@@ -1,98 +1,110 @@
-# Verio — رابط وب
+# Zaexa — web app
 
-یک فایل. بدون سرور، بدون بیلد، بدون وابستگی نصبی.
+One file. No server, no build step, no install.
 
 ```
 web/
-  index.html          ← کل اپلیکیشن (HTML + CSS + JS در یک فایل)
+  index.html          the entire application (HTML + CSS + JS)
   test/
-    stub-ethers.js    ← ethers قلابی + یک AMM ساختگی برای تست آفلاین
-    run.py            ← تست خودکار با Playwright
-    harness.html      ← نسخه‌ی index.html که به‌جای CDN از stub استفاده می‌کند
+    run.py            Playwright suite; builds its own harness from index.html
+    stub-ethers.js    fake ethers + a synthetic Base network, no sockets
 ```
 
-## اجرای محلی
+## Running locally
 
 ```bash
 cd web
 python3 -m http.server 8000
-# مرورگر: http://localhost:8000
+# then open http://localhost:8000
 ```
 
-با `file://` هم باز می‌شود، ولی بعضی کیف پول‌ها روی `file://` تزریق نمی‌کنند —
-پس برای تست با متامسک همان `http.server` را استفاده کن.
+It also opens over `file://`, but some wallets do not inject there — use the
+local server when testing with MetaMask.
 
-## انتشار
+## Publishing
 
-هر هاست استاتیکی کافی است، چون هیچ بک‌اندی وجود ندارد:
+Any static host works, because there is no backend:
 
 ```bash
-npx vercel deploy --prod          # یا
-npx netlify deploy --prod --dir . # یا فقط فایل را روی IPFS بگذار
+npx vercel deploy --prod
+npx netlify deploy --prod --dir .
+# or pin index.html to IPFS
 ```
 
-## تست خودکار
+## Tests
 
-تست‌ها بدون شبکه اجرا می‌شوند: `stub-ethers.js` هم نقش کتابخانه را بازی می‌کند
-هم نقش شبکه‌ی Base را، با یک AMM ضرب‌ثابت و استخرهای عمداً نامتقارن تا
-تقسیم سفارش واقعاً معنا پیدا کند.
+The suite runs with no network at all. `stub-ethers.js` plays both the library
+and the Base chain, with a constant-product AMM and deliberately lopsided pools
+so that order splitting has something real to decide.
 
 ```bash
 pip install playwright --break-system-packages
 playwright install chromium
-cd web && python3 test/run.py
+cd web/test && python3 run.py
 ```
 
-آنچه بررسی می‌شود:
+What it proves:
 
-| تست | چه چیزی را ثابت می‌کند |
+| Test | What it locks down |
 |---|---|
-| کوت ۱۰۰۰ USDC → WETH | مسیر مستقیم، نرخ، افت قیمت و حداقل دریافتی درست محاسبه می‌شوند |
-| کوت ۹۰۰٬۰۰۰ USDC | تقسیم سفارش فعال می‌شود و سود آن (+۷٪) گزارش می‌شود |
-| cbBTC → DAI | وقتی استخر مستقیم نیست، مسیر دومرحله‌ای از USDC پیدا می‌شود |
-| **قطعی RPC** | **پیام «نتوانستیم به شبکه برسیم» می‌آید، نه «مسیری وجود ندارد»** |
-| تم روشن/تیره | کلید تغییر کار می‌کند و از تنظیم سیستم پیروی می‌کند |
-| تنظیمات لغزش | تغییر ۰.۵٪ → ۱٪ حداقل دریافتی را بلافاصله به‌روز می‌کند |
+| 1,000 USDC → WETH | direct route, rate, price impact and minimum received |
+| 900,000 USDC | order splitting engages and reports what it gains |
+| cbBTC → DAI | with no direct pool, the two-hop route via USDC is found |
+| **RPC outage** | **the app says "the network did not answer", never "no route"** |
+| `exit:no-approval` | a missing approval is not reported as a verdict on the token |
+| `exit:honeypot` | a genuine sell-side revert still reads as blocked |
+| `exit:hostile-msg` | a revert message that *looks* like ours does not excuse the token |
+| `exit:rpc-down` | an outage during the sell simulation reads as `unknown` |
+| `vs uniswap` | a zero edge reads as `same`, never as `+0.00%` |
+| `vs uniswap:uniswap-silent` | with no Uniswap quote we claim no edge at all |
+| share link | state round-trips through the URL |
+| hostile share link | a link with an unverifiable token says so instead of falling back |
+| DEX gates | both V3 generations route; a wrong-generation quoter is rejected |
+| native ETH | ETH is selectable and routes via WETH, with its own safety panel |
+| light / dark theme | the toggle works and follows the system setting |
+| slippage | 0.5% → 1% updates the minimum received immediately |
 
-آن تست چهارم مهم‌ترین است — همان باگی که سه بار در این پروژه تکرار شد.
-اگر روزی کسی منطق کوت‌گیری را عوض کرد، این تست جلوی برگشتش را می‌گیرد.
+The outage rows matter most. That class of bug — treating "I don't know" as
+"no" — has appeared seven times in this project's history, and each of those
+tests is a headstone for one of them.
 
-## معماری
+## Architecture
 
-هیچ سروری وجود ندارد. مرورگر مستقیم با RPCهای عمومی Base حرف می‌زند
-و کاربر با کیف پول خودش امضا می‌کند. کلید خصوصی هیچ‌وقت از کیف پول خارج نمی‌شود.
+There is no server. The browser talks to public Base RPCs directly and the user
+signs with their own wallet. No private key ever leaves the wallet.
 
-**کوت‌گیری از Multicall3 عبور می‌کند.** به‌جای ۴۵ درخواست جدا، ۴ تا:
+**Quotes go through Multicall3.** Instead of ~45 requests, four:
 
-| دور | چه چیزی |
+| Round | What |
 |---|---|
-| ۱ | همه‌ی مسیرهای مستقیم + مرحله‌ی اول همه‌ی مسیرهای دومرحله‌ای |
-| ۲ | مرحله‌ی دوم مسیرهای دومرحله‌ای |
-| ۳ | مرحله‌ی اول نسبت‌های مختلف تقسیم |
-| ۴ | مرحله‌ی دوم همان‌ها |
+| 1 | every direct route, plus leg one of every two-hop route |
+| 2 | leg two of the two-hop routes |
+| 3 | leg one of each split ratio |
+| 4 | leg two of the same |
 
-این فقط بهینه‌سازی سرعت نیست — تفکیک «استخر نیست» از «شبکه جواب نداد» را
-هم رایگان می‌دهد: در `aggregate3` شکست یک زیرفراخوانی `success:false` است،
-ولی قطعی شبکه کل درخواست را می‌اندازد. دقیقاً همان تفکیکی که `try_call` در
-`ratelimit.py` انجام می‌داد.
+This is not only a speed optimisation. It separates "no pool" from "the network
+did not answer" for free: inside `aggregate3` a failing sub-call is
+`success:false`, while a real outage drops the whole request. Same distinction
+`try_call` makes on the Python side.
 
-## نکته‌های پیاده‌سازی
+## Implementation notes
 
-- **ETH بومی پشتیبانی نمی‌شود.** قرارداد `SwapExecutor` فقط ERC-20 می‌گیرد.
-  کاربر باید اول WETH کند. (اضافه کردنش یعنی تغییر قرارداد.)
-- **کارمزد از توکن ورودی کم می‌شود**، پس `minAmountOut` قبل از اعمال لغزش
-  ضربدر `(۱ − کارمزد)` می‌شود — وگرنه تراکنش بی‌دلیل revert می‌کند.
-- **قبل از هر ارسال، `staticCall` اجرا می‌شود.** اگر شبیه‌سازی شکست بخورد
-  هیچ تراکنشی نمی‌رود و گسی خرج نمی‌شود. (همان نقش `DRY_RUN` در `swap.py`.)
-- **بعد از ارسال تراکنش**، هر خطایی فقط مربوط به *خواندن* نتیجه است.
-  در آن حالت به کاربر می‌گوییم «ارسال شد ولی رسید را نتوانستیم بخوانیم»،
-  نه «شکست خورد» — دقیقاً همان چیزی که یک بار در ترمینال پیش آمد.
-- **بدون `localStorage`.** تم و توکن‌های وارد‌شده فقط در حافظه‌ی همان تب می‌مانند.
+- **Native ETH is supported.** The executor wraps and unwraps internally, so
+  USDC → ETH needs one signature, not two.
+- **The fee comes out of the input token**, so `minAmountOut` is multiplied by
+  `(1 − fee)` before slippage — otherwise the transaction reverts for no reason.
+- **Every send is preceded by a `staticCall`.** If the simulation fails, nothing
+  is broadcast and no gas is spent.
+- **After a transaction is sent**, any error concerns *reading* the result. The
+  user is told "sent, but we could not read the receipt" — never "failed".
+- **No `localStorage`.** Theme and imported tokens live in the tab only.
+- **Token error strings are escaped** before display, so a malicious token
+  cannot inject markup through its revert reason.
 
-## تغییر اسم
+## Renaming
 
-فقط یک خط، بالای اسکریپت:
+One line, near the top of the script:
 
 ```js
-const BRAND = "Verio";
+const BRAND = "Zaexa";
 ```

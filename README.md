@@ -1,174 +1,101 @@
-# Zaexa — رابط وب و قرارداد
+# Zaexa
+
+**A DEX aggregator for Base that shows you the way out before you go in.**
+
+Live contract: [`0x2fea35aaDae6Cbf9b9481B06164907ccF95DB081`](https://basescan.org/address/0x2fea35aadae6cbf9b9481b06164907ccf95db081#code) — source verified on BaseScan.
+
+---
+
+## Why this exists
+
+Every aggregator will tell you the price. None of them will tell you whether you
+can sell the token back.
+
+Liquidity scores come from pool-depth math, so they cannot see three things that
+only appear when a trade actually executes: a tax that switches on only when you
+sell, a blacklist applied after you buy, and a honeypot whose sell path reverts.
+
+**Exit check** runs the full round trip — buy and sell — inside a single
+simulated transaction against the live chain. No gas, no transaction sent. The
+token really moves through the contract, so a sell-side tax or block shows
+itself.
+
+Three states, and the difference between them is the whole point:
+
+| State | Meaning |
+|---|---|
+| `verified` | The round trip executed. This is proof, not an estimate. |
+| `estimated` | Figures from quotes. Your wallet lacked the balance or approval to run the live test. |
+| `unknown` | The network did not answer. **We do not know** — which is not the same as "no". |
+
+That last row is a rule the whole codebase follows: *"I don't know" must never
+behave like "no."*
+
+## What else is in here
+
+- **Every pool on Base, side by side** — six DEXes quoted at once through
+  Multicall3. Empty pools show as `no pool`; an unresponsive RPC shows as
+  `unknown`. Two different facts, never merged.
+- **Real routing** — direct, two-hop via WETH/USDC, and order splitting across
+  the two best paths. A `vs Uniswap direct` figure says plainly how much the
+  route beats going straight to Uniswap, or says `same` when it doesn't.
+- **Token safety scan** — bytecode, ownership, proxy slot, liquidity, sellability.
+  Heuristics on public bytecode, not an audit.
+- **Portfolio and money flow** — read from `eth_getLogs` on V3 `Swap` events. No
+  third-party data service.
+- **Reverse quoting** — type what you want to receive, get the input required.
+- **Shareable quote links** — the whole state lives in the URL hash.
+
+## Architecture
+
+No backend. The entire application is one HTML file that runs in your browser
+and signs with your own wallet. Nothing is stored, nothing is proxied, and there
+is no server of ours to trust or to go down. It can be hosted on IPFS.
 
 ```
-contracts/
-  src/SwapExecutor.sol                قرارداد اجرا (اصلاح‌شده برای SwapRouter02)
-  test/Mocks.sol                      ماک‌ها — حالا شکل روتر واقعی را آینه می‌کنند
-  test/SwapExecutor.t.sol             ۲۷ تست امنیتی
-  test/SwapExecutor.selectors.t.sol   ← تست سلکتور، باگ مین‌نت را می‌گرفت
-  test/SwapExecutor.fork.t.sol        ← سواپ واقعی روی fork شبکه‌ی Base
-web/
-  index.html                          کل اپلیکیشن در یک فایل
-  test/stub-ethers.js                 ethers قلابی + AMM ساختگی برای تست آفلاین
-  test/run.py                         تست Playwright
+web/index.html            the whole app
+web/test/run.py           Playwright suite, builds its harness from index.html
+web/test/stub-ethers.js   fake ethers + synthetic AMM, no network
+contracts/src/            SwapExecutor.sol
+contracts/test/           46 tests: unit, selector, and fork against live Base
+contracts/script/         deploy, fork test, on-chain DEX verification
 ```
 
-## اجرای رابط
+### Contract design
+
+- **No arbitrary calldata.** The contract builds every router call itself, which
+  closes the classic aggregator theft vector against users who have approved it.
+- **Router allow-list**, enforced on chain.
+- **Fee taken from the input token**, so a swap into a worthless token cannot
+  leave us holding worthless fees.
+- **1% hard fee cap** — a `constant`; the owner cannot raise it.
+- **Not upgradeable.** No proxy. A bug means a new deployment, not a silent
+  rewrite under your feet.
+- **Holds nothing between transactions.**
+
+## Running it
 
 ```bash
-cd web && python3 -m http.server 8000
-```
+# the app — no build step
+open web/index.html
 
-با `file://` باز نکن — بعضی کیف پول‌ها آنجا تزریق نمی‌کنند.
+# offline UI suite (needs playwright + chromium)
+cd web/test && python3 run.py
 
-انتشار: هر هاست استاتیکی. `npx vercel deploy --prod` یا Netlify یا IPFS.
-
-## تست قرارداد
-
-```bash
+# contracts
 cd contracts
-forge test                                                   # آفلاین
-export BASE_RPC_URL=https://base.drpc.org
-forge test --match-path 'test/SwapExecutor.fork.t.sol' -vv   # مقابل Base واقعی
+forge install foundry-rs/forge-std   # not vendored in this repo
+forge test
+./script/fork_test.sh                # fork tests against real Base
+./script/verify_dexes.sh             # check every DEX address on chain
 ```
 
-بدون `BASE_RPC_URL` تست‌های fork بی‌سروصدا رد می‌شوند، پس `forge test` معمولی
-همچنان آفلاین کار می‌کند.
+## Status
 
-## تست رابط
+Deployed and working on Base. Not audited. Fee is currently 0.
 
-```bash
-pip install playwright --break-system-packages && playwright install chromium
-cd web && python3 test/run.py
-```
+---
 
-| تست | چه چیزی را ثابت می‌کند |
-|---|---|
-| کوت ۱۰۰۰ USDC → WETH | نرخ، افت قیمت، حداقل دریافتی |
-| جدول صرافی‌ها | برنده علامت می‌خورد و استخرهای خالی *پنهان نمی‌شوند* |
-| پنل ایمنی | جستجوی سلکتور در بایت‌کد واقعاً یافته تولید می‌کند |
-| کوت ۹۰۰٬۰۰۰ | تقسیم سفارش فعال می‌شود و سودش گزارش می‌شود |
-| cbBTC → DAI | مسیر دومرحله‌ای از USDC پیدا می‌شود |
-| **قطعی RPC** | **«شبکه جواب نداد» می‌آید، نه «مسیری نیست»** |
-| تم، لغزش، مودال | بدون خطای کنسول |
-
-## درس اصلی این مرحله
-
-قرارداد اول ساختار `ExactInputSingleParams` را با فیلد `deadline` می‌فرستاد
-(`SwapRouter` نسل اول). Base از `SwapRouter02` استفاده می‌کند که آن فیلد را
-ندارد. سلکتور از روی شکل ساختار ساخته می‌شود، پس ما تابعی را صدا می‌زدیم که
-وجود نداشت — و EVM بدون هیچ پیامی revert می‌کرد.
-
-۲۷ تست سبز بودند چون **ماک هم همان ساختار غلط را پیاده کرده بود**. ماک فقط
-ثابت می‌کرد قرارداد با تصور ما از دنیا سازگار است.
-
-دو تستی که حالا اضافه شده‌اند این شکاف را می‌بندند:
-
-- `SwapExecutor.selectors.t.sol` — آفلاین، چند میلی‌ثانیه، بدون شبکه.
-  سلکتور اینترفیس‌های ما را با مقادیر منتشرشده‌ی یونی‌سواپ می‌سنجد.
-- `SwapExecutor.fork.t.sol` — سواپ واقعی مقابل روتر واقعی روی fork.
-
-قاعده: **ماک باید شکل قرارداد واقعی را آینه کند، نه انتظار ما را.**
-
-## نمودار قیمت
-
-**داده:** [GeckoTerminal API](https://apiguide.geckoterminal.com/) — رایگان، **بدون کلید**،
-بدون ثبت‌نام. پایه: `https://api.geckoterminal.com/api/v2`. دو درخواست:
-
-```
-GET /networks/base/tokens/{token}/pools          → پرحجم‌ترین استخر توکن
-GET /networks/base/pools/{pool}/ohlcv/{tf}?aggregate=&limit=&currency=usd
-```
-
-نرخ جفت‌ارز از تقسیم دو سری دلاری ساخته می‌شود (اگر یک طرف استیبل باشد، همان
-سری مستقیم استفاده می‌شود).
-
-**رسم:** SVG دست‌ساز، بدون کتابخانه — گرادیان، کراس‌هر، تولتیپ، چهار بازه‌ی زمانی.
-دلیل: صفر وابستگی خارجی و کنترل کامل ظاهر.
-
-اگر تاریخچه نیاید **عدد ساختگی نشان نمی‌دهیم**؛ پیام «در دسترس نیست» می‌آید و
-تصریح می‌شود که کوت‌ها و مسیریابی زنده و مستقل‌اند.
-
-### اگر خواستی به تریدینگ‌ویو مهاجرت کنی
-
-`Lightweight Charts` رایگان و متن‌باز است (Apache 2.0)، **بدون کلید و بدون فرم**:
-
-```html
-<script src="https://cdn.jsdelivr.net/npm/lightweight-charts@5/dist/lightweight-charts.standalone.production.js"></script>
-```
-
-نکته‌ی مهاجرت: در نسخه‌ی ۵ به‌جای `chart.addAreaSeries(...)` باید
-`chart.addSeries(LightweightCharts.AreaSeries, {...})` نوشت.
-
-تریدینگ‌ویو **داده نمی‌دهد** — فقط رسم می‌کند. منبع داده همان GeckoTerminal می‌ماند.
-(کتابخانه‌ی سنگین‌تر `Advanced Charting Library` هم رایگان است ولی نیاز به پر کردن
-فرم دسترسی دارد؛ برای این کاربرد لازم نیست.)
-
-## Exit check — تفاوت اصلی با رقبا
-
-امتیاز نقدینگی رقبا از ریاضی عمق استخر می‌آید و سه چیز را نمی‌بیند:
-
-- مالیاتی که فقط موقع **فروش** فعال می‌شود
-- لیست سیاه یا `pause` که **بعد از** خرید اعمال می‌شود
-- هانی‌پاتی که مسیر فروشش revert می‌کند
-
-هر سه فقط در *اجرا* دیده می‌شوند، نه در کوت.
-
-قرارداد ما مسیر چندمرحله‌ای می‌پذیرد و `tokenIn == tokenOut` مجاز است. پس کل
-رفت‌وبرگشت را به‌صورت **یک** `executeSwap` می‌سازیم و `staticCall` می‌زنیم:
-توکن واقعاً از داخل قرارداد رد می‌شود، پس مالیات و مسدودسازی خودشان را نشان
-می‌دهند. هیچ گسی خرج نمی‌شود.
-
-دو حالت، و **هیچ‌وقت با هم اشتباه نمی‌شوند**:
-
-| برچسب | یعنی |
-|---|---|
-| `verified by simulation` | رفت‌وبرگشت واقعاً اجرا شد (شبیه‌سازی‌شده) و این عدد برگشت |
-| `estimated from quotes` | کیف پول وصل نیست یا موجودی/allowance کافی نیست — فقط تخمین |
-| `sell simulation reverted` | فروش شکست خورد. احتمالاً نمی‌توانی بیرون بیایی |
-
-## افزودن صرافی جدید
-
-آدرس اشتباه اینجا همان کلاس فاجعه‌ای است که یک بار خوردیم. پس هیچ صرافی‌ای
-فقط با نوشتن آدرس فعال نمی‌شود؛ باید چهار دروازه را در زمان اجرا رد کند:
-
-1. در آن آدرس قرارداد وجود دارد (`eth_getCode`)
-2. سلکتور تابعی که صدا می‌زنیم در بایت‌کدش هست
-3. قرارداد اجرا آن روتر را در لیست سفید دارد
-4. کوت واقعی از آن گرفته می‌شود
-
-صرافی رد نشده مسیریابی نمی‌شود ولی **پنهان هم نمی‌شود** — در پنل پوشش با
-دلیلش دیده می‌شود.
-
-```bash
-cd contracts && RPC=https://base.drpc.org ./script/verify_dexes.sh
-```
-
-خروجی برای هرکدام PASS یا FAIL با دلیل می‌دهد، و برای PASSها دستور
-`setRoutersAllowed` را چاپ می‌کند.
-
-⚠️ آدرس صرافی‌های کاندید (BaseSwap، SushiSwap، Alien Base، PancakeSwap V3)
-**تأیید نشده‌اند**. تا وقتی این اسکریپت PASS ندهد و owner لیست سفید نکند،
-رابط از آن‌ها مسیریابی نمی‌کند.
-
-## معماری رابط
-
-بدون سرور. مرورگر مستقیم با زنجیره حرف می‌زند.
-
-**خواندن اول از کیف پول کاربر، بعد از RPCهای عمومی.** کیف پول همین حالا به
-Base وصل است: نه CORS دارد، نه فیلتر جغرافیایی، نه rate limit.
-
-**کوت‌گیری از Multicall3.** به‌جای ~۴۵ درخواست، ۴ تا. این علاوه بر سرعت،
-تفکیک «استخر نیست» از «شبکه جواب نداد» را رایگان می‌دهد: در `aggregate3`
-شکست یک زیرفراخوانی `success:false` است، ولی قطعی شبکه کل درخواست را می‌اندازد.
-
-**سه محافظ قبل از خرج شدن گس:** بررسی لیست سفید روتر و موجودی و allowance،
-سپس `staticCall`، و اگر بهترین مسیر شبیه‌سازی نشد تلاش خودکار با مسیرهای بعدی.
-بعد از ارسال، هر خطا فقط مربوط به *خواندن* نتیجه است و به کاربر «ارسال شد ولی
-رسید خوانده نشد» گفته می‌شود، نه «شکست خورد».
-
-## تغییر اسم
-
-```js
-const BRAND = "Zaexa";     // بالای اسکریپت در web/index.html
-```
+© 2026 — published for transparency, not licensed for reuse. You are welcome to
+read, audit, and learn from this code. It is not open source: no license is
+granted to copy, modify, or redistribute it.
