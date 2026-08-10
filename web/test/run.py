@@ -224,6 +224,35 @@ async def main():
         }""")
         await pg.wait_for_timeout(2500)
 
+        # ---- 2b-quater. exit-check result carried into the token picker ----
+        # فقط چیزی که همین جلسه واقعاً بررسی شده نشان داده می‌شود؛ پیکر
+        # هیچ بررسی تازه‌ای اجرا نمی‌کند.
+        await pg.click("#tokOutBtn"); await pg.wait_for_timeout(300)
+        badges = await pg.eval_on_selector_all(
+            "#tokList .trow",
+            "els => els.map(e => { const b = e.querySelector('.xb');"
+            " return {sym: e.querySelector('.s').innerText, badge: b ? b.innerText : null,"
+            "         tip: b ? b.title : null}; })")
+        shown = [row for row in badges if row["badge"]]
+        for row in shown:
+            print("[picker] %-6s %-9s %s" % (row["sym"], row["badge"], row["tip"]))
+        assert shown, "the token we just checked must carry its result into the picker"
+        assert all("checked" in row["tip"] for row in shown), "a cached result must always show its age"
+        unchecked = [row for row in badges if not row["badge"]]
+        assert unchecked, "tokens we never checked must have no badge at all — absence means unknown, not safe"
+        await pg.keyboard.press("Escape"); await pg.wait_for_timeout(250)
+
+        # یک نتیجه‌ی منفی هم باید تا پیکر برسد
+        await pg.evaluate("""() => {
+            exitCache[balKey(tokenOut)] = {state: "blocked", lossPct: null, at: Date.now()};
+        }""")
+        await pg.click("#tokOutBtn"); await pg.wait_for_timeout(300)
+        neg = await pg.eval_on_selector_all(
+            "#tokList .trow .xb", "els => els.map(e => e.innerText)")
+        print("[picker] after a blocked result: %s" % neg)
+        assert any("no exit" in n for n in neg), "a blocked exit must be visible in the picker"
+        await pg.keyboard.press("Escape"); await pg.wait_for_timeout(250)
+
         # ---- 2c. DEX coverage gate ----
         cov = await pg.inner_text("#coverage")
         print("[coverage] %s" % cov.replace("\n", " | "))

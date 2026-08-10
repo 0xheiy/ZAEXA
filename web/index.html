@@ -340,6 +340,8 @@ footer a{color:var(--tx3)}
 .trow .s{font-weight:620;font-size:14.5px}
 .trow .a{font-size:11.5px;color:var(--tx3)}
 .trow .b{margin-left:auto;font-size:13px;color:var(--tx2)}
+.trow .xb{font-size:11px;font-weight:640;letter-spacing:.02em;padding:3px 8px;border-radius:999px;
+  white-space:nowrap;flex:none}
 .rel{position:relative}
 .pop{position:absolute;right:0;top:46px;width:256px;background:var(--card);border-radius:18px;
   box-shadow:var(--sh);padding:16px;z-index:50;display:none}
@@ -548,7 +550,7 @@ footer a{color:var(--tx3)}
 const BRAND="Zaexa";
 /* شبکه‌های اجتماعی و بازخورد — وقتی حساب‌ها ساخته شد فقط همین‌ها را پر کن. */
 const LINKS={
-  x:"",                 // مثال: https://x.com/zaexa
+  x:"https://x.com/zaexadex",
   telegram:"",          // مثال: https://t.me/zaexa
   github:"https://github.com/0xheiy/ZAEXA",
   feedback:"",          // فرم یا لینک؛ اگر خالی بماند ایمیل استفاده می‌شود
@@ -1059,6 +1061,48 @@ async function preconditionGap(amountIn){
       return "Approve "+t.symbol+" to run the live check. The figure above is from quotes.";
     return "";
   }catch{return null;}
+}
+
+/* آخرین نتیجه‌ی Exit check هر توکن، تا در لیست توکن هم دیده شود.
+   ---------------------------------------------------------------------
+   عمداً *هیچ* بررسی تازه‌ای از داخل پیکر اجرا نمی‌شود. هر بررسی یک
+   رفت‌وبرگشت کامل است؛ اجرای آن برای بیست ردیف یعنی پیکر چند ثانیه قفل
+   شود و RPC عمومی 429 بدهد. پس فقط چیزی نشان داده می‌شود که همین جلسه
+   واقعاً محاسبه شده.
+
+   و چون داده کهنه می‌شود، سنش همیشه همراهش می‌رود: بعد از ده دقیقه رنگ
+   خاموش می‌شود تا یک نتیجه‌ی قدیمی به‌جای وضعیت فعلی جا نزند. */
+const exitCache={};
+function rememberExit2(x){rememberExit(x);return x;}
+function rememberExit(x){
+  if(!x||!x.state||!tokenOut)return;
+  exitCache[balKey(tokenOut)]={state:x.state,lossPct:x.lossPct,at:Date.now()};
+}
+function agoText(ms){
+  const m=Math.floor((Date.now()-ms)/60000);
+  if(m<1)return "just now";
+  if(m<60)return m+"m ago";
+  const h=Math.floor(m/60);return h+"h ago";
+}
+/* برچسب کوتاه برای ردیف لیست توکن. اگر چیزی نمی‌دانیم، هیچ برچسبی نیست —
+   نبودِ برچسب یعنی «بررسی نشده»، نه «سالم». */
+function exitBadge(t){
+  const c=exitCache[balKey(t)];
+  if(!c)return "";
+  const stale=(Date.now()-c.at)>600000;
+  const pct=(c.lossPct===null||c.lossPct===undefined)?null:c.lossPct.toFixed(2)+"%";
+  let txt,col,bg,why;
+  if(c.state==="verified"){txt="✓ "+(pct||"ok");col="var(--pos)";bg="var(--pglow)";
+    why="Round trip verified by simulation";}
+  else if(c.state==="blocked"||c.state==="noexit"){txt="no exit";col="var(--neg)";
+    bg="color-mix(in srgb,var(--neg) 14%,transparent)";
+    why=c.state==="blocked"?"The sell simulation reverted":"No pool would quote selling it back";}
+  else if(c.state==="unknown"){txt="unknown";col="var(--warn)";
+    bg="color-mix(in srgb,var(--warn) 14%,transparent)";why="The network did not answer";}
+  else{txt=pct?"~"+pct:"est.";col="var(--tx2)";bg="var(--raise)";why="Estimated from quotes, not proven";}
+  if(stale){col="var(--tx3)";bg="var(--raise)";}
+  return `<span class="xb" style="color:${col};background:${bg}"
+    title="${esc(why)} · checked ${esc(agoText(c.at))}">${esc(txt)}</span>`;
 }
 
 function renderExit(x){
@@ -1728,7 +1772,7 @@ async function runQuote(){
       await refreshAllowance();
       if(seq!==quoteSeq)return;
       refreshButton();
-      renderExit(await runExitCheck(plan,r.amountIn));
+      renderExit(rememberExit2(await runExitCheck(plan,r.amountIn)));
     }catch(err){
       if(seq!==quoteSeq)return;
       showError("Quote failed",err);currentPlan=null;refreshButton();
@@ -1764,7 +1808,7 @@ async function runQuote(){
     if(seq!==quoteSeq)return;
     refreshButton();
     // بعد از رندر اجرا می‌شود تا قیمت را عقب نیندازد
-    renderExit(await runExitCheck(plan,amountIn));
+    renderExit(rememberExit2(await runExitCheck(plan,amountIn)));
   }catch(err){
     if(seq!==quoteSeq)return;
     showError("Quote failed",err);currentPlan=null;refreshButton();
@@ -2468,7 +2512,8 @@ function renderTokenList(q){
     return `<button class="trow" data-i="${allTokens().indexOf(t)}">
       <span class="av" data-tok="${allTokens().indexOf(t)}">${esc(t.symbol.slice(0,3).toUpperCase())}</span>
       <span><span class="s">${esc(t.symbol)}</span><br><span class="a mono">${shortAddr(t.address)}</span></span>
-      <span class="b mono">${b===undefined?"":fmt(b,t.decimals,5)}</span></button>`;}).join("");
+      <span class="b mono">${b===undefined?"":fmt(b,t.decimals,5)}</span>
+      ${exitBadge(t)}</button>`;}).join("");
   if(!toks.length&&/^0x[0-9a-fA-F]{40}$/.test(query)){
     html='<div class="empty"><span class="spin"></span>Loading token…</div>';importToken(query);
   }else if(!toks.length)html='<div class="empty">Nothing found. Paste a contract address to import it.</div>';
