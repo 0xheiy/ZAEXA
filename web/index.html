@@ -1,0 +1,2729 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Zaexa</title>
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxMDAwLjAwIiBoZWlnaHQ9IjEwMDAuMDAiIHZpZXdCb3g9IjAgMCAxMDAwLjAwIDEwMDAuMDAiIGZpbGw9Im5vbmUiPjxkZWZzPjxsaW5lYXJHcmFkaWVudCBpZD0iengiIHgxPSIwLjAiIHkxPSIwLjAiIHgyPSIxLjAiIHkyPSIwLjAiPjxzdG9wIG9mZnNldD0iMC4wIiBzdG9wLWNvbG9yPSIjMjJFRkY2Ii8+PHN0b3Agb2Zmc2V0PSIwLjIyIiBzdG9wLWNvbG9yPSIjMjJEMkY1Ii8+PHN0b3Agb2Zmc2V0PSIwLjQyIiBzdG9wLWNvbG9yPSIjNDNCNUY3Ii8+PHN0b3Agb2Zmc2V0PSIwLjU4IiBzdG9wLWNvbG9yPSIjNzM5NkY4Ii8+PHN0b3Agb2Zmc2V0PSIwLjc4IiBzdG9wLWNvbG9yPSIjOTY4OEY3Ii8+PHN0b3Agb2Zmc2V0PSIxLjAiIHN0b3AtY29sb3I9IiNBNzg1RjkiLz48L2xpbmVhckdyYWRpZW50PjxsaW5lYXJHcmFkaWVudCBpZD0ienhiZyIgeDE9IjAiIHkxPSIwIiB4Mj0iMSIgeTI9IjEiPjxzdG9wIG9mZnNldD0iMC4wIiBzdG9wLWNvbG9yPSIjMjJFRkY2Ii8+PHN0b3Agb2Zmc2V0PSIwLjIyIiBzdG9wLWNvbG9yPSIjMjJEMkY1Ii8+PHN0b3Agb2Zmc2V0PSIwLjQyIiBzdG9wLWNvbG9yPSIjNDNCNUY3Ii8+PHN0b3Agb2Zmc2V0PSIwLjU4IiBzdG9wLWNvbG9yPSIjNzM5NkY4Ii8+PHN0b3Agb2Zmc2V0PSIwLjc4IiBzdG9wLWNvbG9yPSIjOTY4OEY3Ii8+PHN0b3Agb2Zmc2V0PSIxLjAiIHN0b3AtY29sb3I9IiNBNzg1RjkiLz48L2xpbmVhckdyYWRpZW50PjxtYXNrIGlkPSJtYXNrMF8wXzEiIHN0eWxlPSJtYXNrLXR5cGU6bHVtaW5hbmNlIiBtYXNrVW5pdHM9InVzZXJTcGFjZU9uVXNlIiB4PSIxMyIgeT0iMCIgd2lkdGg9IjE3MzEiIGhlaWdodD0iMTI3NCI+CjxwYXRoIGQ9Ik0xNzQzLjc3IDBIMTNWMTI3My4yNkgxNzQzLjc3VjBaIiBmaWxsPSJ3aGl0ZSIgLz4KPC9tYXNrPjxsaW5lYXJHcmFkaWVudCBpZD0icGFpbnQwX2xpbmVhcl8wXzEiIHgxPSIzNzguMzgiIHkxPSIwIiB4Mj0iMTM3OC4zOCIgeTI9IjAiIGdyYWRpZW50VW5pdHM9InVzZXJTcGFjZU9uVXNlIj4KPHN0b3Agc3RvcC1jb2xvcj0iIzIyRUZGNiIgLz4KPHN0b3Agb2Zmc2V0PSIwLjIyIiBzdG9wLWNvbG9yPSIjMjJEMkY1IiAvPgo8c3RvcCBvZmZzZXQ9IjAuNDIiIHN0b3AtY29sb3I9IiM0M0I1RjciIC8+CjxzdG9wIG9mZnNldD0iMC41OCIgc3RvcC1jb2xvcj0iIzczOTZGOCIgLz4KPHN0b3Agb2Zmc2V0PSIwLjc4IiBzdG9wLWNvbG9yPSIjOTY4OEY3IiAvPgo8c3RvcCBvZmZzZXQ9IjEiIHN0b3AtY29sb3I9IiNBNzg1RjkiIC8+CjwvbGluZWFyR3JhZGllbnQ+PGxpbmVhckdyYWRpZW50IGlkPSJwYWludDFfbGluZWFyXzBfMSIgeDE9IjE1NC44NzgiIHkxPSIxMjMxLjc0IiB4Mj0iMTYwMy4xOCIgeTI9IjEyMzEuNzQiIGdyYWRpZW50VW5pdHM9InVzZXJTcGFjZU9uVXNlIj4KPHN0b3Agc3RvcC1jb2xvcj0iIzIyRUZGNiIgLz4KPHN0b3Agb2Zmc2V0PSIwLjIyIiBzdG9wLWNvbG9yPSIjMjJEMkY1IiAvPgo8c3RvcCBvZmZzZXQ9IjAuNDIiIHN0b3AtY29sb3I9IiM0M0I1RjciIC8+CjxzdG9wIG9mZnNldD0iMC41OCIgc3RvcC1jb2xvcj0iIzczOTZGOCIgLz4KPHN0b3Agb2Zmc2V0PSIwLjc4IiBzdG9wLWNvbG9yPSIjOTY4OEY3IiAvPgo8c3RvcCBvZmZzZXQ9IjEiIHN0b3AtY29sb3I9IiNBNzg1RjkiIC8+CjwvbGluZWFyR3JhZGllbnQ+PC9kZWZzPjxnIHRyYW5zZm9ybT0idHJhbnNsYXRlKDUwLjAsMTg1LjkpIj48ZyB0cmFuc2Zvcm09InRyYW5zbGF0ZSgwLjAwMCwwLjAwMCkgc2NhbGUoMC45MDAwMDApIHRyYW5zbGF0ZSgtMzc4LjM4MCwtMC4wMDApIiBtYXNrPSJ1cmwoI21hc2swXzBfMSkiPjxwYXRoIGQ9Ik0xMDU2LjkzIDgyLjgyTDM4OS44MiA2OTcuOThMNDA4LjQ4IDY5NC4zMkw2MjEuMTMgNjM4LjE2QzY0Ni45MyA2MzAuNzEgNjc1LjAxIDYyNS40OCA2OTkuODUgNjE1LjEyTDEzNjYuOSAwTDEzNDguMzcgMy42TDExMzcuMTIgNTkuMzhDMTExMC44MyA2Ni45NyAxMDgyLjI1IDcyLjI5IDEwNTYuOTMgODIuODJaTTM3OC4zOCA0NC4zNkM0MjYuNTYxIDg3LjI1MyA0NzEuMTQyIDEzNS4wMTYgNTIyLjQ0NSAxNzQuMTM3QzUyNC4zOTQgMTc1LjYyMyA1MjYuNjg1IDE3Ni41OTggNTI5LjEwOSAxNzYuOTUxQzU3NC4yMDYgMTgzLjUyMSA2MjAuNjUgMTc5Ljk2NiA2NjYuMDggMTgzLjQ5QzY3NC41MyAxODQuMDggNjgzLjI0MyAxODUuNDQ4IDY5MS42NDUgMTg3LjU3MUM2OTcuMzIzIDE4OS4wMDMgNzE4LjU1NCAxOTYuNjczIDczMS40MzQgMjA5LjkxM0w3NDIuNjE1IDIyMi4xNDhMNzUyLjMxOSAyMzQuMzg0Qzc1Mi4zMTkgMjM0LjM4NCA3NjYuODQ0IDI1Ni40NzYgNzcwLjQ0MyAyNjcuMDdDNzc0LjEwNSAyNjQuMjc1IDgyMy4zODUgMjE5Ljg4OCA4MjMuMzg1IDIxOS44ODhMODc1LjY4IDE3MS4yMUM4MzUuMzEgMTE1Ljc1IDc4MS4zNCA2Ni40MSA3MTIuOTMgNTAuM0M2OTUuMTggNDUuODIgNjc2LjcgNDYuNTUgNjU4LjU1IDQ1Ljg2TDM3OC4zOCA0NC4zNlpNMTM3OC4zOCA2NTMuNThDMTMzMC4yIDYxMC42ODcgMTI4NS42MSA1NjIuNTQ4IDEyMzQuMzEgNTIzLjQwNEMxMjMyLjM2IDUyMS45MTYgMTIzMC4wNyA1MjAuOTQxIDEyMjcuNjQgNTIwLjU4OUMxMTgyLjU1IDUxNC4wNDkgMTEzNi4xMSA1MTcuOTg0IDEwOTAuNjggNTE0LjQ2QzEwODIuMDQgNTEzLjcyMSAxMDc1LjYzIDUxMi44NDggMTA2NS42OCA1MDkuOTVDMTA0OC41OSA1MDMuMDEgMTAzOS42NCA0OTcuMTA0IDEwMjUuOTIgNDg2LjAxOUMxMDI1LjkyIDQ4Ni4wMTkgMTAxNy4xOCA0NzcuODIzIDEwMTUuMTEgNDc1LjYyNkMxMDEzLjA1IDQ3My40MjkgMTAwOC4xMyA0NjguNzggMTAwNC40NCA0NjMuODQ4QzEwMDAuNzYgNDU4LjkxNSA5OTMuNDUyIDQ0OC40NTEgOTg1LjY4NCA0MjkuOTYyQzk3OS4yNDggNDM1LjMzNSA5MzAgNDgxLjUgOTMwIDQ4MS41TDg4MS4wOCA1MjYuNzRDOTIxLjQ1IDU4Mi4yIDk3NS40MiA2MzEuNTQgMTA0My44MyA2NDcuNjVDMTA2MS41OCA2NTIuMTMgMTA4MC4wNiA2NTEuNCAxMDk4LjIgNjUyLjA4TDEzNzguMzggNjUzLjU4WiIgZmlsbD0idXJsKCNwYWludDBfbGluZWFyXzBfMSkiIC8+PC9nPjwvZz48L3N2Zz4=">
+<style>
+/* =====================================================================
+   Zaexa — نرم، گرد، با فضای باز. الهام از حال‌وهوای Matcha، نه کپی آن:
+   پالت جید به‌جای بنفش، چیدمان دو ردیفه با نمودار به‌عنوان ستون اول،
+   و جدول مقایسه‌ی صرافی‌ها که مخصوص خودمان است.
+   ===================================================================== */
+/* پالت: سطوح کاملاً خنثی (طوسی)، رنگ فقط روی عناصر معنادار.
+   چهار نقش رنگی جدا داریم تا حس تک‌رنگ نده:
+     brand   → بنفش-نیلی  : اقدام، برند، خط نمودار
+     pos     → زمردی      : بهترین قیمت، تأیید، صعود
+     neg     → رز         : ریسک بحرانی، نزول
+     warn    → کهربایی    : هشدار
+   سطوح هیچ‌وقت ته‌رنگ برند نمی‌گیرند — این همان چیزی است که فضا را تنفس‌پذیر می‌کند. */
+/* توکن‌های برند — از brand/docs/zaexa-brand-tokens.json.
+   عمداً بیرون از بلوک‌های تم‌اند: گرادیان لوگو باید در تم روشن و تیره *یکی*
+   باشد، وگرنه دو نسخه‌ی متفاوت از برند به کاربر نشان می‌دهیم. */
+:root{
+  --g1:#22D2F5;   /* cyan   — سر فیروزه‌ای گرادیان */
+  --g2:#A785F9;   /* orchid — سر بنفش */
+  --grad:linear-gradient(135deg,var(--g1),var(--g2));
+}
+:root[data-theme="light"]{
+  --bg:#f4f5f7; --card:#fff; --card2:#f4f5f8; --raise:#eceef2;
+  --line:#e8eaee; --line2:#d6dae1;
+  --tx:#14161a; --tx2:#5b6270; --tx3:#8b93a1;
+  --acc:#5b53e8; --acc-b:#8b5cf6; --on-acc:#fff;
+  --pos:#0d9d6e; --neg:#dc4c4c; --warn:#b5780c;
+  --sh:0 1px 2px rgba(20,22,26,.05), 0 14px 34px rgba(20,22,26,.06);
+  --shs:0 1px 2px rgba(20,22,26,.05);
+  --glow:rgba(91,83,232,.12); --pglow:rgba(13,157,110,.13);
+}
+:root[data-theme="dark"]{
+  /* سطوح تقریباً همان روشنایی قبل را دارند ولی ته‌رنگ آبیِ برند گرفته‌اند —
+     میانه‌ی راه بین خاکستری کاملاً خنثای قبلی و obsidian پکیج برند.
+     قاعده‌ی «سطوح فریاد نمی‌زنند» سر جایش است؛ فقط دیگر با لوگو غریبه نیستند. */
+  --bg:#0b0d13; --card:#14171f; --card2:#1a1e28; --raise:#222735;
+  --line:#212635; --line2:#2c3242;
+  --tx:#eceef4; --tx2:#9aa2b4; --tx3:#6b7488;
+  /* اکسنت از انتهای بنفشِ گرادیان به میانه‌ی آبی آن آمد: در متن خواناتر است
+     و نیمه‌ی فیروزه‌ای برند را که تا حالا هیچ‌جای رابط نبود وارد می‌کند. */
+  --acc:#4fc3f7; --acc-b:#a785f9; --on-acc:#05121a;
+  /* رنگ‌های معنایی عیناً از پکیج برند */
+  --pos:#21d3a0; --neg:#f2545b; --warn:#f5a623;
+  --sh:0 1px 2px rgba(0,0,0,.34), 0 18px 44px rgba(0,0,0,.48);
+  --shs:0 1px 2px rgba(0,0,0,.34);
+  --glow:rgba(79,195,247,.16); --pglow:rgba(33,211,160,.15);
+}
+*{box-sizing:border-box}
+html,body{margin:0;padding:0}
+body{
+  background:var(--bg);color:var(--tx);
+  font:15px/1.55 ui-sans-serif,-apple-system,"Segoe UI",Inter,Roboto,sans-serif;
+  -webkit-font-smoothing:antialiased;transition:background .25s,color .25s;
+}
+button{font:inherit;color:inherit;background:none;border:none;cursor:pointer;padding:0}
+input{font:inherit;color:inherit}
+.mono{font-variant-numeric:tabular-nums;font-feature-settings:"tnum" 1}
+.grow{flex:1}
+
+/* ---------------- header ---------------- */
+header{max-width:1140px;margin:0 auto;padding:20px 20px 8px;display:flex;align-items:center;gap:11px}
+.logo{display:flex;align-items:center;gap:10px;font-size:19px;font-weight:680;letter-spacing:-.4px}
+/* نشان برند خودش گرادیان دارد، پس کاشی رنگی زیرش لازم نیست — دو گرادیان
+   روی هم فقط همدیگر را خفه می‌کنند. */
+.logo .glyph{width:34px;height:34px;display:grid;place-items:center}
+.logo .glyph .mark{width:34px;height:auto;display:block;
+  filter:drop-shadow(0 3px 10px var(--glow))}
+.nav{display:flex;gap:4px;background:var(--card2);border-radius:999px;padding:4px;margin-left:14px}
+.nav button{display:flex;align-items:center;gap:7px;padding:7px 14px;border-radius:999px;
+  font-size:13.5px;color:var(--tx2);transition:.16s;white-space:nowrap}
+.nav button svg{width:16px;height:16px;flex-shrink:0}
+.nav button:hover{color:var(--tx)}
+.nav button.on{background:var(--card);color:var(--tx);font-weight:620;box-shadow:var(--shs)}
+/* --- موبایل ---
+   هدر روی نمایشگر باریک جا نمی‌شد و کل صفحه را به پهلو می‌کشید.
+   راه‌حل: ناوبری از هدر به نوار پایین منتقل می‌شود (دم‌دست انگشت شست)،
+   و چیپ‌های هدر جمع می‌شوند. */
+@media(max-width:720px){
+  header{padding:14px 14px 6px;gap:8px}
+  .logo{font-size:17px}
+  .nav{position:fixed;left:0;right:0;bottom:0;z-index:60;margin:0;border-radius:0;
+    padding:6px 8px calc(6px + env(safe-area-inset-bottom));gap:6px;
+    background:var(--card);box-shadow:0 -1px 0 var(--line),0 -10px 30px rgba(0,0,0,.18)}
+  .nav button{flex:1;flex-direction:column;gap:3px;padding:8px 0;font-size:11px;border-radius:14px}
+  .nav button svg{width:19px;height:19px}
+  .nav button span{display:block}
+  body{padding-bottom:74px}
+  #srcChip span:last-child{display:none}
+  #srcChip{padding:0 12px}
+  .chip{height:36px;font-size:13px}
+  main{padding:8px 14px 40px}
+  .pop{right:-8px;width:min(260px,calc(100vw - 40px))}
+  .chartTop{padding:16px 16px 4px}
+  .px{font-size:27px}
+  .leg{margin:0 10px;padding:13px 13px}
+  .amt{font-size:25px}
+  .cta{width:calc(100% - 20px);margin:12px 10px}
+  .vrow,.frow,.flowkv,.chk{padding-left:14px;padding-right:14px}
+  .card>header{padding:15px 14px 0}
+  .stack,.flowbar{margin-left:14px;margin-right:14px}
+}
+@media(min-width:721px){.nav button span{display:inline}}
+.view{display:none}
+.view.on{display:flex;flex-direction:column;gap:18px}
+.chip{
+  display:inline-flex;align-items:center;gap:7px;height:38px;padding:0 15px;
+  border-radius:999px;background:var(--card);box-shadow:var(--shs);
+  font-size:13.5px;color:var(--tx2);transition:.16s;white-space:nowrap;
+}
+.chip:hover{color:var(--tx);transform:translateY(-1px);box-shadow:var(--sh)}
+.chip.round{padding:0;width:38px;justify-content:center}
+.chip.solid{background:var(--grad);color:var(--on-acc);
+  font-weight:620;box-shadow:0 4px 16px var(--glow)}
+.led{width:7px;height:7px;border-radius:50%;background:var(--pos)}
+.led.off{background:var(--tx3)}
+
+/* ---------------- layout ---------------- */
+main{max-width:1140px;margin:0 auto;padding:8px 20px 56px;display:flex;flex-direction:column;gap:18px}
+.row{display:grid;gap:18px}
+.row.sub{align-items:start}   /* کارت خالی نباید کشیده شود */
+.row.hero{grid-template-columns:1fr 396px}
+.row.sub{grid-template-columns:1.35fr 1fr}
+@media(max-width:940px){.row.hero,.row.sub{grid-template-columns:1fr}}
+
+.card{background:var(--card);border-radius:22px;box-shadow:var(--sh);overflow:hidden}
+.card>header{all:unset;display:flex;align-items:center;gap:10px;padding:17px 20px 0;max-width:none}
+.ttl{font-size:12px;font-weight:640;letter-spacing:.05em;text-transform:uppercase;color:var(--tx3)}
+
+/* ---------------- chart ---------------- */
+.chartTop{display:flex;align-items:flex-start;gap:14px;padding:20px 22px 6px;flex-wrap:wrap}
+.pairName{font-size:14px;color:var(--tx2);font-weight:560}
+.px{font-size:32px;font-weight:680;letter-spacing:-1px;line-height:1.15;margin-top:2px}
+.chg{font-size:13.5px;font-weight:600;margin-top:1px}
+.chg.up{color:var(--pos)}.chg.down{color:var(--neg)}
+.tfs{margin-left:auto;display:flex;gap:4px;background:var(--card2);padding:4px;border-radius:999px}
+.tfs button{padding:6px 13px;border-radius:999px;font-size:12.5px;color:var(--tx2);transition:.16s}
+.tfs button.on{background:var(--card);color:var(--tx);font-weight:620;box-shadow:var(--shs)}
+.row.hero>.card:first-child{display:flex;flex-direction:column}
+.plot{position:relative;flex:1;min-height:236px;padding:0 6px 8px}
+.plot svg{display:block;width:100%;height:100%;overflow:visible}
+.tipbox{
+  position:absolute;pointer-events:none;background:var(--card);border-radius:11px;
+  box-shadow:var(--sh);padding:7px 11px;font-size:12px;white-space:nowrap;
+  transform:translate(-50%,-118%);opacity:0;transition:opacity .12s;z-index:5;
+}
+.tipbox b{display:block;font-size:13.5px;font-weight:650}
+.tipbox span{color:var(--tx3);font-size:11px}
+.chartMsg{display:grid;place-items:center;height:100%;color:var(--tx3);font-size:13px;
+  text-align:center;padding:0 24px;line-height:1.6}
+
+/* ---------------- swap ---------------- */
+.leg{margin:0 14px;padding:15px 16px;border-radius:16px;background:var(--card2);transition:.16s}
+.leg:focus-within{box-shadow:0 0 0 2px var(--acc)}
+.legTop{display:flex;justify-content:space-between;font-size:12.5px;color:var(--tx3);margin-bottom:9px}
+.legTop b{font-weight:560;color:var(--acc);cursor:pointer}
+.frac{margin-left:6px;padding:2px 7px;border-radius:999px;background:var(--card);
+  font-size:10.5px;font-weight:700;letter-spacing:.04em;color:var(--acc);
+  box-shadow:var(--shs);transition:.14s}
+.frac:hover{background:var(--acc);color:var(--on-acc)}
+.legRow{display:flex;align-items:center;gap:10px}
+.amt{flex:1;min-width:0;width:100%;background:none;border:none;outline:none;
+     font-size:29px;font-weight:600;letter-spacing:-.8px;padding:0}
+.amt::placeholder{color:var(--tx3)}
+.amt:disabled{opacity:1}
+.tokbtn{
+  display:flex;align-items:center;gap:8px;flex-shrink:0;padding:7px 13px 7px 8px;
+  border-radius:999px;background:var(--card);box-shadow:var(--shs);
+  font-weight:650;font-size:15px;transition:.16s;
+}
+.tokbtn:hover{transform:translateY(-1px);box-shadow:var(--sh)}
+.tokbtn .av{width:24px;height:24px;border-radius:50%;display:grid;place-items:center;
+  font-size:9px;font-weight:750;background:var(--grad);color:var(--on-acc)}
+/* حروف اختصاری همیشه هستند؛ اگر لوگو لود شد رویشان می‌نشیند.
+   اگر شبکه/فیلتر جلوی تصویر را بگیرد، چیزی نمی‌شکند — فقط حروف می‌ماند. */
+.av{position:relative;overflow:hidden;flex-shrink:0}
+.av img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;
+  border-radius:50%;background:var(--card2);opacity:0;transition:opacity .2s}
+.av img.on{opacity:1}
+.mid{display:flex;justify-content:center;margin:-11px 0;position:relative;z-index:2}
+.mid button{width:34px;height:34px;border-radius:12px;background:var(--card);
+  box-shadow:var(--sh);display:grid;place-items:center;color:var(--tx2);transition:.2s}
+.mid button:hover{color:var(--acc);transform:rotate(180deg)}
+
+.facts{padding:14px 20px 4px}
+.fact{display:flex;justify-content:space-between;gap:12px;padding:5px 0;font-size:13px}
+.fact .k{color:var(--tx3)}
+.fact .v{color:var(--tx2)}
+.cta{
+  display:block;width:calc(100% - 28px);margin:14px;padding:15px;border-radius:16px;
+  background:var(--grad);color:var(--on-acc);
+  font-size:16px;font-weight:660;letter-spacing:-.1px;transition:.18s;
+  box-shadow:0 6px 20px var(--glow);
+}
+.cta:hover:not(:disabled){transform:translateY(-1px);box-shadow:0 9px 26px var(--glow)}
+.cta:disabled{background:var(--raise);color:var(--tx3);box-shadow:none;cursor:not-allowed}
+.spin{width:14px;height:14px;border-radius:50%;border:2px solid currentColor;
+  border-top-color:transparent;animation:sp .7s linear infinite;display:inline-block;
+  vertical-align:-2px;margin-right:8px}
+@keyframes sp{to{transform:rotate(360deg)}}
+
+/* ---------------- venues ---------------- */
+.vrow{
+  display:flex;align-items:center;gap:12px;padding:12px 20px;transition:.14s;
+  border-top:1px solid var(--line);
+}
+.vrow:hover{background:var(--card2)}
+.vrow.win{background:linear-gradient(90deg,var(--pglow),transparent 62%)}
+.vdot{width:9px;height:9px;border-radius:3px;flex-shrink:0}
+.vdot.u{background:#f06ec0}.vdot.a{background:#4fc3f7}
+.vdot.b{background:#f59e0b}.vdot.s{background:#60a5fa}
+.vdot.n{background:#34d399}.vdot.p{background:#a78bfa}
+.vname{font-size:14px;font-weight:560;min-width:0}
+.vtag{font-size:10.5px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;
+  color:var(--pos);background:var(--pglow);border-radius:999px;padding:3px 8px;margin-left:7px}
+.vout{margin-left:auto;text-align:right}
+.vout .a{font-size:14.5px;font-weight:600}
+.vout .d{font-size:12px;color:var(--tx3)}
+.vout .d.neg{color:var(--neg)}
+.vrow.mute .vname,.vrow.mute .a{color:var(--tx3);font-weight:500}
+.bar{width:52px;height:5px;border-radius:3px;background:var(--raise);overflow:hidden;flex-shrink:0}
+.bar i{display:block;height:100%;background:linear-gradient(90deg,var(--pos),var(--pos))}
+
+/* ---------------- coverage ---------------- */
+.cov{padding:12px 20px;border-top:1px solid var(--line);font-size:12.5px;color:var(--tx3)}
+.cov:empty{display:none}
+.covLine{color:var(--tx2)}
+.covLine b{color:var(--tx);font-weight:660}
+.covOff{display:flex;align-items:center;gap:8px;margin-top:7px}
+.covOff span{color:var(--tx3);font-size:11.5px;margin-left:auto;text-align:right}
+
+/* ---------------- route ---------------- */
+.route{padding:14px 20px 18px;display:flex;flex-direction:column;gap:12px}
+.hop{display:flex;align-items:center;gap:9px;flex-wrap:wrap}
+.node{background:var(--card2);border-radius:999px;padding:5px 12px;font-weight:620;font-size:13px}
+.arr{color:var(--tx3)}
+.pct{margin-left:auto;font-size:13px;color:var(--tx2);font-weight:560}
+.via{font-size:12px;color:var(--tx3);margin-top:-4px}
+
+/* ---------------- exit check ---------------- */
+.exit{margin:16px 20px 4px;padding:14px 16px;border-radius:16px;background:var(--card2)}
+.exitHead{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.exitTtl{font-size:15.5px;font-weight:660;letter-spacing:-.2px}
+.exitBadge{margin-left:auto;font-size:10.5px;font-weight:700;letter-spacing:.05em;
+  text-transform:uppercase;border-radius:999px;padding:4px 9px;white-space:nowrap}
+.exitBody{font-size:13px;color:var(--tx2);margin-top:7px;line-height:1.6}
+.exitBody b{color:var(--tx);font-weight:660}
+.exitNote{font-size:12px;color:var(--tx3);margin-top:6px;line-height:1.55}
+
+/* ---------------- safety ---------------- */
+.rhead{display:flex;align-items:center;gap:16px;padding:18px 20px}
+.ring{position:relative;width:60px;height:60px;flex-shrink:0}
+.ring svg{transform:rotate(-90deg)}
+.ring b{position:absolute;inset:0;display:grid;place-items:center;font-size:17px;font-weight:680}
+.rv{font-size:15.5px;font-weight:660}
+.rs{font-size:12.5px;color:var(--tx3);margin-top:1px}
+.chk{display:flex;gap:11px;align-items:flex-start;padding:11px 20px;border-top:1px solid var(--line);font-size:13px}
+.chk .ic{width:19px;height:19px;border-radius:50%;flex-shrink:0;display:grid;place-items:center;
+  font-size:11px;font-weight:700;background:var(--raise);color:var(--tx2);margin-top:1px}
+.chk.critical .ic{background:color-mix(in srgb,var(--neg) 15%,transparent);color:var(--neg)}
+.chk.high .ic,.chk.medium .ic{background:color-mix(in srgb,var(--warn) 16%,transparent);color:var(--warn)}
+.chk.ok .ic{background:var(--pglow);color:var(--pos)}
+.chk b{display:block;font-weight:620;font-size:13.5px}
+.chk span{color:var(--tx3);font-size:12.5px}
+
+/* ---------------- portfolio & flow ----------------
+   فرم: نوار انباشته + فهرست رتبه‌بندی‌شده، نه دونات.
+   دونات فقط برای «نگاه اجمالی» خوب است و مقایسه‌ی مقادیر نزدیک را سخت می‌کند.
+   پالت دسته‌ای از پالت مرجع دیتاویز، اعتبارسنجی‌شده برای هر دو تم.
+   هر بخش برچسب مستقیم دارد، پس هویت هیچ‌وقت فقط با رنگ منتقل نمی‌شود. */
+:root[data-theme="light"]{
+  --s1:#2a78d6;--s2:#eb6834;--s3:#1baf7a;--s4:#eda100;
+  --s5:#e87ba4;--s6:#008300;--s7:#4a3aa7;--s8:#e34948;
+}
+:root[data-theme="dark"]{
+  --s1:#3987e5;--s2:#d95926;--s3:#199e70;--s4:#c98500;
+  --s5:#d55181;--s6:#008300;--s7:#9085e9;--s8:#e66767;
+}
+.stack{display:flex;gap:2px;height:12px;border-radius:6px;overflow:hidden;margin:16px 20px 14px}
+.stack i{display:block;height:100%;min-width:3px}
+.frow{display:flex;align-items:center;gap:11px;padding:9px 20px;font-size:13px}
+.frow+.frow{border-top:1px solid var(--line)}
+.fchip{width:9px;height:9px;border-radius:3px;flex-shrink:0}
+.fsym{font-weight:620}
+.fbal{color:var(--tx3);font-size:12px}
+.fval{margin-left:auto;text-align:right}
+.fval .u{font-weight:620}
+.fval .p{font-size:12px;color:var(--tx3)}
+.flowbar{display:flex;gap:2px;height:12px;border-radius:6px;overflow:hidden;margin:16px 20px 8px}
+.flowbar i{display:block;height:100%}
+.flowkv{display:flex;justify-content:space-between;padding:4px 20px;font-size:13px}
+.flowkv .k{color:var(--tx3)}
+.trade{display:flex;align-items:center;gap:10px;padding:8px 20px;font-size:12.5px;border-top:1px solid var(--line)}
+.trade .amt2{font-weight:620}
+.trade .ago{margin-left:auto;color:var(--tx3);font-size:11.5px}
+
+/* ---------------- notices / misc ---------------- */
+.note{margin:14px 14px 0;padding:12px 14px;border-radius:14px;font-size:12.8px;line-height:1.55}
+#revNote:empty{display:none}
+.note.warn{background:color-mix(in srgb,var(--warn) 11%,transparent);color:var(--warn)}
+.note.err{background:color-mix(in srgb,var(--neg) 11%,transparent);color:var(--neg)}
+.note.ok{background:var(--pglow);color:var(--pos)}
+.note b{font-weight:660}.note a{color:inherit}
+.note pre{white-space:pre-wrap;word-break:break-all;font-size:10.5px;margin:7px 0 0;
+  max-height:170px;overflow:auto;opacity:.85}
+.note summary{cursor:pointer;margin-top:6px;font-size:11.5px;opacity:.85}
+.empty{padding:34px 20px;text-align:center;color:var(--tx3);font-size:13px;line-height:1.6}
+footer{max-width:1140px;margin:0 auto;padding:0 20px 40px;font-size:12px;color:var(--tx3)}
+footer a{color:var(--tx3)}
+.social{display:flex;align-items:center;gap:10px;margin-bottom:12px;flex-wrap:wrap}
+.social a{width:34px;height:34px;border-radius:11px;display:grid;place-items:center;
+  background:var(--card);box-shadow:var(--shs);color:var(--tx2);transition:.16s}
+.social a svg{width:16px;height:16px}
+.social a:hover{color:var(--acc);transform:translateY(-1px);box-shadow:var(--sh)}
+.feedback{margin-left:auto;padding:8px 14px;border-radius:999px;background:var(--card);
+  box-shadow:var(--shs);font-size:12.5px;color:var(--tx2);transition:.16s}
+.feedback:hover{color:var(--acc);box-shadow:var(--sh)}
+
+/* ---------------- modal / popover ---------------- */
+.ov{position:fixed;inset:0;background:rgba(10,25,20,.36);backdrop-filter:blur(4px);
+  display:none;align-items:flex-start;justify-content:center;padding:80px 16px;z-index:70}
+.ov.on{display:flex}
+.modal{background:var(--card);border-radius:22px;box-shadow:var(--sh);width:100%;max-width:404px;
+  max-height:72vh;display:flex;flex-direction:column;overflow:hidden}
+.modal h3{margin:0;padding:18px 20px 4px;font-size:16px;font-weight:660;display:flex;align-items:center}
+.srch{margin:12px 16px 8px;padding:12px 15px;border-radius:14px;background:var(--card2);
+  border:none;outline:none;width:calc(100% - 32px)}
+.srch:focus{box-shadow:0 0 0 2px var(--acc)}
+.tlist{overflow-y:auto;padding:4px 8px 12px}
+.trow{display:flex;align-items:center;gap:12px;width:100%;padding:11px 12px;border-radius:14px;text-align:left}
+.trow:hover{background:var(--card2)}
+.trow .av{width:32px;height:32px;border-radius:50%;display:grid;place-items:center;font-size:10px;
+  font-weight:750;background:var(--grad);color:var(--on-acc)}
+.trow .s{font-weight:620;font-size:14.5px}
+.trow .a{font-size:11.5px;color:var(--tx3)}
+.trow .b{margin-left:auto;font-size:13px;color:var(--tx2)}
+.rel{position:relative}
+.pop{position:absolute;right:0;top:46px;width:256px;background:var(--card);border-radius:18px;
+  box-shadow:var(--sh);padding:16px;z-index:50;display:none}
+.pop.on{display:block}
+.pop h4{margin:0 0 9px;font-size:11.5px;font-weight:640;letter-spacing:.05em;
+  text-transform:uppercase;color:var(--tx3)}
+.seg{display:flex;gap:6px;margin-bottom:15px}
+.seg button{flex:1;padding:8px 0;border-radius:11px;background:var(--card2);font-size:13px;color:var(--tx2)}
+.seg button.on{background:var(--acc);color:var(--on-acc);font-weight:620}
+.seg input{width:62px;padding:8px;border-radius:11px;text-align:right;background:var(--card2);
+  border:none;outline:none}
+.pop p{margin:0;font-size:11.5px;color:var(--tx3);line-height:1.55}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo">
+    <span class="glyph"><svg class="mark" viewBox="0 0 1000 697.98" fill="none" aria-hidden="true"><defs><linearGradient id="zxm-zx" x1="0.0" y1="0.0" x2="1.0" y2="0.0"><stop offset="0.0" stop-color="#22EFF6"/><stop offset="0.22" stop-color="#22D2F5"/><stop offset="0.42" stop-color="#43B5F7"/><stop offset="0.58" stop-color="#7396F8"/><stop offset="0.78" stop-color="#9688F7"/><stop offset="1.0" stop-color="#A785F9"/></linearGradient><linearGradient id="zxm-zxt" x1="0" y1="0" x2="1" y2="0"><stop offset="0.0" stop-color="#22EFF6"/><stop offset="0.22" stop-color="#22D2F5"/><stop offset="0.42" stop-color="#43B5F7"/><stop offset="0.58" stop-color="#7396F8"/><stop offset="0.78" stop-color="#9688F7"/><stop offset="1.0" stop-color="#A785F9"/></linearGradient><mask id="zxm-mask0_0_1" style="mask-type:luminance" maskUnits="userSpaceOnUse" x="13" y="0" width="1731" height="1274"><path d="M1743.77 0H13V1273.26H1743.77V0Z" fill="white" /></mask><linearGradient id="zxm-paint0_linear_0_1" x1="378.38" y1="0" x2="1378.38" y2="0" gradientUnits="userSpaceOnUse"><stop stop-color="#22EFF6" /><stop offset="0.22" stop-color="#22D2F5" /><stop offset="0.42" stop-color="#43B5F7" /><stop offset="0.58" stop-color="#7396F8" /><stop offset="0.78" stop-color="#9688F7" /><stop offset="1" stop-color="#A785F9" /></linearGradient><linearGradient id="zxm-paint1_linear_0_1" x1="154.878" y1="1231.74" x2="1603.18" y2="1231.74" gradientUnits="userSpaceOnUse"><stop stop-color="#22EFF6" /><stop offset="0.22" stop-color="#22D2F5" /><stop offset="0.42" stop-color="#43B5F7" /><stop offset="0.58" stop-color="#7396F8" /><stop offset="0.78" stop-color="#9688F7" /><stop offset="1" stop-color="#A785F9" /></linearGradient></defs><g transform="translate(0.000,0.000) scale(1.000000) translate(-378.380,-0.000)" mask="url(#zxm-mask0_0_1)"><path d="M1056.93 82.82L389.82 697.98L408.48 694.32L621.13 638.16C646.93 630.71 675.01 625.48 699.85 615.12L1366.9 0L1348.37 3.6L1137.12 59.38C1110.83 66.97 1082.25 72.29 1056.93 82.82ZM378.38 44.36C426.561 87.253 471.142 135.016 522.445 174.137C524.394 175.623 526.685 176.598 529.109 176.951C574.206 183.521 620.65 179.966 666.08 183.49C674.53 184.08 683.243 185.448 691.645 187.571C697.323 189.003 718.554 196.673 731.434 209.913L742.615 222.148L752.319 234.384C752.319 234.384 766.844 256.476 770.443 267.07C774.105 264.275 823.385 219.888 823.385 219.888L875.68 171.21C835.31 115.75 781.34 66.41 712.93 50.3C695.18 45.82 676.7 46.55 658.55 45.86L378.38 44.36ZM1378.38 653.58C1330.2 610.687 1285.61 562.548 1234.31 523.404C1232.36 521.916 1230.07 520.941 1227.64 520.589C1182.55 514.049 1136.11 517.984 1090.68 514.46C1082.04 513.721 1075.63 512.848 1065.68 509.95C1048.59 503.01 1039.64 497.104 1025.92 486.019C1025.92 486.019 1017.18 477.823 1015.11 475.626C1013.05 473.429 1008.13 468.78 1004.44 463.848C1000.76 458.915 993.452 448.451 985.684 429.962C979.248 435.335 930 481.5 930 481.5L881.08 526.74C921.45 582.2 975.42 631.54 1043.83 647.65C1061.58 652.13 1080.06 651.4 1098.2 652.08L1378.38 653.58Z" fill="url(#zxm-paint0_linear_0_1)" /></g></svg></span>
+    <span id="brand">Zaexa</span>
+  </div>
+  <nav class="nav" id="nav">
+    <button data-view="swap" class="on" title="Swap">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+           stroke-linecap="round" stroke-linejoin="round">
+        <path d="M7 4v13M4 14l3 3 3-3M17 20V7M14 10l3-3 3 3"/></svg><span>Swap</span></button>
+    <button data-view="folio" title="Portfolio">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+           stroke-linecap="round" stroke-linejoin="round">
+        <path d="M21 12a9 9 0 1 1-9-9v9z"/><path d="M15.5 3.5A9 9 0 0 1 20.5 8.5L12 12z"/></svg><span>Portfolio</span></button>
+    <button data-view="flow" title="Money flow">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+           stroke-linecap="round" stroke-linejoin="round">
+        <path d="M3 13h4l3 7 4-16 3 9h4"/></svg><span>Flow</span></button>
+  </nav>
+  <div class="grow"></div>
+  <div class="chip" id="srcChip"><span class="led off"></span><span id="srcTx">Base</span></div>
+  <button class="chip round" id="shareBtn" title="Copy a link to this quote">
+    <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor"
+         stroke-width="2" stroke-linecap="round"><path d="M10 13a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-1 1"/>
+    <path d="M14 11a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l1-1"/></svg></button>
+  <button class="chip round" id="themeBtn">◐</button>
+  <div class="rel">
+    <button class="chip round" id="setBtn">⚙</button>
+    <div class="pop" id="setPop">
+      <h4>Max slippage</h4>
+      <div class="seg" id="slipSeg">
+        <button data-bps="10">0.1%</button>
+        <button data-bps="50" class="on">0.5%</button>
+        <button data-bps="100">1%</button>
+        <input id="slipCustom" placeholder="…" inputmode="decimal">
+      </div>
+      <h4>Deadline (min)</h4>
+      <div class="seg"><input id="deadlineMin" value="3" inputmode="numeric" style="width:100%"></div>
+      <p>Every swap is simulated first. If the simulation fails, nothing is broadcast and no gas is spent.</p>
+    </div>
+  </div>
+  <button class="chip solid" id="connectBtn">Connect wallet</button>
+</header>
+
+<main>
+<div class="view on" id="view-swap">
+  <div class="row hero">
+    <!-- chart -->
+    <section class="card">
+      <div class="chartTop">
+        <div>
+          <div class="pairName" id="pairName">—</div>
+          <div class="px mono" id="pxNow">—</div>
+          <div class="chg mono" id="pxChg"></div>
+        </div>
+        <div class="tfs" id="tfs">
+          <button data-tf="1H">1H</button>
+          <button data-tf="1D" class="on">1D</button>
+          <button data-tf="1W">1W</button>
+          <button data-tf="1M">1M</button>
+        </div>
+      </div>
+      <div class="plot" id="plot">
+        <div class="chartMsg" id="chartMsg">Loading price history…</div>
+        <div class="tipbox" id="tip"></div>
+      </div>
+    </section>
+
+    <!-- swap -->
+    <section class="card">
+      <div style="height:16px"></div>
+      <div class="leg">
+        <div class="legTop"><span>You pay</span><b id="balIn"></b></div>
+        <div class="legRow">
+          <input class="amt mono" id="amtIn" placeholder="0" inputmode="decimal" autocomplete="off">
+          <button class="tokbtn" id="tokInBtn"><span class="av" id="tokInAv">?</span><span id="tokInSym">—</span></button>
+        </div>
+      </div>
+      <div class="mid"><button id="flipBtn">⇅</button></div>
+      <div class="leg">
+        <div class="legTop"><span>You receive</span><b id="balOut"></b></div>
+        <div class="legRow">
+          <input class="amt mono" id="amtOut" placeholder="0" inputmode="decimal" autocomplete="off">
+          <button class="tokbtn" id="tokOutBtn"><span class="av" id="tokOutAv">?</span><span id="tokOutSym">—</span></button>
+        </div>
+      </div>
+      <div class="facts">
+        <div class="fact"><span class="k">Rate</span><span class="v mono" id="kRate">—</span></div>
+        <div class="fact"><span class="k">Price impact</span><span class="v mono" id="kImpact">—</span></div>
+        <div class="fact"><span class="k">Min received</span><span class="v mono" id="kMin">—</span></div>
+        <div class="fact"><span class="k">Protocol fee</span><span class="v mono" id="kFee">0.00%</span></div>
+        <div class="fact" id="vsRow"><span class="k">vs Uniswap direct</span><span class="v mono" id="kVs">—</span></div>
+      </div>
+      <div id="revNote" style="margin:10px 14px 0;padding:10px 12px;border-radius:12px;
+        background:var(--card2);font-size:12px;color:var(--tx2);line-height:1.55"></div>
+      <div id="notices"></div>
+      <button class="cta" id="actBtn" disabled>Enter an amount</button>
+    </section>
+  </div>
+
+  <div class="row sub">
+    <section class="card">
+      <header><span class="ttl">Every pool on Base</span><span class="grow"></span>
+        <span class="ttl mono" id="venueMeta">—</span></header>
+      <div id="venueBody"><div class="empty">Enter an amount and we will quote every venue, then split your order if that pays more.</div></div>
+      <div id="coverage" class="cov"></div>
+      <div id="routeWrap" style="display:none">
+        <header style="padding-top:14px"><span class="ttl">Selected route</span><span class="grow"></span>
+          <span class="ttl mono" id="routeMeta"></span></header>
+        <div class="route" id="routeBody"></div>
+      </div>
+    </section>
+
+    <section class="card">
+      <header><span class="ttl">Exit check &amp; token safety</span><span class="grow"></span>
+        <span class="ttl mono" id="safetySym"></span></header>
+      <div id="exitBox"></div>
+      <div id="safetyBody"><div class="empty">Pick a token to scan its contract.</div></div>
+    </section>
+  </div>
+</div><!-- /view-swap -->
+
+<div class="view" id="view-folio">
+  <section class="card">
+    <header><span class="ttl">Your portfolio</span><span class="grow"></span>
+      <span class="ttl mono" id="folioTotal"></span></header>
+    <div id="folioBody"><div class="empty">Connect a wallet to see what you hold.</div></div>
+  </section>
+  <p style="padding:0 6px;color:var(--tx3);font-size:12px;margin:0">
+    Balances are read straight from the chain and refresh on their own. Prices come from
+    GeckoTerminal — a token with no price feed is listed but left out of the percentages.
+  </p>
+</div>
+
+<div class="view" id="view-flow">
+  <section class="card">
+    <header>
+      <span class="ttl">Money flow</span>
+      <button class="tokbtn" id="flowTokBtn" style="margin-left:10px;padding:5px 11px 5px 6px;font-size:13.5px">
+        <span class="av" id="flowTokAv" style="width:20px;height:20px;font-size:8px">?</span>
+        <span id="flowTokSym">—</span></button>
+      <span class="grow"></span>
+      <div class="tfs" id="flowTfs" style="padding:3px">
+        <button data-w="h1" class="on">1H</button>
+        <button data-w="h6">6H</button>
+      </div></header>
+    <div id="flowBody"><div class="empty">Pick a token to see who is buying.</div></div>
+  </section>
+  <p style="padding:0 6px;color:var(--tx3);font-size:12px;margin:0">
+    Read live from the deepest pool for this token, in your browser — no server, nothing stored.
+  </p>
+</div>
+</main>
+
+<footer>
+  <div class="social">
+    <a id="lnkX" href="#" target="_blank" rel="noopener" title="X">
+      <svg viewBox="0 0 24 24" fill="currentColor"><path d="M18.9 2H22l-7 8 8.2 12h-6.4l-5-7.3L5.9 22H2.8l7.5-8.6L2.4 2h6.6l4.5 6.6zM17.8 20.1h1.7L7.3 3.8H5.5z"/></svg></a>
+    <a id="lnkTg" href="#" target="_blank" rel="noopener" title="Telegram">
+      <svg viewBox="0 0 24 24" fill="currentColor"><path d="M21.8 4.2 18.7 19c-.2 1-.9 1.3-1.7.8l-4.7-3.5-2.3 2.2c-.3.3-.5.5-1 .5l.3-4.8 8.8-8c.4-.3-.1-.5-.6-.2L6.7 12.9 2 11.4c-1-.3-1-1 .2-1.5l18.3-7c.9-.3 1.6.2 1.3 1.3z"/></svg></a>
+    <a id="lnkGh" href="#" target="_blank" rel="noopener" title="GitHub">
+      <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2a10 10 0 0 0-3.2 19.5c.5.1.7-.2.7-.5v-1.8c-2.8.6-3.4-1.3-3.4-1.3-.4-1.2-1.1-1.5-1.1-1.5-.9-.6.1-.6.1-.6 1 .1 1.5 1 1.5 1 .9 1.5 2.3 1.1 2.9.8.1-.7.4-1.1.6-1.4-2.2-.3-4.6-1.1-4.6-5 0-1.1.4-2 1-2.7-.1-.3-.4-1.3.1-2.6 0 0 .8-.3 2.7 1a9.4 9.4 0 0 1 5 0c1.9-1.3 2.7-1 2.7-1 .5 1.3.2 2.3.1 2.6.6.7 1 1.6 1 2.7 0 3.9-2.4 4.7-4.6 5 .4.3.7 1 .7 2v2.9c0 .3.2.6.7.5A10 10 0 0 0 12 2z"/></svg></a>
+    <button id="feedbackBtn" class="feedback">Report a problem</button>
+  </div>
+  Non-custodial · runs entirely in your browser · no backend ·
+  executor <a id="ctrLink" target="_blank" rel="noopener" class="mono"></a> on BaseScan ·
+  price history by <a href="https://www.geckoterminal.com" target="_blank" rel="noopener">GeckoTerminal</a>
+</footer>
+
+<div class="ov" id="tokOv">
+  <div class="modal">
+    <h3>Select a token<span class="grow"></span><button id="tokClose" style="color:var(--tx3)">✕</button></h3>
+    <input class="srch" id="tokSearch" placeholder="Search name or paste address" autocomplete="off" spellcheck="false">
+    <div class="tlist" id="tokList"></div>
+  </div>
+</div>
+
+<script>
+/* =====================================================================
+   Zaexa — تجمیع‌کننده‌ی DEX روی Base
+
+   از پایتون ترجمه شده:
+     router.py    → مسیر مستقیم + دومرحله‌ای + تقسیم سفارش
+     scanner.py   → امتیاز ریسک از بایت‌کد، مالکیت، proxy، نقدینگی، فروش‌پذیری
+     ratelimit.py → تفکیک «شبکه جواب نداد» از «وجود ندارد»
+
+   اصل حاکم بر همه‌ی فایل: «نمی‌دانم» هرگز نباید شبیه «نه» نمایش داده شود.
+   ===================================================================== */
+
+const BRAND="Zaexa";
+/* شبکه‌های اجتماعی و بازخورد — وقتی حساب‌ها ساخته شد فقط همین‌ها را پر کن. */
+const LINKS={
+  x:"",                 // مثال: https://x.com/zaexa
+  telegram:"",          // مثال: https://t.me/zaexa
+  github:"",            // مثال: https://github.com/hesam/zaexa
+  feedback:"",          // فرم یا لینک؛ اگر خالی بماند ایمیل استفاده می‌شود
+  email:"hello@zaexa.com",
+};
+
+const ETHERS_CDNS=[
+  "https://cdnjs.cloudflare.com/ajax/libs/ethers/6.13.4/ethers.umd.min.js",
+  "https://cdn.jsdelivr.net/npm/ethers@6.13.4/dist/ethers.umd.min.js",
+  "https://unpkg.com/ethers@6.13.4/dist/ethers.umd.min.js",
+];
+function loadEthers(){return new Promise((res,rej)=>{let i=0;const go=()=>{
+  if(i>=ETHERS_CDNS.length)return rej(new Error("ethers failed"));
+  const s=document.createElement("script");s.src=ETHERS_CDNS[i++];
+  s.onload=()=>res(window.ethers);s.onerror=go;document.head.appendChild(s);};go();});}
+
+const CHAIN={
+  id:8453,hexId:"0x2105",name:"Base",explorer:"https://basescan.org",gtNetwork:"base",
+  multicall3:"0xcA11bde05977b3631167028862bE2a173976CA11",
+  executor:"0x2fea35aaDae6Cbf9b9481B06164907ccF95DB081",
+  rpcs:["https://1rpc.io/base","https://base.drpc.org","https://base.llamarpc.com",
+        "https://base.publicnode.com","https://mainnet.base.org"],
+  wrapped:"WETH",reference:"USDC",
+};
+// KIND_V3 = SwapRouter02 (ساختار هفت‌فیلدی، بدون deadline)
+const KIND={V2:0,V3:1,SOLIDLY:2,V3_LEGACY:3};
+
+/*
+ * ⚠️ درباره‌ی افزودن صرافی جدید — بخوان قبل از دست زدن به این آرایه.
+ *
+ * آدرس اشتباه در اینجا دقیقاً همان کلاس فاجعه‌ای است که یک بار خوردیم:
+ * فراخوانی به قراردادی که آن تابع را ندارد، revert بدون پیام، و کاربر
+ * سردرگم. پس هیچ صرافی‌ای فقط با «نوشتن آدرس» فعال نمی‌شود.
+ *
+ * هر صرافی باید چهار دروازه را در زمان اجرا رد کند (verifyDexes):
+ *   ۱) در آن آدرس قرارداد وجود دارد            (eth_getCode)
+ *   ۲) سلکتور تابعی که صدا می‌زنیم در بایت‌کدش هست
+ *   ۳) قرارداد اجرای ما آن روتر را در لیست سفید دارد
+ *   ۴) یک کوت واقعی از آن گرفته می‌شود
+ * هرکدام رد شود، آن صرافی مسیریابی نمی‌شود — و *پنهان هم نمی‌شود*:
+ * در جدول با دلیلش نمایش داده می‌شود.
+ *
+ * `core:true` یعنی روی مین‌نت با پول واقعی آزموده شده.
+ * بقیه کاندیدند: آدرس‌هایشان باید با scripts/verify_dexes.sh تأیید شود و
+ * owner قرارداد باید setRoutersAllowed را برایشان صدا بزند.
+ */
+const DEXES=[
+  {id:"uniswap-v3",name:"Uniswap V3",cls:"u",kind:KIND.V3,core:true,
+   router:"0x2626664c2603336E57B271c5C0b26F421741e481",
+   factory:"0x33128a8fC17869897dcE68Ed026d694621f6FDfD",
+   quoter:"0x3d4e44Eb1374240CE5F1B871ab261CD16335B76a",feeTiers:[100,500,3000,10000]},
+  {id:"aerodrome",name:"Aerodrome",cls:"a",kind:KIND.SOLIDLY,core:true,
+   router:"0xcF77a3Ba9A5CA399B7c97c74d54e5b1Beb874E43",
+   factory:"0x420DD381b31aEf6683db6B902084cB0FFECe40Da",stableModes:[false,true]},
+
+  // --- کاندیدها: تأییدنشده تا وقتی چهار دروازه را رد کنند ---
+  {id:"baseswap",name:"BaseSwap",cls:"b",kind:KIND.V2,
+   router:"0x327Df1E6de05895d2ab08513aaDD9313Fe505d86",
+   factory:"0xFDa619b6d20975be80A10332cD39b9a4b0FAa8BB"},
+  {id:"sushiswap",name:"SushiSwap",cls:"s",kind:KIND.V2,
+   router:"0x6BDED42c6DA8FBf0d2bA55B2fa120C5e0c8D7891",
+   factory:"0x71524B4f93c58fcbF659783284E38825f0622859"},
+  {id:"alienbase",name:"Alien Base",cls:"n",kind:KIND.V2,
+   router:"0x8c1A3cF8f83074169FE5D7aD50B978e1cD6b37c7",
+   factory:"0x3E84D913803b02A4a7f027165E8cA42C14C0FdE7"},
+  // نسل اول SwapRouter (ساختار هشت‌فیلدی، با deadline). روی زنجیره بررسی شد:
+  // بایت‌کد این روتر `0x414bf389` دارد و `0x04e45aaf` ندارد. با KIND.V3
+  // فراخوانی به تابعی می‌رفت که وجود ندارد → revert بدون پیام.
+  // کوترش اما نسل QuoterV2 است (`0xc6a5026a`)، پس کوت‌گیری با V3 یکی است.
+  {id:"pancake-v3",name:"PancakeSwap V3",cls:"p",kind:KIND.V3_LEGACY,
+   router:"0x1b81D678ffb9C0263b24A97847620C99d213eB14",
+   factory:"0x0BFbCF9fa4f9C56B0F40a671Ad40E0805A091865",
+   quoter:"0xB048Bbc1Ee6b733FFfCFb9e9cEF7375518e25997",feeTiers:[100,500,2500,10000]},
+];
+
+/** امضای تابعی که *واقعاً* صدا می‌زنیم — پایه‌ی دروازه‌ی ۲. */
+function swapSigOf(d){
+  if(d.kind===KIND.V3)return "exactInputSingle((address,address,uint24,address,uint256,uint256,uint160))";
+  if(d.kind===KIND.V3_LEGACY)return "exactInputSingle((address,address,uint24,address,uint256,uint256,uint256,uint160))";
+  if(d.kind===KIND.SOLIDLY)return "swapExactTokensForTokens(uint256,uint256,(address,address,bool,address)[],address,uint256)";
+  return "swapExactTokensForTokens(uint256,uint256,address[],address,uint256)";
+}
+
+/* دو نسل V3 از هر نظری که *این* کد به آن اهمیت می‌دهد یکسان‌اند: استخر با
+   fee tier دارند، کوتشان از quoter می‌آید، و factoryشان getPool سه‌آرگومانی
+   دارد. تنها تفاوتشان امضای خودِ سواپ است — و آن فقط در swapSigOf ظاهر می‌شود.
+   پس همه‌جای دیگر باید این را صدا بزند، نه `kind===KIND.V3` را. اگر یک جا
+   جا بیفتد، آن صرافی بی‌سروصدا از مسیریابی حذف می‌شود بدون اینکه هیچ
+   خطایی جایی دیده شود. */
+const isV3=d=>d.kind===KIND.V3||d.kind===KIND.V3_LEGACY;
+
+/* امضای کوتری که واقعاً صدا می‌زنیم — دروازه‌ی ۲ برای quoter.
+   قبلاً فقط *وجود* قرارداد quoter چک می‌شد، نه اینکه تابع درست را دارد یا نه.
+   همان شکافی که یک بار در سمت روتر باگ SwapRouter02 را ساخت. */
+const QUOTER_SIG="quoteExactInputSingle((address,address,uint256,uint24,uint160))";
+const WETH_ADDR="0x4200000000000000000000000000000000000006";
+const BASE_TOKENS=[
+  // ETH بومی: قرارداد فقط ERC-20 می‌گیرد، پس رابط خودش wrap/unwrap می‌کند
+  {symbol:"ETH",name:"Ether",address:"NATIVE",decimals:18,native:true},
+  {symbol:"WETH",name:"Wrapped Ether",address:WETH_ADDR,decimals:18},
+  {symbol:"USDC",name:"USD Coin",address:"0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",decimals:6,stable:true},
+  {symbol:"AERO",name:"Aerodrome",address:"0x940181a94A35A4569E4529A3CDfB74e38FD98631",decimals:18},
+  {symbol:"cbBTC",name:"Coinbase BTC",address:"0xcbB7C0000aB88B473b1f5aFd9ef808440eed33Bf",decimals:8},
+  {symbol:"DAI",name:"Dai",address:"0x50c5725949A6F0c72E6C4a641F24049A917DB0Cb",decimals:18,stable:true},
+];
+const ABI={
+  multicall3:["function aggregate3((address target,bool allowFailure,bytes callData)[] calls) payable returns ((bool success,bytes returnData)[])"],
+  quoterV2:["function quoteExactInputSingle((address tokenIn,address tokenOut,uint256 amountIn,uint24 fee,uint160 sqrtPriceLimitX96) params) returns (uint256 amountOut,uint160 a,uint32 b,uint256 c)"],
+  v2:["function getAmountsOut(uint256 amountIn,address[] path) view returns (uint256[])"],
+  solidly:["function getAmountsOut(uint256 amountIn,(address from,address to,bool stable,address factory)[] routes) view returns (uint256[])"],
+  erc20:["function symbol() view returns (string)","function name() view returns (string)",
+    "function decimals() view returns (uint8)","function balanceOf(address) view returns (uint256)",
+    "function allowance(address,address) view returns (uint256)","function approve(address,uint256) returns (bool)"],
+  ownable:["function owner() view returns (address)"],
+  weth:["function deposit() payable","function withdraw(uint256)"],
+  v3pool:["function token0() view returns (address)",
+    "event Swap(address indexed sender,address indexed recipient,int256 amount0,int256 amount1,uint160 sqrtPriceX96,uint128 liquidity,int24 tick)"],
+  v3factory:["function getPool(address,address,uint24) view returns (address)"],
+  solFactory:["function getPool(address,address,bool) view returns (address)"],
+  executor:["function executeSwap(address tokenIn,address tokenOut,uint256 totalAmountIn,uint256 minAmountOut,((uint8 kind,address router,address tokenIn,address tokenOut,uint24 feeTier,bool stable,address poolFactory)[] steps,uint256 amountIn)[] parts,uint256 deadline) returns (uint256)",
+    "function allowedRouter(address) view returns (bool)","function feeBps() view returns (uint256)"],
+};
+
+let E,iMulti,iQuoter,iV2,iSol,iErc,iOwn,iV3F,iSolF,iExec;
+let readProvider=null,rpcIndex=0,liveSrc=null;
+let walletProvider=null,signer=null,account=null,walletChainId=null;
+let tokenIn=null,tokenOut=null,customTokens=[];
+let slippageBps=50,deadlineMin=3,feeBps=0;
+let currentPlan=null,quoteSeq=0,scanSeq=0,chartSeq=0,exitSeq=0;
+// "exactIn" = کاربر مبلغ پرداختی را نوشته | "targetOut" = مقدار دریافتی را نوشته
+let mode="exactIn";
+let dexStatus={};
+let balances={},allowance=0n,busy=false,pickerTarget="in";
+let safetyCache={},timeframe="1D",chartData=null;
+const $=id=>document.getElementById(id);
+const ZERO="0x0000000000000000000000000000000000000000";
+const DEAD="0x000000000000000000000000000000000000dEaD";
+
+/* =====================================================================
+   RPC — اول کیف پول (بدون CORS، بدون فیلتر، بدون rate limit)، بعد عمومی
+   ===================================================================== */
+function makeProvider(u){return new E.JsonRpcProvider(u,CHAIN.id,{staticNetwork:true,batchMaxCount:1});}
+function rotateRpc(){rpcIndex=(rpcIndex+1)%CHAIN.rpcs.length;readProvider=makeProvider(CHAIN.rpcs[rpcIndex]);}
+function withTimeout(p,ms){return Promise.race([p,new Promise((_,r)=>setTimeout(()=>r(new Error("timeout")),ms))]);}
+function isRevert(e){
+  if(e&&e.code==="CALL_EXCEPTION")return true;
+  const m=((e&&e.message)||"").toLowerCase();
+  return m.includes("execution reverted")||m.includes("revert");
+}
+function walletReady(){return walletProvider&&walletChainId===CHAIN.id;}
+async function rpcSend(fn){
+  if(walletReady()){
+    try{const v=await withTimeout(fn(walletProvider),9000);liveSrc="wallet";paintSrc();return v;}
+    catch(e){if(isRevert(e))throw e;}
+  }
+  let last;
+  for(let k=0;k<CHAIN.rpcs.length;k++){
+    try{const v=await withTimeout(fn(readProvider),7000);liveSrc=CHAIN.rpcs[rpcIndex];paintSrc();return v;}
+    catch(e){if(isRevert(e))throw e;last=e;rotateRpc();}
+  }
+  liveSrc=null;paintSrc();
+  const err=new Error("all RPC endpoints failed");err.rpcDown=true;err.cause=last;throw err;
+}
+const chainCall=tx=>rpcSend(p=>p.call(tx));
+const getCode=a=>rpcSend(p=>p.getCode(a));
+const getStorage=(a,s)=>rpcSend(p=>p.getStorage(a,s));
+const getNative=a=>rpcSend(p=>p.getBalance(a)).catch(()=>null);
+const getLogs=f=>rpcSend(p=>p.getLogs(f));
+const blockNumber=()=>rpcSend(p=>p.getBlockNumber());
+
+async function multicall(calls){
+  if(!calls.length)return[];
+  const data=iMulti.encodeFunctionData("aggregate3",[calls.map(c=>[c.target,true,c.data])]);
+  const raw=await chainCall({to:CHAIN.multicall3,data});
+  return iMulti.decodeFunctionResult("aggregate3",raw)[0].map(r=>({ok:r[0],data:r[1]}));
+}
+
+/* =====================================================================
+   Venues & quoting
+   ===================================================================== */
+/**
+ * چهار دروازه‌ی تأیید. صرافی رد نشده مسیریابی نمی‌شود ولی در جدول با دلیل
+ * دیده می‌شود — سکوت درباره‌ی چیزی که پوشش نمی‌دهیم همان‌قدر بد است که
+ * «استخر نیست» گفتن وقتی شبکه جواب نداده.
+ */
+async function verifyDexes(){
+  for(const d of DEXES)dexStatus[d.id]={ok:false,reason:"checking…"};
+  await Promise.all(DEXES.map(async d=>{
+    const set=(ok,reason)=>{dexStatus[d.id]={ok,reason};};
+    try{
+      const code=await getCode(E.getAddress(d.router));
+      if(!code||code.length<=2)return set(false,"no contract at the router address");
+      const sel=E.id(swapSigOf(d)).slice(2,10).toLowerCase();
+      if(!code.toLowerCase().includes(sel))
+        return set(false,"router does not expose the function we call — interface mismatch");
+      if(isV3(d)){
+        const qc=await getCode(E.getAddress(d.quoter));
+        if(!qc||qc.length<=2)return set(false,"no contract at the quoter address");
+        const qsel=E.id(QUOTER_SIG).slice(2,10).toLowerCase();
+        if(!qc.toLowerCase().includes(qsel))
+          return set(false,"quoter does not expose the function we call — wrong quoter generation");
+      }
+    }catch{return set(false,"could not reach the network to verify");}
+    set(true,"verified");
+  }));
+  // دروازه‌ی ۳ — لیست سفید قرارداد اجرا
+  try{
+    const ds=DEXES.filter(d=>dexStatus[d.id].ok);
+    const res=await multicall(ds.map(d=>({target:CHAIN.executor,
+      data:iExec.encodeFunctionData("allowedRouter",[E.getAddress(d.router)])})));
+    ds.forEach((d,i)=>{
+      if(res[i].ok&&!iExec.decodeFunctionResult("allowedRouter",res[i].data)[0])
+        dexStatus[d.id]={ok:false,reason:"not allow-listed on the executor contract yet"};
+    });
+  }catch{}
+  renderCoverage();
+}
+function enabledDexes(){return DEXES.filter(d=>dexStatus[d.id]&&dexStatus[d.id].ok);}
+function renderCoverage(){
+  const el=$("coverage");if(!el)return;
+  const on=enabledDexes().length,off=DEXES.filter(d=>dexStatus[d.id]&&!dexStatus[d.id].ok);
+  el.innerHTML=`<div class="covLine">Routing through <b>${on}</b> of ${DEXES.length} Base DEXes.</div>`+
+    off.map(d=>`<div class="covOff"><i class="vdot ${d.cls}"></i>${esc(d.name)}
+      <span>${esc(dexStatus[d.id].reason)}</span></div>`).join("");
+}
+
+function allVenues(){
+  const o=[];
+  for(const d of enabledDexes()){
+    if(isV3(d))d.feeTiers.forEach(t=>o.push({dex:d,feeTier:t,stable:null}));
+    else if(d.kind===KIND.SOLIDLY)d.stableModes.forEach(s=>o.push({dex:d,feeTier:null,stable:s}));
+    else o.push({dex:d,feeTier:null,stable:null});
+  }
+  return o;
+}
+function venueLabel(v){
+  if(isV3(v.dex))return `${v.dex.name} ${(v.feeTier/10000).toFixed(2)}%`;
+  if(v.dex.kind===KIND.SOLIDLY)return `${v.dex.name} ${v.stable?"stable":"volatile"}`;
+  return v.dex.name;
+}
+function encodeQuote(v,a,b,amt){
+  const x=E.getAddress(a),y=E.getAddress(b);
+  if(isV3(v.dex))return{target:v.dex.quoter,
+    data:iQuoter.encodeFunctionData("quoteExactInputSingle",[[x,y,amt,v.feeTier,0]]),
+    dec:d=>iQuoter.decodeFunctionResult("quoteExactInputSingle",d)[0]};
+  if(v.dex.kind===KIND.SOLIDLY)return{target:v.dex.router,
+    data:iSol.encodeFunctionData("getAmountsOut",[amt,[[x,y,!!v.stable,v.dex.factory]]]),
+    dec:d=>{const r=iSol.decodeFunctionResult("getAmountsOut",d)[0];return r[r.length-1];}};
+  return{target:v.dex.router,
+    data:iV2.encodeFunctionData("getAmountsOut",[amt,[x,y]]),
+    dec:d=>{const r=iV2.decodeFunctionResult("getAmountsOut",d)[0];return r[r.length-1];}};
+}
+function newStats(){return{attempted:0,ok:0,noPool:0,rpcFailed:0};}
+function unreliable(s){return s.attempted>0&&s.rpcFailed/s.attempted>0.25;}
+
+async function quoteMany(specs,stats){
+  if(!specs.length)return[];
+  const enc=specs.map(s=>encodeQuote(s.venue,s.tokenIn,s.tokenOut,s.amountIn));
+  stats.attempted+=specs.length;
+  let res;
+  try{res=await multicall(enc.map(e=>({target:e.target,data:e.data})));}
+  catch{stats.rpcFailed+=specs.length;return specs.map(()=>({out:null,status:"unknown"}));}
+  return res.map((r,i)=>{
+    if(!r.ok||!r.data||r.data==="0x"){stats.noPool++;return{out:null,status:"nopool"};}
+    try{const v=enc[i].dec(r.data);
+      if(v>0n){stats.ok++;return{out:v,status:"ok"};}
+      stats.noPool++;return{out:null,status:"nopool"};
+    }catch{stats.noPool++;return{out:null,status:"nopool"};}
+  });
+}
+
+/* =====================================================================
+   Route search — router.py
+   ===================================================================== */
+function tokenBySymbol(s){return allTokens().find(t=>t.symbol===s);}
+async function quoteRoutesAt(entries,stats){
+  const amounts=entries.map(e=>e.amountIn),alive=entries.map(()=>true);
+  const maxHops=Math.max(0,...entries.map(e=>e.route.hops.length));
+  for(let h=0;h<maxHops;h++){
+    const specs=[],idx=[];
+    entries.forEach((e,i)=>{
+      if(!alive[i]||h>=e.route.hops.length)return;
+      const hop=e.route.hops[h];
+      specs.push({venue:hop.venue,tokenIn:hop.tokenIn.address,tokenOut:hop.tokenOut.address,amountIn:amounts[i]});
+      idx.push(i);
+    });
+    if(!specs.length)continue;
+    (await quoteMany(specs,stats)).forEach((q,k)=>{
+      const i=idx[k];
+      if(q.out===null||q.out===0n){alive[i]=false;amounts[i]=null;}else amounts[i]=q.out;
+    });
+  }
+  return entries.map((e,i)=>alive[i]?amounts[i]:null);
+}
+async function findRoutes(tIn,tOut,amountIn,stats){
+  const venues=allVenues(),routes=[];
+  const mids=[CHAIN.wrapped,CHAIN.reference].map(tokenBySymbol).filter(m=>m&&
+    m.address.toLowerCase()!==tIn.address.toLowerCase()&&
+    m.address.toLowerCase()!==tOut.address.toLowerCase());
+  const specs=[];
+  venues.forEach(v=>specs.push({venue:v,tokenIn:tIn.address,tokenOut:tOut.address,amountIn,tag:"d"}));
+  mids.forEach(m=>venues.forEach(v=>specs.push({venue:v,tokenIn:tIn.address,tokenOut:m.address,amountIn,tag:"h1",mid:m})));
+  const r1=await quoteMany(specs,stats);
+
+  const direct=[];
+  specs.forEach((s,i)=>{
+    if(s.tag!=="d")return;
+    direct.push({venue:s.venue,out:r1[i].out,status:r1[i].status});
+    if(r1[i].out&&r1[i].out>0n)routes.push({hops:[{venue:s.venue,tokenIn:tIn,tokenOut:tOut,amountIn,amountOut:r1[i].out}],
+      amountIn,amountOut:r1[i].out});
+  });
+  const b1=new Map();
+  specs.forEach((s,i)=>{
+    if(s.tag!=="h1")return;const o=r1[i].out;if(!o||o<=0n)return;
+    const c=b1.get(s.mid.symbol);if(!c||o>c.out)b1.set(s.mid.symbol,{out:o,venue:s.venue,mid:s.mid});
+  });
+  const s2=[];
+  b1.forEach(b=>venues.forEach(v=>s2.push({venue:v,tokenIn:b.mid.address,tokenOut:tOut.address,amountIn:b.out,b})));
+  if(s2.length){
+    const r2=await quoteMany(s2,stats),b2=new Map();
+    s2.forEach((s,i)=>{
+      const o=r2[i].out;if(!o||o<=0n)return;
+      const k=s.b.mid.symbol,c=b2.get(k);if(!c||o>c.out)b2.set(k,{out:o,venue:s.venue,b:s.b});
+    });
+    b2.forEach(x=>routes.push({hops:[
+      {venue:x.b.venue,tokenIn:tIn,tokenOut:x.b.mid,amountIn,amountOut:x.b.out},
+      {venue:x.venue,tokenIn:x.b.mid,tokenOut:tOut,amountIn:x.b.out,amountOut:x.out}],
+      amountIn,amountOut:x.out}));
+  }
+  routes.sort((a,b)=>b.amountOut>a.amountOut?1:-1);
+  return{routes,direct};
+}
+async function findBestSplit(routes,amountIn,stats){
+  const plan={parts:[{route:routes[0],amountIn}],totalIn:amountIn,
+    totalOut:routes[0].amountOut,bestSingleOut:routes[0].amountOut,allRoutes:routes};
+  if(routes.length<2)return plan;
+  const second=routes[1];
+  if(second.amountOut*100n<routes[0].amountOut*80n)return plan;
+  const STEPS=4,entries=[];
+  for(let i=1;i<STEPS;i++){
+    const a2=(amountIn*BigInt(i))/BigInt(STEPS),a1=amountIn-a2;
+    if(a1<=0n||a2<=0n)continue;
+    entries.push({route:routes[0],amountIn:a1},{route:second,amountIn:a2});
+  }
+  if(!entries.length)return plan;
+  const o=await quoteRoutesAt(entries,stats);
+  for(let i=0;i<entries.length;i+=2){
+    if(o[i]===null||o[i+1]===null)continue;
+    const t=o[i]+o[i+1];
+    if(t>plan.totalOut){plan.totalOut=t;
+      plan.parts=[{route:routes[0],amountIn:entries[i].amountIn},{route:second,amountIn:entries[i+1].amountIn}];}
+  }
+  return plan;
+}
+async function priceImpact(tIn,tOut,amountIn,plan,stats){
+  const small=amountIn/1000n>0n?amountIn/1000n:1n;
+  const {routes}=await findRoutes(tIn,tOut,small,stats);
+  if(!routes.length)return null;
+  const SC=10n**18n;
+  const rs=(routes[0].amountOut*SC)/small,rb=(plan.totalOut*SC)/amountIn;
+  if(rs<=0n)return null;
+  return Math.max(0,Number(((rs-rb)*10000n)/rs)/100);
+}
+/* قرارداد جدید ETH بومی را با address(0) می‌شناسد و خودش wrap/unwrap می‌کند.
+   مسیرها همچنان با WETH ساخته می‌شوند. */
+const asArg=t=>isNative(t)?ZERO:t.address;
+function buildParts(plan){
+  return plan.parts.map(p=>[p.route.hops.map(h=>[h.venue.dex.kind,E.getAddress(h.venue.dex.router),
+    E.getAddress(h.tokenIn.address),E.getAddress(h.tokenOut.address),
+    h.venue.feeTier||0,!!h.venue.stable,E.getAddress(h.venue.dex.factory)]),p.amountIn]);
+}
+function minOutOf(plan){
+  const afterFee=(plan.totalOut*BigInt(10000-feeBps))/10000n;
+  return (afterFee*BigInt(10000-slippageBps))/10000n;
+}
+
+/* =====================================================================
+   Exit check — «اگر بخری، آیا می‌توانی بیرون بیایی؟»
+   ---------------------------------------------------------------------
+   امتیاز نقدینگی رقبا از ریاضیِ عمق استخر می‌آید، پس سه چیز را نمی‌بیند:
+   مالیاتی که فقط موقع فروش فعال می‌شود، لیست سیاهی که بعد از خرید اعمال
+   می‌شود، و هانی‌پاتی که مسیر فروشش revert می‌کند. هر سه فقط در *اجرا*
+   دیده می‌شوند، نه در کوت.
+
+   ترفند: قرارداد ما مسیر چندمرحله‌ای می‌پذیرد و tokenIn == tokenOut مجاز است.
+   پس کل رفت‌وبرگشت را به‌صورت *یک* executeSwap می‌سازیم و staticCall می‌زنیم.
+   توکن واقعاً از داخل قرارداد رد می‌شود، پس هر مالیات یا مسدودسازی خودش را
+   نشان می‌دهد. هیچ گسی خرج نمی‌شود و هیچ تراکنشی ارسال نمی‌شود.
+
+   اگر کیف پول وصل نباشد یا موجودی/allowance کافی نباشد، به تخمین مبتنی بر
+   کوت برمی‌گردیم — و *صراحتاً* برچسبش می‌زنیم. تخمین و اثبات یکی نیستند.
+   ===================================================================== */
+async function runExitCheck(plan,amountIn){
+  const seq=++exitSeq;
+  const out={state:"estimated",recovered:null,lossPct:null,reason:null};
+  if(!plan||!plan.parts.length)return null;
+
+  // --- الف) رفت‌وبرگشت مبتنی بر کوت: همیشه در دسترس ---
+  const st=newStats();
+  const back=await findRoutes(routable(tokenOut),routable(tokenIn),plan.totalOut,st);
+  if(seq!==exitSeq)return null;
+  if(!back.routes.length){
+    out.state=(unreliable(st)||st.ok===0)?"unknown":"noexit";
+    out.reason=out.state==="unknown"
+      ?"The network did not answer, so we could not test the sell side."
+      :"No pool would quote selling "+tokenOut.symbol+" back. Nothing to exit into.";
+    return out;
+  }
+  const sellRoute=back.routes[0];
+  out.recovered=sellRoute.amountOut;
+  out.lossPct=(1-Number(out.recovered)/Number(amountIn))*100;
+
+  // --- ب) اثبات با اجرا: خرید و فروش در یک تراکنش شبیه‌سازی‌شده ---
+  const buy=plan.parts[0].route;
+  const steps=buy.hops.length+sellRoute.hops.length;
+  if(!signer||!account||walletChainId!==CHAIN.id){out.reason="Connect a wallet to verify by simulation.";return out;}
+  if(steps>3){out.reason="Path too long to verify in one simulation.";return out;}
+
+  // 🔑 شبیه‌سازی با *توکن قابل مسیریابی* انجام می‌شود، نه با ETH بومی.
+  //    نسخه‌ی قبل موجودی ETH را چک می‌کرد ولی قرارداد به WETH نیاز داشت،
+  //    پس transferFrom می‌افتاد و ما آن را «نمی‌توانی بفروشی» گزارش می‌کردیم.
+  //    یک هشدار کاذب روی قابلیتی که کل ارزشش اعتماد است — بدتر از نداشتنش.
+  const bal=balances[balKey(tokenIn)];
+  if(bal===undefined||bal<amountIn){
+    out.reason="Not enough "+tokenIn.symbol+" in your wallet to verify by simulation.";
+    return out;
+  }
+  if(!isNative(tokenIn)&&allowance<amountIn){
+    out.reason="Approve "+tokenIn.symbol+" to verify by simulation.";return out;}
+
+  const roundTrip={parts:[{route:{hops:buy.hops.concat(sellRoute.hops),amountIn,
+    amountOut:out.recovered},amountIn}],totalIn:amountIn,totalOut:out.recovered};
+  try{
+    const exec=new E.Contract(CHAIN.executor,ABI.executor,signer);
+    const got=await exec.executeSwap.staticCall(
+      asArg(tokenIn),asArg(tokenIn),amountIn,1n,buildParts(roundTrip),
+      BigInt(Math.floor(Date.now()/1000)+300),
+      isNative(tokenIn)?{value:amountIn}:{});
+    if(seq!==exitSeq)return null;
+    out.state="verified";
+    out.recovered=got;
+    out.lossPct=(1-Number(got)/Number(amountIn))*100;
+  }catch(e){
+    if(seq!==exitSeq)return null;
+
+    // ⚠️ سه‌راهی حیاتی. این پنل تنها جایی است که کاربر «نمی‌توانی بفروشی»
+    //    را از ما می‌شنود، پس اشتباه اینجا گران‌ترین اشتباه محصول است.
+
+    // ۱) شبکه اصلاً جواب نداد → «نمی‌دانم». هرگز «نه».
+    if(!isRevert(e)||e.rpcDown){
+      out.state="unknown";
+      out.reason="The network did not answer, so the live sell test could not run. "+
+                 "The figure above is from quotes.";
+      return out;
+    }
+
+    // ۲) revert خوردیم، ولی هنوز معلوم نیست تقصیر پیش‌شرط سمت ماست
+    //    (قرارداد نتوانست توکن را از کیف پول بکشد) یا خود توکن.
+    //    قبلاً این را با تطبیق رشته‌ی خطا حدس می‌زدیم — دو جور غلط می‌شد:
+    //    توکنی که پیامش «transferFrom failed» بود سالم اعلام می‌شد، و
+    //    allowance بیاتِ کش‌شده باعث هشدار کاذب می‌شد. حالا نمی‌پرسیم
+    //    «پیام خطا چه بود»، می‌پرسیم «واقعاً موجودی و allowance هست؟».
+    const gap=await preconditionGap(amountIn);
+    if(seq!==exitSeq)return null;
+    if(gap===null){
+      out.state="unknown";
+      out.reason="The sell simulation reverted, but we could not confirm your balance "+
+                 "and approval, so we cannot tell whether the token is at fault.";
+      return out;
+    }
+    if(gap){out.state="estimated";out.reason=gap;return out;}
+
+    // ۳) پیش‌شرط‌ها برقرارند و باز revert شد → revert از *داخل مسیر فروش* آمده.
+    //    این همان سیگنالی است که هیچ امتیاز عددی نقدینگی نمی‌دهد.
+    out.state="blocked";
+    out.reason=friendly(e);
+  }
+  return out;
+}
+
+/* آیا کیف پول واقعاً پیش‌شرط شبیه‌سازی را ندارد؟ تازه از زنجیره می‌خوانیم،
+   نه از state کش‌شده (که ممکن است چند ثانیه عقب باشد) و نه از متن خطا.
+   خروجی سه‌حالته است — و همین سه‌حالتی بودن نکته‌ی اصلی است:
+     رشته → پیش‌شرط برقرار نیست (تقصیر ما، نه توکن)
+     ""    → پیش‌شرط برقرار است
+     null  → نتوانستیم بفهمیم؛ تماس‌کننده باید «نمی‌دانم» بگوید */
+async function preconditionGap(amountIn){
+  if(!account)return null;
+  const t=routable(tokenIn);
+  try{
+    if(isNative(tokenIn)){
+      const bal=await getNative(account);          // خودش روی خطا null می‌دهد
+      if(bal===null)return null;
+      return bal<amountIn
+        ?"Your wallet does not hold enough ETH to run the live check. The figure above is from quotes."
+        :"";
+    }
+    const r=await multicall([
+      {target:t.address,data:iErc.encodeFunctionData("balanceOf",[account])},
+      {target:t.address,data:iErc.encodeFunctionData("allowance",[account,CHAIN.executor])}]);
+    if(!r[0]||!r[1]||!r[0].ok||!r[1].ok)return null;
+    const bal=iErc.decodeFunctionResult("balanceOf",r[0].data)[0];
+    const alw=iErc.decodeFunctionResult("allowance",r[1].data)[0];
+    if(bal<amountIn)
+      return "Your wallet does not hold enough "+t.symbol+
+             " to run the live check. The figure above is from quotes.";
+    if(alw<amountIn)
+      return "Approve "+t.symbol+" to run the live check. The figure above is from quotes.";
+    return "";
+  }catch{return null;}
+}
+
+function renderExit(x){
+  const box=$("exitBox");
+  if(!box)return;
+  if(!x){box.innerHTML="";return;}
+  const badge={
+    verified:['Verified by simulation','var(--pos)','var(--pglow)'],
+    estimated:['Estimated from quotes','var(--tx2)','var(--raise)'],
+    blocked:['Sell simulation reverted','var(--neg)','color-mix(in srgb,var(--neg) 14%,transparent)'],
+    noexit:['No sell route','var(--neg)','color-mix(in srgb,var(--neg) 14%,transparent)'],
+    unknown:['Unknown','var(--warn)','color-mix(in srgb,var(--warn) 14%,transparent)'],
+  }[x.state];
+  let head,tone;
+  if(x.state==="blocked"||x.state==="noexit"){
+    head="You may not be able to sell this back";tone="var(--neg)";
+  }else if(x.state==="unknown"){head="Exit not tested";tone="var(--warn)";}
+  else{
+    const l=x.lossPct;
+    tone=l>=15?"var(--neg)":l>=5?"var(--warn)":"var(--pos)";
+    head=`Round trip costs ${l.toFixed(2)}%`;
+  }
+  box.innerHTML=`
+    <div class="exit">
+      <div class="exitHead">
+        <span class="exitTtl" style="color:${tone}">${esc(head)}</span>
+        <span class="exitBadge" style="color:${badge[1]};background:${badge[2]}">${badge[0]}</span>
+      </div>
+      ${x.recovered!==null?`<div class="exitBody mono">
+        Sell all of it right back and you recover
+        <b>${fmt(x.recovered,tokenIn.decimals)} ${esc(tokenIn.symbol)}</b>
+        of the ${fmt(parsedAmountIn(),tokenIn.decimals)} you put in.</div>`:""}
+      ${x.reason?`<div class="exitNote">${esc(x.reason)}</div>`:""}
+    </div>`;
+}
+
+/* =====================================================================
+   نمودار قیمت
+   داده از GeckoTerminal (رایگان، بدون کلید). خودِ رسم SVG دست‌ساز است تا
+   نه وابستگی خارجی داشته باشیم نه کنترل ظاهر را از دست بدهیم.
+   اگر تاریخچه نیامد، *دروغ نمی‌گوییم* — حالت «در دسترس نیست» نشان می‌دهیم.
+   ===================================================================== */
+const GT="https://api.geckoterminal.com/api/v2";
+const TFS={
+  "1H":{tf:"minute",agg:1,limit:60,fmt:{hour:"2-digit",minute:"2-digit"}},
+  "1D":{tf:"minute",agg:15,limit:96,fmt:{hour:"2-digit",minute:"2-digit"}},
+  "1W":{tf:"hour",agg:1,limit:168,fmt:{weekday:"short",hour:"2-digit"}},
+  "1M":{tf:"hour",agg:4,limit:180,fmt:{month:"short",day:"numeric"}},
+};
+const poolCache={};
+
+/* ---------------------------------------------------------------------
+   صف درخواست‌های GeckoTerminal
+   API عمومی است و سقف نرخ دارد. قبلاً برای هر توکن یک درخواست جدا و
+   هم‌زمان می‌فرستادیم؛ نتیجه‌اش ۴۲۹ و «قیمت ندارد» برای USDC بود.
+   حالا: صف با فاصله‌ی حداقلی + تلاش مجدد با عقب‌نشینی.
+   همان کاری که ratelimit.py در سمت پایتون می‌کند.
+   --------------------------------------------------------------------- */
+let gtChain=Promise.resolve(),gtLast=0;
+const GT_GAP=240,GT_TRIES=3;
+function gtJson(url){
+  const run=async()=>{
+    for(let i=0;i<GT_TRIES;i++){
+      const wait=Math.max(0,GT_GAP-(Date.now()-gtLast));
+      if(wait)await new Promise(r=>setTimeout(r,wait));
+      gtLast=Date.now();
+      try{
+        const r=await withTimeout(fetch(url,{headers:{accept:"application/json"}}),9000);
+        if(r.status===429||r.status>=500){        // موقتی — دوباره تلاش کن
+          await new Promise(x=>setTimeout(x,900*(i+1)));continue;
+        }
+        if(!r.ok)throw new Error("gt "+r.status);  // دائمی — بس است
+        return r.json();
+      }catch(e){
+        if(i===GT_TRIES-1)throw e;
+        await new Promise(x=>setTimeout(x,900*(i+1)));
+      }
+    }
+    throw new Error("gt: exhausted retries");
+  };
+  const next=gtChain.then(run,run);
+  gtChain=next.catch(()=>{});
+  return next;
+}
+async function topPoolFor(token){
+  const k=token.address.toLowerCase();
+  if(poolCache[k]!==undefined)return poolCache[k];
+  const j=await gtJson(`${GT}/networks/${CHAIN.gtNetwork}/tokens/${token.address}/pools?page=1`);
+  const list=(j&&j.data)||[];
+  const id=list.length?String(list[0].id||"").split("_").pop():null;
+  poolCache[k]=id||null;
+  return poolCache[k];
+}
+async function usdSeries(token,cfg){
+  if(token.stable)return null;                       // استیبل ≈ ۱ دلار
+  const pool=await topPoolFor(token);
+  if(!pool)throw new Error("no pool");
+  const j=await gtJson(`${GT}/networks/${CHAIN.gtNetwork}/pools/${pool}/ohlcv/${cfg.tf}`+
+    `?aggregate=${cfg.agg}&limit=${cfg.limit}&currency=usd`);
+  const raw=(((j||{}).data||{}).attributes||{}).ohlcv_list||[];
+  if(!raw.length)throw new Error("empty");
+  return raw.map(r=>({t:Number(r[0]),c:Number(r[4])}))
+            .filter(p=>isFinite(p.c)&&p.c>0).sort((a,b)=>a.t-b.t);
+}
+/** سری نرخ جفت‌ارز: قیمت دلاری خروجی تقسیم بر قیمت دلاری ورودی. */
+async function pairSeries(tIn,tOut,cfg){
+  const [sIn,sOut]=await Promise.all([usdSeries(tIn,cfg),usdSeries(tOut,cfg)]);
+  if(!sOut&&!sIn)return null;
+  if(!sIn)return sOut.map(p=>({t:p.t,c:p.c}));                 // ورودی استیبل
+  if(!sOut)return sIn.map(p=>({t:p.t,c:1/p.c}));               // خروجی استیبل
+  const m=new Map(sIn.map(p=>[p.t,p.c]));
+  return sOut.map(p=>{const a=m.get(p.t);return a?{t:p.t,c:p.c/a}:null;}).filter(Boolean);
+}
+function chartMsg(t){$("chartMsg").style.display="grid";$("chartMsg").textContent=t;
+  const s=$("plot").querySelector("svg");if(s)s.remove();}
+
+async function loadChart(){
+  const seq=++chartSeq;
+  if(!tokenIn||!tokenOut)return;
+  $("pairName").textContent=`${tokenOut.symbol} / ${tokenIn.symbol}`;
+  chartMsg("Loading price history…");
+  $("pxNow").textContent="—";$("pxChg").textContent="";
+  try{
+    const data=await pairSeries(tokenIn,tokenOut,TFS[timeframe]);
+    if(seq!==chartSeq)return;
+    if(!data||data.length<2){chartMsg("Not enough price history for this pair yet.");return;}
+    chartData=data;
+    $("chartMsg").style.display="none";
+    drawChart(data);
+    const first=data[0].c,last=data[data.length-1].c;
+    $("pxNow").textContent=fmtPx(last)+" "+tokenIn.symbol;
+    const ch=((last-first)/first)*100;
+    const el=$("pxChg");
+    el.className="chg mono "+(ch>=0?"up":"down");
+    el.textContent=(ch>=0?"▲ ":"▼ ")+Math.abs(ch).toFixed(2)+"%  ·  "+timeframe;
+  }catch(e){
+    if(seq!==chartSeq)return;
+    chartMsg("Price history is unavailable right now. Quotes and routing below are live and unaffected.");
+  }
+}
+function fmtPx(n){
+  if(!isFinite(n))return "—";
+  if(n>=1000)return n.toLocaleString("en-US",{maximumFractionDigits:2});
+  if(n>=1)return n.toFixed(4);
+  if(n>=0.0001)return n.toFixed(6);
+  return n.toExponential(3);
+}
+function drawChart(data){
+  const host=$("plot");
+  const old=host.querySelector("svg");if(old)old.remove();
+  const W=host.clientWidth||620,H=host.clientHeight||236;
+  const PL=8,PR=56,PT=14,PB=22;
+  const xs=W-PL-PR,ys=H-PT-PB;
+  const lo=Math.min(...data.map(d=>d.c)),hi=Math.max(...data.map(d=>d.c));
+  const pad=(hi-lo)*.12||hi*.02;
+  const y0=lo-pad,y1=hi+pad;
+  const X=i=>PL+(i/(data.length-1))*xs;
+  const Y=v=>PT+ys-((v-y0)/(y1-y0))*ys;
+
+  const NS="http://www.w3.org/2000/svg";
+  const svg=document.createElementNS(NS,"svg");
+  svg.setAttribute("viewBox",`0 0 ${W} ${H}`);
+  const up=data[data.length-1].c>=data[0].c;
+  const col=up?"var(--pos)":"var(--neg)";
+
+  const defs=document.createElementNS(NS,"defs");
+  defs.innerHTML=`<linearGradient id="gfill" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="${col}" stop-opacity=".24"/>
+      <stop offset="100%" stop-color="${col}" stop-opacity="0"/>
+    </linearGradient>`;
+  svg.appendChild(defs);
+
+  // خطوط راهنما + برچسب محور y
+  for(let g=0;g<=3;g++){
+    const v=y0+(y1-y0)*(g/3),y=Y(v);
+    const ln=document.createElementNS(NS,"line");
+    ln.setAttribute("x1",PL);ln.setAttribute("x2",PL+xs);
+    ln.setAttribute("y1",y);ln.setAttribute("y2",y);
+    ln.setAttribute("stroke","var(--line)");ln.setAttribute("stroke-width","1");
+    svg.appendChild(ln);
+    const tx=document.createElementNS(NS,"text");
+    tx.setAttribute("x",PL+xs+8);tx.setAttribute("y",y+4);
+    tx.setAttribute("font-size","11");tx.setAttribute("fill","var(--tx3)");
+    tx.textContent=fmtPx(v);
+    svg.appendChild(tx);
+  }
+  // برچسب زمان
+  [0,Math.floor(data.length/2),data.length-1].forEach((i,k)=>{
+    const tx=document.createElementNS(NS,"text");
+    tx.setAttribute("x",Math.min(Math.max(X(i),PL+12),PL+xs-12));
+    tx.setAttribute("y",H-5);tx.setAttribute("font-size","11");
+    tx.setAttribute("fill","var(--tx3)");
+    tx.setAttribute("text-anchor",k===0?"start":k===2?"end":"middle");
+    tx.textContent=new Date(data[i].t*1000).toLocaleString("en-US",TFS[timeframe].fmt);
+    svg.appendChild(tx);
+  });
+
+  const d=data.map((p,i)=>`${i?"L":"M"}${X(i).toFixed(1)},${Y(p.c).toFixed(1)}`).join(" ");
+  const area=document.createElementNS(NS,"path");
+  area.setAttribute("d",`${d} L${X(data.length-1)},${PT+ys} L${X(0)},${PT+ys} Z`);
+  area.setAttribute("fill","url(#gfill)");
+  svg.appendChild(area);
+
+  const line=document.createElementNS(NS,"path");
+  line.setAttribute("d",d);line.setAttribute("fill","none");
+  line.setAttribute("stroke",col);line.setAttribute("stroke-width","2.2");
+  line.setAttribute("stroke-linecap","round");line.setAttribute("stroke-linejoin","round");
+  svg.appendChild(line);
+
+  // کراس‌هر
+  const cross=document.createElementNS(NS,"line");
+  cross.setAttribute("stroke","var(--tx3)");cross.setAttribute("stroke-width","1");
+  cross.setAttribute("stroke-dasharray","3 3");cross.setAttribute("opacity","0");
+  svg.appendChild(cross);
+  const dot=document.createElementNS(NS,"circle");
+  dot.setAttribute("r","4.5");dot.setAttribute("fill",col);
+  dot.setAttribute("stroke","var(--card)");dot.setAttribute("stroke-width","2.5");
+  dot.setAttribute("opacity","0");
+  svg.appendChild(dot);
+
+  const tip=$("tip");
+  svg.addEventListener("mousemove",ev=>{
+    const r=svg.getBoundingClientRect();
+    const px=(ev.clientX-r.left)*(W/r.width);
+    let i=Math.round(((px-PL)/xs)*(data.length-1));
+    i=Math.max(0,Math.min(data.length-1,i));
+    const x=X(i),y=Y(data[i].c);
+    cross.setAttribute("x1",x);cross.setAttribute("x2",x);
+    cross.setAttribute("y1",PT);cross.setAttribute("y2",PT+ys);
+    cross.setAttribute("opacity","1");
+    dot.setAttribute("cx",x);dot.setAttribute("cy",y);dot.setAttribute("opacity","1");
+    tip.style.opacity="1";
+    tip.style.left=(x/W*r.width)+"px";
+    tip.style.top=(y/H*r.height)+"px";
+    tip.innerHTML=`<b class="mono">${fmtPx(data[i].c)} ${esc(tokenIn.symbol)}</b>
+      <span>${new Date(data[i].t*1000).toLocaleString()}</span>`;
+  });
+  svg.addEventListener("mouseleave",()=>{
+    cross.setAttribute("opacity","0");dot.setAttribute("opacity","0");tip.style.opacity="0";});
+  host.appendChild(svg);
+}
+
+/* =====================================================================
+   scanner.py → JS
+   ===================================================================== */
+const DANGEROUS=[
+  ["mint(address,uint256)","Mintable","critical","The owner can create new tokens and dilute holders"],
+  ["mint(uint256)","Mintable","critical","The owner can create new tokens"],
+  ["burnFrom(address,uint256)","Burn from others","high","Someone may be able to burn your balance"],
+  ["pause()","Transfers can be paused","critical","Trading can be halted entirely — the classic honeypot"],
+  ["setPaused(bool)","Transfers can be paused","critical","Trading can be halted"],
+  ["setTradingEnabled(bool)","Trading gated","critical","Trading only works while the owner allows it"],
+  ["enableTrading()","Trading gated","high","Trading is closed until the owner opens it"],
+  ["blacklist(address)","Blacklist","critical","Your address can be blocked from selling"],
+  ["addBlackList(address)","Blacklist","critical","Your address can be blocked"],
+  ["setBlacklist(address,bool)","Blacklist","critical","Your address can be blocked"],
+  ["isBlackListed(address)","Blacklist","high","A blacklist mechanism exists"],
+  ["setBots(address[],bool)","Bot flagging","high","You can be flagged as a bot and blocked"],
+  ["setFee(uint256)","Fee is mutable","critical","The sell fee can be raised at any moment"],
+  ["setFees(uint256,uint256)","Fee is mutable","critical","Fees can be changed"],
+  ["setTaxFee(uint256)","Fee is mutable","critical","Fees can be changed"],
+  ["setSellFee(uint256)","Sell fee is mutable","critical","The sell fee can be changed"],
+  ["setBuyFee(uint256)","Buy fee is mutable","high","The buy fee can be changed"],
+  ["setMaxTxAmount(uint256)","Max trade size","medium","Trade size can be capped"],
+  ["setMaxWalletAmount(uint256)","Max wallet size","medium","Wallet balance can be capped"],
+  ["withdrawToken(address,uint256)","Owner withdrawal","medium","The owner can pull tokens out of the contract"],
+  ["rescueTokens(address,uint256)","Owner withdrawal","medium","The owner can pull tokens out"],
+];
+const SLOT_IMPL="0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc";
+const selectorOf=s=>E.id(s).slice(2,10).toLowerCase();
+
+async function scanToken(token){
+  const rep={address:token.address,symbol:token.symbol,findings:[],owner:null,
+    isProxy:false,liqUsd:0,canBuy:false,canSell:false,unknown:0};
+  const add=(l,t,d)=>rep.findings.push({level:l,title:t,detail:d});
+
+  // 🔑 ETH بومی اصلاً قرارداد ندارد. نسخه‌ی قبل این را «شبکه جواب نداد»
+  //    گزارش می‌کرد — یک تشخیص کاملاً غلط. «وجود ندارد» با «نتوانستم بخوانم»
+  //    یکی نیست، و این‌بار اشتباه در جهت عکس بود.
+  if(token.native){
+    add("ok","Native asset","ETH is the network's own currency — there is no token contract, so no owner, no proxy and no transfer tax can exist.");
+    try{rep.liqUsd=await measureLiquidity(WETH_TOKEN());}catch{rep.liqUsd=null;}
+    if(rep.liqUsd!==null&&rep.liqUsd>=50000)
+      add("ok","Deep liquidity","About $"+fmtUsd(rep.liqUsd)+" in WETH pools — ETH routes through WETH.");
+    rep.canBuy=rep.canSell=true;
+    rep.score=0;rep.verdict=verdictOf(rep);
+    return rep;
+  }
+
+  let code=null;
+  try{code=await getCode(E.getAddress(token.address));}catch{rep.unknown++;}
+  if(code===null)add("info","Bytecode unavailable","The network did not answer — unknown, not a problem.");
+  else if(!code||code.length<=2){
+    add("critical","Not a contract","This address has no code — it is a wallet, not a token.");
+    rep.score=100;rep.verdict=verdictOf(rep);return rep;
+  }else{
+    const hex=code.toLowerCase(),seen=new Set();
+    for(const [sig,title,level,detail] of DANGEROUS){
+      if(seen.has(title))continue;
+      if(hex.includes(selectorOf(sig))){seen.add(title);add(level,title,detail+"  ("+sig+")");}
+    }
+  }
+  try{
+    const r=await multicall([{target:token.address,data:iOwn.encodeFunctionData("owner",[])}]);
+    if(r[0].ok&&r[0].data!=="0x"){
+      rep.owner=iOwn.decodeFunctionResult("owner",r[0].data)[0];
+      const o=rep.owner.toLowerCase();
+      if(o===ZERO.toLowerCase()||o===DEAD.toLowerCase())
+        add("ok","Ownership renounced","No one holds privileged control any more.");
+      else add("high","Owner still active","Owner "+shortAddr(rep.owner)+" can call any admin function that exists.");
+    }else add("ok","No standard owner()","The contract exposes no owner() function.");
+  }catch{rep.unknown++;add("info","Ownership unknown","The network did not answer.");}
+
+  try{
+    const slot=await getStorage(E.getAddress(token.address),SLOT_IMPL);
+    if(slot&&BigInt(slot)!==0n){rep.isProxy=true;
+      add("high","Upgradeable (proxy)","The code can be replaced later — safe today does not mean safe tomorrow. Implementation "+shortAddr("0x"+slot.slice(-40)));
+    }else add("ok","Not upgradeable","No EIP-1967 implementation slot — the code is fixed.");
+  }catch{rep.unknown++;add("info","Proxy check unknown","The network did not answer.");}
+
+  // عمق را از سمت توکن *شناخته‌شده* می‌سنجیم؛ قیمت خود توکن می‌تواند ساختگی باشد.
+  // در صورت خطای شبکه null می‌شود نه ۰، وگرنه یک قطعی RPC به‌غلط «نقدینگی کم» می‌داد.
+  try{rep.liqUsd=await measureLiquidity(token);}catch{rep.liqUsd=null;rep.unknown++;}
+  if(rep.liqUsd!==null){
+    if(rep.liqUsd<10000)add("high","Very thin liquidity","About $"+fmtUsd(rep.liqUsd)+" across known pools. Easy to move, hard to exit.");
+    else if(rep.liqUsd<50000)add("medium","Shallow liquidity","About $"+fmtUsd(rep.liqUsd)+" across known pools.");
+    else add("ok","Liquidity present","About $"+fmtUsd(rep.liqUsd)+" across known pools.");
+  }
+  try{
+    const t=await checkTradability(token);
+    rep.canBuy=t.buy;rep.canSell=t.sell;
+    if(!t.buy&&!t.sell&&t.unknown){rep.unknown++;add("info","Tradability unknown","Quotes did not come back.");}
+    else if(!t.sell)add("critical","Cannot get a sell quote","No pool would quote selling this token back. Strongest honeypot signal.");
+    else if(t.roundTrip!==null&&t.roundTrip>15)
+      add("high","Heavy round-trip loss","Buy then sell immediately loses about "+t.roundTrip.toFixed(1)+"% — likely a transfer tax.");
+    else if(t.roundTrip!==null)
+      add("ok","Sellable","Round-trip cost about "+t.roundTrip.toFixed(2)+"%.");
+  }catch{rep.unknown++;}
+
+  rep.score=riskScore(rep);rep.verdict=verdictOf(rep);
+  return rep;
+}
+function riskScore(rep){
+  const ownerActive=rep.owner&&![ZERO.toLowerCase(),DEAD.toLowerCase()].includes(rep.owner.toLowerCase());
+  const structural=["Cannot get a sell quote","Very thin liquidity","Shallow liquidity",
+    "Heavy round-trip loss","Not a contract"];
+  const down={critical:"high",high:"medium",medium:"info"};
+  let c=0,h=0,m=0;
+  rep.findings.forEach(f=>{
+    const l=(ownerActive||structural.includes(f.title))?f.level:(down[f.level]||f.level);
+    if(l==="critical")c++;else if(l==="high")h++;else if(l==="medium")m++;
+  });
+  let s=c*25+h*12+m*5;
+  if(!rep.canSell)s+=40;
+  if(rep.liqUsd!==null&&rep.liqUsd<10000)s+=20;else if(rep.liqUsd!==null&&rep.liqUsd<50000)s+=10;
+  if(ownerActive)s+=10;
+  if(rep.isProxy)s+=10;
+  rep._c=c;rep._h=h;
+  return Math.min(100,s);
+}
+function verdictOf(rep){
+  const c=rep._c||0,h=rep._h||0,s=rep.score||0;
+  if(c>=2||s>=60)return{txt:"High risk",tone:"neg"};
+  if(c>=1||h>=2||s>=30)return{txt:"Caution",tone:"warn"};
+  if(h>=1||s>=15)return{txt:"Acceptable with care",tone:"warn"};
+  return{txt:"No obvious red flags",tone:"pos"};
+}
+async function measureLiquidity(token){
+  const refs=BASE_TOKENS.filter(t=>["USDC","WETH"].includes(t.symbol)&&
+    t.address.toLowerCase()!==token.address.toLowerCase());
+  if(!refs.length)return 0;
+  const calls=[],meta=[];
+  for(const ref of refs)for(const d of DEXES){
+    if(isV3(d))d.feeTiers.forEach(f=>{
+      calls.push({target:d.factory,data:iV3F.encodeFunctionData("getPool",[token.address,ref.address,f])});meta.push(ref);});
+    else if(d.kind===KIND.SOLIDLY)d.stableModes.forEach(st=>{
+      calls.push({target:d.factory,data:iSolF.encodeFunctionData("getPool",[token.address,ref.address,st])});meta.push(ref);});
+  }
+  const res=await multicall(calls),pools=[];
+  res.forEach((r,i)=>{
+    if(!r.ok||r.data==="0x")return;
+    let a;try{a=iV3F.decodeFunctionResult("getPool",r.data)[0];}catch{return;}
+    if(!a||a===ZERO)return;pools.push({addr:a,ref:meta[i]});
+  });
+  if(!pools.length)return 0;
+  const bal=await multicall(pools.map(p=>({target:p.ref.address,
+    data:iErc.encodeFunctionData("balanceOf",[p.addr])})));
+  const eth=await refPriceUsd();
+  let total=0;
+  bal.forEach((r,i)=>{
+    if(!r.ok||r.data==="0x")return;
+    let v;try{v=iErc.decodeFunctionResult("balanceOf",r.data)[0];}catch{return;}
+    const ref=pools[i].ref;
+    total+=Number(E.formatUnits(v,ref.decimals))*(ref.symbol==="USDC"?1:(eth||0));
+  });
+  return total*2;
+}
+let _ethUsd=null;
+async function refPriceUsd(){
+  if(_ethUsd!==null)return _ethUsd;
+  const w=tokenBySymbol("WETH"),u=tokenBySymbol("USDC"),st=newStats();
+  const r=await quoteMany(allVenues().map(v=>({venue:v,tokenIn:w.address,tokenOut:u.address,amountIn:10n**18n})),st);
+  const best=r.map(x=>x.out).filter(Boolean).sort((a,b)=>b>a?1:-1)[0];
+  _ethUsd=best?Number(E.formatUnits(best,6)):null;
+  return _ethUsd;
+}
+async function checkTradability(token){
+  const ref=tokenBySymbol("USDC");
+  if(!ref||ref.address.toLowerCase()===token.address.toLowerCase())
+    return{buy:true,sell:true,roundTrip:0,unknown:false};
+  const st=newStats(),v=allVenues(),inAmt=10n**BigInt(ref.decimals);
+  const buy=await quoteMany(v.map(x=>({venue:x,tokenIn:ref.address,tokenOut:token.address,amountIn:inAmt})),st);
+  const bb=buy.map(x=>x.out).filter(Boolean).sort((a,b)=>b>a?1:-1)[0]||null;
+  if(!bb)return{buy:false,sell:false,roundTrip:null,unknown:unreliable(st)||st.ok===0};
+  const sell=await quoteMany(v.map(x=>({venue:x,tokenIn:token.address,tokenOut:ref.address,amountIn:bb})),st);
+  const bs=sell.map(x=>x.out).filter(Boolean).sort((a,b)=>b>a?1:-1)[0]||null;
+  if(!bs)return{buy:true,sell:false,roundTrip:null,unknown:unreliable(st)};
+  return{buy:true,sell:true,roundTrip:(1-Number(bs)/Number(inAmt))*100,unknown:false};
+}
+
+/* =====================================================================
+   UI helpers
+   ===================================================================== */
+function allTokens(){return BASE_TOKENS.concat(customTokens);}
+
+/* =====================================================================
+   ETH بومی
+   ---------------------------------------------------------------------
+   قرارداد اجرا فقط ERC-20 می‌گیرد. به‌جای تغییر قرارداد، رابط خودش
+   wrap/unwrap می‌کند و کاربر اصلاً نمی‌فهمد WETH وجود دارد.
+   مسیریابی همیشه با WETH انجام می‌شود — ETH فقط پوسته است.
+   ===================================================================== */
+const WETH_TOKEN=()=>BASE_TOKENS.find(t=>t.symbol==="WETH");
+
+/* لوگوی توکن از GeckoTerminal — همان منبعی که تاریخچه‌ی قیمت را می‌دهد،
+   پس درخواست جدیدی به سرویس تازه‌ای اضافه نمی‌کنیم. برای توکن‌های تازه‌ی
+   Base هم پوشش دارد، که دقیقاً مخاطب ماست. */
+// لوگوی ETH بومی نباید همان WETH باشد — درون‌خطی و بدون شبکه
+const ETH_ICON="data:image/svg+xml;utf8,"+encodeURIComponent(
+ '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">'+
+ '<circle cx="16" cy="16" r="16" fill="#627eea"/>'+
+ '<path fill="#fff" fill-opacity=".6" d="M16.5 4v8.87l7.5 3.35z"/>'+
+ '<path fill="#fff" d="M16.5 4L9 16.22l7.5-3.35z"/>'+
+ '<path fill="#fff" fill-opacity=".6" d="M16.5 21.97V28L24 17.62z"/>'+
+ '<path fill="#fff" d="M16.5 28v-6.03L9 17.62z"/>'+
+ '<path fill="#fff" fill-opacity=".2" d="M16.5 20.57l7.5-4.35-7.5-3.35z"/>'+
+ '<path fill="#fff" fill-opacity=".6" d="M9 16.22l7.5 4.35v-7.7z"/></svg>');
+
+async function tokenLogo(t){
+  if(t.native)return ETH_ICON;
+  try{
+    const a=await tokenMeta(t.address);
+    const u=a&&a.image_url;
+    return (u&&!/missing/i.test(u))?u:null;
+  }catch{return null;}
+}
+
+/* ---------------------------------------------------------------------
+   اطلاعات توکن (لوگو + قیمت دلاری)
+   دو اصلاح نسبت به نسخه‌ی قبل:
+     ۱) چند توکن در *یک* درخواست (multi) — به‌جای یکی به ازای هر توکن
+     ۲) 🔑 شکست هیچ‌وقت کش نمی‌شود. قبلاً یک ۴۲۹ گذرا برای همیشه به
+        «این توکن قیمت ندارد» تبدیل می‌شد — همان «نمی‌دانم = نه» که
+        قاعده‌ی اول این پروژه است. حالا فقط موفقیت کش می‌شود و
+        درخواست در حال پرواز به اشتراک گذاشته می‌شود تا رگبار نسازیم.
+   --------------------------------------------------------------------- */
+const metaCache={};        // فقط نتایج موفق
+const metaPending={};      // درخواست‌های در حال پرواز
+
+async function loadMetas(addrs){
+  const want=[...new Set(addrs.map(a=>a.toLowerCase()))].filter(a=>!(a in metaCache));
+  if(!want.length)return;
+  for(let i=0;i<want.length;i+=25){
+    const batch=want.slice(i,i+25);
+    try{
+      const j=await gtJson(`${GT}/networks/${CHAIN.gtNetwork}/tokens/multi/${batch.join(",")}`);
+      ((j||{}).data||[]).forEach(d=>{
+        const at=d.attributes||{};
+        if(at.address)metaCache[at.address.toLowerCase()]=at;
+      });
+    }catch{
+      // دسته‌ای شکست خورد → تک‌تک، و باز هم شکست را کش نمی‌کنیم
+      for(const a of batch){
+        try{
+          const j=await gtJson(`${GT}/networks/${CHAIN.gtNetwork}/tokens/${a}`);
+          const at=((j||{}).data||{}).attributes;
+          if(at)metaCache[a]=at;
+        }catch{}
+      }
+    }
+  }
+}
+async function tokenMeta(addr){
+  const k=addr.toLowerCase();
+  if(k in metaCache)return metaCache[k];
+  if(!(k in metaPending)){
+    metaPending[k]=loadMetas([k]).finally(()=>{delete metaPending[k];});
+  }
+  await metaPending[k];
+  return metaCache[k]||null;      // نبود ≠ کش‌شده‌ی خالی؛ دفعه‌ی بعد باز تلاش می‌شود
+}
+async function priceUsdOf(t){
+  const a=await tokenMeta(t.native?WETH_ADDR:t.address);
+  const p=a&&a.price_usd!=null?Number(a.price_usd):NaN;
+  return isFinite(p)&&p>0?p:null;   // null = نامعلوم، نه صفر
+}
+/** حروف اختصاری را می‌گذارد و اگر لوگو آمد رویش می‌نشاند. */
+function paintAvatar(el,t){
+  if(!el)return;
+  el.innerHTML="";
+  el.appendChild(document.createTextNode(t?t.symbol.slice(0,3).toUpperCase():"?"));
+  if(!t)return;
+  tokenLogo(t).then(url=>{
+    if(!url)return;
+    const img=new Image();
+    img.alt="";img.loading="lazy";
+    img.onload=()=>{img.classList.add("on");};
+    img.onerror=()=>{img.remove();};   // فیلتر یا ۴۰۴ → حروف سر جایش می‌ماند
+    img.src=url;
+    el.appendChild(img);
+  });
+}
+function routable(t){return t&&t.native?WETH_TOKEN():t;}
+function isNative(t){return !!(t&&t.native);}
+function shortAddr(a){return a==="NATIVE"?"Native":a.slice(0,6)+"…"+a.slice(-4);}
+function esc(s){return String(s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));}
+function fmtUsd(n){return n>=1e6?(n/1e6).toFixed(1)+"M":n>=1e3?(n/1e3).toFixed(0)+"k":n.toFixed(0);}
+function fmt(v,dec,p){
+  if(v===null||v===undefined)return "—";
+  const n=Number(E.formatUnits(v,dec));
+  if(n===0)return "0";
+  if(n<1e-8)return "<0.00000001";
+  return n.toLocaleString("en-US",{maximumFractionDigits:p!==undefined?p:(n>=1000?2:n>=1?5:8)});
+}
+function note(k,h){return `<div class="note ${k}">${h}</div>`;}
+function setNotice(h){$("notices").innerHTML=h||"";}
+function paintSrc(){
+  const led=$("srcChip").firstElementChild;
+  if(!liveSrc){led.className="led off";$("srcTx").textContent="Base";return;}
+  led.className="led";
+  $("srcTx").textContent=liveSrc==="wallet"?"Base · via wallet":"Base";
+}
+function paintToken(side,t){
+  paintAvatar($(side==="in"?"tokInAv":"tokOutAv"),t);
+  $(side==="in"?"tokInSym":"tokOutSym").textContent=t?t.symbol:"—";
+}
+const balKey=t=>t.native?"native":t.address.toLowerCase();
+/** برای ETH بومی مقداری گس باقی می‌گذاریم، وگرنه تراکنش رد می‌شود. */
+function spendable(t){
+  let v=balances[balKey(t)];
+  if(v===undefined)return null;
+  if(t.native){const buf=3n*10n**14n; v=v>buf?v-buf:0n;}
+  return v;
+}
+function setPayFraction(t,num,den){
+  const v=spendable(t);
+  if(v===null)return;
+  mode="exactIn";
+  $("amtIn").value=E.formatUnits((v*BigInt(num))/BigInt(den),t.decimals);
+  scheduleQuote();
+}
+function paintBalances(){
+  const n=$("balIn");
+  if(!tokenIn||!account||balances[balKey(tokenIn)]===undefined){n.innerHTML="";}
+  else{
+    n.innerHTML=`${fmt(balances[balKey(tokenIn)],tokenIn.decimals,5)}
+      <button class="frac" id="half">50%</button><button class="frac" id="maxb">MAX</button>`;
+    $("half").onclick=()=>setPayFraction(tokenIn,1,2);
+    $("maxb").onclick=()=>setPayFraction(tokenIn,1,1);
+  }
+  const o=$("balOut");
+  o.textContent=(!tokenOut||!account||balances[balKey(tokenOut)]===undefined)
+    ?"":fmt(balances[balKey(tokenOut)],tokenOut.decimals,5);
+}
+
+/* =====================================================================
+   Quote pipeline
+   ===================================================================== */
+let qTimer=null;
+function scheduleQuote(){
+  clearTimeout(qTimer);currentPlan=null;
+  $(mode==="exactIn"?"amtOut":"amtIn").value="";
+  $("routeWrap").style.display="none";
+  ["kRate","kImpact","kMin","kVs"].forEach(k=>$(k).textContent="—");
+  exitSeq++;renderExit(null);
+  qTimer=setTimeout(runQuote,420);refreshButton();
+}
+function parsedAmountIn(){
+  if(!tokenIn)return null;
+  const raw=($("amtIn").value||"").trim();
+  if(!raw||isNaN(Number(raw))||Number(raw)<=0)return null;
+  try{return E.parseUnits(raw,tokenIn.decimals);}catch{return null;}
+}
+function parsedTargetOut(){
+  if(!tokenOut)return null;
+  const raw=($("amtOut").value||"").trim();
+  if(!raw||isNaN(Number(raw))||Number(raw)<=0)return null;
+  try{return E.parseUnits(raw,tokenOut.decimals);}catch{return null;}
+}
+
+/* =====================================================================
+   حل معکوس: «چقدر باید بدهم تا این‌قدر بگیرم؟»
+   ---------------------------------------------------------------------
+   کوترها فقط جهت مستقیم را جواب می‌دهند (ورودی معلوم → خروجی). ایرودروم
+   اصلاً تابع معکوس ندارد. پس به‌جای تکیه به یک ABI خاص، عددی حلش می‌کنیم:
+   یک تخمین اولیه از نرخ می‌گیریم و دو-سه بار اصلاحش می‌کنیم. چون خروجی
+   AMM نسبت به ورودی یکنواخت است، سریع همگرا می‌شود — و مهم‌تر: از *همان*
+   موتور مسیریابی استفاده می‌کند، پس تقسیم سفارش و مسیر چندمرحله‌ای هم
+   در محاسبه لحاظ می‌شوند.
+   ===================================================================== */
+async function solveForOutput(tIn,tOut,target,stats,seq){
+  // ۱) نرخ تقریبی با یک مبلغ کوچک
+  const probe=10n**BigInt(Math.max(0,tIn.decimals-2));   // ۰.۰۱ واحد
+  let r=await findRoutes(routable(tIn),routable(tOut),probe,stats);
+  if(seq!==quoteSeq)return null;
+  if(!r.routes.length)return {fail:"noroute"};
+  // guess = target / rate
+  let guess=(target*probe)/r.routes[0].amountOut;
+  if(guess<=0n)guess=probe;
+
+  let best=null;
+  for(let i=0;i<4;i++){
+    const rr=await findRoutes(routable(tIn),routable(tOut),guess,stats);
+    if(seq!==quoteSeq)return null;
+    if(!rr.routes.length)return {fail:"noroute"};
+    const plan=await findBestSplit(rr.routes,guess,stats);
+    if(seq!==quoteSeq)return null;
+    best={plan,direct:rr.direct,amountIn:guess};
+    const out=plan.totalOut;
+    if(out===0n)return {fail:"noroute"};
+    // به اندازه‌ی کافی نزدیک؟ (نیم درصد)
+    const diff=out>target?out-target:target-out;
+    if((diff*10000n)/target<=50n)break;
+    const next=(guess*target)/out;
+    if(next<=0n)break;
+    guess=next;
+  }
+  return best;
+}
+
+async function runQuote(){
+  const seq=++quoteSeq;
+  // در حالت معکوس، اول مبلغ ورودی را پیدا می‌کنیم
+  if(mode==="targetOut"){
+    const target=parsedTargetOut();
+    if(!tokenIn||!tokenOut||target===null){setNotice("");renderVenues([],null);refreshButton();return;}
+    if(routable(tokenIn).address.toLowerCase()===routable(tokenOut).address.toLowerCase()){
+      setNotice(note("warn","Pick two different tokens."));refreshButton();return;}
+    $("venueMeta").textContent="solving…";
+    const st=newStats();
+    try{
+      const r=await solveForOutput(tokenIn,tokenOut,target,st,seq);
+      if(seq!==quoteSeq||r===null)return;
+      if(r.fail){
+        setNotice(unreliable(st)||st.ok===0
+          ? note("err",`<b>The network did not answer.</b> ${st.rpcFailed} of ${st.attempted} quotes failed.`)
+          : note("warn",`<b>No route.</b> Nothing on Base can deliver ${esc(tokenOut.symbol)} from ${esc(tokenIn.symbol)}.`));
+        currentPlan=null;refreshButton();return;
+      }
+      $("amtIn").value=Number(E.formatUnits(r.amountIn,tokenIn.decimals))
+        .toLocaleString("en-US",{maximumFractionDigits:tokenIn.decimals,useGrouping:false});
+      const plan=r.plan;
+      plan.impact=await priceImpact(routable(tokenIn),routable(tokenOut),r.amountIn,plan,st);
+      if(seq!==quoteSeq)return;
+      plan.stats=st;currentPlan=plan;
+      renderVenues(r.direct,plan);renderPlan(plan,true);
+      await refreshAllowance();
+      if(seq!==quoteSeq)return;
+      refreshButton();
+      renderExit(await runExitCheck(plan,r.amountIn));
+    }catch(err){
+      if(seq!==quoteSeq)return;
+      showError("Quote failed",err);currentPlan=null;refreshButton();
+    }
+    return;
+  }
+
+  const amountIn=parsedAmountIn();
+  if(!tokenIn||!tokenOut||amountIn===null){setNotice("");renderVenues([],null);refreshButton();return;}
+  if(routable(tokenIn).address.toLowerCase()===routable(tokenOut).address.toLowerCase()){
+    setNotice(note("warn",isNative(tokenIn)||isNative(tokenOut)
+      ?"ETH and WETH are the same asset — use the wrap button instead."
+      :"Pick two different tokens."));refreshButton();return;}
+  $("venueMeta").textContent="quoting…";
+  const stats=newStats();
+  try{
+    const {routes,direct}=await findRoutes(routable(tokenIn),routable(tokenOut),amountIn,stats);
+    if(seq!==quoteSeq)return;
+    renderVenues(direct,null);
+    if(!routes.length){
+      setNotice(unreliable(stats)||stats.ok===0
+        ? note("err",`<b>The network did not answer.</b> ${stats.rpcFailed} of ${stats.attempted} quotes failed, so we cannot tell whether a route exists.`)
+        : note("warn",`<b>No route.</b> No direct pool, and no path through ${CHAIN.wrapped}/${CHAIN.reference} has liquidity for this pair.`));
+      currentPlan=null;refreshButton();return;
+    }
+    const plan=await findBestSplit(routes,amountIn,stats);
+    if(seq!==quoteSeq)return;
+    plan.impact=await priceImpact(routable(tokenIn),routable(tokenOut),amountIn,plan,stats);
+    if(seq!==quoteSeq)return;
+    plan.stats=stats;currentPlan=plan;
+    renderVenues(direct,plan);renderPlan(plan);
+    await refreshAllowance();
+    if(seq!==quoteSeq)return;
+    refreshButton();
+    // بعد از رندر اجرا می‌شود تا قیمت را عقب نیندازد
+    renderExit(await runExitCheck(plan,amountIn));
+  }catch(err){
+    if(seq!==quoteSeq)return;
+    showError("Quote failed",err);currentPlan=null;refreshButton();
+  }
+}
+let lastDirect=[];
+function renderVenues(direct,plan){
+  lastDirect=direct||[];
+  const body=$("venueBody");
+  if(!direct.length){
+    body.innerHTML='<div class="empty">Enter an amount and we will quote every venue, then split your order if that pays more.</div>';
+    $("venueMeta").textContent="—";return;}
+  const rows=direct.slice().sort((a,b)=>{
+    if(a.out&&b.out)return b.out>a.out?1:-1;
+    if(a.out)return -1;if(b.out)return 1;
+    return a.status==="unknown"?-1:1;});
+  const best=rows.find(r=>r.out)||null;
+  const live=rows.filter(r=>r.out).length,unk=rows.filter(r=>r.status==="unknown").length;
+  $("venueMeta").textContent=`${live} live · ${rows.length-live-unk} empty${unk?` · ${unk} unknown`:""}`;
+
+  let h="";
+  for(const r of rows){
+    const isBest=best&&r===best;
+    if(!r.out){
+      // 🔑 «شبکه جواب نداد» با «استخر وجود ندارد» یکی نیست
+      const lbl=r.status==="unknown"?"unknown":"no pool";
+      h+=`<div class="vrow mute"><i class="vdot ${r.venue.dex.cls}"></i>
+        <span class="vname">${esc(venueLabel(r.venue))}</span>
+        <span class="vout"><span class="a mono">${lbl}</span></span></div>`;
+      continue;
+    }
+    const bps=best&&best.out>0n?Number(((r.out-best.out)*10000n)/best.out)/100:0;
+    const rel=best&&best.out>0n?Number((r.out*100n)/best.out):0;
+    h+=`<div class="vrow ${isBest?"win":""}"><i class="vdot ${r.venue.dex.cls}"></i>
+      <span class="vname">${esc(venueLabel(r.venue))}${isBest?'<span class="vtag">best</span>':""}</span>
+      <span class="bar"><i style="width:${Math.max(4,rel)}%"></i></span>
+      <span class="vout"><span class="a mono">${fmt(r.out,tokenOut.decimals)}</span>
+      <span class="d mono ${bps<0?"neg":""}">${isBest?tokenOut.symbol:bps.toFixed(2)+"%"}</span></span></div>`;
+  }
+  if(plan&&plan.parts.length>1)
+    h+=`<div class="vrow" style="color:var(--pos);font-size:12.8px">Splitting across ${plan.parts.length} pools pays
+      ${(Number(((plan.totalOut-plan.bestSingleOut)*10000n)/plan.bestSingleOut)/100).toFixed(2)}% more than the single best venue.</div>`;
+  if(plan&&plan.parts.some(p=>p.route.hops.length>1))
+    h+=`<div class="vrow" style="color:var(--tx3);font-size:12.8px">The winning path is multi-hop, so it is not in the direct list above.</div>`;
+  body.innerHTML=h;
+}
+/* «چقدر بهتر از رفتن مستقیم به یونی‌سواپ؟»
+   ---------------------------------------------------------------------
+   این تنها ادعای رقابتی است که می‌شود عددی‌اش کرد، پس باید بی‌رحمانه صادق
+   باشد. سه دام که عمداً از آن‌ها دوری شده:
+
+   ۱. مقایسه با *بدترین* صرافی جدول عددی بزرگ و بی‌معنا می‌سازد. مرجع،
+      بهترین کوت مستقیم خودِ یونی‌سواپ است — یعنی همان کاری که کاربر اگر
+      ما نبودیم می‌کرد.
+   ۲. اگر یونی‌سواپ جواب نداده باشد، «بی‌نهایت بهتر» نیستیم — «نمی‌دانیم»ایم.
+      «استخر ندارد» هم با «شبکه جواب نداد» یکی نیست.
+   ۳. تفاوت صفر باید «مثل یونی‌سواپ» نوشته شود، نه «+۰.۰۰٪». عدد صفرِ سبز
+      وانمود می‌کند چیزی برنده شده‌ای.
+
+   و یک صداقت دیگر: این فقط *خروجی* را مقایسه می‌کند. مسیر ما یک قرارداد
+   اضافه دارد، پس گس کمی بیشتر است. در tooltip گفته می‌شود. */
+function renderVsUniswap(plan){
+  const el=$("kVs"),row=$("vsRow");
+  if(!el||!row)return;
+  const set=(txt,color,tip)=>{el.textContent=txt;el.style.color=color||"";row.title=tip||"";};
+
+  const uniRows=lastDirect.filter(r=>r.venue&&r.venue.dex.id==="uniswap-v3");
+  if(!uniRows.length||!plan||plan.totalOut<=0n)return set("—","var(--tx3)","");
+
+  const priced=uniRows.filter(r=>r.out&&r.out>0n);
+  if(!priced.length){
+    const unknown=uniRows.some(r=>r.status==="unknown");
+    return unknown
+      ? set("unknown","var(--warn)","Uniswap did not answer, so there is nothing to compare against.")
+      : set("no Uniswap pool","var(--tx3)","Uniswap has no pool for this pair at any fee tier.");
+  }
+
+  let best=priced[0].out;
+  priced.forEach(r=>{if(r.out>best)best=r.out;});
+  const bps=Number(((plan.totalOut-best)*10000n)/best)/100;
+  const gasNote=" Output only — our route goes through the Zaexa contract, so gas is slightly higher than a direct swap.";
+
+  if(Math.abs(bps)<0.01)
+    return set("same","var(--tx3)","The best route we found is what Uniswap already gives you."+gasNote);
+  if(bps<0)
+    return set(bps.toFixed(2)+"%","var(--warn)",
+      "Uniswap direct pays more right now. Swapping there instead would be better."+gasNote);
+
+  const extra=plan.totalOut-best;
+  set("+"+bps.toFixed(2)+"%","var(--pos)",
+      "+"+fmt(extra,tokenOut.decimals)+" "+tokenOut.symbol+
+      " more than the best direct Uniswap pool."+gasNote);
+}
+
+function renderPlan(plan,reverse){
+  if(!reverse)
+    $("amtOut").value=Number(E.formatUnits(plan.totalOut,tokenOut.decimals))
+      .toLocaleString("en-US",{maximumFractionDigits:8,useGrouping:false});
+  const rate=Number(E.formatUnits(plan.totalOut,tokenOut.decimals))/
+             Number(E.formatUnits(plan.totalIn,tokenIn.decimals));
+  $("kRate").textContent="1 "+tokenIn.symbol+" = "+rate.toLocaleString("en-US",{maximumFractionDigits:6})+" "+tokenOut.symbol;
+  const im=plan.impact,el=$("kImpact");
+  el.textContent=im===null?"unknown":im.toFixed(2)+"%";
+  el.style.color=im===null?"var(--tx3)":im>=5?"var(--neg)":im>=1.5?"var(--warn)":"";
+  $("kMin").textContent=fmt(minOutOf(plan),tokenOut.decimals)+" "+tokenOut.symbol;
+  const rv=$("revNote");
+  if(rv)rv.innerHTML=reverse
+    ? `Solved for your target: paying <b>${fmt(plan.totalIn,tokenIn.decimals)} ${esc(tokenIn.symbol)}</b>
+       returns about <b>${fmt(plan.totalOut,tokenOut.decimals)} ${esc(tokenOut.symbol)}</b>.
+       AMMs price by input, so the exact amount can drift slightly.`
+    : "";
+  $("kFee").textContent=(feeBps/100).toFixed(2)+"%";
+  renderVsUniswap(plan);
+
+  let h="";
+  plan.parts.forEach(p=>{
+    const share=Number((p.amountIn*10000n)/plan.totalIn)/100;
+    h+='<div><div class="hop"><span class="node">'+esc(p.route.hops[0].tokenIn.symbol)+"</span>";
+    p.route.hops.forEach(x=>h+='<span class="arr">→</span><span class="node">'+esc(x.tokenOut.symbol)+"</span>");
+    h+=`<span class="pct mono">${share.toFixed(0)}%</span></div>
+        <div class="via">${p.route.hops.map(x=>esc(venueLabel(x.venue))).join("  ·  ")}</div></div>`;
+  });
+  $("routeBody").innerHTML=h;
+  $("routeMeta").textContent=plan.parts.length>1
+    ?"split "+plan.parts.map(p=>Math.round(Number((p.amountIn*100n)/plan.totalIn))+"%").join("/"):"single";
+  $("routeWrap").style.display="";
+
+  let n="";
+  if(unreliable(plan.stats))
+    n+=note("warn",`<b>Partial results.</b> ${plan.stats.rpcFailed}/${plan.stats.attempted} quotes did not return — a better route may exist that we could not see.`);
+  if(im!==null&&im>=5)n+=note("err",`<b>Price impact ${im.toFixed(2)}%.</b> This size is too big for the available depth.`);
+  else if(im!==null&&im>=1.5)n+=note("warn",`Price impact ${im.toFixed(2)}% — the pool moves against you at this size.`);
+  setNotice(n);
+}
+
+/* =====================================================================
+   پورتفولیو
+   نوار انباشته برای ترکیب + فهرست رتبه‌بندی‌شده برای مقایسه‌ی دقیق.
+   قیمتی که خوانده نشد «نامعلوم» می‌ماند و از درصدها کنار گذاشته می‌شود —
+   نه اینکه صفر حساب شود و سهم بقیه را متورم کند.
+   ===================================================================== */
+const SERIES=["var(--s1)","var(--s2)","var(--s3)","var(--s4)",
+              "var(--s5)","var(--s6)","var(--s7)","var(--s8)"];
+let folioSeq=0;
+
+async function renderFolio(){
+  const seq=++folioSeq;
+  const body=$("folioBody");
+  if(!account){body.innerHTML='<div class="empty">Connect a wallet to see what you hold.</div>';
+    $("folioTotal").textContent="";return;}
+
+  const held=allTokens().filter(t=>{
+    const b=balances[balKey(t)];
+    return b!==undefined&&b>0n;
+  });
+  if(!held.length){body.innerHTML='<div class="empty">No balances found on Base.</div>';
+    $("folioTotal").textContent="";return;}
+
+  body.innerHTML='<div class="empty"><span class="spin"></span>Pricing your holdings…</div>';
+  // همه‌ی قیمت‌ها در یک درخواست — نه یکی به ازای هر توکن
+  await loadMetas(held.map(t=>t.native?WETH_ADDR:t.address));
+  if(seq!==folioSeq)return;
+  const rows=[];
+  for(const t of held){
+    const bal=balances[balKey(t)];
+    const amt=Number(E.formatUnits(bal,t.decimals));
+    const px=await priceUsdOf(t);            // null = نامعلوم
+    rows.push({t,bal,amt,px,usd:px===null?null:amt*px});
+  }
+  if(seq!==folioSeq)return;
+
+  const priced=rows.filter(r=>r.usd!==null).sort((a,b)=>b.usd-a.usd);
+  const unpriced=rows.filter(r=>r.usd===null);
+  const total=priced.reduce((s,r)=>s+r.usd,0);
+
+  // بیش از ۸ ردیف: بقیه در «Other» جمع می‌شوند — رنگ دسته‌ای هیچ‌وقت چرخانده نمی‌شود
+  const top=priced.slice(0,8), rest=priced.slice(8);
+  const restUsd=rest.reduce((s,r)=>s+r.usd,0);
+
+  $("folioTotal").textContent=total>0?"$"+total.toLocaleString("en-US",{maximumFractionDigits:2}):"";
+
+  let bar='<div class="stack">';
+  top.forEach((r,i)=>{
+    const pct=total>0?(r.usd/total)*100:0;
+    bar+=`<i style="width:${pct.toFixed(2)}%;background:${SERIES[i]}" title="${esc(r.t.symbol)}"></i>`;
+  });
+  if(restUsd>0)bar+=`<i style="width:${((restUsd/total)*100).toFixed(2)}%;background:var(--line2)"></i>`;
+  bar+="</div>";
+
+  let list="";
+  top.forEach((r,i)=>{
+    const pct=total>0?(r.usd/total)*100:0;
+    list+=`<div class="frow">
+      <span class="fchip" style="background:${SERIES[i]}"></span>
+      <span><span class="fsym">${esc(r.t.symbol)}</span><br>
+      <span class="fbal mono">${fmt(r.bal,r.t.decimals,6)}</span></span>
+      <span class="fval"><span class="u mono">$${r.usd.toLocaleString("en-US",{maximumFractionDigits:2})}</span><br>
+      <span class="p mono">${pct.toFixed(1)}%</span></span></div>`;
+  });
+  if(rest.length)list+=`<div class="frow"><span class="fchip" style="background:var(--line2)"></span>
+      <span><span class="fsym">Other</span><br><span class="fbal">${rest.length} more</span></span>
+      <span class="fval"><span class="u mono">$${restUsd.toLocaleString("en-US",{maximumFractionDigits:2})}</span><br>
+      <span class="p mono">${((restUsd/total)*100).toFixed(1)}%</span></span></div>`;
+  unpriced.forEach(r=>{
+    list+=`<div class="frow"><span class="fchip" style="background:var(--line2)"></span>
+      <span><span class="fsym">${esc(r.t.symbol)}</span><br>
+      <span class="fbal mono">${fmt(r.bal,r.t.decimals,6)}</span></span>
+      <span class="fval"><span class="u" style="color:var(--tx3);font-weight:500">no price</span><br>
+      <span class="p">excluded</span></span></div>`;
+  });
+  body.innerHTML=(total>0?bar:"")+list+
+    (unpriced.length?`<div class="frow" style="color:var(--tx3);font-size:11.5px;border-top:1px solid var(--line)">
+      Tokens without a price feed are listed but left out of the percentages.</div>`:"");
+}
+
+/* =====================================================================
+   جریان پول — کاملاً سمت مرورگر، بدون سرور
+   فشار خرید و بزرگ‌ترین خریدهای اخیر از معاملات واقعی استخر.
+   عمداً «پول هوشمند» نمی‌نامیمش: این جریان است، نه پیش‌بینی.
+   ===================================================================== */
+let flowWindow="h1",flowSeq=0;
+let iPool=null;
+
+/* پیدا کردن عمیق‌ترین استخر یونی‌سواپ V3 برای این توکن، از روی زنجیره. */
+async function deepestV3Pool(token){
+  const dex=DEXES.find(d=>d.id==="uniswap-v3");
+  const refs=BASE_TOKENS.filter(t=>["USDC","WETH"].includes(t.symbol)&&
+    t.address.toLowerCase()!==token.address.toLowerCase());
+  const calls=[],meta=[];
+  refs.forEach(ref=>dex.feeTiers.forEach(f=>{
+    calls.push({target:dex.factory,data:iV3F.encodeFunctionData("getPool",[token.address,ref.address,f])});
+    meta.push({ref,fee:f});}));
+  const res=await multicall(calls);
+  const pools=[];
+  res.forEach((r,i)=>{
+    if(!r.ok||r.data==="0x")return;
+    let a;try{a=iV3F.decodeFunctionResult("getPool",r.data)[0];}catch{return;}
+    if(a&&a!==ZERO)pools.push({addr:a,...meta[i]});
+  });
+  if(!pools.length)return null;
+  const bal=await multicall(pools.map(p=>({target:p.ref.address,
+    data:iErc.encodeFunctionData("balanceOf",[p.addr])})));
+  let best=null,bestV=-1;
+  bal.forEach((r,i)=>{
+    if(!r.ok||r.data==="0x")return;
+    let v;try{v=iErc.decodeFunctionResult("balanceOf",r.data)[0];}catch{return;}
+    const amt=Number(E.formatUnits(v,pools[i].ref.decimals));
+    if(amt>bestV){bestV=amt;best=pools[i];}
+  });
+  return best;
+}
+
+/* =====================================================================
+   جریان پول — مستقیم از رویدادهای زنجیره
+   ---------------------------------------------------------------------
+   نسخه‌ی قبل به API بیرونی تکیه می‌کرد و مدام «در دسترس نیست» می‌داد.
+   حالا رویدادهای Swap استخر را با eth_getLogs می‌خوانیم: همان RPCای که
+   کوت می‌گیرد، و اگر کیف پول وصل باشد از اتصال خودِ کاربر. هیچ سرویس
+   سومی در مسیر نیست.
+   ===================================================================== */
+const WINDOWS={h1:{label:"1 hour",blocks:1800},h6:{label:"6 hours",blocks:10800}};
+
+async function renderFlow(){
+  const seq=++flowSeq,body=$("flowBody");
+  const t=routable(tokenOut);
+  if(!t){body.innerHTML='<div class="empty">Pick a token.</div>';return;}
+  body.innerHTML='<div class="empty"><span class="spin"></span>Reading swaps from the chain…</div>';
+  try{
+    const pool=await deepestV3Pool(t);
+    if(seq!==flowSeq)return;
+    if(!pool){body.innerHTML=`<div class="empty">No Uniswap V3 pool found for ${esc(t.symbol)}.
+      Flow is read from V3 pools for now.</div>`;return;}
+
+    const [t0res,head]=await Promise.all([
+      multicall([{target:pool.addr,data:iPool.encodeFunctionData("token0",[])}]),
+      blockNumber(),
+    ]);
+    if(seq!==flowSeq)return;
+    if(!t0res[0].ok)throw new Error("pool read failed");
+    const token0=iPool.decodeFunctionResult("token0",t0res[0].data)[0].toLowerCase();
+    const ourIs0=token0===t.address.toLowerCase();
+
+    const span=WINDOWS[flowWindow].blocks;
+    const topic=iPool.getEvent("Swap").topicHash;
+    const logs=await getLogs({address:pool.addr,topics:[topic],
+      fromBlock:Math.max(0,head-span),toBlock:head});
+    if(seq!==flowSeq)return;
+
+    if(!logs.length){
+      body.innerHTML=`<div class="empty">No swaps in this pool in the last ${WINDOWS[flowWindow].label}.
+        The pool is simply quiet — that is a real answer, not a failure.</div>`;return;
+    }
+
+    const refPx=await priceUsdOf(pool.ref);
+    const trades=[];
+    for(const lg of logs){
+      let ev;try{ev=iPool.parseLog(lg);}catch{continue;}
+      const a0=ev.args.amount0,a1=ev.args.amount1;
+      const ourAmt=ourIs0?a0:a1, refAmt=ourIs0?a1:a0;
+      // منفی یعنی از استخر خارج شده → کاربر آن را گرفته → خرید توکن ما
+      const isBuy=ourAmt<0n;
+      const refAbs=refAmt<0n?-refAmt:refAmt;
+      const usd=refPx===null?null:Number(E.formatUnits(refAbs,pool.ref.decimals))*refPx;
+      trades.push({isBuy,usd,who:ev.args.recipient,block:lg.blockNumber});
+    }
+    const buys=trades.filter(x=>x.isBuy),sells=trades.filter(x=>!x.isBuy);
+    const sum=a=>a.reduce((s,x)=>s+(x.usd||0),0);
+    const bU=sum(buys),sU=sum(sells),tot=bU+sU,net=bU-sU;
+
+    const cnt={};buys.forEach(x=>{const k=(x.who||"").toLowerCase();if(k)cnt[k]=(cnt[k]||0)+1;});
+    const top=buys.slice().sort((a,b)=>(b.usd||0)-(a.usd||0)).slice(0,5);
+    const blocksAgo=b=>{const m=Math.round((head-b)*2/60);return m<1?"just now":m+"m ago";};
+
+    let h="";
+    if(tot>0)h+=`<div class="flowbar">
+      <i style="width:${((bU/tot)*100).toFixed(1)}%;background:var(--pos)"></i>
+      <i style="width:${((sU/tot)*100).toFixed(1)}%;background:var(--neg)"></i></div>`;
+    const money=v=>refPx===null?"—":"$"+Math.round(v).toLocaleString();
+    h+=`<div class="flowkv"><span class="k">Bought</span>
+        <span class="mono" style="color:var(--pos)">${money(bU)}</span></div>
+      <div class="flowkv"><span class="k">Sold</span>
+        <span class="mono" style="color:var(--neg)">${money(sU)}</span></div>
+      <div class="flowkv"><span class="k">Net</span>
+        <span class="mono" style="color:${net>=0?"var(--pos)":"var(--neg)"}">
+        ${refPx===null?"—":(net>=0?"+":"−")+"$"+Math.round(Math.abs(net)).toLocaleString()}</span></div>
+      <div class="flowkv"><span class="k">Swaps</span>
+        <span class="mono">${buys.length} buys · ${sells.length} sells</span></div>
+      <div class="flowkv"><span class="k">Pool</span>
+        <a class="mono" style="font-size:12px;color:var(--tx3)" target="_blank" rel="noopener"
+           href="${CHAIN.explorer}/address/${pool.addr}">${esc(t.symbol)}/${esc(pool.ref.symbol)} ${(pool.fee/10000).toFixed(2)}%</a></div>`;
+    if(top.length){
+      h+=`<div class="frow" style="color:var(--tx3);font-size:11px;letter-spacing:.05em;
+           text-transform:uppercase;padding-bottom:2px">Largest buys</div>`;
+      top.forEach(x=>{
+        const k=(x.who||"").toLowerCase(),rep=k&&cnt[k]>1;
+        h+=`<div class="trade"><span class="fchip" style="background:var(--pos)"></span>
+          <span class="amt2 mono">${x.usd===null?"—":"$"+Math.round(x.usd).toLocaleString()}</span>
+          ${k?`<a class="mono" style="font-size:11.5px;color:var(--tx3)" target="_blank" rel="noopener"
+               href="${CHAIN.explorer}/address/${k}">${shortAddr(k)}</a>`:""}
+          ${rep?`<span class="vtag" style="margin-left:0">×${cnt[k]}</span>`:""}
+          <span class="ago">${blocksAgo(x.block)}</span></div>`;
+      });
+    }
+    h+=`<div class="frow" style="color:var(--tx3);font-size:11.5px">
+      Read directly from the pool's Swap events on Base — no third-party service.
+      This is <b>flow, not a forecast</b>: it shows who is buying and how much, not whether
+      they are right. ×2 marks a wallet that bought more than once in this window.</div>`;
+    body.innerHTML=h;
+  }catch(e){
+    if(seq!==flowSeq)return;
+    console.error("flow",e);
+    body.innerHTML=`<div class="empty">We could not read the pool's swap history —
+      this is unknown, not zero. Quotes and routing are unaffected.
+      <br><span style="font-size:11.5px">${esc((e&&e.shortMessage)||(e&&e.message)||"")}</span></div>`;
+  }
+}
+
+/* ---------- safety panel ---------- */
+async function runScan(token){
+  const seq=++scanSeq;
+  if(!token)return;
+  $("safetySym").textContent=token.symbol;
+  const key=token.address.toLowerCase();
+  if(safetyCache[key]){renderSafety(safetyCache[key]);return;}
+  $("safetyBody").innerHTML='<div class="empty"><span class="spin"></span>Scanning bytecode, ownership and liquidity…</div>';
+  try{
+    const rep=await scanToken(token);
+    if(seq!==scanSeq)return;
+    safetyCache[key]=rep;renderSafety(rep);
+  }catch{
+    if(seq!==scanSeq)return;
+    $("safetyBody").innerHTML='<div class="empty">Scan could not complete — the network did not answer.</div>';
+  }
+}
+function renderSafety(rep){
+  const col=`var(--${rep.verdict.tone})`,C=2*Math.PI*25;
+  let h=`<div class="rhead"><div class="ring"><svg width="60" height="60">
+      <circle cx="30" cy="30" r="25" fill="none" stroke="var(--raise)" stroke-width="6"/>
+      <circle cx="30" cy="30" r="25" fill="none" stroke="${col}" stroke-width="6"
+        stroke-dasharray="${C}" stroke-dashoffset="${C*(1-Math.max(4,rep.score)/100)}" stroke-linecap="round"/>
+    </svg><b class="mono" style="color:${col}">${rep.score}</b></div>
+    <div><div class="rv" style="color:${col}">${esc(rep.verdict.txt)}</div>
+    <div class="rs">Risk ${rep.score}/100 · lower is safer${rep.unknown?` · ${rep.unknown} unknown`:""}</div></div></div>`;
+  const ord={critical:0,high:1,medium:2,info:3,ok:4},ic={critical:"✕",high:"!",medium:"!",info:"?",ok:"✓"};
+  rep.findings.slice().sort((a,b)=>ord[a.level]-ord[b.level]).forEach(f=>{
+    h+=`<div class="chk ${f.level}"><span class="ic">${ic[f.level]||"·"}</span>
+      <span><b>${esc(f.title)}</b><span>${esc(f.detail)}</span></span></div>`;});
+  h+=`<div class="chk" style="color:var(--tx3);font-size:11.5px">
+    <span></span><span>Heuristics on public bytecode, not an audit. A clean score is not a guarantee.</span></div>`;
+  $("safetyBody").innerHTML=h;
+}
+
+/* =====================================================================
+   Wallet & execution
+   ===================================================================== */
+function injected(){
+  const e=window.ethereum;if(!e)return null;
+  if(e.providers&&e.providers.length)return e.providers.find(p=>p.isMetaMask)||e.providers[0];
+  return e;
+}
+async function connect(){
+  const inj=injected();
+  if(!inj){setNotice(note("err","<b>No wallet found.</b> Install MetaMask and reload."));return;}
+  try{
+    const a=await inj.request({method:"eth_requestAccounts"});
+    account=E.getAddress(a[0]);
+    walletProvider=new E.BrowserProvider(inj,"any");
+    signer=await walletProvider.getSigner();
+    walletChainId=Number((await walletProvider.getNetwork()).chainId);
+    inj.on&&inj.on("accountsChanged",x=>{account=x&&x[0]?E.getAddress(x[0]):null;
+      if(!account)signer=null;balances={};refreshBalances();paintWallet();refreshButton();});
+    inj.on&&inj.on("chainChanged",()=>location.reload());
+    paintWallet();
+    await Promise.all([refreshBalances(),readFee()]);
+    await refreshAllowance();refreshButton();setNotice("");startBalanceWatch();
+  }catch(e){setNotice(note("err",esc(e.message||"Connection rejected.")));}
+}
+async function switchNetwork(){
+  const inj=injected();if(!inj)return;
+  try{await inj.request({method:"wallet_switchEthereumChain",params:[{chainId:CHAIN.hexId}]});}
+  catch(e){
+    if(e.code===4902)await inj.request({method:"wallet_addEthereumChain",params:[{
+      chainId:CHAIN.hexId,chainName:"Base",nativeCurrency:{name:"Ether",symbol:"ETH",decimals:18},
+      rpcUrls:["https://mainnet.base.org"],blockExplorerUrls:[CHAIN.explorer]}]});
+    else throw e;}
+}
+function paintWallet(){
+  const b=$("connectBtn");
+  if(!account){b.textContent="Connect wallet";b.className="chip solid";return;}
+  b.textContent=walletChainId===CHAIN.id?shortAddr(account):"Switch to Base";
+  b.className=walletChainId===CHAIN.id?"chip":"chip solid";
+}
+async function refreshBalances(){
+  if(!account){balances={};paintBalances();return;}
+  const toks=allTokens().filter(t=>!t.native);
+  try{
+    const res=await multicall(toks.map(t=>({target:t.address,data:iErc.encodeFunctionData("balanceOf",[account])})));
+    res.forEach((r,i)=>{if(r.ok&&r.data!=="0x"){
+      try{balances[toks[i].address.toLowerCase()]=iErc.decodeFunctionResult("balanceOf",r.data)[0];}catch{}}});
+  }catch{/* نامعلوم می‌ماند، نه صفر */}
+  const nat=await getNative(account);
+  if(nat!==null)balances["native"]=nat;
+  paintBalances();
+  refreshButton();
+  if(view==="folio")renderFolio();
+}
+
+/* موجودی باید بدون رفرش صفحه تازه بماند: کاربر ممکن است در تب دیگری
+   معامله کند یا از کیف پول مستقیم بفرستد. سه محرک داریم. */
+let balTimer=null;
+function startBalanceWatch(){
+  clearInterval(balTimer);
+  balTimer=setInterval(()=>{if(account&&!document.hidden)refreshBalances();},15000);
+}
+document.addEventListener("visibilitychange",()=>{if(!document.hidden&&account)refreshBalances();});
+addEventListener("focus",()=>{if(account)refreshBalances();});
+async function readFee(){
+  try{
+    const r=await multicall([{target:CHAIN.executor,data:iExec.encodeFunctionData("feeBps",[])}]);
+    if(r[0].ok)feeBps=Number(iExec.decodeFunctionResult("feeBps",r[0].data)[0]);
+    $("kFee").textContent=(feeBps/100).toFixed(2)+"%";
+  }catch{}
+}
+async function refreshAllowance(){
+  allowance=0n;
+  if(!account||!tokenIn)return;
+  try{
+    const r=await multicall([{target:routable(tokenIn).address,
+      data:iErc.encodeFunctionData("allowance",[account,CHAIN.executor])}]);
+    if(r[0].ok)allowance=iErc.decodeFunctionResult("allowance",r[0].data)[0];
+  }catch{}
+}
+async function preflight(plan,amountIn){
+  const problems=[],parts=buildParts(plan);
+  const routers=[...new Set(parts.flatMap(p=>p[0].map(s=>s[1])))];
+  const calls=[{target:CHAIN.executor,data:iExec.encodeFunctionData("feeBps",[])},
+    ...routers.map(r=>({target:CHAIN.executor,data:iExec.encodeFunctionData("allowedRouter",[r])})),
+    {target:routable(tokenIn).address,data:iErc.encodeFunctionData("balanceOf",[account])},
+    {target:routable(tokenIn).address,data:iErc.encodeFunctionData("allowance",[account,CHAIN.executor])}];
+  let res;
+  try{res=await multicall(calls);}catch{return["Could not reach the network to run safety checks. Nothing was sent."];}
+  if(res[0].ok)feeBps=Number(iExec.decodeFunctionResult("feeBps",res[0].data)[0]);
+  routers.forEach((r,i)=>{
+    const x=res[1+i];
+    if(!x.ok)problems.push(`Could not verify router ${shortAddr(r)} is allow-listed.`);
+    else if(!iExec.decodeFunctionResult("allowedRouter",x.data)[0])
+      problems.push(`Router ${shortAddr(r)} is not allow-listed on the executor.`);});
+  const bi=res[1+routers.length],ai=res[2+routers.length];
+  if(isNative(tokenIn)){
+    // برای ETH بومی موجودی ERC20 معنا ندارد
+    const nat=await getNative(account);
+    if(nat!==null&&nat<amountIn)
+      problems.push(`Insufficient ETH: ${fmt(nat,18)} < ${fmt(amountIn,18)}`);
+  }else if(bi.ok){
+    const bal=iErc.decodeFunctionResult("balanceOf",bi.data)[0];
+    balances[routable(tokenIn).address.toLowerCase()]=bal;
+    if(bal<amountIn)problems.push(`Insufficient balance: ${fmt(bal,tokenIn.decimals)} < ${fmt(amountIn,tokenIn.decimals)} ${tokenIn.symbol}`);}
+  if(ai.ok&&!isNative(tokenIn)){
+    allowance=iErc.decodeFunctionResult("allowance",ai.data)[0];
+    if(allowance<amountIn)problems.push("__APPROVE__");}
+  const gas=await getNative(account);
+  if(gas!==null&&gas===0n)problems.push("No ETH on Base to pay for gas.");
+  return problems;
+}
+async function doApprove(){
+  const amountIn=parsedAmountIn();
+  setBusy(true,"Confirm in wallet…");
+  try{
+    const erc=new E.Contract(routable(tokenIn).address,ABI.erc20,signer);
+    const tx=await erc.approve(CHAIN.executor,E.MaxUint256);
+    const url=`${CHAIN.explorer}/tx/${tx.hash}`;
+    setBusy(true,"Approving…");
+    setNotice(note("ok",`Approval sent — <a href="${url}" target="_blank" rel="noopener">${shortAddr(tx.hash)}</a>`));
+    // منبع حقیقت allowance است نه رسید — رسید ممکن است هرگز خوانده نشود
+    const ok=await waitForAllowance(amountIn,90000);
+    setNotice(ok?note("ok",`<b>${esc(tokenIn.symbol)} approved.</b>`)
+      :note("warn",`<b>Approval sent but not confirmed yet.</b> Check <a href="${url}" target="_blank" rel="noopener">${shortAddr(tx.hash)}</a> then press again.`));
+  }catch(e){showError("Approval failed",e);}
+  finally{setBusy(false);refreshButton();}
+}
+async function waitForAllowance(min,ms){
+  const until=Date.now()+ms;
+  while(Date.now()<until){
+    await new Promise(r=>setTimeout(r,3000));
+    await refreshAllowance();
+    if(allowance>=min)return true;}
+  return false;
+}
+/** ETH → WETH. لازم است چون قرارداد اجرا فقط ERC-20 می‌گیرد. */
+async function readWethBalance(){
+  try{
+    const r=await multicall([{target:WETH_ADDR,data:iErc.encodeFunctionData("balanceOf",[account])}]);
+    if(r[0].ok)return iErc.decodeFunctionResult("balanceOf",r[0].data)[0];
+  }catch{}
+  return null;
+}
+
+async function doWrap(){
+  const amountIn=parsedAmountIn();
+  if(amountIn===null)return;
+  setBusy(true,"Confirm wrap in wallet…");
+  try{
+    const weth=new E.Contract(WETH_ADDR,ABI.weth,signer);
+    const tx=await weth.deposit({value:amountIn});
+    const url=`${CHAIN.explorer}/tx/${tx.hash}`;
+    setBusy(true,"Wrapping ETH…");
+    setNotice(note("ok",`Wrapping — <a href="${url}" target="_blank" rel="noopener">${shortAddr(tx.hash)}</a>`));
+    await withTimeout(tx.wait(),180000);
+    await refreshBalances();await refreshAllowance();
+    setNotice(note("ok","<b>ETH wrapped.</b> One more step to swap."));
+  }catch(e){showError("Wrap failed",e);}
+  finally{setBusy(false);refreshButton();}
+}
+
+/** WETH → ETH بعد از سواپ، تا کاربر واقعاً ETH بگیرد. */
+async function unwrapAll(amount){
+  try{
+    setBusy(true,"Unwrapping to ETH…");
+    const weth=new E.Contract(WETH_ADDR,ABI.weth,signer);
+    const tx=await weth.withdraw(amount);
+    await withTimeout(tx.wait(),180000);
+    return true;
+  }catch(e){
+    setNotice(note("warn",`<b>The swap worked, but unwrapping WETH to ETH failed.</b> Your funds are safe as WETH — ${esc(friendly(e))}`));
+    return false;
+  }
+}
+
+async function doSwap(){
+  const amountIn=parsedAmountIn();
+  if(!currentPlan||amountIn===null)return;
+  let chosenSig=null;
+  setBusy(true,"Refreshing price…");
+  try{
+    await runQuote();
+    if(!currentPlan){setBusy(false);refreshButton();return;}
+    setBusy(true,"Safety checks…");
+    const problems=await preflight(currentPlan,amountIn);
+    if(problems.includes("__APPROVE__")){setBusy(false);refreshButton();
+      setNotice(note("warn",`Approve ${esc(tokenIn.symbol)} first.`));return;}
+    if(problems.length){
+      setNotice(note("err","<b>Pre-flight failed — nothing sent.</b><br>• "+problems.map(esc).join("<br>• ")));
+      setBusy(false);refreshButton();return;}
+
+    const fresh=currentPlan;
+    const deadline=BigInt(Math.floor(Date.now()/1000)+Math.max(1,deadlineMin)*60);
+    const exec=new E.Contract(CHAIN.executor,ABI.executor,signer);
+    setBusy(true,"Simulating…");
+    const cands=[{label:"best",plan:fresh,parts:buildParts(fresh),minOut:minOutOf(fresh)}];
+    (fresh.allRoutes||[]).slice(0,4).forEach(r=>{
+      const s={parts:[{route:r,amountIn}],totalIn:amountIn,totalOut:r.amountOut,bestSingleOut:r.amountOut};
+      cands.push({label:venueLabel(r.hops[0].venue),plan:s,parts:buildParts(s),minOut:minOutOf(s)});});
+    let chosen=null,firstErr=null;const attempts=[];
+    for(const c of cands){
+      if(chosen)break;
+      const sig=c.plan.parts.map(p=>({path:[p.route.hops[0].tokenIn.symbol]
+        .concat(p.route.hops.map(h=>h.tokenOut.symbol)).join(">"),
+        venues:p.route.hops.map(h=>venueLabel(h.venue)),hops:p.route.hops.length}));
+      try{
+        await exec.executeSwap.staticCall(asArg(tokenIn),asArg(tokenOut),amountIn,c.minOut,c.parts,deadline,
+          isNative(tokenIn)?{value:amountIn}:{});
+        chosen=c;attempts.push({tried:sig,result:"ok"});
+      }catch(e){if(!firstErr)firstErr=e;
+        attempts.push({tried:sig,result:(e&&(e.shortMessage||e.message))||"failed"});}}
+    if(!chosen){showError("Simulation failed — nothing sent, no gas spent",firstErr,{attempts});
+      setBusy(false);refreshButton();return;}
+    chosenSig=chosen.plan.parts.map(p=>p.route.hops.map(h=>venueLabel(h.venue)).join("+"));
+    if(chosen.label!=="best")
+      setNotice(note("warn",`<b>The best route failed simulation; fell back to ${esc(chosen.label)}.</b>`));
+
+    setBusy(true,`Confirm ${fmt(amountIn,tokenIn.decimals,4)} ${tokenIn.symbol} → ${tokenOut.symbol} in wallet…`);
+    let gasLimit;
+    try{
+      const g=await exec.executeSwap.estimateGas(asArg(tokenIn),asArg(tokenOut),amountIn,chosen.minOut,chosen.parts,deadline,
+        isNative(tokenIn)?{value:amountIn}:{});
+      gasLimit=(g*125n)/100n;
+    }catch{}
+    const opts=isNative(tokenIn)?{value:amountIn}:{};
+    if(gasLimit)opts.gasLimit=gasLimit;
+    const tx=await exec.executeSwap(asArg(tokenIn),asArg(tokenOut),amountIn,
+      chosen.minOut,chosen.parts,deadline,opts);
+    // 🔑 از اینجا تراکنش ارسال شده — هر خطای بعدی فقط خواندن نتیجه است
+    const url=`${CHAIN.explorer}/tx/${tx.hash}`;
+    setBusy(true,`Swapping ${esc(tokenIn.symbol)} → ${esc(tokenOut.symbol)}…`);
+    setNotice(note("ok",`Sent — <a href="${url}" target="_blank" rel="noopener">${shortAddr(tx.hash)}</a>`));
+    let rec=null;
+    try{rec=await withTimeout(tx.wait(),180000);}
+    catch{
+      setNotice(note("warn",`<b>The transaction was sent</b> but the receipt could not be read. Check <a href="${url}" target="_blank" rel="noopener">${shortAddr(tx.hash)}</a>.`));
+      setBusy(false);return;}
+    if(rec&&rec.status===1){
+      setNotice(note("ok",`<b>Swap complete.</b> <a href="${url}" target="_blank" rel="noopener">View on BaseScan</a>`));
+      $("amtIn").value="";$("amtOut").value="";currentPlan=null;
+      $("routeWrap").style.display="none";await refreshBalances();
+    }else setNotice(note("err",`<b>Reverted.</b> <a href="${url}" target="_blank" rel="noopener">View on BaseScan</a>`));
+  }catch(e){showError("Swap failed",e,chosenSig?{sentRoute:chosenSig}:undefined);}
+  finally{setBusy(false);refreshButton();}
+}
+function showError(title,err,extra){
+  console.error(title,err,extra);
+  const raw=JSON.stringify({
+    error:{message:err&&(err.shortMessage||err.message),reason:err&&err.reason,code:err&&err.code,
+      data:err&&(err.data||(err.info&&err.info.error&&err.info.error.message))},
+    context:Object.assign({
+      pair:tokenIn&&tokenOut?tokenIn.symbol+" -> "+tokenOut.symbol:"?",
+      amountIn:$("amtIn").value,slippageBps,feeBps,readSource:liveSrc,
+      bestRoute:currentPlan?currentPlan.parts.map(p=>({
+        share:String((p.amountIn*100n)/currentPlan.totalIn)+"%",
+        venues:p.route.hops.map(h=>venueLabel(h.venue)),
+        routers:p.route.hops.map(h=>h.venue.dex.router)})):null,
+      expectedOut:currentPlan?String(currentPlan.totalOut):null},extra||{})},null,1);
+  setNotice(note("err",`<b>${esc(title)}.</b> ${esc(friendly(err))}
+    <details><summary>Technical details</summary><pre>${esc(raw)}</pre>
+    <button id="copyErr" style="color:inherit;text-decoration:underline;font-size:11px">Copy</button></details>`));
+  const c=$("copyErr");
+  if(c)c.onclick=()=>navigator.clipboard.writeText(raw).then(()=>c.textContent="Copied ✓");
+}
+function friendly(err){
+  const m=(err&&(err.shortMessage||err.reason||err.message))||String(err);
+  if(/user rejected|denied/i.test(m))return "You rejected the request in your wallet.";
+  if(/slippage: output below minimum/i.test(m))
+    return `Price moved more than your ${(slippageBps/100).toFixed(2)}% tolerance. Raise it in settings.`;
+  if(/router not allowed/i.test(m))return "A router in this path is not allow-listed on the executor.";
+  if(/deadline passed/i.test(m))return "The deadline passed. Try again.";
+  if(/zero step output|nothing received/i.test(m))return "A pool in the path returned nothing — too thin for this size.";
+  if(/missing revert data/i.test(m))return "The router rejected the call without a reason — usually an interface mismatch or an empty pool.";
+  if(/insufficient funds/i.test(m))return "Not enough ETH on Base for gas.";
+  return m;
+}
+function setBusy(on,label){busy=on;const b=$("actBtn");b.disabled=on;
+  if(on)b.innerHTML=`<span class="spin"></span>${esc(label||"Working…")}`;}
+function refreshButton(){
+  if(busy)return;
+  const b=$("actBtn");b.onclick=null;
+  const set=(t,en,fn)=>{b.textContent=t;b.disabled=!en;if(fn)b.onclick=fn;};
+  if(!account)return set("Connect wallet",true,connect);
+  if(walletChainId!==CHAIN.id)return set("Switch to Base",true,switchNetwork);
+  if(!tokenIn||!tokenOut)return set("Select tokens",false);
+  const amt=parsedAmountIn();
+  if(amt===null)return set("Enter an amount",false);
+  const bal=balances[balKey(tokenIn)];
+  if(bal!==undefined&&bal<amt)return set(`Insufficient ${tokenIn.symbol}`,false);
+  if(!currentPlan)return set("Finding best route…",false);
+  // ETH بومی هیچ approve نمی‌خواهد — با خود تراکنش می‌رود و قرارداد wrap می‌کند
+  if(!isNative(tokenIn)&&allowance<amt)
+    return set(`Approve ${tokenIn.symbol}`,true,doApprove);
+  return set(isNative(tokenOut)?"Swap to ETH":"Swap",true,doSwap);
+}
+
+/* ---------- token picker ---------- */
+function openPicker(side){pickerTarget=side;$("tokSearch").value="";renderTokenList("");
+  $("tokOv").classList.add("on");setTimeout(()=>$("tokSearch").focus(),30);}
+function closePicker(){$("tokOv").classList.remove("on");}
+function renderTokenList(q){
+  const list=$("tokList"),query=(q||"").trim().toLowerCase();
+  let toks=allTokens();
+  if(query)toks=toks.filter(t=>t.symbol.toLowerCase().includes(query)||
+    (t.name||"").toLowerCase().includes(query)||t.address.toLowerCase().includes(query));
+  let html=toks.map(t=>{
+    const b=balances[balKey(t)];
+    return `<button class="trow" data-i="${allTokens().indexOf(t)}">
+      <span class="av" data-tok="${allTokens().indexOf(t)}">${esc(t.symbol.slice(0,3).toUpperCase())}</span>
+      <span><span class="s">${esc(t.symbol)}</span><br><span class="a mono">${shortAddr(t.address)}</span></span>
+      <span class="b mono">${b===undefined?"":fmt(b,t.decimals,5)}</span></button>`;}).join("");
+  if(!toks.length&&/^0x[0-9a-fA-F]{40}$/.test(query)){
+    html='<div class="empty"><span class="spin"></span>Loading token…</div>';importToken(query);
+  }else if(!toks.length)html='<div class="empty">Nothing found. Paste a contract address to import it.</div>';
+  list.innerHTML=html;
+  list.querySelectorAll(".trow").forEach(el=>el.onclick=()=>pickToken(allTokens()[+el.dataset.i]));
+  loadMetas(toks.filter(t=>!t.native).map(t=>t.address)).finally(()=>{
+    list.querySelectorAll(".av[data-tok]").forEach(el=>paintAvatar(el,allTokens()[+el.dataset.tok]));
+  });
+}
+async function importToken(addr){
+  let a;try{a=E.getAddress(addr);}catch{return;}
+  if(allTokens().some(t=>t.address.toLowerCase()===a.toLowerCase()))return;
+  try{
+    const r=await multicall([{target:a,data:iErc.encodeFunctionData("symbol",[])},
+      {target:a,data:iErc.encodeFunctionData("decimals",[])},
+      {target:a,data:iErc.encodeFunctionData("name",[])}]);
+    if(!r[0].ok||!r[1].ok){
+      $("tokList").innerHTML='<div class="empty">Not a standard ERC-20 (or the network did not answer).</div>';return;}
+    customTokens.push({symbol:iErc.decodeFunctionResult("symbol",r[0].data)[0],
+      decimals:Number(iErc.decodeFunctionResult("decimals",r[1].data)[0]),
+      name:r[2].ok?iErc.decodeFunctionResult("name",r[2].data)[0]:"",address:a,imported:true});
+    if(account)await refreshBalances();
+    renderTokenList($("tokSearch").value);
+  }catch{$("tokList").innerHTML='<div class="empty">The network did not answer. Try again.</div>';}
+}
+function pickToken(t){
+  if(!t)return;
+  if(pickerTarget==="in"){
+    if(tokenOut&&t.address.toLowerCase()===tokenOut.address.toLowerCase())tokenOut=tokenIn;
+    tokenIn=t;
+  }else{
+    if(tokenIn&&t.address.toLowerCase()===tokenIn.address.toLowerCase())tokenIn=tokenOut;
+    tokenOut=t;}
+  paintToken("in",tokenIn);paintToken("out",tokenOut);paintBalances();closePicker();
+  runScan(tokenOut);loadChart();paintFlowToken();
+  if(view==="flow")renderFlow();
+  refreshAllowance().then(scheduleQuote);
+}
+
+/* =====================================================================
+   نماها — سه صفحه‌ی جدا، با hash تا لینک‌پذیر و با دکمه‌ی بازگشت سازگار باشد
+   ===================================================================== */
+let view="swap";
+
+/* =====================================================================
+   لینک اشتراک‌پذیر — `#swap?in=USDC&out=0x…&amt=1000`
+   ---------------------------------------------------------------------
+   بدون بک‌اند: کل وضعیت در hash است، پس نه سروری لازم است نه چیزی ذخیره
+   می‌شود. hash عمداً انتخاب شد نه query string، چون روی IPFS و هاست ایستا
+   هم بدون تنظیمات سرور کار می‌کند.
+
+   ⚠️ مدل تهدید: هرکسی می‌تواند لینکی بسازد که قربانی را روی توکن دلخواهش
+   فرود بیاورد. سه محافظ:
+     ۱. توکن آمده از URL از همان مسیر importToken رد می‌شود — یعنی باید
+        ERC-20 استاندارد باشد، وگرنه اصلاً انتخاب نمی‌شود.
+     ۲. انتخاب شدنش اسکنر ایمنی را صدا می‌زند، مثل هر توکن دیگری.
+     ۳. هیچ‌چیزی از URL مستقیم در HTML تزریق نمی‌شود؛ فقط به‌عنوان آدرس یا
+        نماد تطبیق داده می‌شود و نمایش از روی داده‌ی خوانده‌شده از زنجیره است.
+   ===================================================================== */
+function parseHash(){
+  const raw=decodeURIComponent(location.hash.slice(1));
+  const i=raw.indexOf("?");
+  const v=(i<0?raw:raw.slice(0,i)).trim();
+  let q;try{q=new URLSearchParams(i<0?"":raw.slice(i+1));}catch{q=new URLSearchParams();}
+  return {view:v,params:q};
+}
+function tokenRef(t){
+  if(!t)return "";
+  // نماد فقط برای توکن‌های فهرست پیش‌فرض؛ نماد یک توکن دلخواه می‌تواند جعلی
+  // باشد و لینک را مبهم کند. برای بقیه آدرس، که یکتاست.
+  return BASE_TOKENS.includes(t)?t.symbol:t.address;
+}
+function shareUrl(){
+  const p=new URLSearchParams();
+  if(tokenIn)p.set("in",tokenRef(tokenIn));
+  if(tokenOut)p.set("out",tokenRef(tokenOut));
+  const raw=$("amtIn").value.trim();
+  if(raw&&parseFloat(raw)>0)p.set("amt",raw);
+  return location.origin+location.pathname+location.search+"#swap?"+p.toString();
+}
+/* یک ارجاع به توکن را حل می‌کند. اگر نشد، null — و تماس‌کننده *می‌گوید*
+   که نشد، نه اینکه بی‌صدا روی پیش‌فرض بماند. */
+async function resolveTokenRef(ref){
+  if(!ref)return null;
+  const bySym=BASE_TOKENS.find(t=>t.symbol.toLowerCase()===ref.toLowerCase());
+  if(bySym)return bySym;
+  if(!/^0x[0-9a-fA-F]{40}$/.test(ref))return null;
+  const known=allTokens().find(t=>!t.native&&t.address.toLowerCase()===ref.toLowerCase());
+  if(known)return known;
+  await importToken(ref);
+  return allTokens().find(t=>!t.native&&t.address.toLowerCase()===ref.toLowerCase())||null;
+}
+async function applyShareParams(){
+  const {params}=parseHash();
+  if(!params.has("in")&&!params.has("out")&&!params.has("amt"))return;
+  const missed=[];
+  const [a,b]=await Promise.all([
+    params.has("in") ?resolveTokenRef(params.get("in")) :Promise.resolve(null),
+    params.has("out")?resolveTokenRef(params.get("out")):Promise.resolve(null)]);
+  if(params.has("in")){ if(a)tokenIn=a;  else missed.push(params.get("in")); }
+  if(params.has("out")){if(b)tokenOut=b; else missed.push(params.get("out"));}
+  paintToken("in",tokenIn);paintToken("out",tokenOut);
+  const amt=params.get("amt");
+  if(amt&&/^[0-9]*\.?[0-9]+$/.test(amt)&&parseFloat(amt)>0){mode="exactIn";$("amtIn").value=amt;}
+  if(missed.length)
+    setNotice(note("warn","<b>Part of that link could not be opened.</b> "+
+      esc(missed.join(", "))+" is not a standard ERC-20 on Base, or the network did not answer."));
+  runScan(tokenOut);
+  scheduleQuote();
+}
+function setView(v,push){
+  if(v&&v.indexOf("?")>=0)v=v.slice(0,v.indexOf("?"));
+  if(!["swap","folio","flow"].includes(v))v="swap";
+  view=v;
+  document.querySelectorAll(".view").forEach(el=>el.classList.toggle("on",el.id==="view-"+v));
+  $("nav").querySelectorAll("[data-view]").forEach(b=>b.classList.toggle("on",b.dataset.view===v));
+  if(push!==false&&parseHash().view!==v)location.hash=v;
+  // فقط وقتی نما باز می‌شود داده می‌گیریم — نه در پس‌زمینه
+  if(v==="folio")renderFolio();
+  if(v==="flow"){paintFlowToken();renderFlow();}
+  scrollTo({top:0,behavior:"instant"});
+}
+function paintFlowToken(){
+  paintAvatar($("flowTokAv"),tokenOut);
+  $("flowTokSym").textContent=tokenOut?tokenOut.symbol:"—";
+}
+
+/* ---------- theme & wiring ---------- */
+let theme=(window.matchMedia&&matchMedia("(prefers-color-scheme: dark)").matches)?"dark":"light";
+function applyTheme(){document.documentElement.setAttribute("data-theme",theme);
+  $("themeBtn").textContent=theme==="dark"?"◐":"◑";
+  if(chartData&&$("plot").querySelector("svg"))drawChart(chartData);}
+
+function wire(){
+  $("brand").textContent=BRAND;document.title=BRAND;
+  // آیکون شبکه‌ای که لینکش خالی است اصلاً نمایش داده نمی‌شود
+  [["lnkX",LINKS.x],["lnkTg",LINKS.telegram],["lnkGh",LINKS.github]].forEach(([id,url])=>{
+    const el=$(id);
+    if(url)el.href=url; else el.remove();
+  });
+  $("feedbackBtn").onclick=()=>{
+    if(LINKS.feedback){window.open(LINKS.feedback,"_blank","noopener");return;}
+    const body=encodeURIComponent(
+      "What happened:\n\n\n---\nPage: "+location.hash.replace("#","")+
+      "\nPair: "+((tokenIn&&tokenIn.symbol)||"?")+" -> "+((tokenOut&&tokenOut.symbol)||"?")+
+      "\nWallet: "+(account?shortAddr(account):"not connected")+
+      "\nReads via: "+(liveSrc||"offline"));
+    location.href=`mailto:${LINKS.email}?subject=${encodeURIComponent("Zaexa — problem report")}&body=${body}`;
+  };
+  $("ctrLink").href=`${CHAIN.explorer}/address/${CHAIN.executor}#code`;
+  $("ctrLink").textContent=shortAddr(CHAIN.executor);
+  $("themeBtn").onclick=()=>{theme=theme==="dark"?"light":"dark";applyTheme();};
+  $("shareBtn").onclick=async()=>{
+    const url=shareUrl(),btn=$("shareBtn"),old=btn.innerHTML;
+    let ok=false;
+    // clipboard API فقط در secure context هست. اگر نبود، وانمود نمی‌کنیم
+    // که کپی شد — لینک را نشان می‌دهیم تا کاربر خودش بردارد.
+    try{if(navigator.clipboard&&window.isSecureContext){await navigator.clipboard.writeText(url);ok=true;}}
+    catch{ok=false;}
+    if(ok){
+      btn.textContent="✓";setTimeout(()=>{btn.innerHTML=old;},1400);
+    }else{
+      setNotice(note("warn","<b>Could not reach the clipboard.</b> Copy this link manually:<br>"+
+        '<span class="mono" style="word-break:break-all">'+esc(url)+"</span>"));
+    }
+  };
+  $("connectBtn").onclick=()=>{if(!account)connect();else if(walletChainId!==CHAIN.id)switchNetwork();};
+  $("tokInBtn").onclick=()=>openPicker("in");
+  $("tokOutBtn").onclick=()=>openPicker("out");
+  $("tokClose").onclick=closePicker;
+  $("tokOv").onclick=e=>{if(e.target===$("tokOv"))closePicker();};
+  $("tokSearch").oninput=e=>renderTokenList(e.target.value);
+  $("amtIn").oninput=()=>{mode="exactIn";scheduleQuote();};
+  $("amtOut").oninput=()=>{mode="targetOut";scheduleQuote();};
+  $("flipBtn").onclick=()=>{const a=tokenIn;tokenIn=tokenOut;tokenOut=a;
+    paintToken("in",tokenIn);paintToken("out",tokenOut);
+    $("amtIn").value="";$("amtOut").value="";paintBalances();
+    runScan(tokenOut);loadChart();paintFlowToken();
+    if(view==="flow")renderFlow();
+    refreshAllowance().then(scheduleQuote);};
+  $("nav").querySelectorAll("[data-view]").forEach(b=>b.onclick=()=>setView(b.dataset.view));
+  addEventListener("hashchange",()=>setView(parseHash().view,false));
+  $("flowTokBtn").onclick=()=>openPicker("out");
+  $("flowTfs").querySelectorAll("[data-w]").forEach(b=>b.onclick=()=>{
+    flowWindow=b.dataset.w;
+    $("nav").querySelectorAll("[data-view]").forEach(b=>b.onclick=()=>setView(b.dataset.view));
+  addEventListener("hashchange",()=>setView(parseHash().view,false));
+  $("flowTokBtn").onclick=()=>openPicker("out");
+  $("flowTfs").querySelectorAll("[data-w]").forEach(x=>x.classList.toggle("on",x===b));
+    renderFlow();});
+  $("tfs").querySelectorAll("[data-tf]").forEach(b=>b.onclick=()=>{
+    timeframe=b.dataset.tf;
+    $("nav").querySelectorAll("[data-view]").forEach(b=>b.onclick=()=>setView(b.dataset.view));
+  addEventListener("hashchange",()=>setView(parseHash().view,false));
+  $("flowTokBtn").onclick=()=>openPicker("out");
+  $("flowTfs").querySelectorAll("[data-w]").forEach(b=>b.onclick=()=>{
+    flowWindow=b.dataset.w;
+    $("nav").querySelectorAll("[data-view]").forEach(b=>b.onclick=()=>setView(b.dataset.view));
+  addEventListener("hashchange",()=>setView(parseHash().view,false));
+  $("flowTokBtn").onclick=()=>openPicker("out");
+  $("flowTfs").querySelectorAll("[data-w]").forEach(x=>x.classList.toggle("on",x===b));
+    renderFlow();});
+  $("tfs").querySelectorAll("[data-tf]").forEach(x=>x.classList.toggle("on",x===b));
+    loadChart();});
+  $("setBtn").onclick=e=>{e.stopPropagation();$("setPop").classList.toggle("on");};
+  document.addEventListener("mousedown",e=>{
+    if(!$("setPop").contains(e.target)&&!$("setBtn").contains(e.target))$("setPop").classList.remove("on");});
+  document.querySelectorAll("#slipSeg [data-bps]").forEach(b=>b.onclick=()=>{
+    slippageBps=+b.dataset.bps;
+    document.querySelectorAll("#slipSeg [data-bps]").forEach(x=>x.classList.toggle("on",x===b));
+    $("slipCustom").value="";if(currentPlan)renderPlan(currentPlan);});
+  $("slipCustom").oninput=e=>{const v=parseFloat(e.target.value);
+    if(!isNaN(v)&&v>0&&v<=50){slippageBps=Math.round(v*100);
+      document.querySelectorAll("#slipSeg [data-bps]").forEach(x=>x.classList.remove("on"));
+      if(currentPlan)renderPlan(currentPlan);}};
+  $("deadlineMin").oninput=e=>{const v=parseInt(e.target.value,10);
+    if(!isNaN(v)&&v>0&&v<=60)deadlineMin=v;};
+  document.addEventListener("keydown",e=>{
+    if(e.key!=="Escape")return;closePicker();$("setPop").classList.remove("on");});
+  let rt=null;
+  addEventListener("resize",()=>{clearTimeout(rt);
+    rt=setTimeout(()=>{if(chartData&&$("plot").querySelector("svg"))drawChart(chartData);},180);});
+}
+
+(async function(){
+  applyTheme();wire();
+  try{E=await loadEthers();}
+  catch{setNotice(note("err","<b>Could not load ethers.</b> Check your connection or ad-blocker and reload."));return;}
+  iMulti=new E.Interface(ABI.multicall3);iQuoter=new E.Interface(ABI.quoterV2);
+  iV2=new E.Interface(ABI.v2);iSol=new E.Interface(ABI.solidly);
+  iErc=new E.Interface(ABI.erc20);iOwn=new E.Interface(ABI.ownable);
+  iV3F=new E.Interface(ABI.v3factory);iSolF=new E.Interface(ABI.solFactory);
+  iExec=new E.Interface(ABI.executor);iPool=new E.Interface(ABI.v3pool);
+  // RPC اختصاصی از پارامتر آدرس: ?rpc=https://...
+  // نه در کد نوشته می‌شود نه ذخیره — فقط برای همان تب. برای خواندن
+  // رویدادهای Swap مفید است، چون RPCهای عمومی بازه‌ی getLogs را محدود می‌کنند.
+  try{
+    const q=new URLSearchParams(location.search).get("rpc");
+    if(q&&/^https:\/\//.test(q))CHAIN.rpcs=[q,...CHAIN.rpcs];
+  }catch{}
+  readProvider=makeProvider(CHAIN.rpcs[0]);
+  tokenIn=BASE_TOKENS.find(t=>t.symbol==="USDC");
+  tokenOut=BASE_TOKENS.find(t=>t.symbol==="WETH");
+  paintToken("in",tokenIn);paintToken("out",tokenOut);
+  readFee();loadChart();
+  setView(parseHash().view||"swap",false);
+  await verifyDexes();          // قبل از هر کوتی، بدان کدام صرافی قابل اتکاست
+  // لینک اشتراکی *بعد* از دروازه‌ها اعمال می‌شود: تا ندانیم کدام صرافی
+  // قابل اتکاست، کوت گرفتن برای توکن ناشناس معنا ندارد.
+  await applyShareParams();
+  runScan(tokenOut);
+  const inj=injected();
+  if(inj){try{const a=await inj.request({method:"eth_accounts"});if(a&&a.length)await connect();}catch{}}
+  refreshButton();
+})();
+</script>
+</body>
+</html>

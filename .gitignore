@@ -1,0 +1,17 @@
+# --- اسرار: هیچ‌وقت وارد مخزن نشوند ---
+.rpc
+.env
+*.key
+**/deployment.txt
+
+# --- خروجی‌های ساخت و کش ---
+contracts/out/
+contracts/cache/
+contracts/broadcast/
+contracts/.fork-block
+web/test/harness.html
+web/test/shot-*.png
+__pycache__/
+*.pyc
+node_modules/
+contracts/lib/

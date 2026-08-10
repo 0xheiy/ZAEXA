@@ -1,0 +1,395 @@
+import asyncio, os, sys
+from playwright.async_api import async_playwright
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+def build_harness():
+    """harness = index.html با لودر ethers که به stub محلی اشاره می‌کند."""
+    src = open(os.path.join(HERE, "..", "index.html"), encoding="utf-8").read()
+    a = src.index("const ETHERS_CDNS=[")
+    b = src.index("];", a) + 2
+    out = src[:a] + 'const ETHERS_CDNS=["./stub-ethers.js"];' + src[b:]
+    path = os.path.join(HERE, "harness.html")
+    open(path, "w", encoding="utf-8").write(out)
+    return path
+
+URL = "file://" + build_harness()
+
+async def main():
+    errors = []
+    async with async_playwright() as p:
+        b = await p.chromium.launch()
+        pg = await b.new_page(viewport={"width": 1240, "height": 1000}, color_scheme="dark")
+        pg.on("console", lambda m: errors.append(m.text) if m.type == "error" else None)
+        pg.on("pageerror", lambda e: errors.append(f"PAGEERROR {e}"))
+        await pg.goto(URL)
+        await pg.wait_for_timeout(900)
+
+        assert await pg.inner_text("#tokInSym") == "USDC"
+        assert await pg.inner_text("#tokOutSym") == "WETH"
+
+        # ---- 0. price chart ----
+        await pg.wait_for_selector("#plot svg", timeout=15000)
+        pts = await pg.eval_on_selector_all("#plot svg path", "els => els.length")
+        print("[chart] %s  %s  (%s svg paths)" % (
+            await pg.inner_text("#pairName"), await pg.inner_text("#pxNow"), pts))
+        print("        change: %s" % await pg.inner_text("#pxChg"))
+        assert pts >= 2, "chart line + fill missing"
+        assert "\u2014" not in await pg.inner_text("#pxNow"), "no headline price"
+        box = await (await pg.query_selector("#plot svg")).bounding_box()
+        await pg.mouse.move(box["x"] + box["width"] * 0.62, box["y"] + box["height"] * 0.5)
+        await pg.wait_for_timeout(250)
+        assert await pg.eval_on_selector("#tip", "e => getComputedStyle(e).opacity") == "1", "crosshair tooltip did not show"
+        print("[chart] tooltip: %s" % (await pg.inner_text("#tip")).replace("\n", " "))
+        for tf in ("1W", "1H"):
+            await pg.click(f'#tfs [data-tf="{tf}"]'); await pg.wait_for_timeout(700)
+            assert await pg.query_selector("#plot svg"), f"chart broke on {tf}"
+        await pg.click('#tfs [data-tf="1D"]'); await pg.wait_for_timeout(600)
+
+        # ---- 1. quote + venue comparison table ----
+        await pg.fill("#amtIn", "1000")
+        await pg.wait_for_function("() => document.getElementById('amtOut').value !== ''", timeout=20000)
+        print("[quote 1000 USDC] out=%s  rate=%s  impact=%s  min=%s" % (
+            await pg.input_value("#amtOut"), await pg.inner_text("#kRate"),
+            await pg.inner_text("#kImpact"), await pg.inner_text("#kMin")))
+        print("[venues] %s" % await pg.inner_text("#venueMeta"))
+        # ردیف «نسبت به یونی‌سواپ» — ادعای رقابتی محصول، پس باید صادق بماند
+        print("[vs uniswap] %s  (tip: %s)" % (
+            await pg.inner_text("#kVs"),
+            (await pg.get_attribute("#vsRow", "title") or "")[:80]))
+        vs = await pg.inner_text("#kVs")
+        assert vs in ("same", "—") or vs.startswith("+") or vs.startswith("-"), \
+            "unexpected comparison value: " + vs
+        assert vs != "+0.00%", "a zero difference must read as 'same', not as a win"
+
+        # همان ردیف، در دو حالتی که دستی نمی‌شود به آن رسید
+        async def vs_probe(mutator):
+            return await pg.evaluate("""(m) => {
+                const saved = lastDirect;
+                lastDirect = lastDirect.map(r =>
+                    r.venue && r.venue.dex.id === "uniswap-v3"
+                        ? (m === "worse" && r.out ? Object.assign({}, r, {out: (r.out * 99n) / 100n})
+                                                  : Object.assign({}, r, {out: null, status: "unknown"}))
+                        : r);
+                renderVsUniswap(currentPlan);
+                const out = {v: document.getElementById("kVs").innerText,
+                             t: document.getElementById("vsRow").title};
+                lastDirect = saved; renderVsUniswap(currentPlan);
+                return out;
+            }""", mutator)
+
+        r = await vs_probe("worse")
+        print("[vs uniswap:cheaper-elsewhere] %s" % r["v"])
+        assert r["v"].startswith("+") and float(r["v"].rstrip("%")) > 0.5, \
+            "a real edge over Uniswap must be shown: " + r["v"]
+        assert "gas" in r["t"].lower(), "the gas caveat must travel with the claim"
+
+        r = await vs_probe("unknown")
+        print("[vs uniswap:uniswap-silent] %s" % r["v"])
+        assert r["v"] == "unknown", \
+            "with no Uniswap quote we cannot claim an edge: " + r["v"]
+        rows = await pg.eval_on_selector_all(
+            "#venueBody .vrow", "els => els.map(e => e.innerText.replace(/\\n+/g, ' | '))")
+        for r in rows:
+            print("        ", r)
+        assert any("best" in r.lower() for r in rows), "no best venue marked"
+        assert any("no pool" in r for r in rows), "empty pools must be shown, not hidden"
+        # هر دو نسل V3 باید در جدول باشند. پنکیک نسل اول است (0x414bf389) و
+        # قبلاً با kind=V3 ثبت شده بود، یعنی به تابعی صدا زده می‌شد که ندارد.
+        assert any("PancakeSwap" in r for r in rows), \
+            "a legacy-generation V3 DEX must be quoted like any other V3"
+
+        # ---- 2. safety panel (scanner.py port) ----
+        await pg.wait_for_selector("#safetyBody .rhead", timeout=20000)
+        print("[safety] %s | %s" % (
+            await pg.inner_text("#safetyBody .rv"),
+            (await pg.inner_text("#safetyBody .rs")).replace("\n", " ")))
+        checks = await pg.eval_on_selector_all(
+            "#safetyBody .chk", "els => els.filter(e => e.querySelector('b')).map(e => e.className + ': ' + e.querySelector('b').innerText)")
+        for c in checks:
+            print("        ", c)
+        assert any("Fee is mutable" in c for c in checks), "bytecode selector scan did not fire"
+
+        # ---- 2b. exit check (round-trip) ----
+        await pg.wait_for_selector("#exitBox .exit", timeout=20000)
+        print("[exit] %s | %s" % (
+            await pg.inner_text("#exitBox .exitTtl"),
+            await pg.inner_text("#exitBox .exitBadge")))
+        print("      %s" % (await pg.inner_text("#exitBox")).replace("\n", " ")[:190])
+        assert "estimated" in (await pg.inner_text("#exitBox .exitBadge")).lower(), \
+            "with no wallet the exit check must be labelled an estimate, not a proof"
+        await pg.screenshot(path=os.path.join(HERE, "shot-desk.png"), full_page=True)
+
+        # ---- 2b-bis. THE exit-check regression test --------------------
+        # پس‌زمینه: در اسکرین‌شات ۹ آگوست، USDC قرمز شد با
+        # «SELL SIMULATION REVERTED — transferFrom failed»، در حالی که همان
+        # پنل می‌گفت Sellable و round-trip صفر درصد. علت، توکن نبود: قرارداد
+        # نتوانسته بود توکن را از کیف پول بکشد. یعنی یک مشکل پیش‌شرطِ سمت ما
+        # به‌عنوان حکم علیه توکن نمایش داده شد — «نمی‌دانم» در نقش «نه».
+        # این چهار حالت مرز را قفل می‌کنند.
+        EXIT_PROBE = """async ([msg, alw, down]) => {
+            const realContract = E.Contract;
+            const realCall = readProvider.call.bind(readProvider);
+            window.__STUB_ALLOWANCE__ = BigInt(alw);
+            account = "0x8A0Dcb583C8CAdc481E34487c34f1B856fe97e23";
+            signer = {}; walletChainId = CHAIN.id;
+            balances[balKey(tokenIn)] = 10n ** 30n;   // state کش‌شده: کافی
+            allowance = 10n ** 30n;                   // state کش‌شده: کافی
+            E.Contract = function () {
+                return { executeSwap: { staticCall: async () => { throw new Error(msg); } } };
+            };
+            if (down) readProvider.call = async () => { throw new Error("fetch failed"); };
+            let res = null;
+            try {
+                res = await runExitCheck(currentPlan, parsedAmountIn());
+                renderExit(res);
+            } finally {
+                E.Contract = realContract;
+                readProvider.call = realCall;
+            }
+            return { state: res && res.state, reason: res && res.reason,
+                     badge: document.querySelector("#exitBox .exitBadge").innerText,
+                     title: document.querySelector("#exitBox .exitTtl").innerText };
+        }"""
+
+        async def exit_case(label, msg, allowance="0", down=False):
+            r = await pg.evaluate(EXIT_PROBE, [msg, allowance, down])
+            print("[exit:%s] state=%s  title=%r" % (label, r["state"], r["title"]))
+            print("          %s" % (r["reason"] or "")[:120])
+            return r
+
+        BIG = str(10 ** 30)
+        NEVER = "You may not be able to sell this back"
+
+        # الف) همان باگ اسکرین‌شات: revert چون کیف پول approve نکرده.
+        r = await exit_case("no-approval", 'execution reverted: "transferFrom failed"', allowance="0")
+        assert r["state"] == "estimated", "a missing approval must not read as a verdict on the token"
+        assert NEVER not in r["title"], "screenshot bug is back: " + r["title"]
+        assert "approve" in (r["reason"] or "").lower()
+
+        # ب) کیف پول approve کرده و باز هم revert → این بار واقعاً سیگنال توکن است.
+        r = await exit_case("honeypot", 'execution reverted: "Blacklisted"', allowance=BIG)
+        assert r["state"] == "blocked", "a real sell-side revert must still be reported"
+        assert NEVER in r["title"]
+
+        # ج) حتی با پیام transferFrom، اگر پیش‌شرط‌ها برقرارند revert مال توکن است.
+        #     (رگرسیون نسخه‌ی قبل که فقط رشته را تطبیق می‌داد و اینجا کور بود.)
+        r = await exit_case("hostile-msg", 'execution reverted: "transferFrom failed"', allowance=BIG)
+        assert r["state"] == "blocked", "message matching must not excuse a genuine revert"
+
+        # د) شبکه جواب نداد → «نمی‌دانم»، هرگز «نه».
+        r = await exit_case("rpc-down", "fetch failed", allowance=BIG, down=True)
+        assert r["state"] == "unknown", "an outage must never be reported as a verdict"
+        assert NEVER not in r["title"], "outage reported as unsellable: " + r["title"]
+
+        # پاک کردن کیف پول ساختگی تا تست‌های بعدی حالت «بدون کیف پول» ببینند
+        await pg.evaluate("""() => {
+            account = null; signer = null; walletChainId = null;
+            balances = {}; allowance = 0n; delete window.__STUB_ALLOWANCE__;
+        }""")
+        await pg.fill("#amtIn", "1000")
+        await pg.wait_for_timeout(2500)
+
+        # ---- 2b-ter. shareable quote link ----
+        # وضعیت باید در URL برود و برگردد، بدون بک‌اند. و مهم‌تر: لینکی که
+        # توکن ناشناس دارد نباید بی‌صدا روی پیش‌فرض بنشیند.
+        url = await pg.evaluate("() => shareUrl()")
+        print("[share] %s" % url.split("#")[-1])
+        assert "in=USDC" in url and "out=WETH" in url and "amt=1000" in url, url
+
+        applied = await pg.evaluate("""async () => {
+            location.hash = "swap?in=WETH&out=USDC&amt=2";
+            await applyShareParams();
+            return {inSym: document.getElementById("tokInSym").innerText,
+                    outSym: document.getElementById("tokOutSym").innerText,
+                    amt: document.getElementById("amtIn").value};
+        }""")
+        print("[share] round trip -> %s -> %s  amt=%s" % (
+            applied["inSym"], applied["outSym"], applied["amt"]))
+        assert applied["inSym"] == "WETH" and applied["outSym"] == "USDC" and applied["amt"] == "2", applied
+
+        bad = await pg.evaluate("""async () => {
+            location.hash = "swap?in=USDC&out=0x000000000000000000000000000000000000dEaD&amt=5";
+            await applyShareParams();
+            return {outSym: document.getElementById("tokOutSym").innerText,
+                    notice: document.getElementById("notices").innerText};
+        }""")
+        print("[share] hostile link -> out=%s | %s" % (bad["outSym"], bad["notice"].replace("\n", " ")[:90]))
+        assert "could not be opened" in bad["notice"].lower(), \
+            "a link with a token we cannot verify must say so, not fall back silently"
+
+        # برگشت به حالت اول برای بقیه‌ی تست‌ها
+        await pg.evaluate("""async () => {
+            location.hash = "swap?in=USDC&out=WETH&amt=1000";
+            await applyShareParams();
+        }""")
+        await pg.wait_for_timeout(2500)
+
+        # ---- 2c. DEX coverage gate ----
+        cov = await pg.inner_text("#coverage")
+        print("[coverage] %s" % cov.replace("\n", " | "))
+        assert "Routing through" in cov
+        assert "no contract" in cov, "unverified DEXes must be shown with a reason, not hidden"
+        assert "PancakeSwap" not in cov, "PancakeSwap should now pass the gates, not sit in the excluded list"
+
+        # ---- 2c-bis. every DEX is called with the signature its router actually has ----
+        gens = await pg.evaluate(
+            "() => DEXES.map(d => ({name: d.name, kind: d.kind, sig: swapSigOf(d),"
+            " ok: !!(dexStatus[d.id] && dexStatus[d.id].ok)}))")
+        for g in gens:
+            print("[dex] %-16s kind=%s ok=%-5s %s" % (g["name"], g["kind"], g["ok"], g["sig"][:46]))
+        pcs = next(g for g in gens if "PancakeSwap" in g["name"])
+        assert pcs["ok"], "PancakeSwap must pass the gates once wired as legacy V3"
+        assert "uint256,uint256,uint256,uint160" in pcs["sig"], \
+            "a legacy router must be called with the 8-field struct, not the 7-field one"
+        uni = next(g for g in gens if g["name"] == "Uniswap V3")
+        assert "uint256,uint256,uint160)" in uni["sig"] and "uint256,uint256,uint256" not in uni["sig"], \
+            "SwapRouter02 must keep the 7-field struct"
+
+        # ---- 2c-ter. the quoter gate checks the selector, not just that code exists ----
+        # نسخه‌ی قبل فقط می‌پرسید «قراردادی آنجا هست؟» — همان شکافی که در سمت
+        # روتر باگ SwapRouter02 را ساخت، فقط یک قدم آن‌طرف‌تر.
+        reason = await pg.evaluate("""async () => {
+            const d = DEXES.find(x => x.id === "uniswap-v3"), real = d.quoter;
+            d.quoter = d.router;              // قرارداد هست، ولی تابع کوت را ندارد
+            await verifyDexes();
+            const r = dexStatus["uniswap-v3"].reason;
+            d.quoter = real; await verifyDexes();
+            return r;
+        }""")
+        print("[quoter gate] %s" % reason)
+        assert "quoter" in reason.lower(), \
+            "a quoter that lacks the function we call must be rejected: " + reason
+
+        # ---- 2c-bis. token logos load, initials survive failure ----
+        await pg.wait_for_timeout(800)
+        logos = await pg.eval_on_selector_all("#tokInAv img, #tokOutAv img", "e => e.length")
+        initials = await pg.inner_text("#tokInAv")
+        print("[icons] logo images: %s   fallback initials: %r" % (logos, initials.strip()))
+        assert initials.strip() != "", "initials must always be present as a fallback"
+
+        # ---- 2d. native ETH is offered and routes through WETH ----
+        await pg.click("#tokOutBtn"); await pg.wait_for_timeout(250)
+        await pg.fill("#tokSearch", "ETH"); await pg.wait_for_timeout(250)
+        syms = await pg.eval_on_selector_all("#tokList .trow .s", "e => e.map(x => x.innerText)")
+        print("[eth] picker shows: %s" % syms)
+        assert "ETH" in syms, "native ETH must be selectable"
+        await pg.click(".trow"); await pg.wait_for_timeout(300)
+        assert await pg.inner_text("#tokOutSym") == "ETH"
+        await pg.fill("#amtIn", "1000"); await pg.wait_for_timeout(3000)
+        out_eth = await pg.input_value("#amtOut")
+        print("[eth] USDC -> ETH quote: %s  route=%s" % (
+            out_eth, (await pg.inner_text("#routeBody")).replace("\n", " | ")))
+        assert out_eth not in ("", "0"), "ETH output must quote via WETH"
+        notices = await pg.inner_text("#notices")
+        assert "not supported" not in notices, "native ETH should no longer be rejected"
+        await pg.wait_for_timeout(1200)
+        eth_safety = await pg.inner_text("#safetyBody")
+        print("[eth safety] %s" % eth_safety.replace("\n", " | ")[:120])
+        assert "Native asset" in eth_safety, "native ETH must be explained, not reported as a network failure"
+        assert "did not answer" not in eth_safety, "no contract is not the same as no answer"
+        await pg.screenshot(path=os.path.join(HERE, "shot-eth.png"), full_page=True)
+        # برگرد به WETH برای بقیه‌ی تست‌ها
+        await pg.click("#tokOutBtn"); await pg.wait_for_timeout(250)
+        await pg.fill("#tokSearch", "WETH"); await pg.wait_for_timeout(250)
+        await pg.click(".trow"); await pg.wait_for_timeout(2500)
+
+        # ---- 2e. portfolio + money flow live on their own pages ----
+        assert not await pg.is_visible("#flowBody"), "flow must not sit on the swap page"
+        assert not await pg.is_visible("#folioBody"), "portfolio must not sit on the swap page"
+
+        await pg.click('#nav [data-view="flow"]'); await pg.wait_for_timeout(400)
+        assert await pg.evaluate("location.hash") == "#flow", "view must be linkable"
+        print("[nav] flow page token: %s" % await pg.inner_text("#flowTokSym"))
+        await pg.wait_for_selector("#flowBody .flowkv", timeout=20000)
+        flow = await pg.inner_text("#flowBody")
+        print("[flow 1H] %s" % flow.replace("\n", " | ")[:170])
+        addrs = await pg.eval_on_selector_all("#flowBody .trade a", "e => e.length")
+        print("[flow] buyer addresses shown: %s" % addrs)
+        assert addrs > 0, "largest buys should link the buying wallet"
+        assert "Net" in flow, "flow panel missing net figure"
+        assert "LARGEST BUYS" in flow.upper(), "largest buys list missing"
+        await pg.click('#flowTfs [data-w="h6"]'); await pg.wait_for_timeout(900)
+        print("[flow 6H] %s" % (await pg.inner_text("#flowBody")).replace("\n", " | ")[:120])
+        await pg.click('#flowTfs [data-w="h1"]'); await pg.wait_for_timeout(600)
+        await pg.screenshot(path=os.path.join(HERE, "shot-flow.png"), full_page=True)
+
+        await pg.click('#nav [data-view="folio"]'); await pg.wait_for_timeout(500)
+        folio = await pg.inner_text("#folioBody")
+        print("[portfolio] %s" % folio.replace("\n", " | ")[:120])
+        assert "Connect a wallet" in folio, "with no wallet the portfolio must say so, not show zeros"
+        await pg.screenshot(path=os.path.join(HERE, "shot-folio.png"), full_page=True)
+
+        # back to the swap page for the remaining tests
+        await pg.click('#nav [data-view="swap"]'); await pg.wait_for_timeout(400)
+        assert await pg.is_visible("#amtIn"), "swap page must come back"
+
+        # ---- 2f. reverse quoting: type the amount you WANT to receive ----
+        await pg.fill("#amtIn", "")
+        await pg.fill("#amtOut", "0.5")
+        await pg.wait_for_function(
+            "() => document.getElementById('amtIn').value !== ''", timeout=25000)
+        need = await pg.input_value("#amtIn")
+        got = await pg.input_value("#amtOut")
+        print("[reverse] want %s WETH -> pay %s USDC" % (got, need))
+        assert float(need) > 0, "reverse solve produced no input amount"
+        note = await pg.inner_text("#revNote")
+        assert "Solved for your target" in note, "reverse mode must say the amount is solved, not exact"
+        print("[reverse] %s" % note.replace("\n", " ")[:130])
+        await pg.screenshot(path=os.path.join(HERE, "shot-reverse.png"), full_page=True)
+        await pg.fill("#amtOut", "")
+        await pg.fill("#amtIn", "1000"); await pg.wait_for_timeout(2500)
+
+        # ---- 3. split order ----
+        await pg.fill("#amtIn", "900000")
+        await pg.wait_for_timeout(3000)
+        print("[split] route=%s  impact=%s" % (
+            await pg.inner_text("#routeMeta"), await pg.inner_text("#kImpact")))
+        print("[route] %s" % (await pg.inner_text("#routeBody")).replace("\n", " | "))
+        await pg.screenshot(path=os.path.join(HERE, "shot-split.png"), full_page=True)
+
+        # ---- 4. multi-hop ----
+        for target, sym in (("#tokInBtn", "cbBTC"), ("#tokOutBtn", "DAI")):
+            await pg.click(target); await pg.wait_for_timeout(200)
+            await pg.fill("#tokSearch", sym); await pg.wait_for_timeout(250)
+            await pg.click(".trow"); await pg.wait_for_timeout(300)
+        await pg.fill("#amtIn", "1")
+        await pg.wait_for_timeout(3500)
+        print("[multihop cbBTC->DAI] out=%s  route=%s" % (
+            await pg.input_value("#amtOut"), (await pg.inner_text("#routeBody")).replace("\n", " | ")))
+
+        # ---- 5. THE regression test: outage must read as unknown, never "no route"
+        await pg.evaluate("""() => {
+            readProvider.call = async () => { throw new Error('fetch failed'); };
+            rotateRpc = () => {};
+        }""")
+        await pg.fill("#amtIn", "5")
+        await pg.wait_for_timeout(3500)
+        msg = await pg.inner_text("#notices")
+        print("[rpc down] %s" % msg.replace("\n", " "))
+        assert "did not answer" in msg, "outage misreported: " + msg
+        assert "No route" not in msg, "outage reported as 'no route'"
+
+        # ---- 6. light theme ----
+        await pg.reload(); await pg.wait_for_timeout(900)
+        await pg.fill("#amtIn", "1000"); await pg.wait_for_timeout(3000)
+        await pg.click("#themeBtn"); await pg.wait_for_timeout(300)
+        assert await pg.get_attribute("html", "data-theme") == "light"
+        await pg.screenshot(path=os.path.join(HERE, "shot-light.png"), full_page=True)
+
+        # ---- 7. settings + picker ----
+        await pg.click("#setBtn"); await pg.wait_for_timeout(250)
+        await pg.click('#slipSeg [data-bps="100"]'); await pg.wait_for_timeout(300)
+        print("[slippage 1%%] min=%s" % await pg.inner_text("#kMin"))
+        await pg.keyboard.press("Escape")
+        await pg.click("#tokOutBtn"); await pg.wait_for_timeout(400)
+        await pg.screenshot(path=os.path.join(HERE, "shot-picker.png"))
+        await pg.keyboard.press("Escape")
+        await b.close()
+
+    print("\n--- console errors ---")
+    if errors:
+        for e in errors: print("  ", e)
+        sys.exit(1)
+    print("   none")
+
+asyncio.run(main())
