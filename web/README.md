@@ -5,6 +5,7 @@ One file. No server, no build step, no install.
 ```
 web/
   index.html          the entire application (HTML + CSS + JS)
+  ethers.umd.min.js   vendored, not loaded from a CDN — see below
   test/
     run.py            Playwright suite; builds its own harness from index.html
     stub-ethers.js    fake ethers + a synthetic Base network, no sockets
@@ -97,6 +98,15 @@ did not answer" for free: inside `aggregate3` a failing sub-call is
   is broadcast and no gas is spent.
 - **After a transaction is sent**, any error concerns *reading* the result. The
   user is told "sent, but we could not read the receipt" — never "failed".
+- **ethers is vendored, deliberately.** It used to load from three CDNs with
+  fallback. That meant every visitor executed code from a third party — code
+  that builds the wallet, signs the transaction, and knows the destination
+  address. A compromised CDN could reroute a swap or coax an unlimited approval,
+  invisibly. The file now sits next to `index.html`, taken from the npm registry
+  (`npm pack ethers@6.13.4`). There is **no CDN fallback**: a fallback to an
+  untrusted origin restores the same risk through the back door. If the local
+  file is missing the app fails loudly, which is far better than running code
+  nobody vetted. A test in `run.py` fails if a remote origin ever reappears.
 - **No `localStorage`.** Theme and imported tokens live in the tab only.
 - **Token error strings are escaped** before display, so a malicious token
   cannot inject markup through its revert reason.

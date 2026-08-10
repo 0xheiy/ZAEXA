@@ -14,6 +14,25 @@ def build_harness():
 
 URL = "file://" + build_harness()
 
+def check_no_remote_code():
+    """ethers باید از کنار index.html بیاید، نه از CDN.
+
+    این یک تست رابط نیست، یک تست زنجیره‌ی تأمین است: هر اسکریپتی که از
+    بیرون بارگذاری شود، کیف پول کاربر و مقصد تراکنش را در اختیار دارد.
+    اگر روزی کسی برای «مطمئن‌تر شدن» یک fallback به CDN برگرداند، همین‌جا
+    گیر می‌افتد."""
+    src = open(os.path.join(HERE, "..", "index.html"), encoding="utf-8").read()
+    a = src.index("const ETHERS_CDNS=[")
+    decl = src[a:src.index("];", a) + 2]
+    assert "http://" not in decl and "https://" not in decl, \
+        "ethers must not be loaded from a remote origin:\n" + decl
+    vendored = os.path.join(HERE, "..", "ethers.umd.min.js")
+    assert os.path.exists(vendored), "ethers.umd.min.js is missing next to index.html"
+    print("[supply chain] ethers is vendored (%.0f KB), no remote script tags"
+          % (os.path.getsize(vendored) / 1024))
+
+check_no_remote_code()
+
 async def main():
     errors = []
     async with async_playwright() as p:

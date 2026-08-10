@@ -48,12 +48,18 @@ behave like "no."*
 
 ## Architecture
 
-No backend. The entire application is one HTML file that runs in your browser
-and signs with your own wallet. Nothing is stored, nothing is proxied, and there
-is no server of ours to trust or to go down. It can be hosted on IPFS.
+No backend. The application runs in your browser and signs with your own wallet.
+Nothing is stored, nothing is proxied, and there is no server of ours to trust
+or to go down. It can be hosted on IPFS.
+
+**No third-party code, either.** `ethers` is vendored rather than pulled from a
+CDN, with no remote fallback. A swap page that loads its crypto library from
+someone else's server is one compromised CDN away from rerouting your funds —
+and "no backend" means little if three other origins can still ship you code.
 
 ```
 web/index.html            the whole app
+web/ethers.umd.min.js     vendored — no third-party script is ever loaded
 web/test/run.py           Playwright suite, builds its harness from index.html
 web/test/stub-ethers.js   fake ethers + synthetic AMM, no network
 contracts/src/            SwapExecutor.sol

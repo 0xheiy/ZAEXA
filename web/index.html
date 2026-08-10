@@ -557,11 +557,22 @@ const LINKS={
   email:"hello@zaexa.com",
 };
 
-const ETHERS_CDNS=[
-  "https://cdnjs.cloudflare.com/ajax/libs/ethers/6.13.4/ethers.umd.min.js",
-  "https://cdn.jsdelivr.net/npm/ethers@6.13.4/dist/ethers.umd.min.js",
-  "https://unpkg.com/ethers@6.13.4/dist/ethers.umd.min.js",
-];
+/* ethers از کنار همین فایل بارگذاری می‌شود، نه از CDN.
+   ---------------------------------------------------------------------
+   قبلاً سه CDN پشت سر هم امتحان می‌شدند. یعنی هر بار که کاربری صفحه را باز
+   می‌کرد، کدی از سرور شخص ثالث دانلود و اجرا می‌شد — کدی که کیف پول را
+   می‌سازد، تراکنش را امضا می‌کند و مقصد سواپ را می‌داند. دستکاری آن CDN
+   کافی بود تا مقصد عوض شود یا کاربر به امضای یک approve نامحدود کشیده شود،
+   بدون اینکه نه او بفهمد نه ما.
+
+   fallback به CDN عمداً *برداشته* شد. یک fallback به منبع نامطمئن، همان
+   ریسک را از در پشتی برمی‌گرداند: کافی است فایل محلی یک بار در دسترس نباشد.
+   اگر این فایل نبود، اپ صریح شکست می‌خورد — که خیلی بهتر از اجرای کد ناشناس است.
+
+   فایل از رجیستری npm گرفته شده (ethers 6.13.4)، sha384:
+   6Zl0Pc8zjSz8KvmNeXRvUQgY4ryFb+BwDvKCmLYcBME0joAaru491tQgi9B7zsMM
+   برای به‌روزرسانی: npm pack ethers@<نسخه> و جایگزینی فایل، بعد اجرای تست‌ها. */
+const ETHERS_CDNS=["./ethers.umd.min.js"];
 function loadEthers(){return new Promise((res,rej)=>{let i=0;const go=()=>{
   if(i>=ETHERS_CDNS.length)return rej(new Error("ethers failed"));
   const s=document.createElement("script");s.src=ETHERS_CDNS[i++];
