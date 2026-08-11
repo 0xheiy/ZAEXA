@@ -346,6 +346,9 @@ footer a{color:var(--tx3)}
 .pop{position:absolute;right:0;top:46px;width:256px;background:var(--card);border-radius:18px;
   box-shadow:var(--sh);padding:16px;z-index:50;display:none}
 .pop.on{display:block}
+.optrow{display:flex;gap:9px;align-items:flex-start;font-size:12.5px;color:var(--tx2);
+  margin:-2px 0 4px;cursor:pointer;line-height:1.4}
+.optrow input{margin:2px 0 0;flex:none}
 .pop h4{margin:0 0 9px;font-size:11.5px;font-weight:640;letter-spacing:.05em;
   text-transform:uppercase;color:var(--tx3)}
 .seg{display:flex;gap:6px;margin-bottom:15px}
@@ -396,6 +399,12 @@ footer a{color:var(--tx3)}
       </div>
       <h4>Deadline (min)</h4>
       <div class="seg"><input id="deadlineMin" value="3" inputmode="numeric" style="width:100%"></div>
+      <h4>Approvals</h4>
+      <label class="optrow"><input type="checkbox" id="unlimApprove">
+        <span>Approve unlimited instead of the exact amount</span></label>
+      <h4>Custom RPC · this tab only</h4>
+      <div class="seg"><input id="rpcCustom" placeholder="https://…" style="width:100%"
+        autocomplete="off" spellcheck="false"></div>
       <p>Every swap is simulated first. If the simulation fails, nothing is broadcast and no gas is spent.</p>
     </div>
   </div>
@@ -586,6 +595,8 @@ const CHAIN={
         "https://base.publicnode.com","https://mainnet.base.org"],
   wrapped:"WETH",reference:"USDC",
 };
+const DEFAULT_RPCS=CHAIN.rpcs.slice();
+let customRpc=false;
 // KIND_V3 = SwapRouter02 (ساختار هفت‌فیلدی، بدون deadline)
 const KIND={V2:0,V3:1,SOLIDLY:2,V3_LEGACY:3};
 
@@ -676,25 +687,25 @@ const ABI={
     "function decimals() view returns (uint8)","function balanceOf(address) view returns (uint256)",
     "function allowance(address,address) view returns (uint256)","function approve(address,uint256) returns (bool)"],
   ownable:["function owner() view returns (address)"],
-  weth:["function deposit() payable","function withdraw(uint256)"],
   v3pool:["function token0() view returns (address)",
     "event Swap(address indexed sender,address indexed recipient,int256 amount0,int256 amount1,uint160 sqrtPriceX96,uint128 liquidity,int24 tick)"],
+  v2factory:["function getPair(address,address) view returns (address)"],
   v3factory:["function getPool(address,address,uint24) view returns (address)"],
   solFactory:["function getPool(address,address,bool) view returns (address)"],
   executor:["function executeSwap(address tokenIn,address tokenOut,uint256 totalAmountIn,uint256 minAmountOut,((uint8 kind,address router,address tokenIn,address tokenOut,uint24 feeTier,bool stable,address poolFactory)[] steps,uint256 amountIn)[] parts,uint256 deadline) returns (uint256)",
     "function allowedRouter(address) view returns (bool)","function feeBps() view returns (uint256)"],
 };
 
-let E,iMulti,iQuoter,iV2,iSol,iErc,iOwn,iV3F,iSolF,iExec;
+let E,iMulti,iQuoter,iV2,iSol,iErc,iOwn,iV3F,iSolF,iV2F,iExec;
 let readProvider=null,rpcIndex=0,liveSrc=null;
 let walletProvider=null,signer=null,account=null,walletChainId=null;
 let tokenIn=null,tokenOut=null,customTokens=[];
-let slippageBps=50,deadlineMin=3,feeBps=0;
+let slippageBps=50,deadlineMin=3,feeBps=0,unlimitedApprove=false;
 let currentPlan=null,quoteSeq=0,scanSeq=0,chartSeq=0,exitSeq=0;
 // "exactIn" = کاربر مبلغ پرداختی را نوشته | "targetOut" = مقدار دریافتی را نوشته
 let mode="exactIn";
-let dexStatus={};
-let balances={},allowance=0n,busy=false,pickerTarget="in";
+let dexStatus={},verifyRetried=false;
+let balances={},allowance=0n,allowanceKnown=false,busy=false,pickerTarget="in";
 let safetyCache={},timeframe="1D",chartData=null;
 const $=id=>document.getElementById(id);
 const ZERO="0x0000000000000000000000000000000000000000";
@@ -767,6 +778,15 @@ async function verifyDexes(){
     }catch{return set(false,"could not reach the network to verify");}
     set(true,"verified");
   }));
+  /* یک وقفه‌ی لحظه‌ای موقع بارگذاری، کل جلسه را روی «۰ از ۶ صرافی» قفل
+     می‌کرد و بعد هر کوتی «شبکه جواب نداد» می‌شد — درست ولی برای همیشه
+     غلط. یک تلاش دوباره، فقط برای آن‌هایی که *نشد بپرسیم*. */
+  const unreachable=DEXES.filter(d=>!dexStatus[d.id].ok&&
+    dexStatus[d.id].reason==="could not reach the network to verify");
+  if(unreachable.length&&!verifyRetried){
+    verifyRetried=true;
+    setTimeout(()=>{verifyDexes();},4000);
+  }
   // دروازه‌ی ۳ — لیست سفید قرارداد اجرا
   try{
     const ds=DEXES.filter(d=>dexStatus[d.id].ok);
@@ -815,6 +835,17 @@ function encodeQuote(v,a,b,amt){
     dec:d=>{const r=iV2.decodeFunctionResult("getAmountsOut",d)[0];return r[r.length-1];}};
 }
 function newStats(){return{attempted:0,ok:0,noPool:0,rpcFailed:0};}
+/* «مسیری نیست» یک ادعای قطعی است و فقط وقتی مجاز است که *همه* پرسیده
+   شده باشند. آستانه‌ی ۲۵٪ قبلی یعنی چهار کوت ناموفق از هجده تا هنوز اجازه
+   می‌داد قاطع بگوییم مسیری وجود ندارد — در حالی که شاید همان چهار تا
+   مسیر داشتند. حالا هر شکستی، ادعا را به «تا جایی که دیدیم» تبدیل می‌کند. */
+function noRouteNote(s,detail){
+  if(unreliable(s)||s.ok===0)
+    return note("err",`<b>The network did not answer.</b> ${s.rpcFailed} of ${s.attempted} quotes failed, so we cannot tell whether a route exists.`);
+  if(s.rpcFailed>0)
+    return note("warn",`<b>No route found.</b> ${detail} Note that ${s.rpcFailed} of ${s.attempted} venues did not answer, so this is not a complete picture.`);
+  return note("warn",`<b>No route.</b> ${detail}`);
+}
 function unreliable(s){return s.attempted>0&&s.rpcFailed/s.attempted>0.25;}
 
 async function quoteMany(specs,stats){
@@ -961,7 +992,10 @@ async function runExitCheck(plan,amountIn){
 
   // --- الف) رفت‌وبرگشت مبتنی بر کوت: همیشه در دسترس ---
   const st=newStats();
-  const back=await findRoutes(routable(tokenOut),routable(tokenIn),plan.totalOut,st);
+  // آنچه واقعاً به کاربر می‌رسد، بعد از کارمزد پروتکل است. کوت گرفتن روی
+  // مقدار ناخالص یعنی درصد رفت‌وبرگشت به اندازه‌ی کارمزد کمتر گزارش شود.
+  const sellSize=(plan.totalOut*BigInt(10000-feeBps))/10000n;
+  const back=await findRoutes(routable(tokenOut),routable(tokenIn),sellSize,st);
   if(seq!==exitSeq)return null;
   if(!back.routes.length){
     out.state=(unreliable(st)||st.ok===0)?"unknown":"noexit";
@@ -975,7 +1009,14 @@ async function runExitCheck(plan,amountIn){
   out.lossPct=(1-Number(out.recovered)/Number(amountIn))*100;
 
   // --- ب) اثبات با اجرا: خرید و فروش در یک تراکنش شبیه‌سازی‌شده ---
-  const buy=plan.parts[0].route;
+  /* نقشه‌ی split را نمی‌شود در یک رفت‌وبرگشت سه‌مرحله‌ای نمایش داد. نسخه‌ی
+     قبل مسیر اول را با *کل* مبلغ شبیه‌سازی می‌کرد و برچسب «verified» می‌زد —
+     یعنی تأیید چیزی که کاربر اصلاً انجام نمی‌دهد. حالا بزرگ‌ترین پا با
+     اندازه‌ی واقعی خودش آزموده می‌شود و صریح گفته می‌شود. */
+  const big=plan.parts.slice().sort((a,b)=>b.amountIn>a.amountIn?1:-1)[0];
+  const buy=big.route;
+  const legShare=Number((big.amountIn*10000n)/plan.totalIn)/100;
+  const simAmount=plan.parts.length>1?big.amountIn:amountIn;
   const steps=buy.hops.length+sellRoute.hops.length;
   if(!signer||!account||walletChainId!==CHAIN.id){out.reason="Connect a wallet to verify by simulation.";return out;}
   if(steps>3){out.reason="Path too long to verify in one simulation.";return out;}
@@ -985,25 +1026,33 @@ async function runExitCheck(plan,amountIn){
   //    پس transferFrom می‌افتاد و ما آن را «نمی‌توانی بفروشی» گزارش می‌کردیم.
   //    یک هشدار کاذب روی قابلیتی که کل ارزشش اعتماد است — بدتر از نداشتنش.
   const bal=balances[balKey(tokenIn)];
-  if(bal===undefined||bal<amountIn){
+  if(bal===undefined){
+    // موجودی خوانده نشده — این با «کم است» فرق دارد و نباید مثل آن گفته شود
+    out.reason="We could not read your "+tokenIn.symbol+" balance, so the live check did not run.";
+    return out;
+  }
+  if(bal<amountIn){
     out.reason="Not enough "+tokenIn.symbol+" in your wallet to verify by simulation.";
     return out;
   }
-  if(!isNative(tokenIn)&&allowance<amountIn){
+  if(!isNative(tokenIn)&&allowanceKnown&&allowance<amountIn){
     out.reason="Approve "+tokenIn.symbol+" to verify by simulation.";return out;}
 
-  const roundTrip={parts:[{route:{hops:buy.hops.concat(sellRoute.hops),amountIn,
-    amountOut:out.recovered},amountIn}],totalIn:amountIn,totalOut:out.recovered};
+  const roundTrip={parts:[{route:{hops:buy.hops.concat(sellRoute.hops),amountIn:simAmount,
+    amountOut:out.recovered},amountIn:simAmount}],totalIn:simAmount,totalOut:out.recovered};
   try{
     const exec=new E.Contract(CHAIN.executor,ABI.executor,signer);
     const got=await exec.executeSwap.staticCall(
-      asArg(tokenIn),asArg(tokenIn),amountIn,1n,buildParts(roundTrip),
+      asArg(tokenIn),asArg(tokenIn),simAmount,1n,buildParts(roundTrip),
       BigInt(Math.floor(Date.now()/1000)+300),
-      isNative(tokenIn)?{value:amountIn}:{});
+      isNative(tokenIn)?{value:simAmount}:{});
     if(seq!==exitSeq)return null;
     out.state="verified";
     out.recovered=got;
-    out.lossPct=(1-Number(got)/Number(amountIn))*100;
+    out.lossPct=(1-Number(got)/Number(simAmount))*100;
+    if(plan.parts.length>1)
+      out.reason="Measured on the largest leg of a split route ("+legShare.toFixed(0)+
+                 "% of the order). The other legs are priced the same way but were not simulated.";
   }catch(e){
     if(seq!==exitSeq)return null;
 
@@ -1445,7 +1494,11 @@ async function scanToken(token){
   try{
     const t=await checkTradability(token);
     rep.canBuy=t.buy;rep.canSell=t.sell;
-    if(!t.buy&&!t.sell&&t.unknown){rep.unknown++;add("info","Tradability unknown","Quotes did not come back.");}
+    // ⚠️ ترتیب این دو شرط حیاتی است. قبلاً «نامعلوم» فقط وقتی دیده می‌شد که
+    //    *هر دو* سمت شکست خورده باشند؛ اگر خرید کوت می‌گرفت و فروش به‌خاطر
+    //    قطعی RPC نمی‌گرفت، توکن سالم «قوی‌ترین نشانه‌ی هانی‌پات» اعلام می‌شد
+    //    و چون گزارش کش می‌شود، این اتهام تا آخر جلسه می‌ماند.
+    if(t.unknown){rep.unknown++;add("info","Tradability unknown","Quotes did not come back, so we could not test buying and selling.");}
     else if(!t.sell)add("critical","Cannot get a sell quote","No pool would quote selling this token back. Strongest honeypot signal.");
     else if(t.roundTrip!==null&&t.roundTrip>15)
       add("high","Heavy round-trip loss","Buy then sell immediately loses about "+t.roundTrip.toFixed(1)+"% — likely a transfer tax.");
@@ -1481,6 +1534,15 @@ function verdictOf(rep){
   if(h>=1||s>=15)return{txt:"Acceptable with care",tone:"warn"};
   return{txt:"No obvious red flags",tone:"pos"};
 }
+/* عمق را از سمت توکن *شناخته‌شده* می‌سنجیم، نه از قیمت خود توکن که می‌تواند
+   ساختگی باشد. دو اصلاح نسبت به نسخه‌ی قبل:
+
+   ۱) استخرهای V2 (BaseSwap، SushiSwap، Alien Base) اصلاً شمرده نمی‌شدند.
+      توکنی که تمام عمقش روی آن‌ها بود «نقدینگی بسیار کم» گزارش می‌شد.
+   ۲) اگر قیمت ETH خوانده نمی‌شد، `(eth||0)` سهم هر استخر جفت‌شده با WETH را
+      صفر حساب می‌کرد و نتیجه «حدود ۰ دلار» می‌شد — یک قطعی RPC به شکل
+      اتهامِ «نقدینگی ندارد» درمی‌آمد. حالا در آن حالت null برمی‌گردد و
+      تماس‌کننده «نامعلوم» نشان می‌دهد. */
 async function measureLiquidity(token){
   const refs=BASE_TOKENS.filter(t=>["USDC","WETH"].includes(t.symbol)&&
     t.address.toLowerCase()!==token.address.toLowerCase());
@@ -1488,27 +1550,41 @@ async function measureLiquidity(token){
   const calls=[],meta=[];
   for(const ref of refs)for(const d of DEXES){
     if(isV3(d))d.feeTiers.forEach(f=>{
-      calls.push({target:d.factory,data:iV3F.encodeFunctionData("getPool",[token.address,ref.address,f])});meta.push(ref);});
+      calls.push({target:d.factory,data:iV3F.encodeFunctionData("getPool",[token.address,ref.address,f])});
+      meta.push({ref,v2:false});});
     else if(d.kind===KIND.SOLIDLY)d.stableModes.forEach(st=>{
-      calls.push({target:d.factory,data:iSolF.encodeFunctionData("getPool",[token.address,ref.address,st])});meta.push(ref);});
+      calls.push({target:d.factory,data:iSolF.encodeFunctionData("getPool",[token.address,ref.address,st])});
+      meta.push({ref,v2:false});});
+    else if(d.factory){
+      calls.push({target:d.factory,data:iV2F.encodeFunctionData("getPair",[token.address,ref.address])});
+      meta.push({ref,v2:true});}
   }
-  const res=await multicall(calls),pools=[];
+  const res=await multicall(calls),pools=[],seen=new Set();
   res.forEach((r,i)=>{
     if(!r.ok||r.data==="0x")return;
-    let a;try{a=iV3F.decodeFunctionResult("getPool",r.data)[0];}catch{return;}
-    if(!a||a===ZERO)return;pools.push({addr:a,ref:meta[i]});
+    let a;
+    try{a=meta[i].v2?iV2F.decodeFunctionResult("getPair",r.data)[0]
+                    :iV3F.decodeFunctionResult("getPool",r.data)[0];}catch{return;}
+    if(!a||a===ZERO)return;
+    const k=a.toLowerCase()+"|"+meta[i].ref.address.toLowerCase();
+    if(seen.has(k))return;            // یک استخر دوبار شمرده نشود
+    seen.add(k);pools.push({addr:a,ref:meta[i].ref});
   });
   if(!pools.length)return 0;
   const bal=await multicall(pools.map(p=>({target:p.ref.address,
     data:iErc.encodeFunctionData("balanceOf",[p.addr])})));
   const eth=await refPriceUsd();
-  let total=0;
+  let total=0,wethSeen=false;
   bal.forEach((r,i)=>{
     if(!r.ok||r.data==="0x")return;
     let v;try{v=iErc.decodeFunctionResult("balanceOf",r.data)[0];}catch{return;}
     const ref=pools[i].ref;
-    total+=Number(E.formatUnits(v,ref.decimals))*(ref.symbol==="USDC"?1:(eth||0));
+    if(ref.symbol==="USDC"){total+=Number(E.formatUnits(v,ref.decimals));return;}
+    if(v>0n)wethSeen=true;
+    if(eth!==null)total+=Number(E.formatUnits(v,ref.decimals))*eth;
   });
+  // روی استخرهای WETH عمق دیدیم ولی قیمتش را نمی‌دانیم → عدد ناقص است
+  if(wethSeen&&eth===null)return null;
   return total*2;
 }
 let _ethUsd=null;
@@ -1654,7 +1730,10 @@ function paintSrc(){
   const led=$("srcChip").firstElementChild;
   if(!liveSrc){led.className="led off";$("srcTx").textContent="Base";return;}
   led.className="led";
-  $("srcTx").textContent=liveSrc==="wallet"?"Base · via wallet":"Base";
+  // اگر RPC اختصاصی فعال است باید *دیده شود*. یک منبع داده‌ی متفاوت که
+  // کاربر نمی‌بیندش، همان چیزی است که نسخه‌ی ?rpc= را خطرناک می‌کرد.
+  $("srcTx").textContent=liveSrc==="wallet"?"Base · via wallet"
+    :(customRpc?"Base · custom RPC":"Base");
 }
 function paintToken(side,t){
   paintAvatar($(side==="in"?"tokInAv":"tokOutAv"),t);
@@ -1768,9 +1847,7 @@ async function runQuote(){
       const r=await solveForOutput(tokenIn,tokenOut,target,st,seq);
       if(seq!==quoteSeq||r===null)return;
       if(r.fail){
-        setNotice(unreliable(st)||st.ok===0
-          ? note("err",`<b>The network did not answer.</b> ${st.rpcFailed} of ${st.attempted} quotes failed.`)
-          : note("warn",`<b>No route.</b> Nothing on Base can deliver ${esc(tokenOut.symbol)} from ${esc(tokenIn.symbol)}.`));
+        setNotice(noRouteNote(st,`Nothing on Base can deliver ${esc(tokenOut.symbol)} from ${esc(tokenIn.symbol)}.`));
         currentPlan=null;refreshButton();return;
       }
       $("amtIn").value=Number(E.formatUnits(r.amountIn,tokenIn.decimals))
@@ -1804,9 +1881,7 @@ async function runQuote(){
     if(seq!==quoteSeq)return;
     renderVenues(direct,null);
     if(!routes.length){
-      setNotice(unreliable(stats)||stats.ok===0
-        ? note("err",`<b>The network did not answer.</b> ${stats.rpcFailed} of ${stats.attempted} quotes failed, so we cannot tell whether a route exists.`)
-        : note("warn",`<b>No route.</b> No direct pool, and no path through ${CHAIN.wrapped}/${CHAIN.reference} has liquidity for this pair.`));
+      setNotice(noRouteNote(stats,`No direct pool, and no path through ${CHAIN.wrapped}/${CHAIN.reference} has liquidity for this pair.`));
       currentPlan=null;refreshButton();return;
     }
     const plan=await findBestSplit(routes,amountIn,stats);
@@ -1857,7 +1932,7 @@ function renderVenues(direct,plan){
       <span class="vname">${esc(venueLabel(r.venue))}${isBest?'<span class="vtag">best</span>':""}</span>
       <span class="bar"><i style="width:${Math.max(4,rel)}%"></i></span>
       <span class="vout"><span class="a mono">${fmt(r.out,tokenOut.decimals)}</span>
-      <span class="d mono ${bps<0?"neg":""}">${isBest?tokenOut.symbol:bps.toFixed(2)+"%"}</span></span></div>`;
+      <span class="d mono ${bps<0?"neg":""}">${isBest?esc(tokenOut.symbol):bps.toFixed(2)+"%"}</span></span></div>`;
   }
   if(plan&&plan.parts.length>1)
     h+=`<div class="vrow" style="color:var(--pos);font-size:12.8px">Splitting across ${plan.parts.length} pools pays
@@ -2114,6 +2189,7 @@ async function renderFlow(){
     }
 
     const refPx=await priceUsdOf(pool.ref);
+    if(seq!==flowSeq)return;   // تب عوض شده — نتیجه‌ی قدیمی را ننویس
     const trades=[];
     for(const lg of logs){
       let ev;try{ev=iPool.parseLog(lg);}catch{continue;}
@@ -2152,7 +2228,9 @@ async function renderFlow(){
            href="${CHAIN.explorer}/address/${pool.addr}">${esc(t.symbol)}/${esc(pool.ref.symbol)} ${(pool.fee/10000).toFixed(2)}%</a></div>`;
     if(top.length){
       h+=`<div class="frow" style="color:var(--tx3);font-size:11px;letter-spacing:.05em;
-           text-transform:uppercase;padding-bottom:2px">Largest buys</div>`;
+           text-transform:uppercase;padding-bottom:2px">Largest buys
+           <span style="text-transform:none;letter-spacing:0;color:var(--tx3)"
+             title="From the pool's Swap event. For trades sent through an aggregator or router, this is that contract, not the trader.">· recipient address</span></div>`;
       top.forEach(x=>{
         const k=(x.who||"").toLowerCase(),rep=k&&cnt[k]>1;
         h+=`<div class="trade"><span class="fchip" style="background:var(--pos)"></span>
@@ -2284,13 +2362,16 @@ async function readFee(){
   }catch{}
 }
 async function refreshAllowance(){
-  allowance=0n;
+  allowance=0n;allowanceKnown=false;
   if(!account||!tokenIn)return;
   try{
     const r=await multicall([{target:routable(tokenIn).address,
       data:iErc.encodeFunctionData("allowance",[account,CHAIN.executor])}]);
-    if(r[0].ok)allowance=iErc.decodeFunctionResult("allowance",r[0].data)[0];
+    if(r[0].ok){allowance=iErc.decodeFunctionResult("allowance",r[0].data)[0];allowanceKnown=true;}
   }catch{}
+  // اگر خوانده نشد، allowance صفر *فرض* نمی‌شود. صفرِ فرضی یعنی دکمه‌ی
+  // Approve به کاربری نشان داده شود که از قبل approve کرده — و او یک
+  // تراکنش بی‌دلیل امضا کند. preflight قبل از سواپ خودش تازه می‌خواند.
 }
 async function preflight(plan,amountIn){
   const problems=[],parts=buildParts(plan);
@@ -2329,7 +2410,13 @@ async function doApprove(){
   setBusy(true,"Confirm in wallet…");
   try{
     const erc=new E.Contract(routable(tokenIn).address,ABI.erc20,signer);
-    const tx=await erc.approve(CHAIN.executor,E.MaxUint256);
+    /* پیش‌فرض: دقیقاً همان مقداری که این سواپ لازم دارد.
+       approve نامحدود راحت‌تر است ولی یعنی قرارداد تا ابد به کل موجودی آن
+       توکن دسترسی دارد — همان چیزی که در تهدیدنامه‌ی خودِ این فایل «فاجعه»
+       نامیده شده. هرکس دفعات زیاد معامله می‌کند می‌تواند از تنظیمات
+       نامحدود را روشن کند؛ ولی انتخابِ خودش باشد، نه پیش‌فرض ما. */
+    const cap=unlimitedApprove?E.MaxUint256:amountIn;
+    const tx=await erc.approve(CHAIN.executor,cap);
     const url=`${CHAIN.explorer}/tx/${tx.hash}`;
     setBusy(true,"Approving…");
     setNotice(note("ok",`Approval sent — <a href="${url}" target="_blank" rel="noopener">${shortAddr(tx.hash)}</a>`));
@@ -2349,53 +2436,23 @@ async function waitForAllowance(min,ms){
   return false;
 }
 /** ETH → WETH. لازم است چون قرارداد اجرا فقط ERC-20 می‌گیرد. */
-async function readWethBalance(){
-  try{
-    const r=await multicall([{target:WETH_ADDR,data:iErc.encodeFunctionData("balanceOf",[account])}]);
-    if(r[0].ok)return iErc.decodeFunctionResult("balanceOf",r[0].data)[0];
-  }catch{}
-  return null;
-}
 
-async function doWrap(){
-  const amountIn=parsedAmountIn();
-  if(amountIn===null)return;
-  setBusy(true,"Confirm wrap in wallet…");
-  try{
-    const weth=new E.Contract(WETH_ADDR,ABI.weth,signer);
-    const tx=await weth.deposit({value:amountIn});
-    const url=`${CHAIN.explorer}/tx/${tx.hash}`;
-    setBusy(true,"Wrapping ETH…");
-    setNotice(note("ok",`Wrapping — <a href="${url}" target="_blank" rel="noopener">${shortAddr(tx.hash)}</a>`));
-    await withTimeout(tx.wait(),180000);
-    await refreshBalances();await refreshAllowance();
-    setNotice(note("ok","<b>ETH wrapped.</b> One more step to swap."));
-  }catch(e){showError("Wrap failed",e);}
-  finally{setBusy(false);refreshButton();}
-}
 
 /** WETH → ETH بعد از سواپ، تا کاربر واقعاً ETH بگیرد. */
-async function unwrapAll(amount){
-  try{
-    setBusy(true,"Unwrapping to ETH…");
-    const weth=new E.Contract(WETH_ADDR,ABI.weth,signer);
-    const tx=await weth.withdraw(amount);
-    await withTimeout(tx.wait(),180000);
-    return true;
-  }catch(e){
-    setNotice(note("warn",`<b>The swap worked, but unwrapping WETH to ETH failed.</b> Your funds are safe as WETH — ${esc(friendly(e))}`));
-    return false;
-  }
-}
 
 async function doSwap(){
-  const amountIn=parsedAmountIn();
-  if(!currentPlan||amountIn===null)return;
+  if(!currentPlan||parsedAmountIn()===null)return;
   let chosenSig=null;
   setBusy(true,"Refreshing price…");
   try{
     await runQuote();
     if(!currentPlan){setBusy(false);refreshButton();return;}
+    /* ⚠️ مقدار ورودی *بعد* از runQuote خوانده می‌شود، و از خودِ نقشه.
+       در حالت «کوت معکوس» runQuote مقدار ورودی را دوباره حل می‌کند و کادر
+       را عوض می‌کند. نسخه‌ی قبل مقدار را قبل از این صدا زدن می‌گرفت، پس
+       parts با totalAmountIn نمی‌خواند و minOut برای اندازه‌ی دیگری حساب
+       شده بود — یعنی محافظت لغزش ضعیف‌تر از آنچه روی صفحه نوشته بود. */
+    const amountIn=currentPlan.totalIn;
     setBusy(true,"Safety checks…");
     const problems=await preflight(currentPlan,amountIn);
     if(problems.includes("__APPROVE__")){setBusy(false);refreshButton();
@@ -2504,7 +2561,8 @@ function refreshButton(){
   if(bal!==undefined&&bal<amt)return set(`Insufficient ${tokenIn.symbol}`,false);
   if(!currentPlan)return set("Finding best route…",false);
   // ETH بومی هیچ approve نمی‌خواهد — با خود تراکنش می‌رود و قرارداد wrap می‌کند
-  if(!isNative(tokenIn)&&allowance<amt)
+  // فقط وقتی دکمه‌ی Approve را نشان بده که *بدانیم* allowance کم است
+  if(!isNative(tokenIn)&&allowanceKnown&&allowance<amt)
     return set(`Approve ${tokenIn.symbol}`,true,doApprove);
   return set(isNative(tokenOut)?"Swap to ETH":"Swap",true,doSwap);
 }
@@ -2585,7 +2643,11 @@ let view="swap";
         نماد تطبیق داده می‌شود و نمایش از روی داده‌ی خوانده‌شده از زنجیره است.
    ===================================================================== */
 function parseHash(){
-  const raw=decodeURIComponent(location.hash.slice(1));
+  // decodeURIComponent روی درصدِ ناقص («#%») استثنا می‌دهد. چون parseHash
+  // در مسیر راه‌اندازی صدا زده می‌شود، یک لینک بدشکل کل اپ را قبل از
+  // verifyDexes متوقف می‌کرد و صفحه بی‌صدا نیمه‌کاره می‌ماند.
+  let raw=location.hash.slice(1);
+  try{raw=decodeURIComponent(raw);}catch{}
   const i=raw.indexOf("?");
   const v=(i<0?raw:raw.slice(0,i)).trim();
   let q;try{q=new URLSearchParams(i<0?"":raw.slice(i+1));}catch{q=new URLSearchParams();}
@@ -2603,7 +2665,7 @@ function shareUrl(){
   if(tokenOut)p.set("out",tokenRef(tokenOut));
   const raw=$("amtIn").value.trim();
   if(raw&&parseFloat(raw)>0)p.set("amt",raw);
-  return location.origin+location.pathname+location.search+"#swap?"+p.toString();
+  return location.origin+location.pathname+"#swap?"+p.toString();
 }
 /* یک ارجاع به توکن را حل می‌کند. اگر نشد، null — و تماس‌کننده *می‌گوید*
    که نشد، نه اینکه بی‌صدا روی پیش‌فرض بماند. */
@@ -2632,6 +2694,9 @@ async function applyShareParams(){
   if(missed.length)
     setNotice(note("warn","<b>Part of that link could not be opened.</b> "+
       esc(missed.join(", "))+" is not a standard ERC-20 on Base, or the network did not answer."));
+  // نمودار و موجودی‌ها هم باید با جفت جدید بخوانند، وگرنه لینک اشتراکی
+  // کوت یک توکن را کنار نمودار توکن دیگری نشان می‌دهد.
+  loadChart();paintBalances();paintFlowToken();
   runScan(tokenOut);
   scheduleQuote();
 }
@@ -2708,26 +2773,17 @@ function wire(){
   $("nav").querySelectorAll("[data-view]").forEach(b=>b.onclick=()=>setView(b.dataset.view));
   addEventListener("hashchange",()=>setView(parseHash().view,false));
   $("flowTokBtn").onclick=()=>openPicker("out");
+  /* ⚠️ این ناحیه یک بار با copy-paste خراب شده بود: تکه‌ای از خود wire()
+     داخل هندلرهای کلیک تکرار شده بود. جاوااسکریپت پارسش می‌کرد و ظاهر
+     درست کار می‌کرد، ولی هر کلیک روی بازه‌های زمانی یک شنونده‌ی
+     hashchange تازه ثبت می‌کرد و شنونده‌ها فوق‌خطی زیاد می‌شدند. */
   $("flowTfs").querySelectorAll("[data-w]").forEach(b=>b.onclick=()=>{
     flowWindow=b.dataset.w;
-    $("nav").querySelectorAll("[data-view]").forEach(b=>b.onclick=()=>setView(b.dataset.view));
-  addEventListener("hashchange",()=>setView(parseHash().view,false));
-  $("flowTokBtn").onclick=()=>openPicker("out");
-  $("flowTfs").querySelectorAll("[data-w]").forEach(x=>x.classList.toggle("on",x===b));
+    $("flowTfs").querySelectorAll("[data-w]").forEach(x=>x.classList.toggle("on",x===b));
     renderFlow();});
   $("tfs").querySelectorAll("[data-tf]").forEach(b=>b.onclick=()=>{
     timeframe=b.dataset.tf;
-    $("nav").querySelectorAll("[data-view]").forEach(b=>b.onclick=()=>setView(b.dataset.view));
-  addEventListener("hashchange",()=>setView(parseHash().view,false));
-  $("flowTokBtn").onclick=()=>openPicker("out");
-  $("flowTfs").querySelectorAll("[data-w]").forEach(b=>b.onclick=()=>{
-    flowWindow=b.dataset.w;
-    $("nav").querySelectorAll("[data-view]").forEach(b=>b.onclick=()=>setView(b.dataset.view));
-  addEventListener("hashchange",()=>setView(parseHash().view,false));
-  $("flowTokBtn").onclick=()=>openPicker("out");
-  $("flowTfs").querySelectorAll("[data-w]").forEach(x=>x.classList.toggle("on",x===b));
-    renderFlow();});
-  $("tfs").querySelectorAll("[data-tf]").forEach(x=>x.classList.toggle("on",x===b));
+    $("tfs").querySelectorAll("[data-tf]").forEach(x=>x.classList.toggle("on",x===b));
     loadChart();});
   $("setBtn").onclick=e=>{e.stopPropagation();$("setPop").classList.toggle("on");};
   document.addEventListener("mousedown",e=>{
@@ -2735,13 +2791,23 @@ function wire(){
   document.querySelectorAll("#slipSeg [data-bps]").forEach(b=>b.onclick=()=>{
     slippageBps=+b.dataset.bps;
     document.querySelectorAll("#slipSeg [data-bps]").forEach(x=>x.classList.toggle("on",x===b));
-    $("slipCustom").value="";if(currentPlan)renderPlan(currentPlan);});
+    $("slipCustom").value="";if(currentPlan)renderPlan(currentPlan,mode==="targetOut");});
   $("slipCustom").oninput=e=>{const v=parseFloat(e.target.value);
     if(!isNaN(v)&&v>0&&v<=50){slippageBps=Math.round(v*100);
       document.querySelectorAll("#slipSeg [data-bps]").forEach(x=>x.classList.remove("on"));
-      if(currentPlan)renderPlan(currentPlan);}};
+      if(currentPlan)renderPlan(currentPlan,mode==="targetOut");}};
   $("deadlineMin").oninput=e=>{const v=parseInt(e.target.value,10);
     if(!isNaN(v)&&v>0&&v<=60)deadlineMin=v;};
+  /* فقط تایپ خودِ کاربر می‌تواند منبع داده را عوض کند — نه یک لینک.
+     چیزی ذخیره نمی‌شود و با رفرش برمی‌گردد به پیش‌فرض. */
+  $("unlimApprove").onchange=e=>{unlimitedApprove=e.target.checked;};
+  $("rpcCustom").oninput=e=>{
+    const v=e.target.value.trim();
+    customRpc=/^https:\/\//.test(v);
+    CHAIN.rpcs=customRpc?[v,...DEFAULT_RPCS]:DEFAULT_RPCS.slice();
+    rpcIndex=0;readProvider=makeProvider(CHAIN.rpcs[0]);
+    paintSrc();
+  };
   document.addEventListener("keydown",e=>{
     if(e.key!=="Escape")return;closePicker();$("setPop").classList.remove("on");});
   let rt=null;
@@ -2757,14 +2823,19 @@ function wire(){
   iV2=new E.Interface(ABI.v2);iSol=new E.Interface(ABI.solidly);
   iErc=new E.Interface(ABI.erc20);iOwn=new E.Interface(ABI.ownable);
   iV3F=new E.Interface(ABI.v3factory);iSolF=new E.Interface(ABI.solFactory);
+  iV2F=new E.Interface(ABI.v2factory);
   iExec=new E.Interface(ABI.executor);iPool=new E.Interface(ABI.v3pool);
-  // RPC اختصاصی از پارامتر آدرس: ?rpc=https://...
-  // نه در کد نوشته می‌شود نه ذخیره — فقط برای همان تب. برای خواندن
-  // رویدادهای Swap مفید است، چون RPCهای عمومی بازه‌ی getLogs را محدود می‌کنند.
-  try{
-    const q=new URLSearchParams(location.search).get("rpc");
-    if(q&&/^https:\/\//.test(q))CHAIN.rpcs=[q,...CHAIN.rpcs];
-  }catch{}
+  /* RPC اختصاصی *از آدرس* حذف شد.
+     قبلاً `?rpc=https://…` هر لینکی را قادر می‌کرد تمام درخواست‌های زنجیره را
+     به سرور دلخواه بفرستد — بدون تأیید و بدون هیچ نشانه‌ای در رابط. آن سرور
+     IP بازدیدکننده و بعد از اتصال آدرس کیف پولش را می‌دید، و می‌توانست
+     درباره‌ی کوت‌ها دروغ بگوید تا minOut پایین بیاید. بدتر: shareUrl مقدار
+     location.search را کپی می‌کرد، پس یک لینک آلوده تکثیر می‌شد.
+
+     دیالوگ تأیید هم جوابگو نبود: «RPC اختصاصی» برای کاربر عادی معنا ندارد،
+     و تأییدی که فهمیده نشود امنیت نمی‌آورد — فقط مسئولیت را به کاربر منتقل
+     می‌کند. حالا فقط از پنل تنظیمات و با تایپ خودِ کاربر قابل تنظیم است،
+     پس یک *لینک* هرگز نمی‌تواند عوضش کند. */
   readProvider=makeProvider(CHAIN.rpcs[0]);
   tokenIn=BASE_TOKENS.find(t=>t.symbol==="USDC");
   tokenOut=BASE_TOKENS.find(t=>t.symbol==="WETH");

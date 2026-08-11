@@ -272,6 +272,121 @@ async def main():
         assert any("no exit" in n for n in neg), "a blocked exit must be visible in the picker"
         await pg.keyboard.press("Escape"); await pg.wait_for_timeout(250)
 
+        # ---- 2b-quinquies. findings from the line-by-line review ----
+        # الف) نماد توکن نباید به‌عنوان markup اجرا شود. توکن مهاجم می‌تواند
+        #      هر رشته‌ای را از symbol() برگرداند و لینک اشتراکی آن را انتخابی کند.
+        xss = await pg.evaluate("""() => {
+            const saved = tokenOut;
+            tokenOut = Object.assign({}, tokenOut, {symbol: '<img src=x onerror=window.__PWNED__=1>'});
+            renderVenues(lastDirect, currentPlan);
+            const html = document.getElementById("venueBody").innerHTML;
+            const imgs = document.querySelectorAll("#venueBody img").length;
+            tokenOut = saved; renderVenues(lastDirect, currentPlan);
+            return {pwned: !!window.__PWNED__, imgs, escaped: html.includes("&lt;img")};
+        }""")
+        print("[xss] injected symbol -> imgs=%s pwned=%s escaped=%s"
+              % (xss["imgs"], xss["pwned"], xss["escaped"]))
+        assert xss["imgs"] == 0 and not xss["pwned"], "token symbol reached the DOM as markup"
+
+        # ب) hash بدشکل نباید راه‌اندازی را بیندازد
+        broken = await pg.evaluate("""() => {
+            const h = location.hash;
+            location.hash = "%";
+            let ok = true;
+            try { parseHash(); } catch (e) { ok = false; }
+            location.hash = h;
+            return ok;
+        }""")
+        print("[hash] malformed '#%%' survived: %s" % broken)
+        assert broken, "a malformed hash must not throw — it runs during init"
+
+        # ج) کوت فروش که نیامده، هانی‌پات نیست
+        verdict = await pg.evaluate("""async () => {
+            const real = quoteMany;
+            let call = 0;
+            quoteMany = async (specs, stats) => {
+                call++;
+                if (call === 1) return real(specs, stats);          // خرید: سالم
+                stats.attempted += specs.length;                     // فروش: شبکه نداد
+                stats.rpcFailed += specs.length;
+                return specs.map(() => ({out: null, status: "unknown"}));
+            };
+            const t = await checkTradability(tokenOut);
+            quoteMany = real;
+            return t;
+        }""")
+        print("[tradability] buy ok, sell silent -> %s" % verdict)
+        assert verdict["unknown"], "a failed sell quote must be flagged unknown, not as a honeypot"
+
+        # د) allowance خوانده‌نشده نباید «approve نکرده» تفسیر شود
+        btn = await pg.evaluate("""() => {
+            const savedAcc = account, savedPlan = currentPlan;
+            account = "0x8A0Dcb583C8CAdc481E34487c34f1B856fe97e23";
+            walletChainId = CHAIN.id;
+            balances[balKey(tokenIn)] = 10n ** 30n;
+            allowance = 0n; allowanceKnown = false;      // یعنی: نخواندیم
+            refreshButton();
+            const label = document.getElementById("actBtn").textContent;
+            account = savedAcc; walletChainId = null; balances = {}; currentPlan = savedPlan;
+            refreshButton();
+            return label;
+        }""")
+        print("[allowance] unread allowance -> button says %r" % btn)
+        assert "Approve" not in btn, \
+            "an unread allowance must not push the user into a needless approval"
+
+        # ه) قیمت مرجع نامعلوم نباید «نقدینگی صفر» شود
+        liq = await pg.evaluate("""async () => {
+            const real = refPriceUsd, cached = _ethUsd;
+            _ethUsd = null;
+            refPriceUsd = async () => null;          // قیمت ETH خوانده نشد
+            // توکنی که استخرهایش با WETH جفت شده‌اند — برای WETH خودش،
+            // مرجع فقط USDC است و قیمت ETH اصلاً وارد محاسبه نمی‌شود.
+            const t = BASE_TOKENS.find(x => x.symbol === "AERO");
+            const v = await measureLiquidity(t);
+            refPriceUsd = real; _ethUsd = cached;
+            return v;
+        }""")
+        print("[liquidity] ETH price unknown -> %s" % liq)
+        assert liq is None, \
+            "an unknown ETH price must read as unknown, not as $0 of liquidity"
+
+        # و) approve باید پیش‌فرض دقیق باشد، نه نامحدود
+        appr = await pg.evaluate("""() => {
+            let seen = null;
+            const real = E.Contract;
+            E.Contract = function () {
+                return {approve: async (spender, amt) => {
+                    seen = amt.toString();
+                    return {hash: "0x" + "11".repeat(32), wait: async () => ({status: 1})};
+                }};
+            };
+            const want = parsedAmountIn();
+            const exact = (typeof unlimitedApprove !== "undefined") && !unlimitedApprove;
+            E.Contract = real;
+            return {exact, want: want.toString(), max: E.MaxUint256.toString()};
+        }""")
+        print("[approve] exact-by-default=%s" % appr["exact"])
+        assert appr["exact"], "unlimited approval must not be the default"
+
+        # ز) «مسیری نیست» فقط وقتی همه جواب داده باشند قطعی گفته شود
+        note_txt = await pg.evaluate("""() => {
+            const el = document.createElement("div");
+            el.innerHTML = noRouteNote({attempted: 18, ok: 14, noPool: 0, rpcFailed: 4}, "detail here");
+            return el.innerText;
+        }""")
+        print("[no route] partial data -> %s" % note_txt.replace("\n", " ")[:100])
+        assert "not a complete picture" in note_txt, \
+            "with venues that did not answer we cannot claim there is no route"
+
+        clean = await pg.evaluate("""() => {
+            const el = document.createElement("div");
+            el.innerHTML = noRouteNote({attempted: 18, ok: 18, noPool: 18, rpcFailed: 0}, "detail here");
+            return el.innerText;
+        }""")
+        assert "not a complete picture" not in clean, \
+            "with full data the plain 'No route' wording should stand"
+
         # ---- 2c. DEX coverage gate ----
         cov = await pg.inner_text("#coverage")
         print("[coverage] %s" % cov.replace("\n", " | "))
