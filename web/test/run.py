@@ -445,6 +445,30 @@ async def main():
         print("[contact] %s" % mail)
         assert "@" in mail and "example" not in mail, "contact address must be real"
 
+        # ل) ارسالی که هرگز برنمی‌گردد نباید دکمه را تا ابد بچرخاند
+        stuck = await pg.evaluate("""async () => {
+            // promiseای که هیچ‌وقت resolve نمی‌شود = دقیقاً همان چیزی که
+            // روی سایت واقعی اتفاق افتاد: تراکنش رفت، جواب نیامد.
+            const never = new Promise(() => {});
+            const t0 = Date.now();
+            const r = await sendOrLoseTrack(never, 300);
+            return {result: r, ms: Date.now() - t0};
+        }""")
+        print("[stuck send] returned %s after %sms" % (stuck["result"], stuck["ms"]))
+        assert stuck["result"] is None and stuck["ms"] < 3000, \
+            "a send that never answers must time out, not spin forever"
+
+        # و شکست واقعی نباید با «نمی‌دانم» قاطی شود
+        real = await pg.evaluate("""async () => {
+            try {
+                await sendOrLoseTrack(Promise.reject(new Error("user rejected")), 5000);
+                return "no throw";
+            } catch (e) { return e.message; }
+        }""")
+        print("[stuck send] a real rejection still throws: %r" % real)
+        assert real == "user rejected", \
+            "a genuine failure must propagate, not be swallowed as unknown"
+
         # ---- 2c. DEX coverage gate ----
         cov = await pg.inner_text("#coverage")
         print("[coverage] %s" % cov.replace("\n", " | "))

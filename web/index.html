@@ -2451,6 +2451,37 @@ async function preflight(plan,amountIn){
   if(gas!==null&&gas===0n)problems.push("No ETH on Base to pay for gas.");
   return problems;
 }
+/* =====================================================================
+   ارسال تراکنش، بدون چرخیدن بی‌نهایت
+   ---------------------------------------------------------------------
+   کیف پول می‌تواند تراکنش را بفرستد ولی promise هرگز برنگردد — RPC خودِ
+   تراکنش یا رسیدش را سرو نمی‌کند. نتیجه: دکمه تا ابد روی «Confirm in
+   wallet…» می‌چرخد در حالی که سواپ *انجام شده*. بدترین حالت ممکن، چون
+   کاربر نمی‌داند پولش رفته یا نه.
+
+   پس: مهلت می‌گذاریم، و بعد از مهلت **ادعای شکست نمی‌کنیم**. می‌رویم سراغ
+   منبع حقیقت — موجودی — و می‌بینیم عوض شده یا نه. همان کاری که
+   waitForAllowance برای approve می‌کند.
+   ===================================================================== */
+async function sendOrLoseTrack(promise,ms){
+  try{return await withTimeout(promise,ms);}
+  catch(e){
+    if(((e&&e.message)||"")==="timeout")return null;   // نمی‌دانیم، نه شکست
+    throw e;
+  }
+}
+/* آیا موجودی این توکن عوض شد؟ تا sec ثانیه هر ۴ ثانیه می‌پرسد. */
+async function balanceMoved(tok,before,sec){
+  const key=balKey(tok),until=Date.now()+sec*1000;
+  while(Date.now()<until){
+    await new Promise(r=>setTimeout(r,4000));
+    await refreshBalances();
+    const now=balances[key];
+    if(now!==undefined&&before!==undefined&&now!==before)return true;
+  }
+  return false;
+}
+
 /* wrap و unwrap مستقیم روی قرارداد WETH انجام می‌شوند، نه از راه اجراکننده.
    هیچ approve، هیچ لغزش، هیچ مسیریابی — نسبت همیشه دقیقاً ۱:۱ است. */
 async function doWrapOrUnwrap(kind){
@@ -2459,7 +2490,19 @@ async function doWrapOrUnwrap(kind){
   setBusy(true,"Confirm in wallet…");
   try{
     const w=new E.Contract(WETH_ADDR,ABI.weth,signer);
-    const tx=kind==="wrap"?await w.deposit({value:amt}):await w.withdraw(amt);
+    const before=balances[balKey(tokenOut)];
+    const tx=await sendOrLoseTrack(
+      kind==="wrap"?w.deposit({value:amt}):w.withdraw(amt),90000);
+    if(!tx){
+      setNotice(note("warn","<b>We lost track of that transaction.</b> Your wallet may "+
+        "still have sent it — the network stopped answering us. Checking your balance…"));
+      const moved=await balanceMoved(tokenOut,before,60);
+      setNotice(moved
+        ?note("ok",`<b>It went through.</b> Your ${esc(tokenOut.symbol)} balance changed.`)
+        :note("warn","<b>Still unknown.</b> Check your wallet or BaseScan before trying "+
+              "again — we could not confirm either way."));
+      return;
+    }
     const url=`${CHAIN.explorer}/tx/${tx.hash}`;
     setBusy(true,kind==="wrap"?"Wrapping…":"Unwrapping…");
     setNotice(note("ok",`Sent — <a href="${url}" target="_blank" rel="noopener">${shortAddr(tx.hash)}</a>`));
@@ -2566,8 +2609,19 @@ async function doSwap(){
     }catch{}
     const opts=isNative(tokenIn)?{value:amountIn}:{};
     if(gasLimit)opts.gasLimit=gasLimit;
-    const tx=await exec.executeSwap(asArg(tokenIn),asArg(tokenOut),amountIn,
-      chosen.minOut,chosen.parts,deadline,opts);
+    const outBefore=balances[balKey(tokenOut)];
+    const tx=await sendOrLoseTrack(exec.executeSwap(asArg(tokenIn),asArg(tokenOut),amountIn,
+      chosen.minOut,chosen.parts,deadline,opts),90000);
+    if(!tx){
+      setNotice(note("warn","<b>We lost track of that transaction.</b> Your wallet may "+
+        "still have sent it — the network stopped answering us. Checking your balance…"));
+      const moved=await balanceMoved(tokenOut,outBefore,60);
+      setNotice(moved
+        ?note("ok",`<b>The swap went through.</b> Your ${esc(tokenOut.symbol)} balance changed.`)
+        :note("warn","<b>Still unknown.</b> Check your wallet or BaseScan before swapping "+
+              "again — we could not confirm either way, and repeating it could swap twice."));
+      setBusy(false);refreshButton();return;
+    }
     // 🔑 از اینجا تراکنش ارسال شده — هر خطای بعدی فقط خواندن نتیجه است
     const url=`${CHAIN.explorer}/tx/${tx.hash}`;
     setBusy(true,`Swapping ${esc(tokenIn.symbol)} → ${esc(tokenOut.symbol)}…`);
