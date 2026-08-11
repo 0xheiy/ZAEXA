@@ -2,7 +2,7 @@
 
 **A DEX aggregator for Base that shows you the way out before you go in.**
 
-Live contract: [`0x2fea35aaDae6Cbf9b9481B06164907ccF95DB081`](https://basescan.org/address/0x2fea35aadae6cbf9b9481b06164907ccf95db081#code) — source verified on BaseScan.
+Live contract: [`0xE980825d4B3911e35Be5804349be26eBBe93BcC6`](https://basescan.org/address/0xe980825d4b3911e35be5804349be26ebbe93bcc6#code) — source verified on BaseScan.
 
 ---
 
@@ -63,8 +63,8 @@ web/ethers.umd.min.js     vendored — no third-party script is ever loaded
 web/test/run.py           Playwright suite, builds its harness from index.html
 web/test/stub-ethers.js   fake ethers + synthetic AMM, no network
 contracts/src/            SwapExecutor.sol
-contracts/test/           46 tests: unit, selector, and fork against live Base
-contracts/script/         deploy, fork test, on-chain DEX verification
+contracts/test/           57 tests: unit, selector, and fork against live Base
+contracts/script/         deploy, fork test, on-chain DEX and token verification
 ```
 
 ### Contract design

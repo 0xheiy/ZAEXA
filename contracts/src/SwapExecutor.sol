@@ -121,6 +121,7 @@ contract SwapExecutor {
     address constant NATIVE = address(0);
 
     address public owner;
+    address public pendingOwner;
     address public feeRecipient;
     uint256 public feeBps;                       // کارمزد فعلی
     mapping(address => bool) public allowedRouter;   // لیست سفید روترها
@@ -140,6 +141,8 @@ contract SwapExecutor {
     event FeeChanged(uint256 oldBps, uint256 newBps);
     event FeeRecipientChanged(address indexed oldTo, address indexed newTo);
     event OwnerChanged(address indexed oldOwner, address indexed newOwner);
+    event OwnershipTransferStarted(address indexed oldOwner, address indexed pendingOwner);
+    event ApprovalRevoked(address indexed token, address indexed router);
 
     modifier onlyOwner() {
         require(msg.sender == owner, "not owner");
@@ -257,7 +260,9 @@ contract SwapExecutor {
         } else {
             _safeTransfer(outTok, msg.sender, amountOut);
         }
-        emit Swapped(msg.sender, tokenIn, tokenOut, totalAmountIn, amountOut, fee);
+        // مقدار *واقعاً دریافتی* لاگ می‌شود، نه آنچه کاربر اعلام کرده.
+        // برای توکن کارمزددار این دو فرق دارند و v1 عدد بزرگ‌تر را لاگ می‌کرد.
+        emit Swapped(msg.sender, tokenIn, tokenOut, swapAmount + fee, amountOut, fee);
     }
 
     /// اعتبارسنجی کامل برنامه — قبل از اینکه هیچ دارایی جابه‌جا شود
@@ -300,7 +305,9 @@ contract SwapExecutor {
         for (uint256 i = 0; i < parts.length; i++) {
             RoutePart calldata p = parts[i];
             uint256 amt = (p.amountIn * swapAmount) / totalAmountIn;
-            if (amt == 0) continue;
+            // v1 اینجا `continue` می‌کرد: سهم آن بخش خرج نمی‌شد ولی پول کاربر
+            // را گرفته بودیم و همان‌جا گیر می‌افتاد. سکوت بدترین رفتار است.
+            require(amt > 0, "part rounds to zero");
             for (uint256 j = 0; j < p.steps.length; j++) {
                 amt = _swap(p.steps[j], amt);
                 require(amt > 0, "zero step output");
@@ -309,12 +316,28 @@ contract SwapExecutor {
     }
 
     // -------------------------------------------------------------------
+    /**
+     * یک مرحله را اجرا می‌کند و می‌گوید *واقعاً* چقدر رسید.
+     *
+     * 🔑 خروجی از تفاضل موجودی خوانده می‌شود، نه از عددی که روتر برمی‌گرداند.
+     *    نسخه‌ی v1 عدد روتر را باور می‌کرد. برای توکن‌های کارمزددار
+     *    (fee-on-transfer) این دو یکی نیستند: روتر می‌گوید ۱۰۰۰ فرستادم،
+     *    ۹۸۰ می‌رسد، و مرحله‌ی بعد ۱۰۰۰ می‌خواهد — که یا از باقی‌مانده‌ی
+     *    قرارداد برمی‌دارد یا revert می‌کند. و دقیقاً همان توکن‌های
+     *    کارمزددارند که کاربر برای بررسی‌شان سراغ Exit check می‌آید.
+     */
     function _swap(SwapStep calldata s, uint256 amountIn) internal returns (uint256) {
-        _ensureApproval(s.tokenIn, s.router);
+        _ensureApproval(s.tokenIn, s.router, amountIn);
+        uint256 outBefore = IERC20(s.tokenOut).balanceOf(address(this));
+        _callRouter(s, amountIn);
+        return IERC20(s.tokenOut).balanceOf(address(this)) - outBefore;
+    }
 
+    /// فقط فراخوانی روتر. مقدار برگشتی عمداً نادیده گرفته می‌شود.
+    function _callRouter(SwapStep calldata s, uint256 amountIn) internal {
         if (s.kind == KIND_V3) {
             // SwapRouter02 — بدون deadline. محافظت زمانی در سطح executeSwap است.
-            return IUniswapV3Router02(s.router).exactInputSingle(
+            IUniswapV3Router02(s.router).exactInputSingle(
                 IUniswapV3Router02.ExactInputSingleParams({
                     tokenIn: s.tokenIn, tokenOut: s.tokenOut, fee: s.feeTier,
                     recipient: address(this),
@@ -323,10 +346,11 @@ contract SwapExecutor {
                     sqrtPriceLimitX96: 0
                 })
             );
+            return;
         }
 
         if (s.kind == KIND_V3_LEGACY) {
-            return IUniswapV3Router01(s.router).exactInputSingle(
+            IUniswapV3Router01(s.router).exactInputSingle(
                 IUniswapV3Router01.ExactInputSingleParams({
                     tokenIn: s.tokenIn, tokenOut: s.tokenOut, fee: s.feeTier,
                     recipient: address(this), deadline: block.timestamp,
@@ -335,6 +359,7 @@ contract SwapExecutor {
                     sqrtPriceLimitX96: 0
                 })
             );
+            return;
         }
 
         if (s.kind == KIND_SOLIDLY) {
@@ -343,9 +368,9 @@ contract SwapExecutor {
                 from: s.tokenIn, to: s.tokenOut,
                 stable: s.stable, factory: s.poolFactory
             });
-            uint256[] memory o = ISolidlyRouter(s.router).swapExactTokensForTokens(
+            ISolidlyRouter(s.router).swapExactTokensForTokens(
                 amountIn, 0, routes, address(this), block.timestamp);
-            return o[o.length - 1];
+            return;
         }
 
         // استفاده‌ی صریح از KIND_V2 به‌جای else ضمنی — خواناتر و ایمن‌تر
@@ -353,15 +378,18 @@ contract SwapExecutor {
         address[] memory path = new address[](2);
         path[0] = s.tokenIn;
         path[1] = s.tokenOut;
-        uint256[] memory amts = IUniswapV2Router(s.router).swapExactTokensForTokens(
+        IUniswapV2Router(s.router).swapExactTokensForTokens(
             amountIn, 0, path, address(this), block.timestamp);
-        return amts[amts.length - 1];
     }
 
-    function _ensureApproval(address token, address spender) internal {
+    function _ensureApproval(address token, address spender, uint256 needed) internal {
         uint256 current = IERC20(token).allowance(address(this), spender);
-        if (current > type(uint128).max) {
-            return;      // ⛽ approve بی‌نهایت از قبل ست شده
+        // v1 با `> type(uint128).max` مقایسه می‌کرد. توکن‌هایی که allowance را
+        // در uint96 نگه می‌دارند (سبک COMP/UNI) هرگز به آن آستانه نمی‌رسند، پس
+        // هر مرحله دو SSTORE اضافه می‌خورد. مقایسه با «چقدر لازم داریم» هم
+        // درست‌تر است هم ارزان‌تر.
+        if (current >= needed) {
+            return;
         }
 
         // بعضی توکن‌ها (مثل USDT) اجازه‌ی تغییر مستقیم allowance غیرصفر را نمی‌دهند.
@@ -421,10 +449,24 @@ contract SwapExecutor {
         feeRecipient = to;
     }
 
-    function setOwner(address newOwner) external onlyOwner {
+    /**
+     * انتقال مالکیت دومرحله‌ای.
+     * v1 یک‌مرحله‌ای بود: یک آدرس اشتباه، لیست سفید و کارمزد و نجات را برای
+     * همیشه فریز می‌کرد — و چون قرارداد ارتقاپذیر نیست، راه برگشتی نبود.
+     * حالا مالک جدید باید خودش acceptOwnership را صدا بزند، یعنی باید کلید
+     * آن آدرس را واقعاً در اختیار داشته باشد.
+     */
+    function transferOwnership(address newOwner) external onlyOwner {
         require(newOwner != address(0), "zero owner");
-        emit OwnerChanged(owner, newOwner);
-        owner = newOwner;
+        pendingOwner = newOwner;
+        emit OwnershipTransferStarted(owner, newOwner);
+    }
+
+    function acceptOwnership() external {
+        require(msg.sender == pendingOwner, "not pending owner");
+        emit OwnerChanged(owner, pendingOwner);
+        owner = pendingOwner;
+        pendingOwner = address(0);
     }
 
     /**
@@ -436,5 +478,37 @@ contract SwapExecutor {
         uint256 bal = IERC20(token).balanceOf(address(this));
         require(bal > 0, "nothing to rescue");
         _safeTransfer(token, owner, bal);
+    }
+
+    /**
+     * ETH گیرافتاده را برمی‌گرداند.
+     * `receive()` جلوی ارسال معمولی را می‌گیرد، ولی `selfdestruct` و
+     * پاداش بلاک از آن رد می‌شوند. در v1 هیچ راه خروجی برای ETH نبود، پس
+     * هر مقداری که این‌طور می‌آمد روی یک قرارداد غیرقابل‌ارتقا برای همیشه
+     * قفل می‌شد. قرارداد بین تراکنش‌ها ETH نگه نمی‌دارد، پس اینجا چیزی
+     * جز باقی‌مانده‌ی اتفاقی وجود ندارد.
+     */
+    function rescueETH() external onlyOwner {
+        uint256 bal = address(this).balance;
+        require(bal > 0, "nothing to rescue");
+        (bool sent, ) = owner.call{value: bal}("");
+        require(sent, "eth transfer failed");
+    }
+
+    /**
+     * باطل کردن allowance یک روتر.
+     * حذف روتر از لیست سفید جلوی *استفاده* از آن را می‌گیرد، ولی allowanceای
+     * که قبلاً به آن داده‌ایم سر جایش می‌ماند. اگر روتری به‌خاطر نفوذ حذف
+     * شود، باید دسترسی‌اش هم بسته شود. خودکار نیست چون قرارداد نمی‌داند کدام
+     * توکن‌ها را به کدام روتر approve کرده — تاریخچه‌اش را ذخیره نمی‌کند و
+     * ذخیره کردنش هزینه‌ی گس هر سواپ را بالا می‌برد.
+     */
+    function revokeApprovals(address[] calldata tokens, address router) external onlyOwner {
+        for (uint256 i = 0; i < tokens.length; i++) {
+            (bool ok, bytes memory d) = tokens[i].call(
+                abi.encodeWithSelector(IERC20.approve.selector, router, 0));
+            require(ok && (d.length == 0 || abi.decode(d, (bool))), "revoke failed");
+            emit ApprovalRevoked(tokens[i], router);
+        }
     }
 }

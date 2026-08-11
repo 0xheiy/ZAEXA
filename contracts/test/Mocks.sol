@@ -194,8 +194,13 @@ contract ReentrantRouter {
     ) external returns (uint256[] memory) {
         if (!attacked) {
             attacked = true;
-            (bool ok, ) = executor.call(payload);
-            require(ok, "reentrancy blocked");
+            (bool ok, bytes memory ret) = executor.call(payload);
+            // دلیل واقعی را بالا می‌فرستیم. اگر اینجا پیام خودمان را بگذاریم،
+            // تست دیگر نمی‌تواند «قفل کار کرد» را از «به دلیلی دیگر افتاد»
+            // تشخیص بدهد — و همان چیزی بود که تست قبلی را بی‌اثر کرده بود.
+            if (!ok) {
+                assembly { revert(add(ret, 0x20), mload(ret)) }
+            }
         }
         uint256[] memory a = new uint256[](2);
         return a;
@@ -233,4 +238,131 @@ contract MockWETH {
     }
     function mint(address to, uint256 a) external { balanceOf[to] += a; }
     receive() external payable { balanceOf[msg.sender] += msg.value; }
+}
+
+
+/**
+ * توکن کارمزددار (fee-on-transfer): در هر انتقال درصدی می‌سوزد.
+ * بدون این ماک، شاخه‌ای از قرارداد که «چقدر واقعاً رسید» را می‌سنجد هرگز
+ * اجرا نمی‌شد و ماک با فرض ما هم‌دست بود، نه با واقعیت.
+ */
+contract MockFeeToken {
+    string public name = "Fee On Transfer";
+    string public symbol = "FOT";
+    uint8 public decimals = 18;
+    uint256 public totalSupply;
+    uint256 public feeBps;                       // در ده‌هزارم
+
+    mapping(address => uint256) public balanceOf;
+    mapping(address => mapping(address => uint256)) public allowance;
+
+    constructor(uint256 _feeBps) { feeBps = _feeBps; }
+
+    function mint(address to, uint256 amount) external {
+        balanceOf[to] += amount; totalSupply += amount;
+    }
+    function approve(address spender, uint256 amount) external returns (bool) {
+        allowance[msg.sender][spender] = amount; return true;
+    }
+    function _move(address from, address to, uint256 amount) internal {
+        require(balanceOf[from] >= amount, "insufficient");
+        uint256 fee = (amount * feeBps) / 10_000;
+        balanceOf[from] -= amount;
+        balanceOf[to] += amount - fee;
+        totalSupply -= fee;                      // سوخته
+    }
+    function transfer(address to, uint256 amount) external returns (bool) {
+        _move(msg.sender, to, amount); return true;
+    }
+    function transferFrom(address from, address to, uint256 amount) external returns (bool) {
+        uint256 a = allowance[from][msg.sender];
+        require(a >= amount, "not allowed");
+        if (a != type(uint256).max) allowance[from][msg.sender] = a - amount;
+        _move(from, to, amount); return true;
+    }
+}
+
+
+/**
+ * توکن سبک USDT: هیچ مقداری برنمی‌گرداند، و allowance غیرصفر را مستقیم
+ * نمی‌شود عوض کرد. هر دو شاخه‌ی `_safeTransfer` و ریست در `_ensureApproval`
+ * فقط با چنین توکنی اجرا می‌شوند.
+ */
+contract MockNoReturnToken {
+    string public name = "Tether-like";
+    string public symbol = "USDTL";
+    uint8 public decimals = 6;
+    uint256 public totalSupply;
+
+    mapping(address => uint256) public balanceOf;
+    mapping(address => mapping(address => uint256)) public allowance;
+
+    function mint(address to, uint256 amount) external {
+        balanceOf[to] += amount; totalSupply += amount;
+    }
+    function approve(address spender, uint256 amount) external {
+        require(amount == 0 || allowance[msg.sender][spender] == 0,
+                "USDT: reset allowance to zero first");
+        allowance[msg.sender][spender] = amount;
+    }
+    function transfer(address to, uint256 amount) external {
+        require(balanceOf[msg.sender] >= amount, "insufficient");
+        balanceOf[msg.sender] -= amount; balanceOf[to] += amount;
+    }
+    function transferFrom(address from, address to, uint256 amount) external {
+        require(balanceOf[from] >= amount, "insufficient");
+        uint256 a = allowance[from][msg.sender];
+        require(a >= amount, "not allowed");
+        if (a != type(uint256).max) allowance[from][msg.sender] = a - amount;
+        balanceOf[from] -= amount; balanceOf[to] += amount;
+    }
+}
+
+
+/**
+ * روتر V2 که از ذخیره‌ی خودش پرداخت می‌کند، نه اینکه توکن جدید mint کند.
+ * ماک‌های قبلی نقدینگی بی‌نهایت داشتند، پس هیچ‌وقت معلوم نمی‌شد قرارداد
+ * دارد از موجودی خودش خرج می‌کند یا از استخر.
+ */
+contract MockReserveRouter {
+    uint256 public rateNum = 2;
+    uint256 public rateDen = 1;
+
+    function fund(address token, uint256 amount) external {
+        MockERC20(token).mint(address(this), amount);
+    }
+
+    /* انتقال با فراخوانی سطح‌پایین — روتر واقعی هم همین کار را می‌کند.
+       نسخه‌ی اول اینجا به MockERC20 کست می‌کرد و مقدار bool انتظار داشت، پس
+       با توکن سبک USDT که چیزی برنمی‌گرداند revert می‌شد. ماک نباید فرض
+       کند همه‌ی توکن‌ها مؤدب‌اند — همان چیزی که قرارداد برایش ساخته شده. */
+    function _pull(address token, address from, uint256 amount) internal {
+        (bool ok, bytes memory d) = token.call(
+            abi.encodeWithSignature("transferFrom(address,address,uint256)",
+                                    from, address(this), amount));
+        require(ok && (d.length == 0 || abi.decode(d, (bool))), "mock: pull failed");
+    }
+    function _push(address token, address to, uint256 amount) internal {
+        (bool ok, bytes memory d) = token.call(
+            abi.encodeWithSignature("transfer(address,uint256)", to, amount));
+        require(ok && (d.length == 0 || abi.decode(d, (bool))), "mock: push failed");
+    }
+    function balOf(address token) public view returns (uint256) {
+        (bool ok, bytes memory d) = token.staticcall(
+            abi.encodeWithSignature("balanceOf(address)", address(this)));
+        return ok && d.length >= 32 ? abi.decode(d, (uint256)) : 0;
+    }
+
+    function swapExactTokensForTokens(
+        uint256 amountIn, uint256 amountOutMin, address[] calldata path,
+        address to, uint256
+    ) external returns (uint256[] memory amounts) {
+        _pull(path[0], msg.sender, amountIn);
+        uint256 out = amountIn * rateNum / rateDen;
+        require(out >= amountOutMin, "mock: slippage");
+        require(balOf(path[1]) >= out, "mock: no reserve");
+        _push(path[1], to, out);
+        amounts = new uint256[](2);
+        amounts[0] = amountIn; amounts[1] = out;
+    }
 }

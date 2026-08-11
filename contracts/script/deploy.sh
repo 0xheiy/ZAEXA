@@ -34,17 +34,23 @@ RPC_CANDIDATES=(
   "https://1rpc.io/base"
   "https://mainnet.base.org"
 )
+# ⚠️ آدرس RPC معمولاً کلید API دارد. هر جا چاپ می‌شود باید ماسک شود —
+# یک بار همین اسکریپت کلید را در ترمینال چاپ کرد و کلید در یک چت لو رفت.
+mask_rpc() { printf '%s' "$1" | sed -E 's#^(https?://[^/]+).*#\1/…#'; }
+
 OWNER="${OWNER:-0x8A0Dcb583C8CAdc481E34487c34f1B856fe97e23}"
 FEE_RECIPIENT="${FEE_RECIPIENT:-$OWNER}"
 FEE_BPS="${FEE_BPS:-0}"
 WETH_ADDR="${WETH_ADDR:-0x4200000000000000000000000000000000000006}"
 
-# روترهایی که verify_dexes.sh تأییدشان کرده (کد دارند و سلکتور درست است)
+# روترهایی که verify_dexes.sh تأییدشان کرده (کد دارند و سلکتور درست است).
+# آخری PancakeSwap V3 است — نسل اول SwapRouter، با kind=3 در رابط.
 ROUTERS="0x2626664c2603336E57B271c5C0b26F421741e481,\
 0xcF77a3Ba9A5CA399B7c97c74d54e5b1Beb874E43,\
 0x327Df1E6de05895d2ab08513aaDD9313Fe505d86,\
 0x6BDED42c6DA8FBf0d2bA55B2fa120C5e0c8D7891,\
-0x8c1A3cF8f83074169FE5D7aD50B978e1cD6b37c7"
+0x8c1A3cF8f83074169FE5D7aD50B978e1cD6b37c7,\
+0x1b81D678ffb9C0263b24A97847620C99d213eB14"
 
 echo "==============================================================="
 echo " دیپلوی SwapExecutor"
@@ -61,7 +67,7 @@ for u in "${RPC_CANDIDATES[@]}"; do
   [ -z "$u" ] && continue
   ID=$(cast chain-id --rpc-url "$u" 2>/dev/null)
   if [ "$ID" = "8453" ]; then
-    RPC="$u"; echo "      ✓ $u"; break
+    RPC="$u"; echo "      ✓ $(mask_rpc "$u")"; break
   fi
   echo "      ✗ $u"
 done
@@ -89,12 +95,14 @@ echo "  سبز."
 # --- تأیید ---
 echo
 echo "[۲/۵] پارامترهای دیپلوی:"
-echo "      شبکه          : Base  (RPC: $RPC)"
+echo "      شبکه          : Base  (RPC: $(mask_rpc "$RPC"))"
 echo "      owner         : $OWNER"
 echo "      feeRecipient  : $FEE_RECIPIENT"
 echo "      کارمزد        : $FEE_BPS bps"
 echo "      WETH          : $WETH_ADDR"
-echo "      روترها        : ۵ عدد (لیست سفید بعد از دیپلوی)"
+# شمارش واقعی، نه عدد هاردکدشده — عدد ثابت بعد از اضافه شدن پنکیک دروغ شد
+ROUTER_COUNT=$(printf '%s' "$ROUTERS" | tr ',' '\n' | grep -c '^0x')
+echo "      روترها        : $ROUTER_COUNT عدد (لیست سفید بعد از دیپلوی)"
 echo
 read -r -p "ادامه بدهم؟ این تراکنش واقعی است و گس خرج می‌کند. [yes/no] " OK
 [ "$OK" = "yes" ] || { echo "لغو شد."; exit 0; }
@@ -185,10 +193,13 @@ echo
 echo "دو کار مانده:"
 echo
 echo "۱) آدرس را در رابط وب عوض کن:"
-echo "   sed -i 's/0x9fc4608fA104b032B902650A4D12E0CA51a2F684/$NEW/' ../web/index.html"
+echo "   sed -i -E 's/(executor:\")0x[0-9a-fA-F]{40}/\\1$NEW/' ../web/index.html"
+echo "   (و همین‌طور در web/test/stub-ethers.js، وگرنه دروازه‌ی سوم در تست‌ها"
+echo "    بی‌صدا از کار می‌افتد چون آدرس‌ها دیگر match نمی‌شوند)"
+echo "   sed -i -E 's/(EXEC   = \")0x[0-9a-fA-F]{40}/\\1$NEW/' ../web/test/stub-ethers.js"
 echo
 echo "۲) تأیید نهایی صرافی‌ها روی قرارداد جدید:"
-echo "   SWAP_EXECUTOR=$NEW RPC=$RPC ./script/verify_dexes.sh"
+echo "   SWAP_EXECUTOR=$NEW ./script/verify_dexes.sh"
 echo
 echo "(اختیاری) تأیید سورس روی BaseScan:"
 echo "   forge verify-contract $NEW src/SwapExecutor.sol:SwapExecutor \\"

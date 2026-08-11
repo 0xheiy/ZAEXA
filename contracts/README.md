@@ -5,8 +5,8 @@ already planned: one or more parts, each a chain of swap steps across whiteliste
 routers, all inside a single transaction.
 
 **Deployed on Base:**
-[`0x2fea35aaDae6Cbf9b9481B06164907ccF95DB081`](https://basescan.org/address/0x2fea35aadae6cbf9b9481b06164907ccf95db081#code)
-— source verified.
+[`0xE980825d4B3911e35Be5804349be26eBBe93BcC6`](https://basescan.org/address/0xe980825d4b3911e35be5804349be26ebbe93bcc6#code)
+— source verified on BaseScan and Sourcify.
 
 ```
 constructor(address owner, address feeRecipient, uint256 feeBps, address weth)
@@ -33,7 +33,20 @@ Test: `testFeeNotExposedToRiskyOutputToken`
 contract and pointing the front end at it — visibly, not silently.
 
 **Holds nothing between transactions.** Every path ends with the contract's
-balance of both tokens at zero.
+balance of both tokens at zero. Anything sent in by accident — including ETH
+forced in via `selfdestruct` — can be recovered with `rescue` / `rescueETH`.
+
+**Every hop is measured, not trusted.** `_swap` reads the contract's balance
+before and after calling the router and ignores the router's return value. For
+a fee-on-transfer token those two numbers differ, and trusting the router makes
+the next hop ask for tokens that never arrived.
+
+**Ownership transfers in two steps.** `transferOwnership` then
+`acceptOwnership` from the new address. A mistyped address cannot freeze a
+contract that has no upgrade path.
+
+**Router approvals can be revoked.** Removing a router from the allow-list
+stops it being *used*; `revokeApprovals` closes the allowance it already holds.
 
 **Native ETH is wrapped and unwrapped inside the contract.** `tokenIn` or
 `tokenOut` set to `address(0)` means native. `receive()` accepts ETH only from
@@ -70,7 +83,8 @@ forge install foundry-rs/forge-std
 forge test
 ```
 
-46 tests: 33 unit, 5 selector (offline, milliseconds), 8 fork against live Base.
+57 tests: 33 unit, 11 covering the v2 changes, 5 selector (offline,
+milliseconds), and 8 fork against live Base.
 
 ```bash
 ./script/fork_test.sh      # local anvil on a pinned block, then the fork tests

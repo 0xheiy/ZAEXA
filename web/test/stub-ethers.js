@@ -72,7 +72,7 @@
   const MC3    = "0xcA11bde05977b3631167028862bE2a173976CA11".toLowerCase();
   // باید با CHAIN.executor در index.html یکی باشد، وگرنه allowedRouter و feeBps
   // در استاب هرگز match نمی‌شوند و دروازه‌ی ۳ بی‌صدا از تست بیرون می‌ماند.
-  const EXEC   = "0x2fea35aaDae6Cbf9b9481B06164907ccF95DB081".toLowerCase();
+  const EXEC   = "0xE980825d4B3911e35Be5804349be26eBBe93BcC6".toLowerCase();
 
   const symOf = a => Object.keys(T).find(k => T[k].toLowerCase() === a.toLowerCase()) || "???";
   const pairKey = (a, b) => [symOf(a).toLowerCase(), symOf(b).toLowerCase()].sort().join("-");
@@ -210,9 +210,13 @@
         if (c.name === "totalSupply") return [true, pack([10n ** 24n])];
         if (c.name === "owner") return [true, pack(["0x1111111111111111111111111111111111111111"])];
         if (c.name === "token0") return [true, pack([T.WETH])];
-        if (c.name === "getPool") {
-          // استخر ساختگی: آدرسی مشتق از هدف، تا balanceOf رویش جواب بدهد
-          return [true, pack(["0x" + "a1".repeat(20)])];
+        // هر (توکن، مرجع، tier/stable) باید آدرس *متفاوتی* بدهد، چون روی
+        // زنجیره‌ی واقعی هم همین‌طور است. نسخه‌ی قبل برای همه یک آدرس ثابت
+        // برمی‌گرداند؛ نتیجه این بود که measureLiquidity یک استخر را چند بار
+        // می‌شمرد و هیچ تستی متوجه نمی‌شد.
+        if (c.name === "getPool" || c.name === "getPair") {
+          const key = target + "|" + JSON.stringify(c.args);
+          return [true, pack(["0x" + fakeId(key).slice(2, 42)])];
         }
         if (c.name === "symbol")   return [true, pack([symOf(target)])];
         if (c.name === "name")     return [true, pack(["Test Token"])];

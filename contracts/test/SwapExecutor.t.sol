@@ -463,7 +463,7 @@ contract SwapExecutorTest is Test {
         vm.expectRevert(bytes("not owner"));
         exec.setFeeRecipient(attacker);
         vm.expectRevert(bytes("not owner"));
-        exec.setOwner(attacker);
+        exec.transferOwnership(attacker);
         vm.expectRevert(bytes("not owner"));
         exec.rescue(address(tokenA));
         vm.stopPrank();
@@ -538,9 +538,22 @@ contract SwapExecutorTest is Test {
     function testOwnershipTransfer() public {
         address newOwner = address(0x1234);
 
+        // مرحله‌ی اول: مالکیت هنوز عوض نشده
         vm.prank(owner);
-        exec.setOwner(newOwner);
+        exec.transferOwnership(newOwner);
+        assertEq(exec.owner(), owner, "ownership must not move before it is accepted");
+        assertEq(exec.pendingOwner(), newOwner);
+
+        // کسی جز آدرس مقصد نمی‌تواند بپذیرد
+        vm.prank(address(0xDEAD));
+        vm.expectRevert(bytes("not pending owner"));
+        exec.acceptOwnership();
+
+        // مرحله‌ی دوم
+        vm.prank(newOwner);
+        exec.acceptOwnership();
         assertEq(exec.owner(), newOwner);
+        assertEq(exec.pendingOwner(), address(0), "pending must be cleared");
 
         // مالک قبلی دیگر دسترسی ندارد
         vm.prank(owner);
@@ -576,7 +589,10 @@ contract SwapExecutorTest is Test {
         evil.setup(address(exec), payload);
 
         vm.prank(user);
-        vm.expectRevert();      // باید شکست بخورد (nonReentrant جلویش را می‌گیرد)
+        // ⚠️ `vm.expectRevert()` خالی هر شکستی را قبول می‌کند — و این روتر
+        //    مخرب حتی بدون قفل هم به دلیلی دیگر شکست می‌خورد. پس پیام دقیق
+        //    را می‌خواهیم، وگرنه تست چیزی را ثابت نمی‌کند.
+        vm.expectRevert(bytes("reentrant"));
         exec.executeSwap(address(tokenA), address(tokenB), 10 ether, 0,
                          parts, block.timestamp + 60);
 
