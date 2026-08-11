@@ -387,6 +387,43 @@ async def main():
         assert "not a complete picture" not in clean, \
             "with full data the plain 'No route' wording should stand"
 
+        # ح) ETH ↔ WETH باید wrap/unwrap بدهد، نه بن‌بست
+        wrapui = await pg.evaluate("""async () => {
+            const savedIn = tokenIn, savedOut = tokenOut, savedAcc = account, savedChain = walletChainId;
+            account = "0x8A0Dcb583C8CAdc481E34487c34f1B856fe97e23";
+            walletChainId = CHAIN.id;
+            tokenIn  = BASE_TOKENS.find(t => t.symbol === "ETH");
+            tokenOut = BASE_TOKENS.find(t => t.symbol === "WETH");
+            balances[balKey(tokenIn)] = 10n ** 20n;
+            document.getElementById("amtIn").value = "1";
+            const dir = wrapDirection();
+            refreshButton();
+            const label = document.getElementById("actBtn").textContent;
+            const disabled = document.getElementById("actBtn").disabled;
+            tokenIn = savedIn; tokenOut = savedOut; account = savedAcc;
+            walletChainId = savedChain; balances = {}; refreshButton();
+            return {dir, label, disabled};
+        }""")
+        print("[wrap] ETH -> WETH  dir=%s  button=%r disabled=%s"
+              % (wrapui["dir"], wrapui["label"], wrapui["disabled"]))
+        assert wrapui["dir"] == "wrap", "ETH -> WETH must be recognised as a wrap"
+        assert "Wrap" in wrapui["label"] and not wrapui["disabled"], \
+            "the app must offer a working wrap, not point at a button that does not exist"
+
+        # ط) قطع اتصال باید وضعیت را واقعاً پاک کند
+        dis = await pg.evaluate("""() => {
+            account = "0x8A0Dcb583C8CAdc481E34487c34f1B856fe97e23";
+            walletChainId = CHAIN.id; balances["native"] = 5n; allowanceKnown = true;
+            disconnect();
+            return {account, allowanceKnown, balances: Object.keys(balances).length,
+                    button: document.getElementById("connectBtn").textContent};
+        }""")
+        print("[disconnect] account=%s balances=%s button=%r"
+              % (dis["account"], dis["balances"], dis["button"]))
+        assert dis["account"] is None and dis["balances"] == 0 and not dis["allowanceKnown"], \
+            "disconnect must clear wallet state, not just the label"
+        assert dis["button"] == "Connect wallet"
+
         # ---- 2c. DEX coverage gate ----
         cov = await pg.inner_text("#coverage")
         print("[coverage] %s" % cov.replace("\n", " | "))

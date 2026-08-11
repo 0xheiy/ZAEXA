@@ -409,6 +409,7 @@ footer a{color:var(--tx3)}
     </div>
   </div>
   <button class="chip solid" id="connectBtn">Connect wallet</button>
+  <button class="chip round" id="disconnectBtn" title="Disconnect" style="display:none">⏻</button>
 </header>
 
 <main>
@@ -686,6 +687,7 @@ const ABI={
   erc20:["function symbol() view returns (string)","function name() view returns (string)",
     "function decimals() view returns (uint8)","function balanceOf(address) view returns (uint256)",
     "function allowance(address,address) view returns (uint256)","function approve(address,uint256) returns (bool)"],
+  weth:["function deposit() payable","function withdraw(uint256)"],
   ownable:["function owner() view returns (address)"],
   v3pool:["function token0() view returns (address)",
     "event Swap(address indexed sender,address indexed recipient,int256 amount0,int256 amount1,uint160 sqrtPriceX96,uint128 liquidity,int24 tick)"],
@@ -704,7 +706,7 @@ let slippageBps=50,deadlineMin=3,feeBps=0,unlimitedApprove=false;
 let currentPlan=null,quoteSeq=0,scanSeq=0,chartSeq=0,exitSeq=0;
 // "exactIn" = کاربر مبلغ پرداختی را نوشته | "targetOut" = مقدار دریافتی را نوشته
 let mode="exactIn";
-let dexStatus={},verifyRetried=false;
+let dexStatus={},verifyTries=0;
 let balances={},allowance=0n,allowanceKnown=false,busy=false,pickerTarget="in";
 let safetyCache={},timeframe="1D",chartData=null;
 const $=id=>document.getElementById(id);
@@ -783,9 +785,12 @@ async function verifyDexes(){
      غلط. یک تلاش دوباره، فقط برای آن‌هایی که *نشد بپرسیم*. */
   const unreachable=DEXES.filter(d=>!dexStatus[d.id].ok&&
     dexStatus[d.id].reason==="could not reach the network to verify");
-  if(unreachable.length&&!verifyRetried){
-    verifyRetried=true;
-    setTimeout(()=>{verifyDexes();},4000);
+  if(unreachable.length&&verifyTries<3){
+    verifyTries++;
+    // با فاصله‌ی فزاینده: علت معمول 429 روی RPC عمومی است، و فشار بیشتر
+    // بدترش می‌کند. صرافی سالمی که یک بار جواب نداد نباید کل جلسه حذف بماند.
+    rotateRpc();
+    setTimeout(()=>{verifyDexes();},2000*verifyTries);
   }
   // دروازه‌ی ۳ — لیست سفید قرارداد اجرا
   try{
@@ -1714,6 +1719,18 @@ function paintAvatar(el,t){
 }
 function routable(t){return t&&t.native?WETH_TOKEN():t;}
 function isNative(t){return !!(t&&t.native);}
+/* ETH و WETH یک دارایی‌اند، پس «سواپ» بینشان معنا ندارد و هیچ استخری هم
+   ندارد. کاری که لازم است wrap/unwrap روی خود قرارداد WETH است.
+   قبلاً رابط می‌گفت «از دکمه‌ی wrap استفاده کن» در حالی که چنین دکمه‌ای
+   وجود نداشت — بن‌بست کامل برای کاربر. */
+function wrapDirection(){
+  if(!tokenIn||!tokenOut)return null;
+  const a=routable(tokenIn).address.toLowerCase(),b=routable(tokenOut).address.toLowerCase();
+  if(a!==b||a!==WETH_ADDR.toLowerCase())return null;
+  if(isNative(tokenIn)&&!isNative(tokenOut))return "wrap";
+  if(!isNative(tokenIn)&&isNative(tokenOut))return "unwrap";
+  return null;   // ETH→ETH یا WETH→WETH: واقعاً بی‌معناست
+}
 function shortAddr(a){return a==="NATIVE"?"Native":a.slice(0,6)+"…"+a.slice(-4);}
 function esc(s){return String(s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));}
 function fmtUsd(n){return n>=1e6?(n/1e6).toFixed(1)+"M":n>=1e3?(n/1e3).toFixed(0)+"k":n.toFixed(0);}
@@ -1870,10 +1887,18 @@ async function runQuote(){
 
   const amountIn=parsedAmountIn();
   if(!tokenIn||!tokenOut||amountIn===null){setNotice("");renderVenues([],null);refreshButton();return;}
+  const wd=wrapDirection();
+  if(wd){
+    setNotice(note("ok",wd==="wrap"
+      ?"ETH and WETH are the same asset, so this is a wrap — no pool, no price impact, no fee."
+      :"ETH and WETH are the same asset, so this is an unwrap — no pool, no price impact, no fee."));
+    $("amtOut").value=$("amtIn").value;          // نسبت همیشه ۱:۱ است
+    ["kRate","kImpact","kMin","kVs"].forEach(k=>$(k).textContent="—");
+    $("kRate").textContent="1 : 1";
+    renderVenues([],null);refreshButton();return;
+  }
   if(routable(tokenIn).address.toLowerCase()===routable(tokenOut).address.toLowerCase()){
-    setNotice(note("warn",isNative(tokenIn)||isNative(tokenOut)
-      ?"ETH and WETH are the same asset — use the wrap button instead."
-      :"Pick two different tokens."));refreshButton();return;}
+    setNotice(note("warn","Pick two different tokens."));refreshButton();return;}
   $("venueMeta").textContent="quoting…";
   const stats=newStats();
   try{
@@ -2325,10 +2350,25 @@ async function switchNetwork(){
     else throw e;}
 }
 function paintWallet(){
-  const b=$("connectBtn");
-  if(!account){b.textContent="Connect wallet";b.className="chip solid";return;}
+  const b=$("connectBtn"),d=$("disconnectBtn");
+  if(!account){b.textContent="Connect wallet";b.className="chip solid";
+    if(d)d.style.display="none";return;}
   b.textContent=walletChainId===CHAIN.id?shortAddr(account):"Switch to Base";
   b.className=walletChainId===CHAIN.id?"chip":"chip solid";
+  if(d)d.style.display="";
+}
+
+/* قطع اتصال. کیف پول‌ها API قطع اتصال ندارند، پس تنها کاری که *واقعاً*
+   می‌شود کرد پاک کردن وضعیت سمت ماست — و باید صادقانه همین را بگوییم،
+   نه اینکه وانمود کنیم دسترسی سایت از کیف پول برداشته شد. */
+function disconnect(){
+  account=null;signer=null;walletProvider=null;walletChainId=null;
+  balances={};allowance=0n;allowanceKnown=false;
+  clearInterval(balTimer);
+  paintWallet();paintBalances();refreshButton();
+  if(view==="folio")renderFolio();
+  setNotice(note("ok","<b>Disconnected.</b> This clears the site only — to remove "+
+    "the site's access entirely, do it from your wallet's connected-sites list."));
 }
 async function refreshBalances(){
   if(!account){balances={};paintBalances();return;}
@@ -2405,6 +2445,30 @@ async function preflight(plan,amountIn){
   if(gas!==null&&gas===0n)problems.push("No ETH on Base to pay for gas.");
   return problems;
 }
+/* wrap و unwrap مستقیم روی قرارداد WETH انجام می‌شوند، نه از راه اجراکننده.
+   هیچ approve، هیچ لغزش، هیچ مسیریابی — نسبت همیشه دقیقاً ۱:۱ است. */
+async function doWrapOrUnwrap(kind){
+  const amt=parsedAmountIn();
+  if(amt===null||amt<=0n)return;
+  setBusy(true,"Confirm in wallet…");
+  try{
+    const w=new E.Contract(WETH_ADDR,ABI.weth,signer);
+    const tx=kind==="wrap"?await w.deposit({value:amt}):await w.withdraw(amt);
+    const url=`${CHAIN.explorer}/tx/${tx.hash}`;
+    setBusy(true,kind==="wrap"?"Wrapping…":"Unwrapping…");
+    setNotice(note("ok",`Sent — <a href="${url}" target="_blank" rel="noopener">${shortAddr(tx.hash)}</a>`));
+    // بعد از ارسال، هر خطا فقط مربوط به *خواندن* نتیجه است
+    try{await withTimeout(tx.wait(),120000);
+      setNotice(note("ok",kind==="wrap"?"<b>Wrapped.</b>":"<b>Unwrapped.</b>"));}
+    catch{setNotice(note("warn",
+      `<b>Sent, but we could not read the receipt.</b> Check <a href="${url}" target="_blank" rel="noopener">${shortAddr(tx.hash)}</a>.`));}
+    await refreshBalances();
+  }catch(e){showError(kind==="wrap"?"Wrap failed":"Unwrap failed",e);}
+  finally{setBusy(false);refreshButton();}
+}
+const doWrap=()=>doWrapOrUnwrap("wrap");
+const doUnwrap=()=>doWrapOrUnwrap("unwrap");
+
 async function doApprove(){
   const amountIn=parsedAmountIn();
   setBusy(true,"Confirm in wallet…");
@@ -2559,6 +2623,10 @@ function refreshButton(){
   if(amt===null)return set("Enter an amount",false);
   const bal=balances[balKey(tokenIn)];
   if(bal!==undefined&&bal<amt)return set(`Insufficient ${tokenIn.symbol}`,false);
+  // wrap/unwrap مسیر ندارد، پس منتظر نقشه نمی‌ماند
+  const wd=wrapDirection();
+  if(wd==="wrap")return set("Wrap to WETH",true,doWrap);
+  if(wd==="unwrap")return set("Unwrap to ETH",true,doUnwrap);
   if(!currentPlan)return set("Finding best route…",false);
   // ETH بومی هیچ approve نمی‌خواهد — با خود تراکنش می‌رود و قرارداد wrap می‌کند
   // فقط وقتی دکمه‌ی Approve را نشان بده که *بدانیم* allowance کم است
@@ -2757,6 +2825,7 @@ function wire(){
     }
   };
   $("connectBtn").onclick=()=>{if(!account)connect();else if(walletChainId!==CHAIN.id)switchNetwork();};
+  $("disconnectBtn").onclick=disconnect;
   $("tokInBtn").onclick=()=>openPicker("in");
   $("tokOutBtn").onclick=()=>openPicker("out");
   $("tokClose").onclick=closePicker;
