@@ -424,6 +424,27 @@ async def main():
             "disconnect must clear wallet state, not just the label"
         assert dis["button"] == "Connect wallet"
 
+        # ی) «نمی‌دانم» نباید در امتیاز ریسک جریمه شود
+        risk = await pg.evaluate("""() => {
+            const base = {findings: [], owner: null, isProxy: false, liqUsd: 100000,
+                          canBuy: null, canSell: null, unknown: 1};
+            const unknownScore = riskScore(Object.assign({}, base));
+            const knownBad = riskScore(Object.assign({}, base, {canSell: false}));
+            const knownGood = riskScore(Object.assign({}, base, {canSell: true}));
+            return {unknownScore, knownBad, knownGood};
+        }""")
+        print("[risk] unknown=%s  known-unsellable=%s  known-sellable=%s"
+              % (risk["unknownScore"], risk["knownBad"], risk["knownGood"]))
+        assert risk["unknownScore"] == risk["knownGood"], \
+            "an unknown sell test must not be scored as if the token failed it"
+        assert risk["knownBad"] > risk["unknownScore"], \
+            "a token we know cannot be sold must still be penalised"
+
+        # ک) دکمه‌ی گزارش مشکل باید به ایمیل واقعی برود
+        mail = await pg.evaluate("() => LINKS.email")
+        print("[contact] %s" % mail)
+        assert "@" in mail and "example" not in mail, "contact address must be real"
+
         # ---- 2c. DEX coverage gate ----
         cov = await pg.inner_text("#coverage")
         print("[coverage] %s" % cov.replace("\n", " | "))

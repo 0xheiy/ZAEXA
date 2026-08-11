@@ -564,7 +564,7 @@ const LINKS={
   telegram:"",          // مثال: https://t.me/zaexa
   github:"https://github.com/0xheiy/ZAEXA",
   feedback:"",          // فرم یا لینک؛ اگر خالی بماند ایمیل استفاده می‌شود
-  email:"hello@zaexa.com",
+  email:"zaexadex@gmail.com",
 };
 
 /* ethers از کنار همین فایل بارگذاری می‌شود، نه از CDN.
@@ -1441,7 +1441,11 @@ const selectorOf=s=>E.id(s).slice(2,10).toLowerCase();
 
 async function scanToken(token){
   const rep={address:token.address,symbol:token.symbol,findings:[],owner:null,
-    isProxy:false,liqUsd:0,canBuy:false,canSell:false,unknown:0};
+    // ⚠️ سه‌حالته، نه دوحالته: null یعنی «نپرسیدیم/نفهمیدیم».
+    //    قبلاً false بود و امتیاز ریسک ۴۰ نمره جریمه می‌داد — یعنی متن
+    //    درست می‌گفت «نامعلوم» ولی عدد کنارش رفتار می‌کرد انگار توکن
+    //    قابل فروش نیست. WETH با ریسک ۴۰ «Caution» نشان داده می‌شد.
+    isProxy:false,liqUsd:0,canBuy:null,canSell:null,unknown:0};
   const add=(l,t,d)=>rep.findings.push({level:l,title:t,detail:d});
 
   // 🔑 ETH بومی اصلاً قرارداد ندارد. نسخه‌ی قبل این را «شبکه جواب نداد»
@@ -1498,7 +1502,7 @@ async function scanToken(token){
   }
   try{
     const t=await checkTradability(token);
-    rep.canBuy=t.buy;rep.canSell=t.sell;
+    if(!t.unknown){rep.canBuy=t.buy;rep.canSell=t.sell;}
     // ⚠️ ترتیب این دو شرط حیاتی است. قبلاً «نامعلوم» فقط وقتی دیده می‌شد که
     //    *هر دو* سمت شکست خورده باشند؛ اگر خرید کوت می‌گرفت و فروش به‌خاطر
     //    قطعی RPC نمی‌گرفت، توکن سالم «قوی‌ترین نشانه‌ی هانی‌پات» اعلام می‌شد
@@ -1525,7 +1529,9 @@ function riskScore(rep){
     if(l==="critical")c++;else if(l==="high")h++;else if(l==="medium")m++;
   });
   let s=c*25+h*12+m*5;
-  if(!rep.canSell)s+=40;
+  // فقط وقتی *می‌دانیم* قابل فروش نیست. null یعنی نمی‌دانیم و نمی‌دانستن
+  // جریمه ندارد — شمارنده‌ی «unknown» جداگانه به کاربر نشان داده می‌شود.
+  if(rep.canSell===false)s+=40;
   if(rep.liqUsd!==null&&rep.liqUsd<10000)s+=20;else if(rep.liqUsd!==null&&rep.liqUsd<50000)s+=10;
   if(ownerActive)s+=10;
   if(rep.isProxy)s+=10;
