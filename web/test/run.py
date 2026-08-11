@@ -469,6 +469,33 @@ async def main():
         assert real == "user rejected", \
             "a genuine failure must propagate, not be swallowed as unknown"
 
+        # م) خطای HTTP از RPC نباید «قرارداد رد کرد» خوانده شود
+        #    ethers برای 403/429 هم CALL_EXCEPTION می‌گذارد و پیامش
+        #    «missing revert data» است — عیناً شبیه یک revert واقعی.
+        transport = await pg.evaluate("""() => {
+            const blocked = Object.assign(new Error("missing revert data"),
+                {code: "CALL_EXCEPTION", data: "Request failed with status code 403"});
+            const real = Object.assign(new Error('execution reverted: "Blacklisted"'),
+                {code: "CALL_EXCEPTION"});
+            return {
+                blockedIsRevert: isRevert(blocked),
+                blockedText: friendly(blocked),
+                realIsRevert: isRevert(real),
+                realText: friendly(real),
+            };
+        }""")
+        print("[transport] 403 -> isRevert=%s | %s"
+              % (transport["blockedIsRevert"], transport["blockedText"][:70]))
+        print("[transport] real revert -> isRevert=%s | %s"
+              % (transport["realIsRevert"], transport["realText"][:50]))
+        assert transport["blockedIsRevert"] is False, \
+            "an HTTP 403 from the RPC is not a revert — we never reached the chain"
+        assert "could not reach" in transport["blockedText"].lower(), transport["blockedText"]
+        assert "router" not in transport["blockedText"].lower(), \
+            "do not blame the router for a network we never reached"
+        assert transport["realIsRevert"] is True, \
+            "a genuine revert must still be treated as one"
+
         # ---- 2c. DEX coverage gate ----
         cov = await pg.inner_text("#coverage")
         print("[coverage] %s" % cov.replace("\n", " | "))

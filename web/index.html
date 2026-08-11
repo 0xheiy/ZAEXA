@@ -719,7 +719,28 @@ const DEAD="0x000000000000000000000000000000000000dEaD";
 function makeProvider(u){return new E.JsonRpcProvider(u,CHAIN.id,{staticNetwork:true,batchMaxCount:1});}
 function rotateRpc(){rpcIndex=(rpcIndex+1)%CHAIN.rpcs.length;readProvider=makeProvider(CHAIN.rpcs[rpcIndex]);}
 function withTimeout(p,ms){return Promise.race([p,new Promise((_,r)=>setTimeout(()=>r(new Error("timeout")),ms))]);}
+/* آیا خطا از *انتقال* آمده، نه از زنجیره؟
+   ---------------------------------------------------------------------
+   ⚠️ این تشخیص حیاتی است و یک بار گولمان زد. ethers وقتی RPC جواب HTTP
+   بدهد (403 مسدودسازی جغرافیایی، 429 محدودیت نرخ، 5xx) هم `code` را
+   `CALL_EXCEPTION` می‌گذارد و پیامش می‌شود «missing revert data».
+   یعنی «نتوانستیم بپرسیم» عیناً شبیه «پرسیدیم و قرارداد رد کرد» درمی‌آید.
+
+   نتیجه‌اش روی سایت واقعی این بود: کاربر VPN را قطع کرد، RPC عمومی 403
+   داد، و رابط نوشت «روتر فراخوانی را بدون دلیل رد کرد — معمولاً ناسازگاری
+   اینترفیس یا استخر خالی» — برای یک wrap که اصلاً روتر و استخری ندارد.
+
+   همان قاعده‌ی اول، این بار داخل خودِ لایه‌ی تشخیص خطا. */
+function isTransportError(e){
+  if(!e)return false;
+  const bits=[e.message,e.shortMessage,typeof e.data==="string"?e.data:"",
+              e.error&&e.error.message,e.info&&JSON.stringify(e.info)];
+  const t=bits.filter(Boolean).join(" ").toLowerCase();
+  return /status code\s*[45]\d\d|fetch failed|failed to fetch|network error|networkerror|could not detect network|timeout|timed out|econnrefused|econnreset|socket hang up|too many requests|rate.?limit|forbidden|unauthorized/.test(t);
+}
 function isRevert(e){
+  // شکست انتقال هرگز revert نیست، حتی اگر ethers CALL_EXCEPTION بگذارد
+  if(isTransportError(e))return false;
   if(e&&e.code==="CALL_EXCEPTION")return true;
   const m=((e&&e.message)||"").toLowerCase();
   return m.includes("execution reverted")||m.includes("revert");
@@ -2661,6 +2682,11 @@ function showError(title,err,extra){
 function friendly(err){
   const m=(err&&(err.shortMessage||err.reason||err.message))||String(err);
   if(/user rejected|denied/i.test(m))return "You rejected the request in your wallet.";
+  // اول از همه: اگر اصلاً به شبکه نرسیدیم، هیچ ادعایی درباره‌ی قرارداد نکن
+  if(isTransportError(err))
+    return "We could not reach Base — the RPC endpoint refused or dropped the request. "+
+           "This is usually geographic blocking or rate limiting, not a problem with the "+
+           "trade. Try again, or set a custom RPC under Settings.";
   if(/slippage: output below minimum/i.test(m))
     return `Price moved more than your ${(slippageBps/100).toFixed(2)}% tolerance. Raise it in settings.`;
   if(/router not allowed/i.test(m))return "A router in this path is not allow-listed on the executor.";
