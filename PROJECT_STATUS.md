@@ -21,7 +21,8 @@ feeRecipient : همان owner
                Aerodrome، BaseSwap، SushiSwap، Alien Base، PancakeSwap V3
 تست‌ها       : ۵۷ تست سبز (۳۳ واحد + ۱۱ v2 + ۵ سلکتور + ۸ fork روی Base واقعی)
                + سوییت Playwright رابط وب، همه سبز
-اسم/دامنه    : Zaexa · zaexa.com (خریداری شده، هنوز منتشر نشده)
+سایت         : https://zaexa.com — منتشر شد (Cloudflare Workers، از روی مخزن)
+مخزن         : github.com/0xheiy/ZAEXA (عمومی، بدون LICENSE) · ایکس @zaexadex
 ```
 
 **تازه‌ترین تغییر:** قرارداد v2 دیپلوی شد (بخش ۱۱الف). ETH بومی داخل خود قرارداد wrap/unwrap می‌شود.
@@ -268,7 +269,13 @@ cd ~/web3_tools/web/test  && python3 run.py  # تست آفلاین رابط، ب
 - [ ] تست واقعی USDC → ETH با کیف پول — باید **یک** امضا باشد
 - [ ] لوگو (فعلاً SVG موقت است) و ساخت حساب‌های شبکه‌ی اجتماعی → پر کردن `LINKS`
 - [ ] کشف خودکار توکن‌های تازه‌ی Base (ستون سوم تز)
-- [ ] انتشار روی zaexa.com (Vercel / Netlify / IPFS) + ذخیره در گیت‌هاب
+- [x] انتشار روی zaexa.com + مخزن گیت‌هاب
+      Cloudflare Workers با static assets. تنظیمات در `wrangler.toml` داخل مخزن،
+      نه فقط در پنل. Build command فقط `index.html` و `ethers.umd.min.js` را
+      در `_site` می‌گذارد تا `web/test/` منتشر نشود.
+      ⚠️ موقع اتصال دامنه: رکوردهای A/CNAME که از ثبت‌کننده وارد شده‌اند باید
+      اول حذف شوند، وگرنه «externally managed DNS records» می‌دهد. کادر
+      Subdomain برای دامنه‌ی اصلی باید **خالی** بماند.
 - [ ] فعال کردن کارمزد وقتی آماده بودی:
       `cast send $SWAP_EXECUTOR "setFee(uint256)" 10 --rpc-url $RPC --private-key $PRIVATE_KEY`
 
