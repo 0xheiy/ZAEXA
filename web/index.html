@@ -97,6 +97,7 @@ header{max-width:1140px;margin:0 auto;padding:20px 20px 8px;display:flex;align-i
   .chip{height:36px;font-size:13px}
   main{padding:8px 14px 40px}
   .pop{right:-8px;width:min(260px,calc(100vw - 40px))}
+  .walletPop{right:0;width:min(238px,calc(100vw - 28px))}
   .chartTop{padding:16px 16px 4px}
   .px{font-size:27px}
   .leg{margin:0 10px;padding:13px 13px}
@@ -357,6 +358,17 @@ footer a{color:var(--tx3)}
 .seg input{width:62px;padding:8px;border-radius:11px;text-align:right;background:var(--card2);
   border:none;outline:none}
 .pop p{margin:0;font-size:11.5px;color:var(--tx3);line-height:1.55}
+.walletPop{width:238px;padding:8px}
+.walletHead{display:flex;align-items:center;justify-content:space-between;gap:10px;
+  padding:7px 8px 10px;font-size:11px;font-weight:640;letter-spacing:.05em;
+  text-transform:uppercase;color:var(--tx3)}
+.walletAddr{font-variant-numeric:tabular-nums;text-transform:none;letter-spacing:0;color:var(--tx2)}
+.walletAction{width:100%;display:flex;align-items:center;justify-content:space-between;gap:12px;
+  padding:10px 9px;border-radius:11px;text-align:left;font-size:13px;color:var(--tx2)}
+.walletAction:hover{background:var(--card2);color:var(--tx)}
+.walletAction .right{display:flex;align-items:center;gap:8px;color:var(--tx3);font-size:12px}
+.walletAction.danger{color:var(--neg)}
+.walletAction.danger:hover{background:color-mix(in srgb,var(--neg) 10%,transparent);color:var(--neg)}
 </style>
 </head>
 <body>
@@ -386,7 +398,6 @@ footer a{color:var(--tx3)}
     <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor"
          stroke-width="2" stroke-linecap="round"><path d="M10 13a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-1 1"/>
     <path d="M14 11a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l1-1"/></svg></button>
-  <button class="chip round" id="themeBtn">◐</button>
   <div class="rel">
     <button class="chip round" id="setBtn">⚙</button>
     <div class="pop" id="setPop">
@@ -408,8 +419,18 @@ footer a{color:var(--tx3)}
       <p>Every swap is simulated first. If the simulation fails, nothing is broadcast and no gas is spent.</p>
     </div>
   </div>
-  <button class="chip solid" id="connectBtn">Connect wallet</button>
-  <button class="chip round" id="disconnectBtn" title="Disconnect" style="display:none">⏻</button>
+  <div class="rel" id="walletMenu">
+    <button class="chip solid" id="connectBtn" aria-haspopup="menu" aria-expanded="false">Connect wallet</button>
+    <div class="pop walletPop" id="walletPop" role="menu" aria-label="Wallet menu">
+      <div class="walletHead"><span>Wallet</span><span class="walletAddr" id="walletAddr">—</span></div>
+      <button class="walletAction" id="themeBtn" role="menuitem">
+        <span>Appearance</span><span class="right"><span id="themeState">Light</span><span id="themeIcon" aria-hidden="true">◑</span></span>
+      </button>
+      <button class="walletAction danger" id="disconnectBtn" role="menuitem">
+        <span>Disconnect</span><span aria-hidden="true">⏻</span>
+      </button>
+    </div>
+  </div>
 </header>
 
 <main>
@@ -2345,30 +2366,87 @@ function renderSafety(rep){
 /* =====================================================================
    Wallet & execution
    ===================================================================== */
+let walletEip1193=null,walletEventHandlers=null;
 function injected(){
   const e=window.ethereum;if(!e)return null;
   if(e.providers&&e.providers.length)return e.providers.find(p=>p.isMetaMask)||e.providers[0];
   return e;
 }
-async function connect(){
-  const inj=injected();
-  if(!inj){setNotice(note("err","<b>No wallet found.</b> Install MetaMask and reload."));return;}
+function closeWalletMenu(){
+  $("walletPop").classList.remove("on");
+  $("connectBtn").setAttribute("aria-expanded","false");
+}
+function toggleWalletMenu(){
+  if(!account||walletChainId!==CHAIN.id)return;
+  const open=$("walletPop").classList.toggle("on");
+  $("connectBtn").setAttribute("aria-expanded",String(open));
+}
+function detachWalletEvents(){
+  if(!walletEip1193||!walletEventHandlers)return;
+  const off=walletEip1193.removeListener||walletEip1193.off;
+  if(off){
+    off.call(walletEip1193,"accountsChanged",walletEventHandlers.accountsChanged);
+    off.call(walletEip1193,"chainChanged",walletEventHandlers.chainChanged);
+  }
+  walletEventHandlers=null;
+}
+function clearWalletState(){
+  detachWalletEvents();
+  account=null;signer=null;walletProvider=null;walletEip1193=null;walletChainId=null;
+  balances={};allowance=0n;allowanceKnown=false;
+  clearInterval(balTimer);liveSrc=null;
+  closeWalletMenu();paintWallet();paintBalances();paintSrc();refreshButton();
+}
+async function handleAccountsChanged(accounts){
+  if(!accounts||!accounts[0]){
+    clearWalletState();
+    if(view==="folio")renderFolio();
+    setNotice(note("ok","<b>Wallet disconnected.</b>"));
+    return;
+  }
   try{
-    const a=await inj.request({method:"eth_requestAccounts"});
+    account=E.getAddress(accounts[0]);
+    signer=await walletProvider.getSigner(account);
+    balances={};allowance=0n;allowanceKnown=false;
+    paintWallet();await Promise.all([refreshBalances(),refreshAllowance()]);refreshButton();
+  }catch(e){
+    clearWalletState();setNotice(note("err",esc(e.message||"Could not update the wallet account.")));
+  }
+}
+function attachWalletEvents(provider){
+  if(walletEventHandlers&&walletEip1193===provider)return;
+  detachWalletEvents();walletEip1193=provider;
+  walletEventHandlers={
+    accountsChanged:handleAccountsChanged,
+    chainChanged:()=>location.reload(),
+  };
+  if(provider.on){
+    provider.on("accountsChanged",walletEventHandlers.accountsChanged);
+    provider.on("chainChanged",walletEventHandlers.chainChanged);
+  }
+}
+async function connectWithProvider(provider,requestAccounts){
+  try{
+    const a=await provider.request({method:requestAccounts?"eth_requestAccounts":"eth_accounts"});
+    if(!a||!a[0])throw new Error("No wallet account was returned.");
+    detachWalletEvents();walletEip1193=provider;
     account=E.getAddress(a[0]);
-    walletProvider=new E.BrowserProvider(inj,"any");
+    walletProvider=new E.BrowserProvider(provider,"any");
     signer=await walletProvider.getSigner();
     walletChainId=Number((await walletProvider.getNetwork()).chainId);
-    inj.on&&inj.on("accountsChanged",x=>{account=x&&x[0]?E.getAddress(x[0]):null;
-      if(!account)signer=null;balances={};refreshBalances();paintWallet();refreshButton();});
-    inj.on&&inj.on("chainChanged",()=>location.reload());
+    attachWalletEvents(provider);
     paintWallet();
     await Promise.all([refreshBalances(),readFee()]);
-    await refreshAllowance();refreshButton();setNotice("");startBalanceWatch();
+    await refreshAllowance();refreshButton();setNotice("");startBalanceWatch();closeWalletMenu();
   }catch(e){setNotice(note("err",esc(e.message||"Connection rejected.")));}
 }
+async function connect(){
+  const inj=injected();
+  if(!inj){setNotice(note("err","<b>No wallet found.</b> Install a browser wallet or use WalletConnect."));return;}
+  await connectWithProvider(inj,true);
+}
 async function switchNetwork(){
-  const inj=injected();if(!inj)return;
+  const inj=walletEip1193||injected();if(!inj)return;
   try{await inj.request({method:"wallet_switchEthereumChain",params:[{chainId:CHAIN.hexId}]});}
   catch(e){
     if(e.code===4902)await inj.request({method:"wallet_addEthereumChain",params:[{
@@ -2377,22 +2455,19 @@ async function switchNetwork(){
     else throw e;}
 }
 function paintWallet(){
-  const b=$("connectBtn"),d=$("disconnectBtn");
+  const b=$("connectBtn"),addr=$("walletAddr");
   if(!account){b.textContent="Connect wallet";b.className="chip solid";
-    if(d)d.style.display="none";return;}
+    addr.textContent="—";closeWalletMenu();return;}
   b.textContent=walletChainId===CHAIN.id?shortAddr(account):"Switch to Base";
   b.className=walletChainId===CHAIN.id?"chip":"chip solid";
-  if(d)d.style.display="";
+  addr.textContent=shortAddr(account);
 }
 
 /* قطع اتصال. کیف پول‌ها API قطع اتصال ندارند، پس تنها کاری که *واقعاً*
    می‌شود کرد پاک کردن وضعیت سمت ماست — و باید صادقانه همین را بگوییم،
    نه اینکه وانمود کنیم دسترسی سایت از کیف پول برداشته شد. */
 function disconnect(){
-  account=null;signer=null;walletProvider=null;walletChainId=null;
-  balances={};allowance=0n;allowanceKnown=false;
-  clearInterval(balTimer);
-  paintWallet();paintBalances();refreshButton();
+  clearWalletState();
   if(view==="folio")renderFolio();
   setNotice(note("ok","<b>Disconnected.</b> This clears the site only — to remove "+
     "the site's access entirely, do it from your wallet's connected-sites list."));
@@ -2874,7 +2949,8 @@ function paintFlowToken(){
 /* ---------- theme & wiring ---------- */
 let theme=(window.matchMedia&&matchMedia("(prefers-color-scheme: dark)").matches)?"dark":"light";
 function applyTheme(){document.documentElement.setAttribute("data-theme",theme);
-  $("themeBtn").textContent=theme==="dark"?"◐":"◑";
+  $("themeState").textContent=theme==="dark"?"Dark":"Light";
+  $("themeIcon").textContent=theme==="dark"?"◐":"◑";
   if(chartData&&$("plot").querySelector("svg"))drawChart(chartData);}
 
 function wire(){
@@ -2910,7 +2986,7 @@ function wire(){
         '<span class="mono" style="word-break:break-all">'+esc(url)+"</span>"));
     }
   };
-  $("connectBtn").onclick=()=>{if(!account)connect();else if(walletChainId!==CHAIN.id)switchNetwork();};
+  $("connectBtn").onclick=()=>{if(!account)connect();else if(walletChainId!==CHAIN.id)switchNetwork();else toggleWalletMenu();};
   $("disconnectBtn").onclick=disconnect;
   $("tokInBtn").onclick=()=>openPicker("in");
   $("tokOutBtn").onclick=()=>openPicker("out");
@@ -2943,6 +3019,8 @@ function wire(){
   $("setBtn").onclick=e=>{e.stopPropagation();$("setPop").classList.toggle("on");};
   document.addEventListener("mousedown",e=>{
     if(!$("setPop").contains(e.target)&&!$("setBtn").contains(e.target))$("setPop").classList.remove("on");});
+  document.addEventListener("mousedown",e=>{
+    if(!$("walletPop").contains(e.target)&&!$("connectBtn").contains(e.target))closeWalletMenu();});
   document.querySelectorAll("#slipSeg [data-bps]").forEach(b=>b.onclick=()=>{
     slippageBps=+b.dataset.bps;
     document.querySelectorAll("#slipSeg [data-bps]").forEach(x=>x.classList.toggle("on",x===b));
@@ -2964,7 +3042,7 @@ function wire(){
     paintSrc();
   };
   document.addEventListener("keydown",e=>{
-    if(e.key!=="Escape")return;closePicker();$("setPop").classList.remove("on");});
+    if(e.key!=="Escape")return;closePicker();$("setPop").classList.remove("on");closeWalletMenu();});
   let rt=null;
   addEventListener("resize",()=>{clearTimeout(rt);
     rt=setTimeout(()=>{if(chartData&&$("plot").querySelector("svg"))drawChart(chartData);},180);});
@@ -3003,7 +3081,7 @@ function wire(){
   await applyShareParams();
   runScan(tokenOut);
   const inj=injected();
-  if(inj){try{const a=await inj.request({method:"eth_accounts"});if(a&&a.length)await connect();}catch{}}
+  if(inj){try{const a=await inj.request({method:"eth_accounts"});if(a&&a.length)await connectWithProvider(inj,false);}catch{}}
   refreshButton();
 })();
 </script>

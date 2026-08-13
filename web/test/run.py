@@ -641,11 +641,20 @@ async def main():
         assert "did not answer" in msg, "outage misreported: " + msg
         assert "No route" not in msg, "outage reported as 'no route'"
 
-        # ---- 6. light theme ----
+        # ---- 6. wallet menu + light theme ----
         await pg.reload(); await pg.wait_for_timeout(900)
         await pg.fill("#amtIn", "1000"); await pg.wait_for_timeout(3000)
+        await pg.evaluate("""() => {
+            account = "0x8A0Dcb583C8CAdc481E34487c34f1B856fe97e23";
+            walletChainId = CHAIN.id;
+            paintWallet();
+        }""")
+        await pg.click("#connectBtn"); await pg.wait_for_timeout(150)
+        assert await pg.locator("#walletPop").evaluate("e => e.classList.contains('on')"), \
+            "a connected wallet must open its account menu"
         await pg.click("#themeBtn"); await pg.wait_for_timeout(300)
         assert await pg.get_attribute("html", "data-theme") == "light"
+        assert await pg.inner_text("#themeState") == "Light"
         await pg.screenshot(path=os.path.join(HERE, "shot-light.png"), full_page=True)
 
         # ---- 7. settings + picker ----
@@ -656,6 +665,27 @@ async def main():
         await pg.click("#tokOutBtn"); await pg.wait_for_timeout(400)
         await pg.screenshot(path=os.path.join(HERE, "shot-picker.png"))
         await pg.keyboard.press("Escape")
+
+        # ---- 8. mobile wallet menu ----
+        mob = await b.new_page(viewport={"width": 390, "height": 844}, color_scheme="dark")
+        await mob.goto(URL); await mob.wait_for_timeout(1000)
+        await mob.evaluate("""() => {
+            account = "0x8A0Dcb583C8CAdc481E34487c34f1B856fe97e23";
+            walletChainId = CHAIN.id;
+            paintWallet();
+        }""")
+        await mob.click("#connectBtn"); await mob.wait_for_timeout(150)
+        mobile_menu = await mob.evaluate("""() => {
+            const el = document.getElementById("walletPop"), box = el.getBoundingClientRect();
+            return {open: el.classList.contains("on"), left: box.left, right: box.right,
+                    width: innerWidth, disconnect: !!document.getElementById("disconnectBtn")};
+        }""")
+        print("[wallet menu mobile] open=%s left=%.0f right=%.0f viewport=%s"
+              % (mobile_menu["open"], mobile_menu["left"], mobile_menu["right"], mobile_menu["width"]))
+        assert mobile_menu["open"] and mobile_menu["left"] >= 0 and mobile_menu["right"] <= mobile_menu["width"], \
+            "wallet menu must remain usable inside a mobile viewport"
+        assert mobile_menu["disconnect"], "disconnect must be inside the wallet menu on mobile too"
+        await mob.close()
         await b.close()
 
     print("\n--- console errors ---")
