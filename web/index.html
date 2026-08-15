@@ -443,9 +443,14 @@ footer a{color:var(--tx3)}
       <h4>Approvals</h4>
       <label class="optrow"><input type="checkbox" id="unlimApprove">
         <span>Approve unlimited instead of the exact amount</span></label>
-      <h4>Custom RPC · this tab only</h4>
-      <div class="seg"><input id="rpcCustom" placeholder="https://…" style="width:100%"
-        autocomplete="off" spellcheck="false"></div>
+      <h4>Custom RPC</h4>
+      <div class="seg" style="margin-bottom:7px">
+        <input id="rpcCustom" placeholder="https://…" style="width:100%"
+          autocomplete="off" spellcheck="false" inputmode="url"></div>
+      <div class="seg" style="margin-bottom:7px">
+        <button id="rpcSave" style="flex:2">Test &amp; save</button>
+        <button id="rpcClear" style="flex:1">Clear</button></div>
+      <p id="rpcState" style="margin:0 0 14px"></p>
       <h4>Appearance</h4>
       <button class="walletAction" id="themeBtn" style="margin-bottom:13px">
         <span>Theme</span><span class="right"><span id="themeState">Light</span>
@@ -818,6 +823,76 @@ function isRevert(e){
   const m=((e&&e.message)||"").toLowerCase();
   return m.includes("execution reverted")||m.includes("revert");
 }
+/* ---------------------------------------------------------------------
+   Custom RPC
+   ---------------------------------------------------------------------
+   چرا اصلاً هست: اندپوینت‌های عمومی از بعضی کشورها 403 می‌دهند. کاربر باید
+   بتواند اندپوینت خودش را بگذارد، وگرنه سایت برایش کار نمی‌کند.
+
+   قواعدی که عمداً سخت‌گیرانه‌اند:
+   • فقط از تایپ خودِ کاربر ذخیره می‌شود. **هرگز** از پارامتر URL خوانده
+     نمی‌شود — وگرنه یک لینک می‌توانست بی‌صدا منبع دادهٔ قیمت را عوض کند و
+     کاربر بی‌خبر بماند. این مهم‌ترین قاعده‌ی این بخش است.
+   • فقط https. یک اندپوینت http یعنی هر واسطه‌ای می‌تواند قیمت‌ها را عوض کند.
+   • قبل از ذخیره یک فراخوانی واقعی زده می‌شود. آدرسی که جواب نمی‌دهد یا
+     زنجیره‌اش Base نیست ذخیره نمی‌شود — «ذخیره شد» نباید یعنی «شاید کار کند».
+   • URL می‌تواند کلید شخصی داشته باشد، پس هیچ‌جا کامل چاپش نمی‌کنیم.
+   --------------------------------------------------------------------- */
+const RPC_KEY="zaexa.rpc";
+function maskRpc(u){
+  try{const h=new URL(u);return h.origin+(h.pathname.length>1?"/…":"");}
+  catch{return "the endpoint";}
+}
+function rpcState(kind,text){
+  const el=$("rpcState");if(!el)return;
+  el.textContent=text;
+  el.style.color=kind==="err"?"var(--neg)":kind==="ok"?"var(--pos)":"var(--tx3)";
+}
+function useRpc(url){
+  CHAIN.rpcs=url?[url,...DEFAULT_RPCS]:DEFAULT_RPCS.slice();
+  customRpc=!!url;
+  rpcIndex=0;readProvider=makeProvider(CHAIN.rpcs[0]);
+  paintSrc();
+}
+async function saveCustomRpc(raw){
+  const v=(raw||"").trim();
+  if(!v){clearCustomRpc();return;}
+  if(!/^https:\/\//i.test(v)){
+    rpcState("err","Only https endpoints are accepted.");return;}
+  rpcState("","Testing…");
+  try{
+    const p=makeProvider(v);
+    const id=Number((await withTimeout(p.getNetwork(),8000)).chainId);
+    if(id!==CHAIN.id){
+      rpcState("err",`That endpoint is chain ${id}, not Base (${CHAIN.id}).`);return;}
+    useRpc(v);
+    try{localStorage.setItem(RPC_KEY,v);rpcState("ok","Saved — "+maskRpc(v));}
+    catch{rpcState("ok","Using "+maskRpc(v)+" — this tab only, storage is blocked.");}
+  }catch(e){
+    rpcState("err",isTransportError(e)
+      ?"Could not reach that endpoint."
+      :"That endpoint did not answer as a Base node.");
+  }
+}
+function clearCustomRpc(){
+  try{localStorage.removeItem(RPC_KEY);}catch{}
+  $("rpcCustom").value="";
+  useRpc(null);
+  rpcState("","Using the built-in public endpoints.");
+}
+/* بازیابی هنگام بارگذاری. عمداً بدون تست دوباره: اگر روزی کار نکند،
+   rpcSend خودش به اندپوینت‌های پیش‌فرض می‌چرخد. */
+function restoreCustomRpc(){
+  let v=null;
+  try{v=localStorage.getItem(RPC_KEY);}catch{}
+  if(v&&/^https:\/\//i.test(v)){
+    $("rpcCustom").value=v;useRpc(v);
+    rpcState("","Using your saved endpoint — "+maskRpc(v));
+  }else{
+    rpcState("","Optional. Use your own endpoint if the public ones are blocked where you are.");
+  }
+}
+
 function walletReady(){return walletProvider&&walletChainId===CHAIN.id;}
 async function rpcSend(fn){
   if(walletReady()){
@@ -3289,16 +3364,10 @@ function wire(){
       if(currentPlan)renderPlan(currentPlan,mode==="targetOut");}};
   $("deadlineMin").oninput=e=>{const v=parseInt(e.target.value,10);
     if(!isNaN(v)&&v>0&&v<=60)deadlineMin=v;};
-  /* فقط تایپ خودِ کاربر می‌تواند منبع داده را عوض کند — نه یک لینک.
-     چیزی ذخیره نمی‌شود و با رفرش برمی‌گردد به پیش‌فرض. */
   $("unlimApprove").onchange=e=>{unlimitedApprove=e.target.checked;};
-  $("rpcCustom").oninput=e=>{
-    const v=e.target.value.trim();
-    customRpc=/^https:\/\//.test(v);
-    CHAIN.rpcs=customRpc?[v,...DEFAULT_RPCS]:DEFAULT_RPCS.slice();
-    rpcIndex=0;readProvider=makeProvider(CHAIN.rpcs[0]);
-    paintSrc();
-  };
+  $("rpcSave").onclick=()=>saveCustomRpc($("rpcCustom").value);
+  $("rpcCustom").onkeydown=e=>{if(e.key==="Enter")saveCustomRpc(e.target.value);};
+  $("rpcClear").onclick=clearCustomRpc;
   document.addEventListener("keydown",e=>{
     if(e.key!=="Escape")return;closePicker();closeWalletPicker();
     $("setPop").classList.remove("on");closeWalletMenu();});
@@ -3329,6 +3398,7 @@ function wire(){
      می‌کند. حالا فقط از پنل تنظیمات و با تایپ خودِ کاربر قابل تنظیم است،
      پس یک *لینک* هرگز نمی‌تواند عوضش کند. */
   readProvider=makeProvider(CHAIN.rpcs[0]);
+  restoreCustomRpc();           // فقط از localStorage، که فقط با تایپ کاربر پر می‌شود
   tokenIn=BASE_TOKENS.find(t=>t.symbol==="USDC");
   tokenOut=BASE_TOKENS.find(t=>t.symbol==="WETH");
   paintToken("in",tokenIn);paintToken("out",tokenOut);

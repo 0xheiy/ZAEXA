@@ -706,10 +706,12 @@ async def main():
         # روی http سرو می‌شود نه file:// — بسته موقع بار شدن به localStorage
         # دست می‌زند و مبدأ مبهم اجازه نمی‌دهد.
         import functools, http.server, threading
+        class Quiet(http.server.SimpleHTTPRequestHandler):
+            def log_message(self, *a):     # خروجی تست باید خوانا بماند
+                pass
         srv = http.server.ThreadingHTTPServer(
             ("127.0.0.1", 0),
-            functools.partial(http.server.SimpleHTTPRequestHandler,
-                              directory=os.path.join(HERE, "..")))
+            functools.partial(Quiet, directory=os.path.join(HERE, "..")))
         threading.Thread(target=srv.serve_forever, daemon=True).start()
         port = srv.server_address[1]
         wcpg = await b.new_page()
@@ -729,7 +731,6 @@ async def main():
                                 typeof W.EthereumProvider.init === "function")};
         }""")
         await wcpg.close()
-        srv.shutdown()
         print("[walletconnect] bundle loads standalone: registered=%s init=%s errors=%s"
               % (wc_load["registered"], wc_load["hasInit"], len(wc_errs)))
         assert wc_load["registered"] and wc_load["hasInit"], \
@@ -737,6 +738,81 @@ async def main():
         assert not wc_errs, "the WalletConnect bundle threw while loading: %s" % wc_errs[:2]
         # ⚠️ چیزی که این تست *نمی‌سنجد*: خودِ دست‌دادن با رله‌ی WalletConnect.
         #    آن به سرور بیرونی نیاز دارد و آفلاین قابل آزمودن نیست.
+
+        # ---- 2c-septies. Custom RPC ----
+        # روی http سرو می‌شود چون file:// مبدأ مبهم دارد و localStorage
+        # آنجا اصلاً کار نمی‌کند — یعنی ماندگاری روی file:// قابل آزمودن نیست.
+        rpcpg = await b.new_page()
+        await rpcpg.goto("http://127.0.0.1:%d/test/harness.html?rpc=https://evil.example" % port)
+        await rpcpg.wait_for_timeout(1200)
+
+        # مهم‌ترین ادعای این بخش: یک *لینک* هرگز نباید منبع داده را عوض کند.
+        from_link = await rpcpg.evaluate(
+            "() => ({field: document.getElementById('rpcCustom').value,"
+            " first: CHAIN.rpcs[0], custom: customRpc})")
+        print("[rpc link] field=%r first=%s custom=%s"
+              % (from_link["field"], from_link["first"][:34], from_link["custom"]))
+        assert from_link["field"] == "" and "evil" not in from_link["first"], \
+            "a URL parameter must never set the RPC endpoint: %s" % from_link
+
+        rpc = await rpcpg.evaluate("""async () => {
+            const out = {};
+            const state = () => document.getElementById("rpcState").textContent;
+            const fill = v => { document.getElementById("rpcCustom").value = v; };
+            const wait = async () => { for (let i = 0; i < 40; i++) {
+                if (!/Testing/.test(state())) return; await new Promise(r=>setTimeout(r,50)); } };
+
+            fill("http://plain.example"); await saveCustomRpc("http://plain.example");
+            out.http = {msg: state(), first: CHAIN.rpcs[0], saved: localStorage.getItem("zaexa.rpc")};
+
+            window.__STUB_RPC__ = {"https://wrong.example": 1,
+                                   "https://dead.example": "unreachable"};
+            await saveCustomRpc("https://wrong.example"); await wait();
+            out.wrongChain = {msg: state(), first: CHAIN.rpcs[0],
+                              saved: localStorage.getItem("zaexa.rpc")};
+
+            await saveCustomRpc("https://dead.example"); await wait();
+            out.dead = {msg: state(), saved: localStorage.getItem("zaexa.rpc")};
+
+            await saveCustomRpc("https://good.example/k/SECRET123"); await wait();
+            out.good = {msg: state(), first: CHAIN.rpcs[0],
+                        saved: localStorage.getItem("zaexa.rpc"),
+                        fallbackKept: CHAIN.rpcs.length > 1};
+            return out;
+        }""")
+        for k in ["http", "wrongChain", "dead", "good"]:
+            print("[rpc %s] %s" % (k, rpc[k]["msg"][:64]))
+        assert rpc["http"]["saved"] is None and "https" in rpc["http"]["msg"], \
+            "an http endpoint must be refused: %s" % rpc["http"]
+        assert rpc["wrongChain"]["saved"] is None and "Base" in rpc["wrongChain"]["msg"], \
+            "an endpoint on another chain must be refused: %s" % rpc["wrongChain"]
+        assert rpc["dead"]["saved"] is None, \
+            "an endpoint that never answers must not be saved: %s" % rpc["dead"]
+        assert rpc["good"]["saved"] == "https://good.example/k/SECRET123", \
+            "a working endpoint must persist: %s" % rpc["good"]
+        assert "SECRET123" not in rpc["good"]["msg"], \
+            "the endpoint may carry a private key — never print it in full: %s" % rpc["good"]["msg"]
+        assert rpc["good"]["fallbackKept"], \
+            "the public endpoints must stay as a fallback behind the custom one"
+
+        # ماندگاری بعد از رفرش، و اینکه Clear واقعاً پاک می‌کند
+        await rpcpg.goto("http://127.0.0.1:%d/test/harness.html" % port)
+        await rpcpg.wait_for_timeout(1200)
+        after = await rpcpg.evaluate("""async () => {
+            const before = {field: document.getElementById("rpcCustom").value,
+                            first: CHAIN.rpcs[0]};
+            clearCustomRpc();
+            return {before, after: {field: document.getElementById("rpcCustom").value,
+                                    first: CHAIN.rpcs[0],
+                                    saved: localStorage.getItem("zaexa.rpc")}};
+        }""")
+        await rpcpg.close()
+        print("[rpc reload] restored=%s → cleared=%s"
+              % (after["before"]["first"][:28], after["after"]["first"][:28]))
+        assert after["before"]["field"] == "https://good.example/k/SECRET123", \
+            "a saved endpoint must come back after a reload: %s" % after["before"]
+        assert after["after"]["saved"] is None and "good.example" not in after["after"]["first"], \
+            "Clear must remove it from storage and stop using it: %s" % after["after"]
 
         # ---- 2d. native ETH is offered and routes through WETH ----
         await pg.click("#tokOutBtn"); await pg.wait_for_timeout(250)
@@ -983,6 +1059,7 @@ async def main():
                  % (pb["label"], pb["left"], pb["right"], pb["vw"]))
         await mob.screenshot(path=os.path.join(HERE, "shot-mobile-wallet.png"))
         await mob.close()
+        srv.shutdown()
         await b.close()
 
     print("\n--- console errors ---")

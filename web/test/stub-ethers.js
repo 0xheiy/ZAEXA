@@ -163,6 +163,16 @@
     return FAKE_CODE;                                    // توکن
   };
   JsonRpcProvider.prototype.getBlockNumber = async function () { return 50000000; };
+  /* استاب باید بتواند اندپوینت *بد* را هم بازی کند، وگرنه مسیرهای خطای
+     Custom RPC اصلاً آزموده نمی‌شوند و «ذخیره شد» بی‌معنی سبز می‌ماند.
+     window.__STUB_RPC__ = { "https://…": 1 }            → زنجیره‌ی اشتباه
+     window.__STUB_RPC__ = { "https://…": "unreachable" } → اصلاً جواب نمی‌دهد */
+  JsonRpcProvider.prototype.getNetwork = async function () {
+    const cfg = (window.__STUB_RPC__ || {})[this.url];
+    if (cfg === "unreachable")
+      throw Object.assign(new Error("fetch failed"), { code: "NETWORK_ERROR" });
+    return { chainId: BigInt(cfg === undefined ? 8453 : cfg) };
+  };
   JsonRpcProvider.prototype.getLogs = async function () {
     // چند سواپ ساختگی: amount منفی برای توکن ما = خرید
     const mk = (ourAmt, refAmt, who, block) => ({ blockNumber: block,
