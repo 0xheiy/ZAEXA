@@ -667,7 +667,11 @@ const DEXES=[
   {id:"pancake-v3",name:"PancakeSwap V3",cls:"p",kind:KIND.V3_LEGACY,
    router:"0x1b81D678ffb9C0263b24A97847620C99d213eB14",
    factory:"0x0BFbCF9fa4f9C56B0F40a671Ad40E0805A091865",
-   quoter:"0xB048Bbc1Ee6b733FFfCFb9e9cEF7375518e25997",feeTiers:[100,500,2500,10000]},
+   // ⚠️ حروف بزرگ/کوچک اینجا تزئینی نیست: چک‌سام EIP-55 است. یک بار همین
+   // آدرس با `cEF` به‌جای `CeF` نوشته شده بود و ethers قبل از هر تماسی
+   // ردش می‌کرد؛ نتیجه‌اش روی سایت زنده «could not reach the network» بود
+   // برای مشکلی که اصلاً شبکه‌ای نبود. نگهبانش: کاوشگر [checksum] در run.py.
+   quoter:"0xB048Bbc1Ee6b733FFfCFb9e9CeF7375518e25997",feeTiers:[100,500,2500,10000]},
 ];
 
 /** امضای تابعی که *واقعاً* صدا می‌زنیم — پایه‌ی دروازه‌ی ۲. */

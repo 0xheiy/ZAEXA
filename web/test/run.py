@@ -1,4 +1,4 @@
-import asyncio, os, sys
+import asyncio, os, re, sys
 from playwright.async_api import async_playwright
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -52,6 +52,26 @@ async def main():
         pg.on("pageerror", lambda e: errors.append(f"PAGEERROR {e}"))
         await pg.goto(URL)
         await pg.wait_for_timeout(900)
+
+        # ---- 0-pre. چک‌سام EIP-55 هر آدرسی که در کد نوشته‌ایم ----
+        # چرا با ethers *واقعی* و نه با استاب: در stub-ethers.js تابع getAddress
+        # عملاً `a => a` است و هیچ اعتبارسنجی نمی‌کند. یعنی همان چیزی که باید
+        # این باگ را می‌گرفت، خودش پنهانش کرده بود — کوتر پنکیک با `cEF` به‌جای
+        # `CeF` نوشته شده بود و روی سایت زنده «شبکه جواب نداد» گزارش می‌شد.
+        # ماک باید واقعیت را آینه کند؛ جایی که نمی‌تواند، با نسخه‌ی واقعی بسنج.
+        src_all = open(os.path.join(HERE, "..", "index.html"), encoding="utf-8").read()
+        cands = sorted(set(re.findall(r"0x[0-9a-fA-F]{40}", src_all)))
+        chk = await b.new_page()
+        await chk.set_content("<html></html>")
+        await chk.add_script_tag(path=os.path.join(HERE, "..", "ethers.umd.min.js"))
+        bad = await chk.evaluate(
+            "list => list.filter(a => { try { ethers.getAddress(a); return false; }"
+            " catch { return true; } })", cands)
+        await chk.close()
+        print("[checksum] %d addresses in index.html, %d with a bad EIP-55 checksum"
+              % (len(cands), len(bad)))
+        assert not bad, ("these addresses are written with the wrong capitalisation, so "
+                         "ethers rejects them before any call is made: %s" % bad)
 
         assert await pg.inner_text("#tokInSym") == "USDC"
         assert await pg.inner_text("#tokOutSym") == "WETH"
