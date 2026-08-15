@@ -374,6 +374,15 @@ footer a{color:var(--tx3)}
   padding:10px 9px;border-radius:11px;text-align:left;font-size:13px;color:var(--tx2)}
 .walletAction:hover{background:var(--card2);color:var(--tx)}
 .walletAction .right{display:flex;align-items:center;gap:8px;color:var(--tx3);font-size:12px}
+.walRow{display:flex;align-items:center;gap:12px;padding:12px 16px;cursor:pointer;
+  border-radius:14px;margin:0 8px}
+.walRow:hover{background:var(--card2)}
+.walRow img,.walRow .walFallback{width:30px;height:30px;border-radius:9px;flex:none;object-fit:contain}
+.walRow .walFallback{display:grid;place-items:center;background:var(--card2);
+  font-size:12px;font-weight:700;color:var(--tx2)}
+.walRow .walName{font-weight:620;font-size:14.5px}
+.walRow .walKind{margin-left:auto;font-size:11px;color:var(--tx3)}
+.walNote{margin:6px 16px 16px;font-size:11.5px;color:var(--tx3);line-height:1.55}
 .walletAction.danger{color:var(--neg)}
 .walletAction.danger:hover{background:color-mix(in srgb,var(--neg) 10%,transparent);color:var(--neg)}
 </style>
@@ -574,6 +583,14 @@ footer a{color:var(--tx3)}
   executor <a id="ctrLink" target="_blank" rel="noopener" class="mono"></a> · source verified on BaseScan ·
   price history by <a href="https://www.geckoterminal.com" target="_blank" rel="noopener">GeckoTerminal</a>
 </footer>
+
+<div class="ov" id="walletOv">
+  <div class="modal">
+    <h3>Connect a wallet<span class="grow"></span><button id="walClose" style="color:var(--tx3)">✕</button></h3>
+    <div class="tlist" id="walList"></div>
+    <p class="walNote" id="walNote"></p>
+  </div>
+</div>
 
 <div class="ov" id="tokOv">
   <div class="modal">
@@ -2437,11 +2454,91 @@ function renderSafety(rep){
    Wallet & execution
    ===================================================================== */
 let walletEip1193=null,walletEventHandlers=null;
-function injected(){
-  const e=window.ethereum;if(!e)return null;
+
+/* ---------------------------------------------------------------------
+   کشف کیف پول‌ها — EIP-6963
+   ---------------------------------------------------------------------
+   `window.ethereum` یک جای واحد است و هر افزونه‌ای که نصب باشد سرش دعوا
+   می‌کند؛ هرکس دیرتر بار شود قبلی را می‌پوشاند. نتیجه‌اش این بود که با
+   نصب بودن ربی و متامسک با هم، کاربر نمی‌توانست انتخاب کند و ما هم
+   کورکورانه متامسک را ترجیح می‌دادیم.
+
+   EIP-6963 همین را حل می‌کند: هر کیف پول خودش را با یک رویداد معرفی
+   می‌کند و ما *همه* را می‌بینیم. ربی، متامسک، زریون، کوین‌بیس، Rainbow،
+   Phantom و بقیه همگی این را پیاده کرده‌اند.
+
+   `window.ethereum` به‌عنوان تور ایمنی نگه داشته می‌شود، فقط برای
+   کیف پول قدیمی‌ای که هنوز 6963 ندارد — و فقط وقتی هیچ‌کس خودش را
+   معرفی نکرده باشد، وگرنه یک کیف پول دو بار در لیست می‌آمد.
+   --------------------------------------------------------------------- */
+const discoveredWallets=new Map();          // rdns → {info, provider}
+function onWalletAnnounce(ev){
+  const d=ev&&ev.detail;
+  if(!d||!d.info||!d.provider)return;
+  const key=d.info.rdns||d.info.uuid||d.info.name;
+  if(!key)return;
+  discoveredWallets.set(key,d);
+  if($("walletOv").classList.contains("on"))renderWalletList();
+}
+function scanWallets(){
+  window.dispatchEvent(new Event("eip6963:requestProvider"));
+}
+function legacyInjected(){
+  const e=window.ethereum;
+  if(!e)return null;
   if(e.providers&&e.providers.length)return e.providers.find(p=>p.isMetaMask)||e.providers[0];
   return e;
 }
+/** گزینه‌های قابل نمایش: کشف‌شده‌ها، و اگر هیچ‌کدام نبود، تزریق‌شده‌ی قدیمی. */
+function walletOptions(){
+  const out=[...discoveredWallets.values()].map(d=>({
+    key:d.info.rdns||d.info.uuid,name:d.info.name||"Wallet",
+    icon:d.info.icon||null,provider:d.provider,kind:"Browser extension"}));
+  out.sort((a,b)=>a.name.localeCompare(b.name));
+  if(!out.length){
+    const inj=legacyInjected();
+    if(inj)out.push({key:"legacy",name:injectedName(inj),icon:null,
+      provider:inj,kind:"Browser extension"});
+  }
+  return out;
+}
+/* نام کیف پول قدیمی را فقط از روی پرچم‌های خودش حدس می‌زنیم و اگر نشد
+   «Browser wallet» می‌گوییم — نامِ غلط بدتر از نامِ کلی است. */
+function injectedName(p){
+  if(!p)return "Browser wallet";
+  if(p.isRabby)return "Rabby";
+  if(p.isZerion)return "Zerion";
+  if(p.isCoinbaseWallet)return "Coinbase Wallet";
+  if(p.isTrust||p.isTrustWallet)return "Trust Wallet";
+  if(p.isBraveWallet)return "Brave Wallet";
+  if(p.isMetaMask)return "MetaMask";
+  return "Browser wallet";
+}
+function renderWalletList(){
+  const list=$("walList"),opts=walletOptions();
+  if(!opts.length){
+    list.innerHTML='<div class="empty">No wallet detected in this browser. '+
+      'Install one — Rabby, MetaMask, Zerion and Coinbase Wallet all work here.</div>';
+    $("walNote").textContent="";
+    return;
+  }
+  list.innerHTML=opts.map((o,i)=>`<div class="walRow" data-i="${i}">
+    ${o.icon?`<img src="${esc(o.icon)}" alt="">`
+            :`<span class="walFallback">${esc((o.name[0]||"?").toUpperCase())}</span>`}
+    <span class="walName">${esc(o.name)}</span>
+    <span class="walKind">${esc(o.kind)}</span></div>`).join("");
+  list.querySelectorAll(".walRow").forEach(el=>{
+    el.onclick=()=>{closeWalletPicker();connectWithProvider(opts[+el.dataset.i].provider,true);};
+  });
+  $("walNote").textContent="Zaexa never sees your keys. Connecting only shares your "+
+    "address so we can read balances and ask you to sign.";
+}
+function openWalletPicker(){
+  scanWallets();                       // شاید افزونه‌ای بعد از بارگذاری آمده باشد
+  renderWalletList();
+  $("walletOv").classList.add("on");
+}
+function closeWalletPicker(){$("walletOv").classList.remove("on");}
 function closeWalletMenu(){
   $("walletPop").classList.remove("on");
   $("connectBtn").setAttribute("aria-expanded","false");
@@ -2510,13 +2607,15 @@ async function connectWithProvider(provider,requestAccounts){
     await refreshAllowance();refreshButton();setNotice("");startBalanceWatch();closeWalletMenu();
   }catch(e){setNotice(note("err",esc(e.message||"Connection rejected.")));}
 }
+/* یک کیف پول = بدون انتخاب اضافه. بیشتر از یکی = کاربر خودش انتخاب کند،
+   نه اینکه ما به‌جایش متامسک را بردایم. */
 async function connect(){
-  const inj=injected();
-  if(!inj){setNotice(note("err","<b>No wallet found.</b> Install a browser wallet or use WalletConnect."));return;}
-  await connectWithProvider(inj,true);
+  const opts=walletOptions();
+  if(opts.length===1)return connectWithProvider(opts[0].provider,true);
+  openWalletPicker();
 }
 async function switchNetwork(){
-  const inj=walletEip1193||injected();if(!inj)return;
+  const inj=walletEip1193||legacyInjected();if(!inj)return;
   try{await inj.request({method:"wallet_switchEthereumChain",params:[{chainId:CHAIN.hexId}]});}
   catch(e){
     if(e.code===4902)await inj.request({method:"wallet_addEthereumChain",params:[{
@@ -3062,6 +3161,12 @@ function wire(){
   $("tokOutBtn").onclick=()=>openPicker("out");
   $("tokClose").onclick=closePicker;
   $("tokOv").onclick=e=>{if(e.target===$("tokOv"))closePicker();};
+  $("walClose").onclick=closeWalletPicker;
+  $("walletOv").onclick=e=>{if(e.target===$("walletOv"))closeWalletPicker();};
+  // کیف پول‌ها هر وقت بار شوند خودشان را معرفی می‌کنند؛ گوش‌دادن باید
+  // *قبل* از درخواست باشد، وگرنه اعلانِ کیف پول‌های سریع را از دست می‌دهیم.
+  window.addEventListener("eip6963:announceProvider",onWalletAnnounce);
+  scanWallets();
   $("tokSearch").oninput=e=>renderTokenList(e.target.value);
   $("amtIn").oninput=()=>{mode="exactIn";scheduleQuote();};
   $("amtOut").oninput=()=>{mode="targetOut";scheduleQuote();};
@@ -3112,7 +3217,8 @@ function wire(){
     paintSrc();
   };
   document.addEventListener("keydown",e=>{
-    if(e.key!=="Escape")return;closePicker();$("setPop").classList.remove("on");closeWalletMenu();});
+    if(e.key!=="Escape")return;closePicker();closeWalletPicker();
+    $("setPop").classList.remove("on");closeWalletMenu();});
   let rt=null;
   addEventListener("resize",()=>{clearTimeout(rt);
     rt=setTimeout(()=>{if(chartData&&$("plot").querySelector("svg"))drawChart(chartData);},180);});
@@ -3150,8 +3256,18 @@ function wire(){
   // قابل اتکاست، کوت گرفتن برای توکن ناشناس معنا ندارد.
   await applyShareParams();
   runScan(tokenOut);
-  const inj=injected();
-  if(inj){try{const a=await inj.request({method:"eth_accounts"});if(a&&a.length)await connectWithProvider(inj,false);}catch{}}
+  /* اتصال دوباره‌ی بی‌صدا. `eth_accounts` هیچ پنجره‌ای باز نمی‌کند — فقط
+     می‌پرسد «قبلاً به این سایت اجازه داده بودی؟». اولین کیف پولی که جواب
+     مثبت بدهد وصل می‌شود. یک مکث کوتاه چون اعلان EIP-6963 ممکن است یک
+     تیک بعد از درخواست برسد. */
+  scanWallets();
+  await new Promise(r=>setTimeout(r,120));
+  for(const o of walletOptions()){
+    try{
+      const a=await o.provider.request({method:"eth_accounts"});
+      if(a&&a.length){await connectWithProvider(o.provider,false);break;}
+    }catch{}
+  }
   refreshButton();
 })();
 </script>

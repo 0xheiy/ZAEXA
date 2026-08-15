@@ -629,6 +629,51 @@ async def main():
         print("[icons] logo images: %s   fallback initials: %r" % (logos, initials.strip()))
         assert initials.strip() != "", "initials must always be present as a fallback"
 
+        # ---- 2c-quinquies. wallet picker lists every wallet that announces itself ----
+        # قبلاً فقط window.ethereum خوانده می‌شد و ما کورکورانه متامسک را ترجیح
+        # می‌دادیم؛ با نصب‌بودن ربی و متامسک با هم، کاربر اصلاً حق انتخاب نداشت.
+        picker = await pg.evaluate("""async () => {
+            const mk = (rdns, name) => ({
+              info: {uuid: rdns, name, rdns,
+                     icon: "data:image/svg+xml;utf8," + encodeURIComponent(
+                       "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 8 8'/>")},
+              provider: {__who: name, request: async () => [], on(){}, removeListener(){}}
+            });
+            const fake = [mk("io.rabby","Rabby"), mk("io.metamask","MetaMask"),
+                          mk("io.zerion","Zerion")];
+            window.addEventListener("eip6963:requestProvider", () => {
+              fake.forEach(w => window.dispatchEvent(
+                new CustomEvent("eip6963:announceProvider", {detail: w})));
+            });
+            const realConnect = connectWithProvider;
+            let chosen = null;
+            connectWithProvider = async (p) => { chosen = p.__who; };
+            openWalletPicker();
+            await new Promise(r => setTimeout(r, 120));
+            const names = [...document.querySelectorAll("#walList .walName")]
+                            .map(e => e.textContent);
+            const icons = document.querySelectorAll("#walList img").length;
+            // روی ردیف «Zerion» کلیک کن، نه اولی — تا ثابت شود انتخاب کاربر
+            // واقعاً همان است که وصل می‌شود، نه هرچه بالای لیست بود.
+            const row = [...document.querySelectorAll("#walList .walRow")]
+                          .find(r => /Zerion/.test(r.textContent));
+            if (row) row.click();   // نبودنش خودش یک شکست است، نه یک استثنا
+            await new Promise(r => setTimeout(r, 80));
+            const stillOpen = document.getElementById("walletOv")
+                                .classList.contains("on");
+            connectWithProvider = realConnect;
+            return {names, icons, chosen, stillOpen};
+        }""")
+        print("[wallet picker] %s · icons=%s · clicked -> %s"
+              % (picker["names"], picker["icons"], picker["chosen"]))
+        for w in ["Rabby", "MetaMask", "Zerion"]:
+            assert w in picker["names"], \
+                "%s announced itself but is missing from the picker: %s" % (w, picker["names"])
+        assert picker["chosen"] == "Zerion", \
+            "the picker must connect the wallet the user clicked, not the first one: %r" % picker["chosen"]
+        assert picker["icons"] == 3, "each announced wallet must show its own icon"
+        assert not picker["stillOpen"], "the picker must close once a wallet is chosen"
+
         # ---- 2d. native ETH is offered and routes through WETH ----
         await pg.click("#tokOutBtn"); await pg.wait_for_timeout(250)
         await pg.fill("#tokSearch", "ETH"); await pg.wait_for_timeout(250)
