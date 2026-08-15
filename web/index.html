@@ -115,6 +115,21 @@ header{max-width:1140px;margin:0 auto;padding:20px 20px 8px;display:flex;align-i
   .stack,.flowbar{margin-left:14px;margin-right:14px}
 }
 @media(min-width:721px){.nav button span{display:inline}}
+/* بین ۷۲۱ و ۹۶۰ ناوبری هنوز داخل هدر است ولی جا تنگ می‌شود: لوگو، سه
+   دکمه‌ی برچسب‌دار، چیپ شبکه و «Connect wallet» با هم پهن‌تر از صفحه
+   می‌شدند و کل صفحه به پهلو اسکرول می‌کرد. برچسب‌ها می‌روند، آیکون‌ها
+   می‌مانند — همان اطلاعات، بدون سرریز. */
+@media(min-width:721px) and (max-width:960px){
+  .nav button span{display:none}
+  .nav button{padding:8px 11px}
+  #srcChip span:last-child{display:none}
+  #srcChip{padding:0 12px}
+}
+/* روی موبایل ناوبری به نوار پایین می‌رود، پس فاصله‌ی کشسانِ کنارش
+   بی‌معنی می‌شود و فقط چیپ‌ها را بی‌دلیل هل می‌دهد. */
+@media(max-width:720px){.navPad{display:none}}
+/* هیچ‌چیز نباید صفحه را به پهلو بکشد — تور ایمنی برای همه‌ی عرض‌ها */
+html,body{overflow-x:hidden;max-width:100%}
 .view{display:none}
 .view.on{display:flex;flex-direction:column;gap:18px}
 .chip{
@@ -388,6 +403,21 @@ footer a{color:var(--tx3)}
   padding:10px 9px;border-radius:11px;text-align:left;font-size:13px;color:var(--tx2)}
 .walletAction:hover{background:var(--card2);color:var(--tx)}
 .walletAction .right{display:flex;align-items:center;gap:8px;color:var(--tx3);font-size:12px}
+/* دکمه‌ی پاک‌کردن مبلغ. تا وقتی چیزی تایپ نشده اصلاً وجود ندارد (hidden)،
+   نه اینکه نامرئی باشد — یک دکمه‌ی نادیدنی که بشود رویش کلیک کرد بدتر از
+   نبودنش است. */
+.clr{width:24px;height:24px;flex:none;border-radius:999px;display:grid;place-items:center;
+  background:var(--card2);color:var(--tx3);margin-right:2px}
+.clr:hover{color:var(--tx);background:var(--line)}
+.clr[hidden]{display:none}
+/* آمار توکن خروجی */
+.tstats{display:grid;grid-template-columns:repeat(4,1fr);gap:1px;background:var(--line);
+  border-top:1px solid var(--line);margin-top:14px}
+.tstat{background:var(--card);padding:11px 14px}
+.tstat .k{font-size:10.5px;font-weight:640;letter-spacing:.05em;text-transform:uppercase;
+  color:var(--tx3)}
+.tstat .v{font-size:14px;font-weight:640;margin-top:3px;font-variant-numeric:tabular-nums}
+@media(max-width:560px){.tstats{grid-template-columns:repeat(2,1fr)}}
 .walRow{display:flex;align-items:center;gap:12px;padding:12px 16px;cursor:pointer;
   border-radius:14px;margin:0 8px}
 .walRow:hover{background:var(--card2)}
@@ -408,6 +438,7 @@ footer a{color:var(--tx3)}
     <span class="glyph"><svg class="mark" viewBox="0 0 1000 697.98" fill="none" aria-hidden="true"><defs><linearGradient id="zxm-zx" x1="0.0" y1="0.0" x2="1.0" y2="0.0"><stop offset="0.0" stop-color="#22EFF6"/><stop offset="0.22" stop-color="#22D2F5"/><stop offset="0.42" stop-color="#43B5F7"/><stop offset="0.58" stop-color="#7396F8"/><stop offset="0.78" stop-color="#9688F7"/><stop offset="1.0" stop-color="#A785F9"/></linearGradient><linearGradient id="zxm-zxt" x1="0" y1="0" x2="1" y2="0"><stop offset="0.0" stop-color="#22EFF6"/><stop offset="0.22" stop-color="#22D2F5"/><stop offset="0.42" stop-color="#43B5F7"/><stop offset="0.58" stop-color="#7396F8"/><stop offset="0.78" stop-color="#9688F7"/><stop offset="1.0" stop-color="#A785F9"/></linearGradient><mask id="zxm-mask0_0_1" style="mask-type:luminance" maskUnits="userSpaceOnUse" x="13" y="0" width="1731" height="1274"><path d="M1743.77 0H13V1273.26H1743.77V0Z" fill="white" /></mask><linearGradient id="zxm-paint0_linear_0_1" x1="378.38" y1="0" x2="1378.38" y2="0" gradientUnits="userSpaceOnUse"><stop stop-color="#22EFF6" /><stop offset="0.22" stop-color="#22D2F5" /><stop offset="0.42" stop-color="#43B5F7" /><stop offset="0.58" stop-color="#7396F8" /><stop offset="0.78" stop-color="#9688F7" /><stop offset="1" stop-color="#A785F9" /></linearGradient><linearGradient id="zxm-paint1_linear_0_1" x1="154.878" y1="1231.74" x2="1603.18" y2="1231.74" gradientUnits="userSpaceOnUse"><stop stop-color="#22EFF6" /><stop offset="0.22" stop-color="#22D2F5" /><stop offset="0.42" stop-color="#43B5F7" /><stop offset="0.58" stop-color="#7396F8" /><stop offset="0.78" stop-color="#9688F7" /><stop offset="1" stop-color="#A785F9" /></linearGradient></defs><g transform="translate(0.000,0.000) scale(1.000000) translate(-378.380,-0.000)" mask="url(#zxm-mask0_0_1)"><path d="M1056.93 82.82L389.82 697.98L408.48 694.32L621.13 638.16C646.93 630.71 675.01 625.48 699.85 615.12L1366.9 0L1348.37 3.6L1137.12 59.38C1110.83 66.97 1082.25 72.29 1056.93 82.82ZM378.38 44.36C426.561 87.253 471.142 135.016 522.445 174.137C524.394 175.623 526.685 176.598 529.109 176.951C574.206 183.521 620.65 179.966 666.08 183.49C674.53 184.08 683.243 185.448 691.645 187.571C697.323 189.003 718.554 196.673 731.434 209.913L742.615 222.148L752.319 234.384C752.319 234.384 766.844 256.476 770.443 267.07C774.105 264.275 823.385 219.888 823.385 219.888L875.68 171.21C835.31 115.75 781.34 66.41 712.93 50.3C695.18 45.82 676.7 46.55 658.55 45.86L378.38 44.36ZM1378.38 653.58C1330.2 610.687 1285.61 562.548 1234.31 523.404C1232.36 521.916 1230.07 520.941 1227.64 520.589C1182.55 514.049 1136.11 517.984 1090.68 514.46C1082.04 513.721 1075.63 512.848 1065.68 509.95C1048.59 503.01 1039.64 497.104 1025.92 486.019C1025.92 486.019 1017.18 477.823 1015.11 475.626C1013.05 473.429 1008.13 468.78 1004.44 463.848C1000.76 458.915 993.452 448.451 985.684 429.962C979.248 435.335 930 481.5 930 481.5L881.08 526.74C921.45 582.2 975.42 631.54 1043.83 647.65C1061.58 652.13 1080.06 651.4 1098.2 652.08L1378.38 653.58Z" fill="url(#zxm-paint0_linear_0_1)" /></g></svg></span>
     <span id="brand">Zaexa</span>
   </div>
+  <div class="grow navPad"></div>
   <nav class="nav" id="nav">
     <button data-view="swap" class="on" title="Swap">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
@@ -422,6 +453,9 @@ footer a{color:var(--tx3)}
            stroke-linecap="round" stroke-linejoin="round">
         <path d="M3 13h4l3 7 4-16 3 9h4"/></svg><span>Flow</span></button>
   </nav>
+  <!-- دو فاصله‌ی کشسان، یکی هر طرفِ ناوبری: ناوبری بین لوگو و چیپ‌های راست
+       وسط می‌ماند و با باریک‌شدن پنجره هم قرینه جمع می‌شود. قبلاً فقط یک
+       فاصله بعد از ناوبری بود، پس ناوبری به لوگو چسبیده و کل هدر چپ‌چین بود. -->
   <div class="grow"></div>
   <div class="chip" id="srcChip"><span class="led off"></span><span id="srcTx">Base</span></div>
   <button class="chip round" id="shareBtn" title="Copy a link to this quote">
@@ -500,6 +534,7 @@ footer a{color:var(--tx3)}
         <div class="chartMsg" id="chartMsg">Loading price history…</div>
         <div class="tipbox" id="tip"></div>
       </div>
+      <div class="tstats" id="tokStats" hidden></div>
     </section>
 
     <!-- swap -->
@@ -509,6 +544,10 @@ footer a{color:var(--tx3)}
         <div class="legTop"><span>You pay</span><b id="balIn"></b></div>
         <div class="legRow">
           <input class="amt mono" id="amtIn" placeholder="0" inputmode="decimal" autocomplete="off">
+          <button class="clr" id="amtClear" type="button" title="Clear" aria-label="Clear amount"
+            hidden><svg viewBox="0 0 24 24" width="13" height="13" fill="none"
+            stroke="currentColor" stroke-width="2.4" stroke-linecap="round">
+            <path d="M6 6l12 12M18 6L6 18"/></svg></button>
           <button class="tokbtn" id="tokInBtn"><span class="av" id="tokInAv">?</span><span id="tokInSym">—</span></button>
         </div>
       </div>
@@ -1506,6 +1545,9 @@ async function loadChart(){
   const seq=++chartSeq;
   if(!tokenIn||!tokenOut)return;
   $("pairName").textContent=`${tokenOut.symbol} / ${tokenIn.symbol}`;
+  // آمار به توکن خروجی گره خورده و هر جا جفت عوض شود loadChart صدا زده
+  // می‌شود، پس همین‌جا یک‌بار وصلش می‌کنیم نه در پنج جای مختلف.
+  renderTokenStats(tokenOut);
   chartMsg("Loading price history…");
   $("pxNow").textContent="—";$("pxChg").textContent="";
   try{
@@ -1919,6 +1961,49 @@ async function tokenMeta(addr){
   }
   await metaPending[k];
   return metaCache[k]||null;      // نبود ≠ کش‌شده‌ی خالی؛ دفعه‌ی بعد باز تلاش می‌شود
+}
+/* ---------------------------------------------------------------------
+   آمار توکن خروجی — مارکت‌کپ، FDV، والیوم ۲۴ ساعته
+   ---------------------------------------------------------------------
+   همان درخواستی که برای لوگو و قیمت می‌زنیم این‌ها را هم برمی‌گرداند، پس
+   هیچ تماس تازه‌ای اضافه نمی‌شود.
+
+   دو چیز عمدی:
+   • «تعداد هولدرها» اینجا نیست چون این منبع نمی‌دهدش. عدد نداشتن بهتر از
+     عدد ساختن است.
+   • market_cap_usd برای خیلی از توکن‌های تازه null است. آن وقت «—» نشان
+     می‌دهیم، نه اینکه بی‌صدا FDV را جایش بگذاریم — آن دو یکی نیستند و
+     قاطی‌کردنشان دقیقاً همان جایی است که کاربر گمراه می‌شود.
+   --------------------------------------------------------------------- */
+function fmtBig(n){
+  if(n==null||!isFinite(n)||n<=0)return "—";
+  if(n>=1e12)return "$"+(n/1e12).toFixed(2)+"T";
+  if(n>=1e9)return "$"+(n/1e9).toFixed(2)+"B";
+  if(n>=1e6)return "$"+(n/1e6).toFixed(2)+"M";
+  if(n>=1e3)return "$"+(n/1e3).toFixed(1)+"K";
+  return "$"+n.toFixed(0);
+}
+let statsSeq=0;
+async function renderTokenStats(t){
+  const box=$("tokStats");if(!box)return;
+  const seq=++statsSeq;
+  if(!t){box.hidden=true;return;}
+  let a=null;
+  try{a=await tokenMeta(t.native?WETH_ADDR:t.address);}catch{}
+  if(seq!==statsSeq)return;
+  if(!a){box.hidden=true;return;}
+  const num=v=>(v==null||v==="")?null:Number(v);
+  const rows=[
+    ["Market cap",fmtBig(num(a.market_cap_usd))],
+    ["FDV",fmtBig(num(a.fdv_usd))],
+    ["Volume 24h",fmtBig(num(a.volume_usd&&a.volume_usd.h24))],
+    ["Liquidity",fmtBig(num(a.total_reserve_in_usd))],
+  ];
+  // اگر همه‌شان نامعلوم‌اند، یک ردیف پر از «—» فقط سروصداست
+  if(rows.every(r=>r[1]==="—")){box.hidden=true;return;}
+  box.innerHTML=rows.map(([k,v])=>
+    `<div class="tstat"><div class="k">${esc(k)}</div><div class="v">${esc(v)}</div></div>`).join("");
+  box.hidden=false;
 }
 async function priceUsdOf(t){
   const a=await tokenMeta(t.native?WETH_ADDR:t.address);
@@ -3100,7 +3185,15 @@ function friendly(err){
 }
 function setBusy(on,label){busy=on;const b=$("actBtn");b.disabled=on;
   if(on)b.innerHTML=`<span class="spin"></span>${esc(label||"Working…")}`;}
+/* دکمه‌ی پاک‌کردن مبلغ. مقدارِ فیلد از هفت جای مختلف برنامه‌ای عوض می‌شود و
+   تغییر `.value` از کد هیچ رویدادی نمی‌سازد — نه oninput، نه MutationObserver.
+   پس به‌جای وصل‌کردن به هفت نقطه، به همان تابعی وصلش می‌کنیم که بعد از هر
+   تغییرِ وضعیت اجرا می‌شود. */
+function paintAmtClear(){
+  const el=$("amtClear");if(el)el.hidden=!$("amtIn").value;
+}
 function refreshButton(){
+  paintAmtClear();
   if(busy)return;
   const b=$("actBtn");b.onclick=null;
   const set=(t,en,fn)=>{b.textContent=t;b.disabled=!en;if(fn)b.onclick=fn;};
@@ -3326,7 +3419,14 @@ function wire(){
   window.addEventListener("eip6963:announceProvider",onWalletAnnounce);
   scanWallets();
   $("tokSearch").oninput=e=>renderTokenList(e.target.value);
-  $("amtIn").oninput=()=>{mode="exactIn";scheduleQuote();};
+  /* دکمه‌ی پاک‌کردن فقط وقتی چیزی نوشته شده باشد وجود دارد. هر جایی که
+     مقدار برنامه‌ای عوض می‌شود هم باید صدایش بزند، وگرنه دکمه روی فیلدِ
+     خالی می‌ماند. */
+  $("amtIn").oninput=()=>{paintAmtClear();mode="exactIn";scheduleQuote();};
+  $("amtClear").onclick=()=>{
+    $("amtIn").value="";$("amtOut").value="";
+    paintAmtClear();mode="exactIn";$("amtIn").focus();scheduleQuote();
+  };
   $("amtOut").oninput=()=>{mode="targetOut";scheduleQuote();};
   $("flipBtn").onclick=()=>{const a=tokenIn;tokenIn=tokenOut;tokenOut=a;
     paintToken("in",tokenIn);paintToken("out",tokenOut);
@@ -3399,8 +3499,10 @@ function wire(){
      پس یک *لینک* هرگز نمی‌تواند عوضش کند. */
   readProvider=makeProvider(CHAIN.rpcs[0]);
   restoreCustomRpc();           // فقط از localStorage، که فقط با تایپ کاربر پر می‌شود
-  tokenIn=BASE_TOKENS.find(t=>t.symbol==="USDC");
-  tokenOut=BASE_TOKENS.find(t=>t.symbol==="WETH");
+  // پیش‌فرض: ETH بومی → USDC. کسی که تازه می‌رسد معمولاً ETH دارد و
+  // می‌خواهد بفروشد، نه برعکس.
+  tokenIn=BASE_TOKENS.find(t=>t.native);
+  tokenOut=BASE_TOKENS.find(t=>t.symbol==="USDC");
   paintToken("in",tokenIn);paintToken("out",tokenOut);
   readFee();loadChart();
   setView(parseHash().view||"swap",false);

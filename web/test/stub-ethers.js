@@ -277,11 +277,22 @@
         mk("buy", 9100, 28), mk("sell", 30500, 41), mk("buy", 6400, 52),
         mk("sell", 2200, 300), mk("buy", 155000, 700) ] });
     }
+    // GeckoTerminal کنار قیمت و لوگو، مارکت‌کپ/FDV/والیوم/نقدینگی هم می‌دهد.
+    // ماک قبلاً فقط دو فیلد اول را داشت، پس پنل آمار توکن در تست اصلاً
+    // ظاهر نمی‌شد و ادعای «آمار را نشان می‌دهیم» بی‌صدا نیازموده می‌ماند.
+    // market_cap_usd عمداً برای یکی null است — سرویس واقعی هم برای توکن‌های
+    // تازه همین کار را می‌کند و رابط باید «—» بدهد نه اینکه FDV را جایش بگذارد.
+    const GT_STATS = a => ({
+      market_cap_usd: /^0x833589/i.test(a) ? null : "412530000.0",
+      fdv_usd: "938120000.0",
+      volume_usd: { h24: "27450000.0" },
+      total_reserve_in_usd: "61900000.0",
+    });
     if (/\/tokens\/multi\//.test(u)) {
       const addrs = u.split("/multi/")[1].split("?")[0].split(",");
-      return ok({ data: addrs.map(a => ({ attributes: {
+      return ok({ data: addrs.map(a => ({ attributes: Object.assign({
         address: a, price_usd: "1908.85",
-        image_url: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==" } })) });
+        image_url: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==" }, GT_STATS(a)) })) });
     }
     if (/\/tokens\/0x[0-9a-fA-F]{40}$/.test(u)) {
       return ok({ data: { attributes: { price_usd: "1908.85", image_url:

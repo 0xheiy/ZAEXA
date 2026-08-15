@@ -92,8 +92,12 @@ async def main():
         assert not bad, ("these addresses are written with the wrong capitalisation, so "
                          "ethers rejects them before any call is made: %s" % bad)
 
-        assert await pg.inner_text("#tokInSym") == "USDC"
-        assert await pg.inner_text("#tokOutSym") == "WETH"
+        # پیش‌فرض عمداً ETH → USDC است: کسی که تازه می‌رسد معمولاً ETH دارد
+        # و می‌خواهد بفروشد، نه برعکس.
+        print("[default pair] %s -> %s"
+              % (await pg.inner_text("#tokInSym"), await pg.inner_text("#tokOutSym")))
+        assert await pg.inner_text("#tokInSym") == "ETH"
+        assert await pg.inner_text("#tokOutSym") == "USDC"
 
         # ---- 0. price chart ----
         await pg.wait_for_selector("#plot svg", timeout=15000)
@@ -227,6 +231,18 @@ async def main():
 
         BIG = str(10 ** 30)
         NEVER = "You may not be able to sell this back"
+
+        # این بخش مسیر approve را می‌سنجد، پس ورودی باید یک ERC-20 باشد.
+        # ETH بومی approve نمی‌خواهد، و از وقتی پیش‌فرضِ صفحه ETH شد این
+        # کاوشگرها به جفتِ پیش‌فرض گره خورده بودند. حالا صریح است.
+        await pg.evaluate("""() => {
+            tokenIn = allTokens().find(t => t.symbol === "USDC");
+            tokenOut = allTokens().find(t => t.symbol === "WETH");
+            paintToken("in", tokenIn); paintToken("out", tokenOut);
+            loadChart();
+        }""")
+        await pg.fill("#amtIn", "1000")
+        await pg.wait_for_timeout(3000)
 
         # الف) همان باگ اسکرین‌شات: revert چون کیف پول approve نکرده.
         r = await exit_case("no-approval", 'execution reverted: "transferFrom failed"', allowance="0")
@@ -647,6 +663,93 @@ async def main():
         initials = await pg.inner_text("#tokInAv")
         print("[icons] logo images: %s   fallback initials: %r" % (logos, initials.strip()))
         assert initials.strip() != "", "initials must always be present as a fallback"
+
+        # ---- 2b-bis. clear button, header layout, token stats ----
+        clr = await pg.evaluate("""async () => {
+            const inp = document.getElementById("amtIn"),
+                  btn = document.getElementById("amtClear");
+            const hid = () => btn.hidden || getComputedStyle(btn).display === "none";
+            // فیلد از کاوشگرهای قبلی مقدار دارد؛ اول واقعاً خالی‌اش کن
+            inp.value = ""; inp.dispatchEvent(new Event("input"));
+            await new Promise(r => setTimeout(r, 200));
+            const empty = hid();
+            inp.value = "12.5"; inp.dispatchEvent(new Event("input"));
+            await new Promise(r => setTimeout(r, 200));
+            const typed = hid();
+            btn.click();
+            await new Promise(r => setTimeout(r, 200));
+            return {whenEmpty: empty, whenTyped: typed,
+                    afterClick: hid(), value: inp.value, out: document.getElementById("amtOut").value};
+        }""")
+        print("[clear btn] empty=hidden:%s typed=hidden:%s afterClick=hidden:%s value=%r"
+              % (clr["whenEmpty"], clr["whenTyped"], clr["afterClick"], clr["value"]))
+        assert clr["whenEmpty"], "the clear button must not sit on an empty field"
+        assert not clr["whenTyped"], "the clear button must appear once an amount is typed"
+        assert clr["value"] == "" and clr["out"] == "", \
+            "clearing must empty both sides, not just the one you typed in"
+        assert clr["afterClick"], "the clear button must disappear again after clearing"
+
+        # هدر: ناوبری باید بین لوگو و چیپ‌های راست وسط بماند، نه چسبیده به لوگو
+        head = await pg.evaluate("""() => {
+            const logo = document.querySelector(".logo").getBoundingClientRect();
+            const nav = document.getElementById("nav").getBoundingClientRect();
+            const chip = document.getElementById("srcChip").getBoundingClientRect();
+            return {gapLeft: Math.round(nav.left - logo.right),
+                    gapRight: Math.round(chip.left - nav.right),
+                    navLeft: Math.round(nav.left), navRight: Math.round(nav.right),
+                    vw: innerWidth};
+        }""")
+        print("[header] logo|%spx|nav|%spx|chips  (nav %s..%s of %s)"
+              % (head["gapLeft"], head["gapRight"], head["navLeft"], head["navRight"], head["vw"]))
+        assert head["gapLeft"] > 8 and head["gapRight"] > 8, \
+            "the nav touches the logo or the chips: %s" % head
+        lo, hi = sorted((head["gapLeft"], head["gapRight"]))
+        assert lo / hi >= 0.3, \
+            ("the nav is not balanced between logo and chips (%spx vs %spx) — it should "
+             "sit between them, not be shoved to one side" % (head["gapLeft"], head["gapRight"]))
+
+        # عرض‌های میانی جایی است که هدر معمولاً می‌شکند: ناوبری هنوز در هدر
+        # است ولی جا تنگ شده. هیچ چیزی نباید از لبه بزند بیرون یا بپیچد.
+        narrow = await b.new_page(viewport={"width": 760, "height": 900}, color_scheme="dark")
+        await narrow.goto(URL); await narrow.wait_for_timeout(900)
+        hn = await narrow.evaluate("""() => {
+            const h = document.querySelector("header");
+            const kids = [...h.children].map(e => e.getBoundingClientRect());
+            const tops = new Set(kids.filter(r => r.width > 0).map(r => Math.round(r.top / 12)));
+            return {right: Math.round(Math.max(...kids.map(r => r.right))),
+                    left: Math.round(Math.min(...kids.map(r => r.left))),
+                    rows: tops.size, vw: innerWidth,
+                    docW: Math.round(document.documentElement.scrollWidth)};
+        }""")
+        await narrow.close()
+        print("[header 760] left=%s right=%s rows=%s doc=%s viewport=%s"
+              % (hn["left"], hn["right"], hn["rows"], hn["docW"], hn["vw"]))
+        assert hn["left"] >= 0 and hn["right"] <= hn["vw"] + 1, \
+            "the header runs off the edge at 760px: %s" % hn
+        assert hn["docW"] <= hn["vw"] + 1, \
+            "the page scrolls sideways at 760px — something in the header is too wide: %s" % hn
+        assert hn["rows"] == 1, "the header wrapped onto %s rows at 760px" % hn["rows"]
+
+        # آمار توکن خروجی
+        stats = await pg.evaluate("""async () => {
+            for (let i = 0; i < 40; i++) {
+                const b = document.getElementById("tokStats");
+                if (!b.hidden && b.children.length) break;
+                await new Promise(r => setTimeout(r, 150));
+            }
+            const b = document.getElementById("tokStats");
+            return {hidden: b.hidden,
+                    keys: [...b.querySelectorAll(".k")].map(e => e.textContent),
+                    vals: [...b.querySelectorAll(".v")].map(e => e.textContent)};
+        }""")
+        print("[token stats] %s = %s" % (stats["keys"], stats["vals"]))
+        assert not stats["hidden"], "the output token's stats never appeared"
+        for k in ["Market cap", "FDV", "Volume 24h"]:
+            assert k in stats["keys"], "%s is missing from the token stats: %s" % (k, stats["keys"])
+        # «هولدرز» عمداً نیست: منبع دادهٔ ما نمی‌دهدش و عدد ساختن بدتر از
+        # نداشتن است. اگر روزی اضافه شد، باید از یک منبع واقعی بیاید.
+        assert not any("older" in k for k in stats["keys"]), \
+            "holders is not available from GeckoTerminal — do not invent it"
 
         # ---- 2c-quinquies. wallet picker lists every wallet that announces itself ----
         # قبلاً فقط window.ethereum خوانده می‌شد و ما کورکورانه متامسک را ترجیح
