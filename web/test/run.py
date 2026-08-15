@@ -644,6 +644,27 @@ async def main():
         assert out_eth not in ("", "0"), "ETH output must quote via WETH"
         notices = await pg.inner_text("#notices")
         assert "not supported" not in notices, "native ETH should no longer be rejected"
+
+        # نمودار ETH هم باید بیاید. آدرس ETH در جدول ما "NATIVE" است و
+        # GeckoTerminal آن را نمی‌شناسد؛ برای تاریخچه‌ی قیمت باید به WETH
+        # نگاشت شود. روی سایت زنده این پیام «Price history is unavailable»
+        # می‌داد در حالی که همان جفت با WETH درست کار می‌کرد.
+        eth_chart = await pg.evaluate("""async () => {
+            const t0 = Date.now();
+            while (Date.now() - t0 < 9000) {
+                const m = document.getElementById("chartMsg");
+                const shown = getComputedStyle(m).display !== "none";
+                if (shown && /unavailable/i.test(m.textContent))
+                    return {ok: false, why: m.textContent.trim()};
+                if (document.querySelectorAll("#plot svg path").length >= 2)
+                    return {ok: true, why: "drawn"};
+                await new Promise(r => setTimeout(r, 200));
+            }
+            return {ok: false, why: "no chart and no message after 9s"};
+        }""")
+        print("[eth chart] %s — %s" % (eth_chart["ok"], eth_chart["why"][:70]))
+        assert eth_chart["ok"], \
+            "native ETH must chart through WETH, not fall over: " + eth_chart["why"]
         await pg.wait_for_timeout(1200)
         eth_safety = await pg.inner_text("#safetyBody")
         print("[eth safety] %s" % eth_safety.replace("\n", " | ")[:120])
@@ -742,10 +763,40 @@ async def main():
         await pg.click("#connectBtn"); await pg.wait_for_timeout(150)
         assert await pg.locator("#walletPop").evaluate("e => e.classList.contains('on')"), \
             "a connected wallet must open its account menu"
+        # کلید تم عمداً از منوی والت به تنظیمات رفته: ظاهر سایت ربطی به
+        # «کدام حساب وصل است» ندارد و بدون والت هم باید در دسترس باشد.
+        assert await pg.locator("#walletPop #themeBtn").count() == 0, \
+            "the theme switch belongs in Settings, not in the wallet menu"
+        await pg.keyboard.press("Escape")
+        await pg.click("#setBtn"); await pg.wait_for_timeout(200)
+        assert await pg.locator("#setPop #themeBtn").count() == 1, \
+            "the theme switch must be reachable from Settings"
         await pg.click("#themeBtn"); await pg.wait_for_timeout(300)
         assert await pg.get_attribute("html", "data-theme") == "light"
         assert await pg.inner_text("#themeState") == "Light"
+        print("[theme] moved to Settings, toggles to %s"
+              % await pg.get_attribute("html", "data-theme"))
+        await pg.keyboard.press("Escape")
         await pg.screenshot(path=os.path.join(HERE, "shot-light.png"), full_page=True)
+
+        # ---- 6b. فوتر باید ته صفحه بماند، در هر سه نما ----
+        # صفحه‌های Portfolio و Money Flow وقتی خالی‌اند کوتاه‌ترند؛ قبلاً فوتر
+        # می‌چسبید زیر محتوا و وسط صفحه شناور می‌شد.
+        foot = {}
+        for view in ["swap", "folio", "flow"]:
+            await pg.click(f'.nav button[data-view="{view}"]'); await pg.wait_for_timeout(400)
+            foot[view] = await pg.evaluate("""() => {
+                const f = document.querySelector("footer").getBoundingClientRect();
+                return {bottom: Math.round(f.bottom), vh: innerHeight,
+                        docH: Math.round(document.documentElement.scrollHeight)};
+            }""")
+            print("[footer %s] bottom=%s viewport=%s doc=%s"
+                  % (view, foot[view]["bottom"], foot[view]["vh"], foot[view]["docH"]))
+            f = foot[view]
+            assert f["bottom"] >= f["vh"] - 4, \
+                ("the footer floats mid-page on the %s view: it ends at %s in a %s viewport"
+                 % (view, f["bottom"], f["vh"]))
+        await pg.click('.nav button[data-view="swap"]'); await pg.wait_for_timeout(400)
 
         # ---- 7. settings + picker ----
         await pg.click("#setBtn"); await pg.wait_for_timeout(250)
@@ -767,14 +818,29 @@ async def main():
         await mob.click("#connectBtn"); await mob.wait_for_timeout(150)
         mobile_menu = await mob.evaluate("""() => {
             const el = document.getElementById("walletPop"), box = el.getBoundingClientRect();
+            // آیکون قطع اتصال: قبلاً یک حرف یونیکد («⏻») بود که روی گوشی فونت
+            // ندارد و جایش خالی می‌ماند. «وجود عنصر» کافی نیست — باید واقعاً
+            // ابعاد رسم‌شده داشته باشد و SVG باشد، نه متنی که به فونت وابسته است.
+            const d = document.getElementById("disconnectBtn");
+            const ic = d && d.querySelector("svg");
+            const ib = ic ? ic.getBoundingClientRect() : null;
             return {open: el.classList.contains("on"), left: box.left, right: box.right,
-                    width: innerWidth, disconnect: !!document.getElementById("disconnectBtn")};
+                    width: innerWidth, disconnect: !!d,
+                    iconIsSvg: !!ic, iconW: ib ? Math.round(ib.width) : 0,
+                    iconH: ib ? Math.round(ib.height) : 0};
         }""")
         print("[wallet menu mobile] open=%s left=%.0f right=%.0f viewport=%s"
               % (mobile_menu["open"], mobile_menu["left"], mobile_menu["right"], mobile_menu["width"]))
+        print("[disconnect icon] svg=%s size=%sx%s"
+              % (mobile_menu["iconIsSvg"], mobile_menu["iconW"], mobile_menu["iconH"]))
         assert mobile_menu["open"] and mobile_menu["left"] >= 0 and mobile_menu["right"] <= mobile_menu["width"], \
             "wallet menu must remain usable inside a mobile viewport"
         assert mobile_menu["disconnect"], "disconnect must be inside the wallet menu on mobile too"
+        assert mobile_menu["iconIsSvg"], \
+            "the disconnect icon must be inline SVG — a unicode glyph is missing on many phone fonts"
+        assert mobile_menu["iconW"] >= 10 and mobile_menu["iconH"] >= 10, \
+            "the disconnect icon renders with no size: %sx%s" % (mobile_menu["iconW"], mobile_menu["iconH"])
+        await mob.screenshot(path=os.path.join(HERE, "shot-mobile-wallet.png"))
         await mob.close()
         await b.close()
 

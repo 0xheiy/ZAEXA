@@ -278,6 +278,13 @@
         "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==" } } });
     }
     if (/\/tokens\/.+\/pools/.test(u)) {
+      // GeckoTerminal فقط آدرس قرارداد می‌شناسد. تا امروز این ماک *هر*
+      // رشته‌ای را یک توکن معتبر جا می‌زد، و برای همین باگ ETH بومی را
+      // پنهان کرده بود: آدرس ETH در جدول ما "NATIVE" است، سرویس واقعی
+      // ۴۰۴ می‌داد و کل نمودار می‌افتاد، ولی تست سبز بود.
+      const who = u.split("/tokens/")[1].split("/")[0];
+      if (!/^0x[0-9a-fA-F]{40}$/.test(who))
+        return { ok: false, status: 404, json: async () => ({}) };
       return ok({ data: [{ id: "base_0x" + "cd".repeat(20) }] });
     }
     if (/\/ohlcv\//.test(u)) {
