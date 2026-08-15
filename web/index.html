@@ -2528,24 +2528,96 @@ function injectedName(p){
   if(p.isMetaMask)return "MetaMask";
   return "Browser wallet";
 }
+/* ---------------------------------------------------------------------
+   WalletConnect — کیف پول موبایل با QR
+   ---------------------------------------------------------------------
+   دو چیز باید صریح گفته شود:
+
+   ۱) بسته‌ی WalletConnect داخل همین مخزن است، نه از CDN. پس نگهبان
+      زنجیره‌ی تأمین برقرار می‌ماند: هیچ کدی از مبدأ بیرونی اجرا نمی‌شود.
+      فایل با scripts/build_walletconnect.sh قابل بازتولید و هش‌سنجی است.
+
+   ۲) ولی خودِ پروتکل در *زمان اجرا* به رله‌ی WalletConnect وصل می‌شود؛
+      بدون آن رله، QR اصلاً معنا ندارد. یعنی «کد بیرونی نداریم» درست است،
+      «سرور بیرونی نداریم» درست نیست — و نباید وانمود کنیم هست.
+
+   ۲ مگابایت است، پس فقط وقتی بار می‌شود که کاربر واقعاً انتخابش کند.
+   projectId راز نیست؛ شناسه‌ی عمومی سمت کلاینت است و دامنه‌اش باید در
+   داشبورد WalletConnect قفل شود.
+   --------------------------------------------------------------------- */
+const WC_PROJECT_ID="c1fcdd7d857fb7f0c54788295dfd09fc";
+const WC_ICON="data:image/svg+xml;utf8,"+encodeURIComponent(
+ '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">'+
+ '<rect width="32" height="32" rx="9" fill="#3b99fc"/>'+
+ '<path d="M9.6 12.6a9 9 0 0 1 12.8 0l.4.4a.4.4 0 0 1 0 .6l-1.4 1.4a.2.2 0 0 1-.3 0l-.6-.6a6.3 6.3 0 0 0-8.9 0l-.6.6a.2.2 0 0 1-.3 0L9.3 13.6a.4.4 0 0 1 0-.6z" fill="#fff"/>'+
+ '<path d="M24.6 14.9l1.2 1.2a.4.4 0 0 1 0 .6l-5.5 5.4a.4.4 0 0 1-.6 0l-3.9-3.8a.1.1 0 0 0-.2 0l-3.9 3.8a.4.4 0 0 1-.6 0l-5.5-5.4a.4.4 0 0 1 0-.6l1.2-1.2a.4.4 0 0 1 .6 0l3.9 3.8a.1.1 0 0 0 .2 0l3.9-3.8a.4.4 0 0 1 .6 0l3.9 3.8a.1.1 0 0 0 .2 0l3.9-3.8a.4.4 0 0 1 .6 0z" fill="#fff"/></svg>');
+let wcProvider=null,wcLoading=null;
+function loadWalletConnect(){
+  if(window.WCProvider)return Promise.resolve(window.WCProvider);
+  if(wcLoading)return wcLoading;
+  wcLoading=new Promise((res,rej)=>{
+    const s=document.createElement("script");
+    s.src="./walletconnect.bundle.js";      // محلی — عمداً بدون CDN
+    s.onload=()=>window.WCProvider?res(window.WCProvider)
+      :rej(new Error("WalletConnect loaded but did not register."));
+    s.onerror=()=>rej(new Error("WalletConnect could not be loaded."));
+    document.head.appendChild(s);
+  });
+  wcLoading.catch(()=>{wcLoading=null;});   // شکست نباید برای همیشه کش شود
+  return wcLoading;
+}
+async function connectWalletConnect(){
+  try{
+    setNotice(note("warn","<b>Opening WalletConnect…</b> Loading it now — this happens once."));
+    const lib=await loadWalletConnect();
+    if(!wcProvider){
+      wcProvider=await lib.EthereumProvider.init({
+        projectId:WC_PROJECT_ID,
+        chains:[CHAIN.id],
+        optionalChains:[CHAIN.id],
+        showQrModal:true,
+        metadata:{
+          name:BRAND,
+          description:"Zaexa — a DEX aggregator on Base",
+          url:location.origin,
+          icons:[location.origin+"/favicon.svg"],
+        },
+      });
+    }
+    setNotice("");
+    // enable() هم اتصال را باز می‌کند و هم حساب‌ها را برمی‌گرداند، پس بعدش
+    // دوباره eth_requestAccounts نمی‌زنیم تا از کاربر دو بار پرسیده نشود.
+    const accs=await wcProvider.enable();
+    if(!accs||!accs.length)throw new Error("WalletConnect returned no account.");
+    await connectWithProvider(wcProvider,false);
+  }catch(e){
+    // بستن پنجره‌ی QR توسط کاربر خطا نیست، انصراف است
+    const m=((e&&e.message)||"")+"";
+    if(/user rejected|closed modal|user closed|modal closed/i.test(m)){setNotice("");return;}
+    setNotice(note("err","<b>WalletConnect did not connect.</b> "+esc(m||"Unknown error")));
+  }
+}
+
 function renderWalletList(){
   const list=$("walList"),opts=walletOptions();
-  if(!opts.length){
-    list.innerHTML='<div class="empty">No wallet detected in this browser. '+
-      'Install one — Rabby, MetaMask, Zerion and Coinbase Wallet all work here.</div>';
-    $("walNote").textContent="";
-    return;
-  }
-  list.innerHTML=opts.map((o,i)=>`<div class="walRow" data-i="${i}">
+  const rows=opts.map(o=>({name:o.name,icon:o.icon,kind:o.kind,
+    go:()=>connectWithProvider(o.provider,true)}));
+  // WalletConnect همیشه هست — چیزی نصب نمی‌خواهد و تنها راه کیف پول موبایل است
+  rows.push({name:"WalletConnect",icon:WC_ICON,kind:"Mobile wallet · QR",
+    go:connectWalletConnect});
+  list.innerHTML=rows.map((o,i)=>`<div class="walRow" data-i="${i}">
     ${o.icon?`<img src="${esc(o.icon)}" alt="">`
             :`<span class="walFallback">${esc((o.name[0]||"?").toUpperCase())}</span>`}
     <span class="walName">${esc(o.name)}</span>
     <span class="walKind">${esc(o.kind)}</span></div>`).join("");
   list.querySelectorAll(".walRow").forEach(el=>{
-    el.onclick=()=>{closeWalletPicker();connectWithProvider(opts[+el.dataset.i].provider,true);};
+    el.onclick=()=>{closeWalletPicker();rows[+el.dataset.i].go();};
   });
-  $("walNote").textContent="Zaexa never sees your keys. Connecting only shares your "+
-    "address so we can read balances and ask you to sign.";
+  $("walNote").textContent=opts.length
+    ? "Zaexa never sees your keys. Connecting only shares your address so we can "+
+      "read balances and ask you to sign."
+    : "No browser extension detected. WalletConnect works without one — scan the "+
+      "code with your phone wallet.";
 }
 function openWalletPicker(){
   scanWallets();                       // شاید افزونه‌ای بعد از بارگذاری آمده باشد
@@ -2621,13 +2693,10 @@ async function connectWithProvider(provider,requestAccounts){
     await refreshAllowance();refreshButton();setNotice("");startBalanceWatch();closeWalletMenu();
   }catch(e){setNotice(note("err",esc(e.message||"Connection rejected.")));}
 }
-/* یک کیف پول = بدون انتخاب اضافه. بیشتر از یکی = کاربر خودش انتخاب کند،
-   نه اینکه ما به‌جایش متامسک را بردایم. */
-async function connect(){
-  const opts=walletOptions();
-  if(opts.length===1)return connectWithProvider(opts[0].provider,true);
-  openWalletPicker();
-}
+/* همیشه پنجره‌ی انتخاب. حتی با یک افزونه، WalletConnect هم یک گزینه است،
+   پس همیشه بیش از یک راه وجود دارد و انتخاب باید با کاربر باشد — نه اینکه
+   ما به‌جایش تصمیم بگیریم. */
+async function connect(){openWalletPicker();}
 async function switchNetwork(){
   const inj=walletEip1193||legacyInjected();if(!inj)return;
   try{await inj.request({method:"wallet_switchEthereumChain",params:[{chainId:CHAIN.hexId}]});}

@@ -28,8 +28,27 @@ def check_no_remote_code():
         "ethers must not be loaded from a remote origin:\n" + decl
     vendored = os.path.join(HERE, "..", "ethers.umd.min.js")
     assert os.path.exists(vendored), "ethers.umd.min.js is missing next to index.html"
-    print("[supply chain] ethers is vendored (%.0f KB), no remote script tags"
-          % (os.path.getsize(vendored) / 1024))
+
+    # ethers تنها اسکریپت بیرونی نیست. هر جای دیگری هم که کد بار می‌شود باید
+    # محلی باشد — WalletConnect با یک <script> پویا می‌آید و اگر روزی کسی
+    # آدرسش را به یک CDN عوض کند، بررسی بالا اصلاً نمی‌بیندش.
+    remote_srcs = [m for m in re.findall(r"""(?:src|s\.src)\s*=\s*["']([^"']+)["']""", src)
+                   if m.startswith("http://") or m.startswith("https://")]
+    assert not remote_srcs, \
+        "code must never be loaded from a remote origin: %s" % remote_srcs
+    wc = os.path.join(HERE, "..", "walletconnect.bundle.js")
+    assert os.path.exists(wc), \
+        "walletconnect.bundle.js is missing next to index.html — rebuild it with " \
+        "scripts/build_walletconnect.sh"
+    # بسته‌ی WalletConnect باید *واقعاً* خودکفا باشد. نسخه‌ی رسمی UMD خودشان
+    # نیست: در مرورگر انتظار دارد viem/lit/bs58 از قبل روی صفحه باشند و بی‌صدا
+    # شکست می‌خورد. اگر روزی کسی فایل رسمی را جایگزین کند، این می‌گیردش.
+    wc_head = open(wc, encoding="utf-8", errors="replace").read(600)
+    assert 'require("viem")' not in wc_head, \
+        "this is WalletConnect's own UMD file, which is not self-contained — " \
+        "build the bundle with scripts/build_walletconnect.sh instead"
+    print("[supply chain] vendored: ethers %.0f KB, walletconnect %.0f KB — no remote scripts"
+          % (os.path.getsize(vendored) / 1024, os.path.getsize(wc) / 1024))
 
 check_no_remote_code()
 
@@ -671,8 +690,53 @@ async def main():
                 "%s announced itself but is missing from the picker: %s" % (w, picker["names"])
         assert picker["chosen"] == "Zerion", \
             "the picker must connect the wallet the user clicked, not the first one: %r" % picker["chosen"]
-        assert picker["icons"] == 3, "each announced wallet must show its own icon"
+        # WalletConnect همیشه در لیست هست — تنها راهِ کیف پول موبایل، و چیزی
+        # لازم ندارد نصب شود. پس گزینه‌ها = افزونه‌های کشف‌شده + یک ردیف WC.
+        assert "WalletConnect" in picker["names"], \
+            "WalletConnect must always be offered, even with extensions installed"
+        assert picker["icons"] == len(picker["names"]), \
+            "every row must show its own icon, not a letter fallback"
         assert not picker["stillOpen"], "the picker must close once a wallet is chosen"
+
+        # ---- 2c-sexies. the vendored WalletConnect bundle really is self-contained ----
+        # نسخه‌ی رسمی UMD خودِ WalletConnect در مرورگر بی‌صدا می‌شکند چون
+        # viem/lit/bs58 را از روی صفحه انتظار دارد. ما خودمان بسته‌اش کردیم و
+        # این کاوشگر همان ادعا را می‌سنجد: با یک <script> تنها بار شود و
+        # EthereumProvider.init واقعاً وجود داشته باشد.
+        # روی http سرو می‌شود نه file:// — بسته موقع بار شدن به localStorage
+        # دست می‌زند و مبدأ مبهم اجازه نمی‌دهد.
+        import functools, http.server, threading
+        srv = http.server.ThreadingHTTPServer(
+            ("127.0.0.1", 0),
+            functools.partial(http.server.SimpleHTTPRequestHandler,
+                              directory=os.path.join(HERE, "..")))
+        threading.Thread(target=srv.serve_forever, daemon=True).start()
+        port = srv.server_address[1]
+        wcpg = await b.new_page()
+        wc_errs = []
+        wcpg.on("pageerror", lambda e: wc_errs.append(str(e)))
+        await wcpg.goto("http://127.0.0.1:%d/" % port)
+        wc_load = await wcpg.evaluate("""async () => {
+            await new Promise((res, rej) => {
+                const s = document.createElement("script");
+                s.src = "./walletconnect.bundle.js";
+                s.onload = res; s.onerror = () => rej(new Error("script failed"));
+                document.head.appendChild(s);
+            });
+            const W = window.WCProvider;
+            return {registered: !!W,
+                    hasInit: !!(W && W.EthereumProvider &&
+                                typeof W.EthereumProvider.init === "function")};
+        }""")
+        await wcpg.close()
+        srv.shutdown()
+        print("[walletconnect] bundle loads standalone: registered=%s init=%s errors=%s"
+              % (wc_load["registered"], wc_load["hasInit"], len(wc_errs)))
+        assert wc_load["registered"] and wc_load["hasInit"], \
+            "the WalletConnect bundle did not register a usable EthereumProvider"
+        assert not wc_errs, "the WalletConnect bundle threw while loading: %s" % wc_errs[:2]
+        # ⚠️ چیزی که این تست *نمی‌سنجد*: خودِ دست‌دادن با رله‌ی WalletConnect.
+        #    آن به سرور بیرونی نیاز دارد و آفلاین قابل آزمودن نیست.
 
         # ---- 2d. native ETH is offered and routes through WETH ----
         await pg.click("#tokOutBtn"); await pg.wait_for_timeout(250)
