@@ -35,10 +35,20 @@ check_no_remote_code()
 
 async def main():
     errors = []
+    # خطاهایی که یک کاوشگر *عمداً* تولید می‌کند. اجازه‌ی عبور می‌گیرند ولی
+    # جمع می‌شوند تا همان کاوشگر بتواند ادعا کند واقعاً رخ داده‌اند — وگرنه
+    # allowlist فقط یک راه بی‌صدا برای پنهان‌کردن خطا می‌شد.
+    gate_errs = []
+
+    def on_console(m):
+        if m.type != "error":
+            return
+        (gate_errs if "[zaexa] gate check failed" in m.text else errors).append(m.text)
+
     async with async_playwright() as p:
         b = await p.chromium.launch()
         pg = await b.new_page(viewport={"width": 1240, "height": 1000}, color_scheme="dark")
-        pg.on("console", lambda m: errors.append(m.text) if m.type == "error" else None)
+        pg.on("console", on_console)
         pg.on("pageerror", lambda e: errors.append(f"PAGEERROR {e}"))
         await pg.goto(URL)
         await pg.wait_for_timeout(900)
@@ -531,6 +541,66 @@ async def main():
         print("[quoter gate] %s" % reason)
         assert "quoter" in reason.lower(), \
             "a quoter that lacks the function we call must be rejected: " + reason
+
+        # ---- 2c-quater. «نتوانستیم بپرسیم» یک حالت است، نه یک جمله ----
+        # قبلاً تنها نشانه‌اش متن reason بود و حلقه‌ی retry با مقایسه‌ی همان
+        # رشته تصمیم می‌گرفت؛ و هر خطای غیرشبکه‌ای هم «could not reach the
+        # network» گزارش می‌شد — یعنی «نمی‌دانم چرا» به کاربر به‌شکل یک علت
+        # قطعیِ غلط می‌رسید. سه ادعا:
+        gate = await pg.evaluate("""async () => {
+            const pcs = DEXES.find(d => d.id === "pancake-v3");
+
+            // الف) خطای غیرشبکه‌ای: آدرس بدچک‌سام، بیرون از rpcSend
+            const realGA = ethers.getAddress;
+            ethers.getAddress = a => {
+                if (String(a).toLowerCase() === pcs.router.toLowerCase())
+                    throw new Error("bad address checksum");
+                return realGA(a);
+            };
+            await verifyDexes();
+            const ours = Object.assign({}, dexStatus["pancake-v3"]);
+            ethers.getAddress = realGA;
+            await verifyDexes();
+
+            // ب) خطای انتقال: همان 403 که ethers CALL_EXCEPTION علامتش می‌زند
+            const realCode = ethers.JsonRpcProvider.prototype.getCode;
+            verifyTries = 3;                    // جلوی تایمر retry واقعی
+            ethers.JsonRpcProvider.prototype.getCode = async () => {
+                throw Object.assign(new Error("missing revert data"),
+                    {code: "CALL_EXCEPTION", data: "Request failed with status code 403"});
+            };
+            await verifyDexes();
+            const down = Object.assign({}, dexStatus["pancake-v3"]);
+            ethers.JsonRpcProvider.prototype.getCode = realCode;
+            verifyTries = 0;
+            await verifyDexes();
+
+            // ج) تلاش دوباره‌ی نقطه‌ای نباید صرافی سالم را قربانی کند
+            const uniBefore = dexStatus["uniswap-v3"].ok;
+            await verifyDexes([pcs]);
+            return {ours, down, uniBefore, uniAfter: dexStatus["uniswap-v3"].ok,
+                    uniReason: dexStatus["uniswap-v3"].reason};
+        }""")
+        print("[gate] our fault -> unreachable=%s | %s"
+              % (gate["ours"]["unreachable"], gate["ours"]["reason"]))
+        print("[gate] rpc 403   -> unreachable=%s | %s"
+              % (gate["down"]["unreachable"], gate["down"]["reason"]))
+        assert gate["ours"]["unreachable"] is False, \
+            "a bad address is our bug, not an unreachable network — retrying never fixes it"
+        assert "network" not in gate["ours"]["reason"].lower() \
+            or "not the network" in gate["ours"]["reason"].lower(), \
+            "do not blame the network for a fault on our side: " + gate["ours"]["reason"]
+        assert "checksum" in (gate["ours"].get("err") or ""), \
+            "the real error must be kept, not thrown away: %r" % gate["ours"].get("err")
+        assert gate_errs, "a fault on our side must be logged, not swallowed"
+        assert gate["down"]["unreachable"] is True, \
+            "an HTTP 403 while verifying means we could not ask — that must be retried"
+        assert "could not reach the network" in gate["down"]["reason"], gate["down"]["reason"]
+        print("[gate] targeted retry -> uniswap ok=%s (%s)"
+              % (gate["uniAfter"], gate["uniReason"]))
+        assert gate["uniBefore"] is True and gate["uniAfter"] is True, \
+            "a targeted retry must not wipe DEXes that already verified"
+        assert gate["uniReason"] == "verified", gate["uniReason"]
 
         # ---- 2c-bis. token logos load, initials survive failure ----
         await pg.wait_for_timeout(800)

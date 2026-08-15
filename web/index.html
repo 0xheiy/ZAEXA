@@ -802,49 +802,87 @@ async function multicall(calls){
  * دیده می‌شود — سکوت درباره‌ی چیزی که پوشش نمی‌دهیم همان‌قدر بد است که
  * «استخر نیست» گفتن وقتی شبکه جواب نداده.
  */
-async function verifyDexes(){
-  for(const d of DEXES)dexStatus[d.id]={ok:false,reason:"checking…"};
-  await Promise.all(DEXES.map(async d=>{
-    const set=(ok,reason)=>{dexStatus[d.id]={ok,reason};};
-    try{
-      const code=await getCode(E.getAddress(d.router));
-      if(!code||code.length<=2)return set(false,"no contract at the router address");
-      const sel=E.id(swapSigOf(d)).slice(2,10).toLowerCase();
-      if(!code.toLowerCase().includes(sel))
-        return set(false,"router does not expose the function we call — interface mismatch");
-      if(isV3(d)){
-        const qc=await getCode(E.getAddress(d.quoter));
-        if(!qc||qc.length<=2)return set(false,"no contract at the quoter address");
-        const qsel=E.id(QUOTER_SIG).slice(2,10).toLowerCase();
-        if(!qc.toLowerCase().includes(qsel))
-          return set(false,"quoter does not expose the function we call — wrong quoter generation");
-      }
-    }catch{return set(false,"could not reach the network to verify");}
-    set(true,"verified");
-  }));
+/* «نتوانستیم بپرسیم» یک حالت است، نه یک جمله. قبلاً تنها نشانه‌اش متنِ
+   reason بود و حلقه‌ی retry با `reason === "could not reach…"` تصمیم
+   می‌گرفت — همان «با رشته تصمیم نگیر» که یک بار دیگر هم گزیدمان.
+   حالا خودِ حالت را نگه می‌داریم.
+
+   نکته‌ی ظریف: rpcSend وقتی *همه‌ی* اندپوینت‌ها شکست خوردند rpcDown
+   می‌گذارد، بدون توجه به اینکه چرا. عمداً همان را «نتوانستیم بپرسیم»
+   می‌شماریم؛ چون واقعاً نپرسیدیم. خطای علت در err نگه داشته می‌شود. */
+function cannotAsk(e){
+  if(!e)return false;
+  return !!e.rpcDown||isTransportError(e)||isTransportError(e.cause);
+}
+
+async function checkDex(d){
+  const set=(ok,reason,unreachable)=>{
+    dexStatus[d.id]={ok,reason,unreachable:!!unreachable};};
+  try{
+    const code=await getCode(E.getAddress(d.router));
+    if(!code||code.length<=2)return set(false,"no contract at the router address");
+    const sel=E.id(swapSigOf(d)).slice(2,10).toLowerCase();
+    if(!code.toLowerCase().includes(sel))
+      return set(false,"router does not expose the function we call — interface mismatch");
+    if(isV3(d)){
+      const qc=await getCode(E.getAddress(d.quoter));
+      if(!qc||qc.length<=2)return set(false,"no contract at the quoter address");
+      const qsel=E.id(QUOTER_SIG).slice(2,10).toLowerCase();
+      if(!qc.toLowerCase().includes(qsel))
+        return set(false,"quoter does not expose the function we call — wrong quoter generation");
+    }
+  }catch(e){
+    if(cannotAsk(e))return set(false,"could not reach the network to verify",true);
+    /* هر چیز دیگری — آدرس بدچک‌سام، kind ناشناخته در swapSigOf، خطای
+       decode — باگ خودِ ماست. تقصیرش را گردن شبکه انداختن هم دروغ است
+       و هم retry را بی‌فایده تکرار می‌کند. خطا را نگه دار تا دیده شود. */
+    console.error("[zaexa] gate check failed for "+d.id,e);
+    dexStatus[d.id]={ok:false,unreachable:false,
+      reason:"we could not run the check — this is a fault on our side, not the network",
+      err:(e&&(e.shortMessage||e.message))||String(e)};
+    return;
+  }
+  set(true,"verified");
+}
+
+// دروازه‌ی ۳ — لیست سفید قرارداد اجرا
+async function allowListGate(){
+  try{
+    const ds=DEXES.filter(d=>dexStatus[d.id]&&dexStatus[d.id].ok);
+    if(!ds.length)return;
+    const res=await multicall(ds.map(d=>({target:CHAIN.executor,
+      data:iExec.encodeFunctionData("allowedRouter",[E.getAddress(d.router)])})));
+    ds.forEach((d,i)=>{
+      if(res[i].ok&&!iExec.decodeFunctionResult("allowedRouter",res[i].data)[0])
+        dexStatus[d.id]={ok:false,unreachable:false,
+          reason:"not allow-listed on the executor contract yet"};
+    });
+  }catch{}
+}
+
+/* targets خالی = بررسی کامل. با targets فقط همان‌ها دوباره پرسیده می‌شوند.
+   قبلاً هر retry کل dexStatus را به «checking…» برمی‌گرداند، پس در آن
+   پنجره enabledDexes() خالی بود و هر کوتی که وسط می‌افتاد «مسیری نیست»
+   می‌گرفت — صرافی سالم قربانی صرافیِ جواب‌نداده می‌شد. */
+async function verifyDexes(targets){
+  const list=(targets&&targets.length)?targets:DEXES;
+  if(list===DEXES)
+    for(const d of DEXES)dexStatus[d.id]={ok:false,reason:"checking…",unreachable:false};
+  await Promise.all(list.map(checkDex));
+  await allowListGate();
+  renderCoverage();
   /* یک وقفه‌ی لحظه‌ای موقع بارگذاری، کل جلسه را روی «۰ از ۶ صرافی» قفل
      می‌کرد و بعد هر کوتی «شبکه جواب نداد» می‌شد — درست ولی برای همیشه
      غلط. یک تلاش دوباره، فقط برای آن‌هایی که *نشد بپرسیم*. */
-  const unreachable=DEXES.filter(d=>!dexStatus[d.id].ok&&
-    dexStatus[d.id].reason==="could not reach the network to verify");
+  const unreachable=DEXES.filter(d=>dexStatus[d.id]&&!dexStatus[d.id].ok&&
+    dexStatus[d.id].unreachable);
   if(unreachable.length&&verifyTries<3){
     verifyTries++;
     // با فاصله‌ی فزاینده: علت معمول 429 روی RPC عمومی است، و فشار بیشتر
     // بدترش می‌کند. صرافی سالمی که یک بار جواب نداد نباید کل جلسه حذف بماند.
     rotateRpc();
-    setTimeout(()=>{verifyDexes();},2000*verifyTries);
+    setTimeout(()=>{verifyDexes(unreachable);},2000*verifyTries);
   }
-  // دروازه‌ی ۳ — لیست سفید قرارداد اجرا
-  try{
-    const ds=DEXES.filter(d=>dexStatus[d.id].ok);
-    const res=await multicall(ds.map(d=>({target:CHAIN.executor,
-      data:iExec.encodeFunctionData("allowedRouter",[E.getAddress(d.router)])})));
-    ds.forEach((d,i)=>{
-      if(res[i].ok&&!iExec.decodeFunctionResult("allowedRouter",res[i].data)[0])
-        dexStatus[d.id]={ok:false,reason:"not allow-listed on the executor contract yet"};
-    });
-  }catch{}
-  renderCoverage();
 }
 function enabledDexes(){return DEXES.filter(d=>dexStatus[d.id]&&dexStatus[d.id].ok);}
 function renderCoverage(){
