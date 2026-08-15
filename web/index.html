@@ -102,8 +102,9 @@ header{max-width:1140px;margin:0 auto;padding:20px 20px 8px;display:flex;align-i
   #srcChip{padding:0 12px}
   .chip{height:36px;font-size:13px}
   main{padding:8px 14px 40px}
-  .pop{right:-8px;width:min(260px,calc(100vw - 40px))}
-  .walletPop{right:0;width:min(238px,calc(100vw - 28px))}
+  /* قواعد موبایلِ بازشوها عمداً اینجا نیست — پایین‌تر، بعد از تعریف پایه‌ی
+     .pop آمده. این بلوک بالاتر از آن تعریف است و با هم‌وزن‌بودنِ گزینشگر،
+     قاعده‌ی بعدی برنده می‌شد؛ برای همین `right:-8px` قبلی هرگز اثر نکرد. */
   .chartTop{padding:16px 16px 4px}
   .px{font-size:27px}
   .leg{margin:0 10px;padding:13px 13px}
@@ -352,8 +353,21 @@ footer a{color:var(--tx3)}
   white-space:nowrap;flex:none}
 .rel{position:relative}
 .pop{position:absolute;right:0;top:46px;width:256px;background:var(--card);border-radius:18px;
-  box-shadow:var(--sh);padding:16px;z-index:50;display:none}
+  box-shadow:var(--sh);padding:16px;z-index:50;display:none;
+  /* بدون این سقف، منوی تنظیمات روی گوشی از پایینِ صفحه می‌زد بیرون و نصفش
+     دیده نمی‌شد. هر ردیفی که بعداً اینجا اضافه شود همین را بدتر می‌کند، پس
+     سقف باید به ارتفاع صفحه بسته باشد نه به تعداد ردیف‌ها. */
+  max-height:calc(100vh - 76px);max-height:calc(100dvh - 76px);
+  overflow-y:auto;overscroll-behavior:contain}
 .pop.on{display:block}
+/* روی گوشی بازشو باید به لبه‌ی *صفحه* بچسبد، نه به دکمه‌ی خودش. دکمه‌ی
+   تنظیمات آخرین چیزِ نوار نیست (دکمه‌ی والت سمت راستش است)، پس منویی که از
+   راستِ آن دکمه باز می‌شد از لبه‌ی چپ صفحه بیرون می‌زد. با fixed، جای منو
+   دیگر به این بستگی ندارد که چند دکمه کنارش نشسته باشد. */
+@media(max-width:720px){
+  .pop,.walletPop{position:fixed;top:58px;right:12px;left:auto;
+    width:min(300px,calc(100vw - 24px))}
+}
 .optrow{display:flex;gap:9px;align-items:flex-start;font-size:12.5px;color:var(--tx2);
   margin:-2px 0 4px;cursor:pointer;line-height:1.4}
 .optrow input{margin:2px 0 0;flex:none}

@@ -885,6 +885,38 @@ async def main():
             "the disconnect icon must be inline SVG — a unicode glyph is missing on many phone fonts"
         assert mobile_menu["iconW"] >= 10 and mobile_menu["iconH"] >= 10, \
             "the disconnect icon renders with no size: %sx%s" % (mobile_menu["iconW"], mobile_menu["iconH"])
+
+        # ---- 8b. هر منوی بازشو باید کامل داخل صفحه‌ی گوشی جا شود ----
+        # منوی تنظیمات با اضافه‌شدن ردیف Appearance بلندتر شد و از پایینِ
+        # صفحه زد بیرون. سقف ارتفاع نداشت، پس هر ردیف تازه‌ای دوباره
+        # می‌شکستش — این کاوشگر همه‌ی بازشوها را با هم می‌سنجد.
+        await mob.keyboard.press("Escape")
+        pops = []
+        for opener, pop, label in [("#setBtn", "#setPop", "settings"),
+                                   ("#connectBtn", "#walletPop", "wallet")]:
+            await mob.click(opener); await mob.wait_for_timeout(220)
+            box = await mob.evaluate("""sel => {
+                const e = document.querySelector(sel), r = e.getBoundingClientRect();
+                return {top: Math.round(r.top), bottom: Math.round(r.bottom),
+                        left: Math.round(r.left), right: Math.round(r.right),
+                        vw: innerWidth, vh: innerHeight,
+                        scrolls: e.scrollHeight > e.clientHeight + 1};
+            }""", pop)
+            box["label"] = label
+            pops.append(box)
+            print("[pop %s mobile] top=%s bottom=%s left=%s right=%s viewport=%sx%s scrolls=%s"
+                  % (label, box["top"], box["bottom"], box["left"], box["right"],
+                     box["vw"], box["vh"], box["scrolls"]))
+            await mob.keyboard.press("Escape"); await mob.wait_for_timeout(120)
+        # ⚠️ عمداً `b` نه — نام مرورگر است و سایه‌انداختن رویش باعث شد
+        #    await b.close() در انتهای تست بترکد.
+        for pb in pops:
+            assert pb["top"] >= 0 and pb["bottom"] <= pb["vh"], \
+                ("the %s menu runs off the phone screen vertically: %s..%s in a %s-tall viewport"
+                 % (pb["label"], pb["top"], pb["bottom"], pb["vh"]))
+            assert pb["left"] >= 0 and pb["right"] <= pb["vw"], \
+                ("the %s menu runs off the phone screen horizontally: %s..%s in a %s-wide viewport"
+                 % (pb["label"], pb["left"], pb["right"], pb["vw"]))
         await mob.screenshot(path=os.path.join(HERE, "shot-mobile-wallet.png"))
         await mob.close()
         await b.close()
