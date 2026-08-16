@@ -4,28 +4,28 @@ pragma solidity ^0.8.24;
 /*
  * SwapExecutor
  * ============
- * برنامه‌ی مسیریابی (شامل تقسیم سفارش و مسیر چندمرحله‌ای) را در یک تراکنش اجرا می‌کند.
+ * Executes a routing plan - split orders and multi-hop paths - in a single transaction.
  *
- * ⚠️ مهم‌ترین تصمیم امنیتی این قرارداد:
+ * WARNING - the single most important security decision in this contract:
  *
- *    خیلی از روترهای تجمیع‌کننده، calldata دلخواه از کاربر می‌گیرند و آن را
- *    به یک آدرس دلخواه می‌فرستند. این الگو یک آسیب‌پذیری جدی و شناخته‌شده دارد:
- *    هر کسی که به قرارداد approve داده باشد، مهاجم می‌تواند calldata بسازد که
- *    transferFrom از *او* را صدا بزند و دارایی‌اش را بدزدد.
+ *    Many aggregator routers accept arbitrary calldata from the caller and
+ *    forward it to an arbitrary address. That pattern has a well known, serious
+ *    flaw: anyone who has approved the contract can be drained, because an
+ *    attacker can craft calldata that calls transferFrom on *them*.
  *
- *    برای همین اینجا:
- *      • هیچ calldata دلخواهی پذیرفته نمی‌شود — قرارداد خودش فراخوانی را می‌سازد
- *      • فقط روترهای در لیست سفید قابل استفاده‌اند
- *      • مقدار خروجی از *موجودی واقعی* سنجیده می‌شود، نه از عدد برگشتی روتر
+ *    So, here:
+ *      - no arbitrary calldata is ever accepted; the contract builds every call
+ *      - only whitelisted routers can be used
+ *      - output is measured from the *actual balance*, never from the router's return value
  *
- * محافظت‌های دیگر:
- *      • جلوگیری از ورود مجدد (reentrancy)
- *      • deadline برای جلوگیری از اجرای تراکنش کهنه
- *      • سقف سخت کارمزد (owner نمی‌تواند کارمزد را بالاتر ببرد)
- *      • قرارداد بین تراکنش‌ها هیچ دارایی کاربر را نگه نمی‌دارد
+ * Other protections:
+ *      - reentrancy guard
+ *      - deadline, so a stale transaction cannot execute later
+ *      - hard fee ceiling the owner cannot raise past
+ *      - the contract holds no user funds between transactions
  *
- * ⚠️ این قرارداد آدیت رسمی نشده. قبل از استفاده با مبلغ قابل توجه،
- *    بررسی مستقل و تست کامل لازم است.
+ * NOTE: this contract has not been formally audited. Independent review and
+ *    thorough testing are required before using it with meaningful size.
  */
 
 interface IERC20 {
@@ -37,19 +37,19 @@ interface IERC20 {
 }
 
 /*
- * ⚠️ دو نسل روتر یونی‌سواپ V3 وجود دارد و ساختار ورودی‌شان *فرق دارد*:
+ * WARNING - there are two generations of Uniswap V3 router and their input
+ * structs *differ*:
+ *   SwapRouter   (first gen)  - eight-field struct, includes `deadline`
+ *                               selector: 0x414bf389
+ *   SwapRouter02 (second gen) - seven-field struct, no `deadline`
+ *                               selector: 0x04e45aaf
  *
- *   SwapRouter   (نسل اول) — ساختار هشت‌فیلدی، شامل `deadline`
- *                            سلکتور: 0x414bf389
- *   SwapRouter02 (نسل دوم) — ساختار هفت‌فیلدی، بدون `deadline`
- *                            سلکتور: 0x04e45aaf
+ * The selector is derived from the struct shape, so sending the wrong struct means
+ * calling a function that *does not exist* on the router - and the EVM reverts with
+ * no data at all ("missing revert data"). The first version of this contract only
+ * knew the first generation, while Base uses SwapRouter02.
  *
- * چون سلکتور از روی شکل ساختار ساخته می‌شود، فرستادن ساختار اشتباه یعنی
- * فراخوانی تابعی که در قرارداد *وجود ندارد* — و EVM آن را بدون هیچ داده‌ای
- * revert می‌کند («missing revert data»). نسخه‌ی اول این قرارداد فقط نسل اول
- * را می‌شناخت، در حالی که Base از SwapRouter02 استفاده می‌کند.
- *
- * پس هر دو را تعریف می‌کنیم و انتخاب با `kind` است.
+ * So both are declared, and `kind` selects between them.
  */
 interface IUniswapV3Router02 {
     struct ExactInputSingleParams {
@@ -91,12 +91,12 @@ interface ISolidlyRouter {
 contract SwapExecutor {
 
     uint8 constant KIND_V2 = 0;
-    uint8 constant KIND_V3 = 1;          // SwapRouter02 — استاندارد امروز (Base و اکثر شبکه‌ها)
+    uint8 constant KIND_V3 = 1;          // SwapRouter02 - today's standard (Base and most chains)
     uint8 constant KIND_SOLIDLY = 2;
-    uint8 constant KIND_V3_LEGACY = 3;   // SwapRouter نسل اول، با فیلد deadline
+    uint8 constant KIND_V3_LEGACY = 3;   // first-gen SwapRouter, with the deadline field
     uint8 constant KIND_MAX = 3;
 
-    /// سقف سخت کارمزد: ۱٪. حتی owner هم نمی‌تواند از این بالاتر ببرد.
+    /// Hard fee ceiling: 1%. Not even the owner can go above this.
     uint256 public constant MAX_FEE_BPS = 100;
 
     struct SwapStep {
@@ -104,31 +104,31 @@ contract SwapExecutor {
         address router;
         address tokenIn;
         address tokenOut;
-        uint24  feeTier;      // فقط V3
-        bool    stable;       // فقط Solidly
-        address poolFactory;  // فقط Solidly
+        uint24  feeTier;      // V3 only
+        bool    stable;       // Solidly only
+        address poolFactory;  // Solidly only
     }
 
-    /// یک بخش از سفارش تقسیم‌شده: یک مسیر (یک یا چند مرحله) با مبلغ مشخص
+    /// One leg of a split order: a path (one or more steps) with its own amount
     struct RoutePart {
         SwapStep[] steps;
         uint256 amountIn;
     }
 
-    /// آدرس توکن پیچیده‌ی شبکه (WETH روی Base). تغییرناپذیر است.
+    /// The chain's wrapped native token (WETH on Base). Immutable.
     address public immutable WETH;
-    /// در ورودی/خروجی، address(0) یعنی «ETH بومی»
+    /// In tokenIn/tokenOut, address(0) means "native ETH"
     address constant NATIVE = address(0);
 
     address public owner;
     address public pendingOwner;
     address public feeRecipient;
-    uint256 public feeBps;                       // کارمزد فعلی
-    mapping(address => bool) public allowedRouter;   // لیست سفید روترها
+    uint256 public feeBps;                       // current fee
+    mapping(address => bool) public allowedRouter;   // router whitelist
 
     bool private _locked;
 
-    /// @param fee مقدار کارمزد — همیشه به واحد tokenIn است، نه tokenOut
+    /// @param fee the fee taken - always denominated in tokenIn, never tokenOut
     event Swapped(
         address indexed user,
         address indexed tokenIn,
@@ -166,19 +166,19 @@ contract SwapExecutor {
         feeBps = _feeBps;
     }
 
-    /// فقط WETH موقع withdraw می‌تواند ETH بفرستد. هیچ‌کس دیگر.
+    /// Only WETH may send ETH here, during withdraw. Nobody else.
     receive() external payable {
         require(msg.sender == WETH, "only weth");
     }
 
     // -------------------------------------------------------------------
-    // اجرای سواپ
+    // Swap execution
     //
-    // 🪙 ETH بومی: در tokenIn یا tokenOut آدرس صفر بگذار.
-    //    ورودی بومی  → ETH را با msg.value بفرست؛ قرارداد خودش wrap می‌کند
-    //                  (پس نه approve لازم است نه تراکنش جدا)
-    //    خروجی بومی  → قرارداد بعد از سواپ unwrap می‌کند و ETH می‌فرستد
-    //    نتیجه: «USDC به ETH» یک امضا می‌خواهد، نه دو تا.
+    // Native ETH: pass the zero address as tokenIn or tokenOut.
+    //    native in  -> send ETH as msg.value; the contract wraps it itself
+    //                  (so neither an approval nor a separate transaction is needed)
+    //    native out -> the contract unwraps after the swap and sends real ETH
+    //    Result: "USDC to ETH" costs one signature, not two.
     // -------------------------------------------------------------------
     function executeSwap(
         address tokenIn,
@@ -192,15 +192,15 @@ contract SwapExecutor {
         require(totalAmountIn > 0, "zero amount");
         require(parts.length > 0 && parts.length <= 5, "bad parts count");
 
-        // در مسیرها همیشه با توکن پیچیده کار می‌کنیم؛ بومی فقط پوسته است.
-        // ⚠️ tokenIn == tokenOut عمداً مجاز است (مسیر حلقه‌ای): هم «شبیه‌سازی
-        //    خروج» در رابط به آن تکیه می‌کند، هم آربیتراژ بین دو استخر.
+        // Routing always works in the wrapped token; native is only a wrapper.
+        // NOTE: tokenIn == tokenOut is deliberately allowed (a loop route). The
+        //    interface's "exit simulation" relies on it, as does two-pool arbitrage.
         address inTok  = tokenIn  == NATIVE ? WETH : tokenIn;
         address outTok = tokenOut == NATIVE ? WETH : tokenOut;
 
-        // ℹ️ اعتبارسنجی و اجرا عمداً در توابع جدا هستند.
-        //    وقتی همه‌چیز در یک تابع بود، شمارنده‌های حلقه و متغیرهای موقت
-        //    تابع را از سقف ۱۶ اسلات استک EVM رد می‌کردند («stack too deep»).
+        // Validation and execution are deliberately separate functions.
+        //    With everything in one function, the loop counters and temporaries pushed
+        //    it past the EVM's 16-slot stack limit ("stack too deep").
         _validatePlan(parts, inTok, outTok, totalAmountIn);
 
         uint256 fee;
@@ -208,23 +208,23 @@ contract SwapExecutor {
         {
             uint256 received;
             if (tokenIn == NATIVE) {
-                // ETH با خود تراکنش آمده — wrap می‌کنیم و بقیه مثل ERC-20 پیش می‌رود
+                // ETH arrived with the transaction - wrap it, then proceed as ERC-20
                 require(msg.value == totalAmountIn, "value != amountIn");
                 IWETH(WETH).deposit{value: msg.value}();
                 received = msg.value;
             } else {
                 require(msg.value == 0, "unexpected value");
-                // موجودی واقعی دریافتی را می‌سنجیم تا با توکن‌های کارمزددار هم درست کار کند
+                // Measure what actually arrived, so fee-on-transfer tokens work too
                 uint256 balBefore = IERC20(inTok).balanceOf(address(this));
                 _safeTransferFrom(inTok, msg.sender, address(this), totalAmountIn);
                 received = IERC20(inTok).balanceOf(address(this)) - balBefore;
             }
             require(received > 0, "nothing received");
 
-            // --- کارمزد از توکن *ورودی* برداشته می‌شود ---
-            // 🔑 چرا ورودی و نه خروجی؟ کاربر معمولاً از توکنی معتبر شروع می‌کند
-            //    و به توکن ناشناخته می‌رود. کارمزدِ خروجی می‌تواند فردا بی‌ارزش
-            //    یا اصلاً غیرقابل فروش باشد.
+            // --- the fee is taken from the *input* token ---
+            // Why input and not output? Users usually start from a token that is worth
+            //    something and move toward an unknown one. A fee taken in the output
+            //    token could be worthless, or unsellable, tomorrow.
             if (feeBps > 0 && feeRecipient != address(0)) {
                 fee = (received * feeBps) / 10_000;
                 if (fee > 0) {
@@ -237,35 +237,48 @@ contract SwapExecutor {
 
         {
             uint256 outBefore = IERC20(outTok).balanceOf(address(this));
-            // 🔑 در مسیر حلقه‌ای (ورودی و خروجی یکی) مبلغی که قرار است خرج شود
-            //    همین حالا داخل موجودی است. اگر از «قبل» کم نشود، اختلاف نهایی
-            //    منفی می‌شود و تراکنش با panic می‌افتد.
+            // On a loop route (same token in and out) the amount about to be spent is
+            //    already part of the balance. Without subtracting it up front, the final
+            //    difference underflows and the transaction panics.
             if (inTok == outTok) {
                 outBefore -= swapAmount;
             }
 
             _runParts(parts, swapAmount, totalAmountIn);
 
-            // 🔒 خروجی از موجودی *واقعی* سنجیده می‌شود، نه از عدد برگشتی روتر
+            // Output is measured from the *actual* balance, not the router's return value
             amountOut = IERC20(outTok).balanceOf(address(this)) - outBefore;
         }
-        require(amountOut >= minAmountOut, "slippage: output below minimum");
+        /* Slippage protection must be measured on what reaches the *user's wallet*,
+           not on what reached the contract. For a fee-on-transfer output token these
+           are not the same: the contract receives X, the user receives X minus the
+           transfer fee. The check used to run against X, so minAmountOut could hold
+           while the user got less than they were promised - meaning the very guard
+           that exists for this silently stopped working.
 
-        // کل خروجی به کاربر می‌رسد — کارمزد قبلاً از ورودی کسر شده است
+           Native ETH has no transfer fee, so there the number is unchanged. */
+        uint256 delivered;
         if (tokenOut == NATIVE) {
-            // پوسته را برمی‌داریم و ETH واقعی می‌فرستیم — بدون تراکنش دوم
+            // Unwrap and send real ETH - no second transaction
             IWETH(WETH).withdraw(amountOut);
+            uint256 ethBefore = msg.sender.balance;
             (bool sent, ) = msg.sender.call{value: amountOut}("");
             require(sent, "eth transfer failed");
+            delivered = msg.sender.balance - ethBefore;
         } else {
+            uint256 userBefore = IERC20(outTok).balanceOf(msg.sender);
             _safeTransfer(outTok, msg.sender, amountOut);
+            delivered = IERC20(outTok).balanceOf(msg.sender) - userBefore;
         }
-        // مقدار *واقعاً دریافتی* لاگ می‌شود، نه آنچه کاربر اعلام کرده.
-        // برای توکن کارمزددار این دو فرق دارند و v1 عدد بزرگ‌تر را لاگ می‌کرد.
-        emit Swapped(msg.sender, tokenIn, tokenOut, swapAmount + fee, amountOut, fee);
+        require(delivered >= minAmountOut, "slippage: output below minimum");
+
+        // What was *actually delivered* is logged, not what the caller asked for.
+        // For fee-on-transfer tokens these differ, and v1 logged the larger number.
+        emit Swapped(msg.sender, tokenIn, tokenOut, swapAmount + fee, delivered, fee);
+        amountOut = delivered;
     }
 
-    /// اعتبارسنجی کامل برنامه — قبل از اینکه هیچ دارایی جابه‌جا شود
+    /// Full validation of the plan - before any asset moves
     function _validatePlan(
         RoutePart[] calldata parts,
         address inTok,
@@ -283,7 +296,7 @@ contract SwapExecutor {
             for (uint256 j = 0; j < p.steps.length; j++) {
                 SwapStep calldata s = p.steps[j];
                 require(s.kind <= KIND_MAX, "bad kind");
-                // 🔒 حیاتی: فقط روترهای تأییدشده. جلوی تزریق فراخوانی دلخواه را می‌گیرد.
+                // Critical: whitelisted routers only. This is what blocks call injection.
                 require(allowedRouter[s.router], "router not allowed");
                 require(s.tokenIn != s.tokenOut, "step same token");
                 if (j > 0) {
@@ -295,18 +308,30 @@ contract SwapExecutor {
         require(sum == totalAmountIn, "parts sum mismatch");
     }
 
-    /// اجرای بخش‌های سفارش. سهم هر بخش متناسب با مبلغ خالص محاسبه می‌شود،
-    /// پس هم کارمزد لحاظ می‌شود هم توکن‌های کارمزددار.
+    /// Runs the legs of the order. Each leg's share is computed against the net
+    /// amount, so both the protocol fee and fee-on-transfer tokens are accounted for.
     function _runParts(
         RoutePart[] calldata parts,
         uint256 swapAmount,
         uint256 totalAmountIn
     ) internal {
+        uint256 spent = 0;
         for (uint256 i = 0; i < parts.length; i++) {
             RoutePart calldata p = parts[i];
-            uint256 amt = (p.amountIn * swapAmount) / totalAmountIn;
-            // v1 اینجا `continue` می‌کرد: سهم آن بخش خرج نمی‌شد ولی پول کاربر
-            // را گرفته بودیم و همان‌جا گیر می‌افتاد. سکوت بدترین رفتار است.
+            /* Integer division rounds each leg down, so the shares always summed to
+               slightly less than swapAmount and the remainder stayed in the contract.
+               The amount is tiny, but it belongs to the user, and it accumulates over
+               thousands of swaps.
+
+               The last leg takes whatever is left. The sum of p.amountIn equals
+               totalAmountIn exactly (guaranteed in _validatePlan), so this is always
+               positive and at most a few wei above its nominal share. */
+            uint256 amt = i + 1 == parts.length
+                ? swapAmount - spent
+                : (p.amountIn * swapAmount) / totalAmountIn;
+            spent += amt;
+            // v1 called `continue` here: that leg's share was never spent, yet we had
+            // already taken the user's money and it was stuck. Silence is the worst option.
             require(amt > 0, "part rounds to zero");
             for (uint256 j = 0; j < p.steps.length; j++) {
                 amt = _swap(p.steps[j], amt);
@@ -317,14 +342,14 @@ contract SwapExecutor {
 
     // -------------------------------------------------------------------
     /**
-     * یک مرحله را اجرا می‌کند و می‌گوید *واقعاً* چقدر رسید.
+     * Runs one step and reports how much *actually* arrived.
      *
-     * 🔑 خروجی از تفاضل موجودی خوانده می‌شود، نه از عددی که روتر برمی‌گرداند.
-     *    نسخه‌ی v1 عدد روتر را باور می‌کرد. برای توکن‌های کارمزددار
-     *    (fee-on-transfer) این دو یکی نیستند: روتر می‌گوید ۱۰۰۰ فرستادم،
-     *    ۹۸۰ می‌رسد، و مرحله‌ی بعد ۱۰۰۰ می‌خواهد — که یا از باقی‌مانده‌ی
-     *    قرارداد برمی‌دارد یا revert می‌کند. و دقیقاً همان توکن‌های
-     *    کارمزددارند که کاربر برای بررسی‌شان سراغ Exit check می‌آید.
+     * The output is read as a balance difference, not from the router's return value.
+     *    v1 trusted the router's number. For fee-on-transfer tokens the two differ:
+     *    the router says it sent 1000, 980 arrives, and the next step asks for 1000 -
+     *    which either eats into the contract's leftovers or reverts. And those are
+     *    which either eats into the contract's leftovers or reverts. And those are exactly the
+     *    tokens users come to the Exit check to inspect.
      */
     function _swap(SwapStep calldata s, uint256 amountIn) internal returns (uint256) {
         _ensureApproval(s.tokenIn, s.router, amountIn);
@@ -333,16 +358,16 @@ contract SwapExecutor {
         return IERC20(s.tokenOut).balanceOf(address(this)) - outBefore;
     }
 
-    /// فقط فراخوانی روتر. مقدار برگشتی عمداً نادیده گرفته می‌شود.
+    /// Router call only. The return value is deliberately ignored.
     function _callRouter(SwapStep calldata s, uint256 amountIn) internal {
         if (s.kind == KIND_V3) {
-            // SwapRouter02 — بدون deadline. محافظت زمانی در سطح executeSwap است.
+            // SwapRouter02 - no deadline. Time protection lives at the executeSwap level.
             IUniswapV3Router02(s.router).exactInputSingle(
                 IUniswapV3Router02.ExactInputSingleParams({
                     tokenIn: s.tokenIn, tokenOut: s.tokenOut, fee: s.feeTier,
                     recipient: address(this),
                     amountIn: amountIn,
-                    amountOutMinimum: 0,        // محافظت نهایی در سطح کل سفارش انجام می‌شود
+                    amountOutMinimum: 0,        // the real check happens once, on the whole order
                     sqrtPriceLimitX96: 0
                 })
             );
@@ -373,7 +398,7 @@ contract SwapExecutor {
             return;
         }
 
-        // استفاده‌ی صریح از KIND_V2 به‌جای else ضمنی — خواناتر و ایمن‌تر
+        // KIND_V2 is spelled out rather than left as an implicit else - clearer and safer
         require(s.kind == KIND_V2, "unknown kind");
         address[] memory path = new address[](2);
         path[0] = s.tokenIn;
@@ -384,17 +409,17 @@ contract SwapExecutor {
 
     function _ensureApproval(address token, address spender, uint256 needed) internal {
         uint256 current = IERC20(token).allowance(address(this), spender);
-        // v1 با `> type(uint128).max` مقایسه می‌کرد. توکن‌هایی که allowance را
-        // در uint96 نگه می‌دارند (سبک COMP/UNI) هرگز به آن آستانه نمی‌رسند، پس
-        // هر مرحله دو SSTORE اضافه می‌خورد. مقایسه با «چقدر لازم داریم» هم
-        // درست‌تر است هم ارزان‌تر.
+        // v1 compared against `> type(uint128).max`. Tokens that store allowances in
+        // uint96 (COMP/UNI style) never reach that threshold, so every step paid for two
+        // extra SSTOREs. Comparing against "how much do we actually need" is both more
+        // correct and cheaper.
         if (current >= needed) {
             return;
         }
 
-        // بعضی توکن‌ها (مثل USDT) اجازه‌ی تغییر مستقیم allowance غیرصفر را نمی‌دهند.
-        // ولی این ریست فقط وقتی لازم است که allowance فعلی صفر نباشد —
-        // این هم گس کمتری می‌برد، هم دیگر لازم نیست نتیجه‌ای را نادیده بگیریم.
+        // Some tokens (USDT among them) refuse a direct change of a non-zero allowance.
+        // But this reset is only needed when the current allowance is not already zero -
+        // which costs less gas, and means we no longer have to ignore a return value.
         if (current != 0) {
             (bool resetOk, bytes memory rd) = token.call(
                 abi.encodeWithSelector(IERC20.approve.selector, spender, 0));
@@ -407,7 +432,7 @@ contract SwapExecutor {
         require(ok && (d.length == 0 || abi.decode(d, (bool))), "approve failed");
     }
 
-    // --- انتقال امن (سازگار با توکن‌هایی مثل USDT که bool برنمی‌گردانند) ---
+    // --- Safe transfers (compatible with tokens like USDT that return no bool) ---
     function _safeTransfer(address token, address to, uint256 amount) internal {
         (bool ok, bytes memory d) = token.call(
             abi.encodeWithSelector(IERC20.transfer.selector, to, amount));
@@ -421,7 +446,7 @@ contract SwapExecutor {
     }
 
     // -------------------------------------------------------------------
-    // مدیریت
+    // Administration
     // -------------------------------------------------------------------
     function setRouterAllowed(address router, bool allowed) external onlyOwner {
         require(router != address(0), "zero router");
@@ -450,11 +475,11 @@ contract SwapExecutor {
     }
 
     /**
-     * انتقال مالکیت دومرحله‌ای.
-     * v1 یک‌مرحله‌ای بود: یک آدرس اشتباه، لیست سفید و کارمزد و نجات را برای
-     * همیشه فریز می‌کرد — و چون قرارداد ارتقاپذیر نیست، راه برگشتی نبود.
-     * حالا مالک جدید باید خودش acceptOwnership را صدا بزند، یعنی باید کلید
-     * آن آدرس را واقعاً در اختیار داشته باشد.
+     * Two-step ownership transfer.
+     * v1 was one-step: a single wrong address froze the whitelist, the fee and the
+     * rescue functions forever - and since the contract is not upgradeable, there was
+     * no way back. Now the new owner must call acceptOwnership themselves, which means
+     * they must actually hold the key to that address.
      */
     function transferOwnership(address newOwner) external onlyOwner {
         require(newOwner != address(0), "zero owner");
@@ -470,9 +495,9 @@ contract SwapExecutor {
     }
 
     /**
-     * برداشت توکن‌هایی که اشتباهی به قرارداد فرستاده شده‌اند.
-     * چون قرارداد بین تراکنش‌ها هیچ دارایی کاربری نگه نمی‌دارد، این تابع
-     * نمی‌تواند پول کاربران را بردارد — فقط باقی‌مانده‌های اتفاقی را.
+     * Withdraws tokens sent to the contract by mistake.
+     * Since the contract holds no user funds between transactions, this cannot touch
+     * anyone's money - only accidental leftovers.
      */
     function rescue(address token) external onlyOwner {
         uint256 bal = IERC20(token).balanceOf(address(this));
@@ -481,12 +506,12 @@ contract SwapExecutor {
     }
 
     /**
-     * ETH گیرافتاده را برمی‌گرداند.
-     * `receive()` جلوی ارسال معمولی را می‌گیرد، ولی `selfdestruct` و
-     * پاداش بلاک از آن رد می‌شوند. در v1 هیچ راه خروجی برای ETH نبود، پس
-     * هر مقداری که این‌طور می‌آمد روی یک قرارداد غیرقابل‌ارتقا برای همیشه
-     * قفل می‌شد. قرارداد بین تراکنش‌ها ETH نگه نمی‌دارد، پس اینجا چیزی
-     * جز باقی‌مانده‌ی اتفاقی وجود ندارد.
+     * Recovers stranded ETH.
+     * `receive()` blocks ordinary transfers, but `selfdestruct` and block rewards get
+     * through anyway. v1 had no exit path for ETH, so anything arriving that way was
+     * locked forever on a non-upgradeable contract. The contract holds no ETH between
+     * locked forever on a non-upgradeable contract. The contract holds no ETH between
+     * transactions, so there is never anything here but accidental leftovers.
      */
     function rescueETH() external onlyOwner {
         uint256 bal = address(this).balance;
@@ -496,12 +521,12 @@ contract SwapExecutor {
     }
 
     /**
-     * باطل کردن allowance یک روتر.
-     * حذف روتر از لیست سفید جلوی *استفاده* از آن را می‌گیرد، ولی allowanceای
-     * که قبلاً به آن داده‌ایم سر جایش می‌ماند. اگر روتری به‌خاطر نفوذ حذف
-     * شود، باید دسترسی‌اش هم بسته شود. خودکار نیست چون قرارداد نمی‌داند کدام
-     * توکن‌ها را به کدام روتر approve کرده — تاریخچه‌اش را ذخیره نمی‌کند و
-     * ذخیره کردنش هزینه‌ی گس هر سواپ را بالا می‌برد.
+     * Revokes a router's allowance.
+     * Removing a router from the whitelist stops it from being *used*, but any allowance
+     * already granted to it remains. If a router is removed because it was compromised,
+     * its access must be closed too. This is not automatic because the contract does not
+     * know which tokens it approved to which router - it does not store that history, and
+     * storing it would raise the gas cost of every swap.
      */
     function revokeApprovals(address[] calldata tokens, address router) external onlyOwner {
         for (uint256 i = 0; i < tokens.length; i++) {
