@@ -162,15 +162,16 @@ main{max-width:1140px;margin:0 auto;padding:8px 20px 56px;display:flex;flex-dire
   flex:1 0 auto;width:100%}
 .row{display:grid;gap:18px}
 .row.sub{align-items:start}   /* کارت خالی نباید کشیده شود */
-.row.hero{grid-template-columns:1fr 396px}
-/* فقط کارت سواپ از کشیدگی خارج می‌شود، نه کل ردیف.
-   کارت سواپ کشیده می‌شد تا هم‌قد نمودار شود و زیر دکمه‌ی اقدام ۸۶ پیکسل
-   فضای مرده می‌ماند.
-   ⚠️ چرا `align-items:start` روی خود ردیف نه: اندازه‌گیری نشان داد ارتفاع
-   نمودار از همان کشیدگی تغذیه می‌شود — با خارج‌کردن کل ردیف، `.plot` به
-   کف `min-height` می‌افتد و نمودار از ۳۸۵ به ۲۴۰ پیکسل کوتاه می‌شود.
-   این‌طوری نمودار دست‌نخورده می‌ماند و فقط فضای مرده می‌رود. */
-.row.hero>*:nth-child(2){align-self:start}
+/* هیچ‌کدام از دو کارت کشیده نمی‌شود — هرکدام قد خودش را دارد.
+   این دو با هم معنا دارند و جدا کردنشان هر بار یک باگ ساخت:
+   • فقط `align-items:start` → کارت سواپ درست می‌شد ولی `.plot` که با
+     `flex:1` از ارتفاع ردیف تغذیه می‌کرد به کف `min-height` می‌افتاد و
+     نمودار از ۳۸۵ به ۲۴۰ کوتاه می‌شد.
+   • فقط ارتفاع ثابت `.plot` → کارت نمودار همچنان کشیده می‌شد و فضای اضافه
+     جای دیگری در کارت می‌نشست، پس هر تغییر ارتفاع در کارت کناری باز هم
+     نمودار را تکان می‌داد.
+   با هر دو، ارتفاع هر کارت فقط به محتوای خودش بستگی دارد. */
+.row.hero{grid-template-columns:1fr 396px;align-items:start}
 .row.sub{grid-template-columns:1.35fr 1fr}
 @media(max-width:940px){.row.hero,.row.sub{grid-template-columns:1fr}}
 
@@ -189,6 +190,14 @@ main{max-width:1140px;margin:0 auto;padding:8px 20px 56px;display:flex;flex-dire
 .tfs button.on{background:var(--card);color:var(--tx);font-weight:620;box-shadow:var(--shs)}
 .row.hero>.card:first-child{display:flex;flex-direction:column}
 .plot{position:relative;flex:1;min-height:236px;padding:0 6px 8px}
+/* در چیدمان دوستونه ارتفاع نمودار *ثابت* است، نه مشتق از ردیف.
+   با `flex:1` ارتفاع نمودار از ارتفاع ردیف تغذیه می‌شد و ارتفاع ردیف هم به
+   کارت کناری بستگی داشت. نتیجه‌اش این بود: روی بارگذاری نمودار ۵۷۲ پیکسل
+   می‌آمد، و به‌محض اولین تعویض توکن روی ۵۱۰ می‌نشست و همان‌جا می‌ماند —
+   یعنی کاربر یک پرش ۶۲ پیکسلی می‌دید که هیچ ربطی به کارش نداشت.
+   با ارتفاع ثابت، نمودار دیگر به هیچ‌چیز بیرون از خودش وابسته نیست.
+   زیر ۹۴۱ پیکسل چیدمان تک‌ستونه است و همان رفتار کشسان قبلی می‌ماند. */
+@media(min-width:941px){.plot{flex:0 0 363px}}
 .plot svg{display:block;width:100%;height:100%;overflow:visible}
 .tipbox{
   position:absolute;pointer-events:none;background:var(--card);border-radius:11px;
@@ -596,20 +605,23 @@ footer a{color:var(--tx3)}
         <div class="fact"><span class="k">Protocol fee</span><span class="v mono" id="kFee">0.00%</span></div>
         <div class="fact" id="vsRow"><span class="k">vs Uniswap direct</span><span class="v mono" id="kVs">—</span></div>
       </div>
-      <!-- دکمه‌ی اقدام *بالای* اعلان‌هاست، عمداً.
-           قبلاً اعلان‌ها بینِ جدول و دکمه بودند و چون ارتفاعشان به جفت توکن
-           بستگی دارد (بعضی جفت‌ها اعلان دارند، بعضی نه)، دکمه با هر تعویض
-           توکن جای خودش را عوض می‌کرد — تا ۷۸ پیکسل. یعنی درست همان لحظه‌ای
-           که کاربر می‌خواهد کلیک کند، هدف زیر انگشتش می‌پرید.
+      <!-- اعلان‌ها *بالای* دکمه‌اند و دکمه ته کارت می‌نشیند.
+           تاریخچه‌اش مهم است: یک بار همین ترتیب بود و به‌خاطر یک باگ عوض شد —
+           ارتفاع اعلان به جفت توکن بستگی دارد، پس دکمه با هر تعویض توکن تا
+           ۷۸ پیکسل بالا و پایین می‌پرید، درست همان لحظه‌ای که کاربر می‌خواهد
+           کلیک کند. آن موقع دکمه رفت بالای اعلان‌ها تا ثابت بماند.
 
-           چیزی از دست نمی‌رود: عددهای تصمیم‌ساز (نرخ، اثر قیمت، حداقل
-           دریافتی) در جدول بالای دکمه‌اند و ارتفاعشان ثابت است؛ اعلان‌ها
-           توضیح همان‌هایند. هر شرط بازدارنده هم خودِ دکمه را غیرفعال می‌کند،
-           پس ترتیب خواندن جلوی اقدام اشتباه را نمی‌گیرد — دکمه می‌گیرد. -->
-      <button class="cta" id="actBtn" disabled>Enter an amount</button>
+           حالا ترتیب برگشته ولی باگ برنگشته، چون ناحیه‌ی اعلان ارتفاع کف
+           دارد (`#notices{min-height}`): آمدن و رفتن یک اعلان معمولی دکمه را
+           تکان نمی‌دهد.
+           ⚠️ تنها ریسک باقی‌مانده: اعلانی بلندتر از آن ارتفاع کف باز هم دکمه
+           را جابه‌جا می‌کند. کاوشگر [cta] در run.py دقیقاً همین را می‌سنجد —
+           اگر روزی اعلان بلندتری اضافه شد، آنجا قرمز می‌شود و باید ارتفاع کف
+           بزرگ‌تر شود، نه اینکه ادعا شود مشکلی نیست. -->
       <div id="revNote" style="margin:0 14px 12px;padding:10px 12px;border-radius:12px;
         background:var(--card2);font-size:12px;color:var(--tx2);line-height:1.55"></div>
       <div id="notices"></div>
+      <button class="cta" id="actBtn" disabled>Enter an amount</button>
     </section>
   </div>
 

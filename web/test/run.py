@@ -1253,9 +1253,56 @@ async def main():
                 ("%spx under the action button: that is more than the reserved notice slot, so "
                  "the card is being stretched to match the chart again" % fit["dead"])
             assert fit["plot"] >= 300, \
-                ("the chart collapsed to %spx: taking the whole row out of stretch starves the "
-                 "plot, which sizes itself from it. Only the swap card should opt out."
+                ("the chart collapsed to %spx: with the row out of stretch the plot has nothing "
+                 "to grow into, so it needs its own height. The two go together - taking the "
+                 "row out of stretch without giving .plot a height starves the chart."
                  % fit["plot"])
+
+        # ارتفاع نمودار نباید به کارت کناری وابسته باشد.
+        # با `flex:1` ارتفاع نمودار از ارتفاع ردیف می‌آمد و ارتفاع ردیف از
+        # کارت سواپ: نمودار روی بارگذاری ۵۷۲ پیکسل بود و با اولین تعویض توکن
+        # روی ۵۱۰ می‌نشست. کاربر یک پرش ۶۲ پیکسلی می‌دید که ربطی به کارش نداشت.
+        steady = await pg.evaluate("""async () => {
+            const hero = document.querySelector(".row.hero");
+            if (getComputedStyle(hero).gridTemplateColumns.split(" ").length < 2) return null;
+            const chart = hero.firstElementChild;
+            const H = e => Math.round(e.getBoundingClientRect().height);
+            const wait = ms => new Promise(r => setTimeout(r, ms));
+            const flip = () => { const t = tokenIn; tokenIn = tokenOut; tokenOut = t;
+                                 if (typeof loadChart === "function") loadChart(); };
+            const onLoad = H(chart);
+            flip(); await wait(1300);
+            const afterSwitch = H(chart);
+            flip(); await wait(1300);
+            const back = H(chart);
+            /* و ادعای زیربنایی: ارتفاع نمودار نباید *اصلاً* به کارت کناری
+               وابسته باشد. کارت سواپ را عمداً بلندتر می‌کنیم؛ اگر نمودار
+               دنبالش برود یعنی هنوز از ردیف تغذیه می‌شود و همان پرش با هر
+               تغییر محتوای کارت کناری برمی‌گردد. */
+            const swap = hero.children[1];
+            const keep = swap.style.minHeight;
+            swap.style.minHeight = (H(swap) + 140) + "px";
+            await wait(120);
+            const whileNeighbourTaller = H(chart);
+            swap.style.minHeight = keep;
+            await wait(120);
+            return {onLoad, afterSwitch, back, whileNeighbourTaller,
+                    plot: H(document.getElementById("plot"))};
+        }""")
+        if steady:
+            print("[chart steady] chart height on load=%s after switching tokens=%s back=%s "
+                  "(plot %s)" % (steady["onLoad"], steady["afterSwitch"], steady["back"],
+                                 steady["plot"]))
+            assert steady["onLoad"] == steady["afterSwitch"] == steady["back"], \
+                ("the chart card resized when the tokens were switched (%s -> %s -> %s) — its "
+                 "height must come from itself, not from whatever the row happens to be"
+                 % (steady["onLoad"], steady["afterSwitch"], steady["back"]))
+            print("[chart steady] neighbour forced 140px taller -> chart=%s"
+                  % steady["whileNeighbourTaller"])
+            assert steady["whileNeighbourTaller"] == steady["back"], \
+                ("making the swap card taller dragged the chart from %s to %s — the chart is "
+                 "still sizing itself from the row, so any change in the card next to it will "
+                 "move it again" % (steady["back"], steady["whileNeighbourTaller"]))
 
         # عرض‌های میانی جایی است که هدر معمولاً می‌شکند: ناوبری هنوز در هدر
         # است ولی جا تنگ شده. هیچ چیزی نباید از لبه بزند بیرون یا بپیچد.
