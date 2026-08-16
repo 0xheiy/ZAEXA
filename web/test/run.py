@@ -988,6 +988,138 @@ async def main():
             ("after giving up on the proxy every later request must go direct: %s"
              % proxy["afterGiveUp"])
 
+        # ---- 2b-quinquies. what survives a refresh ----
+        # حسام پیدایش کرد: چند رفرش پیاپی و لوگوها و نمودار می‌افتند. علتش
+        # سرویس نیست — هر رفرش حافظه‌ی صفحه را دور می‌ریزد و همه‌چیز از نو
+        # پرسیده می‌شود، و سقف ۳۰ درخواست در دقیقه است. پس چیزهای واقعاً
+        # ثابت باید بین بازدیدها بمانند.
+        # و چون آدرس لوگو مستقیم در img.src می‌نشیند، هرچه از انبار مرورگر
+        # بیرون می‌آید باید بی‌اعتبار فرض شود.
+        logo = await pg.evaluate("""async () => {
+            const realFetch = window.fetch;
+            let hits = 0;
+            const ADDR = "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+            const IMG  = "https://assets.example/token.png";
+            const tok  = {address: ADDR, symbol: "FAKE"};
+            const reset = () => {
+                Object.keys(metaCache).forEach(k => delete metaCache[k]);
+                Object.keys(poolCache).forEach(k => delete poolCache[k]);
+                gtCache.clear(); gtInflight.clear(); gtFails = 0; gtCoolUntil = 0;
+            };
+            window.fetch = async (u) => {
+                hits++;
+                return /\\/pools/.test(String(u))
+                  ? new Response(JSON.stringify({data: [{id: "base_0xPOOL"}]}), {status: 200})
+                  : new Response(JSON.stringify(
+                      {data: [{attributes: {address: ADDR, image_url: IMG}}]}), {status: 200});
+            };
+            localStorage.removeItem(LS_LOGO); localStorage.removeItem(LS_POOL);
+            const out = {};
+
+            reset();
+            out.first = await tokenLogo(tok);
+            out.firstHits = hits;
+
+            // رفرش شبیه‌سازی‌شده: حافظه‌ی صفحه پاک، انبار مرورگر دست‌نخورده
+            reset(); hits = 0;
+            out.second = await tokenLogo(tok);
+            out.secondHits = hits;
+
+            reset(); hits = 0;
+            out.pool1 = await topPoolFor(tok);
+            const poolFirstHits = hits;
+            reset(); hits = 0;
+            out.pool2 = await topPoolFor(tok);
+            out.poolHits = [poolFirstHits, hits];
+
+            // انبار مسموم — نباید هرگز به img.src برسد
+            localStorage.setItem(LS_LOGO, JSON.stringify(
+                {[ADDR]: {v: "javascript:alert(1)", t: Date.now()}}));
+            reset(); hits = 0;
+            out.poisoned = await tokenLogo(tok);
+            out.poisonHits = hits;
+
+            localStorage.setItem(LS_POOL, JSON.stringify(
+                {[ADDR]: {v: "../../evil", t: Date.now()}}));
+            reset();
+            out.poisonedPool = await topPoolFor(tok);
+
+            // منقضی‌شده باید دوباره پرسیده شود، نه اینکه تا ابد بماند
+            localStorage.setItem(LS_LOGO, JSON.stringify(
+                {[ADDR]: {v: "https://stale.example/a.png", t: Date.now() - 8 * 864e5}}));
+            reset(); hits = 0;
+            out.expired = await tokenLogo(tok);
+            out.expiredHits = hits;
+
+            // «لوگو ندارد» باید زود منقضی شود. یک پاسخ ناقصِ گذرا نباید یک
+            // هفته به «این توکن لوگو ندارد» تبدیل شود.
+            localStorage.setItem(LS_LOGO, JSON.stringify(
+                {[ADDR]: {v: "", t: Date.now() - 2 * 36e5}}));
+            reset(); hits = 0;
+            out.staleNone = await tokenLogo(tok);
+            out.staleNoneHits = hits;
+            // ولی همان «ندارد» تازه باید نگه داشته شود
+            localStorage.setItem(LS_LOGO, JSON.stringify(
+                {[ADDR]: {v: "", t: Date.now()}}));
+            reset(); hits = 0;
+            out.freshNone = await tokenLogo(tok);
+            out.freshNoneHits = hits;
+
+            // آدرس data: نمایش داده می‌شود ولی در انبار نمی‌ماند
+            localStorage.removeItem(LS_LOGO);
+            const DATA = "data:image/png;base64,iVBORw0KGgo=";
+            window.fetch = async () => { hits++; return new Response(JSON.stringify(
+                {data: [{attributes: {address: ADDR, image_url: DATA}}]}), {status: 200}); };
+            reset();
+            out.dataUrl = await tokenLogo(tok);
+            out.dataStored = localStorage.getItem(LS_LOGO);
+
+            window.fetch = realFetch;
+            localStorage.removeItem(LS_LOGO); localStorage.removeItem(LS_POOL);
+            reset();
+            return out;
+        }""")
+        print("[logo cache] first=%s hit(s)=%s | after a refresh=%s hit(s)=%s | pool hits=%s"
+              % (logo["first"], logo["firstHits"], logo["second"],
+                 logo["secondHits"], logo["poolHits"]))
+        assert logo["first"] == "https://assets.example/token.png", \
+            "the logo did not come back on the first ask: %s" % logo["first"]
+        assert logo["secondHits"] == 0 and logo["second"] == logo["first"], \
+            ("a refresh asked for the logo again (%s network calls) — this is exactly what "
+             "burns the 30-per-minute budget" % logo["secondHits"])
+        assert logo["pool1"] == "0xPOOL" and logo["pool2"] == "0xPOOL", \
+            "the top pool id changed across a refresh: %s then %s" % (logo["pool1"], logo["pool2"])
+        assert logo["poolHits"] == [1, 0], \
+            "the pool id was fetched again after a refresh: %s" % logo["poolHits"]
+        print("[logo cache] poisoned store -> logo=%s (%s call), pool=%s | expired -> %s (%s call)"
+              % (logo["poisoned"], logo["poisonHits"], logo["poisonedPool"],
+                 logo["expired"], logo["expiredHits"]))
+        assert logo["poisoned"] == "https://assets.example/token.png", \
+            ("a javascript: url from localStorage came back as a logo and would have gone "
+             "straight into img.src: %s" % logo["poisoned"])
+        assert logo["poisonHits"] >= 1, "the poisoned entry was refused but nothing was refetched"
+        assert logo["poisonedPool"] == "0xPOOL", \
+            "a poisoned pool id was trusted: %s" % logo["poisonedPool"]
+        assert logo["expired"] == "https://assets.example/token.png" and logo["expiredHits"] >= 1, \
+            "an expired logo entry was served instead of being refreshed: %s" % logo["expired"]
+        print("[logo cache] 'no logo' -> kept %s call when fresh, %s call when 2h old | "
+              "data: url shown=%s stored=%s"
+              % (logo["freshNoneHits"], logo["staleNoneHits"],
+                 str(logo["dataUrl"])[:24], logo["dataStored"]))
+        assert logo["freshNoneHits"] == 0 and logo["freshNone"] is None, \
+            "a fresh 'this token has no logo' answer was asked for again: %s" % logo["freshNoneHits"]
+        assert logo["staleNoneHits"] >= 1, \
+            ("a 'no logo' answer older than an hour was reused — a transient gap in the "
+             "response must not turn into 'this token has no logo' for a week")
+        # ماک اینجا واقعیت را آینه نمی‌کند: در هارنس image_url یک data: url است،
+        # در حالی که GeckoTerminal واقعی https می‌دهد. پس هر دو حالت سنجیده
+        # می‌شوند — نمایش باید کار کند، ذخیره نباید.
+        assert logo["dataUrl"] == "data:image/png;base64,iVBORw0KGgo=", \
+            "a data: logo from the service must still be displayed: %s" % logo["dataUrl"]
+        assert not logo["dataStored"] or "data:" not in logo["dataStored"], \
+            ("a data: url was written into localStorage — only https urls are safe to read "
+             "back into img.src: %s" % logo["dataStored"])
+
         # ---- 2b-ter. the action button must not move between pairs ----
         # اعلان‌ها بین جدول و دکمه بودند و ارتفاعشان به جفت توکن بستگی دارد،
         # پس دکمه با هر تعویض توکن تا ۷۸ پیکسل بالا و پایین می‌پرید — درست

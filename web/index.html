@@ -1537,6 +1537,64 @@ const TFS={
 const poolCache={};
 
 /* ---------------------------------------------------------------------
+   کش ماندگار در localStorage
+   ---------------------------------------------------------------------
+   کاشف مسئله خودِ حسام بود: اگر سایت را پشت سر هم رفرش کنی، لوگوها و
+   نمودار می‌افتند. علتش هم سرویس نیست — هر رفرش حافظه‌ی درون‌صفحه‌ای را
+   دور می‌ریزد و همه‌چیز را از نو می‌پرسد، و سقف GeckoTerminal ۳۰ درخواست
+   در دقیقه است. چند رفرش پیاپی یعنی از سقف رد شدن.
+
+   پس چیزهایی که واقعاً ثابت‌اند بین بازدیدها می‌مانند:
+   • آدرس لوگوی توکن (عملاً هرگز عوض نمی‌شود) — یک هفته
+   • شناسه‌ی استخر برتر هر توکن — یک روز
+
+   ⚠️ عمداً قیمت، مارکت‌کپ، والیوم و نقدینگی **ذخیره نمی‌شوند**. آن‌ها هر
+   لحظه عوض می‌شوند و نشان‌دادن عدد کهنه بدتر از نشان‌ندادن است.
+
+   ⚠️ هرچه از localStorage بیرون می‌آید بی‌اعتبار فرض می‌شود و اعتبارسنجی
+   می‌شود. آدرس لوگو مستقیم در `img.src` می‌نشیند؛ اگر کسی بتواند چیزی در
+   انبار مرورگر بنویسد، یک `javascript:` آنجا می‌شد اجرای کد. فقط `https://`
+   پذیرفته است. --------------------------------------------------------- */
+const LS_LOGO="zaexa.logo.v1",LS_POOL="zaexa.pool.v1";
+const LOGO_TTL=7*864e5,POOL_TTL=864e5,LS_MAX=300;
+/* «این توکن لوگو ندارد» خیلی کوتاه‌تر نگه داشته می‌شود از خودِ لوگو.
+   یک پاسخِ ناقصِ گذرا نباید یک هفته به «لوگو ندارد» تبدیل شود — همان
+   «نمی‌دانم = نه» که قاعده‌ی اول این پروژه است. */
+const LOGO_NONE_TTL=36e5;
+const ttlLogo=v=>v===""?LOGO_NONE_TTL:LOGO_TTL;
+const okLogo=v=>v===""||(typeof v==="string"&&/^https:\/\/[^\s"'<>]{4,300}$/.test(v));
+const okPool=v=>typeof v==="string"&&/^[A-Za-z0-9_-]{1,80}$/.test(v);
+/* localStorage در حالت خصوصی و در file:// می‌تواند throw کند. نبودنش خطا
+   نیست — فقط یعنی بدون کش ماندگار کار کن. */
+function lsRead(key){
+  try{
+    const o=JSON.parse(localStorage.getItem(key)||"{}");
+    return (o&&typeof o==="object"&&!Array.isArray(o))?o:{};
+  }catch{return {};}
+}
+function lsWrite(key,o){
+  try{
+    const ks=Object.keys(o);
+    if(ks.length>LS_MAX)                       // قدیمی‌ترها اول می‌روند
+      ks.sort((a,b)=>((o[a]||{}).t||0)-((o[b]||{}).t||0))
+        .slice(0,ks.length-LS_MAX).forEach(k=>delete o[k]);
+    localStorage.setItem(key,JSON.stringify(o));
+  }catch{}
+}
+/** undefined = نداریم یا معتبر نیست. عمداً با «داریم ولی خالی است» فرق دارد. */
+function lsGet(key,addr,ttlOf,ok){
+  const e=lsRead(key)[String(addr||"").toLowerCase()];
+  if(!e||typeof e.t!=="number")return undefined;
+  if(!ok(e.v))return undefined;                       // اول اعتبار، بعد عمر
+  return Date.now()-e.t>ttlOf(e.v)?undefined:e.v;
+}
+function lsSet(key,addr,v){
+  const o=lsRead(key);
+  o[String(addr||"").toLowerCase()]={v,t:Date.now()};
+  lsWrite(key,o);
+}
+
+/* ---------------------------------------------------------------------
    صف درخواست‌های GeckoTerminal
    API عمومی است و سقف نرخ دارد. قبلاً برای هر توکن یک درخواست جدا و
    هم‌زمان می‌فرستادیم؛ نتیجه‌اش ۴۲۹ و «قیمت ندارد» برای USDC بود.
@@ -1653,12 +1711,14 @@ function gtJson(url){
 async function topPoolFor(token){
   const k=token.address.toLowerCase();
   if(poolCache[k])return poolCache[k];
+  const kept=lsGet(LS_POOL,k,()=>POOL_TTL,okPool);   // از بازدید قبلی
+  if(kept)return (poolCache[k]=kept);
   const j=await gtJson(`${GT}/networks/${CHAIN.gtNetwork}/tokens/${token.address}/pools?page=1`);
   const list=(j&&j.data)||[];
   const id=list.length?String(list[0].id||"").split("_").pop():null;
   /* فقط نتیجه‌ی مثبت کش می‌شود. قبلاً null هم کش می‌شد، پس یک پاسخ خالیِ
      گذرا برای همیشه یعنی «این توکن نمودار ندارد» — همان «نمی‌دانم = نه». */
-  if(id)poolCache[k]=id;
+  if(id){poolCache[k]=id;if(okPool(id))lsSet(LS_POOL,k,id);}
   return id;
 }
 /* ETH بومی آدرس قرارداد ندارد — در جدول توکن‌ها address برابر "NATIVE" است.
@@ -2081,10 +2141,22 @@ const ETH_ICON="data:image/svg+xml;utf8,"+encodeURIComponent(
 
 async function tokenLogo(t){
   if(t.native)return ETH_ICON;
+  /* «قبلاً پرسیدیم و توکن لوگو نداشت» یک پاسخ است، نه شکست — به‌شکل رشته‌ی
+     خالی ذخیره می‌شود تا هر بازدید دوباره پرسیده نشود. شکست هرگز ذخیره
+     نمی‌شود؛ آن همان «نمی‌دانم = نه» است. */
+  const kept=lsGet(LS_LOGO,t.address,ttlLogo,okLogo);
+  if(kept!==undefined)return kept||null;
   try{
     const a=await tokenMeta(t.address);
-    const u=a&&a.image_url;
-    return (u&&!/missing/i.test(u))?u:null;
+    if(!a)return null;                       // نپرسیدیم — چیزی هم ذخیره نکن
+    const u=a.image_url;
+    const good=(u&&!/missing/i.test(u))?u:"";
+    /* نمایش و ذخیره دو تصمیم جدا هستند. هرچه سرویس داد نمایش داده می‌شود
+       (رفتار قبلی، دست‌نخورده)، ولی فقط چیزی در انبار مرورگر می‌ماند که
+       خواندنِ دوباره‌اش بی‌خطر باشد — یعنی `https://`. آدرس `data:` نمایش
+       داده می‌شود ولی ذخیره نمی‌شود. */
+    if(good===""||okLogo(good))lsSet(LS_LOGO,t.address,good);
+    return good||null;
   }catch{return null;}
 }
 
