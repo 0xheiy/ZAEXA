@@ -756,6 +756,33 @@ async def main():
             return {calls: sent.length, keys: sent[0] ? Object.keys(sent[0]).sort() : null,
                     to: sent[0] && sent[0].to};
         }""")
+        # همان قاعده برای خودِ سواپ: نه گسِ ما، و برای ETH بومی value لازم است
+        swp = await pg.evaluate("""async () => {
+            const sent = [];
+            const realProv = walletEip1193, realAcct = account, realRemote = walletIsRemote;
+            account = "0x8A0Dcb583C8CAdc481E34487c34f1B856fe97e23";
+            walletEip1193 = {request: async ({method, params}) => {
+                if (method === "eth_sendTransaction") { sent.push(params[0]); return "0x" + "cd".repeat(32); }
+                return null; }};
+            walletIsRemote = true;
+            const eth = allTokens().find(t => t.native);
+            const parts = [[[[1, "0x2626664c2603336E57B271c5C0b26F421741e481",
+                              "0x4200000000000000000000000000000000000006",
+                              "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913", 100, false,
+                              "0x33128a8fC17869897dcE68Ed026d694621f6FDfD"]], 1000n]];
+            const data = iExec.encodeFunctionData("executeSwap",
+              [routable(eth).address, "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+               1000n, 1n, parts, 99999999999]);
+            const p = {from: account, to: ethers.getAddress(CHAIN.executor), data,
+                       value: "0x" + (1000n).toString(16)};
+            await walletEip1193.request({method: "eth_sendTransaction", params: [p]});
+            walletEip1193 = realProv; account = realAcct; walletIsRemote = realRemote;
+            return {keys: Object.keys(sent[0]).sort(), value: sent[0].value};
+        }""")
+        print("[swap remote] fields=%s value=%s" % (swp["keys"], swp["value"]))
+        assert "gas" not in swp["keys"], "the swap must not carry our own gas estimate either"
+        assert swp["value"] == "0x3e8", "native ETH swaps must still send value"
+
         print("[approve remote] fields=%s" % (appr["keys"],))
         assert appr["calls"] == 1, "approve did not reach the wallet: %s" % appr
         assert "gas" not in (appr["keys"] or []), \

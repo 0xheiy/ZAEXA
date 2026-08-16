@@ -3194,6 +3194,20 @@ async function doApprove(){
   }catch(e){showError("Approval failed",e);}
   finally{setBusy(false);refreshButton();}
 }
+/* وقتی تراکنش را خام فرستاده‌ایم فقط یک هش داریم، نه شیء ethers، پس
+   رسید را خودمان از روی زنجیره می‌خوانیم. عمداً از rpcSend می‌رود تا اگر
+   یک اندپوینت جواب نداد سراغ بعدی برود. */
+async function waitForReceipt(hash,ms){
+  const until=Date.now()+ms;
+  while(Date.now()<until){
+    try{
+      const r=await rpcSend(p=>p.getTransactionReceipt(hash));
+      if(r)return r;
+    }catch{}
+    await new Promise(r=>setTimeout(r,3000));
+  }
+  throw new Error("receipt not found in time");
+}
 async function waitForAllowance(min,ms){
   const until=Date.now()+ms;
   while(Date.now()<until){
@@ -3264,8 +3278,22 @@ async function doSwap(){
     const opts=isNative(tokenIn)?{value:amountIn}:{};
     if(gasLimit)opts.gasLimit=gasLimit;
     const outBefore=balances[balKey(tokenOut)];
-    const tx=await sendOrLoseTrack(exec.executeSwap(asArg(tokenIn),asArg(tokenOut),amountIn,
-      chosen.minOut,chosen.parts,deadline,opts),90000);
+    /* والت راه‌دور: همان کاری که برای approve کردیم. تخمین گسِ ما را نفرست
+       (والت خودش تخمین می‌زند) و از لایه‌ی خطای ethers رد شو تا اگر والت رد
+       کرد، پیام واقعیِ خودش دیده شود نه «could not coalesce error».
+       مسیر افزونه دست‌نخورده می‌ماند — آنجا کار می‌کند. */
+    const send=walletIsRemote
+      ? (async()=>{
+          const data=iExec.encodeFunctionData("executeSwap",
+            [asArg(tokenIn),asArg(tokenOut),amountIn,chosen.minOut,chosen.parts,deadline]);
+          const p={from:account,to:E.getAddress(CHAIN.executor),data};
+          if(isNative(tokenIn))p.value="0x"+amountIn.toString(16);
+          const h=await walletEip1193.request({method:"eth_sendTransaction",params:[p]});
+          return{hash:h};
+        })()
+      : exec.executeSwap(asArg(tokenIn),asArg(tokenOut),amountIn,
+          chosen.minOut,chosen.parts,deadline,opts);
+    const tx=await sendOrLoseTrack(send,90000);
     if(!tx){
       setNotice(note("warn","<b>We lost track of that transaction.</b> Your wallet may "+
         "still have sent it — the network stopped answering us. Checking your balance…"));
@@ -3281,7 +3309,7 @@ async function doSwap(){
     setBusy(true,`Swapping ${esc(tokenIn.symbol)} → ${esc(tokenOut.symbol)}…`);
     setNotice(note("ok",`Sent — <a href="${url}" target="_blank" rel="noopener">${shortAddr(tx.hash)}</a>`));
     let rec=null;
-    try{rec=await withTimeout(tx.wait(),180000);}
+    try{rec=await withTimeout(tx.wait?tx.wait():waitForReceipt(tx.hash,180000),180000);}
     catch{
       setNotice(note("warn",`<b>The transaction was sent</b> but the receipt could not be read. Check <a href="${url}" target="_blank" rel="noopener">${shortAddr(tx.hash)}</a>.`));
       setBusy(false);return;}
