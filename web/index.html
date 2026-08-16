@@ -71,7 +71,14 @@ input{font:inherit;color:inherit}
 .grow{flex:1}
 
 /* ---------------- header ---------------- */
-header{max-width:1140px;margin:0 auto;padding:20px 20px 8px;display:flex;align-items:center;gap:11px}
+/* ⚠️ `width:100%` لازم است و تزئینی نیست.
+   `body` یک ستون فلکس است، و `margin:0 auto` روی محور عرضی کشیدگی پیش‌فرض
+   را خنثی می‌کند — یعنی هدر به اندازه‌ی محتوای خودش جمع می‌شد (۷۸۵ پیکسل)
+   و وسط می‌نشست، در حالی که `main` به ۱۱۴۰ می‌رسید چون محتوایش پهن است.
+   نتیجه: لوگو و چیپ‌ها با لبه‌ی کارت‌های پایین هم‌تراز نبودند و هدر تنگ
+   به نظر می‌رسید. `main` همین `width:100%` را از قبل داشت. */
+header{max-width:1140px;margin:0 auto;width:100%;
+  padding:20px 20px 8px;display:flex;align-items:center;gap:11px}
 .logo{display:flex;align-items:center;gap:10px;font-size:19px;font-weight:680;letter-spacing:-.4px}
 /* نشان برند خودش گرادیان دارد، پس کاشی رنگی زیرش لازم نیست — دو گرادیان
    روی هم فقط همدیگر را خفه می‌کنند. */
@@ -150,6 +157,14 @@ main{max-width:1140px;margin:0 auto;padding:8px 20px 56px;display:flex;flex-dire
 .row{display:grid;gap:18px}
 .row.sub{align-items:start}   /* کارت خالی نباید کشیده شود */
 .row.hero{grid-template-columns:1fr 396px}
+/* فقط کارت سواپ از کشیدگی خارج می‌شود، نه کل ردیف.
+   کارت سواپ کشیده می‌شد تا هم‌قد نمودار شود و زیر دکمه‌ی اقدام ۸۶ پیکسل
+   فضای مرده می‌ماند.
+   ⚠️ چرا `align-items:start` روی خود ردیف نه: اندازه‌گیری نشان داد ارتفاع
+   نمودار از همان کشیدگی تغذیه می‌شود — با خارج‌کردن کل ردیف، `.plot` به
+   کف `min-height` می‌افتد و نمودار از ۳۸۵ به ۲۴۰ پیکسل کوتاه می‌شود.
+   این‌طوری نمودار دست‌نخورده می‌ماند و فقط فضای مرده می‌رود. */
+.row.hero>*:nth-child(2){align-self:start}
 .row.sub{grid-template-columns:1.35fr 1fr}
 @media(max-width:940px){.row.hero,.row.sub{grid-template-columns:1fr}}
 

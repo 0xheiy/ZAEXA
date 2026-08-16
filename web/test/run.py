@@ -1195,6 +1195,46 @@ async def main():
             ("the nav is not balanced between logo and chips (%spx vs %spx) — it should "
              "sit between them, not be shoved to one side" % (head["gapLeft"], head["gapRight"]))
 
+        # هدر باید دقیقاً هم‌عرض محتوای زیرش باشد.
+        # `body` یک ستون فلکس است و `margin:0 auto` روی محور عرضی کشیدگی را
+        # خنثی می‌کند، پس هدر بدون `width:100%` به اندازه‌ی محتوای خودش جمع
+        # می‌شد (۷۸۵ در برابر ۱۱۴۰) و با لبه‌ی کارت‌ها هم‌تراز نبود.
+        align = await pg.evaluate("""() => {
+            const h = document.querySelector("header").getBoundingClientRect();
+            const m = document.querySelector("main").getBoundingClientRect();
+            return {hl: Math.round(h.left), hr: Math.round(h.right),
+                    ml: Math.round(m.left), mr: Math.round(m.right), vw: innerWidth};
+        }""")
+        print("[header width] header %s..%s vs main %s..%s of %s"
+              % (align["hl"], align["hr"], align["ml"], align["mr"], align["vw"]))
+        assert align["hl"] == align["ml"] and align["hr"] == align["mr"], \
+            ("the header is not the same width as the content below it: header %s..%s, "
+             "main %s..%s" % (align["hl"], align["hr"], align["ml"], align["mr"]))
+
+        # کارت سواپ نباید کشیده شود تا هم‌قد نمودار شود — زیر دکمه فضای مرده
+        # می‌ماند. ولی ارتفاع نمودار *از همان کشیدگی* تغذیه می‌شود، پس اگر کسی
+        # به‌جای کارت، کل ردیف را از کشیدگی خارج کند، نمودار کوتاه می‌شود.
+        # هر دو با هم سنجیده می‌شوند، وگرنه رفع یکی دیگری را می‌شکند.
+        fit = await pg.evaluate("""() => {
+            const hero = document.querySelector(".row.hero");
+            if (getComputedStyle(hero).gridTemplateColumns.split(" ").length < 2) return null;
+            const [chart, swap] = [...hero.children];
+            const H = e => Math.round(e.getBoundingClientRect().height);
+            return {chart: H(chart), swap: H(swap), plot: H(document.getElementById("plot")),
+                    dead: Math.round(swap.getBoundingClientRect().bottom
+                                     - swap.lastElementChild.getBoundingClientRect().bottom)};
+        }""")
+        if fit:
+            print("[card fit] chart=%s (plot %s)  swap=%s  dead space under the swap card=%s"
+                  % (fit["chart"], fit["plot"], fit["swap"], fit["dead"]))
+            assert fit["dead"] <= 8, \
+                ("%spx of dead space under the swap card - it is being stretched to match the "
+                 "chart" % fit["dead"])
+            assert fit["plot"] >= 300, \
+                ("the chart collapsed to %spx: taking the whole row out of stretch starves the "
+                 "plot, which sizes itself from it. Only the swap card should opt out."
+                 % fit["plot"])
+
         # عرض‌های میانی جایی است که هدر معمولاً می‌شکند: ناوبری هنوز در هدر
         # است ولی جا تنگ شده. هیچ چیزی نباید از لبه بزند بیرون یا بپیچد.
         narrow = await b.new_page(viewport={"width": 760, "height": 900}, color_scheme="dark")
@@ -1202,7 +1242,11 @@ async def main():
         hn = await narrow.evaluate("""() => {
             const h = document.querySelector("header");
             const kids = [...h.children].map(e => e.getBoundingClientRect());
-            const tops = new Set(kids.filter(r => r.width > 0).map(r => Math.round(r.top / 12)));
+            // ⚠️ ارتفاع صفر هم فیلتر می‌شود، نه فقط عرض صفر. دو فاصله‌گذار
+            // کشسان هدر عرض دارند ولی چیزی نشان نمی‌دهند؛ مرکزشان با بقیه
+            // یکی نیست و به‌غلط «سطر دوم» شمرده می‌شدند.
+            const tops = new Set(kids.filter(r => r.width > 0 && r.height > 0)
+                                     .map(r => Math.round(r.top / 12)));
             return {right: Math.round(Math.max(...kids.map(r => r.right))),
                     left: Math.round(Math.min(...kids.map(r => r.left))),
                     rows: tops.size, vw: innerWidth,
