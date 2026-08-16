@@ -1188,12 +1188,16 @@ async def main():
         }""")
         print("[header] logo|%spx|nav|%spx|chips  (nav %s..%s of %s)"
               % (head["gapLeft"], head["gapRight"], head["navLeft"], head["navRight"], head["vw"]))
-        assert head["gapLeft"] > 8 and head["gapRight"] > 8, \
-            "the nav touches the logo or the chips: %s" % head
-        lo, hi = sorted((head["gapLeft"], head["gapRight"]))
-        assert lo / hi >= 0.3, \
-            ("the nav is not balanced between logo and chips (%spx vs %spx) — it should "
-             "sit between them, not be shoved to one side" % (head["gapLeft"], head["gapRight"]))
+        # ناوبری کنار لوگو می‌نشیند (یک گروه در چپ) و چیپ‌ها لبه‌ی راست.
+        # وقتی هدر تمام‌عرض شد، پخش‌کردن فضای اضافه بین دو طرفِ ناوبری دو
+        # حفره‌ی ~۲۱۰ پیکسلی می‌ساخت. حالا همه‌ی فضای اضافه یکجا سمت راست است.
+        assert head["gapLeft"] > 8, "the nav touches the logo: %s" % head
+        assert head["gapLeft"] <= 70, \
+            ("the nav drifted %spx away from the logo — they are meant to read as one "
+             "group on the left" % head["gapLeft"])
+        assert head["gapRight"] > head["gapLeft"], \
+            ("the spare width should collect on the right of the nav, not between the nav "
+             "and the logo: %s" % head)
 
         # هدر باید دقیقاً هم‌عرض محتوای زیرش باشد.
         # `body` یک ستون فلکس است و `margin:0 auto` روی محور عرضی کشیدگی را
@@ -1215,21 +1219,39 @@ async def main():
         # می‌ماند. ولی ارتفاع نمودار *از همان کشیدگی* تغذیه می‌شود، پس اگر کسی
         # به‌جای کارت، کل ردیف را از کشیدگی خارج کند، نمودار کوتاه می‌شود.
         # هر دو با هم سنجیده می‌شوند، وگرنه رفع یکی دیگری را می‌شکند.
-        fit = await pg.evaluate("""() => {
+        fit = await pg.evaluate("""async () => {
             const hero = document.querySelector(".row.hero");
             if (getComputedStyle(hero).gridTemplateColumns.split(" ").length < 2) return null;
             const [chart, swap] = [...hero.children];
             const H = e => Math.round(e.getBoundingClientRect().height);
-            return {chart: H(chart), swap: H(swap), plot: H(document.getElementById("plot")),
+            const settle = () => new Promise(r =>
+                requestAnimationFrame(() => requestAnimationFrame(r)));
+            const idle = H(swap);
+            setNotice('<div class="note ok">Swap complete. <a href="#">View on BaseScan</a></div>');
+            await settle();
+            const withNote = H(swap);
+            setNotice(""); await settle();
+            const back = H(swap);
+            return {chart: H(chart), plot: H(document.getElementById("plot")),
+                    idle, withNote, back,
                     dead: Math.round(swap.getBoundingClientRect().bottom
-                                     - swap.lastElementChild.getBoundingClientRect().bottom)};
+                                     - document.getElementById("actBtn")
+                                         .getBoundingClientRect().bottom)};
         }""")
         if fit:
-            print("[card fit] chart=%s (plot %s)  swap=%s  dead space under the swap card=%s"
-                  % (fit["chart"], fit["plot"], fit["swap"], fit["dead"]))
-            assert fit["dead"] <= 8, \
-                ("%spx of dead space under the swap card - it is being stretched to match the "
-                 "chart" % fit["dead"])
+            print("[card fit] chart=%s (plot %s) | swap card: idle=%s with a notice=%s back=%s "
+                  "| room under the button=%s"
+                  % (fit["chart"], fit["plot"], fit["idle"], fit["withNote"], fit["back"],
+                     fit["dead"]))
+            # این همان چیزی است که کاربر می‌بیند: کارت نباید با آمدن و رفتن
+            # اعلان بالا و پایین بپرد. جای اعلان از پیش رزرو شده.
+            assert fit["idle"] == fit["withNote"] == fit["back"], \
+                ("the swap card changes height when a notice appears (%s -> %s -> %s) — the "
+                 "notice slot is meant to be reserved so nothing jumps"
+                 % (fit["idle"], fit["withNote"], fit["back"]))
+            assert fit["dead"] <= 84, \
+                ("%spx under the action button: that is more than the reserved notice slot, so "
+                 "the card is being stretched to match the chart again" % fit["dead"])
             assert fit["plot"] >= 300, \
                 ("the chart collapsed to %spx: taking the whole row out of stretch starves the "
                  "plot, which sizes itself from it. Only the swap card should opt out."
