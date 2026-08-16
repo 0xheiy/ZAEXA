@@ -932,7 +932,21 @@ function restoreCustomRpc(){
   }
 }
 
-function walletReady(){return walletProvider&&walletChainId===CHAIN.id;}
+/* خواندن از خودِ کیف پول برای افزونه‌ی مرورگر بهترین کار است: بدون CORS،
+   بدون سقف نرخ، بدون فیلتر جغرافیایی.
+
+   ولی برای WalletConnect دقیقاً برعکس است. آنجا هر eth_call باید از رله
+   رد شود، به گوشی برسد، و برگردد — برای *هر* کوت، هر موجودی، هر allowance.
+   نتیجه‌اش ثانیه‌ها تأخیر روی هر خواندن بود و در عمل یعنی سواپ هرگز آماده
+   نمی‌شد؛ حتی بعد از approve نامحدود، چون تأیید allowance خودش یک خواندن
+   است. ضمناً خیلی از کیف پول‌های موبایل اصلاً eth_call دلخواه را پشتیبانی
+   نمی‌کنند.
+
+   پس: خواندن فقط از کیف پولِ تزریق‌شده. امضا‌کردن همچنان از هر دو. */
+let walletIsRemote=false;
+function walletReady(){
+  return walletProvider&&walletChainId===CHAIN.id&&!walletIsRemote;
+}
 async function rpcSend(fn){
   if(walletReady()){
     try{const v=await withTimeout(fn(walletProvider),9000);liveSrc="wallet";paintSrc();return v;}
@@ -2859,6 +2873,7 @@ function detachWalletEvents(){
 function clearWalletState(){
   detachWalletEvents();
   account=null;signer=null;walletProvider=null;walletEip1193=null;walletChainId=null;
+  walletIsRemote=false;
   balances={};allowance=0n;allowanceKnown=false;
   clearInterval(balTimer);liveSrc=null;
   closeWalletMenu();paintWallet();paintBalances();paintSrc();refreshButton();
@@ -2895,6 +2910,9 @@ async function connectWithProvider(provider,requestAccounts){
   try{
     const a=await provider.request({method:requestAccounts?"eth_requestAccounts":"eth_accounts"});
     if(!a||!a[0])throw new Error("No wallet account was returned.");
+    // «راه دور» یعنی هر درخواست باید تا گوشی برود و برگردد → برای خواندن
+    // استفاده نمی‌شود. wcProvider تنها چیزی است که این‌طور است.
+    walletIsRemote=(provider===wcProvider);
     detachWalletEvents();walletEip1193=provider;
     account=E.getAddress(a[0]);
     walletProvider=new E.BrowserProvider(provider,"any");

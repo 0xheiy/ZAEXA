@@ -664,6 +664,34 @@ async def main():
         print("[icons] logo images: %s   fallback initials: %r" % (logos, initials.strip()))
         assert initials.strip() != "", "initials must always be present as a fallback"
 
+        # ---- 2a-ter. reads must never be routed through a remote wallet ----
+        # با WalletConnect هر eth_call باید از رله به گوشی برود و برگردد. اگر
+        # خواندن‌ها از آنجا بروند، هر کوت و هر allowance ثانیه‌ها طول می‌کشد و
+        # عملاً سواپ هرگز آماده نمی‌شود — حتی بعد از approve نامحدود، چون
+        # تأیید approve خودش یک خواندن است. امضا فرق دارد و باید برود.
+        remote = await pg.evaluate("""async () => {
+            const realWP = walletProvider, realId = walletChainId;
+            let viaWallet = 0;
+            walletProvider = {call: async () => { viaWallet++; throw new Error("fetch failed"); }};
+            walletChainId = CHAIN.id;
+
+            walletIsRemote = false;
+            const injectedReady = walletReady();
+            walletIsRemote = true;
+            const remoteReady = walletReady();
+            try { await chainCall({to: CHAIN.multicall3, data: "0x"}); } catch {}
+            const callsWhileRemote = viaWallet;
+
+            walletProvider = realWP; walletChainId = realId; walletIsRemote = false;
+            return {injectedReady, remoteReady, callsWhileRemote};
+        }""")
+        print("[wallet reads] injected=%s remote=%s (remote calls made: %s)"
+              % (remote["injectedReady"], remote["remoteReady"], remote["callsWhileRemote"]))
+        assert remote["injectedReady"], \
+            "an injected wallet is the best read source — do not stop using it"
+        assert not remote["remoteReady"] and remote["callsWhileRemote"] == 0, \
+            "reads went through the WalletConnect relay; every quote would round-trip to the phone"
+
         # ---- 2b-pre. GeckoTerminal request budget ----
         # صف GeckoTerminal تک‌خطی و با فاصله‌ی اجباری است، پس *تعداد*
         # درخواست‌ها مستقیماً می‌شود تأخیری که کاربر می‌بیند: لوگوها دیر
