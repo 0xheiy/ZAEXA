@@ -5,26 +5,28 @@ import "forge-std/Test.sol";
 import "../src/SwapExecutor.sol";
 
 /*
- * تست سلکتور — ارزان‌ترین تستی که باگ مین‌نت را می‌گرفت.
+ * Selector test - the cheapest test that would have caught the mainnet bug.
  * ==========================================================================
  *
- * داستان: قرارداد ساختار ExactInputSingleParams را با فیلد `deadline` اعلام
- * کرده بود. اما SwapRouter02 (که Base و اکثر شبکه‌ها استفاده می‌کنند) آن فیلد
- * را ندارد. چون سلکتور از روی *شکل* ساختار ساخته می‌شود، فراخوانی ما به تابعی
- * می‌رفت که در روتر وجود نداشت و EVM بدون هیچ داده‌ای revert می‌کرد.
+ * The story: the contract declared the ExactInputSingleParams struct with a
+ * `deadline` field. But SwapRouter02 (the one Base and most networks use) does
+ * not have that field. Since the selector is derived from the *shape* of the
+ * struct, our call went to a function that did not exist on the router, and the
+ * EVM reverted with no data at all.
  *
- * ۲۷ تست ماک‌محور این را نگرفتند، چون ماک هم همان ساختار غلط را پیاده کرده بود.
+ * 27 mock-based tests did not catch this, because the mock implemented the same
+ * wrong struct.
  *
- * این تست به شبکه نیاز ندارد و در چند میلی‌ثانیه اجرا می‌شود: فقط ثابت می‌کند
- * سلکتوری که اینترفیس‌های ما تولید می‌کنند دقیقاً همان‌هایی است که یونی‌سواپ
- * منتشر کرده. اگر کسی روزی فیلدی به این ساختارها اضافه یا کم کند، اینجا قرمز
- * می‌شود — نه سه هفته بعد روی مین‌نت با پول واقعی.
+ * This test needs no network and runs in a few milliseconds: it only proves that
+ * the selectors our interfaces produce are exactly the ones Uniswap published.
+ * If someone ever adds or removes a field in these structs, it goes red here -
+ * not three weeks later on mainnet with real money.
  *
- * مقادیر مرجع (قابل بازتولید با `cast sig`):
+ * Reference values (reproducible with `cast sig`):
  *   exactInputSingle((address,address,uint24,address,uint256,uint256,uint160))
- *     = 0x04e45aaf   ← SwapRouter02
+ *     = 0x04e45aaf   <- SwapRouter02
  *   exactInputSingle((address,address,uint24,address,uint256,uint256,uint256,uint160))
- *     = 0x414bf389   ← SwapRouter نسل اول
+ *     = 0x414bf389   <- first-generation SwapRouter
  */
 contract SelectorTest is Test {
 
@@ -44,7 +46,8 @@ contract SelectorTest is Test {
         );
     }
 
-    /// دو نسل باید سلکتور *متفاوت* داشته باشند — وگرنه کل تفکیک بی‌معناست
+    /// The two generations must have *different* selectors - otherwise the whole split is
+    /// pointless
     function testTheTwoGenerationsDiffer() public pure {
         assertTrue(
             IUniswapV3Router02.exactInputSingle.selector
@@ -54,7 +57,9 @@ contract SelectorTest is Test {
     }
 
     function testSolidlySelectorMatchesAerodrome() public pure {
-        // getAmountsOut... در واقع اینجا تابع سواپ مهم است
+        // Aerodrome is Solidly-style: the route is an array of structs, not a plain
+        // address path. That struct shape is part of the selector, so it is what can
+        // silently break us.
         assertEq(
             ISolidlyRouter.swapExactTokensForTokens.selector,
             bytes4(keccak256(

@@ -2,8 +2,8 @@
 pragma solidity ^0.8.24;
 
 /*
- * قراردادهای ساختگی برای تست.
- * این‌ها فقط در محیط تست استفاده می‌شوند و هیچ‌وقت دیپلوی نمی‌شوند.
+ * Mock contracts for testing.
+ * These are used only in the test environment and are never deployed.
  */
 
 contract MockERC20 {
@@ -50,9 +50,9 @@ contract MockERC20 {
 }
 
 
-/// روتر ساختگی سبک Uniswap V2 — با نرخ ثابت سواپ می‌کند
+/// Uniswap V2-style mock router - swaps at a fixed rate
 contract MockV2Router {
-    uint256 public rateNum = 2;     // خروجی = ورودی × rateNum / rateDen
+    uint256 public rateNum = 2;     // out = in * rateNum / rateDen
     uint256 public rateDen = 1;
 
     function setRate(uint256 n, uint256 d) external { rateNum = n; rateDen = d; }
@@ -72,18 +72,19 @@ contract MockV2Router {
 }
 
 
-/// روتر ساختگی سبک Uniswap V3
+/// Uniswap V3-style mock router
 /*
- * روتر ساختگی سبک SwapRouter02 — ساختار *هفت‌فیلدی*، بدون deadline.
+ * SwapRouter02-style mock router - *seven-field* struct, no deadline.
  *
- * ⚠️ درس این ماک: نسخه‌ی قبلی عمداً یا سهواً همان ساختار هشت‌فیلدی‌ای را
- *    پیاده کرده بود که قرارداد می‌فرستاد. نتیجه‌اش این شد که ۲۷ تست سبز
- *    بودند ولی روی مین‌نت هیچ سواپ یونی‌سواپی کار نمی‌کرد — ماک فقط ثابت
- *    می‌کرد قرارداد با *خودش* سازگار است.
+ * !! The lesson of this mock: the previous version, deliberately or by accident,
+ *    implemented the very same eight-field struct that the contract was sending.
+ *    The result was that 27 tests were green while no Uniswap swap worked on
+ *    mainnet - the mock was only proving that the contract agreed with *itself*.
  *
- *    قاعده‌ای که از این به بعد رعایت می‌کنیم: ماک باید شکل قرارداد واقعی را
- *    آینه کند، نه شکل انتظار ما را. و برای چیزی که پول واقعی جابه‌جا می‌کند،
- *    تست fork مقابل قرارداد واقعی هم لازم است (SwapExecutor.fork.t.sol).
+ *    The rule we follow from now on: a mock has to mirror the shape of the real
+ *    contract, not the shape of our expectation. And for something that moves
+ *    real money, a fork test against the real contract is needed too
+ *    (SwapExecutor.fork.t.sol).
  */
 contract MockV3Router {
     struct ExactInputSingleParams {
@@ -107,7 +108,7 @@ contract MockV3Router {
 }
 
 
-/// روتر ساختگی سبک SwapRouter نسل اول — ساختار *هشت‌فیلدی*، با deadline
+/// First-generation SwapRouter-style mock router - *eight-field* struct, with deadline
 contract MockV3LegacyRouter {
     struct ExactInputSingleParams {
         address tokenIn; address tokenOut; uint24 fee; address recipient;
@@ -129,7 +130,7 @@ contract MockV3LegacyRouter {
 }
 
 
-/// روتر ساختگی سبک Solidly / Aerodrome
+/// Solidly / Aerodrome-style mock router
 contract MockSolidlyRouter {
     struct Route { address from; address to; bool stable; address factory; }
 
@@ -152,10 +153,10 @@ contract MockSolidlyRouter {
 
 
 /**
- * روتر مخرب — تلاش می‌کند دارایی یک قربانی را که به SwapExecutor
- * اجازه داده، بدزدد.
+ * Malicious router - tries to steal the funds of a victim who has given an
+ * approval to SwapExecutor.
  *
- * این دقیقاً همان حمله‌ای است که طراحی «لیست سفید» برای جلوگیری از آن است.
+ * This is exactly the attack the "whitelist" design is there to prevent.
  */
 contract MaliciousRouter {
     address public victim;
@@ -170,7 +171,7 @@ contract MaliciousRouter {
     function swapExactTokensForTokens(
         uint256, uint256, address[] calldata, address, uint256
     ) external returns (uint256[] memory) {
-        // تلاش برای برداشتن دارایی قربانی از طریق allowance ای که به executor داده
+        // Try to take the victim's funds via the allowance they gave the executor
         MockERC20(token).transferFrom(victim, attacker, 1000 ether);
         uint256[] memory a = new uint256[](2);
         return a;
@@ -178,7 +179,7 @@ contract MaliciousRouter {
 }
 
 
-/// روتری که سعی می‌کند دوباره وارد executor شود (تست reentrancy)
+/// A router that tries to re-enter the executor (reentrancy test)
 contract ReentrantRouter {
     address public executor;
     bytes public payload;
@@ -195,9 +196,9 @@ contract ReentrantRouter {
         if (!attacked) {
             attacked = true;
             (bool ok, bytes memory ret) = executor.call(payload);
-            // دلیل واقعی را بالا می‌فرستیم. اگر اینجا پیام خودمان را بگذاریم،
-            // تست دیگر نمی‌تواند «قفل کار کرد» را از «به دلیلی دیگر افتاد»
-            // تشخیص بدهد — و همان چیزی بود که تست قبلی را بی‌اثر کرده بود.
+            // Bubble the real reason up. If we put our own message here, the test
+            // can no longer tell "the lock worked" from "it failed for some other
+            // reason" - and that is exactly what made the previous test useless.
             if (!ok) {
                 assembly { revert(add(ret, 0x20), mload(ret)) }
             }
@@ -208,7 +209,7 @@ contract ReentrantRouter {
 }
 
 
-/// WETH ساختگی — deposit/withdraw واقعی، برای تست مسیر ETH بومی
+/// Mock WETH - real deposit/withdraw, for testing the native ETH path
 contract MockWETH {
     string public name = "Wrapped Ether";
     string public symbol = "WETH";
@@ -242,16 +243,17 @@ contract MockWETH {
 
 
 /**
- * توکن کارمزددار (fee-on-transfer): در هر انتقال درصدی می‌سوزد.
- * بدون این ماک، شاخه‌ای از قرارداد که «چقدر واقعاً رسید» را می‌سنجد هرگز
- * اجرا نمی‌شد و ماک با فرض ما هم‌دست بود، نه با واقعیت.
+ * Fee-charging token (fee-on-transfer): burns a percentage on every transfer.
+ * Without this mock, the branch of the contract that measures "how much actually
+ * arrived" would never run, and the mock would be in league with our assumption
+ * rather than with reality.
  */
 contract MockFeeToken {
     string public name = "Fee On Transfer";
     string public symbol = "FOT";
     uint8 public decimals = 18;
     uint256 public totalSupply;
-    uint256 public feeBps;                       // در ده‌هزارم
+    uint256 public feeBps;                       // in ten-thousandths
 
     mapping(address => uint256) public balanceOf;
     mapping(address => mapping(address => uint256)) public allowance;
@@ -269,7 +271,7 @@ contract MockFeeToken {
         uint256 fee = (amount * feeBps) / 10_000;
         balanceOf[from] -= amount;
         balanceOf[to] += amount - fee;
-        totalSupply -= fee;                      // سوخته
+        totalSupply -= fee;                      // burned
     }
     function transfer(address to, uint256 amount) external returns (bool) {
         _move(msg.sender, to, amount); return true;
@@ -284,9 +286,9 @@ contract MockFeeToken {
 
 
 /**
- * توکن سبک USDT: هیچ مقداری برنمی‌گرداند، و allowance غیرصفر را مستقیم
- * نمی‌شود عوض کرد. هر دو شاخه‌ی `_safeTransfer` و ریست در `_ensureApproval`
- * فقط با چنین توکنی اجرا می‌شوند.
+ * USDT-like token: returns no value at all, and a non-zero allowance cannot be
+ * changed directly. Both the `_safeTransfer` branch and the reset in
+ * `_ensureApproval` only ever run with a token like this.
  */
 contract MockNoReturnToken {
     string public name = "Tether-like";
@@ -320,9 +322,9 @@ contract MockNoReturnToken {
 
 
 /**
- * روتر V2 که از ذخیره‌ی خودش پرداخت می‌کند، نه اینکه توکن جدید mint کند.
- * ماک‌های قبلی نقدینگی بی‌نهایت داشتند، پس هیچ‌وقت معلوم نمی‌شد قرارداد
- * دارد از موجودی خودش خرج می‌کند یا از استخر.
+ * A V2 router that pays out of its own reserve instead of minting new tokens.
+ * The earlier mocks had infinite liquidity, so it was never visible whether the
+ * contract was spending from its own balance or from the pool.
  */
 contract MockReserveRouter {
     uint256 public rateNum = 2;
@@ -332,10 +334,11 @@ contract MockReserveRouter {
         MockERC20(token).mint(address(this), amount);
     }
 
-    /* انتقال با فراخوانی سطح‌پایین — روتر واقعی هم همین کار را می‌کند.
-       نسخه‌ی اول اینجا به MockERC20 کست می‌کرد و مقدار bool انتظار داشت، پس
-       با توکن سبک USDT که چیزی برنمی‌گرداند revert می‌شد. ماک نباید فرض
-       کند همه‌ی توکن‌ها مؤدب‌اند — همان چیزی که قرارداد برایش ساخته شده. */
+    /* Transfer via low-level call - the real router does the same thing.
+       The first version cast to MockERC20 here and expected a bool return, so it
+       reverted with the USDT-like token that returns nothing. A mock must not
+       assume every token is well-behaved - that is exactly what the contract was
+       built for. */
     function _pull(address token, address from, uint256 amount) internal {
         (bool ok, bytes memory d) = token.call(
             abi.encodeWithSignature("transferFrom(address,address,uint256)",

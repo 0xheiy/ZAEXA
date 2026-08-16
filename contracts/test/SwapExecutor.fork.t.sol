@@ -16,29 +16,29 @@ interface IV3FactoryLike {
 }
 
 /*
- * تست fork — مقابل قراردادهای *واقعی* روی Base.
+ * Fork test - against the *real* contracts on Base.
  * ==========================================================================
  *
- * چرا لازم است: ماک‌ها فقط ثابت می‌کنند قرارداد با تصور ما از دنیا سازگار است.
- * این تست ثابت می‌کند با خودِ دنیا سازگار است. باگ SwapRouter02 دقیقاً در همان
- * فاصله زندگی می‌کرد.
+ * Why it is needed: mocks only prove the contract agrees with our idea of the world.
+ * This test proves it agrees with the world itself. The SwapRouter02 bug lived exactly
+ * in that gap.
  *
- * اجرا:
+ * Run:
  *   export BASE_RPC_URL=https://base.drpc.org
  *   forge test --match-path 'test/SwapExecutor.fork.t.sol' -vv
  *
- * اگر BASE_RPC_URL تنظیم نباشد تست‌ها بی‌سروصدا رد می‌شوند، تا `forge test`
- * معمولی همچنان آفلاین کار کند.
+ * If BASE_RPC_URL is not set the tests skip silently, so that a plain `forge test`
+ * still works offline.
  */
 contract ForkTest is Test {
 
-    // --- آدرس‌های واقعی Base ---
+    // --- real Base addresses ---
     address constant UNI_V3_ROUTER  = 0x2626664c2603336E57B271c5C0b26F421741e481; // SwapRouter02
     address constant UNI_V3_FACTORY = 0x33128a8fC17869897dcE68Ed026d694621f6FDfD;
     address constant AERO_ROUTER    = 0xcF77a3Ba9A5CA399B7c97c74d54e5b1Beb874E43;
     address constant AERO_FACTORY   = 0x420DD381b31aEf6683db6B902084cB0FFECe40Da;
-    // PancakeSwap V3 — نسل *اول* SwapRouter. بایت‌کد روترش 0x414bf389 دارد و
-    // 0x04e45aaf ندارد؛ روی زنجیره بررسی شد. تنها صرافی‌ای که kind=3 می‌خواهد.
+    // PancakeSwap V3 - the *first*-generation SwapRouter. Its router bytecode has
+    // 0x414bf389 and not 0x04e45aaf; checked on-chain. The only DEX that needs kind=3.
     address constant PCS_V3_ROUTER  = 0x1b81D678ffb9C0263b24A97847620C99d213eB14;
     address constant PCS_V3_FACTORY = 0x0BFbCF9fa4f9C56B0F40a671Ad40E0805A091865;
 
@@ -52,17 +52,17 @@ contract ForkTest is Test {
     function setUp() public {
         string memory url = vm.envOr("BASE_RPC_URL", string(""));
         if (bytes(url).length == 0) {
-            // ⚠️ رد شدن باید *دیده* شود. یک بار در این پروژه تست‌های سبزی
-            //    داشتیم که هیچ چیزی را اثبات نمی‌کردند؛ تکرارش نمی‌کنیم.
+            // !! A skip has to be *seen*. We once had green tests in this project
+            //    that proved nothing; we are not repeating that.
             console2.log("");
             console2.log("  !! FORK TESTS SKIPPED - nothing was verified on-chain");
             console2.log("     export BASE_RPC_URL=https://base.drpc.org  and run again");
             console2.log("");
             return;
         }
-        // 📌 پین کردن بلاک مهم است: فورج وضعیت را روی دیسک کش می‌کند، پس اجرای
-        //    دوم تقریباً هیچ درخواستی به RPC نمی‌زند. بدون پین، RPCهای عمومی
-        //    وسط کار 429 می‌دهند و تست‌ها به‌دلیلی بی‌ربط به کد شکست می‌خورند.
+        // NOTE: pinning the block matters: forge caches state on disk, so the second run
+        //    makes almost no RPC requests. Without pinning, public RPCs start returning 429
+        //    mid-run and the tests fail for a reason unrelated to the code.
         uint256 pinned = vm.envOr("FORK_BLOCK", uint256(0));
         if (pinned > 0) vm.createSelectFork(url, pinned);
         else vm.createSelectFork(url);
@@ -96,12 +96,12 @@ contract ForkTest is Test {
     }
 
     /* ------------------------------------------------------------------
-       ۱) همان سواپی که روی مین‌نت شکست می‌خورد: USDC → WETH از یونی‌سواپ V3.
-          با اینترفیس قدیمی این تست revert می‌شد.
+       1) The same swap that was failing on mainnet: USDC -> WETH on Uniswap V3.
+          With the old interface this test reverted.
        ------------------------------------------------------------------ */
     function testRealUniswapV3Swap() public {
         if (!active) return;
-        uint256 amountIn = 100e6;                    // ۱۰۰ USDC
+        uint256 amountIn = 100e6;                    // 100 USDC
         _fund(USDC, user, amountIn);
 
         uint256 before = IERC20Like(WETH).balanceOf(user);
@@ -119,7 +119,7 @@ contract ForkTest is Test {
     }
 
     /* ------------------------------------------------------------------
-       ۲) ایرودروم واقعی
+       2) Real Aerodrome
        ------------------------------------------------------------------ */
     function testRealAerodromeSwap() public {
         if (!active) return;
@@ -136,7 +136,7 @@ contract ForkTest is Test {
     }
 
     /* ------------------------------------------------------------------
-       ۳) مسیر دومرحله‌ای واقعی — همان چیزی که در رابط وب می‌شکست
+       3) A real two-hop route - the same thing that was breaking in the web UI
        ------------------------------------------------------------------ */
     function testRealTwoHopSwap() public {
         if (!active) return;
@@ -155,8 +155,8 @@ contract ForkTest is Test {
         SwapExecutor.RoutePart[] memory parts = new SwapExecutor.RoutePart[](1);
         parts[0] = SwapExecutor.RoutePart({steps: steps, amountIn: amountIn});
 
-        // رفت‌وبرگشت USDC → WETH → USDC — دقیقاً همان چیزی که «شبیه‌سازی خروج»
-        // در رابط اجرا می‌کند. اگر این تست بشکند، آن قابلیت هم شکسته است.
+        // USDC -> WETH -> USDC round trip - exactly what the "exit simulation"
+        // in the UI does. If this test breaks, that feature is broken too.
         uint256 before = IERC20Like(USDC).balanceOf(user);
         vm.prank(user);
         uint256 out = exec.executeSwap(USDC, USDC, amountIn, 1, parts, block.timestamp + 300);
@@ -167,7 +167,7 @@ contract ForkTest is Test {
     }
 
     /* ------------------------------------------------------------------
-       ۴) تقسیم سفارش واقعی بین دو صرافی، در یک تراکنش
+       4) A real order split between two DEXes, in one transaction
        ------------------------------------------------------------------ */
     function testRealSplitAcrossTwoDexes() public {
         if (!active) return;
@@ -191,10 +191,10 @@ contract ForkTest is Test {
         assertGt(out, 0, "split swap returned nothing");
     }
 
-    /* عمیق‌ترین استخر USDC/WETH پنکیک را از روی زنجیره پیدا می‌کند.
-       fee tier را هاردکد نمی‌کنیم: اگر آن استخر خشک شود یا نباشد، تست باید
-       بگوید «نتوانستم آزمایش کنم»، نه اینکه شکست را به گردن قرارداد بیندازد.
-       این همان قاعده‌ی «نمی‌دانم ≠ نه» است، این بار داخل خودِ تست. */
+    /* Finds the deepest Pancake USDC/WETH pool on-chain.
+       We do not hardcode the fee tier: if that pool dries up or is not there, the test
+       should say "I could not test this", rather than blame the failure on the contract.
+       This is the same "don't know != no" rule, this time inside the test itself. */
     function _deepestPancakeFee() internal view returns (uint24 fee, uint256 depth) {
         uint24[4] memory tiers = [uint24(100), 500, 2500, 10000];
         for (uint256 i = 0; i < tiers.length; i++) {
@@ -206,10 +206,10 @@ contract ForkTest is Test {
     }
 
     /* ------------------------------------------------------------------
-       ۶) شاخه‌ی KIND_V3_LEGACY مقابل یک روتر نسل‌اول *واقعی*.
-          تا امروز این شاخه‌ی قرارداد هرگز اجرا نشده بود — نه در تست واحد، نه
-          در fork. نوشته شده بود، منطقی به نظر می‌رسید، و کسی امتحانش نکرده
-          بود. دقیقاً همان وضعیتی که باگ SwapRouter02 از دلش درآمد.
+       6) The KIND_V3_LEGACY branch against a *real* first-generation router.
+          Until today this branch of the contract had never run - not in a unit test,
+          not in a fork test. It was written, it looked reasonable, and nobody had
+          tried it. Exactly the situation the SwapRouter02 bug came out of.
        ------------------------------------------------------------------ */
     function testRealPancakeLegacySwap() public {
         if (!active) return;
@@ -223,7 +223,7 @@ contract ForkTest is Test {
         }
         console2.log("pancake pool fee tier used:", fee);
 
-        uint256 amountIn = 100e6;                    // ۱۰۰ USDC
+        uint256 amountIn = 100e6;                    // 100 USDC
         _fund(USDC, user, amountIn);
 
         uint256 before = IERC20Like(WETH).balanceOf(user);
@@ -241,9 +241,9 @@ contract ForkTest is Test {
     }
 
     /* ------------------------------------------------------------------
-       ۷) قرینه‌ی تست ۵ — و همان باگی که همین امروز در رابط وب پیدا شد.
-          پنکیک با kind=1 ثبت شده بود، یعنی 0x04e45aaf روی روتری صدا زده
-          می‌شد که آن تابع را ندارد. باید revert کند.
+       7) The mirror of test 5 - and the same bug that was found in the web UI
+          today. Pancake had been registered with kind=1, meaning 0x04e45aaf was
+          called on a router that does not have that function. It must revert.
        ------------------------------------------------------------------ */
     function testModernKindFailsAgainstLegacyRouter() public {
         if (!active) return;
@@ -254,7 +254,7 @@ contract ForkTest is Test {
         _fund(USDC, user, amountIn);
 
         vm.prank(user);
-        vm.expectRevert();      // سلکتور 0x04e45aaf روی SwapRouter نسل اول نیست
+        vm.expectRevert();      // selector 0x04e45aaf is not on the first-generation SwapRouter
         exec.executeSwap(
             USDC, WETH, amountIn, 1,
             _part(1, PCS_V3_ROUTER, PCS_V3_FACTORY, fee, USDC, WETH, amountIn),
@@ -263,9 +263,9 @@ contract ForkTest is Test {
     }
 
     /* ------------------------------------------------------------------
-       ۸) رفت‌وبرگشت با دو نسل مختلف در یک تراکنش — خرید از پنکیک (نسل اول)،
-          فروش در یونی‌سواپ (نسل ۰۲). این همان چیزی است که «شبیه‌سازی خروج»
-          در رابط اجرا می‌کند حالا که هر دو صرافی در مسیریابی هستند.
+       8) A round trip across two different generations in one transaction - buy on
+          Pancake (first generation), sell on Uniswap (02). This is what the "exit
+          simulation" in the UI does now that both DEXes are in the routing.
        ------------------------------------------------------------------ */
     function testRealMixedGenerationRoundTrip() public {
         if (!active) return;
@@ -298,8 +298,8 @@ contract ForkTest is Test {
     }
 
     /* ------------------------------------------------------------------
-       ۵) نوع اشتباه روی روتر واقعی باید شکست بخورد — این همان باگ است،
-          و از این به بعد به‌صورت یک انتظار صریح ثبت شده.
+       5) The wrong kind against a real router must fail - this is the bug, and
+          from now on it is recorded as an explicit expectation.
        ------------------------------------------------------------------ */
     function testLegacyKindFailsAgainstSwapRouter02() public {
         if (!active) return;
@@ -307,7 +307,7 @@ contract ForkTest is Test {
         _fund(USDC, user, amountIn);
 
         vm.prank(user);
-        vm.expectRevert();      // سلکتور 0x414bf389 روی SwapRouter02 وجود ندارد
+        vm.expectRevert();      // selector 0x414bf389 does not exist on SwapRouter02
         exec.executeSwap(
             USDC, WETH, amountIn, 1,
             _part(3, UNI_V3_ROUTER, UNI_V3_FACTORY, 500, USDC, WETH, amountIn),

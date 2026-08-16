@@ -6,12 +6,12 @@ import "../src/SwapExecutor.sol";
 import "./Mocks.sol";
 
 /*
- * تست‌های امنیتی SwapExecutor.
+ * Security tests for SwapExecutor.
  *
- * هدف این تست‌ها این است که *رفتارهای خطرناک را غیرممکن ثابت کنند*.
- * هر تستی که پاس شود یعنی آن حمله یا اشتباه ممکن نیست.
+ * The point of these tests is to *prove that the dangerous behaviours are impossible*.
+ * Every test that passes means that attack or mistake cannot happen.
  *
- * اجرا:
+ * Run:
  *     forge test -vv
  *     forge test --match-test testCannotStealApprovedFunds -vvv
  */
@@ -41,7 +41,7 @@ contract SwapExecutorTest is Test {
         solidly = new MockSolidlyRouter();
 
         weth = new MockWETH();
-        vm.deal(address(weth), 500 ether);   // تا withdraw بتواند ETH بفرستد
+        vm.deal(address(weth), 500 ether);   // so that withdraw can send ETH
 
         vm.prank(owner);
         exec = new SwapExecutor(owner, feeTo, 0, address(weth));
@@ -58,7 +58,7 @@ contract SwapExecutorTest is Test {
     }
 
     // -------------------------------------------------------------------
-    // کمکی‌ها
+    // helpers
     // -------------------------------------------------------------------
 
     function _step(uint8 kind, address router, address tin, address tout)
@@ -80,7 +80,7 @@ contract SwapExecutorTest is Test {
     }
 
     // ===================================================================
-    // ۱) سواپ ساده باید کار کند
+    // 1) a plain swap must work
     // ===================================================================
     function testSimpleSwapWorks() public {
         uint256 amt = 100 ether;
@@ -97,15 +97,15 @@ contract SwapExecutorTest is Test {
     }
 
     // ===================================================================
-    // ۲) 🔒 حیاتی: نمی‌توان دارایی کاربری که approve داده را دزدید
+    // 2) SECURITY, critical: you cannot steal the funds of a user who has approved
     // ===================================================================
     function testCannotStealApprovedFunds() public {
-        // قربانی به قرارداد اجازه‌ی نامحدود می‌دهد (کار کاملاً عادی)
+        // the victim gives the contract an unlimited allowance (a perfectly normal thing)
         tokenA.mint(victim, 10_000 ether);
         vm.prank(victim);
         tokenA.approve(address(exec), type(uint256).max);
 
-        // مهاجم روتری می‌سازد که سعی می‌کند از قربانی بدزدد
+        // the attacker deploys a router that tries to steal from the victim
         MaliciousRouter bad = new MaliciousRouter(
             victim, attacker, address(tokenA), address(exec));
 
@@ -116,7 +116,7 @@ contract SwapExecutorTest is Test {
         SwapExecutor.RoutePart[] memory parts =
             _singlePart(0, address(bad), address(tokenA), address(tokenB), 1 ether);
 
-        // باید رد شود چون روتر مخرب در لیست سفید نیست
+        // must be rejected, because the malicious router is not whitelisted
         vm.expectRevert(bytes("router not allowed"));
         exec.executeSwap(address(tokenA), address(tokenB), 1 ether, 0,
                          parts, block.timestamp + 60);
@@ -127,7 +127,7 @@ contract SwapExecutorTest is Test {
     }
 
     // ===================================================================
-    // ۳) روتر خارج از لیست سفید در هر حالتی رد می‌شود
+    // 3) a router outside the whitelist is rejected in every case
     // ===================================================================
     function testRejectsUnknownRouter() public {
         MockV2Router rogue = new MockV2Router();
@@ -141,7 +141,7 @@ contract SwapExecutorTest is Test {
     }
 
     // ===================================================================
-    // ۴) فقط owner می‌تواند لیست سفید را تغییر دهد
+    // 4) only the owner can change the whitelist
     // ===================================================================
     function testOnlyOwnerCanWhitelist() public {
         MockV2Router other = new MockV2Router();
@@ -154,14 +154,14 @@ contract SwapExecutorTest is Test {
         vm.expectRevert(bytes("not owner"));
         exec.setRouterAllowed(address(other), true);
 
-        // owner می‌تواند
+        // the owner can
         vm.prank(owner);
         exec.setRouterAllowed(address(other), true);
         assertTrue(exec.allowedRouter(address(other)));
     }
 
     // ===================================================================
-    // ۵) owner نمی‌تواند کارمزد را از سقف بالاتر ببرد
+    // 5) the owner cannot push the fee above the cap
     // ===================================================================
     function testFeeCannotExceedCap() public {
         uint256 cap = exec.MAX_FEE_BPS();
@@ -172,9 +172,9 @@ contract SwapExecutorTest is Test {
 
         vm.prank(owner);
         vm.expectRevert(bytes("fee too high"));
-        exec.setFee(10_000);         // ۱۰۰٪
+        exec.setFee(10_000);         // 100%
 
-        // تا سقف مجاز است
+        // up to the cap it is allowed
         vm.prank(owner);
         exec.setFee(cap);
         assertEq(exec.feeBps(), cap);
@@ -186,15 +186,15 @@ contract SwapExecutorTest is Test {
     }
 
     // ===================================================================
-    // ۶) محافظت اسلیپیج: اگر خروجی کمتر از حداقل باشد، برمی‌گردد
+    // 6) slippage protection: if the output is below the minimum, it reverts
     // ===================================================================
     function testSlippageProtection() public {
         uint256 amt = 100 ether;
         SwapExecutor.RoutePart[] memory parts =
             _singlePart(1, address(v3), address(tokenA), address(tokenB), amt);
 
-        // نرخ ساختگی ۲ برابر است، پس خروجی ۲۰۰ خواهد بود.
-        // اگر ۲۵۰ بخواهیم، باید revert شود.
+        // the mock rate is 2x, so the output will be 200.
+        // if we ask for 250, it must revert.
         vm.prank(user);
         vm.expectRevert(bytes("slippage: output below minimum"));
         exec.executeSwap(address(tokenA), address(tokenB), amt, 250 ether,
@@ -206,8 +206,8 @@ contract SwapExecutorTest is Test {
         SwapExecutor.RoutePart[] memory parts =
             _singlePart(1, address(v3), address(tokenA), address(tokenB), amt);
 
-        // شبیه‌سازی افت ناگهانی قیمت بین محاسبه و اجرا
-        v3.setRate(1, 1);            // حالا فقط ۱ برابر می‌دهد
+        // simulate a sudden price drop between quoting and execution
+        v3.setRate(1, 1);            // now it only gives 1x
 
         vm.prank(user);
         vm.expectRevert(bytes("slippage: output below minimum"));
@@ -216,7 +216,7 @@ contract SwapExecutorTest is Test {
     }
 
     // ===================================================================
-    // ۷) deadline گذشته رد می‌شود
+    // 7) an expired deadline is rejected
     // ===================================================================
     function testExpiredDeadlineReverts() public {
         vm.warp(1000);
@@ -229,7 +229,7 @@ contract SwapExecutorTest is Test {
     }
 
     // ===================================================================
-    // ۸) جمع بخش‌ها باید دقیقاً برابر کل باشد
+    // 8) the parts must sum to exactly the total
     // ===================================================================
     function testPartsSumMustMatch() public {
         SwapExecutor.SwapStep[] memory s1 = new SwapExecutor.SwapStep[](1);
@@ -239,7 +239,7 @@ contract SwapExecutorTest is Test {
 
         SwapExecutor.RoutePart[] memory parts = new SwapExecutor.RoutePart[](2);
         parts[0] = SwapExecutor.RoutePart({steps: s1, amountIn: 60 ether});
-        parts[1] = SwapExecutor.RoutePart({steps: s2, amountIn: 30 ether});  // جمع = ۹۰ نه ۱۰۰
+        parts[1] = SwapExecutor.RoutePart({steps: s2, amountIn: 30 ether});  // sum = 90, not 100
 
         vm.prank(user);
         vm.expectRevert(bytes("parts sum mismatch"));
@@ -248,12 +248,12 @@ contract SwapExecutorTest is Test {
     }
 
     // ===================================================================
-    // ۹) مراحل باید درست زنجیر شوند (خروجی هر مرحله = ورودی بعدی)
+    // 9) the steps must chain properly (each step's output = the next one's input)
     // ===================================================================
     function testStepsMustChain() public {
         SwapExecutor.SwapStep[] memory steps = new SwapExecutor.SwapStep[](2);
         steps[0] = _step(1, address(v3), address(tokenA), address(tokenB));
-        // مرحله‌ی دوم باید از tokenB شروع شود ولی از tokenC شروع می‌کند
+        // the second step should start at tokenB but starts at tokenC
         steps[1] = _step(1, address(v3), address(tokenC), address(tokenB));
 
         SwapExecutor.RoutePart[] memory parts = new SwapExecutor.RoutePart[](1);
@@ -266,7 +266,7 @@ contract SwapExecutorTest is Test {
     }
 
     // ===================================================================
-    // ۱۰) مسیر باید از tokenIn شروع و به tokenOut ختم شود
+    // 10) a part must start at tokenIn and end at tokenOut
     // ===================================================================
     function testPartMustStartAndEndCorrectly() public {
         SwapExecutor.RoutePart[] memory bad1 =
@@ -285,7 +285,7 @@ contract SwapExecutorTest is Test {
     }
 
     // ===================================================================
-    // ۱۱) قرارداد بین تراکنش‌ها هیچ دارایی نگه نمی‌دارد
+    // 11) the contract holds nothing between transactions
     // ===================================================================
     function testContractHoldsNothingAfterSwap() public {
         uint256 amt = 100 ether;
@@ -301,11 +301,11 @@ contract SwapExecutorTest is Test {
     }
 
     // ===================================================================
-    // ۱۲) کارمزد درست محاسبه و پرداخت می‌شود
+    // 12) the fee is computed and paid correctly
     // ===================================================================
     function testFeeIsCollectedFromInputToken() public {
         vm.prank(owner);
-        exec.setFee(50);            // ۰.۵٪
+        exec.setFee(50);            // 0.5%
 
         uint256 amt = 100 ether;
         SwapExecutor.RoutePart[] memory parts =
@@ -315,23 +315,23 @@ contract SwapExecutorTest is Test {
         exec.executeSwap(address(tokenA), address(tokenB), amt, 0,
                          parts, block.timestamp + 60);
 
-        // کارمزد ۰.۵٪ از *ورودی*: 100 × 0.5% = 0.5 tokenA
+        // 0.5% fee on the *input*: 100 x 0.5% = 0.5 tokenA
         assertEq(tokenA.balanceOf(feeTo), 0.5 ether, "fee must be in tokenIn");
         assertEq(tokenB.balanceOf(feeTo), 0, "fee must NOT be in tokenOut");
 
-        // 99.5 tokenA سواپ شد × نرخ ۲ = 199 tokenB، همه به کاربر
+        // 99.5 tokenA was swapped x rate 2 = 199 tokenB, all of it to the user
         assertEq(tokenB.balanceOf(user), 199 ether, "user gets full output");
     }
 
     // ===================================================================
-    // 🔑 سناریوی اصلی: کاربر به توکن پرریسک سواپ می‌کند
-    //    کارمزد ما نباید به آن توکن باشد، چون ممکن است بی‌ارزش شود.
+    // KEY scenario: the user swaps into a risky token.
+    //    our fee must not be in that token, because it may become worthless.
     // ===================================================================
     function testFeeNotExposedToRiskyOutputToken() public {
         vm.prank(owner);
-        exec.setFee(100);           // ۱٪ (حداکثر)
+        exec.setFee(100);           // 1% (the maximum)
 
-        // tokenC را «توکن پرریسک مقصد» فرض می‌کنیم
+        // treat tokenC as the "risky destination token"
         uint256 amt = 1000 ether;
         SwapExecutor.RoutePart[] memory parts =
             _singlePart(1, address(v3), address(tokenA), address(tokenC), amt);
@@ -340,17 +340,17 @@ contract SwapExecutorTest is Test {
         exec.executeSwap(address(tokenA), address(tokenC), amt, 0,
                          parts, block.timestamp + 60);
 
-        // کارمزد به tokenA (معتبر) است، نه tokenC (پرریسک)
+        // the fee is in tokenA (the sound one), not tokenC (the risky one)
         assertEq(tokenA.balanceOf(feeTo), 10 ether, "fee in safe input token");
         assertEq(tokenC.balanceOf(feeTo), 0, "no exposure to risky token");
     }
 
     // ===================================================================
-    // کارمزد در حالت تقسیم سفارش هم درست کار می‌کند
+    // the fee also works correctly when the order is split
     // ===================================================================
     function testFeeWithSplitRoutes() public {
         vm.prank(owner);
-        exec.setFee(50);            // ۰.۵٪
+        exec.setFee(50);            // 0.5%
 
         SwapExecutor.SwapStep[] memory s1 = new SwapExecutor.SwapStep[](1);
         s1[0] = _step(1, address(v3), address(tokenA), address(tokenB));
@@ -366,30 +366,30 @@ contract SwapExecutorTest is Test {
                          parts, block.timestamp + 60);
 
         assertEq(tokenA.balanceOf(feeTo), 0.5 ether, "fee taken once from input");
-        // 99.5 سواپ شد × ۲ = 199
+        // 99.5 was swapped x 2 = 199
         assertEq(tokenB.balanceOf(user), 199 ether, "split respects fee deduction");
     }
 
     // ===================================================================
-    // مبلغ خیلی کوچک که پس از کارمزد صفر شود، رد می‌شود
+    // an amount so small that it becomes zero after the fee is rejected
     // ===================================================================
     function testRejectsAmountTooSmallAfterFee() public {
         vm.prank(owner);
-        exec.setFee(100);           // ۱٪
+        exec.setFee(100);           // 1%
 
         SwapExecutor.RoutePart[] memory parts =
             _singlePart(1, address(v3), address(tokenA), address(tokenB), 1);
 
         vm.prank(user);
-        // با ۱ واحد، کارمزد صفر می‌شود (گِرد به پایین) پس سواپ ادامه می‌یابد
-        // ولی خروجی صفر → باید revert شود
+        // with 1 unit the fee rounds down to zero, so the swap goes ahead
+        // but the output is zero -> it must revert
         vm.expectRevert();
         exec.executeSwap(address(tokenA), address(tokenB), 1, 100 ether,
                          parts, block.timestamp + 60);
     }
 
     // ===================================================================
-    // ۱۳) بدون allowance نمی‌توان سواپ کرد
+    // 13) you cannot swap without an allowance
     // ===================================================================
     function testCannotSwapWithoutApproval() public {
         address noApprove = address(0xDEAD1);
@@ -405,7 +405,7 @@ contract SwapExecutorTest is Test {
     }
 
     // ===================================================================
-    // ۱۴) نمی‌توان بیشتر از موجودی سواپ کرد
+    // 14) you cannot swap more than your balance
     // ===================================================================
     function testCannotSwapMoreThanBalance() public {
         SwapExecutor.RoutePart[] memory parts =
@@ -418,7 +418,7 @@ contract SwapExecutorTest is Test {
     }
 
     // ===================================================================
-    // ۱۵) تقسیم سفارش بین چند مسیر درست کار می‌کند
+    // 15) splitting an order across several routes works
     // ===================================================================
     function testSplitAcrossRoutes() public {
         SwapExecutor.SwapStep[] memory s1 = new SwapExecutor.SwapStep[](1);
@@ -437,7 +437,7 @@ contract SwapExecutorTest is Test {
     }
 
     // ===================================================================
-    // ۱۶) مسیر چندمرحله‌ای درست کار می‌کند
+    // 16) a multi-hop route works
     // ===================================================================
     function testMultiHopRoute() public {
         SwapExecutor.SwapStep[] memory steps = new SwapExecutor.SwapStep[](2);
@@ -454,7 +454,7 @@ contract SwapExecutorTest is Test {
     }
 
     // ===================================================================
-    // ۱۷) فقط owner می‌تواند تنظیمات را تغییر دهد
+    // 17) only the owner can change the settings
     // ===================================================================
     function testOnlyOwnerAdminFunctions() public {
         vm.startPrank(attacker);
@@ -470,7 +470,7 @@ contract SwapExecutorTest is Test {
     }
 
     // ===================================================================
-    // ۱۸) ورودی صفر یا توکن یکسان رد می‌شود
+    // 18) a zero amount or an identical token pair is rejected
     // ===================================================================
     function testRejectsInvalidInputs() public {
         SwapExecutor.RoutePart[] memory parts =
@@ -480,7 +480,7 @@ contract SwapExecutorTest is Test {
         vm.expectRevert(bytes("zero amount"));
         exec.executeSwap(address(tokenA), address(tokenB), 0, 0, parts, block.timestamp + 60);
 
-        // یک *مرحله* هرگز نباید ورودی و خروجی یکسان داشته باشد
+        // a single *step* must never have the same token in and out
         SwapExecutor.RoutePart[] memory same =
             _singlePart(1, address(v3), address(tokenA), address(tokenA), 10 ether);
         vm.expectRevert(bytes("step same token"));
@@ -489,15 +489,15 @@ contract SwapExecutorTest is Test {
     }
 
     // ===================================================================
-    // ۱۸ب) مسیر حلقه‌ای A → B → A مجاز است و حسابداری‌اش درست است
+    // 18b) a round-trip route A -> B -> A is allowed and its accounting is correct
     //
-    // این همان چیزی است که «شبیه‌سازی خروج» در رابط به آن تکیه می‌کند: قبل از
-    // خرید، کل رفت‌وبرگشت را در یک staticCall اجرا می‌کنیم تا ببینیم آیا و با
-    // چه هزینه‌ای می‌شود بیرون آمد. تست fork نشان داد نسخه‌ی اول این را رد
-    // می‌کرد، پس اینجا به‌صورت انتظار صریح ثبت می‌شود.
+    // This is what the "exit simulation" in the UI relies on: before buying, we run
+    // the whole round trip in one staticCall to see whether, and at what cost, you can
+    // get back out. The fork test showed the first version rejected this, so it is
+    // recorded here as an explicit expectation.
     // ===================================================================
     function testRoundTripSameTokenIsAllowed() public {
-        v3.setRate(1, 1);                     // نرخ ۱:۱ تا محاسبه ساده بماند
+        v3.setRate(1, 1);                     // rate 1:1 to keep the arithmetic simple
 
         SwapExecutor.SwapStep[] memory steps = new SwapExecutor.SwapStep[](2);
         steps[0] = _step(1, address(v3), address(tokenA), address(tokenB));
@@ -517,7 +517,7 @@ contract SwapExecutorTest is Test {
     }
 
     // ===================================================================
-    // ۱۹) تعداد بخش‌ها و مراحل محدود است (جلوگیری از حمله‌ی گس)
+    // 19) the number of parts and steps is capped (prevents a gas attack)
     // ===================================================================
     function testLimitsPartsAndSteps() public {
         SwapExecutor.RoutePart[] memory many = new SwapExecutor.RoutePart[](6);
@@ -533,55 +533,55 @@ contract SwapExecutorTest is Test {
     }
 
     // ===================================================================
-    // ۲۰) تغییر مالکیت درست کار می‌کند
+    // 20) ownership transfer works correctly
     // ===================================================================
     function testOwnershipTransfer() public {
         address newOwner = address(0x1234);
 
-        // مرحله‌ی اول: مالکیت هنوز عوض نشده
+        // step one: ownership has not moved yet
         vm.prank(owner);
         exec.transferOwnership(newOwner);
         assertEq(exec.owner(), owner, "ownership must not move before it is accepted");
         assertEq(exec.pendingOwner(), newOwner);
 
-        // کسی جز آدرس مقصد نمی‌تواند بپذیرد
+        // nobody but the target address can accept
         vm.prank(address(0xDEAD));
         vm.expectRevert(bytes("not pending owner"));
         exec.acceptOwnership();
 
-        // مرحله‌ی دوم
+        // step two
         vm.prank(newOwner);
         exec.acceptOwnership();
         assertEq(exec.owner(), newOwner);
         assertEq(exec.pendingOwner(), address(0), "pending must be cleared");
 
-        // مالک قبلی دیگر دسترسی ندارد
+        // the previous owner no longer has access
         vm.prank(owner);
         vm.expectRevert(bytes("not owner"));
         exec.setFee(10);
 
-        // مالک جدید دارد
+        // the new owner does
         vm.prank(newOwner);
         exec.setFee(10);
         assertEq(exec.feeBps(), 10);
     }
 
     // ===================================================================
-    // ۲۱) 🔒 ورود مجدد (reentrancy) مسدود است — حتی از روتر تأییدشده
-    //     این بدترین حالت را تست می‌کند: روتری که در لیست سفید است
-    //     ولی مخرب شده (مثلاً ارتقا پیدا کرده) و سعی می‌کند دوباره وارد شود.
+    // 21) SECURITY: reentrancy is blocked - even from an approved router
+    //     This tests the worst case: a router that is on the whitelist but has
+    //     turned malicious (upgraded, say) and tries to re-enter.
     // ===================================================================
     function testReentrancyIsBlocked() public {
         ReentrantRouter evil = new ReentrantRouter();
 
-        // بدترین سناریو: روتر مخرب *در لیست سفید است*
+        // worst case: the malicious router *is whitelisted*
         vm.prank(owner);
         exec.setRouterAllowed(address(evil), true);
 
         SwapExecutor.RoutePart[] memory parts =
             _singlePart(0, address(evil), address(tokenA), address(tokenB), 10 ether);
 
-        // فراخوانی‌ای که روتر مخرب سعی می‌کند دوباره اجرا کند
+        // the call that the malicious router tries to run again
         bytes memory payload = abi.encodeWithSelector(
             exec.executeSwap.selector,
             address(tokenA), address(tokenB), uint256(10 ether), uint256(0),
@@ -589,25 +589,25 @@ contract SwapExecutorTest is Test {
         evil.setup(address(exec), payload);
 
         vm.prank(user);
-        // ⚠️ `vm.expectRevert()` خالی هر شکستی را قبول می‌کند — و این روتر
-        //    مخرب حتی بدون قفل هم به دلیلی دیگر شکست می‌خورد. پس پیام دقیق
-        //    را می‌خواهیم، وگرنه تست چیزی را ثابت نمی‌کند.
+        // !! an empty `vm.expectRevert()` accepts any failure - and this malicious
+        //    router fails for another reason even without the lock. So we want the
+        //    exact message, otherwise the test proves nothing.
         vm.expectRevert(bytes("reentrant"));
         exec.executeSwap(address(tokenA), address(tokenB), 10 ether, 0,
                          parts, block.timestamp + 60);
 
-        // مهم: هیچ دارایی‌ای از دست نرفته باشد
+        // important: nothing must have been lost
         assertEq(tokenA.balanceOf(address(exec)), 0, "contract must hold nothing");
         assertEq(tokenA.balanceOf(user), 1_000_000 ether, "user funds intact");
     }
 
     // ===================================================================
-    // ۲۲) نوع سواپ نامعتبر رد می‌شود
+    // 22) an invalid swap kind is rejected
     // ===================================================================
     function testRejectsUnknownSwapKind() public {
         SwapExecutor.SwapStep[] memory steps = new SwapExecutor.SwapStep[](1);
         steps[0] = SwapExecutor.SwapStep({
-            kind: 4,                     // نوع نامعتبر (۰..۳ معتبرند)
+            kind: 4,                     // invalid kind (0..3 are valid)
             router: address(v3), tokenIn: address(tokenA), tokenOut: address(tokenB),
             feeTier: 3000, stable: false, poolFactory: address(0)
         });
@@ -622,10 +622,10 @@ contract SwapExecutorTest is Test {
 
 
     // ===================================================================
-    // ۲۳) ETH بومی به‌عنوان *ورودی* — یک تراکنش، بدون approve
+    // 23) native ETH as the *input* - one transaction, no approve
     //
-    // قبلاً رابط مجبور بود اول wrap کند و بعد approve و بعد سواپ: سه امضا.
-    // حالا ETH با خود تراکنش می‌آید و قرارداد داخلش wrap می‌کند.
+    // The UI used to have to wrap first, then approve, then swap: three signatures.
+    // Now the ETH comes with the transaction itself and the contract wraps it inside.
     // ===================================================================
     function testNativeInputSwapsInOneTransaction() public {
         uint256 amt = 1 ether;
@@ -645,7 +645,7 @@ contract SwapExecutorTest is Test {
     }
 
     // ===================================================================
-    // ۲۴) ETH بومی به‌عنوان *خروجی* — قرارداد خودش unwrap می‌کند
+    // 24) native ETH as the *output* - the contract unwraps it itself
     // ===================================================================
     function testNativeOutputUnwrapsInSameTransaction() public {
         uint256 amt = 100 ether;
@@ -666,7 +666,7 @@ contract SwapExecutorTest is Test {
     }
 
     // ===================================================================
-    // ۲۵) ارسال ETH همراه سواپ ERC-20 باید رد شود (وگرنه گیر می‌افتد)
+    // 25) sending ETH along with an ERC-20 swap must be rejected (or it gets stuck)
     // ===================================================================
     function testRejectsUnexpectedValue() public {
         vm.deal(user, 1 ether);
@@ -680,7 +680,7 @@ contract SwapExecutorTest is Test {
     }
 
     // ===================================================================
-    // ۲۶) msg.value باید دقیقاً برابر مبلغ اعلام‌شده باشد
+    // 26) msg.value must be exactly equal to the declared amount
     // ===================================================================
     function testNativeValueMustMatchAmount() public {
         vm.deal(user, 2 ether);
@@ -694,8 +694,8 @@ contract SwapExecutorTest is Test {
     }
 
     // ===================================================================
-    // ۲۷) 🔒 فقط WETH می‌تواند به قرارداد ETH بفرستد
-    //     وگرنه هر کسی می‌توانست ETH گیر بیندازد یا حسابداری را به هم بریزد
+    // 27) SECURITY: only WETH may send ETH to the contract
+    //     otherwise anyone could strand ETH here or throw the accounting off
     // ===================================================================
     function testOnlyWethCanSendEth() public {
         vm.deal(attacker, 1 ether);
