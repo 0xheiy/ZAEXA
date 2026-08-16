@@ -72,7 +72,7 @@
   const MC3    = "0xcA11bde05977b3631167028862bE2a173976CA11".toLowerCase();
   // باید با CHAIN.executor در index.html یکی باشد، وگرنه allowedRouter و feeBps
   // در استاب هرگز match نمی‌شوند و دروازه‌ی ۳ بی‌صدا از تست بیرون می‌ماند.
-  const EXEC   = "0xE980825d4B3911e35Be5804349be26eBBe93BcC6".toLowerCase();
+  const EXEC   = "0xb6AE1C7157f877854C498C44ab5ea3d6742416DC".toLowerCase();
 
   const symOf = a => Object.keys(T).find(k => T[k].toLowerCase() === a.toLowerCase()) || "???";
   const pairKey = (a, b) => [symOf(a).toLowerCase(), symOf(b).toLowerCase()].sort().join("-");
