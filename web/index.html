@@ -2793,24 +2793,53 @@ function loadWalletConnect(){
   wcLoading.catch(()=>{wcLoading=null;});   // شکست نباید برای همیشه کش شود
   return wcLoading;
 }
+function wcInitOptions(showQrModal){
+  return{
+    projectId:WC_PROJECT_ID,
+    chains:[CHAIN.id],
+    optionalChains:[CHAIN.id],
+    showQrModal,
+    metadata:{
+      name:BRAND,
+      description:"Zaexa — a DEX aggregator on Base",
+      url:location.origin,
+      icons:[location.origin+"/favicon.svg"],
+    },
+  };
+}
+/* روی گوشی، رفتن به اپ والت و برگشتن معمولاً یعنی مرورگر صفحه را از نو بار
+   کرده. نشست WalletConnect خودش در localStorage می‌ماند، ولی ما هیچ‌وقت
+   بازیابی‌اش نمی‌کردیم — پس هر تأیید، کاربر را به «والت قطع شده» برمی‌گرداند
+   و باید از اول همه‌چیز را انتخاب می‌کرد. */
+function hasWcSession(){
+  try{
+    for(let i=0;i<localStorage.length;i++){
+      const k=localStorage.key(i);
+      if(k&&k.indexOf("wc@2:")===0&&/session/i.test(k)){
+        const v=localStorage.getItem(k);
+        if(v&&v!=="[]"&&v!=="{}"&&v!=="null")return true;
+      }
+    }
+  }catch{}
+  return false;
+}
+async function restoreWalletConnect(){
+  if(!hasWcSession())return false;
+  try{
+    const lib=await loadWalletConnect();
+    if(!wcProvider)wcProvider=await lib.EthereumProvider.init(wcInitOptions(false));
+    if(wcProvider.accounts&&wcProvider.accounts.length){
+      await connectWithProvider(wcProvider,false);
+      return !!account;
+    }
+  }catch{}
+  return false;
+}
 async function connectWalletConnect(){
   try{
     setNotice(note("warn","<b>Opening WalletConnect…</b> Loading it now — this happens once."));
     const lib=await loadWalletConnect();
-    if(!wcProvider){
-      wcProvider=await lib.EthereumProvider.init({
-        projectId:WC_PROJECT_ID,
-        chains:[CHAIN.id],
-        optionalChains:[CHAIN.id],
-        showQrModal:true,
-        metadata:{
-          name:BRAND,
-          description:"Zaexa — a DEX aggregator on Base",
-          url:location.origin,
-          icons:[location.origin+"/favicon.svg"],
-        },
-      });
-    }
+    if(!wcProvider)wcProvider=await lib.EthereumProvider.init(wcInitOptions(true));
     setNotice("");
     // enable() هم اتصال را باز می‌کند و هم حساب‌ها را برمی‌گرداند، پس بعدش
     // دوباره eth_requestAccounts نمی‌زنیم تا از کاربر دو بار پرسیده نشود.
@@ -3127,14 +3156,34 @@ async function doApprove(){
   const amountIn=parsedAmountIn();
   setBusy(true,"Confirm in wallet…");
   try{
-    const erc=new E.Contract(routable(tokenIn).address,ABI.erc20,signer);
+    const target=E.getAddress(routable(tokenIn).address);
     /* پیش‌فرض: دقیقاً همان مقداری که این سواپ لازم دارد.
        approve نامحدود راحت‌تر است ولی یعنی قرارداد تا ابد به کل موجودی آن
        توکن دسترسی دارد — همان چیزی که در تهدیدنامه‌ی خودِ این فایل «فاجعه»
        نامیده شده. هرکس دفعات زیاد معامله می‌کند می‌تواند از تنظیمات
        نامحدود را روشن کند؛ ولی انتخابِ خودش باشد، نه پیش‌فرض ما. */
     const cap=unlimitedApprove?E.MaxUint256:amountIn;
-    const tx=await erc.approve(CHAIN.executor,cap);
+    /* برای والت راه‌دور، تراکنش را خام می‌فرستیم و از ethers رد می‌شویم.
+       دو دلیل، هر دو سنجیده‌شده نه حدسی:
+
+       ۱) ethers همیشه `gas` را از RPC *ما* تخمین می‌زند و داخل تراکنش
+          می‌گذارد — با `{gasLimit:null}` هم همین کار را می‌کند (آزمودمش).
+          والت موبایل بعد خودش شبیه‌سازی می‌کند و اگر موافق نباشد ممکن است
+          کل درخواست را رد کند. والت به هر حال تخمین می‌زند، پس این فیلد
+          فقط یک متغیر اضافه است.
+       ۲) لایه‌ی خطای ethers پاسخ والت را در «could not coalesce error»
+          می‌پیچد. خام که بفرستیم، خطای واقعی والت را می‌بینیم.
+
+       مسیر افزونه دست‌نخورده می‌ماند — آنجا کار می‌کند و بی‌دلیل عوضش نمی‌کنیم. */
+    const data=iErc.encodeFunctionData("approve",[CHAIN.executor,cap]);
+    let hash;
+    if(walletIsRemote){
+      hash=await walletEip1193.request({method:"eth_sendTransaction",
+        params:[{from:account,to:target,data}]});
+    }else{
+      hash=(await new E.Contract(target,ABI.erc20,signer).approve(CHAIN.executor,cap)).hash;
+    }
+    const tx={hash};
     const url=`${CHAIN.explorer}/tx/${tx.hash}`;
     setBusy(true,"Approving…");
     setNotice(note("ok",`Approval sent — <a href="${url}" target="_blank" rel="noopener">${shortAddr(tx.hash)}</a>`));
@@ -3306,6 +3355,7 @@ function setBusy(on,label){busy=on;const b=$("actBtn");b.disabled=on;
    تغییرِ وضعیت اجرا می‌شود. */
 function paintAmtClear(){
   const el=$("amtClear");if(el)el.hidden=!$("amtIn").value;
+  savePair();     // همان قلاب: بعد از هر تغییر وضعیت، انتخاب کاربر را نگه دار
 }
 function refreshButton(){
   paintAmtClear();
@@ -3442,6 +3492,34 @@ async function resolveTokenRef(ref){
   if(known)return known;
   await importToken(ref);
   return allTokens().find(t=>!t.native&&t.address.toLowerCase()===ref.toLowerCase())||null;
+}
+/* ---------------------------------------------------------------------
+   نگه‌داشتن انتخاب کاربر بین بارگذاری‌ها
+   ---------------------------------------------------------------------
+   روی گوشی هر رفت‌وبرگشت به اپ والت معمولاً یعنی یک بار بارگذاری دوباره.
+   قبلاً همه‌چیز به پیش‌فرض برمی‌گشت و کاربر باید دوباره توکن و مبلغ را
+   انتخاب می‌کرد — درست وسط تأیید یک تراکنش.
+
+   فقط نماد توکن‌ها و مبلغ ذخیره می‌شود، و فقط از انتخاب خودِ کاربر.
+   لینک همچنان اولویت دارد و هرگز چیزی را ذخیره نمی‌کند. توکن سفارشی هم
+   ذخیره نمی‌شود: پذیرفتن یک آدرس از حافظه همان ریسکی را دارد که برای
+   Custom RPC نپذیرفتیم. */
+const PAIR_KEY="zaexa.pair";
+function savePair(){
+  try{
+    if(!tokenIn||!tokenOut)return;
+    localStorage.setItem(PAIR_KEY,JSON.stringify({
+      in:tokenIn.symbol,out:tokenOut.symbol,amt:($("amtIn").value||"").slice(0,32)}));
+  }catch{}
+}
+function restorePair(){
+  let s=null;
+  try{s=JSON.parse(localStorage.getItem(PAIR_KEY)||"null");}catch{}
+  if(!s)return;
+  const pick=sym=>BASE_TOKENS.find(t=>t.symbol===sym);
+  const a=pick(s.in),b=pick(s.out);
+  if(a&&b&&a!==b){tokenIn=a;tokenOut=b;}
+  if(s.amt&&/^[0-9]*\.?[0-9]+$/.test(s.amt)){mode="exactIn";$("amtIn").value=s.amt;}
 }
 async function applyShareParams(){
   const {params}=parseHash();
@@ -3618,6 +3696,7 @@ function wire(){
   // می‌خواهد بفروشد، نه برعکس.
   tokenIn=BASE_TOKENS.find(t=>t.native);
   tokenOut=BASE_TOKENS.find(t=>t.symbol==="USDC");
+  restorePair();                // انتخاب قبلیِ خودِ کاربر، اگر بود
   paintToken("in",tokenIn);paintToken("out",tokenOut);
   readFee();loadChart();
   setView(parseHash().view||"swap",false);
@@ -3634,12 +3713,15 @@ function wire(){
   await new Promise(r=>setTimeout(r,120));
   // اگر کاربر خودش قطع کرده، هیچ اتصال خودکاری — حتی اگر والت هنوز مجاز بداند
   if(!userDisconnected()){
+    let back=false;
     for(const o of walletOptions()){
       try{
         const a=await o.provider.request({method:"eth_accounts"});
-        if(a&&a.length){await connectWithProvider(o.provider,false);break;}
+        if(a&&a.length){await connectWithProvider(o.provider,false);back=true;break;}
       }catch{}
     }
+    // و اگر افزونه‌ای نبود، شاید نشست WalletConnect هنوز زنده باشد
+    if(!back)await restoreWalletConnect();
   }
   refreshButton();
 })();

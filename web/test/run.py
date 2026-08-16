@@ -732,6 +732,38 @@ async def main():
         assert not remote["remoteReady"] and remote["callsWhileRemote"] == 0, \
             "reads went through the WalletConnect relay; every quote would round-trip to the phone"
 
+        # ---- 2a-quater. approve through a remote wallet must not carry our gas ----
+        # زریون روی eth_sendTransaction خطای {code:404,"Internal error"} می‌داد و
+        # ethers آن را در «could not coalesce error» می‌پیچید. تراکنشی که ethers
+        # می‌سازد `gas` دارد — تخمینِ RPC *ما*، نه والت. با {gasLimit:null} هم
+        # همان است (آزموده شد). برای والت راه‌دور خام می‌فرستیم.
+        appr = await pg.evaluate("""async () => {
+            const sent = [];
+            const realProv = walletEip1193, realAcct = account,
+                  realSigner = signer, realRemote = walletIsRemote,
+                  realTok = tokenIn, realWait = waitForAllowance;
+            account = "0x8A0Dcb583C8CAdc481E34487c34f1B856fe97e23";
+            tokenIn = allTokens().find(t => t.symbol === "USDC");
+            document.getElementById("amtIn").value = "1.5";
+            walletEip1193 = {request: async ({method, params}) => {
+                if (method === "eth_sendTransaction") { sent.push(params[0]); return "0x" + "ab".repeat(32); }
+                return null; }};
+            walletIsRemote = true;
+            waitForAllowance = async () => true;
+            await doApprove();
+            walletEip1193 = realProv; account = realAcct; signer = realSigner;
+            walletIsRemote = realRemote; tokenIn = realTok; waitForAllowance = realWait;
+            return {calls: sent.length, keys: sent[0] ? Object.keys(sent[0]).sort() : null,
+                    to: sent[0] && sent[0].to};
+        }""")
+        print("[approve remote] fields=%s" % (appr["keys"],))
+        assert appr["calls"] == 1, "approve did not reach the wallet: %s" % appr
+        assert "gas" not in (appr["keys"] or []), \
+            ("we sent our own gas estimate to a remote wallet: %s — let the wallet estimate"
+             % appr["keys"])
+        assert set(appr["keys"]) == {"data", "from", "to"}, \
+            "unexpected fields in the approve payload: %s" % appr["keys"]
+
         # ---- 2b-pre. GeckoTerminal request budget ----
         # صف GeckoTerminal تک‌خطی و با فاصله‌ی اجباری است، پس *تعداد*
         # درخواست‌ها مستقیماً می‌شود تأخیری که کاربر می‌بیند: لوگوها دیر
