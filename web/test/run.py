@@ -14,6 +14,10 @@ def build_harness():
 
 URL = "file://" + build_harness()
 
+# آدرس مستقیم GeckoTerminal. درخواست‌ها روی سیم از /gt روی دامنه‌ی خودمان
+# می‌روند، ولی کلید کش همین می‌ماند — کاوشگر [gt proxy] هر دو را می‌سنجد.
+GT_DIRECT = "https://api.geckoterminal.com/api/v2"
+
 def check_no_remote_code():
     """ethers باید از کنار index.html بیاید، نه از CDN.
 
@@ -50,7 +54,24 @@ def check_no_remote_code():
     print("[supply chain] vendored: ethers %.0f KB, walletconnect %.0f KB — no remote scripts"
           % (os.path.getsize(vendored) / 1024, os.path.getsize(wc) / 1024))
 
+def check_gt_proxy_worker():
+    """پراکسی GeckoTerminal یک Worker جداست و در مرورگر بار نمی‌شود، پس
+    سوییت پلی‌رایت نمی‌بیندش. با node آزموده می‌شود، بدون شبکه.
+
+    چرا اینجا و نه جدا: این کد روی همان دامنه‌ای اجرا می‌شود که کارش امضای
+    تراکنش است. اگر allowlist مسیرش شل شود، دامنه‌ی ما پراکسی باز می‌شود.
+    آن آزمون باید هر بار با بقیه اجرا شود، نه وقتی کسی یادش بیفتد."""
+    import subprocess
+    w = os.path.join(HERE, "..", "..", "worker", "test.mjs")
+    if not os.path.exists(w):
+        raise AssertionError("worker/test.mjs is missing — the GeckoTerminal proxy is untested")
+    r = subprocess.run(["node", w], capture_output=True, text=True,
+                       cwd=os.path.dirname(w))
+    sys.stdout.write(r.stdout)
+    assert r.returncode == 0, "the GeckoTerminal proxy worker failed its tests:\n" + r.stderr
+
 check_no_remote_code()
+check_gt_proxy_worker()
 
 async def main():
     errors = []
@@ -880,6 +901,92 @@ async def main():
              % (storm["afterBatch"], storm["tokens"]))
         assert storm["extra"] == 0, \
             "requests still reached the network while the circuit breaker was open"
+
+        # ---- 2b-quater. GeckoTerminal proxy routing ----
+        # سقف نرخ روی IP کاربر است، پس درخواست‌ها از /gt روی دامنه‌ی خودمان
+        # رد می‌شوند. دو چیز باید درست باشد و هیچ‌کدام بدیهی نیست:
+        # ۱) وقتی پراکسی هست، آدرس *بازنویسی* شود ولی کلید کش همان بماند —
+        #    وگرنه هر آدرس دو بار روی سیم می‌رود.
+        # ۲) وقتی پراکسی نیست (استقرار ناقص)، سایت زنده نباید کور شود.
+        #    ولی یک ۴۰۴ واقعیِ خودِ GeckoTerminal *نباید* پراکسی را خاموش کند.
+        proxy = await pg.evaluate("""async () => {
+            const realFetch = window.fetch, seen = [];
+            const out = {};
+            const reply = (status, marked) => new Response("{}", {
+                status, headers: marked ? {"x-zaexa-proxy": "upstream-" + status} : {},
+            });
+
+            // ۱) با پراکسی: آدرس بازنویسی می‌شود، کلید کش همان می‌ماند
+            gtProxy = "https://zaexa.com/gt";
+            gtCache.clear(); gtInflight.clear(); gtFails = 0; gtCoolUntil = 0;
+            window.fetch = async (u) => { seen.push(String(u)); return reply(200, true); };
+            const u = GT + "/networks/base/tokens/0xabc";
+            await gtJson(u);
+            out.wire = seen[0];
+            out.cachedUnder = [...gtCache.keys()][0];
+
+            // ۲) ۴۰۴ *با* نشان = خود GeckoTerminal گفته نیست. پراکسی سالم است.
+            seen.length = 0; gtCache.clear(); gtInflight.clear();
+            gtFails = 0; gtCoolUntil = 0;
+            window.fetch = async (x) => { seen.push(String(x)); return reply(404, true); };
+            try { await gtJson(GT + "/networks/base/tokens/0xdead"); } catch {}
+            out.realMissCalls = seen.length;
+            out.proxyStillOn = !!gtProxy;
+
+            // ۳) ۴۰۴ *بدون* نشان = /gt وجود ندارد. یک بار مستقیم، بعد خاموش.
+            seen.length = 0; gtCache.clear(); gtInflight.clear();
+            gtFails = 0; gtCoolUntil = 0;
+            window.fetch = async (x) => {
+                seen.push(String(x));
+                return String(x).startsWith("https://zaexa.com/gt")
+                    ? reply(404, false) : reply(200, false);
+            };
+            // ⚠️ اگر fallback نباشد این throw می‌کند و کل کاوشگر با یک خطای
+            // خام می‌افتد به‌جای ادعای روشن — پس خودمان می‌گیریمش.
+            out.recovered = true;
+            try { await gtJson(GT + "/networks/base/tokens/0xabc"); }
+            catch (e) { out.recovered = false; }
+            out.firstTry = seen[0];
+            out.retry = seen[1];
+            out.proxyOffAfter = !gtProxy;
+
+            seen.length = 0; gtCache.clear(); gtInflight.clear();
+            gtFails = 0; gtCoolUntil = 0;
+            try { await gtJson(GT + "/networks/base/tokens/0xbeef"); } catch (e) {}
+            out.afterGiveUp = seen[0];
+
+            window.fetch = realFetch;
+            gtProxy = null; gtCache.clear(); gtInflight.clear();
+            gtFails = 0; gtCoolUntil = 0;
+            return out;
+        }""")
+        # ⚠️ کوتاه‌کننده باید None را هم تحمل کند: وقتی کاوشگر می‌افتد، معمولاً
+        # یکی از این کلیدها اصلاً پر نشده، و آن‌وقت خودِ چاپ می‌ترکد و پیام
+        # واقعی گم می‌شود.
+        sh = lambda s: str(s).replace("https://", "")
+        print("[gt proxy] wire=%s cached-as=%s | missing proxy -> %s then %s, later %s"
+              % (sh(proxy["wire"]), sh(proxy["cachedUnder"]), sh(proxy["firstTry"]),
+                 sh(proxy["retry"]), sh(proxy["afterGiveUp"])))
+        assert proxy["wire"] == "https://zaexa.com/gt/networks/base/tokens/0xabc", \
+            "the request did not go through our own proxy: %s" % proxy["wire"]
+        assert proxy["cachedUnder"] == GT_DIRECT + "/networks/base/tokens/0xabc", \
+            ("the cache key must stay the canonical geckoterminal url, otherwise the same "
+             "response is fetched twice: %s" % proxy["cachedUnder"])
+        assert proxy["realMissCalls"] == 1 and proxy["proxyStillOn"], \
+            ("a 404 that came *from* geckoterminal turned the proxy off — "
+             "an unknown token must not disable proxying for the whole session")
+        assert proxy["firstTry"].startswith("https://zaexa.com/gt"), \
+            "the first attempt should try the proxy: %s" % proxy["firstTry"]
+        assert proxy["recovered"], \
+            ("a deployment without /gt made the request fail outright — the page must "
+             "fall back to geckoterminal instead of losing charts and logos")
+        assert proxy["retry"] == GT_DIRECT + "/networks/base/tokens/0xabc", \
+            ("when /gt is missing the page must fall back to geckoterminal directly, "
+             "not go dark: %s" % proxy["retry"])
+        assert proxy["proxyOffAfter"], "the proxy stayed on after it answered 404"
+        assert proxy["afterGiveUp"] == GT_DIRECT + "/networks/base/tokens/0xbeef", \
+            ("after giving up on the proxy every later request must go direct: %s"
+             % proxy["afterGiveUp"])
 
         # ---- 2b-ter. the action button must not move between pairs ----
         # اعلان‌ها بین جدول و دکمه بودند و ارتفاعشان به جفت توکن بستگی دارد،

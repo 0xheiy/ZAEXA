@@ -14,5 +14,13 @@
 name = "zaexa"
 compatibility_date = "2026-08-10"
 
+# اسکریپت Worker فقط برای مسیر /gt است — پراکسی GeckoTerminal.
+# هر مسیر دیگری همچنان مستقیم از فایل‌های ثابت سرو می‌شود؛ وقتی یک آدرس با
+# فایلی در _site جور دربیاید، Worker اصلاً اجرا نمی‌شود.
+main = "worker/index.js"
+
 [assets]
 directory = "./_site"
+# بایندینگ لازم است تا Worker بتواند برای مسیرهای غیر از /gt خودِ فایل‌های
+# ثابت را برگرداند.
+binding = "ASSETS"

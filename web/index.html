@@ -1501,6 +1501,22 @@ function renderExit(x){
    اگر تاریخچه نیامد، *دروغ نمی‌گوییم* — حالت «در دسترس نیست» نشان می‌دهیم.
    ===================================================================== */
 const GT="https://api.geckoterminal.com/api/v2";
+/* ---------------------------------------------------------------------
+   پراکسی روی همان Worker که این صفحه را سرو می‌کند
+   ---------------------------------------------------------------------
+   سقف نرخ GeckoTerminal روی *IP کاربر* است، پس هر بازدیدکننده سهم خودش
+   را دارد و زود ۴۲۹ می‌گیرد — و چون پاسخ ۴۲۹ هدر CORS ندارد، مرورگر
+   وضعیت را به ما نمی‌دهد و از قطعی شبکه قابل تفکیک نیست.
+
+   با عبور از /gt روی دامنه‌ی خودمان: درخواست از IP کلادفلر می‌رود، پاسخ
+   در کش لبه بین همه‌ی کاربران مشترک می‌شود، و وضعیت واقعی (از جمله ۴۲۹)
+   به صفحه می‌رسد. کد Worker در worker/index.js است.
+
+   `GT` عمداً همان آدرس مستقیم می‌ماند: کلید کش و coalescing همان است و
+   بازنویسی فقط لحظه‌ی رفتن روی سیم انجام می‌شود. اگر پراکسی نبود (استقرار
+   ناقص، یا باز کردن فایل با file://) خودکار به همان مسیر قبلی برمی‌گردیم. */
+let gtProxy=/^https?:$/.test(location.protocol)?location.origin+"/gt":null;
+function gtWire(u){return gtProxy&&u.startsWith(GT)?gtProxy+u.slice(GT.length):u;}
 const TFS={
   "1H":{tf:"minute",agg:1,limit:60,fmt:{hour:"2-digit",minute:"2-digit"}},
   "1D":{tf:"minute",agg:15,limit:96,fmt:{hour:"2-digit",minute:"2-digit"}},
@@ -1565,13 +1581,34 @@ function gtJson(url){
       if(wait)await new Promise(r=>setTimeout(r,wait));
       gtLast=Date.now();
       try{
-        const r=await withTimeout(fetch(url,{headers:{accept:"application/json"}}),9000);
-        if(r.status===429||r.status>=500){        // موقتی — دوباره تلاش کن
+        let r=await withTimeout(fetch(gtWire(url),{headers:{accept:"application/json"}}),9000);
+        /* ۴۰۴ *بدون* نشان پراکسی یعنی مسیر /gt روی این استقرار وجود ندارد
+           (پاسخِ خود GeckoTerminal همیشه با نشان می‌آید، چون از پراکسی رد
+           شده). همان‌جا یک بار مستقیم می‌پرسیم و از این به بعد سراغ پراکسی
+           نمی‌رویم — تا یک استقرار ناقص، نمودار و لوگو را روی سایت زنده
+           نکشد. */
+        if(r.status===404&&gtProxy&&!r.headers.get("x-zaexa-proxy")){
+          gtProxy=null;
+          r=await withTimeout(fetch(url,{headers:{accept:"application/json"}}),9000);
+        }
+        /* تا وقتی مستقیم می‌پرسیدیم، ۴۲۹ اصلاً دیده نمی‌شد (پاسخش هدر CORS
+           ندارد) و به‌شکل خطای شبکه درمی‌آمد. حالا که از پراکسی رد می‌شویم
+           وضعیت واقعی می‌رسد — و درست‌ترین واکنش به «داری زیادی می‌پرسی»
+           این نیست که دو بار دیگر بپرسیم. یک‌راست عقب می‌کشیم. */
+        if(r.status===429){
+          const e=new Error("gt 429");e.gtRateLimited=true;throw e;
+        }
+        if(r.status>=500){                        // موقتی — دوباره تلاش کن
           await new Promise(x=>setTimeout(x,900*(i+1)));continue;
         }
-        if(!r.ok)throw new Error("gt "+r.status);  // دائمی — بس است
+        /* ⚠️ این throw قبلاً با کامنت «دائمی — بس است» نوشته شده بود ولی
+           همان catch پایین می‌گرفتش و دو بار دیگر تلاش می‌کرد؛ یعنی یک
+           توکن ناشناس سه درخواست می‌ساخت. حالا نشان‌دار است تا واقعاً بس
+           باشد. */
+        if(!r.ok){const e=new Error("gt "+r.status);e.gtPermanent=true;throw e;}
         return r.json();
       }catch(e){
+        if(e&&(e.gtPermanent||e.gtRateLimited))throw e;
         if(i===GT_TRIES-1)throw e;
         await new Promise(x=>setTimeout(x,900*(i+1)));
       }
@@ -1586,7 +1623,11 @@ function gtJson(url){
          آدرس خاص نیست. ۴۲۹ هم دقیقاً همین شکل را دارد، چون پاسخش هدر CORS
          ندارد و مرورگر آن را به TypeError تبدیل می‌کند. پس همان اولین بار
          عقب می‌کشیم؛ منتظر سه شکست ماندن یعنی فن‌اوت قبلش اتفاق افتاده. */
-      const transport=isTransportError(e)||
+      /* ۴۰۴ به *همین آدرس* مربوط است، نه به سلامت سرویس. اگر آن هم شمرده
+         شود، سه توکنِ ثبت‌نشده در GeckoTerminal کل نمودار و لوگوها را یک
+         دقیقه می‌خواباند. */
+      if(e&&e.gtPermanent)throw e;
+      const transport=isTransportError(e)||!!(e&&e.gtRateLimited)||
         /exhausted retries/i.test(String((e&&e.message)||""));
       if(transport||++gtFails>=GT_FAIL_LIMIT){
         gtFails=0;gtCoolUntil=Date.now()+GT_COOLDOWN;
