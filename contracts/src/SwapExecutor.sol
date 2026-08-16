@@ -347,7 +347,6 @@ contract SwapExecutor {
      * The output is read as a balance difference, not from the router's return value.
      *    v1 trusted the router's number. For fee-on-transfer tokens the two differ:
      *    the router says it sent 1000, 980 arrives, and the next step asks for 1000 -
-     *    which either eats into the contract's leftovers or reverts. And those are
      *    which either eats into the contract's leftovers or reverts. And those are exactly the
      *    tokens users come to the Exit check to inspect.
      */
@@ -509,7 +508,6 @@ contract SwapExecutor {
      * Recovers stranded ETH.
      * `receive()` blocks ordinary transfers, but `selfdestruct` and block rewards get
      * through anyway. v1 had no exit path for ETH, so anything arriving that way was
-     * locked forever on a non-upgradeable contract. The contract holds no ETH between
      * locked forever on a non-upgradeable contract. The contract holds no ETH between
      * transactions, so there is never anything here but accidental leftovers.
      */
