@@ -2913,6 +2913,8 @@ async function connectWithProvider(provider,requestAccounts){
     // «راه دور» یعنی هر درخواست باید تا گوشی برود و برگردد → برای خواندن
     // استفاده نمی‌شود. wcProvider تنها چیزی است که این‌طور است.
     walletIsRemote=(provider===wcProvider);
+    // فقط انتخاب صریح خودِ کاربر «قطع کردم» را باطل می‌کند، نه یک اتصال خودکار
+    if(requestAccounts)markDisconnected(false);
     detachWalletEvents();walletEip1193=provider;
     account=E.getAddress(a[0]);
     walletProvider=new E.BrowserProvider(provider,"any");
@@ -2949,11 +2951,35 @@ function paintWallet(){
 /* قطع اتصال. کیف پول‌ها API قطع اتصال ندارند، پس تنها کاری که *واقعاً*
    می‌شود کرد پاک کردن وضعیت سمت ماست — و باید صادقانه همین را بگوییم،
    نه اینکه وانمود کنیم دسترسی سایت از کیف پول برداشته شد. */
-function disconnect(){
+/* «قطع کردم» باید بماند.
+   قبلاً disconnect فقط وضعیت سمت ما را پاک می‌کرد. ولی والت هنوز سایت را
+   مجاز می‌دانست، پس بارگذاری بعدی با eth_accounts آدرس را می‌گرفت و بی‌صدا
+   دوباره وصل می‌شد — و کلیک روی Connect هم بدون هیچ پرسشی وصل می‌شد، چون
+   اجازه از قبل داده شده بود. کاربر «قطع» را دیده بود و ما نادیده‌اش گرفتیم.
+
+   نمی‌توانیم اجازه را از سمت والت پس بگیریم (و همین را هم صریح می‌گوییم)،
+   ولی *می‌توانیم* و باید به تصمیمش احترام بگذاریم: تا وقتی خودش دوباره
+   صریحاً یک کیف پول انتخاب نکند، هیچ اتصال خودکاری انجام نمی‌شود. */
+const DISCONNECT_KEY="zaexa.disconnected";
+function userDisconnected(){
+  try{return localStorage.getItem(DISCONNECT_KEY)==="1";}catch{return false;}
+}
+function markDisconnected(on){
+  try{on?localStorage.setItem(DISCONNECT_KEY,"1"):localStorage.removeItem(DISCONNECT_KEY);}
+  catch{}
+}
+async function disconnect(){
+  markDisconnected(true);
+  /* WalletConnect برخلاف افزونه‌ها قطع اتصال *واقعی* دارد: نشست را می‌بندد
+     و گوشی هم آن را می‌بیند. پس آنجا واقعاً دسترسی برداشته می‌شود. */
+  const wasRemote=walletIsRemote;
+  if(wasRemote&&wcProvider){try{await wcProvider.disconnect();}catch{}wcProvider=null;}
   clearWalletState();
   if(view==="folio")renderFolio();
-  setNotice(note("ok","<b>Disconnected.</b> This clears the site only — to remove "+
-    "the site's access entirely, do it from your wallet's connected-sites list."));
+  setNotice(note("ok",wasRemote
+    ? "<b>Disconnected.</b> The WalletConnect session was closed on both sides."
+    : "<b>Disconnected.</b> We will not reconnect on our own. Your wallet may still "+
+      "list this site as allowed — remove it there if you want the access gone too."));
 }
 async function refreshBalances(){
   if(!account){balances={};paintBalances();return;}
@@ -3220,9 +3246,27 @@ async function doSwap(){
 }
 function showError(title,err,extra){
   console.error(title,err,extra);
+  /* «could not coalesce error» یعنی خودِ ethers نتوانسته از پاسخ والت یک خطای
+     قابل‌فهم بسازد — معمولاً چون والت چیزی برگردانده که شکل استانداردِ
+     JSON-RPC ندارد. اگر فقط همان جمله را چاپ کنیم، دقیقاً همان چیزی را دور
+     ریخته‌ایم که برای فهمیدن ماجرا لازم است. پس لایه‌های زیرین را هم برمی‌داریم:
+     خطای اصلی، payload فرستاده‌شده، و پاسخ خام والت. */
+  const peel=e=>{
+    if(!e||typeof e!=="object")return e===undefined?null:e;
+    const o={};
+    for(const k of ["message","shortMessage","reason","code","data","status"])
+      if(e[k]!==undefined)o[k]=typeof e[k]==="object"?peel(e[k]):e[k];
+    if(e.error)o.error=peel(e.error);
+    if(e.info)o.info=peel(e.info);
+    if(e.payload)o.payload=peel(e.payload);
+    if(e.cause&&e.cause!==e)o.cause=peel(e.cause);
+    return o;
+  };
   const raw=JSON.stringify({
     error:{message:err&&(err.shortMessage||err.message),reason:err&&err.reason,code:err&&err.code,
-      data:err&&(err.data||(err.info&&err.info.error&&err.info.error.message))},
+      data:err&&(err.data||(err.info&&err.info.error&&err.info.error.message)),
+      detail:peel(err),
+      wallet:walletIsRemote?"walletconnect":"injected"},
     context:Object.assign({
       pair:tokenIn&&tokenOut?tokenIn.symbol+" -> "+tokenOut.symbol:"?",
       amountIn:$("amtIn").value,slippageBps,feeBps,readSource:liveSrc,
@@ -3588,11 +3632,14 @@ function wire(){
      تیک بعد از درخواست برسد. */
   scanWallets();
   await new Promise(r=>setTimeout(r,120));
-  for(const o of walletOptions()){
-    try{
-      const a=await o.provider.request({method:"eth_accounts"});
-      if(a&&a.length){await connectWithProvider(o.provider,false);break;}
-    }catch{}
+  // اگر کاربر خودش قطع کرده، هیچ اتصال خودکاری — حتی اگر والت هنوز مجاز بداند
+  if(!userDisconnected()){
+    for(const o of walletOptions()){
+      try{
+        const a=await o.provider.request({method:"eth_accounts"});
+        if(a&&a.length){await connectWithProvider(o.provider,false);break;}
+      }catch{}
+    }
   }
   refreshButton();
 })();

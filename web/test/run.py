@@ -664,6 +664,46 @@ async def main():
         print("[icons] logo images: %s   fallback initials: %r" % (logos, initials.strip()))
         assert initials.strip() != "", "initials must always be present as a fallback"
 
+        # ---- 2a-bis. Disconnect must actually stay disconnected ----
+        # باگ واقعی روی سایت زنده: disconnect فقط وضعیت سمت ما را پاک می‌کرد،
+        # ولی والت هنوز سایت را مجاز می‌دانست. پس رفرش بعدی با eth_accounts
+        # بی‌صدا دوباره وصل می‌شد و آدرس کاربر برمی‌گشت، بدون هیچ پرسشی.
+        dis = await pg.evaluate("""async () => {
+            localStorage.removeItem("zaexa.disconnected");
+            const fake = {__who: "ghost", request: async ({method}) =>
+                method === "eth_accounts" || method === "eth_requestAccounts"
+                    ? ["0x8A0Dcb583C8CAdc481E34487c34f1B856fe97e23"] : null,
+                on(){}, removeListener(){}};
+            const out = {};
+            out.autoBefore = !userDisconnected();
+
+            account = "0x8A0Dcb583C8CAdc481E34487c34f1B856fe97e23";
+            walletChainId = CHAIN.id; walletProvider = {}; paintWallet();
+            await disconnect();
+
+            out.cleared = account === null;
+            out.flagged = userDisconnected();
+            // همان کاری که بارگذاری صفحه می‌کند
+            const accs = await fake.request({method: "eth_accounts"});
+            out.walletStillAllows = !!(accs && accs.length);
+            out.wouldAutoConnect = !userDisconnected();
+            // و انتخاب صریح خودِ کاربر باید دوباره اجازه بدهد
+            markDisconnected(false);
+            out.afterExplicit = !userDisconnected();
+            localStorage.removeItem("zaexa.disconnected");
+            return out;
+        }""")
+        print("[disconnect] cleared=%s remembered=%s walletStillAllows=%s autoReconnect=%s"
+              % (dis["cleared"], dis["flagged"], dis["walletStillAllows"], dis["wouldAutoConnect"]))
+        assert dis["cleared"], "disconnect must clear the account"
+        assert dis["flagged"], "disconnect must be remembered across reloads"
+        assert dis["walletStillAllows"], \
+            "the probe is wrong: the wallet is supposed to still allow the site"
+        assert not dis["wouldAutoConnect"], \
+            "the site would silently reconnect after the user pressed Disconnect"
+        assert dis["afterExplicit"], \
+            "picking a wallet explicitly must undo the disconnect, or connecting breaks"
+
         # ---- 2a-ter. reads must never be routed through a remote wallet ----
         # با WalletConnect هر eth_call باید از رله به گوشی برود و برگردد. اگر
         # خواندن‌ها از آنجا بروند، هر کوت و هر allowance ثانیه‌ها طول می‌کشد و
