@@ -1533,9 +1533,30 @@ function gtTtl(u){
   if(/\/ohlcv\//.test(u))return 45000;
   return 60000;
 }
+/* قطع‌کننده‌ی مدار.
+
+   وقتی GeckoTerminal سقف نرخ را اعمال می‌کند، پاسخ ۴۲۹ هدر CORS ندارد، پس
+   مرورگر اصلاً وضعیت را به ما نمی‌دهد — `fetch` فقط throw می‌کند. یعنی
+   نمی‌توانیم «این ۴۲۹ است» را تشخیص بدهیم و ادعایش هم نمی‌کنیم.
+
+   ولی لازم هم نیست: چیزی که می‌بینیم کافی است — سرویس پشت سر هم شکست
+   می‌خورد. در آن حالت ادامه‌ی درخواست‌ها هم بی‌فایده است هم وضع را بدتر
+   می‌کند. پس بعد از چند شکست پیاپی، یک دقیقه کامل دست نگه می‌داریم و
+   درخواست‌ها را بی‌درنگ رد می‌کنیم بدون اینکه به شبکه بزنند.
+
+   خطای این حالت پرچم `gtBackoff` می‌گیرد تا فراخوان‌ها بدانند «سرویس در
+   دسترس نیست»، نه «این آدرس خاص مشکل دارد». */
+const GT_FAIL_LIMIT=3,GT_COOLDOWN=60000;
+let gtFails=0,gtCoolUntil=0;
+function gtBackoffError(msg){
+  const e=new Error(msg);e.gtBackoff=true;return e;
+}
+function rateLimited(e){return !!(e&&e.gtBackoff);}
 function gtJson(url){
   const hit=gtCache.get(url);
   if(hit&&Date.now()-hit.t<gtTtl(url))return Promise.resolve(hit.v);
+  if(Date.now()<gtCoolUntil)
+    return Promise.reject(gtBackoffError("gt: backing off after repeated failures"));
   const flying=gtInflight.get(url);
   if(flying)return flying;
   const run=async()=>{
@@ -1558,8 +1579,21 @@ function gtJson(url){
     throw new Error("gt: exhausted retries");
   };
   const next=gtChain.then(run,run).then(
-    v=>{gtCache.set(url,{t:Date.now(),v});gtInflight.delete(url);return v;},
-    e=>{gtInflight.delete(url);throw e;});
+    v=>{gtFails=0;gtCache.set(url,{t:Date.now(),v});gtInflight.delete(url);return v;},
+    e=>{
+      gtInflight.delete(url);
+      /* شکست انتقالی — یعنی اصلاً پاسخ HTTP نگرفتیم — هیچ‌وقت مربوط به یک
+         آدرس خاص نیست. ۴۲۹ هم دقیقاً همین شکل را دارد، چون پاسخش هدر CORS
+         ندارد و مرورگر آن را به TypeError تبدیل می‌کند. پس همان اولین بار
+         عقب می‌کشیم؛ منتظر سه شکست ماندن یعنی فن‌اوت قبلش اتفاق افتاده. */
+      const transport=isTransportError(e)||
+        /exhausted retries/i.test(String((e&&e.message)||""));
+      if(transport||++gtFails>=GT_FAIL_LIMIT){
+        gtFails=0;gtCoolUntil=Date.now()+GT_COOLDOWN;
+        throw gtBackoffError("gt: backing off after repeated failures");
+      }
+      throw e;
+    });
   gtInflight.set(url,next);
   gtChain=next.catch(()=>{});
   return next;
@@ -2025,14 +2059,21 @@ async function loadMetas(addrs){
         const at=d.attributes||{};
         if(at.address)metaCache[at.address.toLowerCase()]=at;
       });
-    }catch{
-      // دسته‌ای شکست خورد → تک‌تک، و باز هم شکست را کش نمی‌کنیم
+    }catch(e){
+      /* ⚠️ فقط وقتی تک‌تک می‌پرسیم که شکست به *یک آدرس خاص* مربوط باشد.
+
+         اگر علت سقف نرخ یا قطعی شبکه بود، پرسیدن تک‌تک بدترین واکنش ممکن
+         است: یک دسته‌ی ۱۴تایی می‌شود ۱۴ درخواست، هرکدام با تلاش دوباره —
+         یعنی از یک درخواست چهل‌ودو تا درمی‌آید و همه ۴۲۹ می‌خورند. روی سایت
+         زنده دقیقاً همین اتفاق افتاد و کندیِ لوگوها از همین بود. حلقه‌ای که
+         برای مقاومت گذاشته شده بود، در برابر این نوع شکست ضدخودش عمل می‌کرد. */
+      if(rateLimited(e))throw e;
       for(const a of batch){
         try{
           const j=await gtJson(`${GT}/networks/${CHAIN.gtNetwork}/tokens/${a}`);
           const at=((j||{}).data||{}).attributes;
           if(at)metaCache[a]=at;
-        }catch{}
+        }catch(e2){if(rateLimited(e2))throw e2;}
       }
     }
   }

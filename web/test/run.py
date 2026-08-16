@@ -852,6 +852,35 @@ async def main():
         assert budget["dupCalls"] == 1, \
             "four requests for the same url hit the network %s times" % budget["dupCalls"]
 
+        # وقتی سرویس پشت سر هم شکست می‌خورد، ادامه‌ی درخواست‌ها هم بی‌فایده است
+        # هم وضع را بدتر می‌کند. روی سایت زنده همین اتفاق افتاد: دسته ۴۲۹ خورد،
+        # loadMetas تک‌تک پرسید، و یک درخواست به چهل‌ودو تا تبدیل شد.
+        storm = await pg.evaluate("""async () => {
+            const realFetch = window.fetch;
+            let hits = 0;
+            window.fetch = async () => { hits++; throw new TypeError("Failed to fetch"); };
+            gtCache.clear(); gtInflight.clear(); gtFails = 0; gtCoolUntil = 0;
+            Object.keys(metaCache).forEach(k => delete metaCache[k]);
+
+            const toks = allTokens().filter(t => !t.native).map(t => t.address);
+            try { await loadMetas(toks); } catch {}
+            const afterBatch = hits;
+            // و درخواست‌های بعدی، تا وقتی در حالت خنک‌شدن هستیم، به شبکه نزنند
+            try { await gtJson(GT + "/networks/base/tokens/" + toks[0]); } catch {}
+            const afterCooldown = hits;
+
+            window.fetch = realFetch; gtFails = 0; gtCoolUntil = 0;
+            return {tokens: toks.length, afterBatch, extra: afterCooldown - afterBatch};
+        }""")
+        print("[gt storm] %s tokens, everything failing -> %s network hits, %s more while cooling"
+              % (storm["tokens"], storm["afterBatch"], storm["extra"]))
+        assert storm["afterBatch"] <= 4, \
+            ("a failing batch fanned out into %s requests for %s tokens - when the service "
+             "is down, asking one address at a time only makes it worse"
+             % (storm["afterBatch"], storm["tokens"]))
+        assert storm["extra"] == 0, \
+            "requests still reached the network while the circuit breaker was open"
+
         # ---- 2b-ter. the action button must not move between pairs ----
         # اعلان‌ها بین جدول و دکمه بودند و ارتفاعشان به جفت توکن بستگی دارد،
         # پس دکمه با هر تعویض توکن تا ۷۸ پیکسل بالا و پایین می‌پرید — درست
