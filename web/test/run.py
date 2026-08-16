@@ -852,6 +852,37 @@ async def main():
         assert budget["dupCalls"] == 1, \
             "four requests for the same url hit the network %s times" % budget["dupCalls"]
 
+        # ---- 2b-ter. the action button must not move between pairs ----
+        # اعلان‌ها بین جدول و دکمه بودند و ارتفاعشان به جفت توکن بستگی دارد،
+        # پس دکمه با هر تعویض توکن تا ۷۸ پیکسل بالا و پایین می‌پرید — درست
+        # همان لحظه‌ای که کاربر می‌خواهد کلیک کند.
+        tops = {}
+        # ⚠️ نه `a, b` — `b` نام مرورگر است و سایه‌انداختن رویش قبلاً
+        #    await b.close() را در انتهای تست ترکانده بود.
+        for sIn, sOut in [("USDC", "WETH"), ("ETH", "USDC"),
+                          ("cbBTC", "DAI"), ("USDC", "AERO")]:
+            await pg.evaluate("""([i, o]) => {
+                tokenIn = allTokens().find(t => t.symbol === i);
+                tokenOut = allTokens().find(t => t.symbol === o);
+                paintToken("in", tokenIn); paintToken("out", tokenOut);
+                loadChart(); runScan(tokenOut);
+            }""", [sIn, sOut])
+            await pg.fill("#amtIn", "1")
+            await pg.wait_for_timeout(3200)
+            tops[f"{sIn}->{sOut}"] = await pg.evaluate("""() => {
+                const r = document.getElementById("actBtn").getBoundingClientRect();
+                const n = document.getElementById("notices").getBoundingClientRect();
+                return {top: Math.round(r.top), notice: Math.round(n.height)};
+            }""")
+        for k, v in tops.items():
+            print("[cta %s] top=%s (notice height %s)" % (k, v["top"], v["notice"]))
+        uniq = {v["top"] for v in tops.values()}
+        assert len(uniq) == 1, \
+            ("the swap button jumps between pairs: %s — anything whose height depends on the "
+             "pair must sit below it, not above" % tops)
+        assert any(v["notice"] > 0 for v in tops.values()), \
+            "the probe is toothless: no pair produced a notice, so nothing was actually tested"
+
         # ---- 2b-bis. clear button, header layout, token stats ----
         clr = await pg.evaluate("""async () => {
             const inp = document.getElementById("amtIn"),
