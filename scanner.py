@@ -251,7 +251,10 @@ def adjust_severity_by_ownership(report: TokenReport):
     for f in report.findings:
         if f.level in downgrade and f.title not in (
                 "قرارداد نیست", "ERC20 معتبر نیست", "هیچ استخری پیدا نشد",
-                "نقدینگی بسیار کم", "کوت فروش نگرفت", "کوت خرید نگرفت",
+                # ⚠️ عنوان «کوت فروش نگرفت» به «کوت فروش رد شد» تغییر کرد؛
+                #    اگر اینجا به‌روز نشود، یک یافته‌ی honeypot بی‌صدا تنزل
+                #    پیدا می‌کند چون توکن مالک فعال ندارد.
+                "نقدینگی بسیار کم", "کوت فروش رد شد", "کوت خرید نگرفت",
                 "افت شدید در رفت‌وبرگشت"):
             f.level = downgrade[f.level]
             f.detail = f.detail + "\n" + note
@@ -372,7 +375,24 @@ def measure_pool_liquidity(w3: Web3, chain: Chain, pool: PoolInfo,
 
 def quote_on_venue(w3: Web3, venue: Venue, token_in: str, token_out: str,
                    amount_in: int) -> Optional[int]:
-    """یک کوت از یک مکان مشخص. None یعنی نشد."""
+    """یک کوت از یک مکان مشخص. None یعنی نشد — بدون اینکه بگوید چرا."""
+    val, _ = quote_on_venue_st(w3, venue, token_in, token_out, amount_in)
+    return val
+
+
+def quote_on_venue_st(w3: Web3, venue: Venue, token_in: str, token_out: str,
+                      amount_in: int):
+    """
+    مثل quote_on_venue ولی *دلیل* نشدن را هم برمی‌گرداند: (مقدار، وضعیت)
+    وضعیت یکی از "ok" | "missing" | "rpc_error" است.
+
+    ⚠️ چرا این تفکیک لازم شد: تابع بالا هر دو حالت را None می‌کرد، و
+    check_tradability آن None را «نشانه‌ی جدی honeypot» می‌خواند. نتیجه‌اش
+    این بود که cbETH — توکن استیکینگ کوین‌بیس — یافته‌ی بحرانی honeypot
+    گرفت، فقط چون کوت فروشش در برابر USDC جواب نداده بود.
+
+    «قرارداد revert کرد» شاهد است. «نتوانستیم بپرسیم» شاهد نیست.
+    """
     dex = venue.dex
     ti = Web3.to_checksum_address(token_in)
     to = Web3.to_checksum_address(token_out)
@@ -392,7 +412,7 @@ def quote_on_venue(w3: Web3, venue: Venue, token_in: str, token_out: str,
                             abi=V2_ROUTER_ABI)
         q = lambda: c.functions.getAmountsOut(amount_in, [ti, to]).call()[-1]
     val, status = try_call(q)
-    return val if status == "ok" else None
+    return (val if status == "ok" else None), status
 
 
 def check_tradability(w3: Web3, chain: Chain, report: TokenReport,
@@ -412,19 +432,29 @@ def check_tradability(w3: Web3, chain: Chain, report: TokenReport,
     amount_in = 100 * (10 ** ref.decimals)
     best_out = None
     best_venue = None
+    buy_unreachable = 0          # چند مکان اصلاً جواب ندادند (نه اینکه رد کردند)
 
     for dex in chain.dexes:
         for v in dex.variants():
             venue = Venue(dex, v["fee_tier"], v["stable"])
-            out = quote_on_venue(w3, venue, ref.address, token_addr, amount_in)
+            out, st = quote_on_venue_st(w3, venue, ref.address, token_addr, amount_in)
+            if st == "rpc_error":
+                buy_unreachable += 1
+                continue
             if out and out > 0 and (best_out is None or out > best_out):
                 best_out, best_venue = out, venue
 
     if best_out:
         report.can_quote_buy = True
         # فروش: همان مقداری که خریدیم را برگردانیم
-        back = quote_on_venue(w3, best_venue, token_addr, ref.address, best_out)
-        if back and back > 0:
+        back, back_st = quote_on_venue_st(w3, best_venue, token_addr, ref.address, best_out)
+        if back_st == "rpc_error":
+            # نتوانستیم بپرسیم. این هیچ چیزی درباره‌ی توکن نمی‌گوید و
+            # نباید امتیاز خطر بگیرد.
+            report.add("info", "کوت فروش سنجیده نشد",
+                       "شبکه به کوت فروش جواب نداد، پس درباره‌ی فروش‌پذیری\n"
+                       "       این توکن چیزی نمی‌دانیم — نه خوب، نه بد. دوباره تلاش کن.")
+        elif back and back > 0:
             report.can_quote_sell = True
             ratio = Decimal(back) / Decimal(amount_in)
             loss_pct = (1 - ratio) * 100
@@ -439,8 +469,13 @@ def check_tradability(w3: Web3, chain: Chain, report: TokenReport,
                 report.add("info", "رفت‌وبرگشت طبیعی ✓",
                            f"افت خرید و فروش فوری: {loss_pct:.1f}٪ (در حد کارمزد معمول)")
         else:
-            report.add("critical", "کوت فروش نگرفت",
-                       "می‌شود خرید ولی کوت فروش جواب نداد — نشانه‌ی جدی honeypot.")
+            report.add("critical", "کوت فروش رد شد",
+                       "می‌شود خرید ولی قرارداد کوت فروش را رد کرد — نشانه‌ی جدی honeypot.")
+    elif buy_unreachable:
+        # همه‌ی مکان‌هایی که ممکن بود جواب بدهند، اصلاً پاسخ ندادند
+        report.add("info", "خرید و فروش سنجیده نشد",
+                   f"{buy_unreachable} مکان به کوت جواب ندادند، پس نه خرید و نه\n"
+                   "       فروش آزموده شد. این «نمی‌شود خرید» نیست.")
     else:
         report.add("critical", "کوت خرید نگرفت",
                    "هیچ استخری برای خرید این توکن پیدا نشد یا نقدینگی صفر است.")

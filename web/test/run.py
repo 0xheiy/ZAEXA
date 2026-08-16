@@ -664,6 +664,33 @@ async def main():
         print("[icons] logo images: %s   fallback initials: %r" % (logos, initials.strip()))
         assert initials.strip() != "", "initials must always be present as a fallback"
 
+        # ---- 2a-pre. the token list itself ----
+        toks = await pg.evaluate(
+            "() => BASE_TOKENS.map(t => ({s: t.symbol, d: t.decimals,"
+            " a: t.address, st: !!t.stable, n: t.native}))")
+        print("[token list] %s" % ", ".join(f"{t['s']}/{t['d']}" for t in toks))
+        seen = {}
+        for t in toks:
+            assert t["s"] not in seen, "duplicate symbol in the token list: %s" % t["s"]
+            seen[t["s"]] = t
+            if not t["n"]:
+                assert t["a"].startswith("0x") and len(t["a"]) == 42, \
+                    "%s has a malformed address: %s" % (t["s"], t["a"])
+            assert isinstance(t["d"], int) and 0 < t["d"] <= 18, \
+                "%s has implausible decimals: %s" % (t["s"], t["d"])
+        # ⚠️ `stable` یعنی «تقریباً یک دلار» و مستقیم در قیمت‌گذاری می‌نشیند.
+        #    EURC به یورو وصل است؛ اگر روزی کسی این پرچم را برایش بگذارد،
+        #    قیمت‌ها بی‌صدا حدود ۸٪ غلط می‌شوند.
+        assert not seen["EURC"]["st"], \
+            "EURC is euro-pegged — marking it stable makes every price using it wrong"
+        for s in ["USDC", "USDT", "USDbC", "DAI"]:
+            assert seen[s]["st"], "%s is dollar-pegged and must be marked stable" % s
+        # اعشار خوانده‌شده از زنجیره (۱۶ آگوست ۲۰۲۶) — قفلش می‌کنیم
+        for s, d in [("USDT", 6), ("USDbC", 6), ("EURC", 6), ("cbETH", 18),
+                     ("wstETH", 18), ("VIRTUAL", 18), ("MORPHO", 18), ("DEGEN", 18)]:
+            assert seen[s]["d"] == d, \
+                "%s decimals drifted from what the contract reports: %s" % (s, seen[s]["d"])
+
         # ---- 2a-bis. Disconnect must actually stay disconnected ----
         # باگ واقعی روی سایت زنده: disconnect فقط وضعیت سمت ما را پاک می‌کرد،
         # ولی والت هنوز سایت را مجاز می‌دانست. پس رفرش بعدی با eth_accounts

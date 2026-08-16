@@ -52,13 +52,25 @@ class Candidate:
     risk_score: Optional[int] = None
     critical_findings: int = 0
     rejections: List[str] = field(default_factory=list)
+    unknowns: List[str] = field(default_factory=list)
+    failed_quotes: int = 0
 
     @property
     def accepted(self) -> bool:
-        return not self.rejections
+        return not self.rejections and not self.unknowns
+
+    @property
+    def undecided(self) -> bool:
+        """نه رد شد، نه پذیرفته شد — فقط نتوانستیم بسنجیمش."""
+        return bool(self.unknowns) and not self.rejections
 
     def reject(self, reason: str):
+        """توکن را *سنجیدیم* و شرط را رد کرد."""
         self.rejections.append(reason)
+
+    def unknown(self, reason: str):
+        """نتوانستیم بسنجیم. این با «رد شد» یکی نیست و نباید یکی گزارش شود."""
+        self.unknowns.append(reason)
 
 
 def _pool_address(w3: Web3, venue: Venue, a: str, b: str) -> Optional[str]:
@@ -92,20 +104,38 @@ def evaluate_candidate(w3: Web3, chain: Chain, token_addr: str,
     """
     addr = Web3.to_checksum_address(token_addr)
     erc = w3.eth.contract(address=addr, abi=ERC20_ABI)
-    sym, _ = try_call(lambda: erc.functions.symbol().call(), default="?")
+    sym, sym_st = try_call(lambda: erc.functions.symbol().call(), default="?")
     dec, st = try_call(lambda: erc.functions.decimals().call())
 
     c = Candidate(address=addr, symbol=sym or "?", decimals=dec or 18)
 
-    if st != "ok" or dec is None:
-        c.reject("ERC20 معتبر نیست یا خوانده نشد")
+    # ⚠️ «نخواندیم» با «نیست» یکی نیست. try_call همین حالا سه حالت برمی‌گرداند
+    #    (ok / missing / rpc_error) و قبلاً هر دوی آخری به یک پیامِ «ERC20
+    #    معتبر نیست یا خوانده نشد» تبدیل می‌شد. نتیجه‌اش این بود که USDbC و
+    #    DEGEN — دو توکن کاملاً استاندارد Base — «نامعتبر» گزارش شدند، چون
+    #    RPC آن لحظه جواب نداده بود.
+    if st == "rpc_error":
+        c.unknown("قرارداد خوانده نشد — شبکه جواب نداد، نه اینکه ERC-20 نباشد")
         return c
+    if st != "ok" or dec is None:
+        c.reject("ERC20 معتبر نیست")
+        return c
+    # نماد خوانده‌نشده «?» نیست — نامعلوم است. بدون این، wstETH در گزارش
+    # با نام «?» می‌آمد انگار قرارداد نامش را ندارد.
+    if sym_st == "rpc_error":
+        c.unknown("نماد خوانده نشد — شبکه جواب نداد")
 
     # --- فیلتر ۱ و ۲: نقدینگی و تعداد مکان ---
     venues = _all_venues(chain)
     total_liq = Decimal(0)
     seen_venues = set()
     paired_with = []
+    # مکان‌هایی که استخرشان *با همان توکن مرجعِ قیمت‌گذاری* عمق دارد.
+    # این با seen_venues فرق می‌کند و فرقش مهم است: seen_venues روی همه‌ی
+    # مرجع‌ها پر می‌شود، ولی کوت قیمت فقط در برابر chain.reference گرفته
+    # می‌شود. یک فی‌تیر می‌تواند استخر عمیق TOKEN/WETH داشته باشد و استخر
+    # خالی TOKEN/USDC — و همان استخر خالی بود که «۴۲۳٬۲۲۶٪ اختلاف» می‌ساخت.
+    ref_venues = set()
 
     for sym_ref, ref in chain.tokens.items():
         if ref.address.lower() == addr.lower():
@@ -122,12 +152,20 @@ def evaluate_candidate(w3: Web3, chain: Chain, token_addr: str,
                                       abi=ERC20_ABI)
             bal, bst = try_call(
                 lambda: ref_erc.functions.balanceOf(Web3.to_checksum_address(pool)).call())
+            # استخری که موجودی‌اش را نتوانستیم بخوانیم، «خالی» نیست — نامعلوم
+            # است. قبلاً بی‌صدا صفر حساب می‌شد، پس «نقدینگی کم» می‌توانست
+            # فقط یعنی «شبکه جواب نداد».
+            if bst == "rpc_error":
+                c.failed_quotes += 1
+                continue
             if bst != "ok" or not bal:
                 continue
             val = Decimal(bal) / (10 ** ref.decimals) * price_ref
             if val > Decimal(1000):        # استخرهای ناچیز شمرده نشوند
                 total_liq += val
                 seen_venues.add(v.name)
+                if sym_ref == chain.reference:
+                    ref_venues.add(v.name)
                 found_pair = True
         if found_pair:
             paired_with.append(sym_ref)
@@ -136,13 +174,18 @@ def evaluate_candidate(w3: Web3, chain: Chain, token_addr: str,
     c.venue_count = len(seen_venues)
     c.reference_pairs = paired_with
 
-    if total_liq < Decimal(MIN_LIQUIDITY_USD):
+    # اگر بخشی از استخرها اصلاً خوانده نشدند، عددهای زیر ناقص‌اند و ادعای
+    # قطعی روی‌شان («نقدینگی کم») غلط است. هر شکستی ادعا را نامعلوم می‌کند.
+    if c.failed_quotes:
+        c.unknown(f"{c.failed_quotes} استخر خوانده نشد — نقدینگی و تعداد مکان ناقص است")
+    elif total_liq < Decimal(MIN_LIQUIDITY_USD):
         c.reject(f"نقدینگی کم: ${float(total_liq):,.0f} < ${MIN_LIQUIDITY_USD:,}")
-    if len(seen_venues) < MIN_VENUES:
-        c.reject(f"فقط در {len(seen_venues)} مکان (حداقل {MIN_VENUES} لازم است)")
-    if len(paired_with) < MIN_REFERENCE_PAIRS:
-        c.reject(f"فقط با {len(paired_with)} توکن مرجع جفت دارد "
-                 f"(حداقل {MIN_REFERENCE_PAIRS} لازم است)")
+    if not c.failed_quotes:
+        if len(seen_venues) < MIN_VENUES:
+            c.reject(f"فقط در {len(seen_venues)} مکان (حداقل {MIN_VENUES} لازم است)")
+        if len(paired_with) < MIN_REFERENCE_PAIRS:
+            c.reject(f"فقط با {len(paired_with)} توکن مرجع جفت دارد "
+                     f"(حداقل {MIN_REFERENCE_PAIRS} لازم است)")
 
     # --- فیلتر ۳: سازگاری قیمت بین مسیرهای مختلف ---
     ref_tok = chain.token(chain.reference)
@@ -150,10 +193,17 @@ def evaluate_candidate(w3: Web3, chain: Chain, token_addr: str,
         probe = 10 ** c.decimals
         prices = []
         for v in venues:
+            # ⚠️ فقط مکان‌هایی که در شمارش نقدینگی هم به حساب آمدند. قبلاً
+            #    min/max روی *همه‌ی* مکان‌ها گرفته می‌شد، بدون هیچ کف نقدینگی؛
+            #    یک استخر متروکِ چنددلاری با قیمت پرت، lo را نزدیک صفر می‌کرد
+            #    و نسبت منفجر می‌شد. عددهایی مثل «۴۲۳٬۲۱۹٪ اختلاف» واقعیت
+            #    بازار نبودند، همان استخر خالی بودند.
+            if v.name not in ref_venues:
+                continue
             out = quote_on_venue(w3, v, addr, ref_tok.address, probe)
             if out and out > 0:
                 prices.append(Decimal(out) / (10 ** ref_tok.decimals))
-        if prices:
+        if len(prices) >= 2:
             lo, hi = min(prices), max(prices)
             c.price_usd = sum(prices) / len(prices)
             if lo > 0:
@@ -162,6 +212,12 @@ def evaluate_candidate(w3: Web3, chain: Chain, token_addr: str,
                 if dev > Decimal(str(MAX_PRICE_DEVIATION_PCT)):
                     c.reject(f"اختلاف قیمت بین مسیرها {dev:.1f}٪ "
                              f"(بیش از {MAX_PRICE_DEVIATION_PCT}٪ — نشانه‌ی دستکاری)")
+        elif len(prices) == 1:
+            c.price_usd = prices[0]
+            # با یک قیمت نمی‌شود سازگاری را سنجید — نه تأیید، نه رد
+            c.unknown("فقط یک مسیر قیمت داد؛ سازگاری قیمت سنجیده نشد")
+        else:
+            c.unknown("هیچ مسیری قیمت نداد؛ سازگاری قیمت سنجیده نشد")
 
     # --- فیلتر ۴: اسکن ایمنی کامل ---
     try:
@@ -173,7 +229,10 @@ def evaluate_candidate(w3: Web3, chain: Chain, token_addr: str,
         elif c.risk_score > MAX_RISK_SCORE:
             c.reject(f"امتیاز خطر {c.risk_score} (حداکثر {MAX_RISK_SCORE})")
     except Exception as e:
-        c.reject(f"اسکن ایمنی ناموفق: {type(e).__name__}")
+        # اسکن ایمنی که *اجرا نشد* هیچ چیزی درباره‌ی توکن نمی‌گوید. قبلاً
+        # همین به «رد شد» ترجمه می‌شد و یک قطعی موقت RPC یک توکن سالم را
+        # مردود می‌کرد.
+        c.unknown(f"اسکن ایمنی اجرا نشد: {type(e).__name__}")
 
     return c
 
@@ -209,7 +268,10 @@ def format_report(results: List[Candidate], chain: Chain) -> str:
     """گزارش خوانا از نتایج ارزیابی."""
     lines = []
     accepted = [c for c in results if c.accepted]
-    rejected = [c for c in results if not c.accepted]
+    # سه سطل، نه دو تا: «رد شد» یک ادعاست، «نامعلوم» اعتراف به ندانستن.
+    # قاطی‌کردنشان باعث شد USDbC و DEGEN «نامعتبر» گزارش شوند.
+    rejected = [c for c in results if c.rejections]
+    undecided = [c for c in results if c.undecided]
 
     lines.append("=" * 78)
     lines.append(f"  ارزیابی {len(results)} توکن برای افزودن به فهرست مرجع")
@@ -246,6 +308,21 @@ def format_report(results: List[Candidate], chain: Chain) -> str:
             lines.append(f"     {c.symbol} ({c.address[:10]}...)")
             for r in c.rejections:
                 lines.append(f"       • {r}")
+            for r in c.unknowns:
+                lines.append(f"       ? {r}")
+        lines.append("")
+
+    if undecided:
+        lines.append(f"\n  ❓ {len(undecided)} توکن سنجیده نشد "
+                     f"(این «رد شد» نیست — دوباره اجرا کن، ترجیحاً با --rate کمتر "
+                     f"یا یک --rpc اختصاصی):\n")
+        for c in undecided:
+            lines.append(f"     {c.symbol} ({c.address[:10]}...)")
+            for r in c.unknowns:
+                lines.append(f"       ? {r}")
+            if c.liquidity_usd:
+                lines.append(f"       (تا جایی که دیدیم: نقدینگی "
+                             f"${float(c.liquidity_usd):,.0f} در {c.venue_count} مکان)")
         lines.append("")
 
     lines.append("=" * 78)
