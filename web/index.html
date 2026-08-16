@@ -1474,7 +1474,26 @@ const poolCache={};
    --------------------------------------------------------------------- */
 let gtChain=Promise.resolve(),gtLast=0;
 const GT_GAP=240,GT_TRIES=3;
+/* هر درخواست GeckoTerminal در یک صف تک‌خطی با فاصله‌ی اجباری می‌نشیند —
+   لازم است، چون سقف نرخ دارد. ولی دو چیز باعث می‌شد آن صف بی‌دلیل شلوغ شود
+   و کاربر نتیجه‌اش را ببیند: لوگوها دیر می‌آمدند، و نمودار گاهی اصلاً
+   نمی‌آمد تا وقتی جای دو توکن را عوض کنی (که فقط یعنی «دوباره تلاش کن»).
+
+   دو لایه اضافه شد:
+   • coalescing — دو درخواست همزمان به یک URL یکی می‌شوند.
+   • کش کوتاه‌مدت — همان URL در بازه‌ی معتبرش دوباره روی سیم نمی‌رود.
+   فقط موفقیت کش می‌شود؛ شکست هرگز، چون «نتوانستم بپرسم» جواب نیست. */
+const gtCache=new Map(),gtInflight=new Map();
+function gtTtl(u){
+  if(/\/pools(\?|$)/.test(u))return 600000;   // استخر برتر زود عوض نمی‌شود
+  if(/\/ohlcv\//.test(u))return 45000;
+  return 60000;
+}
 function gtJson(url){
+  const hit=gtCache.get(url);
+  if(hit&&Date.now()-hit.t<gtTtl(url))return Promise.resolve(hit.v);
+  const flying=gtInflight.get(url);
+  if(flying)return flying;
   const run=async()=>{
     for(let i=0;i<GT_TRIES;i++){
       const wait=Math.max(0,GT_GAP-(Date.now()-gtLast));
@@ -1494,18 +1513,23 @@ function gtJson(url){
     }
     throw new Error("gt: exhausted retries");
   };
-  const next=gtChain.then(run,run);
+  const next=gtChain.then(run,run).then(
+    v=>{gtCache.set(url,{t:Date.now(),v});gtInflight.delete(url);return v;},
+    e=>{gtInflight.delete(url);throw e;});
+  gtInflight.set(url,next);
   gtChain=next.catch(()=>{});
   return next;
 }
 async function topPoolFor(token){
   const k=token.address.toLowerCase();
-  if(poolCache[k]!==undefined)return poolCache[k];
+  if(poolCache[k])return poolCache[k];
   const j=await gtJson(`${GT}/networks/${CHAIN.gtNetwork}/tokens/${token.address}/pools?page=1`);
   const list=(j&&j.data)||[];
   const id=list.length?String(list[0].id||"").split("_").pop():null;
-  poolCache[k]=id||null;
-  return poolCache[k];
+  /* فقط نتیجه‌ی مثبت کش می‌شود. قبلاً null هم کش می‌شد، پس یک پاسخ خالیِ
+     گذرا برای همیشه یعنی «این توکن نمودار ندارد» — همان «نمی‌دانم = نه». */
+  if(id)poolCache[k]=id;
+  return id;
 }
 /* ETH بومی آدرس قرارداد ندارد — در جدول توکن‌ها address برابر "NATIVE" است.
    GeckoTerminal با آن به /tokens/NATIVE/pools می‌رفت، ۴۰۴ می‌گرفت، و کل
@@ -1541,9 +1565,13 @@ async function pairSeries(tIn,tOut,cfg){
 function chartMsg(t){$("chartMsg").style.display="grid";$("chartMsg").textContent=t;
   const s=$("plot").querySelector("svg");if(s)s.remove();}
 
+let chartTries=0,chartRetry=null,chartKey="";
 async function loadChart(){
   const seq=++chartSeq;
   if(!tokenIn||!tokenOut)return;
+  // شمارنده‌ی تلاش به همین جفت و همین بازه تعلق دارد، نه به کل جلسه
+  const key=`${tokenIn.symbol}>${tokenOut.symbol}>${timeframe}`;
+  if(key!==chartKey){chartKey=key;chartTries=0;clearTimeout(chartRetry);}
   $("pairName").textContent=`${tokenOut.symbol} / ${tokenIn.symbol}`;
   // آمار به توکن خروجی گره خورده و هر جا جفت عوض شود loadChart صدا زده
   // می‌شود، پس همین‌جا یک‌بار وصلش می‌کنیم نه در پنج جای مختلف.
@@ -1563,8 +1591,20 @@ async function loadChart(){
     const el=$("pxChg");
     el.className="chg mono "+(ch>=0?"up":"down");
     el.textContent=(ch>=0?"▲ ":"▼ ")+Math.abs(ch).toFixed(2)+"%  ·  "+timeframe;
+    chartTries=0;
   }catch(e){
     if(seq!==chartSeq)return;
+    /* جابه‌جاکردن توکن ورودی و خروجی نمودار را «درست» نمی‌کرد؛ فقط باعث
+       یک تلاش دوباره می‌شد و آن تلاش معمولاً جواب می‌داد. یعنی شکست گذرا
+       بود و ما کاربر را وادار می‌کردیم دستی دوباره تلاش کند. حالا خودمان
+       دو بار با فاصله تلاش می‌کنیم؛ فقط اگر آن هم نشد پیام می‌دهیم. */
+    if(chartTries<2){
+      chartTries++;
+      chartMsg("Loading price history…");
+      clearTimeout(chartRetry);
+      chartRetry=setTimeout(()=>{if(seq===chartSeq)loadChart();},1400*chartTries);
+      return;
+    }
     chartMsg("Price history is unavailable right now. Quotes and routing below are live and unaffected.");
   }
 }
@@ -1928,7 +1968,7 @@ async function tokenLogo(t){
         درخواست در حال پرواز به اشتراک گذاشته می‌شود تا رگبار نسازیم.
    --------------------------------------------------------------------- */
 const metaCache={};        // فقط نتایج موفق
-const metaPending={};      // درخواست‌های در حال پرواز
+                           // (صف دسته‌ای در tokenMeta پایین‌تر است)
 
 async function loadMetas(addrs){
   const want=[...new Set(addrs.map(a=>a.toLowerCase()))].filter(a=>!(a in metaCache));
@@ -1953,14 +1993,27 @@ async function loadMetas(addrs){
     }
   }
 }
-async function tokenMeta(addr){
-  const k=addr.toLowerCase();
-  if(k in metaCache)return metaCache[k];
-  if(!(k in metaPending)){
-    metaPending[k]=loadMetas([k]).finally(()=>{delete metaPending[k];});
+/* قبلاً هر فراخوانی یک درخواست *جداگانه* می‌ساخت، و چون کل صف GeckoTerminal
+   تک‌خطی و با فاصله است، ده توکن یعنی ده نوبت پشت سر هم — لوگوها ثانیه‌ها
+   دیر می‌آمدند و با زیادشدن توکن‌ها خطی بدتر می‌شد.
+
+   حالا درخواست‌های یک تیک جمع می‌شوند و با هم در یک تماس multi می‌روند.
+   سرویس تا ۲۵ آدرس در هر تماس می‌گیرد و loadMetas خودش تکه‌تکه می‌کند. */
+let metaQueue=new Set(),metaFlush=null;
+function tokenMeta(addr){
+  const k=String(addr||"").toLowerCase();
+  if(!k)return Promise.resolve(null);
+  if(k in metaCache)return Promise.resolve(metaCache[k]);
+  metaQueue.add(k);
+  if(!metaFlush){
+    metaFlush=new Promise(res=>setTimeout(()=>{
+      const batch=[...metaQueue];
+      metaQueue=new Set();metaFlush=null;
+      loadMetas(batch).catch(()=>{}).then(res);
+    },30));
   }
-  await metaPending[k];
-  return metaCache[k]||null;      // نبود ≠ کش‌شده‌ی خالی؛ دفعه‌ی بعد باز تلاش می‌شود
+  // نبود ≠ کش‌شده‌ی خالی؛ دفعه‌ی بعد باز تلاش می‌شود
+  return metaFlush.then(()=>metaCache[k]||null);
 }
 /* ---------------------------------------------------------------------
    آمار توکن خروجی — مارکت‌کپ، FDV، والیوم ۲۴ ساعته

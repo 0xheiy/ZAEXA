@@ -664,6 +664,40 @@ async def main():
         print("[icons] logo images: %s   fallback initials: %r" % (logos, initials.strip()))
         assert initials.strip() != "", "initials must always be present as a fallback"
 
+        # ---- 2b-pre. GeckoTerminal request budget ----
+        # صف GeckoTerminal تک‌خطی و با فاصله‌ی اجباری است، پس *تعداد*
+        # درخواست‌ها مستقیماً می‌شود تأخیری که کاربر می‌بیند: لوگوها دیر
+        # می‌آمدند و نمودار گاهی اصلاً نمی‌آمد. دو چیز را می‌سنجیم:
+        # هیچ URLی دو بار روی سیم نرود، و هر توکن درخواست جدا نسازد.
+        budget = await pg.evaluate("""async () => {
+            const seen = [];
+            const realFetch = window.fetch;
+            window.fetch = function (u, o) { seen.push(String(u)); return realFetch(u, o); };
+            gtCache.clear(); gtInflight.clear();
+            Object.keys(metaCache).forEach(k => delete metaCache[k]);
+
+            const toks = allTokens().filter(t => !t.native).map(t => t.address);
+            await Promise.all(toks.map(a => tokenMeta(a)));      // مثل رسم آواتارها
+            await Promise.all(toks.map(a => tokenMeta(a)));      // بار دوم باید رایگان باشد
+            const metaCalls = seen.filter(u => /\\/tokens\\//.test(u)).length;
+
+            const before = seen.length;
+            const u = GT + "/networks/base/tokens/" + toks[0] + "/pools?page=1";
+            await Promise.all([gtJson(u), gtJson(u), gtJson(u)]);  // همزمان
+            await gtJson(u);                                       // و یک بار بعدش
+            const dupCalls = seen.length - before;
+
+            window.fetch = realFetch;
+            return {tokens: toks.length, metaCalls, dupCalls};
+        }""")
+        print("[gt budget] %s tokens -> %s metadata calls; 4 identical urls -> %s call"
+              % (budget["tokens"], budget["metaCalls"], budget["dupCalls"]))
+        assert budget["metaCalls"] <= 2, \
+            ("%s tokens caused %s metadata requests — they must batch, not queue one by one"
+             % (budget["tokens"], budget["metaCalls"]))
+        assert budget["dupCalls"] == 1, \
+            "four requests for the same url hit the network %s times" % budget["dupCalls"]
+
         # ---- 2b-bis. clear button, header layout, token stats ----
         clr = await pg.evaluate("""async () => {
             const inp = document.getElementById("amtIn"),
