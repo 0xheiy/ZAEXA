@@ -1176,6 +1176,45 @@ async def main():
             "clearing must empty both sides, not just the one you typed in"
         assert clr["afterClick"], "the clear button must disappear again after clearing"
 
+        # ---- مبلغ نباید از رفرش جان سالم به در ببرد ----
+        # مبلغ در localStorage ذخیره می‌شد و پس از رفرش دوباره در فیلد
+        # می‌نشست — ولی بدون اینکه کوتی راه بیفتد، چون بازگردانی برنامه‌ای
+        # رویداد `input` تولید نمی‌کند. نتیجه: دکمه روی «Finding best route…»
+        # قفل می‌ماند تا کاربر خودش عدد را پاک کند و از نو بزند.
+        # جفت توکن باید بماند (کمک است)، مبلغ نه (تصمیم همان لحظه است).
+        rf = await b.new_page(viewport={"width": 1240, "height": 1000}, color_scheme="dark")
+        await rf.goto(URL); await rf.wait_for_timeout(1200)
+        await rf.evaluate("""() => {
+            tokenIn = allTokens().find(t => t.symbol === "USDC");
+            tokenOut = allTokens().find(t => t.symbol === "WETH");
+            paintToken("in", tokenIn); paintToken("out", tokenOut); savePair();
+        }""")
+        await rf.fill("#amtIn", "5")
+        await rf.dispatch_event("#amtIn", "input")
+        await rf.wait_for_timeout(1600)
+        typed = await rf.evaluate("""() => ({
+            amt: document.getElementById("amtIn").value, plan: !!currentPlan,
+            stored: localStorage.getItem("zaexa.pair")})""")
+        await rf.reload(); await rf.wait_for_timeout(2600)
+        after = await rf.evaluate("""() => ({
+            amt: document.getElementById("amtIn").value,
+            out: document.getElementById("amtOut").value,
+            pair: document.getElementById("tokInSym").textContent + "/"
+                + document.getElementById("tokOutSym").textContent})""")
+        await rf.close()
+        print("[refresh] typed=%r quoted=%s stored=%s -> after reload amt=%r pair=%s"
+              % (typed["amt"], typed["plan"], typed["stored"], after["amt"], after["pair"]))
+        assert typed["plan"], "the typed amount never produced a quote — probe is not testing anything"
+        assert "amt" not in (typed["stored"] or ""), \
+            ("the amount is still being written to localStorage (%s) — that is what came back "
+             "after a refresh without a quote behind it" % typed["stored"])
+        assert after["amt"] == "" and after["out"] == "", \
+            ("the amount survived a refresh (%r): it comes back without a quote, so the button "
+             "sits on 'Finding best route' until the field is retyped" % after["amt"])
+        assert after["pair"] == "USDC/WETH", \
+            ("the token pair should still be remembered across a refresh, only the amount is "
+             "dropped: %s" % after["pair"])
+
         # هدر: ناوبری باید بین لوگو و چیپ‌های راست وسط بماند، نه چسبیده به لوگو
         head = await pg.evaluate("""() => {
             const logo = document.querySelector(".logo").getBoundingClientRect();
