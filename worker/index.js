@@ -18,7 +18,15 @@
    /gt/ دست‌نخورده به بایندینگ ASSETS می‌رود.
    ===================================================================== */
 
-const UPSTREAM = "https://api.geckoterminal.com/api/v2";
+/* دو بالادست، با شکل مسیر یکسان.
+   • بی‌کلید: API عمومی GeckoTerminal — سقفش ۳۰ درخواست در دقیقه *روی IP*
+     است، و IP خروجی Workers مشترک و سوخته. عملاً بی‌فایده.
+   • با کلید: همان داده از CoinGecko زیر /onchain. سقف روی *کلید ما*ست، نه
+     روی IP. کلید در `env.CG_KEY` (secret در پنل کلادفلر) می‌ماند و هرگز
+     به مرورگر نمی‌رسد — دلیل اصلی وجود این پراکسی همین است.
+   هر چهار مسیری که سایت می‌زند زیر /onchain آزموده شد و ۲۰۰ داد. */
+const UPSTREAM_FREE = "https://api.geckoterminal.com/api/v2";
+const UPSTREAM_KEYED = "https://api.coingecko.com/api/v3/onchain";
 
 /* پراکسی باز نیست. فقط شکل مسیرهایی که خودِ سایت می‌زند اجازه دارد:
      networks/base/tokens/<addr>
@@ -69,7 +77,7 @@ function fail(status, msg) {
   });
 }
 
-async function proxyGt(request, url, ctx) {
+async function proxyGt(request, url, ctx, env) {
   if (request.method === "OPTIONS") return new Response(null, { status: 204, headers: CORS });
   if (request.method !== "GET" && request.method !== "HEAD")
     return fail(405, "only GET is proxied");
@@ -84,7 +92,9 @@ async function proxyGt(request, url, ctx) {
     qs.push(k + "=" + encodeURIComponent(v));
   }
 
-  const target = UPSTREAM + "/" + rest + (qs.length ? "?" + qs.join("&") : "");
+  const key = (env && typeof env.CG_KEY === "string" && env.CG_KEY) || "";
+  const target = (key ? UPSTREAM_KEYED : UPSTREAM_FREE) + "/" + rest +
+    (qs.length ? "?" + qs.join("&") : "");
   const ttl = ttlFor(rest);
 
   /* کش لبه. عمداً از Cache API استفاده می‌شود و نه از cf.cacheTtl، چون
@@ -93,18 +103,22 @@ async function proxyGt(request, url, ctx) {
      `caches` بیرون از محیط Workers وجود ندارد (مثلاً در تست Node)، پس
      نبودنش خطا نیست — فقط یعنی بدون کش کار کن. */
   const store = (typeof caches !== "undefined" && caches.default) || null;
-  const key = new Request(target, { method: "GET" });
+  const cacheKey = new Request(target, { method: "GET" });
   if (store) {
-    const hit = await store.match(key);
+    const hit = await store.match(cacheKey);
     if (hit) return hit;
   }
 
   let up;
   try {
-    // هیچ‌کدام از هدرهای کاربر (کوکی، Referer، …) به بالادست نمی‌رود.
-    up = await fetch(target, { headers: { accept: "application/json" } });
+    /* هیچ‌کدام از هدرهای کاربر (کوکی، Referer، …) به بالادست نمی‌رود؛ هدرها
+       از نو ساخته می‌شوند. کلید فقط اینجاست — نه در URL (وگرنه در کش و در
+       لاگ‌ها می‌نشست) و نه در هیچ پاسخی که برمی‌گردانیم. */
+    const h = { accept: "application/json" };
+    if (key) h["x-cg-demo-api-key"] = key;
+    up = await fetch(target, { headers: h });
   } catch (e) {
-    return fail(502, "geckoterminal is unreachable");
+    return fail(502, "the price service is unreachable");
   }
 
   const body = await up.arrayBuffer();
@@ -112,8 +126,10 @@ async function proxyGt(request, url, ctx) {
     ...CORS,
     "content-type": up.headers.get("content-type") || "application/json; charset=utf-8",
     "cache-control": up.ok ? "public, max-age=" + ttl : "no-store",
-    // برای بازرسی از بیرون: با یک نگاه معلوم است پاسخ از پراکسی آمده یا نه.
-    "x-zaexa-proxy": up.ok ? "miss" : "upstream-" + up.status,
+    /* برای بازرسی از بیرون: هم معلوم است پاسخ از پراکسی آمده، هم اینکه
+       کلید واقعاً به Worker رسیده یا نه. خودِ کلید هرگز چاپ نمی‌شود. */
+    "x-zaexa-proxy": up.ok ? (key ? "miss-keyed" : "miss-free")
+                           : "upstream-" + up.status,
   };
   const res = new Response(body, { status: up.status, headers });
 
@@ -122,7 +138,7 @@ async function proxyGt(request, url, ctx) {
       status: up.status,
       headers: { ...headers, "x-zaexa-proxy": "hit" },
     });
-    const put = store.put(key, stash);
+    const put = store.put(cacheKey, stash);
     if (ctx && typeof ctx.waitUntil === "function") ctx.waitUntil(put);
     else await put;
   }
@@ -133,7 +149,7 @@ export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
     if (url.pathname === "/gt" || url.pathname.startsWith("/gt/"))
-      return proxyGt(request, url, ctx);
+      return proxyGt(request, url, ctx, env);
     // بقیه‌ی سایت دست‌نخورده از فایل‌های ثابت می‌آید.
     if (env && env.ASSETS) return env.ASSETS.fetch(request);
     return new Response("not found", { status: 404 });

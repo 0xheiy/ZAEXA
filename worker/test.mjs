@@ -17,8 +17,10 @@ const ORIGIN = "https://zaexa.com";
 let sent = [];       // URLهایی که به بالادست رفت
 let reply = null;    // پاسخی که بالادست می‌دهد (یا خطایی که پرتاب می‌کند)
 
-globalThis.fetch = async (u) => {
+let sentHeaders = [];
+globalThis.fetch = async (u, o) => {
   sent.push(String(u));
+  sentHeaders.push((o && o.headers) || {});
   if (reply instanceof Error) throw reply;
   return reply;
 };
@@ -32,10 +34,9 @@ function json(obj, status = 200) {
   });
 }
 
-async function call(path, init) {
-  sent = [];
-  const res = await worker.fetch(new Request(ORIGIN + path, init), env, {});
-  return res;
+async function call(path, init, e) {
+  sent = []; sentHeaders = [];
+  return await worker.fetch(new Request(ORIGIN + path, init), e || env, {});
 }
 
 /* ---- ۱. مسیرهای واقعی سایت پراکسی می‌شوند و درست بازنویسی می‌شوند ---- */
@@ -51,8 +52,31 @@ for (const [path, want] of REAL) {
   ok(res.status === 200, "should proxy " + path + " (got " + res.status + ")");
   ok(sent[0] === want, "wrong upstream url for " + path + ":\n  got  " + sent[0] + "\n  want " + want);
   ok(res.headers.get("access-control-allow-origin") === "*", "no CORS header on " + path);
-  ok(res.headers.get("x-zaexa-proxy") === "miss", "missing proxy marker on " + path);
+  ok(res.headers.get("x-zaexa-proxy") === "miss-free", "missing proxy marker on " + path);
 }
+
+/* ---- ۱b. با کلید: همان مسیرها، بالادست CoinGecko ----
+   بی‌کلید بی‌فایده است (سقف روی IP مشترک کلادفلر است و سوخته). با کلید،
+   سقف روی کلید ماست. هر چهار مسیر زیر /onchain با کلید Demo آزموده شد. */
+const KEY = "CG-secret-do-not-leak-me";
+const keyed = { ASSETS, CG_KEY: KEY };
+for (const [path] of REAL) {
+  reply = json({ data: [] });
+  const res = await call(path, undefined, keyed);
+  const want = path.replace("/gt/", "https://api.coingecko.com/api/v3/onchain/");
+  ok(sent[0] === want, "wrong keyed upstream for " + path + ":\n  got  " + sent[0] + "\n  want " + want);
+  ok(sentHeaders[0]["x-cg-demo-api-key"] === KEY, "the api key was not sent upstream for " + path);
+  ok(res.headers.get("x-zaexa-proxy") === "miss-keyed", "keyed responses must be marked as such");
+  // کلید نه در URL (وگرنه در کش و لاگ می‌نشیند) و نه در چیزی که برمی‌گردانیم
+  ok(!sent[0].includes(KEY), "THE API KEY LEAKED INTO THE UPSTREAM URL: " + sent[0]);
+  const dump = JSON.stringify([...res.headers]) + (await res.clone().text());
+  ok(!dump.includes(KEY), "THE API KEY LEAKED INTO THE RESPONSE WE SEND THE BROWSER");
+}
+// بدون کلید باید همان مسیر بی‌کلید بماند، نه اینکه بشکند
+reply = json({ data: [] });
+await call(REAL[0][0], undefined, { ASSETS });
+ok(sent[0] === REAL[0][1], "without a key the worker must fall back to the free api: " + sent[0]);
+ok(!("x-cg-demo-api-key" in sentHeaders[0]), "an empty key was still sent as a header");
 
 /* ---- ۲. هرچیز دیگری رد می‌شود و *به شبکه نمی‌رسد* ----
    این مهم‌ترین بخش است: یک پراکسی باز روی دامنه‌ای که کارش امضای تراکنش
