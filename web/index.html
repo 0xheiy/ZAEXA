@@ -1515,7 +1515,18 @@ const GT="https://api.geckoterminal.com/api/v2";
    `GT` عمداً همان آدرس مستقیم می‌ماند: کلید کش و coalescing همان است و
    بازنویسی فقط لحظه‌ی رفتن روی سیم انجام می‌شود. اگر پراکسی نبود (استقرار
    ناقص، یا باز کردن فایل با file://) خودکار به همان مسیر قبلی برمی‌گردیم. */
-let gtProxy=/^https?:$/.test(location.protocol)?location.origin+"/gt":null;
+/* ⚠️ فعلاً خاموش — و دلیلش مهم است.
+   اندازه‌گیری روی سایت زنده (۱۶ آگوست ۲۰۲۶) نشان داد اولین درخواست از راه
+   پراکسی هم ۴۲۹ می‌خورد. علت: سقف عمومی GeckoTerminal ۳۰ درخواست در دقیقه
+   *روی IP* است، و IP خروجی Workers بین همه‌ی مشتری‌های کلادفلر مشترک و از
+   قبل سوخته است. یعنی پراکسیِ بی‌کلید همه‌ی کاربران ما را در یک سطل سوخته
+   جمع می‌کند، در حالی که قبلش هر کاربر سهم IP خودش را داشت — بدتر، نه بهتر.
+
+   دوباره روشن می‌شود وقتی Worker یک کلید داشته باشد؛ آن‌وقت سقف روی کلیدِ
+   ماست نه روی IP مشترک، و کش لبه تازه معنا پیدا می‌کند. تا آن روز فقط این
+   یک پرچم عوض می‌شود — کد پراکسی و تست‌هایش دست‌نخورده می‌مانند. */
+const GT_PROXY_ENABLED=false;
+let gtProxy=(GT_PROXY_ENABLED&&/^https?:$/.test(location.protocol))?location.origin+"/gt":null;
 function gtWire(u){return gtProxy&&u.startsWith(GT)?gtProxy+u.slice(GT.length):u;}
 const TFS={
   "1H":{tf:"minute",agg:1,limit:60,fmt:{hour:"2-digit",minute:"2-digit"}},
