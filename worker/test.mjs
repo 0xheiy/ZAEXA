@@ -170,8 +170,135 @@ ok(res.status === 200, "index.html must still be served");
   delete globalThis.caches;
 }
 
+/* ---- ۹. /ev — شمارش رویداد ----
+   دو چیز اینجا سنجیده می‌شود و هر دو مهم‌اند:
+   الف) فقط شکل مورد انتظار پذیرفته می‌شود — وگرنه یک اندپوینت عمومی هر رشته‌ای
+        را در انبار ما می‌نویسد.
+   ب)  آنچه *نوشته می‌شود* دقیقاً همان چهار میدان است و نه چیز دیگر: IP و
+       User-Agent و Referer و کوکی هرگز نباید در ردیف ذخیره‌شده پیدا شوند. */
+{
+  let points = [];
+  const ZX_EV = { writeDataPoint: (p) => points.push(p) };
+  const evEnv = { ASSETS, ZX_EV };
+
+  // هدرهایی که یک مرورگر واقعی می‌فرستد و هیچ‌کدام نباید ثبت شوند
+  const NOSY = {
+    "content-type": "text/plain;charset=UTF-8",
+    "user-agent": "Mozilla/5.0 SecretBrowser/9 SENSITIVE-UA",
+    referer: "https://somewhere.example/private-page",
+    cookie: "sid=SENSITIVE-COOKIE",
+    "cf-connecting-ip": "203.0.113.77",
+    "accept-language": "fa-IR",
+  };
+  function evCall(body, opts = {}) {
+    points = []; sent = [];
+    const init = {
+      method: opts.method || "POST",
+      headers: Object.assign({}, NOSY, opts.headers || {}),
+    };
+    if (init.method !== "GET" && init.method !== "HEAD") init.body = body;
+    const req = new Request(ORIGIN + "/ev", init);
+    if (opts.cf !== undefined) Object.defineProperty(req, "cf", { value: opts.cf });
+    return worker.fetch(req, opts.env || evEnv, {});
+  }
+
+  const GOOD = JSON.stringify({ e: "view:folio", d: "", v: "mobile" });
+
+  /* الف) مسیر درست */
+  let r = await evCall(GOOD, { cf: { country: "DE" } });
+  ok(r.status === 204, "a valid event should be 204 (got " + r.status + ")");
+  ok(points.length === 1, "a valid event was not recorded (" + points.length + " points)");
+  ok(JSON.stringify(points[0].blobs) === JSON.stringify(["view:folio", "", "mobile", "DE"]),
+    "wrong blobs written: " + JSON.stringify(points[0].blobs));
+  ok(points[0].indexes && points[0].indexes[0] === "view:folio",
+    "the event name must be the sampling index");
+  ok(r.headers.get("cache-control") === "no-store", "the /ev reply must not be cached");
+  ok(sent.length === 0, "/ev reached the geckoterminal upstream");
+  ok((await r.clone().text()) === "", "/ev must answer with an empty body, not the site");
+
+  /* ب) هیچ‌چیز حساسی در آنچه نوشته شد نیست */
+  const written = JSON.stringify(points[0]);
+  for (const secret of ["SENSITIVE-UA", "SENSITIVE-COOKIE", "203.0.113.77",
+                        "somewhere.example", "fa-IR", "Mozilla"]) {
+    ok(!written.includes(secret),
+      "A SENSITIVE HEADER WAS WRITTEN INTO THE ANALYTICS ROW: " + secret + " in " + written);
+  }
+  ok(points[0].blobs.length === 4 && points[0].blobs.every(b => typeof b === "string"),
+    "the analytics row must be exactly four strings: " + written);
+
+  /* کشور فقط از request.cf، و هر شکل دیگری «??» */
+  for (const [given, want] of [["DE", "DE"], ["T1", "T1"], ["XX", "XX"],
+                               ["de", "??"], ["IRAN", "??"], ["", "??"], [undefined, "??"]]) {
+    await evCall(GOOD, { cf: given === undefined ? {} : { country: given } });
+    ok(points[0].blobs[3] === want,
+      "country " + JSON.stringify(given) + " should be recorded as " + want +
+      " (got " + points[0].blobs[3] + ")");
+  }
+  await evCall(JSON.stringify({ e: "load", d: "", v: "desktop", country: "US" }), { cf: {} });
+  ok(points[0].blobs[3] === "??", "a country in the request body must be ignored");
+
+  /* ج) هرچه شکل مورد انتظار را ندارد رد می‌شود و *نوشته نمی‌شود* */
+  const REFUSE = [
+    [405, GOOD, { method: "GET" }],
+    [405, GOOD, { method: "PUT" }],
+    [405, GOOD, { method: "OPTIONS" }],
+    [403, GOOD, { headers: { origin: "https://evil.example" } }],
+    [400, "not json at all", {}],
+    [400, "[1,2,3]", {}],
+    [400, "null", {}],
+    [400, '"load"', {}],
+    [400, JSON.stringify({ e: "view:secret", d: "", v: "desktop" }), {}],
+    [400, JSON.stringify({ e: "", d: "", v: "desktop" }), {}],
+    [400, JSON.stringify({ d: "", v: "desktop" }), {}],
+    [400, JSON.stringify({ e: "load", d: "0xdeadbeef", v: "desktop" }), {}],
+    [400, JSON.stringify({ e: "load", d: "", v: "tv" }), {}],
+    [400, JSON.stringify({ e: "load", d: "", v: "" }), {}],
+    [400, JSON.stringify({ e: ["load"], d: "", v: "desktop" }), {}],
+    [413, JSON.stringify({ e: "load", d: "", v: "desktop", pad: "x".repeat(400) }), {}],
+  ];
+  for (const [want, body, opts] of REFUSE) {
+    const res = await evCall(body, opts);
+    ok(res.status === want,
+      "/ev should answer " + want + " for " + body.slice(0, 50) + " (got " + res.status + ")");
+    ok(points.length === 0, "REFUSED BUT STILL RECORDED: " + body.slice(0, 50));
+  }
+  // Origin خودمان باید عبور کند، وگرنه شرط بالا کل شمارش را می‌خورد
+  r = await evCall(GOOD, { headers: { origin: ORIGIN }, cf: {} });
+  ok(r.status === 204, "our own Origin must be accepted (got " + r.status + ")");
+
+  // میدان اضافه‌ی ناشناس مانع نیست، ولی وارد ردیف هم نمی‌شود
+  r = await evCall(JSON.stringify({ e: "load", d: "", v: "desktop", extra: "SNEAKY" }), { cf: {} });
+  ok(r.status === 204, "an unknown extra field should not break the beacon");
+  ok(!JSON.stringify(points[0]).includes("SNEAKY"), "an unknown extra field was written");
+
+  // تن بزرگ با content-length دروغین هم باید بیفتد
+  r = await evCall("x".repeat(400), { headers: { "content-length": "10" } });
+  ok(r.status === 413,
+    "an oversized body with a lying content-length should be 413 (got " + r.status + ")");
+
+  /* د) بایندینگ نباشد: سایت نباید بشکند */
+  r = await evCall(GOOD, { env: { ASSETS }, cf: { country: "US" } });
+  ok(r.status === 204,
+    "without the dataset binding /ev must still answer 204 (got " + r.status + ")");
+
+  /* ه) هر نام مجاز واقعاً پذیرفته می‌شود — وگرنه صفحه رویدادی می‌فرستد که
+     بی‌صدا دور ریخته می‌شود و ما فکر می‌کنیم «کسی این کار را نمی‌کند». */
+  const { EV_OK } = await import("./index.js");
+  for (const name of EV_OK) {
+    const res = await evCall(JSON.stringify({ e: name, d: "", v: "desktop" }), { cf: {} });
+    ok(res.status === 204, "the allowlisted event " + name + " was refused (" + res.status + ")");
+  }
+  for (const d of ["inj", "wc"]) {
+    const res = await evCall(JSON.stringify({ e: "wallet:on", d, v: "desktop" }), { cf: {} });
+    ok(res.status === 204, "the allowlisted detail " + d + " was refused (" + res.status + ")");
+  }
+  console.log("[events] " + EV_OK.size + " event names allowed, everything else refused");
+}
+
 console.log(fails === 0
   ? "[gt proxy] worker ok — " + REAL.length + " real paths proxied, " + BAD.length +
-    " refused without touching the network, 429 passes through with CORS"
+    " refused without touching the network, 429 passes through with CORS\n" +
+    "[events] /ev ok — only the four allowed fields are stored; ip, user-agent, " +
+    "referer and cookie never are"
   : "[gt proxy] " + fails + " FAILURES");
 process.exit(fails === 0 ? 0 : 1);

@@ -1568,6 +1568,60 @@ const GT="https://api.geckoterminal.com/api/v2";
 const GT_PROXY_ENABLED=true;
 let gtProxy=(GT_PROXY_ENABLED&&/^https?:$/.test(location.protocol))?location.origin+"/gt":null;
 function gtWire(u){return gtProxy&&u.startsWith(GT)?gtProxy+u.slice(GT.length):u;}
+
+/* ---------------------------------------------------------------------
+   شمارش رویداد — /ev روی همان Worker
+   ---------------------------------------------------------------------
+   چه می‌فرستیم: نام رویداد، یک جزئیات کوتاه از فهرست بسته، و مبایل/دسکتاپ.
+   کد کشور را خودِ Worker از کلادفلر می‌گیرد، ما نمی‌فرستیم.
+
+   ⚠️ چه چیزی هرگز نمی‌فرستیم: آدرس کیف پول، مبلغ، نام یا آدرس توکن، و هیچ
+   شناسه‌ی نشست یا بازدیدکننده. یعنی «همین یک نفر» قابل بازسازی نیست و دو
+   رویداد از یک نفر به هم وصل نمی‌شوند. این عمدی است، نه فراموش‌شده: با
+   ترافیک کم، جفت‌توکن + زمان به‌علاوه‌ی تراکنش زنجیره یعنی شناسایی کیف پول.
+   قیف ریزش از *نسبت شمارش‌ها* درمی‌آید، نه از دنبال‌کردن یک نفر.
+
+   فهرست پایین باید با EV_OK در worker/index.js یکی باشد؛ کاوشگر [events]
+   همین را می‌سنجد. یک نام تازه که آنجا نباشد، بی‌صدا دور ریخته می‌شود. */
+const EV_ENABLED=true;
+const EV_NAMES=[
+  "load",
+  "view:swap","view:folio","view:flow",
+  "wallet:open","wallet:on",
+  "quote:ok","quote:none",
+  "approve:click","approve:done",
+  "swap:click","swap:blocked","swap:sim-fail","swap:sent",
+  "swap:done","swap:revert","swap:lost","swap:fail",
+];
+/* Global Privacy Control یک «نه»ی صریح از خودِ کاربر است، نه یک حدس. مخاطب
+   این سایت به حریم خصوصی حساس است و شمارش ارزش نادیده‌گرفتنش را ندارد.
+   ⚠️ اثر جانبی: عدد بازدید کمی کمتر از واقعیت می‌شود. */
+const evOff=()=>navigator.globalPrivacyControl===true;
+/* روی file:// (هارنس تست) مقصدی وجود ندارد و POST به یک مسیر نسبی فقط خطای
+   کنسول تولید می‌کند. مثل gtProxy یک متغیر است تا کاوشگر [events] بتواند
+   روشنش کند و *واقعاً* ببیند چه چیزی روی سیم می‌رود. */
+let evUrl=/^https?:$/.test(location.protocol)?"/ev":null;
+let evLast=Object.create(null);
+function ev(name,detail){
+  if(!EV_ENABLED||evOff()||!evUrl)return;
+  if(!EV_NAMES.includes(name))return;                  // نام ناشناخته اصلاً نرود
+  // hashchange می‌تواند رگباری بیاید (دکمه‌ی back نگه‌داشته‌شده). یک رویداد
+  // هم‌نام در فاصله‌ی کمتر از یک ثانیه شمرده نمی‌شود.
+  const now=Date.now();
+  if(evLast[name]&&now-evLast[name]<1000)return;
+  evLast[name]=now;
+  const body=JSON.stringify({e:name,d:detail||"",
+    v:(innerWidth<=760?"mobile":"desktop")});
+  try{
+    // text/plain تا درخواست «ساده» بماند و preflight لازم نشود.
+    const blob=new Blob([body],{type:"text/plain;charset=UTF-8"});
+    if(navigator.sendBeacon&&navigator.sendBeacon(evUrl,blob))return;
+  }catch(e){}
+  // بیکن جا نیفتاد؛ یک تلاش بی‌صدا. شمارش هرگز نباید به کاربر دیده شود.
+  try{fetch(evUrl,{method:"POST",body,keepalive:true,
+    headers:{"content-type":"text/plain;charset=UTF-8"}}).catch(()=>{});}catch(e){}
+}
+
 const TFS={
   "1H":{tf:"minute",agg:1,limit:60,fmt:{hour:"2-digit",minute:"2-digit"}},
   "1D":{tf:"minute",agg:15,limit:96,fmt:{hour:"2-digit",minute:"2-digit"}},
@@ -2476,14 +2530,14 @@ async function runQuote(){
       if(seq!==quoteSeq||r===null)return;
       if(r.fail){
         setNotice(noRouteNote(st,`Nothing on Base can deliver ${esc(tokenOut.symbol)} from ${esc(tokenIn.symbol)}.`));
-        currentPlan=null;refreshButton();return;
+        currentPlan=null;refreshButton();ev("quote:none");return;
       }
       $("amtIn").value=Number(E.formatUnits(r.amountIn,tokenIn.decimals))
         .toLocaleString("en-US",{maximumFractionDigits:tokenIn.decimals,useGrouping:false});
       const plan=r.plan;
       plan.impact=await priceImpact(routable(tokenIn),routable(tokenOut),r.amountIn,plan,st);
       if(seq!==quoteSeq)return;
-      plan.stats=st;currentPlan=plan;
+      plan.stats=st;currentPlan=plan;ev("quote:ok");
       renderVenues(r.direct,plan);renderPlan(plan,true);
       await refreshAllowance();
       if(seq!==quoteSeq)return;
@@ -2518,13 +2572,13 @@ async function runQuote(){
     renderVenues(direct,null);
     if(!routes.length){
       setNotice(noRouteNote(stats,`No direct pool, and no path through ${CHAIN.wrapped}/${CHAIN.reference} has liquidity for this pair.`));
-      currentPlan=null;refreshButton();return;
+      currentPlan=null;refreshButton();ev("quote:none");return;
     }
     const plan=await findBestSplit(routes,amountIn,stats);
     if(seq!==quoteSeq)return;
     plan.impact=await priceImpact(routable(tokenIn),routable(tokenOut),amountIn,plan,stats);
     if(seq!==quoteSeq)return;
-    plan.stats=stats;currentPlan=plan;
+    plan.stats=stats;currentPlan=plan;ev("quote:ok");
     renderVenues(direct,plan);renderPlan(plan);
     await refreshAllowance();
     if(seq!==quoteSeq)return;
@@ -3188,12 +3242,15 @@ async function connectWithProvider(provider,requestAccounts){
     paintWallet();
     await Promise.all([refreshBalances(),readFee()]);
     await refreshAllowance();refreshButton();setNotice("");startBalanceWatch();closeWalletMenu();
+    // فقط «افزونه» یا «WalletConnect» — نه نام والت، که خودش یک ویژگیِ
+    // قابل‌ردیابی از کاربر است.
+    ev("wallet:on",provider===wcProvider?"wc":"inj");
   }catch(e){setNotice(note("err",esc(e.message||"Connection rejected.")));}
 }
 /* همیشه پنجره‌ی انتخاب. حتی با یک افزونه، WalletConnect هم یک گزینه است،
    پس همیشه بیش از یک راه وجود دارد و انتخاب باید با کاربر باشد — نه اینکه
    ما به‌جایش تصمیم بگیریم. */
-async function connect(){openWalletPicker();}
+async function connect(){ev("wallet:open");openWalletPicker();}
 async function switchNetwork(){
   const inj=walletEip1193||legacyInjected();if(!inj)return;
   try{await inj.request({method:"wallet_switchEthereumChain",params:[{chainId:CHAIN.hexId}]});}
@@ -3389,6 +3446,7 @@ const doUnwrap=()=>doWrapOrUnwrap("unwrap");
 
 async function doApprove(){
   const amountIn=parsedAmountIn();
+  ev("approve:click");
   setBusy(true,"Confirm in wallet…");
   try{
     const target=E.getAddress(routable(tokenIn).address);
@@ -3424,6 +3482,7 @@ async function doApprove(){
     setNotice(note("ok",`Approval sent — <a href="${url}" target="_blank" rel="noopener">${shortAddr(tx.hash)}</a>`));
     // منبع حقیقت allowance است نه رسید — رسید ممکن است هرگز خوانده نشود
     const ok=await waitForAllowance(amountIn,90000);
+    if(ok)ev("approve:done");
     setNotice(ok?note("ok",`<b>${esc(tokenIn.symbol)} approved.</b>`)
       :note("warn",`<b>Approval sent but not confirmed yet.</b> Check <a href="${url}" target="_blank" rel="noopener">${shortAddr(tx.hash)}</a> then press again.`));
   }catch(e){showError("Approval failed",e);}
@@ -3458,6 +3517,8 @@ async function waitForAllowance(min,ms){
 
 async function doSwap(){
   if(!currentPlan||parsedAmountIn()===null)return;
+  // قیف ریزش از نسبت همین شمارش‌ها درمی‌آید: کلیک → شبیه‌سازی → ارسال → نتیجه.
+  ev("swap:click");
   let chosenSig=null;
   setBusy(true,"Refreshing price…");
   try{
@@ -3475,7 +3536,7 @@ async function doSwap(){
       setNotice(note("warn",`Approve ${esc(tokenIn.symbol)} first.`));return;}
     if(problems.length){
       setNotice(note("err","<b>Pre-flight failed — nothing sent.</b><br>• "+problems.map(esc).join("<br>• ")));
-      setBusy(false);refreshButton();return;}
+      setBusy(false);refreshButton();ev("swap:blocked");return;}
 
     const fresh=currentPlan;
     const deadline=BigInt(Math.floor(Date.now()/1000)+Math.max(1,deadlineMin)*60);
@@ -3498,7 +3559,7 @@ async function doSwap(){
       }catch(e){if(!firstErr)firstErr=e;
         attempts.push({tried:sig,result:(e&&(e.shortMessage||e.message))||"failed"});}}
     if(!chosen){showError("Simulation failed — nothing sent, no gas spent",firstErr,{attempts});
-      setBusy(false);refreshButton();return;}
+      setBusy(false);refreshButton();ev("swap:sim-fail");return;}
     chosenSig=chosen.plan.parts.map(p=>p.route.hops.map(h=>venueLabel(h.venue)).join("+"));
     if(chosen.label!=="best")
       setNotice(note("warn",`<b>The best route failed simulation; fell back to ${esc(chosen.label)}.</b>`));
@@ -3537,9 +3598,10 @@ async function doSwap(){
         ?note("ok",`<b>The swap went through.</b> Your ${esc(tokenOut.symbol)} balance changed.`)
         :note("warn","<b>Still unknown.</b> Check your wallet or BaseScan before swapping "+
               "again — we could not confirm either way, and repeating it could swap twice."));
-      setBusy(false);refreshButton();return;
+      setBusy(false);refreshButton();ev("swap:lost");return;
     }
     // 🔑 از اینجا تراکنش ارسال شده — هر خطای بعدی فقط خواندن نتیجه است
+    ev("swap:sent");
     const url=`${CHAIN.explorer}/tx/${tx.hash}`;
     setBusy(true,`Swapping ${esc(tokenIn.symbol)} → ${esc(tokenOut.symbol)}…`);
     setNotice(note("ok",`Sent — <a href="${url}" target="_blank" rel="noopener">${shortAddr(tx.hash)}</a>`));
@@ -3551,9 +3613,9 @@ async function doSwap(){
     if(rec&&rec.status===1){
       setNotice(note("ok",`<b>Swap complete.</b> <a href="${url}" target="_blank" rel="noopener">View on BaseScan</a>`));
       $("amtIn").value="";$("amtOut").value="";currentPlan=null;
-      $("routeWrap").style.display="none";await refreshBalances();
-    }else setNotice(note("err",`<b>Reverted.</b> <a href="${url}" target="_blank" rel="noopener">View on BaseScan</a>`));
-  }catch(e){showError("Swap failed",e,chosenSig?{sentRoute:chosenSig}:undefined);}
+      $("routeWrap").style.display="none";await refreshBalances();ev("swap:done");
+    }else{setNotice(note("err",`<b>Reverted.</b> <a href="${url}" target="_blank" rel="noopener">View on BaseScan</a>`));ev("swap:revert");}
+  }catch(e){showError("Swap failed",e,chosenSig?{sentRoute:chosenSig}:undefined);ev("swap:fail");}
   finally{setBusy(false);refreshButton();}
 }
 function showError(title,err,extra){
@@ -3825,6 +3887,9 @@ function setView(v,push){
   // فقط وقتی نما باز می‌شود داده می‌گیریم — نه در پس‌زمینه
   if(v==="folio")renderFolio();
   if(v==="flow"){paintFlowToken();renderFlow();}
+  // سه نما در یک صفحه‌اند و با hash عوض می‌شوند، پس آمار معمولیِ «بازدید
+  // صفحه» آن‌ها را از هم تفکیک نمی‌کند. اینجا تنها نقطه‌ی ورود هر سه است.
+  ev("view:"+v);
   scrollTo({top:0,behavior:"instant"});
 }
 function paintFlowToken(){
@@ -3983,6 +4048,8 @@ function wire(){
   restorePair();                // انتخاب قبلیِ خودِ کاربر، اگر بود
   paintToken("in",tokenIn);paintToken("out",tokenOut);
   readFee();loadChart();
+  // یک بار در هر بازکردن صفحه. مخرج همه‌ی نسبت‌های قیف همین است.
+  ev("load");
   setView(parseHash().view||"swap",false);
   await verifyDexes();          // قبل از هر کوتی، بدان کدام صرافی قابل اتکاست
   // لینک اشتراکی *بعد* از دروازه‌ها اعمال می‌شود: تا ندانیم کدام صرافی

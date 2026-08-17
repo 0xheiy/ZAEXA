@@ -57,6 +57,94 @@ function ttlFor(path) {
   return 60;
 }
 
+/* =====================================================================
+   /ev — شمارش رویداد، روی همان Worker
+   =====================================================================
+   چرا اصلاً لازم است: سایت با بایندینگ ASSETS سرو می‌شود و وقتی یک آدرس با
+   فایلی در _site جور دربیاید، این Worker *اجرا نمی‌شود*. پس بازکردن صفحه از
+   سمت سرور دیده نمی‌شود و شمارش باید از خود صفحه بیاید. `/ev` هیچ فایلی در
+   _site ندارد، پس تنها مسیری است که همیشه به کد می‌رسد.
+
+   ⚠️ مرز حریم خصوصی — این فهرست عمدی است، بدون پرسیدن گسترشش نده:
+   • ثبت می‌شود: نام رویداد، یک جزئیات کوتاه از فهرست بسته، مبایل/دسکتاپ،
+     و کد کشور که خودِ کلادفلر می‌دهد.
+   • ثبت *نمی‌شود*: آدرس کیف پول، مبلغ، نام یا آدرس توکن، IP، رشته‌ی
+     User-Agent، Referer، کوکی، و هیچ شناسه‌ی نشست یا بازدیدکننده.
+     یعنی دو رویداد از یک نفر قابل به‌هم‌بستن نیستند — این عمدی است.
+   دلیلش: با ترافیک کم، «سواپ در ۱۴:۳۲» به‌علاوه‌ی تراکنشی که در همان دقیقه
+   روی زنجیره نشسته، ردیف آمار را به یک کیف پول وصل می‌کند — حتی بدون آدرس.
+   ===================================================================== */
+
+/* هر نام رویداد باید اینجا باشد وگرنه رد می‌شود. صفحه هم فهرست خودش را دارد
+   و کاوشگر [events] در run.py تطبیقشان را می‌سنجد — وگرنه یک رویداد تازه در
+   صفحه بی‌صدا دور ریخته می‌شد و ما فکر می‌کردیم «کسی این کار را نمی‌کند». */
+const EV_OK = new Set([
+  "load",
+  "view:swap", "view:folio", "view:flow",
+  "wallet:open", "wallet:on",
+  "quote:ok", "quote:none",
+  "approve:click", "approve:done",
+  "swap:click", "swap:blocked", "swap:sim-fail", "swap:sent",
+  "swap:done", "swap:revert", "swap:lost", "swap:fail",
+]);
+/* جزئیات هم بسته است. رشته‌ی آزاد یعنی هرکسی می‌تواند هرچه خواست در انبار ما
+   بنویسد، و یک روز چیزی که نباید ثبت شود از همین راه ثبت می‌شود. */
+const EV_DETAIL_OK = new Set(["", "inj", "wc"]);
+const EV_SURFACE_OK = new Set(["desktop", "mobile"]);
+const EV_MAX_BODY = 256;
+
+function evDone(status) {
+  return new Response(null, { status, headers: { "cache-control": "no-store" } });
+}
+
+async function collectEv(request, url, env) {
+  if (request.method !== "POST") return evDone(405);
+
+  /* اگر مرورگر Origin فرستاد، باید خودِ ما باشیم. جلوی «صفحه‌ی کسی دیگر که
+     در پس‌زمینه شمارنده‌ی ما را باد می‌کند» را می‌گیرد. curl را نمی‌گیرد و
+     ادعا هم نمی‌کنیم که می‌گیرد — یک اندپوینت عمومی روی سایت ثابت راه
+     رمزنگاشتی ندارد. */
+  const origin = request.headers.get("origin");
+  if (origin && origin !== url.origin) return evDone(403);
+
+  if (Number(request.headers.get("content-length") || "0") > EV_MAX_BODY)
+    return evDone(413);
+
+  let body;
+  try { body = await request.text(); } catch (e) { return evDone(400); }
+  if (body.length > EV_MAX_BODY) return evDone(413);
+
+  let msg;
+  try { msg = JSON.parse(body); } catch (e) { return evDone(400); }
+  if (!msg || typeof msg !== "object") return evDone(400);
+
+  const name = typeof msg.e === "string" ? msg.e : "";
+  const detail = typeof msg.d === "string" ? msg.d : "";
+  const surface = typeof msg.v === "string" ? msg.v : "";
+  if (!EV_OK.has(name)) return evDone(400);
+  if (!EV_DETAIL_OK.has(detail)) return evDone(400);
+  if (!EV_SURFACE_OK.has(surface)) return evDone(400);
+
+  /* کشور از خودِ کلادفلر می‌آید، نه از چیزی که صفحه گفته. «T1» یعنی Tor.
+     هر شکل دیگری «??» می‌شود — با رشته تصمیم نمی‌گیریم. */
+  const raw = (request.cf && request.cf.country) || "";
+  const country = /^[A-Z][A-Z0-9]$/.test(raw) ? raw : "??";
+
+  /* بایندینگ ممکن است هنوز در پنل اضافه نشده باشد. نبودنش خطا نیست — فقط
+     یعنی چیزی ثبت نمی‌شود؛ سایت نباید به‌خاطرش بشکند. */
+  const ds = env && env.ZX_EV;
+  if (ds && typeof ds.writeDataPoint === "function") {
+    ds.writeDataPoint({
+      blobs: [name, detail, surface, country],
+      doubles: [1],
+      // ایندکس کلید نمونه‌برداری است؛ نام رویداد یعنی نمونه‌برداری
+      // پُرترافیک‌ها به کم‌ترافیک‌ها آسیب نمی‌زند.
+      indexes: [name],
+    });
+  }
+  return evDone(204);
+}
+
 const CORS = {
   "access-control-allow-origin": "*",
   "access-control-allow-methods": "GET,HEAD,OPTIONS",
@@ -150,6 +238,7 @@ export default {
     const url = new URL(request.url);
     if (url.pathname === "/gt" || url.pathname.startsWith("/gt/"))
       return proxyGt(request, url, ctx, env);
+    if (url.pathname === "/ev") return collectEv(request, url, env);
     // بقیه‌ی سایت دست‌نخورده از فایل‌های ثابت می‌آید.
     if (env && env.ASSETS) return env.ASSETS.fetch(request);
     return new Response("not found", { status: 404 });
@@ -157,4 +246,4 @@ export default {
 };
 
 // برای تست‌ها — در زمان اجرا روی Worker استفاده نمی‌شود.
-export { PATH_OK, QUERY_OK, ttlFor };
+export { PATH_OK, QUERY_OK, ttlFor, EV_OK, EV_DETAIL_OK, EV_SURFACE_OK, EV_MAX_BODY };

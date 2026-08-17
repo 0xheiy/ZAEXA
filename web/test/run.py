@@ -70,8 +70,49 @@ def check_gt_proxy_worker():
     sys.stdout.write(r.stdout)
     assert r.returncode == 0, "the GeckoTerminal proxy worker failed its tests:\n" + r.stderr
 
+EV_PAGE_NAMES, EV_DETAILS = set(), set()
+def check_event_allowlists():
+    """دو نگهبان ثابت برای شمارش رویداد، قبل از اینکه مرورگر بالا بیاید.
+
+    ۱) فهرست نام‌ها در صفحه و در Worker باید *یکی* باشد. اگر صفحه نامی
+       بفرستد که Worker ندارد، با ۴۰۰ بی‌صدا دور ریخته می‌شود و ما فکر
+       می‌کنیم «کسی این کار را نمی‌کند» — بدترین حالت، چون عدد غلط شبیه
+       عدد درست است.
+    ۲) هیچ فراخوانی ev() نباید یک *ویژگی* بخواند. این نگهبان حریم خصوصی
+       است: ev("swap:done",tokenIn.symbol) یا ev("x",$("amtIn").value)
+       اینجا می‌افتد، نه روی سایت زنده. مرز حریم خصوصی با ادعا در کامنت
+       نگه داشته نمی‌شود."""
+    global EV_PAGE_NAMES, EV_DETAILS
+    src = open(os.path.join(HERE, "..", "index.html"), encoding="utf-8").read()
+    page = set(re.findall(r'"([^"]+)"', re.search(
+        r"const EV_NAMES=\[(.*?)\];", src, re.S).group(1)))
+    wk = open(os.path.join(HERE, "..", "..", "worker", "index.js"), encoding="utf-8").read()
+    worker_names = set(re.findall(r'"([^"]+)"', re.search(
+        r"const EV_OK = new Set\(\[(.*?)\]\);", wk, re.S).group(1)))
+    details = set(re.findall(r'"([^"]*)"', re.search(
+        r"const EV_DETAIL_OK = new Set\(\[(.*?)\]\);", wk, re.S).group(1)))
+    assert page == worker_names, (
+        "the page and the worker disagree about event names — the page would send "
+        "events the worker silently drops.\n  only in page:   %s\n  only in worker: %s"
+        % (sorted(page - worker_names), sorted(worker_names - page)))
+
+    calls = re.findall(r"(?<![A-Za-z0-9_.$])ev\(([^()]*(?:\([^()]*\)[^()]*)*)\)", src)
+    calls = [c for c in calls if not c.startswith("name,")]        # خودِ تعریف
+    assert len(calls) >= 12, "the ev() call sites vanished — found only %d" % len(calls)
+    for c in calls:
+        assert "." not in c and "`" not in c and "[" not in c, (
+            "an ev() call reads a property, so user data could reach the analytics row: "
+            "ev(%s)" % c)
+        for lit in re.findall(r'"([^"]*)"', c):
+            assert lit in page or lit in details or lit == "view:", (
+                "ev(%s) uses the string %r, which is in neither allowlist" % (c, lit))
+    EV_PAGE_NAMES, EV_DETAILS = page, details
+    print("[events] %d names, page and worker agree; %d call sites, none reads a property"
+          % (len(page), len(calls)))
+
 check_no_remote_code()
 check_gt_proxy_worker()
+check_event_allowlists()
 
 async def main():
     errors = []
@@ -1801,6 +1842,59 @@ async def main():
                  % (pb["label"], pb["left"], pb["right"], pb["vw"]))
         await mob.screenshot(path=os.path.join(HERE, "shot-mobile-wallet.png"))
         await mob.close()
+        # ---- 9. [events] شمارش رویداد، روی سیم ----
+        # دو نگهبان ثابتش بالاتر اجرا شده (check_event_allowlists). اینجا آنچه
+        # *واقعاً* روی سیم می‌رود سنجیده می‌شود، نه آنچه فکر می‌کنیم می‌رود.
+        # روی http سرو می‌شود چون sendBeacon روی file:// مقصدی ندارد.
+        ev_page, ev_detail = EV_PAGE_NAMES, EV_DETAILS
+
+        async def watch_events(page):
+            seen = []
+            async def grab(route):
+                seen.append(route.request.post_data or "")
+                await route.fulfill(status=204, body="")
+            await page.route("**/ev", grab)
+            return seen
+
+        evpg = await b.new_page(viewport={"width": 1240, "height": 1000})
+        ev_seen = await watch_events(evpg)
+        await evpg.goto("http://127.0.0.1:%d/test/harness.html" % port)
+        await evpg.wait_for_timeout(1400)
+        for v in ("folio", "flow", "swap"):
+            await evpg.click('#nav [data-view="%s"]' % v)
+            await evpg.wait_for_timeout(320)
+        await evpg.close()
+
+        import json as _json
+        ev_names = []
+        for raw in ev_seen:
+            body = _json.loads(raw)
+            assert set(body) == {"e", "d", "v"}, "a beacon carried unexpected fields: %s" % raw
+            assert body["e"] in ev_page, "a beacon carried an unknown event name: %s" % raw
+            assert body["d"] in ev_detail, "a beacon carried an unknown detail: %s" % raw
+            assert body["v"] in ("desktop", "mobile"), "a beacon carried an odd surface: %s" % raw
+            assert "0x" not in raw, "AN ADDRESS REACHED THE ANALYTICS BEACON: %s" % raw
+            ev_names.append(body["e"])
+        print("[events] beacons on the wire: %s" % ev_names)
+        for want in ("load", "view:swap", "view:folio", "view:flow"):
+            assert want in ev_names, "the %r event never reached the wire (got %s)" % (want, ev_names)
+        assert ev_names.count("load") == 1, "the load event fired %d times" % ev_names.count("load")
+
+        # Global Privacy Control یک «نه»ی صریح است و باید همه‌چیز را خاموش کند
+        gpcpg = await b.new_page(viewport={"width": 1240, "height": 1000})
+        await gpcpg.add_init_script(
+            "Object.defineProperty(navigator,'globalPrivacyControl',{get:()=>true});")
+        gpc_seen = await watch_events(gpcpg)
+        await gpcpg.goto("http://127.0.0.1:%d/test/harness.html" % port)
+        await gpcpg.wait_for_timeout(1400)
+        await gpcpg.click('#nav [data-view="folio"]')
+        await gpcpg.wait_for_timeout(400)
+        await gpcpg.close()
+        print("[events] with Global Privacy Control on: %d beacons" % len(gpc_seen))
+        assert not gpc_seen, (
+            "Global Privacy Control is an explicit opt-out and must silence every beacon: %s"
+            % gpc_seen)
+
         srv.shutdown()
         await b.close()
 
