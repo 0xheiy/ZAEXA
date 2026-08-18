@@ -158,6 +158,7 @@ RETIRED_EXECUTORS = [
     "0xC261E57cF5739A8a538884405600E4e45dF24802",
     "0x2fea35aaDae6Cbf9b9481B06164907ccF95DB081",   # v1
     "0xE980825d4B3911e35Be5804349be26eBBe93BcC6",   # v2
+    "0xb6AE1C7157f877854C498C44ab5ea3d6742416DC",   # v3 — underflow on a sweeping recipient, see finding 04
 ]
 
 def check_one_executor_address():

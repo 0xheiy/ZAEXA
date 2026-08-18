@@ -2,7 +2,7 @@
 
 **A DEX aggregator for Base that shows you the way out before you go in.**
 
-Live contract: [`0xb6AE1C7157f877854C498C44ab5ea3d6742416DC`](https://basescan.org/address/0xb6ae1c7157f877854c498c44ab5ea3d6742416dc#code) — source verified on BaseScan.
+Live contract: [`0x76082b0fbd0a29C236dD2ae2B2F47BFD96d7F455`](https://basescan.org/address/0x76082b0fbd0a29c236dd2ae2b2f47bfd96d7f455#code) — source verified on BaseScan.
 
 The single source of truth for this address is `CHAIN.executor` in `web/index.html`.
 The UI suite fails if any document here names a retired deployment as the live one.
@@ -16,6 +16,7 @@ The UI suite fails if any document here names a retired deployment as the live o
 | `0xC261E57cF5739A8a538884405600E4e45dF24802` | retired — took the fee from the output token |
 | `0x2fea35aaDae6Cbf9b9481B06164907ccF95DB081` | retired — v1, superseded |
 | `0xE980825d4B3911e35Be5804349be26eBBe93BcC6` | retired — v2, superseded by v3 |
+| `0xb6AE1C7157f877854C498C44ab5ea3d6742416DC` | retired — v3; the delivered-amount subtraction underflowed for a recipient that moves the payout onward in its own hook |
 
 ---
 
@@ -149,6 +150,14 @@ A code review on 18 August 2026 (source reading, no execution) found eight
 things worth fixing; all eight are addressed. Two were in this file: it named a
 retired contract as the live one, and it denied the existence of the two routes
 described under Architecture.
+
+Two of the eight were in the contract, which is not upgradeable, so they needed
+a new deployment — the v4 address above. The bug: for a recipient that forwards
+the payout onward inside its own hook, the delivered-amount subtraction
+underflowed and the swap died with an arithmetic panic instead of a message.
+Before shipping the fix, the three tests that cover it were run against v3 and
+confirmed to fail there with exactly that panic; a test that passes on the
+broken version proves nothing.
 
 ---
 
