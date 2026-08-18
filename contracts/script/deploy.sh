@@ -214,8 +214,19 @@ echo "    اگر مرحله‌ی ۱ را انجام داده‌ای، بدون �
 echo "   ./script/verify_dexes.sh"
 echo
 echo "۴) تأیید سورس روی BaseScan — برای این پروژه اختیاری نیست:"
+# بدون کلید، forge بی‌صدا می‌رود سراغ Sourcify و «موفق» می‌گوید — ولی README
+# به basescan.org/…#code لینک می‌دهد و آن لینک همچنان سورس نشان نمی‌دهد. یک بار
+# همین شد و سند تا نیم‌ساعت چیزی می‌گفت که کاربر با کلیک نمی‌دید.
+if [ -z "${ETHERSCAN_API_KEY:-}" ]; then
+  echo "   ⚠️  ETHERSCAN_API_KEY تنظیم نیست. اگر بدون آن اجرا کنی، تأیید روی"
+  echo "       Sourcify انجام می‌شود نه BaseScan، و لینک #code در README"
+  echo "       همچنان سورس نشان نمی‌دهد. کلید رایگان: etherscan.io/myapikey"
+  echo "       export ETHERSCAN_API_KEY='...'"
+fi
 echo "   forge verify-contract $NEW src/SwapExecutor.sol:SwapExecutor \\"
-echo "     --chain base --watch \\"
+echo "     --chain base --watch --etherscan-api-key \"\$ETHERSCAN_API_KEY\" \\"
 echo "     --constructor-args \$(cast abi-encode 'c(address,address,uint256,address)' $OWNER $FEE_RECIPIENT $FEE_BPS $WETH_ADDR)"
+echo "   بعدش با چشم خودت ببین، به پیام forge بسنده نکن:"
+echo "   curl -s 'https://api.etherscan.io/v2/api?chainid=8453&module=contract&action=getsourcecode&address=$NEW&apikey='\"\$ETHERSCAN_API_KEY\" | head -c 120"
 echo
 echo "جزئیات در deployment.txt ذخیره شد."

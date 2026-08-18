@@ -15,6 +15,7 @@
 
 ```
 قرارداد فعال : 0x76082b0fbd0a29C236dD2ae2B2F47BFD96d7F455   ← Base، v4، ۱۸ آگوست ۲۰۲۶
+               سورس روی BaseScan تأییدشده (Pass - Verified) و روی Sourcify (exact_match)
 بازنشسته    : 0xb6AE1C7157f877854C498C44ab5ea3d6742416DC   ← v3، باگ ۰۴، استفاده نکن
 owner        : 0x8A0Dcb583C8CAdc481E34487c34f1B856fe97e23
 feeRecipient : همان owner
@@ -612,6 +613,15 @@ owner همان `0x8A0Dcb…7e23`. چک‌سام EIP-55 آدرس قبل از گذ
 ---
 
 ## ۱۲. تله‌های فنی که قبلاً خوردیم
+
+**`forge verify-contract` بدون کلید بی‌صدا مسیرش را عوض می‌کند.** ۱۸ آگوست
+۲۰۲۶: قدم ۴ دیپلوی اجرا شد، فورج گفت `Contract successfully verified` و
+`exact_match` — ولی روی **Sourcify**، نه BaseScan. README به
+`basescan.org/…#code` لینک می‌داد و می‌گفت «source verified on BaseScan»، و آن
+لینک هیچ سورسی نشان نمی‌داد. یعنی یک پیام سبز، و یک سند نادرست. با
+`--etherscan-api-key` دوباره اجرا شد (`Pass - Verified`) و با
+`getsourcecode` جدا سنجیده شد. `deploy.sh` حالا اگر کلید نباشد هشدار می‌دهد.
+درس: «ابزار گفت موفق» ادعا نیست؛ همان چیزی را بسنج که کاربر می‌بیند.
 
 - **`forge create`** گاهی «contract was not deployed» می‌گوید در حالی که قرارداد
   واقعاً دیپلوی شده. با `cast compute-address` + `cast code` چک کن.
