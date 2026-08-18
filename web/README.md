@@ -4,11 +4,12 @@ One file. No server, no build step, no install.
 
 ```
 web/
-  index.html          the entire application (HTML + CSS + JS)
-  ethers.umd.min.js   vendored, not loaded from a CDN — see below
+  index.html               the entire application (HTML + CSS + JS)
+  ethers.umd.min.js        vendored, not loaded from a CDN — see below
+  walletconnect.bundle.js  vendored too, built by scripts/build_walletconnect.sh
   test/
-    run.py            Playwright suite; builds its own harness from index.html
-    stub-ethers.js    fake ethers + a synthetic Base network, no sockets
+    run.py                 Playwright suite; builds its own harness from index.html
+    stub-ethers.js         fake ethers + a synthetic Base network, no sockets
 ```
 
 ## Running locally
@@ -22,9 +23,28 @@ python3 -m http.server 8000
 It also opens over `file://`, but some wallets do not inject there — use the
 local server when testing with MetaMask.
 
+That path is tested, not assumed. Enforcing the `integrity` attribute once broke
+it completely: a page opened from disk has an opaque origin, Chromium refuses
+CORS for the `file` scheme, and the script was blocked before the hash was ever
+compared — so the app did not start at all, and said so in a way that blamed the
+user's connection. Integrity is now applied only over `http`/`https`, and the
+`[file://]` check in `run.py` opens the real `index.html` from disk to confirm it
+still starts.
+
 ## Publishing
 
-Any static host works, because there is no backend:
+Swap execution has no backend, so the app itself runs from any static host.
+Two routes on our own origin are not part of a trade but do exist:
+
+- `/gt/*` — cached proxy to the price API, so the rate limit sits on our key
+  instead of the visitor's IP
+- `/ev` — counts page opens and view changes; no address, amount, token, IP or
+  visitor id, and silent under Global Privacy Control
+
+Both live in `worker/index.js` on Cloudflare Workers. On a host without that
+Worker, set `GT_PROXY_ENABLED` and `EV_ENABLED` to `false` near the top of
+`index.html`; the app then runs with no origin of ours involved at all, and
+falls back to direct price requests.
 
 ```bash
 npx vercel deploy --prod
@@ -56,8 +76,14 @@ What it proves:
 | `exit:honeypot` | a genuine sell-side revert still reads as blocked |
 | `exit:hostile-msg` | a revert message that *looks* like ours does not excuse the token |
 | `exit:rpc-down` | an outage during the sell simulation reads as `unknown` |
+| `exit:split-precondition` | the precondition is measured against the simulated leg, not the whole order |
 | `vs uniswap` | a zero edge reads as `same`, never as `+0.00%` |
 | `vs uniswap:uniswap-silent` | with no Uniswap quote we claim no edge at all |
+| `fallback floor` | the minimum on screen is the minimum that gets signed |
+| `recipient sweep` | a forwarding wallet is not told to raise slippage, which could never help |
+| `file://` | the real page still starts when opened from disk |
+| `one address` | no document names a retired executor as the live one |
+| `supply chain` | no remote script, and the integrity hash matches the vendored file |
 | share link | state round-trips through the URL |
 | hostile share link | a link with an unverifiable token says so instead of falling back |
 | DEX gates | both V3 generations route; a wrong-generation quoter is rejected |
@@ -71,8 +97,9 @@ tests is a headstone for one of them.
 
 ## Architecture
 
-There is no server. The browser talks to public Base RPCs directly and the user
-signs with their own wallet. No private key ever leaves the wallet.
+There is no server in the path of a trade. The browser talks to public Base RPCs
+directly and the user signs with their own wallet. No private key ever leaves the
+wallet.
 
 **Quotes go through Multicall3.** Instead of ~45 requests, four:
 
@@ -107,7 +134,20 @@ did not answer" for free: inside `aggregate3` a failing sub-call is
   untrusted origin restores the same risk through the back door. If the local
   file is missing the app fails loudly, which is far better than running code
   nobody vetted. A test in `run.py` fails if a remote origin ever reappears.
-- **No `localStorage`.** Theme and imported tokens live in the tab only.
+- **`localStorage` is used, and this file used to claim it was not.** Five
+  things persist, all of them the user's own choices or a cache of public data,
+  and none of them a wallet address or an amount:
+
+  | Key | What | Why it survives a reload |
+  |---|---|---|
+  | custom RPC | only ever written by the user typing one | otherwise it has to be re-entered every visit |
+  | token logo / pool cache | public metadata, with a TTL | keeps the price API under its rate limit |
+  | disconnect flag | "do not auto-reconnect" | a disconnect that undoes itself is not a disconnect |
+  | selected pair | the two tokens, **never the amount** | the amount is deliberately dropped, so a stale number cannot be signed |
+  | WalletConnect session | written by their SDK, not by us | we only read it to detect a live session |
+
+  Everything read back out is treated as untrusted and re-validated before use —
+  a poisoned entry is discarded, not displayed.
 - **Token error strings are escaped** before display, so a malicious token
   cannot inject markup through its revert reason.
 

@@ -159,6 +159,16 @@ Before shipping the fix, the three tests that cover it were run against v3 and
 confirmed to fail there with exactly that panic; a test that passes on the
 broken version proves nothing.
 
+A second pass over those fixes found two more things, both introduced or
+exposed by the fixes themselves. Enforcing the integrity hash had stopped the
+page from running at all when opened directly from disk — the browser blocks the
+script before it ever compares the hash, and the page then blamed the user's
+connection. Integrity is now applied only over http/https, which is where the
+threat it defends against exists. And a recipient that forwards the output
+inside the same transaction is still refused, because the minimum is never zero;
+what changed is that the page no longer tells that user to raise their slippage
+tolerance, which could never have helped.
+
 ---
 
 © 2026 — published for transparency, not licensed for reuse. You are welcome to

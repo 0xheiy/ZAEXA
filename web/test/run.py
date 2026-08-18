@@ -54,6 +54,17 @@ def check_no_remote_code():
     body = ld.group(0)
     assert not re.search(r'\bfor\s*\(|\bwhile\s*\(|\bi\+\+', body), \
         "loadEthers loops over sources again — one source, no fallthrough:\n" + body[:300]
+    # و اعمالِ هش باید به پروتکل مشروط بماند. بدون این شرط، صفحه‌ای که با
+    # file:// باز شود اصلاً بالا نمی‌آید: مبدأ «null» است، کروم برای طرح file
+    # هیچ CORS نمی‌دهد، و اسکریپت *پیش از* مقایسه‌ی هش بلاک می‌شود. README
+    # همان مسیر را به کاربر پیشنهاد می‌دهد، پس این یک شاخه‌ی تزئینی نیست.
+    gate = re.search(r'if\(ETHERS_SRI&&/\^https\?:\$/\.test\(location\.protocol\)\)', src)
+    assert gate, (
+        "the integrity attribute is no longer gated on the protocol. Applying it over "
+        "file:// blocks the script before the hash is ever compared, and the whole app "
+        "dies with a message that blames the user's connection. Keep the gate; SRI "
+        "defends against a tampered host, which a local file does not have.")
+
     vendored = os.path.join(HERE, "..", "ethers.umd.min.js")
     assert os.path.exists(vendored), "ethers.umd.min.js is missing next to index.html"
 
@@ -220,6 +231,37 @@ def check_one_executor_address():
     print("[one address] live executor %s — %d retired ones labelled as retired"
           % (live, len(RETIRED_EXECUTORS)))
 
+async def check_real_page_from_disk(pw):
+    """صفحه‌ی *واقعی* را با file:// باز کن و ببین ethers بالا می‌آید.
+
+    نگهبان ایستا شرط پروتکل را می‌سنجد، ولی اگر لودر روزی بازنویسی شود آن
+    الگو دیگر معنایی ندارد. این یکی نتیجه را می‌سنجد، نه شکل کد را — و
+    عمداً روی index.html اصلی اجرا می‌شود نه هارنس: هارنس هش را خالی می‌کند
+    و دقیقاً به همین دلیل نمی‌توانست این باگ را ببیند.
+
+    ⚠️ هیچ درخواست شبکه‌ای اجازه ندارد؛ فقط بارگذاری فایل کنار صفحه سنجیده
+    می‌شود."""
+    real = os.path.join(HERE, "..", "index.html")
+    b = await pw.chromium.launch()
+    pg = await b.new_page()
+    await pg.route("http://**", lambda r: asyncio.ensure_future(r.abort()))
+    await pg.route("https://**", lambda r: asyncio.ensure_future(r.abort()))
+    blocked = []
+    pg.on("console", lambda m: blocked.append(m.text)
+          if m.type == "error" and "integrity" in m.text.lower() else None)
+    await pg.goto("file://" + real)
+    await pg.wait_for_timeout(2500)
+    kind = await pg.evaluate("() => typeof window.ethers")
+    shown = await pg.evaluate(
+        "() => (document.getElementById('notices')||{}).innerText || ''")
+    await b.close()
+    assert kind == "object", (
+        "opening web/index.html directly from disk does not start the app: window.ethers "
+        "is %r. Both READMEs tell people to open the file this way.\n"
+        "  integrity errors: %s\n  on screen: %s" % (kind, blocked[:1], shown[:160]))
+    print("[file://] the real page starts from disk — ethers loaded, no integrity block")
+
+
 check_no_remote_code()
 check_gt_proxy_worker()
 check_event_allowlists()
@@ -236,6 +278,10 @@ async def main():
     # بتواند ادعا کند رخ داده‌اند — وگرنه allowlist فقط یک راه بی‌صدا برای
     # قایم‌کردن خطای واقعی می‌شد.
     probe_errs = []
+    # خطای عمدیِ کاوشگر «گیرنده‌ی جاروکننده»: showError درست کار کرده و لاگ
+    # کرده. با نشانِ خودِ تشخیص جدا می‌شود، نه با متن revert — وگرنه یک شکست
+    # واقعیِ لغزش هم بی‌صدا از همین در رد می‌شد.
+    sweep_errs = []
 
     def on_console(m):
         if m.type != "error":
@@ -244,10 +290,13 @@ async def main():
             gate_errs.append(m.text)
         elif "probe: stop before sending" in m.text:
             probe_errs.append(m.text)
+        elif "recipient forwarded the output" in m.text:
+            sweep_errs.append(m.text)
         else:
             errors.append(m.text)
 
     async with async_playwright() as p:
+        await check_real_page_from_disk(p)
         b = await p.chromium.launch()
         pg = await b.new_page(viewport={"width": 1240, "height": 1000}, color_scheme="dark")
         pg.on("console", on_console)
@@ -1991,6 +2040,63 @@ async def main():
         assert "Minimum received is now" in floor_probe["notice"], (
             "the fallback notice names the venue but not the new floor: %s"
             % floor_probe["notice"][:160])
+
+        # ---- 3c. مورد B پیگیری ریویو: پیامی که توصیه‌ی ناممکن نمی‌دهد ----
+        # کلمپ پنیک را برداشت، ولی require(delivered >= minAmountOut) هنوز برای
+        # گیرنده‌ای که پول را در همان تراکنش جلو می‌فرستد می‌افتد، چون minOut
+        # هیچ‌وقت صفر نیست. پیام قدیمی «لغزش را بالا ببر» می‌گفت و آن توصیه
+        # هرگز جواب نمی‌داد. حالا با یک شبیه‌سازی کف‌صفر تفکیک می‌شود.
+        sweep_probe = await pg.evaluate(r"""async () => {
+            const realContract = E.Contract;
+            const BIGV = 10n ** 40n;
+            window.__STUB_ALLOWANCE__ = BIGV.toString();
+            window.__STUB_BALANCE__ = BIGV.toString();
+            account = "0x8A0Dcb583C8CAdc481E34487c34f1B856fe97e23";
+            signer = {}; walletChainId = CHAIN.id; walletIsRemote = false;
+            balances[balKey(tokenIn)] = BIGV; allowance = BIGV; allowanceKnown = true;
+
+            let zeroFloorCalls = 0, floors = [];
+            E.Contract = function () {
+                const send = function () { throw new Error("probe: stop before sending"); };
+                send.staticCall = async (...a) => {
+                    const isExitCheck = JSON.stringify(a[0]) === JSON.stringify(a[1]);
+                    if (isExitCheck) return 1n;
+                    const minOut = BigInt(a[3]);
+                    floors.push(minOut.toString());
+                    /* کیف پول جاروکننده: با هر کف واقعی می‌افتد، و با کف صفر
+                       موفق می‌شود ولی صفر تحویل می‌دهد — دقیقاً همان چیزی که
+                       روی زنجیره می‌بیند. */
+                    if (minOut === 0n) { zeroFloorCalls++; return 0n; }
+                    throw new Error('execution reverted: "slippage: output below minimum"');
+                };
+                send.estimateGas = async () => { throw new Error("probe: no estimate"); };
+                return { executeSwap: send };
+            };
+
+            try { await doSwap(); } catch (e) {}
+            E.Contract = realContract;
+            delete window.__STUB_BALANCE__;
+            return {
+                zeroFloorCalls, floors,
+                notice: document.getElementById("notices").innerText.replace(/\s+/g, " ")
+            };
+        }""")
+        print("[recipient sweep] zero-floor sims=%s  says=%r"
+              % (sweep_probe["zeroFloorCalls"], sweep_probe["notice"][:120]))
+        assert sweep_probe["zeroFloorCalls"] == 1, (
+            "the zero-floor diagnosis never ran (%s calls). Without it the page cannot tell "
+            "'the price moved' from 'the recipient took the funds', and both arrive as the "
+            "same revert string." % sweep_probe["zeroFloorCalls"])
+        assert "moves the funds onward" in sweep_probe["notice"], (
+            "a recipient that forwards the output is still told this was slippage: %s"
+            % sweep_probe["notice"][:200])
+        assert "Raise it in settings" not in sweep_probe["notice"], (
+            "the page still tells the user to raise slippage. Raising it cannot help here — "
+            "the cause is not price movement, so the advice can never succeed:\n  %s"
+            % sweep_probe["notice"][:200])
+        assert sweep_errs, (
+            "the deliberate failure was allow-listed but never actually logged — the "
+            "allowlist would then be a silent way to hide a real error")
         # خطای عمدی این کاوشگر واقعاً باید لاگ شده باشد — نه اینکه بی‌صدا رد شود
         assert probe_errs, \
             "doSwap swallowed the send failure instead of reporting it through showError"

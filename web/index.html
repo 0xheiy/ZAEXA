@@ -767,8 +767,18 @@ function loadEthers(){return new Promise((res,rej)=>{
   /* هش فقط وقتی اعمال می‌شود که خالی نباشد. تنها جایی که خالی است، هارنس
      تست است — آنجا استاب بار می‌شود و هش فایل واقعی به آن نمی‌خورد.
      نگهبان [supply chain] در run.py می‌سنجد که نسخه‌ی *منتشرشده* هش
-     ناخالی و درست داشته باشد، پس این راه در باز نمی‌ماند. */
-  if(ETHERS_SRI){s.integrity=ETHERS_SRI;s.crossOrigin="anonymous";}
+     ناخالی و درست داشته باشد، پس این راه در باز نمی‌ماند.
+
+     ⚠️ و فقط روی http/https اعمال می‌شود. صفحه‌ای که با file:// باز شود
+     مبدأ «null» دارد و کروم برای طرح file اصلاً CORS نمی‌دهد، پس اسکریپت
+     *پیش از* مقایسه‌ی هش بلاک می‌شد و کل برنامه بالا نمی‌آمد — با پیامی که
+     تقصیر را گردن اینترنت کاربر می‌انداخت. برداشتن crossOrigin هم درمانش
+     نبود؛ خودِ integrity درخواست را CORS-دار می‌خواهد. SRI در برابر میزبانِ
+     دستکاری‌شده دفاع می‌کند و برای فایلی روی دیسکِ خودت چنین تهدیدی وجود
+     ندارد، پس اینجا چیزی از دست نمی‌رود. README هم باز کردن مستقیم فایل را
+     پیشنهاد می‌دهد، یعنی این مسیر تزئینی نیست. */
+  if(ETHERS_SRI&&/^https?:$/.test(location.protocol)){
+    s.integrity=ETHERS_SRI;s.crossOrigin="anonymous";}
   s.onload=()=>res(window.ethers);
   s.onerror=()=>rej(new Error("ethers failed to load from "+ETHERS_SRC));
   document.head.appendChild(s);});}
@@ -3596,7 +3606,31 @@ async function doSwap(){
         chosen=c;attempts.push({tried:sig,result:"ok"});
       }catch(e){if(!firstErr)firstErr=e;
         attempts.push({tried:sig,result:(e&&(e.shortMessage||e.message))||"failed"});}}
-    if(!chosen){showError("Simulation failed — nothing sent, no gas spent",firstErr,{attempts});
+    if(!chosen){
+      /* «لغزش» تنها دلیلِ افتادنِ آن require نیست. قرارداد چیزی را می‌سنجد که
+         *در کیف پول می‌ماند*، و کیف پول قراردادی‌ای که در همان تراکنش پول را
+         جلو می‌فرستد، صفر تحویل‌شده دارد. minOut هیچ‌وقت صفر نیست (کوت منهای
+         فی و لغزش)، پس این سواپ هم می‌افتد — با همان رشته‌ی «slippage».
+         پیام قبلی می‌گفت «تحملت را بالا ببر» و آن توصیه هرگز جواب نمی‌داد،
+         چون علت حرکت قیمت نبود. یک شبیه‌سازی اضافه با کف صفر این دو را از هم
+         جدا می‌کند: اگر با کف صفر موفق شود و صفر برگرداند، گیرنده پول را
+         برداشته. فقط روی مسیر شکست اجرا می‌شود و گس ندارد. */
+      let explain=null;
+      const em=(firstErr&&(firstErr.shortMessage||firstErr.reason||firstErr.message))||"";
+      if(/slippage: output below minimum/i.test(em)){
+        try{
+          const got=await exec.executeSwap.staticCall(asArg(tokenIn),asArg(tokenOut),amountIn,0n,
+            cands[0].parts,deadline,isNative(tokenIn)?{value:amountIn}:{});
+          if(BigInt(got)===0n)
+            explain="The route works, but nothing would stay with you: the receiving address "+
+              "moves the funds onward inside the same transaction, so the contract measures "+
+              "zero delivered and refuses to finish. Raising slippage cannot fix this — the "+
+              "cause is not price movement. Smart-contract wallets that forward or sweep on "+
+              "receipt behave this way; swap to a plain address instead.";
+        }catch(e){}
+      }
+      showError("Simulation failed — nothing sent, no gas spent",firstErr,
+        explain?{attempts,diagnosis:"recipient forwarded the output",explain}:{attempts});
       setBusy(false);refreshButton();ev("swap:sim-fail");return;}
     chosenSig=chosen.plan.parts.map(p=>p.route.hops.map(h=>venueLabel(h.venue)).join("+"));
     /* ⚠️ کفی که روی صفحه نوشته است باید همان کفی باشد که امضا می‌شود.
@@ -3695,7 +3729,7 @@ function showError(title,err,extra){
         venues:p.route.hops.map(h=>venueLabel(h.venue)),
         routers:p.route.hops.map(h=>h.venue.dex.router)})):null,
       expectedOut:currentPlan?String(currentPlan.totalOut):null},extra||{})},null,1);
-  setNotice(note("err",`<b>${esc(title)}.</b> ${esc(friendly(err))}
+  setNotice(note("err",`<b>${esc(title)}.</b> ${esc((extra&&extra.explain)||friendly(err))}
     <details><summary>Technical details</summary><pre>${esc(raw)}</pre>
     <button id="copyErr" style="color:inherit;text-decoration:underline;font-size:11px">Copy</button></details>`));
   const c=$("copyErr");
