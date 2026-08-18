@@ -211,6 +211,13 @@
         }
         if (c.name === "balanceOf") {
           const d = DEC[t] || 18;
+          /* موجودی هم مثل allowance قابل تنظیم شد. تا قبل از این ثابت ۲۵۰۰
+             بود، و هر تستی که می‌خواست مسیر «موجودی هست ولی allowance بین
+             پای شبیه‌سازی و کل سفارش است» را بسنجد، اول به سنگِ موجودی
+             می‌خورد و آن شاخه هرگز اجرا نمی‌شد. ماک باید بتواند واقعیت را
+             آینه کند، وگرنه خودش باگ را پنهان می‌کند. */
+          if (window.__STUB_BALANCE__ !== undefined)
+            return [true, pack([BigInt(window.__STUB_BALANCE__)])];
           return [true, pack([2500n * 10n ** BigInt(d)])];
         }
         // allowance قابل تنظیم است تا تست بتواند «کاربر approve کرده» و

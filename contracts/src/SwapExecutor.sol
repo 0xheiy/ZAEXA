@@ -24,6 +24,21 @@ pragma solidity ^0.8.24;
  *      - hard fee ceiling the owner cannot raise past
  *      - the contract holds no user funds between transactions
  *
+ * WHAT THE OWNER KEY CAN STILL DO - stated because the list above reads like a
+ * complete account of the trust model, and without these three it is not:
+ *
+ *      - `_ensureApproval` grants a whitelisted router `type(uint256).max` on a
+ *        token. The bound is real - the contract holds nothing between calls and
+ *        a router's allowance cannot touch a user's approval to this contract -
+ *        but within a single transaction a whitelisted router that is later
+ *        compromised can take the in-flight amount. The only backstop is the
+ *        caller's `minAmountOut`, because every individual step deliberately
+ *        passes `amountOutMinimum: 0`.
+ *      - `setRouterAllowed` / `setRoutersAllowed` are single-EOA calls with no
+ *        timelock, so the allow-list is exactly as strong as one key.
+ *      - `rescue` / `rescueETH` move whatever the contract is holding to the
+ *        owner. They now emit, so the action is at least observable.
+ *
  * NOTE: this contract has not been formally audited. Independent review and
  *    thorough testing are required before using it with meaningful size.
  */
@@ -143,6 +158,11 @@ contract SwapExecutor {
     event OwnerChanged(address indexed oldOwner, address indexed newOwner);
     event OwnershipTransferStarted(address indexed oldOwner, address indexed pendingOwner);
     event ApprovalRevoked(address indexed token, address indexed router);
+    /* Rescue used to be the only privileged action that left no on-chain trace.
+       Every other owner power already emits; these two did not, which made owner
+       withdrawals the one thing a reader could not reconstruct from logs. */
+    event Rescued(address indexed token, address indexed to, uint256 amount);
+    event RescuedETH(address indexed to, uint256 amount);
 
     modifier onlyOwner() {
         require(msg.sender == owner, "not owner");
@@ -256,7 +276,20 @@ contract SwapExecutor {
            while the user got less than they were promised - meaning the very guard
            that exists for this silently stopped working.
 
-           Native ETH has no transfer fee, so there the number is unchanged. */
+           Native ETH has no transfer fee, so there the number is unchanged.
+
+           The balance delta is clamped at zero, and that clamp is load bearing.
+           Measuring the recipient assumes the recipient is passive, and a smart
+           contract wallet does not have to be: one that sweeps or forwards inside
+           its receive hook ends the call with a balance at or *below* the one we
+           recorded. Under 0.8.x an unguarded subtraction there is an arithmetic
+           panic (0x11), not a revert string - so the whole swap failed with no
+           usable message, for exactly the callers most likely to reach an
+           aggregator programmatically. Clamped, the require below still fails
+           closed on a genuine shortfall, but it fails with the error that
+           explains itself, and a wallet that moved its own funds onward and is
+           happy with the outcome is no longer blocked outright.
+           The ERC-20 branch has the same shape via a recipient hook. */
         uint256 delivered;
         if (tokenOut == NATIVE) {
             // Unwrap and send real ETH - no second transaction
@@ -264,11 +297,13 @@ contract SwapExecutor {
             uint256 ethBefore = msg.sender.balance;
             (bool sent, ) = msg.sender.call{value: amountOut}("");
             require(sent, "eth transfer failed");
-            delivered = msg.sender.balance - ethBefore;
+            uint256 ethAfter = msg.sender.balance;
+            delivered = ethAfter > ethBefore ? ethAfter - ethBefore : 0;
         } else {
             uint256 userBefore = IERC20(outTok).balanceOf(msg.sender);
             _safeTransfer(outTok, msg.sender, amountOut);
-            delivered = IERC20(outTok).balanceOf(msg.sender) - userBefore;
+            uint256 userAfter = IERC20(outTok).balanceOf(msg.sender);
+            delivered = userAfter > userBefore ? userAfter - userBefore : 0;
         }
         require(delivered >= minAmountOut, "slippage: output below minimum");
 
@@ -502,6 +537,7 @@ contract SwapExecutor {
         uint256 bal = IERC20(token).balanceOf(address(this));
         require(bal > 0, "nothing to rescue");
         _safeTransfer(token, owner, bal);
+        emit Rescued(token, owner, bal);
     }
 
     /**
@@ -516,6 +552,7 @@ contract SwapExecutor {
         require(bal > 0, "nothing to rescue");
         (bool sent, ) = owner.call{value: bal}("");
         require(sent, "eth transfer failed");
+        emit RescuedETH(owner, bal);
     }
 
     /**

@@ -33,7 +33,19 @@ RPC="${RPC:-${PRIVATE_RPC:-https://base.drpc.org}}"
 # قرارداد فعال (ETH بومی، دیپلوی ۹ آگوست). پیش‌فرض قبلی `0x9fc4608f…` بود —
 # یعنی قرارداد رهاشده‌ی باگ‌دار. یک بار یادت می‌رفت SWAP_EXECUTOR را ست کنی و
 # اسکریپت بی‌صدا قرارداد اشتباه را گزارش می‌داد.
-EXECUTOR="${SWAP_EXECUTOR:-0x2fea35aaDae6Cbf9b9481B06164907ccF95DB081}"
+# آدرس پیش‌فرض از تنها منبع حقیقت خوانده می‌شود: CHAIN.executor در
+# web/index.html. قبلاً اینجا v1 هاردکد بود — دو نسل عقب‌تر از قرارداد زنده،
+# و کسی که اسکریپت را بی‌متغیر اجرا می‌کرد قرارداد اشتباه را می‌سنجید.
+if [ -z "${SWAP_EXECUTOR:-}" ]; then
+  _idx="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/web/index.html"
+  SWAP_EXECUTOR="$(grep -o 'executor:"0x[0-9a-fA-F]\{40\}"' "$_idx" \
+                   | head -1 | grep -o '0x[0-9a-fA-F]\{40\}')"
+  if [ -z "$SWAP_EXECUTOR" ]; then
+    echo "Could not read CHAIN.executor from $_idx - pass SWAP_EXECUTOR instead." >&2
+    exit 1
+  fi
+fi
+EXECUTOR="$SWAP_EXECUTOR"
 
 SIG_V3="exactInputSingle((address,address,uint24,address,uint256,uint256,uint160))"
 SIG_V3_LEGACY="exactInputSingle((address,address,uint24,address,uint256,uint256,uint256,uint160))"

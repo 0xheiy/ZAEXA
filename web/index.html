@@ -747,11 +747,31 @@ const LINKS={
    فایل از رجیستری npm گرفته شده (ethers 6.13.4)، sha384:
    6Zl0Pc8zjSz8KvmNeXRvUQgY4ryFb+BwDvKCmLYcBME0joAaru491tQgi9B7zsMM
    برای به‌روزرسانی: npm pack ethers@<نسخه> و جایگزینی فایل، بعد اجرای تست‌ها. */
-const ETHERS_CDNS=["./ethers.umd.min.js"];
-function loadEthers(){return new Promise((res,rej)=>{let i=0;const go=()=>{
-  if(i>=ETHERS_CDNS.length)return rej(new Error("ethers failed"));
-  const s=document.createElement("script");s.src=ETHERS_CDNS[i++];
-  s.onload=()=>res(window.ethers);s.onerror=go;document.head.appendChild(s);};go();});}
+/* ⚠️ یک رشته، نه آرایه — و عمداً.
+   قبلاً این `ETHERS_CDNS` بود: یک آرایه با حلقه‌ای که روی `onerror` به عضو
+   بعدی می‌رفت. رفتارش درست بود (فقط یک مسیر محلی داخلش بود) ولی اسم و شکلش
+   دعوت می‌کرد که یک URL دیگر ته آرایه اضافه شود، و همان یک خط تمام آن چیزی
+   را برمی‌گرداند که نه خط کامنت بالا برای حذفش نوشته شده. حالا افزودن یک
+   fallback نیازمند بازنویسی این تابع است، نه یک کاما.
+
+   `integrity` هم واقعاً اعمال می‌شود، نه فقط مستند. آن sha384 بالا قبلاً فقط
+   یک یادداشت بود؛ حالا اگر فایل عوض شود و هش به‌روز نشود، مرورگر اسکریپت را
+   اجرا نمی‌کند و اپ صریح می‌شکند — که هدف همان کامنت است.
+   نگهبان [supply chain] در run.py هش را از خودِ فایل بازمحاسبه می‌کند تا این
+   دو هرگز از هم دور نیفتند. */
+const ETHERS_SRC="./ethers.umd.min.js";
+const ETHERS_SRI="sha384-6Zl0Pc8zjSz8KvmNeXRvUQgY4ryFb+BwDvKCmLYcBME0joAaru491tQgi9B7zsMM";
+function loadEthers(){return new Promise((res,rej)=>{
+  const s=document.createElement("script");
+  s.src=ETHERS_SRC;
+  /* هش فقط وقتی اعمال می‌شود که خالی نباشد. تنها جایی که خالی است، هارنس
+     تست است — آنجا استاب بار می‌شود و هش فایل واقعی به آن نمی‌خورد.
+     نگهبان [supply chain] در run.py می‌سنجد که نسخه‌ی *منتشرشده* هش
+     ناخالی و درست داشته باشد، پس این راه در باز نمی‌ماند. */
+  if(ETHERS_SRI){s.integrity=ETHERS_SRI;s.crossOrigin="anonymous";}
+  s.onload=()=>res(window.ethers);
+  s.onerror=()=>rej(new Error("ethers failed to load from "+ETHERS_SRC));
+  document.head.appendChild(s);});}
 
 const CHAIN={
   id:8453,hexId:"0x2105",name:"Base",explorer:"https://basescan.org",gtNetwork:"base",
@@ -1366,11 +1386,17 @@ async function runExitCheck(plan,amountIn){
     out.reason="We could not read your "+tokenIn.symbol+" balance, so the live check did not run.";
     return out;
   }
-  if(bal<amountIn){
+  /* ⚠️ همه‌ی این سه سنجش با `simAmount` انجام می‌شوند، نه با `amountIn`.
+     شبیه‌سازی روی بزرگ‌ترین پا اجرا می‌شود و آن پا از کل سفارش کوچک‌تر است؛
+     پس پرسیدن «آیا کلِ سفارش موجودی/allowance دارد؟» سؤال اشتباهی است.
+     دو جور غلط می‌شد: شبیه‌سازی‌ای که موفق می‌شد بی‌دلیل رد می‌شد، و بدتر،
+     در شاخه‌ی revert یک `blocked` واقعی به «اول approve کن» تبدیل می‌شد —
+     یعنی همان «نمی‌دانم رفتار «نه» بگیرد»، در گران‌ترین جهت ممکن. */
+  if(bal<simAmount){
     out.reason="Not enough "+tokenIn.symbol+" in your wallet to verify by simulation.";
     return out;
   }
-  if(!isNative(tokenIn)&&allowanceKnown&&allowance<amountIn){
+  if(!isNative(tokenIn)&&allowanceKnown&&allowance<simAmount){
     out.reason="Approve "+tokenIn.symbol+" to verify by simulation.";return out;}
 
   const roundTrip={parts:[{route:{hops:buy.hops.concat(sellRoute.hops),amountIn:simAmount,
@@ -1408,7 +1434,9 @@ async function runExitCheck(plan,amountIn){
     //    توکنی که پیامش «transferFrom failed» بود سالم اعلام می‌شد، و
     //    allowance بیاتِ کش‌شده باعث هشدار کاذب می‌شد. حالا نمی‌پرسیم
     //    «پیام خطا چه بود»، می‌پرسیم «واقعاً موجودی و allowance هست؟».
-    const gap=await preconditionGap(amountIn);
+    // با `simAmount`، همان مقداری که واقعاً شبیه‌سازی شد. با `amountIn` این
+    // سنجش می‌توانست بگوید «موجودی کم است» برای مبلغی که هرگز لازم نبود.
+    const gap=await preconditionGap(simAmount);
     if(seq!==exitSeq)return null;
     if(gap===null){
       out.state="unknown";
@@ -2245,11 +2273,17 @@ async function tokenLogo(t){
     if(!a)return null;                       // نپرسیدیم — چیزی هم ذخیره نکن
     const u=a.image_url;
     const good=(u&&!/missing/i.test(u))?u:"";
-    /* نمایش و ذخیره دو تصمیم جدا هستند. هرچه سرویس داد نمایش داده می‌شود
-       (رفتار قبلی، دست‌نخورده)، ولی فقط چیزی در انبار مرورگر می‌ماند که
-       خواندنِ دوباره‌اش بی‌خطر باشد — یعنی `https://`. آدرس `data:` نمایش
-       داده می‌شود ولی ذخیره نمی‌شود. */
-    if(good===""||okLogo(good))lsSet(LS_LOGO,t.address,good);
+    /* ⚠️ نمایش و ذخیره حالا *یک* قاعده دارند، و این تغییر عمدی است.
+       قبلاً هرچه سرویس می‌داد نمایش داده می‌شد و فقط ذخیره محدود به
+       `https://` بود. یعنی مسیر رندر — همان مسیری که یک نفوذ در سرویس
+       قیمت اول از همه به آن می‌رسد — شل‌ترین دو مسیر بود. امروز قابل
+       بهره‌برداری نبود (`javascript:` از `<img src>` اجرا نمی‌شود و SVG
+       داخل `<img>` اسکریپت اجرا نمی‌کند)، ولی سخت‌کردنش هزینه‌ای ندارد.
+       بهایش این است که لوگوی `data:` از سرویس دیگر نمایش داده نمی‌شود —
+       همان‌ها که از قبل هم ذخیره نمی‌شدند. آیکون ETH خودمان بالاتر و
+       قبل از این شاخه برگردانده می‌شود، پس دست‌نخورده است. */
+    if(good!==""&&!okLogo(good))return null;
+    lsSet(LS_LOGO,t.address,good);
     return good||null;
   }catch{return null;}
 }
@@ -2374,6 +2408,10 @@ function paintAvatar(el,t){
   if(!t)return;
   tokenLogo(t).then(url=>{
     if(!url)return;
+    /* دفاع دوم، سر خودِ چاه. tokenLogo قبلاً فیلتر می‌کند؛ این خط برای وقتی
+       است که کسی روزی مسیر تازه‌ای به اینجا وصل کند. تنها استثنا آیکون
+       خودمان است که یک `data:` ثابت و درون‌فایل است، نه چیزی از شبکه. */
+    if(url!==ETH_ICON&&!okLogo(url))return;
     const img=new Image();
     img.alt="";img.loading="lazy";
     img.onload=()=>{img.classList.add("on");};
@@ -3561,8 +3599,16 @@ async function doSwap(){
     if(!chosen){showError("Simulation failed — nothing sent, no gas spent",firstErr,{attempts});
       setBusy(false);refreshButton();ev("swap:sim-fail");return;}
     chosenSig=chosen.plan.parts.map(p=>p.route.hops.map(h=>venueLabel(h.venue)).join("+"));
+    /* ⚠️ کفی که روی صفحه نوشته است باید همان کفی باشد که امضا می‌شود.
+       `kMin` از نقشه‌ی *اولیه* رندر شده بود و وقتی مسیر بهتر در شبیه‌سازی
+       می‌افتاد و به یک صرافی دیگر برمی‌گشتیم، دوباره رندر نمی‌شد. کاربر
+       هشداری می‌دید که نام صرافی تازه را می‌گفت، ولی عددی که امضا می‌کرد
+       ضمانتی پایین‌تر از عدد روی صفحه داشت — و روی جفت کم‌عمق این اختلاف
+       می‌توانست از لغزشی که خودش تنظیم کرده بیشتر شود. */
+    $("kMin").textContent=fmt(chosen.minOut,tokenOut.decimals)+" "+tokenOut.symbol;
     if(chosen.label!=="best")
-      setNotice(note("warn",`<b>The best route failed simulation; fell back to ${esc(chosen.label)}.</b>`));
+      setNotice(note("warn",`<b>The best route failed simulation; fell back to ${esc(chosen.label)}.</b><br>`+
+        `Minimum received is now <b>${fmt(chosen.minOut,tokenOut.decimals)} ${esc(tokenOut.symbol)}</b>.`));
 
     setBusy(true,`Confirm ${fmt(amountIn,tokenIn.decimals,4)} ${tokenIn.symbol} → ${tokenOut.symbol} in wallet…`);
     let gasLimit;

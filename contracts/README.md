@@ -4,9 +4,13 @@
 already planned: one or more parts, each a chain of swap steps across whitelisted
 routers, all inside a single transaction.
 
-**Deployed on Base:**
-[`0xE980825d4B3911e35Be5804349be26eBBe93BcC6`](https://basescan.org/address/0xe980825d4b3911e35be5804349be26ebbe93bcc6#code)
-— source verified on BaseScan and Sourcify.
+Live contract: [`0xb6AE1C7157f877854C498C44ab5ea3d6742416DC`](https://basescan.org/address/0xb6ae1c7157f877854c498c44ab5ea3d6742416dc#code)
+— deployed on Base, source verified on BaseScan and Sourcify.
+
+The address above is a copy of `CHAIN.executor` in `web/index.html`, which is the
+single source of truth. The UI suite fails if the two drift apart, or if any
+document here presents a retired deployment as the live one — both happened, and
+that is why the check exists. Retired addresses are listed in the root README.
 
 ```
 constructor(address owner, address feeRecipient, uint256 feeBps, address weth)

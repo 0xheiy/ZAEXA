@@ -3,13 +3,25 @@ from playwright.async_api import async_playwright
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 def build_harness():
-    """harness = index.html با لودر ethers که به stub محلی اشاره می‌کند."""
+    """harness = index.html با لودر ethers که به stub محلی اشاره می‌کند.
+
+    ⚠️ هش SRI هم خالی می‌شود. هش فایل واقعی به استاب نمی‌خورد، و روی `file://`
+    اصلاً SRI اجازه‌ی اجرا نمی‌دهد. اینکه هارنس هش ندارد اشکالی نیست —
+    check_no_remote_code جداگانه می‌سنجد که *نسخه‌ی منتشرشده* هش دارد و
+    هشش با خودِ فایل vendor‌شده یکی است."""
     src = open(os.path.join(HERE, "..", "index.html"), encoding="utf-8").read()
-    a = src.index("const ETHERS_CDNS=[")
-    b = src.index("];", a) + 2
-    out = src[:a] + 'const ETHERS_CDNS=["./stub-ethers.js"];' + src[b:]
+    # ⚠️ حضور را می‌سنجیم نه تغییر را. نسخه‌ی اول این را با «قبل != بعد» چک
+    # می‌کرد و وقتی مقدار از قبل همان جایگزین بود (SRI خالی) بی‌ربط می‌افتاد و
+    # جای نگهبان واقعی را می‌گرفت — یعنی خطای درست را با پیام غلط نشان می‌داد.
+    assert re.search(r'const ETHERS_SRC="[^"]*";', src), \
+        "the harness cannot find ETHERS_SRC — did the ethers loader get renamed?"
+    assert re.search(r'const ETHERS_SRI="[^"]*";', src), \
+        "the harness cannot find ETHERS_SRI — did the ethers loader get renamed?"
+    src3 = re.sub(r'const ETHERS_SRC="[^"]*";',
+                  'const ETHERS_SRC="./stub-ethers.js";', src, count=1)
+    src3 = re.sub(r'const ETHERS_SRI="[^"]*";', 'const ETHERS_SRI="";', src3, count=1)
     path = os.path.join(HERE, "harness.html")
-    open(path, "w", encoding="utf-8").write(out)
+    open(path, "w", encoding="utf-8").write(src3)
     return path
 
 URL = "file://" + build_harness()
@@ -26,12 +38,42 @@ def check_no_remote_code():
     اگر روزی کسی برای «مطمئن‌تر شدن» یک fallback به CDN برگرداند، همین‌جا
     گیر می‌افتد."""
     src = open(os.path.join(HERE, "..", "index.html"), encoding="utf-8").read()
-    a = src.index("const ETHERS_CDNS=[")
-    decl = src[a:src.index("];", a) + 2]
-    assert "http://" not in decl and "https://" not in decl, \
-        "ethers must not be loaded from a remote origin:\n" + decl
+    m = re.search(r'const ETHERS_SRC="([^"]*)";', src)
+    assert m, "ETHERS_SRC is gone — the ethers loader was rewritten, re-check this guard"
+    decl = m.group(1)
+    assert not decl.startswith("http://") and not decl.startswith("https://"), \
+        "ethers must not be loaded from a remote origin: " + decl
+    # آرایه‌ی چندمقداری برنگردد. سنجش روی *اعلان* است نه روی نام، وگرنه یک
+    # کامنت که ماجرا را توضیح می‌دهد هم نگهبان را می‌انداخت.
+    assert not re.search(r'\bconst\s+ETHERS_CDNS\s*=', src), \
+        "the ETHERS_CDNS list is back — a list with a fallback loop invites exactly the " \
+        "remote fallback this guard exists to prevent. One source, loaded directly."
+    # و خودِ لودر نباید حلقه داشته باشد: حلقه یعنی «عضو بعدی» یعنی fallback.
+    ld = re.search(r'function loadEthers\(\)\{.*?\n\}', src, re.S)
+    assert ld, "loadEthers is gone or reshaped — re-check this guard"
+    body = ld.group(0)
+    assert not re.search(r'\bfor\s*\(|\bwhile\s*\(|\bi\+\+', body), \
+        "loadEthers loops over sources again — one source, no fallthrough:\n" + body[:300]
     vendored = os.path.join(HERE, "..", "ethers.umd.min.js")
     assert os.path.exists(vendored), "ethers.umd.min.js is missing next to index.html"
+
+    # هش SRI باید ناخالی باشد *و* با خودِ فایل بخواند. تا امروز آن sha384 فقط
+    # یک کامنت بود؛ حالا مرورگر اعمالش می‌کند، پس اگر فایل عوض شود و هش عقب
+    # بماند، سایت زنده می‌شکند. این نگهبان همان اتفاق را قبل از انتشار می‌گیرد.
+    import base64, hashlib
+    sri = re.search(r'const ETHERS_SRI="([^"]*)";', src)
+    assert sri, "ETHERS_SRI is gone — the integrity hash must ship with the page"
+    want = sri.group(1)
+    assert want.startswith("sha384-"), \
+        "ETHERS_SRI must be a sha384- value in the shipped page, got: %r" % want
+    actual = "sha384-" + base64.b64encode(
+        hashlib.sha384(open(vendored, "rb").read()).digest()).decode()
+    assert want == actual, (
+        "the integrity hash in index.html does not match ethers.umd.min.js.\n"
+        "  page:  %s\n  file:  %s\n"
+        "Either the vendored file changed without updating ETHERS_SRI (the live site "
+        "would refuse to run ethers at all), or the file is not the one we pinned."
+        % (want, actual))
 
     # ethers تنها اسکریپت بیرونی نیست. هر جای دیگری هم که کد بار می‌شود باید
     # محلی باشد — WalletConnect با یک <script> پویا می‌آید و اگر روزی کسی
@@ -110,9 +152,77 @@ def check_event_allowlists():
     print("[events] %d names, page and worker agree; %d call sites, none reads a property"
           % (len(page), len(calls)))
 
+RETIRED_EXECUTORS = [
+    "0x6443C06bb117223DC818df54A09A642696D0489c",
+    "0x9fc4608fA104b032B902650A4D12E0CA51a2F684",
+    "0xC261E57cF5739A8a538884405600E4e45dF24802",
+    "0x2fea35aaDae6Cbf9b9481B06164907ccF95DB081",   # v1
+    "0xE980825d4B3911e35Be5804349be26eBBe93BcC6",   # v2
+]
+
+def check_one_executor_address():
+    """هیچ سندی نباید قرارداد بازنشسته را به‌عنوان قرارداد زنده معرفی کند.
+
+    این نگهبان از یک اشتباه واقعی آمده، نه از احتیاط: هر دو README قرارداد v2
+    را «Live contract» می‌نامیدند و به BaseScan با `#code` لینک می‌دادند — یک
+    دعوت صریح به رفتن و ممیزی‌کردن قرارداد اشتباه — و `verify_dexes.sh` حتی
+    یک نسل عقب‌تر، v1 را هاردکد کرده بود. کسی که README را می‌خواند
+    integrator یا auditor است؛ گران‌ترین جای اشتباه‌بودن همین‌جاست.
+
+    قاعده: `CHAIN.executor` در index.html تنها منبع حقیقت است. هر آدرس
+    بازنشسته‌ای که در اسناد ظاهر شود باید در فاصله‌ی نزدیک، برچسب بازنشستگی
+    داشته باشد."""
+    idx = open(os.path.join(HERE, "..", "index.html"), encoding="utf-8").read()
+    m = re.search(r'executor:"(0x[0-9a-fA-F]{40})"', idx)
+    assert m, "CHAIN.executor is gone from index.html — this guard has nothing to compare against"
+    live = m.group(1)
+    assert live.lower() not in [a.lower() for a in RETIRED_EXECUTORS], \
+        "the app itself points at a retired executor: " + live
+
+    root = os.path.join(HERE, "..", "..")
+    docs = [("README.md", os.path.join(root, "README.md")),
+            ("contracts/README.md", os.path.join(root, "contracts", "README.md")),
+            ("contracts/script/verify_dexes.sh",
+             os.path.join(root, "contracts", "script", "verify_dexes.sh"))]
+    RETIRED_WORDS = ("retired", "abandoned", "do not use", "superseded", "replaced",
+                     "بازنشسته", "استفاده نکن", "رها")
+    problems = []
+    for label, path in docs:
+        if not os.path.exists(path):
+            problems.append("%s is missing" % label); continue
+        text = open(path, encoding="utf-8").read()
+        low = text.lower()
+
+        # ⚠️ برچسب بازنشستگی باید روی *همان خط* باشد، نه «جایی این نزدیکی».
+        # نسخه‌ی اول پنجره‌ی ۴۰۰ نویسه‌ای داشت و چون جدول بازنشسته‌ها همان
+        # پایین بود، یک خط «Live contract: <آدرس بازنشسته>» هم بخشیده می‌شد —
+        # یعنی نگهبان دقیقاً همان باگی را که برایش نوشته شده بود نمی‌گرفت.
+        for i, line in enumerate(low.splitlines(), 1):
+            for old_addr in RETIRED_EXECUTORS:
+                if old_addr.lower() in line and not any(w in line for w in RETIRED_WORDS):
+                    problems.append("%s:%d names retired executor %s with no retirement "
+                                    "label on that line" % (label, i, old_addr))
+
+        # و ادعای صریح «قرارداد زنده این است» باید همان آدرس زنده را بدهد
+        if label.endswith(".md"):
+            claims = re.findall(r'(?i)live contract:\s*\[`(0x[0-9a-fA-F]{40})`\]', text)
+            if not claims:
+                problems.append("%s no longer states which contract is live" % label)
+            for c in claims:
+                if c.lower() != live.lower():
+                    problems.append("%s says the live contract is %s, but the app uses %s"
+                                    % (label, c, live))
+            if live.lower() not in low:
+                problems.append("%s never names the live executor %s" % (label, live))
+    assert not problems, ("the executor address has drifted across the docs:\n  - "
+                          + "\n  - ".join(problems))
+    print("[one address] live executor %s — %d retired ones labelled as retired"
+          % (live, len(RETIRED_EXECUTORS)))
+
 check_no_remote_code()
 check_gt_proxy_worker()
 check_event_allowlists()
+check_one_executor_address()
 
 async def main():
     errors = []
@@ -120,11 +230,21 @@ async def main():
     # جمع می‌شوند تا همان کاوشگر بتواند ادعا کند واقعاً رخ داده‌اند — وگرنه
     # allowlist فقط یک راه بی‌صدا برای پنهان‌کردن خطا می‌شد.
     gate_errs = []
+    # خطاهای عمدیِ کاوشگر «کف fallback»: آن کاوشگر ارسال را وسط راه قطع می‌کند،
+    # پس showError درست کار کرده و لاگ کرده. جمعشان می‌کنیم تا خودِ کاوشگر
+    # بتواند ادعا کند رخ داده‌اند — وگرنه allowlist فقط یک راه بی‌صدا برای
+    # قایم‌کردن خطای واقعی می‌شد.
+    probe_errs = []
 
     def on_console(m):
         if m.type != "error":
             return
-        (gate_errs if "[zaexa] gate check failed" in m.text else errors).append(m.text)
+        if "[zaexa] gate check failed" in m.text:
+            gate_errs.append(m.text)
+        elif "probe: stop before sending" in m.text:
+            probe_errs.append(m.text)
+        else:
+            errors.append(m.text)
 
     async with async_playwright() as p:
         b = await p.chromium.launch()
@@ -260,14 +380,18 @@ async def main():
         # نتوانسته بود توکن را از کیف پول بکشد. یعنی یک مشکل پیش‌شرطِ سمت ما
         # به‌عنوان حکم علیه توکن نمایش داده شد — «نمی‌دانم» در نقش «نه».
         # این چهار حالت مرز را قفل می‌کنند.
-        EXIT_PROBE = """async ([msg, alw, down]) => {
+        EXIT_PROBE = """async ([msg, alw, down, cachedBal, cachedAlw]) => {
             const realContract = E.Contract;
             const realCall = readProvider.call.bind(readProvider);
             window.__STUB_ALLOWANCE__ = BigInt(alw);
             account = "0x8A0Dcb583C8CAdc481E34487c34f1B856fe97e23";
             signer = {}; walletChainId = CHAIN.id;
-            balances[balKey(tokenIn)] = 10n ** 30n;   // state کش‌شده: کافی
-            allowance = 10n ** 30n;                   // state کش‌شده: کافی
+            /* state کش‌شده. پیش‌فرض «کافی» است، ولی تست می‌تواند عددی *بین*
+               پای شبیه‌سازی و کل سفارش بگذارد — همان بازه‌ای که دو نگهبان
+               زودهنگام قبلاً با مقدار اشتباه می‌سنجیدند. */
+            balances[balKey(tokenIn)] = cachedBal ? BigInt(cachedBal) : 10n ** 30n;
+            allowance = cachedAlw ? BigInt(cachedAlw) : 10n ** 30n;
+            allowanceKnown = true;
             E.Contract = function () {
                 return { executeSwap: { staticCall: async () => { throw new Error(msg); } } };
             };
@@ -285,8 +409,9 @@ async def main():
                      title: document.querySelector("#exitBox .exitTtl").innerText };
         }"""
 
-        async def exit_case(label, msg, allowance="0", down=False):
-            r = await pg.evaluate(EXIT_PROBE, [msg, allowance, down])
+        async def exit_case(label, msg, allowance="0", down=False,
+                            cached_bal=None, cached_alw=None):
+            r = await pg.evaluate(EXIT_PROBE, [msg, allowance, down, cached_bal, cached_alw])
             print("[exit:%s] state=%s  title=%r" % (label, r["state"], r["title"]))
             print("          %s" % (r["reason"] or "")[:120])
             return r
@@ -326,6 +451,54 @@ async def main():
         r = await exit_case("rpc-down", "fetch failed", allowance=BIG, down=True)
         assert r["state"] == "unknown", "an outage must never be reported as a verdict"
         assert NEVER not in r["title"], "outage reported as unsellable: " + r["title"]
+
+        # ---- 2b-quater. مورد ۰۵ ریویو: پیش‌شرط با *مقدار شبیه‌سازی‌شده* ----
+        # روی نقشه‌ی split، شبیه‌سازی روی بزرگ‌ترین پا اجرا می‌شود، پس مقداری
+        # که لازم دارد از کل سفارش کمتر است. اگر پیش‌شرط با کل سفارش سنجیده
+        # شود، کیف پولی که allowance‌اش بین این دو است پیام «اول approve کن»
+        # می‌گیرد و پنل روی estimated می‌نشیند — در حالی که revert واقعاً از
+        # سمت توکن آمده. یک `blocked` واقعی نرم می‌شود به «نتوانستیم بسنجیم»؛
+        # همان «نمی‌دانم در نقش نه»، در گران‌ترین جهت.
+        await pg.fill("#amtIn", "900000")            # مبلغی که مسیر را تقسیم می‌کند
+        await pg.wait_for_timeout(3200)
+        legs = await pg.evaluate("""() => {
+            if (!currentPlan) return null;
+            const big = currentPlan.parts.slice().sort((a,b)=>b.amountIn>a.amountIn?1:-1)[0];
+            return {parts: currentPlan.parts.length,
+                    total: currentPlan.totalIn.toString(),
+                    biggest: big.amountIn.toString()};
+        }""")
+        assert legs and legs["parts"] > 1, \
+            "this probe needs a split plan; got %s — the amount may no longer split" % legs
+        # موجودی زیاد، ولی allowance دقیقاً *بین* پای بزرگ و کل سفارش
+        between = (int(legs["biggest"]) + int(legs["total"])) // 2
+        assert int(legs["biggest"]) < between < int(legs["total"])
+        await pg.evaluate("v => { window.__STUB_BALANCE__ = v; }", str(10 ** 40))
+        r = await exit_case("split-precondition",
+                            'execution reverted: "Blacklisted"', allowance=str(between))
+        await pg.evaluate("() => { delete window.__STUB_BALANCE__; }")
+        print("[exit:split-precondition] parts=%s biggest=%s total=%s allowance=between"
+              % (legs["parts"], legs["biggest"][:8] + "…", legs["total"][:8] + "…"))
+        assert r["state"] == "blocked", (
+            "the simulation only needed the biggest leg, and the wallet had approved more "
+            "than that — a genuine sell-side revert was softened into %r (%s). This is the "
+            "first rule of the project failing in its expensive direction."
+            % (r["state"], (r["reason"] or "")[:90]))
+        assert NEVER in r["title"], "a real block must still say so: " + r["title"]
+
+        # همان مقدار اشتباه در دو نگهبان *زودهنگام* هم بود: موجودی و allowance
+        # کش‌شده با کل سفارش سنجیده می‌شدند، پس شبیه‌سازی‌ای که موفق می‌شد
+        # بی‌دلیل رد می‌شد و پنل هرگز به «blocked» نمی‌رسید.
+        for label, kw in (("cached-balance", {"cached_bal": str(between)}),
+                          ("cached-allowance", {"cached_alw": str(between)})):
+            await pg.evaluate("v => { window.__STUB_BALANCE__ = v; }", str(10 ** 40))
+            r2 = await exit_case(label, 'execution reverted: "Blacklisted"',
+                                 allowance=str(10 ** 40), **kw)
+            await pg.evaluate("() => { delete window.__STUB_BALANCE__; }")
+            assert r2["state"] == "blocked", (
+                "the %s guard was measured against the whole order instead of the leg that "
+                "is actually simulated, so a real block came back as %r (%s)"
+                % (label, r2["state"], (r2["reason"] or "")[:80]))
 
         # پاک کردن کیف پول ساختگی تا تست‌های بعدی حالت «بدون کیف پول» ببینند
         await pg.evaluate("""() => {
@@ -1106,7 +1279,7 @@ async def main():
             out.freshNone = await tokenLogo(tok);
             out.freshNoneHits = hits;
 
-            // آدرس data: نمایش داده می‌شود ولی در انبار نمی‌ماند
+            // آدرس data: از سرویس: نه ذخیره می‌شود و نه — از این نسخه — نمایش
             localStorage.removeItem(LS_LOGO);
             const DATA = "data:image/png;base64,iVBORw0KGgo=";
             window.fetch = async () => { hits++; return new Response(JSON.stringify(
@@ -1114,6 +1287,35 @@ async def main():
             reset();
             out.dataUrl = await tokenLogo(tok);
             out.dataStored = localStorage.getItem(LS_LOGO);
+
+            // …ولی آیکون خودمان که یک data: درون‌فایل است باید سر جایش بماند.
+            // سخت‌کردن مسیر نمایش نباید آیکون ETH را قربانی کند.
+            out.ethIcon = await tokenLogo(allTokens().find(t => t.native));
+            out.ethIsOurs = out.ethIcon === ETH_ICON;
+
+            // و چیزی که واقعاً به img.src می‌رسد سنجیده می‌شود، نه فقط
+            // خروجی tokenLogo — چاه همان جاست.
+            const box = document.createElement("div");
+            paintAvatar(box, allTokens().find(t => t.native));
+            await new Promise(r => setTimeout(r, 60));
+            out.ethImgSrc = (box.querySelector("img") || {}).src || null;
+
+            const box2 = document.createElement("div");
+            paintAvatar(box2, tok);
+            await new Promise(r => setTimeout(r, 60));
+            out.dataImgSrc = (box2.querySelector("img") || {}).src || null;
+
+            /* دفاع دومِ سر چاه را جدا می‌سنجیم. با tokenLogo سالم، این خط
+               هرگز اجرا نمی‌شود و برداشتنش هیچ تستی را نمی‌انداخت — یعنی
+               نگهبانی داشتیم که هیچ چیزی ثابت نمی‌کرد. اینجا tokenLogo را
+               موقتاً بی‌اثر می‌کنیم تا خودِ paintAvatar سنجیده شود. */
+            const realTokenLogo = tokenLogo;
+            tokenLogo = async () => "data:image/png;base64,iVBORw0KGgo=";
+            const box3 = document.createElement("div");
+            paintAvatar(box3, tok);
+            await new Promise(r => setTimeout(r, 60));
+            out.sinkGuard = (box3.querySelector("img") || {}).src || null;
+            tokenLogo = realTokenLogo;
 
             window.fetch = realFetch;
             localStorage.removeItem(LS_LOGO); localStorage.removeItem(LS_POOL);
@@ -1152,14 +1354,31 @@ async def main():
         assert logo["staleNoneHits"] >= 1, \
             ("a 'no logo' answer older than an hour was reused — a transient gap in the "
              "response must not turn into 'this token has no logo' for a week")
-        # ماک اینجا واقعیت را آینه نمی‌کند: در هارنس image_url یک data: url است،
-        # در حالی که GeckoTerminal واقعی https می‌دهد. پس هر دو حالت سنجیده
-        # می‌شوند — نمایش باید کار کند، ذخیره نباید.
-        assert logo["dataUrl"] == "data:image/png;base64,iVBORw0KGgo=", \
-            "a data: logo from the service must still be displayed: %s" % logo["dataUrl"]
+        # ⚠️ این قاعده در ۱۸ آگوست ۲۰۲۶ سخت‌تر شد و انتظار این تست عوض شد.
+        # قبلاً نمایش هرچه سرویس می‌داد آزاد بود و فقط ذخیره به https محدود
+        # بود — یعنی مسیر رندر، همان مسیری که یک نفوذ در سرویس قیمت اول از
+        # همه به آن می‌رسد، شل‌ترینِ دو مسیر بود. حالا هر دو یک قاعده دارند.
+        # ماک اینجا واقعیت را آینه نمی‌کند: در هارنس image_url یک data: url است
+        # در حالی که GeckoTerminal واقعی https می‌دهد — و همین باعث شد این
+        # حالت اصلاً قابل سنجش باشد.
+        print("[logo cache] service data: url -> shown=%s | our ETH icon -> ours=%s src=%s"
+              % (logo["dataUrl"], logo["ethIsOurs"], str(logo["ethImgSrc"])[:22]))
+        assert logo["dataUrl"] is None, \
+            ("a data: logo from the price service reached the display path — img.src must be "
+             "held to the same https-only rule as localStorage: %s" % logo["dataUrl"])
+        assert logo["dataImgSrc"] is None, \
+            ("paintAvatar put a non-https url into img.src: %s" % logo["dataImgSrc"])
+        assert logo["sinkGuard"] is None, \
+            ("paintAvatar accepted a non-https url handed straight to it — the render sink "
+             "must hold the line even when whatever feeds it does not: %s" % logo["sinkGuard"])
         assert not logo["dataStored"] or "data:" not in logo["dataStored"], \
             ("a data: url was written into localStorage — only https urls are safe to read "
              "back into img.src: %s" % logo["dataStored"])
+        # و آیکون خودمان قربانی این سخت‌گیری نشده باشد
+        assert logo["ethIsOurs"] and logo["ethImgSrc"] and \
+               logo["ethImgSrc"].startswith("data:image/svg+xml"), \
+            ("tightening the display path also killed our own built-in ETH icon: %s"
+             % logo["ethImgSrc"])
 
         # ---- 2b-ter. the action button must not move between pairs ----
         # اعلان‌ها بین جدول و دکمه بودند و ارتفاعشان به جفت توکن بستگی دارد،
@@ -1697,6 +1916,92 @@ async def main():
             await pg.inner_text("#routeMeta"), await pg.inner_text("#kImpact")))
         print("[route] %s" % (await pg.inner_text("#routeBody")).replace("\n", " | "))
         await pg.screenshot(path=os.path.join(HERE, "shot-split.png"), full_page=True)
+
+        # ---- 3b. مورد ۰۳ ریویو: کف روی صفحه = کفی که امضا می‌شود ----
+        # وقتی مسیر بهتر در شبیه‌سازی می‌افتد، doSwap به یک صرافی تک برمی‌گردد
+        # که minOut کمترى دارد. «Min received» از نقشه‌ی *اولیه* رندر شده بود و
+        # دوباره رندر نمی‌شد، پس کاربر تراکنشی را امضا می‌کرد که ضمانتش پایین‌تر
+        # از عدد روی صفحه بود — روی جفت کم‌عمق، بیشتر از لغزشی که خودش گذاشته.
+        # raw string: the JS below contains \s, which is not a Python escape
+        floor_probe = await pg.evaluate(r"""async () => {
+            const realContract = E.Contract;
+            const BIGV = 10n ** 40n;
+            window.__STUB_ALLOWANCE__ = BIGV.toString();
+            window.__STUB_BALANCE__ = BIGV.toString();   // وگرنه preflight همان‌جا می‌ایستد
+            account = "0x8A0Dcb583C8CAdc481E34487c34f1B856fe97e23";
+            signer = {}; walletChainId = CHAIN.id; walletIsRemote = false;
+            balances[balKey(tokenIn)] = BIGV; allowance = BIGV; allowanceKnown = true;
+
+            let cand = 0, seen = [], noticeAtSend = "";
+            E.Contract = function () {
+                const send = function () {
+                    /* اعلان را همین‌جا برمی‌داریم — یک لحظه قبل از ارسال، که
+                       دقیقاً همان چیزی است که کاربر می‌بیند. بعد از این،
+                       showError جای اعلان را می‌گیرد. */
+                    noticeAtSend = document.getElementById("notices").innerText
+                                     .replace(/\s+/g, " ");
+                    throw new Error("probe: stop before sending");
+                };
+                send.staticCall = async (...a) => {
+                    /* ⚠️ doSwap اول runQuote را صدا می‌زند و آن هم runExitCheck را،
+                       که یک مسیر *حلقه‌ای* (tokenIn == tokenOut) شبیه‌سازی می‌کند.
+                       تلاش اول این تست همان تماس را با کاندید اول اشتباه گرفت و
+                       حلقه‌ی کاندیدها هرگز به fallback نرسید. پس تفکیکش می‌کنیم. */
+                    const isExitCheck = JSON.stringify(a[0]) === JSON.stringify(a[1]);
+                    if (isExitCheck) return 1n;
+                    cand++; seen.push(a[3].toString());
+                    // کاندید اول «best» است و عمداً می‌افتد؛ دومی قبول می‌شود
+                    if (cand === 1) throw new Error('execution reverted: "best route fails"');
+                    return 1n;
+                };
+                send.estimateGas = async () => { throw new Error("probe: no estimate"); };
+                return { executeSwap: send };
+            };
+
+            const before = document.getElementById("kMin").textContent;
+            try { await doSwap(); } catch (e) {}
+            E.Contract = realContract;
+
+            delete window.__STUB_BALANCE__;
+            const chosenMinOut = seen.length > 1 ? seen[1] : null;
+            return {
+                before, after: document.getElementById("kMin").textContent,
+                calls: cand, chosenMinOut,
+                expected: chosenMinOut === null ? null
+                    : fmt(BigInt(chosenMinOut), tokenOut.decimals) + " " + tokenOut.symbol,
+                notice: noticeAtSend
+            };
+        }""")
+        print("[fallback floor] sims=%s  on screen before=%r after=%r"
+              % (floor_probe["calls"], floor_probe["before"], floor_probe["after"]))
+        assert floor_probe["calls"] >= 2, (
+            "the probe never reached a fallback candidate (%s simulation calls) — preflight "
+            "probably stopped doSwap first, so this test proves nothing"
+            % floor_probe["calls"])
+        assert floor_probe["expected"], "the fallback candidate's minOut was not captured"
+        assert floor_probe["after"] == floor_probe["expected"], (
+            "Min received on screen is not the floor that would have been signed.\n"
+            "  on screen: %s\n  in the transaction: %s\n"
+            "The user reads the panel, not the calldata."
+            % (floor_probe["after"], floor_probe["expected"]))
+        assert floor_probe["after"] != floor_probe["before"], (
+            "the fallback floor happens to equal the original one, so this run cannot tell "
+            "a re-render from a stale value — the probe needs a plan where they differ")
+        assert "Minimum received is now" in floor_probe["notice"], (
+            "the fallback notice names the venue but not the new floor: %s"
+            % floor_probe["notice"][:160])
+        # خطای عمدی این کاوشگر واقعاً باید لاگ شده باشد — نه اینکه بی‌صدا رد شود
+        assert probe_errs, \
+            "doSwap swallowed the send failure instead of reporting it through showError"
+        print("[fallback floor] the interrupted send was reported, not swallowed (%d log)"
+              % len(probe_errs))
+
+        await pg.evaluate("""() => {
+            account = null; signer = null; walletChainId = null; walletIsRemote = false;
+            balances = {}; allowance = 0n; allowanceKnown = false;
+            delete window.__STUB_ALLOWANCE__; setNotice("");
+        }""")
+        await pg.fill("#amtIn", "900000"); await pg.wait_for_timeout(2500)
 
         # ---- 4. multi-hop ----
         for target, sym in (("#tokInBtn", "cbBTC"), ("#tokOutBtn", "DAI")):

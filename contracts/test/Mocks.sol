@@ -369,3 +369,129 @@ contract MockReserveRouter {
         amounts[0] = amountIn; amounts[1] = out;
     }
 }
+
+
+/**
+ * A smart contract wallet that sweeps its whole balance out of its receive hook.
+ *
+ * Not an exotic shape: forwarding wallets and automated routers do this, and
+ * those are exactly the callers most likely to reach an aggregator
+ * programmatically. The point of this mock is that the recipient is *not*
+ * passive - after the executor sends ETH, this wallet's balance can end up
+ * *below* what it was before the send, because the sweep also takes whatever it
+ * was already holding. That is the case the delivered-amount subtraction has to
+ * survive.
+ */
+contract SweepingWallet {
+    address public sink;
+    bool public sweeping = true;
+
+    constructor(address _sink) { sink = _sink; }
+    function setSweeping(bool v) external { sweeping = v; }
+
+    receive() external payable {
+        if (!sweeping) return;
+        uint256 all = address(this).balance;
+        if (all > 0) {
+            (bool ok, ) = sink.call{value: all}("");
+            require(ok, "sink refused");
+        }
+    }
+
+    /// Lets a test drive executeSwap from inside a contract account.
+    function call(address target, bytes calldata data, uint256 value)
+        external returns (bytes memory)
+    {
+        (bool ok, bytes memory ret) = target.call{value: value}(data);
+        if (!ok) {
+            // bubble the original revert/panic up unchanged, so the test sees it
+            assembly { revert(add(ret, 0x20), mload(ret)) }
+        }
+        return ret;
+    }
+}
+
+
+/// Recipient hook, so the token-out branch can be exercised with a non-passive
+/// recipient - the ERC-20 mirror of SweepingWallet.
+interface ITokenReceiver {
+    function onTokenReceived(address token, uint256 amount) external;
+}
+
+contract MockHookToken {
+    string public name = "Hooked";
+    string public symbol = "HOOK";
+    uint8 public decimals = 18;
+    uint256 public totalSupply;
+
+    mapping(address => uint256) public balanceOf;
+    mapping(address => mapping(address => uint256)) public allowance;
+    mapping(address => bool) public isHooked;
+
+    function setHooked(address who, bool v) external { isHooked[who] = v; }
+
+    function mint(address to, uint256 amount) external {
+        balanceOf[to] += amount; totalSupply += amount;
+    }
+    function approve(address spender, uint256 amount) external returns (bool) {
+        allowance[msg.sender][spender] = amount; return true;
+    }
+    function _move(address from, address to, uint256 amount) internal {
+        require(balanceOf[from] >= amount, "insufficient");
+        balanceOf[from] -= amount;
+        balanceOf[to] += amount;
+        if (isHooked[to]) ITokenReceiver(to).onTokenReceived(address(this), amount);
+    }
+    function transfer(address to, uint256 amount) external returns (bool) {
+        _move(msg.sender, to, amount); return true;
+    }
+    function transferFrom(address from, address to, uint256 amount) external returns (bool) {
+        uint256 a = allowance[from][msg.sender];
+        require(a >= amount, "not allowed");
+        if (a != type(uint256).max) allowance[from][msg.sender] = a - amount;
+        _move(from, to, amount); return true;
+    }
+}
+
+
+/// A contract wallet that empties its token balance the moment it is credited.
+contract SweepingTokenWallet is ITokenReceiver {
+    address public sink;
+    constructor(address _sink) { sink = _sink; }
+
+    function onTokenReceived(address token, uint256) external {
+        uint256 all = MockHookToken(token).balanceOf(address(this));
+        if (all > 0) MockHookToken(token).transfer(sink, all);
+    }
+
+    function call(address target, bytes calldata data, uint256 value)
+        external returns (bytes memory)
+    {
+        (bool ok, bytes memory ret) = target.call{value: value}(data);
+        if (!ok) { assembly { revert(add(ret, 0x20), mload(ret)) } }
+        return ret;
+    }
+    receive() external payable {}
+}
+
+
+/// V2-style router that pays out a MockHookToken instead of a MockERC20.
+contract MockHookRouter {
+    uint256 public rateNum = 2;
+    uint256 public rateDen = 1;
+
+    function setRate(uint256 n, uint256 d) external { rateNum = n; rateDen = d; }
+
+    function swapExactTokensForTokens(
+        uint256 amountIn, uint256 amountOutMin, address[] calldata path,
+        address to, uint256
+    ) external returns (uint256[] memory amounts) {
+        MockERC20(path[0]).transferFrom(msg.sender, address(this), amountIn);
+        uint256 out = amountIn * rateNum / rateDen;
+        require(out >= amountOutMin, "mock: slippage");
+        MockHookToken(path[path.length-1]).mint(to, out);
+        amounts = new uint256[](2);
+        amounts[0] = amountIn;
+        amounts[1] = out;
+    }
+}
