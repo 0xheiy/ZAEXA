@@ -186,6 +186,8 @@ main{max-width:1140px;margin:0 auto;padding:8px 20px 56px;display:flex;flex-dire
      نمودار را تکان می‌داد.
    با هر دو، ارتفاع هر کارت فقط به محتوای خودش بستگی دارد. */
 .row.hero{grid-template-columns:1fr 396px;align-items:start}
+.row.tkGrid{grid-template-columns:1fr 396px;align-items:start}
+@media(max-width:900px){.row.tkGrid{grid-template-columns:1fr}}
 .row.sub{grid-template-columns:1.35fr 1fr}
 @media(max-width:940px){.row.hero,.row.sub{grid-template-columns:1fr}}
 
@@ -320,7 +322,7 @@ main{max-width:1140px;margin:0 auto;padding:8px 20px 56px;display:flex;flex-dire
 .exitBody{font-size:13px;color:var(--tx2);margin-top:7px;line-height:1.6}
 .exitBody b{color:var(--tx);font-weight:660}
 .exitNote{font-size:12px;color:var(--tx3);margin-top:6px;line-height:1.55}
-.exitShare{margin-top:10px;font-size:11px;letter-spacing:.02em;color:var(--tx3);
+.exitShare{margin:0 12px 0 0;font-size:11px;letter-spacing:.02em;color:var(--tx3);
   background:none;border:0;padding:0;cursor:pointer;text-decoration:underline;
   text-underline-offset:3px}
 .exitShare:hover{color:var(--tx1)}
@@ -471,7 +473,12 @@ footer a{color:var(--tx3)}
 .tstats{display:grid;grid-template-columns:repeat(4,1fr);gap:1px;background:var(--line);
   border-top:1px solid var(--line);margin-top:14px}
 .tstat{background:var(--card);padding:11px 14px}
-.tkTop{display:flex;align-items:center;gap:15px;padding:20px 18px 16px}
+.tkHero{overflow:hidden}
+.tkHero:before{content:"";display:block;height:3px;background:var(--grad)}
+.tkTop{display:flex;align-items:center;gap:16px;padding:22px 20px 4px}
+.tkGrid{margin-top:14px}
+#view-token #tk-exitBox{padding:0 20px}
+#view-token .exit{margin-top:14px}
 .tkAv{width:52px;height:52px;border-radius:50%;display:grid;place-items:center;
   background:var(--raise);font-size:15px;font-weight:600;color:var(--tx2)}
 .tkSym{font-size:27px;font-weight:600;letter-spacing:-.02em;line-height:1.1}
@@ -480,7 +487,7 @@ footer a{color:var(--tx3)}
 .tkPx .px{font-size:20px}
 .tkAddr{display:block;margin-top:5px;color:var(--tx3);font-size:11.5px;text-decoration:none}
 .tkAddr:hover{color:var(--tx1);text-decoration:underline}
-.tkCta{display:flex;gap:11px;padding:16px 18px 4px;flex-wrap:wrap}
+.tkCta{display:flex;gap:11px;padding:18px 20px 4px;flex-wrap:wrap}
 .tkTrade{flex:1;min-width:190px;padding:14px 20px;border:0;border-radius:13px;cursor:pointer;
   background:var(--grad);color:var(--on-acc);font-size:15px;font-weight:660;
   box-shadow:0 6px 20px var(--glow);transition:.18s}
@@ -488,7 +495,7 @@ footer a{color:var(--tx3)}
 .tkCopy{padding:14px 18px;border:1px solid var(--line);border-radius:11px;cursor:pointer;
   background:transparent;color:var(--tx2);font-size:13.5px}
 .tkCopy:hover{color:var(--tx1);border-color:var(--tx3)}
-.tkNote{margin:14px 18px 18px;color:var(--tx3);font-size:12px;line-height:1.6}
+.tkNote{margin:13px 20px 20px;color:var(--tx3);font-size:12px;line-height:1.6}
 @media(max-width:620px){.tkTop{flex-wrap:wrap}.tkPx{text-align:left;width:100%}}
 .tstat .k{font-size:10.5px;font-weight:640;letter-spacing:.05em;text-transform:uppercase;
   color:var(--tx3)}
@@ -677,6 +684,9 @@ footer a{color:var(--tx3)}
 
     <section class="card">
       <header><span class="ttl">Exit check &amp; token safety</span><span class="grow"></span>
+        <button class="exitShare" id="checkShare" type="button"
+          title="Copy a link that opens this token's page — no wallet needed"
+        >Copy this check</button>
         <span class="ttl mono" id="safetySym"></span></header>
       <div id="exitBox"></div>
       <div id="safetyBody"><div class="empty">Pick a token to scan its contract.</div></div>
@@ -725,7 +735,7 @@ footer a{color:var(--tx3)}
      هیچ منطقی اینجا تکرار نشده؛ فقط مقصدِ رندر عوض می‌شود.
      ===================================================================== -->
 <div class="view" id="view-token">
-  <section class="card">
+  <section class="card tkHero">
     <div class="tkTop">
       <span class="av tkAv" id="tk-av">?</span>
       <div class="tkId">
@@ -738,21 +748,40 @@ footer a{color:var(--tx3)}
         <a class="tkAddr mono" id="tk-addr" target="_blank" rel="noopener"></a>
       </div>
     </div>
-    <div id="tk-tokStats" class="tstats" hidden></div>
+
+    <!-- جوابِ سؤالی که خواننده با آن آمده، بالاتر از هر چیز دیگر -->
+    <div id="tk-exitBox"></div>
+
     <div class="tkCta">
       <button class="tkTrade" id="tk-trade">Trade now</button>
       <button class="tkCopy" id="tk-copy">Copy this link</button>
     </div>
-    <p class="tkNote">Nothing here needs a wallet. The round trip below is simulated
+    <p class="tkNote">Nothing here needs a wallet. The round trip above is simulated
       against the live chain — no transaction, no gas.</p>
   </section>
 
-  <section class="card">
-    <header><span class="ttl">Exit check &amp; token safety</span><span class="grow"></span>
-      <span class="ttl mono" id="tk-sym2"></span></header>
-    <div id="tk-exitBox"></div>
-    <div id="tk-safetyBody"><div class="empty"><span class="spin"></span>Reading the token…</div></div>
-  </section>
+  <div class="row tkGrid">
+    <section class="card">
+      <div class="chartTop">
+        <div>
+          <div class="pairName" id="tk-pairName">—</div>
+          <div class="px mono" id="tk-pxNow">—</div>
+          <div class="chg mono" id="tk-pxChg"></div>
+        </div>
+      </div>
+      <div class="plot" id="tk-plot">
+        <div class="chartMsg" id="tk-chartMsg">Loading price history…</div>
+        <div class="tipbox" id="tk-tip"></div>
+      </div>
+      <div class="tstats" id="tk-tokStats" hidden></div>
+    </section>
+
+    <section class="card">
+      <header><span class="ttl">Token safety</span><span class="grow"></span>
+        <span class="ttl mono" id="tk-sym2"></span></header>
+      <div id="tk-safetyBody"><div class="empty"><span class="spin"></span>Reading the token…</div></div>
+    </section>
+  </div>
 </div>
 </main>
 
@@ -1661,14 +1690,7 @@ function renderExit(x){
         <b>${fmt(x.recovered,tokenIn.decimals)} ${esc(tokenIn.symbol)}</b>
         of the ${fmt(parsedAmountIn(),tokenIn.decimals)} you put in.</div>`:""}
       ${x.reason?`<div class="exitNote">${esc(x.reason)}</div>`:""}
-      ${tokenOut?`<button class="exitShare" id="checkShare" type="button"
-        title="Copy a link that opens this result — no wallet needed"
-        >Copy this check</button>`:""}
     </div>`;
-  const cs=box.querySelector("#checkShare");
-  /* برای توکن واقعی، صفحه‌ی توکن؛ برای ETH بومی که صفحه‌ی توکن ندارد،
-     همان لینک هش‌دار قبلی. هیچ‌کدام دکمه را بی‌صدا خاموش نمی‌کند. */
-  if(cs)cs.onclick=()=>copyLink(tokenPageUrl()||checkUrl(),cs);
   /* کسی که این لینک را باز کرده دنبال همین جعبه آمده، نه دنبال فرم سواپ. */
   if(checkLink&&!checkScrolled){
     checkScrolled=true;
@@ -1989,8 +2011,8 @@ async function pairSeries(tIn,tOut,cfg){
   const m=new Map(sIn.map(p=>[p.t,p.c]));
   return sOut.map(p=>{const a=m.get(p.t);return a?{t:p.t,c:p.c/a}:null;}).filter(Boolean);
 }
-function chartMsg(t){$("chartMsg").style.display="grid";$("chartMsg").textContent=t;
-  const s=$("plot").querySelector("svg");if(s)s.remove();}
+function chartMsg(t){panel("chartMsg").style.display="grid";panel("chartMsg").textContent=t;
+  const s=panel("plot").querySelector("svg");if(s)s.remove();}
 
 let chartTries=0,chartRetry=null,chartKey="";
 async function loadChart(){
@@ -1999,23 +2021,23 @@ async function loadChart(){
   // شمارنده‌ی تلاش به همین جفت و همین بازه تعلق دارد، نه به کل جلسه
   const key=`${tokenIn.symbol}>${tokenOut.symbol}>${timeframe}`;
   if(key!==chartKey){chartKey=key;chartTries=0;clearTimeout(chartRetry);}
-  $("pairName").textContent=`${tokenOut.symbol} / ${tokenIn.symbol}`;
+  panel("pairName").textContent=`${tokenOut.symbol} / ${tokenIn.symbol}`;
   // آمار به توکن خروجی گره خورده و هر جا جفت عوض شود loadChart صدا زده
   // می‌شود، پس همین‌جا یک‌بار وصلش می‌کنیم نه در پنج جای مختلف.
   renderTokenStats(tokenOut);
   chartMsg("Loading price history…");
-  $("pxNow").textContent="—";$("pxChg").textContent="";
+  panel("pxNow").textContent="—";panel("pxChg").textContent="";
   try{
     const data=await pairSeries(tokenIn,tokenOut,TFS[timeframe]);
     if(seq!==chartSeq)return;
     if(!data||data.length<2){chartMsg("Not enough price history for this pair yet.");return;}
     chartData=data;
-    $("chartMsg").style.display="none";
+    panel("chartMsg").style.display="none";
     drawChart(data);
     const first=data[0].c,last=data[data.length-1].c;
-    $("pxNow").textContent=fmtPx(last)+" "+tokenIn.symbol;
+    panel("pxNow").textContent=fmtPx(last)+" "+tokenIn.symbol;
     const ch=((last-first)/first)*100;
-    const el=$("pxChg");
+    const el=panel("pxChg");
     el.className="chg mono "+(ch>=0?"up":"down");
     el.textContent=(ch>=0?"▲ ":"▼ ")+Math.abs(ch).toFixed(2)+"%  ·  "+timeframe;
     chartTries=0;
@@ -2043,7 +2065,7 @@ function fmtPx(n){
   return n.toExponential(3);
 }
 function drawChart(data){
-  const host=$("plot");
+  const host=panel("plot");
   const old=host.querySelector("svg");if(old)old.remove();
   const W=host.clientWidth||620,H=host.clientHeight||236;
   const PL=8,PR=56,PT=14,PB=22;
@@ -2115,7 +2137,7 @@ function drawChart(data){
   dot.setAttribute("opacity","0");
   svg.appendChild(dot);
 
-  const tip=$("tip");
+  const tip=panel("tip");
   svg.addEventListener("mousemove",ev=>{
     const r=svg.getBoundingClientRect();
     const px=(ev.clientX-r.left)*(W/r.width);
@@ -3331,6 +3353,11 @@ function openWalletPicker(){
   scanWallets();                       // شاید افزونه‌ای بعد از بارگذاری آمده باشد
   renderWalletList();
   $("walletOv").classList.add("on");
+  /* اعلانِ EIP-6963 همزمان نیست: با dispatch می‌رود و یک تیک بعد برمی‌گردد.
+     رندر بلافاصله‌ی بعدش می‌تواند فهرست را خالی نشان بدهد و کاربر «هیچ
+     افزونه‌ای پیدا نشد» ببیند در حالی که افزونه هست. یک رندر تأخیری هزینه‌ای
+     ندارد و همان حالت را می‌بندد. */
+  setTimeout(()=>{if($("walletOv").classList.contains("on"))renderWalletList();},250);
 }
 function closeWalletPicker(){$("walletOv").classList.remove("on");}
 function closeWalletMenu(){
@@ -4186,7 +4213,7 @@ let theme=(window.matchMedia&&matchMedia("(prefers-color-scheme: dark)").matches
 function applyTheme(){document.documentElement.setAttribute("data-theme",theme);
   // آیکون حالا SVG ثابت است؛ خودِ حالت را متن کنارش می‌گوید، نه شکل نیم‌دایره
   $("themeState").textContent=theme==="dark"?"Dark":"Light";
-  if(chartData&&$("plot").querySelector("svg"))drawChart(chartData);}
+  if(chartData&&panel("plot").querySelector("svg"))drawChart(chartData);}
 
 function wire(){
   $("brand").textContent=BRAND;document.title=BRAND;
@@ -4270,16 +4297,33 @@ function wire(){
   $("rpcSave").onclick=()=>saveCustomRpc($("rpcCustom").value);
   $("rpcCustom").onkeydown=e=>{if(e.key==="Enter")saveCustomRpc(e.target.value);};
   $("rpcClear").onclick=clearCustomRpc;
+  /* بیرون از کارت نتیجه و بی‌ربط به اینکه مبلغی وارد شده یا نه: لینک به
+     *توکن* اشاره می‌کند، نه به یک کوت مشخص، پس دلیلی ندارد منتظر عدد بماند. */
+  if($("checkShare"))$("checkShare").onclick=()=>{
+    const u=tokenPageUrl();
+    if(!u){setNotice(note("warn","<b>Native ETH has no token page.</b> Pick an ERC-20 to share a check."));return;}
+    copyLink(u,$("checkShare"));
+  };
   if($("tk-copy"))$("tk-copy").onclick=()=>copyLink(location.href,$("tk-copy"));
   if($("tk-trade"))$("tk-trade").onclick=()=>{
     /* از صفحه‌ی توکن به فرم سواپ، بدون بارگذاری دوباره. پنل‌ها باید یک بار
        در مقصد تازه رندر شوند، وگرنه کاربر یک کارت خالی می‌بیند. */
+    /* فقط جفت ارز می‌رود، **نه مبلغ**. عدد ۱۰۰ روی صفحه‌ی توکن یک اندازه‌ی
+       مرجع برای شبیه‌سازی رفت‌وبرگشت است، نه انتخاب کاربر؛ بردنش به فرم سواپ
+       یعنی گذاشتن سفارشی که کسی نخواسته — و همان یک بار هم ۲۶ کوت را بی‌دلیل
+       روی RPC خرج کرد و به خطای «شبکه جواب نداد» رسید. */
     tokenPage=false;
     history.pushState(null,"",location.origin+"/#swap");
     setView("swap",false);
+    $("amtIn").value="";$("amtOut").value="";
+    mode="exactIn";setNotice("");
     paintToken("in",tokenIn);paintToken("out",tokenOut);
     loadChart();paintBalances();paintFlowToken();
-    runScan(tokenOut);scheduleQuote();
+    runScan(tokenOut);
+    /* همان مسیری که وقتی کاربر خودش فیلد را خالی می‌کند طی می‌شود: پنل را
+       پاک می‌کند و با مبلغ خالی هیچ کوتی نمی‌گیرد. */
+    scheduleQuote();
+    paintAmtClear();refreshButton();
     $("amtIn").focus();
   };
   document.addEventListener("keydown",e=>{
@@ -4287,7 +4331,7 @@ function wire(){
     $("setPop").classList.remove("on");closeWalletMenu();});
   let rt=null;
   addEventListener("resize",()=>{clearTimeout(rt);
-    rt=setTimeout(()=>{if(chartData&&$("plot").querySelector("svg"))drawChart(chartData);},180);});
+    rt=setTimeout(()=>{if(chartData&&panel("plot").querySelector("svg"))drawChart(chartData);},180);});
 }
 
 (async function(){

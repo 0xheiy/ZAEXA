@@ -2313,8 +2313,18 @@ async def main():
         srcpg = await b.new_page(viewport={"width": 1240, "height": 1000})
         await srcpg.goto("http://127.0.0.1:%d/test/harness.html" % port)
         await srcpg.wait_for_timeout(1200)
+        # دکمه‌ی کپی نباید منتظر عدد بماند: لینک به *توکن* اشاره می‌کند نه به
+        # یک کوت. روی صفحه‌ی تازه، با فیلد مبلغ خالی، باید همان‌جا دیده شود.
+        share_amt = await srcpg.input_value("#amtIn")
+        share_seen = await srcpg.is_visible("#checkShare")
         built = await srcpg.evaluate("() => tokenPageUrl() || checkUrl()")
         await srcpg.close()
+        print("[check button] visible with an empty amount: %s (amount=%r)"
+              % (share_seen, share_amt))
+        assert share_amt == "", "the probe expected a fresh page with no amount typed"
+        assert share_seen, (
+            "the copy-check button only appears once a quote exists. The link points at a "
+            "token, not at a quote, so it has no reason to wait for a number.")
         ck_path = built[built.index("/", 8):]   # پس از «http://host»
         # ⚠️ صفحه‌ی *تازه*. رفتن به همان سند با هشِ دیگر فقط hashchange می‌دهد،
         # نه بارگذاری — و تلاش اول همین بود و پنل خالی می‌ماند، که باگ لینک
@@ -2334,12 +2344,13 @@ async def main():
         # دکمه‌ای که وجود ندارد ۳۰ ثانیه تایم‌اوت می‌دهد و پیامش «element is
         # not visible» است — که علت را پنهان می‌کند. این‌طور، همان ادعای
         # بالاتر که علت را می‌داند حرف می‌زند.
-        ck_traded, ck_carried = False, ""
+        ck_traded, ck_carried, ck_amt = False, "", ""
         if await ckpg.is_visible("#tk-trade"):
             await ckpg.click("#tk-trade")
             await ckpg.wait_for_timeout(1200)
             ck_traded = await ckpg.is_visible("#view-swap.on")
             ck_carried = await ckpg.inner_text("#tokOutSym")
+            ck_amt = await ckpg.input_value("#amtIn")
         ck_names = [_json.loads(r)["e"] for r in ck_seen]
         await ckpg.close()
         print("[token page] %s -> %s | %s" % (ck_path, ck_out, ck_box[:52]))
@@ -2359,6 +2370,10 @@ async def main():
         assert ck_stats.strip(), \
             "the token page shows no market figures: %r" % ck_stats[:80]
         assert ck_traded, "Trade now did not open the swap form"
+        assert ck_amt == "", (
+            "Trade now carried an amount into the swap form (%r). The figure on the token "
+            "page is a reference size for the simulation, not an order the reader placed — "
+            "and quoting it spends RPC calls nobody asked for." % ck_amt)
         assert ck_carried.strip() == ck_out.strip(), (
             "Trade now dropped the token the reader came for: page said %r, the form says %r"
             % (ck_out, ck_carried))
