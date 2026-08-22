@@ -306,6 +306,10 @@ main{max-width:1140px;margin:0 auto;padding:8px 20px 56px;display:flex;flex-dire
 .exitBody{font-size:13px;color:var(--tx2);margin-top:7px;line-height:1.6}
 .exitBody b{color:var(--tx);font-weight:660}
 .exitNote{font-size:12px;color:var(--tx3);margin-top:6px;line-height:1.55}
+.exitShare{margin-top:10px;font-size:11px;letter-spacing:.02em;color:var(--tx3);
+  background:none;border:0;padding:0;cursor:pointer;text-decoration:underline;
+  text-underline-offset:3px}
+.exitShare:hover{color:var(--tx1)}
 
 /* ---------------- safety ---------------- */
 .rhead{display:flex;align-items:center;gap:16px;padding:18px 20px}
@@ -1538,6 +1542,21 @@ function exitBadge(t){
     title="${esc(why)} · checked ${esc(agoText(c.at))}">${esc(txt)}</span>`;
 }
 
+let checkLink=false,checkScrolled=false;
+/* clipboard API فقط در secure context هست. اگر نبود، وانمود نمی‌کنیم که
+   کپی شد — لینک را نشان می‌دهیم تا کاربر خودش بردارد. */
+async function copyLink(url,btn){
+  const old=btn?btn.innerHTML:null;
+  let ok=false;
+  try{if(navigator.clipboard&&window.isSecureContext){await navigator.clipboard.writeText(url);ok=true;}}
+  catch{ok=false;}
+  if(ok&&btn){btn.textContent="Copied \u2713";setTimeout(()=>{btn.innerHTML=old;},1400);}
+  else if(!ok){
+    setNotice(note("warn","<b>Could not reach the clipboard.</b> Copy this link manually:<br>"+
+      '<span class="mono" style="word-break:break-all">'+esc(url)+"</span>"));
+  }
+}
+
 function renderExit(x){
   const box=$("exitBox");
   if(!box)return;
@@ -1569,7 +1588,17 @@ function renderExit(x){
         <b>${fmt(x.recovered,tokenIn.decimals)} ${esc(tokenIn.symbol)}</b>
         of the ${fmt(parsedAmountIn(),tokenIn.decimals)} you put in.</div>`:""}
       ${x.reason?`<div class="exitNote">${esc(x.reason)}</div>`:""}
+      ${tokenOut?`<button class="exitShare" id="checkShare" type="button"
+        title="Copy a link that opens this result — no wallet needed"
+        >Copy this check</button>`:""}
     </div>`;
+  const cs=box.querySelector("#checkShare");
+  if(cs)cs.onclick=()=>copyLink(checkUrl(),cs);
+  /* کسی که این لینک را باز کرده دنبال همین جعبه آمده، نه دنبال فرم سواپ. */
+  if(checkLink&&!checkScrolled){
+    checkScrolled=true;
+    try{box.scrollIntoView({block:"center",behavior:"smooth"});}catch{}
+  }
 }
 
 /* =====================================================================
@@ -1625,6 +1654,7 @@ const EV_ENABLED=true;
 const EV_NAMES=[
   "load",
   "view:swap","view:folio","view:flow",
+  "check:open",
   "wallet:open","wallet:on",
   "quote:ok","quote:none",
   "approve:click","approve:done",
@@ -3886,6 +3916,33 @@ function shareUrl(){
   if(raw&&parseFloat(raw)>0)p.set("amt",raw);
   return location.origin+location.pathname+"#swap?"+p.toString();
 }
+/* لینک «آیا می‌شود از این توکن بیرون آمد؟»
+   ---------------------------------------------------------------------
+   لینک اشتراکیِ معمولی یک *کوت* را می‌فرستد. این یکی یک *سؤال* را می‌فرستد،
+   و جوابش بدون وصل‌کردن کیف پول دیده می‌شود — یعنی گیرنده هیچ ریسکی نمی‌کند
+   تا نتیجه را ببیند. همان چیزی که در گروه‌ها پرسیده می‌شود.
+
+   اگر کاربر مبلغی تایپ نکرده باشد، لینک روی یک اندازه‌ی مرجع ثابت بسته
+   می‌شود (۱۰۰ USDC) تا نتیجه‌ی دو لینک با هم مقایسه‌شدنی باشد. اگر تایپ
+   کرده باشد، همان انتخاب خودش می‌رود — لینک نباید چیزی را پشت سرش عوض کند. */
+function checkUrl(){
+  const p=new URLSearchParams();
+  const raw=$("amtIn").value.trim();
+  const typed=raw&&parseFloat(raw)>0;
+  /* ⚠️ طرفِ مقابل نمی‌تواند خودِ توکن باشد. نسخه‌ی اول همیشه USDC می‌گذاشت و
+     برای توکنی که خودش USDC بود لینک `in=USDC&out=USDC` می‌ساخت — یک مسیر
+     حلقه‌ای که هیچ رفت‌وبرگشتی ندارد، پس گیرنده‌ی لینک یک جعبه‌ی خالی
+     می‌دید. کاوشگر [check link] همین را گرفت. */
+  const loop=tokenOut&&tokenOut.symbol==="USDC";
+  const ref=loop?"ETH":"USDC";
+  p.set("in",typed?tokenRef(tokenIn):ref);
+  p.set("out",tokenRef(tokenOut));
+  // اندازه‌ی مرجع ~۱۰۰ دلار در هر دو حالت، تا نتیجه‌ی دو لینک مقایسه‌شدنی باشد
+  p.set("amt",typed?raw:(loop?"0.03":"100"));
+  p.set("check","1");
+  return location.origin+location.pathname+"#swap?"+p.toString();
+}
+
 /* یک ارجاع به توکن را حل می‌کند. اگر نشد، null — و تماس‌کننده *می‌گوید*
    که نشد، نه اینکه بی‌صدا روی پیش‌فرض بماند. */
 async function resolveTokenRef(ref){
@@ -3939,6 +3996,10 @@ function restorePair(){
 async function applyShareParams(){
   const {params}=parseHash();
   if(!params.has("in")&&!params.has("out")&&!params.has("amt"))return;
+  /* لینک بررسی: خواننده برای دیدن جواب هیچ کاری نباید بکند. فقط یک بار در
+     هر بارگذاری، و فقط وقتی نتیجه‌ی واقعی رندر شد — نه روی جعبه‌ی خالی. */
+  checkLink=params.get("check")==="1";
+  if(checkLink)ev("check:open");
   const missed=[];
   const [a,b]=await Promise.all([
     params.has("in") ?resolveTokenRef(params.get("in")) :Promise.resolve(null),
@@ -4003,20 +4064,7 @@ function wire(){
   $("ctrLink").href=`${CHAIN.explorer}/address/${CHAIN.executor}#code`;
   $("ctrLink").textContent=shortAddr(CHAIN.executor);
   $("themeBtn").onclick=()=>{theme=theme==="dark"?"light":"dark";applyTheme();};
-  $("shareBtn").onclick=async()=>{
-    const url=shareUrl(),btn=$("shareBtn"),old=btn.innerHTML;
-    let ok=false;
-    // clipboard API فقط در secure context هست. اگر نبود، وانمود نمی‌کنیم
-    // که کپی شد — لینک را نشان می‌دهیم تا کاربر خودش بردارد.
-    try{if(navigator.clipboard&&window.isSecureContext){await navigator.clipboard.writeText(url);ok=true;}}
-    catch{ok=false;}
-    if(ok){
-      btn.textContent="✓";setTimeout(()=>{btn.innerHTML=old;},1400);
-    }else{
-      setNotice(note("warn","<b>Could not reach the clipboard.</b> Copy this link manually:<br>"+
-        '<span class="mono" style="word-break:break-all">'+esc(url)+"</span>"));
-    }
-  };
+  $("shareBtn").onclick=()=>copyLink(shareUrl(),$("shareBtn"));
   $("connectBtn").onclick=()=>{if(!account)connect();else if(walletChainId!==CHAIN.id)switchNetwork();else toggleWalletMenu();};
   $("disconnectBtn").onclick=disconnect;
   $("tokInBtn").onclick=()=>openPicker("in");

@@ -81,6 +81,7 @@ function ttlFor(path) {
 const EV_OK = new Set([
   "load",
   "view:swap", "view:folio", "view:flow",
+  "check:open",
   "wallet:open", "wallet:on",
   "quote:ok", "quote:none",
   "approve:click", "approve:done",

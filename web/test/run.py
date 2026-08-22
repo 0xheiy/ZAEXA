@@ -24,7 +24,8 @@ def build_harness():
     open(path, "w", encoding="utf-8").write(src3)
     return path
 
-URL = "file://" + build_harness()
+# The product opens on its marketing route; UI probes explicitly target the app route.
+URL = "file://" + build_harness() + "#swap"
 
 # آدرس مستقیم GeckoTerminal. درخواست‌ها روی سیم از /gt روی دامنه‌ی خودمان
 # می‌روند، ولی کلید کش همین می‌ماند — کاوشگر [gt proxy] هر دو را می‌سنجد.
@@ -2270,7 +2271,7 @@ async def main():
 
         evpg = await b.new_page(viewport={"width": 1240, "height": 1000})
         ev_seen = await watch_events(evpg)
-        await evpg.goto("http://127.0.0.1:%d/test/harness.html" % port)
+        await evpg.goto("http://127.0.0.1:%d/test/harness.html#swap" % port)
         await evpg.wait_for_timeout(1400)
         for v in ("folio", "flow", "swap"):
             await evpg.click('#nav [data-view="%s"]' % v)
@@ -2291,6 +2292,45 @@ async def main():
         for want in ("load", "view:swap", "view:folio", "view:flow"):
             assert want in ev_names, "the %r event never reached the wire (got %s)" % (want, ev_names)
         assert ev_names.count("load") == 1, "the load event fired %d times" % ev_names.count("load")
+
+        # ---- لینک بررسی: کسی که بازش می‌کند بدون کیف پول جواب می‌گیرد ----
+        # این تنها راه رشد بدون تبلیغات است که در خودِ محصول هست: سؤالی که در
+        # گروه‌ها پرسیده می‌شود «این توکن سالم است؟»، و جوابش هیچ ریسکی برای
+        # پرسنده ندارد. اگر لینک باز نشود یا شمرده نشود، آن حلقه وجود ندارد.
+        srcpg = await b.new_page(viewport={"width": 1240, "height": 1000})
+        await srcpg.goto("http://127.0.0.1:%d/test/harness.html" % port)
+        await srcpg.wait_for_timeout(1200)
+        built = await srcpg.evaluate("() => checkUrl()")
+        await srcpg.close()
+        ck_hash = built[built.index("#"):]
+        # ⚠️ صفحه‌ی *تازه*. رفتن به همان سند با هشِ دیگر فقط hashchange می‌دهد،
+        # نه بارگذاری — و تلاش اول همین بود و پنل خالی می‌ماند، که باگ لینک
+        # نبود، باگ خودِ تست بود. گیرنده‌ی واقعی هم صفحه را از نو باز می‌کند.
+        ckpg = await b.new_page(viewport={"width": 1240, "height": 1000})
+        ck_seen = await watch_events(ckpg)
+        await ckpg.goto("http://127.0.0.1:%d/test/harness.html%s" % (port, ck_hash))
+        await ckpg.wait_for_timeout(4000)
+        ck_box = (await ckpg.inner_text("#exitBox")).replace("\n", " ")
+        ck_out = await ckpg.inner_text("#tokOutSym")
+        ck_names = [_json.loads(r)["e"] for r in ck_seen]
+        await ckpg.close()
+        print("[check link] %s -> %s | %s" % (ck_hash[:46], ck_out, ck_box[:60]))
+        assert "check=1" in ck_hash and "out=" in ck_hash, \
+            "checkUrl() did not build a check link: %s" % ck_hash
+        import urllib.parse as _up
+        ck_q = _up.parse_qs(ck_hash.split("?", 1)[1])
+        assert ck_q.get("in") != ck_q.get("out"), (
+            "the check link points a token at itself (%s). A loop route has no round trip, "
+            "so the reader lands on an empty panel." % ck_hash)
+        assert "amt=" in ck_hash, (
+            "a check link with no amount cannot run a round trip, so the reader would land "
+            "on an empty panel: %s" % ck_hash)
+        assert ck_box.strip(), (
+            "opening a check link shows an empty exit panel — the whole point is that the "
+            "answer is already there when the page opens")
+        assert "check:open" in ck_names, (
+            "the check-link visit was not counted (%s). Without it there is no way to tell "
+            "whether shared links bring anyone." % ck_names)
 
         # Global Privacy Control یک «نه»ی صریح است و باید همه‌چیز را خاموش کند
         gpcpg = await b.new_page(viewport={"width": 1240, "height": 1000})
