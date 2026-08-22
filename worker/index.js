@@ -78,9 +78,11 @@ function ttlFor(path) {
 /* هر نام رویداد باید اینجا باشد وگرنه رد می‌شود. صفحه هم فهرست خودش را دارد
    و کاوشگر [events] در run.py تطبیقشان را می‌سنجد — وگرنه یک رویداد تازه در
    صفحه بی‌صدا دور ریخته می‌شد و ما فکر می‌کردیم «کسی این کار را نمی‌کند». */
+const TOKEN_PAGE = /^\/t\/0x[0-9a-fA-F]{40}\/?$/;
+
 const EV_OK = new Set([
   "load",
-  "view:swap", "view:folio", "view:flow",
+  "view:swap", "view:folio", "view:flow", "view:token",
   "check:open",
   "wallet:open", "wallet:on",
   "quote:ok", "quote:none",
@@ -240,6 +242,13 @@ export default {
     if (url.pathname === "/gt" || url.pathname.startsWith("/gt/"))
       return proxyGt(request, url, ctx, env);
     if (url.pathname === "/ev") return collectEv(request, url, env);
+    /* /t/<آدرس> یک صفحه‌ی واقعی است، نه یک هش. بایندینگ [assets] برای مسیری
+       که فایل ندارد ۴۰۴ می‌دهد، پس خودمان همان index.html را برایش سرو
+       می‌کنیم و صفحه از روی pathname می‌فهمد کدام توکن را باید نشان بدهد.
+       چرا مسیر و نه هش: هش هیچ‌وقت به سرور نمی‌رسد، پس با هش هرگز نمی‌شد
+       کارت پیش‌نمایش (OG) برای تلگرام و ایکس ساخت. */
+    if (TOKEN_PAGE.test(url.pathname) && env && env.ASSETS)
+      return env.ASSETS.fetch(new Request(new URL("/index.html", url), request));
     // بقیه‌ی سایت دست‌نخورده از فایل‌های ثابت می‌آید.
     if (env && env.ASSETS) return env.ASSETS.fetch(request);
     return new Response("not found", { status: 404 });

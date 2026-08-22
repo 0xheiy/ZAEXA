@@ -1762,6 +1762,19 @@ async def main():
         class Quiet(http.server.SimpleHTTPRequestHandler):
             def log_message(self, *a):     # خروجی تست باید خوانا بماند
                 pass
+            def translate_path(self, path):
+                # آینه‌ی همان قاعده در worker/index.js: /t/<آدرس> صفحه‌ی
+                # اصلی را می‌گیرد. اگر آنجا عوض شد، اینجا هم باید عوض شود،
+                # وگرنه تست چیزی را می‌سنجد که روی سایت وجود ندارد.
+                clean = path.split("?")[0]
+                if re.match(r"^/t/0x[0-9a-fA-F]{40}/?$", clean):
+                    return os.path.join(HERE, "harness.html")
+                # صفحه‌ی توکن یک <base href="/"> می‌گذارد، پس استاب از ریشه
+                # خواسته می‌شود. روی سایت واقعی ethers هم دقیقاً کنار
+                # index.html در ریشه است، پس این جانشینِ درستِ همان است.
+                if clean == "/stub-ethers.js":
+                    return os.path.join(HERE, "stub-ethers.js")
+                return super().translate_path(path)
         srv = http.server.ThreadingHTTPServer(
             ("127.0.0.1", 0),
             functools.partial(Quiet, directory=os.path.join(HERE, "..")))
@@ -2300,34 +2313,55 @@ async def main():
         srcpg = await b.new_page(viewport={"width": 1240, "height": 1000})
         await srcpg.goto("http://127.0.0.1:%d/test/harness.html" % port)
         await srcpg.wait_for_timeout(1200)
-        built = await srcpg.evaluate("() => checkUrl()")
+        built = await srcpg.evaluate("() => tokenPageUrl() || checkUrl()")
         await srcpg.close()
-        ck_hash = built[built.index("#"):]
+        ck_path = built[built.index("/", 8):]   # پس از «http://host»
         # ⚠️ صفحه‌ی *تازه*. رفتن به همان سند با هشِ دیگر فقط hashchange می‌دهد،
         # نه بارگذاری — و تلاش اول همین بود و پنل خالی می‌ماند، که باگ لینک
         # نبود، باگ خودِ تست بود. گیرنده‌ی واقعی هم صفحه را از نو باز می‌کند.
         ckpg = await b.new_page(viewport={"width": 1240, "height": 1000})
         ck_seen = await watch_events(ckpg)
-        await ckpg.goto("http://127.0.0.1:%d/test/harness.html%s" % (port, ck_hash))
-        await ckpg.wait_for_timeout(4000)
-        ck_box = (await ckpg.inner_text("#exitBox")).replace("\n", " ")
-        ck_out = await ckpg.inner_text("#tokOutSym")
+        await ckpg.goto("http://127.0.0.1:%d%s" % (port, ck_path))
+        await ckpg.wait_for_timeout(4500)
+        ck_box = (await ckpg.inner_text("#tk-exitBox")).replace("\n", " ")
+        ck_out = await ckpg.inner_text("#tk-sym")
+        ck_stats = (await ckpg.inner_text("#tk-tokStats")).replace("\n", " ")
+        ck_risk = (await ckpg.inner_text("#tk-safetyBody")).replace("\n", " ")
+        ck_swap_open = await ckpg.is_visible("#view-swap.on")
+        # «Trade now» باید همان توکن را به فرم سواپ ببرد، نه اینکه صفحه را
+        # از نو باز کند یا انتخاب را بریزد.
+        # ⚠️ کلیک مشروط است. اگر صفحه‌ی توکن اصلاً باز نشده باشد، کلیک روی
+        # دکمه‌ای که وجود ندارد ۳۰ ثانیه تایم‌اوت می‌دهد و پیامش «element is
+        # not visible» است — که علت را پنهان می‌کند. این‌طور، همان ادعای
+        # بالاتر که علت را می‌داند حرف می‌زند.
+        ck_traded, ck_carried = False, ""
+        if await ckpg.is_visible("#tk-trade"):
+            await ckpg.click("#tk-trade")
+            await ckpg.wait_for_timeout(1200)
+            ck_traded = await ckpg.is_visible("#view-swap.on")
+            ck_carried = await ckpg.inner_text("#tokOutSym")
         ck_names = [_json.loads(r)["e"] for r in ck_seen]
         await ckpg.close()
-        print("[check link] %s -> %s | %s" % (ck_hash[:46], ck_out, ck_box[:60]))
-        assert "check=1" in ck_hash and "out=" in ck_hash, \
-            "checkUrl() did not build a check link: %s" % ck_hash
-        import urllib.parse as _up
-        ck_q = _up.parse_qs(ck_hash.split("?", 1)[1])
-        assert ck_q.get("in") != ck_q.get("out"), (
-            "the check link points a token at itself (%s). A loop route has no round trip, "
-            "so the reader lands on an empty panel." % ck_hash)
-        assert "amt=" in ck_hash, (
-            "a check link with no amount cannot run a round trip, so the reader would land "
-            "on an empty panel: %s" % ck_hash)
+        print("[token page] %s -> %s | %s" % (ck_path, ck_out, ck_box[:52]))
+        print("[token page] stats=%r risk=%r" % (ck_stats[:44], ck_risk[:44]))
+        assert re.match(r"^/t/0x[0-9a-fA-F]{40}$", ck_path), \
+            "the share button did not build a token-page link: %s" % ck_path
+        assert not ck_swap_open, (
+            "opening a token link still lands the reader on the swap form. They came with a "
+            "question, not with a trade to place.")
+        assert ck_out.strip() and ck_out != "—", \
+            "the token page never named the token: %r" % ck_out
         assert ck_box.strip(), (
-            "opening a check link shows an empty exit panel — the whole point is that the "
-            "answer is already there when the page opens")
+            "the token page shows an empty exit panel — the whole point is that the answer "
+            "is already there when the page opens")
+        assert ck_risk.strip() and "Reading the token" not in ck_risk, \
+            "the risk panel never finished: %r" % ck_risk[:80]
+        assert ck_stats.strip(), \
+            "the token page shows no market figures: %r" % ck_stats[:80]
+        assert ck_traded, "Trade now did not open the swap form"
+        assert ck_carried.strip() == ck_out.strip(), (
+            "Trade now dropped the token the reader came for: page said %r, the form says %r"
+            % (ck_out, ck_carried))
         assert "check:open" in ck_names, (
             "the check-link visit was not counted (%s). Without it there is no way to tell "
             "whether shared links bring anyone." % ck_names)

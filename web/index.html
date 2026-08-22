@@ -3,6 +3,20 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<script>
+/* ⚠️ روی /t/<آدرس> سند همین index.html است، ولی *نشانی* صفحه یک سطح
+   عمیق‌تر است. پس هر مسیر نسبی — «./ethers.umd.min.js»،
+   «./walletconnect.bundle.js» — نسبت به /t/ باز می‌شود و ۴۰۴ می‌گیرد، و
+   صفحه با «Could not load ethers» می‌ماند. یک <base> ریشه همه‌ی منابع را
+   یکجا درست می‌کند.
+   فقط روی همین مسیر اجرا می‌شود، پس باز کردن مستقیم فایل با file:// —
+   که README پیشنهادش می‌دهد و کاوشگر [file://] می‌سنجدش — دست‌نخورده
+   می‌ماند. این را تست گرفت، نه بازبینی: بدون آن، صفحه‌ی توکن روی سایت
+   واقعی هم بالا نمی‌آمد. */
+if(/^\/t\/0x[0-9a-fA-F]{40}\/?$/.test(location.pathname)){
+  var b=document.createElement("base");b.href="/";document.head.appendChild(b);
+}
+</script>
 <title>Zaexa</title>
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxMDAwLjAwIiBoZWlnaHQ9IjEwMDAuMDAiIHZpZXdCb3g9IjAgMCAxMDAwLjAwIDEwMDAuMDAiIGZpbGw9Im5vbmUiPjxkZWZzPjxsaW5lYXJHcmFkaWVudCBpZD0iengiIHgxPSIwLjAiIHkxPSIwLjAiIHgyPSIxLjAiIHkyPSIwLjAiPjxzdG9wIG9mZnNldD0iMC4wIiBzdG9wLWNvbG9yPSIjMjJFRkY2Ii8+PHN0b3Agb2Zmc2V0PSIwLjIyIiBzdG9wLWNvbG9yPSIjMjJEMkY1Ii8+PHN0b3Agb2Zmc2V0PSIwLjQyIiBzdG9wLWNvbG9yPSIjNDNCNUY3Ii8+PHN0b3Agb2Zmc2V0PSIwLjU4IiBzdG9wLWNvbG9yPSIjNzM5NkY4Ii8+PHN0b3Agb2Zmc2V0PSIwLjc4IiBzdG9wLWNvbG9yPSIjOTY4OEY3Ii8+PHN0b3Agb2Zmc2V0PSIxLjAiIHN0b3AtY29sb3I9IiNBNzg1RjkiLz48L2xpbmVhckdyYWRpZW50PjxsaW5lYXJHcmFkaWVudCBpZD0ienhiZyIgeDE9IjAiIHkxPSIwIiB4Mj0iMSIgeTI9IjEiPjxzdG9wIG9mZnNldD0iMC4wIiBzdG9wLWNvbG9yPSIjMjJFRkY2Ii8+PHN0b3Agb2Zmc2V0PSIwLjIyIiBzdG9wLWNvbG9yPSIjMjJEMkY1Ii8+PHN0b3Agb2Zmc2V0PSIwLjQyIiBzdG9wLWNvbG9yPSIjNDNCNUY3Ii8+PHN0b3Agb2Zmc2V0PSIwLjU4IiBzdG9wLWNvbG9yPSIjNzM5NkY4Ii8+PHN0b3Agb2Zmc2V0PSIwLjc4IiBzdG9wLWNvbG9yPSIjOTY4OEY3Ii8+PHN0b3Agb2Zmc2V0PSIxLjAiIHN0b3AtY29sb3I9IiNBNzg1RjkiLz48L2xpbmVhckdyYWRpZW50PjxtYXNrIGlkPSJtYXNrMF8wXzEiIHN0eWxlPSJtYXNrLXR5cGU6bHVtaW5hbmNlIiBtYXNrVW5pdHM9InVzZXJTcGFjZU9uVXNlIiB4PSIxMyIgeT0iMCIgd2lkdGg9IjE3MzEiIGhlaWdodD0iMTI3NCI+CjxwYXRoIGQ9Ik0xNzQzLjc3IDBIMTNWMTI3My4yNkgxNzQzLjc3VjBaIiBmaWxsPSJ3aGl0ZSIgLz4KPC9tYXNrPjxsaW5lYXJHcmFkaWVudCBpZD0icGFpbnQwX2xpbmVhcl8wXzEiIHgxPSIzNzguMzgiIHkxPSIwIiB4Mj0iMTM3OC4zOCIgeTI9IjAiIGdyYWRpZW50VW5pdHM9InVzZXJTcGFjZU9uVXNlIj4KPHN0b3Agc3RvcC1jb2xvcj0iIzIyRUZGNiIgLz4KPHN0b3Agb2Zmc2V0PSIwLjIyIiBzdG9wLWNvbG9yPSIjMjJEMkY1IiAvPgo8c3RvcCBvZmZzZXQ9IjAuNDIiIHN0b3AtY29sb3I9IiM0M0I1RjciIC8+CjxzdG9wIG9mZnNldD0iMC41OCIgc3RvcC1jb2xvcj0iIzczOTZGOCIgLz4KPHN0b3Agb2Zmc2V0PSIwLjc4IiBzdG9wLWNvbG9yPSIjOTY4OEY3IiAvPgo8c3RvcCBvZmZzZXQ9IjEiIHN0b3AtY29sb3I9IiNBNzg1RjkiIC8+CjwvbGluZWFyR3JhZGllbnQ+PGxpbmVhckdyYWRpZW50IGlkPSJwYWludDFfbGluZWFyXzBfMSIgeDE9IjE1NC44NzgiIHkxPSIxMjMxLjc0IiB4Mj0iMTYwMy4xOCIgeTI9IjEyMzEuNzQiIGdyYWRpZW50VW5pdHM9InVzZXJTcGFjZU9uVXNlIj4KPHN0b3Agc3RvcC1jb2xvcj0iIzIyRUZGNiIgLz4KPHN0b3Agb2Zmc2V0PSIwLjIyIiBzdG9wLWNvbG9yPSIjMjJEMkY1IiAvPgo8c3RvcCBvZmZzZXQ9IjAuNDIiIHN0b3AtY29sb3I9IiM0M0I1RjciIC8+CjxzdG9wIG9mZnNldD0iMC41OCIgc3RvcC1jb2xvcj0iIzczOTZGOCIgLz4KPHN0b3Agb2Zmc2V0PSIwLjc4IiBzdG9wLWNvbG9yPSIjOTY4OEY3IiAvPgo8c3RvcCBvZmZzZXQ9IjEiIHN0b3AtY29sb3I9IiNBNzg1RjkiIC8+CjwvbGluZWFyR3JhZGllbnQ+PC9kZWZzPjxnIHRyYW5zZm9ybT0idHJhbnNsYXRlKDUwLjAsMTg1LjkpIj48ZyB0cmFuc2Zvcm09InRyYW5zbGF0ZSgwLjAwMCwwLjAwMCkgc2NhbGUoMC45MDAwMDApIHRyYW5zbGF0ZSgtMzc4LjM4MCwtMC4wMDApIiBtYXNrPSJ1cmwoI21hc2swXzBfMSkiPjxwYXRoIGQ9Ik0xMDU2LjkzIDgyLjgyTDM4OS44MiA2OTcuOThMNDA4LjQ4IDY5NC4zMkw2MjEuMTMgNjM4LjE2QzY0Ni45MyA2MzAuNzEgNjc1LjAxIDYyNS40OCA2OTkuODUgNjE1LjEyTDEzNjYuOSAwTDEzNDguMzcgMy42TDExMzcuMTIgNTkuMzhDMTExMC44MyA2Ni45NyAxMDgyLjI1IDcyLjI5IDEwNTYuOTMgODIuODJaTTM3OC4zOCA0NC4zNkM0MjYuNTYxIDg3LjI1MyA0NzEuMTQyIDEzNS4wMTYgNTIyLjQ0NSAxNzQuMTM3QzUyNC4zOTQgMTc1LjYyMyA1MjYuNjg1IDE3Ni41OTggNTI5LjEwOSAxNzYuOTUxQzU3NC4yMDYgMTgzLjUyMSA2MjAuNjUgMTc5Ljk2NiA2NjYuMDggMTgzLjQ5QzY3NC41MyAxODQuMDggNjgzLjI0MyAxODUuNDQ4IDY5MS42NDUgMTg3LjU3MUM2OTcuMzIzIDE4OS4wMDMgNzE4LjU1NCAxOTYuNjczIDczMS40MzQgMjA5LjkxM0w3NDIuNjE1IDIyMi4xNDhMNzUyLjMxOSAyMzQuMzg0Qzc1Mi4zMTkgMjM0LjM4NCA3NjYuODQ0IDI1Ni40NzYgNzcwLjQ0MyAyNjcuMDdDNzc0LjEwNSAyNjQuMjc1IDgyMy4zODUgMjE5Ljg4OCA4MjMuMzg1IDIxOS44ODhMODc1LjY4IDE3MS4yMUM4MzUuMzEgMTE1Ljc1IDc4MS4zNCA2Ni40MSA3MTIuOTMgNTAuM0M2OTUuMTggNDUuODIgNjc2LjcgNDYuNTUgNjU4LjU1IDQ1Ljg2TDM3OC4zOCA0NC4zNlpNMTM3OC4zOCA2NTMuNThDMTMzMC4yIDYxMC42ODcgMTI4NS42MSA1NjIuNTQ4IDEyMzQuMzEgNTIzLjQwNEMxMjMyLjM2IDUyMS45MTYgMTIzMC4wNyA1MjAuOTQxIDEyMjcuNjQgNTIwLjU4OUMxMTgyLjU1IDUxNC4wNDkgMTEzNi4xMSA1MTcuOTg0IDEwOTAuNjggNTE0LjQ2QzEwODIuMDQgNTEzLjcyMSAxMDc1LjYzIDUxMi44NDggMTA2NS42OCA1MDkuOTVDMTA0OC41OSA1MDMuMDEgMTAzOS42NCA0OTcuMTA0IDEwMjUuOTIgNDg2LjAxOUMxMDI1LjkyIDQ4Ni4wMTkgMTAxNy4xOCA0NzcuODIzIDEwMTUuMTEgNDc1LjYyNkMxMDEzLjA1IDQ3My40MjkgMTAwOC4xMyA0NjguNzggMTAwNC40NCA0NjMuODQ4QzEwMDAuNzYgNDU4LjkxNSA5OTMuNDUyIDQ0OC40NTEgOTg1LjY4NCA0MjkuOTYyQzk3OS4yNDggNDM1LjMzNSA5MzAgNDgxLjUgOTMwIDQ4MS41TDg4MS4wOCA1MjYuNzRDOTIxLjQ1IDU4Mi4yIDk3NS40MiA2MzEuNTQgMTA0My44MyA2NDcuNjVDMTA2MS41OCA2NTIuMTMgMTA4MC4wNiA2NTEuNCAxMDk4LjIgNjUyLjA4TDEzNzguMzggNjUzLjU4WiIgZmlsbD0idXJsKCNwYWludDBfbGluZWFyXzBfMSkiIC8+PC9nPjwvZz48L3N2Zz4=">
 <style>
@@ -457,6 +471,25 @@ footer a{color:var(--tx3)}
 .tstats{display:grid;grid-template-columns:repeat(4,1fr);gap:1px;background:var(--line);
   border-top:1px solid var(--line);margin-top:14px}
 .tstat{background:var(--card);padding:11px 14px}
+.tkTop{display:flex;align-items:center;gap:15px;padding:20px 18px 16px}
+.tkAv{width:52px;height:52px;border-radius:50%;display:grid;place-items:center;
+  background:var(--raise);font-size:15px;font-weight:600;color:var(--tx2)}
+.tkSym{font-size:27px;font-weight:600;letter-spacing:-.02em;line-height:1.1}
+.tkName{color:var(--tx3);font-size:13px;margin-top:3px}
+.tkPx{text-align:right}
+.tkPx .px{font-size:20px}
+.tkAddr{display:block;margin-top:5px;color:var(--tx3);font-size:11.5px;text-decoration:none}
+.tkAddr:hover{color:var(--tx1);text-decoration:underline}
+.tkCta{display:flex;gap:11px;padding:16px 18px 4px;flex-wrap:wrap}
+.tkTrade{flex:1;min-width:190px;padding:14px 20px;border:0;border-radius:13px;cursor:pointer;
+  background:var(--grad);color:var(--on-acc);font-size:15px;font-weight:660;
+  box-shadow:0 6px 20px var(--glow);transition:.18s}
+.tkTrade:hover{transform:translateY(-1px);box-shadow:0 9px 26px var(--glow)}
+.tkCopy{padding:14px 18px;border:1px solid var(--line);border-radius:11px;cursor:pointer;
+  background:transparent;color:var(--tx2);font-size:13.5px}
+.tkCopy:hover{color:var(--tx1);border-color:var(--tx3)}
+.tkNote{margin:14px 18px 18px;color:var(--tx3);font-size:12px;line-height:1.6}
+@media(max-width:620px){.tkTop{flex-wrap:wrap}.tkPx{text-align:left;width:100%}}
 .tstat .k{font-size:10.5px;font-weight:640;letter-spacing:.05em;text-transform:uppercase;
   color:var(--tx3)}
 .tstat .v{font-size:14px;font-weight:640;margin-top:3px;font-variant-numeric:tabular-nums}
@@ -680,6 +713,46 @@ footer a{color:var(--tx3)}
   <p style="padding:0 6px;color:var(--tx3);font-size:12px;margin:0">
     Read live from the deepest pool for this token, in your browser — no server, nothing stored.
   </p>
+</div>
+
+<!-- =====================================================================
+     صفحه‌ی توکن — /t/<آدرس>
+     ---------------------------------------------------------------------
+     کسی که لینک بررسی را باز می‌کند دنبال یک سؤال آمده، نه دنبال فرم سواپ.
+     افتادن مستقیم روی فرم، از او می‌خواهد تصمیمی بگیرد که هنوز جوابش را
+     ندارد. این نما همان داده‌ها را نشان می‌دهد — همان `renderTokenStats`،
+     همان `renderExit`، همان `renderSafety` — فقط در جای دیگری رندر می‌شوند.
+     هیچ منطقی اینجا تکرار نشده؛ فقط مقصدِ رندر عوض می‌شود.
+     ===================================================================== -->
+<div class="view" id="view-token">
+  <section class="card">
+    <div class="tkTop">
+      <span class="av tkAv" id="tk-av">?</span>
+      <div class="tkId">
+        <div class="tkSym" id="tk-sym">—</div>
+        <div class="tkName" id="tk-name"></div>
+      </div>
+      <span class="grow"></span>
+      <div class="tkPx">
+        <div class="px mono" id="tk-px">—</div>
+        <a class="tkAddr mono" id="tk-addr" target="_blank" rel="noopener"></a>
+      </div>
+    </div>
+    <div id="tk-tokStats" class="tstats" hidden></div>
+    <div class="tkCta">
+      <button class="tkTrade" id="tk-trade">Trade now</button>
+      <button class="tkCopy" id="tk-copy">Copy this link</button>
+    </div>
+    <p class="tkNote">Nothing here needs a wallet. The round trip below is simulated
+      against the live chain — no transaction, no gas.</p>
+  </section>
+
+  <section class="card">
+    <header><span class="ttl">Exit check &amp; token safety</span><span class="grow"></span>
+      <span class="ttl mono" id="tk-sym2"></span></header>
+    <div id="tk-exitBox"></div>
+    <div id="tk-safetyBody"><div class="empty"><span class="spin"></span>Reading the token…</div></div>
+  </section>
 </div>
 </main>
 
@@ -1558,7 +1631,7 @@ async function copyLink(url,btn){
 }
 
 function renderExit(x){
-  const box=$("exitBox");
+  const box=panel("exitBox");
   if(!box)return;
   if(!x){box.innerHTML="";return;}
   const badge={
@@ -1593,7 +1666,9 @@ function renderExit(x){
         >Copy this check</button>`:""}
     </div>`;
   const cs=box.querySelector("#checkShare");
-  if(cs)cs.onclick=()=>copyLink(checkUrl(),cs);
+  /* برای توکن واقعی، صفحه‌ی توکن؛ برای ETH بومی که صفحه‌ی توکن ندارد،
+     همان لینک هش‌دار قبلی. هیچ‌کدام دکمه را بی‌صدا خاموش نمی‌کند. */
+  if(cs)cs.onclick=()=>copyLink(tokenPageUrl()||checkUrl(),cs);
   /* کسی که این لینک را باز کرده دنبال همین جعبه آمده، نه دنبال فرم سواپ. */
   if(checkLink&&!checkScrolled){
     checkScrolled=true;
@@ -1653,7 +1728,7 @@ function gtWire(u){return gtProxy&&u.startsWith(GT)?gtProxy+u.slice(GT.length):u
 const EV_ENABLED=true;
 const EV_NAMES=[
   "load",
-  "view:swap","view:folio","view:flow",
+  "view:swap","view:folio","view:flow","view:token",
   "check:open",
   "wallet:open","wallet:on",
   "quote:ok","quote:none",
@@ -2413,9 +2488,18 @@ function fmtBig(n){
   if(n>=1e3)return "$"+(n/1e3).toFixed(1)+"K";
   return "$"+n.toFixed(0);
 }
+/* ---------------------------------------------------------------------
+   مقصدِ رندر
+   ---------------------------------------------------------------------
+   سه پنل (آمار، exit، ایمنی) در دو جا دیده می‌شوند: صفحه‌ی سواپ و صفحه‌ی
+   توکن. به‌جای دو نسخه از منطق، فقط مقصد عوض می‌شود. اگر روزی یکی از این
+   دو نما حذف شد، هیچ کد تکراری‌ای برای پاک‌کردن نمی‌ماند. */
+let tokenPage=false;
+const panel=id=>$( (tokenPage?"tk-":"")+id );
+
 let statsSeq=0;
 async function renderTokenStats(t){
-  const box=$("tokStats");if(!box)return;
+  const box=panel("tokStats");if(!box)return;
   const seq=++statsSeq;
   if(!t){box.hidden=true;return;}
   let a=null;
@@ -3028,16 +3112,17 @@ async function runScan(token){
   const seq=++scanSeq;
   if(!token)return;
   $("safetySym").textContent=token.symbol;
+  if($("tk-sym2"))$("tk-sym2").textContent=token.symbol;
   const key=token.address.toLowerCase();
   if(safetyCache[key]){renderSafety(safetyCache[key]);return;}
-  $("safetyBody").innerHTML='<div class="empty"><span class="spin"></span>Scanning bytecode, ownership and liquidity…</div>';
+  panel("safetyBody").innerHTML='<div class="empty"><span class="spin"></span>Scanning bytecode, ownership and liquidity…</div>';
   try{
     const rep=await scanToken(token);
     if(seq!==scanSeq)return;
     safetyCache[key]=rep;renderSafety(rep);
   }catch{
     if(seq!==scanSeq)return;
-    $("safetyBody").innerHTML='<div class="empty">Scan could not complete — the network did not answer.</div>';
+    panel("safetyBody").innerHTML='<div class="empty">Scan could not complete — the network did not answer.</div>';
   }
 }
 function renderSafety(rep){
@@ -3055,7 +3140,7 @@ function renderSafety(rep){
       <span><b>${esc(f.title)}</b><span>${esc(f.detail)}</span></span></div>`;});
   h+=`<div class="chk" style="color:var(--tx3);font-size:11.5px">
     <span></span><span>Heuristics on public bytecode, not an audit. A clean score is not a guarantee.</span></div>`;
-  $("safetyBody").innerHTML=h;
+  panel("safetyBody").innerHTML=h;
 }
 
 /* =====================================================================
@@ -3925,6 +4010,64 @@ function shareUrl(){
    اگر کاربر مبلغی تایپ نکرده باشد، لینک روی یک اندازه‌ی مرجع ثابت بسته
    می‌شود (۱۰۰ USDC) تا نتیجه‌ی دو لینک با هم مقایسه‌شدنی باشد. اگر تایپ
    کرده باشد، همان انتخاب خودش می‌رود — لینک نباید چیزی را پشت سرش عوض کند. */
+/* آدرس صفحه‌ی توکن. مسیر است نه هش، چون این یک *صفحه* است نه یک حالت از
+   صفحه‌ی سواپ — و مسیر بعداً به Worker اجازه می‌دهد کارت پیش‌نمایش (OG) را
+   سمت سرور بسازد، کاری که با هش هیچ‌وقت ممکن نیست چون هش اصلاً به سرور
+   نمی‌رسد. توکن‌های فهرست پیش‌فرض هم با آدرس می‌روند، نه با نماد: نماد
+   یکتا نیست و لینکی که باید یک توکن مشخص را نشان بدهد نباید مبهم باشد. */
+function tokenPageUrl(t){
+  const tok=t||tokenOut;
+  if(!tok||tok.native)return null;
+  return location.origin+"/t/"+tok.address;
+}
+
+/* =====================================================================
+   باز کردن صفحه‌ی توکن
+   ---------------------------------------------------------------------
+   همه‌ی کار را همان توابع همیشگی می‌کنند؛ اینجا فقط ترتیب و مقصد را
+   می‌چینیم. اگر آدرس روی Base یک ERC-20 نباشد، **می‌گوییم** نتوانستیم —
+   صفحه‌ی نیمه‌کاره با خطوط تیره بدترین حالت است، چون شبیه «امن است» به نظر
+   می‌رسد.
+   ===================================================================== */
+async function openTokenPage(addr){
+  const t=await resolveTokenRef(addr);
+  if(!t){
+    $("tk-sym").textContent="Unknown token";
+    $("tk-name").textContent="";
+    $("tk-addr").textContent=shortAddr(addr);
+    $("tk-addr").href=`${CHAIN.explorer}/token/${addr}`;
+    $("tk-safetyBody").innerHTML='<div class="empty">This address is not a standard ERC-20 on '+
+      'Base, or the network did not answer. We are not saying it is unsafe — we are saying '+
+      'we could not read it.</div>';
+    return;
+  }
+  ev("check:open");              // همان شمارنده‌ی لینک بررسی، از مسیر تازه
+  tokenOut=t;
+  // طرفِ مقابل نمی‌تواند خودِ توکن باشد، همان تله‌ی لینک بررسی
+  const usdc=BASE_TOKENS.find(x=>x.symbol==="USDC");
+  const eth=BASE_TOKENS.find(x=>x.native)||BASE_TOKENS[0];
+  tokenIn=(usdc&&t.address.toLowerCase()===usdc.address.toLowerCase())?eth:usdc;
+  mode="exactIn";
+  $("amtIn").value=(tokenIn&&tokenIn.native)?"0.03":"100";
+
+  paintAvatar($("tk-av"),t);
+  $("tk-sym").textContent=t.symbol;
+  $("tk-name").textContent=t.name||"";
+  $("tk-sym2").textContent=t.symbol;
+  $("tk-addr").textContent=shortAddr(t.address);
+  $("tk-addr").href=`${CHAIN.explorer}/token/${t.address}`;
+  paintToken("in",tokenIn);paintToken("out",tokenOut);
+
+  renderTokenStats(t);
+  priceUsdOf(t).then(px=>{
+    // قیمت نامعلوم «۰ دلار» نیست. خط تیره یعنی نمی‌دانیم.
+    $("tk-px").textContent=px==null?"—":("$"+(px<1?px.toPrecision(4):px.toLocaleString(
+      undefined,{maximumFractionDigits:2})));
+  }).catch(()=>{});
+  runScan(t);
+  scheduleQuote();               // exit check از دلِ همین می‌آید
+}
+
 function checkUrl(){
   const p=new URLSearchParams();
   const raw=$("amtIn").value.trim();
@@ -4020,7 +4163,7 @@ async function applyShareParams(){
 }
 function setView(v,push){
   if(v&&v.indexOf("?")>=0)v=v.slice(0,v.indexOf("?"));
-  if(!["swap","folio","flow"].includes(v))v="swap";
+  if(!["swap","folio","flow","token"].includes(v))v="swap";
   view=v;
   document.querySelectorAll(".view").forEach(el=>el.classList.toggle("on",el.id==="view-"+v));
   $("nav").querySelectorAll("[data-view]").forEach(b=>b.classList.toggle("on",b.dataset.view===v));
@@ -4127,6 +4270,18 @@ function wire(){
   $("rpcSave").onclick=()=>saveCustomRpc($("rpcCustom").value);
   $("rpcCustom").onkeydown=e=>{if(e.key==="Enter")saveCustomRpc(e.target.value);};
   $("rpcClear").onclick=clearCustomRpc;
+  if($("tk-copy"))$("tk-copy").onclick=()=>copyLink(location.href,$("tk-copy"));
+  if($("tk-trade"))$("tk-trade").onclick=()=>{
+    /* از صفحه‌ی توکن به فرم سواپ، بدون بارگذاری دوباره. پنل‌ها باید یک بار
+       در مقصد تازه رندر شوند، وگرنه کاربر یک کارت خالی می‌بیند. */
+    tokenPage=false;
+    history.pushState(null,"",location.origin+"/#swap");
+    setView("swap",false);
+    paintToken("in",tokenIn);paintToken("out",tokenOut);
+    loadChart();paintBalances();paintFlowToken();
+    runScan(tokenOut);scheduleQuote();
+    $("amtIn").focus();
+  };
   document.addEventListener("keydown",e=>{
     if(e.key!=="Escape")return;closePicker();closeWalletPicker();
     $("setPop").classList.remove("on");closeWalletMenu();});
@@ -4178,8 +4333,13 @@ function wire(){
   readFee();loadChart();
   // یک بار در هر بازکردن صفحه. مخرج همه‌ی نسبت‌های قیف همین است.
   ev("load");
-  setView(parseHash().view||"swap",false);
+  /* /t/<آدرس> یعنی «این توکن را برایم بررسی کن». Worker همین index.html را
+     برای آن مسیر سرو می‌کند، پس اینجا از روی pathname تشخیص می‌دهیم. */
+  const onToken=/^\/t\/(0x[0-9a-fA-F]{40})\/?$/.exec(location.pathname);
+  tokenPage=!!onToken;
+  setView(tokenPage?"token":(parseHash().view||"swap"),false);
   await verifyDexes();          // قبل از هر کوتی، بدان کدام صرافی قابل اتکاست
+  if(tokenPage){await openTokenPage(onToken[1]);}
   // لینک اشتراکی *بعد* از دروازه‌ها اعمال می‌شود: تا ندانیم کدام صرافی
   // قابل اتکاست، کوت گرفتن برای توکن ناشناس معنا ندارد.
   await applyShareParams();
