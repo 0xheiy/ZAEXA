@@ -473,30 +473,82 @@ footer a{color:var(--tx3)}
 .tstats{display:grid;grid-template-columns:repeat(4,1fr);gap:1px;background:var(--line);
   border-top:1px solid var(--line);margin-top:14px}
 .tstat{background:var(--card);padding:11px 14px}
-.tkHero{overflow:hidden}
-.tkHero:before{content:"";display:block;height:3px;background:var(--grad)}
-.tkTop{display:flex;align-items:center;gap:16px;padding:22px 20px 4px}
-.tkGrid{margin-top:14px}
-#view-token #tk-exitBox{padding:0 20px}
-#view-token .exit{margin-top:14px}
-.tkAv{width:52px;height:52px;border-radius:50%;display:grid;place-items:center;
-  background:var(--raise);font-size:15px;font-weight:600;color:var(--tx2)}
-.tkSym{font-size:27px;font-weight:600;letter-spacing:-.02em;line-height:1.1}
-.tkName{color:var(--tx3);font-size:13px;margin-top:3px}
-.tkPx{text-align:right}
-.tkPx .px{font-size:20px}
-.tkAddr{display:block;margin-top:5px;color:var(--tx3);font-size:11.5px;text-decoration:none}
+/* ---------- صفحه‌ی توکن ----------
+   این صفحه عمداً شبیه صفحه‌ی سواپ نیست. کارش یک چیز است: جواب دادن به
+   «اگر بخرم، می‌توانم بیرون بیایم؟» — پس رفت‌وبرگشت بزرگ‌ترین چیز روی
+   صفحه است و بقیه دورش ساکت می‌مانند. گرادیان برند فقط روی دکمه‌ی معامله
+   می‌آید؛ رنگ‌های معنایی (سبز/کهربایی/قرمز) کار قضاوت را می‌کنند. */
+.tkBar{display:flex;align-items:center;gap:14px;padding:14px 18px}
+.tkAv{width:42px;height:42px;border-radius:50%;display:grid;place-items:center;
+  background:var(--raise);font-size:13px;font-weight:600;color:var(--tx2)}
+.tkSym{font-size:20px;font-weight:640;letter-spacing:-.02em;line-height:1.15}
+.tkName{color:var(--tx3);font-size:12px;margin-top:1px}
+.tkPx{text-align:right;margin-right:4px}
+.tkPx .px{font-size:17px;font-weight:600}
+.tkAddr{display:block;margin-top:2px;color:var(--tx3);font-size:11px;text-decoration:none}
 .tkAddr:hover{color:var(--tx1);text-decoration:underline}
-.tkCta{display:flex;gap:11px;padding:18px 20px 4px;flex-wrap:wrap}
-.tkTrade{flex:1;min-width:190px;padding:14px 20px;border:0;border-radius:13px;cursor:pointer;
-  background:var(--grad);color:var(--on-acc);font-size:15px;font-weight:660;
-  box-shadow:0 6px 20px var(--glow);transition:.18s}
-.tkTrade:hover{transform:translateY(-1px);box-shadow:0 9px 26px var(--glow)}
-.tkCopy{padding:14px 18px;border:1px solid var(--line);border-radius:11px;cursor:pointer;
-  background:transparent;color:var(--tx2);font-size:13.5px}
+.tkTrade{padding:9px 20px;border:0;border-radius:10px;cursor:pointer;
+  background:var(--grad);color:var(--on-acc);font-size:13.5px;font-weight:640;
+  box-shadow:0 4px 14px var(--glow);transition:.16s}
+.tkTrade:hover{transform:translateY(-1px);box-shadow:0 7px 20px var(--glow)}
+.tkCopy{padding:9px 13px;border:1px solid var(--line);border-radius:10px;cursor:pointer;
+  background:transparent;color:var(--tx3);font-size:12.5px}
 .tkCopy:hover{color:var(--tx1);border-color:var(--tx3)}
-.tkNote{margin:13px 20px 20px;color:var(--tx3);font-size:12px;line-height:1.6}
-@media(max-width:620px){.tkTop{flex-wrap:wrap}.tkPx{text-align:left;width:100%}}
+/* هدف لمسی روی موبایل زیر ۴۴ پیکسل نرود، و تمرکز صفحه‌کلید دیده شود */
+@media(max-width:620px){.tkTrade,.tkCopy{min-height:44px}}
+.tkTrade:focus-visible,.tkCopy:focus-visible,.exitShare:focus-visible{
+  outline:2px solid var(--acc);outline-offset:2px}
+
+/* امضا: مسیر رفت‌وبرگشت */
+.tkTrip{margin-top:16px;padding:24px;min-height:144px}
+.eyebrow{font-size:10px;letter-spacing:.16em;text-transform:uppercase;color:var(--tx3)}
+.tripHead{display:flex;align-items:baseline;gap:12px;flex-wrap:wrap}
+.tripPct{font-size:40px;font-weight:640;letter-spacing:-.035em;line-height:1}
+.tripWord{font-size:14px;color:var(--tx2)}
+.tripTrack{position:relative;height:10px;margin:24px 0 8px;border-radius:99px;
+  background:var(--raise);overflow:hidden}
+.tripFill{position:absolute;inset:0 auto 0 0;border-radius:99px;transition:width .5s ease}
+@media(prefers-reduced-motion:reduce){.tripFill{transition:none}}
+.tripEnds{display:flex;justify-content:space-between;font-size:12px;color:var(--tx3);
+  font-variant-numeric:tabular-nums}
+.tripEnds b{color:var(--tx1);font-weight:560}
+.tripNote{margin-top:14px;font-size:12.5px;color:var(--tx3);line-height:1.6}
+.tripBadge{margin-left:auto;font-size:10px;letter-spacing:.1em;text-transform:uppercase;
+  padding:5px 10px;border-radius:99px}
+
+/* اعداد بازار، هرکدام کارت خودش */
+.tkLeft{display:flex;flex-direction:column;gap:16px}
+.tkPlot{min-height:320px}
+.tkStats{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
+.tkStat{background:var(--card);border-radius:16px;box-shadow:var(--shs);padding:16px}
+.tkStat .k{font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--tx3)}
+.tkStat .v{margin-top:8px;font-size:18px;font-weight:600;letter-spacing:-.02em;
+  font-variant-numeric:tabular-nums}
+
+.row.tkGrid{grid-template-columns:1fr 396px;align-items:start;margin-top:16px;gap:16px}
+.tkFine{margin:14px 6px 0;color:var(--tx3);font-size:11.5px}
+
+/* ریسک‌ها و تأییدها: دو فهرست شماره‌دار، چون «چندتا» خودش خبر است */
+.scoreTop{display:flex;align-items:center;gap:15px;padding:18px 20px}
+.scoreTop .rv{font-size:16px;font-weight:640}
+.chkGroup{border-top:1px solid var(--line);padding:14px 20px 4px}
+.chkGroup .eyebrow{display:block;margin-bottom:8px}
+.chkRow{display:flex;gap:11px;align-items:flex-start;padding:9px 0;font-size:13px}
+.chkNum{width:16px;flex-shrink:0;font-size:11px;color:var(--tx3);
+  font-variant-numeric:tabular-nums;padding-top:2px}
+.chkMark{width:18px;height:18px;border-radius:50%;flex-shrink:0;display:grid;
+  place-items:center;font-size:11px;font-weight:700}
+.chkRow b{display:block;font-weight:560}
+.chkRow span.d{display:block;color:var(--tx3);font-size:12px;margin-top:2px;line-height:1.5}
+@media(max-width:900px){
+  .row.tkGrid{grid-template-columns:1fr}
+  .tkStats{grid-template-columns:repeat(2,1fr)}
+}
+@media(max-width:620px){
+  .tkBar{flex-wrap:wrap}
+  .tkPx{text-align:left;margin-right:auto}
+  .tripPct{font-size:32px}
+}
 .tstat .k{font-size:10.5px;font-weight:640;letter-spacing:.05em;text-transform:uppercase;
   color:var(--tx3)}
 .tstat .v{font-size:14px;font-weight:640;margin-top:3px;font-variant-numeric:tabular-nums}
@@ -735,32 +787,29 @@ footer a{color:var(--tx3)}
      هیچ منطقی اینجا تکرار نشده؛ فقط مقصدِ رندر عوض می‌شود.
      ===================================================================== -->
 <div class="view" id="view-token">
-  <section class="card tkHero">
-    <div class="tkTop">
-      <span class="av tkAv" id="tk-av">?</span>
-      <div class="tkId">
-        <div class="tkSym" id="tk-sym">—</div>
-        <div class="tkName" id="tk-name"></div>
-      </div>
-      <span class="grow"></span>
-      <div class="tkPx">
-        <div class="px mono" id="tk-px">—</div>
-        <a class="tkAddr mono" id="tk-addr" target="_blank" rel="noopener"></a>
-      </div>
+  <!-- نوار هویت: چه توکنی، چه قیمتی، و راه رفتن سرِ معامله. دکمه کوچک است
+       چون کسی که این صفحه را باز کرده هنوز نمی‌داند می‌خواهد معامله کند. -->
+  <section class="card tkBar">
+    <span class="av tkAv" id="tk-av">?</span>
+    <div class="tkId">
+      <div class="tkSym" id="tk-sym">—</div>
+      <div class="tkName" id="tk-name"></div>
     </div>
-
-    <!-- جوابِ سؤالی که خواننده با آن آمده، بالاتر از هر چیز دیگر -->
-    <div id="tk-exitBox"></div>
-
-    <div class="tkCta">
-      <button class="tkTrade" id="tk-trade">Trade now</button>
-      <button class="tkCopy" id="tk-copy">Copy this link</button>
+    <span class="grow"></span>
+    <div class="tkPx">
+      <div class="px mono" id="tk-px">—</div>
+      <a class="tkAddr mono" id="tk-addr" target="_blank" rel="noopener"></a>
     </div>
-    <p class="tkNote">Nothing here needs a wallet. The round trip above is simulated
-      against the live chain — no transaction, no gas.</p>
+    <button class="tkTrade" id="tk-trade">Trade</button>
+    <button class="tkCopy" id="tk-copy" title="Copy a link to this page">Copy link</button>
   </section>
 
+  <!-- امضای صفحه: خودِ رفت‌وبرگشت. تنها ادعایی که فقط ما داریم — «فروش را
+       هم اجرا کردیم» — باید همان چیزی باشد که اول دیده می‌شود، نه قیمت. -->
+  <section class="card tkTrip" id="tk-exitBox"></section>
+
   <div class="row tkGrid">
+    <div class="tkLeft">
     <section class="card">
       <div class="chartTop">
         <div>
@@ -769,19 +818,20 @@ footer a{color:var(--tx3)}
           <div class="chg mono" id="tk-pxChg"></div>
         </div>
       </div>
-      <div class="plot" id="tk-plot">
+      <div class="plot tkPlot" id="tk-plot">
         <div class="chartMsg" id="tk-chartMsg">Loading price history…</div>
         <div class="tipbox" id="tk-tip"></div>
       </div>
-      <div class="tstats" id="tk-tokStats" hidden></div>
     </section>
+    <div class="tkStats" id="tk-tokStats" hidden></div>
+    </div>
 
-    <section class="card">
-      <header><span class="ttl">Token safety</span><span class="grow"></span>
-        <span class="ttl mono" id="tk-sym2"></span></header>
-      <div id="tk-safetyBody"><div class="empty"><span class="spin"></span>Reading the token…</div></div>
+    <section class="card" id="tk-safetyBody">
+      <div class="empty"><span class="spin"></span>Reading the token…</div>
     </section>
   </div>
+  <p class="tkFine">Heuristics on public bytecode, not an audit. A clean score is not a
+    guarantee.</p>
 </div>
 </main>
 
@@ -1659,9 +1709,74 @@ async function copyLink(url,btn){
   }
 }
 
+/* =====================================================================
+   مسیر رفت‌وبرگشت — امضای صفحه‌ی توکن
+   ---------------------------------------------------------------------
+   کارت نتیجه‌ی صفحه‌ی سواپ یک ردیف در میان بقیه است. اینجا خودِ سؤال است،
+   پس شکل دیگری می‌گیرد: چقدر گذاشتی، چقدر برمی‌گردد، و چقدرش در راه
+   می‌ماند — روی یک نوار، که همان چیزی است که هیچ تجمیع‌کننده‌ی دیگری
+   نشان نمی‌دهد. داده دقیقاً همان داده‌ی renderExit است.
+   ===================================================================== */
+function renderRoundTrip(box,x){
+  if(!x){
+    box.innerHTML='<div class="eyebrow">The round trip</div>'+
+      '<div class="tripHead" style="margin-top:10px"><span class="spin"></span>'+
+      '<span class="tripWord">Simulating a buy and a sell against the live chain…</span></div>';
+    return;
+  }
+  const paid=parsedAmountIn();
+  const IN=tokenIn?esc(tokenIn.symbol):"";
+  if(x.state==="blocked"||x.state==="noexit"){
+    box.innerHTML=`<div class="eyebrow">The round trip</div>
+      <div class="tripHead" style="margin-top:12px">
+        <span class="tripPct" style="color:var(--neg)">No way out</span>
+        <span class="tripBadge" style="color:var(--neg);background:color-mix(in srgb,var(--neg) 14%,transparent)">
+          ${x.state==="blocked"?"Sell reverted":"No sell route"}</span>
+      </div>
+      <div class="tripTrack"><div class="tripFill" style="width:100%;background:var(--neg);opacity:.35"></div></div>
+      <div class="tripEnds"><span>The buy goes through</span><span>The sell does not</span></div>
+      <div class="tripNote">${esc(x.reason||"The sell side failed when we ran it.")}</div>`;
+    return;
+  }
+  if(x.state==="unknown"){
+    box.innerHTML=`<div class="eyebrow">The round trip</div>
+      <div class="tripHead" style="margin-top:12px">
+        <span class="tripPct" style="color:var(--warn)">Not tested</span>
+        <span class="tripBadge" style="color:var(--warn);background:color-mix(in srgb,var(--warn) 14%,transparent)">Unknown</span>
+      </div>
+      <div class="tripTrack"></div>
+      <div class="tripEnds"><span>We could not run the sell</span><span>&nbsp;</span></div>
+      <div class="tripNote">${esc(x.reason||"The network did not answer, so the live sell test could not run.")}
+        <b>We do not know</b> — which is not the same as “no”.</div>`;
+    return;
+  }
+  const loss=x.lossPct,kept=Math.max(0,Math.min(100,100-loss));
+  const tone=loss>=15?"var(--neg)":loss>=5?"var(--warn)":"var(--pos)";
+  const proven=x.state==="verified";
+  box.innerHTML=`<div class="eyebrow">The round trip</div>
+    <div class="tripHead" style="margin-top:12px">
+      <span class="tripPct" style="color:${tone}">${loss.toFixed(2)}%</span>
+      <span class="tripWord">is what a buy and an immediate sell costs you</span>
+      <span class="tripBadge" style="color:${proven?"var(--pos)":"var(--tx2)"};
+        background:${proven?"var(--pglow)":"var(--raise)"}">
+        ${proven?"Ran on chain":"From quotes"}</span>
+    </div>
+    <div class="tripTrack"><div class="tripFill" style="width:${kept.toFixed(2)}%;background:${tone}"></div></div>
+    <div class="tripEnds">
+      <span>In <b>${paid!==null&&tokenIn?fmt(paid,tokenIn.decimals)+" "+IN:"—"}</b></span>
+      <span>Back <b>${x.recovered!==null&&tokenIn?fmt(x.recovered,tokenIn.decimals)+" "+IN:"—"}</b></span>
+    </div>
+    <div class="tripNote">${proven
+      ? "Both legs were executed inside one simulated transaction against the live chain. "+
+        "A sell-side tax or a block would have shown up here."
+      : "Figures from quotes. The live round trip needs a wallet with the balance and "+
+        "approval to run it, so this is an estimate, not proof."}</div>`;
+}
+
 function renderExit(x){
   const box=panel("exitBox");
   if(!box)return;
+  if(tokenPage)return renderRoundTrip(box,x);
   if(!x){box.innerHTML="";return;}
   const badge={
     verified:['Verified by simulation','var(--pos)','var(--pglow)'],
@@ -2538,7 +2653,8 @@ async function renderTokenStats(t){
   // اگر همه‌شان نامعلوم‌اند، یک ردیف پر از «—» فقط سروصداست
   if(rows.every(r=>r[1]==="—")){box.hidden=true;return;}
   box.innerHTML=rows.map(([k,v])=>
-    `<div class="tstat"><div class="k">${esc(k)}</div><div class="v">${esc(v)}</div></div>`).join("");
+    `<div class="${tokenPage?"tkStat":"tstat"}"><div class="k">${esc(k)}</div>`+
+    `<div class="v">${esc(v)}</div></div>`).join("");
   box.hidden=false;
 }
 async function priceUsdOf(t){
@@ -3134,7 +3250,7 @@ async function runScan(token){
   const seq=++scanSeq;
   if(!token)return;
   $("safetySym").textContent=token.symbol;
-  if($("tk-sym2"))$("tk-sym2").textContent=token.symbol;
+
   const key=token.address.toLowerCase();
   if(safetyCache[key]){renderSafety(safetyCache[key]);return;}
   panel("safetyBody").innerHTML='<div class="empty"><span class="spin"></span>Scanning bytecode, ownership and liquidity…</div>';
@@ -3162,7 +3278,45 @@ function renderSafety(rep){
       <span><b>${esc(f.title)}</b><span>${esc(f.detail)}</span></span></div>`;});
   h+=`<div class="chk" style="color:var(--tx3);font-size:11.5px">
     <span></span><span>Heuristics on public bytecode, not an audit. A clean score is not a guarantee.</span></div>`;
+  if(tokenPage)return renderSafetyReport(rep);
   panel("safetyBody").innerHTML=h;
+}
+
+/* همان گزارش، چیدمان دیگر: چیزی که باید نگرانش باشی از چیزی که سنجیده شده
+   و ایراد نداشته جدا می‌شود. شماره‌ها تزئین نیستند — «چندتا» خودش خبر است،
+   و «۳ ایراد» با «۱ ایراد» دو حرف کاملاً متفاوت‌اند. */
+function renderSafetyReport(rep){
+  const box=$("tk-safetyBody");if(!box)return;
+  const col=`var(--${rep.verdict.tone})`,C=2*Math.PI*25;
+  const bad=rep.findings.filter(f=>f.level!=="ok");
+  const good=rep.findings.filter(f=>f.level==="ok");
+  const ord={critical:0,high:1,medium:2,info:3};
+  bad.sort((a,b)=>ord[a.level]-ord[b.level]);
+  const mark=f=>{
+    if(f.level==="ok")return['✓','var(--pos)','var(--pglow)'];
+    if(f.level==="info")return['?','var(--tx3)','var(--raise)'];
+    if(f.level==="critical")return['✕','var(--neg)','color-mix(in srgb,var(--neg) 14%,transparent)'];
+    return['!','var(--warn)','color-mix(in srgb,var(--warn) 15%,transparent)'];
+  };
+  const row=(f,n)=>{const[m,c,bg]=mark(f);
+    return `<div class="chkRow"><span class="chkNum">${n}</span>
+      <span class="chkMark" style="color:${c};background:${bg}">${m}</span>
+      <span><b>${esc(f.title)}</b><span class="d">${esc(f.detail)}</span></span></div>`;};
+  box.innerHTML=`
+    <div class="scoreTop">
+      <div class="ring"><svg width="60" height="60">
+        <circle cx="30" cy="30" r="25" fill="none" stroke="var(--raise)" stroke-width="6"/>
+        <circle cx="30" cy="30" r="25" fill="none" stroke="${col}" stroke-width="6"
+          stroke-dasharray="${C}" stroke-dashoffset="${C*(1-Math.max(4,rep.score)/100)}"
+          stroke-linecap="round"/></svg>
+        <b class="mono" style="color:${col}">${rep.score}</b></div>
+      <div><div class="rv" style="color:${col}">${esc(rep.verdict.txt)}</div>
+        <div class="rs">Risk ${rep.score} out of 100 · lower is safer</div></div>
+    </div>
+    ${bad.length?`<div class="chkGroup"><span class="eyebrow">${bad.length} to look at</span>
+      ${bad.map((f,i)=>row(f,i+1)).join("")}</div>`:""}
+    ${good.length?`<div class="chkGroup"><span class="eyebrow">${good.length} checked and clear</span>
+      ${good.map((f,i)=>row(f,i+1)).join("")}</div>`:""}`;
 }
 
 /* =====================================================================
@@ -4063,6 +4217,7 @@ async function openTokenPage(addr){
     $("tk-name").textContent="";
     $("tk-addr").textContent=shortAddr(addr);
     $("tk-addr").href=`${CHAIN.explorer}/token/${addr}`;
+    renderRoundTrip($("tk-exitBox"),{state:"unknown",reason:"We could not read this address."});
     $("tk-safetyBody").innerHTML='<div class="empty">This address is not a standard ERC-20 on '+
       'Base, or the network did not answer. We are not saying it is unsafe — we are saying '+
       'we could not read it.</div>';
@@ -4080,11 +4235,14 @@ async function openTokenPage(addr){
   paintAvatar($("tk-av"),t);
   $("tk-sym").textContent=t.symbol;
   $("tk-name").textContent=t.name||"";
-  $("tk-sym2").textContent=t.symbol;
   $("tk-addr").textContent=shortAddr(t.address);
   $("tk-addr").href=`${CHAIN.explorer}/token/${t.address}`;
   paintToken("in",tokenIn);paintToken("out",tokenOut);
 
+  renderRoundTrip($("tk-exitBox"),null);   // «داریم می‌سنجیم»، نه یک کارت خالی
+  /* نمودار در راه‌اندازی یک بار با جفتِ پیش‌فرض کشیده شده؛ حالا که جفت
+     واقعی معلوم است باید دوباره بخواند، وگرنه سرصفحه‌اش «—» می‌ماند. */
+  loadChart();
   renderTokenStats(t);
   priceUsdOf(t).then(px=>{
     // قیمت نامعلوم «۰ دلار» نیست. خط تیره یعنی نمی‌دانیم.
