@@ -247,8 +247,15 @@ export default {
        می‌کنیم و صفحه از روی pathname می‌فهمد کدام توکن را باید نشان بدهد.
        چرا مسیر و نه هش: هش هیچ‌وقت به سرور نمی‌رسد، پس با هش هرگز نمی‌شد
        کارت پیش‌نمایش (OG) برای تلگرام و ایکس ساخت. */
+    /* ⚠️ «/» نه «/index.html». سرویس فایل‌های ثابت برای /index.html طبق
+       قاعده‌ی خودش ۳۰۷ به / می‌دهد، و آن ریدایرکت از همین‌جا بیرون می‌رفت:
+       مرورگر سر از صفحه‌ی اصلی درمی‌آورد، pathname دیگر /t/… نبود، و صفحه‌ی
+       توکن هیچ‌وقت باز نمی‌شد. اندازه‌گیری‌شده روی سایت زنده:
+         /t/0x8335…  307 -> https://zaexa.com/
+       در حالی که /tx/0xabc و /hello-there ۴۰۴ می‌دادند — یعنی مسیرهای
+       ناشناخته سالم بودند و فقط همین یکی ریدایرکت می‌شد. */
     if (TOKEN_PAGE.test(url.pathname) && env && env.ASSETS)
-      return env.ASSETS.fetch(new Request(new URL("/index.html", url), request));
+      return env.ASSETS.fetch(new Request(new URL("/", url), request));
     // بقیه‌ی سایت دست‌نخورده از فایل‌های ثابت می‌آید.
     if (env && env.ASSETS) return env.ASSETS.fetch(request);
     return new Response("not found", { status: 404 });

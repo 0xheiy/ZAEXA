@@ -295,6 +295,32 @@ ok(res.status === 200, "index.html must still be served");
   console.log("[events] " + EV_OK.size + " event names allowed, everything else refused");
 }
 
+/* صفحه‌ی توکن: Worker باید *ریشه* را از ASSETS بخواهد، نه /index.html.
+   خواستن /index.html یک ۳۰۷ به / برمی‌گرداند و همان ریدایرکت از Worker
+   بیرون می‌رود؛ مرورگر سر از صفحه‌ی اصلی درمی‌آورد و صفحه‌ی توکن هرگز باز
+   نمی‌شود. این روی سایت زنده اتفاق افتاد، پس اینجا سنجیده می‌شود. */
+{
+  let asked = [];
+  const spyEnv = { ASSETS: { fetch: async (req) => {
+    asked.push(new URL(req.url).pathname);
+    return new Response("the site", { status: 200 });
+  } } };
+  const addr = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913";
+  const res = await worker.fetch(new Request(ORIGIN + "/t/" + addr), spyEnv, {});
+  ok(res.status === 200,
+     "the token page did not return the app (" + res.status + ")");
+  ok(asked.length === 1 && asked[0] === "/",
+     "the token page asked ASSETS for " + JSON.stringify(asked) +
+     " — it must ask for \"/\": /index.html answers with a 307 to /, and that " +
+     "redirect leaves the path behind, so the token page never opens");
+  // و یک آدرس بدشکل نباید این مسیر را بگیرد
+  asked = [];
+  await worker.fetch(new Request(ORIGIN + "/t/not-an-address"), spyEnv, {});
+  ok(asked.length === 1 && asked[0] === "/t/not-an-address",
+     "a malformed token path was treated as a token page: " + JSON.stringify(asked));
+  console.log("[token page] worker serves / for /t/<address>, untouched for anything else");
+}
+
 console.log(fails === 0
   ? "[gt proxy] worker ok — " + REAL.length + " real paths proxied, " + BAD.length +
     " refused without touching the network, 429 passes through with CORS\n" +
