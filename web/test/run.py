@@ -1583,21 +1583,38 @@ async def main():
             ("the spare width should collect on the right of the nav, not between the nav "
              "and the logo: %s" % head)
 
-        # هدر باید دقیقاً هم‌عرض محتوای زیرش باشد.
-        # `body` یک ستون فلکس است و `margin:0 auto` روی محور عرضی کشیدگی را
-        # خنثی می‌کند، پس هدر بدون `width:100%` به اندازه‌ی محتوای خودش جمع
-        # می‌شد (۷۸۵ در برابر ۱۱۴۰) و با لبه‌ی کارت‌ها هم‌تراز نبود.
+        # هدر باید تمام‌عرضِ پنجره باشد.
+        # ⚠️ ادعای این کاوشگر ۲۳ آگوست عوض شد چون *خواسته* عوض شد، نه چون
+        # قرمز شده بود: قبلاً می‌سنجید که هدر دقیقاً هم‌عرض `main` است (۱۱۴۰
+        # وسط صفحه)، و حسام گفت روی نمایشگر پهن شبیه ستون یک وبلاگ می‌شود.
+        # ولی خطری که آن ادعا جلویش را می‌گرفت هنوز سر جایش است: `body` یک
+        # ستون فلکس است و `margin:0 auto` کشیدگی محور عرضی را خنثی می‌کند، پس
+        # هدر بدون `width:100%` به اندازه‌ی محتوای خودش جمع می‌شود (۷۸۵ در
+        # برابر ۱۲۴۰). همان خطر، سنجه‌ی تازه: لبه تا لبه‌ی پنجره.
         align = await pg.evaluate("""() => {
             const h = document.querySelector("header").getBoundingClientRect();
             const m = document.querySelector("main").getBoundingClientRect();
+            const cs = getComputedStyle(document.querySelector("header"));
             return {hl: Math.round(h.left), hr: Math.round(h.right),
-                    ml: Math.round(m.left), mr: Math.round(m.right), vw: innerWidth};
+                    ml: Math.round(m.left), mr: Math.round(m.right), vw: innerWidth,
+                    surface: cs.backgroundColor, rule: cs.borderBottomWidth};
         }""")
-        print("[header width] header %s..%s vs main %s..%s of %s"
-              % (align["hl"], align["hr"], align["ml"], align["mr"], align["vw"]))
-        assert align["hl"] == align["ml"] and align["hr"] == align["mr"], \
-            ("the header is not the same width as the content below it: header %s..%s, "
-             "main %s..%s" % (align["hl"], align["hr"], align["ml"], align["mr"]))
+        print("[header width] header %s..%s of %s (main %s..%s) surface=%s rule=%s"
+              % (align["hl"], align["hr"], align["vw"], align["ml"], align["mr"],
+                 align["surface"], align["rule"]))
+        assert align["hl"] <= 0 and align["hr"] >= align["vw"], \
+            ("the header no longer spans the window: it runs %s..%s of %s — without "
+             "width:100%% a flex-column body shrinks it to its own content"
+             % (align["hl"], align["hr"], align["vw"]))
+        assert align["hr"] - align["hl"] > align["mr"] - align["ml"], \
+            "the header is not wider than the cards below it, so it still reads as a column"
+        # نوار باید سطح خودش را داشته باشد، وگرنه لبه‌به‌لبه‌شدن فقط شبیه این
+        # است که محتوا از قاب بیرون زده — همان چیزی که گزینه‌ی بدون‌نوار بود.
+        assert align["surface"] not in ("rgba(0, 0, 0, 0)", "transparent") \
+            and float(align["rule"].replace("px", "")) > 0, \
+            ("the header bar lost its surface or its bottom rule (%s / %s) — edge-to-edge "
+             "without them reads as content escaping the frame, not as a bar"
+             % (align["surface"], align["rule"]))
 
         # کارت سواپ نباید کشیده شود تا هم‌قد نمودار شود — زیر دکمه فضای مرده
         # می‌ماند. ولی ارتفاع نمودار *از همان کشیدگی* تغذیه می‌شود، پس اگر کسی
