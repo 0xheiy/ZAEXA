@@ -356,6 +356,40 @@ async def main():
         print("[quote 1000 USDC] out=%s  rate=%s  impact=%s  min=%s" % (
             await pg.input_value("#amtOut"), await pg.inner_text("#kRate"),
             await pg.inner_text("#kImpact"), await pg.inner_text("#kMin")))
+
+        # ---- 1a. عددی که خودمان در فیلد خروجی می‌نویسیم باید خوانا باشد ----
+        # قبلاً بی‌جداکننده و با ۸ رقم اعشار بود: 2148785.216084.
+        # سه ادعا، چون گروه‌بندی به‌تنهایی می‌توانست تایپ در همین فیلد را بشکند:
+        #   الف) شکل نمایش گروه‌بندی‌شده است،
+        #   ب) با فوکوس به عدد خام برمی‌گردد تا ویرایش نشکند،
+        #   ج) «1,5» — اعشار به سبک اروپایی — همچنان نامعتبر است و بی‌صدا
+        #      ۱۵ خوانده نمی‌شود. این سومی مهم‌ترین است: یک replace ساده‌ی
+        #      کاما همان‌جا یک باگ خاموشِ پولی می‌ساخت.
+        shown = await pg.input_value("#amtOut")
+        assert re.fullmatch(r"\d{1,3}(,\d{3})+\.\d{1,2}", shown), \
+            "the receive field is not grouped and rounded for a large amount: " + shown
+        await pg.focus("#amtOut"); await pg.wait_for_timeout(150)
+        raw = await pg.input_value("#amtOut")
+        assert "," not in raw and float(raw) > 0, \
+            "focusing the receive field must hand back a raw number to edit, got: " + raw
+        euro = await pg.evaluate("""() => {
+            const el = document.getElementById("amtOut");
+            el.value = "1,5";
+            return parsedTargetOut() === null;
+        }""")
+        print("[amount grouping] shown=%s  on focus=%s  '1,5' still rejected=%s"
+              % (shown, raw, euro))
+        assert euro, \
+            ("'1,5' is being read as 15 — a plain comma strip turns a European decimal into a "
+             "number fifteen times too big")
+        await pg.fill("#amtIn", "1000")
+        await pg.wait_for_function("() => document.getElementById('amtOut').value !== ''", timeout=20000)
+        assert await pg.evaluate("""() => {
+            const el = document.getElementById("amtOut");
+            el.value = "2,148,785.22";
+            return parsedTargetOut() !== null;
+        }"""), "the grouped amount we write ourselves does not parse back"
+
         print("[venues] %s" % await pg.inner_text("#venueMeta"))
         # ردیف «نسبت به یونی‌سواپ» — ادعای رقابتی محصول، پس باید صادق بماند
         print("[vs uniswap] %s  (tip: %s)" % (
@@ -1608,6 +1642,23 @@ async def main():
                  "row out of stretch without giving .plot a height starves the chart."
                  % fit["plot"])
 
+        # نیمه‌ی دومِ کاوشگر [mobile order]: جابه‌جایی ترتیب فقط زیر ۹۴۱ پیکسل
+        # است. اگر order به چیدمان دوستونه نشت کند، نمودار می‌رود سمت راست و
+        # کل حساب‌های ارتفاعِ بالا بی‌معنا می‌شود.
+        desk_order = await pg.evaluate("""() => {
+            const c = [...document.querySelectorAll(".row.hero > .card")];
+            const swap = c.find(x => x.querySelector("#amtIn"));
+            const chart = c.find(x => x.querySelector("#plot"));
+            return {chartLeft: Math.round(chart.getBoundingClientRect().left),
+                    swapLeft: Math.round(swap.getBoundingClientRect().left)};
+        }""")
+        print("[desktop order] chart left=%s swap left=%s"
+              % (desk_order["chartLeft"], desk_order["swapLeft"]))
+        assert desk_order["chartLeft"] < desk_order["swapLeft"], \
+            ("the two-column layout flipped: the chart is at %s and the swap card at %s — the "
+             "mobile order override has leaked past its media query"
+             % (desk_order["chartLeft"], desk_order["swapLeft"]))
+
         # ارتفاع نمودار نباید به کارت کناری وابسته باشد.
         # با `flex:1` ارتفاع نمودار از ارتفاع ردیف می‌آمد و ارتفاع ردیف از
         # کارت سواپ: نمودار روی بارگذاری ۵۷۲ پیکسل بود و با اولین تعویض توکن
@@ -2190,6 +2241,90 @@ async def main():
             assert f["bottom"] >= f["vh"] - 4, \
                 ("the footer floats mid-page on the %s view: it ends at %s in a %s viewport"
                  % (view, f["bottom"], f["vh"]))
+        # ---- 6c. پانویس نثری باید یک جمله‌ی پیوسته باشد، نه ستون‌های کنار هم ----
+        # این پانویس‌ها از .frow استفاده می‌کردند و .frow یک ردیف فلکس است، پس
+        # <b> وسط جمله یک آیتم فلکس می‌شد و ستون خودش را می‌گرفت. روی صفحه
+        # این‌طور دیده می‌شد: «…This is | flow, not a forecast | : it shows…».
+        # سنجه دقیقاً همان چیزی است که چشم می‌دید: عبارت پررنگ باید از هر دو
+        # طرف به متن چسبیده باشد. در حالت فلکس، `gap:11px` هر طرف یازده پیکسل
+        # فاصله می‌انداخت و `align-items:center` تکه‌ها را روی خط‌های متفاوت
+        # می‌نشاند. با display هم می‌سنجیم تا برگشت به .frow از هر دو طرف بیفتد.
+        # (دو سنجه‌ی دیگر را امتحان کردم و کنار گذاشتم چون باگ را جدا نمی‌کردند:
+        #  «عرض تکه‌ها» — تکه‌ی اول به‌درستی وسط سطر تمام می‌شود؛ و «شروع افقی
+        #  سطرها» — client rects به‌ازای هر تکه‌ی متن است، نه هر سطر.)
+        await pg.click('.nav button[data-view="flow"]'); await pg.wait_for_timeout(1200)
+        note = await pg.evaluate("""() => {
+            const el = document.querySelector("#flowBody .fnote");
+            if (!el) return {missing: true};
+            const b = el.querySelector("b");
+            if (!b) return {noBold: true};
+            const cs = getComputedStyle(el), br = b.getBoundingClientRect();
+            const edge = (start, end) => {
+                const r = document.createRange();
+                r.setStart(start[0], start[1]); r.setEnd(end[0], end[1]);
+                const list = [...r.getClientRects()].filter(x => x.width > 1);
+                return list.length ? list : null;
+            };
+            const before = edge([el.firstChild, 0], [b, 0]);
+            const after  = edge([b, b.childNodes.length], [el.lastChild, el.lastChild.length]);
+            const bl = before[before.length - 1], af = after[0];
+            return {display: cs.display,
+                    gapBefore: Math.round(br.left - bl.right),
+                    lineBefore: Math.abs(br.top - bl.top) < 6,
+                    gapAfter: Math.round(af.left - br.right),
+                    lineAfter: Math.abs(af.top - br.top) < 6};
+        }""")
+        assert not note.get("missing"), "the Flow footnote is gone"
+        assert not note.get("noBold"), "the Flow footnote lost the bold phrase this probe watches"
+        print("[prose note] display=%s | bold touches text: before %spx/line=%s  after %spx/line=%s"
+              % (note["display"], note["gapBefore"], note["lineBefore"],
+                 note["gapAfter"], note["lineAfter"]))
+        assert note["display"] == "block", \
+            ("the prose footnote is display:%s — a flex parent turns the <b> mid-sentence "
+             "into its own column" % note["display"])
+        assert note["gapBefore"] <= 3 and note["lineBefore"], \
+            ("the bold phrase is detached from the text before it: %spx away, same line=%s"
+             % (note["gapBefore"], note["lineBefore"]))
+        assert note["gapAfter"] <= 3 and note["lineAfter"], \
+            ("the sentence does not continue straight after the bold phrase: %spx away, "
+             "same line=%s" % (note["gapAfter"], note["lineAfter"]))
+
+        # ---- 6d. حالت خالی باید بگوید صفحه چیست و راهِ ورود بدهد ----
+        # این بلوک تنها چیزِ روی صفحه است وقتی والتی وصل نیست؛ یک جمله‌ی تنها
+        # وسط صفحه‌ی خالی «اینجا چیزی نیست» خوانده می‌شد.
+        # ⚠️ دکمه با delegation وصل است چون #folioBody با innerHTML بازنویسی
+        # می‌شود. اینجا عمداً اول یک رندرِ دوباره می‌گیریم و بعد کلیک می‌کنیم —
+        # یک onclick مستقیم دقیقاً همین‌جا می‌افتاد.
+        # تا اینجای تست یک والت وصل شده، پس برای دیدن حالت خالی موقتاً قطعش
+        # می‌کنیم. رندرِ دوباره هم عمداً همین‌جاست: کلیکِ بعدی روی محتوایی
+        # می‌افتد که تازه با innerHTML ساخته شده.
+        await pg.click('.nav button[data-view="folio"]'); await pg.wait_for_timeout(500)
+        await pg.evaluate("window.__acct = account; account = null; renderFolio();")
+        await pg.wait_for_timeout(400)
+        intro = await pg.evaluate("""() => {
+            const el = document.querySelector("#folioBody .empty.intro");
+            if (!el) return {missing: true};
+            const p = el.querySelector("p");
+            return {h: Math.round(el.getBoundingClientRect().height),
+                    title: (el.querySelector(".eTtl") || {textContent: ""}).textContent.trim(),
+                    words: p ? p.textContent.trim().split(/\\s+/).length : 0,
+                    btn: !!el.querySelector('[data-act="connect"]')};
+        }""")
+        assert not intro.get("missing"), "the portfolio empty state lost its intro block"
+        print("[empty intro] height=%s title=%r body=%s words button=%s"
+              % (intro["h"], intro["title"][:44], intro["words"], intro["btn"]))
+        assert intro["h"] >= 280, \
+            "the empty state is only %spx tall — it reads as a stub on a blank page" % intro["h"]
+        assert intro["title"] and intro["words"] >= 6 and intro["btn"], \
+            "the empty state needs a heading, a sentence of explanation and a way in"
+        await pg.click('#folioBody [data-act="connect"]'); await pg.wait_for_timeout(400)
+        assert await pg.evaluate('document.getElementById("walletOv").classList.contains("on")'), \
+            ("the empty-state button did not open the wallet picker after a re-render "
+             "— the delegated listener is gone")
+        await pg.keyboard.press("Escape"); await pg.wait_for_timeout(250)
+        await pg.evaluate("account = window.__acct; renderFolio();")
+        await pg.wait_for_timeout(300)
+
         await pg.click('.nav button[data-view="swap"]'); await pg.wait_for_timeout(400)
 
         # ---- 7. settings + picker ----
@@ -2209,6 +2344,30 @@ async def main():
             walletChainId = CHAIN.id;
             paintWallet();
         }""")
+        # ---- 8a. روی گوشی کارت سواپ باید بالای نمودار باشد ----
+        # زیر ۹۴۱ پیکسل ستون یکی می‌شود و ترتیب DOM حکم می‌کرد، یعنی نمودار
+        # اول می‌آمد و کارِ اصلی صفحه کامل زیر خط تاشو می‌افتاد.
+        # دو ادعا، چون هرکدام جدا می‌تواند بشکند: ترتیب روی گوشی عوض شده باشد،
+        # و ترتیب روی دسکتاپ عوض *نشده* باشد.
+        order = await mob.evaluate("""() => {
+            const c = [...document.querySelectorAll(".row.hero > .card")];
+            const swap = c.find(x => x.querySelector("#amtIn"));
+            const chart = c.find(x => x.querySelector("#plot"));
+            const cta = document.getElementById("actBtn");
+            return {swapTop: Math.round(swap.getBoundingClientRect().top + scrollY),
+                    chartTop: Math.round(chart.getBoundingClientRect().top + scrollY),
+                    ctaBottom: Math.round(cta.getBoundingClientRect().bottom + scrollY),
+                    vh: innerHeight};
+        }""")
+        print("[mobile order] swap top=%s chart top=%s | swap CTA ends at %s of %s"
+              % (order["swapTop"], order["chartTop"], order["ctaBottom"], order["vh"]))
+        assert order["swapTop"] < order["chartTop"], \
+            ("on a phone the swap card sits below the chart (%s vs %s) — the main action "
+             "is pushed off the first screen" % (order["swapTop"], order["chartTop"]))
+        assert order["ctaBottom"] <= order["vh"], \
+            ("the swap button ends at %s in a %s viewport — it no longer fits the first screen"
+             % (order["ctaBottom"], order["vh"]))
+
         await mob.click("#connectBtn"); await mob.wait_for_timeout(150)
         mobile_menu = await mob.evaluate("""() => {
             const el = document.getElementById("walletPop"), box = el.getBoundingClientRect();

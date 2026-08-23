@@ -190,6 +190,15 @@ main{max-width:1140px;margin:0 auto;padding:8px 20px 56px;display:flex;flex-dire
 @media(max-width:900px){.row.tkGrid{grid-template-columns:1fr}}
 .row.sub{grid-template-columns:1.35fr 1fr}
 @media(max-width:940px){.row.hero,.row.sub{grid-template-columns:1fr}}
+/* روی یک ستون، ترتیب DOM حکم می‌کرد و نمودار اولِ صفحه بود — کارت سواپ،
+   یعنی کارِ اصلی این صفحه، کامل زیر خط تاشو می‌افتاد و کاربر تازه باید
+   اسکرول می‌کرد تا ببیندش. اینجا فقط ترتیب عوض می‌شود، نه چیدمان.
+   ⚠️ در چیدمان دوستونه دست نمی‌خوریم: ارتفاع نمودار و جای دکمه آنجا با
+   [card fit] و [chart steady] قفل شده‌اند. کاوشگر [mobile order]. */
+@media(max-width:940px){
+  .row.hero>.card:first-child{order:2}
+  .row.hero>.card:nth-child(2){order:1}
+}
 
 .card{background:var(--card);border-radius:22px;box-shadow:var(--sh);overflow:hidden}
 .card>header{all:unset;display:flex;align-items:center;gap:10px;padding:17px 20px 0;max-width:none}
@@ -360,6 +369,14 @@ main{max-width:1140px;margin:0 auto;padding:8px 20px 56px;display:flex;flex-dire
 .stack i{display:block;height:100%;min-width:3px}
 .frow{display:flex;align-items:center;gap:11px;padding:9px 20px;font-size:13px}
 .frow+.frow{border-top:1px solid var(--line)}
+/* پانویس نثری ته کارت. عمداً از .frow جدا است و باید جدا بماند:
+   .frow یک ردیف فلکس است، پس هر <b> وسط جمله به یک آیتم فلکس تبدیل می‌شد
+   و ستون خودش را می‌گرفت — جمله‌ی صفحه‌ی Flow سه‌تکه دیده می‌شد:
+   «…This is | flow, not a forecast | : it shows who is buying…».
+   کاوشگر [prose note]. */
+.fnote{display:block;padding:10px 20px 12px;font-size:11.5px;line-height:1.65;
+  color:var(--tx3);border-top:1px solid var(--line)}
+.fnote b{color:var(--tx2);font-weight:640}
 .fchip{width:9px;height:9px;border-radius:3px;flex-shrink:0}
 .fsym{font-weight:620}
 .fbal{color:var(--tx3);font-size:12px}
@@ -394,6 +411,14 @@ main{max-width:1140px;margin:0 auto;padding:8px 20px 56px;display:flex;flex-dire
   max-height:170px;overflow:auto;opacity:.85}
 .note summary{cursor:pointer;margin-top:6px;font-size:11.5px;opacity:.85}
 .empty{padding:34px 20px;text-align:center;color:var(--tx3);font-size:13px;line-height:1.6}
+/* حالت خالیِ Portfolio و Flow تنها چیزِ روی صفحه است — بقیه‌ی صفحه واقعاً
+   خالی است. پس این بلوک باید بگوید صفحه چه نشان می‌دهد و یک راه ورود بدهد،
+   نه اینکه یک جمله وسط ۷۰۰ پیکسل خالی بگذارد. کاوشگر [empty intro]. */
+.empty.intro{min-height:min(52vh,400px);display:flex;flex-direction:column;
+  align-items:center;justify-content:center;padding:40px 22px}
+.empty.intro .eTtl{color:var(--tx);font-size:16px;font-weight:640;letter-spacing:-.2px}
+.empty.intro p{max-width:46ch;margin:9px 0 0;font-size:12.8px}
+.empty.intro .chip{margin-top:22px}
 footer{max-width:1140px;width:100%;margin:auto auto 0;padding:0 20px 40px;font-size:12px;color:var(--tx3)}
 footer a{color:var(--tx3)}
 .social{display:flex;align-items:center;gap:10px;margin-bottom:12px;flex-wrap:wrap}
@@ -750,7 +775,14 @@ footer a{color:var(--tx3)}
   <section class="card">
     <header><span class="ttl">Your portfolio</span><span class="grow"></span>
       <span class="ttl mono" id="folioTotal"></span></header>
-    <div id="folioBody"><div class="empty">Connect a wallet to see what you hold.</div></div>
+    <div id="folioBody"><div class="empty intro">
+      <span class="eTtl">Connect a wallet to see what you hold</span>
+      <!-- عمداً چیزی را که پانویسِ زیر کارت می‌گوید تکرار نمی‌کند: آنجا
+           «از کجا خوانده می‌شود» است، اینجا «چه چیزی گیرت می‌آید». -->
+      <p>Every token you hold on Base, valued and ranked by share.
+         No account, nothing stored.</p>
+      <button class="chip solid" data-act="connect">Connect wallet</button>
+    </div></div>
   </section>
   <p style="padding:0 6px;color:var(--tx3);font-size:12px;margin:0">
     Balances are read straight from the chain and refresh on their own. Prices come from
@@ -770,7 +802,12 @@ footer a{color:var(--tx3)}
         <button data-w="h1" class="on">1H</button>
         <button data-w="h6">6H</button>
       </div></header>
-    <div id="flowBody"><div class="empty">Pick a token to see who is buying.</div></div>
+    <div id="flowBody"><div class="empty intro">
+      <span class="eTtl">Pick a token to see who is buying</span>
+      <p>Swap events are read from the deepest pool on Base — what was bought,
+         what was sold, and the largest recent buyers.</p>
+      <button class="chip solid" data-act="pickFlowToken">Choose a token</button>
+    </div></div>
   </section>
   <p style="padding:0 6px;color:var(--tx3);font-size:12px;margin:0">
     Read live from the deepest pool for this token, in your browser — no server, nothing stored.
@@ -1083,6 +1120,11 @@ let dexStatus={},verifyTries=0;
 let balances={},allowance=0n,allowanceKnown=false,busy=false,pickerTarget="in";
 let safetyCache={},timeframe="1D",chartData=null;
 const $=id=>document.getElementById(id);
+/* بلوکِ حالت خالی این دو صفحه همان‌جایی که در HTML نوشته شده برداشته می‌شود
+   و بعداً همان برگردانده می‌شود. عمداً کپی نمی‌کنیم: قبلاً همین متن‌ها در
+   دو جا (مارک‌آپ و رندر) تکرار می‌شدند و با هر ویرایش از هم دور می‌افتادند.
+   این خط قبل از هر رندری اجرا می‌شود چون اسکریپت بعد از مارک‌آپ است. */
+const EMPTY_FOLIO=$("folioBody").innerHTML,EMPTY_FLOW=$("flowBody").innerHTML;
 const ZERO="0x0000000000000000000000000000000000000000";
 const DEAD="0x000000000000000000000000000000000000dEaD";
 
@@ -2768,9 +2810,17 @@ function parsedAmountIn(){
   if(!raw||isNaN(Number(raw))||Number(raw)<=0)return null;
   try{return E.parseUnits(raw,tokenIn.decimals);}catch{return null;}
 }
+/* الگوی دقیقِ گروه‌بندیِ انگلیسی: 1,234 و 12,345,678.9 آری، «1,5» نه.
+   عمداً سخت‌گیر است — با یک replace سرراستِ کاما، «1,5» که کاربر اروپایی
+   به‌عنوان یک‌ونیم می‌نویسد بی‌صدا ۱۵ خوانده می‌شد. امروز آن ورودی نامعتبر
+   است و باید نامعتبر بماند. کاوشگر [amount grouping]. */
+const GROUPED=/^\d{1,3}(,\d{3})+(\.\d*)?$/;
+function ungroup(s){return GROUPED.test(s)?s.replace(/,/g,""):s;}
 function parsedTargetOut(){
   if(!tokenOut)return null;
-  const raw=($("amtOut").value||"").trim();
+  /* این فیلد را خودمان با جداکننده پر می‌کنیم، پس پارس باید همان شکل را
+     پس بگیرد؛ وگرنه هر مبلغ چهاررقمیِ نوشته‌شده توسط برنامه NaN می‌شد. */
+  const raw=ungroup(($("amtOut").value||"").trim());
   if(!raw||isNaN(Number(raw))||Number(raw)<=0)return null;
   try{return E.parseUnits(raw,tokenOut.decimals);}catch{return null;}
 }
@@ -2979,10 +3029,20 @@ function renderVsUniswap(plan){
       " more than the best direct Uniswap pool."+gasNote);
 }
 
+/* مبلغی که خودِ برنامه در فیلد «You receive» می‌نویسد.
+   قبلاً بی‌جداکننده و با ۸ رقم اعشار بود، پس یک مبلغ بزرگ به شکل
+   2148785.216084 در می‌آمد و عملاً خوانده نمی‌شد. تعداد اعشار حالا به
+   بزرگی عدد بسته است و جداکننده اضافه می‌شود.
+   ⚠️ فقط همین یک فیلد. مبلغی که دکمه‌ی MAX می‌نویسد و جوابِ حل معکوس
+   («چقدر بدهم تا این‌قدر بگیرم») باید دقیق بمانند: گردکردنِ اولی خاک جا
+   می‌گذارد و دومی کم‌تر از هدف تحویل می‌دهد. رقمِ تضمین‌شده هم همچنان
+   «Min received» است، نه این فیلد. کاوشگر [amount grouping]. */
+function fmtOutField(v){
+  return v.toLocaleString("en-US",{maximumFractionDigits:v>=1000?2:v>=1?6:8});
+}
 function renderPlan(plan,reverse){
   if(!reverse)
-    $("amtOut").value=Number(E.formatUnits(plan.totalOut,tokenOut.decimals))
-      .toLocaleString("en-US",{maximumFractionDigits:8,useGrouping:false});
+    $("amtOut").value=fmtOutField(Number(E.formatUnits(plan.totalOut,tokenOut.decimals)));
   const rate=Number(E.formatUnits(plan.totalOut,tokenOut.decimals))/
              Number(E.formatUnits(plan.totalIn,tokenIn.decimals));
   $("kRate").textContent="1 "+tokenIn.symbol+" = "+rate.toLocaleString("en-US",{maximumFractionDigits:6})+" "+tokenOut.symbol;
@@ -3033,7 +3093,7 @@ let folioSeq=0;
 async function renderFolio(){
   const seq=++folioSeq;
   const body=$("folioBody");
-  if(!account){body.innerHTML='<div class="empty">Connect a wallet to see what you hold.</div>';
+  if(!account){body.innerHTML=EMPTY_FOLIO;
     $("folioTotal").textContent="";return;}
 
   const held=allTokens().filter(t=>{
@@ -3096,7 +3156,7 @@ async function renderFolio(){
       <span class="p">excluded</span></span></div>`;
   });
   body.innerHTML=(total>0?bar:"")+list+
-    (unpriced.length?`<div class="frow" style="color:var(--tx3);font-size:11.5px;border-top:1px solid var(--line)">
+    (unpriced.length?`<div class="fnote">
       Tokens without a price feed are listed but left out of the percentages.</div>`:"");
 }
 
@@ -3150,7 +3210,7 @@ const WINDOWS={h1:{label:"1 hour",blocks:1800},h6:{label:"6 hours",blocks:10800}
 async function renderFlow(){
   const seq=++flowSeq,body=$("flowBody");
   const t=routable(tokenOut);
-  if(!t){body.innerHTML='<div class="empty">Pick a token.</div>';return;}
+  if(!t){body.innerHTML=EMPTY_FLOW;return;}
   body.innerHTML='<div class="empty"><span class="spin"></span>Reading swaps from the chain…</div>';
   try{
     const pool=await deepestV3Pool(t);
@@ -3231,7 +3291,7 @@ async function renderFlow(){
           <span class="ago">${blocksAgo(x.block)}</span></div>`;
       });
     }
-    h+=`<div class="frow" style="color:var(--tx3);font-size:11.5px">
+    h+=`<div class="fnote">
       Read directly from the pool's Swap events on Base — no third-party service.
       This is <b>flow, not a forecast</b>: it shows who is buying and how much, not whether
       they are right. ×2 marks a wallet that bought more than once in this window.</div>`;
@@ -4395,6 +4455,11 @@ function wire(){
   $("shareBtn").onclick=()=>copyLink(shareUrl(),$("shareBtn"));
   $("connectBtn").onclick=()=>{if(!account)connect();else if(walletChainId!==CHAIN.id)switchNetwork();else toggleWalletMenu();};
   $("disconnectBtn").onclick=disconnect;
+  /* دکمه‌های داخل حالت خالی با delegation وصل می‌شوند، نه مستقیم: محتوای
+     این دو ظرف با innerHTML بازنویسی می‌شود و یک onclick مستقیم بعد از
+     اولین رندر از بین می‌رفت. شنونده روی خودِ ظرف است که هرگز عوض نمی‌شود. */
+  $("folioBody").onclick=e=>{if(e.target.closest('[data-act="connect"]'))connect();};
+  $("flowBody").onclick=e=>{if(e.target.closest('[data-act="pickFlowToken"]'))openPicker("out");};
   $("tokInBtn").onclick=()=>openPicker("in");
   $("tokOutBtn").onclick=()=>openPicker("out");
   $("tokClose").onclick=closePicker;
@@ -4414,6 +4479,13 @@ function wire(){
     $("amtIn").value="";$("amtOut").value="";
     paintAmtClear();mode="exactIn";$("amtIn").focus();scheduleQuote();
   };
+  /* لحظه‌ای که کاربر می‌خواهد در فیلد خروجی تایپ کند، جداکننده‌هایی که
+     خودمان گذاشته‌ایم برداشته می‌شود تا ویرایش روی عدد خام باشد — وگرنه
+     پاک‌کردن یک رقم از «2,148,785.22» شکل گروه‌بندی را می‌شکست و مبلغ
+     نامعتبر می‌شد. شرط GROUPED یعنی به کاماییِ که خودِ کاربر تایپ کرده
+     دست نمی‌زنیم. کاوشگر [amount grouping]. */
+  $("amtOut").onfocus=()=>{const el=$("amtOut");
+    if(GROUPED.test(el.value))el.value=el.value.replace(/,/g,"");};
   $("amtOut").oninput=()=>{mode="targetOut";scheduleQuote();};
   $("flipBtn").onclick=()=>{const a=tokenIn;tokenIn=tokenOut;tokenOut=a;
     paintToken("in",tokenIn);paintToken("out",tokenOut);
