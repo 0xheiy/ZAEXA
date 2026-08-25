@@ -2513,6 +2513,10 @@ async def main():
         ck_out = await ckpg.inner_text("#tk-sym")
         ck_stats = (await ckpg.inner_text("#tk-tokStats")).replace("\n", " ")
         ck_risk = (await ckpg.inner_text("#tk-safetyBody")).replace("\n", " ")
+        # هیچ اسکلتی نباید بعد از نشستن صفحه باقی بماند: اسکلتِ جامانده یعنی
+        # چیزی هرگز نرسیده و کاربر به یک درخشش بی‌پایان نگاه می‌کند.
+        ck_sk = await ckpg.eval_on_selector_all("#view-token .sk", "els => els.length")
+        ck_score = await ckpg.inner_text("#tk-score")
         ck_swap_open = await ckpg.is_visible("#view-swap.on")
         # «Trade now» باید همان توکن را به فرم سواپ ببرد، نه اینکه صفحه را
         # از نو باز کند یا انتخاب را بریزد.
@@ -2545,6 +2549,13 @@ async def main():
             "the risk panel never finished: %r" % ck_risk[:80]
         assert ck_stats.strip(), \
             "the token page shows no market figures: %r" % ck_stats[:80]
+        assert ck_sk == 0, (
+            "%d loading skeletons are still on the page after it settled — something never "
+            "arrived and the reader is left looking at a shimmer." % ck_sk)
+        assert ck_score.strip() not in ("", "0"), (
+            "the risk score never counted up from zero (still %r). The ring animates from 0 "
+            "on purpose; if it stops there, the scan result never reached the ring."
+            % ck_score)
         assert ck_traded, "Trade now did not open the swap form"
         assert ck_amt == "", (
             "Trade now carried an amount into the swap form (%r). The figure on the token "
