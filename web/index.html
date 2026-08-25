@@ -478,21 +478,28 @@ footer a{color:var(--tx3)}
    «اگر بخرم، می‌توانم بیرون بیایم؟» — پس رفت‌وبرگشت بزرگ‌ترین چیز روی
    صفحه است و بقیه دورش ساکت می‌مانند. گرادیان برند فقط روی دکمه‌ی معامله
    می‌آید؛ رنگ‌های معنایی (سبز/کهربایی/قرمز) کار قضاوت را می‌کنند. */
-.tkBar{display:flex;align-items:center;gap:14px;padding:14px 18px}
-.tkAv{width:42px;height:42px;border-radius:50%;display:grid;place-items:center;
-  background:var(--raise);font-size:13px;font-weight:600;color:var(--tx2)}
-.tkSym{font-size:20px;font-weight:640;letter-spacing:-.02em;line-height:1.15}
-.tkName{color:var(--tx3);font-size:12px;margin-top:1px}
-.tkPx{text-align:right;margin-right:4px}
-.tkPx .px{font-size:17px;font-weight:600}
-.tkAddr{display:block;margin-top:2px;color:var(--tx3);font-size:11px;text-decoration:none}
+.tkBar{display:flex;align-items:center;gap:18px;padding:28px 24px}
+.tkAv{width:56px;height:56px;border-radius:50%;display:grid;place-items:center;
+  background:var(--raise);font-size:15px;font-weight:600;color:var(--tx2);
+  box-shadow:0 0 0 1px var(--line)}
+.tkSym{font-size:28px;font-weight:640;letter-spacing:-.026em;line-height:1.1}
+.tkMeta{display:flex;align-items:center;gap:9px;margin-top:6px;flex-wrap:wrap;
+  color:var(--tx3);font-size:13px}
+.tkChip{padding:2px 9px;border-radius:99px;background:var(--raise);
+  font-size:11px;letter-spacing:.02em;color:var(--tx2)}
+.tkPx{text-align:right;margin-right:6px}
+.tkPx .px{font-size:23px;font-weight:620;font-variant-numeric:tabular-nums;
+  letter-spacing:-.02em}
+.tkPxSub{font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--tx3);
+  margin-top:3px}
+.tkAddr{color:var(--tx3);font-size:12px;text-decoration:none}
 .tkAddr:hover{color:var(--tx1);text-decoration:underline}
-.tkTrade{padding:9px 20px;border:0;border-radius:10px;cursor:pointer;
-  background:var(--grad);color:var(--on-acc);font-size:13.5px;font-weight:640;
+.tkTrade{padding:13px 28px;border:0;border-radius:12px;cursor:pointer;
+  background:var(--grad);color:var(--on-acc);font-size:14.5px;font-weight:640;
   box-shadow:0 4px 14px var(--glow);transition:.16s}
 .tkTrade:hover{transform:translateY(-1px);box-shadow:0 7px 20px var(--glow)}
-.tkCopy{padding:9px 13px;border:1px solid var(--line);border-radius:10px;cursor:pointer;
-  background:transparent;color:var(--tx3);font-size:12.5px}
+.tkCopy{padding:13px 18px;border:1px solid var(--line);border-radius:12px;cursor:pointer;
+  background:transparent;color:var(--tx3);font-size:13.5px}
 .tkCopy:hover{color:var(--tx1);border-color:var(--tx3)}
 /* هدف لمسی روی موبایل زیر ۴۴ پیکسل نرود، و تمرکز صفحه‌کلید دیده شود */
 @media(max-width:620px){.tkTrade,.tkCopy{min-height:44px}}
@@ -500,23 +507,30 @@ footer a{color:var(--tx3)}
   outline:2px solid var(--acc);outline-offset:2px}
 
 /* امضا: مسیر رفت‌وبرگشت */
-.tkTrip{margin-top:16px;padding:24px;min-height:144px}
+.tkTrip{margin-top:14px;padding:11px 20px 12px;min-height:0}
 .eyebrow{font-size:10px;letter-spacing:.16em;text-transform:uppercase;color:var(--tx3)}
 .tripHead{display:flex;align-items:baseline;gap:12px;flex-wrap:wrap}
-.tripPct{font-size:40px;font-weight:640;letter-spacing:-.035em;line-height:1}
-.tripWord{font-size:14px;color:var(--tx2)}
-.tripTrack{position:relative;height:10px;margin:24px 0 8px;border-radius:99px;
+.tripPct{font-size:21px;font-weight:640;letter-spacing:-.03em;line-height:1}
+.tripWord{font-size:12.5px;color:var(--tx2)}
+.tripTrack{position:relative;height:5px;margin:8px 0 5px;border-radius:99px;
   background:var(--raise);overflow:hidden}
 .tripFill{position:absolute;inset:0 auto 0 0;border-radius:99px;transition:width .5s ease}
 @media(prefers-reduced-motion:reduce){.tripFill{transition:none}}
 .tripEnds{display:flex;justify-content:space-between;font-size:12px;color:var(--tx3);
   font-variant-numeric:tabular-nums}
 .tripEnds b{color:var(--tx1);font-weight:560}
-.tripNote{margin-top:14px;font-size:12.5px;color:var(--tx3);line-height:1.6}
+.tripNote{margin-top:6px;font-size:10.5px;color:var(--tx3);line-height:1.4}
 .tripBadge{margin-left:auto;font-size:10px;letter-spacing:.1em;text-transform:uppercase;
   padding:5px 10px;border-radius:99px}
 
 /* اعداد بازار، هرکدام کارت خودش */
+/* اسکلت بارگذاری: به‌جای جعبه‌ی خالی، *شکلِ* جوابی که دارد می‌آید. کاربر
+   می‌بیند چه چیزی قرار است بیاید و صفحه موقع رسیدن داده نمی‌پرد. */
+.sk{background:linear-gradient(90deg,var(--raise) 25%,var(--card2) 37%,var(--raise) 63%);
+  background-size:400% 100%;border-radius:7px;animation:skWave 1.4s ease infinite}
+@keyframes skWave{0%{background-position:100% 0}100%{background-position:0 0}}
+@media(prefers-reduced-motion:reduce){.sk{animation:none}}
+.skRow{display:flex;align-items:center;gap:11px;padding:11px 20px;border-top:1px solid var(--line)}
 .tkLeft{display:flex;flex-direction:column;gap:16px}
 .tkPlot{min-height:320px}
 .tkStats{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
@@ -547,7 +561,7 @@ footer a{color:var(--tx3)}
 @media(max-width:620px){
   .tkBar{flex-wrap:wrap}
   .tkPx{text-align:left;margin-right:auto}
-  .tripPct{font-size:32px}
+  .tripPct{font-size:21px}
 }
 .tstat .k{font-size:10.5px;font-weight:640;letter-spacing:.05em;text-transform:uppercase;
   color:var(--tx3)}
@@ -793,12 +807,18 @@ footer a{color:var(--tx3)}
     <span class="av tkAv" id="tk-av">?</span>
     <div class="tkId">
       <div class="tkSym" id="tk-sym">—</div>
-      <div class="tkName" id="tk-name"></div>
+      <!-- وسط کارت با *واقعیت* پر می‌شود، نه با فضای خالی: نام، شبکه و آدرس
+           قرارداد. نسخه‌ی قبل همه‌چیز را به دو لبه هل می‌داد و وسطش حفره بود. -->
+      <div class="tkMeta">
+        <span id="tk-name"><span class="sk" style="display:inline-block;width:118px;height:12px"></span></span>
+        <span class="tkChip">Base</span>
+        <a class="tkAddr mono" id="tk-addr" target="_blank" rel="noopener"></a>
+      </div>
     </div>
     <span class="grow"></span>
     <div class="tkPx">
       <div class="px mono" id="tk-px">—</div>
-      <a class="tkAddr mono" id="tk-addr" target="_blank" rel="noopener"></a>
+      <div class="tkPxSub">price now</div>
     </div>
     <button class="tkTrade" id="tk-trade">Trade</button>
     <button class="tkCopy" id="tk-copy" title="Copy a link to this page">Copy link</button>
@@ -823,11 +843,30 @@ footer a{color:var(--tx3)}
         <div class="tipbox" id="tk-tip"></div>
       </div>
     </section>
-    <div class="tkStats" id="tk-tokStats" hidden></div>
+    <div class="tkStats" id="tk-tokStats">
+      <div class="tkStat"><div class="k">Market cap</div>
+        <div class="sk" style="width:74%;height:19px;margin-top:8px"></div></div>
+      <div class="tkStat"><div class="k">FDV</div>
+        <div class="sk" style="width:66%;height:19px;margin-top:8px"></div></div>
+      <div class="tkStat"><div class="k">Volume 24h</div>
+        <div class="sk" style="width:70%;height:19px;margin-top:8px"></div></div>
+      <div class="tkStat"><div class="k">Liquidity</div>
+        <div class="sk" style="width:62%;height:19px;margin-top:8px"></div></div>
+    </div>
     </div>
 
     <section class="card" id="tk-safetyBody">
-      <div class="empty"><span class="spin"></span>Reading the token…</div>
+      <div class="scoreTop">
+        <span class="sk" style="width:60px;height:60px;border-radius:50%"></span>
+        <div><span class="sk" style="display:block;width:104px;height:15px"></span>
+          <span class="sk" style="display:block;width:168px;height:11px;margin-top:7px"></span></div>
+      </div>
+      <div class="skRow"><span class="sk" style="width:18px;height:18px;border-radius:50%"></span>
+        <span class="sk" style="flex:1;height:13px"></span></div>
+      <div class="skRow"><span class="sk" style="width:18px;height:18px;border-radius:50%"></span>
+        <span class="sk" style="flex:1;height:13px"></span></div>
+      <div class="skRow"><span class="sk" style="width:18px;height:18px;border-radius:50%"></span>
+        <span class="sk" style="flex:1;height:13px"></span></div>
     </section>
   </div>
   <p class="tkFine">Heuristics on public bytecode, not an audit. A clean score is not a
@@ -1719,16 +1758,18 @@ async function copyLink(url,btn){
    ===================================================================== */
 function renderRoundTrip(box,x){
   if(!x){
-    box.innerHTML='<div class="eyebrow">The round trip</div>'+
-      '<div class="tripHead" style="margin-top:10px"><span class="spin"></span>'+
-      '<span class="tripWord">Simulating a buy and a sell against the live chain…</span></div>';
+    box.innerHTML=`<div class="tripHead">
+        <span class="sk" style="width:84px;height:23px"></span>
+        <span class="tripWord">Buying it and selling it back, inside one simulated transaction…</span></div>
+      <div class="tripTrack"><span class="sk" style="display:block;width:100%;height:100%;border-radius:99px"></span></div>
+      <div class="tripEnds"><span class="sk" style="width:92px;height:11px"></span>
+        <span class="sk" style="width:118px;height:11px"></span></div>`;
     return;
   }
   const paid=parsedAmountIn();
   const IN=tokenIn?esc(tokenIn.symbol):"";
   if(x.state==="blocked"||x.state==="noexit"){
-    box.innerHTML=`<div class="eyebrow">The round trip</div>
-      <div class="tripHead" style="margin-top:12px">
+    box.innerHTML=`<div class="tripHead">
         <span class="tripPct" style="color:var(--neg)">No way out</span>
         <span class="tripBadge" style="color:var(--neg);background:color-mix(in srgb,var(--neg) 14%,transparent)">
           ${x.state==="blocked"?"Sell reverted":"No sell route"}</span>
@@ -1739,8 +1780,7 @@ function renderRoundTrip(box,x){
     return;
   }
   if(x.state==="unknown"){
-    box.innerHTML=`<div class="eyebrow">The round trip</div>
-      <div class="tripHead" style="margin-top:12px">
+    box.innerHTML=`<div class="tripHead">
         <span class="tripPct" style="color:var(--warn)">Not tested</span>
         <span class="tripBadge" style="color:var(--warn);background:color-mix(in srgb,var(--warn) 14%,transparent)">Unknown</span>
       </div>
@@ -1753,8 +1793,7 @@ function renderRoundTrip(box,x){
   const loss=x.lossPct,kept=Math.max(0,Math.min(100,100-loss));
   const tone=loss>=15?"var(--neg)":loss>=5?"var(--warn)":"var(--pos)";
   const proven=x.state==="verified";
-  box.innerHTML=`<div class="eyebrow">The round trip</div>
-    <div class="tripHead" style="margin-top:12px">
+  box.innerHTML=`<div class="tripHead">
       <span class="tripPct" style="color:${tone}">${loss.toFixed(2)}%</span>
       <span class="tripWord">is what a buy and an immediate sell costs you</span>
       <span class="tripBadge" style="color:${proven?"var(--pos)":"var(--tx2)"};
@@ -1767,10 +1806,8 @@ function renderRoundTrip(box,x){
       <span>Back <b>${x.recovered!==null&&tokenIn?fmt(x.recovered,tokenIn.decimals)+" "+IN:"—"}</b></span>
     </div>
     <div class="tripNote">${proven
-      ? "Both legs were executed inside one simulated transaction against the live chain. "+
-        "A sell-side tax or a block would have shown up here."
-      : "Figures from quotes. The live round trip needs a wallet with the balance and "+
-        "approval to run it, so this is an estimate, not proof."}</div>`;
+      ? "Both legs ran inside one simulated transaction against the live chain."
+      : "From quotes. The live test needs a wallet with the balance and approval to run it."}</div>`;
 }
 
 function renderExit(x){
@@ -3285,6 +3322,25 @@ function renderSafety(rep){
 /* همان گزارش، چیدمان دیگر: چیزی که باید نگرانش باشی از چیزی که سنجیده شده
    و ایراد نداشته جدا می‌شود. شماره‌ها تزئین نیستند — «چندتا» خودش خبر است،
    و «۳ ایراد» با «۱ ایراد» دو حرف کاملاً متفاوت‌اند. */
+/* شمارش نرم تا عدد نهایی. اگر کاربر حرکت کمتر خواسته، مستقیم روی نتیجه
+   می‌نشیند — انیمیشن نباید شرطِ دیدنِ جواب باشد. */
+function animateScore(score,C){
+  const arc=$("tk-arc"),num=$("tk-score");
+  if(!arc||!num)return;
+  const target=Math.max(4,score)/100;
+  const still=window.matchMedia&&matchMedia("(prefers-reduced-motion: reduce)").matches;
+  if(still){arc.setAttribute("stroke-dashoffset",C*(1-target));num.textContent=score;return;}
+  const dur=900,t0=performance.now();
+  const ease=t=>1-Math.pow(1-t,3);
+  const step=now=>{
+    const k=Math.min(1,(now-t0)/dur),e=ease(k);
+    arc.setAttribute("stroke-dashoffset",C*(1-target*e));
+    num.textContent=Math.round(score*e);
+    if(k<1)requestAnimationFrame(step);else num.textContent=score;
+  };
+  requestAnimationFrame(step);
+}
+
 function renderSafetyReport(rep){
   const box=$("tk-safetyBody");if(!box)return;
   const col=`var(--${rep.verdict.tone})`,C=2*Math.PI*25;
@@ -3302,14 +3358,17 @@ function renderSafetyReport(rep){
     return `<div class="chkRow"><span class="chkNum">${n}</span>
       <span class="chkMark" style="color:${c};background:${bg}">${m}</span>
       <span><b>${esc(f.title)}</b><span class="d">${esc(f.detail)}</span></span></div>`;};
+  /* حلقه از صفر پر می‌شود و عدد هم با آن بالا می‌رود — چون همین الان
+     سنجیده شد، نه اینکه از قبل آنجا بوده باشد. `dashoffset` روی خودِ
+     محیط دایره شروع می‌شود، یعنی خالی. */
   box.innerHTML=`
     <div class="scoreTop">
       <div class="ring"><svg width="60" height="60">
         <circle cx="30" cy="30" r="25" fill="none" stroke="var(--raise)" stroke-width="6"/>
-        <circle cx="30" cy="30" r="25" fill="none" stroke="${col}" stroke-width="6"
-          stroke-dasharray="${C}" stroke-dashoffset="${C*(1-Math.max(4,rep.score)/100)}"
+        <circle id="tk-arc" cx="30" cy="30" r="25" fill="none" stroke="${col}" stroke-width="6"
+          stroke-dasharray="${C}" stroke-dashoffset="${C}"
           stroke-linecap="round"/></svg>
-        <b class="mono" style="color:${col}">${rep.score}</b></div>
+        <b class="mono" id="tk-score" style="color:${col}">0</b></div>
       <div><div class="rv" style="color:${col}">${esc(rep.verdict.txt)}</div>
         <div class="rs">Risk ${rep.score} out of 100 · lower is safer</div></div>
     </div>
@@ -3317,6 +3376,7 @@ function renderSafetyReport(rep){
       ${bad.map((f,i)=>row(f,i+1)).join("")}</div>`:""}
     ${good.length?`<div class="chkGroup"><span class="eyebrow">${good.length} checked and clear</span>
       ${good.map((f,i)=>row(f,i+1)).join("")}</div>`:""}`;
+  animateScore(rep.score,C);
 }
 
 /* =====================================================================
@@ -4250,8 +4310,10 @@ async function openTokenPage(addr){
       undefined,{maximumFractionDigits:2})));
   }).catch(()=>{});
   runScan(t);
-  scheduleQuote();               // exit check از دلِ همین می‌آید
 }
+/* کوت و exit check جدا شدند تا بتوانند *بعد* از دروازه‌ها اجرا شوند بدون
+   اینکه بقیه‌ی صفحه منتظرشان بماند. */
+function runTokenQuote(){ if(tokenPage)scheduleQuote(); }
 
 function checkUrl(){
   const p=new URLSearchParams();
@@ -4540,8 +4602,14 @@ function wire(){
   const onToken=/^\/t\/(0x[0-9a-fA-F]{40})\/?$/.exec(location.pathname);
   tokenPage=!!onToken;
   setView(tokenPage?"token":(parseHash().view||"swap"),false);
+  /* ⚠️ ترتیب اینجا سرعتِ دیده‌شدن را تعیین می‌کند. خواندنِ خودِ توکن به
+     دروازه‌های صرافی ربطی ندارد، پس همان اول شروع می‌شود و موازی با
+     verifyDexes پیش می‌رود؛ نام و لوگو و اعداد بازار چند ثانیه زودتر
+     می‌نشینند. فقط کوت و exit check منتظر دروازه‌ها می‌مانند، چون بدون
+     دانستنِ صرافی‌های قابل اتکا معنا ندارند. */
+  const early=tokenPage?openTokenPage(onToken[1]):null;
   await verifyDexes();          // قبل از هر کوتی، بدان کدام صرافی قابل اتکاست
-  if(tokenPage){await openTokenPage(onToken[1]);}
+  if(early){await early;runTokenQuote();}
   // لینک اشتراکی *بعد* از دروازه‌ها اعمال می‌شود: تا ندانیم کدام صرافی
   // قابل اتکاست، کوت گرفتن برای توکن ناشناس معنا ندارد.
   await applyShareParams();
