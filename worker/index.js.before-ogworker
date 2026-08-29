@@ -28,9 +28,6 @@
 const UPSTREAM_FREE = "https://api.geckoterminal.com/api/v2";
 const UPSTREAM_KEYED = "https://api.coingecko.com/api/v3/onchain";
 
-import { ogTags, ogTitle, pickTokenMeta } from "./og.js";
-import { ogImageResponse } from "./og-image.js";
-
 /* پراکسی باز نیست. فقط شکل مسیرهایی که خودِ سایت می‌زند اجازه دارد:
      networks/base/tokens/<addr>
      networks/base/tokens/<addr>/pools
@@ -239,89 +236,12 @@ async function proxyGt(request, url, ctx, env) {
   return res;
 }
 
-/* =====================================================================
-   داده‌ی کارت پیش‌نمایش — سمت سرور
-   =====================================================================
-   ⚠️ فقط از کش *می‌خواند* و هرگز در آن نمی‌نویسد. کلید کش عمداً همان کلیدی
-   است که proxyGt می‌سازد، پس اگر مرورگری همین توکن را تازه گرفته باشد این
-   رندر مجانی است. ولی اگر ما هم می‌نوشتیم، پاسخِ بی‌هدرِ CORS ما زیر همان
-   کلید می‌نشست و فراخوانی بعدیِ /gt از داخل مرورگر با خطای CORS می‌افتاد —
-   یعنی یک کارت پیش‌نمایش، قیمت را روی خودِ سایت خراب می‌کرد.
-
-   ⚠️ «base» اینجا ثابت است چون این Worker فقط همین یک سایت را سرو می‌کند و
-   `CHAIN.gtNetwork` در صفحه هم «base» است. اگر روزی شبکه‌ی دوم اضافه شد،
-   این هم باید از مسیر بیاید نه از این ثابت. */
-const OG_NETWORK = "base";
-const OG_TIMEOUT_MS = 1200;
-
-async function ogFetchMeta(addr, env) {
-  const key = (env && typeof env.CG_KEY === "string" && env.CG_KEY) || "";
-  const rest = "networks/" + OG_NETWORK + "/tokens/" + addr;
-  const target = (key ? UPSTREAM_KEYED : UPSTREAM_FREE) + "/" + rest;
-
-  const store = (typeof caches !== "undefined" && caches.default) || null;
-  if (store) {
-    try {
-      const hit = await store.match(new Request(target, { method: "GET" }));
-      if (hit) return pickTokenMeta(await hit.json());
-    } catch (e) { /* کش خراب = بی‌کش، نه بی‌کارت */ }
-  }
-
-  /* سقف زمانی سخت. اگر بالادست کند بود، کارت عمومی می‌شود ولی صفحه‌ی کاربر
-     منتظر نمی‌ماند — «نمی‌دانم» نباید به «صفحه بالا نیامد» ترجمه شود. */
-  const ac = new AbortController();
-  const timer = setTimeout(() => ac.abort(), OG_TIMEOUT_MS);
-  try {
-    const h = { accept: "application/json" };
-    if (key) h["x-cg-demo-api-key"] = key;
-    const up = await fetch(target, { headers: h, signal: ac.signal });
-    if (!up.ok) return null;
-    return pickTokenMeta(await up.json());
-  } catch (e) {
-    return null;
-  } finally {
-    clearTimeout(timer);
-  }
-}
-
-/* تگ‌ها را داخل همان HTML می‌نشاند.
-   HTMLRewriter جریانی است، پس ۲۹۰KB صفحه در حافظه بافر نمی‌شود.
-   ترتیب مهم است: اول تگ‌های ثابتِ صفحه‌ی اصلی (که با data-og علامت خورده‌اند)
-   برداشته می‌شوند، بعد تگ‌های این توکن اضافه می‌شود — وگرنه ربات دو og:title
-   می‌دید و کدام را برمی‌دارد به خودش بستگی داشت. */
-function injectOg(res, url, addr, metaPromise) {
-  if (typeof HTMLRewriter === "undefined") return res;   // بیرون از Workers (تست node)
-  if (!res || res.status !== 200) return res;
-  const ct = res.headers.get("content-type") || "";
-  if (!/text\/html/i.test(ct)) return res;
-  return new HTMLRewriter()
-    .on("meta[data-og]", { element(el) { el.remove(); } })
-    .on("link[data-og]", { element(el) { el.remove(); } })
-    .on("title", {
-      async element(el) {
-        const meta = await metaPromise;
-        el.setInnerContent(ogTitle(meta), { html: false });
-      },
-    })
-    .on("head", {
-      async element(el) {
-        const meta = await metaPromise;
-        el.append(ogTags(meta, addr, url.origin), { html: true });
-      },
-    })
-    .transform(res);
-}
-
 export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
     if (url.pathname === "/gt" || url.pathname.startsWith("/gt/"))
       return proxyGt(request, url, ctx, env);
     if (url.pathname === "/ev") return collectEv(request, url, env);
-    /* تصویر کارت. عمداً در `_site` نیست، پس همیشه به کد می‌رسد — مثل /gt و
-       /ev. یعنی برای اضافه‌شدنش لازم نیست کسی Build command را در پنل عوض
-       کند، و انتشارش با خودِ کد اتمیک است. */
-    if (url.pathname === "/og.png") return ogImageResponse(request);
     /* /t/<آدرس> یک صفحه‌ی واقعی است، نه یک هش. بایندینگ [assets] برای مسیری
        که فایل ندارد ۴۰۴ می‌دهد، پس خودمان همان index.html را برایش سرو
        می‌کنیم و صفحه از روی pathname می‌فهمد کدام توکن را باید نشان بدهد.
@@ -334,16 +254,8 @@ export default {
          /t/0x8335…  307 -> https://zaexa.com/
        در حالی که /tx/0xabc و /hello-there ۴۰۴ می‌دادند — یعنی مسیرهای
        ناشناخته سالم بودند و فقط همین یکی ریدایرکت می‌شد. */
-    if (TOKEN_PAGE.test(url.pathname) && env && env.ASSETS) {
-      const addr = url.pathname.slice(3).replace(/\/$/, "");
-      /* ⚠️ فراخوانی داده **قبل** از await روی ASSETS شروع می‌شود تا این دو
-         موازی بروند، نه پشت سر هم. همان درسی که در خودِ صفحه‌ی توکن گرفتیم:
-         خواندن توکن پشت verifyDexes منتظر می‌ماند در حالی که ربطی به آن
-         نداشت. اینجا هم صفحه نباید پشت یک API بیرونی صف بایستد. */
-      const metaPromise = ogFetchMeta(addr, env);
-      const res = await env.ASSETS.fetch(new Request(new URL("/", url), request));
-      return injectOg(res, url, addr, metaPromise);
-    }
+    if (TOKEN_PAGE.test(url.pathname) && env && env.ASSETS)
+      return env.ASSETS.fetch(new Request(new URL("/", url), request));
     // بقیه‌ی سایت دست‌نخورده از فایل‌های ثابت می‌آید.
     if (env && env.ASSETS) return env.ASSETS.fetch(request);
     return new Response("not found", { status: 404 });
@@ -352,4 +264,3 @@ export default {
 
 // برای تست‌ها — در زمان اجرا روی Worker استفاده نمی‌شود.
 export { PATH_OK, QUERY_OK, ttlFor, EV_OK, EV_DETAIL_OK, EV_SURFACE_OK, EV_MAX_BODY };
-export { OG_NETWORK, OG_TIMEOUT_MS, ogFetchMeta };
