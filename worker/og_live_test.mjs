@@ -14,6 +14,7 @@
 
 import { fileURLToPath } from "node:url";
 import path from "node:path";
+import { OG_IMAGE_V } from "./og.js";
 
 let Miniflare;
 try {
@@ -104,8 +105,8 @@ const GOOD = {
      "og:title does not carry the token:\n" + html.slice(0, 900));
   ok(html.includes("Liquidity $12.40M"), "the description lost the liquidity figure");
   ok(html.includes("Vol 24h $3.12M"), "the description lost the 24h volume");
-  ok(html.includes('content="https://zaexa.com/og.png?v=1"'),
-     "og:image is not an absolute url on our own origin");
+  ok(html.includes('content="https://zaexa.com/og.png?v=' + OG_IMAGE_V + '"'),
+     "og:image is not absolute, or its version is stale (expected v=" + OG_IMAGE_V + ")");
   ok(html.includes('content="https://zaexa.com/t/' + ADDR + '"'),
      "og:url is not the canonical token url");
   ok(!html.includes("DEX aggregator on Base"),
@@ -163,7 +164,7 @@ for (const [mode, label] of [["error", "a 500 from upstream"], ["slow", "an upst
 /* ---- ۴. تصویر کارت واقعاً از /og.png می‌آید ---- */
 {
   const m = mf();
-  const res = await m.dispatchFetch("https://zaexa.com/og.png?v=1");
+  const res = await m.dispatchFetch("https://zaexa.com/og.png?v=" + OG_IMAGE_V);
   const buf = new Uint8Array(await res.arrayBuffer());
   const etag = res.headers.get("etag");
   const res304 = await m.dispatchFetch("https://zaexa.com/og.png", {

@@ -601,6 +601,58 @@ async def main():
             print("        ", c)
         assert any("Fee is mutable" in c for c in checks), "bytecode selector scan did not fire"
 
+        # ---- 2a-bis. Bug 5 رگرسیون: حلقه‌ی ریسکِ نمای اصلی هم باید انیمیت شود ----
+        # renderSafetyReport (صفحه‌ی توکن) از صفر پر می‌شد؛ renderSafety (نمای
+        # اصلی) مستقیم مقدار نهایی را می‌نوشت و هرگز حرکت نمی‌کرد. اینجا هم
+        # حرکتِ عادی سنجیده می‌شود و هم حالتِ prefers-reduced-motion.
+        sf_key = await pg.evaluate("() => Object.keys(safetyCache)[0]")
+        assert sf_key, "no safety scan is cached on the main view yet — nothing to re-animate"
+        C_ring = 2 * 3.141592653589793 * 25
+        pre_off = await pg.evaluate(
+            """(k) => { renderSafety(safetyCache[k]);
+               return document.getElementById("sf-arc").getAttribute("stroke-dashoffset"); }""",
+            sf_key)
+        assert abs(float(pre_off) - C_ring) < 0.5, (
+            "the main-site ring must start fully empty (offset=circumference) the instant the "
+            "scan lands, got %s" % pre_off)
+        await pg.wait_for_timeout(1200)
+        rs_text = await pg.inner_text("#safetyBody .rs")
+        score_m = re.search(r"Risk (\d+)/100", rs_text)
+        assert score_m, "could not read the score off the main safety panel: %r" % rs_text
+        score = int(score_m.group(1))
+        expected_off = C_ring * (1 - max(4, score) / 100)
+        settled_off = float(await pg.get_attribute("#sf-arc", "stroke-dashoffset"))
+        settled_num = (await pg.inner_text("#sf-score")).strip()
+        print("[risk] main-site ring animates from empty: start=%.1f settled=%.1f expected=%.1f score=%s"
+              % (float(pre_off), settled_off, expected_off, settled_num))
+        assert abs(settled_off - expected_off) < 0.5, (
+            "the ring did not settle where the scanned score says it should: got %.2f, "
+            "expected %.2f" % (settled_off, expected_off))
+        assert settled_num == str(score), (
+            "the number never finished counting up to the final score: shows %r, scan says %d"
+            % (settled_num, score))
+
+        rmpg = await b.new_page(viewport={"width": 1240, "height": 1000})
+        await rmpg.emulate_media(reduced_motion="reduce")
+        await rmpg.goto(URL)
+        await rmpg.wait_for_selector("#safetyBody .rhead", timeout=20000)
+        rm_off = float(await rmpg.get_attribute("#sf-arc", "stroke-dashoffset"))
+        rm_num = (await rmpg.inner_text("#sf-score")).strip()
+        rm_rs = await rmpg.inner_text("#safetyBody .rs")
+        rm_m = re.search(r"Risk (\d+)/100", rm_rs)
+        assert rm_m, "could not read the score with reduced motion emulated: %r" % rm_rs
+        rm_score = int(rm_m.group(1))
+        rm_expected = C_ring * (1 - max(4, rm_score) / 100)
+        await rmpg.close()
+        print("[risk] prefers-reduced-motion is final immediately: offset=%.1f expected=%.1f score=%s"
+              % (rm_off, rm_expected, rm_num))
+        assert abs(rm_off - rm_expected) < 0.5, (
+            "with prefers-reduced-motion: reduce the ring must land on the final value "
+            "immediately, not mid-animation: got %.2f, expected %.2f" % (rm_off, rm_expected))
+        assert rm_num == str(rm_score), (
+            "with prefers-reduced-motion: reduce the number must show the final score right "
+            "away: shows %r, scan says %d" % (rm_num, rm_score))
+
         # ---- 2b. exit check (round-trip) ----
         await pg.wait_for_selector("#exitBox .exit", timeout=20000)
         print("[exit] %s | %s" % (
@@ -1793,6 +1845,38 @@ async def main():
              "transparent — that quietly shrinks the header by that many pixels and shifts "
              "everything below it" % align["rule"])
 
+        # ---- 2c-bis. Bug 1 رگرسیون: وردمارک باید هم‌قدِ نشان بماند، نه درشت‌تر ----
+        # نشان (glyph) و وردمارک دو viewBox با نسبتِ تصویریِ متفاوت دارند؛
+        # اندازه‌ی CSS باید طوری تنظیم شود که «قدِ جوهر» دو طرف نزدیک هم بماند
+        # (هدف ۰.۶) و مرکزِ عمودیِ دو طرف عوض نشود. این روی صفحه‌ی *واقعی*
+        # (نه هارنس) و در ۱۴۴۰×۹۰۰ سنجیده می‌شود، چون خودِ گزارش دقیقاً همین
+        # سند و همین اندازه را اندازه گرفته بود.
+        logopg = await b.new_page(viewport={"width": 1440, "height": 900})
+        await logopg.goto("file://" + os.path.join(HERE, "..", "index.html"))
+        await logopg.wait_for_timeout(700)
+        logo = await logopg.evaluate("""() => {
+            const mark = document.querySelector(".logo .glyph .mark").getBoundingClientRect();
+            const word = document.querySelector(".logo .wordmark").getBoundingClientRect();
+            const hdr = document.querySelector("header").getBoundingClientRect();
+            return {markH: mark.height, wordH: word.height,
+                    markCenter: mark.top + mark.height / 2,
+                    wordCenter: word.top + word.height / 2,
+                    hdrH: hdr.height};
+        }""")
+        await logopg.close()
+        ratio = logo["wordH"] / logo["markH"]
+        center_gap = abs(logo["markCenter"] - logo["wordCenter"])
+        print("[header] wordmark is not oversized: mark=%.1fpx word=%.1fpx ratio=%.2f "
+              "centers %.1f/%.1f headerH=%.1f"
+              % (logo["markH"], logo["wordH"], ratio, logo["markCenter"], logo["wordCenter"],
+                 logo["hdrH"]))
+        assert 0.57 <= ratio <= 0.63, (
+            "the wordmark's ink height is no longer sized to the mark's: ratio=%.3f (want "
+            "0.57-0.63) — mark=%.1fpx word=%.1fpx" % (ratio, logo["markH"], logo["wordH"]))
+        assert center_gap <= 1.5, (
+            "resizing the wordmark moved it out of vertical alignment with the mark: "
+            "%.2fpx apart" % center_gap)
+
         # کارت سواپ نباید کشیده شود تا هم‌قد نمودار شود — زیر دکمه فضای مرده
         # می‌ماند. ولی ارتفاع نمودار *از همان کشیدگی* تغذیه می‌شود، پس اگر کسی
         # به‌جای کارت، کل ردیف را از کشیدگی خارج کند، نمودار کوتاه می‌شود.
@@ -2255,7 +2339,9 @@ async def main():
                 flowWindow = id;
                 await renderFlow();
                 await new Promise(r => setTimeout(r, 80));
-                return { text: document.getElementById("flowBody").innerText, calls: calls.slice() };
+                return { text: document.getElementById("flowBody").innerText,
+                         html: document.getElementById("flowBody").innerHTML,
+                         calls: calls.slice() };
             }
 
             const h1 = await run("h1", null);
@@ -2322,6 +2408,27 @@ async def main():
              "wording, not invent a total: %r" % flow_split["h6dead"]["text"][:200])
         assert "Net" not in flow_split["h6dead"]["text"], \
             "a totally failed read must not still show Bought/Sold/Net figures"
+
+        # ---- 2e-quater. Bug 6 رگرسیون: نوارِ زیرِ Coverage خودش را معرفی می‌کند ----
+        # آن نوار نسبتِ خرید-به-فروش است، نه نوارِ پوشش — قبلاً بدون برچسب
+        # بود و درست کنار ردیفِ Coverage می‌نشست، پس چشم آن را مالِ Coverage
+        # می‌خواند (یک بازه‌ی ۴.۳ از ۶ ساعت که همه‌فروش بود، یک نوارِ قرمزِ
+        # تمام‌عرض نشان می‌داد که انگار «پوشش صفر است»).
+        h6p_html = flow_split["h6partial"]["html"]
+        print("[flow] split bar is labelled: %s" % (
+            "flowbarCap" in h6p_html and "border-bottom" in h6p_html))
+        assert "flowbarCap" in h6p_html, \
+            "the bought/sold split bar has no caption class — it still reads as unlabelled"
+        cap_m = re.search(r'<div class="flowbarCap">(.*?)</div>', h6p_html, re.S)
+        assert cap_m, "no flowbarCap element was rendered next to the split bar"
+        cap_text = cap_m.group(1)
+        assert "Bought" in cap_text and "Sold" in cap_text and "%" in cap_text, \
+            "the split-bar caption must name both sides and their share: %r" % cap_text[:160]
+        cov_m = re.search(r'<div class="flowkv" style="([^"]*)">\s*<span class="k">Coverage</span>', h6p_html)
+        assert cov_m, "the Coverage row markup changed shape — cannot check its separation style"
+        assert "border-bottom" in cov_m.group(1), \
+            "the Coverage row needs its own border so the split bar underneath it does not read " \
+            "as belonging to Coverage: style=%r" % cov_m.group(1)
 
         await pg.screenshot(path=os.path.join(HERE, "shot-flow.png"), full_page=True)
 
@@ -2877,6 +2984,37 @@ async def main():
         assert "check:open" in ck_names, (
             "the check-link visit was not counted (%s). Without it there is no way to tell "
             "whether shared links bring anyone." % ck_names)
+
+        # ---- 2b-sexies. Bug 3+4 رگرسیون: نوار ناوبری هم باید صفحه‌ی توکن را ترک کند ----
+        # ریشه‌ی مشترک هر دو باگ یکی بود: setView هرگز tokenPage را خاموش
+        # نمی‌کرد. دکمه‌ی Trade خودش دستی درستش می‌کرد، ولی نوار بالای صفحه
+        # از کنارش رد می‌شد — کلیک روی Swap در ناوبری، tokenPage را روشن
+        # نگه می‌داشت. اینجا از همان مسیر واقعی، نه دکمه‌ی Trade، عبور می‌کنیم.
+        navpg = await b.new_page(viewport={"width": 1240, "height": 1000})
+        await navpg.goto("http://127.0.0.1:%d%s" % (port, ck_path))
+        await navpg.wait_for_timeout(4500)
+        await navpg.click('#nav [data-view="swap"]')
+        await navpg.wait_for_timeout(600)
+        nv_tokenPage = await navpg.evaluate("() => tokenPage")
+        nv_amt = await navpg.input_value("#amtIn")
+        nv_hash = await navpg.evaluate("() => location.hash")
+        nv_path = await navpg.evaluate("() => location.pathname")
+        nv_safety = await navpg.inner_text("#safetyBody")
+        await navpg.close()
+        print("[token page] nav out of token page resets: tokenPage=%s amtIn=%r hash=%s path=%s"
+              % (nv_tokenPage, nv_amt, nv_hash, nv_path))
+        assert nv_tokenPage is False, (
+            "clicking the nav Swap button left tokenPage=%r on — panel() still points at the "
+            "hidden tk-* nodes instead of the main view" % nv_tokenPage)
+        assert nv_amt == "", (
+            "the nav Swap button carried the token page's reference amount into #amtIn (%r) — "
+            "it now looks like an order the reader placed" % nv_amt)
+        assert nv_hash == "#swap" and nv_path == "/", (
+            "the nav Swap button did not really leave the token-page route: hash=%s path=%s"
+            % (nv_hash, nv_path))
+        assert "Pick a token to scan" not in nv_safety, (
+            "the main view's safety card is still showing the initial placeholder after leaving "
+            "the token page: %r" % nv_safety[:120])
 
         # Global Privacy Control یک «نه»ی صریح است و باید همه‌چیز را خاموش کند
         gpcpg = await b.new_page(viewport={"width": 1240, "height": 1000})
