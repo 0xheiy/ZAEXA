@@ -17,6 +17,23 @@ if(/^\/t\/0x[0-9a-fA-F]{40}\/?$/.test(location.pathname)){
   var b=document.createElement("base");b.href="/";document.head.appendChild(b);
 }
 </script>
+<script>
+/* جلوگیری از فلاشِ تمِ غلط: پیش از رنگ‌آمیزیِ <style>ِ پایین‌تر، همان
+   قاعده‌ی applyTheme پایین صفحه را — انتخابِ ذخیره‌شده برنده، وگرنه
+   prefers-color-scheme — همین‌جا کوچک و بی‌وابستگی تکرار می‌کنیم تا
+   attribute درست از همان اول روی <html> باشد. applyTheme پایین همچنان
+   تنها منبعِ حقیقتِ همه‌چیزِ دیگر (رسم نمودار و…) می‌ماند؛ این فقط attribute
+   را زودتر می‌گذارد. */
+(function(){
+  try{
+    var v=localStorage.getItem("zaexa.theme.v1");
+    if(v!=="dark"&&v!=="light"){
+      v=(window.matchMedia&&matchMedia("(prefers-color-scheme: dark)").matches)?"dark":"light";
+    }
+    document.documentElement.dataset.theme=v;
+  }catch(e){}
+})();
+</script>
 <title>Zaexa</title>
 <!-- ============================================================
      کارت پیش‌نمایش (Open Graph) — نسخه‌ی ثابتِ صفحه‌ی اصلی
@@ -33,7 +50,7 @@ if(/^\/t\/0x[0-9a-fA-F]{40}\/?$/.test(location.pathname)){
 <meta data-og property="og:title" content="Zaexa — DEX aggregator on Base">
 <meta data-og property="og:description" content="Best price across six Base DEXes, and an exit check that tells you whether you can sell a token back before you buy it. No wallet needed to look.">
 <meta data-og property="og:url" content="https://zaexa.com/">
-<meta data-og property="og:image" content="https://zaexa.com/og.png?v=2">
+<meta data-og property="og:image" content="https://zaexa.com/og.png?v=3">
 <meta data-og property="og:image:width" content="1200">
 <meta data-og property="og:image:height" content="630">
 <meta data-og property="og:image:alt" content="Zaexa">
@@ -41,7 +58,7 @@ if(/^\/t\/0x[0-9a-fA-F]{40}\/?$/.test(location.pathname)){
 <meta data-og name="twitter:site" content="@zaexadex">
 <meta data-og name="twitter:title" content="Zaexa — DEX aggregator on Base">
 <meta data-og name="twitter:description" content="Best price across six Base DEXes, and an exit check that tells you whether you can sell a token back before you buy it. No wallet needed to look.">
-<meta data-og name="twitter:image" content="https://zaexa.com/og.png?v=2">
+<meta data-og name="twitter:image" content="https://zaexa.com/og.png?v=3">
 <meta data-og name="description" content="Best price across six Base DEXes, and an exit check that tells you whether you can sell a token back before you buy it. No wallet needed to look.">
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxMDAwLjAwIiBoZWlnaHQ9IjEwMDAuMDAiIHZpZXdCb3g9IjAgMCAxMDAwLjAwIDEwMDAuMDAiIGZpbGw9Im5vbmUiPjxkZWZzPjxsaW5lYXJHcmFkaWVudCBpZD0iengiIHgxPSIwLjAiIHkxPSIwLjAiIHgyPSIxLjAiIHkyPSIwLjAiPjxzdG9wIG9mZnNldD0iMC4wIiBzdG9wLWNvbG9yPSIjMjJFRkY2Ii8+PHN0b3Agb2Zmc2V0PSIwLjIyIiBzdG9wLWNvbG9yPSIjMjJEMkY1Ii8+PHN0b3Agb2Zmc2V0PSIwLjQyIiBzdG9wLWNvbG9yPSIjNDNCNUY3Ii8+PHN0b3Agb2Zmc2V0PSIwLjU4IiBzdG9wLWNvbG9yPSIjNzM5NkY4Ii8+PHN0b3Agb2Zmc2V0PSIwLjc4IiBzdG9wLWNvbG9yPSIjOUM4MkY5Ii8+PHN0b3Agb2Zmc2V0PSIxLjAiIHN0b3AtY29sb3I9IiNDNTZDRjUiLz48L2xpbmVhckdyYWRpZW50PjxsaW5lYXJHcmFkaWVudCBpZD0ienhiZyIgeDE9IjAiIHkxPSIwIiB4Mj0iMSIgeTI9IjEiPjxzdG9wIG9mZnNldD0iMC4wIiBzdG9wLWNvbG9yPSIjMjJFRkY2Ii8+PHN0b3Agb2Zmc2V0PSIwLjIyIiBzdG9wLWNvbG9yPSIjMjJEMkY1Ii8+PHN0b3Agb2Zmc2V0PSIwLjQyIiBzdG9wLWNvbG9yPSIjNDNCNUY3Ii8+PHN0b3Agb2Zmc2V0PSIwLjU4IiBzdG9wLWNvbG9yPSIjNzM5NkY4Ii8+PHN0b3Agb2Zmc2V0PSIwLjc4IiBzdG9wLWNvbG9yPSIjOUM4MkY5Ii8+PHN0b3Agb2Zmc2V0PSIxLjAiIHN0b3AtY29sb3I9IiNDNTZDRjUiLz48L2xpbmVhckdyYWRpZW50PjxtYXNrIGlkPSJtYXNrMF8wXzEiIHN0eWxlPSJtYXNrLXR5cGU6bHVtaW5hbmNlIiBtYXNrVW5pdHM9InVzZXJTcGFjZU9uVXNlIiB4PSIxMyIgeT0iMCIgd2lkdGg9IjE3MzEiIGhlaWdodD0iMTI3NCI+CjxwYXRoIGQ9Ik0xNzQzLjc3IDBIMTNWMTI3My4yNkgxNzQzLjc3VjBaIiBmaWxsPSJ3aGl0ZSIgLz4KPC9tYXNrPjxsaW5lYXJHcmFkaWVudCBpZD0icGFpbnQwX2xpbmVhcl8wXzEiIHgxPSIzNzguMzgiIHkxPSIwIiB4Mj0iMTM3OC4zOCIgeTI9IjAiIGdyYWRpZW50VW5pdHM9InVzZXJTcGFjZU9uVXNlIj4KPHN0b3Agc3RvcC1jb2xvcj0iIzIyRUZGNiIgLz4KPHN0b3Agb2Zmc2V0PSIwLjIyIiBzdG9wLWNvbG9yPSIjMjJEMkY1IiAvPgo8c3RvcCBvZmZzZXQ9IjAuNDIiIHN0b3AtY29sb3I9IiM0M0I1RjciIC8+CjxzdG9wIG9mZnNldD0iMC41OCIgc3RvcC1jb2xvcj0iIzczOTZGOCIgLz4KPHN0b3Agb2Zmc2V0PSIwLjc4IiBzdG9wLWNvbG9yPSIjOUM4MkY5IiAvPgo8c3RvcCBvZmZzZXQ9IjEiIHN0b3AtY29sb3I9IiNDNTZDRjUiIC8+CjwvbGluZWFyR3JhZGllbnQ+PGxpbmVhckdyYWRpZW50IGlkPSJwYWludDFfbGluZWFyXzBfMSIgeDE9IjE1NC44NzgiIHkxPSIxMjMxLjc0IiB4Mj0iMTYwMy4xOCIgeTI9IjEyMzEuNzQiIGdyYWRpZW50VW5pdHM9InVzZXJTcGFjZU9uVXNlIj4KPHN0b3Agc3RvcC1jb2xvcj0iIzIyRUZGNiIgLz4KPHN0b3Agb2Zmc2V0PSIwLjIyIiBzdG9wLWNvbG9yPSIjMjJEMkY1IiAvPgo8c3RvcCBvZmZzZXQ9IjAuNDIiIHN0b3AtY29sb3I9IiM0M0I1RjciIC8+CjxzdG9wIG9mZnNldD0iMC41OCIgc3RvcC1jb2xvcj0iIzczOTZGOCIgLz4KPHN0b3Agb2Zmc2V0PSIwLjc4IiBzdG9wLWNvbG9yPSIjOUM4MkY5IiAvPgo8c3RvcCBvZmZzZXQ9IjEiIHN0b3AtY29sb3I9IiNDNTZDRjUiIC8+CjwvbGluZWFyR3JhZGllbnQ+PC9kZWZzPjxnIHRyYW5zZm9ybT0idHJhbnNsYXRlKDUwLjAsMTg1LjkpIj48ZyB0cmFuc2Zvcm09InRyYW5zbGF0ZSgwLjAwMCwwLjAwMCkgc2NhbGUoMC45MDAwMDApIHRyYW5zbGF0ZSgtMzc4LjM4MCwtMC4wMDApIiBtYXNrPSJ1cmwoI21hc2swXzBfMSkiPjxwYXRoIGQ9Ik0xMDU2LjkzIDgyLjgyTDM4OS44MiA2OTcuOThMNDA4LjQ4IDY5NC4zMkw2MjEuMTMgNjM4LjE2QzY0Ni45MyA2MzAuNzEgNjc1LjAxIDYyNS40OCA2OTkuODUgNjE1LjEyTDEzNjYuOSAwTDEzNDguMzcgMy42TDExMzcuMTIgNTkuMzhDMTExMC44MyA2Ni45NyAxMDgyLjI1IDcyLjI5IDEwNTYuOTMgODIuODJaTTM3OC4zOCA0NC4zNkM0MjYuNTYxIDg3LjI1MyA0NzEuMTQyIDEzNS4wMTYgNTIyLjQ0NSAxNzQuMTM3QzUyNC4zOTQgMTc1LjYyMyA1MjYuNjg1IDE3Ni41OTggNTI5LjEwOSAxNzYuOTUxQzU3NC4yMDYgMTgzLjUyMSA2MjAuNjUgMTc5Ljk2NiA2NjYuMDggMTgzLjQ5QzY3NC41MyAxODQuMDggNjgzLjI0MyAxODUuNDQ4IDY5MS42NDUgMTg3LjU3MUM2OTcuMzIzIDE4OS4wMDMgNzE4LjU1NCAxOTYuNjczIDczMS40MzQgMjA5LjkxM0w3NDIuNjE1IDIyMi4xNDhMNzUyLjMxOSAyMzQuMzg0Qzc1Mi4zMTkgMjM0LjM4NCA3NjYuODQ0IDI1Ni40NzYgNzcwLjQ0MyAyNjcuMDdDNzc0LjEwNSAyNjQuMjc1IDgyMy4zODUgMjE5Ljg4OCA4MjMuMzg1IDIxOS44ODhMODc1LjY4IDE3MS4yMUM4MzUuMzEgMTE1Ljc1IDc4MS4zNCA2Ni40MSA3MTIuOTMgNTAuM0M2OTUuMTggNDUuODIgNjc2LjcgNDYuNTUgNjU4LjU1IDQ1Ljg2TDM3OC4zOCA0NC4zNlpNMTM3OC4zOCA2NTMuNThDMTMzMC4yIDYxMC42ODcgMTI4NS42MSA1NjIuNTQ4IDEyMzQuMzEgNTIzLjQwNEMxMjMyLjM2IDUyMS45MTYgMTIzMC4wNyA1MjAuOTQxIDEyMjcuNjQgNTIwLjU4OUMxMTgyLjU1IDUxNC4wNDkgMTEzNi4xMSA1MTcuOTg0IDEwOTAuNjggNTE0LjQ2QzEwODIuMDQgNTEzLjcyMSAxMDc1LjYzIDUxMi44NDggMTA2NS42OCA1MDkuOTVDMTA0OC41OSA1MDMuMDEgMTAzOS42NCA0OTcuMTA0IDEwMjUuOTIgNDg2LjAxOUMxMDI1LjkyIDQ4Ni4wMTkgMTAxNy4xOCA0NzcuODIzIDEwMTUuMTEgNDc1LjYyNkMxMDEzLjA1IDQ3My40MjkgMTAwOC4xMyA0NjguNzggMTAwNC40NCA0NjMuODQ4QzEwMDAuNzYgNDU4LjkxNSA5OTMuNDUyIDQ0OC40NTEgOTg1LjY4NCA0MjkuOTYyQzk3OS4yNDggNDM1LjMzNSA5MzAgNDgxLjUgOTMwIDQ4MS41TDg4MS4wOCA1MjYuNzRDOTIxLjQ1IDU4Mi4yIDk3NS40MiA2MzEuNTQgMTA0My44MyA2NDcuNjVDMTA2MS41OCA2NTIuMTMgMTA4MC4wNiA2NTEuNCAxMDk4LjIgNjUyLjA4TDEzNzguMzggNjUzLjU4WiIgZmlsbD0idXJsKCNwYWludDBfbGluZWFyXzBfMSkiIC8+PC9nPjwvZz48L3N2Zz4=">
 <style>
@@ -176,7 +193,7 @@ header{max-width:none;margin:0 0 10px;width:100%;
    فرزند را جدا اندازه می‌گیرند) خودش را نشان می‌دهد. هر چهار فرزند را
    صریحاً `grid-row:1` می‌کنیم تا این نخ اصلاً باز نشود. */
 header>.navPad{grid-column:1;grid-row:1;width:0;min-width:0}
-.logo{grid-column:1;grid-row:1;display:flex;align-items:center;gap:10px;font-size:19px;font-weight:680;letter-spacing:-.4px}
+.logo{grid-column:1;grid-row:1;display:flex;align-items:center;gap:8px;font-size:19px;font-weight:680;letter-spacing:-.4px}
 /* نشان برند خودش گرادیان دارد، پس کاشی رنگی زیرش لازم نیست — دو گرادیان
    روی هم فقط همدیگر را خفه می‌کنند. */
 .logo .glyph{width:38px;height:38px;display:grid;place-items:center}
@@ -185,9 +202,11 @@ header>.navPad{grid-column:1;grid-row:1;width:0;min-width:0}
 /* وردمارکِ رسمی نسبتِ طول به عرضش حدود ۸.۳ به ۱ است — در قدِ حروفِ اسپنِ
    متنیِ قبلی، خیلی پهن‌تر از آن متن درمی‌آید. زیر ۳۸۰px با ناوبری/چیپ‌های
    هدر تصادم می‌کند؛ آنجا فقط نشان می‌ماند، نه اینکه وردمارک را کوچک کنیم.
-   ارتفاع اینک ۱۶px تا نسبت قدِ جوهرِ وردمارک به نشان حدود ۰.۶ بماند —
-   نسخه‌ی قبلی (۲۲px) وردمارک را از نشان درشت‌تر نشان می‌داد. */
-.logo .wordmark{height:16px;width:auto;display:block;color:var(--tx)}
+   ارتفاع اینک ۱۲.۷px تا نسبت قدِ جوهرِ وردمارک به نشان حدود ۰.۴۸ بماند —
+   طبق قاعده‌ی برند (۰.۴۸)؛ نسخه‌ی قبلی (۱۶px) این نسبت را ۰.۶۰۳ می‌کرد که
+   از قاعده جلوتر بود. گَپ کنارِ لوگو هم به همان اندازه (از ۱۰px به ۸px)
+   جمع شد تا کنار وردمارکِ کوچک‌تر نامتناسب نماند. */
+.logo .wordmark{height:12.7px;width:auto;display:block;color:var(--tx)}
 @media(max-width:380px){
   .logo .wordmark{display:none}
 }
@@ -255,6 +274,20 @@ html,body{overflow-x:hidden;max-width:100%}
 .chip.round{padding:0;width:38px;justify-content:center}
 .chip.solid{background:var(--grad);color:var(--on-acc);
   font-weight:620;box-shadow:0 4px 16px var(--glow)}
+/* دکمه‌ی اتصال کیف‌پول: کاربر گزارش داد گرادیانِ تمِ روشن «خراب» است — چون
+   دستور رنگِ دکمه‌ها (--g1/--g2) در تمِ روشن نسخه‌ی پرکنتراست‌تری از سرهای
+   برند است، نه خودِ گرادیانِ شش‌ایست که روی نشان/کارت می‌بینیم. اینجا عیناً
+   همان گرادیانِ برند را در هر دو تم می‌گذاریم — پس دیگر داخل بلوکِ تمی
+   تعریف نمی‌شود، درست مثل گرادیانِ خودِ نشان.
+   رنگِ متن دیگر var(--on-acc) نیست: سفیدِ تمِ روشن روی روشن‌ترین سرِ این
+   گرادیان کنتراستِ ۱.۴۲:۱ تا ۳.۰۷:۱ می‌دهد (رد می‌شود). ۰۵۱۲۱a‌ (همان
+   on-acc تمِ تیره) روی هر شش سر ≥۶.۱۷:۱ می‌دهد — پس گرادیان می‌ماند، رنگِ
+   برچسب ثابت و مستقل از تم می‌شود. */
+#connectBtn,.chip.solid[data-act="connect"]{
+  background:linear-gradient(135deg,#22EFF6,#22D2F5,#43B5F7,#7396F8,#9C82F9,#C56CF5);
+  color:#05121a;
+}
+#connectBtn:hover,.chip.solid[data-act="connect"]:hover{color:#05121a}
 .led{width:7px;height:7px;border-radius:50%;background:var(--pos)}
 .led.off{background:var(--tx3)}
 
@@ -424,10 +457,15 @@ main{max-width:1140px;margin:0 auto;padding:8px 20px 56px;display:flex;flex-dire
 .exitBody{font-size:13px;color:var(--tx2);margin-top:7px;line-height:1.6}
 .exitBody b{color:var(--tx);font-weight:660}
 .exitNote{font-size:12px;color:var(--tx3);margin-top:6px;line-height:1.55}
-.exitShare{margin:0 12px 0 0;font-size:11px;letter-spacing:.02em;color:var(--tx3);
-  background:none;border:0;padding:0;cursor:pointer;text-decoration:underline;
-  text-underline-offset:3px}
-.exitShare:hover{color:var(--tx1)}
+/* دکمه‌ی ثانویه‌ی خطی — کنار CTA اصلیِ سواپ گم نشود ولی روی آن هم فریاد
+   نزند: بدون پرکردگیِ گرادیانی، بدون سایه‌ی سنگین، فقط حاشیه‌ی نازکِ
+   رنگِ اکسنت که در هر دو تم از var(--acc) می‌آید. */
+.exitShare{display:inline-flex;align-items:center;gap:5px;margin:0 12px 0 0;
+  font-size:11.5px;font-weight:620;letter-spacing:.02em;color:var(--acc);
+  background:none;border:1px solid var(--acc);border-radius:999px;
+  padding:5px 11px;cursor:pointer;transition:.16s}
+.exitShare svg{width:12px;height:12px;flex-shrink:0}
+.exitShare:hover{background:color-mix(in srgb,var(--acc) 14%,transparent)}
 
 /* ---------------- safety ---------------- */
 .rhead{display:flex;align-items:center;gap:16px;padding:18px 20px}
@@ -876,7 +914,7 @@ footer a{color:var(--tx3)}
       <header><span class="ttl">Exit check &amp; token safety</span><span class="grow"></span>
         <button class="exitShare" id="checkShare" type="button"
           title="Copy a link that opens this token's page — no wallet needed"
-        >Copy this check</button>
+        ><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M20 9H11a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h9a2 2 0 0 0 2-2v-9a2 2 0 0 0-2-2Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>Copy this check</button>
         <span class="ttl mono" id="safetySym"></span></header>
       <div id="exitBox"></div>
       <div id="safetyBody"><div class="empty">Pick a token to scan its contract.</div></div>
@@ -4689,7 +4727,22 @@ function paintFlowToken(){
 }
 
 /* ---------- theme & wiring ---------- */
-let theme=(window.matchMedia&&matchMedia("(prefers-color-scheme: dark)").matches)?"dark":"light";
+/* انتخاب کاربر یک‌بار ذخیره شود، هر بازدید دوباره سراغ prefers-color-scheme
+   نرویم. هرچه از localStorage می‌آید طبق قاعده‌ی همیشگی (کنار LS_LOGO)
+   بی‌اعتبار فرض و اعتبارسنجی می‌شود — فقط "dark"/"light" پذیرفته است؛
+   هر چیز دیگر (یا نبودِ کلید، یا حالت خصوصی که اصلاً نمی‌گذارد بنویسیم)
+   یعنی کاربر هنوز انتخابی نکرده و باید همچنان دنباله‌روِ سیستم بماند. */
+const LS_THEME="zaexa.theme.v1";
+function readStoredTheme(){
+  try{
+    const v=localStorage.getItem(LS_THEME);
+    return (v==="dark"||v==="light")?v:null;
+  }catch{return null;}
+}
+function storeTheme(v){
+  try{localStorage.setItem(LS_THEME,v);}catch{}
+}
+let theme=readStoredTheme()||((window.matchMedia&&matchMedia("(prefers-color-scheme: dark)").matches)?"dark":"light");
 function applyTheme(){document.documentElement.setAttribute("data-theme",theme);
   // آیکون حالا SVG ثابت است؛ خودِ حالت را متن کنارش می‌گوید، نه شکل نیم‌دایره
   $("themeState").textContent=theme==="dark"?"Dark":"Light";
@@ -4715,7 +4768,7 @@ function wire(){
   };
   $("ctrLink").href=`${CHAIN.explorer}/address/${CHAIN.executor}#code`;
   $("ctrLink").textContent=shortAddr(CHAIN.executor);
-  $("themeBtn").onclick=()=>{theme=theme==="dark"?"light":"dark";applyTheme();};
+  $("themeBtn").onclick=()=>{theme=theme==="dark"?"light":"dark";storeTheme(theme);applyTheme();};
   $("shareBtn").onclick=()=>copyLink(shareUrl(),$("shareBtn"));
   $("connectBtn").onclick=()=>{if(!account)connect();else if(walletChainId!==CHAIN.id)switchNetwork();else toggleWalletMenu();};
   $("disconnectBtn").onclick=disconnect;

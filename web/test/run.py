@@ -1870,9 +1870,12 @@ async def main():
               "centers %.1f/%.1f headerH=%.1f"
               % (logo["markH"], logo["wordH"], ratio, logo["markCenter"], logo["wordCenter"],
                  logo["hdrH"]))
-        assert 0.57 <= ratio <= 0.63, (
+        # قاعده‌ی برند عوض شد: نسبتِ قدِ جوهرِ وردمارک به نشان دیگر ۰.۶۰ نیست،
+        # ۰.۴۸ است (وردمارکِ کوچک‌تر، کنار نشانِ هم‌اندازه‌ی قبلی). باند هنوز
+        # باریک است تا اگر کسی نسخه‌ی قدیمی (۰.۶۰) را برگرداند همچنان رد شود.
+        assert 0.465 <= ratio <= 0.495, (
             "the wordmark's ink height is no longer sized to the mark's: ratio=%.3f (want "
-            "0.57-0.63) — mark=%.1fpx word=%.1fpx" % (ratio, logo["markH"], logo["wordH"]))
+            "0.465-0.495, target 0.48) — mark=%.1fpx word=%.1fpx" % (ratio, logo["markH"], logo["wordH"]))
         assert center_gap <= 1.5, (
             "resizing the wordmark moved it out of vertical alignment with the mark: "
             "%.2fpx apart" % center_gap)
