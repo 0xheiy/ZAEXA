@@ -1,4 +1,4 @@
-import asyncio, os, re, sys
+import asyncio, base64, os, re, sys
 from playwright.async_api import async_playwright
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -123,6 +123,157 @@ def check_gt_proxy_worker():
                        cwd=os.path.dirname(w))
     sys.stdout.write(r.stdout)
     assert r.returncode == 0, "the GeckoTerminal proxy worker failed its tests:\n" + r.stderr
+
+def check_brand_palette():
+    """پالت «ارکید» — سه چیز که هرکدام یک‌بار واقعاً شکسته بودند.
+
+    ۱) هگزهای برندِ قبلی (#9688F7 و #A785F9) نباید هیچ‌جای index.html مانده
+       باشند — نه در CSS/SVG متنِ صفحه، و نه داخل دیتا-یوآرآیِ base64ِ
+       فاویکون. grep ساده دومی را نمی‌بیند چون رشته‌ی base64 هیچ شباهتی به
+       هگزهای اصلی ندارد؛ این نگهبان قبل از مقایسه فاویکون را decode می‌کند.
+    ۲) نشانِ هدر باید همان چهار توقفِ ثابتِ گرادیان را نگه داشته باشد
+       (#22EFF6 #22D2F5 #43B5F7 #7396F8) به‌علاوه‌ی دو سرِ تازه
+       (#9C82F9 #C56CF5) — یعنی این یک گرادیانِ نو نیست، همان گرادیان با دو
+       سرِ عوض‌شده. اگر یکی از چهارتای میانی غایب شود یعنی کسی گرادیان را
+       کامل بازنویسی کرده، نه فقط بازرنگ.
+    ۳) --g1/--g2 باید *داخل* هر دو بلوکِ تم تعریف شده باشند، نه بیرون از
+       آن‌ها. باگِ واقعی این بود: وقتی این دو بیرون از تم بودند، دکمه‌ی
+       اصلی در هر دو تم همان یک گرادیانِ روشن را می‌گرفت و متنِ سفیدِ رویش
+       در تمِ تیره کنتراستِ ۱.۸۱:۱ داشت (کفِ WCAG برای متن معمولی ۴.۵:۱
+       است). این نگهبان کنتراست را از رویِ خودِ هگزهای فایل حساب می‌کند —
+       عدد را اینجا هاردکد نکرده تا اگر رنگی روزی عوض شد و کنتراست دوباره
+       افتاد، خودش را نشان بدهد، نه اینکه ساکت بماند چون «قبلاً درست
+       بود». بدترین نقطه‌ی رمپ سنجیده می‌شود، نه فقط دو سرش، چون کمینه‌ی
+       کنتراست معمولاً وسطِ گرادیان می‌افتد — جایی که هیچ توسعه‌دهنده‌ای با
+       چشم نگاه نمی‌کند."""
+    src = open(os.path.join(HERE, "..", "index.html"), encoding="utf-8").read()
+
+    old_hexes = ["9688F7", "A785F9"]
+    low = src.lower()
+    leaked = [h for h in old_hexes if h.lower() in low]
+
+    fm = re.search(
+        r'<link rel="icon"[^>]*href="data:image/svg\+xml;base64,([A-Za-z0-9+/=]+)"', src)
+    assert fm, "the favicon <link> is gone — this guard has nothing to decode"
+    favicon_svg = base64.b64decode(fm.group(1)).decode("utf-8", "replace")
+    leaked_fav = [h for h in old_hexes if h.lower() in favicon_svg.lower()]
+    assert not leaked and not leaked_fav, (
+        "an old Orchid hex survived the recolor (in the page: %s, inside the decoded "
+        "favicon: %s)" % (leaked, leaked_fav))
+
+    mm = re.search(r'<span class="glyph"><svg class="mark".*?</span>', src, re.S)
+    assert mm, "the header mark svg is gone"
+    mark_src = mm.group(0)
+    unchanged = ["22EFF6", "22D2F5", "43B5F7", "7396F8"]
+    new_stops = ["9C82F9", "C56CF5"]
+    missing_unchanged = [h for h in unchanged if h.lower() not in mark_src.lower()]
+    missing_new = [h for h in new_stops if h.lower() not in mark_src.lower()]
+    assert not missing_unchanged and not missing_new, (
+        "the header mark's gradient drifted — missing untouched stops %s, missing new "
+        "stops %s" % (missing_unchanged, missing_new))
+
+    lm = re.search(r':root\[data-theme="light"\]\{(.*?)\n\}', src, re.S)
+    dm = re.search(r':root\[data-theme="dark"\]\{(.*?)\n\}', src, re.S)
+    assert lm and dm, "could not find both :root[data-theme=...] blocks in index.html"
+    light_block, dark_block = lm.group(1), dm.group(1)
+    for label, block in (("light", light_block), ("dark", dark_block)):
+        assert re.search(r"--g1:\s*#[0-9A-Fa-f]{3,6}", block), \
+            "--g1 is not defined inside the %s theme block" % label
+        assert re.search(r"--g2:\s*#[0-9A-Fa-f]{3,6}", block), \
+            "--g2 is not defined inside the %s theme block" % label
+
+    def expand(hexcolor):
+        h = hexcolor.lstrip("#")
+        if len(h) == 3:
+            h = "".join(c * 2 for c in h)
+        return "#" + h
+
+    def toks(block):
+        g1 = expand(re.search(r"--g1:\s*(#[0-9A-Fa-f]{3,6})", block).group(1))
+        g2 = expand(re.search(r"--g2:\s*(#[0-9A-Fa-f]{3,6})", block).group(1))
+        onacc = expand(re.search(r"--on-acc:\s*(#[0-9A-Fa-f]{3,6})", block).group(1))
+        return g1, g2, onacc
+
+    def srgb_lin(c):
+        c = c / 255.0
+        return c / 12.92 if c <= 0.03928 else ((c + 0.055) / 1.055) ** 2.4
+
+    def rel_lum(hexcolor):
+        h = hexcolor.lstrip("#")
+        r, g, b = int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
+        return 0.2126 * srgb_lin(r) + 0.7152 * srgb_lin(g) + 0.0722 * srgb_lin(b)
+
+    def contrast(h1, h2):
+        l1, l2 = rel_lum(h1), rel_lum(h2)
+        l1, l2 = max(l1, l2), min(l1, l2)
+        return (l1 + 0.05) / (l2 + 0.05)
+
+    def mix(h1, h2, t):
+        a, b = h1.lstrip("#"), h2.lstrip("#")
+        out = []
+        for i in (0, 2, 4):
+            va, vb = int(a[i:i + 2], 16), int(b[i:i + 2], 16)
+            out.append(round(va + (vb - va) * t))
+        return "#%02x%02x%02x" % tuple(out)
+
+    def worst_ratio(g1, g2, text, steps=100):
+        return min(contrast(text, mix(g1, g2, i / steps)) for i in range(steps + 1))
+
+    lg1, lg2, lonacc = toks(light_block)
+    dg1, dg2, donacc = toks(dark_block)
+    light_ratio = worst_ratio(lg1, lg2, lonacc)
+    dark_ratio = worst_ratio(dg1, dg2, donacc)
+    assert light_ratio >= 4.5, (
+        "light theme: %s text on the %s\u2192%s button gradient bottoms out at %.2f:1, "
+        "under the 4.5 WCAG floor" % (lonacc, lg1, lg2, light_ratio))
+    assert dark_ratio >= 4.5, (
+        "dark theme: %s text on the %s\u2192%s button gradient bottoms out at %.2f:1, "
+        "under the 4.5 WCAG floor" % (donacc, dg1, dg2, dark_ratio))
+    print("[brand palette] no old hex left, header mark gradient intact, button contrast "
+          "%.2f:1 light / %.2f:1 dark" % (light_ratio, dark_ratio))
+
+
+def check_og_tags():
+    """کارت پیش‌نمایش لینک — دو چیزی که بی‌صدا خراب می‌شوند.
+
+    ربات‌های تلگرام و ایکس جاوااسکریپت اجرا نمی‌کنند، پس تگ‌های og باید در
+    خودِ HTML باشند. صفحه‌ی اصلی نسخه‌ی ثابت خودش را دارد؛ روی /t/<آدرس>
+    همان‌ها را Worker برمی‌دارد و تگ‌های آن توکن را می‌گذارد.
+
+    ۱) هر تگ og/twitter در index.html باید نشانه‌ی `data-og` داشته باشد.
+       Worker با همین نشانه پیدایشان می‌کند. بدون آن، ربات دو og:title
+       می‌بیند و انتخاب بین آن دو دست ما نیست — و هیچ‌چیز نمی‌شکند، فقط
+       کارت گاهی غلط می‌شود. دقیقاً همان کلاسی که «عدد غلط شبیه عدد درست»
+       است.
+    ۲) آدرس تصویر در صفحه باید با `OG_IMAGE_PATH` و `OG_IMAGE_V` در
+       worker/og.js یکی باشد. اگر یکی جلو برود و دیگری نه، یکی از دو کارت
+       به تصویری اشاره می‌کند که وجود ندارد."""
+    src = open(os.path.join(HERE, "..", "index.html"), encoding="utf-8").read()
+
+    tags = re.findall(r"<meta\b[^>]*>", src)
+    og = [t for t in tags if 'property="og:' in t or 'name="twitter:' in t]
+    assert og, "index.html has no open graph tags — every shared link is a bare url"
+    missing = [t for t in og if "data-og" not in t]
+    assert not missing, (
+        "these og tags carry no data-og marker, so the worker cannot replace them on a "
+        "token page and a bot would see two of each:\n  " + "\n  ".join(missing))
+    assert 'content="summary_large_image"' in src, \
+        "without twitter:card=summary_large_image X shows a thumbnail, not a card"
+
+    ogjs = os.path.join(HERE, "..", "..", "worker", "og.js")
+    assert os.path.exists(ogjs), "worker/og.js is missing — the token card is gone"
+    wsrc = open(ogjs, encoding="utf-8").read()
+    mp = re.search(r'OG_IMAGE_PATH\s*=\s*"([^"]+)"', wsrc)
+    mv = re.search(r'OG_IMAGE_V\s*=\s*"([^"]+)"', wsrc)
+    assert mp and mv, "OG_IMAGE_PATH / OG_IMAGE_V are gone from worker/og.js"
+    want = mp.group(1) + "?v=" + mv.group(1)
+    page = re.findall(r'content="https?://[^"]*(/og\.png\?v=[^"]*)"', src)
+    assert page, "index.html points at no og image at all"
+    wrong = [p for p in page if p != want]
+    assert not wrong, (
+        "the page and the worker disagree about the card image: page has %s, worker "
+        "builds %s. One of the two cards is pointing at a 404." % (wrong, want))
+
 
 EV_PAGE_NAMES, EV_DETAILS = set(), set()
 def check_event_allowlists():
@@ -266,6 +417,8 @@ async def check_real_page_from_disk(pw):
 check_no_remote_code()
 check_gt_proxy_worker()
 check_event_allowlists()
+check_og_tags()
+check_brand_palette()
 check_one_executor_address()
 
 async def main():
@@ -1560,28 +1713,30 @@ async def main():
             ("the token pair should still be remembered across a refresh, only the amount is "
              "dropped: %s" % after["pair"])
 
-        # هدر: ناوبری باید بین لوگو و چیپ‌های راست وسط بماند، نه چسبیده به لوگو
+        # هدر: ناوبری باید *وسطِ خودِ هدر* بماند — نه وسطِ فاصله‌ی باقی‌مانده.
+        # ⚠️ ۲۹ اوت: این ادعا عوض شد چون *خواسته* عوض شد. قبلاً ناوبری کنار
+        # لوگو می‌نشست (یک گروه در چپ) و یک فاصله‌ی کشسان همه‌ی فضای اضافه را
+        # سمت راست جمع می‌کرد — یعنی ناوبری هرچه لوگو یا خوشه‌ی راست پهن‌تر یا
+        # باریک‌تر می‌شد، جابه‌جا می‌شد. کاربر گفت ناوبری باید واقعاً وسط باشد،
+        # فارغ از پهنای آن دو. با `grid-template-columns:1fr auto 1fr` این
+        # تضمین ساختاری است، نه تصادفی: ستون میانی همیشه بین دو ستونِ هم‌اندازه
+        # می‌نشیند. سنجه هم به همین اندازه ساده شد: مرکز ناوبری باید عملاً
+        # مرکز هدر باشد.
         head = await pg.evaluate("""() => {
-            const logo = document.querySelector(".logo").getBoundingClientRect();
+            const h = document.querySelector("header").getBoundingClientRect();
             const nav = document.getElementById("nav").getBoundingClientRect();
-            const chip = document.getElementById("srcChip").getBoundingClientRect();
-            return {gapLeft: Math.round(nav.left - logo.right),
-                    gapRight: Math.round(chip.left - nav.right),
+            return {navCenter: Math.round(nav.left + nav.width / 2),
+                    hdrCenter: Math.round(h.left + h.width / 2),
                     navLeft: Math.round(nav.left), navRight: Math.round(nav.right),
                     vw: innerWidth};
         }""")
-        print("[header] logo|%spx|nav|%spx|chips  (nav %s..%s of %s)"
-              % (head["gapLeft"], head["gapRight"], head["navLeft"], head["navRight"], head["vw"]))
-        # ناوبری کنار لوگو می‌نشیند (یک گروه در چپ) و چیپ‌ها لبه‌ی راست.
-        # وقتی هدر تمام‌عرض شد، پخش‌کردن فضای اضافه بین دو طرفِ ناوبری دو
-        # حفره‌ی ~۲۱۰ پیکسلی می‌ساخت. حالا همه‌ی فضای اضافه یکجا سمت راست است.
-        assert head["gapLeft"] > 8, "the nav touches the logo: %s" % head
-        assert head["gapLeft"] <= 70, \
-            ("the nav drifted %spx away from the logo — they are meant to read as one "
-             "group on the left" % head["gapLeft"])
-        assert head["gapRight"] > head["gapLeft"], \
-            ("the spare width should collect on the right of the nav, not between the nav "
-             "and the logo: %s" % head)
+        print("[header] nav center=%s header center=%s  (nav %s..%s of %s)"
+              % (head["navCenter"], head["hdrCenter"], head["navLeft"], head["navRight"], head["vw"]))
+        assert abs(head["navCenter"] - head["hdrCenter"]) <= 2, \
+            ("the nav is not centred in the header: nav center=%s header center=%s (%spx off) — "
+             "grid-template-columns:1fr auto 1fr should keep it centred no matter how wide the "
+             "logo or the right-hand cluster are" % (head["navCenter"], head["hdrCenter"],
+                                                       abs(head["navCenter"] - head["hdrCenter"])))
 
         # هدر باید تمام‌عرضِ پنجره باشد.
         # ⚠️ ادعای این کاوشگر ۲۳ آگوست عوض شد چون *خواسته* عوض شد، نه چون
@@ -1597,7 +1752,8 @@ async def main():
             const cs = getComputedStyle(document.querySelector("header"));
             return {hl: Math.round(h.left), hr: Math.round(h.right),
                     ml: Math.round(m.left), mr: Math.round(m.right), vw: innerWidth,
-                    surface: cs.backgroundColor, rule: cs.borderBottomWidth};
+                    surface: cs.backgroundColor, rule: cs.borderBottomWidth,
+                    ruleColor: cs.borderBottomColor};
         }""")
         print("[header width] header %s..%s of %s (main %s..%s) surface=%s rule=%s"
               % (align["hl"], align["hr"], align["vw"], align["ml"], align["mr"],
@@ -1608,13 +1764,34 @@ async def main():
              % (align["hl"], align["hr"], align["vw"]))
         assert align["hr"] - align["hl"] > align["mr"] - align["ml"], \
             "the header is not wider than the cards below it, so it still reads as a column"
-        # نوار باید سطح خودش را داشته باشد، وگرنه لبه‌به‌لبه‌شدن فقط شبیه این
-        # است که محتوا از قاب بیرون زده — همان چیزی که گزینه‌ی بدون‌نوار بود.
-        assert align["surface"] not in ("rgba(0, 0, 0, 0)", "transparent") \
-            and float(align["rule"].replace("px", "")) > 0, \
-            ("the header bar lost its surface or its bottom rule (%s / %s) — edge-to-edge "
-             "without them reads as content escaping the frame, not as a bar"
-             % (align["surface"], align["rule"]))
+        # ۲۹ اوت: کاربر دیگر یک «نوار» بالای صفحه نمی‌خواست — فقط تمام‌عرض‌
+        # بودن و خودِ محتوا (لوگو، ناوبری، چیپ‌ها) شناور روی زمینه‌ی صفحه.
+        # پس نیمه‌ی «باید سطح/خط داشته باشد» این کاوشگر برداشته شد — دیگر
+        # چیزی برای سنجیدن نیست، نبودشان دیگر نقص نیست، خواسته است.
+        # ولی خطرِ زیربنایی که آن نیمه واقعاً جلویش را می‌گرفت چیز دیگری بود:
+        # همین‌که هدر لبه‌به‌لبه بماند و هیچ‌کدام از دو تغییر بی‌صدا خنثی
+        # نشوند. برای همین همان ادعای «تمام‌عرض و پهن‌تر از کارت‌ها» بالا
+        # دست‌نخورده ماند و اینجا فقط یک چیز دیگر اضافه شده: ارتفاعِ هدر باید
+        # با حذفِ سطح/خط عوض نشود — وگرنه هرچه زیرِ هدر است بی‌صدا یک پیکسل
+        # جابه‌جا می‌شود و فاصله‌ی تازه‌ی ۳۰ پیکسلیِ کارت‌ها دیگر دقیقاً ۳۰
+        # نیست. به‌همین‌خاطر خطِ زیرین کاملاً حذف نشد، فقط رنگش شفاف شد.
+        assert align["surface"] in ("rgba(0, 0, 0, 0)", "transparent"), \
+            ("the header still paints its own surface (%s) — it should float on the page "
+             "background now, not read as a separate bar" % align["surface"])
+        assert align["ruleColor"] in ("rgba(0, 0, 0, 0)", "transparent"), \
+            "the bottom rule is still visible (%s) — it should be gone, not just faint" \
+            % align["ruleColor"]
+        # ⚠️ خودِ خط عمداً به‌جای حذف کامل، فقط بی‌رنگ شد: با
+        # `box-sizing:border-box` یک پیکسلِ کادر جزوِ ارتفاعِ جعبه است. اگر
+        # کاملاً حذف می‌شد هدر یک پیکسل کوتاه‌تر می‌شد و هرچه زیرش است — از
+        # جمله فاصله‌ی تازه‌ی ۳۰ پیکسلیِ کارت‌ها — بی‌صدا یک پیکسل جابه‌جا
+        # می‌شد و دیگر دقیقاً ۳۰ نبود. اینجا رابطه سنجیده می‌شود نه یک عددِ
+        # مطلق: پهنای کادر باید همچنان چیزی غیرصفر باشد (فقط رنگش شفاف است)،
+        # وگرنه یعنی کسی کادر را کامل حذف کرده و آن یک پیکسل دوباره گم شد.
+        assert float(align["rule"].replace("px", "")) > 0, \
+            ("the bottom border was removed outright (width=%s) instead of only being made "
+             "transparent — that quietly shrinks the header by that many pixels and shifts "
+             "everything below it" % align["rule"])
 
         # کارت سواپ نباید کشیده شود تا هم‌قد نمودار شود — زیر دکمه فضای مرده
         # می‌ماند. ولی ارتفاع نمودار *از همان کشیدگی* تغذیه می‌شود، پس اگر کسی
@@ -2013,6 +2190,139 @@ async def main():
         await pg.click('#flowTfs [data-w="h6"]'); await pg.wait_for_timeout(900)
         print("[flow 6H] %s" % (await pg.inner_text("#flowBody")).replace("\n", " | ")[:120])
         await pg.click('#flowTfs [data-w="h1"]'); await pg.wait_for_timeout(600)
+
+        # ---- 2e-ter. ۶ ساعته نباید کپی‌ی ۱ ساعته باشد ----
+        # علتِ اینکه باگِ بازه‌ی eth_getLogs تا حالا دیده نشده بود همین بود:
+        # هارنس برای هر دو پنجره *همان* دسته‌ی ثابتِ لاگ را برمی‌گرداند، پس
+        # [flow 1H] و [flow 6H] رقم به رقم یکی بودند و هیچ کاوشگری نمی‌توانست
+        # فرقی ببیند که نبود. اینجا به‌جای آن مقدارِ ثابت، خودِ این کاوشگر
+        # موقتاً `ethers.JsonRpcProvider.prototype.getLogs` را عوض می‌کند —
+        # همان روشی که `[gate]` و `[quoter gate]` بالاتر برای شبیه‌سازی خطای
+        # RPC استفاده کرده‌اند — و رفتار یک RPC عمومی واقعی را می‌سازد:
+        #   ۱) هر بازه‌ی بزرگ‌تر از ۲۰۰۰ بلوک رد می‌شود (دقیقاً همان سقفی که
+        #      باعث شد پنجره‌ی ۶ ساعته‌ی ۱۰۸۰۰ بلوکیِ تک‌درخواستی بشکند)،
+        #   ۲) هر بازه‌ای که قبول می‌شود، رویدادهایی می‌سازد که از خودِ شماره‌
+        #      بلوکش می‌آیند — پس دو بازه‌ی متفاوت، دو دسته لاگِ متفاوت
+        #      می‌گیرند، نه یک کپی از یک دسته‌ی ثابت.
+        # با این مسیر، کدِ قدیمیِ تک‌درخواستی همین‌جا رد می‌شد (بازه‌ی ۱۰۸۰۰
+        # از ۲۰۰۰ رد می‌شود) و [flow 6H] یک خطای «نمی‌دانم» نشان می‌داد —
+        # دقیقاً همان چیزی که کاربر واقعی دید. کدِ تکه‌تکه‌کننده باید چند
+        # درخواست بزند و رد شود.
+        flow_split = await pg.evaluate("""async () => {
+            const realGetLogs = ethers.JsonRpcProvider.prototype.getLogs;
+            const RANGE_CAP = 2000;
+            const topic = iPool.getEvent("Swap").topicHash;
+            /* ⚠️ لاگ باید به قالبِ خودِ استاب کدگذاری شود، نه ABI واقعی.
+               stub-ethers.js چنین می‌کند:
+                 data     = toHex(ser({amount0, amount1, recipient}))
+                 parseLog = de(fromHex(lg.data))
+               یعنی JSON، نه کلمه‌های ۳۲ بایتی. نسخه‌ی اول این کاوشگر کلمه‌های
+               واقعیِ ABI می‌ساخت، `de` رویشان JSON.parse می‌خورد و می‌افتاد،
+               و renderFlow با catch/continue همه را دور می‌ریخت — پس هر دو
+               پنجره «۰ خرید · ۰ فروش» می‌شدند و *به همین دلیل* متنشان یکی
+               بود، نه به‌خاطر باگی در تکه‌کردن. */
+            const ser = (x) => JSON.stringify(x, (k, v) =>
+                (typeof v === "bigint" ? { __b: v.toString() } : v));
+            const toHex = (s) => "0x" + Array.from(new TextEncoder().encode(s))
+                .map(b => b.toString(16).padStart(2, "0")).join("");
+            let failMode = null, callIdx = 0;
+            const calls = [];
+            ethers.JsonRpcProvider.prototype.getLogs = async function (f) {
+                const from = f.fromBlock, to = f.toBlock, i = callIdx++;
+                calls.push([from, to]);
+                if (to - from > RANGE_CAP)
+                    throw Object.assign(new Error("eth_getLogs range exceeds the provider limit"),
+                        { code: "SERVER_ERROR" });
+                if (failMode && failMode(i, from))
+                    throw Object.assign(new Error("temporary rpc hiccup"), { code: "SERVER_ERROR" });
+                const logs = [];
+                const start = Math.ceil(from / 97) * 97;
+                for (let b = start; b <= to; b += 97) {
+                    const isBuy = (b % 2) === 0;
+                    const our = BigInt(1 + (b % 5)) * 10n ** 17n;
+                    const ref = BigInt(200 + (b % 7) * 100) * 10n ** 6n;
+                    logs.push({ blockNumber: b, data: toHex(ser({
+                        amount0: isBuy ? -our : our,
+                        amount1: isBuy ? ref : -ref,
+                        recipient: "0x" + (b % 3 + 17).toString(16).repeat(20).slice(0, 40),
+                    })) });
+                }
+                return logs;
+            };
+
+            async function run(id, fm) {
+                failMode = fm; callIdx = 0; calls.length = 0;
+                flowWindow = id;
+                await renderFlow();
+                await new Promise(r => setTimeout(r, 80));
+                return { text: document.getElementById("flowBody").innerText, calls: calls.slice() };
+            }
+
+            const h1 = await run("h1", null);
+            const h6 = await run("h6", null);
+            /* ⚠️ شکست باید به خودِ *تکه* گره بخورد، نه به شماره‌ی فراخوانی:
+               تلاش دوباره یک شماره‌ی تازه می‌گیرد و از شرطِ شماره‌ای فرار
+               می‌کند، پس خواندن کامل می‌شود و مسیر «پوشش ناقص» هرگز اجرا
+               نمی‌شود. با گره‌زدن به بلوکِ شروع، آن تکه هر بار می‌افتد. */
+            /* دو سناریوی بعدی عمداً شکست می‌خورند و renderFlow درست عمل
+               می‌کند که console.error بزند — ولی همان یک خط، بررسیِ
+               «صفر خطای کنسول» در انتهای سوییت را قرمز می‌کرد. فقط برای
+               همین دو اجرا خاموشش می‌کنیم و بلافاصله برمی‌گردانیم، تا یک
+               خطای *غیرمنتظره* همچنان دیده شود. */
+            const realConsoleError = console.error;
+            console.error = () => {};
+            const deadFrom = new Set();
+            const h6partial = await run("h6", (i, from) => {
+                if (deadFrom.size === 0 || deadFrom.has(from)) {
+                    if (deadFrom.size < 2) deadFrom.add(from);
+                    return deadFrom.has(from);
+                }
+                return false;
+            });
+            const h6dead = await run("h6", () => true);            // همه‌ی تکه‌ها شکست می‌خورند
+
+            console.error = realConsoleError;
+            ethers.JsonRpcProvider.prototype.getLogs = realGetLogs;
+            flowWindow = "h1"; await renderFlow();   // حالت را برای بقیه‌ی تست‌ها برمی‌گرداند
+            await new Promise(r => setTimeout(r, 200));
+
+            return { h1, h6, h6partial, h6dead };
+        }""")
+        print("[flow split] 1H calls=%s 6H calls=%s (ranges<=1500: %s)"
+              % (len(flow_split["h1"]["calls"]), len(flow_split["h6"]["calls"]),
+                 all(t - f <= 1500 for f, t in flow_split["h6"]["calls"])))
+        # ادعای اول: باگ اصلی. اگر ۱H و ۶H همان متن را بدهند، یعنی همان مشکلِ
+        # «داده‌ی ساختگیِ یکسان برای دو پنجره» دوباره برگشته و این کاوشگر
+        # دوباره کور شده.
+        assert flow_split["h1"]["text"] != flow_split["h6"]["text"], \
+            "1H and 6H rendered byte-identical text — the mock is hiding the window again"
+        assert "Net" in flow_split["h6"]["text"], \
+            "the 6H window did not render at all against a range-capped mock: %r" \
+            % flow_split["h6"]["text"][:160]
+        # ادعای دوم: بازه واقعاً تکه‌تکه شد. یک پنجره‌ی ۱۰۸۰۰ بلوکی با سقفِ
+        # ۲۰۰۰ بلوکی فقط با بیش از یک درخواست ممکن است جواب بگیرد.
+        assert len(flow_split["h6"]["calls"]) > 1, \
+            "the 6H window answered from a single eth_getLogs call — chunking did not happen: %s" \
+            % flow_split["h6"]["calls"]
+        assert all(t - f <= 2000 for f, t in flow_split["h6"]["calls"]), \
+            "a chunk still asked for more than the provider's 2000-block cap: %s" \
+            % flow_split["h6"]["calls"]
+        # ادعای سوم: بعضی تکه‌ها شکست بخورند، ولی نتیجه هنوز *ناقص* گزارش
+        # شود، نه اینکه جمعِ ناقص را جمعِ کل جا بزند — قاعده‌ی اول همین پروژه.
+        print("[flow split partial] %s" % flow_split["h6partial"]["text"].replace("\n", " | ")[:160])
+        assert "did not answer" in flow_split["h6partial"]["text"], \
+            ("a partial read must say so in the same words the rest of the file uses for "
+             "unknown/partial states — got: %r" % flow_split["h6partial"]["text"][:200])
+        assert "Coverage" in flow_split["h6partial"]["text"] or "~$" in flow_split["h6partial"]["text"], \
+            "a partial result must be visibly marked as partial, not shown as a clean total"
+        # ادعای چهارم: اگر همه‌ی تکه‌ها شکست بخورند، همان رفتارِ قدیمی —
+        # «نمی‌دانم»، نه صفرِ ساختگی و نه جمعِ کامل.
+        assert "unknown, not zero" in flow_split["h6dead"]["text"], \
+            ("when every chunk fails the panel must fall back to the existing unknown-not-zero "
+             "wording, not invent a total: %r" % flow_split["h6dead"]["text"][:200])
+        assert "Net" not in flow_split["h6dead"]["text"], \
+            "a totally failed read must not still show Bought/Sold/Net figures"
+
         await pg.screenshot(path=os.path.join(HERE, "shot-flow.png"), full_page=True)
 
         await pg.click('#nav [data-view="folio"]'); await pg.wait_for_timeout(500)
