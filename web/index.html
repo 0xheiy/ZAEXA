@@ -532,6 +532,14 @@ main{max-width:1140px;margin:0 auto;padding:8px 20px 56px;display:flex;flex-dire
 .note.err{background:color-mix(in srgb,var(--neg) 11%,transparent);color:var(--neg)}
 .note.ok{background:var(--pglow);color:var(--pos)}
 .note b{font-weight:660}.note a{color:inherit}
+/* بنر پرچم dev عمداً بیرون از #notices است: کوت‌گیری با هر تغییر مبلغ
+   setNotice("") می‌زند و هر پیامی را که آنجا باشد پاک می‌کند. اولین
+   نسخه‌ی این پیام همان‌جا نشست و روی سایت زنده در چند میلی‌ثانیه محو شد،
+   در حالی که تست سبز بود چون لحظه‌ی اول را می‌سنجید نه حالت پایدار. */
+.devBan{margin:0 14px 14px;padding:12px 14px;border-radius:14px;font-size:12.8px;
+  line-height:1.55;background:color-mix(in srgb,var(--warn) 11%,transparent);color:var(--warn)}
+.devBan.ok{background:var(--pglow);color:var(--pos)}
+.devBan b{font-weight:660}
 .note pre{white-space:pre-wrap;word-break:break-all;font-size:10.5px;margin:7px 0 0;
   max-height:170px;overflow:auto;opacity:.85}
 .note summary{cursor:pointer;margin-top:6px;font-size:11.5px;opacity:.85}
@@ -887,6 +895,7 @@ footer a{color:var(--tx3)}
            بزرگ‌تر شود، نه اینکه ادعا شود مشکلی نیست. -->
       <div id="revNote" style="margin:0 14px 12px;padding:10px 12px;border-radius:12px;
         background:var(--card2);font-size:12px;color:var(--tx2);line-height:1.55"></div>
+      <div id="devBanner" hidden></div>
       <div id="notices"></div>
       <button class="cta" id="actBtn" disabled>Enter an amount</button>
     </section>
@@ -5059,13 +5068,26 @@ function wire(){
   readFee();loadChart();
   // یک بار در هر بازکردن صفحه. مخرج همه‌ی نسبت‌های قیف همین است.
   ev("load");
-  // به صاحب سایت بگو پرچم واقعاً عوض شد — او نباید حدس بزند.
-  if(devNotice==="off")
-    setNotice(note("warn","<b>Analytics muted on this browser.</b> Your visits will not be "+
-      "counted. Open the site with <span class=\"mono\">?dev=0</span> to undo this."));
-  else if(devNotice==="on")
-    setNotice(note("ok","<b>Analytics re-enabled on this browser.</b> Your visits are counted "+
-      "again, anonymously."));
+  /* به صاحب سایت بگو وضعیت چیست — او نباید حدس بزند.
+     ⚠️ این *نباید* در #notices بنشیند: کوت‌گیری با هر تغییر مبلغ آنجا را
+     پاک می‌کند و روی صفحه‌ی خالیِ اول همین اتفاق بلافاصله می‌افتد.
+     و عمداً هر بار که خاموش است نشان داده می‌شود، نه فقط باری که پرچم عوض
+     شد: پرچم ماندگار است، پس باید بشود در هر بازدید فهمید این مرورگر
+     شمرده می‌شود یا نه. */
+  const devBan=$("devBanner");
+  if(devBan){
+    if(devMuted()){
+      devBan.className="devBan";
+      devBan.innerHTML="<b>Analytics muted on this browser.</b> Your visits are not "+
+        "counted. Open the site with <span class=\"mono\">?dev=0</span> to undo this.";
+      devBan.hidden=false;
+    }else if(devNotice==="on"){
+      devBan.className="devBan ok";
+      devBan.innerHTML="<b>Analytics re-enabled on this browser.</b> Your visits are "+
+        "counted again, anonymously.";
+      devBan.hidden=false;
+    }
+  }
   /* /t/<آدرس> یعنی «این توکن را برایم بررسی کن». Worker همین index.html را
      برای آن مسیر سرو می‌کند، پس اینجا از روی pathname تشخیص می‌دهیم. */
   const onToken=/^\/t\/(0x[0-9a-fA-F]{40})\/?$/.exec(location.pathname);

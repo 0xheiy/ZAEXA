@@ -3494,7 +3494,21 @@ async def main():
         before = len(dev_seen)
         await devpg.goto("http://127.0.0.1:%d/test/harness.html?dev=1" % port)
         await devpg.wait_for_timeout(1400)
-        dev_notice_muted = await devpg.inner_text("#notices")
+        # ⚠️ بنر از #notices خوانده نمی‌شود. نسخه‌ی اول همان‌جا می‌نشست و
+        # روی سایت زنده در چند میلی‌ثانیه محو می‌شد، چون کوت‌گیری با هر
+        # تغییر مبلغ `setNotice("")` می‌زند و روی صفحه‌ی خالیِ اول همین
+        # بلافاصله اتفاق می‌افتد. تست وقت سبز بود چون *لحظه‌ی اول* را
+        # می‌سنجید، نه حالت پایدار. حالا ظرف جداست و پایداری‌اش هم سنجیده
+        # می‌شود: عمداً همان کاری که پاکش می‌کرد را می‌کنیم و باز می‌خوانیم.
+        dev_notice_muted = await devpg.inner_text("#devBanner")
+        await devpg.evaluate("() => setNotice('')")
+        await devpg.fill("#amtIn", "5")
+        await devpg.wait_for_timeout(500)
+        await devpg.fill("#amtIn", "")
+        await devpg.wait_for_timeout(900)
+        dev_notice_survived = await devpg.inner_text("#devBanner")
+        dev_banner_hidden = await devpg.evaluate(
+            "() => document.getElementById('devBanner').hidden")
         dev_muted_beacons = len(dev_seen) - before
 
         # 2) باید ماندگار باشد: بارگذاریِ دوباره، بدون هیچ پارامتری، در همان
@@ -3521,6 +3535,11 @@ async def main():
         assert dev_muted_beacons == 0, (
             "?dev=1 must silence every beacon on the very first load, got %d"
             % dev_muted_beacons)
+        assert "Analytics muted" in dev_notice_survived and not dev_banner_hidden, (
+            "the mute banner vanished as soon as the quote path cleared the notice area "
+            "(%r). It must live outside #notices, or the owner sees it for a few "
+            "milliseconds on the live site and concludes the flag did not work."
+            % dev_notice_survived[:120])
         assert dev_persist_beacons == 0, (
             "the mute flag did not survive a reload with no query string — a flag that resets "
             "on reload is useless, since the owner does not keep ?dev=1 in his address bar")
@@ -3537,7 +3556,7 @@ async def main():
             "http://127.0.0.1:%d/test/harness.html?dev=1&in=USDC&out=WETH&amt=5" % port)
         await urlpg.wait_for_timeout(1400)
         url_search = await urlpg.evaluate("() => location.search")
-        url_notice = await urlpg.inner_text("#notices")
+        url_notice = await urlpg.inner_text("#devBanner")
         await urlpg.close()
         from urllib.parse import parse_qs
         url_q = parse_qs(url_search.lstrip("?"))
