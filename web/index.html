@@ -2201,11 +2201,43 @@ const EV_NAMES=[
 /* Global Privacy Control یک «نه»ی صریح از خودِ کاربر است، نه یک حدس. مخاطب
    این سایت به حریم خصوصی حساس است و شمارش ارزش نادیده‌گرفتنش را ندارد.
    ⚠️ اثر جانبی: عدد بازدید کمی کمتر از واقعیت می‌شود. */
-const evOff=()=>navigator.globalPrivacyControl===true;
+/* این ترافیک خودِ صاحب سایت است، نه بازدیدکننده. GPC یعنی کاربر می‌گوید
+   «نه»؛ این یعنی ما درباره‌ی خودمان می‌گوییم «نه». هیچ شناسه‌ای اضافه
+   نمی‌شود — فقط یک پرچم محلی در همین مرورگر. localStorage در برخی
+   زمینه‌های حریم خصوصی استثنا می‌دهد؛ صفحه هرگز نباید به‌خاطر این بشکند. */
+function devMuted(){
+  try{return localStorage.getItem("zaexa.dev")==="1";}catch{return false;}
+}
+/* هر دو دلیلِ خاموشیِ بیکن اینجا کنار هم‌اند و نه یک‌جای دیگر: قبلاً باگ ۳
+   و ۴ از همین جدا افتادنِ یک قاعده روی دو مسیر آمد. یک دروازه، برای هر دو. */
+const evOff=()=>navigator.globalPrivacyControl===true||devMuted();
 /* روی file:// (هارنس تست) مقصدی وجود ندارد و POST به یک مسیر نسبی فقط خطای
    کنسول تولید می‌کند. مثل gtProxy یک متغیر است تا کاوشگر [events] بتواند
    روشنش کند و *واقعاً* ببیند چه چیزی روی سیم می‌رود. */
 let evUrl=/^https?:$/.test(location.protocol)?"/ev":null;
+/* پیام برای صاحب سایت که پرچم واقعاً عوض شد — پایین‌تر، بعد از ev("load")،
+   روی صفحه نشانده می‌شود چون تا آن‌جا مطمئنیم DOM آماده است. */
+let devNotice="";
+/* ⚠️ باید *قبل* از هر جایی که location.search یا location.hash را
+   می‌خواند اجرا شود — مخصوصاً applyShareParams — وگرنه پارامتر dev به
+   عنوان یک پارامتر ناشناخته به آن پارسر می‌رسد و «بخشی از این لینک باز
+   نشد» نشان داده می‌شود. تمیزکردن URL هم لازم است: اگر صاحب سایت آدرس نوار
+   را کپی کند، نباید بی‌صدا آنالیتیکس کس دیگری را خاموش کند — که برعکسِ
+   خرابی، و نامرئی، بود. */
+(function(){
+  let v;
+  try{v=new URLSearchParams(location.search).get("dev");}catch{return;}
+  if(v!=="1"&&v!=="0")return;
+  try{
+    if(v==="1"){localStorage.setItem("zaexa.dev","1");devNotice="off";}
+    else{localStorage.removeItem("zaexa.dev");devNotice="on";}
+  }catch{}
+  try{
+    const u=new URL(location.href);
+    u.searchParams.delete("dev");
+    history.replaceState(null,"",u.pathname+u.search+u.hash);
+  }catch{}
+})();
 let evLast=Object.create(null);
 function ev(name,detail){
   if(!EV_ENABLED||evOff()||!evUrl)return;
@@ -5027,6 +5059,13 @@ function wire(){
   readFee();loadChart();
   // یک بار در هر بازکردن صفحه. مخرج همه‌ی نسبت‌های قیف همین است.
   ev("load");
+  // به صاحب سایت بگو پرچم واقعاً عوض شد — او نباید حدس بزند.
+  if(devNotice==="off")
+    setNotice(note("warn","<b>Analytics muted on this browser.</b> Your visits will not be "+
+      "counted. Open the site with <span class=\"mono\">?dev=0</span> to undo this."));
+  else if(devNotice==="on")
+    setNotice(note("ok","<b>Analytics re-enabled on this browser.</b> Your visits are counted "+
+      "again, anonymously."));
   /* /t/<آدرس> یعنی «این توکن را برایم بررسی کن». Worker همین index.html را
      برای آن مسیر سرو می‌کند، پس اینجا از روی pathname تشخیص می‌دهیم. */
   const onToken=/^\/t\/(0x[0-9a-fA-F]{40})\/?$/.exec(location.pathname);

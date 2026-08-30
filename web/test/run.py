@@ -2240,7 +2240,9 @@ async def main():
         # ---- 2c-bis. Bug 1 رگرسیون: وردمارک باید هم‌قدِ نشان بماند، نه درشت‌تر ----
         # نشان (glyph) و وردمارک دو viewBox با نسبتِ تصویریِ متفاوت دارند؛
         # اندازه‌ی CSS باید طوری تنظیم شود که «قدِ جوهر» دو طرف نزدیک هم بماند
-        # (هدف ۰.۶) و مرکزِ عمودیِ دو طرف عوض نشود. این روی صفحه‌ی *واقعی*
+        # (هدف ۰.۴۸ — این کامنت تا ۳۰ آگوست ۲۰۲۶ هنوز ۰.۶ می‌گفت، در حالی که
+        # خودِ assert پایین‌تر درست بود؛ کامنتی که دروغ می‌گوید بدتر از کامنت
+        # نداشتن است) و مرکزِ عمودیِ دو طرف عوض نشود. این روی صفحه‌ی *واقعی*
         # (نه هارنس) و در ۱۴۴۰×۹۰۰ سنجیده می‌شود، چون خودِ گزارش دقیقاً همین
         # سند و همین اندازه را اندازه گرفته بود.
         logopg = await b.new_page(viewport={"width": 1440, "height": 900})
@@ -3479,6 +3481,84 @@ async def main():
         assert not gpc_seen, (
             "Global Privacy Control is an explicit opt-out and must silence every beacon: %s"
             % gpc_seen)
+
+        # ---- [dev flag]: صاحب سایت باید بتواند آنالیتیکس را روی مرورگر خودش
+        # برای همیشه خاموش کند، بدون شناسه و بدون رفت‌وبرگشت با سرور. سه
+        # مرحله‌ی اول همه روی *یک* صفحه (یک context) پشت‌سرهم اجرا می‌شوند —
+        # چون کل ادعا این است که پرچم بین بارگذاری‌ها زنده می‌ماند، و آن فقط
+        # وقتی قابل آزمودن است که context عوض نشود. ----
+        devpg = await b.new_page(viewport={"width": 1240, "height": 1000})
+        dev_seen = await watch_events(devpg)
+
+        # 1) خاموش‌کردن باید سرتاسری کار کند: صفر بیکن روی سیم.
+        before = len(dev_seen)
+        await devpg.goto("http://127.0.0.1:%d/test/harness.html?dev=1" % port)
+        await devpg.wait_for_timeout(1400)
+        dev_notice_muted = await devpg.inner_text("#notices")
+        dev_muted_beacons = len(dev_seen) - before
+
+        # 2) باید ماندگار باشد: بارگذاریِ دوباره، بدون هیچ پارامتری، در همان
+        # context، هنوز باید صفر بیکن بدهد. اگر ماندگار نبود کل قابلیت
+        # بی‌فایده است.
+        before = len(dev_seen)
+        await devpg.goto("http://127.0.0.1:%d/test/harness.html" % port)
+        await devpg.wait_for_timeout(1400)
+        dev_persist_beacons = len(dev_seen) - before
+
+        # 3) باید برگشت‌پذیر باشد: dev=0 پرچم را برمی‌دارد و بیکن‌ها دوباره
+        # جاری می‌شوند — دستِ‌کم load.
+        before = len(dev_seen)
+        await devpg.goto("http://127.0.0.1:%d/test/harness.html?dev=0" % port)
+        await devpg.wait_for_timeout(1400)
+        dev_restored_raw = dev_seen[before:]
+        await devpg.close()
+        import json as _json2
+        dev_restored_names = [_json2.loads(r)["e"] for r in dev_restored_raw]
+        dev_restored_beacons = len(dev_restored_raw)
+
+        print("[dev flag] muted: beacons=%d  persisted: beacons=%d  restored: beacons=%d"
+              % (dev_muted_beacons, dev_persist_beacons, dev_restored_beacons))
+        assert dev_muted_beacons == 0, (
+            "?dev=1 must silence every beacon on the very first load, got %d"
+            % dev_muted_beacons)
+        assert dev_persist_beacons == 0, (
+            "the mute flag did not survive a reload with no query string — a flag that resets "
+            "on reload is useless, since the owner does not keep ?dev=1 in his address bar")
+        assert dev_restored_beacons > 0 and "load" in dev_restored_names, (
+            "?dev=0 must turn beacons back on (at least 'load'); got %s" % dev_restored_names)
+
+        # 4) پاکسازی URL: بعد از یک بارِ dev=1 کنار یک لینک اشتراکی، پارامتر
+        # dev باید ناپدید شود ولی in/out/amt دست‌نخورده بمانند، و پارسر لینک
+        # نباید آن‌ها را به‌عنوان چیزی «باز نشدنی» ببیند — چون این‌ها اصلاً
+        # روی location.hash نیستند، پارسر لینک اشتراکی اصلاً نمی‌بیندشان.
+        # context تازه، تا حالت هیچ چیزی از مراحل بالا را به ارث نبرد.
+        urlpg = await b.new_page(viewport={"width": 1240, "height": 1000})
+        await urlpg.goto(
+            "http://127.0.0.1:%d/test/harness.html?dev=1&in=USDC&out=WETH&amt=5" % port)
+        await urlpg.wait_for_timeout(1400)
+        url_search = await urlpg.evaluate("() => location.search")
+        url_notice = await urlpg.inner_text("#notices")
+        await urlpg.close()
+        from urllib.parse import parse_qs
+        url_q = parse_qs(url_search.lstrip("?"))
+        print("[dev flag] url cleaned=%r notice=%r" % (url_search, url_notice[:120]))
+        assert "dev" not in url_q, (
+            "the dev param must be stripped from the address bar, or copying it hands someone "
+            "else a link that silently mutes their analytics: %r" % url_search)
+        for k in ("in", "out", "amt"):
+            assert k in url_q, (
+                "cleaning the dev param must not touch the other query params — %r vanished "
+                "from %r" % (k, url_search))
+        assert "could not be opened" not in url_notice, (
+            "a leftover dev param (or its cleanup) confused the share-link parser: %r"
+            % url_notice[:200])
+
+        # 5) صاحب سایت نباید حدس بزند: پیام روی صفحه باید صریح بگوید خاموش شد.
+        # همان context مرحله‌ی ۱ (dev_notice_muted) که تازه از dev=1 آمده.
+        print("[dev flag] notice on mute contains 'Analytics muted': %s"
+              % ("Analytics muted" in dev_notice_muted))
+        assert "Analytics muted" in dev_notice_muted, (
+            "the owner is not told muting worked: %r" % dev_notice_muted[:200])
 
         srv.shutdown()
         await b.close()
