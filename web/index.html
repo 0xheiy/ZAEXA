@@ -579,16 +579,34 @@ main{max-width:1140px;margin:0 auto;padding:8px 20px 56px;display:flex;flex-dire
 .empty.intro .eTtl{color:var(--tx);font-size:16px;font-weight:640;letter-spacing:-.2px}
 .empty.intro p{max-width:46ch;margin:9px 0 0;font-size:12.8px}
 .empty.intro .chip{margin-top:22px}
-footer{max-width:1140px;width:100%;margin:auto auto 0;padding:0 20px 40px;font-size:12px;color:var(--tx3)}
-footer a{color:var(--tx3)}
-.social{display:flex;align-items:center;gap:10px;margin-bottom:12px;flex-wrap:wrap}
+footer{max-width:1140px;width:100%;margin:auto auto 0;padding:40px 20px 32px;font-size:12px;color:var(--tx3)}
+footer a{color:var(--tx3);text-decoration:none}
+/* شبکه‌ی چهارستونه: بلوکِ برند + سه ستونِ برچسب‌دار. زیرِ ۷۲۰px یک‌ستونه
+   می‌شود — هر بخش کاملاً پهنای عرض را می‌گیرد و زیرِ هم می‌نشیند. */
+.footGrid{display:grid;grid-template-columns:minmax(200px,1.3fr) repeat(3,minmax(120px,1fr));
+  gap:30px 28px}
+.footBrand .footWordmark{font-size:19px;font-weight:680;letter-spacing:-.4px;color:var(--tx)}
+.footBrand .footTag{margin:9px 0 16px;font-size:12px;line-height:1.55;max-width:32ch;color:var(--tx3)}
+.social{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
 .social a{width:34px;height:34px;border-radius:11px;display:grid;place-items:center;
   background:var(--card);box-shadow:var(--shs);color:var(--tx2);transition:.16s}
 .social a svg{width:16px;height:16px}
 .social a:hover{color:var(--acc);transform:translateY(-1px);box-shadow:var(--sh)}
-.feedback{margin-left:auto;padding:8px 14px;border-radius:999px;background:var(--card);
-  box-shadow:var(--shs);font-size:12.5px;color:var(--tx2);transition:.16s}
-.feedback:hover{color:var(--acc);box-shadow:var(--sh)}
+.footCol{display:flex;flex-direction:column;gap:10px;min-width:0}
+.footCol h4{margin:0 0 2px;font-size:12.5px;font-weight:660;letter-spacing:.15px;color:var(--tx2)}
+.footCol a,.footCol .footRow{display:block;font-size:12.5px;color:var(--tx3);transition:.16s}
+.footCol a:hover{color:var(--acc)}
+.footCol .footLbl{display:block;font-size:11px;color:var(--tx3);opacity:.8}
+.footCol .footRow a{display:inline;padding:0}
+.footCol .feedback{width:fit-content;padding:8px 14px;border-radius:999px;
+  background:var(--card);box-shadow:var(--shs);font-size:12.5px;color:var(--tx2);transition:.16s}
+.footCol .feedback:hover{color:var(--acc);box-shadow:var(--sh)}
+.footBottom{margin-top:28px;padding-top:16px;border-top:1px solid var(--line);
+  font-size:11px;color:var(--tx3)}
+@media(max-width:720px){
+  .footGrid{grid-template-columns:1fr;gap:26px}
+  .footBrand .footTag{max-width:none}
+}
 
 /* ---------------- modal / popover ---------------- */
 .ov{position:fixed;inset:0;background:rgba(10,25,20,.36);backdrop-filter:blur(4px);
@@ -1146,19 +1164,41 @@ footer a{color:var(--tx3)}
 </main>
 
 <footer>
-  <div class="social">
-    <a id="lnkX" href="#" target="_blank" rel="noopener" title="X">
-      <svg viewBox="0 0 24 24" fill="currentColor"><path d="M18.9 2H22l-7 8 8.2 12h-6.4l-5-7.3L5.9 22H2.8l7.5-8.6L2.4 2h6.6l4.5 6.6zM17.8 20.1h1.7L7.3 3.8H5.5z"/></svg></a>
-    <a id="lnkTg" href="#" target="_blank" rel="noopener" title="Telegram">
-      <svg viewBox="0 0 24 24" fill="currentColor"><path d="M21.8 4.2 18.7 19c-.2 1-.9 1.3-1.7.8l-4.7-3.5-2.3 2.2c-.3.3-.5.5-1 .5l.3-4.8 8.8-8c.4-.3-.1-.5-.6-.2L6.7 12.9 2 11.4c-1-.3-1-1 .2-1.5l18.3-7c.9-.3 1.6.2 1.3 1.3z"/></svg></a>
-    <a id="lnkGh" href="#" target="_blank" rel="noopener" title="GitHub">
-      <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2a10 10 0 0 0-3.2 19.5c.5.1.7-.2.7-.5v-1.8c-2.8.6-3.4-1.3-3.4-1.3-.4-1.2-1.1-1.5-1.1-1.5-.9-.6.1-.6.1-.6 1 .1 1.5 1 1.5 1 .9 1.5 2.3 1.1 2.9.8.1-.7.4-1.1.6-1.4-2.2-.3-4.6-1.1-4.6-5 0-1.1.4-2 1-2.7-.1-.3-.4-1.3.1-2.6 0 0 .8-.3 2.7 1a9.4 9.4 0 0 1 5 0c1.9-1.3 2.7-1 2.7-1 .5 1.3.2 2.3.1 2.6.6.7 1 1.6 1 2.7 0 3.9-2.4 4.7-4.6 5 .4.3.7 1 .7 2v2.9c0 .3.2.6.7.5A10 10 0 0 0 12 2z"/></svg></a>
-    <button id="feedbackBtn" class="feedback">Report a problem</button>
+  <div class="footGrid">
+    <div class="footBrand">
+      <div class="footWordmark">ZAEXA</div>
+      <p class="footTag">A DEX aggregator on Base. One transaction, every pool.</p>
+      <div class="social">
+        <a id="lnkX" href="#" target="_blank" rel="noopener" title="X">
+          <svg viewBox="0 0 24 24" fill="currentColor"><path d="M18.9 2H22l-7 8 8.2 12h-6.4l-5-7.3L5.9 22H2.8l7.5-8.6L2.4 2h6.6l4.5 6.6zM17.8 20.1h1.7L7.3 3.8H5.5z"/></svg></a>
+        <a id="lnkTg" href="#" target="_blank" rel="noopener" title="Telegram">
+          <svg viewBox="0 0 24 24" fill="currentColor"><path d="M21.8 4.2 18.7 19c-.2 1-.9 1.3-1.7.8l-4.7-3.5-2.3 2.2c-.3.3-.5.5-1 .5l.3-4.8 8.8-8c.4-.3-.1-.5-.6-.2L6.7 12.9 2 11.4c-1-.3-1-1 .2-1.5l18.3-7c.9-.3 1.6.2 1.3 1.3z"/></svg></a>
+        <a id="lnkGh" href="#" target="_blank" rel="noopener" title="GitHub">
+          <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2a10 10 0 0 0-3.2 19.5c.5.1.7-.2.7-.5v-1.8c-2.8.6-3.4-1.3-3.4-1.3-.4-1.2-1.1-1.5-1.1-1.5-.9-.6.1-.6.1-.6 1 .1 1.5 1 1.5 1 .9 1.5 2.3 1.1 2.9.8.1-.7.4-1.1.6-1.4-2.2-.3-4.6-1.1-4.6-5 0-1.1.4-2 1-2.7-.1-.3-.4-1.3.1-2.6 0 0 .8-.3 2.7 1a9.4 9.4 0 0 1 5 0c1.9-1.3 2.7-1 2.7-1 .5 1.3.2 2.3.1 2.6.6.7 1 1.6 1 2.7 0 3.9-2.4 4.7-4.6 5 .4.3.7 1 .7 2v2.9c0 .3.2.6.7.5A10 10 0 0 0 12 2z"/></svg></a>
+      </div>
+    </div>
+    <div class="footCol">
+      <h4>Trade</h4>
+      <a href="#swap">Swap</a>
+      <a href="#folio">Portfolio</a>
+      <a href="#flow">Flow</a>
+    </div>
+    <div class="footCol">
+      <h4>About</h4>
+      <a href="#faq" id="faqLink">How it works &amp; FAQ</a>
+      <span class="footRow">
+        <span class="footLbl">Contract on BaseScan</span>
+        <a id="ctrLink" target="_blank" rel="noopener" class="mono"></a>
+      </span>
+      <a href="https://github.com/0xheiy/ZAEXA" target="_blank" rel="noopener">Source on GitHub</a>
+    </div>
+    <div class="footCol">
+      <h4>Support</h4>
+      <button id="feedbackBtn" class="feedback">Report a problem</button>
+      <a href="https://www.geckoterminal.com" target="_blank" rel="noopener">Price history by GeckoTerminal</a>
+    </div>
   </div>
-  <a href="#faq" id="faqLink">How this works &amp; FAQ</a> ·
-  Non-custodial · runs entirely in your browser · no backend ·
-  executor <a id="ctrLink" target="_blank" rel="noopener" class="mono"></a> · source verified on BaseScan ·
-  price history by <a href="https://www.geckoterminal.com" target="_blank" rel="noopener">GeckoTerminal</a>
+  <div class="footBottom">Non-custodial · runs entirely in your browser · no backend · not audited</div>
 </footer>
 
 <div class="ov" id="walletOv">

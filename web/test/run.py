@@ -3575,6 +3575,109 @@ async def main():
             "no view:faq beacon reached the wire (saw %s) — a name missing from either "
             "allow-list is dropped with a 400 and nobody notices" % faqev_names)
 
+        # ---- [footer] پانویسِ چندستونه: باید ستون‌دار و برچسب‌دار باشد ----
+        # قبلاً یک جمله‌ی پیوسته بود؛ حالا بلوکِ برند + سه ستون. کلیک روی
+        # #faqLink را [faq] بالاتر («footer link: view-faq») از قبل سنجیده،
+        # اینجا تکرار نمی‌شود.
+        footpg = await b.new_page(viewport={"width": 1440, "height": 1000})
+        await footpg.goto("http://127.0.0.1:%d/test/harness.html#swap" % port)
+        await footpg.wait_for_timeout(1200)
+
+        # ۱. ستون‌ها هست و برچسب دارند، هرکدام دست‌کم دو لینک (Support یک
+        #    لینک + دکمه هم کافی است)
+        cols = await footpg.evaluate("""() => {
+            const out = {};
+            document.querySelectorAll("footer .footCol").forEach(col => {
+                const h = col.querySelector("h4");
+                if (!h) return;
+                out[h.textContent.trim()] = {
+                    links: col.querySelectorAll("a").length,
+                    buttons: col.querySelectorAll("button").length,
+                };
+            });
+            return out;
+        }""")
+        print("[footer] columns=%r" % cols)
+        for name in ["Trade", "About", "Support"]:
+            assert name in cols, "the footer is missing the %r column heading" % name
+        assert cols["Trade"]["links"] >= 2, "Trade column has too few links: %r" % cols["Trade"]
+        assert cols["About"]["links"] >= 2, "About column has too few links: %r" % cols["About"]
+        assert cols["Support"]["links"] + cols["Support"]["buttons"] >= 2, (
+            "Support column has too few links/actions: %r" % cols["Support"])
+
+        # ۲. هیچ لینکی به ناکجا نمی‌رود
+        hrefs = await footpg.eval_on_selector_all(
+            "footer a", "els => els.map(e => e.getAttribute('href'))")
+        print("[footer] hrefs=%r" % hrefs)
+        for href in hrefs:
+            assert href not in (None, "", "#") and not href.lower().startswith("javascript:"), (
+                "a footer link goes nowhere real: href=%r (full list: %s)" % (href, hrefs))
+
+        # ۳. شناسه‌های سیم‌کشی‌شده زنده مانده‌اند، و لینکِ خالیِ تلگرام بدون
+        #    باقی‌مانده حذف شده
+        wired = await footpg.evaluate("""() => {
+            const g = id => document.getElementById(id);
+            const ctr = g("ctrLink");
+            return {
+                lnkX: !!g("lnkX"), lnkGh: !!g("lnkGh"), feedbackBtn: !!g("feedbackBtn"),
+                ctrLink: !!ctr, ctrHref: ctr ? ctr.href : null,
+                faqLink: !!g("faqLink"), lnkTg: !!g("lnkTg"),
+                socialCount: document.querySelectorAll("footer .social > *").length,
+            };
+        }""")
+        chain_executor_f = await footpg.evaluate("() => CHAIN.executor")
+        print("[footer] wired=%r executor=%s" % (wired, chain_executor_f))
+        for key in ["lnkX", "lnkGh", "feedbackBtn", "ctrLink", "faqLink"]:
+            assert wired[key], "footer element #%s did not survive the rebuild" % key
+        assert chain_executor_f.lower() in wired["ctrHref"].lower(), (
+            "#ctrLink's href (%r) does not contain CHAIN.executor (%r) — looks hardcoded"
+            % (wired["ctrHref"], chain_executor_f))
+        assert not wired["lnkTg"], (
+            "LINKS.telegram is empty so #lnkTg must remove() itself, but it is still present")
+        assert wired["socialCount"] == 2, (
+            "expected exactly the X and GitHub icons left in .social after #lnkTg removed "
+            "itself, found %d children — a leftover empty slot or separator" % wired["socialCount"])
+
+        # ۵. واقعاً خواناست — فاصله‌ی ردیف‌ها و اندازه‌ی متن، نه فقط ستون‌بندی
+        rhythm = await footpg.evaluate("""() => {
+            const col = [...document.querySelectorAll("footer .footCol")]
+                .find(c => c.querySelector("h4") && c.querySelector("h4").textContent.trim() === "Trade");
+            const links = [...col.querySelectorAll("a")].map(a => a.getBoundingClientRect());
+            let minGap = Infinity;
+            for (let i = 1; i < links.length; i++) {
+                minGap = Math.min(minGap, links[i].top - links[i - 1].bottom);
+            }
+            const walker = document.createTreeWalker(
+                document.querySelector("footer"), NodeFilter.SHOW_TEXT,
+                { acceptNode: n => n.textContent.trim() ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_SKIP });
+            let minFont = Infinity, node;
+            while (node = walker.nextNode()) {
+                const fs = parseFloat(getComputedStyle(node.parentElement).fontSize);
+                minFont = Math.min(minFont, fs);
+            }
+            return { minGap, minFont };
+        }""")
+        print("[footer] Trade link gap=%.1fpx minFontSize=%.1fpx"
+              % (rhythm["minGap"], rhythm["minFont"]))
+        assert rhythm["minGap"] >= 8, (
+            "the Trade column's links sit only %.1fpx apart — that is still the cramped "
+            "run-on look, not a readable list" % rhythm["minGap"])
+        assert rhythm["minFont"] >= 10.9, (
+            "some footer text renders at %.1fpx, under the 11px readability floor"
+            % rhythm["minFont"])
+        await footpg.close()
+
+        # ۶. موبایل: بدون سرریز افقی — روی body، نه documentElement (همان
+        #    دلیلِ کاوشگر [faq]: overflow-x:hidden ریشه را کلمپ می‌کند)
+        footmob = await b.new_page(viewport={"width": 390, "height": 900})
+        await footmob.goto("http://127.0.0.1:%d/test/harness.html#swap" % port)
+        await footmob.wait_for_timeout(1200)
+        body_w = await footmob.evaluate("() => document.body.scrollWidth")
+        print("[footer] mobile 390px: body.scrollWidth=%d" % body_w)
+        assert body_w <= 390 + 1, (
+            "the footer overflows horizontally at 390px: body.scrollWidth=%d" % body_w)
+        await footmob.close()
+
         # Global Privacy Control یک «نه»ی صریح است و باید همه‌چیز را خاموش کند
         gpcpg = await b.new_page(viewport={"width": 1240, "height": 1000})
         await gpcpg.add_init_script(
