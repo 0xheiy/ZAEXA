@@ -1,7 +1,16 @@
-import asyncio, base64, os, re, sys
+import asyncio, base64, glob, os, re, sys
 from playwright.async_api import async_playwright
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+
+def vendor_path(prefix):
+    """مسیر باندل وندور با هر هشی که در نامش هست. دقیقاً یکی باید باشد."""
+    matches = glob.glob(os.path.join(HERE, "..", prefix + ".*.js"))
+    assert len(matches) == 1, (
+        "expected exactly one %s.<hash>.js next to index.html, found %d: %s"
+        % (prefix, len(matches), matches))
+    return matches[0]
+
 def build_harness():
     """harness = index.html با لودر ethers که به stub محلی اشاره می‌کند.
 
@@ -66,8 +75,7 @@ def check_no_remote_code():
         "dies with a message that blames the user's connection. Keep the gate; SRI "
         "defends against a tampered host, which a local file does not have.")
 
-    vendored = os.path.join(HERE, "..", "ethers.umd.min.js")
-    assert os.path.exists(vendored), "ethers.umd.min.js is missing next to index.html"
+    vendored = vendor_path("ethers.umd.min")
 
     # هش SRI باید ناخالی باشد *و* با خودِ فایل بخواند. تا امروز آن sha384 فقط
     # یک کامنت بود؛ حالا مرورگر اعمالش می‌کند، پس اگر فایل عوض شود و هش عقب
@@ -81,11 +89,11 @@ def check_no_remote_code():
     actual = "sha384-" + base64.b64encode(
         hashlib.sha384(open(vendored, "rb").read()).digest()).decode()
     assert want == actual, (
-        "the integrity hash in index.html does not match ethers.umd.min.js.\n"
+        "the integrity hash in index.html does not match %s.\n"
         "  page:  %s\n  file:  %s\n"
         "Either the vendored file changed without updating ETHERS_SRI (the live site "
         "would refuse to run ethers at all), or the file is not the one we pinned."
-        % (want, actual))
+        % (os.path.basename(vendored), want, actual))
 
     # ethers تنها اسکریپت بیرونی نیست. هر جای دیگری هم که کد بار می‌شود باید
     # محلی باشد — WalletConnect با یک <script> پویا می‌آید و اگر روزی کسی
@@ -94,10 +102,7 @@ def check_no_remote_code():
                    if m.startswith("http://") or m.startswith("https://")]
     assert not remote_srcs, \
         "code must never be loaded from a remote origin: %s" % remote_srcs
-    wc = os.path.join(HERE, "..", "walletconnect.bundle.js")
-    assert os.path.exists(wc), \
-        "walletconnect.bundle.js is missing next to index.html — rebuild it with " \
-        "scripts/build_walletconnect.sh"
+    wc = vendor_path("walletconnect.bundle")
     # بسته‌ی WalletConnect باید *واقعاً* خودکفا باشد. نسخه‌ی رسمی UMD خودشان
     # نیست: در مرورگر انتظار دارد viem/lit/bs58 از قبل روی صفحه باشند و بی‌صدا
     # شکست می‌خورد. اگر روزی کسی فایل رسمی را جایگزین کند، این می‌گیردش.
@@ -123,6 +128,109 @@ def check_gt_proxy_worker():
                        cwd=os.path.dirname(w))
     sys.stdout.write(r.stdout)
     assert r.returncode == 0, "the GeckoTerminal proxy worker failed its tests:\n" + r.stderr
+
+def check_asset_cache_headers():
+    """باندل‌های وندور یک سال immutable کش می‌شوند (web/_headers) و این فقط
+    وقتی بی‌خطر است که نام هر فایل شامل هش محتوایش باشد — وگرنه یک باگ در
+    باندل یک سال روی مرورگر کاربر گیر می‌کند و هیچ انتشار تازه‌ای نجاتش
+    نمی‌دهد. این نگهبان همان پیش‌شرط را روی خودِ فایل‌ها می‌سنجد، نه روی حرف."""
+    import hashlib
+    webdir = os.path.join(HERE, "..")
+
+    # ۱) خودِ فایل باید باشد.
+    headers_path = os.path.join(webdir, "_headers")
+    assert os.path.exists(headers_path), \
+        "web/_headers is missing — the vendor bundles fall back to Cloudflare's default " \
+        "of max-age=0, must-revalidate and every page load revalidates 2.5MB for nothing"
+    headers_src = open(headers_path, encoding="utf-8").read()
+
+    # ۲) الگو را می‌پارسیم، نه کل فایل را substring-match — یک max-age روی
+    #    یک الگوی دیگر نباید این را قبول‌شده جا بزند.
+    blocks, cur_pattern, cur_lines = {}, None, []
+    for raw in headers_src.splitlines():
+        if not raw.strip() or raw.lstrip().startswith("#"):
+            continue
+        if raw[:1] not in (" ", "\t"):
+            if cur_pattern is not None:
+                blocks[cur_pattern] = cur_lines
+            cur_pattern, cur_lines = raw.strip(), []
+        else:
+            cur_lines.append(raw.strip())
+    if cur_pattern is not None:
+        blocks[cur_pattern] = cur_lines
+    assert "/*.js" in blocks, \
+        "web/_headers has no /*.js pattern — the vendor bundles are not covered: %r" \
+        % list(blocks)
+    cc = None
+    for line in blocks["/*.js"]:
+        if line.lower().startswith("cache-control:"):
+            cc = line.split(":", 1)[1].strip()
+    assert cc, "the /*.js block in web/_headers sets no Cache-Control header"
+    mage = re.search(r"max-age=(\d+)", cc)
+    assert mage and int(mage.group(1)) >= 31536000, \
+        "the /*.js Cache-Control max-age is too short to call this immutable: %r" % cc
+    assert "immutable" in cc, \
+        "the /*.js Cache-Control is missing 'immutable': %r" % cc
+
+    # ۲ب) و قرینه‌اش، که مهم‌تر است: index.html هرگز نباید immutable شود.
+    #     نامش هش ندارد و هیچ‌وقت هم نخواهد داشت — آدرسش همان `/` است. اگر
+    #     روزی کسی قاعده‌ای بنویسد که به آن هم بخورد، هر انتشار تازه تا یک
+    #     سال به کاربرهای فعلی نمی‌رسد و هیچ‌کس نمی‌فهمد چرا.
+    for pat, lines in blocks.items():
+        if pat not in ("/", "/*", "/index.html", "/*.html"):
+            continue
+        for line in lines:
+            if not line.lower().startswith("cache-control:"):
+                continue
+            v = line.split(":", 1)[1].strip()
+            m2 = re.search(r"max-age=(\d+)", v)
+            assert "immutable" not in v.lower() and not (m2 and int(m2.group(1)) > 300), (
+                "the pattern %r in web/_headers caches index.html hard (%r). index.html "
+                "carries no content hash, so a new deployment would never reach anyone "
+                "who already has the old one." % (pat, v))
+
+    # ۳) پیش‌شرط ایمنی‌ِ قاعده‌ی بالا: هر js کنار index.html باید نامش هشِ
+    #    خودش را حمل کند، وگرنه یک بازسازی بی‌سروصدا زیر یک آدرس immutable
+    #    یک سال گم می‌شود.
+    js_files = sorted(f for f in os.listdir(webdir)
+                       if f.endswith(".js") and os.path.isfile(os.path.join(webdir, f)))
+    name_re = re.compile(r"^(.+)\.([0-9a-f]{8})\.js$")
+    for f in js_files:
+        m = name_re.match(f)
+        assert m, (
+            "web/%s sits next to index.html without a content hash in its name. The "
+            "blanket immutable rule in web/_headers applies to every *.js file here, so "
+            "an unhashed one would be cached for a year with no way to invalidate it." % f)
+        want = hashlib.sha256(open(os.path.join(webdir, f), "rb").read()).hexdigest()[:8]
+        assert m.group(2) == want, (
+            "web/%s claims hash %s but its real sha256 starts with %s — the file changed "
+            "without its name changing, which is exactly what the immutable rule cannot "
+            "survive." % (f, m.group(2), want))
+
+    # ۴) هر ارجاعی در index.html باید به فایلی که واقعاً وجود دارد باشد —
+    #    وگرنه یک تغییرِ نام جاماندهْ سایت را از کار می‌اندازد.
+    idx_src = open(os.path.join(webdir, "index.html"), encoding="utf-8").read()
+    refs = sorted(set(re.findall(r'"\./([A-Za-z0-9_.-]+\.js)"', idx_src)))
+    assert refs, "no local .js script reference found in index.html — re-check this guard"
+    for r_ in refs:
+        assert os.path.exists(os.path.join(webdir, r_)), (
+            "index.html references \"./%s\" but no such file exists next to it — "
+            "the page would 404 loading it." % r_)
+
+    # ۵) دستور ساخت مستندشده باید هم _headers و هم همه‌ی js را کپی کند.
+    wr_src = open(os.path.join(HERE, "..", "..", "wrangler.toml"), encoding="utf-8").read()
+    build_line = next((l for l in wr_src.splitlines() if "cp web/index.html" in l), None)
+    assert build_line, "wrangler.toml no longer documents the Build command — re-check this guard"
+    assert "web/_headers" in build_line, (
+        "the documented Build command does not copy web/_headers, so the immutable cache "
+        "rule silently never ships: %s" % build_line.strip())
+    assert "web/*.js" in build_line, (
+        "the documented Build command no longer globs web/*.js, so a rebuilt vendor bundle "
+        "with a new hash in its name would need someone to remember to edit this line by "
+        "hand: %s" % build_line.strip())
+
+    print("[cache] vendor bundles are content-addressed and immutable: %s (max-age=%s)"
+          % (", ".join(js_files), mage.group(1)))
 
 def check_brand_palette():
     """پالت «ارکید» — سه چیز که هرکدام یک‌بار واقعاً شکسته بودند.
@@ -428,6 +536,7 @@ async def check_real_page_from_disk(pw):
 
 check_no_remote_code()
 check_gt_proxy_worker()
+check_asset_cache_headers()
 check_event_allowlists()
 check_og_tags()
 check_brand_palette()
@@ -480,7 +589,7 @@ async def main():
         cands = sorted(set(re.findall(r"0x[0-9a-fA-F]{40}", src_all)))
         chk = await b.new_page()
         await chk.set_content("<html></html>")
-        await chk.add_script_tag(path=os.path.join(HERE, "..", "ethers.umd.min.js"))
+        await chk.add_script_tag(path=vendor_path("ethers.umd.min"))
         bad = await chk.evaluate(
             "list => list.filter(a => { try { ethers.getAddress(a); return false; }"
             " catch { return true; } })", cands)
@@ -1041,6 +1150,149 @@ async def main():
             "an unknown sell test must not be scored as if the token failed it"
         assert risk["knownBad"] > risk["unknownScore"], \
             "a token we know cannot be sold must still be penalised"
+
+        # بررسی‌های آشتی: یک شبیه‌سازیِ واقعاً اجراشده باید بر یک کوت غالب شود،
+        # و پنل ایمنی نباید چیزی خلاف پنل خروج بگوید (باگ ۹).
+
+        # ۱) blocked باید یک "Sellable" مبتنی بر کوت را بی‌اثر کند
+        rev = await pg.evaluate("""() => {
+            const addr = "0x1111111111111111111111111111111111111111";
+            const rep = {address: addr, symbol: "TST", native: false,
+                findings: [
+                    {level: "ok", title: "Sellable", detail: "Round-trip cost about 0.00%."},
+                    {level: "ok", title: "Liquidity present", detail: "About $120,000 across known pools."}
+                ],
+                owner: null, isProxy: false, liqUsd: 120000,
+                canBuy: true, canSell: true, unknown: 0};
+            rep.score = riskScore(rep); rep.verdict = verdictOf(rep);
+            const beforeScore = rep.score;
+            exitCache[addr] = {state: "blocked", lossPct: null, at: Date.now()};
+            const after = reconcileExit(rep);
+            delete exitCache[addr];
+            return {
+                afterTitles: after.findings.map(f => f.title),
+                afterLevels: after.findings.map(f => f.level),
+                afterScore: after.score,
+                afterCanSell: after.canSell,
+                afterVerdict: after.verdict.txt,
+                beforeScore,
+                rawTitles: rep.findings.map(f => f.title)
+            };
+        }""")
+        print("[risk] live sell revert overrides the quote: before=%s after=%s titles=%s"
+              % (rev["beforeScore"], rev["afterScore"], rev["afterTitles"]))
+        assert "Sellable" not in rev["afterTitles"], \
+            "a live revert must remove the quote-based Sellable finding"
+        assert "Sell simulation reverted" in rev["afterTitles"], \
+            "a live revert must add its own finding"
+        idx = rev["afterTitles"].index("Sell simulation reverted")
+        assert rev["afterLevels"][idx] == "critical", \
+            "a proven revert must be reported as critical, not softened"
+        assert rev["afterScore"] > rev["beforeScore"], \
+            "overriding to a proven revert must raise the score, not lower it"
+        assert rev["afterCanSell"] is False, \
+            "a proven revert must mark canSell false"
+        assert "Sellable" in rev["rawTitles"], \
+            "the cached report object must not be mutated in place"
+
+        # ۲) verified باید یک "Cannot get a sell quote" بدبینانه را نجات دهد
+        ver = await pg.evaluate("""() => {
+            const addr = "0x2222222222222222222222222222222222222222";
+            const rep = {address: addr, symbol: "TST2", native: false,
+                findings: [
+                    {level: "critical", title: "Cannot get a sell quote",
+                     detail: "No pool would quote selling this token back."}
+                ],
+                owner: null, isProxy: false, liqUsd: 120000,
+                canBuy: true, canSell: false, unknown: 0};
+            rep.score = riskScore(rep); rep.verdict = verdictOf(rep);
+            const beforeScore = rep.score;
+            exitCache[addr] = {state: "verified", lossPct: 0.4, at: Date.now()};
+            const after = reconcileExit(rep);
+            delete exitCache[addr];
+            return {
+                afterTitles: after.findings.map(f => f.title),
+                afterLevels: after.findings.map(f => f.level),
+                afterScore: after.score,
+                afterCanSell: after.canSell,
+                beforeScore
+            };
+        }""")
+        print("[risk] a verified round trip clears the quote-only honeypot flag: before=%s after=%s"
+              % (ver["beforeScore"], ver["afterScore"]))
+        assert "Cannot get a sell quote" not in ver["afterTitles"], \
+            "a verified live sell must clear the pessimistic quote-only finding"
+        assert "No sell quote from the reference pool" in ver["afterTitles"], \
+            "a verified live sell must explain why the quote was pessimistic"
+        idx = ver["afterTitles"].index("No sell quote from the reference pool")
+        assert ver["afterLevels"][idx] == "info", \
+            "a resolved false alarm must be informational, not scary"
+        assert ver["afterCanSell"] is True, \
+            "a verified live sell must mark canSell true"
+        assert ver["afterScore"] < ver["beforeScore"], \
+            "clearing a false honeypot flag must lower the score"
+
+        # ۳) unknown/estimated/غایب چیزی را عوض نمی‌کنند و همان شیء برمی‌گردد
+        untouched = await pg.evaluate("""() => {
+            const addr = "0x3333333333333333333333333333333333333333";
+            const mk = () => ({address: addr, symbol: "TST3", native: false,
+                findings: [{level: "ok", title: "Sellable", detail: "x"}],
+                owner: null, isProxy: false, liqUsd: 50000,
+                canBuy: true, canSell: true, unknown: 0});
+            const repU = mk();
+            exitCache[addr] = {state: "unknown", lossPct: null, at: Date.now()};
+            const sameU = reconcileExit(repU) === repU;
+
+            const repE = mk();
+            exitCache[addr] = {state: "estimated", lossPct: 1.2, at: Date.now()};
+            const sameE = reconcileExit(repE) === repE;
+
+            delete exitCache[addr];
+            const repA = mk();
+            const sameA = reconcileExit(repA) === repA;
+            return {sameU, sameE, sameA};
+        }""")
+        print("[risk] an untested or estimated exit does not touch the report: unknown=%s estimated=%s absent=%s"
+              % (untouched["sameU"], untouched["sameE"], untouched["sameA"]))
+        assert untouched["sameU"] and untouched["sameE"] and untouched["sameA"], \
+            "an unknown/estimated/absent exit result must return the very same report object"
+
+        # ۴) پنل ایمنی روی صفحه واقعاً همان چیزی را نشان دهد که پنل خروج می‌گوید
+        has_safety_body = await pg.evaluate("() => !!document.getElementById('safetyBody')")
+        assert has_safety_body, \
+            "the harness page has no #safetyBody element — cannot verify the rendered panel"
+        dom = await pg.evaluate("""() => {
+            const t = BASE_TOKENS.find(x => x.symbol === "cbBTC" && !x.native);
+            const addr = t.address.toLowerCase();
+            const savedRep = safetyCache[addr];
+            const savedExit = exitCache[addr];
+            const savedPage = tokenPage;
+            tokenPage = false;
+            safetyCache[addr] = {address: t.address, symbol: t.symbol, native: false,
+                findings: [
+                    {level: "ok", title: "Sellable", detail: "Round-trip cost about 0.00%."},
+                    {level: "ok", title: "Liquidity present", detail: "About $200,000 across known pools."}
+                ],
+                owner: null, isProxy: false, liqUsd: 200000,
+                canBuy: true, canSell: true, unknown: 0};
+            safetyCache[addr].score = riskScore(safetyCache[addr]);
+            safetyCache[addr].verdict = verdictOf(safetyCache[addr]);
+            exitCache[addr] = {state: "blocked", lossPct: null, at: Date.now()};
+            renderSafety(safetyCache[addr]);
+            const text = document.getElementById("safetyBody").innerText;
+            if (savedRep === undefined) delete safetyCache[addr]; else safetyCache[addr] = savedRep;
+            if (savedExit === undefined) delete exitCache[addr]; else exitCache[addr] = savedExit;
+            tokenPage = savedPage;
+            if (safetyCache[addr]) renderSafety(safetyCache[addr]);
+            else document.getElementById("safetyBody").innerHTML =
+                '<div class="empty">Pick a token to scan its contract.</div>';
+            return text;
+        }""")
+        print("[risk] the safety panel agrees with the live sell test: %r" % dom)
+        assert "Sell simulation reverted" in dom, \
+            "the rendered safety panel did not pick up the live sell revert"
+        assert "Sellable" not in dom, \
+            "the rendered safety panel still shows the contradicted quote-based verdict"
 
         # ک) دکمه‌ی گزارش مشکل باید به ایمیل واقعی برود
         mail = await pg.evaluate("() => LINKS.email")
@@ -2128,10 +2380,10 @@ async def main():
         wc_errs = []
         wcpg.on("pageerror", lambda e: wc_errs.append(str(e)))
         await wcpg.goto("http://127.0.0.1:%d/" % port)
-        wc_load = await wcpg.evaluate("""async () => {
+        wc_load = await wcpg.evaluate("""async (wcName) => {
             await new Promise((res, rej) => {
                 const s = document.createElement("script");
-                s.src = "./walletconnect.bundle.js";
+                s.src = "./" + wcName;
                 s.onload = res; s.onerror = () => rej(new Error("script failed"));
                 document.head.appendChild(s);
             });
@@ -2139,7 +2391,7 @@ async def main():
             return {registered: !!W,
                     hasInit: !!(W && W.EthereumProvider &&
                                 typeof W.EthereumProvider.init === "function")};
-        }""")
+        }""", os.path.basename(vendor_path("walletconnect.bundle")))
         await wcpg.close()
         print("[walletconnect] bundle loads standalone: registered=%s init=%s errors=%s"
               % (wc_load["registered"], wc_load["hasInit"], len(wc_errs)))
@@ -2967,6 +3219,60 @@ async def main():
         await ckpg.close()
         print("[token page] %s -> %s | %s" % (ck_path, ck_out, ck_box[:52]))
         print("[token page] stats=%r risk=%r" % (ck_stats[:44], ck_risk[:44]))
+
+        # ---- [stats] رد جفت مارکت‌کپ/FDV محال ----
+        # روی همان تابع واقعی renderTokenStats و همان گره‌ی DOM واقعی، نه یک
+        # کپی جدا از منطق. صفحه‌ی توکن را دوباره باز می‌کنیم چون tokenOut و
+        # metaCache فقط آنجا برپا هستند؛ metaCache را موقتاً برای یک آدرس
+        # سیم‌پیچی می‌کنیم تا داده‌ی ساختگی از همان مسیری بگذرد که داده‌ی
+        # واقعی می‌گذرد.
+        stpg = await b.new_page(viewport={"width": 1240, "height": 1000})
+        await stpg.goto("http://127.0.0.1:%d%s" % (port, ck_path))
+        await stpg.wait_for_timeout(3000)
+
+        async def stats_case(fx):
+            return await stpg.evaluate("""(fx) => {
+                const key = (tokenOut.native ? WETH_ADDR : tokenOut.address).toLowerCase();
+                const had = key in metaCache, orig = metaCache[key];
+                metaCache[key] = fx;
+                return renderTokenStats(tokenOut).then(() => {
+                    const box = document.getElementById(tokenPage ? "tk-tokStats" : "tokStats");
+                    const text = box.innerText;
+                    if (had) metaCache[key] = orig; else delete metaCache[key];
+                    return text;
+                });
+            }""", fx)
+
+        fx_impossible = {"market_cap_usd": "72860000000", "fdv_usd": "4260000000",
+                          "volume_usd": {"h24": "1000000"}, "total_reserve_in_usd": "500000"}
+        fx_normal = {"market_cap_usd": "34670000", "fdv_usd": "212500000",
+                     "volume_usd": {"h24": "1000000"}, "total_reserve_in_usd": "500000"}
+        fx_tol = {"market_cap_usd": "100000000", "fdv_usd": "100000000",
+                  "volume_usd": {"h24": "1000000"}, "total_reserve_in_usd": "500000"}
+
+        txt_impossible = await stats_case(fx_impossible)
+        txt_normal = await stats_case(fx_normal)
+        txt_tol = await stats_case(fx_tol)
+        await stpg.close()
+
+        print("[stats] impossible pair is refused: mc=%r fdv=%r note=%s"
+              % (fx_impossible["market_cap_usd"], fx_impossible["fdv_usd"],
+                 "impossible" in txt_impossible))
+        assert "$72.86B" not in txt_impossible and "$4.26B" not in txt_impossible, \
+            "an impossible market cap/FDV pair was printed anyway: %r" % txt_impossible[:200]
+        assert "impossible" in txt_impossible, \
+            "the impossible-pair note never appeared: %r" % txt_impossible[:200]
+        assert "$1.00M" in txt_impossible, \
+            "hiding the impossible pair also hid volume, which was not implicated: %r" \
+            % txt_impossible[:200]
+        assert "$34.67M" in txt_normal and "$212.50M" in txt_normal, \
+            "a legitimate market cap/FDV pair was hidden: %r" % txt_normal[:200]
+        assert "impossible" not in txt_normal, \
+            "a legitimate pair triggered the impossible-pair note: %r" % txt_normal[:200]
+        assert "impossible" not in txt_tol, \
+            "an equal market cap and FDV (fully circulating supply) was flagged as " \
+            "impossible: %r" % txt_tol[:200]
+
         assert re.match(r"^/t/0x[0-9a-fA-F]{40}$", ck_path), \
             "the share button did not build a token-page link: %s" % ck_path
         assert not ck_swap_open, (

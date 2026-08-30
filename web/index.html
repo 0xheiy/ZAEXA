@@ -5,8 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <script>
 /* ⚠️ روی /t/<آدرس> سند همین index.html است، ولی *نشانی* صفحه یک سطح
-   عمیق‌تر است. پس هر مسیر نسبی — «./ethers.umd.min.js»،
-   «./walletconnect.bundle.js» — نسبت به /t/ باز می‌شود و ۴۰۴ می‌گیرد، و
+   عمیق‌تر است. پس هر مسیر نسبی — «./ethers.umd.min.fd66c046.js»،
+   «./walletconnect.bundle.9d119cbe.js» — نسبت به /t/ باز می‌شود و ۴۰۴ می‌گیرد، و
    صفحه با «Could not load ethers» می‌ماند. یک <base> ریشه همه‌ی منابع را
    یکجا درست می‌کند.
    فقط روی همین مسیر اجرا می‌شود، پس باز کردن مستقیم فایل با file:// —
@@ -717,6 +717,9 @@ footer a{color:var(--tx3)}
   color:var(--tx3)}
 .tstat .v{font-size:14px;font-weight:640;margin-top:3px;font-variant-numeric:tabular-nums}
 @media(max-width:560px){.tstats{grid-template-columns:repeat(2,1fr)}}
+.statNote{grid-column:1/-1;background:var(--card);padding:9px 14px;font-size:11.5px;
+  line-height:1.5;color:var(--tx3)}
+.tkStats .statNote{border-radius:16px;box-shadow:var(--shs);padding:12px 16px}
 .walRow{display:flex;align-items:center;gap:12px;padding:12px 16px;cursor:pointer;
   border-radius:14px;margin:0 8px}
 .walRow:hover{background:var(--card2)}
@@ -1120,7 +1123,7 @@ const LINKS={
    اجرا نمی‌کند و اپ صریح می‌شکند — که هدف همان کامنت است.
    نگهبان [supply chain] در run.py هش را از خودِ فایل بازمحاسبه می‌کند تا این
    دو هرگز از هم دور نیفتند. */
-const ETHERS_SRC="./ethers.umd.min.js";
+const ETHERS_SRC="./ethers.umd.min.fd66c046.js";
 const ETHERS_SRI="sha384-6Zl0Pc8zjSz8KvmNeXRvUQgY4ryFb+BwDvKCmLYcBME0joAaru491tQgi9B7zsMM";
 function loadEthers(){return new Promise((res,rej)=>{
   const s=document.createElement("script");
@@ -1930,6 +1933,19 @@ function rememberExit2(x){rememberExit(x);return x;}
 function rememberExit(x){
   if(!x||!x.state||!tokenOut)return;
   exitCache[balKey(tokenOut)]={state:x.state,lossPct:x.lossPct,at:Date.now()};
+  refreshSafetyForExit();
+}
+// یک نتیجه‌ی تازه‌ی رفت‌وبرگشت رسید — اگر پنل ایمنی همین توکن باز است و
+// چیز تازه‌ای برای گفتن هست، دوباره رسم می‌شود. گزارش خام دست‌نخورده
+// می‌ماند؛ فقط reconcileExit روی آن اعمال می‌شود.
+function refreshSafetyForExit(){
+  if(!tokenOut||tokenOut.native||!tokenOut.address)return;
+  const raw=safetyCache[tokenOut.address.toLowerCase()];
+  if(!raw)return;
+  const now=reconcileExit(raw);
+  const sig=now._exitState||"";
+  if(sig===safetyShownExit)return;
+  renderSafety(raw);
 }
 function agoText(ms){
   const m=Math.floor((Date.now()-ms)/60000);
@@ -2566,7 +2582,7 @@ const SLOT_IMPL="0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382
 const selectorOf=s=>E.id(s).slice(2,10).toLowerCase();
 
 async function scanToken(token){
-  const rep={address:token.address,symbol:token.symbol,findings:[],owner:null,
+  const rep={address:token.address,symbol:token.symbol,findings:[],owner:null,native:!!token.native,
     // ⚠️ سه‌حالته، نه دوحالته: null یعنی «نپرسیدیم/نفهمیدیم».
     //    قبلاً false بود و امتیاز ریسک ۴۰ نمره جریمه می‌داد — یعنی متن
     //    درست می‌گفت «نامعلوم» ولی عدد کنارش رفتار می‌کرد انگار توکن
@@ -2647,7 +2663,7 @@ async function scanToken(token){
 function riskScore(rep){
   const ownerActive=rep.owner&&![ZERO.toLowerCase(),DEAD.toLowerCase()].includes(rep.owner.toLowerCase());
   const structural=["Cannot get a sell quote","Very thin liquidity","Shallow liquidity",
-    "Heavy round-trip loss","Not a contract"];
+    "Heavy round-trip loss","Not a contract","Sell simulation reverted","No sell route"];
   const down={critical:"high",high:"medium",medium:"info"};
   let c=0,h=0,m=0;
   rep.findings.forEach(f=>{
@@ -2670,6 +2686,40 @@ function verdictOf(rep){
   if(c>=1||h>=2||s>=30)return{txt:"Caution",tone:"warn"};
   if(h>=1||s>=15)return{txt:"Acceptable with care",tone:"warn"};
   return{txt:"No obvious red flags",tone:"pos"};
+}
+// ⚠️ دو زیرسیستم، دو منبع شواهد، هیچ‌کس آن‌ها را آشتی نمی‌دهد: checkTradability
+//    فقط کوت می‌گیرد، runExitCheck واقعاً خرید+فروش را در یک تراکنش شبیه‌سازی
+//    می‌کند روی زنجیره‌ی زنده. یک شبیه‌سازی که واقعاً اجرا شده بر یک کوت برتری
+//    دارد — این تابع همان اصل را پیاده می‌کند: هیچ پنلی نباید چیزی بگوید که
+//    پنل دیگر نقضش کند.
+const QUOTE_SELL_TITLES=["Sellable","Heavy round-trip loss","Cannot get a sell quote","Tradability unknown"];
+function reconcileExit(rep){
+  if(!rep)return rep;
+  if(rep.native)return rep;
+  if(!rep.address)return rep;
+  const c=exitCache[rep.address.toLowerCase()];
+  if(!c||!c.state)return rep;
+  let override=null;
+  if(c.state==="blocked"){
+    override={level:"critical",title:"Sell simulation reverted",
+      detail:"Quotes price a sell, but running the sell against the live chain reverted with your balance and approval in place. Treat the quoted round trip as unproven."};
+  }else if(c.state==="noexit"){
+    override={level:"critical",title:"No sell route",
+      detail:"The live check found no pool that would sell this back."};
+  }else if(c.state==="verified"){
+    if(!rep.findings.some(f=>f.title==="Cannot get a sell quote"))return rep;
+    override={level:"info",title:"No sell quote from the reference pool",
+      detail:"Quotes against USDC did not price a sell, but a live simulation sold it back inside one transaction. It is sellable through the route shown above."};
+  }else{
+    return rep;
+  }
+  const out=Object.assign({},rep);
+  out.findings=rep.findings.filter(f=>!QUOTE_SELL_TITLES.includes(f.title));
+  out.findings.push(override);
+  out.canSell=(c.state==="verified");
+  out.score=riskScore(out);out.verdict=verdictOf(out);
+  out._exitState=c.state;
+  return out;
 }
 /* عمق را از سمت توکن *شناخته‌شده* می‌سنجیم، نه از قیمت خود توکن که می‌تواند
    ساختگی باشد. دو اصلاح نسبت به نسخه‌ی قبل:
@@ -2872,12 +2922,17 @@ function tokenMeta(addr){
    همان درخواستی که برای لوگو و قیمت می‌زنیم این‌ها را هم برمی‌گرداند، پس
    هیچ تماس تازه‌ای اضافه نمی‌شود.
 
-   دو چیز عمدی:
+   سه چیز عمدی:
    • «تعداد هولدرها» اینجا نیست چون این منبع نمی‌دهدش. عدد نداشتن بهتر از
      عدد ساختن است.
    • market_cap_usd برای خیلی از توکن‌های تازه null است. آن وقت «—» نشان
      می‌دهیم، نه اینکه بی‌صدا FDV را جایش بگذاریم — آن دو یکی نیستند و
      قاطی‌کردنشان دقیقاً همان جایی است که کاربر گمراه می‌شود.
+   • مارکت‌کپ یعنی قیمت×عرضه‌ی در گردش، FDV یعنی قیمت×عرضه‌ی کل. عرضه‌ی
+     در گردش هرگز نمی‌تواند از عرضه‌ی کل بیشتر باشد، پس مارکت‌کپ > FDV
+     از نظر ریاضی محال است. اگر منبع چنین جفتی داد، عدد درست نیست — و
+     نمی‌دانیم کدام‌یک غلط است، پس هیچ‌کدام را نشان نمی‌دهیم؛ نمایش یک
+     عدد که می‌دانیم نادرست است بدتر از نبودِ آن عدد است.
    --------------------------------------------------------------------- */
 function fmtBig(n){
   if(n==null||!isFinite(n)||n<=0)return "—";
@@ -2906,9 +2961,14 @@ async function renderTokenStats(t){
   if(seq!==statsSeq)return;
   if(!a){box.hidden=true;return;}
   const num=v=>(v==null||v==="")?null:Number(v);
+  const mc=num(a.market_cap_usd),fdv=num(a.fdv_usd);
+  // مارکت‌کپ > FDV محال است (بالا توضیح داده شد). ۱٪ رواداری برای گرد کردن
+  // و اینکه دو عدد در دو لحظه‌ی کمی متفاوت نمونه‌برداری شده‌اند — نمونه‌ی
+  // واقعی ۱۷ برابر بود، نه ۱٪، پس این رواداری چیزی واقعی را پنهان نمی‌کند.
+  const impossiblePair=mc!=null&&fdv!=null&&isFinite(mc)&&isFinite(fdv)&&mc>0&&fdv>0&&mc>fdv*1.01;
   const rows=[
-    ["Market cap",fmtBig(num(a.market_cap_usd))],
-    ["FDV",fmtBig(num(a.fdv_usd))],
+    ["Market cap",impossiblePair?"—":fmtBig(mc)],
+    ["FDV",impossiblePair?"—":fmtBig(fdv)],
     ["Volume 24h",fmtBig(num(a.volume_usd&&a.volume_usd.h24))],
     ["Liquidity",fmtBig(num(a.total_reserve_in_usd))],
   ];
@@ -2916,7 +2976,10 @@ async function renderTokenStats(t){
   if(rows.every(r=>r[1]==="—")){box.hidden=true;return;}
   box.innerHTML=rows.map(([k,v])=>
     `<div class="${tokenPage?"tkStat":"tstat"}"><div class="k">${esc(k)}</div>`+
-    `<div class="v">${esc(v)}</div></div>`).join("");
+    `<div class="v">${esc(v)}</div></div>`).join("")+
+    (impossiblePair?'<div class="statNote">Market cap and FDV are hidden. The price source '+
+      'reported a market cap larger than the fully diluted value, which is impossible — '+
+      'one of the two is wrong and we cannot tell which.</div>':"");
   box.hidden=false;
 }
 async function priceUsdOf(t){
@@ -3568,7 +3631,10 @@ async function runScan(token){
     panel("safetyBody").innerHTML='<div class="empty">Scan could not complete — the network did not answer.</div>';
   }
 }
+let safetyShownExit="";
 function renderSafety(rep){
+  rep=reconcileExit(rep);
+  safetyShownExit=rep._exitState||"";
   const col=`var(--${rep.verdict.tone})`,C=2*Math.PI*25;
   let h=`<div class="rhead"><div class="ring"><svg width="60" height="60">
       <circle cx="30" cy="30" r="25" fill="none" stroke="var(--raise)" stroke-width="6"/>
@@ -3741,7 +3807,7 @@ function loadWalletConnect(){
   if(wcLoading)return wcLoading;
   wcLoading=new Promise((res,rej)=>{
     const s=document.createElement("script");
-    s.src="./walletconnect.bundle.js";      // محلی — عمداً بدون CDN
+    s.src="./walletconnect.bundle.9d119cbe.js";      // محلی — عمداً بدون CDN
     s.onload=()=>window.WCProvider?res(window.WCProvider)
       :rej(new Error("WalletConnect loaded but did not register."));
     s.onerror=()=>rej(new Error("WalletConnect could not be loaded."));

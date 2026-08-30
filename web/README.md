@@ -5,8 +5,8 @@ One file. No server, no build step, no install.
 ```
 web/
   index.html               the entire application (HTML + CSS + JS)
-  ethers.umd.min.js        vendored, not loaded from a CDN — see below
-  walletconnect.bundle.js  vendored too, built by scripts/build_walletconnect.sh
+  ethers.umd.min.<hash>.js        vendored, not loaded from a CDN — see below
+  walletconnect.bundle.<hash>.js  vendored too, built by scripts/build_walletconnect.sh
   test/
     run.py                 Playwright suite; builds its own harness from index.html
     stub-ethers.js         fake ethers + a synthetic Base network, no sockets

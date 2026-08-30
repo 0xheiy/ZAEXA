@@ -86,7 +86,7 @@ and "no backend" means little if three other origins can still ship you code.
 
 ```
 web/index.html            the whole app
-web/ethers.umd.min.js     vendored — no third-party script is ever loaded
+web/ethers.umd.min.<hash>.js  vendored — no third-party script is ever loaded
 web/test/run.py           Playwright suite, builds its harness from index.html
 web/test/stub-ethers.js   fake ethers + synthetic AMM, no network
 contracts/src/            SwapExecutor.sol
