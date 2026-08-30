@@ -14,6 +14,7 @@ web/test/shot-*.png
 __pycache__/
 *.pyc
 node_modules/
+.venv/
 contracts/lib/
 .freebuff/
 .freebuff/

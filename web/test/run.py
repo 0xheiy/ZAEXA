@@ -1472,8 +1472,15 @@ async def main():
             "a genuine revert must still be treated as one"
 
         # ---- 2c. DEX coverage gate ----
+        # ⚠️ این خط درباره‌ی مین‌نت حرف نمی‌زند. `stub-ethers.js` عمداً برای
+        #    CANDIDATE_ROUTERS «کد ندارد» برمی‌گرداند تا مسیرِ «کاندیدِ
+        #    تأییدنشده» در UI آزموده شود. یک بار همین خط ماه‌ها به‌جای
+        #    واقعیتِ زنجیره خوانده شد و «سه صرافی مرده‌اند» در حافظه ثبت شد؛
+        #    روی زنجیره هر شش‌تا PASS دادند و هر شش‌تا لیست‌سفید بودند.
+        #    برچسب زیر برای این است که آن اشتباه دوباره تکرار نشود.
         cov = await pg.inner_text("#coverage")
-        print("[coverage] %s" % cov.replace("\n", " | "))
+        print("[coverage] (FIXTURE, not mainnet - the stub forces the candidate "
+              "routers to look code-less) %s" % cov.replace("\n", " | "))
         assert "Routing through" in cov
         assert "no contract" in cov, "unverified DEXes must be shown with a reason, not hidden"
         assert "PancakeSwap" not in cov, "PancakeSwap should now pass the gates, not sit in the excluded list"
