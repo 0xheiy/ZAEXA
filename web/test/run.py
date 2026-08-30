@@ -3467,6 +3467,114 @@ async def main():
             "the main view's safety card is still showing the initial placeholder after leaving "
             "the token page: %r" % nv_safety[:120])
 
+        # ---- [faq] پرسش‌های متداول: نه ابزار است، نه دکمه‌ای در ناوبری دارد ----
+        # فقط از پانویس و از #faq می‌رسند به آن، دقیقاً مثل view-token که هیچ
+        # دکمه‌ای در نوار بالا ندارد. آدرسِ قرارداد باید تنها از CHAIN.executor
+        # بیاید — کپیِ هاردکد همان اشتباهی است که check_one_executor_address
+        # قبلاً یک‌بار پیدایش کرده.
+        faqpg = await b.new_page(viewport={"width": 1240, "height": 1000})
+        await faqpg.goto("http://127.0.0.1:%d/test/harness.html#faq" % port)
+        await faqpg.wait_for_timeout(1200)
+        faq_on = await faqpg.evaluate(
+            "() => document.getElementById('view-faq').classList.contains('on')")
+        faq_nav_btns = await faqpg.eval_on_selector_all(
+            "#nav [data-view]", "els => els.map(e => e.dataset.view)")
+        faq_nav_selected = await faqpg.eval_on_selector_all(
+            "#nav [data-view].on, #nav [data-view][aria-selected=true]",
+            "els => els.map(e => e.dataset.view)")
+        faq_hash = await faqpg.evaluate("() => location.hash")
+        print("[faq] route=%s navButtons=%r hash=%s" % (faq_on, faq_nav_btns, faq_hash))
+        assert faq_on, "navigating to #faq did not turn on view-faq"
+        assert "faq" not in faq_nav_btns, (
+            "the FAQ got a nav button (%r) — the owner explicitly rejected a fourth tab; "
+            "the FAQ is reached only from the footer and #faq" % faq_nav_btns)
+        assert not faq_nav_selected, (
+            "some nav button is marked selected for the FAQ view (%r), though none exists "
+            "for it" % faq_nav_selected)
+
+        chain_executor = await faqpg.evaluate("() => CHAIN.executor")
+        faq_addr_text = (await faqpg.text_content("#view-faq #faqCtrLink") or "").strip()
+        faq_addr_href = await faqpg.get_attribute("#view-faq #faqCtrLink", "href") or ""
+        addr_match = faq_addr_text.lower() == chain_executor.lower()
+        href_match = chain_executor.lower() in faq_addr_href.lower()
+        print("[faq] address matches CHAIN.executor: %s" % (addr_match and href_match))
+        assert addr_match, (
+            "the FAQ's rendered contract address (%r) does not match CHAIN.executor (%r) — "
+            "looks like a hardcoded second source of truth" % (faq_addr_text, chain_executor))
+        assert href_match, (
+            "the FAQ's BaseScan link (%r) does not contain CHAIN.executor (%r)"
+            % (faq_addr_href, chain_executor))
+
+        await faqpg.set_viewport_size({"width": 390, "height": 844})
+        await faqpg.wait_for_timeout(500)
+        doc_scroll = await faqpg.evaluate("() => document.documentElement.scrollWidth")
+        doc_client = await faqpg.evaluate("() => document.documentElement.clientWidth")
+        # ⚠️ خودِ سایت `html,body{overflow-x:hidden}` دارد — و این باعث می‌شود
+        # documentElement.scrollWidth روی کروم به clientWidth کلمپ شود، حتی
+        # وقتی داخلش واقعاً یک عنصر پهن‌تر از صفحه هست (خاصیتِ خودِ ریشه‌ی
+        # سند، نه یک فرزندش). یعنی همین سنجش به‌تنهایی یک کارتِ ۹۰۰ پیکسلی
+        # ثابت را در ویوپورت ۳۹۰ پیکسلی نمی‌بیند. body.scrollWidth این
+        # کلمپ را ندارد، پس همراهش سنجیده می‌شود تا کاوشگر واقعاً کور نباشد.
+        body_scroll = await faqpg.evaluate("() => document.body.scrollWidth")
+        faq_first_visible = await faqpg.is_visible("#view-faq .faqItem:first-of-type .faqA")
+        print("[faq] 390px: docScroll=%d docClient=%d (bodyScroll=%d)"
+              % (doc_scroll, doc_client, body_scroll))
+        assert doc_scroll <= doc_client + 1, (
+            "the FAQ overflows horizontally at 390px: scrollWidth=%d clientWidth=%d"
+            % (doc_scroll, doc_client))
+        assert body_scroll <= doc_client + 1, (
+            "the FAQ overflows horizontally at 390px: body.scrollWidth=%d viewport=%d — "
+            "documentElement.scrollWidth alone missed this because the site's own "
+            "html,body{overflow-x:hidden} clamps it to clientWidth"
+            % (body_scroll, doc_client))
+        assert faq_first_visible, "the first FAQ entry's answer is not visible at 390px"
+        await faqpg.close()
+
+        # پانویس باید به همان‌جا برسد، و نوار بالا باید بتواند از آن‌جا بیرون ببرد
+        faqnavpg = await b.new_page(viewport={"width": 1240, "height": 1000})
+        await faqnavpg.goto("http://127.0.0.1:%d/test/harness.html#swap" % port)
+        await faqnavpg.wait_for_timeout(1200)
+        await faqnavpg.click("#faqLink")
+        await faqnavpg.wait_for_timeout(600)
+        faqnav_on = await faqnavpg.evaluate(
+            "() => document.getElementById('view-faq').classList.contains('on')")
+        faqnav_hash = await faqnavpg.evaluate("() => location.hash")
+        print("[faq] footer link: view-faq on=%s hash=%s" % (faqnav_on, faqnav_hash))
+        assert faqnav_on, "clicking the footer FAQ link did not open view-faq"
+        assert faqnav_hash == "#faq", (
+            "the footer FAQ link did not land on #faq: hash=%s" % faqnav_hash)
+
+        await faqnavpg.click('#nav [data-view="swap"]')
+        await faqnavpg.wait_for_timeout(600)
+        faq_leave_swap_on = await faqnavpg.evaluate(
+            "() => document.getElementById('view-swap').classList.contains('on')")
+        faq_leave_hash = await faqnavpg.evaluate("() => location.hash")
+        faq_leave_tokenPage = await faqnavpg.evaluate("() => tokenPage")
+        print("[faq] leave: swapOn=%s hash=%s tokenPage=%s"
+              % (faq_leave_swap_on, faq_leave_hash, faq_leave_tokenPage))
+        assert faq_leave_swap_on, "clicking the nav Swap button from the FAQ did not open view-swap"
+        assert faq_leave_hash == "#swap", (
+            "leaving the FAQ via the nav did not update the hash: %s" % faq_leave_hash)
+        assert faq_leave_tokenPage is False, (
+            "leaving the FAQ via the nav left tokenPage=%r" % faq_leave_tokenPage)
+        await faqnavpg.close()
+
+        # بیکن آنالیتیکس واقعاً روی سیم — ثابت می‌کند دو فهرست (صفحه و Worker)
+        # واقعاً توافق دارند، نه فقط این‌که نگهبان ایستا سبز است
+        faqevpg = await b.new_page(viewport={"width": 1240, "height": 1000})
+        faqev_seen = await watch_events(faqevpg)
+        await faqevpg.goto("http://127.0.0.1:%d/test/harness.html#swap" % port)
+        await faqevpg.wait_for_timeout(1200)
+        await faqevpg.click("#faqLink")
+        await faqevpg.wait_for_timeout(600)
+        await faqevpg.close()
+        faqev_names = [_json.loads(raw)["e"] for raw in faqev_seen]
+        faq_beacon_ok = "view:faq" in faqev_names
+        print("[faq] view:faq beacon: %s" % faq_beacon_ok)
+        assert faq_beacon_ok, (
+            "no view:faq beacon reached the wire (saw %s) — a name missing from either "
+            "allow-list is dropped with a 400 and nobody notices" % faqev_names)
+
         # Global Privacy Control یک «نه»ی صریح است و باید همه‌چیز را خاموش کند
         gpcpg = await b.new_page(viewport={"width": 1240, "height": 1000})
         await gpcpg.add_init_script(

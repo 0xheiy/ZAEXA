@@ -543,6 +543,33 @@ main{max-width:1140px;margin:0 auto;padding:8px 20px 56px;display:flex;flex-dire
 .note pre{white-space:pre-wrap;word-break:break-all;font-size:10.5px;margin:7px 0 0;
   max-height:170px;overflow:auto;opacity:.85}
 .note summary{cursor:pointer;margin-top:6px;font-size:11.5px;opacity:.85}
+/* ---------------- faq ---------------- */
+/* پرسش‌های متداول ابزار نیست، پس نه دکمه‌ای در نوار بالا دارد و نه از
+   نوار بالا می‌آید — فقط از پانویس و از #faq. ستون متن عمداً باریک نگه
+   داشته شده (~68ch): این صفحه برای خواندن است، نه برای پر کردن عرض کارت. */
+.faqCard{padding:26px 22px 6px}
+.faqWrap{max-width:68ch;margin:0 auto}
+.faqH{margin:0 0 6px;font-size:21px;font-weight:700;color:var(--tx);line-height:1.3}
+.faqSub{margin:0 0 20px;color:var(--tx2);font-size:14px;line-height:1.6}
+.faqItem{border-top:1px solid var(--line);padding:15px 0}
+.faqItem:first-of-type{border-top:none;padding-top:0}
+.faqItem summary{cursor:pointer;list-style:none;display:flex;align-items:center;gap:11px;
+  font-weight:620;font-size:14.5px;color:var(--tx);line-height:1.4}
+.faqItem summary::-webkit-details-marker{display:none}
+.faqQ{width:22px;height:22px;border-radius:999px;flex:none;background:var(--raise);
+  box-shadow:var(--shs);color:var(--tx2);font-size:13px;font-weight:700;
+  display:flex;align-items:center;justify-content:center;transition:.16s}
+.faqQ::before{content:"+"}
+.faqItem[open] .faqQ{background:var(--pglow);color:var(--pos)}
+.faqItem[open] .faqQ::before{content:"–"}
+.faqA{margin:10px 0 0 33px;color:var(--tx2);font-size:13.5px;line-height:1.65}
+.faqA b{color:var(--tx);font-weight:660}
+.faqA .mono{color:var(--tx)}
+@media(max-width:480px){
+  .faqCard{padding:20px 16px 4px}
+  .faqH{font-size:19px}
+  .faqA{margin-left:0}
+}
 .empty{padding:34px 20px;text-align:center;color:var(--tx3);font-size:13px;line-height:1.6}
 /* حالت خالیِ Portfolio و Flow تنها چیزِ روی صفحه است — بقیه‌ی صفحه واقعاً
    خالی است. پس این بلوک باید بگوید صفحه چه نشان می‌دهد و یک راه ورود بدهد،
@@ -1050,6 +1077,72 @@ footer a{color:var(--tx3)}
   <p class="tkFine">Heuristics on public bytecode, not an audit. A clean score is not a
     guarantee.</p>
 </div>
+
+<!-- پرسش‌های متداول ابزار نیست، یک صفحه‌ی توضیح است — بدون دکمه در ناوبری بالا
+     (تنها راه ورود: پانویس و #faq)، دقیقاً مثل view-token. -->
+<div class="view" id="view-faq">
+  <section class="card faqCard">
+    <div class="faqWrap">
+      <h1 class="faqH">How ZAEXA works</h1>
+      <p class="faqSub">Straight answers, including the ones that are not flattering.</p>
+
+      <details class="faqItem" open>
+        <summary><span class="faqQ"></span>What is ZAEXA?</summary>
+        <div class="faqA"><p>A DEX aggregator on Base. When you enter an amount, it asks every pool it knows about on Base for a price, then builds the route that returns you the most — splitting your order across several pools when that pays better. It all happens in one transaction from your wallet.</p></div>
+      </details>
+
+      <details class="faqItem">
+        <summary><span class="faqQ"></span>Do you hold my money?</summary>
+        <div class="faqA"><p>No. Your tokens leave your wallet, move through the pools, and come back to your wallet inside a single transaction. Nothing of yours sits in the contract between transactions. There is no account, no deposit, and no backend — the app runs entirely in your browser.</p></div>
+      </details>
+
+      <details class="faqItem">
+        <summary><span class="faqQ"></span>What am I approving, and what is this contract?</summary>
+        <div class="faqA"><p>The contract is <b>SwapExecutor</b>, at <a id="faqCtrLink" class="mono" target="_blank" rel="noopener"></a> on Base. Its source is verified on BaseScan and on Sourcify, so you can read exactly what it does before you trust it. By default the app asks you to approve only the amount of the swap you are making — not an unlimited allowance.</p></div>
+      </details>
+
+      <details class="faqItem">
+        <summary><span class="faqQ"></span>My wallet's security extension shows a red warning. Is something wrong?</summary>
+        <div class="faqA"><p>Almost certainly not, and it is worth knowing what these tools are actually saying.<br><br>
+          <b>Pocket Universe</b> shows "This is not covered — this is not insured." That is about their optional paid insurance product, not about your transaction. Their own simulation of a ZAEXA swap shows the correct amounts in and out, and flags nothing.<br><br>
+          <b>Rabby</b> shows "Unknown Signature Type" and leaves the Protocol row empty. That means their contract database has no label for us yet — a new project, not a suspicious one. Rabby's balance-change simulation still runs, and it is correct.<br><br>
+          What to check in any wallet, always: the amounts you send and receive, and that the request comes from <b>zaexa.com</b>.</p></div>
+      </details>
+
+      <details class="faqItem">
+        <summary><span class="faqQ"></span>Has the contract been audited?</summary>
+        <div class="faqA"><p>No. The source is public and verified, it is covered by 67 tests, and it has been running on Base since 18 August 2026 — but no third party has audited it. That is a real difference, and you should size your trades accordingly.</p></div>
+      </details>
+
+      <details class="faqItem">
+        <summary><span class="faqQ"></span>What can the owner do?</summary>
+        <div class="faqA"><p>Nothing to your funds. The contract holds nothing between transactions, and the owner cannot take tokens out of your wallet, cannot pause you, and cannot change the code — the contract is not upgradeable.<br><br>
+          What the owner key <i>can</i> do, exactly: change the protocol fee, up to a 1% ceiling written into the contract that even the owner cannot raise; change which DEX routers the contract is allowed to call; withdraw tokens or ETH that end up stranded in the contract by accident; and hand ownership to another address, in two steps.<br><br>
+          The router list is the one worth watching, since the contract will only ever call a router on it. Your protection is the minimum-output check: if a swap would return you less than the minimum shown before you signed, the whole transaction reverts and you keep your tokens.</p></div>
+      </details>
+
+      <details class="faqItem">
+        <summary><span class="faqQ"></span>What are the fees?</summary>
+        <div class="faqA"><p>The protocol fee is currently <b>0%</b>. You pay the pools' own fees, which are shown next to each venue, and network gas. Nothing else.</p></div>
+      </details>
+
+      <details class="faqItem">
+        <summary><span class="faqQ"></span>What do you collect about me?</summary>
+        <div class="faqA"><p>Anonymous counts, and only four things: which view was opened, a few funnel steps, whether the screen is mobile or desktop, and a country code. Never your wallet address, the amount, the token, your IP, user agent, referrer or cookies — and no session or visitor identifier of any kind, so the counts can never be assembled back into a person. If your browser sends Global Privacy Control, nothing is recorded at all.</p></div>
+      </details>
+
+      <details class="faqItem">
+        <summary><span class="faqQ"></span>Why did my swap say "Simulation failed"?</summary>
+        <div class="faqA"><p>Every swap is simulated against the live chain before anything is broadcast. If that simulation fails, nothing is sent and you pay no gas. It is the check that costs you nothing and saves you a failed transaction.</p></div>
+      </details>
+
+      <details class="faqItem">
+        <summary><span class="faqQ"></span>What is the Exit check?</summary>
+        <div class="faqA"><p>Before you buy, it buys the token and sells it straight back inside one simulated transaction, then shows what that round trip actually costs. A token that cannot be sold back shows up right there. It is the honeypot test most interfaces do not run.</p></div>
+      </details>
+    </div>
+  </section>
+</div>
 </main>
 
 <footer>
@@ -1062,6 +1155,7 @@ footer a{color:var(--tx3)}
       <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2a10 10 0 0 0-3.2 19.5c.5.1.7-.2.7-.5v-1.8c-2.8.6-3.4-1.3-3.4-1.3-.4-1.2-1.1-1.5-1.1-1.5-.9-.6.1-.6.1-.6 1 .1 1.5 1 1.5 1 .9 1.5 2.3 1.1 2.9.8.1-.7.4-1.1.6-1.4-2.2-.3-4.6-1.1-4.6-5 0-1.1.4-2 1-2.7-.1-.3-.4-1.3.1-2.6 0 0 .8-.3 2.7 1a9.4 9.4 0 0 1 5 0c1.9-1.3 2.7-1 2.7-1 .5 1.3.2 2.3.1 2.6.6.7 1 1.6 1 2.7 0 3.9-2.4 4.7-4.6 5 .4.3.7 1 .7 2v2.9c0 .3.2.6.7.5A10 10 0 0 0 12 2z"/></svg></a>
     <button id="feedbackBtn" class="feedback">Report a problem</button>
   </div>
+  <a href="#faq" id="faqLink">How this works &amp; FAQ</a> ·
   Non-custodial · runs entirely in your browser · no backend ·
   executor <a id="ctrLink" target="_blank" rel="noopener" class="mono"></a> · source verified on BaseScan ·
   price history by <a href="https://www.geckoterminal.com" target="_blank" rel="noopener">GeckoTerminal</a>
@@ -2199,7 +2293,7 @@ function gtWire(u){return gtProxy&&u.startsWith(GT)?gtProxy+u.slice(GT.length):u
 const EV_ENABLED=true;
 const EV_NAMES=[
   "load",
-  "view:swap","view:folio","view:flow","view:token",
+  "view:swap","view:folio","view:flow","view:token","view:faq",
   "check:open",
   "wallet:open","wallet:on",
   "quote:ok","quote:none",
@@ -4858,7 +4952,7 @@ function leaveTokenPage(v){
 }
 function setView(v,push){
   if(v&&v.indexOf("?")>=0)v=v.slice(0,v.indexOf("?"));
-  if(!["swap","folio","flow","token"].includes(v))v="swap";
+  if(!["swap","folio","flow","token","faq"].includes(v))v="swap";
   /* اگر از صفحه‌ی توکن بیرون می‌رویم، آدرس را خودِ leaveTokenPage عوض
      می‌کند، پس دیگر hash نباید دوباره نوشته شود. */
   const leaving=tokenPage&&v!=="token";
@@ -4922,6 +5016,10 @@ function wire(){
   };
   $("ctrLink").href=`${CHAIN.explorer}/address/${CHAIN.executor}#code`;
   $("ctrLink").textContent=shortAddr(CHAIN.executor);
+  // پرسش‌های متداول: همان لینک، آدرس این‌بار کامل — نه برای اینکه شبیه‌تر
+  // شود، بلکه چون کاوشگر [faq] دقیقاً همین متن را با CHAIN.executor می‌سنجد.
+  $("faqCtrLink").href=`${CHAIN.explorer}/address/${CHAIN.executor}#code`;
+  $("faqCtrLink").textContent=CHAIN.executor;
   $("themeBtn").onclick=()=>{theme=theme==="dark"?"light":"dark";storeTheme(theme);applyTheme();};
   $("shareBtn").onclick=()=>copyLink(shareUrl(),$("shareBtn"));
   $("connectBtn").onclick=()=>{if(!account)connect();else if(walletChainId!==CHAIN.id)switchNetwork();else toggleWalletMenu();};

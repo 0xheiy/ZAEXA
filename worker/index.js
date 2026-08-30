@@ -85,7 +85,7 @@ const TOKEN_PAGE = /^\/t\/0x[0-9a-fA-F]{40}\/?$/;
 
 const EV_OK = new Set([
   "load",
-  "view:swap", "view:folio", "view:flow", "view:token",
+  "view:swap", "view:folio", "view:flow", "view:token", "view:faq",
   "check:open",
   "wallet:open", "wallet:on",
   "quote:ok", "quote:none",
