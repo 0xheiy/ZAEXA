@@ -467,7 +467,17 @@ def check_one_executor_address():
     docs = [("README.md", os.path.join(root, "README.md")),
             ("contracts/README.md", os.path.join(root, "contracts", "README.md")),
             ("contracts/script/verify_dexes.sh",
-             os.path.join(root, "contracts", "script", "verify_dexes.sh"))]
+             os.path.join(root, "contracts", "script", "verify_dexes.sh")),
+            # هر اسکریپتی که آدرس قرارداد چاپ می‌کند باید زیر همین نگهبان باشد،
+            # وگرنه فردا یکی آدرس بازنشسته را در آن هاردکد می‌کند و کسی نمی‌فهمد.
+            ("contracts/script/verify_slipstream.sh",
+             os.path.join(root, "contracts", "script", "verify_slipstream.sh")),
+            ("contracts/script/compare_slipstream.sh",
+             os.path.join(root, "contracts", "script", "compare_slipstream.sh")),
+            ("contracts/script/probe_token_pools.sh",
+             os.path.join(root, "contracts", "script", "probe_token_pools.sh")),
+            ("contracts/script/diagnose_dead_dexes.sh",
+             os.path.join(root, "contracts", "script", "diagnose_dead_dexes.sh"))]
     RETIRED_WORDS = ("retired", "abandoned", "do not use", "superseded", "replaced",
                      "بازنشسته", "استفاده نکن", "رها")
     problems = []
@@ -1293,6 +1303,117 @@ async def main():
             "the rendered safety panel did not pick up the live sell revert"
         assert "Sellable" not in dom, \
             "the rendered safety panel still shows the contradicted quote-based verdict"
+
+        # ------------------------------------------------------------
+        # باگ ۱۲: «هزینه‌ی رفت‌وبرگشت −۰.۱۱٪» — یک عدد منفی هرگز نباید
+        # به‌عنوان سود چاپ شود. یک تابع، چهار محل مصرف.
+        # ------------------------------------------------------------
+
+        # ۱) خودِ تابع خالص — جدول‌محور
+        trip_cases = [-5, -1, -0.11, -0.004, 0, 0.004, 0.005, 0.10, 51.54, None]
+        trip_results = await pg.evaluate(
+            "(vals) => vals.map(v => tripCost(v))", trip_cases)
+        for v, r in zip(trip_cases, trip_results):
+            if v in (-5, -1):
+                assert r["state"] == "implausible", \
+                    "a large apparent gain must read as unpriceable, not a real discount: %r -> %r" % (v, r)
+            elif v in (-0.11, -0.004, 0, 0.004):
+                assert r["state"] == "zeroish" and r["text"] == "about 0%", \
+                    "a small negative/zero cost must smooth to 'about 0%%': %r -> %r" % (v, r)
+            elif v in (0.005, 0.10, 51.54):
+                assert r["state"] == "normal" and r["text"].endswith("%") and not r["text"].startswith("-"), \
+                    "a genuine cost must print plainly: %r -> %r" % (v, r)
+            elif v is None:
+                assert r["state"] == "unknown", "a non-finite loss must read as unknown: %r -> %r" % (v, r)
+        assert all(not re.search(r"-\d", r["text"]) for r in trip_results), \
+            "a negative cost leaked into the rendered text: %s" % trip_results
+        print("[trip] no negative cost is ever printed: %s" % trip_results)
+
+        # ۲) کارت سواپ (renderExit)
+        swap_probe = await pg.evaluate("""() => {
+            const box = document.getElementById("exitBox");
+            const savedHTML = box.innerHTML;
+            const savedTokenPage = tokenPage;
+            tokenPage = false;
+            const mk = loss => ({state: "estimated", lossPct: loss, recovered: null, reason: null});
+            renderExit(mk(-0.11));
+            const t1 = box.innerText;
+            renderExit(mk(-5));
+            const t2 = box.innerText;
+            renderExit(mk(0.10));
+            const t3 = box.innerText;
+            box.innerHTML = savedHTML;
+            tokenPage = savedTokenPage;
+            return {t1, t2, t3};
+        }""")
+        print("[trip] swap card: %r | %r | %r" % (
+            swap_probe["t1"][:40], swap_probe["t2"][:40], swap_probe["t3"][:40]))
+        assert "about 0%" in swap_probe["t1"] and "-0.11" not in swap_probe["t1"], \
+            "swap card: a -0.11%% round trip must read as ~0%%, not a printed negative"
+        assert "could not price" in swap_probe["t2"].lower() and "-5" not in swap_probe["t2"], \
+            "swap card: a -5%% apparent gain must read as unpriceable, not a printed negative"
+        assert "0.10%" in swap_probe["t3"], \
+            "swap card: a genuine 0.10%% cost must still be printed plainly"
+
+        # ۳) صفحه‌ی توکن (renderRoundTrip)
+        token_probe = await pg.evaluate("""() => {
+            const box = document.getElementById("tk-exitBox");
+            const savedHTML = box.innerHTML;
+            const mk = loss => ({state: "estimated", lossPct: loss, recovered: null});
+            renderRoundTrip(box, mk(-0.11));
+            const t1 = box.innerText;
+            renderRoundTrip(box, mk(-5));
+            const t2 = box.innerText;
+            renderRoundTrip(box, mk(0.10));
+            const t3 = box.innerText;
+            box.innerHTML = savedHTML;
+            return {t1, t2, t3};
+        }""")
+        print("[trip] token page: %r | %r | %r" % (
+            token_probe["t1"][:40], token_probe["t2"][:40], token_probe["t3"][:40]))
+        assert "about 0%" in token_probe["t1"] and "-0.11" not in token_probe["t1"], \
+            "token page: a -0.11%% round trip must read as ~0%%, not a printed negative"
+        assert "not priced" in token_probe["t2"].lower() and "-5" not in token_probe["t2"], \
+            "token page: a -5%% apparent gain must read as unpriced, not a printed negative"
+        assert "0.10%" in token_probe["t3"], \
+            "token page: a genuine 0.10%% cost must still be printed plainly"
+
+        # ۴) نشان ردیف در انتخابگر توکن (exitBadge)
+        badge_probe = await pg.evaluate("""() => {
+            const t = BASE_TOKENS.find(x => x.symbol === "cbBTC" && !x.native);
+            const key = balKey(t);
+            const saved = exitCache[key];
+            exitCache[key] = {state: "verified", lossPct: -3, at: Date.now()};
+            const html = exitBadge(t);
+            if (saved === undefined) delete exitCache[key]; else exitCache[key] = saved;
+            return html;
+        }""")
+        print("[trip] picker badge on an implausible gain: %r" % badge_probe)
+        assert "✓" not in badge_probe and "-3" not in badge_probe and "unclear" in badge_probe, \
+            "picker badge: an implausible 'gain' must not wear a checkmark or a printed negative"
+
+        # ۵) یافته‌ی پنل ایمنی باید با تست فروش زنده آشتی شود (رگرسیون باگ ۹)
+        recon_probe = await pg.evaluate("""() => {
+            const addr = "0x4444444444444444444444444444444444444444";
+            const rep = {address: addr, symbol: "TST4", native: false,
+                findings: [
+                    {level: "info", title: "Round trip did not price cleanly",
+                     detail: "Selling it straight back quoted more than the buy cost."}
+                ],
+                owner: null, isProxy: false, liqUsd: 80000,
+                canBuy: true, canSell: null, unknown: 0};
+            rep.score = riskScore(rep); rep.verdict = verdictOf(rep);
+            exitCache[addr] = {state: "blocked", lossPct: null, at: Date.now()};
+            const after = reconcileExit(rep);
+            delete exitCache[addr];
+            return { afterTitles: after.findings.map(f => f.title) };
+        }""")
+        print("[trip] the new finding is reconciled with the live sell test: %s"
+              % recon_probe["afterTitles"])
+        assert "Round trip did not price cleanly" not in recon_probe["afterTitles"], \
+            "QUOTE_SELL_TITLES must cover the new title so a live revert replaces it, not sits beside it"
+        assert "Sell simulation reverted" in recon_probe["afterTitles"], \
+            "the live revert override must still be applied"
 
         # ک) دکمه‌ی گزارش مشکل باید به ایمیل واقعی برود
         mail = await pg.evaluate("() => LINKS.email")

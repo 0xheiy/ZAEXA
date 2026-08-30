@@ -140,6 +140,10 @@ forge install foundry-rs/forge-std   # not vendored in this repo
 forge test
 ./script/fork_test.sh                # fork tests against real Base
 ./script/verify_dexes.sh             # check every DEX address on chain
+./script/verify_slipstream.sh        # check the Aerodrome Slipstream (CL) candidates
+./script/compare_slipstream.sh       # how much more would Slipstream pay? (read-only)
+TOKEN=0x… ./script/probe_token_pools.sh   # where is one token's liquidity? (read-only)
+./script/diagnose_dead_dexes.sh      # dead DEX, or just a stale router address?
 ```
 
 ## Status

@@ -1953,15 +1953,38 @@ function agoText(ms){
   if(m<60)return m+"m ago";
   const h=Math.floor(m/60);return h+"h ago";
 }
+/* هزینه‌ی رفت‌وبرگشت از دو پای *مستقل* می‌آید: پای خرید یک کوت می‌گیرد،
+   پای فروش کوت دیگری — از استخر دیگر، یا همان استخر در لحظه‌ی دیگر —
+   چند لحظه بعد. چون این دو لحظه یکی نیستند، گاهی تفاضل‌شان کمی منفی
+   درمی‌آید: این «سود» نیست، نویزِ همین دو-مرحله‌ای‌بودن است و باید به
+   صفر نزدیک نشان داده شود. اما اگر منفی *بزرگ* باشد (کوتِ بیات، توکن
+   ری‌بیس‌شونده یا کارمزد-روی-انتقال، یا یک استخر خراب)، آن دیگر نویز
+   نیست — نشانه‌ی واقعیِ خرابی است، و صاف‌کردنش به «حدود صفر» همان نشانه
+   را پنهان می‌کند؛ باید صادقانه «قیمت‌گذاری‌اش قابل اعتماد نبود» باشد.
+   این تابع تنها جایی است که عدد رفت‌وبرگشت به کلمه تبدیل می‌شود — هر
+   چهار محل نمایش (کارت سواپ، صفحه‌ی توکن، نشان ردیف، یافته‌ی ایمنی)
+   باید از همین یک تابع عبور کنند، وگرنه دوباره باگ ۳/۴ می‌شویم: پاکسازی
+   که فقط روی یک مسیر زندگی می‌کند. */
+function tripCost(loss){
+  if(typeof loss!=="number"||!Number.isFinite(loss))return{state:"unknown",text:"",short:""};
+  if(loss>=0.005)return{state:"normal",text:loss.toFixed(2)+"%",short:loss.toFixed(2)+"%"};
+  if(loss>-1&&loss<0.005)return{state:"zeroish",text:"about 0%",short:"~0%"};
+  return{state:"implausible",text:"",short:"unclear"};
+}
 /* برچسب کوتاه برای ردیف لیست توکن. اگر چیزی نمی‌دانیم، هیچ برچسبی نیست —
    نبودِ برچسب یعنی «بررسی نشده»، نه «سالم». */
 function exitBadge(t){
   const c=exitCache[balKey(t)];
   if(!c)return "";
   const stale=(Date.now()-c.at)>600000;
-  const pct=(c.lossPct===null||c.lossPct===undefined)?null:c.lossPct.toFixed(2)+"%";
+  const tc=tripCost(c.lossPct);
+  const pct=tc.short||null;
   let txt,col,bg,why;
-  if(c.state==="verified"){txt="✓ "+(pct||"ok");col="var(--pos)";bg="var(--pglow)";
+  if(c.state==="verified"&&tc.state==="implausible"){
+    txt="unclear";col="var(--warn)";
+    bg="color-mix(in srgb,var(--warn) 14%,transparent)";
+    why="The round trip priced out as a gain, which we cannot confirm";}
+  else if(c.state==="verified"){txt="✓ "+(pct||"ok");col="var(--pos)";bg="var(--pglow)";
     why="Round trip verified by simulation";}
   else if(c.state==="blocked"||c.state==="noexit"){txt="no exit";col="var(--neg)";
     bg="color-mix(in srgb,var(--neg) 14%,transparent)";
@@ -2031,12 +2054,29 @@ function renderRoundTrip(box,x){
         <b>We do not know</b> — which is not the same as “no”.</div>`;
     return;
   }
-  const loss=x.lossPct,kept=Math.max(0,Math.min(100,100-loss));
-  const tone=loss>=15?"var(--neg)":loss>=5?"var(--warn)":"var(--pos)";
+  const loss=x.lossPct;
+  const c=tripCost(loss);
+  if(c.state==="implausible"){
+    box.innerHTML=`<div class="tripHead">
+        <span class="tripPct" style="color:var(--warn)">Not priced</span>
+        <span class="tripBadge" style="color:var(--warn);background:color-mix(in srgb,var(--warn) 14%,transparent)">Unknown</span>
+      </div>
+      <div class="tripTrack"></div>
+      <div class="tripEnds"><span>We could not run the sell</span><span>&nbsp;</span></div>
+      <div class="tripNote">Selling it straight back appears to return more than you put in. That is not a profit — the two legs were priced in different pools moments apart. Treat this as unknown.</div>`;
+    return;
+  }
+  const kept=Math.max(0,Math.min(100,100-loss));
+  const zeroish=c.state==="zeroish";
+  const tone=zeroish?"var(--pos)":(loss>=15?"var(--neg)":loss>=5?"var(--warn)":"var(--pos)");
   const proven=x.state==="verified";
+  const pctText=zeroish?"about 0%":loss.toFixed(2)+"%";
+  const wordText=zeroish
+    ? "is what a buy and an immediate sell costs you — effectively nothing"
+    : "is what a buy and an immediate sell costs you";
   box.innerHTML=`<div class="tripHead">
-      <span class="tripPct" style="color:${tone}">${loss.toFixed(2)}%</span>
-      <span class="tripWord">is what a buy and an immediate sell costs you</span>
+      <span class="tripPct" style="color:${tone}">${pctText}</span>
+      <span class="tripWord">${wordText}</span>
       <span class="tripBadge" style="color:${proven?"var(--pos)":"var(--tx2)"};
         background:${proven?"var(--pglow)":"var(--raise)"}">
         ${proven?"Ran on chain":"From quotes"}</span>
@@ -2056,21 +2096,28 @@ function renderExit(x){
   if(!box)return;
   if(tokenPage)return renderRoundTrip(box,x);
   if(!x){box.innerHTML="";return;}
-  const badge={
+  const badgeMap={
     verified:['Verified by simulation','var(--pos)','var(--pglow)'],
     estimated:['Estimated from quotes','var(--tx2)','var(--raise)'],
     blocked:['Sell simulation reverted','var(--neg)','color-mix(in srgb,var(--neg) 14%,transparent)'],
     noexit:['No sell route','var(--neg)','color-mix(in srgb,var(--neg) 14%,transparent)'],
     unknown:['Unknown','var(--warn)','color-mix(in srgb,var(--warn) 14%,transparent)'],
-  }[x.state];
-  let head,tone;
+  };
+  let head,tone,badge=badgeMap[x.state],implausibleNote=null;
   if(x.state==="blocked"||x.state==="noexit"){
     head="You may not be able to sell this back";tone="var(--neg)";
   }else if(x.state==="unknown"){head="Exit not tested";tone="var(--warn)";}
   else{
-    const l=x.lossPct;
-    tone=l>=15?"var(--neg)":l>=5?"var(--warn)":"var(--pos)";
-    head=`Round trip costs ${l.toFixed(2)}%`;
+    const l=x.lossPct,c=tripCost(l);
+    if(c.state==="implausible"){
+      head="We could not price the round trip";tone="var(--warn)";badge=badgeMap.unknown;
+      implausibleNote="Selling it straight back appears to return more than you put in. That is not a profit — the two legs were priced in different pools moments apart. Treat this as unknown.";
+    }else if(c.state==="zeroish"){
+      head="Round trip costs about 0%";tone="var(--pos)";
+    }else{
+      tone=l>=15?"var(--neg)":l>=5?"var(--warn)":"var(--pos)";
+      head="Round trip costs "+c.text;
+    }
   }
   box.innerHTML=`
     <div class="exit">
@@ -2082,7 +2129,7 @@ function renderExit(x){
         Sell all of it right back and you recover
         <b>${fmt(x.recovered,tokenIn.decimals)} ${esc(tokenIn.symbol)}</b>
         of the ${fmt(parsedAmountIn(),tokenIn.decimals)} you put in.</div>`:""}
-      ${x.reason?`<div class="exitNote">${esc(x.reason)}</div>`:""}
+      ${(implausibleNote||x.reason)?`<div class="exitNote">${esc(implausibleNote||x.reason)}</div>`:""}
     </div>`;
   /* کسی که این لینک را باز کرده دنبال همین جعبه آمده، نه دنبال فرم سواپ. */
   if(checkLink&&!checkScrolled){
@@ -2653,8 +2700,16 @@ async function scanToken(token){
     else if(!t.sell)add("critical","Cannot get a sell quote","No pool would quote selling this token back. Strongest honeypot signal.");
     else if(t.roundTrip!==null&&t.roundTrip>15)
       add("high","Heavy round-trip loss","Buy then sell immediately loses about "+t.roundTrip.toFixed(1)+"% — likely a transfer tax.");
-    else if(t.roundTrip!==null)
-      add("ok","Sellable","Round-trip cost about "+t.roundTrip.toFixed(2)+"%.");
+    else if(t.roundTrip!==null){
+      const tc=tripCost(t.roundTrip);
+      if(tc.state==="implausible")
+        add("info","Round trip did not price cleanly",
+          "Selling it straight back quoted more than the buy cost. That is a pricing artefact, not a profit, so we cannot confirm the round-trip cost.");
+      else if(tc.state==="zeroish")
+        add("ok","Sellable","Round-trip cost is effectively zero.");
+      else
+        add("ok","Sellable","Round-trip cost about "+t.roundTrip.toFixed(2)+"%.");
+    }
   }catch{rep.unknown++;}
 
   rep.score=riskScore(rep);rep.verdict=verdictOf(rep);
@@ -2692,7 +2747,7 @@ function verdictOf(rep){
 //    می‌کند روی زنجیره‌ی زنده. یک شبیه‌سازی که واقعاً اجرا شده بر یک کوت برتری
 //    دارد — این تابع همان اصل را پیاده می‌کند: هیچ پنلی نباید چیزی بگوید که
 //    پنل دیگر نقضش کند.
-const QUOTE_SELL_TITLES=["Sellable","Heavy round-trip loss","Cannot get a sell quote","Tradability unknown"];
+const QUOTE_SELL_TITLES=["Sellable","Heavy round-trip loss","Cannot get a sell quote","Tradability unknown","Round trip did not price cleanly"];
 function reconcileExit(rep){
   if(!rep)return rep;
   if(rep.native)return rep;
