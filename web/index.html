@@ -91,7 +91,13 @@ if(/^\/t\/0x[0-9a-fA-F]{40}\/?$/.test(location.pathname)){
   --bg:#f4f5f7; --card:#fff; --card2:#f4f5f8; --raise:#eceef2;
   --line:#e8eaee; --line2:#d6dae1;
   --tx:#14161a; --tx2:#5b6270; --tx3:#8b93a1;
-  --g1:#058287; --g2:#AE33F1;   /* رنگ دکمه‌ها — نسخه‌ی پرکنتراست‌ترِ همان دو سرِ برند (۱۸۲° و ۲۷۹°) */
+  /* ⚠️ ۱۴۰۵/۰۶/۰۷ (۲۰۲۶-۰۸-۲۹): مالک محصول عمداً همین گرادیانِ زندهٔ برند
+     (همان شش‌ایستِ نشان) را به‌جای نسخه‌ی پرکنتراستِ قبلی انتخاب کرد — با
+     چشمِ باز به قیمتش: سفید روی سرِ فیروزه‌ای‌اش کنتراست ۱.۴۲:۱ می‌دهد، زیرِ
+     حداقلِ WCAG. این یک نقص نیست، یک تصمیمِ ثبت‌شده است. اگر روزی برگشت
+     لازم شد، مقادیرِ قبلی #058287 / #AE33F1 بودند (پرکنتراست‌ترِ همان دو
+     سرِ برند در ۱۸۲° و ۲۷۹°) — کسی این را «تعمیر» نکند بدون آگاهی از این. */
+  --g1:#22EFF6; --g2:#C56CF5;
   --acc:#5b53e8; --acc-b:#8b5cf6; --on-acc:#fff;
   --pos:#0d9d6e; --neg:#dc4c4c; --warn:#b5780c;
   --sh:0 1px 2px rgba(20,22,26,.05), 0 14px 34px rgba(20,22,26,.06);
@@ -193,7 +199,7 @@ header{max-width:none;margin:0 0 10px;width:100%;
    فرزند را جدا اندازه می‌گیرند) خودش را نشان می‌دهد. هر چهار فرزند را
    صریحاً `grid-row:1` می‌کنیم تا این نخ اصلاً باز نشود. */
 header>.navPad{grid-column:1;grid-row:1;width:0;min-width:0}
-.logo{grid-column:1;grid-row:1;display:flex;align-items:center;gap:8px;font-size:19px;font-weight:680;letter-spacing:-.4px}
+.logo{grid-column:1;grid-row:1;display:flex;align-items:center;gap:13px;font-size:19px;font-weight:680;letter-spacing:-.4px}
 /* نشان برند خودش گرادیان دارد، پس کاشی رنگی زیرش لازم نیست — دو گرادیان
    روی هم فقط همدیگر را خفه می‌کنند. */
 .logo .glyph{width:38px;height:38px;display:grid;place-items:center}
@@ -204,8 +210,8 @@ header>.navPad{grid-column:1;grid-row:1;width:0;min-width:0}
    هدر تصادم می‌کند؛ آنجا فقط نشان می‌ماند، نه اینکه وردمارک را کوچک کنیم.
    ارتفاع اینک ۱۲.۷px تا نسبت قدِ جوهرِ وردمارک به نشان حدود ۰.۴۸ بماند —
    طبق قاعده‌ی برند (۰.۴۸)؛ نسخه‌ی قبلی (۱۶px) این نسبت را ۰.۶۰۳ می‌کرد که
-   از قاعده جلوتر بود. گَپ کنارِ لوگو هم به همان اندازه (از ۱۰px به ۸px)
-   جمع شد تا کنار وردمارکِ کوچک‌تر نامتناسب نماند. */
+   از قاعده جلوتر بود. گَپِ کنارِ لوگو ۱۳px است — نه فشرده، نه دورافتاده از
+   وردمارکِ کوچک‌تر. */
 .logo .wordmark{height:12.7px;width:auto;display:block;color:var(--tx)}
 @media(max-width:380px){
   .logo .wordmark{display:none}
@@ -274,20 +280,6 @@ html,body{overflow-x:hidden;max-width:100%}
 .chip.round{padding:0;width:38px;justify-content:center}
 .chip.solid{background:var(--grad);color:var(--on-acc);
   font-weight:620;box-shadow:0 4px 16px var(--glow)}
-/* دکمه‌ی اتصال کیف‌پول: کاربر گزارش داد گرادیانِ تمِ روشن «خراب» است — چون
-   دستور رنگِ دکمه‌ها (--g1/--g2) در تمِ روشن نسخه‌ی پرکنتراست‌تری از سرهای
-   برند است، نه خودِ گرادیانِ شش‌ایست که روی نشان/کارت می‌بینیم. اینجا عیناً
-   همان گرادیانِ برند را در هر دو تم می‌گذاریم — پس دیگر داخل بلوکِ تمی
-   تعریف نمی‌شود، درست مثل گرادیانِ خودِ نشان.
-   رنگِ متن دیگر var(--on-acc) نیست: سفیدِ تمِ روشن روی روشن‌ترین سرِ این
-   گرادیان کنتراستِ ۱.۴۲:۱ تا ۳.۰۷:۱ می‌دهد (رد می‌شود). ۰۵۱۲۱a‌ (همان
-   on-acc تمِ تیره) روی هر شش سر ≥۶.۱۷:۱ می‌دهد — پس گرادیان می‌ماند، رنگِ
-   برچسب ثابت و مستقل از تم می‌شود. */
-#connectBtn,.chip.solid[data-act="connect"]{
-  background:linear-gradient(135deg,#22EFF6,#22D2F5,#43B5F7,#7396F8,#9C82F9,#C56CF5);
-  color:#05121a;
-}
-#connectBtn:hover,.chip.solid[data-act="connect"]:hover{color:#05121a}
 .led{width:7px;height:7px;border-radius:50%;background:var(--pos)}
 .led.off{background:var(--tx3)}
 
