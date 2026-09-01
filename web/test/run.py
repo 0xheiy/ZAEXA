@@ -442,6 +442,7 @@ RETIRED_EXECUTORS = [
     "0x2fea35aaDae6Cbf9b9481B06164907ccF95DB081",   # v1
     "0xE980825d4B3911e35Be5804349be26eBBe93BcC6",   # v2
     "0xb6AE1C7157f877854C498C44ab5ea3d6742416DC",   # v3 — underflow on a sweeping recipient, see finding 04
+    "0x76082b0fbd0a29C236dD2ae2B2F47BFD96d7F455",   # v4 — no Slipstream branch; KIND_MAX was 3
 ]
 
 def check_one_executor_address():
@@ -513,6 +514,67 @@ def check_one_executor_address():
     print("[one address] live executor %s — %d retired ones labelled as retired"
           % (live, len(RETIRED_EXECUTORS)))
 
+
+def check_dex_parity():
+    """`verify_dexes.sh` باید دقیقاً همان صرافی‌هایی را بسنجد که اپ مسیریابی می‌کند.
+
+    این نگهبان از یک اتفاق واقعی آمد، نه از احتیاط: وقتی Slipstream به
+    `DEXES` در index.html اضافه شد، `verify_dexes.sh` فهرست هاردکد خودش را
+    داشت و همچنان «۶ صرافی، همه PASS» چاپ می‌کرد. خروجی سبز بود و **دقیقاً
+    تازه‌ترین و مهم‌ترین روتر را نمی‌سنجید**. سبزِ ناقص از قرمز بدتر است،
+    چون کسی دنبالش نمی‌گردد.
+
+    مقایسه عمداً **حساس به حروف بزرگ و کوچک** است. `[checksum]` در سوییت
+    مرورگر ثابت می‌کند هر آدرسِ index.html چک‌سام EIP-55 درست دارد؛ پس اگر
+    اسکریپت شل هم بایت‌به‌بایت همان را داشته باشد، چک‌سامِ آن هم لازم نیست
+    جدا سنجیده شود. و همین بند یک باگ واقعی را گرفت: کوتر پنکیک در
+    `verify_dexes.sh` با `cEF` نوشته شده بود به‌جای `CeF`. `cast` قبولش
+    می‌کرد، ولی هر ابزاری که چک‌سام را جدی بگیرد ردش می‌کند — و این همان
+    خطایی است که یک بار روی سایت زنده به «could not reach the network»
+    ترجمه شد برای مشکلی که اصلاً شبکه‌ای نبود."""
+    idx = open(os.path.join(HERE, "..", "index.html"), encoding="utf-8").read()
+    block = re.search(r"const DEXES\s*=\s*\[(.*?)\n\];", idx, re.S)
+    assert block, "could not find the DEXES array in index.html"
+    app_routers = re.findall(r'router:"(0x[0-9a-fA-F]{40})"', block.group(1))
+    app_quoters = re.findall(r'quoter:"(0x[0-9a-fA-F]{40})"', block.group(1))
+    assert app_routers, "no routers parsed out of index.html — the parser, not the app, is broken"
+
+    sh_path = os.path.join(HERE, "..", "..", "contracts", "script", "verify_dexes.sh")
+    sh = open(sh_path, encoding="utf-8").read()
+    sh_block = re.search(r"^DEXES=\((.*?)^\)", sh, re.S | re.M)
+    assert sh_block, "could not find the DEXES array in verify_dexes.sh"
+    rows = re.findall(r'"([^"|]+)\|([^|]*)\|(0x[0-9a-fA-F]{40})\|(0x[0-9a-fA-F]{40})?"',
+                      sh_block.group(1))
+    sh_routers = [r[2] for r in rows]
+    sh_quoters = [r[3] for r in rows if r[3]]
+    assert sh_routers, "no routers parsed out of verify_dexes.sh"
+
+    problems = []
+    missing = [a for a in app_routers if a not in sh_routers]
+    extra   = [a for a in sh_routers if a not in app_routers]
+    if missing:
+        problems.append("verify_dexes.sh does not check these routers the app routes "
+                        "through: %s" % missing)
+    if extra:
+        problems.append("verify_dexes.sh checks routers the app does not use: %s" % extra)
+    q_missing = [a for a in app_quoters if a not in sh_quoters]
+    if q_missing:
+        problems.append("verify_dexes.sh does not check these quoters: %s" % q_missing)
+
+    # حساس به حروف: اگر همان آدرس با حروف دیگری نوشته شده باشد، بالا آن را
+    # به‌عنوان «گم‌شده» می‌بیند، پس یک پیام روشن‌تر بدهیم.
+    low_sh = {a.lower(): a for a in sh_routers + sh_quoters}
+    for a in app_routers + app_quoters:
+        other = low_sh.get(a.lower())
+        if other and other != a:
+            problems.append("same address, different capitalisation: index.html has %s, "
+                            "verify_dexes.sh has %s — one of them fails EIP-55" % (a, other))
+
+    assert not problems, ("index.html and verify_dexes.sh disagree:\n  - "
+                          + "\n  - ".join(problems))
+    print("[dex parity] verify_dexes.sh covers all %d routers and %d quoters, "
+          "byte for byte" % (len(app_routers), len(app_quoters)))
+
 async def check_real_page_from_disk(pw):
     """صفحه‌ی *واقعی* را با file:// باز کن و ببین ethers بالا می‌آید.
 
@@ -551,6 +613,7 @@ check_event_allowlists()
 check_og_tags()
 check_brand_palette()
 check_one_executor_address()
+check_dex_parity()
 
 async def main():
     errors = []
@@ -1498,6 +1561,77 @@ async def main():
         uni = next(g for g in gens if g["name"] == "Uniswap V3")
         assert "uint256,uint256,uint160)" in uni["sig"] and "uint256,uint256,uint256" not in uni["sig"], \
             "SwapRouter02 must keep the 7-field struct"
+
+        # ---- 2c-quinquies. [slipstream] — v5 wiring: Slipstream must not be mistaken
+        # for the uint24-fee V3 generations, and its step must carry tickSpacing. ----
+        # الف) امضای سواپش باید به سلکتور 0xa026383e هش شود، نه به 0x414bf389
+        #    (که با آن‌جا اشتباه شکلش یکی است ولی سلکتورش فرق دارد).
+        # E.id در صفحه‌ی اصلی همان fakeId استاب است (غیررمزنگاری) — برای سلکتور
+        # *واقعی* باید مثل چک‌سام بالا از ethers واقعی استفاده کرد، وگرنه این
+        # کاوشگر هیچ‌وقت نمی‌تواند تفاوت 0xa026383e و 0x414bf389 را واقعاً بسنجد.
+        slip = next(g for g in gens if "Slipstream" in g["name"])
+        real_e = await b.new_page()
+        await real_e.set_content("<html></html>")
+        await real_e.add_script_tag(path=vendor_path("ethers.umd.min"))
+        sel = await real_e.evaluate("s => ethers.id(s).slice(0, 10)", slip["sig"])
+        await real_e.close()
+        print("[slipstream] swap selector = %s (kind=%s)" % (sel, slip["kind"]))
+        assert sel == "0xa026383e", \
+            "Slipstream's exactInputSingle must hash to 0xa026383e, got %s — check swapSigOf" % sel
+        assert sel != "0x414bf389", \
+            "Slipstream must never be filed under the V3_LEGACY selector — same shape, wrong selector"
+
+        # ب) تاپل step در ABI اجراکننده باید دقیقاً ۸ فیلد داشته باشد و با
+        #    int24 tickSpacing تمام شود.
+        exec_sig = await pg.evaluate("() => ABI.executor[0]")
+        m = re.search(r"\(\(([^)]*)\)\[\]\s*steps", exec_sig)
+        assert m, "could not find the ((...)[] steps tuple in ABI.executor — re-check this guard"
+        step_fields = [f.strip() for f in m.group(1).split(",")]
+        print("[slipstream] executor step tuple fields = %s" % step_fields)
+        assert len(step_fields) == 8, \
+            "the executor step tuple must have exactly 8 fields, found %d: %s" \
+            % (len(step_fields), step_fields)
+        assert step_fields[-1] == "int24 tickSpacing", \
+            "the step tuple must end with int24 tickSpacing, found %r" % step_fields[-1]
+        assert step_fields[0] == "uint8 kind", \
+            "kind must still be the first field, found %r" % step_fields[0]
+
+        # ج) [checksum] بالا هر آدرسی در index.html را با EIP-55 واقعی می‌سنجد —
+        #    این فقط تأیید می‌کند سه آدرس Slipstream واقعاً داخل آن دامنه‌اند،
+        #    نه یک چک‌سام دوم. اگر یکی از این‌ها جا بیفتد، [checksum] هرگز آن را
+        #    نمی‌دیده و صرافی جدید بی‌سروصدا از آن پوشش بیرون می‌ماند.
+        slip_addrs = await pg.evaluate(
+            "() => { const d = DEXES.find(x => x.kind === 4);"
+            " return [d.router, d.factory, d.quoter]; }")
+        print("[slipstream] addresses inside [checksum]'s scan: %s"
+              % all(a in cands for a in slip_addrs))
+        assert all(a in cands for a in slip_addrs), \
+            "the Slipstream router/factory/quoter addresses must be literal 0x… text in " \
+            "index.html, or the [checksum] probe never actually looks at them: %s" % slip_addrs
+
+        # د) استخر Slipstream در step چاپ‌شده باید tickSpacing را در جایگاه ۸ حمل
+        #    کند و feeTier صفر باشد — دقیقاً همان ترتیبی که buildParts می‌نویسد.
+        step_probe = await pg.evaluate("""() => {
+            const d = DEXES.find(x => x.kind === KIND.SLIPSTREAM);
+            const tick = d.tickSpacings[0];
+            const venue = {dex: d, feeTier: null, stable: null, tickSpacing: tick};
+            const hop = {venue,
+                tokenIn: {address: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913"},
+                tokenOut: {address: "0x4200000000000000000000000000000000000006"}};
+            const plan = {parts: [{route: {hops: [hop]}, amountIn: 1n}]};
+            const step = buildParts(plan)[0][0][0];
+            return {len: step.length, kind: step[0], feeTier: step[4],
+                    stable: step[5], tickSpacing: step[7], expectTick: tick};
+        }""")
+        print("[slipstream] encoded step: len=%d kind=%s feeTier=%s stable=%s tickSpacing=%s (expect %s)"
+              % (step_probe["len"], step_probe["kind"], step_probe["feeTier"],
+                 step_probe["stable"], step_probe["tickSpacing"], step_probe["expectTick"]))
+        assert step_probe["len"] == 8, "an encoded step must have exactly 8 elements"
+        assert step_probe["kind"] == 4, "kind must be first and must be KIND.SLIPSTREAM"
+        assert step_probe["feeTier"] == 0, \
+            "a Slipstream venue has no fee tier — the encoded feeTier must be 0"
+        assert step_probe["tickSpacing"] == step_probe["expectTick"], \
+            "tickSpacing must land in position 8 (index 7), carrying the venue's own tick spacing"
 
         # ---- 2c-ter. the quoter gate checks the selector, not just that code exists ----
         # نسخه‌ی قبل فقط می‌پرسید «قراردادی آنجا هست؟» — همان شکافی که در سمت

@@ -2,7 +2,7 @@
 
 **A DEX aggregator for Base that shows you the way out before you go in.**
 
-Live contract: [`0x76082b0fbd0a29C236dD2ae2B2F47BFD96d7F455`](https://basescan.org/address/0x76082b0fbd0a29c236dd2ae2b2f47bfd96d7f455#code) — source verified on BaseScan.
+Live contract: [`0x15e511Bf2Ea1a0F50F25E973d57Dce0D01946b6d`](https://basescan.org/address/0x15e511bf2ea1a0f50f25e973d57dce0d01946b6d#code) — source verified on BaseScan.
 
 The single source of truth for this address is `CHAIN.executor` in `web/index.html`.
 The UI suite fails if any document here names a retired deployment as the live one.
@@ -17,6 +17,7 @@ The UI suite fails if any document here names a retired deployment as the live o
 | `0x2fea35aaDae6Cbf9b9481B06164907ccF95DB081` | retired — v1, superseded |
 | `0xE980825d4B3911e35Be5804349be26eBBe93BcC6` | retired — v2, superseded by v3 |
 | `0xb6AE1C7157f877854C498C44ab5ea3d6742416DC` | retired — v3; the delivered-amount subtraction underflowed for a recipient that moves the payout onward in its own hook |
+| `0x76082b0fbd0a29C236dD2ae2B2F47BFD96d7F455` | retired — v4; no branch could reach an Aerodrome Slipstream pool, so a token whose only market is one had no route at all |
 
 ---
 

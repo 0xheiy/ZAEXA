@@ -66,7 +66,7 @@ contract SwapExecutorTest is Test {
     {
         return SwapExecutor.SwapStep({
             kind: kind, router: router, tokenIn: tin, tokenOut: tout,
-            feeTier: 3000, stable: false, poolFactory: address(0)
+            feeTier: 3000, stable: false, poolFactory: address(0), tickSpacing: 0
         });
     }
 
@@ -607,9 +607,9 @@ contract SwapExecutorTest is Test {
     function testRejectsUnknownSwapKind() public {
         SwapExecutor.SwapStep[] memory steps = new SwapExecutor.SwapStep[](1);
         steps[0] = SwapExecutor.SwapStep({
-            kind: 4,                     // invalid kind (0..3 are valid)
+            kind: 6,                     // invalid kind (0..5 are valid as of v5; see SwapExecutor.v5.t.sol:testKindSixIsRejected)
             router: address(v3), tokenIn: address(tokenA), tokenOut: address(tokenB),
-            feeTier: 3000, stable: false, poolFactory: address(0)
+            feeTier: 3000, stable: false, poolFactory: address(0), tickSpacing: 0
         });
         SwapExecutor.RoutePart[] memory parts = new SwapExecutor.RoutePart[](1);
         parts[0] = SwapExecutor.RoutePart({steps: steps, amountIn: 10 ether});

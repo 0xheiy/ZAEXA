@@ -54,6 +54,13 @@ SIG_SOLIDLY="swapExactTokensForTokens(uint256,uint256,(address,address,bool,addr
 # تابعی که برای کوت صدا می‌زنیم (QuoterV2). قبلاً فقط *وجود* قرارداد کوتر
 # چک می‌شد — همان شکافی که یک قدم آن‌طرف‌تر باگ SwapRouter02 را ساخت.
 SIG_QUOTER="quoteExactInputSingle((address,address,uint256,uint24,uint160))"
+# Slipstream (نقدینگی متمرکز Aerodrome) استخر را با tickSpacing (int24) کلید
+# می‌زند، نه با fee (uint24). هم امضای سواپ و هم امضای کوترش فرق دارد — و
+# ساختار سواپش برای مقادیر مثبت *دقیقاً* مثل نسل اول انکود می‌شود و فقط
+# سلکتور فرق دارد (0xa026383e در برابر 0x414bf389). پس اگر اینجا با
+# $SIG_V3_LEGACY بسنجیمش، به‌غلط PASS می‌گیرد.
+SIG_SLIPSTREAM="exactInputSingle((address,address,int24,address,uint256,uint256,uint256,uint160))"
+SIG_QUOTER_CL="quoteExactInputSingle((address,address,uint256,int24,uint160))"
 
 # نام|نوع|روتر|کوتر (کوتر فقط برای V3)
 DEXES=(
@@ -64,15 +71,28 @@ DEXES=(
   "Alien Base|v2|0x8c1A3cF8f83074169FE5D7aD50B978e1cD6b37c7|"
   # روی زنجیره بررسی شد: بایت‌کد این روتر 0x414bf389 دارد و 0x04e45aaf ندارد،
   # یعنی نسل اول SwapRouter است. کوترش اما QuoterV2 است (0xc6a5026a).
-  "PancakeSwap V3|v3legacy|0x1b81D678ffb9C0263b24A97847620C99d213eB14|0xB048Bbc1Ee6b733FFfCFb9e9cEF7375518e25997"
+  "PancakeSwap V3|v3legacy|0x1b81D678ffb9C0263b24A97847620C99d213eB14|0xB048Bbc1Ee6b733FFfCFb9e9CeF7375518e25997"
+  # Aerodrome Slipstream — تنها بازارِ بعضی توکن‌های تازه‌ی Base. تا v5 اصلاً
+  # قابل مسیریابی نبود، نه گران‌تر: هیچ شاخه‌ای سلکتورش را نمی‌ساخت.
+  "Aerodrome Slipstream|slipstream|0x698Cb2b6dd822994581fEa6eA4Fc755d1363A92F|0x514c8B5f54112481E28028F1166Bd78501089259"
 )
 
 sig_for() {
   case "$1" in
-    v3)        echo "$SIG_V3" ;;
-    v3legacy)  echo "$SIG_V3_LEGACY" ;;
-    solidly)   echo "$SIG_SOLIDLY" ;;
-    *)         echo "$SIG_V2" ;;
+    v3)         echo "$SIG_V3" ;;
+    v3legacy)   echo "$SIG_V3_LEGACY" ;;
+    slipstream) echo "$SIG_SLIPSTREAM" ;;
+    solidly)    echo "$SIG_SOLIDLY" ;;
+    *)          echo "$SIG_V2" ;;
+  esac
+}
+
+# کوتر هم بسته به نسل فرق دارد — یک ثابت سراسری اینجا همان اشتباهی است که
+# در سمت روتر یک بار افتاد.
+quoter_sig_for() {
+  case "$1" in
+    slipstream) echo "$SIG_QUOTER_CL" ;;
+    *)          echo "$SIG_QUOTER" ;;
   esac
 }
 
@@ -139,7 +159,7 @@ for entry in "${DEXES[@]}"; do
     continue
   fi
 
-  if [ "$KIND" = "v3" ] || [ "$KIND" = "v3legacy" ]; then
+  if [ "$KIND" = "v3" ] || [ "$KIND" = "v3legacy" ] || [ "$KIND" = "slipstream" ]; then
     if ! QCODE=$(try_cast cast code "$QUOTER" --rpc-url "$RPC"); then
       row "$NAME" "UNKNOWN" "the RPC did not answer for quoter $QUOTER"
       UNSEEN=1; continue
@@ -148,7 +168,7 @@ for entry in "${DEXES[@]}"; do
       row "$NAME" "FAIL" "no contract at quoter $QUOTER"
       continue
     fi
-    if ! QSEL=$(try_cast cast sig "$SIG_QUOTER"); then
+    if ! QSEL=$(try_cast cast sig "$(quoter_sig_for "$KIND")"); then
       row "$NAME" "UNKNOWN" "could not compute the quoter selector locally"
       UNSEEN=1; continue
     fi

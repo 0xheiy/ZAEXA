@@ -51,7 +51,7 @@ contract V2Test is Test {
         SwapExecutor.SwapStep[] memory steps = new SwapExecutor.SwapStep[](1);
         steps[0] = SwapExecutor.SwapStep({
             kind: kind, router: router, tokenIn: tin, tokenOut: tout,
-            feeTier: 500, stable: false, poolFactory: address(0)
+            feeTier: 500, stable: false, poolFactory: address(0), tickSpacing: 0
         });
         parts = new SwapExecutor.RoutePart[](1);
         parts[0] = SwapExecutor.RoutePart({steps: steps, amountIn: amt});
@@ -99,10 +99,10 @@ contract V2Test is Test {
         SwapExecutor.SwapStep[] memory steps = new SwapExecutor.SwapStep[](2);
         steps[0] = SwapExecutor.SwapStep({kind: 0, router: address(v2),
             tokenIn: address(tokenA), tokenOut: address(tokenB),
-            feeTier: 0, stable: false, poolFactory: address(0)});
+            feeTier: 0, stable: false, poolFactory: address(0), tickSpacing: 0});
         steps[1] = SwapExecutor.SwapStep({kind: 0, router: address(v2),
             tokenIn: address(tokenB), tokenOut: address(tokenA),
-            feeTier: 0, stable: false, poolFactory: address(0)});
+            feeTier: 0, stable: false, poolFactory: address(0), tickSpacing: 0});
         SwapExecutor.RoutePart[] memory parts = new SwapExecutor.RoutePart[](1);
         parts[0] = SwapExecutor.RoutePart({steps: steps, amountIn: 10 ether});
 
@@ -131,10 +131,10 @@ contract V2Test is Test {
         SwapExecutor.SwapStep[] memory steps = new SwapExecutor.SwapStep[](2);
         steps[0] = SwapExecutor.SwapStep({kind: 0, router: address(r),
             tokenIn: address(tokenA), tokenOut: address(fot),
-            feeTier: 0, stable: false, poolFactory: address(0)});
+            feeTier: 0, stable: false, poolFactory: address(0), tickSpacing: 0});
         steps[1] = SwapExecutor.SwapStep({kind: 0, router: address(r),
             tokenIn: address(fot), tokenOut: address(tokenB),
-            feeTier: 0, stable: false, poolFactory: address(0)});
+            feeTier: 0, stable: false, poolFactory: address(0), tickSpacing: 0});
         SwapExecutor.RoutePart[] memory parts = new SwapExecutor.RoutePart[](1);
         parts[0] = SwapExecutor.RoutePart({steps: steps, amountIn: 10 ether});
 
@@ -181,7 +181,7 @@ contract V2Test is Test {
         SwapExecutor.SwapStep[] memory a = new SwapExecutor.SwapStep[](1);
         a[0] = SwapExecutor.SwapStep({kind: 0, router: address(v2),
             tokenIn: address(tokenA), tokenOut: address(tokenB),
-            feeTier: 0, stable: false, poolFactory: address(0)});
+            feeTier: 0, stable: false, poolFactory: address(0), tickSpacing: 0});
         parts[0] = SwapExecutor.RoutePart({steps: a, amountIn: 1});          // one wei
 
         SwapExecutor.SwapStep[] memory b = new SwapExecutor.SwapStep[](1);

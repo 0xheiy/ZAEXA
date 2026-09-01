@@ -25,7 +25,7 @@ pragma solidity ^0.8.24;
  *      - the contract holds no user funds between transactions
  *
  * WHAT THE OWNER KEY CAN STILL DO - stated because the list above reads like a
- * complete account of the trust model, and without these three it is not:
+ * complete account of the trust model, and without these four it is not:
  *
  *      - `_ensureApproval` grants a whitelisted router `type(uint256).max` on a
  *        token. The bound is real - the contract holds nothing between calls and
@@ -38,6 +38,14 @@ pragma solidity ^0.8.24;
  *        timelock, so the allow-list is exactly as strong as one key.
  *      - `rescue` / `rescueETH` move whatever the contract is holding to the
  *        owner. They now emit, so the action is at least observable.
+ *      - `setAdapterAllowed` / `setAdaptersAllowed` are likewise single-EOA calls
+ *        with no timelock. A registered adapter (KIND_ADAPTER) receives the
+ *        in-flight amount of a step outright, so a malicious or compromised
+ *        adapter can keep it - the same bound that already applies to a
+ *        compromised whitelisted router, and again the only backstop is the
+ *        caller's `minAmountOut`. The compensating fact: an adapter never
+ *        receives an allowance, so unlike a router its reach ends when the call
+ *        ends - it can only take what was physically handed to it.
  *
  * NOTE: this contract has not been formally audited. Independent review and
  *    thorough testing are required before using it with meaningful size.
@@ -52,19 +60,25 @@ interface IERC20 {
 }
 
 /*
- * WARNING - there are two generations of Uniswap V3 router and their input
- * structs *differ*:
+ * WARNING - there are, by now, THREE router input-struct shapes this contract
+ * has to tell apart:
  *   SwapRouter   (first gen)  - eight-field struct, includes `deadline`
- *                               selector: 0x414bf389
+ *                               fee is `uint24`; selector: 0x414bf389
  *   SwapRouter02 (second gen) - seven-field struct, no `deadline`
- *                               selector: 0x04e45aaf
+ *                               fee is `uint24`; selector: 0x04e45aaf
+ *   Slipstream (Aerodrome CL) - eight-field struct, includes `deadline`,
+ *                               same shape as the first generation except the
+ *                               fee-like field is `int24 tickSpacing`, not
+ *                               `uint24 fee`; selector: 0xa026383e
  *
  * The selector is derived from the struct shape, so sending the wrong struct means
  * calling a function that *does not exist* on the router - and the EVM reverts with
  * no data at all ("missing revert data"). The first version of this contract only
- * knew the first generation, while Base uses SwapRouter02.
+ * knew the first generation, while Base uses SwapRouter02. See the warning above
+ * `ISlipstreamRouter` below for why the third shape needs its own branch too,
+ * despite looking, at a glance, like the first generation.
  *
- * So both are declared, and `kind` selects between them.
+ * So all three are declared, and `kind` selects between them.
  */
 interface IUniswapV3Router02 {
     struct ExactInputSingleParams {
@@ -102,6 +116,56 @@ interface ISolidlyRouter {
     ) external returns (uint256[] memory);
 }
 
+/*
+ * WARNING - the central trap of this interface: Aerodrome Slipstream's
+ * ExactInputSingleParams struct has the SAME EIGHT-FIELD SHAPE as the first-gen
+ * SwapRouter (IUniswapV3Router01 above), including the `deadline` field - the
+ * only structural difference is `int24 tickSpacing` where the legacy struct has
+ * `uint24 fee`. For every positive value the two encode identically byte for
+ * byte, but the function SELECTOR differs (0xa026383e here vs 0x414bf389 for the
+ * legacy router), because the selector is derived from the declared type name,
+ * not merely its width. Anyone tempted to reuse KIND_V3_LEGACY for Slipstream
+ * because "the shape matches" will build calldata that targets a function which
+ * does not exist on the Slipstream router, and the call reverts with no data at
+ * all. A separate branch (KIND_SLIPSTREAM) is mandatory - see
+ * SwapExecutor.v5.t.sol:testSlipstreamKindAgainstLegacyOnlyRouterReverts, which
+ * pins exactly this trap.
+ */
+interface ISlipstreamRouter {
+    struct ExactInputSingleParams {
+        address tokenIn; address tokenOut; int24 tickSpacing; address recipient;
+        uint256 deadline; uint256 amountIn; uint256 amountOutMinimum; uint160 sqrtPriceLimitX96;
+    }
+    function exactInputSingle(ExactInputSingleParams calldata p) external payable returns (uint256);
+}
+
+/*
+ * Contract adapters must honour a small contract, since the executor grants
+ * them no allowance and trusts them for exactly one inbound transfer:
+ *   - the executor transfers `amountIn` of tokenIn to the adapter BEFORE
+ *     calling swap; no allowance is ever granted
+ *   - for fee-on-transfer tokens the adapter must trade its own actual
+ *     balance, not the nominal `amountIn` it was told about
+ *   - the adapter must send the output to `recipient`; the return value is
+ *     ignored because output is measured as a balance difference at the
+ *     executor, the same way every router call is measured
+ *   - anything the adapter fails to send back is simply lost to that adapter -
+ *     the order-level `minAmountOut` is what protects the user, not this
+ *     interface
+ */
+interface IZaexaAdapter {
+    function swap(
+        address tokenIn,
+        address tokenOut,
+        uint256 amountIn,
+        uint24  feeTier,
+        int24   tickSpacing,
+        bool    stable,
+        address poolFactory,
+        address recipient
+    ) external;
+}
+
 
 contract SwapExecutor {
 
@@ -109,19 +173,22 @@ contract SwapExecutor {
     uint8 constant KIND_V3 = 1;          // SwapRouter02 - today's standard (Base and most chains)
     uint8 constant KIND_SOLIDLY = 2;
     uint8 constant KIND_V3_LEGACY = 3;   // first-gen SwapRouter, with the deadline field
-    uint8 constant KIND_MAX = 3;
+    uint8 constant KIND_SLIPSTREAM = 4;  // Aerodrome Slipstream (CL) - keyed on tickSpacing, not fee
+    uint8 constant KIND_ADAPTER = 5;     // owner-registered adapter contract
+    uint8 constant KIND_MAX = 5;
 
     /// Hard fee ceiling: 1%. Not even the owner can go above this.
     uint256 public constant MAX_FEE_BPS = 100;
 
     struct SwapStep {
         uint8   kind;
-        address router;
+        address router;       // for KIND_ADAPTER this is the adapter address, not a router
         address tokenIn;
         address tokenOut;
         uint24  feeTier;      // V3 only
         bool    stable;       // Solidly only
         address poolFactory;  // Solidly only
+        int24   tickSpacing;  // Slipstream only
     }
 
     /// One leg of a split order: a path (one or more steps) with its own amount
@@ -140,6 +207,7 @@ contract SwapExecutor {
     address public feeRecipient;
     uint256 public feeBps;                       // current fee
     mapping(address => bool) public allowedRouter;   // router whitelist
+    mapping(address => bool) public allowedAdapter;  // adapter whitelist - separate from allowedRouter
 
     bool private _locked;
 
@@ -153,6 +221,7 @@ contract SwapExecutor {
         uint256 fee
     );
     event RouterAllowed(address indexed router, bool allowed);
+    event AdapterAllowed(address indexed adapter, bool allowed);
     event FeeChanged(uint256 oldBps, uint256 newBps);
     event FeeRecipientChanged(address indexed oldTo, address indexed newTo);
     event OwnerChanged(address indexed oldOwner, address indexed newOwner);
@@ -287,8 +356,12 @@ contract SwapExecutor {
            usable message, for exactly the callers most likely to reach an
            aggregator programmatically. Clamped, the require below still fails
            closed on a genuine shortfall, but it fails with the error that
-           explains itself, and a wallet that moved its own funds onward and is
-           happy with the outcome is no longer blocked outright.
+           explains itself. The clamp only turns an arithmetic panic into a
+           readable revert - it does not relax the guard itself: when
+           `minAmountOut > 0` a wallet that moved its own funds onward is still,
+           correctly, blocked by the requirement below. Only a caller who passed
+           `minAmountOut == 0` - meaning they asked for no guarantee at all -
+           passes through instead of reverting.
            The ERC-20 branch has the same shape via a recipient hook. */
         uint256 delivered;
         if (tokenOut == NATIVE) {
@@ -332,7 +405,16 @@ contract SwapExecutor {
                 SwapStep calldata s = p.steps[j];
                 require(s.kind <= KIND_MAX, "bad kind");
                 // Critical: whitelisted routers only. This is what blocks call injection.
-                require(allowedRouter[s.router], "router not allowed");
+                // The adapter list is a *separate* whitelist and is equally mandatory -
+                // an address allowed on one list must never be usable through the other.
+                if (s.kind == KIND_ADAPTER) {
+                    require(allowedAdapter[s.router], "adapter not allowed");
+                } else {
+                    require(allowedRouter[s.router], "router not allowed");
+                }
+                if (s.kind == KIND_SLIPSTREAM) {
+                    require(s.tickSpacing > 0, "bad tick spacing");
+                }
                 require(s.tokenIn != s.tokenOut, "step same token");
                 if (j > 0) {
                     require(s.tokenIn == p.steps[j-1].tokenOut, "steps not chained");
@@ -384,11 +466,29 @@ contract SwapExecutor {
      *    the router says it sent 1000, 980 arrives, and the next step asks for 1000 -
      *    which either eats into the contract's leftovers or reverts. And those are exactly the
      *    tokens users come to the Exit check to inspect.
+     *
+     * The adapter path (KIND_ADAPTER) is strictly TIGHTER than the router path, not
+     *    merely different. A router receives `type(uint256).max` approval via
+     *    `_ensureApproval` and can pull from that allowance on any call for as long as
+     *    it stands. An adapter receives no allowance at all: it is handed exactly the
+     *    in-flight amount by a direct transfer, and once that transfer completes it
+     *    holds no standing permission over this contract's tokens whatsoever.
+     *
+     * Reading `outBefore` before the transfer/approval below is safe because
+     *    `_validatePlan` already forbids `s.tokenIn == s.tokenOut` on any step, so the
+     *    outgoing transfer can never move the very balance being measured.
      */
     function _swap(SwapStep calldata s, uint256 amountIn) internal returns (uint256) {
-        _ensureApproval(s.tokenIn, s.router, amountIn);
         uint256 outBefore = IERC20(s.tokenOut).balanceOf(address(this));
-        _callRouter(s, amountIn);
+        if (s.kind == KIND_ADAPTER) {
+            _safeTransfer(s.tokenIn, s.router, amountIn);
+            IZaexaAdapter(s.router).swap(
+                s.tokenIn, s.tokenOut, amountIn, s.feeTier, s.tickSpacing,
+                s.stable, s.poolFactory, address(this));
+        } else {
+            _ensureApproval(s.tokenIn, s.router, amountIn);
+            _callRouter(s, amountIn);
+        }
         return IERC20(s.tokenOut).balanceOf(address(this)) - outBefore;
     }
 
@@ -412,6 +512,19 @@ contract SwapExecutor {
             IUniswapV3Router01(s.router).exactInputSingle(
                 IUniswapV3Router01.ExactInputSingleParams({
                     tokenIn: s.tokenIn, tokenOut: s.tokenOut, fee: s.feeTier,
+                    recipient: address(this), deadline: block.timestamp,
+                    amountIn: amountIn,
+                    amountOutMinimum: 0,
+                    sqrtPriceLimitX96: 0
+                })
+            );
+            return;
+        }
+
+        if (s.kind == KIND_SLIPSTREAM) {
+            ISlipstreamRouter(s.router).exactInputSingle(
+                ISlipstreamRouter.ExactInputSingleParams({
+                    tokenIn: s.tokenIn, tokenOut: s.tokenOut, tickSpacing: s.tickSpacing,
                     recipient: address(this), deadline: block.timestamp,
                     amountIn: amountIn,
                     amountOutMinimum: 0,
@@ -493,6 +606,20 @@ contract SwapExecutor {
             require(routers[i] != address(0), "zero router");
             allowedRouter[routers[i]] = allowed;
             emit RouterAllowed(routers[i], allowed);
+        }
+    }
+
+    function setAdapterAllowed(address adapter, bool allowed) external onlyOwner {
+        require(adapter != address(0), "zero adapter");
+        allowedAdapter[adapter] = allowed;
+        emit AdapterAllowed(adapter, allowed);
+    }
+
+    function setAdaptersAllowed(address[] calldata adapters, bool allowed) external onlyOwner {
+        for (uint256 i = 0; i < adapters.length; i++) {
+            require(adapters[i] != address(0), "zero adapter");
+            allowedAdapter[adapters[i]] = allowed;
+            emit AdapterAllowed(adapters[i], allowed);
         }
     }
 

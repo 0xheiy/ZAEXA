@@ -18,16 +18,20 @@
 ## ۱. وضعیت فعلی ✅
 
 ```
-قرارداد فعال : 0x76082b0fbd0a29C236dD2ae2B2F47BFD96d7F455   ← Base، v4، ۱۸ آگوست ۲۰۲۶
-               سورس روی BaseScan تأییدشده (Pass - Verified) و روی Sourcify (exact_match)
+قرارداد فعال : 0x15e511Bf2Ea1a0F50F25E973d57Dce0D01946b6d   ← Base، v5، ۱ سپتامبر ۲۰۲۶
+               ⚠️ تأیید سورس روی BaseScan/Sourcify هنوز انجام نشده
 owner        : 0x8A0Dcb583C8CAdc481E34487c34f1B856fe97e23
 feeRecipient : همان owner
 کارمزد       : 0 bps  (سقف سخت ۱۰۰ bps = ۱٪، غیرقابل عبور حتی برای owner)
-روترها       : هر شش تا لیست‌سفید و تأییدشده روی زنجیره — Uniswap V3،
-               Aerodrome، BaseSwap، SushiSwap، Alien Base، PancakeSwap V3
-تست‌ها       : ۶۷ تست سبز (۳۳ واحد + ۱۱ v2 + ۳ v3 + ۷ v4 + ۵ سلکتور + ۸ fork)
-               ⚠️ آن ۸ تست fork بدون RPC رد می‌شوند و باز هم «PASS» می‌دهند —
-               گس ۲۴۱۶ یعنی بدنه اجرا نشده. اجرای واقعی: ./script/fork_test.sh
+روترها       : هر هفت تا لیست‌سفید — Uniswap V3، Aerodrome، BaseSwap،
+               SushiSwap، Alien Base، PancakeSwap V3، Aerodrome Slipstream
+آداپتورها    : هیچ‌کدام. `allowedAdapter` خالی است و عمداً خالی مانده.
+تست‌ها       : ۸۲ تست واحد سبز + ۱۱ تست fork سبز روی مین‌نت
+               (۳۳ واحد + ۱۱ v2 + ۳ v3 + ۷ v4 + ۲۱ v5 + ۷ سلکتور + ۱۱ fork)
+               ⚠️ تست fork بدون RPC رد می‌شود و باز هم «PASS» می‌دهد —
+               گس حدود ۲۴۰۰ یعنی بدنه اجرا نشده. اجرای واقعی فقط با
+               ./script/fork_test.sh (بلاک را پین می‌کند؛ یک `forge test`
+               ساده روی اندپوینت عمومی ۴۲۹ می‌گیرد و شبیه خرابی به نظر می‌رسد)
                + سوییت Playwright رابط وب + تست Worker با node، همه سبز
 سایت         : https://zaexa.com — منتشر شد (Cloudflare Workers، از روی مخزن)
 مخزن         : github.com/0xheiy/ZAEXA (عمومی، بدون LICENSE) · ایکس @zaexadex

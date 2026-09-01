@@ -27,6 +27,12 @@ import "../src/SwapExecutor.sol";
  *     = 0x04e45aaf   <- SwapRouter02
  *   exactInputSingle((address,address,uint24,address,uint256,uint256,uint256,uint160))
  *     = 0x414bf389   <- first-generation SwapRouter
+ *   exactInputSingle((address,address,int24,address,uint256,uint256,uint256,uint160))
+ *     = 0xa026383e   <- Aerodrome Slipstream. Same eight-field shape as the
+ *                        first-generation router, `int24 tickSpacing` instead of
+ *                        `uint24 fee` - and yet a different selector. This is the
+ *                        one that would have let Slipstream get folded into
+ *                        KIND_V3_LEGACY by mistake.
  */
 contract SelectorTest is Test {
 
@@ -53,6 +59,24 @@ contract SelectorTest is Test {
             IUniswapV3Router02.exactInputSingle.selector
                 != IUniswapV3Router01.exactInputSingle.selector,
             "the two router generations must not collide"
+        );
+    }
+
+    function testSlipstreamSelectorMatchesAerodromeCL() public pure {
+        assertEq(
+            ISlipstreamRouter.exactInputSingle.selector,
+            bytes4(0xa026383e),
+            "KIND_SLIPSTREAM must target Aerodrome Slipstream's CL router"
+        );
+    }
+
+    /// Same eight-field shape as the legacy router, but the selectors must not collide -
+    /// this is exactly the trap that makes a separate KIND_SLIPSTREAM mandatory.
+    function testSlipstreamAndLegacyV3SelectorsDiffer() public pure {
+        assertTrue(
+            ISlipstreamRouter.exactInputSingle.selector
+                != IUniswapV3Router01.exactInputSingle.selector,
+            "Slipstream must not collide with the legacy SwapRouter despite the identical shape"
         );
     }
 

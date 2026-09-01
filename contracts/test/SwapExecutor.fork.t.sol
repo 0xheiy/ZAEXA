@@ -15,6 +15,14 @@ interface IV3FactoryLike {
     function getPool(address, address, uint24) external view returns (address);
 }
 
+/* Slipstream keys its pools on tickSpacing (int24), not on a fee tier (uint24).
+   The factory therefore has a *different* getPool - same name, same arity, different
+   selector. Asking the Slipstream factory with the uint24 signature reaches a function
+   that is not there, and the answer is not "no pool", it is no answer at all. */
+interface ICLFactoryLike {
+    function getPool(address, address, int24) external view returns (address);
+}
+
 /*
  * Fork test - against the *real* contracts on Base.
  * ==========================================================================
@@ -41,6 +49,10 @@ contract ForkTest is Test {
     // 0x414bf389 and not 0x04e45aaf; checked on-chain. The only DEX that needs kind=3.
     address constant PCS_V3_ROUTER  = 0x1b81D678ffb9C0263b24A97847620C99d213eB14;
     address constant PCS_V3_FACTORY = 0x0BFbCF9fa4f9C56B0F40a671Ad40E0805A091865;
+    // Aerodrome Slipstream (concentrated liquidity). Verified on-chain by
+    // script/verify_slipstream.sh. This is the market v4 could not reach at all.
+    address constant CL_ROUTER      = 0x698Cb2b6dd822994581fEa6eA4Fc755d1363A92F;
+    address constant CL_FACTORY     = 0xf8f2eB4940CFE7d13603DDDD87f123820Fc061Ef;
 
     address constant USDC = 0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913;
     address constant WETH = 0x4200000000000000000000000000000000000006;
@@ -69,10 +81,11 @@ contract ForkTest is Test {
         active = true;
 
         exec = new SwapExecutor(address(this), address(this), 0, WETH);
-        address[] memory routers = new address[](3);
+        address[] memory routers = new address[](4);
         routers[0] = UNI_V3_ROUTER;
         routers[1] = AERO_ROUTER;
         routers[2] = PCS_V3_ROUTER;
+        routers[3] = CL_ROUTER;
         exec.setRoutersAllowed(routers, true);
     }
 
@@ -89,7 +102,7 @@ contract ForkTest is Test {
         SwapExecutor.SwapStep[] memory steps = new SwapExecutor.SwapStep[](1);
         steps[0] = SwapExecutor.SwapStep({
             kind: kind, router: router, tokenIn: tin, tokenOut: tout,
-            feeTier: fee, stable: false, poolFactory: factory
+            feeTier: fee, stable: false, poolFactory: factory, tickSpacing: 0
         });
         parts = new SwapExecutor.RoutePart[](1);
         parts[0] = SwapExecutor.RoutePart({steps: steps, amountIn: amt});
@@ -146,11 +159,11 @@ contract ForkTest is Test {
         SwapExecutor.SwapStep[] memory steps = new SwapExecutor.SwapStep[](2);
         steps[0] = SwapExecutor.SwapStep({
             kind: 1, router: UNI_V3_ROUTER, tokenIn: USDC, tokenOut: WETH,
-            feeTier: 500, stable: false, poolFactory: UNI_V3_FACTORY
+            feeTier: 500, stable: false, poolFactory: UNI_V3_FACTORY, tickSpacing: 0
         });
         steps[1] = SwapExecutor.SwapStep({
             kind: 2, router: AERO_ROUTER, tokenIn: WETH, tokenOut: USDC,
-            feeTier: 0, stable: false, poolFactory: AERO_FACTORY
+            feeTier: 0, stable: false, poolFactory: AERO_FACTORY, tickSpacing: 0
         });
         SwapExecutor.RoutePart[] memory parts = new SwapExecutor.RoutePart[](1);
         parts[0] = SwapExecutor.RoutePart({steps: steps, amountIn: amountIn});
@@ -178,12 +191,12 @@ contract ForkTest is Test {
 
         SwapExecutor.SwapStep[] memory a = new SwapExecutor.SwapStep[](1);
         a[0] = SwapExecutor.SwapStep({kind: 1, router: UNI_V3_ROUTER, tokenIn: USDC,
-            tokenOut: WETH, feeTier: 500, stable: false, poolFactory: UNI_V3_FACTORY});
+            tokenOut: WETH, feeTier: 500, stable: false, poolFactory: UNI_V3_FACTORY, tickSpacing: 0});
         parts[0] = SwapExecutor.RoutePart({steps: a, amountIn: 120e6});
 
         SwapExecutor.SwapStep[] memory b = new SwapExecutor.SwapStep[](1);
         b[0] = SwapExecutor.SwapStep({kind: 2, router: AERO_ROUTER, tokenIn: USDC,
-            tokenOut: WETH, feeTier: 0, stable: false, poolFactory: AERO_FACTORY});
+            tokenOut: WETH, feeTier: 0, stable: false, poolFactory: AERO_FACTORY, tickSpacing: 0});
         parts[1] = SwapExecutor.RoutePart({steps: b, amountIn: 80e6});
 
         vm.prank(user);
@@ -278,11 +291,11 @@ contract ForkTest is Test {
         SwapExecutor.SwapStep[] memory steps = new SwapExecutor.SwapStep[](2);
         steps[0] = SwapExecutor.SwapStep({
             kind: 3, router: PCS_V3_ROUTER, tokenIn: USDC, tokenOut: WETH,
-            feeTier: fee, stable: false, poolFactory: PCS_V3_FACTORY
+            feeTier: fee, stable: false, poolFactory: PCS_V3_FACTORY, tickSpacing: 0
         });
         steps[1] = SwapExecutor.SwapStep({
             kind: 1, router: UNI_V3_ROUTER, tokenIn: WETH, tokenOut: USDC,
-            feeTier: 500, stable: false, poolFactory: UNI_V3_FACTORY
+            feeTier: 500, stable: false, poolFactory: UNI_V3_FACTORY, tickSpacing: 0
         });
         SwapExecutor.RoutePart[] memory parts = new SwapExecutor.RoutePart[](1);
         parts[0] = SwapExecutor.RoutePart({steps: steps, amountIn: amountIn});
@@ -311,6 +324,114 @@ contract ForkTest is Test {
         exec.executeSwap(
             USDC, WETH, amountIn, 1,
             _part(3, UNI_V3_ROUTER, UNI_V3_FACTORY, 500, USDC, WETH, amountIn),
+            block.timestamp + 300
+        );
+    }
+
+    // ==================================================================
+    // Slipstream (KIND_SLIPSTREAM = 4) - the reason v5 exists.
+    //
+    // Mocks cannot prove this branch. The Slipstream params struct has the same
+    // eight-field shape as the first-generation SwapRouter, differing only in
+    // int24 tickSpacing where the legacy struct has uint24 fee - and for positive
+    // values the two encode identically, byte for byte. Only the selector differs
+    // (0xa026383e vs 0x414bf389). A mock we wrote ourselves would agree with
+    // whichever of the two we believed; the real router will not.
+    // ==================================================================
+
+    function _partCL(address router, int24 tickSpacing,
+                     address tin, address tout, uint256 amt)
+        internal pure returns (SwapExecutor.RoutePart[] memory parts)
+    {
+        SwapExecutor.SwapStep[] memory steps = new SwapExecutor.SwapStep[](1);
+        steps[0] = SwapExecutor.SwapStep({
+            kind: 4, router: router, tokenIn: tin, tokenOut: tout,
+            feeTier: 0, stable: false, poolFactory: CL_FACTORY,
+            tickSpacing: tickSpacing
+        });
+        parts = new SwapExecutor.RoutePart[](1);
+        parts[0] = SwapExecutor.RoutePart({steps: steps, amountIn: amt});
+    }
+
+    /* Finds the deepest Slipstream USDC/WETH pool on-chain. Same rule as
+       _deepestPancakeFee: nothing is hardcoded, and if no pool answers, the test
+       says "I could not test this" instead of blaming the contract. */
+    function _deepestSlipstreamTick() internal view returns (int24 spacing, uint256 depth) {
+        int24[5] memory spacings = [int24(1), int24(50), int24(100), int24(200), int24(2000)];
+        for (uint256 i = 0; i < spacings.length; i++) {
+            address pool = ICLFactoryLike(CL_FACTORY).getPool(USDC, WETH, spacings[i]);
+            if (pool == address(0)) continue;
+            uint256 bal = IERC20Like(WETH).balanceOf(pool);
+            if (bal > depth) { depth = bal; spacing = spacings[i]; }
+        }
+    }
+
+    /* ------------------------------------------------------------------
+       9) A real swap through the real Slipstream router. Under v4 this was not
+          slower or worse - it was impossible: KIND_MAX was 3 and no branch could
+          ever produce selector 0xa026383e.
+       ------------------------------------------------------------------ */
+    function testRealSlipstreamSwap() public {
+        if (!active) return;
+        (int24 spacing, uint256 depth) = _deepestSlipstreamTick();
+        if (spacing == 0 || depth < 1 ether) {
+            console2.log("  !! no deep Slipstream USDC/WETH pool at this block - not tested");
+            return;
+        }
+        console2.log("  Slipstream tickSpacing used:", vm.toString(int256(spacing)));
+
+        uint256 amountIn = 100e6;                    // 100 USDC
+        _fund(USDC, user, amountIn);
+
+        uint256 before = IERC20Like(WETH).balanceOf(user);
+        vm.prank(user);
+        uint256 out = exec.executeSwap(
+            USDC, WETH, amountIn, 1,
+            _partCL(CL_ROUTER, spacing, USDC, WETH, amountIn),
+            block.timestamp + 300
+        );
+
+        assertGt(out, 0, "Slipstream swap returned nothing");
+        assertEq(IERC20Like(WETH).balanceOf(user) - before, out, "user did not receive output");
+        assertEq(IERC20Like(USDC).balanceOf(address(exec)), 0, "contract must keep no input token");
+        assertEq(IERC20Like(WETH).balanceOf(address(exec)), 0, "contract must keep no output token");
+    }
+
+    /* ------------------------------------------------------------------
+       10) The trap, against real bytecode: the Slipstream kind aimed at a real
+           first-generation SwapRouter. Same struct shape, same encoding for
+           positive values - and it must still revert, because the selector is
+           not there.
+       ------------------------------------------------------------------ */
+    function testSlipstreamKindFailsAgainstLegacyRouter() public {
+        if (!active) return;
+        uint256 amountIn = 10e6;
+        _fund(USDC, user, amountIn);
+
+        vm.prank(user);
+        vm.expectRevert();      // selector 0xa026383e is not on the first-gen SwapRouter
+        exec.executeSwap(
+            USDC, WETH, amountIn, 1,
+            _partCL(PCS_V3_ROUTER, int24(100), USDC, WETH, amountIn),
+            block.timestamp + 300
+        );
+    }
+
+    /* ------------------------------------------------------------------
+       11) The mirror of 10, and the one that would have caught the tempting
+           mistake: routing Slipstream under KIND_V3_LEGACY because "the shape
+           matches". Against the real Slipstream router it must revert.
+       ------------------------------------------------------------------ */
+    function testLegacyKindFailsAgainstSlipstreamRouter() public {
+        if (!active) return;
+        uint256 amountIn = 10e6;
+        _fund(USDC, user, amountIn);
+
+        vm.prank(user);
+        vm.expectRevert();      // selector 0x414bf389 is not on the Slipstream router
+        exec.executeSwap(
+            USDC, WETH, amountIn, 1,
+            _part(3, CL_ROUTER, CL_FACTORY, 100, USDC, WETH, amountIn),
             block.timestamp + 300
         );
     }

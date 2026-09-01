@@ -4,7 +4,7 @@
 already planned: one or more parts, each a chain of swap steps across whitelisted
 routers, all inside a single transaction.
 
-Live contract: [`0x76082b0fbd0a29C236dD2ae2B2F47BFD96d7F455`](https://basescan.org/address/0x76082b0fbd0a29c236dd2ae2b2f47bfd96d7f455#code)
+Live contract: [`0x15e511Bf2Ea1a0F50F25E973d57Dce0D01946b6d`](https://basescan.org/address/0x15e511bf2ea1a0f50f25e973d57dce0d01946b6d#code)
 — deployed on Base, source verified on BaseScan and Sourcify.
 
 The address above is a copy of `CHAIN.executor` in `web/index.html`, which is the

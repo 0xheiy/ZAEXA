@@ -413,6 +413,7 @@ main{max-width:1140px;margin:0 auto;padding:8px 20px 56px;display:flex;flex-dire
 .vdot.u{background:#f06ec0}.vdot.a{background:#4fc3f7}
 .vdot.b{background:#f59e0b}.vdot.s{background:#60a5fa}
 .vdot.n{background:#34d399}.vdot.p{background:#a78bfa}
+.vdot.c{background:#2dd4bf}
 .vname{font-size:14px;font-weight:560;min-width:0}
 .vtag{font-size:10.5px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;
   color:var(--pos);background:var(--pglow);border-radius:999px;padding:3px 8px;margin-left:7px}
@@ -1293,7 +1294,7 @@ function loadEthers(){return new Promise((res,rej)=>{
 const CHAIN={
   id:8453,hexId:"0x2105",name:"Base",explorer:"https://basescan.org",gtNetwork:"base",
   multicall3:"0xcA11bde05977b3631167028862bE2a173976CA11",
-  executor:"0x76082b0fbd0a29C236dD2ae2B2F47BFD96d7F455",
+  executor:"0x15e511Bf2Ea1a0F50F25E973d57Dce0D01946b6d",
   rpcs:["https://1rpc.io/base","https://base.drpc.org","https://base.llamarpc.com",
         "https://base.publicnode.com","https://mainnet.base.org"],
   wrapped:"WETH",reference:"USDC",
@@ -1301,7 +1302,7 @@ const CHAIN={
 const DEFAULT_RPCS=CHAIN.rpcs.slice();
 let customRpc=false;
 // KIND_V3 = SwapRouter02 (ساختار هفت‌فیلدی، بدون deadline)
-const KIND={V2:0,V3:1,SOLIDLY:2,V3_LEGACY:3};
+const KIND={V2:0,V3:1,SOLIDLY:2,V3_LEGACY:3,SLIPSTREAM:4};
 
 /*
  * ⚠️ درباره‌ی افزودن صرافی جدید — بخوان قبل از دست زدن به این آرایه.
@@ -1353,14 +1354,29 @@ const DEXES=[
    // ردش می‌کرد؛ نتیجه‌اش روی سایت زنده «could not reach the network» بود
    // برای مشکلی که اصلاً شبکه‌ای نبود. نگهبانش: کاوشگر [checksum] در run.py.
    quoter:"0xB048Bbc1Ee6b733FFfCFb9e9CeF7375518e25997",feeTiers:[100,500,2500,10000]},
+  // ⚠️ Aerodrome Slipstream: ساختار پارامترهایش همان شکل هشت‌فیلدیِ نسل اولِ
+  // SwapRouter (بالا، pancake-v3) است و برای مقدارهای مثبت عیناً همان‌طور
+  // encode می‌شود — ولی سلکتورش 0xa026383e است، نه 0x414bf389. اگر زیر
+  // KIND.V3_LEGACY ثبت شود، به تابعی صدا می‌زند که این قرارداد ندارد →
+  // revert بدون پیام، دقیقاً همان فاجعه‌ای که بالا درباره‌اش هشدار داده شده.
+  // کلید استخرش هم tickSpacing (int24) است، نه fee (uint24)، پس کوترش و
+  // getPool فکتوری‌اش هر دو *تابع* متفاوتی‌اند (سلکتور فرق دارد)، نه فقط
+  // مقدار پارامتر. هنوز core:true نیست — کاندید است تا چهار دروازه را رد کند.
+  {id:"aerodrome-cl",name:"Aerodrome Slipstream",cls:"c",kind:KIND.SLIPSTREAM,
+   router:"0x698Cb2b6dd822994581fEa6eA4Fc755d1363A92F",
+   factory:"0xf8f2eB4940CFE7d13603DDDD87f123820Fc061Ef",
+   quoter:"0x514c8B5f54112481E28028F1166Bd78501089259",tickSpacings:[1,50,100,200,2000]},
 ];
 
 /** امضای تابعی که *واقعاً* صدا می‌زنیم — پایه‌ی دروازه‌ی ۲. */
 function swapSigOf(d){
   if(d.kind===KIND.V3)return "exactInputSingle((address,address,uint24,address,uint256,uint256,uint160))";
   if(d.kind===KIND.V3_LEGACY)return "exactInputSingle((address,address,uint24,address,uint256,uint256,uint256,uint160))";
+  // ⚠️ همان شکل هشت‌فیلدیِ بالا (V3_LEGACY) ولی سلکتورش فرق دارد چون نوع
+  // فیلد سوم int24 است نه uint24 — 0xa026383e، نه 0x414bf389.
+  if(d.kind===KIND.SLIPSTREAM)return "exactInputSingle((address,address,int24,address,uint256,uint256,uint256,uint160))";
   if(d.kind===KIND.SOLIDLY)return "swapExactTokensForTokens(uint256,uint256,(address,address,bool,address)[],address,uint256)";
-  return "swapExactTokensForTokens(uint256,uint256,address[],address,uint256)";
+  return "swapExactTokensForTokens(uint256,uint256,address[],address,uint256)"; // V2
 }
 
 /* دو نسل V3 از هر نظری که *این* کد به آن اهمیت می‌دهد یکسان‌اند: استخر با
@@ -1368,13 +1384,36 @@ function swapSigOf(d){
    دارد. تنها تفاوتشان امضای خودِ سواپ است — و آن فقط در swapSigOf ظاهر می‌شود.
    پس همه‌جای دیگر باید این را صدا بزند، نه `kind===KIND.V3` را. اگر یک جا
    جا بیفتد، آن صرافی بی‌سروصدا از مسیریابی حذف می‌شود بدون اینکه هیچ
-   خطایی جایی دیده شود. */
+   خطایی جایی دیده شود.
+
+   Slipstream عمداً اینجا شریک نیست، هرچند از نظر «آیا اصلاً یک استخر
+   concentrated-liquidity با کوتر است؟» با این دو یکی است: استخر دارد،
+   کوتر دارد، getPool سه‌آرگومانی دارد. تفاوتش این است که کلید استخرش
+   int24 tickSpacing است، نه uint24 fee — یعنی هم امضای کوترش و هم امضای
+   getPool فکتوری‌اش *سلکتور* متفاوتی دارند، نه فقط مقدار متفاوت. اگر
+   isV3 اینجا گسترده می‌شد، هر جا که یک عدد fee را مستقیم به قراردادی با
+   امضای uint24 می‌فرستاد (کوتر، getPool) خاموش خراب می‌شد. برای «آیا این
+   یک استخر CL است، فارغ از شکل کلید؟» به‌جایش از isCL استفاده کن. */
 const isV3=d=>d.kind===KIND.V3||d.kind===KIND.V3_LEGACY;
+const isCL=d=>isV3(d)||d.kind===KIND.SLIPSTREAM;   // «استخر کلیددار با کوتر»
+
+/* کلید استخر بسته به نسل فرق دارد (fee در برابر tickSpacing) — به‌جای
+   پخش‌کردن if در هر سایتی که استخر را می‌شمارد، این accessor را صدا بزن. */
+function poolKeysOf(d){ return isV3(d) ? d.feeTiers : d.tickSpacings; }
 
 /* امضای کوتری که واقعاً صدا می‌زنیم — دروازه‌ی ۲ برای quoter.
    قبلاً فقط *وجود* قرارداد quoter چک می‌شد، نه اینکه تابع درست را دارد یا نه.
-   همان شکافی که یک بار در سمت روتر باگ SwapRouter02 را ساخت. */
-const QUOTER_SIG="quoteExactInputSingle((address,address,uint256,uint24,uint160))";
+   همان شکافی که یک بار در سمت روتر باگ SwapRouter02 را ساخت. حالا این امضا
+   ثابت هم نیست: Slipstream کوتر دیگری صدا می‌زند (fee به‌جای tickSpacing)،
+   پس یک ثابتِ سطحِ‌ماژول دیگر کافی نیست — باید per-dex بپرسیم. */
+function quoterSigOf(d){ return d.kind===KIND.SLIPSTREAM
+  ? "quoteExactInputSingle((address,address,uint256,int24,uint160))"
+  : "quoteExactInputSingle((address,address,uint256,uint24,uint160))"; }
+/* Interface درست را از روی خودِ dex انتخاب کن، نه از یک ثابتِ سطحِ‌ماژول —
+   وگرنه کوت/getPool اسلیپ‌استریم با Interface نسل uint24 انکود می‌شود. */
+function quoterIfaceOf(d){ return d.kind===KIND.SLIPSTREAM ? iQuoterCL : iQuoter; }
+function factoryIfaceOf(d){ return d.kind===KIND.SLIPSTREAM ? iClF : iV3F; }
+
 const WETH_ADDR="0x4200000000000000000000000000000000000006";
 const BASE_TOKENS=[
   // ETH بومی: قرارداد فقط ERC-20 می‌گیرد، پس رابط خودش wrap/unwrap می‌کند
@@ -1406,6 +1445,7 @@ const BASE_TOKENS=[
 const ABI={
   multicall3:["function aggregate3((address target,bool allowFailure,bytes callData)[] calls) payable returns ((bool success,bytes returnData)[])"],
   quoterV2:["function quoteExactInputSingle((address tokenIn,address tokenOut,uint256 amountIn,uint24 fee,uint160 sqrtPriceLimitX96) params) returns (uint256 amountOut,uint160 a,uint32 b,uint256 c)"],
+  quoterCL:["function quoteExactInputSingle((address tokenIn,address tokenOut,uint256 amountIn,int24 tickSpacing,uint160 sqrtPriceLimitX96) params) returns (uint256 amountOut,uint160 a,uint32 b,uint256 c)"],
   v2:["function getAmountsOut(uint256 amountIn,address[] path) view returns (uint256[])"],
   solidly:["function getAmountsOut(uint256 amountIn,(address from,address to,bool stable,address factory)[] routes) view returns (uint256[])"],
   erc20:["function symbol() view returns (string)","function name() view returns (string)",
@@ -1417,12 +1457,13 @@ const ABI={
     "event Swap(address indexed sender,address indexed recipient,int256 amount0,int256 amount1,uint160 sqrtPriceX96,uint128 liquidity,int24 tick)"],
   v2factory:["function getPair(address,address) view returns (address)"],
   v3factory:["function getPool(address,address,uint24) view returns (address)"],
+  clFactory:["function getPool(address,address,int24) view returns (address)"],
   solFactory:["function getPool(address,address,bool) view returns (address)"],
-  executor:["function executeSwap(address tokenIn,address tokenOut,uint256 totalAmountIn,uint256 minAmountOut,((uint8 kind,address router,address tokenIn,address tokenOut,uint24 feeTier,bool stable,address poolFactory)[] steps,uint256 amountIn)[] parts,uint256 deadline) returns (uint256)",
+  executor:["function executeSwap(address tokenIn,address tokenOut,uint256 totalAmountIn,uint256 minAmountOut,((uint8 kind,address router,address tokenIn,address tokenOut,uint24 feeTier,bool stable,address poolFactory,int24 tickSpacing)[] steps,uint256 amountIn)[] parts,uint256 deadline) returns (uint256)",
     "function allowedRouter(address) view returns (bool)","function feeBps() view returns (uint256)"],
 };
 
-let E,iMulti,iQuoter,iV2,iSol,iErc,iOwn,iV3F,iSolF,iV2F,iExec;
+let E,iMulti,iQuoter,iQuoterCL,iV2,iSol,iErc,iOwn,iV3F,iClF,iSolF,iV2F,iExec;
 let readProvider=null,rpcIndex=0,liveSrc=null;
 let walletProvider=null,signer=null,account=null,walletChainId=null;
 let tokenIn=null,tokenOut=null,customTokens=[];
@@ -1670,10 +1711,10 @@ async function checkDex(d){
     const sel=E.id(swapSigOf(d)).slice(2,10).toLowerCase();
     if(!code.toLowerCase().includes(sel))
       return set(false,"router does not expose the function we call — interface mismatch");
-    if(isV3(d)){
+    if(isCL(d)){
       const qc=await getCode(E.getAddress(d.quoter));
       if(!qc||qc.length<=2)return set(false,"no contract at the quoter address");
-      const qsel=E.id(QUOTER_SIG).slice(2,10).toLowerCase();
+      const qsel=E.id(quoterSigOf(d)).slice(2,10).toLowerCase();
       if(!qc.toLowerCase().includes(qsel))
         return set(false,"quoter does not expose the function we call — wrong quoter generation");
     }
@@ -1742,22 +1783,27 @@ function renderCoverage(){
 function allVenues(){
   const o=[];
   for(const d of enabledDexes()){
-    if(isV3(d))d.feeTiers.forEach(t=>o.push({dex:d,feeTier:t,stable:null}));
-    else if(d.kind===KIND.SOLIDLY)d.stableModes.forEach(s=>o.push({dex:d,feeTier:null,stable:s}));
-    else o.push({dex:d,feeTier:null,stable:null});
+    if(isV3(d))d.feeTiers.forEach(t=>o.push({dex:d,feeTier:t,stable:null,tickSpacing:null}));
+    else if(d.kind===KIND.SLIPSTREAM)d.tickSpacings.forEach(t=>o.push({dex:d,feeTier:null,stable:null,tickSpacing:t}));
+    else if(d.kind===KIND.SOLIDLY)d.stableModes.forEach(s=>o.push({dex:d,feeTier:null,stable:s,tickSpacing:null}));
+    else o.push({dex:d,feeTier:null,stable:null,tickSpacing:null});
   }
   return o;
 }
 function venueLabel(v){
   if(isV3(v.dex))return `${v.dex.name} ${(v.feeTier/10000).toFixed(2)}%`;
+  if(v.dex.kind===KIND.SLIPSTREAM)return `${v.dex.name} tick ${v.tickSpacing}`;
   if(v.dex.kind===KIND.SOLIDLY)return `${v.dex.name} ${v.stable?"stable":"volatile"}`;
   return v.dex.name;
 }
 function encodeQuote(v,a,b,amt){
   const x=E.getAddress(a),y=E.getAddress(b);
-  if(isV3(v.dex))return{target:v.dex.quoter,
-    data:iQuoter.encodeFunctionData("quoteExactInputSingle",[[x,y,amt,v.feeTier,0]]),
-    dec:d=>iQuoter.decodeFunctionResult("quoteExactInputSingle",d)[0]};
+  if(isCL(v.dex)){
+    const key=isV3(v.dex)?v.feeTier:v.tickSpacing,iface=quoterIfaceOf(v.dex);
+    return{target:v.dex.quoter,
+      data:iface.encodeFunctionData("quoteExactInputSingle",[[x,y,amt,key,0]]),
+      dec:d=>iface.decodeFunctionResult("quoteExactInputSingle",d)[0]};
+  }
   if(v.dex.kind===KIND.SOLIDLY)return{target:v.dex.router,
     data:iSol.encodeFunctionData("getAmountsOut",[amt,[[x,y,!!v.stable,v.dex.factory]]]),
     dec:d=>{const r=iSol.decodeFunctionResult("getAmountsOut",d)[0];return r[r.length-1];}};
@@ -1893,7 +1939,8 @@ const asArg=t=>isNative(t)?ZERO:t.address;
 function buildParts(plan){
   return plan.parts.map(p=>[p.route.hops.map(h=>[h.venue.dex.kind,E.getAddress(h.venue.dex.router),
     E.getAddress(h.tokenIn.address),E.getAddress(h.tokenOut.address),
-    h.venue.feeTier||0,!!h.venue.stable,E.getAddress(h.venue.dex.factory)]),p.amountIn]);
+    h.venue.feeTier||0,!!h.venue.stable,E.getAddress(h.venue.dex.factory),
+    h.venue.tickSpacing||0]),p.amountIn]);
 }
 function minOutOf(plan){
   const afterFee=(plan.totalOut*BigInt(10000-feeBps))/10000n;
@@ -2968,6 +3015,9 @@ async function measureLiquidity(token){
   for(const ref of refs)for(const d of DEXES){
     if(isV3(d))d.feeTiers.forEach(f=>{
       calls.push({target:d.factory,data:iV3F.encodeFunctionData("getPool",[token.address,ref.address,f])});
+      meta.push({ref,v2:false});});
+    else if(d.kind===KIND.SLIPSTREAM)d.tickSpacings.forEach(ts=>{
+      calls.push({target:d.factory,data:iClF.encodeFunctionData("getPool",[token.address,ref.address,ts])});
       meta.push({ref,v2:false});});
     else if(d.kind===KIND.SOLIDLY)d.stableModes.forEach(st=>{
       calls.push({target:d.factory,data:iSolF.encodeFunctionData("getPool",[token.address,ref.address,st])});
@@ -5168,9 +5218,11 @@ function wire(){
   try{E=await loadEthers();}
   catch{setNotice(note("err","<b>Could not load ethers.</b> Check your connection or ad-blocker and reload."));return;}
   iMulti=new E.Interface(ABI.multicall3);iQuoter=new E.Interface(ABI.quoterV2);
+  iQuoterCL=new E.Interface(ABI.quoterCL);
   iV2=new E.Interface(ABI.v2);iSol=new E.Interface(ABI.solidly);
   iErc=new E.Interface(ABI.erc20);iOwn=new E.Interface(ABI.ownable);
-  iV3F=new E.Interface(ABI.v3factory);iSolF=new E.Interface(ABI.solFactory);
+  iV3F=new E.Interface(ABI.v3factory);iClF=new E.Interface(ABI.clFactory);
+  iSolF=new E.Interface(ABI.solFactory);
   iV2F=new E.Interface(ABI.v2factory);
   iExec=new E.Interface(ABI.executor);iPool=new E.Interface(ABI.v3pool);
   /* RPC اختصاصی *از آدرس* حذف شد.

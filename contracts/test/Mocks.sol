@@ -475,6 +475,148 @@ contract SweepingTokenWallet is ITokenReceiver {
 }
 
 
+/**
+ * Aerodrome Slipstream-style mock router - eight-field struct like the legacy
+ * router, but with `int24 tickSpacing` instead of `uint24 fee` (selector
+ * 0xa026383e). Records the tickSpacing it was called with, so a test can assert
+ * it arrived unchanged.
+ */
+contract MockSlipstreamRouter {
+    struct ExactInputSingleParams {
+        address tokenIn; address tokenOut; int24 tickSpacing; address recipient;
+        uint256 deadline; uint256 amountIn; uint256 amountOutMinimum; uint160 sqrtPriceLimitX96;
+    }
+
+    uint256 public rateNum = 2;
+    uint256 public rateDen = 1;
+    int24   public lastTickSpacing;
+
+    function setRate(uint256 n, uint256 d) external { rateNum = n; rateDen = d; }
+
+    function exactInputSingle(ExactInputSingleParams calldata p)
+        external returns (uint256 amountOut)
+    {
+        require(block.timestamp <= p.deadline, "mock: expired");
+        lastTickSpacing = p.tickSpacing;
+        MockERC20(p.tokenIn).transferFrom(msg.sender, address(this), p.amountIn);
+        amountOut = p.amountIn * rateNum / rateDen;
+        require(amountOut >= p.amountOutMinimum, "mock: slippage");
+        MockERC20(p.tokenOut).mint(p.recipient, amountOut);
+    }
+}
+
+
+/**
+ * A router that only ever knew the legacy (uint24 fee) shape - used to prove
+ * that sending it a Slipstream-kind (int24 tickSpacing) call reverts, because
+ * the selectors genuinely differ despite the identical eight-field layout.
+ */
+contract MockLegacyOnlyRouter {
+    struct ExactInputSingleParams {
+        address tokenIn; address tokenOut; uint24 fee; address recipient;
+        uint256 deadline; uint256 amountIn; uint256 amountOutMinimum; uint160 sqrtPriceLimitX96;
+    }
+
+    uint256 public rateNum = 2;
+    uint256 public rateDen = 1;
+
+    function exactInputSingle(ExactInputSingleParams calldata p)
+        external returns (uint256 amountOut)
+    {
+        require(block.timestamp <= p.deadline, "mock: expired");
+        MockERC20(p.tokenIn).transferFrom(msg.sender, address(this), p.amountIn);
+        amountOut = p.amountIn * rateNum / rateDen;
+        require(amountOut >= p.amountOutMinimum, "mock: slippage");
+        MockERC20(p.tokenOut).mint(p.recipient, amountOut);
+    }
+}
+
+
+/**
+ * Adapter mock (IZaexaAdapter). Trades its OWN balance of tokenIn - not the
+ * nominal amountIn it was told about - exactly as the interface requires, so a
+ * fee-on-transfer tokenIn is handled correctly. Records every argument it was
+ * passed, so a test can assert the executor forwarded the full step.
+ */
+contract MockAdapter {
+    uint256 public rateNum = 2;
+    uint256 public rateDen = 1;
+
+    address public lastTokenIn;
+    address public lastTokenOut;
+    uint256 public lastAmountIn;
+    uint24  public lastFeeTier;
+    int24   public lastTickSpacing;
+    bool    public lastStable;
+    address public lastPoolFactory;
+    address public lastRecipient;
+
+    function setRate(uint256 n, uint256 d) external { rateNum = n; rateDen = d; }
+
+    function swap(
+        address tokenIn,
+        address tokenOut,
+        uint256 amountIn,
+        uint24  feeTier,
+        int24   tickSpacing,
+        bool    stable,
+        address poolFactory,
+        address recipient
+    ) external {
+        lastTokenIn = tokenIn;
+        lastTokenOut = tokenOut;
+        lastAmountIn = amountIn;
+        lastFeeTier = feeTier;
+        lastTickSpacing = tickSpacing;
+        lastStable = stable;
+        lastPoolFactory = poolFactory;
+        lastRecipient = recipient;
+
+        // Trade the adapter's OWN balance - not the nominal amountIn - per the
+        // interface contract: this is what makes fee-on-transfer tokenIn safe.
+        uint256 have = MockERC20(tokenIn).balanceOf(address(this));
+        uint256 out = have * rateNum / rateDen;
+        MockERC20(tokenOut).mint(recipient, out);
+    }
+}
+
+
+/// An adapter that keeps whatever it is sent and sends nothing back.
+contract MockLazyAdapter {
+    function swap(
+        address, address, uint256, uint24, int24, bool, address, address
+    ) external {
+        // deliberately does nothing
+    }
+}
+
+
+/// An adapter that tries to re-enter the executor (reentrancy test).
+contract MockReentrantAdapter {
+    address public executor;
+    bytes public payload;
+    bool public attacked;
+
+    function setup(address _executor, bytes calldata _payload) external {
+        executor = _executor;
+        payload = _payload;
+    }
+
+    function swap(
+        address, address, uint256, uint24, int24, bool, address, address
+    ) external {
+        if (!attacked) {
+            attacked = true;
+            (bool ok, bytes memory ret) = executor.call(payload);
+            // Bubble the real reason up, same reasoning as ReentrantRouter above.
+            if (!ok) {
+                assembly { revert(add(ret, 0x20), mload(ret)) }
+            }
+        }
+    }
+}
+
+
 /// V2-style router that pays out a MockHookToken instead of a MockERC20.
 contract MockHookRouter {
     uint256 public rateNum = 2;

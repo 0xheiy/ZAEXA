@@ -42,6 +42,9 @@
 
   // عمق استخر (دلار) برای هر (venueKey, pair). عمدی نامتقارن تا تقسیم سفارش معنا پیدا کند.
   const DEPTH = {
+    // Aerodrome Slipstream — کلید استخرش tickSpacing است، نه fee؛ prefix
+    // "cl" جدا از "uni"/"pcs" است تا استخرهای دو نسل قاطی نشوند.
+    "cl-100|weth-usdc": 5_000_000,
     "uni-500|weth-usdc": 9_000_000, "uni-3000|weth-usdc": 1_200_000,
     "uni-100|weth-usdc": 0,         "uni-10000|weth-usdc": 90_000,
     "aero-vol|weth-usdc": 6_500_000, "aero-stb|weth-usdc": 0,
@@ -62,17 +65,20 @@
 
   const FEE = { "uni-100":1n, "uni-500":5n, "uni-3000":30n, "uni-10000":100n,
                 "pcs-100":1n, "pcs-500":5n, "pcs-2500":25n, "pcs-10000":100n,
-                "aero-vol":30n, "aero-stb":5n };  // در ده‌هزارم
+                "aero-vol":30n, "aero-stb":5n, "cl-100":5n };  // در ده‌هزارم
 
   const QUOTER = "0x3d4e44Eb1374240CE5F1B871ab261CD16335B76a".toLowerCase();
   const PCS_Q  = "0xB048Bbc1Ee6b733FFfCFb9e9cEF7375518e25997".toLowerCase();
-  // هر کوتر V3 به یک پیشوند venue نگاشت می‌شود، تا استخرهای دو صرافی قاطی نشوند
-  const V3_QUOTERS = { [QUOTER]: "uni", [PCS_Q]: "pcs" };
+  const CL_Q   = "0x514c8B5f54112481E28028F1166Bd78501089259".toLowerCase();
+  // هر کوتر (V3 یا Slipstream) به یک پیشوند venue نگاشت می‌شود، تا استخرهای
+  // چند صرافی قاطی نشوند. آرگومان چهارم برای "cl" همان tickSpacing است، ولی
+  // amm() فقط یک عدد کلید می‌خواهد و برایش فرقی نمی‌کند fee باشد یا tickSpacing.
+  const V3_QUOTERS = { [QUOTER]: "uni", [PCS_Q]: "pcs", [CL_Q]: "cl" };
   const AERO_R = "0xcF77a3Ba9A5CA399B7c97c74d54e5b1Beb874E43".toLowerCase();
   const MC3    = "0xcA11bde05977b3631167028862bE2a173976CA11".toLowerCase();
   // باید با CHAIN.executor در index.html یکی باشد، وگرنه allowedRouter و feeBps
   // در استاب هرگز match نمی‌شوند و دروازه‌ی ۳ بی‌صدا از تست بیرون می‌ماند.
-  const EXEC   = "0x76082b0fbd0a29C236dD2ae2B2F47BFD96d7F455".toLowerCase();
+  const EXEC   = "0x15e511Bf2Ea1a0F50F25E973d57Dce0D01946b6d".toLowerCase();
 
   const symOf = a => Object.keys(T).find(k => T[k].toLowerCase() === a.toLowerCase()) || "???";
   const pairKey = (a, b) => [symOf(a).toLowerCase(), symOf(b).toLowerCase()].sort().join("-");
@@ -122,22 +128,33 @@
     "0x2626664c2603336E57B271c5C0b26F421741e481",   // Uniswap V3 router (نسل ۰۲)
     "0xcF77a3Ba9A5CA399B7c97c74d54e5b1Beb874E43",   // Aerodrome router
     "0x1b81D678ffb9C0263b24A97847620C99d213eB14",   // PancakeSwap V3 router (نسل ۰۱)
+    "0x698Cb2b6dd822994581fEa6eA4Fc755d1363A92F",   // Aerodrome Slipstream router
   ].map(a => a.toLowerCase());
   // کوترها کد جدا دارند: دروازه‌ی جدید سلکتور کوتر را در بایت‌کد می‌گردد،
   // پس اگر کد کوتر همان کد روتر باشد تست چیزی را ثابت نمی‌کند.
   const GOOD_QUOTERS = [
     "0x3d4e44Eb1374240CE5F1B871ab261CD16335B76a",   // Uniswap V3 quoter
     "0xB048Bbc1Ee6b733FFfCFb9e9cEF7375518e25997",   // PancakeSwap V3 quoter
+    "0x514c8B5f54112481E28028F1166Bd78501089259",   // Aerodrome Slipstream quoter
   ].map(a => a.toLowerCase());
   const SWAP_SIGS = [
     "exactInputSingle((address,address,uint24,address,uint256,uint256,uint160))",
     "exactInputSingle((address,address,uint24,address,uint256,uint256,uint256,uint160))",
     "swapExactTokensForTokens(uint256,uint256,(address,address,bool,address)[],address,uint256)",
     "swapExactTokensForTokens(uint256,uint256,address[],address,uint256)",
+    // Slipstream: همان شکلِ هشت‌فیلدیِ نسل اول، ولی fee سوم int24 است نه
+    // uint24 — سلکتور 0xa026383e، جدا از 0x414bf389.
+    "exactInputSingle((address,address,int24,address,uint256,uint256,uint256,uint160))",
   ];
   const ROUTER_CODE = "0x60806040" + SWAP_SIGS.map(s => fakeId(s).slice(2, 10)).join("beef");
-  const QUOTER_SIG  = "quoteExactInputSingle((address,address,uint256,uint24,uint160))";
-  const QUOTER_CODE = "0x60806040" + fakeId(QUOTER_SIG).slice(2, 10) + "00".repeat(20);
+  // دو نسل کوتر: fee (uint24 — V3/PancakeSwap) و tickSpacing (int24 — Slipstream).
+  // هر دو سلکتور در همان بلوکِ کدِ مشترکِ کوترها نشسته‌اند، درست مثل ROUTER_CODE
+  // که سلکتور همه‌ی روترهای «سالم» را با هم دارد.
+  const QUOTER_SIGS = [
+    "quoteExactInputSingle((address,address,uint256,uint24,uint160))",
+    "quoteExactInputSingle((address,address,uint256,int24,uint160))",
+  ];
+  const QUOTER_CODE = "0x60806040" + QUOTER_SIGS.map(s => fakeId(s).slice(2, 10)).join("beef");
   // آدرس‌هایی که روی زنجیره‌ی واقعی هم قرارداد ندارند. بدون این‌ها استاب
   // *هر* آدرسی را یک ERC-20 سالم نشان می‌داد و مسیر «توکن قابل تأیید نیست»
   // اصلاً آزموده نمی‌شد.
