@@ -520,7 +520,15 @@ def check_one_executor_address():
 
     قاعده: `CHAIN.executor` در index.html تنها منبع حقیقت است. هر آدرس
     بازنشسته‌ای که در اسناد ظاهر شود باید در فاصله‌ی نزدیک، برچسب بازنشستگی
-    داشته باشد."""
+    داشته باشد.
+
+    ⚠️ چرا فهرست اسناد دیگر هاردکد نیست: تا همین اواخر این نگهبان یک فهرست
+    ثابت را می‌گشت، و BASESCAN_NAME_TAG_REQUEST.md هرگز به آن فهرست اضافه
+    نشده بود — پس وقتی قرارداد v4 بازنشسته شد، آدرسش ماه‌ها در همان سند، بدون
+    هیچ نگهبانی، به‌عنوان مقصد یک درخواست واقعی به BaseScan نشست. یک فهرست
+    صریح فقط تا روزی درست است که کسی سند تازه بنویسد و فراموش کند آن را به
+    فهرست هم اضافه کند — و همیشه کسی فراموش می‌کند. به‌جای فهرست، حالا مسیرها
+    را می‌گردد تا سند بعدی هم بدون یادآوری زیر پوشش باشد."""
     idx = open(os.path.join(HERE, "..", "index.html"), encoding="utf-8").read()
     m = re.search(r'executor:"(0x[0-9a-fA-F]{40})"', idx)
     assert m, "CHAIN.executor is gone from index.html — this guard has nothing to compare against"
@@ -529,26 +537,35 @@ def check_one_executor_address():
         "the app itself points at a retired executor: " + live
 
     root = os.path.join(HERE, "..", "..")
-    docs = [("README.md", os.path.join(root, "README.md")),
-            ("contracts/README.md", os.path.join(root, "contracts", "README.md")),
-            ("contracts/script/verify_dexes.sh",
-             os.path.join(root, "contracts", "script", "verify_dexes.sh")),
-            # هر اسکریپتی که آدرس قرارداد چاپ می‌کند باید زیر همین نگهبان باشد،
-            # وگرنه فردا یکی آدرس بازنشسته را در آن هاردکد می‌کند و کسی نمی‌فهمد.
-            ("contracts/script/verify_slipstream.sh",
-             os.path.join(root, "contracts", "script", "verify_slipstream.sh")),
-            ("contracts/script/compare_slipstream.sh",
-             os.path.join(root, "contracts", "script", "compare_slipstream.sh")),
-            ("contracts/script/probe_token_pools.sh",
-             os.path.join(root, "contracts", "script", "probe_token_pools.sh")),
-            ("contracts/script/diagnose_dead_dexes.sh",
-             os.path.join(root, "contracts", "script", "diagnose_dead_dexes.sh"))]
+
+    # README.md و contracts/README.md پایه‌ی این نگهبان‌اند (چک ادعای «قرارداد
+    # زنده» فقط روی همین دو معنا دارد)؛ اگر یکی جابه‌جا یا حذف شود مشکل واقعی
+    # است و باید همین‌جا با پیام روشن بترکد، نه این‌که در گلاب بی‌صدا گم شود.
+    for must_rel in ("README.md", os.path.join("contracts", "README.md")):
+        assert os.path.exists(os.path.join(root, must_rel)), \
+            "%s is missing — a doc this guard depends on was renamed or deleted" % must_rel
+
+    def rel_label(path):
+        return os.path.relpath(path, root).replace(os.sep, "/")
+
+    md_root = glob.glob(os.path.join(root, "*.md"))
+    md_contracts = glob.glob(os.path.join(root, "contracts", "**", "*.md"), recursive=True)
+    # اسکریپت‌ها همچنان با نام صریح انتخاب می‌شوند (فقط contracts/script/*.sh)،
+    # چون کامنت زیرش هنوز درست است: هر اسکریپتی که آدرس چاپ می‌کند باید زیر
+    # همین نگهبان باشد — گلابِ همین یک پوشه هر اسکریپتی را که پیش‌تر صریح
+    # فهرست شده بود هم پوشش می‌دهد، به‌علاوه‌ی هر اسکریپت تازه‌ای.
+    scripts = glob.glob(os.path.join(root, "contracts", "script", "*.sh"))
+
+    docs = sorted(
+        ((rel_label(p), p) for p in md_root + md_contracts + scripts),
+        key=lambda pair: pair[0],
+    )
+
     RETIRED_WORDS = ("retired", "abandoned", "do not use", "superseded", "replaced",
                      "بازنشسته", "استفاده نکن", "رها")
+    AUTHORITATIVE_MD = ("README.md", "contracts/README.md")
     problems = []
     for label, path in docs:
-        if not os.path.exists(path):
-            problems.append("%s is missing" % label); continue
         text = open(path, encoding="utf-8").read()
         low = text.lower()
 
@@ -562,8 +579,10 @@ def check_one_executor_address():
                     problems.append("%s:%d names retired executor %s with no retirement "
                                     "label on that line" % (label, i, old_addr))
 
-        # و ادعای صریح «قرارداد زنده این است» باید همان آدرس زنده را بدهد
-        if label.endswith(".md"):
+        # ادعای صریح «قرارداد زنده این است» فقط وظیفه‌ی دو README مرجع است؛
+        # اسناد دیگر (مثل PROJECT_STATUS.md یا BASESCAN_NAME_TAG_REQUEST.md)
+        # قرار نیست این ادعا را داشته باشند، پس نبودنش در آن‌ها مشکل نیست.
+        if label in AUTHORITATIVE_MD:
             claims = re.findall(r'(?i)live contract:\s*\[`(0x[0-9a-fA-F]{40})`\]', text)
             if not claims:
                 problems.append("%s no longer states which contract is live" % label)
@@ -575,8 +594,9 @@ def check_one_executor_address():
                 problems.append("%s never names the live executor %s" % (label, live))
     assert not problems, ("the executor address has drifted across the docs:\n  - "
                           + "\n  - ".join(problems))
-    print("[one address] live executor %s — %d retired ones labelled as retired"
-          % (live, len(RETIRED_EXECUTORS)))
+    print("[one address] live executor %s — %d retired ones labelled as retired — "
+          "%d files scanned (%s)"
+          % (live, len(RETIRED_EXECUTORS), len(docs), ", ".join(l for l, _ in docs)))
 
 
 def check_dex_parity():

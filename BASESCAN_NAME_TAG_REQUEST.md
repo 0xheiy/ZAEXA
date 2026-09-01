@@ -3,7 +3,7 @@
 **Where to send it:** BaseScan → Contact Us, category **"Address Related — Update Public Name Tag / Label"**.
 Direct link (address pre-filled):
 
-https://basescan.org/contactus?id=5&a=0x76082b0fbd0a29C236dD2ae2B2F47BFD96d7F455
+https://basescan.org/contactus?id=5&a=0x15e511Bf2Ea1a0F50F25E973d57Dce0D01946b6d
 
 You need to be signed in to a BaseScan account, and the reply comes to that
 account's email. Submitting from an address you control is not required, but
@@ -14,14 +14,14 @@ declaring ownership is — that is the part their curators actually check.
 ## Paste this into the message field
 
 ```
-Subject: Public name tag request — ZAEXA: Swap Executor (0x76082b0f...F455)
+Subject: Public name tag request — ZAEXA: Swap Executor (0x15e511Bf...6b6d)
 
 Hello,
 
 I am requesting a public name tag for a verified contract we own and operate
 on Base.
 
-Address:        0x76082b0fbd0a29C236dD2ae2B2F47BFD96d7F455
+Address:        0x15e511Bf2Ea1a0F50F25E973d57Dce0D01946b6d
 Requested tag:  ZAEXA: Swap Executor
 Contract name:  SwapExecutor
 Network:        Base mainnet
