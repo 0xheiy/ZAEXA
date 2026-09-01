@@ -96,7 +96,7 @@ export function ogDescription(meta) {
    `v` در آدرس تصویر برای شکستن کش ربات‌هاست؛ اگر روزی تصویر عوض شد، همین
    عدد را جلو ببر — وگرنه تلگرام ماه‌ها تصویر قدیمی را نشان می‌دهد. */
 export const OG_IMAGE_PATH = "/og.png";
-export const OG_IMAGE_V = "3";
+export const OG_IMAGE_V = "4";
 
 export function ogTags(meta, addr, origin) {
   const title = ogTitle(meta);

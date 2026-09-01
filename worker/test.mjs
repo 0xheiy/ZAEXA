@@ -7,6 +7,8 @@
    run.py هم پیش از سوییت مرورگر همین را صدا می‌زند. */
 
 import worker from "./index.js";
+import { createHash } from "node:crypto";
+import { OG_PNG_ETAG } from "./og-image.js";
 
 let fails = 0;
 function ok(cond, what) {
@@ -434,8 +436,21 @@ ok(res.status === 200, "index.html must still be served");
   ok(bytes.length > 100000, "/og.png looks truncated (" + bytes.length + " bytes)");
   ok(askedOg.length === 0, "/og.png was handed to ASSETS: " + JSON.stringify(askedOg));
 
+  /* اتگ باید هشِ همان بایت‌هایی باشد که واقعاً سرو می‌شوند.
+
+     این نگهبان از یک شکافِ خاموش آمد: هیچ تستی اتگ را با تصویر نمی‌سنجید.
+     تست ۳۰۴ فقط هر اتگی را که سرور داد به خودش پس می‌دهد، پس یک اتگِ کهنه
+     از همه‌ی تست‌ها سبز رد می‌شد — و چون هدر `cache-control: immutable`
+     است، کلادفلر تا ابد تصویر قدیمی را می‌داد. یعنی تصویر عوض می‌شد،
+     همه‌ی تست‌ها سبز بودند، و کاربر هیچ‌وقت تصویر تازه را نمی‌دید. */
+  const shouldEtag = '"' + createHash("sha256").update(bytes).digest("hex").slice(0, 16) + '"';
+  ok(OG_PNG_ETAG === shouldEtag,
+     "OG_PNG_ETAG is stale: the file says " + OG_PNG_ETAG + " but the bytes served hash to " +
+     shouldEtag + " — bump it, or Cloudflare keeps serving the old card forever");
+
   console.log("[og] card text, escaping, upstream call and /og.png ok " +
               "(injection itself: worker/og_live_test.mjs)");
+  console.log("[og etag] OG_PNG_ETAG matches the bytes actually served: " + OG_PNG_ETAG);
 }
 
 console.log(fails === 0
