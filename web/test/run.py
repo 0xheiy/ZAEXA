@@ -466,17 +466,38 @@ def check_error_handler():
         "the resource-error branch no longer restricts itself to SCRIPT and LINK — a token "
         "logo that 404s is normal here and would start raising false error banners")
 
-    # ۴) مرز حریم خصوصی: هیچ‌کدام از سه رویدادِ خطا نباید detail ببرد. اگر
-    #    روزی پیام خطا یا کد در detail برود، فهرست بسته‌ی /ev بی‌معنا می‌شود.
+    # ۴) قاعده برعکس شده: حالا سه رویدادِ خطا *باید* بتوانند یک کدِ
+    #    چهار-رقمی حمل کنند (کاوشگرهای [err] پایین‌تر همین را روی خودِ
+    #    مرورگر می‌سنجند). آنچه باید نگهبانی شود این است که Worker همان کد
+    #    را روی هر رویدادِ *دیگری* رد کند — وگرنه مرز detail برای همه‌چیز
+    #    باز شده، نه فقط برای خطا. این رفتاریِ Worker است، نه جای کد در
+    #    فایل، پس با یک فراخوانیِ واقعی به خودِ worker/index.js سنجیده
+    #    می‌شود، نه با خواندنِ متن.
     for name in ("err:js", "err:promise", "err:res"):
         assert ('"%s"' % name) in src, "the event name %r vanished from the page" % name
-    bad = re.findall(r'ev\(\s*"(err:[a-z]+)"\s*,', src)
-    assert not bad, (
-        "an error event was given a detail argument (%s). The detail allowlist is what keeps "
-        "free-form strings out of the analytics store; error text must never go through it."
-        % bad)
+
+    import subprocess
+    worker_dir = os.path.join(HERE, "..", "..", "worker")
+    probe = """
+    import worker from "./index.js";
+    const env = { ASSETS: { fetch: async () => new Response("x") } };
+    const req = new Request("https://zaexa.com/ev", {
+      method: "POST", body: JSON.stringify({ e: "wallet:on", d: "A3F1", v: "desktop" }),
+    });
+    Object.defineProperty(req, "cf", { value: {} });
+    const res = await worker.fetch(req, env, {});
+    console.log(res.status);
+    """
+    r = subprocess.run(["node", "--input-type=module", "-e", probe],
+                       capture_output=True, text=True, cwd=worker_dir)
+    got = r.stdout.strip()
+    assert got == "400", (
+        "the worker accepted a 4-hex detail (\"A3F1\") on wallet:on, a non-error event "
+        "(got status %r). The hex exception must stay narrow to err:js/err:promise/err:res "
+        "— otherwise the detail boundary is open for every event, not just errors.\n%s"
+        % (got, r.stderr))
     print("[err] handler is above the main script; banner is outside #notices; "
-          "IMG excluded; 3 error events, none carries a detail")
+          "IMG excluded; 3 error events may carry a hex code, everything else is still refused")
 
 RETIRED_EXECUTORS = [
     "0x6443C06bb117223DC818df54A09A642696D0489c",
@@ -3460,12 +3481,18 @@ async def main():
         await evpg.close()
 
         import json as _json
+        # فقط برای سه رویدادِ err: بازتر شده — همان شکلِ چهار-رقمِ بزرگی که
+        # Worker می‌پذیرد (worker/test.mjs قسمتِ «ح» را می‌سنجد). برای هر
+        # رویدادِ دیگری detail همچنان باید از ev_detail (فهرست بسته) بیاید.
+        EV_ERR_HEX = re.compile(r"^[0-9A-F]{4}$")
         ev_names = []
         for raw in ev_seen:
             body = _json.loads(raw)
             assert set(body) == {"e", "d", "v"}, "a beacon carried unexpected fields: %s" % raw
             assert body["e"] in ev_page, "a beacon carried an unknown event name: %s" % raw
-            assert body["d"] in ev_detail, "a beacon carried an unknown detail: %s" % raw
+            is_err = body["e"].startswith("err:")
+            assert body["d"] in ev_detail or (is_err and EV_ERR_HEX.match(body["d"])), (
+                "a beacon carried an unknown detail: %s" % raw)
             assert body["v"] in ("desktop", "mobile"), "a beacon carried an odd surface: %s" % raw
             assert "0x" not in raw, "AN ADDRESS REACHED THE ANALYTICS BEACON: %s" % raw
             ev_names.append(body["e"])
@@ -3985,6 +4012,11 @@ async def main():
         def err_names(seen):
             return [_json3.loads(r)["e"] for r in seen if _json3.loads(r)["e"].startswith("err:")]
 
+        def err_details(seen):
+            # همان فیلترِ err_names، ولی روی «d» — همان چهار نویسه‌ی پایانیِ
+            # کدی که کاربر روی صفحه می‌بیند، نه پیام یا فایل یا خط.
+            return [_json3.loads(r)["d"] for r in seen if _json3.loads(r)["e"].startswith("err:")]
+
         # 1) صفحه‌ی سالم: بنر نباید بالا بیاید و هیچ رویداد خطایی نرود.
         #    ⚠️ این مهم‌ترین بند است. نگهبانی که روی صفحه‌ی سالم هم شلیک کند،
         #    بعد از دو روز نادیده گرفته می‌شود و بدتر از نبودنش است.
@@ -4015,9 +4047,10 @@ async def main():
         js_survived = await jspg.evaluate(
             "() => !document.getElementById('errBanner').hidden")
         js_names = err_names(js_seen[before:])
+        js_details = err_details(js_seen[before:])
         await jspg.close()
-        print("[err] uncaught throw: code=%r survived quoting=%s beacons=%s"
-              % (js_code, js_survived, js_names))
+        print("[err] uncaught throw: code=%r survived quoting=%s beacons=%s details=%s"
+              % (js_code, js_survived, js_names, js_details))
         assert not js_hidden, (
             "an uncaught exception left no trace on screen — this is exactly the silent "
             "failure the handler exists to end")
@@ -4029,6 +4062,13 @@ async def main():
             "live outside #notices — the same trap the ?dev=1 banner fell into.")
         assert js_names == ["err:js"], (
             "an uncaught exception should send exactly one err:js, got %s" % js_names)
+        # d باید دقیقاً همان چهار نویسه‌ی پایانیِ کدِ روی صفحه باشد — نه
+        # پیام، نه فایل، نه خط. اگر این دو از هم جدا بیفتند، آمار و گزارشِ
+        # خودِ کاربر دیگر به یک باگ اشاره نمی‌کنند.
+        assert js_details == [js_code[-4:]], (
+            "the beacon's detail (%s) does not match the last four characters of the "
+            "on-screen code (%s) — the dashboard and the user's own report would point at "
+            "different bugs" % (js_details, js_code))
 
         # 3) رد شدنِ گرفته‌نشده‌ی promise — کلاسِ جدا، چون async است و هرگز
         #    به window.onerror نمی‌رسد.
@@ -4072,7 +4112,7 @@ async def main():
         #    با آن پایداری را سنجید.
         async def synth_code(msg):
             spg = await b.new_page(viewport={"width": 1240, "height": 1000})
-            await watch_events(spg)
+            seen = await watch_events(spg)
             await spg.goto("http://127.0.0.1:%d/test/harness.html#swap" % port)
             await spg.wait_for_timeout(1300)
             await spg.evaluate("""(m) => dispatchEvent(new ErrorEvent("error", {
@@ -4081,24 +4121,36 @@ async def main():
             code = await spg.inner_text("#errCode")
             raw = await spg.evaluate("() => document.getElementById('errRaw').textContent")
             pwned = await spg.evaluate("() => !!window.__zxPwned")
+            details = err_details(seen)
             await spg.close()
-            return code, raw, pwned
+            return code, raw, pwned, details
 
-        code_a, _, _ = await synth_code("zaexa probe: stable")
-        code_b, _, _ = await synth_code("zaexa probe: stable")
-        code_c, _, _ = await synth_code("zaexa probe: different")
-        print("[err] same fault twice: %s / %s   different fault: %s"
-              % (code_a, code_b, code_c))
+        code_a, _, _, det_a = await synth_code("zaexa probe: stable")
+        code_b, _, _, det_b = await synth_code("zaexa probe: stable")
+        code_c, _, _, det_c = await synth_code("zaexa probe: different")
+        print("[err] same fault twice: %s / %s   different fault: %s   details: %s/%s/%s"
+              % (code_a, code_b, code_c, det_a, det_b, det_c))
         assert code_a == code_b, (
             "the same fault produced two different codes (%s vs %s) — then two users "
             "reporting the same bug look like two bugs" % (code_a, code_b))
         assert code_a != code_c, (
             "two different faults collapsed onto the same code %s — then two bugs look "
             "like one" % code_a)
+        # همان چیزی که برای throw واقعی در بند ۲ سنجیده شد، اینجا برای دو
+        # بازدیدِ *جداگانه* از یک فالت: d باید هم با کدِ روی صفحه بخواند و
+        # هم بین دو بازدید یکسان بماند — وگرنه «یک باگ» در آمار به دو ردیفِ
+        # جدا تبدیل می‌شود.
+        assert det_a == [code_a[-4:]], (
+            "the beacon detail (%s) does not match the on-screen code's last four "
+            "characters (%s)" % (det_a, code_a))
+        assert det_a == det_b, (
+            "the same fault in two separate page loads produced different beacon details "
+            "(%s vs %s) — two reports of one bug would look like two distinct bugs"
+            % (det_a, det_b))
 
         # 7) پیام خطا رشته‌ی کنترل‌نشده است و می‌تواند از ورودیِ خودِ کاربر
         #    بیاید. اگر با innerHTML بنشیند، گزارشِ خطا خودش یک XSS است.
-        _, xss_raw, xss_pwned = await synth_code(
+        _, xss_raw, xss_pwned, _ = await synth_code(
             '<img src=x onerror="window.__zxPwned=1">')
         print("[err] hostile message rendered as text: %s (executed=%s)"
               % ("<img" in xss_raw, xss_pwned))

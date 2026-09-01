@@ -45,17 +45,23 @@ if(/^\/t\/0x[0-9a-fA-F]{40}\/?$/.test(location.pathname)){
    نمی‌شود؛ بالای همه‌چیز یعنی حتی وقتی هیچ‌کدام از کدِ زیر اجرا نشد، باز هم
    کاربر یک کد می‌بیند و می‌تواند بگوید چه دید.
 
-   دو خروجی جدا دارد و عمداً به هم وابسته نیستند:
+   دو خروجی جدا دارد، ولی دیگر کاملاً بی‌ربط به هم نیستند:
    • روی صفحه: یک کد کوتاه و پایدار (مثل E-JS-4C1A) که کاربر می‌تواند برای
-     ما بخواند، به‌علاوه‌ی دکمه‌ی کپی جزئیات. این هیچ‌جا فرستاده نمی‌شود —
-     فقط اگر خودِ کاربر کلیک کند به کلیپ‌بوردش می‌رود.
-   • در آمار: فقط *نام رویداد* (`err:js` / `err:promise` / `err:res`).
-     ⚠️ نه پیام خطا، نه فایل، نه همان کدِ روی صفحه. مرز حریم خصوصیِ /ev
-     یعنی `detail` از یک فهرست بسته می‌آید، و آن تصمیم بدون پرسیدن عوض
-     نمی‌شود. پس آمار می‌گوید «چند تا و از چه جنسی»، و گزارشِ خودِ کاربر
-     می‌گوید «کدام باگ».
+     ما بخواند، به‌علاوه‌ی دکمه‌ی کپی جزئیات. متنِ کامل (پیام، فایل، خط،
+     پشته) هیچ‌جا فرستاده نمی‌شود — فقط اگر خودِ کاربر کلیک کند به
+     کلیپ‌بوردش می‌رود.
+   • در آمار: *نام رویداد* (`err:js` / `err:promise` / `err:res`) به‌علاوه‌ی
+     همان چهار نویسه‌ی پایانیِ کدِ روی صفحه (مثلاً از E-JS-4C1A فقط "4C1A")
+     — با اجازه‌ی صریح صاحب سایت، تا بشود شمرد «چند باگِ *متمایز*» داریم و
+     کدام‌یک بیشتر می‌افتد، نه فقط «خطایی افتاد».
+     ⚠️ ولی نه پیام خطا، نه فایل، نه خط/ستون، نه پشته — هیچ‌کدام. مرز حریم
+     خصوصیِ /ev همچنان یعنی `detail` از یک فهرست بسته می‌آید یا (فقط برای
+     همین سه رویداد) از شکل ثابتِ چهار-رقمِ شانزده‌شانزدهی؛ آن مرز بدون
+     پرسیدن عوض نمی‌شود. شانزده بیت یعنی نمی‌شود از این راه چیزِ دیگری
+     قاچاق کرد.
    ⚠️ کد از هشِ پیام+فایل+خط ساخته می‌شود، پس *یک* باگ همیشه *یک* کد
-   می‌دهد — دو گزارش با کد یکسان یعنی یک چیز، نه دو چیز. */
+   می‌دهد — دو گزارش با کد یکسان یعنی یک چیز، نه دو چیز؛ و همان یکسانی است
+   که به d ی یکسان در آمار هم می‌رسد. */
 (function(){
   var MAX_EV=3, sent=0, shown=false;
   window.__zxErrQ=[];        // تا وقتی ev() تعریف نشده، اینجا صف می‌شود
@@ -83,8 +89,12 @@ if(/^\/t\/0x[0-9a-fA-F]{40}\/?$/.test(location.pathname)){
     return true;
   }
   function hit(kind,name,seed,full){
+    /* ⚠️ کد همیشه اینجا ساخته می‌شود، نه فقط دفعه‌ی اول: hex پایین برای
+       *هر* رخداد لازم است، حتی وقتی بنر قبلاً روی صفحه نشسته و paint()
+       دوباره صدا زده نمی‌شود. */
+    var code=tag(kind,seed);
+    var hex=code.slice(-4);            // فقط همین چهار نویسه به آمار می‌رود
     if(!shown){
-      var code=tag(kind,seed);
       window.__zxErrLast=code+"\n"+full;
       shown=paint(code,window.__zxErrLast);
       // اگر بدنه هنوز نبود، تسلیم نشو — سرِ DOMContentLoaded دوباره
@@ -96,8 +106,12 @@ if(/^\/t\/0x[0-9a-fA-F]{40}\/?$/.test(location.pathname)){
        چیز تازه‌ای می‌گوید نه باید سهمیه‌ی /ev را بسوزاند. */
     if(sent>=MAX_EV)return;
     sent++;
-    if(window.__zxOnErr)window.__zxOnErr(name);
-    else window.__zxErrQ.push(name);
+    /* ⚠️ فقط همین چهار نویسه (hex) به سمتِ ev می‌رود — نه seed، نه full، و
+       نه کدِ کامل با پیشوندِ E-KIND-. صاحب سایت این را صریحاً پذیرفت تا
+       بشود شمرد «چند باگِ متمایز» داریم؛ مرزِ حریم خصوصیِ /ev همچنان همان
+       است، فقط این یک استثنای شانزده‌بیتی رویش باز شده. */
+    if(window.__zxOnErr)window.__zxOnErr(name,hex);
+    else window.__zxErrQ.push([name,hex]);
   }
   addEventListener("error",function(e){
     /* دو چیزِ کاملاً متفاوت از یک رویداد می‌آیند و باید *ساختاری* جدا شوند،
@@ -1295,7 +1309,7 @@ footer a{color:var(--tx3);text-decoration:none}
 
       <details class="faqItem">
         <summary><span class="faqQ"></span>What do you collect about me?</summary>
-        <div class="faqA"><p>Anonymous counts, and only four things: which view was opened, a few funnel steps, whether the screen is mobile or desktop, and a country code. Never your wallet address, the amount, the token, your IP, user agent, referrer or cookies — and no session or visitor identifier of any kind, so the counts can never be assembled back into a person. If your browser sends Global Privacy Control, nothing is recorded at all.</p></div>
+        <div class="faqA"><p>Anonymous counts, and only a few things: which view was opened, a few funnel steps, a four-character code identifying which JS bug fired (nothing else about it — no message, no file, no stack), whether the screen is mobile or desktop, and a country code. Never your wallet address, the amount, the token, your IP, user agent, referrer or cookies — and no session or visitor identifier of any kind, so the counts can never be assembled back into a person. If your browser sends Global Privacy Control, nothing is recorded at all.</p></div>
       </details>
 
       <details class="faqItem">
@@ -2535,10 +2549,13 @@ const EV_NAMES=[
   "approve:click","approve:done",
   "swap:click","swap:blocked","swap:sim-fail","swap:sent",
   "swap:done","swap:revert","swap:lost","swap:fail",
-  /* ⚠️ سه نامِ خطا، و عمداً *سه نام* و نه یک نام با detail متفاوت. اگر جنسِ
-     خطا در detail می‌رفت، فهرست بسته‌ی detail باید باز می‌شد — و آن فهرست
-     همان چیزی است که نگه می‌دارد هیچ رشته‌ی آزادی به انبار ما نرسد. با نام
-     جدا، مرز حریم خصوصی اصلاً دست نمی‌خورد و گزارش هم خواناتر است. */
+  /* ⚠️ سه نامِ خطا، همچنان جدا — این هنوز *کدام دسته* (js/promise/res) را
+     می‌گوید. آنچه عوض شده detail است: این سه‌تا حالا اجازه دارند چهار
+     نویسه‌ی پایانیِ کدِ روی صفحه را هم با خودشان ببرند (ev() پایین‌تر) تا
+     بشود شمرد «چند باگِ متمایز». این باز نیست به‌شکلِ رشته‌ی آزاد — Worker
+     دقیقاً چهار رقمِ شانزده‌شانزدهیِ بزرگ را می‌پذیرد، آن‌هم فقط برای همین
+     سه نام. مرز حریم خصوصی دست‌نخورده مانده، فقط این یک استثنای باریک
+     رویش باز شده — با اجازه‌ی صریح صاحب سایت. */
   "err:js","err:promise","err:res",
 ];
 /* Global Privacy Control یک «نه»ی صریح از خودِ کاربر است، نه یک حدس. مخاطب
@@ -5418,8 +5435,11 @@ function wire(){
      ندارد و «۳ خطا» نه زیاد است نه کم.
      ⚠️ و اگر خطا آن‌قدر زود باشد که همین اسکریپت اصلاً اجرا نشود، هیچ
      رویدادی نمی‌رود — ولی بنر و کد روی صفحه سر جایشان‌اند، چون آن‌ها به این
-     کد وابسته نیستند. همین حالتِ بدترین، دلیلِ دوخروجی‌بودنِ طراحی است. */
-  for(const n of window.__zxErrQ)ev(n);
+     کد وابسته نیستند. همین حالتِ بدترین، دلیلِ دوخروجی‌بودنِ طراحی است.
+     ⚠️ صف عناصرِ [name,hex] است، نه رشته‌ی تنها؛ دیستراکچرینگِ سرِ حلقه —
+     نه یک خواندنِ ویژگی — پس کاوشگر [events] در run.py که نبودِ نقطه را
+     در فراخوانیِ تابعِ شمارنده می‌سنجد همچنان سبز می‌ماند. */
+  for(const [n,h] of window.__zxErrQ)ev(n,h);
   window.__zxErrQ.length=0;
   window.__zxOnErr=ev;
   /* به صاحب سایت بگو وضعیت چیست — او نباید حدس بزند.

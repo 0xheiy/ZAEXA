@@ -302,10 +302,34 @@ ok(res.status === 200, "index.html must still be served");
     ok(EV_OK.has(name), "the worker no longer accepts " + name + ", so browser errors "
       + "would be silently dropped and the dashboard would read as 'no errors'");
   }
-  /* ز) و هیچ‌کدام نباید detail ببرد: فهرست بسته دست‌نخورده مانده است. */
+  /* ز) فهرست بسته‌ی همیشگی دست‌نخورده مانده — سه ورودی، نه بیشتر. */
   const { EV_DETAIL_OK } = await import("./index.js");
   ok(EV_DETAIL_OK.size === 3, "the detail allowlist grew to " + EV_DETAIL_OK.size
     + " entries. Error text must never travel in detail — that list is the privacy boundary.");
+
+  /* ح) استثنای تازه: کدِ چهار-رقمِ بزرگ فقط برای سه رویدادِ err:، و برای
+     هیچ رویدادِ دیگری — حتی wallet:on که خودش detail دارد. اگر این باریک
+     نماند، مرزِ detail برای همه‌چیز باز می‌شود. */
+  let hx = await evCall(JSON.stringify({ e: "err:js", d: "A3F1", v: "desktop" }), { cf: {} });
+  ok(hx.status === 204, "a 4-hex detail on an err: event should be accepted (got " + hx.status + ")");
+
+  hx = await evCall(JSON.stringify({ e: "wallet:on", d: "A3F1", v: "desktop" }), { cf: {} });
+  ok(hx.status === 400, "the SAME hex detail must be refused on a non-error event like "
+    + "wallet:on (got " + hx.status + ") — otherwise the detail boundary is open for "
+    + "every event, not just errors");
+
+  hx = await evCall(JSON.stringify({ e: "err:js", d: "ZZZZ", v: "desktop" }), { cf: {} });
+  ok(hx.status === 400, "\"ZZZZ\" is not hex and must be refused even on an error event "
+    + "(got " + hx.status + ")");
+
+  hx = await evCall(JSON.stringify({ e: "err:js", d: "a3f1", v: "desktop" }), { cf: {} });
+  ok(hx.status === 400, "lowercase hex must be refused — the shape is uppercase-only "
+    + "(got " + hx.status + ")");
+
+  hx = await evCall(JSON.stringify({ e: "wallet:on", d: "inj", v: "desktop" }), { cf: {} });
+  ok(hx.status === 204, "wallet:on must still accept its own allowlisted detail \"inj\" "
+    + "(got " + hx.status + ")");
+
   console.log("[events] " + EV_OK.size + " event names allowed, everything else refused");
 }
 
@@ -463,6 +487,78 @@ ok(res.status === 200, "index.html must still be served");
   console.log("[og] card text, escaping, upstream call and /og.png ok " +
               "(injection itself: worker/og_live_test.mjs)");
   console.log("[og etag] OG_PNG_ETAG matches the bytes actually served: " + OG_PNG_ETAG);
+}
+
+/* ---- ۱۱. محدودکننده‌ی نرخ — درون‌ایزوله، بدون هیچ بایندینگ ----
+   هدف: یک اسکریپت که از یک IP می‌کوبد بعد از سقف رد شود؛ IP دیگری در همان
+   پنجره اثر نبیند؛ جلورفتنِ ساعت پنجره را از نو باز کند؛ ۴۲۹ِ /gt همچنان
+   CORS داشته باشد؛ و Map نه بی‌سقف رشد کند و نه خودِ IP را نگه دارد. */
+{
+  const { rateOk, rlHits, RL_LIMIT, RL_WINDOW_MS } = await import("./index.js");
+  ok(RL_LIMIT === 120, "the rate limit is no longer 120 — it must not be tightened: " + RL_LIMIT);
+  ok(RL_WINDOW_MS === 60000, "the rate limit window is no longer 60000ms: " + RL_WINDOW_MS);
+
+  function reqIp(ip) {
+    return new Request(ORIGIN + "/x", { headers: { "cf-connecting-ip": ip } });
+  }
+
+  // الف) ۱۲۰ درخواست از یک IP در یک سطل عبور می‌کند، ۱۲۱‌ام رد می‌شود
+  const now0 = 1_700_000_000_000;
+  let lastAllowed = false;
+  for (let i = 0; i < RL_LIMIT; i++)
+    lastAllowed = rateOk(reqIp("1.2.3.4"), "rl-a", RL_LIMIT, RL_WINDOW_MS, now0);
+  ok(lastAllowed === true, "the " + RL_LIMIT + "th request in a fresh window should still pass");
+  ok(rateOk(reqIp("1.2.3.4"), "rl-a", RL_LIMIT, RL_WINDOW_MS, now0) === false,
+    "the " + (RL_LIMIT + 1) + "th request in the same window should be refused");
+
+  // ب) IP دیگری در همان سطل و همان پنجره اصلاً اثر نمی‌بیند
+  ok(rateOk(reqIp("5.6.7.8"), "rl-a", RL_LIMIT, RL_WINDOW_MS, now0) === true,
+    "a different IP sharing the same bucket and window must have its own budget");
+
+  // ج) گذشتنِ کاملِ پنجره دوباره اجازه می‌دهد — به همان IPِ بسته‌شده
+  ok(rateOk(reqIp("1.2.3.4"), "rl-a", RL_LIMIT, RL_WINDOW_MS, now0 + RL_WINDOW_MS) === true,
+    "advancing the clock past the window must reopen the same client's budget");
+
+  // د) ۴۲۹ِ خودِ /gt باید CORS داشته باشد وگرنه صفحه با قطعیِ شبکه اشتباهش می‌گیرد
+  for (let i = 0; i < RL_LIMIT; i++) {
+    reply = json({ data: [] });
+    await call("/gt/networks/base/tokens/0xratelimit",
+      { headers: { "cf-connecting-ip": "203.0.113.200" } });
+  }
+  reply = json({ data: [] });
+  const rl429 = await call("/gt/networks/base/tokens/0xratelimit",
+    { headers: { "cf-connecting-ip": "203.0.113.200" } });
+  ok(rl429.status === 429,
+    "the " + (RL_LIMIT + 1) + "th /gt request from one IP should be rate-limited (got " +
+    rl429.status + ")");
+  ok(rl429.headers.get("access-control-allow-origin") === "*",
+    "a rate-limited /gt response has no CORS header — the browser turns it into an opaque "
+    + "network error and the page's circuit breaker mis-reads it");
+  ok(rl429.headers.get("retry-after") === "60",
+    "a rate-limited response must say retry-after: 60 (got " +
+    rl429.headers.get("retry-after") + ")");
+
+  // ه) حافظه‌ی نامحدود خودش یک ازکارافتادگی است: ۶۰۰۰ IP متمایز نباید Map
+  //    را بی‌سقف نگه دارد.
+  for (let i = 0; i < 6000; i++)
+    rateOk(reqIp("198.51.100." + (i % 256) + "-" + i), "rl-mem", 999999, 999999999, now0);
+  ok(rlHits.size <= 5000, "rlHits grew past its hard bound: size=" + rlHits.size);
+
+  // و) کلید Map باید همیشه عدد باشد — هرگز رشته‌ای که خودِ IP را در خودش دارد.
+  //    این مرزِ حریم خصوصیِ محدودکننده است: یک IP خام حتی در حافظه هم IP است.
+  const SECRET_IP = "198.51.100.77-secret";
+  rateOk(reqIp(SECRET_IP), "rl-priv", RL_LIMIT, RL_WINDOW_MS, now0);
+  let sawNonNumberKey = false, sawIpInKey = false;
+  for (const k of rlHits.keys()) {
+    if (typeof k !== "number") sawNonNumberKey = true;
+    if (String(k).includes(SECRET_IP)) sawIpInKey = true;
+  }
+  ok(!sawNonNumberKey, "rlHits has a non-numeric key — it must be keyed by a hash, never a string");
+  ok(!sawIpInKey, "AN IP ADDRESS LEAKED INTO THE RATE LIMITER'S MAP KEY: " + SECRET_IP);
+
+  console.log("[rate limit] " + RL_LIMIT + "/" + RL_WINDOW_MS + "ms per bucket per hashed IP; "
+    + "independent IPs unaffected; window reopens; /gt 429 carries CORS; rlHits bounded at "
+    + rlHits.size + " after a 6000-IP flood");
 }
 
 console.log(fails === 0
