@@ -34,6 +34,121 @@ if(/^\/t\/0x[0-9a-fA-F]{40}\/?$/.test(location.pathname)){
   }catch(e){}
 })();
 </script>
+<script>
+/* =====================================================================
+   گیرنده‌ی خطای سراسری
+   =====================================================================
+   ⚠️ چرا اینجا و نه پایین کنار بقیه‌ی کد: تا امروز یک استثنای گرفته‌نشده
+   در جاوااسکریپت *صفر* اثر داشت — صفحه بی‌صدا کاری نمی‌کرد، کاربر می‌رفت،
+   و ما هیچ‌وقت نمی‌فهمیدیم اتفاقی افتاد. نامرئی‌ترین کلاسِ باگ. اگر این
+   بلوک پایین صفحه بنشیند، خطایی که *خودِ* آن اسکریپت را می‌کشد هرگز گرفته
+   نمی‌شود؛ بالای همه‌چیز یعنی حتی وقتی هیچ‌کدام از کدِ زیر اجرا نشد، باز هم
+   کاربر یک کد می‌بیند و می‌تواند بگوید چه دید.
+
+   دو خروجی جدا دارد و عمداً به هم وابسته نیستند:
+   • روی صفحه: یک کد کوتاه و پایدار (مثل E-JS-4C1A) که کاربر می‌تواند برای
+     ما بخواند، به‌علاوه‌ی دکمه‌ی کپی جزئیات. این هیچ‌جا فرستاده نمی‌شود —
+     فقط اگر خودِ کاربر کلیک کند به کلیپ‌بوردش می‌رود.
+   • در آمار: فقط *نام رویداد* (`err:js` / `err:promise` / `err:res`).
+     ⚠️ نه پیام خطا، نه فایل، نه همان کدِ روی صفحه. مرز حریم خصوصیِ /ev
+     یعنی `detail` از یک فهرست بسته می‌آید، و آن تصمیم بدون پرسیدن عوض
+     نمی‌شود. پس آمار می‌گوید «چند تا و از چه جنسی»، و گزارشِ خودِ کاربر
+     می‌گوید «کدام باگ».
+   ⚠️ کد از هشِ پیام+فایل+خط ساخته می‌شود، پس *یک* باگ همیشه *یک* کد
+   می‌دهد — دو گزارش با کد یکسان یعنی یک چیز، نه دو چیز. */
+(function(){
+  var MAX_EV=3, sent=0, shown=false;
+  window.__zxErrQ=[];        // تا وقتی ev() تعریف نشده، اینجا صف می‌شود
+  window.__zxOnErr=null;     // اسکریپت اصلیِ پایین پرش می‌کند
+  window.__zxErrLast="";     // متن کامل، فقط برای دکمه‌ی کپی
+
+  /* FNV-1a. کارش رمزنگاری نیست — فقط یک برچسب چهاررقمی که برای یک خطای
+     یکسان همیشه یکسان دربیاید. */
+  function tag(kind,seed){
+    var h=2166136261;
+    for(var i=0;i<seed.length;i++){h^=seed.charCodeAt(i);h=Math.imul(h,16777619);}
+    return "E-"+kind+"-"+("000"+((h>>>0)%65536).toString(16).toUpperCase()).slice(-4);
+  }
+  function paint(code,full){
+    var el=document.getElementById("errBanner");
+    if(!el)return false;                       // بدنه هنوز پارس نشده
+    /* ⚠️ متن خطا با textContent می‌نشیند نه innerHTML. پیام یک استثنا
+       می‌تواند هر چیزی باشد، از جمله رشته‌ای که خودِ کاربر تایپ کرده؛ ساختنِ
+       HTML از آن یعنی یک XSS که از راهِ گزارشِ خطا باز کرده‌ایم. */
+    var c=document.getElementById("errCode");
+    if(c)c.textContent=code;
+    var raw=document.getElementById("errRaw");
+    if(raw)raw.textContent=full;
+    el.hidden=false;
+    return true;
+  }
+  function hit(kind,name,seed,full){
+    if(!shown){
+      var code=tag(kind,seed);
+      window.__zxErrLast=code+"\n"+full;
+      shown=paint(code,window.__zxErrLast);
+      // اگر بدنه هنوز نبود، تسلیم نشو — سرِ DOMContentLoaded دوباره
+      if(!shown)document.addEventListener("DOMContentLoaded",function(){
+        if(!shown)shown=paint(code,window.__zxErrLast);
+      });
+    }
+    /* سقف سه‌تا: یک حلقه‌ی خراب می‌تواند صدها خطا در ثانیه بدهد، و آن نه
+       چیز تازه‌ای می‌گوید نه باید سهمیه‌ی /ev را بسوزاند. */
+    if(sent>=MAX_EV)return;
+    sent++;
+    if(window.__zxOnErr)window.__zxOnErr(name);
+    else window.__zxErrQ.push(name);
+  }
+  addEventListener("error",function(e){
+    /* دو چیزِ کاملاً متفاوت از یک رویداد می‌آیند و باید *ساختاری* جدا شوند،
+       نه با نگاه‌کردن به متن: اگر target یک المان باشد، یک منبع بارگذاری
+       نشده؛ وگرنه یک استثنای گرفته‌نشده است. */
+    var t=e&&e.target;
+    if(t&&t!==window&&t.tagName){
+      /* ⚠️ IMG عمداً بیرون است. لوگوی توکنی که ۴۰۴ می‌دهد رفتار *عادی* این
+         سایت است و img.onerror پایین‌تر خودش هندلش می‌کند؛ اگر اینجا شمرده
+         شود، بنر خطا روی صفحه‌ی کاملاً سالم بالا می‌آید و بعد از دو روز
+         دیگر کسی جدی‌اش نمی‌گیرد. فقط چیزی که واقعاً صفحه را می‌شکند. */
+      var tn=t.tagName.toUpperCase();
+      if(tn!=="SCRIPT"&&tn!=="LINK")return;
+      var src=String(t.src||t.href||"");
+      hit("RES","err:res",tn+" "+src,tn+" failed to load\n"+src);
+      return;
+    }
+    var msg=String((e&&e.message)||"error");
+    var at=String((e&&e.filename)||"")+":"+((e&&e.lineno)||0)+":"+((e&&e.colno)||0);
+    hit("JS","err:js",msg+"@"+at,msg+"\nat "+at);
+  },true);
+  addEventListener("unhandledrejection",function(e){
+    var r=e&&e.reason;
+    var msg=String((r&&r.message)||r||"rejection");
+    var stack=String((r&&r.stack)||"").split("\n").slice(0,4).join("\n");
+    hit("PR","err:promise",msg,msg+(stack?"\n"+stack:""));
+  });
+  /* دکمه بعد از پارس‌شدن بدنه سیم می‌شود. کپی *تنها* راهی است که جزئیات از
+     مرورگر کاربر بیرون می‌رود، و با کلیک خودش. */
+  document.addEventListener("DOMContentLoaded",function(){
+    var btn=document.getElementById("errCopy");
+    if(!btn)return;
+    btn.addEventListener("click",function(){
+      var txt=window.__zxErrLast+"\n"+location.pathname+"\n"+navigator.userAgent;
+      function reveal(){
+        /* کلیپ‌بورد در زمینه‌ی ناامن یا بدون اجازه رد می‌شود. «نشد» نباید به
+           «کاربر هیچ راهی ندارد» ترجمه شود — متن را نشان بده تا دستی
+           انتخابش کند. */
+        var raw=document.getElementById("errRaw");
+        if(raw){raw.hidden=false;btn.textContent="Select the text below";}
+      }
+      try{
+        if(navigator.clipboard&&navigator.clipboard.writeText)
+          return navigator.clipboard.writeText(txt).then(
+            function(){btn.textContent="Copied";},reveal);
+      }catch(err){}
+      reveal();
+    });
+  });
+})();
+</script>
 <title>Zaexa</title>
 <!-- ============================================================
      کارت پیش‌نمایش (Open Graph) — نسخه‌ی ثابتِ صفحه‌ی اصلی
@@ -541,6 +656,21 @@ main{max-width:1140px;margin:0 auto;padding:8px 20px 56px;display:flex;flex-dire
   line-height:1.55;background:color-mix(in srgb,var(--warn) 11%,transparent);color:var(--warn)}
 .devBan.ok{background:var(--pglow);color:var(--pos)}
 .devBan b{font-weight:660}
+/* ---------------- بنر خطای سراسری ---------------- */
+/* روی همه‌ی نماها می‌نشیند، پس حاشیه‌اش از خودِ صفحه می‌آید نه از کارت. لحن
+   عمداً آرام است: کاربری که ترسیده صفحه را می‌بندد و کدی را که لازم داریم
+   نمی‌خواند. */
+#errBanner{margin:14px 14px 0;padding:13px 15px;border-radius:14px;font-size:12.8px;
+  line-height:1.6;background:color-mix(in srgb,var(--neg) 10%,transparent);color:var(--neg)}
+#errBanner b{font-weight:660}
+.errCode{display:inline-block;padding:1px 7px;border-radius:7px;font-weight:640;
+  background:color-mix(in srgb,var(--neg) 16%,transparent)}
+.errCopyBtn{margin-left:6px;padding:2px 9px;border-radius:8px;cursor:pointer;
+  font:inherit;font-size:11.5px;color:inherit;background:transparent;
+  border:1px solid color-mix(in srgb,var(--neg) 34%,transparent)}
+.errCopyBtn:hover{background:color-mix(in srgb,var(--neg) 12%,transparent)}
+#errRaw{white-space:pre-wrap;word-break:break-word;font-size:10.5px;margin:8px 0 0;
+  max-height:150px;overflow:auto;opacity:.85;user-select:text}
 .note pre{white-space:pre-wrap;word-break:break-all;font-size:10.5px;margin:7px 0 0;
   max-height:170px;overflow:auto;opacity:.85}
 .note summary{cursor:pointer;margin-top:6px;font-size:11.5px;opacity:.85}
@@ -788,6 +918,24 @@ footer a{color:var(--tx3);text-decoration:none}
 </style>
 </head>
 <body>
+
+<!-- ⚠️ اینجا و نه داخل کارت سواپ. دو دلیل، هر دو اندازه‌گیری‌شده:
+     • کوت‌گیری با هر تغییر مبلغ `setNotice("")` می‌زند و هرچه در #notices
+       باشد را پاک می‌کند — همان چیزی که بنر ?dev=1 را در نسخه‌ی اول چند
+       میلی‌ثانیه‌ای محو می‌کرد.
+     • خطا می‌تواند در نمای پورتفولیو یا صفحه‌ی توکن هم بیفتد، جایی که کارت
+       سواپ اصلاً روی صفحه نیست. بالای همه‌ی نماها یعنی در هر نمایی دیده
+       می‌شود.
+     پرشدنش با اسکریپت ابتدای <head> است، نه با کدِ پایین صفحه — تا وقتی
+     که کدِ پایین اصلاً اجرا نشده هم کار کند. -->
+<div id="errBanner" hidden>
+  <b>Something on this page stopped working.</b>
+  Your funds are untouched — nothing was sent. Reloading usually helps.
+  If it keeps happening, send us this code:
+  <span class="mono errCode" id="errCode">—</span>
+  <button type="button" id="errCopy" class="errCopyBtn">Copy details</button>
+  <pre id="errRaw" hidden></pre>
+</div>
 
 <header>
   <div class="logo">
@@ -2387,6 +2535,11 @@ const EV_NAMES=[
   "approve:click","approve:done",
   "swap:click","swap:blocked","swap:sim-fail","swap:sent",
   "swap:done","swap:revert","swap:lost","swap:fail",
+  /* ⚠️ سه نامِ خطا، و عمداً *سه نام* و نه یک نام با detail متفاوت. اگر جنسِ
+     خطا در detail می‌رفت، فهرست بسته‌ی detail باید باز می‌شد — و آن فهرست
+     همان چیزی است که نگه می‌دارد هیچ رشته‌ی آزادی به انبار ما نرسد. با نام
+     جدا، مرز حریم خصوصی اصلاً دست نمی‌خورد و گزارش هم خواناتر است. */
+  "err:js","err:promise","err:res",
 ];
 /* Global Privacy Control یک «نه»ی صریح از خودِ کاربر است، نه یک حدس. مخاطب
    این سایت به حریم خصوصی حساس است و شمارش ارزش نادیده‌گرفتنش را ندارد.
@@ -5258,6 +5411,17 @@ function wire(){
   readFee();loadChart();
   // یک بار در هر بازکردن صفحه. مخرج همه‌ی نسبت‌های قیف همین است.
   ev("load");
+  /* صفِ خطاهایی که *پیش از* آماده‌شدن ev() افتاده‌اند، و از اینجا به بعد
+     مسیر مستقیم. گیرنده بالای <head> نصب شده، پس می‌تواند خیلی زودتر از
+     این خط شلیک کرده باشد.
+     ⚠️ این خط عمداً *بعد* از ev("load") است: بدون مخرج، شمارشِ خطا نسبت
+     ندارد و «۳ خطا» نه زیاد است نه کم.
+     ⚠️ و اگر خطا آن‌قدر زود باشد که همین اسکریپت اصلاً اجرا نشود، هیچ
+     رویدادی نمی‌رود — ولی بنر و کد روی صفحه سر جایشان‌اند، چون آن‌ها به این
+     کد وابسته نیستند. همین حالتِ بدترین، دلیلِ دوخروجی‌بودنِ طراحی است. */
+  for(const n of window.__zxErrQ)ev(n);
+  window.__zxErrQ.length=0;
+  window.__zxOnErr=ev;
   /* به صاحب سایت بگو وضعیت چیست — او نباید حدس بزند.
      ⚠️ این *نباید* در #notices بنشیند: کوت‌گیری با هر تغییر مبلغ آنجا را
      پاک می‌کند و روی صفحه‌ی خالیِ اول همین اتفاق بلافاصله می‌افتد.

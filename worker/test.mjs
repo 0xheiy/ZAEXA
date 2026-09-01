@@ -294,6 +294,18 @@ ok(res.status === 200, "index.html must still be served");
     const res = await evCall(JSON.stringify({ e: "wallet:on", d, v: "desktop" }), { cf: {} });
     ok(res.status === 204, "the allowlisted detail " + d + " was refused (" + res.status + ")");
   }
+  /* و) سه رویداد خطا باید *باشند*. حلقه‌ی بالا فقط می‌گوید هرچه در فهرست
+     هست پذیرفته می‌شود؛ اگر روزی این سه از فهرست بیفتند، آن حلقه همچنان
+     سبز می‌ماند و صفحه بی‌صدا ۴۰۰ می‌گیرد — یعنی «هیچ خطایی نیفتاد» که
+     همان عددِ غلطِ شبیهِ عددِ درست است. */
+  for (const name of ["err:js", "err:promise", "err:res"]) {
+    ok(EV_OK.has(name), "the worker no longer accepts " + name + ", so browser errors "
+      + "would be silently dropped and the dashboard would read as 'no errors'");
+  }
+  /* ز) و هیچ‌کدام نباید detail ببرد: فهرست بسته دست‌نخورده مانده است. */
+  const { EV_DETAIL_OK } = await import("./index.js");
+  ok(EV_DETAIL_OK.size === 3, "the detail allowlist grew to " + EV_DETAIL_OK.size
+    + " entries. Error text must never travel in detail — that list is the privacy boundary.");
   console.log("[events] " + EV_OK.size + " event names allowed, everything else refused");
 }
 

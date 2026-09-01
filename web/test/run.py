@@ -435,6 +435,49 @@ def check_event_allowlists():
     print("[events] %d names, page and worker agree; %d call sites, none reads a property"
           % (len(page), len(calls)))
 
+def check_error_handler():
+    """چهار حقیقتِ ساختاری درباره‌ی گیرنده‌ی خطا، پیش از بالاآمدن مرورگر.
+
+    این‌ها را مرورگر نمی‌تواند بسنجد چون درباره‌ی *جای* کد در فایل‌اند، نه
+    درباره‌ی رفتارش — و هر چهارتا اگر بشکنند، رفتار همچنان سبز به نظر
+    می‌رسد و فقط در حالتِ بد از کار می‌افتد."""
+    src = open(os.path.join(HERE, "..", "index.html"), encoding="utf-8").read()
+
+    # ۱) گیرنده باید *پیش از* هر اسکریپت دیگری بیاید. اگر پایین صفحه بنشیند،
+    #    خطایی که خودِ آن اسکریپت را می‌کشد هرگز گرفته نمی‌شود — یعنی دقیقاً
+    #    همان حالتی که این قابلیت برایش ساخته شده.
+    at_handler = src.index('window.__zxErrQ=[]')
+    at_title = src.index("<title>")
+    at_main = src.index('const EV_NAMES=[')
+    assert at_handler < at_title < at_main, (
+        "the global error handler no longer sits at the top of <head> (handler=%d, "
+        "title=%d, main script=%d). Moved below the main script, it cannot catch the one "
+        "failure that matters most: the main script itself dying." % (at_handler, at_title, at_main))
+
+    # ۲) بنر نباید در #notices باشد. کوت‌گیری آنجا را پاک می‌کند.
+    at_banner = src.index('id="errBanner"')
+    at_notices = src.index('id="notices"')
+    assert at_banner < at_notices, (
+        "#errBanner moved below (or into) #notices, which the quote path clears on every "
+        "amount change — the banner would vanish milliseconds after appearing")
+
+    # ۳) IMG باید بیرون بماند، وگرنه هر توکن بی‌لوگو یک خطای دروغین می‌سازد.
+    assert 'tn!=="SCRIPT"&&tn!=="LINK"' in src, (
+        "the resource-error branch no longer restricts itself to SCRIPT and LINK — a token "
+        "logo that 404s is normal here and would start raising false error banners")
+
+    # ۴) مرز حریم خصوصی: هیچ‌کدام از سه رویدادِ خطا نباید detail ببرد. اگر
+    #    روزی پیام خطا یا کد در detail برود، فهرست بسته‌ی /ev بی‌معنا می‌شود.
+    for name in ("err:js", "err:promise", "err:res"):
+        assert ('"%s"' % name) in src, "the event name %r vanished from the page" % name
+    bad = re.findall(r'ev\(\s*"(err:[a-z]+)"\s*,', src)
+    assert not bad, (
+        "an error event was given a detail argument (%s). The detail allowlist is what keeps "
+        "free-form strings out of the analytics store; error text must never go through it."
+        % bad)
+    print("[err] handler is above the main script; banner is outside #notices; "
+          "IMG excluded; 3 error events, none carries a detail")
+
 RETIRED_EXECUTORS = [
     "0x6443C06bb117223DC818df54A09A642696D0489c",
     "0x9fc4608fA104b032B902650A4D12E0CA51a2F684",
@@ -610,6 +653,7 @@ check_no_remote_code()
 check_gt_proxy_worker()
 check_asset_cache_headers()
 check_event_allowlists()
+check_error_handler()
 check_og_tags()
 check_brand_palette()
 check_one_executor_address()
@@ -3923,6 +3967,162 @@ async def main():
               % ("Analytics muted" in dev_notice_muted))
         assert "Analytics muted" in dev_notice_muted, (
             "the owner is not told muting worked: %r" % dev_notice_muted[:200])
+
+        # ---- [err] گیرنده‌ی خطای سراسری ----
+        # ادعا: یک استثنای گرفته‌نشده دیگر بی‌صدا نیست — کاربر یک کد می‌بیند
+        # و ما یک شمارش. هر بند اینجا یک راهِ شکستِ *اندازه‌گیری‌شده* را
+        # می‌بندد، نه یک احتمال ذهنی.
+        import json as _json3
+        ERRCODE = re.compile(r"^E-(JS|PR|RES)-[0-9A-F]{4}$")
+
+        async def err_page():
+            pg2 = await b.new_page(viewport={"width": 1240, "height": 1000})
+            seen = await watch_events(pg2)
+            await pg2.goto("http://127.0.0.1:%d/test/harness.html#swap" % port)
+            await pg2.wait_for_timeout(1400)
+            return pg2, seen
+
+        def err_names(seen):
+            return [_json3.loads(r)["e"] for r in seen if _json3.loads(r)["e"].startswith("err:")]
+
+        # 1) صفحه‌ی سالم: بنر نباید بالا بیاید و هیچ رویداد خطایی نرود.
+        #    ⚠️ این مهم‌ترین بند است. نگهبانی که روی صفحه‌ی سالم هم شلیک کند،
+        #    بعد از دو روز نادیده گرفته می‌شود و بدتر از نبودنش است.
+        okpg, ok_seen = await err_page()
+        ok_hidden = await okpg.evaluate("() => document.getElementById('errBanner').hidden")
+        ok_errs = err_names(ok_seen)
+        await okpg.close()
+        print("[err] healthy page: banner hidden=%s, err beacons=%s" % (ok_hidden, ok_errs))
+        assert ok_hidden, "the error banner is showing on a page where nothing went wrong"
+        assert not ok_errs, "a healthy page reported errors: %s" % ok_errs
+
+        # 2) یک استثنای *واقعیِ* گرفته‌نشده: بنر + کد + دقیقاً یک رویداد.
+        jspg, js_seen = await err_page()
+        before = len(js_seen)
+        await jspg.evaluate(
+            "() => setTimeout(() => { throw new Error('zaexa probe: uncaught'); }, 0)")
+        await jspg.wait_for_timeout(700)
+        js_hidden = await jspg.evaluate("() => document.getElementById('errBanner').hidden")
+        js_code = await jspg.inner_text("#errCode")
+        # 5) پایداری: همان کاری که بنر ?dev=1 را در نسخه‌ی اول محو می‌کرد،
+        #    اینجا عمداً تکرار می‌شود و بعد دوباره خوانده می‌شود. سنجیدنِ
+        #    «لحظه‌ی اول» همان اشتباهی بود که آن باگ را سبز نشان داد.
+        await jspg.evaluate("() => setNotice('')")
+        await jspg.fill("#amtIn", "5")
+        await jspg.wait_for_timeout(500)
+        await jspg.fill("#amtIn", "")
+        await jspg.wait_for_timeout(900)
+        js_survived = await jspg.evaluate(
+            "() => !document.getElementById('errBanner').hidden")
+        js_names = err_names(js_seen[before:])
+        await jspg.close()
+        print("[err] uncaught throw: code=%r survived quoting=%s beacons=%s"
+              % (js_code, js_survived, js_names))
+        assert not js_hidden, (
+            "an uncaught exception left no trace on screen — this is exactly the silent "
+            "failure the handler exists to end")
+        assert ERRCODE.match(js_code), (
+            "the on-screen code is not a reportable code: %r. A user cannot read out "
+            "something shaped like this." % js_code)
+        assert js_survived, (
+            "the error banner vanished once the quote path cleared the notice area. It must "
+            "live outside #notices — the same trap the ?dev=1 banner fell into.")
+        assert js_names == ["err:js"], (
+            "an uncaught exception should send exactly one err:js, got %s" % js_names)
+
+        # 3) رد شدنِ گرفته‌نشده‌ی promise — کلاسِ جدا، چون async است و هرگز
+        #    به window.onerror نمی‌رسد.
+        prpg, pr_seen = await err_page()
+        before = len(pr_seen)
+        await prpg.evaluate("() => { Promise.reject(new Error('zaexa probe: rejected')); }")
+        await prpg.wait_for_timeout(700)
+        pr_code = await prpg.inner_text("#errCode")
+        pr_names = err_names(pr_seen[before:])
+        await prpg.close()
+        print("[err] unhandled rejection: code=%r beacons=%s" % (pr_code, pr_names))
+        assert pr_names == ["err:promise"], (
+            "an unhandled promise rejection should send exactly one err:promise, got %s"
+            % pr_names)
+        assert pr_code.startswith("E-PR-"), (
+            "a rejection must be labelled as one, not folded into E-JS: %r" % pr_code)
+
+        # 4) لوگوی توکنی که ۴۰۴ می‌دهد رفتار *عادی* است. اگر اینجا بنر بالا
+        #    بیاید، روی سایت زنده روی هر توکن بی‌لوگو یک خطای دروغین می‌نشیند.
+        impg, im_seen = await err_page()
+        before = len(im_seen)
+        await impg.evaluate("""() => {
+            const i = document.createElement("img");
+            i.src = "/no-such-logo-" + Date.now() + ".png";
+            document.body.appendChild(i);
+        }""")
+        await impg.wait_for_timeout(700)
+        im_hidden = await impg.evaluate("() => document.getElementById('errBanner').hidden")
+        im_names = err_names(im_seen[before:])
+        await impg.close()
+        print("[err] failed <img>: banner hidden=%s beacons=%s" % (im_hidden, im_names))
+        assert im_hidden and not im_names, (
+            "a token logo that 404s is normal on this site and must not raise an error "
+            "banner (hidden=%s, beacons=%s)" % (im_hidden, im_names))
+
+        # 6) یک باگ = یک کد، در دو بازدید جدا.
+        #    ⚠️ اینجا عمداً یک ErrorEvent ساختگی با فیلدهای ثابت شلیک می‌شود.
+        #    استثنای واقعیِ بند ۲ ثابت می‌کند گیرنده به خطای *واقعی* وصل است؛
+        #    این بند ثابت می‌کند هش برای ورودیِ یکسان ثابت است. هیچ‌کدام به
+        #    تنهایی کافی نیست، و throw واقعی شماره‌ی خط ثابتی ندارد که بشود
+        #    با آن پایداری را سنجید.
+        async def synth_code(msg):
+            spg = await b.new_page(viewport={"width": 1240, "height": 1000})
+            await watch_events(spg)
+            await spg.goto("http://127.0.0.1:%d/test/harness.html#swap" % port)
+            await spg.wait_for_timeout(1300)
+            await spg.evaluate("""(m) => dispatchEvent(new ErrorEvent("error", {
+                message: m, filename: "zx-probe.js", lineno: 42, colno: 7 }))""", msg)
+            await spg.wait_for_timeout(300)
+            code = await spg.inner_text("#errCode")
+            raw = await spg.evaluate("() => document.getElementById('errRaw').textContent")
+            pwned = await spg.evaluate("() => !!window.__zxPwned")
+            await spg.close()
+            return code, raw, pwned
+
+        code_a, _, _ = await synth_code("zaexa probe: stable")
+        code_b, _, _ = await synth_code("zaexa probe: stable")
+        code_c, _, _ = await synth_code("zaexa probe: different")
+        print("[err] same fault twice: %s / %s   different fault: %s"
+              % (code_a, code_b, code_c))
+        assert code_a == code_b, (
+            "the same fault produced two different codes (%s vs %s) — then two users "
+            "reporting the same bug look like two bugs" % (code_a, code_b))
+        assert code_a != code_c, (
+            "two different faults collapsed onto the same code %s — then two bugs look "
+            "like one" % code_a)
+
+        # 7) پیام خطا رشته‌ی کنترل‌نشده است و می‌تواند از ورودیِ خودِ کاربر
+        #    بیاید. اگر با innerHTML بنشیند، گزارشِ خطا خودش یک XSS است.
+        _, xss_raw, xss_pwned = await synth_code(
+            '<img src=x onerror="window.__zxPwned=1">')
+        print("[err] hostile message rendered as text: %s (executed=%s)"
+              % ("<img" in xss_raw, xss_pwned))
+        assert not xss_pwned, "AN ERROR MESSAGE EXECUTED AS HTML IN THE ERROR BANNER"
+        assert "<img" in xss_raw, (
+            "the hostile message was neither escaped nor shown — it silently vanished, so "
+            "this probe would not notice if it started executing: %r" % xss_raw[:120])
+
+        # 8) سقف: یک حلقه‌ی خراب نباید سهمیه‌ی /ev را بسوزاند.
+        cappg, cap_seen = await err_page()
+        before = len(cap_seen)
+        await cappg.evaluate("""() => {
+            for (let i = 0; i < 10; i++) {
+                dispatchEvent(new ErrorEvent("error", {
+                    message: "flood " + i, filename: "f.js", lineno: i, colno: 1 }));
+            }
+        }""")
+        await cappg.wait_for_timeout(700)
+        cap_names = err_names(cap_seen[before:])
+        await cappg.close()
+        print("[err] 10 errors in a row -> %d beacons" % len(cap_names))
+        assert 0 < len(cap_names) <= 3, (
+            "ten errors produced %d beacons; a broken loop must not burn the /ev quota, "
+            "and must not go completely silent either" % len(cap_names))
 
         srv.shutdown()
         await b.close()
