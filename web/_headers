@@ -10,3 +10,52 @@
 # index.html بنشیند، تست قرمز می‌شود، نه اینکه کاربر یک سال گروگان بماند.
 /*.js
   Cache-Control: public, max-age=31536000, immutable
+
+# ⚠️ این فایل یک آرتیفکتِ کلادفلر است: فقط روی سایتِ واقعاً منتشرشده اعمال
+# می‌شود، نه روی هارنسِ محلی (harness.html با file://) و نه روی هیچ‌چیزی که
+# پلی‌رایت باز می‌کند. check_security_headers() در web/test/run.py خودِ *فایل*
+# را می‌سنجد — که این هدرها را بنویسیم و خراب نکنیم — و هیچ ادعایی درباره‌ی
+# رفتارِ مرورگر روی سایتِ زنده نمی‌کند. آن را فقط با بازکردنِ سایتِ منتشرشده
+# در مرورگر (یا چیزی مثل curl -I) می‌شود واقعاً سنجید.
+#
+# CSP خط‌به‌خط، با دلیلِ هر تنگ‌کردن یا نکردن:
+#
+# ⚠️ base-uri باید 'self' بماند، هرگز 'none' نشود. `web/index.html` نزدیکِ
+# خط ۱۷ روی مسیرِ `/t/<address>` یک `<base href="/">` تزریق می‌کند تا
+# مسیرهای نسبیِ باندل‌ها (ethers، walletconnect) درست حل شوند؛ `base-uri
+# 'none'` هر <base> را کلاً ممنوع می‌کند، یعنی آن تزریق اجرا نمی‌شود، ethers
+# لود نمی‌شود و صفحه با «Could not load ethers» می‌ماند — دقیقاً همان
+# صفحه‌ای که این تزریق برایش نوشته شده. یک نسخه‌ی قبلیِ همین قاعده 'none'
+# بود و صفحه‌ی توکن را روی سایت زنده می‌شکست.
+#
+# script-src 'unsafe-inline' چون کلِ اپ در بلوک‌های <script> داخل همان
+# index.html نوشته شده، نه در فایل‌های جدا — اینجا 'unsafe-inline' چیزی را
+# سست نمی‌کند که از قبل سفت بود. ارزشِ واقعیِ این خط قفل‌کردنِ *مبدأ* است:
+# 'self' یعنی هیچ اسکریپتی از دامنه‌ی دیگر اجرا نمی‌شود، حتی اگر کسی بتواند
+# یک <script src="https://evil"> در HTML تزریق کند.
+#
+# ⚠️ worker-src 'self' blob: یک احتیاط است، نه اندازه‌گیری‌شده: بدونش
+# worker-src از default-src ارث می‌برد (که blob: ندارد) و هر web worker
+# ساخته‌شده از Blob مسدود می‌شود — کتابخانه‌های ردهٔ WalletConnect از همین
+# الگو استفاده می‌کنند. صادقانه: امروز روی این سایت worker از blob: دیده
+# نشده، ولی نبودنش فقط وقتی معلوم می‌شود که یک کیف پول آن را لازم داشته
+# باشد و بی‌صدا از کار بیفتد — پس از قبل باز گذاشته شده.
+#
+# connect-src عمداً روی https: و wss: باز می‌ماند، نه فهرستِ بسته‌ی
+# دامنه‌ها: صفحه اجازه می‌دهد کاربر یک RPC دلخواه (Custom RPC) بنویسد —
+# برای کاربرهای پشتِ فیلترینگ — و WalletConnect relay هم دامنه‌ی خودش را
+# دارد. تنگ‌کردنِ این به یک فهرستِ ثابت هر دو را می‌شکند.
+#
+# object-src 'none' و form-action 'none': این سایت نه <object>/<embed>
+# دارد نه <form> واقعی که جایی سابمیت شود — سواپ با جاوااسکریپت تراکنش
+# می‌سازد، نه فرم. بستنشان چیزی را خراب نمی‌کند و مسیرهای کلاسیکِ تزریق را
+# می‌بندد.
+#
+# frame-ancestors 'none': این سایت هیچ‌وقت قرار نیست داخلِ iframeِ سایتِ
+# دیگری بنشیند؛ بازش‌گذاشتن یعنی clickjacking روی صفحه‌ای که تراکنشِ
+# on-chain امضا می‌کند.
+/*
+  Content-Security-Policy: default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' data:; connect-src 'self' https: wss:; worker-src 'self' blob:; base-uri 'self'; object-src 'none'; form-action 'none'; frame-ancestors 'none'
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: no-referrer
+  Permissions-Policy: camera=(), microphone=(), geolocation=(), payment=(), usb=()

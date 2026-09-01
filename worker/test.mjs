@@ -359,6 +359,47 @@ ok(res.status === 200, "index.html must still be served");
   console.log("[token page] worker serves / for /t/<address>, untouched for anything else");
 }
 
+/* صفحه‌ی توکن هم زیر rateOk است — /gt و /ev هر دو بودند، این یکی نبود، و
+   همین یکی مستقیم ogFetchMeta را صدا می‌زند که کلید مشترکِ CoinGecko را
+   می‌سوزاند. یک حلقه روی آدرس‌های تصادفیِ /t/0x… دقیقاً همان کلیدی را
+   تمام می‌کرد که rateOk قرار بود از آن محافظت کند.
+   ⚠️ ولی رویِ سقف نباید ۴۲۹ بدهد — پشتِ این درخواست یک آدم است که یک
+   صفحه‌ی واقعی باز کرده، نه اسکریپتی که باید عقب رانده شود. پس زیرِ سقف
+   بالادست خوانده می‌شود (خودِ *تزریق* اینجا سنجیدنی نیست — HTMLRewriter
+   در node نیست، برای آن worker/og_live_test.mjs هست)، و رویِ سقف صفحه
+   همچنان ۲۰۰ است ولی هیچ فراخوانی به بالادست نمی‌رود: تنزلِ پیش‌نمایش،
+   نه تنزلِ صفحه. */
+{
+  const { RL_LIMIT } = await import("./index.js");
+  const addr = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913";
+  const ip = "203.0.113.201";
+
+  reply = json({ data: { attributes: { name: "USD Coin", symbol: "USDC",
+    total_reserve_in_usd: "1" } } });
+  let res = await call("/t/" + addr, { headers: { "cf-connecting-ip": ip } });
+  ok(res.status === 200, "a token page under the limit should still be 200 (got " + res.status + ")");
+  ok(sent.length === 1,
+     "a token page under the limit should still read CoinGecko once, got " + sent.length);
+
+  // بقیه‌ی سهمیه‌ی همین سطل را می‌سوزانیم تا به مرز برسیم
+  for (let i = 1; i < RL_LIMIT; i++) {
+    reply = json({ data: {} });
+    await call("/t/" + addr, { headers: { "cf-connecting-ip": ip } });
+  }
+  reply = json({ data: {} });
+  res = await call("/t/" + addr, { headers: { "cf-connecting-ip": ip } });
+  ok(res.status === 200,
+     "over the limit the token page must still open — a human is looking at it, not a " +
+     "script to push back on (got " + res.status + ")");
+  ok(sent.length === 0,
+     "over the limit ogFetchMeta must not touch the network — the whole point is protecting " +
+     "the shared CoinGecko key, got " + sent.length + " call(s)");
+  ok((await res.text()) === "the site",
+     "over the limit the page markup itself must be untouched, not a broken or empty page");
+  console.log("[og limit] under the cap: upstream read once, page 200; over the cap: page " +
+    "still 200 with the site's own markup, zero upstream calls");
+}
+
 /* ---- ۱۰. کارت پیش‌نمایش (OG) — بخش‌هایی که بدون workerd سنجیدنی‌اند ----
    `HTMLRewriter` در node وجود ندارد، پس خودِ *تزریق* اینجا سنجیده نمی‌شود؛
    آن در `worker/og_live_test.mjs` روی workerd واقعی سنجیده می‌شود.

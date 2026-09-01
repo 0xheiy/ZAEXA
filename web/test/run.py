@@ -232,6 +232,98 @@ def check_asset_cache_headers():
     print("[cache] vendor bundles are content-addressed and immutable: %s (max-age=%s)"
           % (", ".join(js_files), mage.group(1)))
 
+def parse_headers_blocks(src):
+    """`_headers` را به {الگو: [خط‌های هدر]} می‌شکند — همان پارسرِ
+    check_asset_cache_headers، بیرون‌کشیده تا این نگهبان هم از آن استفاده
+    کند. substring-match نمی‌کنیم چون یک هدر روی یک الگوی دیگر نباید
+    قبول‌شده جا بزند."""
+    blocks, cur_pattern, cur_lines = {}, None, []
+    for raw in src.splitlines():
+        if not raw.strip() or raw.lstrip().startswith("#"):
+            continue
+        if raw[:1] not in (" ", "\t"):
+            if cur_pattern is not None:
+                blocks[cur_pattern] = cur_lines
+            cur_pattern, cur_lines = raw.strip(), []
+        else:
+            cur_lines.append(raw.strip())
+    if cur_pattern is not None:
+        blocks[cur_pattern] = cur_lines
+    return blocks
+
+def check_security_headers():
+    """⚠️ `web/_headers` یک آرتیفکتِ کلادفلر است: فقط روی سایتِ منتشرشده
+    اعمال می‌شود، نه روی هارنسِ محلی که بقیه‌ی run.py با آن کار می‌کند و نه
+    روی هیچ‌چیزی که پلی‌رایت باز می‌کند (نه file://، نه هیچ سروری که این
+    فایل خودش راه بیندازد). پس این نگهبان فقط *فایل* را می‌سنجد — که هدرهای
+    درست نوشته شده‌اند و کسی بی‌خبر آن‌ها را شل نکرده — و هیچ چیزی درباره‌ی
+    رفتارِ واقعیِ مرورگر روی سایتِ زنده اثبات نمی‌کند. تنها راهِ سنجیدنِ آن
+    رفتار باز کردنِ خودِ سایتِ منتشرشده است (یا curl -I رویش)، نه یک
+    شبیه‌سازی اینجا که هیچ‌وقت نمی‌تواند قرمز شود — یک تستی که نمی‌تواند
+    شکست بخورد بدتر از نبودِ آن تست است."""
+    webdir = os.path.join(HERE, "..")
+    headers_path = os.path.join(webdir, "_headers")
+    assert os.path.exists(headers_path), "web/_headers is missing"
+    blocks = parse_headers_blocks(open(headers_path, encoding="utf-8").read())
+
+    assert "/*" in blocks, \
+        "web/_headers has no /* block — the whole site ships with no security headers at all"
+    lines = blocks["/*"]
+
+    def header(name):
+        for line in lines:
+            if line.lower().startswith(name.lower() + ":"):
+                return line.split(":", 1)[1].strip()
+        return None
+
+    csp = header("Content-Security-Policy")
+    assert csp, "the /* block sets no Content-Security-Policy"
+
+    def directive(name):
+        m = re.search(r"(?:^|;)\s*" + re.escape(name) + r"\s+([^;]*)", csp)
+        return m.group(1).strip() if m else None
+
+    ssrc = directive("script-src")
+    assert ssrc and "'self'" in ssrc, \
+        "script-src must pin 'self', or any injected <script src> from another origin runs: %r" % ssrc
+    assert not re.search(r"https?://", ssrc or ""), \
+        "script-src names a remote origin — that is exactly the hole a strict CSP exists to close: %r" % ssrc
+    assert "'unsafe-eval'" not in (ssrc or ""), \
+        "script-src allows 'unsafe-eval' — this app never needs eval()/new Function(), " \
+        "and this is the one relaxation a CSP must never grant for nothing: %r" % ssrc
+
+    base = directive("base-uri")
+    assert "'none'" not in (base or ""), \
+        ("base-uri must never be 'none': web/index.html near line 17 injects <base href=\"/\"> "
+         "on /t/<address> so relative bundle paths resolve there too. 'none' forbids every "
+         "<base> element, so that injection stops working, ethers never loads, and the token "
+         "page dies with 'Could not load ethers' — this broke production once, do not "
+         "tighten it back: %r" % base)
+    assert base and "'self'" in base, \
+        "base-uri must include 'self' — nothing else keeps a stray <base> from hijacking " \
+        "every relative asset path"
+
+    assert directive("object-src") == "'none'", \
+        "object-src must be 'none' — this site has no <object>/<embed> to protect: %r" % directive("object-src")
+    assert directive("frame-ancestors") == "'none'", \
+        "frame-ancestors must be 'none' — a page that signs on-chain transactions must " \
+        "never be embeddable, or clickjacking becomes a wallet-draining vector: %r" % directive("frame-ancestors")
+
+    conn = directive("connect-src")
+    assert conn and "https:" in conn, \
+        ("connect-src lost https: — that breaks the Custom RPC setting (for users behind "
+         "filtering) and the WalletConnect relay, both of which call arbitrary https hosts: %r"
+         % conn)
+
+    assert (header("X-Content-Type-Options") or "").lower() == "nosniff", \
+        "X-Content-Type-Options must be nosniff"
+
+    print("[security headers] web/_headers /* block: script-src pinned to 'self', "
+          "base-uri 'self' (never 'none' — the /t/<address> <base> injection depends on it), "
+          "object-src/frame-ancestors 'none', connect-src keeps https:/wss:, nosniff set. "
+          "⚠️ this only proves the file, not the deployed site — _headers is a Cloudflare "
+          "artifact the local harness never applies")
+
 def check_brand_palette():
     """پالت «ارکید» — سه چیز که هرکدام یک‌بار واقعاً شکسته بودند.
 
@@ -693,6 +785,7 @@ async def check_real_page_from_disk(pw):
 check_no_remote_code()
 check_gt_proxy_worker()
 check_asset_cache_headers()
+check_security_headers()
 check_event_allowlists()
 check_error_handler()
 check_og_tags()
@@ -2102,6 +2195,31 @@ async def main():
         assert proxy["afterGiveUp"] == GT_DIRECT + "/networks/base/tokens/0xbeef", \
             ("after giving up on the proxy every later request must go direct: %s"
              % proxy["afterGiveUp"])
+
+        # ---- 2b-quater-bis. gtCache is capped ----
+        # gtCache روی هر پاسخ موفق /gt یک ورودی می‌نویسد و TTL فقط موقعِ
+        # *خواندن* سنجیده می‌شود — یک نشستِ طولانی که پشتِ سرِ هم ده‌ها توکن
+        # را باز می‌کند هرگز چیزی از این Map پاک نمی‌کرد. اینجا مستقیم روی
+        # gtCacheSet می‌سنجیم (بدون شبکه) که سقف واقعاً نگه داشته می‌شود.
+        cap = await pg.evaluate("""() => {
+            gtCache.clear();
+            const n = GT_CACHE_MAX + 50;
+            for (let i = 0; i < n; i++)
+                gtCacheSet("https://x/" + i, {t: i, v: i});
+            return {max: GT_CACHE_MAX, inserted: n, size: gtCache.size,
+                    oldestGone: !gtCache.has("https://x/0"),
+                    newestKept: gtCache.has("https://x/" + (n - 1))};
+        }""")
+        print("[gt cache cap] max=%s inserted=%s size after=%s oldestGone=%s newestKept=%s"
+              % (cap["max"], cap["inserted"], cap["size"], cap["oldestGone"], cap["newestKept"]))
+        assert cap["size"] <= cap["max"], \
+            ("gtCache grew past its cap: size=%s — a long session opening many tokens would "
+             "leak memory forever, since TTL is only checked on read" % cap["size"])
+        assert cap["oldestGone"], \
+            "gtCache did not evict the oldest entry first — following the same rule as lsWrite"
+        assert cap["newestKept"], \
+            "gtCache evicted a fresh entry instead of the oldest ones"
+        await pg.evaluate("() => { gtCache.clear(); }")
 
         # ---- 2b-quinquies. what survives a refresh ----
         # حسام پیدایش کرد: چند رفرش پیاپی و لوگوها و نمودار می‌افتند. علتش
@@ -4195,6 +4313,69 @@ async def main():
         assert 0 < len(cap_names) <= 3, (
             "ten errors produced %d beacons; a broken loop must not burn the /ev quota, "
             "and must not go completely silent either" % len(cap_names))
+
+        # ---- [selector] یک سلکتور فقط وقتی «تابع» است که PUSH4 باشد ----
+        # ⚠️ باگ زنده: AERO ریسک ۷۷ گرفت چون جست‌وجوی زیررشته‌ای در بایت‌کد،
+        # چهار بایتِ اتفاقی داخل داده را «این تابع وجود دارد» می‌خواند.
+        selpg = await b.new_page(viewport={"width": 1240, "height": 1000})
+        await selpg.goto("http://127.0.0.1:%d/test/harness.html#swap" % port)
+        await selpg.wait_for_timeout(1300)
+        sel = await selpg.evaluate("""() => {
+            const s = "deadbeef";
+            return {
+              // فقط داده: همان چهار بایت، ولی PUSH4 قبلش نیست
+              dataOnly: hasSelector("60" + s + "5b", s),
+              // توزیع واقعی: 63 = PUSH4
+              push4:    hasSelector("6080604052" + "63" + s + "14", s),
+              // همان سوزن، ولی از یک موقعیت فرد شروع می‌شود
+              odd:      hasSelector("a" + "63" + s + "14", s),
+            };
+        }""")
+        await selpg.close()
+        print("[selector] data-only=%s  PUSH4=%s  odd-offset=%s"
+              % (sel["dataOnly"], sel["push4"], sel["odd"]))
+        assert sel["push4"], (
+            "a selector emitted as a real PUSH4 must still be found, or the safety scan "
+            "goes blind and every token looks clean")
+        assert not sel["dataOnly"], (
+            "four bytes sitting in data were counted as a function. That is how AERO — a "
+            "blue-chip Base token — scored 77 and told the owner a safe token was dangerous")
+        assert not sel["odd"], (
+            "the needle matched from an odd hex offset, straddling two bytes; a hex string "
+            "search must respect byte boundaries")
+
+        # ---- [err] شکستِ مدل‌شده نباید بنر بالا بیاورد ----
+        modpg = await b.new_page(viewport={"width": 1240, "height": 1000})
+        mod_seen = await watch_events(modpg)
+        await modpg.goto("http://127.0.0.1:%d/test/harness.html#swap" % port)
+        await modpg.wait_for_timeout(1300)
+        before = len(mod_seen)
+        # همان پرچمی که gtJson روی خطای قطع‌کننده‌ی مدار می‌گذارد
+        await modpg.evaluate(
+            """() => { const e = new Error("gt: backing off"); e.gtBackoff = true;
+                       Promise.reject(e); }""")
+        await modpg.wait_for_timeout(700)
+        tagged_hidden = await modpg.evaluate(
+            "() => document.getElementById('errBanner').hidden")
+        # و یک rejection بی‌پرچم باید همچنان دیده شود
+        await modpg.evaluate("() => { Promise.reject(new Error('zaexa probe: untagged')); }")
+        await modpg.wait_for_timeout(700)
+        untagged_shown = await modpg.evaluate(
+            "() => !document.getElementById('errBanner').hidden")
+        mod_names = [_json3.loads(r)["e"] for r in mod_seen[before:]
+                     if _json3.loads(r)["e"].startswith("err:")]
+        await modpg.close()
+        print("[err] modelled failure silent=%s | untagged still reported=%s | beacons=%s"
+              % (tagged_hidden, untagged_shown, mod_names))
+        assert tagged_hidden, (
+            "a modelled failure (the GeckoTerminal circuit breaker) raised the error banner. "
+            "Every one of those states already has its own UI, so this is the guard crying "
+            "wolf on a healthy page — measured live on 1 Sep as E-PR-E6FA")
+        assert untagged_shown, (
+            "silencing modelled failures also silenced a genuine untagged rejection — the "
+            "point was to stop crying wolf, not to go blind")
+        assert mod_names == ["err:promise"], (
+            "expected exactly one beacon, from the untagged rejection only, got %s" % mod_names)
 
         srv.shutdown()
         await b.close()

@@ -135,6 +135,19 @@ if(/^\/t\/0x[0-9a-fA-F]{40}\/?$/.test(location.pathname)){
   },true);
   addEventListener("unhandledrejection",function(e){
     var r=e&&e.reason;
+    /* ⚠️ شکستِ *مدل‌شده* «صفحه از کار افتاد» نیست.
+       اندازه‌گیری‌شده روی سایت زنده (۱ سپتامبر): مالک روی صفحه‌ای کاملاً
+       سالم `E-PR-E6FA` دید. علتش این است که در بلوک راه‌اندازی، readFee و
+       loadChart و runScan و scanWallets همگی async‌اند و بدون await و بدون
+       catch صدا زده می‌شوند؛ پس وقتی قطع‌کننده‌ی مدارِ GeckoTerminal باز
+       می‌شود یا ۴۲۹ می‌آید، آن rejection تا اینجا می‌آید و بنر بالا می‌رود
+       — در حالی که هر کدامِ آن حالت‌ها رابط کاربریِ خودشان را دارند و
+       کاربر همان را می‌بیند.
+       فقط پرچم‌هایی که *خودِ کد ما* روی خطا می‌گذارد نادیده گرفته می‌شوند،
+       نه متن پیام. تصمیم‌گرفتن با رشته همان کاری است که این پروژه یک بار
+       بابتش هزینه داده. یک rejection بی‌پرچم همچنان بنر می‌گیرد — قرار
+       است گرگ‌های واقعی دیده شوند، نه اینکه چشم‌مان بسته شود. */
+    if(r&&(r.gtBackoff||r.gtPermanent||r.gtRateLimited))return;
     var msg=String((r&&r.message)||r||"rejection");
     var stack=String((r&&r.stack)||"").split("\n").slice(0,4).join("\n");
     hit("PR","err:promise",msg,msg+(stack?"\n"+stack:""));
@@ -2702,8 +2715,24 @@ const GT_GAP=240,GT_TRIES=3;
    دو لایه اضافه شد:
    • coalescing — دو درخواست همزمان به یک URL یکی می‌شوند.
    • کش کوتاه‌مدت — همان URL در بازه‌ی معتبرش دوباره روی سیم نمی‌رود.
-   فقط موفقیت کش می‌شود؛ شکست هرگز، چون «نتوانستم بپرسم» جواب نیست. */
+   فقط موفقیت کش می‌شود؛ شکست هرگز، چون «نتوانستم بپرسم» جواب نیست.
+
+   ⚠️ سقف حافظه، همان الگوی LS_MAX بالاتر: یک نشست طولانی که پشتِ سرِ هم
+   ده‌ها توکن مختلف را باز می‌کند (folio، جابه‌جاییِ مکرر جفت‌ها) هرگز از
+   این Map چیزی پاک نمی‌کرد — TTL فقط موقعِ *خواندن* سنجیده می‌شود، نه
+   موقعِ نوشتن، پس ورودی‌های منقضی‌شده تا ابد می‌مانند. قدیمی‌ترها (بر
+   اساسِ t، نه ترتیبِ درج) اول می‌روند، دقیقاً مثلِ lsWrite. */
+const GT_CACHE_MAX=300;
 const gtCache=new Map(),gtInflight=new Map();
+function gtCacheSet(url,entry){
+  gtCache.set(url,entry);
+  if(gtCache.size>GT_CACHE_MAX){
+    [...gtCache.entries()]
+      .sort((a,b)=>a[1].t-b[1].t)
+      .slice(0,gtCache.size-GT_CACHE_MAX)
+      .forEach(([k])=>gtCache.delete(k));
+  }
+}
 function gtTtl(u){
   if(/\/pools(\?|$)/.test(u))return 600000;   // استخر برتر زود عوض نمی‌شود
   if(/\/ohlcv\//.test(u))return 45000;
@@ -2776,7 +2805,7 @@ function gtJson(url){
     throw new Error("gt: exhausted retries");
   };
   const next=gtChain.then(run,run).then(
-    v=>{gtFails=0;gtCache.set(url,{t:Date.now(),v});gtInflight.delete(url);return v;},
+    v=>{gtFails=0;gtCacheSet(url,{t:Date.now(),v});gtInflight.delete(url);return v;},
     e=>{
       gtInflight.delete(url);
       /* شکست انتقالی — یعنی اصلاً پاسخ HTTP نگرفتیم — هیچ‌وقت مربوط به یک
@@ -3020,6 +3049,39 @@ const DANGEROUS=[
 const SLOT_IMPL="0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc";
 const selectorOf=s=>E.id(s).slice(2,10).toLowerCase();
 
+/* آیا این سلکتور *واقعاً* یک تابع در این قرارداد است؟
+   ---------------------------------------------------------------------
+   ⚠️ اندازه‌گیری‌شده روی سایت زنده (۱ سپتامبر): AERO — توکنِ خودِ Aerodrome
+   با ~۴۵۹ میلیون دلار مارکت‌کپ — ریسک ۷۷ گرفت. حسابِ riskScore دقیقاً
+   می‌گوید این یعنی ۲ critical + ۱ high + ۱ medium + مالکِ فعال. برای چنین
+   توکنی این تقریباً قطعاً تطبیقِ کاذب است.
+
+   علتش نسخه‌ی قبلی بود: `hex.includes(selector)` روی *کل بایت‌کد به‌شکل
+   یک رشته‌ی هگز*. دو ایراد داشت و هر دو کاذب می‌سازند:
+     ۱) به مرزِ بایت تراز نبود — یک سوزنِ هشت‌کاراکتری می‌توانست از یک
+        موقعیتِ فرد شروع شود و روی دو بایتِ مجاور سوار شود.
+     ۲) هر حضوری را «تابع وجود دارد» می‌خواند: ثابت‌ها، داده‌ی بسته‌بندی‌شده،
+        immutableها، آدرس‌ها.
+   حالا فقط چیزی شمرده می‌شود که واقعاً `PUSH4 <selector>` باشد: بایتِ
+   `63` بلافاصله قبلش، و شروع روی موقعیتِ زوج. جدولِ توزیعِ سالیدیتی همیشه
+   همین شکل را تولید می‌کند.
+
+   ⚠️ معامله‌اش را پنهان نمی‌کنم: یک توزیعِ غیرمتعارف (اسمبلیِ دستی، ویپر)
+   ممکن است از قلم بیفتد. اینجا قابل قبول است چون شاهدِ قوی‌ترِ ما
+   شبیه‌سازیِ زنده‌ی فروش است که از قبل بر این ابتکارها می‌چربد — نه اینکه
+   این تنها خطِ دفاع باشد.
+   ⚠️ و این قاعده عمداً به `verifyDexes` تعمیم داده *نشد*: آنجا یک منفیِ
+   کاذب یک صرافیِ سالم را بی‌صدا خاموش می‌کند، و این پروژه یک بار سه دکسِ
+   زنده را «مرده» اعلام کرد. دو جا، دو قاعده، با دلیل. */
+function hasSelector(hex,sel){
+  let i=hex.indexOf(sel);
+  while(i>=0){
+    if(i%2===0&&i>=2&&hex.slice(i-2,i)==="63")return true;   // PUSH4
+    i=hex.indexOf(sel,i+1);
+  }
+  return false;
+}
+
 async function scanToken(token){
   const rep={address:token.address,symbol:token.symbol,findings:[],owner:null,native:!!token.native,
     // ⚠️ سه‌حالته، نه دوحالته: null یعنی «نپرسیدیم/نفهمیدیم».
@@ -3052,7 +3114,7 @@ async function scanToken(token){
     const hex=code.toLowerCase(),seen=new Set();
     for(const [sig,title,level,detail] of DANGEROUS){
       if(seen.has(title))continue;
-      if(hex.includes(selectorOf(sig))){seen.add(title);add(level,title,detail+"  ("+sig+")");}
+      if(hasSelector(hex,selectorOf(sig))){seen.add(title);add(level,title,detail+"  ("+sig+")");}
     }
   }
   try{
