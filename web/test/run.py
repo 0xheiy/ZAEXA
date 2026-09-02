@@ -2943,6 +2943,140 @@ async def main():
         assert after["after"]["saved"] is None and "good.example" not in after["after"]["first"], \
             "Clear must remove it from storage and stop using it: %s" % after["after"]
 
+        # ---- 2c-octies. RPC rotation: session dead-list + the comparative rule ----
+        # قاعده: یک اندپوینت فقط وقتی «مرده» علامت می‌خورد که یکی دیگر در
+        # همان تلاش جواب داده باشد؛ اگر همه شکست بخورند هیچ‌کدام علامت
+        # نمی‌خورد (مقصر شبکه‌ی کاربر است، نه اندپوینت‌ها).
+        rpcdead = await b.new_page()
+        await rpcdead.goto("http://127.0.0.1:%d/test/harness.html" % port)
+        await rpcdead.wait_for_timeout(1200)
+        r1 = await rpcdead.evaluate("""async () => {
+            const first = CHAIN.rpcs[0], second = CHAIN.rpcs[1];
+            window.__STUB_RPC__ = {}; window.__STUB_RPC__[first] = "unreachable";
+            window.__STUB_RPC_LOG__ = [];
+            const code = await getCode("0x" + "ab".repeat(20));
+            return {first, second, code,
+                    log1: window.__STUB_RPC_LOG__.slice(),
+                    deadHasFirst: deadRpc.has(first), liveSrc,
+                    remembered: localStorage.getItem("zaexa.rpc.last")};
+        }""")
+        print("[rpc dead] first=%s… attempted=%s dead-marked=%s live=%s…"
+              % (r1["first"][:28], len(r1["log1"]), r1["deadHasFirst"], (r1["liveSrc"] or "")[:28]))
+        assert r1["code"] and r1["code"] != "0x", \
+            "a dead first endpoint must not stop the read: %s" % r1
+        assert r1["log1"] == [r1["first"], r1["second"]], \
+            "the read must roll forward to the next endpoint, in order: %s" % r1["log1"]
+        assert r1["deadHasFirst"], \
+            "the failed endpoint must be marked dead once another one answered: %s" % r1
+        assert r1["liveSrc"] == r1["second"], \
+            "the endpoint that answered must become the live source: %s" % r1
+        assert r1["remembered"] == r1["second"], \
+            "a successful read must remember the winning endpoint for next visit: %s" % r1
+
+        r2 = await rpcdead.evaluate("""async () => {
+            window.__STUB_RPC_LOG__ = [];
+            const code = await getCode("0x" + "cd".repeat(20));
+            return {code, log: window.__STUB_RPC_LOG__.slice()};
+        }""")
+        print("[rpc dead retry] attempted=%s" % [u[:28] for u in r2["log"]])
+        assert r1["first"] not in r2["log"], \
+            "an endpoint marked dead this session must not be retried again: %s" % r2["log"]
+        assert r2["code"] and r2["code"] != "0x"
+        await rpcdead.evaluate("() => localStorage.removeItem('zaexa.rpc.last')")
+        await rpcdead.close()
+
+        # همه شکست می‌خورند → هیچ‌کدام مرده علامت نمی‌خورد، و تلاش بعدی باید
+        # دوباره همه را امتحان کند — از جمله همان اولی که این بار شکست خورد.
+        rpcall = await b.new_page()
+        await rpcall.goto("http://127.0.0.1:%d/test/harness.html" % port)
+        await rpcall.wait_for_timeout(1200)
+        r3 = await rpcall.evaluate("""async () => {
+            const all = CHAIN.rpcs.slice();
+            window.__STUB_RPC__ = {}; all.forEach(u => window.__STUB_RPC__[u] = "unreachable");
+            window.__STUB_RPC_LOG__ = [];
+            let err = null;
+            try { await getCode("0x" + "ef".repeat(20)); }
+            catch (e) { err = {message: e.message, rpcDown: !!e.rpcDown}; }
+            return {all, err, log: window.__STUB_RPC_LOG__.slice(), deadSize: deadRpc.size};
+        }""")
+        print("[rpc all down] attempted=%d rpcDown=%s dead-marked=%d"
+              % (len(r3["log"]), r3["err"] and r3["err"]["rpcDown"], r3["deadSize"]))
+        assert r3["err"] and r3["err"]["rpcDown"], \
+            "when every endpoint fails, the caller must still reach the network-down path: %s" % r3["err"]
+        assert r3["log"] == r3["all"], \
+            "a total failure must still try every endpoint once: %s" % r3
+        assert r3["deadSize"] == 0, \
+            ("when everything fails, nothing may be marked dead — that is the user's network, "
+             "not the endpoints: %s" % r3)
+
+        r4 = await rpcall.evaluate("""async () => {
+            window.__STUB_RPC__ = {};            // حالا همه زنده‌اند
+            window.__STUB_RPC_LOG__ = [];
+            const code = await getCode("0x" + "12".repeat(20));
+            return {code, log: window.__STUB_RPC_LOG__.slice()};
+        }""")
+        print("[rpc all down retry] attempted=%s" % [u[:28] for u in r4["log"]])
+        assert r4["log"][0] == r3["all"][0], \
+            "a later retry must try the very first endpoint again, not skip it as dead: %s" % r4
+        await rpcall.evaluate("() => localStorage.removeItem('zaexa.rpc.last')")
+        await rpcall.close()
+
+        # ---- 2c-octies-bis. remembered endpoint: validated before use ----
+        # هرچه از localStorage برمی‌گردد نامعتبر فرض می‌شود؛ فقط عضو
+        # DEFAULT_RPCS پذیرفته می‌شود، نه هر رشته‌ای که آنجا نشسته باشد.
+        rpclast = await b.new_page()
+        await rpclast.goto("http://127.0.0.1:%d/test/harness.html" % port)
+        await rpclast.wait_for_timeout(1200)
+        baseline = await rpclast.evaluate(
+            "() => ({defaults: DEFAULT_RPCS.slice(), first: CHAIN.rpcs[0]})")
+        assert baseline["first"] == baseline["defaults"][0]
+        # فهرستِ اندازه‌گیری‌شده‌ی ۲ سپتامبر ۲۰۲۶ — 1rpc.io و llamarpc.com
+        # دیگر نباید هرگز اینجا برگردند (هر دو CORS رد می‌شوند)، و ترتیب باید
+        # همان ترتیبِ تأخیرِ صعودی باشد که در CHAIN.rpcs کامنت شده.
+        expected_rpcs = ["https://base.publicnode.com", "https://base.meowrpc.com",
+                          "https://base.drpc.org", "https://base.gateway.tenderly.co",
+                          "https://mainnet.base.org"]
+        assert baseline["defaults"] == expected_rpcs, \
+            "CHAIN.rpcs no longer matches the measured, CORS-clean list: %s" % baseline["defaults"]
+
+        await rpclast.evaluate(
+            "() => localStorage.setItem('zaexa.rpc.last', 'https://evil.example/poison')")
+        await rpclast.goto("http://127.0.0.1:%d/test/harness.html" % port)
+        await rpclast.wait_for_timeout(1200)
+        poisoned = await rpclast.evaluate("() => CHAIN.rpcs[0]")
+        print("[rpc remember poisoned] first=%s…" % poisoned[:28])
+        assert poisoned == baseline["defaults"][0], \
+            "a localStorage value outside the known endpoint list must be ignored: %r" % poisoned
+
+        target = baseline["defaults"][2]
+        await rpclast.evaluate(
+            "(v) => localStorage.setItem('zaexa.rpc.last', v)", target)
+        await rpclast.goto("http://127.0.0.1:%d/test/harness.html" % port)
+        await rpclast.wait_for_timeout(1200)
+        honored = await rpclast.evaluate("() => CHAIN.rpcs[0]")
+        print("[rpc remember valid] first=%s…" % honored[:28])
+        assert honored == target, \
+            "a remembered endpoint that IS in the known list must lead next visit: %s != %s" \
+            % (honored, target)
+        await rpclast.evaluate("() => localStorage.removeItem('zaexa.rpc.last')")
+        await rpclast.close()
+
+        # ---- 2c-octies-ter. main button agrees with the header on first paint ----
+        # قبل از این، مارک‌آپِ خامِ actBtn «Enter an amount» بود و فقط بعد از
+        # بارگذاریِ async ethers به «Connect wallet» عوض می‌شد — یعنی همان
+        # لحظه‌ای که کاربر بدون کیف پول اولین‌بار صفحه را می‌بیند، هدر و دکمه
+        # دو حرف مختلف می‌زدند. این کاوشگر خودِ HTML خام را می‌خواند، نه
+        # DOM بعد از اجرای اسکریپت — دقیقاً همان چیزی که first paint نشان
+        # می‌دهد.
+        raw_src = open(os.path.join(HERE, "..", "index.html"), encoding="utf-8").read()
+        m_hdr = re.search(r'id="connectBtn"[^>]*>([^<]*)<', raw_src)
+        m_act = re.search(r'id="actBtn"[^>]*>([^<]*)<', raw_src)
+        assert m_hdr and m_act, "connectBtn/actBtn markup not found — did the ids change?"
+        print("[cta initial] header=%r action=%r" % (m_hdr.group(1), m_act.group(1)))
+        assert m_hdr.group(1) == m_act.group(1) == "Connect wallet", \
+            ("with no wallet connected, the header and the main action button must agree from "
+             "first paint: header=%r action=%r" % (m_hdr.group(1), m_act.group(1)))
+
         # ---- 2d. native ETH is offered and routes through WETH ----
         await pg.click("#tokOutBtn"); await pg.wait_for_timeout(250)
         await pg.fill("#tokSearch", "ETH"); await pg.wait_for_timeout(250)

@@ -1137,7 +1137,13 @@ footer a{color:var(--tx3);text-decoration:none}
         background:var(--card2);font-size:12px;color:var(--tx2);line-height:1.55"></div>
       <div id="devBanner" hidden></div>
       <div id="notices"></div>
-      <button class="cta" id="actBtn" disabled>Enter an amount</button>
+      <!-- متنِ اولیه باید با هدر یکی باشد. تا وقتی کیف پول وصل نیست، چیزی
+           که از کاربر خواسته می‌شود «وصل کردن» است، نه «مبلغ را بنویس» —
+           هدر همین را از همان اول می‌گوید (#connectBtn، خط بالاتر)، ولی این
+           دکمه قبلاً «Enter an amount» نشان می‌داد تا refreshButton() بعد از
+           بارگذاری ethers (async) جایش را عوض کند. کاوشگر [cta initial] در
+           run.py همین توافق را می‌سنجد. -->
+      <button class="cta" id="actBtn" disabled>Connect wallet</button>
     </section>
   </div>
 
@@ -1489,8 +1495,28 @@ const CHAIN={
   id:8453,hexId:"0x2105",name:"Base",explorer:"https://basescan.org",gtNetwork:"base",
   multicall3:"0xcA11bde05977b3631167028862bE2a173976CA11",
   executor:"0x15e511Bf2Ea1a0F50F25E973d57Dce0D01946b6d",
-  rpcs:["https://1rpc.io/base","https://base.drpc.org","https://base.llamarpc.com",
-        "https://base.publicnode.com","https://mainnet.base.org"],
+  /* اندازه‌گیریِ ۲ سپتامبر ۲۰۲۶، از مرورگر واقعیِ owner روی خودِ مبدأ
+     zaexa.com — نه با curl. CORS به مبدأ *درخواست‌دهنده* بستگی دارد؛
+     اندپوینتی که با curl جواب می‌دهد می‌تواند دقیقاً همین‌جا، از این
+     مبدأ، رد شود. پس تنها آزمونی که معنا داشت همین بود: هر کاندید با
+     eth_chainId از zaexa.com پاسخ 0x2105 داد یا نداد.
+
+     ترتیب زیر بر اساس تأخیرِ اندازه‌گیری‌شده است (صعودی)، با یک استثنا:
+     mainnet.base.org آخر است چون زیر بار واقعی 429 داد — یعنی «کند»
+     نیست، ولی زیر فشار اولین کسی است که باید رد شود، نه اولین انتخاب.
+
+     1rpc.io و base.llamarpc.com به‌کل حذف شدند، نه فقط عقب رفتند: هردو
+     با CORS رد می‌شدند، یعنی از این مبدأ اصلاً قابل استفاده نیستند —
+     «کند» نیستند، برای ما وجود ندارند. نگه‌داشتنشان در فهرست فقط یعنی
+     هر خواندن دو timeout بی‌فایده قبل از رسیدن به یک اندپوینتِ زنده
+     می‌سوزاند؛ دقیقاً همان باگی که این فهرست را عوض کرد. rpc.ankr.com/base
+     هم کنار گذاشته شد: 200 برمی‌گرداند ولی دیگر بدون کلید chainId نمی‌دهد.
+
+     ⚠️ این فهرست را با curl آزمایش نکن — نتیجه‌اش چیزی درباره‌ی CORS
+     نمی‌گوید. اگر روزی دوباره سنجیده شد، باید از مرورگر و روی مبدأ
+     واقعی سایت باشد. */
+  rpcs:["https://base.publicnode.com","https://base.meowrpc.com","https://base.drpc.org",
+        "https://base.gateway.tenderly.co","https://mainnet.base.org"],
   wrapped:"WETH",reference:"USDC",
 };
 const DEFAULT_RPCS=CHAIN.rpcs.slice();
@@ -1659,6 +1685,9 @@ const ABI={
 
 let E,iMulti,iQuoter,iQuoterCL,iV2,iSol,iErc,iOwn,iV3F,iClF,iSolF,iV2F,iExec;
 let readProvider=null,rpcIndex=0,liveSrc=null;
+/* اندپوینت‌های عمومیِ «مرده برای همین نشست» — پایین‌تر، کنار rpcSend،
+   توضیح کامل قاعده‌ی مقایسه‌ای هست. */
+const deadRpc=new Set();
 let walletProvider=null,signer=null,account=null,walletChainId=null;
 let tokenIn=null,tokenOut=null,customTokens=[];
 let slippageBps=50,deadlineMin=3,feeBps=0,unlimitedApprove=false;
@@ -1778,6 +1807,23 @@ function restoreCustomRpc(){
     rpcState("","Optional. Use your own endpoint if the public ones are blocked where you are.");
   }
 }
+/* بازدید قبلی کدام اندپوینتِ عمومی جواب داد؟ همان‌جا شروع کن — به‌جای
+   شروع همیشگی از اول فهرست و تحملِ همان چرخشِ اول دوباره.
+   ⚠️ اگر RPC اختصاصی فعال است دست نمی‌زنیم: آن همیشه اول است، این فقط
+   ترتیب داخلِ فهرستِ عمومی را عوض می‌کند.
+   ⚠️ هرچه از localStorage می‌آید نامعتبر فرض می‌شود: فقط اگر دقیقاً یکی
+   از DEFAULT_RPCS باشد پذیرفته می‌شود — نه هر رشته‌ای که کسی در آن نوشته
+   (یا در حالت خصوصی/مسموم بوده). یک URL دلخواه اینجا هرگز مستقیم
+   provider نمی‌شود. */
+function restoreLastRpc(){
+  if(customRpc)return;
+  let last=null;
+  try{last=localStorage.getItem(LS_RPC_LAST);}catch{}
+  if(!last||!DEFAULT_RPCS.includes(last))return;
+  const i=CHAIN.rpcs.indexOf(last);
+  if(i>0)CHAIN.rpcs=[CHAIN.rpcs[i],...CHAIN.rpcs.slice(0,i),...CHAIN.rpcs.slice(i+1)];
+  rpcIndex=0;readProvider=makeProvider(CHAIN.rpcs[0]);
+}
 
 /* خواندن از خودِ کیف پول برای افزونه‌ی مرورگر بهترین کار است: بدون CORS،
    بدون سقف نرخ، بدون فیلتر جغرافیایی.
@@ -1794,15 +1840,60 @@ let walletIsRemote=false;
 function walletReady(){
   return walletProvider&&walletChainId===CHAIN.id&&!walletIsRemote;
 }
+/* اندپوینتِ برنده‌ی آخرین خواندنِ موفق، برای شروعِ بازدید بعدی.
+   ⚠️ فقط از یک خواندنِ *واقعاً موفق* پر می‌شود، هرگز از پارامتر URL —
+   همان قاعده‌ای که RPC اختصاصی را نگه داشته، اینجا هم برقرار است. و چون
+   هرچه از localStorage برمی‌گردد نامعتبر فرض می‌شود، restoreLastRpc پایین‌تر
+   قبل از استفاده آن را با DEFAULT_RPCS می‌سنجد — یک URL دلخواهِ نشسته در
+   localStorage هرگز مستقیماً provider نمی‌شود. */
+const LS_RPC_LAST="zaexa.rpc.last";
+/* ---------------------------------------------------------------------
+   «مرده برای این نشست» — چرا، و چرا با احتیاط
+   ---------------------------------------------------------------------
+   قبل از این، هر شکست موقتی فرض می‌شد و چرخش دوباره به همان اندپوینتِ
+   مرده برمی‌گشت؛ برای همین 1rpc.io در یک بارگذاری صفحه هشت بار امتحان
+   می‌شد — هر بار یک timeout کامل، فقط برای رسیدن به همان نتیجه.
+
+   ⚠️ تله‌ای که باید حواسمان بهش باشد: در مرورگر، رد CORS و قطعیِ واقعیِ
+   شبکه از هم قابل تشخیص *نیستند* — هر دو همان TypeError با پیام
+   «Failed to fetch» را می‌دهند. اگر با یک شکستِ تنها یک اندپوینت مرده
+   علامت بخورد، کاربری که وایفایش لحظه‌ای قطع شده یا پشت فیلترینگ است همه‌ی
+   اندپوینت‌ها را مرده می‌بیند و سایت برایش کامل و همیشگی خراب می‌ماند —
+   دقیقاً همان کلاس خطایی که یک بار سه صرافیِ زنده را از رویِ یک استنتاجِ
+   غلط «مرده» اعلام کرد.
+
+   پس قاعده مقایسه‌ای است، نه مطلق: یک اندپوینت فقط وقتی مرده علامت
+   می‌خورد که *اندپوینتِ دیگری در همان تلاش جواب داده باشد*. اگر همه شکست
+   بخورند، هیچ‌کدام علامت نمی‌خورند — چون آن‌وقت مقصر شبکه‌ی خودِ کاربر است،
+   نه اندپوینت‌ها، و تلاش بعدی باید دوباره همه را امتحان کند. */
 async function rpcSend(fn){
   if(walletReady()){
     try{const v=await withTimeout(fn(walletProvider),9000);liveSrc="wallet";paintSrc();return v;}
     catch(e){if(isRevert(e))throw e;}
   }
   let last;
+  const failedThisRound=[];               // فقط شکست‌های همین یک تلاش
   for(let k=0;k<CHAIN.rpcs.length;k++){
-    try{const v=await withTimeout(fn(readProvider),7000);liveSrc=CHAIN.rpcs[rpcIndex];paintSrc();return v;}
-    catch(e){if(isRevert(e))throw e;last=e;rotateRpc();}
+    const url=CHAIN.rpcs[rpcIndex];
+    if(deadRpc.has(url)){rotateRpc();continue;}   // قبلاً اثبات شد مرده — رد شو، امتحان نکن
+    try{
+      const v=await withTimeout(fn(readProvider),7000);
+      liveSrc=url;paintSrc();
+      // قاعده‌ی مقایسه‌ای بالا: این یکی جواب داد، پس بقیه‌ی شکست‌خورده‌های
+      // همین تلاش («رو در رو با یک زنده») حالا مرده علامت می‌خورند —
+      // ولی فقط اگر جزو فهرست شناخته‌شده باشند؛ RPC اختصاصیِ کاربر (اگر
+      // فعال باشد) هرگز اینجا مرده علامت نمی‌خورد، چون آن تنظیم دست‌نخورده
+      // می‌ماند.
+      failedThisRound.filter(u=>DEFAULT_RPCS.includes(u)).forEach(u=>deadRpc.add(u));
+      if(DEFAULT_RPCS.includes(url)){
+        try{localStorage.setItem(LS_RPC_LAST,url);}catch{}
+      }
+      return v;
+    }catch(e){
+      if(isRevert(e))throw e;
+      last=e;failedThisRound.push(url);
+      rotateRpc();
+    }
   }
   liveSrc=null;paintSrc();
   const err=new Error("all RPC endpoints failed");err.rpcDown=true;err.cause=last;throw err;
@@ -5489,6 +5580,7 @@ function wire(){
      پس یک *لینک* هرگز نمی‌تواند عوضش کند. */
   readProvider=makeProvider(CHAIN.rpcs[0]);
   restoreCustomRpc();           // فقط از localStorage، که فقط با تایپ کاربر پر می‌شود
+  restoreLastRpc();             // اگر اختصاصی نبود، از اندپوینتِ برنده‌ی بازدید قبلی شروع کن
   // پیش‌فرض: ETH بومی → USDC. کسی که تازه می‌رسد معمولاً ETH دارد و
   // می‌خواهد بفروشد، نه برعکس.
   tokenIn=BASE_TOKENS.find(t=>t.native);

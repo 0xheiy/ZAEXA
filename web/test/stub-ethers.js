@@ -178,9 +178,28 @@
     "0x8c1A3cF8f83074169FE5D7aD50B978e1cD6b37c7",
   ].map(a => a.toLowerCase());
 
+  /* استاب باید بتواند اندپوینت *بد* را هم بازی کند، وگرنه نه مسیرهای خطای
+     Custom RPC و نه چرخشِ rpcSend روی اندپوینتِ عمومیِ مرده آزموده می‌شوند.
+     window.__STUB_RPC__ = { "https://…": 1 }            → زنجیره‌ی اشتباه (فقط getNetwork)
+     window.__STUB_RPC__ = { "https://…": "unreachable" } → اصلاً جواب نمی‌دهد (همه‌ی متدها)
+     stubAlive را هر متدی که rpcSend صدا می‌زند (call/getCode/getStorage/
+     getBalance/getLogs) اول کار خودش صدا می‌زند تا شبیه‌سازیِ اندپوینتِ مرده
+     واقعاً کل مسیرِ خواندن را بپوشاند، نه فقط تست دکمه‌ی Custom RPC. */
+  function stubAlive(url) {
+    // اختیاری: تست با window.__STUB_RPC_LOG__=[] فعالش می‌کند تا ببیند
+    // rpcSend واقعاً کدام اندپوینت‌ها را امتحان کرد (و کدام را رد کرد).
+    if (window.__STUB_RPC_LOG__) window.__STUB_RPC_LOG__.push(url);
+    if ((window.__STUB_RPC__ || {})[url] === "unreachable")
+      throw Object.assign(new Error("Failed to fetch"), { code: "NETWORK_ERROR" });
+  }
+
   function JsonRpcProvider(url) { this.url = url; }
-  JsonRpcProvider.prototype.getBalance = async function () { return 42n * 10n ** 15n; };
+  JsonRpcProvider.prototype.getBalance = async function () {
+    stubAlive(this.url);
+    return 42n * 10n ** 15n;
+  };
   JsonRpcProvider.prototype.getCode = async function (addr) {
+    stubAlive(this.url);
     const a = String(addr || "").toLowerCase();
     if (NOCODE.includes(a)) return "0x";
     if (GOOD_ROUTERS.includes(a)) return ROUTER_CODE;
@@ -189,10 +208,8 @@
     return FAKE_CODE;                                    // توکن
   };
   JsonRpcProvider.prototype.getBlockNumber = async function () { return 50000000; };
-  /* استاب باید بتواند اندپوینت *بد* را هم بازی کند، وگرنه مسیرهای خطای
-     Custom RPC اصلاً آزموده نمی‌شوند و «ذخیره شد» بی‌معنی سبز می‌ماند.
-     window.__STUB_RPC__ = { "https://…": 1 }            → زنجیره‌ی اشتباه
-     window.__STUB_RPC__ = { "https://…": "unreachable" } → اصلاً جواب نمی‌دهد */
+  /* getNetwork جدا مانده چون علاوه بر "unreachable" باید زنجیره‌ی اشتباه
+     (عدد) را هم بازی کند — چیزی که rpcSend به آن کاری ندارد. */
   JsonRpcProvider.prototype.getNetwork = async function () {
     const cfg = (window.__STUB_RPC__ || {})[this.url];
     if (cfg === "unreachable")
@@ -200,6 +217,7 @@
     return { chainId: BigInt(cfg === undefined ? 8453 : cfg) };
   };
   JsonRpcProvider.prototype.getLogs = async function () {
+    stubAlive(this.url);
     // چند سواپ ساختگی: amount منفی برای توکن ما = خرید
     const mk = (ourAmt, refAmt, who, block) => ({ blockNumber: block,
       data: toHex(ser({ amount0: ourAmt, amount1: refAmt, recipient: who })) });
@@ -211,9 +229,11 @@
     ];
   };
   JsonRpcProvider.prototype.getStorage = async function () {
+    stubAlive(this.url);
     return "0x" + "00".repeat(32);        // proxy نیست
   };
   JsonRpcProvider.prototype.call = async function (tx) {
+    stubAlive(this.url);
     if (tx.to.toLowerCase() !== MC3) throw new Error("unexpected target");
     const outer = unpack(tx.data);
     const calls = outer.args[0];
