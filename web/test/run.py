@@ -4377,6 +4377,54 @@ async def main():
         assert mod_names == ["err:promise"], (
             "expected exactly one beacon, from the untagged rejection only, got %s" % mod_names)
 
+        # ---- [err] خطای افزونه‌ی مرورگر مالِ ما نیست ----
+        # ⚠️ باگ زنده: مالک روی صفحه‌ای سالم بنر دید. جزئیاتش
+        # «Cannot redefine property: isZerion» از یک chrome-extension:// بود —
+        # دو کیف پول سرِ window.ethereum دعوا داشتند. کاربر این سایت اغلب
+        # بیش از یک کیف پول نصب دارد، پس این حالت نادر نیست، قاعده است.
+        extpg = await b.new_page(viewport={"width": 1240, "height": 1000})
+        ext_seen = await watch_events(extpg)
+        await extpg.goto("http://127.0.0.1:%d/test/harness.html#swap" % port)
+        await extpg.wait_for_timeout(1300)
+        before = len(ext_seen)
+        # rejection با پشته‌ای که از افزونه می‌آید
+        await extpg.evaluate("""() => {
+            const e = new Error("Cannot redefine property: isZerion");
+            e.stack = "TypeError: Cannot redefine property: isZerion\\n"
+                    + "    at Object.defineProperty (<anonymous>)\\n"
+                    + "    at Object.l (chrome-extension://klghhnkeealcohjjanjjdaeeggmfmlpl"
+                    + "/content-script/in-page.js:9:317331)";
+            Promise.reject(e);
+        }""")
+        # و همان چیز به‌شکل رویداد error، که filename دارد
+        await extpg.evaluate("""() => dispatchEvent(new ErrorEvent("error", {
+            message: "Cannot redefine property: isZerion",
+            filename: "chrome-extension://klghhnkeealcohjjanjjdaeeggmfmlpl/in-page.js",
+            lineno: 9, colno: 317331 }))""")
+        await extpg.wait_for_timeout(700)
+        ext_hidden = await extpg.evaluate(
+            "() => document.getElementById('errBanner').hidden")
+        # ولی یک خطای واقعی از خودِ صفحه باید همچنان دیده شود
+        await extpg.evaluate(
+            "() => setTimeout(() => { throw new Error('zaexa probe: ours'); }, 0)")
+        await extpg.wait_for_timeout(700)
+        ours_shown = await extpg.evaluate(
+            "() => !document.getElementById('errBanner').hidden")
+        ext_names = [_json3.loads(r)["e"] for r in ext_seen[before:]
+                     if _json3.loads(r)["e"].startswith("err:")]
+        await extpg.close()
+        print("[err] extension fault silent=%s | our own fault still reported=%s | beacons=%s"
+              % (ext_hidden, ours_shown, ext_names))
+        assert ext_hidden, (
+            "a fault thrown inside a browser extension raised our error banner. Two wallet "
+            "extensions fighting over window.ethereum is normal for this audience, and we "
+            "would be blaming our own page for something we did not do and cannot fix")
+        assert ours_shown, (
+            "filtering extension faults also silenced a real fault from our own code — the "
+            "point is to stop taking the blame for others, not to stop reporting")
+        assert ext_names == ["err:js"], (
+            "expected exactly one beacon, from our own fault only, got %s" % ext_names)
+
         srv.shutdown()
         await b.close()
 

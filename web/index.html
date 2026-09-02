@@ -70,6 +70,21 @@ if(/^\/t\/0x[0-9a-fA-F]{40}\/?$/.test(location.pathname)){
 
   /* FNV-1a. کارش رمزنگاری نیست — فقط یک برچسب چهاررقمی که برای یک خطای
      یکسان همیشه یکسان دربیاید. */
+  /* آیا این خطا اصلاً مالِ *ما* بود؟
+     ⚠️ اندازه‌گیری‌شده روی سایت زنده: مالک روی صفحه‌ای سالم بنر دید، و
+     جزئیاتش این بود:
+         Cannot redefine property: isZerion
+         at chrome-extension://klghh…/content-script/in-page.js
+     یعنی دو افزونه‌ی کیف پول سرِ window.ethereum با هم دعوا داشتند. کدِ
+     صفحه‌ی ما هیچ نقشی نداشت و هیچ‌وقت هم نمی‌تواند درستش کند.
+     و مخاطب این سایت کاربر کریپتوست — داشتنِ دو کیف پول اصلاً کمیاب نیست،
+     پس این بنر برای بخش بزرگی از کاربران روی صفحه‌ی درست بالا می‌آمد.
+     ⚠️ تشخیص با *منشأ* است نه با متن پیام: هرچه در chrome-extension:// یا
+     moz-extension:// اجرا شود، کدِ ما نیست. متن پیام را نمی‌خوانیم — همان
+     دامی که این پروژه یک بار بابتش هزینه داد. */
+  function foreign(s){
+    return /(^|\s|\()(chrome|moz|safari-web|safari|ms-browser)-extension:\/\//.test(String(s||""));
+  }
   function tag(kind,seed){
     var h=2166136261;
     for(var i=0;i<seed.length;i++){h^=seed.charCodeAt(i);h=Math.imul(h,16777619);}
@@ -131,6 +146,7 @@ if(/^\/t\/0x[0-9a-fA-F]{40}\/?$/.test(location.pathname)){
     }
     var msg=String((e&&e.message)||"error");
     var at=String((e&&e.filename)||"")+":"+((e&&e.lineno)||0)+":"+((e&&e.colno)||0);
+    if(foreign(at))return;                     // کدِ افزونه، نه کدِ ما
     hit("JS","err:js",msg+"@"+at,msg+"\nat "+at);
   },true);
   addEventListener("unhandledrejection",function(e){
@@ -150,6 +166,9 @@ if(/^\/t\/0x[0-9a-fA-F]{40}\/?$/.test(location.pathname)){
     if(r&&(r.gtBackoff||r.gtPermanent||r.gtRateLimited))return;
     var msg=String((r&&r.message)||r||"rejection");
     var stack=String((r&&r.stack)||"").split("\n").slice(0,4).join("\n");
+    /* برای rejection، فایل جدا نداریم؛ منشأ فقط از پشته درمی‌آید. همان
+       خطای `isZerion` از این راه شناخته می‌شود. */
+    if(foreign(stack))return;
     hit("PR","err:promise",msg,msg+(stack?"\n"+stack:""));
   });
   /* دکمه بعد از پارس‌شدن بدنه سیم می‌شود. کپی *تنها* راهی است که جزئیات از
