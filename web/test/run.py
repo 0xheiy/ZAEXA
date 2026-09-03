@@ -4127,25 +4127,38 @@ async def main():
             const vw = document.documentElement.clientWidth;
             const f = document.querySelector("footer").getBoundingClientRect();
             const g = document.querySelector("footer .footGrid").getBoundingClientRect();
-            const bw = parseFloat(getComputedStyle(document.querySelector("footer"))
-                .borderTopWidth);
+            const cs = getComputedStyle(document.querySelector("footer"));
+            const bw = parseFloat(cs.borderTopWidth);
+            const padL = parseFloat(cs.paddingLeft), padR = parseFloat(cs.paddingRight);
             const leftGap = g.left - f.left, rightGap = f.right - g.right;
             return {
                 vw, bandW: f.width, bandLeft: f.left, contentW: g.width,
-                borderW: bw, centred: Math.abs(leftGap - rightGap) <= 1,
+                padL, padR, borderW: bw, centred: Math.abs(leftGap - rightGap) <= 1,
             };
         }""")
-        print("[footer] band=%.0fpx viewport=%.0fpx content=%.0fpx centred=%s"
-              % (geo["bandW"], geo["vw"], geo["contentW"], geo["centred"]))
+        print("[footer] band=%.0fpx viewport=%.0fpx content=%.0fpx gutter=%.0fpx centred=%s"
+              % (geo["bandW"], geo["vw"], geo["contentW"], geo["padL"], geo["centred"]))
         assert abs(geo["bandW"] - geo["vw"]) <= 1, (
             "the footer band is not full-bleed: width=%.1fpx but viewport clientWidth=%.1fpx"
             % (geo["bandW"], geo["vw"]))
         assert abs(geo["bandLeft"]) <= 1, (
             "the footer's left edge is not at 0: left=%.1fpx" % geo["bandLeft"])
-        assert abs(geo["contentW"] - 1100) <= 2, (
-            "the footer content (.footGrid) should stay pinned at ~1100px regardless of the "
-            "band width, but measures %.1fpx — the text now stretches toward the edge of the "
-            "screen instead of keeping its own max-width" % geo["contentW"])
+        # ⚠️ عمداً «باریک‌تر از نوار» نیست. مالک دو بار گفت فوتر باید تمام‌عرض
+        #    باشد؛ نسخه‌ی میانی فقط نوار را پهن کرد و محتوا روی ۱۱۰۰ پین ماند،
+        #    که روی ۱۵۸۵ پیکسل یعنی ۲۴۲ پیکسل فضای خالی هر طرف — و همان رد شد.
+        #    پس شرط روی عددِ محاسبه‌شده پین است: محتوا باید دقیقاً نوار منهای
+        #    گاترِ خودش باشد. عددِ گاتر از خودِ computed style می‌آید، نه هاردکد،
+        #    چون clamp() با عرضِ صفحه عوض می‌شود.
+        expected_content = geo["bandW"] - geo["padL"] - geo["padR"]
+        assert abs(geo["contentW"] - expected_content) <= 2, (
+            "the footer content (.footGrid) should fill the band minus its own gutter — "
+            "expected %.1fpx (band %.1f - padding %.1f - %.1f) but measured %.1fpx. A "
+            "max-width creeping back onto .footGrid puts the columns in the middle of the "
+            "screen again, which is the exact layout the owner rejected twice."
+            % (expected_content, geo["bandW"], geo["padL"], geo["padR"], geo["contentW"]))
+        assert geo["contentW"] > 1200, (
+            "at a %.0fpx viewport the footer columns only span %.1fpx — that is the old "
+            "1100px centred island, not a full-width footer" % (geo["vw"], geo["contentW"]))
         assert geo["centred"], (
             ".footGrid is not horizontally centred inside the footer band")
         assert geo["borderW"] > 0, (
