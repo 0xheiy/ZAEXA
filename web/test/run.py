@@ -4115,6 +4115,42 @@ async def main():
             "expected exactly the X and GitHub icons left in .social after #lnkTg removed "
             "itself, found %d children — a leftover empty slot or separator" % wired["socialCount"])
 
+        # ۴. هندسه: نوارِ فوتر باید تمام‌عرضِ صفحه باشد، ولی محتوایش (.footGrid)
+        #    باریک‌تر و وسط‌چین بماند. تا امروز هیچ کاوشگری هندسه‌ی فوتر را
+        #    نمی‌سنجید و دقیقاً از همین در، فوتر ماه‌ها یک جزیره‌ی ۱۱۴۰ پیکسلی
+        #    وسط صفحه بود: روی پهنای ۱۶۰۰ از x=230 شروع می‌شد.
+        #    ⚠️ با getBoundingClientRect اندازه بگیر، نه از روی اسکرین‌شات —
+        #    اسکرین‌شاتِ full_page موقعیتِ عناصرِ fixed را وسط صفحه دروغ می‌گوید.
+        #    ⚠️ و شرطِ محتوا روی عددِ ۱۱۰۰ پین شده، نه «باریک‌تر از نوار»: با
+        #    شرطِ شل، محتوا تا ۱۴۰۰ پیکسل کش می‌آمد و باز هم از نگهبان رد می‌شد.
+        geo = await footpg.evaluate("""() => {
+            const vw = document.documentElement.clientWidth;
+            const f = document.querySelector("footer").getBoundingClientRect();
+            const g = document.querySelector("footer .footGrid").getBoundingClientRect();
+            const bw = parseFloat(getComputedStyle(document.querySelector("footer"))
+                .borderTopWidth);
+            const leftGap = g.left - f.left, rightGap = f.right - g.right;
+            return {
+                vw, bandW: f.width, bandLeft: f.left, contentW: g.width,
+                borderW: bw, centred: Math.abs(leftGap - rightGap) <= 1,
+            };
+        }""")
+        print("[footer] band=%.0fpx viewport=%.0fpx content=%.0fpx centred=%s"
+              % (geo["bandW"], geo["vw"], geo["contentW"], geo["centred"]))
+        assert abs(geo["bandW"] - geo["vw"]) <= 1, (
+            "the footer band is not full-bleed: width=%.1fpx but viewport clientWidth=%.1fpx"
+            % (geo["bandW"], geo["vw"]))
+        assert abs(geo["bandLeft"]) <= 1, (
+            "the footer's left edge is not at 0: left=%.1fpx" % geo["bandLeft"])
+        assert abs(geo["contentW"] - 1100) <= 2, (
+            "the footer content (.footGrid) should stay pinned at ~1100px regardless of the "
+            "band width, but measures %.1fpx — the text now stretches toward the edge of the "
+            "screen instead of keeping its own max-width" % geo["contentW"])
+        assert geo["centred"], (
+            ".footGrid is not horizontally centred inside the footer band")
+        assert geo["borderW"] > 0, (
+            "the footer has no visible border-top separating it from the page")
+
         # ۵. واقعاً خواناست — فاصله‌ی ردیف‌ها و اندازه‌ی متن، نه فقط ستون‌بندی
         rhythm = await footpg.evaluate("""() => {
             const col = [...document.querySelectorAll("footer .footCol")]
