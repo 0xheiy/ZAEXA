@@ -477,7 +477,12 @@ export default {
          ریخته می‌شود — وگرنه خودِ همین شرط بی‌فایده می‌شد: هر کاربرِ آخرِ
          سقف باز هم یک بار به CoinGecko می‌زد. */
       const metaPromise = withinLimit ? ogFetchMeta(addr, env) : null;
-      const res = await env.ASSETS.fetch(new Request(new URL("/", url), request));
+      /* ⚠️ «/app» نه «/». از روزی که صفحه‌ی معرفی روی ریشه نشست، «/» دیگر
+         اپ نیست. اگر این خط روی «/» بماند، هر لینکِ /t/<آدرس> صفحه‌ی
+         معرفی را باز می‌کند و اپ هرگز بالا نمی‌آید — و چون ۲۰۰ برمی‌گردد،
+         هیچ خطایی هم دیده نمی‌شود. بدونِ پسوند، به همان دلیلِ زیر: /app.html
+         یک ۳۰۷ به /app می‌دهد و آن ریدایرکت مسیر را جا می‌گذارد. */
+      const res = await env.ASSETS.fetch(new Request(new URL("/app", url), request));
       return withinLimit ? injectOg(res, url, addr, metaPromise) : res;
     }
     // بقیه‌ی سایت دست‌نخورده از فایل‌های ثابت می‌آید.

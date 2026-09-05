@@ -229,6 +229,18 @@ def check_asset_cache_headers():
         "with a new hash in its name would need someone to remember to edit this line by "
         "hand: %s" % build_line.strip())
 
+    # از روزی که صفحه‌ی معرفی درِ ورودی شد، آدرس‌ها و نامِ فایل‌ها یکی نیستند:
+    # web/index.html روی /app سرو می‌شود و web/landing.html روی /. اگر کسی این
+    # خط را ساده کند، یا اپ ناپدید می‌شود یا صفحه‌ی معرفی هرگز منتشر نمی‌شود —
+    # و هیچ‌کدام خطا نمی‌دهند، فقط سایت عوض می‌شود.
+    assert "_site/app.html" in build_line, (
+        "the documented Build command no longer puts the app at _site/app.html, so "
+        "zaexa.com/app would 404 while every link on the landing page points there: %s"
+        % build_line.strip())
+    assert "web/landing.html" in build_line and "_site/index.html" in build_line, (
+        "the documented Build command no longer copies web/landing.html to _site/index.html, "
+        "so the site root would fall back to whatever else lands there: %s" % build_line.strip())
+
     print("[cache] vendor bundles are content-addressed and immutable: %s (max-age=%s)"
           % (", ".join(js_files), mage.group(1)))
 
@@ -782,6 +794,50 @@ async def check_real_page_from_disk(pw):
     print("[file://] the real page starts from disk — ethers loaded, no integrity block")
 
 
+
+def check_landing_page():
+    """صفحه‌ی معرفی از این پس درِ ورودیِ سایت است و هیچ‌چیز تا امروز نمی‌سنجیدش.
+
+    سه چیزی که اگر بشکنند بی‌صدا می‌شکنند: درخواستِ بیرونی (که روی سایتی با
+    شعارِ «runs entirely in your browser» یک تناقض است)، فونت‌های جاسازی‌شده
+    (که اگر از فایل بیفتند، تایپوگرافی بی‌صدا به فونتِ سیستم می‌افتد)، و تگ‌های
+    og (که نبودشان فقط وقتی معلوم می‌شود که لینک جایی به‌اشتراک گذاشته شده).
+    """
+    path = os.path.join(HERE, "..", "landing.html")
+    assert os.path.exists(path), (
+        "web/landing.html is gone, but wrangler.toml still documents copying it to "
+        "_site/index.html — the site root would go missing on the next deploy")
+    src = open(path, encoding="utf-8").read()
+
+    allowed = {"https://x.com/zaexadex", "https://github.com/0xheiy/ZAEXA",
+               "https://www.geckoterminal.com", "https://zaexa.com/",
+               "https://zaexa.com/og.png?v=4"}
+    refs = set(re.findall(r'(?:src|href)="(https?://[^"]*)"', src))
+    stray = sorted(r for r in refs if r not in allowed)
+    assert not stray, (
+        "web/landing.html loads or links to something outside the allowed set: %s. The page "
+        "is meant to make zero third-party requests." % stray)
+
+    faces = re.findall(r'src:url\("data:font/woff2;base64,([^"]+)"\)', src)
+    assert len(faces) == 2, (
+        "web/landing.html should embed exactly 2 woff2 fonts as data URIs, found %d — a "
+        "dropped font falls back to the system face with no error anywhere" % len(faces))
+    for i, b in enumerate(faces, 1):
+        assert len(b) > 10000, (
+            "embedded font %d in web/landing.html is only %d chars of base64, which means it "
+            "was truncated somewhere" % (i, len(b)))
+
+    og = re.findall(r'<meta data-og [^>]*>', src)
+    assert len(og) >= 8, (
+        "web/landing.html carries only %d data-og tags. It is the page every shared zaexa.com "
+        "link resolves to, so a bare preview is the first thing anyone sees." % len(og))
+    assert 'content="https://zaexa.com/"' in src, (
+        "web/landing.html has no og:url pointing at the site root")
+
+    print("[landing] %d bytes, %d embedded fonts, %d og tags, %d external links (all allowed)"
+          % (len(src), len(faces), len(og), len(refs)))
+
+
 check_no_remote_code()
 check_gt_proxy_worker()
 check_asset_cache_headers()
@@ -792,6 +848,7 @@ check_og_tags()
 check_brand_palette()
 check_one_executor_address()
 check_dex_parity()
+check_landing_page()
 
 async def main():
     errors = []
