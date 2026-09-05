@@ -9,6 +9,8 @@
 import worker from "./index.js";
 import { createHash } from "node:crypto";
 import { OG_PNG_ETAG } from "./og-image.js";
+import fs from "node:fs";
+import { createRequire } from "node:module";
 
 let fails = 0;
 function ok(cond, what) {
@@ -409,7 +411,8 @@ ok(res.status === 200, "index.html must still be served");
    اینکه Worker چه چیزی به بالادست می‌فرستد و چه وقت هیچ نمی‌فرستد. */
 {
   const og = await import("./og.js");
-  const { OG_NETWORK, ogFetchMeta } = await import("./index.js");
+  const { OG_NETWORK, ogFetchMeta, VD_CACHE_HOST, PATH_OK, UPSTREAM_FREE, UPSTREAM_KEYED } =
+    await import("./index.js");
 
   /* گریز: هر پنج نویسه، نه فقط `<`. یک `"` تنها کافی است که نام توکن از
      مقدار ویژگی بیرون بزند و یک تگ تازه باز کند. */
@@ -440,6 +443,47 @@ ok(res.status === 200, "index.html must still be served");
     ok(og.pickTokenMeta(bad) === null,
        "pickTokenMeta should be null for " + JSON.stringify(bad));
 
+  /* decimals و priceUsd — فقط با نوع و بازه‌ی درست پذیرفته می‌شوند، نه با
+     چیزی که می‌شود به عدد تبدیلش کرد؛ یک priceUsd رشته‌ای که بی‌سروصدا
+     Number() می‌شد دقیقاً همان راهی است که یک شکلِ غیرمنتظر از بالادست
+     «قیمتِ معتبر» جا می‌زند. بقیه‌ی میدان‌ها (نام، نماد، نقدینگی) باید
+     دست‌نخورده بمانند — یک قیمتِ بدشکل نباید آن‌ها را هم با خودش ببرد. */
+  {
+    const attrsOk = { name: "USD Coin", symbol: "USDC", total_reserve_in_usd: "1",
+                      decimals: 6, price_usd: 1.0001 };
+    const good = og.pickTokenMeta({ data: { attributes: attrsOk } });
+    ok(good && good.decimals === 6 && good.priceUsd === 1.0001 &&
+       good.name === "USD Coin" && good.symbol === "USDC",
+       "pickTokenMeta lost decimals/priceUsd (or something else) for a valid shape: " +
+       JSON.stringify(good));
+
+    const BAD_PRICE = [
+      ["a string price", { ...attrsOk, price_usd: "1.0001" }],
+      ["a negative price", { ...attrsOk, price_usd: -1 }],
+      ["a zero price", { ...attrsOk, price_usd: 0 }],
+      ["a NaN price", { ...attrsOk, price_usd: NaN }],
+    ];
+    for (const [label, attrs] of BAD_PRICE) {
+      const m = og.pickTokenMeta({ data: { attributes: attrs } });
+      ok(m && m.priceUsd === null && m.decimals === 6,
+         "priceUsd should be null (decimals unaffected) for " + label + ": " + JSON.stringify(m));
+    }
+
+    const BAD_DECIMALS = [
+      ["decimals 37", { ...attrsOk, decimals: 37 }],
+      ["decimals -1", { ...attrsOk, decimals: -1 }],
+      ["decimals given as the string \"18\"", { ...attrsOk, decimals: "18" }],
+      ["non-integer decimals", { ...attrsOk, decimals: 1.5 }],
+    ];
+    for (const [label, attrs] of BAD_DECIMALS) {
+      const m = og.pickTokenMeta({ data: { attributes: attrs } });
+      ok(m && m.decimals === null && m.priceUsd === 1.0001,
+         "decimals should be null (priceUsd unaffected) for " + label + ": " + JSON.stringify(m));
+    }
+    console.log("[pickTokenMeta] decimals/priceUsd carried through for a valid shape, null for "
+      + "each bad one, without disturbing name/symbol/liquidity");
+  }
+
   /* عنوان — چهار حالت، و هیچ‌کدام نباید «undefined» بدهد. */
   ok(og.ogTitle(null) === "Token on Base — Zaexa", "no data should give a generic title");
   ok(og.ogTitle({ symbol: "USDC", name: "USD Coin" }) === "USDC · USD Coin — Zaexa",
@@ -459,6 +503,34 @@ ok(res.status === 200, "index.html must still be served");
   ok(!dBare.includes("undefined") && !dBare.includes("null") && !dBare.includes("$—"),
      "the description leaked a placeholder: " + dBare);
 
+  /* verdict در توضیح — جمله‌ی verdict همیشه *اول* می‌آید چون تلگرام دم را
+     می‌بُرد؛ رشته‌ی «امروز» زیر دست‌نویس شده، نه بازمحاسبه از خودِ تابع،
+     وگرنه این probe هیچ‌چیزی را اثبات نمی‌کرد. */
+  const VERDICT_META = { liquidity: "$1.00M", vol24: "$2.00M" };
+  const TODAY_DESC = "Base · Liquidity $1.00M · Vol 24h $2.00M. Check whether you can sell it " +
+    "back before you buy — exit simulation and risk flags, no wallet needed.";
+  ok(og.ogDescription(VERDICT_META) === TODAY_DESC,
+     "ogDescription called without a second argument at all must be byte-for-byte the old "
+     + "string: " + og.ogDescription(VERDICT_META));
+  ok(og.ogDescription(VERDICT_META, undefined) === TODAY_DESC,
+     "ogDescription(meta, undefined) must be byte-for-byte the old string: " +
+     og.ogDescription(VERDICT_META, undefined));
+  ok(og.ogDescription(VERDICT_META, "who knows") === TODAY_DESC,
+     "a junk verdict value must not change the description at all: " +
+     og.ogDescription(VERDICT_META, "who knows"));
+  ok(og.ogDescription(VERDICT_META, "sell") === "A sell route was quoted. " + TODAY_DESC,
+     "sell verdict sentence missing or misworded: " + og.ogDescription(VERDICT_META, "sell"));
+  ok(og.ogDescription(VERDICT_META, "nosell") ===
+     "No sell route quoted — you may not be able to exit. " + TODAY_DESC,
+     "nosell verdict sentence missing or misworded: " + og.ogDescription(VERDICT_META, "nosell"));
+  ok(og.ogDescription(VERDICT_META, "sell").indexOf("A sell route was quoted.") === 0,
+     "the sell sentence must be the very first thing in the description — Telegram cuts the tail");
+  ok(og.ogDescription(VERDICT_META, "nosell").indexOf("No sell route quoted") === 0,
+     "the nosell sentence must be the very first thing in the description — Telegram cuts the tail");
+  console.log("[og description] verdict sentence goes first, wording is exact (\"quoted\", not "
+    + "\"simulated\"/\"safe\"), and an absent or junk verdict leaves the string byte-for-byte "
+    + "unchanged");
+
   /* تگ‌ها */
   const addr = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913";
   const tags = og.ogTags({ symbol: "USDC", name: "USD Coin", liquidity: "$1.00M" },
@@ -476,9 +548,39 @@ ok(res.status === 200, "index.html must still be served");
                          addr, "https://zaexa.com");
   ok(!evil.includes("<script>"), "a hostile token name escaped the attribute");
 
+  /* ogTags با همان سه آرگومانِ همیشگی (بدونِ verdict) نباید هیچ جمله‌ی
+     verdict‌ای اضافه کند — کالر قدیمی که این آرگومان تازه را نمی‌فرستد
+     باید بایت‌به‌بایت همان چیزی را ببیند که امروز می‌بیند. */
+  ok(!tags.includes("sell route") && !tags.includes("No sell route"),
+     "ogTags called with three arguments (no verdict) carries a verdict sentence anyway: " + tags);
+
   /* Worker → بالادست: کدام آدرس، و با کلید کجا می‌رود.
      ⚠️ اگر روزی شبکه‌ی دوم اضافه شد، این ثابت باید از مسیر بیاید. */
   ok(OG_NETWORK === "base", "OG_NETWORK is no longer base — the card would ask the wrong chain");
+
+  /* جداییِ کلیدِ کشِ verdict — نباید هیچ‌وقت زیرِ کلیدی بنشیند که proxyGt هم
+     می‌شناسد. اگر VD_CACHE_HOST با یکی از دو بالادستِ /gt یکی یا هم‌پیشوند
+     می‌شد، پاسخِ بدونِ CORSِ ما می‌توانست زیرِ همان کلید بنشیند و فراخوانیِ
+     بعدیِ /gt از داخلِ مرورگر با خطای CORS بشکند — دقیقاً همان چیزی که این
+     میزبانِ جداگانه قرار است ازش دور بماند. */
+  for (const up of [UPSTREAM_FREE, UPSTREAM_KEYED]) {
+    const upHost = new URL(up).host; // مقایسه روی *میزبان*، نه روی رشته‌ی کاملِ URL —
+    // VD_CACHE_HOST خودش بدونِ scheme است، پس مقایسه‌ی رشته‌ای مستقیم با
+    // "https://…" هرگز برابر نمی‌شد و این probe چیزی را نمی‌سنجید.
+    ok(VD_CACHE_HOST !== upHost, "VD_CACHE_HOST equals an upstream host: " + VD_CACHE_HOST);
+    ok(!upHost.startsWith(VD_CACHE_HOST) && !VD_CACHE_HOST.startsWith(upHost),
+       "VD_CACHE_HOST is a prefix of (or is prefixed by) an upstream host: " +
+       VD_CACHE_HOST + " vs " + upHost);
+  }
+  // کلیدِ کشِ verdict هرگز شکلی که PATH_OK می‌پذیرد ندارد — با میزبانِ جدا
+  // این خودش امن است، ولی صریح سنجیده می‌شود تا هرکسی که این دو را روزی
+  // زیرِ یک host مشترک ادغام کرد بلافاصله همین‌جا رد شود.
+  for (const a of ["0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913", "0xAbCdEf0000000000000000000000000000dEaD"]) {
+    const rest = "v1/" + OG_NETWORK + "/" + a.toLowerCase();
+    ok(!PATH_OK.test(rest), "the verdict cache key's path shape is accepted by PATH_OK: " + rest);
+  }
+  console.log("[verdict cache isolation] VD_CACHE_HOST shares no prefix with either /gt "
+    + "upstream, and its key shape never matches PATH_OK");
   sent = []; sentHeaders = [];
   reply = json({ data: { attributes: { name: "USD Coin", symbol: "USDC",
                                        total_reserve_in_usd: "12400000" } } });
@@ -604,10 +706,400 @@ ok(res.status === 200, "index.html must still be served");
     + rlHits.size + " after a 6000-IP flood");
 }
 
+/* ---- ۱۲. verdict.js — «آیا هنوز جایی این توکن به فروش می‌رسد؟» ----
+   ماژول pure است و هنوز به هیچ Workerی وصل نشده؛ فقط خودِ ماژول این‌جا
+   سنجیده می‌شود.
+
+   کِکاک۲۵۶ در Node بدونِ کتابخانه نیست، پس سلکتورها و چک‌سام‌ها را با
+   ethersِ وندورشده‌ی خودِ مخزن (web/ethers.umd.min.*.js) مستقل بازمحاسبه
+   می‌کنیم. نامِ فایل هرباز که باندل ساخته شود عوض می‌شود، پس با
+   fs.readdirSync پیدایش می‌کنیم، نه هاردکدِ نام.
+
+   ⚠️ این مخزن ریشه‌اش "type":"module" دارد، پس این .js با require معمولی
+   ESM دیده می‌شود و باندلِ UMD چیزی به‌عنوان named export نمی‌دهد — ولی
+   همان باندل، چون require را ندید، شاخه‌ی fallbackِ خودش را می‌رود و
+   globalThis.ethers را پر می‌کند؛ همان‌جا می‌خوانیمش. */
+const vd = await import("./verdict.js");
+const webDir = new URL("../web/", import.meta.url);
+const ethersFile = fs.readdirSync(webDir).find((f) => /^ethers\.umd\.min\..*\.js$/.test(f));
+if (!ethersFile) throw new Error("could not find the vendored ethers bundle under web/");
+createRequire(import.meta.url)(new URL(ethersFile, webDir).pathname);
+const ethers = globalThis.ethers;
+
+/* --- ۱۲.۱ نگهبانِ سلکتور --- هرچهار سلکتور از رویِ امضای کاملش با
+   ethers.id بازمحاسبه می‌شود؛ یک سلکتورِ دستیِ بی‌تست دقیقاً همان کلاس
+   باگی است که این مخزن را یک بار گزیده. */
+{
+  const sigs = {
+    SEL_CL_UINT24: "quoteExactInputSingle((address,address,uint256,uint24,uint160))",
+    SEL_CL_INT24: "quoteExactInputSingle((address,address,uint256,int24,uint160))",
+    SEL_SOLIDLY: "getAmountsOut(uint256,(address,address,bool,address)[])",
+    SEL_V2: "getAmountsOut(uint256,address[])",
+  };
+  for (const [name, sig] of Object.entries(sigs)) {
+    const want = ethers.id(sig).slice(0, 10);
+    ok(vd[name] === want,
+      name + " is stale: file says " + vd[name] + " but \"" + sig + "\" hashes to " + want);
+  }
+}
+
+/* --- ۱۲.۲ نگهبانِ چک‌سام --- این مخزن یک‌بار با یک حرفِ کوچکِ اشتباه در
+   یک آدرس شکسته بود؛ هر آدرسِ جدولِ صرافی‌ها + WETH + USDC از رویِ
+   ethers.getAddress عوض نمی‌شود. */
+{
+  const addrs = [["WETH_ADDR", vd.WETH_ADDR], ["USDC_ADDR", vd.USDC_ADDR]];
+  for (const row of vd.VD_VENUES) {
+    addrs.push([row.id + ".to", row.to]);
+    if (row.factory) addrs.push([row.id + ".factory", row.factory]);
+  }
+  ok(addrs.length === 2 + vd.VD_VENUES.length + 1, "expected exactly one factory address (aerodrome)");
+  for (const [label, a] of addrs) {
+    let checksummed;
+    try { checksummed = ethers.getAddress(a); } catch { checksummed = null; }
+    ok(checksummed === a, "address is not correctly checksummed for " + label + ": " + a);
+  }
+}
+
+/* --- ۱۲.۳ طلای رمزگذاری --- کالدیتای دست‌ساز باید بایت‌به‌بایت با
+   ethers.Interface یکی باشد؛ این چیزی است که خودِ رمزگذارِ دستی را اثبات
+   می‌کند، نه فقط شکل‌های ایستا. */
+{
+  const TOKEN = "0x1111111111111111111111111111111111111111";
+  const amt = 123456789n;
+
+  const ifaceU = new ethers.Interface([
+    "function quoteExactInputSingle((address,address,uint256,uint24,uint160)) returns (uint256,uint160,uint32,uint256)"]);
+  const ifaceI = new ethers.Interface([
+    "function quoteExactInputSingle((address,address,uint256,int24,uint160)) returns (uint256,uint160,uint32,uint256)"]);
+  const ifaceV2 = new ethers.Interface(["function getAmountsOut(uint256,address[]) returns (uint256[])"]);
+  const ifaceSolidly = new ethers.Interface([
+    "function getAmountsOut(uint256,(address,address,bool,address)[]) returns (uint256[])"]);
+
+  const probe = vd.buildProbe(TOKEN, vd.WETH_ADDR, amt);
+  ok(probe.length === 16, "buildProbe should produce exactly 16 calls (3+3+5+2+1+1+1), got " + probe.length);
+
+  for (const p of probe) {
+    const row = vd.VD_VENUES.find((r) => r.id === p.id);
+    let want;
+    if (row.kind === "CL_UINT24") {
+      want = ifaceU.encodeFunctionData("quoteExactInputSingle", [[TOKEN, vd.WETH_ADDR, amt, p.key, 0]]);
+    } else if (row.kind === "CL_INT24") {
+      want = ifaceI.encodeFunctionData("quoteExactInputSingle", [[TOKEN, vd.WETH_ADDR, amt, p.key, 0]]);
+    } else if (row.kind === "SOLIDLY") {
+      want = ifaceSolidly.encodeFunctionData("getAmountsOut",
+        [amt, [[TOKEN, vd.WETH_ADDR, p.key, row.factory]]]);
+    } else if (row.kind === "V2") {
+      want = ifaceV2.encodeFunctionData("getAmountsOut", [amt, [TOKEN, vd.WETH_ADDR]]);
+    }
+    ok(p.data === want, row.kind + " encoding mismatch for " + p.id + "/" + p.key + ":\n  got  " +
+      p.data + "\n  want " + want);
+    ok(p.to === row.to, "wrong contract address for " + p.id);
+  }
+
+  // خودِ کاناری هم همین امضا را می‌گیرد، با مقادیرِ ثابتش
+  const canary = vd.canaryCall();
+  const wantCanary = ifaceU.encodeFunctionData("quoteExactInputSingle",
+    [[vd.WETH_ADDR, vd.USDC_ADDR, 10000000000000000n, 500, 0]]);
+  ok(canary.data === wantCanary, "canaryCall encoding mismatch:\n  got  " + canary.data +
+    "\n  want " + wantCanary);
+  ok(canary.to === vd.VD_VENUES[0].to, "canaryCall must hit the uniswap-v3 quoter, the pool's liveness "
+    + "reference, not some other contract");
+}
+
+/* --- ۱۲.۴ رمزگشایی --- */
+{
+  const w = (n) => BigInt(n).toString(16).padStart(64, "0");
+  const mkStatic4 = (amountOut) => "0x" + w(amountOut) + w(0) + w(0) + w(0);
+
+  const ifaceArr = new ethers.Interface(["function f() returns (uint256[])"]);
+  const arr3 = ifaceArr.encodeFunctionResult("f", [[10n, 20n, 30n]]);
+  ok(vd.decodeQuote("V2", arr3) === 30n,
+    "decodeQuote must take the LAST element of a uint256[], not assume exactly two entries");
+  ok(vd.decodeQuote("SOLIDLY", arr3) === 30n, "decodeQuote(SOLIDLY) must take the last element too");
+
+  ok(vd.decodeQuote("V2", "0x") === null, "decodeQuote must be null for an empty \"0x\" array return");
+  ok(vd.decodeQuote("CL_UINT24", "0x") === null, "decodeQuote must be null for an empty \"0x\" static return");
+
+  ok(vd.decodeQuote("V2", "0x1234") === null, "decodeQuote must be null for truncated garbage (array)");
+  ok(vd.decodeQuote("CL_UINT24", "0x1234") === null, "decodeQuote must be null for truncated garbage (static)");
+
+  const ifaceStatic = new ethers.Interface(["function g() returns (uint256,uint160,uint32,uint256)"]);
+  const staticRet = ifaceStatic.encodeFunctionResult("g", [777n, 5n, 6n, 8n]);
+  ok(vd.decodeQuote("CL_UINT24", staticRet) === 777n,
+    "decodeQuote(CL_UINT24) must take the FIRST word (amountOut), not the last");
+  ok(vd.decodeQuote("CL_INT24", staticRet) === 777n, "decodeQuote(CL_INT24) must take the first word too");
+}
+
+/* --- ۱۲.۵ verdictFrom --- قلبِ کار؛ یک probe به‌ازای هر قاعده. */
+{
+  const w = (n) => BigInt(n).toString(16).padStart(64, "0");
+  const mkStatic4 = (amountOut) => "0x" + w(amountOut) + w(0) + w(0) + w(0);
+  const mkArray = (vals) => "0x" + w(0x20) + w(vals.length) + vals.map(w).join("");
+  const aliveCanary = { result: mkStatic4(5) };
+
+  // الف) مثبت همیشه برنده است، هرچه‌ی دیگر هم اتفاق افتاده باشد
+  ok(vd.verdictFrom({
+    canary: aliveCanary,
+    items: [{ kind: "CL_UINT24", error: { code: 3 } }, { kind: "V2", result: mkArray([0n, 42n]) }],
+  }) === "sell", "a single positive item must win over reverts elsewhere");
+
+  // ب) کاناریِ مرده → نامعلوم، حتی اگر همه رد شده باشند
+  ok(vd.verdictFrom({
+    canary: { error: { code: 3 } },
+    items: [{ kind: "V2", error: { code: 3 } }, { kind: "CL_UINT24", error: { code: -32000 } }],
+  }) === null, "a dead canary must make the verdict unknown, even when every item reverted — "
+    + "we never call a token unsellable on an endpoint that could not even price WETH→USDC");
+
+  // ج) همه ریوِرت + کاناریِ زنده → nosell
+  ok(vd.verdictFrom({
+    canary: aliveCanary,
+    items: [
+      { kind: "CL_UINT24", error: { code: 3 } },
+      { kind: "CL_INT24", error: { code: -32000 } },
+      { kind: "V2", result: "0x" },
+      { kind: "SOLIDLY", result: mkArray([0n]) },
+    ],
+  }) === "nosell", "all-proven-negative items with a live canary must give nosell");
+
+  // د) یک کدِ خطای دیگر (نه ۳، نه -۳۲۰۰۰) میانِ ریوِرت‌ها → نامعلوم
+  ok(vd.verdictFrom({
+    canary: aliveCanary,
+    items: [{ kind: "CL_UINT24", error: { code: 3 } }, { kind: "V2", error: { code: -32603 } }],
+  }) === null, "an error code other than 3/-32000 is not a proven negative — one such item must "
+    + "make the whole verdict unknown, not nosell");
+
+  // ه) "0x" خودش به‌تنهایی اثباتی است
+  ok(vd.verdictFrom({ canary: aliveCanary, items: [{ kind: "V2", result: "0x" }] }) === "nosell",
+    "an empty \"0x\" return must count as a proven negative on its own");
+
+  // و) صفرِ رمزگشایی‌شده هم اثباتی است
+  ok(vd.verdictFrom({ canary: aliveCanary, items: [{ kind: "CL_UINT24", result: mkStatic4(0) }] }) === "nosell",
+    "a decoded zero must count as a proven negative on its own");
+
+  // ز) فهرستِ پروبِ خالی، حتی با کاناریِ زنده، چیزی را اثبات نمی‌کند —
+  // هیچ صرافی‌ای پرسیده نشده، پس نه sell است نه nosell.
+  ok(vd.verdictFrom({ canary: aliveCanary, items: [] }) === null,
+    "an empty probe list must be unknown, not nosell — nothing was actually asked");
+  ok(vd.verdictFrom({ canary: aliveCanary }) === null,
+    "a missing items array (defaults to empty) must also be unknown, not nosell");
+
+  console.log("[verdict rules] positive wins; dead canary -> unknown; all-proven-negative -> "
+    + "nosell; an unproven error -> unknown; \"0x\" and zero each proven on their own; an empty "
+    + "probe list -> unknown");
+}
+
+/* --- ۱۲.۶ sellAmountFrom --- */
+{
+  ok(vd.sellAmountFrom(2000, 18) === 5n * 10n ** 16n,
+    "$100 of a token priced at $2000 with 18 decimals should be 0.05 tokens raw, got " +
+    vd.sellAmountFrom(2000, 18));
+  ok(vd.sellAmountFrom(1, 6) === 100000000n,
+    "$100 of a $1 token with 6 decimals should be 100e6 raw, got " + vd.sellAmountFrom(1, 6));
+  ok(vd.sellAmountFrom("2000", 18) === 5n * 10n ** 16n, "sellAmountFrom must accept a price given as a string");
+  ok(vd.sellAmountFrom(0, 18) === null, "a zero price must give null, not zero");
+  ok(vd.sellAmountFrom(null, 18) === null, "a missing price must give null — \"I don't know\" must never act like \"no\"");
+  ok(vd.sellAmountFrom(undefined, 18) === null, "an undefined price must give null");
+  ok(vd.sellAmountFrom(NaN, 18) === null, "a NaN price must give null");
+  ok(vd.sellAmountFrom(-5, 18) === null, "a negative price must give null");
+  ok(vd.sellAmountFrom("abc", 18) === null, "a non-numeric price string must give null");
+  ok(vd.sellAmountFrom(2000, 37) === null, "decimals above 36 must give null");
+  ok(vd.sellAmountFrom(2000, -1) === null, "negative decimals must give null");
+  ok(vd.sellAmountFrom(2000, 1.5) === null, "non-integer decimals must give null");
+  ok(vd.sellAmountFrom(1e30, 0) === null, "a price so high the notional floors to zero raw units must "
+    + "give null, not zero");
+  console.log("[sellAmountFrom] normal 18/6-decimal cases match hand-computed integers; every bad "
+    + "input (price <=0/NaN/missing/non-numeric, decimals outside 0..36, floors-to-zero) gives null");
+}
+
+/* --- ۱۲.۷ fetchVerdict --- با fetchImpl جعلی، بدونِ هیچ شبکه‌ای. */
+{
+  const w = (n) => BigInt(n).toString(16).padStart(64, "0");
+  const mkStatic4 = (amountOut) => "0x" + w(amountOut) + w(0) + w(0) + w(0);
+  const jsonRes = (body) => new Response(JSON.stringify(body), {
+    status: 200, headers: { "content-type": "application/json" },
+  });
+  const TOKEN = "0x2222222222222222222222222222222222222222";
+  const meta = { decimals: 18, priceUsd: 2000 };
+  const usdcHexLower = vd.USDC_ADDR.slice(2).toLowerCase();
+
+  // الف) پاسخِ به‌هم‌ریخته: کاناری آخرِ آرایه، آیتم‌ها هم برعکسِ ترتیبِ
+  // درخواست — اگر تطبیق روی موقعیت به‌جای id بود، اینجا قطعاً به‌هم می‌ریخت،
+  // چون شکلِ رمزگشاییِ کاناری با آیتم‌ها یکی نیست.
+  {
+    const fetchImpl = async (url, init) => {
+      const reqs = JSON.parse(init.body);
+      const body = reqs.map((r) => r.id === 0
+        ? { id: 0, result: mkStatic4(5) }
+        : { id: r.id, result: r.id === 1 ? mkStatic4(999) : "0x" });
+      body.reverse(); // ترتیبِ آرایه‌ی پاسخ را عمداً برعکس می‌کنیم
+      return jsonRes(body);
+    };
+    const res = await vd.fetchVerdict(TOKEN, meta, { fetchImpl, rpcs: ["https://rpc.example"] });
+    ok(res === "sell", "a reordered batch must still be matched by id, not by array position "
+      + "(got " + res + ")");
+  }
+
+  // ب) مرحله‌ی A نامعلوم/nosell → مرحله‌ی B مثبت → نتیجه‌ی نهایی sell
+  {
+    let calls = 0;
+    const fetchImpl = async (url, init) => {
+      calls++;
+      const reqs = JSON.parse(init.body);
+      const isStageB = reqs.some((r) => r.id >= 1 && r.params[0].data.includes(usdcHexLower));
+      const body = reqs.map((r) => {
+        if (r.id === 0) return { id: 0, result: mkStatic4(5) };
+        if (!isStageB) return { id: r.id, result: "0x" };
+        return { id: r.id, result: r.id === 1 ? mkStatic4(999) : "0x" };
+      });
+      return jsonRes(body);
+    };
+    const res = await vd.fetchVerdict(TOKEN, meta, { fetchImpl, rpcs: ["https://rpc.example"] });
+    ok(res === "sell", "stage A nosell followed by a stage B positive must return sell (got " + res + ")");
+    ok(calls === 2, "stage B must only run once stage A came back nosell (2 fetch calls expected, got " + calls + ")");
+  }
+
+  // ج) اندپوینتِ اول پرتاب می‌کند → اندپوینتِ دوم جواب می‌دهد
+  {
+    let calls = 0;
+    const rpcs = ["https://rpc-bad.example", "https://rpc-good.example"];
+    const fetchImpl = async (url, init) => {
+      calls++;
+      if (url === rpcs[0]) throw new Error("network is down");
+      const reqs = JSON.parse(init.body);
+      const body = reqs.map((r) => r.id === 0 ? { id: 0, result: mkStatic4(5) } : { id: r.id, result: "0x" });
+      return jsonRes(body);
+    };
+    const res = await vd.fetchVerdict(TOKEN, meta, { fetchImpl, rpcs });
+    ok(res === "nosell", "a throw on the first endpoint must not sink the whole call — the second "
+      + "endpoint should still be tried (got " + res + ")");
+    ok(calls === 3, "expected 1 (failed) + 2 (stage A + stage B on the second endpoint) = 3 calls, got " + calls);
+  }
+
+  // د) مهلت گذشته → نامعلوم، بدونِ حتی یک فراخوانیِ شبکه
+  {
+    let calls = 0;
+    const fetchImpl = async () => { calls++; return jsonRes([]); };
+    let res = await vd.fetchVerdict(TOKEN, meta, {
+      fetchImpl, now: () => 10_000, deadlineAt: 5_000, rpcs: ["https://rpc.example"],
+    });
+    ok(res === null && calls === 0, "past the deadline fetchVerdict must return null without any "
+      + "fetch call (got " + res + ", " + calls + " calls)");
+
+    res = await vd.fetchVerdict(TOKEN, meta, {
+      fetchImpl, now: () => 9_700, deadlineAt: 10_000, rpcs: ["https://rpc.example"],
+    }); // فقط ۳۰۰ میلی‌ثانیه مانده، کمتر از ۴۰۰
+    ok(res === null && calls === 0, "fewer than 400ms left must also stop before any fetch "
+      + "(got " + res + ", " + calls + " calls)");
+  }
+
+  // ه) پاسخِ غیر-۲۰۰ روی هر دو اندپوینت → نامعلوم
+  {
+    let calls = 0;
+    const fetchImpl = async () => { calls++; return new Response("boom", { status: 500 }); };
+    const res = await vd.fetchVerdict(TOKEN, meta, {
+      fetchImpl, rpcs: ["https://rpc-a.example", "https://rpc-b.example"],
+    });
+    ok(res === null, "a non-200 upstream response must give null (got " + res + ")");
+    ok(calls === 2, "a non-200 must try the second endpoint too, and stop at 2 (got " + calls + " calls)");
+  }
+
+  // و) sellAmountFrom(null) → بدونِ حتی یک فراخوانی
+  {
+    let calls = 0;
+    const fetchImpl = async () => { calls++; return jsonRes([]); };
+    const res = await vd.fetchVerdict(TOKEN, { decimals: 18, priceUsd: null }, { fetchImpl, rpcs: ["https://rpc.example"] });
+    ok(res === null && calls === 0, "an unpriceable token must return null before any fetch "
+      + "(got " + res + ", " + calls + " calls)");
+  }
+
+  console.log("[fetchVerdict] id-matched batches, stage A->B escalation, endpoint failover "
+    + "(max 2), deadline enforced with zero calls, non-200 handled, unpriced tokens skip the "
+    + "network entirely — all against an injected fake, no real RPC involved");
+}
+
+/* ---- ۱۳. ogFetchVerdict — سیم‌کشیِ verdict داخل worker/index.js ----
+   برخلافِ fetchVerdict که خودش پارامتری است، ogFetchVerdict مستقیماً از
+   کشِ لبه و از globalThis.fetch استفاده می‌کند؛ اینجا هر دو را جعل می‌کنیم. */
+{
+  const { ogFetchVerdict } = await import("./index.js");
+  const w = (n) => BigInt(n).toString(16).padStart(64, "0");
+  const mkStatic4 = (amountOut) => "0x" + w(amountOut) + w(0) + w(0) + w(0);
+  const meta = { decimals: 18, priceUsd: 2000 };
+
+  // الف) بدونِ متادیتا حتی یک تلاش هم نمی‌کند
+  ok(await ogFetchVerdict("0x" + "1".repeat(40), null, Date.now() + 2000, {}, {}) === null,
+     "ogFetchVerdict without meta must return null with no work at all");
+
+  const shelf = new Map();
+  globalThis.caches = {
+    default: {
+      match: async (req) => { const v = shelf.get(req.url); return v ? v.clone() : undefined; },
+      put: async (req, r) => { shelf.set(req.url, r); },
+    },
+  };
+  const waited = [];
+  const ctx = { waitUntil: (p) => waited.push(p) };
+
+  // ب) میسِ کش → fetchVerdict واقعاً صدا زده می‌شود و نتیجه در کش می‌نشیند
+  const TOKEN_SELL = "0x" + "2".repeat(40);
+  let calls = 0;
+  globalThis.fetch = async (u, o) => {
+    calls++;
+    const reqs = JSON.parse(o.body);
+    const body = reqs.map((r) =>
+      r.id === 0 ? { id: 0, result: mkStatic4(5) } : { id: r.id, result: mkStatic4(999) });
+    return new Response(JSON.stringify(body), { status: 200, headers: { "content-type": "application/json" } });
+  };
+  let v = await ogFetchVerdict(TOKEN_SELL, meta, Date.now() + 2000, {}, ctx);
+  ok(v === "sell" && calls === 1,
+     "a cache miss must call fetchVerdict once and surface its verdict (got " + v + ", " + calls + " calls)");
+  await Promise.all(waited);
+  ok(shelf.size === 1, "a resolved verdict must be written to the edge cache");
+  for (const stashed of shelf.values()) {
+    ok(stashed.headers.get("cache-control") === "public, max-age=300",
+       "wrong cache lifetime for a cached verdict: " + stashed.headers.get("cache-control"));
+    const stored = JSON.parse(await stashed.clone().text());
+    ok(stored.verdict === "sell", "wrong verdict written to cache: " + JSON.stringify(stored));
+  }
+
+  // ج) هیت کش → بدونِ حتی یک فراخوانیِ تازه به fetchVerdict
+  calls = 0;
+  v = await ogFetchVerdict(TOKEN_SELL, meta, Date.now() + 2000, {}, ctx);
+  ok(v === "sell" && calls === 0,
+     "a cache hit must skip fetchVerdict entirely (calls=" + calls + ")");
+
+  // د) هرگز یک verdictِ نامعلوم (null) را کش نکن — یک تعلیقِ گذرا نباید ۵
+  // دقیقه‌ی خاموش شود.
+  const TOKEN_UNKNOWN = "0x" + "3".repeat(40);
+  globalThis.fetch = async () => new Response("boom", { status: 500 });
+  v = await ogFetchVerdict(TOKEN_UNKNOWN, meta, Date.now() + 2000, {}, ctx);
+  ok(v === null, "an unreachable rpc must give a null verdict, not a broken card: got " + v);
+  ok(shelf.size === 1, "A NULL VERDICT WAS WRITTEN TO THE CACHE — a transient RPC hiccup would "
+    + "silently degrade the card for 5 whole minutes");
+
+  // ه) مهلتِ deadlineAt باید واقعاً تا fetchVerdict برسد — یک مهلتِ گذشته
+  // باید بدونِ حتی یک فراخوانیِ شبکه null بدهد.
+  const TOKEN_LATE = "0x" + "4".repeat(40);
+  calls = 0;
+  globalThis.fetch = async () => { calls++; return new Response(JSON.stringify([]), { status: 200, headers: { "content-type": "application/json" } }); };
+  v = await ogFetchVerdict(TOKEN_LATE, meta, Date.now() - 1000, {}, ctx);
+  ok(v === null && calls === 0,
+     "ogFetchVerdict must pass deadlineAt through to fetchVerdict end to end — a past deadline "
+     + "should stop it before any network call (got " + v + ", " + calls + " calls)");
+
+  delete globalThis.caches;
+  console.log("[og verdict wiring] no-meta short-circuit; cache miss calls fetchVerdict once and "
+    + "writes the result; cache hit skips the network; an unknown verdict is never cached; "
+    + "deadlineAt reaches fetchVerdict end to end");
+}
+
 console.log(fails === 0
   ? "[gt proxy] worker ok — " + REAL.length + " real paths proxied, " + BAD.length +
     " refused without touching the network, 429 passes through with CORS\n" +
     "[events] /ev ok — only the four allowed fields are stored; ip, user-agent, " +
-    "referer and cookie never are"
+    "referer and cookie never are\n" +
+    "[verdict] worker/verdict.js ok — selectors and checksums independently verified, hand "
+    + "encoder matches ethers byte-for-byte, decode/verdict/sellAmountFrom/fetchVerdict all "
+    + "covered"
   : "[gt proxy] " + fails + " FAILURES");
 process.exit(fails === 0 ? 0 : 1);

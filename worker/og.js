@@ -55,16 +55,27 @@ export function ogBig(v) {
   return "$" + n.toFixed(0);
 }
 
-/* پاسخ GeckoTerminal → فقط چهار چیزی که لازم داریم.
-   هر شکل دیگری (خطا، بدنه‌ی خالی، آرایه به‌جای شیء) → null، نه شیء نصفه. */
+/* پاسخ GeckoTerminal → فقط چیزهایی که لازم داریم.
+   هر شکل دیگری (خطا، بدنه‌ی خالی، آرایه به‌جای شیء) → null، نه شیء نصفه.
+
+   ⚠️ decimals و priceUsd هر دو فقط وقتی پذیرفته می‌شوند که *نوعشان* درست
+   باشد، نه وقتی می‌شود آن‌ها را به عدد تبدیل کرد. یک priceUsd رشته‌ای که
+   بی‌سروصدا Number() می‌شد، دقیقاً همان راهی است که یک روز یک شکلِ غیرمنتظر
+   از بالادست را «قیمتِ معتبر» جا می‌زند؛ سخت‌گیری اینجا ارزانِ همیشگیِ این
+   ماژول است، نه محافظه‌کاریِ زیادی. */
 export function pickTokenMeta(body) {
   const a = body && body.data && !Array.isArray(body.data) && body.data.attributes;
   if (!a || typeof a !== "object") return null;
+  const decimals =
+    Number.isInteger(a.decimals) && a.decimals >= 0 && a.decimals <= 36 ? a.decimals : null;
+  const priceUsd = typeof a.price_usd === "number" && a.price_usd > 0 ? a.price_usd : null;
   return {
     name: ogClean(a.name, 48),
     symbol: ogClean(a.symbol, 16),
     liquidity: ogBig(a.total_reserve_in_usd),
     vol24: ogBig(a.volume_usd && a.volume_usd.h24),
+    decimals,
+    priceUsd,
   };
 }
 
@@ -84,11 +95,25 @@ export function ogTitle(meta) {
   return sym + " · " + name + " — Zaexa";
 }
 
-export function ogDescription(meta) {
+/* ⚠️ جمله‌ی verdict همیشه *اول* می‌آید، نه آخر — تلگرام توضیح را در طول
+   مشخصی قطع می‌کند، و کل نکته‌ی این ستون همان یک سؤالی است که کاربر قبل از
+   کلیک می‌پرسد: «آیا این یک اسکم است؟». اگر آن جمله جایی ته صف بنشیند، دقیقاً
+   همان چیزی که این کار قرار بود حل کند تلگرام قطعش می‌کند.
+
+   واژه‌ها عمدی‌اند و بحث ندارند: «quoted»، نه «simulated» و نه «safe» — یک
+   کوت فقط یک کوت است، نه شبیه‌سازی و نه ضمانتِ امنیت. عوض‌کردنِ این واژه‌ها
+   یعنی ادعا کردنِ چیزی که این مدرک اثبات نمی‌کند. */
+export function ogDescription(meta, verdict) {
   const bits = ["Base"];
   if (meta && meta.liquidity) bits.push("Liquidity " + meta.liquidity);
   if (meta && meta.vol24) bits.push("Vol 24h " + meta.vol24);
-  return bits.join(" · ") + ". " + PITCH;
+  const base = bits.join(" · ") + ". " + PITCH;
+  if (verdict === "nosell") return "No sell route quoted — you may not be able to exit. " + base;
+  if (verdict === "sell") return "A sell route was quoted. " + base;
+  // هر چیزِ دیگری — از جمله نبودِ همین آرگومان — یعنی «نمی‌دانم»، و
+  // «نمی‌دانم» نباید مثلِ «نه» رفتار کند: بدون جمله‌ی verdict، رشته‌ی قدیمی
+  // بایت‌به‌بایت.
+  return base;
 }
 
 /* رشته‌ی تگ‌ها. `origin` باید مطلق باشد: ربات پیش‌نمایش صفحه را از جای
@@ -98,9 +123,9 @@ export function ogDescription(meta) {
 export const OG_IMAGE_PATH = "/og.png";
 export const OG_IMAGE_V = "4";
 
-export function ogTags(meta, addr, origin) {
+export function ogTags(meta, addr, origin, verdict) {
   const title = ogTitle(meta);
-  const desc = ogDescription(meta);
+  const desc = ogDescription(meta, verdict);
   const img = origin + OG_IMAGE_PATH + "?v=" + OG_IMAGE_V;
   const canonical = origin + "/t/" + addr;
   const m = (attr, k, v) =>

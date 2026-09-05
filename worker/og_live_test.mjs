@@ -15,6 +15,7 @@
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { OG_IMAGE_V } from "./og.js";
+import { OG_BUDGET_MS } from "./index.js";
 
 let Miniflare;
 try {
@@ -66,6 +67,13 @@ function mf() {
     // هر fetch بیرونیِ Worker از اینجا رد می‌شود — بالادست واقعی زده نمی‌شود.
     outboundService: (req) => {
       upstreamHits.push(req.url);
+      /* درخواست‌های verdict به یکی از RPCهای Base می‌روند. این کانتینر
+         واقعاً به هیچ‌کدام دسترسی ندارد؛ به‌جایِ ساختنِ یک پاسخِ موفقِ
+         ساختگی (که «شبکه را جعل‌کردن» می‌شد)، همین نبودِ دسترسی را با یک
+         ردِ صریح نشان می‌دهیم — دقیقاً همان چیزی که یک اندپوینتِ واقعاً
+         غیرقابل‌دسترس هم برمی‌گرداند. */
+      if (/publicnode\.com|meowrpc\.com|drpc\.org|tenderly\.co|mainnet\.base\.org/.test(req.url))
+        return Promise.reject(new Error("no route to Base RPC in this sandbox"));
       if (upstreamReply === "slow")
         return new Promise((r) => setTimeout(() => r(new Response("{}")), 5000));
       if (upstreamReply === "error") return new Response("nope", { status: 500 });
@@ -191,6 +199,47 @@ for (const [mode, label] of [["error", "a 500 from upstream"], ["slow", "an upst
   ok(upstreamHits.length === 0,
      "the home page triggered a token lookup: " + JSON.stringify(upstreamHits));
   console.log("[og live] the home page keeps its own tags and costs no upstream call");
+}
+
+/* ---- ۶. verdict — RPC واقعاً غیرقابل‌دسترس → تنزلِ باوقار ----
+   این کانتینر به هیچ RPC ای از Base دسترسی ندارد؛ پس صادقانه‌ترین probeِ
+   زنده همین است: با RPC غیرقابل‌دسترس، توضیحِ کارت باید بایت‌به‌بایت همان
+   چیزی بماند که امروز سرو می‌شود (یعنی verdict چیزی اضافه نکند)، و صفحه
+   باید همچنان ۲۰۰ بدهد و کاملاً داخلِ OG_BUDGET_MS تمام شود. */
+{
+  upstreamHits = [];
+  upstreamReply = {
+    data: { attributes: {
+      name: "USD Coin", symbol: "USDC",
+      total_reserve_in_usd: "12400000",
+      volume_usd: { h24: "3120000" },
+      decimals: 6, price_usd: 1,
+    } },
+  };
+  const m = mf();
+  const t0 = Date.now();
+  const res = await m.dispatchFetch("https://zaexa.com/t/" + ADDR);
+  const html = await res.text();
+  const ms = Date.now() - t0;
+  await m.dispose();
+
+  const wantDesc = "Base · Liquidity $12.40M · Vol 24h $3.12M. Check whether you can sell it " +
+    "back before you buy — exit simulation and risk flags, no wallet needed.";
+  ok(res.status === 200,
+     "the token page with an unreachable RPC did not return 200 (" + res.status + ")");
+  ok(html.includes('content="' + wantDesc + '"'),
+     "with the RPC unreachable, og:description is not byte-for-byte today's description:\n" +
+     html.slice(0, 900));
+  ok(!html.includes("sell route"),
+     "an unknown verdict leaked a verdict sentence into the description anyway");
+  ok(ms < OG_BUDGET_MS,
+     "the page waited " + ms + "ms with an unreachable RPC — that must stay well inside the " +
+     OG_BUDGET_MS + "ms card budget");
+  ok(upstreamHits.some((u) => /publicnode\.com|meowrpc\.com|drpc\.org|tenderly\.co|base\.org/.test(u)),
+     "the verdict path never even attempted an RPC call — is it actually wired up? hits: " +
+     JSON.stringify(upstreamHits));
+  console.log("[og live] verdict: RPC genuinely unreachable -> today's description byte-for-byte, "
+    + "page 200 in " + ms + "ms (budget " + OG_BUDGET_MS + "ms)");
 }
 
 console.log(fails === 0

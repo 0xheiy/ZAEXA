@@ -30,6 +30,7 @@ const UPSTREAM_KEYED = "https://api.coingecko.com/api/v3/onchain";
 
 import { ogTags, ogTitle, pickTokenMeta } from "./og.js";
 import { ogImageResponse } from "./og-image.js";
+import { fetchVerdict } from "./verdict.js";
 
 /* پراکسی باز نیست. فقط شکل مسیرهایی که خودِ سایت می‌زند اجازه دارد:
      networks/base/tokens/<addr>
@@ -375,6 +376,23 @@ async function proxyGt(request, url, ctx, env) {
 const OG_NETWORK = "base";
 const OG_TIMEOUT_MS = 1200;
 
+/* سقفِ کلِ خط‌لوله‌ی کارت — متادیتا + verdict، هر دو. یک آدم پشتِ این
+   درخواست منتظر است؛ handlerهای HTMLRewriter پایین‌تر همین Promiseها را
+   await می‌کنند، پس هر میلی‌ثانیه‌ی اینجا یک میلی‌ثانیه‌ی صفحه‌ی سفید است.
+   OG_TIMEOUT_MS (سقفِ خودِ متادیتا) دست‌نخورده می‌ماند؛ این یکی سقفِ
+   مجموع است، نه جایگزینِ آن. */
+export const OG_BUDGET_MS = 2000;
+
+/* میزبانِ خصوصیِ کشِ verdict — هیچ‌جا واقعاً درخواست نمی‌رود، فقط کلیدِ
+   Cache API است. عمداً از هر دو بالادستِ /gt جدا: UPSTREAM_FREE/KEYED هر
+   دو زیرِ همین کلیدها در proxyGt نشسته‌اند، و اگر verdict هم همان کلیدها
+   را به کار می‌گرفت، ⚠️ پاسخِ ما (بدونِ هدرِ CORS) زیرِ کلیدِ یک URLِ
+   بالادستِ /gt می‌نشست و فراخوانیِ بعدیِ همان آدرس از داخلِ مرورگر با خطای
+   CORS می‌شکست — دقیقاً همان مشکلی که ogFetchMeta با فقط-خواندن دورش
+   می‌زند. یک میزبانِ ساختگیِ خودمان با هیچ URLِ واقعیِ /gt برخورد نمی‌کند،
+   پس اینجا هم خواندن امن است هم نوشتن. */
+export const VD_CACHE_HOST = "zaexa-verdict.internal";
+
 async function ogFetchMeta(addr, env) {
   const key = (env && typeof env.CG_KEY === "string" && env.CG_KEY) || "";
   const rest = "networks/" + OG_NETWORK + "/tokens/" + addr;
@@ -405,12 +423,54 @@ async function ogFetchMeta(addr, env) {
   }
 }
 
+/* آیا هنوز جایی این توکن قیمت فروش می‌دهد؟ — سمت سرور، فقط برای همین یک
+   جمله‌ی اولِ توضیح.
+   ⚠️ برخلافِ ogFetchMeta که فقط از کش می‌خواند، اینجا هم می‌خوانیم هم
+   می‌نویسیم — روی VD_CACHE_HOST که هیچ ربطی به proxyGt ندارد (توضیح بالای
+   همین فایل، کنارِ VD_CACHE_HOST). هرگز پرتاب نمی‌کند: هر مسیر شکست، null. */
+async function ogFetchVerdict(addr, meta, deadlineAt, env, ctx) {
+  if (!meta) return null; // بدونِ متادیتا حتی یک تلاش هم لازم نیست
+  try {
+    const store = (typeof caches !== "undefined" && caches.default) || null;
+    const cacheKey = new Request(
+      "https://" + VD_CACHE_HOST + "/v1/" + OG_NETWORK + "/" + addr.toLowerCase());
+
+    if (store) {
+      const hit = await store.match(cacheKey);
+      if (hit) {
+        const body = await hit.json();
+        return body && (body.verdict === "sell" || body.verdict === "nosell") ? body.verdict : null;
+      }
+    }
+
+    const verdict = await fetchVerdict(addr, meta, { deadlineAt, fetchImpl: fetch });
+
+    /* هرگز «نمی‌دانم» را کش نکن. یک تعلیقِ گذرای یک RPC را به پنج دقیقه‌ی
+       خاموشِ کارتِ تنزل‌یافته تبدیل می‌کند — دقیقاً همان «نمی‌دانم که مثل
+       نه رفتار کند» که این پروژه هرگز نمی‌پذیرد. */
+    if ((verdict === "sell" || verdict === "nosell") && store) {
+      const stash = new Response(JSON.stringify({ verdict }), {
+        headers: {
+          "content-type": "application/json",
+          "cache-control": "public, max-age=300",
+        },
+      });
+      const put = store.put(cacheKey, stash);
+      if (ctx && typeof ctx.waitUntil === "function") ctx.waitUntil(put);
+      else await put;
+    }
+    return verdict;
+  } catch (e) {
+    return null; // این تابع هرگز نباید کارت را بشکند
+  }
+}
+
 /* تگ‌ها را داخل همان HTML می‌نشاند.
    HTMLRewriter جریانی است، پس ۲۹۰KB صفحه در حافظه بافر نمی‌شود.
    ترتیب مهم است: اول تگ‌های ثابتِ صفحه‌ی اصلی (که با data-og علامت خورده‌اند)
    برداشته می‌شوند، بعد تگ‌های این توکن اضافه می‌شود — وگرنه ربات دو og:title
    می‌دید و کدام را برمی‌دارد به خودش بستگی داشت. */
-function injectOg(res, url, addr, metaPromise) {
+function injectOg(res, url, addr, metaPromise, vdPromise) {
   if (typeof HTMLRewriter === "undefined") return res;   // بیرون از Workers (تست node)
   if (!res || res.status !== 200) return res;
   const ct = res.headers.get("content-type") || "";
@@ -420,14 +480,17 @@ function injectOg(res, url, addr, metaPromise) {
     .on("link[data-og]", { element(el) { el.remove(); } })
     .on("title", {
       async element(el) {
-        const meta = await metaPromise;
+        // عنوان به verdict نیازی ندارد، ولی باید همان Promise را await کند
+        // تا سرِ نخِ زمانی هر دو handler یکی باشد — نه اینکه عنوان زودتر
+        // از verdict چاپ شود و بعد head دوباره صبر کند.
+        const [meta] = await Promise.all([metaPromise, vdPromise]);
         el.setInnerContent(ogTitle(meta), { html: false });
       },
     })
     .on("head", {
       async element(el) {
-        const meta = await metaPromise;
-        el.append(ogTags(meta, addr, url.origin), { html: true });
+        const [meta, verdict] = await Promise.all([metaPromise, vdPromise]);
+        el.append(ogTags(meta, addr, url.origin, verdict), { html: true });
       },
     })
     .transform(res);
@@ -476,14 +539,26 @@ export default {
          روی سقف، metaPromise اصلاً ساخته نمی‌شود — نه فقط نتیجه‌اش دور
          ریخته می‌شود — وگرنه خودِ همین شرط بی‌فایده می‌شد: هر کاربرِ آخرِ
          سقف باز هم یک بار به CoinGecko می‌زد. */
+      /* مهلتِ verdict از همین‌جا، پیش از شروعِ خودِ متادیتا، محاسبه می‌شود —
+         تا شمارشِ OG_BUDGET_MS واقعاً از لحظه‌ی رسیدنِ درخواست باشد، نه از
+         لحظه‌ای که متادیتا برگشت (که خودش می‌تواند تا OG_TIMEOUT_MS طول
+         بکشد و مهلتِ verdict را بی‌صدا آب کند). */
+      const deadlineAt = Date.now() + OG_BUDGET_MS;
       const metaPromise = withinLimit ? ogFetchMeta(addr, env) : null;
+      /* verdict فقط بعد از متادیتا معنا دارد (به decimals/priceUsd همان
+         نیاز دارد)، پس زنجیر می‌شود، نه موازیِ کامل — ولی چون خودش هم یک
+         Promise جداست، صفحه هنوز پشتِ آن صف نمی‌ایستد؛ هر دو Promise با
+         هم در injectOg پایین await می‌شوند.
+         روی سقف نرخ metaPromise اصلاً null است، پس اینجا هم هیچ verdict‌ای
+         ساخته نمی‌شود — دقیقاً همان استدلالِ metaPromise بالا. */
+      const vdPromise = metaPromise ? metaPromise.then((m) => ogFetchVerdict(addr, m, deadlineAt, env, ctx)) : null;
       /* ⚠️ «/app» نه «/». از روزی که صفحه‌ی معرفی روی ریشه نشست، «/» دیگر
          اپ نیست. اگر این خط روی «/» بماند، هر لینکِ /t/<آدرس> صفحه‌ی
          معرفی را باز می‌کند و اپ هرگز بالا نمی‌آید — و چون ۲۰۰ برمی‌گردد،
          هیچ خطایی هم دیده نمی‌شود. بدونِ پسوند، به همان دلیلِ زیر: /app.html
          یک ۳۰۷ به /app می‌دهد و آن ریدایرکت مسیر را جا می‌گذارد. */
       const res = await env.ASSETS.fetch(new Request(new URL("/app", url), request));
-      return withinLimit ? injectOg(res, url, addr, metaPromise) : res;
+      return withinLimit ? injectOg(res, url, addr, metaPromise, vdPromise) : res;
     }
     // بقیه‌ی سایت دست‌نخورده از فایل‌های ثابت می‌آید.
     if (env && env.ASSETS) return env.ASSETS.fetch(request);
@@ -494,4 +569,5 @@ export default {
 // برای تست‌ها — در زمان اجرا روی Worker استفاده نمی‌شود.
 export { PATH_OK, QUERY_OK, ttlFor, EV_OK, EV_DETAIL_OK, EV_SURFACE_OK, EV_MAX_BODY };
 export { rateOk, rlHits, RL_LIMIT, RL_WINDOW_MS };
-export { OG_NETWORK, OG_TIMEOUT_MS, ogFetchMeta };
+export { OG_NETWORK, OG_TIMEOUT_MS, ogFetchMeta, ogFetchVerdict };
+export { UPSTREAM_FREE, UPSTREAM_KEYED };
