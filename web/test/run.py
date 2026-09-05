@@ -1,4 +1,5 @@
 import asyncio, base64, glob, os, re, sys
+from urllib.parse import urlparse
 from playwright.async_api import async_playwright
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -640,6 +641,25 @@ def check_one_executor_address():
     assert live.lower() not in [a.lower() for a in RETIRED_EXECUTORS], \
         "the app itself points at a retired executor: " + live
 
+    # صفحه‌ی معرفی آدرس را ثابت در HTML دارد، چون CHAIN را اجرا نمی‌کند. پس
+    # همان آدرس باید مو‌به‌مو با CHAIN.executor یکی باشد — وگرنه روزی قرارداد
+    # عوض می‌شود، اپ درست می‌ماند و درِ ورودیِ سایت بی‌صدا آدرس مرده را به
+    # بازدیدکننده نشان می‌دهد و به BaseScanِ اشتباه لینک می‌دهد.
+    landing_path = os.path.join(HERE, "..", "landing.html")
+    if os.path.exists(landing_path):
+        lnd = open(landing_path, encoding="utf-8").read()
+        addrs = set(re.findall(r"0x[0-9a-fA-F]{40}", lnd))
+        stale = sorted(a for a in addrs if a.lower() != live.lower())
+        assert not stale, (
+            "web/landing.html names %s, but the live executor is %s. The landing page has "
+            "no CHAIN object to read it from, so a redeployed contract leaves it pointing "
+            "at the old one with nothing to notice." % (stale, live))
+        short = live[:6] + "\u2026" + live[-4:]
+        if addrs:
+            assert short in lnd, (
+                "web/landing.html links the executor but does not show it as %s, so the text "
+                "a reader compares against BaseScan is not the address being linked" % short)
+
     root = os.path.join(HERE, "..", "..")
 
     # README.md و contracts/README.md پایه‌ی این نگهبان‌اند (چک ادعای «قرارداد
@@ -809,14 +829,17 @@ def check_landing_page():
         "_site/index.html — the site root would go missing on the next deploy")
     src = open(path, encoding="utf-8").read()
 
-    allowed = {"https://x.com/zaexadex", "https://github.com/0xheiy/ZAEXA",
-               "https://www.geckoterminal.com", "https://zaexa.com/",
-               "https://zaexa.com/og.png?v=4"}
+    # بر اساس دامنه، نه آدرسِ کامل: لینکِ قرارداد شاملِ خودِ آدرس است و آن را
+    # نگهبانِ check_one_executor_address می‌سنجد. اگر اینجا هم آدرسِ کامل را
+    # قفل کنیم، یک قراردادِ تازه دو نگهبان را با یک تغییر می‌شکند.
+    allowed_hosts = {"x.com", "github.com", "www.geckoterminal.com",
+                     "zaexa.com", "basescan.org"}
     refs = set(re.findall(r'(?:src|href)="(https?://[^"]*)"', src))
-    stray = sorted(r for r in refs if r not in allowed)
+    stray = sorted(r for r in refs
+                   if urlparse(r).hostname not in allowed_hosts)
     assert not stray, (
-        "web/landing.html loads or links to something outside the allowed set: %s. The page "
-        "is meant to make zero third-party requests." % stray)
+        "web/landing.html loads or links to a host outside the allowed set: %s. The page is "
+        "meant to make zero third-party requests." % stray)
 
     faces = re.findall(r'src:url\("data:font/woff2;base64,([^"]+)"\)', src)
     assert len(faces) == 2, (
