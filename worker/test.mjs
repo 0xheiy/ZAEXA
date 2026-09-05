@@ -22,12 +22,16 @@ let sent = [];       // URLهایی که به بالادست رفت
 let reply = null;    // پاسخی که بالادست می‌دهد (یا خطایی که پرتاب می‌کند)
 
 let sentHeaders = [];
-globalThis.fetch = async (u, o) => {
+/* موکِ ردیاب — تابعِ نام‌دار، نه یک بسته‌شده‌ی بی‌نام، تا هر بخشی که موقتاً
+   globalThis.fetch را برای آزمودنِ چیزِ دیگری عوض می‌کند (مثلاً بخشِ ogFetchVerdict)
+   بتواند دقیقاً همین را برگرداند، نه یک کپیِ دوم که رفتارش کمی فرق دارد. */
+async function trackingFetch(u, o) {
   sent.push(String(u));
   sentHeaders.push((o && o.headers) || {});
   if (reply instanceof Error) throw reply;
   return reply;
-};
+}
+globalThis.fetch = trackingFetch;
 
 const ASSETS = { fetch: async () => new Response("the site", { status: 200 }) };
 const env = { ASSETS };
@@ -443,11 +447,15 @@ ok(res.status === 200, "index.html must still be served");
     ok(og.pickTokenMeta(bad) === null,
        "pickTokenMeta should be null for " + JSON.stringify(bad));
 
-  /* decimals و priceUsd — فقط با نوع و بازه‌ی درست پذیرفته می‌شوند، نه با
-     چیزی که می‌شود به عدد تبدیلش کرد؛ یک priceUsd رشته‌ای که بی‌سروصدا
-     Number() می‌شد دقیقاً همان راهی است که یک شکلِ غیرمنتظر از بالادست
-     «قیمتِ معتبر» جا می‌زند. بقیه‌ی میدان‌ها (نام، نماد، نقدینگی) باید
-     دست‌نخورده بمانند — یک قیمتِ بدشکل نباید آن‌ها را هم با خودش ببرد. */
+  /* decimals و priceUsd.
+     ⚠️ GeckoTerminal price_usd را هم مثل total_reserve_in_usd/volume_usd.h24
+     به‌صورت رشته می‌فرستد؛ رد کردنِ رشته یعنی روی داده‌ی واقعی همیشه null
+     دربیاید و fetchVerdict هرگز حتی تلاش نکند — دقیقاً همان باگی که یک‌بار
+     کارتِ زنده را ساکت خراب کرد. پس priceUsd هر عددِ رشته‌ای یا خامِ مثبت را
+     قبول می‌کند، درست مثلِ ogBig؛ decimals فرق دارد، آن همیشه عدد است، نه
+     رشته، پس همان سخت‌گیریِ typeof می‌ماند. بقیه‌ی میدان‌ها (نام، نماد،
+     نقدینگی) باید دست‌نخورده بمانند — یک قیمتِ بدشکل نباید آن‌ها را هم با
+     خودش ببرد. */
   {
     const attrsOk = { name: "USD Coin", symbol: "USDC", total_reserve_in_usd: "1",
                       decimals: 6, price_usd: 1.0001 };
@@ -457,11 +465,26 @@ ok(res.status === 200, "index.html must still be served");
        "pickTokenMeta lost decimals/priceUsd (or something else) for a valid shape: " +
        JSON.stringify(good));
 
+    // یک قیمتِ رشته‌ای — دقیقاً شکلی که بالادستِ واقعی می‌فرستد — باید
+    // عیناً مثلِ همان عددِ خام پذیرفته شود.
+    const stringPrice = og.pickTokenMeta({ data: { attributes: { ...attrsOk, price_usd: "1.0001" } } });
+    ok(stringPrice && stringPrice.priceUsd === 1.0001,
+       "a numeric price given as a string must be accepted — GeckoTerminal always sends it as a "
+       + "string, and rejecting it is exactly what left fetchVerdict never trying: " +
+       JSON.stringify(stringPrice));
+
+    const noPriceField = { ...attrsOk }; delete noPriceField.price_usd;
     const BAD_PRICE = [
-      ["a string price", { ...attrsOk, price_usd: "1.0001" }],
       ["a negative price", { ...attrsOk, price_usd: -1 }],
+      ["a negative price string", { ...attrsOk, price_usd: "-1" }],
       ["a zero price", { ...attrsOk, price_usd: 0 }],
+      ["a zero price string", { ...attrsOk, price_usd: "0" }],
       ["a NaN price", { ...attrsOk, price_usd: NaN }],
+      ["a non-numeric price string", { ...attrsOk, price_usd: "abc" }],
+      ["an empty price string", { ...attrsOk, price_usd: "" }],
+      ["a whitespace-only price string", { ...attrsOk, price_usd: "   " }],
+      ["a null price", { ...attrsOk, price_usd: null }],
+      ["a missing price field", noPriceField],
     ];
     for (const [label, attrs] of BAD_PRICE) {
       const m = og.pickTokenMeta({ data: { attributes: attrs } });
@@ -480,8 +503,48 @@ ok(res.status === 200, "index.html must still be served");
       ok(m && m.decimals === null && m.priceUsd === 1.0001,
          "decimals should be null (priceUsd unaffected) for " + label + ": " + JSON.stringify(m));
     }
-    console.log("[pickTokenMeta] decimals/priceUsd carried through for a valid shape, null for "
-      + "each bad one, without disturbing name/symbol/liquidity");
+    console.log("[pickTokenMeta] decimals/priceUsd carried through for a valid shape, a string "
+      + "price accepted, null for each bad one, without disturbing name/symbol/liquidity");
+  }
+
+  /* --- فیکسچرِ واقعی، اندازه‌گیری‌شده روی سایتِ زنده ---
+     قاعده‌ی استانداردِ این مخزن: یک ماک باید واقعیت را آینه کند. فیکسچرِ
+     قبلی عددها را جایی می‌گذاشت که API رشته می‌فرستد؛ همه‌ی تست‌ها با آن
+     سبز بودند و کارتِ زنده هیچ‌کاری نمی‌کرد — دقیقاً همان چیزی که این probe
+     قرار است دیگر تکرار نشود. */
+  {
+    const { sellAmountFrom } = await import("./verdict.js");
+    const LIVE_ATTRS = {
+      name: "Some Token", symbol: "TOK",
+      decimals: 18,
+      price_usd: "0.001096077838",
+      total_reserve_in_usd:
+        "864686.88844287130299348404259937249318777297342779422871533805033929852051014022",
+      volume_usd: { h24: "72419.9274686212" },
+    };
+    const live = og.pickTokenMeta({ data: { attributes: LIVE_ATTRS } });
+    ok(live && typeof live.priceUsd === "number" && live.priceUsd > 0 && live.decimals === 18,
+       "the measured live-shape fixture did not yield a usable priceUsd/decimals: " +
+       JSON.stringify(live));
+
+    const amt = live ? sellAmountFrom(live.priceUsd, live.decimals) : null;
+    ok(amt != null, "sellAmountFrom returned null for a realistic price/decimals pair: " +
+       (live && live.priceUsd) + "/" + (live && live.decimals));
+    // بزرگی، نه رقمِ دقیق: ~۹۱٬۲۳۳ × ۱۰^۱۸ — یعنی بینِ ۹۰٬۰۰۰ و ۹۲٬۰۰۰ واحدِ کامل.
+    // amt را فقط وقتی به BigInt تقسیم می‌کنیم که واقعاً BigInt باشد — وگرنه
+    // یک احتمالِ null اینجا probe را با یک TypeError خام می‌ترکاند، که یک
+    // FAILِ خوانا نیست.
+    if (typeof amt === "bigint") {
+      const whole = amt / 10n ** 18n;
+      ok(whole > 90000n && whole < 92000n,
+         "sellAmountFrom's magnitude looks wrong for the measured live price: got " + whole +
+         " whole tokens, expected roughly 91,233");
+    } else {
+      ok(false, "sellAmountFrom did not return a BigInt for a realistic price/decimals pair, " +
+        "got " + JSON.stringify(amt));
+    }
+    console.log("[live fixture] a realistic string-typed GeckoTerminal payload yields a usable "
+      + "priceUsd and a sane sellAmountFrom magnitude (~91,233 tokens), not a silent null");
   }
 
   /* عنوان — چهار حالت، و هیچ‌کدام نباید «undefined» بدهد. */
@@ -1088,9 +1151,84 @@ const ethers = globalThis.ethers;
      + "should stop it before any network call (got " + v + ", " + calls + " calls)");
 
   delete globalThis.caches;
+  // ⚠️ این بخش globalThis.fetch را چند بار برای آزمودنِ ogFetchVerdict عوض
+  // کرد؛ اگر همین‌جا برنگردد، هر بخشِ بعدی که به sent/reply تکیه می‌کند
+  // (مثلاً بخشِ ۱۴) بی‌صدا چیزی ثبت نمی‌بیند — نه یک FAILِ درست، بلکه یک
+  // probe که همیشه به همان جواب می‌رسد چه باگ باشد چه نباشد.
+  globalThis.fetch = trackingFetch;
   console.log("[og verdict wiring] no-meta short-circuit; cache miss calls fetchVerdict once and "
     + "writes the result; cache hit skips the network; an unknown verdict is never cached; "
     + "deadlineAt reaches fetchVerdict end to end");
+}
+
+/* ---- ۱۴. /vd/<address> — پروبِ تشخیصی، بدونِ کارت ----
+   همان خط‌لوله‌ی کارت (ogFetchMeta سپس ogFetchVerdict) را صدا می‌زند؛
+   اینجا فقط سیم‌کشیِ خودِ مسیر سنجیده می‌شود: متد، شکلِ آدرس، بستهٔ نرخِ
+   جدا از «og»، و اینکه پاسخ همیشه JSON با cache-control: no-store است. */
+{
+  const { RL_LIMIT: RL, PATH_OK: PATH_OK_2 } = await import("./index.js");
+  const ADDR = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913";
+
+  // الف) شکلِ درست، متادیتا موفق؛ همان fetch جعلی برای هر تلاشِ RPC هم
+  // صدا زده می‌شود ولی هیچ‌وقت شکلِ یک batch واقعی را ندارد → v:null.
+  reply = json({ data: { attributes: { name: "USD Coin", symbol: "USDC",
+    total_reserve_in_usd: "1", decimals: 18, price_usd: "1" } } });
+  let res = await call("/vd/" + ADDR, { headers: { "cf-connecting-ip": "203.0.113.50" } });
+  ok(res.status === 200, "a well-formed /vd request should be 200 (got " + res.status + ")");
+  ok((res.headers.get("content-type") || "").includes("application/json"), "/vd must answer JSON");
+  ok(res.headers.get("cache-control") === "no-store", "/vd must never be cached");
+  const body = await res.json();
+  ok("v" in body && "ms" in body, "/vd body is missing v/ms: " + JSON.stringify(body));
+  ok(body.v === null,
+     "with no real RPC batch ever answering, /vd should say v:null, not error or hang: " +
+     JSON.stringify(body));
+  ok(typeof body.ms === "number" && body.ms >= 0, "ms should be a non-negative number: " +
+     JSON.stringify(body));
+
+  // ب) متد غیرِ GET
+  reply = json({ data: {} });
+  res = await call("/vd/" + ADDR, { method: "POST", headers: { "cf-connecting-ip": "203.0.113.51" } });
+  ok(res.status === 405, "/vd should refuse non-GET (got " + res.status + ")");
+
+  // ج) آدرسِ بدشکل
+  for (const bad of ["/vd/not-an-address", "/vd/0xabc", "/vd/", "/vd"]) {
+    reply = json({ data: {} });
+    res = await call(bad, { headers: { "cf-connecting-ip": "203.0.113.52" } });
+    ok(res.status === 400, "/vd should refuse a malformed address " + bad + " (got " + res.status + ")");
+  }
+
+  // د) بستهٔ نرخِ خودش «vd» است — سوزاندنِ سهمیه‌ی vd نباید og را بسوزاند
+  const ip = "203.0.113.53";
+  for (let i = 0; i < RL; i++) {
+    reply = json({ data: {} });
+    await call("/vd/" + ADDR, { headers: { "cf-connecting-ip": ip } });
+  }
+  reply = json({ data: {} });
+  res = await call("/vd/" + ADDR, { headers: { "cf-connecting-ip": ip } });
+  ok(res.status === 429,
+     "the " + (RL + 1) + "th /vd request from one IP should be rate-limited (got " + res.status + ")");
+  ok(res.headers.get("retry-after") === "60", "/vd's 429 must say retry-after: 60");
+
+  // همان IP باید هنوز بتواند صفحه‌ی توکن (بستهٔ «og») را باز کند — بسته‌ها مستقل‌اند.
+  // ⚠️ صفحه‌ی توکن روی سقف هم همیشه ۲۰۰ می‌دهد (تنزلِ باوقار)، پس خودِ کدِ
+  // وضعیت اثباتی نیست؛ اثبات این است که متادیتا واقعاً از بالادست خوانده
+  // شود — اگر «vd» با «og» یکی شده بود، این IP سهمیه‌ی og را هم قبلاً
+  // سوزانده بود و metaPromise اصلاً ساخته نمی‌شد.
+  const spyEnv = { ASSETS: { fetch: async () => new Response("the site", { status: 200 }) } };
+  reply = json({ data: {} });
+  res = await call("/t/" + ADDR, { headers: { "cf-connecting-ip": ip } }, spyEnv);
+  ok(res.status === 200,
+     "burning out the vd bucket must not rate-limit the og bucket for the same IP (got " +
+     res.status + ")");
+  ok(sent.length === 1,
+     "the og bucket looks shared with vd — burning the vd bucket for this IP left 0 upstream " +
+     "metadata calls for the token page (got " + sent.length + ")");
+
+  // ه) شکلِ آدرسِ خامِ /vd هرگز چیزی نیست که PATH_OK بپذیرد
+  ok(!PATH_OK_2.test(ADDR.toLowerCase()), "a raw /vd address must never match PATH_OK's shape");
+
+  console.log("[vd diag] well-formed request -> {v, ms} JSON, no-store; non-GET 405; malformed "
+    + "address 400; its own \"vd\" rate bucket independent of \"og\"; 429 carries retry-after");
 }
 
 console.log(fails === 0

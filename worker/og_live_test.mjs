@@ -242,6 +242,40 @@ for (const [mode, label] of [["error", "a 500 from upstream"], ["slow", "an upst
     + "page 200 in " + ms + "ms (budget " + OG_BUDGET_MS + "ms)");
 }
 
+/* ---- ۷. /vd/<address> — با RPC واقعاً غیرقابل‌دسترس ----
+   همان دلیلِ بخشِ ۶: این کانتینر واقعاً به هیچ Base RPCای دسترسی ندارد.
+   پروبِ تشخیصی باید همچنان ۲۰۰ بدهد با v:null — نه خطا، نه آویزان‌شدن —
+   و کاملاً داخلِ بودجه بماند. */
+{
+  upstreamHits = [];
+  upstreamReply = {
+    data: { attributes: {
+      name: "USD Coin", symbol: "USDC",
+      total_reserve_in_usd: "12400000",
+      decimals: 6, price_usd: 1,
+    } },
+  };
+  const m = mf();
+  const t0 = Date.now();
+  const res = await m.dispatchFetch("https://zaexa.com/vd/" + ADDR);
+  const ms = Date.now() - t0;
+  const body = await res.json();
+  await m.dispose();
+
+  ok(res.status === 200, "/vd with an unreachable RPC did not return 200 (" + res.status + ")");
+  ok(res.headers.get("content-type").includes("application/json"), "/vd must answer JSON");
+  ok(res.headers.get("cache-control") === "no-store", "/vd must never be cached");
+  ok(body.v === null, "/vd with an unreachable RPC should say v:null, not an error: " +
+     JSON.stringify(body));
+  ok(typeof body.ms === "number" && body.ms >= 0, "/vd's own ms field looks wrong: " +
+     JSON.stringify(body));
+  ok(ms < OG_BUDGET_MS,
+     "/vd waited " + ms + "ms with an unreachable RPC — must stay well inside the " +
+     OG_BUDGET_MS + "ms budget");
+  console.log("[og live] /vd: RPC genuinely unreachable -> 200 with v:null, " + ms + "ms " +
+    "(budget " + OG_BUDGET_MS + "ms)");
+}
+
 console.log(fails === 0
   ? "[og live] ok — injection, escaping, fallback, image and home page all verified on workerd"
   : "[og live] " + fails + " FAILURES");

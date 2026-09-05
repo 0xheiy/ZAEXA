@@ -496,12 +496,58 @@ function injectOg(res, url, addr, metaPromise, vdPromise) {
     .transform(res);
 }
 
+/* =====================================================================
+   /vd/<آدرس> — پروبِ تشخیصیِ verdict، بدونِ کارت
+   =====================================================================
+   مسئله: یک verdictِ نامعلوم روی کارت بایت‌به‌بایت همان توضیحِ قدیمی است،
+   پس «RPC از کار افتاده» با «کد هنوز دیپلوی نشده» با «priceUsd جایی null
+   شد» از بیرون هیچ فرقی ندارند — بدونِ این مسیر، فهمیدنِ کدام‌یک، یک حلقه‌ی
+   سه‌دقیقه‌ایِ دیپلوی-و-چک می‌خواست.
+
+   ⚠️ همان خط‌لوله‌ی کارت را صدا می‌زند (ogFetchMeta سپس ogFetchVerdict) —
+   یک کپیِ دومِ منطقِ verdict نیست؛ اگر بود، این دو می‌توانستند از هم جدا
+   بیفتند و همین مسیر هم چیزِ اشتباهی نشان می‌داد.
+
+   بستهٔ (bucket) نرخِ خودش «vd» است، جدا از «og» — کاوش‌کردن با این مسیر
+   نباید سهمیه‌ی رندرِ کارتِ واقعی را بخورد. هیچ‌چیزی ثبت یا لاگ نمی‌شود؛
+   فقط یک عددِ خام برمی‌گردد. */
+const VD_ADDR_RE = /^0x[0-9a-fA-F]{40}$/;
+
+function vdDone(status, body, extraHeaders) {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: Object.assign(
+      { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" },
+      extraHeaders),
+  });
+}
+
+async function diagVerdict(request, url, env, ctx) {
+  /* همیشه اولین خط، پیش از هر بررسیِ دیگری — همان قاعده‌ای که /gt و /ev
+     دارند: یک اسکریپتِ کوبنده نباید حتی شکلِ درخواست را هم مجانی بسنجد. */
+  if (!rateOk(request, "vd", RL_LIMIT, RL_WINDOW_MS))
+    return vdDone(429, { error: "too many requests" }, { "retry-after": "60" });
+  if (request.method !== "GET") return vdDone(405, { error: "only GET" });
+
+  const addr = url.pathname.slice("/vd/".length);
+  if (!VD_ADDR_RE.test(addr)) return vdDone(400, { error: "bad address" });
+
+  const t0 = Date.now();
+  const meta = await ogFetchMeta(addr, env);
+  const v = await ogFetchVerdict(addr, meta, t0 + OG_BUDGET_MS, env, ctx);
+  return vdDone(200, { v, ms: Date.now() - t0 });
+}
+
 export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
     if (url.pathname === "/gt" || url.pathname.startsWith("/gt/"))
       return proxyGt(request, url, ctx, env);
     if (url.pathname === "/ev") return collectEv(request, url, env);
+    /* تصویر کارت نیست، بایندینگ ASSETS هم نیست — مثل /gt و /ev همیشه باید
+       به کد برسد، نه به فایل‌های ثابت. */
+    if (url.pathname === "/vd" || url.pathname.startsWith("/vd/"))
+      return diagVerdict(request, url, env, ctx);
     /* تصویر کارت. عمداً در `_site` نیست، پس همیشه به کد می‌رسد — مثل /gt و
        /ev. یعنی برای اضافه‌شدنش لازم نیست کسی Build command را در پنل عوض
        کند، و انتشارش با خودِ کد اتمیک است. */
@@ -571,3 +617,4 @@ export { PATH_OK, QUERY_OK, ttlFor, EV_OK, EV_DETAIL_OK, EV_SURFACE_OK, EV_MAX_B
 export { rateOk, rlHits, RL_LIMIT, RL_WINDOW_MS };
 export { OG_NETWORK, OG_TIMEOUT_MS, ogFetchMeta, ogFetchVerdict };
 export { UPSTREAM_FREE, UPSTREAM_KEYED };
+export { VD_ADDR_RE };

@@ -58,17 +58,22 @@ export function ogBig(v) {
 /* پاسخ GeckoTerminal → فقط چیزهایی که لازم داریم.
    هر شکل دیگری (خطا، بدنه‌ی خالی، آرایه به‌جای شیء) → null، نه شیء نصفه.
 
-   ⚠️ decimals و priceUsd هر دو فقط وقتی پذیرفته می‌شوند که *نوعشان* درست
-   باشد، نه وقتی می‌شود آن‌ها را به عدد تبدیل کرد. یک priceUsd رشته‌ای که
-   بی‌سروصدا Number() می‌شد، دقیقاً همان راهی است که یک روز یک شکلِ غیرمنتظر
-   از بالادست را «قیمتِ معتبر» جا می‌زند؛ سخت‌گیری اینجا ارزانِ همیشگیِ این
-   ماژول است، نه محافظه‌کاریِ زیادی. */
+   ⚠️ GeckoTerminal عددها را به‌صورت رشته می‌فرستد — total_reserve_in_usd و
+   volume_usd.h24 همین‌طورند و ogBig از قبل رشته را قبول می‌کند؛ price_usd
+   هم فرقی ندارد (مثلاً "0.001096077838"). اگر priceUsd فقط typeof number
+   را قبول کند، روی داده‌ی واقعی همیشه null درمی‌آید، sellAmountFrom هم
+   همیشه null می‌دهد، و fetchVerdict حتی یک تلاش هم نمی‌کند — دقیقاً همان
+   باگی که یک‌بار روی سایتِ زنده کارت را ساکت خراب کرد. پس اینجا Number()
+   می‌کنیم، مثل ogBig؛ فقط رشته‌ی خالی/فاصله، غیرعددی، صفر و منفی رد
+   می‌شوند. decimals فرق دارد: آن یکی همیشه عدد است، نه رشته، پس همان
+   سخت‌گیریِ typeof می‌ماند. */
 export function pickTokenMeta(body) {
   const a = body && body.data && !Array.isArray(body.data) && body.data.attributes;
   if (!a || typeof a !== "object") return null;
   const decimals =
     Number.isInteger(a.decimals) && a.decimals >= 0 && a.decimals <= 36 ? a.decimals : null;
-  const priceUsd = typeof a.price_usd === "number" && a.price_usd > 0 ? a.price_usd : null;
+  const n = Number(a.price_usd);
+  const priceUsd = Number.isFinite(n) && n > 0 ? n : null;
   return {
     name: ogClean(a.name, 48),
     symbol: ogClean(a.symbol, 16),
