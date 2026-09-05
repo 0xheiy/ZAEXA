@@ -492,12 +492,30 @@ def check_og_tags():
     mv = re.search(r'OG_IMAGE_V\s*=\s*"([^"]+)"', wsrc)
     assert mp and mv, "OG_IMAGE_PATH / OG_IMAGE_V are gone from worker/og.js"
     want = mp.group(1) + "?v=" + mv.group(1)
-    page = re.findall(r'content="https?://[^"]*(/og\.png\?v=[^"]*)"', src)
-    assert page, "index.html points at no og image at all"
-    wrong = [p for p in page if p != want]
-    assert not wrong, (
-        "the page and the worker disagree about the card image: page has %s, worker "
-        "builds %s. One of the two cards is pointing at a 404." % (wrong, want))
+    # ⚠️ هر صفحه‌ای که تگ og دارد، نه فقط اپ. از روزی که صفحه‌ی معرفی روی
+    #    ریشه نشست، نسخه‌ی تصویر در دو فایل نوشته می‌شود. و چون `/og.png`
+    #    هدر immutable دارد، صفحه‌ی جامانده تا ابد کارتِ کهنه را نشان می‌دهد
+    #    و هیچ تستی قرمز نمی‌شود — همان کلاسِ «غلط شبیه درست».
+    pages = [("index.html", src)]
+    lnd = os.path.join(HERE, "..", "landing.html")
+    if os.path.exists(lnd):
+        pages.append(("landing.html", open(lnd, encoding="utf-8").read()))
+    for name, psrc in pages:
+        page = re.findall(r'content="https?://[^"]*(/og\.png\?v=[^"]*)"', psrc)
+        assert page, "%s points at no og image at all" % name
+        wrong = [p for p in page if p != want]
+        assert not wrong, (
+            "%s and the worker disagree about the card image: the page has %s, the worker "
+            "builds %s. /og.png is served immutable, so the page left behind would show the "
+            "stale card for good." % (name, wrong, want))
+        if name != "index.html":
+            miss = [t for t in re.findall(r"<meta\b[^>]*>", psrc)
+                    if ('property="og:' in t or 'name="twitter:' in t) and "data-og" not in t]
+            assert not miss, (
+                "%s has og tags without a data-og marker:\n  %s" % (name, "\n  ".join(miss)))
+
+    print("[og tags] card version %s matches across %s and worker/og.js"
+          % (want, ", ".join(n for n, _ in pages)))
 
 
 EV_PAGE_NAMES, EV_DETAILS = set(), set()
