@@ -1509,7 +1509,22 @@ const ethers = globalThis.ethers;
   // کمکیِ مشترک: هر why مشاهده‌شده باید عضوِ فهرستِ منجمدِ VD_SOL_WHY باشد —
   // با پیمایشِ خودِ فهرست (Array.includes)، نه با کپی‌کردنِ دوباره‌ی آن در
   // این فایل؛ اگر فهرست روزی جابه‌جا شود، این چک هم خودش را همان لحظه به‌روز می‌بیند.
-  function isFrozenWhy(why) { return vs.VD_SOL_WHY.includes(why); }
+  //
+  // خانواده‌ی "rpc:<method>:<status>" و "jup:<endpoint>:<status>" همیشه یک
+  // عددِ صحیح در آخرین بخش دارند — پس اینجا هر why را از آخرین «:» می‌شکنیم:
+  // اگر بخشِ آخر یک عددِ صحیح بود، *پیشوند* (همه‌چیز جز آن بخشِ آخر) باید
+  // عضوِ VD_SOL_WHY باشد؛ وگرنه خودِ why بی‌کم‌وکاست باید عضو باشد (مثلِ
+  // "payer-balance"، "too-big"، …، که هیچ‌وقت پسوندِ عددی نمی‌گیرند).
+  function isFrozenWhy(why) {
+    const s = String(why);
+    const i = s.lastIndexOf(":");
+    if (i > 0) {
+      const suffix = s.slice(i + 1);
+      if (/^-?\d+$/.test(suffix) && Number.isInteger(Number(suffix)))
+        return vs.VD_SOL_WHY.includes(s.slice(0, i));
+    }
+    return vs.VD_SOL_WHY.includes(s);
+  }
 
   // الف) مسیرِ سبز — رفت‌وبرگشت موفق *و* کنترل (فقط‌فروش) شکست می‌خورد
   // (پیش‌فرضِ controlErr="INSTR")، یعنی خرید واقعاً چیزی تحویل داد. یک
@@ -1569,8 +1584,8 @@ const ethers = globalThis.ethers;
     const legs = makeLegs();
     const { fetchImpl, calls } = makeFetch({ legs, simErr: "SUCCESS", controlSimStatus: 500 });
     const res = await vs.fetchVerdictSol(MINT, opts({ fetchImpl }));
-    ok(res && res.v === null && res.why === "rpc:simulateTransaction" && isFrozenWhy(res.why),
-      "a failed RPC call for the control simulation must give null/\"rpc:simulateTransaction\", " +
+    ok(res && res.v === null && res.why === "rpc:simulateTransaction:500" && isFrozenWhy(res.why),
+      "a failed RPC call for the control simulation must give null/\"rpc:simulateTransaction:500\", " +
       "never \"sell\" (got " + JSON.stringify(res) + ")");
     ok(calls.filter((c) => c === "rpc:simulateTransaction").length === 2,
       "the control call must actually have been attempted (and failed), got: " + calls.join(","));
@@ -1629,8 +1644,8 @@ const ethers = globalThis.ethers;
     const legs = makeLegs();
     const { fetchImpl, calls } = makeFetch({ legs, buyQuoteOk: false });
     const res = await vs.fetchVerdictSol(MINT, opts({ fetchImpl }));
-    ok(res && res.v === null && res.why === "jup:quote" && isFrozenWhy(res.why),
-      "a non-200 quote response from Jupiter must give null/\"jup:quote\", not \"nosell\" " +
+    ok(res && res.v === null && res.why === "jup:quote:404" && isFrozenWhy(res.why),
+      "a non-200 quote response from Jupiter must give null/\"jup:quote:404\", not \"nosell\" " +
       "(got " + JSON.stringify(res) + ")");
     ok(!calls.includes("swap-ix:buy"), "swap-instructions must not be requested after a failed quote");
   }
@@ -1665,8 +1680,8 @@ const ethers = globalThis.ethers;
     const legs = makeLegs();
     const { fetchImpl, calls } = makeFetch({ legs, rpcStatus: { simulateTransaction: 500 } });
     const res = await vs.fetchVerdictSol(MINT, opts({ fetchImpl }));
-    ok(res && res.v === null && res.why === "rpc:simulateTransaction" && isFrozenWhy(res.why),
-      "a 500 from simulateTransaction must give null/\"rpc:simulateTransaction\", not \"nosell\" " +
+    ok(res && res.v === null && res.why === "rpc:simulateTransaction:500" && isFrozenWhy(res.why),
+      "a 500 from simulateTransaction must give null/\"rpc:simulateTransaction:500\", not \"nosell\" " +
       "(got " + JSON.stringify(res) + ")");
     ok(calls.filter((c) => c === "rpc:simulateTransaction").length === 1,
       "a failed roundtrip simulateTransaction call must never be followed by a control call, got: " +
@@ -1687,8 +1702,8 @@ const ethers = globalThis.ethers;
       return fetchImpl(url, init);
     };
     const res = await vs.fetchVerdictSol(MINT, opts({ fetchImpl: wrapped }));
-    ok(res && res.v === null && res.why === "jup:swap-instructions" && isFrozenWhy(res.why),
-      "a 500 from the buy leg's swap-instructions must give null/\"jup:swap-instructions\" " +
+    ok(res && res.v === null && res.why === "jup:swap-instructions:500" && isFrozenWhy(res.why),
+      "a 500 from the buy leg's swap-instructions must give null/\"jup:swap-instructions:500\" " +
       "(got " + JSON.stringify(res) + ")");
     ok(!calls.includes("swap-ix:sell"),
       "a failed buy-leg swap-instructions must stop before the sell leg is even requested, got: " +
@@ -1704,9 +1719,9 @@ const ethers = globalThis.ethers;
     legs.legBuy.addressLookupTableAddresses = [ALT_ADDR];
     const { fetchImpl, calls } = makeFetch({ legs, rpcStatus: { getMultipleAccounts: 500 } });
     const res = await vs.fetchVerdictSol(MINT, opts({ fetchImpl }));
-    ok(res && res.v === null && res.why === "rpc:getMultipleAccounts" && isFrozenWhy(res.why),
+    ok(res && res.v === null && res.why === "rpc:getMultipleAccounts:500" && isFrozenWhy(res.why),
       "a 500 from getMultipleAccounts (fetching an address-lookup table) must give " +
-      "null/\"rpc:getMultipleAccounts\" (got " + JSON.stringify(res) + ")");
+      "null/\"rpc:getMultipleAccounts:500\" (got " + JSON.stringify(res) + ")");
     ok(!calls.includes("rpc:simulateTransaction"),
       "a failed getMultipleAccounts must stop before simulateTransaction, got: " + calls.join(","));
   }
@@ -1900,8 +1915,9 @@ const ethers = globalThis.ethers;
   {
     const { fetchImpl, calls } = makeFailoverFetch({ [RPC1]: "throw", [RPC2]: "403", [RPC3]: "throw", [RPC4]: "ok" });
     const res = await vs.fetchVerdictSol(MINT, { fetchImpl, rpcs: [RPC1, RPC2, RPC3, RPC4], jupBase: JUP, payer: PAYER });
-    ok(res && res.v === null && res.why === "rpc:getBalance", "when every tried endpoint fails the " +
-      "verdict must stay null/\"rpc:getBalance\", never \"nosell\" (got " + JSON.stringify(res) + ")");
+    ok(res && res.v === null && res.why === "rpc:getBalance:0", "when every tried endpoint fails the " +
+      "verdict must stay null/\"rpc:getBalance:0\" (the last attempt's status — RPC3 threw), never " +
+      "\"nosell\" (got " + JSON.stringify(res) + ")");
     ok(calls.length === vs.VD_SOL_RPC_MAX_TRIES,
       "at most VD_SOL_RPC_MAX_TRIES (" + vs.VD_SOL_RPC_MAX_TRIES + ") endpoints may be tried in one " +
       "request — got " + calls.length + ": " + calls.join(","));
@@ -1920,11 +1936,54 @@ const ethers = globalThis.ethers;
       JSON.stringify(res) + ", " + calls.length + " getBalance calls)");
   }
 
+  // ه) env.SOL_RPC — همان الگویِ env.CG_KEY. solRpcsFor (worker/index.js) آن
+  // را جلوی VD_SOL_RPCS می‌گذارد، بدونِ لمسِ خودِ فهرستِ عمومی. اول ثابت
+  // می‌کنیم solRpcsFor خودش درست است (بدونِ هیچ RPC واقعی)، بعد با
+  // fetchVerdictSol واقعی می‌سنجیم که خودِ failover هم همین ترتیب را
+  // رعایت می‌کند و سقفِ VD_SOL_RPC_MAX_TRIES رویِ فهرستِ *ترکیب‌شده* اعمال
+  // می‌شود، نه رویِ هرکدام جدا.
+  {
+    const { solRpcsFor } = await import("./index.js");
+    // کلید هم در مسیر هم در کوئری — دقیقاً همان دو جایی که یک URL می‌تواند
+    // یک کلید را حمل کند؛ بخشِ «۴. secret leak» پایین‌تر همین دو رشته را
+    // در خروجیِ /vd/rpc جست‌وجو می‌کند.
+    const SECRET_URL = "https://priv-rpc.example/token/SUPERSECRETPATH?api-key=SUPERSECRETQUERY";
+
+    ok(solRpcsFor({}).join(",") === vs.VD_SOL_RPCS.join(","),
+      "solRpcsFor with no SOL_RPC must leave today's public list untouched: " +
+      JSON.stringify(solRpcsFor({})));
+    ok(solRpcsFor(undefined).join(",") === vs.VD_SOL_RPCS.join(","),
+      "solRpcsFor must defend against a missing env, exactly like CG_KEY's own read");
+    ok(solRpcsFor({ SOL_RPC: 123 }).join(",") === vs.VD_SOL_RPCS.join(","),
+      "a non-string SOL_RPC must be ignored, exactly like a non-string CG_KEY would be");
+
+    const withSecret = solRpcsFor({ SOL_RPC: SECRET_URL });
+    ok(withSecret[0] === SECRET_URL && withSecret.length === vs.VD_SOL_RPCS.length + 1 &&
+      withSecret.slice(1).join(",") === vs.VD_SOL_RPCS.join(","),
+      "solRpcsFor with SOL_RPC set must try it first, with the public list intact behind it: " +
+      JSON.stringify(withSecret));
+
+    // SOL_RPC خودش شکست می‌خورد (throw) → failover باید همان‌طور که برای
+    // هر اندپوینتِ معمولی می‌رود به فهرستِ عمومی برود؛ سقفِ ۳ کلِ فهرستِ
+    // ترکیب‌شده (SOL_RPC + عمومی) را می‌شمارد، نه فقط فهرستِ عمومی را.
+    const { fetchImpl, calls } = makeFailoverFetch({
+      [SECRET_URL]: "throw", [withSecret[1]]: "403", [withSecret[2]]: "ok",
+    });
+    const res = await vs.fetchVerdictSol(MINT, { fetchImpl, rpcs: withSecret, jupBase: JUP, payer: PAYER });
+    ok(res && res.v === "sell", "a failing SOL_RPC should still fail over into the public list " +
+      "(got " + JSON.stringify(res) + ")");
+    ok(calls.join(",") === SECRET_URL + "," + withSecret[1] + "," + withSecret[2],
+      "SOL_RPC must be the first URL actually fetched, ahead of any public host, and the cap " +
+      "(VD_SOL_RPC_MAX_TRIES) must apply to the combined list — got: " + calls.join(","));
+  }
+
   console.log("[fetchVerdictSol rpc failover] first-endpoint-only failover (getBalance): a thrown " +
     "fetch or a 403 moves to the next endpoint and the winner sticks for the rest of the request; " +
     "at most " + vs.VD_SOL_RPC_MAX_TRIES + " endpoints tried per request; every candidate failing " +
-    "gives null/\"rpc\" (never \"nosell\"); an under-400ms deadline tries zero endpoints — all " +
-    "against an injected fake, no claim made about which real endpoint answers");
+    "gives null/\"rpc:getBalance:<status>\" (never \"nosell\"); an under-400ms deadline tries zero " +
+    "endpoints; env.SOL_RPC (via solRpcsFor) is tried first ahead of the public list, falls back " +
+    "into it on failure, and the cap still applies to the combined list — all against an injected " +
+    "fake, no claim made about which real endpoint answers");
 }
 
 /* ---- ۱۹. /vd/<mint سولانا> سرتاسری، و /t/<mint سولانا> → ۴۰۴ ----
@@ -2033,10 +2092,34 @@ const ethers = globalThis.ethers;
   ok(body2.v === null && body2.why === "payer-balance" && vs.VD_SOL_WHY.includes(body2.why),
     "/vd end to end did not surface fetchVerdictSol's reason: " + JSON.stringify(body2));
 
+  // یک mint سوم — این‌بار با env.SOL_RPC ست‌شده (کلید در مسیر و کوئریِ خودِ
+  // URL) و getBalance شکست‌خورده روی همان اندپوینتِ اختصاصی، تا ثابت شود
+  // مسیرِ سرتاسریِ /vd هم why را با پسوندِ عددیِ جدید می‌سازد *و* مسیر/کوئریِ
+  // SOL_RPC هیچ‌جای بدنه ظاهر نمی‌شود — نه در why، نه در هیچ کلیدِ دیگر.
+  const SOL_ADDR_3 = "So11111111111111111111111111111111111111112".slice(0, -1) + "4";
+  const SECRET_PATH_3 = "SUPERSECRETPATH3";
+  const SECRET_QUERY_3 = "SUPERSECRETQUERY3";
+  const SOL_RPC_URL_3 = "https://priv-rpc-3.example/token/" + SECRET_PATH_3 + "?api-key=" + SECRET_QUERY_3;
+  globalThis.fetch = async (u, o) => {
+    const b = JSON.parse(o.body);
+    if (b.method === "getBalance") return new Response("forbidden", { status: 403 }); // فقط SOL_RPC صدا زده می‌شود، همیشه ۴۰۳
+    return jsonRes({ error: "unexpected" }, 500);
+  };
+  const res3 = await worker.fetch(new Request(ORIGIN + "/vd/" + SOL_ADDR_3,
+    { headers: { "cf-connecting-ip": "203.0.113.63" } }), { ...spyEnv, SOL_RPC: SOL_RPC_URL_3 }, {});
+  const body3 = await res3.json();
+  const raw3 = JSON.stringify(body3);
+  ok(body3.v === null && body3.why === "rpc:getBalance:403" && vs.VD_SOL_WHY.includes("rpc:getBalance"),
+    "/vd end to end with SOL_RPC set must surface the new \"rpc:<method>:<status>\" shape " +
+    "(got " + raw3 + ")");
+  ok(!raw3.includes(SECRET_PATH_3) && !raw3.includes(SECRET_QUERY_3) && !raw3.includes("api-key"),
+    "SOL_RPC's path and query must never appear in /vd's response body, why included: " + raw3);
+
   globalThis.fetch = trackingFetch; // برگرداندنِ موکِ پیش‌فرض برای هرچه بعد از این اجرا می‌شود
   console.log("[vd/t solana] /vd/<solana mint> runs the Solana verdict pipeline end to end " +
     "through worker.fetch (v:\"sell\"); /t/<solana mint> is still 404, exactly like an unknown " +
-    "path, until the token page itself can render Solana");
+    "path, until the token page itself can render Solana; with env.SOL_RPC set, why now surfaces " +
+    "\"rpc:<method>:<status>\" end to end and the secret URL's path/query never appear in the body");
 }
 
 /* ---- ۲۰. GET /vd/rpc — ماتریسِ اندپوینت×متد ----
@@ -2138,7 +2221,38 @@ const ethers = globalThis.ethers;
   ok(!raw.includes("https://") && !raw.includes("connection refused") && !raw.includes("Method not found"),
     "/vd/rpc's body must carry no URL and no free-text error message: " + raw);
 
-  // ز) ریت‌لیمیت — /vd/rpc روی همان سطلِ «vd» است، پس مصرفِ همین مسیر هم رد می‌شود.
+  // ز) env.SOL_RPC — ردیفِ اول با فقط hostname، هرگز مسیر یا کوئری؛ کلید هم
+  // در مسیر هم در کوئریِ خودِ URL گذاشته شده تا هر دو جا سنجیده شود.
+  {
+    const SECRET_HOST = "priv-rpc.example";
+    const SECRET_PATH = "SUPERSECRETPATH";
+    const SECRET_QUERY = "SUPERSECRETQUERY";
+    const SOL_RPC_URL = "https://" + SECRET_HOST + "/token/" + SECRET_PATH + "?api-key=" + SECRET_QUERY;
+    const secretCalls = [];
+    globalThis.fetch = async (url, init) => {
+      const u = String(url);
+      const body = JSON.parse(init.body);
+      secretCalls.push(new URL(u).hostname + "|" + body.method);
+      return new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, result: "ok" }), { status: 200 });
+    };
+    const secretRes = await worker.fetch(new Request(ORIGIN + "/vd/rpc",
+      { headers: { "cf-connecting-ip": "203.0.113.72" } }), { ...spyEnv, SOL_RPC: SOL_RPC_URL }, {});
+    ok(secretRes.status === 200, "/vd/rpc with SOL_RPC set should still be 200 (got " + secretRes.status + ")");
+    const secretBody = await secretRes.json();
+    const secretRaw = JSON.stringify(secretBody);
+    ok(Array.isArray(secretBody.endpoints) && secretBody.endpoints.length === vs.VD_SOL_RPCS.length + 1,
+      "with SOL_RPC set /vd/rpc must report exactly one extra row (the secret endpoint), got: " + secretRaw);
+    ok(secretBody.endpoints[0] && secretBody.endpoints[0].h === SECRET_HOST,
+      "SOL_RPC's row must be first, and named only by its hostname: " +
+      JSON.stringify(secretBody.endpoints[0]));
+    ok(!secretRaw.includes(SECRET_PATH) && !secretRaw.includes(SECRET_QUERY) && !secretRaw.includes("api-key"),
+      "SOL_RPC's path and query (present in both the URL's path and its query string) must never " +
+      "appear anywhere in /vd/rpc's response body: " + secretRaw);
+    ok(secretCalls[0] === SECRET_HOST + "|" + vs.VD_SOL_RPC_METHODS[0],
+      "SOL_RPC must actually be the first endpoint probed by /vd/rpc, got calls: " + secretCalls.join(","));
+  }
+
+  // ح) ریت‌لیمیت — /vd/rpc روی همان سطلِ «vd» است، پس مصرفِ همین مسیر هم رد می‌شود.
   const { RL_LIMIT: RL_LIMIT_VDRPC } = await import("./index.js");
   const RL_IP = "203.0.113.71";
   for (let i = 0; i < RL_LIMIT_VDRPC; i++) {
@@ -2154,8 +2268,9 @@ const ethers = globalThis.ethers;
     "VD_SOL_RPCS candidate — exactly {h,methods:[{m,ok,status,code,ms}]} per row, a thrown fetch " +
     "shows status:0/ok:false/code:null, a 200-with-JSON-RPC-error surfaces its numeric code (never " +
     "message text), simulateTransaction is always skipped:\"unprobeable\" without ever actually " +
-    "being called, no-store, shares the \"vd\" rate-limit bucket — no claim made about which real " +
-    "endpoint answers which method from Cloudflare");
+    "being called, no-store, shares the \"vd\" rate-limit bucket, and with env.SOL_RPC set its row " +
+    "is first and hostname-only — its path and query (planted in both) never appear anywhere in the " +
+    "body — no claim made about which real endpoint answers which method from Cloudflare");
 }
 
 console.log(fails === 0
@@ -2170,8 +2285,10 @@ console.log(fails === 0
     + "fetchVerdictSol all covered against injected fakes; /vd/<mint> wired end to end; "
     + "/t/<mint> still 404\n" +
     "[solana rpc] RPC endpoint failover (first-call-only, capped, never nosell), per-method \"why\" "
-    + "reasons (rpc:<method>, jup:quote, jup:swap-instructions), and GET /vd/rpc's endpoint×method "
-    + "matrix all covered against injected fakes — no claim made about which real endpoint answers "
-    + "which method"
+    + "reasons now carrying a numeric status (rpc:<method>:<status>, jup:quote:<status>, "
+    + "jup:swap-instructions:<status>, verified via the frozen-prefix+integer-suffix rule), "
+    + "env.SOL_RPC tried first ahead of the public list (via solRpcsFor, same shape as CG_KEY) with "
+    + "its path/query never surfacing anywhere, and GET /vd/rpc's endpoint×method matrix all covered "
+    + "against injected fakes — no claim made about which real endpoint answers which method"
   : "[gt proxy] " + fails + " FAILURES");
 process.exit(fails === 0 ? 0 : 1);

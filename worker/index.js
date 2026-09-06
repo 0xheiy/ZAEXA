@@ -502,6 +502,25 @@ async function ogFetchVerdict(addr, meta, deadlineAt, env, ctx) {
   );
 }
 
+/* env.SOL_RPC — یک RPC اختصاصیِ سولانا، دقیقاً هم‌شکل با env.CG_KEY بالای
+   همین فایل: خوانده می‌شود defensively (typeof … === "string")، در پنل
+   کلادفلر به‌صورتِ یک Secret می‌نشیند، و هرگز به مرورگر نمی‌رسد. اگر ست شده
+   باشد، *اولین* اندپوینتی است که fetchVerdictSol (و پروبِ GET /vd/rpc
+   پایین‌تر) امتحان می‌کنند؛ فهرستِ عمومیِ VD_SOL_RPCS دقیقاً پشتِ آن، بدونِ
+   هیچ تغییری، به‌عنوانِ fallback می‌ماند. غایب‌بودنش رفتار را بایت‌به‌بایت
+   همان چیزی نگه می‌دارد که امروز است (خودِ VD_SOL_RPCS، بدونِ افزوده).
+
+   ⚠️ برخلافِ CG_KEY که همیشه در هدر می‌رود، یک RPC اختصاصی معمولاً کلید را
+   در خودِ URL حمل می‌کند — یا در مسیر (…/rpc/<KEY>) یا در کوئری
+   (…?api-key=<KEY>). پس این URL کاملش هرگز نباید در هیچ پاسخ، هیچ لاگ، یا
+   خروجیِ GET /vd/rpc ظاهر شود. diagVerdictRpc پایین‌تر همیشه فقط
+   new URL(rpcUrl).hostname را گزارش می‌کند — همان تابعی که مسیر و کوئری را
+   خودش دور می‌ریزد، نه چیزی که این تابع باید جداگانه پاک کند. */
+export function solRpcsFor(env) {
+  const solRpc = (env && typeof env.SOL_RPC === "string" && env.SOL_RPC) || "";
+  return solRpc ? [solRpc, ...VD_SOL_RPCS] : VD_SOL_RPCS;
+}
+
 /* همان سوال، برای سولانا — بدونِ متادیتای GeckoTerminal، چون
    fetchVerdictSol چیزی از قیمت/دسیمال نمی‌خواهد (رفت‌وبرگشتش را جوپیتر با
    quote خودش حساب می‌کند، نه با priceUsd ما).
@@ -512,13 +531,13 @@ async function ogFetchVerdict(addr, meta, deadlineAt, env, ctx) {
    شیءِ برگشتیِ fetchVerdictSol جدا می‌کنیم. هرگز کش نمی‌شود، چون فقط وقتی
    پر می‌شود که computeFn واقعاً اجرا شده باشد (نه از cache hit) و
    cachedVerdict فقط verdictِ sell/nosell را می‌نویسد، نه why را. */
-async function solFetchVerdict(mint, deadlineAt, ctx) {
+async function solFetchVerdict(mint, deadlineAt, ctx, env) {
   let why; // فقط computeFn (نه cache hit) آن را پر می‌کند، و فقط وقتی v نهایی null باشد معنا دارد
   const v = await cachedVerdict(
     "/v1/solana/" + mint,
     async () => {
       const res = await fetchVerdictSol(mint,
-        { deadlineAt, fetchImpl: fetch, rpcs: VD_SOL_RPCS, jupBase: VD_SOL_JUP_BASE, payer: VD_SOL_PAYER });
+        { deadlineAt, fetchImpl: fetch, rpcs: solRpcsFor(env), jupBase: VD_SOL_JUP_BASE, payer: VD_SOL_PAYER });
       why = res.why;
       return res.v;
     },
@@ -623,10 +642,15 @@ const VD_RPC_PROBE_BUDGET_MS = 4000;
    می‌گیرد.
 
    خروجی فقط میزبان/نامِ متد/ok/کدِ HTTP/کدِ JSON-RPC/میلی‌ثانیه است — نه
-   بدنه، نه URL کامل، نه متنِ خطا. */
-async function diagVerdictRpc() {
+   بدنه، نه URL کامل، نه متنِ خطا.
+
+   ⚠️ اگر env.SOL_RPC ست شده باشد (solRpcsFor بالا)، همان اندپوینتِ
+   اختصاصی هم *ردیفِ اول* همین ماتریس است — ولی باز هم فقط با hostname، نه
+   URL کامل؛ هیچ استثنایی برای این یک اندپوینت در قاعده‌ی بالا نیست. */
+async function diagVerdictRpc(env) {
   const deadlineAt = Date.now() + VD_RPC_PROBE_BUDGET_MS;
-  const endpoints = await Promise.all(VD_SOL_RPCS.map(async (rpcUrl) => {
+  const rpcs = solRpcsFor(env);
+  const endpoints = await Promise.all(rpcs.map(async (rpcUrl) => {
     const methods = [];
     for (const m of VD_SOL_RPC_METHODS) {
       if (m === "simulateTransaction") {
@@ -657,7 +681,7 @@ async function diagVerdict(request, url, env, ctx) {
   // chainOf/parsing بیاید؛ وگرنه این مسیر فقط با ۴۰۰ («bad address») رد
   // می‌شد، نه با پاسخِ خودِ probe. همان سطلِ نرخِ «vd» بالا برایش هم سنجیده
   // شده، پس این مسیر نمی‌تواند سهمیه‌ای جدا از /vd/<mint> بخورد.
-  if (url.pathname === "/vd/rpc") return diagVerdictRpc();
+  if (url.pathname === "/vd/rpc") return diagVerdictRpc(env);
 
   const addr = url.pathname.slice("/vd/".length);
   const chain = chainOf(addr);
@@ -668,7 +692,7 @@ async function diagVerdict(request, url, env, ctx) {
     // «why» فقط وقتی v واقعاً null باشد چیزی غیرِ undefined است؛ JSON.stringify
     // کلیدی با مقدارِ undefined را خودش حذف می‌کند، پس یک sell/nosell همان
     // شکلِ {v,ms} امروز را بایت‌به‌بایت نگه می‌دارد.
-    const { v, why } = await solFetchVerdict(addr, t0 + OG_BUDGET_MS, ctx);
+    const { v, why } = await solFetchVerdict(addr, t0 + OG_BUDGET_MS, ctx, env);
     return vdDone(200, { v, ms: Date.now() - t0, why });
   }
   const meta = await ogFetchMeta(addr, env);

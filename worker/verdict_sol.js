@@ -235,16 +235,24 @@ export function decodeLookupTable(data) {
 export const SOL_MINT_ADDR = "So11111111111111111111111111111111111111112";
 export const VD_SOL_NOTIONAL_SOL = 0.05;
 
-// ⚠️ هیچ‌کدامِ این چهار آدرس از کلادفلر تایید نشده — این کانتینر اصلاً به هیچ
-// RPC سولانایی دسترسی ندارد (بالای همین فایل هم همین را می‌گوید)، پس ترتیبِ
-// زیر فقط یک حدس است، نه نتیجه‌ی اندازه‌گیری. حدس این‌طور بوده: publicnode و
-// drpc به‌خاطرِ شهرتِ کلی‌شان در پاسخ‌گویی از ترافیکِ دیتاسنترها جلوتر آمده‌اند؛
-// api.mainnet-beta.solana.com که مستنداتِ خودش می‌گوید برای تولید نیست و
-// معمولاً همین ترافیک را رد می‌کند عمداً سوم است، نه اول؛ و onfinality چهارم
-// چون کم‌شناخته‌ترین گزینه است. تنها چیزی که واقعاً این حدس را می‌سنجد
-// GET /vd/rpc در worker/index.js است (diagVerdictRpc) — تا آن مسیر از یک
-// دیپلویِ واقعی صدا زده نشود، هیچ‌کس (نه این کد، نه این کامنت) درباره‌ی
-// اینکه کدام‌یک واقعاً از کلادفلر جواب می‌دهد چیزی نمی‌داند.
+// ⚠️ اندازه‌گیری‌شده از خودِ کلادفلر (GET /vd/rpc در یک دیپلویِ واقعی)، ۶
+// سپتامبرِ ۲۰۲۶: هیچ‌کدامِ این چهار اندپوینتِ رایگان کلِ مسیرِ verdict را سرِپا
+// جواب نمی‌دهد.
+//   • api.mainnet-beta.solana.com → ۴۰۳ روی هر متد، بی‌قیدوشرط (مستنداتِ
+//     خودش هم می‌گوید این اندپوینت برای تولید نیست).
+//   • solana.drpc.org → ۴۰۰ روی هر متد.
+//   • solana.api.onfinality.io → ۴۲۹ روی هر متد.
+//   • solana-rpc.publicnode.com → جزئی و throttled: مثلاً getMultipleAccounts
+//     با یک درخواستِ کوچک ۳۰ms جواب داد، ولی getBalance رویِ همان میزبان ۴۲۹
+//     گرفت — یعنی «کار می‌کند» بسته به متد و لحظه فرق دارد، نه یک قطعیت.
+// دلیلِ مشترکِ هر چهارتا یکی است: IP خروجیِ کلادفلر مشترک و داغ است — دقیقاً
+// همان مشکلی که این پروژه با CG_KEY (پراکسیِ CoinGecko به‌جای GeckoTerminالِ
+// بی‌کلید) از قبل حلش کرده بود. پس نتیجه‌گیریِ درست «یک اندپوینتِ رایگانِ
+// پنجم را امتحان کن» نیست: env.SOL_RPC (پایین‌تر در worker/index.js، هم‌شکل
+// با env.CG_KEY) تنظیمِ *پشتیبانی‌شده* است؛ فهرستِ زیر فقط fallbackِ
+// best-effort است، نه یک راه‌حلِ کامل. کسی که این را یک ماه بعد می‌خواند لازم
+// نیست دوباره کشفش کند — GET /vd/rpc هنوز همان ابزاری است که این وضعیت را
+// (یا تغییرش را) از یک دیپلویِ واقعی نشان می‌دهد.
 export const VD_SOL_RPCS = [
   "https://solana-rpc.publicnode.com",
   "https://solana.drpc.org",
@@ -286,20 +294,33 @@ const PLACEHOLDER_BLOCKHASH = "1".repeat(32);
    هیچ موردِ بی‌برچسب پیدا نکند.
 
    نگاشتِ دقیق (یک‌جا نوشته شده تا پراکنده در کامنتِ کنارِ هر return نباشد):
-     • "rpc:<method>" فقط وقتی rpcCall خودش برای همان متدِ مشخص {ok:false}
-       داده — یعنی پرتابِ شبکه‌ای، غیرِ ۲۰۰، یا بدنه‌ای که JSON.parse رویش
-       شکست خورد. نامِ متد از خودِ کد است (رشته‌ای که به rpcCall پاس داده
-       می‌شود)، نه یک کپیِ جدا که بتواند از کد جدا بیفتد — به همین دلیل قبلاً
-       یک "rpc" تنها همه‌چیز را قاطی می‌کرد: می‌گفت شکست خورد، نه اینکه کدام
-       تماس. هر بررسیِ شکل *بعد از* ok:true (فیلدی که انتظارش می‌رفت نبود)
-       زیرِ "internal" می‌رود، نه "rpc:…" — چون آن دیگر شکستِ خودِ تماس نیست.
-     • "jup:<endpoint>" همان قاعده برای jupCall است، دو سطل: "jup:quote"
-       برای هر دو quote (خرید و فروش، هر دو روی همان مسیرِ /swap/v1/quote)،
-       و "jup:swap-instructions" برای هر دو swap-instructions (خرید و
-       فروش، هر دو روی /swap/v1/swap-instructions). برای دو
-       swap-instructions که مفهومِ route اصلاً ندارند، یک بدنه‌ی ok:true
-       ولی بدونِ json هم زیرِ همان "jup:swap-instructions" می‌ماند چون
-       سطلِ اختصاصیِ دیگری برایشان نیست (برخلافِ quote که "no-route" دارد).
+     • "rpc:<method>:<status>" فقط وقتی rpcCall خودش برای همان متدِ مشخص
+       {ok:false} داده — یعنی پرتابِ شبکه‌ای، غیرِ ۲۰۰، یا خطای سطحِ JSON-RPC.
+       نامِ متد از خودِ کد است (رشته‌ای که به rpcCall پاس داده می‌شود)، نه یک
+       کپیِ جدا که بتواند از کد جدا بیفتد — به همین دلیل قبلاً یک "rpc" تنها
+       همه‌چیز را قاطی می‌کرد: می‌گفت شکست خورد، نه اینکه کدام تماس. بخشِ
+       عددیِ آخر (rpcFailReason، کنارِ خودِ rpcCall پایین‌تر) هم می‌گوید *چرا*
+       شکست خورد: کدِ HTTP وقتی خودِ HTTP غیرِ ۲۰۰ بود یا fetch پرتاب/تایم‌اوت
+       کرد (۰ برای این یکی)، یا کدِ عددیِ JSON-RPC وقتی HTTP خودش ۲۰۰ بود ولی
+       بدنه خطا داشت — هرگز از رویِ متنِ error.message. هر بررسیِ شکل *بعد از*
+       ok:true (فیلدی که انتظارش می‌رفت نبود) زیرِ "internal" می‌رود، نه
+       "rpc:…" — چون آن دیگر شکستِ خودِ تماس نیست.
+     • "jup:<endpoint>:<status>" همان قاعده برای jupCall است، دو سطل:
+       "jup:quote:<status>" برای هر دو quote (خرید و فروش، هر دو روی همان
+       مسیرِ /swap/v1/quote)، و "jup:swap-instructions:<status>" برای هر دو
+       swap-instructions (خرید و فروش، هر دو روی /swap/v1/swap-instructions).
+       بخشِ عددی همیشه کدِ HTTPِ همان تماس است (۰ برای پرتابِ شبکه‌ای/تایم‌اوت)
+       — جوپیتر کدِ خطای سطحِ JSON-RPC ندارد، پس اینجا فقط یک عدد در کار است،
+       نه دوتا مثلِ rpc. برای دو swap-instructions که مفهومِ route اصلاً
+       ندارند، یک بدنه‌ی ok:true ولی بدونِ json هم زیرِ همان
+       "jup:swap-instructions:200" می‌ماند چون سطلِ اختصاصیِ دیگری برایشان
+       نیست (برخلافِ quote که "no-route" دارد).
+     • ⚠️ هر دو خانواده («rpc:…»، «jup:…») همیشه دقیقاً سه بخشِ جداشده با «:»
+       دارند: خودِ پیشوند، نامِ متد/اندپوینت، و یک عددِ صحیح در آخر — هرگز متنِ
+       آزاد. VD_SOL_WHY پایین‌تر فقط *پیشوندِ دوبخشی* را نگه می‌دارد (مثلاً
+       "rpc:getMultipleAccounts")؛ عضویت در فهرستِ منجمد یعنی این پیشوند
+       یکی از آن‌هاست و بخشِ آخر با Number.isInteger معتبر است — دقیقاً همان
+       چیزی که worker/test.mjs با isFrozenWhy می‌سنجد.
      • "no-route" فقط برای دو quote (خرید/فروش): تماس موفق بود (ok:true)
        ولی outAmount در کار نبود.
      • "payer-balance" همان‌طور که خودِ تعریف می‌گوید: یا فی‌پیر کمتر از
@@ -586,7 +607,12 @@ function compileV0Message(payer, instructions, lookupTables) {
 
 /* ---------------------------------------------------------------------
    شبکه — همه‌چیز تزریق‌شدنی، هیچ‌وقت پرتاب نمی‌کند.
-   --------------------------------------------------------------------- */
+   برخلافِ نسخه‌ی قدیمی که فقط ok:true/false برمی‌گرداند، حالا status/code
+   هم همراهش می‌آید — دقیقاً همان دو عددی که probeRpcMethod پایین‌تر برای
+   GET /vd/rpc نگه می‌دارد. دلیل: خودِ حلقه‌ی failover فقط به ok نیاز دارد،
+   ولی why (پایین‌تر در fetchVerdictSol، از دلِ rpcFailReason) باید بگوید
+   شکست از کجا بود — ۴۲۹؟ تایم‌اوت؟ خطای سطحِ JSON-RPC؟ — و برای آن این دو
+   عدد لازم است، نه یک ok خامِ تنها. */
 async function rpcCall(fetchImpl, rpcUrl, method, params, timeoutMs) {
   const ac = new AbortController();
   const timer = setTimeout(() => ac.abort(), timeoutMs);
@@ -599,15 +625,35 @@ async function rpcCall(fetchImpl, rpcUrl, method, params, timeoutMs) {
       signal: ac.signal,
     });
   } catch {
-    return { ok: false }; // پرتابِ شبکه‌ای → نامعلوم، نه ریوِرت
+    return { ok: false, status: 0, code: null }; // پرتابِ شبکه‌ای/تایم‌اوت → نامعلوم، نه ریوِرت
   } finally {
     clearTimeout(timer);
   }
-  if (!res || res.status !== 200) return { ok: false }; // غیرِ ۲۰۰ → نامعلوم
+  const status = res ? res.status : 0;
+  if (!res || status !== 200) return { ok: false, status, code: null }; // غیرِ ۲۰۰ → نامعلوم
   let body;
-  try { body = await res.json(); } catch { return { ok: false }; }
-  if (!body || typeof body !== "object" || body.error) return { ok: false };
-  return { ok: true, result: body.result };
+  try { body = await res.json(); } catch { return { ok: false, status, code: null }; }
+  if (!body || typeof body !== "object") return { ok: false, status, code: null };
+  if (body.error) {
+    // کدِ عددیِ JSON-RPC، فقط وقتی واقعاً عدد است — هرگز متنِ error.message.
+    const code = typeof body.error === "object" && typeof body.error.code === "number"
+      ? body.error.code : null;
+    return { ok: false, status, code };
+  }
+  return { ok: true, status, code: null, result: body.result };
+}
+
+/* ساختنِ بخشِ عددیِ "rpc:<method>:<status>" از رویِ خروجیِ rpcCall: کدِ
+   عددیِ JSON-RPC وقتی HTTP خودش ۲۰۰ بود ولی بدنه خطا داشت، وگرنه خودِ کدِ
+   HTTP (۰ برای پرتابِ شبکه‌ای/تایم‌اوت). attempt نظری null هم می‌تواند
+   باشد (هرگز واقعاً در مسیرِ fetchVerdictSol پیش نمی‌آید، چون پیش از
+   رسیدن به اینجا حلقه یا با "deadline" برمی‌گردد یا حداقل یک بار تلاش
+   کرده) — ولی status:0 یک پیش‌فرضِ امن است، نه یک throw. */
+function rpcFailReason(method, attempt) {
+  const status = attempt ? attempt.status : 0;
+  const code = attempt ? attempt.code : null;
+  const num = status === 200 && code != null ? code : status;
+  return "rpc:" + method + ":" + num;
 }
 
 /* ---------------------------------------------------------------------
@@ -663,14 +709,14 @@ async function jupCall(fetchImpl, jupBase, path, opts, timeoutMs) {
   try {
     res = await fetchImpl(url, init);
   } catch {
-    return { ok: false };
+    return { ok: false, status: 0, json: null }; // پرتابِ شبکه‌ای/تایم‌اوت → بخشِ عددیِ why برابرِ ۰
   } finally {
     clearTimeout(timer);
   }
-  if (!res) return { ok: false };
+  if (!res) return { ok: false, status: 0, json: null };
   let json = null;
   try { json = await res.json(); } catch { /* پایین با json:null رد می‌شود */ }
-  return { ok: !!res.ok, json };
+  return { ok: !!res.ok, status: res.status, json };
 }
 
 /* ---------------------------------------------------------------------
@@ -719,13 +765,16 @@ export async function fetchVerdictSol(mint, opts) {
     // همان قاعده‌ی مقایسه‌ای که کل این پروژه رویش ایستاده.
     let rpc = null;
     let balRes = null;
+    let lastBalAttempt = null; // فقط برای بخشِ عددیِ why اگر همه شکست بخورند — آخرین تلاش، نه اولین
     for (let i = 0; i < rpcs.length && i < VD_SOL_RPC_MAX_TRIES; i++) {
       if (pastDeadline()) return unknown("deadline");
       const attempt = await rpcCall(fetchImpl, rpcs[i], "getBalance",
         [payer, { commitment: "confirmed" }], timeoutMs);
+      lastBalAttempt = attempt;
       if (attempt.ok) { rpc = rpcs[i]; balRes = attempt; break; }
     }
-    if (!rpc) return unknown("rpc:getBalance"); // هیچ‌کدام از اندپوینت‌های امتحان‌شده جواب نداد
+    // هیچ‌کدام از اندپوینت‌های امتحان‌شده جواب نداد.
+    if (!rpc) return unknown(rpcFailReason("getBalance", lastBalAttempt));
     if (!balRes.result || typeof balRes.result.value !== "number") return unknown("payer-balance");
     if (balRes.result.value < VD_SOL_MIN_PAYER_LAMPORTS) return unknown("payer-balance");
 
@@ -736,7 +785,7 @@ export async function fetchVerdictSol(mint, opts) {
       query: { inputMint: SOL_MINT_ADDR, outputMint: mint, amount: String(amountLamports),
                slippageBps: "500", onlyDirectRoutes: "true" },
     }, timeoutMs);
-    if (!quoteBuyRes.ok) return unknown("jup:quote");
+    if (!quoteBuyRes.ok) return unknown("jup:quote:" + quoteBuyRes.status);
     if (!quoteBuyRes.json || !quoteBuyRes.json.outAmount) return unknown("no-route"); // بی‌مسیر → نامعلوم، نه nosell
     const quoteBuy = quoteBuyRes.json;
 
@@ -752,7 +801,7 @@ export async function fetchVerdictSol(mint, opts) {
     const quoteSellRes = await jupCall(fetchImpl, jupBase, "/swap/v1/quote", {
       query: { inputMint: mint, outputMint: SOL_MINT_ADDR, amount: String(sellAmount), slippageBps: "500" },
     }, timeoutMs);
-    if (!quoteSellRes.ok) return unknown("jup:quote");
+    if (!quoteSellRes.ok) return unknown("jup:quote:" + quoteSellRes.status);
     if (!quoteSellRes.json || !quoteSellRes.json.outAmount) return unknown("no-route");
     const quoteSell = quoteSellRes.json;
 
@@ -762,12 +811,12 @@ export async function fetchVerdictSol(mint, opts) {
       method: "POST", body: { userPublicKey: payer, quoteResponse: quoteBuy, wrapAndUnwrapSol: true },
     }, timeoutMs);
     // این اندپوینت مفهومِ route ندارد، پس سطلِ اختصاصیِ دیگری هم برایش نیست.
-    if (!legBuyRes.ok || !legBuyRes.json) return unknown("jup:swap-instructions");
+    if (!legBuyRes.ok || !legBuyRes.json) return unknown("jup:swap-instructions:" + legBuyRes.status);
 
     const legSellRes = await jupCall(fetchImpl, jupBase, "/swap/v1/swap-instructions", {
       method: "POST", body: { userPublicKey: payer, quoteResponse: quoteSell, wrapAndUnwrapSol: true },
     }, timeoutMs);
-    if (!legSellRes.ok || !legSellRes.json) return unknown("jup:swap-instructions");
+    if (!legSellRes.ok || !legSellRes.json) return unknown("jup:swap-instructions:" + legSellRes.status);
 
     // ۵. ترکیبِ یک تراکنشِ v0 واحد، و حل کردنِ هر جدولِ آدرسی که هرکدام از
     // دو leg نام برده.
@@ -780,7 +829,7 @@ export async function fetchVerdictSol(mint, opts) {
     if (composed.altAddrs.length > 0) {
       const altRes = await rpcCall(fetchImpl, rpc, "getMultipleAccounts",
         [composed.altAddrs, { encoding: "base64", commitment: "confirmed" }], timeoutMs);
-      if (!altRes.ok) return unknown("rpc:getMultipleAccounts");
+      if (!altRes.ok) return unknown(rpcFailReason("getMultipleAccounts", altRes));
       if (!altRes.result || !Array.isArray(altRes.result.value) ||
           altRes.result.value.length !== composed.altAddrs.length) return unknown("internal");
       for (let i = 0; i < altRes.result.value.length; i++) {
@@ -808,7 +857,7 @@ export async function fetchVerdictSol(mint, opts) {
     if (pastDeadline()) return unknown("deadline");
     const simRes = await rpcCall(fetchImpl, rpc, "simulateTransaction",
       [b64tx, { sigVerify: false, replaceRecentBlockhash: true, encoding: "base64" }], timeoutMs);
-    if (!simRes.ok) return unknown("rpc:simulateTransaction");
+    if (!simRes.ok) return unknown(rpcFailReason("simulateTransaction", simRes));
     if (!simRes.result || !simRes.result.value ||
         !Object.prototype.hasOwnProperty.call(simRes.result.value, "err")) return unknown("internal");
     const err = simRes.result.value.err;
@@ -838,7 +887,7 @@ export async function fetchVerdictSol(mint, opts) {
     // 🔴 یک verdictِ «sell» هرگز نباید برگردد مگر اینکه همین شبیه‌سازیِ کنترل
     // واقعاً اجرا و شکست خورده باشد. اگر مهلت پیش از رسیدن به آن تمام شود، یا
     // خودِ تماسِ RPCِ کنترل شکست بخورد، جواب باید null باشد ("deadline" یا
-    // "rpc:simulateTransaction") — هرگز sell. یک «sell»ِ تاییدنشده روی یک
+    // "rpc:simulateTransaction:<status>") — هرگز sell. یک «sell»ِ تاییدنشده روی یک
     // توکنِ کلاهبردار بدترین خروجیِ ممکنِ این سیستم است، بدتر از هیچ‌نگفتن.
     if (pastDeadline()) return unknown("deadline");
     let controlComposed;
@@ -860,7 +909,7 @@ export async function fetchVerdictSol(mint, opts) {
 
     const controlSimRes = await rpcCall(fetchImpl, rpc, "simulateTransaction",
       [controlB64tx, { sigVerify: false, replaceRecentBlockhash: true, encoding: "base64" }], timeoutMs);
-    if (!controlSimRes.ok) return unknown("rpc:simulateTransaction"); // هرگز sell بدونِ کنترلِ واقعاً اجراشده
+    if (!controlSimRes.ok) return unknown(rpcFailReason("simulateTransaction", controlSimRes)); // هرگز sell بدونِ کنترلِ واقعاً اجراشده
     if (!controlSimRes.result || !controlSimRes.result.value ||
         !Object.prototype.hasOwnProperty.call(controlSimRes.result.value, "err")) return unknown("internal");
     const controlErr = controlSimRes.result.value.err;
