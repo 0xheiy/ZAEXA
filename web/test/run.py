@@ -847,6 +847,20 @@ def check_landing_page():
         "_site/index.html — the site root would go missing on the next deploy")
     src = open(path, encoding="utf-8").read()
 
+    # ⚠️ باگ زنده: زاعکسا.com هیچ favicon نداشت — مرورگر کره‌ی خالیِ پیش‌فرض
+    # را روی تب نشان می‌داد. index.html آیکن را به‌عنوانِ data URI دارد،
+    # چون یک فایل SVG جدا زیر _site هرگز کپی نمی‌شود (خط ساخت Cloudflare
+    # فقط web/*.html و چند فایل معین را کپی می‌کند). پس این نگهبان یک فایل
+    # روی دیسک نمی‌گردد؛ خطِ <link rel="icon"> باید *عیناً* — بایت‌به‌بایت —
+    # هم در index.html هم در landing.html باشد، وگرنه دو صفحه دو آیکن
+    # متفاوت (یا یکی هیچ‌کدام) نشان می‌دهند.
+    idx_for_icon = open(os.path.join(HERE, "..", "index.html"), encoding="utf-8").read()
+    im = re.search(r'<link rel="icon"[^>]*>', idx_for_icon)
+    assert im, "index.html itself has no <link rel=\"icon\"> any more — nothing to compare against"
+    assert im.group(0) in src, (
+        "web/landing.html is missing the exact favicon <link> that index.html carries — "
+        "zaexa.com (served from landing.html) would show the browser's blank default icon")
+
     # بر اساس دامنه، نه آدرسِ کامل: لینکِ قرارداد شاملِ خودِ آدرس است و آن را
     # نگهبانِ check_one_executor_address می‌سنجد. اگر اینجا هم آدرسِ کامل را
     # قفل کنیم، یک قراردادِ تازه دو نگهبان را با یک تغییر می‌شکند.
@@ -878,6 +892,33 @@ def check_landing_page():
     print("[landing] %d bytes, %d embedded fonts, %d og tags, %d external links (all allowed)"
           % (len(src), len(faces), len(og), len(refs)))
 
+    # ---- [landing routes] هر /app#... باید نمایی باشد که خودِ اپ می‌شناسد ----
+    # ⚠️ این دومین‌بار است که لینکی به داخلِ اپ از نامِ واقعیِ نماها جا مانده:
+    # Portfolio و Flow هر دو بی‌صدا به نمای سواپ می‌رفتند چون بی‌هش بودند.
+    # فهرستِ نماهای شناخته‌شده اینجا دستی نوشته نمی‌شود — از خودِ index.html،
+    # از همان آرایه‌ای که setView() رویش fallback می‌زند، بیرون کشیده می‌شود؛
+    # یک فهرستِ دستی درست همینِ تست هم روزی از اپِ واقعی جا می‌ماند.
+    idx_src = open(os.path.join(HERE, "..", "index.html"), encoding="utf-8").read()
+    m = re.search(r'if\(!\[([^\]]*)\]\.includes\(v\)\)v="swap"', idx_src)
+    assert m, (
+        "could not find the known-views array inside index.html's setView() — this guard "
+        "has nothing left to check web/landing.html's /app#... links against")
+    known_views = set(re.findall(r'"([^"]+)"', m.group(1)))
+    assert "faq" in known_views, (
+        "the known-views array parsed out of index.html does not contain 'faq', which is a "
+        "real view — either setView() changed shape or this guard mis-parsed it")
+
+    app_hashes = re.findall(r'href="/app#([^"?]+)', src)
+    bad = sorted(set(h for h in app_hashes if h not in known_views))
+    assert not bad, (
+        "web/landing.html links to /app#%s, but the app's own setView() does not recognise "
+        "that view (known: %s) — the app silently falls back to the swap view instead. "
+        "Measured live: the Portfolio and Flow footer links both drifted this way." % (
+            bad, sorted(known_views)))
+
+    print("[landing routes] %d /app#... links, known views=%s, all resolve"
+          % (len(app_hashes), sorted(known_views)))
+
 
 check_no_remote_code()
 check_gt_proxy_worker()
@@ -890,6 +931,90 @@ check_brand_palette()
 check_one_executor_address()
 check_dex_parity()
 check_landing_page()
+
+
+async def check_landing_mobile(p, errors):
+    """صفحه‌ی معرفی (نه اپ) را با file:// روی موبایل واقعی باز کن — ۳۹۰×۸۴۴،
+    isMobile، hasTouch — و دو باگِ زنده‌ی گزارش‌شده روی گوشیِ صاحب‌کار را
+    اندازه بگیر، نه حدس بزن.
+
+    باگِ اول: گروهِ راستِ هدر (دکمه‌ی تم + همبرگر) بدونِ margin-left:auto —
+    که با حذفِ .desktop-nav روی موبایل، ستونِ گریدِ وسط را می‌گرفت نه ستونِ
+    سومِ 1fr را — وسطِ عرض می‌نشست و سمتِ راست یک شکافِ خالیِ بزرگ می‌ماند.
+    اندازه‌گیریِ زنده پیش از رفع: burgerRight≈257 در ویوپورتِ ۳۹۰ (یعنی ۱۳۳px
+    فاصله تا لبه). بعد از رفع: ≈372.
+
+    باگِ دوم: قانونِ .exitcheck برای گرید تک‌ستونه در مدیاکوئریِ اول همین فایل
+    نوشته شده بود، ولی تعریفِ بدون‌مدیای .exitcheck پایین‌ترِ همان فایل با
+    اسپسیفیسیتیِ برابر و ترتیبِ متن‌یِ بعدی رویش غالب می‌شد — یعنی کارت روی
+    موبایل هم دوستونه می‌ماند. اندازه‌گیریِ زنده پیش از رفع: عرضِ کارت=141px و
+    ردیفِ عنوان (stageHd) با سه‌خط پیچیدن به ۵۸px قد می‌کشید. بعد از رفع:
+    عرض≈354px، ارتفاعِ ردیف≈19px.
+
+    ⚠️ آستانه‌ها را روی خودِ عددهای اندازه‌گرفته‌شده قفل می‌کنیم، نه فقط
+    «داخلِ ویوپورت» — چون نسخه‌ی شکسته هم داخلِ ویوپورت بود، فقط له‌شده."""
+    path = os.path.join(HERE, "..", "landing.html")
+    b = await p.chromium.launch()
+    ctx = await b.new_context(viewport={"width": 390, "height": 844},
+                               device_scale_factor=2, is_mobile=True, has_touch=True)
+    pg = await ctx.new_page()
+    pg.on("console", lambda m: errors.append(m.text) if m.type == "error" else None)
+    await pg.goto("file://" + path)
+    await pg.wait_for_timeout(400)
+
+    header = await pg.evaluate("""() => {
+        const r = el => el.getBoundingClientRect();
+        const toggle = r(document.getElementById('themeToggle'));
+        const burger = r(document.getElementById('menuToggle'));
+        return {toggleRight: toggle.right, burgerRight: burger.right,
+                docW: document.documentElement.scrollWidth,
+                vw: document.documentElement.clientWidth};
+    }""")
+    print("[landing mobile header] toggleRight=%.1f burgerRight=%.1f doc=%s viewport=%s"
+          % (header["toggleRight"], header["burgerRight"], header["docW"], header["vw"]))
+    tol = 20
+    assert header["burgerRight"] >= header["vw"] - tol, (
+        "the hamburger sits %.1fpx from the right edge of a %spx viewport (measured live at "
+        "~133px away — roughly mid-width — when the header's right-hand group loses its grid "
+        "placement): %s" % (header["vw"] - header["burgerRight"], header["vw"], header))
+    assert header["docW"] <= header["vw"] + 1, (
+        "web/landing.html scrolls sideways at %spx: scrollWidth=%s"
+        % (header["vw"], header["docW"]))
+
+    exit_info = await pg.evaluate("""() => {
+        const rect = el => el ? (({x,y,width,height,top,left,right,bottom}) => (
+            {x,y,width,height,top,left,right,bottom}))(el.getBoundingClientRect()) : null;
+        return {card: rect(document.querySelector('.exitStage .stage')),
+                stageHd: rect(document.querySelector('.stageHd')),
+                ttl: rect(document.querySelector('.stageTtl')),
+                sub: rect(document.querySelector('.stageSub')),
+                vw: document.documentElement.clientWidth};
+    }""")
+    print("[landing mobile exit-test] cardWidth=%.1f cardRight=%.1f stageHdHeight=%.1f"
+          % (exit_info["card"]["width"], exit_info["card"]["right"],
+             exit_info["stageHd"]["height"]))
+    assert exit_info["card"]["right"] <= exit_info["vw"] + 1, (
+        "the exit-test card overflows a %spx viewport: %s" % (exit_info["vw"], exit_info["card"]))
+    assert exit_info["card"]["width"] >= 260, (
+        "the exit-test card is only %.1fpx wide at a %spx viewport (measured live at 141px "
+        "when .exitcheck stays two-column on mobile — a later unmediaed rule in this same "
+        "file overrides the mobile media query's grid-template-columns:1fr) — it should span "
+        "the section's usable width" % (exit_info["card"]["width"], exit_info["vw"]))
+
+    def overlaps(a, b):
+        ox = max(0, min(a["right"], b["right"]) - max(a["left"], b["left"]))
+        oy = max(0, min(a["bottom"], b["bottom"]) - max(a["top"], b["top"]))
+        return ox > 1 and oy > 1
+    assert not overlaps(exit_info["ttl"], exit_info["sub"]), (
+        "the exit-test card's title and subtitle rectangles overlap: %s / %s"
+        % (exit_info["ttl"], exit_info["sub"]))
+    assert exit_info["stageHd"]["height"] <= 30, (
+        "the exit-test card's title row is %.1fpx tall (measured live at 58px when the title "
+        "wraps across three lines because the card is squashed two-column) — it should fit "
+        "on one line" % exit_info["stageHd"]["height"])
+
+    await b.close()
+
 
 async def main():
     errors = []
@@ -921,6 +1046,7 @@ async def main():
 
     async with async_playwright() as p:
         await check_real_page_from_disk(p)
+        await check_landing_mobile(p, errors)
         b = await p.chromium.launch()
         pg = await b.new_page(viewport={"width": 1240, "height": 1000}, color_scheme="dark")
         pg.on("console", on_console)
@@ -4705,6 +4831,66 @@ async def main():
             "point is to stop taking the blame for others, not to stop reporting")
         assert ext_names == ["err:js"], (
             "expected exactly one beacon, from our own fault only, got %s" % ext_names)
+
+        # ---- [err] یک LINK شکسته: تصمیم با مبدأ است، نه با رشته‌ی آدرس ----
+        # ⚠️ باگ زنده روی موبایل: E-RES-5C45، «LINK failed to load
+        # https://fonts.reown.com/KHTeka-Medium.woff2» — آن فونت را مودالِ
+        # WalletConnect از سرورِ خودش می‌خواهد، نه از ما؛ CSP درست ردش کرد،
+        # ولی بنر «چیزی خراب شد» زیرِ عنوانِ صفحه‌ای درباره‌ی دارایی‌های کاربر
+        # بالا آمد. این کاوشگر هر دو مسیر را واقعاً اجرا می‌کند — هم‌مبدأ و
+        # غیرهم‌مبدأ — نه فرض می‌کند یکی‌شان درست کار می‌کند چون آن یکی درست
+        # کار کرد. rel عمداً یک مقدارِ ناشناخته است (نه stylesheet/preload) تا
+        # مرورگر خودش هیچ فچِ واقعیِ شبکه‌ای راه نیندازد؛ عنصر باید در سند
+        # وصل باشد تا مسیرِ capture:true تا window برسد، بعد خودمان رویداد
+        # error را می‌سازیم — دقیقاً همان target/src که یک ۴۰۴ی واقعی می‌داد.
+        same_pg, same_seen = await err_page()
+        before = len(same_seen)
+        await same_pg.evaluate("""() => {
+            const l = document.createElement("link");
+            l.rel = "zx-test-noop";
+            l.href = location.origin + "/no-such-style-" + Date.now() + ".css";
+            document.head.appendChild(l);
+            l.dispatchEvent(new Event("error"));
+            l.remove();
+        }""")
+        await same_pg.wait_for_timeout(500)
+        same_hidden = await same_pg.evaluate(
+            "() => document.getElementById('errBanner').hidden")
+        same_names = err_names(same_seen[before:])
+        await same_pg.close()
+        print("[err] same-origin LINK failure: banner hidden=%s beacons=%s"
+              % (same_hidden, same_names))
+        assert not same_hidden, (
+            "a failed same-origin LINK (the ethers/walletconnect bundle case) must still "
+            "raise the banner — that failure is genuinely ours and unchanged")
+        assert same_names == ["err:res"], (
+            "a failed same-origin LINK should send exactly one err:res, got %s" % same_names)
+
+        cross_pg, cross_seen = await err_page()
+        before = len(cross_seen)
+        await cross_pg.evaluate("""() => {
+            const l = document.createElement("link");
+            l.rel = "zx-test-noop";
+            l.href = "https://fonts.reown.com/KHTeka-Medium.woff2";
+            document.head.appendChild(l);
+            l.dispatchEvent(new Event("error"));
+            l.remove();
+        }""")
+        await cross_pg.wait_for_timeout(500)
+        cross_hidden = await cross_pg.evaluate(
+            "() => document.getElementById('errBanner').hidden")
+        cross_names = err_names(cross_seen[before:])
+        await cross_pg.close()
+        print("[err] cross-origin LINK failure (wallet's own font host): banner hidden=%s "
+              "beacons=%s" % (cross_hidden, cross_names))
+        assert cross_hidden, (
+            "a failed cross-origin LINK raised the banner — measured live as E-RES-5C45, a "
+            "false alarm under a page about the user's funds when a wallet modal's own font "
+            "host was simply unreachable")
+        assert cross_names == ["err:res"], (
+            "a failed cross-origin LINK must still be counted as err:res even with the banner "
+            "staying hidden — a silent third-party failure should still be countable later, "
+            "got %s" % cross_names)
 
         srv.shutdown()
         await b.close()

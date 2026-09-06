@@ -128,6 +128,18 @@ if(/^\/t\/0x[0-9a-fA-F]{40}\/?$/.test(location.pathname)){
     if(window.__zxOnErr)window.__zxOnErr(name,hex);
     else window.__zxErrQ.push([name,hex]);
   }
+  /* شمارش بدون رنگ‌آمیزیِ بنر. ⚠️ به‌جای گذاشتنِ یک پرچمِ سکوت روی hit() —
+     که خواننده‌ی بعدی باید حدس بزند «کِی صدا زده می‌شود که رنگ نکند» — همان
+     تفکیکِ رنگ‌آمیزی از شمارش که hit() از اول داشت را با یک تابعِ جدا و
+     کوچک ادامه می‌دهیم: این یکی فقط می‌شمارد. کدِ hex از همان tag() ساخته
+     می‌شود، پس یک خطای یکسان همیشه یک کدِ یکسان می‌دهد، چه بنر بیاید چه نه. */
+  function countOnly(kind,name,seed){
+    var hex=tag(kind,seed).slice(-4);
+    if(sent>=MAX_EV)return;
+    sent++;
+    if(window.__zxOnErr)window.__zxOnErr(name,hex);
+    else window.__zxErrQ.push([name,hex]);
+  }
   addEventListener("error",function(e){
     /* دو چیزِ کاملاً متفاوت از یک رویداد می‌آیند و باید *ساختاری* جدا شوند،
        نه با نگاه‌کردن به متن: اگر target یک المان باشد، یک منبع بارگذاری
@@ -141,7 +153,29 @@ if(/^\/t\/0x[0-9a-fA-F]{40}\/?$/.test(location.pathname)){
       var tn=t.tagName.toUpperCase();
       if(tn!=="SCRIPT"&&tn!=="LINK")return;
       var src=String(t.src||t.href||"");
-      hit("RES","err:res",tn+" "+src,tn+" failed to load\n"+src);
+      /* ⚠️ اندازه‌گیری‌شده روی موبایل: E-RES-5C45، «LINK failed to load
+         https://fonts.reown.com/KHTeka-Medium.woff2». آن فونت را مودالِ
+         WalletConnect از سرورِ خودش تزریق می‌کند؛ CSP ما (font-src 'self'
+         data:) درستْ ردش کرد، ولی همان ردشدن رویدادِ error می‌دهد و بنرِ
+         «چیزی خراب شد» را زیرِ عنوانِ صفحه‌ای درباره‌ی دارایی‌های کاربر بالا
+         می‌آورد — درحالی‌که مودال با فونتِ جایگزین کاملاً درست نمایش داده
+         می‌شود. CSP همین‌جا دست‌نخورده می‌ماند: برای کاربرانی که بیشترشان
+         پشتِ فیلترینگِ سنگین‌اند، نیاوردنِ یک فونتِ شخصِ ثالث خودش نتیجه‌ی
+         درستی است؛ فقط زنگِ خطرِ الکی باگ بود، نه ردکردنِ فونت. تشخیص با
+         *منشأ* است، نه رشته‌ی آدرس یا نامِ میزبان: هر
+         SCRIPT/LINK هم‌مبدأ واقعاً مالِ ماست (باندلِ ethers/walletconnect)
+         و شکستنش هنوز فاجعه است؛ هر SCRIPT/LINK غیرهم‌مبدأ مالِ ما نیست.
+         برای SCRIPT این مرز حتی یک حفره هم باز نمی‌کند: CSP ما script-src
+         'self' است، پس یک اسکریپتِ غیرهم‌مبدأ از اصل نمی‌تواند روی این
+         صفحه اجرا شود — بنابراین هرگز نمی‌تواند وابستگیِ *ما* باشد. آدرسی
+         که parse نشود مالِ ما حساب می‌شود: ندانستن نباید به معنیِ «مشکلِ ما
+         نیست» باشد. با این حال شکستِ غیرهم‌مبدأ را بی‌صدا هم نمی‌گذاریم —
+         به‌عنوانِ err:res شمرده می‌شود تا بشود بعداً شمردش، فقط بنر نمی‌آید. */
+      var sameOrigin=true;
+      try{sameOrigin=(new URL(src,location.href).origin===location.origin);}
+      catch(parseErr){sameOrigin=true;}
+      if(sameOrigin)hit("RES","err:res",tn+" "+src,tn+" failed to load\n"+src);
+      else countOnly("RES","err:res",tn+" "+src);
       return;
     }
     var msg=String((e&&e.message)||"error");
@@ -4463,7 +4497,11 @@ function wcInitOptions(showQrModal){
       name:BRAND,
       description:"Zaexa — a DEX aggregator on Base",
       url:location.origin,
-      icons:[location.origin+"/favicon.svg"],
+      /* والت خودش این آدرس را از سمت خودش (نه از داخل DOM این صفحه) فچ
+         می‌کند، پس data URI اینجا کار نمی‌کند — باید یک فایل واقعی روی
+         همان origin باشد. favicon.svg اصلاً وجود ندارد و ۴۰۴ می‌داد؛
+         og.png را Worker واقعاً سرو می‌کند. */
+      icons:[location.origin+"/og.png"],
     },
   };
 }
