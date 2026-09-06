@@ -265,6 +265,10 @@ export const VD_SOL_RPCS = [
 // تا worker/test.mjs رویش بشمارد، نه اینکه دوباره در تست کپی شود.
 export const VD_SOL_RPC_MAX_TRIES = 3;
 
+// ⚠️ همین میزبان، چه با کلید چه بی‌کلید — این ثابت به‌خاطرِ env.JUP_KEY
+// (پایین‌تر، کنارِ jupCall) عوض نمی‌شود و کسی نباید آن را «تعمیر» کند به
+// جابه‌جاکردنِ میزبان: یک هاستِ جوپیتریِ دیگر برای کلیددارها وجود ندارد،
+// فقط هدرِ x-api-key فرق می‌کند.
 export const VD_SOL_JUP_BASE = "https://api.jup.ag";
 
 // ۱ SOL — کف امنی که فی‌پیر واقعاً بتواند کارمزد/rent را روی خودِ همین
@@ -694,7 +698,12 @@ export async function probeRpcMethod(fetchImpl, rpcUrl, method, params, timeoutM
   }
 }
 
-async function jupCall(fetchImpl, jupBase, path, opts, timeoutMs) {
+// jupKey — همان env.JUP_KEY، از دلِ o.jupKey که fetchVerdictSol پایین‌تر
+// پاس می‌دهد. فقط در هدر می‌رود، هرگز در url/query — URL هرجا لاگ یا کش
+// شود کلید را با خودش می‌برد، هدر نه. وقتی jupKey خالی است (رشته‌ی خالی یا
+// هر مقدارِ falsy دیگر) هیچ هدری اضافه نمی‌شود، پس رفتارِ بی‌کلید
+// بایت‌به‌بایت همان چیزی می‌ماند که بدونِ این پارامتر بود.
+async function jupCall(fetchImpl, jupBase, path, opts, timeoutMs, jupKey) {
   let url = jupBase + path;
   if (opts.query) url += "?" + new URLSearchParams(opts.query).toString();
   const init = { method: opts.method || "GET" };
@@ -702,6 +711,7 @@ async function jupCall(fetchImpl, jupBase, path, opts, timeoutMs) {
     init.headers = { "content-type": "application/json" };
     init.body = JSON.stringify(opts.body);
   }
+  if (jupKey) init.headers = Object.assign({}, init.headers, { "x-api-key": jupKey });
   const ac = new AbortController();
   init.signal = ac.signal;
   const timer = setTimeout(() => ac.abort(), timeoutMs);
@@ -736,6 +746,11 @@ export async function fetchVerdictSol(mint, opts) {
     const deadlineAt = o.deadlineAt;
     const rpcs = o.rpcs || VD_SOL_RPCS;
     const jupBase = o.jupBase || VD_SOL_JUP_BASE;
+    // env.JUP_KEY — خوانده‌شده در worker/index.js (jupKeyFor، هم‌شکل با
+    // CG_KEY/SOL_RPC) و از همین‌جا به هر چهار جوپیترCall پاس داده می‌شود.
+    // نبودنش (رشته‌ی خالی) یعنی جوپیترCall هیچ هدرِ x-api-key‌ای اضافه
+    // نمی‌کند — رفتارِ امروز، بدونِ کم‌وکاست.
+    const jupKey = (typeof o.jupKey === "string" && o.jupKey) || "";
     const timeoutMs = o.timeoutMs || 900;
     const payer = o.payer || VD_SOL_PAYER;
 
@@ -784,7 +799,7 @@ export async function fetchVerdictSol(mint, opts) {
     const quoteBuyRes = await jupCall(fetchImpl, jupBase, "/swap/v1/quote", {
       query: { inputMint: SOL_MINT_ADDR, outputMint: mint, amount: String(amountLamports),
                slippageBps: "500", onlyDirectRoutes: "true" },
-    }, timeoutMs);
+    }, timeoutMs, jupKey);
     if (!quoteBuyRes.ok) return unknown("jup:quote:" + quoteBuyRes.status);
     if (!quoteBuyRes.json || !quoteBuyRes.json.outAmount) return unknown("no-route"); // بی‌مسیر → نامعلوم، نه nosell
     const quoteBuy = quoteBuyRes.json;
@@ -800,7 +815,7 @@ export async function fetchVerdictSol(mint, opts) {
     if (!Number.isFinite(sellAmount) || sellAmount <= 0) return unknown("internal");
     const quoteSellRes = await jupCall(fetchImpl, jupBase, "/swap/v1/quote", {
       query: { inputMint: mint, outputMint: SOL_MINT_ADDR, amount: String(sellAmount), slippageBps: "500" },
-    }, timeoutMs);
+    }, timeoutMs, jupKey);
     if (!quoteSellRes.ok) return unknown("jup:quote:" + quoteSellRes.status);
     if (!quoteSellRes.json || !quoteSellRes.json.outAmount) return unknown("no-route");
     const quoteSell = quoteSellRes.json;
@@ -809,13 +824,13 @@ export async function fetchVerdictSol(mint, opts) {
     if (pastDeadline()) return unknown("deadline");
     const legBuyRes = await jupCall(fetchImpl, jupBase, "/swap/v1/swap-instructions", {
       method: "POST", body: { userPublicKey: payer, quoteResponse: quoteBuy, wrapAndUnwrapSol: true },
-    }, timeoutMs);
+    }, timeoutMs, jupKey);
     // این اندپوینت مفهومِ route ندارد، پس سطلِ اختصاصیِ دیگری هم برایش نیست.
     if (!legBuyRes.ok || !legBuyRes.json) return unknown("jup:swap-instructions:" + legBuyRes.status);
 
     const legSellRes = await jupCall(fetchImpl, jupBase, "/swap/v1/swap-instructions", {
       method: "POST", body: { userPublicKey: payer, quoteResponse: quoteSell, wrapAndUnwrapSol: true },
-    }, timeoutMs);
+    }, timeoutMs, jupKey);
     if (!legSellRes.ok || !legSellRes.json) return unknown("jup:swap-instructions:" + legSellRes.status);
 
     // ۵. ترکیبِ یک تراکنشِ v0 واحد، و حل کردنِ هر جدولِ آدرسی که هرکدام از

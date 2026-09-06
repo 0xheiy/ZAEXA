@@ -521,6 +521,23 @@ export function solRpcsFor(env) {
   return solRpc ? [solRpc, ...VD_SOL_RPCS] : VD_SOL_RPCS;
 }
 
+/* env.JUP_KEY — دقیقاً همان الگوی env.CG_KEY/env.SOL_RPC بالا: خوانده
+   می‌شود defensively (typeof … === "string")، در پنل کلادفلر به‌صورتِ یک
+   Secret می‌نشیند، و هرگز به مرورگر نمی‌رسد. کلید‌دار (Jupiter's Swap API
+   plan) سقفِ نرخش خیلی بالاتر از میزبانِ کلیددارِ رایگان است — بی‌کلید
+   حدودِ ۰٫۵ درخواست در ثانیه، و یک verdict چند تماس لازم دارد؛ همان کاری
+   که CG_KEY برای GeckoTerminal حل کرد، این برای Jupiter می‌کند.
+
+   ⚠️ برخلافِ SOL_RPC (که کلید را در خودِ URL می‌برد)، اینجا کلید همیشه در
+   هدر می‌رود — VD_SOL_JUP_BASE (worker/verdict_sol.js) دست‌نخورده می‌ماند،
+   میزبان برای کلیددار و بی‌کلید یکی است، فقط هدرِ x-api-key فرق می‌کند؛
+   کسی این را «تعمیر» نکند به عوض‌کردنِ میزبان. غایب‌بودنِ JUP_KEY رفتار را
+   بایت‌به‌بایت همان چیزی نگه می‌دارد که امروز است: هیچ هدرِ x-api-key‌ای
+   اضافه نمی‌شود. */
+export function jupKeyFor(env) {
+  return (env && typeof env.JUP_KEY === "string" && env.JUP_KEY) || "";
+}
+
 /* همان سوال، برای سولانا — بدونِ متادیتای GeckoTerminal، چون
    fetchVerdictSol چیزی از قیمت/دسیمال نمی‌خواهد (رفت‌وبرگشتش را جوپیتر با
    quote خودش حساب می‌کند، نه با priceUsd ما).
@@ -537,7 +554,8 @@ async function solFetchVerdict(mint, deadlineAt, ctx, env) {
     "/v1/solana/" + mint,
     async () => {
       const res = await fetchVerdictSol(mint,
-        { deadlineAt, fetchImpl: fetch, rpcs: solRpcsFor(env), jupBase: VD_SOL_JUP_BASE, payer: VD_SOL_PAYER });
+        { deadlineAt, fetchImpl: fetch, rpcs: solRpcsFor(env), jupBase: VD_SOL_JUP_BASE, payer: VD_SOL_PAYER,
+          jupKey: jupKeyFor(env) });
       why = res.why;
       return res.v;
     },

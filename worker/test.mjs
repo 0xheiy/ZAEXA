@@ -1986,6 +1986,309 @@ const ethers = globalThis.ethers;
     "fake, no claim made about which real endpoint answers");
 }
 
+/* ---- ۱۸ج. env.JUP_KEY — کلیدِ جوپیتر، فقط در هدر ----
+   دقیقاً همان الگوی env.CG_KEY/env.SOL_RPC: خوانده‌شده defensively با
+   jupKeyFor (worker/index.js)، در هر چهار جوپیترCall به‌عنوانِ هدرِ
+   x-api-key سوار می‌شود، و هرگز در URL. این بخش fetchVerdictSol را
+   مستقیم می‌سنجد (نه سرتاسری) تا خودِ init.headers بازرسی شود، نه فقط
+   رشته‌ی URL — بخشِ ۱۸د (بعدی) همین چیز را سرتاسری، از دلِ worker.fetch،
+   می‌سنجد. */
+{
+  const vs = await import("./verdict_sol.js");
+  const { jupKeyFor } = await import("./index.js");
+
+  // الف) jupKeyFor خودش — همان آزمونی که solRpcsFor بالا برایِ SOL_RPC پس داد.
+  ok(jupKeyFor({}) === "", "jupKeyFor with no JUP_KEY must read as empty, exactly like CG_KEY's own read: " +
+    JSON.stringify(jupKeyFor({})));
+  ok(jupKeyFor(undefined) === "", "jupKeyFor must defend against a missing env, exactly like CG_KEY's own read");
+  ok(jupKeyFor({ JUP_KEY: 123 }) === "",
+    "a non-string JUP_KEY must be ignored, exactly like a non-string CG_KEY would be");
+  ok(jupKeyFor({ JUP_KEY: "sk-live-123" }) === "sk-live-123",
+    "jupKeyFor must return the key string as-is when it is present and a string");
+
+  function fakePubkey(n) {
+    const b = new Uint8Array(32);
+    for (let i = 0; i < 32; i++) b[i] = (n * 41 + i * 7 + 3) % 256;
+    return vs.base58Encode(b);
+  }
+  function ixData(bytes) { return vs.bytesToBase64(Uint8Array.from(bytes)); }
+  function rawIx(programId, accounts, dataBytes) {
+    return {
+      programId,
+      accounts: accounts.map(([pubkey, isSigner, isWritable]) => ({ pubkey, isSigner, isWritable })),
+      data: ixData(dataBytes),
+    };
+  }
+  function jsonRes(body, status = 200) {
+    return new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
+  }
+  function rpcOk(result) { return jsonRes({ jsonrpc: "2.0", id: 1, result }); }
+
+  const PAYER = vs.VD_SOL_PAYER;
+  const MINT = fakePubkey(300);
+  const PROGRAM = fakePubkey(301);
+  const JUP = vs.VD_SOL_JUP_BASE;
+  const RPC = "https://rpc-jupkey.example";
+  const SECRET = "sk-live-JUPSECRET-do-not-leak-9F3q";
+
+  const legBuy = {
+    computeBudgetInstructions: [], setupInstructions: [],
+    swapInstruction: rawIx(PROGRAM, [[PAYER, true, true]], [1, 2]),
+    cleanupInstruction: null, addressLookupTableAddresses: [],
+  };
+  const legSell = {
+    computeBudgetInstructions: [], setupInstructions: [],
+    swapInstruction: rawIx(PROGRAM, [[PAYER, true, true]], [3, 4]),
+    cleanupInstruction: null, addressLookupTableAddresses: [],
+  };
+
+  // fetchImpl مشترک برای ب/ج پایین‌تر — یک رفت‌وبرگشتِ کوچکِ کاملاً معتبر
+  // (همان الگوی بخشِ ۱۸ب)، به‌علاوه‌ی ثبتِ headersSeen برای هر تماسِ جوپیتری
+  // (نه فقط quote — swap-instructions هم، چون init.headers آنجا از قبل
+  // content-type دارد و jupCall باید رویِ همان شیء بنشیند، نه آن را دور بریزد).
+  function makeFetch() {
+    const calls = [];
+    const headersSeen = []; // [{ url, headers }] فقط برای تماس‌های جوپیتری
+    let simCalls = 0;
+    const fetchImpl = async (url, init) => {
+      const u = String(url);
+      if (u.startsWith(JUP)) headersSeen.push({ url: u, headers: (init && init.headers) || {} });
+      if (u.startsWith(JUP + "/swap/v1/quote")) {
+        const isBuy = u.includes("onlyDirectRoutes=true");
+        calls.push(isBuy ? "quote:buy" : "quote:sell");
+        return jsonRes({ outAmount: isBuy ? "1000000" : "40000000", routePlan: [{}] });
+      }
+      if (u.startsWith(JUP + "/swap/v1/swap-instructions")) {
+        const body = JSON.parse(init.body);
+        const isBuy = body.quoteResponse.outAmount === "1000000";
+        calls.push(isBuy ? "swap-ix:buy" : "swap-ix:sell");
+        return jsonRes(isBuy ? legBuy : legSell);
+      }
+      const body = JSON.parse(init.body);
+      calls.push("rpc:" + body.method);
+      if (body.method === "getBalance") return rpcOk({ value: 2_000_000_000 });
+      if (body.method === "simulateTransaction") {
+        simCalls++;
+        // اولی رفت‌وبرگشت (موفق)، دومی کنترل (InstructionError) — تا verdict
+        // واقعاً به sell برسد، نه به payer-holds؛ این بخش رفتارِ خودِ کلید را
+        // می‌سنجد، نه دوباره‌ی قواعدِ verdict که بخشِ ۱۸ از قبل پوشانده.
+        return rpcOk({ value: { err: simCalls === 1 ? null : { InstructionError: [1, { Custom: 1 }] } } });
+      }
+      return jsonRes({ error: "unexpected" }, 500);
+    };
+    return { fetchImpl, calls, headersSeen };
+  }
+
+  // ب) JUP_KEY ست‌شده → هر چهار تماسِ جوپیتری (دو quote، دو swap-instructions)
+  // هدرِ x-api-key را با همین مقدار حمل می‌کنند، و خودِ URL هیچ‌کدام کلید
+  // را در خودش ندارد — init.headers بازرسی می‌شود، نه فقط رشته‌ی URL.
+  {
+    const { fetchImpl, headersSeen } = makeFetch();
+    const res = await vs.fetchVerdictSol(MINT, { fetchImpl, rpcs: [RPC], jupBase: JUP, payer: PAYER, jupKey: SECRET });
+    ok(res && res.v === "sell", "happy path with JUP_KEY set should still reach \"sell\" (got " +
+      JSON.stringify(res) + ")");
+    ok(headersSeen.length === 4,
+      "expected exactly four Jupiter calls (two quotes, two swap-instructions), got " +
+      headersSeen.length + ": " + headersSeen.map((h) => h.url).join(","));
+    for (const { url, headers } of headersSeen) {
+      ok(headers["x-api-key"] === SECRET,
+        "every Jupiter request must carry the x-api-key header equal to JUP_KEY when it is set, " +
+        "missing/wrong for " + url + " (got " + JSON.stringify(headers) + ")");
+      ok(!url.includes(SECRET), "THE JUP KEY LEAKED INTO A JUPITER REQUEST URL: " + url);
+    }
+  }
+
+  // ج) JUP_KEY غایب → هیچ هدرِ x-api-key‌ای اصلاً فرستاده نمی‌شود، و توالیِ
+  // خودِ تماس‌ها همان چیزی می‌ماند که بخشِ ۱۸ (بدونِ این پارامتر) از قبل سنجید.
+  {
+    const { fetchImpl, calls, headersSeen } = makeFetch();
+    const res = await vs.fetchVerdictSol(MINT, { fetchImpl, rpcs: [RPC], jupBase: JUP, payer: PAYER });
+    ok(res && res.v === "sell", "happy path without JUP_KEY should still reach \"sell\" (got " +
+      JSON.stringify(res) + ")");
+    ok(headersSeen.every(({ headers }) => !("x-api-key" in headers)),
+      "no x-api-key header should be sent when JUP_KEY is absent: " +
+      JSON.stringify(headersSeen.map((h) => h.headers)));
+    ok(calls.join(",") === "rpc:getBalance,quote:buy,quote:sell,swap-ix:buy,swap-ix:sell," +
+      "rpc:simulateTransaction,rpc:simulateTransaction",
+      "the call sequence without JUP_KEY must be byte-for-byte identical to today's sequence, got: " +
+      calls.join(","));
+  }
+
+  // د) جوپیترِ ۴۰۱ (کلید نامعتبر/رد‌شده) با JUP_KEY ست‌شده → null/"jup:quote:401" —
+  // واژه‌نامه‌ی why عوض نمی‌شود؛ کدِ HTTP همان چیزی است که به صاحب می‌گوید
+  // کلید غلط است، بدونِ نیاز به متنِ پیام (طبقِ قاعده‌ی همیشگیِ این پروژه).
+  {
+    const fetchImpl = async (url, init) => {
+      const u = String(url);
+      if (u.startsWith(JUP + "/swap/v1/quote")) return jsonRes({ error: "invalid api key" }, 401);
+      const body = JSON.parse(init.body);
+      if (body.method === "getBalance") return rpcOk({ value: 2_000_000_000 });
+      return jsonRes({ error: "unexpected" }, 500);
+    };
+    const res = await vs.fetchVerdictSol(MINT, { fetchImpl, rpcs: [RPC], jupBase: JUP, payer: PAYER, jupKey: SECRET });
+    ok(res && res.v === null && res.why === "jup:quote:401" && vs.VD_SOL_WHY.includes("jup:quote"),
+      "a 401 from Jupiter's quote with a key set must give null/\"jup:quote:401\", the reason " +
+      "vocabulary unchanged (got " + JSON.stringify(res) + ")");
+  }
+
+  console.log("[env.JUP_KEY] jupKeyFor reads defensively, exactly like CG_KEY/SOL_RPC; with JUP_KEY " +
+    "set every one of the four Jupiter calls (both quotes, both swap-instructions) carries " +
+    "x-api-key equal to it, inspected via init.headers, and no Jupiter URL ever contains the key; " +
+    "without JUP_KEY no x-api-key header is sent and the call sequence matches today's exactly; a " +
+    "401 from Jupiter's quote with a key set gives null/\"jup:quote:401\" — all against an injected " +
+    "fake, no real Jupiter call involved");
+}
+
+/* ---- ۱۸د. env.JUP_KEY سرتاسری — /vd/<mint> با globalThis.fetch جعلی ----
+   دقیقاً همان الگوی بخشِ ۱۹ برایِ env.SOL_RPC: این‌بار کلید هرگز نباید در
+   هیچ پاسخی ظاهر شود — نه در یک "sell"، نه در یک "nosell"، نه در یک null
+   با why (اینجا jup:quote:401، تا هر دو ادعا در یک تیر برود). */
+{
+  const vs = await import("./verdict_sol.js");
+  const SECRET_JUP = "sk-live-JUPSECRET-E2E-do-not-leak-Q7z";
+
+  function fakePubkey(n) {
+    const b = new Uint8Array(32);
+    for (let i = 0; i < 32; i++) b[i] = (n * 41 + i * 7 + 3) % 256;
+    return vs.base58Encode(b);
+  }
+  function ixData(bytes) { return vs.bytesToBase64(Uint8Array.from(bytes)); }
+  function rawIx(programId, accounts, dataBytes) {
+    return {
+      programId,
+      accounts: accounts.map(([pubkey, isSigner, isWritable]) => ({ pubkey, isSigner, isWritable })),
+      data: ixData(dataBytes),
+    };
+  }
+  function jsonRes(body, status = 200) {
+    return new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
+  }
+  function rpcOk(result) { return jsonRes({ jsonrpc: "2.0", id: 1, result }); }
+
+  const PAYER = vs.VD_SOL_PAYER;
+  const PROGRAM = fakePubkey(401);
+  const legBuy = {
+    computeBudgetInstructions: [], setupInstructions: [],
+    swapInstruction: rawIx(PROGRAM, [[PAYER, true, true]], [1, 2]),
+    cleanupInstruction: null, addressLookupTableAddresses: [],
+  };
+  const legSell = {
+    computeBudgetInstructions: [], setupInstructions: [],
+    swapInstruction: rawIx(PROGRAM, [[PAYER, true, true]], [3, 4]),
+    cleanupInstruction: null, addressLookupTableAddresses: [],
+  };
+
+  const spyEnv = {
+    ASSETS: {
+      fetch: async (req) => {
+        const p = new URL(req.url).pathname;
+        return p === "/app" ? new Response("the site", { status: 200 })
+                             : new Response("not found", { status: 404 });
+      },
+    },
+    JUP_KEY: SECRET_JUP,
+  };
+
+  // سه مینتِ سولانا، هرکدام آخرین نویسه‌شان فرق دارد — همان ترفندِ بخشِ ۱۹،
+  // با نویسه‌هایی که آنجا استفاده نشده‌اند (۳،۴) تا هیچ mint‌ای دوباره
+  // استفاده نشود.
+  const BASE_MINT = "So11111111111111111111111111111111111111112";
+  const MINT_SELL = BASE_MINT.slice(0, -1) + "5";
+  const MINT_NOSELL = BASE_MINT.slice(0, -1) + "6";
+  const MINT_NULL = BASE_MINT.slice(0, -1) + "7";
+
+  // الف) sell — و هر تماسِ جوپیتری همان‌جا بازرسی می‌شود که x-api-key دارد.
+  {
+    let simCalls = 0;
+    globalThis.fetch = async (url, init) => {
+      const u = String(url);
+      if (u.includes("/swap/v1/quote")) {
+        ok(init.headers && init.headers["x-api-key"] === SECRET_JUP,
+          "a quote call end to end with env.JUP_KEY set must carry x-api-key: " + u);
+        const isBuy = u.includes("onlyDirectRoutes=true");
+        return jsonRes({ outAmount: isBuy ? "1000000" : "40000000", routePlan: [{}] });
+      }
+      if (u.includes("/swap/v1/swap-instructions")) {
+        ok(init.headers && init.headers["x-api-key"] === SECRET_JUP,
+          "a swap-instructions call end to end with env.JUP_KEY set must carry x-api-key: " + u);
+        const body = JSON.parse(init.body);
+        const isBuy = body.quoteResponse.outAmount === "1000000";
+        return jsonRes(isBuy ? legBuy : legSell);
+      }
+      const body = JSON.parse(init.body);
+      if (body.method === "getBalance") return rpcOk({ value: 2_000_000_000 });
+      if (body.method === "simulateTransaction") {
+        simCalls++;
+        return rpcOk({ value: { err: simCalls === 1 ? null : { InstructionError: [1, { Custom: 1 }] } } });
+      }
+      return jsonRes({ error: "unexpected" }, 500);
+    };
+    const res = await worker.fetch(new Request(ORIGIN + "/vd/" + MINT_SELL,
+      { headers: { "cf-connecting-ip": "203.0.113.80" } }), spyEnv, {});
+    const raw = await res.clone().text();
+    const body = JSON.parse(raw);
+    ok(body.v === "sell", "sell scenario with env.JUP_KEY set did not surface \"sell\": " + raw);
+    ok(!raw.includes(SECRET_JUP), "THE JUP KEY LEAKED INTO A \"sell\" RESPONSE BODY: " + raw);
+  }
+
+  // ب) nosell — رفت‌وبرگشت خودش InstructionError می‌گیرد، کنترل هرگز صدا زده نمی‌شود.
+  {
+    globalThis.fetch = async (url, init) => {
+      const u = String(url);
+      if (u.includes("/swap/v1/quote")) {
+        const isBuy = u.includes("onlyDirectRoutes=true");
+        return jsonRes({ outAmount: isBuy ? "1000000" : "40000000", routePlan: [{}] });
+      }
+      if (u.includes("/swap/v1/swap-instructions")) {
+        const body = JSON.parse(init.body);
+        const isBuy = body.quoteResponse.outAmount === "1000000";
+        return jsonRes(isBuy ? legBuy : legSell);
+      }
+      const body = JSON.parse(init.body);
+      if (body.method === "getBalance") return rpcOk({ value: 2_000_000_000 });
+      if (body.method === "simulateTransaction")
+        return rpcOk({ value: { err: { InstructionError: [1, { Custom: 1 }] } } });
+      return jsonRes({ error: "unexpected" }, 500);
+    };
+    const res = await worker.fetch(new Request(ORIGIN + "/vd/" + MINT_NOSELL,
+      { headers: { "cf-connecting-ip": "203.0.113.81" } }), spyEnv, {});
+    const raw = await res.clone().text();
+    const body = JSON.parse(raw);
+    ok(body.v === "nosell", "nosell scenario with env.JUP_KEY set did not surface \"nosell\": " + raw);
+    ok(!raw.includes(SECRET_JUP), "THE JUP KEY LEAKED INTO A \"nosell\" RESPONSE BODY: " + raw);
+  }
+
+  // ج) null (۴۰۱ از quote خرید، کلید رد شده) → jup:quote:401 — و کلید همان‌جا
+  // نه در why نه در هیچ کلیدِ دیگرِ بدنه نیست.
+  {
+    globalThis.fetch = async (url, init) => {
+      const u = String(url);
+      if (u.includes("/swap/v1/quote")) {
+        ok(init.headers && init.headers["x-api-key"] === SECRET_JUP,
+          "the quote call must still carry x-api-key even on the path that ends in a 401: " + u);
+        return jsonRes({ error: "unauthorized" }, 401);
+      }
+      const body = JSON.parse(init.body);
+      if (body.method === "getBalance") return rpcOk({ value: 2_000_000_000 });
+      return jsonRes({ error: "unexpected" }, 500);
+    };
+    const res = await worker.fetch(new Request(ORIGIN + "/vd/" + MINT_NULL,
+      { headers: { "cf-connecting-ip": "203.0.113.82" } }), spyEnv, {});
+    const raw = await res.clone().text();
+    const body = JSON.parse(raw);
+    ok(body.v === null && body.why === "jup:quote:401" && vs.VD_SOL_WHY.includes("jup:quote"),
+      "a 401 from Jupiter's quote end to end with a key set must give null/\"jup:quote:401\" " +
+      "(got " + raw + ")");
+    ok(!raw.includes(SECRET_JUP),
+      "THE JUP KEY LEAKED INTO A null-VERDICT RESPONSE BODY (why included): " + raw);
+  }
+
+  globalThis.fetch = trackingFetch; // برگرداندنِ موکِ پیش‌فرض برای هرچه بعد از این اجرا می‌شود
+  console.log("[env.JUP_KEY e2e] env.JUP_KEY set end to end through worker.fetch: every Jupiter call " +
+    "(quote and swap-instructions) carries x-api-key, and the key never appears in the response " +
+    "body for a \"sell\", a \"nosell\", or a null/\"jup:quote:401\" outcome");
+}
+
 /* ---- ۱۹. /vd/<mint سولانا> سرتاسری، و /t/<mint سولانا> → ۴۰۴ ----
    همان مسیرِ واقعیِ index.js (diagVerdict -> solFetchVerdict -> fetchVerdictSol)
    با globalThis.fetch جعلی، دقیقاً مثلِ بخشِ ۱۳. */
@@ -2289,6 +2592,10 @@ console.log(fails === 0
     + "jup:swap-instructions:<status>, verified via the frozen-prefix+integer-suffix rule), "
     + "env.SOL_RPC tried first ahead of the public list (via solRpcsFor, same shape as CG_KEY) with "
     + "its path/query never surfacing anywhere, and GET /vd/rpc's endpoint×method matrix all covered "
-    + "against injected fakes — no claim made about which real endpoint answers which method"
+    + "against injected fakes — no claim made about which real endpoint answers which method\n" +
+    "[jup key] env.JUP_KEY (via jupKeyFor, same shape as CG_KEY/SOL_RPC) rides as the x-api-key "
+    + "header on every Jupiter call and never in a URL; absent it, behaviour is byte-for-byte "
+    + "today's; the key never surfaces in a \"sell\", \"nosell\", or null/\"jup:quote:401\" response "
+    + "body, checked both against an injected fetchImpl and end to end through worker.fetch"
   : "[gt proxy] " + fails + " FAILURES");
 process.exit(fails === 0 ? 0 : 1);
