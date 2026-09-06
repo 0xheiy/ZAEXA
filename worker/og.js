@@ -107,9 +107,17 @@ export function ogTitle(meta) {
 
    واژه‌ها عمدی‌اند و بحث ندارند: «quoted»، نه «simulated» و نه «safe» — یک
    کوت فقط یک کوت است، نه شبیه‌سازی و نه ضمانتِ امنیت. عوض‌کردنِ این واژه‌ها
-   یعنی ادعا کردنِ چیزی که این مدرک اثبات نمی‌کند. */
-export function ogDescription(meta, verdict) {
-  const bits = ["Base"];
+   یعنی ادعا کردنِ چیزی که این مدرک اثبات نمی‌کند.
+
+   ⚠️ برچسبِ زنجیره پارامتر است، نه حدسی که اینجا زده شود — کالر (worker/
+   index.js) همان chainOf(addr) را که برای انتخابِ verdictِ درست هم به کار
+   می‌برد پاس می‌دهد، تا این فایل هیچ تشخیصِ دومی نسازد که بتواند از تشخیصِ
+   اصلی جدا بیفتد. غیابش («Base» پیش‌فرض) یعنی رفتارِ همیشگی: کارتِ توکنِ
+   سولانا تا امروز اصلاً وجود نداشت (/t/<mint سولانا> ۴۰۴ می‌گرفت)، پس هر
+   کارتی که واقعاً ساخته شده همیشه Base بوده — این پیش‌فرض همان را عوض
+   نمی‌کند، فقط اسمش را صریح می‌کند. */
+export function ogDescription(meta, verdict, chain) {
+  const bits = [chain || "Base"];
   if (meta && meta.liquidity) bits.push("Liquidity " + meta.liquidity);
   if (meta && meta.vol24) bits.push("Vol 24h " + meta.vol24);
   const base = bits.join(" · ") + ". " + PITCH;
@@ -128,9 +136,9 @@ export function ogDescription(meta, verdict) {
 export const OG_IMAGE_PATH = "/og.png";
 export const OG_IMAGE_V = "4";
 
-export function ogTags(meta, addr, origin, verdict) {
+export function ogTags(meta, addr, origin, verdict, chain) {
   const title = ogTitle(meta);
-  const desc = ogDescription(meta, verdict);
+  const desc = ogDescription(meta, verdict, chain);
   const img = origin + OG_IMAGE_PATH + "?v=" + OG_IMAGE_V;
   const canonical = origin + "/t/" + addr;
   const m = (attr, k, v) =>

@@ -411,10 +411,9 @@ export const OG_BUDGET_MS = 2000;
 export const VD_CACHE_HOST = "zaexa-verdict.internal";
 
 async function ogFetchMeta(addr, env) {
-  // شبکه از رویِ خودِ آدرس، نه از رویِ OG_NETWORK — امروز این تابع فقط برای
-  // آدرس‌های Base صدا زده می‌شود (سولانا مسیرِ کاملاً جدایی دارد، پایین‌تر)،
-  // پس این فقط برای وقتی است که روزی این تابع برای زنجیره‌ی دیگری هم صدا
-  // زده شود؛ آن روز این خط دیگر نیازی به تغییر ندارد.
+  // شبکه از رویِ خودِ آدرس، نه از رویِ OG_NETWORK — از امروز این تابع هم
+  // برای Base هم برای سولانا صدا زده می‌شود (/t/<mint سولانا> دیگر ۴۰۴
+  // نمی‌گیرد)، و همین یک خط بدونِ هیچ تغییری هر دو را درست می‌فهمد.
   const network = gtNetworkOf(chainOf(addr)) || OG_NETWORK;
   const key = (env && typeof env.CG_KEY === "string" && env.CG_KEY) || "";
   const rest = "networks/" + network + "/tokens/" + addr;
@@ -487,14 +486,27 @@ async function cachedVerdict(cacheKeyPath, computeFn, ctx) {
   }
 }
 
-/* آیا هنوز جایی این توکن قیمت فروش می‌دهد؟ — Base، سمت سرور، فقط برای
-   همین یک جمله‌ی اولِ توضیح.
+/* آیا هنوز جایی این توکن قیمت فروش می‌دهد؟ — سمت سرور، فقط برای همین یک
+   جمله‌ی اولِ توضیح؛ Base و سولانا هر دو، از رویِ chainOf(addr).
    ⚠️ برخلافِ ogFetchMeta که فقط از کش می‌خواند، اینجا هم می‌خوانیم هم
    می‌نویسیم — روی VD_CACHE_HOST که هیچ ربطی به proxyGt ندارد (توضیح بالای
    همین فایل، کنارِ VD_CACHE_HOST). */
 async function ogFetchVerdict(addr, meta, deadlineAt, env, ctx) {
   if (!meta) return null; // بدونِ متادیتا حتی یک تلاش هم لازم نیست
-  const network = gtNetworkOf(chainOf(addr)) || OG_NETWORK;
+  const chain = chainOf(addr);
+  if (chain === "solana") {
+    /* ⚠️ اینجا toLowerCase نمی‌شود — mint سولانا حساسِ به حروف است،
+       برخلافِ چک‌سامِ Base؛ همان قاعده‌ای که solFetchVerdict/diagVerdict
+       رعایت می‌کنند (توضیحِ بالای cachedVerdict). و همان fetchVerdictSol
+       صدا زده می‌شود، نه یک کپیِ دومِ منطقِ verdict — دقیقاً همان استدلالِ
+       همیشگیِ این فایل؛ بدونِ این شاخه، تابعِ Base-محورِ fetchVerdict یک
+       رشته‌ی base58 را به‌جای آدرس EVM می‌گرفت و بی‌فایده یک eth_call واقعی
+       به RPCهای Base می‌فرستاد. کشِ آن هم با /vd/<mint> مشترک است: اگر
+       کاربر همین mint را تازه چک کرده باشد، این رایگان است. */
+    const { v } = await solFetchVerdict(addr, deadlineAt, ctx, env);
+    return v;
+  }
+  const network = gtNetworkOf(chain) || OG_NETWORK;
   return cachedVerdict(
     "/v1/" + network + "/" + addr.toLowerCase(),
     () => fetchVerdict(addr, meta, { deadlineAt, fetchImpl: fetch }),
@@ -569,7 +581,7 @@ async function solFetchVerdict(mint, deadlineAt, ctx, env) {
    ترتیب مهم است: اول تگ‌های ثابتِ صفحه‌ی اصلی (که با data-og علامت خورده‌اند)
    برداشته می‌شوند، بعد تگ‌های این توکن اضافه می‌شود — وگرنه ربات دو og:title
    می‌دید و کدام را برمی‌دارد به خودش بستگی داشت. */
-function injectOg(res, url, addr, metaPromise, vdPromise) {
+function injectOg(res, url, addr, metaPromise, vdPromise, chain) {
   if (typeof HTMLRewriter === "undefined") return res;   // بیرون از Workers (تست node)
   if (!res || res.status !== 200) return res;
   const ct = res.headers.get("content-type") || "";
@@ -589,7 +601,9 @@ function injectOg(res, url, addr, metaPromise, vdPromise) {
     .on("head", {
       async element(el) {
         const [meta, verdict] = await Promise.all([metaPromise, vdPromise]);
-        el.append(ogTags(meta, addr, url.origin, verdict), { html: true });
+        // برچسبِ زنجیره از همان chainOf(addr) که کالر پاس داده — نه حدسی
+        // که اینجا دوباره زده شود.
+        el.append(ogTags(meta, addr, url.origin, verdict, chain), { html: true });
       },
     })
     .transform(res);
@@ -749,17 +763,14 @@ export default {
        ناشناخته سالم بودند و فقط همین یکی ریدایرکت می‌شد. */
     if (TOKEN_PAGE.test(url.pathname) && env && env.ASSETS) {
       const addr = url.pathname.slice(3).replace(/\/$/, "");
-      /* ⚠️ سولانا هنوز اینجا صفحه نمی‌گیرد. TOKEN_PAGE بالا شکلِ یک mint
-         سولانا را هم قبول می‌کند (برای همین همین شرط لازم است)، ولی
-         web/index.html هنوز نمی‌تواند یک توکنِ سولانا را رندر کند — اگر
-         اپ را برایش سرو می‌کردیم، نتیجه یک صفحه‌ی ساکت‌شکسته بود، نه یک
-         خطای دیده‌شدنی. پس تا اسلایسِ بعدی که آن صفحه می‌رسد، یک mint
-         سولانا از همین‌جا با همان ۴۰۴ای که هر مسیرِ ناشناخته می‌گیرد رد
-         می‌شود (env.ASSETS.fetch(request) با pathname دست‌نخورده، نه
-         «/app»). فقط /vd/ همین امروز سولانا را می‌شناسد — آن مسیر کارت
-         سرو نمی‌کند، فقط یک عدد؛ محدودیتِ این صفحه آنجا معنایی ندارد.
-         این خط را برای «رفعِ» این محدودیت پاک نکن — دلیلش هنوز پابرجاست. */
-      if (chainOf(addr) !== "base") return env.ASSETS.fetch(request);
+      /* ⚠️ سولانا از امروز همین‌جا صفحه می‌گیرد، نه ۴۰۴. تا همین‌جا، یک mint
+         سولانا با همان ۴۰۴ای که هر مسیرِ ناشناخته می‌گرفت رد می‌شد، چون
+         web/index.html نمی‌توانست آن را رندر کند و سرودادنِ اپ برایش یک
+         صفحه‌ی ساکت‌شکسته می‌ساخت. حالا web/index.html یک «حالتِ فقط-چکِ
+         سولانا» دارد (بدونِ ethers، بدونِ کیف‌پول، فقط GET /gt +‌ GET /vd) —
+         پس آن رد دیگر لازم نیست: chainOf(addr) اینجا دیگر چک نمی‌شود، هر
+         دو شکل همان مسیرِ زیر را طی می‌کنند و همان index.html (زیرِ /app)
+         سرو می‌شود. */
       /* ⚠️ /gt و /ev هر دو زیر rateOk بودند، این مسیر نبود — و همین یکی
          مستقیم به ogFetchMeta می‌رسد که کلید مشترکِ CoinGecko را می‌سوزاند.
          یک حلقه روی آدرس‌های تصادفیِ /t/0x… دقیقاً همان کلیدی را تمام
@@ -798,7 +809,10 @@ export default {
          هیچ خطایی هم دیده نمی‌شود. بدونِ پسوند، به همان دلیلِ زیر: /app.html
          یک ۳۰۷ به /app می‌دهد و آن ریدایرکت مسیر را جا می‌گذارد. */
       const res = await env.ASSETS.fetch(new Request(new URL("/app", url), request));
-      return withinLimit ? injectOg(res, url, addr, metaPromise, vdPromise) : res;
+      // همان chainOf(addr) که ogFetchVerdict بالاتر برای انتخابِ verdictِ
+      // درست به کار می‌برد — یک منبعِ حقیقت، نه تشخیصِ دومی داخلِ og.js.
+      const chain = chainOf(addr) === "solana" ? "Solana" : "Base";
+      return withinLimit ? injectOg(res, url, addr, metaPromise, vdPromise, chain) : res;
     }
     // بقیه‌ی سایت دست‌نخورده از فایل‌های ثابت می‌آید.
     if (env && env.ASSETS) return env.ASSETS.fetch(request);

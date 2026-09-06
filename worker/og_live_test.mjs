@@ -72,8 +72,8 @@ function mf() {
          ساختگی (که «شبکه را جعل‌کردن» می‌شد)، همین نبودِ دسترسی را با یک
          ردِ صریح نشان می‌دهیم — دقیقاً همان چیزی که یک اندپوینتِ واقعاً
          غیرقابل‌دسترس هم برمی‌گرداند. */
-      if (/publicnode\.com|meowrpc\.com|drpc\.org|tenderly\.co|mainnet\.base\.org/.test(req.url))
-        return Promise.reject(new Error("no route to Base RPC in this sandbox"));
+      if (/publicnode\.com|meowrpc\.com|drpc\.org|tenderly\.co|mainnet\.base\.org|onfinality\.io|api\.jup\.ag|mainnet-beta\.solana\.com/.test(req.url))
+        return Promise.reject(new Error("no route to Base/Solana RPC or Jupiter in this sandbox"));
       if (upstreamReply === "slow")
         return new Promise((r) => setTimeout(() => r(new Response("{}")), 5000));
       if (upstreamReply === "error") return new Response("nope", { status: 500 });

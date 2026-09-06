@@ -2289,9 +2289,11 @@ const ethers = globalThis.ethers;
     "body for a \"sell\", a \"nosell\", or a null/\"jup:quote:401\" outcome");
 }
 
-/* ---- ۱۹. /vd/<mint سولانا> سرتاسری، و /t/<mint سولانا> → ۴۰۴ ----
+/* ---- ۱۹. /vd/<mint سولانا> سرتاسری، و /t/<mint سولانا> → ۲۰۰ ----
    همان مسیرِ واقعیِ index.js (diagVerdict -> solFetchVerdict -> fetchVerdictSol)
-   با globalThis.fetch جعلی، دقیقاً مثلِ بخشِ ۱۳. */
+   با globalThis.fetch جعلی، دقیقاً مثلِ بخشِ ۱۳.
+   ⚠️ /t/<mint سولانا> دیگر ۴۰۴ نمی‌گیرد — web/index.html حالا یک حالتِ
+   فقط-چکِ سولانا دارد، پس همان صفحه‌ی اصلی (زیرِ /app) سرو می‌شود. */
 {
   const vs = await import("./verdict_sol.js");
   const { TOKEN_PAGE: TP } = await import("./index.js");
@@ -2374,8 +2376,10 @@ const ethers = globalThis.ethers;
 
   const tRes = await worker.fetch(new Request(ORIGIN + "/t/" + SOL_ADDR,
     { headers: { "cf-connecting-ip": "203.0.113.61" } }), spyEnv, {});
-  ok(tRes.status === 404, "/t/<solana mint> must be 404 until web/index.html can render a Solana " +
-    "token (got " + tRes.status + ")");
+  ok(tRes.status === 200, "/t/<solana mint> should now serve the app, exactly like a Base address " +
+    "(got " + tRes.status + ")");
+  ok((await tRes.clone().text()) === "the site",
+    "/t/<solana mint> did not ask ASSETS for \"/app\" — got a different body than the Base case");
 
   // یک mint دیگر، این‌بار فی‌پیرِ کم‌موجودی — سرتاسری از خودِ /vd، تا ثابت
   // شود why واقعاً تا بیرونی‌ترین لایه می‌رسد، نه فقط تا fetchVerdictSol.
@@ -2420,9 +2424,184 @@ const ethers = globalThis.ethers;
 
   globalThis.fetch = trackingFetch; // برگرداندنِ موکِ پیش‌فرض برای هرچه بعد از این اجرا می‌شود
   console.log("[vd/t solana] /vd/<solana mint> runs the Solana verdict pipeline end to end " +
-    "through worker.fetch (v:\"sell\"); /t/<solana mint> is still 404, exactly like an unknown " +
-    "path, until the token page itself can render Solana; with env.SOL_RPC set, why now surfaces " +
-    "\"rpc:<method>:<status>\" end to end and the secret URL's path/query never appear in the body");
+    "through worker.fetch (v:\"sell\"); /t/<solana mint> now serves the app, exactly like Base; " +
+    "with env.SOL_RPC set, why now surfaces \"rpc:<method>:<status>\" end to end and the secret " +
+    "URL's path/query never appear in the body");
+}
+
+/* ---- ۱۹ب. کارتِ پیش‌نمایش (OG) برای یک mintِ سولانا ----
+   /t/ دیگر سولانا را رد نمی‌کند، پس این مسیر هم باید کارت بسازد. ogFetchMeta
+   از قبل chain-aware است (gtNetworkOf(chainOf(addr)))؛ اینجا همان چیز از
+   رویِ worker.fetch سنجیده می‌شود: شبکه‌ی درخواست باید «solana» باشد، نه
+   OG_NETWORK ثابت، و عنوان/توضیحِ کارت باید از رویِ همان متادیتای خودِ
+   توکن ساخته شوند — نه رشته‌ی عمومیِ fallback («Token on Base — Zaexa»)
+   و نه متادیتای توکنِ دیگری. */
+{
+  const og = await import("./og.js");
+  const { ogFetchMeta } = await import("./index.js");
+  const mint = "So11111111111111111111111111111111111111112";
+
+  sent = []; sentHeaders = [];
+  reply = json({ data: { attributes: { name: "Wrapped SOL", symbol: "SOL",
+    total_reserve_in_usd: "5000000", volume_usd: { h24: "2500000" } } } });
+  const meta = await ogFetchMeta(mint, {});
+  ok(sent[0] === "https://api.geckoterminal.com/api/v2/networks/solana/tokens/" + mint,
+    "the Solana OG card asked the wrong upstream: " + sent[0]);
+  ok(meta && meta.symbol === "SOL" && meta.name === "Wrapped SOL",
+    "the Solana OG card did not read the token's own metadata: " + JSON.stringify(meta));
+
+  const title = og.ogTitle(meta);
+  const desc = og.ogDescription(meta, null);
+  ok(title.includes("SOL") && title.includes("Wrapped SOL"),
+    "the Solana OG title was not built from this token's own metadata: " + title);
+  ok(title !== og.ogTitle(null), "a real Solana token fell back to the no-metadata title: " + title);
+  ok(desc.includes("Liquidity $5.00M") && desc.includes("Vol 24h $2.50M"),
+    "the Solana OG description was not built from this token's own market numbers: " + desc);
+
+  // بدونِ متادیتا (بالادست شکست خورده) کارت باید عمومی بماند، نه غلط —
+  // همان قاعده‌ای که Base هم دارد، دوباره برای سولانا سنجیده می‌شود.
+  reply = new Response("nope", { status: 500 });
+  ok(await ogFetchMeta(mint, {}) === null, "a failed upstream should give no metadata for a Solana mint");
+
+  console.log("[og solana] a Solana mint's OG card asks networks/solana/tokens/<mint> (not Base) " +
+    "and builds its title/description from that token's own metadata, falling back to the generic " +
+    "card — never to someone else's data — when the upstream fails");
+}
+
+/* ---- ۱۹ب‑۲. برچسبِ زنجیره در توضیحِ کارت: پارامتر است، نه حدس ----
+   قبل از این، ogDescription همیشه «Base» را literal داخلِ خودش می‌نوشت —
+   یعنی کارتِ هر mintِ سولانا هم می‌گفت «Base · …»، دقیقاً همان باگی که
+   کوردیناتور دید. حالا chain آرگومان است و کالر (worker/index.js) همان
+   chainOf(addr) را پاس می‌دهد. اینجا مستقیماً خودِ og.js را می‌سنجیم:
+   با یک متادیتای سولانا و هر سه حالتِ verdict، توضیح باید با «Solana · »
+   شروع شود، نه با «Base · »؛ و بدونِ این آرگومان (کالرِ قدیمی) باید
+   بایت‌به‌بایت همان رشته‌ی «امروز» بماند — رشته‌های زیر دست‌نویس‌اند، نه
+   بازمحاسبه از خودِ تابع، وگرنه این probe هیچ‌چیزی را اثبات نمی‌کرد. */
+{
+  const og = await import("./og.js");
+
+  const SOL_VERDICT_META = { liquidity: "$5.00M", vol24: "$2.50M" };
+  const TODAY_SOL_DESC = "Solana · Liquidity $5.00M · Vol 24h $2.50M. Check whether you can sell it " +
+    "back before you buy — exit simulation and risk flags, no wallet needed.";
+
+  ok(og.ogDescription(SOL_VERDICT_META, null, "Solana") === TODAY_SOL_DESC,
+     "an unknown Solana verdict must not add a verdict sentence, and must say Solana not Base: " +
+     og.ogDescription(SOL_VERDICT_META, null, "Solana"));
+  ok(og.ogDescription(SOL_VERDICT_META, "sell", "Solana") === "A sell route was quoted. " + TODAY_SOL_DESC,
+     "sell verdict sentence missing/misworded for a Solana description: " +
+     og.ogDescription(SOL_VERDICT_META, "sell", "Solana"));
+  ok(og.ogDescription(SOL_VERDICT_META, "nosell", "Solana") ===
+     "No sell route quoted — you may not be able to exit. " + TODAY_SOL_DESC,
+     "nosell verdict sentence missing/misworded for a Solana description: " +
+     og.ogDescription(SOL_VERDICT_META, "nosell", "Solana"));
+  ok(og.ogDescription(SOL_VERDICT_META, "sell", "Solana").indexOf("A sell route was quoted.") === 0,
+     "the sell sentence must lead a Solana description too — Telegram cuts the tail");
+  ok(og.ogDescription(SOL_VERDICT_META, "nosell", "Solana").indexOf("No sell route quoted") === 0,
+     "the nosell sentence must lead a Solana description too — Telegram cuts the tail");
+
+  // یک Base صریح باید همان رشته‌ی همیشگی را بدهد — chain="Base" فقط اسمِ
+  // همان پیش‌فرض را صریح می‌کند، رفتار را عوض نمی‌کند.
+  const BASE_VERDICT_META = { liquidity: "$1.00M", vol24: "$2.00M" };
+  const TODAY_BASE_DESC = "Base · Liquidity $1.00M · Vol 24h $2.00M. Check whether you can sell it " +
+    "back before you buy — exit simulation and risk flags, no wallet needed.";
+  ok(og.ogDescription(BASE_VERDICT_META, "sell", "Base") === "A sell route was quoted. " + TODAY_BASE_DESC,
+     "chain=\"Base\" explicitly must match the byte-for-byte old Base description: " +
+     og.ogDescription(BASE_VERDICT_META, "sell", "Base"));
+
+  // کالرِ قدیمیِ ogTags (چهار آرگومان، بدونِ chain) نباید هیچ فرقی حس کند —
+  // بایت‌به‌بایت همان توضیحِ Base که امروز تولید می‌شود.
+  const addr4 = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913";
+  const TODAY_TAGS_DESC = "A sell route was quoted. " + TODAY_BASE_DESC;
+  const tags4 = og.ogTags(
+    { symbol: "USDC", name: "USD Coin", liquidity: "$1.00M", vol24: "$2.00M" },
+    addr4, "https://zaexa.com", "sell",
+  );
+  ok(tags4.includes('content="' + TODAY_TAGS_DESC + '"'),
+     "ogTags called with only four arguments (no chain) must still carry the byte-for-byte old " +
+     "Base description: " + tags4);
+  ok(!tags4.includes("Solana"), "ogTags with no chain argument must never say Solana: " + tags4);
+
+  console.log("[og chain label] chain is a parameter, not a guess: a Solana meta produces " +
+    "\"Solana · Liquidity …\" for all three verdict states (each leading with the right verdict " +
+    "sentence), an explicit \"Base\" and an omitted chain both stay byte-for-byte the old string, " +
+    "and ogTags called with its old four-argument shape is unaffected");
+}
+
+/* ---- ۱۹ج. ogFetchVerdict روی یک mintِ سولانا: به fetchVerdictSol می‌رود ----
+   بدونِ این شاخه، ogFetchVerdict یک mintِ سولانا را به‌عنوانِ آدرسِ EVM به
+   fetchVerdict (Base، eth_call) می‌داد — یک calldataیِ بی‌معنا به RPCهای
+   Base. این پروب دقیقاً همان کلاس‌باگ را می‌گیرد: هیچ eth_call‌ای نباید
+   فرستاده شود، و نتیجه باید همان چیزی باشد که fetchVerdictSol/diagVerdict
+   هم می‌دهند (دقیقاً همان شبیه‌سازیِ رفت‌وبرگشتِ بخشِ ۱۹). */
+{
+  const { ogFetchVerdict } = await import("./index.js");
+  const vs = await import("./verdict_sol.js");
+  const SOL_ADDR = "So11111111111111111111111111111111111111112";
+
+  function fakePubkey(n) {
+    const b = new Uint8Array(32);
+    for (let i = 0; i < 32; i++) b[i] = (n * 41 + i * 7 + 3) % 256;
+    return vs.base58Encode(b);
+  }
+  function ixData(bytes) { return vs.bytesToBase64(Uint8Array.from(bytes)); }
+  function rawIx(programId, accounts, dataBytes) {
+    return {
+      programId,
+      accounts: accounts.map(([pubkey, isSigner, isWritable]) => ({ pubkey, isSigner, isWritable })),
+      data: ixData(dataBytes),
+    };
+  }
+  const PAYER = vs.VD_SOL_PAYER;
+  const PROGRAM = fakePubkey(19);
+  const legBuy = {
+    computeBudgetInstructions: [], setupInstructions: [],
+    swapInstruction: rawIx(PROGRAM, [[PAYER, true, true]], [1, 2]),
+    cleanupInstruction: null, addressLookupTableAddresses: [],
+  };
+  const legSell = {
+    computeBudgetInstructions: [], setupInstructions: [],
+    swapInstruction: rawIx(PROGRAM, [[PAYER, true, true]], [3, 4]),
+    cleanupInstruction: null, addressLookupTableAddresses: [],
+  };
+  function jsonRes(body, status = 200) {
+    return new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
+  }
+  function rpcOk(result) { return jsonRes({ jsonrpc: "2.0", id: 1, result }); }
+
+  let simCalls = 0, evmCallSeen = false;
+  globalThis.fetch = async (url, init) => {
+    const u = String(url);
+    if (u.includes("/swap/v1/quote")) {
+      const isBuy = u.includes("onlyDirectRoutes=true");
+      return jsonRes({ outAmount: isBuy ? "1000000" : "40000000", routePlan: [{}] });
+    }
+    if (u.includes("/swap/v1/swap-instructions")) {
+      const body = JSON.parse(init.body);
+      const isBuy = body.quoteResponse.outAmount === "1000000";
+      return jsonRes(isBuy ? legBuy : legSell);
+    }
+    let body = null;
+    try { body = JSON.parse(init.body); } catch { /* نه JSON، پس مطمئناً eth_call نیست */ }
+    // یک batchِ eth_call همیشه آرایه است؛ اگر این شاخه اشتباه به fetchVerdict
+    // Base می‌رفت، دقیقاً همین شکل را می‌ساخت — این‌جا گرفته می‌شود.
+    if (Array.isArray(body) && body.some((x) => x && x.method === "eth_call")) evmCallSeen = true;
+    if (body && body.method === "getBalance") return rpcOk({ value: 2_000_000_000 });
+    if (body && body.method === "simulateTransaction") {
+      simCalls++;
+      return rpcOk({ value: { err: simCalls === 1 ? null : { InstructionError: [1, { Custom: 1 }] } } });
+    }
+    return jsonRes({ error: "unexpected" }, 500);
+  };
+
+  const meta = { symbol: "SOL", name: "Wrapped SOL", priceUsd: 150, decimals: 9 }; // فقط باید truthy باشد
+  const v = await ogFetchVerdict(SOL_ADDR, meta, Date.now() + 2000, {}, {});
+  globalThis.fetch = trackingFetch;
+
+  ok(v === "sell", "ogFetchVerdict on a Solana mint did not resolve through fetchVerdictSol (got " + v + ")");
+  ok(!evmCallSeen, "ogFetchVerdict sent an eth_call for a Solana mint — it must route to " +
+    "fetchVerdictSol, never to the Base-only fetchVerdict");
+  console.log("[og verdict solana] ogFetchVerdict(<solana mint>) resolves through fetchVerdictSol " +
+    "end to end (\"sell\"), never through the Base-only eth_call path");
 }
 
 /* ---- ۲۰. GET /vd/rpc — ماتریسِ اندپوینت×متد ----
@@ -2586,7 +2765,9 @@ console.log(fails === 0
     + "covered\n" +
     "[solana] chains.js chain detection, hand-rolled base58/base64, wire-size math and "
     + "fetchVerdictSol all covered against injected fakes; /vd/<mint> wired end to end; "
-    + "/t/<mint> still 404\n" +
+    + "/t/<mint> now 200, same as Base; the OG card's title/description build from the Solana "
+    + "token's own metadata; ogFetchVerdict routes a Solana address to fetchVerdictSol, never "
+    + "to the Base-only eth_call path\n" +
     "[solana rpc] RPC endpoint failover (first-call-only, capped, never nosell), per-method \"why\" "
     + "reasons now carrying a numeric status (rpc:<method>:<status>, jup:quote:<status>, "
     + "jup:swap-instructions:<status>, verified via the frozen-prefix+integer-suffix rule), "

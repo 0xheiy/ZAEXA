@@ -12,8 +12,14 @@
    فقط روی همین مسیر اجرا می‌شود، پس باز کردن مستقیم فایل با file:// —
    که README پیشنهادش می‌دهد و کاوشگر [file://] می‌سنجدش — دست‌نخورده
    می‌ماند. این را تست گرفت، نه بازبینی: بدون آن، صفحه‌ی توکن روی سایت
-   واقعی هم بالا نمی‌آمد. */
-if(/^\/t\/0x[0-9a-fA-F]{40}\/?$/.test(location.pathname)){
+   واقعی هم بالا نمی‌آمد.
+   ⚠️ الگو حالا هر دو شکلِ آدرس را می‌پذیرد — هگزِ Base *یا* base58ِ سولانا
+   (طول ۳۲ تا ۴۴، بدونِ 0/O/I/l، دقیقاً مثلِ SOL_MINT در worker/chains.js) —
+   چون Worker از امروز روی /t/<mint سولانا> هم همین index.html را سرو
+   می‌کند، نه ۴۰۴. بدونِ این، باندل‌های نسبی روی صفحه‌ی سولانا هم دقیقاً
+   همان ۴۰۴ می‌گرفتند و همان «Could not load ethers» بالا می‌آمد — یک
+   regexِ خودکفا، بدونِ وابستگی به چیزی پایین‌تر در همین فایل. */
+if(/^\/t\/(0x[0-9a-fA-F]{40}|[1-9A-HJ-NP-Za-km-z]{32,44})\/?$/.test(location.pathname)){
   var b=document.createElement("base");b.href="/";document.head.appendChild(b);
 }
 </script>
@@ -1271,8 +1277,23 @@ footer .fine{max-width:78ch;margin:46px 0 0;font-size:11.5px;color:var(--tx3);li
      ندارد. این نما همان داده‌ها را نشان می‌دهد — همان `renderTokenStats`،
      همان `renderExit`، همان `renderSafety` — فقط در جای دیگری رندر می‌شوند.
      هیچ منطقی اینجا تکرار نشده؛ فقط مقصدِ رندر عوض می‌شود.
+
+     ⚠️ همین یک نما، حالا یک حالتِ دوم هم دارد: /t/<mint سولانا>. آنجا
+     `openSolanaTokenPage` صدا زده می‌شود، نه `openTokenPage` — و رندرش
+     تابع‌های تازه‌ای دارند (`renderSolStats`، `renderSolExit`)، نه همان سه
+     تای بالا؛ آن سه برای یک شیءِ توکنِ Base ساخته شده‌اند (decimals،
+     tokenMeta، BASE_TOKENS) و برای داده‌ی خامِ GeckoTerminal/verdictِ
+     سولانا معنا ندارند. نمودار قیمت (#tk-chartCard) و کارتِ ایمنی
+     (#tk-safetyBody) هر دو مخصوصِ Base‌اند (نمودار از GT شبکه‌ی base
+     می‌خواند، ایمنی بایت‌کدِ EVM را می‌خواند) و روی مسیرِ سولانا مخفی
+     می‌مانند — نه چیزی که نداریم را ادعا کنیم، نه اسکلتی که هرگز پر
+     نمی‌شود.
      ===================================================================== -->
 <div class="view" id="view-token">
+  <!-- بنرِ فقط-چکِ سولانا. پیش‌فرض مخفی — فقط openSolanaTokenPage آن را
+       نشان می‌دهد؛ روی Base همیشه hidden می‌ماند. متن دقیقاً همان چیزی است
+       که صاحب سایت خواسته، کلمه‌به‌کلمه. -->
+  <div class="note warn" id="tk-solNotice" hidden>Solana: checking only. Zaexa can tell you whether this token can be sold back — swapping on Solana is not live yet.</div>
   <!-- نوار هویت: چه توکنی، چه قیمتی، و راه رفتن سرِ معامله. دکمه کوچک است
        چون کسی که این صفحه را باز کرده هنوز نمی‌داند می‌خواهد معامله کند. -->
   <section class="card tkBar">
@@ -1283,7 +1304,7 @@ footer .fine{max-width:78ch;margin:46px 0 0;font-size:11.5px;color:var(--tx3);li
            قرارداد. نسخه‌ی قبل همه‌چیز را به دو لبه هل می‌داد و وسطش حفره بود. -->
       <div class="tkMeta">
         <span id="tk-name"><span class="sk" style="display:inline-block;width:118px;height:12px"></span></span>
-        <span class="tkChip">Base</span>
+        <span class="tkChip" id="tk-chip">Base</span>
         <a class="tkAddr mono" id="tk-addr" target="_blank" rel="noopener"></a>
       </div>
     </div>
@@ -1300,9 +1321,9 @@ footer .fine{max-width:78ch;margin:46px 0 0;font-size:11.5px;color:var(--tx3);li
        هم اجرا کردیم» — باید همان چیزی باشد که اول دیده می‌شود، نه قیمت. -->
   <section class="card tkTrip" id="tk-exitBox"></section>
 
-  <div class="row tkGrid">
+  <div class="row tkGrid" id="tk-grid">
     <div class="tkLeft">
-    <section class="card">
+    <section class="card" id="tk-chartCard">
       <div class="chartTop">
         <div>
           <div class="pairName" id="tk-pairName">—</div>
@@ -1341,7 +1362,7 @@ footer .fine{max-width:78ch;margin:46px 0 0;font-size:11.5px;color:var(--tx3);li
         <span class="sk" style="flex:1;height:13px"></span></div>
     </section>
   </div>
-  <p class="tkFine">Heuristics on public bytecode, not an audit. A clean score is not a
+  <p class="tkFine" id="tk-fine">Heuristics on public bytecode, not an audit. A clean score is not a
     guarantee.</p>
 </div>
 
@@ -3621,6 +3642,13 @@ function fmtBig(n){
    دو نما حذف شد، هیچ کد تکراری‌ای برای پاک‌کردن نمی‌ماند. */
 let tokenPage=false;
 const panel=id=>$( (tokenPage?"tk-":"")+id );
+/* /t/<mint سولانا>: حالتِ فقط-چک. بولی جدا از tokenPage چون tokenPage
+   یعنی «همین حالا روی نمای toke هستیم» (با نویگیت‌کردن می‌تواند خاموش شود)،
+   ولی این یکی یعنی «این بارگذاری هرگز نباید ethers/verifyDexes/کیف‌پول را
+   لمس کند» — تصمیمی که فقط یک‌بار، سرِ راه‌اندازی، گرفته می‌شود و تا پایانِ
+   عمرِ همین بارگذاری ثابت می‌ماند. wire() پایین‌تر همین پرچم را می‌خواند تا
+   scanWallets را رویِ همین مسیر صدا نزند. */
+let solanaReadOnly=false;
 
 let statsSeq=0;
 async function renderTokenStats(t){
@@ -5325,6 +5353,151 @@ async function openTokenPage(addr){
    اینکه بقیه‌ی صفحه منتظرشان بماند. */
 function runTokenQuote(){ if(tokenPage)scheduleQuote(); }
 
+/* =====================================================================
+   /t/<mint سولانا> — حالتِ فقط-چک
+   ---------------------------------------------------------------------
+   هیچ چیزِ EVM اینجا لمس نمی‌شود: نه ethers، نه verifyDexes، نه کوت، نه
+   کیف‌پول. فقط همان سؤالی که این پروژه روی Base هم برایش ساخته شده —
+   «می‌شود این را فروخت؟» — این‌بار از GET /vd/<mint>، که خودِ Worker
+   سرتاسری حساب کرده، نه از چیزی که این صفحه شبیه‌سازی کند.
+   داده‌ی بازار از GET /gt/networks/solana/tokens/<mint> می‌آید — همان
+   gtJson و همان پراکسی‌ای که صفحه از قبل برای Base دارد، فقط شبکه فرق
+   می‌کند؛ کش/قطع‌کننده‌ی مدار/تلاشِ دوباره همه رایگان با آن می‌آیند. */
+function solTokenUrl(mint){return "https://solscan.io/token/"+mint;}
+
+async function fetchSolMeta(mint){
+  try{
+    const j=await gtJson(GT+"/networks/solana/tokens/"+mint);
+    const a=j&&j.data&&j.data.attributes;
+    return (a&&typeof a==="object")?a:null;
+  }catch{return null;}   // «نمی‌دانم» → کارت عمومی، نه صفحه‌ی شکسته
+}
+/* برخلافِ gtJson، اینجا کش/تلاشِ دوباره نمی‌خواهیم: این صفحه دقیقاً همان
+   ادعایی را می‌کند که Worker می‌سنجد — «الان» — و هر کش یا تلاشِ اضافه
+   همان لحظه را عقب می‌انداخت. */
+async function fetchSolVerdict(mint){
+  try{
+    const r=await withTimeout(fetch(location.origin+"/vd/"+mint,
+      {headers:{accept:"application/json"}}),9000);
+    if(!r.ok)return {v:null,why:null};
+    const j=await r.json();
+    const v=(j&&(j.v==="sell"||j.v==="nosell"))?j.v:null;
+    const why=(j&&typeof j.why==="string")?j.why:null;
+    return {v,why};
+  }catch{return {v:null,why:null};}
+}
+
+/* هویت + عکسِ آواتار، از رویِ داده‌ی خامِ GeckoTerminal — نه paintAvatar
+   (آن یکی یک شیءِ توکنِ Base با tokenLogo خودش می‌خواهد). */
+function paintSolAvatar(meta){
+  const el=$("tk-av");if(!el)return;
+  el.innerHTML="";
+  const sym=meta&&meta.symbol;
+  el.appendChild(document.createTextNode(sym?sym.slice(0,3).toUpperCase():"?"));
+  const url=meta&&meta.image_url;
+  if(!url||!okLogo(url))return;
+  const img=new Image();
+  img.alt="";img.loading="lazy";
+  img.onload=()=>{img.classList.add("on");};
+  img.onerror=()=>{img.remove();};
+  img.src=url;
+  el.appendChild(img);
+}
+
+/* چهار عددِ بازار — دقیقاً همان قاعده‌ی renderTokenStats (مارکت‌کپ > FDV
+   محال است، آن جفت پنهان می‌شود؛ همه‌چیز «—» یعنی جعبه‌ای نشان نده)، ولی
+   از رویِ attributes خامی که خودمان گرفته‌ایم، نه از tokenMeta/BASE_TOKENS. */
+function renderSolStats(a){
+  const box=$("tk-tokStats");if(!box)return;
+  if(!a){box.hidden=true;return;}
+  const num=v=>(v==null||v==="")?null:Number(v);
+  const mc=num(a.market_cap_usd),fdv=num(a.fdv_usd);
+  const impossiblePair=mc!=null&&fdv!=null&&isFinite(mc)&&isFinite(fdv)&&mc>0&&fdv>0&&mc>fdv*1.01;
+  const rows=[
+    ["Market cap",impossiblePair?"—":fmtBig(mc)],
+    ["FDV",impossiblePair?"—":fmtBig(fdv)],
+    ["Volume 24h",fmtBig(num(a.volume_usd&&a.volume_usd.h24))],
+    ["Liquidity",fmtBig(num(a.total_reserve_in_usd))],
+  ];
+  if(rows.every(r=>r[1]==="—")){box.hidden=true;return;}
+  box.innerHTML=rows.map(([k,v])=>
+    `<div class="tkStat"><div class="k">${esc(k)}</div><div class="v">${esc(v)}</div></div>`).join("")+
+    (impossiblePair?'<div class="statNote">Market cap and FDV are hidden. The price source '+
+      'reported a market cap larger than the fully diluted value, which is impossible — '+
+      'one of the two is wrong and we cannot tell which.</div>':"");
+  box.hidden=false;
+}
+
+/* دقیقاً سه جمله — کلمه‌به‌کلمه، از صاحب سایت. حالتِ نامعلوم هرگز سبز
+   نیست و هرگز چیزی شبیه اطمینان نمی‌گوید؛ فقط می‌گوید نتوانستیم بسنجیم.
+   «نمی‌دانم» اینجا هم مثلِ همه‌جای دیگرِ این پروژه هرگز مثلِ «نه» رفتار
+   نمی‌کند: verdict نبود یا هر چیزِ دیگری غیر از "sell"/"nosell" همیشه
+   همین یک شاخه را می‌گیرد، حتی وقتی why دارد.
+   زیرِ ?dev=1، why خام هم کنارش می‌آید — همان جایی که دفعه‌ی بعد از آنجا
+   می‌خوانیمش (devMuted، نه یک پرچمِ تازه). */
+function renderSolExit(v,why){
+  const box=$("tk-exitBox");if(!box)return;
+  if(v==="sell"){
+    box.innerHTML=`<div class="tripHead">
+        <span class="tripPct" style="color:var(--pos)">Sell route found</span>
+        <span class="tripBadge" style="color:var(--pos);background:var(--pglow)">Quoted just now</span>
+      </div>
+      <div class="tripNote">A sell route was quoted just now.</div>`;
+    return;
+  }
+  if(v==="nosell"){
+    box.innerHTML=`<div class="tripHead">
+        <span class="tripPct" style="color:var(--neg)">No way out</span>
+        <span class="tripBadge" style="color:var(--neg);background:color-mix(in srgb,var(--neg) 14%,transparent)">No sell route</span>
+      </div>
+      <div class="tripNote">No sell route quoted — you may not be able to exit.</div>`;
+    return;
+  }
+  let note="We could not check this right now.";
+  if(devMuted()&&why)note+=" (why: "+why+")";
+  box.innerHTML=`<div class="tripHead">
+      <span class="tripPct" style="color:var(--warn)">Not checked</span>
+      <span class="tripBadge" style="color:var(--warn);background:color-mix(in srgb,var(--warn) 14%,transparent)">Unknown</span>
+    </div>
+    <div class="tripNote">${esc(note)}</div>`;
+}
+
+/* مقصدِ تنها راه‌اندازی‌کننده: هرچه لازم است پیش از خودِ داده نشان داده
+   شود (بنر، حذفِ بخش‌های مخصوصِ Base) اینجاست، نه در بولوت. */
+async function openSolanaTokenPage(mint){
+  $("tk-solNotice").hidden=false;
+  $("tk-chip").textContent="Solana";
+  // پیشنهادِ اقدامی که نمی‌توانیم اجرا کنیم قولی است که نگه نمی‌داریم —
+  // پس این دو *مخفی* می‌شوند، نه فقط غیرفعال.
+  $("tk-trade").hidden=true;
+  $("walletMenu").hidden=true;
+  // بخش‌های مخصوصِ Base: نمودار (شبکه‌اش base است) و کارتِ ایمنی (بایت‌کدِ
+  // EVM). اسکلتی که هرگز پر نمی‌شود از خودِ نبودشان بدتر است.
+  $("tk-chartCard").hidden=true;
+  $("tk-safetyBody").hidden=true;
+  $("tk-fine").hidden=true;
+  $("tk-grid").style.gridTemplateColumns="1fr";
+
+  $("tk-sym").textContent="—";
+  $("tk-name").textContent="";
+  $("tk-addr").textContent=shortAddr(mint);
+  $("tk-addr").href=solTokenUrl(mint);
+  paintSolAvatar(null);
+  renderRoundTrip($("tk-exitBox"),null);   // «داریم می‌سنجیم»، همان اسکلتِ Base
+  ev("check:open");                        // همان شمارنده‌ی لینک بررسی
+
+  const [meta,verdict]=await Promise.all([fetchSolMeta(mint),fetchSolVerdict(mint)]);
+  $("tk-sym").textContent=(meta&&meta.symbol)||"Unknown token";
+  $("tk-name").textContent=(meta&&meta.name)||"";
+  const px=meta&&meta.price_usd!=null?Number(meta.price_usd):NaN;
+  $("tk-px").textContent=(isFinite(px)&&px>0)
+    ?("$"+(px<1?px.toPrecision(4):px.toLocaleString(undefined,{maximumFractionDigits:2})))
+    :"—";
+  paintSolAvatar(meta);
+  renderSolStats(meta);
+  renderSolExit(verdict.v,verdict.why);
+}
+
 function checkUrl(){
   const p=new URLSearchParams();
   const raw=$("amtIn").value.trim();
@@ -5523,7 +5696,9 @@ function wire(){
   // کیف پول‌ها هر وقت بار شوند خودشان را معرفی می‌کنند؛ گوش‌دادن باید
   // *قبل* از درخواست باشد، وگرنه اعلانِ کیف پول‌های سریع را از دست می‌دهیم.
   window.addEventListener("eip6963:announceProvider",onWalletAnnounce);
-  scanWallets();
+  // ⚠️ حالتِ فقط-چکِ سولانا هرگز کیف‌پول را نمی‌بیند و نمی‌سنجد — نه فقط
+  // دکمه‌اش مخفی می‌شود، خودِ درخواستِ eip6963 هم اصلاً فرستاده نمی‌شود.
+  if(!solanaReadOnly)scanWallets();
   $("tokSearch").oninput=e=>renderTokenList(e.target.value);
   /* دکمه‌ی پاک‌کردن فقط وقتی چیزی نوشته شده باشد وجود دارد. هر جایی که
      مقدار برنامه‌ای عوض می‌شود هم باید صدایش بزند، وگرنه دکمه روی فیلدِ
@@ -5609,50 +5784,65 @@ function wire(){
 }
 
 (async function(){
-  applyTheme();wire();
-  try{E=await loadEthers();}
-  catch{setNotice(note("err","<b>Could not load ethers.</b> Check your connection or ad-blocker and reload."));return;}
-  iMulti=new E.Interface(ABI.multicall3);iQuoter=new E.Interface(ABI.quoterV2);
-  iQuoterCL=new E.Interface(ABI.quoterCL);
-  iV2=new E.Interface(ABI.v2);iSol=new E.Interface(ABI.solidly);
-  iErc=new E.Interface(ABI.erc20);iOwn=new E.Interface(ABI.ownable);
-  iV3F=new E.Interface(ABI.v3factory);iClF=new E.Interface(ABI.clFactory);
-  iSolF=new E.Interface(ABI.solFactory);
-  iV2F=new E.Interface(ABI.v2factory);
-  iExec=new E.Interface(ABI.executor);iPool=new E.Interface(ABI.v3pool);
-  /* RPC اختصاصی *از آدرس* حذف شد.
-     قبلاً `?rpc=https://…` هر لینکی را قادر می‌کرد تمام درخواست‌های زنجیره را
-     به سرور دلخواه بفرستد — بدون تأیید و بدون هیچ نشانه‌ای در رابط. آن سرور
-     IP بازدیدکننده و بعد از اتصال آدرس کیف پولش را می‌دید، و می‌توانست
-     درباره‌ی کوت‌ها دروغ بگوید تا minOut پایین بیاید. بدتر: shareUrl مقدار
-     location.search را کپی می‌کرد، پس یک لینک آلوده تکثیر می‌شد.
+  applyTheme();
+  /* سولانا فقط-چک باید همین اول تشخیص داده شود — پیش از wire() (که خودش
+     scanWallets صدا می‌زند، فقط اگر solanaReadOnly=false باشد) و پیش از
+     هر تلاشی برای بارگذاری ethers. الگو با همان SOL_MINT در
+     worker/chains.js یکی است؛ هگزِ Base هرگز این شکل را ندارد (۰x همیشه
+     اول است، الفبای base58 اصلاً 0 ندارد)، پس این «یا» هیچ‌وقت مبهم
+     نیست. */
+  const onTokenSol=!/^\/t\/0x[0-9a-fA-F]{40}\/?$/.test(location.pathname) &&
+                    /^\/t\/([1-9A-HJ-NP-Za-km-z]{32,44})\/?$/.exec(location.pathname);
+  solanaReadOnly=!!onTokenSol;
+  wire();
+  /* ⚠️ همه‌ی این بلوک — ethers، همه‌ی Interfaceها، RPC، جفتِ پیش‌فرض،
+     نمودار — فقط برای Base است. رویِ مسیرِ سولانا هیچ‌کدامشان صدا زده
+     نمی‌شود: نه loadEthers، نه makeProvider، نه یک eth_call. */
+  if(!solanaReadOnly){
+    try{E=await loadEthers();}
+    catch{setNotice(note("err","<b>Could not load ethers.</b> Check your connection or ad-blocker and reload."));return;}
+    iMulti=new E.Interface(ABI.multicall3);iQuoter=new E.Interface(ABI.quoterV2);
+    iQuoterCL=new E.Interface(ABI.quoterCL);
+    iV2=new E.Interface(ABI.v2);iSol=new E.Interface(ABI.solidly);
+    iErc=new E.Interface(ABI.erc20);iOwn=new E.Interface(ABI.ownable);
+    iV3F=new E.Interface(ABI.v3factory);iClF=new E.Interface(ABI.clFactory);
+    iSolF=new E.Interface(ABI.solFactory);
+    iV2F=new E.Interface(ABI.v2factory);
+    iExec=new E.Interface(ABI.executor);iPool=new E.Interface(ABI.v3pool);
+    /* RPC اختصاصی *از آدرس* حذف شد.
+       قبلاً `?rpc=https://…` هر لینکی را قادر می‌کرد تمام درخواست‌های زنجیره را
+       به سرور دلخواه بفرستد — بدون تأیید و بدون هیچ نشانه‌ای در رابط. آن سرور
+       IP بازدیدکننده و بعد از اتصال آدرس کیف پولش را می‌دید، و می‌توانست
+       درباره‌ی کوت‌ها دروغ بگوید تا minOut پایین بیاید. بدتر: shareUrl مقدار
+       location.search را کپی می‌کرد، پس یک لینک آلوده تکثیر می‌شد.
 
-     دیالوگ تأیید هم جوابگو نبود: «RPC اختصاصی» برای کاربر عادی معنا ندارد،
-     و تأییدی که فهمیده نشود امنیت نمی‌آورد — فقط مسئولیت را به کاربر منتقل
-     می‌کند. حالا فقط از پنل تنظیمات و با تایپ خودِ کاربر قابل تنظیم است،
-     پس یک *لینک* هرگز نمی‌تواند عوضش کند. */
-  readProvider=makeProvider(CHAIN.rpcs[0]);
-  restoreCustomRpc();           // فقط از localStorage، که فقط با تایپ کاربر پر می‌شود
-  restoreLastRpc();             // اگر اختصاصی نبود، از اندپوینتِ برنده‌ی بازدید قبلی شروع کن
-  // پیش‌فرض: ETH بومی → USDC. کسی که تازه می‌رسد معمولاً ETH دارد و
-  // می‌خواهد بفروشد، نه برعکس.
-  tokenIn=BASE_TOKENS.find(t=>t.native);
-  tokenOut=BASE_TOKENS.find(t=>t.symbol==="USDC");
-  /* مرورگرها مقدار فیلدها را بعد از رفرش خودشان هم برمی‌گردانند، حتی با
-     autocomplete="off". و آن بازگردانی رویداد `input` شلیک نمی‌کند، پس هیچ
-     کوتی راه نمی‌افتد و دکمه روی «Finding best route…» می‌ماند. صفحه با
-     مبلغ خالی شروع می‌شود؛ اگر لینک اشتراکی مبلغ داشته باشد،
-     applyShareParams پایین‌تر پُرش می‌کند.
+       دیالوگ تأیید هم جوابگو نبود: «RPC اختصاصی» برای کاربر عادی معنا ندارد،
+       و تأییدی که فهمیده نشود امنیت نمی‌آورد — فقط مسئولیت را به کاربر منتقل
+       می‌کند. حالا فقط از پنل تنظیمات و با تایپ خودِ کاربر قابل تنظیم است،
+       پس یک *لینک* هرگز نمی‌تواند عوضش کند. */
+    readProvider=makeProvider(CHAIN.rpcs[0]);
+    restoreCustomRpc();           // فقط از localStorage، که فقط با تایپ کاربر پر می‌شود
+    restoreLastRpc();             // اگر اختصاصی نبود، از اندپوینتِ برنده‌ی بازدید قبلی شروع کن
+    // پیش‌فرض: ETH بومی → USDC. کسی که تازه می‌رسد معمولاً ETH دارد و
+    // می‌خواهد بفروشد، نه برعکس.
+    tokenIn=BASE_TOKENS.find(t=>t.native);
+    tokenOut=BASE_TOKENS.find(t=>t.symbol==="USDC");
+    /* مرورگرها مقدار فیلدها را بعد از رفرش خودشان هم برمی‌گردانند، حتی با
+       autocomplete="off". و آن بازگردانی رویداد `input` شلیک نمی‌کند، پس هیچ
+       کوتی راه نمی‌افتد و دکمه روی «Finding best route…» می‌ماند. صفحه با
+       مبلغ خالی شروع می‌شود؛ اگر لینک اشتراکی مبلغ داشته باشد،
+       applyShareParams پایین‌تر پُرش می‌کند.
 
-     ⚠️ این دو خط **آزموده نیستند**. علتِ اندازه‌گیری‌شده‌ی باگ، ذخیره‌ی مبلغ
-     در localStorage بود که برداشته شد؛ کاوشگر [refresh] همان را می‌سنجد.
-     بازگردانیِ خودِ مرورگر در پلی‌رایت بازتولید نمی‌شود، پس این یک احتیاط
-     است نه ادعای اثبات‌شده. اگر روزی راهی برای آزمودنش پیدا شد، اضافه شود. */
-  $("amtIn").value="";$("amtOut").value="";
-  restorePair();                // انتخاب قبلیِ خودِ کاربر، اگر بود
-  paintToken("in",tokenIn);paintToken("out",tokenOut);
-  readFee();loadChart();
-  // یک بار در هر بازکردن صفحه. مخرج همه‌ی نسبت‌های قیف همین است.
+       ⚠️ این دو خط **آزموده نیستند**. علتِ اندازه‌گیری‌شده‌ی باگ، ذخیره‌ی مبلغ
+       در localStorage بود که برداشته شد؛ کاوشگر [refresh] همان را می‌سنجد.
+       بازگردانیِ خودِ مرورگر در پلی‌رایت بازتولید نمی‌شود، پس این یک احتیاط
+       است نه ادعای اثبات‌شده. اگر روزی راهی برای آزمودنش پیدا شد، اضافه شود. */
+    $("amtIn").value="";$("amtOut").value="";
+    restorePair();                // انتخاب قبلیِ خودِ کاربر، اگر بود
+    paintToken("in",tokenIn);paintToken("out",tokenOut);
+    readFee();loadChart();
+  }
+  // یک بار در هر بازکردن صفحه — روی هر دو مسیر. مخرج همه‌ی نسبت‌های قیف همین است.
   ev("load");
   /* صفِ خطاهایی که *پیش از* آماده‌شدن ev() افتاده‌اند، و از اینجا به بعد
      مسیر مستقیم. گیرنده بالای <head> نصب شده، پس می‌تواند خیلی زودتر از
@@ -5687,6 +5877,16 @@ function wire(){
         "counted again, anonymously.";
       devBan.hidden=false;
     }
+  }
+  /* از اینجا به بعد فقط برای Base است. سولانا همین‌جا از بولوت خارج
+     می‌شود — نه verifyDexes، نه applyShareParams، نه runScan، نه هیچ
+     scanWallets/eth_accounts/WalletConnectی: صفحه‌اش را خودِ
+     openSolanaTokenPage بالاتر رندر کرده. */
+  if(solanaReadOnly){
+    tokenPage=true;
+    setView("token",false);
+    await openSolanaTokenPage(onTokenSol[1]);
+    return;
   }
   /* /t/<آدرس> یعنی «این توکن را برایم بررسی کن». Worker همین index.html را
      برای آن مسیر سرو می‌کند، پس اینجا از روی pathname تشخیص می‌دهیم. */

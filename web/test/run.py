@@ -3205,8 +3205,11 @@ async def main():
                 # آینه‌ی همان قاعده در worker/index.js: /t/<آدرس> صفحه‌ی
                 # اصلی را می‌گیرد. اگر آنجا عوض شد، اینجا هم باید عوض شود،
                 # وگرنه تست چیزی را می‌سنجد که روی سایت وجود ندارد.
+                # ⚠️ شکل حالا هر دو خانواده‌ی آدرس را می‌گیرد — هگزِ Base و
+                # base58ِ سولانا (همان بازه‌ی SOL_MINT در worker/chains.js) —
+                # چون /t/<mint سولانا> دیگر ۴۰۴ نمی‌گیرد.
                 clean = path.split("?")[0]
-                if re.match(r"^/t/0x[0-9a-fA-F]{40}/?$", clean):
+                if re.match(r"^/t/(0x[0-9a-fA-F]{40}|[1-9A-HJ-NP-Za-km-z]{32,44})/?$", clean):
                     return os.path.join(HERE, "harness.html")
                 # صفحه‌ی توکن یک <base href="/"> می‌گذارد، پس استاب از ریشه
                 # خواسته می‌شود. روی سایت واقعی ethers هم دقیقاً کنار
@@ -4319,6 +4322,127 @@ async def main():
         assert "Pick a token to scan" not in nv_safety, (
             "the main view's safety card is still showing the initial placeholder after leaving "
             "the token page: %r" % nv_safety[:120])
+
+        # ---- [sol token page] /t/<mint سولانا> — حالتِ فقط-چک ----
+        # هیچ ethersای، هیچ verifyDexesای، هیچ کیف‌پولی. GT و /vd هر دو با
+        # page.route کنترل می‌شوند — این کانتینر به هیچ GeckoTerminal یا
+        # Solana RPC واقعی دسترسی ندارد. درخواست‌های واقعی (نه یک پرچمِ
+        # جاوااسکریپتی که می‌تواند دروغ بگوید) با page.on("request") ثبت
+        # می‌شوند تا ثابت شود ethers هرگز خواسته نمی‌شود.
+        SOL_MINT = "So11111111111111111111111111111111111111112"
+
+        def gt_solana_body():
+            return _json.dumps({"data": {"attributes": {
+                "name": "Wrapped SOL", "symbol": "SOL",
+                "price_usd": "150.25", "decimals": 9,
+                "market_cap_usd": "1000000000", "fdv_usd": "1200000000",
+                "volume_usd": {"h24": "45000000"}, "total_reserve_in_usd": "30000000",
+            }}})
+
+        async def open_sol_page(verdict_body, dev=False):
+            seen_urls = []
+            spg = await b.new_page(viewport={"width": 1240, "height": 1000})
+            spg.on("request", lambda req: seen_urls.append(req.url))
+            async def stub_gt(route):
+                await route.fulfill(status=200, content_type="application/json", body=gt_solana_body())
+            async def stub_vd(route):
+                await route.fulfill(status=200, content_type="application/json",
+                                     body=_json.dumps(verdict_body))
+            await spg.route("**/gt/networks/solana/tokens/**", stub_gt)
+            await spg.route("**/vd/**", stub_vd)
+            suffix = "?dev=1" if dev else ""
+            await spg.goto("http://127.0.0.1:%d/t/%s%s" % (port, SOL_MINT, suffix))
+            await spg.wait_for_timeout(1500)
+            return spg, seen_urls
+
+        async def sol_state(spg):
+            return await spg.evaluate("""() => ({
+                sym: document.getElementById("tk-sym").textContent,
+                name: document.getElementById("tk-name").textContent,
+                addr: document.getElementById("tk-addr").textContent,
+                chip: document.getElementById("tk-chip").textContent,
+                noticeHidden: document.getElementById("tk-solNotice").hidden,
+                noticeText: document.getElementById("tk-solNotice").textContent,
+                stats: document.getElementById("tk-tokStats").innerText.replace(/\\n/g, " "),
+                exitText: document.getElementById("tk-exitBox").innerText.replace(/\\n/g, " "),
+                exitHtml: document.getElementById("tk-exitBox").innerHTML,
+                tradeHidden: document.getElementById("tk-trade").hidden,
+                walletHidden: document.getElementById("walletMenu").hidden,
+                chartHidden: document.getElementById("tk-chartCard").hidden,
+                safetyHidden: document.getElementById("tk-safetyBody").hidden,
+                tokenPage: tokenPage,
+            })""")
+
+        # الف) sell — جمله‌ی دقیق، هویت و اعداد بازار درست، هیچ اقدامی پیشنهاد نمی‌شود
+        sellpg, sell_urls = await open_sol_page({"v": "sell", "ms": 187})
+        sell = await sol_state(sellpg)
+        await sellpg.close()
+        print("[sol token page] sym=%r name=%r chip=%r stats=%r"
+              % (sell["sym"], sell["name"], sell["chip"], sell["stats"][:70]))
+        print("[sol token page] exit(sell)=%r" % sell["exitText"][:70])
+        assert sell["sym"] == "SOL" and sell["name"] == "Wrapped SOL", \
+            "the Solana token page did not name the token: %s" % sell
+        assert sell["chip"] == "Solana", "the identity chip still says Base on a Solana page: %r" % sell["chip"]
+        assert "$1.00B" in sell["stats"] and "$1.20B" in sell["stats"] and \
+               "$45.00M" in sell["stats"] and "$30.00M" in sell["stats"], \
+            "the Solana token page is missing its market numbers: %r" % sell["stats"]
+        assert sell["noticeHidden"] is False and (
+            "Solana: checking only" in sell["noticeText"] and
+            "swapping on Solana is not live yet" in sell["noticeText"]), \
+            "the Solana checking-only notice did not render: %r" % sell["noticeText"]
+        assert "A sell route was quoted just now." in sell["exitText"], \
+            "the \"sell\" verdict did not render its exact sentence: %r" % sell["exitText"]
+        assert sell["tradeHidden"] and sell["walletHidden"], \
+            "the swap CTA and/or the wallet button are not hidden on the Solana page: %s" % sell
+        assert sell["chartHidden"] and sell["safetyHidden"], \
+            "a Base-only panel (chart or bytecode safety) is still shown on a Solana page: %s" % sell
+        assert sell["tokenPage"] is True, "tokenPage was not set for a Solana token page"
+        assert not any("ethers" in u for u in sell_urls), \
+            "ethers was requested on the Solana read-only path: %s" % [u for u in sell_urls if "ethers" in u]
+
+        # ب) nosell — جمله‌ی دقیق
+        nopg, no_urls = await open_sol_page({"v": "nosell", "ms": 50})
+        nosell = await sol_state(nopg)
+        await nopg.close()
+        print("[sol token page] exit(nosell)=%r" % nosell["exitText"][:70])
+        assert "No sell route quoted — you may not be able to exit." in nosell["exitText"], \
+            "the \"nosell\" verdict did not render its exact sentence: %r" % nosell["exitText"]
+        assert not any("ethers" in u for u in no_urls), \
+            "ethers was requested on the Solana read-only path (nosell case): %s" % no_urls
+
+        # ج) نامعلوم (why بدونِ dev=1) — همان یک جمله، هرگز اطمینان‌بخش، هرگز سبز
+        unkpg, unk_urls = await open_sol_page({"v": None, "ms": 10, "why": "jup:quote:500"})
+        unknown = await sol_state(unkpg)
+        await unkpg.close()
+        print("[sol token page] exit(unknown)=%r" % unknown["exitText"][:70])
+        assert "We could not check this right now." in unknown["exitText"], \
+            "a null verdict (with a reason) did not render the exact unknown sentence: %r" % unknown["exitText"]
+        assert "A sell route was quoted" not in unknown["exitText"] and \
+               "No sell route quoted" not in unknown["exitText"], \
+            "the unknown state also carries another verdict's sentence: %r" % unknown["exitText"]
+        assert "var(--pos)" not in unknown["exitHtml"], \
+            "the unknown state is painted green (var(--pos)) — it must never read as reassurance: %s" \
+            % unknown["exitHtml"][:200]
+        assert "jup:quote:500" not in unknown["exitText"], \
+            "the raw why leaked without ?dev=1: %r" % unknown["exitText"]
+        assert not any("ethers" in u for u in unk_urls), \
+            "ethers was requested on the Solana read-only path (unknown case): %s" % unk_urls
+
+        # د) همان نامعلوم، این‌بار زیرِ ?dev=1 — why خام باید کنارش بیاید
+        devpg2, dev_urls = await open_sol_page({"v": None, "ms": 10, "why": "jup:quote:500"}, dev=True)
+        devunknown = await sol_state(devpg2)
+        await devpg2.close()
+        print("[sol token page] exit(unknown, dev=1)=%r" % devunknown["exitText"][:90])
+        assert "We could not check this right now." in devunknown["exitText"] and \
+               "jup:quote:500" in devunknown["exitText"], \
+            "?dev=1 did not surface the raw why next to the exact sentence: %r" % devunknown["exitText"]
+        assert not any("ethers" in u for u in dev_urls), \
+            "ethers was requested on the Solana read-only path (?dev=1 case): %s" % dev_urls
+
+        print("[sol token page] identity, market numbers and all three verdict sentences render "
+              "correctly; the unknown state carries no reassurance and is never painted green; "
+              "the raw why only shows up under ?dev=1; ethers is never requested on any of the four "
+              "runs above (checked against recorded network requests, not a JS-side flag)")
 
         # ---- [faq] پرسش‌های متداول: نه ابزار است، نه دکمه‌ای در ناوبری دارد ----
         # فقط از پانویس و از #faq می‌رسند به آن، دقیقاً مثل view-token که هیچ
