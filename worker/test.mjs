@@ -1630,6 +1630,138 @@ const ethers = globalThis.ethers;
     "real RPC or Jupiter call involved");
 }
 
+/* ---- ۱۸ب. fetchVerdictSol — failover بینِ چند اندپوینتِ RPC ----
+   طبقِ کامنتِ بالای حلقه در verdict_sol.js: failover فقط برای تماسِ *اولِ*
+   RPC (getBalance) است؛ هر اندپوینتی که همان‌جا جواب داد، تا آخرِ همان
+   درخواست چسبیده می‌ماند. این بخش هم روی یک fetchImpl جعلی است — هیچ
+   ادعایی درباره‌ی اینکه کدام‌یک از VD_SOL_RPCS واقعاً از کلادفلر جواب
+   می‌دهد نمی‌کند؛ آن سوال فقط با GET /vd/rpc (بخشِ ۲۰، بازهم جعلی در همین
+   کانتینر) قابلِ‌سنجش است، و حتی آن هم فقط بعدِ دیپلویِ واقعی معنا پیدا می‌کند. */
+{
+  const vs = await import("./verdict_sol.js");
+
+  function fakePubkey(n) {
+    const b = new Uint8Array(32);
+    for (let i = 0; i < 32; i++) b[i] = (n * 41 + i * 7 + 3) % 256;
+    return vs.base58Encode(b);
+  }
+  function ixData(bytes) { return vs.bytesToBase64(Uint8Array.from(bytes)); }
+  function rawIx(programId, accounts, dataBytes) {
+    return {
+      programId,
+      accounts: accounts.map(([pubkey, isSigner, isWritable]) => ({ pubkey, isSigner, isWritable })),
+      data: ixData(dataBytes),
+    };
+  }
+  function jsonRes(body, status = 200) {
+    return new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
+  }
+  function rpcOk(result) { return jsonRes({ jsonrpc: "2.0", id: 1, result }); }
+
+  const PAYER = vs.VD_SOL_PAYER;
+  const MINT = fakePubkey(210);
+  const PROGRAM = fakePubkey(211);
+  const JUP = vs.VD_SOL_JUP_BASE;
+
+  // یک رفت‌وبرگشتِ کوچکِ کاملاً معتبر (همان الگوی بخشِ ۱۹) — این بخش رفتارِ
+  // خودِ failover را می‌سنجد، نه بقیه‌ی خط‌لوله را، پس بعد از getBalance
+  // موفق همه‌چیزِ دیگر مسیرِ سبز می‌گیرد.
+  const legBuy = {
+    computeBudgetInstructions: [], setupInstructions: [],
+    swapInstruction: rawIx(PROGRAM, [[PAYER, true, true]], [1, 2]),
+    cleanupInstruction: null, addressLookupTableAddresses: [],
+  };
+  const legSell = {
+    computeBudgetInstructions: [], setupInstructions: [],
+    swapInstruction: rawIx(PROGRAM, [[PAYER, true, true]], [3, 4]),
+    cleanupInstruction: null, addressLookupTableAddresses: [],
+  };
+
+  // behaviors: نقشه‌ی url -> "throw" | "403" | "ok"، فقط برای متدِ getBalance.
+  function makeFailoverFetch(behaviors) {
+    const calls = []; // فقط تماس‌های getBalance، به‌ترتیبِ اندپوینتِ زده‌شده
+    const fetchImpl = async (url, init) => {
+      const u = String(url);
+      if (u.startsWith(JUP + "/swap/v1/quote")) {
+        const isBuy = u.includes("onlyDirectRoutes=true");
+        return jsonRes({ outAmount: isBuy ? "1000000" : "40000000", routePlan: [{}] });
+      }
+      if (u.startsWith(JUP + "/swap/v1/swap-instructions")) {
+        const body = JSON.parse(init.body);
+        const isBuy = body.quoteResponse.outAmount === "1000000";
+        return jsonRes(isBuy ? legBuy : legSell);
+      }
+      const body = JSON.parse(init.body);
+      if (body.method === "getBalance") {
+        calls.push(u);
+        const behavior = behaviors[u];
+        if (behavior === "throw") throw new Error("network down");
+        if (behavior === "403") return new Response("forbidden", { status: 403 });
+        return rpcOk({ value: 2_000_000_000 });
+      }
+      if (body.method === "getTokenAccountsByOwner") return rpcOk({ value: [] });
+      if (body.method === "simulateTransaction") return rpcOk({ value: { err: null } });
+      return jsonRes({ error: { code: -1, message: "unexpected method " + body.method } }, 500);
+    };
+    return { fetchImpl, calls };
+  }
+
+  const RPC1 = "https://rpc1.example", RPC2 = "https://rpc2.example",
+        RPC3 = "https://rpc3.example", RPC4 = "https://rpc4.example";
+
+  // الف) اولی throw می‌کند، دومی جواب می‌دهد → sell
+  {
+    const { fetchImpl, calls } = makeFailoverFetch({ [RPC1]: "throw", [RPC2]: "ok" });
+    const res = await vs.fetchVerdictSol(MINT, { fetchImpl, rpcs: [RPC1, RPC2, RPC3], jupBase: JUP, payer: PAYER });
+    ok(res && res.v === "sell", "failover to the second endpoint should still reach \"sell\" (got " +
+      JSON.stringify(res) + ")");
+    ok(calls.join(",") === RPC1 + "," + RPC2,
+      "expected exactly two getBalance attempts (first thrown, second answering), got: " + calls.join(","));
+  }
+
+  // ب) اولین دوتا ۴۰۳، سومی جواب می‌دهد → sell
+  {
+    const { fetchImpl, calls } = makeFailoverFetch({ [RPC1]: "403", [RPC2]: "403", [RPC3]: "ok" });
+    const res = await vs.fetchVerdictSol(MINT, { fetchImpl, rpcs: [RPC1, RPC2, RPC3], jupBase: JUP, payer: PAYER });
+    ok(res && res.v === "sell", "failover past two HTTP 403s to a third endpoint should reach \"sell\" " +
+      "(got " + JSON.stringify(res) + ")");
+    ok(calls.join(",") === RPC1 + "," + RPC2 + "," + RPC3,
+      "expected exactly three getBalance attempts, got: " + calls.join(","));
+  }
+
+  // ج) هر چهار کاندید شکست می‌خورند → null/"rpc"، ولی فقط ۳تا (نه ۴تا) امتحان می‌شود —
+  // کاندیدِ چهارم حتی جواب هم می‌داد ("ok")، ولی سقفِ VD_SOL_RPC_MAX_TRIES هرگز اجازه‌ی
+  // امتحان‌کردنش را نمی‌دهد.
+  {
+    const { fetchImpl, calls } = makeFailoverFetch({ [RPC1]: "throw", [RPC2]: "403", [RPC3]: "throw", [RPC4]: "ok" });
+    const res = await vs.fetchVerdictSol(MINT, { fetchImpl, rpcs: [RPC1, RPC2, RPC3, RPC4], jupBase: JUP, payer: PAYER });
+    ok(res && res.v === null && res.why === "rpc", "when every tried endpoint fails the verdict must " +
+      "stay null/\"rpc\", never \"nosell\" (got " + JSON.stringify(res) + ")");
+    ok(calls.length === vs.VD_SOL_RPC_MAX_TRIES,
+      "at most VD_SOL_RPC_MAX_TRIES (" + vs.VD_SOL_RPC_MAX_TRIES + ") endpoints may be tried in one " +
+      "request — got " + calls.length + ": " + calls.join(","));
+    ok(!calls.includes(RPC4),
+      "the fourth candidate (which would have answered) must never be reached once the cap is hit: " +
+      calls.join(","));
+  }
+
+  // د) مهلت با کمتر از ۴۰۰میلی‌ثانیه باقیمانده → حتی اولین اندپوینت هم امتحان نمی‌شود
+  {
+    const { fetchImpl, calls } = makeFailoverFetch({ [RPC1]: "ok" });
+    const res = await vs.fetchVerdictSol(MINT,
+      { fetchImpl, rpcs: [RPC1, RPC2, RPC3], jupBase: JUP, payer: PAYER, now: () => 10_000, deadlineAt: 10_300 });
+    ok(res && res.v === null && res.why === "deadline" && calls.length === 0,
+      "with under 400ms left on the deadline, not even the first endpoint should be tried (got " +
+      JSON.stringify(res) + ", " + calls.length + " getBalance calls)");
+  }
+
+  console.log("[fetchVerdictSol rpc failover] first-endpoint-only failover (getBalance): a thrown " +
+    "fetch or a 403 moves to the next endpoint and the winner sticks for the rest of the request; " +
+    "at most " + vs.VD_SOL_RPC_MAX_TRIES + " endpoints tried per request; every candidate failing " +
+    "gives null/\"rpc\" (never \"nosell\"); an under-400ms deadline tries zero endpoints — all " +
+    "against an injected fake, no claim made about which real endpoint answers");
+}
+
 /* ---- ۱۹. /vd/<mint سولانا> سرتاسری، و /t/<mint سولانا> → ۴۰۴ ----
    همان مسیرِ واقعیِ index.js (diagVerdict -> solFetchVerdict -> fetchVerdictSol)
    با globalThis.fetch جعلی، دقیقاً مثلِ بخشِ ۱۳. */
@@ -1737,6 +1869,62 @@ const ethers = globalThis.ethers;
     "path, until the token page itself can render Solana");
 }
 
+/* ---- ۲۰. GET /vd/rpc — پروبِ تشخیصیِ زنده‌بودنِ اندپوینت‌های RPC سولانا ----
+   سرتاسری از خودِ worker.fetch، با globalThis.fetch جعلی — این کانتینر به
+   هیچ RPC واقعی دسترسی ندارد، پس این بخش فقط شکلِ مسیر را می‌سنجد، نه
+   اینکه کدام‌یک از VD_SOL_RPCS واقعاً از کلادفلر جواب می‌دهد. */
+{
+  const vs = await import("./verdict_sol.js");
+  const spyEnv = {
+    ASSETS: { fetch: async () => new Response("not found", { status: 404 }) },
+  };
+
+  // الف) شکلِ دقیق: یک ردیف به‌ازای هر کاندید، دقیقاً چهار کلید h/ok/status/ms،
+  // و یک fetch که پرتاب می‌کند باید status:0/ok:false بدهد، نه اینکه کلِ مسیر را بترکاند.
+  globalThis.fetch = async (url) => {
+    const u = String(url);
+    if (u.includes("solana.drpc.org")) throw new Error("connection refused");
+    return new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, result: "ok" }), { status: 200 });
+  };
+  const res = await worker.fetch(new Request(ORIGIN + "/vd/rpc",
+    { headers: { "cf-connecting-ip": "203.0.113.70" } }), spyEnv, {});
+  ok(res.status === 200, "/vd/rpc should be 200 (got " + res.status + ")");
+  ok(res.headers.get("cache-control") === "no-store", "/vd/rpc must never be cached");
+  const body = await res.json();
+  ok(Array.isArray(body.endpoints) && body.endpoints.length === vs.VD_SOL_RPCS.length,
+    "/vd/rpc should report exactly one entry per candidate (" + vs.VD_SOL_RPCS.length + "), got: " +
+    JSON.stringify(body));
+  for (const row of body.endpoints || []) {
+    ok(Object.keys(row).sort().join(",") === "h,ms,ok,status",
+      "/vd/rpc entry must carry exactly h/ok/status/ms, got keys: " + JSON.stringify(row));
+  }
+  const drpcRow = (body.endpoints || []).find((r) => r.h === "solana.drpc.org");
+  ok(drpcRow && drpcRow.ok === false && drpcRow.status === 0,
+    "a thrown fetch for one candidate must show ok:false, status:0, without crashing the whole " +
+    "route: " + JSON.stringify(drpcRow));
+  const otherRows = (body.endpoints || []).filter((r) => r.h !== "solana.drpc.org");
+  ok(otherRows.length > 0 && otherRows.every((r) => r.ok === true && r.status === 200),
+    "every other candidate answering 200 with no error field should show ok:true, status:200: " +
+    JSON.stringify(otherRows));
+
+  // ب) ریت‌لیمیت — /vd/rpc روی همان سطلِ «vd» است، پس مصرفِ همین مسیر هم رد می‌شود.
+  const { RL_LIMIT: RL_LIMIT_VDRPC } = await import("./index.js");
+  const RL_IP = "203.0.113.71";
+  for (let i = 0; i < RL_LIMIT_VDRPC; i++) {
+    await worker.fetch(new Request(ORIGIN + "/vd/rpc", { headers: { "cf-connecting-ip": RL_IP } }), spyEnv, {});
+  }
+  const limited = await worker.fetch(new Request(ORIGIN + "/vd/rpc",
+    { headers: { "cf-connecting-ip": RL_IP } }), spyEnv, {});
+  ok(limited.status === 429, "the " + (RL_LIMIT_VDRPC + 1) + "th /vd/rpc request from one IP should " +
+    "be rate-limited (got " + limited.status + ")");
+
+  globalThis.fetch = trackingFetch;
+  console.log("[vd/rpc] GET /vd/rpc probes every VD_SOL_RPCS candidate in parallel via getHealth — " +
+    "exactly {h,ok,status,ms} per entry, one entry per candidate, a thrown fetch shows " +
+    "status:0/ok:false without crashing the route, no-store, and shares the \"vd\" rate-limit " +
+    "bucket — no claim made about which real endpoint answers from Cloudflare");
+}
+
 console.log(fails === 0
   ? "[gt proxy] worker ok — " + REAL.length + " real paths proxied, " + BAD.length +
     " refused without touching the network, 429 passes through with CORS\n" +
@@ -1747,6 +1935,8 @@ console.log(fails === 0
     + "covered\n" +
     "[solana] chains.js chain detection, hand-rolled base58/base64, wire-size math and "
     + "fetchVerdictSol all covered against injected fakes; /vd/<mint> wired end to end; "
-    + "/t/<mint> still 404"
+    + "/t/<mint> still 404\n" +
+    "[solana rpc] RPC endpoint failover (first-call-only, capped, never nosell) and GET /vd/rpc "
+    + "both covered against injected fakes — no claim made about which real endpoint answers"
   : "[gt proxy] " + fails + " FAILURES");
 process.exit(fails === 0 ? 0 : 1);

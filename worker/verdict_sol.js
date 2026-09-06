@@ -235,11 +235,27 @@ export function decodeLookupTable(data) {
 export const SOL_MINT_ADDR = "So11111111111111111111111111111111111111112";
 export const VD_SOL_NOTIONAL_SOL = 0.05;
 
-// ⚠️ خودِ مستنداتِ همین اندپوینت می‌گوید برای تولید نیست (rate limit پایین،
-// بدونِ SLA). این‌جا فقط چون تنها گزینه‌ی رایگان و بی‌کلیدِ موجود است — پیش
-// از اینکه سولانا به جایی جز این پروبِ تشخیصی برسد، باید به یک RPC اختصاصی
-// کوچ کند.
-export const VD_SOL_RPCS = ["https://api.mainnet-beta.solana.com"];
+// ⚠️ هیچ‌کدامِ این چهار آدرس از کلادفلر تایید نشده — این کانتینر اصلاً به هیچ
+// RPC سولانایی دسترسی ندارد (بالای همین فایل هم همین را می‌گوید)، پس ترتیبِ
+// زیر فقط یک حدس است، نه نتیجه‌ی اندازه‌گیری. حدس این‌طور بوده: publicnode و
+// drpc به‌خاطرِ شهرتِ کلی‌شان در پاسخ‌گویی از ترافیکِ دیتاسنترها جلوتر آمده‌اند؛
+// api.mainnet-beta.solana.com که مستنداتِ خودش می‌گوید برای تولید نیست و
+// معمولاً همین ترافیک را رد می‌کند عمداً سوم است، نه اول؛ و onfinality چهارم
+// چون کم‌شناخته‌ترین گزینه است. تنها چیزی که واقعاً این حدس را می‌سنجد
+// GET /vd/rpc در worker/index.js است (diagVerdictRpc) — تا آن مسیر از یک
+// دیپلویِ واقعی صدا زده نشود، هیچ‌کس (نه این کد، نه این کامنت) درباره‌ی
+// اینکه کدام‌یک واقعاً از کلادفلر جواب می‌دهد چیزی نمی‌داند.
+export const VD_SOL_RPCS = [
+  "https://solana-rpc.publicnode.com",
+  "https://solana.drpc.org",
+  "https://api.mainnet-beta.solana.com",
+  "https://solana.api.onfinality.io/public",
+];
+
+// حداکثرِ تعدادِ اندپوینتی که fetchVerdictSol در یک درخواست امتحان می‌کند —
+// فقط برای failoverِ اولین تماسِ RPC (پایین‌تر، کنارِ همان حلقه). صادر شده
+// تا worker/test.mjs رویش بشمارد، نه اینکه دوباره در تست کپی شود.
+export const VD_SOL_RPC_MAX_TRIES = 3;
 
 export const VD_SOL_JUP_BASE = "https://api.jup.ag";
 
@@ -519,6 +535,40 @@ async function rpcCall(fetchImpl, rpcUrl, method, params, timeoutMs) {
   return { ok: true, result: body.result };
 }
 
+/* ---------------------------------------------------------------------
+   probeRpcHealth — برای GET /vd/rpc در worker/index.js. برخلافِ rpcCall
+   (که فقط ok/notok برای مصرفِ داخلیِ fetchVerdictSol لازم دارد و هر
+   کدِ غیرِ۲۰۰ را دور می‌ریزد)، این تابع خودِ کدِ HTTP واقعی را نگه می‌دارد —
+   تشخیص دقیقاً همین عدد را می‌خواهد (۰ یعنی خودِ fetch پرتاب کرد).
+   getHealth ارزان‌ترین متدِ RPC است: بدونِ پارامتر، بدونِ حسابی که خوانده شود.
+   --------------------------------------------------------------------- */
+export async function probeRpcHealth(fetchImpl, rpcUrl, timeoutMs) {
+  const t0 = Date.now();
+  const ac = new AbortController();
+  const timer = setTimeout(() => ac.abort(), timeoutMs);
+  try {
+    let res;
+    try {
+      res = await fetchImpl(rpcUrl, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "getHealth", params: [] }),
+        signal: ac.signal,
+      });
+    } catch {
+      return { status: 0, ok: false, ms: Date.now() - t0 }; // پرتابِ خودِ fetch → کدِ ۰
+    }
+    const status = res ? res.status : 0;
+    if (status !== 200) return { status, ok: false, ms: Date.now() - t0 };
+    let body;
+    try { body = await res.json(); } catch { return { status, ok: false, ms: Date.now() - t0 }; }
+    const ok = !!body && typeof body === "object" && !body.error;
+    return { status, ok, ms: Date.now() - t0 };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 async function jupCall(fetchImpl, jupBase, path, opts, timeoutMs) {
   let url = jupBase + path;
   if (opts.query) url += "?" + new URLSearchParams(opts.query).toString();
@@ -556,7 +606,6 @@ export async function fetchVerdictSol(mint, opts) {
     const now = o.now || Date.now;
     const deadlineAt = o.deadlineAt;
     const rpcs = o.rpcs || VD_SOL_RPCS;
-    const rpc = rpcs[0];
     const jupBase = o.jupBase || VD_SOL_JUP_BASE;
     const timeoutMs = o.timeoutMs || 900;
     const payer = o.payer || VD_SOL_PAYER;
@@ -569,9 +618,30 @@ export async function fetchVerdictSol(mint, opts) {
 
     // ۱. موجودیِ SOL فی‌پیر — کمتر از ۱ SOL یعنی این آدرس نمی‌تواند پروب را
     // تامین کند؛ این یک واقعیت درباره‌ی *این آدرس* است، نه درباره‌ی توکن.
-    if (pastDeadline()) return unknown("deadline");
-    const balRes = await rpcCall(fetchImpl, rpc, "getBalance", [payer, { commitment: "confirmed" }], timeoutMs);
-    if (!balRes.ok) return unknown("rpc");
+    //
+    // failover بینِ اندپوینت‌ها *فقط همین‌جا* اتفاق می‌افتد — دقیقاً همان
+    // شکلِ batchA در worker/verdict.js: هر اندپوینتی که همین اولین تماس
+    // رویش شکست بخورد (پرتابِ شبکه‌ای، غیرِ۲۰۰، بدنه‌ی ناخوانا) کنار گذاشته
+    // می‌شود و اندپوینتِ بعدی امتحان می‌شود؛ هرکدام که همین‌جا جواب داد، از
+    // این‌جا تا آخرِ همین درخواست «چسبیده» می‌ماند و بقیه‌ی تماس‌های RPC
+    // پایین‌تر (getTokenAccountsByOwner، getMultipleAccounts،
+    // simulateTransaction) دیگر failover نمی‌گیرند — همان‌طور که batchB در
+    // fetchVerdict هم اگر شکست بخورد مستقیم null می‌شود، نه اینکه اندپوینتِ
+    // بعدی را امتحان کند. حداکثر VD_SOL_RPC_MAX_TRIES اندپوینت در یک
+    // درخواست، و هر بار پیش از امتحانِ اندپوینتِ بعدی مهلت دوباره سنجیده
+    // می‌شود — یعنی اگر مهلت کم بیاورد، امتحان‌کردنِ بقیه‌ی فهرست هم متوقف
+    // می‌شود. هیچ اندپوینتی «مرده» شمرده نمی‌شود مگر اینکه واقعاً امتحان و
+    // رد شده باشد؛ اگر همه رد شوند نتیجه null/"rpc" می‌ماند، هرگز nosell —
+    // همان قاعده‌ی مقایسه‌ای که کل این پروژه رویش ایستاده.
+    let rpc = null;
+    let balRes = null;
+    for (let i = 0; i < rpcs.length && i < VD_SOL_RPC_MAX_TRIES; i++) {
+      if (pastDeadline()) return unknown("deadline");
+      const attempt = await rpcCall(fetchImpl, rpcs[i], "getBalance",
+        [payer, { commitment: "confirmed" }], timeoutMs);
+      if (attempt.ok) { rpc = rpcs[i]; balRes = attempt; break; }
+    }
+    if (!rpc) return unknown("rpc"); // هیچ‌کدام از اندپوینت‌های امتحان‌شده جواب نداد
     if (!balRes.result || typeof balRes.result.value !== "number") return unknown("payer-balance");
     if (balRes.result.value < VD_SOL_MIN_PAYER_LAMPORTS) return unknown("payer-balance");
 

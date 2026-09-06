@@ -32,7 +32,7 @@ import { ogTags, ogTitle, pickTokenMeta } from "./og.js";
 import { ogImageResponse } from "./og-image.js";
 import { fetchVerdict } from "./verdict.js";
 import { EVM_ADDR, SOL_MINT, chainOf, gtNetworkOf } from "./chains.js";
-import { fetchVerdictSol, VD_SOL_RPCS, VD_SOL_JUP_BASE, VD_SOL_PAYER } from "./verdict_sol.js";
+import { fetchVerdictSol, VD_SOL_RPCS, VD_SOL_JUP_BASE, VD_SOL_PAYER, probeRpcHealth } from "./verdict_sol.js";
 
 /* پراکسی باز نیست. فقط شکل مسیرهایی که خودِ سایت می‌زند اجازه دارد:
      networks/base/tokens/<addr>
@@ -586,12 +586,36 @@ function vdDone(status, body, extraHeaders) {
   });
 }
 
+const VD_RPC_PROBE_TIMEOUT_MS = 1500;
+
+/* GET /vd/rpc — پروبِ تشخیصیِ خودِ اندپوینت‌های RPC سولانا، از کلادفلر.
+   تنها جایی که واقعاً می‌تواند بگوید کدام‌یک از VD_SOL_RPCS از ترافیکِ
+   دیتاسنتر پاسخ می‌گیرد همین‌جاست — این کانتینر و هر اندازه‌گیریِ خانگی
+   هیچ‌کدام درباره‌ی رفتارِ کلادفلر چیزی ثابت نمی‌کنند (توضیحِ کاملش بالای
+   VD_SOL_RPCS در worker/verdict_sol.js). getHealth ارزان‌ترین فراخوانیِ
+   ممکن است؛ خروجی فقط میزبان/ok/کدِ HTTP/میلی‌ثانیه است — نه بدنه، نه URL
+   کامل، نه متنِ خطا. */
+async function diagVerdictRpc() {
+  const endpoints = await Promise.all(VD_SOL_RPCS.map(async (rpcUrl) => {
+    const { status, ok, ms } = await probeRpcHealth(fetch, rpcUrl, VD_RPC_PROBE_TIMEOUT_MS);
+    return { h: new URL(rpcUrl).hostname, ok, status, ms };
+  }));
+  return vdDone(200, { endpoints });
+}
+
 async function diagVerdict(request, url, env, ctx) {
   /* همیشه اولین خط، پیش از هر بررسیِ دیگری — همان قاعده‌ای که /gt و /ev
      دارند: یک اسکریپتِ کوبنده نباید حتی شکلِ درخواست را هم مجانی بسنجد. */
   if (!rateOk(request, "vd", RL_LIMIT, RL_WINDOW_MS))
     return vdDone(429, { error: "too many requests" }, { "retry-after": "60" });
   if (request.method !== "GET") return vdDone(405, { error: "only GET" });
+
+  // «rpc» هرگز نمی‌تواند با یک mint واقعی قاطی شود — کوتاه‌ترین SOL_MINT
+  // معتبر ۳۲ نویسه‌ی base58 است، «rpc» فقط ۳ نویسه. پس این چک باید پیش از
+  // chainOf/parsing بیاید؛ وگرنه این مسیر فقط با ۴۰۰ («bad address») رد
+  // می‌شد، نه با پاسخِ خودِ probe. همان سطلِ نرخِ «vd» بالا برایش هم سنجیده
+  // شده، پس این مسیر نمی‌تواند سهمیه‌ای جدا از /vd/<mint> بخورد.
+  if (url.pathname === "/vd/rpc") return diagVerdictRpc();
 
   const addr = url.pathname.slice("/vd/".length);
   const chain = chainOf(addr);
