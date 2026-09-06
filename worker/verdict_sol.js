@@ -264,6 +264,49 @@ const TX_SIZE_LIMIT = 1232; // سقفِ سختِ پروتکلِ سولانا، �
 const PLACEHOLDER_BLOCKHASH = "1".repeat(32);
 
 /* ---------------------------------------------------------------------
+   واژه‌نامه‌ی «why» — چرا verdict نامعلوم است، از یک فهرستِ بسته و منجمد،
+   هرگز متنِ آزاد. هر مسیرِ return null داخلِ fetchVerdictSol باید دقیقاً
+   یکی از این‌ها را حمل کند؛ گریپ‌کردنِ «return null» داخلِ این فایل باید
+   هیچ موردِ بی‌برچسب پیدا نکند.
+
+   نگاشتِ دقیق (یک‌جا نوشته شده تا پراکنده در کامنتِ کنارِ هر return نباشد):
+     • "rpc"  فقط وقتی rpcCall خودش {ok:false} داده — یعنی پرتابِ شبکه‌ای،
+       غیرِ ۲۰۰، یا بدنه‌ای که JSON.parse رویش شکست خورد. هر بررسیِ شکل
+       *بعد از* ok:true (فیلدی که انتظارش می‌رفت نبود) زیرِ "internal"
+       می‌رود، نه "rpc" — چون آن دیگر شکستِ خودِ تماس نیست.
+     • "jup" همان قاعده برای jupCall (quote خرید/فروش و هر دو
+       swap-instructions) است. برای دو swap-instructions که مفهومِ
+       route اصلاً ندارند، یک بدنه‌ی ok:true ولی بدونِ json هم زیرِ "jup"
+       می‌ماند چون سطلِ اختصاصیِ دیگری برایشان نیست (برخلافِ quote).
+     • "no-route" فقط برای دو quote (خرید/فروش): تماس موفق بود (ok:true)
+       ولی outAmount در کار نبود.
+     • "payer-balance" همان‌طور که خودِ تعریف می‌گوید: یا فی‌پیر کمتر از
+       ۱ SOL دارد، یا خودِ getBalance شکلی داد که خواندنش ممکن نبود.
+     • "payer-holds"، "too-big"، "deadline" دقیقاً همان یک چکِ صریحِ خودشان.
+     • "internal" همه‌ی بقیه: شکلِ ناخوانا/غیرمنتظره‌ی داده‌ای که خودِ تماس
+       در آن موفق بود (BigInt رویِ مقدارِ نامعتبر، محاسبه‌ی sellAmount که
+       صفر/نامحدود درآمد، ALT/decodeLookupTable، compose/compile/serialize،
+       شکلِ ناشناخته‌ی err شبیه‌سازی)، به‌علاوه‌ی catch بیرونیِ خودِ تابع.
+
+   ⚠️ "unsupported" هم در همین فهرست است چون خودِ واژه‌نامه آن را خواسته،
+   ولی هیچ مسیری داخلِ همین تابع آن را تولید نمی‌کند: به زمانی اشاره دارد
+   که chainOf آدرس را به‌کل نه Base نه سولانا تشخیص می‌دهد — و آن حالت
+   همین امروز پیش از رسیدن به این‌جا با ۴۰۰ («bad address» در diagVerdict)
+   رد می‌شود، نه با v:null. تغییرِ آن رفتار خواسته‌ی این اسلایس نبود، پس
+   این کد فقط اینجا در فهرست نگه‌داشته می‌شود، بدونِ مسیرِ تولیدکننده. */
+export const VD_SOL_WHY = Object.freeze([
+  "unsupported",
+  "payer-balance",
+  "payer-holds",
+  "no-route",
+  "too-big",
+  "rpc",
+  "jup",
+  "deadline",
+  "internal",
+]);
+
+/* ---------------------------------------------------------------------
    تبدیلِ دستورالعملِ خامِ جوپیتر (programId رشته، accounts با
    pubkey/isSigner/isWritable، data به‌صورت base64) به شکلِ داخلی.
    --------------------------------------------------------------------- */
@@ -503,7 +546,9 @@ async function jupCall(fetchImpl, jupBase, path, opts, timeoutMs) {
 
 /* ---------------------------------------------------------------------
    fetchVerdictSol — ارکستراسیون؛ هشت گام، دقیقاً به همان ترتیبِ اسپایک.
-   --------------------------------------------------------------------- */
+   بازگشت حالا همیشه یک شیء است: { v: "sell" } / { v: "nosell" } برای
+   موفقیت (بدونِ کلیدِ why)، یا { v: null, why } برای هر بن‌بست — نگاشتِ
+   دقیقِ هر why بالای فایل، کنارِ VD_SOL_WHY، یک‌جا نوشته شده. */
 export async function fetchVerdictSol(mint, opts) {
   try {
     const o = opts || {};
@@ -519,116 +564,127 @@ export async function fetchVerdictSol(mint, opts) {
     function pastDeadline() {
       return deadlineAt != null && (now() >= deadlineAt || deadlineAt - now() < 400);
     }
+    // یک نقطه‌ی واحد برای «نامعلوم» — تا هیچ return بی‌برچسب نماند.
+    function unknown(why) { return { v: null, why }; }
 
     // ۱. موجودیِ SOL فی‌پیر — کمتر از ۱ SOL یعنی این آدرس نمی‌تواند پروب را
     // تامین کند؛ این یک واقعیت درباره‌ی *این آدرس* است، نه درباره‌ی توکن.
-    if (pastDeadline()) return null;
+    if (pastDeadline()) return unknown("deadline");
     const balRes = await rpcCall(fetchImpl, rpc, "getBalance", [payer, { commitment: "confirmed" }], timeoutMs);
-    if (!balRes.ok || !balRes.result || typeof balRes.result.value !== "number") return null;
-    if (balRes.result.value < VD_SOL_MIN_PAYER_LAMPORTS) return null;
+    if (!balRes.ok) return unknown("rpc");
+    if (!balRes.result || typeof balRes.result.value !== "number") return unknown("payer-balance");
+    if (balRes.result.value < VD_SOL_MIN_PAYER_LAMPORTS) return unknown("payer-balance");
 
     // ۲. 🔴 موجودیِ همین mint نزدِ فی‌پیر باید صفر باشد. اولین چهار نتیجه‌ی
     // سبزِ این کار بی‌معنی بودند چون فی‌پیر یک کیف‌پولِ صرافی با میلیون‌ها
     // USDC بود: لگِ فروش از همان موجودیِ قبلی تامین می‌شد، نه از چیزی که
     // لگِ خرید همین تراکنش تحویل داده بود. این چک همان کنترلِ منفی است که
     // آن‌روز چیز را لو داد — بدونش هر نتیجه‌ی «sell» هیچ چیزی اثبات نمی‌کند.
-    if (pastDeadline()) return null;
+    if (pastDeadline()) return unknown("deadline");
     const heldRes = await rpcCall(fetchImpl, rpc, "getTokenAccountsByOwner",
       [payer, { mint }, { encoding: "jsonParsed", commitment: "confirmed" }], timeoutMs);
-    if (!heldRes.ok) return null;
+    if (!heldRes.ok) return unknown("rpc");
     let heldRaw = 0n;
     for (const row of (heldRes.result && heldRes.result.value) || []) {
       const amt = row && row.account && row.account.data && row.account.data.parsed &&
         row.account.data.parsed.info && row.account.data.parsed.info.tokenAmount &&
         row.account.data.parsed.info.tokenAmount.amount;
       if (amt == null) continue;
-      try { heldRaw += BigInt(amt); } catch { return null; } // شکلِ عددیِ نامعتبر → نامعلوم
+      try { heldRaw += BigInt(amt); } catch { return unknown("internal"); } // شکلِ عددیِ نامعتبر، نه شکستِ خودِ تماس
     }
-    if (heldRaw > 0n) return null; // هرگز sell، حتی اگر شبیه‌سازی بعداً موفق می‌شد
+    if (heldRaw > 0n) return unknown("payer-holds"); // هرگز sell، حتی اگر شبیه‌سازی بعداً موفق می‌شد
 
     // ۳. quote خرید SOL -> mint — فقط مسیرِ مستقیم (چندجهشی احتمالاً جا نمی‌شود).
-    if (pastDeadline()) return null;
+    if (pastDeadline()) return unknown("deadline");
     const amountLamports = Math.round(VD_SOL_NOTIONAL_SOL * 1e9);
     const quoteBuyRes = await jupCall(fetchImpl, jupBase, "/swap/v1/quote", {
       query: { inputMint: SOL_MINT_ADDR, outputMint: mint, amount: String(amountLamports),
                slippageBps: "500", onlyDirectRoutes: "true" },
     }, timeoutMs);
-    if (!quoteBuyRes.ok || !quoteBuyRes.json || !quoteBuyRes.json.outAmount) return null; // بی‌مسیر → نامعلوم، نه nosell
+    if (!quoteBuyRes.ok) return unknown("jup");
+    if (!quoteBuyRes.json || !quoteBuyRes.json.outAmount) return unknown("no-route"); // بی‌مسیر → نامعلوم، نه nosell
     const quoteBuy = quoteBuyRes.json;
 
     // ۴. quote فروش mint -> SOL، عمداً برای ۹۰٪ خروجیِ خرید — نه ۱۰۰٪، چون
     // مقدارِ واقعیِ رسیده در همین تراکنش می‌تواند به‌خاطرِ اسلیپیج کمتر از
     // quote باشد؛ لگِ فروش نباید صرفاً به‌خاطرِ «موجودی کافی نیست» شکست بخورد.
-    if (pastDeadline()) return null;
+    if (pastDeadline()) return unknown("deadline");
     const sellAmount = Math.floor(Number(quoteBuy.outAmount) * 0.9);
-    if (!Number.isFinite(sellAmount) || sellAmount <= 0) return null;
+    // مقدارِ نامعقول (صفر/نامحدود) یعنی خودِ محاسبه‌ی ما روی این quote جا
+    // نیفتاد؛ Jupiter در همین مرحله چیزی برنگردانده که «no-route» باشد،
+    // پس internal درست‌تر است تا نامش را جعل نکنیم.
+    if (!Number.isFinite(sellAmount) || sellAmount <= 0) return unknown("internal");
     const quoteSellRes = await jupCall(fetchImpl, jupBase, "/swap/v1/quote", {
       query: { inputMint: mint, outputMint: SOL_MINT_ADDR, amount: String(sellAmount), slippageBps: "500" },
     }, timeoutMs);
-    if (!quoteSellRes.ok || !quoteSellRes.json || !quoteSellRes.json.outAmount) return null;
+    if (!quoteSellRes.ok) return unknown("jup");
+    if (!quoteSellRes.json || !quoteSellRes.json.outAmount) return unknown("no-route");
     const quoteSell = quoteSellRes.json;
 
     // ۵. دستورالعمل‌های swap برای هر دو leg.
-    if (pastDeadline()) return null;
+    if (pastDeadline()) return unknown("deadline");
     const legBuyRes = await jupCall(fetchImpl, jupBase, "/swap/v1/swap-instructions", {
       method: "POST", body: { userPublicKey: payer, quoteResponse: quoteBuy, wrapAndUnwrapSol: true },
     }, timeoutMs);
-    if (!legBuyRes.ok || !legBuyRes.json) return null;
+    // این اندپوینت مفهومِ route ندارد، پس سطلِ اختصاصیِ دیگری هم برایش نیست.
+    if (!legBuyRes.ok || !legBuyRes.json) return unknown("jup");
 
     const legSellRes = await jupCall(fetchImpl, jupBase, "/swap/v1/swap-instructions", {
       method: "POST", body: { userPublicKey: payer, quoteResponse: quoteSell, wrapAndUnwrapSol: true },
     }, timeoutMs);
-    if (!legSellRes.ok || !legSellRes.json) return null;
+    if (!legSellRes.ok || !legSellRes.json) return unknown("jup");
 
     // ۶. ترکیبِ یک تراکنشِ v0 واحد، و حل کردنِ هر جدولِ آدرسی که هرکدام از
     // دو leg نام برده.
-    if (pastDeadline()) return null;
+    if (pastDeadline()) return unknown("deadline");
     let composed;
-    try { composed = composeRoundtrip(legBuyRes.json, legSellRes.json); } catch { return null; }
-    if (!composed) return null;
+    try { composed = composeRoundtrip(legBuyRes.json, legSellRes.json); } catch { return unknown("internal"); }
+    if (!composed) return unknown("internal");
 
     const lookupTables = [];
     if (composed.altAddrs.length > 0) {
       const altRes = await rpcCall(fetchImpl, rpc, "getMultipleAccounts",
         [composed.altAddrs, { encoding: "base64", commitment: "confirmed" }], timeoutMs);
-      if (!altRes.ok || !altRes.result || !Array.isArray(altRes.result.value) ||
-          altRes.result.value.length !== composed.altAddrs.length) return null;
+      if (!altRes.ok) return unknown("rpc");
+      if (!altRes.result || !Array.isArray(altRes.result.value) ||
+          altRes.result.value.length !== composed.altAddrs.length) return unknown("internal");
       for (let i = 0; i < altRes.result.value.length; i++) {
         const info = altRes.result.value[i];
-        if (!info || !Array.isArray(info.data) || typeof info.data[0] !== "string") return null;
+        if (!info || !Array.isArray(info.data) || typeof info.data[0] !== "string") return unknown("internal");
         const raw = base64ToBytes(info.data[0]);
         const addrs = raw ? decodeLookupTable(raw) : null;
-        if (!addrs) return null; // جدولِ آدرس روی زنجیره نیست یا خراب است → نامعلوم
+        if (!addrs) return unknown("internal"); // جدولِ آدرس روی زنجیره نیست یا خراب است → نامعلوم
         lookupTables.push({ key: composed.altAddrs[i], addresses: addrs });
       }
     }
 
     let message;
-    try { message = compileV0Message(payer, composed.instructions, lookupTables); } catch { return null; }
+    try { message = compileV0Message(payer, composed.instructions, lookupTables); } catch { return unknown("internal"); }
 
     // ۷. سقفِ سختِ اندازه — رد شدن یعنی نتوانستیم سوال را بپرسیم، نه اینکه
     // جوابش «نه» بود.
-    if (transactionWireSize(message) > TX_SIZE_LIMIT) return null;
+    if (transactionWireSize(message) > TX_SIZE_LIMIT) return unknown("too-big");
 
     let wireBytes;
-    try { wireBytes = serializeTransaction(message); } catch { return null; }
+    try { wireBytes = serializeTransaction(message); } catch { return unknown("internal"); }
     const b64tx = bytesToBase64(wireBytes);
 
     // ۸. شبیه‌سازی — بدونِ امضا، بدونِ کیف‌پولِ واقعی.
-    if (pastDeadline()) return null;
+    if (pastDeadline()) return unknown("deadline");
     const simRes = await rpcCall(fetchImpl, rpc, "simulateTransaction",
       [b64tx, { sigVerify: false, replaceRecentBlockhash: true, encoding: "base64" }], timeoutMs);
-    if (!simRes.ok || !simRes.result || !simRes.result.value ||
-        !Object.prototype.hasOwnProperty.call(simRes.result.value, "err")) return null;
+    if (!simRes.ok) return unknown("rpc");
+    if (!simRes.result || !simRes.result.value ||
+        !Object.prototype.hasOwnProperty.call(simRes.result.value, "err")) return unknown("internal");
     const err = simRes.result.value.err;
-    if (err === null) return "sell";
+    if (err === null) return { v: "sell" };
     // ⚠️ هرگز از رویِ متنِ آزادِ خطا تصمیم نمی‌گیریم — فقط از رویِ شکل: یک
     // InstructionError یعنی زنجیره واقعاً اجرا کرد و ردش کرد؛ هر شکلِ دیگر
     // (خطای سطحِ RPC، شکلِ ناشناخته) یعنی نامعلوم، نه غیرقابل‌فروش.
     if (err && typeof err === "object" && Object.prototype.hasOwnProperty.call(err, "InstructionError"))
-      return "nosell";
-    return null;
+      return { v: "nosell" };
+    return unknown("internal"); // شکلِ err ناشناخته — نه موفقیت، نه InstructionError
   } catch {
-    return null; // این تابع هرگز نباید پرتاب کند
+    return { v: null, why: "internal" }; // این تابع هرگز نباید پرتاب کند
   }
 }

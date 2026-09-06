@@ -169,11 +169,34 @@ svg.diag{display:block;width:100%;height:auto}
   .contrast,.how,.faq{padding-top:70px;padding-bottom:70px}
   .contrast-grid,.how-steps{grid-template-columns:1fr;gap:36px}
   .how-steps:before{display:none}
+
+  /* باگِ سوم: .trust-art عرضی برایش تعریف نشده بود — فقط max-width — و
+     چون گرید تک‌ستونه‌ی موبایل align-items:center دارد (کشش روی محور بلاک
+     خاموش است) و aspect-ratio با هر دو بعدِ auto و بدون فرزندِ درون‌جریان
+     (orbit/signal همه position:absolute هستند) رفع نمی‌شد، عرض/ارتفاعِ
+     محاسبه‌شده صفر می‌ماند. حاصل: خودِ جعبه صفر بود ولی نویسه‌ی «؟» با
+     font-size:75px هنوز رسم می‌شد و overflow پیش‌فرض (visible) اجازه‌ی
+     سرریز می‌داد — یعنی جعبه‌ی ۱۶×۱۶px بالای متن، درست روی عنوان و
+     eyebrow می‌نشست. اندازه‌گیریِ زنده پیش از رفع (۳۹۰px): جعبه‌ی جعبه
+     ۱۶×۱۶ در y≈5640–5657، ولی رنگِ واقعیِ نویسه (Range روی متن) تا
+     y≈5749 پایین می‌آمد و با eyebrow (top=5690.8) و بالای h2 (top=5727.8)
+     همپوشانی داشت. رفع: با دادنِ عرضِ صریح، aspect-ratio دوباره کار
+     می‌کند، جعبه فضای واقعی می‌گیرد و ترکیب‌بندی (مدارها + نویسه) با
+     فاصله‌ی امن بالای عنوان قرار می‌گیرد. بعد از رفع: پایینِ نویسه
+     y≈5853.7، بالای eyebrow y≈5996.7 — فاصله≈143px. دسکتاپ (۱۲۸۰px)
+     دست‌نخورده می‌ماند چون این قانون فقط داخلِ همین مدیاکوئری است. */
+  .trust-art{width:min(70%,300px);margin:0 auto 40px}
 }
 </style>
 </head>
 <body>
-<div class="page-glow" aria-hidden="true"><div class="glow-blob b1"></div><div class="glow-blob b2"></div><div class="glow-blob b3"></div><div class="glow-blob b4"></div></div>
+<!-- data-overlap-ok: نورِ محیطیِ پس‌زمینه با z-index:-1 و position:fixed —
+     همیشه پشتِ کل صفحه رسم می‌شود، پس جعبه‌اش با تقریباً هر تیتری روی صفحه
+     هم‌پوشانی هندسی دارد اما هرگز رویِ متن نمی‌نشیند. این یک نشانِ صریح در
+     مارک‌آپ است برای نگهبانِ overlap sweep در run.py — نه یک لیستِ id ثابت —
+     که می‌گوید «این هم‌پوشانی عمدی است»، چون svg-محور یا aria-hidden-محورِ
+     ساده کافی نیست وقتی خودِ لایه‌ی پس‌زمینه است. -->
+<div class="page-glow" aria-hidden="true" data-overlap-ok="fixed background glow at z-index:-1, always behind content"><div class="glow-blob b1"></div><div class="glow-blob b2"></div><div class="glow-blob b3"></div><div class="glow-blob b4"></div></div>
 
 <!-- نشان و لوگوتایپِ برندِ زکسا — عیناً از current-landing.html (id="zxMark"،
      id="zxWord")، نه SVGِ manus. یک‌بار تعریف، با <use> در هدر و فوتر تکرار
@@ -391,7 +414,12 @@ svg.diag{display:block;width:100%;height:auto}
 </section>
 
 <section id="trust" class="trust section-pad">
-  <div class="trust-art">
+  <!-- aria-hidden="true": این کل ترکیب‌بندی (مدار‌ها + نشانِ «؟») تزئینی است،
+       مثلِ سایرِ زیوراتِ همین فایل (page-glow، آیکن‌های SVG). این نشانه هم
+       دسترس‌پذیری را درست می‌کند (صفحه‌خوان «؟» را با صدای بلند نمی‌خواند)
+       هم به نگهبانِ [landing mobile trust glyph]/overlap sweep در run.py
+       می‌گوید این عنصر «تزئینی» است، نه یک لیستِ id ثابت. -->
+  <div class="trust-art" aria-hidden="true">
     <div class="trust-orbit orbit-1"></div>
     <div class="trust-orbit orbit-2"></div>
     <div class="trust-signal">?</div>

@@ -935,7 +935,7 @@ check_landing_page()
 
 async def check_landing_mobile(p, errors):
     """صفحه‌ی معرفی (نه اپ) را با file:// روی موبایل واقعی باز کن — ۳۹۰×۸۴۴،
-    isMobile، hasTouch — و دو باگِ زنده‌ی گزارش‌شده روی گوشیِ صاحب‌کار را
+    isMobile، hasTouch — و سه باگِ زنده‌ی گزارش‌شده روی گوشیِ صاحب‌کار را
     اندازه بگیر، نه حدس بزن.
 
     باگِ اول: گروهِ راستِ هدر (دکمه‌ی تم + همبرگر) بدونِ margin-left:auto —
@@ -950,6 +950,26 @@ async def check_landing_mobile(p, errors):
     موبایل هم دوستونه می‌ماند. اندازه‌گیریِ زنده پیش از رفع: عرضِ کارت=141px و
     ردیفِ عنوان (stageHd) با سه‌خط پیچیدن به ۵۸px قد می‌کشید. بعد از رفع:
     عرض≈354px، ارتفاعِ ردیف≈19px.
+
+    باگِ سوم: .trust-art (مدار‌ها + نشانِ «؟» بخشِ THE TRUST LAYER) برایش عرضی
+    تعریف نشده بود — فقط max-width. روی گریدِ تک‌ستونه‌ی موبایل، چون .trust
+    خودش align-items:center دارد (بدونِ کشش روی محورِ بلاک) و همه‌ی فرزندانِ
+    trust-art با position:absolute از جریان بیرون‌اند، aspect-ratio نتوانست
+    اندازه را حل کند و جعبه صفر×صفر ماند. متنِ «؟» با font-size:75px هنوز
+    رسم می‌شد چون overflow پیش‌فرض visible است — یعنی جوهرِ واقعیِ نویسه از
+    جعبه‌ی نامرئی‌اش سرریز کرده و مستقیم روی eyebrow و تیترِ بخش می‌نشست، در
+    حالی که جعبه‌ی خودِ عنصر (۱۶×۱۶px) هیچ‌وقت با جعبه‌ی تیتر تلاقی نداشت.
+    ⚠️ همین «جعبه تلاقی ندارد ولی جوهر تلاقی دارد» دقیقاً همان چیزی است که
+    یک سوئیپِ هم‌پوشانیِ قبلی (که فقط getBoundingClientRect خودِ عنصر را
+    می‌سنجید، نه Range روی متنِ داخلش) از قلم انداخته بود — آن سوئیپ می‌گفت
+    «فقط هم‌پوشانی‌های عمدی: آواتارهای پشته‌ای، لایه‌های SVG» چون تنها
+    هم‌پوشانی‌هایی که می‌دید همان‌ها بودند؛ این یکی جعبه‌اش اصلاً به تیتر
+    نمی‌رسید. نگهبانِ [landing mobile trust glyph] و overlap sweep پایین‌تر
+    هر دو روی جوهرِ واقعیِ متن (Range) کار می‌کنند، نه فقط جعبه‌ی عنصر.
+    اندازه‌گیریِ زنده پیش از رفع (۳۹۰px): جوهرِ نویسه تا y≈5749 پایین می‌آمد،
+    eyebrow از y≈5690.8 شروع می‌شد — هم‌پوشانی. بعد از رفع: پایینِ جوهر
+    y≈5848، بالای eyebrow y≈5978.6 — فاصله≈130px. دسکتاپ (۱۲۸۰px) دست‌نخورده
+    می‌ماند چون رفع فقط داخلِ @media(max-width:900px) است.
 
     ⚠️ آستانه‌ها را روی خودِ عددهای اندازه‌گرفته‌شده قفل می‌کنیم، نه فقط
     «داخلِ ویوپورت» — چون نسخه‌ی شکسته هم داخلِ ویوپورت بود، فقط له‌شده."""
@@ -1012,6 +1032,138 @@ async def check_landing_mobile(p, errors):
         "the exit-test card's title row is %.1fpx tall (measured live at 58px when the title "
         "wraps across three lines because the card is squashed two-column) — it should fit "
         "on one line" % exit_info["stageHd"]["height"])
+
+    # ---- [landing mobile overlap sweep] ----
+    # سوئیپِ قبلی فقط getBoundingClientRect خودِ عنصر را می‌سنجید. آن کافی
+    # نیست وقتی جعبه‌ی یک عنصرِ تزئینی جمع‌شده (صفر یا نزدیکِ صفر) ولی
+    # overflow:visible اجازه می‌دهد متن/گلیفِ داخلش از جعبه بیرون بزند —
+    # دقیقاً حالتِ نشانِ «؟» بخشِ trust. این نسخه برای هر عنصرِ تزئینیِ برگ
+    # (بدونِ فرزندِ عنصری) که فقط متن دارد، به‌جای جعبه‌ی خودش، جعبه‌ی
+    # Range روی متنش را می‌سنجد — یعنی جوهرِ واقعیِ رسم‌شده را.
+    #
+    # «تزئینی بودن» ساختاری تشخیص داده می‌شود، نه با فهرستِ دستیِ idها:
+    # هر برگی که زیرِ [aria-hidden="true"] یا زیرِ یک <svg> است. «متنِ
+    # واقعی» هم h1/h2/h3/p/li است — نه هر span، پس آواتارهای پشته‌ایِ
+    # .proof-avatar (که هرکدام حرفِ واقعی دارند، نه تزئین) از اساس در این
+    # سوئیپ شرکت نمی‌کنند؛ پشته‌شدنِ عمدی‌شان تصمیمِ محتوا-با-محتواست، نه
+    # چیزی که این نگهبان قرار است داوری کند. دو راهِ فرارِ صریح هم هست، هر دو
+    # ساختاری: (۱) اگر تزئینی و متن هر دو زیرِ همان <svg> باشند (لایه‌های
+    # داخلیِ یک دیاگرام)، (۲) اگر عنصر یا یکی از اجدادش data-overlap-ok
+    # داشته باشد — مثلِ .page-glow که چون z-index:-1 و position:fixed دارد،
+    # با تقریباً هر تیتری هم‌پوشانیِ هندسی دارد ولی همیشه پشتِ محتواست.
+    sweep = await pg.evaluate("""() => {
+        function isVisible(el) {
+            const r = el.getBoundingClientRect();
+            if (r.width <= 0 || r.height <= 0) return false;
+            const cs = getComputedStyle(el);
+            return cs.visibility !== 'hidden' && cs.display !== 'none'
+                && parseFloat(cs.opacity) > 0;
+        }
+        function inkRect(el) {
+            if (el.children.length === 0 && el.textContent.trim().length) {
+                const rg = document.createRange();
+                rg.selectNodeContents(el);
+                const rc = rg.getBoundingClientRect();
+                if (rc.width > 0 || rc.height > 0) return rc;
+            }
+            // شکلِ بدونِ متن (مثلِ حلقه‌های نقطه‌چینِ .trust-orbit) با
+            // rotate+skew جعبه‌ی محاطی‌اش را چند برابرِ خودِ حلقه‌ی نازک
+            // بزرگ می‌کند — جعبه‌ی بعدِ تبدیل، نه جوهرِ واقعی. transform را
+            // موقتاً خاموش می‌کنیم، جعبه‌ی پیش‌از-تبدیل را می‌سنجیم (که برای
+            // یک عنصرِ inset:0 دقیقاً جعبه‌ی والدش است، تقریبِ معقولی برای
+            // جوهر)، و بعد برمی‌گردانیم — وگرنه دسکتاپِ ۱۲۸۰px هم به‌غلط
+            // «هم‌پوشانی» می‌گرفت (اندازه‌گیریِ زنده: بدونِ این رفع، جعبه‌ی
+            // orbit-1 در ۱۲۸۰px از x=-66 تا x=666 می‌رفت و ستونِ trust-copy
+            // را قورت می‌داد، در حالی که خودِ حلقه فقط یک نوارِ نازک است).
+            const cs = getComputedStyle(el);
+            if (cs.transform && cs.transform !== 'none') {
+                const prevT = el.style.transform, prevA = el.style.animation,
+                      prevTr = el.style.transition;
+                el.style.setProperty('transition', 'none', 'important');
+                el.style.setProperty('animation', 'none', 'important');
+                el.style.setProperty('transform', 'none', 'important');
+                const rc = el.getBoundingClientRect();
+                el.style.transform = prevT; el.style.animation = prevA;
+                el.style.transition = prevTr;
+                return rc;
+            }
+            return el.getBoundingClientRect();
+        }
+        const plain = r => ({x: r.x, y: r.y, width: r.width, height: r.height,
+            top: r.top, left: r.left, right: r.right, bottom: r.bottom});
+
+        const decorative = Array.from(document.querySelectorAll('*'))
+            .filter(el => el.children.length === 0)
+            .filter(el => el.closest('[aria-hidden="true"]') || el.closest('svg'))
+            .filter(isVisible);
+        const protectedText = Array.from(document.querySelectorAll('h1,h2,h3,p,li'))
+            .filter(el => !el.closest('[aria-hidden="true"]'))
+            .filter(el => el.textContent.trim().length)
+            .filter(isVisible);
+
+        const violations = [];
+        for (const d of decorative) {
+            if (d.closest('[data-overlap-ok]')) continue;
+            const dRect = inkRect(d);
+            const dSvg = d.closest('svg');
+            for (const t of protectedText) {
+                if (t.closest('[data-overlap-ok]')) continue;
+                if (dSvg && dSvg === t.closest('svg')) continue;
+                const tRect = t.getBoundingClientRect();
+                const ox = Math.max(0, Math.min(dRect.right, tRect.right)
+                    - Math.max(dRect.left, tRect.left));
+                const oy = Math.max(0, Math.min(dRect.bottom, tRect.bottom)
+                    - Math.max(dRect.top, tRect.top));
+                if (ox > 1 && oy > 1) {
+                    violations.push({
+                        decorative: (d.className && d.className.toString) ? d.className.toString() : d.tagName,
+                        text: t.tagName + ':' + t.textContent.trim().slice(0, 40),
+                        decRect: plain(dRect), textRect: plain(tRect)
+                    });
+                }
+            }
+        }
+        return {decorativeCount: decorative.length, protectedCount: protectedText.length,
+                violations};
+    }""")
+    print("[landing mobile overlap sweep] decorative=%d protected-text=%d violations=%d"
+          % (sweep["decorativeCount"], sweep["protectedCount"], len(sweep["violations"])))
+    assert not sweep["violations"], (
+        "a decorative element's rendered ink overlaps real heading/paragraph text at %spx "
+        "wide, checked by ink extent (a Range over the text node) rather than just the "
+        "element's own box — found: %s" % (header["vw"], sweep["violations"][:3]))
+
+    # ---- [landing mobile trust glyph] ----
+    # پیامدِ زنده‌ی همان باگِ سوم: نشانِ «؟» تزئینیِ بخشِ trust در برابرِ
+    # eyebrow و h2 همان بخش، با آستانه‌ی عددیِ قفل‌شده (نه فقط «هم‌پوشانی
+    # ندارد») — چون یک نگهبانِ شل («داخلِ ویوپورت است») همان زمانی که جعبه
+    # له شده بود هم سبز می‌شد.
+    trust = await pg.evaluate("""() => {
+        const rect = el => { const r = el.getBoundingClientRect();
+            return {top: r.top, left: r.left, right: r.right, bottom: r.bottom}; };
+        const signal = document.querySelector('.trust-signal');
+        const rg = document.createRange();
+        rg.selectNodeContents(signal.firstChild);
+        const ink = rg.getBoundingClientRect();
+        return {
+            glyphInk: {top: ink.top, left: ink.left, right: ink.right, bottom: ink.bottom},
+            eyebrow: rect(document.querySelector('#trust .eyebrow')),
+            h2: rect(document.querySelector('#trust h2'))
+        };
+    }""")
+    clearance = trust["eyebrow"]["top"] - trust["glyphInk"]["bottom"]
+    print("[landing mobile trust glyph] glyphInkBottom=%.1f eyebrowTop=%.1f h2Top=%.1f "
+          "clearance=%.1f" % (trust["glyphInk"]["bottom"], trust["eyebrow"]["top"],
+                               trust["h2"]["top"], clearance))
+    assert not overlaps(trust["glyphInk"], trust["h2"]), (
+        "the trust section's decorative \"?\" glyph visually overlaps the heading "
+        "at %spx wide: glyph ink=%s heading=%s"
+        % (header["vw"], trust["glyphInk"], trust["h2"]))
+    assert clearance >= 20, (
+        "the trust glyph's rendered ink clears the eyebrow text by only %.1fpx at %spx wide "
+        "(pinned minimum: 20px) — measured live before the fix this was negative: glyph ink "
+        "ran to y=%.1f while the eyebrow starts at y=%.1f" % (
+            clearance, header["vw"], trust["glyphInk"]["bottom"], trust["eyebrow"]["top"]))
 
     await b.close()
 

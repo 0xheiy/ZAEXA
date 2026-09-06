@@ -1442,15 +1442,18 @@ const ethers = globalThis.ethers;
   const JUP = vs.VD_SOL_JUP_BASE;
 
   function makeFetch({ legs, lamports = 2_000_000_000, heldRaw = null, simErr = "SUCCESS",
-                       buyQuoteOk = true, rpcStatus = {} } = {}) {
+                       buyQuoteOk = true, buyQuoteEmpty = false, rpcStatus = {} } = {}) {
     const calls = [];
     const fetchImpl = async (url, init) => {
       const u = String(url);
       if (u.startsWith(JUP + "/swap/v1/quote")) {
         const isBuy = u.includes("onlyDirectRoutes=true");
         calls.push(isBuy ? "quote:buy" : "quote:sell");
-        if (isBuy) return buyQuoteOk ? jsonRes({ outAmount: "1000000", routePlan: [{}] })
-                                     : jsonRes({ error: "no route" }, 404);
+        if (isBuy) {
+          if (!buyQuoteOk) return jsonRes({ error: "no route" }, 404); // غیرِ ۲۰۰ → "jup"
+          if (buyQuoteEmpty) return jsonRes({ routePlan: [] }); // ۲۰۰ ولی بدونِ outAmount → "no-route"
+          return jsonRes({ outAmount: "1000000", routePlan: [{}] });
+        }
         return jsonRes({ outAmount: "40000000", routePlan: [{}] });
       }
       if (u.startsWith(JUP + "/swap/v1/swap-instructions")) {
@@ -1482,91 +1485,149 @@ const ethers = globalThis.ethers;
     return Object.assign({ rpcs: [RPC], jupBase: JUP, payer: PAYER }, extra);
   }
 
-  // الف) مسیرِ سبز — هیچ چیزِ استثنایی، همه‌چیز موفق
+  // کمکیِ مشترک: هر why مشاهده‌شده باید عضوِ فهرستِ منجمدِ VD_SOL_WHY باشد —
+  // با پیمایشِ خودِ فهرست (Array.includes)، نه با کپی‌کردنِ دوباره‌ی آن در
+  // این فایل؛ اگر فهرست روزی جابه‌جا شود، این چک هم خودش را همان لحظه به‌روز می‌بیند.
+  function isFrozenWhy(why) { return vs.VD_SOL_WHY.includes(why); }
+
+  // الف) مسیرِ سبز — هیچ چیزِ استثنایی، همه‌چیز موفق. یک sell هیچ کلیدِ
+  // why‌ای ندارد، حتی به‌شکلِ undefined.
   {
     const legs = makeLegs();
     const { fetchImpl, calls } = makeFetch({ legs, simErr: "SUCCESS" });
     const res = await vs.fetchVerdictSol(MINT, opts({ fetchImpl }));
-    ok(res === "sell", "happy path should return \"sell\" (got " + res + ")");
+    ok(res && res.v === "sell", "happy path should return { v: \"sell\" } (got " + JSON.stringify(res) + ")");
+    ok(!("why" in res), "a \"sell\" result must carry no why key at all: " + JSON.stringify(res));
     ok(calls.join(",") === "rpc:getBalance,rpc:getTokenAccountsByOwner,quote:buy,quote:sell," +
       "swap-ix:buy,swap-ix:sell,rpc:simulateTransaction",
       "unexpected call sequence for the happy path: " + calls.join(","));
   }
 
-  // ب) خطای سطحِ تراکنش (InstructionError) → nosell
+  // ب) خطای سطحِ تراکنش (InstructionError) → nosell، باز هم بدونِ why
   {
     const legs = makeLegs();
     const { fetchImpl } = makeFetch({ legs, simErr: "INSTR" });
     const res = await vs.fetchVerdictSol(MINT, opts({ fetchImpl }));
-    ok(res === "nosell", "a transaction-level InstructionError should give \"nosell\" (got " + res + ")");
+    ok(res && res.v === "nosell", "a transaction-level InstructionError should give { v: \"nosell\" } " +
+      "(got " + JSON.stringify(res) + ")");
+    ok(!("why" in res), "a \"nosell\" result must carry no why key at all: " + JSON.stringify(res));
   }
 
-  // ج) 🔴 فی‌پیر از قبل خودِ mint را دارد → null، حتی اگر شبیه‌سازی زیرش
-  // موفق می‌بود — همان تله‌ای که چهار نتیجه‌ی اول را بی‌معنی کرده بود.
+  // ج) 🔴 فی‌پیر از قبل خودِ mint را دارد → null/"payer-holds"، حتی اگر
+  // شبیه‌سازی زیرش موفق می‌بود — همان تله‌ای که چهار نتیجه‌ی اول را
+  // بی‌معنی کرده بود.
   {
     const legs = makeLegs();
     const { fetchImpl, calls } = makeFetch({ legs, heldRaw: "500", simErr: "SUCCESS" });
     const res = await vs.fetchVerdictSol(MINT, opts({ fetchImpl }));
-    ok(res === null, "a payer that already holds the mint must give null, even though the " +
-      "simulation underneath would say success (got " + res + ")");
+    ok(res && res.v === null && res.why === "payer-holds" && isFrozenWhy(res.why),
+      "a payer that already holds the mint must give null/\"payer-holds\", even though the " +
+      "simulation underneath would say success (got " + JSON.stringify(res) + ")");
     ok(calls.join(",") === "rpc:getBalance,rpc:getTokenAccountsByOwner",
       "the guard must stop before any Jupiter/simulate call once the payer is found to hold the " +
       "mint, got: " + calls.join(","));
   }
 
-  // د) فی‌پیر کمتر از ۱ SOL → null، بدونِ حتی یک فراخوانیِ جوپیتر
+  // د) فی‌پیر کمتر از ۱ SOL → null/"payer-balance"، بدونِ حتی یک فراخوانیِ جوپیتر
   {
     const legs = makeLegs();
     const { fetchImpl, calls } = makeFetch({ legs, lamports: 100_000_000 }); // ۰٫۱ SOL
     const res = await vs.fetchVerdictSol(MINT, opts({ fetchImpl }));
-    ok(res === null, "a payer under 1 SOL must give null (got " + res + ")");
+    ok(res && res.v === null && res.why === "payer-balance" && isFrozenWhy(res.why),
+      "a payer under 1 SOL must give null/\"payer-balance\" (got " + JSON.stringify(res) + ")");
     ok(calls.join(",") === "rpc:getBalance",
       "an underfunded payer must stop before even the held-mint check or any Jupiter call, got: " +
       calls.join(","));
   }
 
-  // ه) بدونِ مسیرِ خرید در جوپیتر → نامعلوم، نه nosell
+  // د۲) همان "payer-balance"، ولی از راهِ دیگرِ تعریفش: خودِ getBalance شکلی
+  // داد که مقدارش عدد نبود — نه اینکه کم بود.
+  {
+    const legs = makeLegs();
+    const { fetchImpl } = makeFetch({ legs, lamports: "not-a-number" });
+    const res = await vs.fetchVerdictSol(MINT, opts({ fetchImpl }));
+    ok(res && res.v === null && res.why === "payer-balance" && isFrozenWhy(res.why),
+      "an unreadable getBalance shape must also give \"payer-balance\", not a crash or a different " +
+      "reason (got " + JSON.stringify(res) + ")");
+  }
+
+  // ه) بدونِ مسیرِ خرید در جوپیتر، به‌شکلِ یک غیرِ۲۰۰ از خودِ Jupiter → "jup"
+  // (تماس در سطحِ HTTP شکست خورده، نه اینکه با ۲۰۰ گفته باشد route‌ای نیست)
   {
     const legs = makeLegs();
     const { fetchImpl, calls } = makeFetch({ legs, buyQuoteOk: false });
     const res = await vs.fetchVerdictSol(MINT, opts({ fetchImpl }));
-    ok(res === null, "no direct buy route from Jupiter must give null, not \"nosell\" (got " + res + ")");
+    ok(res && res.v === null && res.why === "jup" && isFrozenWhy(res.why),
+      "a non-200 quote response from Jupiter must give null/\"jup\", not \"nosell\" " +
+      "(got " + JSON.stringify(res) + ")");
     ok(!calls.includes("swap-ix:buy"), "swap-instructions must not be requested after a failed quote");
   }
 
-  // و) تراکنشِ بزرگ‌تر از ۱۲۳۲ بایت → null، هرگز حتی به simulateTransaction نمی‌رسد
+  // ه۲) quote خرید با ۲۰۰ ولی بدونِ outAmount → "no-route" — Jupiter واقعاً
+  // جواب داد، فقط چیزی برای این mint نداشت.
+  {
+    const legs = makeLegs();
+    const { fetchImpl, calls } = makeFetch({ legs, buyQuoteEmpty: true });
+    const res = await vs.fetchVerdictSol(MINT, opts({ fetchImpl }));
+    ok(res && res.v === null && res.why === "no-route" && isFrozenWhy(res.why),
+      "a 200 quote response with no outAmount must give null/\"no-route\" " +
+      "(got " + JSON.stringify(res) + ")");
+    ok(!calls.includes("swap-ix:buy"), "swap-instructions must not be requested after a route-less quote");
+  }
+
+  // و) تراکنشِ بزرگ‌تر از ۱۲۳۲ بایت → null/"too-big"، هرگز حتی به
+  // simulateTransaction نمی‌رسد
   {
     const legs = makeLegs({ hugeSwapData: true });
     const { fetchImpl, calls } = makeFetch({ legs, simErr: "SUCCESS" });
     const res = await vs.fetchVerdictSol(MINT, opts({ fetchImpl }));
-    ok(res === null, "a transaction over the 1232-byte limit must give null (got " + res + ")");
+    ok(res && res.v === null && res.why === "too-big" && isFrozenWhy(res.why),
+      "a transaction over the 1232-byte limit must give null/\"too-big\" (got " + JSON.stringify(res) + ")");
     ok(!calls.includes("rpc:simulateTransaction"),
       "an oversized transaction must never reach simulateTransaction — got calls: " + calls.join(","));
   }
 
-  // ز) ۵۰۰ از خودِ simulateTransaction → null، نه nosell
+  // ز) ۵۰۰ از خودِ simulateTransaction → null/"rpc"، نه nosell
   {
     const legs = makeLegs();
     const { fetchImpl } = makeFetch({ legs, rpcStatus: { simulateTransaction: 500 } });
     const res = await vs.fetchVerdictSol(MINT, opts({ fetchImpl }));
-    ok(res === null, "a 500 from simulateTransaction must give null, not \"nosell\" (got " + res + ")");
+    ok(res && res.v === null && res.why === "rpc" && isFrozenWhy(res.why),
+      "a 500 from simulateTransaction must give null/\"rpc\", not \"nosell\" (got " + JSON.stringify(res) + ")");
   }
 
-  // ح) مهلتِ گذشته → null، بدونِ حتی یک فراخوانیِ شبکه
+  // ح) مهلتِ گذشته → null/"deadline"، بدونِ حتی یک فراخوانیِ شبکه
   {
     let calls = 0;
     const fetchImpl = async () => { calls++; return jsonRes({}); };
     const res = await vs.fetchVerdictSol(MINT, { fetchImpl, now: () => 10_000, deadlineAt: 5_000 });
-    ok(res === null && calls === 0, "past the deadline fetchVerdictSol must return null without " +
-      "any fetch call (got " + res + ", " + calls + " calls)");
+    ok(res && res.v === null && res.why === "deadline" && isFrozenWhy(res.why) && calls === 0,
+      "past the deadline fetchVerdictSol must return null/\"deadline\" without any fetch call " +
+      "(got " + JSON.stringify(res) + ", " + calls + " calls)");
   }
 
-  console.log("[fetchVerdictSol] happy path -> sell; InstructionError -> nosell; a payer holding " +
-    "the mint -> null even under a successful simulation; an underfunded payer -> null with zero " +
-    "Jupiter calls; no direct route -> null; an oversized (>1232 byte) transaction -> null " +
-    "without ever reaching simulateTransaction; a 500 from simulateTransaction -> null; a past " +
-    "deadline -> null with zero fetch calls — all against an injected fake, no real RPC or " +
-    "Jupiter call involved");
+  // ط) موجودیِ همین mint با شکلِ عددیِ نامعتبر (نه throw، نه یک why دیگر) → "internal"
+  {
+    const legs = makeLegs();
+    const { fetchImpl } = makeFetch({ legs, heldRaw: "not-a-bigint" });
+    const res = await vs.fetchVerdictSol(MINT, opts({ fetchImpl }));
+    ok(res && res.v === null && res.why === "internal" && isFrozenWhy(res.why),
+      "an unparsable held-token amount must give null/\"internal\" without throwing " +
+      "(got " + JSON.stringify(res) + ")");
+  }
+
+  // ی) "unsupported" را هیچ مسیری در fetchVerdictSol تولید نمی‌کند (بالای
+  // verdict_sol.js توضیح داده چرا) — فقط عضویتش در فهرستِ منجمد سنجیده می‌شود.
+  ok(isFrozenWhy("unsupported"), "\"unsupported\" must still be a member of the frozen reason vocabulary");
+
+  console.log("[fetchVerdictSol] happy path -> {v:\"sell\"} with no why key; InstructionError -> " +
+    "{v:\"nosell\"} with no why key; a payer holding the mint -> \"payer-holds\"; an underfunded " +
+    "payer or an unreadable getBalance shape -> \"payer-balance\"; a non-200 Jupiter quote -> " +
+    "\"jup\"; a 200 quote with no route -> \"no-route\"; an oversized (>1232 byte) transaction -> " +
+    "\"too-big\"; a 500 from simulateTransaction -> \"rpc\"; a past deadline -> \"deadline\" with " +
+    "zero fetch calls; an unparsable held-token amount -> \"internal\"; every observed why checked " +
+    "against VD_SOL_WHY by iterating the actual frozen list — all against an injected fake, no " +
+    "real RPC or Jupiter call involved");
 }
 
 /* ---- ۱۹. /vd/<mint سولانا> سرتاسری، و /t/<mint سولانا> → ۴۰۴ ----
@@ -1644,11 +1705,31 @@ const ethers = globalThis.ethers;
   ok(res.headers.get("cache-control") === "no-store", "/vd must never be cached");
   const body = await res.json();
   ok(body.v === "sell", "/vd/<solana mint> did not surface the Solana verdict: " + JSON.stringify(body));
+  ok(!("why" in body), "/vd's response for a \"sell\" verdict must carry no why key at all: " +
+    JSON.stringify(body));
 
   const tRes = await worker.fetch(new Request(ORIGIN + "/t/" + SOL_ADDR,
     { headers: { "cf-connecting-ip": "203.0.113.61" } }), spyEnv, {});
   ok(tRes.status === 404, "/t/<solana mint> must be 404 until web/index.html can render a Solana " +
     "token (got " + tRes.status + ")");
+
+  // یک mint دیگر، این‌بار فی‌پیرِ کم‌موجودی — سرتاسری از خودِ /vd، تا ثابت
+  // شود why واقعاً تا بیرونی‌ترین لایه می‌رسد، نه فقط تا fetchVerdictSol.
+  const SOL_ADDR_2 = "So11111111111111111111111111111111111111112".slice(0, -1) + "3"; // شکلِ معتبر، آدرسِ دیگر
+  globalThis.fetch = async (u, o) => {
+    const b = JSON.parse(o.body);
+    if (b.method === "getBalance") return rpcOk({ value: 100_000_000 }); // ۰٫۱ SOL
+    return jsonRes({ error: "unexpected" }, 500);
+  };
+  const res2 = await worker.fetch(new Request(ORIGIN + "/vd/" + SOL_ADDR_2,
+    { headers: { "cf-connecting-ip": "203.0.113.62" } }), spyEnv, {});
+  ok(res2.status === 200, "/vd/<solana mint> with an underfunded payer should still be 200 " +
+    "(got " + res2.status + ")");
+  const body2 = await res2.json();
+  ok(Object.keys(body2).sort().join(",") === "ms,v,why",
+    "/vd's null-verdict body must be exactly {v, ms, why}, got keys: " + JSON.stringify(body2));
+  ok(body2.v === null && body2.why === "payer-balance" && vs.VD_SOL_WHY.includes(body2.why),
+    "/vd end to end did not surface fetchVerdictSol's reason: " + JSON.stringify(body2));
 
   globalThis.fetch = trackingFetch; // برگرداندنِ موکِ پیش‌فرض برای هرچه بعد از این اجرا می‌شود
   console.log("[vd/t solana] /vd/<solana mint> runs the Solana verdict pipeline end to end " +

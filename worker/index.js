@@ -501,13 +501,27 @@ async function ogFetchVerdict(addr, meta, deadlineAt, env, ctx) {
 
 /* همان سوال، برای سولانا — بدونِ متادیتای GeckoTerminal، چون
    fetchVerdictSol چیزی از قیمت/دسیمال نمی‌خواهد (رفت‌وبرگشتش را جوپیتر با
-   quote خودش حساب می‌کند، نه با priceUsd ما). */
+   quote خودش حساب می‌کند، نه با priceUsd ما).
+
+   ⚠️ cachedVerdict عمداً دست‌نخورده مانده (همان قراردادِ خامِ
+   "sell"/"nosell"/null که ogFetchVerdict هم می‌بیند و کارتِ Base هم رویش
+   حساب باز کرده) — پس «why» را همین‌جا، بیرونِ آن تابعِ مشترک، از دلِ
+   شیءِ برگشتیِ fetchVerdictSol جدا می‌کنیم. هرگز کش نمی‌شود، چون فقط وقتی
+   پر می‌شود که computeFn واقعاً اجرا شده باشد (نه از cache hit) و
+   cachedVerdict فقط verdictِ sell/nosell را می‌نویسد، نه why را. */
 async function solFetchVerdict(mint, deadlineAt, ctx) {
-  return cachedVerdict(
+  let why; // فقط computeFn (نه cache hit) آن را پر می‌کند، و فقط وقتی v نهایی null باشد معنا دارد
+  const v = await cachedVerdict(
     "/v1/solana/" + mint,
-    () => fetchVerdictSol(mint, { deadlineAt, fetchImpl: fetch, rpcs: VD_SOL_RPCS, jupBase: VD_SOL_JUP_BASE, payer: VD_SOL_PAYER }),
+    async () => {
+      const res = await fetchVerdictSol(mint,
+        { deadlineAt, fetchImpl: fetch, rpcs: VD_SOL_RPCS, jupBase: VD_SOL_JUP_BASE, payer: VD_SOL_PAYER });
+      why = res.why;
+      return res.v;
+    },
     ctx,
   );
+  return v === null ? { v: null, why: why || "internal" } : { v };
 }
 
 /* تگ‌ها را داخل همان HTML می‌نشاند.
@@ -585,10 +599,16 @@ async function diagVerdict(request, url, env, ctx) {
 
   const t0 = Date.now();
   if (chain === "solana") {
-    const v = await solFetchVerdict(addr, t0 + OG_BUDGET_MS, ctx);
-    return vdDone(200, { v, ms: Date.now() - t0 });
+    // «why» فقط وقتی v واقعاً null باشد چیزی غیرِ undefined است؛ JSON.stringify
+    // کلیدی با مقدارِ undefined را خودش حذف می‌کند، پس یک sell/nosell همان
+    // شکلِ {v,ms} امروز را بایت‌به‌بایت نگه می‌دارد.
+    const { v, why } = await solFetchVerdict(addr, t0 + OG_BUDGET_MS, ctx);
+    return vdDone(200, { v, ms: Date.now() - t0, why });
   }
   const meta = await ogFetchMeta(addr, env);
+  // ⚠️ ماژولِ Base (worker/verdict.js) دست‌نخورده مانده و هیچ why‌ای تولید
+  // نمی‌کند؛ برای یک verdictِ null در همین زنجیره، به‌جای حدسِ یک why از رویِ
+  // هیچ، این کلید کلاً از پاسخ حذف می‌شود — نه اینکه internal گفته شود.
   const v = await ogFetchVerdict(addr, meta, t0 + OG_BUDGET_MS, env, ctx);
   return vdDone(200, { v, ms: Date.now() - t0 });
 }
