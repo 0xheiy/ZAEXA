@@ -286,14 +286,20 @@ const PLACEHOLDER_BLOCKHASH = "1".repeat(32);
    هیچ موردِ بی‌برچسب پیدا نکند.
 
    نگاشتِ دقیق (یک‌جا نوشته شده تا پراکنده در کامنتِ کنارِ هر return نباشد):
-     • "rpc"  فقط وقتی rpcCall خودش {ok:false} داده — یعنی پرتابِ شبکه‌ای،
-       غیرِ ۲۰۰، یا بدنه‌ای که JSON.parse رویش شکست خورد. هر بررسیِ شکل
-       *بعد از* ok:true (فیلدی که انتظارش می‌رفت نبود) زیرِ "internal"
-       می‌رود، نه "rpc" — چون آن دیگر شکستِ خودِ تماس نیست.
-     • "jup" همان قاعده برای jupCall (quote خرید/فروش و هر دو
-       swap-instructions) است. برای دو swap-instructions که مفهومِ
-       route اصلاً ندارند، یک بدنه‌ی ok:true ولی بدونِ json هم زیرِ "jup"
-       می‌ماند چون سطلِ اختصاصیِ دیگری برایشان نیست (برخلافِ quote).
+     • "rpc:<method>" فقط وقتی rpcCall خودش برای همان متدِ مشخص {ok:false}
+       داده — یعنی پرتابِ شبکه‌ای، غیرِ ۲۰۰، یا بدنه‌ای که JSON.parse رویش
+       شکست خورد. نامِ متد از خودِ کد است (رشته‌ای که به rpcCall پاس داده
+       می‌شود)، نه یک کپیِ جدا که بتواند از کد جدا بیفتد — به همین دلیل قبلاً
+       یک "rpc" تنها همه‌چیز را قاطی می‌کرد: می‌گفت شکست خورد، نه اینکه کدام
+       تماس. هر بررسیِ شکل *بعد از* ok:true (فیلدی که انتظارش می‌رفت نبود)
+       زیرِ "internal" می‌رود، نه "rpc:…" — چون آن دیگر شکستِ خودِ تماس نیست.
+     • "jup:<endpoint>" همان قاعده برای jupCall است، دو سطل: "jup:quote"
+       برای هر دو quote (خرید و فروش، هر دو روی همان مسیرِ /swap/v1/quote)،
+       و "jup:swap-instructions" برای هر دو swap-instructions (خرید و
+       فروش، هر دو روی /swap/v1/swap-instructions). برای دو
+       swap-instructions که مفهومِ route اصلاً ندارند، یک بدنه‌ی ok:true
+       ولی بدونِ json هم زیرِ همان "jup:swap-instructions" می‌ماند چون
+       سطلِ اختصاصیِ دیگری برایشان نیست (برخلافِ quote که "no-route" دارد).
      • "no-route" فقط برای دو quote (خرید/فروش): تماس موفق بود (ok:true)
        ولی outAmount در کار نبود.
      • "payer-balance" همان‌طور که خودِ تعریف می‌گوید: یا فی‌پیر کمتر از
@@ -316,11 +322,46 @@ export const VD_SOL_WHY = Object.freeze([
   "payer-holds",
   "no-route",
   "too-big",
-  "rpc",
-  "jup",
+  "rpc:getBalance",
+  "rpc:getTokenAccountsByOwner",
+  "rpc:getMultipleAccounts",
+  "rpc:simulateTransaction",
+  "jup:quote",
+  "jup:swap-instructions",
   "deadline",
   "internal",
 ]);
+
+/* ---------------------------------------------------------------------
+   فهرستِ متدهای RPC که مسیرِ verdict سولانا واقعاً صدا می‌زند — دقیقاً همان
+   چهار رشته‌ای که به rpcCall در fetchVerdictSol پاس داده می‌شوند، پایین‌تر
+   در همین فایل. صادر شده برای دو مصرف:
+     • GET /vd/rpc در worker/index.js همین فهرست را پیمایش می‌کند تا هر
+       اندپوینت را رویِ همین متدها پروب کند — نه یک فهرستِ دستیِ جدا که
+       می‌توانست از کد جدا بیفتد.
+     • worker/test.mjs همین فایل را با regex می‌خواند و متدهای واقعاً
+       صداشده را دوباره استخراج می‌کند تا بسنجد این فهرست همچنان همان‌هاست؛
+       افزودنِ یک rpcCall تازه بدونِ افزودنِ متدش اینجا آن تست را می‌شکند.
+   getHealth عمداً اینجا نیست: هیچ‌جا در مسیرِ verdict صدا زده نمی‌شود. */
+export const VD_SOL_RPC_METHODS = Object.freeze([
+  "getBalance",
+  "getTokenAccountsByOwner",
+  "getMultipleAccounts",
+  "simulateTransaction",
+]);
+
+/* پارامترهای واقعی و بی‌ضرر برای هر متد در GET /vd/rpc — همان آدرسِ فی‌پیر
+   و همان mint وسولی که خودِ fetchVerdictSol هم به کار می‌برد، نه یک
+   جای‌گزینِ ساختگی که یک نود می‌تواند طورِ دیگری با آن رفتار کند.
+   simulateTransaction عمداً اینجا نیست: بدونِ ترکیبِ یک تراکنشِ کامل هیچ
+   راهِ صادقانه‌ای برای پروب‌کردنش نیست (diagVerdictRpc آن را skip می‌کند،
+   نه اینکه یک پاسِ ساختگی جعل کند). */
+export const VD_SOL_RPC_PROBE_PARAMS = Object.freeze({
+  getBalance: [VD_SOL_PAYER, { commitment: "confirmed" }],
+  getTokenAccountsByOwner: [VD_SOL_PAYER, { mint: SOL_MINT_ADDR },
+    { encoding: "jsonParsed", commitment: "confirmed" }],
+  getMultipleAccounts: [[SOL_MINT_ADDR], { encoding: "base64", commitment: "confirmed" }],
+});
 
 /* ---------------------------------------------------------------------
    تبدیلِ دستورالعملِ خامِ جوپیتر (programId رشته، accounts با
@@ -536,13 +577,16 @@ async function rpcCall(fetchImpl, rpcUrl, method, params, timeoutMs) {
 }
 
 /* ---------------------------------------------------------------------
-   probeRpcHealth — برای GET /vd/rpc در worker/index.js. برخلافِ rpcCall
-   (که فقط ok/notok برای مصرفِ داخلیِ fetchVerdictSol لازم دارد و هر
-   کدِ غیرِ۲۰۰ را دور می‌ریزد)، این تابع خودِ کدِ HTTP واقعی را نگه می‌دارد —
-   تشخیص دقیقاً همین عدد را می‌خواهد (۰ یعنی خودِ fetch پرتاب کرد).
-   getHealth ارزان‌ترین متدِ RPC است: بدونِ پارامتر، بدونِ حسابی که خوانده شود.
-   --------------------------------------------------------------------- */
-export async function probeRpcHealth(fetchImpl, rpcUrl, timeoutMs) {
+   probeRpcMethod — برای GET /vd/rpc در worker/index.js. برخلافِ rpcCall
+   (که فقط ok/notok برای مصرفِ داخلیِ fetchVerdictSol لازم دارد و هر جزئیاتِ
+   دیگر را دور می‌ریزد)، این تابع خودِ کدِ HTTP واقعی و کدِ خطای JSON-RPC را
+   نگه می‌دارد — تشخیص دقیقاً همین دو عدد را می‌خواهد، نه یک ok/notok خام:
+   یک ۴۰۳ یعنی چیزِ دیگری از یک ۲۰۰-با-error-code (مثلاً -۳۲۶۰۱ «متد پیدا
+   نشد»، شکلی که خیلی از نودهای عمومی برای متدهای سنگین می‌دهند).
+     status ۰  → خودِ fetch پرتاب کرد (قطعیِ شبکه/تایم‌اوت).
+     code null → یا HTTP خودش غیرِ۲۰۰ بود، یا بدنه اصلاً JSON-RPC error نداشت.
+   هرگز از رویِ متنِ خطا تصمیم نمی‌گیرد — فقط از رویِ همین دو عدد. */
+export async function probeRpcMethod(fetchImpl, rpcUrl, method, params, timeoutMs) {
   const t0 = Date.now();
   const ac = new AbortController();
   const timer = setTimeout(() => ac.abort(), timeoutMs);
@@ -552,18 +596,19 @@ export async function probeRpcHealth(fetchImpl, rpcUrl, timeoutMs) {
       res = await fetchImpl(rpcUrl, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "getHealth", params: [] }),
+        body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
         signal: ac.signal,
       });
     } catch {
-      return { status: 0, ok: false, ms: Date.now() - t0 }; // پرتابِ خودِ fetch → کدِ ۰
+      return { m: method, ok: false, status: 0, code: null, ms: Date.now() - t0 }; // پرتابِ خودِ fetch
     }
     const status = res ? res.status : 0;
-    if (status !== 200) return { status, ok: false, ms: Date.now() - t0 };
-    let body;
-    try { body = await res.json(); } catch { return { status, ok: false, ms: Date.now() - t0 }; }
-    const ok = !!body && typeof body === "object" && !body.error;
-    return { status, ok, ms: Date.now() - t0 };
+    let body = null;
+    try { body = await res.json(); } catch { /* بدنه‌ی غیرِ JSON — کدی برای استخراج نیست */ }
+    const code = body && typeof body === "object" && body.error && typeof body.error === "object" &&
+      typeof body.error.code === "number" ? body.error.code : null;
+    const ok = status === 200 && !!body && typeof body === "object" && !body.error;
+    return { m: method, ok, status, code, ms: Date.now() - t0 };
   } finally {
     clearTimeout(timer);
   }
@@ -641,7 +686,7 @@ export async function fetchVerdictSol(mint, opts) {
         [payer, { commitment: "confirmed" }], timeoutMs);
       if (attempt.ok) { rpc = rpcs[i]; balRes = attempt; break; }
     }
-    if (!rpc) return unknown("rpc"); // هیچ‌کدام از اندپوینت‌های امتحان‌شده جواب نداد
+    if (!rpc) return unknown("rpc:getBalance"); // هیچ‌کدام از اندپوینت‌های امتحان‌شده جواب نداد
     if (!balRes.result || typeof balRes.result.value !== "number") return unknown("payer-balance");
     if (balRes.result.value < VD_SOL_MIN_PAYER_LAMPORTS) return unknown("payer-balance");
 
@@ -653,7 +698,7 @@ export async function fetchVerdictSol(mint, opts) {
     if (pastDeadline()) return unknown("deadline");
     const heldRes = await rpcCall(fetchImpl, rpc, "getTokenAccountsByOwner",
       [payer, { mint }, { encoding: "jsonParsed", commitment: "confirmed" }], timeoutMs);
-    if (!heldRes.ok) return unknown("rpc");
+    if (!heldRes.ok) return unknown("rpc:getTokenAccountsByOwner");
     let heldRaw = 0n;
     for (const row of (heldRes.result && heldRes.result.value) || []) {
       const amt = row && row.account && row.account.data && row.account.data.parsed &&
@@ -671,7 +716,7 @@ export async function fetchVerdictSol(mint, opts) {
       query: { inputMint: SOL_MINT_ADDR, outputMint: mint, amount: String(amountLamports),
                slippageBps: "500", onlyDirectRoutes: "true" },
     }, timeoutMs);
-    if (!quoteBuyRes.ok) return unknown("jup");
+    if (!quoteBuyRes.ok) return unknown("jup:quote");
     if (!quoteBuyRes.json || !quoteBuyRes.json.outAmount) return unknown("no-route"); // بی‌مسیر → نامعلوم، نه nosell
     const quoteBuy = quoteBuyRes.json;
 
@@ -687,7 +732,7 @@ export async function fetchVerdictSol(mint, opts) {
     const quoteSellRes = await jupCall(fetchImpl, jupBase, "/swap/v1/quote", {
       query: { inputMint: mint, outputMint: SOL_MINT_ADDR, amount: String(sellAmount), slippageBps: "500" },
     }, timeoutMs);
-    if (!quoteSellRes.ok) return unknown("jup");
+    if (!quoteSellRes.ok) return unknown("jup:quote");
     if (!quoteSellRes.json || !quoteSellRes.json.outAmount) return unknown("no-route");
     const quoteSell = quoteSellRes.json;
 
@@ -697,12 +742,12 @@ export async function fetchVerdictSol(mint, opts) {
       method: "POST", body: { userPublicKey: payer, quoteResponse: quoteBuy, wrapAndUnwrapSol: true },
     }, timeoutMs);
     // این اندپوینت مفهومِ route ندارد، پس سطلِ اختصاصیِ دیگری هم برایش نیست.
-    if (!legBuyRes.ok || !legBuyRes.json) return unknown("jup");
+    if (!legBuyRes.ok || !legBuyRes.json) return unknown("jup:swap-instructions");
 
     const legSellRes = await jupCall(fetchImpl, jupBase, "/swap/v1/swap-instructions", {
       method: "POST", body: { userPublicKey: payer, quoteResponse: quoteSell, wrapAndUnwrapSol: true },
     }, timeoutMs);
-    if (!legSellRes.ok || !legSellRes.json) return unknown("jup");
+    if (!legSellRes.ok || !legSellRes.json) return unknown("jup:swap-instructions");
 
     // ۶. ترکیبِ یک تراکنشِ v0 واحد، و حل کردنِ هر جدولِ آدرسی که هرکدام از
     // دو leg نام برده.
@@ -715,7 +760,7 @@ export async function fetchVerdictSol(mint, opts) {
     if (composed.altAddrs.length > 0) {
       const altRes = await rpcCall(fetchImpl, rpc, "getMultipleAccounts",
         [composed.altAddrs, { encoding: "base64", commitment: "confirmed" }], timeoutMs);
-      if (!altRes.ok) return unknown("rpc");
+      if (!altRes.ok) return unknown("rpc:getMultipleAccounts");
       if (!altRes.result || !Array.isArray(altRes.result.value) ||
           altRes.result.value.length !== composed.altAddrs.length) return unknown("internal");
       for (let i = 0; i < altRes.result.value.length; i++) {
@@ -743,7 +788,7 @@ export async function fetchVerdictSol(mint, opts) {
     if (pastDeadline()) return unknown("deadline");
     const simRes = await rpcCall(fetchImpl, rpc, "simulateTransaction",
       [b64tx, { sigVerify: false, replaceRecentBlockhash: true, encoding: "base64" }], timeoutMs);
-    if (!simRes.ok) return unknown("rpc");
+    if (!simRes.ok) return unknown("rpc:simulateTransaction");
     if (!simRes.result || !simRes.result.value ||
         !Object.prototype.hasOwnProperty.call(simRes.result.value, "err")) return unknown("internal");
     const err = simRes.result.value.err;

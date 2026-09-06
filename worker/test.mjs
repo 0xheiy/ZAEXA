@@ -1442,7 +1442,7 @@ const ethers = globalThis.ethers;
   const JUP = vs.VD_SOL_JUP_BASE;
 
   function makeFetch({ legs, lamports = 2_000_000_000, heldRaw = null, simErr = "SUCCESS",
-                       buyQuoteOk = true, buyQuoteEmpty = false, rpcStatus = {} } = {}) {
+                       buyQuoteOk = true, buyQuoteEmpty = false, rpcStatus = {}, altData = null } = {}) {
     const calls = [];
     const fetchImpl = async (url, init) => {
       const u = String(url);
@@ -1475,6 +1475,10 @@ const ethers = globalThis.ethers;
           : simErr === "INSTR" ? { InstructionError: [1, { Custom: 6001 }] }
           : simErr;
         return rpcOk({ value: { err } });
+      }
+      if (body.method === "getMultipleAccounts" && altData) {
+        const addrs = body.params[0];
+        return rpcOk({ value: addrs.map(() => ({ data: [altData, "base64"] })) });
       }
       return jsonRes({ error: { code: -1, message: "unexpected method " + body.method } }, 500);
     };
@@ -1557,8 +1561,8 @@ const ethers = globalThis.ethers;
     const legs = makeLegs();
     const { fetchImpl, calls } = makeFetch({ legs, buyQuoteOk: false });
     const res = await vs.fetchVerdictSol(MINT, opts({ fetchImpl }));
-    ok(res && res.v === null && res.why === "jup" && isFrozenWhy(res.why),
-      "a non-200 quote response from Jupiter must give null/\"jup\", not \"nosell\" " +
+    ok(res && res.v === null && res.why === "jup:quote" && isFrozenWhy(res.why),
+      "a non-200 quote response from Jupiter must give null/\"jup:quote\", not \"nosell\" " +
       "(got " + JSON.stringify(res) + ")");
     ok(!calls.includes("swap-ix:buy"), "swap-instructions must not be requested after a failed quote");
   }
@@ -1592,8 +1596,77 @@ const ethers = globalThis.ethers;
     const legs = makeLegs();
     const { fetchImpl } = makeFetch({ legs, rpcStatus: { simulateTransaction: 500 } });
     const res = await vs.fetchVerdictSol(MINT, opts({ fetchImpl }));
-    ok(res && res.v === null && res.why === "rpc" && isFrozenWhy(res.why),
-      "a 500 from simulateTransaction must give null/\"rpc\", not \"nosell\" (got " + JSON.stringify(res) + ")");
+    ok(res && res.v === null && res.why === "rpc:simulateTransaction" && isFrozenWhy(res.why),
+      "a 500 from simulateTransaction must give null/\"rpc:simulateTransaction\", not \"nosell\" " +
+      "(got " + JSON.stringify(res) + ")");
+  }
+
+  // ز۲) ۵۰۰ از خودِ getTokenAccountsByOwner → null/"rpc:getTokenAccountsByOwner"، نه یک
+  // "rpc" عمومی — این همان چیزی است که تشخیص می‌دهد کدام تماس شکست خورده.
+  {
+    const legs = makeLegs();
+    const { fetchImpl, calls } = makeFetch({ legs, rpcStatus: { getTokenAccountsByOwner: 500 } });
+    const res = await vs.fetchVerdictSol(MINT, opts({ fetchImpl }));
+    ok(res && res.v === null && res.why === "rpc:getTokenAccountsByOwner" && isFrozenWhy(res.why),
+      "a 500 from getTokenAccountsByOwner must give null/\"rpc:getTokenAccountsByOwner\" " +
+      "(got " + JSON.stringify(res) + ")");
+    ok(!calls.some((c) => c.startsWith("quote:")),
+      "a failed getTokenAccountsByOwner must stop before any Jupiter call, got: " + calls.join(","));
+  }
+
+  // ز۳) ۵۰۰ از خودِ swap-instructionِ leg خرید → null/"jup:swap-instructions"، جدا از
+  // "jup:quote" — این دو زیرِ یک "jup" واحد قاطی نمی‌شوند.
+  {
+    const legs = makeLegs();
+    const { fetchImpl, calls } = makeFetch({ legs });
+    const wrapped = async (url, init) => {
+      const u = String(url);
+      if (u.startsWith(JUP + "/swap/v1/swap-instructions")) {
+        const body = JSON.parse(init.body);
+        if (body.quoteResponse.outAmount === "1000000") return new Response("boom", { status: 500 });
+      }
+      return fetchImpl(url, init);
+    };
+    const res = await vs.fetchVerdictSol(MINT, opts({ fetchImpl: wrapped }));
+    ok(res && res.v === null && res.why === "jup:swap-instructions" && isFrozenWhy(res.why),
+      "a 500 from the buy leg's swap-instructions must give null/\"jup:swap-instructions\" " +
+      "(got " + JSON.stringify(res) + ")");
+    ok(!calls.includes("swap-ix:sell"),
+      "a failed buy-leg swap-instructions must stop before the sell leg is even requested, got: " +
+      calls.join(","));
+  }
+
+  // ز۴) جدولِ آدرس (ALT) حاضر است، ولی getMultipleAccounts خودش ۵۰۰ می‌دهد →
+  // null/"rpc:getMultipleAccounts" — این تماس فقط وقتی اتفاق می‌افتد که
+  // altAddrs خالی نباشد، پس این تنها بخشی است که یک ALT واقعی تزریق می‌کند.
+  {
+    const ALT_ADDR = fakePubkey(50);
+    const legs = makeLegs();
+    legs.legBuy.addressLookupTableAddresses = [ALT_ADDR];
+    const { fetchImpl, calls } = makeFetch({ legs, rpcStatus: { getMultipleAccounts: 500 } });
+    const res = await vs.fetchVerdictSol(MINT, opts({ fetchImpl }));
+    ok(res && res.v === null && res.why === "rpc:getMultipleAccounts" && isFrozenWhy(res.why),
+      "a 500 from getMultipleAccounts (fetching an address-lookup table) must give " +
+      "null/\"rpc:getMultipleAccounts\" (got " + JSON.stringify(res) + ")");
+    ok(!calls.includes("rpc:simulateTransaction"),
+      "a failed getMultipleAccounts must stop before simulateTransaction, got: " + calls.join(","));
+  }
+
+  // ز۵) همان ALT، این‌بار جواب می‌دهد و یک LookupTable معتبر (بدونِ آدرس) برمی‌گرداند →
+  // مسیر همچنان تا sell می‌رسد — اثبات می‌کند حاضربودنِ یک ALT خودش چیزی را
+  // نمی‌شکند، فقط شکستِ خودِ تماس why می‌سازد.
+  {
+    const ALT_ADDR = fakePubkey(51);
+    const altHeader = new Uint8Array(56); // discriminant=1 (LE)، بقیه صفر، صفر آدرس دنبالش
+    altHeader[0] = 1;
+    const legs = makeLegs();
+    legs.legBuy.addressLookupTableAddresses = [ALT_ADDR];
+    const { fetchImpl, calls } = makeFetch({ legs, altData: vs.bytesToBase64(altHeader) });
+    const res = await vs.fetchVerdictSol(MINT, opts({ fetchImpl }));
+    ok(res && res.v === "sell", "a valid (empty) address-lookup table must not block the happy path " +
+      "(got " + JSON.stringify(res) + ")");
+    ok(calls.includes("rpc:getMultipleAccounts"),
+      "getMultipleAccounts must actually be called once an ALT address is present, got: " + calls.join(","));
   }
 
   // ح) مهلتِ گذشته → null/"deadline"، بدونِ حتی یک فراخوانیِ شبکه
@@ -1620,14 +1693,36 @@ const ethers = globalThis.ethers;
   // verdict_sol.js توضیح داده چرا) — فقط عضویتش در فهرستِ منجمد سنجیده می‌شود.
   ok(isFrozenWhy("unsupported"), "\"unsupported\" must still be a member of the frozen reason vocabulary");
 
+  // ک) توافق: VD_SOL_RPC_METHODS باید دقیقاً همان متدهایی باشد که خودِ کدِ
+  // verdict_sol.js به rpcCall پاس می‌دهد — استخراج‌شده با regex از متنِ خودِ
+  // فایل، نه یک فهرستِ دستیِ دیگر در همین تست؛ اگر یک rpcCall تازه اضافه شود
+  // بدونِ افزودنِ متدش به VD_SOL_RPC_METHODS، این چک باید بشکند.
+  {
+    const src = fs.readFileSync(new URL("./verdict_sol.js", import.meta.url), "utf8");
+    const seen = new Set();
+    const re = /rpcCall\(\s*fetchImpl\s*,\s*[^,]+,\s*"([A-Za-z]+)"/g;
+    let m;
+    while ((m = re.exec(src))) seen.add(m[1]);
+    const fromCode = Array.from(seen).sort();
+    const declared = [...vs.VD_SOL_RPC_METHODS].sort();
+    ok(fromCode.length > 0 && fromCode.length === declared.length &&
+      fromCode.every((method, i) => method === declared[i]),
+      "VD_SOL_RPC_METHODS must match exactly the methods literally passed to rpcCall(...) inside " +
+      "verdict_sol.js — regex-derived from the source: [" + fromCode.join(",") + "], declared: [" +
+      declared.join(",") + "]");
+  }
+
   console.log("[fetchVerdictSol] happy path -> {v:\"sell\"} with no why key; InstructionError -> " +
     "{v:\"nosell\"} with no why key; a payer holding the mint -> \"payer-holds\"; an underfunded " +
     "payer or an unreadable getBalance shape -> \"payer-balance\"; a non-200 Jupiter quote -> " +
-    "\"jup\"; a 200 quote with no route -> \"no-route\"; an oversized (>1232 byte) transaction -> " +
-    "\"too-big\"; a 500 from simulateTransaction -> \"rpc\"; a past deadline -> \"deadline\" with " +
-    "zero fetch calls; an unparsable held-token amount -> \"internal\"; every observed why checked " +
-    "against VD_SOL_WHY by iterating the actual frozen list — all against an injected fake, no " +
-    "real RPC or Jupiter call involved");
+    "\"jup:quote\"; a 200 quote with no route -> \"no-route\"; an oversized (>1232 byte) transaction " +
+    "-> \"too-big\"; a 500 from getTokenAccountsByOwner/getMultipleAccounts/simulateTransaction -> " +
+    "the matching \"rpc:<method>\"; a 500 from swap-instructions -> \"jup:swap-instructions\"; a " +
+    "valid empty address-lookup table does not block the happy path; a past deadline -> " +
+    "\"deadline\" with zero fetch calls; an unparsable held-token amount -> \"internal\"; every " +
+    "observed why checked against VD_SOL_WHY by iterating the actual frozen list; VD_SOL_RPC_METHODS " +
+    "checked against the methods regex-derived from verdict_sol.js itself — all against an injected " +
+    "fake, no real RPC or Jupiter call involved");
 }
 
 /* ---- ۱۸ب. fetchVerdictSol — failover بینِ چند اندپوینتِ RPC ----
@@ -1735,8 +1830,8 @@ const ethers = globalThis.ethers;
   {
     const { fetchImpl, calls } = makeFailoverFetch({ [RPC1]: "throw", [RPC2]: "403", [RPC3]: "throw", [RPC4]: "ok" });
     const res = await vs.fetchVerdictSol(MINT, { fetchImpl, rpcs: [RPC1, RPC2, RPC3, RPC4], jupBase: JUP, payer: PAYER });
-    ok(res && res.v === null && res.why === "rpc", "when every tried endpoint fails the verdict must " +
-      "stay null/\"rpc\", never \"nosell\" (got " + JSON.stringify(res) + ")");
+    ok(res && res.v === null && res.why === "rpc:getBalance", "when every tried endpoint fails the " +
+      "verdict must stay null/\"rpc:getBalance\", never \"nosell\" (got " + JSON.stringify(res) + ")");
     ok(calls.length === vs.VD_SOL_RPC_MAX_TRIES,
       "at most VD_SOL_RPC_MAX_TRIES (" + vs.VD_SOL_RPC_MAX_TRIES + ") endpoints may be tried in one " +
       "request — got " + calls.length + ": " + calls.join(","));
@@ -1869,21 +1964,36 @@ const ethers = globalThis.ethers;
     "path, until the token page itself can render Solana");
 }
 
-/* ---- ۲۰. GET /vd/rpc — پروبِ تشخیصیِ زنده‌بودنِ اندپوینت‌های RPC سولانا ----
+/* ---- ۲۰. GET /vd/rpc — ماتریسِ اندپوینت×متد ----
    سرتاسری از خودِ worker.fetch، با globalThis.fetch جعلی — این کانتینر به
    هیچ RPC واقعی دسترسی ندارد، پس این بخش فقط شکلِ مسیر را می‌سنجد، نه
-   اینکه کدام‌یک از VD_SOL_RPCS واقعاً از کلادفلر جواب می‌دهد. */
+   اینکه کدام‌یک از VD_SOL_RPCS واقعاً از کلادفلر و رویِ کدام متد جواب
+   می‌دهد. آن سوال فقط با یک دیپلویِ واقعی و خواندنِ خودِ /vd/rpc جواب دارد. */
 {
   const vs = await import("./verdict_sol.js");
   const spyEnv = {
     ASSETS: { fetch: async () => new Response("not found", { status: 404 }) },
   };
 
-  // الف) شکلِ دقیق: یک ردیف به‌ازای هر کاندید، دقیقاً چهار کلید h/ok/status/ms،
-  // و یک fetch که پرتاب می‌کند باید status:0/ok:false بدهد، نه اینکه کلِ مسیر را بترکاند.
-  globalThis.fetch = async (url) => {
+  const DRPC = "solana.drpc.org";
+  const ONFINALITY = "solana.api.onfinality.io";
+  const calls = []; // "<hostname>|<method>"، به‌ترتیبِ صدا زده‌شدن
+
+  // الف) سه رفتارِ متفاوت روی سه ترکیبِ اندپوینت×متدِ مختلف — پرتابِ شبکه‌ای،
+  // خطای سطحِ JSON-RPC (کدِ عددی، نه متن)، و موفقیتِ ساده — به‌علاوه‌ی
+  // simulateTransaction که هرگز نباید حتی یک بار فراخوانی شود.
+  globalThis.fetch = async (url, init) => {
     const u = String(url);
-    if (u.includes("solana.drpc.org")) throw new Error("connection refused");
+    const body = JSON.parse(init.body);
+    const host = new URL(u).hostname;
+    calls.push(host + "|" + body.method);
+    if (host === DRPC && body.method === "getBalance") throw new Error("connection refused"); // پرتابِ شبکه‌ای
+    if (host === ONFINALITY && body.method === "getTokenAccountsByOwner") {
+      // خطای سطحِ JSON-RPC: HTTP ۲۰۰ ولی body.error با کدِ عددی — همان شکلی
+      // که خیلی از نودهای عمومی برای یک متدِ بسته‌شده می‌دهند.
+      return new Response(JSON.stringify({ jsonrpc: "2.0", id: 1,
+        error: { code: -32601, message: "Method not found" } }), { status: 200 });
+    }
     return new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, result: "ok" }), { status: 200 });
   };
   const res = await worker.fetch(new Request(ORIGIN + "/vd/rpc",
@@ -1891,23 +2001,69 @@ const ethers = globalThis.ethers;
   ok(res.status === 200, "/vd/rpc should be 200 (got " + res.status + ")");
   ok(res.headers.get("cache-control") === "no-store", "/vd/rpc must never be cached");
   const body = await res.json();
-  ok(Array.isArray(body.endpoints) && body.endpoints.length === vs.VD_SOL_RPCS.length,
-    "/vd/rpc should report exactly one entry per candidate (" + vs.VD_SOL_RPCS.length + "), got: " +
-    JSON.stringify(body));
-  for (const row of body.endpoints || []) {
-    ok(Object.keys(row).sort().join(",") === "h,ms,ok,status",
-      "/vd/rpc entry must carry exactly h/ok/status/ms, got keys: " + JSON.stringify(row));
-  }
-  const drpcRow = (body.endpoints || []).find((r) => r.h === "solana.drpc.org");
-  ok(drpcRow && drpcRow.ok === false && drpcRow.status === 0,
-    "a thrown fetch for one candidate must show ok:false, status:0, without crashing the whole " +
-    "route: " + JSON.stringify(drpcRow));
-  const otherRows = (body.endpoints || []).filter((r) => r.h !== "solana.drpc.org");
-  ok(otherRows.length > 0 && otherRows.every((r) => r.ok === true && r.status === 200),
-    "every other candidate answering 200 with no error field should show ok:true, status:200: " +
-    JSON.stringify(otherRows));
+  const raw = JSON.stringify(body);
 
-  // ب) ریت‌لیمیت — /vd/rpc روی همان سطلِ «vd» است، پس مصرفِ همین مسیر هم رد می‌شود.
+  ok(Array.isArray(body.endpoints) && body.endpoints.length === vs.VD_SOL_RPCS.length,
+    "/vd/rpc should report exactly one row per candidate (" + vs.VD_SOL_RPCS.length + "), got: " + raw);
+  for (const row of body.endpoints || []) {
+    ok(Object.keys(row).sort().join(",") === "h,methods",
+      "/vd/rpc endpoint row must carry exactly h/methods, got keys: " + JSON.stringify(row));
+    ok(Array.isArray(row.methods) && row.methods.length === vs.VD_SOL_RPC_METHODS.length &&
+      row.methods.every((r, i) => r.m === vs.VD_SOL_RPC_METHODS[i]),
+      "/vd/rpc must probe exactly VD_SOL_RPC_METHODS, in order, for host " + row.h + ": " +
+      JSON.stringify(row.methods));
+    for (const m of row.methods) {
+      const keys = Object.keys(m).sort().join(",");
+      ok(keys === "code,m,ms,ok,status" || keys === "code,m,ms,ok,skipped,status",
+        "/vd/rpc method row must carry only m/ok/status/code/ms(+skipped), got keys: " + JSON.stringify(m));
+    }
+  }
+
+  // ب) simulateTransaction هیچ‌وقت واقعاً فراخوانی نمی‌شود — بدونِ ترکیبِ یک
+  // تراکنشِ کامل هیچ راهِ صادقانه‌ای برای پروب‌کردنش نیست.
+  ok(!calls.some((c) => c.endsWith("|simulateTransaction")),
+    "simulateTransaction must never actually be called by /vd/rpc, got calls: " + calls.join(","));
+  for (const row of body.endpoints || []) {
+    const simRow = row.methods.find((r) => r.m === "simulateTransaction");
+    ok(simRow && simRow.ok === null && simRow.status === null && simRow.code === null &&
+      simRow.skipped === "unprobeable",
+      "simulateTransaction's row must be ok:null/status:null/code:null/skipped:\"unprobeable\" for " +
+      row.h + ", got: " + JSON.stringify(simRow));
+  }
+
+  // ج) پرتابِ شبکه‌ای روی یک ترکیبِ خاص → status:0/ok:false/code:null، بدونِ
+  // ترکاندنِ بقیه‌ی ماتریس.
+  const drpcRow = (body.endpoints || []).find((r) => r.h === DRPC);
+  const drpcBalance = drpcRow && drpcRow.methods.find((r) => r.m === "getBalance");
+  ok(drpcBalance && drpcBalance.ok === false && drpcBalance.status === 0 && drpcBalance.code === null,
+    "a thrown fetch for one endpoint×method must show ok:false/status:0/code:null, without " +
+    "crashing the whole matrix: " + JSON.stringify(drpcBalance));
+
+  // د) خطای سطحِ JSON-RPC (کدِ عددی) → همان کد در خروجی، نه یک متنِ آزاد.
+  const onfRow = (body.endpoints || []).find((r) => r.h === ONFINALITY);
+  const onfHeld = onfRow && onfRow.methods.find((r) => r.m === "getTokenAccountsByOwner");
+  ok(onfHeld && onfHeld.ok === false && onfHeld.status === 200 && onfHeld.code === -32601,
+    "a 200 response carrying a JSON-RPC error must surface its numeric code, not the message: " +
+    JSON.stringify(onfHeld));
+
+  // ه) بقیه‌ی ترکیب‌ها (غیرِ سه‌موردِ بالا) ساده موفق‌اند.
+  for (const row of body.endpoints || []) {
+    for (const m of row.methods) {
+      if (m.skipped || (row.h === DRPC && m.m === "getBalance") ||
+          (row.h === ONFINALITY && m.m === "getTokenAccountsByOwner")) continue;
+      ok(m.ok === true && m.status === 200 && m.code === null,
+        "every other endpoint×method answering plain 200 should show ok:true/status:200/code:null: " +
+        JSON.stringify(m) + " on " + row.h);
+    }
+  }
+
+  // و) هیچ URLای، هیچ متنِ آزادِ خطایی در کلِ پاسخ نیست — فقط میزبان/نامِ
+  // متد/عدد. متنِ خطای شبیه‌سازی‌شده‌ی بالا («connection refused»،
+  // «Method not found») نباید هیچ‌جای بدنه دیده شود.
+  ok(!raw.includes("https://") && !raw.includes("connection refused") && !raw.includes("Method not found"),
+    "/vd/rpc's body must carry no URL and no free-text error message: " + raw);
+
+  // ز) ریت‌لیمیت — /vd/rpc روی همان سطلِ «vd» است، پس مصرفِ همین مسیر هم رد می‌شود.
   const { RL_LIMIT: RL_LIMIT_VDRPC } = await import("./index.js");
   const RL_IP = "203.0.113.71";
   for (let i = 0; i < RL_LIMIT_VDRPC; i++) {
@@ -1919,10 +2075,12 @@ const ethers = globalThis.ethers;
     "be rate-limited (got " + limited.status + ")");
 
   globalThis.fetch = trackingFetch;
-  console.log("[vd/rpc] GET /vd/rpc probes every VD_SOL_RPCS candidate in parallel via getHealth — " +
-    "exactly {h,ok,status,ms} per entry, one entry per candidate, a thrown fetch shows " +
-    "status:0/ok:false without crashing the route, no-store, and shares the \"vd\" rate-limit " +
-    "bucket — no claim made about which real endpoint answers from Cloudflare");
+  console.log("[vd/rpc] GET /vd/rpc now probes an endpoint×method matrix (VD_SOL_RPC_METHODS) per " +
+    "VD_SOL_RPCS candidate — exactly {h,methods:[{m,ok,status,code,ms}]} per row, a thrown fetch " +
+    "shows status:0/ok:false/code:null, a 200-with-JSON-RPC-error surfaces its numeric code (never " +
+    "message text), simulateTransaction is always skipped:\"unprobeable\" without ever actually " +
+    "being called, no-store, shares the \"vd\" rate-limit bucket — no claim made about which real " +
+    "endpoint answers which method from Cloudflare");
 }
 
 console.log(fails === 0
@@ -1936,7 +2094,9 @@ console.log(fails === 0
     "[solana] chains.js chain detection, hand-rolled base58/base64, wire-size math and "
     + "fetchVerdictSol all covered against injected fakes; /vd/<mint> wired end to end; "
     + "/t/<mint> still 404\n" +
-    "[solana rpc] RPC endpoint failover (first-call-only, capped, never nosell) and GET /vd/rpc "
-    + "both covered against injected fakes — no claim made about which real endpoint answers"
+    "[solana rpc] RPC endpoint failover (first-call-only, capped, never nosell), per-method \"why\" "
+    + "reasons (rpc:<method>, jup:quote, jup:swap-instructions), and GET /vd/rpc's endpoint×method "
+    + "matrix all covered against injected fakes — no claim made about which real endpoint answers "
+    + "which method"
   : "[gt proxy] " + fails + " FAILURES");
 process.exit(fails === 0 ? 0 : 1);

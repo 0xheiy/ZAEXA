@@ -32,7 +32,10 @@ import { ogTags, ogTitle, pickTokenMeta } from "./og.js";
 import { ogImageResponse } from "./og-image.js";
 import { fetchVerdict } from "./verdict.js";
 import { EVM_ADDR, SOL_MINT, chainOf, gtNetworkOf } from "./chains.js";
-import { fetchVerdictSol, VD_SOL_RPCS, VD_SOL_JUP_BASE, VD_SOL_PAYER, probeRpcHealth } from "./verdict_sol.js";
+import {
+  fetchVerdictSol, VD_SOL_RPCS, VD_SOL_JUP_BASE, VD_SOL_PAYER,
+  VD_SOL_RPC_METHODS, VD_SOL_RPC_PROBE_PARAMS, probeRpcMethod,
+} from "./verdict_sol.js";
 
 /* پراکسی باز نیست. فقط شکل مسیرهایی که خودِ سایت می‌زند اجازه دارد:
      networks/base/tokens/<addr>
@@ -586,19 +589,55 @@ function vdDone(status, body, extraHeaders) {
   });
 }
 
-const VD_RPC_PROBE_TIMEOUT_MS = 1500;
+const VD_RPC_PROBE_TIMEOUT_MS = 1500; // سقفِ هر تماسِ تک‌متدی
 
-/* GET /vd/rpc — پروبِ تشخیصیِ خودِ اندپوینت‌های RPC سولانا، از کلادفلر.
-   تنها جایی که واقعاً می‌تواند بگوید کدام‌یک از VD_SOL_RPCS از ترافیکِ
-   دیتاسنتر پاسخ می‌گیرد همین‌جاست — این کانتینر و هر اندازه‌گیریِ خانگی
-   هیچ‌کدام درباره‌ی رفتارِ کلادفلر چیزی ثابت نمی‌کنند (توضیحِ کاملش بالای
-   VD_SOL_RPCS در worker/verdict_sol.js). getHealth ارزان‌ترین فراخوانیِ
-   ممکن است؛ خروجی فقط میزبان/ok/کدِ HTTP/میلی‌ثانیه است — نه بدنه، نه URL
-   کامل، نه متنِ خطا. */
+// سقفِ سختِ کلِ درخواست (همه‌ی اندپوینت‌ها، همه‌ی متدها) — یک نودِ کند نباید
+// کلِ /vd/rpc را کند کند؛ هر متدی که تا این لحظه نوبتش نرسیده skip می‌شود،
+// نه اینکه بی‌صدا از خروجی بیفتد.
+const VD_RPC_PROBE_BUDGET_MS = 4000;
+
+/* GET /vd/rpc — پروبِ تشخیصیِ خودِ اندپوینت‌های RPC سولانا، از کلادفلر،
+   حالا به‌صورتِ یک ماتریسِ اندپوینت×متد، نه فقط یک getHealth تنها.
+   مسئله‌ای که این تغییر را لازم کرد: getHealth موفق‌بودن به این معنا
+   نیست که همان نود متدهایی را هم که مسیرِ verdict واقعاً به آن‌ها نیاز
+   دارد جواب می‌دهد — بعضی نودهای عمومی دقیقاً همین متدهای سنگین‌تر
+   (مثلِ getTokenAccountsByOwner) را عمداً می‌بندند. بدونِ این ماتریس،
+   یک why:"rpc:…" فقط می‌گفت *که* شکست خورد، نه کدام تماس — این پروب
+   دقیقاً همان سوال را پیش از نیاز به یک deploy-and-guess دیگر جواب می‌دهد.
+
+   فهرستِ متدها از VD_SOL_RPC_METHODS در worker/verdict_sol.js می‌آید —
+   دقیقاً همان چهار رشته‌ای که fetchVerdictSol صدا می‌زند، نه یک کپیِ دستیِ
+   جدا؛ worker/test.mjs با regex روی خودِ کدِ verdict_sol.js می‌سنجد که این
+   دو هیچ‌وقت از هم جدا نیفتند. simulateTransaction بدونِ ترکیبِ یک
+   تراکنشِ کامل هیچ راهِ صادقانه‌ای برای پروب‌شدن ندارد، پس اصلاً فراخوانی
+   نمی‌شود — ردیفش ok:null با skipped:"unprobeable" است، نه یک پاسِ جعلی.
+
+   اندپوینت‌ها موازی امتحان می‌شوند (یک نودِ کند نباید بقیه را منتظر بگذارد)،
+   ولی متدهای *داخلِ* یک اندپوینت پشتِ‌سرِهم — همان‌طور که فهرستِ متدها به
+   ترتیب صدا زده می‌شوند، تا یک نودِ حساس به نرخ زیرِ فشارِ موازی چهار تماس
+   قرار نگیرد. VD_RPC_PROBE_BUDGET_MS سقفِ کلِ درخواست است، جدا از سقفِ
+   هر تماس؛ هر متدی که مهلتش رسیده باشد اما نوبتش نرسیده skipped:"deadline"
+   می‌گیرد.
+
+   خروجی فقط میزبان/نامِ متد/ok/کدِ HTTP/کدِ JSON-RPC/میلی‌ثانیه است — نه
+   بدنه، نه URL کامل، نه متنِ خطا. */
 async function diagVerdictRpc() {
+  const deadlineAt = Date.now() + VD_RPC_PROBE_BUDGET_MS;
   const endpoints = await Promise.all(VD_SOL_RPCS.map(async (rpcUrl) => {
-    const { status, ok, ms } = await probeRpcHealth(fetch, rpcUrl, VD_RPC_PROBE_TIMEOUT_MS);
-    return { h: new URL(rpcUrl).hostname, ok, status, ms };
+    const methods = [];
+    for (const m of VD_SOL_RPC_METHODS) {
+      if (m === "simulateTransaction") {
+        methods.push({ m, ok: null, status: null, code: null, ms: 0, skipped: "unprobeable" });
+        continue;
+      }
+      if (Date.now() >= deadlineAt) {
+        methods.push({ m, ok: null, status: null, code: null, ms: 0, skipped: "deadline" });
+        continue;
+      }
+      const row = await probeRpcMethod(fetch, rpcUrl, m, VD_SOL_RPC_PROBE_PARAMS[m], VD_RPC_PROBE_TIMEOUT_MS);
+      methods.push(row);
+    }
+    return { h: new URL(rpcUrl).hostname, methods };
   }));
   return vdDone(200, { endpoints });
 }
