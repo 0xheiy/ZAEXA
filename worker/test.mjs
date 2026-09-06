@@ -1441,9 +1441,20 @@ const ethers = globalThis.ethers;
   const RPC = "https://rpc.example";
   const JUP = vs.VD_SOL_JUP_BASE;
 
-  function makeFetch({ legs, lamports = 2_000_000_000, heldRaw = null, simErr = "SUCCESS",
-                       buyQuoteOk = true, buyQuoteEmpty = false, rpcStatus = {}, altData = null } = {}) {
+  // simErr: نتیجه‌ی شبیه‌سازیِ *رفت‌وبرگشت* (تماسِ اولِ simulateTransaction).
+  // controlErr: نتیجه‌ی شبیه‌سازیِ *کنترل* (تماسِ دومِ simulateTransaction، فقط
+  // وقتی رفت‌وبرگشت موفق شده باشد) — پیش‌فرضش "INSTR" است چون این همان
+  // چیزی است که مسیرِ سبزِ واقعی انتظار دارد: خرید چیزی تحویل داد که فروشِ
+  // تنها بدونش شکست می‌خورد، پس کنترل باید شکست بخورد تا verdict واقعاً
+  // "sell" شود. controlSimStatus فقط تماسِ دومِ simulateTransaction را (نه
+  // اولی را) به یک ۵۰۰ HTTP می‌شکند — جدا از rpcStatus.simulateTransaction
+  // که فقط تماسِ اول را می‌شکند (هر دو روی همان نامِ متد نشسته‌اند، پس یک
+  // شمارنده لازم است تا این دو از هم جدا بمانند).
+  function makeFetch({ legs, lamports = 2_000_000_000, simErr = "SUCCESS", controlErr = "INSTR",
+                       buyQuoteOk = true, buyQuoteEmpty = false, rpcStatus = {}, controlSimStatus = null,
+                       altData = null } = {}) {
     const calls = [];
+    let simCalls = 0;
     const fetchImpl = async (url, init) => {
       const u = String(url);
       if (u.startsWith(JUP + "/swap/v1/quote")) {
@@ -1464,18 +1475,24 @@ const ethers = globalThis.ethers;
       }
       const body = JSON.parse(init.body);
       calls.push("rpc:" + body.method);
-      if (rpcStatus[body.method]) return new Response("boom", { status: rpcStatus[body.method] });
-      if (body.method === "getBalance") return rpcOk({ value: lamports });
-      if (body.method === "getTokenAccountsByOwner") {
-        return rpcOk({ value: heldRaw == null ? [] :
-          [{ account: { data: { parsed: { info: { tokenAmount: { amount: heldRaw } } } } } }] });
-      }
       if (body.method === "simulateTransaction") {
-        const err = simErr === "SUCCESS" ? null
-          : simErr === "INSTR" ? { InstructionError: [1, { Custom: 6001 }] }
-          : simErr;
+        simCalls++;
+        if (simCalls === 1) {
+          if (rpcStatus.simulateTransaction) return new Response("boom", { status: rpcStatus.simulateTransaction });
+          const err = simErr === "SUCCESS" ? null
+            : simErr === "INSTR" ? { InstructionError: [1, { Custom: 6001 }] }
+            : simErr;
+          return rpcOk({ value: { err } });
+        }
+        // دومین تماس = شبیه‌سازیِ کنترل (فقط legِ فروش، بدونِ خرید).
+        if (controlSimStatus) return new Response("boom", { status: controlSimStatus });
+        const err = controlErr === "SUCCESS" ? null
+          : controlErr === "INSTR" ? { InstructionError: [2, { Custom: 6002 }] }
+          : controlErr;
         return rpcOk({ value: { err } });
       }
+      if (rpcStatus[body.method]) return new Response("boom", { status: rpcStatus[body.method] });
+      if (body.method === "getBalance") return rpcOk({ value: lamports });
       if (body.method === "getMultipleAccounts" && altData) {
         const addrs = body.params[0];
         return rpcOk({ value: addrs.map(() => ({ data: [altData, "base64"] })) });
@@ -1494,42 +1511,93 @@ const ethers = globalThis.ethers;
   // این فایل؛ اگر فهرست روزی جابه‌جا شود، این چک هم خودش را همان لحظه به‌روز می‌بیند.
   function isFrozenWhy(why) { return vs.VD_SOL_WHY.includes(why); }
 
-  // الف) مسیرِ سبز — هیچ چیزِ استثنایی، همه‌چیز موفق. یک sell هیچ کلیدِ
-  // why‌ای ندارد، حتی به‌شکلِ undefined.
+  // الف) مسیرِ سبز — رفت‌وبرگشت موفق *و* کنترل (فقط‌فروش) شکست می‌خورد
+  // (پیش‌فرضِ controlErr="INSTR")، یعنی خرید واقعاً چیزی تحویل داد. یک
+  // sell هیچ کلیدِ why‌ای ندارد، حتی به‌شکلِ undefined؛ و دو تماسِ
+  // simulateTransaction دیده می‌شود، یکی رفت‌وبرگشت، یکی کنترل.
   {
     const legs = makeLegs();
-    const { fetchImpl, calls } = makeFetch({ legs, simErr: "SUCCESS" });
+    const { fetchImpl, calls } = makeFetch({ legs, simErr: "SUCCESS", controlErr: "INSTR" });
     const res = await vs.fetchVerdictSol(MINT, opts({ fetchImpl }));
     ok(res && res.v === "sell", "happy path should return { v: \"sell\" } (got " + JSON.stringify(res) + ")");
     ok(!("why" in res), "a \"sell\" result must carry no why key at all: " + JSON.stringify(res));
-    ok(calls.join(",") === "rpc:getBalance,rpc:getTokenAccountsByOwner,quote:buy,quote:sell," +
-      "swap-ix:buy,swap-ix:sell,rpc:simulateTransaction",
-      "unexpected call sequence for the happy path: " + calls.join(","));
+    ok(calls.join(",") === "rpc:getBalance,quote:buy,quote:sell,swap-ix:buy,swap-ix:sell," +
+      "rpc:simulateTransaction,rpc:simulateTransaction",
+      "unexpected call sequence for the happy path (must include exactly two simulateTransaction " +
+      "calls — roundtrip then control): " + calls.join(","));
+    ok(!calls.includes("rpc:getTokenAccountsByOwner"),
+      "getTokenAccountsByOwner must never be requested anywhere in the Solana path any more — the " +
+      "held-mint check is now the control simulation, got calls: " + calls.join(","));
   }
 
-  // ب) خطای سطحِ تراکنش (InstructionError) → nosell، باز هم بدونِ why
+  // ب) خطای سطحِ تراکنش (InstructionError) روی خودِ رفت‌وبرگشت → nosell،
+  // باز هم بدونِ why — و 🔴 کنترل هرگز صدا زده نمی‌شود، چون رفت‌وبرگشت خودش
+  // از قبل رد شده و چیزی برای اثبات‌کردن نمانده. شمارشِ خودِ تماس‌ها همین
+  // را ثابت می‌کند: فقط یک simulateTransaction، نه دوتا.
   {
     const legs = makeLegs();
-    const { fetchImpl } = makeFetch({ legs, simErr: "INSTR" });
+    const { fetchImpl, calls } = makeFetch({ legs, simErr: "INSTR" });
     const res = await vs.fetchVerdictSol(MINT, opts({ fetchImpl }));
     ok(res && res.v === "nosell", "a transaction-level InstructionError should give { v: \"nosell\" } " +
       "(got " + JSON.stringify(res) + ")");
     ok(!("why" in res), "a \"nosell\" result must carry no why key at all: " + JSON.stringify(res));
+    ok(calls.filter((c) => c === "rpc:simulateTransaction").length === 1,
+      "a failed roundtrip must never trigger the control simulation — expected exactly one " +
+      "simulateTransaction call, got: " + calls.join(","));
   }
 
-  // ج) 🔴 فی‌پیر از قبل خودِ mint را دارد → null/"payer-holds"، حتی اگر
-  // شبیه‌سازی زیرش موفق می‌بود — همان تله‌ای که چهار نتیجه‌ی اول را
-  // بی‌معنی کرده بود.
+  // ج) 🔴 رفت‌وبرگشت موفق می‌شود *و* کنترل (فقط‌فروش) هم به‌تنهایی موفق
+  // می‌شود → null/"payer-holds": فی‌پیر از قبل موجودی داشته، پس رفت‌وبرگشت
+  // هیچ چیزی اثبات نکرد — همان تله‌ای که چهار نتیجه‌ی اولِ اسپایک را
+  // بی‌معنی کرده بود، این‌بار گرفته‌شده با اجرا نه با یک lookup.
   {
     const legs = makeLegs();
-    const { fetchImpl, calls } = makeFetch({ legs, heldRaw: "500", simErr: "SUCCESS" });
+    const { fetchImpl, calls } = makeFetch({ legs, simErr: "SUCCESS", controlErr: "SUCCESS" });
     const res = await vs.fetchVerdictSol(MINT, opts({ fetchImpl }));
     ok(res && res.v === null && res.why === "payer-holds" && isFrozenWhy(res.why),
-      "a payer that already holds the mint must give null/\"payer-holds\", even though the " +
-      "simulation underneath would say success (got " + JSON.stringify(res) + ")");
-    ok(calls.join(",") === "rpc:getBalance,rpc:getTokenAccountsByOwner",
-      "the guard must stop before any Jupiter/simulate call once the payer is found to hold the " +
-      "mint, got: " + calls.join(","));
+      "a payer for whom the sell-only control transaction also succeeds must give " +
+      "null/\"payer-holds\", never \"sell\" (got " + JSON.stringify(res) + ")");
+    ok(calls.filter((c) => c === "rpc:simulateTransaction").length === 2,
+      "\"payer-holds\" must only be reached after the control simulation actually ran (both " +
+      "simulateTransaction calls), got: " + calls.join(","));
+  }
+
+  // ج۲) 🔴 رفت‌وبرگشت موفق می‌شود، ولی خودِ تماسِ RPCِ کنترل شکست می‌خورد
+  // (۵۰۰) → null/"rpc:simulateTransaction"، هرگز sell — دقیقاً همان قاعده‌ی
+  // بالای فایل: بدونِ اجرای واقعیِ کنترل، «sell» ممنوع است.
+  {
+    const legs = makeLegs();
+    const { fetchImpl, calls } = makeFetch({ legs, simErr: "SUCCESS", controlSimStatus: 500 });
+    const res = await vs.fetchVerdictSol(MINT, opts({ fetchImpl }));
+    ok(res && res.v === null && res.why === "rpc:simulateTransaction" && isFrozenWhy(res.why),
+      "a failed RPC call for the control simulation must give null/\"rpc:simulateTransaction\", " +
+      "never \"sell\" (got " + JSON.stringify(res) + ")");
+    ok(calls.filter((c) => c === "rpc:simulateTransaction").length === 2,
+      "the control call must actually have been attempted (and failed), got: " + calls.join(","));
+  }
+
+  // ج۳) 🔴 رفت‌وبرگشت موفق می‌شود، ولی مهلت درست پیش از کنترل تمام می‌شود →
+  // null/"deadline"، هرگز sell — کنترل حتی یک بار هم فراخوانی نمی‌شود.
+  {
+    const legs = makeLegs();
+    const { fetchImpl: baseFetch, calls } = makeFetch({ legs, simErr: "SUCCESS" });
+    let past = false;
+    const now = () => (past ? 999_999 : 0);
+    const fetchImpl = async (url, init) => {
+      const res = await baseFetch(url, init);
+      // فقط تماس‌های RPC (نه quote/swap-instructionِ جوپیتر که بدونِ init.body می‌روند)
+      // بدنه‌ی JSON-RPC دارند؛ init.body برای GETِ quote اصلاً ست نمی‌شود.
+      const body = init.body ? JSON.parse(init.body) : null;
+      if (body && body.method === "simulateTransaction") past = true; // بعدِ اولین شبیه‌سازی، مهلت را تمام‌شده اعلام کن
+      return res;
+    };
+    const res = await vs.fetchVerdictSol(MINT, opts({ fetchImpl, now, deadlineAt: 10_000 }));
+    ok(res && res.v === null && res.why === "deadline" && isFrozenWhy(res.why),
+      "a deadline hit exactly before the control simulation must give null/\"deadline\", never " +
+      "\"sell\" (got " + JSON.stringify(res) + ")");
+    ok(calls.filter((c) => c === "rpc:simulateTransaction").length === 1,
+      "the control simulation must never be attempted once the deadline is gone, got calls: " +
+      calls.join(","));
   }
 
   // د) فی‌پیر کمتر از ۱ SOL → null/"payer-balance"، بدونِ حتی یک فراخوانیِ جوپیتر
@@ -1591,30 +1659,21 @@ const ethers = globalThis.ethers;
       "an oversized transaction must never reach simulateTransaction — got calls: " + calls.join(","));
   }
 
-  // ز) ۵۰۰ از خودِ simulateTransaction → null/"rpc"، نه nosell
+  // ز) ۵۰۰ از خودِ simulateTransactionِ رفت‌وبرگشت (تماسِ اول) → null/"rpc"،
+  // نه nosell — و کنترل هرگز فراخوانی نمی‌شود چون خودِ رفت‌وبرگشت جواب نداد.
   {
     const legs = makeLegs();
-    const { fetchImpl } = makeFetch({ legs, rpcStatus: { simulateTransaction: 500 } });
+    const { fetchImpl, calls } = makeFetch({ legs, rpcStatus: { simulateTransaction: 500 } });
     const res = await vs.fetchVerdictSol(MINT, opts({ fetchImpl }));
     ok(res && res.v === null && res.why === "rpc:simulateTransaction" && isFrozenWhy(res.why),
       "a 500 from simulateTransaction must give null/\"rpc:simulateTransaction\", not \"nosell\" " +
       "(got " + JSON.stringify(res) + ")");
+    ok(calls.filter((c) => c === "rpc:simulateTransaction").length === 1,
+      "a failed roundtrip simulateTransaction call must never be followed by a control call, got: " +
+      calls.join(","));
   }
 
-  // ز۲) ۵۰۰ از خودِ getTokenAccountsByOwner → null/"rpc:getTokenAccountsByOwner"، نه یک
-  // "rpc" عمومی — این همان چیزی است که تشخیص می‌دهد کدام تماس شکست خورده.
-  {
-    const legs = makeLegs();
-    const { fetchImpl, calls } = makeFetch({ legs, rpcStatus: { getTokenAccountsByOwner: 500 } });
-    const res = await vs.fetchVerdictSol(MINT, opts({ fetchImpl }));
-    ok(res && res.v === null && res.why === "rpc:getTokenAccountsByOwner" && isFrozenWhy(res.why),
-      "a 500 from getTokenAccountsByOwner must give null/\"rpc:getTokenAccountsByOwner\" " +
-      "(got " + JSON.stringify(res) + ")");
-    ok(!calls.some((c) => c.startsWith("quote:")),
-      "a failed getTokenAccountsByOwner must stop before any Jupiter call, got: " + calls.join(","));
-  }
-
-  // ز۳) ۵۰۰ از خودِ swap-instructionِ leg خرید → null/"jup:swap-instructions"، جدا از
+  // ز۲) ۵۰۰ از خودِ swap-instructionِ leg خرید → null/"jup:swap-instructions"، جدا از
   // "jup:quote" — این دو زیرِ یک "jup" واحد قاطی نمی‌شوند.
   {
     const legs = makeLegs();
@@ -1636,7 +1695,7 @@ const ethers = globalThis.ethers;
       calls.join(","));
   }
 
-  // ز۴) جدولِ آدرس (ALT) حاضر است، ولی getMultipleAccounts خودش ۵۰۰ می‌دهد →
+  // ز۳) جدولِ آدرس (ALT) حاضر است، ولی getMultipleAccounts خودش ۵۰۰ می‌دهد →
   // null/"rpc:getMultipleAccounts" — این تماس فقط وقتی اتفاق می‌افتد که
   // altAddrs خالی نباشد، پس این تنها بخشی است که یک ALT واقعی تزریق می‌کند.
   {
@@ -1652,7 +1711,7 @@ const ethers = globalThis.ethers;
       "a failed getMultipleAccounts must stop before simulateTransaction, got: " + calls.join(","));
   }
 
-  // ز۵) همان ALT، این‌بار جواب می‌دهد و یک LookupTable معتبر (بدونِ آدرس) برمی‌گرداند →
+  // ز۴) همان ALT، این‌بار جواب می‌دهد و یک LookupTable معتبر (بدونِ آدرس) برمی‌گرداند →
   // مسیر همچنان تا sell می‌رسد — اثبات می‌کند حاضربودنِ یک ALT خودش چیزی را
   // نمی‌شکند، فقط شکستِ خودِ تماس why می‌سازد.
   {
@@ -1679,13 +1738,14 @@ const ethers = globalThis.ethers;
       "(got " + JSON.stringify(res) + ", " + calls + " calls)");
   }
 
-  // ط) موجودیِ همین mint با شکلِ عددیِ نامعتبر (نه throw، نه یک why دیگر) → "internal"
+  // ط) شکلِ err کنترل ناشناخته (نه null، نه InstructionError) → "internal"،
+  // نه throw و نه به‌اشتباه sell یا payer-holds.
   {
     const legs = makeLegs();
-    const { fetchImpl } = makeFetch({ legs, heldRaw: "not-a-bigint" });
+    const { fetchImpl } = makeFetch({ legs, simErr: "SUCCESS", controlErr: { Unknown: true } });
     const res = await vs.fetchVerdictSol(MINT, opts({ fetchImpl }));
     ok(res && res.v === null && res.why === "internal" && isFrozenWhy(res.why),
-      "an unparsable held-token amount must give null/\"internal\" without throwing " +
+      "an unrecognised control-simulation err shape must give null/\"internal\" without throwing " +
       "(got " + JSON.stringify(res) + ")");
   }
 
@@ -1712,14 +1772,19 @@ const ethers = globalThis.ethers;
       declared.join(",") + "]");
   }
 
-  console.log("[fetchVerdictSol] happy path -> {v:\"sell\"} with no why key; InstructionError -> " +
-    "{v:\"nosell\"} with no why key; a payer holding the mint -> \"payer-holds\"; an underfunded " +
-    "payer or an unreadable getBalance shape -> \"payer-balance\"; a non-200 Jupiter quote -> " +
+  console.log("[fetchVerdictSol] happy path -> roundtrip ok + control (sell-only) fails -> " +
+    "{v:\"sell\"} with no why key, exactly two simulateTransaction calls; roundtrip " +
+    "InstructionError -> {v:\"nosell\"} with the control never called (call count asserted); " +
+    "roundtrip ok + control also ok -> null/\"payer-holds\"; roundtrip ok + control's RPC call " +
+    "fails -> null/\"rpc:simulateTransaction\" (never \"sell\"); roundtrip ok + deadline hit right " +
+    "before the control -> null/\"deadline\" (never \"sell\", control never attempted); " +
+    "getTokenAccountsByOwner is asserted absent from the whole Solana path; an underfunded payer " +
+    "or an unreadable getBalance shape -> \"payer-balance\"; a non-200 Jupiter quote -> " +
     "\"jup:quote\"; a 200 quote with no route -> \"no-route\"; an oversized (>1232 byte) transaction " +
-    "-> \"too-big\"; a 500 from getTokenAccountsByOwner/getMultipleAccounts/simulateTransaction -> " +
-    "the matching \"rpc:<method>\"; a 500 from swap-instructions -> \"jup:swap-instructions\"; a " +
-    "valid empty address-lookup table does not block the happy path; a past deadline -> " +
-    "\"deadline\" with zero fetch calls; an unparsable held-token amount -> \"internal\"; every " +
+    "-> \"too-big\"; a 500 from getMultipleAccounts/simulateTransaction -> the matching " +
+    "\"rpc:<method>\"; a 500 from swap-instructions -> \"jup:swap-instructions\"; a valid empty " +
+    "address-lookup table does not block the happy path; a past deadline (before any call) -> " +
+    "\"deadline\" with zero fetch calls; an unrecognised control err shape -> \"internal\"; every " +
     "observed why checked against VD_SOL_WHY by iterating the actual frozen list; VD_SOL_RPC_METHODS " +
     "checked against the methods regex-derived from verdict_sol.js itself — all against an injected " +
     "fake, no real RPC or Jupiter call involved");
@@ -1775,6 +1840,7 @@ const ethers = globalThis.ethers;
   // behaviors: نقشه‌ی url -> "throw" | "403" | "ok"، فقط برای متدِ getBalance.
   function makeFailoverFetch(behaviors) {
     const calls = []; // فقط تماس‌های getBalance، به‌ترتیبِ اندپوینتِ زده‌شده
+    let simCalls = 0;
     const fetchImpl = async (url, init) => {
       const u = String(url);
       if (u.startsWith(JUP + "/swap/v1/quote")) {
@@ -1794,8 +1860,12 @@ const ethers = globalThis.ethers;
         if (behavior === "403") return new Response("forbidden", { status: 403 });
         return rpcOk({ value: 2_000_000_000 });
       }
-      if (body.method === "getTokenAccountsByOwner") return rpcOk({ value: [] });
-      if (body.method === "simulateTransaction") return rpcOk({ value: { err: null } });
+      if (body.method === "simulateTransaction") {
+        simCalls++;
+        // اولی رفت‌وبرگشت (موفق)، دومی کنترل (InstructionError) — تا verdict
+        // نهایی واقعاً به sell برسد، نه اینکه در payer-holds گیر کند.
+        return rpcOk({ value: { err: simCalls === 1 ? null : { InstructionError: [1, { Custom: 1 }] } } });
+      }
       return jsonRes({ error: { code: -1, message: "unexpected method " + body.method } }, 500);
     };
     return { fetchImpl, calls };
@@ -1898,6 +1968,7 @@ const ethers = globalThis.ethers;
   }
   function rpcOk(result) { return jsonRes({ jsonrpc: "2.0", id: 1, result }); }
 
+  let e2eSimCalls = 0;
   globalThis.fetch = async (url, init) => {
     const u = String(url);
     if (u.includes("/swap/v1/quote")) {
@@ -1911,8 +1982,12 @@ const ethers = globalThis.ethers;
     }
     const body = JSON.parse(init.body);
     if (body.method === "getBalance") return rpcOk({ value: 2_000_000_000 });
-    if (body.method === "getTokenAccountsByOwner") return rpcOk({ value: [] });
-    if (body.method === "simulateTransaction") return rpcOk({ value: { err: null } });
+    if (body.method === "simulateTransaction") {
+      e2eSimCalls++;
+      // اولی رفت‌وبرگشت (موفق)، دومی کنترل (InstructionError) — تا verdict
+      // سرتاسری واقعاً به sell برسد، نه به payer-holds.
+      return rpcOk({ value: { err: e2eSimCalls === 1 ? null : { InstructionError: [1, { Custom: 1 }] } } });
+    }
     return jsonRes({ error: "unexpected" }, 500);
   };
 
@@ -1988,7 +2063,7 @@ const ethers = globalThis.ethers;
     const host = new URL(u).hostname;
     calls.push(host + "|" + body.method);
     if (host === DRPC && body.method === "getBalance") throw new Error("connection refused"); // پرتابِ شبکه‌ای
-    if (host === ONFINALITY && body.method === "getTokenAccountsByOwner") {
+    if (host === ONFINALITY && body.method === "getMultipleAccounts") {
       // خطای سطحِ JSON-RPC: HTTP ۲۰۰ ولی body.error با کدِ عددی — همان شکلی
       // که خیلی از نودهای عمومی برای یک متدِ بسته‌شده می‌دهند.
       return new Response(JSON.stringify({ jsonrpc: "2.0", id: 1,
@@ -2041,7 +2116,7 @@ const ethers = globalThis.ethers;
 
   // د) خطای سطحِ JSON-RPC (کدِ عددی) → همان کد در خروجی، نه یک متنِ آزاد.
   const onfRow = (body.endpoints || []).find((r) => r.h === ONFINALITY);
-  const onfHeld = onfRow && onfRow.methods.find((r) => r.m === "getTokenAccountsByOwner");
+  const onfHeld = onfRow && onfRow.methods.find((r) => r.m === "getMultipleAccounts");
   ok(onfHeld && onfHeld.ok === false && onfHeld.status === 200 && onfHeld.code === -32601,
     "a 200 response carrying a JSON-RPC error must surface its numeric code, not the message: " +
     JSON.stringify(onfHeld));
@@ -2050,7 +2125,7 @@ const ethers = globalThis.ethers;
   for (const row of body.endpoints || []) {
     for (const m of row.methods) {
       if (m.skipped || (row.h === DRPC && m.m === "getBalance") ||
-          (row.h === ONFINALITY && m.m === "getTokenAccountsByOwner")) continue;
+          (row.h === ONFINALITY && m.m === "getMultipleAccounts")) continue;
       ok(m.ok === true && m.status === 200 && m.code === null,
         "every other endpoint×method answering plain 200 should show ok:true/status:200/code:null: " +
         JSON.stringify(m) + " on " + row.h);

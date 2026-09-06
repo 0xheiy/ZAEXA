@@ -304,7 +304,10 @@ const PLACEHOLDER_BLOCKHASH = "1".repeat(32);
        ولی outAmount در کار نبود.
      • "payer-balance" همان‌طور که خودِ تعریف می‌گوید: یا فی‌پیر کمتر از
        ۱ SOL دارد، یا خودِ getBalance شکلی داد که خواندنش ممکن نبود.
-     • "payer-holds"، "too-big"، "deadline" دقیقاً همان یک چکِ صریحِ خودشان.
+     • "payer-holds" دیگر از یک lookup (getTokenAccountsByOwner) نمی‌آید —
+       از شبیه‌سازیِ کنترلِ گامِ ۸ می‌آید: وقتی تراکنشِ فقط-فروش هم به‌تنهایی
+       موفق می‌شود، یعنی فی‌پیر از قبل موجودی داشته و رفت‌وبرگشت هیچ چیزی
+       اثبات نکرده. "too-big"، "deadline" همان یک چکِ صریحِ خودشان.
      • "internal" همه‌ی بقیه: شکلِ ناخوانا/غیرمنتظره‌ی داده‌ای که خودِ تماس
        در آن موفق بود (BigInt رویِ مقدارِ نامعتبر، محاسبه‌ی sellAmount که
        صفر/نامحدود درآمد، ALT/decodeLookupTable، compose/compile/serialize،
@@ -323,7 +326,6 @@ export const VD_SOL_WHY = Object.freeze([
   "no-route",
   "too-big",
   "rpc:getBalance",
-  "rpc:getTokenAccountsByOwner",
   "rpc:getMultipleAccounts",
   "rpc:simulateTransaction",
   "jup:quote",
@@ -334,7 +336,7 @@ export const VD_SOL_WHY = Object.freeze([
 
 /* ---------------------------------------------------------------------
    فهرستِ متدهای RPC که مسیرِ verdict سولانا واقعاً صدا می‌زند — دقیقاً همان
-   چهار رشته‌ای که به rpcCall در fetchVerdictSol پاس داده می‌شوند، پایین‌تر
+   سه رشته‌ای که به rpcCall در fetchVerdictSol پاس داده می‌شوند، پایین‌تر
    در همین فایل. صادر شده برای دو مصرف:
      • GET /vd/rpc در worker/index.js همین فهرست را پیمایش می‌کند تا هر
        اندپوینت را رویِ همین متدها پروب کند — نه یک فهرستِ دستیِ جدا که
@@ -342,10 +344,13 @@ export const VD_SOL_WHY = Object.freeze([
      • worker/test.mjs همین فایل را با regex می‌خواند و متدهای واقعاً
        صداشده را دوباره استخراج می‌کند تا بسنجد این فهرست همچنان همان‌هاست؛
        افزودنِ یک rpcCall تازه بدونِ افزودنِ متدش اینجا آن تست را می‌شکند.
-   getHealth عمداً اینجا نیست: هیچ‌جا در مسیرِ verdict صدا زده نمی‌شود. */
+   getTokenAccountsByOwner دیگر اینجا نیست: چکِ «فی‌پیر از قبل این mint را
+   دارد» حالا با یک شبیه‌سازیِ کنترل انجام می‌شود (گامِ ۸ در fetchVerdictSol)،
+   نه با این lookup — پس مسیرِ verdict دیگر این متد را صدا نمی‌زند، و این
+   پروب هم نباید دیگر رویش تلاش کند. getHealth عمداً اینجا نیست: هیچ‌جا در
+   مسیرِ verdict صدا زده نمی‌شود. */
 export const VD_SOL_RPC_METHODS = Object.freeze([
   "getBalance",
-  "getTokenAccountsByOwner",
   "getMultipleAccounts",
   "simulateTransaction",
 ]);
@@ -358,8 +363,6 @@ export const VD_SOL_RPC_METHODS = Object.freeze([
    نه اینکه یک پاسِ ساختگی جعل کند). */
 export const VD_SOL_RPC_PROBE_PARAMS = Object.freeze({
   getBalance: [VD_SOL_PAYER, { commitment: "confirmed" }],
-  getTokenAccountsByOwner: [VD_SOL_PAYER, { mint: SOL_MINT_ADDR },
-    { encoding: "jsonParsed", commitment: "confirmed" }],
   getMultipleAccounts: [[SOL_MINT_ADDR], { encoding: "base64", commitment: "confirmed" }],
 });
 
@@ -429,6 +432,37 @@ function composeRoundtrip(legBuy, legSell) {
     ...(legBuy.addressLookupTableAddresses || []),
     ...(legSell.addressLookupTableAddresses || []),
   ]));
+
+  return { instructions, altAddrs };
+}
+
+/* ---------------------------------------------------------------------
+   ترکیبِ کنترلِ منفی — فقط legِ فروش، بدونِ خریدِ همین تراکنش. کامپیوت‌بادجت
+   و setup حالا از خودِ legSell می‌آیند (نه از خرید، چون خرید اصلاً در این
+   تراکنش نیست). همان قاعده‌ی composeRoundtrip: فقط *cleanup نهایی* نگه
+   داشته می‌شود، setup دیدوپ‌شده تا حسابی دوبار ساخته نشود. */
+function composeSellOnly(legSell) {
+  if (!legSell || !legSell.swapInstruction) return null;
+
+  const computeBudgetRaw = legSell.computeBudgetInstructions || [];
+
+  const setupRawAll = legSell.setupInstructions || [];
+  const seen = new Set();
+  const dedupedSetup = [];
+  for (const raw of setupRawAll) {
+    const k = ixKey(raw);
+    if (!seen.has(k)) { seen.add(k); dedupedSetup.push(raw); }
+  }
+
+  const rawInstructions = [
+    ...computeBudgetRaw,
+    ...dedupedSetup,
+    legSell.swapInstruction,
+    ...(legSell.cleanupInstruction ? [legSell.cleanupInstruction] : []),
+  ];
+  const instructions = rawInstructions.map(rawToInstruction);
+
+  const altAddrs = Array.from(new Set(legSell.addressLookupTableAddresses || []));
 
   return { instructions, altAddrs };
 }
@@ -640,7 +674,11 @@ async function jupCall(fetchImpl, jupBase, path, opts, timeoutMs) {
 }
 
 /* ---------------------------------------------------------------------
-   fetchVerdictSol — ارکستراسیون؛ هشت گام، دقیقاً به همان ترتیبِ اسپایک.
+   fetchVerdictSol — ارکستراسیون؛ هشت گام. گام‌های ۱ تا ۷ دقیقاً همان
+   ترتیبِ اسپایک‌اند (رفت‌وبرگشت را شبیه‌سازی کن)؛ گامِ ۸ چیزی است که اسپایک
+   نداشت — یک شبیه‌سازیِ کنترلِ منفی به‌جایِ lookupِ getTokenAccountsByOwner،
+   دقیقاً همان چکِ «فی‌پیر از قبل این mint را ندارد»، این‌بار با اجرا نه با
+   خواندنِ حساب.
    بازگشت حالا همیشه یک شیء است: { v: "sell" } / { v: "nosell" } برای
    موفقیت (بدونِ کلیدِ why)، یا { v: null, why } برای هر بن‌بست — نگاشتِ
    دقیقِ هر why بالای فایل، کنارِ VD_SOL_WHY، یک‌جا نوشته شده. */
@@ -669,8 +707,9 @@ export async function fetchVerdictSol(mint, opts) {
     // رویش شکست بخورد (پرتابِ شبکه‌ای، غیرِ۲۰۰، بدنه‌ی ناخوانا) کنار گذاشته
     // می‌شود و اندپوینتِ بعدی امتحان می‌شود؛ هرکدام که همین‌جا جواب داد، از
     // این‌جا تا آخرِ همین درخواست «چسبیده» می‌ماند و بقیه‌ی تماس‌های RPC
-    // پایین‌تر (getTokenAccountsByOwner، getMultipleAccounts،
-    // simulateTransaction) دیگر failover نمی‌گیرند — همان‌طور که batchB در
+    // پایین‌تر (getMultipleAccounts، simulateTransaction — این یکی دوبار،
+    // یک‌بار برای رفت‌وبرگشت و یک‌بار برای کنترل) دیگر failover نمی‌گیرند
+    // — همان‌طور که batchB در
     // fetchVerdict هم اگر شکست بخورد مستقیم null می‌شود، نه اینکه اندپوینتِ
     // بعدی را امتحان کند. حداکثر VD_SOL_RPC_MAX_TRIES اندپوینت در یک
     // درخواست، و هر بار پیش از امتحانِ اندپوینتِ بعدی مهلت دوباره سنجیده
@@ -690,26 +729,7 @@ export async function fetchVerdictSol(mint, opts) {
     if (!balRes.result || typeof balRes.result.value !== "number") return unknown("payer-balance");
     if (balRes.result.value < VD_SOL_MIN_PAYER_LAMPORTS) return unknown("payer-balance");
 
-    // ۲. 🔴 موجودیِ همین mint نزدِ فی‌پیر باید صفر باشد. اولین چهار نتیجه‌ی
-    // سبزِ این کار بی‌معنی بودند چون فی‌پیر یک کیف‌پولِ صرافی با میلیون‌ها
-    // USDC بود: لگِ فروش از همان موجودیِ قبلی تامین می‌شد، نه از چیزی که
-    // لگِ خرید همین تراکنش تحویل داده بود. این چک همان کنترلِ منفی است که
-    // آن‌روز چیز را لو داد — بدونش هر نتیجه‌ی «sell» هیچ چیزی اثبات نمی‌کند.
-    if (pastDeadline()) return unknown("deadline");
-    const heldRes = await rpcCall(fetchImpl, rpc, "getTokenAccountsByOwner",
-      [payer, { mint }, { encoding: "jsonParsed", commitment: "confirmed" }], timeoutMs);
-    if (!heldRes.ok) return unknown("rpc:getTokenAccountsByOwner");
-    let heldRaw = 0n;
-    for (const row of (heldRes.result && heldRes.result.value) || []) {
-      const amt = row && row.account && row.account.data && row.account.data.parsed &&
-        row.account.data.parsed.info && row.account.data.parsed.info.tokenAmount &&
-        row.account.data.parsed.info.tokenAmount.amount;
-      if (amt == null) continue;
-      try { heldRaw += BigInt(amt); } catch { return unknown("internal"); } // شکلِ عددیِ نامعتبر، نه شکستِ خودِ تماس
-    }
-    if (heldRaw > 0n) return unknown("payer-holds"); // هرگز sell، حتی اگر شبیه‌سازی بعداً موفق می‌شد
-
-    // ۳. quote خرید SOL -> mint — فقط مسیرِ مستقیم (چندجهشی احتمالاً جا نمی‌شود).
+    // ۲. quote خرید SOL -> mint — فقط مسیرِ مستقیم (چندجهشی احتمالاً جا نمی‌شود).
     if (pastDeadline()) return unknown("deadline");
     const amountLamports = Math.round(VD_SOL_NOTIONAL_SOL * 1e9);
     const quoteBuyRes = await jupCall(fetchImpl, jupBase, "/swap/v1/quote", {
@@ -720,7 +740,7 @@ export async function fetchVerdictSol(mint, opts) {
     if (!quoteBuyRes.json || !quoteBuyRes.json.outAmount) return unknown("no-route"); // بی‌مسیر → نامعلوم، نه nosell
     const quoteBuy = quoteBuyRes.json;
 
-    // ۴. quote فروش mint -> SOL، عمداً برای ۹۰٪ خروجیِ خرید — نه ۱۰۰٪، چون
+    // ۳. quote فروش mint -> SOL، عمداً برای ۹۰٪ خروجیِ خرید — نه ۱۰۰٪، چون
     // مقدارِ واقعیِ رسیده در همین تراکنش می‌تواند به‌خاطرِ اسلیپیج کمتر از
     // quote باشد؛ لگِ فروش نباید صرفاً به‌خاطرِ «موجودی کافی نیست» شکست بخورد.
     if (pastDeadline()) return unknown("deadline");
@@ -736,7 +756,7 @@ export async function fetchVerdictSol(mint, opts) {
     if (!quoteSellRes.json || !quoteSellRes.json.outAmount) return unknown("no-route");
     const quoteSell = quoteSellRes.json;
 
-    // ۵. دستورالعمل‌های swap برای هر دو leg.
+    // ۴. دستورالعمل‌های swap برای هر دو leg.
     if (pastDeadline()) return unknown("deadline");
     const legBuyRes = await jupCall(fetchImpl, jupBase, "/swap/v1/swap-instructions", {
       method: "POST", body: { userPublicKey: payer, quoteResponse: quoteBuy, wrapAndUnwrapSol: true },
@@ -749,7 +769,7 @@ export async function fetchVerdictSol(mint, opts) {
     }, timeoutMs);
     if (!legSellRes.ok || !legSellRes.json) return unknown("jup:swap-instructions");
 
-    // ۶. ترکیبِ یک تراکنشِ v0 واحد، و حل کردنِ هر جدولِ آدرسی که هرکدام از
+    // ۵. ترکیبِ یک تراکنشِ v0 واحد، و حل کردنِ هر جدولِ آدرسی که هرکدام از
     // دو leg نام برده.
     if (pastDeadline()) return unknown("deadline");
     let composed;
@@ -776,7 +796,7 @@ export async function fetchVerdictSol(mint, opts) {
     let message;
     try { message = compileV0Message(payer, composed.instructions, lookupTables); } catch { return unknown("internal"); }
 
-    // ۷. سقفِ سختِ اندازه — رد شدن یعنی نتوانستیم سوال را بپرسیم، نه اینکه
+    // ۶. سقفِ سختِ اندازه — رد شدن یعنی نتوانستیم سوال را بپرسیم، نه اینکه
     // جوابش «نه» بود.
     if (transactionWireSize(message) > TX_SIZE_LIMIT) return unknown("too-big");
 
@@ -784,7 +804,7 @@ export async function fetchVerdictSol(mint, opts) {
     try { wireBytes = serializeTransaction(message); } catch { return unknown("internal"); }
     const b64tx = bytesToBase64(wireBytes);
 
-    // ۸. شبیه‌سازی — بدونِ امضا، بدونِ کیف‌پولِ واقعی.
+    // ۷. شبیه‌سازیِ رفت‌وبرگشت — بدونِ امضا، بدونِ کیف‌پولِ واقعی.
     if (pastDeadline()) return unknown("deadline");
     const simRes = await rpcCall(fetchImpl, rpc, "simulateTransaction",
       [b64tx, { sigVerify: false, replaceRecentBlockhash: true, encoding: "base64" }], timeoutMs);
@@ -792,13 +812,63 @@ export async function fetchVerdictSol(mint, opts) {
     if (!simRes.result || !simRes.result.value ||
         !Object.prototype.hasOwnProperty.call(simRes.result.value, "err")) return unknown("internal");
     const err = simRes.result.value.err;
-    if (err === null) return { v: "sell" };
     // ⚠️ هرگز از رویِ متنِ آزادِ خطا تصمیم نمی‌گیریم — فقط از رویِ شکل: یک
     // InstructionError یعنی زنجیره واقعاً اجرا کرد و ردش کرد؛ هر شکلِ دیگر
     // (خطای سطحِ RPC، شکلِ ناشناخته) یعنی نامعلوم، نه غیرقابل‌فروش.
     if (err && typeof err === "object" && Object.prototype.hasOwnProperty.call(err, "InstructionError"))
       return { v: "nosell" };
-    return unknown("internal"); // شکلِ err ناشناخته — نه موفقیت، نه InstructionError
+    if (err !== null) return unknown("internal"); // شکلِ err ناشناخته — نه موفقیت، نه InstructionError
+
+    // ۸. 🔴 کنترلِ منفی — رفت‌وبرگشت موفق شد، ولی این هنوز اثبات نمی‌کند که
+    // فروش از چیزی کار کرد که *همین* خرید تحویل داد؛ ممکن است فی‌پیر از قبل
+    // خودِ این mint را داشته باشد — دقیقاً همان تله‌ای که چهار نتیجه‌ی اولِ
+    // اسپایک را بی‌معنی کرده بود (یک کیف‌پولِ صرافی با میلیون‌ها USDC، جایی
+    // که لگِ فروش از موجودیِ قبلی تامین می‌شد، نه از خروجیِ همین خرید).
+    //
+    // پس یک تراکنشِ دومِ مستقل می‌سازیم: فقط legِ فروش، بدونِ خرید. اگر
+    // *همین* هم به‌تنهایی موفق شود، یعنی فروش نیازی به خریدِ همین تراکنش
+    // نداشت → "payer-holds" (رفت‌وبرگشت هیچ چیزی اثبات نکرد، هرگز sell).
+    // اگر شکست بخورد (InstructionError)، یعنی خرید واقعاً چیزی تحویل داد که
+    // فروش را ممکن کرد → این‌بار sell واقعی است.
+    //
+    // 🔴 این شبیه‌سازیِ کنترل فقط رویِ مسیرِ موفقیت اجرا می‌شود — یک توکنِ
+    // کلاهبردار (رایج‌ترین حالتِ همین قابلیت، چون رفت‌وبرگشت همان‌جا با
+    // InstructionError رد می‌شود) هنوز فقط یک شبیه‌سازی هزینه دارد، نه دوتا.
+    //
+    // 🔴 یک verdictِ «sell» هرگز نباید برگردد مگر اینکه همین شبیه‌سازیِ کنترل
+    // واقعاً اجرا و شکست خورده باشد. اگر مهلت پیش از رسیدن به آن تمام شود، یا
+    // خودِ تماسِ RPCِ کنترل شکست بخورد، جواب باید null باشد ("deadline" یا
+    // "rpc:simulateTransaction") — هرگز sell. یک «sell»ِ تاییدنشده روی یک
+    // توکنِ کلاهبردار بدترین خروجیِ ممکنِ این سیستم است، بدتر از هیچ‌نگفتن.
+    if (pastDeadline()) return unknown("deadline");
+    let controlComposed;
+    try { controlComposed = composeSellOnly(legSellRes.json); } catch { return unknown("internal"); }
+    if (!controlComposed) return unknown("internal");
+
+    // جدول‌های آدرسِ همین گام از قبل (بالا، برای رفت‌وبرگشت) واکشی شده‌اند —
+    // altAddrs این کنترل زیرمجموعه‌ی همان‌هاست (فقط چیزی که legِ فروش نام
+    // برده)، پس نیازی به یک getMultipleAccounts دوم نیست؛ compileV0Message
+    // خودش فقط جدول‌هایی را که واقعاً استفاده می‌شوند نگه می‌دارد.
+    let controlMessage;
+    try { controlMessage = compileV0Message(payer, controlComposed.instructions, lookupTables); }
+    catch { return unknown("internal"); }
+    if (transactionWireSize(controlMessage) > TX_SIZE_LIMIT) return unknown("too-big");
+
+    let controlWireBytes;
+    try { controlWireBytes = serializeTransaction(controlMessage); } catch { return unknown("internal"); }
+    const controlB64tx = bytesToBase64(controlWireBytes);
+
+    const controlSimRes = await rpcCall(fetchImpl, rpc, "simulateTransaction",
+      [controlB64tx, { sigVerify: false, replaceRecentBlockhash: true, encoding: "base64" }], timeoutMs);
+    if (!controlSimRes.ok) return unknown("rpc:simulateTransaction"); // هرگز sell بدونِ کنترلِ واقعاً اجراشده
+    if (!controlSimRes.result || !controlSimRes.result.value ||
+        !Object.prototype.hasOwnProperty.call(controlSimRes.result.value, "err")) return unknown("internal");
+    const controlErr = controlSimRes.result.value.err;
+    if (controlErr === null) return unknown("payer-holds"); // فروشِ تنها هم موفق شد → رفت‌وبرگشت چیزی اثبات نکرد
+    if (controlErr && typeof controlErr === "object" &&
+        Object.prototype.hasOwnProperty.call(controlErr, "InstructionError"))
+      return { v: "sell" }; // فقط اینجا — بعدِ شکستِ واقعیِ کنترل
+    return unknown("internal"); // شکلِ controlErr ناشناخته — نه موفقیت، نه InstructionError
   } catch {
     return { v: null, why: "internal" }; // این تابع هرگز نباید پرتاب کند
   }
