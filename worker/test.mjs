@@ -1231,6 +1231,431 @@ const ethers = globalThis.ethers;
     + "address 400; its own \"vd\" rate bucket independent of \"og\"; 429 carries retry-after");
 }
 
+/* ---- ۱۵. chains.js — تشخیصِ زنجیره از رویِ شکلِ آدرس ----
+   بدونِ ابهام: هر رشته‌ای که EVM_ADDR بپذیرد با «0x» شروع می‌شود، یعنی
+   نویسه‌ی اولش «0» است؛ الفبای SOL_MINT اصلاً نویسه‌ی «0» ندارد — نه فقط در
+   جایگاهِ اول، در هیچ جایگاهی. پس این دو الگو ذاتاً جدا از همند، نه فقط در
+   نمونه‌های زیر — ولی همان نمونه‌ها هم اینجا سنجیده می‌شوند. */
+{
+  const { EVM_ADDR, SOL_MINT, chainOf, gtNetworkOf } = await import("./chains.js");
+
+  const BASE_ADDR = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913";
+  const SOL_ADDR = "So11111111111111111111111111111111111111112"; // خودِ wSOL mint
+  ok(chainOf(BASE_ADDR) === "base", "a real Base address should resolve to \"base\": " + chainOf(BASE_ADDR));
+  ok(chainOf(SOL_ADDR) === "solana", "a real Solana mint should resolve to \"solana\": " + chainOf(SOL_ADDR));
+
+  // شکل‌های نزدیک‌به‌درست — همه باید نامعلوم بدهند، نه یکی از دو زنجیره
+  const NEAR_MISS = [
+    ["39 hex chars (one short)", "0x" + "a".repeat(39)],
+    ["41 hex chars (one over)", "0x" + "a".repeat(41)],
+    ["base58 31 chars (one short)", "1".repeat(31)],
+    ["base58 45 chars (one over)", "1".repeat(45)],
+    ["base58 containing 0", "1111111111111111111111111111110111"],
+    ["base58 containing O", "1111111111111111111111111111111O11"],
+    ["base58 containing I", "1111111111111111111111111111111I11"],
+    ["base58 containing l", "1111111111111111111111111111111l11"],
+    ["an empty string", ""],
+    ["a 0x address with non-hex characters", "0x" + "g".repeat(40)],
+  ];
+  for (const [label, addr] of NEAR_MISS) {
+    ok(chainOf(addr) === null, "chainOf should be null for " + label + " (" + JSON.stringify(addr) +
+      "), got " + chainOf(addr));
+  }
+
+  // اثباتِ بدون‌ابهامی: هیچ آدرسِ Base ای هرگز شکلِ سولانا هم ندارد
+  const BASE_SAMPLES = [
+    "0x" + "0".repeat(36) + "dEaD",
+    "0x4200000000000000000000000000000000000006",
+    "0xffffffffffffffffffffffffffffffffffffffff",
+  ];
+  for (const a of BASE_SAMPLES) {
+    ok(EVM_ADDR.test(a), "test fixture is not actually a valid Base address: " + a);
+    ok(!SOL_MINT.test(a), "A BASE ADDRESS ALSO MATCHED SOL_MINT — the two shapes are no longer "
+      + "unambiguous: " + a);
+  }
+
+  ok(gtNetworkOf("base") === "base", "gtNetworkOf(\"base\") should be \"base\"");
+  ok(gtNetworkOf("solana") === "solana", "gtNetworkOf(\"solana\") should be \"solana\"");
+  ok(gtNetworkOf("ethereum") === null, "gtNetworkOf of an unknown chain should be null, not a guess");
+  ok(gtNetworkOf(null) === null, "gtNetworkOf(null) should be null");
+
+  console.log("[chains] chainOf resolves real Base/Solana addresses correctly, every near-miss "
+    + "shape (wrong length, forbidden base58 character, empty string, non-hex 0x) gives null, and "
+    + "no address can ever match both EVM_ADDR and SOL_MINT at once");
+}
+
+/* ---- ۱۶. verdict_sol.js — رمزگذاری/رمزگشاییِ base58 و base64 ---- */
+{
+  const vs = await import("./verdict_sol.js");
+  const decodedMint = vs.base58Decode(vs.SOL_MINT_ADDR);
+  const decodedPayer = vs.base58Decode(vs.VD_SOL_PAYER);
+  ok(decodedMint && decodedMint.length === 32,
+    "base58Decode(SOL_MINT_ADDR) should be 32 bytes, got " + (decodedMint && decodedMint.length));
+  ok(decodedPayer && decodedPayer.length === 32,
+    "base58Decode(VD_SOL_PAYER) should be 32 bytes, got " + (decodedPayer && decodedPayer.length));
+
+  ok(vs.base58Encode(decodedMint) === vs.SOL_MINT_ADDR,
+    "base58 round-trip broke for the wSOL mint: " + vs.base58Encode(decodedMint));
+  ok(vs.base58Encode(decodedPayer) === vs.VD_SOL_PAYER,
+    "base58 round-trip broke for the payer address: " + vs.base58Encode(decodedPayer));
+
+  ok(vs.base58Decode("") === null, "base58Decode of an empty string should be null");
+  ok(vs.base58Decode("0OIl") === null, "base58Decode must refuse the four excluded characters");
+  ok(vs.base58Decode(null) === null, "base58Decode of a non-string should be null");
+
+  // صفرِ ابتدایی → «۱»ِ ابتدایی، رفت‌وبرگشت باید حفظش کند
+  const zeros = new Uint8Array(32);
+  ok(vs.base58Encode(zeros) === "1".repeat(32),
+    "encoding 32 zero bytes should give 32 leading \"1\"s, got " + vs.base58Encode(zeros));
+  const roundTrippedZeros = vs.base58Decode(vs.base58Encode(zeros));
+  ok(roundTrippedZeros.length === 32 && roundTrippedZeros.every((b) => b === 0),
+    "round-tripping 32 zero bytes through base58 lost the leading zeros");
+
+  // base64 دستی هم باید رفت‌وبرگشت را حفظ کند — تمامِ داده‌ی دستورالعمل و
+  // بایتِ نهاییِ تراکنشی که به simulateTransaction می‌رود از همین دو تابع رد می‌شود.
+  for (const len of [0, 1, 2, 3, 4, 31, 32, 33]) {
+    const raw = new Uint8Array(len);
+    for (let i = 0; i < len; i++) raw[i] = (i * 37 + 5) % 256;
+    const back = vs.base64ToBytes(vs.bytesToBase64(raw));
+    ok(back && back.length === len && back.every((b, i) => b === raw[i]),
+      "base64 round-trip broke for a " + len + "-byte buffer");
+  }
+
+  console.log("[base58/base64] decode/encode round-trip holds for the wSOL mint and the payer "
+    + "address (both 32 bytes), leading zero bytes survive, the excluded base58 characters "
+    + "(0/O/I/l) are refused, and base64 round-trips cleanly across several buffer lengths");
+}
+
+/* ---- ۱۷. verdict_sol.js — اندازه‌گیریِ اندازه‌ی سیم ----
+   پیام‌های زیر دستی ساخته شده‌اند، نه از رویِ compileV0Message؛ عددِ موردِ
+   انتظار هم دستی محاسبه شده (کنارِ هر بلوک نوشته شده چطور)، نه با شمردنِ
+   دوباره از رویِ shortvecLen خودِ ماژول — وگرنه این تست هیچ‌چیزی را اثبات
+   نمی‌کرد. */
+{
+  const vs = await import("./verdict_sol.js");
+
+  // امضاها: shortvec(1)=۱ + ۱×۶۴=۶۴  → ۶۵
+  // پیشوندِ نسخه + هدر: ۱+۳            → ۴
+  // کلیدهای استاتیک: shortvec(2)=۱ + ۲×۳۲=۶۴ → ۶۵
+  // recentBlockhash                    → ۳۲
+  // شمارشِ دستورالعمل‌ها: shortvec(1)=۱ → ۱
+  // دستورالعملِ تنها: ۱ (programIdIndex) + shortvec(1)=۱+۱=۲ (اندیس‌ها) +
+  //                    shortvec(3)=۱+۳=۴ (دادهٔ ۳بایتی)              → ۷
+  // جدول‌های آدرس: shortvec(0)=۱، بدونِ ورودی                        → ۱
+  // جمع: ۶۵+۴+۶۵+۳۲+۱+۷+۱ = ۱۷۵
+  const msg1 = {
+    header: { numRequiredSignatures: 1, numReadonlySignedAccounts: 0, numReadonlyUnsignedAccounts: 1 },
+    staticAccountKeys: ["payer-placeholder", "program-placeholder"],
+    recentBlockhash: "blockhash-placeholder",
+    compiledInstructions: [
+      { programIdIndex: 1, accountKeyIndexes: [0], data: new Uint8Array([1, 2, 3]) },
+    ],
+    addressTableLookups: [],
+  };
+  ok(vs.transactionWireSize(msg1) === 175,
+    "hand-computed wire size mismatch: expected 175, got " + vs.transactionWireSize(msg1));
+
+  // همان محاسبه، این‌بار با یک ورودیِ Address Lookup Table:
+  // امضاها ۶۵؛ پیشوند+هدر ۴؛ کلیدهای استاتیک shortvec(1)=۱+۳۲=۳۳؛ blockhash
+  // ۳۲؛ شمارشِ دستورالعمل ۱؛ دستورالعمل: ۱+(shortvec(2)=۱+۲=۳)+(shortvec(2)=۱+۲=۳)=۷؛
+  // شمارشِ جدول ۱؛ ورودیِ جدول: ۳۲+(shortvec(2)=۱+۲=۳)+(shortvec(1)=۱+۱=۲)=۳۷.
+  // جمع: ۶۵+۴+۳۳+۳۲+۱+۷+۱+۳۷ = ۱۸۰
+  const msg2 = {
+    header: { numRequiredSignatures: 1, numReadonlySignedAccounts: 0, numReadonlyUnsignedAccounts: 0 },
+    staticAccountKeys: ["payer-placeholder"],
+    recentBlockhash: "blockhash-placeholder",
+    compiledInstructions: [
+      { programIdIndex: 0, accountKeyIndexes: [1, 2], data: new Uint8Array([9, 9]) },
+    ],
+    addressTableLookups: [
+      { accountKey: "table-placeholder", writableIndexes: [0, 1], readonlyIndexes: [2] },
+    ],
+  };
+  ok(vs.transactionWireSize(msg2) === 180,
+    "hand-computed wire size mismatch (with an ALT entry): expected 180, got " +
+    vs.transactionWireSize(msg2));
+
+  console.log("[wire size] transactionWireSize matches a hand-computed byte count for a small "
+    + "fixed message, with and without an address-table-lookup entry");
+}
+
+/* ---- ۱۸. fetchVerdictSol — با fetchImpl جعلی، بدونِ هیچ RPC یا جوپیترِ واقعی ----
+   این کانتینر به هیچ RPC سولانا یا api.jup.ag دسترسی ندارد؛ هرچه اینجا
+   سنجیده می‌شود روی یک fetchImpl تزریق‌شده است، نه شبکه‌ی واقعی — پس این
+   بخش هیچ ادعایی درباره‌ی رفتارِ زنده نمی‌کند، فقط درباره‌ی قواعدِ خودِ کد. */
+{
+  const vs = await import("./verdict_sol.js");
+
+  function fakePubkey(n) {
+    const b = new Uint8Array(32);
+    for (let i = 0; i < 32; i++) b[i] = (n * 41 + i * 7 + 3) % 256;
+    return vs.base58Encode(b);
+  }
+  function ixData(bytes) { return vs.bytesToBase64(Uint8Array.from(bytes)); }
+  function rawIx(programId, accounts, dataBytes) {
+    return {
+      programId,
+      accounts: accounts.map(([pubkey, isSigner, isWritable]) => ({ pubkey, isSigner, isWritable })),
+      data: ixData(dataBytes),
+    };
+  }
+
+  const PAYER = vs.VD_SOL_PAYER;
+  const MINT = fakePubkey(100);
+  const PROGRAM_CB = fakePubkey(1);
+  const PROGRAM_SETUP = fakePubkey(2);
+  const PROGRAM_SWAP = fakePubkey(3);
+  const ATA_MINT = fakePubkey(4);
+  const ATA_WSOL = fakePubkey(5);
+  const WSOL_ACCT = fakePubkey(6);
+
+  function makeLegs({ hugeSwapData = false } = {}) {
+    const legBuy = {
+      computeBudgetInstructions: [rawIx(PROGRAM_CB, [], [2, 0, 0, 0, 0])],
+      setupInstructions: [rawIx(PROGRAM_SETUP, [[PAYER, true, true], [ATA_MINT, false, true]], [1])],
+      swapInstruction: rawIx(PROGRAM_SWAP,
+        [[PAYER, true, true], [ATA_MINT, false, true], [WSOL_ACCT, false, true]],
+        hugeSwapData ? new Array(1400).fill(7) : [9, 9, 9, 9]),
+      cleanupInstruction: null,
+      addressLookupTableAddresses: [],
+    };
+    const legSell = {
+      // ⚠️ کامپیوت‌بادجتِ leg فروش هم عمداً اینجا هست تا ثابت شود کدِ زیر
+      // واقعاً *فقط از خرید* برمی‌دارد، نه اینکه تصادفاً هیچ‌کدام نداشته باشند.
+      computeBudgetInstructions: [rawIx(PROGRAM_CB, [], [3, 0, 0, 0, 0])],
+      setupInstructions: [rawIx(PROGRAM_SETUP, [[PAYER, true, true], [ATA_WSOL, false, true]], [1])],
+      swapInstruction: rawIx(PROGRAM_SWAP,
+        [[PAYER, true, true], [ATA_WSOL, false, true], [WSOL_ACCT, false, true]],
+        [8, 8, 8, 8]),
+      cleanupInstruction: rawIx(PROGRAM_SETUP, [[WSOL_ACCT, false, true]], [3]),
+      addressLookupTableAddresses: [],
+    };
+    return { legBuy, legSell };
+  }
+
+  function jsonRes(body, status = 200) {
+    return new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
+  }
+  function rpcOk(result) { return jsonRes({ jsonrpc: "2.0", id: 1, result }); }
+
+  const RPC = "https://rpc.example";
+  const JUP = vs.VD_SOL_JUP_BASE;
+
+  function makeFetch({ legs, lamports = 2_000_000_000, heldRaw = null, simErr = "SUCCESS",
+                       buyQuoteOk = true, rpcStatus = {} } = {}) {
+    const calls = [];
+    const fetchImpl = async (url, init) => {
+      const u = String(url);
+      if (u.startsWith(JUP + "/swap/v1/quote")) {
+        const isBuy = u.includes("onlyDirectRoutes=true");
+        calls.push(isBuy ? "quote:buy" : "quote:sell");
+        if (isBuy) return buyQuoteOk ? jsonRes({ outAmount: "1000000", routePlan: [{}] })
+                                     : jsonRes({ error: "no route" }, 404);
+        return jsonRes({ outAmount: "40000000", routePlan: [{}] });
+      }
+      if (u.startsWith(JUP + "/swap/v1/swap-instructions")) {
+        const body = JSON.parse(init.body);
+        const isBuy = body.quoteResponse.outAmount === "1000000";
+        calls.push(isBuy ? "swap-ix:buy" : "swap-ix:sell");
+        return jsonRes(isBuy ? legs.legBuy : legs.legSell);
+      }
+      const body = JSON.parse(init.body);
+      calls.push("rpc:" + body.method);
+      if (rpcStatus[body.method]) return new Response("boom", { status: rpcStatus[body.method] });
+      if (body.method === "getBalance") return rpcOk({ value: lamports });
+      if (body.method === "getTokenAccountsByOwner") {
+        return rpcOk({ value: heldRaw == null ? [] :
+          [{ account: { data: { parsed: { info: { tokenAmount: { amount: heldRaw } } } } } }] });
+      }
+      if (body.method === "simulateTransaction") {
+        const err = simErr === "SUCCESS" ? null
+          : simErr === "INSTR" ? { InstructionError: [1, { Custom: 6001 }] }
+          : simErr;
+        return rpcOk({ value: { err } });
+      }
+      return jsonRes({ error: { code: -1, message: "unexpected method " + body.method } }, 500);
+    };
+    return { fetchImpl, calls };
+  }
+
+  function opts(extra) {
+    return Object.assign({ rpcs: [RPC], jupBase: JUP, payer: PAYER }, extra);
+  }
+
+  // الف) مسیرِ سبز — هیچ چیزِ استثنایی، همه‌چیز موفق
+  {
+    const legs = makeLegs();
+    const { fetchImpl, calls } = makeFetch({ legs, simErr: "SUCCESS" });
+    const res = await vs.fetchVerdictSol(MINT, opts({ fetchImpl }));
+    ok(res === "sell", "happy path should return \"sell\" (got " + res + ")");
+    ok(calls.join(",") === "rpc:getBalance,rpc:getTokenAccountsByOwner,quote:buy,quote:sell," +
+      "swap-ix:buy,swap-ix:sell,rpc:simulateTransaction",
+      "unexpected call sequence for the happy path: " + calls.join(","));
+  }
+
+  // ب) خطای سطحِ تراکنش (InstructionError) → nosell
+  {
+    const legs = makeLegs();
+    const { fetchImpl } = makeFetch({ legs, simErr: "INSTR" });
+    const res = await vs.fetchVerdictSol(MINT, opts({ fetchImpl }));
+    ok(res === "nosell", "a transaction-level InstructionError should give \"nosell\" (got " + res + ")");
+  }
+
+  // ج) 🔴 فی‌پیر از قبل خودِ mint را دارد → null، حتی اگر شبیه‌سازی زیرش
+  // موفق می‌بود — همان تله‌ای که چهار نتیجه‌ی اول را بی‌معنی کرده بود.
+  {
+    const legs = makeLegs();
+    const { fetchImpl, calls } = makeFetch({ legs, heldRaw: "500", simErr: "SUCCESS" });
+    const res = await vs.fetchVerdictSol(MINT, opts({ fetchImpl }));
+    ok(res === null, "a payer that already holds the mint must give null, even though the " +
+      "simulation underneath would say success (got " + res + ")");
+    ok(calls.join(",") === "rpc:getBalance,rpc:getTokenAccountsByOwner",
+      "the guard must stop before any Jupiter/simulate call once the payer is found to hold the " +
+      "mint, got: " + calls.join(","));
+  }
+
+  // د) فی‌پیر کمتر از ۱ SOL → null، بدونِ حتی یک فراخوانیِ جوپیتر
+  {
+    const legs = makeLegs();
+    const { fetchImpl, calls } = makeFetch({ legs, lamports: 100_000_000 }); // ۰٫۱ SOL
+    const res = await vs.fetchVerdictSol(MINT, opts({ fetchImpl }));
+    ok(res === null, "a payer under 1 SOL must give null (got " + res + ")");
+    ok(calls.join(",") === "rpc:getBalance",
+      "an underfunded payer must stop before even the held-mint check or any Jupiter call, got: " +
+      calls.join(","));
+  }
+
+  // ه) بدونِ مسیرِ خرید در جوپیتر → نامعلوم، نه nosell
+  {
+    const legs = makeLegs();
+    const { fetchImpl, calls } = makeFetch({ legs, buyQuoteOk: false });
+    const res = await vs.fetchVerdictSol(MINT, opts({ fetchImpl }));
+    ok(res === null, "no direct buy route from Jupiter must give null, not \"nosell\" (got " + res + ")");
+    ok(!calls.includes("swap-ix:buy"), "swap-instructions must not be requested after a failed quote");
+  }
+
+  // و) تراکنشِ بزرگ‌تر از ۱۲۳۲ بایت → null، هرگز حتی به simulateTransaction نمی‌رسد
+  {
+    const legs = makeLegs({ hugeSwapData: true });
+    const { fetchImpl, calls } = makeFetch({ legs, simErr: "SUCCESS" });
+    const res = await vs.fetchVerdictSol(MINT, opts({ fetchImpl }));
+    ok(res === null, "a transaction over the 1232-byte limit must give null (got " + res + ")");
+    ok(!calls.includes("rpc:simulateTransaction"),
+      "an oversized transaction must never reach simulateTransaction — got calls: " + calls.join(","));
+  }
+
+  // ز) ۵۰۰ از خودِ simulateTransaction → null، نه nosell
+  {
+    const legs = makeLegs();
+    const { fetchImpl } = makeFetch({ legs, rpcStatus: { simulateTransaction: 500 } });
+    const res = await vs.fetchVerdictSol(MINT, opts({ fetchImpl }));
+    ok(res === null, "a 500 from simulateTransaction must give null, not \"nosell\" (got " + res + ")");
+  }
+
+  // ح) مهلتِ گذشته → null، بدونِ حتی یک فراخوانیِ شبکه
+  {
+    let calls = 0;
+    const fetchImpl = async () => { calls++; return jsonRes({}); };
+    const res = await vs.fetchVerdictSol(MINT, { fetchImpl, now: () => 10_000, deadlineAt: 5_000 });
+    ok(res === null && calls === 0, "past the deadline fetchVerdictSol must return null without " +
+      "any fetch call (got " + res + ", " + calls + " calls)");
+  }
+
+  console.log("[fetchVerdictSol] happy path -> sell; InstructionError -> nosell; a payer holding " +
+    "the mint -> null even under a successful simulation; an underfunded payer -> null with zero " +
+    "Jupiter calls; no direct route -> null; an oversized (>1232 byte) transaction -> null " +
+    "without ever reaching simulateTransaction; a 500 from simulateTransaction -> null; a past " +
+    "deadline -> null with zero fetch calls — all against an injected fake, no real RPC or " +
+    "Jupiter call involved");
+}
+
+/* ---- ۱۹. /vd/<mint سولانا> سرتاسری، و /t/<mint سولانا> → ۴۰۴ ----
+   همان مسیرِ واقعیِ index.js (diagVerdict -> solFetchVerdict -> fetchVerdictSol)
+   با globalThis.fetch جعلی، دقیقاً مثلِ بخشِ ۱۳. */
+{
+  const vs = await import("./verdict_sol.js");
+  const { TOKEN_PAGE: TP } = await import("./index.js");
+  const SOL_ADDR = "So11111111111111111111111111111111111111112";
+
+  ok(TP.test("/t/" + SOL_ADDR), "TOKEN_PAGE should accept a Solana mint's shape too: " +
+    "/t/" + SOL_ADDR);
+
+  function fakePubkey(n) {
+    const b = new Uint8Array(32);
+    for (let i = 0; i < 32; i++) b[i] = (n * 41 + i * 7 + 3) % 256;
+    return vs.base58Encode(b);
+  }
+  function ixData(bytes) { return vs.bytesToBase64(Uint8Array.from(bytes)); }
+  function rawIx(programId, accounts, dataBytes) {
+    return {
+      programId,
+      accounts: accounts.map(([pubkey, isSigner, isWritable]) => ({ pubkey, isSigner, isWritable })),
+      data: ixData(dataBytes),
+    };
+  }
+  const PAYER = vs.VD_SOL_PAYER;
+  const PROGRAM = fakePubkey(9);
+  const legBuy = {
+    computeBudgetInstructions: [], setupInstructions: [],
+    swapInstruction: rawIx(PROGRAM, [[PAYER, true, true]], [1, 2]),
+    cleanupInstruction: null, addressLookupTableAddresses: [],
+  };
+  const legSell = {
+    computeBudgetInstructions: [], setupInstructions: [],
+    swapInstruction: rawIx(PROGRAM, [[PAYER, true, true]], [3, 4]),
+    cleanupInstruction: null, addressLookupTableAddresses: [],
+  };
+  function jsonRes(body, status = 200) {
+    return new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
+  }
+  function rpcOk(result) { return jsonRes({ jsonrpc: "2.0", id: 1, result }); }
+
+  globalThis.fetch = async (url, init) => {
+    const u = String(url);
+    if (u.includes("/swap/v1/quote")) {
+      const isBuy = u.includes("onlyDirectRoutes=true");
+      return jsonRes({ outAmount: isBuy ? "1000000" : "40000000", routePlan: [{}] });
+    }
+    if (u.includes("/swap/v1/swap-instructions")) {
+      const body = JSON.parse(init.body);
+      const isBuy = body.quoteResponse.outAmount === "1000000";
+      return jsonRes(isBuy ? legBuy : legSell);
+    }
+    const body = JSON.parse(init.body);
+    if (body.method === "getBalance") return rpcOk({ value: 2_000_000_000 });
+    if (body.method === "getTokenAccountsByOwner") return rpcOk({ value: [] });
+    if (body.method === "simulateTransaction") return rpcOk({ value: { err: null } });
+    return jsonRes({ error: "unexpected" }, 500);
+  };
+
+  const spyEnv = {
+    ASSETS: {
+      fetch: async (req) => {
+        const p = new URL(req.url).pathname;
+        return p === "/app" ? new Response("the site", { status: 200 })
+                             : new Response("not found", { status: 404 });
+      },
+    },
+  };
+
+  const res = await worker.fetch(new Request(ORIGIN + "/vd/" + SOL_ADDR,
+    { headers: { "cf-connecting-ip": "203.0.113.60" } }), spyEnv, {});
+  ok(res.status === 200, "/vd/<solana mint> should be 200 (got " + res.status + ")");
+  ok(res.headers.get("cache-control") === "no-store", "/vd must never be cached");
+  const body = await res.json();
+  ok(body.v === "sell", "/vd/<solana mint> did not surface the Solana verdict: " + JSON.stringify(body));
+
+  const tRes = await worker.fetch(new Request(ORIGIN + "/t/" + SOL_ADDR,
+    { headers: { "cf-connecting-ip": "203.0.113.61" } }), spyEnv, {});
+  ok(tRes.status === 404, "/t/<solana mint> must be 404 until web/index.html can render a Solana " +
+    "token (got " + tRes.status + ")");
+
+  globalThis.fetch = trackingFetch; // برگرداندنِ موکِ پیش‌فرض برای هرچه بعد از این اجرا می‌شود
+  console.log("[vd/t solana] /vd/<solana mint> runs the Solana verdict pipeline end to end " +
+    "through worker.fetch (v:\"sell\"); /t/<solana mint> is still 404, exactly like an unknown " +
+    "path, until the token page itself can render Solana");
+}
+
 console.log(fails === 0
   ? "[gt proxy] worker ok — " + REAL.length + " real paths proxied, " + BAD.length +
     " refused without touching the network, 429 passes through with CORS\n" +
@@ -1238,6 +1663,9 @@ console.log(fails === 0
     "referer and cookie never are\n" +
     "[verdict] worker/verdict.js ok — selectors and checksums independently verified, hand "
     + "encoder matches ethers byte-for-byte, decode/verdict/sellAmountFrom/fetchVerdict all "
-    + "covered"
+    + "covered\n" +
+    "[solana] chains.js chain detection, hand-rolled base58/base64, wire-size math and "
+    + "fetchVerdictSol all covered against injected fakes; /vd/<mint> wired end to end; "
+    + "/t/<mint> still 404"
   : "[gt proxy] " + fails + " FAILURES");
 process.exit(fails === 0 ? 0 : 1);

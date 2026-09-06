@@ -31,6 +31,8 @@ const UPSTREAM_KEYED = "https://api.coingecko.com/api/v3/onchain";
 import { ogTags, ogTitle, pickTokenMeta } from "./og.js";
 import { ogImageResponse } from "./og-image.js";
 import { fetchVerdict } from "./verdict.js";
+import { EVM_ADDR, SOL_MINT, chainOf, gtNetworkOf } from "./chains.js";
+import { fetchVerdictSol, VD_SOL_RPCS, VD_SOL_JUP_BASE, VD_SOL_PAYER } from "./verdict_sol.js";
 
 /* پراکسی باز نیست. فقط شکل مسیرهایی که خودِ سایت می‌زند اجازه دارد:
      networks/base/tokens/<addr>
@@ -161,7 +163,15 @@ const RL_WINDOW_MS = 60000;
 /* هر نام رویداد باید اینجا باشد وگرنه رد می‌شود. صفحه هم فهرست خودش را دارد
    و کاوشگر [events] در run.py تطبیقشان را می‌سنجد — وگرنه یک رویداد تازه در
    صفحه بی‌صدا دور ریخته می‌شد و ما فکر می‌کردیم «کسی این کار را نمی‌کند». */
-const TOKEN_PAGE = /^\/t\/0x[0-9a-fA-F]{40}\/?$/;
+/* شکلِ مسیر حالا هر دو خانواده‌ی آدرس را می‌پذیرد — از رویِ همان دو الگویی
+   که chains.js دارد ساخته می‌شود (source.slice(1,-1) فقط لنگرهای ^/$ را
+   برمی‌دارد تا بشود این دو را کنارِ هم، زیرِ یک «یا»، گذاشت) تا این مسیر و
+   chainOf هرگز از هم جدا نیفتند. ⚠️ ولی «پذیرفتنِ شکل» به‌معنایِ «سرودادنِ
+   صفحه» نیست — پایین‌تر، جایی که این regex استفاده می‌شود، توضیح داده شده
+   چرا آدرسِ سولانا با همین شکل باز هم ۴۰۴ می‌گیرد. */
+const TOKEN_PAGE = new RegExp(
+  "^\\/t\\/(" + EVM_ADDR.source.slice(1, -1) + "|" + SOL_MINT.source.slice(1, -1) + ")\\/?$"
+);
 
 const EV_OK = new Set([
   "load",
@@ -370,9 +380,13 @@ async function proxyGt(request, url, ctx, env) {
    کلید می‌نشست و فراخوانی بعدیِ /gt از داخل مرورگر با خطای CORS می‌افتاد —
    یعنی یک کارت پیش‌نمایش، قیمت را روی خودِ سایت خراب می‌کرد.
 
-   ⚠️ «base» اینجا ثابت است چون این Worker فقط همین یک سایت را سرو می‌کند و
-   `CHAIN.gtNetwork` در صفحه هم «base» است. اگر روزی شبکه‌ی دوم اضافه شد،
-   این هم باید از مسیر بیاید نه از این ثابت. */
+   ⚠️ شبکه‌ی دوم (سولانا) دیگر رسیده — این ثابت دیگر تصمیم‌گیرنده نیست، فقط
+   یک بازمانده‌ی سازگاریِ عقب‌رو است (برای هر کدی که هنوز از رویِ نام این
+   export چیزی می‌خواند). تصمیمِ واقعی از رویِ خودِ آدرس گرفته می‌شود:
+   `gtNetworkOf(chainOf(addr))` — ogFetchMeta و ogFetchVerdict هر دو همین
+   را صدا می‌زنند، نه این ثابت را. `CHAIN.gtNetwork` در web/index.html هم
+   «base» است چون آن صفحه هنوز فقط Base را رندر می‌کند (پایین‌تر، کنارِ
+   TOKEN_PAGE، توضیح داده شده چرا). */
 const OG_NETWORK = "base";
 const OG_TIMEOUT_MS = 1200;
 
@@ -394,8 +408,13 @@ export const OG_BUDGET_MS = 2000;
 export const VD_CACHE_HOST = "zaexa-verdict.internal";
 
 async function ogFetchMeta(addr, env) {
+  // شبکه از رویِ خودِ آدرس، نه از رویِ OG_NETWORK — امروز این تابع فقط برای
+  // آدرس‌های Base صدا زده می‌شود (سولانا مسیرِ کاملاً جدایی دارد، پایین‌تر)،
+  // پس این فقط برای وقتی است که روزی این تابع برای زنجیره‌ی دیگری هم صدا
+  // زده شود؛ آن روز این خط دیگر نیازی به تغییر ندارد.
+  const network = gtNetworkOf(chainOf(addr)) || OG_NETWORK;
   const key = (env && typeof env.CG_KEY === "string" && env.CG_KEY) || "";
-  const rest = "networks/" + OG_NETWORK + "/tokens/" + addr;
+  const rest = "networks/" + network + "/tokens/" + addr;
   const target = (key ? UPSTREAM_KEYED : UPSTREAM_FREE) + "/" + rest;
 
   const store = (typeof caches !== "undefined" && caches.default) || null;
@@ -423,17 +442,17 @@ async function ogFetchMeta(addr, env) {
   }
 }
 
-/* آیا هنوز جایی این توکن قیمت فروش می‌دهد؟ — سمت سرور، فقط برای همین یک
-   جمله‌ی اولِ توضیح.
-   ⚠️ برخلافِ ogFetchMeta که فقط از کش می‌خواند، اینجا هم می‌خوانیم هم
-   می‌نویسیم — روی VD_CACHE_HOST که هیچ ربطی به proxyGt ندارد (توضیح بالای
-   همین فایل، کنارِ VD_CACHE_HOST). هرگز پرتاب نمی‌کند: هر مسیر شکست، null. */
-async function ogFetchVerdict(addr, meta, deadlineAt, env, ctx) {
-  if (!meta) return null; // بدونِ متادیتا حتی یک تلاش هم لازم نیست
+/* هستهٔ مشترکِ کش‌کردنِ verdict — هم برای Base هم برای سولانا. قبلاً این
+   منطق فقط داخلِ ogFetchVerdict بود؛ با آمدنِ سولانا دو نسخه از همان قاعده‌ی
+   «هرگز نامعلوم را کش نکن» می‌شد، و این دقیقاً همان کلاس‌خطایی است که یک بار
+   با کپی‌شدنِ منطقِ verdict این مخزن را گزیده. کلیدِ کش را کالر می‌سازد، نه
+   این تابع، چون شکلِ آدرسِ دو زنجیره فرق دارد: چک‌سامِ EVM یعنی حروفِ
+   کوچک/بزرگ همان آدرس‌اند، پس toLowerCase لازم است؛ mint سولانا حساس به
+   حروف است — lowercase کردنش آدرسِ دیگری می‌سازد، نه همان یکی. */
+async function cachedVerdict(cacheKeyPath, computeFn, ctx) {
   try {
     const store = (typeof caches !== "undefined" && caches.default) || null;
-    const cacheKey = new Request(
-      "https://" + VD_CACHE_HOST + "/v1/" + OG_NETWORK + "/" + addr.toLowerCase());
+    const cacheKey = new Request("https://" + VD_CACHE_HOST + cacheKeyPath);
 
     if (store) {
       const hit = await store.match(cacheKey);
@@ -443,7 +462,7 @@ async function ogFetchVerdict(addr, meta, deadlineAt, env, ctx) {
       }
     }
 
-    const verdict = await fetchVerdict(addr, meta, { deadlineAt, fetchImpl: fetch });
+    const verdict = await computeFn();
 
     /* هرگز «نمی‌دانم» را کش نکن. یک تعلیقِ گذرای یک RPC را به پنج دقیقه‌ی
        خاموشِ کارتِ تنزل‌یافته تبدیل می‌کند — دقیقاً همان «نمی‌دانم که مثل
@@ -463,6 +482,32 @@ async function ogFetchVerdict(addr, meta, deadlineAt, env, ctx) {
   } catch (e) {
     return null; // این تابع هرگز نباید کارت را بشکند
   }
+}
+
+/* آیا هنوز جایی این توکن قیمت فروش می‌دهد؟ — Base، سمت سرور، فقط برای
+   همین یک جمله‌ی اولِ توضیح.
+   ⚠️ برخلافِ ogFetchMeta که فقط از کش می‌خواند، اینجا هم می‌خوانیم هم
+   می‌نویسیم — روی VD_CACHE_HOST که هیچ ربطی به proxyGt ندارد (توضیح بالای
+   همین فایل، کنارِ VD_CACHE_HOST). */
+async function ogFetchVerdict(addr, meta, deadlineAt, env, ctx) {
+  if (!meta) return null; // بدونِ متادیتا حتی یک تلاش هم لازم نیست
+  const network = gtNetworkOf(chainOf(addr)) || OG_NETWORK;
+  return cachedVerdict(
+    "/v1/" + network + "/" + addr.toLowerCase(),
+    () => fetchVerdict(addr, meta, { deadlineAt, fetchImpl: fetch }),
+    ctx,
+  );
+}
+
+/* همان سوال، برای سولانا — بدونِ متادیتای GeckoTerminal، چون
+   fetchVerdictSol چیزی از قیمت/دسیمال نمی‌خواهد (رفت‌وبرگشتش را جوپیتر با
+   quote خودش حساب می‌کند، نه با priceUsd ما). */
+async function solFetchVerdict(mint, deadlineAt, ctx) {
+  return cachedVerdict(
+    "/v1/solana/" + mint,
+    () => fetchVerdictSol(mint, { deadlineAt, fetchImpl: fetch, rpcs: VD_SOL_RPCS, jupBase: VD_SOL_JUP_BASE, payer: VD_SOL_PAYER }),
+    ctx,
+  );
 }
 
 /* تگ‌ها را داخل همان HTML می‌نشاند.
@@ -510,8 +555,13 @@ function injectOg(res, url, addr, metaPromise, vdPromise) {
 
    بستهٔ (bucket) نرخِ خودش «vd» است، جدا از «og» — کاوش‌کردن با این مسیر
    نباید سهمیه‌ی رندرِ کارتِ واقعی را بخورد. هیچ‌چیزی ثبت یا لاگ نمی‌شود؛
-   فقط یک عددِ خام برمی‌گردد. */
-const VD_ADDR_RE = /^0x[0-9a-fA-F]{40}$/;
+   فقط یک عددِ خام برمی‌گردد.
+
+   ⚠️ برخلافِ /t/ که تا رسیدنِ صفحه‌اش یک mint سولانا را رد می‌کند، /vd/
+   همین امروز هر دو زنجیره را جواب می‌دهد — این مسیر کارتی سرو نمی‌کند، فقط
+   یک عدد؛ محدودیتِ web/index.html اینجا معنایی ندارد. chainOf همان تصمیمی
+   را می‌گیرد که chains.js همه‌جای دیگر هم می‌گیرد. */
+const VD_ADDR_RE = EVM_ADDR; // برای هرکسی که هنوز این نام را ایمپورت می‌کند
 
 function vdDone(status, body, extraHeaders) {
   return new Response(JSON.stringify(body), {
@@ -530,9 +580,14 @@ async function diagVerdict(request, url, env, ctx) {
   if (request.method !== "GET") return vdDone(405, { error: "only GET" });
 
   const addr = url.pathname.slice("/vd/".length);
-  if (!VD_ADDR_RE.test(addr)) return vdDone(400, { error: "bad address" });
+  const chain = chainOf(addr);
+  if (chain === null) return vdDone(400, { error: "bad address" });
 
   const t0 = Date.now();
+  if (chain === "solana") {
+    const v = await solFetchVerdict(addr, t0 + OG_BUDGET_MS, ctx);
+    return vdDone(200, { v, ms: Date.now() - t0 });
+  }
   const meta = await ogFetchMeta(addr, env);
   const v = await ogFetchVerdict(addr, meta, t0 + OG_BUDGET_MS, env, ctx);
   return vdDone(200, { v, ms: Date.now() - t0 });
@@ -566,6 +621,17 @@ export default {
        ناشناخته سالم بودند و فقط همین یکی ریدایرکت می‌شد. */
     if (TOKEN_PAGE.test(url.pathname) && env && env.ASSETS) {
       const addr = url.pathname.slice(3).replace(/\/$/, "");
+      /* ⚠️ سولانا هنوز اینجا صفحه نمی‌گیرد. TOKEN_PAGE بالا شکلِ یک mint
+         سولانا را هم قبول می‌کند (برای همین همین شرط لازم است)، ولی
+         web/index.html هنوز نمی‌تواند یک توکنِ سولانا را رندر کند — اگر
+         اپ را برایش سرو می‌کردیم، نتیجه یک صفحه‌ی ساکت‌شکسته بود، نه یک
+         خطای دیده‌شدنی. پس تا اسلایسِ بعدی که آن صفحه می‌رسد، یک mint
+         سولانا از همین‌جا با همان ۴۰۴ای که هر مسیرِ ناشناخته می‌گیرد رد
+         می‌شود (env.ASSETS.fetch(request) با pathname دست‌نخورده، نه
+         «/app»). فقط /vd/ همین امروز سولانا را می‌شناسد — آن مسیر کارت
+         سرو نمی‌کند، فقط یک عدد؛ محدودیتِ این صفحه آنجا معنایی ندارد.
+         این خط را برای «رفعِ» این محدودیت پاک نکن — دلیلش هنوز پابرجاست. */
+      if (chainOf(addr) !== "base") return env.ASSETS.fetch(request);
       /* ⚠️ /gt و /ev هر دو زیر rateOk بودند، این مسیر نبود — و همین یکی
          مستقیم به ogFetchMeta می‌رسد که کلید مشترکِ CoinGecko را می‌سوزاند.
          یک حلقه روی آدرس‌های تصادفیِ /t/0x… دقیقاً همان کلیدی را تمام
@@ -618,3 +684,4 @@ export { rateOk, rlHits, RL_LIMIT, RL_WINDOW_MS };
 export { OG_NETWORK, OG_TIMEOUT_MS, ogFetchMeta, ogFetchVerdict };
 export { UPSTREAM_FREE, UPSTREAM_KEYED };
 export { VD_ADDR_RE };
+export { TOKEN_PAGE, solFetchVerdict };
