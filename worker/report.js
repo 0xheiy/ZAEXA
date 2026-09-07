@@ -71,14 +71,40 @@ export function newPoolRowToToken(row) {
       row.relationships.dex.data.id;
     const dex = typeof dexId === "string" ? dexId : null;
 
-    return { address, priceUsd, reserveUsd, poolCreatedAt, dex };
+    // volume_usd ممکن است کلاً نباشد (یک استخرِ تازه‌تر از اولین شمعِ ۲۴ساعته) —
+    // نبودنش نباید کل ردیف را رد کند، فقط این یک عدد null می‌شود.
+    const vol24hRaw = attrs.volume_usd && attrs.volume_usd.h24;
+    const vol24hNum = Number(vol24hRaw);
+    const vol24hUsd = Number.isFinite(vol24hNum) && vol24hNum >= 0 ? vol24hNum : null;
+
+    // ⚠️ market_cap_usd در پاسخِ واقعی اغلب null است (توکن‌های تازه هنوز
+    // عرضه‌ی گردشیِ گزارش‌شده ندارند) — fallback به آن یعنی گاهی FDV واقعی و
+    // گاهی مارکت‌کپ را زیرِ یک نامِ یکسان قاطی کردن؛ عمداً نادیده گرفته می‌شود.
+    const fdvNum = Number(attrs.fdv_usd);
+    const fdvUsd = Number.isFinite(fdvNum) && fdvNum > 0 ? fdvNum : null;
+
+    return { address, priceUsd, reserveUsd, poolCreatedAt, dex, vol24hUsd, fdvUsd };
   } catch (e) {
     return null;
   }
 }
 
-/* یک ردیفِ گزارش، یا null. شکل برای v۱ قفل است — کلیدها به همین ترتیب. */
-export function reportRow({ chain, address, symbol, verdict, checkedAt, poolCreatedAt, reserveUsd, dex }) {
+// یک عددِ ذخیره‌شدنی، یا null. هرگز رشته، هرگز NaN، هرگز صفر-به‌جای-نامعلوم —
+// صفرِ واقعی (مثلاً حجمِ صفر) باید صفر بماند، پس شرط Number.isFinite است، نه truthy.
+function storedNumber(n) {
+  return typeof n === "number" && Number.isFinite(n) ? n : null;
+}
+
+/* یک ردیفِ گزارش، یا null. شکل برای v۱ قفل است — کلیدها به همین ترتیب.
+   🔴 انبار همیشه عددِ خام نگه می‌دارد، هرگز رشته‌ی نمایشی. ogBig() در
+   worker/og.js چیزی مثل "$1.2M" برمی‌گرداند — آن یک رندر است، نه داده؛ چیزی
+   که رندر شده دیگر نمی‌شود مرتب کرد یا دوباره فرمت داد. priceUsd/vol24hUsd/
+   fdvUsd/reserveUsd همیشه باید از attributes خامِ همان ردیفِ pool بیایند
+   (newPoolRowToToken)، نه از meta.liquidity/meta.vol24 که از قبل ogBig
+   شده‌اند — کسی این را به‌بهانه‌ی «ساده‌سازی» به meta برنگرداند. */
+export function reportRow({
+  chain, address, symbol, name, verdict, checkedAt, poolCreatedAt, priceUsd, reserveUsd, vol24hUsd, fdvUsd, dex,
+}) {
   try {
     if (verdict !== "sell" && verdict !== "nosell" && verdict !== null) return null; // هرگز یک حکم ساختگی
 
@@ -97,11 +123,15 @@ export function reportRow({ chain, address, symbol, verdict, checkedAt, poolCrea
       chain,
       address,
       symbol: typeof symbol === "string" ? symbol : null,
+      name: typeof name === "string" ? name : null,
       v: verdict,
       checkKind,
       checkedAt,
       poolCreatedAt: poolCreatedAt == null ? null : poolCreatedAt,
-      reserveUsd: reserveUsd == null ? null : reserveUsd,
+      priceUsd: storedNumber(priceUsd),
+      reserveUsd: storedNumber(reserveUsd),
+      vol24hUsd: storedNumber(vol24hUsd),
+      fdvUsd: storedNumber(fdvUsd),
       dex: dex == null ? null : dex,
     };
   } catch (e) {
@@ -236,14 +266,22 @@ export async function runReportPass({ kv, fetchPools, metaOf, verdictOf, now, sl
       try { verdict = await verdictOf(t.address, meta); } catch (e) { verdict = null; }
 
       const checkedAt = new Date(now()).toISOString();
+      // ⚠️ priceUsd/vol24hUsd/fdvUsd همیشه از t (همان ردیفِ pool که
+      // newPoolRowToToken برگرداند) می‌آیند، هرگز از meta — metaOf که null
+      // برگرداند فقط name/symbol را می‌گیرد، نه این سه عدد را؛ توکنی که
+      // متادیتایش نیامده نباید قیمت/حجم/FDVاش را هم از دست بدهد.
       const row = reportRow({
         chain: "base",
         address: t.address,
         symbol: meta && typeof meta.symbol === "string" ? meta.symbol : null,
+        name: meta && typeof meta.name === "string" ? meta.name : null,
         verdict,
         checkedAt,
         poolCreatedAt: t.poolCreatedAt,
+        priceUsd: t.priceUsd,
         reserveUsd: t.reserveUsd,
+        vol24hUsd: t.vol24hUsd,
+        fdvUsd: t.fdvUsd,
         dex: t.dex,
       });
       if (row) builtRows.push(row);

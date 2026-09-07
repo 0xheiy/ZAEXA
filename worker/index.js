@@ -990,7 +990,11 @@ async function reportRoute(request, url, env) {
   // امروز زود عوض می‌شود (اجرای ساعتی بعدی)، روزِ گذشته دیگر هرگز عوض
   // نمی‌شود — عمرِ کش هم همین تفاوت را باید نشان بدهد.
   const cacheControl = isToday ? "public, max-age=300" : "public, max-age=86400";
-  return vdDone(200, doc, { "cache-control": cacheControl });
+  // 🔴 store فقط از بیرون دیده می‌شود، هرگز در KV نمی‌نشیند — یک بایندینگِ
+  // بسته‌شده-ولی-خالی و یک ZX_KV کاملاً غایب امروز پاسخِ یکسان می‌دهند، و از
+  // بیرون هیچ راهی برای فرق‌گذاشتنشان نیست. rows:[] با store:true یعنی
+  // «هنوز چیزی جمع نشده»؛ با store:false یعنی «خودِ بایندینگ هرگز نرسید».
+  return vdDone(200, { ...doc, store: !!(env && env.ZX_KV) }, { "cache-control": cacheControl });
 }
 
 async function pairsRoute(request, url, env) {
@@ -1002,7 +1006,9 @@ async function pairsRoute(request, url, env) {
   if (chain !== "base" && chain !== "solana") return vdDone(400, { error: "bad chain" });
 
   const rows = await pairsRowsFor(env, chain);
-  return vdDone(200, { chain, rows }, { "cache-control": "public, max-age=300" });
+  // 🔴 همان دلیلِ reportRoute: store فقط می‌گوید بایندینگ حاضر است یا نه —
+  // یک حلقه‌ی خالی به‌تنهایی این را نمی‌گوید.
+  return vdDone(200, { chain, rows, store: !!(env && env.ZX_KV) }, { "cache-control": "public, max-age=300" });
 }
 
 /* بدنه‌ی scheduled — تابعِ جداگانه تا worker/test.mjs بتواند بدونِ ساختنِ

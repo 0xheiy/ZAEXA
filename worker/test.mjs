@@ -3015,6 +3015,16 @@ const ethers = globalThis.ethers;
      "base_token_price_usd must be Number()-parsed, got " + (tok && tok.priceUsd));
   ok(tok && tok.poolCreatedAt === "2026-09-07T16:47:23Z", "pool_created_at not carried through");
   ok(tok && tok.dex === "uniswap-v3-base", "dex id not carried through");
+  // ۹. volume_usd.h24 و fdv_usd هم رشته‌اند در پاسخِ واقعی — باید Number()
+  // شوند، نه اینکه رشته بمانند یا NaN شوند.
+  ok(tok && typeof tok.vol24hUsd === "number" && tok.vol24hUsd === 2.48003,
+     "volume_usd.h24 (a STRING) must be Number()-parsed into vol24hUsd, got " +
+     JSON.stringify(tok && tok.vol24hUsd) + " (" + typeof (tok && tok.vol24hUsd) + ")");
+  ok(tok && typeof tok.fdvUsd === "number" && tok.fdvUsd === 1056084.154,
+     "fdv_usd (a STRING) must be Number()-parsed into fdvUsd, got " +
+     JSON.stringify(tok && tok.fdvUsd) + " (" + typeof (tok && tok.fdvUsd) + ")");
+  ok(tok && typeof tok.priceUsd === "number" && tok.priceUsd === 0.00105608666453529,
+     "base_token_price_usd must be a number, exactly the parsed double, got " + tok.priceUsd);
 
   // ۲. آدرسِ صفر و آستانه‌ی رزرو
   function withBaseToken(id) {
@@ -3040,11 +3050,41 @@ const ethers = globalThis.ethers;
   ok(newPoolRowToToken(withReserve("5000")) !== null,
      "reserve exactly at REPORT_MIN_RESERVE_USD must be accepted");
 
+  // ۱۰. یک ردیفِ pool که اصلاً شیءِ volume_usd ندارد — یک استخرِ خیلی تازه‌تر
+  // از اولین شمعِ ۲۴ساعته می‌تواند این‌طور باشد؛ نبودنش نباید کلِ ردیف را
+  // رد کند (پرتاب کند)، فقط این یک عدد null می‌شود.
+  const noVolRow = withBaseToken("base_0x" + "3".repeat(40));
+  delete noVolRow.attributes.volume_usd;
+  const tokNoVol = newPoolRowToToken(noVolRow);
+  ok(tokNoVol !== null, "a pool row with no volume_usd object at all must still produce a token, not null");
+  ok(tokNoVol && tokNoVol.vol24hUsd === null,
+     "a missing volume_usd object must yield vol24hUsd:null without throwing, got " +
+     JSON.stringify(tokNoVol && tokNoVol.vol24hUsd));
+
+  // ۱۱. fdv_usd "0" یا غایب → fdvUsd:null؛ و market_cap_usd هرگز جایگزینش
+  // نمی‌شود، حتی وقتی مقداری واقعی دارد — این دو مفهومِ متفاوت‌اند.
+  function withFdv(fdv, marketCap) {
+    const row = withBaseToken("base_0x" + "4".repeat(40));
+    if (fdv === undefined) delete row.attributes.fdv_usd;
+    else row.attributes.fdv_usd = fdv;
+    row.attributes.market_cap_usd = marketCap;
+    return row;
+  }
+  const tokFdvZero = newPoolRowToToken(withFdv("0", null));
+  ok(tokFdvZero && tokFdvZero.fdvUsd === null,
+     "fdv_usd \"0\" must yield fdvUsd:null, got " + JSON.stringify(tokFdvZero && tokFdvZero.fdvUsd));
+  const tokFdvMissing = newPoolRowToToken(withFdv(undefined, "999"));
+  ok(tokFdvMissing !== null, "a missing fdv_usd must still produce a token, not null");
+  ok(tokFdvMissing && tokFdvMissing.fdvUsd === null,
+     "fdv_usd missing must never fall back to market_cap_usd (here \"999\"), got fdvUsd=" +
+     JSON.stringify(tokFdvMissing && tokFdvMissing.fdvUsd));
+
   // ۳. checkKind از رویِ chain — هرگز از رویِ متن
   const T0 = "2026-09-07T00:00:00.000Z";
   function baseArgs(extra) {
-    return Object.assign({ address: "0x" + "2".repeat(40), symbol: null, verdict: "sell", checkedAt: T0,
-      poolCreatedAt: null, reserveUsd: 1, dex: null }, extra);
+    return Object.assign({ address: "0x" + "2".repeat(40), symbol: null, name: null, verdict: "sell",
+      checkedAt: T0, poolCreatedAt: null, priceUsd: 0.5, reserveUsd: 1, vol24hUsd: 2, fdvUsd: 3,
+      dex: null }, extra);
   }
   const rowBase = reportRow(baseArgs({ chain: "base" }));
   const rowSol = reportRow(baseArgs({ chain: "solana", verdict: null }));
@@ -3064,6 +3104,57 @@ const ethers = globalThis.ethers;
     ok(r && r.checkKind === CHECK_KIND_BY_CHAIN[r.chain],
        "every built row must satisfy checkKind === CHECK_KIND_BY_CHAIN[chain]: " + JSON.stringify(r));
   }
+
+  // ۱۲. 🔴 هیچ فیلدِ ذخیره‌شده رشته‌ی نمایشی نیست — شکلِ ogBig() ("$1.2M")
+  // هرگز نباید به یک ردیفِ ساخته‌شده برسد؛ فقط عدد یا null مجاز است.
+  for (const key of ["priceUsd", "reserveUsd", "vol24hUsd", "fdvUsd"]) {
+    const v = rowBase[key];
+    ok(v === null || typeof v === "number",
+       "row." + key + " must be a number or null, never a display string, got " +
+       JSON.stringify(v) + " (" + typeof v + ")");
+    ok(!(typeof v === "string" && /^\$/.test(v)),
+       "row." + key + " must never look like an ogBig() rendering (\"$…\"), got " + JSON.stringify(v));
+  }
+  // همان چیز از یک ورودیِ رشته‌ای/نامعتبر: هرگز رشته یا NaN، فقط null
+  // ⚠️ هر چهار فیلد باید *رشته* بگیرند، نه سه‌تا NaN/undefined و یکی رشته:
+  // یک بار همین نامتقارنی باعث شد شکستنِ عمدیِ vol24hUsd (رشته را رد کند)
+  // از کنارِ سوییت رد شود، چون آن فیلد در این فیکسچر رشته نمی‌گرفت.
+  const rowJunkNums = reportRow(baseArgs({
+    chain: "base", priceUsd: "$1.2M", reserveUsd: "not-a-number", vol24hUsd: "$3.4K",
+    fdvUsd: "1056084.154",
+  }));
+  for (const key of ["priceUsd", "reserveUsd", "vol24hUsd", "fdvUsd"]) {
+    ok(rowJunkNums && rowJunkNums[key] === null,
+       "a non-numeric input for " + key + " must become null, never survive as a string/NaN, got " +
+       JSON.stringify(rowJunkNums && rowJunkNums[key]));
+  }
+  // و همان چهار فیلد با شکل‌های غیرِرشته‌ایِ نامعتبر — NaN، بی‌نهایت، غایب.
+  const rowJunkShapes = reportRow(baseArgs({
+    chain: "base", priceUsd: NaN, reserveUsd: Infinity, vol24hUsd: undefined, fdvUsd: null,
+  }));
+  for (const key of ["priceUsd", "reserveUsd", "vol24hUsd", "fdvUsd"]) {
+    ok(rowJunkShapes && rowJunkShapes[key] === null,
+       "a NaN/Infinity/absent input for " + key + " must become null, got " +
+       JSON.stringify(rowJunkShapes && rowJunkShapes[key]));
+  }
+
+  // ۱۳. ترتیب و مجموعه‌ی دقیقِ کلیدهای ردیف — شکلِ v۱ گسترش‌یافته
+  const FROZEN_ROW_KEYS = [
+    "chain", "address", "symbol", "name", "v", "checkKind", "checkedAt", "poolCreatedAt",
+    "priceUsd", "reserveUsd", "vol24hUsd", "fdvUsd", "dex",
+  ];
+  ok(JSON.stringify(Object.keys(rowBase)) === JSON.stringify(FROZEN_ROW_KEYS),
+     "reportRow's key order/set must match the frozen list exactly, got " +
+     JSON.stringify(Object.keys(rowBase)));
+
+  // ۱۴. name: رشته یا null، هرگز چیزِ دیگری — یک مقدارِ نارشته‌ای هرگز رد نمی‌کند
+  const rowNameNum = reportRow(baseArgs({ chain: "base", name: 12345 }));
+  ok(rowNameNum !== null && rowNameNum.name === null,
+     "a non-string name must become null without rejecting the row, got " +
+     JSON.stringify(rowNameNum && rowNameNum.name));
+  const rowNameStr = reportRow(baseArgs({ chain: "base", name: "Pool Coin" }));
+  ok(rowNameStr && rowNameStr.name === "Pool Coin",
+     "a string name must be carried through as-is, got " + JSON.stringify(rowNameStr && rowNameStr.name));
 
   // ۵. هر ردیفِ تولیدشده: chain/checkKind غیرِ خالی، checkedAt به‌شکلِ ISO
   for (const r of [rowBase, rowSol]) {
@@ -3112,13 +3203,18 @@ const ethers = globalThis.ethers;
      "no address may appear twice in the ring");
 
   console.log("[report rows] worker/report.js pure functions ok — the real GeckoTerminal fixture "
-    + "(strings, not numeric literals) parses to address/reserveUsd/priceUsd/poolCreatedAt/dex; the "
+    + "(strings, not numeric literals) parses to address/reserveUsd/priceUsd/poolCreatedAt/dex/"
+    + "vol24hUsd/fdvUsd, all as numbers; a missing volume_usd object degrades to vol24hUsd:null without "
+    + "throwing; fdv_usd \"0\" or absent yields fdvUsd:null and never falls back to market_cap_usd; the "
     + "zero address and a reserve under $" + REPORT_MIN_RESERVE_USD + " are rejected; checkKind comes "
     + "only from CHECK_KIND_BY_CHAIN (base -> sell-quote, solana -> roundtrip, ethereum -> null row) "
     + "and a caller-supplied checkKind is always ignored; every row carries a non-empty chain/checkKind "
-    + "and an ISO checkedAt; a null verdict survives as null, never nosell; mergeReportDoc keeps "
-    + "first-seen verdicts, accumulates checked, and still produces rows:[] on a zero-finding day; "
-    + "mergePairsRing dedupes newest-first and caps at exactly " + REPORT_PAIRS_CAP);
+    + "and an ISO checkedAt; a null verdict survives as null, never nosell; priceUsd/reserveUsd/"
+    + "vol24hUsd/fdvUsd on a built row are always a number or null, never an ogBig()-shaped display "
+    + "string; name is a string or null and never invented from the pool's own name field; the row's "
+    + "key order/set matches the frozen v1 list exactly; mergeReportDoc keeps first-seen verdicts, "
+    + "accumulates checked, and still produces rows:[] on a zero-finding day; mergePairsRing dedupes "
+    + "newest-first and caps at exactly " + REPORT_PAIRS_CAP);
 }
 
 /* ---- ۲۲. runReportPass — با kv/fetchPools/metaOf/verdictOf/sleep جعلی ----
@@ -3134,10 +3230,13 @@ const ethers = globalThis.ethers;
     };
   }
   function mkAddr(n) { return "0x" + n.toString(16).padStart(40, "0"); }
-  function poolRow(addr, reserve, price) {
+  // vol24h/fdv اختیاری‌اند — پیش‌فرضشان یک عددِ واقعی است (نه رشته‌ی خراب)
+  // تا هر فراخوانیِ قدیمی که این دو را نمی‌دهد باز هم یک ردیفِ معتبر بسازد.
+  function poolRow(addr, reserve, price, vol24h = 0, fdv = 0) {
     return {
       attributes: { reserve_in_usd: String(reserve), base_token_price_usd: String(price),
-        pool_created_at: "2026-09-07T10:00:00Z" },
+        pool_created_at: "2026-09-07T10:00:00Z",
+        volume_usd: { h24: String(vol24h) }, fdv_usd: String(fdv) },
       relationships: { base_token: { data: { id: "base_" + addr } },
         dex: { data: { id: "uniswap-v3-base" } } },
     };
@@ -3173,10 +3272,12 @@ const ethers = globalThis.ethers;
 
   // ۶ + ۱۲. مسیرِ واقعی: دو توکنِ تازه، یکی metaOf-null، پیس/عدم‌همپوشانی
   const kv = makeKv();
-  const rows = [poolRow(mkAddr(1), 10000, 0.001), poolRow(mkAddr(2), 10000, 0.002)];
+  // vol24h/fdv واقعی روی هر دو، تا بشود سنجید metaOf-null فقط name را از دست
+  // می‌دهد، نه این اعداد را.
+  const rows = [poolRow(mkAddr(1), 10000, 0.001, 500.5, 9999.99), poolRow(mkAddr(2), 10000, 0.002, 10, 5000)];
   let sleepCalls = 0; const sleepArgs = [];
   const sleep = async (ms) => { sleepCalls++; sleepArgs.push(ms); };
-  const metaOf = async (addr) => (addr === mkAddr(1) ? null : { symbol: "T2" });
+  const metaOf = async (addr) => (addr === mkAddr(1) ? null : { symbol: "T2", name: "Token Two" });
   let verdictActive = 0, sawOverlap = false, verdictCalls = 0;
   const verdictOf = async (addr, meta) => {
     verdictCalls++; verdictActive++;
@@ -3202,6 +3303,18 @@ const ethers = globalThis.ethers;
      JSON.stringify(row1 && row1.v));
   ok(doc.checked === 2, "the written report doc must carry the real checked count, got " + doc.checked);
 
+  // ۱۳. metaOf-null هرگز عدد را از دست نمی‌دهد، فقط name را — و name هرگز از
+  // رویِ رشته‌ی نامِ استخر ("PC / WETH 1%") حدس زده نمی‌شود، فقط از meta.name
+  ok(row1 && row1.name === null,
+     "metaOf-null must yield row.name:null, never a name invented from the pool row, got " +
+     JSON.stringify(row1 && row1.name));
+  ok(row1 && row1.priceUsd === 0.001 && row1.vol24hUsd === 500.5 && row1.fdvUsd === 9999.99,
+     "a metaOf-null token must keep priceUsd/vol24hUsd/fdvUsd straight from the pool row, got " +
+     JSON.stringify(row1 && { p: row1.priceUsd, v: row1.vol24hUsd, f: row1.fdvUsd }));
+  const row2 = doc.rows.find((r) => r.address === mkAddr(2));
+  ok(row2 && row2.name === "Token Two",
+     "when metaOf resolves, row.name must come from meta.name, got " + JSON.stringify(row2 && row2.name));
+
   const pairs = JSON.parse(await kv.get(PAIRS_KEY_BASE));
   ok(Array.isArray(pairs) && pairs.length === 2, "both fresh tokens must land in the pairs ring");
 
@@ -3215,9 +3328,11 @@ const ethers = globalThis.ethers;
 
   console.log("[report kv] runReportPass ok — kv:null skips fetchPools entirely (checked 0/added 0), "
     + "a throwing or non-array fetchPools degrades the same way, a metaOf-null token still produces a "
-    + "row with v:null (never nosell), sleep runs once per token at exactly REPORT_PACE_MS with "
-    + "verdictOf calls never overlapping, both KV keys are written with the real checked/added counts, "
-    + "and a second run against the same store skips tokens already in the pairs ring");
+    + "row with v:null (never nosell) and its priceUsd/vol24hUsd/fdvUsd intact from the pool row while "
+    + "name is null (never guessed from the pool's own name string), a metaOf hit carries its name "
+    + "through, sleep runs once per token at exactly REPORT_PACE_MS with verdictOf calls never "
+    + "overlapping, both KV keys are written with the real checked/added counts, and a second run "
+    + "against the same store skips tokens already in the pairs ring");
 }
 
 /* ---- ۲۳. /report/<...>.json و /pairs.json — از رویِ worker.fetch ---- */
@@ -3266,13 +3381,52 @@ const ethers = globalThis.ethers;
   ok(rPairs.headers.get("cache-control") === "public, max-age=300",
      "/pairs.json must be cached 300s at the edge, got " + rPairs.headers.get("cache-control"));
   const rPast = await call("/report/2020-01-01.json", { method: "GET" }, envNoKv);
+  const bPast = await rPast.json();
   ok(rPast.status === 200 && rPast.headers.get("cache-control") === "public, max-age=86400",
      "a past date must be cached 86400s at the edge, got " + rPast.headers.get("cache-control"));
+
+  // ۱۵. 🔴 store — یک بایندینگِ کاملاً غایب باید از یک بایندینگِ بسته-ولی-خالی
+  // از بیرون قابلِ‌تشخیص باشد. سه مسیر، دو حالتِ env: بدونِ ZX_KV → store:false،
+  // با یک KV جعلیِ حاضر (حتی خالی) → store:true. store همیشه آخرین کلید است.
+  for (const [path, body] of [
+    ["/report/today.json", bToday], ["/report/2020-01-01.json", bPast], ["/pairs.json", bPairs],
+  ]) {
+    ok(body.store === false, "without env.ZX_KV, " + path + " must report store:false, got " +
+       JSON.stringify(body.store));
+    const keys = Object.keys(body);
+    ok(keys[keys.length - 1] === "store",
+       path + "'s store must be the last key of the body, got " + JSON.stringify(keys));
+  }
+
+  const fakeKv = { get: async () => null, put: async () => {} };
+  const envWithKv = { ASSETS, ZX_KV: fakeKv };
+  const rTodayKv = await call("/report/today.json", { method: "GET" }, envWithKv);
+  const bTodayKv = await rTodayKv.json();
+  const rDateKv = await call("/report/2020-01-01.json", { method: "GET" }, envWithKv);
+  const bDateKv = await rDateKv.json();
+  const rPairsKv = await call("/pairs.json", { method: "GET" }, envWithKv);
+  const bPairsKv = await rPairsKv.json();
+  for (const [path, body] of [
+    ["/report/today.json", bTodayKv], ["/report/2020-01-01.json", bDateKv], ["/pairs.json", bPairsKv],
+  ]) {
+    ok(body.store === true, "with env.ZX_KV present (even bound to an empty store), " + path +
+       " must report store:true, got " + JSON.stringify(body.store));
+    const keys = Object.keys(body);
+    ok(keys[keys.length - 1] === "store",
+       path + "'s store must be the last key of the body, got " + JSON.stringify(keys));
+  }
+  // یک بایندینگِ حاضر-ولی-خالی و یک بایندینگِ کاملاً غایب باید هر دو rows:[]
+  // بدهند — تنها فرقشان همین store است، نه شکلِ rows.
+  ok(Array.isArray(bTodayKv.rows) && bTodayKv.rows.length === 0 && bTodayKv.store === true,
+     "an empty-but-present KV must still yield rows:[] — store:true here means \"nothing collected "
+     + "yet\", not \"the binding is missing\"");
 
   console.log("[report routes] GET /report/today.json, GET /report/<date>.json and GET /pairs.json "
     + "ok — a missing env.ZX_KV degrades to 200 with an empty doc/ring, never 500; non-GET is 405; an "
     + "unparseable date is 400; an unknown ?chain is 400 while ?chain=solana is accepted and returns "
-    + "an empty ring; today and /pairs.json cache 300s at the edge, a past date caches 86400s");
+    + "an empty ring; today and /pairs.json cache 300s at the edge, a past date caches 86400s; all "
+    + "three routes report store:false with no ZX_KV and store:true with one bound (even empty), "
+    + "always as the response body's last key");
 }
 
 console.log(fails === 0
