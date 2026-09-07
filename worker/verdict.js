@@ -270,6 +270,24 @@ export function decodeQuote(kind, hex) {
    --------------------------------------------------------------------- */
 const PROVEN_NEGATIVE_CODES = new Set([3, -32000]); // بازگشتِ ریوِرت JSON-RPC
 
+/* آیا یک صفر (رمزگشایی‌شده یا "0x" خالی) برای این kind اثباتِ «هیچ استخری
+   نیست» است؟ برای کوترهای شکلِ CL_UINT24/CL_INT24 و روترهای V2، عدم‌وجودِ
+   استخر همیشه ریوِرت می‌کند، پس یک بازگشتِ *موفق* با مقدارِ صفر یا "0x"
+   خودش یعنی «این مسیر امتحان شد و صفر داد» — اثباتی.
+   ولی getAmountsOut به‌سبکِ Solidly (Aerodrome) وقتی استخر وجود ندارد
+   ریوِرت *نمی‌کند*؛ آرامآرام صفر برمی‌گرداند. یعنی «صفر» اینجا با «هیچ‌کاری
+   نکردم» از بیرون یک شکل است — دقیقاً همان تله‌ای که یک توکنِ واقعاً
+   قابلِ‌فروش را روی مسیرِ زنده‌ی سایت «nosell» کرد: هر پروبِ aerodrome
+   (چه key:false چه key:true) روی آن توکن صفرِ رمزگشایی‌شده داد، و کدِ قدیم
+   هر دو را «اثباتِ منفی» می‌شمرد. برای SOLIDLY، صفر/​"0x" هرگز به‌تنهایی
+   اثبات نیست — فقط یک ریوِرتِ کدِ اثباتی (که برای این قرارداد اصلاً معمول
+   نیست، ولی اگر پیش بیاید هنوز اثبات است) کل نتیجه را منفی می‌کند.
+   نگاشت بسته است تا هم این قاعده جایی جز اینجا حدس زده نشود، هم
+   worker/test.mjs بتواند خودِ همین شیء را پین کند. */
+export const VD_ZERO_IS_PROOF = Object.freeze({
+  CL_UINT24: true, CL_INT24: true, V2: true, SOLIDLY: false,
+});
+
 function decodeItemValue(item) {
   if (!item || item.error || typeof item.result !== "string") return null;
   return decodeQuote(item.kind, item.result);
@@ -298,17 +316,30 @@ export function verdictFrom({ canary, items }) {
   if (list.length === 0) return null;
 
   // با کاناریِ زنده و بدون هیچ مثبتی: هرچیزی که «اثبات‌شده منفی» نباشد کل
-  // نتیجه را نامعلوم می‌کند. اثباتی یعنی: ریوِرتِ کدِ ۳ یا -۳۲۰۰۰، یا "0x"
-  // خالی، یا رمزگشاییِ صفر. کدِ دیگرِ خطا یا رمزگشاییِ ناموفق اثباتی نیست.
+  // نتیجه را نامعلوم می‌کند. اثباتی یعنی: ریوِرتِ کدِ ۳ یا -۳۲۰۰۰، یا (فقط
+  // وقتی VD_ZERO_IS_PROOF[kind] راست باشد) "0x" خالی یا رمزگشاییِ صفر.
+  // کدِ دیگرِ خطا، رمزگشاییِ ناموفق، یا صفرِ یک kindِ zero-is-not-proof
+  // اثباتی نیست. یک kindِ غایب/ناشناخته هم هرگز حدس زده نمی‌شود — نامعلوم.
   for (const it of list) {
+    const kind = it && it.kind;
+    const zeroIsProof = Object.prototype.hasOwnProperty.call(VD_ZERO_IS_PROOF, kind)
+      ? VD_ZERO_IS_PROOF[kind] : null;
+    if (zeroIsProof === null) return null; // kindِ نامعتبر → هرگز حدس نزن
+
     if (it && it.error) {
       if (PROVEN_NEGATIVE_CODES.has(it.error.code)) continue;
       return null;
     }
     if (!it || typeof it.result !== "string") return null; // نه نتیجه نه خطا → شکلِ نامعتبر
-    if (it.result === "0x") continue;
+    if (it.result === "0x") {
+      if (zeroIsProof) continue;
+      return null; // SOLIDLY: "0x" اینجا هم می‌تواند یعنی «هیچ استخری نیست» باشد
+    }
     const v = decodeQuote(it.kind, it.result);
-    if (v === 0n) continue;
+    if (v === 0n) {
+      if (zeroIsProof) continue;
+      return null; // SOLIDLY: صفرِ بی‌صدا اثباتِ «فروش نمی‌رود» نیست
+    }
     if (v == null) return null; // رمزگشایی نشد → اثبات نشده
     // v>0 این‌جا دیگر ممکن نیست؛ حلقه‌ی بالا قبلاً بازگشته بود
   }

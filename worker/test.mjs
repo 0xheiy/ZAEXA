@@ -796,6 +796,22 @@ if (!ethersFile) throw new Error("could not find the vendored ethers bundle unde
 createRequire(import.meta.url)(new URL(ethersFile, webDir).pathname);
 const ethers = globalThis.ethers;
 
+/* نگاشتِ id (همان idِ عددیِ eth_call که callBatch در verdict.js می‌سازد —
+   ۰ کاناری است، آیتم‌ها از ۱ شروع می‌شوند) به kind، از رویِ خودِ
+   buildProbe/VD_VENUES ساخته می‌شود — نه یک فهرستِ دستیِ دومِ نامِ صرافی‌ها
+   که اگر VD_VENUES جابه‌جا شود بی‌صدا از هدف جا می‌ماند.
+   ⚠️ چند سناریوی زیر (fetchVerdict روی پروبِ *واقعی*) از این استفاده
+   می‌کنند تا آیتمِ SOLIDLY (aerodrome) را با یک ریوِرتِ کدِ ۳ اثبات کنند،
+   نه با "0x"/صفر — دقیقاً همان استثنایی که VD_ZERO_IS_PROOF اضافه کرد؛
+   بدونِ این تفکیک، یک "0x" برای *همه‌ی* آیتم‌ها (که پیش از این تغییر یک
+   نوسانِ nosellِ کاملاً معتبر بود) حالا در SOLIDLY نامعلوم می‌ماند و کلِ
+   verdict را نامعلوم می‌کند. */
+const PROBE_KIND_BY_ID = new Map(
+  vd.buildProbe("0x1111111111111111111111111111111111111111", vd.WETH_ADDR, 1n)
+    .map((p, i) => [i + 1, vd.VD_VENUES.find((r) => r.id === p.id).kind])
+);
+function isSolidlyReqId(id) { return PROBE_KIND_BY_ID.get(id) === "SOLIDLY"; }
+
 /* --- ۱۲.۱ نگهبانِ سلکتور --- هرچهار سلکتور از رویِ امضای کاملش با
    ethers.id بازمحاسبه می‌شود؛ یک سلکتورِ دستیِ بی‌تست دقیقاً همان کلاس
    باگی است که این مخزن را یک بار گزیده. */
@@ -920,16 +936,19 @@ const ethers = globalThis.ethers;
   }) === null, "a dead canary must make the verdict unknown, even when every item reverted — "
     + "we never call a token unsellable on an endpoint that could not even price WETH→USDC");
 
-  // ج) همه ریوِرت + کاناریِ زنده → nosell
+  // ج) همه ریوِرت + کاناریِ زنده → nosell — SOLIDLY هم اینجا با یک
+  // ریوِرتِ کدِ ۳ اثبات می‌کند (اثباتِ ریوِرت مستقل از kind است)، نه با
+  // صفرِ رمزگشایی‌شده؛ آن یکی جداگانه، در بخشِ «صفرِ بی‌صدای SOLIDLY» پایین‌تر.
   ok(vd.verdictFrom({
     canary: aliveCanary,
     items: [
       { kind: "CL_UINT24", error: { code: 3 } },
       { kind: "CL_INT24", error: { code: -32000 } },
       { kind: "V2", result: "0x" },
-      { kind: "SOLIDLY", result: mkArray([0n]) },
+      { kind: "SOLIDLY", error: { code: 3 } },
     ],
-  }) === "nosell", "all-proven-negative items with a live canary must give nosell");
+  }) === "nosell", "all-proven-negative items with a live canary must give nosell, "
+    + "including a SOLIDLY item that reverted with code 3");
 
   // د) یک کدِ خطای دیگر (نه ۳، نه -۳۲۰۰۰) میانِ ریوِرت‌ها → نامعلوم
   ok(vd.verdictFrom({
@@ -953,9 +972,108 @@ const ethers = globalThis.ethers;
   ok(vd.verdictFrom({ canary: aliveCanary }) === null,
     "a missing items array (defaults to empty) must also be unknown, not nosell");
 
+  /* --- ح تا ل) لایه‌ی اول: صفرِ بی‌صدای SOLIDLY اثبات نیست ---
+     خودِ باگِ زنده: aerodrome (تنها صرافیِ SOLIDLY در جدول) وقتی استخر
+     ندارد ریوِرت نمی‌کند، بی‌صدا صفر برمی‌گرداند — این جفت‌آزمون (ح) دقیقاً
+     همان چیزی است که این لایه باید درست کند. */
+
+  // ح) SOLIDLY، صفرِ رمزگشایی‌شده، کاناری زنده، بدونِ هیچ مثبتی → نامعلوم
+  ok(vd.verdictFrom({
+    canary: aliveCanary,
+    items: [{ kind: "SOLIDLY", result: mkArray([0n]) }],
+  }) === null, "a SOLIDLY item decoding to zero must NOT be a proven negative — it must leave the "
+    + "whole verdict unknown, not nosell (this is the live bug: aerodrome returns 0 instead of "
+    + "reverting when it has no pool for the token)");
+
+  // همان سناریو، فقط kind به V2 عوض شده — این یکی *باید* nosell بدهد، تا
+  // روشن شود تفاوت واقعاً از رویِ VD_ZERO_IS_PROOF[kind] است، نه از رویِ
+  // شکلِ بازگشتی.
+  ok(vd.verdictFrom({
+    canary: aliveCanary,
+    items: [{ kind: "V2", result: mkArray([0n]) }],
+  }) === "nosell", "the exact same decoded-zero payload under kind V2 must still prove nosell — "
+    + "the SOLIDLY exception must come from VD_ZERO_IS_PROOF, not from the payload shape");
+
+  // ط) SOLIDLY با "0x" خالی → همان نامعلوم؛ SOLIDLY با یک ریوِرتِ کدِ ۳
+  // واقعی (نه صفرِ بی‌صدا) کنارِ بقیه‌ی اثباتی‌ها → nosell — ریوِرت هنوز
+  // اثبات است، فقط صفرِ بی‌صدا دیگر نیست.
+  ok(vd.verdictFrom({
+    canary: aliveCanary,
+    items: [{ kind: "SOLIDLY", result: "0x" }],
+  }) === null, "a SOLIDLY item returning an empty \"0x\" must also be unknown, not nosell");
+  ok(vd.verdictFrom({
+    canary: aliveCanary,
+    items: [
+      { kind: "CL_UINT24", error: { code: 3 } },
+      { kind: "SOLIDLY", error: { code: 3 } },
+    ],
+  }) === "nosell", "a SOLIDLY item that actually reverts with code 3 is still proof, even though a "
+    + "decoded zero or \"0x\" from the same kind is not");
+
+  // ي) kindِ غایب/ناشناخته هرگز حدس زده نمی‌شود — نامعلوم، چه ریوِرت باشد
+  // چه یک نتیجه‌ی به‌ظاهر موفق.
+  ok(vd.verdictFrom({
+    canary: aliveCanary,
+    items: [{ result: mkStatic4(0) }], // بدونِ kind
+  }) === null, "an item with no kind at all must never be treated as a proven negative");
+  ok(vd.verdictFrom({
+    canary: aliveCanary,
+    items: [{ kind: "UNKNOWN_DEX_KIND", error: { code: 3 } }],
+  }) === null, "an item with an unrecognised kind must never be treated as a proven negative, "
+    + "even when it reverts with a normally-proving code — never guess");
+
+  // ك) مثبت هنوز همیشه برنده است، حتی کنارِ یک صفرِ SOLIDLY که به‌تنهایی
+  // نامعلوم بود.
+  ok(vd.verdictFrom({
+    canary: aliveCanary,
+    items: [
+      { kind: "SOLIDLY", result: mkArray([0n]) },
+      { kind: "CL_UINT24", result: mkStatic4(42) },
+    ],
+  }) === "sell", "a positive quote must still win even alongside an unproven SOLIDLY zero");
+
+  // ل) VD_ZERO_IS_PROOF بسته است و دقیقاً روی همان kindهایی نشسته که
+  // VD_VENUES واقعاً دارد — نه بیشتر نه کمتر؛ هر دو سو پیموده می‌شود، نه
+  // یک فهرستِ دستیِ دوم.
+  {
+    const venueKinds = new Set(vd.VD_VENUES.map((r) => r.kind));
+    for (const kind of Object.keys(vd.VD_ZERO_IS_PROOF)) {
+      ok(venueKinds.has(kind), "VD_ZERO_IS_PROOF has a kind VD_VENUES never uses: " + kind);
+    }
+    for (const kind of venueKinds) {
+      ok(Object.prototype.hasOwnProperty.call(vd.VD_ZERO_IS_PROOF, kind),
+        "VD_VENUES uses a kind missing from VD_ZERO_IS_PROOF: " + kind);
+    }
+    ok(vd.VD_ZERO_IS_PROOF.SOLIDLY === false, "VD_ZERO_IS_PROOF.SOLIDLY must be false — a "
+      + "Solidly-style getAmountsOut returns 0 instead of reverting when it has no pool");
+    ok(vd.VD_ZERO_IS_PROOF.CL_UINT24 === true && vd.VD_ZERO_IS_PROOF.CL_INT24 === true &&
+      vd.VD_ZERO_IS_PROOF.V2 === true, "the three v3/v2-style kinds must keep zero-is-proof");
+    ok(Object.isFrozen(vd.VD_ZERO_IS_PROOF), "VD_ZERO_IS_PROOF must be frozen");
+  }
+
+  // (پایداریِ رفتار — بندِ ۱۱ از فهرستِ آزمون‌ها) یک senarioِ ساده‌ی sell و
+  // یک all-revert فقط با kindهای v3-style (بدونِ V2، بدونِ SOLIDLY) باید
+  // دقیقاً همان چیزی بدهند که امروز می‌دهند، دست‌نخورده از این تغییر.
+  ok(vd.verdictFrom({
+    canary: aliveCanary,
+    items: [{ kind: "CL_UINT24", result: mkStatic4(42) }],
+  }) === "sell", "an existing plain positive-quote scenario must still verdict sell, unchanged");
+  ok(vd.verdictFrom({
+    canary: aliveCanary,
+    items: [
+      { kind: "CL_UINT24", error: { code: 3 } },
+      { kind: "CL_INT24", error: { code: -32000 } },
+    ],
+  }) === "nosell", "an existing all-revert scenario using only v3-style kinds (no V2, no SOLIDLY) "
+    + "must still verdict nosell, unchanged by the SOLIDLY exception");
+
   console.log("[verdict rules] positive wins; dead canary -> unknown; all-proven-negative -> "
-    + "nosell; an unproven error -> unknown; \"0x\" and zero each proven on their own; an empty "
-    + "probe list -> unknown");
+    + "nosell; an unproven error -> unknown; \"0x\" and zero each proven on their own for "
+    + "zero-is-proof kinds; an empty probe list -> unknown; "
+    + "[VD_ZERO_IS_PROOF] a SOLIDLY zero/\"0x\" is never proof (the live aerodrome bug) while a "
+    + "real SOLIDLY revert still is, an unrecognised/missing kind is never guessed at, positive "
+    + "still wins over an unproven SOLIDLY zero, and the frozen map exactly mirrors VD_VENUES's "
+    + "kinds in both directions");
 }
 
 /* --- ۱۲.۶ sellAmountFrom --- */
@@ -1010,6 +1128,10 @@ const ethers = globalThis.ethers;
   }
 
   // ب) مرحله‌ی A نامعلوم/nosell → مرحله‌ی B مثبت → نتیجه‌ی نهایی sell
+  // ⚠️ آیتمِ SOLIDLY (aerodrome) در مرحله‌ی A با یک ریوِرتِ کدِ ۳ رد می‌شود،
+  // نه "0x" — از وقتی SOLIDLY صفر/​"0x" را اثبات نمی‌داند، یک "0x"ِ یکسان
+  // برای همه‌ی آیتم‌ها خودِ مرحله‌ی A را نامعلوم می‌کرد و هرگز به مرحله‌ی B
+  // نمی‌رسید (دقیقاً همان لایه‌ی اولی که این فایل الان اضافه کرد).
   {
     let calls = 0;
     const fetchImpl = async (url, init) => {
@@ -1018,7 +1140,7 @@ const ethers = globalThis.ethers;
       const isStageB = reqs.some((r) => r.id >= 1 && r.params[0].data.includes(usdcHexLower));
       const body = reqs.map((r) => {
         if (r.id === 0) return { id: 0, result: mkStatic4(5) };
-        if (!isStageB) return { id: r.id, result: "0x" };
+        if (!isStageB) return isSolidlyReqId(r.id) ? { id: r.id, error: { code: 3 } } : { id: r.id, result: "0x" };
         return { id: r.id, result: r.id === 1 ? mkStatic4(999) : "0x" };
       });
       return jsonRes(body);
@@ -1029,6 +1151,8 @@ const ethers = globalThis.ethers;
   }
 
   // ج) اندپوینتِ اول پرتاب می‌کند → اندپوینتِ دوم جواب می‌دهد
+  // ⚠️ همان دلیلِ بالا: SOLIDLY با ریوِرتِ کدِ ۳ رد می‌شود، نه "0x"، وگرنه
+  // نتیجه‌ی هر دو مرحله روی اندپوینتِ دوم نامعلوم می‌شد.
   {
     let calls = 0;
     const rpcs = ["https://rpc-bad.example", "https://rpc-good.example"];
@@ -1036,7 +1160,9 @@ const ethers = globalThis.ethers;
       calls++;
       if (url === rpcs[0]) throw new Error("network is down");
       const reqs = JSON.parse(init.body);
-      const body = reqs.map((r) => r.id === 0 ? { id: 0, result: mkStatic4(5) } : { id: r.id, result: "0x" });
+      const body = reqs.map((r) => r.id === 0
+        ? { id: 0, result: mkStatic4(5) }
+        : isSolidlyReqId(r.id) ? { id: r.id, error: { code: 3 } } : { id: r.id, result: "0x" });
       return jsonRes(body);
     };
     const res = await vd.fetchVerdict(TOKEN, meta, { fetchImpl, rpcs });
@@ -3903,6 +4029,178 @@ const ethers = globalThis.ethers;
     + "rule verified the same way as VD_SOL_WHY); GET /vd/<address>?probe=1 adds a venues array "
     + "end to end while a normal /vd/<address> body stays exactly {v, ms}; an injected RPC URL's path "
     + "and query never leak into the probe log; and ?probe=1 never reads or writes the verdict cache");
+}
+
+/* ---- ۲۶. حفاظِ پوشش‌ِ Base (baseVenueCovered) — لایه‌ی دوم ----
+   مسئله‌ای که این حفاظ برایش ساخته شد بالای worker/index.js توضیح داده
+   شده: حتی با لایه‌ی اول (SOLIDLY دیگر با صفرِ بی‌صدا اثبات نمی‌کند)، یک
+   توکن که استخرهای واقعی‌اش همگی روی صرافی‌هایی هستند که VD_VENUES اصلاً
+   پروب نمی‌کند (مثلِ uniswap-v4-base) هنوز ۱۶ ریوِرتِ اثباتی جمع می‌کند و
+   "nosell" می‌گیرد. یک ریوِرت از صرافی‌ای که اصلاً استخر ندارد اثباتِ
+   هیچ‌چیزی نیست، پس یک nosell حالا باید شاهدِ مثبتِ پوشش هم داشته باشد. */
+{
+  const { baseVenueCovered, GT_DEX_TO_VENUE, UPSTREAM_FREE: UF_COV } = await import("./index.js");
+  const w = (n) => BigInt(n).toString(16).padStart(64, "0");
+  const mkStatic4 = (n) => "0x" + w(n) + w(0) + w(0) + w(0);
+  const jsonRes = (body, status = 200) => new Response(JSON.stringify(body), {
+    status, headers: { "content-type": "application/json" },
+  });
+  const poolsBody = (dexIds) => ({
+    data: dexIds.map((id) => ({ relationships: { dex: { data: { id } } } })),
+  });
+  const ADDR = "0x" + "8".repeat(40);
+  const savedFetch = globalThis.fetch;
+
+  /* --- ۶) baseVenueCovered مستقیم، رویِ یک fetch جعلی --- */
+  {
+    const cases = [
+      ["only uniswap-v4-base (a real dex, but not one VD_VENUES probes)", ["uniswap-v4-base"], false],
+      ["aerodrome-slipstream (mapped to aerodrome-cl, which is covered)", ["aerodrome-slipstream"], true],
+      ["aerodrome-slipstream-2 (deliberately unmapped, not a typo)", ["aerodrome-slipstream-2"], false],
+    ];
+    for (const [label, dexIds, want] of cases) {
+      globalThis.fetch = async () => jsonRes(poolsBody(dexIds));
+      const got = await baseVenueCovered(ADDR, {});
+      ok(got === want, "baseVenueCovered(" + label + ") should be " + want + ", got " + got);
+    }
+
+    globalThis.fetch = async () => new Response("boom", { status: 500 });
+    ok(await baseVenueCovered(ADDR, {}) === null, "a 500 from the pools endpoint must give null, never false");
+
+    globalThis.fetch = async () => { throw new Error("network is down"); };
+    ok(await baseVenueCovered(ADDR, {}) === null, "a thrown fetch must give null, never false");
+
+    globalThis.fetch = async () => jsonRes({ notData: [] });
+    ok(await baseVenueCovered(ADDR, {}) === null, "a body without a data array must give null, never false");
+
+    // نگاشت باید دقیقاً همان هفت idِ اندازه‌گیری‌شده را داشته باشد — نه
+    // بیشتر نه کمتر — و uniswap-v4-base هرگز نباید عضوش شود.
+    const wantIds = ["uniswap-v3-base", "pancakeswap-v3-base", "aerodrome-slipstream",
+      "aerodrome-base", "baseswap", "sushiswap-v2-base", "alien-base"];
+    ok(Object.keys(GT_DEX_TO_VENUE).length === wantIds.length &&
+      wantIds.every((id) => id in GT_DEX_TO_VENUE),
+      "GT_DEX_TO_VENUE must have exactly the seven measured dex ids, got " +
+      JSON.stringify(Object.keys(GT_DEX_TO_VENUE)));
+    ok(!("uniswap-v4-base" in GT_DEX_TO_VENUE),
+      "uniswap-v4-base must never map to a venue — it is a different contract we do not probe");
+    ok(Object.isFrozen(GT_DEX_TO_VENUE), "GT_DEX_TO_VENUE must be frozen");
+  }
+
+  /* --- ۷ و ۸) سرتاسری از رویِ worker.fetch: /vd/<addr> --- */
+  const gtMetaFor = (name) => jsonRes({ data: { attributes: {
+    name, symbol: "GST", total_reserve_in_usd: "1000", decimals: 18, price_usd: "1" } } });
+
+  function allRevertFetch(poolsDexIds) {
+    return async (url, init) => {
+      const u = String(url);
+      if (u.endsWith("/pools")) return jsonRes(poolsBody(poolsDexIds));
+      if (u.startsWith(UF_COV)) return gtMetaFor("Ghost Token");
+      const reqs = JSON.parse(init.body);
+      const body = reqs.map((r) => r.id === 0
+        ? { id: 0, result: mkStatic4(5) } : { id: r.id, error: { code: 3 } });
+      return jsonRes(body);
+    };
+  }
+
+  // همه‌ی پروب‌ها رد می‌شوند، ولی استخرِ واقعی فقط روی uniswap-v4-base است
+  // (پوشش‌داده‌نشده) — nosellِ خام باید به نامعلوم تنزل کند.
+  const ADDR_V4 = "0x" + "9".repeat(40);
+  globalThis.fetch = allRevertFetch(["uniswap-v4-base"]);
+  const resV4 = await call("/vd/" + ADDR_V4, { headers: { "cf-connecting-ip": "203.0.113.201" } });
+  const bodyV4 = await resV4.json();
+  ok(bodyV4.v === null, "an all-revert token whose only real pool is on an unprobed dex "
+    + "(uniswap-v4-base) must answer v:null, never nosell — got " + JSON.stringify(bodyV4));
+
+  // همان دقیقاً همان پروبِ رد‌شده، ولی استخرِ واقعی روی uniswap-v3-base —
+  // پوشش‌داده‌شده، پس nosellِ خام باید سرِ جایش بماند.
+  const ADDR_V3 = "0x" + "a".repeat(40);
+  globalThis.fetch = allRevertFetch(["uniswap-v3-base"]);
+  const resV3 = await call("/vd/" + ADDR_V3, { headers: { "cf-connecting-ip": "203.0.113.202" } });
+  const bodyV3 = await resV3.json();
+  ok(bodyV3.v === "nosell", "the exact same all-revert probe outcome, but with the token's real pool "
+    + "on a covered dex (uniswap-v3-base), must answer nosell — got " + JSON.stringify(bodyV3));
+
+  // (۸) یک verdictِ sell هرگز نباید اندپوینتِ pools را صدا بزند — مثبت
+  // هرگز از رویِ این حفاظ رد نمی‌شود.
+  {
+    const ADDR_SELL = "0x" + "b".repeat(40);
+    let poolsCalls = 0;
+    globalThis.fetch = async (url, init) => {
+      const u = String(url);
+      if (u.endsWith("/pools")) { poolsCalls++; return jsonRes(poolsBody(["uniswap-v3-base"])); }
+      if (u.startsWith(UF_COV)) return gtMetaFor("Sell Token");
+      const reqs = JSON.parse(init.body);
+      const body = reqs.map((r) => r.id === 0
+        ? { id: 0, result: mkStatic4(5) }
+        : { id: r.id, result: r.id === 1 ? mkStatic4(777) : "0x" });
+      return jsonRes(body);
+    };
+    const resSell = await call("/vd/" + ADDR_SELL, { headers: { "cf-connecting-ip": "203.0.113.203" } });
+    const bodySell = await resSell.json();
+    ok(bodySell.v === "sell", "sanity: this scenario should verdict sell (got " + JSON.stringify(bodySell) + ")");
+    ok(poolsCalls === 0, "a sell verdict must never call the pools coverage endpoint at all, got "
+      + poolsCalls + " calls");
+  }
+
+  /* --- ۹) شکستِ خودِ چکِ پوشش (۵۰۰ یا پرتاب) روی یک nosellِ خام → null --- */
+  {
+    const ADDR_500 = "0x" + "c".repeat(40);
+    globalThis.fetch = async (url, init) => {
+      const u = String(url);
+      if (u.endsWith("/pools")) return new Response("boom", { status: 500 });
+      if (u.startsWith(UF_COV)) return gtMetaFor("Fail Token");
+      const reqs = JSON.parse(init.body);
+      const body = reqs.map((r) => r.id === 0 ? { id: 0, result: mkStatic4(5) } : { id: r.id, error: { code: 3 } });
+      return jsonRes(body);
+    };
+    const res500 = await call("/vd/" + ADDR_500, { headers: { "cf-connecting-ip": "203.0.113.204" } });
+    const body500 = await res500.json();
+    ok(body500.v === null, "a 500 from the coverage check on an otherwise-nosell token must degrade "
+      + "to v:null, never nosell — got " + JSON.stringify(body500));
+
+    const ADDR_THROW = "0x" + "d".repeat(40);
+    globalThis.fetch = async (url, init) => {
+      const u = String(url);
+      if (u.endsWith("/pools")) throw new Error("network is down");
+      if (u.startsWith(UF_COV)) return gtMetaFor("Throw Token");
+      const reqs = JSON.parse(init.body);
+      const body = reqs.map((r) => r.id === 0 ? { id: 0, result: mkStatic4(5) } : { id: r.id, error: { code: 3 } });
+      return jsonRes(body);
+    };
+    const resThrow = await call("/vd/" + ADDR_THROW, { headers: { "cf-connecting-ip": "203.0.113.205" } });
+    const bodyThrow = await resThrow.json();
+    ok(bodyThrow.v === null, "a thrown coverage check on an otherwise-nosell token must also degrade "
+      + "to v:null, never nosell — got " + JSON.stringify(bodyThrow));
+  }
+
+  /* --- ۱۰) ?probe=1 خامِ verdict+covered را نگه می‌دارد، /vd همان آدرس گیت‌شده جواب می‌دهد --- */
+  {
+    const ADDR_DIFF = "0x" + "e".repeat(40);
+    globalThis.fetch = allRevertFetch(["uniswap-v4-base"]);
+
+    const resProbe = await call("/vd/" + ADDR_DIFF + "?probe=1", { headers: { "cf-connecting-ip": "203.0.113.206" } });
+    const bodyProbe = await resProbe.json();
+    ok(bodyProbe.v === "nosell", "?probe=1 must keep reporting the RAW verdict, unaffected by the "
+      + "coverage gate — got " + JSON.stringify(bodyProbe));
+    ok(bodyProbe.covered === false, "?probe=1 must expose the raw coverage result too — got " +
+      JSON.stringify(bodyProbe));
+
+    const resNormal = await call("/vd/" + ADDR_DIFF, { headers: { "cf-connecting-ip": "203.0.113.207" } });
+    const bodyNormal = await resNormal.json();
+    ok(bodyNormal.v === null, "a normal /vd on the exact same address must report the GATED verdict "
+      + "(null, because coverage was false) — got " + JSON.stringify(bodyNormal));
+  }
+
+  globalThis.fetch = savedFetch;
+  console.log("[base coverage gate] baseVenueCovered maps a pool's dex id through the frozen "
+    + "seven-entry GT_DEX_TO_VENUE table (uniswap-v4-base and every other unmeasured id stay "
+    + "absent on purpose) and is null (never false) on a non-200, a throw, or a body without a "
+    + "data array; end to end through worker.fetch, an all-revert token with its only real pool "
+    + "on an unprobed dex answers v:null while the identical probe outcome with a covered dex "
+    + "answers nosell; a \"sell\" verdict never calls the pools endpoint at all; a failing coverage "
+    + "check (500 or throw) degrades an otherwise-nosell token to null; and ?probe=1 keeps "
+    + "reporting the raw verdict plus the raw \"covered\" value while a plain /vd on the same "
+    + "address reports the gated one — pinned side by side so the difference is never accidental");
 }
 
 console.log(fails === 0

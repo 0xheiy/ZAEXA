@@ -30,7 +30,7 @@ const UPSTREAM_KEYED = "https://api.coingecko.com/api/v3/onchain";
 
 import { ogTags, ogTitle, pickTokenMeta } from "./og.js";
 import { ogImageResponse } from "./og-image.js";
-import { fetchVerdict } from "./verdict.js";
+import { fetchVerdict, VD_VENUES } from "./verdict.js";
 import { EVM_ADDR, SOL_MINT, chainOf, gtNetworkOf } from "./chains.js";
 import {
   REPORT_DATE_RE, PAIRS_KEY_BASE, reportKey, utcDateOf, emptyReportDoc, runReportPass,
@@ -489,6 +489,78 @@ async function cachedVerdict(cacheKeyPath, computeFn, ctx) {
   }
 }
 
+/* =====================================================================
+   حفاظِ Base — یک "nosell" بدونِ استخرِ پوشش‌داده‌شده اثبات نیست
+   =====================================================================
+   اندازه‌گیریِ زنده: یک توکنِ واقعاً قابلِ‌فروش روی Base «nosell» گرفت چون
+   استخرهای واقعی‌اش روی صرافی‌هایی بودند که VD_VENUES اصلاً پروب نمی‌کند
+   (شش‌تا روی uniswap-v4، یکی روی uniswap-v2) — هر پروب رد شد (چهارتا حتی
+   با صفرِ SOLIDLY، لایه‌ی بالا همین را جدا کرد)، ولی هیچ‌کدام چیزی درباره‌ی
+   *فروش* نگفتند؛ فقط گفتند «من استخر ندارم». یک ریوِرت از صرافی‌ای که
+   اصلاً استخر ندارد اثباتِ هیچ‌چیزی نیست.
+
+   پس یک nosell دیگر به‌تنهایی کافی نیست: باید شاهدِ مثبت هم باشد که
+   دست‌کم یک صرافیِ *پوشش‌داده‌شده* واقعاً برای این توکن استخر دارد.
+
+   این هفت id دقیقاً همان‌هایی‌اند که امروز از خودِ فهرستِ زنده‌ی
+   networks/base/dexes خوانده شدند — اندازه‌گیری‌شده، نه حدسی. هر idِ دیگرِ
+   همان شبکه (از‌جمله uniswap-v4-base، uniswap-v2-base، baseswap-v3،
+   sushiswap-v3-base، alien-base-v3، aerodrome-slipstream-2) عمداً غایب
+   است: قراردادهای دیگری‌اند که ما پروب نمی‌کنیم، پس نبایدِ نگاشت‌شدنشان
+   باید به‌سمتِ «نامعلوم» شکست بخورد، نه به‌سمتِ یک اتهام. */
+export const GT_DEX_TO_VENUE = Object.freeze({
+  "uniswap-v3-base": "uniswap-v3",
+  "pancakeswap-v3-base": "pancake-v3",
+  "aerodrome-slipstream": "aerodrome-cl",
+  "aerodrome-base": "aerodrome",
+  "baseswap": "baseswap",
+  "sushiswap-v2-base": "sushiswap",
+  "alien-base": "alienbase",
+});
+
+/* از رویِ خودِ VD_VENUES ساخته می‌شود — یک فهرستِ دستیِ دومِ idِ صرافی‌ها
+   دقیقاً همان کلاسِ drift است که این فایل جاهای دیگر هم رویش هشدار داده. */
+const VD_VENUE_ID_SET = new Set(VD_VENUES.map((v) => v.id));
+
+/* آیا برای این توکن، دست‌کم یک استخر روی یکی از صرافی‌های *پوشش‌داده‌شده*
+   واقعاً وجود دارد؟ true/false/null — هرگز پرتاب نمی‌کند.
+   همان الگوی upstream/کلید که ogFetchMeta دارد (UPSTREAM_KEYED با هدرِ
+   x-cg-demo-api-key وقتی env.CG_KEY هست، وگرنه UPSTREAM_FREE)، و همان
+   سبکِ سقفِ زمانیِ سخت. */
+async function baseVenueCovered(addr, env) {
+  try {
+    const key = (env && typeof env.CG_KEY === "string" && env.CG_KEY) || "";
+    const target = (key ? UPSTREAM_KEYED : UPSTREAM_FREE) +
+      "/networks/base/tokens/" + addr + "/pools";
+
+    const ac = new AbortController();
+    const timer = setTimeout(() => ac.abort(), OG_TIMEOUT_MS);
+    let up;
+    try {
+      const h = { accept: "application/json" };
+      if (key) h["x-cg-demo-api-key"] = key;
+      up = await fetch(target, { headers: h, signal: ac.signal });
+    } finally {
+      clearTimeout(timer);
+    }
+    if (!up || !up.ok) return null; // غیر-۲۰۰ → نامعلوم، نه false
+
+    const body = await up.json();
+    if (!body || !Array.isArray(body.data)) return null; // شکلِ غیرقابلِ‌اعتماد → نامعلوم
+
+    for (const pool of body.data) {
+      const dexId = pool && pool.relationships && pool.relationships.dex &&
+        pool.relationships.dex.data && pool.relationships.dex.data.id;
+      if (typeof dexId !== "string") continue;
+      const venue = GT_DEX_TO_VENUE[dexId];
+      if (venue && VD_VENUE_ID_SET.has(venue)) return true;
+    }
+    return false; // بدنه سالم بود، ولی هیچ استخری روی یک صرافیِ پوشش‌داده‌شده نبود
+  } catch (e) {
+    return null; // پرتاب (شبکه/مهلت/پارس) → نامعلوم، هرگز false
+  }
+}
+
 /* آیا هنوز جایی این توکن قیمت فروش می‌دهد؟ — سمت سرور، فقط برای همین یک
    جمله‌ی اولِ توضیح؛ Base و سولانا هر دو، از رویِ chainOf(addr).
    ⚠️ برخلافِ ogFetchMeta که فقط از کش می‌خواند، اینجا هم می‌خوانیم هم
@@ -510,11 +582,23 @@ async function ogFetchVerdict(addr, meta, deadlineAt, env, ctx) {
     return v;
   }
   const network = gtNetworkOf(chain) || OG_NETWORK;
-  return cachedVerdict(
+  const raw = await cachedVerdict(
     "/v1/" + network + "/" + addr.toLowerCase(),
     () => fetchVerdict(addr, meta, { deadlineAt, fetchImpl: fetch }),
     ctx,
   );
+
+  /* حفاظِ پوشش — فقط روی Base، و فقط وقتی raw واقعاً "nosell" است. مثبت
+     هرگز از این‌جا رد نمی‌شود (baseVenueCovered اصلاً صدا زده نمی‌شود)، و
+     نامعلوم همان نامعلوم می‌ماند. توجه: raw همان چیزی است که cachedVerdict
+     کش کرد/می‌کند (بدونِ تغییر در منطقِ کش)، پس یک ضربه‌ی کش هم دوباره از
+     همین گیت رد می‌شود — یک "nosell"ِ کش‌شده هرگز بدونِ این چک به بیرون
+     نمی‌رود. */
+  if (chain !== "base" || raw !== "nosell") return raw;
+  const covered = await baseVenueCovered(addr, env);
+  // 🔴 شکستِ خودِ چکِ پوشش (false یا null) هم به نامعلوم تنزل می‌کند —
+  // «نتوانستیم پوشش را بسنجیم» هرگز اجازه‌ی اتهام نیست.
+  return covered === true ? "nosell" : null;
 }
 
 /* env.SOL_RPC — یک RPC اختصاصیِ سولانا، دقیقاً هم‌شکل با env.CG_KEY بالای
@@ -739,10 +823,17 @@ async function diagVerdict(request, url, env, ctx) {
   // گفت» ساخته شده، پس باید مستقیم fetchVerdict را با یک collect تازه صدا
   // بزند، نه از پشتِ کش. هیچ‌چیزی هم در کش نوشته نمی‌شود؛ این یک پروبِ
   // یک‌باره است، نه چیزی که verdictِ بعدیِ همین آدرس را رنگ بزند.
+  // ⚠️ اینجا عمداً همچنان verdictِ خامِ fetchVerdict را گزارش می‌کند، نه
+  // خروجیِ گیت‌شده‌ی ogFetchVerdict — این یک ابزارِ تشخیصی است، باید نشان
+  // بدهد صرافی‌ها واقعاً چه گفتند، نه جوابِ نهایی‌ای که کاربر می‌بیند.
+  // covered دقیقاً همان ورودیِ گیت را از بیرون قابلِ‌دیدن می‌کند — کسی روزی
+  // این تابع را «تعمیر» نکند تا با /vd هم‌رنگ شود؛ آن هم‌رنگی خودِ این
+  // ابزارِ تشخیصی را کور می‌کند.
   if (url.searchParams.get("probe") === "1") {
     const collect = [];
     const v = await fetchVerdict(addr, meta, { deadlineAt: t0 + OG_BUDGET_MS, fetchImpl: fetch, collect });
-    return vdDone(200, { v, ms: Date.now() - t0, venues: collect });
+    const covered = await baseVenueCovered(addr, env);
+    return vdDone(200, { v, ms: Date.now() - t0, venues: collect, covered });
   }
 
   // ⚠️ ماژولِ Base (worker/verdict.js) دست‌نخورده مانده و هیچ why‌ای تولید
@@ -1212,6 +1303,7 @@ export default {
 export { PATH_OK, QUERY_OK, ttlFor, EV_OK, EV_DETAIL_OK, EV_SURFACE_OK, EV_MAX_BODY };
 export { rateOk, rlHits, RL_LIMIT, RL_WINDOW_MS };
 export { OG_NETWORK, OG_TIMEOUT_MS, ogFetchMeta, ogFetchVerdict };
+export { baseVenueCovered };
 export { UPSTREAM_FREE, UPSTREAM_KEYED };
 export { VD_ADDR_RE };
 export { TOKEN_PAGE, solFetchVerdict };
