@@ -11,6 +11,12 @@ import { createHash } from "node:crypto";
 import { OG_PNG_ETAG } from "./og-image.js";
 import fs from "node:fs";
 import { createRequire } from "node:module";
+import {
+  REPORT_MIN_RESERVE_USD, REPORT_MAX_TOKENS_PER_RUN, REPORT_PAIRS_CAP, REPORT_PACE_MS,
+  CHECK_KIND_BY_CHAIN, REPORT_DATE_RE, PAIRS_KEY_BASE,
+  newPoolRowToToken, reportRow, mergeReportDoc, mergePairsRing,
+  utcDateOf, reportKey, emptyReportDoc, runReportPass,
+} from "./report.js";
 
 let fails = 0;
 function ok(cond, what) {
@@ -2965,6 +2971,309 @@ const ethers = globalThis.ethers;
   globalThis.fetch = trackingFetch; // برگرداندنِ موکِ پیش‌فرض برای هرچه بعد از این اجرا می‌شود
 }
 
+/* ---- ۲۱. worker/report.js — ساختِ ردیف‌ها، بدونِ هیچ I/O ----
+   🔴 روی Base رفت‌وبرگشت نداریم؛ worker/verdict.js فقط SELL QUOTE می‌دهد.
+   CHECK_KIND_BY_CHAIN و اینکه reportRow اصلاً پارامتری برای checkKind
+   نمی‌پذیرد این را از رویِ ساختار تضمین می‌کنند، نه از رویِ متنِ دستی — این
+   بخش دقیقاً همان تضمین را می‌سنجد. */
+{
+  // فیکسچرِ واقعی — امروز از خودِ پراکسیِ زنده گرفته شد. هر عدد رشته است؛
+  // یک فیکسچر با literal عددی هیچ‌چیز از Number(...) را نمی‌سنجد.
+  const REAL_POOL_ROW = {
+    id: "base_0x1c63fb92fc15d39f28a07a76bc4c94c37ae26813",
+    type: "pool",
+    attributes: {
+      base_token_price_usd: "0.00105608666453529",
+      base_token_price_native_currency: "0.000000421577885286176",
+      quote_token_price_usd: "2480.03",
+      base_token_price_quote_token: "0.0000004215778853",
+      address: "0x1c63fb92fc15d39f28a07a76bc4c94c37ae26813",
+      name: "PC / WETH 1%",
+      pool_created_at: "2026-09-07T16:47:23Z",
+      fdv_usd: "1056084.154",
+      market_cap_usd: null,
+      price_change_percentage: { m5: "0" },
+      transactions: { m5: { buys: 1, sells: 0, buyers: 1, sellers: 0 } },
+      volume_usd: { h24: "2.48003" },
+      reserve_in_usd: "1035070.5289",
+    },
+    relationships: {
+      base_token: { data: { id: "base_0xb200000000000000000000c573ceb6905ec145da", type: "token" } },
+      quote_token: { data: { id: "base_0x4200000000000000000000000000000000000006", type: "token" } },
+      dex: { data: { id: "uniswap-v3-base", type: "dex" } },
+    },
+  };
+
+  // ۱. فیکسچرِ واقعی → توکنِ قابلِ استفاده
+  const tok = newPoolRowToToken(REAL_POOL_ROW);
+  ok(tok !== null, "the real GeckoTerminal fixture must yield a usable token");
+  ok(tok && tok.address === "0xb200000000000000000000c573ceb6905ec145da",
+     "wrong address parsed from the real fixture: " + (tok && tok.address));
+  ok(tok && tok.reserveUsd === 1035070.5289,
+     "reserve_in_usd (a STRING in the real payload) must be Number()-parsed, got " + (tok && tok.reserveUsd));
+  ok(tok && Math.abs(tok.priceUsd - 0.00105608666453529) < 1e-18,
+     "base_token_price_usd must be Number()-parsed, got " + (tok && tok.priceUsd));
+  ok(tok && tok.poolCreatedAt === "2026-09-07T16:47:23Z", "pool_created_at not carried through");
+  ok(tok && tok.dex === "uniswap-v3-base", "dex id not carried through");
+
+  // ۲. آدرسِ صفر و آستانه‌ی رزرو
+  function withBaseToken(id) {
+    return {
+      attributes: { ...REAL_POOL_ROW.attributes },
+      relationships: {
+        base_token: { data: { id } },
+        dex: REAL_POOL_ROW.relationships.dex,
+      },
+    };
+  }
+  const zeroAddrRow = withBaseToken("base_0x0000000000000000000000000000000000000000");
+  ok(newPoolRowToToken(zeroAddrRow) === null,
+     "the zero address must be rejected even though a live sitemap once listed it");
+
+  function withReserve(reserve) {
+    const row = withBaseToken("base_0x" + "1".repeat(40));
+    row.attributes.reserve_in_usd = reserve;
+    return row;
+  }
+  ok(newPoolRowToToken(withReserve("4999.99")) === null,
+     "reserve just under REPORT_MIN_RESERVE_USD (" + REPORT_MIN_RESERVE_USD + ") must be rejected");
+  ok(newPoolRowToToken(withReserve("5000")) !== null,
+     "reserve exactly at REPORT_MIN_RESERVE_USD must be accepted");
+
+  // ۳. checkKind از رویِ chain — هرگز از رویِ متن
+  const T0 = "2026-09-07T00:00:00.000Z";
+  function baseArgs(extra) {
+    return Object.assign({ address: "0x" + "2".repeat(40), symbol: null, verdict: "sell", checkedAt: T0,
+      poolCreatedAt: null, reserveUsd: 1, dex: null }, extra);
+  }
+  const rowBase = reportRow(baseArgs({ chain: "base" }));
+  const rowSol = reportRow(baseArgs({ chain: "solana", verdict: null }));
+  const rowEth = reportRow(baseArgs({ chain: "ethereum" }));
+  ok(rowBase && rowBase.checkKind === "sell-quote",
+     "a Base row must carry checkKind \"sell-quote\", got " + (rowBase && rowBase.checkKind));
+  ok(rowSol && rowSol.checkKind === "roundtrip",
+     "a Solana row must carry checkKind \"roundtrip\", got " + (rowSol && rowSol.checkKind));
+  ok(rowEth === null, "a chain absent from CHECK_KIND_BY_CHAIN must produce no row at all, got " +
+     JSON.stringify(rowEth));
+
+  // ۴. گاردِ ساختاری: هیچ checkKindِ caller-داده پذیرفته نمی‌شود
+  const spoofed = reportRow(baseArgs({ chain: "base", checkKind: "round trip" }));
+  ok(spoofed !== null && spoofed.checkKind === "sell-quote",
+     "reportRow must ignore a caller-supplied checkKind entirely, got " + (spoofed && spoofed.checkKind));
+  for (const r of [rowBase, rowSol, spoofed]) {
+    ok(r && r.checkKind === CHECK_KIND_BY_CHAIN[r.chain],
+       "every built row must satisfy checkKind === CHECK_KIND_BY_CHAIN[chain]: " + JSON.stringify(r));
+  }
+
+  // ۵. هر ردیفِ تولیدشده: chain/checkKind غیرِ خالی، checkedAt به‌شکلِ ISO
+  for (const r of [rowBase, rowSol]) {
+    ok(typeof r.chain === "string" && r.chain.length > 0, "row.chain must be non-empty");
+    ok(typeof r.checkKind === "string" && r.checkKind.length > 0, "row.checkKind must be non-empty");
+    ok(/^\d{4}-\d{2}-\d{2}T/.test(r.checkedAt), "row.checkedAt must look like ISO-8601: " + r.checkedAt);
+  }
+
+  // ۶. حکمِ null باید null بماند — هرگز به "nosell" تبدیل نشود
+  const rowUnknown = reportRow(baseArgs({ chain: "base", verdict: null }));
+  ok(rowUnknown && rowUnknown.v === null, "a null verdict must survive as null, got " +
+     JSON.stringify(rowUnknown && rowUnknown.v));
+
+  // ۷. mergeReportDoc: اول‌دیده‌شده می‌برد، checked انباشته می‌شود، روزِ
+  //    بدونِ‌یافته هم سندِ کامل است
+  const emptyRun = mergeReportDoc(null, "2026-09-07", [], 5, T0);
+  ok(Array.isArray(emptyRun.rows) && emptyRun.rows.length === 0 && emptyRun.checked === 5,
+     "a day with zero findings must still be a full document: rows [] with the real checked count, " +
+     "got rows.length=" + emptyRun.rows.length + " checked=" + emptyRun.checked);
+
+  const rowA_early = reportRow(baseArgs({ chain: "base", address: "0xaa", verdict: "sell" }));
+  const rowA_late = reportRow(baseArgs({ chain: "base", address: "0xaa", verdict: "nosell" }));
+  const doc1 = mergeReportDoc(null, "2026-09-07", [rowA_early], 1, T0);
+  const doc2 = mergeReportDoc(doc1, "2026-09-07", [rowA_late], 1, T0);
+  ok(doc2.rows.length === 1 && doc2.rows[0].v === "sell",
+     "first-seen wins: a later run must never rewrite an earlier verdict for the same address, got v=" +
+     (doc2.rows[0] && doc2.rows[0].v));
+  ok(doc2.checked === 2, "checked must accumulate across merges, got " + doc2.checked);
+  ok(mergeReportDoc(undefined, "2026-09-07", [], 0, T0).rows.length === 0,
+     "a missing prevDoc must be treated as an empty day, not an error");
+  ok(mergeReportDoc({ garbage: true }, "2026-09-07", [], 0, T0).rows.length === 0,
+     "a malformed prevDoc must be treated as an empty day, not an error");
+
+  // ۸. mergePairsRing: تکرار حذف، تازه اول، سقفِ دقیقِ ۲۰۰
+  function mkAddr(n) { return "0x" + n.toString(16).padStart(40, "0"); }
+  function ringRow(addr) { return { address: addr, v: null }; }
+  const prevRing = Array.from({ length: 190 }, (_, i) => ringRow(mkAddr(1000 + i)));
+  const newRing = Array.from({ length: 20 }, (_, i) => ringRow(mkAddr(i)));
+  newRing[0] = ringRow(mkAddr(1000)); // یک تکراری عمدی با ابتدای prevRing
+  const merged = mergePairsRing(prevRing, newRing, REPORT_PAIRS_CAP);
+  ok(merged.length === REPORT_PAIRS_CAP,
+     "the ring must cap at exactly " + REPORT_PAIRS_CAP + ", got " + merged.length);
+  ok(merged[0].address === newRing[0].address,
+     "newest rows must sort first in the ring");
+  ok(new Set(merged.map((r) => r.address)).size === merged.length,
+     "no address may appear twice in the ring");
+
+  console.log("[report rows] worker/report.js pure functions ok — the real GeckoTerminal fixture "
+    + "(strings, not numeric literals) parses to address/reserveUsd/priceUsd/poolCreatedAt/dex; the "
+    + "zero address and a reserve under $" + REPORT_MIN_RESERVE_USD + " are rejected; checkKind comes "
+    + "only from CHECK_KIND_BY_CHAIN (base -> sell-quote, solana -> roundtrip, ethereum -> null row) "
+    + "and a caller-supplied checkKind is always ignored; every row carries a non-empty chain/checkKind "
+    + "and an ISO checkedAt; a null verdict survives as null, never nosell; mergeReportDoc keeps "
+    + "first-seen verdicts, accumulates checked, and still produces rows:[] on a zero-finding day; "
+    + "mergePairsRing dedupes newest-first and caps at exactly " + REPORT_PAIRS_CAP);
+}
+
+/* ---- ۲۲. runReportPass — با kv/fetchPools/metaOf/verdictOf/sleep جعلی ----
+   این تابع خودش هیچ I/O یا fetch مستقیم ندارد؛ همه‌چیز تزریق می‌شود، پس
+   بدونِ شبکه‌ی واقعی هم رفتارِ کاملش قابلِ سنجیدن است. */
+{
+  function makeKv() {
+    const store = new Map();
+    return {
+      store,
+      get: async (k) => (store.has(k) ? store.get(k) : null),
+      put: async (k, v) => { store.set(k, v); },
+    };
+  }
+  function mkAddr(n) { return "0x" + n.toString(16).padStart(40, "0"); }
+  function poolRow(addr, reserve, price) {
+    return {
+      attributes: { reserve_in_usd: String(reserve), base_token_price_usd: String(price),
+        pool_created_at: "2026-09-07T10:00:00Z" },
+      relationships: { base_token: { data: { id: "base_" + addr } },
+        dex: { data: { id: "uniswap-v3-base" } } },
+    };
+  }
+  const NOW_MS = Date.parse("2026-09-07T12:00:00.000Z");
+
+  // ۹. بدونِ kv، حتی یک فراخوانیِ fetchPools هم روا نیست
+  let fpCalls9 = 0;
+  const res9 = await runReportPass({
+    kv: null,
+    fetchPools: async () => { fpCalls9++; return []; },
+    metaOf: async () => null,
+    verdictOf: async () => null,
+    now: () => NOW_MS,
+    sleep: async () => {},
+  });
+  ok(fpCalls9 === 0, "runReportPass with kv:null must never call fetchPools, got " + fpCalls9 + " calls");
+  ok(res9.checked === 0 && res9.added === 0,
+     "runReportPass with kv:null must return {checked:0, added:0}, got " + JSON.stringify(res9));
+
+  // یک fetchPools که پرتاب می‌کند یا آرایه نمی‌دهد → همان صفر، بدونِ کرش
+  const kvA = makeKv();
+  const resThrow = await runReportPass({
+    kv: kvA, fetchPools: async () => { throw new Error("upstream is down"); },
+    metaOf: async () => null, verdictOf: async () => null, now: () => NOW_MS, sleep: async () => {},
+  });
+  ok(resThrow.checked === 0 && resThrow.added === 0, "a throwing fetchPools must yield {checked:0, added:0}");
+  const resBad = await runReportPass({
+    kv: kvA, fetchPools: async () => ({ not: "an array" }),
+    metaOf: async () => null, verdictOf: async () => null, now: () => NOW_MS, sleep: async () => {},
+  });
+  ok(resBad.checked === 0 && resBad.added === 0, "a non-array fetchPools result must yield {checked:0, added:0}");
+
+  // ۶ + ۱۲. مسیرِ واقعی: دو توکنِ تازه، یکی metaOf-null، پیس/عدم‌همپوشانی
+  const kv = makeKv();
+  const rows = [poolRow(mkAddr(1), 10000, 0.001), poolRow(mkAddr(2), 10000, 0.002)];
+  let sleepCalls = 0; const sleepArgs = [];
+  const sleep = async (ms) => { sleepCalls++; sleepArgs.push(ms); };
+  const metaOf = async (addr) => (addr === mkAddr(1) ? null : { symbol: "T2" });
+  let verdictActive = 0, sawOverlap = false, verdictCalls = 0;
+  const verdictOf = async (addr, meta) => {
+    verdictCalls++; verdictActive++;
+    if (verdictActive > 1) sawOverlap = true;
+    await Promise.resolve();
+    verdictActive--;
+    return addr === mkAddr(1) ? null : "sell";
+  };
+  const res = await runReportPass({ kv, fetchPools: async () => rows, metaOf, verdictOf, now: () => NOW_MS, sleep });
+  ok(res.checked === 2, "two fresh tokens must yield checked:2, got " + res.checked);
+  ok(res.added === 2, "both tokens must produce a row, got added:" + res.added);
+  ok(sleepCalls === 2 && sleepArgs.every((ms) => ms === REPORT_PACE_MS),
+     "sleep must be called once per token with exactly REPORT_PACE_MS, got " + JSON.stringify(sleepArgs));
+  ok(!sawOverlap, "verdictOf calls must never overlap — pacing must be sequential, not parallel");
+  ok(verdictCalls === 2,
+     "verdictOf must be called once per token even when metaOf returned null, got " + verdictCalls);
+
+  const dateStr = utcDateOf(NOW_MS);
+  const doc = JSON.parse(await kv.get(reportKey(dateStr)));
+  const row1 = doc.rows.find((r) => r.address === mkAddr(1));
+  ok(row1 && row1.v === null,
+     "a token whose metaOf returned null must still get a row with v:null, never nosell, got " +
+     JSON.stringify(row1 && row1.v));
+  ok(doc.checked === 2, "the written report doc must carry the real checked count, got " + doc.checked);
+
+  const pairs = JSON.parse(await kv.get(PAIRS_KEY_BASE));
+  ok(Array.isArray(pairs) && pairs.length === 2, "both fresh tokens must land in the pairs ring");
+
+  // دومین اجرا با همان kv: توکن‌های شناخته‌شده دوباره چک نمی‌شوند
+  const res2 = await runReportPass({
+    kv, fetchPools: async () => rows, metaOf, verdictOf, now: () => NOW_MS + 3600000, sleep,
+  });
+  ok(res2.checked === 0 && res2.added === 0,
+     "tokens already in the pairs ring must not be re-checked on the next hourly run, got " +
+     JSON.stringify(res2));
+
+  console.log("[report kv] runReportPass ok — kv:null skips fetchPools entirely (checked 0/added 0), "
+    + "a throwing or non-array fetchPools degrades the same way, a metaOf-null token still produces a "
+    + "row with v:null (never nosell), sleep runs once per token at exactly REPORT_PACE_MS with "
+    + "verdictOf calls never overlapping, both KV keys are written with the real checked/added counts, "
+    + "and a second run against the same store skips tokens already in the pairs ring");
+}
+
+/* ---- ۲۳. /report/<...>.json و /pairs.json — از رویِ worker.fetch ---- */
+{
+  const envNoKv = { ASSETS };
+
+  // ۱۰. بدونِ env.ZX_KV: هیچ‌جا نباید بشکند
+  const rToday = await call("/report/today.json", { method: "GET" }, envNoKv);
+  const bToday = await rToday.json();
+  ok(rToday.status === 200, "GET /report/today.json without ZX_KV must be 200, got " + rToday.status);
+  ok(Array.isArray(bToday.rows) && bToday.rows.length === 0,
+     "without ZX_KV, today's doc must have rows:[], got " + JSON.stringify(bToday.rows));
+  ok(bToday.date === utcDateOf(Date.now()),
+     "today's doc must carry today's UTC date, got " + bToday.date);
+
+  const rPairs = await call("/pairs.json", { method: "GET" }, envNoKv);
+  const bPairs = await rPairs.json();
+  ok(rPairs.status === 200 && Array.isArray(bPairs.rows) && bPairs.rows.length === 0,
+     "GET /pairs.json without ZX_KV must be 200 with rows:[], got " + JSON.stringify(bPairs));
+  ok(bPairs.chain === "base", "GET /pairs.json must default chain to base, got " + bPairs.chain);
+
+  const rPost = await call("/report/today.json", { method: "POST" }, envNoKv);
+  ok(rPost.status === 405, "POST /report/today.json must be 405, got " + rPost.status);
+  ok((await rPost.json()).error === "only GET", "405 body must say only GET");
+
+  const rPostPairs = await call("/pairs.json", { method: "POST" }, envNoKv);
+  ok(rPostPairs.status === 405, "POST /pairs.json must be 405, got " + rPostPairs.status);
+
+  const rBadDate = await call("/report/nope.json", { method: "GET" }, envNoKv);
+  ok(rBadDate.status === 400, "GET /report/nope.json must be 400, got " + rBadDate.status);
+  ok((await rBadDate.json()).error === "bad date", "bad date body must say bad date");
+
+  const rBadChain = await call("/pairs.json?chain=doge", { method: "GET" }, envNoKv);
+  ok(rBadChain.status === 400, "GET /pairs.json?chain=doge must be 400, got " + rBadChain.status);
+  ok((await rBadChain.json()).error === "bad chain", "bad chain body must say bad chain");
+
+  const rSolChain = await call("/pairs.json?chain=solana", { method: "GET" }, envNoKv);
+  const bSolChain = await rSolChain.json();
+  ok(rSolChain.status === 200 && Array.isArray(bSolChain.rows) && bSolChain.rows.length === 0,
+     "?chain=solana must be accepted today and simply return an empty ring, got " +
+     JSON.stringify(bSolChain));
+
+  // ۱۱. عمرِ کش: امروز/تازه‌ها ۵ دقیقه، روزِ گذشته ۲۴ ساعت
+  ok(rToday.headers.get("cache-control") === "public, max-age=300",
+     "today's report must be cached 300s at the edge, got " + rToday.headers.get("cache-control"));
+  ok(rPairs.headers.get("cache-control") === "public, max-age=300",
+     "/pairs.json must be cached 300s at the edge, got " + rPairs.headers.get("cache-control"));
+  const rPast = await call("/report/2020-01-01.json", { method: "GET" }, envNoKv);
+  ok(rPast.status === 200 && rPast.headers.get("cache-control") === "public, max-age=86400",
+     "a past date must be cached 86400s at the edge, got " + rPast.headers.get("cache-control"));
+
+  console.log("[report routes] GET /report/today.json, GET /report/<date>.json and GET /pairs.json "
+    + "ok — a missing env.ZX_KV degrades to 200 with an empty doc/ring, never 500; non-GET is 405; an "
+    + "unparseable date is 400; an unknown ?chain is 400 while ?chain=solana is accepted and returns "
+    + "an empty ring; today and /pairs.json cache 300s at the edge, a past date caches 86400s");
+}
 
 console.log(fails === 0
   ? "[gt proxy] worker ok — " + REAL.length + " real paths proxied, " + BAD.length +

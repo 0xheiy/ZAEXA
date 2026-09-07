@@ -33,6 +33,9 @@ import { ogImageResponse } from "./og-image.js";
 import { fetchVerdict } from "./verdict.js";
 import { EVM_ADDR, SOL_MINT, chainOf, gtNetworkOf } from "./chains.js";
 import {
+  REPORT_DATE_RE, PAIRS_KEY_BASE, reportKey, utcDateOf, emptyReportDoc, runReportPass,
+} from "./report.js";
+import {
   fetchVerdictSol, VD_SOL_RPCS, VD_SOL_JUP_BASE, VD_SOL_PAYER,
   VD_SOL_RPC_METHODS, VD_SOL_RPC_PROBE_PARAMS, probeRpcMethod,
 } from "./verdict_sol.js";
@@ -933,6 +936,113 @@ async function sitemapResponse(url, env, ctx) {
   return res;
 }
 
+/* =====================================================================
+   /report/<...>.json و /pairs.json — دو نمای همان یک انبار
+   =====================================================================
+   worker/report.js تصمیم می‌گیرد سند چه شکلی است؛ اینجا فقط مسیر و سقفِ
+   کش و رفتارِ «بدونِ KV نشکن» هستند. هر سه مسیر بستهٔ نرخِ خودشان را دارند
+   («report»، جدا از ev/gt/vd/og) تا کاوش روی این سه سهمیهٔ بقیه را نخورد. */
+
+async function reportDocFor(env, dateStr) {
+  const kv = env && env.ZX_KV;
+  if (!kv) return emptyReportDoc(dateStr); // بایندینگ نبود → سایت نباید بشکند، فقط سندِ خالی
+  try {
+    const raw = await kv.get(reportKey(dateStr));
+    if (typeof raw !== "string") return emptyReportDoc(dateStr);
+    const parsed = JSON.parse(raw);
+    if (!parsed || !Array.isArray(parsed.rows)) return emptyReportDoc(dateStr);
+    return parsed;
+  } catch (e) {
+    // 🔴 خواندنِ KV پرتاب کرد یا JSON خراب بود — همان «سندِ خالی»، هرگز ۵۰۰
+    return emptyReportDoc(dateStr);
+  }
+}
+
+async function pairsRowsFor(env, chain) {
+  // میدانِ chain همین امروز هم می‌پذیرد «solana» و فقط حلقه‌ی خالی می‌دهد —
+  // تا افزودنِ سولانا فردا هیچ مهاجرتِ شکلِ داده‌ای نخواهد.
+  if (chain === "solana") return [];
+  const kv = env && env.ZX_KV;
+  if (!kv) return [];
+  try {
+    const raw = await kv.get(PAIRS_KEY_BASE);
+    if (typeof raw !== "string") return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch (e) {
+    return [];
+  }
+}
+
+async function reportRoute(request, url, env) {
+  // همیشه اولین خط — همان قاعده‌ای که /ev و /gt و /vd دارند.
+  if (!rateOk(request, "report", RL_LIMIT, RL_WINDOW_MS))
+    return vdDone(429, { error: "too many requests" }, { "retry-after": "60" });
+  if (request.method !== "GET") return vdDone(405, { error: "only GET" });
+
+  const rest = url.pathname.slice("/report/".length);
+  const isToday = rest === "today.json";
+  const datePart = rest.endsWith(".json") ? rest.slice(0, -".json".length) : rest;
+  if (!isToday && !REPORT_DATE_RE.test(datePart)) return vdDone(400, { error: "bad date" });
+
+  const dateStr = isToday ? utcDateOf(Date.now()) : datePart;
+  const doc = await reportDocFor(env, dateStr);
+  // امروز زود عوض می‌شود (اجرای ساعتی بعدی)، روزِ گذشته دیگر هرگز عوض
+  // نمی‌شود — عمرِ کش هم همین تفاوت را باید نشان بدهد.
+  const cacheControl = isToday ? "public, max-age=300" : "public, max-age=86400";
+  return vdDone(200, doc, { "cache-control": cacheControl });
+}
+
+async function pairsRoute(request, url, env) {
+  if (!rateOk(request, "report", RL_LIMIT, RL_WINDOW_MS))
+    return vdDone(429, { error: "too many requests" }, { "retry-after": "60" });
+  if (request.method !== "GET") return vdDone(405, { error: "only GET" });
+
+  const chain = url.searchParams.get("chain") || "base";
+  if (chain !== "base" && chain !== "solana") return vdDone(400, { error: "bad chain" });
+
+  const rows = await pairsRowsFor(env, chain);
+  return vdDone(200, { chain, rows }, { "cache-control": "public, max-age=300" });
+}
+
+/* بدنه‌ی scheduled — تابعِ جداگانه تا worker/test.mjs بتواند بدونِ ساختنِ
+   یک event واقعیِ کرون آن را صدا بزند، همان الگویی که sitemapResponse و
+   diagVerdict برای تست‌پذیریِ handlerهای دیگر دنبال می‌کنند. */
+async function scheduledReportPass(env, ctx) {
+  try {
+    // بدونِ KV، حتی یک تماسِ بالادست هم روا نیست — همان گاردِ اولِ
+    // runReportPass، اینجا هم پیش از ساختنِ fetchPools تکرار می‌شود.
+    if (!env || !env.ZX_KV) return { checked: 0, added: 0 };
+
+    const fetchPools = async () => {
+      try {
+        const key = (env && typeof env.CG_KEY === "string" && env.CG_KEY) || "";
+        const target = (key ? UPSTREAM_KEYED : UPSTREAM_FREE) + "/networks/base/new_pools";
+        const h = { accept: "application/json" };
+        if (key) h["x-cg-demo-api-key"] = key;
+        const up = await fetch(target, { headers: h });
+        if (!up.ok) return [];
+        const body = await up.json();
+        if (!body || !Array.isArray(body.data)) return [];
+        return body.data;
+      } catch (e) {
+        return []; // همان قاعده‌ی fetchSitemapPoolsPage: بالادستِ نامعتبر یعنی «چیزی نداریم»
+      }
+    };
+
+    return await runReportPass({
+      kv: env.ZX_KV,
+      fetchPools,
+      metaOf: (addr) => ogFetchMeta(addr, env),
+      verdictOf: (addr, meta) => ogFetchVerdict(addr, meta, Date.now() + OG_BUDGET_MS, env, ctx),
+      now: () => Date.now(),
+      sleep: (ms) => new Promise((r) => setTimeout(r, ms)),
+    });
+  } catch (e) {
+    return { checked: 0, added: 0 }; // یک اجرای زمان‌بندی‌شده هرگز نباید پرتاب کند
+  }
+}
+
 export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
@@ -943,6 +1053,13 @@ export default {
        به کد برسد، نه به فایل‌های ثابت. */
     if (url.pathname === "/vd" || url.pathname.startsWith("/vd/"))
       return diagVerdict(request, url, env, ctx);
+    /* گزارشِ روزانه و نمای «تازه‌ها». نه فایل‌اند، نه بایندینگ ASSETS، پس
+       باید مثلِ /gt و /ev و /vd همیشه به کد برسند — همان دلیلی که پایین‌تر
+       برای robots.txt/sitemap.xml هم تکرار شده: خط Build در پنل فقط
+       html/js/_headers را کپی می‌کند، پس یک مسیرِ تازه باید از همین‌جا سرو
+       شود، نه از `_site`، وگرنه بی‌صدا ۴۰۴ می‌گرفت. */
+    if (url.pathname.startsWith("/report/")) return reportRoute(request, url, env);
+    if (url.pathname === "/pairs.json") return pairsRoute(request, url, env);
     /* تصویر کارت. عمداً در `_site` نیست، پس همیشه به کد می‌رسد — مثل /gt و
        /ev. یعنی برای اضافه‌شدنش لازم نیست کسی Build command را در پنل عوض
        کند، و انتشارش با خودِ کد اتمیک است. */
@@ -1023,6 +1140,15 @@ export default {
     if (env && env.ASSETS) return env.ASSETS.fetch(request);
     return new Response("not found", { status: 404 });
   },
+
+  // اجرای ساعتیِ کرون (wrangler.toml، [triggers]). بدنه‌ی واقعی در
+  // scheduledReportPass است تا worker/test.mjs بتواند بدونِ event واقعیِ
+  // کرون آن را صدا بزند.
+  async scheduled(event, env, ctx) {
+    const p = scheduledReportPass(env, ctx);
+    if (ctx && typeof ctx.waitUntil === "function") ctx.waitUntil(p);
+    else await p;
+  },
 };
 
 // برای تست‌ها — در زمان اجرا روی Worker استفاده نمی‌شود.
@@ -1033,3 +1159,4 @@ export { UPSTREAM_FREE, UPSTREAM_KEYED };
 export { VD_ADDR_RE };
 export { TOKEN_PAGE, solFetchVerdict };
 export { SITEMAP_TOKEN_PAGES, SITEMAP_TOKEN_CAP, sitemapResponse, buildSitemapTokens };
+export { reportRoute, pairsRoute, scheduledReportPass };
