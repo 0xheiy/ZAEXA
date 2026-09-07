@@ -2792,6 +2792,11 @@ const ethers = globalThis.ethers;
      + "modify or redistribute this code, and permitting training contradicted it. Owner's "
      + "decision, 7 September 2026 — do not flip it back without asking.");
 
+  // این فراخوانی عمداً پیش از هر جعلِ globalThis.fetch/caches در بخشِ بعدی
+  // است، پس روی همان trackingFetch پیش‌فرض می‌رود؛ همینجا فقط شکلِ کلیِ
+  // پاسخ سنجیده می‌شود، نه رفتارِ توکن‌ها — آن رفتار بخشِ اختصاصیِ خودش را
+  // زیر همین کامنت دارد.
+  reply = new Response("nope", { status: 500 }); // بالادستِ توکن‌ها هم خراب باشد، قابلِ پیش‌بینی بماند
   const sm = await call("/sitemap.xml");
   const xml = await sm.text();
   ok(sm.status === 200, "GET /sitemap.xml must be 200, got " + sm.status);
@@ -2800,9 +2805,164 @@ const ethers = globalThis.ethers;
   ok(xml.startsWith("<?xml"), "sitemap must start with an XML declaration");
   ok(xml.includes("<loc>" + ORIGIN + "/</loc>") && xml.includes("<loc>" + ORIGIN + "/app</loc>"),
      "sitemap must list the landing page and the app");
-  ok(!/\/t\//.test(xml),
-     "sitemap must not enumerate /t/<address> pages: they are unbounded and a hand-kept list "
-     + "of 'important' tokens is exactly what drifts silently in this repo");
+}
+
+/* ---- sitemap.xml — صفحه‌های /t/<آدرس> از رویِ networks/base/pools ----
+   ⚠️ اینجا هم globalThis.fetch هم globalThis.caches جعل می‌شوند — سایت‌مپ
+   هم به بالادست می‌زند هم روی کشِ لبه می‌نشیند. هر سناریو کشِ خودش را تازه
+   می‌سازد تا هیت/میسِ یک سناریو رویِ سناریوی بعدی اثر نگذارد. */
+{
+  const smIndex = await import("./index.js");
+  const { SITEMAP_TOKEN_CAP, SITEMAP_TOKEN_PAGES } = smIndex;
+
+  function mkAddr(n) { return "0x" + n.toString(16).padStart(40, "0"); }
+  function poolRow(addr, reserve) {
+    return {
+      attributes: { reserve_in_usd: reserve },
+      relationships: { base_token: { data: { id: "base_" + addr } } },
+    };
+  }
+  function pageResponse(rows) {
+    return new Response(JSON.stringify({ data: rows }),
+      { status: 200, headers: { "content-type": "application/json" } });
+  }
+  function freshCacheStore() {
+    const shelf = new Map();
+    return { default: {
+      match: async (req) => { const v = shelf.get(req.url); return v ? v.clone() : undefined; },
+      put: async (req, r) => { shelf.set(req.url, r); },
+    } };
+  }
+  function pageOf(u) { return Number(new URL(String(u)).searchParams.get("page")); }
+
+  /* ---- الف) موفق: ردیف‌های ناقص دورریخته، تکرار یک‌بار، ترتیبِ حجم حفظ، سقفِ ۵۰ ---- */
+  const SOL_LOOKALIKE = "So11111111111111111111111111111111111111112"; // شکلِ سولانا، نه Base
+  const page1Rows = [];
+  for (let i = 1; i <= 15; i++) page1Rows.push(poolRow(mkAddr(i), "1000"));
+  page1Rows.push(poolRow(mkAddr(9001), "0"));            // رزرو صفر
+  page1Rows.push(poolRow(mkAddr(9002), null));           // رزرو غایب
+  page1Rows.push(poolRow(mkAddr(9003), ""));              // رزرو خالی
+  page1Rows.push(poolRow(mkAddr(9004), "not-a-number"));  // رزرو غیرِ عددی
+  page1Rows.push({ attributes: { reserve_in_usd: "500" },
+    relationships: { base_token: { data: { id: "base_" + SOL_LOOKALIKE } } } }); // زنجیره‌ی غیرِ Base
+
+  const page2Rows = [];
+  for (let i = 16; i <= 35; i++) page2Rows.push(poolRow(mkAddr(i), "500"));
+
+  const page3Rows = [];
+  for (let i = 36; i <= 52; i++) page3Rows.push(poolRow(mkAddr(i), "250"));
+  page3Rows.push(poolRow(mkAddr(1), "999"));   // تکراریِ صفحه‌ی ۱
+  page3Rows.push(poolRow(mkAddr(16), "999"));  // تکراریِ صفحه‌ی ۲
+  page3Rows.push(poolRow(mkAddr(36), "999"));  // تکراریِ همین صفحه
+
+  let smCalls = 0;
+  globalThis.caches = freshCacheStore();
+  globalThis.fetch = async (u) => {
+    smCalls++;
+    const p = pageOf(u);
+    if (p === 1) return pageResponse(page1Rows);
+    if (p === 2) return pageResponse(page2Rows);
+    if (p === 3) return pageResponse(page3Rows);
+    return pageResponse([]);
+  };
+
+  let res = await call("/sitemap.xml");
+  const coldCalls = smCalls;
+  const xml = await res.text();
+  ok(res.status === 200, "sitemap with a healthy upstream must be 200, got " + res.status);
+  ok(res.headers.get("cache-control") === "public, max-age=86400",
+     "a successfully built sitemap must be cached 24h at the edge, got: " +
+     res.headers.get("cache-control"));
+  ok(xml.startsWith("<?xml"), "sitemap must start with an XML declaration");
+  ok((xml.match(/<urlset/g) || []).length === 1,
+     "sitemap must carry exactly one <urlset>: " + xml.slice(0, 120));
+
+  const locs = Array.from(xml.matchAll(/<loc>([^<]+)<\/loc>/g)).map((m) => m[1]);
+  ok(locs[0] === ORIGIN + "/" && locs[1] === ORIGIN + "/app",
+     "the two static pages must come first, got: " + JSON.stringify(locs.slice(0, 2)));
+  const tokenLocs = locs.slice(2);
+  ok(tokenLocs.length === SITEMAP_TOKEN_CAP,
+     "token URLs must be capped at " + SITEMAP_TOKEN_CAP + ", got " + tokenLocs.length);
+  const TOKEN_LOC_RE = new RegExp("^" + ORIGIN + "/t/0x[0-9a-fA-F]{40}$");
+  ok(tokenLocs.every((l) => TOKEN_LOC_RE.test(l)),
+     "every token URL must match /t/0x<40 hex>: " +
+     JSON.stringify(tokenLocs.filter((l) => !TOKEN_LOC_RE.test(l))));
+  ok(new Set(locs).size === locs.length, "no <loc> may appear twice in the sitemap");
+  ok(tokenLocs[0] === ORIGIN + "/t/" + mkAddr(1) &&
+     tokenLocs[tokenLocs.length - 1] === ORIGIN + "/t/" + mkAddr(SITEMAP_TOKEN_CAP),
+     "token order must follow upstream volume order and stop exactly at the cap, got first/last: " +
+     tokenLocs[0] + " / " + tokenLocs[tokenLocs.length - 1]);
+  ok(!xml.includes(mkAddr(51)) && !xml.includes(mkAddr(52)),
+     "addresses beyond the " + SITEMAP_TOKEN_CAP + "-token cap must not appear even though the "
+     + "upstream returned them");
+  ok(!xml.includes(mkAddr(9001)) && !xml.includes(mkAddr(9002)) &&
+     !xml.includes(mkAddr(9003)) && !xml.includes(mkAddr(9004)),
+     "a pool with reserve_in_usd of 0/null/\"\"/a non-numeric string must never reach the sitemap");
+  ok(!xml.includes(SOL_LOOKALIKE),
+     "a pool whose base token id is not a Base address must never reach the sitemap");
+  ok(coldCalls === SITEMAP_TOKEN_PAGES,
+     "a cold sitemap build should make exactly " + SITEMAP_TOKEN_PAGES + " upstream calls (one per "
+     + "page), got " + coldCalls);
+
+  // ب) گرم: همان کشِ لبه، بدونِ حتی یک فراخوانیِ تازه
+  smCalls = 0;
+  const res2 = await call("/sitemap.xml");
+  const xml2 = await res2.text();
+  ok(smCalls === 0,
+     "a warm sitemap request served from the edge cache must touch the upstream zero times, got " +
+     smCalls + " calls");
+  ok(xml2 === xml, "a cached sitemap must be served byte-identical on the next request");
+
+  console.log("[sitemap tokens] up to " + SITEMAP_TOKEN_PAGES + " pages of networks/base/pools feed "
+    + "/t/<address> entries after the two static pages: reserve_in_usd of 0/null/\"\"/non-numeric "
+    + "and a non-Base token id are all dropped without breaking the rest of the file, duplicates "
+    + "across pools collapse to one, order follows upstream volume and stops exactly at " +
+    SITEMAP_TOKEN_CAP + ", no <loc> repeats, a cold build makes exactly " + SITEMAP_TOKEN_PAGES +
+    " upstream calls and a warm one (edge-cached, 24h) makes none");
+
+  /* ---- ج) بالادست شکست می‌خورد: ۵۰۰، پرتاب، یا {} بدون‌شکل — هر سه فقط دو
+     URL ثابت می‌دهند، با عمرِ کوتاه، و هرگز کش نمی‌شوند ---- */
+  async function checkSitemapFallback(label, makeFetchImpl) {
+    let calls = 0;
+    globalThis.caches = freshCacheStore();
+    globalThis.fetch = makeFetchImpl(() => { calls++; });
+
+    const r1 = await call("/sitemap.xml");
+    const body1 = await r1.text();
+    ok(r1.status === 200, "sitemap must stay 200 when " + label + " (got " + r1.status + ")");
+    const ls1 = Array.from(body1.matchAll(/<loc>([^<]+)<\/loc>/g)).map((m) => m[1]);
+    ok(ls1.length === 2 && ls1[0] === ORIGIN + "/" && ls1[1] === ORIGIN + "/app",
+       "when " + label + ", sitemap must carry exactly the two static URLs, got: " + JSON.stringify(ls1));
+    ok(r1.headers.get("cache-control") === "public, max-age=300",
+       "a failed sitemap build must be cached briefly at the edge (not 86400), got: " +
+       r1.headers.get("cache-control"));
+    const callsAfterFirst = calls;
+    ok(callsAfterFirst > 0, "sitemap must actually attempt the upstream when " + label);
+
+    const r2 = await call("/sitemap.xml");
+    ok(r2.status === 200, "a second failing sitemap request must still be 200 (got " + r2.status + ")");
+    ok(calls > callsAfterFirst,
+       "a failed sitemap build must never be cached — a second request must hit the upstream again, "
+       + "when " + label + " (calls: " + callsAfterFirst + " -> " + calls + ")");
+    console.log("[sitemap fallback] " + label + " -> 200 with exactly the two static URLs, a short "
+      + "cache-control, and never cached at the edge (the very next request tries the upstream again)");
+  }
+
+  await checkSitemapFallback("the upstream answers 500", (bump) => async () => {
+    bump();
+    return new Response("boom", { status: 500 });
+  });
+  await checkSitemapFallback("the upstream throws", (bump) => async () => {
+    bump();
+    throw new Error("network is down");
+  });
+  await checkSitemapFallback("the upstream returns {}", (bump) => async () => {
+    bump();
+    return new Response("{}", { status: 200, headers: { "content-type": "application/json" } });
+  });
+
+  delete globalThis.caches;
+  globalThis.fetch = trackingFetch; // برگرداندنِ موکِ پیش‌فرض برای هرچه بعد از این اجرا می‌شود
 }
 
 
@@ -2831,8 +2991,13 @@ console.log(fails === 0
     + "body, checked both against an injected fetchImpl and end to end through worker.fetch\n" +
     "[robots] /robots.txt and /sitemap.xml are served by the Worker, not from _site (the "
     + "panel build line copies only html/js/_headers, so a .txt or .xml beside index.html "
-    + "would never ship): the whole site is allowed, no crawler is singled out, the sitemap "
-    + "is pointed at, and /t/<address> pages are deliberately not enumerated"
+    + "would never ship): the whole site is allowed, no crawler is singled out, and the "
+    + "sitemap is pointed at\n" +
+    "[sitemap tokens] the sitemap's long tail: up to 3 pages of networks/base/pools feed "
+    + "/t/<address> entries after the two always-first static pages, filtered, deduped, capped "
+    + "at 50 and ordered by upstream volume; a failed or unusable upstream (500, a thrown fetch, "
+    + "or an unparseable body) degrades to exactly the two static URLs with a short cache-control "
+    + "and is never cached at the edge, while a successful build is cached 24h"
 
   : "[gt proxy] " + fails + " FAILURES");
 process.exit(fails === 0 ? 0 : 1);

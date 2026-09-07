@@ -787,25 +787,150 @@ function robotsResponse() {
   });
 }
 
-/* sitemap.xml — فقط صفحه‌هایی که واقعاً وجود دارند و ثابت‌اند.
-   ⚠️ صفحه‌های `/t/<آدرس>` عمداً این‌جا نیستند. تعدادشان بی‌کران است (هر
-   آدرسی یک صفحه است)، و فهرستِ دستیِ «توکن‌های مهم» دقیقاً همان چیزی است
-   که در این پروژه بارها بی‌صدا drift کرده. کشفشان از راهِ لینکی است که
-   کاربر به اشتراک می‌گذارد — همان کاری که کارتِ پیش‌نمایش برایش ساخته شد. */
-function sitemapResponse(url) {
-  const origin = url.origin;
-  const paths = ["/", "/app"];
-  const body =
+/* sitemap.xml — دو صفحه‌ی همیشگی («/» و «/app») به‌علاوه‌ی صفحه‌های
+   `/t/<آدرس>` — همان دنباله‌ی بلندِ جست‌وجو («فلان توکن هانی‌پات است؟»،
+   «می‌شود فلان را فروخت؟») که سرورساید با عنوان و رقمِ واقعیِ همان توکن
+   رندر می‌شود، پس واقعاً قابلِ ایندکس است؛ فقط تا امروز هیچ‌جا فهرست
+   نمی‌شد. فهرستِ دستیِ «توکن‌های مهم» دقیقاً همان چیزی است که در این پروژه
+   بارها بی‌صدا drift کرده، پس منبعِ توکن‌ها خودِ GeckoTerminal است:
+   استخرهای Base به‌ترتیبِ حجمِ ۲۴ساعته، از رویِ همان پراکسیِ کلیددار که
+   proxyGt/ogFetchMeta هم به کار می‌برند.
+
+   ⚠️ چرا صفحه‌های ۱ تا ۳ (حداکثر ۶۰ استخر، حداکثر ۳ فراخوانیِ بالادست) و نه
+   مثلاً ۵۰۰۰ آدرس: ۵۰۰۰ یعنی ۲۵۰ فراخوانیِ بالادست روی یک کلیدِ مشترک، برای
+   فایلی که کراولرها مکرراً دوباره می‌گیرند — دقیقاً همان مصرفی که proxyGt
+   برای *کاربر* حل کرده بود را اینجا خودمان بازتولید می‌کردیم. */
+const SITEMAP_TOKEN_PAGES = 3;
+const SITEMAP_TOKEN_CAP = 50;
+
+/* میزبانِ خصوصیِ کشِ سایت‌مپ — دقیقاً همان تکنیکِ VD_CACHE_HOST بالاتر: هیچ‌جا
+   واقعاً درخواست نمی‌رود، فقط کلیدِ Cache API است، و عمداً از میزبانِ واقعیِ
+   بالادست جداست تا کلیدش هرگز با یک ورودیِ کشِ /gt برخورد نکند. */
+const SITEMAP_CACHE_HOST = "zaexa-sitemap.internal";
+const SITEMAP_CACHE_PATH = "/tokens";
+
+/* یک صفحه از networks/base/pools — بدونِ هیچ فرضی روی شکلِ پاسخ. اگر بدنه
+   آرایه‌ی data نداشته باشد یعنی «قابلِ استفاده نیست»، دقیقاً هم‌ردیفِ ۴۰۴/۵۰۰:
+   کالر باید هر دو را یک‌جور شکست بداند. */
+async function fetchSitemapPoolsPage(page, env) {
+  const key = (env && typeof env.CG_KEY === "string" && env.CG_KEY) || "";
+  const target = (key ? UPSTREAM_KEYED : UPSTREAM_FREE) +
+    "/networks/base/pools?page=" + page;
+  const h = { accept: "application/json" };
+  if (key) h["x-cg-demo-api-key"] = key;
+  const up = await fetch(target, { headers: h });
+  if (!up.ok) throw new Error("sitemap upstream status " + up.status);
+  const body = await up.json();
+  if (!body || !Array.isArray(body.data)) throw new Error("sitemap upstream: unusable body");
+  return body.data;
+}
+
+/* یک ردیفِ استخر → آدرسِ توکنِ پایه، یا null. هر فیلد «نامعتمد» است — از
+   بالادستی می‌آید که کنترلش دستِ ما نیست — پس یک ردیفِ عجیب فقط خودش را رد
+   می‌کند، نه کل فایل را می‌شکند. */
+function sitemapTokenFromPool(row) {
+  try {
+    const rawId = row && row.relationships && row.relationships.base_token &&
+      row.relationships.base_token.data && row.relationships.base_token.data.id;
+    if (typeof rawId !== "string") return null;
+    const addr = rawId.replace(/^base_/, "");
+    if (chainOf(addr) !== "base") return null; // شکلِ دیگر یا زنجیره‌ی دیگر → دور ریخته می‌شود، نه گزارش
+
+    // reserve_in_usd گم/غیرِ عددی/۰/منفی → همان «استخری که کسی معامله نمی‌کند»؛
+    // Number روی هرکدام از این‌ها (undefined، null، ""، رشته‌ی غیرِ عددی) یا
+    // NaN می‌دهد یا ۰، پس یک شرط برای همه کافی است.
+    const reserve = Number(row && row.attributes && row.attributes.reserve_in_usd);
+    if (!Number.isFinite(reserve) || reserve <= 0) return null;
+
+    return addr;
+  } catch (e) {
+    return null;
+  }
+}
+
+/* فهرستِ نهاییِ آدرس‌ها، به همان ترتیبی که بالادست داد (حجم‌محور)، بدونِ
+   تکرار، سقف‌خورده در SITEMAP_TOKEN_CAP. null یعنی «بالادست قابلِ اعتماد
+   نبود» — کالر باید دقیقاً مثلِ یک ۵۰۰/پرتاب رفتار کند، نه مثلِ فهرستِ خالی. */
+async function buildSitemapTokens(env) {
+  const seen = new Set();
+  const tokens = [];
+  for (let page = 1; page <= SITEMAP_TOKEN_PAGES; page++) {
+    let rows;
+    try {
+      rows = await fetchSitemapPoolsPage(page, env);
+    } catch (e) {
+      // اگر همان صفحه‌ی اول شکست بخورد، کل بالادست را خراب فرض کن.
+      // اگر صفحه‌ی بعدتری بود، آنچه تا اینجا جمع شده معتبر می‌ماند — فقط
+      // ادامه‌ی جمع‌آوری متوقف می‌شود، نه چیزی که تا الان داریم دور ریخته.
+      if (tokens.length === 0 && page === 1) return null;
+      break;
+    }
+    for (const row of rows) {
+      const addr = sitemapTokenFromPool(row);
+      if (!addr || seen.has(addr)) continue;
+      seen.add(addr);
+      tokens.push(addr);
+    }
+  }
+  return tokens.slice(0, SITEMAP_TOKEN_CAP);
+}
+
+function renderSitemapXml(origin, paths, lastmod) {
+  return (
     '<?xml version="1.0" encoding="UTF-8"?>' +
     '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">' +
-    paths.map((p) => "<url><loc>" + origin + p + "</loc></url>").join("") +
-    "</urlset>";
-  return new Response(body, {
-    headers: {
-      "content-type": "application/xml; charset=utf-8",
-      "cache-control": "public, max-age=3600",
-    },
-  });
+    paths.map((p) =>
+      "<url><loc>" + origin + p + "</loc><lastmod>" + lastmod + "</lastmod></url>"
+    ).join("") +
+    "</urlset>"
+  );
+}
+
+/* 🔴 هرگز شکست را کش نکن، هرگز یک سایت‌مپِ شکسته سرو نکن. «/» و «/app» همیشه
+   اول‌اند، هرچه پیش بیاید. توکن‌ها فقط وقتی اضافه می‌شوند که buildSitemapTokens
+   واقعاً یک آرایه بدهد (حتی خالی — یعنی بالادست جواب داد ولی چیزِ قابلِ
+   استفاده‌ای نداشت)؛ اگر بالادست پرتاب کرد یا ۲۰۰ نداد یا به چیزِ قابلِ فهم
+   parse نشد (null)، دقیقاً همان دو مسیرِ ثابت با عمرِ کوتاه برمی‌گردد تا
+   درخواستِ بعدی دوباره تلاش کند — نه یک روز کامل بدونِ صفحه‌های توکن. */
+async function sitemapResponse(url, env, ctx) {
+  const origin = url.origin;
+  const staticPaths = ["/", "/app"];
+  const lastmod = new Date().toISOString().slice(0, 10);
+
+  const store = (typeof caches !== "undefined" && caches.default) || null;
+  const cacheKey = store ? new Request("https://" + SITEMAP_CACHE_HOST + SITEMAP_CACHE_PATH) : null;
+  if (store) {
+    try {
+      const hit = await store.match(cacheKey);
+      if (hit) return hit;
+    } catch (e) { /* کش خراب = بی‌کش، نه بی‌سایت‌مپ */ }
+  }
+
+  let tokens = null;
+  try {
+    tokens = await buildSitemapTokens(env);
+  } catch (e) {
+    tokens = null; // هرگز نباید به اینجا برسد (buildSitemapTokens خودش try/catch دارد)، ولی محافظِ آخر باشد
+  }
+  const ok = Array.isArray(tokens);
+  const paths = staticPaths.concat(ok ? tokens.map((a) => "/t/" + a) : []);
+  const body = renderSitemapXml(origin, paths, lastmod);
+
+  const headers = {
+    "content-type": "application/xml; charset=utf-8",
+    // موفق: ۲۴ ساعت، لبه نگهش می‌دارد. ناموفق: عمرِ کوتاه، تا درخواستِ بعدی
+    // دوباره امتحان کند — نه یک روزِ کامل با فقط دو URL.
+    "cache-control": ok ? "public, max-age=86400" : "public, max-age=300",
+  };
+  const res = new Response(body, { headers });
+
+  if (ok && store) {
+    const stash = new Response(body, { headers });
+    const put = store.put(cacheKey, stash);
+    if (ctx && typeof ctx.waitUntil === "function") ctx.waitUntil(put);
+    else await put;
+  }
+  return res;
 }
 
 export default {
@@ -828,7 +953,7 @@ export default {
        index.html بی‌صدا منتشر *نمی‌شود* و ما فکر می‌کنیم شده. از این‌جا،
        انتشارش با خودِ کد اتمیک است و هیچ قدمِ دستیِ پنلی نمی‌خواهد. */
     if (url.pathname === "/robots.txt") return robotsResponse();
-    if (url.pathname === "/sitemap.xml") return sitemapResponse(url);
+    if (url.pathname === "/sitemap.xml") return sitemapResponse(url, env, ctx);
     /* /t/<آدرس> یک صفحه‌ی واقعی است، نه یک هش. بایندینگ [assets] برای مسیری
        که فایل ندارد ۴۰۴ می‌دهد، پس خودمان همان index.html را برایش سرو
        می‌کنیم و صفحه از روی pathname می‌فهمد کدام توکن را باید نشان بدهد.
@@ -907,3 +1032,4 @@ export { OG_NETWORK, OG_TIMEOUT_MS, ogFetchMeta, ogFetchVerdict };
 export { UPSTREAM_FREE, UPSTREAM_KEYED };
 export { VD_ADDR_RE };
 export { TOKEN_PAGE, solFetchVerdict };
+export { SITEMAP_TOKEN_PAGES, SITEMAP_TOKEN_CAP, sitemapResponse, buildSitemapTokens };
