@@ -213,9 +213,18 @@ async function safeKvPutJson(kv, key, value) {
   }
 }
 
+/* سقفِ توکن‌های یک گذر. اجرای دستی (سنجش) عددِ کوچک‌تری می‌دهد تا پاسخ در
+   چند ثانیه برگردد، ولی هیچ کالری نمی‌تواند سقف را از REPORT_MAX_TOKENS_PER_RUN
+   بالاتر ببرد — وگرنه همان اندپوینتِ سنجش راهی می‌شد برای سوزاندنِ سهمیه. */
+function tokenCap(maxTokens) {
+  return Number.isInteger(maxTokens) && maxTokens > 0
+    ? Math.min(maxTokens, REPORT_MAX_TOKENS_PER_RUN)
+    : REPORT_MAX_TOKENS_PER_RUN;
+}
+
 /* گذرِ گزارش‌گیریِ ساعتی. همه‌چیز تزریق می‌شود؛ خودِ این تابع نه I/O دارد نه
    fetch مستقیم. */
-export async function runReportPass({ kv, fetchPools, metaOf, verdictOf, now, sleep }) {
+export async function runReportPass({ kv, fetchPools, metaOf, verdictOf, now, sleep, maxTokens }) {
   try {
     // 🔴 بدون انباری برای نوشتن، هیچ تماسِ بالادستی مجاز نیست — قبل از هر
     // چیز دیگری، حتی قبل از fetchPools.
@@ -246,7 +255,7 @@ export async function runReportPass({ kv, fetchPools, metaOf, verdictOf, now, sl
 
     const tokens = candidates
       .filter((t) => !knownAddr.has(t.address))
-      .slice(0, REPORT_MAX_TOKENS_PER_RUN);
+      .slice(0, tokenCap(maxTokens));
 
     const builtRows = [];
     let checked = 0;

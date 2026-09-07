@@ -7,6 +7,7 @@
    run.py هم پیش از سوییت مرورگر همین را صدا می‌زند. */
 
 import worker from "./index.js";
+import { REPORT_RUN_MAX_TOKENS } from "./index.js";
 import { createHash } from "node:crypto";
 import { OG_PNG_ETAG } from "./og-image.js";
 import fs from "node:fs";
@@ -3326,13 +3327,46 @@ const ethers = globalThis.ethers;
      "tokens already in the pairs ring must not be re-checked on the next hourly run, got " +
      JSON.stringify(res2));
 
+  // ۱۳. سقفِ توکن: اجرای دستی عددِ کوچک می‌دهد، ولی هیچ کالری نمی‌تواند از
+  // REPORT_MAX_TOKENS_PER_RUN بالاتر برود — وگرنه اندپوینتِ سنجش خودش راهی
+  // برای سوزاندنِ سهمیه‌ی RPC می‌شد.
+  const kvCap = makeKv();
+  const manyRows = Array.from({ length: 40 }, (_, i) => poolRow(mkAddr(5000 + i), 9000, 1, 10, 100));
+  const resCap3 = await runReportPass({
+    kv: kvCap, fetchPools: async () => manyRows,
+    metaOf: async () => null, verdictOf: async () => null,
+    now: () => NOW_MS, sleep: async () => {}, maxTokens: 3,
+  });
+  ok(resCap3.checked === 3,
+     "maxTokens:3 must check exactly 3 tokens, got " + resCap3.checked);
+
+  const kvCap2 = makeKv();
+  const resCapHuge = await runReportPass({
+    kv: kvCap2, fetchPools: async () => manyRows,
+    metaOf: async () => null, verdictOf: async () => null,
+    now: () => NOW_MS, sleep: async () => {}, maxTokens: 9999,
+  });
+  ok(resCapHuge.checked === REPORT_MAX_TOKENS_PER_RUN,
+     "a caller-supplied maxTokens above REPORT_MAX_TOKENS_PER_RUN must be clamped to " +
+     REPORT_MAX_TOKENS_PER_RUN + ", got " + resCapHuge.checked);
+
+  const kvCap3 = makeKv();
+  const resCapNone = await runReportPass({
+    kv: kvCap3, fetchPools: async () => manyRows,
+    metaOf: async () => null, verdictOf: async () => null,
+    now: () => NOW_MS, sleep: async () => {},
+  });
+  ok(resCapNone.checked === REPORT_MAX_TOKENS_PER_RUN,
+     "with no maxTokens the pass must use the full cap, got " + resCapNone.checked);
+
   console.log("[report kv] runReportPass ok — kv:null skips fetchPools entirely (checked 0/added 0), "
     + "a throwing or non-array fetchPools degrades the same way, a metaOf-null token still produces a "
     + "row with v:null (never nosell) and its priceUsd/vol24hUsd/fdvUsd intact from the pool row while "
     + "name is null (never guessed from the pool's own name string), a metaOf hit carries its name "
     + "through, sleep runs once per token at exactly REPORT_PACE_MS with verdictOf calls never "
     + "overlapping, both KV keys are written with the real checked/added counts, and a second run "
-    + "against the same store skips tokens already in the pairs ring");
+    + "against the same store skips tokens already in the pairs ring, and maxTokens caps a pass "
+    + "exactly (3 -> 3) while any value above REPORT_MAX_TOKENS_PER_RUN is clamped down to it");
 }
 
 /* ---- ۲۳. /report/<...>.json و /pairs.json — از رویِ worker.fetch ---- */
@@ -3427,6 +3461,69 @@ const ethers = globalThis.ethers;
     + "an empty ring; today and /pairs.json cache 300s at the edge, a past date caches 86400s; all "
     + "three routes report store:false with no ZX_KV and store:true with one bound (even empty), "
     + "always as the response body's last key");
+}
+
+/* ---- ۲۴. GET /report/run — اجرای دستیِ همان گذر، پشتِ یک راز ----
+   این مسیر ابزارِ سنجش است: وقتی زمان‌بند چیزی نمی‌نویسد، تنها راهِ فرق‌گذاشتنِ
+   «کرون شلیک نکرد» با «گذر افتاد» یک اجرای به‌دستور است. */
+{
+  const KEY = "s3cret-run-key-for-tests";
+  const envNoKey = { ASSETS };
+  const envKey = { ASSETS, RUN_KEY: KEY };
+  const hdr = (k) => ({ method: "GET", headers: { "x-run-key": k } });
+
+  // بدونِ RUN_KEY در env، حتی با یک هدرِ درست‌نما: مسیر اصلاً وجود ندارد
+  const rOff = await call("/report/run", hdr(KEY), envNoKey);
+  ok(rOff.status === 404,
+     "with no RUN_KEY in env, /report/run must be 404 (not 401, not 200), got " + rOff.status);
+
+  // RUN_KEY هست ولی هدر نیست، یا هدر غلط است → باز هم ۴۰۴، نه ۴۰۱:
+  // از بیرون نباید معلوم شود چنین مسیری وجود دارد.
+  const rNoHdr = await call("/report/run", { method: "GET" }, envKey);
+  ok(rNoHdr.status === 404, "a missing x-run-key must be 404, got " + rNoHdr.status);
+  const rWrong = await call("/report/run", hdr(KEY + "x"), envKey);
+  ok(rWrong.status === 404, "a wrong x-run-key must be 404, got " + rWrong.status);
+
+  // کلیدِ درست، ولی بدونِ ZX_KV: باید اجرا شود و صادقانه بگوید انباری نبود —
+  // و مثل خودِ زمان‌بند، هیچ فراخوانیِ بالادستی نزند.
+  const rRun = await call("/report/run", hdr(KEY), envKey);
+  ok(rRun.status === 200, "a correct x-run-key must run the pass and return 200, got " + rRun.status);
+  const bRun = await rRun.json();
+  ok(bRun.ran === true, "the manual run must report ran:true, got " + JSON.stringify(bRun.ran));
+  ok(bRun.store === false,
+     "with no ZX_KV bound the manual run must report store:false, got " + JSON.stringify(bRun.store));
+  ok(bRun.checked === 0 && bRun.added === 0,
+     "with no store the manual run must check nothing, got " + JSON.stringify(bRun));
+  ok(typeof bRun.ms === "number" && bRun.ms >= 0,
+     "the manual run must report its own duration as a number, got " + JSON.stringify(bRun.ms));
+
+  // متدِ دیگر با کلیدِ درست → ۴۰۵ (نه ۴۰۴): کلید درست بوده، فقط متد غلط است
+  const rPost = await call("/report/run", { method: "POST", headers: { "x-run-key": KEY } }, envKey);
+  ok(rPost.status === 405, "POST /report/run with a correct key must be 405, got " + rPost.status);
+
+  // ⚠️ «run» نباید به reportRoute برسد و به‌عنوان تاریخِ بدشکل ۴۰۰ بگیرد
+  ok(rOff.status !== 400 && rNoHdr.status !== 400,
+     "/report/run must never fall through to the date route and answer \"bad date\"");
+
+  // 🔴 راز هرگز نباید در پاسخ ظاهر شود — نه در بدنه، نه در هدرها
+  const runBodyText = JSON.stringify(bRun);
+  ok(!runBodyText.includes(KEY), "RUN_KEY must never appear in the response body");
+  let hdrText = "";
+  rRun.headers.forEach((v, k) => { hdrText += k + ":" + v + "\n"; });
+  ok(!hdrText.includes(KEY), "RUN_KEY must never appear in a response header");
+
+  // سقفِ اجرای دستی کوچک است، ولی هرگز بزرگ‌تر از سقفِ زمان‌بند
+  ok(REPORT_RUN_MAX_TOKENS > 0 && REPORT_RUN_MAX_TOKENS <= REPORT_MAX_TOKENS_PER_RUN,
+     "REPORT_RUN_MAX_TOKENS must be a small positive number, never above REPORT_MAX_TOKENS_PER_RUN, got "
+     + REPORT_RUN_MAX_TOKENS);
+
+  console.log("[report run] GET /report/run ok — the route does not exist without env.RUN_KEY (404), "
+    + "and a missing or wrong x-run-key is 404 as well, never 401, so its existence never leaks; the "
+    + "key rides as a header and never as a query, and never surfaces in the response body or headers; "
+    + "a correct key runs the same pass the cron runs and answers {ran, checked, added, ms, store}, "
+    + "reporting store:false honestly when no KV is bound (checking nothing, exactly like the "
+    + "scheduled pass); a non-GET with a correct key is 405; and its token cap ("
+    + REPORT_RUN_MAX_TOKENS + ") is never above the scheduled cap (" + REPORT_MAX_TOKENS_PER_RUN + ")");
 }
 
 console.log(fails === 0

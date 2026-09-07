@@ -1014,7 +1014,7 @@ async function pairsRoute(request, url, env) {
 /* بدنه‌ی scheduled — تابعِ جداگانه تا worker/test.mjs بتواند بدونِ ساختنِ
    یک event واقعیِ کرون آن را صدا بزند، همان الگویی که sitemapResponse و
    diagVerdict برای تست‌پذیریِ handlerهای دیگر دنبال می‌کنند. */
-async function scheduledReportPass(env, ctx) {
+async function scheduledReportPass(env, ctx, opts) {
   try {
     // بدونِ KV، حتی یک تماسِ بالادست هم روا نیست — همان گاردِ اولِ
     // runReportPass، اینجا هم پیش از ساختنِ fetchPools تکرار می‌شود.
@@ -1043,10 +1043,44 @@ async function scheduledReportPass(env, ctx) {
       verdictOf: (addr, meta) => ogFetchVerdict(addr, meta, Date.now() + OG_BUDGET_MS, env, ctx),
       now: () => Date.now(),
       sleep: (ms) => new Promise((r) => setTimeout(r, ms)),
+      // فقط اجرای دستی این را می‌دهد؛ زمان‌بند سقفِ کاملِ خودش را دارد.
+      maxTokens: opts && opts.maxTokens,
     });
   } catch (e) {
     return { checked: 0, added: 0 }; // یک اجرای زمان‌بندی‌شده هرگز نباید پرتاب کند
   }
+}
+
+/* ---------------------------------------------------------------------
+   GET /report/run — همان گذرِ زمان‌بند، ولی به‌دستور.
+   ---------------------------------------------------------------------
+   چرا هست: وقتی زمان‌بند چیزی نمی‌نویسد، از بیرون نمی‌شود فهمید «کرون شلیک
+   نکرد» یا «گذر شلیک شد و وسطش افتاد». این مسیر همان تفاوت را با یک
+   درخواست روشن می‌کند — همان الگویی که /vd و /vd/rpc برای حکم انجام دادند.
+
+   🔴 کلید از هدر می‌آید نه از کوئری: یک راز می‌تواند در مسیر یا کوئریِ URL
+   بنشیند و از آن‌جا در لاگ و تاریخچه‌ی شل بماند. هدر هیچ‌کدام را نمی‌سازد.
+   🔴 نبودِ RUN_KEY و کلیدِ غلط هر دو ۴۰۴ می‌گیرند، نه ۴۰۱: از بیرون اصلاً
+   معلوم نشود چنین مسیری وجود دارد.
+   ⚠️ سقفِ توکن اینجا ۵ است نه ۳۰ — پاسخ باید در چند ثانیه برگردد، و
+   tokenCap در report.js هم اجازه نمی‌دهد هیچ کالری از سقفِ اصلی بالاتر برود. */
+const REPORT_RUN_MAX_TOKENS = 5;
+
+async function reportRunRoute(request, env, ctx) {
+  const want = (env && typeof env.RUN_KEY === "string" && env.RUN_KEY) || "";
+  const got = request.headers.get("x-run-key") || "";
+  if (!want || got !== want) return vdDone(404, { error: "not found" });
+  if (request.method !== "GET") return vdDone(405, { error: "only GET" });
+
+  const t0 = Date.now();
+  const r = await scheduledReportPass(env, ctx, { maxTokens: REPORT_RUN_MAX_TOKENS });
+  return vdDone(200, {
+    ran: true,
+    checked: r.checked,
+    added: r.added,
+    ms: Date.now() - t0,
+    store: !!(env && env.ZX_KV),
+  });
 }
 
 export default {
@@ -1064,6 +1098,9 @@ export default {
        برای robots.txt/sitemap.xml هم تکرار شده: خط Build در پنل فقط
        html/js/_headers را کپی می‌کند، پس یک مسیرِ تازه باید از همین‌جا سرو
        شود، نه از `_site`، وگرنه بی‌صدا ۴۰۴ می‌گرفت. */
+    /* پیش از reportRoute: وگرنه «run» یک تاریخِ بدشکل حساب می‌شد و ۴۰۰
+       می‌گرفت، نه اجرا. */
+    if (url.pathname === "/report/run") return reportRunRoute(request, env, ctx);
     if (url.pathname.startsWith("/report/")) return reportRoute(request, url, env);
     if (url.pathname === "/pairs.json") return pairsRoute(request, url, env);
     /* تصویر کارت. عمداً در `_site` نیست، پس همیشه به کد می‌رسد — مثل /gt و
@@ -1165,4 +1202,4 @@ export { UPSTREAM_FREE, UPSTREAM_KEYED };
 export { VD_ADDR_RE };
 export { TOKEN_PAGE, solFetchVerdict };
 export { SITEMAP_TOKEN_PAGES, SITEMAP_TOKEN_CAP, sitemapResponse, buildSitemapTokens };
-export { reportRoute, pairsRoute, scheduledReportPass };
+export { reportRoute, pairsRoute, scheduledReportPass, reportRunRoute, REPORT_RUN_MAX_TOKENS };
