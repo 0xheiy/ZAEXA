@@ -2780,6 +2780,18 @@ const ethers = globalThis.ethers;
   ok(/^Sitemap:\s*https:\/\/zaexa\.com\/sitemap\.xml$/m.test(body),
      "robots.txt must point at the sitemap");
 
+  /* ⚠️ خواندن برای جواب‌دادن ≠ برداشتن برای آموزش. این سه مقدار سه تصمیمِ
+     جدا هستند و نباید با هم جابه‌جا شوند. */
+  ok(/Content-Signal:[^\n]*\bsearch=yes\b/.test(body),
+     "Content-Signal must keep search=yes — being findable is the point of this site");
+  ok(/Content-Signal:[^\n]*\bai-input=yes\b/.test(body),
+     "Content-Signal must keep ai-input=yes — an assistant answering \"is this token a "
+     + "honeypot\" is exactly the reader this site exists for");
+  ok(/Content-Signal:[^\n]*\bai-train=no\b/.test(body),
+     "Content-Signal must say ai-train=no: the README states no license is granted to copy, "
+     + "modify or redistribute this code, and permitting training contradicted it. Owner's "
+     + "decision, 7 September 2026 — do not flip it back without asking.");
+
   const sm = await call("/sitemap.xml");
   const xml = await sm.text();
   ok(sm.status === 200, "GET /sitemap.xml must be 200, got " + sm.status);

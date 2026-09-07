@@ -756,13 +756,22 @@ async function diagVerdict(request, url, env, ctx) {
    اگر باز هم «Cloudflare Managed content» دیدی، خاموش‌کردنش در داشبورد
    لازم است و این فایل به‌تنهایی کافی نیست.
 
-   `Content-Signal` عمداً هر سه را باز می‌گذارد. اگر روزی نظرمان درباره‌ی
-   آموزش عوض شد، همین‌جا `ai-train=no` می‌شود و بس. */
+   `Content-Signal` دو تا را باز می‌گذارد و یکی را نه، و این تفکیک عمدی است:
+   • `search=yes` و `ai-input=yes` — خوانده‌شدن و جواب‌داده‌شدن **هدفِ** این
+     سایت است. کاربرِ ما همان کسی است که از یک دستیار می‌پرسد «این توکن
+     هانی‌پات است؟»؛ نادیدنی‌بودن برای دستیارها یعنی آن سؤال بدونِ ما جواب
+     داده شود.
+   • `ai-train=no` — چون README همین مخزن صریح می‌گوید «It is not open
+     source: no license is granted to copy, modify, or redistribute it»
+     (و عمداً هیچ فایل LICENSE‌ای هم ندارد). اجازه‌ی آموزش دادن با آن جمله
+     در تناقض بود. تصمیمِ صاحب سایت، ۷ سپتامبر ۲۰۲۶.
+   ⚠️ خواندن برای جواب‌دادن با برداشتن برای آموزش یکی نیست؛ این خط همان
+   مرز است و نگهبانش در worker/test.mjs پینش می‌کند. */
 export const ROBOTS_TXT = [
   "# Zaexa — a DEX aggregator with an exit check. Read us; that is the point.",
   "",
   "User-agent: *",
-  "Content-Signal: search=yes,ai-input=yes,ai-train=yes",
+  "Content-Signal: search=yes,ai-input=yes,ai-train=no",
   "Allow: /",
   "",
   "Sitemap: https://zaexa.com/sitemap.xml",
