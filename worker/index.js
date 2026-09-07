@@ -735,6 +735,70 @@ async function diagVerdict(request, url, env, ctx) {
   return vdDone(200, { v, ms: Date.now() - t0 });
 }
 
+/* =====================================================================
+   robots.txt — چه کسی اجازه دارد این سایت را بخواند
+   =====================================================================
+   ۷ سپتامبر ۲۰۲۶: `zaexa.com/robots.txt` هیچ‌وقت مالِ ما نبود. کلادفلر
+   نسخه‌ی «مدیریت‌شده»ی خودش را سرو می‌کرد و آن نسخه ClaudeBot، GPTBot،
+   CCBot، Google-Extended، Amazonbot، Applebot-Extended، Bytespider و
+   meta-externalagent را با `Disallow: /` می‌بست.
+
+   چرا این برای *این* سایت مهم است و برای خیلی سایت‌ها نیست: کاربرِ Zaexa
+   دقیقاً همان کسی است که از یک دستیار می‌پرسد «چطور بفهمم این توکن
+   هانی‌پات است؟». اگر دستیارها اجازه‌ی خواندنِ ما را نداشته باشند، آن
+   سؤال با ما جواب داده نمی‌شود — بی‌آنکه هیچ‌جا خطایی دیده شود. این یک
+   تصمیمِ محصولی است که کسی نگرفته بود، فقط پیش‌فرضِ یک پنل بود.
+
+   ⚠️ سرو کردنش از این‌جا لزوماً نسخه‌ی مدیریت‌شده را کنار نمی‌زند: آن
+   قابلیت در سطحِ زون کار می‌کند و ممکن است جلوتر از Worker بنشیند. پس
+   بعد از انتشار باید *سنجیده* شود، نه فرض:
+     curl -s https://zaexa.com/robots.txt | head -20
+   اگر باز هم «Cloudflare Managed content» دیدی، خاموش‌کردنش در داشبورد
+   لازم است و این فایل به‌تنهایی کافی نیست.
+
+   `Content-Signal` عمداً هر سه را باز می‌گذارد. اگر روزی نظرمان درباره‌ی
+   آموزش عوض شد، همین‌جا `ai-train=no` می‌شود و بس. */
+export const ROBOTS_TXT = [
+  "# Zaexa — a DEX aggregator with an exit check. Read us; that is the point.",
+  "",
+  "User-agent: *",
+  "Content-Signal: search=yes,ai-input=yes,ai-train=yes",
+  "Allow: /",
+  "",
+  "Sitemap: https://zaexa.com/sitemap.xml",
+  "",
+].join("\n");
+
+function robotsResponse() {
+  return new Response(ROBOTS_TXT, {
+    headers: {
+      "content-type": "text/plain; charset=utf-8",
+      "cache-control": "public, max-age=3600",
+    },
+  });
+}
+
+/* sitemap.xml — فقط صفحه‌هایی که واقعاً وجود دارند و ثابت‌اند.
+   ⚠️ صفحه‌های `/t/<آدرس>` عمداً این‌جا نیستند. تعدادشان بی‌کران است (هر
+   آدرسی یک صفحه است)، و فهرستِ دستیِ «توکن‌های مهم» دقیقاً همان چیزی است
+   که در این پروژه بارها بی‌صدا drift کرده. کشفشان از راهِ لینکی است که
+   کاربر به اشتراک می‌گذارد — همان کاری که کارتِ پیش‌نمایش برایش ساخته شد. */
+function sitemapResponse(url) {
+  const origin = url.origin;
+  const paths = ["/", "/app"];
+  const body =
+    '<?xml version="1.0" encoding="UTF-8"?>' +
+    '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">' +
+    paths.map((p) => "<url><loc>" + origin + p + "</loc></url>").join("") +
+    "</urlset>";
+  return new Response(body, {
+    headers: {
+      "content-type": "application/xml; charset=utf-8",
+      "cache-control": "public, max-age=3600",
+    },
+  });
+}
+
 export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
@@ -749,6 +813,13 @@ export default {
        /ev. یعنی برای اضافه‌شدنش لازم نیست کسی Build command را در پنل عوض
        کند، و انتشارش با خودِ کد اتمیک است. */
     if (url.pathname === "/og.png") return ogImageResponse(request);
+    /* robots.txt و sitemap.xml هم از کد می‌آیند، نه از `_site` — به همان
+       دلیلِ بالا: خط Build در پنل فقط `web/*.html`، `web/_headers` و
+       `web/*.js` را کپی می‌کند، پس یک فایلِ `.txt` یا `.xml` کنارِ
+       index.html بی‌صدا منتشر *نمی‌شود* و ما فکر می‌کنیم شده. از این‌جا،
+       انتشارش با خودِ کد اتمیک است و هیچ قدمِ دستیِ پنلی نمی‌خواهد. */
+    if (url.pathname === "/robots.txt") return robotsResponse();
+    if (url.pathname === "/sitemap.xml") return sitemapResponse(url);
     /* /t/<آدرس> یک صفحه‌ی واقعی است، نه یک هش. بایندینگ [assets] برای مسیری
        که فایل ندارد ۴۰۴ می‌دهد، پس خودمان همان index.html را برایش سرو
        می‌کنیم و صفحه از روی pathname می‌فهمد کدام توکن را باید نشان بدهد.

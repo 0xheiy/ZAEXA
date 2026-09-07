@@ -2755,6 +2755,45 @@ const ethers = globalThis.ethers;
     "body — no claim made about which real endpoint answers which method from Cloudflare");
 }
 
+/* ---- robots.txt و sitemap.xml از خودِ Worker ----
+   ⚠️ این‌ها عمداً از کد سرو می‌شوند، نه از `_site`: خط Build در پنل فقط
+   html/js/_headers را کپی می‌کند، پس یک فایلِ txt یا xml کنارِ index.html
+   بی‌صدا منتشر نمی‌شد. */
+{
+  const r = await call("/robots.txt");
+  const body = await r.text();
+  ok(r.status === 200, "GET /robots.txt must be 200, got " + r.status);
+  ok(/^text\/plain/.test(r.headers.get("content-type") || ""),
+     "robots.txt must be served as text/plain, got " + r.headers.get("content-type"));
+  ok(/^\s*User-agent:\s*\*/m.test(body),
+     "robots.txt must carry a User-agent: * group");
+  ok(/^\s*Allow:\s*\/\s*$/m.test(body),
+     "robots.txt must allow the whole site — the whole point of owning this file is that "
+     + "Cloudflare's managed default disallowed every AI crawler");
+  ok(!/Disallow:\s*\//.test(body),
+     "robots.txt must not disallow anything: " + JSON.stringify(body));
+  for (const bot of ["ClaudeBot", "GPTBot", "CCBot", "Google-Extended"]) {
+    ok(!new RegExp("User-agent:\\s*" + bot, "i").test(body),
+       "robots.txt must not single out " + bot + " — a named group here would re-create the "
+       + "exact block we are removing");
+  }
+  ok(/^Sitemap:\s*https:\/\/zaexa\.com\/sitemap\.xml$/m.test(body),
+     "robots.txt must point at the sitemap");
+
+  const sm = await call("/sitemap.xml");
+  const xml = await sm.text();
+  ok(sm.status === 200, "GET /sitemap.xml must be 200, got " + sm.status);
+  ok(/^application\/xml/.test(sm.headers.get("content-type") || ""),
+     "sitemap must be served as application/xml, got " + sm.headers.get("content-type"));
+  ok(xml.startsWith("<?xml"), "sitemap must start with an XML declaration");
+  ok(xml.includes("<loc>" + ORIGIN + "/</loc>") && xml.includes("<loc>" + ORIGIN + "/app</loc>"),
+     "sitemap must list the landing page and the app");
+  ok(!/\/t\//.test(xml),
+     "sitemap must not enumerate /t/<address> pages: they are unbounded and a hand-kept list "
+     + "of 'important' tokens is exactly what drifts silently in this repo");
+}
+
+
 console.log(fails === 0
   ? "[gt proxy] worker ok — " + REAL.length + " real paths proxied, " + BAD.length +
     " refused without touching the network, 429 passes through with CORS\n" +
@@ -2777,6 +2816,11 @@ console.log(fails === 0
     "[jup key] env.JUP_KEY (via jupKeyFor, same shape as CG_KEY/SOL_RPC) rides as the x-api-key "
     + "header on every Jupiter call and never in a URL; absent it, behaviour is byte-for-byte "
     + "today's; the key never surfaces in a \"sell\", \"nosell\", or null/\"jup:quote:401\" response "
-    + "body, checked both against an injected fetchImpl and end to end through worker.fetch"
+    + "body, checked both against an injected fetchImpl and end to end through worker.fetch\n" +
+    "[robots] /robots.txt and /sitemap.xml are served by the Worker, not from _site (the "
+    + "panel build line copies only html/js/_headers, so a .txt or .xml beside index.html "
+    + "would never ship): the whole site is allowed, no crawler is singled out, the sitemap "
+    + "is pointed at, and /t/<address> pages are deliberately not enumerated"
+
   : "[gt proxy] " + fails + " FAILURES");
 process.exit(fails === 0 ? 0 : 1);

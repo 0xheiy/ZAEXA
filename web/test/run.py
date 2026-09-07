@@ -322,6 +322,15 @@ def check_security_headers():
         "frame-ancestors must be 'none' — a page that signs on-chain transactions must " \
         "never be embeddable, or clickjacking becomes a wallet-draining vector: %r" % directive("frame-ancestors")
 
+    img = directive("img-src")
+    assert img and "blob:" in img, \
+        ("img-src lost blob: — the WalletConnect modal fetches every wallet icon and then "
+         "renders it from a blob URL, so without blob: every icon in that list breaks while "
+         "the network log still shows 200 for each one. Measured on the live site on "
+         "7 September 2026: an <img> with a blob: source fired error while the same bytes "
+         "as data: loaded fine. This is not a hole — a blob is created by this origin's own "
+         "code and script execution is already pinned to 'self': %r" % img)
+
     conn = directive("connect-src")
     assert conn and "https:" in conn, \
         ("connect-src lost https: — that breaks the Custom RPC setting (for users behind "

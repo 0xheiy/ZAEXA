@@ -34,6 +34,21 @@
 # 'self' یعنی هیچ اسکریپتی از دامنه‌ی دیگر اجرا نمی‌شود، حتی اگر کسی بتواند
 # یک <script src="https://evil"> در HTML تزریق کند.
 #
+# 🔴 img-src ... blob: — این یکی برعکسِ بغلی *اندازه‌گیری‌شده* است، روی سایتِ
+# زنده و در مرورگرِ واقعی (۷ سپتامبر ۲۰۲۶). آیکون‌های والت در مودالِ
+# WalletConnect شکسته بودند و سه فرضِ اول همه رد شدند: هر ۲۱ درخواستِ تصویر
+# کدِ ۲۰۰ می‌گرفتند، همان آدرس با fetch از داخلِ صفحه درست رمزگشایی می‌شد
+# (image/webp، ۱۲۰×۱۲۰)، شناسه و دامنه در داشبورد Reown ثبت بودند، و روی
+# بریوِ بدون سپر و کروم هر دو خراب بود. علتِ واقعی: مودال تصویر را می‌گیرد و
+# از رویش یک blob می‌سازد، و `<img src="blob:…">` زیرِ img-srcِ قبلی رد
+# می‌شد — درخواست ۲۰۰ می‌ماند و فقط *نمایش* ممنوع می‌شد، که از بیرون شبیهِ
+# «تصویر خراب است» به نظر می‌رسد نه شبیهِ CSP.
+# اثباتِ نهایی، اجراشده در کنسولِ خودِ zaexa.com: یک <img> با blob: رویدادِ
+# error می‌داد در حالی که همان تصویر با data: بی‌مشکل لود می‌شد.
+# باز کردنِ blob: برای *تصویر* چیزی را باز نمی‌کند که از قبل بسته باشد: یک
+# blob فقط از داخلِ همین مبدأ ساخته می‌شود و اجرای اسکریپت از قبل به 'self'
+# قفل است.
+#
 # ⚠️ worker-src 'self' blob: یک احتیاط است، نه اندازه‌گیری‌شده: بدونش
 # worker-src از default-src ارث می‌برد (که blob: ندارد) و هر web worker
 # ساخته‌شده از Blob مسدود می‌شود — کتابخانه‌های ردهٔ WalletConnect از همین
@@ -55,7 +70,7 @@
 # دیگری بنشیند؛ بازش‌گذاشتن یعنی clickjacking روی صفحه‌ای که تراکنشِ
 # on-chain امضا می‌کند.
 /*
-  Content-Security-Policy: default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' data:; connect-src 'self' https: wss:; worker-src 'self' blob:; base-uri 'self'; object-src 'none'; form-action 'none'; frame-ancestors 'none'
+  Content-Security-Policy: default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; font-src 'self' data:; connect-src 'self' https: wss:; worker-src 'self' blob:; base-uri 'self'; object-src 'none'; form-action 'none'; frame-ancestors 'none'
   X-Content-Type-Options: nosniff
   Referrer-Policy: no-referrer
   Permissions-Policy: camera=(), microphone=(), geolocation=(), payment=(), usb=()
