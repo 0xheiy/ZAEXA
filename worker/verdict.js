@@ -316,15 +316,53 @@ export function verdictFrom({ canary, items }) {
 }
 
 /* ---------------------------------------------------------------------
+   لاگِ پروب — فقط برای تشخیص (`opts.collect` در fetchVerdict)، اثری روی
+   verdict ندارد. واژه‌نامه بسته است و از رویِ status/شکل تعیین می‌شود، هرگز
+   از رویِ error.message؛ دقیقاً همان قاعده‌ای که verdictFrom خودش رعایت
+   می‌کند. اگر روزی از رویِ متن تصمیم بگیریم، یک تغییرِ متنِ خطا در سمتِ RPC
+   بی‌آنکه هیچ کدی عوض شود می‌تواند خروجیِ این ابزار را خراب کند — دقیقاً
+   همان تله‌ای که verdictFrom را هم مجبور به «فقط کد، نه متن» کرده.
+   --------------------------------------------------------------------- */
+export const VD_PROBE_OUT = Object.freeze([
+  "quoted", "zero", "empty", "undecodable", "revert", "no-answer", "batch-failed", "deadline",
+]);
+
+/* entry همان چیزی است که pick(id) در callBatch برمی‌گرداند: {result} یا
+   {error}. code === -1 یعنی «هیچ ورودی‌ای برای این id نیامد» (شکلِ ساختگیِ
+   خودِ pick، نه یک کدِ واقعیِ JSON-RPC) — این یکی «no-answer» است، نه
+   "revert:-1"؛ آن دو معنیِ کاملاً متفاوتی دارند و قاطی‌کردنشان یعنی «اندپوینت
+   اصلاً جواب نداد» با «اندپوینت جواب داد و رد کرد» یکی شود. */
+function classifyProbeOut(kind, entry) {
+  if (entry && entry.error) {
+    const code = entry.error.code;
+    if (code === -1) return "no-answer";
+    return "revert:" + (Number.isInteger(code) ? code : "unknown");
+  }
+  if (!entry || typeof entry.result !== "string") return "revert:unknown"; // شکلی که pick هرگز نمی‌دهد؛ فقط احتیاط
+  if (entry.result === "0x") return "empty";
+  const v = decodeQuote(kind, entry.result);
+  if (v == null) return "undecodable";
+  return v > 0n ? "quoted" : "zero";
+}
+
+/* ---------------------------------------------------------------------
    fetchVerdict — ارکستراسیون. همه‌چیز تزریق‌شدنی، هیچ‌وقت پرتاب نمی‌کند.
    --------------------------------------------------------------------- */
-async function callBatch(fetchImpl, rpcUrl, canary, probeItems, timeoutMs) {
+async function callBatch(fetchImpl, rpcUrl, canary, probeItems, timeoutMs, collect, stage) {
   const requests = [
     { jsonrpc: "2.0", id: 0, method: "eth_call", params: [{ to: canary.to, data: canary.data }, "latest"] },
     ...probeItems.map((p, i) => ({
       jsonrpc: "2.0", id: i + 1, method: "eth_call", params: [{ to: p.to, data: p.data }, "latest"],
     })),
   ];
+
+  // شکستِ کلِ batch (نه یک آیتم) — یک ردِ تک‌شیءِ "batch-failed"، نه یک
+  // ردیف به‌ازای هر آیتمی که هرگز واقعاً پرسیده نشد؛ چون در این حالت‌ها
+  // اصلاً معلوم نیست کدام آیتم پرسیده شد و کدام نه.
+  function failed() {
+    if (collect) collect.push({ venue: null, key: null, out: "batch-failed", stage });
+    return null;
+  }
 
   const ac = new AbortController();
   const timer = setTimeout(() => ac.abort(), timeoutMs);
@@ -337,25 +375,25 @@ async function callBatch(fetchImpl, rpcUrl, canary, probeItems, timeoutMs) {
       signal: ac.signal,
     });
   } catch {
-    return null; // پرتابِ شبکه‌ای → این اندپوینت نامعلوم
+    return failed(); // پرتابِ شبکه‌ای → این اندپوینت نامعلوم
   } finally {
     clearTimeout(timer);
   }
-  if (!res || res.status !== 200) return null; // غیر ۲۰۰ → نامعلوم
+  if (!res || res.status !== 200) return failed(); // غیر ۲۰۰ → نامعلوم
 
   let body;
   try {
     body = await res.json();
   } catch {
-    return null; // بدنه‌ی غیرقابل‌پارس → نامعلوم
+    return failed(); // بدنه‌ی غیرقابل‌پارس → نامعلوم
   }
-  if (!Array.isArray(body)) return null; // شکلِ غیرآرایه → کلِ تلاش نامعلوم
+  if (!Array.isArray(body)) return failed(); // شکلِ غیرآرایه → کلِ تلاش نامعلوم
 
   // تطبیق با id، نه با موقعیتِ آرایه — یک batch می‌تواند جابه‌جا برگردد.
   const byId = new Map();
   for (const entry of body) {
     if (!entry || typeof entry !== "object" || entry.id === undefined || entry.id === null) {
-      return null; // یک ورودیِ بدونِ id → کلِ پاسخ نامعتبر است
+      return failed(); // یک ورودیِ بدونِ id → کلِ پاسخ نامعتبر است
     }
     byId.set(entry.id, entry);
   }
@@ -366,9 +404,21 @@ async function callBatch(fetchImpl, rpcUrl, canary, probeItems, timeoutMs) {
     return e.error ? { error: e.error } : { result: e.result };
   }
 
+  const pickedCanary = pick(0);
+  const pickedItems = probeItems.map((p, i) => Object.assign({ kind: VENUE_KIND_BY_ID.get(p.id) }, pick(i + 1)));
+
+  // این batch واقعاً اجرا شد؛ کاناری اول (همان ترتیبِ id=0)، بعد هر آیتم
+  // به همان ترتیبی که buildProbe ساخته — نه ترتیبِ برگشتیِ RPC.
+  if (collect) {
+    collect.push({ venue: "canary", key: null, out: classifyProbeOut("CL_UINT24", pickedCanary), stage });
+    for (let i = 0; i < probeItems.length; i++) {
+      collect.push({ venue: probeItems[i].id, key: probeItems[i].key, out: classifyProbeOut(pickedItems[i].kind, pickedItems[i]), stage });
+    }
+  }
+
   return {
-    canary: pick(0),
-    items: probeItems.map((p, i) => Object.assign({ kind: VENUE_KIND_BY_ID.get(p.id) }, pick(i + 1))),
+    canary: pickedCanary,
+    items: pickedItems,
   };
 }
 
@@ -383,17 +433,32 @@ export async function fetchVerdict(tokenAddr, meta, opts) {
     const deadlineAt = o.deadlineAt;
     const rpcs = o.rpcs || VD_RPCS;
     const timeoutMs = o.timeoutMs || 900;
+    // opts.collect فقط وقتی آرایه است فعال می‌شود — نبودنش رفتار و هزینه
+    // را دقیقاً همان چیزی نگه می‌دارد که امروز است؛ این تابع «مشاهده‌گر»
+    // است، هرگز خودش تصمیمی از رویِ همین آرایه نمی‌گیرد.
+    const collect = Array.isArray(o.collect) ? o.collect : null;
+
+    // یک چکِ مهلت که پیش از مرحله‌ای که هنوز اجرا نشده رد می‌شود؛ اگر بزند
+    // خودش یک رکوردِ "deadline" برای همان مرحله ثبت می‌کند — نه اینکه پروب
+    // بی‌صدا از خروجیِ collect بیفتد.
+    function deadlineHit(stage) {
+      if (deadlineAt != null && (now() >= deadlineAt || deadlineAt - now() < 400)) {
+        if (collect) collect.push({ venue: null, key: null, out: "deadline", stage });
+        return true;
+      }
+      return false;
+    }
 
     const canary = canaryCall();
     let endpointsTried = 0;
 
     for (const rpc of rpcs) {
       if (endpointsTried >= 2) break;
-      if (deadlineAt != null && (now() >= deadlineAt || deadlineAt - now() < 400)) return null;
+      if (deadlineHit("weth")) return null;
       endpointsTried++;
 
       const itemsWeth = buildProbe(tokenAddr, WETH_ADDR, amt);
-      const batchA = await callBatch(fetchImpl, rpc, canary, itemsWeth, timeoutMs);
+      const batchA = await callBatch(fetchImpl, rpc, canary, itemsWeth, timeoutMs, collect, "weth");
       if (batchA == null) continue; // نامعلومِ سطحِ اتصال (پرتاب/غیر۲۰۰/ناپارس) → اندپوینتِ بعدی
 
       const canaryAlive =
@@ -405,9 +470,9 @@ export async function fetchVerdict(tokenAddr, meta, opts) {
       if (verdictA === "sell") return "sell";
       if (verdictA !== "nosell") return null; // ابهامِ ردیف‌ها با کاناریِ زنده — دلیلِ عوض‌کردنِ اندپوینت نیست
 
-      if (deadlineAt != null && (now() >= deadlineAt || deadlineAt - now() < 400)) return null;
+      if (deadlineHit("usdc")) return null;
       const itemsUsdc = buildProbe(tokenAddr, USDC_ADDR, amt);
-      const batchB = await callBatch(fetchImpl, rpc, canary, itemsUsdc, timeoutMs);
+      const batchB = await callBatch(fetchImpl, rpc, canary, itemsUsdc, timeoutMs, collect, "usdc");
       if (batchB == null) return null; // ابهامِ مرحله‌ی B هم اندپوینتِ بعدی را صدا نمی‌زند
 
       const verdictB = verdictFrom(batchB);

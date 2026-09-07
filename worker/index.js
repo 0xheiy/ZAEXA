@@ -731,6 +731,20 @@ async function diagVerdict(request, url, env, ctx) {
     return vdDone(200, { v, ms: Date.now() - t0, why });
   }
   const meta = await ogFetchMeta(addr, env);
+
+  // ?probe=1 — همان سطلِ نرخِ «vd» بالا را می‌خورد (هیچ مسیرِ ارزان‌تری
+  // ندارد)، ولی ogFetchVerdict را دور می‌زند: آن تابع از کشِ verdict
+  // می‌خواند و در آن می‌نویسد، و یک برخوردِ کش دقیقاً یک verdict بدونِ هیچ
+  // جزئیاتِ صرافی‌ای برمی‌گرداند — این ابزار برای همان «کدام صرافی چه
+  // گفت» ساخته شده، پس باید مستقیم fetchVerdict را با یک collect تازه صدا
+  // بزند، نه از پشتِ کش. هیچ‌چیزی هم در کش نوشته نمی‌شود؛ این یک پروبِ
+  // یک‌باره است، نه چیزی که verdictِ بعدیِ همین آدرس را رنگ بزند.
+  if (url.searchParams.get("probe") === "1") {
+    const collect = [];
+    const v = await fetchVerdict(addr, meta, { deadlineAt: t0 + OG_BUDGET_MS, fetchImpl: fetch, collect });
+    return vdDone(200, { v, ms: Date.now() - t0, venues: collect });
+  }
+
   // ⚠️ ماژولِ Base (worker/verdict.js) دست‌نخورده مانده و هیچ why‌ای تولید
   // نمی‌کند؛ برای یک verdictِ null در همین زنجیره، به‌جای حدسِ یک why از رویِ
   // هیچ، این کلید کلاً از پاسخ حذف می‌شود — نه اینکه internal گفته شود.

@@ -3526,6 +3526,385 @@ const ethers = globalThis.ethers;
     + REPORT_RUN_MAX_TOKENS + ") is never above the scheduled cap (" + REPORT_MAX_TOKENS_PER_RUN + ")");
 }
 
+/* ---- ۲۵. لاگِ پروبِ verdict (opts.collect) و GET /vd/<Base>?probe=1 ----
+   مسئله‌ای که این ابزار برای آن ساخته شده در بالای این فایل توضیح داده
+   نشده، توضیحش کنارِ خودِ verdict.js/index.js است: امروز یک توکنِ Base که
+   واقعاً قابلِ‌فروش است می‌تواند "nosell" بگیرد چون صرافیِ واقعی‌اش
+   (مثلاً uniswap-v4-base) اصلاً عضوِ VD_VENUES نیست و هر پروب رد می‌شود —
+   و از داخلِ همین کانتینر هیچ RPC واقعیِ Base در دسترس نیست تا فهمید هر
+   صرافی واقعاً چه برمی‌گرداند. این بخش خودِ verdictِ برگشتی را عوض نمی‌کند
+   (هدفِ این تغییر نبود)، فقط ثابت می‌کند لاگِ observe-only درست کار می‌کند:
+   هرگز چیزی را عوض نمی‌کند، هرگز از رویِ متنِ خطا تصمیم نمی‌گیرد، هرگز
+   URLِ RPC را لو نمی‌دهد، و هرگز کشِ verdict را آلوده نمی‌کند. */
+{
+  const w = (n) => BigInt(n).toString(16).padStart(64, "0");
+  const mkStatic4 = (amountOut) => "0x" + w(amountOut) + w(0) + w(0) + w(0);
+  const jsonRes = (body, status = 200) => new Response(JSON.stringify(body), {
+    status, headers: { "content-type": "application/json" },
+  });
+  const TOKEN = "0x5555555555555555555555555555555555555555";
+  const meta = { decimals: 18, priceUsd: 2000 };
+  // شکلِ probeItems واقعی را از خودِ buildProbe می‌گیریم، نه یک فهرستِ
+  // دستیِ دومِ نامِ صرافی‌ها — اگر VD_VENUES جابه‌جا شود این هم خودش را
+  // به‌روز می‌بیند.
+  const probeShape = vd.buildProbe(TOKEN, vd.WETH_ADDR, 1n);
+  const N_ITEMS = probeShape.length;
+
+  const allObservedOut = []; // برای بخشِ ۲۵.۶ (واژه‌نامه) از همه‌ی سناریوهای زیر جمع می‌شود
+
+  // الف) opts.collect نباید هیچ اثری روی verdict یا شمارِ فراخوانی‌ها بگذارد —
+  // دو سناریوی کاملاً یکسان، یکی بدونِ collect، یکی با آن.
+  {
+    const fetchOnce = async (url, init) => {
+      const reqs = JSON.parse(init.body);
+      const body = reqs.map((r) => r.id === 0
+        ? { id: 0, result: mkStatic4(5) }
+        : { id: r.id, result: r.id === 1 ? mkStatic4(777) : "0x" });
+      return jsonRes(body);
+    };
+    let calls1 = 0;
+    const v1 = await vd.fetchVerdict(TOKEN, meta,
+      { fetchImpl: (u, o) => { calls1++; return fetchOnce(u, o); }, rpcs: ["https://rpc-a.example"] });
+
+    let calls2 = 0;
+    const collect = [];
+    const v2 = await vd.fetchVerdict(TOKEN, meta,
+      { fetchImpl: (u, o) => { calls2++; return fetchOnce(u, o); }, rpcs: ["https://rpc-a.example"], collect });
+
+    ok(v1 === "sell" && v2 === "sell", "sanity: this scenario should verdict sell (got " + v1 + "/" + v2 + ")");
+    ok(v1 === v2, "opts.collect must never change the returned verdict: without=" + v1 + " with=" + v2);
+    ok(calls1 === calls2, "opts.collect must never change the number of fetch calls: without=" +
+      calls1 + " with=" + calls2);
+    ok(collect.length > 0, "collect should have been populated when passed as an array");
+    allObservedOut.push(...collect.map((e) => e.out));
+  }
+
+  // ب) یک کوتِ مثبت میانِ رد‌ها → "quoted"، و verdict همچنان "sell"
+  {
+    const collect = [];
+    const fetchImpl = async (url, init) => {
+      const reqs = JSON.parse(init.body);
+      const body = reqs.map((r) => r.id === 0
+        ? { id: 0, result: mkStatic4(5) }
+        : { id: r.id, result: r.id === 1 ? mkStatic4(777) : "0x" });
+      return jsonRes(body);
+    };
+    const v = await vd.fetchVerdict(TOKEN, meta, { fetchImpl, rpcs: ["https://rpc-a.example"], collect });
+    ok(v === "sell", "one quoting item must verdict sell (got " + v + ")");
+    const first = probeShape[0]; // آیتمی که در fetchImpl بالا id=1 می‌گیرد
+    const entry = collect.find((e) => e.venue === first.id && e.key === first.key && e.stage === "weth");
+    ok(entry && entry.out === "quoted",
+      "a decoded positive value must be recorded as \"quoted\", got " + JSON.stringify(entry));
+    allObservedOut.push(...collect.map((e) => e.out));
+  }
+
+  // ج) همه با کدِ ۳ رد می‌شوند → هر آیتم "revert:3"، verdict همچنان "nosell"
+  // (همان رفتارِ امروز؛ این ابزار فقط آن را ثبت می‌کند، عوضش نمی‌کند).
+  let allCode3Collect;
+  {
+    const collect = [];
+    const fetchImpl = async (url, init) => {
+      const reqs = JSON.parse(init.body);
+      const body = reqs.map((r) => r.id === 0
+        ? { id: 0, result: mkStatic4(5) }
+        : { id: r.id, error: { code: 3 } });
+      return jsonRes(body);
+    };
+    const v = await vd.fetchVerdict(TOKEN, meta, { fetchImpl, rpcs: ["https://rpc-a.example"], collect });
+    ok(v === "nosell", "an all-code-3-revert batch must still verdict nosell — this instrument records "
+      + "today's behaviour, it does not change it (got " + v + ")");
+    const itemEntries = collect.filter((e) => e.venue !== "canary" && e.venue !== null);
+    ok(itemEntries.length === N_ITEMS * 2,
+      "expected " + (N_ITEMS * 2) + " item entries (both stages ran), got " + itemEntries.length);
+    ok(itemEntries.every((e) => e.out === "revert:3"),
+      "every reverted item must read \"revert:3\", got: " + JSON.stringify(itemEntries.filter((e) => e.out !== "revert:3")));
+    allCode3Collect = collect;
+    allObservedOut.push(...collect.map((e) => e.out));
+  }
+
+  // د) واژه‌نامه‌ی بسته: خالی/صفر/رمزگشایی‌نشده/کدهای خطا/بدونِ‌پاسخ، همه در یک batch
+  {
+    const collect = [];
+    const [pEmpty, pZero, pBad, pCode, pNoCode, pMissing] = probeShape; // آیتم‌های ۱ تا ۶
+    const fetchImpl = async (url, init) => {
+      const reqs = JSON.parse(init.body);
+      const body = [];
+      for (const r of reqs) {
+        if (r.id === 0) { body.push({ id: 0, result: mkStatic4(5) }); continue; }
+        if (r.id === 1) { body.push({ id: 1, result: "0x" }); continue; }               // "empty"
+        if (r.id === 2) { body.push({ id: 2, result: mkStatic4(0) }); continue; }        // "zero"
+        if (r.id === 3) { body.push({ id: 3, result: "0xzz" }); continue; }              // "undecodable"
+        if (r.id === 4) { body.push({ id: 4, error: { code: -32000 } }); continue; }     // "revert:-32000"
+        if (r.id === 5) { body.push({ id: 5, error: { message: "no code field here" } }); continue; } // "revert:unknown"
+        if (r.id === 6) continue; // عمداً حذف شده از پاسخ → «no-answer»
+        body.push({ id: r.id, result: "0x" });
+      }
+      return jsonRes(body);
+    };
+    await vd.fetchVerdict(TOKEN, meta, { fetchImpl, rpcs: ["https://rpc-a.example"], collect });
+    const find = (p) => collect.find((e) => e.venue === p.id && e.key === p.key && e.stage === "weth");
+    ok(find(pEmpty) && find(pEmpty).out === "empty",
+      "an exact \"0x\" result must read \"empty\", got " + JSON.stringify(find(pEmpty)));
+    ok(find(pZero) && find(pZero).out === "zero",
+      "a decoded-zero result must read \"zero\", got " + JSON.stringify(find(pZero)));
+    ok(find(pBad) && find(pBad).out === "undecodable",
+      "an unparseable result string must read \"undecodable\", got " + JSON.stringify(find(pBad)));
+    ok(find(pCode) && find(pCode).out === "revert:-32000",
+      "error.code -32000 must read exactly \"revert:-32000\" (never from message text), got " +
+      JSON.stringify(find(pCode)));
+    ok(find(pNoCode) && find(pNoCode).out === "revert:unknown",
+      "an error with a missing code must read \"revert:unknown\", got " + JSON.stringify(find(pNoCode)));
+    ok(find(pMissing) && find(pMissing).out === "no-answer",
+      "no entry for this id (the -1 sentinel shape) must read \"no-answer\", not \"revert:-1\", got " +
+      JSON.stringify(find(pMissing)));
+    allObservedOut.push(...collect.map((e) => e.out));
+  }
+
+  // ه) شکستِ کلِ batch (پرتاب یا غیر-۲۰۰) → دقیقاً یک "batch-failed"، نه یک ردیف به‌ازای هر آیتم
+  {
+    // ه‌.۱ — پرتابِ شبکه‌ای در همان اولین (و تنها) تلاش → مرحله‌ی weth هرگز کامل نشد
+    const collect = [];
+    const fetchImpl = async () => { throw new Error("network is down"); };
+    const v = await vd.fetchVerdict(TOKEN, meta, { fetchImpl, rpcs: ["https://rpc-a.example"], collect });
+    ok(v === null, "a thrown fetch with no other endpoint to try must give null (got " + v + ")");
+    ok(collect.length === 1 && collect[0].venue === null && collect[0].key === null &&
+      collect[0].out === "batch-failed" && collect[0].stage === "weth",
+      "a thrown fetch must record exactly one batch-failed entry for the weth stage and nothing else, got: "
+      + JSON.stringify(collect));
+    allObservedOut.push(...collect.map((e) => e.out));
+  }
+  {
+    // ه‌.۲ — مرحله‌ی weth کامل و nosell می‌شود، بعد مرحله‌ی usdc با ۵۰۰ برمی‌گردد
+    const collect = [];
+    let calls = 0;
+    const fetchImpl = async (url, init) => {
+      calls++;
+      if (calls === 1) {
+        const reqs = JSON.parse(init.body);
+        const body = reqs.map((r) => r.id === 0 ? { id: 0, result: mkStatic4(5) } : { id: r.id, error: { code: 3 } });
+        return jsonRes(body);
+      }
+      return new Response("boom", { status: 500 });
+    };
+    const v = await vd.fetchVerdict(TOKEN, meta, { fetchImpl, rpcs: ["https://rpc-a.example"], collect });
+    ok(v === null, "a stage-B non-200 must give null (got " + v + ")");
+    const wethEntries = collect.filter((e) => e.stage === "weth");
+    const usdcEntries = collect.filter((e) => e.stage === "usdc");
+    ok(wethEntries.length === N_ITEMS + 1,
+      "the weth stage ran fully and should carry canary + " + N_ITEMS + " items, got " + wethEntries.length);
+    ok(usdcEntries.length === 1 && usdcEntries[0].venue === null && usdcEntries[0].key === null &&
+      usdcEntries[0].out === "batch-failed",
+      "a non-200 stage-B batch must record exactly one batch-failed entry and no per-item entries, got: "
+      + JSON.stringify(usdcEntries));
+    allObservedOut.push(...collect.map((e) => e.out));
+  }
+
+  // و) مهلتِ تمام‌شده پیش از یک مرحله → دقیقاً یک "deadline" برای همان مرحله، بدونِ هیچ فراخوانی‌ای
+  {
+    const collect = [];
+    let calls = 0;
+    const fetchImpl = async () => { calls++; return jsonRes([]); };
+    const v = await vd.fetchVerdict(TOKEN, meta,
+      { fetchImpl, now: () => 10_000, deadlineAt: 5_000, rpcs: ["https://rpc-a.example"], collect });
+    ok(v === null && calls === 0, "past the deadline must give null with zero fetch calls (got " + v +
+      ", " + calls + " calls)");
+    ok(collect.length === 1 && collect[0].venue === null && collect[0].key === null &&
+      collect[0].out === "deadline" && collect[0].stage === "weth",
+      "a deadline hit before the weth stage must record exactly one deadline entry, got: " + JSON.stringify(collect));
+    allObservedOut.push(...collect.map((e) => e.out));
+  }
+
+  // ز) کاناری دقیقاً یک‌بار به‌ازای هر batchی که واقعاً اجرا شد، و ترتیبِ
+  // stage همیشه weth سپس (در صورتِ اجرا) usdc — با همان سناریوی «بند ج».
+  {
+    const collect = allCode3Collect;
+    const canaryEntries = collect.filter((e) => e.venue === "canary");
+    ok(canaryEntries.length === 2,
+      "the canary must be recorded once per batch that ran (weth + usdc here), got " + canaryEntries.length);
+    ok(canaryEntries[0] && canaryEntries[0].stage === "weth" && canaryEntries[1] && canaryEntries[1].stage === "usdc",
+      "canary stage order must be weth then usdc, got " + JSON.stringify(canaryEntries.map((e) => e.stage)));
+    const stages = collect.map((e) => e.stage);
+    ok(stages.filter((s) => s === "weth").length === N_ITEMS + 1 &&
+      stages.filter((s) => s === "usdc").length === N_ITEMS + 1,
+      "expected " + (N_ITEMS + 1) + " entries per stage (canary+items), got weth=" +
+      stages.filter((s) => s === "weth").length + " usdc=" + stages.filter((s) => s === "usdc").length);
+  }
+
+  // ح) واژه‌نامه‌ی بسته — هر out مشاهده‌شده یا عضوِ VD_PROBE_OUT است، یا با
+  // "revert:" شروع می‌شود و بخشِ بعدش یک عددِ صحیح یا لفظِ "unknown" است.
+  // دقیقاً همان قاعده‌ای که VD_SOL_WHY با isFrozenWhy در همین فایل سنجیده
+  // می‌شود؛ فهرست از رویِ خودِ vd.VD_PROBE_OUT پیموده می‌شود، نه یک کپیِ دوم.
+  function isFrozenProbeOut(out) {
+    const s = String(out);
+    if (s.startsWith("revert:")) {
+      const suffix = s.slice("revert:".length);
+      return suffix === "unknown" || /^-?\d+$/.test(suffix);
+    }
+    return vd.VD_PROBE_OUT.includes(s);
+  }
+  ok(allObservedOut.length > 10, "sanity: the scenarios above should have observed a good number of outs, got "
+    + allObservedOut.length);
+  const stray = allObservedOut.filter((o) => !isFrozenProbeOut(o));
+  ok(stray.length === 0, "every observed \"out\" must match the frozen vocabulary (VD_PROBE_OUT, or a " +
+    "\"revert:<int|unknown>\"), got strays: " + JSON.stringify(stray));
+  // هر عضوِ خودِ VD_PROBE_OUT (به‌جز پیشوندِ برهنه‌ی "revert") واقعاً هم در
+  // یکی از سناریوهای بالا مشاهده شد — واژه‌نامه بازتابِ رفتارِ واقعی است،
+  // نه فقط یک آرزو.
+  const observedSet = new Set(allObservedOut);
+  for (const label of vd.VD_PROBE_OUT) {
+    if (label === "revert") continue; // خودش هرگز خام ثبت نمی‌شود، همیشه با ":<code>"
+    ok(observedSet.has(label), "VD_PROBE_OUT lists \"" + label + "\" but no scenario above ever produced it");
+  }
+
+  // ط) GET /vd/<Base address>?probe=1 سرتاسری — venues فقط اینجا ظاهر می‌شود
+  {
+    const { UPSTREAM_FREE: UF } = await import("./index.js");
+    const ADDR_PROBE = "0x" + "6".repeat(40);
+    const savedFetch = globalThis.fetch;
+    const gtMeta = () => new Response(JSON.stringify({ data: { attributes: {
+      name: "Probe Test Token", symbol: "PTT", total_reserve_in_usd: "1000",
+      decimals: 18, price_usd: "2000" } } }), { status: 200, headers: { "content-type": "application/json" } });
+
+    globalThis.fetch = async (url, init) => {
+      const u = String(url);
+      if (u.startsWith(UF)) return gtMeta();
+      const reqs = JSON.parse(init.body);
+      const body = reqs.map((r) => r.id === 0
+        ? { id: 0, result: mkStatic4(5) }
+        : { id: r.id, result: r.id === 1 ? mkStatic4(555) : "0x" });
+      return jsonRes(body);
+    };
+
+    const resProbe = await call("/vd/" + ADDR_PROBE + "?probe=1",
+      { headers: { "cf-connecting-ip": "203.0.113.90" } });
+    ok(resProbe.status === 200, "/vd/<addr>?probe=1 should be 200 (got " + resProbe.status + ")");
+    const bodyProbe = await resProbe.json();
+    ok(Array.isArray(bodyProbe.venues), "?probe=1 must answer with a venues array, got " +
+      JSON.stringify(bodyProbe).slice(0, 300));
+    ok(bodyProbe.v === "sell" && typeof bodyProbe.ms === "number",
+      "?probe=1 must still answer {v, ms} alongside venues, got " + JSON.stringify(bodyProbe).slice(0, 300));
+    ok(bodyProbe.venues.length > 0, "?probe=1's venues array should not be empty for a scenario that ran");
+    for (const rpcHost of vd.VD_RPCS) {
+      ok(!JSON.stringify(bodyProbe).includes(new URL(rpcHost).hostname),
+        "no real RPC hostname should ever appear in the probe response body, found " + rpcHost);
+    }
+
+    globalThis.fetch = async (url, init) => {
+      const u = String(url);
+      if (u.startsWith(UF)) return gtMeta();
+      const reqs = JSON.parse(init.body);
+      const body = reqs.map((r) => r.id === 0
+        ? { id: 0, result: mkStatic4(5) }
+        : { id: r.id, result: r.id === 1 ? mkStatic4(555) : "0x" });
+      return jsonRes(body);
+    };
+    const resNormal = await call("/vd/" + ADDR_PROBE, { headers: { "cf-connecting-ip": "203.0.113.91" } });
+    ok(resNormal.status === 200, "/vd/<addr> without probe should still be 200 (got " + resNormal.status + ")");
+    const bodyNormal = await resNormal.json();
+    ok(!("venues" in bodyNormal), "a normal (non-probe) /vd/<addr> response must never carry a venues key, "
+      + "got keys: " + JSON.stringify(Object.keys(bodyNormal)));
+    const normalKeys = Object.keys(bodyNormal).sort();
+    ok(normalKeys.length === 2 && normalKeys[0] === "ms" && normalKeys[1] === "v",
+      "a normal /vd/<addr> body must be exactly {v, ms}, got keys: " + JSON.stringify(normalKeys));
+
+    globalThis.fetch = savedFetch;
+  }
+
+  // ي) URLِ اختصاصیِ RPC هرگز نباید در collect ظاهر شود — نه کاملش، نه
+  // مسیرش، نه کوئری‌اش. worker/verdict.js هیچ راهِ تزریقِ rpcs را برای
+  // /vd/<Base> از env نمی‌دهد (برخلافِ SOL_RPC برای سولانا)، پس این را
+  // مستقیماً روی خودِ fetchVerdict می‌سنجیم — دقیقاً همان آرایه‌ای که
+  // ?probe=1 بدونِ هیچ تغییری زیرِ کلیدِ venues برمی‌گرداند.
+  {
+    const SECRET_RPC = "https://rpc.example.invalid/v2/SECRET-PATH?k=SECRET-QUERY";
+    const collect = [];
+    const fetchImpl = async (url, init) => {
+      const reqs = JSON.parse(init.body);
+      const body = reqs.map((r) => r.id === 0 ? { id: 0, result: mkStatic4(5) } : { id: r.id, error: { code: 3 } });
+      return jsonRes(body);
+    };
+    const v = await vd.fetchVerdict(TOKEN, meta, { fetchImpl, rpcs: [SECRET_RPC], collect });
+    ok(v === "nosell", "sanity check for the secrecy scenario (got " + v + ")");
+    const serialized = JSON.stringify(collect);
+    ok(!serialized.includes("SECRET-PATH"), "the injected RPC URL's path leaked into the probe log: " + serialized);
+    ok(!serialized.includes("SECRET-QUERY"), "the injected RPC URL's query leaked into the probe log: " + serialized);
+    ok(!serialized.includes(SECRET_RPC), "the full injected RPC URL leaked into the probe log");
+  }
+
+  // ك) ?probe=1 هرگز نباید کشِ verdict را بخواند یا در آن بنویسد — یک ضربه‌ی
+  // کش دقیقاً یک verdict بدونِ هیچ جزئیاتی می‌داد و کلِ این ابزار کور می‌شد.
+  {
+    const shelf = new Map();
+    globalThis.caches = {
+      default: {
+        match: async (req) => { const v = shelf.get(req.url); return v ? v.clone() : undefined; },
+        put: async (req, r) => { shelf.set(req.url, r); },
+      },
+    };
+    const { UPSTREAM_FREE: UF2 } = await import("./index.js");
+    const ADDR_CACHE = "0x" + "7".repeat(40);
+    const savedFetch = globalThis.fetch;
+    const gtMeta2 = () => new Response(JSON.stringify({ data: { attributes: {
+      name: "Cache Test Token", symbol: "CTT", total_reserve_in_usd: "1000",
+      decimals: 18, price_usd: "2000" } } }), { status: 200, headers: { "content-type": "application/json" } });
+
+    // اول: ?probe=1 با پاسخی که "nosell" می‌دهد
+    globalThis.fetch = async (url, init) => {
+      const u = String(url);
+      if (u.startsWith(UF2)) return gtMeta2();
+      const reqs = JSON.parse(init.body);
+      const body = reqs.map((r) => r.id === 0 ? { id: 0, result: mkStatic4(5) } : { id: r.id, error: { code: 3 } });
+      return jsonRes(body);
+    };
+    const resProbe = await call("/vd/" + ADDR_CACHE + "?probe=1",
+      { headers: { "cf-connecting-ip": "203.0.113.92" } });
+    const bodyProbe = await resProbe.json();
+    ok(bodyProbe.v === "nosell", "sanity: the probe scenario here should verdict nosell (got " +
+      JSON.stringify(bodyProbe) + ")");
+    ok(shelf.size === 0, "?probe=1 must never write to the verdict cache, found " + shelf.size + " entries");
+
+    // بعد: همان آدرس، بدونِ probe، ولی این‌بار RPC جواب دیگری می‌دهد
+    // ("sell") — اگر مسیرِ عادی از کش سرو می‌شد همچنان "nosell" قدیمی را
+    // می‌دید؛ چون واقعاً دوباره fetch می‌کند، جوابِ تازه را می‌بیند.
+    let rpcCallsAfter = 0;
+    globalThis.fetch = async (url, init) => {
+      const u = String(url);
+      if (u.startsWith(UF2)) return gtMeta2();
+      rpcCallsAfter++;
+      const reqs = JSON.parse(init.body);
+      const body = reqs.map((r) => r.id === 0
+        ? { id: 0, result: mkStatic4(5) }
+        : { id: r.id, result: r.id === 1 ? mkStatic4(999) : "0x" });
+      return jsonRes(body);
+    };
+    const resNormal = await call("/vd/" + ADDR_CACHE, { headers: { "cf-connecting-ip": "203.0.113.93" } });
+    const bodyNormal = await resNormal.json();
+    ok(bodyNormal.v === "sell" && rpcCallsAfter > 0,
+      "the normal path after ?probe=1 must really re-fetch and see the new answer, not a cached "
+      + "\"nosell\" from the probe path (got v=" + bodyNormal.v + ", rpcCallsAfter=" + rpcCallsAfter + ")");
+
+    delete globalThis.caches;
+    globalThis.fetch = savedFetch;
+  }
+
+  // ⚠️ این بلوک چند بار globalThis.fetch را برای آزمودنِ worker.fetch سرتاسری
+  // عوض کرد؛ اگر همین‌جا به trackingFetch برنگردد، هر بخشِ بعدی که به
+  // sent/reply تکیه دارد بی‌صدا چیزی نمی‌بیند (همان تله‌ای که بخشِ ۱۳ هم
+  // کنارش هشدار داده).
+  globalThis.fetch = trackingFetch;
+
+  console.log("[vd probe] opts.collect never changes the verdict or the fetch-call count; a positive "
+    + "item reads \"quoted\"; an all-revert:3 batch is recorded faithfully as nosell (unchanged "
+    + "behaviour); \"0x\"/zero/undecodable/revert:<code>/revert:unknown/no-answer all classified from "
+    + "status and shape only, never from error.message; a whole-batch failure (throw or non-200) "
+    + "records exactly one batch-failed entry, never one per item; a deadline hit before a stage "
+    + "records exactly one deadline entry for that stage; the canary is recorded once per batch that "
+    + "ran, weth before usdc; every observed out matches the frozen VD_PROBE_OUT vocabulary (prefix+int "
+    + "rule verified the same way as VD_SOL_WHY); GET /vd/<address>?probe=1 adds a venues array "
+    + "end to end while a normal /vd/<address> body stays exactly {v, ms}; an injected RPC URL's path "
+    + "and query never leak into the probe log; and ?probe=1 never reads or writes the verdict cache");
+}
+
 console.log(fails === 0
   ? "[gt proxy] worker ok — " + REAL.length + " real paths proxied, " + BAD.length +
     " refused without touching the network, 429 passes through with CORS\n" +
