@@ -862,7 +862,7 @@ function isSolidlyReqId(id) { return PROBE_KIND_BY_ID.get(id) === "SOLIDLY"; }
     "function getAmountsOut(uint256,(address,address,bool,address)[]) returns (uint256[])"]);
 
   const probe = vd.buildProbe(TOKEN, vd.WETH_ADDR, amt);
-  ok(probe.length === 16, "buildProbe should produce exactly 16 calls (3+3+5+2+1+1+1), got " + probe.length);
+  ok(probe.length === 17, "buildProbe should produce exactly 17 calls (3+3+5+2+1+1+1+1), got " + probe.length);
 
   for (const p of probe) {
     const row = vd.VD_VENUES.find((r) => r.id === p.id);
@@ -4076,11 +4076,34 @@ function isSolidlyReqId(id) { return PROBE_KIND_BY_ID.get(id) === "SOLIDLY"; }
     // نگاشت باید دقیقاً همان هفت idِ اندازه‌گیری‌شده را داشته باشد — نه
     // بیشتر نه کمتر — و uniswap-v4-base هرگز نباید عضوش شود.
     const wantIds = ["uniswap-v3-base", "pancakeswap-v3-base", "aerodrome-slipstream",
-      "aerodrome-base", "baseswap", "sushiswap-v2-base", "alien-base"];
+      "aerodrome-base", "baseswap", "sushiswap-v2-base", "alien-base", "uniswap-v2-base"];
     ok(Object.keys(GT_DEX_TO_VENUE).length === wantIds.length &&
       wantIds.every((id) => id in GT_DEX_TO_VENUE),
-      "GT_DEX_TO_VENUE must have exactly the seven measured dex ids, got " +
+      "GT_DEX_TO_VENUE must have exactly the measured dex ids, got " +
       JSON.stringify(Object.keys(GT_DEX_TO_VENUE)));
+
+    // \U0001f534 هر صرافیی که پروب می‌شود باید در نگاشت هم باشد، وگرنه گاردِ پوشش
+    // هرگز آن را «پوشش‌داده‌شده» نمی‌بیند و حکمِ منفی بی‌صدا غیرممکن می‌شود.
+    // دقیقاً دامی که افزودنِ uniswap-v2 می‌توانست بیندازد.
+    const mappedVenues = new Set(Object.values(GT_DEX_TO_VENUE));
+    for (const row of vd.VD_VENUES) {
+      ok(mappedVenues.has(row.id),
+        "venue " + row.id + " is probed but no GT dex id maps to it, so the coverage guard can never "
+        + "see it and a negative verdict for it becomes silently impossible");
+    }
+    for (const venue of mappedVenues) {
+      ok(vd.VD_VENUES.some((r) => r.id === venue),
+        "GT_DEX_TO_VENUE maps a dex to " + venue + ", which is not a venue we probe");
+    }
+
+    // روترِ Uniswap نسخه‌ی ۲ روی Base — آدرس پین می‌شود تا یک تغییرِ
+    // بی‌دقت بی‌صدا قیمتِ قراردادِ دیگری را نپرسد.
+    const uniV2 = vd.VD_VENUES.find((r) => r.id === "uniswap-v2");
+    ok(uniV2 && uniV2.kind === "V2",
+      "uniswap-v2 must be probed as a V2-style router");
+    ok(uniV2 && uniV2.to.toLowerCase() === "0x4752ba5dbc23f44d87826276bf6fd6b1c372ad24",
+      "the uniswap-v2 router address must stay exactly the documented Base deployment, got " +
+      (uniV2 && uniV2.to));
     ok(!("uniswap-v4-base" in GT_DEX_TO_VENUE),
       "uniswap-v4-base must never map to a venue — it is a different contract we do not probe");
     ok(Object.isFrozen(GT_DEX_TO_VENUE), "GT_DEX_TO_VENUE must be frozen");

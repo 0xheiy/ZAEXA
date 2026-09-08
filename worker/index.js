@@ -516,6 +516,9 @@ export const GT_DEX_TO_VENUE = Object.freeze({
   "baseswap": "baseswap",
   "sushiswap-v2-base": "sushiswap",
   "alien-base": "alienbase",
+  // از ۸ سپتامبر پوشش داده می‌شود؛ پیش از آن عمداً بیرون بود چون روترش در
+  // VD_VENUES نبود. جدول و فهرستِ صرافی‌ها باید همیشه با هم جابه‌جا شوند.
+  "uniswap-v2-base": "uniswap-v2",
 });
 
 /* از رویِ خودِ VD_VENUES ساخته می‌شود — یک فهرستِ دستیِ دومِ idِ صرافی‌ها
