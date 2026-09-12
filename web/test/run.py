@@ -929,6 +929,125 @@ def check_landing_page():
           % (len(app_hashes), sorted(known_views)))
 
 
+def check_pairs_page():
+    """web/pairs.html — نمای فقط-خوانده روی /pairs.json?chain=base.
+
+    این نگهبان ایستا است: روی متنِ خودِ فایل می‌گردد، نه روی صفحه‌ی رندرشده
+    (آن بخش، اگر امکانش باشد، در check_pairs_page_dynamic داخل main() است).
+    سه‌چیزی که اگر بشکنند بی‌صدا می‌شکنند: متنِ «نمی‌دانیم» که شکلِ «رد شد»
+    بگیرد (دقیقاً همان اشتباهی که این محصول برایش ساخته شده)، یک آدرس/قیمتِ
+    واقعی که این‌جا جا بماند (این صفحه باید از داده خالی باشد)، و یک درخواستِ
+    بیرونی که آرامِ «هیچ بک‌اندِ تازه‌ای» را نقض کند.
+    """
+    path = os.path.join(HERE, "..", "pairs.html")
+    assert os.path.exists(path), "web/pairs.html is missing"
+    src = open(path, encoding="utf-8").read()
+
+    assert "<h1>New pairs</h1>" in src, (
+        "web/pairs.html's <h1> must read exactly \"New pairs\"")
+    sub_copy = ("The newest Base pools we found, each run through the same exit check as the "
+                "app. Updated hourly.")
+    assert sub_copy in src, "web/pairs.html is missing the exact sub-heading copy: %r" % sub_copy
+
+    # ---- سه حالتِ حکم: برچسب + جمله‌ی معنا، بایت‌به‌بایت ----
+    # ⚠️ عمداً *دو بار* سنجیده می‌شود: یک‌بار در نشانِ استاتیکِ راهنما (legend،
+    # جایی‌که کاربر بدونِ هیچ فچی همین حالا آن را می‌بیند) و یک‌بار در آبجکتِ
+    # LABELS داخلِ اسکریپت (جایی‌که هر ردیف واقعی از آن‌جا برچسب می‌گیرد).
+    # اگر فقط یکی از این دو را می‌سنجیدیم، تغییردادنِ فقط legend یا فقط
+    # LABELS بی‌صدا رد می‌شد چون رشته‌ی درست هنوز جای دیگری در فایل هست.
+    permanent_note = ("A sell quote is not a promise. It is one quote, at one moment, from the "
+                       "venues we cover. Tokens can change after it.")
+    assert permanent_note in src, (
+        "web/pairs.html is missing the exact permanent note: %r" % permanent_note)
+
+    legend_lines = {
+        "sell":    '<span class="badge badge-pos">Sell quoted</span><span class="legend-text">'
+                   'A venue quoted a sell for this token.</span>',
+        "nosell":  '<span class="badge badge-neg">No sell quote</span><span class="legend-text">'
+                   'No venue we cover would quote a sell.</span>',
+        "unknown": '<span class="badge badge-unknown">Unknown</span><span class="legend-text">'
+                   'We could not check this one. Unknown is not "safe" and not "scam".</span>',
+    }
+    for verdict, line in legend_lines.items():
+        assert line in src, (
+            "web/pairs.html's always-visible legend is missing the exact %r markup: %r"
+            % (verdict, line))
+
+    js_labels = {
+        "sell":    ("label: 'Sell quoted',   meaning: 'A venue quoted a sell for this token.'"),
+        "nosell":  ("label: 'No sell quote', meaning: 'No venue we cover would quote a sell.'"),
+        "unknown": ("label: 'Unknown',       meaning: 'We could not check this one. Unknown is "
+                    "not \"safe\" and not \"scam\".'"),
+    }
+    for verdict, line in js_labels.items():
+        assert line in src, (
+            "web/pairs.html's script is missing the exact %r label/meaning: %r" % (verdict, line))
+
+    # 🔴 «Unknown» هرگز نباید کلاسِ رنگِ مثبت/منفی را هم‌زمان با خودش داشته
+    # باشد — همان بدنه‌ی اصلیِ این محصول: «نمی‌دانیم» فروخته‌شده به‌جای «نه»
+    # نباید بشود، پس نشانه‌اش (badge-unknown) هرگز نباید کنارِ badge-pos یا
+    # badge-neg روی یک عنصر بنشیند.
+    class_lists = re.findall(r'class="([^"]*badge[^"]*)"', src)
+    unknown_classes = [c for c in class_lists if "badge-unknown" in c]
+    assert unknown_classes, "could not find any element with class=\"...badge-unknown...\" in web/pairs.html"
+    tainted = [c for c in unknown_classes if "badge-pos" in c or "badge-neg" in c]
+    assert not tainted, (
+        "an unknown-verdict badge also carries a positive/negative class: %s — unknown must "
+        "never look like a pass or a fail" % tainted)
+
+    # ---- تنها یک اندپوینتِ بک‌اند: /pairs.json?chain=base ----
+    assert "/pairs.json?chain=base" in src, (
+        "web/pairs.html never calls /pairs.json?chain=base — it has no data to show")
+    other_backend = re.findall(r'"(/(?:gt|vd|ev|report)(?:[/"?][^"]*)?)"', src)
+    assert not other_backend, (
+        "web/pairs.html references a backend path other than /pairs.json: %s — this page must "
+        "add no new backend and must not reach into another endpoint's traffic" % other_backend)
+    other_json = [m for m in re.findall(r'"([^"]*\.json[^"]*)"', src) if "pairs.json" not in m]
+    assert not other_json, (
+        "web/pairs.html references a .json path other than /pairs.json: %s" % other_json)
+
+    # ---- بدونِ منبعِ بیرونی، جز خودِ سایت ----
+    # web/landing.html هیچ فونتی را از یک میزبانِ بیرونی نمی‌خواهد (هر دو
+    # @font-face به‌صورت data:font/woff2;base64 درون‌خطی‌اند)، پس «یک منبعِ
+    # فونتِ مجاز» برای این صفحه هم چیزی جز خودِ سایت نیست — مجموعه‌ی مجاز
+    # فقط zaexa.com است.
+    lnd_src = open(os.path.join(HERE, "..", "landing.html"), encoding="utf-8").read()
+    lnd_font_hosts = set(
+        urlparse(u).hostname
+        for u in re.findall(r'src:url\("(https?://[^"]+)"\)', lnd_src)
+    )
+    allowed_hosts = {"zaexa.com"} | lnd_font_hosts
+    refs = set(re.findall(r'(?:src|href)="(https?://[^"]*)"', src))
+    stray = sorted(r for r in refs if urlparse(r).hostname not in allowed_hosts)
+    assert not stray, (
+        "web/pairs.html loads or links to a host outside the allowed set (self + web/landing.html's "
+        "own font origin, if any): %s. Found refs: %s" % (stray, sorted(refs)))
+
+    # ---- همان کلیدِ localStorage که web/landing.html برای تم استفاده می‌کند ----
+    # هیچ‌وقت این رشته را دوباره دستی اینجا نمی‌نویسیم — از خودِ landing.html
+    # بیرون کشیده می‌شود، وگرنه اگر یک‌روز آنجا عوض شود، این نگهبان همچنان
+    # یک رشته‌ی قدیمیِ درست‌به‌نظر را می‌سنجد.
+    km = re.search(r"localStorage\.getItem\('([^']+)'\)", lnd_src)
+    assert km, "could not find the theme localStorage key inside web/landing.html itself"
+    theme_key = km.group(1)
+    assert theme_key in src, (
+        "web/pairs.html does not use web/landing.html's own theme storage key (%r) — a visitor's "
+        "theme choice would not carry across the two pages" % theme_key)
+
+    # ---- این صفحه باید از داده خالی باشد: هیچ آدرس/توکن/قیمتِ واقعی ----
+    addrs = re.findall(r"0x[0-9a-fA-F]{40}", src)
+    assert not addrs, (
+        "web/pairs.html contains what looks like a real token address: %s — this page must ship "
+        "with no data baked in, only the fetch against /pairs.json?chain=base" % addrs)
+
+    print("[pairs page] %d bytes, all 3 verdict labels/meanings present byte-for-byte, permanent "
+          "note present, only /pairs.json?chain=base referenced (%d other backend/.json refs), "
+          "%d external refs (all allowed: %s), theme key %r shared with landing.html, no baked-in "
+          "token address"
+          % (len(src), len(other_backend) + len(other_json), len(refs), sorted(allowed_hosts),
+             theme_key))
+
+
 check_no_remote_code()
 check_gt_proxy_worker()
 check_asset_cache_headers()
@@ -940,6 +1059,7 @@ check_brand_palette()
 check_one_executor_address()
 check_dex_parity()
 check_landing_page()
+check_pairs_page()
 
 
 async def check_landing_mobile(p, errors):
@@ -5176,6 +5296,117 @@ async def main():
             "a failed cross-origin LINK must still be counted as err:res even with the banner "
             "staying hidden — a silent third-party failure should still be countable later, "
             "got %s" % cross_names)
+
+        # ---- [pairs page dynamic] web/pairs.html واقعی، با /pairs.json?chain=base استاب‌شده ----
+        # همان سرورِ استاتیکِ محلی (srv/port) که چند بخش بالاتر برای
+        # WalletConnect/Custom-RPC ساختیم، از روی خودِ web/ سرو می‌شود، پس
+        # http://127.0.0.1:<port>/pairs.html همان web/pairs.html واقعی است.
+        # فقط /pairs.json?chain=base با page.route استاب می‌شود — این کانتینر
+        # هیچ GeckoTerminal یا Baseِ واقعی‌ای ندارد.
+        import json as _jsonPairs
+
+        SELL_ROW = {"chain": "base", "address": "0x" + "1" * 40, "symbol": "AAA",
+                    "name": "Alpha Coin", "v": "sell", "checkKind": "sell-quote",
+                    "checkedAt": "2020-01-01T00:00:00.000Z", "poolCreatedAt": "2020-01-01T00:00:00.000Z",
+                    "priceUsd": 0.0000123, "reserveUsd": 28800, "vol24hUsd": 150000,
+                    "fdvUsd": 900000, "dex": "uniswap_v3"}
+        NOSELL_ROW = {"chain": "base", "address": "0x" + "2" * 40, "symbol": "BBB",
+                      "name": "Beta Token", "v": "nosell", "checkKind": "sell-quote",
+                      "checkedAt": "2020-01-01T00:00:00.000Z", "poolCreatedAt": "2020-01-01T00:00:00.000Z",
+                      "priceUsd": 1.5, "reserveUsd": 500, "vol24hUsd": None,
+                      "fdvUsd": None, "dex": "aerodrome"}
+        UNKNOWN_ROW = {"chain": "base", "address": "0x" + "3" * 40, "symbol": "CCC",
+                       "name": None, "v": None, "checkKind": "sell-quote",
+                       "checkedAt": None, "poolCreatedAt": None,
+                       "priceUsd": None, "reserveUsd": 0, "vol24hUsd": 0,
+                       "fdvUsd": None, "dex": "unknown-dex"}
+
+        async def open_pairs(body_or_status, viewport=None, abort=False):
+            ppg = await b.new_page(viewport=viewport or {"width": 1240, "height": 900})
+            perrs = []
+            ppg.on("pageerror", lambda e: perrs.append(str(e)))
+
+            async def stub_pairs(route):
+                if abort:
+                    await route.abort()
+                    return
+                await route.fulfill(status=200, content_type="application/json",
+                                     body=_jsonPairs.dumps(body_or_status))
+            await ppg.route("**/pairs.json**", stub_pairs)
+            await ppg.goto("http://127.0.0.1:%d/pairs.html" % port)
+            await ppg.wait_for_timeout(600)
+            return ppg, perrs
+
+        # ۱) حالتِ نرمال: هر سه حکم با هم در یک پاسخ
+        pg_rows, errs_rows = await open_pairs(
+            {"chain": "base", "rows": [SELL_ROW, NOSELL_ROW, UNKNOWN_ROW], "store": True})
+        results_hidden = await pg_rows.evaluate("document.getElementById('resultsWrap').hidden")
+        badge_texts = await pg_rows.eval_on_selector_all(
+            "#rowsBody .badge", "els => els.map(e => e.textContent)")
+        row_count = await pg_rows.eval_on_selector_all("#rowsBody tr", "els => els.length")
+        first_href = await pg_rows.eval_on_selector(
+            "#rowsBody tr:first-child a", "e => e.getAttribute('href')")
+        await pg_rows.close()
+        print("[pairs page dynamic] rows: resultsHidden=%s rowCount=%s badges=%s firstHref=%s "
+              "errors=%s" % (results_hidden, row_count, badge_texts, first_href, errs_rows))
+        assert results_hidden is False, (
+            "web/pairs.html did not show the results table/cards for a non-empty rows response")
+        assert row_count == 3, "expected 3 rendered rows, got %s" % row_count
+        assert badge_texts == ["Sell quoted", "No sell quote", "Unknown"], (
+            "the three verdict badges did not render with the exact expected labels, in order: %s"
+            % badge_texts)
+        assert first_href == "/t/" + SELL_ROW["address"], (
+            "the first row's link did not point at /t/<address>, got %r" % first_href)
+        assert not errs_rows, "web/pairs.html threw while rendering rows: %s" % errs_rows
+
+        # ۲) rows:[] با store:true -> «هنوز چیزی جمع نشده»، نه صفحه‌ی خالی
+        pg_empty, errs_empty = await open_pairs({"chain": "base", "rows": [], "store": True})
+        empty_hidden = await pg_empty.evaluate("document.getElementById('emptyState').hidden")
+        empty_text = (await pg_empty.inner_text("#emptyState")).strip()
+        await pg_empty.close()
+        print("[pairs page dynamic] empty: hidden=%s text=%r errors=%s"
+              % (empty_hidden, empty_text, errs_empty))
+        assert empty_hidden is False, "web/pairs.html did not show the empty state for rows:[]"
+        assert empty_text == "Nothing collected yet. The hourly job writes at 17 past the hour.", (
+            "wrong empty-state copy: %r" % empty_text)
+
+        # ۳) store:false -> «انبار وصل نشده»، جدا از «صفر توکن»
+        pg_nostore, errs_nostore = await open_pairs({"chain": "base", "rows": [], "store": False})
+        nostore_hidden = await pg_nostore.evaluate("document.getElementById('noStoreState').hidden")
+        nostore_text = (await pg_nostore.inner_text("#noStoreState")).strip()
+        await pg_nostore.close()
+        print("[pairs page dynamic] no-store: hidden=%s text=%r errors=%s"
+              % (nostore_hidden, nostore_text, errs_nostore))
+        assert nostore_hidden is False, "web/pairs.html did not show the no-store state for store:false"
+        assert nostore_text == "The store is not wired up yet.", (
+            "wrong no-store-state copy: %r" % nostore_text)
+
+        # ۴) فچِ ناموفق -> پیامِ خطا + دکمه‌ی retry، هرگز جدولِ خالی به‌جای جواب
+        pg_err, errs_err = await open_pairs(None, abort=True)
+        err_hidden = await pg_err.evaluate("document.getElementById('errorState').hidden")
+        err_text = (await pg_err.inner_text("#errorState")).strip()
+        retry_visible = await pg_err.eval_on_selector("#retryBtn", "e => !!e")
+        await pg_err.close()
+        print("[pairs page dynamic] error: hidden=%s text=%r retryButton=%s errors=%s"
+              % (err_hidden, err_text, retry_visible, errs_err))
+        assert err_hidden is False, "web/pairs.html did not show the error state for a failed fetch"
+        assert err_text.startswith("Could not load the list."), (
+            "wrong error-state copy: %r" % err_text)
+        assert retry_visible, "web/pairs.html's error state has no retry button"
+
+        # ۵) عرضِ باریک -> کارت‌ها، نه جدول
+        pg_narrow, errs_narrow = await open_pairs(
+            {"chain": "base", "rows": [SELL_ROW], "store": True},
+            viewport={"width": 480, "height": 900})
+        table_display = await pg_narrow.eval_on_selector(
+            ".pairs-table", "e => getComputedStyle(e).display")
+        cards_display = await pg_narrow.eval_on_selector(
+            ".pairs-cards", "e => getComputedStyle(e).display")
+        await pg_narrow.close()
+        print("[pairs page dynamic] narrow viewport: table display=%s cards display=%s errors=%s"
+              % (table_display, cards_display, errs_narrow))
+        assert table_display == "none", "the table did not hide on a narrow viewport"
+        assert cards_display != "none", "the card list did not show on a narrow viewport"
 
         srv.shutdown()
         await b.close()

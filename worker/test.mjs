@@ -4226,6 +4226,63 @@ function isSolidlyReqId(id) { return PROBE_KIND_BY_ID.get(id) === "SOLIDLY"; }
     + "address reports the gated one — pinned side by side so the difference is never accidental");
 }
 
+/* ---- /pairs — نسخه‌ی تمیزِ آدرس برای web/pairs.html ----
+   خط Build در پنل امروز web/pairs.html را داخل _site کپی می‌کند، پس
+   بایندینگ [assets] معمولاً خودش زودتر از این مسیر جواب می‌دهد و شرطِ
+   /pairs در worker/index.js در عمل هرگز اجرا نمی‌شود — همان‌طور که کدِ
+   خودش هم می‌گوید. اینجا با یک ASSETS جاسوس دقیقاً همان رفتار سنجیده
+   می‌شود: pathname درخواستی از /pairs به /pairs.html تغییر می‌کند، نه
+   کمتر و نه بیشتر، و بدنه‌ی پاسخِ ASSETS بدون دست‌خوردن برمی‌گردد. */
+{
+  let asked = [];
+  const spyEnv = { ASSETS: { fetch: async (req) => {
+    asked.push(new URL(req.url).pathname);
+    return new Response("pairs page body", { status: 200 });
+  } } };
+  const res = await worker.fetch(new Request(ORIGIN + "/pairs"), spyEnv, {});
+  ok(res.status === 200, "GET /pairs must return the ASSETS body's status (got " + res.status + ")");
+  ok((await res.text()) === "pairs page body",
+     "GET /pairs must return exactly what ASSETS.fetch gave it, unmodified");
+  ok(asked.length === 1 && asked[0] === "/pairs.html",
+     "GET /pairs must ask ASSETS for \"/pairs.html\", got " + JSON.stringify(asked));
+
+  // بدونِ env.ASSETS: نباید پرتاب کند و نباید ۵۰۰ بدهد — مسیر باید بی‌صدا
+  // به رفتارِ امروز (که خودش هم بدونِ ASSETS چهار-صد-چهار می‌دهد) سقوط کند.
+  let threw = null;
+  let resNoAssets = null;
+  try {
+    resNoAssets = await worker.fetch(new Request(ORIGIN + "/pairs"), {}, {});
+  } catch (e) {
+    threw = e;
+  }
+  ok(threw === null, "GET /pairs with no env.ASSETS must not throw, threw: " + threw);
+  ok(resNoAssets && resNoAssets.status !== 500,
+     "GET /pairs with no env.ASSETS must not 500, got " + (resNoAssets && resNoAssets.status));
+
+  // /pairs نباید /pairs.json را سایه بیندازد — pathname فرق دارد، ولی
+  // چون هر دو با «/pairs» شروع می‌شوند، این را صریح می‌سنجیم.
+  const rPairsJson = await call("/pairs.json?chain=base", { method: "GET" }, { ASSETS: spyEnv.ASSETS });
+  const bPairsJson = await rPairsJson.json();
+  ok(rPairsJson.status === 200 && Array.isArray(bPairsJson.rows) && bPairsJson.chain === "base",
+     "GET /pairs.json?chain=base must still behave exactly as today, got " + JSON.stringify(bPairsJson));
+  ok(asked.length === 1,
+     "GET /pairs.json?chain=base must never be handed to ASSETS by the new /pairs route, asked=" +
+     JSON.stringify(asked));
+
+  // مسیرهای شبیه ولی نه دقیقاً «/pairs» نباید گرفته شوند
+  for (const bad of ["/pairsX", "/pairs/"]) {
+    asked = [];
+    const rBad = await worker.fetch(new Request(ORIGIN + bad), spyEnv, {});
+    ok(!(asked.length === 1 && asked[0] === "/pairs.html"),
+       bad + " must not be captured by the /pairs route, asked=" + JSON.stringify(asked));
+    ok(rBad.status !== undefined, bad + " must still get a response, not throw");
+  }
+
+  console.log("[pairs route] GET /pairs asks ASSETS for exactly \"/pairs.html\" and returns its body "
+    + "untouched; a missing env.ASSETS falls through without throwing or 500ing; GET /pairs.json?"
+    + "chain=base is unaffected (never handed to ASSETS); /pairsX and /pairs/ are not captured");
+}
+
 console.log(fails === 0
   ? "[gt proxy] worker ok — " + REAL.length + " real paths proxied, " + BAD.length +
     " refused without touching the network, 429 passes through with CORS\n" +

@@ -1222,6 +1222,17 @@ export default {
        انتشارش با خودِ کد اتمیک است و هیچ قدمِ دستیِ پنلی نمی‌خواهد. */
     if (url.pathname === "/robots.txt") return robotsResponse();
     if (url.pathname === "/sitemap.xml") return sitemapResponse(url, env, ctx);
+    /* GET /pairs — نسخه‌ی تمیزِ آدرس برای web/pairs.html.
+       🔴 برخلافِ /gt و /ev و /vd، این مسیر یک فایل *دارد*: خطِ Build در
+       پنل همین امروز `web/*.html` را (پس web/pairs.html را هم) داخلِ
+       `_site` کپی می‌کند، یعنی بایندینگِ [assets] معمولاً خودش زودتر از
+       این خط به این pathname جواب می‌دهد و این شرط هرگز در عمل اجرا
+       نمی‌شود. با این‌حال این‌جا نگه داشته می‌شود تا اگر یک‌روز آن رفتار
+       عوض شد (مثلاً فایل از _site جا افتاد)، آدرس تمیز بی‌صدا ۴۰۴ نگیرد.
+       الگو عیناً همان الگوی /t/<آدرس> پایین‌تر است: یک Request تازه با
+       pathname واقعیِ فایل ساخته می‌شود و به env.ASSETS داده می‌شود. */
+    if (url.pathname === "/pairs" && env && env.ASSETS)
+      return env.ASSETS.fetch(new Request(new URL("/pairs.html", url), request));
     /* /t/<آدرس> یک صفحه‌ی واقعی است، نه یک هش. بایندینگ [assets] برای مسیری
        که فایل ندارد ۴۰۴ می‌دهد، پس خودمان همان index.html را برایش سرو
        می‌کنیم و صفحه از روی pathname می‌فهمد کدام توکن را باید نشان بدهد.
