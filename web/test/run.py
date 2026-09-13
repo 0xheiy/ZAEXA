@@ -1576,6 +1576,43 @@ def check_header_cta_gradient():
           "var(--cta-bg) with white ink")
 
 
+def check_dark_text_scale_shared():
+    """پروبِ ۸: نردبانِ متنِ تمِ تیره در صفحه‌ی معرفی همان نردبانِ اپ است.
+
+    ۱۳ سپتامبر ۲۰۲۶ حسام گفت نوشته‌های تمِ تیره‌ی صفحه‌ی معرفی سخت خوانده
+    می‌شوند و باید هم‌رنگِ نوشته‌های اپ شوند. پس --tx/--tx2/--tx3 در بلوکِ
+    تیره‌ی landing.html دقیقاً از index.html خوانده می‌شوند.
+
+    ⚠️ این پروب فقط یکی‌بودن را قفل می‌کند، نه خوانا‌بودن را: دو نردبان از
+    نظر روشنایی تقریباً یکی بودند (اختلافِ زیر ۳ درصد در نسبتِ کنتراست)، پس
+    اگر روزی باز هم شکایتِ خوانایی آمد، جوابش اینجا نیست — جوابش بالابردنِ
+    خودِ --tx3 یا کم‌کردنِ --glowop است، چون متنِ این صفحه روی هاله‌های رنگیِ
+    متحرک می‌نشیند و کنتراستِ واقعی‌اش از عددی که روی --bg حساب می‌شود کمتر
+    است."""
+    land = merged_root_decls(
+        open(os.path.join(HERE, "..", "landing.html"), encoding="utf-8").read(), "dark")
+    idx_src = open(os.path.join(HERE, "..", "index.html"), encoding="utf-8").read()
+    _, dark_block = index_theme_blocks(idx_src)
+    idx = parse_css_decls(dark_block)
+
+    shown = {}
+    for name in ("tx", "tx2", "tx3"):
+        a = _expand_hex(resolve_css_var(land, name)).lower()
+        b = _expand_hex(resolve_css_var(idx, name)).lower()
+        assert a == b, (
+            "dark --%s is %s on the landing page but %s in the app. The owner asked on "
+            "2026-09-12 for one text scale across both, because the landing's dark text read "
+            "harder than the app's." % (name, a, b))
+        shown[name] = a
+
+    bg = _expand_hex(resolve_css_var(land, "bg"))
+    ratios = {k: contrast_ratio(v, bg) for k, v in shown.items()}
+    print("[dark text scale] landing and app share --tx/--tx2/--tx3 (%s); on the landing's own "
+          "--bg they measure %.2f:1 / %.2f:1 / %.2f:1"
+          % (", ".join("%s=%s" % kv for kv in shown.items()),
+             ratios["tx"], ratios["tx2"], ratios["tx3"]))
+
+
 def check_cta_shadow_token():
     """پروبِ ۶: .button-primary دیگر سایه‌ی فیروزه‌ای را هاردکد نمی‌کند، از
     var(--cta-shadow) می‌خواند؛ مقدارِ روشن دیگر ردی از سه‌تاییِ فیروزه‌ای
@@ -1627,6 +1664,7 @@ check_viz_contrast()
 check_viz_dark_unchanged()
 check_headline_gradient()
 check_header_cta_gradient()
+check_dark_text_scale_shared()
 check_cta_shadow_token()
 check_one_executor_address()
 check_dex_parity()
