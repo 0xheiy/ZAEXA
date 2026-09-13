@@ -875,10 +875,42 @@ def check_event_allowlists():
         r"const EV_OK = new Set\(\[(.*?)\]\);", wk, re.S).group(1)))
     details = set(re.findall(r'"([^"]*)"', re.search(
         r"const EV_DETAIL_OK = new Set\(\[(.*?)\]\);", wk, re.S).group(1)))
-    assert page == worker_names, (
-        "the page and the worker disagree about event names — the page would send "
-        "events the worker silently drops.\n  only in page:   %s\n  only in worker: %s"
-        % (sorted(page - worker_names), sorted(worker_names - page)))
+    # ⚠️ صفحه‌ی معرفی هم از ۱۴ سپتامبر ۲۰۲۶ رویداد می‌فرستد، و عمداً فقط دو
+    # نامی را اعلام می‌کند که خودش می‌فرستد — نه کلِ فهرست. پس آنچه باید با
+    # Worker یکی باشد *اجتماعِ* دو صفحه است. اگر به‌جایش هر صفحه را جدا با
+    # Worker برابر می‌گرفتیم، یا باید اپ نام‌هایی را اعلام می‌کرد که هرگز
+    # نمی‌فرستد، یا این نگهبان اصلاً صفحه‌ی معرفی را نمی‌دید.
+    land_src = open(os.path.join(HERE, "..", "landing.html"), encoding="utf-8").read()
+    land_m = re.search(r"const EV_NAMES=\[(.*?)\];", land_src, re.S)
+    assert land_m, (
+        "web/landing.html no longer declares an EV_NAMES list. It sends view:home and "
+        "cta:app — the only two numbers that say whether the page turns readers into users.")
+    landing_names = set(re.findall(r'"([^"]+)"', land_m.group(1)))
+    assert landing_names, "web/landing.html's EV_NAMES list is empty"
+    assert landing_names <= worker_names, (
+        "web/landing.html would send %s, which the worker drops with a 400 — and a dropped "
+        "event looks exactly like an event nobody triggered"
+        % sorted(landing_names - worker_names))
+    assert (page | landing_names) == worker_names, (
+        "the pages and the worker disagree about event names — a page would send events the "
+        "worker silently drops, or the worker carries a name nothing sends.\n"
+        "  only in pages:  %s\n  only in worker: %s"
+        % (sorted((page | landing_names) - worker_names),
+           sorted(worker_names - (page | landing_names))))
+
+    land_calls = re.findall(r"(?<![A-Za-z0-9_.$])ev\(([^()]*(?:\([^()]*\)[^()]*)*)\)",
+                            land_src)
+    land_calls = [c for c in land_calls if not c.startswith("name")]
+    assert len(land_calls) >= 2, (
+        "web/landing.html has only %d ev() call sites left; view:home and cta:app are both "
+        "supposed to fire" % len(land_calls))
+    for c in land_calls:
+        assert "." not in c and "`" not in c and "[" not in c, (
+            "an ev() call on the landing page reads a property, so user data could reach the "
+            "analytics row: ev(%s)" % c)
+        for lit in re.findall(r'"([^"]*)"', c):
+            assert lit in landing_names, (
+                "the landing page's ev(%s) uses %r, which it never declared" % (c, lit))
 
     calls = re.findall(r"(?<![A-Za-z0-9_.$])ev\(([^()]*(?:\([^()]*\)[^()]*)*)\)", src)
     calls = [c for c in calls if not c.startswith("name,")]        # خودِ تعریف
@@ -891,8 +923,9 @@ def check_event_allowlists():
             assert lit in page or lit in details or lit == "view:", (
                 "ev(%s) uses the string %r, which is in neither allowlist" % (c, lit))
     EV_PAGE_NAMES, EV_DETAILS = page, details
-    print("[events] %d names, page and worker agree; %d call sites, none reads a property"
-          % (len(page), len(calls)))
+    print("[events] %d names, both pages and the worker agree (app %d, landing %d); "
+          "%d call sites in the app and %d on the landing page, none reads a property"
+          % (len(worker_names), len(page), len(landing_names), len(calls), len(land_calls)))
 
 def check_error_handler():
     """چهار حقیقتِ ساختاری درباره‌ی گیرنده‌ی خطا، پیش از بالاآمدن مرورگر.
@@ -5126,6 +5159,61 @@ async def main():
             assert want in ev_names, "the %r event never reached the wire (got %s)" % (want, ev_names)
         assert ev_names.count("load") == 1, "the load event fired %d times" % ev_names.count("load")
 
+        # ---- [events] صفحه‌ی معرفی، روی سیم ----
+        # تا ۱۴ سپتامبر ۲۰۲۶ این صفحه هیچ رویدادی نداشت، پس نرخِ تبدیل کور
+        # بود. دو نام و نه بیشتر، و هر دو باید *واقعاً* برسند — نه اینکه فقط
+        # در فهرست باشند. ⚠️ کلیک روی لینکِ اپ با یک شنونده‌ی فازِ گرفتن خنثی
+        # می‌شود، نه با عوض‌کردنِ href: اگر href را دست بزنیم دیگر همان چیزی
+        # را نسنجیده‌ایم که کاربر روی آن کلیک می‌کند.
+        lndpg = await b.new_page(viewport={"width": 1240, "height": 1000})
+        lnd_seen = await watch_events(lndpg)
+        await lndpg.goto("http://127.0.0.1:%d/landing.html" % port)
+        await lndpg.wait_for_timeout(700)
+        await lndpg.evaluate(
+            "() => document.addEventListener('click', e => e.preventDefault(), true)")
+        await lndpg.click('a[href^="/app"]')
+        await lndpg.wait_for_timeout(400)
+        await lndpg.close()
+        lnd_names = []
+        for raw in lnd_seen:
+            body = _json.loads(raw)
+            assert set(body) == {"e", "d", "v"}, (
+                "a landing-page beacon carried unexpected fields: %s" % raw)
+            assert body["d"] == "", (
+                "a landing-page beacon carried a detail; that page has nothing to say in one "
+                "and an open detail is how user data leaks into a counter: %s" % raw)
+            assert body["v"] in ("desktop", "mobile"), (
+                "a landing-page beacon carried an odd surface: %s" % raw)
+            assert "0x" not in raw, (
+                "AN ADDRESS REACHED THE ANALYTICS BEACON: %s" % raw)
+            lnd_names.append(body["e"])
+        print("[events] landing page on the wire: %s" % lnd_names)
+        for want in ("view:home", "cta:app"):
+            assert want in lnd_names, (
+                "the landing page never sent %r (got %s). Without both of them the only "
+                "number that page exists to produce \u2014 how many readers become users "
+                "\u2014 cannot be computed." % (want, lnd_names))
+        assert lnd_names.count("view:home") == 1, (
+            "view:home fired %d times on one load" % lnd_names.count("view:home"))
+
+        # همان «نه»ی صریح، روی صفحه‌ی معرفی هم — یک مکانیزمِ دوم یعنی یک روز
+        # یکی‌شان ساکت نمی‌ماند.
+        lgpc = await b.new_page(viewport={"width": 1240, "height": 1000})
+        await lgpc.add_init_script(
+            "Object.defineProperty(navigator,'globalPrivacyControl',{get:()=>true});")
+        lgpc_seen = await watch_events(lgpc)
+        await lgpc.goto("http://127.0.0.1:%d/landing.html" % port)
+        await lgpc.wait_for_timeout(700)
+        await lgpc.evaluate(
+            "() => document.addEventListener('click', e => e.preventDefault(), true)")
+        await lgpc.click('a[href^="/app"]')
+        await lgpc.wait_for_timeout(300)
+        await lgpc.close()
+        print("[events] landing page with Global Privacy Control on: %d beacons"
+              % len(lgpc_seen))
+        assert not lgpc_seen, (
+            "Global Privacy Control must silence the landing page too: %s" % lgpc_seen)
+
         # ---- لینک بررسی: کسی که بازش می‌کند بدون کیف پول جواب می‌گیرد ----
         # این تنها راه رشد بدون تبلیغات است که در خودِ محصول هست: سؤالی که در
         # گروه‌ها پرسیده می‌شود «این توکن سالم است؟»، و جوابش هیچ ریسکی برای
@@ -5351,6 +5439,7 @@ async def main():
                 walletHidden: document.getElementById("walletMenu").hidden,
                 chartHidden: document.getElementById("tk-chartCard").hidden,
                 safetyHidden: document.getElementById("tk-safetyBody").hidden,
+                footTag: document.querySelector(".footTag").textContent,
                 tokenPage: tokenPage,
             })""")
 
@@ -5364,6 +5453,12 @@ async def main():
         assert sell["sym"] == "SOL" and sell["name"] == "Wrapped SOL", \
             "the Solana token page did not name the token: %s" % sell
         assert sell["chip"] == "Solana", "the identity chip still says Base on a Solana page: %r" % sell["chip"]
+        # فوتر هم بخشی از همان ادعاست: روی یک صفحه‌ی سولانا نه استخری تجمیع
+        # می‌شود و نه تراکنشی زده می‌شود، پس جمله‌ی صفحه‌ی Base آن‌جا دروغ است.
+        assert "One transaction, every pool" not in sell["footTag"], (
+            "the footer still promises the Base pitch on a Solana page: %r" % sell["footTag"])
+        assert "Solana" in sell["footTag"], (
+            "the footer on a Solana page says nothing about Solana: %r" % sell["footTag"])
         assert "$1.00B" in sell["stats"] and "$1.20B" in sell["stats"] and \
                "$45.00M" in sell["stats"] and "$30.00M" in sell["stats"], \
             "the Solana token page is missing its market numbers: %r" % sell["stats"]

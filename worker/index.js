@@ -182,6 +182,11 @@ const TOKEN_PAGE = new RegExp(
 const EV_OK = new Set([
   "load",
   "view:swap", "view:folio", "view:flow", "view:token", "view:faq",
+  /* ⚠️ این دو از صفحه‌ی معرفی می‌آیند، نه از اپ — تنها دو نامی که اپ هرگز
+     نمی‌فرستد. تا امروز صفحه‌ی معرفی هیچ رویدادی نداشت، پس نرخِ تبدیل
+     («از هر چند نفر که صفحه را دیدند، یکی وارد اپ شد») اصلاً سنجیده
+     نمی‌شد — دقیقاً همان عددی که کلِ آن صفحه برایش ساخته شده. */
+  "view:home", "cta:app",
   "check:open",
   "wallet:open", "wallet:on",
   "quote:ok", "quote:none",
@@ -946,6 +951,12 @@ function sitemapTokenFromPool(row) {
     if (typeof rawId !== "string") return null;
     const addr = rawId.replace(/^base_/, "");
     if (chainOf(addr) !== "base") return null; // شکلِ دیگر یا زنجیره‌ی دیگر → دور ریخته می‌شود، نه گزارش
+    /* 🔴 آدرسِ صفر یک توکن نیست و صفحه‌اش هیچ‌وقت چیزی برای نشان‌دادن ندارد.
+       یک سایت‌مپِ واقعی یک بار همین را لیست کرد. newPoolRowToToken در
+       worker/report.js از همان روز ردش می‌کند؛ این مسیر جا مانده بود، و
+       جاماندنش دیده نمی‌شد چون خروجی‌اش فقط یک آدرسِ اضافه در یک فایلِ XML
+       است که هیچ‌کس نمی‌خواندش — تا وقتی یک کراولر بخواند. */
+    if (/^0x0{40}$/i.test(addr)) return null;
 
     // reserve_in_usd گم/غیرِ عددی/۰/منفی → همان «استخری که کسی معامله نمی‌کند»؛
     // Number روی هرکدام از این‌ها (undefined، null، ""، رشته‌ی غیرِ عددی) یا

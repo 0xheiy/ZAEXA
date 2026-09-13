@@ -2971,6 +2971,10 @@ function isSolidlyReqId(id) { return PROBE_KIND_BY_ID.get(id) === "SOLIDLY"; }
   /* ---- الف) موفق: ردیف‌های ناقص دورریخته، تکرار یک‌بار، ترتیبِ حجم حفظ، سقفِ ۵۰ ---- */
   const SOL_LOOKALIKE = "So11111111111111111111111111111111111111112"; // شکلِ سولانا، نه Base
   const page1Rows = [];
+  /* 🔴 اولین ردیف، عمداً: اگر آدرسِ صفر رد نشود، هم در سایت‌مپ ظاهر می‌شود و
+     هم *اولین* آدرسِ فهرست می‌شود، پس ادعای ترتیب هم پایین‌تر می‌شکند. یک
+     سایت‌مپِ واقعی یک بار همین را لیست کرد. */
+  page1Rows.push(poolRow(mkAddr(0), "1000"));
   for (let i = 1; i <= 15; i++) page1Rows.push(poolRow(mkAddr(i), "1000"));
   page1Rows.push(poolRow(mkAddr(9001), "0"));            // رزرو صفر
   page1Rows.push(poolRow(mkAddr(9002), null));           // رزرو غایب
@@ -3033,6 +3037,9 @@ function isSolidlyReqId(id) { return PROBE_KIND_BY_ID.get(id) === "SOLIDLY"; }
      "a pool with reserve_in_usd of 0/null/\"\"/a non-numeric string must never reach the sitemap");
   ok(!xml.includes(SOL_LOOKALIKE),
      "a pool whose base token id is not a Base address must never reach the sitemap");
+  ok(!xml.includes(mkAddr(0)),
+     "the zero address is not a token and must never reach the sitemap, however healthy the "
+     + "pool row around it looks");
   ok(coldCalls === SITEMAP_TOKEN_PAGES,
      "a cold sitemap build should make exactly " + SITEMAP_TOKEN_PAGES + " upstream calls (one per "
      + "page), got " + coldCalls);

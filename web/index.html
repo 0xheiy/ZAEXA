@@ -5943,6 +5943,13 @@ function wire(){
      scanWallets/eth_accounts/WalletConnectی: صفحه‌اش را خودِ
      openSolanaTokenPage بالاتر رندر کرده. */
   if(solanaReadOnly){
+    /* ⚠️ فوتر تا امروز روی همین صفحه هم می‌گفت «تجمیع‌کننده روی Base، یک
+       تراکنش، هر استخر» — دو ادعا که هیچ‌کدام برای یک صفحه‌ی سولانا درست
+       نیست: نه اینجا استخری تجمیع می‌شود و نه تراکنشی زده می‌شود. جمله فقط
+       روی همین حالت عوض می‌شود، نه در خودِ HTML، چون صفحه‌ی Base همان جمله‌ی
+       قبلی را دارد و آن‌جا درست است. */
+    const ftag=document.querySelector(".footTag");
+    if(ftag)ftag.textContent="A DEX aggregator on Base. On Solana, the exit check only.";
     tokenPage=true;
     setView("token",false);
     await openSolanaTokenPage(onTokenSol[1]);

@@ -642,5 +642,46 @@ svg.diag{display:block;width:100%;height:auto}
 
 </script>
 
+<script>
+/* شمارشِ تبدیل — دو نام و نه بیشتر.
+   تا امروز این صفحه هیچ رویدادی نمی‌فرستاد، پس نمی‌شد فهمید از هر چند
+   بازدیدکننده یکی وارد اپ می‌شود. قاعده‌ها عیناً همان اپ‌اند و عمداً کپیِ
+   کوچکی از همان‌ها، نه یک مکانیزم دوم: Global Privacy Control یک «نه»ی
+   صریحِ کاربر است؛ کلیدِ zaexa.dev همان پرچمِ مشترکِ خودِ ماست تا ترافیکِ
+   خودمان شمرده نشود؛ بدنه همان سه فیلد است و هیچ‌چیز از محتوای صفحه یا از
+   کاربر داخلش نمی‌رود؛ و روی file:// اصلاً مقصدی وجود ندارد پس خاموش است.
+   ⚠️ فهرست نام‌ها باید زیرمجموعه‌ی EV_OK در worker/index.js باشد، وگرنه
+   Worker بی‌صدا ۴۰۰ می‌دهد و ما فکر می‌کنیم «کسی این کار را نمی‌کند».
+   کاوشگر [events] همین را می‌سنجد. */
+const EV_NAMES=["view:home","cta:app"];
+(function(){
+  var url=/^https?:$/.test(location.protocol)?"/ev":null;
+  function muted(){try{return localStorage.getItem("zaexa.dev")==="1";}catch(e){return false;}}
+  var last=Object.create(null);
+  function ev(name){
+    if(!url||navigator.globalPrivacyControl===true||muted())return;
+    if(EV_NAMES.indexOf(name)<0)return;
+    var now=Date.now();
+    if(last[name]&&now-last[name]<1000)return;
+    last[name]=now;
+    var body=JSON.stringify({e:name,d:"",v:(innerWidth<=760?"mobile":"desktop")});
+    try{
+      var blob=new Blob([body],{type:"text/plain;charset=UTF-8"});
+      if(navigator.sendBeacon&&navigator.sendBeacon(url,blob))return;
+    }catch(e){}
+    try{fetch(url,{method:"POST",body:body,keepalive:true,
+      headers:{"content-type":"text/plain;charset=UTF-8"}}).catch(function(){});}catch(e){}
+  }
+  window.__zaexaEv=ev;
+  ev("view:home");
+  /* روی خودِ سند، نه روی تک‌تکِ لینک‌ها: یازده لینک به اپ در این صفحه هست و
+     یکی‌یکی بستن یعنی لینکِ دوازدهم فردا بی‌صدا شمرده نمی‌شود. sendBeacon
+     هم دقیقاً برای همین لحظه است — صفحه دارد می‌رود. */
+  document.addEventListener("click",function(e){
+    var a=e.target&&e.target.closest?e.target.closest('a[href^="/app"]'):null;
+    if(a)ev("cta:app");
+  });
+})();
+</script>
 </body>
 </html>
