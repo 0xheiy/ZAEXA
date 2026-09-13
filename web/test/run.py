@@ -1540,6 +1540,42 @@ def check_headline_gradient():
           "the buttons by reference; dark: its own original 105deg/#4ecaf2 ramp, untouched")
 
 
+def check_header_cta_gradient():
+    """پروبِ ۷: دکمه‌ی بالای صفحه‌ی معرفی، در هر دو تم، همان رمپِ دکمه‌هاست.
+
+    مسیرش دو پله بود و هر دو پله را مالک تعیین کرد: ۱۲ سپتامبر خواست این دکمه
+    هم مثلِ بقیه گرادیان بگیرد؛ همان روز گفت هرچه غیرِ خواسته‌اش عوض شده برگردد،
+    و چون همه‌ی حرف‌هایش درباره‌ی حالتِ روز بود، تمِ تیره به همان قرصِ تختِ
+    قبلی برگشت. ۱۳ سپتامبر تیره را هم دید و گفت آن هم گرادیان شود.
+
+    پس --hdr-bg/--hdr-fg دیگر دو مقدارِ متفاوت ندارند، ولی توکن‌ها نگه داشته
+    شدند: اگر روزی دوباره لازم شد تمِ تیره جدا شود، جایش همین‌جاست و یک
+    سلکتورِ تازه لازم نمی‌شود."""
+    src = open(os.path.join(HERE, "..", "landing.html"), encoding="utf-8").read()
+    bodies = rule_bodies(src, ".header-cta")
+    assert bodies, "could not find a CSS rule for .header-cta in web/landing.html any more"
+    joined = " ".join(bodies)
+    for token in ("var(--hdr-bg)", "var(--hdr-fg)"):
+        assert token in joined, (
+            ".header-cta no longer paints from %s (rule body: %r)" % (token, joined))
+
+    for label, decls in (("light", merged_root_decls(src, "light")),
+                         ("dark", merged_root_decls(src, "dark"))):
+        assert decls["hdr-bg"].strip() == "var(--cta-bg)", (
+            "%s --hdr-bg is %r, not the literal reference var(--cta-bg). The owner asked for "
+            "the header button to carry the same ramp as every other button, in this theme "
+            "too \u2014 reading the same token is what keeps them from drifting apart."
+            % (label, decls["hdr-bg"].strip()))
+        fg = _expand_hex(resolve_css_var(decls, "hdr-fg")).lower()
+        assert fg in ("#ffffff", "#fff"), (
+            "%s --hdr-fg is %s; the header button's label is white like every other button's, "
+            "and the owner said button text is never turned dark to buy contrast."
+            % (label, fg))
+
+    print("[header cta] .header-cta reads --hdr-bg/--hdr-fg; both themes resolve to "
+          "var(--cta-bg) with white ink")
+
+
 def check_cta_shadow_token():
     """پروبِ ۶: .button-primary دیگر سایه‌ی فیروزه‌ای را هاردکد نمی‌کند، از
     var(--cta-shadow) می‌خواند؛ مقدارِ روشن دیگر ردی از سه‌تاییِ فیروزه‌ای
@@ -1590,6 +1626,7 @@ check_viz_tokens_literal()
 check_viz_contrast()
 check_viz_dark_unchanged()
 check_headline_gradient()
+check_header_cta_gradient()
 check_cta_shadow_token()
 check_one_executor_address()
 check_dex_parity()
