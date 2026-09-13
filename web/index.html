@@ -21,6 +21,21 @@
    regexِ خودکفا، بدونِ وابستگی به چیزی پایین‌تر در همین فایل. */
 if(/^\/t\/(0x[0-9a-fA-F]{40}|[1-9A-HJ-NP-Za-km-z]{32,44})\/?$/.test(location.pathname)){
   var b=document.createElement("base");b.href="/";document.head.appendChild(b);
+  /* ⚠️ عوارضِ همان <base>: یک لینکِ هش-تنها هم نسبی است، پس #swap دیگر «همین
+     صفحه، بخشِ swap» معنا نمی‌دهد — به «/» به‌علاوه‌ی هش حل می‌شود، یعنی
+     صفحه‌ی معرفی. روی سایتِ زنده دیده شد: از صفحه‌ی یک توکن، Swap و
+     Portfolio و Flow و FAQ همگی کاربر را از اپ بیرون می‌انداختند و چون ۲۰۰
+     برمی‌گشت هیچ خطایی هم دیده نمی‌شد. پس همان‌جا که <base> را می‌گذاریم،
+     لینک‌های هش-تنها را به مسیرِ همین صفحه مقید می‌کنیم.
+     «#» تنها کنار گذاشته می‌شود: آن سه لینکِ شبکه‌های اجتماعی جای‌نگه‌دارند و
+     آدرسِ واقعی‌شان را پایین‌تر خودِ اسکریپت می‌نشاند. */
+  addEventListener("DOMContentLoaded",function(){
+    var here=location.pathname,as=document.querySelectorAll('a[href^="#"]');
+    for(var i=0;i<as.length;i++){
+      var h=as[i].getAttribute("href");
+      if(h&&h.length>1)as[i].setAttribute("href",here+h);
+    }
+  });
 }
 </script>
 <script>

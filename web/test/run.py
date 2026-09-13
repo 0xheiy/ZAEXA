@@ -1937,6 +1937,76 @@ async def check_landing_mobile(p, errors):
     await b.close()
 
 
+async def check_token_page_hash_links(p, errors):
+    """صفحه‌ی /t/<آدرس>: لینک‌های هش-تنها باید روی همین صفحه بمانند.
+
+    باگِ واقعی، گزارشِ مالک ۱۴ سپتامبر ۲۰۲۶: از لینکِ «Copy this check»، چهار
+    لینکِ فوتر — Swap، Portfolio، Flow، و FAQ — کاربر را به صفحه‌ی معرفی
+    می‌بردند و اپ بسته می‌شد. علت یک عارضه‌ی <base> بود: صفحه‌ی توکن یک
+    `<base href="/">` تزریق می‌کند تا باندل‌های نسبی (ethers، walletconnect)
+    حل شوند، و همان base هر `href="#x"` را هم نسبی حساب می‌کند، یعنی
+    «/#x» — صفحه‌ی معرفی. ۲۰۰ برمی‌گشت، پس هیچ خطایی دیده نمی‌شد.
+
+    این پروب صفحه را روی یک آدرسِ واقعیِ /t/ بالا می‌آورد (نه file://، چون
+    خودِ تزریق به pathname نگاه می‌کند) و سه چیز را می‌سنجد: base هنوز
+    هست و باندل‌ها را درست حل می‌کند، هر چهار لینک روی همان pathname
+    می‌مانند، و لینک‌های جای‌نگه‌دارِ «#» دست‌نخورده می‌مانند تا اسکریپت
+    بتواند آدرسِ واقعی را رویشان بنشاند."""
+    html = open(os.path.join(HERE, "..", "index.html"), encoding="utf-8").read()
+    addr = "0x" + "a" * 40
+    origin = "https://zaexa.example"
+
+    b = await p.chromium.launch()
+    ctx = await b.new_context()
+    pg = await ctx.new_page()
+    pg.on("console", lambda m: None)
+
+    async def handler(route):
+        path = route.request.url.split("?")[0][len(origin):]
+        if path.startswith("/t/"):
+            await route.fulfill(status=200, content_type="text/html; charset=utf-8", body=html)
+        elif path.endswith(".js"):
+            await route.fulfill(status=200, content_type="text/javascript", body="")
+        else:
+            await route.fulfill(status=404, body="")
+    await ctx.route(origin + "/**", handler)
+    await pg.goto(origin + "/t/" + addr)
+    await pg.wait_for_timeout(500)
+
+    got = await pg.evaluate("""() => ({
+        base: (document.querySelector('base') || {}).href || null,
+        links: [...document.querySelectorAll('a')]
+            .map(a => a.getAttribute('href'))
+            .filter(h => h && h.indexOf('#') >= 0 && h.indexOf('://') < 0),
+        bundles: [...document.scripts].map(s => s.src).filter(Boolean),
+    })""")
+    await b.close()
+
+    assert got["base"] == origin + "/", (
+        "the /t/ page no longer injects <base href=\"/\"> (got %r). Without it the relative "
+        "bundles 404 and the page dies on 'Could not load ethers'." % got["base"])
+    assert any(u.startswith(origin + "/ethers") for u in got["bundles"]), (
+        "the ethers bundle no longer resolves to the site root on a /t/ page: %r"
+        % got["bundles"])
+
+    wanted = ["#swap", "#folio", "#flow", "#faq"]
+    here = "/t/" + addr
+    for frag in wanted:
+        assert (here + frag) in got["links"], (
+            "on /t/<address> the footer link %r is %r, not %r. A bare fragment there resolves "
+            "against <base href=\"/\"> and throws the visitor out of the app onto the landing "
+            "page \u2014 which returns 200, so nothing looks broken from the outside."
+            % (frag, [h for h in got["links"] if h.endswith(frag)], here + frag))
+    assert (here + "#") not in got["links"], (
+        "a placeholder href=\"#\" was rewritten into %r. Those three social links are "
+        "placeholders the page's own script fills in with real URLs; binding one to the path "
+        "turns a click into a jump to the top of the page instead." % (here + "#"))
+
+    print("[token page links] /t/<address> keeps <base href=\"/\"> for the bundles, and "
+          "%s now resolve to the token's own path instead of the landing page"
+          % ", ".join(wanted))
+
+
 async def check_canvas_palette_live(p, errors):
     """پروبِ ۵ (پویا): پالتِ زنده‌ی canvas بدونِ ریلود دنبالِ عوض‌شدنِ
     data-theme می‌رود.
@@ -2034,6 +2104,7 @@ async def main():
         await check_theme_migration(p, errors)
         await check_landing_mobile(p, errors)
         await check_canvas_palette_live(p, errors)
+        await check_token_page_hash_links(p, errors)
         b = await p.chromium.launch()
         pg = await b.new_page(viewport={"width": 1240, "height": 1000}, color_scheme="dark")
         pg.on("console", on_console)
