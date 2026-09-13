@@ -12,7 +12,7 @@
 :root{--bg:#f4f5f7;--card:#fff;--card2:#f4f5f8;--raise:#eceef2;--line:#e8eaee;--line2:#d6dae1;--tx:#14161a;--tx2:#5b6270;--tx3:#8b93a1;--g1:#22EFF6;--g2:#C56CF5;--acc:#5b53e8;--acc-b:#8b5cf6;--on-acc:#fff;--pos:#0d9d6e;--sh:0 18px 44px rgba(20,22,26,.08);--ease:cubic-bezier(.23,1,.32,1);--glowop:.14}
 :root[data-theme=dark]{--bg:#0a0810;--card:#131020;--card2:#191527;--raise:#241e38;--line:#221d33;--line2:#302842;--tx:#f0eef7;--tx2:#a49fb8;--tx3:#736d8a;--acc:#4fc3f7;--acc-b:#C56CF5;--on-acc:#05121a;--pos:#21d3a0;--sh:0 18px 44px rgba(0,0,0,.42);--glowop:.26}
 :root{--gradwarm:linear-gradient(90deg,#F5A623,#F2704B 55%,#EF4E5F);--wash1:rgba(34,239,246,.10);--wash2:rgba(197,108,245,.09);--grad:linear-gradient(135deg,var(--g1),var(--g2));--pglow:color-mix(in srgb,var(--pos),transparent 87%);--warn:#b5780c;--neg:#dc4c4c}
-:root[data-theme=dark]{--warn:#f5a623;--neg:#f2545b;--wash1:rgba(34,239,246,.10);--wash2:rgba(197,108,245,.13)}
+:root[data-theme=dark]{--warn:#f5a623;--neg:#f2545b;--wash1:rgba(34,239,246,.10);--wash2:rgba(197,108,245,.13);}
 
 /* فونت — عیناً همان فایلِ Manrope که web/landing.html به‌صورت base64
    درون‌خطی بار می‌کند (نه یک منبعِ تازه، همان یک دیتا-یوآرآی، یک‌بار دیگر
@@ -193,20 +193,33 @@ h1{font-size:clamp(28px,4vw,40px);letter-spacing:-.03em;margin:0 0 14px;line-hei
 </footer>
 
 <script>
-/* سوییچ تم — عیناً همان منطق و همان کلیدِ localStorage در web/landing.html
-   (zaexa.landing.theme)، تا انتخابِ کاربر بین دو صفحه یکسان بماند. */
+/* سوییچ تم — عیناً همان منطق در web/landing.html، اکنون هم‌کلید با اپ.
+   رفعِ باگِ «تم بین صفحه‌ها زنده نمی‌ماند» (۲۰۲۶-۰۹-۱۲): این صفحه زیرِ
+   کلیدِ جداگانه‌ی zaexa.landing.theme ذخیره می‌کرد درحالی‌که اپ (index.html)
+   زیرِ zaexa.theme.v1 — یعنی یک تمِ تیره‌ی انتخاب‌شده اینجا با یک اپِ روشن
+   باز می‌شد. اکنون هم‌کلید با اپ‌اند (zaexa.theme.v1)، با همان
+   اعتبارسنجیِ اپ: فقط "dark"/"light" یک انتخاب حساب می‌شود. مهاجرتِ
+   یک‌باره: اگر کلیدِ تازه هنوز انتخابِ معتبری ندارد ولی کلیدِ قدیمی دارد،
+   همان مقدار را می‌گیریم و بلافاصله در کلیدِ تازه هم می‌نویسیم تا کسی که
+   قبلاً انتخاب کرده بود چیزی را از دست ندهد. */
 (function(){
   var root = document.documentElement, themeButton = document.getElementById('themeToggle');
-  var saved = null;
-  try { saved = localStorage.getItem('zaexa.landing.theme'); } catch (e) {}
-  root.dataset.theme = saved === 'dark' ? 'dark' : 'light';
+  var LS_THEME = 'zaexa.theme.v1', LS_OLD = 'zaexa.landing.theme';
+  function readValid(key){ try { var v = localStorage.getItem(key); return (v === 'dark' || v === 'light') ? v : null; } catch (e) { return null; } }
+  var theme = readValid(LS_THEME);
+  if (!theme) {
+    var old = readValid(LS_OLD);
+    if (old) { theme = old; try { localStorage.setItem(LS_THEME, theme); } catch (e) {} }
+  }
+  if (!theme) { theme = (window.matchMedia && matchMedia('(prefers-color-scheme: dark)').matches) ? 'dark' : 'light'; }
+  root.dataset.theme = theme;
   function syncTheme(){
     if (themeButton) themeButton.setAttribute('aria-label', root.dataset.theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme');
   }
   syncTheme();
   themeButton && themeButton.addEventListener('click', function(){
     root.dataset.theme = root.dataset.theme === 'dark' ? 'light' : 'dark';
-    try { localStorage.setItem('zaexa.landing.theme', root.dataset.theme); } catch (e) {}
+    try { localStorage.setItem(LS_THEME, root.dataset.theme); } catch (e) {}
     syncTheme();
   });
 })();

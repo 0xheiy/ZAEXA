@@ -4,6 +4,12 @@ from playwright.async_api import async_playwright
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 
+# کلیدِ localStorage قدیمی و منسوخِ تمِ صفحاتِ landing/pairs، پیش از یکی‌شدن
+# با کلیدِ خودِ اپ (zaexa.theme.v1). فقط برای سنجیدنِ اینکه دیگر جایی
+# *نوشته* نمی‌شود — کلیدِ تازه هیچ‌وقت اینجا هاردکد نمی‌شود، همیشه از
+# دلِ index.html بیرون کشیده می‌شود (نگاه کن به theme_key_from_index).
+OLD_THEME_KEY = "zaexa.landing.theme"
+
 def vendor_path(prefix):
     """مسیر باندل وندور با هر هشی که در نامش هست. دقیقاً یکی باید باشد."""
     matches = glob.glob(os.path.join(HERE, "..", prefix + ".*.js"))
@@ -346,6 +352,115 @@ def check_security_headers():
           "⚠️ this only proves the file, not the deployed site — _headers is a Cloudflare "
           "artifact the local harness never applies")
 
+# ---------- ریاضیِ رنگ و پارسِ توکن‌های CSS — مشترک بینِ چند نگهبانِ پالت ----------
+def _expand_hex(hexcolor):
+    h = hexcolor.lstrip("#")
+    if len(h) == 3:
+        h = "".join(c * 2 for c in h)
+    return "#" + h
+
+
+def _srgb_lin(c):
+    c = c / 255.0
+    return c / 12.92 if c <= 0.03928 else ((c + 0.055) / 1.055) ** 2.4
+
+
+def _rel_lum(hexcolor):
+    h = _expand_hex(hexcolor).lstrip("#")
+    r, g, b = int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
+    return 0.2126 * _srgb_lin(r) + 0.7152 * _srgb_lin(g) + 0.0722 * _srgb_lin(b)
+
+
+def contrast_ratio(h1, h2):
+    l1, l2 = _rel_lum(h1), _rel_lum(h2)
+    l1, l2 = max(l1, l2), min(l1, l2)
+    return (l1 + 0.05) / (l2 + 0.05)
+
+
+def _mix_hex(h1, h2, t):
+    a, b = _expand_hex(h1).lstrip("#"), _expand_hex(h2).lstrip("#")
+    out = []
+    for i in (0, 2, 4):
+        va, vb = int(a[i:i + 2], 16), int(b[i:i + 2], 16)
+        out.append(round(va + (vb - va) * t))
+    return "#%02x%02x%02x" % tuple(out)
+
+
+def worst_gradient_ratio(g1, g2, text, steps=100):
+    return min(contrast_ratio(text, _mix_hex(g1, g2, i / steps)) for i in range(steps + 1))
+
+
+def parse_css_decls(block):
+    """یک بلوکِ {...} را به دیکشنریِ نام→مقدار برای متغیرهای --x تبدیل می‌کند.
+    کامنت‌های /* ... */ اول حذف می‌شوند — وگرنه یک دونقطه‌ی داخلِ جمله‌ی
+    فارسیِ یک کامنت (مثلاً «...آمد: در متن...») به‌غلط مرزِ نام/مقدار یک
+    توکن فرض می‌شود و مقدارِ واقعیِ بعد از آن کامنت گم می‌شود."""
+    block = re.sub(r"/\*.*?\*/", "", block, flags=re.S)
+    out = {}
+    for part in block.split(";"):
+        part = part.strip()
+        if not part or ":" not in part:
+            continue
+        name, val = part.split(":", 1)
+        name = name.strip()
+        if name.startswith("--"):
+            out[name[2:]] = val.strip()
+    return out
+
+
+def resolve_css_var(decls, name, _seen=None):
+    """اگر مقدارِ یک توکن فقط var(--دیگری) باشد دنبالش می‌رود تا به مقدارِ
+    واقعی (هگز/گرادیان) برسد — هر دو داخلِ همان دیکشنری‌ی یک بلوک."""
+    _seen = _seen or set()
+    assert name not in _seen, "circular var() reference for --%s" % name
+    _seen = _seen | {name}
+    assert name in decls, "--%s not found in this token block" % name
+    val = decls[name]
+    m = re.fullmatch(r"var\(--([\w-]+)\)", val)
+    if m:
+        return resolve_css_var(decls, m.group(1), _seen)
+    return val
+
+
+def merged_root_decls(src, theme=None):
+    """کسکیدِ واقعیِ CSS برای بلوک‌های :root را روی متنِ فایل شبیه‌سازی
+    می‌کند: همه‌ی :root{...}های بدونِ ویژگی (که همیشه اعمال می‌شوند) به
+    ترتیبِ متن ادغام می‌شوند، و اگر theme داده شود ("light" یا "dark")
+    همه‌ی :root[data-theme=...]{...}های همان تم (با یا بدونِ گیومه)
+    رویشان override می‌شوند — دقیقاً همان اولویتی که مرورگر وقتی آن تم
+    روی <html> نشسته اعمال می‌کند، صرف‌نظر از ترتیبِ متنی‌شان. برای
+    landing.html/pairs.html که «روشن» فقط همان :root ساده است (سلکتورِ
+    ویژه‌ی light ندارند)، theme="light" بی‌اثر می‌ماند و دقیقاً همان
+    ادغامِ پایه را برمی‌گرداند — که خودش رفتارِ درست است."""
+    merged = {}
+    for m in re.finditer(r":root\{([^}]*)\}", src):
+        merged.update(parse_css_decls(m.group(1)))
+    if theme:
+        for m in re.finditer(r':root\[data-theme=\"?%s\"?\]\{([^}]*)\}' % re.escape(theme), src):
+            merged.update(parse_css_decls(m.group(1)))
+    return merged
+
+
+def index_theme_blocks(src):
+    """متنِ خامِ دو بلوکِ :root[data-theme="light"/"dark"] را از index.html
+    برمی‌گرداند — منبعِ مشترکِ چند نگهبانِ پالت، تا رجکسِ پیداکردنشان یک‌جا
+    نگه داشته شود."""
+    lm = re.search(r':root\[data-theme="light"\]\{(.*?)\n\}', src, re.S)
+    dm = re.search(r':root\[data-theme="dark"\]\{(.*?)\n\}', src, re.S)
+    assert lm and dm, "could not find both :root[data-theme=...] blocks in index.html"
+    return lm.group(1), dm.group(1)
+
+
+def rule_bodies(src, selector_literal):
+    """همه‌ی بدنه‌های قانونی که *دقیقاً* با این سلکتور شروع می‌شوند را
+    برمی‌گرداند — با نگاه به بایت‌های واقعیِ CSS، نه فقط grep کردنِ کل
+    فایل. لازم است چون یک سلکتور مثلِ .cta ممکن است داخلِ یک مدیاکوئری هم
+    دوباره تعریف شده باشد؛ اگر فقط اولین رخداد را بردارییم، دقیقاً همان
+    رخدادی که رنگ را دارد ممکن است از قلم بیفتد."""
+    pattern = re.compile(r"(?<![\w.-])" + re.escape(selector_literal) + r"\{([^}]*)\}")
+    return [m.group(1) for m in pattern.finditer(src)]
+
+
 def check_brand_palette():
     """پالت «ارکید» — سه چیز که هرکدام یک‌بار واقعاً شکسته بودند.
 
@@ -394,77 +509,289 @@ def check_brand_palette():
         "the header mark's gradient drifted — missing untouched stops %s, missing new "
         "stops %s" % (missing_unchanged, missing_new))
 
-    lm = re.search(r':root\[data-theme="light"\]\{(.*?)\n\}', src, re.S)
-    dm = re.search(r':root\[data-theme="dark"\]\{(.*?)\n\}', src, re.S)
-    assert lm and dm, "could not find both :root[data-theme=...] blocks in index.html"
-    light_block, dark_block = lm.group(1), dm.group(1)
+    light_block, dark_block = index_theme_blocks(src)
     for label, block in (("light", light_block), ("dark", dark_block)):
         assert re.search(r"--g1:\s*#[0-9A-Fa-f]{3,6}", block), \
             "--g1 is not defined inside the %s theme block" % label
         assert re.search(r"--g2:\s*#[0-9A-Fa-f]{3,6}", block), \
             "--g2 is not defined inside the %s theme block" % label
 
-    def expand(hexcolor):
-        h = hexcolor.lstrip("#")
-        if len(h) == 3:
-            h = "".join(c * 2 for c in h)
-        return "#" + h
-
     def toks(block):
-        g1 = expand(re.search(r"--g1:\s*(#[0-9A-Fa-f]{3,6})", block).group(1))
-        g2 = expand(re.search(r"--g2:\s*(#[0-9A-Fa-f]{3,6})", block).group(1))
-        onacc = expand(re.search(r"--on-acc:\s*(#[0-9A-Fa-f]{3,6})", block).group(1))
+        g1 = _expand_hex(re.search(r"--g1:\s*(#[0-9A-Fa-f]{3,6})", block).group(1))
+        g2 = _expand_hex(re.search(r"--g2:\s*(#[0-9A-Fa-f]{3,6})", block).group(1))
+        onacc = _expand_hex(re.search(r"--on-acc:\s*(#[0-9A-Fa-f]{3,6})", block).group(1))
         return g1, g2, onacc
 
-    def srgb_lin(c):
-        c = c / 255.0
-        return c / 12.92 if c <= 0.03928 else ((c + 0.055) / 1.055) ** 2.4
-
-    def rel_lum(hexcolor):
-        h = hexcolor.lstrip("#")
-        r, g, b = int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
-        return 0.2126 * srgb_lin(r) + 0.7152 * srgb_lin(g) + 0.0722 * srgb_lin(b)
-
-    def contrast(h1, h2):
-        l1, l2 = rel_lum(h1), rel_lum(h2)
-        l1, l2 = max(l1, l2), min(l1, l2)
-        return (l1 + 0.05) / (l2 + 0.05)
-
-    def mix(h1, h2, t):
-        a, b = h1.lstrip("#"), h2.lstrip("#")
-        out = []
-        for i in (0, 2, 4):
-            va, vb = int(a[i:i + 2], 16), int(b[i:i + 2], 16)
-            out.append(round(va + (vb - va) * t))
-        return "#%02x%02x%02x" % tuple(out)
-
-    def worst_ratio(g1, g2, text, steps=100):
-        return min(contrast(text, mix(g1, g2, i / steps)) for i in range(steps + 1))
-
-    lg1, lg2, lonacc = toks(light_block)
     dg1, dg2, donacc = toks(dark_block)
-    light_ratio = worst_ratio(lg1, lg2, lonacc)
-    dark_ratio = worst_ratio(dg1, dg2, donacc)
-    # \u26a0\ufe0f \u06f1\u06f4\u06f0\u06f5/\u06f0\u06f6/\u06f0\u06f7 (\u06f2\u06f0\u06f2\u06f6-\u06f0\u06f8-\u06f2\u06f9): \u0645\u0627\u0644\u06a9 \u0645\u062d\u0635\u0648\u0644 \u0639\u0645\u062f\u0627\u064b \u0647\u0645\u06cc\u0646 \u06af\u0631\u0627\u062f\u06cc\u0627\u0646\u0650 \u0632\u0646\u062f\u0647\u0654 \u0628\u0631\u0646\u062f \u0631\u0627
-    # \u0628\u0627 \u0645\u062a\u0646\u0650 \u0633\u0641\u06cc\u062f\u0650 \u0631\u0648\u06cc\u0634 \u062f\u0631 \u062a\u0645\u0650 \u0631\u0648\u0634\u0646 \u0627\u0646\u062a\u062e\u0627\u0628 \u06a9\u0631\u062f \u2014 \u0628\u0627 \u0639\u0644\u0645 \u0628\u0647 \u0627\u06cc\u0646\u200c\u06a9\u0647 \u06a9\u0646\u062a\u0631\u0627\u0633\u062a
-    # \u0632\u06cc\u0631\u0650 \u06a9\u0641\u0650 \u06f4.\u06f5 WCAG \u0645\u06cc\u200c\u0627\u0641\u062a\u062f (\u0646\u0642\u0637\u0647\u200c\u06cc \u0628\u062f\u062a\u0631\u06cc\u0646 ~\u06f1.\u06f4\u06f2:\u06f1). \u0627\u06cc\u0646 \u06cc\u06a9 \u0646\u0642\u0635 \u0646\u06cc\u0633\u062a\u061b
-    # \u06a9\u0641\u0650 \u06f4.\u06f5 \u062f\u06cc\u06af\u0631 \u0631\u0648\u06cc *\u0627\u06cc\u0646* \u06a9\u0646\u062a\u0631\u0644\u0650 \u0646\u0627\u0645\u200c\u0628\u0631\u062f\u0647 \u062f\u0631 \u062a\u0645\u0650 \u0631\u0648\u0634\u0646 \u0627\u0639\u0645\u0627\u0644 \u0646\u0645\u06cc\u200c\u0634\u0648\u062f. \u0648\u0644\u06cc
-    # \u06a9\u0641 \u06a9\u0627\u0645\u0644\u0627\u064b \u0628\u0631\u062f\u0627\u0634\u062a\u0647 \u0646\u0634\u062f\u0647 \u2014 \u06a9\u0641\u0650 \u067e\u0627\u06cc\u06cc\u0646\u200c\u062a\u0631\u0650 \u062a\u0627\u0632\u0647 \u0647\u0645\u0627\u0646 \u0645\u0642\u062f\u0627\u0631\u0650 \u067e\u0630\u06cc\u0631\u0641\u062a\u0647\u200c\u0634\u062f\u0647\u200c\u06cc
-    # \u0641\u0639\u0644\u06cc \u0627\u0633\u062a\u060c \u067e\u0633 \u0627\u06af\u0631 \u06a9\u0646\u062a\u0631\u0627\u0633\u062a \u0627\u0632 \u0647\u0645\u06cc\u0646\u200c\u062c\u0627 \u0647\u0645 \u067e\u0627\u06cc\u06cc\u0646\u200c\u062a\u0631 \u0631\u0641\u062a (\u0631\u0646\u06af\u06cc \u062d\u062a\u06cc
-    # \u0631\u0648\u0634\u0646\u200c\u062a\u0631\u060c \u06cc\u0627 \u062a\u063a\u06cc\u06cc\u0631\u0650 \u0631\u0646\u06af\u0650 \u0645\u062a\u0646) \u0628\u0627\u0632 \u0647\u0645 \u0631\u062f \u0645\u06cc\u200c\u0634\u0648\u062f. \u062a\u0645\u0650 \u062a\u06cc\u0631\u0647 \u062f\u0633\u062a\u200c\u0646\u062e\u0648\u0631\u062f\u0647
-    # \u0645\u0627\u0646\u062f\u0647 \u0648 \u06a9\u0641\u0650 \u06f4.\u06f5 WCAG \u0631\u0627 \u06a9\u0627\u0645\u0644 \u0646\u06af\u0647 \u0645\u06cc\u200c\u062f\u0627\u0631\u062f.
-    LIGHT_GRAD_ACCEPTED_FLOOR = 1.35
-    assert light_ratio >= LIGHT_GRAD_ACCEPTED_FLOOR, (
-        "light theme: %s text on the %s\u2192%s button gradient bottoms out at %.2f:1 \u2014 "
-        "even below the owner-accepted vivid-gradient exception of 2026-08-29 (floor %.2f:1). "
-        "this is not the WCAG 4.5 floor (that was knowingly waived for this control), but "
-        "this is a real further regression" % (
-            lonacc, lg1, lg2, light_ratio, LIGHT_GRAD_ACCEPTED_FLOOR))
+    dark_ratio = worst_gradient_ratio(dg1, dg2, donacc)
     assert dark_ratio >= 4.5, (
-        "dark theme: %s text on the %s\u2192%s button gradient bottoms out at %.2f:1, "
+        "dark theme: %s text on the %s→%s button gradient bottoms out at %.2f:1, "
         "under the 4.5 WCAG floor" % (donacc, dg1, dg2, dark_ratio))
+
+    # ⚠️ ۱۴۰۵/۰۶/۲۵ (۲۰۲۶-۰۹-۱۲) — چهار دورِ بازخوردِ مالک، به ترتیب:
+    #   ۱) «فیروزه‌ای در نورِ روز اذیت می‌کند.»
+    #   ۲) دکمه تخت شد → رد شد: «گفتم سایان از گرادیانِ دکمه‌ها حذف شود، نه گرادیان.»
+    #   ۳) رنگ‌های واژه‌ی «can» از رمپ برداشته شود، سهمِ بنفش-تا-ماجنتا کمتر شود،
+    #      جهت دست نخورَد، و متنِ سفیدِ دکمه‌ها به هیچ عنوان مشکی نشود.
+    #   ۴) «هرچه غیرِ این‌ها عوض کردی برگردان.» — و یکی‌شان همین بود: زاویه‌ی
+    #      اصلی ۱۰۵ درجه بود و به ۱۳۵ رفته بود. برگشت.
+    # پس آنچه این نگهبان می‌سنجد یک کفِ WCAG نیست — چهار قیدی است که مالک واقعاً
+    # گفت. عدد فقط چاپ می‌شود تا اگر روزی بدتر شد دیده شود، نه اینکه تست را بشکند.
+    light_decls = parse_css_decls(light_block)
+    dark_decls = parse_css_decls(dark_block)
+    on_acc = _expand_hex(resolve_css_var(light_decls, "on-acc"))
+    assert on_acc.lower() in ("#ffffff", "#fff"), (
+        "light --on-acc is %s. The app's buttons paint their label with it, and the owner "
+        "said on 2026-09-12 that the white button text must never be turned black \u2014 an "
+        "earlier attempt did exactly that to buy contrast and was rejected." % on_acc)
+    grad = resolve_css_var(light_decls, "grad")
+    assert "linear-gradient" in grad, (
+        "light --grad is not a linear-gradient any more (got %r). A flat colour on the app's "
+        "buttons was rejected once already, do not re-flatten it." % grad)
+    assert "135deg" in grad.replace(" ", ""), (
+        "light --grad no longer starts at 135deg (got %r). The owner asked explicitly for "
+        "every gradient to keep the direction it already had." % grad)
+    can_head = [h for h in ("22eff6", "22d2f5") if h in grad.lower()]
+    assert not can_head, (
+        "light --grad carries %s again (%r). Those are the colours of the word \"can\" in the "
+        "landing headline, and the owner asked for exactly that slice of the ramp to come off "
+        "the buttons." % (", ".join("#" + h.upper() for h in can_head), grad))
+    assert "grad" in dark_decls, (
+        "the dark theme block of web/index.html declares no --grad of its own. It must: the "
+        "light block now holds literal hexes instead of var(--g1)/var(--g2), so without an "
+        "explicit dark declaration the dark theme silently inherits the LIGHT ramp. That "
+        "exact leak shipped once before any probe looked for it.")
+    dark_grad = resolve_css_var(dark_decls, "grad")
+    dark_grad_resolved = dark_grad
+    for ref, val in (("var(--g1)", dg1), ("var(--g2)", dg2)):
+        dark_grad_resolved = dark_grad_resolved.replace(ref, _expand_hex(val))
+    assert _expand_hex(dg1).lower() in dark_grad_resolved.lower() and \
+           _expand_hex(dg2).lower() in dark_grad_resolved.lower(), (
+        "dark --grad (%r) no longer runs from --g1 (%s) to --g2 (%s) \u2014 the dark theme was "
+        "not part of any of this and must stay exactly as it was" % (dark_grad, dg1, dg2))
+    stops = [_expand_hex(h) for h in re.findall(r"#[0-9A-Fa-f]{3,6}", grad)]
+    light_ratio = min(worst_gradient_ratio(a, b, on_acc) for a, b in zip(stops, stops[1:]))
+
     print("[brand palette] no old hex left, header mark gradient intact, button contrast "
-          "%.2f:1 light / %.2f:1 dark" % (light_ratio, dark_ratio))
+          "%.2f:1 light (%s, 135deg, white ink kept by the owner's call, no 4.5 floor "
+          "claimed) / %.2f:1 dark" % (light_ratio, "\u2192".join(stops), dark_ratio))
+
+
+def check_light_grad_text_contrast():
+    """رفعِ باگِ فیروزه‌ای در تمِ روشن — پروبِ ۲: زاویه و سرِ هر سه رمپِ روشن.
+
+    مالک ۲۰۲۶-۰۹-۱۲ دو چیز را جدا از هم گفت: رنگ‌های واژه‌ی «can» از رمپ
+    برداشته شود، و **جهتِ گرادیان به هیچ عنوان عوض نشود**. دومی یک بار نقض
+    شد (۱۰۵ درجه به ۱۳۵ رفت) و خودش گرفتش، نه تست. حالا تست می‌گیرد: هر رمپِ
+    تمِ روشن باید همان زاویه‌ی قبلِ تغییرش را داشته باشد و هیچ‌کدام از دو
+    توقفِ فیروزه‌ای را نیاورد. کنتراست اینجا سنجیده نمی‌شود — آن تصمیم ثبت‌شده
+    است و در check_brand_palette چاپ می‌شود."""
+    src = open(os.path.join(HERE, "..", "landing.html"), encoding="utf-8").read()
+    light = merged_root_decls(src, "light")
+    expected_angle = {"grad": "135deg", "cta-bg": "105deg", "head-bg": "105deg"}
+    shown = {}
+    for name, angle in expected_angle.items():
+        val = resolve_css_var(light, name)
+        assert "linear-gradient" in val, (
+            "light --%s is not a linear-gradient any more (got %r)" % (name, val))
+        assert angle in val.replace(" ", ""), (
+            "light --%s is at %r, not %s. That is the angle it had before any of this work, "
+            "and the owner asked explicitly that the direction never move: it runs from a "
+            "little above the left to a little below the right." % (name, val, angle))
+        leaked = [h for h in ("22eff6", "22d2f5") if h in val.lower()]
+        assert not leaked, (
+            "light --%s carries %s again (%r) \u2014 the \"can\" stops belong to the hero "
+            "animation now, not to a ramp" % (
+                name, ", ".join("#" + h.upper() for h in leaked), val))
+        shown[name] = angle
+    print("[light ramps] angles unchanged and no \"can\" stop in any of them: %s"
+          % ", ".join("--%s %s" % (k, v) for k, v in shown.items()))
+
+
+def check_g1ui_token():
+    """رفعِ باگِ فیروزه‌ای در تمِ روشن — پروبِ ۳: --g1ui.
+
+    سه جا فیروزه‌ای را نه به‌عنوانِ گرادیان که به‌عنوانِ یک سطحِ تخت می‌کشیدند:
+    حلقه‌ی visual-core، هاله‌ی پشتِ هیرو، و آواتارِ سوم. هر سه var(--g1) بودند؛
+    حالا هر سه از --g1ui می‌خوانند تا تمِ روشن بتواند جایگزین بگذارد بی‌آنکه
+    تمِ تیره تکان بخورد.
+
+    ⚠️ کفِ ۳:۱ اینجا هم برداشته شد. دلیلش: مالک ۲۰۲۶-۰۹-۱۲ خودش رنگ را نام
+    برد — همان آبی‌ای که حرفِ «s» در «sell» رویش می‌نشیند — و رنگی که او نام
+    برده باشد را با یک کفِ سلیقه‌ای عوض نمی‌کنیم. چیزی که به‌جایش قفل می‌شود
+    این است: --g1ui در تمِ روشن دقیقاً همان --viz1 باشد (بومِ هیرو و حلقه‌اش
+    یک رنگ‌اند؛ یکی با CSS رنگ می‌شود و دیگری با جاوااسکریپت، پس واگراییِ
+    بی‌صدا ممکن است)، و در تمِ تیره دست‌نخورده بماند."""
+    landing_src = open(os.path.join(HERE, "..", "landing.html"), encoding="utf-8").read()
+    light = merged_root_decls(landing_src, "light")
+    dark = merged_root_decls(landing_src, "dark")
+
+    bg = _expand_hex(light["bg"])
+    g1ui_light = _expand_hex(resolve_css_var(light, "g1ui")).lower()
+    viz1_light = _expand_hex(resolve_css_var(light, "viz1")).lower()
+    assert g1ui_light == viz1_light, (
+        "light --g1ui (%s) and --viz1 (%s) have drifted apart. The ring is painted by CSS and "
+        "the canvas by JS, so a split here shows up as a two-coloured hero that no other probe "
+        "looks at." % (g1ui_light, viz1_light))
+    ratio = contrast_ratio(g1ui_light, bg)
+
+    raw_dark_g1ui = dark["g1ui"].strip()
+    assert raw_dark_g1ui == "var(--g1)", (
+        "dark theme: --g1ui must stay exactly \"var(--g1)\" (the logo's own cyan, untouched by "
+        "the light-theme work), found %r" % raw_dark_g1ui)
+
+    for sel in (".hero-visual:before", ".visual-core", ".proof-avatar.c"):
+        bodies = rule_bodies(landing_src, sel)
+        assert bodies, "could not find a CSS rule for %s in web/landing.html any more" % sel
+        joined = " ".join(bodies)
+        assert "var(--g1ui)" in joined, (
+            "%s no longer paints from var(--g1ui) \u2014 it is one of the three flat cyan "
+            "surfaces this token exists for" % sel)
+
+    print("[g1ui token] light %s (== --viz1, %.2f:1 on --bg, floor waived: the owner named "
+          "this colour), dark stays var(--g1); ring, glow and avatar all read it"
+          % (g1ui_light, ratio))
+
+
+def check_no_cyan_in_swapped_selectors():
+    """رفعِ باگِ گرادیانِ فیروزه‌ای در تمِ روشن — پروبِ ۴: هیچ ردِ فیروزه‌ای
+    مستقیم در سلکتورهایی که این تغییر رویشان سوییچ کرده باشد نماند.
+
+    ⚠️ روی *قانون‌های واقعیِ CSS* راه می‌رود (rule_bodies)، نه یک grep سرتاسریِ
+    فایل — چون خودِ لوگو/نشان همچنان به‌درستی #22EFF6 و var(--g1) استفاده
+    می‌کند (و باید بکند)؛ یک grep کور آن را هم رد می‌کرد."""
+    landing_src = open(os.path.join(HERE, "..", "landing.html"), encoding="utf-8").read()
+    index_src = open(os.path.join(HERE, "..", "index.html"), encoding="utf-8").read()
+
+    targets = [
+        (landing_src, "web/landing.html", ".button-primary"),
+        (landing_src, "web/landing.html", ".hero h1 em"),
+        (landing_src, "web/landing.html", ".proof-avatar.c"),
+        (landing_src, "web/landing.html", ".hero-visual:before"),
+        (landing_src, "web/landing.html", ".visual-core"),
+        (index_src, "web/index.html", ".cta"),
+        (index_src, "web/index.html", ".tkTrade"),
+    ]
+    checked = 0
+    for src, label, selector in targets:
+        bodies = rule_bodies(src, selector)
+        assert bodies, (
+            "%s: could not find a CSS rule for %r any more — this guard has nothing to check "
+            "(selector renamed or removed?)" % (label, selector))
+        for body in bodies:
+            assert not re.search(r"#22EFF6", body, re.I), (
+                "%s: %r still has the raw cyan hex #22EFF6 in its declarations: %r"
+                % (label, selector, body))
+            assert "var(--g1)" not in body, (
+                "%s: %r still references var(--g1) directly in its declarations: %r"
+                % (label, selector, body))
+        checked += len(bodies)
+    print("[no cyan in swapped selectors] %d selector(s) across %d rule occurrence(s), "
+          "none reference #22EFF6 or var(--g1) directly"
+          % (len(targets), checked))
+
+
+def theme_key_from_index(idx_src):
+    """کلیدِ localStorageِ تمِ اپ را از خودِ index.html بیرون می‌کشد — هیچ‌وقت
+    دستی اینجا دوباره نوشته نمی‌شود، وگرنه اگر یک‌روز آنجا عوض شود این
+    نگهبان‌ها همچنان یک رشته‌ی قدیمیِ درست‌به‌نظر را می‌سنجند."""
+    m = re.search(r'LS_THEME\s*=\s*"([^"]+)"', idx_src)
+    assert m, "could not find LS_THEME=\"...\" inside web/index.html itself"
+    return m.group(1)
+
+
+def setitem_keys_written(src):
+    """برای هر localStorage.setItem(X, ...) در متنِ اسکریپت، مقدارِ رشته‌ای‌ای
+    که واقعاً نوشته می‌شود را برمی‌گرداند — چه X خودش رشته‌ی مستقیم باشد
+    (setItem('foo', v))، چه یک شناسه/متغیر باشد که جایی همان فایل با یک
+    رشته مقداردهی شده (const LS_OLD='foo'; setItem(LS_OLD, v)). یک بررسیِ
+    grep ساده روی رشته‌ی هگز کلید فقط حالتِ اول را می‌بیند؛ این تابع دومی
+    را هم می‌بیند — دقیقاً همان شکلی که کدِ خودِ این پروژه امضا می‌کند."""
+    keys = []
+    for arg in re.findall(r"localStorage\.setItem\(\s*([^,)]+)\s*,", src):
+        arg = arg.strip()
+        lit = re.fullmatch(r"""['"]([^'"]+)['"]""", arg)
+        if lit:
+            keys.append(lit.group(1))
+            continue
+        ident = re.fullmatch(r"[A-Za-z_$][\w$]*", arg)
+        if ident:
+            am = re.search(r"""\b%s\s*=\s*['"]([^'"]+)['"]""" % re.escape(arg), src)
+            if am:
+                keys.append(am.group(1))
+    return keys
+
+
+def check_theme_key_unified():
+    """رفعِ باگِ «تم بین صفحه‌ها زنده نمی‌ماند» — پروبِ ۵: هر سه صفحه رویِ
+    *یک* کلیدِ localStorage توافق دارند.
+
+    کلیدِ تازه از خودِ index.html بیرون کشیده می‌شود (هیچ‌وقت اینجا دوباره
+    دستی نوشته نمی‌شود). فقط *نوشتنِ* کلیدِ قدیمی را ممنوع می‌کنیم، نه
+    حضورِ صرفِ رشته‌اش — چونکه مهاجرتِ یک‌باره هنوز باید کلیدِ قدیمی را
+    *بخواند* تا مقدارش را به کلیدِ تازه منتقل کند."""
+    idx_src = open(os.path.join(HERE, "..", "index.html"), encoding="utf-8").read()
+    landing_src = open(os.path.join(HERE, "..", "landing.html"), encoding="utf-8").read()
+    pairs_src = open(os.path.join(HERE, "..", "pairs.html"), encoding="utf-8").read()
+
+    key = theme_key_from_index(idx_src)
+    assert key in landing_src, (
+        "web/landing.html does not reference the app's own theme key %r — a visitor's theme "
+        "choice would not carry across the two pages" % key)
+    assert key in pairs_src, (
+        "web/pairs.html does not reference the app's own theme key %r — a visitor's theme "
+        "choice would not carry across the two pages" % key)
+
+    for label, src in (("web/landing.html", landing_src), ("web/pairs.html", pairs_src)):
+        written = setitem_keys_written(src)
+        assert OLD_THEME_KEY not in written, (
+            "%s still WRITES the retired per-page key %r (via localStorage.setItem, whether "
+            "with the literal string or a variable holding it) — it must only write %r from "
+            "here on. setItem calls found: %s" % (label, OLD_THEME_KEY, key, written))
+
+    print("[theme key] all three pages agree on %r; %r is never written any more"
+          % (key, OLD_THEME_KEY))
+
+
+def check_dark_tokens_unchanged():
+    """پروبِ ۷: بلوکِ تمِ تیره در هر سه فایل بایت‌به‌بایت همان مقادیرِ قبل از
+    این تغییر است — تنها استثنا دو توکنِ تازه (--g1ui، --cta-bg) که خودِ
+    این تغییر اضافه‌شان کرد. اگر یکی از این شش مقدار جابه‌جا شود، یعنی
+    ویرایشِ تمِ روشن به‌طورِ ناخواسته روی تمِ تیره هم اثر گذاشته — دقیقاً
+    همان ریسکی که «تمِ تیره نباید یک رنگ هم عوض شود» درباره‌اش هشدار داد.
+
+    ⚠️ --bg/--card این‌جا *مشترکِ* هر سه فایل نیستند: index.html از قبل
+    (پیش از این تغییر، هیچ ربطی به این باگ ندارد) یک تیره‌ی مستقلِ خودش
+    دارد (--bg:#0b0d13 / --card:#14171f) — ته‌رنگِ آبیِ برند که در
+    landing.html/pairs.html نیست. هاردکدکردنِ یک عددِ مشترک برای هر سه
+    همین‌جا خودش یک قلبِ درست را رد می‌کرد؛ پس bg/card هر فایل با مقدارِ
+    واقعیِ *همان فایل* سنجیده می‌شود، درحالی‌که acc/g1/g2/on-acc — که
+    واقعاً بینِ هر سه یکی‌اند — با یک مقدارِ مشترک."""
+    shared_expected = {
+        "acc": "#4fc3f7", "g1": "#22EFF6", "g2": "#C56CF5", "on-acc": "#05121a",
+    }
+    per_file_expected = {
+        "web/landing.html": {"bg": "#0a0810", "card": "#131020"},
+        "web/pairs.html": {"bg": "#0a0810", "card": "#131020"},
+        "web/index.html": {"bg": "#0b0d13", "card": "#14171f"},
+    }
+    files = {
+        "web/landing.html": open(os.path.join(HERE, "..", "landing.html"), encoding="utf-8").read(),
+        "web/pairs.html": open(os.path.join(HERE, "..", "pairs.html"), encoding="utf-8").read(),
+        "web/index.html": open(os.path.join(HERE, "..", "index.html"), encoding="utf-8").read(),
+    }
+    for label, src in files.items():
+        dark = merged_root_decls(src, "dark")
+        expected = dict(shared_expected)
+        expected.update(per_file_expected[label])
+        for name, want in expected.items():
+            assert name in dark, "%s: dark theme has no --%s at all" % (label, name)
+            got = _expand_hex(dark[name].strip())
+            assert got.lower() == want.lower(), (
+                "%s: dark theme's --%s is %s, expected %s unchanged — the light-theme edit "
+                "leaked into the dark theme" % (label, name, got, want))
+    print("[dark tokens unchanged] bg/card/acc/g1/g2/on-acc identical to pre-change values "
+          "in all 3 files: %s" % sorted(files))
 
 
 def check_og_tags():
@@ -1023,15 +1350,15 @@ def check_pairs_page():
         "web/pairs.html loads or links to a host outside the allowed set (self + web/landing.html's "
         "own font origin, if any): %s. Found refs: %s" % (stray, sorted(refs)))
 
-    # ---- همان کلیدِ localStorage که web/landing.html برای تم استفاده می‌کند ----
-    # هیچ‌وقت این رشته را دوباره دستی اینجا نمی‌نویسیم — از خودِ landing.html
-    # بیرون کشیده می‌شود، وگرنه اگر یک‌روز آنجا عوض شود، این نگهبان همچنان
-    # یک رشته‌ی قدیمیِ درست‌به‌نظر را می‌سنجد.
-    km = re.search(r"localStorage\.getItem\('([^']+)'\)", lnd_src)
-    assert km, "could not find the theme localStorage key inside web/landing.html itself"
-    theme_key = km.group(1)
+    # ---- همان کلیدِ localStorage که خودِ اپ (index.html) برای تم استفاده
+    # می‌کند — هیچ‌وقت این رشته را دوباره دستی اینجا نمی‌نویسیم، از خودِ
+    # index.html بیرون کشیده می‌شود (check_theme_key_unified همین کلید را
+    # روی هر سه صفحه با جزئیاتِ بیشتری می‌سنجد؛ این‌جا فقط برای پیامِ
+    # خلاصه‌ی چاپیِ همین نگهبان لازم است).
+    idx_src_for_key = open(os.path.join(HERE, "..", "index.html"), encoding="utf-8").read()
+    theme_key = theme_key_from_index(idx_src_for_key)
     assert theme_key in src, (
-        "web/pairs.html does not use web/landing.html's own theme storage key (%r) — a visitor's "
+        "web/pairs.html does not use the app's own theme storage key (%r) — a visitor's "
         "theme choice would not carry across the two pages" % theme_key)
 
     # ---- این صفحه باید از داده خالی باشد: هیچ آدرس/توکن/قیمتِ واقعی ----
@@ -1048,6 +1375,203 @@ def check_pairs_page():
              theme_key))
 
 
+def _canvas_script_block(landing_src):
+    """متنِ خامِ اسکریپتِ routeCanvas را بین دو نشانه برمی‌گرداند: خطِ
+    getElementById('routeCanvas') و شروعِ IIFEِ بی‌ربطِ کارت‌های ویژگی که
+    بلافاصله بعدِ آن می‌آید. عمداً از انتهای همان بلوک استفاده می‌کنیم، نه
+    یک grep سرتاسری — چون لوگو و بقیه‌ی صفحه هنوز مجازند همین هگزها را
+    داشته باشند."""
+    start_marker = "getElementById('routeCanvas'"
+    end_marker = "feature-grid>.feature-card"
+    start = landing_src.find(start_marker)
+    assert start != -1, (
+        "could not find the routeCanvas script anchor (getElementById('routeCanvas')) in "
+        "web/landing.html")
+    end = landing_src.find(end_marker, start)
+    assert end != -1, (
+        "could not find the end-of-canvas-script anchor (%r) after routeCanvas in "
+        "web/landing.html" % end_marker)
+    return landing_src[start:end]
+
+
+def check_canvas_no_color_literal():
+    """پروبِ ۱: اسکریپتِ routeCanvas دیگر هیچ رنگِ ثابتی ندارد.
+
+    صاحبِ‌کار دقیقاً همین را گزارش کرد: «خط‌های نازکِ فیروزه‌ای روی زمینه‌ی
+    سفید». هیچ‌کدام از سه هگزِ برند (#22EFF6 فیروزه‌ای، #C56CF5 ارکید،
+    #8b5cf6 بنفش) و هیچ سه‌تاییِ rgba(عدد,عدد,عدد,...) هاردکد نباید داخلِ
+    این بلوک مانده باشد — همه باید از پالتِ --viz1/--viz2/--vizline بیایند.
+    ⚠️ الگوی rgba فقط دنبالِ رقمِ بلافاصله بعد از پرانتز می‌گردد، پس
+    'rgba('+r+... (تابعِ کمکیِ hexToRgba که خودش رنگی هاردکد نمی‌کند) را رد
+    نمی‌کند."""
+    landing_src = open(os.path.join(HERE, "..", "landing.html"), encoding="utf-8").read()
+    block = _canvas_script_block(landing_src)
+
+    for hexval in ("#22EFF6", "#C56CF5", "#8b5cf6"):
+        assert not re.search(re.escape(hexval), block, re.I), (
+            "the routeCanvas script still hard-codes %s — thin cyan/orchid lines on a light "
+            "background were the exact daylight-readability complaint; it must come from the "
+            "--viz1/--viz2/--vizline palette instead" % hexval)
+
+    m = re.search(r"rgba\(\s*\d", block)
+    assert not m, (
+        "the routeCanvas script still has a literal rgba(r,g,b,a) colour triple near %r — every "
+        "drawn colour must come from the --viz1/--viz2/--vizline palette via the hexToRgba(hex,a) "
+        "helper, never a baked-in number"
+        % (block[max(0, m.start() - 24):m.start() + 24] if m else ""))
+
+    print("[canvas no color literal] routeCanvas script (%d chars) carries none of #22EFF6/"
+          "#C56CF5/#8b5cf6 and no literal rgba(r,g,b,...) triple" % len(block))
+
+
+def check_viz_tokens_literal():
+    """پروبِ ۲: --viz1/--viz2/--vizline در هر دو بلوکِ تم هست و هر شش مقدار
+    یک هگزِ لفظیِ #rrggbb است، هرگز var(...). دلیلش صرفاً سلیقه نیست:
+    canvas با getComputedStyle().getPropertyValue() می‌خواندشان و اگر
+    نتیجه هنوز یک رشته‌ی var(--x) باشد، رنگی نیست که بشود با آن رنگ زد."""
+    landing_src = open(os.path.join(HERE, "..", "landing.html"), encoding="utf-8").read()
+    light = merged_root_decls(landing_src)
+    dark = merged_root_decls(landing_src, "dark")
+    hexlit = re.compile(r"^#[0-9A-Fa-f]{6}$")
+
+    for name in ("viz1", "viz2", "vizline"):
+        for label, decls in (("light", light), ("dark", dark)):
+            assert name in decls, (
+                "--%s is missing from the %s :root block(s) of web/landing.html" % (name, label))
+            val = decls[name].strip()
+            assert hexlit.match(val), (
+                "--%s in the %s block of web/landing.html is %r, not a literal #rrggbb hex — "
+                "the canvas script reads this via getComputedStyle().getPropertyValue() and "
+                "cannot paint with a var() reference" % (name, label, val))
+
+    print("[viz tokens literal] --viz1/--viz2/--vizline are literal #rrggbb in both theme "
+          "blocks: light=%s dark=%s"
+          % ({k: light[k] for k in ("viz1", "viz2", "vizline")},
+             {k: dark[k] for k in ("viz1", "viz2", "vizline")}))
+
+
+def check_viz_contrast():
+    """پروبِ ۳: رنگ‌هایی که رویِ بومِ روشن کشیده می‌شوند.
+
+    --vizline کفِ ۳:۱ روی --bg را نگه می‌دارد، چون برچسبِ متنیِ کنارِ هر نقطه
+    با همین رنگ نوشته می‌شود و متن باید خوانده شود.
+
+    ⚠️ --viz1 و --viz2 استثنا هستند و عمدی: ۲۰۲۶-۰۹-۱۲ مالک گفت رنگ‌های واژه‌ی
+    «can» از تیترِ صفحه‌ی معرفی — یعنی سرِ فیروزه‌ایِ رمپِ برند — از دکمه‌ها
+    برداشته و **به انیمیشنِ هیرو داده** شود. پس فیروزه‌ای اینجا خواسته است، نه
+    باگ. کفِ ۳:۱ برایشان برداشته شد چون از اول هم عددِ درستی را نمی‌سنجید: بوم
+    با این دو فقط خط و نقطه می‌کشد و همه‌شان با آلفای ۰.۳ تا ۰.۵۵ کشیده
+    می‌شوند. آنچه باید ثابت بماند این است که هر دو از سرِ فیروزه‌ایِ خودِ نشانِ
+    برند بیایند، نه یک رنگِ اختراعی — و ماجنتا که سهمش به دکمه رسید، اینجا
+    نماند."""
+    landing_src = open(os.path.join(HERE, "..", "landing.html"), encoding="utf-8").read()
+    light = merged_root_decls(landing_src)
+    bg = _expand_hex(resolve_css_var(light, "bg"))
+
+    ratios = {n: contrast_ratio(_expand_hex(resolve_css_var(light, n)), bg)
+              for n in ("viz1", "viz2", "vizline")}
+    assert ratios["vizline"] >= 3.0, (
+        "light --vizline (%s) reaches only %.2f:1 against light --bg (%s) \u2014 under the 3:1 "
+        "floor, and this is the colour the node labels are typed in" % (
+            _expand_hex(resolve_css_var(light, "vizline")), ratios["vizline"], bg))
+
+    sell_stops = ["#43b5f7", "#7396f8"]
+    for name in ("viz1", "viz2"):
+        val = _expand_hex(resolve_css_var(light, name)).lower()
+        assert val in sell_stops, (
+            "light --%s is %s, which is not one of the two stops the letter \"s\" of \"sell\" "
+            "sits on in the landing headline (%s). That single letter is what the owner "
+            "pointed at on 2026-09-12 when he handed a colour to the hero animation \u2014 not "
+            "the cyan of \"can\" before it, and not a colour invented next to it." % (
+                name, val, ", ".join(sell_stops)))
+
+    print("[viz contrast] light on --bg (%s): --viz1=%.2f:1 --viz2=%.2f:1 (the two stops of the \"s\" "
+          "in \"sell\", strokes drawn at alpha .30-.55, floor waived by the owner 2026-09-12) "
+          "--vizline=%.2f:1 (>= 3:1, labels)"
+          % (bg, ratios["viz1"], ratios["viz2"], ratios["vizline"]))
+
+
+def check_viz_dark_unchanged():
+    """پروبِ ۴: --viz1/--viz2 در تمِ تیره دقیقاً همان #22EFF6/#C56CF5ِ همیشگی
+    می‌مانند — این تغییر فقط تمِ روشن را اصلاح می‌کند، تمِ تیره را دست
+    نمی‌زند."""
+    landing_src = open(os.path.join(HERE, "..", "landing.html"), encoding="utf-8").read()
+    dark = merged_root_decls(landing_src, "dark")
+    assert dark["viz1"].strip() == "#22EFF6", (
+        "dark --viz1 changed to %r, must stay exactly #22EFF6" % dark["viz1"].strip())
+    assert dark["viz2"].strip() == "#C56CF5", (
+        "dark --viz2 changed to %r, must stay exactly #C56CF5" % dark["viz2"].strip())
+    print("[viz dark unchanged] dark --viz1=#22EFF6 --viz2=#C56CF5, untouched")
+
+
+def check_headline_gradient():
+    """پروبِ ۶: تیترِ «can sell it» و دکمه‌ها در تمِ روشن یک رمپِ واحد دارند.
+
+    ۲۰۲۶-۰۹-۱۲ مالک خواست تیترِ هیرو همان رمپِ دکمه‌ها را بگیرد. راهش این بود
+    که --head-bg در تمِ روشن *به* --cta-bg ارجاع بدهد، نه اینکه مقدارش کپی
+    شود — کپی یعنی دفعه‌ی بعد که رمپِ دکمه عوض شود، تیتر بی‌صدا عقب می‌ماند.
+
+    در تمِ تیره اما --head-bg مقدارِ خودش را دارد، چون رمپِ تیترِ تیره از اول
+    با رمپِ دکمه‌ی تیره مو-به‌مو یکی نبود (‎#4ecaf2 در ۴۴٪ در برابر ‎#50c8f6 در
+    ۴۲٪) و هیچ‌کس نخواسته بود آن عوض شود."""
+    src = open(os.path.join(HERE, "..", "landing.html"), encoding="utf-8").read()
+    bodies = rule_bodies(src, ".hero h1 em")
+    assert bodies, "could not find a CSS rule for .hero h1 em in web/landing.html any more"
+    joined = " ".join(bodies)
+    assert "var(--head-bg)" in joined, (
+        "the hero headline no longer paints from var(--head-bg) (rule body: %r)" % joined)
+    assert "background-clip:text" in joined.replace(" ", ""), (
+        "the hero headline lost its background-clip:text, so the gradient is painting behind "
+        "the letters instead of inside them")
+
+    light = merged_root_decls(src, "light")
+    dark = merged_root_decls(src, "dark")
+    assert light["head-bg"].strip() == "var(--cta-bg)", (
+        "light --head-bg is %r, not the literal reference var(--cta-bg). The owner asked for "
+        "\"can sell it\" to carry the same ramp as the buttons, and reading the same token is "
+        "what keeps the two from drifting apart \u2014 a copied value does not."
+        % light["head-bg"].strip())
+    dark_head = dark["head-bg"].strip()
+    assert "4ecaf2" in dark_head.lower() and "105deg" in dark_head.replace(" ", ""), (
+        "dark --head-bg is %r; it must stay the headline ramp the dark theme already had "
+        "(105deg, #4ecaf2 at 44%%). Nobody asked for the dark headline to change." % dark_head)
+
+    print("[headline gradient] light: .hero h1 em -> --head-bg -> var(--cta-bg), one ramp with "
+          "the buttons by reference; dark: its own original 105deg/#4ecaf2 ramp, untouched")
+
+
+def check_cta_shadow_token():
+    """پروبِ ۶: .button-primary دیگر سایه‌ی فیروزه‌ای را هاردکد نمی‌کند، از
+    var(--cta-shadow) می‌خواند؛ مقدارِ روشن دیگر ردی از سه‌تاییِ فیروزه‌ای
+    (34,211,238) ندارد، مقدارِ تیره همان قبلی می‌ماند."""
+    landing_src = open(os.path.join(HERE, "..", "landing.html"), encoding="utf-8").read()
+    bodies = rule_bodies(landing_src, ".button-primary")
+    assert bodies, "could not find a CSS rule for .button-primary in web/landing.html any more"
+
+    found = False
+    for body in bodies:
+        m = re.search(r"box-shadow\s*:\s*([^;]+)", body)
+        if not m:
+            continue
+        found = True
+        val = m.group(1).strip()
+        assert val == "var(--cta-shadow)", (
+            ".button-primary box-shadow is %r, expected var(--cta-shadow)" % val)
+    assert found, ".button-primary has no box-shadow declaration any more"
+
+    light = merged_root_decls(landing_src)
+    dark = merged_root_decls(landing_src, "dark")
+    assert "34,211,238" not in light["cta-shadow"], (
+        "light --cta-shadow still carries the cyan halo rgb triple 34,211,238: %r"
+        % light["cta-shadow"])
+    assert "34,211,238" in dark["cta-shadow"], (
+        "dark --cta-shadow should stay the exact original cyan halo value, got %r"
+        % dark["cta-shadow"])
+
+    print("[cta shadow token] .button-primary uses var(--cta-shadow); light=%r dark=%r"
+          % (light["cta-shadow"].strip(), dark["cta-shadow"].strip()))
+
+
 check_no_remote_code()
 check_gt_proxy_worker()
 check_asset_cache_headers()
@@ -1056,10 +1580,75 @@ check_event_allowlists()
 check_error_handler()
 check_og_tags()
 check_brand_palette()
+check_light_grad_text_contrast()
+check_g1ui_token()
+check_no_cyan_in_swapped_selectors()
+check_theme_key_unified()
+check_dark_tokens_unchanged()
+check_canvas_no_color_literal()
+check_viz_tokens_literal()
+check_viz_contrast()
+check_viz_dark_unchanged()
+check_headline_gradient()
+check_cta_shadow_token()
 check_one_executor_address()
 check_dex_parity()
 check_landing_page()
 check_pairs_page()
+
+
+async def check_theme_migration(p, errors):
+    """رفعِ باگِ «تم بین صفحه‌ها زنده نمی‌ماند» — پروبِ ۶ (پویا): مهاجرتِ
+    یک‌باره‌ی کلیدِ localStorage واقعاً روی یک صفحه‌ی بارگذاری‌شده اتفاق
+    می‌افتد، نه فقط داخلِ متنِ اسکریپت به‌نظر درست می‌آید.
+
+    حالتِ ۱: فقط کلیدِ قدیمی (zaexa.landing.theme) روی "dark" است. صفحه باید
+    تیره باز شود *و* بلافاصله همان مقدار را در کلیدِ تازه هم بنویسد —
+    وگرنه دفعه‌ی بعد که کلیدِ قدیمی هم پاک شود، انتخابِ کاربر گم می‌شود.
+    حالتِ ۲: هر دو کلید ست‌اند، قدیمی="dark"، تازه="light". کلیدِ تازه
+    باید برنده باشد — یعنی از این پس فقط همان یکی منبعِ حقیقت است."""
+    path = os.path.join(HERE, "..", "landing.html")
+    idx_src = open(os.path.join(HERE, "..", "index.html"), encoding="utf-8").read()
+    new_key = theme_key_from_index(idx_src)
+
+    b = await p.chromium.launch()
+
+    ctx1 = await b.new_context()
+    pg1 = await ctx1.new_page()
+    pg1.on("console", lambda m: errors.append(m.text) if m.type == "error" else None)
+    await ctx1.add_init_script("localStorage.setItem(%r, 'dark');" % OLD_THEME_KEY)
+    await pg1.goto("file://" + path)
+    await pg1.wait_for_timeout(300)
+    state1 = await pg1.evaluate(
+        "(k) => ({theme: document.documentElement.dataset.theme, "
+        "newVal: localStorage.getItem(k)})", new_key)
+    await ctx1.close()
+    assert state1["theme"] == "dark", (
+        "with only the old key (%r) set to 'dark', web/landing.html ended up in %r theme "
+        "instead of dark — the one-time migration did not run" % (OLD_THEME_KEY, state1["theme"]))
+    assert state1["newVal"] == "dark", (
+        "with only the old key (%r) set to 'dark', web/landing.html did not write 'dark' into "
+        "the new key (%r) — got %r. Without this, the choice is lost the moment the old key "
+        "is gone" % (OLD_THEME_KEY, new_key, state1["newVal"]))
+
+    ctx2 = await b.new_context()
+    pg2 = await ctx2.new_page()
+    pg2.on("console", lambda m: errors.append(m.text) if m.type == "error" else None)
+    await ctx2.add_init_script(
+        "localStorage.setItem(%r, 'light'); localStorage.setItem(%r, 'dark');"
+        % (new_key, OLD_THEME_KEY))
+    await pg2.goto("file://" + path)
+    await pg2.wait_for_timeout(300)
+    theme2 = await pg2.evaluate("() => document.documentElement.dataset.theme")
+    await ctx2.close()
+    assert theme2 == "light", (
+        "with the new key (%r) set to 'light' and the old key (%r) set to 'dark', "
+        "web/landing.html ended up %r — the new key must win once it holds a valid choice"
+        % (new_key, OLD_THEME_KEY, theme2))
+
+    await b.close()
+    print("[theme migration] old-key-only -> dark and migrated into %r; "
+          "new-key-present -> new key wins" % new_key)
 
 
 async def check_landing_mobile(p, errors):
@@ -1297,6 +1886,70 @@ async def check_landing_mobile(p, errors):
     await b.close()
 
 
+async def check_canvas_palette_live(p, errors):
+    """پروبِ ۵ (پویا): پالتِ زنده‌ی canvas بدونِ ریلود دنبالِ عوض‌شدنِ
+    data-theme می‌رود.
+
+    web/landing.html را با تمِ ذخیره‌شده‌ی "light" بار می‌کنیم، پالتی که
+    اسکریپت واقعاً خواند (window.__zaexaViz — همان شیءِ viz که readViz
+    داخلش می‌نویسد) را می‌سنجیم که ست روشن باشد، سپس data-theme را روی
+    خودِ <html> به "dark" برمی‌گردانیم — دقیقاً همان کاری که MutationObserver
+    باید ببیند — بدونِ هیچ reloadی، و دوباره همان شیء را می‌خوانیم که باید
+    ست تیره شده باشد. اگر MutationObserver برداشته شود، پالت روی مقادیرِ
+    روشنِ بارگذاریِ اول گیر می‌ماند و این پروب با پیام واضح FAIL می‌شود، نه
+    کرش."""
+    path = os.path.join(HERE, "..", "landing.html")
+    idx_src = open(os.path.join(HERE, "..", "index.html"), encoding="utf-8").read()
+    new_key = theme_key_from_index(idx_src)
+
+    b = await p.chromium.launch()
+    ctx = await b.new_context()
+    pg = await ctx.new_page()
+    pg.on("console", lambda m: errors.append(m.text) if m.type == "error" else None)
+    await ctx.add_init_script("localStorage.setItem(%r, 'light');" % new_key)
+    await pg.goto("file://" + path)
+    await pg.wait_for_timeout(400)
+
+    assert await pg.query_selector("#routeCanvas") is not None, (
+        "web/landing.html: #routeCanvas is missing right after load")
+
+    light_live = await pg.evaluate("() => window.__zaexaViz ? {...window.__zaexaViz} : null")
+    assert light_live, (
+        "window.__zaexaViz is not exposed by the routeCanvas script — cannot verify the live "
+        "palette without a reload (the script must expose the palette it resolved, or this "
+        "probe has nothing to read)")
+    # مقادیرِ انتظار از خودِ فایل خوانده می‌شوند، نه هاردکد: چیزی که این پروب
+    # ثابت می‌کند این است که بوم *همان* توکن‌های تمِ روشن را می‌خواند، نه اینکه
+    # آن توکن‌ها یک رنگِ بخصوص‌اند — درستیِ خودِ رنگ‌ها کارِ check_viz_contrast است.
+    light_decls_f = merged_root_decls(
+        open(path, encoding="utf-8").read())
+    want_light = {k: _expand_hex(resolve_css_var(light_decls_f, n)).lower()
+                  for k, n in (("v1", "viz1"), ("v2", "viz2"), ("vl", "vizline"))}
+    got_light = {k: light_live.get(k, "").lower() for k in want_light}
+    assert got_light == want_light, (
+        "on load with the light theme active, the canvas script resolved %r instead of the "
+        "light --viz1/--viz2/--vizline set declared in landing.html (%r)" % (
+            got_light, want_light))
+
+    await pg.evaluate("() => { document.documentElement.dataset.theme = 'dark'; }")
+    await pg.wait_for_timeout(200)
+    dark_live = await pg.evaluate("() => ({...window.__zaexaViz})")
+    assert (dark_live.get("v1", "").lower() == "#22eff6"
+            and dark_live.get("v2", "").lower() == "#c56cf5"
+            and dark_live.get("vl", "").lower() == "#667496"), (
+        "flipping data-theme to 'dark' on the root element (no reload) left the canvas "
+        "script's live palette at %r instead of the dark set (#22EFF6/#C56CF5/#667496) — is "
+        "the MutationObserver on data-theme missing or not re-reading the tokens?" % dark_live)
+
+    assert await pg.query_selector("#routeCanvas") is not None, (
+        "#routeCanvas disappeared after the theme flip")
+
+    await ctx.close()
+    await b.close()
+    print("[canvas palette live] light on load -> %s; flipped data-theme to dark without "
+          "reload -> %s" % (light_live, dark_live))
+
+
 async def main():
     errors = []
     # خطاهایی که یک کاوشگر *عمداً* تولید می‌کند. اجازه‌ی عبور می‌گیرند ولی
@@ -1327,7 +1980,9 @@ async def main():
 
     async with async_playwright() as p:
         await check_real_page_from_disk(p)
+        await check_theme_migration(p, errors)
         await check_landing_mobile(p, errors)
+        await check_canvas_palette_live(p, errors)
         b = await p.chromium.launch()
         pg = await b.new_page(viewport={"width": 1240, "height": 1000}, color_scheme="dark")
         pg.on("console", on_console)
