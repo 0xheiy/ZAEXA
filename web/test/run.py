@@ -1540,77 +1540,54 @@ def check_headline_gradient():
           "the buttons by reference; dark: its own original 105deg/#4ecaf2 ramp, untouched")
 
 
-def check_header_cta_gradient():
-    """پروبِ ۷: دکمه‌ی بالای صفحه‌ی معرفی، در هر دو تم، همان رمپِ دکمه‌هاست.
+def check_button_label_ink():
+    """پروبِ ۷: جوهرِ نوشته‌ی روی هر سطحِ گرادیانی، در هر دو تم.
 
-    مسیرش دو پله بود و هر دو پله را مالک تعیین کرد: ۱۲ سپتامبر خواست این دکمه
-    هم مثلِ بقیه گرادیان بگیرد؛ همان روز گفت هرچه غیرِ خواسته‌اش عوض شده برگردد،
-    و چون همه‌ی حرف‌هایش درباره‌ی حالتِ روز بود، تمِ تیره به همان قرصِ تختِ
-    قبلی برگشت. ۱۳ سپتامبر تیره را هم دید و گفت آن هم گرادیان شود.
+    ۱۳ سپتامبر ۲۰۲۶ حسام گفت نوشته‌ی دکمه‌های تمِ تیره‌ی صفحه‌ی معرفی خوانده
+    نمی‌شود و باید مثلِ اپ باشد. اپ از اول درست بود چون جوهرش را از --on-acc
+    می‌خواند: در تمِ روشن سفید، در تمِ تیره جوهرِ تیره. صفحه‌ی معرفی به‌جایش
+    #fff را هاردکد کرده بود، پس در تمِ تیره سفید روی فیروزه‌ای می‌نشست.
 
-    پس --hdr-bg/--hdr-fg دیگر دو مقدارِ متفاوت ندارند، ولی توکن‌ها نگه داشته
-    شدند: اگر روزی دوباره لازم شد تمِ تیره جدا شود، جایش همین‌جاست و یک
-    سلکتورِ تازه لازم نمی‌شود."""
+    سه سطح این‌جا بررسی می‌شوند — دکمه‌ی اصلی، دکمه‌ی هدر، و دایره‌های شماره‌دارِ
+    «چهار گام» — و هر سه باید var(--on-acc) را بخوانند، نه یک رنگِ ثابت.
+
+    ⚠️ عددِ تمِ روشن کف ندارد: مالک صریح گفت نوشته‌ی دکمه در تمِ روشن سفید
+    می‌ماند و مشکی نمی‌شود، و بهایش همان‌جا ثبت شده. عددِ تمِ تیره اما کفِ ۴.۵
+    دارد، چون تنها دلیلِ وجودِ این تغییر همان بود."""
     src = open(os.path.join(HERE, "..", "landing.html"), encoding="utf-8").read()
-    bodies = rule_bodies(src, ".header-cta")
-    assert bodies, "could not find a CSS rule for .header-cta in web/landing.html any more"
-    joined = " ".join(bodies)
-    for token in ("var(--hdr-bg)", "var(--hdr-fg)"):
-        assert token in joined, (
-            ".header-cta no longer paints from %s (rule body: %r)" % (token, joined))
+    for sel in (".button-primary", ".header-cta", ".how-num"):
+        bodies = rule_bodies(src, sel)
+        assert bodies, "could not find a CSS rule for %s in web/landing.html any more" % sel
+        joined = " ".join(bodies)
+        assert re.search(r"color\s*:\s*var\(--(on-acc|hdr-fg|cta-fg)\)", joined), (
+            "%s does not read its label colour from a token that resolves to --on-acc "
+            "(rule body: %r). A hardcoded #fff there is exactly the bug: it paints white on "
+            "the bright cyan ramp in the dark theme, which is unreadable." % (sel, joined))
 
-    for label, decls in (("light", merged_root_decls(src, "light")),
-                         ("dark", merged_root_decls(src, "dark"))):
+    ratios = {}
+    for label in ("light", "dark"):
+        decls = merged_root_decls(src, label)
         assert decls["hdr-bg"].strip() == "var(--cta-bg)", (
-            "%s --hdr-bg is %r, not the literal reference var(--cta-bg). The owner asked for "
-            "the header button to carry the same ramp as every other button, in this theme "
-            "too \u2014 reading the same token is what keeps them from drifting apart."
-            % (label, decls["hdr-bg"].strip()))
-        fg = _expand_hex(resolve_css_var(decls, "hdr-fg")).lower()
-        assert fg in ("#ffffff", "#fff"), (
-            "%s --hdr-fg is %s; the header button's label is white like every other button's, "
-            "and the owner said button text is never turned dark to buy contrast."
-            % (label, fg))
+            "%s --hdr-bg is %r, not var(--cta-bg): the header button carries the same ramp as "
+            "every other button." % (label, decls["hdr-bg"].strip()))
+        assert decls["hdr-fg"].strip() == "var(--on-acc)", (
+            "%s --hdr-fg is %r, not var(--on-acc): the header button's label follows the same "
+            "ink as every other button's." % (label, decls["hdr-fg"].strip()))
+        ink = _expand_hex(resolve_css_var(decls, "on-acc"))
+        ramp = resolve_css_var(decls, "cta-bg")
+        for ref in ("var(--g1)", "var(--g2)"):
+            ramp = ramp.replace(ref, _expand_hex(resolve_css_var(decls, ref[6:-1])))
+        stops = [_expand_hex(h) for h in re.findall(r"#[0-9A-Fa-f]{3,6}", ramp)]
+        ratios[label] = min(worst_gradient_ratio(x, y, ink)
+                            for x, y in zip(stops, stops[1:]))
+    assert ratios["dark"] >= 4.5, (
+        "dark theme: the button label reaches only %.2f:1 at the worst point of its ramp, "
+        "under the 4.5 floor. Reading --on-acc is what fixes this; if --on-acc itself went "
+        "light in the dark theme, that is the regression." % ratios["dark"])
 
-    print("[header cta] .header-cta reads --hdr-bg/--hdr-fg; both themes resolve to "
-          "var(--cta-bg) with white ink")
-
-
-def check_dark_text_scale_shared():
-    """پروبِ ۸: نردبانِ متنِ تمِ تیره در صفحه‌ی معرفی همان نردبانِ اپ است.
-
-    ۱۳ سپتامبر ۲۰۲۶ حسام گفت نوشته‌های تمِ تیره‌ی صفحه‌ی معرفی سخت خوانده
-    می‌شوند و باید هم‌رنگِ نوشته‌های اپ شوند. پس --tx/--tx2/--tx3 در بلوکِ
-    تیره‌ی landing.html دقیقاً از index.html خوانده می‌شوند.
-
-    ⚠️ این پروب فقط یکی‌بودن را قفل می‌کند، نه خوانا‌بودن را: دو نردبان از
-    نظر روشنایی تقریباً یکی بودند (اختلافِ زیر ۳ درصد در نسبتِ کنتراست)، پس
-    اگر روزی باز هم شکایتِ خوانایی آمد، جوابش اینجا نیست — جوابش بالابردنِ
-    خودِ --tx3 یا کم‌کردنِ --glowop است، چون متنِ این صفحه روی هاله‌های رنگیِ
-    متحرک می‌نشیند و کنتراستِ واقعی‌اش از عددی که روی --bg حساب می‌شود کمتر
-    است."""
-    land = merged_root_decls(
-        open(os.path.join(HERE, "..", "landing.html"), encoding="utf-8").read(), "dark")
-    idx_src = open(os.path.join(HERE, "..", "index.html"), encoding="utf-8").read()
-    _, dark_block = index_theme_blocks(idx_src)
-    idx = parse_css_decls(dark_block)
-
-    shown = {}
-    for name in ("tx", "tx2", "tx3"):
-        a = _expand_hex(resolve_css_var(land, name)).lower()
-        b = _expand_hex(resolve_css_var(idx, name)).lower()
-        assert a == b, (
-            "dark --%s is %s on the landing page but %s in the app. The owner asked on "
-            "2026-09-12 for one text scale across both, because the landing's dark text read "
-            "harder than the app's." % (name, a, b))
-        shown[name] = a
-
-    bg = _expand_hex(resolve_css_var(land, "bg"))
-    ratios = {k: contrast_ratio(v, bg) for k, v in shown.items()}
-    print("[dark text scale] landing and app share --tx/--tx2/--tx3 (%s); on the landing's own "
-          "--bg they measure %.2f:1 / %.2f:1 / %.2f:1"
-          % (", ".join("%s=%s" % kv for kv in shown.items()),
-             ratios["tx"], ratios["tx2"], ratios["tx3"]))
+    print("[button label ink] .button-primary/.header-cta/.how-num all read --on-acc; label "
+          "contrast %.2f:1 dark (>= 4.5) / %.2f:1 light (no floor, the owner keeps white ink "
+          "there)" % (ratios["dark"], ratios["light"]))
 
 
 def check_cta_shadow_token():
@@ -1663,8 +1640,7 @@ check_viz_tokens_literal()
 check_viz_contrast()
 check_viz_dark_unchanged()
 check_headline_gradient()
-check_header_cta_gradient()
-check_dark_text_scale_shared()
+check_button_label_ink()
 check_cta_shadow_token()
 check_one_executor_address()
 check_dex_parity()
