@@ -2018,6 +2018,54 @@ async def check_token_page_hash_links(p, errors):
           "(%d placeholder '#' links left alone)" % head["placeholders"])
 
 
+async def check_logo_parity(p, errors):
+    """نشانِ برند باید در صفحه‌ی معرفی و اپ دقیقاً یک‌جا بنشیند.
+
+    ۱۴ سپتامبر ۲۰۲۶، از روی یک ویدیوی ضبط‌شده‌ی مالک: لوگو موقعِ رفت‌وآمد بین
+    دو صفحه می‌پرید و — حرفِ خودش — «مخاطب نباید فکر کند صفحه‌ها از هم جدا
+    هستند». اندازه یکی بود (۳۸ در ۲۷)، جا نه: نوارِ بالای اپ ۷۲ پیکسل و
+    فاصله‌ی کناری‌اش ۲۶ ثابت بود، در حالی که صفحه‌ی معرفی ۹۰ و
+    clamp(20px,3.4vw,56px) داشت. یعنی تا ۳۰ پیکسل افقی و ۹ پیکسل عمودی پرش.
+    انتخابِ مالک این بود که اپ با صفحه‌ی معرفی جور شود.
+
+    این پروب همان چیزی را می‌سنجد که چشم می‌بیند — مختصاتِ واقعیِ نشان روی
+    صفحه، نه متنِ CSS — و در چند عرض، چون اختلاف از یک clamp می‌آمد که فقط
+    در بعضی عرض‌ها خودش را نشان می‌دهد. ⚠️ صفحه‌ی جفت‌ها عمداً بیرون است:
+    نشانش کوچک‌تر است (۲۲ در ۱۵) و کسی نخواسته آن عوض شود."""
+    landing = "file://" + os.path.join(os.path.dirname(HERE), "landing.html")
+    app = "file://" + os.path.join(os.path.dirname(HERE), "index.html")
+    js = """() => {
+        const brand = document.querySelector('.brand') || document.querySelector('.logo');
+        const mark = brand && brand.querySelector('.mark');
+        if (!mark) return null;
+        const b = mark.getBoundingClientRect();
+        return [Math.round(b.x), Math.round(b.y), Math.round(b.width), Math.round(b.height)];
+    }"""
+    b = await p.chromium.launch()
+    seen = {}
+    for w in (1920, 1440, 1024, 900, 760, 430):
+        ctx = await b.new_context(viewport={"width": w, "height": 900})
+        pg = await ctx.new_page()
+        await ctx.add_init_script("localStorage.setItem('zaexa.theme.v1','dark');")
+        got = {}
+        for name, url in (("landing", landing), ("app", app)):
+            await pg.goto(url)
+            await pg.wait_for_timeout(250)
+            got[name] = await pg.evaluate(js)
+        await ctx.close()
+        assert got["landing"] and got["app"], (
+            "could not find the brand mark on one of the two pages at %dpx: %r" % (w, got))
+        assert got["landing"] == got["app"], (
+            "at %dpx the brand mark sits at %r on the landing page and %r in the app "
+            "(x, y, width, height). It has to be the same rectangle on both, or the logo "
+            "jumps as the visitor moves between them \u2014 which is what made it look like "
+            "two separate sites." % (w, got["landing"], got["app"]))
+        seen[w] = got["app"]
+    await b.close()
+    print("[logo parity] brand mark identical on the landing page and the app at %s: %s"
+          % (", ".join("%dpx" % w for w in seen), seen[1440]))
+
+
 async def check_canvas_palette_live(p, errors):
     """پروبِ ۵ (پویا): پالتِ زنده‌ی canvas بدونِ ریلود دنبالِ عوض‌شدنِ
     data-theme می‌رود.
@@ -2115,6 +2163,7 @@ async def main():
         await check_theme_migration(p, errors)
         await check_landing_mobile(p, errors)
         await check_canvas_palette_live(p, errors)
+        await check_logo_parity(p, errors)
         await check_token_page_hash_links(p, errors)
         b = await p.chromium.launch()
         pg = await b.new_page(viewport={"width": 1240, "height": 1000}, color_scheme="dark")
@@ -4018,13 +4067,21 @@ async def main():
             const h = document.querySelector("header");
             const kids = [...h.children].map(e => e.getBoundingClientRect());
             // ⚠️ ارتفاع صفر هم فیلتر می‌شود، نه فقط عرض صفر. دو فاصله‌گذار
-            // کشسان هدر عرض دارند ولی چیزی نشان نمی‌دهند؛ مرکزشان با بقیه
-            // یکی نیست و به‌غلط «سطر دوم» شمرده می‌شدند.
-            const tops = new Set(kids.filter(r => r.width > 0 && r.height > 0)
-                                     .map(r => Math.round(r.top / 12)));
+            // کشسان هدر عرض دارند ولی چیزی نشان نمی‌دهند.
+            // ⚠️ «سطر» با هم‌پوشانیِ عمودی شمرده می‌شود، نه با گِرد‌کردنِ top روی
+            // ۱۲. آن گِردکردن یک تقریب بود و وقتی ارتفاعِ نوار عوض شد (۱۴
+            // سپتامبر ۲۰۲۶، هم‌ترازیِ لوگو با صفحه‌ی معرفی) دو فرزندِ کاملاً
+            // هم‌سطح با اختلافِ یک پیکسل در دو سبد افتادند و پروب یک پیچشِ
+            // خیالی گزارش کرد. پیچشِ واقعی یعنی بازه‌ی عمودیِ یک فرزند با
+            // بازه‌ی فرزندِ قبلی هیچ هم‌پوشانی نداشته باشد؛ همین سنجیده می‌شود.
+            const vis = kids.filter(r => r.width > 0 && r.height > 0)
+                            .sort((a, b) => a.top - b.top);
+            let rows = 0, edge = -Infinity;
+            for (const r of vis) { if (r.top >= edge) { rows++; edge = r.bottom; }
+                                   else if (r.bottom > edge) edge = r.bottom; }
             return {right: Math.round(Math.max(...kids.map(r => r.right))),
                     left: Math.round(Math.min(...kids.map(r => r.left))),
-                    rows: tops.size, vw: innerWidth,
+                    rows: rows, vw: innerWidth,
                     docW: Math.round(document.documentElement.scrollWidth)};
         }""")
         await narrow.close()
