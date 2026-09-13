@@ -1940,26 +1940,29 @@ async def check_landing_mobile(p, errors):
 async def check_token_page_hash_links(p, errors):
     """صفحه‌ی /t/<آدرس>: لینک‌های هش-تنها باید روی همین صفحه بمانند.
 
-    باگِ واقعی، گزارشِ مالک ۱۴ سپتامبر ۲۰۲۶: از لینکِ «Copy this check»، چهار
-    لینکِ فوتر — Swap، Portfolio، Flow، و FAQ — کاربر را به صفحه‌ی معرفی
-    می‌بردند و اپ بسته می‌شد. علت یک عارضه‌ی <base> بود: صفحه‌ی توکن یک
-    `<base href="/">` تزریق می‌کند تا باندل‌های نسبی (ethers، walletconnect)
-    حل شوند، و همان base هر `href="#x"` را هم نسبی حساب می‌کند، یعنی
-    «/#x» — صفحه‌ی معرفی. ۲۰۰ برمی‌گشت، پس هیچ خطایی دیده نمی‌شد.
+    دو باگِ واقعی، هر دو گزارشِ مالک (۱۳ و ۱۴ سپتامبر ۲۰۲۶):
 
-    این پروب صفحه را روی یک آدرسِ واقعیِ /t/ بالا می‌آورد (نه file://، چون
-    خودِ تزریق به pathname نگاه می‌کند) و سه چیز را می‌سنجد: base هنوز
-    هست و باندل‌ها را درست حل می‌کند، هر چهار لینک روی همان pathname
-    می‌مانند، و لینک‌های جای‌نگه‌دارِ «#» دست‌نخورده می‌مانند تا اسکریپت
-    بتواند آدرسِ واقعی را رویشان بنشاند."""
+    ۱) از لینکِ «Copy this check»، چهار لینکِ فوتر — Swap، Portfolio، Flow،
+       FAQ — کاربر را به صفحه‌ی معرفی می‌بردند. علت یک عارضه‌ی <base> بود:
+       صفحه‌ی توکن یک `<base href="/">` تزریق می‌کند تا باندل‌های نسبی حل
+       شوند، و همان base هر `href="#x"` را هم «/#x» می‌کند.
+    ۲) بعدِ رفعِ اول، یکی‌درمیان صفحه‌ی توکن از نو بار می‌شد: خودِ اپ وقتی از
+       صفحه‌ی توکن بیرون می‌رود آدرس را با pushState عوض می‌کند، پس hrefی که
+       به مسیرِ توکن قفل شده بود از کلیکِ بعدی یک ناوبریِ واقعی می‌شد.
+
+    پس این پروب رفتارِ کلیک را می‌سنجد، نه فقط متنِ href: صفحه روی یک آدرسِ
+    واقعیِ /t/ بالا می‌آید، هر چهار لینک کلیک می‌شوند، و هیچ‌کدام نباید یک
+    بارگذاریِ تازه راه بیندازد یا pathname را عوض کند."""
     html = open(os.path.join(HERE, "..", "index.html"), encoding="utf-8").read()
     addr = "0x" + "a" * 40
     origin = "https://zaexa.example"
+    here = "/t/" + addr
 
     b = await p.chromium.launch()
     ctx = await b.new_context()
     pg = await ctx.new_page()
-    pg.on("console", lambda m: None)
+    loads = []
+    pg.on("load", lambda _: loads.append(1))
 
     async def handler(route):
         path = route.request.url.split("?")[0][len(origin):]
@@ -1970,41 +1973,49 @@ async def check_token_page_hash_links(p, errors):
         else:
             await route.fulfill(status=404, body="")
     await ctx.route(origin + "/**", handler)
-    await pg.goto(origin + "/t/" + addr)
+    await pg.goto(origin + here)
     await pg.wait_for_timeout(500)
 
-    got = await pg.evaluate("""() => ({
+    head = await pg.evaluate("""() => ({
         base: (document.querySelector('base') || {}).href || null,
-        links: [...document.querySelectorAll('a')]
-            .map(a => a.getAttribute('href'))
-            .filter(h => h && h.indexOf('#') >= 0 && h.indexOf('://') < 0),
         bundles: [...document.scripts].map(s => s.src).filter(Boolean),
+        marked: [...document.querySelectorAll('a[data-hash-link]')]
+            .map(a => a.getAttribute('data-hash-link')),
+        placeholders: [...document.querySelectorAll('a')]
+            .map(a => a.getAttribute('href'))
+            .filter(h => h === '#').length,
     })""")
-    await b.close()
-
-    assert got["base"] == origin + "/", (
+    assert head["base"] == origin + "/", (
         "the /t/ page no longer injects <base href=\"/\"> (got %r). Without it the relative "
-        "bundles 404 and the page dies on 'Could not load ethers'." % got["base"])
-    assert any(u.startswith(origin + "/ethers") for u in got["bundles"]), (
+        "bundles 404 and the page dies on 'Could not load ethers'." % head["base"])
+    assert any(u.startswith(origin + "/ethers") for u in head["bundles"]), (
         "the ethers bundle no longer resolves to the site root on a /t/ page: %r"
-        % got["bundles"])
+        % head["bundles"])
+    for frag in ("swap", "folio", "flow", "faq"):
+        assert frag in head["marked"], (
+            "the footer link #%s is not marked as an in-page hash link on /t/<address> "
+            "(marked: %r). Unmarked, it inherits <base href=\"/\"> and walks the visitor out "
+            "of the app onto the landing page." % (frag, head["marked"]))
 
-    wanted = ["#swap", "#folio", "#flow", "#faq"]
-    here = "/t/" + addr
-    for frag in wanted:
-        assert (here + frag) in got["links"], (
-            "on /t/<address> the footer link %r is %r, not %r. A bare fragment there resolves "
-            "against <base href=\"/\"> and throws the visitor out of the app onto the landing "
-            "page \u2014 which returns 200, so nothing looks broken from the outside."
-            % (frag, [h for h in got["links"] if h.endswith(frag)], here + frag))
-    assert (here + "#") not in got["links"], (
-        "a placeholder href=\"#\" was rewritten into %r. Those three social links are "
-        "placeholders the page's own script fills in with real URLs; binding one to the path "
-        "turns a click into a jump to the top of the page instead." % (here + "#"))
+    for frag in ("swap", "folio", "flow", "faq"):
+        before = len(loads)
+        await pg.click('a[data-hash-link="%s"]' % frag)
+        await pg.wait_for_timeout(250)
+        state = await pg.evaluate("() => [location.pathname, location.hash]")
+        assert len(loads) == before, (
+            "clicking the footer's #%s on /t/<address> triggered a full page load. That is the "
+            "every-other-click bug: the app rewrites the URL with pushState when it leaves the "
+            "token page, and a link pinned to the old path then navigates for real." % frag)
+        assert state[0] == here, (
+            "clicking #%s moved the path to %r; it must stay on the token's own page (%r). A "
+            "path of '/' is the landing page." % (frag, state[0], here))
+        assert state[1] == "#" + frag, (
+            "clicking #%s left the hash at %r" % (frag, state[1]))
 
-    print("[token page links] /t/<address> keeps <base href=\"/\"> for the bundles, and "
-          "%s now resolve to the token's own path instead of the landing page"
-          % ", ".join(wanted))
+    await b.close()
+    print("[token page links] /t/<address> keeps <base href=\"/\"> for the bundles; clicking "
+          "#swap/#folio/#flow/#faq stays on the token's own path with no page load "
+          "(%d placeholder '#' links left alone)" % head["placeholders"])
 
 
 async def check_canvas_palette_live(p, errors):
@@ -5222,9 +5233,16 @@ async def main():
         assert nv_amt == "", (
             "the nav Swap button carried the token page's reference amount into #amtIn (%r) — "
             "it now looks like an order the reader placed" % nv_amt)
-        assert nv_hash == "#swap" and nv_path == "/", (
-            "the nav Swap button did not really leave the token-page route: hash=%s path=%s"
-            % (nv_hash, nv_path))
+        # ⚠️ «/app» نه «/». این ادعا تا ۱۴ سپتامبر ۲۰۲۶ «/» را می‌خواست، چون
+        # leaveTokenPage آدرس را به ریشه می‌فرستاد — و از روزی که صفحه‌ی معرفی
+        # روی ریشه نشست، آن یعنی «آدرسِ اپ را به آدرسِ صفحه‌ی معرفی عوض کن».
+        # pushState چیزی بار نمی‌کند، پس هیچ‌چیز بلافاصله نمی‌شکست؛ ولی یک رفرش
+        # کاربر را از اپ بیرون می‌انداخت و لینک‌های داخلیِ صفحه‌ی توکن یکی‌درمیان
+        # به یک ناوبریِ واقعی تبدیل می‌شدند. مقصدِ درست مسیرِ خودِ اپ است.
+        assert nv_hash == "#swap" and nv_path == "/app", (
+            "leaving the token page put the address at hash=%s path=%s. It must be the app's "
+            "own path: '/' is the landing page, and parking the address there means a refresh "
+            "drops the visitor out of the app." % (nv_hash, nv_path))
         assert "Pick a token to scan" not in nv_safety, (
             "the main view's safety card is still showing the initial placeholder after leaving "
             "the token page: %r" % nv_safety[:120])

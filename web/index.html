@@ -33,8 +33,24 @@ if(/^\/t\/(0x[0-9a-fA-F]{40}|[1-9A-HJ-NP-Za-km-z]{32,44})\/?$/.test(location.pat
     var here=location.pathname,as=document.querySelectorAll('a[href^="#"]');
     for(var i=0;i<as.length;i++){
       var h=as[i].getAttribute("href");
-      if(h&&h.length>1)as[i].setAttribute("href",here+h);
+      if(!h||h.length<2)continue;
+      as[i].setAttribute("href",here+h);
+      as[i].setAttribute("data-hash-link",h.slice(1));
     }
+    /* ⚠️ نوشتنِ href کافی نیست: به‌محضِ اینکه کاربر از صفحه‌ی توکن بیرون برود،
+       خودِ اپ آدرس را با pushState به مسیرِ اپ عوض می‌کند، و آن href که به
+       مسیرِ توکن قفل شده بود از کلیکِ بعدی یک ناوبریِ واقعی می‌شود — صفحه‌ی
+       توکن دوباره از نو بار می‌شد، یکی‌درمیان. پس کلیکِ ساده را می‌گیریم و
+       فقط هش را می‌نویسیم؛ این هر جا که آدرس رفته باشد درست کار می‌کند.
+       کلیکِ با Ctrl/Cmd/Shift یا دکمه‌ی وسط دست‌نخورده رد می‌شود تا «بازکردن
+       در تبِ تازه» همچنان کار کند. */
+    document.addEventListener("click",function(e){
+      if(e.button!==0||e.metaKey||e.ctrlKey||e.shiftKey||e.altKey)return;
+      var a=e.target&&e.target.closest?e.target.closest("a[data-hash-link]"):null;
+      if(!a)return;
+      e.preventDefault();
+      location.hash=a.getAttribute("data-hash-link");
+    });
   });
 }
 </script>
@@ -5627,7 +5643,14 @@ async function applyShareParams(){
    می‌شد. حالا هر خروجی از همین‌جا رد می‌شود. */
 function leaveTokenPage(v){
   tokenPage=false;
-  history.pushState(null,"",location.origin+"/#"+v);
+  /* ⚠️ «/» نه. از روزی که صفحه‌ی معرفی روی ریشه نشست، location.origin+"/#"+v
+     یعنی آدرسِ صفحه‌ی معرفی — و این خط همان‌جا مانده بود. هیچ‌چیز بلافاصله
+     نمی‌شکست چون pushState بارگذاری نمی‌کند، ولی نوارِ آدرس بی‌صدا به ریشه
+     می‌رفت: یک رفرش کاربر را از اپ بیرون می‌انداخت، و لینک‌های داخلیِ صفحه‌ی
+     توکن از کلیکِ دوم به بعد یک ناوبریِ واقعی می‌شدند (باگِ «یکی‌درمیان صفحه‌ی
+     توکن باز می‌شود»، گزارشِ ۱۴ سپتامبر ۲۰۲۶). مقصدِ درست مسیرِ خودِ اپ است. */
+  const backTo=/^\/t\//.test(location.pathname)?"/app":location.pathname;
+  history.pushState(null,"",backTo+"#"+v);
   $("amtIn").value="";$("amtOut").value="";
   mode="exactIn";setNotice("");
   paintToken("in",tokenIn);paintToken("out",tokenOut);
