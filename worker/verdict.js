@@ -36,15 +36,44 @@ export const SEL_V2 = "0xd06ca61f";
 export const WETH_ADDR = "0x4200000000000000000000000000000000000006";
 export const USDC_ADDR = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913"; // ۶ رقم اعشار
 
-// همان فهرست و همان ترتیب CHAIN.rpcs در web/index.html — ترتیب عمدی است
-// (mainnet.base.org آخر است چون زیر بار واقعی ۴۲۹ داد).
+/* ⚠️ این فهرست فقط برای batchِ eth_call است، نه برای یک تماسِ تکی — یک
+   اندپوینت فقط وقتی حق دارد این‌جا باشد که واقعاً batch را با موفقیت جواب
+   داده باشد؛ جواب‌دادن به یک تماسِ تکی چیزی را اثبات نمی‌کند. اندازه‌گیریِ
+   ۱۳ سپتامبر ۲۰۲۶ (control = ۱ تماس ×۳، batch = ۱۸ تماس ×۵، HTTP واقعی،
+   user-agentِ مرورگر):
+     https://base.publicnode.com         control 3/3   batch 5/5
+     https://base.gateway.tenderly.co    control 3/3   batch 3/5
+     https://base.meowrpc.com            control 1/3   batch 0/5
+     https://base.drpc.org               control 3/3   batch 0/5
+     https://mainnet.base.org            control 3/3   batch 0/5
+   سه‌تای زیر عمداً بیرون‌اند، نه اینکه یادمان رفته باشد:
+     - base.meowrpc.com   → batch 0/5 (و حتی control هم 1/3 بود؛ اندپوینتِ
+       ناپایدار، نه فقط بدونِ batch)
+     - base.drpc.org      → batch 0/5 (تماسِ تکی همیشه جواب داد، batch هرگز)
+     - mainnet.base.org   → batch 0/5 (همان داستان؛ تماسِ تکی سالم، batch هیچ)
+   این سه هرگز به این فهرست برنگردند مگر با یک اندازه‌گیریِ batch تازه که
+   خلافِ همین جدول را نشان دهد — «تماسِ تکی جواب داد» کافی نیست.
+   ⚠️ قبلاً این‌جا نوشته بود «همان فهرست و همان ترتیبِ CHAIN.rpcs در
+   web/index.html». آن دیگر درست نیست و عمدی است، نه یک ناهماهنگیِ فراموش‌شده:
+   مرورگر (web/index.html) هر تماس را تکی می‌زند، هرگز batch نمی‌سازد، پس
+   فهرستِ آن‌جا این اندازه‌گیری را اصلاً نمی‌بیند و باید دست‌نخورده با هر پنج
+   اندپوینت بماند. این‌جا (سمتِ Worker، جایی که buildProbe یک batchِ ۱۸تایی
+   می‌سازد) تنها دو اندپوینتِ اثبات‌شده کافی است. */
 export const VD_RPCS = [
   "https://base.publicnode.com",
-  "https://base.meowrpc.com",
-  "https://base.drpc.org",
   "https://base.gateway.tenderly.co",
-  "https://mainnet.base.org",
 ];
+
+/* سقفِ تعدادِ اندپوینتی که یک درخواستِ /vd می‌تواند امتحان کند — برای
+   محدودکردنِ تأخیر، نه برای صرفه‌جویی؛ هر اندپوینتِ اضافه یک تایم‌اوتِ
+   کامل (timeoutMs) دیگر به بدترین‌حالت اضافه می‌کند. باید همیشه *حداقل*
+   به‌اندازه‌ی تعدادِ کاندیدهای batch-capable باشد — یعنی امروز حداقل ۳:
+   دو تای VD_RPCS بالا، به‌علاوه‌ی env.BASE_RPC وقتی ست شده باشد (Change 3،
+   baseRpcsFor در worker/index.js). اگر این عدد از تعدادِ کاندیدها کمتر
+   شود، یک تک‌هیچکاپ می‌تواند کلِ فهرست را قبل از رسیدن به اندپوینتِ سالم
+   تمام کند و verdict بی‌جهت به "نامعلوم" تنزل پیدا کند — دقیقاً همان
+   باگی که این فایل امروز رفع کرد (توضیحِ بالای همین فایل). */
+export const VD_MAX_ENDPOINTS = 3;
 
 export const VD_NOTIONAL_USD = 100;
 
@@ -397,11 +426,18 @@ async function callBatch(fetchImpl, rpcUrl, canary, probeItems, timeoutMs, colle
     })),
   ];
 
-  // شکستِ کلِ batch (نه یک آیتم) — یک ردِ تک‌شیءِ "batch-failed"، نه یک
-  // ردیف به‌ازای هر آیتمی که هرگز واقعاً پرسیده نشد؛ چون در این حالت‌ها
+  // شکستِ کلِ batch (نه یک آیتم) — یک ردِ تک‌شیءِ "batch-failed:<status>"، نه
+  // یک ردیف به‌ازای هر آیتمی که هرگز واقعاً پرسیده نشد؛ چون در این حالت‌ها
   // اصلاً معلوم نیست کدام آیتم پرسیده شد و کدام نه.
-  function failed() {
-    if (collect) collect.push({ venue: null, key: null, out: "batch-failed", stage });
+  // ⚠️ status همیشه از کدِ HTTP واقعی می‌آید (یا صفر وقتی خودِ fetch پرتاب
+  // کرد)، دقیقاً همان قراردادِ "rpc:<method>:<status>" در worker/verdict_sol.js
+  // — هرگز از رویِ error.message: یک تغییرِ متنِ خطا در سمتِ RPC بی‌آنکه هیچ
+  // کدی عوض شود نباید این خروجی را خراب کند. قبلاً "batch-failed" بی‌هیچ
+  // عددی ثبت می‌شد و همین چیزی بود که این باگ را یک روزِ تمام مخفی نگه
+  // داشت: نمی‌شد فهمید یک ۴۰۰ (batch رد شد) با یک تایم‌اوت (پرتابِ شبکه‌ای)
+  // یکی نیستند.
+  function failed(status) {
+    if (collect) collect.push({ venue: null, key: null, out: "batch-failed:" + status, stage });
     return null;
   }
 
@@ -416,25 +452,30 @@ async function callBatch(fetchImpl, rpcUrl, canary, probeItems, timeoutMs, colle
       signal: ac.signal,
     });
   } catch {
-    return failed(); // پرتابِ شبکه‌ای → این اندپوینت نامعلوم
+    return failed(0); // پرتابِ شبکه‌ای → این اندپوینت نامعلوم، وضعیتِ ۰ یعنی خودِ fetch پرتاب کرد
   } finally {
     clearTimeout(timer);
   }
-  if (!res || res.status !== 200) return failed(); // غیر ۲۰۰ → نامعلوم
+  // ⚠️ status یک‌بار همین‌جا محاسبه می‌شود و از این به بعد برای هر شکستِ
+  // پایین‌تر (بدنه‌ی غیرقابل‌پارس، شکلِ غیرآرایه، ورودیِ بدونِ id) هم به کار
+  // می‌رود — همان‌ها همه زیرِ همان res.status===200 هستند، پس status همیشه
+  // ۲۰۰ می‌ماند، ولی از رویِ همان res واقعی خوانده می‌شود، نه فرض.
+  const status = res ? res.status : 0;
+  if (!res || status !== 200) return failed(status); // غیر ۲۰۰ → نامعلوم
 
   let body;
   try {
     body = await res.json();
   } catch {
-    return failed(); // بدنه‌ی غیرقابل‌پارس → نامعلوم
+    return failed(status); // بدنه‌ی غیرقابل‌پارس → نامعلوم
   }
-  if (!Array.isArray(body)) return failed(); // شکلِ غیرآرایه → کلِ تلاش نامعلوم
+  if (!Array.isArray(body)) return failed(status); // شکلِ غیرآرایه → کلِ تلاش نامعلوم
 
   // تطبیق با id، نه با موقعیتِ آرایه — یک batch می‌تواند جابه‌جا برگردد.
   const byId = new Map();
   for (const entry of body) {
     if (!entry || typeof entry !== "object" || entry.id === undefined || entry.id === null) {
-      return failed(); // یک ورودیِ بدونِ id → کلِ پاسخ نامعتبر است
+      return failed(status); // یک ورودیِ بدونِ id → کلِ پاسخ نامعتبر است
     }
     byId.set(entry.id, entry);
   }
@@ -494,7 +535,7 @@ export async function fetchVerdict(tokenAddr, meta, opts) {
     let endpointsTried = 0;
 
     for (const rpc of rpcs) {
-      if (endpointsTried >= 2) break;
+      if (endpointsTried >= VD_MAX_ENDPOINTS) break;
       if (deadlineHit("weth")) return null;
       endpointsTried++;
 

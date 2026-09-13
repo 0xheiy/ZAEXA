@@ -30,7 +30,7 @@ const UPSTREAM_KEYED = "https://api.coingecko.com/api/v3/onchain";
 
 import { ogTags, ogTitle, pickTokenMeta } from "./og.js";
 import { ogImageResponse } from "./og-image.js";
-import { fetchVerdict, VD_VENUES } from "./verdict.js";
+import { fetchVerdict, VD_VENUES, VD_RPCS } from "./verdict.js";
 import { EVM_ADDR, SOL_MINT, chainOf, gtNetworkOf } from "./chains.js";
 import {
   REPORT_DATE_RE, PAIRS_KEY_BASE, reportKey, utcDateOf, emptyReportDoc, runReportPass,
@@ -569,6 +569,27 @@ async function baseVenueCovered(addr, env) {
   }
 }
 
+/* env.BASE_RPC — یک RPC اختصاصیِ Base، دقیقاً هم‌شکل با env.SOL_RPC/env.CG_KEY
+   بالا: خوانده می‌شود defensively (typeof … === "string")، در پنل کلادفلر
+   به‌صورتِ یک Secret می‌نشیند، و هرگز به مرورگر نمی‌رسد. اگر ست شده باشد،
+   *اولین* اندپوینتی است که fetchVerdict امتحان می‌کند؛ فهرستِ عمومیِ VD_RPCS
+   (worker/verdict.js) دقیقاً پشتِ آن، بدونِ هیچ تغییری، به‌عنوانِ fallback
+   می‌ماند. غایب‌بودنش رفتار را بایت‌به‌بایت همان چیزی نگه می‌دارد که امروز
+   است (خودِ VD_RPCS، بدونِ افزوده).
+
+   ⚠️ برخلافِ CG_KEY، یک RPC اختصاصی معمولاً کلید را در خودِ URL حمل می‌کند —
+   یا در مسیر یا در کوئری، دقیقاً همان‌طور که env.SOL_RPC می‌کند. پس این URL
+   کاملش هرگز نباید در هیچ پاسخ، هیچ لاگ، یا خروجیِ probe (?probe=1 پایین‌تر)
+   ظاهر شود. برخلافِ سولانا که یک اندپوینتِ تشخیصیِ هم‌شکل با /vd/rpc دارد
+   (که حداقل hostname را گزارش می‌کند)، Base چنین چیزی ندارد — لاگِ پروبِ
+   fetchVerdict (opts.collect) اصلاً هیچ اشاره‌ای به کدام RPC ندارد، فقط
+   venue/key/stage/out. پس قاعده اینجا حتی سخت‌گیرانه‌تر از سولانا است: نه
+   فقط مسیر/کوئری، هیچ‌چیزِ URL هرگز به بیرون نمی‌رود. */
+export function baseRpcsFor(env) {
+  const baseRpc = (env && typeof env.BASE_RPC === "string" && env.BASE_RPC) || "";
+  return baseRpc ? [baseRpc, ...VD_RPCS] : VD_RPCS;
+}
+
 /* آیا هنوز جایی این توکن قیمت فروش می‌دهد؟ — سمت سرور، فقط برای همین یک
    جمله‌ی اولِ توضیح؛ Base و سولانا هر دو، از رویِ chainOf(addr).
    ⚠️ برخلافِ ogFetchMeta که فقط از کش می‌خواند، اینجا هم می‌خوانیم هم
@@ -592,7 +613,7 @@ async function ogFetchVerdict(addr, meta, deadlineAt, env, ctx) {
   const network = gtNetworkOf(chain) || OG_NETWORK;
   const raw = await cachedVerdict(
     "/v1/" + network + "/" + addr.toLowerCase(),
-    () => fetchVerdict(addr, meta, { deadlineAt, fetchImpl: fetch }),
+    () => fetchVerdict(addr, meta, { deadlineAt, fetchImpl: fetch, rpcs: baseRpcsFor(env) }),
     ctx,
   );
 
@@ -839,7 +860,8 @@ async function diagVerdict(request, url, env, ctx) {
   // ابزارِ تشخیصی را کور می‌کند.
   if (url.searchParams.get("probe") === "1") {
     const collect = [];
-    const v = await fetchVerdict(addr, meta, { deadlineAt: t0 + OG_BUDGET_MS, fetchImpl: fetch, collect });
+    const v = await fetchVerdict(addr, meta,
+      { deadlineAt: t0 + OG_BUDGET_MS, fetchImpl: fetch, collect, rpcs: baseRpcsFor(env) });
     const covered = await baseVenueCovered(addr, env);
     return vdDone(200, { v, ms: Date.now() - t0, venues: collect, covered });
   }

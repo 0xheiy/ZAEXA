@@ -3793,7 +3793,8 @@ function isSolidlyReqId(id) { return PROBE_KIND_BY_ID.get(id) === "SOLIDLY"; }
     allObservedOut.push(...collect.map((e) => e.out));
   }
 
-  // ه) شکستِ کلِ batch (پرتاب یا غیر-۲۰۰) → دقیقاً یک "batch-failed"، نه یک ردیف به‌ازای هر آیتم
+  // ه) شکستِ کلِ batch (پرتاب یا غیر-۲۰۰) → دقیقاً یک "batch-failed:<status>"،
+  // نه یک ردیف به‌ازای هر آیتم — و status باید همان کدِ واقعی باشد (پرتاب=۰).
   {
     // ه‌.۱ — پرتابِ شبکه‌ای در همان اولین (و تنها) تلاش → مرحله‌ی weth هرگز کامل نشد
     const collect = [];
@@ -3801,8 +3802,8 @@ function isSolidlyReqId(id) { return PROBE_KIND_BY_ID.get(id) === "SOLIDLY"; }
     const v = await vd.fetchVerdict(TOKEN, meta, { fetchImpl, rpcs: ["https://rpc-a.example"], collect });
     ok(v === null, "a thrown fetch with no other endpoint to try must give null (got " + v + ")");
     ok(collect.length === 1 && collect[0].venue === null && collect[0].key === null &&
-      collect[0].out === "batch-failed" && collect[0].stage === "weth",
-      "a thrown fetch must record exactly one batch-failed entry for the weth stage and nothing else, got: "
+      collect[0].out === "batch-failed:0" && collect[0].stage === "weth",
+      "a thrown fetch must record exactly one batch-failed:0 entry for the weth stage and nothing else, got: "
       + JSON.stringify(collect));
     allObservedOut.push(...collect.map((e) => e.out));
   }
@@ -3826,9 +3827,9 @@ function isSolidlyReqId(id) { return PROBE_KIND_BY_ID.get(id) === "SOLIDLY"; }
     ok(wethEntries.length === N_ITEMS + 1,
       "the weth stage ran fully and should carry canary + " + N_ITEMS + " items, got " + wethEntries.length);
     ok(usdcEntries.length === 1 && usdcEntries[0].venue === null && usdcEntries[0].key === null &&
-      usdcEntries[0].out === "batch-failed",
-      "a non-200 stage-B batch must record exactly one batch-failed entry and no per-item entries, got: "
-      + JSON.stringify(usdcEntries));
+      usdcEntries[0].out === "batch-failed:500",
+      "a non-200 stage-B batch must record exactly one batch-failed:<status> entry (the real 500, "
+      + "not a bare \"batch-failed\") and no per-item entries, got: " + JSON.stringify(usdcEntries));
     allObservedOut.push(...collect.map((e) => e.out));
   }
 
@@ -3864,7 +3865,9 @@ function isSolidlyReqId(id) { return PROBE_KIND_BY_ID.get(id) === "SOLIDLY"; }
   }
 
   // ح) واژه‌نامه‌ی بسته — هر out مشاهده‌شده یا عضوِ VD_PROBE_OUT است، یا با
-  // "revert:" شروع می‌شود و بخشِ بعدش یک عددِ صحیح یا لفظِ "unknown" است.
+  // "revert:" شروع می‌شود و بخشِ بعدش یک عددِ صحیح یا لفظِ "unknown" است، یا
+  // با "batch-failed:" شروع می‌شود و بخشِ بعدش یک عددِ صحیحِ نامنفی است (هرگز
+  // "unknown" — status همیشه یک عددِ واقعی است: ۰ برای پرتاب، وگرنه کدِ HTTP).
   // دقیقاً همان قاعده‌ای که VD_SOL_WHY با isFrozenWhy در همین فایل سنجیده
   // می‌شود؛ فهرست از رویِ خودِ vd.VD_PROBE_OUT پیموده می‌شود، نه یک کپیِ دوم.
   function isFrozenProbeOut(out) {
@@ -3873,19 +3876,23 @@ function isSolidlyReqId(id) { return PROBE_KIND_BY_ID.get(id) === "SOLIDLY"; }
       const suffix = s.slice("revert:".length);
       return suffix === "unknown" || /^-?\d+$/.test(suffix);
     }
+    if (s.startsWith("batch-failed:")) {
+      const suffix = s.slice("batch-failed:".length);
+      return /^\d+$/.test(suffix);
+    }
     return vd.VD_PROBE_OUT.includes(s);
   }
   ok(allObservedOut.length > 10, "sanity: the scenarios above should have observed a good number of outs, got "
     + allObservedOut.length);
   const stray = allObservedOut.filter((o) => !isFrozenProbeOut(o));
   ok(stray.length === 0, "every observed \"out\" must match the frozen vocabulary (VD_PROBE_OUT, or a " +
-    "\"revert:<int|unknown>\"), got strays: " + JSON.stringify(stray));
-  // هر عضوِ خودِ VD_PROBE_OUT (به‌جز پیشوندِ برهنه‌ی "revert") واقعاً هم در
-  // یکی از سناریوهای بالا مشاهده شد — واژه‌نامه بازتابِ رفتارِ واقعی است،
-  // نه فقط یک آرزو.
+    "\"revert:<int|unknown>\" or \"batch-failed:<int>\"), got strays: " + JSON.stringify(stray));
+  // هر عضوِ خودِ VD_PROBE_OUT (به‌جز پیشوندهای برهنه‌ی "revert" و "batch-failed")
+  // واقعاً هم در یکی از سناریوهای بالا مشاهده شد — واژه‌نامه بازتابِ رفتارِ
+  // واقعی است، نه فقط یک آرزو.
   const observedSet = new Set(allObservedOut);
   for (const label of vd.VD_PROBE_OUT) {
-    if (label === "revert") continue; // خودش هرگز خام ثبت نمی‌شود، همیشه با ":<code>"
+    if (label === "revert" || label === "batch-failed") continue; // این دو هرگز خام ثبت نمی‌شوند، همیشه با ":<عدد>"
     ok(observedSet.has(label), "VD_PROBE_OUT lists \"" + label + "\" but no scenario above ever produced it");
   }
 
@@ -3944,10 +3951,15 @@ function isSolidlyReqId(id) { return PROBE_KIND_BY_ID.get(id) === "SOLIDLY"; }
   }
 
   // ي) URLِ اختصاصیِ RPC هرگز نباید در collect ظاهر شود — نه کاملش، نه
-  // مسیرش، نه کوئری‌اش. worker/verdict.js هیچ راهِ تزریقِ rpcs را برای
-  // /vd/<Base> از env نمی‌دهد (برخلافِ SOL_RPC برای سولانا)، پس این را
-  // مستقیماً روی خودِ fetchVerdict می‌سنجیم — دقیقاً همان آرایه‌ای که
-  // ?probe=1 بدونِ هیچ تغییری زیرِ کلیدِ venues برمی‌گرداند.
+  // مسیرش، نه کوئری‌اش. ⚠️ این‌جا قبلاً نوشته بود «worker/verdict.js هیچ راهِ
+  // تزریقِ rpcs را برای /vd/<Base> از env نمی‌دهد، برخلافِ SOL_RPC برای
+  // سولانا» — از وقتی env.BASE_RPC اضافه شد (baseRpcsFor در worker/index.js،
+  // بخشِ «RPC اختصاصی» پایین‌تر) آن جمله دیگر درست نیست: Base هم حالا دقیقاً
+  // همان الگو را دارد. این پروب همچنان مستقیماً روی خودِ fetchVerdict می‌سنجد
+  // (نه روی baseRpcsFor)، چون فقط می‌خواهد ثابت کند خودِ fetchVerdict هیچ‌جای
+  // آرایه‌ی rpcs را در لاگ فاش نمی‌کند — همان آرایه‌ای که ?probe=1 بدونِ هیچ
+  // تغییری زیرِ کلیدِ venues برمی‌گرداند. سنجشِ خودِ baseRpcsFor و سیم‌کشیِ
+  // env.BASE_RPC سرتاسری در بخشِ تازه‌ی پایین‌تر می‌آید.
   {
     const SECRET_RPC = "https://rpc.example.invalid/v2/SECRET-PATH?k=SECRET-QUERY";
     const collect = [];
@@ -4030,12 +4042,275 @@ function isSolidlyReqId(id) { return PROBE_KIND_BY_ID.get(id) === "SOLIDLY"; }
     + "item reads \"quoted\"; an all-revert:3 batch is recorded faithfully as nosell (unchanged "
     + "behaviour); \"0x\"/zero/undecodable/revert:<code>/revert:unknown/no-answer all classified from "
     + "status and shape only, never from error.message; a whole-batch failure (throw or non-200) "
-    + "records exactly one batch-failed entry, never one per item; a deadline hit before a stage "
+    + "records exactly one batch-failed:<status> entry (0 for a throw, the real HTTP status otherwise, "
+    + "never from error.message), never one per item; a deadline hit before a stage "
     + "records exactly one deadline entry for that stage; the canary is recorded once per batch that "
     + "ran, weth before usdc; every observed out matches the frozen VD_PROBE_OUT vocabulary (prefix+int "
     + "rule verified the same way as VD_SOL_WHY); GET /vd/<address>?probe=1 adds a venues array "
     + "end to end while a normal /vd/<address> body stays exactly {v, ms}; an injected RPC URL's path "
     + "and query never leak into the probe log; and ?probe=1 never reads or writes the verdict cache");
+}
+
+/* ---- ۲۵ب. رفعِ باگِ batch-failedِ متناوب — VD_RPCS/VD_MAX_ENDPOINTS/baseRpcsFor ----
+   مسئله (بالای worker/verdict.js): سه از پنج اندپوینتِ VD_RPCS قبلی هرگز
+   batch را جواب نمی‌دادند، و سقفِ failoverِ قدیمی (۲) دقیقاً با دومین
+   اندپوینتِ ناسالم (meowrpc) پُر می‌شد — یک هیک‌آپِ اولین اندپوینت کافی بود
+   کل verdict را «نامعلوم» کند. این بخش هر چهار تکه‌ی رفع را می‌سنجد:
+   فهرستِ هرس‌شده، سقفِ تازه، env.BASE_RPC (دقیقاً هم‌شکل با env.SOL_RPC)، و
+   اینکه batch-failed حالا وضعیت هم می‌گوید. */
+{
+  const w = (n) => BigInt(n).toString(16).padStart(64, "0");
+  const mkStatic4 = (amountOut) => "0x" + w(amountOut) + w(0) + w(0) + w(0);
+  const jsonRes = (body, status = 200) => new Response(JSON.stringify(body), {
+    status, headers: { "content-type": "application/json" },
+  });
+  const meta = { decimals: 18, priceUsd: 2000 };
+
+  // الف) VD_RPCS پین‌شده — دقیقاً همان دو میزبانِ batch-capable، به همان ترتیب؛
+  // و هر سه‌ی حذف‌شده باید غایب باشند، هرکدام با دلیلِ اندازه‌گیری‌شده‌ی خودش.
+  {
+    ok(vd.VD_RPCS.length === 2 &&
+       vd.VD_RPCS[0] === "https://base.publicnode.com" &&
+       vd.VD_RPCS[1] === "https://base.gateway.tenderly.co",
+       "VD_RPCS must be pinned to exactly the two measured batch-capable hosts, in that order, got: " +
+       JSON.stringify(vd.VD_RPCS));
+    ok(!vd.VD_RPCS.some((u) => u.includes("meowrpc")),
+       "base.meowrpc.com measured batch 0/5 (control only 1/3, an unstable endpoint, not just batch-less) " +
+       "— it must never be back in VD_RPCS, got: " + JSON.stringify(vd.VD_RPCS));
+    ok(!vd.VD_RPCS.some((u) => u.includes("drpc.org")),
+       "base.drpc.org measured batch 0/5 (control 3/3 — single calls always worked, batches never) " +
+       "— it must never be back in VD_RPCS, got: " + JSON.stringify(vd.VD_RPCS));
+    ok(!vd.VD_RPCS.some((u) => u.includes("mainnet.base.org")),
+       "mainnet.base.org measured batch 0/5 (control 3/3 — single calls always worked, batches never) " +
+       "— it must never be back in VD_RPCS, got: " + JSON.stringify(vd.VD_RPCS));
+  }
+
+  // ب) VD_MAX_ENDPOINTS صادر شده، برابرِ ۳ است، و حلقه واقعاً آن را رعایت
+  // می‌کند: با چهار اندپوینتِ تزریقیِ همه‌شکست‌خورده، دقیقاً سه‌تا امتحان
+  // می‌شود، نه دو و نه چهار.
+  {
+    ok(vd.VD_MAX_ENDPOINTS === 3, "VD_MAX_ENDPOINTS must be exported and equal 3, got " + vd.VD_MAX_ENDPOINTS);
+
+    const rpcs = [
+      "https://rpc-cap1.example", "https://rpc-cap2.example",
+      "https://rpc-cap3.example", "https://rpc-cap4.example",
+    ];
+    const calls = [];
+    const fetchImpl = async (url) => { calls.push(String(url)); throw new Error("down"); };
+    const TOKEN_CAP = "0x" + "6".repeat(40);
+    const v = await vd.fetchVerdict(TOKEN_CAP, meta, { fetchImpl, rpcs });
+    ok(v === null, "four failing endpoints must still verdict null, never throw (got " + v + ")");
+    ok(calls.length === vd.VD_MAX_ENDPOINTS,
+       "exactly VD_MAX_ENDPOINTS (" + vd.VD_MAX_ENDPOINTS + ") endpoints must be tried with four failing " +
+       "candidates available, got " + calls.length + ": " + calls.join(","));
+    ok(calls.join(",") === rpcs.slice(0, vd.VD_MAX_ENDPOINTS).join(","),
+       "the first VD_MAX_ENDPOINTS candidates must be tried in order and the fourth never reached: " +
+       calls.join(","));
+  }
+
+  // ج) baseRpcsFor — همان الگویِ solRpcsFor: بدونِ BASE_RPC فهرستِ عمومی
+  // بایت‌به‌بایت دست‌نخورده می‌ماند؛ با آن، راز اول می‌آید و فهرستِ عمومی
+  // پشتِ آن، بدونِ تغییر.
+  {
+    const { baseRpcsFor } = await import("./index.js");
+    ok(baseRpcsFor({}).join(",") === vd.VD_RPCS.join(","),
+       "baseRpcsFor with no BASE_RPC must leave VD_RPCS untouched: " + JSON.stringify(baseRpcsFor({})));
+    ok(baseRpcsFor(undefined).join(",") === vd.VD_RPCS.join(","),
+       "baseRpcsFor must defend against a missing env, exactly like solRpcsFor/CG_KEY's own read");
+    ok(baseRpcsFor({ BASE_RPC: 123 }).join(",") === vd.VD_RPCS.join(","),
+       "a non-string BASE_RPC must be ignored, exactly like a non-string SOL_RPC/CG_KEY would be");
+
+    const SECRET_URL = "https://priv-base-rpc.example/token/SUPERSECRETPATH?api-key=SUPERSECRETQUERY";
+    const withSecret = baseRpcsFor({ BASE_RPC: SECRET_URL });
+    ok(withSecret[0] === SECRET_URL && withSecret.length === vd.VD_RPCS.length + 1 &&
+       withSecret.slice(1).join(",") === vd.VD_RPCS.join(","),
+       "baseRpcsFor with BASE_RPC set must try it first, with the public VD_RPCS list intact behind it: " +
+       JSON.stringify(withSecret));
+  }
+
+  // د) batch-failed:<status> هرگز از رویِ error.message نمی‌آید — یک پیغامِ
+  // گمراه‌کننده که یک عددِ دیگر (۴۰۳) را داخلِ متن حمل می‌کند نباید آن عدد را
+  // به بیرون درز بدهد؛ status باید همچنان ۰ (پرتاب) بماند.
+  {
+    const collect = [];
+    const fetchImpl = async () => { throw new Error("403 Forbidden — access denied, quota exceeded"); };
+    const TOKEN_MSG = "0x" + "7".repeat(40);
+    const v = await vd.fetchVerdict(TOKEN_MSG, meta, { fetchImpl, rpcs: ["https://rpc-msg.example"], collect });
+    ok(v === null, "sanity: a throwing endpoint must verdict null (got " + v + ")");
+    ok(collect.length === 1 && collect[0].out === "batch-failed:0",
+       "a thrown fetch's batch-failed status must be 0 regardless of the error's message text, got: " +
+       JSON.stringify(collect));
+    const serialized = JSON.stringify(collect);
+    ok(!serialized.includes("Forbidden") && !serialized.includes("403") && !serialized.includes("quota"),
+       "batch-failed must never leak error.message text into the probe log: " + serialized);
+  }
+
+  // ه) رازِ BASE_RPC هرگز درز نمی‌کند — سرتاسری از رویِ worker.fetch، نه فقط
+  // روی fetchImpl تزریقی: GET /vd/<آدرس>?probe=1 با env.BASE_RPC (کلید هم در
+  // مسیر هم در کوئریِ خودِ URL) و هر سه کاندید (راز + دو میزبانِ عمومی) شکست‌
+  // خورده. هم‌زمان همین سناریو سیم‌کشیِ محلِ فراخوانیِ دومِ fetchVerdict (خطِ
+  // probe=1 در diagVerdict) را هم ثابت می‌کند: راز باید اول امتحان شود.
+  {
+    const { UPSTREAM_FREE: UF_LEAK } = await import("./index.js");
+    const ADDR_LEAK = "0x" + "b".repeat(40);
+    const SECRET_PATH = "SUPERSECRETPATH-B";
+    const SECRET_QUERY = "SUPERSECRETQUERY-B";
+    const SECRET_BASE_RPC = "https://priv-base-rpc-leak.example/token/" + SECRET_PATH + "?api-key=" + SECRET_QUERY;
+    const savedFetch = globalThis.fetch;
+    const rpcCalls = [];
+    globalThis.fetch = async (url, init) => {
+      const u = String(url);
+      if (u.startsWith(UF_LEAK)) {
+        return jsonRes({ data: { attributes: {
+          name: "Leak Test Token", symbol: "LEAK", total_reserve_in_usd: "1000",
+          decimals: 18, price_usd: "2000",
+        } } });
+      }
+      rpcCalls.push(u);
+      return new Response("boom", { status: 500 }); // هر اندپوینتی، حتی رازِ اول، شکست می‌خورد
+    };
+    const res = await call("/vd/" + ADDR_LEAK + "?probe=1",
+      { headers: { "cf-connecting-ip": "203.0.113.150" } }, { ASSETS, BASE_RPC: SECRET_BASE_RPC });
+    ok(res.status === 200,
+       "/vd/<addr>?probe=1 with BASE_RPC set and every endpoint failing must still be 200, got " + res.status);
+    const body = await res.json();
+    const raw = JSON.stringify(body);
+    ok(body.v === null, "every endpoint failing must verdict null, got " + raw);
+    ok(rpcCalls.length === 3 && rpcCalls[0] === SECRET_BASE_RPC &&
+       rpcCalls[1] === vd.VD_RPCS[0] && rpcCalls[2] === vd.VD_RPCS[1],
+       "with BASE_RPC set, ?probe=1 (the second fetchVerdict call site, in diagVerdict) must try the " +
+       "secret first, then VD_RPCS in order, all three (VD_MAX_ENDPOINTS) since every one fails, got: " +
+       JSON.stringify(rpcCalls));
+    ok(!raw.includes(SECRET_PATH) && !raw.includes(SECRET_QUERY) && !raw.includes("api-key") &&
+       !raw.includes(SECRET_BASE_RPC),
+       "BASE_RPC's path/query/full URL must never leak into ?probe=1's response body: " + raw);
+    globalThis.fetch = savedFetch;
+  }
+
+  // و) سیم‌کشی — هر سه مسیری که به fetchVerdict می‌رسند باید واقعاً
+  // env.BASE_RPC را اول امتحان کنند، سرتاسری از رویِ worker.fetch.
+  function makeWireFetch(UF, SECRET, rpcCalls) {
+    return async (url, init) => {
+      const u = String(url);
+      if (u.startsWith(UF)) {
+        return jsonRes({ data: { attributes: {
+          name: "Wire Test Token", symbol: "WIRE", total_reserve_in_usd: "1000",
+          decimals: 18, price_usd: "2000",
+        } } });
+      }
+      rpcCalls.push(u);
+      if (u === SECRET) {
+        const reqs = JSON.parse(init.body);
+        const body = reqs.map((r) =>
+          r.id === 0 ? { id: 0, result: mkStatic4(5) } : { id: r.id, result: mkStatic4(999) });
+        return jsonRes(body);
+      }
+      return new Response("must never be reached", { status: 500 }); // فهرستِ عمومی نباید حتی لمس شود
+    };
+  }
+
+  // و‌.۱ — GET /vd/<آدرس> عادی (خطِ اولِ fetchVerdict، داخلِ ogFetchVerdict)
+  {
+    const { UPSTREAM_FREE: UF1 } = await import("./index.js");
+    const ADDR1 = "0x" + "c".repeat(40);
+    const SECRET1 = "https://priv-base-rpc-wire1.example/token/WIREPATH1?api-key=WIREQUERY1";
+    const savedFetch = globalThis.fetch;
+    const rpcCalls = [];
+    globalThis.fetch = makeWireFetch(UF1, SECRET1, rpcCalls);
+    const res = await call("/vd/" + ADDR1,
+      { headers: { "cf-connecting-ip": "203.0.113.151" } }, { ASSETS, BASE_RPC: SECRET1 });
+    ok(res.status === 200, "/vd/<addr> with BASE_RPC set should be 200, got " + res.status);
+    const body = await res.json();
+    ok(body.v === "sell",
+       "/vd/<addr> (ogFetchVerdict's fetchVerdict call) did not use env.BASE_RPC first: " + JSON.stringify(body));
+    ok(rpcCalls.length === 1 && rpcCalls[0] === SECRET1,
+       "env.BASE_RPC must be the only/first RPC endpoint hit for /vd/<addr>, got: " + JSON.stringify(rpcCalls));
+    globalThis.fetch = savedFetch;
+  }
+
+  // و‌.۲ — کارتِ پیش‌نمایش /t/<آدرس> (همان ogFetchVerdict، این‌بار از پشتِ
+  // خط‌لوله‌ی کارت). ⚠️ در Node، HTMLRewriter تعریف‌نشده است (injectOg خودش
+  // همین را می‌گوید)، پس worker.fetch پیش از تمام‌شدنِ vdPromise برمی‌گردد —
+  // زنجیره‌ی metaPromise→ogFetchVerdict→fetchVerdict همچنان در پس‌زمینه اجرا
+  // می‌شود. چند تیکِ میکروتاسک/تایمرِ خالی به آن فرصتِ رسیدن به همان fetch
+  // جعلی را می‌دهد.
+  {
+    const { UPSTREAM_FREE: UF2 } = await import("./index.js");
+    const ADDR2 = "0x" + "d".repeat(40);
+    const SECRET2 = "https://priv-base-rpc-wire2.example/token/WIREPATH2?api-key=WIREQUERY2";
+    const savedFetch = globalThis.fetch;
+    const rpcCalls = [];
+    globalThis.fetch = makeWireFetch(UF2, SECRET2, rpcCalls);
+    await call("/t/" + ADDR2, { headers: { "cf-connecting-ip": "203.0.113.152" } }, { ASSETS, BASE_RPC: SECRET2 });
+    for (let i = 0; i < 30; i++) await new Promise((r) => setTimeout(r, 0));
+    ok(rpcCalls.length > 0 && rpcCalls[0] === SECRET2,
+       "the OG-card path (/t/<addr>, same ogFetchVerdict as /vd/<addr>) must also hit env.BASE_RPC first, " +
+       "got: " + JSON.stringify(rpcCalls));
+    globalThis.fetch = savedFetch;
+  }
+
+  // و‌.۳ — گذرِ گزارش/کرون (GET /report/run → scheduledReportPass → runReportPass
+  // → verdictOf → ogFetchVerdict). این مسیر لایه‌های بیشتری بینِ راز و
+  // fetchVerdict دارد؛ اگر یکی از آن‌ها env را جا می‌گذاشت، همین‌جا معلوم می‌شد.
+  {
+    const { UPSTREAM_FREE: UF3 } = await import("./index.js");
+    const SECRET3 = "https://priv-base-rpc-wire3.example/token/WIREPATH3?api-key=WIREQUERY3";
+    const savedFetch = globalThis.fetch;
+    const rpcCalls = [];
+    const POOL_ROW = {
+      attributes: {
+        base_token_price_usd: "2000",
+        reserve_in_usd: "10000",
+        pool_created_at: "2026-09-13T00:00:00Z",
+        volume_usd: { h24: "1000" },
+        fdv_usd: "500000",
+      },
+      relationships: {
+        base_token: { data: { id: "base_0x" + "e".repeat(40) } },
+        dex: { data: { id: "uniswap-v3-base" } },
+      },
+    };
+    globalThis.fetch = async (url, init) => {
+      const u = String(url);
+      if (u.includes("/new_pools")) return jsonRes({ data: [POOL_ROW] });
+      if (u.startsWith(UF3)) {
+        return jsonRes({ data: { attributes: {
+          name: "Cron Test Token", symbol: "CRON", total_reserve_in_usd: "1000",
+          decimals: 18, price_usd: "2000",
+        } } });
+      }
+      rpcCalls.push(u);
+      if (u === SECRET3) {
+        const reqs = JSON.parse(init.body);
+        const body = reqs.map((r) =>
+          r.id === 0 ? { id: 0, result: mkStatic4(5) } : { id: r.id, result: mkStatic4(999) });
+        return jsonRes(body);
+      }
+      return new Response("must never be reached", { status: 500 });
+    };
+    const fakeKvW = { get: async () => null, put: async () => {} };
+    const cronEnv = { ASSETS, ZX_KV: fakeKvW, RUN_KEY: "wire-run-key", BASE_RPC: SECRET3 };
+    const res = await call("/report/run", { method: "GET", headers: { "x-run-key": "wire-run-key" } }, cronEnv);
+    ok(res.status === 200, "/report/run must be 200, got " + res.status);
+    const body = await res.json();
+    ok(body.checked === 1,
+       "/report/run should have checked exactly the one fresh token, got " + JSON.stringify(body));
+    ok(rpcCalls.length === 1 && rpcCalls[0] === SECRET3,
+       "the report/cron path (scheduledReportPass -> ogFetchVerdict) must also hit env.BASE_RPC first, got: " +
+       JSON.stringify(rpcCalls));
+    globalThis.fetch = savedFetch;
+  }
+
+  globalThis.fetch = trackingFetch; // برگرداندنِ موکِ پیش‌فرض برای هرچه بعد از این اجرا می‌شود
+
+  console.log("[base rpc batch fix] VD_RPCS pinned to the two measured batch-capable hosts (meowrpc/drpc/" +
+    "mainnet.base.org absent, each with its measured reason); VD_MAX_ENDPOINTS exported as 3 and the " +
+    "failover loop honours it (four failing candidates → exactly three tried); baseRpcsFor mirrors " +
+    "solRpcsFor byte-for-byte (absent BASE_RPC → VD_RPCS untouched, present → secret first then the " +
+    "public list); batch-failed now carries \":<status>\" (0 for a throw, the real HTTP status " +
+    "otherwise, never from error.message); and env.BASE_RPC's path/query never leak — verified end to " +
+    "end through worker.fetch for all three fetchVerdict call sites (/vd/<addr>, /vd/<addr>?probe=1, " +
+    "and the report/cron pass) plus the OG-card path, which shares ogFetchVerdict with /vd/<addr>");
 }
 
 /* ---- ۲۶. حفاظِ پوشش‌ِ Base (baseVenueCovered) — لایه‌ی دوم ----
