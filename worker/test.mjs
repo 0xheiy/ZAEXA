@@ -821,6 +821,7 @@ function isSolidlyReqId(id) { return PROBE_KIND_BY_ID.get(id) === "SOLIDLY"; }
     SEL_CL_INT24: "quoteExactInputSingle((address,address,uint256,int24,uint160))",
     SEL_SOLIDLY: "getAmountsOut(uint256,(address,address,bool,address)[])",
     SEL_V2: "getAmountsOut(uint256,address[])",
+    SEL_V4_SINGLE: "quoteExactInputSingle(((address,address,uint24,int24,address),bool,uint128,bytes))",
   };
   for (const [name, sig] of Object.entries(sigs)) {
     const want = ethers.id(sig).slice(0, 10);
@@ -860,9 +861,26 @@ function isSolidlyReqId(id) { return PROBE_KIND_BY_ID.get(id) === "SOLIDLY"; }
   const ifaceV2 = new ethers.Interface(["function getAmountsOut(uint256,address[]) returns (uint256[])"]);
   const ifaceSolidly = new ethers.Interface([
     "function getAmountsOut(uint256,(address,address,bool,address)[]) returns (uint256[])"]);
+  const ifaceV4 = new ethers.Interface([
+    "function quoteExactInputSingle(((address,address,uint24,int24,address),bool,uint128,bytes)) returns (uint256,uint256)"]);
+
+  // ضدجفتِ مرحله‌ی WETH پس از VD_V4_COUNTER اترِ بومی (address(0)) می‌شود؛
+  // TOKEN (0x11..) از صفر بزرگ‌تر است، پس TOKEN همیشه currency1 است و
+  // zeroForOne نادرست. ضدجفتِ مرحله‌ی USDC خودِ USDC (0x83..) می‌ماند؛ TOKEN
+  // از آن کوچک‌تر است، پس TOKEN همیشه currency0 و zeroForOne درست است —
+  // همین دو حالت هر دو سوی مرتب‌سازی را می‌پیمایند، بدون این‌که کدِ تست
+  // خودش حدس بزند.
+  function wantV4Data(tokenIn, tokenOut, amountIn, fee, tickSpacing) {
+    const a = BigInt(tokenIn.toLowerCase()), b = BigInt(tokenOut.toLowerCase());
+    const currency0 = a < b ? tokenIn : tokenOut;
+    const currency1 = a < b ? tokenOut : tokenIn;
+    const zeroForOne = a < b;
+    return ifaceV4.encodeFunctionData("quoteExactInputSingle",
+      [[[currency0, currency1, fee, tickSpacing, vd.NATIVE_ADDR], zeroForOne, amountIn, "0x"]]);
+  }
 
   const probe = vd.buildProbe(TOKEN, vd.WETH_ADDR, amt);
-  ok(probe.length === 17, "buildProbe should produce exactly 17 calls (3+3+5+2+1+1+1+1), got " + probe.length);
+  ok(probe.length === 21, "buildProbe should produce exactly 21 calls (3+3+5+2+1+1+1+1+4), got " + probe.length);
 
   for (const p of probe) {
     const row = vd.VD_VENUES.find((r) => r.id === p.id);
@@ -876,10 +894,25 @@ function isSolidlyReqId(id) { return PROBE_KIND_BY_ID.get(id) === "SOLIDLY"; }
         [amt, [[TOKEN, vd.WETH_ADDR, p.key, row.factory]]]);
     } else if (row.kind === "V2") {
       want = ifaceV2.encodeFunctionData("getAmountsOut", [amt, [TOKEN, vd.WETH_ADDR]]);
+    } else if (row.kind === "V4_SINGLE") {
+      const [feeStr, tickStr] = p.key.split(":");
+      want = wantV4Data(TOKEN, vd.NATIVE_ADDR, amt, Number(feeStr), Number(tickStr));
     }
     ok(p.data === want, row.kind + " encoding mismatch for " + p.id + "/" + p.key + ":\n  got  " +
       p.data + "\n  want " + want);
     ok(p.to === row.to, "wrong contract address for " + p.id);
+  }
+
+  // همان چهار کلید، ولی مرحله‌ی USDC — اینجا TOKEN از ضدجفتش کوچک‌تر است،
+  // پس zeroForOne باید درست باشد؛ این نصفِ دومِ «هر دو سوی مرتب‌سازی» است.
+  const probeUsdcGolden = vd.buildProbe(TOKEN, vd.USDC_ADDR, amt).filter((p) => p.id === "uniswap-v4");
+  ok(probeUsdcGolden.length === 4, "expected all four v4 keys in the USDC stage too, got " + probeUsdcGolden.length);
+  for (const p of probeUsdcGolden) {
+    const [feeStr, tickStr] = p.key.split(":");
+    const want = wantV4Data(TOKEN, vd.USDC_ADDR, amt, Number(feeStr), Number(tickStr));
+    ok(p.data === want, "V4_SINGLE (USDC stage, zeroForOne=true) encoding mismatch for " + p.key +
+      ":\n  got  " + p.data + "\n  want " + want);
+    ok(p.to === vd.VD_VENUES.find((r) => r.id === "uniswap-v4").to, "wrong contract address for uniswap-v4");
   }
 
   // خودِ کاناری هم همین امضا را می‌گیرد، با مقادیرِ ثابتش
@@ -890,6 +923,58 @@ function isSolidlyReqId(id) { return PROBE_KIND_BY_ID.get(id) === "SOLIDLY"; }
     "\n  want " + wantCanary);
   ok(canary.to === vd.VD_VENUES[0].to, "canaryCall must hit the uniswap-v3 quoter, the pool's liveness "
     + "reference, not some other contract");
+
+  // --- شمارِ متقابلِ v4 --- مرحله‌ی WETH همیشه اترِ بومی می‌پرسد، هرگز خودِ
+  // WETH را؛ مرحله‌ی USDC دست‌نخورده می‌ماند و خودِ USDC را می‌پرسد.
+  // VD_V4_COUNTER بسته است و دقیقاً یک ورودی دارد.
+  {
+    const decodeCurrencies = (data) => {
+      // پارامترِ تابع خودش یک تاپلِ تک‌عضوی است (QuoteExactSingleParams)؛
+      // عضوِ ۰ِ آن poolKey است، نه خودش — یک لایه‌ی دیگر باید باز شود.
+      const [params] = ifaceV4.decodeFunctionData("quoteExactInputSingle", data);
+      const poolKey = params[0];
+      return [String(poolKey[0]).toLowerCase(), String(poolKey[1]).toLowerCase()];
+    };
+    const probeWethV4 = probe.filter((p) => p.id === "uniswap-v4");
+    ok(probeWethV4.length === 4, "expected all four v4 keys in the WETH stage, got " + probeWethV4.length);
+    for (const p of probeWethV4) {
+      const currencies = decodeCurrencies(p.data);
+      ok(currencies.includes(vd.NATIVE_ADDR), "the WETH stage v4 probe must address native ether, got " +
+        JSON.stringify(currencies));
+      ok(!currencies.includes(vd.WETH_ADDR.toLowerCase()), "the WETH stage v4 probe must never address "
+        + "wrapped WETH itself, got " + JSON.stringify(currencies));
+    }
+    for (const p of probeUsdcGolden) {
+      const currencies = decodeCurrencies(p.data);
+      ok(currencies.includes(vd.USDC_ADDR.toLowerCase()), "the USDC stage v4 probe must address USDC, got "
+        + JSON.stringify(currencies));
+    }
+    ok(Object.isFrozen(vd.VD_V4_COUNTER), "VD_V4_COUNTER must be frozen");
+    ok(Object.keys(vd.VD_V4_COUNTER).length === 1 &&
+      vd.VD_V4_COUNTER[vd.WETH_ADDR.toLowerCase()] === vd.NATIVE_ADDR,
+      "VD_V4_COUNTER must have exactly one entry, WETH -> native ether, got " +
+      JSON.stringify(vd.VD_V4_COUNTER));
+  }
+
+  // --- گاردِ uint128 --- مقدارِ برابر یا بیش از ظرفیت باید ردیفِ v4 را
+  // بی‌صدا حذف کند (نه بریده)، یکی کمتر باید هر چهار کلید را نگه دارد.
+  {
+    const overflow = vd.buildProbe(TOKEN, vd.WETH_ADDR, 2n ** 128n);
+    ok(overflow.length === 17, "an amountIn at exactly 2**128 must drop all four v4 entries, leaving the "
+      + "17 non-v4 calls, got " + overflow.length);
+    ok(!overflow.some((p) => p.id === "uniswap-v4"), "an amountIn at 2**128 must never produce a "
+      + "uniswap-v4 entry with truncated data");
+
+    const atCap = vd.buildProbe(TOKEN, vd.WETH_ADDR, 2n ** 128n - 1n);
+    ok(atCap.length === 21, "an amountIn one below 2**128 must still produce all 21 calls, got " + atCap.length);
+    ok(atCap.filter((p) => p.id === "uniswap-v4").length === 4, "an amountIn one below 2**128 must keep "
+      + "all four v4 keys");
+
+    ok(vd.encodeV4QuoteExactInputSingle(TOKEN, vd.NATIVE_ADDR, 2n ** 128n, 500, 10) === null,
+      "encodeV4QuoteExactInputSingle must return null at exactly 2**128, never mask or truncate");
+    ok(vd.encodeV4QuoteExactInputSingle(TOKEN, vd.NATIVE_ADDR, 2n ** 128n - 1n, 500, 10) !== null,
+      "encodeV4QuoteExactInputSingle must still succeed one below 2**128");
+  }
 }
 
 /* --- ۱۲.۴ رمزگشایی --- */
@@ -914,6 +999,25 @@ function isSolidlyReqId(id) { return PROBE_KIND_BY_ID.get(id) === "SOLIDLY"; }
   ok(vd.decodeQuote("CL_UINT24", staticRet) === 777n,
     "decodeQuote(CL_UINT24) must take the FIRST word (amountOut), not the last");
   ok(vd.decodeQuote("CL_INT24", staticRet) === 777n, "decodeQuote(CL_INT24) must take the first word too");
+
+  // --- decodeStatic2 (V4_SINGLE) --- بازگشتِ v4 دو کلمه است (amountOut,
+  // gasEstimate)؛ اینجا باید همان کلمه‌ی اول بگیرد و *هرگز* بابتِ کوتاه‌تر
+  // بودن از چهار کلمه رد نشود — دقیقاً همان دامی که decodeStatic4 می‌افتاد.
+  const ifaceV4Ret = new ethers.Interface(["function h() returns (uint256,uint256)"]);
+  const v4Ret = ifaceV4Ret.encodeFunctionResult("h", [321n, 999999n]);
+  ok(vd.decodeQuote("V4_SINGLE", v4Ret) === 321n,
+    "decodeQuote(V4_SINGLE) must take the first word (amountOut), not the gasEstimate");
+  const v4RetBigGas = ifaceV4Ret.encodeFunctionResult("h", [321n, 2n ** 200n]);
+  ok(vd.decodeQuote("V4_SINGLE", v4RetBigGas) === 321n,
+    "a huge gasEstimate in the second word must not disturb decoding the first");
+  ok(vd.decodeQuote("V4_SINGLE", "0x") === null, "decodeQuote(V4_SINGLE) must be null for an empty \"0x\"");
+  const oneWord = "0x" + w(42);
+  ok(vd.decodeQuote("V4_SINGLE", oneWord) === null,
+    "decodeQuote(V4_SINGLE) must be null for a single-word (truncated) payload");
+  // نگهبانِ اصلیِ این بخش: یک بازگشتِ دوکلمه‌ایِ واقعیِ v4 (که برای decodeStatic4
+  // «کوتاه‌تر از ظرفیت» و رد می‌شد) با V4_SINGLE باید موفق رمزگشایی شود.
+  ok(vd.decodeQuote("V4_SINGLE", v4Ret) !== null,
+    "a two-word v4 return must decode successfully, not be rejected for being shorter than four words");
 }
 
 /* --- ۱۲.۵ verdictFrom --- قلبِ کار؛ یک probe به‌ازای هر قاعده. */
@@ -1051,6 +1155,79 @@ function isSolidlyReqId(id) { return PROBE_KIND_BY_ID.get(id) === "SOLIDLY"; }
     ok(Object.isFrozen(vd.VD_ZERO_IS_PROOF), "VD_ZERO_IS_PROOF must be frozen");
   }
 
+  // م) VD_POSITIVE_ONLY هم بسته است و دقیقاً روی همان kindهایی نشسته که
+  // VD_VENUES واقعاً دارد — نه بیشتر نه کمتر؛ هر دو سو پیموده می‌شود، دقیقاً
+  // همان الگوی VD_ZERO_IS_PROOF بالا.
+  {
+    const venueKinds = new Set(vd.VD_VENUES.map((r) => r.kind));
+    for (const kind of Object.keys(vd.VD_POSITIVE_ONLY)) {
+      ok(venueKinds.has(kind), "VD_POSITIVE_ONLY has a kind VD_VENUES never uses: " + kind);
+    }
+    for (const kind of venueKinds) {
+      ok(Object.prototype.hasOwnProperty.call(vd.VD_POSITIVE_ONLY, kind),
+        "VD_VENUES uses a kind missing from VD_POSITIVE_ONLY: " + kind);
+    }
+    ok(vd.VD_POSITIVE_ONLY.V4_SINGLE === true, "VD_POSITIVE_ONLY.V4_SINGLE must be true — v4 can only "
+      + "prove a sale, never the absence of one, because we guess its pool keys");
+    ok(vd.VD_POSITIVE_ONLY.CL_UINT24 === false && vd.VD_POSITIVE_ONLY.CL_INT24 === false &&
+      vd.VD_POSITIVE_ONLY.V2 === false && vd.VD_POSITIVE_ONLY.SOLIDLY === false,
+      "every non-v4 kind must stay able to prove nosell");
+    ok(Object.isFrozen(vd.VD_POSITIVE_ONLY), "VD_POSITIVE_ONLY must be frozen");
+  }
+
+  /* --- ن تا ی) V4_SINGLE positive-only + گاردِ کوروم ---
+     v4 با کوترِ چهار PoolKeyِ حدسی حرف می‌زند: یک کوت اثباتِ واقعیِ فروش
+     است، ولی یک ریوِرت یا صفر فقط یعنی حدسمان غلط بود — هیچ‌چیزی اثبات
+     نمی‌کند. mkStatic2 شکلِ بازگشتیِ واقعیِ v4 است: دو کلمه، نه چهار. */
+  const mkStatic2 = (amountOut) => "0x" + w(amountOut) + w(0);
+
+  // ن) یک کوتِ مثبت از v4 باید همچنان برنده باشد، حتی وقتی هرچیزِ دیگر رد شده.
+  ok(vd.verdictFrom({
+    canary: aliveCanary,
+    items: [
+      { kind: "CL_UINT24", error: { code: 3 } },
+      { kind: "V4_SINGLE", result: mkStatic2(777) },
+    ],
+  }) === "sell", "a v4 positive quote must still win the verdict, exactly like any other kind");
+
+  // س) همه‌ی آیتم‌های non-v4 اثباتِ منفی‌اند، v4 ریوِرت می‌کند → nosell —
+  // عمداً با کدِ خطای -۳۲۶۰۳ (نه ۳، نه -۳۲۰۰۰) که خودش هرگز اثباتی نیست؛
+  // این‌جا فقط continue می‌شود چون positiveOnly است، پیش از آن‌که حتی کدِ
+  // خطا بررسی شود. اگر کدِ ۳/​-۳۲۰۰۰ به‌کار می‌رفت، این probe حتی با
+  // VD_POSITIVE_ONLY.V4_SINGLE=false هم nosell می‌داد و چیزی را نمی‌سنجید.
+  ok(vd.verdictFrom({
+    canary: aliveCanary,
+    items: [
+      { kind: "CL_UINT24", error: { code: 3 } },
+      { kind: "V2", result: "0x" },
+      { kind: "V4_SINGLE", error: { code: -32603 } },
+    ],
+  }) === "nosell", "a reverting v4 item (with a non-proving error code) alongside proven-negative "
+    + "non-v4 items must still give nosell — v4's own revert proves nothing and must not block the "
+    + "verdict");
+
+  // ع) همان، ولی v4 صفرِ رمزگشایی‌شده می‌دهد (نه ریوِرت) → همچنان nosell.
+  ok(vd.verdictFrom({
+    canary: aliveCanary,
+    items: [
+      { kind: "CL_UINT24", error: { code: 3 } },
+      { kind: "V4_SINGLE", result: mkStatic2(0) },
+    ],
+  }) === "nosell", "a decoded-zero v4 item alongside a proven-negative non-v4 item must still give "
+    + "nosell — v4's zero is our own guess failing, not proof, and must not block the verdict");
+
+  // 🔴 ف) گاردِ کوروم — فهرست فقط از آیتم‌های v4 (positive-only) ساخته شده،
+  // همه ریوِرت. بدونِ این گارد این سناریو از هر continue رد می‌شد و بی‌صدا
+  // nosell می‌گرفت؛ دقیقاً باگِ ۱۶ شهریور، این‌بار با صفر شاهدِ واقعی.
+  ok(vd.verdictFrom({
+    canary: aliveCanary,
+    items: [
+      { kind: "V4_SINGLE", error: { code: 3 } },
+      { kind: "V4_SINGLE", error: { code: 3 } },
+    ],
+  }) === null, "a list made only of v4 (positive-only) items, all reverting, must give unknown, never "
+    + "nosell — there is zero real evidence, only failed guesses (the quorum guard)");
+
   // (پایداریِ رفتار — بندِ ۱۱ از فهرستِ آزمون‌ها) یک senarioِ ساده‌ی sell و
   // یک all-revert فقط با kindهای v3-style (بدونِ V2، بدونِ SOLIDLY) باید
   // دقیقاً همان چیزی بدهند که امروز می‌دهند، دست‌نخورده از این تغییر.
@@ -1073,7 +1250,10 @@ function isSolidlyReqId(id) { return PROBE_KIND_BY_ID.get(id) === "SOLIDLY"; }
     + "[VD_ZERO_IS_PROOF] a SOLIDLY zero/\"0x\" is never proof (the live aerodrome bug) while a "
     + "real SOLIDLY revert still is, an unrecognised/missing kind is never guessed at, positive "
     + "still wins over an unproven SOLIDLY zero, and the frozen map exactly mirrors VD_VENUES's "
-    + "kinds in both directions");
+    + "kinds in both directions; "
+    + "[VD_POSITIVE_ONLY] frozen and mirrors VD_VENUES's kinds too, only V4_SINGLE is true, and a "
+    + "v4 positive quote wins/a v4 revert or zero never blocks nosell/a v4-only all-revert list "
+    + "gives unknown, never nosell (the quorum guard)");
 }
 
 /* --- ۱۲.۶ sellAmountFrom --- */
@@ -3731,6 +3911,30 @@ function isSolidlyReqId(id) { return PROBE_KIND_BY_ID.get(id) === "SOLIDLY"; }
     allObservedOut.push(...collect.map((e) => e.out));
   }
 
+  // ب-۲) همان قاعده، ولی برای یک آیتمِ V4_SINGLE — classifyProbeOut باید
+  // بازگشتِ دوکلمه‌ایِ v4 را هم درست به "quoted" بخواند، نه اینکه چون از
+  // decodeStatic4 نیست undecodable بشمردش.
+  {
+    const mkStatic2 = (amountOut) => "0x" + w(amountOut) + w(0);
+    const v4Item = probeShape.find((p) => p.id === "uniswap-v4");
+    const v4Id = probeShape.indexOf(v4Item) + 1; // همان idِ eth_call که callBatch می‌سازد
+    const collect = [];
+    const fetchImpl = async (url, init) => {
+      const reqs = JSON.parse(init.body);
+      const body = reqs.map((r) => r.id === 0
+        ? { id: 0, result: mkStatic4(5) }
+        : { id: r.id, result: r.id === v4Id ? mkStatic2(321) : "0x" });
+      return jsonRes(body);
+    };
+    const v = await vd.fetchVerdict(TOKEN, meta, { fetchImpl, rpcs: ["https://rpc-a.example"], collect });
+    ok(v === "sell", "a quoted v4 item must also verdict sell (got " + v + ")");
+    const entry = collect.find((e) => e.venue === v4Item.id && e.key === v4Item.key && e.stage === "weth");
+    ok(entry && entry.out === "quoted",
+      "a V4_SINGLE item decoding to a positive amount must be recorded as \"quoted\", got " +
+      JSON.stringify(entry));
+    allObservedOut.push(...collect.map((e) => e.out));
+  }
+
   // ج) همه با کدِ ۳ رد می‌شوند → هر آیتم "revert:3"، verdict همچنان "nosell"
   // (همان رفتارِ امروز؛ این ابزار فقط آن را ثبت می‌کند، عوضش نمی‌کند).
   let allCode3Collect;
@@ -4094,6 +4298,10 @@ function isSolidlyReqId(id) { return PROBE_KIND_BY_ID.get(id) === "SOLIDLY"; }
     // دقیقاً دامی که افزودنِ uniswap-v2 می‌توانست بیندازد.
     const mappedVenues = new Set(Object.values(GT_DEX_TO_VENUE));
     for (const row of vd.VD_VENUES) {
+      // یک venueِ positive-only (مثلِ v4) از این قاعده مستثناست: هیچ‌وقت
+      // اثباتِ منفی نمی‌دهد، پس گاردِ پوشش هرگز به دیدنش نیاز ندارد و نبودش
+      // در GT_DEX_TO_VENUE عمدی است، نه سهو.
+      if (vd.VD_POSITIVE_ONLY[row.kind]) continue;
       ok(mappedVenues.has(row.id),
         "venue " + row.id + " is probed but no GT dex id maps to it, so the coverage guard can never "
         + "see it and a negative verdict for it becomes silently impossible");
@@ -4101,6 +4309,14 @@ function isSolidlyReqId(id) { return PROBE_KIND_BY_ID.get(id) === "SOLIDLY"; }
     for (const venue of mappedVenues) {
       ok(vd.VD_VENUES.some((r) => r.id === venue),
         "GT_DEX_TO_VENUE maps a dex to " + venue + ", which is not a venue we probe");
+    }
+    // جهتِ برعکس: هیچ venueِ positive-only نباید هیچ‌وقت به‌عنوانِ مقدار در
+    // GT_DEX_TO_VENUE ظاهر شود — وگرنه گاردِ پوشش یک ریوِرتِ حدسیِ v4 را
+    // «پوشش» می‌شمرد و دقیقاً همان تله‌ای بازمی‌گردد که این جدول برایش ساخته شد.
+    for (const venue of mappedVenues) {
+      const row = vd.VD_VENUES.find((r) => r.id === venue);
+      ok(!(row && vd.VD_POSITIVE_ONLY[row.kind]),
+        "a positive-only venue (" + venue + ") must never appear as a value in GT_DEX_TO_VENUE");
     }
 
     // روترِ Uniswap نسخه‌ی ۲ روی Base — آدرس پین می‌شود تا یک تغییرِ
@@ -4111,6 +4327,15 @@ function isSolidlyReqId(id) { return PROBE_KIND_BY_ID.get(id) === "SOLIDLY"; }
     ok(uniV2 && uniV2.to.toLowerCase() === "0x4752ba5dbc23f44d87826276bf6fd6b1c372ad24",
       "the uniswap-v2 router address must stay exactly the documented Base deployment, got " +
       (uniV2 && uniV2.to));
+
+    // V4Quoter روی Base — همان الگوی پینِ آدرسِ uniswap-v2 بالا؛ یک تغییرِ
+    // بی‌دقت نباید بی‌صدا قراردادِ دیگری را بپرسد.
+    const uniV4 = vd.VD_VENUES.find((r) => r.id === "uniswap-v4");
+    ok(uniV4 && uniV4.kind === "V4_SINGLE", "uniswap-v4 must be probed as a V4_SINGLE quoter");
+    ok(uniV4 && uniV4.to.toLowerCase() === "0x0d5e0f971ed27fbff6c2837bf31316121532048d",
+      "the v4 quoter address must stay exactly the documented Base deployment, got " +
+      (uniV4 && uniV4.to));
+
     ok(!("uniswap-v4-base" in GT_DEX_TO_VENUE),
       "uniswap-v4-base must never map to a venue — it is a different contract we do not probe");
     ok(Object.isFrozen(GT_DEX_TO_VENUE), "GT_DEX_TO_VENUE must be frozen");
