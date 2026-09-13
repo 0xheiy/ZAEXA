@@ -32,22 +32,9 @@ export const SEL_CL_INT24 = "0x9e7defe6";
 export const SEL_SOLIDLY = "0x5509a1ac";
 // getAmountsOut(uint256 amountIn,address[] path)
 export const SEL_V2 = "0xd06ca61f";
-// quoteExactInputSingle(((address,address,uint24,int24,address),bool,uint128,bytes))
-export const SEL_V4_SINGLE = "0xaa9d21cb";
 
 export const WETH_ADDR = "0x4200000000000000000000000000000000000006";
 export const USDC_ADDR = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913"; // ۶ رقم اعشار
-export const NATIVE_ADDR = "0x0000000000000000000000000000000000000000"; // اتر بومی، currency0 همیشه در v4
-
-/* در Uniswap v4 استخرِ WETH پوشیده وجود ندارد؛ ارزِ متقابلِ کانونیک اترِ
-   بومی است که آدرسش address(0) است. پس وقتی outAddr مرحله WETH است، ردیفِ
-   v4 باید به‌جای WETH با اترِ بومی کوت بگیرد. جدول بسته است تا هم این
-   قاعده فقط همین‌جا نوشته شود، هم worker/test.mjs بتواند خودش را پین کند.
-   مرحله‌ی USDC دست‌نخورده می‌ماند — USDC در v4 هم یک ERC-20 واقعی است، پس
-   با نبودش در این جدول به خودش نگاشت می‌شود. */
-export const VD_V4_COUNTER = Object.freeze({
-  [WETH_ADDR.toLowerCase()]: NATIVE_ADDR,
-});
 
 // همان فهرست و همان ترتیب CHAIN.rpcs در web/index.html — ترتیب عمدی است
 // (mainnet.base.org آخر است چون زیر بار واقعی ۴۲۹ داد).
@@ -65,13 +52,10 @@ export const VD_NOTIONAL_USD = 100;
    کارمزدِ ۱۰۰۰۰ برای uniswap-v3 عمداً کنار گذاشته نشده (آن یکی که کنار
    گذاشته شده کارمزدِ ۱۰۰۰۰۰ نیست — این‌جا اصلاً چنین ردیفی وجود ندارد؛
    سطحِ استیبل-به-استیبلِ یونی‌سواپ که کنار گذاشته شده هرگز جزوِ این چهار
-   کارمزد نبوده). جمعِ فراخوانی‌ها ۲۱ تاست: ۳+۳+۵+۲+۱+۱+۱+۱+۴.
+   کارمزد نبوده). جمعِ فراخوانی‌ها ۱۷ تاست: ۳+۳+۵+۲+۱+۱+۱+۱.
    ⚠️ هر ردیفی که این‌جا اضافه شود باید در GT_DEX_TO_VENUE در
    worker/index.js هم شناسه‌ی دکسش بیاید، وگرنه گاردِ پوشش هرگز آن صرافی را
-   نمی‌بیند و حکمِ منفی برایش بی‌صدا غیرممکن می‌شود. تست هر دو سو را می‌پیماید.
-   ⚠️ استثنا: یک ردیفِ positive-only (VD_POSITIVE_ONLY) اصلاً حکمِ منفی
-   نمی‌سازد، پس نه لازم دارد در آن جدول باشد و نه *مجاز* است باشد — تست
-   همین را هم می‌پیماید. امروز فقط uniswap-v4 این‌طور است. */
+   نمی‌بیند و حکمِ منفی برایش بی‌صدا غیرممکن می‌شود. تست هر دو سو را می‌پیماید. */
 export const VD_VENUES = [
   { id: "uniswap-v3", kind: "CL_UINT24",
     to: "0x3d4e44Eb1374240CE5F1B871ab261CD16335B76a", keys: [500, 3000, 10000] },
@@ -92,19 +76,6 @@ export const VD_VENUES = [
      0x8909Dc15e40173Ff4699343b6eB8132c65e18eC6 است و اینجا لازم نیست —
      getAmountsOut خودش از روترِ خودش کارخانه را می‌شناسد. */
   { id: "uniswap-v2", kind: "V2", to: "0x4752ba5DBc23f44D87826276BF6Fd6b1C372aD24", keys: [null] },
-  /* Uniswap v4 روی Base — آدرسِ V4Quoter از Uniswap/contracts/deployments/8453.md
-     و برچسبِ تأییدشده‌ی BaseScan «Uniswap V4: Quoter» خوانده شد. کوتر id
-     استخر می‌خواهد، نه آدرسِ توکن؛ id هشِ PoolKey است، پس از رویِ آدرسِ توکن
-     قابلِ‌بازیابی نیست — این چهار جفتِ (fee, tickSpacing) چهار PoolKeyِ
-     استانداردِ بدونِ هوک‌اند که فقط *حدس* می‌زنیم؛ استخرهای هوک‌دار عمداً
-     در دسترسِ این ردیف نیستند. یک کوتِ مثبت اینجا اثباتِ واقعیِ فروش است،
-     ولی یک ریوِرت فقط یعنی حدسِ ما غلط بود یا استخر هوک دارد — هیچ‌چیزی
-     اثبات نمی‌کند. به همین دلیل این ردیف positive-only است (VD_POSITIVE_ONLY)
-     و هرگز، تحتِ هیچ شرایطی، نباید در GT_DEX_TO_VENUE در worker/index.js
-     ظاهر شود — برخلافِ هر ردیفِ دیگرِ این جدول. */
-  { id: "uniswap-v4", kind: "V4_SINGLE",
-    to: "0x0d5e0F971ED27FBfF6c2837bf31316121532048D",
-    keys: [[100, 1], [500, 10], [3000, 60], [10000, 200]] },
 ];
 
 const VENUE_KIND_BY_ID = new Map(VD_VENUES.map((v) => [v.id, v.kind]));
@@ -161,36 +132,6 @@ function encodeSolidlyGetAmountsOut(amountIn, routes) {
     wordUint(routes.length) +
     routes.map((r) => wordAddr(r.from) + wordAddr(r.to) + wordBool(r.stable) + wordAddr(r.factory)).join("");
   return "0x" + SEL_SOLIDLY.slice(2) + head + body;
-}
-
-/* quoteExactInputSingle(((address,address,uint24,int24,address),bool,uint128,bytes)) — امضای
-   V4_SINGLE. PoolKey کاملاً ایستاست، پس مستقیم داخلِ سرِ تاپلِ بیرونی جا
-   می‌شود و آفستِ جداگانه‌ی خودش را نمی‌گیرد؛ فقط hookData که bytes است
-   دینامیک است و آفستش نسبت‌به شروعِ خودِ تاپل حساب می‌شود (۸ کلمه‌ی سر).
-   exactAmount اینجا uint128 است، نه uint256 — یک مقدارِ بزرگ‌تر باید ردیف
-   را حذف کند، نه اینکه بی‌صدا بریده شود و کوتِ توکنِ دیگری را بپرسد. */
-export function encodeV4QuoteExactInputSingle(tokenIn, tokenOut, amountIn, fee, tickSpacing) {
-  if (BigInt(amountIn) >= 2n ** 128n) return null; // بیش از ظرفیتِ uint128 — هرگز ماسک/برش
-
-  const a = BigInt(String(tokenIn).toLowerCase());
-  const b = BigInt(String(tokenOut).toLowerCase());
-  const currency0 = a < b ? tokenIn : tokenOut;
-  const currency1 = a < b ? tokenOut : tokenIn;
-  const zeroForOne = a < b; // tokenIn است currency0؟
-
-  const head =
-    wordUint(0x20) +           // آفستِ تاپل؛ چون hookData بایتی درونش هست، تاپل دینامیک است
-    wordAddr(currency0) +
-    wordAddr(currency1) +
-    wordUint(fee) +            // uint24
-    wordUint(tickSpacing) +    // int24، همه‌ی مقادیرِ ما مثبت‌اند پس چپ‌چینِ صفر درست است
-    wordAddr(NATIVE_ADDR) +    // hooks = صفر؛ فقط استخرهای بدونِ هوک را حدس می‌زنیم
-    wordBool(zeroForOne) +
-    wordUint(amountIn) +
-    wordUint(0x100) +          // آفستِ hookData، نسبت‌به شروعِ تاپل = ۸ کلمه‌ی سر
-    wordUint(0);               // طولِ hookData
-
-  return "0x" + SEL_V4_SINGLE.slice(2) + head;
 }
 
 /* ---------------------------------------------------------------------
@@ -264,13 +205,6 @@ export function buildProbe(tokenAddr, outAddr, amountIn) {
         id: row.id, key: null, to: row.to,
         data: encodeV2GetAmountsOut(amountIn, [tokenAddr, outAddr]),
       });
-    } else if (row.kind === "V4_SINGLE") {
-      const counter = VD_V4_COUNTER[String(outAddr).toLowerCase()] || outAddr;
-      for (const [fee, tickSpacing] of row.keys) {
-        const data = encodeV4QuoteExactInputSingle(tokenAddr, counter, amountIn, fee, tickSpacing);
-        if (data == null) continue;   // بیش از ظرفیتِ uint128 — ردیف حذف می‌شود، بریده نمی‌شود
-        out.push({ id: row.id, key: fee + ":" + tickSpacing, to: row.to, data });
-      }
     }
   }
   return out;
@@ -310,17 +244,6 @@ function decodeStatic4(hex) {
   return BigInt("0x" + hexWordAt(body, 0));
 }
 
-/* بازگشتِ (uint256 amountOut,uint256 gasEstimate) — v4 فقط دو کلمه برمی‌گرداند،
-   نه چهار. decodeStatic4 این را رد می‌کرد چون کوتاه‌تر از ظرفیتِ آن است، در
-   حالی که یک بازگشتِ v4 معتبر است. کلمه‌ی *اول* amountOut است؛ کلمه‌ی آخر
-   gasEstimate است و اینجا هرگز نباید گرفته شود. */
-function decodeStatic2(hex) {
-  if (!isHexData(hex) || hex === "0x") return null;
-  const body = hex.slice(2);
-  if (body.length < 128) return null; // کوتاه‌تر از ۲ کلمه → ناقص برای این شکل
-  return BigInt("0x" + hexWordAt(body, 0));
-}
-
 /* بازگشتِ uint256[] — طول متغیر است، پس برخلافِ static4 این‌جا *آخرین* عضو
    درست است، نه دومی و نه اولی. آفست و طول را واقعی می‌خوانیم، فرض نمی‌کنیم
    آرایه دقیقاً دو عضو دارد. */
@@ -346,7 +269,6 @@ function decodeDynamicUintArray(hex) {
 export function decodeQuote(kind, hex) {
   if (kind === "CL_UINT24" || kind === "CL_INT24") return decodeStatic4(hex);
   if (kind === "SOLIDLY" || kind === "V2") return decodeDynamicUintArray(hex);
-  if (kind === "V4_SINGLE") return decodeStatic2(hex);
   return null; // نوعِ ناشناخته → نمی‌دانیم، نه صفر
 }
 
@@ -373,18 +295,7 @@ const PROVEN_NEGATIVE_CODES = new Set([3, -32000]); // بازگشتِ ریوِر
    نگاشت بسته است تا هم این قاعده جایی جز اینجا حدس زده نشود، هم
    worker/test.mjs بتواند خودِ همین شیء را پین کند. */
 export const VD_ZERO_IS_PROOF = Object.freeze({
-  CL_UINT24: true, CL_INT24: true, V2: true, SOLIDLY: false, V4_SINGLE: false,
-});
-
-/* v4 را حدس می‌زنیم: چهار PoolKeyِ استاندارد را امتحان می‌کنیم، نه استخرِ
-   واقعیِ توکن را. یک کوتِ مثبت اثباتِ واقعیِ فروش است، ولی یک ریوِرت یا
-   صفر فقط یعنی حدسِ ما غلط بود یا استخر هوک دارد — هیچ‌چیزی درباره‌ی نبودِ
-   فروش اثبات نمی‌کند. پس v4 (و هر venueِ positive-only دیگری) هرگز نباید
-   در حلقه‌ی منفیِ verdictFrom شمرده شود؛ فقط رد می‌شود (continue)، نه رد
-   می‌شود و اثبات هم می‌کند. جدول بسته است تا این قاعده هم فقط همین‌جا
-   نوشته شود، هم worker/test.mjs بتواند خودش را پین کند. */
-export const VD_POSITIVE_ONLY = Object.freeze({
-  CL_UINT24: false, CL_INT24: false, V2: false, SOLIDLY: false, V4_SINGLE: true,
+  CL_UINT24: true, CL_INT24: true, V2: true, SOLIDLY: false,
 });
 
 function decodeItemValue(item) {
@@ -419,23 +330,12 @@ export function verdictFrom({ canary, items }) {
   // وقتی VD_ZERO_IS_PROOF[kind] راست باشد) "0x" خالی یا رمزگشاییِ صفر.
   // کدِ دیگرِ خطا، رمزگشاییِ ناموفق، یا صفرِ یک kindِ zero-is-not-proof
   // اثباتی نیست. یک kindِ غایب/ناشناخته هم هرگز حدس زده نمی‌شود — نامعلوم.
-  // شمارشِ آیتم‌های non-positive-only که واقعاً از حلقه گذشتند (یعنی اثباتِ
-  // منفی دادند، نه اینکه حدس زده شده باشند) — اگر صفر باشد، فهرست فقط از
-  // ردیف‌های positive-only ساخته شده و "nosell" دادن دقیقاً همان باگِ
-  // ۷ سپتامبر است، فقط این‌بار با صفر شاهد به‌جای شاهدِ ناقص.
-  let negativeProofCount = 0;
   for (const it of list) {
     const kind = it && it.kind;
     const zeroIsProof = Object.prototype.hasOwnProperty.call(VD_ZERO_IS_PROOF, kind)
       ? VD_ZERO_IS_PROOF[kind] : null;
     if (zeroIsProof === null) return null; // kindِ نامعتبر → هرگز حدس نزن
 
-    const positiveOnly = Object.prototype.hasOwnProperty.call(VD_POSITIVE_ONLY, kind)
-      ? VD_POSITIVE_ONLY[kind] : null;
-    if (positiveOnly === null) return null; // kindِ نامعتبر → هرگز حدس نزن
-    if (positiveOnly) continue;             // نه اثباتِ منفی می‌دهد نه مانعش می‌شود
-
-    negativeProofCount++;
     if (it && it.error) {
       if (PROVEN_NEGATIVE_CODES.has(it.error.code)) continue;
       return null;
@@ -453,11 +353,6 @@ export function verdictFrom({ canary, items }) {
     if (v == null) return null; // رمزگشایی نشد → اثبات نشده
     // v>0 این‌جا دیگر ممکن نیست؛ حلقه‌ی بالا قبلاً بازگشته بود
   }
-  // 🔴 گاردِ کوروم: اگر هیچ آیتمِ non-positive-onlyای این حلقه را طی نکرده
-  // باشد (فهرست فقط از v4 یا هر venueِ positive-only دیگری ساخته شده)،
-  // هیچ شاهدی برای "nosell" نداریم — بدون این گارد یک فهرستِ صرفاً v4 با
-  // صفر شاهدِ واقعی از هر continue رد می‌شد و بی‌صدا "nosell" می‌گرفت.
-  if (negativeProofCount === 0) return null;
   return "nosell";
 }
 
