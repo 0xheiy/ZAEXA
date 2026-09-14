@@ -18,6 +18,10 @@ import {
   newPoolRowToToken, reportRow, mergeReportDoc, mergePairsRing,
   utcDateOf, reportKey, emptyReportDoc, runReportPass,
 } from "./report.js";
+import * as v4 from "./v4index.js";
+import {
+  readV4Keys, readV4Entry, rpcCallBase, fetchV4Pools, storeV4Result, v4StoreTtl, runV4Index,
+} from "./index.js";
 
 let fails = 0;
 function ok(cond, what) {
@@ -884,6 +888,12 @@ function isSolidlyReqId(id) { return PROBE_KIND_BY_ID.get(id) === "SOLIDLY"; }
 
   for (const p of probe) {
     const row = vd.VD_VENUES.find((r) => r.id === p.id);
+    // این حلقه فقط شکلِ حدسیِ "fee:tickSpacing" را می‌فهمد؛ اگر یک کلیدِ
+    // واقعیِ "real:..." این‌جا سر برآورد (یعنی گاردِ opts-غایب در بخشِ
+    // ۲۷.۱۱ شکسته)، شمارشِ ۲۱‌تاییِ بالا همین را از قبل «FAIL» کرده — ادامه‌ی
+    // این حلقه با فرضِ شکلِ غلط باید فقط رد شود، نه با کرش (split/Number
+    // روی "real:" یک NaN می‌سازد و ethers را با underflow می‌ترکاند).
+    if (typeof p.key === "string" && p.key.startsWith("real:")) continue;
     let want;
     if (row.kind === "CL_UINT24") {
       want = ifaceU.encodeFunctionData("quoteExactInputSingle", [[TOKEN, vd.WETH_ADDR, amt, p.key, 0]]);
@@ -908,6 +918,8 @@ function isSolidlyReqId(id) { return PROBE_KIND_BY_ID.get(id) === "SOLIDLY"; }
   const probeUsdcGolden = vd.buildProbe(TOKEN, vd.USDC_ADDR, amt).filter((p) => p.id === "uniswap-v4");
   ok(probeUsdcGolden.length === 4, "expected all four v4 keys in the USDC stage too, got " + probeUsdcGolden.length);
   for (const p of probeUsdcGolden) {
+    // همان دلیلِ گاردِ حلقه‌ی بالا: یک کلیدِ "real:..." این‌جا نباید کرش کند.
+    if (typeof p.key === "string" && p.key.startsWith("real:")) continue;
     const [feeStr, tickStr] = p.key.split(":");
     const want = wantV4Data(TOKEN, vd.USDC_ADDR, amt, Number(feeStr), Number(tickStr));
     ok(p.data === want, "V4_SINGLE (USDC stage, zeroForOne=true) encoding mismatch for " + p.key +
@@ -4732,6 +4744,796 @@ function isSolidlyReqId(id) { return PROBE_KIND_BY_ID.get(id) === "SOLIDLY"; }
     + "reporting the raw verdict plus the raw \"covered\" value while a plain /vd on the same "
     + "address reports the gated one — pinned side by side so the difference is never accidental");
 }
+
+/* ---- ۲۷. worker/v4index.js — کلیدِ واقعیِ v4، از رویِ لاگِ Initialize ----
+   ماژول pure است، هیچ fetchی ندارد؛ اینجا فقط خودش سنجیده می‌شود. سیم‌کشیِ
+   worker/verdict.js (VD_V4_STAGE_COUNTERS/encodeV4QuoteExactInputSingleKey/
+   buildProbe) و worker/index.js (rpcCallBase/readV4Keys/GET /vd/v4/<addr>)
+   زیرِ همین شماره، در زیربخش‌های ۲۷.۹ به بعد، پوشش داده می‌شوند. */
+
+const POOL_ID_A = "0x" + "11".repeat(32);
+const POOL_ID_B = "0x" + "22".repeat(32);
+const V4_CURR0 = "0x" + "aa".repeat(20);
+const V4_CURR1 = "0x" + "bb".repeat(20);
+const V4_HOOKS = "0x" + "cc".repeat(20);
+
+function v4wNum(n) { return BigInt(n).toString(16).padStart(64, "0"); }
+function v4wAddrWord(addr) { return "0".repeat(24) + String(addr).replace(/^0x/, "").toLowerCase(); }
+// دو-مکملِ کاملِ ۲۵۶-بیتی برایِ -mag — دقیقاً همان‌طور که ABI یک int امضادار
+// را با چپ‌چینِ بیتِ‌علامت رمز می‌کند، نه با چپ‌چینِ صفر.
+function v4wNegWord(mag) { return (2n ** 256n - BigInt(mag)).toString(16).padStart(64, "0"); }
+
+function v4BuildLog({ poolId, currency0, currency1, feeWord, tickWord, hooksWord }) {
+  return {
+    topics: [v4.V4_INITIALIZE_TOPIC, poolId, "0x" + v4wAddrWord(currency0), "0x" + v4wAddrWord(currency1)],
+    data: "0x" + feeWord + tickWord + hooksWord + v4wNum(0) + v4wNum(0),
+  };
+}
+
+/* --- ۲۷.۱ decodeInitializeLog — لاگِ خوش‌شکل --- */
+{
+  const log = v4BuildLog({
+    poolId: POOL_ID_A, currency0: V4_CURR0, currency1: V4_CURR1,
+    feeWord: v4wNum(3000), tickWord: v4wNum(60), hooksWord: v4wAddrWord(V4_HOOKS),
+  });
+  const key = v4.decodeInitializeLog(log, POOL_ID_A);
+  ok(key !== null, "a well-formed Initialize log must decode, got null");
+  ok(key && key.poolId === POOL_ID_A, "decodeInitializeLog must echo back the lowercase poolId");
+  ok(key && key.currency0 === V4_CURR0.toLowerCase(), "currency0 mismatch: " + JSON.stringify(key));
+  ok(key && key.currency1 === V4_CURR1.toLowerCase(), "currency1 mismatch: " + JSON.stringify(key));
+  ok(key && key.fee === 3000, "fee mismatch: " + JSON.stringify(key));
+  ok(key && key.tickSpacing === 60, "tickSpacing mismatch: " + JSON.stringify(key));
+  ok(key && key.hooks === V4_HOOKS.toLowerCase(), "hooks (non-zero) mismatch: " + JSON.stringify(key));
+
+  // fee = 0x800000 — پرچمِ کارمزدِ پویا، عمداً *مجاز* و ویژه‌نشده
+  const logDynFee = v4BuildLog({
+    poolId: POOL_ID_A, currency0: V4_CURR0, currency1: V4_CURR1,
+    feeWord: v4wNum(0x800000), tickWord: v4wNum(60), hooksWord: v4wAddrWord(V4_HOOKS),
+  });
+  const keyDynFee = v4.decodeInitializeLog(logDynFee, POOL_ID_A);
+  ok(keyDynFee !== null && keyDynFee.fee === 0x800000,
+    "fee=0x800000 (dynamic-fee flag) must decode as-is, never be special-cased away, got " + JSON.stringify(keyDynFee));
+}
+
+/* --- ۲۷.۲ decodeInitializeLog — ردهای رد، هرکدام پروبِ خودش --- */
+{
+  const good = v4BuildLog({
+    poolId: POOL_ID_A, currency0: V4_CURR0, currency1: V4_CURR1,
+    feeWord: v4wNum(3000), tickWord: v4wNum(60), hooksWord: v4wAddrWord(V4_HOOKS),
+  });
+
+  ok(v4.decodeInitializeLog({ topics: good.topics.slice(0, 3), data: good.data }, POOL_ID_A) === null,
+    "3 topics (a missing indexed field) must be refused");
+
+  const wrongTopic0 = { topics: ["0x" + "0".repeat(63) + "1", ...good.topics.slice(1)], data: good.data };
+  ok(v4.decodeInitializeLog(wrongTopic0, POOL_ID_A) === null,
+    "a topic0 that is not the Initialize signature must be refused");
+
+  ok(v4.decodeInitializeLog({ topics: good.topics, data: good.data.slice(0, 2 + 256) }, POOL_ID_A) === null,
+    "data one word short (4 words instead of 5) must be refused");
+
+  ok(v4.decodeInitializeLog({ topics: good.topics, data: good.data + "0".repeat(64) }, POOL_ID_A) === null,
+    "data one word long (6 words instead of 5) must be refused, not truncated to fit");
+
+  const badCurrencyWord = "01" + "0".repeat(22) + V4_CURR0.slice(2).toLowerCase();
+  const badTopic2 = { topics: [good.topics[0], good.topics[1], "0x" + badCurrencyWord, good.topics[3]], data: good.data };
+  ok(v4.decodeInitializeLog(badTopic2, POOL_ID_A) === null,
+    "topics[2] with a non-zero byte in the upper 12 bytes must be refused, never sliced blind");
+
+  const negTick = v4BuildLog({
+    poolId: POOL_ID_A, currency0: V4_CURR0, currency1: V4_CURR1,
+    feeWord: v4wNum(3000), tickWord: v4wNegWord(60), hooksWord: v4wAddrWord(V4_HOOKS),
+  });
+  ok(v4.decodeInitializeLog(negTick, POOL_ID_A) === null,
+    "a properly two's-complement-encoded negative tickSpacing must be refused, not misread as a huge positive");
+
+  const zeroTick = v4BuildLog({
+    poolId: POOL_ID_A, currency0: V4_CURR0, currency1: V4_CURR1,
+    feeWord: v4wNum(3000), tickWord: v4wNum(0), hooksWord: v4wAddrWord(V4_HOOKS),
+  });
+  ok(v4.decodeInitializeLog(zeroTick, POOL_ID_A) === null, "tickSpacing of exactly zero must be refused");
+
+  const forB = v4BuildLog({
+    poolId: POOL_ID_B, currency0: V4_CURR0, currency1: V4_CURR1,
+    feeWord: v4wNum(3000), tickWord: v4wNum(60), hooksWord: v4wAddrWord(V4_HOOKS),
+  });
+  ok(v4.decodeInitializeLog(forB, POOL_ID_A) === null,
+    "a log for a different pool id must be refused even if otherwise perfectly well-formed — an "
+    + "endpoint that ignores the topics filter must never slip another pool's key into the store");
+  ok(v4.decodeInitializeLog(forB, POOL_ID_B) !== null,
+    "sanity: the exact same log must still decode fine when asked for its own pool id");
+}
+
+/* --- ۲۷.۳ estimateBlock --- */
+{
+  const anchor = { number: 1000000, timestampMs: 1700000000000 };
+  ok(v4.estimateBlock(anchor.timestampMs - 200000, anchor) === anchor.number - 100,
+    "estimateBlock arithmetic (200s back == 100 blocks back) mismatch");
+  ok(v4.estimateBlock(anchor.timestampMs - 10_000_000_000, anchor) === 0,
+    "estimateBlock must clamp at 0, never go negative");
+  ok(v4.estimateBlock(anchor.timestampMs + 10_000_000_000, anchor) === anchor.number,
+    "estimateBlock must clamp at anchor.number, never exceed it");
+  ok(v4.estimateBlock(NaN, anchor) === null, "estimateBlock(NaN, anchor) must be null");
+  ok(v4.estimateBlock(anchor.timestampMs, { number: Infinity, timestampMs: 0 }) === null,
+    "a non-finite anchor.number must give null");
+  ok(v4.estimateBlock(anchor.timestampMs, null) === null, "a missing anchor must give null");
+}
+
+/* --- ۲۷.۴ v4PoolsFromGt — از رویِ شکلِ زنده‌ی نقل‌شده در اسپک --- */
+{
+  const V3_ADDR_40HEX = "0x" + "9".repeat(40);
+  // ⚠️ هر عددِ این پاسخِ زنده رشته است، دقیقاً مثلِ پاسخِ واقعیِ GeckoTerminal —
+  // یک فیکسچر با literalِ عددی چیزی از این تبدیل نمی‌سنجید.
+  const poolsFixture = [
+    {
+      relationships: { dex: { data: { id: "uniswap-v3-base" } } },
+      attributes: { address: V3_ADDR_40HEX, pool_created_at: "2026-09-07T15:31:23Z", reserve_in_usd: "12345.6" },
+    },
+    {
+      relationships: { dex: { data: { id: "uniswap-v4-base" } } },
+      attributes: { address: POOL_ID_A, pool_created_at: "2026-09-06T10:00:00Z", reserve_in_usd: "500.0" },
+    },
+    {
+      relationships: { dex: { data: { id: "uniswap-v4-base" } } },
+      attributes: { address: POOL_ID_B, pool_created_at: "2026-09-08T10:00:00Z", reserve_in_usd: "700.0" },
+    },
+  ];
+  const { rows, sawV4, sawId } = v4.v4PoolsFromGt(poolsFixture);
+  ok(sawV4 === true && sawId === true, "a fixture with a real, well-formed v4 row must set sawV4/sawId true");
+  ok(rows.length === 2, "the uniswap-v3-base row (40-hex address) must be skipped, only the two v4 rows kept, got " + rows.length);
+  ok(rows[0] && rows[0].poolId === POOL_ID_B.toLowerCase(), "rows must be newest-first, got " + JSON.stringify(rows));
+  ok(rows[1] && rows[1].poolId === POOL_ID_A.toLowerCase(), "rows must be newest-first, got " + JSON.stringify(rows));
+
+  const badIdFixture = [
+    { relationships: { dex: { data: { id: "uniswap-v4-base" } } },
+      attributes: { address: V3_ADDR_40HEX, pool_created_at: "2026-09-07T15:31:23Z" } },
+  ];
+  const badId = v4.v4PoolsFromGt(badIdFixture);
+  ok(badId.rows.length === 0 && badId.sawV4 === true && badId.sawId === false,
+    "a v4 row with a 40-hex (contract-address-shaped) address must yield the no-pool-id path, got " + JSON.stringify(badId));
+
+  const manyRows = [];
+  for (let i = 0; i < v4.V4_MAX_POOLS + 4; i++) {
+    manyRows.push({
+      relationships: { dex: { data: { id: "uniswap-v4-base" } } },
+      attributes: { address: "0x" + String(i).padStart(64, "0"), pool_created_at: "2026-09-0" + (1 + (i % 8)) + "T00:00:00Z" },
+    });
+  }
+  ok(v4.v4PoolsFromGt(manyRows).rows.length === v4.V4_MAX_POOLS,
+    "v4PoolsFromGt must cap at V4_MAX_POOLS, got " + v4.v4PoolsFromGt(manyRows).rows.length);
+
+  const none = v4.v4PoolsFromGt([]);
+  ok(none.rows.length === 0 && none.sawV4 === false && none.sawId === false,
+    "an empty pools array must give no rows and both flags false");
+}
+
+/* --- ۲۷.۵ windowFor --- */
+{
+  // انکری با فاصله‌ی زیاد از تخمین تا خودِ عدد ۱۰۰۰۰۰۰، تا هیچ‌کدام از دو
+  // چپ‌چین اینجا خودش را نشان ندهد — چپ‌چین‌ها زیرِ همین بخش جداگانه سنجیده می‌شوند.
+  const anchor = { number: 10000000, timestampMs: 1700000000000 };
+  const est = anchor.number - 100000; // ۲۰۰۰۰۰ ثانیه پیش‌تر
+  const w1 = v4.windowFor(anchor.timestampMs - 200000000, anchor);
+  ok(w1 && w1[0] === est - v4.V4_WINDOW_BACK && w1[1] === est + v4.V4_WINDOW_FWD,
+    "windowFor arithmetic mismatch, got " + JSON.stringify(w1));
+
+  const wGenesis = v4.windowFor(anchor.timestampMs - anchor.number * v4.V4_BLOCK_MS, anchor);
+  ok(wGenesis && wGenesis[0] === 0, "windowFor must clamp its lower bound at 0, got " + JSON.stringify(wGenesis));
+
+  const wHead = v4.windowFor(anchor.timestampMs + 10_000_000_000, anchor);
+  ok(wHead && wHead[1] === anchor.number, "windowFor must clamp its upper bound at anchor.number, got " + JSON.stringify(wHead));
+
+  ok(v4.windowFor(NaN, anchor) === null, "windowFor(NaN, anchor) must be null");
+}
+
+/* --- ۲۷.۶ getLogsParams --- */
+{
+  const params = v4.getLogsParams([100, 200], POOL_ID_A);
+  ok(params && params.address === v4.V4_POOL_MANAGER, "getLogsParams must target the PoolManager, got " + JSON.stringify(params));
+  ok(params && params.fromBlock === "0x64" && params.toBlock === "0xc8",
+    "getLogsParams fromBlock/toBlock must be minimal hex, got " + JSON.stringify(params));
+  ok(params && JSON.stringify(params.topics) === JSON.stringify([v4.V4_INITIALIZE_TOPIC, POOL_ID_A]),
+    "getLogsParams.topics must be exactly [topic, poolId], got " + JSON.stringify(params && params.topics));
+
+  const zero = v4.getLogsParams([0, 0], POOL_ID_A);
+  ok(zero && zero.fromBlock === "0x0" && zero.toBlock === "0x0",
+    "getLogsParams must give \"0x0\" for zero, never \"0x00\", got " + JSON.stringify(zero));
+
+  ok(v4.getLogsParams([100, 200], "0xnotapoolid") === null, "a malformed pool id must give null");
+  ok(v4.getLogsParams([100, 200], "0x" + "1".repeat(40)) === null,
+    "a 40-hex (contract-address-shaped) pool id must give null, not be accepted as a 64-hex id");
+  ok(v4.getLogsParams(null, POOL_ID_A) === null, "a missing window must give null");
+}
+
+/* --- ۲۷.۷ keyUsableFor --- */
+{
+  const key = { currency0: V4_CURR0.toLowerCase(), currency1: V4_CURR1.toLowerCase() };
+  ok(v4.keyUsableFor(key, V4_CURR0) === V4_CURR1.toLowerCase(), "keyUsableFor must return the counter when the token is currency0");
+  ok(v4.keyUsableFor(key, V4_CURR1) === V4_CURR0.toLowerCase(), "keyUsableFor must return the counter when the token is currency1");
+  ok(v4.keyUsableFor(key, "0x" + "9".repeat(40)) === null, "keyUsableFor must refuse a token this key does not contain at all");
+}
+
+/* --- ۲۷.۸ mergeV4Keys --- */
+{
+  const k1 = { poolId: POOL_ID_A, fee: 500 };
+  const k2 = { poolId: POOL_ID_B, fee: 3000 };
+  const k1dup = { poolId: POOL_ID_A, fee: 999 };
+  const merged = v4.mergeV4Keys([k1], [k1dup, k2]);
+  ok(merged.length === 2 && merged[0] === k1 && merged[1] === k2,
+    "mergeV4Keys must dedupe by poolId, keeping the EXISTING entry first, got " + JSON.stringify(merged));
+
+  const many = [];
+  for (let i = 0; i < v4.V4_MAX_KEYS + 3; i++) many.push({ poolId: "0x" + String(i).padStart(64, "0") });
+  ok(v4.mergeV4Keys([], many).length === v4.V4_MAX_KEYS, "mergeV4Keys must cap at V4_MAX_KEYS");
+
+  const existingArr = [k1];
+  const foundArr = [k2];
+  v4.mergeV4Keys(existingArr, foundArr);
+  ok(existingArr.length === 1 && foundArr.length === 1, "mergeV4Keys must never mutate its arguments");
+}
+
+/* --- ۲۷.۹ indexV4Keys — یک پروب به‌ازای هر دلیل در V4_REASONS، به‌جز no-kv ----
+   🔴 نکته‌ی اصلی: صفر پاسخِ eth_getLogs باید rpc-down بدهد، نه no-log؛ یک
+   آرایه‌ی خالیِ *خوش‌شکل* باید no-log بدهد. قاطی‌کردنِ این دو دقیقاً همان
+   «نمی‌دانم را مثلِ نه رفتار دادن» است که این پروژه هرگز نمی‌پذیرد. */
+{
+  const TOKEN_ADDR = "0x" + "44".repeat(20);
+  const rpcNeverCall = async () => { throw new Error("indexV4Keys must not call rpcCall before it has a valid pool row"); };
+
+  const rNoV4Pool = await v4.indexV4Keys({ tokenAddr: TOKEN_ADDR, pools: [], rpcCall: rpcNeverCall, now: () => 0 });
+  ok(rNoV4Pool.reason === "no-v4-pool" && rNoV4Pool.keys.length === 0,
+    "no v4 dex row at all must give no-v4-pool, got " + JSON.stringify(rNoV4Pool));
+
+  const poolsNoPoolId = [{ relationships: { dex: { data: { id: "uniswap-v4-base" } } },
+    attributes: { address: "0x" + "a".repeat(40), pool_created_at: "2026-09-07T15:31:23Z" } }];
+  const rNoPoolId = await v4.indexV4Keys({ tokenAddr: TOKEN_ADDR, pools: poolsNoPoolId, rpcCall: rpcNeverCall, now: () => 0 });
+  ok(rNoPoolId.reason === "no-pool-id", "a v4 row with a 40-hex address must give no-pool-id, got " + JSON.stringify(rNoPoolId));
+
+  const poolsNoCreatedAt = [{ relationships: { dex: { data: { id: "uniswap-v4-base" } } },
+    attributes: { address: POOL_ID_A, pool_created_at: "not-a-date" } }];
+  const rNoCreatedAt = await v4.indexV4Keys({ tokenAddr: TOKEN_ADDR, pools: poolsNoCreatedAt, rpcCall: rpcNeverCall, now: () => 0 });
+  ok(rNoCreatedAt.reason === "no-created-at", "an id with an unparseable pool_created_at must give no-created-at, got " + JSON.stringify(rNoCreatedAt));
+
+  const poolsValid = [{ relationships: { dex: { data: { id: "uniswap-v4-base" } } },
+    attributes: { address: POOL_ID_A, pool_created_at: "2026-09-07T15:31:23Z" } }];
+
+  const rpcNoAnchor = async (method) => {
+    if (method === "eth_getBlockByNumber") return { ok: false, result: null };
+    throw new Error("indexV4Keys must not attempt eth_getLogs without a valid anchor");
+  };
+  const rNoAnchor = await v4.indexV4Keys({ tokenAddr: TOKEN_ADDR, pools: poolsValid, rpcCall: rpcNoAnchor, now: () => 0 });
+  ok(rNoAnchor.reason === "no-anchor", "a failed eth_getBlockByNumber must give no-anchor (not rpc-down — a separate step), got " + JSON.stringify(rNoAnchor));
+
+  function anchorResult() {
+    return { ok: true, result: { number: "0x" + (1000000).toString(16), timestamp: "0x" + (1700000000).toString(16) } };
+  }
+
+  const rpcAllLogsFail = async (method) => {
+    if (method === "eth_getBlockByNumber") return anchorResult();
+    if (method === "eth_getLogs") return { ok: false, result: null };
+    return { ok: false, result: null };
+  };
+  const rRpcDown = await v4.indexV4Keys({ tokenAddr: TOKEN_ADDR, pools: poolsValid, rpcCall: rpcAllLogsFail, now: () => 0 });
+  ok(rRpcDown.reason === "rpc-down" && rRpcDown.keys.length === 0,
+    "every eth_getLogs call failing must give rpc-down — never stored as a miss, got " + JSON.stringify(rRpcDown));
+
+  const rpcEmptyLogs = async (method) => {
+    if (method === "eth_getBlockByNumber") return anchorResult();
+    if (method === "eth_getLogs") return { ok: true, result: [] };
+    return { ok: false, result: null };
+  };
+  const rNoLog = await v4.indexV4Keys({ tokenAddr: TOKEN_ADDR, pools: poolsValid, rpcCall: rpcEmptyLogs, now: () => 0 });
+  ok(rNoLog.reason === "no-log" && rNoLog.keys.length === 0,
+    "a well-formed EMPTY eth_getLogs array must give no-log — a real proven negative, got " + JSON.stringify(rNoLog));
+
+  const COUNTER_ADDR = "0x" + "55".repeat(20);
+  const goodLog = v4BuildLog({
+    poolId: POOL_ID_A, currency0: TOKEN_ADDR, currency1: COUNTER_ADDR,
+    feeWord: v4wNum(500), tickWord: v4wNum(10), hooksWord: v4wAddrWord("0x0000000000000000000000000000000000000000"),
+  });
+  const rpcOk = async (method) => {
+    if (method === "eth_getBlockByNumber") return anchorResult();
+    if (method === "eth_getLogs") return { ok: true, result: [goodLog] };
+    return { ok: false, result: null };
+  };
+  const rOk = await v4.indexV4Keys({ tokenAddr: TOKEN_ADDR, pools: poolsValid, rpcCall: rpcOk, now: () => 0 });
+  ok(rOk.reason === "ok" && rOk.keys.length === 1 && rOk.keys[0].poolId === POOL_ID_A.toLowerCase(),
+    "a well-formed log carrying the token must decode into exactly one stored key, got " + JSON.stringify(rOk));
+
+  /* گاردِ درایفت: هر عضوِ V4_REASONS باید بالا یک پروبِ اختصاصی داشته باشد،
+     به‌جز دو تایی که خودِ indexV4Keys هرگز نمی‌سازد و سیم‌کشیِ
+     worker/index.js می‌سازدشان — no-kv (بایندینگِ KV نیست) و no-pools
+     (فهرستِ استخرها به‌دست نیامد). هر دو در ۲۷.۱۴ و ۲۷.۱۷ پوشش دارند. */
+  const WIRING_ONLY_REASONS = ["no-kv", "no-pools"];
+  const coveredReasons = new Set(["ok", "no-v4-pool", "no-pool-id", "no-created-at", "no-anchor", "rpc-down", "no-log"]);
+  const expectedReasons = new Set(v4.V4_REASONS.filter((r) => !WIRING_ONLY_REASONS.includes(r)));
+  ok(coveredReasons.size === expectedReasons.size && [...expectedReasons].every((r) => coveredReasons.has(r)),
+    "every V4_REASONS entry except " + JSON.stringify(WIRING_ONLY_REASONS) +
+    " must have a dedicated indexV4Keys probe above, V4_REASONS=" + JSON.stringify(v4.V4_REASONS));
+}
+
+console.log("[v4index] worker/v4index.js ok — decodeInitializeLog accepts a well-formed log (fee=0x800000 "
+  + "and fee=3000 both, non-zero hooks) and refuses each malformed shape on its own probe (topic count, "
+  + "topic0, data length short/long, a dirty upper-12-byte currency word, a properly two's-complement "
+  + "negative tickSpacing, a zero tickSpacing, and a mismatched pool id); estimateBlock/windowFor match "
+  + "hand-computed arithmetic and clamp at both ends; v4PoolsFromGt filters/caps/orders a live-shaped "
+  + "(all-string) fixture and separates no-v4-pool from no-pool-id; getLogsParams filters on the exact "
+  + "pool id with minimal hex bounds; mergeV4Keys dedupes/caps/never mutates; and indexV4Keys is pinned "
+  + "on every V4_REASONS value except no-kv, with rpc-down (nothing answered) kept distinct from no-log "
+  + "(something answered empty)");
+
+/* --- ۲۷.۱۰ worker/verdict.js — VD_V4_STAGE_COUNTERS / VD_V4_REAL_MAX / encodeV4QuoteExactInputSingleKey --- */
+{
+  ok(Object.isFrozen(vd.VD_V4_STAGE_COUNTERS), "VD_V4_STAGE_COUNTERS must be frozen");
+  ok(JSON.stringify(vd.VD_V4_STAGE_COUNTERS[vd.WETH_ADDR.toLowerCase()]) ===
+      JSON.stringify([vd.NATIVE_ADDR, vd.WETH_ADDR]),
+    "the WETH stage must accept native ETH or wrapped WETH as the counter, got " +
+    JSON.stringify(vd.VD_V4_STAGE_COUNTERS[vd.WETH_ADDR.toLowerCase()]));
+  ok(JSON.stringify(vd.VD_V4_STAGE_COUNTERS[vd.USDC_ADDR.toLowerCase()]) === JSON.stringify([vd.USDC_ADDR]),
+    "the USDC stage must accept only USDC itself as the counter");
+  ok(vd.VD_V4_REAL_MAX === 4, "VD_V4_REAL_MAX must be 4, got " + vd.VD_V4_REAL_MAX);
+
+  const ifaceV4 = new ethers.Interface([
+    "function quoteExactInputSingle(((address,address,uint24,int24,address),bool,uint128,bytes)) returns (uint256,uint256)"]);
+  const TOKEN = "0x4444444444444444444444444444444444444444";
+  const OTHER = "0x5555555555555555555555555555555555555555";
+  const amt = 123n;
+  const key = { currency0: TOKEN, currency1: OTHER, fee: 3000, tickSpacing: 60, hooks: V4_HOOKS };
+
+  const gotA = vd.encodeV4QuoteExactInputSingleKey(key, TOKEN, amt); // tokenIn===currency0 -> zeroForOne=true
+  const wantA = ifaceV4.encodeFunctionData("quoteExactInputSingle",
+    [[[TOKEN, OTHER, 3000, 60, V4_HOOKS], true, amt, "0x"]]);
+  ok(gotA === wantA, "encodeV4QuoteExactInputSingleKey mismatch (zeroForOne=true):\n  got  " + gotA + "\n  want " + wantA);
+
+  const gotB = vd.encodeV4QuoteExactInputSingleKey(key, OTHER, amt); // tokenIn===currency1 -> zeroForOne=false
+  const wantB = ifaceV4.encodeFunctionData("quoteExactInputSingle",
+    [[[TOKEN, OTHER, 3000, 60, V4_HOOKS], false, amt, "0x"]]);
+  ok(gotB === wantB, "encodeV4QuoteExactInputSingleKey mismatch (zeroForOne=false):\n  got  " + gotB + "\n  want " + wantB);
+
+  ok(vd.encodeV4QuoteExactInputSingleKey(key, "0x" + "7".repeat(40), amt) === null,
+    "encodeV4QuoteExactInputSingleKey must return null when tokenIn is neither currency");
+  ok(vd.encodeV4QuoteExactInputSingleKey(key, TOKEN, 2n ** 128n) === null,
+    "encodeV4QuoteExactInputSingleKey must return null at exactly 2**128, never mask or truncate");
+  ok(vd.encodeV4QuoteExactInputSingleKey(key, TOKEN, 2n ** 128n - 1n) !== null,
+    "encodeV4QuoteExactInputSingleKey must still succeed one below 2**128");
+
+  // encodeV4QuoteExactInputSingle باید همچنان دقیقاً همان بایتِ امروز را بدهد —
+  // امضای صادرشده و بایتِ خروجی نباید حتی یک بیت عوض شوند.
+  const a = BigInt(TOKEN.toLowerCase()), b = BigInt(OTHER.toLowerCase());
+  const c0 = a < b ? TOKEN : OTHER;
+  const c1 = a < b ? OTHER : TOKEN;
+  const zfo = a < b;
+  const wantOld = ifaceV4.encodeFunctionData("quoteExactInputSingle",
+    [[[c0, c1, 3000, 60, vd.NATIVE_ADDR], zfo, amt, "0x"]]);
+  const gotOld = vd.encodeV4QuoteExactInputSingle(TOKEN, OTHER, amt, 3000, 60);
+  ok(gotOld === wantOld, "encodeV4QuoteExactInputSingle must still produce today's exact bytes:\n  got  " +
+    gotOld + "\n  want " + wantOld);
+}
+
+/* --- ۲۷.۱۱ buildProbe بدونِ opts — دقیقاً همان ۲۱ تای امروز، بایت‌به‌بایت ----
+   فهرستِ موردانتظار از رویِ خودِ VD_VENUES ساخته می‌شود (همان الگویِ بخشِ
+   ۱۲.۳)، نه یک بلابِ کپی‌شده. */
+{
+  const TOKEN = "0x1111111111111111111111111111111111111111";
+  const amt = 987654321n;
+  const ifaceU = new ethers.Interface([
+    "function quoteExactInputSingle((address,address,uint256,uint24,uint160)) returns (uint256,uint160,uint32,uint256)"]);
+  const ifaceI = new ethers.Interface([
+    "function quoteExactInputSingle((address,address,uint256,int24,uint160)) returns (uint256,uint160,uint32,uint256)"]);
+  const ifaceV2 = new ethers.Interface(["function getAmountsOut(uint256,address[]) returns (uint256[])"]);
+  const ifaceSolidly = new ethers.Interface([
+    "function getAmountsOut(uint256,(address,address,bool,address)[]) returns (uint256[])"]);
+  const ifaceV4b = new ethers.Interface([
+    "function quoteExactInputSingle(((address,address,uint24,int24,address),bool,uint128,bytes)) returns (uint256,uint256)"]);
+
+  function expectedFor(outAddr) {
+    const expected = [];
+    for (const row of vd.VD_VENUES) {
+      if (row.kind === "CL_UINT24" || row.kind === "CL_INT24") {
+        const iface = row.kind === "CL_UINT24" ? ifaceU : ifaceI;
+        for (const key of row.keys) {
+          expected.push({ id: row.id, key, to: row.to,
+            data: iface.encodeFunctionData("quoteExactInputSingle", [[TOKEN, outAddr, amt, key, 0]]) });
+        }
+      } else if (row.kind === "SOLIDLY") {
+        for (const stable of row.keys) {
+          expected.push({ id: row.id, key: stable, to: row.to,
+            data: ifaceSolidly.encodeFunctionData("getAmountsOut", [amt, [[TOKEN, outAddr, stable, row.factory]]]) });
+        }
+      } else if (row.kind === "V2") {
+        expected.push({ id: row.id, key: null, to: row.to,
+          data: ifaceV2.encodeFunctionData("getAmountsOut", [amt, [TOKEN, outAddr]]) });
+      } else if (row.kind === "V4_SINGLE") {
+        const counter = vd.VD_V4_COUNTER[String(outAddr).toLowerCase()] || outAddr;
+        const a = BigInt(TOKEN.toLowerCase()), b = BigInt(String(counter).toLowerCase());
+        const currency0 = a < b ? TOKEN : counter;
+        const currency1 = a < b ? counter : TOKEN;
+        const zeroForOne = a < b;
+        for (const [fee, tickSpacing] of row.keys) {
+          const data = ifaceV4b.encodeFunctionData("quoteExactInputSingle",
+            [[[currency0, currency1, fee, tickSpacing, vd.NATIVE_ADDR], zeroForOne, amt, "0x"]]);
+          expected.push({ id: row.id, key: fee + ":" + tickSpacing, to: row.to, data });
+        }
+      }
+    }
+    return expected;
+  }
+
+  for (const outAddr of [vd.WETH_ADDR, vd.USDC_ADDR]) {
+    const got = vd.buildProbe(TOKEN, outAddr, amt);
+    const want = expectedFor(outAddr);
+    ok(got.length === 21, "buildProbe with opts absent must still return exactly 21 items for stage " +
+      outAddr + ", got " + got.length);
+    ok(JSON.stringify(got) === JSON.stringify(want),
+      "buildProbe with opts absent must be byte-for-byte identical to the pre-change output for stage " + outAddr);
+
+    const gotEmptyKeys = vd.buildProbe(TOKEN, outAddr, amt, { v4Keys: [] });
+    ok(JSON.stringify(gotEmptyKeys) === JSON.stringify(want),
+      "buildProbe with an empty v4Keys array must be byte-for-byte identical to opts-absent, stage " + outAddr);
+  }
+}
+
+/* --- ۲۷.۱۲ buildProbe با کلیدهای واقعی --- */
+{
+  const TOKEN = "0x3333333333333333333333333333333333333333";
+  const amt = 42n;
+
+  // کلیدی که ضدجفتش اترِ بومی است — باید در مرحله‌ی WETH ظاهر شود، در USDC نه.
+  const keyNative = { poolId: POOL_ID_A, currency0: TOKEN.toLowerCase(), currency1: vd.NATIVE_ADDR,
+    fee: 500, tickSpacing: 10, hooks: vd.NATIVE_ADDR };
+  const probeWeth = vd.buildProbe(TOKEN, vd.WETH_ADDR, amt, { v4Keys: [keyNative] });
+  const realWeth = probeWeth.filter((p) => typeof p.key === "string" && p.key.startsWith("real:"));
+  ok(realWeth.length === 1 && realWeth[0].key === "real:500:10" && realWeth[0].id === "uniswap-v4",
+    "a key whose counter is native ETH must appear on the WETH stage, got " + JSON.stringify(realWeth));
+
+  const probeUsdc = vd.buildProbe(TOKEN, vd.USDC_ADDR, amt, { v4Keys: [keyNative] });
+  ok(!probeUsdc.some((p) => typeof p.key === "string" && p.key.startsWith("real:")),
+    "the same native-ETH-counter key must NOT appear on the USDC stage, got " + JSON.stringify(probeUsdc));
+
+  // کلیدی با ضدجفتِ کاملاً نامرتبط — نه در WETH نه در USDC
+  const unrelated = "0x" + "9".repeat(40);
+  const keyUnrelated = { poolId: POOL_ID_B, currency0: TOKEN.toLowerCase(), currency1: unrelated,
+    fee: 3000, tickSpacing: 60, hooks: vd.NATIVE_ADDR };
+  const probeWeth2 = vd.buildProbe(TOKEN, vd.WETH_ADDR, amt, { v4Keys: [keyUnrelated] });
+  const probeUsdc2 = vd.buildProbe(TOKEN, vd.USDC_ADDR, amt, { v4Keys: [keyUnrelated] });
+  ok(!probeWeth2.some((p) => String(p.key).startsWith("real:")),
+    "a key paired with an unrelated token must not appear on the WETH stage");
+  ok(!probeUsdc2.some((p) => String(p.key).startsWith("real:")),
+    "a key paired with an unrelated token must not appear on the USDC stage");
+
+  // سقفِ VD_V4_REAL_MAX
+  const manyKeys = [];
+  for (let i = 0; i < vd.VD_V4_REAL_MAX + 3; i++) {
+    manyKeys.push({ poolId: "0x" + String(i).padStart(64, "0"), currency0: TOKEN.toLowerCase(),
+      currency1: vd.NATIVE_ADDR, fee: 100 + i, tickSpacing: 1 + i, hooks: vd.NATIVE_ADDR });
+  }
+  const probeMany = vd.buildProbe(TOKEN, vd.WETH_ADDR, amt, { v4Keys: manyKeys });
+  const realMany = probeMany.filter((p) => String(p.key).startsWith("real:"));
+  ok(realMany.length === vd.VD_V4_REAL_MAX,
+    "real-key probes must be capped at VD_V4_REAL_MAX (" + vd.VD_V4_REAL_MAX + "), got " + realMany.length);
+  ok(realMany.every((p) => p.id === "uniswap-v4"), "every appended real-key probe must carry id:\"uniswap-v4\"");
+}
+
+/* --- ۲۷.۱۳ کلیدِ واقعی هرگز حقِ اتهام نمی‌گیرد --- */
+{
+  ok(vd.VD_POSITIVE_ONLY.V4_SINGLE === true,
+    "VD_POSITIVE_ONLY.V4_SINGLE must stay true — a real v4 key still only ever proves a positive");
+  const { GT_DEX_TO_VENUE: GDV27 } = await import("./index.js");
+  ok(!Object.values(GDV27).includes("uniswap-v4"),
+    "uniswap-v4 must stay absent from GT_DEX_TO_VENUE's values even with real keys wired in");
+}
+
+console.log("[v4 verdict wiring] VD_V4_STAGE_COUNTERS frozen with exactly the WETH (native+wrapped) and "
+  + "USDC entries; VD_V4_REAL_MAX=4; encodeV4QuoteExactInputSingleKey byte-matches ethers.Interface for a "
+  + "non-zero-hooks key both ways of zeroForOne and refuses a foreign tokenIn/an amountIn at 2**128; "
+  + "encodeV4QuoteExactInputSingle still emits today's exact bytes; buildProbe with opts absent (or an "
+  + "empty v4Keys) is byte-for-byte the pre-change 21-item output, rebuilt from VD_VENUES, not a pasted "
+  + "blob; a real key is only appended when its counter is listed for that stage, never for an unrelated "
+  + "counter, capped at VD_V4_REAL_MAX and always carrying id:\"uniswap-v4\"; and VD_POSITIVE_ONLY."
+  + "V4_SINGLE stays true with uniswap-v4 still absent from GT_DEX_TO_VENUE's values");
+
+/* --- ۲۷.۱۴ worker/index.js — v4StoreTtl / storeV4Result --- */
+{
+  for (const r of ["no-v4-pool", "no-pool-id", "no-created-at", "no-log"]) {
+    ok(v4StoreTtl(r) === v4.V4_MISS_TTL_S, "v4StoreTtl('" + r + "') must equal V4_MISS_TTL_S, got " + v4StoreTtl(r));
+  }
+  ok(v4StoreTtl("ok") === v4.V4_KEY_TTL_S, "v4StoreTtl('ok') must equal V4_KEY_TTL_S, got " + v4StoreTtl("ok"));
+  for (const r of ["rpc-down", "no-anchor", "no-kv", "no-pools"]) {
+    ok(v4StoreTtl(r) === null, "v4StoreTtl('" + r + "') must be null (never write), got " + v4StoreTtl(r));
+  }
+
+  function makeRecordingKv() {
+    const store = new Map();
+    const puts = [];
+    return { store, puts,
+      get: async (k) => (store.has(k) ? store.get(k) : null),
+      put: async (k, v, opts) => { store.set(k, v); puts.push({ k, v, opts }); } };
+  }
+
+  const ADDR = "0x" + "6".repeat(40);
+  const kvOk = makeRecordingKv();
+  const storedOk = await storeV4Result(ADDR, { ZX_KV: kvOk }, { reason: "ok", keys: [{ poolId: POOL_ID_A }] });
+  ok(storedOk === true && kvOk.puts.length === 1 && kvOk.puts[0].opts.expirationTtl === v4.V4_KEY_TTL_S,
+    "storeV4Result('ok') must write once with V4_KEY_TTL_S, got " + JSON.stringify(kvOk.puts));
+
+  const kvMiss = makeRecordingKv();
+  const storedMiss = await storeV4Result(ADDR, { ZX_KV: kvMiss }, { reason: "no-v4-pool", keys: [] });
+  ok(storedMiss === true && kvMiss.puts.length === 1 && kvMiss.puts[0].opts.expirationTtl === v4.V4_MISS_TTL_S,
+    "storeV4Result('no-v4-pool') must write once with V4_MISS_TTL_S, got " + JSON.stringify(kvMiss.puts));
+
+  const kvUnknown = makeRecordingKv();
+  const storedUnknown = await storeV4Result(ADDR, { ZX_KV: kvUnknown }, { reason: "rpc-down", keys: [] });
+  ok(storedUnknown === false && kvUnknown.puts.length === 0,
+    "storeV4Result('rpc-down') must write NOTHING at all, got " + JSON.stringify(kvUnknown.puts));
+
+  const kvNoAnchor = makeRecordingKv();
+  const storedNoAnchor = await storeV4Result(ADDR, { ZX_KV: kvNoAnchor }, { reason: "no-anchor", keys: [] });
+  ok(storedNoAnchor === false && kvNoAnchor.puts.length === 0, "storeV4Result('no-anchor') must write NOTHING at all");
+
+  const storedNoKv = await storeV4Result(ADDR, {}, { reason: "ok", keys: [] });
+  ok(storedNoKv === false, "storeV4Result without env.ZX_KV must return false, never throw");
+}
+
+/* --- ۲۷.۱۵ worker/index.js — readV4Keys / readV4Entry --- */
+{
+  const ADDR = "0x" + "7".repeat(40);
+
+  ok(JSON.stringify(await readV4Keys(ADDR, {})) === "[]", "readV4Keys without env.ZX_KV must give []");
+  const entryNoKv = await readV4Entry(ADDR, {});
+  ok(entryNoKv.found === false && entryNoKv.keys.length === 0, "readV4Entry without env.ZX_KV must report found:false");
+
+  function makeKvWith(raw) { return { get: async () => raw, put: async () => {} }; }
+
+  const entryMissing = await readV4Entry(ADDR, { ZX_KV: makeKvWith(null) });
+  ok(entryMissing.found === false, "readV4Entry must report found:false when nothing has ever been stored");
+
+  const missBody = JSON.stringify({ keys: [], reason: "no-v4-pool" });
+  const entryMiss = await readV4Entry(ADDR, { ZX_KV: makeKvWith(missBody) });
+  ok(entryMiss.found === true && entryMiss.keys.length === 0,
+    "readV4Entry must report found:true for a stored MISS — an empty-keys miss is not the same as \"never indexed\"");
+
+  const okBody = JSON.stringify({ keys: [{ poolId: POOL_ID_A }], reason: "ok" });
+  const keysOk = await readV4Keys(ADDR, { ZX_KV: makeKvWith(okBody) });
+  ok(keysOk.length === 1 && keysOk[0].poolId === POOL_ID_A, "readV4Keys must return the stored keys array, got " +
+    JSON.stringify(keysOk));
+
+  const entryGarbage = await readV4Entry(ADDR, { ZX_KV: makeKvWith("not json") });
+  ok(entryGarbage.found === false, "readV4Entry must degrade to found:false on unparseable KV content, never throw");
+}
+
+/* --- ۲۷.۱۶ worker/index.js — rpcCallBase: failover across V4_LOG_RPCS، هرگز URL بیرون نمی‌رود --- */
+{
+  const savedFetch = globalThis.fetch;
+  const calledUrls = [];
+
+  globalThis.fetch = async (u) => {
+    calledUrls.push(String(u));
+    if (calledUrls.length === 1) throw new Error("network down");
+    if (calledUrls.length === 2) return new Response("err", { status: 500 });
+    return new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, result: { number: "0x1" } }), { status: 200 });
+  };
+  const res1 = await rpcCallBase("eth_getBlockByNumber", ["latest", false], 1000);
+  ok(res1.ok === true && res1.result && res1.result.number === "0x1",
+    "rpcCallBase must fail over past a thrown fetch and a 500 to the endpoint that answers, got " + JSON.stringify(res1));
+  ok(calledUrls.length === 3, "rpcCallBase must have tried all three endpoints in order, tried " + calledUrls.length);
+  ok(JSON.stringify(calledUrls) === JSON.stringify(v4.V4_LOG_RPCS),
+    "rpcCallBase must try V4_LOG_RPCS in its own declared order, got " + JSON.stringify(calledUrls));
+
+  calledUrls.length = 0;
+  globalThis.fetch = async () => new Response("nope", { status: 502 });
+  const res2 = await rpcCallBase("eth_getLogs", [{}], 1000);
+  ok(res2.ok === false && res2.result === null, "rpcCallBase must give ok:false, result:null when every endpoint fails");
+
+  globalThis.fetch = async () => new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, error: { code: -32000 } }), { status: 200 });
+  const res3 = await rpcCallBase("eth_getLogs", [{}], 1000);
+  ok(res3.ok === false, "a 200-with-JSON-RPC-error body must count as a failure, never a successful result");
+
+  globalThis.fetch = savedFetch;
+}
+
+/* --- ۲۷.۱۷ GET /vd/v4/<address> — پروبِ تشخیصی --- */
+{
+  const savedFetch = globalThis.fetch;
+  const ADDR = "0x" + "8".repeat(40);
+
+  function makeRecordingKv() {
+    const store = new Map();
+    const puts = [];
+    return { store, puts,
+      get: async (k) => (store.has(k) ? store.get(k) : null),
+      put: async (k, v, opts) => { store.set(k, v); puts.push({ k, v, opts }); } };
+  }
+
+  // بدونِ ZX_KV → reason:"no-kv" و هیچ فراخوانیِ بالادستی
+  let upstreamCalls = 0;
+  globalThis.fetch = async () => { upstreamCalls++; throw new Error("must not be called without ZX_KV"); };
+  const resNoKv = await call("/vd/v4/" + ADDR, undefined, { ASSETS });
+  const bodyNoKv = await resNoKv.json();
+  ok(bodyNoKv.reason === "no-kv" && bodyNoKv.store === false && bodyNoKv.stored === false && Array.isArray(bodyNoKv.keys),
+    "GET /vd/v4/<address> without ZX_KV must answer reason:no-kv, got " + JSON.stringify(bodyNoKv));
+  ok(upstreamCalls === 0, "GET /vd/v4/<address> without ZX_KV must make no upstream call at all");
+
+  // آدرسِ بدشکل → ۴۰۰، دقیقاً پیش از رسیدن به پارسِ خودِ /vd/<address>
+  const resBad = await call("/vd/v4/not-an-address", undefined, { ASSETS });
+  ok(resBad.status === 400, "GET /vd/v4/<bad address> must be 400, got " + resBad.status);
+
+  // با ZX_KV: مسیرِ کاملِ ایندکس، از GT گرفته تا ذخیره
+  const goodLogWire = v4BuildLog({
+    poolId: POOL_ID_A, currency0: ADDR, currency1: vd.NATIVE_ADDR,
+    feeWord: v4wNum(500), tickWord: v4wNum(10), hooksWord: v4wAddrWord(vd.NATIVE_ADDR),
+  });
+  globalThis.fetch = async (u, o) => {
+    const url = String(u);
+    if (url.includes("/tokens/" + ADDR + "/pools")) {
+      return new Response(JSON.stringify({ data: [
+        { relationships: { dex: { data: { id: "uniswap-v4-base" } } },
+          attributes: { address: POOL_ID_A, pool_created_at: "2026-09-07T15:31:23Z" } },
+      ] }), { status: 200 });
+    }
+    if (v4.V4_LOG_RPCS.includes(url)) {
+      const req = JSON.parse(o.body);
+      if (req.method === "eth_getBlockByNumber") {
+        return new Response(JSON.stringify({ jsonrpc: "2.0", id: 1,
+          result: { number: "0xf4240", timestamp: "0x64fc0d80" } }), { status: 200 });
+      }
+      return new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, result: [goodLogWire] }), { status: 200 });
+    }
+    throw new Error("unexpected upstream call in /vd/v4 wiring test: " + url);
+  };
+
+  const kv = makeRecordingKv();
+  const resOk = await call("/vd/v4/" + ADDR, undefined, { ASSETS, ZX_KV: kv });
+  ok(resOk.status === 200, "GET /vd/v4/<address> must be matched before the plain /vd/<address> address " +
+    "parse (a bad-address 400 there would mean the route was never reached), got " + resOk.status);
+  const bodyOk = await resOk.json();
+  ok(bodyOk.reason === "ok" && Array.isArray(bodyOk.keys) && bodyOk.keys.length === 1 &&
+    bodyOk.keys[0].poolId === POOL_ID_A.toLowerCase() && bodyOk.stored === true && bodyOk.store === true,
+    "GET /vd/v4/<address> end to end must index and report ok with the decoded key, got " + JSON.stringify(bodyOk));
+  ok(kv.puts.length === 1 && kv.puts[0].opts.expirationTtl === v4.V4_KEY_TTL_S,
+    "GET /vd/v4/<address> must store the result with V4_KEY_TTL_S on ok, got " + JSON.stringify(kv.puts));
+
+  /* 🔴 بالادستِ قیمت جواب نداد → no-pools، نه rpc-down: آن یکی یعنی آرپی‌سیِ
+     زنجیره جواب نداد. یکی‌کردنشان همان «کجا ایستاد» را کور می‌کند که این
+     اندپوینت برای دیدنش هست. و هیچ‌چیز ذخیره نمی‌شود — نامعلوم هرگز میس نیست.
+     اگر در این حالت حتی یک تماسِ آرپی‌سی زده شود، یعنی بی‌دلیل هزینه می‌دهیم. */
+  let rpcCallsOnNoPools = 0;
+  globalThis.fetch = async (u) => {
+    const url = String(u);
+    if (v4.V4_LOG_RPCS.includes(url)) rpcCallsOnNoPools++;
+    return new Response("upstream is down", { status: 502 });
+  };
+  const kvNoPools = makeRecordingKv();
+  const resNoPools = await call("/vd/v4/" + ADDR, undefined, { ASSETS, ZX_KV: kvNoPools });
+  const bodyNoPools = await resNoPools.json();
+  ok(bodyNoPools.reason === "no-pools",
+    "a failed GeckoTerminal pools call must answer reason:no-pools, never rpc-down (a chain-RPC failure), got "
+    + JSON.stringify(bodyNoPools));
+  ok(bodyNoPools.stored === false && kvNoPools.puts.length === 0,
+    "reason:no-pools must write NOTHING at all — unknown is never cached as a miss, got " + JSON.stringify(kvNoPools.puts));
+  ok(rpcCallsOnNoPools === 0,
+    "reason:no-pools must not make a single chain-RPC call — there is nothing to look up, got " + rpcCallsOnNoPools);
+
+  globalThis.fetch = savedFetch;
+}
+
+/* --- ۲۷.۱۸ ogFetchVerdict — سیم‌کشیِ v4Keys: ایندکس فقط وقتی هیچ ورودی نیست --- */
+{
+  const { ogFetchVerdict } = await import("./index.js");
+  const savedFetch = globalThis.fetch;
+  const savedCaches = globalThis.caches;
+
+  function makeRecordingKv() {
+    const store = new Map();
+    const puts = [];
+    return { store, puts,
+      get: async (k) => (store.has(k) ? store.get(k) : null),
+      put: async (k, v, opts) => { store.set(k, v); puts.push({ k, v, opts }); } };
+  }
+  function makeCacheShelf() {
+    const shelf = new Map();
+    return { default: {
+      match: async (req) => { const v = shelf.get(req.url); return v ? v.clone() : undefined; },
+      put: async (req, r) => { shelf.set(req.url, r); },
+    } };
+  }
+  const w = (n) => BigInt(n).toString(16).padStart(64, "0");
+  const mkStatic4 = (amountOut) => "0x" + w(amountOut) + w(0) + w(0) + w(0);
+  const meta = { decimals: 18, priceUsd: 2000 };
+
+  // الف) هیچ ورودی‌ای برای این توکن ایندکس نشده → یک waitUntil برنامه‌ریزی
+  // می‌شود؛ بعد از await آن، KV باید یک نتیجه‌ی «ok» با V4_KEY_TTL_S داشته باشد.
+  globalThis.caches = makeCacheShelf();
+  const ADDR1 = "0x" + "a1".repeat(20);
+  const kv1 = makeRecordingKv();
+  const waited1 = [];
+  const ctx1 = { waitUntil: (p) => waited1.push(p) };
+
+  const goodLogW = v4BuildLog({
+    poolId: POOL_ID_A, currency0: ADDR1, currency1: vd.NATIVE_ADDR,
+    feeWord: v4wNum(500), tickWord: v4wNum(10), hooksWord: v4wAddrWord(vd.NATIVE_ADDR),
+  });
+  // ⚠️ base.publicnode.com هم در VD_RPCS هم در V4_LOG_RPCS است (عمداً — بالای
+  // V4_LOG_RPCS در v4index.js توضیح داده شده)، پس شاخه‌بندی روی خودِ URL کافی
+  // نیست: باید شکلِ بدنه را سنجید — batchِ eth_call یک آرایه است، یک
+  // JSON-RPCِ تکیِ rpcCallBase یک شیءِ تک با فیلدِ method.
+  globalThis.fetch = async (u, o) => {
+    const url = String(u);
+    if (url.includes("/tokens/" + ADDR1 + "/pools")) {
+      return new Response(JSON.stringify({ data: [
+        { relationships: { dex: { data: { id: "uniswap-v4-base" } } },
+          attributes: { address: POOL_ID_A, pool_created_at: "2026-09-07T15:31:23Z" } },
+      ] }), { status: 200 });
+    }
+    const parsed = JSON.parse(o.body);
+    if (!Array.isArray(parsed) && parsed && parsed.method === "eth_getBlockByNumber") {
+      return new Response(JSON.stringify({ jsonrpc: "2.0", id: 1,
+        result: { number: "0xf4240", timestamp: "0x64fc0d80" } }), { status: 200 });
+    }
+    if (!Array.isArray(parsed) && parsed && parsed.method === "eth_getLogs") {
+      return new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, result: [goodLogW] }), { status: 200 });
+    }
+    // batchِ eth_call خودِ fetchVerdict (آرایه) — کاناری زنده، بقیه صفر → nosell/null، بدونِ نیاز به کلیدِ واقعی
+    const reqs = Array.isArray(parsed) ? parsed : [parsed];
+    const body = reqs.map((r) => ({ id: r.id, result: mkStatic4(r.id === 0 ? 5 : 0) }));
+    return new Response(JSON.stringify(body), { status: 200, headers: { "content-type": "application/json" } });
+  };
+
+  await ogFetchVerdict(ADDR1, meta, Date.now() + 2000, { ZX_KV: kv1 }, ctx1);
+  ok(waited1.length === 1,
+    "ogFetchVerdict must schedule exactly one background index pass via ctx.waitUntil when nothing is " +
+    "stored yet for this token, got " + waited1.length);
+  await Promise.all(waited1);
+  ok(kv1.puts.length === 1 && kv1.puts[0].opts.expirationTtl === v4.V4_KEY_TTL_S,
+    "the background index pass scheduled by ogFetchVerdict must store an \"ok\" result with V4_KEY_TTL_S, " +
+    "got " + JSON.stringify(kv1.puts));
+
+  // ب) یک ورودی (حتی یک میسِ ذخیره‌شده) از قبل هست → هیچ ایندکسِ تازه‌ای
+  // برنامه‌ریزی نمی‌شود و هیچ فراخوانیِ بالادستِ pools/RPCای هم نمی‌رود.
+  const ADDR2 = "0x" + "b2".repeat(20);
+  const kv2 = makeRecordingKv();
+  kv2.store.set(v4.v4KvKey("base", ADDR2), JSON.stringify({ keys: [], reason: "no-v4-pool" }));
+  const waited2 = [];
+  const ctx2 = { waitUntil: (p) => waited2.push(p) };
+  let upstreamHit2 = false;
+  globalThis.fetch = async (u, o) => {
+    const url = String(u);
+    if (url.includes("/tokens/")) { upstreamHit2 = true; throw new Error("must not fetch pools for an already-stored entry"); }
+    const parsed = JSON.parse(o.body);
+    // یک تماسِ تکیِ JSON-RPC با method=eth_getBlockByNumber/eth_getLogs یعنی
+    // ایندکس واقعاً دوباره اجرا شد — همان چیزی که این تست باید رد کند. یک
+    // batchِ eth_call (آرایه) همان تماسِ همیشگیِ خودِ fetchVerdict است، حتی
+    // وقتی میزبانش (base.publicnode.com) با V4_LOG_RPCS مشترک باشد.
+    if (!Array.isArray(parsed) && parsed &&
+        (parsed.method === "eth_getBlockByNumber" || parsed.method === "eth_getLogs")) {
+      upstreamHit2 = true;
+      throw new Error("must not re-index an already-stored entry");
+    }
+    const reqs = Array.isArray(parsed) ? parsed : [parsed];
+    const body = reqs.map((r) => ({ id: r.id, result: mkStatic4(r.id === 0 ? 5 : 0) }));
+    return new Response(JSON.stringify(body), { status: 200, headers: { "content-type": "application/json" } });
+  };
+  await ogFetchVerdict(ADDR2, meta, Date.now() + 2000, { ZX_KV: kv2 }, ctx2);
+  ok(waited2.length === 0,
+    "ogFetchVerdict must NOT reschedule indexing once an entry (even a stored miss) already exists, got " +
+    waited2.length);
+  ok(upstreamHit2 === false,
+    "an already-indexed token must never re-hit the pools or RPC upstream from ogFetchVerdict");
+
+  globalThis.fetch = savedFetch;
+  if (savedCaches === undefined) delete globalThis.caches; else globalThis.caches = savedCaches;
+}
+
+console.log("[v4 index wiring] worker/index.js ok — v4StoreTtl/storeV4Result follow the ok/miss/never-write " +
+  "rule exactly (ok->V4_KEY_TTL_S, no-v4-pool/no-pool-id/no-created-at/no-log->V4_MISS_TTL_S, rpc-down/" +
+  "no-anchor/no-kv->nothing written); readV4Entry tells \"never indexed\" (found:false) apart from a " +
+  "stored empty-keys miss (found:true); rpcCallBase fails over across V4_LOG_RPCS in order (a throw, a " +
+  "500, and a 200-with-JSON-RPC-error all count as failure) and gives ok:false only once every endpoint " +
+  "is exhausted; GET /vd/v4/<address> is matched before the plain /vd/<address> parse, answers no-kv " +
+  "with zero upstream calls when unbound, 400s a bad address, and end to end indexes+stores a real key; " +
+  "and ogFetchVerdict schedules exactly one background index pass via ctx.waitUntil only when nothing is " +
+  "stored yet, never again once an entry (even a miss) exists");
+
+
 
 /* ---- /pairs — نسخه‌ی تمیزِ آدرس برای web/pairs.html ----
    خط Build در پنل امروز web/pairs.html را داخل _site کپی می‌کند، پس

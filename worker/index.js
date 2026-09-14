@@ -39,6 +39,7 @@ import {
   fetchVerdictSol, VD_SOL_RPCS, VD_SOL_JUP_BASE, VD_SOL_PAYER,
   VD_SOL_RPC_METHODS, VD_SOL_RPC_PROBE_PARAMS, probeRpcMethod,
 } from "./verdict_sol.js";
+import { indexV4Keys, v4KvKey, V4_LOG_RPCS, V4_KEY_TTL_S, V4_MISS_TTL_S } from "./v4index.js";
 
 /* پراکسی باز نیست. فقط شکل مسیرهایی که خودِ سایت می‌زند اجازه دارد:
      networks/base/tokens/<addr>
@@ -590,6 +591,162 @@ export function baseRpcsFor(env) {
   return baseRpc ? [baseRpc, ...VD_RPCS] : VD_RPCS;
 }
 
+/* =====================================================================
+   ایندکسِ کلیدِ واقعیِ v4 — سیم‌کشیِ worker/v4index.js داخلِ Worker
+   =====================================================================
+   خودِ worker/v4index.js خالص است و هیچ fetchی ندارد؛ همین‌جا سه چیز به
+   آن تزریق می‌شود: pools (از همان بالادستِ GeckoTerminal که
+   baseVenueCovered هم می‌زند)، rpcCall (یک تماسِ تکی؛ failover-اش هم
+   همین‌جاست، نه در v4index.js)، و کلیدِ ذخیره‌سازی (v4KvKey). */
+
+/* سقفِ هر تلاشِ RPC — هم‌رده‌ی VD_RPC_PROBE_TIMEOUT_MS پایین‌ترِ همین فایل
+   (که برای پروبِ سولانا به‌کار می‌رود)؛ eth_getLogs هم یک تماسِ تکی است،
+   پس همان مرتبه از تایم‌اوت منطقی است. */
+const V4_LOG_TIMEOUT_MS = 1500;
+
+/* یک JSON-RPC POSTِ تکی، با failover بینِ V4_LOG_RPCS — همان شکلِ
+   {ok, result} که indexV4Keys از تابعِ تزریق‌شده‌ی rpcCall می‌خواهد.
+   failover *اینجا* اتفاق می‌افتد، نه در v4index.js — همان‌طور که بالای
+   خودِ آن فایل هم نوشته شده: indexV4Keys فقط یک rpcCall(method, params)
+   می‌خواهد و نمی‌داند پشتش چند اندپوینت است.
+   🔴 هرگز URLِ هیچ اندپوینتی را لاگ یا برنگردان — همان قاعده‌ی بالای
+   baseRpcsFor، بدونِ هیچ استثنایی برای این تابع. */
+async function rpcCallBase(method, params, timeoutMs) {
+  for (const rpcUrl of V4_LOG_RPCS) {
+    const ac = new AbortController();
+    const timer = setTimeout(() => ac.abort(), timeoutMs);
+    let res;
+    try {
+      res = await fetch(rpcUrl, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
+        signal: ac.signal,
+      });
+    } catch (e) {
+      clearTimeout(timer);
+      continue; // پرتابِ شبکه‌ای/تایم‌اوت → این اندپوینت نامعلوم، بعدی را امتحان کن
+    }
+    clearTimeout(timer);
+    if (!res || res.status !== 200) continue; // غیرِ ۲۰۰ → این اندپوینت نامعلوم
+    let body;
+    try { body = await res.json(); } catch (e) { continue; } // بدنه‌ی ناخوانا → نامعلوم
+    if (!body || typeof body !== "object" || body.error) continue; // خطای JSON-RPC → نامعلوم
+    return { ok: true, result: body.result };
+  }
+  return { ok: false, result: null }; // هیچ اندپوینتی جوابِ خوش‌شکل نداد
+}
+
+/* همان بالادستِ baseVenueCovered (networks/base/tokens/<addr>/pools) —
+   یک فراخوانیِ جداست، چون baseVenueCovered فقط true/false/null می‌خواهد و
+   خودِ ردیف‌های خام را دور می‌ریزد؛ v4PoolsFromGt (در v4index.js) به همان
+   ردیف‌های خام نیاز دارد و خودش شکلشان را می‌سنجد. */
+async function fetchV4Pools(addr, env) {
+  try {
+    const key = (env && typeof env.CG_KEY === "string" && env.CG_KEY) || "";
+    const target = (key ? UPSTREAM_KEYED : UPSTREAM_FREE) +
+      "/networks/base/tokens/" + addr + "/pools";
+    const ac = new AbortController();
+    const timer = setTimeout(() => ac.abort(), OG_TIMEOUT_MS);
+    let up;
+    try {
+      const h = { accept: "application/json" };
+      if (key) h["x-cg-demo-api-key"] = key;
+      up = await fetch(target, { headers: h, signal: ac.signal });
+    } finally {
+      clearTimeout(timer);
+    }
+    if (!up || !up.ok) return null; // غیرِ۲۰۰/پرتاب → نامعلوم، نه فهرستِ خالی
+    const body = await up.json();
+    if (!body || !Array.isArray(body.data)) return null;
+    return body.data;
+  } catch (e) {
+    return null;
+  }
+}
+
+/* چه مدت (ثانیه) نتیجه‌ی ایندکس ذخیره شود، یا اصلاً ذخیره نشود.
+   🔴 «ok» با V4_KEY_TTL_S (۳۰ روز — یک PoolKey هرگز عوض نمی‌شود) می‌نشیند.
+   no-v4-pool/no-created-at/no-log با V4_MISS_TTL_S (۶ ساعت) — این سه از
+   دلِ خودِ pools یا لاگِ زنجیره‌ای که واقعاً خوانده شده می‌آیند، یک منفیِ
+   صادقانه‌اند، هرچند کوتاه‌عمر.
+   rpc-down/no-anchor هرگز نوشته نمی‌شوند — نامعلوم هرگز کش نمی‌شود؛
+   دفعه‌ی بعد دوباره امتحان می‌شود.
+   ⚠️ no-pool-id در اسپکِ این تغییر از قلمِ این فهرست افتاده بود (فقط
+   no-v4-pool/no-created-at/no-log به‌عنوانِ میسِ ذخیره‌شدنی نام برده شده
+   بودند) — ولی از همان جنسِ no-created-at است: هر دو از شکلِ دادهٔ خودِ
+   GeckoTerminal می‌آیند (نه از یک RPCِ نامعلوم)، پس همان رفتار به آن هم
+   داده شد؛ در گزارشِ نهایی به‌عنوانِ یک نکته گزارش می‌شود، نه یک تصمیمِ
+   بی‌صدا. */
+function v4StoreTtl(reason) {
+  if (reason === "ok") return V4_KEY_TTL_S;
+  if (reason === "no-v4-pool" || reason === "no-pool-id" ||
+      reason === "no-created-at" || reason === "no-log") return V4_MISS_TTL_S;
+  return null; // rpc-down / no-anchor / no-kv → هرگز نوشته نمی‌شود
+}
+
+async function storeV4Result(addr, env, result) {
+  try {
+    const kv = env && env.ZX_KV;
+    if (!kv) return false;
+    const ttl = v4StoreTtl(result && result.reason);
+    if (ttl === null) return false;
+    const body = JSON.stringify({
+      keys: Array.isArray(result && result.keys) ? result.keys : [],
+      reason: result.reason,
+    });
+    await kv.put(v4KvKey("base", addr), body, { expirationTtl: ttl });
+    return true;
+  } catch (e) {
+    return false; // نوشتنِ ناموفق نباید هیچ‌چیزِ دیگری را بشکند
+  }
+}
+
+/* { found, keys } — found فقط برای تشخیصِ «هیچ‌وقت ایندکس نشده» از «ایندکس
+   شده ولی میسِ خالی» لازم است (هر دو حالت آرایه‌ی [] می‌دهند). */
+async function readV4Entry(addr, env) {
+  try {
+    const kv = env && env.ZX_KV;
+    if (!kv) return { found: false, keys: [] };
+    const raw = await kv.get(v4KvKey("base", addr));
+    if (typeof raw !== "string") return { found: false, keys: [] };
+    let parsed;
+    try { parsed = JSON.parse(raw); } catch (e) { return { found: false, keys: [] }; }
+    if (!parsed || !Array.isArray(parsed.keys)) return { found: false, keys: [] };
+    return { found: true, keys: parsed.keys };
+  } catch (e) {
+    return { found: false, keys: [] };
+  }
+}
+
+// readV4Keys(addr, env) → آرایه‌ی ذخیره‌شده یا []. بدونِ ZX_KV ⇒ []، هرگز پرتاب نمی‌کند.
+async function readV4Keys(addr, env) {
+  return (await readV4Entry(addr, env)).keys;
+}
+
+/* یک گذرِ کاملِ ایندکس: pools را بگیر، indexV4Keys را با failover-rpcCall
+   صدا بزن، نتیجه را ذخیره کن. هم از ctx.waitUntil (ogFetchVerdict) هم از
+   GET /vd/v4/<address> صدا زده می‌شود — یک‌جا نوشته شده تا این دو مسیر
+   هرگز از هم جدا نیفتند، دقیقاً همان استدلالِ همیشگیِ این فایل
+   (cachedVerdict بالاتر برای verdict همین کار را می‌کند). */
+async function runV4Index(addr, env) {
+  const pools = await fetchV4Pools(addr, env);
+  let result;
+  if (!Array.isArray(pools)) {
+    /* 🔴 خودِ فهرستِ استخرها به‌دست نیامد — indexV4Keys اصلاً صدا زده
+       نمی‌شود، چون ورودی‌اش وجود ندارد. قاعده‌ی ذخیره‌اش همان rpc-down است
+       (هرگز نوشته نمی‌شود)، ولی دلیلش عمداً جداست: rpc-down یعنی آرپی‌سیِ
+       زنجیره جواب نداد و no-pools یعنی بالادستِ قیمت. یکی‌کردنشان همان
+       «کجا ایستاد» را کور می‌کند که این اندپوینت برای دیدنش ساخته شده. */
+    result = { keys: [], reason: "no-pools" };
+  } else {
+    const rpcCall = (method, params) => rpcCallBase(method, params, V4_LOG_TIMEOUT_MS);
+    result = await indexV4Keys({ tokenAddr: addr, pools, rpcCall, now: Date.now });
+  }
+  const stored = await storeV4Result(addr, env, result);
+  return { reason: result.reason, keys: Array.isArray(result.keys) ? result.keys : [], stored };
+}
+
 /* آیا هنوز جایی این توکن قیمت فروش می‌دهد؟ — سمت سرور، فقط برای همین یک
    جمله‌ی اولِ توضیح؛ Base و سولانا هر دو، از رویِ chainOf(addr).
    ⚠️ برخلافِ ogFetchMeta که فقط از کش می‌خواند، اینجا هم می‌خوانیم هم
@@ -613,7 +770,25 @@ async function ogFetchVerdict(addr, meta, deadlineAt, env, ctx) {
   const network = gtNetworkOf(chain) || OG_NETWORK;
   const raw = await cachedVerdict(
     "/v1/" + network + "/" + addr.toLowerCase(),
-    () => fetchVerdict(addr, meta, { deadlineAt, fetchImpl: fetch, rpcs: baseRpcsFor(env) }),
+    async () => {
+      /* کلیدهای واقعیِ v4 — فقط داخلِ خودِ computeFn خوانده می‌شوند، نه
+         بیرون از cachedVerdict: یک ضربه‌ی کش اصلاً به آن‌ها نیازی ندارد، پس
+         این‌جا خواندنِ KV و برنامه‌ریزیِ ایندکس هر دو فقط وقتی واقعاً اتفاق
+         می‌افتند که computeFn قرار است اجرا شود.
+         ⚠️ اگر هنوز هیچ ورودی‌ای برای این توکن ایندکس نشده، خودِ
+         ایندکس‌کردن با ctx.waitUntil به پس‌زمینه فرستاده می‌شود تا *همین*
+         درخواست هزینه‌اش را نپردازد — فقط درخواستِ بعدیِ همین توکن از
+         کلیدهای واقعی بهره می‌برد. */
+      let v4Keys = [];
+      if (env && env.ZX_KV) {
+        const entry = await readV4Entry(addr, env);
+        v4Keys = entry.keys;
+        if (!entry.found && ctx && typeof ctx.waitUntil === "function") {
+          ctx.waitUntil(runV4Index(addr, env));
+        }
+      }
+      return fetchVerdict(addr, meta, { deadlineAt, fetchImpl: fetch, rpcs: baseRpcsFor(env), v4Keys });
+    },
     ctx,
   );
 
@@ -817,6 +992,29 @@ async function diagVerdictRpc(env) {
   return vdDone(200, { endpoints });
 }
 
+/* GET /vd/v4/<address> — پروبِ تشخیصیِ ایندکسِ v4: همین حالا اجرایش کن،
+   نتیجه را با همان قاعده‌ی storeV4Result ذخیره کن، و بگو چه شد.
+   rateOk و متد از قبل در diagVerdict سنجیده شده‌اند (همان سطلِ «vd»)، پس
+   اینجا دوباره تکرار نمی‌شود.
+   بدونِ ZX_KV: reason="no-kv" و هیچ فراخوانیِ بالادستی اصلاً انجام نمی‌شود —
+   نه pools، نه هیچ RPC ای. */
+async function diagVerdictV4(url, env) {
+  const addr = url.pathname.slice("/vd/v4/".length);
+  if (chainOf(addr) !== "base") return vdDone(400, { error: "bad address" });
+
+  const t0 = Date.now();
+  const kv = env && env.ZX_KV;
+  if (!kv) {
+    return vdDone(200, { addr, reason: "no-kv", keys: [], stored: false, store: false, ms: Date.now() - t0 });
+  }
+
+  const result = await runV4Index(addr, env);
+  return vdDone(200, {
+    addr, reason: result.reason, keys: result.keys, stored: result.stored,
+    store: true, ms: Date.now() - t0,
+  });
+}
+
 async function diagVerdict(request, url, env, ctx) {
   /* همیشه اولین خط، پیش از هر بررسیِ دیگری — همان قاعده‌ای که /gt و /ev
      دارند: یک اسکریپتِ کوبنده نباید حتی شکلِ درخواست را هم مجانی بسنجد. */
@@ -830,6 +1028,12 @@ async function diagVerdict(request, url, env, ctx) {
   // می‌شد، نه با پاسخِ خودِ probe. همان سطلِ نرخِ «vd» بالا برایش هم سنجیده
   // شده، پس این مسیر نمی‌تواند سهمیه‌ای جدا از /vd/<mint> بخورد.
   if (url.pathname === "/vd/rpc") return diagVerdictRpc(env);
+
+  /* GET /vd/v4/<address> — دقیقاً پیش از پارسِ آدرسِ خودِ /vd/<address> زیر،
+     درست مثلِ /vd/rpc بالا؛ وگرنه «v4/<address>» خودش به‌عنوانِ یک آدرسِ
+     بدشکل رد می‌شد و هرگز به این تشخیص نمی‌رسید. همان سطلِ نرخِ «vd» (بالای
+     همین تابع) را می‌خورد، سطلِ جداگانه ندارد. */
+  if (url.pathname.startsWith("/vd/v4/")) return diagVerdictV4(url, env);
 
   const addr = url.pathname.slice("/vd/".length);
   const chain = chainOf(addr);
@@ -1356,3 +1560,5 @@ export { VD_ADDR_RE };
 export { TOKEN_PAGE, solFetchVerdict };
 export { SITEMAP_TOKEN_PAGES, SITEMAP_TOKEN_CAP, sitemapResponse, buildSitemapTokens };
 export { reportRoute, pairsRoute, scheduledReportPass, reportRunRoute, REPORT_RUN_MAX_TOKENS };
+export { readV4Keys, readV4Entry, rpcCallBase, fetchV4Pools, storeV4Result, v4StoreTtl, runV4Index };
+export { V4_LOG_TIMEOUT_MS };

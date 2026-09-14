@@ -22,6 +22,13 @@
    worker/test.mjs همه را از رویِ امضا با ethers.id بازمحاسبه می‌کند.
    ===================================================================== */
 
+// فقط برای فهمیدنِ اینکه یک کلیدِ واقعیِ v4 اصلاً این توکن را در بر دارد یا
+// نه (کدام ضدجفتش مجاز است تصمیمی است که همین‌جا، در VD_V4_STAGE_COUNTERS
+// پایین‌تر گرفته می‌شود، نه در v4index.js) — worker/v4index.js خودش هیچ
+// fetchی ندارد، پس این ایمپورت هیچ چیزی را از «خالص‌بودنِ» این ماژول کم
+// نمی‌کند.
+import { keyUsableFor } from "./v4index.js";
+
 // quoteExactInputSingle((address tokenIn,address tokenOut,uint256 amountIn,uint24 fee,uint160 sqrtPriceLimitX96))
 export const SEL_CL_UINT24 = "0xc6a5026a";
 // quoteExactInputSingle((address tokenIn,address tokenOut,uint256 amountIn,int24 tickSpacing,uint160 sqrtPriceLimitX96))
@@ -47,6 +54,26 @@ export const NATIVE_ADDR = "0x0000000000000000000000000000000000000000"; // ات
    با نبودش در این جدول به خودش نگاشت می‌شود. */
 export const VD_V4_COUNTER = Object.freeze({
   [WETH_ADDR.toLowerCase()]: NATIVE_ADDR,
+});
+
+/* حداکثر چند پروبِ کلید-واقعی به‌ازای هر مرحله (WETH/USDC) اضافه می‌شود —
+   یک توکن با ده‌ها استخرِ واقعی نباید batch را باد کند؛ v4index.js خودش
+   هم روی V4_MAX_KEYS سقف دارد، این یکی سقفِ *مصرفِ* آن‌جاست، نه سقفِ ذخیره. */
+export const VD_V4_REAL_MAX = 4;
+
+/* کلیدهای واقعی (opts.v4Keys در buildProbe) از رویِ لاگِ Initialize خودِ
+   PoolManager آمده‌اند (worker/v4index.js) — یعنی یک استخرِ *واقعیِ* این
+   توکن با یک ضدجفتِ مشخص. ولی یک استخرِ واقعی که توکن را با یک توکنِ کاملاً
+   نامرتبط جفت کرده باشد، یک استخرِ واقعی *هست* ولی کوت‌گرفتن از آن هیچ‌چیز
+   درباره‌ی «خروج» اثبات نمی‌کند — پس تنها وقتی این کلید پروب می‌شود که
+   ضدجفتش یکی از همان ضدجفت‌هایی باشد که آن مرحله (VD_V4_COUNTER هم همین
+   منطق را برای حدس‌ها دارد) از قبل به‌عنوانِ راهِ خروج می‌شناسد. در v4 سمتِ
+   اتر می‌تواند بومی باشد یا پوشیده، برای همین مرحله‌ی WETH دو ورودی دارد.
+   جدول بسته است تا هم این قاعده فقط همین‌جا نوشته شود، هم worker/test.mjs
+   بتواند خودش را پین کند. */
+export const VD_V4_STAGE_COUNTERS = Object.freeze({
+  [WETH_ADDR.toLowerCase()]: [NATIVE_ADDR, WETH_ADDR],
+  [USDC_ADDR.toLowerCase()]: [USDC_ADDR],
 });
 
 /* ⚠️ این فهرست فقط برای batchِ eth_call است، نه برای یک تماسِ تکی — یک
@@ -94,7 +121,12 @@ export const VD_NOTIONAL_USD = 100;
    کارمزدِ ۱۰۰۰۰ برای uniswap-v3 عمداً کنار گذاشته نشده (آن یکی که کنار
    گذاشته شده کارمزدِ ۱۰۰۰۰۰ نیست — این‌جا اصلاً چنین ردیفی وجود ندارد؛
    سطحِ استیبل-به-استیبلِ یونی‌سواپ که کنار گذاشته شده هرگز جزوِ این چهار
-   کارمزد نبوده). جمعِ فراخوانی‌ها ۲۱ تاست: ۳+۳+۵+۲+۱+۱+۱+۱+۴.
+   کارمزد نبوده). جمعِ فراخوانی‌ها بدونِ کلیدهای واقعی همیشه ۲۱ تاست:
+   ۳+۳+۵+۲+۱+۱+۱+۱+۴. با کلیدهای واقعی (opts.v4Keys در buildProbe) تا
+   VD_V4_REAL_MAX=۴ تای دیگر به‌ازای هر مرحله اضافه می‌شود، یعنی حداکثر ۲۵.
+   ⚠️ این کامنت یک‌بار کهنه ماند و همین‌جا («۲۱ تاست»، بدونِ قیدِ «بدون
+   کلیدهای واقعی») یک روزِ تمام هزینه داشت — با هر تغییرِ این عدد، همین‌جا
+   هم عوض شود.
    ⚠️ هر ردیفی که این‌جا اضافه شود باید در GT_DEX_TO_VENUE در
    worker/index.js هم شناسه‌ی دکسش بیاید، وگرنه گاردِ پوشش هرگز آن صرافی را
    نمی‌بیند و حکمِ منفی برایش بی‌صدا غیرممکن می‌شود. تست هر دو سو را می‌پیماید.
@@ -197,29 +229,55 @@ function encodeSolidlyGetAmountsOut(amountIn, routes) {
    می‌شود و آفستِ جداگانه‌ی خودش را نمی‌گیرد؛ فقط hookData که bytes است
    دینامیک است و آفستش نسبت‌به شروعِ خودِ تاپل حساب می‌شود (۸ کلمه‌ی سر).
    exactAmount اینجا uint128 است، نه uint256 — یک مقدارِ بزرگ‌تر باید ردیف
-   را حذف کند، نه اینکه بی‌صدا بریده شود و کوتِ توکنِ دیگری را بپرسد. */
-export function encodeV4QuoteExactInputSingle(tokenIn, tokenOut, amountIn, fee, tickSpacing) {
-  if (BigInt(amountIn) >= 2n ** 128n) return null; // بیش از ظرفیتِ uint128 — هرگز ماسک/برش
+   را حذف کند، نه اینکه بی‌صدا بریده شود و کوتِ توکنِ دیگری را بپرسد.
 
-  const a = BigInt(String(tokenIn).toLowerCase());
-  const b = BigInt(String(tokenOut).toLowerCase());
-  const currency0 = a < b ? tokenIn : tokenOut;
-  const currency1 = a < b ? tokenOut : tokenIn;
-  const zeroForOne = a < b; // tokenIn است currency0؟
+   ⚠️ این نسخه یک PoolKeyِ *کامل* می‌گیرد (currency0/currency1/fee/
+   tickSpacing/hooks آماده)، نه اینکه خودش جفت را مرتب کند یا hooks را حدس
+   بزند — با یک کلیدِ واقعی (worker/v4index.js) ترتیب و hooks از قبل معلوم
+   و داده‌شده‌اند، نه چیزی که این‌جا از رویِ آدرس دوباره ساخته شود.
+   zeroForOne از رویِ tokenIn === currency0 گرفته می‌شود، *نه* از رویِ
+   مقایسه‌ی عددیِ آدرس — با یک کلیدِ واقعی ترتیب را خودِ رویدادِ Initialize
+   گفته، نه چیزی که این‌جا دوباره از رویِ بزرگی/کوچکیِ آدرس استنتاج شود. */
+export function encodeV4QuoteExactInputSingleKey(key, tokenIn, amountIn) {
+  if (BigInt(amountIn) >= 2n ** 128n) return null; // بیش از ظرفیتِ uint128 — هرگز ماسک/برش
+  if (!key) return null;
+
+  const t = String(tokenIn).toLowerCase();
+  const c0 = String(key.currency0).toLowerCase();
+  const c1 = String(key.currency1).toLowerCase();
+  if (t !== c0 && t !== c1) return null; // tokenIn اصلاً در این کلید نیست
+  const zeroForOne = t === c0;
 
   const head =
     wordUint(0x20) +           // آفستِ تاپل؛ چون hookData بایتی درونش هست، تاپل دینامیک است
-    wordAddr(currency0) +
-    wordAddr(currency1) +
-    wordUint(fee) +            // uint24
-    wordUint(tickSpacing) +    // int24، همه‌ی مقادیرِ ما مثبت‌اند پس چپ‌چینِ صفر درست است
-    wordAddr(NATIVE_ADDR) +    // hooks = صفر؛ فقط استخرهای بدونِ هوک را حدس می‌زنیم
+    wordAddr(key.currency0) +  // به همان ترتیبی که خودِ کلید می‌گوید — این‌جا دوباره مرتب نمی‌شود
+    wordAddr(key.currency1) +
+    wordUint(key.fee) +        // uint24
+    wordUint(key.tickSpacing) + // int24؛ decodeInitializeLog همیشه مثبت می‌دهد، پس چپ‌چینِ صفر درست است
+    wordAddr(key.hooks) +
     wordBool(zeroForOne) +
     wordUint(amountIn) +
     wordUint(0x100) +          // آفستِ hookData، نسبت‌به شروعِ تاپل = ۸ کلمه‌ی سر
     wordUint(0);               // طولِ hookData
 
   return "0x" + SEL_V4_SINGLE.slice(2) + head;
+}
+
+/* نسخه‌ی حدسی — همان امضای صادرشده و همان بایت‌های خروجیِ امروز، حالا فقط
+   با مرتب‌کردنِ جفت و delegate به تابعِ بالا با hooks=NATIVE_ADDR (همان
+   حدسِ «بدونِ هوک»ِ همیشگی). worker/test.mjs این را بایت‌به‌بایت پین می‌کند،
+   پس این تغییر نباید حتی یک بایتِ خروجی را عوض کند. */
+export function encodeV4QuoteExactInputSingle(tokenIn, tokenOut, amountIn, fee, tickSpacing) {
+  const a = BigInt(String(tokenIn).toLowerCase());
+  const b = BigInt(String(tokenOut).toLowerCase());
+  const currency0 = a < b ? tokenIn : tokenOut;
+  const currency1 = a < b ? tokenOut : tokenIn;
+
+  return encodeV4QuoteExactInputSingleKey(
+    { currency0, currency1, fee, tickSpacing, hooks: NATIVE_ADDR },
+    tokenIn,
+    amountIn,
+  );
 }
 
 /* ---------------------------------------------------------------------
@@ -268,7 +326,9 @@ export function sellAmountFrom(priceUsd, decimals) {
 /* ---------------------------------------------------------------------
    buildProbe / canaryCall
    --------------------------------------------------------------------- */
-export function buildProbe(tokenAddr, outAddr, amountIn) {
+const V4_ROW = VD_VENUES.find((r) => r.id === "uniswap-v4");
+
+export function buildProbe(tokenAddr, outAddr, amountIn, opts) {
   const out = [];
   for (const row of VD_VENUES) {
     if (row.kind === "CL_UINT24" || row.kind === "CL_INT24") {
@@ -302,6 +362,38 @@ export function buildProbe(tokenAddr, outAddr, amountIn) {
       }
     }
   }
+
+  /* --- کلیدهای واقعیِ v4، پس از همه‌ی حدس‌ها ---
+     ⚠️ opts غایب یا opts.v4Keys خالی یعنی خروجی باید بایت‌به‌بایت همان چیزی
+     بماند که امروز است — همین شرط دقیقاً همان چیزی است که «۲۱ تای امروز
+     دست‌نخورده می‌ماند» را تضمین می‌کند، نه یک قرارداد.
+     هر کلید فقط وقتی پروب می‌شود که ضدجفتش (keyUsableFor) یکی از
+     ضدجفت‌های مجازِ همین مرحله در VD_V4_STAGE_COUNTERS باشد — این تابع
+     خودش هرگز روی «کدام ضدجفت» تصمیم نمی‌گیرد، فقط همان جدول را می‌خواند. */
+  const v4Keys = (opts && Array.isArray(opts.v4Keys)) ? opts.v4Keys : [];
+  if (v4Keys.length > 0 && V4_ROW) {
+    const allowed = VD_V4_STAGE_COUNTERS[String(outAddr).toLowerCase()];
+    if (allowed) {
+      const allowedSet = new Set(allowed.map((a) => String(a).toLowerCase()));
+      let appended = 0;
+      for (const key of v4Keys) {
+        if (appended >= VD_V4_REAL_MAX) break;
+        const counter = keyUsableFor(key, tokenAddr);
+        if (!counter) continue; // این کلید اصلاً این توکن را ندارد
+        if (!allowedSet.has(String(counter).toLowerCase())) continue; // ضدجفتِ این مرحله نیست
+        const data = encodeV4QuoteExactInputSingleKey(key, tokenAddr, amountIn);
+        if (data == null) continue; // بیش از ظرفیتِ uint128 — ردیف حذف می‌شود، بریده نمی‌شود
+        out.push({
+          id: "uniswap-v4", // positive-only همچنان از همین‌جا اعمال می‌شود
+          key: "real:" + key.fee + ":" + key.tickSpacing,
+          to: V4_ROW.to,
+          data,
+        });
+        appended++;
+      }
+    }
+  }
+
   return out;
 }
 
@@ -644,7 +736,7 @@ export async function fetchVerdict(tokenAddr, meta, opts) {
       if (deadlineHit("weth")) return null;
       endpointsTried++;
 
-      const itemsWeth = buildProbe(tokenAddr, WETH_ADDR, amt);
+      const itemsWeth = buildProbe(tokenAddr, WETH_ADDR, amt, { v4Keys: o.v4Keys });
       const batchA = await callBatch(fetchImpl, rpc, canary, itemsWeth, timeoutMs, collect, "weth");
       if (batchA == null) continue; // نامعلومِ سطحِ اتصال (پرتاب/غیر۲۰۰/ناپارس) → اندپوینتِ بعدی
 
@@ -658,7 +750,7 @@ export async function fetchVerdict(tokenAddr, meta, opts) {
       if (verdictA !== "nosell") return null; // ابهامِ ردیف‌ها با کاناریِ زنده — دلیلِ عوض‌کردنِ اندپوینت نیست
 
       if (deadlineHit("usdc")) return null;
-      const itemsUsdc = buildProbe(tokenAddr, USDC_ADDR, amt);
+      const itemsUsdc = buildProbe(tokenAddr, USDC_ADDR, amt, { v4Keys: o.v4Keys });
       const batchB = await callBatch(fetchImpl, rpc, canary, itemsUsdc, timeoutMs, collect, "usdc");
       if (batchB == null) return null; // ابهامِ مرحله‌ی B هم اندپوینتِ بعدی را صدا نمی‌زند
 
