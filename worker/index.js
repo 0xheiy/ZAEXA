@@ -1107,10 +1107,19 @@ async function diagVerdict(request, url, env, ctx) {
   // ابزارِ تشخیصی را کور می‌کند.
   if (url.searchParams.get("probe") === "1") {
     const collect = [];
+    /* 🔴 کلیدهای واقعیِ ذخیره‌شده *باید* اینجا هم داده شوند. بدونشان این
+       ابزار دقیقاً همان چیزی را نمی‌بیند که برای دیدنش هست: مسیرِ واقعی
+       (ogFetchVerdict) ردیف‌های `real:` را می‌سازد و این‌جا نمی‌ساخت، پس
+       خروجی‌اش شبیهِ «کلیدِ واقعی اصلاً پروب نشد» به‌نظر می‌رسید در حالی که
+       هیچ‌چیزی درباره‌اش نمی‌گفت. یک ابزارِ تشخیصی که ورودیِ مسیرِ واقعی را
+       ندارد، شاهد نیست.
+       v4Keys در پاسخ هم می‌آید تا «هیچ کلیدی ذخیره نشده» از «کلید ذخیره شده
+       ولی ردیفش ساخته نشد» قابلِ‌تفکیک باشد — این دو از بیرون یک شکل‌اند. */
+    const v4Keys = await readV4Keys(addr, env);
     const v = await fetchVerdict(addr, meta,
-      { deadlineAt: t0 + OG_BUDGET_MS, fetchImpl: fetch, collect, rpcs: baseRpcsFor(env) });
+      { deadlineAt: t0 + OG_BUDGET_MS, fetchImpl: fetch, collect, rpcs: baseRpcsFor(env), v4Keys });
     const covered = await baseVenueCovered(addr, env);
-    return vdDone(200, { v, ms: Date.now() - t0, venues: collect, covered });
+    return vdDone(200, { v, ms: Date.now() - t0, venues: collect, covered, v4Keys: v4Keys.length });
   }
 
   // ⚠️ ماژولِ Base (worker/verdict.js) دست‌نخورده مانده و هیچ why‌ای تولید

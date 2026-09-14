@@ -5611,8 +5611,14 @@ console.log("[v4 verdict wiring] VD_V4_STAGE_COUNTERS frozen with exactly the WE
   const rpcLog = [];
   const out = await rpcCallBase("eth_getLogs", [{}], 500, rpcLog);
   ok(out.ok === true, "rpcCallBase must still succeed on the third endpoint, got " + JSON.stringify(out));
-  ok(rpcLog.length === 3 && rpcLog[0].stage === "status" && rpcLog[0].status === 403 &&
-     rpcLog[1].stage === "rpc-error" && rpcLog[1].code === -32614 && rpcLog[2].stage === "ok",
+  /* بر اساسِ نامِ میزبان سنجیده می‌شود، نه جایگاه — ترتیبِ V4_LOG_RPCS یک
+     تصمیمِ اندازه‌گیری‌شده است که عوض می‌شود؛ پینی که به جایگاه چسبیده باشد
+     با هر بازچینیِ درست هم قرمز می‌شود و چیزی را محافظت نمی‌کند. */
+  const byHost = Object.fromEntries(rpcLog.map((r) => [r.h, r]));
+  ok(rpcLog.length === 3 &&
+     byHost["base.publicnode.com"].stage === "status" && byHost["base.publicnode.com"].status === 403 &&
+     byHost["base.gateway.tenderly.co"].stage === "rpc-error" && byHost["base.gateway.tenderly.co"].code === -32614 &&
+     byHost["mainnet.base.org"].stage === "ok",
     "the rpc observer must record each attempt's stage, HTTP status and NUMERIC JSON-RPC code, got " + JSON.stringify(rpcLog));
   ok(rpcLog.every((r) => typeof r.h === "string" && !r.h.includes("://") && !r.h.includes("/")),
     "the rpc observer must record hostnames only — never a URL, which can carry a key in its path or " +
@@ -5620,6 +5626,55 @@ console.log("[v4 verdict wiring] VD_V4_STAGE_COUNTERS frozen with exactly the WE
 
   const rpcLogAbsent = await rpcCallBase("eth_getLogs", [{}], 500);
   ok(rpcLogAbsent.ok === true, "rpcCallBase without an observer must behave exactly as before");
+  globalThis.fetch = savedFetch;
+}
+
+/* --- ۲۷.۱۹ب GET /vd/<address>?probe=1 باید کلیدهای واقعی را هم بدهد ----
+   🔴 این ابزار برای «کدام صرافی چه گفت» ساخته شده. اگر ورودیِ مسیرِ واقعی
+   (v4Keys) را نگیرد، خروجی‌اش شبیهِ «کلیدِ واقعی پروب نشد» به‌نظر می‌رسد در
+   حالی که هیچ‌چیزی درباره‌اش نمی‌گوید — و یک ابزارِ تشخیصیِ گمراه‌کننده از
+   نبودنش بدتر است. این دقیقاً روی سایتِ زنده اتفاق افتاد. */
+{
+  const savedFetch = globalThis.fetch;
+  const ADDR = "0x" + "5".repeat(40);
+  const stored = [{
+    poolId: POOL_ID_A,
+    currency0: ADDR.toLowerCase(),
+    currency1: vd.WETH_ADDR.toLowerCase(),
+    fee: 100, tickSpacing: 1, hooks: vd.NATIVE_ADDR,
+  }];
+  const kv = { store: new Map([[
+    "v4key:base:" + ADDR.toLowerCase(), JSON.stringify({ keys: stored, reason: "ok" }),
+  ]]),
+    get: async (k) => (kv.store.has(k) ? kv.store.get(k) : null),
+    put: async () => {} };
+
+  const seen = [];
+  globalThis.fetch = async (u, o) => {
+    const url = String(u);
+    if (url.includes("/tokens/")) {
+      return new Response(JSON.stringify({ data: { attributes: {
+        address: ADDR, symbol: "T", name: "T", decimals: 18, price_usd: "1.0",
+      } } }), { status: 200 });
+    }
+    if (url.includes("/pools")) return new Response(JSON.stringify({ data: [] }), { status: 200 });
+    // هر آرپی‌سیِ Base: همه‌ی آیتم‌ها ریوِرت، کاناری سالم — فقط شکلِ درخواست مهم است
+    const reqs = JSON.parse(o.body);
+    reqs.forEach((r) => { if (r.params && r.params[0]) seen.push(r.params[0].data); });
+    return new Response(JSON.stringify(reqs.map((r, i) => (i === 0
+      ? { id: 0, result: "0x" + "0".repeat(63) + "1" + "0".repeat(192) }
+      : { id: r.id, error: { code: 3, message: "execution reverted" } }))), { status: 200 });
+  };
+
+  const res = await call("/vd/" + ADDR + "?probe=1", undefined, { ASSETS, ZX_KV: kv });
+  const body = await res.json();
+  ok(body.v4Keys === 1,
+    "?probe=1 must report how many stored real keys it was given — \"none stored\" and \"stored but " +
+    "never probed\" look identical from outside without it, got " + JSON.stringify(body.v4Keys));
+  const realRows = (body.venues || []).filter((r) => typeof r.key === "string" && r.key.startsWith("real:"));
+  ok(realRows.length > 0,
+    "?probe=1 must probe the stored real keys too — without them this tool cannot see the very row it " +
+    "exists to explain, got venues=" + JSON.stringify((body.venues || []).map((r) => r.key)));
   globalThis.fetch = savedFetch;
 }
 

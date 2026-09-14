@@ -84,9 +84,22 @@ export const V4_MISS_TTL_S = 21600;  // ۶ ساعت — فقط برای یک ن�
    env.BASE_RPC (Alchemyِ رایگان) عمداً غایب است: eth_getLogs روی آن به
    بازه‌ی خیلی باریکی محدود است. ⚠️ این یکی *اندازه‌گیری‌نشده* است، از
    حافظه آمده — اگر روزی لازم شد، اول بسنجش. */
+/* 🔴 ترتیبِ زیر از اندازه‌گیریِ **داخلِ خودِ Worker** آمد (۱۴ سپتامبر،
+   `?debug=1` روی سایتِ زنده)، نه از ویندوز:
+
+     base.publicnode.com   eth_getBlockByNumber  200
+     base.publicnode.com   eth_getLogs           403   ← فقط همین یک متد
+     base.gateway.tenderly.co  eth_getLogs       200
+
+   یعنی publicnode که از ویندوزِ حسام بازه‌ی ۶۰۰۰ بلاکی را بی‌مشکل می‌داد،
+   از کلادفلر روی eth_getLogs مشخصاً ۴۰۳ می‌دهد — در حالی که همان اندپوینت
+   تماسِ دیگر را ۲۰۰ جواب می‌دهد. پس نه سقفِ بازه بود نه قطعی: بلاکِ
+   هدفمندِ یک متد، فقط از سمتِ سرور. tenderly اول است چون *از همین‌جا*
+   جواب داد؛ publicnode دوم می‌ماند چون انکر را می‌دهد و ممکن است رفتارش
+   عوض شود. */
 export const V4_LOG_RPCS = [
-  "https://base.publicnode.com",
   "https://base.gateway.tenderly.co",
+  "https://base.publicnode.com",
   "https://mainnet.base.org",
 ];
 
