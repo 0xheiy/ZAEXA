@@ -328,6 +328,41 @@ export function sellAmountFrom(priceUsd, decimals) {
    --------------------------------------------------------------------- */
 const V4_ROW = VD_VENUES.find((r) => r.id === "uniswap-v4");
 
+/* فقط ردیف‌های کلیدِ *واقعیِ* v4 برای این مرحله — جدا از buildProbe، چون دو
+   جا لازمش داریم و قاعده‌ی «کدام ضدجفت مجاز است» باید فقط یک‌بار نوشته شود:
+   یکی داخلِ خودِ buildProbe (ته جدول)، و یکی در گذرِ اثباتِ مثبتِ
+   fetchVerdict وقتی مرحله‌ی WETH مبهم مانده.
+   ⚠️ خالی‌بودنِ v4Keys باید دقیقاً آرایه‌ی خالی بدهد، نه چیزِ دیگر — همین
+   است که «بدونِ کلیدِ واقعی، رفتار بایت‌به‌بایت همان دیروز است» را تضمین
+   می‌کند. */
+export function buildRealV4Probe(tokenAddr, outAddr, amountIn, v4Keys) {
+  const out = [];
+  const keys = Array.isArray(v4Keys) ? v4Keys : [];
+  if (keys.length === 0 || !V4_ROW) return out;
+
+  const allowed = VD_V4_STAGE_COUNTERS[String(outAddr).toLowerCase()];
+  if (!allowed) return out;
+  const allowedSet = new Set(allowed.map((a) => String(a).toLowerCase()));
+
+  let appended = 0;
+  for (const key of keys) {
+    if (appended >= VD_V4_REAL_MAX) break;
+    const counter = keyUsableFor(key, tokenAddr);
+    if (!counter) continue; // این کلید اصلاً این توکن را ندارد
+    if (!allowedSet.has(String(counter).toLowerCase())) continue; // ضدجفتِ این مرحله نیست
+    const data = encodeV4QuoteExactInputSingleKey(key, tokenAddr, amountIn);
+    if (data == null) continue; // بیش از ظرفیتِ uint128 — ردیف حذف می‌شود، بریده نمی‌شود
+    out.push({
+      id: "uniswap-v4", // positive-only همچنان از همین‌جا اعمال می‌شود
+      key: "real:" + key.fee + ":" + key.tickSpacing,
+      to: V4_ROW.to,
+      data,
+    });
+    appended++;
+  }
+  return out;
+}
+
 export function buildProbe(tokenAddr, outAddr, amountIn, opts) {
   const out = [];
   for (const row of VD_VENUES) {
@@ -370,28 +405,8 @@ export function buildProbe(tokenAddr, outAddr, amountIn, opts) {
      هر کلید فقط وقتی پروب می‌شود که ضدجفتش (keyUsableFor) یکی از
      ضدجفت‌های مجازِ همین مرحله در VD_V4_STAGE_COUNTERS باشد — این تابع
      خودش هرگز روی «کدام ضدجفت» تصمیم نمی‌گیرد، فقط همان جدول را می‌خواند. */
-  const v4Keys = (opts && Array.isArray(opts.v4Keys)) ? opts.v4Keys : [];
-  if (v4Keys.length > 0 && V4_ROW) {
-    const allowed = VD_V4_STAGE_COUNTERS[String(outAddr).toLowerCase()];
-    if (allowed) {
-      const allowedSet = new Set(allowed.map((a) => String(a).toLowerCase()));
-      let appended = 0;
-      for (const key of v4Keys) {
-        if (appended >= VD_V4_REAL_MAX) break;
-        const counter = keyUsableFor(key, tokenAddr);
-        if (!counter) continue; // این کلید اصلاً این توکن را ندارد
-        if (!allowedSet.has(String(counter).toLowerCase())) continue; // ضدجفتِ این مرحله نیست
-        const data = encodeV4QuoteExactInputSingleKey(key, tokenAddr, amountIn);
-        if (data == null) continue; // بیش از ظرفیتِ uint128 — ردیف حذف می‌شود، بریده نمی‌شود
-        out.push({
-          id: "uniswap-v4", // positive-only همچنان از همین‌جا اعمال می‌شود
-          key: "real:" + key.fee + ":" + key.tickSpacing,
-          to: V4_ROW.to,
-          data,
-        });
-        appended++;
-      }
-    }
+  for (const item of buildRealV4Probe(tokenAddr, outAddr, amountIn, opts && opts.v4Keys)) {
+    out.push(item);
   }
 
   return out;
@@ -747,7 +762,31 @@ export async function fetchVerdict(tokenAddr, meta, opts) {
 
       const verdictA = verdictFrom(batchA);
       if (verdictA === "sell") return "sell";
-      if (verdictA !== "nosell") return null; // ابهامِ ردیف‌ها با کاناریِ زنده — دلیلِ عوض‌کردنِ اندپوینت نیست
+      if (verdictA !== "nosell") {
+        /* ابهامِ ردیف‌ها با کاناریِ زنده — دلیلِ عوض‌کردنِ اندپوینت نیست، و
+           تا امروز همین‌جا با null تمام می‌شد.
+
+           🔴 چرا حالا یک گذرِ دیگر هست: مرحله‌ی USDC فقط پشتِ یک «nosell»ِ
+           تمیزِ مرحله‌ی WETH اجرا می‌شود، چون کلِ هدفش *تأییدِ یک منفی* بود.
+           ولی یک کلیدِ واقعیِ v4 که ضدجفتش USDC است می‌تواند یک **مثبت**
+           اثبات کند، و مثبت به ابهامِ مرحله‌ی قبل هیچ ربطی ندارد. اندازه‌گیریِ
+           زنده‌ی ۱۴ سپتامبر یک نمونه‌ی واقعی داد: توکنی با استخرِ USDCِ نسخه ۴
+           که معادلِ صد دلار را با ۹۹٫۷۵ دلار خروجی کوت می‌دهد، و ما هرگز
+           نمی‌پرسیدیم چون صفرِ aerodrome مرحله‌ی WETH را مبهم کرده بود.
+
+           این گذر فقط و فقط می‌تواند null را به "sell" تبدیل کند:
+           - فقط ردیف‌های کلیدِ واقعی فرستاده می‌شوند (buildRealV4Probe)، که
+             همگی positive-only‌اند، پس verdictFrom از این دسته هرگز
+             نمی‌تواند "nosell" بسازد؛
+           - و هر نتیجه‌ای جز "sell" همان null می‌شود.
+           بدونِ کلیدِ واقعیِ USDC حتی یک فراخوانی هم اضافه نمی‌شود. */
+        const proofItems = buildRealV4Probe(tokenAddr, USDC_ADDR, amt, o.v4Keys);
+        if (proofItems.length === 0) return null;
+        if (deadlineHit("usdc-proof")) return null;
+        const batchP = await callBatch(fetchImpl, rpc, canary, proofItems, timeoutMs, collect, "usdc-proof");
+        if (batchP == null) return null;
+        return verdictFrom(batchP) === "sell" ? "sell" : null;
+      }
 
       if (deadlineHit("usdc")) return null;
       const itemsUsdc = buildProbe(tokenAddr, USDC_ADDR, amt, { v4Keys: o.v4Keys });

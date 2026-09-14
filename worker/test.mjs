@@ -1342,6 +1342,116 @@ function isSolidlyReqId(id) { return PROBE_KIND_BY_ID.get(id) === "SOLIDLY"; }
     ok(calls === 2, "stage B must only run once stage A came back nosell (2 fetch calls expected, got " + calls + ")");
   }
 
+  /* ب۲) مرحله‌ی WETH **مبهم** (نه nosell) + کلیدِ واقعیِ USDC → گذرِ اثباتِ
+     مثبت. 🔴 این از یک اندازه‌گیریِ زنده آمد، نه از یک ایده: توکنی با استخرِ
+     USDCِ نسخه ۴ که معادلِ صد دلار را با ۹۹٫۷۵ دلار خروجی کوت می‌دهد، و
+     هرگز پرسیده نمی‌شد چون صفرِ aerodrome مرحله‌ی WETH را مبهم کرده بود. */
+  {
+    const REAL_USDC_KEY = {
+      currency0: TOKEN.toLowerCase(),
+      currency1: vd.USDC_ADDR.toLowerCase(),
+      fee: 9990, tickSpacing: 100, hooks: vd.NATIVE_ADDR,
+    };
+    // مرحله‌ی WETH را مبهم می‌کند: SOLIDLY صفر می‌دهد (که اثبات نیست) و بقیه "0x"
+    const ambiguousWeth = (r) => ({ id: r.id, result: "0x" });
+
+    // ب۲-۱) کلیدِ واقعیِ USDC کوتِ مثبت می‌دهد → sell
+    {
+      let calls = 0;
+      let proofBatch = null;
+      const fetchImpl = async (url, init) => {
+        calls++;
+        const reqs = JSON.parse(init.body);
+        const isProof = reqs.some((r) => r.id >= 1 && r.params[0].data.includes(usdcHexLower));
+        if (isProof) proofBatch = reqs;
+        return jsonRes(reqs.map((r) => {
+          if (r.id === 0) return { id: 0, result: mkStatic4(5) };
+          if (!isProof) return ambiguousWeth(r);
+          return { id: r.id, result: "0x" + w(99745784) + w(0) }; // v4: دو کلمه
+        }));
+      };
+      const res = await vd.fetchVerdict(TOKEN, meta,
+        { fetchImpl, rpcs: ["https://rpc.example"], v4Keys: [REAL_USDC_KEY] });
+      ok(res === "sell",
+        "an AMBIGUOUS weth stage plus a real USDC v4 key that quotes must still reach sell — a positive " +
+        "is proof on its own and does not depend on the earlier stage reaching a clean negative (got " + res + ")");
+      ok(calls === 2, "the proof pass must be exactly one extra batch, got " + calls);
+      // فقط ردیف‌های کلیدِ واقعی، نه کلِ جدول — وگرنه ردیف‌های منفی‌ساز هم
+      // وارد گذری می‌شوند که اصلاً برای منفی ساخته نشده.
+      ok(proofBatch && proofBatch.length === 2,
+        "the proof batch must carry the canary plus ONLY the real v4 rows, got " +
+        (proofBatch ? proofBatch.length : "none") + " requests");
+    }
+
+    // ب۲-۲) همان، ولی کلیدِ واقعی ریوِرت می‌دهد → همان null، هرگز nosell
+    {
+      const fetchImpl = async (url, init) => {
+        const reqs = JSON.parse(init.body);
+        const isProof = reqs.some((r) => r.id >= 1 && r.params[0].data.includes(usdcHexLower));
+        return jsonRes(reqs.map((r) => {
+          if (r.id === 0) return { id: 0, result: mkStatic4(5) };
+          if (!isProof) return ambiguousWeth(r);
+          return { id: r.id, error: { code: 3 } };
+        }));
+      };
+      const res = await vd.fetchVerdict(TOKEN, meta,
+        { fetchImpl, rpcs: ["https://rpc.example"], v4Keys: [REAL_USDC_KEY] });
+      ok(res === null,
+        "a reverting real USDC key must leave the answer at null — this pass may only ever turn null " +
+        "into sell, never into nosell (got " + res + ")");
+    }
+
+    // ب۲-۳) بدونِ کلیدِ واقعیِ USDC: رفتار باید بایت‌به‌بایت همان دیروز باشد،
+    // یعنی حتی یک فراخوانیِ اضافه هم نباید زده شود.
+    {
+      let calls = 0;
+      const fetchImpl = async (url, init) => {
+        calls++;
+        const reqs = JSON.parse(init.body);
+        return jsonRes(reqs.map((r) => (r.id === 0 ? { id: 0, result: mkStatic4(5) } : ambiguousWeth(r))));
+      };
+      const res = await vd.fetchVerdict(TOKEN, meta, { fetchImpl, rpcs: ["https://rpc.example"] });
+      ok(res === null && calls === 1,
+        "with no real USDC key an ambiguous weth stage must end exactly as it did before — one batch, " +
+        "null, no extra call (got " + res + ", " + calls + " calls)");
+    }
+
+    /* ب۲-۳ب) 🔴 صداقت درباره‌ی چیزی که نگهبان ندارد:
+       نوشتنِ `=== "sell" ? "sell" : null` در گذرِ اثبات را عمداً برداشتم و
+       سوییت **سبز ماند**. دلیلش این است که دسته‌ی اثبات فقط ردیف‌های v4
+       دارد و تا وقتی VD_POSITIVE_ONLY.V4_SINGLE برقرار است، verdictFrom از
+       چنین دسته‌ای اصلاً نمی‌تواند "nosell" بسازد — پس آن باریک‌سازی امروز
+       رفتارِ قابلِ‌سنجشی ندارد.
+       یعنی امنیتِ این گذر روی همان پرچم سوار است. این پروب همان وابستگی را
+       پین می‌کند: اگر روزی کسی پرچم را برگرداند، این خط قرمز می‌شود و
+       یادآوری می‌کند که باریک‌سازیِ fetchVerdict تنها چیزی است که بینِ این
+       گذر و یک منفیِ کاذب ایستاده. خودِ باریک‌سازی می‌ماند، چون درست است —
+       ولی ادعا نمی‌کنیم آزموده شده. */
+    ok(vd.VD_POSITIVE_ONLY.V4_SINGLE === true,
+      "the USDC proof pass is only safe because every row it sends is positive-only. If this flag is " +
+      "ever flipped, the `=== \"sell\"` narrowing in fetchVerdict becomes the sole guard against a " +
+      "false negative — and that narrowing has no behavioural test of its own");
+
+    // ب۲-۴) کلیدِ واقعی که ضدجفتش USDC *نیست* نباید این گذر را باز کند
+    {
+      let calls = 0;
+      const wethKey = {
+        currency0: TOKEN.toLowerCase(), currency1: vd.WETH_ADDR.toLowerCase(),
+        fee: 3000, tickSpacing: 60, hooks: vd.NATIVE_ADDR,
+      };
+      const fetchImpl = async (url, init) => {
+        calls++;
+        const reqs = JSON.parse(init.body);
+        return jsonRes(reqs.map((r) => (r.id === 0 ? { id: 0, result: mkStatic4(5) } : ambiguousWeth(r))));
+      };
+      const res = await vd.fetchVerdict(TOKEN, meta,
+        { fetchImpl, rpcs: ["https://rpc.example"], v4Keys: [wethKey] });
+      ok(res === null && calls === 1,
+        "a real key whose counter is not USDC must not open the proof pass — it already rode along on " +
+        "the weth stage (got " + res + ", " + calls + " calls)");
+    }
+  }
+
   // ج) اندپوینتِ اول پرتاب می‌کند → اندپوینتِ دوم جواب می‌دهد
   // ⚠️ همان دلیلِ بالا: SOLIDLY با ریوِرتِ کدِ ۳ رد می‌شود، نه "0x"، وگرنه
   // نتیجه‌ی هر دو مرحله روی اندپوینتِ دوم نامعلوم می‌شد.
