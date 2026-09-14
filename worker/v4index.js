@@ -36,8 +36,33 @@ export const V4_INITIALIZE_TOPIC =
 export const V4_GT_DEX_ID = "uniswap-v4-base";
 
 export const V4_BLOCK_MS = 2000; // Base هر ۲ ثانیه یک بلاک می‌سازد، بدونِ اسلاتِ جامانده
-export const V4_WINDOW_BACK = 4500; // بلاک، پیش از تخمین
-export const V4_WINDOW_FWD = 1500;  // بلاک، پس از تخمین — جمعاً ۶۰۰۰، زیرِ سقفِ ۱۰۰۰۰
+/* 🔴 اندازه‌گیریِ ۱۴ سپتامبر، از ماشینِ حسام، با کنترلِ مثبت روی هر اندپوینت
+   (eth_blockNumber اول، بعد همان eth_getLogs با سه بازه‌ی مختلف):
+
+     base.drpc.org          ۶۰۰۰ → ۴۰۰ (code 35)   ۵۰۰ → ۴۰۰ (code 35)   ۱۰ → ok
+     base.publicnode.com    ۶۰۰۰ → ok               ۵۰۰ → ok               ۱۰ → ok
+     mainnet.base.org       ۶۰۰۰ → ۴۱۳ (-32614)     ۵۰۰ → ok               ۱۰ → ok
+
+   دو چیز از همین جدول درآمد که هر دو خلافِ چیزی بودند که فرض شده بود:
+   ۱. **ادعای «۱۰۰۰۰ بلاکِ رایگانِ drpc» غلط است.** خودش روی ۵۰۰ بلاک هم
+      ۴۰۰ می‌دهد و در متنِ خطا همان جمله‌ی «ranges over 10000 blocks» را
+      تکرار می‌کند — یعنی متنِ خطایش با رفتارش نمی‌خواند. به همین دلیل از
+      فهرست بیرون رفت: اندپوینتی که دلیلِ ردش دروغ می‌گوید قابلِ‌استدلال نیست.
+   ۲. **mainnet.base.org سقفِ صریحِ ۲۰۰۰ بلاکی دارد** (کدِ عددیِ -32614).
+
+   پس پنجره ۱۰۰۰ بلاک است، نه ۶۰۰۰: زیرِ سقفِ صریحِ ۲۰۰۰، و آن‌قدر باریک که
+   هیچ‌کدام از سقف‌های اندازه‌گیری‌شده را لمس نکند.
+   ⚠️ این اندازه‌گیری از ویندوزِ حسام است، نه از داخلِ Worker — پس درباره‌ی
+   اینکه کدام اندپوینت به *Worker* جواب می‌دهد هیچ‌چیزی اثبات نمی‌کند؛
+   `?debug=1` روی /vd/v4 دقیقاً برای همین اضافه شد. */
+export const V4_WINDOW_BACK = 900; // بلاک، پیش از تخمین
+export const V4_WINDOW_FWD = 100;  // بلاک، پس از تخمین — جمعاً ۱۰۰۰
+/* اگر تکه‌ی اول با آرایه‌ی خالیِ خوش‌شکل برگردد، یک تکه‌ی ۱۰۰۰بلاکیِ
+   *قبل‌تر* هم امتحان می‌شود — یعنی جمعاً حدودِ ۶۶ دقیقه پوشش، با دو تماسی
+   که هر دو زیرِ سقف‌اند. باریک‌کردنِ پنجره بدونِ این تکه‌ی دوم یعنی یک
+   تخمینِ کمی پرت، به‌جای «نامعلوم»، یک میسِ ذخیره‌شده‌ی شش‌ساعته می‌سازد —
+   همان تبدیلِ نامعلوم به «نه» که کلِ این پروژه علیه آن نوشته شده. */
+export const V4_WINDOW_CHUNKS = 2;
 export const V4_MAX_POOLS = 3; // حداکثر چند استخرِ v4 به‌ازای هر توکن بررسی می‌شود
 export const V4_MAX_KEYS = 6;  // حداکثر چند کلید به‌ازای هر توکن ذخیره می‌شود
 export const V4_KEY_TTL_S = 2592000; // ۳۰ روز — یک PoolKey هرگز عوض نمی‌شود
@@ -45,14 +70,23 @@ export const V4_MISS_TTL_S = 21600;  // ۶ ساعت — فقط برای یک ن�
 
 /* ⚠️ عمداً فهرستی جدا از VD_RPCS در worker/verdict.js: VD_RPCS فقط دو
    اندپوینتی است که اثبات‌شده batchِ eth_call را جواب می‌دهند — eth_getLogs
-   یک تماسِ تکی است، پس آن اندازه‌گیری اصلاً به‌کارش نمی‌آید. base.drpc.org
-   اینجا اول است چون رایگان یک بازه‌ی ۱۰۰۰۰-بلاکی را سرو می‌کند.
-   env.BASE_RPC (Alchemyِ رایگان) عمداً غایب است: eth_getLogs را روی آن به
-   ۱۰ بلاک محدود می‌کنند، پس یک پنجره‌ی ۶۰۰۰-بلاکی روی آن هرگز موفق
-   نمی‌شود — اضافه‌نشود. */
+   یک تماسِ تکی است، پس آن اندازه‌گیری اصلاً به‌کارش نمی‌آید.
+   ترتیب از رویِ جدولِ اندازه‌گیری‌شده‌ی بالای V4_WINDOW_BACK است:
+   publicnode تنها اندپوینتی بود که هر سه بازه را قبول کرد، پس اول است؛
+   tenderly همان اندپوینتِ دومِ VD_RPCS است و برای getLogs هنوز اندازه‌گیری
+   نشده — سوم نیست بلکه دوم است چون یک کاندیدِ مستقل لازم داریم، و اگر جواب
+   ندهد `?debug=1` خودش می‌گویدش؛ mainnet.base.org آخر است چون سقفِ صریحِ
+   ۲۰۰۰ بلاکی دارد و پنجره‌ی ۱۰۰۰بلاکیِ امروز زیرِ آن می‌ماند، ولی حاشیه‌اش
+   از بقیه کمتر است.
+   🔴 base.drpc.org عمداً حذف شد — روی ۵۰۰ بلاک هم رد می‌کند در حالی که
+   متنِ خطایش از ۱۰۰۰۰ حرف می‌زند (اندازه‌گیریِ بالا). هر کس خواست برش
+   گرداند، اول همان اندازه‌گیری را دوباره بگیرد.
+   env.BASE_RPC (Alchemyِ رایگان) عمداً غایب است: eth_getLogs روی آن به
+   بازه‌ی خیلی باریکی محدود است. ⚠️ این یکی *اندازه‌گیری‌نشده* است، از
+   حافظه آمده — اگر روزی لازم شد، اول بسنجش. */
 export const V4_LOG_RPCS = [
-  "https://base.drpc.org",
   "https://base.publicnode.com",
+  "https://base.gateway.tenderly.co",
   "https://mainnet.base.org",
 ];
 
@@ -145,12 +179,25 @@ export function v4PoolsFromGt(pools) {
 /* ---------------------------------------------------------------------
    windowFor — بازه‌ی بلاکِ جست‌وجو، حولِ تخمین
    --------------------------------------------------------------------- */
-export function windowFor(createdAtMs, anchor) {
+export function windowFor(createdAtMs, anchor, chunk) {
   const est = estimateBlock(createdAtMs, anchor);
   if (est === null) return null;
-  const from = Math.max(0, est - V4_WINDOW_BACK);
-  const to = Math.min(anchor.number, est + V4_WINDOW_FWD);
-  return [from, to];
+  const c = chunk == null ? 0 : chunk;
+  if (!Number.isInteger(c) || c < 0 || c >= V4_WINDOW_CHUNKS) return null;
+
+  /* تکه‌ی صفر دقیقاً حولِ تخمین است؛ هر تکه‌ی بعدی یک پنجره‌ی کاملِ دیگر
+     *عقب‌تر* — نه گشادتر. گشادکردنِ پنجره یعنی دوباره خوردن به همان سقفی
+     که اندازه‌گیری نشانش داد؛ تکه‌کردن یعنی همان پوشش با تماس‌هایی که همه
+     زیرِ سقف می‌مانند. */
+  /* ⚠️ مرزها *شاملِ* خودشان‌اند (eth_getLogs هر دو سر را می‌گیرد)، پس
+     پهنای هر تکه span+1 بلاک است و گامِ بینِ تکه‌ها هم باید span+1 باشد،
+     نه span — وگرنه تکه‌ها دقیقاً یک بلاک روی هم می‌افتند. همان یک بلاک را
+     پروبِ «تکه‌ی ۱ باید بی‌فاصله پیش از تکه‌ی ۰ باشد» گرفت. */
+  const step = V4_WINDOW_BACK + V4_WINDOW_FWD + 1;
+  const to = Math.min(anchor.number, est + V4_WINDOW_FWD) - c * step;
+  const from = to - (step - 1);
+  if (to < 0) return null;
+  return [Math.max(0, from), to];
 }
 
 function toMinimalHex(n) {
@@ -310,7 +357,7 @@ function parseAnchor(res) {
    V4_LOG_RPCS کارِ کالر است (worker/index.js)، نه این ماژول — این ماژول
    هیچ fetchی ندارد.
    pools همان آرایه‌ی خامِ data از /networks/base/tokens/<addr>/pools است. */
-export async function indexV4Keys({ tokenAddr, pools, rpcCall, now }) {
+export async function indexV4Keys({ tokenAddr, pools, rpcCall, now, collect }) {
   try {
     void now; // برای تزریق‌پذیریِ یک‌دست با بقیه‌ی ماژول‌ها نگه داشته شده؛ امروز مصرفی ندارد
 
@@ -332,23 +379,36 @@ export async function indexV4Keys({ tokenAddr, pools, rpcCall, now }) {
     let failed = 0;   // چند تا شکست خورد (پرتاب/غیرِ۲۰۰/بدنه‌ی بد/آرایه نبود)
     const found = [];
 
+    /* collect فقط وقتی آرایه است فعال می‌شود — همان الگوی opts.collect در
+       worker/verdict.js: یک مشاهده‌گرِ محض که هیچ تصمیمی از رویش گرفته
+       نمی‌شود و نبودنش هزینه و رفتار را بایت‌به‌بایت همان نگه می‌دارد. */
+    const log_ = Array.isArray(collect) ? collect : null;
+
     for (const row of rows) {
-      const window = windowFor(row.createdAtMs, anchor);
-      const params = window ? getLogsParams(window, row.poolId) : null;
-      if (!params) { failed++; continue; } // با rowهای عبورکرده از v4PoolsFromGt عملاً نمی‌افتد؛ فقط احتیاط
+      for (let chunk = 0; chunk < V4_WINDOW_CHUNKS; chunk++) {
+        const window = windowFor(row.createdAtMs, anchor, chunk);
+        const params = window ? getLogsParams(window, row.poolId) : null;
+        if (!params) { failed++; break; } // با rowهای عبورکرده عملاً نمی‌افتد؛ فقط احتیاط
 
-      const res = await rpcCall("eth_getLogs", [params]);
-      if (!res || res.ok !== true || !Array.isArray(res.result)) {
-        failed++;
-        continue;
-      }
-      answered++;
+        const res = await rpcCall("eth_getLogs", [params]);
+        const okShape = !!(res && res.ok === true && Array.isArray(res.result));
+        if (log_) log_.push({ poolId: row.poolId, chunk, from: window[0], to: window[1],
+                              answered: okShape, logs: okShape ? res.result.length : null });
+        if (!okShape) {
+          failed++;
+          break; // این اندپوینت‌ها همین حالا رد کردند؛ تکه‌ی بعدی هم همان را می‌گیرد
+        }
+        answered++;
 
-      for (const log of res.result) {
-        const key = decodeInitializeLog(log, row.poolId);
-        if (!key) continue;
-        if (!keyUsableFor(key, tokenAddr)) continue; // کلیدی که اصلاً این توکن را ندارد
-        found.push(key);
+        let hitHere = 0;
+        for (const log of res.result) {
+          const key = decodeInitializeLog(log, row.poolId);
+          if (!key) continue;
+          if (!keyUsableFor(key, tokenAddr)) continue; // کلیدی که اصلاً این توکن را ندارد
+          found.push(key);
+          hitHere++;
+        }
+        if (hitHere > 0) break; // کلیدِ این استخر پیدا شد — تکه‌ی عقب‌تر لازم نیست
       }
     }
 

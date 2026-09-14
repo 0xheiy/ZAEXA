@@ -5523,6 +5523,163 @@ console.log("[v4 verdict wiring] VD_V4_STAGE_COUNTERS frozen with exactly the WE
   if (savedCaches === undefined) delete globalThis.caches; else globalThis.caches = savedCaches;
 }
 
+/* --- ۲۷.۱۹ پنجره‌ی تکه‌ای و دو مشاهده‌گر — از دلِ اندازه‌گیریِ ۱۴ سپتامبر ----
+   🔴 اندازه‌گیری نشان داد mainnet.base.org سقفِ صریحِ ۲۰۰۰ بلاکی دارد و
+   base.drpc.org حتی ۵۰۰ را هم رد می‌کند (با متنِ خطایی که از ۱۰۰۰۰ حرف
+   می‌زند — متنِ خطا شاهد نیست). این بخش همان درس را پین می‌کند: پنجره باید
+   زیرِ سقفِ اندازه‌گیری‌شده بماند و پوششِ ازدست‌رفته با *تکه*‌ی دوم جبران
+   شود، نه با گشادکردنِ دوباره‌ی پنجره. */
+{
+  const MEASURED_HARD_CAP = 2000; // mainnet.base.org، کدِ -32614، اندازه‌گیریِ ۱۴ سپتامبر
+  const span = v4.V4_WINDOW_BACK + v4.V4_WINDOW_FWD;
+  ok(span <= MEASURED_HARD_CAP,
+    "the block window must stay under the measured 2000-block cap of mainnet.base.org — widen it with " +
+    "another CHUNK, never with a bigger span; got " + span);
+
+  ok(!v4.V4_LOG_RPCS.some((u) => u.includes("drpc.org")),
+    "base.drpc.org must stay out of V4_LOG_RPCS — it refused a 500-block range while its error text " +
+    "claimed a 10000-block limit; re-measure before putting it back, got " + JSON.stringify(v4.V4_LOG_RPCS));
+
+  const anchor = { number: 1_000_000, timestampMs: 1_700_000_000_000 };
+  const est = v4.estimateBlock(anchor.timestampMs - 200_000_000, anchor);
+  const c0 = v4.windowFor(anchor.timestampMs - 200_000_000, anchor, 0);
+  const c1 = v4.windowFor(anchor.timestampMs - 200_000_000, anchor, 1);
+  ok(c0 && c0[0] === est - v4.V4_WINDOW_BACK && c0[1] === est + v4.V4_WINDOW_FWD,
+    "chunk 0 must sit exactly around the estimate, got " + JSON.stringify(c0));
+  /* 🔴 بی‌فاصله و بدونِ هم‌پوشانی: مرزهای eth_getLogs شاملِ خودشان‌اند، پس
+     یک گامِ اشتباه یعنی یک بلاک دو بار پرسیده می‌شود. همین پروب همان
+     off-by-one را در نسخه‌ی اولِ همین تابع گرفت. */
+  ok(c1 && c1[1] === c0[0] - 1 && (c1[1] - c1[0]) === (c0[1] - c0[0]),
+    "chunk 1 must be the window immediately BEFORE chunk 0 — contiguous, no overlap, same width, got " +
+    JSON.stringify(c1) + " against " + JSON.stringify(c0));
+  ok(v4.windowFor(anchor.timestampMs, anchor, v4.V4_WINDOW_CHUNKS) === null,
+    "a chunk index at or past V4_WINDOW_CHUNKS must be null");
+  ok(v4.windowFor(anchor.timestampMs, anchor, -1) === null, "a negative chunk index must be null");
+  ok(v4.windowFor(anchor.timestampMs, anchor, 0.5) === null, "a non-integer chunk index must be null");
+
+  // --- تکه‌ی دوم فقط وقتی تکه‌ی اول خالی و خوش‌شکل بود ---
+  const TOKEN_ADDR = "0x" + "44".repeat(20);
+  const pools = [{ relationships: { dex: { data: { id: "uniswap-v4-base" } } },
+    attributes: { address: POOL_ID_A, pool_created_at: "2026-09-07T15:31:23Z" } }];
+  const anchorOk = { jsonrpc: "2.0", result: { number: "0xf4240", timestamp: "0x64fc0d80" } };
+
+  function makeRpc(logsPerCall) {
+    const calls = [];
+    return { calls, fn: async (method, params) => {
+      if (method === "eth_getBlockByNumber") return { ok: true, result: anchorOk.result };
+      calls.push(params[0]);
+      return logsPerCall(calls.length - 1);
+    } };
+  }
+
+  const emptyBoth = makeRpc(() => ({ ok: true, result: [] }));
+  const winLog = [];
+  const rEmpty = await v4.indexV4Keys({ tokenAddr: TOKEN_ADDR, pools, rpcCall: emptyBoth.fn, now: () => 0, collect: winLog });
+  ok(emptyBoth.calls.length === v4.V4_WINDOW_CHUNKS,
+    "an empty well-formed first chunk must be followed by the earlier chunk, got " + emptyBoth.calls.length + " calls");
+  ok(rEmpty.reason === "no-log", "both chunks answering empty must still be no-log, got " + JSON.stringify(rEmpty));
+  ok(winLog.length === v4.V4_WINDOW_CHUNKS && winLog[0].chunk === 0 && winLog[1].chunk === 1 &&
+     winLog[0].answered === true && winLog[0].logs === 0 &&
+     typeof winLog[0].from === "number" && typeof winLog[0].to === "number",
+    "the window observer must record one row per chunk with its bounds and log count, got " + JSON.stringify(winLog));
+
+  const goodLog = v4BuildLog({
+    poolId: POOL_ID_A, currency0: TOKEN_ADDR, currency1: vd.NATIVE_ADDR,
+    feeWord: v4wNum(500), tickWord: v4wNum(10), hooksWord: v4wAddrWord(vd.NATIVE_ADDR),
+  });
+  const hitFirst = makeRpc(() => ({ ok: true, result: [goodLog] }));
+  const rHit = await v4.indexV4Keys({ tokenAddr: TOKEN_ADDR, pools, rpcCall: hitFirst.fn, now: () => 0 });
+  ok(hitFirst.calls.length === 1 && rHit.reason === "ok",
+    "a hit in the first chunk must not spend a second call, got " + hitFirst.calls.length + " calls / " + JSON.stringify(rHit));
+
+  const failFirst = makeRpc(() => ({ ok: false, result: null }));
+  const rFail = await v4.indexV4Keys({ tokenAddr: TOKEN_ADDR, pools, rpcCall: failFirst.fn, now: () => 0 });
+  ok(failFirst.calls.length === 1 && rFail.reason === "rpc-down",
+    "a REFUSED first chunk must not retry the earlier chunk (the endpoints just refused, the range is not " +
+    "the question) and must stay rpc-down, got " + failFirst.calls.length + " calls / " + JSON.stringify(rFail));
+
+  // --- مشاهده‌گرِ rpcCallBase: فقط hostname و فقط کدِ عددی ---
+  const savedFetch = globalThis.fetch;
+  globalThis.fetch = async (u) => {
+    const url = String(u);
+    if (url.includes("publicnode")) return new Response("nope", { status: 403 });
+    if (url.includes("tenderly")) {
+      return new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, error: { code: -32614, message: "limited to a 2,000 range" } }), { status: 200 });
+    }
+    return new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, result: [] }), { status: 200 });
+  };
+  const rpcLog = [];
+  const out = await rpcCallBase("eth_getLogs", [{}], 500, rpcLog);
+  ok(out.ok === true, "rpcCallBase must still succeed on the third endpoint, got " + JSON.stringify(out));
+  ok(rpcLog.length === 3 && rpcLog[0].stage === "status" && rpcLog[0].status === 403 &&
+     rpcLog[1].stage === "rpc-error" && rpcLog[1].code === -32614 && rpcLog[2].stage === "ok",
+    "the rpc observer must record each attempt's stage, HTTP status and NUMERIC JSON-RPC code, got " + JSON.stringify(rpcLog));
+  ok(rpcLog.every((r) => typeof r.h === "string" && !r.h.includes("://") && !r.h.includes("/")),
+    "the rpc observer must record hostnames only — never a URL, which can carry a key in its path or " +
+    "query, got " + JSON.stringify(rpcLog.map((r) => r.h)));
+
+  const rpcLogAbsent = await rpcCallBase("eth_getLogs", [{}], 500);
+  ok(rpcLogAbsent.ok === true, "rpcCallBase without an observer must behave exactly as before");
+  globalThis.fetch = savedFetch;
+}
+
+/* --- ۲۷.۲۰ GET /vd/v4/<address>?debug=1 --- */
+{
+  const savedFetch = globalThis.fetch;
+  const ADDR = "0x" + "7".repeat(40);
+  const kv = { store: new Map(), puts: [],
+    get: async (k) => (kv.store.has(k) ? kv.store.get(k) : null),
+    put: async (k, v, o) => { kv.store.set(k, v); kv.puts.push({ k, v, o }); } };
+
+  globalThis.fetch = async (u, o) => {
+    const url = String(u);
+    if (url.includes("/tokens/" + ADDR + "/pools")) {
+      return new Response(JSON.stringify({ data: [
+        { relationships: { dex: { data: { id: "uniswap-v4-base" } } },
+          attributes: { address: POOL_ID_A, pool_created_at: "2026-09-07T15:31:23Z" } },
+      ] }), { status: 200 });
+    }
+    /* انکر عمداً جواب می‌دهد و فقط eth_getLogs بلاک می‌شود — دقیقاً همان
+       چیزی که سایتِ زنده نشان داد: reason=rpc-down در حالی که خودِ آرپی‌سی
+       در دسترس بود. اگر انکر هم بلاک شود، دلیل no-anchor می‌شود و این پروب
+       اصلاً به لاگِ getLogs نمی‌رسد. */
+    if (v4.V4_LOG_RPCS.includes(url)) {
+      const req = JSON.parse(o && o.body ? o.body : "{}");
+      if (req.method === "eth_getBlockByNumber") {
+        return new Response(JSON.stringify({ jsonrpc: "2.0", id: 1,
+          result: { number: "0xf4240", timestamp: "0x64fc0d80" } }), { status: 200 });
+      }
+      return new Response("blocked", { status: 403 });
+    }
+    throw new Error("unexpected upstream call in /vd/v4 debug test: " + url);
+  };
+
+  const resPlain = await call("/vd/v4/" + ADDR, undefined, { ASSETS, ZX_KV: kv });
+  const bodyPlain = await resPlain.json();
+  ok(bodyPlain.reason === "rpc-down" && bodyPlain.rpc === undefined && bodyPlain.windows === undefined,
+    "without ?debug=1 the response shape must stay exactly what it was, got " + JSON.stringify(bodyPlain));
+
+  const resDebug = await call("/vd/v4/" + ADDR + "?debug=1", undefined, { ASSETS, ZX_KV: kv });
+  const bodyDebug = await resDebug.json();
+  ok(bodyDebug.reason === "rpc-down" && Array.isArray(bodyDebug.rpc) && bodyDebug.rpc.length > 0,
+    "?debug=1 must report every endpoint attempt — that is the whole point of it, got " + JSON.stringify(bodyDebug));
+  ok(bodyDebug.rpc.every((r) => !String(r.h).includes("://")),
+    "?debug=1 must never print a URL, got " + JSON.stringify(bodyDebug.rpc));
+  ok(bodyDebug.rpc.some((r) => r.m === "eth_getBlockByNumber") === false ||
+     bodyDebug.rpc.every((r) => typeof r.status === "number"),
+    "every recorded attempt must carry a numeric status");
+  ok(kv.puts.length === 0, "?debug=1 must not change the never-store rule for rpc-down, got " + JSON.stringify(kv.puts));
+
+  globalThis.fetch = savedFetch;
+}
+
+console.log("[v4 window+debug] the block window stays under the measured 2000-block cap and widens by " +
+  "CHUNK not by span; base.drpc.org is kept out (it refused 500 blocks while its error text claimed " +
+  "10000); chunk 1 is the contiguous earlier window and is tried only when chunk 0 answered empty, never " +
+  "when it was refused; and both observers (rpcCallBase attempts, indexV4Keys windows) are pure add-ons " +
+  "that record hostnames and numeric codes only, surfacing through GET /vd/v4/<address>?debug=1 without " +
+  "changing the plain response shape or the never-store rule");
+
 console.log("[v4 index wiring] worker/index.js ok — v4StoreTtl/storeV4Result follow the ok/miss/never-write " +
   "rule exactly (ok->V4_KEY_TTL_S, no-v4-pool/no-pool-id/no-created-at/no-log->V4_MISS_TTL_S, rpc-down/" +
   "no-anchor/no-kv->nothing written); readV4Entry tells \"never indexed\" (found:false) apart from a " +

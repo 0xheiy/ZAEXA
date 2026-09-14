@@ -611,7 +611,23 @@ const V4_LOG_TIMEOUT_MS = 1500;
    می‌خواهد و نمی‌داند پشتش چند اندپوینت است.
    🔴 هرگز URLِ هیچ اندپوینتی را لاگ یا برنگردان — همان قاعده‌ی بالای
    baseRpcsFor، بدونِ هیچ استثنایی برای این تابع. */
-async function rpcCallBase(method, params, timeoutMs) {
+async function rpcCallBase(method, params, timeoutMs, collect) {
+  /* collect یک مشاهده‌گرِ محض است (همان الگوی opts.collect در
+     worker/verdict.js): وقتی آرایه نباشد، این تابع بایت‌به‌بایت همان چیزی
+     است که بود. هرگز هیچ تصمیمی از رویش گرفته نمی‌شود.
+     🔴 فقط hostname ثبت می‌شود، هرگز خودِ URL — همان قاعده‌ی بالای
+     baseRpcsFor. و دلیلِ رد همیشه از کدِ عددی می‌آید (وضعیتِ HTTP و کدِ
+     JSON-RPC)، هرگز از متنِ پیامِ خطا: متنِ خطای drpc در اندازه‌گیریِ
+     ۱۴ سپتامبر از ۱۰۰۰۰ بلاک حرف می‌زد در حالی که روی ۵۰۰ بلاک هم رد
+     می‌کرد — متنِ خطا شاهد نیست. */
+  const log_ = Array.isArray(collect) ? collect : null;
+  function note(rpcUrl, stage, status, code) {
+    if (!log_) return;
+    let h = "unparseable-url";
+    try { h = new URL(rpcUrl).hostname; } catch (e) { /* عمداً خاموش */ }
+    log_.push({ h, m: method, stage, status, code });
+  }
+
   for (const rpcUrl of V4_LOG_RPCS) {
     const ac = new AbortController();
     const timer = setTimeout(() => ac.abort(), timeoutMs);
@@ -625,13 +641,26 @@ async function rpcCallBase(method, params, timeoutMs) {
       });
     } catch (e) {
       clearTimeout(timer);
+      note(rpcUrl, "throw", 0, null);
       continue; // پرتابِ شبکه‌ای/تایم‌اوت → این اندپوینت نامعلوم، بعدی را امتحان کن
     }
     clearTimeout(timer);
-    if (!res || res.status !== 200) continue; // غیرِ ۲۰۰ → این اندپوینت نامعلوم
+    if (!res || res.status !== 200) {
+      note(rpcUrl, "status", res ? res.status : 0, null);
+      continue; // غیرِ ۲۰۰ → این اندپوینت نامعلوم
+    }
     let body;
-    try { body = await res.json(); } catch (e) { continue; } // بدنه‌ی ناخوانا → نامعلوم
-    if (!body || typeof body !== "object" || body.error) continue; // خطای JSON-RPC → نامعلوم
+    try { body = await res.json(); } catch (e) {
+      note(rpcUrl, "body", res.status, null);
+      continue; // بدنه‌ی ناخوانا → نامعلوم
+    }
+    if (!body || typeof body !== "object" || body.error) {
+      const code = body && body.error && typeof body.error === "object" &&
+        typeof body.error.code === "number" ? body.error.code : null;
+      note(rpcUrl, "rpc-error", res.status, code);
+      continue; // خطای JSON-RPC → نامعلوم
+    }
+    note(rpcUrl, "ok", res.status, null);
     return { ok: true, result: body.result };
   }
   return { ok: false, result: null }; // هیچ اندپوینتی جوابِ خوش‌شکل نداد
@@ -729,7 +758,12 @@ async function readV4Keys(addr, env) {
    GET /vd/v4/<address> صدا زده می‌شود — یک‌جا نوشته شده تا این دو مسیر
    هرگز از هم جدا نیفتند، دقیقاً همان استدلالِ همیشگیِ این فایل
    (cachedVerdict بالاتر برای verdict همین کار را می‌کند). */
-async function runV4Index(addr, env) {
+async function runV4Index(addr, env, diag) {
+  /* diag، وقتی شیء باشد، دو آرایه‌ی مشاهده‌گر می‌گیرد: rpc (به‌ازای هر تلاشِ
+     اندپوینت) و windows (به‌ازای هر تکه‌ی بلاک). فقط GET /vd/v4/…?debug=1
+     آن را می‌دهد؛ مسیرِ عادی هیچ‌کدام را نمی‌سازد. */
+  const rpcLog = diag && Array.isArray(diag.rpc) ? diag.rpc : null;
+  const winLog = diag && Array.isArray(diag.windows) ? diag.windows : null;
   const pools = await fetchV4Pools(addr, env);
   let result;
   if (!Array.isArray(pools)) {
@@ -740,8 +774,8 @@ async function runV4Index(addr, env) {
        «کجا ایستاد» را کور می‌کند که این اندپوینت برای دیدنش ساخته شده. */
     result = { keys: [], reason: "no-pools" };
   } else {
-    const rpcCall = (method, params) => rpcCallBase(method, params, V4_LOG_TIMEOUT_MS);
-    result = await indexV4Keys({ tokenAddr: addr, pools, rpcCall, now: Date.now });
+    const rpcCall = (method, params) => rpcCallBase(method, params, V4_LOG_TIMEOUT_MS, rpcLog);
+    result = await indexV4Keys({ tokenAddr: addr, pools, rpcCall, now: Date.now, collect: winLog });
   }
   const stored = await storeV4Result(addr, env, result);
   return { reason: result.reason, keys: Array.isArray(result.keys) ? result.keys : [], stored };
@@ -1008,11 +1042,20 @@ async function diagVerdictV4(url, env) {
     return vdDone(200, { addr, reason: "no-kv", keys: [], stored: false, store: false, ms: Date.now() - t0 });
   }
 
-  const result = await runV4Index(addr, env);
-  return vdDone(200, {
+  /* ?debug=1 — همان گذر، ولی با دو مشاهده‌گر. چرا لازم است: «rpc-down» فقط
+     می‌گوید هیچ اندپوینتی جواب نداد، نه اینکه کدام و با چه کدی رد کرد. یک
+     اندازه‌گیری از ویندوزِ حسام هم این را نمی‌گوید، چون آن‌جا کدِ ما اجرا
+     نمی‌شود. این تنها جایی است که پاسخِ واقعی دیده می‌شود.
+     🔴 هیچ URLی بیرون نمی‌رود — فقط hostname، و فقط کدهای عددی. */
+  const debug = url.searchParams.get("debug") === "1";
+  const diag = debug ? { rpc: [], windows: [] } : null;
+  const result = await runV4Index(addr, env, diag);
+  const body = {
     addr, reason: result.reason, keys: result.keys, stored: result.stored,
     store: true, ms: Date.now() - t0,
-  });
+  };
+  if (debug) { body.rpc = diag.rpc; body.windows = diag.windows; }
+  return vdDone(200, body);
 }
 
 async function diagVerdict(request, url, env, ctx) {
