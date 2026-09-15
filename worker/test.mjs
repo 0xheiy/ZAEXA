@@ -3578,7 +3578,7 @@ function isSolidlyReqId(id) { return PROBE_KIND_BY_ID.get(id) === "SOLIDLY"; }
   // ۱۳. ترتیب و مجموعه‌ی دقیقِ کلیدهای ردیف — شکلِ v۱ گسترش‌یافته
   const FROZEN_ROW_KEYS = [
     "chain", "address", "symbol", "name", "v", "checkKind", "checkedAt", "poolCreatedAt",
-    "priceUsd", "reserveUsd", "vol24hUsd", "fdvUsd", "dex",
+    "priceUsd", "reserveUsd", "vol24hUsd", "fdvUsd", "dex", "why",
   ];
   ok(JSON.stringify(Object.keys(rowBase)) === JSON.stringify(FROZEN_ROW_KEYS),
      "reportRow's key order/set must match the frozen list exactly, got " +
@@ -3685,8 +3685,8 @@ function isSolidlyReqId(id) { return PROBE_KIND_BY_ID.get(id) === "SOLIDLY"; }
   const res9 = await runReportPass({
     kv: null,
     fetchPools: async () => { fpCalls9++; return []; },
-    metaOf: async () => null,
-    verdictOf: async () => null,
+    metaOf: async () => ({ meta: null, why: "meta:429" }),
+    verdictOf: async () => ({ v: null, why: "no-quote" }),
     now: () => NOW_MS,
     sleep: async () => {},
   });
@@ -3698,12 +3698,14 @@ function isSolidlyReqId(id) { return PROBE_KIND_BY_ID.get(id) === "SOLIDLY"; }
   const kvA = makeKv();
   const resThrow = await runReportPass({
     kv: kvA, fetchPools: async () => { throw new Error("upstream is down"); },
-    metaOf: async () => null, verdictOf: async () => null, now: () => NOW_MS, sleep: async () => {},
+    metaOf: async () => ({ meta: null, why: "meta:429" }), verdictOf: async () => ({ v: null, why: "no-quote" }),
+    now: () => NOW_MS, sleep: async () => {},
   });
   ok(resThrow.checked === 0 && resThrow.added === 0, "a throwing fetchPools must yield {checked:0, added:0}");
   const resBad = await runReportPass({
     kv: kvA, fetchPools: async () => ({ not: "an array" }),
-    metaOf: async () => null, verdictOf: async () => null, now: () => NOW_MS, sleep: async () => {},
+    metaOf: async () => ({ meta: null, why: "meta:429" }), verdictOf: async () => ({ v: null, why: "no-quote" }),
+    now: () => NOW_MS, sleep: async () => {},
   });
   ok(resBad.checked === 0 && resBad.added === 0, "a non-array fetchPools result must yield {checked:0, added:0}");
 
@@ -3714,14 +3716,16 @@ function isSolidlyReqId(id) { return PROBE_KIND_BY_ID.get(id) === "SOLIDLY"; }
   const rows = [poolRow(mkAddr(1), 10000, 0.001, 500.5, 9999.99), poolRow(mkAddr(2), 10000, 0.002, 10, 5000)];
   let sleepCalls = 0; const sleepArgs = [];
   const sleep = async (ms) => { sleepCalls++; sleepArgs.push(ms); };
-  const metaOf = async (addr) => (addr === mkAddr(1) ? null : { symbol: "T2", name: "Token Two" });
+  const metaOf = async (addr) => (addr === mkAddr(1)
+    ? { meta: null, why: "meta:429" }
+    : { meta: { symbol: "T2", name: "Token Two" }, why: null });
   let verdictActive = 0, sawOverlap = false, verdictCalls = 0;
   const verdictOf = async (addr, meta) => {
     verdictCalls++; verdictActive++;
     if (verdictActive > 1) sawOverlap = true;
     await Promise.resolve();
     verdictActive--;
-    return addr === mkAddr(1) ? null : "sell";
+    return addr === mkAddr(1) ? { v: null, why: "no-quote" } : { v: "sell", why: null };
   };
   const res = await runReportPass({ kv, fetchPools: async () => rows, metaOf, verdictOf, now: () => NOW_MS, sleep });
   ok(res.checked === 2, "two fresh tokens must yield checked:2, got " + res.checked);
@@ -3770,7 +3774,7 @@ function isSolidlyReqId(id) { return PROBE_KIND_BY_ID.get(id) === "SOLIDLY"; }
   const manyRows = Array.from({ length: 40 }, (_, i) => poolRow(mkAddr(5000 + i), 9000, 1, 10, 100));
   const resCap3 = await runReportPass({
     kv: kvCap, fetchPools: async () => manyRows,
-    metaOf: async () => null, verdictOf: async () => null,
+    metaOf: async () => ({ meta: null, why: "meta:429" }), verdictOf: async () => ({ v: null, why: "no-quote" }),
     now: () => NOW_MS, sleep: async () => {}, maxTokens: 3,
   });
   ok(resCap3.checked === 3,
@@ -3779,7 +3783,7 @@ function isSolidlyReqId(id) { return PROBE_KIND_BY_ID.get(id) === "SOLIDLY"; }
   const kvCap2 = makeKv();
   const resCapHuge = await runReportPass({
     kv: kvCap2, fetchPools: async () => manyRows,
-    metaOf: async () => null, verdictOf: async () => null,
+    metaOf: async () => ({ meta: null, why: "meta:429" }), verdictOf: async () => ({ v: null, why: "no-quote" }),
     now: () => NOW_MS, sleep: async () => {}, maxTokens: 9999,
   });
   ok(resCapHuge.checked === REPORT_MAX_TOKENS_PER_RUN,
@@ -3789,7 +3793,7 @@ function isSolidlyReqId(id) { return PROBE_KIND_BY_ID.get(id) === "SOLIDLY"; }
   const kvCap3 = makeKv();
   const resCapNone = await runReportPass({
     kv: kvCap3, fetchPools: async () => manyRows,
-    metaOf: async () => null, verdictOf: async () => null,
+    metaOf: async () => ({ meta: null, why: "meta:429" }), verdictOf: async () => ({ v: null, why: "no-quote" }),
     now: () => NOW_MS, sleep: async () => {},
   });
   ok(resCapNone.checked === REPORT_MAX_TOKENS_PER_RUN,
@@ -5856,7 +5860,517 @@ console.log("[v4 index wiring] worker/index.js ok — v4StoreTtl/storeV4Result f
   "and ogFetchVerdict schedules exactly one background index pass via ctx.waitUntil only when nothing is " +
   "stored yet, never again once an entry (even a miss) exists");
 
+/* ---- ۲۷ب. چرا «نامعلوم» — واژه‌نامه‌ی بسته‌ی why روی Base ----
+   مسئله (بالای این فایل، ۲۰۲۶-۰۹-۱۴): گزارشِ روزانه‌ی زنده ۱۰۶ از ۲۱۰ ردیف
+   را با v:null («نتوانستیم بررسی کنیم») دارد، و امروز هیچ‌جا ثبت نمی‌شود
+   *کجا* هرکدام متوقف شد — هر نظریه (سقفِ نرخِ GeckoTerminal حینِ کرون،
+   توکن‌های Uniswap v4 بدونِ استخرِ قابلِ‌کوت، مهلت، RPC) فقط یک حدس است.
+   این بخش یک ابزارِ اندازه‌گیری است، نه چیزِ دیگر: verdict/کش/شمارِ
+   فراخوانی‌ها را عوض نمی‌کند، فقط ثابت می‌کند why دقیقاً همان چیزی را
+   می‌گوید که واقعاً اتفاق افتاد. */
+{
+  // آ) isBaseWhy — واژه‌نامه‌ی بسته: هر عضوِ VD_BASE_WHY، به‌علاوه‌ی
+  // پیشوند+وضعیتِ عددیِ ۱ تا ۳ رقمی برای "meta"/"cover"، و نه چیزِ دیگر.
+  {
+    for (const label of vd.VD_BASE_WHY) {
+      ok(vd.isBaseWhy(label) === true,
+         "isBaseWhy(" + JSON.stringify(label) + ") must be true — it is a frozen VD_BASE_WHY member");
+    }
+    for (const s of ["meta:429", "cover:0", "cover:503"]) {
+      ok(vd.isBaseWhy(s) === true,
+         "isBaseWhy(" + JSON.stringify(s) + ") must be true — prefix+1-3-digit-status is allowed");
+    }
+    const bad = ["meta:", "meta:4290", "meta:-1", "meta:abc", "cover", "rpc:500", "", null, 42,
+      "meta:429 ", "https://x"];
+    for (const s of bad) {
+      ok(vd.isBaseWhy(s) === false, "isBaseWhy(" + JSON.stringify(s) + ") must be false");
+    }
+  }
 
+  // ب) fetchVerdict + opts.whyOut — یک سناریو به‌ازای هر دلیل، با
+  // fetchImpl/now/deadlineAt تزریقی؛ برای هرکدام: whyOut.why دقیقاً همان
+  // دلیل، verdict با/بدونِ whyOut یکسان، و شمارِ فراخوانیِ fetch با/بدونِ
+  // whyOut یکسان — این تابع فقط مشاهده می‌کند، هرگز تصمیم نمی‌گیرد.
+  {
+    const w = (n) => BigInt(n).toString(16).padStart(64, "0");
+    const mkStatic4 = (n) => "0x" + w(n) + w(0) + w(0) + w(0);
+    const jsonRes = (body, status = 200) => new Response(JSON.stringify(body), {
+      status, headers: { "content-type": "application/json" },
+    });
+    const TOKEN = "0x5151515151515151515151515151515151515151";
+    const meta = { decimals: 18, priceUsd: 2000 };
+    const usdcHexLower = vd.USDC_ADDR.slice(2).toLowerCase();
+    const REAL_USDC_KEY = {
+      currency0: TOKEN.toLowerCase(), currency1: vd.USDC_ADDR.toLowerCase(),
+      fee: 9990, tickSpacing: 100, hooks: vd.NATIVE_ADDR,
+    };
+    // همه‌جا "0x" (SOLIDLY هرگز صفر را اثبات نمی‌داند) → مرحله مبهم می‌ماند
+    const ambiguous = (r) => ({ id: r.id, result: "0x" });
+    // کدِ ۳ برای SOLIDLY، "0x" برای بقیه → مرحله تمیز nosell می‌شود
+    const cleanNosell = (r) => (isSolidlyReqId(r.id) ? { id: r.id, error: { code: 3 } } : { id: r.id, result: "0x" });
+
+    async function twice(reason, meta_, buildOpts) {
+      let calls1 = 0;
+      const v1 = await vd.fetchVerdict(TOKEN, meta_, Object.assign({}, buildOpts(() => calls1++)));
+      let calls2 = 0;
+      const whyOut = {};
+      const v2 = await vd.fetchVerdict(TOKEN, meta_,
+        Object.assign({}, buildOpts(() => calls2++), { whyOut }));
+      ok(v1 === v2, "[" + reason + "] opts.whyOut must never change the returned verdict: without=" +
+        v1 + " with=" + v2);
+      ok(calls1 === calls2, "[" + reason + "] opts.whyOut must never change the fetch call count: without=" +
+        calls1 + " with=" + calls2);
+      ok(whyOut.why === reason,
+        "[" + reason + "] whyOut.why must equal " + JSON.stringify(reason) + ", got " + JSON.stringify(whyOut.why));
+      return v2;
+    }
+
+    // no-amount — بدونِ حتی یک فراخوانی
+    await twice("no-amount", { decimals: 18, priceUsd: null }, (tick) => ({
+      fetchImpl: async () => { tick(); return jsonRes([]); },
+      rpcs: ["https://rpc-why-1.example"],
+    }));
+
+    // deadline — مهلت پیش از اولین مرحله، بدونِ حتی یک فراخوانی
+    await twice("deadline", meta, (tick) => ({
+      fetchImpl: async () => { tick(); return jsonRes([]); },
+      now: () => 10_000, deadlineAt: 5_000, rpcs: ["https://rpc-why-2.example"],
+    }));
+
+    // rpc-down — هر دو اندپوینت پرتاب می‌کنند
+    await twice("rpc-down", meta, (tick) => ({
+      fetchImpl: async () => { tick(); throw new Error("network is down"); },
+      rpcs: ["https://rpc-why-3a.example", "https://rpc-why-3b.example"],
+    }));
+
+    // canary-dead — هر دو اندپوینت ۲۰۰ می‌دهند ولی کاناری‌شان مرده است
+    await twice("canary-dead", meta, (tick) => ({
+      fetchImpl: async (url, init) => {
+        tick();
+        JSON.parse(init.body); // فقط شکل را می‌سنجیم؛ محتوا لازم نیست
+        return jsonRes([{ id: 0, result: mkStatic4(0) }]); // کاناریِ صفر → مرده
+      },
+      rpcs: ["https://rpc-why-4a.example", "https://rpc-why-4b.example"],
+    }));
+
+    // no-quote — مرحله‌ی WETH مبهم، بدونِ کلیدِ واقعیِ USDC
+    await twice("no-quote", meta, (tick) => ({
+      fetchImpl: async (url, init) => {
+        tick();
+        const reqs = JSON.parse(init.body);
+        return jsonRes(reqs.map((r) => (r.id === 0 ? { id: 0, result: mkStatic4(5) } : ambiguous(r))));
+      },
+      rpcs: ["https://rpc-why-5.example"],
+    }));
+
+    // proof-rpc — مرحله‌ی WETH مبهم + کلیدِ واقعیِ USDC، ولی گذرِ اثبات ۵۰۰ می‌گیرد
+    await twice("proof-rpc", meta, (tick) => ({
+      fetchImpl: async (url, init) => {
+        tick();
+        const reqs = JSON.parse(init.body);
+        const isProof = reqs.some((r) => r.id >= 1 && r.params[0].data.includes(usdcHexLower));
+        if (isProof) return new Response("boom", { status: 500 });
+        return jsonRes(reqs.map((r) => (r.id === 0 ? { id: 0, result: mkStatic4(5) } : ambiguous(r))));
+      },
+      rpcs: ["https://rpc-why-6.example"], v4Keys: [REAL_USDC_KEY],
+    }));
+
+    // proof-no-quote — همان، ولی کلیدِ واقعی ریوِرت می‌دهد
+    await twice("proof-no-quote", meta, (tick) => ({
+      fetchImpl: async (url, init) => {
+        tick();
+        const reqs = JSON.parse(init.body);
+        const isProof = reqs.some((r) => r.id >= 1 && r.params[0].data.includes(usdcHexLower));
+        return jsonRes(reqs.map((r) => {
+          if (r.id === 0) return { id: 0, result: mkStatic4(5) };
+          if (!isProof) return ambiguous(r);
+          return { id: r.id, error: { code: 3 } };
+        }));
+      },
+      rpcs: ["https://rpc-why-7.example"], v4Keys: [REAL_USDC_KEY],
+    }));
+
+    // usdc-rpc — مرحله‌ی WETH تمیز nosell، مرحله‌ی USDC ۵۰۰ می‌گیرد
+    await twice("usdc-rpc", meta, (tick) => ({
+      fetchImpl: async (url, init) => {
+        tick();
+        const reqs = JSON.parse(init.body);
+        const isStageB = reqs.some((r) => r.id >= 1 && r.params[0].data.includes(usdcHexLower));
+        if (isStageB) return new Response("boom", { status: 500 });
+        return jsonRes(reqs.map((r) => (r.id === 0 ? { id: 0, result: mkStatic4(5) } : cleanNosell(r))));
+      },
+      rpcs: ["https://rpc-why-8.example"],
+    }));
+
+    // usdc-no-proof — مرحله‌ی WETH تمیز nosell، مرحله‌ی USDC مبهم می‌ماند
+    await twice("usdc-no-proof", meta, (tick) => ({
+      fetchImpl: async (url, init) => {
+        tick();
+        const reqs = JSON.parse(init.body);
+        const isStageB = reqs.some((r) => r.id >= 1 && r.params[0].data.includes(usdcHexLower));
+        return jsonRes(reqs.map((r) => {
+          if (r.id === 0) return { id: 0, result: mkStatic4(5) };
+          if (!isStageB) return cleanNosell(r);
+          return ambiguous(r); // مرحله‌ی B هم با همان صفرِ SOLIDLY مبهم می‌ماند
+        }));
+      },
+      rpcs: ["https://rpc-why-9.example"],
+    }));
+
+    // sell و nosell — whyOut.why باید undefined بماند
+    {
+      let calls1 = 0, calls2 = 0;
+      const sellImpl = (tick) => async (url, init) => {
+        tick();
+        const reqs = JSON.parse(init.body);
+        return jsonRes(reqs.map((r) => r.id === 0
+          ? { id: 0, result: mkStatic4(5) }
+          : { id: r.id, result: r.id === 1 ? mkStatic4(777) : "0x" }));
+      };
+      const v1 = await vd.fetchVerdict(TOKEN, meta,
+        { fetchImpl: sellImpl(() => calls1++), rpcs: ["https://rpc-why-10.example"] });
+      const whyOut = {};
+      const v2 = await vd.fetchVerdict(TOKEN, meta,
+        { fetchImpl: sellImpl(() => calls2++), rpcs: ["https://rpc-why-10.example"], whyOut });
+      ok(v1 === "sell" && v2 === "sell" && calls1 === calls2,
+         "[sell] verdict/call-count must be identical with/without whyOut, got " + v1 + "/" + v2);
+      ok(whyOut.why === undefined,
+         "[sell] whyOut.why must stay undefined on a sell verdict, got " + JSON.stringify(whyOut));
+    }
+    {
+      let calls1 = 0, calls2 = 0;
+      const nosellImpl = (tick) => async (url, init) => {
+        tick();
+        const reqs = JSON.parse(init.body);
+        return jsonRes(reqs.map((r) => (r.id === 0 ? { id: 0, result: mkStatic4(5) } : cleanNosell(r))));
+      };
+      const v1 = await vd.fetchVerdict(TOKEN, meta,
+        { fetchImpl: nosellImpl(() => calls1++), rpcs: ["https://rpc-why-11.example"] });
+      const whyOut = {};
+      const v2 = await vd.fetchVerdict(TOKEN, meta,
+        { fetchImpl: nosellImpl(() => calls2++), rpcs: ["https://rpc-why-11.example"], whyOut });
+      ok(v1 === "nosell" && v2 === "nosell" && calls1 === calls2,
+         "[nosell] verdict/call-count must be identical with/without whyOut, got " + v1 + "/" + v2);
+      ok(whyOut.why === undefined,
+         "[nosell] whyOut.why must stay undefined on a nosell verdict, got " + JSON.stringify(whyOut));
+    }
+  }
+
+  // ج) GET /vd/<Base>(بدونِ probe=1)، سرتاسری از رویِ worker.fetch — هر why
+  // که اینجا دیده می‌شود باید isBaseWhy را پاس کند، و هیچ بدنه‌ای هرگز نباید
+  // "http"/"://" یا CG_KEYِ همین بخش را درز بدهد.
+  const allWhyC = [];
+  const allBodiesC = [];
+  {
+    const { UPSTREAM_KEYED: UK_C } = await import("./index.js");
+    const CG_SECRET_C = "SECRET-CG-KEY-FOR-27B";
+    const envC = { ASSETS, CG_KEY: CG_SECRET_C };
+    const w = (n) => BigInt(n).toString(16).padStart(64, "0");
+    const mkStatic4 = (n) => "0x" + w(n) + w(0) + w(0) + w(0);
+    const jsonResC = (body, status = 200) => new Response(JSON.stringify(body), {
+      status, headers: { "content-type": "application/json" },
+    });
+    const gtMeta = (priceUsd) => new Response(JSON.stringify({ data: { attributes: {
+      name: "Why C Token", symbol: "WHYC", total_reserve_in_usd: "1000",
+      decimals: 18, price_usd: priceUsd,
+    } } }), { status: 200, headers: { "content-type": "application/json" } });
+    const cleanNosellRow = (r) => (isSolidlyReqId(r.id) ? { id: r.id, error: { code: 3 } } : { id: r.id, result: "0x" });
+    // آدرسِ متمایز + cf-connecting-ip متمایز به‌ازای هر سناریو — دومی برای
+    // اینکه محدودکننده‌ی نرخ (بستهٔ «vd») بینِ سناریوها قاطی نشود.
+    let ipTailC = 230;
+    async function probe(addr, dispatch) {
+      const savedFetch = globalThis.fetch;
+      globalThis.fetch = dispatch;
+      ipTailC++;
+      const res = await call("/vd/" + addr, { headers: { "cf-connecting-ip": "203.0.113." + ipTailC } }, envC);
+      const raw = await res.text();
+      allBodiesC.push(raw);
+      globalThis.fetch = savedFetch;
+      return { res, body: JSON.parse(raw) };
+    }
+
+    // C۱) اندپوینتِ tokens غیر-۲۰۰ (۴۲۹) → why:"meta:429"، دقیقاً ms,v,why
+    {
+      const { res, body } = await probe("0x" + "1".repeat(40), async (url) => {
+        const u = String(url);
+        if (u.startsWith(UK_C)) return new Response("rate limited", { status: 429 });
+        throw new Error("unexpected upstream call in why-C1: " + u);
+      });
+      ok(res.status === 200, "a 429 from the GT tokens endpoint must still answer 200, got " + res.status);
+      ok(body.v === null && body.why === "meta:429",
+         "a 429 from the GT tokens endpoint must surface why:\"meta:429\", got " + JSON.stringify(body));
+      ok(JSON.stringify(Object.keys(body).sort()) === JSON.stringify(["ms", "v", "why"]),
+         "the body must carry exactly ms,v,why, got " + JSON.stringify(Object.keys(body)));
+      allWhyC.push(body.why);
+    }
+
+    // C۲) fetch به اندپوینتِ tokens پرتاب می‌کند → why:"meta:0"
+    {
+      const { body } = await probe("0x" + "2".repeat(40), async (url) => {
+        const u = String(url);
+        if (u.startsWith(UK_C)) throw new Error("network is down");
+        throw new Error("unexpected upstream call in why-C2: " + u);
+      });
+      ok(body.v === null && body.why === "meta:0",
+         "a thrown GT tokens fetch must surface why:\"meta:0\", got " + JSON.stringify(body));
+      allWhyC.push(body.why);
+    }
+
+    // C۳) متادیتا سالم ولی price_usd "0" (بدونِ مقدار) → why:"no-amount"، بدونِ فراخوانیِ RPC
+    {
+      let rpcCalls = 0;
+      const { body } = await probe("0x" + "3".repeat(40), async (url) => {
+        const u = String(url);
+        if (u.startsWith(UK_C)) return gtMeta("0");
+        rpcCalls++;
+        throw new Error("must never reach the RPC when the amount is null");
+      });
+      ok(body.v === null && body.why === "no-amount",
+         "price_usd \"0\" must surface why:\"no-amount\", got " + JSON.stringify(body));
+      ok(rpcCalls === 0, "no-amount must never reach the RPC, got " + rpcCalls + " calls");
+      allWhyC.push(body.why);
+    }
+
+    // C۴) متادیتا سالم، RPC یک nosellِ تمیز می‌دهد، pools فقط یک دکسِ
+    // پوشش‌نداده‌شده دارد → why:"cover:false"
+    {
+      const { body } = await probe("0x" + "4".repeat(40), async (url, init) => {
+        const u = String(url);
+        if (u.endsWith("/pools")) {
+          return new Response(JSON.stringify({ data: [
+            { relationships: { dex: { data: { id: "uniswap-v4-base" } } } },
+          ] }), { status: 200, headers: { "content-type": "application/json" } });
+        }
+        if (u.startsWith(UK_C)) return gtMeta("2000");
+        const reqs = JSON.parse(init.body);
+        return jsonResC(reqs.map((r) => (r.id === 0 ? { id: 0, result: mkStatic4(5) } : cleanNosellRow(r))));
+      });
+      ok(body.v === null && body.why === "cover:false",
+         "an uncovered-only pools body must surface why:\"cover:false\", got " + JSON.stringify(body));
+      allWhyC.push(body.why);
+    }
+
+    // C۴ب) همان، ولی pools خودش ۴۲۹ می‌گیرد → why:"cover:429"
+    {
+      const { body } = await probe("0x" + "5".repeat(40), async (url, init) => {
+        const u = String(url);
+        if (u.endsWith("/pools")) return new Response("rate limited", { status: 429 });
+        if (u.startsWith(UK_C)) return gtMeta("2000");
+        const reqs = JSON.parse(init.body);
+        return jsonResC(reqs.map((r) => (r.id === 0 ? { id: 0, result: mkStatic4(5) } : cleanNosellRow(r))));
+      });
+      ok(body.v === null && body.why === "cover:429",
+         "a 429 from the pools endpoint must surface why:\"cover:429\", got " + JSON.stringify(body));
+      allWhyC.push(body.why);
+    }
+
+    // C۵) یک sell — کلیدها دقیقاً ms,v، بدونِ why
+    {
+      const { body } = await probe("0x" + "6".repeat(40), async (url, init) => {
+        const u = String(url);
+        if (u.startsWith(UK_C)) return gtMeta("2000");
+        const reqs = JSON.parse(init.body);
+        return jsonResC(reqs.map((r) => r.id === 0
+          ? { id: 0, result: mkStatic4(5) }
+          : { id: r.id, result: r.id === 1 ? mkStatic4(777) : "0x" }));
+      });
+      ok(body.v === "sell", "sanity: this scenario must verdict sell, got " + JSON.stringify(body));
+      ok(JSON.stringify(Object.keys(body).sort()) === JSON.stringify(["ms", "v"]),
+         "a sell body must carry exactly ms,v (no why key), got " + JSON.stringify(Object.keys(body)));
+    }
+
+    // C۶) بالادستِ tokens جواب نمی‌دهد تا تایم‌اوت → why:"meta:timeout" (نه "meta:0")
+    //     — تشخیص از signal.aborted، پس fetchِ جعلی فقط وقتی سیگنال abort شد رد می‌کند.
+    const hangUntilAbort = (init) => new Promise((_, reject) => {
+      const sig = init && init.signal;
+      if (!sig) return; // بدونِ سیگنال هرگز برنمی‌گردد — خودِ تست گیر می‌کند و لو می‌رود
+      sig.addEventListener("abort", () => reject(new Error("aborted")));
+    });
+    {
+      const { body } = await probe("0x" + "7".repeat(40), async (url, init) => {
+        const u = String(url);
+        if (u.startsWith(UK_C)) return hangUntilAbort(init);
+        throw new Error("unexpected upstream call in why-C6: " + u);
+      });
+      ok(body.v === null && body.why === "meta:timeout",
+         "a GT tokens call that only ends by our own abort must surface why:\"meta:timeout\", got "
+         + JSON.stringify(body));
+      allWhyC.push(body.why);
+    }
+
+    // C۷) tokens ۲۰۰ ولی بدنه‌ای که pickTokenMeta نمی‌خواند → why:"meta:shape"
+    {
+      const { body } = await probe("0x" + "8".repeat(40), async (url) => {
+        const u = String(url);
+        if (u.startsWith(UK_C)) return jsonResC({ data: [] });
+        throw new Error("unexpected upstream call in why-C7: " + u);
+      });
+      ok(body.v === null && body.why === "meta:shape",
+         "a 200 tokens body with no attributes must surface why:\"meta:shape\", got " + JSON.stringify(body));
+      allWhyC.push(body.why);
+    }
+
+    // C۸) nosellِ خام، ولی pools تا تایم‌اوت جواب نمی‌دهد → why:"cover:timeout"
+    {
+      const { body } = await probe("0x" + "9".repeat(40), async (url, init) => {
+        const u = String(url);
+        if (u.endsWith("/pools")) return hangUntilAbort(init);
+        if (u.startsWith(UK_C)) return gtMeta("2000");
+        const reqs = JSON.parse(init.body);
+        return jsonResC(reqs.map((r) => (r.id === 0 ? { id: 0, result: mkStatic4(5) } : cleanNosellRow(r))));
+      });
+      ok(body.v === null && body.why === "cover:timeout",
+         "a pools call that only ends by our own abort must surface why:\"cover:timeout\", got "
+         + JSON.stringify(body));
+      allWhyC.push(body.why);
+    }
+
+    ok(allWhyC.length > 0 && allWhyC.every((w2) => vd.isBaseWhy(w2)),
+       "every why observed in this subsection must pass isBaseWhy, got " + JSON.stringify(allWhyC));
+    ok(allBodiesC.every((b) => !b.includes("http") && !b.includes("://") && !b.includes(CG_SECRET_C)),
+       "no /vd/<addr> response body may ever contain \"http\", \"://\" or the CG_KEY value");
+  }
+
+  // د) runReportPass با fakeهای مستقیم — قراردادِ metaOf/verdictOf تازه
+  {
+    function makeKvD() {
+      const store = new Map();
+      return { store, get: async (k) => (store.has(k) ? store.get(k) : null), put: async (k, v) => { store.set(k, v); } };
+    }
+    function mkAddrD(n) { return "0x" + n.toString(16).padStart(40, "0"); }
+    function poolRowD(addr) {
+      return {
+        attributes: { reserve_in_usd: "9000", base_token_price_usd: "1",
+          pool_created_at: "2026-09-14T00:00:00Z", volume_usd: { h24: "10" }, fdv_usd: "100" },
+        relationships: { base_token: { data: { id: "base_" + addr } }, dex: { data: { id: "uniswap-v3-base" } } },
+      };
+    }
+    const NOW_MS_D = Date.parse("2026-09-14T12:00:00.000Z");
+
+    async function rowFor(addr, metaOf, verdictOf) {
+      const kv = makeKvD();
+      await runReportPass({
+        kv, fetchPools: async () => [poolRowD(addr)], metaOf, verdictOf,
+        now: () => NOW_MS_D, sleep: async () => {},
+      });
+      const doc = JSON.parse(await kv.get(reportKey(utcDateOf(NOW_MS_D))));
+      return doc.rows.find((r) => r.address === addr);
+    }
+
+    // verdictOf اینجا دقیقاً همان رفتارِ واقعیِ ogFetchVerdictDetail را برای
+    // meta:null تقلید می‌کند (why را از metaWhy می‌گیرد) — چون metaOf پرتاب
+    // کرده، runReportPass باید metaWhy را خودش "internal" کرده باشد، و
+    // آن باید تا ردیفِ ذخیره‌شده برسد.
+    const rowThrow = await rowFor(mkAddrD(1),
+      async () => { throw new Error("meta upstream is down"); },
+      async (addr, meta, metaWhy) => ({ v: null, why: metaWhy }));
+    ok(rowThrow && rowThrow.v === null && rowThrow.why === "internal",
+       "a throwing metaOf must yield a stored row v:null why:\"internal\", got " + JSON.stringify(rowThrow));
+
+    const rowMetaWhy = await rowFor(mkAddrD(2),
+      async () => ({ meta: null, why: "meta:429" }),
+      async (addr, meta, metaWhy) => ({ v: null, why: metaWhy }));
+    ok(rowMetaWhy && rowMetaWhy.v === null && rowMetaWhy.why === "meta:429",
+       "verdictOf {v:null, why:\"meta:429\"} must be stored as-is, got " + JSON.stringify(rowMetaWhy));
+
+    const rowBogus = await rowFor(mkAddrD(3),
+      async () => ({ meta: { symbol: "T3", name: "Token Three" }, why: null }),
+      async () => ({ v: null, why: "bogus" }));
+    ok(rowBogus && rowBogus.v === null && rowBogus.why === "internal",
+       "a why outside the closed vocabulary must be stored as \"internal\", got " + JSON.stringify(rowBogus));
+
+    const rowSellWhy = await rowFor(mkAddrD(4),
+      async () => ({ meta: { symbol: "T4", name: "Token Four" }, why: null }),
+      async () => ({ v: "sell", why: "no-quote" }));
+    ok(rowSellWhy && rowSellWhy.v === "sell" && rowSellWhy.why === null,
+       "a why alongside v:\"sell\" must never survive into the stored row, got " + JSON.stringify(rowSellWhy));
+
+    const rowBareNull = await rowFor(mkAddrD(5),
+      async () => ({ meta: { symbol: "T5", name: "Token Five" }, why: null }),
+      async () => null);
+    ok(rowBareNull && rowBareNull.v === null && rowBareNull.why === "internal",
+       "a bare-null (old shape) verdictOf must degrade to v:null why:\"internal\", got " + JSON.stringify(rowBareNull));
+  }
+
+  // ه) سرتاسر — GET /report/run با یک KV جعلی که put را ثبت می‌کند، دقیقاً
+  // همان الگوی تستِ سیم‌کشیِ کرون («و‌.۳» بالاتر)
+  {
+    const { UPSTREAM_FREE: UF_E } = await import("./index.js");
+    const savedFetch = globalThis.fetch;
+    const POOL_ROW_E = {
+      attributes: {
+        base_token_price_usd: "1500", reserve_in_usd: "20000",
+        pool_created_at: "2026-09-14T00:00:00Z",
+        volume_usd: { h24: "500" }, fdv_usd: "10000",
+      },
+      relationships: {
+        base_token: { data: { id: "base_0x" + "f".repeat(40) } },
+        dex: { data: { id: "uniswap-v3-base" } },
+      },
+    };
+    globalThis.fetch = async (url) => {
+      const u = String(url);
+      if (u.includes("/new_pools")) return new Response(JSON.stringify({ data: [POOL_ROW_E] }),
+        { status: 200, headers: { "content-type": "application/json" } });
+      if (u.startsWith(UF_E)) return new Response("rate limited", { status: 429 });
+      throw new Error("unexpected upstream call in why-E: " + u);
+    };
+    const puts = [];
+    const fakeKvE = { get: async () => null, put: async (k, v) => { puts.push({ k, v }); } };
+    const envE = { ASSETS, ZX_KV: fakeKvE, RUN_KEY: "why-e-run-key" };
+    const res = await call("/report/run", { method: "GET", headers: { "x-run-key": "why-e-run-key" } }, envE);
+    ok(res.status === 200, "GET /report/run must be 200, got " + res.status);
+    const body = await res.json();
+    ok(body.checked === 1, "exactly the one fresh token must be checked, got " + JSON.stringify(body));
+    const reportPut = puts.find((p) => p.k.startsWith("report:"));
+    ok(!!reportPut, "the report:<date> key must have been written, got keys: " + JSON.stringify(puts.map((p) => p.k)));
+    const storedDoc = reportPut && JSON.parse(reportPut.v);
+    ok(storedDoc && storedDoc.rows.length === 1,
+       "the stored report doc must carry exactly one row, got " + (storedDoc && storedDoc.rows.length));
+    const row = storedDoc && storedDoc.rows[0];
+    ok(row && row.v === null && row.why === "meta:429",
+       "a 429 from the GT tokens endpoint, through the full cron pass, must store v:null why:\"meta:429\", got " +
+       JSON.stringify(row));
+    globalThis.fetch = savedFetch;
+  }
+
+  // و) مسیرِ کارتِ OG (/t/<addr>) دست‌نخورده — همان ogFetchVerdict (حالا یک
+  // نازک‌پوششِ ogFetchVerdictDetail) همچنان بدونِ کرش کار می‌کند
+  {
+    const { UPSTREAM_FREE: UF_F } = await import("./index.js");
+    const ADDR_F = "0x" + "7".repeat(40);
+    const savedFetch = globalThis.fetch;
+    globalThis.fetch = async (url, init) => {
+      const u = String(url);
+      if (u.startsWith(UF_F)) {
+        return new Response(JSON.stringify({ data: { attributes: {
+          name: "OG Untouched Token", symbol: "OGU", total_reserve_in_usd: "1000",
+          decimals: 18, price_usd: "2000",
+        } } }), { status: 200, headers: { "content-type": "application/json" } });
+      }
+      const reqs = JSON.parse(init.body);
+      return new Response(JSON.stringify(reqs.map((r) => (r.id === 0
+        ? { id: 0, result: "0x" + "0".repeat(64) }
+        : { id: r.id, result: "0x" }))), { status: 200, headers: { "content-type": "application/json" } });
+    };
+    const res = await call("/t/" + ADDR_F, { headers: { "cf-connecting-ip": "203.0.113.220" } });
+    ok(res.status === 200, "GET /t/<addr> must still be 200 after the why plumbing, got " + res.status);
+    globalThis.fetch = savedFetch;
+  }
+
+  globalThis.fetch = trackingFetch; // برگرداندنِ موکِ پیش‌فرض برای هرچه بعد از این اجرا می‌شود
+
+  console.log("[base why] isBaseWhy accepts exactly VD_BASE_WHY plus prefix+1-3-digit-status for meta/cover, "
+    + "nothing else; fetchVerdict's opts.whyOut is a pure observer covering all nine null-reasons "
+    + "(no-amount/deadline/rpc-down/canary-dead/no-quote/proof-rpc/proof-no-quote/usdc-rpc/usdc-no-proof) "
+    + "plus sell/nosell leaving why undefined, each verified identical verdict and call count with/without "
+    + "whyOut; GET /vd/<Base>(non-probe) end to end surfaces meta:<status>/meta:0/no-amount/cover:<status> "
+    + "with the why key present only when v is null (a sell body stays exactly {v,ms}), never leaking "
+    + "\"http\"/\"://\"/the CG_KEY; runReportPass normalizes metaOf/verdictOf's {meta,why}/{v,why} shape "
+    + "(a throw, an old bare-null, or a why outside the closed vocabulary all degrade to \"internal\", and "
+    + "why is always null alongside a sell/nosell verdict), verified both via direct fakes and end to end "
+    + "through GET /report/run with a fake KV; and the OG-card path (/t/<addr>) is unaffected");
+}
 
 /* ---- ۲۸. متنِ گزارش — reportText و /report/<...>.txt ----
    🔴 روی Base رفت‌وبرگشت نداریم — این بخش با یک regex تضمین می‌کند هیچ متنِ

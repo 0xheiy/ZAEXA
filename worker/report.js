@@ -16,6 +16,8 @@
    تضمین می‌شود: CHECK_KIND_BY_CHAIN زیر، و اینکه reportRow اصلاً پارامتری
    برای checkKind نمی‌پذیرد. */
 
+import { isBaseWhy } from "./verdict.js";
+
 export const REPORT_MIN_RESERVE_USD = 5000;
 export const REPORT_MAX_TOKENS_PER_RUN = 30;
 export const REPORT_PAIRS_CAP = 200;
@@ -95,15 +97,35 @@ function storedNumber(n) {
   return typeof n === "number" && Number.isFinite(n) ? n : null;
 }
 
+/* حکمِ null «نمی‌دانم» است، ولی نمی‌گوید *کجا* ایستاد — این تابع همان
+   واژه‌نامه‌ی بسته را روی مرزِ ذخیره‌سازی هم می‌بندد، دقیقاً مثلِ checkKind
+   بالاتر: یک why ساختگی/دست‌ساز هرگز نباید در انبار بنشیند.
+   ⚠️ v «sell»/«nosell» → why همیشه null، صرف‌نظر از هرچه پاس داده شده —
+   یک why روی یک حکمِ مثبت/منفی خودش یک ادعای ساختگی است (چرا باید دلیلِ
+   نامعلوم‌بودن را برای چیزی که نامعلوم نیست نگه داریم؟).
+   v null → روی Base فقط عضوِ VD_BASE_WHY/isBaseWhy پذیرفته می‌شود؛ روی
+   سولانا (که واژه‌نامه‌ی خودش را در worker/verdict_sol.js دارد، نه اینجا)
+   فقط شکلِ عمومیِ safe-string. هر چیزِ دیگر → "internal". */
+function whyForRow(chain, verdict, why) {
+  if (verdict === "sell" || verdict === "nosell") return null;
+  if (chain === "base") return isBaseWhy(why) ? why : "internal";
+  if (chain === "solana") return typeof why === "string" && /^[a-z0-9:-]{1,40}$/.test(why) ? why : "internal";
+  return "internal";
+}
+
 /* یک ردیفِ گزارش، یا null. شکل برای v۱ قفل است — کلیدها به همین ترتیب.
    🔴 انبار همیشه عددِ خام نگه می‌دارد، هرگز رشته‌ی نمایشی. ogBig() در
    worker/og.js چیزی مثل "$1.2M" برمی‌گرداند — آن یک رندر است، نه داده؛ چیزی
    که رندر شده دیگر نمی‌شود مرتب کرد یا دوباره فرمت داد. priceUsd/vol24hUsd/
    fdvUsd/reserveUsd همیشه باید از attributes خامِ همان ردیفِ pool بیایند
    (newPoolRowToToken)، نه از meta.liquidity/meta.vol24 که از قبل ogBig
-   شده‌اند — کسی این را به‌بهانه‌ی «ساده‌سازی» به meta برنگرداند. */
+   شده‌اند — کسی این را به‌بهانه‌ی «ساده‌سازی» به meta برنگرداند.
+   🔴 why (کلیدِ آخر، v۲): چرا یک verdictِ null به null رسید — فقط برای
+   اندازه‌گیری (زیرِ ۲۷ب worker/test.mjs)، هیچ خواننده‌ی دیگری (reportText
+   ازجمله) رفتارش را از رویِ آن عوض نمی‌کند. */
 export function reportRow({
   chain, address, symbol, name, verdict, checkedAt, poolCreatedAt, priceUsd, reserveUsd, vol24hUsd, fdvUsd, dex,
+  why,
 }) {
   try {
     if (verdict !== "sell" && verdict !== "nosell" && verdict !== null) return null; // هرگز یک حکم ساختگی
@@ -133,6 +155,7 @@ export function reportRow({
       vol24hUsd: storedNumber(vol24hUsd),
       fdvUsd: storedNumber(fdvUsd),
       dex: dex == null ? null : dex,
+      why: whyForRow(chain, verdict, why),
     };
   } catch (e) {
     return null;
@@ -265,14 +288,26 @@ export async function runReportPass({ kv, fetchPools, metaOf, verdictOf, now, sl
       await sleep(REPORT_PACE_MS);
       checked++;
 
-      let meta = null;
-      try { meta = await metaOf(t.address); } catch (e) { meta = null; }
+      // metaOf باید { meta, why } بدهد — شکلِ دیگر (پرتاب، غیرِشیء، بدونِ
+      // کلیدِ meta) یعنی metaOf خودش قابلِ‌اعتماد نبود: meta می‌شود null و
+      // metaWhy می‌شود "internal"، نه یک حدس از رویِ چیزی که نیامد.
+      let metaResult;
+      try { metaResult = await metaOf(t.address); } catch (e) { metaResult = null; }
+      const metaOk = !!metaResult && typeof metaResult === "object" &&
+        Object.prototype.hasOwnProperty.call(metaResult, "meta");
+      const meta = metaOk && metaResult.meta && typeof metaResult.meta === "object" ? metaResult.meta : null;
+      const metaWhy = metaOk ? metaResult.why : "internal";
 
-      // ⚠️ metaOf که null می‌دهد به‌معنای «حکم نه» نیست — «نمی‌دانم» یک
-      // نتیجه است، پس verdictOf همچنان صدا زده می‌شود؛ نتیجه‌اش هرچه شد
-      // (احتمالاً باز هم null) همان چیزی است که در v می‌نشیند.
-      let verdict = null;
-      try { verdict = await verdictOf(t.address, meta); } catch (e) { verdict = null; }
+      // ⚠️ metaOf که meta:null می‌دهد به‌معنای «حکم نه» نیست — «نمی‌دانم» یک
+      // نتیجه است، پس verdictOf همچنان صدا زده می‌شود، با metaWhy همراهش تا
+      // خودش تصمیم بگیرد «هیچ تلاشی نکردم» را چه بنامد.
+      // verdictOf هم همان قاعده‌ی متاOf را دارد: شکلِ دیگر → v:null، why:"internal".
+      let verdictResult;
+      try { verdictResult = await verdictOf(t.address, meta, metaWhy); } catch (e) { verdictResult = null; }
+      const verdictOk = !!verdictResult && typeof verdictResult === "object" &&
+        Object.prototype.hasOwnProperty.call(verdictResult, "v");
+      const verdict = verdictOk ? verdictResult.v : null;
+      const why = verdictOk ? verdictResult.why : "internal";
 
       const checkedAt = new Date(now()).toISOString();
       // ⚠️ priceUsd/vol24hUsd/fdvUsd همیشه از t (همان ردیفِ pool که
@@ -292,6 +327,7 @@ export async function runReportPass({ kv, fetchPools, metaOf, verdictOf, now, sl
         vol24hUsd: t.vol24hUsd,
         fdvUsd: t.fdvUsd,
         dex: t.dex,
+        why,
       });
       if (row) builtRows.push(row);
     }

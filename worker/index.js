@@ -420,7 +420,15 @@ export const OG_BUDGET_MS = 2000;
    پس اینجا هم خواندن امن است هم نوشتن. */
 export const VD_CACHE_HOST = "zaexa-verdict.internal";
 
-async function ogFetchMeta(addr, env) {
+/* نسخه‌ی جزئیات‌دارِ ogFetchMeta — { meta, why }. ogFetchMeta پایین‌تر فقط
+   .meta همین تابع را برمی‌گرداند؛ همان تماس‌ها، همان تایم‌اوت، همان خواندنِ
+   کش. why فقط برای سنجش است (worker/report.js/reportRow آن را ذخیره
+   می‌کند)؛ خودِ meta و رفتارِ کشِ لبه بایت‌به‌بایت دست‌نخورده می‌ماند.
+   ⚠️ چرا fetch و json() دو try جدا دارند: تشخیصِ «fetch پرتاب کرد» (که
+   signal.aborted می‌گوید تایم‌اوت بود یا نه) از «بدنه‌ی غیرقابلِ‌پارس/شکلِ
+   بد» فقط با دو مرحله‌ی جدا ممکن است — یک try مشترک هر دو را زیرِ یک
+   catch گم می‌کرد. */
+async function ogFetchMetaDetail(addr, env) {
   // شبکه از رویِ خودِ آدرس، نه از رویِ OG_NETWORK — از امروز این تابع هم
   // برای Base هم برای سولانا صدا زده می‌شود (/t/<mint سولانا> دیگر ۴۰۴
   // نمی‌گیرد)، و همین یک خط بدونِ هیچ تغییری هر دو را درست می‌فهمد.
@@ -433,7 +441,10 @@ async function ogFetchMeta(addr, env) {
   if (store) {
     try {
       const hit = await store.match(new Request(target, { method: "GET" }));
-      if (hit) return pickTokenMeta(await hit.json());
+      if (hit) {
+        const meta = pickTokenMeta(await hit.json());
+        return { meta, why: meta ? null : "meta:shape" };
+      }
     } catch (e) { /* کش خراب = بی‌کش، نه بی‌کارت */ }
   }
 
@@ -444,14 +455,26 @@ async function ogFetchMeta(addr, env) {
   try {
     const h = { accept: "application/json" };
     if (key) h["x-cg-demo-api-key"] = key;
-    const up = await fetch(target, { headers: h, signal: ac.signal });
-    if (!up.ok) return null;
-    return pickTokenMeta(await up.json());
-  } catch (e) {
-    return null;
+    let up;
+    try {
+      up = await fetch(target, { headers: h, signal: ac.signal });
+    } catch (e) {
+      return { meta: null, why: ac.signal.aborted ? "meta:timeout" : "meta:0" };
+    }
+    if (!up.ok) return { meta: null, why: "meta:" + up.status };
+    try {
+      const meta = pickTokenMeta(await up.json());
+      return { meta, why: meta ? null : "meta:shape" };
+    } catch (e) {
+      return { meta: null, why: "meta:shape" };
+    }
   } finally {
     clearTimeout(timer);
   }
+}
+
+async function ogFetchMeta(addr, env) {
+  return (await ogFetchMetaDetail(addr, env)).meta;
 }
 
 /* هستهٔ مشترکِ کش‌کردنِ verdict — هم برای Base هم برای سولانا. قبلاً این
@@ -537,7 +560,11 @@ const VD_VENUE_ID_SET = new Set(VD_VENUES.map((v) => v.id));
    همان الگوی upstream/کلید که ogFetchMeta دارد (UPSTREAM_KEYED با هدرِ
    x-cg-demo-api-key وقتی env.CG_KEY هست، وگرنه UPSTREAM_FREE)، و همان
    سبکِ سقفِ زمانیِ سخت. */
-async function baseVenueCovered(addr, env) {
+/* نسخه‌ی جزئیات‌دارِ baseVenueCovered — { covered, why }. baseVenueCovered
+   پایین‌تر فقط .covered همین تابع را برمی‌گرداند؛ خودِ تصمیمِ true/false/null
+   بایت‌به‌بایت دست‌نخورده می‌ماند، why فقط برای سنجش (ogFetchVerdictDetail)
+   اضافه شده. همان دلیلِ ogFetchMetaDetail بالا برای try جداگانه‌ی fetch. */
+async function baseVenueCoveredDetail(addr, env) {
   try {
     const key = (env && typeof env.CG_KEY === "string" && env.CG_KEY) || "";
     const target = (key ? UPSTREAM_KEYED : UPSTREAM_FREE) +
@@ -549,26 +576,34 @@ async function baseVenueCovered(addr, env) {
     try {
       const h = { accept: "application/json" };
       if (key) h["x-cg-demo-api-key"] = key;
-      up = await fetch(target, { headers: h, signal: ac.signal });
+      try {
+        up = await fetch(target, { headers: h, signal: ac.signal });
+      } catch (e) {
+        return { covered: null, why: ac.signal.aborted ? "cover:timeout" : "cover:0" };
+      }
     } finally {
       clearTimeout(timer);
     }
-    if (!up || !up.ok) return null; // غیر-۲۰۰ → نامعلوم، نه false
+    if (!up || !up.ok) return { covered: null, why: "cover:" + (up ? up.status : 0) }; // غیر-۲۰۰ → نامعلوم، نه false
 
     const body = await up.json();
-    if (!body || !Array.isArray(body.data)) return null; // شکلِ غیرقابلِ‌اعتماد → نامعلوم
+    if (!body || !Array.isArray(body.data)) return { covered: null, why: "cover:shape" }; // شکلِ غیرقابلِ‌اعتماد → نامعلوم
 
     for (const pool of body.data) {
       const dexId = pool && pool.relationships && pool.relationships.dex &&
         pool.relationships.dex.data && pool.relationships.dex.data.id;
       if (typeof dexId !== "string") continue;
       const venue = GT_DEX_TO_VENUE[dexId];
-      if (venue && VD_VENUE_ID_SET.has(venue)) return true;
+      if (venue && VD_VENUE_ID_SET.has(venue)) return { covered: true, why: null };
     }
-    return false; // بدنه سالم بود، ولی هیچ استخری روی یک صرافیِ پوشش‌داده‌شده نبود
+    return { covered: false, why: "cover:false" }; // بدنه سالم بود، ولی هیچ استخری روی یک صرافیِ پوشش‌داده‌شده نبود
   } catch (e) {
-    return null; // پرتاب (شبکه/مهلت/پارس) → نامعلوم، هرگز false
+    return { covered: null, why: "cover:shape" }; // پرتاب (پارس) → نامعلوم، هرگز false
   }
+}
+
+async function baseVenueCovered(addr, env) {
+  return (await baseVenueCoveredDetail(addr, env)).covered;
 }
 
 /* env.BASE_RPC — یک RPC اختصاصیِ Base، دقیقاً هم‌شکل با env.SOL_RPC/env.CG_KEY
@@ -787,8 +822,13 @@ async function runV4Index(addr, env, diag) {
    ⚠️ برخلافِ ogFetchMeta که فقط از کش می‌خواند، اینجا هم می‌خوانیم هم
    می‌نویسیم — روی VD_CACHE_HOST که هیچ ربطی به proxyGt ندارد (توضیح بالای
    همین فایل، کنارِ VD_CACHE_HOST). */
-async function ogFetchVerdict(addr, meta, deadlineAt, env, ctx) {
-  if (!meta) return null; // بدونِ متادیتا حتی یک تلاش هم لازم نیست
+/* نسخه‌ی جزئیات‌دارِ ogFetchVerdict — { v, why }. ogFetchVerdict پایین‌تر
+   فقط .v همین تابع را برمی‌گرداند؛ خودِ verdict/کش/گیتِ پوشش بایت‌به‌بایت
+   دست‌نخورده می‌ماند. metaWhy اختیاری است: کالر (مثلاً scheduledReportPass)
+   وقتی خودش متادیتا را جدا از ogFetchMetaDetail گرفته، دلیلِ نبودِ آن را
+   همین‌جا پاس می‌دهد؛ نبودنش (undefined) یعنی "internal". */
+async function ogFetchVerdictDetail(addr, meta, deadlineAt, env, ctx, metaWhy) {
+  if (!meta) return { v: null, why: typeof metaWhy === "string" ? metaWhy : "internal" }; // بدونِ متادیتا حتی یک تلاش هم لازم نیست
   const chain = chainOf(addr);
   if (chain === "solana") {
     /* ⚠️ اینجا toLowerCase نمی‌شود — mint سولانا حساسِ به حروف است،
@@ -799,10 +839,13 @@ async function ogFetchVerdict(addr, meta, deadlineAt, env, ctx) {
        رشته‌ی base58 را به‌جای آدرس EVM می‌گرفت و بی‌فایده یک eth_call واقعی
        به RPCهای Base می‌فرستاد. کشِ آن هم با /vd/<mint> مشترک است: اگر
        کاربر همین mint را تازه چک کرده باشد، این رایگان است. */
-    const { v } = await solFetchVerdict(addr, deadlineAt, ctx, env);
-    return v;
+    return await solFetchVerdict(addr, deadlineAt, ctx, env);
   }
   const network = gtNetworkOf(chain) || OG_NETWORK;
+  // فقط computeFn (نه یک ضربه‌ی کش) آن را پر می‌کند، و فقط وقتی raw نهایتاً
+  // null بماند معنا دارد — دقیقاً همان الگویی که solFetchVerdict برای why
+  // بیرونِ cachedVerdict دارد.
+  let baseWhy;
   const raw = await cachedVerdict(
     "/v1/" + network + "/" + addr.toLowerCase(),
     async () => {
@@ -822,22 +865,33 @@ async function ogFetchVerdict(addr, meta, deadlineAt, env, ctx) {
           ctx.waitUntil(runV4Index(addr, env));
         }
       }
-      return fetchVerdict(addr, meta, { deadlineAt, fetchImpl: fetch, rpcs: baseRpcsFor(env), v4Keys });
+      const whyOut = {};
+      const result = await fetchVerdict(addr, meta,
+        { deadlineAt, fetchImpl: fetch, rpcs: baseRpcsFor(env), v4Keys, whyOut });
+      baseWhy = whyOut.why;
+      return result;
     },
     ctx,
   );
 
   /* حفاظِ پوشش — فقط روی Base، و فقط وقتی raw واقعاً "nosell" است. مثبت
-     هرگز از این‌جا رد نمی‌شود (baseVenueCovered اصلاً صدا زده نمی‌شود)، و
-     نامعلوم همان نامعلوم می‌ماند. توجه: raw همان چیزی است که cachedVerdict
-     کش کرد/می‌کند (بدونِ تغییر در منطقِ کش)، پس یک ضربه‌ی کش هم دوباره از
-     همین گیت رد می‌شود — یک "nosell"ِ کش‌شده هرگز بدونِ این چک به بیرون
-     نمی‌رود. */
-  if (chain !== "base" || raw !== "nosell") return raw;
-  const covered = await baseVenueCovered(addr, env);
+     هرگز از این‌جا رد نمی‌شود (baseVenueCoveredDetail اصلاً صدا زده
+     نمی‌شود)، و نامعلوم همان نامعلوم می‌ماند. توجه: raw همان چیزی است که
+     cachedVerdict کش کرد/می‌کند (بدونِ تغییر در منطقِ کش)، پس یک ضربه‌ی کش
+     هم دوباره از همین گیت رد می‌شود — یک "nosell"ِ کش‌شده هرگز بدونِ این
+     چک به بیرون نمی‌رود. */
+  if (chain !== "base" || raw !== "nosell") {
+    return raw === null ? { v: null, why: baseWhy || "internal" } : { v: raw, why: null };
+  }
+  const covered = await baseVenueCoveredDetail(addr, env);
   // 🔴 شکستِ خودِ چکِ پوشش (false یا null) هم به نامعلوم تنزل می‌کند —
   // «نتوانستیم پوشش را بسنجیم» هرگز اجازه‌ی اتهام نیست.
-  return covered === true ? "nosell" : null;
+  if (covered.covered === true) return { v: "nosell", why: null };
+  return { v: null, why: covered.why || "cover:shape" };
+}
+
+async function ogFetchVerdict(addr, meta, deadlineAt, env, ctx) {
+  return (await ogFetchVerdictDetail(addr, meta, deadlineAt, env, ctx)).v;
 }
 
 /* env.SOL_RPC — یک RPC اختصاصیِ سولانا، دقیقاً هم‌شکل با env.CG_KEY بالای
@@ -1103,7 +1157,10 @@ async function diagVerdict(request, url, env, ctx) {
     const { v, why } = await solFetchVerdict(addr, t0 + OG_BUDGET_MS, ctx, env);
     return vdDone(200, { v, ms: Date.now() - t0, why });
   }
-  const meta = await ogFetchMeta(addr, env);
+  // چرا با ogFetchMetaDetail: پایین‌تر (شاخه‌ی غیرِ probe) metaWhy لازم است
+  // تا وقتی خودِ متادیتا نیامد، دلیلش هم گزارش شود، نه فقط internal حدسی.
+  // شاخه‌ی ?probe=1 دست‌نخورده همان meta را می‌گیرد، پس رفتارش عوض نمی‌شود.
+  const { meta, why: metaWhy } = await ogFetchMetaDetail(addr, env);
 
   // ?probe=1 — همان سطلِ نرخِ «vd» بالا را می‌خورد (هیچ مسیرِ ارزان‌تری
   // ندارد)، ولی ogFetchVerdict را دور می‌زند: آن تابع از کشِ verdict
@@ -1135,11 +1192,12 @@ async function diagVerdict(request, url, env, ctx) {
     return vdDone(200, { v, ms: Date.now() - t0, venues: collect, covered, v4Keys: v4Keys.length });
   }
 
-  // ⚠️ ماژولِ Base (worker/verdict.js) دست‌نخورده مانده و هیچ why‌ای تولید
-  // نمی‌کند؛ برای یک verdictِ null در همین زنجیره، به‌جای حدسِ یک why از رویِ
-  // هیچ، این کلید کلاً از پاسخ حذف می‌شود — نه اینکه internal گفته شود.
-  const v = await ogFetchVerdict(addr, meta, t0 + OG_BUDGET_MS, env, ctx);
-  return vdDone(200, { v, ms: Date.now() - t0 });
+  // ⚠️ ماژولِ Base (worker/verdict.js) حالا واژه‌نامه‌ی بسته‌ی why دارد
+  // (VD_BASE_WHY) — این کلید فقط وقتی v واقعاً null است در پاسخ می‌آید
+  // (undefined پایین‌تر با JSON.stringify حذف می‌شود، دقیقاً همان ترفندی که
+  // شاخه‌ی سولانا بالاتر هم دارد)، نه اینکه همیشه یک internal حدسی بگوید.
+  const { v, why } = await ogFetchVerdictDetail(addr, meta, t0 + OG_BUDGET_MS, env, ctx, metaWhy);
+  return vdDone(200, { v, ms: Date.now() - t0, why: v === null ? why : undefined });
 }
 
 /* =====================================================================
@@ -1496,8 +1554,8 @@ async function scheduledReportPass(env, ctx, opts) {
     return await runReportPass({
       kv: env.ZX_KV,
       fetchPools,
-      metaOf: (addr) => ogFetchMeta(addr, env),
-      verdictOf: (addr, meta) => ogFetchVerdict(addr, meta, Date.now() + OG_BUDGET_MS, env, ctx),
+      metaOf: (addr) => ogFetchMetaDetail(addr, env),
+      verdictOf: (addr, meta, metaWhy) => ogFetchVerdictDetail(addr, meta, Date.now() + OG_BUDGET_MS, env, ctx, metaWhy),
       now: () => Date.now(),
       sleep: (ms) => new Promise((r) => setTimeout(r, ms)),
       // فقط اجرای دستی این را می‌دهد؛ زمان‌بند سقفِ کاملِ خودش را دارد.

@@ -609,6 +609,31 @@ export const VD_PROBE_OUT = Object.freeze([
   "quoted", "zero", "empty", "undecodable", "revert", "no-answer", "batch-failed", "deadline",
 ]);
 
+/* ---------------------------------------------------------------------
+   واژه‌نامه‌ی بسته‌ی why — چرا یک verdict به null رسید؟ فقط برای سنجش
+   (worker/report.js، worker/index.js)، اثری روی خودِ verdict ندارد.
+   دقیقاً همان قاعده‌ی VD_PROBE_OUT بالا: هرگز از رویِ error.message، فقط از
+   رویِ شکل/کدِ عددی. جدول بسته است تا هم یک why دستیِ حدسی جایی جز اینجا
+   نوشته نشود، هم worker/test.mjs بتواند خودش را پین کند. */
+export const VD_BASE_WHY = Object.freeze([
+  "meta:timeout", "meta:shape", "no-amount", "deadline", "rpc-down", "canary-dead",
+  "no-quote", "proof-rpc", "proof-no-quote", "usdc-rpc", "usdc-no-proof",
+  "cover:false", "cover:timeout", "cover:shape", "internal",
+]);
+// این دو پیشوند به‌جای یک عضوِ ثابت، با یک کدِ عددیِ ۱ تا ۳ رقمی می‌آیند
+// ("meta:429"، "cover:503") — isBaseWhy پایین‌تر همین قاعده را می‌سنجد.
+export const VD_BASE_WHY_STATUS = Object.freeze(["meta", "cover"]);
+
+// آیا s یک whyِ معتبرِ Base است؟ هرگز پرتاب نمی‌کند.
+export function isBaseWhy(s) {
+  if (typeof s !== "string") return false;
+  if (VD_BASE_WHY.includes(s)) return true;
+  for (const prefix of VD_BASE_WHY_STATUS) {
+    if (s.startsWith(prefix + ":") && /^\d{1,3}$/.test(s.slice(prefix.length + 1))) return true;
+  }
+  return false;
+}
+
 /* entry همان چیزی است که pick(id) در callBatch برمی‌گرداند: {result} یا
    {error}. code === -1 یعنی «هیچ ورودی‌ای برای این id نیامد» (شکلِ ساختگیِ
    خودِ pick، نه یک کدِ واقعیِ JSON-RPC) — این یکی «no-answer» است، نه
@@ -717,11 +742,20 @@ async function callBatch(fetchImpl, rpcUrl, canary, probeItems, timeoutMs, colle
 }
 
 export async function fetchVerdict(tokenAddr, meta, opts) {
+  const o = opts || {};
+  // opts.whyOut فقط وقتی شیء است فعال می‌شود — دقیقاً همان الگوی
+  // opts.collect: نبودنش رفتار و هزینه را بایت‌به‌بایت همان چیزی نگه
+  // می‌دارد که امروز است؛ این هم یک «مشاهده‌گر» محض است، هرگز خودش
+  // تصمیمی از رویِ همین شیء نمی‌گیرد (قاعده‌ی observer، بالای این ماژول).
+  const whyOut = o.whyOut && typeof o.whyOut === "object" ? o.whyOut : null;
+  function setWhy(why) {
+    if (whyOut) whyOut.why = why; // هرگز روی "sell"/"nosell" صدا زده نمی‌شود
+  }
+
   try {
     const amt = sellAmountFrom(meta && meta.priceUsd, meta && meta.decimals);
-    if (amt == null) return null; // بدونِ مقدار معنادار حتی یک fetch هم لازم نیست
+    if (amt == null) { setWhy("no-amount"); return null; } // بدونِ مقدار معنادار حتی یک fetch هم لازم نیست
 
-    const o = opts || {};
     const fetchImpl = o.fetchImpl || fetch;
     const now = o.now || Date.now;
     const deadlineAt = o.deadlineAt;
@@ -738,6 +772,7 @@ export async function fetchVerdict(tokenAddr, meta, opts) {
     function deadlineHit(stage) {
       if (deadlineAt != null && (now() >= deadlineAt || deadlineAt - now() < 400)) {
         if (collect) collect.push({ venue: null, key: null, out: "deadline", stage });
+        setWhy("deadline");
         return true;
       }
       return false;
@@ -745,6 +780,10 @@ export async function fetchVerdict(tokenAddr, meta, opts) {
 
     const canary = canaryCall();
     let endpointsTried = 0;
+    // چند اندپوینت واقعاً batch را جواب دادند (نامعلومِ سطحِ اتصال نبودند)
+    // ولی کاناری‌شان مرده بود — فقط برای انتخابِ why بعد از حلقه، هیچ‌جا
+    // روی کنترلِ حلقه اثر نمی‌گذارد (قاعده‌ی observer).
+    let canaryDeadCount = 0;
 
     for (const rpc of rpcs) {
       if (endpointsTried >= VD_MAX_ENDPOINTS) break;
@@ -758,7 +797,7 @@ export async function fetchVerdict(tokenAddr, meta, opts) {
       const canaryAlive =
         batchA.canary && !batchA.canary.error && typeof batchA.canary.result === "string" &&
         (() => { const v = decodeQuote("CL_UINT24", batchA.canary.result); return v != null && v > 0n; })();
-      if (!canaryAlive) continue; // کاناریِ مرده → این اندپوینت هم قابلِ‌اعتماد نیست، بعدی
+      if (!canaryAlive) { canaryDeadCount++; continue; } // کاناریِ مرده → این اندپوینت هم قابلِ‌اعتماد نیست، بعدی
 
       const verdictA = verdictFrom(batchA);
       if (verdictA === "sell") return "sell";
@@ -781,25 +820,30 @@ export async function fetchVerdict(tokenAddr, meta, opts) {
            - و هر نتیجه‌ای جز "sell" همان null می‌شود.
            بدونِ کلیدِ واقعیِ USDC حتی یک فراخوانی هم اضافه نمی‌شود. */
         const proofItems = buildRealV4Probe(tokenAddr, USDC_ADDR, amt, o.v4Keys);
-        if (proofItems.length === 0) return null;
+        if (proofItems.length === 0) { setWhy("no-quote"); return null; }
         if (deadlineHit("usdc-proof")) return null;
         const batchP = await callBatch(fetchImpl, rpc, canary, proofItems, timeoutMs, collect, "usdc-proof");
-        if (batchP == null) return null;
-        return verdictFrom(batchP) === "sell" ? "sell" : null;
+        if (batchP == null) { setWhy("proof-rpc"); return null; }
+        if (verdictFrom(batchP) === "sell") return "sell";
+        setWhy("proof-no-quote");
+        return null;
       }
 
       if (deadlineHit("usdc")) return null;
       const itemsUsdc = buildProbe(tokenAddr, USDC_ADDR, amt, { v4Keys: o.v4Keys });
       const batchB = await callBatch(fetchImpl, rpc, canary, itemsUsdc, timeoutMs, collect, "usdc");
-      if (batchB == null) return null; // ابهامِ مرحله‌ی B هم اندپوینتِ بعدی را صدا نمی‌زند
+      if (batchB == null) { setWhy("usdc-rpc"); return null; } // ابهامِ مرحله‌ی B هم اندپوینتِ بعدی را صدا نمی‌زند
 
       const verdictB = verdictFrom(batchB);
       if (verdictB === "sell") return "sell";
       if (verdictB === "nosell") return "nosell";
+      setWhy("usdc-no-proof");
       return null;
     }
+    setWhy(canaryDeadCount > 0 ? "canary-dead" : "rpc-down");
     return null;
   } catch {
+    setWhy("internal");
     return null; // این تابع هرگز نباید پرتاب کند
   }
 }
