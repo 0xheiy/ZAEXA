@@ -17,6 +17,7 @@ import {
   CHECK_KIND_BY_CHAIN, REPORT_DATE_RE, PAIRS_KEY_BASE,
   newPoolRowToToken, reportRow, mergeReportDoc, mergePairsRing,
   utcDateOf, reportKey, emptyReportDoc, runReportPass,
+  reportText, REPORT_TEXT_FIRST_DATE,
 } from "./report.js";
 import * as v4 from "./v4index.js";
 import {
@@ -5856,6 +5857,311 @@ console.log("[v4 index wiring] worker/index.js ok — v4StoreTtl/storeV4Result f
   "stored yet, never again once an entry (even a miss) exists");
 
 
+
+/* ---- ۲۸. متنِ گزارش — reportText و /report/<...>.txt ----
+   🔴 روی Base رفت‌وبرگشت نداریم — این بخش با یک regex تضمین می‌کند هیچ متنِ
+   تولیدشده در کلِ این بخش کلمه‌ای مثل "round trip"، "simulat"، "safe"،
+   "verified"، "honeypot"، "tax"، "blacklist"، "revert" یا "cannot be sold"
+   نگفته باشد — به‌جز عبارتِ مجازِ ثابتِ فوتر.
+   🔴 symbol از بالادست می‌آید و کنترلش دستِ ما نیست؛ اینجا با چند symbolِ
+   خصمانه سنجیده می‌شود که هرگز عیناً در متنِ خروجی ننشیند.
+   🔴 report:2026-09-07 هنوز ردیف‌های nosellِ نادرست دارد — cutoff باید پیش
+   از هر خواندنِ KV رد کند، نه بعدش. */
+{
+  const textsProduced = [];
+  function rt(doc) {
+    const t = reportText(doc);
+    if (typeof t === "string") textsProduced.push(t);
+    return t;
+  }
+
+  function mkRow(overrides) {
+    return Object.assign({
+      chain: "base",
+      address: "0x" + "2".repeat(40),
+      symbol: null,
+      name: null,
+      v: "sell",
+      checkKind: "sell-quote",
+      checkedAt: "2026-09-14T00:00:00.000Z",
+      poolCreatedAt: null,
+      priceUsd: null,
+      reserveUsd: null,
+      vol24hUsd: null,
+      fdvUsd: null,
+      dex: null,
+    }, overrides);
+  }
+  function mkAddr(n) { return "0x" + n.toString(16).padStart(40, "0"); }
+
+  // الف) رشته‌ی دقیقِ نمونه‌ی چهار-ردیفی از خودِ اسپک
+  const rowSpacex = mkRow({
+    address: "0xebc185ed974f5257d11164e70b9324b9527aca8e", symbol: "SPACEX", v: "sell",
+  });
+  const rowLapcat = mkRow({ address: mkAddr(1), symbol: "LAPCAT", v: null });
+  const rowBaseTok = mkRow({ address: mkAddr(2), symbol: "BASE", v: null });
+  const rowRugme = mkRow({
+    address: "0x1111111111111111111111111111111111111111", symbol: "RUGME", v: "nosell",
+  });
+  const docA = {
+    date: "2026-09-14", generatedAt: "2026-09-14T23:17:15.207Z", chains: ["base"],
+    checked: 210, rows: [rowSpacex, rowLapcat, rowBaseTok, rowRugme],
+  };
+  const EXPECTED_A = "Exit Report · 14 Sep\n\n4 new Base tokens checked.\n1 had no sell route "
+    + "quoted.\n1 had a sell route quoted.\n2 could not be checked.\n\n$RUGME — no sell route "
+    + "quoted\nzaexa.com/t/0x1111111111111111111111111111111111111111\n\nSell quotes on Base DEXes, "
+    + "not a simulated round trip.\nLast check 23:17 UTC.\n";
+  const tA = rt(docA);
+  ok(tA === EXPECTED_A, "the 4-row fixture must produce the exact spec'd string, got " +
+     JSON.stringify(tA));
+
+  // ب) مفرد در برابر جمع
+  const doc1 = { date: "2026-09-14", generatedAt: null, rows: [mkRow({ v: "sell", address: mkAddr(3) })] };
+  const t1 = rt(doc1);
+  ok(t1.includes("1 new Base token checked."), "a single checked token must say \"token\", not "
+     + "\"tokens\", got: " + JSON.stringify(t1));
+  ok(!t1.includes("tokens"), "singular count must never contain the word \"tokens\", got: " +
+     JSON.stringify(t1));
+
+  // ج) صفر ردیف
+  const docEmpty = { date: "2026-09-14", generatedAt: "2026-09-14T23:17:15.207Z", rows: [] };
+  const tEmpty = rt(docEmpty);
+  ok(tEmpty === "Exit Report · 14 Sep\n\nNo new Base tokens were checked.\n",
+     "an empty-rows doc must produce exactly the zero-token body, got " + JSON.stringify(tEmpty));
+
+  // د) صفر پرچم
+  const docZeroFlag = {
+    date: "2026-09-14", generatedAt: null,
+    rows: [mkRow({ v: "sell", address: mkAddr(4) }), mkRow({ v: null, address: mkAddr(5) })],
+  };
+  const tZero = rt(docZeroFlag);
+  ok(tZero.includes("0 had no sell route quoted."), "zero flagged rows must still print the count "
+     + "line, got: " + JSON.stringify(tZero));
+  ok(!tZero.includes("zaexa.com/t/"), "zero flagged rows must list nothing, got: " + JSON.stringify(tZero));
+  // 🔴 بدونِ پرچم هم پانویس باید با یک خطِ خالی از شمارش‌ها جدا بماند.
+  ok(tZero === "Exit Report · 14 Sep\n\n2 new Base tokens checked.\n0 had no sell route quoted.\n"
+     + "1 had a sell route quoted.\n1 could not be checked.\n\n"
+     + "Sell quotes on Base DEXes, not a simulated round trip.\n",
+     "zero flagged rows must produce exactly the counts, one blank line, then the footer, got: "
+     + JSON.stringify(tZero));
+
+  // ه) سقفِ فهرست — ۱۲ پرچم، فقط ۱۰ لیست‌شده، بقیه در «+more»
+  const rows12 = Array.from({ length: 12 }, (_, i) => mkRow({ v: "nosell", address: mkAddr(300 + i) }));
+  const doc12 = { date: "2026-09-14", generatedAt: null, rows: rows12 };
+  const t12 = rt(doc12);
+  const linkMatches = t12.match(/zaexa\.com\/t\//g) || [];
+  ok(linkMatches.length === 10, "12 flagged rows must list exactly 10 token links, got " +
+     linkMatches.length);
+  ok(t12.includes("+2 more: zaexa.com/report/2026-09-14.json"),
+     "the overflow line must name the remaining 2 and point at the full JSON report, got: " +
+     JSON.stringify(t12));
+
+  // و) symbolهای خصمانه — هرگز عیناً در متن، همیشه به آدرسِ کوتاه‌شده سقوط می‌کند
+  const HOSTILE_SYMBOLS = [
+    "SAFE\nzaexa.com/t/0xdead", "a b", "https://x", "", 12345, null, "ÆTHER",
+    "ABCDEFGHIJKLMNOPQ", "ZAEXA.COM", "$SAFE",
+  ];
+  const HOSTILE_ADDR = "0x1111111111111111111111111111111111111111";
+  for (const sym of HOSTILE_SYMBOLS) {
+    const docH = {
+      date: "2026-09-14", generatedAt: null,
+      rows: [mkRow({ v: "nosell", address: HOSTILE_ADDR, symbol: sym })],
+    };
+    const tH = rt(docH);
+    ok(tH.includes("0x1111…1111 — no sell route quoted"),
+       "hostile symbol " + JSON.stringify(sym) + " must fall back to the truncated-address label, got: "
+       + JSON.stringify(tH));
+    if (typeof sym === "string" && sym.length > 0) {
+      ok(!tH.includes(sym), "hostile symbol " + JSON.stringify(sym) +
+         " must never appear verbatim in the report text");
+    }
+  }
+  const docSpacexSym = {
+    date: "2026-09-14", generatedAt: null,
+    rows: [mkRow({ v: "nosell", address: HOSTILE_ADDR, symbol: "SPACEX" })],
+  };
+  ok(rt(docSpacexSym).includes("$SPACEX — no sell route quoted"),
+     "a whitelisted symbol must be labeled \"$SYMBOL\"");
+
+  // ز) هر v غیرِ sell/nosell یعنی «نمی‌توان چک کرد» — هرگز لیست نمی‌شود؛ sell هم هرگز لیست نمی‌شود
+  const docUnchecked = {
+    date: "2026-09-14", generatedAt: null,
+    rows: [
+      mkRow({ v: null, address: mkAddr(101) }),
+      mkRow({ v: undefined, address: mkAddr(102) }),
+      mkRow({ v: "maybe", address: mkAddr(103) }),
+      mkRow({ v: "NOSELL", address: mkAddr(104) }),
+      mkRow({ v: "sell", address: mkAddr(105) }),
+    ],
+  };
+  const tUnchecked = rt(docUnchecked);
+  ok(tUnchecked.includes("0 had no sell route quoted."), "null/undefined/\"maybe\"/\"NOSELL\" must "
+     + "never count as flagged, got: " + JSON.stringify(tUnchecked));
+  ok(tUnchecked.includes("1 had a sell route quoted."), "exactly the one \"sell\" row must count as "
+     + "quoted, got: " + JSON.stringify(tUnchecked));
+  ok(tUnchecked.includes("4 could not be checked."), "null/undefined/\"maybe\"/\"NOSELL\" must all "
+     + "land in could-not-be-checked, got: " + JSON.stringify(tUnchecked));
+  ok(!tUnchecked.includes("zaexa.com/t/"), "no row may be listed when none is flagged, got: " +
+     JSON.stringify(tUnchecked));
+
+  // ح) ردیف‌های نامربوط — chain غلط، checkKind ناجور، آدرسِ بزرگ‌حرف — در هیچ شمارشی حساب نمی‌شوند
+  const rowValidH = mkRow({ v: "sell", address: mkAddr(201) });
+  const rowSolana = mkRow({ chain: "solana", checkKind: "roundtrip", v: "nosell", address: mkAddr(202) });
+  const rowBadCheckKind = mkRow({ chain: "base", checkKind: "roundtrip", v: "nosell", address: mkAddr(203) });
+  const rowUpperAddr = mkRow({
+    chain: "base", checkKind: "sell-quote", v: "nosell", address: "0x" + "A".repeat(40),
+  });
+  const docH = {
+    date: "2026-09-14", generatedAt: null,
+    rows: [rowValidH, rowSolana, rowBadCheckKind, rowUpperAddr],
+  };
+  const tH = rt(docH);
+  ok(tH.includes("1 new Base token checked."), "a solana row, a base row with the wrong checkKind, "
+     + "and an uppercase address must all be ignored, got: " + JSON.stringify(tH));
+  ok(tH.includes("0 had no sell route quoted."), "none of the three ignored rows may count as "
+     + "flagged, got: " + JSON.stringify(tH));
+  ok(!tH.includes("zaexa.com/t/"), "none of the three ignored rows may be listed, got: " +
+     JSON.stringify(tH));
+
+  // ط) گاردِ تاریخ
+  ok(reportText({ date: "2026-09-07", generatedAt: null, rows: [] }) === null,
+     "the day before the cutoff must return null, even with rows:[]");
+  ok(typeof rt({ date: "2026-09-08", generatedAt: null, rows: [] }) === "string",
+     "the cutoff date itself must be allowed");
+  ok(reportText({ date: "nope", generatedAt: null, rows: [] }) === null,
+     "an unparseable date must return null");
+  ok(reportText(null) === null, "a null doc must return null");
+  ok(reportText({ date: "2026-09-14", generatedAt: null, rows: "not-an-array" }) === null,
+     "rows that are not an array must return null");
+
+  // ی) generatedAt خراب — فقط خطِ «Last check» غایب می‌شود، بقیه دست‌نخورده
+  const docJValid = {
+    date: "2026-09-14", generatedAt: "2026-09-14T23:17:15.207Z",
+    rows: [mkRow({ v: "sell", address: mkAddr(6) })],
+  };
+  const docJBad = { ...docJValid, generatedAt: "garbage" };
+  const tJValid = rt(docJValid);
+  const tJBad = rt(docJBad);
+  ok(!tJBad.includes("Last check"), "an unparseable generatedAt must omit the Last check line "
+     + "entirely, got: " + JSON.stringify(tJBad));
+  ok(tJValid === tJBad.slice(0, -1) + "\nLast check 23:17 UTC.\n",
+     "a bad generatedAt must change nothing else about the text, only drop the Last check line");
+
+  /* ---- مسیرِ /report/<...>.txt — از رویِ worker.fetch ---- */
+  const envNoKvTxt = { ASSETS };
+
+  // ل) بدونِ env.ZX_KV
+  const rNoKv = await call("/report/today.txt", { method: "GET" }, envNoKvTxt);
+  ok(rNoKv.status === 503, "GET /report/today.txt without ZX_KV must be 503, got " + rNoKv.status);
+  ok(rNoKv.headers.get("content-type") === "text/plain; charset=utf-8",
+     "the .txt route must answer text/plain, got " + rNoKv.headers.get("content-type"));
+  ok(rNoKv.headers.get("cache-control") === "no-store",
+     "every error response on this route must be no-store, got " + rNoKv.headers.get("cache-control"));
+  ok((await rNoKv.text()) === "report store unavailable\n",
+     "the no-KV body must be exactly \"report store unavailable\\n\"");
+
+  // م) متد غلط، تاریخِ بدشکل
+  const rPostTxt = await call("/report/today.txt", { method: "POST" }, envNoKvTxt);
+  ok(rPostTxt.status === 405 && (await rPostTxt.text()) === "only GET\n",
+     "POST /report/today.txt must be 405 \"only GET\\n\", got " + rPostTxt.status);
+  const rBadDateTxt = await call("/report/nope.txt", { method: "GET" }, envNoKvTxt);
+  ok(rBadDateTxt.status === 400 && (await rBadDateTxt.text()) === "bad date\n",
+     "GET /report/nope.txt must be 400 \"bad date\\n\", got " + rBadDateTxt.status);
+
+  // ن) گاردِ تاریخ پیش از هر خواندنِ KV
+  let cutoffGetCalls = 0;
+  const kvCutoffSpy = { get: async () => { cutoffGetCalls++; return null; } };
+  const rCutoffTxt = await call("/report/2026-09-07.txt", { method: "GET" },
+    { ASSETS, ZX_KV: kvCutoffSpy });
+  ok(rCutoffTxt.status === 404 &&
+     (await rCutoffTxt.text()) === "no text report before " + REPORT_TEXT_FIRST_DATE + "\n",
+     "a pre-cutoff date must 404 with the cutoff message, got " + rCutoffTxt.status);
+  ok(cutoffGetCalls === 0, "the cutoff must be checked before any kv.get call, got " + cutoffGetCalls
+     + " calls");
+
+  // س) کلیدِ غایب
+  const kvMissing = { get: async () => null };
+  const rMissingTxt = await call("/report/2026-09-10.txt", { method: "GET" },
+    { ASSETS, ZX_KV: kvMissing });
+  ok(rMissingTxt.status === 404 && (await rMissingTxt.text()) === "no report for 2026-09-10 yet\n",
+     "a missing key must be 404 \"no report for <date> yet\\n\", got " + rMissingTxt.status);
+
+  // ع) kv.get پرتاب می‌کند
+  const kvThrows = { get: async () => { throw new Error("kv is down"); } };
+  const rThrowsTxt = await call("/report/2026-09-10.txt", { method: "GET" },
+    { ASSETS, ZX_KV: kvThrows });
+  ok(rThrowsTxt.status === 503 && (await rThrowsTxt.text()) === "report store unavailable\n",
+     "a throwing kv.get must be 503 \"report store unavailable\\n\", got " + rThrowsTxt.status);
+
+  // ف) JSON خراب، و سندِ معتبر با تاریخِ نادرست
+  const kvBadJson = { get: async () => "{bad" };
+  const rBadJsonTxt = await call("/report/2026-09-10.txt", { method: "GET" },
+    { ASSETS, ZX_KV: kvBadJson });
+  ok(rBadJsonTxt.status === 503 && (await rBadJsonTxt.text()) === "report unreadable\n",
+     "unparseable JSON in KV must be 503 \"report unreadable\\n\", got " + rBadJsonTxt.status);
+  const kvWrongDate = { get: async () => JSON.stringify({ date: "2026-09-11", rows: [] }) };
+  const rWrongDateTxt = await call("/report/2026-09-10.txt", { method: "GET" },
+    { ASSETS, ZX_KV: kvWrongDate });
+  ok(rWrongDateTxt.status === 503 && (await rWrongDateTxt.text()) === "report unreadable\n",
+     "a stored doc whose date does not match the requested date must be 503 \"report unreadable\\n\", "
+     + "got " + rWrongDateTxt.status);
+
+  // ص) گذرِ خوش‌مسیر — کلیدِ درخواست‌شده، بدنه، عمرِ کش، هدرها
+  let askedKey = null;
+  const kvGood = { get: async (k) => { askedKey = k; return JSON.stringify(docA); } };
+  const rGoodTxt = await call("/report/2026-09-14.txt", { method: "GET" }, { ASSETS, ZX_KV: kvGood });
+  ok(rGoodTxt.status === 200, "a well-formed stored doc must answer 200, got " + rGoodTxt.status);
+  const bodyGoodTxt = await rGoodTxt.text();
+  ok(bodyGoodTxt === reportText(docA), "the route's body must equal reportText(doc) exactly");
+  ok(rGoodTxt.headers.get("cache-control") === "public, max-age=86400",
+     "a past date must cache 86400s at the edge, got " + rGoodTxt.headers.get("cache-control"));
+  ok(askedKey === "report:2026-09-14", "the route must ask KV for reportKey(dateStr), got " +
+     JSON.stringify(askedKey));
+  ok(rGoodTxt.headers.get("x-content-type-options") === "nosniff",
+     "every response on this route must carry x-content-type-options: nosniff");
+
+  // ق) today.txt روی همان سند — عمرِ کشِ کوتاه‌تر
+  const todayStr = utcDateOf(Date.now());
+  const docToday = { ...docA, date: todayStr };
+  const kvToday = { get: async () => JSON.stringify(docToday) };
+  const rTodayTxt = await call("/report/today.txt", { method: "GET" }, { ASSETS, ZX_KV: kvToday });
+  ok(rTodayTxt.status === 200 && rTodayTxt.headers.get("cache-control") === "public, max-age=300",
+     "/report/today.txt must be 200 and cache 300s at the edge, got " + rTodayTxt.status + " " +
+     rTodayTxt.headers.get("cache-control"));
+
+  // ر) رگرسیون — /report/<date>.json دست‌نخورده می‌ماند
+  const rJsonRegression = await call("/report/2026-09-14.json", { method: "GET" },
+    { ASSETS, ZX_KV: kvGood });
+  ok(rJsonRegression.status === 200 &&
+     (rJsonRegression.headers.get("content-type") || "").startsWith("application/json"),
+     "GET /report/2026-09-14.json must remain untouched (200, application/json), got " +
+     rJsonRegression.status + " " + rJsonRegression.headers.get("content-type"));
+
+  // ک) گاردِ واژگان — روی هر متنی که این بخش تولید کرد
+  const FORBIDDEN_WORDING = /round.?trip|simulat|safe|verified|honeypot|tax|blacklist|revert|cannot be sold/i;
+  for (const t of textsProduced) {
+    const stripped = t.split("not a simulated round trip").join("");
+    ok(!FORBIDDEN_WORDING.test(stripped),
+       "a report text must never use forbidden wording outside the one allowed phrase, got: " +
+       JSON.stringify(t));
+  }
+
+  console.log("[report text] worker/report.js's reportText() and GET /report/<...>.txt ok — the "
+    + "4-row spec fixture matches byte-for-byte; singular/plural token counts; zero-rows and "
+    + "zero-flagged bodies; the flagged list caps at 10 with a \"+N more\" pointer at the full JSON; "
+    + "hostile symbols (newlines, URLs, punctuation, non-ASCII, length 17, empty, non-string, null) "
+    + "never appear verbatim and always fall back to the truncated-address label, while a whitelisted "
+    + "symbol renders as \"$SYMBOL\"; null/undefined/\"maybe\"/\"NOSELL\" all count as could-not-be-"
+    + "checked and are never listed, and \"sell\" rows are never listed either; a solana row, a base "
+    + "row with the wrong checkKind, and an uppercase address are ignored in every count; the "
+    + REPORT_TEXT_FIRST_DATE + " cutoff returns null (and, on the route, 404 before any kv.get call); "
+    + "a bad generatedAt drops only the Last check line; the .txt route mirrors reportRoute's KV-error "
+    + "handling (503 on missing/throwing binding, 404 on a missing key, 503 on bad JSON or a mismatched "
+    + "date) without reusing reportDocFor's empty-doc conflation, serves text/plain with nosniff and "
+    + "no-store on every error, caches 86400s for a past date and 300s for today, and leaves GET "
+    + "/report/<date>.json unaffected; and no text produced anywhere in this section uses forbidden "
+    + "wording outside the one allowed phrase");
+}
 
 /* ---- /pairs — نسخه‌ی تمیزِ آدرس برای web/pairs.html ----
    خط Build در پنل امروز web/pairs.html را داخل _site کپی می‌کند، پس

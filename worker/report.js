@@ -312,3 +312,103 @@ export async function runReportPass({ kv, fetchPools, metaOf, verdictOf, now, sl
     return { checked: 0, added: 0 }; // این تابع هرگز نباید پرتاب کند
   }
 }
+
+/* =====================================================================
+   متنِ ساده‌ی گزارش — همان بایگانی، نمای سومی برای پُست‌های عمومی
+   =====================================================================
+   🔴 report:2026-09-07 هنوز ردیف‌های nosellِ نادرستِ شناخته‌شده را در KV
+   نگه می‌دارد (رفعش همان شب دیپلوی شد) — پس هیچ متنی برای تاریخِ پیش از
+   REPORT_TEXT_FIRST_DATE ساخته نمی‌شود.
+   🔴 symbol از بالادست می‌آید و کنترلش دستِ ما نیست و مستقیم در یک پُستِ
+   عمومی می‌نشیند — پس whitelist می‌شود، نه escape؛ هر چیزِ خارج از این
+   الگو با نمایشِ آدرس جایگزین می‌شود. */
+export const REPORT_TEXT_FIRST_DATE = "2026-09-08";
+export const REPORT_TEXT_MAX_LISTED = 10;
+
+const REPORT_TEXT_MONTHS = [
+  "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+];
+
+const REPORT_TEXT_SYMBOL_OK = /^[A-Za-z0-9_-]{1,16}$/;
+const REPORT_TEXT_ADDR_OK = /^0x[0-9a-f]{40}$/;
+
+// برچسبِ یک ردیفِ پرچم‌خورده: symbolِ سفید-فهرست‌شده، وگرنه آدرسِ کوتاه‌شده —
+// هیچ تبدیلِ دیگری روی هیچ‌کدام اعمال نمی‌شود.
+function reportTextSymbolLabel(row) {
+  if (typeof row.symbol === "string" && REPORT_TEXT_SYMBOL_OK.test(row.symbol))
+    return "$" + row.symbol;
+  return row.address.slice(0, 6) + "…" + row.address.slice(-4);
+}
+
+/* سندِ یک روز → متنِ ساده برای پُست، یا null. خالص، بدونِ I/O، هرگز پرتاب
+   نمی‌کند. */
+export function reportText(doc) {
+  try {
+    if (!doc || typeof doc !== "object" || typeof doc.date !== "string" ||
+        !REPORT_DATE_RE.test(doc.date) || !Array.isArray(doc.rows))
+      return null;
+    if (doc.date < REPORT_TEXT_FIRST_DATE) return null;
+
+    // فقط ردیف‌های Base با checkKindِ همان‌جدول و آدرسِ درست‌شکل — هر ردیفِ
+    // دیگر در هیچ شمارشی حساب نمی‌شود.
+    const rows = doc.rows.filter((r) =>
+      r && typeof r === "object" && r.chain === "base" &&
+      r.checkKind === CHECK_KIND_BY_CHAIN.base &&
+      typeof r.address === "string" && REPORT_TEXT_ADDR_OK.test(r.address));
+
+    const flaggedRows = rows.filter((r) => r.v === "nosell");
+    let quoted = 0;
+    let unchecked = 0;
+    for (const r of rows) {
+      if (r.v === "sell") quoted++;
+      else if (r.v !== "nosell") unchecked++;
+    }
+    const total = rows.length;
+    const flagged = flaggedRows.length;
+
+    const [y, m, d] = doc.date.split("-");
+    const dateLabel = String(Number(d)) + " " + REPORT_TEXT_MONTHS[Number(m) - 1];
+
+    const lines = ["Exit Report · " + dateLabel, ""];
+
+    if (total === 0) {
+      lines.push("No new Base tokens were checked.");
+      return lines.join("\n") + "\n";
+    }
+
+    lines.push(total + " new Base token" + (total === 1 ? "" : "s") + " checked.");
+    lines.push(flagged + " had no sell route quoted.");
+    lines.push(quoted + " had a sell route quoted.");
+    lines.push(unchecked + " could not be checked.");
+
+    // خطِ خالی همیشه — وگرنه وقتی هیچ توکنی پرچم نخورده، پانویس به شمارش‌ها می‌چسبد.
+    lines.push("");
+    if (flagged > 0) {
+      const listed = flaggedRows.slice(0, REPORT_TEXT_MAX_LISTED);
+      listed.forEach((r, i) => {
+        if (i > 0) lines.push("");
+        lines.push(reportTextSymbolLabel(r) + " — no sell route quoted");
+        lines.push("zaexa.com/t/" + r.address);
+      });
+      if (flagged > REPORT_TEXT_MAX_LISTED) {
+        lines.push("");
+        lines.push("+" + (flagged - REPORT_TEXT_MAX_LISTED) + " more: zaexa.com/report/" +
+          doc.date + ".json");
+      }
+      lines.push("");
+    }
+
+    lines.push("Sell quotes on Base DEXes, not a simulated round trip.");
+
+    if (typeof doc.generatedAt === "string" && Number.isFinite(Date.parse(doc.generatedAt))) {
+      const gd = new Date(doc.generatedAt);
+      const hh = String(gd.getUTCHours()).padStart(2, "0");
+      const mm = String(gd.getUTCMinutes()).padStart(2, "0");
+      lines.push("Last check " + hh + ":" + mm + " UTC.");
+    }
+
+    return lines.join("\n") + "\n";
+  } catch (e) {
+    return null; // این تابع هرگز نباید پرتاب کند
+  }
+}

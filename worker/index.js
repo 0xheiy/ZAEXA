@@ -34,6 +34,7 @@ import { fetchVerdict, VD_VENUES, VD_RPCS } from "./verdict.js";
 import { EVM_ADDR, SOL_MINT, chainOf, gtNetworkOf } from "./chains.js";
 import {
   REPORT_DATE_RE, PAIRS_KEY_BASE, reportKey, utcDateOf, emptyReportDoc, runReportPass,
+  reportText, REPORT_TEXT_FIRST_DATE,
 } from "./report.js";
 import {
   fetchVerdictSol, VD_SOL_RPCS, VD_SOL_JUP_BASE, VD_SOL_PAYER,
@@ -965,6 +966,18 @@ function vdDone(status, body, extraHeaders) {
   });
 }
 
+// همان vdDone، برای پاسخِ متنیِ ساده‌ی /report/<...>.txt — content-type متن، نه JSON.
+function textDone(status, text, extraHeaders) {
+  return new Response(text, {
+    status,
+    headers: Object.assign({
+      "content-type": "text/plain; charset=utf-8",
+      "cache-control": "no-store",
+      "x-content-type-options": "nosniff",
+    }, extraHeaders),
+  });
+}
+
 const VD_RPC_PROBE_TIMEOUT_MS = 1500; // سقفِ هر تماسِ تک‌متدی
 
 // سقفِ سختِ کلِ درخواست (همه‌ی اندپوینت‌ها، همه‌ی متدها) — یک نودِ کند نباید
@@ -1394,6 +1407,53 @@ async function reportRoute(request, url, env) {
   return vdDone(200, { ...doc, store: !!(env && env.ZX_KV) }, { "cache-control": cacheControl });
 }
 
+/* GET /report/<...>.txt — همان انبار، نمای متنِ ساده برای پُستِ عمومی.
+   🔴 عمداً reportDocFor را دوباره به‌کار نمی‌گیرد: آن تابع «نبودِ بایندینگ»،
+   «پرتاب» و «کلیدِ غایب» را همه در یک سندِ خالی تخت می‌کند — دقیقاً همان
+   قاطی‌کردنی که این مسیر نباید بکند (بدونِ KV باید ۵۰۳ بدهد، نه یک متنِ
+   خالیِ ۲۰۰). */
+async function reportTextRoute(request, url, env) {
+  if (!rateOk(request, "report", RL_LIMIT, RL_WINDOW_MS))
+    return textDone(429, "too many requests\n", { "retry-after": "60" });
+  if (request.method !== "GET") return textDone(405, "only GET\n");
+
+  const rest = url.pathname.slice("/report/".length);
+  const isToday = rest === "today.txt";
+  const datePart = rest.endsWith(".txt") ? rest.slice(0, -".txt".length) : rest;
+  if (!isToday && !REPORT_DATE_RE.test(datePart)) return textDone(400, "bad date\n");
+
+  const dateStr = isToday ? utcDateOf(Date.now()) : datePart;
+  // پیش از هر چیز، حتی پیش از لمسِ KV — report:2026-09-07 هنوز ردیف‌های
+  // nosellِ نادرست دارد.
+  if (dateStr < REPORT_TEXT_FIRST_DATE)
+    return textDone(404, "no text report before " + REPORT_TEXT_FIRST_DATE + "\n");
+
+  const kv = env && env.ZX_KV;
+  if (!kv) return textDone(503, "report store unavailable\n");
+
+  let raw;
+  try {
+    raw = await kv.get(reportKey(dateStr));
+  } catch (e) {
+    return textDone(503, "report store unavailable\n");
+  }
+  if (typeof raw !== "string") return textDone(404, "no report for " + dateStr + " yet\n");
+
+  let text;
+  try {
+    const parsed = JSON.parse(raw);
+    if (!parsed || parsed.date !== dateStr) return textDone(503, "report unreadable\n");
+    text = reportText(parsed);
+    if (text === null) return textDone(503, "report unreadable\n");
+  } catch (e) {
+    return textDone(503, "report unreadable\n");
+  }
+
+  // همان تفاوتِ عمرِ کشِ reportRoute: امروز زود عوض می‌شود، روزِ گذشته هرگز.
+  const cacheControl = isToday ? "public, max-age=300" : "public, max-age=86400";
+  return textDone(200, text, { "cache-control": cacheControl });
+}
+
 async function pairsRoute(request, url, env) {
   if (!rateOk(request, "report", RL_LIMIT, RL_WINDOW_MS))
     return vdDone(429, { error: "too many requests" }, { "retry-after": "60" });
@@ -1498,6 +1558,8 @@ export default {
     /* پیش از reportRoute: وگرنه «run» یک تاریخِ بدشکل حساب می‌شد و ۴۰۰
        می‌گرفت، نه اجرا. */
     if (url.pathname === "/report/run") return reportRunRoute(request, env, ctx);
+    if (url.pathname.startsWith("/report/") && url.pathname.endsWith(".txt"))
+      return reportTextRoute(request, url, env);
     if (url.pathname.startsWith("/report/")) return reportRoute(request, url, env);
     if (url.pathname === "/pairs.json") return pairsRoute(request, url, env);
     /* تصویر کارت. عمداً در `_site` نیست، پس همیشه به کد می‌رسد — مثل /gt و
