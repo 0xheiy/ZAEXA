@@ -6157,6 +6157,81 @@ console.log("[v4 index wiring] worker/index.js ok — v4StoreTtl/storeV4Result f
        "the chain-verified pool is its own coverage evidence, got " + JSON.stringify(bodyP));
   }
 
+  /* ک) 🔴 حکم نباید بینِ دو درخواست عوض شود — شاهدِ نسخه ۴ باید با خودِ حکم
+     کش شود. اندازه‌گیریِ زنده‌ی ۱۹ شهریور: همان توکن در اجرای اول nosell داد و
+     یک دقیقه بعد «نامعلوم / cover:false»، چون ضربه‌ی کش پرچمِ شاهد را نداشت و
+     گاردِ پوشش دوباره تنزلش می‌داد. این تست یک کشِ واقعی‌نما می‌سازد و همان دو
+     درخواستِ پشت‌سرهم را می‌زند. */
+  {
+    const { UPSTREAM_KEYED: UK_K } = await import("./index.js");
+    const { v4KvKey } = await import("./v4index.js");
+    const ADDR_K = "0x" + "f".repeat(40);
+    const POOL_ID_K = "0x" + "3".repeat(64);
+    const REAL_KEY_K = { currency0: vd.NATIVE_ADDR, currency1: ADDR_K, fee: 0, tickSpacing: 1,
+      hooks: vd.NATIVE_ADDR, poolId: POOL_ID_K };
+    const wrappedK = vd.VD_REVERT_WRAPPER + w2(0x20) + w2(36) +
+      vd.VD_NO_LIQUIDITY_SELECTOR.slice(2) + POOL_ID_K.slice(2) + "0".repeat(56);
+    const shapeK = vd.buildProbe(ADDR_K, vd.WETH_ADDR, 1n, { v4Keys: [REAL_KEY_K] });
+    const kvK = {
+      get: async (k) => (k === v4KvKey("base", ADDR_K)
+        ? JSON.stringify({ keys: [REAL_KEY_K], reason: "ok" }) : null),
+      put: async () => {},
+    };
+    const envK = { ASSETS, CG_KEY: "SECRET-CG-KEY-FOR-27A-3", ZX_KV: kvK };
+
+    let rpcBatches = 0;
+    const savedFetch = globalThis.fetch;
+    const savedCaches = globalThis.caches;
+    const cacheStore = new Map();
+    globalThis.caches = { default: {
+      match: async (req) => {
+        const body = cacheStore.get(String(req.url));
+        return body === undefined ? undefined : new Response(body,
+          { headers: { "content-type": "application/json" } });
+      },
+      put: async (req, res) => { cacheStore.set(String(req.url), await res.text()); },
+    } };
+    globalThis.fetch = async (url, init) => {
+      const u = String(url);
+      if (u.endsWith("/pools")) {
+        return new Response(JSON.stringify({ data: [
+          { relationships: { dex: { data: { id: "uniswap-v4-base" } } } },
+        ] }), { status: 200, headers: { "content-type": "application/json" } });
+      }
+      if (u.startsWith(UK_K)) {
+        return new Response(JSON.stringify({ data: { attributes: {
+          name: "Cached V4", symbol: "CACHEV4", total_reserve_in_usd: "1000",
+          decimals: 18, price_usd: "2000" } } }),
+          { status: 200, headers: { "content-type": "application/json" } });
+      }
+      rpcBatches++;
+      const reqs = JSON.parse(init.body);
+      return new Response(JSON.stringify(reqs.map((r) => {
+        if (r.id === 0) return { id: 0, result: mk4(5) };
+        const item = shapeK[r.id - 1];
+        if (item && item.poolId) return { id: r.id, error: { code: 3, data: wrappedK } };
+        return { id: r.id, error: { code: 3 } };
+      })), { status: 200, headers: { "content-type": "application/json" } });
+    };
+
+    const first = await (await call("/vd/" + ADDR_K,
+      { headers: { "cf-connecting-ip": "203.0.113.204" } }, envK)).json();
+    const batchesAfterFirst = rpcBatches;
+    const second = await (await call("/vd/" + ADDR_K,
+      { headers: { "cf-connecting-ip": "203.0.113.205" } }, envK)).json();
+    globalThis.fetch = savedFetch;
+    if (savedCaches === undefined) delete globalThis.caches; else globalThis.caches = savedCaches;
+
+    ok(first.v === "nosell", "the fresh compute must give nosell, got " + JSON.stringify(first));
+    ok(second.v === "nosell",
+       "the SAME token one request later must still give nosell — the v4 evidence has to be cached " +
+       "alongside the verdict, or the coverage gate silently downgrades a cache hit, got " +
+       JSON.stringify(second));
+    ok(rpcBatches === batchesAfterFirst,
+       "sanity: the second request must really be served from the verdict cache (no new RPC batch), got " +
+       rpcBatches + " vs " + batchesAfterFirst);
+  }
+
   /* ی) گذرِ کرون کلیدِ واقعیِ v4 را *پیش از* حکم می‌سازد.
      🔴 اندازه‌گیریِ ۱۹ شهریور: ۶۴ از ۶۵ توکنِ v4 در گزارش «نامعلوم» بودند،
      چون ایندکس با waitUntil بعد از حکم اجرا می‌شد و گزارش هر توکن را فقط

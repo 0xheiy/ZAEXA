@@ -484,7 +484,14 @@ async function ogFetchMeta(addr, env) {
    این تابع، چون شکلِ آدرسِ دو زنجیره فرق دارد: چک‌سامِ EVM یعنی حروفِ
    کوچک/بزرگ همان آدرس‌اند، پس toLowerCase لازم است؛ mint سولانا حساس به
    حروف است — lowercase کردنش آدرسِ دیگری می‌سازد، نه همان یکی. */
-async function cachedVerdict(cacheKeyPath, computeFn, ctx) {
+/* out (اختیاری) یک شیءِ مشاهده‌گر است، دقیقاً مثلِ whyOut در fetchVerdict:
+   computeFn می‌تواند out.v4Proof را پر کند و همان مقدار **کنارِ خودِ حکم کش
+   می‌شود**، و روی هر ضربه‌ی کش دوباره در همان out می‌نشیند.
+   🔴 چرا لازم شد: بدونِ این، یک "nosell"ِ کش‌شده در درخواستِ بعدی شاهدِ
+   نسخه ۴ خود را نداشت و گاردِ پوشش دوباره به «نامعلوم» تنزلش می‌داد —
+   اندازه‌گیریِ زنده‌ی ۱۹ شهریور: همان توکن در دو اجرای پشت‌سرهم دو جوابِ
+   متفاوت داد. یک حکم نباید بینِ دو درخواستِ یک‌دقیقه‌ای عوض شود. */
+async function cachedVerdict(cacheKeyPath, computeFn, ctx, out) {
   try {
     const store = (typeof caches !== "undefined" && caches.default) || null;
     const cacheKey = new Request("https://" + VD_CACHE_HOST + cacheKeyPath);
@@ -493,6 +500,7 @@ async function cachedVerdict(cacheKeyPath, computeFn, ctx) {
       const hit = await store.match(cacheKey);
       if (hit) {
         const body = await hit.json();
+        if (out && body && body.v4Proof === true) out.v4Proof = true;
         return body && (body.verdict === "sell" || body.verdict === "nosell") ? body.verdict : null;
       }
     }
@@ -503,7 +511,8 @@ async function cachedVerdict(cacheKeyPath, computeFn, ctx) {
        خاموشِ کارتِ تنزل‌یافته تبدیل می‌کند — دقیقاً همان «نمی‌دانم که مثل
        نه رفتار کند» که این پروژه هرگز نمی‌پذیرد. */
     if ((verdict === "sell" || verdict === "nosell") && store) {
-      const stash = new Response(JSON.stringify({ verdict }), {
+      const stash = new Response(JSON.stringify(
+        out && out.v4Proof === true ? { verdict, v4Proof: true } : { verdict }), {
         headers: {
           "content-type": "application/json",
           "cache-control": "public, max-age=300",
@@ -846,7 +855,7 @@ async function ogFetchVerdictDetail(addr, meta, deadlineAt, env, ctx, metaWhy) {
   // null بماند معنا دارد — دقیقاً همان الگویی که solFetchVerdict برای why
   // بیرونِ cachedVerdict دارد.
   let baseWhy;
-  let baseV4Proof = false;
+  const cacheOut = {}; // {v4Proof} — هم از computeFn پر می‌شود هم از ضربه‌ی کش
   const raw = await cachedVerdict(
     "/v1/" + network + "/" + addr.toLowerCase(),
     async () => {
@@ -870,10 +879,11 @@ async function ogFetchVerdictDetail(addr, meta, deadlineAt, env, ctx, metaWhy) {
       const result = await fetchVerdict(addr, meta,
         { deadlineAt, fetchImpl: fetch, rpcs: baseRpcsFor(env), v4Keys, whyOut });
       baseWhy = whyOut.why;
-      baseV4Proof = whyOut.v4Proof === true;
+      if (whyOut.v4Proof === true) cacheOut.v4Proof = true;
       return result;
     },
     ctx,
+    cacheOut,
   );
 
   /* حفاظِ پوشش — فقط روی Base، و فقط وقتی raw واقعاً "nosell" است. مثبت
@@ -894,9 +904,9 @@ async function ogFetchVerdictDetail(addr, meta, deadlineAt, env, ctx, metaWhy) {
      *واقعاً* از استخرِ خودش پرسیده‌ایم — حتی اگر بالادست هیچ استخری روی
      صرافی‌های پروب‌شونده نشان ندهد. کلید از لاگِ Initialize زنجیره آمده و
      شناسه‌ی داخلِ خطا با همان کلید یکی است (verdict.js/v4NoLiquidityProof).
-     ⚠️ این پرچم فقط وقتی هست که computeFn واقعاً اجرا شده باشد؛ یک ضربه‌ی
-     کش آن را ندارد و همان مسیرِ محافظه‌کارانه‌ی قبلی را می‌رود. */
-  if (baseV4Proof === true) return { v: "nosell", why: null };
+     ⚠️ این پرچم کنارِ خودِ حکم کش می‌شود (cachedVerdict بالاتر)، وگرنه همان
+     توکن در درخواستِ بعدی جوابِ دیگری می‌گرفت. */
+  if (cacheOut.v4Proof === true) return { v: "nosell", why: null };
   return { v: null, why: covered.why || "cover:shape" };
 }
 
