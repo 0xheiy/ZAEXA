@@ -352,11 +352,17 @@ export function buildRealV4Probe(tokenAddr, outAddr, amountIn, v4Keys) {
     if (!allowedSet.has(String(counter).toLowerCase())) continue; // ضدجفتِ این مرحله نیست
     const data = encodeV4QuoteExactInputSingleKey(key, tokenAddr, amountIn);
     if (data == null) continue; // بیش از ظرفیتِ uint128 — ردیف حذف می‌شود، بریده نمی‌شود
+    /* poolId فقط روی همین ردیف‌ها می‌نشیند — ردیف‌های حدسیِ v4 هرگز آن را
+       ندارند، و همان تفاوت است که شرطِ اولِ v4NoLiquidityProof را بی‌صدا
+       نگه می‌دارد: یک حدس هیچ‌وقت نمی‌تواند شاهدِ منفی بسازد. */
+    const poolId = typeof key.poolId === "string" && /^0x[0-9a-fA-F]{64}$/.test(key.poolId)
+      ? key.poolId : null;
     out.push({
-      id: "uniswap-v4", // positive-only همچنان از همین‌جا اعمال می‌شود
+      id: "uniswap-v4", // positive-only؛ تنها استثنا v4NoLiquidityProof است
       key: "real:" + key.fee + ":" + key.tickSpacing,
       to: V4_ROW.to,
       data,
+      poolId,
     });
     appended++;
   }
@@ -535,6 +541,55 @@ export const VD_POSITIVE_ONLY = Object.freeze({
    worker/index.js (baseVenueCovered) سرِ جایش است. */
 export const VD_MIN_NEGATIVE_PROOF = 1;
 
+/* ---------------------------------------------------------------------
+   شاهدِ «این استخر هیچ اندازه‌ای را پر نمی‌کند» — تنها راهی که یک ردیفِ v4
+   می‌تواند منفی اثبات کند
+   ---------------------------------------------------------------------
+   اندازه‌گیریِ ۱۹ شهریور روی شش توکنِ زنده‌ی v4 (اسکریپتِ v4_pool_truth.py):
+   پنج‌تا با هر دو اندازه (۱ واحدِ خام و یک توکنِ کامل) همین را برگرداندند و
+   ششمی کوتِ سالم داد — یعنی کوت‌گرفتنِ ما از v4 سالم است، حتی با هوک.
+   کوترِ v4 خطای داخلیِ استخر را در UnexpectedRevertBytes(bytes) می‌پیچد؛
+   چهار بایتِ *درونی* اسمِ خطا را می‌دهد و NotEnoughLiquidity شناسه‌ی خودِ
+   استخر را هم با خودش می‌آورد.
+   🔴 این تنها حالتی است که یک ردیفِ positive-only اجازه‌ی اثباتِ منفی دارد، و
+   چهار شرط با هم لازم است (تصمیمِ صریحِ حسام، ۱۹ شهریور):
+     ۱. کلید از لاگِ Initialize زنجیره ایندکس شده باشد، نه حدسی (یعنی ردیف
+        poolId دارد؛ ردیف‌های حدسی هرگز poolId ندارند).
+     ۲. خطای درونی دقیقاً NotEnoughLiquidity باشد — از رویِ چهار بایت، نه متن.
+     ۳. شناسه‌ی داخلِ خطا با همان کلیدی که فرستادیم یکی باشد.
+     ۴. کاناری زنده باشد (همان گاردِ همیشگیِ verdictFrom، بالاتر).
+   هر چیزِ دیگر — از جمله PoolNotInitialized که یعنی کلیدِ ما اشتباه بوده —
+   هیچ‌چیز اثبات نمی‌کند. */
+export const VD_REVERT_WRAPPER = "0x6190b2b0";      // UnexpectedRevertBytes(bytes)
+export const VD_NO_LIQUIDITY_SELECTOR = "0x7a5ed734"; // NotEnoughLiquidity(bytes32)
+
+/* بایت‌های ریوِرتِ درونی را از دلِ پوشش بیرون می‌کشد، یا null.
+   هرگز پرتاب نمی‌کند و هیچ‌وقت از متن چیزی نمی‌خواند. */
+export function innerRevertData(data) {
+  if (typeof data !== "string" || !data.startsWith(VD_REVERT_WRAPPER)) return null;
+  const body = data.slice(10);
+  if (body.length < 128) return null;
+  let len;
+  try { len = Number(BigInt("0x" + body.slice(64, 128))); } catch (e) { return null; }
+  if (!Number.isInteger(len) || len <= 0 || len > 4096) return null;
+  const inner = body.slice(128, 128 + len * 2);
+  if (inner.length !== len * 2) return null;
+  return "0x" + inner;
+}
+
+/* آیا این ردیف اثباتِ «استخرِ واقعیِ خودش هیچ اندازه‌ای را پر نمی‌کند» است؟ */
+export function v4NoLiquidityProof(item) {
+  if (!item || item.kind !== "V4_SINGLE") return false;
+  const poolId = typeof item.poolId === "string" ? item.poolId.toLowerCase() : null;
+  if (!poolId || !/^0x[0-9a-f]{64}$/.test(poolId)) return false; // شرطِ ۱ — فقط کلیدِ واقعی
+  const err = item.error;
+  const data = err && typeof err.data === "string" ? err.data : null;
+  const inner = innerRevertData(data);
+  if (!inner || !inner.toLowerCase().startsWith(VD_NO_LIQUIDITY_SELECTOR)) return false; // شرطِ ۲
+  const idInError = "0x" + inner.slice(10, 74).toLowerCase();
+  return idInError.length === 66 && idInError === poolId; // شرطِ ۳
+}
+
 function decodeItemValue(item) {
   if (!item || item.error || typeof item.result !== "string") return null;
   return decodeQuote(item.kind, item.result);
@@ -584,7 +639,12 @@ export function verdictFrom({ canary, items }) {
     const positiveOnly = Object.prototype.hasOwnProperty.call(VD_POSITIVE_ONLY, kind)
       ? VD_POSITIVE_ONLY[kind] : null;
     if (positiveOnly === null) return null; // kindِ نامعتبر → هرگز حدس نزن
-    if (positiveOnly) continue;             // نه اثباتِ منفی می‌دهد نه مانعش می‌شود
+    if (positiveOnly) {
+      // تنها استثنا: استخرِ واقعیِ خودِ توکن می‌گوید هیچ اندازه‌ای را پر
+      // نمی‌کند، و شناسه‌اش با کلیدی که فرستادیم یکی است.
+      if (v4NoLiquidityProof(it)) proofCount++;
+      continue;                             // در هر حالتِ دیگر: نه اثبات، نه مانع
+    }
 
     if (it && it.error) {
       if (PROVEN_NEGATIVE_CODES.has(it.error.code)) { proofCount++; continue; }
@@ -621,6 +681,9 @@ export function verdictFrom({ canary, items }) {
    --------------------------------------------------------------------- */
 export const VD_PROBE_OUT = Object.freeze([
   "quoted", "zero", "empty", "undecodable", "revert", "no-answer", "batch-failed", "deadline",
+  // ریوِرتِ کوترِ v4 که درونش NotEnoughLiquidity با شناسه‌ی همین استخر است —
+  // از "revert:<کد>" جدا نگه داشته می‌شود چون معنایش فرق دارد: این یکی شاهد است.
+  "no-liquidity",
 ]);
 
 /* ---------------------------------------------------------------------
@@ -655,6 +718,7 @@ export function isBaseWhy(s) {
    اصلاً جواب نداد» با «اندپوینت جواب داد و رد کرد» یکی شود. */
 function classifyProbeOut(kind, entry) {
   if (entry && entry.error) {
+    if (v4NoLiquidityProof(Object.assign({ kind }, entry))) return "no-liquidity";
     const code = entry.error.code;
     if (code === -1) return "no-answer";
     return "revert:" + (Number.isInteger(code) ? code : "unknown");
@@ -738,7 +802,10 @@ async function callBatch(fetchImpl, rpcUrl, canary, probeItems, timeoutMs, colle
   }
 
   const pickedCanary = pick(0);
-  const pickedItems = probeItems.map((p, i) => Object.assign({ kind: VENUE_KIND_BY_ID.get(p.id) }, pick(i + 1)));
+  // poolId (فقط ردیف‌های کلیدِ واقعیِ v4) باید تا verdictFrom برسد، وگرنه
+  // شرطِ «شناسه‌ی داخلِ خطا با کلیدِ ما یکی است» اصلاً قابلِ سنجش نیست.
+  const pickedItems = probeItems.map((p, i) =>
+    Object.assign({ kind: VENUE_KIND_BY_ID.get(p.id), poolId: p.poolId || null }, pick(i + 1)));
 
   // این batch واقعاً اجرا شد؛ کاناری اول (همان ترتیبِ id=0)، بعد هر آیتم
   // به همان ترتیبی که buildProbe ساخته — نه ترتیبِ برگشتیِ RPC.
@@ -764,6 +831,14 @@ export async function fetchVerdict(tokenAddr, meta, opts) {
   const whyOut = o.whyOut && typeof o.whyOut === "object" ? o.whyOut : null;
   function setWhy(why) {
     if (whyOut) whyOut.why = why; // هرگز روی "sell"/"nosell" صدا زده نمی‌شود
+  }
+  /* 🔴 وقتی یک "nosell" از شاهدِ استخرِ واقعیِ v4 آمده، کالر باید بداند —
+     گاردِ پوششِ worker/index.js فقط با همین می‌تواند بفهمد که ما واقعاً از
+     استخرِ خودِ توکن پرسیده‌ایم، حتی اگر بالادست هیچ استخری روی صرافی‌های
+     پروب‌شونده نشان ندهد. مشاهده‌گرِ محض است، مثلِ collect و why. */
+  function markV4Proof(batch) {
+    if (!whyOut || !batch || !Array.isArray(batch.items)) return;
+    if (batch.items.some((it) => v4NoLiquidityProof(it))) whyOut.v4Proof = true;
   }
 
   try {
@@ -850,7 +925,7 @@ export async function fetchVerdict(tokenAddr, meta, opts) {
 
       const verdictB = verdictFrom(batchB);
       if (verdictB === "sell") return "sell";
-      if (verdictB === "nosell") return "nosell";
+      if (verdictB === "nosell") { markV4Proof(batchA); markV4Proof(batchB); return "nosell"; }
       setWhy("usdc-no-proof");
       return null;
     }

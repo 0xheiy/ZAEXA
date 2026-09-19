@@ -846,6 +846,7 @@ async function ogFetchVerdictDetail(addr, meta, deadlineAt, env, ctx, metaWhy) {
   // null بماند معنا دارد — دقیقاً همان الگویی که solFetchVerdict برای why
   // بیرونِ cachedVerdict دارد.
   let baseWhy;
+  let baseV4Proof = false;
   const raw = await cachedVerdict(
     "/v1/" + network + "/" + addr.toLowerCase(),
     async () => {
@@ -869,6 +870,7 @@ async function ogFetchVerdictDetail(addr, meta, deadlineAt, env, ctx, metaWhy) {
       const result = await fetchVerdict(addr, meta,
         { deadlineAt, fetchImpl: fetch, rpcs: baseRpcsFor(env), v4Keys, whyOut });
       baseWhy = whyOut.why;
+      baseV4Proof = whyOut.v4Proof === true;
       return result;
     },
     ctx,
@@ -887,6 +889,14 @@ async function ogFetchVerdictDetail(addr, meta, deadlineAt, env, ctx, metaWhy) {
   // 🔴 شکستِ خودِ چکِ پوشش (false یا null) هم به نامعلوم تنزل می‌کند —
   // «نتوانستیم پوشش را بسنجیم» هرگز اجازه‌ی اتهام نیست.
   if (covered.covered === true) return { v: "nosell", why: null };
+  /* 🔴 استثنای پوشش (۱۹ شهریور، با تصمیمِ صریحِ حسام): وقتی خودِ حکمِ منفی از
+     شاهدِ «استخرِ واقعیِ این توکن هیچ اندازه‌ای را پر نمی‌کند» آمده باشد، ما
+     *واقعاً* از استخرِ خودش پرسیده‌ایم — حتی اگر بالادست هیچ استخری روی
+     صرافی‌های پروب‌شونده نشان ندهد. کلید از لاگِ Initialize زنجیره آمده و
+     شناسه‌ی داخلِ خطا با همان کلید یکی است (verdict.js/v4NoLiquidityProof).
+     ⚠️ این پرچم فقط وقتی هست که computeFn واقعاً اجرا شده باشد؛ یک ضربه‌ی
+     کش آن را ندارد و همان مسیرِ محافظه‌کارانه‌ی قبلی را می‌رود. */
+  if (baseV4Proof === true) return { v: "nosell", why: null };
   return { v: null, why: covered.why || "cover:shape" };
 }
 
@@ -1555,7 +1565,21 @@ async function scheduledReportPass(env, ctx, opts) {
       kv: env.ZX_KV,
       fetchPools,
       metaOf: (addr) => ogFetchMetaDetail(addr, env),
-      verdictOf: (addr, meta, metaWhy) => ogFetchVerdictDetail(addr, meta, Date.now() + OG_BUDGET_MS, env, ctx, metaWhy),
+      /* 🔴 ۱۹ شهریور: تا امروز کلیدِ واقعیِ v4 با ctx.waitUntil *بعد* از حکم
+         ساخته می‌شد، و چون گزارش هر توکن را فقط یک بار می‌بیند (حلقه‌ی
+         pairs)، آن کلید هرگز روی هیچ ردیفی اثر نمی‌گذاشت — اندازه‌گیری:
+         ۶۴ از ۶۵ توکنِ v4 در گزارشِ ۱۹ شهریور «نامعلوم». پس این‌جا، و فقط
+         این‌جا (مسیرِ کارتِ /t/ دست‌نخورده)، ایندکس پیش از حکم و منتظرشونده
+         اجرا می‌شود — تنها برای توکنی که دکسش v4 است و هنوز ورودی ندارد. */
+      verdictOf: async (addr, meta, metaWhy, dex) => {
+        if (env.ZX_KV && typeof dex === "string" && dex.startsWith("uniswap-v4")) {
+          try {
+            const entry = await readV4Entry(addr, env);
+            if (!entry.found) await runV4Index(addr, env);
+          } catch (e) { /* ایندکس هرگز نباید گذرِ گزارش را بشکند */ }
+        }
+        return ogFetchVerdictDetail(addr, meta, Date.now() + OG_BUDGET_MS, env, ctx, metaWhy);
+      },
       now: () => Date.now(),
       sleep: (ms) => new Promise((r) => setTimeout(r, ms)),
       // فقط اجرای دستی این را می‌دهد؛ زمان‌بند سقفِ کاملِ خودش را دارد.

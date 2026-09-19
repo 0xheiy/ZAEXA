@@ -4217,6 +4217,138 @@ function isSolidlyReqId(id) { return PROBE_KIND_BY_ID.get(id) === "SOLIDLY"; }
     }
     return vd.VD_PROBE_OUT.includes(s);
   }
+  /* ک) شاهدِ «استخرِ واقعیِ v4 هیچ اندازه‌ای را پر نمی‌کند» — تنها حالتی که
+     یک ردیفِ positive-only منفی اثبات می‌کند (تصمیمِ حسام، ۱۹ شهریور).
+     شکلِ پاسخ از اندازه‌گیریِ زنده آمده: کوترِ v4 خطای استخر را در
+     UnexpectedRevertBytes(bytes) می‌پیچد و چهار بایتِ درونی
+     NotEnoughLiquidity(bytes32) است، با شناسه‌ی خودِ همان استخر. */
+  {
+    const POOL_ID = "0x48c69f5edad1664e170aac7c20f7b299add9668bc8dd221d9e18b6649b386263";
+    const REAL_KEY = {
+      currency0: vd.NATIVE_ADDR, currency1: TOKEN.toLowerCase(),
+      fee: 0, tickSpacing: 1, hooks: vd.NATIVE_ADDR, poolId: POOL_ID,
+    };
+    // 🔴 بایت‌ها دقیقاً همان چیزی است که زنجیره برگرداند: پوشش + طول + درونی
+    const wrapped = (poolId) => vd.VD_REVERT_WRAPPER + w(0x20) + w(36) +
+      vd.VD_NO_LIQUIDITY_SELECTOR.slice(2) + poolId.slice(2) + "0".repeat(56);
+    const dispatch = (poolIdInError) => async (url, init) => {
+      const reqs = JSON.parse(init.body);
+      return jsonRes(reqs.map((r) => {
+        if (r.id === 0) return { id: 0, result: mkStatic4(5) };
+        const item = probeShapeReal[r.id - 1];
+        if (item && item.poolId) {
+          return { id: r.id, error: { code: 3, data: wrapped(poolIdInError) } };
+        }
+        return { id: r.id, error: { code: 3 } }; // بقیه: ریوِرتِ اثباتیِ معمولی
+      }));
+    };
+    const probeShapeReal = vd.buildProbe(TOKEN, vd.WETH_ADDR, 1n, { v4Keys: [REAL_KEY] });
+    ok(probeShapeReal.some((x) => x.poolId === POOL_ID),
+       "sanity: buildProbe must carry the real key's poolId on the row it built from it");
+    ok(vd.buildProbe(TOKEN, vd.WETH_ADDR, 1n).every((x) => !x.poolId),
+       "a guessed v4 row must never carry a poolId — that is what keeps a guess from ever proving a negative");
+
+    const collect = [];
+    const whyOut = {};
+    const v = await vd.fetchVerdict(TOKEN, meta,
+      { fetchImpl: dispatch(POOL_ID), rpcs: ["https://rpc-a.example"], v4Keys: [REAL_KEY], collect, whyOut });
+    ok(v === "nosell", "a real v4 pool answering NotEnoughLiquidity for its own pool id must count as " +
+       "evidence, got " + v);
+    ok(collect.some((e) => e.out === "no-liquidity"),
+       "the probe log must show no-liquidity, separately from revert:<code>, got " +
+       JSON.stringify(collect.map((e) => e.out).slice(0, 6)));
+    ok(whyOut.v4Proof === true,
+       "fetchVerdict must tell the caller the negative rests on a real v4 pool, so the coverage gate can see it");
+    allObservedOut.push(...collect.map((e) => e.out));
+
+    // 🔴 همان پاسخ، ولی شناسه‌ی داخلِ خطا مالِ استخرِ دیگری است → هیچ اثباتی
+    const OTHER = "0x" + "9".repeat(64);
+    const collect2 = [];
+    const whyOut2 = {};
+    const v2 = await vd.fetchVerdict(TOKEN, { decimals: 18, priceUsd: 2000 },
+      { fetchImpl: async (url, init) => {
+          const reqs = JSON.parse(init.body);
+          return jsonRes(reqs.map((r) => {
+            if (r.id === 0) return { id: 0, result: mkStatic4(5) };
+            const item = probeShapeReal[r.id - 1];
+            if (item && item.poolId) return { id: r.id, error: { code: 3, data: wrapped(OTHER) } };
+            return { id: r.id, error: { code: 3 } }; // اثباتِ منفیِ عادی، بدونِ کمکِ v4
+          }));
+        }, rpcs: ["https://rpc-a.example"], v4Keys: [REAL_KEY], collect: collect2, whyOut: whyOut2 });
+    ok(v2 === "nosell", "sanity: the other venues still prove the negative on their own, got " + v2);
+    ok(!collect2.some((e) => e.out === "no-liquidity"),
+       "a pool id that does not match the key we sent must never be logged as no-liquidity");
+    ok(whyOut2.v4Proof !== true,
+       "a mismatched pool id must not raise the v4 proof flag — that flag is what lets the coverage gate " +
+       "accuse a token whose only pool is on v4");
+    allObservedOut.push(...collect2.map((e) => e.out));
+
+    /* 🔴 شرطِ ۲: خطای درونیِ دیگری غیرِ NotEnoughLiquidity هیچ‌چیز اثبات
+       نمی‌کند. PoolNotInitialized یعنی کلیدِ ما اشتباه بوده — و یک کلیدِ
+       اشتباه دقیقاً همان چیزی است که نباید به اتهام ترجمه شود. */
+    const wrappedOther = vd.VD_REVERT_WRAPPER + w(0x20) + w(4) + "486aa307" + "0".repeat(56);
+    // مستقیم روی verdictFrom، چون فقط این‌جا می‌شود «تنها شاهد، همین ردیف
+    // است» را ساخت: یک فهرستِ تک‌ردیفیِ v4.
+    const aliveC = { result: mkStatic4(5) };
+    ok(vd.verdictFrom({ canary: aliveC,
+        items: [{ kind: "V4_SINGLE", poolId: POOL_ID, error: { code: 3, data: wrapped(POOL_ID) } }] })
+        === "nosell",
+       "a lone real-key v4 row answering NotEnoughLiquidity for its own pool id must be enough");
+    ok(vd.verdictFrom({ canary: aliveC,
+        items: [{ kind: "V4_SINGLE", poolId: POOL_ID, error: { code: 3, data: wrappedOther } }] })
+        === null,
+       "the same row answering PoolNotInitialized proves nothing — a wrong key must never become an accusation");
+    ok(vd.verdictFrom({ canary: aliveC,
+        items: [{ kind: "V4_SINGLE", poolId: null, error: { code: 3, data: wrapped(POOL_ID) } }] })
+        === null,
+       "a guessed row (no pool id) answering NotEnoughLiquidity proves nothing");
+    /* 🔴 شرطِ ۲ به‌تنهایی: خطای درونیِ دیگری که *اتفاقاً* همان شناسه را هم در
+       آرگومانش دارد. اگر فقط شناسه را مقایسه می‌کردیم و چهار بایت را نه،
+       این یکی هم اثبات حساب می‌شد. */
+    const wrappedSameIdOtherError = vd.VD_REVERT_WRAPPER + w(0x20) + w(36) +
+      "deadbeef" + POOL_ID.slice(2) + "0".repeat(56);
+    ok(vd.verdictFrom({ canary: aliveC,
+        items: [{ kind: "V4_SINGLE", poolId: POOL_ID,
+                  error: { code: 3, data: wrappedSameIdOtherError } }] })
+        === null,
+       "an inner error that is not NotEnoughLiquidity proves nothing, even when its first word happens to " +
+       "be our pool id — the selector is checked, not just the id");
+
+    const collect3 = [];
+    const whyOut3 = {};
+    await vd.fetchVerdict(TOKEN, { decimals: 18, priceUsd: 2000 },
+      { fetchImpl: async (url, init) => {
+          const reqs = JSON.parse(init.body);
+          return jsonRes(reqs.map((r) => {
+            if (r.id === 0) return { id: 0, result: mkStatic4(5) };
+            const item = probeShapeReal[r.id - 1];
+            if (item && item.poolId) return { id: r.id, error: { code: 3, data: wrappedOther } };
+            return { id: r.id, error: { code: 3 } };
+          }));
+        }, rpcs: ["https://rpc-a.example"], v4Keys: [REAL_KEY], collect: collect3, whyOut: whyOut3 });
+    ok(!collect3.some((e) => e.out === "no-liquidity"),
+       "only NotEnoughLiquidity may ever be logged as no-liquidity, got " +
+       JSON.stringify(collect3.map((e) => e.out).slice(0, 6)));
+    ok(whyOut3.v4Proof !== true, "a wrong key must never raise the v4 proof flag");
+
+    /* شرطِ ۱: همان پاسخِ NotEnoughLiquidity، ولی روی یک ردیفِ *حدسی* (بدونِ
+       poolId) — یک حدس هرگز حق اثبات ندارد. */
+    const collect4 = [];
+    const whyOut4 = {};
+    const v4g = await vd.fetchVerdict(TOKEN, { decimals: 18, priceUsd: 2000 },
+      { fetchImpl: async (url, init) => {
+          const reqs = JSON.parse(init.body);
+          return jsonRes(reqs.map((r) => {
+            if (r.id === 0) return { id: 0, result: mkStatic4(5) };
+            return { id: r.id, error: { code: 3, data: wrapped(POOL_ID) } };
+          }));
+        }, rpcs: ["https://rpc-a.example"], collect: collect4, whyOut: whyOut4 }); // بدونِ v4Keys
+    ok(!collect4.some((e) => e.out === "no-liquidity"),
+       "a guessed v4 row carries no pool id, so its answer may never be read as no-liquidity");
+    ok(whyOut4.v4Proof !== true, "a guessed row must never raise the v4 proof flag");
+    allObservedOut.push(...collect3.map((e) => e.out), ...collect4.map((e) => e.out));
+  }
+
   ok(allObservedOut.length > 10, "sanity: the scenarios above should have observed a good number of outs, got "
     + allObservedOut.length);
   const stray = allObservedOut.filter((o) => !isFrozenProbeOut(o));
@@ -5975,12 +6107,140 @@ console.log("[v4 index wiring] worker/index.js ok — v4StoreTtl/storeV4Result f
        JSON.stringify(uncovered));
   }
 
+  /* ط) استخرِ واقعیِ v4 به‌عنوانِ شاهد *و* پوشش — سرتاسری از رویِ worker.fetch.
+     توکنی که بالادست فقط استخرِ v4 برایش می‌شناسد (پوشش false)، ولی کلیدِ
+     واقعی‌اش ذخیره شده و خودِ آن استخر می‌گوید هیچ اندازه‌ای را پر نمی‌کند.
+     تا ۱۹ شهریور این ترکیب «نامعلوم» می‌شد؛ حالا حکم می‌گیرد. */
+  {
+    const { UPSTREAM_KEYED: UK_P, v4KvKeyForTest } = await import("./index.js");
+    const { v4KvKey } = await import("./v4index.js");
+    const ADDR_P = "0x" + "c".repeat(40);
+    const POOL_ID_P = "0x" + "7".repeat(64);
+    const REAL_KEY_P = { currency0: vd.NATIVE_ADDR, currency1: ADDR_P, fee: 0, tickSpacing: 1,
+      hooks: vd.NATIVE_ADDR, poolId: POOL_ID_P };
+    const wrappedP = vd.VD_REVERT_WRAPPER + w2(0x20) + w2(36) +
+      vd.VD_NO_LIQUIDITY_SELECTOR.slice(2) + POOL_ID_P.slice(2) + "0".repeat(56);
+    const kvP = {
+      get: async (k) => (k === v4KvKey("base", ADDR_P)
+        ? JSON.stringify({ keys: [REAL_KEY_P], reason: "ok" }) : null),
+      put: async () => {},
+    };
+    const envP = { ASSETS, CG_KEY: "SECRET-CG-KEY-FOR-27A-2", ZX_KV: kvP };
+    const shapeP = vd.buildProbe(ADDR_P, vd.WETH_ADDR, 1n, { v4Keys: [REAL_KEY_P] });
+    const savedFetch = globalThis.fetch;
+    globalThis.fetch = async (url, init) => {
+      const u = String(url);
+      if (u.endsWith("/pools")) {
+        return new Response(JSON.stringify({ data: [
+          { relationships: { dex: { data: { id: "uniswap-v4-base" } } } },
+        ] }), { status: 200, headers: { "content-type": "application/json" } });
+      }
+      if (u.startsWith(UK_P)) {
+        return new Response(JSON.stringify({ data: { attributes: {
+          name: "Only V4", symbol: "ONLYV4", total_reserve_in_usd: "1000",
+          decimals: 18, price_usd: "2000",
+        } } }), { status: 200, headers: { "content-type": "application/json" } });
+      }
+      const reqs = JSON.parse(init.body);
+      return new Response(JSON.stringify(reqs.map((r) => {
+        if (r.id === 0) return { id: 0, result: mk4(5) };
+        const item = shapeP[r.id - 1];
+        if (item && item.poolId) return { id: r.id, error: { code: 3, data: wrappedP } };
+        return { id: r.id, error: { code: 3 } };
+      })), { status: 200, headers: { "content-type": "application/json" } });
+    };
+    const resP = await call("/vd/" + ADDR_P, { headers: { "cf-connecting-ip": "203.0.113.203" } }, envP);
+    const bodyP = await resP.json();
+    globalThis.fetch = savedFetch;
+    ok(bodyP.v === "nosell" && !("why" in bodyP),
+       "a v4-only token whose own indexed pool cannot fill any size must now reach nosell end to end — " +
+       "the chain-verified pool is its own coverage evidence, got " + JSON.stringify(bodyP));
+  }
+
+  /* ی) گذرِ کرون کلیدِ واقعیِ v4 را *پیش از* حکم می‌سازد.
+     🔴 اندازه‌گیریِ ۱۹ شهریور: ۶۴ از ۶۵ توکنِ v4 در گزارش «نامعلوم» بودند،
+     چون ایندکس با waitUntil بعد از حکم اجرا می‌شد و گزارش هر توکن را فقط
+     یک بار می‌بیند — کلید ساخته می‌شد و هرگز به هیچ ردیفی نمی‌رسید.
+     این تست ترتیب را می‌سنجد، نه فقط وجودِ تماس را. */
+  {
+    const ADDR_C = "0x" + "d".repeat(40);
+    const order = [];
+    const POOL_ROW_C = {
+      attributes: {
+        base_token_price_usd: "2000", reserve_in_usd: "10000",
+        pool_created_at: "2026-09-19T00:00:00Z", volume_usd: { h24: "1000" }, fdv_usd: "500000",
+      },
+      relationships: {
+        base_token: { data: { id: "base_" + ADDR_C } },
+        dex: { data: { id: "uniswap-v4-base" } },
+      },
+    };
+    const savedFetch = globalThis.fetch;
+    globalThis.fetch = async (url, init) => {
+      const u = String(url);
+      if (u.includes("/new_pools")) {
+        return new Response(JSON.stringify({ data: [POOL_ROW_C] }),
+          { status: 200, headers: { "content-type": "application/json" } });
+      }
+      // ⚠️ اول /pools، بعد /tokens/ — آدرسِ استخرها خودش شاملِ /tokens/ است
+      if (u.endsWith("/pools")) {
+        order.push("pools");
+        return new Response(JSON.stringify({ data: [
+          // 🔴 شناسه‌ی استخرِ v4 سی‌ودو بایت است، نه بیست — فیکسچرِ بیست‌بایتی
+          // را خودِ v4index کنار می‌گذارد و هیچ لاگی خوانده نمی‌شود.
+          { attributes: { address: "0x" + "e".repeat(64), pool_created_at: "2026-09-19T00:00:00Z" },
+            relationships: { dex: { data: { id: "uniswap-v4-base" } } } },
+        ] }), { status: 200, headers: { "content-type": "application/json" } });
+      }
+      if (u.includes("/tokens/")) {
+        order.push("meta");
+        return new Response(JSON.stringify({ data: { attributes: {
+          name: "Cron V4", symbol: "CRONV4", total_reserve_in_usd: "1000",
+          decimals: 18, price_usd: "2000" } } }),
+          { status: 200, headers: { "content-type": "application/json" } });
+      }
+      const body = JSON.parse(init.body);
+      const method = Array.isArray(body) ? "eth_call" : body.method;
+      order.push(method);
+      if (method === "eth_getBlockByNumber") {
+        return new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, result: { number: "0x3111111" } }),
+          { status: 200, headers: { "content-type": "application/json" } });
+      }
+      if (method === "eth_getLogs") {
+        return new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, result: [] }),
+          { status: 200, headers: { "content-type": "application/json" } });
+      }
+      return new Response(JSON.stringify(body.map((r) => (r.id === 0
+        ? { id: 0, result: mk4(5) } : { id: r.id, error: { code: 3 } }))),
+        { status: 200, headers: { "content-type": "application/json" } });
+    };
+    const store = new Map();
+    const kvC = { get: async (k) => (store.has(k) ? store.get(k) : null),
+      put: async (k, v) => { store.set(k, v); } };
+    const resC = await call("/report/run", { method: "GET", headers: { "x-run-key": "cron-v4-key" } },
+      { ASSETS, ZX_KV: kvC, RUN_KEY: "cron-v4-key" });
+    globalThis.fetch = savedFetch;
+    ok(resC.status === 200, "the manual report run must answer 200, got " + resC.status);
+    // اولین تماسِ زنجیره‌ایِ خودِ ایندکس (هر کدام زودتر بیاید) در برابرِ اولین
+    // eth_call که مالِ حکم است.
+    const idxCalls = order.filter((m) => m === "eth_getBlockByNumber" || m === "eth_getLogs");
+    const firstIndex = order.findIndex((m) => m === "eth_getBlockByNumber" || m === "eth_getLogs");
+    const firstCall = order.indexOf("eth_call");
+    ok(idxCalls.length > 0,
+       "the cron pass must index the real v4 key itself, got call order: " + JSON.stringify(order));
+    ok(firstCall === -1 || firstIndex < firstCall,
+       "the v4 index must run BEFORE the verdict's eth_call, not after it in the background — " +
+       "otherwise the key it builds never reaches any report row. Order: " + JSON.stringify(order));
+  }
+
   console.log("[nosell quorum] an abstaining venue no longer erases proven negatives: the measured live "
     + "shape (19 reverts + 2 aerodrome zeros) now verdicts nosell instead of unknown, while an abstain "
     + "alone still proves nothing, an unknown error code or an undecodable result still makes the whole "
     + "verdict unknown, positive-only v4 rows still carry no evidence, a positive still wins and a dead "
     + "canary still voids everything; end to end the same shape reaches nosell on a covered dex and "
-    + "still degrades to cover:false on an uncovered one");
+    + "still degrades to cover:false on an uncovered one; a real v4 pool answering NotEnoughLiquidity for its "
+    + "own pool id is now both evidence and its own coverage (a guessed row, or a mismatched pool id, still "
+    + "proves nothing); and the cron pass indexes the real v4 key BEFORE the verdict instead of after it");
 }
 
 /* ---- ۲۷ب. چرا «نامعلوم» — واژه‌نامه‌ی بسته‌ی why روی Base ----

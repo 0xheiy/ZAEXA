@@ -303,7 +303,10 @@ export async function runReportPass({ kv, fetchPools, metaOf, verdictOf, now, sl
       // خودش تصمیم بگیرد «هیچ تلاشی نکردم» را چه بنامد.
       // verdictOf هم همان قاعده‌ی متاOf را دارد: شکلِ دیگر → v:null، why:"internal".
       let verdictResult;
-      try { verdictResult = await verdictOf(t.address, meta, metaWhy); } catch (e) { verdictResult = null; }
+      // dex هم پاس داده می‌شود: کالر (worker/index.js) برای دکسِ v4 پیش از
+      // حکم کلیدِ واقعی را ایندکس می‌کند. این تابع خودش هیچ تصمیمی از رویش
+      // نمی‌گیرد — فقط همان چیزی را که از newPoolRowToToken آمده رد می‌کند.
+      try { verdictResult = await verdictOf(t.address, meta, metaWhy, t.dex); } catch (e) { verdictResult = null; }
       const verdictOk = !!verdictResult && typeof verdictResult === "object" &&
         Object.prototype.hasOwnProperty.call(verdictResult, "v");
       const verdict = verdictOk ? verdictResult.v : null;
