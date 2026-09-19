@@ -523,6 +523,18 @@ export const VD_POSITIVE_ONLY = Object.freeze({
   CL_UINT24: false, CL_INT24: false, V2: false, SOLIDLY: false, V4_SINGLE: true,
 });
 
+/* کمترین تعدادِ شاهدِ واقعیِ منفی برای یک حکمِ "nosell".
+   ۱۹ شهریور، اندازه‌گیریِ زنده روی یک توکنِ Base: نوزده ریوِرتِ کدِ ۳ و دو
+   صفرِ aerodrome. کدِ قبلی آن دو صفر را «باطل‌کننده‌ی کل» می‌شمرد، پس نوزده
+   شاهدِ تمیز پاک می‌شد — و چون روترِ سالیدیتی وقتی استخر ندارد صفر می‌دهد نه
+   ریوِرت، آن دو صفر تقریباً روی هر توکنِ تازه هست. نتیجه: شاخه‌ی nosell عملاً
+   غیرقابلِ‌رسیدن بود (صفر مورد در ۳۱۹ توکنِ زنده).
+   حالا صفرِ یک kindِ zero-is-not-proof «رأیِ ممتنع» است: نه اثبات می‌کند، نه
+   اثباتِ دیگران را پاک می‌کند. سقفِ پایین همان یک شاهدِ واقعی می‌ماند —
+   دقیقاً همان چیزی که پیش از این هم لازم بود — و گاردِ پوششِ
+   worker/index.js (baseVenueCovered) سرِ جایش است. */
+export const VD_MIN_NEGATIVE_PROOF = 1;
+
 function decodeItemValue(item) {
   if (!item || item.error || typeof item.result !== "string") return null;
   return decodeQuote(item.kind, item.result);
@@ -550,16 +562,19 @@ export function verdictFrom({ canary, items }) {
   // نشد» با «همه‌ی صرافی‌ها رد کردند» یکی می‌شد؛ اولی نامعلوم است.
   if (list.length === 0) return null;
 
-  // با کاناریِ زنده و بدون هیچ مثبتی: هرچیزی که «اثبات‌شده منفی» نباشد کل
-  // نتیجه را نامعلوم می‌کند. اثباتی یعنی: ریوِرتِ کدِ ۳ یا -۳۲۰۰۰، یا (فقط
-  // وقتی VD_ZERO_IS_PROOF[kind] راست باشد) "0x" خالی یا رمزگشاییِ صفر.
-  // کدِ دیگرِ خطا، رمزگشاییِ ناموفق، یا صفرِ یک kindِ zero-is-not-proof
-  // اثباتی نیست. یک kindِ غایب/ناشناخته هم هرگز حدس زده نمی‌شود — نامعلوم.
-  // شمارشِ آیتم‌های non-positive-only که واقعاً از حلقه گذشتند (یعنی اثباتِ
-  // منفی دادند، نه اینکه حدس زده شده باشند) — اگر صفر باشد، فهرست فقط از
-  // ردیف‌های positive-only ساخته شده و "nosell" دادن دقیقاً همان باگِ
-  // ۷ سپتامبر است، فقط این‌بار با صفر شاهد به‌جای شاهدِ ناقص.
-  let negativeProofCount = 0;
+  /* با کاناریِ زنده و بدون هیچ مثبتی، هر ردیف یکی از سه چیز است:
+       اثبات   — ریوِرتِ کدِ ۳ یا -۳۲۰۰۰، یا (فقط وقتی VD_ZERO_IS_PROOF[kind]
+                 راست باشد) "0x" خالی یا رمزگشاییِ صفر.
+       ممتنع   — صفر/"0x" از kindی که zero-is-proof نیست (امروز SOLIDLY).
+                 🔴 این ردیف هیچ‌چیز نمی‌گوید: روترِ سالیدیتی وقتی استخر ندارد
+                 صفر می‌دهد. پس نه اثبات می‌شود (همان رفعِ ۷ سپتامبر —
+                 VD_ZERO_IS_PROOF.SOLIDLY هنوز false است) و نه — این تغییرِ
+                 ۱۹ شهریور — اثباتِ بقیه را پاک می‌کند.
+       نامعلوم — کدِ خطای دیگر، رمزگشاییِ ناموفق، شکلِ نامعتبر، یا kindِ
+                 ناشناخته: «نتوانستیم بپرسیم» با «پرسیدیم و رد شد» یکی نیست،
+                 پس کلِ حکم null می‌شود.
+     ردیف‌های positive-only (v4) پیش از همه‌ی این‌ها کنار گذاشته می‌شوند. */
+  let proofCount = 0;
   for (const it of list) {
     const kind = it && it.kind;
     const zeroIsProof = Object.prototype.hasOwnProperty.call(VD_ZERO_IS_PROOF, kind)
@@ -571,29 +586,28 @@ export function verdictFrom({ canary, items }) {
     if (positiveOnly === null) return null; // kindِ نامعتبر → هرگز حدس نزن
     if (positiveOnly) continue;             // نه اثباتِ منفی می‌دهد نه مانعش می‌شود
 
-    negativeProofCount++;
     if (it && it.error) {
-      if (PROVEN_NEGATIVE_CODES.has(it.error.code)) continue;
+      if (PROVEN_NEGATIVE_CODES.has(it.error.code)) { proofCount++; continue; }
       return null;
     }
     if (!it || typeof it.result !== "string") return null; // نه نتیجه نه خطا → شکلِ نامعتبر
     if (it.result === "0x") {
-      if (zeroIsProof) continue;
-      return null; // SOLIDLY: "0x" اینجا هم می‌تواند یعنی «هیچ استخری نیست» باشد
+      if (zeroIsProof) { proofCount++; continue; }
+      continue; // ممتنع — "0x" از SOLIDLY می‌تواند یعنی «هیچ استخری نیست» باشد
     }
     const v = decodeQuote(it.kind, it.result);
     if (v === 0n) {
-      if (zeroIsProof) continue;
-      return null; // SOLIDLY: صفرِ بی‌صدا اثباتِ «فروش نمی‌رود» نیست
+      if (zeroIsProof) { proofCount++; continue; }
+      continue; // ممتنع — صفرِ بی‌صدای SOLIDLY اثباتِ «فروش نمی‌رود» نیست
     }
     if (v == null) return null; // رمزگشایی نشد → اثبات نشده
     // v>0 این‌جا دیگر ممکن نیست؛ حلقه‌ی بالا قبلاً بازگشته بود
   }
-  // 🔴 گاردِ کوروم: اگر هیچ آیتمِ non-positive-onlyای این حلقه را طی نکرده
-  // باشد (فهرست فقط از v4 یا هر venueِ positive-only دیگری ساخته شده)،
-  // هیچ شاهدی برای "nosell" نداریم — بدون این گارد یک فهرستِ صرفاً v4 با
-  // صفر شاهدِ واقعی از هر continue رد می‌شد و بی‌صدا "nosell" می‌گرفت.
-  if (negativeProofCount === 0) return null;
+  // 🔴 گاردِ کوروم: حکمِ منفی شاهدِ *واقعی* می‌خواهد. ردیف‌های ممتنع و
+  // positive-only (v4) هیچ‌کدام شاهد نیستند، پس شمرده نمی‌شوند — بدون این
+  // گارد، فهرستی که فقط از صفرهای aerodrome یا فقط از حدس‌های v4 ساخته شده
+  // از هر continue رد می‌شد و بی‌صدا "nosell" می‌گرفت: همان باگِ ۷ سپتامبر.
+  if (proofCount < VD_MIN_NEGATIVE_PROOF) return null;
   return "nosell";
 }
 

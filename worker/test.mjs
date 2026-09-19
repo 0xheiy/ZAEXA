@@ -1353,8 +1353,12 @@ function isSolidlyReqId(id) { return PROBE_KIND_BY_ID.get(id) === "SOLIDLY"; }
       currency1: vd.USDC_ADDR.toLowerCase(),
       fee: 9990, tickSpacing: 100, hooks: vd.NATIVE_ADDR,
     };
-    // مرحله‌ی WETH را مبهم می‌کند: SOLIDLY صفر می‌دهد (که اثبات نیست) و بقیه "0x"
-    const ambiguousWeth = (r) => ({ id: r.id, result: "0x" });
+    /* مرحله‌ی WETH را مبهم می‌کند. ⚠️ ۱۹ شهریور عوض شد: پیش از آن یک "0x"ِ
+       یکسان برای همه کافی بود، چون صفرِ SOLIDLY کلِ حکم را باطل می‌کرد. حالا
+       آن صفر فقط «ممتنع» است و "0x"ِ بقیه اثباتِ منفی — یعنی همان فیکسچر
+       nosellِ تمیز می‌شد و این گذر اصلاً اجرا نمی‌شد. ابهامِ واقعی یعنی
+       «نتوانستیم بپرسیم»: یک کدِ خطای غیرِ اثباتی (خطای داخلیِ نود). */
+    const ambiguousWeth = (r) => ({ id: r.id, error: { code: -32603 } });
 
     // ب۲-۱) کلیدِ واقعیِ USDC کوتِ مثبت می‌دهد → sell
     {
@@ -5860,6 +5864,125 @@ console.log("[v4 index wiring] worker/index.js ok — v4StoreTtl/storeV4Result f
   "and ogFetchVerdict schedules exactly one background index pass via ctx.waitUntil only when nothing is " +
   "stored yet, never again once an entry (even a miss) exists");
 
+/* ---- ۲۷الف. کوروم شاهد — یک صرافیِ مبهم نباید اثباتِ بقیه را پاک کند ----
+   🔴 از یک اندازه‌گیریِ زنده آمد، نه از یک ایده. پروبِ توکنِ واقعیِ
+   0x6F63d869011f95274498023b4ABFC00b30c34378 روی سایتِ زنده:
+     by out: {'quoted': 1 (canary), 'revert:3': 19, 'zero': 2}  · covered: true
+   آن دو صفر از aerodrome (SOLIDLY) بودند و تا پیش از ۱۹ شهریور کلِ حکم را
+   باطل می‌کردند، یعنی نوزده شاهدِ تمیز پاک می‌شد. و چون روترِ سالیدیتی وقتی
+   استخر ندارد صفر می‌دهد نه ریوِرت، آن دو صفر تقریباً روی هر توکنِ تازه هست:
+   شاخه‌ی nosell عملاً غیرقابلِ‌رسیدن بود (۰ مورد در ۳۱۹ توکنِ زنده).
+   حالا صفرِ آن kind «ممتنع» است: نه اثبات می‌کند، نه اثباتِ بقیه را پاک. */
+{
+  const w2 = (n) => BigInt(n).toString(16).padStart(64, "0");
+  const mk4 = (n) => "0x" + w2(n) + w2(0) + w2(0) + w2(0);
+  const mkArr = (vals) => "0x" + w2(0x20) + w2(vals.length) + vals.map(w2).join("");
+  const alive = { result: mk4(5) };
+  const proofs = (n, kind = "CL_UINT24") =>
+    Array.from({ length: n }, () => ({ kind, error: { code: 3 } }));
+  const solidlyZero = { kind: "SOLIDLY", result: mkArr([0n]) };
+  const solidlyEmpty = { kind: "SOLIDLY", result: "0x" };
+
+  // الف) دقیقاً شکلِ زنده: نوزده ریوِرتِ اثباتی + دو صفرِ آئرودروم → nosell
+  ok(vd.verdictFrom({ canary: alive, items: proofs(19).concat([solidlyZero, solidlyZero]) }) === "nosell",
+     "the live shape (19 proven reverts + 2 aerodrome zeros) must verdict nosell — two abstaining "
+     + "rows may not erase nineteen proofs");
+
+  // ب) هیچ اثباتی، فقط ممتنع → نامعلوم (گاردِ کوروم)
+  ok(vd.verdictFrom({ canary: alive, items: [solidlyZero, solidlyEmpty, solidlyZero] }) === null,
+     "a list of nothing but abstaining SOLIDLY rows must stay unknown — an abstain is not evidence");
+
+  // ج) یک اثبات + ممتنع → nosell (کف همان یک شاهدِ واقعی است، مثلِ قبل)
+  ok(vd.verdictFrom({ canary: alive, items: [{ kind: "V2", result: "0x" }, solidlyZero] }) === "nosell",
+     "one real proof next to an abstain must still verdict nosell — the floor is unchanged at "
+     + "VD_MIN_NEGATIVE_PROOF");
+
+  // د) «نتوانستیم بپرسیم» هنوز کلِ حکم را نامعلوم می‌کند، حتی کنارِ ۱۹ اثبات
+  ok(vd.verdictFrom({ canary: alive,
+        items: proofs(19).concat([{ kind: "V2", error: { code: -32603 } }, solidlyZero]) }) === null,
+     "an unknown error code is \"we could not ask\", not an abstain — it must still make the whole "
+     + "verdict unknown even beside nineteen proofs");
+  ok(vd.verdictFrom({ canary: alive,
+        items: proofs(19).concat([{ kind: "CL_UINT24", result: "0xdeadbeef" }]) }) === null,
+     "an undecodable result must still make the whole verdict unknown, beside any number of proofs");
+
+  // ه) ردیف‌های positive-only هرگز کوروم نمی‌سازند، حتی در کنارِ ممتنع‌ها
+  ok(vd.verdictFrom({ canary: alive,
+        items: [{ kind: "V4_SINGLE", error: { code: 3 } }, { kind: "V4_SINGLE", error: { code: 3 } },
+                solidlyZero] }) === null,
+     "v4 rows plus abstains carry zero real evidence — that must be unknown, never nosell");
+
+  // و) مثبت همچنان بر همه‌چیز می‌چربد، و کاناریِ مرده همچنان همه را باطل می‌کند
+  ok(vd.verdictFrom({ canary: alive,
+        items: proofs(19).concat([solidlyZero, { kind: "V2", result: mkArr([0n, 7n]) }]) }) === "sell",
+     "a positive quote must still win over nineteen proofs and any abstain");
+  ok(vd.verdictFrom({ canary: { error: { code: 3 } },
+        items: proofs(19).concat([solidlyZero]) }) === null,
+     "a dead canary must still make the verdict unknown, whatever the items said");
+
+  // ز) پین‌های جدول — صفرِ SOLIDLY هنوز اثبات نیست (رفعِ ۷ سپتامبر سرِ جایش)
+  ok(vd.VD_MIN_NEGATIVE_PROOF === 1,
+     "VD_MIN_NEGATIVE_PROOF must be exported as 1, got " + JSON.stringify(vd.VD_MIN_NEGATIVE_PROOF));
+  ok(vd.VD_ZERO_IS_PROOF.SOLIDLY === false && vd.VD_ZERO_IS_PROOF.V4_SINGLE === false,
+     "the 7 Sep rule must still hold: a SOLIDLY/V4 zero is never proof on its own");
+
+  /* ح) سرتاسری از رویِ worker.fetch — همان شکلِ زنده، با و بدونِ پوشش.
+     گاردِ پوشش (baseVenueCovered) لایه‌ی دومِ ۷ سپتامبر است و باید دست‌نخورده
+     بماند: حالا که nosell دوباره قابلِ‌رسیدن است، این تنها چیزی است که
+     جلوی اتهام به توکنی را می‌گیرد که استخرش روی صرافیِ پوشش‌نداده است. */
+  {
+    const { UPSTREAM_KEYED: UK_Q } = await import("./index.js");
+    const envQ = { ASSETS, CG_KEY: "SECRET-CG-KEY-FOR-27A" };
+    const gtMetaQ = () => new Response(JSON.stringify({ data: { attributes: {
+      name: "Quorum Token", symbol: "QRM", total_reserve_in_usd: "1000",
+      decimals: 18, price_usd: "2000",
+    } } }), { status: 200, headers: { "content-type": "application/json" } });
+    // شکلِ زنده: هر ردیفِ غیرِ SOLIDLY ریوِرتِ کدِ ۳، ردیف‌های SOLIDLY صفر
+    const liveShapeRow = (r) => (isSolidlyReqId(r.id)
+      ? { id: r.id, result: mkArr([0n]) }
+      : { id: r.id, error: { code: 3 } });
+    const dispatchQ = (dexId) => async (url, init) => {
+      const u = String(url);
+      if (u.endsWith("/pools")) {
+        return new Response(JSON.stringify({ data: [
+          { relationships: { dex: { data: { id: dexId } } } },
+        ] }), { status: 200, headers: { "content-type": "application/json" } });
+      }
+      if (u.startsWith(UK_Q)) return gtMetaQ();
+      const reqs = JSON.parse(init.body);
+      return new Response(JSON.stringify(reqs.map((r) => (r.id === 0
+        ? { id: 0, result: mk4(5) } : liveShapeRow(r)))),
+        { status: 200, headers: { "content-type": "application/json" } });
+    };
+    async function askQ(addr, dexId, ipTail) {
+      const savedFetch = globalThis.fetch;
+      globalThis.fetch = dispatchQ(dexId);
+      const res = await call("/vd/" + addr, { headers: { "cf-connecting-ip": "203.0.113." + ipTail } }, envQ);
+      const body = await res.json();
+      globalThis.fetch = savedFetch;
+      return body;
+    }
+
+    const covered = await askQ("0x" + "a".repeat(40), "uniswap-v3-base", 201);
+    ok(covered.v === "nosell" && !("why" in covered),
+       "the live shape on a COVERED dex must reach nosell end to end, with no why key, got " +
+       JSON.stringify(covered));
+
+    const uncovered = await askQ("0x" + "b".repeat(40), "uniswap-v4-base", 202);
+    ok(uncovered.v === null && uncovered.why === "cover:false",
+       "the same shape on an UNCOVERED dex must still degrade to unknown (cover:false) — the 7 Sep " +
+       "coverage guard is what keeps this change from accusing a token we never actually asked about, got " +
+       JSON.stringify(uncovered));
+  }
+
+  console.log("[nosell quorum] an abstaining venue no longer erases proven negatives: the measured live "
+    + "shape (19 reverts + 2 aerodrome zeros) now verdicts nosell instead of unknown, while an abstain "
+    + "alone still proves nothing, an unknown error code or an undecodable result still makes the whole "
+    + "verdict unknown, positive-only v4 rows still carry no evidence, a positive still wins and a dead "
+    + "canary still voids everything; end to end the same shape reaches nosell on a covered dex and "
+    + "still degrades to cover:false on an uncovered one");
+}
+
 /* ---- ۲۷ب. چرا «نامعلوم» — واژه‌نامه‌ی بسته‌ی why روی Base ----
    مسئله (بالای این فایل، ۲۰۲۶-۰۹-۱۴): گزارشِ روزانه‌ی زنده ۱۰۶ از ۲۱۰ ردیف
    را با v:null («نتوانستیم بررسی کنیم») دارد، و امروز هیچ‌جا ثبت نمی‌شود
@@ -5905,7 +6028,9 @@ console.log("[v4 index wiring] worker/index.js ok — v4StoreTtl/storeV4Result f
       fee: 9990, tickSpacing: 100, hooks: vd.NATIVE_ADDR,
     };
     // همه‌جا "0x" (SOLIDLY هرگز صفر را اثبات نمی‌داند) → مرحله مبهم می‌ماند
-    const ambiguous = (r) => ({ id: r.id, result: "0x" });
+    // ابهامِ واقعی = «نتوانستیم بپرسیم» → کدِ خطای غیرِ اثباتی. (پیش از
+    // ۱۹ شهریور "0x" هم مبهم بود؛ حالا اثباتِ منفی است.)
+    const ambiguous = (r) => ({ id: r.id, error: { code: -32603 } });
     // کدِ ۳ برای SOLIDLY، "0x" برای بقیه → مرحله تمیز nosell می‌شود
     const cleanNosell = (r) => (isSolidlyReqId(r.id) ? { id: r.id, error: { code: 3 } } : { id: r.id, result: "0x" });
 
