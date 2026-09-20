@@ -1026,8 +1026,12 @@ export async function fetchVerdict(tokenAddr, meta, opts) {
     }
     setWhy(canaryDeadCount > 0 ? "canary-dead" : "rpc-down");
     return null;
-  } catch {
+  } catch (e) {
     setWhy("internal");
+    // فقط مشاهده‌گر: نامِ خودِ خطا برای تشخیص (diagVerdict/?probe=1)، هرگز
+    // بخشی از واژگانِ بسته‌ی VD_BASE_WHY نمی‌شود و why همچنان دقیقاً
+    // "internal" می‌ماند.
+    if (whyOut) whyOut.errName = (e && e.name) || "Error";
     return null; // این تابع هرگز نباید پرتاب کند
   }
 }

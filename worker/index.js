@@ -501,6 +501,7 @@ async function cachedVerdict(cacheKeyPath, computeFn, ctx, out) {
       if (hit) {
         const body = await hit.json();
         if (out && body && body.v4Proof === true) out.v4Proof = true;
+        if (out && body && body.v4Keyed === true) out.v4Keyed = true;
         return body && (body.verdict === "sell" || body.verdict === "nosell") ? body.verdict : null;
       }
     }
@@ -511,8 +512,10 @@ async function cachedVerdict(cacheKeyPath, computeFn, ctx, out) {
        خاموشِ کارتِ تنزل‌یافته تبدیل می‌کند — دقیقاً همان «نمی‌دانم که مثل
        نه رفتار کند» که این پروژه هرگز نمی‌پذیرد. */
     if ((verdict === "sell" || verdict === "nosell") && store) {
-      const stash = new Response(JSON.stringify(
-        out && out.v4Proof === true ? { verdict, v4Proof: true } : { verdict }), {
+      const stashBody = { verdict };
+      if (out && out.v4Proof === true) stashBody.v4Proof = true;
+      if (out && out.v4Keyed === true) stashBody.v4Keyed = true;
+      const stash = new Response(JSON.stringify(stashBody), {
         headers: {
           "content-type": "application/json",
           "cache-control": "public, max-age=300",
@@ -598,14 +601,20 @@ async function baseVenueCoveredDetail(addr, env) {
     const body = await up.json();
     if (!body || !Array.isArray(body.data)) return { covered: null, why: "cover:shape" }; // شکلِ غیرقابلِ‌اعتماد → نامعلوم
 
+    // v4Listed: آیا در همینِ بدنه‌ی سالم، دست‌کم یک استخر دقیقاً روی
+    // uniswap-v4-base دیده شد؟ فقط برای مسیرهایی که واقعاً بدنه را
+    // خوانده‌اند معنا دارد؛ هیچ‌کدام از return-های زودهنگامِ بالا از این خط
+    // رد نمی‌شوند، پس آن‌جا همیشه false/absent می‌ماند.
+    let v4Listed = false;
     for (const pool of body.data) {
       const dexId = pool && pool.relationships && pool.relationships.dex &&
         pool.relationships.dex.data && pool.relationships.dex.data.id;
       if (typeof dexId !== "string") continue;
+      if (dexId === "uniswap-v4-base") v4Listed = true;
       const venue = GT_DEX_TO_VENUE[dexId];
-      if (venue && VD_VENUE_ID_SET.has(venue)) return { covered: true, why: null };
+      if (venue && VD_VENUE_ID_SET.has(venue)) return { covered: true, why: null, v4Listed };
     }
-    return { covered: false, why: "cover:false" }; // بدنه سالم بود، ولی هیچ استخری روی یک صرافیِ پوشش‌داده‌شده نبود
+    return { covered: false, why: "cover:false", v4Listed }; // بدنه سالم بود، ولی هیچ استخری روی یک صرافیِ پوشش‌داده‌شده نبود
   } catch (e) {
     return { covered: null, why: "cover:shape" }; // پرتاب (پارس) → نامعلوم، هرگز false
   }
@@ -925,6 +934,9 @@ async function ogFetchVerdictDetail(addr, meta, deadlineAt, env, ctx, metaWhy) {
           ctx.waitUntil(runV4Index(addr, env));
         }
       }
+      // فقط مشاهده‌گر: آیا دست‌کم یک کلیدِ واقعیِ v4 برای این توکن ایندکس
+      // شده؟ درست مثلِ v4Proof پایین‌تر، هرگز روی fetchVerdict اثر نمی‌گذارد.
+      cacheOut.v4Keyed = v4Keys.length > 0;
       const whyOut = {};
       const retOut = {};
       const result = await fetchVerdict(addr, meta,
@@ -973,6 +985,17 @@ async function ogFetchVerdictDetail(addr, meta, deadlineAt, env, ctx, metaWhy) {
      ⚠️ این پرچم کنارِ خودِ حکم کش می‌شود (cachedVerdict بالاتر)، وگرنه همان
      توکن در درخواستِ بعدی جوابِ دیگری می‌گرفت. */
   if (cacheOut.v4Proof === true) {
+    const empty = await v4PoolsEmpty(addr, env, deadlineAt);
+    return { v: "nosell", why: null, cause: empty === true ? "empty-pool" : undefined };
+  }
+  /* 🔴 استثنای پوششِ v4 (۲۹ شهریور): بالادست برای همین توکن یک استخرِ
+     uniswap-v4-base *دید* (v4Listed) و ما دست‌کم یک کلیدِ واقعیِ ایندکس‌شده
+     برای همان توکن داریم (v4Keyed) — یعنی واقعاً از استخرِ خودِ این توکن
+     پرسیده‌ایم، حتی اگر جدولِ GT_DEX_TO_VENUE این صرافی را پروب نمی‌کند.
+     ⚠️ عمداً فقط covered.covered === false، نه null: چکی که اصلاً نتوانسته
+     جواب بدهد (cover:timeout / cover:shape / cover:<status>) هرگز به این
+     شاخه نمی‌رسد و همیشه نامعلوم می‌ماند — یک چکِ ناکام هرگز اتهام نیست. */
+  if (covered.covered === false && covered.v4Listed === true && cacheOut.v4Keyed === true) {
     const empty = await v4PoolsEmpty(addr, env, deadlineAt);
     return { v: "nosell", why: null, cause: empty === true ? "empty-pool" : undefined };
   }
@@ -1275,10 +1298,17 @@ async function diagVerdict(request, url, env, ctx) {
        v4Keys در پاسخ هم می‌آید تا «هیچ کلیدی ذخیره نشده» از «کلید ذخیره شده
        ولی ردیفش ساخته نشد» قابلِ‌تفکیک باشد — این دو از بیرون یک شکل‌اند. */
     const v4Keys = await readV4Keys(addr, env);
+    // whyOut هم اینجا داده می‌شود — فقط مشاهده‌گر، دقیقاً همان الگویی که
+    // ogFetchVerdictDetail بالاتر برای خواندنِ why/v4Proof دارد؛ فیلدهای
+    // افزوده‌ی why/errName زیر همان observer را به بیرون قابلِ‌دیدن می‌کنند.
+    const whyOut = {};
     const v = await fetchVerdict(addr, meta,
-      { deadlineAt: t0 + OG_BUDGET_MS, fetchImpl: fetch, collect, rpcs: baseRpcsFor(env), v4Keys });
+      { deadlineAt: t0 + OG_BUDGET_MS, fetchImpl: fetch, collect, rpcs: baseRpcsFor(env), v4Keys, whyOut });
     const covered = await baseVenueCovered(addr, env);
-    return vdDone(200, { v, ms: Date.now() - t0, venues: collect, covered, v4Keys: v4Keys.length });
+    return vdDone(200, {
+      v, ms: Date.now() - t0, venues: collect, covered, v4Keys: v4Keys.length,
+      why: whyOut.why, errName: whyOut.errName,
+    });
   }
 
   // ⚠️ ماژولِ Base (worker/verdict.js) حالا واژه‌نامه‌ی بسته‌ی why دارد
@@ -1871,7 +1901,7 @@ export default {
 export { PATH_OK, QUERY_OK, ttlFor, EV_OK, EV_DETAIL_OK, EV_SURFACE_OK, EV_MAX_BODY };
 export { rateOk, rlHits, RL_LIMIT, RL_WINDOW_MS };
 export { OG_NETWORK, OG_TIMEOUT_MS, ogFetchMeta, ogFetchVerdict };
-export { baseVenueCovered };
+export { baseVenueCovered, baseVenueCoveredDetail };
 export { UPSTREAM_FREE, UPSTREAM_KEYED };
 export { VD_ADDR_RE };
 export { TOKEN_PAGE, solFetchVerdict };

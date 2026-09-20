@@ -8635,6 +8635,218 @@ console.log("[report cause] causeForRow enforces the closed REPORT_CAUSES vocabu
     + "stays Base-only by deliberate, separate decision");
 }
 
+/* ---- ۴۰. استثنای پوششِ v4 — [cover v4 exception] ----
+   مسئله (اندازه‌گیریِ ۲۰ سپتامبر): GT_DEX_TO_VENUE عمداً uniswap-v4-base را
+   ندارد، با این توضیح که «قراردادهای v4 را پروب نمی‌کنیم». آن توضیح حالا
+   کهنه است — کلیدهای واقعیِ v4 از رویِ لاگِ زنجیره ایندکس می‌شوند و استخرِ
+   خودِ توکن پروب می‌شود؛ ۴۸۵ از ۱۰۸۳ ردیفِ شش‌روزِ اخیر دقیقاً همین‌جا به
+   نامعلوم می‌افتند. این بخش شاخهٔ تازه‌ی گیت را می‌سنجد: باید *هم* بالادست
+   یک استخرِ v4 برای همین توکن دیده باشد (v4Listed) *هم* ما دست‌کم یک کلیدِ
+   واقعیِ ایندکس‌شده داشته باشیم (v4Keyed) — وگرنه نامعلوم دست‌نخورده می‌ماند. */
+{
+  const { UPSTREAM_KEYED: UK_V4X, baseVenueCoveredDetail: bvcdX } = await import("./index.js");
+  const { v4KvKey: v4KvKeyX } = await import("./v4index.js");
+  const w2x = (n) => BigInt(n).toString(16).padStart(64, "0");
+  const mk4x = (n) => "0x" + w2x(n) + w2x(0) + w2x(0) + w2x(0);
+  // همان الگوی cleanNosellRow بالاتر (۲۷ب): کدِ ۳ برای SOLIDLY، "0x" برای
+  // بقیه — یک nosellِ تمیزِ متعارف، بدونِ هیچ ربطی به شاهدِ v4.
+  const cleanNosellRowX = (r) => (isSolidlyReqId(r.id) ? { id: r.id, error: { code: 3 } } : { id: r.id, result: "0x" });
+  const gtMetaX = () => new Response(JSON.stringify({ data: { attributes: {
+    name: "V4 Exception Token", symbol: "V4X", total_reserve_in_usd: "1000",
+    decimals: 18, price_usd: "2000",
+  } } }), { status: 200, headers: { "content-type": "application/json" } });
+  const poolsBodyX = (dexIds) => new Response(JSON.stringify({ data: dexIds.map((id) => (
+    { relationships: { dex: { data: { id } } } })) }), { status: 200, headers: { "content-type": "application/json" } });
+  // eth_call تکیِ v4PoolsEmpty (نه آرایه‌ی batch) — همیشه یک نقدینگیِ صفرِ
+  // خواندنی برمی‌گرداند؛ خودِ cause این بخش را نمی‌سنجد، فقط v/why را.
+  const singleEthCallOkX = (parsed) => new Response(JSON.stringify(
+    { jsonrpc: "2.0", id: parsed.id, result: "0x" + "0".repeat(64) }),
+    { status: 200, headers: { "content-type": "application/json" } });
+  const realKvX = (addr, key) => ({
+    get: async (k) => (k === v4KvKeyX("base", addr) ? JSON.stringify({ keys: [key], reason: "ok" }) : null),
+    put: async () => {},
+  });
+  const noKvX = () => ({ get: async () => null, put: async () => {} });
+  // شناسه‌ی استخرِ این کلید هرگز با هیچ داده‌ی ریوِرتی که پایین‌تر می‌سازیم
+  // یکی نمی‌شود — یعنی v4NoLiquidityProof/whyOut.v4Proof هرگز true نمی‌شود؛
+  // این بخش عمداً شاخه‌ی تازه را می‌سنجد، نه شاخه‌ی قدیمیِ ۱۹ شهریور.
+  const realKeyX = (addr) => ({ currency0: vd.NATIVE_ADDR, currency1: addr, fee: 0, tickSpacing: 1,
+    hooks: vd.NATIVE_ADDR, poolId: "0x" + "9".repeat(64) });
+
+  async function askV4X(addr, env_, dispatch, ipTail) {
+    const savedFetch = globalThis.fetch;
+    globalThis.fetch = dispatch;
+    const res = await call("/vd/" + addr, { headers: { "cf-connecting-ip": "198.51.100." + ipTail } }, env_);
+    const body = await res.json();
+    globalThis.fetch = savedFetch;
+    return body;
+  }
+
+  function nosellDispatchX(dexIds) {
+    return async (url, init) => {
+      const u = String(url);
+      if (u.endsWith("/pools")) return poolsBodyX(dexIds);
+      if (u.startsWith(UK_V4X)) return gtMetaX();
+      const parsed = JSON.parse(init.body);
+      if (!Array.isArray(parsed)) return singleEthCallOkX(parsed);
+      return new Response(JSON.stringify(parsed.map((r) => (r.id === 0
+        ? { id: 0, result: mk4x(5) } : cleanNosellRowX(r)))),
+        { status: 200, headers: { "content-type": "application/json" } });
+    };
+  }
+
+  // ۱) covered:false + v4Listed:true + v4Keyed:true + خامِ nosell → nosell نهایی، بدونِ why
+  {
+    const ADDR = "0x" + "a1".repeat(20);
+    const env_ = { ASSETS, CG_KEY: "SECRET-CG-KEY-V4X-1", ZX_KV: realKvX(ADDR, realKeyX(ADDR)) };
+    const body = await askV4X(ADDR, env_, nosellDispatchX(["uniswap-v4-base"]), 11);
+    ok(body.v === "nosell" && !("why" in body),
+       "[cover v4 exception] covered:false + v4Listed:true + v4Keyed:true with a raw nosell must reach " +
+       "nosell end to end, got " + JSON.stringify(body));
+  }
+
+  // ۲) همان شکل، ولی بدونِ هیچ کلیدِ واقعی‌ای (v4Keyed:false) → نامعلوم/cover:false
+  {
+    const ADDR = "0x" + "a2".repeat(20);
+    const env_ = { ASSETS, CG_KEY: "SECRET-CG-KEY-V4X-2", ZX_KV: noKvX() };
+    const body = await askV4X(ADDR, env_, nosellDispatchX(["uniswap-v4-base"]), 12);
+    ok(body.v === null && body.why === "cover:false",
+       "[cover v4 exception] without a real indexed v4 key (v4Keyed:false) the same v4-only pools shape " +
+       "must stay cover:false, got " + JSON.stringify(body));
+  }
+
+  // ۳) خودِ چکِ پوشش اصلاً جواب نداد (cover:timeout) → نامعلوم می‌ماند، حتی با کلیدِ واقعی
+  {
+    const ADDR = "0x" + "a3".repeat(20);
+    const env_ = { ASSETS, CG_KEY: "SECRET-CG-KEY-V4X-3", ZX_KV: realKvX(ADDR, realKeyX(ADDR)) };
+    const hangUntilAbortX = (init) => new Promise((_, reject) => {
+      const sig = init && init.signal;
+      if (!sig) return; // بدونِ سیگنال هرگز برنمی‌گردد — خودِ تست گیر می‌کند و لو می‌رود
+      sig.addEventListener("abort", () => reject(new Error("aborted")));
+    });
+    const body = await askV4X(ADDR, env_, async (url, init) => {
+      const u = String(url);
+      if (u.endsWith("/pools")) return hangUntilAbortX(init);
+      if (u.startsWith(UK_V4X)) return gtMetaX();
+      const parsed = JSON.parse(init.body);
+      if (!Array.isArray(parsed)) return singleEthCallOkX(parsed);
+      return new Response(JSON.stringify(parsed.map((r) => (r.id === 0
+        ? { id: 0, result: mk4x(5) } : cleanNosellRowX(r)))),
+        { status: 200, headers: { "content-type": "application/json" } });
+    }, 13);
+    ok(body.v === null && body.why === "cover:timeout",
+       "[cover v4 exception] a coverage check that could not answer must stay unknown forever, even with " +
+       "a real indexed v4 key present, got " + JSON.stringify(body));
+  }
+
+  // ۴) covered:false + v4Listed:false (دکسِ نامرتبطِ دیگری، نه v4) + v4Keyed:true → cover:false
+  {
+    const ADDR = "0x" + "a4".repeat(20);
+    const env_ = { ASSETS, CG_KEY: "SECRET-CG-KEY-V4X-4", ZX_KV: realKvX(ADDR, realKeyX(ADDR)) };
+    const body = await askV4X(ADDR, env_, nosellDispatchX(["some-other-dex"]), 14);
+    ok(body.v === null && body.why === "cover:false",
+       "[cover v4 exception] v4Listed:false (an unrelated uncovered dex, not v4) must never trigger the " +
+       "exception even with a real indexed key present, got " + JSON.stringify(body));
+  }
+
+  // ۵) کنترلِ مثبت — یک sellِ خام هرگز baseVenueCoveredDetail (اندپوینتِ pools) را صدا نمی‌زند
+  {
+    const ADDR = "0x" + "a5".repeat(20);
+    const env_ = { ASSETS, CG_KEY: "SECRET-CG-KEY-V4X-5", ZX_KV: realKvX(ADDR, realKeyX(ADDR)) };
+    let poolsCalledX = false;
+    const body = await askV4X(ADDR, env_, async (url, init) => {
+      const u = String(url);
+      if (u.endsWith("/pools")) { poolsCalledX = true; return poolsBodyX(["uniswap-v4-base"]); }
+      if (u.startsWith(UK_V4X)) return gtMetaX();
+      const parsed = JSON.parse(init.body);
+      return new Response(JSON.stringify(parsed.map((r) => (r.id === 0
+        ? { id: 0, result: mk4x(5) }
+        : { id: r.id, result: r.id === 1 ? mk4x(777) : "0x" }))),
+        { status: 200, headers: { "content-type": "application/json" } });
+    }, 15);
+    ok(body.v === "sell" && !("why" in body),
+       "[cover v4 exception] sanity: this scenario must verdict sell, got " + JSON.stringify(body));
+    ok(poolsCalledX === false,
+       "[cover v4 exception] positive control: a raw sell must never call the coverage (pools) endpoint " +
+       "at all, got poolsCalled=" + poolsCalledX);
+  }
+
+  // ۶) baseVenueCoveredDetail مستقیم، رویِ شکلِ واقعیِ زنده‌ی GeckoTerminal —
+  // اعداد به‌صورتِ رشته می‌آیند (measured, نه حدسی؛ رجوع به بالای فایل).
+  {
+    const savedFetch = globalThis.fetch;
+    const ADDR = "0x" + "a6".repeat(20);
+    globalThis.fetch = async () => new Response(JSON.stringify({ data: [
+      { relationships: { dex: { data: { id: "uniswap-v4-base", type: "dex" } } },
+        attributes: { reserve_in_usd: "267410.9781" } },
+    ] }), { status: 200, headers: { "content-type": "application/json" } });
+    const detailV4X = await bvcdX(ADDR, {});
+    globalThis.fetch = async () => new Response(JSON.stringify({ data: [
+      { relationships: { dex: { data: { id: "uniswap-v3-base", type: "dex" } } },
+        attributes: { reserve_in_usd: "267410.9781" } },
+    ] }), { status: 200, headers: { "content-type": "application/json" } });
+    const detailV3X = await bvcdX(ADDR, {});
+    globalThis.fetch = savedFetch;
+    ok(detailV4X.covered === false && detailV4X.why === "cover:false" && detailV4X.v4Listed === true,
+       "[cover v4 exception] the real live payload shape (string reserve numbers) with only a v4 pool " +
+       "must give covered:false, why:\"cover:false\", v4Listed:true, got " + JSON.stringify(detailV4X));
+    ok(detailV3X.covered === true && detailV3X.v4Listed !== true,
+       "[cover v4 exception] the same shape with a covered v3 pool must give covered:true and " +
+       "v4Listed false/absent, got " + JSON.stringify(detailV3X));
+  }
+
+  // ۷) گردشِ کش — v4Keyed که درونِ computeFn نشسته باید از ضربه‌ی کش هم زنده بیرون بیاید
+  // (همان اندازه‌گیریِ ۱۹ شهریور بالاتر، این‌بار برایِ v4Keyed نه v4Proof).
+  {
+    const ADDR = "0x" + "a7".repeat(20);
+    const env_ = { ASSETS, CG_KEY: "SECRET-CG-KEY-V4X-7", ZX_KV: realKvX(ADDR, realKeyX(ADDR)) };
+    let rpcBatchesX = 0;
+    const savedFetch = globalThis.fetch;
+    const savedCaches = globalThis.caches;
+    const cacheStoreX = new Map();
+    globalThis.caches = { default: {
+      match: async (req) => {
+        const b = cacheStoreX.get(String(req.url));
+        return b === undefined ? undefined : new Response(b, { headers: { "content-type": "application/json" } });
+      },
+      put: async (req, res) => { cacheStoreX.set(String(req.url), await res.text()); },
+    } };
+    globalThis.fetch = async (url, init) => {
+      const u = String(url);
+      if (u.endsWith("/pools")) return poolsBodyX(["uniswap-v4-base"]);
+      if (u.startsWith(UK_V4X)) return gtMetaX();
+      const parsed = JSON.parse(init.body);
+      if (!Array.isArray(parsed)) return singleEthCallOkX(parsed);
+      rpcBatchesX++;
+      return new Response(JSON.stringify(parsed.map((r) => (r.id === 0
+        ? { id: 0, result: mk4x(5) } : cleanNosellRowX(r)))),
+        { status: 200, headers: { "content-type": "application/json" } });
+    };
+    const firstX = await (await call("/vd/" + ADDR, { headers: { "cf-connecting-ip": "198.51.100.17" } }, env_)).json();
+    const batchesAfterFirstX = rpcBatchesX;
+    const secondX = await (await call("/vd/" + ADDR, { headers: { "cf-connecting-ip": "198.51.100.18" } }, env_)).json();
+    globalThis.fetch = savedFetch;
+    if (savedCaches === undefined) delete globalThis.caches; else globalThis.caches = savedCaches;
+
+    ok(firstX.v === "nosell", "[cover v4 exception] the fresh compute must give nosell, got " + JSON.stringify(firstX));
+    ok(secondX.v === "nosell",
+       "[cover v4 exception] the SAME token one request later must still give nosell — v4Keyed has to be " +
+       "cached alongside the verdict, or the coverage gate silently downgrades a cache hit, got " +
+       JSON.stringify(secondX));
+    ok(rpcBatchesX === batchesAfterFirstX,
+       "[cover v4 exception] sanity: the second request must really be served from the verdict cache (no " +
+       "new venue-probe RPC batch), got " + rpcBatchesX + " vs " + batchesAfterFirstX);
+  }
+
+  console.log("[cover v4 exception] the stale \"we never probe v4\" comment is gone: a token whose only "
+    + "GeckoTerminal-listed pool is uniswap-v4-base (v4Listed) now keeps its raw nosell verdict when we "
+    + "hold a real indexed v4 key for it (v4Keyed), and that survives a cache hit; dropping either v4Listed "
+    + "or v4Keyed alone still degrades to cover:false; a coverage check that could not answer (cover:timeout) "
+    + "still stays unknown forever even with a real key present; a raw sell never calls the coverage endpoint "
+    + "at all; and baseVenueCoveredDetail against the measured live payload shape (string reserve numbers) "
+    + "correctly flags v4Listed only on the v4-only pools body, never on a covered v3 one");
+}
+
 console.log(fails === 0
   ? "[gt proxy] worker ok — " + REAL.length + " real paths proxied, " + BAD.length +
     " refused without touching the network, 429 passes through with CORS\n" +
