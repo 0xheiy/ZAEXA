@@ -17,6 +17,7 @@
    برای checkKind نمی‌پذیرد. */
 
 import { isBaseWhy } from "./verdict.js";
+import { SOL_MINT } from "./chains.js";
 
 export const REPORT_MIN_RESERVE_USD = 5000;
 export const REPORT_MAX_TOKENS_PER_RUN = 30;
@@ -46,17 +47,34 @@ export function emptyReportDoc(dateStr) {
 
 /* یک ردیفِ new_pools → توکنِ بررسی‌شدنی، یا null. کپیِ همان قاعده‌ی
    sitemapTokenFromPool در worker/index.js: هر فیلد از بالادست می‌آید که
-   کنترلش دستِ ما نیست، پس یک ردیفِ عجیب فقط خودش را رد می‌کند. */
-export function newPoolRowToToken(row) {
+   کنترلش دستِ ما نیست، پس یک ردیفِ عجیب فقط خودش را رد می‌کند.
+   نسخه‌ی زنجیره‌آگاه: فقط بخشِ شناساییِ id بسته به chain فرق می‌کند — بقیه‌ی
+   قاعده‌ها (آستانه‌ی رزرو، قیمت، poolCreatedAt، dex، حجم، FDV) مشترک و
+   دست‌نخورده می‌مانند.
+   ⚠️ mint سولانا حساسِ به حروف است (base58، برخلافِ چک‌سامِ اختیاریِ Base) —
+   اینجا هیچ toLowerCase‌ای روی آن اعمال نمی‌شود، وگرنه یک mint واقعی
+   بی‌صدا خراب می‌شد. */
+export function newPoolRowToTokenFor(chain, row) {
   try {
     const rawId = row && row.relationships && row.relationships.base_token &&
       row.relationships.base_token.data && row.relationships.base_token.data.id;
     if (typeof rawId !== "string") return null;
 
-    const rest = rawId.replace(/^base_/, "");
-    if (!/^0x[0-9a-fA-F]{40}$/.test(rest)) return null;
-    const address = rest.toLowerCase();
+    let address;
+    if (chain === "base") {
+      const rest = rawId.replace(/^base_/, "");
+      if (!/^0x[0-9a-fA-F]{40}$/.test(rest)) return null;
+      address = rest.toLowerCase();
+    } else if (chain === "solana") {
+      const rest = rawId.replace(/^solana_/, "");
+      // ⚠️ اینجا toLowerCase نمی‌شود — mint سولانا حساسِ به حروف است.
+      if (!SOL_MINT.test(rest)) return null;
+      address = rest;
+    } else {
+      return null; // زنجیره‌ای که نمی‌شناسیم
+    }
     // 🔴 یک سایت‌مپ واقعی همین آدرس را یک بار لیست کرد. نگذار به گزارش برسد.
+    // (این الگو فقط شکلِ Base را می‌گیرد؛ روی یک mint سولانا هرگز true نمی‌شود.)
     if (/^0x0{40}$/.test(address)) return null;
 
     const attrs = row.attributes || {};
@@ -89,6 +107,11 @@ export function newPoolRowToToken(row) {
   } catch (e) {
     return null;
   }
+}
+
+// پوششِ نازک — کالرها و پروب‌های امروز دست‌نخورده می‌مانند، بایت‌به‌بایت.
+export function newPoolRowToToken(row) {
+  return newPoolRowToTokenFor("base", row);
 }
 
 // یک عددِ ذخیره‌شدنی، یا null. هرگز رشته، هرگز NaN، هرگز صفر-به‌جای-نامعلوم —
@@ -207,6 +230,8 @@ export function pickFollowUpTargets(doc, nowMs, cap = 12) {
     const candidates = [];
     for (const row of doc.rows) {
       if (!row || typeof row !== "object") continue;
+      // 🔴 عمداً فقط Base: شاهدِ این فالوآپ (v4PoolsEmpty) یک قراردادِ Base
+      // است، نه یک جاماندگی — سولانا هنوز شاهدِ خودش را ندارد.
       if (row.chain !== "base" || row.v !== "sell") continue;
       if (Object.prototype.hasOwnProperty.call(row, "follow")) continue;
       if (typeof row.checkedAt !== "string") continue;
@@ -306,10 +331,20 @@ export function mergeReportDoc(prevDoc, dateStr, newRows, checkedDelta, generate
     }
     const prevChecked = prev && Number.isFinite(prev.checked) ? prev.checked : 0;
     const delta = Number.isFinite(checkedDelta) ? checkedDelta : 0;
+
+    // chains از رویِ خودِ ردیف‌های ادغام‌شده — نه یک ثابتِ Base-فقط، حالا که
+    // سولانا هم می‌تواند در همین سند بنشیند. مرتب و بی‌تکرار؛ روزِ بدونِ
+    // هیچ ردیفی (هنوز چیزی چک نشده) به همان ["base"] پیش‌فرض برمی‌گردد.
+    const chainsSet = new Set();
+    for (const r of rows) {
+      if (r && typeof r.chain === "string") chainsSet.add(r.chain);
+    }
+    const chains = chainsSet.size > 0 ? Array.from(chainsSet).sort() : ["base"];
+
     return {
       date: dateStr,
       generatedAt: generatedAt || null,
-      chains: ["base"],
+      chains,
       checked: prevChecked + delta,
       rows, // 🔴 حتی وقتی هیچ‌چیز پیدا نشد، این [] می‌ماند — یک سندِ نیمه‌ساخته هرگز نباید وجود داشته باشد
     };
@@ -367,9 +402,23 @@ function tokenCap(maxTokens) {
     : REPORT_MAX_TOKENS_PER_RUN;
 }
 
+/* همان انضباطِ tokenCap، ولی برای پایِ سولانا: سقفِ پیش‌فرض و سقفِ سخت هر
+   دو ۶‌اند — هزینه‌ی این پا باید محدود بماند، هرچه بالادست بدهد. */
+export const REPORT_SOL_MAX_TOKENS = 6;
+function solTokenCap(maxTokens) {
+  return Number.isInteger(maxTokens) && maxTokens > 0
+    ? Math.min(maxTokens, REPORT_SOL_MAX_TOKENS)
+    : REPORT_SOL_MAX_TOKENS;
+}
+
 /* گذرِ گزارش‌گیریِ ساعتی. همه‌چیز تزریق می‌شود؛ خودِ این تابع نه I/O دارد نه
-   fetch مستقیم. */
-export async function runReportPass({ kv, fetchPools, metaOf, verdictOf, now, sleep, maxTokens, poolEmptyOf }) {
+   fetch مستقیم.
+   fetchPoolsSol/solMaxTokens اختیاری‌اند — پایِ سولانا، بعد از پایِ Base:
+   fetchPoolsSol غایب یا پرتاب‌کننده یعنی «این گذر سولانایی ندارد»، هرگز
+   یعنی شکستِ کل گذر. */
+export async function runReportPass({
+  kv, fetchPools, metaOf, verdictOf, now, sleep, maxTokens, poolEmptyOf, fetchPoolsSol, solMaxTokens,
+}) {
   try {
     // 🔴 بدون انباری برای نوشتن، هیچ تماسِ بالادستی مجاز نیست — قبل از هر
     // چیز دیگری، حتی قبل از fetchPools.
@@ -465,12 +514,85 @@ export async function runReportPass({ kv, fetchPools, metaOf, verdictOf, now, sl
       if (row) builtRows.push(row);
     }
 
+    /* پایِ سولانا — دقیقاً بعد از پایِ Base، همان پیس/همان sleep/همان
+       REPORT_PACE_MS. fetchPoolsSol که نباشد یا پرتاب کند یعنی «این گذر
+       سولانایی ندارد»، نه شکستِ گذر — همان قاعده‌ای که fetchPools در بالا
+       (وقتی خودِ Base شکست بخورد) کلِ گذر را متوقف می‌کند اینجا برعکس است:
+       فقط این یک پا را خالی می‌گذارد. */
+    const builtRowsSol = [];
+    if (typeof fetchPoolsSol === "function") {
+      let rawRowsSol;
+      try {
+        rawRowsSol = await fetchPoolsSol();
+      } catch (e) {
+        rawRowsSol = null;
+      }
+      if (Array.isArray(rawRowsSol)) {
+        const seenAddrSol = new Set();
+        const candidatesSol = [];
+        for (const row of rawRowsSol) {
+          const t = newPoolRowToTokenFor("solana", row);
+          if (!t || seenAddrSol.has(t.address)) continue;
+          seenAddrSol.add(t.address);
+          candidatesSol.push(t);
+        }
+
+        const tokensSol = candidatesSol.slice(0, solTokenCap(solMaxTokens));
+
+        for (const t of tokensSol) {
+          await sleep(REPORT_PACE_MS);
+          checked++;
+
+          // همان انضباطِ متاOf/verdictOf که پایِ Base بالاتر دارد — این دو
+          // تابع خودشان زنجیره‌آگاه‌اند (از رویِ chainOf(addr))، پس همان
+          // تزریق‌شده‌ی کالر برای هر دو پا کافی است.
+          let metaResult;
+          try { metaResult = await metaOf(t.address); } catch (e) { metaResult = null; }
+          const metaOk = !!metaResult && typeof metaResult === "object" &&
+            Object.prototype.hasOwnProperty.call(metaResult, "meta");
+          const meta = metaOk && metaResult.meta && typeof metaResult.meta === "object" ? metaResult.meta : null;
+          const metaWhy = metaOk ? metaResult.why : "internal";
+
+          let verdictResult;
+          try { verdictResult = await verdictOf(t.address, meta, metaWhy, t.dex); } catch (e) { verdictResult = null; }
+          const verdictOk = !!verdictResult && typeof verdictResult === "object" &&
+            Object.prototype.hasOwnProperty.call(verdictResult, "v");
+          const verdict = verdictOk ? verdictResult.v : null;
+          const why = verdictOk ? verdictResult.why : "internal";
+          const cause = verdictOk ? verdictResult.cause : undefined;
+          const ret = verdictOk ? verdictResult.ret : undefined;
+
+          const checkedAt = new Date(now()).toISOString();
+          const row = reportRow({
+            chain: "solana",
+            address: t.address,
+            symbol: meta && typeof meta.symbol === "string" ? meta.symbol : null,
+            name: meta && typeof meta.name === "string" ? meta.name : null,
+            verdict,
+            checkedAt,
+            poolCreatedAt: t.poolCreatedAt,
+            priceUsd: t.priceUsd,
+            reserveUsd: t.reserveUsd,
+            vol24hUsd: t.vol24hUsd,
+            fdvUsd: t.fdvUsd,
+            dex: t.dex,
+            why,
+            cause,
+            ret,
+          });
+          if (row) builtRowsSol.push(row);
+        }
+      }
+    }
+
     const nowMs = now();
     const dateStr = utcDateOf(nowMs);
     const generatedAt = new Date(nowMs).toISOString();
 
     const prevDoc = await safeKvGetJson(kv, reportKey(dateStr));
-    const newDoc = mergeReportDoc(prevDoc, dateStr, builtRows, checked, generatedAt);
+    const newDoc = mergeReportDoc(prevDoc, dateStr, builtRows.concat(builtRowsSol), checked, generatedAt);
+    // 🔴 حلقه‌ی «تازه‌ها» فقط Base است — سولانا هرگز وارد pairs:base:latest
+    // نمی‌شود، حتی وقتی همین گذر ردیفِ سولانایی هم اضافه کرده باشد.
     const newPairs = mergePairsRing(prevPairsArr, builtRows, REPORT_PAIRS_CAP);
 
     await safeKvPutJson(kv, reportKey(dateStr), newDoc);
@@ -516,7 +638,7 @@ export async function runReportPass({ kv, fetchPools, metaOf, verdictOf, now, sl
       }
     }
 
-    return { checked, added: builtRows.length, followed };
+    return { checked, added: builtRows.length + builtRowsSol.length, addedSol: builtRowsSol.length, followed };
   } catch (e) {
     return { checked: 0, added: 0 }; // این تابع هرگز نباید پرتاب کند
   }
@@ -560,6 +682,10 @@ export function reportText(doc) {
 
     // فقط ردیف‌های Base با checkKindِ همان‌جدول و آدرسِ درست‌شکل — هر ردیفِ
     // دیگر در هیچ شمارشی حساب نمی‌شود.
+    // 🔴 عمداً: از امروز سندِ روزانه ردیف‌های سولانا هم دارد (runReportPass)،
+    // ولی متنِ عمومی هنوز فقط Base است — این یک تصمیمِ جدا و بعداً است،
+    // نه جاماندگی؛ ورودشان به این متن، اگر/وقتی تصمیم گرفته شود، تغییرِ
+    // دیگری می‌خواهد، نه اینجا.
     const rows = doc.rows.filter((r) =>
       r && typeof r === "object" && r.chain === "base" &&
       r.checkKind === CHECK_KIND_BY_CHAIN.base &&

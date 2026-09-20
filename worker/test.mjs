@@ -15,12 +15,12 @@ import { createRequire } from "node:module";
 import {
   REPORT_MIN_RESERVE_USD, REPORT_MAX_TOKENS_PER_RUN, REPORT_PAIRS_CAP, REPORT_PACE_MS,
   CHECK_KIND_BY_CHAIN, REPORT_DATE_RE, PAIRS_KEY_BASE,
-  newPoolRowToToken, reportRow, mergeReportDoc, mergePairsRing,
+  newPoolRowToToken, newPoolRowToTokenFor, reportRow, mergeReportDoc, mergePairsRing,
   utcDateOf, reportKey, emptyReportDoc, runReportPass,
   reportText, REPORT_TEXT_FIRST_DATE,
   causeForRow, REPORT_CAUSES,
   followForRow, REPORT_FOLLOWS, applyFollowUps, pickFollowUpTargets,
-  retForRow,
+  retForRow, REPORT_SOL_MAX_TOKENS,
 } from "./report.js";
 import * as v4 from "./v4index.js";
 import {
@@ -8304,6 +8304,335 @@ console.log("[report cause] causeForRow enforces the closed REPORT_CAUSES vocabu
   console.log("[pairs route] GET /pairs asks ASSETS for exactly \"/pairs.html\" and returns its body "
     + "untouched; a missing env.ASSETS falls through without throwing or 500ing; GET /pairs.json?"
     + "chain=base is unaffected (never handed to ASSETS); /pairsX and /pairs/ are not captured");
+}
+
+/* ---- ۳۶. worker/report.js — newPoolRowToTokenFor زنجیره‌آگاه ----
+   فیکسچرِ سولانا امروز از خودِ پراکسیِ زنده گرفته شد: صفحه‌ی ۱ی new_pools
+   هیچ استخری بالای آستانه‌ی رزرو نداشت، سه‌تای واجدِ شرطِ صفحه‌ی ۲ به‌ترتیب
+   $48416/$11220/$7721 بودند، و dex‌هایشان pumpswap/meteora-dbc/pump-fun.
+   هر عدد در پاسخِ واقعی رشته است، دقیقاً مثلِ Base. */
+{
+  const REAL_SOL_POOL_ROW = {
+    id: "solana_5ZoUg31NuEfDLDJfTh8hJGiavENmE2deDUBT4hhcpump",
+    type: "pool",
+    attributes: {
+      base_token_price_usd: "0.000034521",
+      reserve_in_usd: "48416.32",
+      pool_created_at: "2026-09-20T09:12:00Z",
+      volume_usd: { h24: "12345.6" },
+      fdv_usd: "34521.9",
+    },
+    relationships: {
+      base_token: { data: { id: "solana_5ZoUg31NuEfDLDJfTh8hJGiavENmE2deDUBT4hhcpump" } },
+      dex: { data: { id: "pumpswap" } },
+    },
+  };
+  const SOL_MINT_ORIG = "5ZoUg31NuEfDLDJfTh8hJGiavENmE2deDUBT4hhcpump";
+
+  // ۱. یک ردیفِ واقعیِ سولانا → mint دقیقاً همان، حروف دست‌نخورده
+  const tokSol = newPoolRowToTokenFor("solana", REAL_SOL_POOL_ROW);
+  ok(tokSol !== null, "the real Solana new_pools fixture must yield a usable token");
+  ok(tokSol && tokSol.address === SOL_MINT_ORIG,
+     "the mint must be carried through exactly, got " + (tokSol && tokSol.address));
+  // 🔴 اثباتِ صریح: نتیجه نباید با نسخه‌ی lowercase یکی باشد — این mint حروفِ
+  // بزرگ واقعی دارد، پس اگر کدی جایی toLowerCase زده باشد اینجا رد می‌شود.
+  ok(tokSol && tokSol.address !== SOL_MINT_ORIG.toLowerCase(),
+     "a Solana mint must NEVER be lowercased, got " + (tokSol && tokSol.address));
+  ok(tokSol && tokSol.reserveUsd === 48416.32,
+     "reserve_in_usd (a STRING) must be Number()-parsed for a Solana row too, got " +
+     (tokSol && tokSol.reserveUsd));
+  ok(tokSol && tokSol.dex === "pumpswap", "dex id not carried through for a Solana row");
+
+  // ۲. یک ردیفِ Base هنوز دقیقاً مثلِ امروز نگاشت می‌شود
+  const REAL_BASE_POOL_ROW = {
+    attributes: {
+      base_token_price_usd: "0.00105608666453529",
+      reserve_in_usd: "1035070.5289",
+      pool_created_at: "2026-09-07T16:47:23Z",
+      volume_usd: { h24: "2.48003" },
+      fdv_usd: "1056084.154",
+    },
+    relationships: {
+      base_token: { data: { id: "base_0xb200000000000000000000c573ceb6905ec145da" } },
+      dex: { data: { id: "uniswap-v3-base" } },
+    },
+  };
+  const tokBase = newPoolRowToTokenFor("base", REAL_BASE_POOL_ROW);
+  ok(tokBase && tokBase.address === "0xb200000000000000000000c573ceb6905ec145da",
+     "newPoolRowToTokenFor(\"base\", …) must behave exactly like today's newPoolRowToToken, got " +
+     (tokBase && tokBase.address));
+
+  // ۳. یک ردیفِ «سولانا» با idِ شکلِ Base → null (پیشوندِ اشتباه/الفبای اشتباه)
+  function poolWithId(id, attrs) {
+    return { attributes: attrs, relationships: { base_token: { data: { id } }, dex: { data: { id: "pumpswap" } } } };
+  }
+  const solRowBaseId = poolWithId("base_0x" + "1".repeat(40), REAL_SOL_POOL_ROW.attributes);
+  ok(newPoolRowToTokenFor("solana", solRowBaseId) === null,
+     "a Solana-chain call with a Base-shaped id must return null");
+
+  // ۴. یک ردیفِ «Base» با idِ شکلِ سولانا → null
+  const baseRowSolId = poolWithId("solana_" + SOL_MINT_ORIG, REAL_BASE_POOL_ROW.attributes);
+  ok(newPoolRowToTokenFor("base", baseRowSolId) === null,
+     "a Base-chain call with a Solana-shaped id must return null");
+
+  // ۵. زنجیره‌ی ناشناخته → null
+  ok(newPoolRowToTokenFor("ethereum", REAL_SOL_POOL_ROW) === null,
+     "an unknown chain must return null regardless of the row's shape");
+  ok(newPoolRowToTokenFor("ethereum", REAL_BASE_POOL_ROW) === null,
+     "an unknown chain must return null regardless of the row's shape (Base-shaped row too)");
+
+  // ۶. زیرِ آستانه‌ی رزرو → null (روی سولانا هم)
+  const solLowReserve = poolWithId("solana_" + SOL_MINT_ORIG,
+    { ...REAL_SOL_POOL_ROW.attributes, reserve_in_usd: "4999.99" });
+  ok(newPoolRowToTokenFor("solana", solLowReserve) === null,
+     "a Solana row under REPORT_MIN_RESERVE_USD must be rejected just like a Base row");
+
+  // ۲ (تکمیل). پوششِ نازکِ newPoolRowToToken — بایت‌به‌بایت همان
+  // newPoolRowToTokenFor("base", …)
+  for (const row of [REAL_BASE_POOL_ROW, solRowBaseId, poolWithId("base_0x0000000000000000000000000000000000000000", REAL_BASE_POOL_ROW.attributes)]) {
+    ok(JSON.stringify(newPoolRowToToken(row)) === JSON.stringify(newPoolRowToTokenFor("base", row)),
+       "newPoolRowToToken must remain a byte-for-byte thin wrapper over newPoolRowToTokenFor(\"base\", …), " +
+       "diverged on " + JSON.stringify(row && row.relationships && row.relationships.base_token));
+  }
+
+  console.log("[report chain map] newPoolRowToTokenFor ok — the real Solana new_pools fixture (string "
+    + "numbers, a \"solana_…pump\" id) maps with the mint preserved exactly, case intact, and is proven "
+    + "NOT lowercased; a Base row still maps exactly as today; a Solana-chain call with a Base-shaped id, "
+    + "a Base-chain call with a Solana-shaped id, an unknown chain (either row shape), and a Solana row "
+    + "under the reserve floor all return null; newPoolRowToToken stays a byte-for-byte thin wrapper over "
+    + "newPoolRowToTokenFor(\"base\", …)");
+}
+
+/* ---- ۳۷. runReportPass — پایِ سولانا، تزریقی ----
+   fetchPoolsSol/solMaxTokens/metaOf/verdictOf همه جعلی؛ هیچ شبکه‌ی واقعی
+   لازم نیست. metaOf/verdictOf عمداً زنجیره‌آگاه نوشته نشده‌اند (دقیقاً مثلِ
+   worker/index.js واقعی که ogFetchMetaDetail/ogFetchVerdictDetail را برای
+   هر دو زنجیره یکسان تزریق می‌کند) — فقط از رویِ شکلِ آدرس (0x…/mint)
+   تشخیص می‌دهند. */
+{
+  function makeKv() {
+    const store = new Map();
+    const putCalls = [];
+    return {
+      store, putCalls,
+      get: async (k) => (store.has(k) ? store.get(k) : null),
+      put: async (k, v) => { store.set(k, v); putCalls.push(k); },
+    };
+  }
+  function mkAddr(n) { return "0x" + n.toString(16).padStart(40, "0"); }
+  // الفبای base58 معتبر (بدونِ 0/O/I/l) — تولیدِ deterministic چند mintِ
+  // معتبرِ ۴۴نویسه‌ای برای فیکسچرها.
+  const B58 = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
+  function mkSolAddr(n) {
+    let s = "";
+    const x = n + 1000;
+    for (let i = 0; i < 44; i++) s += B58[(x + i * 7) % B58.length];
+    return s;
+  }
+  function poolRow(addr, reserve, price) {
+    return {
+      attributes: { reserve_in_usd: String(reserve), base_token_price_usd: String(price),
+        pool_created_at: "2026-09-20T10:00:00Z", volume_usd: { h24: "0" }, fdv_usd: "0" },
+      relationships: { base_token: { data: { id: "base_" + addr } }, dex: { data: { id: "uniswap-v3-base" } } },
+    };
+  }
+  function solPoolRow(addr, reserve, price, dex) {
+    return {
+      attributes: { reserve_in_usd: String(reserve), base_token_price_usd: String(price),
+        pool_created_at: "2026-09-20T09:00:00Z", volume_usd: { h24: "100" }, fdv_usd: "1000" },
+      relationships: { base_token: { data: { id: "solana_" + addr } }, dex: { data: { id: dex } } },
+    };
+  }
+  const NOW_MS = Date.parse("2026-09-20T12:00:00.000Z");
+  const metaOf = async () => ({ meta: { symbol: "X", name: "X" }, why: null });
+
+  // ---- الف) هر دو پا با هم: سند هر دو زنجیره را دارد ----
+  {
+    const solAddrs = [mkSolAddr(1), mkSolAddr(2), mkSolAddr(3)];
+    // اندازه‌گیریِ واقعی: از سه mintِ واجدِ شرط، دو تا "sell" شدند و یکی
+    // {v:null, why:"jup:quote:400"} — دقیقاً همان توزیع اینجا بازسازی می‌شود.
+    const verdictOf = async (addr) => {
+      if (addr === solAddrs[2]) return { v: null, why: "jup:quote:400" };
+      return { v: "sell", why: null };
+    };
+    const baseRows = [poolRow(mkAddr(1), 10000, 0.5)];
+    const solRows = [
+      solPoolRow(solAddrs[0], 48416, 0.001, "pumpswap"),
+      solPoolRow(solAddrs[1], 11220, 0.002, "meteora-dbc"),
+      solPoolRow(solAddrs[2], 7721, 0.003, "pump-fun"),
+    ];
+    const kv = makeKv();
+    const res = await runReportPass({
+      kv, fetchPools: async () => baseRows, fetchPoolsSol: async () => solRows,
+      metaOf, verdictOf, now: () => NOW_MS, sleep: async () => {},
+    });
+    ok(res.checked === 4, "one Base + three Solana candidates must yield checked:4, got " + res.checked);
+    ok(res.addedSol === 3, "all three eligible Solana rows must be added, got addedSol:" + res.addedSol);
+    ok(res.added === 4, "added must be the total across both legs, got " + res.added);
+
+    const dateStr = utcDateOf(NOW_MS);
+    const doc = JSON.parse(await kv.get(reportKey(dateStr)));
+    ok(JSON.stringify(doc.chains) === JSON.stringify(["base", "solana"]),
+       "doc.chains must be the sorted unique chains actually present, got " + JSON.stringify(doc.chains));
+    const solRowsInDoc = doc.rows.filter((r) => r.chain === "solana");
+    ok(solRowsInDoc.length === 3, "the document must carry all three Solana rows, got " + solRowsInDoc.length);
+    ok(solRowsInDoc.every((r) => r.checkKind === "roundtrip"),
+       "every Solana row must carry checkKind:\"roundtrip\", got " +
+       JSON.stringify(solRowsInDoc.map((r) => r.checkKind)));
+    ok(doc.rows.some((r) => r.chain === "base" && r.address === mkAddr(1)),
+       "the Base row must still be in the same document");
+
+    // 🔴 دقیقاً یک نوشتنِ KV روی خودِ کلیدِ گزارش برای همین گذر — بدونِ
+    // poolEmptyOf هیچ نوشتنِ دومِ فالوآپی هم نباید باشد.
+    const reportWrites = kv.putCalls.filter((k) => k === reportKey(dateStr));
+    ok(reportWrites.length === 1,
+       "exactly one KV write of the report document must happen per pass, got " + reportWrites.length);
+
+    // ---- پ) حلقه‌ی pairs هیچ ردیفِ سولانایی نمی‌گیرد ----
+    const pairs = JSON.parse(await kv.get(PAIRS_KEY_BASE));
+    ok(Array.isArray(pairs) && pairs.length === 1 && pairs[0].address === mkAddr(1),
+       "the pairs ring must receive only the Base row, got " + JSON.stringify(pairs));
+    ok(!pairs.some((r) => solAddrs.includes(r.address)),
+       "the pairs ring must contain no Solana address even though Solana rows were added, got " +
+       JSON.stringify(pairs));
+  }
+
+  // ---- ب) کنترل: fetchPoolsSol غایب، و fetchPoolsSol پرتاب‌کننده — هر دو
+  // باید بایت‌به‌بایت همان سندِ Base-تنها را بدهند ----
+  {
+    const baseRows = [poolRow(mkAddr(9), 10000, 0.5)];
+    const verdictOf = async () => ({ v: "sell", why: null });
+
+    const kvAbsent = makeKv();
+    const resAbsent = await runReportPass({
+      kv: kvAbsent, fetchPools: async () => baseRows, metaOf, verdictOf, now: () => NOW_MS, sleep: async () => {},
+    });
+
+    const kvThrow = makeKv();
+    const resThrow = await runReportPass({
+      kv: kvThrow, fetchPools: async () => baseRows,
+      fetchPoolsSol: async () => { throw new Error("upstream is down"); },
+      metaOf, verdictOf, now: () => NOW_MS, sleep: async () => {},
+    });
+
+    const dateStr = utcDateOf(NOW_MS);
+    const docAbsent = await kvAbsent.get(reportKey(dateStr));
+    const docThrow = await kvThrow.get(reportKey(dateStr));
+    ok(docAbsent === docThrow,
+       "a throwing fetchPoolsSol must produce a document byte-for-byte identical to fetchPoolsSol being " +
+       "absent entirely");
+    ok(resAbsent.addedSol === 0 && resThrow.addedSol === 0,
+       "addedSol must be 0 with no Solana rows, got " + resAbsent.addedSol + "/" + resThrow.addedSol);
+    ok(resAbsent.added === 1 && resThrow.added === 1,
+       "the Base leg must still land when the Solana leg yields nothing, got " +
+       resAbsent.added + "/" + resThrow.added);
+    ok(JSON.stringify(JSON.parse(docAbsent).chains) === JSON.stringify(["base"]),
+       "chains must be [\"base\"] when no Solana rows landed, got " + JSON.parse(docAbsent).chains);
+  }
+
+  console.log("[report sol pass] runReportPass's injected Solana leg ok — both legs land in one document "
+    + "written to KV exactly once per pass, chains becomes [\"base\",\"solana\"] sorted, every Solana row "
+    + "carries checkKind:\"roundtrip\", checked/added/addedSol all count correctly, and the pairs ring "
+    + "receives only the Base row even when Solana rows were added; a fetchPoolsSol that is absent or "
+    + "throws yields a byte-for-byte identical document to a Base-only pass with addedSol:0, and the "
+    + "Base leg still lands either way");
+}
+
+/* ---- ۳۸. runReportPass — سقفِ ۶ توکنِ سولانا در هر گذر ---- */
+{
+  function makeKv() {
+    const store = new Map();
+    return { store, get: async (k) => (store.has(k) ? store.get(k) : null), put: async (k, v) => { store.set(k, v); } };
+  }
+  const B58 = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
+  function mkSolAddr(n) {
+    let s = "";
+    const x = n + 5000;
+    for (let i = 0; i < 44; i++) s += B58[(x + i * 7) % B58.length];
+    return s;
+  }
+  function solPoolRow(addr, reserve) {
+    return {
+      attributes: { reserve_in_usd: String(reserve), base_token_price_usd: "0.001",
+        pool_created_at: "2026-09-20T09:00:00Z", volume_usd: { h24: "1" }, fdv_usd: "1" },
+      relationships: { base_token: { data: { id: "solana_" + addr } }, dex: { data: { id: "pumpswap" } } },
+    };
+  }
+  const NOW_MS = Date.parse("2026-09-20T12:00:00.000Z");
+  const metaOf = async () => ({ meta: null, why: "meta:429" });
+  const verdictOf = async () => ({ v: "sell", why: null });
+  const manyEligible = Array.from({ length: 20 }, (_, i) => solPoolRow(mkSolAddr(i), 6000 + i));
+
+  // بدونِ solMaxTokens: پیش‌فرض ۶
+  const kvDefault = makeKv();
+  const resDefault = await runReportPass({
+    kv: kvDefault, fetchPools: async () => [], fetchPoolsSol: async () => manyEligible,
+    metaOf, verdictOf, now: () => NOW_MS, sleep: async () => {},
+  });
+  ok(resDefault.addedSol === REPORT_SOL_MAX_TOKENS,
+     "20 eligible Solana rows with no solMaxTokens must add exactly " + REPORT_SOL_MAX_TOKENS +
+     ", got " + resDefault.addedSol);
+
+  // solMaxTokens بالاتر از سقفِ سخت هم گیر می‌کند
+  const kvHuge = makeKv();
+  const resHuge = await runReportPass({
+    kv: kvHuge, fetchPools: async () => [], fetchPoolsSol: async () => manyEligible,
+    metaOf, verdictOf, now: () => NOW_MS, sleep: async () => {}, solMaxTokens: 9999,
+  });
+  ok(resHuge.addedSol === REPORT_SOL_MAX_TOKENS,
+     "solMaxTokens above the hard cap must still clamp to " + REPORT_SOL_MAX_TOKENS +
+     ", got " + resHuge.addedSol);
+
+  // solMaxTokens زیرِ سقف رعایت می‌شود
+  const kvLow = makeKv();
+  const resLow = await runReportPass({
+    kv: kvLow, fetchPools: async () => [], fetchPoolsSol: async () => manyEligible,
+    metaOf, verdictOf, now: () => NOW_MS, sleep: async () => {}, solMaxTokens: 2,
+  });
+  ok(resLow.addedSol === 2, "solMaxTokens:2 must add exactly 2, got " + resLow.addedSol);
+
+  console.log("[report sol cap] runReportPass's Solana leg caps at exactly " + REPORT_SOL_MAX_TOKENS +
+    " tokens per pass regardless of how many eligible rows the upstream returns (20 -> " +
+    REPORT_SOL_MAX_TOKENS + "), a solMaxTokens above the hard cap clamps down to it, and a lower "
+    + "solMaxTokens is respected exactly");
+}
+
+/* ---- ۳۹. reportText — ردیف‌های سولانا در سند، بایت‌به‌بایتِ متنِ Baseِ تنها ----
+   🔴 عمداً: متنِ عمومی هنوز فقط Base است، هرچند سند خودش حالا سولانا هم
+   دارد — این تصمیمی جدا از این تغییر است، نه جاماندگی. */
+{
+  const T9 = "2026-09-20T00:00:00.000Z";
+  function baseRowArgs(extra) {
+    return Object.assign({ chain: "base", address: "0x" + "3".repeat(40), symbol: "B3", name: "B3",
+      verdict: "sell", checkedAt: T9, poolCreatedAt: null, priceUsd: 1, reserveUsd: 1, vol24hUsd: 1,
+      fdvUsd: 1, dex: "uniswap-v3-base", why: null }, extra);
+  }
+  const rowBaseSell = reportRow(baseRowArgs({}));
+  const rowBaseNoSell = reportRow(baseRowArgs({ address: "0x" + "4".repeat(40), symbol: "B4", verdict: "nosell" }));
+  const rowSol = reportRow({
+    chain: "solana", address: "5ZoUg31NuEfDLDJfTh8hJGiavENmE2deDUBT4hhcpump", symbol: "SOL9", name: "Sol Nine",
+    verdict: "sell", checkedAt: T9, poolCreatedAt: null, priceUsd: 1, reserveUsd: 1, vol24hUsd: 1, fdvUsd: 1,
+    dex: "pumpswap", why: null,
+  });
+  ok(rowSol && rowSol.checkKind === "roundtrip", "sanity: the injected Solana row must carry checkKind roundtrip");
+
+  const docWithSol = {
+    date: "2026-09-20", generatedAt: T9, chains: ["base", "solana"], checked: 3,
+    rows: [rowBaseSell, rowSol, rowBaseNoSell],
+  };
+  const docNoSol = {
+    date: "2026-09-20", generatedAt: T9, chains: ["base"], checked: 2,
+    rows: [rowBaseSell, rowBaseNoSell],
+  };
+  const textWithSol = reportText(docWithSol);
+  const textNoSol = reportText(docNoSol);
+  ok(typeof textWithSol === "string" && textWithSol === textNoSol,
+     "reportText with Solana rows present must be byte-for-byte identical to the same document with " +
+     "the Solana rows removed, got:\n--- with sol ---\n" + textWithSol + "\n--- without sol ---\n" + textNoSol);
+
+  console.log("[report text sol] reportText ok — a document containing Solana rows renders byte-for-byte "
+    + "identical text to the same document with those Solana rows removed, confirming the public text "
+    + "stays Base-only by deliberate, separate decision");
 }
 
 console.log(fails === 0

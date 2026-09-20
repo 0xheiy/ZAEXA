@@ -1650,6 +1650,32 @@ async function scheduledReportPass(env, ctx, opts) {
       }
     };
 
+    /* همان کلید/هدر/قاعده‌ی fetchPools بالا، ولی برای سولانا و دو صفحه: امروز
+       اندازه‌گیری شد که صفحه‌ی اول هیچ استخری بالای آستانه‌ی رزرو نداشت و
+       سه‌تای واجدِ شرط همه در صفحه‌ی دوم بودند — پس بدونِ صفحه‌ی دوم این پا
+       عملاً همیشه خالی می‌ماند. هر صفحه try/catchِ خودش را دارد؛ شکستِ یکی
+       فقط یعنی هرچه صفحه‌ی دیگر داد، نه شکستِ کلِ fetchPoolsSol. */
+    const fetchPoolsSol = async () => {
+      const key = (env && typeof env.CG_KEY === "string" && env.CG_KEY) || "";
+      const h = { accept: "application/json" };
+      if (key) h["x-cg-demo-api-key"] = key;
+      const base = (key ? UPSTREAM_KEYED : UPSTREAM_FREE) + "/networks/solana/new_pools";
+      const fetchPage = async (target) => {
+        try {
+          const up = await fetch(target, { headers: h });
+          if (!up.ok) return [];
+          const body = await up.json();
+          if (!body || !Array.isArray(body.data)) return [];
+          return body.data;
+        } catch (e) {
+          return [];
+        }
+      };
+      const page1 = await fetchPage(base);
+      const page2 = await fetchPage(base + "?page=2");
+      return page1.concat(page2);
+    };
+
     return await runReportPass({
       kv: env.ZX_KV,
       fetchPools,
@@ -1677,6 +1703,8 @@ async function scheduledReportPass(env, ctx, opts) {
       // به ۱۲ آدرس در هر گذر سقف‌گذاری شده، پس این حداکثر ۱۲ eth_call کوتاهِ
       // اضافه در ساعت است، روی مسیری که هیچ کاربری منتظرش نیست.
       poolEmptyOf: (addr) => v4PoolsEmpty(addr, env, Date.now() + 1200),
+      fetchPoolsSol,
+      solMaxTokens: 6,
     });
   } catch (e) {
     return { checked: 0, added: 0 }; // یک اجرای زمان‌بندی‌شده هرگز نباید پرتاب کند
