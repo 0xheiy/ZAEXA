@@ -2663,6 +2663,217 @@ async def main():
         print("[tradability] buy ok, sell silent -> %s" % verdict)
         assert verdict["unknown"], "a failed sell quote must be flagged unknown, not as a honeypot"
 
+        # ---- باگ ۱۵: نبودِ کوتِ فروشِ این صفحه داور نهایی نیست — سرور
+        # (/vd/<address>) با پوششِ وسیع‌تر (از جمله Uniswap v4) داور است.
+        # هر چهار حالت: null (نامعلوم)، sell (نجات)، nosell (اتهامِ واقعی
+        # بدونِ کلمه‌ی «هانی‌پات»)، و شاهدِ مثبت (کوتِ فروش خودِ صفحه که
+        # اصلاً نباید سراغ سرور برود).
+        r15_unknown = await pg.evaluate("""async () => {
+            const realCT = checkTradability, realVD = fetchVdVerdict, realML = measureLiquidity;
+            checkTradability = async () => ({buy: true, sell: false, roundTrip: null, unknown: false});
+            fetchVdVerdict = async () => ({v: null, why: null});
+            measureLiquidity = async () => 200000;
+            const rep = await scanToken(tokenOut);
+            checkTradability = realCT; fetchVdVerdict = realVD; measureLiquidity = realML;
+            const withFalsePenalty = riskScore(Object.assign({}, rep, {canSell: false}));
+            return {titles: rep.findings.map(f => f.title), canSell: rep.canSell,
+                    score: rep.score, withFalsePenalty};
+        }""")
+        print("[risk 15] server verdict unknown -> titles=%s canSell=%s score=%s vs +40=%s"
+              % (r15_unknown["titles"], r15_unknown["canSell"], r15_unknown["score"],
+                 r15_unknown["withFalsePenalty"]))
+        assert "Tradability unknown" in r15_unknown["titles"]
+        assert "Cannot get a sell quote" not in r15_unknown["titles"]
+        assert r15_unknown["canSell"] is None
+        assert r15_unknown["score"] < r15_unknown["withFalsePenalty"], \
+            "an unresolved server verdict must not carry the +40 unsellable penalty"
+
+        r15_sell = await pg.evaluate("""async () => {
+            const realCT = checkTradability, realVD = fetchVdVerdict, realML = measureLiquidity;
+            checkTradability = async () => ({buy: true, sell: false, roundTrip: null, unknown: false});
+            fetchVdVerdict = async () => ({v: "sell", why: null});
+            measureLiquidity = async () => 200000;
+            const rep = await scanToken(tokenOut);
+            checkTradability = realCT; fetchVdVerdict = realVD; measureLiquidity = realML;
+            return {findings: rep.findings.map(f => ({title: f.title, level: f.level})),
+                    canSell: rep.canSell};
+        }""")
+        print("[risk 15] server verdict sell -> canSell=%s findings=%s"
+              % (r15_sell["canSell"], r15_sell["findings"]))
+        hit = next((x for x in r15_sell["findings"]
+                    if x["title"] == "No sell quote from the pools we quote"), None)
+        assert hit is not None, "a server-confirmed sell must be reported"
+        assert hit["level"] == "info"
+        assert r15_sell["canSell"] is True
+        assert not any(x["title"] == "Cannot get a sell quote" for x in r15_sell["findings"]), \
+            "a server-confirmed sell must not leave the tradability-critical finding behind"
+
+        r15_nosell = await pg.evaluate("""async () => {
+            const realCT = checkTradability, realVD = fetchVdVerdict, realML = measureLiquidity;
+            checkTradability = async () => ({buy: true, sell: false, roundTrip: null, unknown: false});
+            fetchVdVerdict = async () => ({v: "nosell", why: null});
+            measureLiquidity = async () => 200000;
+            const rep = await scanToken(tokenOut);
+            checkTradability = realCT; fetchVdVerdict = realVD; measureLiquidity = realML;
+            return {findings: rep.findings.map(f => ({title: f.title, level: f.level, detail: f.detail})),
+                    canSell: rep.canSell};
+        }""")
+        print("[risk 15] server verdict nosell -> canSell=%s" % r15_nosell["canSell"])
+        hit = next((x for x in r15_nosell["findings"] if x["title"] == "Cannot get a sell quote"), None)
+        assert hit is not None, "a server-confirmed no-sell must still be reported critical"
+        assert hit["level"] == "critical"
+        assert "honeypot" not in hit["detail"].lower(), \
+            "most nosell verdicts are pulled liquidity, not honeypot contracts — the word must not appear"
+        assert r15_nosell["canSell"] is False
+
+        r15_control = await pg.evaluate("""async () => {
+            const realCT = checkTradability, realVD = fetchVdVerdict, realML = measureLiquidity;
+            let vdCalls = 0;
+            checkTradability = async () => ({buy: true, sell: true, roundTrip: 0.5, unknown: false});
+            fetchVdVerdict = async () => { vdCalls++; return {v: "sell", why: null}; };
+            measureLiquidity = async () => 200000;
+            const rep = await scanToken(tokenOut);
+            checkTradability = realCT; fetchVdVerdict = realVD; measureLiquidity = realML;
+            return {titles: rep.findings.map(f => f.title), vdCalls};
+        }""")
+        print("[risk 15] positive control, page itself sold -> titles=%s vdCalls=%s"
+              % (r15_control["titles"], r15_control["vdCalls"]))
+        assert r15_control["vdCalls"] == 0, \
+            "the server verdict must not be consulted when this page's own quotes already sold"
+        assert "Sellable" in r15_control["titles"]
+
+        r15_rescue = await pg.evaluate("""async () => {
+            const realCT = checkTradability, realVD = fetchVdVerdict, realML = measureLiquidity;
+            checkTradability = async () => ({buy: false, sell: false, roundTrip: null, unknown: true});
+            fetchVdVerdict = async () => ({v: "sell", why: null});
+            measureLiquidity = async () => 200000;
+            const rep = await scanToken(tokenOut);
+            checkTradability = realCT; fetchVdVerdict = realVD; measureLiquidity = realML;
+            return {canSell: rep.canSell, canBuy: rep.canBuy};
+        }""")
+        print("[risk 15] browser unknown, server sell -> canSell=%s canBuy=%s"
+              % (r15_rescue["canSell"], r15_rescue["canBuy"]))
+        assert r15_rescue["canSell"] is True, \
+            "a server-confirmed sell must rescue a browser-side unknown"
+
+        # ---- باگ ۱۶: عددِ کمِ نقدینگی بدونِ شاهدِ پوشش اتهام نیست ----
+        r16_false = await pg.evaluate("""async () => {
+            const realML = measureLiquidity, realCov = liqCoverage, realCT = checkTradability;
+            measureLiquidity = async () => 0;
+            liqCoverage = async () => false;
+            checkTradability = async () => ({buy: true, sell: true, roundTrip: 0, unknown: false});
+            const rep = await scanToken(tokenOut);
+            measureLiquidity = realML; liqCoverage = realCov; checkTradability = realCT;
+            return {titles: rep.findings.map(f => f.title), liqUsd: rep.liqUsd, unknown: rep.unknown};
+        }""")
+        print("[liquidity 16] coverage false -> titles=%s liqUsd=%s unknown=%s"
+              % (r16_false["titles"], r16_false["liqUsd"], r16_false["unknown"]))
+        assert "Very thin liquidity" not in r16_false["titles"]
+        assert "Liquidity not fully measured" in r16_false["titles"]
+        assert r16_false["liqUsd"] is None
+        assert r16_false["unknown"] == 0
+
+        r16_null = await pg.evaluate("""async () => {
+            const realML = measureLiquidity, realCov = liqCoverage, realCT = checkTradability;
+            measureLiquidity = async () => 0;
+            liqCoverage = async () => null;
+            checkTradability = async () => ({buy: true, sell: true, roundTrip: 0, unknown: false});
+            const rep = await scanToken(tokenOut);
+            measureLiquidity = realML; liqCoverage = realCov; checkTradability = realCT;
+            return {titles: rep.findings.map(f => f.title), liqUsd: rep.liqUsd, unknown: rep.unknown};
+        }""")
+        print("[liquidity 16] coverage null -> titles=%s liqUsd=%s unknown=%s"
+              % (r16_null["titles"], r16_null["liqUsd"], r16_null["unknown"]))
+        assert "Very thin liquidity" not in r16_null["titles"]
+        assert "Liquidity not fully measured" in r16_null["titles"]
+        assert r16_null["liqUsd"] is None
+        assert r16_null["unknown"] >= 1, \
+            "an unresolved coverage check must count toward the unknown total"
+
+        r16_control = await pg.evaluate("""async () => {
+            const realML = measureLiquidity, realCov = liqCoverage, realCT = checkTradability;
+            let covCalls = 0;
+            measureLiquidity = async () => 0;
+            liqCoverage = async () => { covCalls++; return true; };
+            checkTradability = async () => ({buy: true, sell: true, roundTrip: 0, unknown: false});
+            const rep = await scanToken(tokenOut);
+            measureLiquidity = realML; liqCoverage = realCov; checkTradability = realCT;
+            return {titles: rep.findings.map(f => f.title), liqUsd: rep.liqUsd, covCalls};
+        }""")
+        print("[liquidity 16] positive control, coverage true -> titles=%s liqUsd=%s"
+              % (r16_control["titles"], r16_control["liqUsd"]))
+        assert "Very thin liquidity" in r16_control["titles"]
+        assert r16_control["liqUsd"] == 0
+        assert r16_control["covCalls"] == 1
+
+        # ---- liqCoverage به‌تنهایی: شکل‌های واقعی و لبه‌ایِ GeckoTerminal ----
+        our_addr = "0x4f795d79f9bcec1dc51083249dddb9ee4ccfe87e"
+        usdc_addr = "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913"
+        weth_addr = "0x4200000000000000000000000000000000000006"
+        other_addr = "0x1234567890123456789012345678901234567890"
+
+        def gt_pool(dex, base, quote):
+            return {"relationships": {
+                "base_token": {"data": {"id": "base_" + base}},
+                "quote_token": {"data": {"id": "base_" + quote}},
+                "dex": {"data": {"id": dex}},
+            }}
+
+        cov_cases = [
+            ("real v4 payload", {"data": [gt_pool("uniswap-v4-base", our_addr, weth_addr)]}, False),
+            ("v3 vs USDC", {"data": [gt_pool("uniswap-v3-base", our_addr, usdc_addr)]}, True),
+            ("v3 vs other token", {"data": [gt_pool("uniswap-v3-base", our_addr, other_addr)]}, False),
+            ("empty pools", {"data": []}, None),
+            ("full page (20)", {"data": [gt_pool("uniswap-v3-base", our_addr, usdc_addr)
+                                          for _ in range(20)]}, None),
+            ("pool missing dex", {"data": [{"relationships": {
+                "base_token": {"data": {"id": "base_" + our_addr}},
+                "quote_token": {"data": {"id": "base_" + usdc_addr}}}}]}, None),
+        ]
+        for label, payload, expect in cov_cases:
+            got = await pg.evaluate("""async (args) => {
+                const real = gtJson;
+                gtJson = async () => args.payload;
+                const v = await liqCoverage({address: args.addr});
+                gtJson = real;
+                return v;
+            }""", {"payload": payload, "addr": our_addr})
+            print("[liqCoverage] %s -> %s" % (label, got))
+            assert got == expect, "%s: expected %r, got %r" % (label, expect, got)
+
+        thrown = await pg.evaluate("""async (addr) => {
+            const real = gtJson;
+            gtJson = async () => { throw new Error("boom"); };
+            const v = await liqCoverage({address: addr});
+            gtJson = real;
+            return v;
+        }""", our_addr)
+        print("[liqCoverage] gtJson throws -> %s" % thrown)
+        assert thrown is None
+
+        # ---- نگهبانِ ایستا: GT_DEX_TO_DEX زیرمجموعه‌ی دقیقِ GT_DEX_TO_VENUE ----
+        idx_src = open(os.path.join(HERE, "..", "index.html"), encoding="utf-8").read()
+        wk_src = open(os.path.join(HERE, "..", "..", "worker", "index.js"), encoding="utf-8").read()
+        gd_m = re.search(r"const GT_DEX_TO_DEX=Object\.freeze\((.*?)\);", idx_src, re.S)
+        assert gd_m, "web/index.html no longer declares GT_DEX_TO_DEX"
+        gd_pairs = re.findall(r'"([^"]+)":"([^"]+)"', gd_m.group(1))
+        assert gd_pairs, "GT_DEX_TO_DEX parsed empty"
+        gv_m = re.search(r"GT_DEX_TO_VENUE = Object\.freeze\((.*?)\);", wk_src, re.S)
+        assert gv_m, "worker/index.js no longer declares GT_DEX_TO_VENUE"
+        gv_pairs = dict(re.findall(r'"([^"]+)":\s*"([^"]+)"', gv_m.group(1)))
+        dexes_m = re.search(r"const DEXES=\[(.*?)\];", idx_src, re.S)
+        assert dexes_m, "web/index.html no longer declares DEXES"
+        dex_ids = set(re.findall(r'\{id:"([^"]+)"', dexes_m.group(1)))
+        print("[static guard] GT_DEX_TO_DEX pairs=%d dex_ids=%s" % (len(gd_pairs), sorted(dex_ids)))
+        for k, v in gd_pairs:
+            assert gv_pairs.get(k) == v, \
+                "GT_DEX_TO_DEX[%r]=%r does not match worker's GT_DEX_TO_VENUE[%r]=%r" \
+                % (k, v, k, gv_pairs.get(k))
+            assert v in dex_ids, \
+                "GT_DEX_TO_DEX maps %r to %r, which is not a DEXES id in web/index.html" % (k, v)
+        assert "Strongest honeypot signal" not in idx_src, \
+            "the removed honeypot-signal wording must not reappear in web/index.html"
+
         # د) allowance خوانده‌نشده نباید «approve نکرده» تفسیر شود
         btn = await pg.evaluate("""() => {
             const savedAcc = account, savedPlan = currentPlan;

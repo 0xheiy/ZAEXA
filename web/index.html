@@ -3362,31 +3362,69 @@ async function scanToken(token){
   // عمق را از سمت توکن *شناخته‌شده* می‌سنجیم؛ قیمت خود توکن می‌تواند ساختگی باشد.
   // در صورت خطای شبکه null می‌شود نه ۰، وگرنه یک قطعی RPC به‌غلط «نقدینگی کم» می‌داد.
   try{rep.liqUsd=await measureLiquidity(token);}catch{rep.liqUsd=null;rep.unknown++;}
-  if(rep.liqUsd!==null){
-    if(rep.liqUsd<10000)add("high","Very thin liquidity","About $"+fmtUsd(rep.liqUsd)+" across known pools. Easy to move, hard to exit.");
-    else if(rep.liqUsd<50000)add("medium","Shallow liquidity","About $"+fmtUsd(rep.liqUsd)+" across known pools.");
-    else add("ok","Liquidity present","About $"+fmtUsd(rep.liqUsd)+" across known pools.");
+  if(rep.liqUsd!==null&&rep.liqUsd<50000){
+    // عدد کم به‌تنهایی «کم» نیست — ممکن است فقط استخری باشد که این صفحه
+    // نمی‌شناسد (مثلاً Uniswap v4). پیش از اتهام، شاهد پوشش می‌خواهیم.
+    const cov=await liqCoverage(token);
+    if(cov===true){
+      if(rep.liqUsd<10000)add("high","Very thin liquidity","About $"+fmtUsd(rep.liqUsd)+" across known pools. Easy to move, hard to exit.");
+      else add("medium","Shallow liquidity","About $"+fmtUsd(rep.liqUsd)+" across known pools.");
+    }else{
+      const measured=rep.liqUsd;
+      rep.liqUsd=null;
+      if(cov===null)rep.unknown++;
+      add("info","Liquidity not fully measured","About $"+fmtUsd(measured)+" in the pools we measure, but "+
+        (cov===false?"this token also trades in pools we do not measure (for example Uniswap v4), so the total is unknown.":
+          "we could not list all of its pools, so the total is unknown."));
+    }
+  }else if(rep.liqUsd!==null){
+    add("ok","Liquidity present","About $"+fmtUsd(rep.liqUsd)+" across known pools.");
   }
   try{
-    const t=await checkTradability(token);
-    if(!t.unknown){rep.canBuy=t.buy;rep.canSell=t.sell;}
+    let t=null;
+    try{t=await checkTradability(token);}catch{t=null;}
+    if(t&&!t.unknown){rep.canBuy=t.buy;rep.canSell=t.sell;}
+    const quoteSell=!!(t&&!t.unknown&&t.sell);
     // ⚠️ ترتیب این دو شرط حیاتی است. قبلاً «نامعلوم» فقط وقتی دیده می‌شد که
     //    *هر دو* سمت شکست خورده باشند؛ اگر خرید کوت می‌گرفت و فروش به‌خاطر
     //    قطعی RPC نمی‌گرفت، توکن سالم «قوی‌ترین نشانه‌ی هانی‌پات» اعلام می‌شد
     //    و چون گزارش کش می‌شود، این اتهام تا آخر جلسه می‌ماند.
-    if(t.unknown){rep.unknown++;add("info","Tradability unknown","Quotes did not come back, so we could not test buying and selling.");}
-    else if(!t.sell)add("critical","Cannot get a sell quote","No pool would quote selling this token back. Strongest honeypot signal.");
-    else if(t.roundTrip!==null&&t.roundTrip>15)
-      add("high","Heavy round-trip loss","Buy then sell immediately loses about "+t.roundTrip.toFixed(1)+"% — likely a transfer tax.");
-    else if(t.roundTrip!==null){
-      const tc=tripCost(t.roundTrip);
-      if(tc.state==="implausible")
-        add("info","Round trip did not price cleanly",
-          "Selling it straight back quoted more than the buy cost. That is a pricing artefact, not a profit, so we cannot confirm the round-trip cost.");
-      else if(tc.state==="zeroish")
-        add("ok","Sellable","Round-trip cost is effectively zero.");
-      else
-        add("ok","Sellable","Round-trip cost about "+t.roundTrip.toFixed(2)+"%.");
+    if(quoteSell){
+      if(t.roundTrip!==null&&t.roundTrip>15)
+        add("high","Heavy round-trip loss","Buy then sell immediately loses about "+t.roundTrip.toFixed(1)+"% — likely a transfer tax.");
+      else if(t.roundTrip!==null){
+        const tc=tripCost(t.roundTrip);
+        if(tc.state==="implausible")
+          add("info","Round trip did not price cleanly",
+            "Selling it straight back quoted more than the buy cost. That is a pricing artefact, not a profit, so we cannot confirm the round-trip cost.");
+        else if(tc.state==="zeroish")
+          add("ok","Sellable","Round-trip cost is effectively zero.");
+        else
+          add("ok","Sellable","Round-trip cost about "+t.roundTrip.toFixed(2)+"%.");
+      }
+    }else{
+      // این صفحه فقط استخرهایی را کوت می‌گیرد که می‌شناسد (بدون Uniswap v4،
+      // بدون Uniswap v2). نبودِ کوتِ فروش اینجا یعنی «این صفحه نتوانست»، نه
+      // «این توکن هانی‌پات است» — پس داور نهایی همان چیزی است که سرور با
+      // پوشش وسیع‌تر (از جمله v4) واقعاً سنجیده: /vd/<address>.
+      const sv=await fetchVdVerdict(token.address);
+      const fallbackBuy=(t&&!t.unknown)?t.buy:null;
+      if(sv.v==="sell"){
+        add("info","No sell quote from the pools we quote",
+          "This page's quotes found no sell, but the server check priced a sell through a pool this page does not quote (for example Uniswap v4).");
+        rep.canSell=true;rep.canBuy=fallbackBuy;
+      }else if(sv.v==="nosell"){
+        add("critical","Cannot get a sell quote",
+          "No pool we quote would sell this back, and the server check found no way to sell it either. That can be a token that blocks selling or a pool whose liquidity was pulled — either way there is no exit right now.");
+        rep.canSell=false;rep.canBuy=fallbackBuy;
+      }else{
+        rep.unknown++;
+        add("info","Tradability unknown",
+          (t&&!t.unknown)
+            ?"This page's quotes found no sell, but they only cover the pools we quote and the server check did not confirm it. Unknown — not a no."
+            :"Quotes did not come back, so we could not test buying and selling.");
+        rep.canSell=null;rep.canBuy=fallbackBuy;
+      }
     }
   }catch{rep.unknown++;}
 
@@ -3425,7 +3463,7 @@ function verdictOf(rep){
 //    می‌کند روی زنجیره‌ی زنده. یک شبیه‌سازی که واقعاً اجرا شده بر یک کوت برتری
 //    دارد — این تابع همان اصل را پیاده می‌کند: هیچ پنلی نباید چیزی بگوید که
 //    پنل دیگر نقضش کند.
-const QUOTE_SELL_TITLES=["Sellable","Heavy round-trip loss","Cannot get a sell quote","Tradability unknown","Round trip did not price cleanly"];
+const QUOTE_SELL_TITLES=["Sellable","Heavy round-trip loss","Cannot get a sell quote","Tradability unknown","Round trip did not price cleanly","No sell quote from the pools we quote"];
 function reconcileExit(rep){
   if(!rep)return rep;
   if(rep.native)return rep;
@@ -3509,6 +3547,46 @@ async function measureLiquidity(token){
   // روی استخرهای WETH عمق دیدیم ولی قیمتش را نمی‌دانیم → عدد ناقص است
   if(wethSeen&&eth===null)return null;
   return total*2;
+}
+/* دقیقاً worker/index.js GT_DEX_TO_VENUE منهای "uniswap-v2-base" — فهرست
+   DEXES این صفحه اصلاً Uniswap v2 ندارد. هر id دیگری (uniswap-v4-base،
+   aerodrome-slipstream-3، …) یعنی «اینجا سنجیده نشده» و باید به نامعلوم
+   بیفتد، نه به اتهام. */
+const GT_DEX_TO_DEX=Object.freeze({"uniswap-v3-base":"uniswap-v3","pancakeswap-v3-base":"pancake-v3","aerodrome-slipstream":"aerodrome-cl","aerodrome-base":"aerodrome","baseswap":"baseswap","sushiswap-v2-base":"sushiswap","alien-base":"alienbase"});
+/* شاهدِ پوشش برای measureLiquidity: آیا *همه‌ی* استخرهای این توکن روی
+   GeckoTerminal در همان جفت‌هایی هستند که measureLiquidity می‌سنجد؟
+   true فقط وقتی که مطمئن باشیم؛ در هر ابهامی null برمی‌گردد، هرگز false
+   ساختگی — چون false همین‌جا یعنی «رقم اندازه‌گیری‌شده را نادیده بگیر». */
+async function liqCoverage(token){
+  let j;
+  try{j=await gtJson(GT+"/networks/base/tokens/"+token.address.toLowerCase()+"/pools");}
+  catch{return null;}
+  if(!j||!Array.isArray(j.data))return null;
+  if(j.data.length===0)return null;
+  // صفحه پر است؛ فهرست ممکن است ناقص باشد، پس نمی‌تواند شاهدِ «همه‌ی استخرها» باشد.
+  if(j.data.length>=20)return null;
+  const usdc=tokenBySymbol("USDC"),weth=tokenBySymbol("WETH");
+  if(!usdc||!weth)return null;
+  const usdcAddr=usdc.address.toLowerCase(),wethAddr=weth.address.toLowerCase();
+  const our=token.address.toLowerCase();
+  let allMeasured=true;
+  for(const pool of j.data){
+    const dex=pool?.relationships?.dex?.data?.id;
+    const base=pool?.relationships?.base_token?.data?.id;
+    const quote=pool?.relationships?.quote_token?.data?.id;
+    if(typeof dex!=="string"||typeof base!=="string"||typeof quote!=="string")return null;
+    const strip=s=>s.replace(/^base_/,"").toLowerCase();
+    const b=strip(base),q=strip(quote);
+    let counterpart;
+    if(b===our)counterpart=q;
+    else if(q===our)counterpart=b;
+    else return null;
+    const mapped=GT_DEX_TO_DEX[dex];
+    const isKnownDex=DEXES.some(d=>d.id===mapped);
+    const isKnownPair=counterpart===usdcAddr||counterpart===wethAddr;
+    if(!(isKnownDex&&isKnownPair))allMeasured=false;
+  }
+  return allMeasured;
 }
 let _ethUsd=null;
 async function refPriceUsd(){
@@ -5418,8 +5496,10 @@ async function fetchSolMeta(mint){
 }
 /* برخلافِ gtJson، اینجا کش/تلاشِ دوباره نمی‌خواهیم: این صفحه دقیقاً همان
    ادعایی را می‌کند که Worker می‌سنجد — «الان» — و هر کش یا تلاشِ اضافه
-   همان لحظه را عقب می‌انداخت. */
-async function fetchSolVerdict(mint){
+   همان لحظه را عقب می‌انداخت. این یک تابع هم به سولانا خدمت می‌کند هم به
+   Base — id چه mint سولانا باشد چه آدرس قرارداد Base، همان /vd/<id> روی
+   Worker جواب می‌دهد. */
+async function fetchVdVerdict(mint){
   try{
     const r=await withTimeout(fetch(location.origin+"/vd/"+mint,
       {headers:{accept:"application/json"}}),9000);
@@ -5530,7 +5610,7 @@ async function openSolanaTokenPage(mint){
   renderRoundTrip($("tk-exitBox"),null);   // «داریم می‌سنجیم»، همان اسکلتِ Base
   ev("check:open");                        // همان شمارنده‌ی لینک بررسی
 
-  const [meta,verdict]=await Promise.all([fetchSolMeta(mint),fetchSolVerdict(mint)]);
+  const [meta,verdict]=await Promise.all([fetchSolMeta(mint),fetchVdVerdict(mint)]);
   $("tk-sym").textContent=(meta&&meta.symbol)||"Unknown token";
   $("tk-name").textContent=(meta&&meta.name)||"";
   const px=meta&&meta.price_usd!=null?Number(meta.price_usd):NaN;
