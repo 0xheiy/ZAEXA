@@ -1470,7 +1470,7 @@ footer .fine{max-width:78ch;margin:46px 0 0;font-size:11.5px;color:var(--tx3);li
 
       <details class="faqItem">
         <summary><span class="faqQ"></span>What is the Exit check?</summary>
-        <div class="faqA"><p>Before you buy, it buys the token and sells it straight back inside one simulated transaction, then shows what that round trip actually costs. A token that cannot be sold back shows up right there. It is the honeypot test most interfaces do not run.</p></div>
+        <div class="faqA"><p>Before you buy, it prices the buy and the sell straight back, and shows what that round trip costs. With a wallet connected that holds the balance and the approval, it goes further and runs both legs inside one simulated transaction against the live chain — and the result says which of the two you are looking at. A token that cannot be sold back shows up right there.</p></div>
       </details>
     </div>
   </section>
@@ -2613,10 +2613,30 @@ function renderRoundTrip(box,x){
   if(!x){
     box.innerHTML=`<div class="tripHead">
         <span class="sk" style="width:84px;height:23px"></span>
-        <span class="tripWord">Buying it and selling it back, inside one simulated transaction…</span></div>
+        <span class="tripWord">Checking whether this can be bought and sold straight back…</span></div>
       <div class="tripTrack"><span class="sk" style="display:block;width:100%;height:100%;border-radius:99px"></span></div>
       <div class="tripEnds"><span class="sk" style="width:92px;height:11px"></span>
         <span class="sk" style="width:118px;height:11px"></span></div>`;
+    return;
+  }
+  if(x.state==="serverSell"){
+    box.innerHTML=`<div class="tripHead">
+        <span class="tripPct" style="color:var(--pos)">Sellable</span>
+        <span class="tripBadge" style="color:var(--pos);background:var(--pglow)">Server check</span>
+      </div>
+      <div class="tripTrack"></div>
+      <div class="tripEnds"><span>Checked by our server</span><span>&nbsp;</span></div>
+      <div class="tripNote">This page could not quote a sell through the pools it knows. Our server check covers more pools — for example Uniswap v4 — and it priced a sell. That is a quote, not a simulation.</div>`;
+    return;
+  }
+  if(x.state==="serverNoSell"){
+    box.innerHTML=`<div class="tripHead">
+        <span class="tripPct" style="color:var(--neg)">No way out</span>
+        <span class="tripBadge" style="color:var(--neg);background:color-mix(in srgb,var(--neg) 14%,transparent)">Server check</span>
+      </div>
+      <div class="tripTrack"><div class="tripFill" style="width:100%;background:var(--neg);opacity:.35"></div></div>
+      <div class="tripEnds"><span>The buy may go through</span><span>The sell does not</span></div>
+      <div class="tripNote">This page could not quote a sell, and our server check found no way to sell it back either. That can be a token that blocks selling, or a pool whose liquidity was pulled.</div>`;
     return;
   }
   const paid=parsedAmountIn();
@@ -2681,6 +2701,9 @@ function renderRoundTrip(box,x){
 }
 
 function renderExit(x){
+  // نتیجه‌ی واقعی رسید — نوار دیگر منتظر نگهبانِ زمانی نیست. اسکلت (x=null)
+  // چیزی را نمی‌بندد؛ همچنان در انتظار می‌ماند.
+  if(x){tkExitSettled=tkExitSeq;clearTimeout(tkExitTimer);tkExitTimer=null;}
   const box=panel("exitBox");
   if(!box)return;
   if(tokenPage)return renderRoundTrip(box,x);
@@ -3899,6 +3922,37 @@ function paintBalances(){
 /* =====================================================================
    Quote pipeline
    ===================================================================== */
+/* =====================================================================
+   باگ ۱۳ — نوار رفت‌وبرگشتِ صفحه‌ی توکن هرگز از اسکلت خارج نمی‌شد
+   ---------------------------------------------------------------------
+   renderExit فقط زمانی صدا زده می‌شود که runQuote تا انتها برود. اما
+   runQuote چند خروجیِ زودهنگام دارد — بدون route، ورودی نامعتبر، همان
+   توکن دو طرف، جهتِ wrap، و catch — و هیچ‌کدام چیزی رسم نمی‌کنند. روی
+   صفحه‌ی توکن این یعنی اسکلت تا ابد می‌ماند. tkExitSeq/tkExitSettled/
+   tkExitTimer اینجا تضمین می‌کنند که نوار همیشه یک سرنوشت پیدا کند: یا
+   خودِ runQuote آن را می‌بندد، یا نگهبانِ زمانی بعد از ۱۸ ثانیه. */
+let tkExitSeq=0,tkExitSettled=-1,tkExitTimer=null;
+const REASON={
+  noroute:"No pool this page quotes has a route for this token, and the server check did not answer either.",
+  timeout:"The check did not come back in time.",
+  input:"There is nothing to price yet."
+};
+/* وقتی مسیرِ زنده (runExitCheck → renderExit) هرگز به مقصد نمی‌رسد، این
+   تابع نوار را می‌بندد — یا با تأییدِ سرور (که فقط یک کوت است، از پوششِ
+   وسیع‌ترِ /vd، نه یک شبیه‌سازی) یا با «نامعلوم». عمداً rememberExit یا
+   rememberExit2 را صدا نمی‌زند و چیزی در exitCache نمی‌نویسد: نتیجه‌ی
+   سرور یک شبیه‌سازیِ زنده نیست و نباید به reconcileExit در پنل ایمنی
+   برسد — وگرنه یک کوتِ صرفاً قیمتی جای یک اثباتِ زنجیره‌ای را می‌گرفت. */
+async function tokenExitFallback(seq,why){
+  if(!tokenPage||seq!==tkExitSeq||tkExitSettled===seq||!tokenOut||!tokenOut.address)return;
+  const sv=await fetchVdVerdict(tokenOut.address);
+  if(seq!==tkExitSeq||tkExitSettled===seq)return;
+  tkExitSettled=tkExitSeq;clearTimeout(tkExitTimer);tkExitTimer=null;
+  if(sv.v==="sell")renderRoundTrip($("tk-exitBox"),{state:"serverSell"});
+  else if(sv.v==="nosell")renderRoundTrip($("tk-exitBox"),{state:"serverNoSell"});
+  else renderRoundTrip($("tk-exitBox"),{state:"unknown",reason:REASON[why]||REASON.timeout});
+}
+
 let qTimer=null;
 function scheduleQuote(){
   clearTimeout(qTimer);currentPlan=null;
@@ -3906,6 +3960,8 @@ function scheduleQuote(){
   $("routeWrap").style.display="none";
   ["kRate","kImpact","kMin","kVs"].forEach(k=>$(k).textContent="—");
   exitSeq++;renderExit(null);
+  tkExitSeq++;clearTimeout(tkExitTimer);tkExitTimer=null;
+  if(tokenPage)tkExitTimer=setTimeout(()=>tokenExitFallback(tkExitSeq,"timeout"),18000);
   qTimer=setTimeout(runQuote,420);refreshButton();
 }
 function parsedAmountIn(){
@@ -3974,9 +4030,11 @@ async function runQuote(){
   // در حالت معکوس، اول مبلغ ورودی را پیدا می‌کنیم
   if(mode==="targetOut"){
     const target=parsedTargetOut();
-    if(!tokenIn||!tokenOut||target===null){setNotice("");renderVenues([],null);refreshButton();return;}
+    if(!tokenIn||!tokenOut||target===null){
+      setNotice("");renderVenues([],null);refreshButton();tokenExitFallback(tkExitSeq,"input");return;}
     if(routable(tokenIn).address.toLowerCase()===routable(tokenOut).address.toLowerCase()){
-      setNotice(note("warn","Pick two different tokens."));refreshButton();return;}
+      setNotice(note("warn","Pick two different tokens."));refreshButton();
+      tokenExitFallback(tkExitSeq,"input");return;}
     $("venueMeta").textContent="solving…";
     const st=newStats();
     try{
@@ -3984,7 +4042,7 @@ async function runQuote(){
       if(seq!==quoteSeq||r===null)return;
       if(r.fail){
         setNotice(noRouteNote(st,`Nothing on Base can deliver ${esc(tokenOut.symbol)} from ${esc(tokenIn.symbol)}.`));
-        currentPlan=null;refreshButton();ev("quote:none");return;
+        currentPlan=null;refreshButton();ev("quote:none");tokenExitFallback(tkExitSeq,"noroute");return;
       }
       $("amtIn").value=Number(E.formatUnits(r.amountIn,tokenIn.decimals))
         .toLocaleString("en-US",{maximumFractionDigits:tokenIn.decimals,useGrouping:false});
@@ -3999,13 +4057,14 @@ async function runQuote(){
       renderExit(rememberExit2(await runExitCheck(plan,r.amountIn)));
     }catch(err){
       if(seq!==quoteSeq)return;
-      showError("Quote failed",err);currentPlan=null;refreshButton();
+      showError("Quote failed",err);currentPlan=null;refreshButton();tokenExitFallback(tkExitSeq,"noroute");
     }
     return;
   }
 
   const amountIn=parsedAmountIn();
-  if(!tokenIn||!tokenOut||amountIn===null){setNotice("");renderVenues([],null);refreshButton();return;}
+  if(!tokenIn||!tokenOut||amountIn===null){
+    setNotice("");renderVenues([],null);refreshButton();tokenExitFallback(tkExitSeq,"input");return;}
   const wd=wrapDirection();
   if(wd){
     setNotice(note("ok",wd==="wrap"
@@ -4014,10 +4073,11 @@ async function runQuote(){
     $("amtOut").value=$("amtIn").value;          // نسبت همیشه ۱:۱ است
     ["kRate","kImpact","kMin","kVs"].forEach(k=>$(k).textContent="—");
     $("kRate").textContent="1 : 1";
-    renderVenues([],null);refreshButton();return;
+    renderVenues([],null);refreshButton();tokenExitFallback(tkExitSeq,"input");return;
   }
   if(routable(tokenIn).address.toLowerCase()===routable(tokenOut).address.toLowerCase()){
-    setNotice(note("warn","Pick two different tokens."));refreshButton();return;}
+    setNotice(note("warn","Pick two different tokens."));refreshButton();
+    tokenExitFallback(tkExitSeq,"input");return;}
   $("venueMeta").textContent="quoting…";
   const stats=newStats();
   try{
@@ -4026,7 +4086,7 @@ async function runQuote(){
     renderVenues(direct,null);
     if(!routes.length){
       setNotice(noRouteNote(stats,`No direct pool, and no path through ${CHAIN.wrapped}/${CHAIN.reference} has liquidity for this pair.`));
-      currentPlan=null;refreshButton();ev("quote:none");return;
+      currentPlan=null;refreshButton();ev("quote:none");tokenExitFallback(tkExitSeq,"noroute");return;
     }
     const plan=await findBestSplit(routes,amountIn,stats);
     if(seq!==quoteSeq)return;
@@ -4041,7 +4101,7 @@ async function runQuote(){
     renderExit(rememberExit2(await runExitCheck(plan,amountIn)));
   }catch(err){
     if(seq!==quoteSeq)return;
-    showError("Quote failed",err);currentPlan=null;refreshButton();
+    showError("Quote failed",err);currentPlan=null;refreshButton();tokenExitFallback(tkExitSeq,"noroute");
   }
 }
 let lastDirect=[];

@@ -991,6 +991,38 @@ def check_error_handler():
     print("[err] handler is above the main script; banner is outside #notices; "
           "IMG excluded; 3 error events may carry a hex code, everything else is still refused")
 
+def check_exit13_static():
+    """باگ ۱۳ — سه حقیقتِ ساختاری که مرورگر نمی‌سنجد.
+
+    ۱) جمله‌ی قدیمیِ اسکلت («inside one simulated transaction…») باید کاملاً
+       رفته باشد. ۲) پاسخِ FAQ باید ادعای تازه را بگوید. ۳) خودِ
+       tokenExitFallback هرگز نباید rememberExit/rememberExit2 را صدا بزند
+       یا در exitCache بنویسد — نتیجه‌ی سرور شبیه‌سازیِ زنده نیست."""
+    src = open(os.path.join(HERE, "..", "index.html"), encoding="utf-8").read()
+
+    assert "inside one simulated transaction…" not in src, (
+        "the old skeleton sentence ('...inside one simulated transaction…') is still in "
+        "index.html — it makes a false claim on the quote-only path")
+
+    faq = re.search(
+        r'What is the Exit check\?.*?<div class="faqA"><p>(.*?)</p></div>', src, re.S)
+    assert faq, "could not find the 'What is the Exit check?' FAQ answer"
+    assert "With a wallet connected" in faq.group(1), (
+        "the FAQ answer no longer explains that the live simulation needs a connected "
+        "wallet with balance and approval: %r" % faq.group(1)[:200])
+
+    fn = re.search(r'async function tokenExitFallback\(seq,why\)\{.*?\n\}', src, re.S)
+    assert fn, "tokenExitFallback is gone or reshaped — re-check this guard"
+    body = fn.group(0)
+    assert "rememberExit" not in body, (
+        "tokenExitFallback calls rememberExit/rememberExit2 — a server verdict is a quote, "
+        "not a live simulation, and must never reach the risk panel's reconcileExit")
+    assert "exitCache" not in body, (
+        "tokenExitFallback writes to exitCache directly — same problem as above, by a "
+        "different door")
+    print("[exit 13 static] old skeleton sentence gone; FAQ mentions a connected wallet; "
+          "tokenExitFallback touches neither rememberExit nor exitCache")
+
 RETIRED_EXECUTORS = [
     "0x6443C06bb117223DC818df54A09A642696D0489c",
     "0x9fc4608fA104b032B902650A4D12E0CA51a2F684",
@@ -1661,6 +1693,7 @@ check_asset_cache_headers()
 check_security_headers()
 check_event_allowlists()
 check_error_handler()
+check_exit13_static()
 check_og_tags()
 check_brand_palette()
 check_light_grad_text_contrast()
@@ -3226,6 +3259,220 @@ async def main():
         print("[trip] picker badge on an implausible gain: %r" % badge_probe)
         assert "✓" not in badge_probe and "-3" not in badge_probe and "unclear" in badge_probe, \
             "picker badge: an implausible 'gain' must not wear a checkmark or a printed negative"
+
+        # ------------------------------------------------------------
+        # باگ ۱۳: نوارِ رفت‌وبرگشتِ صفحه‌ی توکن هرگز از اسکلت خارج نمی‌شد.
+        # هر خروجیِ زودهنگامِ runQuote (بدون route، ورودیِ نامعتبر، همان
+        # توکن دو طرف، جهتِ wrap، catch) و نگهبانِ زمانی، باید نوار را
+        # ببندند — یا با تأییدِ سرور (/vd) یا با «نامعلوم». تأییدِ سرور یک
+        # کوت است نه شبیه‌سازی، پس هرگز نباید exitCache را لمس کند.
+        # ------------------------------------------------------------
+        EXIT13_SETTLE_PROBE = """async (verdict) => {
+            const saved = {
+                tokenPage, tokenIn, tokenOut, findRoutes, fetchVdVerdict,
+                amtIn: document.getElementById("amtIn").value,
+                boxHTML: document.getElementById("tk-exitBox").innerHTML
+            };
+            const addr = "0x" + "13".repeat(20);
+            const key = addr.toLowerCase();
+            const cacheKeysBefore = Object.keys(exitCache).length;
+            tokenPage = true;
+            tokenIn = BASE_TOKENS.find(t => t.symbol === "USDC");
+            tokenOut = {address: addr, symbol: "T13", decimals: 18, native: false, name: "T13"};
+            document.getElementById("amtIn").value = "100";
+            findRoutes = async () => ({routes: [], direct: []});
+            fetchVdVerdict = async () => verdict;
+            // شبیه‌سازیِ یک چرخه‌ی تازه، بدون گذاشتنِ یک qTimer زنده که بعداً
+            // با مقادیرِ بازگردانده‌شده شلیک کند.
+            tkExitSeq++;
+            await runQuote();
+            // tokenExitFallback عمداً منتظرش نمی‌مانند (fire-and-forget)؛ یک
+            // نوبت به حلقه‌ی رویداد می‌دهیم تا awaitِ داخلی‌اش تمام شود.
+            await new Promise(r => setTimeout(r, 30));
+            const box = document.getElementById("tk-exitBox");
+            const badgeEl = box.querySelector(".tripBadge");
+            const result = {
+                skCount: box.querySelectorAll(".sk").length,
+                text: box.innerText,
+                badge: badgeEl ? badgeEl.innerText : null,
+                cacheGrew: Object.keys(exitCache).length !== cacheKeysBefore,
+                cacheHasKey: key in exitCache
+            };
+            findRoutes = saved.findRoutes; fetchVdVerdict = saved.fetchVdVerdict;
+            tokenPage = saved.tokenPage; tokenIn = saved.tokenIn; tokenOut = saved.tokenOut;
+            document.getElementById("amtIn").value = saved.amtIn;
+            box.innerHTML = saved.boxHTML;
+            clearTimeout(tkExitTimer); tkExitTimer = null;
+            delete exitCache[key];
+            return result;
+        }"""
+
+        r13_noroute = await pg.evaluate(EXIT13_SETTLE_PROBE, {"v": None, "why": None})
+        print("[exit 13] no-route, server verdict unknown -> sk=%d badge=%r"
+              % (r13_noroute["skCount"], r13_noroute["badge"]))
+        assert r13_noroute["skCount"] == 0, \
+            "the round-trip bar is still a loading skeleton after the quote settled with no route"
+        assert "did not answer either" in r13_noroute["text"], \
+            "the no-route fallback must show the noroute reason text"
+        assert not r13_noroute["cacheGrew"] and not r13_noroute["cacheHasKey"], \
+            "a server verdict must never write to exitCache"
+
+        r13_sell = await pg.evaluate(EXIT13_SETTLE_PROBE, {"v": "sell", "why": None})
+        print("[exit 13] no-route, server verdict sell -> sk=%d badge=%r"
+              % (r13_sell["skCount"], r13_sell["badge"]))
+        assert r13_sell["skCount"] == 0, \
+            "the round-trip bar is still a loading skeleton after a rescuing server verdict"
+        assert "Sellable" in r13_sell["text"] and r13_sell["badge"] == "Server check", \
+            "a server-confirmed sell must render the Sellable/Server check state: %r" % r13_sell["text"]
+        assert "not a simulation" in r13_sell["text"], \
+            "the server-sell note must be honest that it is a quote, not a simulation"
+        assert not r13_sell["cacheGrew"] and not r13_sell["cacheHasKey"], \
+            "a server verdict must never write to exitCache, even a rescuing one"
+
+        r13_nosell = await pg.evaluate(EXIT13_SETTLE_PROBE, {"v": "nosell", "why": None})
+        print("[exit 13] no-route, server verdict nosell -> sk=%d badge=%r"
+              % (r13_nosell["skCount"], r13_nosell["badge"]))
+        assert r13_nosell["skCount"] == 0, \
+            "the round-trip bar is still a loading skeleton after a nosell server verdict"
+        assert "No way out" in r13_nosell["text"] and r13_nosell["badge"] == "Server check", \
+            "a server-confirmed no-sell must render the No way out/Server check state: %r" % r13_nosell["text"]
+        assert not r13_nosell["cacheGrew"] and not r13_nosell["cacheHasKey"], \
+            "a server verdict must never write to exitCache"
+
+        # نگهبانِ زمانی: وقتی هیچ‌کدام از مسیرهای بالا نرسند (route هرگز جواب
+        # نمی‌دهد)، یک تایمر باید همین حالا برپا باشد — فقط روی صفحه‌ی توکن.
+        r13_watchdog = await pg.evaluate("""async () => {
+            const saved = {
+                tokenPage, tokenIn, tokenOut, findRoutes, fetchVdVerdict, qTimer,
+                amtIn: document.getElementById("amtIn").value,
+                boxHTML: document.getElementById("tk-exitBox").innerHTML
+            };
+            const addr = "0x" + "14".repeat(20);
+            tokenIn = BASE_TOKENS.find(t => t.symbol === "USDC");
+            tokenOut = {address: addr, symbol: "T14", decimals: 18, native: false, name: "T14"};
+            document.getElementById("amtIn").value = "100";
+            findRoutes = () => new Promise(() => {});    // هرگز حل نمی‌شود
+            fetchVdVerdict = async () => ({v: "sell", why: null});
+
+            tokenPage = true;
+            scheduleQuote();
+            const timerOnToken = tkExitTimer !== null;
+
+            tokenPage = false;
+            scheduleQuote();
+            const timerOnSwap = tkExitTimer === null;
+
+            // این قسمت جدا است: می‌سنجد که چه‌وقتی سرور هم چیزی نمی‌گوید
+            // (v:null)، خودِ متنِ دلیلِ «timeout» رسم می‌شود — نه اینکه
+            // تأییدِ «sell» بالاتر (که فقط برای برپا بودنِ تایمر لازم بود)
+            // این رسم را رنگ بزند.
+            fetchVdVerdict = async () => ({v: null, why: null});
+            tokenPage = true;
+            await tokenExitFallback(tkExitSeq, "timeout");
+            const box = document.getElementById("tk-exitBox");
+            const text = box.innerText;
+            const badgeEl = box.querySelector(".tripBadge");
+
+            clearTimeout(qTimer); clearTimeout(tkExitTimer);
+            findRoutes = saved.findRoutes; fetchVdVerdict = saved.fetchVdVerdict; qTimer = saved.qTimer;
+            tokenPage = saved.tokenPage; tokenIn = saved.tokenIn; tokenOut = saved.tokenOut;
+            document.getElementById("amtIn").value = saved.amtIn;
+            box.innerHTML = saved.boxHTML;
+            tkExitTimer = null;
+
+            return {timerOnToken, timerOnSwap, text, badge: badgeEl ? badgeEl.innerText : null};
+        }""")
+        print("[exit 13] watchdog: set on token page=%s, absent on swap page=%s, timeout text=%r"
+              % (r13_watchdog["timerOnToken"], r13_watchdog["timerOnSwap"], r13_watchdog["text"][:70]))
+        assert r13_watchdog["timerOnToken"], \
+            "scheduleQuote must arm the 18s watchdog on the token page"
+        assert r13_watchdog["timerOnSwap"], \
+            "scheduleQuote must NOT arm a watchdog on the swap page — #exitBox has no such bar"
+        assert "did not come back in time" in r13_watchdog["text"], \
+            "a direct tokenExitFallback(...,'timeout') call must settle the bar with the timeout reason"
+        assert r13_watchdog["badge"] == "Unknown", \
+            "a timed-out fallback with no server verdict renders the plain Unknown state, not a Server-check badge: %r" \
+            % r13_watchdog["badge"]
+
+        # کهنگی: یک seq قدیمی هرگز نباید چیزی رسم کند.
+        r13_stale = await pg.evaluate("""async () => {
+            const saved = {
+                tokenPage, tokenOut,
+                boxHTML: document.getElementById("tk-exitBox").innerHTML
+            };
+            tokenPage = true;
+            tokenOut = {address: "0x" + "15".repeat(20), symbol: "T15", decimals: 18, native: false, name: "T15"};
+            const box = document.getElementById("tk-exitBox");
+            renderRoundTrip(box, {state: "unknown", reason: "BASELINE_MARKER_13"});
+            const before = box.innerHTML;
+            await tokenExitFallback(tkExitSeq - 1, "noroute");
+            const after = box.innerHTML;
+            tokenPage = saved.tokenPage; tokenOut = saved.tokenOut;
+            box.innerHTML = saved.boxHTML;
+            return {before, after};
+        }""")
+        print("[exit 13] a stale sequence does not paint: unchanged=%s"
+              % (r13_stale["before"] == r13_stale["after"]))
+        assert r13_stale["before"] == r13_stale["after"], \
+            "tokenExitFallback(seq-1, ...) painted over the bar — the staleness guard did not hold"
+
+        # شاهدِ مثبت: یک نتیجه‌ی واقعی، دقیقاً مثل امروز رسم می‌شود و
+        # نگهبانِ زمانی را هم می‌بندد.
+        r13_control = await pg.evaluate("""() => {
+            const saved = {
+                tokenPage, tokenIn, tokenOut, findRoutes, qTimer,
+                amtIn: document.getElementById("amtIn").value,
+                swapHTML: document.getElementById("exitBox").innerHTML,
+                tokHTML: document.getElementById("tk-exitBox").innerHTML
+            };
+            tokenIn = BASE_TOKENS.find(t => t.symbol === "USDC");
+            const x = {state: "verified", lossPct: 0.12, recovered: null, reason: null};
+
+            tokenPage = false;
+            renderExit(x);
+            const swapBadge = document.querySelector("#exitBox .exitBadge").innerText;
+            const swapTitle = document.querySelector("#exitBox .exitTtl").innerText;
+
+            tokenPage = true;
+            tokenOut = BASE_TOKENS.find(t => t.symbol === "cbBTC" && !t.native);
+            document.getElementById("amtIn").value = "100";
+            findRoutes = () => new Promise(() => {});
+            scheduleQuote();
+            const timerBefore = tkExitTimer !== null;
+            renderExit(x);
+            const timerAfter = tkExitTimer === null;
+            const tokBadge = document.querySelector("#tk-exitBox .tripBadge").innerText;
+            const tokPct = document.querySelector("#tk-exitBox .tripPct").innerText;
+
+            clearTimeout(qTimer); clearTimeout(tkExitTimer);
+            findRoutes = saved.findRoutes; qTimer = saved.qTimer;
+            tokenPage = saved.tokenPage; tokenIn = saved.tokenIn; tokenOut = saved.tokenOut;
+            document.getElementById("amtIn").value = saved.amtIn;
+            document.getElementById("exitBox").innerHTML = saved.swapHTML;
+            document.getElementById("tk-exitBox").innerHTML = saved.tokHTML;
+            tkExitTimer = null;
+
+            return {swapBadge, swapTitle, timerBefore, timerAfter, tokBadge, tokPct};
+        }""")
+        print("[exit 13] positive control: swap=%r/%r token=%r/%r watchdog cleared=%s"
+              % (r13_control["swapTitle"], r13_control["swapBadge"],
+                 r13_control["tokPct"], r13_control["tokBadge"], r13_control["timerAfter"]))
+        # ⚠️ .exitBadge/.tripBadge هر دو text-transform:uppercase دارند، و
+        # نودِ صفحه‌ی توکن اینجا در نمای مخفی رندر می‌شود (نه در view فعال)،
+        # پس هم بزرگ/کوچکیِ حروف و هم فاصله‌های سفیدِ بین خطوطِ template
+        # literal را باید نادیده گرفت — دقیقاً کاری که کاوشگرهای دیگرِ همین
+        # فایل با exitBadge می‌کنند (ن.ک. خط ۲۴۵۰).
+        swap_badge_n = r13_control["swapBadge"].strip().lower()
+        tok_badge_n = " ".join(r13_control["tokBadge"].split()).lower()
+        assert swap_badge_n == "verified by simulation" and "0.12%" in r13_control["swapTitle"], \
+            "a verified quote must still render exactly as before on the swap card: %r/%r" \
+            % (r13_control["swapBadge"], r13_control["swapTitle"])
+        assert tok_badge_n == "ran on chain" and r13_control["tokPct"] == "0.12%", \
+            "a verified quote must still render exactly as before on the token page bar: %r/%r" \
+            % (r13_control["tokBadge"], r13_control["tokPct"])
+        assert r13_control["timerBefore"], "scheduleQuote must have armed the watchdog before renderExit ran"
+        assert r13_control["timerAfter"], \
+            "a real renderExit(...) result must settle (clear) the watchdog timer"
 
         # ۵) یافته‌ی پنل ایمنی باید با تست فروش زنده آشتی شود (رگرسیون باگ ۹)
         recon_probe = await pg.evaluate("""() => {
