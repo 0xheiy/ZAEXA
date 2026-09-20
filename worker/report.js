@@ -127,6 +127,90 @@ export function causeForRow(verdict, cause) {
   return typeof cause === "string" && REPORT_CAUSES.includes(cause) ? cause : undefined;
 }
 
+/* واژه‌نامه‌ی بسته‌ی follow — دقیقاً هم‌رده‌ی REPORT_CAUSES: امروز فقط دو
+   عضو دارد، ولی فهرست است نه یک رشته‌ی تکی. */
+export const REPORT_FOLLOWS = Object.freeze(["pool-empty", "pool-there"]);
+
+/* هم‌انضباطِ causeForRow: یک follow ساختگی/دست‌ساز هرگز نباید در انبار
+   بنشیند — فقط وقتی verdict واقعاً "sell" است و خودِ رشته عضوِ همین
+   واژه‌نامه‌ی بسته است، وگرنه undefined. */
+export function followForRow(verdict, follow) {
+  if (verdict !== "sell") return undefined;
+  return typeof follow === "string" && REPORT_FOLLOWS.includes(follow) ? follow : undefined;
+}
+
+/* یک ردیفِ ذخیره‌شده معمولاً هرگز بعد از نوشته‌شدن عوض نمی‌شود (mergeReportDoc
+   بالاتر اول‌دیده‌شده‌می‌برد است و هرگز بازنویسی نمی‌کند) — این تابع تنها
+   استثنای افزایشی/additive-only همان قاعده است، و **تنها جایی که یک ردیفِ
+   ذخیره‌شده بعد از نوشته‌شدن ویرایش می‌شود**، همین‌جاست، هیچ‌کجای دیگر.
+   خالص است، هرگز پرتاب نمی‌کند، همیشه یک سندِ تازه برمی‌گرداند (هرگز ورودی
+   را جهش نمی‌دهد). برای هر {address, follow} در updates: اگر ردیفی با
+   همان آدرس پیدا شود و v==="sell" باشد، هنوز کلیدِ follow نداشته باشد، و
+   followForRow آن را معتبر بداند، یک کپی از همان ردیف با دقیقاً دو کلیدِ
+   افزوده (follow و followAt) جایگزینِ ردیفِ قبلی می‌شود.
+   🔴 هیچ کلیدِ دیگری از هیچ ردیفی عوض نمی‌شود، هیچ ردیفی افزوده/حذف/
+   جابه‌جا نمی‌شود، و date/chains/checked/generatedAt همان می‌مانند که
+   بودند. atIso باید یک رشته‌ی ISOِ خواندنی باشد؛ وگرنه کل فراخوانی سند را
+   دست‌نخورده برمی‌گرداند. */
+export function applyFollowUps(doc, updates, atIso) {
+  try {
+    if (typeof atIso !== "string" || Number.isNaN(Date.parse(atIso))) return doc;
+    if (!doc || typeof doc !== "object" || !Array.isArray(doc.rows)) return doc;
+    if (!Array.isArray(updates)) return doc;
+
+    // نقشه‌ی آدرس → follow پیشنهادی — فقط یک بار به‌ازای هر آدرس (اولین‌بار می‌برد).
+    const followByAddr = new Map();
+    for (const u of updates) {
+      if (u && typeof u.address === "string" && typeof u.follow === "string" && !followByAddr.has(u.address)) {
+        followByAddr.set(u.address, u.follow);
+      }
+    }
+    if (followByAddr.size === 0) return doc;
+
+    const rows = doc.rows.map((row) => {
+      if (!row || typeof row.address !== "string" || !followByAddr.has(row.address)) return row;
+      if (row.v !== "sell") return row; // نوسل/نامعلوم هرگز follow نمی‌گیرد
+      if (Object.prototype.hasOwnProperty.call(row, "follow")) return row; // یک‌بار فالو، همیشه فالو
+      const follow = followForRow(row.v, followByAddr.get(row.address));
+      if (follow === undefined) return row; // رشته‌ی نامعتبر → بی‌اثر
+      return { ...row, follow, followAt: atIso };
+    });
+
+    return { ...doc, rows };
+  } catch (e) {
+    return doc; // هرگز پرتاب نمی‌کند
+  }
+}
+
+/* آدرس‌های ردیف‌هایی که کاندیدِ فالوآپِ ساعتی‌اند: chain==="base"،
+   v==="sell"، هنوز follow ندارند، و checkedAt‌شان بینِ ۵۵ تا ۱۸۰ دقیقه
+   پیش از nowMs است (هر دو مرز شاملند). قدیمی‌ترین اول، حداکثر cap تا —
+   یک هزینه‌ی محدود در هر گذر، هرگز جاروبِ کلِ روز. */
+export function pickFollowUpTargets(doc, nowMs, cap = 12) {
+  try {
+    if (!doc || typeof doc !== "object" || !Array.isArray(doc.rows)) return [];
+    if (!Number.isFinite(nowMs)) return [];
+    const capNum = Number.isInteger(cap) && cap > 0 ? cap : 12;
+
+    const candidates = [];
+    for (const row of doc.rows) {
+      if (!row || typeof row !== "object") continue;
+      if (row.chain !== "base" || row.v !== "sell") continue;
+      if (Object.prototype.hasOwnProperty.call(row, "follow")) continue;
+      if (typeof row.checkedAt !== "string") continue;
+      const checkedMs = Date.parse(row.checkedAt);
+      if (Number.isNaN(checkedMs)) continue; // checkedAt ناخواندنی → کاندید نیست
+      const ageMin = (nowMs - checkedMs) / 60000;
+      if (ageMin < 55 || ageMin > 180) continue;
+      candidates.push({ address: row.address, checkedMs });
+    }
+    candidates.sort((a, b) => a.checkedMs - b.checkedMs); // قدیمی‌ترین اول
+    return candidates.slice(0, capNum).map((c) => c.address);
+  } catch (e) {
+    return [];
+  }
+}
+
 /* یک ردیفِ گزارش، یا null. شکل برای v۱ قفل است — کلیدها به همین ترتیب.
    🔴 انبار همیشه عددِ خام نگه می‌دارد، هرگز رشته‌ی نمایشی. ogBig() در
    worker/og.js چیزی مثل "$1.2M" برمی‌گرداند — آن یک رندر است، نه داده؛ چیزی
@@ -268,7 +352,7 @@ function tokenCap(maxTokens) {
 
 /* گذرِ گزارش‌گیریِ ساعتی. همه‌چیز تزریق می‌شود؛ خودِ این تابع نه I/O دارد نه
    fetch مستقیم. */
-export async function runReportPass({ kv, fetchPools, metaOf, verdictOf, now, sleep, maxTokens }) {
+export async function runReportPass({ kv, fetchPools, metaOf, verdictOf, now, sleep, maxTokens, poolEmptyOf }) {
   try {
     // 🔴 بدون انباری برای نوشتن، هیچ تماسِ بالادستی مجاز نیست — قبل از هر
     // چیز دیگری، حتی قبل از fetchPools.
@@ -371,7 +455,47 @@ export async function runReportPass({ kv, fetchPools, metaOf, verdictOf, now, sl
     await safeKvPutJson(kv, reportKey(dateStr), newDoc);
     await safeKvPutJson(kv, PAIRS_KEY_BASE, newPairs);
 
-    return { checked, added: builtRows.length };
+    /* فالوآپِ «یک ساعت بعد»: سندِ همین گذر که تازه نوشته شد، نه بایگانیِ
+       روزهای پیش — پس ردیفِ تازه‌نوشته‌ی همین گذر هم می‌تواند خودش کاندید
+       باشد (اگر checkedAt‌اش به‌اندازه‌ی کافی قدیمی باشد، که در یک گذرِ
+       تک نیست، ولی قاعده یکی است). 🔴 این گام هرگز نباید خودِ گذر را
+       بشکند: بدونِ poolEmptyOf کلاً رد می‌شود، و هر شکستی داخلش فقط یعنی
+       followed:0 — سندی که همین بالا نوشته شد دست‌نخورده می‌ماند. */
+    let followed = 0;
+    if (typeof poolEmptyOf === "function") {
+      try {
+        const targets = pickFollowUpTargets(newDoc, nowMs, 12);
+        const updates = [];
+        for (const address of targets) {
+          // هر آدرس تویِ try/catچِ خودش — یک پرتاب یعنی این یکی آدرس رد
+          // می‌شود، هرگز یک حدس.
+          let empty;
+          try {
+            empty = await poolEmptyOf(address);
+          } catch (e) {
+            empty = null;
+          }
+          if (empty === true) updates.push({ address, follow: "pool-empty" });
+          else if (empty === false) updates.push({ address, follow: "pool-there" });
+          // null/undefined/هرچیزِ دیگر → اصلاً آپدیتی برای این آدرس نیست
+        }
+        if (updates.length > 0) {
+          const followedDoc = applyFollowUps(newDoc, updates, generatedAt);
+          await safeKvPutJson(kv, reportKey(dateStr), followedDoc);
+          // شمارشِ واقعی: فقط ردیف‌هایی که واقعاً follow گرفتند، نه صرفاً
+          // طولِ updates (که در تئوری می‌تواند بیشتر از ردیف‌های واقعاً
+          // تغییریافته باشد).
+          for (const u of updates) {
+            const row = followedDoc.rows.find((r) => r && r.address === u.address);
+            if (row && row.follow === u.follow) followed++;
+          }
+        }
+      } catch (e) {
+        followed = 0;
+      }
+    }
+
+    return { checked, added: builtRows.length, followed };
   } catch (e) {
     return { checked: 0, added: 0 }; // این تابع هرگز نباید پرتاب کند
   }
@@ -444,6 +568,15 @@ export function reportText(doc) {
     lines.push(flagged + " had no sell route quoted.");
     lines.push(quoted + " had a sell route quoted.");
     lines.push(unchecked + " could not be checked.");
+
+    // پیگیریِ یک‌ساعته: فقط وقتی حداقل یک ردیفِ sell در همین مجموعه‌ی
+    // فیلترشده follow="pool-empty" دارد، درست بعدِ خطِ «could not be
+    // checked» — با شمارشِ صفر، این خط اصلاً اضافه نمی‌شود و متن بایت‌به‌بایت
+    // همان چیزی می‌ماند که پیش از این تغییر بود.
+    const followEmptyCount = rows.filter((r) => r.v === "sell" && r.follow === "pool-empty").length;
+    if (followEmptyCount > 0) {
+      lines.push(followEmptyCount + " of the quoted tokens had an empty pool an hour later.");
+    }
 
     // خطِ خالی همیشه — وگرنه وقتی هیچ توکنی پرچم نخورده، پانویس به شمارش‌ها می‌چسبد.
     lines.push("");

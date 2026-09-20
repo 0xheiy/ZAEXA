@@ -19,6 +19,7 @@ import {
   utcDateOf, reportKey, emptyReportDoc, runReportPass,
   reportText, REPORT_TEXT_FIRST_DATE,
   causeForRow, REPORT_CAUSES,
+  followForRow, REPORT_FOLLOWS, applyFollowUps, pickFollowUpTargets,
 } from "./report.js";
 import * as v4 from "./v4index.js";
 import {
@@ -6276,6 +6277,365 @@ console.log("[report cause] causeForRow enforces the closed REPORT_CAUSES vocabu
   "(undefined, never a stored null) so today's documents stay comparable; and reportText appends " +
   "\" · pool is empty\" only to a surviving empty-pool row, leaving every causeless row's line " +
   "byte-for-byte unchanged");
+
+/* ---- ۲۷د. applyFollowUps — یک فالوآپِ افزایشی روی یک ردیفِ sell ----
+   دقیقاً همان چیزی که queue item 17 خواسته: پیگیریِ یک‌ساعته‌ی هر ردیفِ
+   "sell"، بدونِ لمسِ هیچ کلیدِ دیگری و بدونِ جهش‌دادنِ سندِ ورودی. */
+{
+  ok(JSON.stringify(REPORT_FOLLOWS) === JSON.stringify(["pool-empty", "pool-there"]) &&
+     Object.isFrozen(REPORT_FOLLOWS),
+     "REPORT_FOLLOWS must be the frozen two-member closed vocabulary, got " + JSON.stringify(REPORT_FOLLOWS));
+  ok(followForRow("sell", "pool-empty") === "pool-empty" && followForRow("sell", "pool-there") === "pool-there",
+     "followForRow must let both REPORT_FOLLOWS members survive on a sell row");
+  ok(followForRow("nosell", "pool-empty") === undefined,
+     "followForRow must drop \"pool-empty\" on a nosell row");
+  ok(followForRow(null, "pool-empty") === undefined,
+     "followForRow must drop \"pool-empty\" on a null-verdict row");
+  ok(followForRow("sell", "made-up") === undefined,
+     "followForRow must drop any string not in REPORT_FOLLOWS, even on a sell row");
+
+  function mkAddr(n) { return "0x" + n.toString(16).padStart(40, "0"); }
+  const T1 = "2026-09-20T10:00:00.000Z";
+  function followRow(addr, v, extra) {
+    return Object.assign({
+      chain: "base", address: addr, symbol: "S", name: "N", v, checkKind: "sell-quote",
+      checkedAt: T1, poolCreatedAt: null, priceUsd: 1, reserveUsd: 2, vol24hUsd: 3, fdvUsd: 4,
+      dex: "uniswap-v4-base", why: null,
+    }, extra);
+  }
+  const rowA = followRow(mkAddr(1), "sell");
+  const rowB = followRow(mkAddr(2), "sell");
+  const rowC = followRow(mkAddr(3), "nosell", { cause: "empty-pool" });
+  const origDoc = { date: "2026-09-20", generatedAt: T1, chains: ["base"], checked: 3, rows: [rowA, rowB, rowC] };
+  const origSnapshot = JSON.stringify(origDoc);
+
+  const atIso = "2026-09-20T11:00:00.000Z";
+  const updated = applyFollowUps(origDoc, [{ address: mkAddr(1), follow: "pool-empty" }], atIso);
+
+  ok(updated.rows[0].follow === "pool-empty" && updated.rows[0].followAt === atIso,
+     "applyFollowUps must add follow+followAt to the matching sell row, got " + JSON.stringify(updated.rows[0]));
+  const { follow: f0, followAt: fa0, ...restRow0 } = updated.rows[0];
+  ok(JSON.stringify(restRow0) === JSON.stringify(rowA),
+     "every other key of the marked row must stay byte-for-byte identical, got " + JSON.stringify(restRow0));
+  ok(JSON.stringify(updated.rows[1]) === JSON.stringify(rowB) &&
+     JSON.stringify(updated.rows[2]) === JSON.stringify(rowC),
+     "every untouched row must stay byte-for-byte identical, got " +
+     JSON.stringify([updated.rows[1], updated.rows[2]]));
+  ok(updated.rows.map((r) => r.address).join(",") === [rowA, rowB, rowC].map((r) => r.address).join(","),
+     "applyFollowUps must never reorder rows, got " + JSON.stringify(updated.rows.map((r) => r.address)));
+  ok(updated.date === origDoc.date && updated.generatedAt === origDoc.generatedAt &&
+     updated.checked === origDoc.checked && JSON.stringify(updated.chains) === JSON.stringify(origDoc.chains),
+     "date/chains/checked/generatedAt must stay exactly as they were");
+  ok(JSON.stringify(origDoc) === origSnapshot,
+     "applyFollowUps must never mutate its input doc, got a changed original: " + JSON.stringify(origDoc));
+
+  console.log("[report follow apply] applyFollowUps marks exactly the matching \"sell\" row with " +
+    "follow+followAt, leaves every other key of every row byte-for-byte identical, never reorders rows, " +
+    "keeps date/chains/checked/generatedAt untouched, and never mutates its input doc; followForRow " +
+    "enforces the frozen REPORT_FOLLOWS vocabulary exactly like causeForRow does for REPORT_CAUSES");
+}
+
+/* ---- ۲۷ه. applyFollowUps — رد کردنِ هر موردِ نامعتبر ----
+   شش سناریو، هرکدام باید کلِ سند را دست‌نخورده برگرداند. */
+{
+  function mkAddr(n) { return "0x" + n.toString(16).padStart(40, "0"); }
+  const T2 = "2026-09-20T10:00:00.000Z";
+  function row(addr, v, extra) {
+    return Object.assign({
+      chain: "base", address: addr, symbol: "S", name: "N", v, checkKind: "sell-quote",
+      checkedAt: T2, poolCreatedAt: null, priceUsd: 1, reserveUsd: 2, vol24hUsd: 3, fdvUsd: 4,
+      dex: "uniswap-v4-base", why: null,
+    }, extra);
+  }
+  function freshDoc(r) {
+    return { date: "2026-09-20", generatedAt: T2, chains: ["base"], checked: 1, rows: [r] };
+  }
+  function unchanged(label, doc, updates, atIso) {
+    const before = JSON.stringify(doc);
+    const after = applyFollowUps(doc, updates, atIso);
+    ok(JSON.stringify(after) === before,
+       "applyFollowUps must refuse and return the doc unchanged for: " + label + ", got " +
+       JSON.stringify(after));
+  }
+
+  // الف) ردیفِ nosell
+  unchanged("a nosell row", freshDoc(row(mkAddr(1), "nosell")),
+    [{ address: mkAddr(1), follow: "pool-empty" }], "2026-09-20T11:00:00.000Z");
+  // ب) ردیفِ حکمِ null
+  unchanged("a null-verdict row", freshDoc(row(mkAddr(2), null)),
+    [{ address: mkAddr(2), follow: "pool-empty" }], "2026-09-20T11:00:00.000Z");
+  // ج) ردیفی که از پیش follow دارد
+  unchanged("a row that already has follow",
+    freshDoc(row(mkAddr(3), "sell", { follow: "pool-there", followAt: T2 })),
+    [{ address: mkAddr(3), follow: "pool-empty" }], "2026-09-20T11:00:00.000Z");
+  // د) رشته‌ی followِ ناشناخته
+  unchanged("an unknown follow string", freshDoc(row(mkAddr(4), "sell")),
+    [{ address: mkAddr(4), follow: "pool-maybe" }], "2026-09-20T11:00:00.000Z");
+  // ه) آدرسی که در سند نیست
+  unchanged("an address not in the doc", freshDoc(row(mkAddr(5), "sell")),
+    [{ address: mkAddr(999), follow: "pool-empty" }], "2026-09-20T11:00:00.000Z");
+  // و) atIso غیرِ ISO — کلِ فراخوانی رد می‌شود
+  unchanged("a non-ISO atIso", freshDoc(row(mkAddr(6), "sell")),
+    [{ address: mkAddr(6), follow: "pool-empty" }], "not-a-date");
+
+  console.log("[report follow refuse] applyFollowUps refuses and returns the doc byte-for-byte unchanged " +
+    "for a nosell row, a null-verdict row, a row that already carries follow, an unknown follow string, " +
+    "an address absent from the doc, and a non-ISO atIso (the whole call is refused, not just that row)");
+}
+
+/* ---- ۲۷و. pickFollowUpTargets — پنجره‌ی ۵۵ تا ۱۸۰ دقیقه، سقف، قدیمی‌ترین اول ---- */
+{
+  function mkAddr(n) { return "0x" + n.toString(16).padStart(40, "0"); }
+  const NOW3 = Date.parse("2026-09-20T12:00:00.000Z");
+  function ageRow(addr, minutesAgo, extra) {
+    return Object.assign({
+      chain: "base", v: "sell", address: addr,
+      checkedAt: new Date(NOW3 - minutesAgo * 60000).toISOString(),
+    }, extra);
+  }
+  const r55 = ageRow(mkAddr(1), 55);       // مرزِ پایین، شامل
+  const r180 = ageRow(mkAddr(2), 180);     // مرزِ بالا، شامل
+  const r54 = ageRow(mkAddr(3), 54);       // خارج، تازه‌تر از مرز
+  const r181 = ageRow(mkAddr(4), 181);     // خارج، قدیمی‌تر از مرز
+  const rFollowed = ageRow(mkAddr(5), 100, { follow: "pool-empty" }); // از پیش فالو شده
+  const rBad = { chain: "base", v: "sell", address: mkAddr(6), checkedAt: "not-a-date" }; // نامعتبر
+  const rNoSell = ageRow(mkAddr(7), 100, { v: "nosell" });
+  const rSolana = ageRow(mkAddr(8), 100, { chain: "solana" });
+
+  const docWindow = {
+    date: "2026-09-20", generatedAt: null, chains: ["base"], checked: 8,
+    rows: [r55, r180, r54, r181, rFollowed, rBad, rNoSell, rSolana],
+  };
+  const picked = pickFollowUpTargets(docWindow, NOW3, 12);
+  ok(JSON.stringify(picked) === JSON.stringify([mkAddr(2), mkAddr(1)]),
+     "the window must include exactly the 55- and 180-minute rows (180 first, oldest-first), exclude " +
+     "54/181/already-followed/unparseable/nosell/non-base, got " + JSON.stringify(picked));
+
+  // سقف و ترتیب: ۲۰ ردیفِ درونِ پنجره، فقط ۱۲تای قدیمی‌ترش
+  const manyRows = Array.from({ length: 20 }, (_, i) => ageRow(mkAddr(100 + i), 60 + i));
+  const docMany = { date: "2026-09-20", generatedAt: null, chains: ["base"], checked: 20, rows: manyRows };
+  const pickedCap = pickFollowUpTargets(docMany, NOW3, 12);
+  ok(pickedCap.length === 12, "the cap must hold at exactly 12, got " + pickedCap.length);
+  const expectedCap = Array.from({ length: 12 }, (_, k) => mkAddr(100 + (19 - k)));
+  ok(JSON.stringify(pickedCap) === JSON.stringify(expectedCap),
+     "the 12 oldest rows must be returned oldest-first, got " + JSON.stringify(pickedCap));
+  const pickedCap5 = pickFollowUpTargets(docMany, NOW3, 5);
+  ok(pickedCap5.length === 5 && JSON.stringify(pickedCap5) === JSON.stringify(expectedCap.slice(0, 5)),
+     "a custom cap must be respected exactly, got " + JSON.stringify(pickedCap5));
+
+  console.log("[report follow pick] pickFollowUpTargets picks only base/sell/not-yet-followed rows " +
+    "whose checkedAt falls between 55 and 180 minutes before now (both bounds included, 54/181 " +
+    "excluded), skips an already-followed row and one with an unparseable checkedAt, returns " +
+    "oldest-first, and respects the cap exactly (default 12 and a custom value)");
+}
+
+/* ---- ۲۷ز. runReportPass — پیگیریِ یک‌ساعته با poolEmptyOf تزریقی ----
+   یک سندِ از پیش‌نوشته که ردیفِ sellِ قدیمی‌ترش درونِ پنجره‌ی ۵۵-۱۸۰ دقیقه‌ای
+   است؛ همین گذر باید آن را فالو کند و دوباره در KV بنویسد، بدونِ اینکه
+   verdict/why/cause‌اش را لمس کند. */
+{
+  function makeKv() {
+    const store = new Map();
+    return {
+      store,
+      get: async (k) => (store.has(k) ? store.get(k) : null),
+      put: async (k, v) => { store.set(k, v); },
+    };
+  }
+  function mkAddr(n) { return "0x" + n.toString(16).padStart(40, "0"); }
+  function poolRow(addr, reserve, price) {
+    return {
+      attributes: { reserve_in_usd: String(reserve), base_token_price_usd: String(price),
+        pool_created_at: "2026-09-20T10:00:00Z", volume_usd: { h24: "0" }, fdv_usd: "0" },
+      relationships: { base_token: { data: { id: "base_" + addr } },
+        dex: { data: { id: "uniswap-v3-base" } } },
+    };
+  }
+  function seedOldSellRow(nowMs, addr) {
+    return reportRow({
+      chain: "base", address: addr, symbol: "OLD", name: "Old Token", verdict: "sell",
+      checkedAt: new Date(nowMs - 100 * 60000).toISOString(), poolCreatedAt: null,
+      priceUsd: 1, reserveUsd: 2, vol24hUsd: 3, fdvUsd: 4, dex: "uniswap-v4-base", why: null,
+    });
+  }
+
+  // الف) poolEmptyOf → true
+  {
+    const NOW = Date.parse("2026-09-20T12:00:00.000Z");
+    const dateStr = utcDateOf(NOW);
+    const addr = mkAddr(1);
+    const oldRow = seedOldSellRow(NOW, addr);
+    const seedDoc = mergeReportDoc(null, dateStr, [oldRow], 1, new Date(NOW - 100 * 60000).toISOString());
+    const kv = makeKv();
+    await kv.put(reportKey(dateStr), JSON.stringify(seedDoc));
+    await kv.put(PAIRS_KEY_BASE, JSON.stringify([{ address: addr, v: "sell" }]));
+    let calls = [];
+    const poolEmptyOf = async (a) => { calls.push(a); return true; };
+    const res = await runReportPass({
+      kv, fetchPools: async () => [], metaOf: async () => ({ meta: null, why: "meta:429" }),
+      verdictOf: async () => ({ v: null, why: "no-quote" }), now: () => NOW, sleep: async () => {}, poolEmptyOf,
+    });
+    ok(res.followed === 1, "poolEmptyOf:true must mark exactly one row, followed=" + res.followed);
+    ok(calls.length === 1 && calls[0] === addr, "poolEmptyOf must be called with the one due address, got " +
+      JSON.stringify(calls));
+    const stored = JSON.parse(await kv.get(reportKey(dateStr)));
+    const storedRow = stored.rows.find((r) => r.address === addr);
+    ok(storedRow.follow === "pool-empty" && typeof storedRow.followAt === "string",
+       "a true poolEmptyOf must store follow:\"pool-empty\" with a followAt string, got " +
+       JSON.stringify(storedRow));
+    ok(storedRow.v === "sell" && storedRow.why === null && !("cause" in storedRow),
+       "the followed row's verdict/why/cause must stay unchanged, got " + JSON.stringify(storedRow));
+  }
+
+  // ب) poolEmptyOf → false
+  {
+    const NOW = Date.parse("2026-09-20T12:00:00.000Z");
+    const dateStr = utcDateOf(NOW);
+    const addr = mkAddr(2);
+    const oldRow = seedOldSellRow(NOW, addr);
+    const seedDoc = mergeReportDoc(null, dateStr, [oldRow], 1, new Date(NOW - 100 * 60000).toISOString());
+    const kv = makeKv();
+    await kv.put(reportKey(dateStr), JSON.stringify(seedDoc));
+    await kv.put(PAIRS_KEY_BASE, JSON.stringify([{ address: addr, v: "sell" }]));
+    const res = await runReportPass({
+      kv, fetchPools: async () => [], metaOf: async () => ({ meta: null, why: "meta:429" }),
+      verdictOf: async () => ({ v: null, why: "no-quote" }), now: () => NOW, sleep: async () => {},
+      poolEmptyOf: async () => false,
+    });
+    ok(res.followed === 1, "poolEmptyOf:false must still mark exactly one row, followed=" + res.followed);
+    const stored = JSON.parse(await kv.get(reportKey(dateStr)));
+    const storedRow = stored.rows.find((r) => r.address === addr);
+    ok(storedRow.follow === "pool-there", "a false poolEmptyOf must store follow:\"pool-there\", got " +
+      JSON.stringify(storedRow.follow));
+  }
+
+  // ج) poolEmptyOf → null
+  {
+    const NOW = Date.parse("2026-09-20T12:00:00.000Z");
+    const dateStr = utcDateOf(NOW);
+    const addr = mkAddr(3);
+    const oldRow = seedOldSellRow(NOW, addr);
+    const seedDoc = mergeReportDoc(null, dateStr, [oldRow], 1, new Date(NOW - 100 * 60000).toISOString());
+    const kv = makeKv();
+    await kv.put(reportKey(dateStr), JSON.stringify(seedDoc));
+    await kv.put(PAIRS_KEY_BASE, JSON.stringify([{ address: addr, v: "sell" }]));
+    const res = await runReportPass({
+      kv, fetchPools: async () => [], metaOf: async () => ({ meta: null, why: "meta:429" }),
+      verdictOf: async () => ({ v: null, why: "no-quote" }), now: () => NOW, sleep: async () => {},
+      poolEmptyOf: async () => null,
+    });
+    ok(res.followed === 0, "poolEmptyOf:null must yield followed:0, got " + res.followed);
+    const stored = JSON.parse(await kv.get(reportKey(dateStr)));
+    const storedRow = stored.rows.find((r) => r.address === addr);
+    ok(!("follow" in storedRow) && !("followAt" in storedRow),
+       "poolEmptyOf:null must leave no follow key at all, got " + JSON.stringify(storedRow));
+  }
+
+  // د) poolEmptyOf پرتاب می‌کند — همان رفتارِ null، و checked/added دست‌نخورده
+  {
+    const NOW = Date.parse("2026-09-20T13:00:00.000Z");
+    const dateStr = utcDateOf(NOW);
+    const oldAddr = mkAddr(4);
+    const oldRow = seedOldSellRow(NOW, oldAddr);
+    const seedDoc = mergeReportDoc(null, dateStr, [oldRow], 1, new Date(NOW - 100 * 60000).toISOString());
+    const kv = makeKv();
+    await kv.put(reportKey(dateStr), JSON.stringify(seedDoc));
+    await kv.put(PAIRS_KEY_BASE, JSON.stringify([{ address: oldAddr, v: "sell" }]));
+    const freshAddr = mkAddr(5);
+    const res = await runReportPass({
+      kv, fetchPools: async () => [poolRow(freshAddr, 10000, 0.5)],
+      metaOf: async () => ({ meta: { symbol: "NEW", name: "New Token" }, why: null }),
+      verdictOf: async () => ({ v: "sell", why: null }),
+      now: () => NOW, sleep: async () => {},
+      poolEmptyOf: async () => { throw new Error("rpc is down"); },
+    });
+    ok(res.checked === 1 && res.added === 1,
+       "a throwing poolEmptyOf must never affect the pass's normal checked/added, got " + JSON.stringify(res));
+    ok(res.followed === 0, "a throwing poolEmptyOf must yield followed:0, got " + res.followed);
+    const stored = JSON.parse(await kv.get(reportKey(dateStr)));
+    const storedRow = stored.rows.find((r) => r.address === oldAddr);
+    ok(!("follow" in storedRow), "a throwing poolEmptyOf must leave no follow key, got " +
+       JSON.stringify(storedRow));
+  }
+
+  // ه) بدونِ poolEmptyOf اصلاً — followed همیشه ۰، رفتارِ امروز دست‌نخورده
+  {
+    const NOW = Date.parse("2026-09-20T12:00:00.000Z");
+    const dateStr = utcDateOf(NOW);
+    const addr = mkAddr(6);
+    const oldRow = seedOldSellRow(NOW, addr);
+    const seedDoc = mergeReportDoc(null, dateStr, [oldRow], 1, new Date(NOW - 100 * 60000).toISOString());
+    const kv = makeKv();
+    await kv.put(reportKey(dateStr), JSON.stringify(seedDoc));
+    await kv.put(PAIRS_KEY_BASE, JSON.stringify([{ address: addr, v: "sell" }]));
+    const res = await runReportPass({
+      kv, fetchPools: async () => [], metaOf: async () => ({ meta: null, why: "meta:429" }),
+      verdictOf: async () => ({ v: null, why: "no-quote" }), now: () => NOW, sleep: async () => {},
+    });
+    ok(res.followed === 0, "with no poolEmptyOf injected, followed must be 0, got " + res.followed);
+  }
+
+  console.log("[report follow pass] runReportPass's injected poolEmptyOf marks a due sell row " +
+    "\"pool-empty\" on true and \"pool-there\" on false, writing the document again; null or a throw " +
+    "leaves no follow key at all and followed:0 without disturbing the pass's normal checked/added; " +
+    "the followed row's verdict/why/cause never change; and omitting poolEmptyOf entirely leaves " +
+    "followed:0 with today's behaviour otherwise untouched");
+}
+
+/* ---- ۲۷ح. reportText — خطِ «pool is empty an hour later» ---- */
+{
+  function mkAddr(n) { return "0x" + n.toString(16).padStart(40, "0"); }
+  function row5(overrides) {
+    return Object.assign({
+      chain: "base", address: mkAddr(1), symbol: null, name: null, v: "sell", checkKind: "sell-quote",
+      checkedAt: "2026-09-20T00:00:00.000Z", poolCreatedAt: null, priceUsd: null, reserveUsd: null,
+      vol24hUsd: null, fdvUsd: null, dex: null,
+    }, overrides);
+  }
+
+  // الف) یک ردیفِ pool-empty — عددِ مفرد، جای درست
+  const rowFollowed1 = row5({ address: mkAddr(1), follow: "pool-empty" });
+  const rowOther1 = row5({ address: mkAddr(2) });
+  const doc1 = { date: "2026-09-20", generatedAt: null, rows: [rowFollowed1, rowOther1] };
+  const t1 = reportText(doc1);
+  const lines1 = t1.split("\n");
+  const idx1 = lines1.findIndex((l) => l.endsWith("could not be checked."));
+  ok(idx1 >= 0 && lines1[idx1 + 1] === "1 of the quoted tokens had an empty pool an hour later.",
+     "the singular line must sit immediately after the \"could not be checked.\" line, got " +
+     JSON.stringify(lines1));
+  ok(lines1[idx1 + 2] === "", "a blank line must still follow the new line, got " + JSON.stringify(lines1));
+
+  // ب) سه ردیفِ pool-empty — همان جمله، فقط عدد فرق دارد
+  const rowFollowedA = row5({ address: mkAddr(11), follow: "pool-empty" });
+  const rowFollowedB = row5({ address: mkAddr(12), follow: "pool-empty" });
+  const rowFollowedC = row5({ address: mkAddr(13), follow: "pool-empty" });
+  const doc3 = { date: "2026-09-20", generatedAt: null, rows: [rowFollowedA, rowFollowedB, rowFollowedC] };
+  const t3 = reportText(doc3);
+  ok(t3.includes("3 of the quoted tokens had an empty pool an hour later."),
+     "three pool-empty rows must produce the count 3 with the same sentence, got " + JSON.stringify(t3));
+
+  // ج) صفر ردیفِ pool-empty — بایت‌به‌بایت همان سندِ بدونِ هیچ followی
+  const docNoFollowField = {
+    date: "2026-09-20", generatedAt: null,
+    rows: [row5({ address: mkAddr(20) }), row5({ address: mkAddr(21), v: "nosell" })],
+  };
+  const docFollowButNotEmpty = {
+    date: "2026-09-20", generatedAt: null,
+    rows: [row5({ address: mkAddr(20), follow: "pool-there" }), row5({ address: mkAddr(21), v: "nosell" })],
+  };
+  const tNoField = reportText(docNoFollowField);
+  const tNotEmpty = reportText(docFollowButNotEmpty);
+  ok(tNoField === tNotEmpty,
+     "with zero pool-empty rows, the output must be byte-for-byte identical to the same document " +
+     "without any follow fields, got:\n" + JSON.stringify(tNoField) + "\nvs\n" + JSON.stringify(tNotEmpty));
+  ok(!tNoField.includes("empty pool an hour later"),
+     "with zero pool-empty rows, no such line may appear at all, got " + JSON.stringify(tNoField));
+
+  console.log("[report follow text] reportText inserts \"N of the quoted tokens had an empty pool an " +
+    "hour later.\" immediately after the \"could not be checked.\" line whenever a pool-empty row is " +
+    "present, with correct singular/plural wording, and is byte-for-byte identical to the same document " +
+    "with no follow fields at all when the count is zero");
+}
 
 /* ---- ۲۷الف. کوروم شاهد — یک صرافیِ مبهم نباید اثباتِ بقیه را پاک کند ----
    🔴 از یک اندازه‌گیریِ زنده آمد، نه از یک ایده. پروبِ توکنِ واقعیِ

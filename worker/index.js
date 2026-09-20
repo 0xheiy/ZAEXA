@@ -1657,6 +1657,10 @@ async function scheduledReportPass(env, ctx, opts) {
       sleep: (ms) => new Promise((r) => setTimeout(r, ms)),
       // فقط اجرای دستی این را می‌دهد؛ زمان‌بند سقفِ کاملِ خودش را دارد.
       maxTokens: opts && opts.maxTokens,
+      // فالوآپِ «یک ساعت بعد»: pickFollowUpTargets داخلِ runReportPass خودش
+      // به ۱۲ آدرس در هر گذر سقف‌گذاری شده، پس این حداکثر ۱۲ eth_call کوتاهِ
+      // اضافه در ساعت است، روی مسیری که هیچ کاربری منتظرش نیست.
+      poolEmptyOf: (addr) => v4PoolsEmpty(addr, env, Date.now() + 1200),
     });
   } catch (e) {
     return { checked: 0, added: 0 }; // یک اجرای زمان‌بندی‌شده هرگز نباید پرتاب کند
