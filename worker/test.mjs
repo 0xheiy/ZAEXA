@@ -20,6 +20,7 @@ import {
   reportText, REPORT_TEXT_FIRST_DATE,
   causeForRow, REPORT_CAUSES,
   followForRow, REPORT_FOLLOWS, applyFollowUps, pickFollowUpTargets,
+  retForRow,
 } from "./report.js";
 import * as v4 from "./v4index.js";
 import {
@@ -7487,6 +7488,460 @@ console.log("[report cause] causeForRow enforces the closed REPORT_CAUSES vocabu
     + "(a throw, an old bare-null, or a why outside the closed vocabulary all degrade to \"internal\", and "
     + "why is always null alongside a sell/nosell verdict), verified both via direct fakes and end to end "
     + "through GET /report/run with a fake KV; and the OG-card path (/t/<addr>) is unaffected");
+}
+
+/* ---- ۲۹. worker/verdict.js — bestPositive ----
+   بزرگ‌ترین مقدارِ مثبتِ رمزگشایی‌شده در batch، یا null. همان decodeItemValue
+   که verdictFrom استفاده می‌کند، پس نمونه‌ها همان شکل‌های آشنا هستند: مثبت،
+   صفر، ریوِرت، و شکلِ رمزگشایی‌ناپذیر (بریده/kindِ ناشناخته). */
+{
+  const w = (n) => BigInt(n).toString(16).padStart(64, "0");
+  const mkStatic4 = (n) => "0x" + w(n) + w(0) + w(0) + w(0);
+  const mkStatic2 = (n) => "0x" + w(n) + w(0);
+
+  const mixedItems = [
+    { kind: "CL_UINT24", result: mkStatic4(250) },              // مثبت
+    { kind: "CL_UINT24", result: mkStatic4(0) },                // صفر
+    { kind: "CL_UINT24", error: { code: 3 } },                  // ریوِرتِ اثباتی
+    { kind: "CL_UINT24", result: "0x1234" },                    // بریده — رمزگشایی‌ناپذیر
+    { kind: "CL_UINT24", result: mkStatic4(900) },               // بزرگ‌ترینِ مثبت
+    { kind: "V4_SINGLE", result: mkStatic2(300) },               // مثبتِ کوچک‌تر، kindِ دیگر
+    { kind: "MADE_UP_KIND", result: mkStatic4(5000) },           // kindِ ناشناخته → decodeQuote خودش null می‌دهد
+    null,
+    undefined,
+  ];
+  ok(vd.bestPositive({ items: mixedItems }) === 900n,
+     "bestPositive must pick the largest positive across mixed items, got " +
+     vd.bestPositive({ items: mixedItems }));
+
+  const noPositiveItems = [
+    { kind: "CL_UINT24", result: mkStatic4(0) },
+    { kind: "CL_UINT24", error: { code: 3 } },
+    { kind: "CL_UINT24", result: "0x1234" },
+  ];
+  ok(vd.bestPositive({ items: noPositiveItems }) === null,
+     "bestPositive must return null when there is no positive item, got " +
+     vd.bestPositive({ items: noPositiveItems }));
+
+  // هرگز پرتاب نمی‌کند، حتی روی یک batchِ کاملاً بدشکل.
+  const malformedBatches = [
+    null, undefined, {}, "not-an-object", 42,
+    { items: null }, { items: "nope" }, { items: 5 },
+    { items: [{ kind: "CL_UINT24", result: 123 }] },      // result نه رشته
+    { items: [{ kind: "CL_UINT24", result: "0xzzzz" }] }, // هگزِ نامعتبر
+    { items: [{}] }, { items: [1, "x", true] },
+  ];
+  for (const b of malformedBatches) {
+    let threw = false;
+    let res;
+    try { res = vd.bestPositive(b); } catch (e) { threw = true; }
+    ok(!threw, "bestPositive must never throw on a malformed batch, got a throw for " + JSON.stringify(b));
+    ok(res === null || typeof res === "bigint",
+       "bestPositive must return null or a BigInt even on a malformed batch, got " + res + " for " +
+       JSON.stringify(b));
+  }
+
+  console.log("[verdict bestPositive] bestPositive picks the largest positive across mixed items " +
+    "(positive/zero/revert/undecodable/unknown-kind), returns null when there is no positive, and " +
+    "never throws on a malformed batch");
+}
+
+/* ---- ۳۰. worker/verdict.js — canaryUsdPerEth ----
+   قیمتِ دلاریِ ۱ اتر از رویِ همان کاناریِ ۰٫۰۱ WETH→USDC؛ باندِ عقل‌سنجیِ
+   ۵۰ تا ۱۰۰۰۰۰ هر عددِ پرت را دور می‌ریزد، نه فقط کاناریِ خراب/ریوِرتی را. */
+{
+  const w = (n) => BigInt(n).toString(16).padStart(64, "0");
+  const mkStatic4 = (n) => "0x" + w(n) + w(0) + w(0) + w(0);
+
+  // واقعی — ۳۰ USDC برای ۰٫۰۱ WETH → ۱ اتر = ۳۰۰۰ دلار
+  ok(vd.canaryUsdPerEth({ canary: { result: mkStatic4(30000000) } }) === 3000,
+     "canaryUsdPerEth must compute the expected price from a realistic canary, got " +
+     vd.canaryUsdPerEth({ canary: { result: mkStatic4(30000000) } }));
+
+  // غایب
+  ok(vd.canaryUsdPerEth({}) === null, "canaryUsdPerEth must be null with no canary at all");
+  ok(vd.canaryUsdPerEth(null) === null, "canaryUsdPerEth must never throw on a null batch, must give null");
+
+  // صفر
+  ok(vd.canaryUsdPerEth({ canary: { result: mkStatic4(0) } }) === null,
+     "canaryUsdPerEth must be null for a zero canary");
+
+  // ریوِرتی
+  ok(vd.canaryUsdPerEth({ canary: { error: { code: 3 } } }) === null,
+     "canaryUsdPerEth must be null for an errored canary");
+
+  // پرتِ پایین (زیرِ ۵۰) — قیمت=۱۰
+  ok(vd.canaryUsdPerEth({ canary: { result: mkStatic4(100000) } }) === null,
+     "canaryUsdPerEth must be null for a price below the 50 sanity floor");
+
+  // پرتِ بالا (بالای ۱۰۰۰۰۰) — قیمت=۲۰۰۰۰۰
+  ok(vd.canaryUsdPerEth({ canary: { result: mkStatic4(2000000000) } }) === null,
+     "canaryUsdPerEth must be null for a price above the 100000 sanity ceiling");
+
+  console.log("[verdict canaryUsdPerEth] a realistic canary gives the exact expected USD/ETH price; " +
+    "a missing, zero, errored, or out-of-[50,100000]-band canary all give null");
+}
+
+/* ---- ۳۱. worker/verdict.js — retPctFrom ----
+   درصدِ برگشتِ یک کوتِ فروش در برابرِ VD_NOTIONAL_USD؛ فیکسچرها طوری
+   ساخته شده‌اند که پاسخ یک عددِ گِردِ دقیق باشد، نه چیزی که فقط «نزدیک»
+   سنجیده شود. */
+{
+  const w = (n) => BigInt(n).toString(16).padStart(64, "0");
+  const mkStatic4 = (n) => "0x" + w(n) + w(0) + w(0) + w(0);
+
+  // مرحله‌ی WETH با کاناریِ زنده — قیمت=۱۲۰۰۰، بهترینِ خروجی=۰٫۰۰۷۵ WETH
+  // → بازیافتی=۹۰ دلار → ۹۰٪ از صد دلار، دقیقاً.
+  const wethBatch = {
+    canary: { result: mkStatic4(120000000) },
+    items: [{ kind: "CL_UINT24", result: mkStatic4(7500000000000000) }],
+  };
+  ok(vd.retPctFrom(wethBatch, "weth") === 90,
+     "retPctFrom(weth) must equal exactly 90 for the built fixture, got " + vd.retPctFrom(wethBatch, "weth"));
+
+  // مرحله‌ی USDC کاناری نمی‌خواهد — ۵۰ USDC بازیافتی از رویِ صد دلار = ۵۰٪.
+  const usdcBatch = { items: [{ kind: "CL_UINT24", result: mkStatic4(50000000) }] };
+  ok(vd.retPctFrom(usdcBatch, "usdc") === 50,
+     "retPctFrom(usdc) must equal exactly 50 with no canary at all, got " + vd.retPctFrom(usdcBatch, "usdc"));
+
+  // نتیجه‌ای که بعدِ گردکردن صفر می‌شود → null، نه صفر.
+  const dustBatch = { items: [{ kind: "CL_UINT24", result: mkStatic4(1) }] };
+  ok(vd.retPctFrom(dustBatch, "usdc") === null,
+     "retPctFrom must be null (not zero) when the recovered amount rounds to 0%, got " +
+     vd.retPctFrom(dustBatch, "usdc"));
+
+  // پرت (بالای ۱۰۰۰٪) → null، نه یک عددِ کلمپ‌شده.
+  const absurdBatch = { items: [{ kind: "CL_UINT24", result: mkStatic4(2000000000) }] };
+  ok(vd.retPctFrom(absurdBatch, "usdc") === null,
+     "retPctFrom must drop an out-of-band (>1000%) result, not clamp it, got " +
+     vd.retPctFrom(absurdBatch, "usdc"));
+
+  // WETH بدونِ کاناریِ قابلِ‌اعتماد → null.
+  const noCanaryBatch = { items: [{ kind: "CL_UINT24", result: mkStatic4(7500000000000000) }] };
+  ok(vd.retPctFrom(noCanaryBatch, "weth") === null,
+     "retPctFrom(weth) must be null with no usable canary, got " + vd.retPctFrom(noCanaryBatch, "weth"));
+
+  // stageِ ناشناخته → null.
+  ok(vd.retPctFrom(usdcBatch, "eth") === null, "retPctFrom must be null for an unknown stage");
+  ok(vd.retPctFrom(usdcBatch, undefined) === null, "retPctFrom must be null with no stage at all");
+
+  console.log("[verdict retPctFrom] the WETH stage with a live canary and the USDC stage (no canary " +
+    "needed) both yield exact round percentages for the built fixtures; a dust result that rounds to " +
+    "0% and an absurd (>1000%) result both yield null rather than 0 or a clamped number; and an " +
+    "unknown stage always yields null");
+}
+
+/* ---- ۳۲. fetchVerdict + opts.retOut ----
+   دقیقاً همان انضباطِ opts.whyOut (بخشِ ۲۷ب): یک مشاهده‌گرِ محض که هرگز روی
+   verdict یا شمارِ فراخوانی‌ها اثر نمی‌گذارد؛ فقط کنارِ یک "sell" واقعی
+   چیزی می‌نویسد. */
+{
+  const w = (n) => BigInt(n).toString(16).padStart(64, "0");
+  const mkStatic4 = (n) => "0x" + w(n) + w(0) + w(0) + w(0);
+  const jsonRes = (body, status = 200) => new Response(JSON.stringify(body), {
+    status, headers: { "content-type": "application/json" },
+  });
+  const mkStatic2 = (n) => "0x" + w(n) + w(0);
+  const TOKEN = "0x" + "e".repeat(40);
+  const meta = { decimals: 18, priceUsd: 2000 };
+  const usdcHexLower = vd.USDC_ADDR.slice(2).toLowerCase();
+  const REAL_USDC_KEY_RET = {
+    currency0: TOKEN.toLowerCase(), currency1: vd.USDC_ADDR.toLowerCase(),
+    fee: 9990, tickSpacing: 100, hooks: vd.NATIVE_ADDR,
+  };
+  const cleanNosell = (r) => (isSolidlyReqId(r.id) ? { id: r.id, error: { code: 3 } } : { id: r.id, result: "0x" });
+  const ambiguous = (r) => ({ id: r.id, error: { code: -32603 } });
+
+  // sell از مرحله‌ی WETH — همان فیکسچرِ بخشِ ۳۱ (کاناری=۱۲۰۰۰، بهترین=۹۰٪).
+  {
+    const sellImpl = (tick) => async (url, init) => {
+      tick();
+      const reqs = JSON.parse(init.body);
+      return jsonRes(reqs.map((r) => r.id === 0
+        ? { id: 0, result: mkStatic4(120000000) }
+        : { id: r.id, result: r.id === 1 ? mkStatic4(7500000000000000) : "0x" }));
+    };
+    let calls1 = 0;
+    const v1 = await vd.fetchVerdict(TOKEN, meta,
+      { fetchImpl: sellImpl(() => calls1++), rpcs: ["https://rpc-ret-1.example"] });
+    let calls2 = 0;
+    const retOut = {};
+    const v2 = await vd.fetchVerdict(TOKEN, meta,
+      { fetchImpl: sellImpl(() => calls2++), rpcs: ["https://rpc-ret-1.example"], retOut });
+    ok(v1 === "sell" && v2 === "sell" && calls1 === calls2,
+       "[sell] opts.retOut must never change the returned verdict/call-count, got v1=" + v1 + " v2=" + v2 +
+       " calls1=" + calls1 + " calls2=" + calls2);
+    ok(retOut.ret === 90, "[sell] retOut.ret must equal 90 for the WETH-stage fixture, got " +
+       JSON.stringify(retOut));
+  }
+
+  // sell از مرحله‌ی USDC — مرحله‌ی WETH تمیز nosell می‌شود، بعد مرحله‌ی USDC
+  // مثبت می‌دهد (۵۰ USDC روی صد دلار = ۵۰٪). این همان batchB است، نه batchA.
+  {
+    const stageBSellImpl = (tick) => async (url, init) => {
+      tick();
+      const reqs = JSON.parse(init.body);
+      const isStageB = reqs.some((r) => r.id >= 1 && r.params[0].data.includes(usdcHexLower));
+      return jsonRes(reqs.map((r) => {
+        if (r.id === 0) return { id: 0, result: mkStatic4(120000000) };
+        if (!isStageB) return cleanNosell(r);
+        return { id: r.id, result: r.id === 1 ? mkStatic4(50000000) : "0x" };
+      }));
+    };
+    let calls1 = 0;
+    const v1 = await vd.fetchVerdict(TOKEN, meta,
+      { fetchImpl: stageBSellImpl(() => calls1++), rpcs: ["https://rpc-ret-1b.example"] });
+    let calls2 = 0;
+    const retOut = {};
+    const v2 = await vd.fetchVerdict(TOKEN, meta,
+      { fetchImpl: stageBSellImpl(() => calls2++), rpcs: ["https://rpc-ret-1b.example"], retOut });
+    ok(v1 === "sell" && v2 === "sell" && calls1 === calls2,
+       "[usdc-stage sell] opts.retOut must never change the returned verdict/call-count, got v1=" + v1 +
+       " v2=" + v2);
+    ok(retOut.ret === 50, "[usdc-stage sell] retOut.ret must equal 50 for the USDC-stage fixture (batchB, " +
+       "not batchA), got " + JSON.stringify(retOut));
+  }
+
+  // sell از گذرِ اثباتِ USDC (کلیدِ واقعیِ v4) — مرحله‌ی WETH مبهم می‌ماند،
+  // گذرِ اثبات مثبت می‌دهد (۵۰ USDC = ۵۰٪). این همان batchP است.
+  {
+    const proofSellImpl = (tick) => async (url, init) => {
+      tick();
+      const reqs = JSON.parse(init.body);
+      const isProof = reqs.some((r) => r.id >= 1 && r.params[0].data.includes(usdcHexLower));
+      return jsonRes(reqs.map((r) => {
+        if (r.id === 0) return { id: 0, result: mkStatic4(120000000) };
+        if (!isProof) return ambiguous(r);
+        return { id: r.id, result: mkStatic2(50000000) };
+      }));
+    };
+    let calls1 = 0;
+    const v1 = await vd.fetchVerdict(TOKEN, meta, { fetchImpl: proofSellImpl(() => calls1++),
+      rpcs: ["https://rpc-ret-1c.example"], v4Keys: [REAL_USDC_KEY_RET] });
+    let calls2 = 0;
+    const retOut = {};
+    const v2 = await vd.fetchVerdict(TOKEN, meta, { fetchImpl: proofSellImpl(() => calls2++),
+      rpcs: ["https://rpc-ret-1c.example"], v4Keys: [REAL_USDC_KEY_RET], retOut });
+    ok(v1 === "sell" && v2 === "sell" && calls1 === calls2,
+       "[proof-pass sell] opts.retOut must never change the returned verdict/call-count, got v1=" + v1 +
+       " v2=" + v2);
+    ok(retOut.ret === 50, "[proof-pass sell] retOut.ret must equal 50 for the proof-pass fixture (batchP), " +
+       "got " + JSON.stringify(retOut));
+  }
+
+  // nosell تمیز — retOut.ret باید undefined بماند.
+  {
+    const nosellImpl = (tick) => async (url, init) => {
+      tick();
+      const reqs = JSON.parse(init.body);
+      return jsonRes(reqs.map((r) => (r.id === 0 ? { id: 0, result: mkStatic4(120000000) } : cleanNosell(r))));
+    };
+    let calls1 = 0;
+    const v1 = await vd.fetchVerdict(TOKEN, meta,
+      { fetchImpl: nosellImpl(() => calls1++), rpcs: ["https://rpc-ret-2.example"] });
+    let calls2 = 0;
+    const retOut = {};
+    const v2 = await vd.fetchVerdict(TOKEN, meta,
+      { fetchImpl: nosellImpl(() => calls2++), rpcs: ["https://rpc-ret-2.example"], retOut });
+    ok(v1 === "nosell" && v2 === "nosell" && calls1 === calls2,
+       "[nosell] opts.retOut must never change the returned verdict/call-count, got v1=" + v1 + " v2=" + v2);
+    ok(retOut.ret === undefined, "[nosell] retOut.ret must stay undefined, got " + JSON.stringify(retOut));
+  }
+
+  // حکمِ null — retOut.ret باید undefined بماند.
+  {
+    const downImpl = (tick) => async () => { tick(); throw new Error("network is down"); };
+    let calls1 = 0;
+    const v1 = await vd.fetchVerdict(TOKEN, meta,
+      { fetchImpl: downImpl(() => calls1++), rpcs: ["https://rpc-ret-3a.example", "https://rpc-ret-3b.example"] });
+    let calls2 = 0;
+    const retOut = {};
+    const v2 = await vd.fetchVerdict(TOKEN, meta,
+      { fetchImpl: downImpl(() => calls2++), retOut,
+        rpcs: ["https://rpc-ret-3a.example", "https://rpc-ret-3b.example"] });
+    ok(v1 === null && v2 === null && calls1 === calls2,
+       "[null] opts.retOut must never change the returned verdict/call-count, got v1=" + v1 + " v2=" + v2);
+    ok(retOut.ret === undefined, "[null] retOut.ret must stay undefined, got " + JSON.stringify(retOut));
+  }
+
+  console.log("[verdict retOut] fetchVerdict's opts.retOut is a pure observer covering all three \"sell\" " +
+    "sites with their own batch (WETH stage/batchA, USDC stage/batchB, USDC proof-pass/batchP), each " +
+    "setting retOut.ret to the exact expected percentage from its OWN batch; a clean \"nosell\" and a " +
+    "null verdict both leave retOut.ret undefined; and in every case the returned verdict and fetch " +
+    "call count are byte-for-byte identical with and without retOut");
+}
+
+/* ---- ۳۳. GET /vd/<Base> — کلیدِ ret ----
+   دقیقاً هم‌رده‌ی بخشِ «C۵» در ۲۷ب برای why/cause: ret فقط کنارِ v:"sell" می‌نشیند. */
+{
+  const { UPSTREAM_FREE: UF_RET } = await import("./index.js");
+  const w = (n) => BigInt(n).toString(16).padStart(64, "0");
+  const mkStatic4 = (n) => "0x" + w(n) + w(0) + w(0) + w(0);
+  const jsonRes = (body, status = 200) => new Response(JSON.stringify(body), {
+    status, headers: { "content-type": "application/json" },
+  });
+  const gtMeta = (priceUsd) => new Response(JSON.stringify({ data: { attributes: {
+    name: "Ret Token", symbol: "RETT", total_reserve_in_usd: "1000",
+    decimals: 18, price_usd: priceUsd,
+  } } }), { status: 200, headers: { "content-type": "application/json" } });
+  const cleanNosellRow = (r) => (isSolidlyReqId(r.id) ? { id: r.id, error: { code: 3 } } : { id: r.id, result: "0x" });
+
+  async function probeRet(addr, dispatch, ipTail) {
+    const savedFetch = globalThis.fetch;
+    globalThis.fetch = dispatch;
+    const res = await call("/vd/" + addr, { headers: { "cf-connecting-ip": "203.0.113." + ipTail } });
+    const body = await res.json();
+    globalThis.fetch = savedFetch;
+    return { res, body };
+  }
+
+  // sell — کلیدها دقیقاً ms,ret,v
+  {
+    const { body } = await probeRet("0x" + "e".repeat(40), async (url, init) => {
+      const u = String(url);
+      if (u.startsWith(UF_RET)) return gtMeta("2000");
+      const reqs = JSON.parse(init.body);
+      return jsonRes(reqs.map((r) => r.id === 0
+        ? { id: 0, result: mkStatic4(120000000) }
+        : { id: r.id, result: r.id === 1 ? mkStatic4(7500000000000000) : "0x" }));
+    }, 240);
+    ok(body.v === "sell", "sanity: this scenario must verdict sell, got " + JSON.stringify(body));
+    ok(body.ret === 90, "a sell /vd response must carry ret:90, got " + JSON.stringify(body));
+    ok(JSON.stringify(Object.keys(body).sort()) === JSON.stringify(["ms", "ret", "v"]),
+       "a sell body must carry exactly ms,ret,v, got " + JSON.stringify(Object.keys(body)));
+  }
+
+  // nosell — بدونِ کلیدِ ret. گاردِ پوشش هم باید عبور کند، وگرنه به نامعلوم
+  // تنزل می‌کند — پس اندپوینتِ "/pools" هم یک دکسِ پوشش‌داده‌شده می‌دهد.
+  {
+    const { body } = await probeRet("0x" + "d".repeat(40), async (url, init) => {
+      const u = String(url);
+      if (u.endsWith("/pools")) {
+        return jsonRes({ data: [{ relationships: { dex: { data: { id: "uniswap-v3-base" } } } }] });
+      }
+      if (u.startsWith(UF_RET)) return gtMeta("2000");
+      const reqs = JSON.parse(init.body);
+      return jsonRes(reqs.map((r) => (r.id === 0 ? { id: 0, result: mkStatic4(120000000) } : cleanNosellRow(r))));
+    }, 241);
+    ok(body.v === "nosell", "sanity: this scenario must verdict nosell, got " + JSON.stringify(body));
+    ok(!("ret" in body), "a nosell /vd response must carry no ret key at all, got " + JSON.stringify(body));
+  }
+
+  // null — بدونِ کلیدِ ret
+  {
+    const { body } = await probeRet("0x" + "c".repeat(40), async (url) => {
+      const u = String(url);
+      if (u.startsWith(UF_RET)) return new Response("rate limited", { status: 429 });
+      throw new Error("unexpected upstream call in the ret/null probe: " + u);
+    }, 242);
+    ok(body.v === null, "sanity: this scenario must verdict null, got " + JSON.stringify(body));
+    ok(!("ret" in body), "a null /vd response must carry no ret key at all, got " + JSON.stringify(body));
+  }
+
+  console.log("[vd ret] GET /vd/<Base> carries ret only alongside v:\"sell\" (exactly ms,ret,v keys), " +
+    "and never on a nosell or null response");
+}
+
+/* ---- ۳۴. worker/report.js — retForRow و ردیف ----
+   دقیقاً هم‌انضباطِ causeForRow (بخشِ ۲۷ج): فقط verdict==="sell" و فقط عددی
+   متناهی در بازه‌ی (۰, ۱۰۰۰] از این تابع زنده بیرون می‌آید. */
+{
+  ok(retForRow("sell", 42.3) === 42.3, "retForRow must let a valid ret survive on a sell row, got " +
+     retForRow("sell", 42.3));
+  ok(retForRow("nosell", 42.3) === undefined, "retForRow must drop ret on a nosell row");
+  ok(retForRow(null, 42.3) === undefined, "retForRow must drop ret on a null verdict row");
+  ok(retForRow("sell", 42.34) === 42.3, "retForRow must round to one decimal, got " + retForRow("sell", 42.34));
+
+  for (const bad of [0, -5, 1001, NaN, Infinity, -Infinity, "42", null, undefined, "1000"]) {
+    ok(retForRow("sell", bad) === undefined,
+       "retForRow must drop " + JSON.stringify(bad) + " even on a sell row, got " +
+       JSON.stringify(retForRow("sell", bad)));
+  }
+  ok(retForRow("sell", 1000) === 1000, "retForRow must let the boundary value 1000 survive");
+
+  const T34 = "2026-09-20T00:00:00.000Z";
+  function rowArgsRet(extra) {
+    return Object.assign({ chain: "base", address: "0x" + "3".repeat(40), symbol: "T34", name: "T34",
+      verdict: "sell", checkedAt: T34, poolCreatedAt: null, priceUsd: 1, reserveUsd: 1, vol24hUsd: 1,
+      fdvUsd: 1, dex: "uniswap-v3-base", why: null }, extra);
+  }
+
+  const rowWithRet = reportRow(rowArgsRet({ ret: 55 }));
+  ok(rowWithRet && rowWithRet.ret === 55,
+     "reportRow must carry ret:55 through on a sell row, got " + JSON.stringify(rowWithRet));
+
+  const rowNoRet = reportRow(rowArgsRet({}));
+  ok(rowNoRet && !("ret" in rowNoRet),
+     "reportRow must OMIT the ret key entirely when there is none, not store null — got " +
+     JSON.stringify(rowNoRet));
+
+  const rowNosellRet = reportRow(rowArgsRet({ verdict: "nosell", ret: 55 }));
+  ok(rowNosellRet && !("ret" in rowNosellRet),
+     "reportRow must never let a ret survive on a nosell verdict, got " + JSON.stringify(rowNosellRet));
+
+  const rowNullRet = reportRow(rowArgsRet({ verdict: null, ret: 55 }));
+  ok(rowNullRet && !("ret" in rowNullRet),
+     "reportRow must never let a ret survive on a null verdict, got " + JSON.stringify(rowNullRet));
+
+  const rowJunkRet = reportRow(rowArgsRet({ ret: 1001 }));
+  ok(rowJunkRet && !("ret" in rowJunkRet),
+     "reportRow must drop an out-of-band ret even on a sell row, got " + JSON.stringify(rowJunkRet));
+
+  console.log("[report ret] retForRow enforces the sell-only + (0,1000] finite-number discipline " +
+    "(0/negative/1001/NaN/±Infinity/string all dropped, rounded to one decimal otherwise, exactly like " +
+    "causeForRow's vocabulary check); reportRow OMITS the ret key entirely when there is none " +
+    "(undefined, never a stored null) exactly like cause");
+}
+
+/* ---- ۳۵. worker/report.js — reportText، خطِ میانه‌ی ret ----
+   فقط با حداقل ۵ ردیفِ retدار یک خطِ تازه می‌آید، درست بعدِ «had a sell "
+   route quoted.»؛ با کمتر از ۵ ردیف متن بایت‌به‌بایت همان چیزی می‌ماند که
+   بدونِ هیچ retای بود؛ برای تعدادِ زوج عضوِ پایین‌ترِ دو وسطی انتخاب می‌شود. */
+{
+  function mkRowRet(overrides) {
+    return Object.assign({
+      chain: "base", address: "0x" + "2".repeat(40), symbol: null, name: null,
+      v: "sell", checkKind: "sell-quote", checkedAt: "2026-09-14T00:00:00.000Z",
+      poolCreatedAt: null, priceUsd: null, reserveUsd: null, vol24hUsd: null, fdvUsd: null, dex: null,
+    }, overrides);
+  }
+  function mkAddrRet(n) { return "0x" + n.toString(16).padStart(40, "0"); }
+
+  // پنج ردیف — میانه با گردکردنِ عددِ اعشاری به عددِ صحیح.
+  const fiveVals = [10, 90, 50.6, 30, 70];
+  const rowsFive = fiveVals.map((r, i) => mkRowRet({ address: mkAddrRet(400 + i), ret: r }));
+  const tFive = reportText({ date: "2026-09-14", generatedAt: null, rows: rowsFive });
+  ok(typeof tFive === "string" && tFive.includes(
+    "0 had no sell route quoted.\n5 had a sell route quoted.\n" +
+    "A $100 sell quote came back at 51% for the median of them.\n0 could not be checked."),
+    "5 ret rows must add the median line right after \"had a sell route quoted.\", with the exact " +
+    "median (50.6 rounded to 51), got " + JSON.stringify(tFive));
+
+  // چهار ردیف — بایت‌به‌بایت همان سندِ بدونِ هیچ retای.
+  const fourVals = [10, 90, 50, 30];
+  const rowsFour = fourVals.map((r, i) => mkRowRet({ address: mkAddrRet(410 + i), ret: r }));
+  const rowsFourNoRet = rowsFour.map(({ ret, ...rest }) => rest);
+  const tFourWith = reportText({ date: "2026-09-14", generatedAt: null, rows: rowsFour });
+  const tFourNoRet = reportText({ date: "2026-09-14", generatedAt: null, rows: rowsFourNoRet });
+  ok(tFourWith === tFourNoRet,
+     "with fewer than 5 ret rows, reportText must be byte-for-byte identical to the same document with " +
+     "no ret fields at all, got:\n" + JSON.stringify(tFourWith) + "\nvs\n" + JSON.stringify(tFourNoRet));
+  ok(!tFourWith.includes("median of them"),
+     "with 4 ret rows the median line must not appear at all, got " + JSON.stringify(tFourWith));
+
+  // شش ردیف — عضوِ پایین‌ترِ دو وسطی (۳۰، نه ۴۰).
+  const sixVals = [50, 10, 60, 30, 40, 20];
+  const rowsSix = sixVals.map((r, i) => mkRowRet({ address: mkAddrRet(420 + i), ret: r }));
+  const tSix = reportText({ date: "2026-09-14", generatedAt: null, rows: rowsSix });
+  ok(tSix.includes("A $100 sell quote came back at 30% for the median of them."),
+     "6 ret rows must use the lower of the two middle values (30, not 40, and never an average), got " +
+     JSON.stringify(tSix));
+
+  console.log("[report text ret] reportText adds \"A $100 sell quote came back at NN% for the median " +
+    "of them.\" immediately after the \"had a sell route quoted.\" line only with 5+ numeric-ret rows, " +
+    "rounds the median to a whole number, uses the lower of the two middle values for an even count, " +
+    "and with fewer than 5 such rows the text is byte-for-byte identical to a document with no ret " +
+    "fields at all");
 }
 
 /* ---- ۲۸. متنِ گزارش — reportText و /report/<...>.txt ----

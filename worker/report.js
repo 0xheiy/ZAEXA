@@ -127,6 +127,18 @@ export function causeForRow(verdict, cause) {
   return typeof cause === "string" && REPORT_CAUSES.includes(cause) ? cause : undefined;
 }
 
+/* هم‌انضباطِ causeForRow/followForRow، ولی به‌جای یک واژه‌نامه‌ی بسته یک بازه‌ی
+   بسته: فقط وقتی verdict واقعاً "sell" است و ret عددی متناهی و در بازه‌ی
+   (۰, ۱۰۰۰] است زنده می‌ماند، وگرنه undefined — یک ret ساختگی/دست‌ساز هم
+   نباید در انبار بنشیند. عددِ برگشتی همیشه با یک رقمِ اعشار گرد شده است؛
+   verdict.js خودش هم دقیقاً همین گرد‌کردن را قبل از فرستادن انجام می‌دهد،
+   این‌جا فقط دوباره‌ سنجیده می‌شود، به آن اعتماد کورکورانه نمی‌شود. */
+export function retForRow(verdict, ret) {
+  if (verdict !== "sell") return undefined;
+  if (typeof ret !== "number" || !Number.isFinite(ret) || ret <= 0 || ret > 1000) return undefined;
+  return Math.round(ret * 10) / 10;
+}
+
 /* واژه‌نامه‌ی بسته‌ی follow — دقیقاً هم‌رده‌ی REPORT_CAUSES: امروز فقط دو
    عضو دارد، ولی فهرست است نه یک رشته‌ی تکی. */
 export const REPORT_FOLLOWS = Object.freeze(["pool-empty", "pool-there"]);
@@ -223,7 +235,7 @@ export function pickFollowUpTargets(doc, nowMs, cap = 12) {
    ازجمله) رفتارش را از رویِ آن عوض نمی‌کند. */
 export function reportRow({
   chain, address, symbol, name, verdict, checkedAt, poolCreatedAt, priceUsd, reserveUsd, vol24hUsd, fdvUsd, dex,
-  why, cause,
+  why, cause, ret,
 }) {
   try {
     if (verdict !== "sell" && verdict !== "nosell" && verdict !== null) return null; // هرگز یک حکم ساختگی
@@ -261,6 +273,11 @@ export function reportRow({
     // قابلِ‌مقایسه نمی‌مانند.
     const rowCause = causeForRow(verdict, cause);
     if (rowCause !== undefined) row.cause = rowCause;
+    // 🔴 هم‌انضباطِ cause: ret فقط وقتی کلید می‌سازد که واقعاً معنا داشته
+    // باشد — undefined هرگز کلید نمی‌شود، وگرنه سندهای امروز که اصلاً ret
+    // ندارند دیگر با سندهای تازه قابلِ‌مقایسه نمی‌مانند.
+    const rowRet = retForRow(verdict, ret);
+    if (rowRet !== undefined) row.ret = rowRet;
     return row;
   } catch (e) {
     return null;
@@ -419,6 +436,9 @@ export async function runReportPass({ kv, fetchPools, metaOf, verdictOf, now, sl
       // همان انضباطِ شکلِ why: یک verdictResult ناسالم (غیرِشیء) یعنی هیچ
       // cause‌ای هم نداریم — undefined، نه یک حدس.
       const cause = verdictOk ? verdictResult.cause : undefined;
+      // همان انضباط برای ret — فقط وقتی verdictResult واقعاً شیء است چیزی
+      // غیرِundefined می‌شود؛ reportRow/retForRow خودشان باز هم می‌سنجندش.
+      const ret = verdictOk ? verdictResult.ret : undefined;
 
       const checkedAt = new Date(now()).toISOString();
       // ⚠️ priceUsd/vol24hUsd/fdvUsd همیشه از t (همان ردیفِ pool که
@@ -440,6 +460,7 @@ export async function runReportPass({ kv, fetchPools, metaOf, verdictOf, now, sl
         dex: t.dex,
         why,
         cause,
+        ret,
       });
       if (row) builtRows.push(row);
     }
@@ -567,6 +588,20 @@ export function reportText(doc) {
     lines.push(total + " new Base token" + (total === 1 ? "" : "s") + " checked.");
     lines.push(flagged + " had no sell route quoted.");
     lines.push(quoted + " had a sell route quoted.");
+
+    // میانه‌ی درصدِ برگشت — فقط وقتی حداقل ۵ ردیفِ همین مجموعه‌ی فیلترشده
+    // ret عددی دارند؛ کمتر از ۵ یعنی متن بایت‌به‌بایت همان چیزی می‌ماند که
+    // پیش از این تغییر بود. برای تعدادِ زوج، عضوِ پایین‌ترِ دو وسطی انتخاب
+    // می‌شود — بدونِ میانگین‌گیری، تا نتیجه همیشه یکی از همان اعدادِ واقعی باشد.
+    const retValues = rows
+      .filter((r) => r.v === "sell" && typeof r.ret === "number" && Number.isFinite(r.ret))
+      .map((r) => r.ret)
+      .sort((a, b) => a - b);
+    if (retValues.length >= 5) {
+      const median = retValues[Math.floor((retValues.length - 1) / 2)];
+      lines.push("A $100 sell quote came back at " + Math.round(median) + "% for the median of them.");
+    }
+
     lines.push(unchecked + " could not be checked.");
 
     // پیگیریِ یک‌ساعته: فقط وقتی حداقل یک ردیفِ sell در همین مجموعه‌ی

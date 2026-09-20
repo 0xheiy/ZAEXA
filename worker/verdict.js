@@ -595,6 +595,92 @@ function decodeItemValue(item) {
   return decodeQuote(item.kind, item.result);
 }
 
+/* ---------------------------------------------------------------------
+   bestPositive / canaryUsdPerEth / retPctFrom — «چقدر برگشت»، نه فقط «آیا
+   برگشت». هرسه خالص‌اند، هرگز پرتاب نمی‌کنند؛ فقط opts.retOut در
+   fetchVerdict آن‌ها را صدا می‌زند، دقیقاً به همان سبکِ observer که
+   whyOut/collect پایین‌تر دارند — هیچ‌کدام روی خودِ verdict اثر نمی‌گذارد.
+   --------------------------------------------------------------------- */
+
+// بزرگ‌ترین مقدارِ مثبتِ رمزگشایی‌شده در کلِ batch، یا null — از همان
+// decodeItemValue بالا که verdictFrom خودش هم استفاده می‌کند (غیرمستقیم)،
+// تا قاعده‌ی رمزگشایی جایی جز اینجا دوباره نوشته نشود.
+export function bestPositive(batch) {
+  try {
+    const list = batch && Array.isArray(batch.items) ? batch.items : [];
+    let best = null;
+    for (const it of list) {
+      const v = decodeItemValue(it);
+      if (v != null && v > 0n && (best == null || v > best)) best = v;
+    }
+    return best;
+  } catch (e) {
+    return null; // هرگز پرتاب نمی‌کند
+  }
+}
+
+/* قیمتِ دلاریِ ۱ اتر، از رویِ همان کاناریِ همین batch (WETH→USDC،
+   uniswap-v3، دقیقاً ۰٫۰۱ WETH). این قیمت هرگز یک منبعِ مستقلِ دیگر نیست —
+   همان کوتی است که کاناری برای اثباتِ زنده‌بودنِ اندپوینت گرفته، حالا فقط
+   دوباره برای قیمت‌گذاری خوانده می‌شود؛ پس هیچ fetch اضافه‌ای لازم نیست و
+   قیمت دقیقاً همان لحظه‌ای است که خودِ کوت گرفته شده.
+   باندِ ۵۰ تا ۱۰۰۰۰۰ فقط عقل‌سنجی است: یک عددِ پرت (کاناریِ خراب یا
+   رمزگشاییِ غلط) هرگز به‌عنوانِ قیمت پذیرفته نمی‌شود — کاناریِ یک batch هم
+   هرگز نباید برای batchِ دیگری خوانده شود، هرکدام قیمتِ لحظه‌ی خودشان‌اند. */
+export function canaryUsdPerEth(batch) {
+  try {
+    const canary = batch && batch.canary;
+    if (!canary || canary.error || typeof canary.result !== "string") return null;
+    const v = decodeQuote("CL_UINT24", canary.result);
+    if (v == null || v <= 0n) return null;
+    const price = Number(v) / 1e6 / 0.01;
+    if (!Number.isFinite(price) || price < 50 || price > 100000) return null;
+    return price;
+  } catch (e) {
+    return null;
+  }
+}
+
+// سقفِ بالای یک درصدِ معقول — بالاتر از این یعنی جایی رمزگشایی/قیمت‌گذاری
+// غلط شده، نه اینکه واقعاً هزار درصد برگشته؛ retPctFrom چنین چیزی را دور
+// می‌ریزد، هرگز کلمپ نمی‌کند.
+export const VD_RET_MAX_PCT = 1000;
+
+/* درصدِ برگشتِ یک کوتِ فروش، در برابرِ VD_NOTIONAL_USD ($۱۰۰) — یعنی دقیقاً
+   همین سوال: «برای صد دلار خرید، صرافی الان چقدر پس می‌دهد؟»، نه چیزِ
+   بیشتر.
+   🔴 این عدد قیمتِ «واقعیِ» توکن را اثبات نمی‌کند و نمی‌گوید توکن ارزشش
+   چقدر است — فقط می‌گوید استخرها در برابرِ همان صد دلارِ لیست‌شده‌ی بالادست
+   چه کوتی می‌دهند؛ پس این تابع همیشه کوت را با قیمتِ لیست‌شده‌ی بالادست
+   می‌سنجد، هرگز یک حقیقتِ مستقل درباره‌ی توکن. اسپرد/اسلیپیج/نقدینگیِ کم
+   همه‌شان همین‌جا افتاده‌اند.
+   یک عددِ غایب («نتوانستیم قیمت‌گذاری کنیم») هرگز صفر نیست — دو معنیِ
+   کاملاً متفاوت‌اند، دقیقاً همان قاعده‌ای که why/cause هم رعایت می‌کنند. */
+export function retPctFrom(batch, stage) {
+  try {
+    const best = bestPositive(batch);
+    if (best == null) return null;
+
+    let recoveredUsd;
+    if (stage === "usdc") {
+      recoveredUsd = Number(best) / 1e6; // USDC، ۶ رقم اعشار
+    } else if (stage === "weth") {
+      const price = canaryUsdPerEth(batch);
+      if (price == null) return null;
+      recoveredUsd = (Number(best) / 1e18) * price; // WETH، ۱۸ رقم اعشار
+    } else {
+      return null; // stageِ ناشناخته → هرگز حدس نزن
+    }
+    if (!Number.isFinite(recoveredUsd)) return null;
+
+    const pct = Math.round((recoveredUsd / VD_NOTIONAL_USD) * 100 * 10) / 10;
+    if (!Number.isFinite(pct) || pct <= 0 || pct > VD_RET_MAX_PCT) return null; // پرت → دورریخته، هرگز کلمپ‌شده
+    return pct;
+  } catch (e) {
+    return null;
+  }
+}
+
 export function verdictFrom({ canary, items }) {
   const list = items || [];
 
@@ -841,6 +927,15 @@ export async function fetchVerdict(tokenAddr, meta, opts) {
     if (batch.items.some((it) => v4NoLiquidityProof(it))) whyOut.v4Proof = true;
   }
 
+  // opts.retOut هم دقیقاً همان الگوی opts.whyOut است — نبودنش رفتار و
+  // هزینه را بایت‌به‌بایت همان چیزی نگه می‌دارد که امروز است. فقط درست
+  // پیش از هر "sell" صدا زده می‌شود، با batch و stageِ همان لحظه — هرگز
+  // روی nosell/null، و هرگز با batchِ یک مرحله‌ی دیگر.
+  const retOut = o.retOut && typeof o.retOut === "object" ? o.retOut : null;
+  function setRet(batch, stage) {
+    if (retOut) retOut.ret = retPctFrom(batch, stage);
+  }
+
   try {
     const amt = sellAmountFrom(meta && meta.priceUsd, meta && meta.decimals);
     if (amt == null) { setWhy("no-amount"); return null; } // بدونِ مقدار معنادار حتی یک fetch هم لازم نیست
@@ -889,7 +984,7 @@ export async function fetchVerdict(tokenAddr, meta, opts) {
       if (!canaryAlive) { canaryDeadCount++; continue; } // کاناریِ مرده → این اندپوینت هم قابلِ‌اعتماد نیست، بعدی
 
       const verdictA = verdictFrom(batchA);
-      if (verdictA === "sell") return "sell";
+      if (verdictA === "sell") { setRet(batchA, "weth"); return "sell"; }
       if (verdictA !== "nosell") {
         /* ابهامِ ردیف‌ها با کاناریِ زنده — دلیلِ عوض‌کردنِ اندپوینت نیست، و
            تا امروز همین‌جا با null تمام می‌شد.
@@ -913,7 +1008,7 @@ export async function fetchVerdict(tokenAddr, meta, opts) {
         if (deadlineHit("usdc-proof")) return null;
         const batchP = await callBatch(fetchImpl, rpc, canary, proofItems, timeoutMs, collect, "usdc-proof");
         if (batchP == null) { setWhy("proof-rpc"); return null; }
-        if (verdictFrom(batchP) === "sell") return "sell";
+        if (verdictFrom(batchP) === "sell") { setRet(batchP, "usdc"); return "sell"; }
         setWhy("proof-no-quote");
         return null;
       }
@@ -924,7 +1019,7 @@ export async function fetchVerdict(tokenAddr, meta, opts) {
       if (batchB == null) { setWhy("usdc-rpc"); return null; } // ابهامِ مرحله‌ی B هم اندپوینتِ بعدی را صدا نمی‌زند
 
       const verdictB = verdictFrom(batchB);
-      if (verdictB === "sell") return "sell";
+      if (verdictB === "sell") { setRet(batchB, "usdc"); return "sell"; }
       if (verdictB === "nosell") { markV4Proof(batchA); markV4Proof(batchB); return "nosell"; }
       setWhy("usdc-no-proof");
       return null;

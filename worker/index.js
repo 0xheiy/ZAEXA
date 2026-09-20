@@ -902,6 +902,9 @@ async function ogFetchVerdictDetail(addr, meta, deadlineAt, env, ctx, metaWhy) {
   // null بماند معنا دارد — دقیقاً همان الگویی که solFetchVerdict برای why
   // بیرونِ cachedVerdict دارد.
   let baseWhy;
+  // ret فقط از computeFn پر می‌شود، هرگز از ضربه‌ی کش — یک "sell"ِ کش‌شده
+  // بدونِ batchِ تازه، ret ندارد و همین درست است؛ چیزی حدسی جایش نمی‌نشیند.
+  let ret;
   const cacheOut = {}; // {v4Proof} — هم از computeFn پر می‌شود هم از ضربه‌ی کش
   const raw = await cachedVerdict(
     "/v1/" + network + "/" + addr.toLowerCase(),
@@ -923,9 +926,11 @@ async function ogFetchVerdictDetail(addr, meta, deadlineAt, env, ctx, metaWhy) {
         }
       }
       const whyOut = {};
+      const retOut = {};
       const result = await fetchVerdict(addr, meta,
-        { deadlineAt, fetchImpl: fetch, rpcs: baseRpcsFor(env), v4Keys, whyOut });
+        { deadlineAt, fetchImpl: fetch, rpcs: baseRpcsFor(env), v4Keys, whyOut, retOut });
       baseWhy = whyOut.why;
+      ret = retOut.ret;
       if (whyOut.v4Proof === true) cacheOut.v4Proof = true;
       return result;
     },
@@ -940,7 +945,14 @@ async function ogFetchVerdictDetail(addr, meta, deadlineAt, env, ctx, metaWhy) {
      هم دوباره از همین گیت رد می‌شود — یک "nosell"ِ کش‌شده هرگز بدونِ این
      چک به بیرون نمی‌رود. */
   if (chain !== "base" || raw !== "nosell") {
-    return raw === null ? { v: null, why: baseWhy || "internal" } : { v: raw, why: null };
+    return raw === null
+      ? { v: null, why: baseWhy || "internal" }
+      // ret فقط کنارِ یک "sell" واقعی می‌نشیند — یک "nosellِ" غیرِBase هم از
+      // همین شاخه رد می‌شود ولی هرگز ret نمی‌گیرد. و حتی روی "sell" هم ret
+      // فقط وقتی عدد است می‌نشیند — retPctFrom که نتوانسته قیمت‌گذاری کند
+      // null می‌دهد، و آن null هم باید undefined بشود، نه یک کلیدِ واقعی با
+      // مقدارِ null: «نتوانستیم اندازه بگیریم» باید غایب باشد، نه صفر/null.
+      : { v: raw, why: null, ret: raw === "sell" && typeof ret === "number" ? ret : undefined };
   }
   const covered = await baseVenueCoveredDetail(addr, env);
   // 🔴 شکستِ خودِ چکِ پوشش (false یا null) هم به نامعلوم تنزل می‌کند —
@@ -1275,11 +1287,15 @@ async function diagVerdict(request, url, env, ctx) {
   // شاخه‌ی سولانا بالاتر هم دارد)، نه اینکه همیشه یک internal حدسی بگوید.
   // cause هم از همان قاعده پیروی می‌کند: فقط وقتی v واقعاً "nosell" است —
   // یک sell/null همان شکلِ امروز را بایت‌به‌بایت نگه می‌دارد.
-  const { v, why, cause } = await ogFetchVerdictDetail(addr, meta, t0 + OG_BUDGET_MS, env, ctx, metaWhy);
+  // ret هم دقیقاً همین قاعده را دارد، ولی برعکس: فقط کنارِ v==="sell" —
+  // چقدر از صد دلارِ فرضی برگشت، نه اینکه فروش رخ داد یا نه؛ nosell/null
+  // هرگز ret نمی‌گیرد.
+  const { v, why, cause, ret } = await ogFetchVerdictDetail(addr, meta, t0 + OG_BUDGET_MS, env, ctx, metaWhy);
   return vdDone(200, {
     v, ms: Date.now() - t0,
     why: v === null ? why : undefined,
     cause: v === "nosell" ? cause : undefined,
+    ret: v === "sell" && typeof ret === "number" ? ret : undefined,
   });
 }
 
