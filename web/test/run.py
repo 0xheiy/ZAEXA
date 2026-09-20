@@ -2789,6 +2789,64 @@ async def main():
         assert r15_rescue["canSell"] is True, \
             "a server-confirmed sell must rescue a browser-side unknown"
 
+        # ---- fix9: علتِ «empty-pool» رویِ یک nosellِ سروری — «استخر خالی است»
+        # به‌جای جمله‌ی همیشگیِ چندپهلو، فقط وقتی سرور خودش cause را داده.
+        r_cause_yes = await pg.evaluate("""async () => {
+            const realCT = checkTradability, realVD = fetchVdVerdict, realML = measureLiquidity;
+            checkTradability = async () => ({buy: true, sell: false, roundTrip: null, unknown: false});
+            fetchVdVerdict = async () => ({v: "nosell", why: null, cause: "empty-pool"});
+            measureLiquidity = async () => 200000;
+            const rep = await scanToken(tokenOut);
+            checkTradability = realCT; fetchVdVerdict = realVD; measureLiquidity = realML;
+            const hit = rep.findings.find(f => f.title === "Cannot get a sell quote");
+            return {detail: hit ? hit.detail : null};
+        }""")
+        print("[risk cause] server verdict nosell with empty-pool cause -> detail=%r" % r_cause_yes["detail"])
+        assert r_cause_yes["detail"] is not None and "no liquidity left in the pool" in r_cause_yes["detail"], \
+            "an empty-pool cause must produce the pool-specific wording, got %r" % r_cause_yes["detail"]
+
+        r_cause_no = await pg.evaluate("""async () => {
+            const realCT = checkTradability, realVD = fetchVdVerdict, realML = measureLiquidity;
+            checkTradability = async () => ({buy: true, sell: false, roundTrip: null, unknown: false});
+            fetchVdVerdict = async () => ({v: "nosell", why: null});
+            measureLiquidity = async () => 200000;
+            const rep = await scanToken(tokenOut);
+            checkTradability = realCT; fetchVdVerdict = realVD; measureLiquidity = realML;
+            const hit = rep.findings.find(f => f.title === "Cannot get a sell quote");
+            return {detail: hit ? hit.detail : null};
+        }""")
+        print("[risk cause] server verdict nosell without cause -> detail=%r" % r_cause_no["detail"])
+        assert r_cause_no["detail"] == (
+            "No pool we quote would sell this back, and the server check found no way to sell it "
+            "either. That can be a token that blocks selling or a pool whose liquidity was pulled "
+            "— either way there is no exit right now."
+        ), "without a cause, the detail must stay byte-for-byte today's wording, got %r" % r_cause_no["detail"]
+
+        # fetchVdVerdict itself must reject any cause other than "empty-pool" —
+        # a junk upstream value must never reach the panel as a claim.
+        r_cause_junk = await pg.evaluate("""async () => {
+            const realFetch = window.fetch;
+            window.fetch = async () => new Response(JSON.stringify({v: "nosell", cause: "whatever"}),
+                {status: 200});
+            const direct = await fetchVdVerdict("0x" + "16".repeat(20));
+            window.fetch = realFetch;
+
+            const realCT = checkTradability, realVD = fetchVdVerdict, realML = measureLiquidity;
+            checkTradability = async () => ({buy: true, sell: false, roundTrip: null, unknown: false});
+            fetchVdVerdict = async () => ({v: "nosell", why: null, cause: "whatever"});
+            measureLiquidity = async () => 200000;
+            const rep = await scanToken(tokenOut);
+            checkTradability = realCT; fetchVdVerdict = realVD; measureLiquidity = realML;
+            const hit = rep.findings.find(f => f.title === "Cannot get a sell quote");
+            return {directCause: direct.cause, detail: hit ? hit.detail : null};
+        }""")
+        print("[fetchVdVerdict cause] junk cause from upstream -> directCause=%s detail=%r"
+              % (r_cause_junk["directCause"], r_cause_junk["detail"]))
+        assert r_cause_junk["directCause"] is None, \
+            "fetchVdVerdict must turn any non-\"empty-pool\" cause into null, got %r" % r_cause_junk["directCause"]
+        assert r_cause_junk["detail"] == r_cause_no["detail"], \
+            "a junk cause must fall back to the neutral panel wording, got %r" % r_cause_junk["detail"]
+
         # ---- باگ ۱۶: عددِ کمِ نقدینگی بدونِ شاهدِ پوشش اتهام نیست ----
         r16_false = await pg.evaluate("""async () => {
             const realML = measureLiquidity, realCov = liqCoverage, realCT = checkTradability;
@@ -3337,6 +3395,24 @@ async def main():
         assert "No way out" in r13_nosell["text"] and r13_nosell["badge"] == "Server check", \
             "a server-confirmed no-sell must render the No way out/Server check state: %r" % r13_nosell["text"]
         assert not r13_nosell["cacheGrew"] and not r13_nosell["cacheHasKey"], \
+            "a server verdict must never write to exitCache"
+
+        # ---- fix9: علتِ «empty-pool» رویِ نوارِ رفت‌وبرگشت (tokenExitFallback) ----
+        r_exit_cause_yes = await pg.evaluate(EXIT13_SETTLE_PROBE,
+                                              {"v": "nosell", "why": None, "cause": "empty-pool"})
+        print("[exit cause] no-route, server verdict nosell + empty-pool -> text=%r"
+              % r_exit_cause_yes["text"])
+        assert "no liquidity left in it" in r_exit_cause_yes["text"], \
+            "an empty-pool cause must show the pool-specific note, got %r" % r_exit_cause_yes["text"]
+        assert not r_exit_cause_yes["cacheGrew"] and not r_exit_cause_yes["cacheHasKey"], \
+            "a server verdict must never write to exitCache, even with a cause"
+
+        r_exit_cause_no = await pg.evaluate(EXIT13_SETTLE_PROBE, {"v": "nosell", "why": None})
+        print("[exit cause] no-route, server verdict nosell without cause -> text=%r"
+              % r_exit_cause_no["text"])
+        assert "found no way to sell it back either" in r_exit_cause_no["text"], \
+            "without a cause, the note must stay byte-for-byte today's wording, got %r" % r_exit_cause_no["text"]
+        assert not r_exit_cause_no["cacheGrew"] and not r_exit_cause_no["cacheHasKey"], \
             "a server verdict must never write to exitCache"
 
         # نگهبانِ زمانی: وقتی هیچ‌کدام از مسیرهای بالا نرسند (route هرگز جواب

@@ -18,10 +18,12 @@ import {
   newPoolRowToToken, reportRow, mergeReportDoc, mergePairsRing,
   utcDateOf, reportKey, emptyReportDoc, runReportPass,
   reportText, REPORT_TEXT_FIRST_DATE,
+  causeForRow, REPORT_CAUSES,
 } from "./report.js";
 import * as v4 from "./v4index.js";
 import {
   readV4Keys, readV4Entry, rpcCallBase, fetchV4Pools, storeV4Result, v4StoreTtl, runV4Index,
+  v4PoolsEmpty, V4_STATE_VIEW, V4_GET_LIQUIDITY_SEL,
 } from "./index.js";
 
 let fails = 0;
@@ -5996,6 +5998,285 @@ console.log("[v4 index wiring] worker/index.js ok — v4StoreTtl/storeV4Result f
   "and ogFetchVerdict schedules exactly one background index pass via ctx.waitUntil only when nothing is " +
   "stored yet, never again once an entry (even a miss) exists");
 
+/* ---- ۲۷ب. worker/index.js — v4PoolsEmpty و علتِ «empty-pool» رویِ یک nosell ----
+   اندازه‌گیریِ ۲۰ شهریور بالای همین فایل: از ۹ nosellِ امروز، ۷ تا استخری
+   بودند که نقدینگی‌اش ۱ تا ۵ دقیقه پیش از چکِ ما کشیده شده بود (اثبات از
+   رویِ رخدادهای ModifyLiquidity زنجیره‌ی PoolManager)، و ۲ تا هنوز نقدینگی
+   داشتند. StateView.getLiquidity(poolId) این دو دسته را بی‌نقص جدا می‌کند:
+   صفر برای همان ۷ تا، غیرصفر برای آن ۲ تا. اینجا همان شاهد، از رویِ یک
+   worker.fetch("/vd/<addr>") واقعی، سنجیده می‌شود — نه فقط تابعِ خام. */
+{
+  const { UPSTREAM_FREE: UF_C9 } = await import("./index.js");
+  const w9 = (n) => BigInt(n).toString(16).padStart(64, "0");
+  const mkStatic4_9 = (n) => "0x" + w9(n) + w9(0) + w9(0) + w9(0);
+  const jsonRes9 = (body, status = 200) => new Response(JSON.stringify(body), {
+    status, headers: { "content-type": "application/json" },
+  });
+  const poolsBody9 = (dexIds) => ({
+    data: dexIds.map((id) => ({ relationships: { dex: { data: { id } } } })),
+  });
+  const gtMetaFor9 = (name) => jsonRes9({ data: { attributes: {
+    name, symbol: "GST", total_reserve_in_usd: "1000", decimals: 18, price_usd: "1" } } });
+
+  const PID1 = "0x" + "aa".repeat(32);
+  const PID2 = "0x" + "bb".repeat(32);
+  const kvWith = (keys) => ({ get: async () => JSON.stringify({ keys, reason: "ok" }), put: async () => {} });
+
+  /* یک fetchِ جعلیِ عمومی برای این بخش: /pools یک استخرِ پوشش‌داده‌شده
+     می‌دهد، متادیتا برمی‌گردد، پروبِ صرافی‌ها همه‌جا ریوِرت می‌کند (nosellِ
+     خام)، و eth_call رویِ هر poolId از رویِ liqByPoolId جواب می‌دهد —
+     null یعنی خودِ پاسخ ناخواندنی (۵۰۰) باشد.
+     ⚠️ فقط بدنه‌ی تکیِ JSON-RPC (نه آرایه‌ی batch پروبِ صرافی‌ها) را
+     eth_call می‌شمارد — دقیقاً همان چیزی که rpcCallBase/v4PoolsEmpty
+     می‌سازد، برخلافِ آرایه‌ای که fetchVerdict برای batch می‌فرستد. */
+  function makeFetch9(liqByPoolId, ethCallsOut) {
+    return async (url, init) => {
+      const u = String(url);
+      if (u.endsWith("/pools")) return jsonRes9(poolsBody9(["uniswap-v3-base"]));
+      if (u.startsWith(UF_C9)) return gtMetaFor9("Empty Pool Token");
+      const parsed = JSON.parse(init.body);
+      if (Array.isArray(parsed)) {
+        return jsonRes9(parsed.map((r) => r.id === 0
+          ? { id: 0, result: mkStatic4_9(5) } : { id: r.id, error: { code: 3 } }));
+      }
+      if (parsed.method === "eth_call") {
+        if (ethCallsOut) ethCallsOut.push({ to: parsed.params[0].to, data: parsed.params[0].data });
+        const poolId = "0x" + parsed.params[0].data.slice(10);
+        const has = Object.prototype.hasOwnProperty.call(liqByPoolId, poolId);
+        const liq = has ? liqByPoolId[poolId] : undefined;
+        if (liq === null || liq === undefined) return new Response("boom", { status: 500 });
+        return jsonRes9({ jsonrpc: "2.0", id: parsed.id, result: "0x" + BigInt(liq).toString(16).padStart(64, "0") });
+      }
+      return new Response("unexpected rpc call in this section: " + JSON.stringify(parsed), { status: 500 });
+    };
+  }
+
+  const savedFetch = globalThis.fetch;
+
+  // (۱) هر دو کلیدِ واقعی صفر → cause:"empty-pool"، و خودِ eth_call با
+  // calldataِ V4_GET_LIQUIDITY_SEL+poolId به V4_STATE_VIEW رفته است.
+  {
+    const ADDR = "0x" + "51".repeat(20);
+    const ethCalls = [];
+    globalThis.fetch = makeFetch9({ [PID1]: 0n, [PID2]: 0n }, ethCalls);
+    const res = await call("/vd/" + ADDR, { headers: { "cf-connecting-ip": "203.0.113.221" } },
+      { ASSETS, ZX_KV: kvWith([{ poolId: PID1 }, { poolId: PID2 }]) });
+    const body = await res.json();
+    ok(body.v === "nosell" && body.cause === "empty-pool",
+      "every v4 key reporting zero liquidity must yield {v:nosell,cause:empty-pool} on /vd, got " +
+      JSON.stringify(body));
+    ok(ethCalls.length === 2 && ethCalls.every((c) => c.to.toLowerCase() === V4_STATE_VIEW.toLowerCase()),
+      "v4PoolsEmpty must eth_call V4_STATE_VIEW for every real key, got " + JSON.stringify(ethCalls));
+    ok(ethCalls.every((c) => c.data === V4_GET_LIQUIDITY_SEL + PID1.slice(2) ||
+      c.data === V4_GET_LIQUIDITY_SEL + PID2.slice(2)),
+      "the eth_call data must be V4_GET_LIQUIDITY_SEL followed by the poolId's own 32 bytes, got " +
+      JSON.stringify(ethCalls));
+  }
+  console.log("[v4 empty-pool cause] a nosell whose every real v4 key reads zero on live " +
+    "StateView.getLiquidity gets cause:\"empty-pool\" from /vd/<addr>; the eth_call itself is verified " +
+    "against the intercepted JSON-RPC request to go to V4_STATE_VIEW with V4_GET_LIQUIDITY_SEL+poolId " +
+    "as calldata");
+
+  // (۲) یک کلیدِ پرنقدینگی کافی است — هیچ cause‌ای در پاسخ نباشد.
+  {
+    const ADDR = "0x" + "52".repeat(20);
+    globalThis.fetch = makeFetch9({ [PID1]: 777n, [PID2]: 0n });
+    const res = await call("/vd/" + ADDR, { headers: { "cf-connecting-ip": "203.0.113.222" } },
+      { ASSETS, ZX_KV: kvWith([{ poolId: PID1 }, { poolId: PID2 }]) });
+    const body = await res.json();
+    ok(body.v === "nosell", "sanity: this scenario must still verdict nosell, got " + JSON.stringify(body));
+    ok(!("cause" in body), "one non-zero v4 key must leave the /vd response with no \"cause\" key at all, got " +
+      JSON.stringify(body));
+  }
+  console.log("[v4 empty-pool cause] one real v4 key reading non-zero liquidity leaves /vd with no " +
+    "\"cause\" key at all — liquidity present is never reported as the empty-pool story");
+
+  // (۳) خودِ RPC ناخواندنی (۵۰۰، یا نتیجه‌ی غیرِهگزادسیمال) → هیچ cause‌ای —
+  // کنترلِ مثبت: «نتوانستیم بپرسیم» هرگز به یک ادعا تبدیل نمی‌شود.
+  {
+    const ADDR = "0x" + "53".repeat(20);
+    globalThis.fetch = makeFetch9({ [PID1]: null });
+    const res500 = await call("/vd/" + ADDR, { headers: { "cf-connecting-ip": "203.0.113.223" } },
+      { ASSETS, ZX_KV: kvWith([{ poolId: PID1 }]) });
+    const body500 = await res500.json();
+    ok(body500.v === "nosell" && !("cause" in body500),
+      "a 500 answering the eth_call itself must leave /vd with no cause key, got " + JSON.stringify(body500));
+
+    const ADDR2 = "0x" + "54".repeat(20);
+    globalThis.fetch = async (url, init) => {
+      const u = String(url);
+      if (u.endsWith("/pools")) return jsonRes9(poolsBody9(["uniswap-v3-base"]));
+      if (u.startsWith(UF_C9)) return gtMetaFor9("Bad Hex Token");
+      const parsed = JSON.parse(init.body);
+      if (Array.isArray(parsed)) {
+        return jsonRes9(parsed.map((r) => r.id === 0
+          ? { id: 0, result: mkStatic4_9(5) } : { id: r.id, error: { code: 3 } }));
+      }
+      return jsonRes9({ jsonrpc: "2.0", id: parsed.id, result: "not-hex" }); // نتیجه‌ی غیرِهگزادسیمال
+    };
+    const resBad = await call("/vd/" + ADDR2, { headers: { "cf-connecting-ip": "203.0.113.224" } },
+      { ASSETS, ZX_KV: kvWith([{ poolId: PID1 }]) });
+    const bodyBad = await resBad.json();
+    ok(bodyBad.v === "nosell" && !("cause" in bodyBad),
+      "a non-0x-hex eth_call result must leave /vd with no cause key, got " + JSON.stringify(bodyBad));
+
+    // هیچ کلیدِ واقعی‌ای ذخیره نشده — v4PoolsEmpty حتی نباید یک eth_call هم بزند.
+    const ADDR3 = "0x" + "5c".repeat(20);
+    const ethCallsEmpty = [];
+    globalThis.fetch = makeFetch9({}, ethCallsEmpty);
+    const resEmpty = await call("/vd/" + ADDR3, { headers: { "cf-connecting-ip": "203.0.113.227" } },
+      { ASSETS, ZX_KV: kvWith([]) });
+    const bodyEmpty = await resEmpty.json();
+    ok(bodyEmpty.v === "nosell" && !("cause" in bodyEmpty),
+      "an empty stored v4 key list must leave /vd with no cause key, got " + JSON.stringify(bodyEmpty));
+    ok(ethCallsEmpty.length === 0,
+      "an empty stored v4 key list must never even attempt an eth_call, got " + ethCallsEmpty.length);
+
+    /* بودجه‌ی زمانی — یک توضیح هرگز نباید جوابِ اصلی را دیر کند. با
+       deadlineAtِ گذشته، v4PoolsEmpty باید بدونِ هیچ eth_callی نامعلوم
+       بدهد؛ و کنترلِ مثبت: با بودجه‌ی کافی همان ورودی جواب می‌دهد. */
+    const ethCallsLate = [];
+    globalThis.fetch = makeFetch9({ [PID1]: 0n }, ethCallsLate);
+    const envBudget = { ASSETS, ZX_KV: kvWith([{ poolId: PID1 }]) };
+    const lateVal = await v4PoolsEmpty(ADDR2, envBudget, Date.now() - 1);
+    ok(lateVal === null,
+      "an exhausted budget must read as unknown, got " + JSON.stringify(lateVal));
+    ok(ethCallsLate.length === 0,
+      "an exhausted budget must not spend an eth_call, got " + ethCallsLate.length);
+    const roomyVal = await v4PoolsEmpty(ADDR2, envBudget, Date.now() + 5000);
+    ok(roomyVal === true,
+      "the same input with budget left must still witness the empty pool, got " + JSON.stringify(roomyVal));
+    ok(ethCallsLate.length === 1,
+      "the budgeted control must spend exactly one eth_call, got " + ethCallsLate.length);
+  }
+  console.log("[v4 empty-pool budget] the explanation is skipped, not guessed, when the caller's deadline " +
+    "is spent: no eth_call and no cause — with a positive control on the same input");
+  console.log("[v4 empty-pool cause] an unreadable RPC answer (a 500, or a non-hex result) never becomes " +
+    "a cause — \"could not ask\" stays absent, the positive control for the empty-pool claim");
+
+  // (۴) یک حکمِ sell و یک حکمِ null: شکلِ /vd بایت‌به‌بایت مثلِ قبل، بدونِ
+  // cause، و v4PoolsEmpty اصلاً صدا زده نمی‌شود — با شمارشِ خودِ eth_callها.
+  {
+    let ethCallCount = 0;
+    function countingWrap(inner) {
+      return async (url, init) => {
+        try {
+          const parsed = init && init.body ? JSON.parse(init.body) : null;
+          if (parsed && !Array.isArray(parsed) && parsed.method === "eth_call") ethCallCount++;
+        } catch (e) { /* بدنه‌ی غیرِJSON، اهمیتی ندارد */ }
+        return inner(url, init);
+      };
+    }
+
+    const ADDR_SELL = "0x" + "55".repeat(20);
+    globalThis.fetch = countingWrap(async (url, init) => {
+      const u = String(url);
+      if (u.endsWith("/pools")) return jsonRes9(poolsBody9(["uniswap-v3-base"]));
+      if (u.startsWith(UF_C9)) return gtMetaFor9("Sell Token C9");
+      const reqs = JSON.parse(init.body);
+      return jsonRes9(reqs.map((r) => r.id === 0
+        ? { id: 0, result: mkStatic4_9(5) }
+        : { id: r.id, result: r.id === 1 ? mkStatic4_9(777) : "0x" }));
+    });
+    const resSell = await call("/vd/" + ADDR_SELL, { headers: { "cf-connecting-ip": "203.0.113.225" } },
+      { ASSETS, ZX_KV: kvWith([{ poolId: PID1 }]) });
+    const bodySell = await resSell.json();
+    ok(bodySell.v === "sell" && JSON.stringify(Object.keys(bodySell).sort()) === JSON.stringify(["ms", "v"]),
+      "a sell verdict's /vd response must keep today's exact shape (only v, ms), got " + JSON.stringify(bodySell));
+
+    const ADDR_NULL = "0x" + "56".repeat(20);
+    globalThis.fetch = countingWrap(async () => new Response("boom", { status: 500 }));
+    const resNull = await call("/vd/" + ADDR_NULL, { headers: { "cf-connecting-ip": "203.0.113.226" } },
+      { ASSETS, ZX_KV: kvWith([{ poolId: PID1 }]) });
+    const bodyNull = await resNull.json();
+    ok(bodyNull.v === null && !("cause" in bodyNull),
+      "a null verdict must keep today's /vd shape, no cause key, got " + JSON.stringify(bodyNull));
+
+    ok(ethCallCount === 0,
+      "v4PoolsEmpty must never be reached on a sell or a null verdict, eth_call attempts=" + ethCallCount);
+  }
+  console.log("[v4 empty-pool cause] a \"sell\" verdict and a null verdict keep today's /vd shape byte-" +
+    "for-byte (no cause key at all, why unaffected) and never reach v4PoolsEmpty — proven by counting " +
+    "eth_call attempts, not just by reading the response");
+
+  globalThis.fetch = savedFetch;
+}
+
+/* ---- ۲۷ج. worker/report.js — causeForRow، ردیف، و متنِ گزارش ----
+   دقیقاً همان انضباطِ whyForRow: فقط verdict==="nosell" و فقط رشته‌ای عضوِ
+   REPORT_CAUSES از این تابع زنده بیرون می‌آید؛ هر چیزِ دیگر undefined است،
+   نه null و نه یک رشته‌ی دست‌ساز. */
+{
+  ok(causeForRow("nosell", "empty-pool") === "empty-pool",
+    "causeForRow must let \"empty-pool\" survive on a nosell row");
+  ok(causeForRow("sell", "empty-pool") === undefined,
+    "causeForRow must drop \"empty-pool\" on a sell row (a cause on a positive verdict is a fabricated claim)");
+  ok(causeForRow(null, "empty-pool") === undefined,
+    "causeForRow must drop \"empty-pool\" on a null verdict row");
+  ok(causeForRow("nosell", "made-up-cause") === undefined,
+    "causeForRow must drop any string not in REPORT_CAUSES, even on a nosell row");
+  ok(causeForRow("nosell", undefined) === undefined && causeForRow("nosell", null) === undefined,
+    "causeForRow must give undefined (not null) for an absent cause");
+  ok(JSON.stringify(REPORT_CAUSES) === JSON.stringify(["empty-pool"]) && Object.isFrozen(REPORT_CAUSES),
+    "REPORT_CAUSES must be the frozen one-member closed vocabulary, got " + JSON.stringify(REPORT_CAUSES));
+
+  const T9 = "2026-09-20T00:00:00.000Z";
+  function rowArgs(extra) {
+    return Object.assign({ chain: "base", address: "0x" + "9".repeat(40), symbol: "T9", name: "T9",
+      verdict: "nosell", checkedAt: T9, poolCreatedAt: null, priceUsd: 1, reserveUsd: 1, vol24hUsd: 1,
+      fdvUsd: 1, dex: "uniswap-v3-base", why: null }, extra);
+  }
+  const rowWithCause = reportRow(rowArgs({ cause: "empty-pool" }));
+  ok(rowWithCause && rowWithCause.cause === "empty-pool",
+    "reportRow must carry cause:\"empty-pool\" through on a nosell row, got " + JSON.stringify(rowWithCause));
+
+  const rowNoCause = reportRow(rowArgs({}));
+  ok(rowNoCause && !("cause" in rowNoCause),
+    "reportRow must OMIT the cause key entirely when there is none, not store null — got " +
+    JSON.stringify(rowNoCause));
+
+  const rowSellCause = reportRow(rowArgs({ verdict: "sell", cause: "empty-pool" }));
+  ok(rowSellCause && !("cause" in rowSellCause),
+    "reportRow must never let a cause survive on a sell verdict, got " + JSON.stringify(rowSellCause));
+
+  const rowJunkCause = reportRow(rowArgs({ cause: "made-up" }));
+  ok(rowJunkCause && !("cause" in rowJunkCause),
+    "reportRow must drop an unknown cause string even on a nosell row, got " + JSON.stringify(rowJunkCause));
+
+  function docWith(rows) {
+    return { date: "2026-09-20", generatedAt: T9, chains: ["base"], checked: rows.length, rows };
+  }
+  const rowPlainNoSell = reportRow(rowArgs({ address: "0x" + "8".repeat(40), symbol: "T8" }));
+  const textWithCause = reportText(docWith([rowWithCause]));
+  const textNoCause = reportText(docWith([rowPlainNoSell]));
+  ok(typeof textWithCause === "string" && textWithCause.includes("$T9 — no sell route quoted · pool is empty"),
+    "reportText must append \" · pool is empty\" to a row whose cause is empty-pool, got " +
+    JSON.stringify(textWithCause));
+  ok(typeof textNoCause === "string" && textNoCause.includes("$T8 — no sell route quoted") &&
+    !textNoCause.includes("pool is empty"),
+    "reportText must leave a causeless row's line byte-for-byte as today's, got " + JSON.stringify(textNoCause));
+
+  // یک سندِ بدونِ هیچ causeای باید بایت‌به‌بایت همان چیزی بماند که پیش از
+  // این تغییر بود — هیچ ستون/فاصله‌ای در ردیف‌های دیگر عوض نشود.
+  // ⚠️ خطِ سرتیترِ «Exit Report · <date>» خودش همیشه یک «·» دارد — پس این
+  // چک فقط دنبالِ پسوندِ مشخصِ « · pool is empty» است، نه هر «·»ای.
+  const docNoCauses = docWith([
+    reportRow(rowArgs({ address: "0x" + "7".repeat(40), symbol: "T7", verdict: "sell", why: null })),
+    reportRow(rowArgs({ address: "0x" + "6".repeat(40), symbol: "T6", verdict: null, why: "internal" })),
+    reportRow(rowArgs({ address: "0x" + "5".repeat(40), symbol: "T5" })), // nosell, no cause
+  ]);
+  const textNoCauses = reportText(docNoCauses);
+  ok(typeof textNoCauses === "string" && !textNoCauses.includes(" · pool is empty"),
+    "a document with no causes anywhere must render with no \" · pool is empty\" suffix at all, got " +
+    JSON.stringify(textNoCauses));
+}
+console.log("[report cause] causeForRow enforces the closed REPORT_CAUSES vocabulary exactly like " +
+  "whyForRow does for why (nosell+empty-pool survives; the same string on sell/null is dropped; an " +
+  "unknown string on nosell is dropped); reportRow OMITS the cause key entirely when there is none " +
+  "(undefined, never a stored null) so today's documents stay comparable; and reportText appends " +
+  "\" · pool is empty\" only to a surviving empty-pool row, leaving every causeless row's line " +
+  "byte-for-byte unchanged");
+
 /* ---- ۲۷الف. کوروم شاهد — یک صرافیِ مبهم نباید اثباتِ بقیه را پاک کند ----
    🔴 از یک اندازه‌گیریِ زنده آمد، نه از یک ایده. پروبِ توکنِ واقعیِ
    0x6F63d869011f95274498023b4ABFC00b30c34378 روی سایتِ زنده:
@@ -6204,9 +6485,24 @@ console.log("[v4 index wiring] worker/index.js ok — v4StoreTtl/storeV4Result f
           decimals: 18, price_usd: "2000" } } }),
           { status: 200, headers: { "content-type": "application/json" } });
       }
+      const parsed = JSON.parse(init.body);
+      // ⚠️ fix9: v4PoolsEmpty (کالر تازه‌ی cacheOut.v4Proof===true پایین‌تر)
+      // یک eth_call تکی می‌زند، نه آرایه‌ی batchِ پروبِ صرافی‌ها — این دو باید
+      // جدا شمرده شوند وگرنه شاهدِ «ضربه‌ی کش هیچ RPC تازه‌ای نمی‌زند» یک
+      // چیزِ دیگر را می‌سنجد. اینجا فقط batchِ واقعی (آرایه) در rpcBatches
+      // می‌نشیند؛ eth_callِ تکی جدا جواب می‌گیرد و شمرده نمی‌شود، چون خودِ
+      // این تست فقط می‌خواهد اثبات کند حکمِ نوشته‌شده در کش دوباره محاسبه
+      // نمی‌شود — نه اینکه هیچ RPCِ توضیحی هرگز نزند (که طبقِ طراحیِ همین
+      // تغییر، روی هر دو درخواست، کش‌شده یا تازه، یکسان اتفاق می‌افتد).
+      if (!Array.isArray(parsed)) {
+        if (parsed && parsed.method === "eth_call") {
+          return new Response(JSON.stringify({ jsonrpc: "2.0", id: parsed.id,
+            result: "0x" + "0".repeat(64) }), { status: 200, headers: { "content-type": "application/json" } });
+        }
+        return new Response("unexpected single RPC call", { status: 500 });
+      }
       rpcBatches++;
-      const reqs = JSON.parse(init.body);
-      return new Response(JSON.stringify(reqs.map((r) => {
+      return new Response(JSON.stringify(parsed.map((r) => {
         if (r.id === 0) return { id: 0, result: mk4(5) };
         const item = shapeK[r.id - 1];
         if (item && item.poolId) return { id: r.id, error: { code: 3, data: wrappedK } };
@@ -6228,8 +6524,9 @@ console.log("[v4 index wiring] worker/index.js ok — v4StoreTtl/storeV4Result f
        "alongside the verdict, or the coverage gate silently downgrades a cache hit, got " +
        JSON.stringify(second));
     ok(rpcBatches === batchesAfterFirst,
-       "sanity: the second request must really be served from the verdict cache (no new RPC batch), got " +
-       rpcBatches + " vs " + batchesAfterFirst);
+       "sanity: the second request must really be served from the verdict cache (no new venue-probe " +
+       "RPC batch) — cause's own explanatory eth_call is a different, always-on-negative call and is " +
+       "counted separately, got " + rpcBatches + " vs " + batchesAfterFirst);
   }
 
   /* ی) گذرِ کرون کلیدِ واقعیِ v4 را *پیش از* حکم می‌سازد.

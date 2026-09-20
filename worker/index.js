@@ -798,6 +798,53 @@ async function readV4Keys(addr, env) {
   return (await readV4Entry(addr, env)).keys;
 }
 
+/* آدرسِ StateView در Base — روی زنجیره‌ی زنده تایید شده (۲۰ سپتامبر)؛
+   چک‌سامِ حروف بزرگ/کوچکِ این آدرس معنادار است، دقیقاً همان‌طور که این‌جا
+   نوشته شده فرستاده شود، نه lowercase/uppercase‌شده. */
+export const V4_STATE_VIEW = "0xa3c0c9b65baD0b08107Aa264b0f3dB444b867A71";
+// سلکتورِ getLiquidity(bytes32) روی همان StateView — از رویِ ABI واقعی‌اش،
+// همان‌جا که آدرسِ بالا تایید شد.
+export const V4_GET_LIQUIDITY_SEL = "0xfa6793d5";
+/* سقفِ یک تماسِ شاهد، و کف‌ِ بودجه‌ای که زیرش اصلاً پرسیده نمی‌شود. */
+export const V4_EMPTY_CALL_MS = 1200;
+export const V4_EMPTY_MIN_MS = 400;
+
+/* شاهدِ زنده‌ی «آیا استخرِ واقعیِ این توکن هنوز چیزی دارد؟» — true فقط وقتی
+   *هر* کلیدِ واقعیِ v4ِ این توکن روی StateView.getLiquidity صفر پاسخ داد،
+   false به‌محضِ اولین پاسخِ غیرصفر (نقدینگی هست)، و null هر جا که واقعاً
+   نتوانستیم بپرسیم — بدونِ کلید، پاسخِ ناخواندنی، تایم‌اوت. هرگز پرتاب
+   نمی‌کند: صفر از یک پاسخِ *خواندنی* شاهد است، پاسخِ ناخواندنی هرگز به یک
+   ادعا تبدیل نمی‌شود.
+   🔴 این تابع هرگز یک حکمِ منفی نمی‌سازد — فقط حکمِ منفی‌ای را که از جایی
+   دیگر (پوششِ صرافی/اثباتِ لاگِ v4) آمده توضیح می‌دهد؛ کالر فقط زمانی
+   صدایش می‌زند که raw از قبل "nosell" است. */
+export async function v4PoolsEmpty(addr, env, deadlineAt) {
+  /* ⚠️ بودجه‌ی زمانی: این تابع روی مسیرِ کارتِ OG هم اجرا می‌شود که کلِ
+     بودجه‌اش OG_BUDGET_MS است. یک توضیح هرگز نباید خودِ جواب را دیر کند،
+     پس اگر کمتر از V4_EMPTY_MIN_MS از بودجه مانده باشد اصلاً شروع نمی‌شود
+     و تایم‌اوتِ هر تماس هم به باقی‌مانده‌ی بودجه بریده می‌شود. */
+  const left = typeof deadlineAt === "number" ? deadlineAt - Date.now() : V4_EMPTY_CALL_MS;
+  if (left < V4_EMPTY_MIN_MS) return null;
+  const keys = await readV4Keys(addr, env);
+  if (!Array.isArray(keys) || keys.length === 0) return null;
+  const use = keys.slice(0, 4);
+  for (const key of use) {
+    const poolId = key && typeof key.poolId === "string" ? key.poolId : null;
+    if (!poolId) return null;
+    const data = V4_GET_LIQUIDITY_SEL + poolId.slice(2);
+    const budget = typeof deadlineAt === "number"
+      ? Math.min(V4_EMPTY_CALL_MS, deadlineAt - Date.now()) : V4_EMPTY_CALL_MS;
+    if (budget < V4_EMPTY_MIN_MS) return null;   // بودجه تمام شد → نامعلوم، نه ادعا
+    const res = await rpcCallBase("eth_call", [{ to: V4_STATE_VIEW, data }, "latest"], budget);
+    if (!res || !res.ok || typeof res.result !== "string" || !/^0x[0-9a-fA-F]*$/.test(res.result))
+      return null; // پاسخِ ناخواندنی — «نتوانستیم بپرسیم» هرگز یک ادعا نیست
+    let liquidity;
+    try { liquidity = BigInt(res.result); } catch (e) { return null; }
+    if (liquidity !== 0n) return false; // اولین کلیدِ پرنقدینگی کافی است
+  }
+  return true; // همه‌ی کلیدهای پرسیده‌شده، با پاسخی خواندنی، صفر بودند
+}
+
 /* یک گذرِ کاملِ ایندکس: pools را بگیر، indexV4Keys را با failover-rpcCall
    صدا بزن، نتیجه را ذخیره کن. هم از ctx.waitUntil (ogFetchVerdict) هم از
    GET /vd/v4/<address> صدا زده می‌شود — یک‌جا نوشته شده تا این دو مسیر
@@ -898,7 +945,14 @@ async function ogFetchVerdictDetail(addr, meta, deadlineAt, env, ctx, metaWhy) {
   const covered = await baseVenueCoveredDetail(addr, env);
   // 🔴 شکستِ خودِ چکِ پوشش (false یا null) هم به نامعلوم تنزل می‌کند —
   // «نتوانستیم پوشش را بسنجیم» هرگز اجازه‌ی اتهام نیست.
-  if (covered.covered === true) return { v: "nosell", why: null };
+  /* ⚠️ تماسِ اضافه‌ی v4PoolsEmpty فقط همین‌جا، روی مسیرِ منفی، اتفاق
+     می‌افتد — هرگز روی مثبت یا نامعلوم. شکستِ همین یک eth_call چیزی برای
+     کالر هزینه ندارد جز خودِ توضیح (cause می‌شود undefined، خودِ حکم دست‌نخورده
+     می‌ماند)؛ این با v4PoolsEmpty که هرگز پرتاب نمی‌کند تضمین می‌شود. */
+  if (covered.covered === true) {
+    const empty = await v4PoolsEmpty(addr, env, deadlineAt);
+    return { v: "nosell", why: null, cause: empty === true ? "empty-pool" : undefined };
+  }
   /* 🔴 استثنای پوشش (۱۹ شهریور، با تصمیمِ صریحِ حسام): وقتی خودِ حکمِ منفی از
      شاهدِ «استخرِ واقعیِ این توکن هیچ اندازه‌ای را پر نمی‌کند» آمده باشد، ما
      *واقعاً* از استخرِ خودش پرسیده‌ایم — حتی اگر بالادست هیچ استخری روی
@@ -906,7 +960,10 @@ async function ogFetchVerdictDetail(addr, meta, deadlineAt, env, ctx, metaWhy) {
      شناسه‌ی داخلِ خطا با همان کلید یکی است (verdict.js/v4NoLiquidityProof).
      ⚠️ این پرچم کنارِ خودِ حکم کش می‌شود (cachedVerdict بالاتر)، وگرنه همان
      توکن در درخواستِ بعدی جوابِ دیگری می‌گرفت. */
-  if (cacheOut.v4Proof === true) return { v: "nosell", why: null };
+  if (cacheOut.v4Proof === true) {
+    const empty = await v4PoolsEmpty(addr, env, deadlineAt);
+    return { v: "nosell", why: null, cause: empty === true ? "empty-pool" : undefined };
+  }
   return { v: null, why: covered.why || "cover:shape" };
 }
 
@@ -1216,8 +1273,14 @@ async function diagVerdict(request, url, env, ctx) {
   // (VD_BASE_WHY) — این کلید فقط وقتی v واقعاً null است در پاسخ می‌آید
   // (undefined پایین‌تر با JSON.stringify حذف می‌شود، دقیقاً همان ترفندی که
   // شاخه‌ی سولانا بالاتر هم دارد)، نه اینکه همیشه یک internal حدسی بگوید.
-  const { v, why } = await ogFetchVerdictDetail(addr, meta, t0 + OG_BUDGET_MS, env, ctx, metaWhy);
-  return vdDone(200, { v, ms: Date.now() - t0, why: v === null ? why : undefined });
+  // cause هم از همان قاعده پیروی می‌کند: فقط وقتی v واقعاً "nosell" است —
+  // یک sell/null همان شکلِ امروز را بایت‌به‌بایت نگه می‌دارد.
+  const { v, why, cause } = await ogFetchVerdictDetail(addr, meta, t0 + OG_BUDGET_MS, env, ctx, metaWhy);
+  return vdDone(200, {
+    v, ms: Date.now() - t0,
+    why: v === null ? why : undefined,
+    cause: v === "nosell" ? cause : undefined,
+  });
 }
 
 /* =====================================================================

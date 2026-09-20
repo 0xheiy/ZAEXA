@@ -113,6 +113,20 @@ function whyForRow(chain, verdict, why) {
   return "internal";
 }
 
+// واژه‌نامه‌ی بسته‌ی cause — دقیقاً هم‌رده‌ی همان انضباطِ whyForRow. امروز
+// فقط یک عضو دارد، ولی فهرست است نه یک رشته‌ی تکی، برای همان روزی که عضوِ
+// دوم لازم شود.
+export const REPORT_CAUSES = Object.freeze(["empty-pool"]);
+
+/* یک cause ساختگی/دست‌ساز هرگز نباید در انبار بنشیند — فقط وقتی verdict
+   واقعاً "nosell" است و خودِ رشته عضوِ همین واژه‌نامه‌ی بسته است، وگرنه
+   undefined. هر cause‌ای که از انبار خوانده می‌شود یا کالر می‌دهد باید از
+   همینجا رد شود، هیچ مسیرِ دیگری به یک ردیف نمی‌رسد. */
+export function causeForRow(verdict, cause) {
+  if (verdict !== "nosell") return undefined;
+  return typeof cause === "string" && REPORT_CAUSES.includes(cause) ? cause : undefined;
+}
+
 /* یک ردیفِ گزارش، یا null. شکل برای v۱ قفل است — کلیدها به همین ترتیب.
    🔴 انبار همیشه عددِ خام نگه می‌دارد، هرگز رشته‌ی نمایشی. ogBig() در
    worker/og.js چیزی مثل "$1.2M" برمی‌گرداند — آن یک رندر است، نه داده؛ چیزی
@@ -125,7 +139,7 @@ function whyForRow(chain, verdict, why) {
    ازجمله) رفتارش را از رویِ آن عوض نمی‌کند. */
 export function reportRow({
   chain, address, symbol, name, verdict, checkedAt, poolCreatedAt, priceUsd, reserveUsd, vol24hUsd, fdvUsd, dex,
-  why,
+  why, cause,
 }) {
   try {
     if (verdict !== "sell" && verdict !== "nosell" && verdict !== null) return null; // هرگز یک حکم ساختگی
@@ -141,7 +155,7 @@ export function reportRow({
     if (typeof checkedAt !== "string" || checkedAt.length === 0 || Number.isNaN(Date.parse(checkedAt)))
       return null;
 
-    return {
+    const row = {
       chain,
       address,
       symbol: typeof symbol === "string" ? symbol : null,
@@ -157,6 +171,13 @@ export function reportRow({
       dex: dex == null ? null : dex,
       why: whyForRow(chain, verdict, why),
     };
+    // 🔴 cause فقط وقتی روی شیء می‌نشیند که واقعاً معنا داشته باشد — برخلافِ
+    // why (که همیشه null یا یک رشته است)، undefined هرگز نباید یک کلید
+    // بسازد، وگرنه سندهای امروز که اصلاً cause ندارند دیگر با سندهای تازه
+    // قابلِ‌مقایسه نمی‌مانند.
+    const rowCause = causeForRow(verdict, cause);
+    if (rowCause !== undefined) row.cause = rowCause;
+    return row;
   } catch (e) {
     return null;
   }
@@ -311,6 +332,9 @@ export async function runReportPass({ kv, fetchPools, metaOf, verdictOf, now, sl
         Object.prototype.hasOwnProperty.call(verdictResult, "v");
       const verdict = verdictOk ? verdictResult.v : null;
       const why = verdictOk ? verdictResult.why : "internal";
+      // همان انضباطِ شکلِ why: یک verdictResult ناسالم (غیرِشیء) یعنی هیچ
+      // cause‌ای هم نداریم — undefined، نه یک حدس.
+      const cause = verdictOk ? verdictResult.cause : undefined;
 
       const checkedAt = new Date(now()).toISOString();
       // ⚠️ priceUsd/vol24hUsd/fdvUsd همیشه از t (همان ردیفِ pool که
@@ -331,6 +355,7 @@ export async function runReportPass({ kv, fetchPools, metaOf, verdictOf, now, sl
         fdvUsd: t.fdvUsd,
         dex: t.dex,
         why,
+        cause,
       });
       if (row) builtRows.push(row);
     }
@@ -426,7 +451,10 @@ export function reportText(doc) {
       const listed = flaggedRows.slice(0, REPORT_TEXT_MAX_LISTED);
       listed.forEach((r, i) => {
         if (i > 0) lines.push("");
-        lines.push(reportTextSymbolLabel(r) + " — no sell route quoted");
+        // پسوندِ « · pool is empty» فقط وقتی خودِ ردیف cause="empty-pool"
+        // دارد — ردیف‌های بدونِ آن بایت‌به‌بایت همان خطِ امروز می‌مانند.
+        lines.push(reportTextSymbolLabel(r) + " — no sell route quoted" +
+          (r.cause === "empty-pool" ? " · pool is empty" : ""));
         lines.push("zaexa.com/t/" + r.address);
       });
       if (flagged > REPORT_TEXT_MAX_LISTED) {

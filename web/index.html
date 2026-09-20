@@ -2630,13 +2630,18 @@ function renderRoundTrip(box,x){
     return;
   }
   if(x.state==="serverNoSell"){
+    // cause فقط "empty-pool" یا نامعلوم است (تضمینِ fetchVdVerdict) — بدونش
+    // همان جمله‌ی همیشگی می‌ماند، سرِ جا و ظاهرش (سر/نشان/نوار/دوسر) هم.
+    const note=x.cause==="empty-pool"
+      ?"This page could not quote a sell, and our server check found none either: the pool has no liquidity left in it. That is about the pool, not a claim about the token's contract."
+      :"This page could not quote a sell, and our server check found no way to sell it back either. That can be a token that blocks selling, or a pool whose liquidity was pulled.";
     box.innerHTML=`<div class="tripHead">
         <span class="tripPct" style="color:var(--neg)">No way out</span>
         <span class="tripBadge" style="color:var(--neg);background:color-mix(in srgb,var(--neg) 14%,transparent)">Server check</span>
       </div>
       <div class="tripTrack"><div class="tripFill" style="width:100%;background:var(--neg);opacity:.35"></div></div>
       <div class="tripEnds"><span>The buy may go through</span><span>The sell does not</span></div>
-      <div class="tripNote">This page could not quote a sell, and our server check found no way to sell it back either. That can be a token that blocks selling, or a pool whose liquidity was pulled.</div>`;
+      <div class="tripNote">${note}</div>`;
     return;
   }
   const paid=parsedAmountIn();
@@ -3437,8 +3442,12 @@ async function scanToken(token){
           "This page's quotes found no sell, but the server check priced a sell through a pool this page does not quote (for example Uniswap v4).");
         rep.canSell=true;rep.canBuy=fallbackBuy;
       }else if(sv.v==="nosell"){
+        // cause فقط از سرور می‌آید، فقط "empty-pool" معتبر است (fetchVdVerdict
+        // خودش این را ضمانت می‌کند) — بدونش همان جمله‌ی همیشگی می‌ماند.
         add("critical","Cannot get a sell quote",
-          "No pool we quote would sell this back, and the server check found no way to sell it either. That can be a token that blocks selling or a pool whose liquidity was pulled — either way there is no exit right now.");
+          sv.cause==="empty-pool"
+            ?"No pool we quote would sell this back, and the server check found none either: there is no liquidity left in the pool — it was pulled. That is about the pool, not a claim about the token's contract."
+            :"No pool we quote would sell this back, and the server check found no way to sell it either. That can be a token that blocks selling or a pool whose liquidity was pulled — either way there is no exit right now.");
         rep.canSell=false;rep.canBuy=fallbackBuy;
       }else{
         rep.unknown++;
@@ -3949,7 +3958,7 @@ async function tokenExitFallback(seq,why){
   if(seq!==tkExitSeq||tkExitSettled===seq)return;
   tkExitSettled=tkExitSeq;clearTimeout(tkExitTimer);tkExitTimer=null;
   if(sv.v==="sell")renderRoundTrip($("tk-exitBox"),{state:"serverSell"});
-  else if(sv.v==="nosell")renderRoundTrip($("tk-exitBox"),{state:"serverNoSell"});
+  else if(sv.v==="nosell")renderRoundTrip($("tk-exitBox"),{state:"serverNoSell",cause:sv.cause});
   else renderRoundTrip($("tk-exitBox"),{state:"unknown",reason:REASON[why]||REASON.timeout});
 }
 
@@ -5563,12 +5572,15 @@ async function fetchVdVerdict(mint){
   try{
     const r=await withTimeout(fetch(location.origin+"/vd/"+mint,
       {headers:{accept:"application/json"}}),9000);
-    if(!r.ok)return {v:null,why:null};
+    if(!r.ok)return {v:null,why:null,cause:null};
     const j=await r.json();
     const v=(j&&(j.v==="sell"||j.v==="nosell"))?j.v:null;
     const why=(j&&typeof j.why==="string")?j.why:null;
-    return {v,why};
-  }catch{return {v:null,why:null};}
+    // فقط دقیقاً "empty-pool" پذیرفته می‌شود — هر رشته‌ی دیگر یعنی cause
+    // هرگز نگفته، نه یک حدس.
+    const cause=(j&&j.cause==="empty-pool")?j.cause:null;
+    return {v,why,cause};
+  }catch{return {v:null,why:null,cause:null};}
 }
 
 /* هویت + عکسِ آواتار، از رویِ داده‌ی خامِ GeckoTerminal — نه paintAvatar
