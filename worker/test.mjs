@@ -23,7 +23,7 @@ import {
   retForRow, REPORT_SOL_MAX_TOKENS,
   recheckForRow, REPORT_RECHECKS, applyRechecks, pickRecheckTargets,
   PASS_LOG_KEY, REPORT_PASS_LOG_CAP, readPassLog, REPORT_CAP_PROBE, classifyCapProbe,
-  REPORT_METER_STAGES,
+  REPORT_METER_STAGES, REPORT_PASS_BASE_CAP,
 } from "./report.js";
 import * as v4 from "./v4index.js";
 import {
@@ -9750,7 +9750,8 @@ function stripAllowedWording(t) {
      JSON.stringify(rec.capProbe));
   const recKeys = Object.keys(rec).sort();
   ok(JSON.stringify(recKeys) === JSON.stringify(
-       ["added", "addedSol", "at", "base", "capProbe", "checked", "followed", "recheckTried", "rechecked", "sol"]),
+       ["added", "addedSol", "at", "base", "capAt", "capProbe", "checked", "discarded", "followed",
+        "metaBatch", "recheckTried", "rechecked", "sol", "stoppedAt"]),
      "the pass record must carry exactly its documented keys, nothing else, got " + JSON.stringify(recKeys));
   const recRaw = JSON.stringify(logA2);
   ok(!/0x[0-9a-f]{40}/i.test(recRaw),
@@ -10254,6 +10255,511 @@ function stripAllowedWording(t) {
   console.log("[pass meter restore] scheduledReportPass ok — globalThis.fetch is swapped for meter.fetch only "
     + "for the duration of the pass and is always put back in a finally, whether the pass completes normally "
     + "or every injected fetch throws mid-stage");
+}
+
+/* ---- ۴۹. سقفِ ساب‌ریکوئست: توقفِ گذر، هرگز ذخیره‌ی ردیفِ آلوده، متادیتای
+   دسته‌ای — [pass budget] ----
+   makeSubMeter.capHit/capAt، capHit تزریقیِ runReportPass، دورریختنِ ردیفِ
+   نیمه‌کاره، سهمِ هر مرحله، و ogFetchMetaMany — همه‌شان از رویِ همان لاگِ
+   گذرِ زنده‌ی ۱۹:۱۷ UTC که در بالای این فایل توضیح داده شد. */
+{
+  function makeKvBudget() {
+    const store = new Map();
+    return { store, get: async (k) => (store.has(k) ? store.get(k) : null), put: async (k, v) => { store.set(k, v); } };
+  }
+  function mkAddrBudget(n) { return "0x" + n.toString(16).padStart(40, "0"); }
+  function poolRowBudget(addr) {
+    return {
+      attributes: { reserve_in_usd: "9000", base_token_price_usd: "1",
+        pool_created_at: "2026-09-21T10:00:00Z", volume_usd: { h24: "0" }, fdv_usd: "0" },
+      relationships: { base_token: { data: { id: "base_" + addr } }, dex: { data: { id: "uniswap-v3-base" } } },
+    };
+  }
+  const B58_BUDGET = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
+  function mkSolAddrBudget(n) {
+    let s = "";
+    const x = n + 9000;
+    for (let i = 0; i < 44; i++) s += B58_BUDGET[(x + i * 7) % B58_BUDGET.length];
+    return s;
+  }
+  function solPoolRowBudget(addr) {
+    return {
+      attributes: { reserve_in_usd: "9000", base_token_price_usd: "1",
+        pool_created_at: "2026-09-21T09:00:00Z", volume_usd: { h24: "10" }, fdv_usd: "100" },
+      relationships: { base_token: { data: { id: "solana_" + addr } }, dex: { data: { id: "pumpswap" } } },
+    };
+  }
+  function shapeOkPassRecord(rec) {
+    ok(rec.stoppedAt === null || REPORT_METER_STAGES.includes(rec.stoppedAt),
+       "stoppedAt must be null or a member of REPORT_METER_STAGES, got " + JSON.stringify(rec.stoppedAt));
+    ok(typeof rec.discarded === "number", "discarded must be a number, got " + JSON.stringify(rec.discarded));
+    ok(["ok", "failed", "absent"].includes(rec.metaBatch),
+       "metaBatch must be one of ok/failed/absent, got " + JSON.stringify(rec.metaBatch));
+    ok(rec.capAt === null || (typeof rec.capAt.ops === "number" && typeof rec.capAt.fetches === "number" &&
+       typeof rec.capAt.cache === "number"),
+       "capAt must be null or {ops,fetches,cache} numbers, got " + JSON.stringify(rec.capAt));
+    ok(!/0x[0-9a-f]{40}/i.test(JSON.stringify(rec)) && !/https?:\/\//i.test(JSON.stringify(rec)),
+       "no address or URL may ever appear in the stored pass record, got " + JSON.stringify(rec));
+  }
+
+  // الف) makeSubMeter — capHit/capAt
+  {
+    // یک fetch که پیامِ سقف را پرتاب می‌کند
+    const savedF1 = globalThis.fetch;
+    globalThis.fetch = async () => { throw new Error("Too many subrequests."); };
+    const meter1 = makeSubMeter();
+    globalThis.fetch = savedF1;
+
+    ok(meter1.isCapHit() === false && meter1.capAt === null,
+       "a fresh meter must start with capHit:false and capAt:null");
+
+    let threw1 = null;
+    try { await meter1.fetch("https://host-budget.example.com/a"); } catch (e) { threw1 = e; }
+    ok(threw1 && threw1.message === "Too many subrequests.",
+       "a cap-shaped throw must propagate unchanged, got " + threw1);
+    ok(meter1.isCapHit() === true, "a cap-shaped throw must set capHit:true");
+    ok(meter1.capAt && JSON.stringify(meter1.capAt) === JSON.stringify({ ops: 1, fetches: 1, cache: 0 }),
+       "capAt must be the meter's own running totals at that moment, got " + JSON.stringify(meter1.capAt));
+    const capAtFirst = meter1.capAt;
+
+    // یک ضربه‌ی دومِ سقف — capAt دیگر جابه‌جا نمی‌شود
+    let threw2 = null;
+    try { await meter1.fetch("https://host-budget.example.com/b"); } catch (e) { threw2 = e; }
+    ok(threw2 && threw2.message === "Too many subrequests.",
+       "a second cap-shaped throw must still propagate unchanged, got " + threw2);
+    ok(JSON.stringify(meter1.capAt) === JSON.stringify(capAtFirst),
+       "a later cap error must never move capAt, got " + JSON.stringify(meter1.capAt) + " vs first " +
+       JSON.stringify(capAtFirst));
+
+    // یک خطای غیرِسقف — capHit هرگز true نمی‌شود
+    const savedF2 = globalThis.fetch;
+    globalThis.fetch = async () => { throw new Error("network exploded"); };
+    const meter2 = makeSubMeter();
+    globalThis.fetch = savedF2;
+    let threw3 = null;
+    try { await meter2.fetch("https://host-budget.example.com/c"); } catch (e) { threw3 = e; }
+    ok(threw3 && threw3.message === "network exploded",
+       "a non-cap throw must still propagate unchanged, got " + threw3);
+    ok(meter2.isCapHit() === false && meter2.capAt === null,
+       "a non-cap throw must never set capHit/capAt, got isCapHit=" + meter2.isCapHit() + " capAt=" +
+       JSON.stringify(meter2.capAt));
+
+    // یک عملیاتِ کش که به سقف می‌خورد هم — از همان مسیری که کالرِ واقعی
+    // (scheduledReportPass در index.js) با noteThrow استفاده می‌کند
+    const savedF3 = globalThis.fetch;
+    globalThis.fetch = async () => new Response("", { status: 200 });
+    const meter3 = makeSubMeter();
+    globalThis.fetch = savedF3;
+    meter3.cacheOp();
+    meter3.noteThrow(new Error("Too many subrequests. (cache)"));
+    ok(meter3.isCapHit() === true, "a cache op reporting the cap error via noteThrow must set capHit");
+    ok(meter3.capAt && meter3.capAt.cache === 1 && meter3.capAt.fetches === 0,
+       "capAt from a cache-op cap error must reflect the cache/fetch counters at that moment, got " +
+       JSON.stringify(meter3.capAt));
+
+    console.log("[pass budget meter] makeSubMeter ok — a fetch or a cache op reporting a \"too many " +
+      "subrequests\" message sets capHit:true and freezes capAt at the meter's own running totals, the error " +
+      "propagates unchanged, a later cap error never moves capAt again, and a non-cap error never sets " +
+      "capHit at all");
+  }
+
+  // ب) runReportPass — capHit تزریقی که در میانه‌ی توکنِ سومِ Base true می‌شود
+  {
+    const NOWB = Date.parse("2026-09-21T13:00:00.000Z");
+    const dateStrB = utcDateOf(NOWB);
+    const oldIsoB = new Date(NOWB - 90 * 60000).toISOString();
+    const followAddrB = mkAddrBudget(900);
+    const recheckAddrB = mkAddrBudget(901);
+    const seedDocB = {
+      date: dateStrB, generatedAt: oldIsoB, chains: ["base"], checked: 2,
+      rows: [
+        reportRow({ chain: "base", address: followAddrB, symbol: "SF", name: "SF", verdict: "sell",
+          checkedAt: oldIsoB, poolCreatedAt: oldIsoB, priceUsd: 1, reserveUsd: 9000, vol24hUsd: 0, fdvUsd: 0,
+          dex: "uniswap-v3-base", why: null }),
+        reportRow({ chain: "base", address: recheckAddrB, symbol: "SR", name: "SR", verdict: null,
+          checkedAt: oldIsoB, poolCreatedAt: oldIsoB, priceUsd: 1, reserveUsd: 9000, vol24hUsd: 0, fdvUsd: 0,
+          dex: "uniswap-v3-base", why: "no-quote" }),
+      ],
+    };
+    const kvB = makeKvBudget();
+    await kvB.put(reportKey(dateStrB), JSON.stringify(seedDocB));
+
+    const addrsB = [1, 2, 3, 4, 5].map(mkAddrBudget);
+    const poolsB = addrsB.map(poolRowBudget);
+    const metaCallsB = [];
+    const verdictCallsB = [];
+    let solCalledB = 0;
+    let followCalledB = 0;
+    const capHitB = () => metaCallsB.length >= 3; // درست پس از metaOfِ توکنِ سوم true می‌شود
+
+    const resB = await runReportPass({
+      kv: kvB, fetchPools: async () => poolsB,
+      metaOf: async (addr) => { metaCallsB.push(addr); return { meta: { symbol: "T", name: "T" }, why: null }; },
+      verdictOf: async (addr) => { verdictCallsB.push(addr); return { v: "sell", why: null }; },
+      now: () => NOWB, sleep: async () => {}, capHit: capHitB,
+      fetchPoolsSol: async () => { solCalledB++; return []; },
+      poolEmptyOf: async () => { followCalledB++; return true; },
+    });
+
+    ok(JSON.stringify(metaCallsB) === JSON.stringify(addrsB.slice(0, 3)),
+       "capHit flipping during the 3rd Base token must call metaOf for exactly tokens 1-3 and no others, got " +
+       JSON.stringify(metaCallsB));
+    ok(JSON.stringify(verdictCallsB) === JSON.stringify(addrsB.slice(0, 3)),
+       "capHit flipping during the 3rd Base token must call verdictOf for exactly tokens 1-3 and no others, " +
+       "got " + JSON.stringify(verdictCallsB));
+    ok(resB.checked === 3, "checked must count exactly the 3 attempted Base tokens, got " + resB.checked);
+    ok(solCalledB === 0, "the Solana leg must never start once the Base leg hit the cap, got " + solCalledB);
+    ok(followCalledB === 0, "the follow-up stage must never start once the Base leg hit the cap, got " +
+       followCalledB);
+
+    const storedDocB = JSON.parse(await kvB.get(reportKey(dateStrB)));
+    const storedAddrsB = storedDocB.rows.map((r) => r.address);
+    ok(!storedAddrsB.includes(addrsB[2]),
+       "the token whose processing crossed the cap must never be stored in the doc, got " +
+       JSON.stringify(storedAddrsB));
+    ok(storedAddrsB.includes(addrsB[0]) && storedAddrsB.includes(addrsB[1]),
+       "the two tokens finished before the cap must be stored normally, got " + JSON.stringify(storedAddrsB));
+
+    const ringB = JSON.parse(await kvB.get(PAIRS_KEY_BASE)) || [];
+    ok(!ringB.some((r) => r.address === addrsB[2]),
+       "the token whose processing crossed the cap must never enter the pairs ring, got " +
+       JSON.stringify(ringB.map((r) => r.address)));
+
+    const logB = JSON.parse(await kvB.get(PASS_LOG_KEY));
+    ok(Array.isArray(logB) && logB.length === 1, "the KV pass log must still gain exactly one entry, got " +
+       JSON.stringify(logB));
+    ok(logB[0].stoppedAt === "base-token", "stoppedAt must record \"base-token\", got " +
+       JSON.stringify(logB[0].stoppedAt));
+    ok(logB[0].discarded === 1, "discarded must be exactly 1, got " + logB[0].discarded);
+    ok(logB[0].recheckTried === 0, "recheckTried must be 0 — the recheck stage must never start, got " +
+       logB[0].recheckTried);
+    shapeOkPassRecord(logB[0]);
+
+    // ---- همان قاعده برای سولانا: توکنی که سقف وسطِ بررسی‌اش خورد نه در سند
+    //      می‌نشیند نه شمرده می‌شود، و توکنِ بعدیِ سولانا اصلاً شروع نمی‌شود.
+    {
+      const B58S = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
+      const mkMintS = (n) => { let x = ""; for (let i = 0; i < 44; i++) x += B58S[(n + 3000 + i * 7) % B58S.length]; return x; };
+      const solPoolS = (addr) => ({
+        attributes: { reserve_in_usd: "9000", base_token_price_usd: "1",
+          pool_created_at: "2026-09-21T09:00:00Z", volume_usd: { h24: "10" }, fdv_usd: "100" },
+        relationships: { base_token: { data: { id: "solana_" + addr } }, dex: { data: { id: "pumpswap" } } },
+      });
+      const mintsS = [1, 2].map(mkMintS);
+      const kvS = makeKvBudget();
+      const solMetaCalls = [];
+      const capHitS = () => solMetaCalls.length >= 1; // درست پس از metaOfِ اولین توکنِ سولانا true می‌شود
+      await runReportPass({
+        kv: kvS, fetchPools: async () => [], fetchPoolsSol: async () => mintsS.map(solPoolS),
+        metaOf: async (addr) => { if (!addr.startsWith("0x")) solMetaCalls.push(addr); return { meta: { symbol: "SM", name: "SM" }, why: null }; },
+        verdictOf: async () => ({ v: "sell", why: null }),
+        now: () => NOWB, sleep: async () => {}, capHit: capHitS,
+      });
+      const docS = JSON.parse(await kvS.get(reportKey(dateStrB)) || "null");
+      const solStored = docS && Array.isArray(docS.rows) ? docS.rows.filter((r) => r.chain === "solana").map((r) => r.address) : [];
+      ok(solStored.length === 0,
+         "a Solana token whose check crossed the cap must never be stored, got " + JSON.stringify(solStored));
+      ok(solMetaCalls.length === 1,
+         "the next Solana token must never start once the cap was hit, got metaOf calls " + JSON.stringify(solMetaCalls));
+      const logS = JSON.parse(await kvS.get(PASS_LOG_KEY));
+      ok(Array.isArray(logS) && logS[0] && logS[0].discarded === 1 && logS[0].stoppedAt === "sol-token",
+         "the pass log must record discarded 1 and stoppedAt sol-token, got " + JSON.stringify(logS && logS[0]));
+    }
+
+    console.log("[pass budget base stop] runReportPass ok — a capHit that flips true while the 3rd Base " +
+      "token is being processed stores tokens 1-2 normally, discards token 3 from both the doc and the " +
+      "pairs ring, never starts token 4/5/Solana/follow/recheck, and still writes both the doc and the " +
+      "pass log (stoppedAt:\"base-token\", discarded:1)");
+  }
+
+  // ب٢) capHit تزریقی که *پیش از* شروعِ توکنِ دوم true می‌شود، نه در میانه‌ی
+  // پردازشِ خودِ آن توکن — این دقیقاً همان گاردِ جداگانه‌ی «پیش از شروعِ هر
+  // توکن» را می‌سنجد، مستقل از گاردِ «در میانه‌ی همین توکن» بالاتر.
+  {
+    const NOWB2 = Date.parse("2026-09-21T13:30:00.000Z");
+    const addrsB2 = [1, 2, 3].map(mkAddrBudget);
+    const poolsB2 = addrsB2.map(poolRowBudget);
+    const metaCallsB2 = [];
+    let capCallsB2 = 0;
+    // true از سومین باری که capHit صدا زده می‌شود — با گاردِ پیش از شروع
+    // (که یک‌بار قبل از هر توکن صدا می‌زند) این دقیقاً درست پیش از توکنِ
+    // دوم می‌رسد، پیش از آنکه metaOf آن اصلاً صدا زده شود.
+    const capHitB2 = () => { capCallsB2++; return capCallsB2 >= 3; };
+    const kvB2 = makeKvBudget();
+    await runReportPass({
+      kv: kvB2, fetchPools: async () => poolsB2,
+      metaOf: async (addr) => { metaCallsB2.push(addr); return { meta: { symbol: "T", name: "T" }, why: null }; },
+      verdictOf: async () => ({ v: "sell", why: null }),
+      now: () => NOWB2, sleep: async () => {}, capHit: capHitB2,
+    });
+    ok(JSON.stringify(metaCallsB2) === JSON.stringify([addrsB2[0]]),
+       "the pre-token cap check (before starting the next Base token) must stop token 2 before its metaOf " +
+       "is ever called, got " + JSON.stringify(metaCallsB2));
+
+    console.log("[pass budget base pre-check] runReportPass ok — the cap check before starting the next " +
+      "Base token stops the pass without ever calling that token's metaOf, independently of the " +
+      "mid-token discard check");
+  }
+
+  // ج) runReportPass — capHit تزریقی که در میانه‌ی یک فالوآپ true می‌شود
+  {
+    const NOWC = Date.parse("2026-09-21T14:00:00.000Z");
+    const dateStrC = utcDateOf(NOWC);
+    const oldIsoC = new Date(NOWC - 90 * 60000).toISOString();
+    const followAddrC = mkAddrBudget(950);
+    const recheckAddrC = mkAddrBudget(951);
+    const seedDocC = {
+      date: dateStrC, generatedAt: oldIsoC, chains: ["base"], checked: 2,
+      rows: [
+        reportRow({ chain: "base", address: followAddrC, symbol: "SF", name: "SF", verdict: "sell",
+          checkedAt: oldIsoC, poolCreatedAt: oldIsoC, priceUsd: 1, reserveUsd: 9000, vol24hUsd: 0, fdvUsd: 0,
+          dex: "uniswap-v3-base", why: null }),
+        reportRow({ chain: "base", address: recheckAddrC, symbol: "SR", name: "SR", verdict: null,
+          checkedAt: oldIsoC, poolCreatedAt: oldIsoC, priceUsd: 1, reserveUsd: 9000, vol24hUsd: 0, fdvUsd: 0,
+          dex: "uniswap-v3-base", why: "no-quote" }),
+      ],
+    };
+    const kvC = makeKvBudget();
+    await kvC.put(reportKey(dateStrC), JSON.stringify(seedDocC));
+
+    let poolEmptyCalledC = 0;
+    let metaCalledC = 0;
+    let verdictCalledC = 0;
+    const capHitC = () => poolEmptyCalledC >= 1; // پس از تنها تماسِ فالوآپ true می‌شود
+
+    const resC = await runReportPass({
+      kv: kvC, fetchPools: async () => [],
+      metaOf: async () => { metaCalledC++; return { meta: null, why: "meta:429" }; },
+      verdictOf: async () => { verdictCalledC++; return { v: null, why: "no-quote" }; },
+      now: () => NOWC, sleep: async () => {}, capHit: capHitC,
+      poolEmptyOf: async () => { poolEmptyCalledC++; return true; },
+    });
+
+    ok(resC.followed === 0, "a capHit flip mid follow-up must leave followed:0, got " + resC.followed);
+    ok(poolEmptyCalledC === 1, "poolEmptyOf must have been called exactly once (the one target attempted), " +
+       "got " + poolEmptyCalledC);
+    ok(metaCalledC === 0 && verdictCalledC === 0,
+       "the recheck stage must never start once the follow stage hit the cap (metaOf/verdictOf untouched " +
+       "since the Base leg had nothing to check), got meta=" + metaCalledC + " verdict=" + verdictCalledC);
+
+    const storedDocC = JSON.parse(await kvC.get(reportKey(dateStrC)));
+    const followRowC = storedDocC.rows.find((r) => r.address === followAddrC);
+    ok(followRowC && !("follow" in followRowC),
+       "the follow update that crossed the cap must never be applied, got " + JSON.stringify(followRowC));
+
+    const logC = JSON.parse(await kvC.get(PASS_LOG_KEY));
+    ok(logC[0].stoppedAt === "follow", "stoppedAt must record \"follow\", got " + JSON.stringify(logC[0].stoppedAt));
+    ok(logC[0].discarded === 1, "discarded must be exactly 1, got " + logC[0].discarded);
+    ok(logC[0].recheckTried === 0, "recheckTried must be 0 — recheck must never start, got " + logC[0].recheckTried);
+    shapeOkPassRecord(logC[0]);
+
+    console.log("[pass budget follow stop] runReportPass ok — a capHit that flips true while the one due " +
+      "follow-up target is being checked leaves its update unapplied, never starts the recheck stage, and " +
+      "still writes both the doc and the pass log (stoppedAt:\"follow\", discarded:1)");
+  }
+
+  // د) سهمِ هر مرحله — ۱۲ کاندید در هر پا، capHit همیشه false
+  {
+    const NOWD = Date.parse("2026-09-21T15:00:00.000Z");
+    const dateStrD = utcDateOf(NOWD);
+    const oldIsoD = new Date(NOWD - 90 * 60000).toISOString();
+
+    const baseCands = Array.from({ length: 12 }, (_, i) => mkAddrBudget(1 + i));
+    const solCands = Array.from({ length: 12 }, (_, i) => mkSolAddrBudget(1 + i));
+    const followAddrsD = Array.from({ length: 12 }, (_, i) => mkAddrBudget(100 + i));
+    const recheckAddrsD = Array.from({ length: 12 }, (_, i) => mkAddrBudget(200 + i));
+
+    const seedRowsD = [
+      ...followAddrsD.map((a) => reportRow({ chain: "base", address: a, symbol: "SF", name: "SF",
+        verdict: "sell", checkedAt: oldIsoD, poolCreatedAt: oldIsoD, priceUsd: 1, reserveUsd: 9000,
+        vol24hUsd: 0, fdvUsd: 0, dex: "uniswap-v3-base", why: null })),
+      ...recheckAddrsD.map((a) => reportRow({ chain: "base", address: a, symbol: "SR", name: "SR",
+        verdict: null, checkedAt: oldIsoD, poolCreatedAt: oldIsoD, priceUsd: 1, reserveUsd: 9000,
+        vol24hUsd: 0, fdvUsd: 0, dex: "uniswap-v3-base", why: "no-quote" })),
+    ];
+    const seedDocD = { date: dateStrD, generatedAt: oldIsoD, chains: ["base"], checked: 24, rows: seedRowsD };
+    const kvD = makeKvBudget();
+    await kvD.put(reportKey(dateStrD), JSON.stringify(seedDocD));
+
+    const metaCallsD = [];
+    const poolEmptyCallsD = [];
+
+    const resD = await runReportPass({
+      kv: kvD, fetchPools: async () => baseCands.map(poolRowBudget),
+      metaOf: async (addr) => { metaCallsD.push(addr); return { meta: { symbol: "T", name: "T" }, why: null }; },
+      verdictOf: async () => ({ v: "sell", why: null }),
+      now: () => NOWD, sleep: async () => {}, maxTokens: REPORT_PASS_BASE_CAP,
+      fetchPoolsSol: async () => solCands.map(solPoolRowBudget), solMaxTokens: 2,
+      poolEmptyOf: async (addr) => { poolEmptyCallsD.push(addr); return true; },
+    });
+
+    const baseCallsD = metaCallsD.filter((a) => baseCands.includes(a));
+    const solCallsD = metaCallsD.filter((a) => solCands.includes(a));
+    const recheckCallsD = metaCallsD.filter((a) => recheckAddrsD.includes(a));
+
+    ok(baseCallsD.length === 5,
+       "with 12 Base candidates, maxTokens:REPORT_PASS_BASE_CAP and no cap hit, exactly 5 must be attempted, " +
+       "got " + baseCallsD.length);
+    ok(solCallsD.length === 2,
+       "with 12 Solana candidates, solMaxTokens:2 and no cap hit, exactly 2 must be attempted, got " +
+       solCallsD.length);
+    ok(poolEmptyCallsD.length === 3,
+       "with 12 follow-up candidates and no cap hit, exactly 3 (runReportPass's own internal cap) must be " +
+       "attempted, got " + poolEmptyCallsD.length);
+    ok(recheckCallsD.length === 2,
+       "with 12 recheck candidates and no cap hit, exactly 2 (runReportPass's own internal cap) must be " +
+       "attempted, got " + recheckCallsD.length);
+    ok(resD.checked === 7, "checked must equal the Base+Solana tokens actually attempted (5+2), got " +
+       resD.checked);
+
+    const logD = JSON.parse(await kvD.get(PASS_LOG_KEY));
+    ok(logD[0].stoppedAt === null, "with capHit absent, stoppedAt must stay null, got " +
+       JSON.stringify(logD[0].stoppedAt));
+    ok(logD[0].discarded === 0, "with capHit absent, discarded must stay 0, got " + logD[0].discarded);
+    shapeOkPassRecord(logD[0]);
+
+    console.log("[pass budget stage caps] runReportPass ok — with 12 eligible candidates on every leg and " +
+      "capHit staying false, exactly 5 Base tokens, 2 Solana tokens, 3 follow-ups and 2 rechecks are " +
+      "attempted (REPORT_PASS_BASE_CAP/solMaxTokens as injected, follow/recheck at runReportPass's own " +
+      "internal 3/2), and stoppedAt/discarded stay null/0");
+  }
+
+  // ه) ogFetchMetaMany — شکلِ زنده‌ی batch (رشته‌ای)، همان pickTokenMeta تک‌آدرسه
+  {
+    const { ogFetchMetaMany, UPSTREAM_FREE: UF_MM } = await import("./index.js");
+    const { pickTokenMeta } = await import("./og.js");
+
+    const addrA = "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913";
+    const addrMissing = "0x0000000000000000000000000000000000dEaD";
+    // دقیقاً شکلِ زنده — همه‌ی اعداد رشته‌اند، فقط decimals عدد است
+    const itemA = {
+      id: "base_" + addrA, type: "token",
+      attributes: {
+        address: addrA, name: "USD Coin", symbol: "USDC", decimals: 6,
+        image_url: "https://example.com/x.png", coingecko_coin_id: "usd-coin",
+        total_supply: "4293037995232084.0", normalized_total_supply: "4293037995.23208",
+        price_usd: "0.9968434683", fdv_usd: "4279461069.5161", total_reserve_in_usd: "258481966.13245",
+      },
+    };
+
+    let sentMM = [];
+    const savedFetchMM = globalThis.fetch;
+    globalThis.fetch = async (u) => { sentMM.push(String(u)); return json({ data: [itemA] }); };
+    const mapMM = await ogFetchMetaMany([addrA, addrMissing], {});
+    globalThis.fetch = savedFetchMM;
+
+    ok(sentMM[0] === UF_MM + "/networks/base/tokens/multi/" + addrA + "," + addrMissing,
+       "ogFetchMetaMany must GET networks/base/tokens/multi/<addr1>,<addr2>, got " + sentMM[0]);
+    ok(mapMM instanceof Map, "ogFetchMetaMany must return a Map on success, got " + typeof mapMM);
+
+    const gotA = mapMM.get(addrA.toLowerCase());
+    const wantA = pickTokenMeta({ data: itemA });
+    ok(gotA && JSON.stringify(gotA.meta) === JSON.stringify(wantA) && gotA.why === null,
+       "the present address's meta must equal pickTokenMeta fed the single-item shape {data:item}, got " +
+       JSON.stringify(gotA) + " vs want " + JSON.stringify(wantA));
+
+    const gotMissing = mapMM.get(addrMissing.toLowerCase());
+    ok(gotMissing && gotMissing.meta === null && gotMissing.why === "meta:404",
+       "an address absent from a successful batch response must map to {meta:null, why:\"meta:404\"}, got " +
+       JSON.stringify(gotMissing));
+
+    // شکستِ کل تماس → null، هرگز پرتاب
+    globalThis.fetch = async () => new Response("nope", { status: 500 });
+    ok(await ogFetchMetaMany([addrA], {}) === null, "a 500 upstream must give null, never throw");
+    globalThis.fetch = async () => new Response("not json", { status: 200,
+      headers: { "content-type": "application/json" } });
+    ok(await ogFetchMetaMany([addrA], {}) === null, "a broken body must give null, never throw");
+    globalThis.fetch = async () => { throw new Error("network is down"); };
+    ok(await ogFetchMetaMany([addrA], {}) === null, "a network failure must give null, never throw");
+    globalThis.fetch = savedFetchMM;
+
+    console.log("[pass budget meta many] ogFetchMetaMany ok — a single batch GET to " +
+      "networks/base/tokens/multi/<addr1>,<addr2>, meta for a present address equal to pickTokenMeta fed " +
+      "the single-item shape {data:item}, an address absent from a successful response mapped to " +
+      "meta:404, and a failed/broken/unreachable upstream returning null, never throwing");
+  }
+
+  // و) metaMany در runReportPass — batch موفق/ناموفق/غایب
+  {
+    const NOWE = Date.parse("2026-09-21T16:00:00.000Z");
+    const addrsE = [1, 2, 3].map(mkAddrBudget);
+    const poolsE = addrsE.map(poolRowBudget);
+
+    // batch موفق — metaOf هرگز صدا زده نمی‌شود
+    let metaOfCallsOk = 0;
+    let metaManyCallsOk = 0;
+    const kvOk = makeKvBudget();
+    await runReportPass({
+      kv: kvOk, fetchPools: async () => poolsE,
+      metaOf: async () => { metaOfCallsOk++; return { meta: { symbol: "X", name: "X" }, why: null }; },
+      verdictOf: async () => ({ v: "sell", why: null }),
+      now: () => NOWE, sleep: async () => {},
+      metaMany: async (addrs) => {
+        metaManyCallsOk++;
+        const map = new Map();
+        for (const a of addrs) map.set(a, { meta: { symbol: "B", name: "B" }, why: null });
+        return map;
+      },
+    });
+    ok(metaOfCallsOk === 0, "a successful metaMany batch must mean metaOf is never called, got " + metaOfCallsOk);
+    ok(metaManyCallsOk === 1, "metaMany must be called exactly once per pass, got " + metaManyCallsOk);
+    const docOk = JSON.parse(await kvOk.get(reportKey(utcDateOf(NOWE))));
+    ok(docOk.rows.every((r) => r.symbol === "B"),
+       "every row must carry the batch's own symbol, not metaOf's, got " +
+       JSON.stringify(docOk.rows.map((r) => r.symbol)));
+    const logOk = JSON.parse(await kvOk.get(PASS_LOG_KEY));
+    ok(logOk[0].metaBatch === "ok", "a successful metaMany must record metaBatch:\"ok\", got " +
+       JSON.stringify(logOk[0].metaBatch));
+    shapeOkPassRecord(logOk[0]);
+
+    // batch ناموفق (null) — metaOf دقیقاً یک بار به‌ازای هر توکن، نتیجه‌ای
+    // بایت‌به‌بایت مثلِ نبودِ metaMany
+    let metaOfCallsFail = 0;
+    let metaManyCallsFail = 0;
+    const kvFail = makeKvBudget();
+    await runReportPass({
+      kv: kvFail, fetchPools: async () => poolsE,
+      metaOf: async () => { metaOfCallsFail++; return { meta: { symbol: "X", name: "X" }, why: null }; },
+      verdictOf: async () => ({ v: "sell", why: null }),
+      now: () => NOWE, sleep: async () => {},
+      metaMany: async () => { metaManyCallsFail++; return null; },
+    });
+    ok(metaOfCallsFail === 3, "a null metaMany batch must fall back to metaOf for every token, got " +
+       metaOfCallsFail);
+    ok(metaManyCallsFail === 1, "metaMany must still be called exactly once even when it fails, got " +
+       metaManyCallsFail);
+    const docFail = JSON.parse(await kvFail.get(reportKey(utcDateOf(NOWE))));
+    const logFail = JSON.parse(await kvFail.get(PASS_LOG_KEY));
+    ok(logFail[0].metaBatch === "failed", "a failing metaMany must record metaBatch:\"failed\", got " +
+       JSON.stringify(logFail[0].metaBatch));
+    shapeOkPassRecord(logFail[0]);
+
+    let metaOfCallsPlain = 0;
+    const kvPlain = makeKvBudget();
+    await runReportPass({
+      kv: kvPlain, fetchPools: async () => poolsE,
+      metaOf: async () => { metaOfCallsPlain++; return { meta: { symbol: "X", name: "X" }, why: null }; },
+      verdictOf: async () => ({ v: "sell", why: null }),
+      now: () => NOWE, sleep: async () => {},
+    });
+    ok(metaOfCallsPlain === metaOfCallsFail,
+       "a failed batch must call metaOf exactly as many times as omitting metaMany entirely, got " +
+       metaOfCallsPlain + " vs " + metaOfCallsFail);
+    const docPlain = JSON.parse(await kvPlain.get(reportKey(utcDateOf(NOWE))));
+    ok(JSON.stringify(docPlain.rows) === JSON.stringify(docFail.rows),
+       "a failed batch's stored rows must be byte-for-byte identical to omitting metaMany entirely, got " +
+       JSON.stringify(docPlain.rows) + " vs " + JSON.stringify(docFail.rows));
+    const logPlain = JSON.parse(await kvPlain.get(PASS_LOG_KEY));
+    ok(logPlain[0].metaBatch === "absent", "with no metaMany injected, metaBatch must be \"absent\", got " +
+       JSON.stringify(logPlain[0].metaBatch));
+    shapeOkPassRecord(logPlain[0]);
+
+    console.log("[pass budget meta many wiring] runReportPass+metaMany ok — a successful batch means metaOf " +
+      "is never called and every row carries the batch's own meta; a failing (null) batch falls back to " +
+      "metaOf for every token, byte-for-byte identical to omitting metaMany entirely; metaMany is called " +
+      "exactly once per pass regardless of outcome; and metaBatch records \"ok\"/\"failed\"/\"absent\" " +
+      "accordingly, with none of it ever carrying an address or a URL");
+  }
 }
 
 console.log(fails === 0

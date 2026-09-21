@@ -24,6 +24,16 @@ export const REPORT_MAX_TOKENS_PER_RUN = 30;
 export const REPORT_PAIRS_CAP = 200;
 export const REPORT_PACE_MS = 500;
 
+/* سهمِ پایِ Base در یک گذرِ زمان‌بندی‌شده — از رویِ لاگِ گذرِ زنده‌ی ساعت
+   ۱۹:۱۷ UTC تنظیم شده: هفت توکنِ Base تلاش شد، شمارشِ عملیات به‌ازای توکن
+   [۶،۸،۶،۹،۸،۹،۲] بود، اولین ردیفِ نامعلوم از اندیسِ ۳ به بعد ظاهر شد،
+   capProbe نتیجه‌اش "cap" بود، و از ۴۱ فچِ کل ۲۴تا به api.coingecko.com
+   رفت. یعنی همان گذر پیش از توکنِ چهارم به سقفِ ساب‌ریکوئستِ Worker خورد —
+   این سقف را عمداً پایین‌تر از آن نقطه نگه می‌دارد تا هیچ ردیفی وسطِ
+   کارش نیمه‌کاره نماند. فقط پایِ زمان‌بندی‌شده را محدود می‌کند؛ /report/run
+   سقفِ کوچک‌ترِ خودش (REPORT_RUN_MAX_TOKENS در index.js) را جدا نگه می‌دارد. */
+export const REPORT_PASS_BASE_CAP = 5;
+
 // نگاشتِ بسته — تنها جایی که checkKind از آن می‌آید. هیچ پارامتری برای
 // checkKind وجود ندارد، دقیقاً برای اینکه نوشتنِ «round trip» روی یک نتیجه‌ی
 // sell-quote از نظرِ ساختاری غیرممکن باشد، نه فقط دلسردکننده.
@@ -583,10 +593,23 @@ function solTokenCap(maxTokens) {
    fetch مستقیم.
    fetchPoolsSol/solMaxTokens اختیاری‌اند — پایِ سولانا، بعد از پایِ Base:
    fetchPoolsSol غایب یا پرتاب‌کننده یعنی «این گذر سولانایی ندارد»، هرگز
-   یعنی شکستِ کل گذر. */
+   یعنی شکستِ کل گذر.
+   🔴 capHit اختیاری است: تابعی که هر بار صدا زده می‌شود می‌گوید «همین الان
+   به سقفِ ساب‌ریکوئستِ Worker خورده‌ایم یا نه» (کالر — scheduledReportPassInner
+   در index.js — () => meter.isCapHit() را پاس می‌دهد). غایب → همیشه false،
+   یعنی گذرِ بدونِ این تزریق بایت‌به‌بایت همان چیزی می‌ماند که امروز است.
+   پیش از شروعِ هر توکنِ Base، هر توکنِ سولانا، هر هدفِ فالوآپ و هر هدفِ
+   رِی‌چک سنجیده می‌شود: true یعنی همان مرحله همین‌جا متوقف می‌شود و هر
+   مرحله‌ی بعدی هم کلاً شروع نمی‌شود (stoppedAt نامِ همان مرحله را نگه
+   می‌دارد). اگر سقف *در میانه‌ی* کارِ یک توکن/هدف زده شود، آن یکی هم
+   دور ریخته می‌شود (نه در سند نه در حلقه‌ی pairs) — یک ردیفِ نامعلومِ
+   ساختگی، فقط به‌خاطرِ بودجه‌ی خودمان، هرگز نباید ذخیره شود؛ discarded
+   شمارشِ همین ردیف‌های دورریخته است. metaMany اختیاری است: یک تماسِ
+   دسته‌ای پیش از حلقه‌ی Base که به‌جای N تماسِ metaOf یکی می‌شود؛ غایب یا
+   ناموفق (null) یعنی بایت‌به‌بایت همان مسیرِ metaOf تک‌آدرسه‌ی امروز. */
 export async function runReportPass({
   kv, fetchPools, metaOf, verdictOf, now, sleep, maxTokens, poolEmptyOf, fetchPoolsSol, solMaxTokens,
-  probeFetch, meter,
+  probeFetch, meter, capHit, metaMany,
 }) {
   try {
     // 🔴 بدون انباری برای نوشتن، هیچ تماسِ بالادستی مجاز نیست — قبل از هر
@@ -604,6 +627,19 @@ export async function runReportPass({
     function mStage(name) { if (m && typeof m.stage === "function") m.stage(name); }
     function mTokenStart() { if (m && typeof m.tokenStart === "function") m.tokenStart(); }
     function mTokenEnd() { if (m && typeof m.tokenEnd === "function") m.tokenEnd(); }
+
+    // capHit غایب → همیشه false؛ یک capHit که خودش پرتاب کند هم یعنی false
+    // (هرگز حدسی به‌جای «نمی‌دانم» ساخته نمی‌شود).
+    function isCapped() {
+      if (typeof capHit !== "function") return false;
+      try { return !!capHit(); } catch (e) { return false; }
+    }
+    // کجا گذر ایستاد (نامِ یکی از REPORT_METER_STAGES) — null یعنی هرگز
+    // نایستاد. یک‌بار نوشته می‌شود، اولین مرحله‌ای که سقف را دید می‌برد.
+    let stoppedAt = null;
+    // چند ردیف/به‌روزرسانی به‌خاطرِ زدن به سقف در میانه‌ی کارش دور ریخته شد —
+    // نه در سند نه در حلقه‌ی pairs، تا گذرِ ساعتیِ بعدی دوباره سراغش برود.
+    let discarded = 0;
 
     mStage("pools");
     let rawRows;
@@ -633,9 +669,32 @@ export async function runReportPass({
       .filter((t) => !knownAddr.has(t.address))
       .slice(0, tokenCap(maxTokens));
 
+    /* متادیتای دسته‌ایِ Base — پیش از حلقه، فقط وقتی metaMany تزریق شده،
+       دقیقاً یک بار با همان آدرس‌هایی که همین گذر می‌خواهد چک کند.
+       متاBatch فقط برای اندازه‌گیری است ("absent" وقتی اصلاً تزریق نشده،
+       "failed" وقتی تماس null داد، "ok" وقتی یک Map برگشت — هر سه فقط در
+       رکوردِ لاگ می‌نشینند، هیچ رفتاری از رویشان تغییر نمی‌کند این‌جا،
+       تصمیم زیرِ همان `if (metaMap)` است). batch ناموفق → metaMap همان
+       null می‌ماند و هر توکن دقیقاً مسیرِ metaOf تک‌آدرسه‌ی امروز را طی
+       می‌کند؛ batch موفق → هیچ توکنی دیگر metaOf را صدا نمی‌زند. */
+    let metaMap = null;
+    let metaBatch = "absent";
+    if (typeof metaMany === "function") {
+      mStage("base-token");
+      try {
+        metaMap = await metaMany(tokens.map((t) => t.address));
+      } catch (e) {
+        metaMap = null;
+      }
+      metaBatch = metaMap ? "ok" : "failed";
+    }
+
     const builtRows = [];
     let checked = 0;
     for (const t of tokens) {
+      if (stoppedAt === null && isCapped()) stoppedAt = "base-token";
+      if (stoppedAt !== null) break; // سقف پیش از شروعِ این توکن دیده شد — نه این یکی نه هیچ‌کدامِ بعدی
+
       // پیش از هر توکن، هرگز موازی — یک نودِ حساس به نرخ زیرِ فشارِ چند
       // تماسِ هم‌زمان قرار نگیرد.
       await sleep(REPORT_PACE_MS);
@@ -646,8 +705,15 @@ export async function runReportPass({
       // metaOf باید { meta, why } بدهد — شکلِ دیگر (پرتاب، غیرِشیء، بدونِ
       // کلیدِ meta) یعنی metaOf خودش قابلِ‌اعتماد نبود: meta می‌شود null و
       // metaWhy می‌شود "internal"، نه یک حدس از رویِ چیزی که نیامد.
+      // ⚠️ metaMap فقط وقتی صدا زده می‌شود که batch واقعاً موفق بود
+      // (metaMap !== null) — یک batchِ ناموفق یعنی این توکن هم دقیقاً
+      // همان metaOf تک‌آدرسه‌ی امروز را صدا می‌زند، بدونِ هیچ افتی.
       let metaResult;
-      try { metaResult = await metaOf(t.address); } catch (e) { metaResult = null; }
+      if (metaMap) {
+        metaResult = metaMap.get(t.address) || { meta: null, why: "meta:404" };
+      } else {
+        try { metaResult = await metaOf(t.address); } catch (e) { metaResult = null; }
+      }
       const metaOk = !!metaResult && typeof metaResult === "object" &&
         Object.prototype.hasOwnProperty.call(metaResult, "meta");
       const meta = metaOk && metaResult.meta && typeof metaResult.meta === "object" ? metaResult.meta : null;
@@ -695,8 +761,17 @@ export async function runReportPass({
         cause,
         ret,
       });
-      if (row) builtRows.push(row);
       mTokenEnd();
+
+      // سقف در میانه‌ی همین توکن دیده شد → این یکی هم دور ریخته می‌شود
+      // (نه در سند نه در حلقه‌ی pairs) و هیچ توکنِ بعدی هم شروع نمی‌شود —
+      // یک «نامعلوم»ِ ساختگیِ برخاسته از بودجه‌ی خودمان، نه از خودِ توکن.
+      if (isCapped()) {
+        discarded++;
+        if (stoppedAt === null) stoppedAt = "base-token";
+        break;
+      }
+      if (row) builtRows.push(row);
     }
 
     /* پایِ سولانا — دقیقاً بعد از پایِ Base، همان پیس/همان sleep/همان
@@ -705,7 +780,9 @@ export async function runReportPass({
        (وقتی خودِ Base شکست بخورد) کلِ گذر را متوقف می‌کند اینجا برعکس است:
        فقط این یک پا را خالی می‌گذارد. */
     const builtRowsSol = [];
-    if (typeof fetchPoolsSol === "function") {
+    // stoppedAt !== null یعنی سقف قبلاً (تویِ پایِ Base) دیده شده — این پا
+    // اصلاً شروع نمی‌شود، حتی fetchPoolsSol هم صدا زده نمی‌شود.
+    if (typeof fetchPoolsSol === "function" && stoppedAt === null) {
       mStage("sol-pools");
       let rawRowsSol;
       try {
@@ -726,6 +803,9 @@ export async function runReportPass({
         const tokensSol = candidatesSol.slice(0, solTokenCap(solMaxTokens));
 
         for (const t of tokensSol) {
+          if (stoppedAt === null && isCapped()) stoppedAt = "sol-token";
+          if (stoppedAt !== null) break;
+
           await sleep(REPORT_PACE_MS);
           checked++;
           mStage("sol-token");
@@ -768,8 +848,14 @@ export async function runReportPass({
             cause,
             ret,
           });
-          if (row) builtRowsSol.push(row);
           mTokenEnd();
+
+          if (isCapped()) {
+            discarded++;
+            if (stoppedAt === null) stoppedAt = "sol-token";
+            break;
+          }
+          if (row) builtRowsSol.push(row);
         }
       }
     }
@@ -800,12 +886,17 @@ export async function runReportPass({
     // نکند (clobber نکند).
     let latestDoc = newDoc;
     let followed = 0;
-    if (typeof poolEmptyOf === "function") {
+    // stoppedAt !== null یعنی سقف قبلاً دیده شده (پایِ Base یا سولانا) —
+    // این مرحله اصلاً شروع نمی‌شود.
+    if (typeof poolEmptyOf === "function" && stoppedAt === null) {
       try {
         mStage("follow");
-        const targets = pickFollowUpTargets(newDoc, nowMs, 12);
+        const targets = pickFollowUpTargets(newDoc, nowMs, 3);
         const updates = [];
         for (const address of targets) {
+          if (stoppedAt === null && isCapped()) stoppedAt = "follow";
+          if (stoppedAt !== null) break; // سقف پیش از این هدف دیده شد
+
           // هر آدرس تویِ try/catچِ خودش — یک پرتاب یعنی این یکی آدرس رد
           // می‌شود، هرگز یک حدس.
           let empty;
@@ -813,6 +904,14 @@ export async function runReportPass({
             empty = await poolEmptyOf(address);
           } catch (e) {
             empty = null;
+          }
+
+          // سقف در میانه‌ی همین هدف دیده شد → به‌روزرسانی‌اش اعمال
+          // نمی‌شود، و مرحله همین‌جا متوقف می‌شود.
+          if (isCapped()) {
+            discarded++;
+            if (stoppedAt === null) stoppedAt = "follow";
+            break;
           }
           if (empty === true) updates.push({ address, follow: "pool-empty" });
           else if (empty === false) updates.push({ address, follow: "pool-there" });
@@ -844,11 +943,15 @@ export async function runReportPass({
        یا فالوآپِ بالا را بشکند — هر شکستی فقط یعنی rechecked:0. */
     let rechecked = 0;
     let recheckTried = 0;
-    try {
+    // stoppedAt !== null یعنی سقف قبلاً دیده شده — این مرحله اصلاً شروع نمی‌شود.
+    if (stoppedAt === null) try {
       mStage("recheck");
-      const targets = pickRecheckTargets(latestDoc, nowMs, 4);
+      const targets = pickRecheckTargets(latestDoc, nowMs, 2);
       const updates = [];
       for (const t of targets) {
+        if (stoppedAt === null && isCapped()) stoppedAt = "recheck";
+        if (stoppedAt !== null) break; // سقف پیش از این هدف دیده شد
+
         recheckTried++;
         // هر هدف تویِ try/catچِ خودش — یک پرتاب یعنی این یکی هدف رد
         // می‌شود، هرگز کل حلقه را نمی‌شکند.
@@ -869,7 +972,14 @@ export async function runReportPass({
           const v = verdictOk ? verdictResult.v : null;
           const cause = verdictOk ? verdictResult.cause : undefined;
 
-          if (v === "sell" || v === "nosell") updates.push({ address: t.address, recheck: v, cause });
+          // سقف در میانه‌ی همین هدف دیده شد → به‌روزرسانی‌اش اعمال نمی‌شود؛
+          // حلقه با گاردِ سرِ همین for (بالاتر) پیش از هدفِ بعدی متوقف می‌شود.
+          if (isCapped()) {
+            discarded++;
+            if (stoppedAt === null) stoppedAt = "recheck";
+          } else if (v === "sell" || v === "nosell") {
+            updates.push({ address: t.address, recheck: v, cause });
+          }
           // null/هرچیزِ دیگر → همچنان نامعلوم، اصلاً آپدیتی برای این آدرس نیست
           // (و ردیف کاندید می‌ماند تا سنش از ۱۸۰ دقیقه بگذرد)
         } catch (e) {
@@ -913,6 +1023,15 @@ export async function runReportPass({
         at: generatedAt, checked, added: builtRows.length + builtRowsSol.length,
         addedSol: builtRowsSol.length, followed, rechecked, recheckTried,
         base: passChainStats(builtRows), sol: passChainStats(builtRowsSol),
+        // 🔴 چهار فیلدِ زیر همیشه می‌نشینند (نه شرطی مثلِ capProbe/sub) —
+        // discarded/stoppedAt نتیجه‌ی مستقیمِ همین گذرند، metaBatch فقط سه
+        // رشته‌ی بسته است، و capAt هم یا null است یا فقط عدد (m.capAt خودش
+        // هرگز چیزی بیش از {ops,fetches,cache} نمی‌سازد — makeSubMeter در
+        // worker/index.js تضمینش می‌کند). هیچ‌کدام آدرس/symbol/URL ندارند.
+        discarded,
+        stoppedAt,
+        metaBatch,
+        capAt: m && m.capAt ? m.capAt : null,
       };
       if (capProbe !== undefined) passRecord.capProbe = capProbe;
       if (m && typeof m.snapshot === "function") passRecord.sub = m.snapshot();

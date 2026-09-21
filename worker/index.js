@@ -35,7 +35,7 @@ import { EVM_ADDR, SOL_MINT, chainOf, gtNetworkOf } from "./chains.js";
 import {
   REPORT_DATE_RE, PAIRS_KEY_BASE, reportKey, utcDateOf, emptyReportDoc, runReportPass,
   reportText, REPORT_TEXT_FIRST_DATE, followForRow, recheckForRow, causeForRow, readPassLog,
-  REPORT_METER_STAGES,
+  REPORT_METER_STAGES, REPORT_PASS_BASE_CAP,
 } from "./report.js";
 import {
   fetchVerdictSol, VD_SOL_RPCS, VD_SOL_JUP_BASE, VD_SOL_PAYER,
@@ -479,6 +479,72 @@ async function ogFetchMetaDetail(addr, env) {
 
 async function ogFetchMeta(addr, env) {
   return (await ogFetchMetaDetail(addr, env)).meta;
+}
+
+/* نسخه‌ی دسته‌ایِ ogFetchMetaDetail — فقط Base، فقط برایِ گذرِ گزارش (worker/
+   report.js → runReportPass با metaMany تزریق می‌کند). یک GET برای چند
+   آدرس با هم، دقیقاً همان الگوی بالادستِ کلیددار/رایگان + هدر +
+   AbortController(OG_TIMEOUT_MS) که ogFetchMetaDetail بالا دارد — بدونِ
+   Cache API (این یک تماسِ دسته‌ایِ یک‌باره است، نه یک کارتِ تک‌آدرسه که
+   ترافیکِ تکراری داشته باشد و از کشِ لبه سود ببرد).
+   خروجی: Map آدرس(کوچک) → { meta, why }؛ هر meta دقیقاً از همان
+   pickTokenMeta‌ای می‌آید که ogFetchMetaDetail استفاده می‌کند، با شکلِ
+   تک‌آیتمیِ { data: item } — یعنی هیچ قاعده‌ی دومِ موازی برای «متا چیست»
+   ساخته نمی‌شود.
+   ⚠️ آدرسی که در پاسخِ موفق نباشد → why:"meta:404" (همان چیزی که
+   تک‌آدرسه در آن ۴۰۴ می‌گفت). شکستِ کلِ تماس (fetch پرتاب کرد، status
+   ناموفق، JSON خراب، شکلِ بدنه بد) → null، هرگز پرتاب — کالر (runReportPass)
+   با غیابِ این نتیجه دقیقاً مثلِ نبودِ metaMany رفتار می‌کند: fallback به
+   metaOf تک‌آدرسه‌ی امروز، برای هر توکن. */
+async function ogFetchMetaMany(addrs, env) {
+  try {
+    if (!Array.isArray(addrs) || addrs.length === 0) return null;
+    const key = (env && typeof env.CG_KEY === "string" && env.CG_KEY) || "";
+    const rest = "networks/base/tokens/multi/" + addrs.join(",");
+    const target = (key ? UPSTREAM_KEYED : UPSTREAM_FREE) + "/" + rest;
+
+    const ac = new AbortController();
+    const timer = setTimeout(() => ac.abort(), OG_TIMEOUT_MS);
+    try {
+      const h = { accept: "application/json" };
+      if (key) h["x-cg-demo-api-key"] = key;
+      let up;
+      try {
+        up = await fetch(target, { headers: h, signal: ac.signal });
+      } catch (e) {
+        return null;
+      }
+      if (!up.ok) return null;
+      let body;
+      try {
+        body = await up.json();
+      } catch (e) {
+        return null;
+      }
+      if (!body || !Array.isArray(body.data)) return null;
+
+      const byAddr = new Map();
+      for (const item of body.data) {
+        const a = item && item.attributes && typeof item.attributes.address === "string"
+          ? item.attributes.address.toLowerCase() : null;
+        if (!a) continue;
+        const meta = pickTokenMeta({ data: item });
+        byAddr.set(a, { meta, why: meta ? null : "meta:shape" });
+      }
+
+      const out = new Map();
+      for (const addr of addrs) {
+        const a = typeof addr === "string" ? addr.toLowerCase() : null;
+        if (!a) continue;
+        out.set(a, byAddr.has(a) ? byAddr.get(a) : { meta: null, why: "meta:404" });
+      }
+      return out;
+    } finally {
+      clearTimeout(timer);
+    }
+  } catch (e) {
+    return null;
+  }
 }
 
 /* هستهٔ مشترکِ کش‌کردنِ verdict — هم برای Base هم برای سولانا. قبلاً این
@@ -1754,9 +1820,27 @@ function makeSubMeter() {
   const byHost = {};
   let cacheN = 0;
   let kvN = 0;
+  let fetchN = 0;
   const baseTokens = [];
   const solTokens = [];
   let tokenBase = null;
+
+  // سقفِ ساب‌ریکوئست — capHit/capAt. این کلاس فقط از رویِ متنِ پیام سنجیده
+  // می‌شود چون خودِ پلتفرم برایش هیچ کدِ جداگانه‌ای نمی‌دهد (همان کلاسی که
+  // classifyCapProbe در worker/report.js با /too many subrequests/i تشخیص
+  // می‌دهد)؛ capProbe در انتهای گذر همان کنترلِ مثبتِ این تشخیص است. فقط
+  // اولین بار ثبت می‌شود (capAt دیگر جابه‌جا نمی‌شود)، و پیام هرگز اینجا
+  // بلعیده نمی‌شود — نوتِ زیر همیشه پیام را بدونِ دست‌کاری دوباره پرتاب
+  // می‌کند، این تابع فقط رصد می‌کند.
+  let capHit_ = false;
+  let capAt_ = null;
+  function noteThrow(e) {
+    if (capHit_) return; // فقط اولین ضربه
+    if (e && typeof e.message === "string" && /too many subrequests/i.test(e.message)) {
+      capHit_ = true;
+      capAt_ = { ops: total, fetches: fetchN, cache: cacheN };
+    }
+  }
 
   function bumpStage() {
     total++;
@@ -1776,8 +1860,19 @@ function makeSubMeter() {
       }
       bumpStage();
       byHost[host] = (byHost[host] || 0) + 1;
-      return realFetch(input, init);
+      fetchN++;
+      try {
+        return await realFetch(input, init);
+      } catch (e) {
+        noteThrow(e); // پیام دست‌نخورده دوباره پرتاب می‌شود؛ این فقط رصد می‌کند
+        throw e;
+      }
     },
+    // فقط برای فراخوانیِ بیرونی (کالرِ cache/kv که خودِ عملیات را await
+    // می‌کند و خطایش را می‌گیرد) — همان تشخیصی که fetch بالا رویِ خودش دارد.
+    noteThrow,
+    isCapHit() { return capHit_; },
+    get capAt() { return capAt_; },
     stage(name) {
       // 🔴 فقط از REPORT_METER_STAGES — یک نامِ ناشناخته گذرِ آینده را
       // نمی‌شکند، فقط زیرِ همان نامِ دست‌ساز می‌نشیند (هنوز یک عدد است، نه
@@ -1854,8 +1949,28 @@ async function scheduledReportPass(env, ctx, opts) {
     const originalCacheMatch = cacheStore ? cacheStore.match : null;
     const originalCachePut = cacheStore ? cacheStore.put : null;
     if (cacheStore) {
-      cacheStore.match = async (...args) => { meter.cacheOp(); return originalCacheMatch.apply(cacheStore, args); };
-      cacheStore.put = async (...args) => { meter.cacheOp(); return originalCachePut.apply(cacheStore, args); };
+      // ⚠️ شمارش پیش از await می‌نشیند (همان قاعده‌ی meter.fetch: یک عملیات
+      // که تلاشش را کرد ولی شکست خورد هم یک ساب‌ریکوئست مصرف کرده)؛ خطا
+      // گرفته و به meter.noteThrow داده می‌شود تا کلاسِ سقف اینجا هم مثلِ
+      // fetch تشخیص داده شود، و بعد دست‌نخورده دوباره پرتاب می‌شود.
+      cacheStore.match = async (...args) => {
+        meter.cacheOp();
+        try {
+          return await originalCacheMatch.apply(cacheStore, args);
+        } catch (e) {
+          meter.noteThrow(e);
+          throw e;
+        }
+      };
+      cacheStore.put = async (...args) => {
+        meter.cacheOp();
+        try {
+          return await originalCachePut.apply(cacheStore, args);
+        } catch (e) {
+          meter.noteThrow(e);
+          throw e;
+        }
+      };
     }
 
     try {
@@ -1941,14 +2056,29 @@ async function scheduledReportPassInner(env, ctx, opts, meter) {
       },
       now: () => Date.now(),
       sleep: (ms) => new Promise((r) => setTimeout(r, ms)),
-      // فقط اجرای دستی این را می‌دهد؛ زمان‌بند سقفِ کاملِ خودش را دارد.
-      maxTokens: opts && opts.maxTokens,
+      // 🔴 اجرای دستی (/report/run) سقفِ کوچک‌ترِ خودش را می‌دهد
+      // (REPORT_RUN_MAX_TOKENS)؛ کرونِ ساعتی هیچ opts.maxTokens‌ای نمی‌دهد،
+      // پس همان‌جا REPORT_PASS_BASE_CAP (=۵) به کار می‌رود — از رویِ لاگِ
+      // گذرِ زنده‌ی ۱۹:۱۷ UTC تنظیم شده (پایِ Base پیش از توکنِ چهارم به
+      // سقفِ ساب‌ریکوئستِ Worker خورد)، جزئیاتش کنارِ خودِ ثابت در
+      // worker/report.js.
+      maxTokens: (opts && opts.maxTokens) || REPORT_PASS_BASE_CAP,
       // فالوآپِ «یک ساعت بعد»: pickFollowUpTargets داخلِ runReportPass خودش
-      // به ۱۲ آدرس در هر گذر سقف‌گذاری شده، پس این حداکثر ۱۲ eth_call کوتاهِ
-      // اضافه در ساعت است، روی مسیری که هیچ کاربری منتظرش نیست.
+      // به ۳ آدرس در هر گذر سقف‌گذاری شده (از ۱۲، هم‌رده‌ی کاهشِ سهمِ Base) —
+      // این حداکثر ۳ eth_call کوتاهِ اضافه در ساعت است، روی مسیری که هیچ
+      // کاربری منتظرش نیست.
       poolEmptyOf: (addr) => v4PoolsEmpty(addr, env, Date.now() + 1200),
       fetchPoolsSol,
-      solMaxTokens: 6,
+      // از ۶ به ۲ — همان تنظیمِ سهمِ هر مرحله از رویِ لاگِ گذرِ زنده‌ی
+      // ۱۹:۱۷ UTC (کنارِ REPORT_PASS_BASE_CAP در worker/report.js).
+      solMaxTokens: 2,
+      // سقفِ ساب‌ریکوئست — هرگز خودش یک ساب‌ریکوئست دیگر مصرف نمی‌کند تا
+      // بودجه بسوزاند؛ فقط رصدِ همان capHit_ی است که meter.fetch/noteThrow
+      // بالاتر ثبت می‌کنند.
+      capHit: () => meter.isCapHit(),
+      // متادیتای دسته‌ایِ Base — یک تماس به‌جای N؛ غایب یا ناموفق یعنی
+      // runReportPass دقیقاً مسیرِ metaOf تک‌آدرسه‌ی امروز را طی می‌کند.
+      metaMany: (addrs) => ogFetchMetaMany(addrs, env),
       /* پروبِ سقفِ ساب‌ریکوئست — فقط اندازه‌گیری: یک HEAD تک به همان بالادستِ
          GeckoTerminal، پشتِ مهلتِ ۱۵۰۰ میلی‌ثانیه‌ایِ خودش. اثباتِ «گذرِ ساعتی
          به سقفِ ساب‌ریکوئستِ Worker می‌خورد یا نه» — هیچ رفتاری از خودِ گذر
@@ -2137,7 +2267,7 @@ export default {
 // برای تست‌ها — در زمان اجرا روی Worker استفاده نمی‌شود.
 export { PATH_OK, QUERY_OK, ttlFor, EV_OK, EV_DETAIL_OK, EV_SURFACE_OK, EV_MAX_BODY, pairsRowsFor };
 export { rateOk, rlHits, RL_LIMIT, RL_WINDOW_MS };
-export { OG_NETWORK, OG_TIMEOUT_MS, ogFetchMeta, ogFetchVerdict };
+export { OG_NETWORK, OG_TIMEOUT_MS, ogFetchMeta, ogFetchVerdict, ogFetchMetaMany };
 export { baseVenueCovered, baseVenueCoveredDetail };
 export { UPSTREAM_FREE, UPSTREAM_KEYED };
 export { VD_ADDR_RE };
