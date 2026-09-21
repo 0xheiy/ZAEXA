@@ -591,9 +591,15 @@ function solTokenCap(maxTokens) {
 
 /* گذرِ گزارش‌گیریِ ساعتی. همه‌چیز تزریق می‌شود؛ خودِ این تابع نه I/O دارد نه
    fetch مستقیم.
-   fetchPoolsSol/solMaxTokens اختیاری‌اند — پایِ سولانا، بعد از پایِ Base:
-   fetchPoolsSol غایب یا پرتاب‌کننده یعنی «این گذر سولانایی ندارد»، هرگز
-   یعنی شکستِ کل گذر.
+   🔴 ترتیبِ مراحل: Base → نوشتنِ اول (فقط ردیف‌های Base) → فالوآپ → رِی‌چک
+   → سولانا → نوشتنِ دوم (اگر سولانا چیزی داشت) → پروب → لاگِ گذر. سولانا
+   دیگر بلافاصله بعدِ Base نمی‌آید — هر توکنِ سولانا ۶ تا ۱۲ ساب‌ریکوئست
+   می‌خورد و وقتی زودتر می‌آمد بودجه را می‌بلعید، پس فالوآپ/رِی‌چک در
+   گذرهای زنده همیشه صفر ثبت می‌شدند. حالا آن دو مرحله‌ی ارزان‌تر همیشه
+   فرصتِ اجرا دارند و سولانا (گران‌ترین پا) اولین چیزی است که سقف کنارش
+   می‌گذارد.
+   fetchPoolsSol/solMaxTokens اختیاری‌اند: fetchPoolsSol غایب یا پرتاب‌کننده
+   یعنی «این گذر سولانایی ندارد»، هرگز یعنی شکستِ کل گذر.
    🔴 capHit اختیاری است: تابعی که هر بار صدا زده می‌شود می‌گوید «همین الان
    به سقفِ ساب‌ریکوئستِ Worker خورده‌ایم یا نه» (کالر — scheduledReportPassInner
    در index.js — () => meter.isCapHit() را پاس می‌دهد). غایب → همیشه false،
@@ -690,7 +696,9 @@ export async function runReportPass({
     }
 
     const builtRows = [];
-    let checked = 0;
+    // شمارشِ پا جدا از هم: checkedBase در همین حلقه، checkedSol در حلقه‌ی
+    // سولانا (پایین‌تر، بعد از فالوآپ/رِی‌چک) — checked نهایی جمعِ این دو است.
+    let checkedBase = 0;
     for (const t of tokens) {
       if (stoppedAt === null && isCapped()) stoppedAt = "base-token";
       if (stoppedAt !== null) break; // سقف پیش از شروعِ این توکن دیده شد — نه این یکی نه هیچ‌کدامِ بعدی
@@ -698,7 +706,7 @@ export async function runReportPass({
       // پیش از هر توکن، هرگز موازی — یک نودِ حساس به نرخ زیرِ فشارِ چند
       // تماسِ هم‌زمان قرار نگیرد.
       await sleep(REPORT_PACE_MS);
-      checked++;
+      checkedBase++;
       mStage("base-token");
       mTokenStart();
 
@@ -774,98 +782,16 @@ export async function runReportPass({
       if (row) builtRows.push(row);
     }
 
-    /* پایِ سولانا — دقیقاً بعد از پایِ Base، همان پیس/همان sleep/همان
-       REPORT_PACE_MS. fetchPoolsSol که نباشد یا پرتاب کند یعنی «این گذر
-       سولانایی ندارد»، نه شکستِ گذر — همان قاعده‌ای که fetchPools در بالا
-       (وقتی خودِ Base شکست بخورد) کلِ گذر را متوقف می‌کند اینجا برعکس است:
-       فقط این یک پا را خالی می‌گذارد. */
-    const builtRowsSol = [];
-    // stoppedAt !== null یعنی سقف قبلاً (تویِ پایِ Base) دیده شده — این پا
-    // اصلاً شروع نمی‌شود، حتی fetchPoolsSol هم صدا زده نمی‌شود.
-    if (typeof fetchPoolsSol === "function" && stoppedAt === null) {
-      mStage("sol-pools");
-      let rawRowsSol;
-      try {
-        rawRowsSol = await fetchPoolsSol();
-      } catch (e) {
-        rawRowsSol = null;
-      }
-      if (Array.isArray(rawRowsSol)) {
-        const seenAddrSol = new Set();
-        const candidatesSol = [];
-        for (const row of rawRowsSol) {
-          const t = newPoolRowToTokenFor("solana", row);
-          if (!t || seenAddrSol.has(t.address)) continue;
-          seenAddrSol.add(t.address);
-          candidatesSol.push(t);
-        }
-
-        const tokensSol = candidatesSol.slice(0, solTokenCap(solMaxTokens));
-
-        for (const t of tokensSol) {
-          if (stoppedAt === null && isCapped()) stoppedAt = "sol-token";
-          if (stoppedAt !== null) break;
-
-          await sleep(REPORT_PACE_MS);
-          checked++;
-          mStage("sol-token");
-          mTokenStart();
-
-          // همان انضباطِ متاOf/verdictOf که پایِ Base بالاتر دارد — این دو
-          // تابع خودشان زنجیره‌آگاه‌اند (از رویِ chainOf(addr))، پس همان
-          // تزریق‌شده‌ی کالر برای هر دو پا کافی است.
-          let metaResult;
-          try { metaResult = await metaOf(t.address); } catch (e) { metaResult = null; }
-          const metaOk = !!metaResult && typeof metaResult === "object" &&
-            Object.prototype.hasOwnProperty.call(metaResult, "meta");
-          const meta = metaOk && metaResult.meta && typeof metaResult.meta === "object" ? metaResult.meta : null;
-          const metaWhy = metaOk ? metaResult.why : "internal";
-
-          let verdictResult;
-          try { verdictResult = await verdictOf(t.address, meta, metaWhy, t.dex); } catch (e) { verdictResult = null; }
-          const verdictOk = !!verdictResult && typeof verdictResult === "object" &&
-            Object.prototype.hasOwnProperty.call(verdictResult, "v");
-          const verdict = verdictOk ? verdictResult.v : null;
-          const why = verdictOk ? verdictResult.why : "internal";
-          const cause = verdictOk ? verdictResult.cause : undefined;
-          const ret = verdictOk ? verdictResult.ret : undefined;
-
-          const checkedAt = new Date(now()).toISOString();
-          const row = reportRow({
-            chain: "solana",
-            address: t.address,
-            symbol: meta && typeof meta.symbol === "string" ? meta.symbol : null,
-            name: meta && typeof meta.name === "string" ? meta.name : null,
-            verdict,
-            checkedAt,
-            poolCreatedAt: t.poolCreatedAt,
-            priceUsd: t.priceUsd,
-            reserveUsd: t.reserveUsd,
-            vol24hUsd: t.vol24hUsd,
-            fdvUsd: t.fdvUsd,
-            dex: t.dex,
-            why,
-            cause,
-            ret,
-          });
-          mTokenEnd();
-
-          if (isCapped()) {
-            discarded++;
-            if (stoppedAt === null) stoppedAt = "sol-token";
-            break;
-          }
-          if (row) builtRowsSol.push(row);
-        }
-      }
-    }
-
     const nowMs = now();
     const dateStr = utcDateOf(nowMs);
     const generatedAt = new Date(nowMs).toISOString();
 
+    /* نوشتنِ اول: فقط ردیف‌های Base، فقط checkedBase. ترتیبِ تازه‌ی گذر
+       Base → نوشتن → فالوآپ → رِی‌چک → سولانا است (پایِ سولانا پایین‌تر،
+       بعد از رِی‌چک می‌آید — دلیلش کنارِ همان بلوک توضیح داده شده)، پس تا
+       همین‌جا فقط همین چیزی است که داریم. */
     const prevDoc = await safeKvGetJson(kv, reportKey(dateStr));
-    const newDoc = mergeReportDoc(prevDoc, dateStr, builtRows.concat(builtRowsSol), checked, generatedAt);
+    const newDoc = mergeReportDoc(prevDoc, dateStr, builtRows, checkedBase, generatedAt);
     // 🔴 حلقه‌ی «تازه‌ها» فقط Base است — سولانا هرگز وارد pairs:base:latest
     // نمی‌شود، حتی وقتی همین گذر ردیفِ سولانایی هم اضافه کرده باشد.
     const newPairs = mergePairsRing(prevPairsArr, builtRows, REPORT_PAIRS_CAP);
@@ -1000,10 +926,122 @@ export async function runReportPass({
       rechecked = 0;
     }
 
-    /* پروبِ سقفِ ساب‌ریکوئست — دقیقاً همین‌جا، بعدِ گامِ رِی‌چک، تا اندازه‌گیری
-       واقعاً *انتهای* همان گذری باشد که می‌خواهیم درباره‌اش بدانیم. صرفاً
-       اندازه‌گیری است: هیچ رفتاری از بالاتر عوض نمی‌شود، و نبودِ probeFetch
-       یعنی این فیلد کلاً غایب می‌ماند، نه یک حدس. */
+    /* پایِ سولانا — حالا اینجا، بعد از فالوآپ و رِی‌چک، نه بلافاصله بعدِ
+       Base. دلیل: هر توکنِ سولانا ۶ تا ۱۲ ساب‌ریکوئست می‌خورد (metaOf +
+       verdictOf با چند تلاشِ RPC/دکس)، و وقتی این پا بلافاصله بعدِ Base
+       می‌آمد بودجه را می‌بلعید — در گذرهای زنده followed/rechecked همیشه
+       صفر ثبت می‌شد چون سقف پیش از رسیدنِ نوبتِ آن‌ها می‌خورد. ترتیبِ
+       Base → نوشتن → فالوآپ → رِی‌چک → سولانا یعنی آن دو مرحله‌ی ارزان‌تر
+       همیشه فرصتِ اجرا دارند، و اگر سقف بخورد اول سولانا (گران‌ترین پا)
+       کنار می‌رود، نه فالوآپ/رِی‌چک.
+       همان پیس/همان sleep/همان REPORT_PACE_MS. fetchPoolsSol که نباشد یا
+       پرتاب کند یعنی «این گذر سولانایی ندارد»، نه شکستِ گذر — همان قاعده‌ای
+       که fetchPools در بالا (وقتی خودِ Base شکست بخورد) کلِ گذر را متوقف
+       می‌کند اینجا برعکس است: فقط این یک پا را خالی می‌گذارد.
+       🔴 stoppedAt !== null یعنی سقف قبلاً (تویِ Base، فالوآپ یا رِی‌چک)
+       دیده شده — این پا اصلاً شروع نمی‌شود، حتی fetchPoolsSol هم صدا زده
+       نمی‌شود؛ رِی‌چک هم مثلِ فالوآپ می‌تواند stoppedAt را ست کند، پس یک
+       سقف در رِی‌چک یعنی سولانا هرگز شروع نمی‌شود و fetchPoolsSol هرگز
+       صدا زده نمی‌شود. */
+    const builtRowsSol = [];
+    let checkedSol = 0;
+    if (typeof fetchPoolsSol === "function" && stoppedAt === null) {
+      mStage("sol-pools");
+      let rawRowsSol;
+      try {
+        rawRowsSol = await fetchPoolsSol();
+      } catch (e) {
+        rawRowsSol = null;
+      }
+      if (Array.isArray(rawRowsSol)) {
+        const seenAddrSol = new Set();
+        const candidatesSol = [];
+        for (const row of rawRowsSol) {
+          const t = newPoolRowToTokenFor("solana", row);
+          if (!t || seenAddrSol.has(t.address)) continue;
+          seenAddrSol.add(t.address);
+          candidatesSol.push(t);
+        }
+
+        const tokensSol = candidatesSol.slice(0, solTokenCap(solMaxTokens));
+
+        for (const t of tokensSol) {
+          if (stoppedAt === null && isCapped()) stoppedAt = "sol-token";
+          if (stoppedAt !== null) break;
+
+          await sleep(REPORT_PACE_MS);
+          checkedSol++;
+          mStage("sol-token");
+          mTokenStart();
+
+          // همان انضباطِ متاOf/verdictOf که پایِ Base بالاتر دارد — این دو
+          // تابع خودشان زنجیره‌آگاه‌اند (از رویِ chainOf(addr))، پس همان
+          // تزریق‌شده‌ی کالر برای هر دو پا کافی است.
+          let metaResult;
+          try { metaResult = await metaOf(t.address); } catch (e) { metaResult = null; }
+          const metaOk = !!metaResult && typeof metaResult === "object" &&
+            Object.prototype.hasOwnProperty.call(metaResult, "meta");
+          const meta = metaOk && metaResult.meta && typeof metaResult.meta === "object" ? metaResult.meta : null;
+          const metaWhy = metaOk ? metaResult.why : "internal";
+
+          let verdictResult;
+          try { verdictResult = await verdictOf(t.address, meta, metaWhy, t.dex); } catch (e) { verdictResult = null; }
+          const verdictOk = !!verdictResult && typeof verdictResult === "object" &&
+            Object.prototype.hasOwnProperty.call(verdictResult, "v");
+          const verdict = verdictOk ? verdictResult.v : null;
+          const why = verdictOk ? verdictResult.why : "internal";
+          const cause = verdictOk ? verdictResult.cause : undefined;
+          const ret = verdictOk ? verdictResult.ret : undefined;
+
+          const checkedAt = new Date(now()).toISOString();
+          const row = reportRow({
+            chain: "solana",
+            address: t.address,
+            symbol: meta && typeof meta.symbol === "string" ? meta.symbol : null,
+            name: meta && typeof meta.name === "string" ? meta.name : null,
+            verdict,
+            checkedAt,
+            poolCreatedAt: t.poolCreatedAt,
+            priceUsd: t.priceUsd,
+            reserveUsd: t.reserveUsd,
+            vol24hUsd: t.vol24hUsd,
+            fdvUsd: t.fdvUsd,
+            dex: t.dex,
+            why,
+            cause,
+            ret,
+          });
+          mTokenEnd();
+
+          if (isCapped()) {
+            discarded++;
+            if (stoppedAt === null) stoppedAt = "sol-token";
+            break;
+          }
+          if (row) builtRowsSol.push(row);
+        }
+      }
+    }
+
+    /* نوشتنِ دوم، فقط وقتی سولانا واقعاً چیزی داشت (ردیف یا حتی فقط یک
+       تلاشِ چک‌شده): رویِ latestDoc ادغام می‌شود، نه newDoc و نه یک
+       خواندنِ تازه — تا کلیدهای follow/recheck که بالاتر نوشته شدند پاک
+       نشوند (clobber نکند). */
+    if (builtRowsSol.length > 0 || checkedSol > 0) {
+      const solDoc = mergeReportDoc(latestDoc, dateStr, builtRowsSol, checkedSol, generatedAt);
+      mStage("kv-write");
+      await safeKvPutJson(kv, reportKey(dateStr), solDoc);
+      latestDoc = solDoc;
+    }
+
+    // checked نهایی: جمعِ دو پا — همان چیزی که در result/passRecord می‌نشیند.
+    const checked = checkedBase + checkedSol;
+
+    /* پروبِ سقفِ ساب‌ریکوئست — دقیقاً همین‌جا، بعدِ پایِ سولانا (آخرین
+       مرحله‌ی گذر)، تا اندازه‌گیری واقعاً *انتهای* همان گذری باشد که
+       می‌خواهیم درباره‌اش بدانیم. صرفاً اندازه‌گیری است: هیچ رفتاری از
+       بالاتر عوض نمی‌شود، و نبودِ probeFetch یعنی این فیلد کلاً غایب
+       می‌ماند، نه یک حدس. */
     let capProbe;
     if (typeof probeFetch === "function") {
       mStage("probe");

@@ -8670,11 +8670,14 @@ function stripAllowedWording(t) {
     ok(doc.rows.some((r) => r.chain === "base" && r.address === mkAddr(1)),
        "the Base row must still be in the same document");
 
-    // 🔴 دقیقاً یک نوشتنِ KV روی خودِ کلیدِ گزارش برای همین گذر — بدونِ
-    // poolEmptyOf هیچ نوشتنِ دومِ فالوآپی هم نباید باشد.
+    // 🔴 دقیقاً دو نوشتنِ KV روی خودِ کلیدِ گزارش برای همین گذر — یکی برای
+    // ردیف‌های Base (بلافاصله بعدِ حلقه‌ی Base)، یکی برای ردیف‌های سولانا
+    // (آخرِ گذر، رویِ همان latestDoc ادغام می‌شود). بدونِ poolEmptyOf هیچ
+    // نوشتنِ سومِ فالوآپی هم نباید باشد.
     const reportWrites = kv.putCalls.filter((k) => k === reportKey(dateStr));
-    ok(reportWrites.length === 1,
-       "exactly one KV write of the report document must happen per pass, got " + reportWrites.length);
+    ok(reportWrites.length === 2,
+       "exactly two KV writes of the report document must happen per pass when both legs have rows " +
+       "(Base, then Solana), got " + reportWrites.length);
 
     // ---- پ) حلقه‌ی pairs هیچ ردیفِ سولانایی نمی‌گیرد ----
     const pairs = JSON.parse(await kv.get(PAIRS_KEY_BASE));
@@ -8718,9 +8721,10 @@ function stripAllowedWording(t) {
        "chains must be [\"base\"] when no Solana rows landed, got " + JSON.parse(docAbsent).chains);
   }
 
-  console.log("[report sol pass] runReportPass's injected Solana leg ok — both legs land in one document "
-    + "written to KV exactly once per pass, chains becomes [\"base\",\"solana\"] sorted, every Solana row "
-    + "carries checkKind:\"roundtrip\", checked/added/addedSol all count correctly, and the pairs ring "
+  console.log("[report sol pass] runReportPass's injected Solana leg ok — both legs land in the same "
+    + "document across two KV writes per pass (Base first, Solana merged onto latestDoc after follow/"
+    + "recheck), chains becomes [\"base\",\"solana\"] sorted, every Solana row carries "
+    + "checkKind:\"roundtrip\", checked/added/addedSol all count correctly, and the pairs ring "
     + "receives only the Base row even when Solana rows were added; a fetchPoolsSol that is absent or "
     + "throws yields a byte-for-byte identical document to a Base-only pass with addedSol:0, and the "
     + "Base leg still lands either way");
@@ -10179,16 +10183,27 @@ function stripAllowedWording(t) {
   const sub = withM.stored.sub;
   ok(sub && typeof sub === "object",
      "the stored pass record must carry a sub object when a meter is injected, got " + JSON.stringify(withM.stored));
-  ok(sub.total === 18,
+  // 🔴 با ترتیبِ تازه (Base → follow → recheck → سولانا)، خواندنِ prevDoc
+  // (بعدِ حلقه‌ی Base، پیش از mStage("kv-write")) حالا زیرِ "base-token"
+  // می‌نشیند نه "sol-token" (که دیگر مرحله‌ی قبلی نیست)؛ و چون سولانا
+  // ردیف دارد، یک نوشتنِ KV واقعیِ تازه هم اضافه شده (مرجِ روی latestDoc) —
+  // پس sub.total یکی بیشتر از قبل است (۱۸ شد ۱۹).
+  ok(sub.total === 19,
      "sub.total must equal the exact number of metered ops up to where the pass record is snapshotted, got " +
      sub.total);
+  // 🔴 کلیدهای این شیء به همان ترتیبِ اولین‌باری که هر مرحله دیده می‌شود
+  // نشسته‌اند (JSON.stringify ترتیب را حفظ می‌کند) — با ترتیبِ تازه‌ی گذر
+  // (Base → نوشتن → فالوآپ → رِی‌چک → سولانا → پروب) این ترتیب pools,
+  // base-token, kv-write, follow, recheck, sol-pools, sol-token, probe است.
   ok(JSON.stringify(sub.byStage) === JSON.stringify({
-       pools: 2, "base-token": 4, "sol-pools": 1, "sol-token": 3, "kv-write": 4, follow: 1, recheck: 2, probe: 1,
+       pools: 2, "base-token": 5, "kv-write": 5, follow: 1, recheck: 2, "sol-pools": 1, "sol-token": 2, probe: 1,
      }), "sub.byStage must attribute every metered op to the exact stage active at call time, got " +
      JSON.stringify(sub.byStage));
+  // 🔴 همان انضباطِ ترتیبِ کلید بالا: فالوآپ (poolempty.example.com) حالا
+  // پیش از سولانا (solpools.example.com) دیده می‌شود.
   ok(JSON.stringify(sub.byHost) === JSON.stringify({
        "pools.example.com": 1, "meta.example.com": 4, "verdict.example.com": 4,
-       "solpools.example.com": 1, "poolempty.example.com": 1, "probe.example.com": 1,
+       "poolempty.example.com": 1, "solpools.example.com": 1, "probe.example.com": 1,
      }), "sub.byHost must key on hostname only, got " + JSON.stringify(sub.byHost));
   ok(JSON.stringify(sub.baseTokens) === JSON.stringify([2, 2]),
      "sub.baseTokens must carry one entry per Base token in check order, got " + JSON.stringify(sub.baseTokens));
@@ -10759,6 +10774,424 @@ function stripAllowedWording(t) {
       "metaOf for every token, byte-for-byte identical to omitting metaMany entirely; metaMany is called " +
       "exactly once per pass regardless of outcome; and metaBatch records \"ok\"/\"failed\"/\"absent\" " +
       "accordingly, with none of it ever carrying an address or a URL");
+  }
+}
+
+/* ---- ۵۰. ترتیبِ گذر: Base → نوشتن → فالوآپ → رِی‌چک → سولانا —
+   [pass order] ----
+   پیش‌تر سولانا بلافاصله بعدِ Base می‌آمد، پیش از نوشتنِ اول. حالا سولانا
+   آخرین پا است، بعد از فالوآپ و رِی‌چک. این بخش خودِ توالی را می‌سنجد —
+   با یک متر-مانندِ سفارشی که فقط نامِ stage() را ضبط می‌کند (نه یک متر
+   واقعی)، و با ترتیبِ صدا زدنِ خودِ توابعِ تزریقی. */
+{
+  function makeKvO() {
+    const store = new Map();
+    return { store, get: async (k) => (store.has(k) ? store.get(k) : null),
+      put: async (k, v) => { store.set(k, v); } };
+  }
+  function mkAddrO(n) { return "0x" + n.toString(16).padStart(40, "0"); }
+  function poolRowO(addr) {
+    return {
+      attributes: { reserve_in_usd: "9000", base_token_price_usd: "1",
+        pool_created_at: "2026-09-21T10:00:00Z", volume_usd: { h24: "0" }, fdv_usd: "0" },
+      relationships: { base_token: { data: { id: "base_" + addr } }, dex: { data: { id: "uniswap-v3-base" } } },
+    };
+  }
+  const B58_O = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
+  function mkSolAddrO(n) {
+    let s = "";
+    const x = n + 7000;
+    for (let i = 0; i < 44; i++) s += B58_O[(x + i * 7) % B58_O.length];
+    return s;
+  }
+  function solPoolRowO(addr) {
+    return {
+      attributes: { reserve_in_usd: "9000", base_token_price_usd: "1",
+        pool_created_at: "2026-09-21T09:00:00Z", volume_usd: { h24: "10" }, fdv_usd: "100" },
+      relationships: { base_token: { data: { id: "solana_" + addr } }, dex: { data: { id: "pumpswap" } } },
+    };
+  }
+
+  // الف) ترتیبِ خودِ stage()ها + ترتیبِ صدا زدنِ fetchPools/poolEmptyOf/
+  // verdictOfِ رِی‌چک/fetchPoolsSol
+  {
+    const NOWOa = Date.parse("2026-09-21T16:00:00.000Z");
+    const dateStrOa = utcDateOf(NOWOa);
+    const oldIsoOa = new Date(NOWOa - 90 * 60000).toISOString();
+    const followAddrOa = mkAddrO(500);
+    const recheckAddrOa = mkAddrO(501);
+    const seedDocOa = {
+      date: dateStrOa, generatedAt: oldIsoOa, chains: ["base"], checked: 2,
+      rows: [
+        reportRow({ chain: "base", address: followAddrOa, symbol: "SF", name: "SF", verdict: "sell",
+          checkedAt: oldIsoOa, poolCreatedAt: oldIsoOa, priceUsd: 1, reserveUsd: 9000, vol24hUsd: 0, fdvUsd: 0,
+          dex: "uniswap-v3-base", why: null }),
+        reportRow({ chain: "base", address: recheckAddrOa, symbol: "SR", name: "SR", verdict: null,
+          checkedAt: oldIsoOa, poolCreatedAt: oldIsoOa, priceUsd: 1, reserveUsd: 9000, vol24hUsd: 0, fdvUsd: 0,
+          dex: "uniswap-v3-base", why: "no-quote" }),
+      ],
+    };
+    const kvOa = makeKvO();
+    await kvOa.put(reportKey(dateStrOa), JSON.stringify(seedDocOa));
+
+    const stageSeqOa = [];
+    let curStageOa = "?";
+    const stageRecorderOa = { stage(name) { curStageOa = name; stageSeqOa.push(name); } };
+    const callSeqOa = [];
+    const baseAddrsOa = [1, 2].map(mkAddrO);
+
+    await runReportPass({
+      kv: kvOa, meter: stageRecorderOa,
+      fetchPools: async () => { callSeqOa.push("fetchPools"); return baseAddrsOa.map(poolRowO); },
+      metaOf: async () => ({ meta: { symbol: "T", name: "T" }, why: null }),
+      verdictOf: async () => { callSeqOa.push("verdictOf@" + curStageOa); return { v: "sell", why: null }; },
+      now: () => NOWOa, sleep: async () => {},
+      poolEmptyOf: async () => { callSeqOa.push("poolEmptyOf"); return true; },
+      fetchPoolsSol: async () => { callSeqOa.push("fetchPoolsSol"); return [solPoolRowO(mkSolAddrO(1))]; },
+    });
+
+    const firstIdxOa = (name) => stageSeqOa.indexOf(name);
+    const lastIdxOa = (name) => stageSeqOa.lastIndexOf(name);
+    ok(firstIdxOa("sol-pools") !== -1 && firstIdxOa("sol-pools") > lastIdxOa("recheck"),
+       "the first \"sol-pools\" stage must come after the LAST \"recheck\" stage, got sequence " +
+       JSON.stringify(stageSeqOa));
+    ok(firstIdxOa("sol-pools") > firstIdxOa("follow"),
+       "the first \"sol-pools\" stage must come after the first \"follow\" stage, got sequence " +
+       JSON.stringify(stageSeqOa));
+    ok(firstIdxOa("follow") > firstIdxOa("kv-write"),
+       "the first \"follow\" stage must come after the first \"kv-write\" stage, got sequence " +
+       JSON.stringify(stageSeqOa));
+
+    const idxCallOa = (name) => callSeqOa.indexOf(name);
+    ok(idxCallOa("fetchPoolsSol") > idxCallOa("poolEmptyOf"),
+       "fetchPoolsSol must be called after poolEmptyOf (follow), got call order " + JSON.stringify(callSeqOa));
+    ok(idxCallOa("fetchPoolsSol") > idxCallOa("verdictOf@recheck"),
+       "fetchPoolsSol must be called after recheck's own verdictOf call, got call order " +
+       JSON.stringify(callSeqOa));
+
+    console.log("[pass order] runReportPass ok — the first \"sol-pools\" stage comes after the last " +
+      "\"recheck\" stage and after the first \"follow\" stage, the first \"follow\" stage comes after the " +
+      "first \"kv-write\" stage, and fetchPoolsSol is called after both poolEmptyOf and recheck's own " +
+      "verdictOf call");
+  }
+
+  // ب) سقف در میانه‌ی رِی‌چک — سولانا هرگز شروع نمی‌شود، Base و فالوآپ در سند می‌مانند
+  {
+    const NOWOb = Date.parse("2026-09-21T16:30:00.000Z");
+    const dateStrOb = utcDateOf(NOWOb);
+    const oldIsoOb = new Date(NOWOb - 90 * 60000).toISOString();
+    const followAddrOb = mkAddrO(510);
+    const recheckAddrOb = mkAddrO(511);
+    const seedDocOb = {
+      date: dateStrOb, generatedAt: oldIsoOb, chains: ["base"], checked: 2,
+      rows: [
+        reportRow({ chain: "base", address: followAddrOb, symbol: "SF", name: "SF", verdict: "sell",
+          checkedAt: oldIsoOb, poolCreatedAt: oldIsoOb, priceUsd: 1, reserveUsd: 9000, vol24hUsd: 0, fdvUsd: 0,
+          dex: "uniswap-v3-base", why: null }),
+        reportRow({ chain: "base", address: recheckAddrOb, symbol: "SR", name: "SR", verdict: null,
+          checkedAt: oldIsoOb, poolCreatedAt: oldIsoOb, priceUsd: 1, reserveUsd: 9000, vol24hUsd: 0, fdvUsd: 0,
+          dex: "uniswap-v3-base", why: "no-quote" }),
+      ],
+    };
+    const kvOb = makeKvO();
+    await kvOb.put(reportKey(dateStrOb), JSON.stringify(seedDocOb));
+
+    const baseAddrOb = mkAddrO(1);
+    let recheckMetaCallsOb = 0;
+    let solCalledOb = 0;
+    const capHitOb = () => recheckMetaCallsOb >= 1; // درست پس از metaOfِ هدفِ رِی‌چک true می‌شود
+
+    await runReportPass({
+      kv: kvOb, capHit: capHitOb,
+      fetchPools: async () => [poolRowO(baseAddrOb)],
+      metaOf: async (addr) => {
+        if (addr === recheckAddrOb) recheckMetaCallsOb++;
+        return { meta: { symbol: "T", name: "T" }, why: null };
+      },
+      verdictOf: async () => ({ v: "sell", why: null }),
+      now: () => NOWOb, sleep: async () => {},
+      poolEmptyOf: async () => true,
+      fetchPoolsSol: async () => { solCalledOb++; return [solPoolRowO(mkSolAddrO(2))]; },
+    });
+
+    ok(solCalledOb === 0, "fetchPoolsSol must never be called once the cap was hit during recheck, got " +
+       solCalledOb);
+
+    const storedDocOb = JSON.parse(await kvOb.get(reportKey(dateStrOb)));
+    const storedAddrsOb = storedDocOb.rows.map((r) => r.address);
+    ok(storedAddrsOb.includes(baseAddrOb), "the Base row must still be stored, got " +
+       JSON.stringify(storedAddrsOb));
+    const followRowOb = storedDocOb.rows.find((r) => r.address === followAddrOb);
+    ok(followRowOb && "follow" in followRowOb,
+       "the follow key written before the cap must still be persisted, got " + JSON.stringify(followRowOb));
+
+    const logOb = JSON.parse(await kvOb.get(PASS_LOG_KEY));
+    ok(logOb[0].stoppedAt === "recheck", "stoppedAt must record \"recheck\", got " +
+       JSON.stringify(logOb[0].stoppedAt));
+
+    console.log("[pass order recheck cap] runReportPass ok — a capHit that flips true once the recheck " +
+      "target's own metaOf has been called leaves fetchPoolsSol never invoked and stoppedAt:\"recheck\", " +
+      "while the Base rows and the follow key written earlier in the same pass stay in the stored doc");
+  }
+
+  // ج) سقف در میانه‌ی توکنِ سولانا — ردیفِ آن توکن نه در سند نه شمرده می‌شود
+  {
+    const NOWOc = Date.parse("2026-09-21T17:00:00.000Z");
+    const dateStrOc = utcDateOf(NOWOc);
+    const oldIsoOc = new Date(NOWOc - 90 * 60000).toISOString();
+    const followAddrOc = mkAddrO(520);
+    const recheckAddrOc = mkAddrO(521);
+    const seedDocOc = {
+      date: dateStrOc, generatedAt: oldIsoOc, chains: ["base"], checked: 2,
+      rows: [
+        reportRow({ chain: "base", address: followAddrOc, symbol: "SF", name: "SF", verdict: "sell",
+          checkedAt: oldIsoOc, poolCreatedAt: oldIsoOc, priceUsd: 1, reserveUsd: 9000, vol24hUsd: 0, fdvUsd: 0,
+          dex: "uniswap-v3-base", why: null }),
+        reportRow({ chain: "base", address: recheckAddrOc, symbol: "SR", name: "SR", verdict: null,
+          checkedAt: oldIsoOc, poolCreatedAt: oldIsoOc, priceUsd: 1, reserveUsd: 9000, vol24hUsd: 0, fdvUsd: 0,
+          dex: "uniswap-v3-base", why: "no-quote" }),
+      ],
+    };
+    const kvOc = makeKvO();
+    await kvOc.put(reportKey(dateStrOc), JSON.stringify(seedDocOc));
+
+    const baseAddrOc = mkAddrO(3);
+    const solAddrsOc = [1, 2].map(mkSolAddrO);
+    let solMetaCallsOc = 0;
+    const capHitOc = () => solMetaCallsOc >= 1; // درست پس از metaOfِ اولین توکنِ سولانا true می‌شود
+
+    await runReportPass({
+      kv: kvOc, capHit: capHitOc,
+      fetchPools: async () => [poolRowO(baseAddrOc)],
+      metaOf: async (addr) => {
+        if (!addr.startsWith("0x")) solMetaCallsOc++;
+        return { meta: { symbol: "T", name: "T" }, why: null };
+      },
+      verdictOf: async () => ({ v: "sell", why: null }),
+      now: () => NOWOc, sleep: async () => {},
+      poolEmptyOf: async () => true,
+      fetchPoolsSol: async () => solAddrsOc.map(solPoolRowO),
+    });
+
+    const storedDocOc = JSON.parse(await kvOc.get(reportKey(dateStrOc)));
+    const storedAddrsOc = storedDocOc.rows.map((r) => r.address);
+    ok(storedAddrsOc.includes(baseAddrOc), "the Base row must still be stored, got " +
+       JSON.stringify(storedAddrsOc));
+    const followRowOc = storedDocOc.rows.find((r) => r.address === followAddrOc);
+    ok(followRowOc && "follow" in followRowOc,
+       "the follow key written earlier in the same pass must still be persisted, got " +
+       JSON.stringify(followRowOc));
+    const recheckRowOc = storedDocOc.rows.find((r) => r.address === recheckAddrOc);
+    ok(recheckRowOc && "recheck" in recheckRowOc,
+       "the recheck key written earlier in the same pass must still be persisted, got " +
+       JSON.stringify(recheckRowOc));
+    ok(!storedAddrsOc.includes(solAddrsOc[0]),
+       "the Solana token whose check crossed the cap must never be stored, got " +
+       JSON.stringify(storedAddrsOc));
+
+    const logOc = JSON.parse(await kvOc.get(PASS_LOG_KEY));
+    ok(logOc[0].stoppedAt === "sol-token", "stoppedAt must record \"sol-token\", got " +
+       JSON.stringify(logOc[0].stoppedAt));
+    ok(logOc[0].discarded === 1, "discarded must be exactly 1, got " + logOc[0].discarded);
+
+    console.log("[pass order sol cap] runReportPass ok — a capHit that flips true once the first Solana " +
+      "token's own metaOf has been called leaves that token out of the stored doc (discarded:1, " +
+      "stoppedAt:\"sol-token\"), while the Base rows and the follow/recheck keys written earlier in the " +
+      "same pass all stay in place");
+  }
+
+  // د) گاردِ clobber — فالوآپ + رِی‌چک + یک ردیفِ سولانا، هر سه در سندِ نهایی
+  {
+    const NOWOd = Date.parse("2026-09-21T17:30:00.000Z");
+    const dateStrOd = utcDateOf(NOWOd);
+    const oldIsoOd = new Date(NOWOd - 90 * 60000).toISOString();
+    const followAddrOd = mkAddrO(530);
+    const recheckAddrOd = mkAddrO(531);
+    const seedDocOd = {
+      date: dateStrOd, generatedAt: oldIsoOd, chains: ["base"], checked: 2,
+      rows: [
+        reportRow({ chain: "base", address: followAddrOd, symbol: "SF", name: "SF", verdict: "sell",
+          checkedAt: oldIsoOd, poolCreatedAt: oldIsoOd, priceUsd: 1, reserveUsd: 9000, vol24hUsd: 0, fdvUsd: 0,
+          dex: "uniswap-v3-base", why: null }),
+        reportRow({ chain: "base", address: recheckAddrOd, symbol: "SR", name: "SR", verdict: null,
+          checkedAt: oldIsoOd, poolCreatedAt: oldIsoOd, priceUsd: 1, reserveUsd: 9000, vol24hUsd: 0, fdvUsd: 0,
+          dex: "uniswap-v3-base", why: "no-quote" }),
+      ],
+    };
+    const kvOd = makeKvO();
+    await kvOd.put(reportKey(dateStrOd), JSON.stringify(seedDocOd));
+
+    const baseAddrsOd = [1, 2].map(mkAddrO);
+    const solAddrOd = mkSolAddrO(9);
+
+    const resOd = await runReportPass({
+      kv: kvOd,
+      fetchPools: async () => baseAddrsOd.map(poolRowO),
+      metaOf: async () => ({ meta: { symbol: "T", name: "T" }, why: null }),
+      verdictOf: async () => ({ v: "sell", why: null }),
+      now: () => NOWOd, sleep: async () => {},
+      poolEmptyOf: async () => true,
+      fetchPoolsSol: async () => [solPoolRowO(solAddrOd)],
+    });
+
+    const storedDocOd = JSON.parse(await kvOd.get(reportKey(dateStrOd)));
+    const followRowOd = storedDocOd.rows.find((r) => r.address === followAddrOd);
+    const recheckRowOd = storedDocOd.rows.find((r) => r.address === recheckAddrOd);
+    const solRowOd = storedDocOd.rows.find((r) => r.address === solAddrOd);
+    ok(followRowOd && "follow" in followRowOd,
+       "the final stored doc must carry the follow key, got " + JSON.stringify(followRowOd));
+    ok(recheckRowOd && "recheck" in recheckRowOd,
+       "the final stored doc must carry the recheck key, got " + JSON.stringify(recheckRowOd));
+    ok(solRowOd && solRowOd.chain === "solana",
+       "the final stored doc must carry the Solana row, got " + JSON.stringify(solRowOd));
+    ok(resOd.checked === baseAddrsOd.length + 1,
+       "checked must equal Base tokens attempted (2) + Solana tokens attempted (1), got " + resOd.checked);
+    ok(storedDocOd.checked === seedDocOd.checked + resOd.checked,
+       "the stored doc's checked is additive (mergeReportDoc onto latestDoc twice) — it must equal the " +
+       "seed doc's prior checked plus this pass's own Base+Solana checked count, got doc=" +
+       storedDocOd.checked + " seed=" + seedDocOd.checked + " pass=" + resOd.checked);
+
+    const ringOd = JSON.parse(await kvOd.get(PAIRS_KEY_BASE)) || [];
+    ok(!ringOd.some((r) => r.address === solAddrOd),
+       "the Solana row must never enter the Base pairs ring, even after the follow/recheck/Solana writes " +
+       "that come after the ring write, got " + JSON.stringify(ringOd.map((r) => r.address)));
+
+    console.log("[pass order clobber] runReportPass ok — when the same pass writes a follow key, a recheck " +
+      "key and a Solana row, the final stored doc carries all three (the Solana write onto latestDoc never " +
+      "clobbers follow/recheck), doc.checked stays additive across both writes, and the Solana row still " +
+      "never enters the Base pairs ring");
+  }
+}
+
+/* ---- ۵۱. Cache API در طولِ گذر خاموش است — [pass cache off] ----
+   scheduledReportPass دیگر caches.default.match/put واقعی را صدا نمی‌زند؛
+   فقط meter.cacheSkip() را می‌شمرد و خودش undefined/هیچ برمی‌گرداند. این
+   بخش هم سطحِ scheduledReportPass (واقعی، با fetch/caches جعلی) را می‌سنجد
+   هم خودِ makeSubMeter.cacheSkip را جدا. */
+{
+  function poolRowCO(addr) {
+    return {
+      attributes: { reserve_in_usd: "9000", base_token_price_usd: "1",
+        pool_created_at: "2026-09-21T10:00:00Z", volume_usd: { h24: "0" }, fdv_usd: "0" },
+      relationships: { base_token: { data: { id: "base_" + addr } }, dex: { data: { id: "uniswap-v3-base" } } },
+    };
+  }
+  const addrCO = "0x" + "7".repeat(40);
+  function tokenDetailCO() {
+    return json({ data: { attributes: { name: "OFF", symbol: "OFF", decimals: 18,
+      price_usd: "1", total_reserve_in_usd: "9000", volume_usd: { h24: "0" } } } });
+  }
+  // یک fetch که واقعاً یک توکنِ Base تازه می‌دهد — تا ogFetchMetaDetail و
+  // cachedVerdict (پشتِ verdictOf) هر دو واقعاً اجرا شوند، نه فقط fetchPools.
+  async function fetchOkCO(url) {
+    const u = String(url);
+    if (u.includes("/networks/base/new_pools")) return json({ data: [poolRowCO(addrCO)] });
+    if (u.includes("/networks/solana/new_pools")) return json({ data: [] });
+    if (u.includes("/networks/base/tokens/")) return tokenDetailCO();
+    if (u.includes("/networks?page=1")) return new Response("", { status: 200 });
+    // هر چیزِ دیگر (RPCِ eth_call) — شکلِ نامعتبر، ولی هیچ‌گاه پرتاب نمی‌کند؛
+    // verdict نامعلوم می‌ماند، این خودِ نکته نیست، فقط نباید گذر را بشکند.
+    return new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, result: "0x" }), { status: 200 });
+  }
+
+  // الف) گذرِ عادی — caches.default.match/put واقعی هرگز صدا زده نمی‌شوند
+  {
+    let realMatchCalls = 0;
+    let realPutCalls = 0;
+    const savedFetch = globalThis.fetch;
+    const savedCaches = globalThis.caches;
+    globalThis.fetch = fetchOkCO;
+    globalThis.caches = { default: {
+      match: async () => { realMatchCalls++; return undefined; },
+      put: async () => { realPutCalls++; },
+    } };
+    const matchBefore = globalThis.caches.default.match;
+    const putBefore = globalThis.caches.default.put;
+
+    const storeCO = new Map();
+    const kvCO = {
+      get: async (k) => (storeCO.has(k) ? storeCO.get(k) : null),
+      put: async (k, v) => { storeCO.set(k, v); },
+    };
+    await scheduledReportPass({ ZX_KV: kvCO }, {});
+
+    globalThis.fetch = savedFetch;
+    const matchAfter = globalThis.caches.default.match;
+    const putAfter = globalThis.caches.default.put;
+    if (savedCaches === undefined) delete globalThis.caches; else globalThis.caches = savedCaches;
+
+    ok(realMatchCalls === 0, "the real caches.default.match must never be called during the pass, got " +
+       realMatchCalls + " calls");
+    ok(realPutCalls === 0, "the real caches.default.put must never be called during the pass, got " +
+       realPutCalls + " calls");
+
+    const logCO = JSON.parse(storeCO.get(PASS_LOG_KEY) || "null");
+    ok(Array.isArray(logCO) && logCO[0] && logCO[0].sub && typeof logCO[0].sub === "object",
+       "the stored pass log must carry a sub object, got " + JSON.stringify(logCO && logCO[0]));
+    ok(logCO[0].sub.cache === 0, "sub.cache must stay 0 — no real cache op is ever performed, got " +
+       JSON.stringify(logCO[0].sub.cache));
+    ok(typeof logCO[0].sub.cacheSkipped === "number" && logCO[0].sub.cacheSkipped >= 1,
+       "sub.cacheSkipped must be a positive control that the pass really did try the cache, got " +
+       JSON.stringify(logCO[0].sub.cacheSkipped));
+
+    ok(matchAfter === matchBefore, "globalThis.caches.default.match must be restored to the exact same " +
+       "function object after the pass, got a different function");
+    ok(putAfter === putBefore, "globalThis.caches.default.put must be restored to the exact same function " +
+       "object after the pass, got a different function");
+
+    console.log("[pass cache off] scheduledReportPass ok — a normal pass with at least one Base token never " +
+      "calls the real caches.default.match/put (both stay at 0 real calls), the stored pass log's " +
+      "sub.cache is 0 while sub.cacheSkipped is a positive count (the pass really did try the cache), and " +
+      "caches.default.match/put are restored to the exact same function objects afterward");
+  }
+
+  // ب) همان، ولی هر fetch پرتاب می‌کند — بازگردانی حتی وقتی هیچ توکنی چک نمی‌شود
+  {
+    const savedFetch = globalThis.fetch;
+    const savedCaches = globalThis.caches;
+    globalThis.fetch = async () => { throw new Error("network exploded mid-stage"); };
+    globalThis.caches = { default: {
+      match: async () => undefined,
+      put: async () => {},
+    } };
+    const matchBefore = globalThis.caches.default.match;
+    const putBefore = globalThis.caches.default.put;
+
+    const kvThrowCO = { get: async () => null, put: async () => {} };
+    await scheduledReportPass({ ZX_KV: kvThrowCO }, {});
+
+    globalThis.fetch = savedFetch;
+    const matchAfter = globalThis.caches.default.match;
+    const putAfter = globalThis.caches.default.put;
+    if (savedCaches === undefined) delete globalThis.caches; else globalThis.caches = savedCaches;
+
+    ok(matchAfter === matchBefore && putAfter === putBefore,
+       "even when every injected fetch throws, caches.default.match/put must still be restored to the " +
+       "exact same function objects afterward");
+
+    console.log("[pass cache off restore] scheduledReportPass ok — caches.default.match/put are restored " +
+      "to the exact same function objects even when every fetch throws mid-stage and no token is ever " +
+      "checked");
+  }
+
+  // ج) makeSubMeter.cacheSkip — فقط شمارش، هرگز bumpStage/total/byStage/cacheOp را لمس نمی‌کند
+  {
+    const meterCS = makeSubMeter();
+    meterCS.stage("pools");
+    meterCS.cacheSkip();
+    meterCS.cacheSkip();
+    const snapCS = meterCS.snapshot();
+    ok(snapCS.cacheSkipped === 2, "cacheSkip() called twice must give snapshot().cacheSkipped === 2, got " +
+       snapCS.cacheSkipped);
+    ok(snapCS.total === 0, "cacheSkip() must never touch total (a skipped op is not a subrequest), got " +
+       snapCS.total);
+    ok(JSON.stringify(snapCS.byStage) === JSON.stringify({}),
+       "cacheSkip() must never touch byStage, got " + JSON.stringify(snapCS.byStage));
+    ok(snapCS.cache === 0, "cacheSkip() must never touch the separate cacheOp() counter, got " + snapCS.cache);
+
+    console.log("[pass cache off unit] makeSubMeter.cacheSkip ok — it only increments its own counter " +
+      "(snapshot().cacheSkipped), never bumpStage/total/byStage, and never touches the separate cacheOp() " +
+      "counter");
   }
 }
 

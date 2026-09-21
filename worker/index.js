@@ -1819,6 +1819,7 @@ function makeSubMeter() {
   const byStage = {};
   const byHost = {};
   let cacheN = 0;
+  let cacheSkipN = 0;
   let kvN = 0;
   let fetchN = 0;
   const baseTokens = [];
@@ -1892,6 +1893,13 @@ function makeSubMeter() {
       bumpStage();
       cacheN++;
     },
+    // Cache API خاموش است (پایین‌تر، در scheduledReportPass) — این فقط
+    // شمارش می‌کند که تلاش برای کش وجود داشت، هرگز bumpStage را صدا
+    // نمی‌زند و به total/byStage/byHost دست نمی‌زند: یک عملیاتِ رد‌شده
+    // یک ساب‌ریکوئستِ واقعی نیست.
+    cacheSkip() {
+      cacheSkipN++;
+    },
     // KV — همان الگو، تحتِ یک سطلِ ثابتِ «kv». نامِ دومِ متفاوت (نه
     // cacheOp دوباره) تا شمارشِ cache/kv هرگز با هم قاطی نشود.
     kvOp() {
@@ -1906,6 +1914,7 @@ function makeSubMeter() {
         byStage: { ...byStage },
         byHost: { ...byHost },
         cache: cacheN,
+        cacheSkipped: cacheSkipN,
         kv: kvN,
         baseTokens: baseTokens.slice(),
         solTokens: solTokens.slice(),
@@ -1932,16 +1941,27 @@ async function scheduledReportPass(env, ctx, opts) {
     if (!env || !env.ZX_KV) return { checked: 0, added: 0 };
 
     /* متر ساب‌ریکوئست — برای *هر* اجرا (چه کرونِ ساعتی چه /report/run)
-       ساخته می‌شود. globalThis.fetch و caches.default.match/put فقط برای
-       طولِ همین گذر جایگزین می‌شوند و در finally همیشه برمی‌گردند — حتی
-       وقتی یک مرحله در وسطِ راه throw کند. این جایگزینی خودِ رفتارِ هیچ
-       fetchی را عوض نمی‌کند (meter.fetch همان fetchِ واقعی را صدا می‌زند)،
-       فقط رهگیری‌اش می‌کند.
+       ساخته می‌شود. globalThis.fetch فقط برای طولِ همین گذر جایگزین
+       می‌شود و در finally همیشه برمی‌گردد — حتی وقتی یک مرحله در وسطِ راه
+       throw کند. این جایگزینی خودِ رفتارِ هیچ fetchی را عوض نمی‌کند
+       (meter.fetch همان fetchِ واقعی را صدا می‌زند)، فقط رهگیری‌اش می‌کند.
        ⚠️ این اجرای زمان‌بندی‌شده «درخواستِ خودش» است؛ درخواست‌های هم‌زمانِ
        دیگر در همین ایزوله (اگر باشند) هم می‌توانند از همین globalThis.fetch
        جایگزین‌شده رد شوند و زیرِ همین شمارش بنشینند — پس عددها یک بالاسری
        هستند، نه یک اندازه‌گیریِ دقیقِ ایزوله‌شده. برای بودجه‌بندی این طرفِ
-       امن است: کم‌شماری خطرناک‌تر از بیش‌شماری بود. */
+       امن است: کم‌شماری خطرناک‌تر از بیش‌شماری بود.
+
+       🔴 Cache API در طولِ همین گذر کاملاً خاموش است — caches.default.match
+       هیچ‌وقت واقعاً صدا زده نمی‌شود، فقط undefined برمی‌گرداند، و .put هم
+       هیچ‌وقت واقعاً چیزی نمی‌نویسد. دلیل: اندازه‌گیریِ زنده نشان داد ۱۵ از
+       ۵۱ ساب‌ریکوئستِ یک گذر عملیاتِ Cache API بودند، و کلادفلر همین
+       عملیات‌ها را هم جزوِ سقفِ ۵۰تایی می‌شمرد — درحالی‌که کش تقریباً همیشه
+       برای توکن‌های تازه خالی است (یک توکنِ تازه‌کشف‌شده هیچ‌وقت از قبل کش
+       نشده)، پس آن ۱۵ تماس تقریباً همیشه فقط برای رسیدن به یک miss بودند.
+       خاموش کردنش یعنی همان بودجه برای فالوآپ/رِی‌چک/سولانا می‌ماند.
+       ⚠️ یک درخواستِ هم‌زمان در همین ایزوله (اگر باشد) هم در طولِ گذر کش
+       را میس می‌کند و رویش نمی‌نویسد — طرفِ امن: فقط یعنی آن درخواست
+       کارِ تازه انجام می‌دهد، هرگز یک حکمِ کهنه/باطل نمی‌بیند. */
     const meter = makeSubMeter();
     const originalFetch = globalThis.fetch;
     globalThis.fetch = meter.fetch;
@@ -1949,27 +1969,12 @@ async function scheduledReportPass(env, ctx, opts) {
     const originalCacheMatch = cacheStore ? cacheStore.match : null;
     const originalCachePut = cacheStore ? cacheStore.put : null;
     if (cacheStore) {
-      // ⚠️ شمارش پیش از await می‌نشیند (همان قاعده‌ی meter.fetch: یک عملیات
-      // که تلاشش را کرد ولی شکست خورد هم یک ساب‌ریکوئست مصرف کرده)؛ خطا
-      // گرفته و به meter.noteThrow داده می‌شود تا کلاسِ سقف اینجا هم مثلِ
-      // fetch تشخیص داده شود، و بعد دست‌نخورده دوباره پرتاب می‌شود.
-      cacheStore.match = async (...args) => {
-        meter.cacheOp();
-        try {
-          return await originalCacheMatch.apply(cacheStore, args);
-        } catch (e) {
-          meter.noteThrow(e);
-          throw e;
-        }
+      cacheStore.match = async () => {
+        meter.cacheSkip();
+        return undefined;
       };
-      cacheStore.put = async (...args) => {
-        meter.cacheOp();
-        try {
-          return await originalCachePut.apply(cacheStore, args);
-        } catch (e) {
-          meter.noteThrow(e);
-          throw e;
-        }
+      cacheStore.put = async () => {
+        meter.cacheSkip();
       };
     }
 
