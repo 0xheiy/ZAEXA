@@ -21,11 +21,12 @@ import {
   causeForRow, REPORT_CAUSES,
   followForRow, REPORT_FOLLOWS, applyFollowUps, pickFollowUpTargets,
   retForRow, REPORT_SOL_MAX_TOKENS,
+  recheckForRow, REPORT_RECHECKS, applyRechecks, pickRecheckTargets,
 } from "./report.js";
 import * as v4 from "./v4index.js";
 import {
   readV4Keys, readV4Entry, rpcCallBase, fetchV4Pools, storeV4Result, v4StoreTtl, runV4Index,
-  v4PoolsEmpty, V4_STATE_VIEW, V4_GET_LIQUIDITY_SEL,
+  v4PoolsEmpty, V4_STATE_VIEW, V4_GET_LIQUIDITY_SEL, pairsRowsFor,
 } from "./index.js";
 
 let fails = 0;
@@ -352,7 +353,30 @@ ok(res.status === 200, "index.html must still be served");
   ok(hx.status === 204, "wallet:on must still accept its own allowlisted detail \"inj\" "
     + "(got " + hx.status + ")");
 
-  console.log("[events] " + EV_OK.size + " event names allowed, everything else refused");
+  /* ط) رویدادِ تازه: share:copy — همیشه با detail="" فرستاده می‌شود (هیچ
+     توکن/آدرس/URLای هرگز فرستاده نمی‌شود). حلقه‌ی «ه» بالاتر همین را برای
+     همه‌ی EV_OK از‌جمله share:copy سنجیده؛ اینجا صریح‌تر: detail خالی
+     پذیرفته می‌شود، و یک detail واقعاً نامعتبر (نه در EV_DETAIL_OK، و
+     share:copy جزوِ EV_ERR_NAMES نیست پس استثنای چهار-رقمی هم شاملش
+     نمی‌شود) رد می‌شود.
+     ⚠️ "inj"/"wc" عضوِ همان EV_DETAIL_OKِ سراسری‌اند و برای *هر* رویدادی
+     پذیرفته می‌شوند (نه فقط wallet:on) — این یک قاعده‌ی از پیش‌موجود است،
+     نه چیزی که این تغییر باز کرده باشد؛ پس share:copy هم با "inj" ۲۰۴
+     می‌گیرد، درست هم‌رده‌ی wallet:on در سطر «ه» بالاتر. */
+  let sc = await evCall(JSON.stringify({ e: "share:copy", d: "", v: "desktop" }), { cf: {} });
+  ok(sc.status === 204, "share:copy with detail \"\" should be accepted (got " + sc.status + ")");
+
+  sc = await evCall(JSON.stringify({ e: "share:copy", d: "inj", v: "desktop" }), { cf: {} });
+  ok(sc.status === 204, "share:copy with the pre-existing globally-allowlisted detail \"inj\" should be "
+    + "accepted (got " + sc.status + ") — EV_DETAIL_OK is not per-event");
+
+  sc = await evCall(JSON.stringify({ e: "share:copy", d: "0xdeadbeef", v: "desktop" }), { cf: {} });
+  ok(sc.status === 400, "share:copy with a detail outside EV_DETAIL_OK (share:copy is not an err: event, "
+    + "so the 4-hex exception never applies to it) should be refused (got " + sc.status + ")");
+
+  console.log("[events] " + EV_OK.size + " event names allowed, everything else refused, including the "
+    + "new share:copy (accepted with detail \"\" and with the pre-existing global \"inj\"/\"wc\" details, "
+    + "refused with anything else)");
 }
 
 /* صفحه‌ی توکن: Worker باید *اپ* را از ASSETS بخواهد (/app)، نه ریشه و نه
@@ -7944,6 +7968,28 @@ console.log("[report cause] causeForRow enforces the closed REPORT_CAUSES vocabu
     "fields at all");
 }
 
+/* گاردِ واژگانِ ممنوع — تنها جایی که این گارد زندگی می‌کند همین فایلِ تست
+   است (خودِ worker/report.js چنین regexای ندارد؛ ساختار، نه واژه‌شماری،
+   تضمینِ اصلی است — نگاه کن به CHECK_KIND_BY_CHAIN بالای report.js). دو
+   بخشِ زیر (۲۸ و ۳۹) از همین یک regex و همین یک تابعِ حذفِ استثناها
+   استفاده می‌کنند تا هر دو دقیقاً یک قاعده را بسنجند.
+   🔴 استثنا عمداً باریک است: فقط رشته‌های *ثابتِ* زیر (هرکدام یک substring
+   دقیق، نه یک الگو) حذف می‌شوند — یک regexِ عمومیِ «هر خطی که simulat
+   دارد» دقیقاً همان شکافی است که این گارد باید جلویش را بگیرد. */
+const FORBIDDEN_WORDING = /round.?trip|simulat|safe|verified|honeypot|tax|blacklist|revert|cannot be sold/i;
+const ALLOWED_WORDING_PHRASES = [
+  "not a simulated round trip",
+  "failed a simulated buy and sell.",
+  "passed a simulated buy and sell.",
+  " — failed the simulated buy and sell",
+  "On Solana, the buy and the sell are simulated together.",
+];
+function stripAllowedWording(t) {
+  let out = t;
+  for (const phrase of ALLOWED_WORDING_PHRASES) out = out.split(phrase).join("");
+  return out;
+}
+
 /* ---- ۲۸. متنِ گزارش — reportText و /report/<...>.txt ----
    🔴 روی Base رفت‌وبرگشت نداریم — این بخش با یک regex تضمین می‌کند هیچ متنِ
    تولیدشده در کلِ این بخش کلمه‌ای مثل "round trip"، "simulat"، "safe"،
@@ -8224,10 +8270,8 @@ console.log("[report cause] causeForRow enforces the closed REPORT_CAUSES vocabu
      rJsonRegression.status + " " + rJsonRegression.headers.get("content-type"));
 
   // ک) گاردِ واژگان — روی هر متنی که این بخش تولید کرد
-  const FORBIDDEN_WORDING = /round.?trip|simulat|safe|verified|honeypot|tax|blacklist|revert|cannot be sold/i;
   for (const t of textsProduced) {
-    const stripped = t.split("not a simulated round trip").join("");
-    ok(!FORBIDDEN_WORDING.test(stripped),
+    ok(!FORBIDDEN_WORDING.test(stripAllowedWording(t)),
        "a report text must never use forbidden wording outside the one allowed phrase, got: " +
        JSON.stringify(t));
   }
@@ -8304,6 +8348,137 @@ console.log("[report cause] causeForRow enforces the closed REPORT_CAUSES vocabu
   console.log("[pairs route] GET /pairs asks ASSETS for exactly \"/pairs.html\" and returns its body "
     + "untouched; a missing env.ASSETS falls through without throwing or 500ing; GET /pairs.json?"
     + "chain=base is unaffected (never handed to ASSETS); /pairsX and /pairs/ are not captured");
+}
+
+/* ---- pairsRowsFor — پیوستِ follow/recheck در زمانِ خواندن — [pairs merge] ----
+   حلقه‌ی pairs:base:latest فقط یک بار نوشته می‌شود و هرگز follow/recheck
+   نمی‌گیرد؛ pairsRowsFor باید این دو کلید را در زمانِ خواندن از سندِ روزانه
+   (امروز، بعد دیروز، امروز برنده) قرض بگیرد، بدونِ اینکه خودِ حلقه یا هیچ
+   کلیدِ دیگرِ هر ردیف دست بخورد. */
+{
+  const T = "2026-09-20T12:00:00.000Z"; // فقط برای generatedAt سندهای زیر
+  const todayStr = utcDateOf(Date.now());
+  const yesterdayStr = utcDateOf(Date.now() - 86400000);
+
+  function mkKv(map) {
+    return { get: async (k) => (Object.prototype.hasOwnProperty.call(map, k) ? map[k] : null) };
+  }
+  function addr(n) { return "0x" + n.toString(16).padStart(40, "0"); }
+
+  const addrFollow = addr(0x10);       // v:"sell" در حلقه، follow معتبر در سندِ امروز
+  const addrRecheck = addr(0x11);      // v:null در حلقه، recheck:"nosell" معتبر در سندِ امروز
+  const addrBadFollow = addr(0x12);    // v:"sell"، ولی follow="maybe" (نامعتبر)
+  const addrWrongVerdict = addr(0x13); // v:"nosell" در حلقه — سندِ امروز follow دارد ولی نباید بگیرد
+  const addrUnrelated = addr(0x14);    // فقط یک کلیدِ نامربوط در سند عوض شده، بدونِ follow/recheck
+  const addrYesterdayOnly = addr(0x15); // follow فقط در سندِ دیروز
+  const addrTodayWins = addr(0x16);     // follow در هر دو سند، امروز باید ببرد
+  const addrNotInAnyDoc = addr(0x17);   // در هیچ سندی نیست
+
+  const ring = [
+    { address: addrFollow, v: "sell", tag: "keep-me-1" },
+    { address: addrRecheck, v: null, tag: "keep-me-2" },
+    { address: addrBadFollow, v: "sell", tag: "keep-me-3" },
+    { address: addrWrongVerdict, v: "nosell", tag: "keep-me-4" },
+    { address: addrUnrelated, v: "sell", priceUsd: 1, tag: "keep-me-5" },
+    { address: addrYesterdayOnly, v: "sell", tag: "keep-me-6" },
+    { address: addrTodayWins, v: "sell", tag: "keep-me-7" },
+    { address: addrNotInAnyDoc, v: "sell", tag: "keep-me-8" },
+  ];
+
+  const todayDoc = {
+    date: todayStr, generatedAt: T, chains: ["base"], checked: 8,
+    rows: [
+      { address: addrFollow, v: "sell", follow: "pool-empty", followAt: "2026-09-20T13:00:00.000Z" },
+      {
+        address: addrRecheck, v: null, recheck: "nosell", recheckAt: "2026-09-20T13:00:00.000Z",
+        recheckCause: "empty-pool",
+      },
+      { address: addrBadFollow, v: "sell", follow: "maybe", followAt: "2026-09-20T13:00:00.000Z" },
+      { address: addrWrongVerdict, v: "sell", follow: "pool-there", followAt: "2026-09-20T13:00:00.000Z" },
+      { address: addrUnrelated, v: "sell", priceUsd: 999 }, // بدونِ follow/recheck — فقط یک کلیدِ نامربوط
+      { address: addrTodayWins, v: "sell", follow: "pool-empty", followAt: "2026-09-20T13:00:00.000Z" },
+    ],
+  };
+  const yesterdayDoc = {
+    date: yesterdayStr, generatedAt: T, chains: ["base"], checked: 2,
+    rows: [
+      {
+        address: addrYesterdayOnly, v: "sell", follow: "pool-there", followAt: "2026-09-19T13:00:00.000Z",
+      },
+      { address: addrTodayWins, v: "sell", follow: "pool-there", followAt: "2026-09-19T13:00:00.000Z" },
+    ],
+  };
+
+  const kv = mkKv({
+    [PAIRS_KEY_BASE]: JSON.stringify(ring),
+    [reportKey(todayStr)]: JSON.stringify(todayDoc),
+    [reportKey(yesterdayStr)]: JSON.stringify(yesterdayDoc),
+  });
+  const rows = await pairsRowsFor({ ZX_KV: kv }, "base");
+
+  ok(Array.isArray(rows) && rows.length === ring.length,
+     "the merged rows must keep the ring's exact length, got " + (rows && rows.length));
+  ok(rows.map((r) => r.address).join(",") === ring.map((r) => r.address).join(","),
+     "the merged rows must keep the ring's exact order, got " + JSON.stringify(rows.map((r) => r.address)));
+
+  const byAddr = new Map(rows.map((r) => [r.address, r]));
+
+  const rFollow = byAddr.get(addrFollow);
+  ok(rFollow.follow === "pool-empty" && rFollow.followAt === "2026-09-20T13:00:00.000Z" &&
+     rFollow.tag === "keep-me-1" && rFollow.v === "sell",
+     "a sell row must carry follow+followAt copied from today's doc, got " + JSON.stringify(rFollow));
+
+  const rRecheck = byAddr.get(addrRecheck);
+  ok(rRecheck.recheck === "nosell" && rRecheck.recheckAt === "2026-09-20T13:00:00.000Z" &&
+     rRecheck.recheckCause === "empty-pool" && rRecheck.tag === "keep-me-2" && rRecheck.v === null,
+     "a null-verdict row must carry recheck+recheckAt+recheckCause copied from today's doc, got " +
+     JSON.stringify(rRecheck));
+
+  const rBadFollow = byAddr.get(addrBadFollow);
+  ok(!("follow" in rBadFollow) && !("followAt" in rBadFollow),
+     "an invalid follow string (\"maybe\") must never be copied, got " + JSON.stringify(rBadFollow));
+
+  const rWrongVerdict = byAddr.get(addrWrongVerdict);
+  ok(!("follow" in rWrongVerdict) && !("followAt" in rWrongVerdict),
+     "a follow must never be copied onto a ring row whose own v is not \"sell\", even when the doc row " +
+     "says sell, got " + JSON.stringify(rWrongVerdict));
+
+  const rUnrelated = byAddr.get(addrUnrelated);
+  ok(rUnrelated.priceUsd === 1 && !("follow" in rUnrelated) && !("recheck" in rUnrelated),
+     "unrelated keys of the doc row (priceUsd) must never be copied onto the ring row, got " +
+     JSON.stringify(rUnrelated));
+
+  const rYesterdayOnly = byAddr.get(addrYesterdayOnly);
+  ok(rYesterdayOnly.follow === "pool-there" && rYesterdayOnly.followAt === "2026-09-19T13:00:00.000Z",
+     "a follow present only in yesterday's doc must still be copied, got " + JSON.stringify(rYesterdayOnly));
+
+  const rTodayWins = byAddr.get(addrTodayWins);
+  ok(rTodayWins.follow === "pool-empty" && rTodayWins.followAt === "2026-09-20T13:00:00.000Z",
+     "today's doc must win over yesterday's for the same address, got " + JSON.stringify(rTodayWins));
+
+  const rNotInAnyDoc = byAddr.get(addrNotInAnyDoc);
+  ok(!("follow" in rNotInAnyDoc) && !("recheck" in rNotInAnyDoc) && rNotInAnyDoc.tag === "keep-me-8",
+     "a ring row absent from both docs must come back exactly as it was, got " + JSON.stringify(rNotInAnyDoc));
+
+  // یک سندِ نامعتبر (JSON خراب) → حلقه دقیقاً همان چیزی برمی‌گردد که بود —
+  // reportDocFor هرگز پرتاب نمی‌کند، فقط سندِ خالی می‌دهد.
+  const kvBadDoc = mkKv({
+    [PAIRS_KEY_BASE]: JSON.stringify(ring),
+    [reportKey(todayStr)]: "{not valid json",
+    [reportKey(yesterdayStr)]: "{also not valid",
+  });
+  const rowsBadDoc = await pairsRowsFor({ ZX_KV: kvBadDoc }, "base");
+  ok(JSON.stringify(rowsBadDoc) === JSON.stringify(ring),
+     "invalid JSON in either report doc must leave the ring rows exactly as stored, got " +
+     JSON.stringify(rowsBadDoc));
+
+  console.log("[pairs merge] pairsRowsFor ok — follow+followAt and recheck+recheckAt(+recheckCause) are "
+    + "borrowed at read time from today's/yesterday's report doc (today winning on a shared address) onto "
+    + "matching pairs:base:latest ring rows, validated with followForRow/recheckForRow/causeForRow against "
+    + "the RING row's own v (never the doc row's); an invalid follow string, a follow on a ring row whose "
+    + "v is not \"sell\", and any unrelated key of the doc row are all never copied; a ring row in neither "
+    + "doc, or a doc that fails to parse, comes back byte-for-byte unchanged; and the ring's own order and "
+    + "length are always preserved");
 }
 
 /* ---- ۳۶. worker/report.js — newPoolRowToTokenFor زنجیره‌آگاه ----
@@ -8597,9 +8772,12 @@ console.log("[report cause] causeForRow enforces the closed REPORT_CAUSES vocabu
     + "solMaxTokens is respected exactly");
 }
 
-/* ---- ۳۹. reportText — ردیف‌های سولانا در سند، بایت‌به‌بایتِ متنِ Baseِ تنها ----
-   🔴 عمداً: متنِ عمومی هنوز فقط Base است، هرچند سند خودش حالا سولانا هم
-   دارد — این تصمیمی جدا از این تغییر است، نه جاماندگی. */
+/* ---- ۳۹. reportText — ردیف‌های سولانا در متنِ عمومی — [report text solana] ----
+   از ۲۰ سپتامبر سندِ روزانه ردیف‌های سولانا هم دارد (پیوستِ روزِ قبل، پایینِ
+   همین فایل). این بخش قاعده‌ی تصمیمِ نهایی را می‌سنجد: صفر ردیفِ *شمرده‌شده*
+   یعنی خروجی بایت‌به‌بایت همان چیزی می‌ماند که پیش از این تصمیم بود (چون
+   بلوکِ سولانا کلاً پشتِ if(solTotal>0) است — هیچ خطِ Base‌ای دست نمی‌خورد)،
+   و یک یا بیشتر یعنی یک بلوکِ تازه بعدِ کلِ بلوکِ Base و پیش از پانویس. */
 {
   const T9 = "2026-09-20T00:00:00.000Z";
   function baseRowArgs(extra) {
@@ -8607,32 +8785,160 @@ console.log("[report cause] causeForRow enforces the closed REPORT_CAUSES vocabu
       verdict: "sell", checkedAt: T9, poolCreatedAt: null, priceUsd: 1, reserveUsd: 1, vol24hUsd: 1,
       fdvUsd: 1, dex: "uniswap-v3-base", why: null }, extra);
   }
+  // نمونه‌ی واقعیِ اسپک، عیناً: آدرس/symbol/name/dex همان چیزی که از سایتِ
+  // زنده گرفته شد.
+  function solRowArgs(extra) {
+    return Object.assign({ chain: "solana", address: "eqNcWScchYa8SKsKS6cg3VyKh3Q3j5K1vKiDj26pump",
+      symbol: "JEANPHISOL", name: "Jean Phil Solana", verdict: "sell", checkedAt: T9, poolCreatedAt: T9,
+      priceUsd: 0.00005251157983698064, reserveUsd: 18543.59, vol24hUsd: 199.34, fdvUsd: 51122.81,
+      dex: "pumpswap", why: null }, extra);
+  }
+
   const rowBaseSell = reportRow(baseRowArgs({}));
   const rowBaseNoSell = reportRow(baseRowArgs({ address: "0x" + "4".repeat(40), symbol: "B4", verdict: "nosell" }));
-  const rowSol = reportRow({
-    chain: "solana", address: "5ZoUg31NuEfDLDJfTh8hJGiavENmE2deDUBT4hhcpump", symbol: "SOL9", name: "Sol Nine",
-    verdict: "sell", checkedAt: T9, poolCreatedAt: null, priceUsd: 1, reserveUsd: 1, vol24hUsd: 1, fdvUsd: 1,
-    dex: "pumpswap", why: null,
-  });
-  ok(rowSol && rowSol.checkKind === "roundtrip", "sanity: the injected Solana row must carry checkKind roundtrip");
 
-  const docWithSol = {
-    date: "2026-09-20", generatedAt: T9, chains: ["base", "solana"], checked: 3,
-    rows: [rowBaseSell, rowSol, rowBaseNoSell],
-  };
-  const docNoSol = {
+  const EXPECTED_ZERO_SOL = "Exit Report · 20 Sep\n\n2 new Base tokens checked.\n1 had no sell route "
+    + "quoted.\n1 had a sell route quoted.\n0 could not be checked.\n\n$B4 — no sell route quoted\n"
+    + "zaexa.com/t/0x4444444444444444444444444444444444444444\n\nSell quotes on Base DEXes, not a "
+    + "simulated round trip.\nLast check 00:00 UTC.\n";
+
+  // الف) بدونِ هیچ ردیفِ سولانایی — همان مرجعِ پیش از این تغییر.
+  const docNoSolAtAll = {
     date: "2026-09-20", generatedAt: T9, chains: ["base"], checked: 2,
     rows: [rowBaseSell, rowBaseNoSell],
   };
-  const textWithSol = reportText(docWithSol);
-  const textNoSol = reportText(docNoSol);
-  ok(typeof textWithSol === "string" && textWithSol === textNoSol,
-     "reportText with Solana rows present must be byte-for-byte identical to the same document with " +
-     "the Solana rows removed, got:\n--- with sol ---\n" + textWithSol + "\n--- without sol ---\n" + textNoSol);
+  ok(reportText(docNoSolAtAll) === EXPECTED_ZERO_SOL,
+     "a doc with no Solana rows at all must produce exactly the pre-Solana text, got " +
+     JSON.stringify(reportText(docNoSolAtAll)));
 
-  console.log("[report text sol] reportText ok — a document containing Solana rows renders byte-for-byte "
-    + "identical text to the same document with those Solana rows removed, confirming the public text "
-    + "stays Base-only by deliberate, separate decision");
+  // ب) یک ردیفِ سولانا با checkKindِ ناجور — شمرده نمی‌شود، پس همچنان صفر.
+  const rowWrongKindOnly = { ...reportRow(solRowArgs({ verdict: "nosell" })), checkKind: "sell-quote" };
+  const docWrongKindOnly = {
+    date: "2026-09-20", generatedAt: T9, chains: ["base", "solana"], checked: 3,
+    rows: [rowBaseSell, rowBaseNoSell, rowWrongKindOnly],
+  };
+  ok(reportText(docWrongKindOnly) === EXPECTED_ZERO_SOL,
+     "a solana-shaped row with the wrong checkKind must count as zero and leave the text byte-for-byte " +
+     "identical to the pre-Solana output, got " + JSON.stringify(reportText(docWrongKindOnly)));
+
+  // پ) یک ردیفِ سولانا با mintِ بدشکل (کوتاه‌تر از ۳۲) — شمرده نمی‌شود.
+  const rowBadMintOnly = reportRow(solRowArgs({ address: "short", verdict: "nosell" }));
+  const docBadMintOnly = {
+    date: "2026-09-20", generatedAt: T9, chains: ["base", "solana"], checked: 3,
+    rows: [rowBaseSell, rowBaseNoSell, rowBadMintOnly],
+  };
+  ok(reportText(docBadMintOnly) === EXPECTED_ZERO_SOL,
+     "a solana row with a malformed (too-short) mint must count as zero and leave the text byte-for-byte " +
+     "identical to the pre-Solana output, got " + JSON.stringify(reportText(docBadMintOnly)));
+
+  // ت) سندِ آمیخته — دو ردیفِ Base + سه ردیفِ *شمردنیِ* سولانا (sell/nosell/null)
+  // + یک ردیفِ سولانا با mintِ بدشکل و یکی با checkKindِ ناجور (هر دو نادیده
+  // گرفته می‌شوند، پس مجموعِ سولانا همچنان ۳ می‌ماند).
+  const rowSolSell = reportRow(solRowArgs({
+    address: "So11111111111111111111111111111111111111112", verdict: "sell",
+  }));
+  const rowSolNosell = reportRow(solRowArgs({ verdict: "nosell" })); // eqNc…pump، عیناً نمونه‌ی اسپک
+  const rowSolNull = reportRow(solRowArgs({
+    address: "9xQeWvG816bUx9EPjHmaT23yvVM2ZWbrrpZb9PusVFin", verdict: null,
+  }));
+  const rowSolBadMintUncounted = { ...rowSolNosell, address: "tooshort" };
+  const rowSolWrongKindUncounted = {
+    ...rowSolSell, checkKind: "sell-quote", address: "7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAs",
+  };
+
+  const docMixed = {
+    date: "2026-09-20", generatedAt: T9, chains: ["base", "solana"], checked: 5,
+    rows: [rowBaseSell, rowBaseNoSell, rowSolSell, rowSolNosell, rowSolNull,
+           rowSolBadMintUncounted, rowSolWrongKindUncounted],
+  };
+  const textMixed = reportText(docMixed);
+  const EXPECTED_MIXED = "Exit Report · 20 Sep\n\n2 new Base tokens checked.\n1 had no sell route "
+    + "quoted.\n1 had a sell route quoted.\n0 could not be checked.\n\n$B4 — no sell route quoted\n"
+    + "zaexa.com/t/0x4444444444444444444444444444444444444444\n\n3 new Solana tokens checked.\n"
+    + "1 failed a simulated buy and sell.\n1 passed a simulated buy and sell.\n1 could not be checked.\n\n"
+    + "$JEANPHISOL — failed the simulated buy and sell\n"
+    + "zaexa.com/t/eqNcWScchYa8SKsKS6cg3VyKh3Q3j5K1vKiDj26pump\n\n"
+    + "Sell quotes on Base DEXes, not a simulated round trip.\n"
+    + "On Solana, the buy and the sell are simulated together.\nLast check 00:00 UTC.\n";
+  ok(textMixed === EXPECTED_MIXED,
+     "the mixed base+solana fixture must produce the exact spec'd string, got " + JSON.stringify(textMixed));
+
+  // شکلِ خط‌های خالی — روی هر ترکیبِ Base/سولانا: هرگز دو خطِ خالیِ پشت‌سرِهم،
+  // و پانویس همیشه با یک خطِ خالی از بالایش جدا می‌شود (با یا بدونِ فهرستِ پرچم).
+  for (const [label, rowsX] of [
+    ["sol sell only", [rowBaseSell, rowSolSell]],
+    ["sol nosell only", [rowBaseSell, rowSolNosell]],
+    ["base nosell + sol sell", [rowBaseNoSell, rowSolSell]],
+    ["both flagged", [rowBaseNoSell, rowSolNosell, rowSolNull]],
+  ]) {
+    const tx = reportText({ date: "2026-09-20", generatedAt: T9, chains: ["base", "solana"], checked: rowsX.length, rows: rowsX });
+    ok(typeof tx === "string" && !tx.includes("\n\n\n"),
+       "report text (" + label + ") must never contain two blank lines in a row, got " + JSON.stringify(tx));
+    ok(typeof tx === "string" && tx.includes("\n\nSell quotes on Base DEXes"),
+       "report text (" + label + ") footer must be separated by exactly one blank line, got " + JSON.stringify(tx));
+  }
+
+  // ث) شمارش‌ها جمع می‌زنند — ۱ (nosell) + ۱ (sell) + ۱ (null) = ۳.
+  ok(textMixed.includes("3 new Solana tokens checked.\n1 failed a simulated buy and sell.\n"
+     + "1 passed a simulated buy and sell.\n1 could not be checked."),
+     "the three solana counts must sum to the printed total, got " + JSON.stringify(textMixed));
+
+  // ج) symbol با ایموجی → fallback به آدرسِ کوتاه‌شده، هرگز عیناً
+  const rowSolEmoji = reportRow(solRowArgs({
+    address: "3n5oQMhqQ4c9y6d7bJtmuVQnU9UwbXPMTfxQCkmVBcTh", verdict: "nosell", symbol: "🚀ROCKET",
+  }));
+  const docEmoji = {
+    date: "2026-09-20", generatedAt: T9, chains: ["base", "solana"], checked: 2,
+    rows: [rowBaseSell, rowSolEmoji],
+  };
+  const textEmoji = reportText(docEmoji);
+  ok(textEmoji.includes("3n5oQM…BcTh — failed the simulated buy and sell\n" +
+     "zaexa.com/t/3n5oQMhqQ4c9y6d7bJtmuVQnU9UwbXPMTfxQCkmVBcTh"),
+     "an emoji symbol must fall back to the truncated mint address, got " + JSON.stringify(textEmoji));
+  ok(!textEmoji.includes("🚀ROCKET"), "the emoji symbol must never appear verbatim in the report text");
+
+  // چ) بیش از ۱۰ nosell → سقفِ فهرست در ۱۰ و خطِ overflow، هم‌رده‌ی Base
+  const SOL_OVERFLOW_SUFFIXES = ["aa", "bb", "cc", "dd", "ee", "ff", "gg", "hh", "jj", "kk", "mm", "nn"];
+  function mkSolAddr(i) { return "Sun9BkTPQ7xVne9CyR8mFhWZzAq3Kd" + SOL_OVERFLOW_SUFFIXES[i]; }
+  const rows12Sol = Array.from({ length: 12 }, (_, i) =>
+    reportRow(solRowArgs({ address: mkSolAddr(i), verdict: "nosell", symbol: "S" + i })));
+  const doc12Sol = {
+    date: "2026-09-20", generatedAt: T9, chains: ["base", "solana"], checked: 13,
+    rows: [rowBaseSell, ...rows12Sol],
+  };
+  const text12Sol = reportText(doc12Sol);
+  const solLinkMatches = (text12Sol.match(/zaexa\.com\/t\/Sun9/g) || []);
+  ok(solLinkMatches.length === 10, "12 flagged solana rows must list exactly 10 token links, got " +
+     solLinkMatches.length + " in " + JSON.stringify(text12Sol));
+  ok(text12Sol.includes("+2 more: zaexa.com/report/2026-09-20.json"),
+     "the solana overflow line must name the remaining 2 and point at the full JSON report, got: " +
+     JSON.stringify(text12Sol));
+
+  // ح) گاردِ واژگان روی خطوطِ سولانا — «honeypot»/«round trip» هرگز، و
+  // استثنای باریک فقط چهار رشته‌ی ثابت را می‌پذیرد، نه هر چیزی که "simulat" دارد.
+  for (const t of [textMixed, textEmoji, text12Sol]) {
+    ok(!/honeypot/i.test(t), "a solana-bearing report text must never say \"honeypot\", got: " +
+       JSON.stringify(t));
+    ok(!FORBIDDEN_WORDING.test(stripAllowedWording(t)),
+       "a solana-bearing report text failed the shared banned-wording guard after stripping only the " +
+       "narrow allowance, got: " + JSON.stringify(t));
+  }
+  // استثنای باریک، نه یک regexِ عمومی: یک رشته‌ی ساختگی که "simulat" دارد ولی
+  // دقیقاً هیچ‌کدام از چهار رشته‌ی مجاز نیست باید همچنان رد شود.
+  const fakeWidening = "some other simulated thing entirely, not one of the four allowed phrases";
+  ok(FORBIDDEN_WORDING.test(stripAllowedWording(fakeWidening)),
+     "the narrow allowance must not strip arbitrary \"simulat\" text that is not one of the four exact " +
+     "allowed phrases — got a false pass on: " + JSON.stringify(fakeWidening));
+
+  console.log("[report text solana] reportText ok — zero counted Solana rows (none at all, a wrong-" +
+    "checkKind row, or a malformed mint) leaves the text byte-for-byte identical to the pre-Solana " +
+    "output; the mixed Base+Solana fixture matches the exact spec'd string; the three Solana counts " +
+    "(failed/passed/could-not-check) sum to the printed total; a nosell Solana row is listed with its " +
+    "own zaexa.com/t/<mint> link; an emoji symbol falls back to the truncated mint address and never " +
+    "appears verbatim; 12 nosell rows cap the list at 10 with a \"+2 more\" pointer at the full JSON; " +
+    "and the shared banned-wording guard still rejects \"honeypot\"/\"round trip\" on every Solana-" +
+    "bearing text while its narrow allowance admits only the four exact fixed Solana phrases, never " +
+    "arbitrary \"simulat\" text");
 }
 
 /* ---- ۴۰. استثنای پوششِ v4 — [cover v4 exception] ----
@@ -8845,6 +9151,398 @@ console.log("[report cause] causeForRow enforces the closed REPORT_CAUSES vocabu
     + "still stays unknown forever even with a real key present; a raw sell never calls the coverage endpoint "
     + "at all; and baseVenueCoveredDetail against the measured live payload shape (string reserve numbers) "
     + "correctly flags v4Listed only on the v4-only pools body, never on a covered v3 one");
+}
+
+/* ---- ۴۱. رِی‌چکِ یک‌ساعته‌ی ردیف‌های نامعلوم — [report recheck] ----
+   اندازه‌گیریِ زنده: پنج ردیفِ نامعلومِ امروز که یک ساعت بعد دوباره پرسیده
+   شدند، هر پنج‌تا یک حکمِ واقعی برگرداندند — نامعلومی‌ها گذرا بودند (نرخ‌گیر،
+   استثناهای قورت‌داده‌شده). هم‌رده‌ی followUp روی sell، این بخش همان کار را
+   روی v===null انجام می‌دهد، افزایشی و بدونِ بازنویسیِ حکمِ اصلی. */
+{
+  ok(JSON.stringify(REPORT_RECHECKS) === JSON.stringify(["sell", "nosell"]) &&
+     Object.isFrozen(REPORT_RECHECKS),
+     "REPORT_RECHECKS must be the frozen two-member closed vocabulary, got " + JSON.stringify(REPORT_RECHECKS));
+  ok(recheckForRow(null, "sell") === "sell" && recheckForRow(null, "nosell") === "nosell",
+     "recheckForRow must let both REPORT_RECHECKS members survive on a null-verdict row");
+  ok(recheckForRow("sell", "sell") === undefined,
+     "recheckForRow must drop any recheck on an already-\"sell\" row");
+  ok(recheckForRow("nosell", "nosell") === undefined,
+     "recheckForRow must drop any recheck on an already-\"nosell\" row");
+  ok(recheckForRow(null, "made-up") === undefined,
+     "recheckForRow must drop any string not in REPORT_RECHECKS, even on a null-verdict row");
+
+  // ---- pickRecheckTargets — پنجره‌ی ۵۵ تا ۱۸۰ دقیقه، سقف، قدیمی‌ترین اول، dex ----
+  function mkAddrR(n) { return "0x" + n.toString(16).padStart(40, "0"); }
+  const NOWR = Date.parse("2026-09-20T12:00:00.000Z");
+  function ageRowR(addr, minutesAgo, extra) {
+    return Object.assign({
+      chain: "base", v: null, address: addr, dex: "uniswap-v3-base",
+      checkedAt: new Date(NOWR - minutesAgo * 60000).toISOString(),
+    }, extra);
+  }
+  const rr55 = ageRowR(mkAddrR(1), 55);                                   // مرزِ پایین، شامل
+  const rr180 = ageRowR(mkAddrR(2), 180, { dex: null });                  // مرزِ بالا، شامل — dexِ null هم برمی‌گردد
+  const rr54 = ageRowR(mkAddrR(3), 54);                                   // خارج، تازه‌تر از مرز
+  const rr181 = ageRowR(mkAddrR(4), 181);                                 // خارج، قدیمی‌تر از مرز
+  const rrHasRecheck = ageRowR(mkAddrR(5), 100, { recheck: "sell", recheckAt: "x" }); // از پیش رِی‌چک شده
+  const rrBad = { chain: "base", v: null, address: mkAddrR(6), dex: null, checkedAt: "not-a-date" };
+  const rrSell = ageRowR(mkAddrR(7), 100, { v: "sell" });
+  const rrNosell = ageRowR(mkAddrR(8), 100, { v: "nosell" });
+  const rrSolana = ageRowR(mkAddrR(9), 100, { chain: "solana" });
+
+  const docWindowR = {
+    date: "2026-09-20", generatedAt: null, chains: ["base"], checked: 9,
+    rows: [rr55, rr180, rr54, rr181, rrHasRecheck, rrBad, rrSell, rrNosell, rrSolana],
+  };
+  const pickedR = pickRecheckTargets(docWindowR, NOWR, 4);
+  ok(JSON.stringify(pickedR) === JSON.stringify([
+       { address: mkAddrR(2), dex: null }, { address: mkAddrR(1), dex: "uniswap-v3-base" },
+     ]),
+     "the window must include exactly the 55- and 180-minute null rows (180 first, oldest-first), each " +
+     "carrying its own dex (null when the row has none), and exclude 54/181/already-rechecked/" +
+     "unparseable/sell/nosell/non-base, got " + JSON.stringify(pickedR));
+
+  // سقف و ترتیب: ۱۰ ردیفِ درونِ پنجره، فقط ۴تای قدیمی‌ترش (سقفِ پیش‌فرض)
+  const manyRowsR = Array.from({ length: 10 }, (_, i) => ageRowR(mkAddrR(100 + i), 60 + i));
+  const docManyR = { date: "2026-09-20", generatedAt: null, chains: ["base"], checked: 10, rows: manyRowsR };
+  const pickedCapR = pickRecheckTargets(docManyR, NOWR, 4);
+  ok(pickedCapR.length === 4, "the default cap must hold at exactly 4, got " + pickedCapR.length);
+  const expectedCapR = Array.from({ length: 4 }, (_, k) => ({ address: mkAddrR(100 + (9 - k)), dex: "uniswap-v3-base" }));
+  ok(JSON.stringify(pickedCapR) === JSON.stringify(expectedCapR),
+     "the 4 oldest rows must be returned oldest-first with dex, got " + JSON.stringify(pickedCapR));
+  const pickedCapR2 = pickRecheckTargets(docManyR, NOWR, 2);
+  ok(pickedCapR2.length === 2 && JSON.stringify(pickedCapR2) === JSON.stringify(expectedCapR.slice(0, 2)),
+     "a custom cap must be respected exactly, got " + JSON.stringify(pickedCapR2));
+
+  console.log("[report recheck pick] pickRecheckTargets picks only base/null-verdict/not-yet-rechecked " +
+    "rows whose checkedAt falls between 55 and 180 minutes before now (both bounds included, 54/181 " +
+    "excluded), skips an already-rechecked row, a sell row, a nosell row, a non-base row and one with " +
+    "an unparseable checkedAt, returns {address, dex} oldest-first (dex null when the row has none), " +
+    "and respects the cap exactly (default 4 and a custom value)");
+}
+
+/* ---- applyRechecks — یک رِی‌چکِ افزایشی روی یک ردیفِ v===null ---- */
+{
+  function mkAddrA(n) { return "0x" + n.toString(16).padStart(40, "0"); }
+  const T1A = "2026-09-20T10:00:00.000Z";
+  function recheckRow(addr, v, extra) {
+    return Object.assign({
+      chain: "base", address: addr, symbol: "S", name: "N", v, checkKind: "sell-quote",
+      checkedAt: T1A, poolCreatedAt: null, priceUsd: 1, reserveUsd: 2, vol24hUsd: 3, fdvUsd: 4,
+      dex: "uniswap-v4-base", why: v === null ? "no-quote" : null,
+    }, extra);
+  }
+  const rowA1 = recheckRow(mkAddrA(1), null);   // می‌شود recheck:"sell"
+  const rowA2 = recheckRow(mkAddrA(2), null);   // می‌شود recheck:"nosell" با cause
+  const rowA3 = recheckRow(mkAddrA(3), "sell"); // v!==null → هرگز رِی‌چک نمی‌گیرد
+  const origDocA = {
+    date: "2026-09-20", generatedAt: T1A, chains: ["base"], checked: 3, rows: [rowA1, rowA2, rowA3],
+  };
+  const origSnapshotA = JSON.stringify(origDocA);
+  const origCloneA = JSON.parse(origSnapshotA);
+
+  const atIsoA = "2026-09-20T11:00:00.000Z";
+  const updatedA = applyRechecks(origDocA, [
+    { address: mkAddrA(1), recheck: "sell" },
+    { address: mkAddrA(2), recheck: "nosell", cause: "empty-pool" },
+    { address: mkAddrA(3), recheck: "sell" }, // v!==null، بی‌اثر
+  ], atIsoA);
+
+  ok(updatedA.rows[0].recheck === "sell" && updatedA.rows[0].recheckAt === atIsoA &&
+     !("recheckCause" in updatedA.rows[0]),
+     "applyRechecks must add exactly recheck+recheckAt for a \"sell\" recheck, never recheckCause, got " +
+     JSON.stringify(updatedA.rows[0]));
+  ok(updatedA.rows[1].recheck === "nosell" && updatedA.rows[1].recheckAt === atIsoA &&
+     updatedA.rows[1].recheckCause === "empty-pool",
+     "applyRechecks must add recheck+recheckAt+recheckCause for a \"nosell\" recheck with a valid cause, " +
+     "got " + JSON.stringify(updatedA.rows[1]));
+  const { recheck: rk0, recheckAt: rka0, ...restRowA0 } = updatedA.rows[0];
+  ok(JSON.stringify(restRowA0) === JSON.stringify(rowA1),
+     "every other key of the sell-rechecked row must stay byte-for-byte identical, got " +
+     JSON.stringify(restRowA0));
+  const { recheck: rk1, recheckAt: rka1, recheckCause: rkc1, ...restRowA1 } = updatedA.rows[1];
+  ok(JSON.stringify(restRowA1) === JSON.stringify(rowA2),
+     "every other key of the nosell-rechecked row must stay byte-for-byte identical, got " +
+     JSON.stringify(restRowA1));
+  ok(JSON.stringify(updatedA.rows[2]) === JSON.stringify(rowA3),
+     "a row whose v is not null must stay untouched even when it is named in updates, got " +
+     JSON.stringify(updatedA.rows[2]));
+  ok(updatedA.date === origDocA.date && updatedA.generatedAt === origDocA.generatedAt &&
+     updatedA.checked === origDocA.checked && JSON.stringify(updatedA.chains) === JSON.stringify(origDocA.chains),
+     "date/chains/checked/generatedAt must stay exactly as they were");
+  ok(JSON.stringify(origDocA) === origSnapshotA,
+     "applyRechecks must never mutate its input doc, got a changed original: " + JSON.stringify(origDocA));
+  ok(JSON.stringify(origDocA) === JSON.stringify(origCloneA),
+     "a deep clone taken before the call must still match the input doc afterwards, got " +
+     JSON.stringify(origDocA));
+
+  // یک recheck:"sell" با یک cause همراهش هم هرگز recheckCause نمی‌سازد
+  const updatedSellCause = applyRechecks(
+    { date: "2026-09-20", generatedAt: T1A, chains: ["base"], checked: 1, rows: [recheckRow(mkAddrA(9), null)] },
+    [{ address: mkAddrA(9), recheck: "sell", cause: "empty-pool" }], atIsoA);
+  ok(!("recheckCause" in updatedSellCause.rows[0]),
+     "a \"sell\" recheck must never get recheckCause even when a cause is passed alongside it, got " +
+     JSON.stringify(updatedSellCause.rows[0]));
+
+  function freshDocA(r) {
+    return { date: "2026-09-20", generatedAt: T1A, chains: ["base"], checked: 1, rows: [r] };
+  }
+  function unchangedA(label, doc, updates, atIso) {
+    const before = JSON.stringify(doc);
+    const after = applyRechecks(doc, updates, atIso);
+    ok(JSON.stringify(after) === before,
+       "applyRechecks must refuse and return the doc unchanged for: " + label + ", got " + JSON.stringify(after));
+  }
+
+  // نامعتبر — هر کدام باید کلِ سند را دست‌نخورده برگردانند
+  unchangedA("recheck \"maybe\"", freshDocA(recheckRow(mkAddrA(10), null)),
+    [{ address: mkAddrA(10), recheck: "maybe" }], atIsoA);
+  unchangedA("recheck \"unknown\"", freshDocA(recheckRow(mkAddrA(11), null)),
+    [{ address: mkAddrA(11), recheck: "unknown" }], atIsoA);
+  unchangedA("recheck null", freshDocA(recheckRow(mkAddrA(12), null)),
+    [{ address: mkAddrA(12), recheck: null }], atIsoA);
+  unchangedA("a row whose v is \"sell\"", freshDocA(recheckRow(mkAddrA(13), "sell")),
+    [{ address: mkAddrA(13), recheck: "sell" }], atIsoA);
+  unchangedA("a row whose v is \"nosell\"", freshDocA(recheckRow(mkAddrA(14), "nosell")),
+    [{ address: mkAddrA(14), recheck: "nosell" }], atIsoA);
+  unchangedA("a row that already carries recheck",
+    freshDocA(recheckRow(mkAddrA(15), null, { recheck: "sell", recheckAt: T1A })),
+    [{ address: mkAddrA(15), recheck: "nosell" }], atIsoA);
+  unchangedA("an address not in the doc", freshDocA(recheckRow(mkAddrA(16), null)),
+    [{ address: mkAddrA(999), recheck: "sell" }], atIsoA);
+  unchangedA("a non-ISO atIso", freshDocA(recheckRow(mkAddrA(17), null)),
+    [{ address: mkAddrA(17), recheck: "sell" }], "not-a-date");
+
+  // اعمالِ دوباره روی ردیفی که همین الان رِی‌چک گرفت — دومین فراخوانی بی‌اثر است
+  const onceDoc = applyRechecks(freshDocA(recheckRow(mkAddrA(20), null)),
+    [{ address: mkAddrA(20), recheck: "sell" }], atIsoA);
+  const onceSnapshot = JSON.stringify(onceDoc);
+  const twiceDoc = applyRechecks(onceDoc, [{ address: mkAddrA(20), recheck: "nosell", cause: "empty-pool" }],
+    "2026-09-20T12:00:00.000Z");
+  ok(JSON.stringify(twiceDoc) === onceSnapshot,
+     "a second application to an already-rechecked row must leave the doc byte-for-byte unchanged, got " +
+     JSON.stringify(twiceDoc));
+
+  console.log("[report recheck apply] applyRechecks marks exactly the matching v===null row with " +
+    "recheck+recheckAt (and recheckCause only for a \"nosell\" recheck with a valid cause; a \"sell\" " +
+    "recheck never gets recheckCause), leaves every other key of every row byte-for-byte identical, " +
+    "refuses and returns the whole doc untouched for an invalid recheck string, a row whose v is " +
+    "already \"sell\"/\"nosell\", a row that already carries recheck, an address absent from the doc, " +
+    "a non-ISO atIso, and a second application to an already-rechecked row, and never mutates its input " +
+    "doc; recheckForRow enforces the frozen REPORT_RECHECKS vocabulary exactly like followForRow does " +
+    "for REPORT_FOLLOWS");
+}
+
+/* ---- runReportPass — رِی‌چکِ یک‌ساعته با metaOf/verdictOfِ همان تزریقی ---- */
+{
+  function makeKvR() {
+    const store = new Map();
+    return {
+      store,
+      get: async (k) => (store.has(k) ? store.get(k) : null),
+      put: async (k, v) => { store.set(k, v); },
+    };
+  }
+  function mkAddrP(n) { return "0x" + n.toString(16).padStart(40, "0"); }
+  function seedOldNullRow(nowMs, addr) {
+    return reportRow({
+      chain: "base", address: addr, symbol: "OLD", name: "Old Token", verdict: null,
+      checkedAt: new Date(nowMs - 100 * 60000).toISOString(), poolCreatedAt: null,
+      priceUsd: 1, reserveUsd: 2, vol24hUsd: 3, fdvUsd: 4, dex: "uniswap-v4-base", why: "no-quote",
+    });
+  }
+  function seedOldSellRowP(nowMs, addr) {
+    return reportRow({
+      chain: "base", address: addr, symbol: "OLD", name: "Old Token", verdict: "sell",
+      checkedAt: new Date(nowMs - 100 * 60000).toISOString(), poolCreatedAt: null,
+      priceUsd: 1, reserveUsd: 2, vol24hUsd: 3, fdvUsd: 4, dex: "uniswap-v4-base", why: null,
+    });
+  }
+
+  // الف) یک ردیفِ نامعلومِ قدیمی → رِی‌چک به "sell"، v/why دست‌نخورده
+  {
+    const NOW = Date.parse("2026-09-20T12:00:00.000Z");
+    const dateStr = utcDateOf(NOW);
+    const addr = mkAddrP(1);
+    const oldRow = seedOldNullRow(NOW, addr);
+    const seedDoc = mergeReportDoc(null, dateStr, [oldRow], 1, new Date(NOW - 100 * 60000).toISOString());
+    const kv = makeKvR();
+    await kv.put(reportKey(dateStr), JSON.stringify(seedDoc));
+    const res = await runReportPass({
+      kv, fetchPools: async () => [], metaOf: async () => ({ meta: null, why: "meta:429" }),
+      verdictOf: async () => ({ v: "sell", why: null }), now: () => NOW, sleep: async () => {},
+    });
+    ok(res.rechecked === 1 && res.recheckTried === 1,
+       "one due null row must yield recheckTried=1 and rechecked=1, got " + JSON.stringify(res));
+    const stored = JSON.parse(await kv.get(reportKey(dateStr)));
+    const storedRow = stored.rows.find((r) => r.address === addr);
+    ok(storedRow.recheck === "sell" && typeof storedRow.recheckAt === "string",
+       "a \"sell\" verdictOf reply must store recheck:\"sell\" with a recheckAt string, got " +
+       JSON.stringify(storedRow));
+    ok(storedRow.v === null && storedRow.why === "no-quote",
+       "the rechecked row's original v/why must stay exactly as they were, got " + JSON.stringify(storedRow));
+  }
+
+  // ب) یک verdictOf که برای یک هدف پرتاب می‌کند نباید بقیه را متوقف کند، و
+  //    نباید کلِ گذر را بشکند
+  {
+    const NOW = Date.parse("2026-09-20T12:00:00.000Z");
+    const dateStr = utcDateOf(NOW);
+    const addrThrow = mkAddrP(2);
+    const addrOk = mkAddrP(3);
+    const rowThrow = seedOldNullRow(NOW, addrThrow);
+    const rowOk = seedOldNullRow(NOW, addrOk);
+    const seedDoc = mergeReportDoc(null, dateStr, [rowThrow, rowOk], 2, new Date(NOW - 100 * 60000).toISOString());
+    const kv = makeKvR();
+    await kv.put(reportKey(dateStr), JSON.stringify(seedDoc));
+    const res = await runReportPass({
+      kv, fetchPools: async () => [], metaOf: async () => ({ meta: null, why: "meta:429" }),
+      verdictOf: async (addr) => {
+        if (addr === addrThrow) throw new Error("rpc is down");
+        return { v: "nosell", why: null, cause: "empty-pool" };
+      },
+      now: () => NOW, sleep: async () => {},
+    });
+    ok(res.recheckTried === 2, "both due null rows must be attempted, got " + JSON.stringify(res));
+    ok(res.rechecked === 1,
+       "only the non-throwing target must actually gain a recheck key, got " + JSON.stringify(res));
+    const stored = JSON.parse(await kv.get(reportKey(dateStr)));
+    const storedThrow = stored.rows.find((r) => r.address === addrThrow);
+    const storedOk = stored.rows.find((r) => r.address === addrOk);
+    ok(!("recheck" in storedThrow), "the throwing target must gain no recheck key, got " +
+       JSON.stringify(storedThrow));
+    ok(storedOk.recheck === "nosell" && storedOk.recheckCause === "empty-pool",
+       "the other target must still be rechecked normally, got " + JSON.stringify(storedOk));
+  }
+
+  // ج) یک فالوآپ که در همین گذر نوشته شد باید بعدِ گامِ رِی‌چک هم بماند —
+  //    latestDoc نباید کارِ applyFollowUps را پاک کند
+  {
+    const NOW = Date.parse("2026-09-20T12:00:00.000Z");
+    const dateStr = utcDateOf(NOW);
+    const addrSell = mkAddrP(4);
+    const addrNull = mkAddrP(5);
+    const sellRow = seedOldSellRowP(NOW, addrSell);
+    const nullRow = seedOldNullRow(NOW, addrNull);
+    const seedDoc = mergeReportDoc(null, dateStr, [sellRow, nullRow], 2, new Date(NOW - 100 * 60000).toISOString());
+    const kv = makeKvR();
+    await kv.put(reportKey(dateStr), JSON.stringify(seedDoc));
+    await kv.put(PAIRS_KEY_BASE, JSON.stringify([{ address: addrSell, v: "sell" }]));
+    const res = await runReportPass({
+      kv, fetchPools: async () => [], metaOf: async () => ({ meta: null, why: "meta:429" }),
+      verdictOf: async () => ({ v: "sell", why: null }),
+      now: () => NOW, sleep: async () => {},
+      poolEmptyOf: async () => true,
+    });
+    ok(res.followed === 1 && res.rechecked === 1,
+       "both the follow-up and the recheck step must do their own job in the same pass, got " +
+       JSON.stringify(res));
+    const stored = JSON.parse(await kv.get(reportKey(dateStr)));
+    const storedSell = stored.rows.find((r) => r.address === addrSell);
+    const storedNull = stored.rows.find((r) => r.address === addrNull);
+    ok(storedSell.follow === "pool-empty" && typeof storedSell.followAt === "string",
+       "the follow-up written earlier in the pass must survive the later recheck step, got " +
+       JSON.stringify(storedSell));
+    ok(storedNull.recheck === "sell" && typeof storedNull.recheckAt === "string",
+       "the recheck step must still do its own job alongside the surviving follow-up, got " +
+       JSON.stringify(storedNull));
+  }
+
+  console.log("[report recheck pass] runReportPass's recheck step reuses the same injected metaOf/" +
+    "verdictOf as the main loop to re-ask a due null row, storing recheck:\"sell\"/\"nosell\" (with " +
+    "recheckCause when applicable) while leaving that row's original v/why untouched; a verdictOf that " +
+    "throws for one target skips only that target, never stops the others and never breaks the pass; " +
+    "and a follow-up written earlier in the same pass survives the later recheck step untouched (no " +
+    "clobbering via latestDoc)");
+}
+
+/* ---- reportText — بایت‌به‌بایت پیش و پس از applyRechecks ---- */
+{
+  function mkAddrT(n) { return "0x" + n.toString(16).padStart(40, "0"); }
+  const T1T = "2026-09-20T10:00:00.000Z";
+  const rowSellT = reportRow({
+    chain: "base", address: mkAddrT(1), symbol: "T1", name: "N1", verdict: "sell",
+    checkedAt: T1T, poolCreatedAt: null, priceUsd: 1, reserveUsd: 100000, vol24hUsd: 3, fdvUsd: 4,
+    dex: "uniswap-v4-base", why: null,
+  });
+  const rowNullT = reportRow({
+    chain: "base", address: mkAddrT(2), symbol: "T2", name: "N2", verdict: null,
+    checkedAt: T1T, poolCreatedAt: null, priceUsd: 1, reserveUsd: 100000, vol24hUsd: 3, fdvUsd: 4,
+    dex: "uniswap-v4-base", why: "no-quote",
+  });
+  const docBeforeT = {
+    date: "2026-09-20", generatedAt: T1T, chains: ["base"], checked: 2, rows: [rowSellT, rowNullT],
+  };
+  const textBeforeT = reportText(docBeforeT);
+
+  const docAfterT = applyRechecks(docBeforeT, [{ address: mkAddrT(2), recheck: "sell" }],
+    "2026-09-20T11:00:00.000Z");
+  const textAfterT = reportText(docAfterT);
+
+  ok(textBeforeT === textAfterT,
+     "reportText must be byte-for-byte identical before and after applyRechecks, got:\n" +
+     JSON.stringify(textBeforeT) + "\nvs\n" + JSON.stringify(textAfterT));
+  ok(docAfterT.rows[1].recheck === "sell",
+     "sanity: the recheck must actually have been applied to the doc reportText was given, got " +
+     JSON.stringify(docAfterT.rows[1]));
+
+  console.log("[report recheck text] reportText's output is byte-for-byte identical whether or not a " +
+    "row carries recheck keys — the public text counts only original verdicts, never a recheck");
+}
+
+/* ---- recheck زنده می‌ماند تا گذرِ بعدی — mergeReportDoc اول‌دیده‌شده‌می‌برد ---- */
+{
+  function mkAddrS(n) { return "0x" + n.toString(16).padStart(40, "0"); }
+  function makeKvS() {
+    const store = new Map();
+    return {
+      store,
+      get: async (k) => (store.has(k) ? store.get(k) : null),
+      put: async (k, v) => { store.set(k, v); },
+    };
+  }
+  function poolRowS(addr, reserve, price) {
+    return {
+      attributes: { reserve_in_usd: String(reserve), base_token_price_usd: String(price),
+        pool_created_at: "2026-09-20T10:00:00Z", volume_usd: { h24: "0" }, fdv_usd: "0" },
+      relationships: { base_token: { data: { id: "base_" + addr } },
+        dex: { data: { id: "uniswap-v3-base" } } },
+    };
+  }
+  const NOW1 = Date.parse("2026-09-20T12:00:00.000Z");
+  const dateStr = utcDateOf(NOW1);
+  const rechAddr = mkAddrS(1);
+  const rechAtIso = "2026-09-20T11:55:00.000Z";
+  const rechRow = Object.assign(reportRow({
+    chain: "base", address: rechAddr, symbol: "OLD", name: "Old Token", verdict: null,
+    checkedAt: new Date(NOW1 - 100 * 60000).toISOString(), poolCreatedAt: null,
+    priceUsd: 1, reserveUsd: 2, vol24hUsd: 3, fdvUsd: 4, dex: "uniswap-v4-base", why: "no-quote",
+  }), { recheck: "sell", recheckAt: rechAtIso });
+  const seedDoc = mergeReportDoc(null, dateStr, [rechRow], 1, new Date(NOW1 - 100 * 60000).toISOString());
+  const kv = makeKvS();
+  await kv.put(reportKey(dateStr), JSON.stringify(seedDoc));
+
+  const freshAddr = mkAddrS(2);
+  const NOW2 = NOW1 + 5 * 60000; // پنج دقیقه بعد، همان روزِ UTC
+  const res = await runReportPass({
+    kv, fetchPools: async () => [poolRowS(freshAddr, 10000, 0.5)],
+    metaOf: async () => ({ meta: { symbol: "NEW", name: "New Token" }, why: null }),
+    verdictOf: async () => ({ v: "sell", why: null }),
+    now: () => NOW2, sleep: async () => {},
+  });
+  ok(res.added === 1, "the second pass must still add the one brand-new token, got " + JSON.stringify(res));
+
+  const stored = JSON.parse(await kv.get(reportKey(dateStr)));
+  const storedRech = stored.rows.find((r) => r.address === rechAddr);
+  const storedFresh = stored.rows.find((r) => r.address === freshAddr);
+  ok(storedRech.recheck === "sell" && storedRech.recheckAt === rechAtIso,
+     "the row rechecked in a prior pass must keep its recheck+recheckAt after a later pass adds new " +
+     "rows via mergeReportDoc (first-occurrence wins), got " + JSON.stringify(storedRech));
+  ok(!!storedFresh, "the fresh token from the second pass must also be present, got " + JSON.stringify(stored));
+
+  console.log("[report recheck survive] recheck+recheckAt from an earlier pass survive an unrelated " +
+    "later pass that adds new rows — mergeReportDoc's first-occurrence-wins merge keeps the already-" +
+    "rechecked row exactly as it was, the same way a follow keeps its follow/followAt");
 }
 
 console.log(fails === 0

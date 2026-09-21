@@ -79,6 +79,7 @@ h1{font-size:clamp(28px,4vw,40px);letter-spacing:-.03em;margin:0 0 14px;line-hei
 .token-addr{color:var(--tx3);font-size:11px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;margin-top:2px}
 .num-cell{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12.5px}
 .checked-cell{color:var(--tx3);font-size:12px}
+.verdict-note{display:block;margin-top:4px;font-size:11px;line-height:1.3;color:var(--tx3)}
 
 .pairs-cards{list-style:none;padding:0;margin:0;display:none;flex-direction:column;gap:12px}
 .card{border:1px solid var(--line);border-radius:12px;background:var(--card);position:relative}
@@ -277,6 +278,42 @@ h1{font-size:clamp(28px,4vw,40px);letter-spacing:-.03em;margin:0 0 14px;line-hei
     return esc(a.slice(0, 6) + ELLIPSIS + a.slice(-4));
   }
 
+  /* یادداشتِ زیرِ نشانِ رأی — از رویِ کلیدهایی که Worker تازه به هر ردیف
+     اضافه کرده (ret/cause/follow/followAt/recheck/recheckAt/recheckCause).
+     یک واژه‌نامه‌ی بسته این‌جا هم تکرار شده — دفاعِ دوم، مستقل از سرور:
+     فقط دقیقاً همین رشته‌ها/بازه‌ی عددی پذیرفته می‌شوند، هر چیز دیگر یعنی
+     ندیده گرفتنِ همان کلید، نه رندرِ یک حدس. نبودِ کلید یعنی «نداریم» —
+     هرگز جای‌گزین نمی‌گیرد. */
+  var FOLLOW_LABELS = { 'pool-empty': 'Later: pool empty', 'pool-there': 'Later: pool still there' };
+  function validRet(n){
+    return typeof n === 'number' && isFinite(n) && n > 0 && n <= 1000;
+  }
+  function noteFor(row){
+    if (!row) return null;
+    var parts = [];
+    var laterIso = null;
+    if (row.v === 'sell') {
+      if (validRet(row.ret)) parts.push('Quote back ' + row.ret.toFixed(1) + '%');
+      if (Object.prototype.hasOwnProperty.call(FOLLOW_LABELS, row.follow)) {
+        parts.push(FOLLOW_LABELS[row.follow]);
+        laterIso = row.followAt;
+      }
+    } else if (row.v === 'nosell') {
+      if (row.cause === 'empty-pool') parts.push('Pool has no liquidity');
+    } else if (row.v == null) {
+      if (row.recheck === 'sell') {
+        parts.push('Later: sell quoted');
+        laterIso = row.recheckAt;
+      } else if (row.recheck === 'nosell') {
+        parts.push(row.recheckCause === 'empty-pool' ? 'Later: pool empty' : 'Later: no sell quoted');
+        laterIso = row.recheckAt;
+      }
+    }
+    if (!parts.length) return null;
+    var titleAttr = (typeof laterIso === 'string' && laterIso) ? ' title="' + esc(laterIso) + '"' : '';
+    return '<div class="verdict-note"' + titleAttr + '>' + esc(parts.join(' · ')) + '</div>';
+  }
+
   function relTime(iso){
     if (!iso) return { text: EM_DASH_NUM, title: '' };
     var t = new Date(iso).getTime();
@@ -323,10 +360,12 @@ h1{font-size:clamp(28px,4vw,40px);letter-spacing:-.03em;margin:0 0 14px;line-hei
     var checkedAttr = esc((row && row.checkedAt) || '');
     var href = '/t/' + encodeURIComponent(addr);
     var rowAriaLabel = esc(((row && row.symbol) || 'Unknown token') + ', ' + v.label + ', price ' + priceStr);
+    var noteHtml = noteFor(row) || '';
     if (forCard) {
       return '<a class="card-link" href="' + href + '" aria-label="' + rowAriaLabel + '">' +
         '<div class="card-top"><span class="card-sym">' + symStr + '</span>' +
         '<span class="badge badge-' + v.cls + '" title="' + esc(v.meaning) + '">' + esc(v.label) + '</span></div>' +
+        noteHtml +
         (nameStr ? '<div class="card-name">' + nameStr + '</div>' : '') +
         '<div class="card-addr" title="' + esc(addr) + '">' + shortAddr(addr) + '</div>' +
         '<dl class="card-stats">' +
@@ -344,7 +383,7 @@ h1{font-size:clamp(28px,4vw,40px);letter-spacing:-.03em;margin:0 0 14px;line-hei
         (nameStr ? '<div class="token-name">' + nameStr + '</div>' : '') +
         '<div class="token-addr" title="' + esc(addr) + '">' + shortAddr(addr) + '</div>' +
       '</td>' +
-      '<td><span class="badge badge-' + v.cls + '" title="' + esc(v.meaning) + '">' + esc(v.label) + '</span></td>' +
+      '<td><span class="badge badge-' + v.cls + '" title="' + esc(v.meaning) + '">' + esc(v.label) + '</span>' + noteHtml + '</td>' +
       '<td class="num-cell">' + esc(priceStr) + '</td>' +
       '<td class="num-cell">' + esc(volStr) + '</td>' +
       '<td class="num-cell">' + esc(liqStr) + '</td>' +

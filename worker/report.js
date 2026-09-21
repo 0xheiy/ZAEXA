@@ -174,6 +174,20 @@ export function followForRow(verdict, follow) {
   return typeof follow === "string" && REPORT_FOLLOWS.includes(follow) ? follow : undefined;
 }
 
+/* واژه‌نامه‌ی بسته‌ی recheck — هم‌رده‌ی REPORT_FOLLOWS، ولی برای مسیرِ
+   دیگر: پیگیریِ فالوآپ روی یک sell کار می‌کند، این یکی روی یک حکمِ
+   nullِ (نامعلوم) کار می‌کند — «نمی‌دانم» یک نتیجه‌ی موقتی بود، شاید
+   بعداً واقعاً sell/nosell دربیاید. */
+export const REPORT_RECHECKS = Object.freeze(["sell", "nosell"]);
+
+/* هم‌انضباطِ followForRow: یک recheck ساختگی/دست‌ساز هرگز نباید در انبار
+   بنشیند — فقط وقتی verdictِ اصلیِ ردیف (نه recheck) واقعاً null است و
+   خودِ رشته عضوِ همین واژه‌نامه‌ی بسته است، وگرنه undefined. */
+export function recheckForRow(verdict, recheck) {
+  if (verdict !== null) return undefined;
+  return typeof recheck === "string" && REPORT_RECHECKS.includes(recheck) ? recheck : undefined;
+}
+
 /* یک ردیفِ ذخیره‌شده معمولاً هرگز بعد از نوشته‌شدن عوض نمی‌شود (mergeReportDoc
    بالاتر اول‌دیده‌شده‌می‌برد است و هرگز بازنویسی نمی‌کند) — این تابع تنها
    استثنای افزایشی/additive-only همان قاعده است، و **تنها جایی که یک ردیفِ
@@ -217,6 +231,55 @@ export function applyFollowUps(doc, updates, atIso) {
   }
 }
 
+/* دومین استثنایِ additive-only بر همان قاعده‌ی mergeReportDoc — هم‌رده‌ی
+   applyFollowUps، ولی روی حکمِ null: v و why اصلیِ ردیف *هرگز* بازنویسی
+   نمی‌شوند؛ این یک مشاهده‌ی دومِ کنارِ اولی است، نه جایگزینِ آن. خالص است،
+   هرگز پرتاب نمی‌کند، همیشه یک سندِ تازه برمی‌گرداند (هرگز ورودی را جهش
+   نمی‌دهد). برای هر {address, recheck, cause} در updates: اگر ردیفی با
+   همان آدرس پیدا شود و v===null باشد، هنوز کلیدِ recheck نداشته باشد، و
+   recheckForRow آن را معتبر بداند، یک کپی از همان ردیف با کلیدهای recheck
+   و recheckAt (و فقط برای recheck==="nosell"، اگر causeForRow آن را معتبر
+   بداند، recheckCause هم) جایگزینِ ردیفِ قبلی می‌شود.
+   🔴 هیچ کلیدِ دیگری از هیچ ردیفی عوض نمی‌شود، هیچ ردیفی افزوده/حذف/
+   جابه‌جا نمی‌شود، و date/chains/checked/generatedAt همان می‌مانند که
+   بودند. atIso باید یک رشته‌ی ISOِ خواندنی باشد؛ وگرنه کل فراخوانی سند را
+   دست‌نخورده برمی‌گرداند. */
+export function applyRechecks(doc, updates, atIso) {
+  try {
+    if (typeof atIso !== "string" || Number.isNaN(Date.parse(atIso))) return doc;
+    if (!doc || typeof doc !== "object" || !Array.isArray(doc.rows)) return doc;
+    if (!Array.isArray(updates)) return doc;
+
+    // نقشه‌ی آدرس → recheckِ پیشنهادی (+cause) — فقط یک بار به‌ازای هر آدرس.
+    const recheckByAddr = new Map();
+    for (const u of updates) {
+      if (u && typeof u.address === "string" && typeof u.recheck === "string" && !recheckByAddr.has(u.address)) {
+        recheckByAddr.set(u.address, { recheck: u.recheck, cause: u.cause });
+      }
+    }
+    if (recheckByAddr.size === 0) return doc;
+
+    const rows = doc.rows.map((row) => {
+      if (!row || typeof row.address !== "string" || !recheckByAddr.has(row.address)) return row;
+      if (row.v !== null) return row; // فقط ردیفِ حکمِ نامعلوم دوباره چک می‌شود
+      if (Object.prototype.hasOwnProperty.call(row, "recheck")) return row; // یک‌بار recheck، همیشه recheck
+      const proposed = recheckByAddr.get(row.address);
+      const recheck = recheckForRow(row.v, proposed.recheck);
+      if (recheck === undefined) return row; // رشته‌ی نامعتبر → بی‌اثر
+      const next = { ...row, recheck, recheckAt: atIso };
+      if (recheck === "nosell") {
+        const recheckCause = causeForRow("nosell", proposed.cause);
+        if (recheckCause !== undefined) next.recheckCause = recheckCause;
+      }
+      return next;
+    });
+
+    return { ...doc, rows };
+  } catch (e) {
+    return doc; // هرگز پرتاب نمی‌کند
+  }
+}
+
 /* آدرس‌های ردیف‌هایی که کاندیدِ فالوآپِ ساعتی‌اند: chain==="base"،
    v==="sell"، هنوز follow ندارند، و checkedAt‌شان بینِ ۵۵ تا ۱۸۰ دقیقه
    پیش از nowMs است (هر دو مرز شاملند). قدیمی‌ترین اول، حداکثر cap تا —
@@ -243,6 +306,48 @@ export function pickFollowUpTargets(doc, nowMs, cap = 12) {
     }
     candidates.sort((a, b) => a.checkedMs - b.checkedMs); // قدیمی‌ترین اول
     return candidates.slice(0, capNum).map((c) => c.address);
+  } catch (e) {
+    return [];
+  }
+}
+
+/* آدرس‌های ردیف‌هایی که کاندیدِ رِی‌چکِ ساعتی‌اند: chain==="base"،
+   v===null (نامعلوم — نه sell، نه nosell)، هنوز recheck ندارند، و
+   checkedAt‌شان بینِ ۵۵ تا ۱۸۰ دقیقه پیش از nowMs است (هر دو مرز شاملند).
+   قدیمی‌ترین اول، حداکثر cap تا — هم‌رده‌ی pickFollowUpTargets، همان بازه،
+   همان ترتیب.
+   🔴 برخلافِ pickFollowUpTargets که فقط آدرس برمی‌گرداند، اینجا dex هم
+   لازم است: verdictOf برای ایندکسِ کلیدهای v4 به dex نیاز دارد (همان
+   dexِ خودِ ردیف، نه یک حدس). یک recheck که خودش هم نامعلوم برگردد هیچ
+   کلیدی ذخیره نمی‌کند (applyRechecks چیزی برایش نمی‌سازد)، پس ردیف همچنان
+   کاندید می‌ماند تا سنش از ۱۸۰ دقیقه بگذرد — یعنی حداکثر سه تلاش (سه گذرِ
+   ساعتی)؛ این محدودیت عمدی است، عضوِ سومی برای REPORT_RECHECKS اضافه
+   نمی‌شود. */
+export function pickRecheckTargets(doc, nowMs, cap = 4) {
+  try {
+    if (!doc || typeof doc !== "object" || !Array.isArray(doc.rows)) return [];
+    if (!Number.isFinite(nowMs)) return [];
+    const capNum = Number.isInteger(cap) && cap > 0 ? cap : 4;
+
+    const candidates = [];
+    for (const row of doc.rows) {
+      if (!row || typeof row !== "object") continue;
+      // 🔴 عمداً فقط Base، هم‌رده‌ی pickFollowUpTargets.
+      if (row.chain !== "base" || row.v !== null) continue;
+      if (Object.prototype.hasOwnProperty.call(row, "recheck")) continue;
+      if (typeof row.checkedAt !== "string") continue;
+      const checkedMs = Date.parse(row.checkedAt);
+      if (Number.isNaN(checkedMs)) continue; // checkedAt ناخواندنی → کاندید نیست
+      const ageMin = (nowMs - checkedMs) / 60000;
+      if (ageMin < 55 || ageMin > 180) continue;
+      candidates.push({
+        address: row.address,
+        dex: typeof row.dex === "string" ? row.dex : null,
+        checkedMs,
+      });
+    }
+    candidates.sort((a, b) => a.checkedMs - b.checkedMs); // قدیمی‌ترین اول
+    return candidates.slice(0, capNum).map((c) => ({ address: c.address, dex: c.dex }));
   } catch (e) {
     return [];
   }
@@ -604,6 +709,11 @@ export async function runReportPass({
        تک نیست، ولی قاعده یکی است). 🔴 این گام هرگز نباید خودِ گذر را
        بشکند: بدونِ poolEmptyOf کلاً رد می‌شود، و هر شکستی داخلش فقط یعنی
        followed:0 — سندی که همین بالا نوشته شد دست‌نخورده می‌ماند. */
+    // 🔴 latestDoc همیشه آخرین سندی است که واقعاً در KV نوشته شده — فالوآپ
+    // اگر چیزی نوشت آن را جلو می‌برد، وگرنه همان newDoc می‌ماند. گامِ
+    // رِی‌چکِ زیر روی همین latestDoc کار می‌کند تا کارِ فالوآپ را دوباره‌نویسی
+    // نکند (clobber نکند).
+    let latestDoc = newDoc;
     let followed = 0;
     if (typeof poolEmptyOf === "function") {
       try {
@@ -625,6 +735,7 @@ export async function runReportPass({
         if (updates.length > 0) {
           const followedDoc = applyFollowUps(newDoc, updates, generatedAt);
           await safeKvPutJson(kv, reportKey(dateStr), followedDoc);
+          latestDoc = followedDoc;
           // شمارشِ واقعی: فقط ردیف‌هایی که واقعاً follow گرفتند، نه صرفاً
           // طولِ updates (که در تئوری می‌تواند بیشتر از ردیف‌های واقعاً
           // تغییریافته باشد).
@@ -638,7 +749,62 @@ export async function runReportPass({
       }
     }
 
-    return { checked, added: builtRows.length + builtRowsSol.length, addedSol: builtRowsSol.length, followed };
+    /* رِی‌چکِ «یک ساعت بعد» برای ردیف‌هایی که حکمشان null ماند — دقیقاً
+       هم‌رده‌ی گامِ فالوآپِ بالا، ولی روی latestDoc (نه newDoc خام) تا
+       چیزی که فالوآپ همین بالا نوشت پاک نشود. هیچ تزریقِ تازه‌ای لازم
+       نیست: همان metaOf/verdictOfِ حلقه‌ی اصلی دوباره صدا زده می‌شوند،
+       دقیقاً با همان قاعده‌ی شکل‌سنجی. 🔴 این گام هم هرگز نباید خودِ گذر
+       یا فالوآپِ بالا را بشکند — هر شکستی فقط یعنی rechecked:0. */
+    let rechecked = 0;
+    let recheckTried = 0;
+    try {
+      const targets = pickRecheckTargets(latestDoc, nowMs, 4);
+      const updates = [];
+      for (const t of targets) {
+        recheckTried++;
+        // هر هدف تویِ try/catچِ خودش — یک پرتاب یعنی این یکی هدف رد
+        // می‌شود، هرگز کل حلقه را نمی‌شکند.
+        try {
+          await sleep(REPORT_PACE_MS);
+
+          let metaResult;
+          try { metaResult = await metaOf(t.address); } catch (e) { metaResult = null; }
+          const metaOk = !!metaResult && typeof metaResult === "object" &&
+            Object.prototype.hasOwnProperty.call(metaResult, "meta");
+          const meta = metaOk && metaResult.meta && typeof metaResult.meta === "object" ? metaResult.meta : null;
+          const metaWhy = metaOk ? metaResult.why : "internal";
+
+          let verdictResult;
+          try { verdictResult = await verdictOf(t.address, meta, metaWhy, t.dex); } catch (e) { verdictResult = null; }
+          const verdictOk = !!verdictResult && typeof verdictResult === "object" &&
+            Object.prototype.hasOwnProperty.call(verdictResult, "v");
+          const v = verdictOk ? verdictResult.v : null;
+          const cause = verdictOk ? verdictResult.cause : undefined;
+
+          if (v === "sell" || v === "nosell") updates.push({ address: t.address, recheck: v, cause });
+          // null/هرچیزِ دیگر → همچنان نامعلوم، اصلاً آپدیتی برای این آدرس نیست
+          // (و ردیف کاندید می‌ماند تا سنش از ۱۸۰ دقیقه بگذرد)
+        } catch (e) {
+          /* این یک هدف رد می‌شود، هرگز یک حدس */
+        }
+      }
+      if (updates.length > 0) {
+        const rechDoc = applyRechecks(latestDoc, updates, generatedAt);
+        await safeKvPutJson(kv, reportKey(dateStr), rechDoc);
+        latestDoc = rechDoc;
+        for (const u of updates) {
+          const row = rechDoc.rows.find((r) => r && r.address === u.address);
+          if (row && row.recheck === u.recheck) rechecked++;
+        }
+      }
+    } catch (e) {
+      rechecked = 0;
+    }
+
+    return {
+      checked, added: builtRows.length + builtRowsSol.length, addedSol: builtRowsSol.length, followed,
+      rechecked, recheckTried,
+    };
   } catch (e) {
     return { checked: 0, added: 0 }; // این تابع هرگز نباید پرتاب کند
   }
@@ -681,11 +847,7 @@ export function reportText(doc) {
     if (doc.date < REPORT_TEXT_FIRST_DATE) return null;
 
     // فقط ردیف‌های Base با checkKindِ همان‌جدول و آدرسِ درست‌شکل — هر ردیفِ
-    // دیگر در هیچ شمارشی حساب نمی‌شود.
-    // 🔴 عمداً: از امروز سندِ روزانه ردیف‌های سولانا هم دارد (runReportPass)،
-    // ولی متنِ عمومی هنوز فقط Base است — این یک تصمیمِ جدا و بعداً است،
-    // نه جاماندگی؛ ورودشان به این متن، اگر/وقتی تصمیم گرفته شود، تغییرِ
-    // دیگری می‌خواهد، نه اینجا.
+    // دیگر در هیچ شمارشِ Base حساب نمی‌شود.
     const rows = doc.rows.filter((r) =>
       r && typeof r === "object" && r.chain === "base" &&
       r.checkKind === CHECK_KIND_BY_CHAIN.base &&
@@ -700,6 +862,19 @@ export function reportText(doc) {
     }
     const total = rows.length;
     const flagged = flaggedRows.length;
+
+    // 🔴 ردیف‌های سولانا — همان انضباط: فقط chain==="solana"، checkKindِ
+    // همان‌جدول (roundtrip)، و mintِ base58 درست‌شکل. صفر ردیفِ شمرده‌شده
+    // یعنی خروجیِ زیر باید بایت‌به‌بایت همان چیزی بماند که پیش از این تغییر
+    // بود — solTotal===0 هیچ خطی به متن اضافه نمی‌کند، هیچ‌کجا.
+    const solRows = doc.rows.filter((r) =>
+      r && typeof r === "object" && r.chain === "solana" &&
+      r.checkKind === CHECK_KIND_BY_CHAIN.solana &&
+      typeof r.address === "string" && SOL_MINT.test(r.address));
+    const solNosellRows = solRows.filter((r) => r.v === "nosell");
+    const solSellCount = solRows.filter((r) => r.v === "sell").length;
+    const solUnchecked = solRows.length - solNosellRows.length - solSellCount;
+    const solTotal = solRows.length;
 
     const [y, m, d] = doc.date.split("-");
     const dateLabel = String(Number(d)) + " " + REPORT_TEXT_MONTHS[Number(m) - 1];
@@ -759,7 +934,39 @@ export function reportText(doc) {
       lines.push("");
     }
 
+    // 🔴 بلوکِ سولانا — فقط وقتی حداقل یک ردیفِ سولانا شمرده شده؛ بعدِ کلِ
+    // بلوکِ Base (شمارش‌ها، خطِ اختیاریِ follow/ret، و فهرستِ پرچم‌خورده‌ها) و
+    // پیش از خط‌های پانویس. solTotal===0 هیچ خطی اینجا اضافه نمی‌کند.
+    if (solTotal > 0) {
+      // خطِ خالیِ جداکننده همان خطِ خالیِ پایانیِ بلوکِ Base است (همیشه
+      // پیش از پانویس چاپ می‌شود)؛ این بلوک هم مثلِ Base با یک خطِ خالی تمام
+      // می‌شود تا پانویس به فهرست نچسبد.
+      lines.push(solTotal + " new Solana token" + (solTotal === 1 ? "" : "s") + " checked.");
+      lines.push(solNosellRows.length + " failed a simulated buy and sell.");
+      lines.push(solSellCount + " passed a simulated buy and sell.");
+      lines.push(solUnchecked + " could not be checked.");
+
+      if (solNosellRows.length > 0) {
+        lines.push("");
+        const listedSol = solNosellRows.slice(0, REPORT_TEXT_MAX_LISTED);
+        listedSol.forEach((r, i) => {
+          if (i > 0) lines.push("");
+          lines.push(reportTextSymbolLabel(r) + " — failed the simulated buy and sell");
+          lines.push("zaexa.com/t/" + r.address);
+        });
+        if (solNosellRows.length > REPORT_TEXT_MAX_LISTED) {
+          lines.push("");
+          lines.push("+" + (solNosellRows.length - REPORT_TEXT_MAX_LISTED) + " more: zaexa.com/report/" +
+            doc.date + ".json");
+        }
+      }
+      lines.push("");
+    }
+
     lines.push("Sell quotes on Base DEXes, not a simulated round trip.");
+    // 🔴 فقط وقتی بلوکِ سولانا واقعاً چاپ شده این خط هم می‌آید — هم‌رده‌ی
+    // همان قاعده‌ی solTotal===0 بالاتر.
+    if (solTotal > 0) lines.push("On Solana, the buy and the sell are simulated together.");
 
     if (typeof doc.generatedAt === "string" && Number.isFinite(Date.parse(doc.generatedAt))) {
       const gd = new Date(doc.generatedAt);

@@ -2599,6 +2599,7 @@ async function copyLink(url,btn){
     setNotice(note("warn","<b>Could not reach the clipboard.</b> Copy this link manually:<br>"+
       '<span class="mono" style="word-break:break-all">'+esc(url)+"</span>"));
   }
+  return ok;
 }
 
 /* =====================================================================
@@ -2620,13 +2621,19 @@ function renderRoundTrip(box,x){
     return;
   }
   if(x.state==="serverSell"){
+    // ret فقط یک عدد است (اعتبارسنجیِ بازه یک‌بار، در fetchVdVerdict، انجام
+    // شده) — اینجا نه آستانه‌ای هست نه تغییر رنگی، فقط همان جمله به‌علاوه‌ی
+    // خودِ عدد، شفافیت بدون قضاوت.
+    const retNote=(typeof x.ret==="number"&&isFinite(x.ret))
+      ?" A $100 sell, valued at the listed price, was quoted back at "+x.ret.toFixed(1)+"%."
+      :"";
     box.innerHTML=`<div class="tripHead">
         <span class="tripPct" style="color:var(--pos)">Sellable</span>
         <span class="tripBadge" style="color:var(--pos);background:var(--pglow)">Server check</span>
       </div>
       <div class="tripTrack"></div>
       <div class="tripEnds"><span>Checked by our server</span><span>&nbsp;</span></div>
-      <div class="tripNote">This page could not quote a sell through the pools it knows. Our server check covers more pools — for example Uniswap v4 — and it priced a sell. That is a quote, not a simulation.</div>`;
+      <div class="tripNote">This page could not quote a sell through the pools it knows. Our server check covers more pools — for example Uniswap v4 — and it priced a sell. That is a quote, not a simulation.${retNote}</div>`;
     return;
   }
   if(x.state==="serverNoSell"){
@@ -2822,6 +2829,7 @@ const EV_NAMES=[
      سه نام. مرز حریم خصوصی دست‌نخورده مانده، فقط این یک استثنای باریک
      رویش باز شده — با اجازه‌ی صریح صاحب سایت. */
   "err:js","err:promise","err:res",
+  "share:copy",
 ];
 /* Global Privacy Control یک «نه»ی صریح از خودِ کاربر است، نه یک حدس. مخاطب
    این سایت به حریم خصوصی حساس است و شمارش ارزش نادیده‌گرفتنش را ندارد.
@@ -3957,7 +3965,7 @@ async function tokenExitFallback(seq,why){
   const sv=await fetchVdVerdict(tokenOut.address);
   if(seq!==tkExitSeq||tkExitSettled===seq)return;
   tkExitSettled=tkExitSeq;clearTimeout(tkExitTimer);tkExitTimer=null;
-  if(sv.v==="sell")renderRoundTrip($("tk-exitBox"),{state:"serverSell"});
+  if(sv.v==="sell")renderRoundTrip($("tk-exitBox"),{state:"serverSell",ret:sv.ret});
   else if(sv.v==="nosell")renderRoundTrip($("tk-exitBox"),{state:"serverNoSell",cause:sv.cause});
   else renderRoundTrip($("tk-exitBox"),{state:"unknown",reason:REASON[why]||REASON.timeout});
 }
@@ -5572,15 +5580,19 @@ async function fetchVdVerdict(mint){
   try{
     const r=await withTimeout(fetch(location.origin+"/vd/"+mint,
       {headers:{accept:"application/json"}}),9000);
-    if(!r.ok)return {v:null,why:null,cause:null};
+    if(!r.ok)return {v:null,why:null,cause:null,ret:null};
     const j=await r.json();
     const v=(j&&(j.v==="sell"||j.v==="nosell"))?j.v:null;
     const why=(j&&typeof j.why==="string")?j.why:null;
     // فقط دقیقاً "empty-pool" پذیرفته می‌شود — هر رشته‌ی دیگر یعنی cause
     // هرگز نگفته، نه یک حدس.
     const cause=(j&&j.cause==="empty-pool")?j.cause:null;
-    return {v,why,cause};
-  }catch{return {v:null,why:null,cause:null};}
+    // ret فقط وقتی v==="sell" معنا دارد: درصدِ برگشتِ یک فروشِ ۱۰۰دلاری،
+    // محدود به بازه‌ی معتبرِ (۰،۱۰۰۰] — بیرونِ این بازه یعنی نداریم، نه صفر.
+    const ret=(v==="sell"&&typeof j.ret==="number"&&isFinite(j.ret)&&j.ret>0&&j.ret<=1000)
+      ?j.ret:null;
+    return {v,why,cause,ret};
+  }catch{return {v:null,why:null,cause:null,ret:null};}
 }
 
 /* هویت + عکسِ آواتار، از رویِ داده‌ی خامِ GeckoTerminal — نه paintAvatar
@@ -5961,12 +5973,14 @@ function wire(){
   $("rpcClear").onclick=clearCustomRpc;
   /* بیرون از کارت نتیجه و بی‌ربط به اینکه مبلغی وارد شده یا نه: لینک به
      *توکن* اشاره می‌کند، نه به یک کوت مشخص، پس دلیلی ندارد منتظر عدد بماند. */
-  if($("checkShare"))$("checkShare").onclick=()=>{
+  if($("checkShare"))$("checkShare").onclick=async()=>{
     const u=tokenPageUrl();
     if(!u){setNotice(note("warn","<b>Native ETH has no token page.</b> Pick an ERC-20 to share a check."));return;}
-    copyLink(u,$("checkShare"));
+    if(await copyLink(u,$("checkShare")))ev("share:copy");
   };
-  if($("tk-copy"))$("tk-copy").onclick=()=>copyLink(location.href,$("tk-copy"));
+  if($("tk-copy"))$("tk-copy").onclick=async()=>{
+    if(await copyLink(location.href,$("tk-copy")))ev("share:copy");
+  };
   if($("tk-trade"))$("tk-trade").onclick=()=>{
     /* از صفحه‌ی توکن به فرم سواپ، بدون بارگذاری دوباره. پنل‌ها باید یک بار
        در مقصد تازه رندر شوند، وگرنه کاربر یک کارت خالی می‌بیند.

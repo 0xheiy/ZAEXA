@@ -6897,6 +6897,324 @@ async def main():
         assert table_display == "none", "the table did not hide on a narrow viewport"
         assert cards_display != "none", "the card list did not show on a narrow viewport"
 
+        # ---- [pairs verdict note] یادداشتِ زیرِ نشانِ رأی — از رویِ کلیدهای تازه‌ی
+        # Worker (ret/cause/follow/followAt/recheck/recheckAt/recheckCause). هر ردیف
+        # دقیقاً یکی از حالت‌های واقعیِ /pairs.json را می‌سنجد؛ نامعتبرها هرگز رندر
+        # نمی‌شوند، و یک <img> تزریق‌شده در یک رشته هرگز به یک عنصرِ واقعی نمی‌رسد. ----
+        def note_addr(n):
+            return "0x" + format(n, "040x")
+
+        NOTE_SELL_RET = dict(SELL_ROW, address=note_addr(101), ret=42.5)
+        NOTE_SELL_RET_FOLLOW_EMPTY = dict(
+            SELL_ROW, address=note_addr(102), ret=1.0,
+            follow="pool-empty", followAt="2026-01-01T00:00:00.000Z")
+        NOTE_NOSELL_CAUSE = dict(NOSELL_ROW, address=note_addr(103), cause="empty-pool")
+        NOTE_NULL_RECHECK_SELL = dict(
+            UNKNOWN_ROW, address=note_addr(104),
+            recheck="sell", recheckAt="2026-02-02T00:00:00.000Z")
+        NOTE_NULL_RECHECK_NOSELL_CAUSE = dict(
+            UNKNOWN_ROW, address=note_addr(105), recheck="nosell",
+            recheckAt="2026-03-03T00:00:00.000Z", recheckCause="empty-pool")
+        NOTE_NULL_RECHECK_NOSELL_NOCAUSE = dict(
+            UNKNOWN_ROW, address=note_addr(106),
+            recheck="nosell", recheckAt="2026-04-04T00:00:00.000Z")
+        NOTE_PLAIN_SELL = dict(SELL_ROW, address=note_addr(107))   # هیچ کلید تازه‌ای ندارد
+
+        NOTE_BAD_RET_ZERO = dict(SELL_ROW, address=note_addr(108), ret=0)
+        NOTE_BAD_RET_HIGH = dict(SELL_ROW, address=note_addr(109), ret=5000)
+        NOTE_BAD_RET_STR = dict(SELL_ROW, address=note_addr(110), ret="98")
+        NOTE_BAD_FOLLOW = dict(SELL_ROW, address=note_addr(111), follow="maybe")
+        NOTE_BAD_RECHECK_ON_SELL = dict(
+            SELL_ROW, address=note_addr(112),
+            recheck="sell", recheckAt="2026-05-05T00:00:00.000Z")
+        NOTE_BAD_CAUSE_ON_SELL = dict(SELL_ROW, address=note_addr(113), cause="empty-pool")
+        NOTE_INJECTED_ISO = dict(
+            UNKNOWN_ROW, address=note_addr(114),
+            recheck="sell", recheckAt="<img src=x onerror=alert(1)>")
+
+        NOTE_ROWS = [
+            NOTE_SELL_RET, NOTE_SELL_RET_FOLLOW_EMPTY, NOTE_NOSELL_CAUSE,
+            NOTE_NULL_RECHECK_SELL, NOTE_NULL_RECHECK_NOSELL_CAUSE,
+            NOTE_NULL_RECHECK_NOSELL_NOCAUSE, NOTE_PLAIN_SELL,
+            NOTE_BAD_RET_ZERO, NOTE_BAD_RET_HIGH, NOTE_BAD_RET_STR, NOTE_BAD_FOLLOW,
+            NOTE_BAD_RECHECK_ON_SELL, NOTE_BAD_CAUSE_ON_SELL, NOTE_INJECTED_ISO,
+        ]
+
+        note_pg, note_errs = await open_pairs({"chain": "base", "rows": NOTE_ROWS, "store": True})
+        note_info = await note_pg.evaluate("""() => {
+            const rows = Array.from(document.querySelectorAll('#rowsBody tr'));
+            const cards = Array.from(document.querySelectorAll('#rowsCards .card'));
+            function pick(list) {
+                return list.map(el => {
+                    const n = el.querySelector('.verdict-note');
+                    return n ? {text: n.textContent, title: n.getAttribute('title'),
+                                imgCount: n.querySelectorAll('img').length} : null;
+                });
+            }
+            return {table: pick(rows), cards: pick(cards)};
+        }""")
+        await note_pg.close()
+        print("[pairs verdict note] table=%r" % note_info["table"])
+        print("[pairs verdict note] cards=%r" % note_info["cards"])
+        assert not note_errs, "web/pairs.html threw while rendering verdict notes: %s" % note_errs
+
+        EXPECTED_NOTES = [
+            "Quote back 42.5%",
+            "Quote back 1.0% · Later: pool empty",
+            "Pool has no liquidity",
+            "Later: sell quoted",
+            "Later: pool empty",
+            "Later: no sell quoted",
+            None,   # NOTE_PLAIN_SELL — هیچ کلید تازه‌ای ندارد
+            None,   # ret 0 — بیرونِ بازه
+            None,   # ret 5000 — بیرونِ بازه
+            None,   # ret "98" — رشته، نه عدد
+            None,   # follow "maybe" — بیرونِ واژه‌نامه
+            None,   # recheck روی یک ردیفِ sell — کلید فقط برای v===null معنا دارد
+            None,   # cause روی یک ردیفِ sell — کلید فقط برای nosell معنا دارد
+            "Later: sell quoted",  # recheckAt تزریق‌شده — متن سالم می‌ماند
+        ]
+        for i, expect in enumerate(EXPECTED_NOTES):
+            for surface, got in (("table", note_info["table"][i]), ("card", note_info["cards"][i])):
+                if expect is None:
+                    assert got is None, (
+                        "row %d (%s) rendered a .verdict-note where none was expected: %r"
+                        % (i, surface, got))
+                else:
+                    assert got is not None and got["text"] == expect, (
+                        "row %d (%s) verdict-note text mismatch: expected %r, got %r"
+                        % (i, surface, expect, got))
+
+        cause_row = note_info["table"][2]
+        assert cause_row["title"] is None, (
+            "a note with no later-observation part must carry no title attribute, got %r"
+            % cause_row["title"])
+        follow_row = note_info["table"][1]
+        assert follow_row["title"] == NOTE_SELL_RET_FOLLOW_EMPTY["followAt"], (
+            "the later-observation title must carry followAt verbatim: %r" % follow_row)
+        recheck_row = note_info["table"][3]
+        assert recheck_row["title"] == NOTE_NULL_RECHECK_SELL["recheckAt"], (
+            "the later-observation title must carry recheckAt verbatim: %r" % recheck_row)
+        inj_row_table = note_info["table"][13]
+        inj_row_card = note_info["cards"][13]
+        assert inj_row_table["imgCount"] == 0 and inj_row_card["imgCount"] == 0, (
+            "an injected <img> in recheckAt became a real element: %r / %r"
+            % (inj_row_table, inj_row_card))
+        assert inj_row_table["title"] == NOTE_INJECTED_ISO["recheckAt"], (
+            "the title attribute must round-trip the raw ISO text through esc(), got %r"
+            % inj_row_table["title"])
+
+        # ---- [pairs verdict note] بوم‌سنج: یادداشت هرگز از سلول/کارت بیرون نمی‌زند،
+        # نه در دسکتاپ نه در ۳۹۰px — با getBoundingClientRect، نه با چشم. ----
+        LONG_NOTE_ROW = dict(
+            SELL_ROW, address=note_addr(120), ret=999.9,
+            follow="pool-there", followAt="2026-06-06T00:00:00.000Z")
+        for width, label, sel_wrap in ((1280, "desktop", "#rowsBody .verdict-note"),
+                                        (390, "390px", "#rowsCards .verdict-note")):
+            bpg, berrs = await open_pairs(
+                {"chain": "base", "rows": [LONG_NOTE_ROW], "store": True},
+                viewport={"width": width, "height": 900})
+            box = await bpg.evaluate("""(sel) => {
+                const note = document.querySelector(sel);
+                const container = note.closest('td') || note.closest('.card');
+                const nr = note.getBoundingClientRect();
+                const cr = container.getBoundingClientRect();
+                return {
+                    noteRight: nr.right, noteLeft: nr.left, noteWidth: nr.width,
+                    containerRight: cr.right, containerLeft: cr.left,
+                    whiteSpace: getComputedStyle(note).whiteSpace,
+                    docOverflowX: document.documentElement.scrollWidth
+                        - document.documentElement.clientWidth
+                };
+            }""", sel_wrap)
+            await bpg.close()
+            print("[pairs verdict note] %s width=%d box=%r errors=%s"
+                  % (label, width, box, berrs))
+            assert not berrs, "web/pairs.html threw at %s width: %s" % (label, berrs)
+            assert box["noteRight"] <= box["containerRight"] + 1, (
+                "the verdict-note overflows its %s container on the right at %s: %r"
+                % (label, label, box))
+            assert box["noteLeft"] >= box["containerLeft"] - 1, (
+                "the verdict-note overflows its %s container on the left at %s: %r"
+                % (label, label, box))
+            assert box["docOverflowX"] <= 1, (
+                "the page scrolls horizontally at %s — the note forced an overflow: %r"
+                % (label, box))
+            assert box["whiteSpace"] != "nowrap", (
+                "the verdict-note's white-space is nowrap — it can never wrap at %s: %r"
+                % (label, box))
+
+        # ---- [server sell ret] fetchVdVerdict واقعی، /vd استاب‌شده روی سیم — نه
+        # جایگزینیِ خودِ تابع؛ همان اعتبارسنجیِ بازه که در fetchVdVerdict نوشته شده
+        # اینجا واقعاً اجرا می‌شود، تا شکستنِ عمدیِ سقفِ ۱۰۰۰ در پایین همین تست
+        # قرمز شود. ----
+        async def open_ret_harness(vd_body):
+            rpg = await b.new_page(viewport={"width": 1240, "height": 1000})
+
+            async def stub_vd(route):
+                await route.fulfill(status=200, content_type="application/json",
+                                     body=_json.dumps(vd_body))
+            await rpg.route("**/vd/**", stub_vd)
+            await rpg.goto("http://127.0.0.1:%d/test/harness.html" % port)
+            await rpg.wait_for_timeout(600)
+            return rpg
+
+        RET_SETTLE_PROBE = """async () => {
+            const saved = {
+                tokenPage, tokenOut,
+                boxHTML: document.getElementById("tk-exitBox").innerHTML
+            };
+            tokenPage = true;
+            tokenOut = {address: "0x" + "16".repeat(20), symbol: "T16", decimals: 18,
+                        native: false, name: "T16"};
+            tkExitSeq++;
+            await tokenExitFallback(tkExitSeq, "timeout");
+            const box = document.getElementById("tk-exitBox");
+            const note = box.querySelector(".tripNote");
+            const text = note ? note.textContent : null;
+            tokenPage = saved.tokenPage; tokenOut = saved.tokenOut;
+            box.innerHTML = saved.boxHTML;
+            clearTimeout(tkExitTimer); tkExitTimer = null;
+            return text;
+        }"""
+
+        r1p = await open_ret_harness({"v": "sell", "ret": 0.1})
+        r1 = await r1p.evaluate(RET_SETTLE_PROBE)
+        await r1p.close()
+        r2p = await open_ret_harness({"v": "sell"})
+        r2 = await r2p.evaluate(RET_SETTLE_PROBE)
+        await r2p.close()
+        r3p = await open_ret_harness({"v": "sell", "ret": 5000})
+        r3 = await r3p.evaluate(RET_SETTLE_PROBE)
+        await r3p.close()
+        r4p = await open_ret_harness({"v": "sell", "ret": "0.1"})
+        r4 = await r4p.evaluate(RET_SETTLE_PROBE)
+        await r4p.close()
+
+        print("[server sell ret] ret=0.1 -> %r" % r1)
+        print("[server sell ret] no ret -> %r" % r2)
+        print("[server sell ret] ret=5000 -> %r" % r3)
+        print("[server sell ret] ret='0.1' (string) -> %r" % r4)
+        ORIG_TRIPNOTE = (
+            "This page could not quote a sell through the pools it knows. Our server "
+            "check covers more pools — for example Uniswap v4 — and it priced "
+            "a sell. That is a quote, not a simulation.")
+        assert r1 == ORIG_TRIPNOTE + (
+            " A $100 sell, valued at the listed price, was quoted back at 0.1%."), (
+            "a valid ret=0.1 from a real /vd response did not append the exact "
+            "quote-back sentence: %r" % r1)
+        assert r2 == ORIG_TRIPNOTE, (
+            "no ret must leave the tripNote text byte-identical to today's: %r" % r2)
+        assert r3 == ORIG_TRIPNOTE, (
+            "ret=5000 (above the 1000 bound) must not be shown: %r" % r3)
+        assert r4 == ORIG_TRIPNOTE, (
+            "a string ret ('0.1') must not be shown: %r" % r4)
+
+        # ---- [events share] share:copy فقط از دو دکمه‌ی «share a check» —
+        # #checkShare و #tk-copy — و فقط وقتی کپی واقعاً موفق شده. #shareBtn یک
+        # کوتِ سواپ را به اشتراک می‌گذارد، نه یک چک، پس هرگز share:copy نمی‌فرستد. ----
+        def clip_init_script(ok):
+            return ("Object.defineProperty(navigator,'clipboard',{value:{writeText:"
+                    "()=>Promise.%s},configurable:true});"
+                    % ("resolve()" if ok else "reject(new Error('no-clipboard'))"))
+
+        async def swap_share_page(clip_ok, gpc=False):
+            p = await b.new_page(viewport={"width": 1240, "height": 1000})
+            await p.add_init_script(clip_init_script(clip_ok))
+            if gpc:
+                await p.add_init_script(
+                    "Object.defineProperty(navigator,'globalPrivacyControl',{get:()=>true});")
+            seen = await watch_events(p)
+            await p.goto("http://127.0.0.1:%d/test/harness.html#swap" % port)
+            await p.wait_for_timeout(1200)
+            return p, seen
+
+        async def token_share_page(clip_ok, gpc=False):
+            p = await b.new_page(viewport={"width": 1240, "height": 1000})
+            await p.add_init_script(clip_init_script(clip_ok))
+            if gpc:
+                await p.add_init_script(
+                    "Object.defineProperty(navigator,'globalPrivacyControl',{get:()=>true});")
+            seen = await watch_events(p)
+            await p.goto("http://127.0.0.1:%d%s" % (port, ck_path))
+            await p.wait_for_timeout(1500)
+            return p, seen
+
+        def share_names(seen_list):
+            return [_json.loads(r)["e"] for r in seen_list if _json.loads(r)["e"] == "share:copy"]
+
+        # ۱) #checkShare، کلیپ‌بورد سالم -> دقیقاً یک بیکن
+        p1, seen1 = await swap_share_page(True)
+        assert await p1.is_visible("#checkShare"), "#checkShare is not visible on the swap page"
+        before1 = len(seen1)
+        await p1.click("#checkShare")
+        await p1.wait_for_timeout(500)
+        names1 = share_names(seen1[before1:])
+        await p1.close()
+        print("[events share] #checkShare, working clipboard -> %s" % names1)
+        assert names1 == ["share:copy"], (
+            "expected exactly one share:copy beacon from #checkShare, got %s" % names1)
+
+        # ۲) #tk-copy، کلیپ‌بورد سالم -> دقیقاً یک بیکن
+        p2, seen2 = await token_share_page(True)
+        assert await p2.is_visible("#tk-copy"), "#tk-copy is not visible on the token page"
+        before2 = len(seen2)
+        await p2.click("#tk-copy")
+        await p2.wait_for_timeout(500)
+        names2 = share_names(seen2[before2:])
+        await p2.close()
+        print("[events share] #tk-copy, working clipboard -> %s" % names2)
+        assert names2 == ["share:copy"], (
+            "expected exactly one share:copy beacon from #tk-copy, got %s" % names2)
+
+        # ۳) کلیپ‌بورد ناموفق -> هیچ بیکنی از هیچ‌کدام
+        p3, seen3 = await swap_share_page(False)
+        before3 = len(seen3)
+        await p3.click("#checkShare")
+        await p3.wait_for_timeout(400)
+        names3 = share_names(seen3[before3:])
+        await p3.close()
+        p3b, seen3b = await token_share_page(False)
+        before3b = len(seen3b)
+        await p3b.click("#tk-copy")
+        await p3b.wait_for_timeout(400)
+        names3b = share_names(seen3b[before3b:])
+        await p3b.close()
+        print("[events share] failing clipboard -> checkShare=%s tk-copy=%s" % (names3, names3b))
+        assert names3 == [], "a failing clipboard must never send share:copy, got %s" % names3
+        assert names3b == [], "a failing clipboard must never send share:copy, got %s" % names3b
+
+        # ۴) #shareBtn یک کوت را به اشتراک می‌گذارد، نه یک چک — هرگز share:copy
+        p4, seen4 = await swap_share_page(True)
+        assert await p4.is_visible("#shareBtn"), "#shareBtn is not visible on the swap page"
+        before4 = len(seen4)
+        await p4.click("#shareBtn")
+        await p4.wait_for_timeout(500)
+        names4 = share_names(seen4[before4:])
+        await p4.close()
+        print("[events share] #shareBtn, working clipboard -> %s" % names4)
+        assert names4 == [], (
+            "#shareBtn must never send share:copy — it shares a swap quote, not a check, "
+            "got %s" % names4)
+
+        # ۵) Global Privacy Control روشن -> هیچ بیکنی
+        p5, seen5 = await swap_share_page(True, gpc=True)
+        before5 = len(seen5)
+        await p5.click("#checkShare")
+        await p5.wait_for_timeout(400)
+        names5 = share_names(seen5[before5:])
+        await p5.close()
+        p5b, seen5b = await token_share_page(True, gpc=True)
+        before5b = len(seen5b)
+        await p5b.click("#tk-copy")
+        await p5b.wait_for_timeout(400)
+        names5b = share_names(seen5b[before5b:])
+        await p5b.close()
+        print("[events share] Global Privacy Control on -> checkShare=%s tk-copy=%s"
+              % (names5, names5b))
+        assert names5 == [], "GPC must silence share:copy too, got %s" % names5
+        assert names5b == [], "GPC must silence share:copy too, got %s" % names5b
+
         srv.shutdown()
         await b.close()
 

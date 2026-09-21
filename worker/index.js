@@ -34,7 +34,7 @@ import { fetchVerdict, VD_VENUES, VD_RPCS } from "./verdict.js";
 import { EVM_ADDR, SOL_MINT, chainOf, gtNetworkOf } from "./chains.js";
 import {
   REPORT_DATE_RE, PAIRS_KEY_BASE, reportKey, utcDateOf, emptyReportDoc, runReportPass,
-  reportText, REPORT_TEXT_FIRST_DATE,
+  reportText, REPORT_TEXT_FIRST_DATE, followForRow, recheckForRow, causeForRow,
 } from "./report.js";
 import {
   fetchVerdictSol, VD_SOL_RPCS, VD_SOL_JUP_BASE, VD_SOL_PAYER,
@@ -204,6 +204,9 @@ const EV_OK = new Set([
      پیام خطا، نام فایل، خط/ستون و پشته‌ی فراخوانی همچنان هیچ‌کدام نمی‌آیند؛
      فقط می‌شود شمرد «چند باگِ *متمایز*»، نه «کدام پیام». */
   "err:js", "err:promise", "err:res",
+  /* شمرده می‌شود وقتی لینکِ چکِ یک توکن با موفقیت کپی می‌شود — هیچ توکن،
+     آدرس یا URLای هرگز فرستاده نمی‌شود، فقط خودِ رخداد. */
+  "share:copy",
 ]);
 /* جزئیات هم بسته است. رشته‌ی آزاد یعنی هرکسی می‌تواند هرچه خواست در انبار ما
    بنویسد، و یک روز چیزی که نباید ثبت شود از همین راه ثبت می‌شود. */
@@ -1555,20 +1558,76 @@ async function reportDocFor(env, dateStr) {
   }
 }
 
+/* پیوستِ follow/recheck در زمانِ خواندن — حلقه‌ی pairs:base:latest فقط یک
+   بار نوشته می‌شود و هرگز follow (یک ساعت بعد، فقط در سندِ روزانه) یا
+   recheck (رِی‌چکِ ردیفِ نامعلوم، همان‌جا) نمی‌گیرد. این تابع خودِ حلقه را
+   دست‌نخورده می‌گذارد و فقط در پاسخ این دو کلید را از سندِ روزانه قرض
+   می‌گیرد — امروز و دیروز (UTC)، امروز برنده وقتی هر دو همان آدرس را
+   دارند. reportDocFor هرگز پرتاب نمی‌کند و هر شکستِ خواندن/پارس را به
+   سندِ خالی تخت می‌کند، پس هر شکست اینجا فقط یعنی «چیزی برای قرض‌گرفتن
+   نیست»، نه شکستِ کل تابع — ردیف‌های حلقه همان می‌مانند که بودند. */
 async function pairsRowsFor(env, chain) {
   // میدانِ chain همین امروز هم می‌پذیرد «solana» و فقط حلقه‌ی خالی می‌دهد —
   // تا افزودنِ سولانا فردا هیچ مهاجرتِ شکلِ داده‌ای نخواهد.
   if (chain === "solana") return [];
   const kv = env && env.ZX_KV;
   if (!kv) return [];
+  let ringRows;
   try {
     const raw = await kv.get(PAIRS_KEY_BASE);
     if (typeof raw !== "string") return [];
     const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed : [];
+    ringRows = Array.isArray(parsed) ? parsed : [];
   } catch (e) {
     return [];
   }
+
+  const nowMs = Date.now();
+  const todayStr = utcDateOf(nowMs);
+  const yesterdayStr = utcDateOf(nowMs - 86400000);
+  const [todayDoc, yesterdayDoc] = await Promise.all([
+    reportDocFor(env, todayStr),
+    reportDocFor(env, yesterdayStr),
+  ]);
+
+  // نقشه‌ی آدرس → ردیفِ سندِ روزانه — دیروز اول، امروز دوم، پس امروز
+  // (اگر همان آدرس را داشته باشد) برنده می‌شود.
+  const byAddr = new Map();
+  for (const r of (yesterdayDoc && Array.isArray(yesterdayDoc.rows) ? yesterdayDoc.rows : [])) {
+    if (r && typeof r.address === "string") byAddr.set(r.address, r);
+  }
+  for (const r of (todayDoc && Array.isArray(todayDoc.rows) ? todayDoc.rows : [])) {
+    if (r && typeof r.address === "string") byAddr.set(r.address, r);
+  }
+  if (byAddr.size === 0) return ringRows;
+
+  return ringRows.map((ringRow) => {
+    if (!ringRow || typeof ringRow.address !== "string" || !byAddr.has(ringRow.address)) return ringRow;
+    const docRow = byAddr.get(ringRow.address);
+    // 🔴 همیشه یک کپی — هیچ کلیدِ دیگری از ringRow عوض نمی‌شود، هیچ کلیدِ
+    // دیگری از docRow قرض گرفته نمی‌شود.
+    const out = { ...ringRow };
+
+    const follow = followForRow(ringRow.v, docRow.follow);
+    if (follow !== undefined && typeof docRow.followAt === "string" &&
+        !Number.isNaN(Date.parse(docRow.followAt))) {
+      out.follow = follow;
+      out.followAt = docRow.followAt;
+    }
+
+    const recheck = recheckForRow(ringRow.v, docRow.recheck);
+    if (recheck !== undefined && typeof docRow.recheckAt === "string" &&
+        !Number.isNaN(Date.parse(docRow.recheckAt))) {
+      out.recheck = recheck;
+      out.recheckAt = docRow.recheckAt;
+      if (recheck === "nosell") {
+        const recheckCause = causeForRow("nosell", docRow.recheckCause);
+        if (recheckCause !== undefined) out.recheckCause = recheckCause;
+      }
+    }
+
+    return out;
+  });
 }
 
 async function reportRoute(request, url, env) {
@@ -1768,6 +1827,9 @@ async function reportRunRoute(request, env, ctx) {
     ran: true,
     checked: r.checked,
     added: r.added,
+    followed: r.followed,
+    rechecked: r.rechecked,
+    recheckTried: r.recheckTried,
     ms: Date.now() - t0,
     store: !!(env && env.ZX_KV),
   });
@@ -1898,7 +1960,7 @@ export default {
 };
 
 // برای تست‌ها — در زمان اجرا روی Worker استفاده نمی‌شود.
-export { PATH_OK, QUERY_OK, ttlFor, EV_OK, EV_DETAIL_OK, EV_SURFACE_OK, EV_MAX_BODY };
+export { PATH_OK, QUERY_OK, ttlFor, EV_OK, EV_DETAIL_OK, EV_SURFACE_OK, EV_MAX_BODY, pairsRowsFor };
 export { rateOk, rlHits, RL_LIMIT, RL_WINDOW_MS };
 export { OG_NETWORK, OG_TIMEOUT_MS, ogFetchMeta, ogFetchVerdict };
 export { baseVenueCovered, baseVenueCoveredDetail };
