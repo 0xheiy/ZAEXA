@@ -513,6 +513,16 @@ export async function readPassLog(kv) {
    گذر را عوض نمی‌کند. */
 export const REPORT_CAP_PROBE = Object.freeze(["ok", "cap", "timeout", "threw"]);
 
+/* واژه‌نامه‌ی بسته‌ی نامِ مرحله برای متر ساب‌ریکوئست (worker/index.js →
+   makeSubMeter) — فقط اندازه‌گیریِ اینکه هر مرحله‌ی گذر چند ساب‌ریکوئست
+   می‌خورد، هیچ رفتاری از خودِ گذر را عوض نمی‌کند. runReportPass زیرِ همین
+   فایل دقیقاً همین هشت نام را به meter.stage() می‌دهد، هیچ نامِ دیگری هرگز —
+   یک نامِ دست‌ساز/اشتباه‌تایپ‌شده فقط یعنی آن ساب‌ریکوئست‌ها زیرِ نامِ قبلی
+   می‌مانند، نه یک شکستِ خاموش. */
+export const REPORT_METER_STAGES = Object.freeze([
+  "pools", "base-token", "follow", "recheck", "sol-pools", "sol-token", "probe", "kv-write",
+]);
+
 /* probeFetch یک تزریق است (کالر در worker/index.js یک fetch با HEAD/AbortController
    می‌سازد) — این تابع فقط نتیجه‌اش را به یکی از چهار برچسبِ بالا می‌بندد:
      - هر Response (با هر status) یعنی درخواست واقعاً رفت‌وبرگشت کرد → "ok"
@@ -576,13 +586,26 @@ function solTokenCap(maxTokens) {
    یعنی شکستِ کل گذر. */
 export async function runReportPass({
   kv, fetchPools, metaOf, verdictOf, now, sleep, maxTokens, poolEmptyOf, fetchPoolsSol, solMaxTokens,
-  probeFetch,
+  probeFetch, meter,
 }) {
   try {
     // 🔴 بدون انباری برای نوشتن، هیچ تماسِ بالادستی مجاز نیست — قبل از هر
     // چیز دیگری، حتی قبل از fetchPools.
     if (!kv) return { checked: 0, added: 0 };
 
+    /* meter یک تزریقِ اختیاریِ محض است (هم‌رده‌ی out در cachedVerdict/
+       whyOut در fetchVerdict): غایب یا بدشکل یعنی سه تابعِ زیر کاملاً
+       بی‌اثرند، پس گذرِ بدونِ meter بایت‌به‌بایت همان چیزی می‌ماند که امروز
+       است — نه یک fetch/cache واقعی اینجا شمرده می‌شود (آن‌ها بیرون از این
+       تابعِ خالص، در worker/index.js، با جایگزینیِ موقتِ globalThis.fetch/
+       caches.default رخ می‌دهند)، فقط برچسبِ «الان کدام مرحله‌ایم» و
+       شروع/پایانِ شمارشِ هر توکن. */
+    const m = meter && typeof meter === "object" ? meter : null;
+    function mStage(name) { if (m && typeof m.stage === "function") m.stage(name); }
+    function mTokenStart() { if (m && typeof m.tokenStart === "function") m.tokenStart(); }
+    function mTokenEnd() { if (m && typeof m.tokenEnd === "function") m.tokenEnd(); }
+
+    mStage("pools");
     let rawRows;
     try {
       rawRows = await fetchPools();
@@ -617,6 +640,8 @@ export async function runReportPass({
       // تماسِ هم‌زمان قرار نگیرد.
       await sleep(REPORT_PACE_MS);
       checked++;
+      mStage("base-token");
+      mTokenStart();
 
       // metaOf باید { meta, why } بدهد — شکلِ دیگر (پرتاب، غیرِشیء، بدونِ
       // کلیدِ meta) یعنی metaOf خودش قابلِ‌اعتماد نبود: meta می‌شود null و
@@ -671,6 +696,7 @@ export async function runReportPass({
         ret,
       });
       if (row) builtRows.push(row);
+      mTokenEnd();
     }
 
     /* پایِ سولانا — دقیقاً بعد از پایِ Base، همان پیس/همان sleep/همان
@@ -680,6 +706,7 @@ export async function runReportPass({
        فقط این یک پا را خالی می‌گذارد. */
     const builtRowsSol = [];
     if (typeof fetchPoolsSol === "function") {
+      mStage("sol-pools");
       let rawRowsSol;
       try {
         rawRowsSol = await fetchPoolsSol();
@@ -701,6 +728,8 @@ export async function runReportPass({
         for (const t of tokensSol) {
           await sleep(REPORT_PACE_MS);
           checked++;
+          mStage("sol-token");
+          mTokenStart();
 
           // همان انضباطِ متاOf/verdictOf که پایِ Base بالاتر دارد — این دو
           // تابع خودشان زنجیره‌آگاه‌اند (از رویِ chainOf(addr))، پس همان
@@ -740,6 +769,7 @@ export async function runReportPass({
             ret,
           });
           if (row) builtRowsSol.push(row);
+          mTokenEnd();
         }
       }
     }
@@ -754,6 +784,7 @@ export async function runReportPass({
     // نمی‌شود، حتی وقتی همین گذر ردیفِ سولانایی هم اضافه کرده باشد.
     const newPairs = mergePairsRing(prevPairsArr, builtRows, REPORT_PAIRS_CAP);
 
+    mStage("kv-write");
     await safeKvPutJson(kv, reportKey(dateStr), newDoc);
     await safeKvPutJson(kv, PAIRS_KEY_BASE, newPairs);
 
@@ -771,6 +802,7 @@ export async function runReportPass({
     let followed = 0;
     if (typeof poolEmptyOf === "function") {
       try {
+        mStage("follow");
         const targets = pickFollowUpTargets(newDoc, nowMs, 12);
         const updates = [];
         for (const address of targets) {
@@ -788,6 +820,7 @@ export async function runReportPass({
         }
         if (updates.length > 0) {
           const followedDoc = applyFollowUps(newDoc, updates, generatedAt);
+          mStage("kv-write");
           await safeKvPutJson(kv, reportKey(dateStr), followedDoc);
           latestDoc = followedDoc;
           // شمارشِ واقعی: فقط ردیف‌هایی که واقعاً follow گرفتند، نه صرفاً
@@ -812,6 +845,7 @@ export async function runReportPass({
     let rechecked = 0;
     let recheckTried = 0;
     try {
+      mStage("recheck");
       const targets = pickRecheckTargets(latestDoc, nowMs, 4);
       const updates = [];
       for (const t of targets) {
@@ -844,6 +878,7 @@ export async function runReportPass({
       }
       if (updates.length > 0) {
         const rechDoc = applyRechecks(latestDoc, updates, generatedAt);
+        mStage("kv-write");
         await safeKvPutJson(kv, reportKey(dateStr), rechDoc);
         latestDoc = rechDoc;
         for (const u of updates) {
@@ -861,11 +896,18 @@ export async function runReportPass({
        یعنی این فیلد کلاً غایب می‌ماند، نه یک حدس. */
     let capProbe;
     if (typeof probeFetch === "function") {
+      mStage("probe");
       capProbe = await classifyCapProbe(probeFetch);
     }
 
     /* لاگِ گذر — تویِ try/catچِ خودش، هرگز نباید خودِ گذر را بشکند. فقط عدد و
-       رشته‌ی بسته‌ی capProbe؛ هیچ آدرس/symbol/why اینجا نمی‌نشیند. */
+       رشته‌ی بسته‌ی capProbe؛ هیچ آدرس/symbol/why اینجا نمی‌نشیند.
+       🔴 sub (وقتی meter تزریق شده) هم فقط عدد و نامِ hostname/مرحله است —
+       همان انضباط، تضمین‌شده توسطِ خودِ makeSubMeter در worker/index.js
+       (هرگز مسیر/کوئری، هرگز خودِ URL). snapshot() دقیقاً همین‌جا گرفته
+       می‌شود، پیش از نوشتنِ خودِ PASS_LOG_KEY — یعنی هزینه‌ی همین یک put
+       آخر در sub این گذر نمی‌نشیند (اندازه‌گیریِ خودِ اندازه‌گیری ممکن
+       نیست)، محدودیتی عمدی و بی‌ضرر. */
     try {
       const passRecord = {
         at: generatedAt, checked, added: builtRows.length + builtRowsSol.length,
@@ -873,8 +915,10 @@ export async function runReportPass({
         base: passChainStats(builtRows), sol: passChainStats(builtRowsSol),
       };
       if (capProbe !== undefined) passRecord.capProbe = capProbe;
+      if (m && typeof m.snapshot === "function") passRecord.sub = m.snapshot();
       const prevLog = await readPassLog(kv);
       const nextLog = [passRecord, ...prevLog].slice(0, REPORT_PASS_LOG_CAP);
+      mStage("kv-write");
       await safeKvPutJson(kv, PASS_LOG_KEY, nextLog);
     } catch (e) {
       /* اندازه‌گیری هرگز نباید خودِ گذر را بشکند */
@@ -885,6 +929,9 @@ export async function runReportPass({
       rechecked, recheckTried,
     };
     if (capProbe !== undefined) result.capProbe = capProbe;
+    // 🔴 غایب‌بودنِ meter یعنی این کلید کلاً روی result هم نمی‌نشیند — نتیجه‌ی
+    // یک گذرِ بدونِ meter بایت‌به‌بایت همان چیزی می‌ماند که امروز برمی‌گشت.
+    if (m && typeof m.snapshot === "function") result.sub = m.snapshot();
     return result;
   } catch (e) {
     return { checked: 0, added: 0 }; // این تابع هرگز نباید پرتاب کند

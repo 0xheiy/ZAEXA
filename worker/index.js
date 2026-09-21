@@ -35,6 +35,7 @@ import { EVM_ADDR, SOL_MINT, chainOf, gtNetworkOf } from "./chains.js";
 import {
   REPORT_DATE_RE, PAIRS_KEY_BASE, reportKey, utcDateOf, emptyReportDoc, runReportPass,
   reportText, REPORT_TEXT_FIRST_DATE, followForRow, recheckForRow, causeForRow, readPassLog,
+  REPORT_METER_STAGES,
 } from "./report.js";
 import {
   fetchVerdictSol, VD_SOL_RPCS, VD_SOL_JUP_BASE, VD_SOL_PAYER,
@@ -1728,12 +1729,154 @@ async function pairsRoute(request, url, env) {
 /* بدنه‌ی scheduled — تابعِ جداگانه تا worker/test.mjs بتواند بدونِ ساختنِ
    یک event واقعیِ کرون آن را صدا بزند، همان الگویی که sitemapResponse و
    diagVerdict برای تست‌پذیریِ handlerهای دیگر دنبال می‌کنند. */
+/* =====================================================================
+   متر ساب‌ریکوئست — فقط اندازه‌گیری، هیچ رفتاری از گذرِ گزارش عوض نمی‌شود
+   =====================================================================
+   اندازه‌گیریِ زنده‌ی ۱۸:۱۷ UTC نشان داد گذرِ ساعتی به سقفِ ساب‌ریکوئستِ
+   Worker می‌خورد (capProbe:"cap")، ولی معلوم نبود *کدام* مرحله هزینه‌بر
+   است. این متر دقیقاً همان چیزی را می‌شمارد که سقف را می‌سوزاند: هر
+   fetch واقعی (زیرِ hostname مقصد، هرگز مسیر/کوئری — یک راز می‌تواند در
+   مسیر بنشیند، مثلِ URLِ RPCِ سولانا)، هر عملیاتِ Cache API، و هر عملیاتِ
+   KV — همه زیرِ برچسبِ «الان کدام مرحله‌ایم».
+
+   🔴 شمارش دقیقِ همان چیزی نیست که واقعاً روی زیرساختِ کلادفلر اتفاق
+   می‌افتد — این یک بالاسری امنِ عمدی است (پایین‌تر توضیح داده شده)، نه
+   یک ادعای دقیقِ صددرصد. */
+function makeSubMeter() {
+  // fetchِ واقعی همین الان (پیش از اینکه کالر globalThis.fetch را با
+  // meter.fetch عوض کند) — وگرنه meter.fetch خودش را صدا می‌زد و هرگز به
+  // شبکه نمی‌رسید.
+  const realFetch = globalThis.fetch;
+
+  let stage_ = "?";
+  let total = 0;
+  const byStage = {};
+  const byHost = {};
+  let cacheN = 0;
+  let kvN = 0;
+  const baseTokens = [];
+  const solTokens = [];
+  let tokenBase = null;
+
+  function bumpStage() {
+    total++;
+    byStage[stage_] = (byStage[stage_] || 0) + 1;
+  }
+
+  return {
+    // ⚠️ همیشه fetchِ واقعی را صدا می‌زند، هرگز globalThis.fetch را (که
+    // ممکن است خودِ همین تابع باشد) — شمارش هیچ‌وقت نباید حلقه بزند.
+    async fetch(input, init) {
+      let host = "?";
+      try {
+        const u = typeof input === "string" ? input : (input && input.url);
+        host = new URL(u).hostname;
+      } catch (e) {
+        host = "?"; // پارسِ URL شکست خورد → فقط زیرِ «؟»، هرگز چیزِ خامِ ورودی
+      }
+      bumpStage();
+      byHost[host] = (byHost[host] || 0) + 1;
+      return realFetch(input, init);
+    },
+    stage(name) {
+      // 🔴 فقط از REPORT_METER_STAGES — یک نامِ ناشناخته گذرِ آینده را
+      // نمی‌شکند، فقط زیرِ همان نامِ دست‌ساز می‌نشیند (هنوز یک عدد است، نه
+      // یک رشته‌ی دلخواهِ کاربر، پس ریسکِ نشتِ داده‌ای ندارد).
+      stage_ = typeof name === "string" && name ? name : "?";
+    },
+    tokenStart() { tokenBase = total; },
+    tokenEnd() {
+      const delta = total - (tokenBase === null ? total : tokenBase);
+      tokenBase = null;
+      if (stage_ === "base-token") baseTokens.push(delta);
+      else if (stage_ === "sol-token") solTokens.push(delta);
+    },
+    // Cache API — caches.default.match/put را wrap می‌کند (پایین‌تر، در
+    // scheduledReportPass)؛ تحتِ یک سطلِ ثابتِ «cache»، نه hostname واقعی.
+    cacheOp() {
+      bumpStage();
+      cacheN++;
+    },
+    // KV — همان الگو، تحتِ یک سطلِ ثابتِ «kv». نامِ دومِ متفاوت (نه
+    // cacheOp دوباره) تا شمارشِ cache/kv هرگز با هم قاطی نشود.
+    kvOp() {
+      bumpStage();
+      kvN++;
+    },
+    // رونوشتِ فقط-خواندنی برای نشستن در passRecord — فقط عدد/hostname/نامِ
+    // مرحله، هرگز مسیر/کوئری/کلید.
+    snapshot() {
+      return {
+        total,
+        byStage: { ...byStage },
+        byHost: { ...byHost },
+        cache: cacheN,
+        kv: kvN,
+        baseTokens: baseTokens.slice(),
+        solTokens: solTokens.slice(),
+      };
+    },
+  };
+}
+
+/* پوششِ نازکِ get/put/list رویِ env.ZX_KV — فقط شمارش، هرگز نتیجه را عوض
+   نمی‌کند (همان مقدارِ برگشتی/پرتابِ خودِ kv بدونِ دست‌کاری رد می‌شود). */
+function meterKv(kv, meter) {
+  if (!kv || !meter) return kv;
+  return {
+    get: (...args) => { meter.kvOp(); return kv.get(...args); },
+    put: (...args) => { meter.kvOp(); return kv.put(...args); },
+    list: (...args) => { meter.kvOp(); return kv.list(...args); },
+  };
+}
+
 async function scheduledReportPass(env, ctx, opts) {
   try {
     // بدونِ KV، حتی یک تماسِ بالادست هم روا نیست — همان گاردِ اولِ
     // runReportPass، اینجا هم پیش از ساختنِ fetchPools تکرار می‌شود.
     if (!env || !env.ZX_KV) return { checked: 0, added: 0 };
 
+    /* متر ساب‌ریکوئست — برای *هر* اجرا (چه کرونِ ساعتی چه /report/run)
+       ساخته می‌شود. globalThis.fetch و caches.default.match/put فقط برای
+       طولِ همین گذر جایگزین می‌شوند و در finally همیشه برمی‌گردند — حتی
+       وقتی یک مرحله در وسطِ راه throw کند. این جایگزینی خودِ رفتارِ هیچ
+       fetchی را عوض نمی‌کند (meter.fetch همان fetchِ واقعی را صدا می‌زند)،
+       فقط رهگیری‌اش می‌کند.
+       ⚠️ این اجرای زمان‌بندی‌شده «درخواستِ خودش» است؛ درخواست‌های هم‌زمانِ
+       دیگر در همین ایزوله (اگر باشند) هم می‌توانند از همین globalThis.fetch
+       جایگزین‌شده رد شوند و زیرِ همین شمارش بنشینند — پس عددها یک بالاسری
+       هستند، نه یک اندازه‌گیریِ دقیقِ ایزوله‌شده. برای بودجه‌بندی این طرفِ
+       امن است: کم‌شماری خطرناک‌تر از بیش‌شماری بود. */
+    const meter = makeSubMeter();
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = meter.fetch;
+    const cacheStore = (typeof caches !== "undefined" && caches.default) || null;
+    const originalCacheMatch = cacheStore ? cacheStore.match : null;
+    const originalCachePut = cacheStore ? cacheStore.put : null;
+    if (cacheStore) {
+      cacheStore.match = async (...args) => { meter.cacheOp(); return originalCacheMatch.apply(cacheStore, args); };
+      cacheStore.put = async (...args) => { meter.cacheOp(); return originalCachePut.apply(cacheStore, args); };
+    }
+
+    try {
+      return await scheduledReportPassInner(env, ctx, opts, meter);
+    } finally {
+      globalThis.fetch = originalFetch;
+      if (cacheStore) {
+        cacheStore.match = originalCacheMatch;
+        cacheStore.put = originalCachePut;
+      }
+    }
+  } catch (e) {
+    return { checked: 0, added: 0 }; // یک اجرای زمان‌بندی‌شده هرگز نباید پرتاب کند
+  }
+}
+
+// بدنه‌ی واقعیِ گذر — جدا از scheduledReportPass تا سیم‌کشیِ متر (بالا) و
+// خودِ منطقِ گذر (اینجا) قاطی نشوند؛ همان تقسیمِ مسئولیتی که خودِ
+// runReportPass با kv/fetchPools/... تزریقی رعایت می‌کند.
+async function scheduledReportPassInner(env, ctx, opts, meter) {
+  try {
     const fetchPools = async () => {
       try {
         const key = (env && typeof env.CG_KEY === "string" && env.CG_KEY) || "";
@@ -1777,7 +1920,8 @@ async function scheduledReportPass(env, ctx, opts) {
     };
 
     return await runReportPass({
-      kv: env.ZX_KV,
+      kv: meterKv(env.ZX_KV, meter),
+      meter,
       fetchPools,
       metaOf: (addr) => ogFetchMetaDetail(addr, env),
       /* 🔴 ۱۹ شهریور: تا امروز کلیدِ واقعیِ v4 با ctx.waitUntil *بعد* از حکم
@@ -1858,6 +2002,7 @@ async function reportRunRoute(request, env, ctx) {
     added: r.added,
     followed: r.followed,
     rechecked: r.rechecked,
+    sub: r.sub,
     recheckTried: r.recheckTried,
     capProbe: r.capProbe,
     ms: Date.now() - t0,
@@ -1999,5 +2144,6 @@ export { VD_ADDR_RE };
 export { TOKEN_PAGE, solFetchVerdict };
 export { SITEMAP_TOKEN_PAGES, SITEMAP_TOKEN_CAP, sitemapResponse, buildSitemapTokens };
 export { reportRoute, pairsRoute, scheduledReportPass, reportRunRoute, REPORT_RUN_MAX_TOKENS };
+export { makeSubMeter, meterKv };
 export { readV4Keys, readV4Entry, rpcCallBase, fetchV4Pools, storeV4Result, v4StoreTtl, runV4Index };
 export { V4_LOG_TIMEOUT_MS };

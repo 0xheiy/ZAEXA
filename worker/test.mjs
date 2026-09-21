@@ -23,11 +23,13 @@ import {
   retForRow, REPORT_SOL_MAX_TOKENS,
   recheckForRow, REPORT_RECHECKS, applyRechecks, pickRecheckTargets,
   PASS_LOG_KEY, REPORT_PASS_LOG_CAP, readPassLog, REPORT_CAP_PROBE, classifyCapProbe,
+  REPORT_METER_STAGES,
 } from "./report.js";
 import * as v4 from "./v4index.js";
 import {
   readV4Keys, readV4Entry, rpcCallBase, fetchV4Pools, storeV4Result, v4StoreTtl, runV4Index,
   v4PoolsEmpty, V4_STATE_VIEW, V4_GET_LIQUIDITY_SEL, pairsRowsFor,
+  makeSubMeter, meterKv, scheduledReportPass,
 } from "./index.js";
 
 let fails = 0;
@@ -9908,6 +9910,350 @@ function stripAllowedWording(t) {
 
   console.log("[vd passes] GET /vd/passes ok — {passes:[]} without ZX_KV, the stored report:passlog ring "
     + "returned verbatim when present, no-store, 405 for non-GET, and shares the \"vd\" rate-limit bucket");
+}
+
+/* ---- ۴۶. متر ساب‌ریکوئست — [pass meter] ----
+   اندازه‌گیریِ زنده‌ی ۱۸:۱۷ UTC به سقفِ ساب‌ریکوئست خورد (capProbe:"cap")؛
+   این بخش خودِ makeSubMeter/meterKv (worker/index.js) را مستقیم می‌سنجد و
+   بعد سیم‌کشیِ کاملش داخلِ runReportPass (worker/report.js) را — همه‌چیز
+   فقط اندازه‌گیری است، هیچ رفتاری از خودِ گذر عوض نمی‌شود. */
+{
+  // الف) fetch — شمارش زیرِ مرحله‌ی جاری و hostname (نه مسیر/کوئری)
+  const savedGF1 = globalThis.fetch;
+  globalThis.fetch = async (u) => new Response(String(u), { status: 200 });
+  const meterA = makeSubMeter();
+  globalThis.fetch = savedGF1;
+
+  meterA.stage("pools");
+  await meterA.fetch("https://host-a.example.com/pools?x=1");
+  await meterA.fetch("https://host-a.example.com/pools/2");
+  meterA.stage("base-token");
+  await meterA.fetch("https://host-b.example.com/meta/0xabc");
+  meterA.stage("probe");
+  await meterA.fetch("https://host-a.example.com/probe");
+
+  const snapA = meterA.snapshot();
+  ok(snapA.total === 4, "makeSubMeter: total must count every fetch exactly once, got " + snapA.total);
+  ok(JSON.stringify(snapA.byStage) === JSON.stringify({ pools: 2, "base-token": 1, probe: 1 }),
+     "makeSubMeter: byStage must attribute each fetch to the stage active at call time, got " +
+     JSON.stringify(snapA.byStage));
+  ok(JSON.stringify(snapA.byHost) === JSON.stringify({ "host-a.example.com": 3, "host-b.example.com": 1 }),
+     "makeSubMeter: byHost must key on hostname only (path/query dropped), got " + JSON.stringify(snapA.byHost));
+
+  // ب) URLِ ناپارس‌شدنی → hostname "?"
+  const savedGF2 = globalThis.fetch;
+  globalThis.fetch = async () => new Response("", { status: 200 });
+  const meterB = makeSubMeter();
+  globalThis.fetch = savedGF2;
+  meterB.stage("pools");
+  await meterB.fetch("not a url at all");
+  const snapB = meterB.snapshot();
+  ok(snapB.byHost["?"] === 1,
+     "makeSubMeter: an unparseable URL must be counted under host \"?\", got " + JSON.stringify(snapB.byHost));
+
+  // پ) یک URLِ حاملِ راز — فقط hostname می‌نشیند، هرگز مسیر/کوئری/کلید
+  const savedGF3 = globalThis.fetch;
+  globalThis.fetch = async () => new Response("", { status: 200 });
+  const meterC = makeSubMeter();
+  globalThis.fetch = savedGF3;
+  const secretUrl = "https://solana-mainnet.g.alchemy.com/v2/SECRETKEY123456789012345";
+  meterC.stage("sol-token");
+  await meterC.fetch(secretUrl);
+  const snapC = meterC.snapshot();
+  const rawC = JSON.stringify(snapC);
+  ok(snapC.byHost["solana-mainnet.g.alchemy.com"] === 1,
+     "makeSubMeter: a secret-bearing URL must still be recorded under its hostname, got " +
+     JSON.stringify(snapC.byHost));
+  ok(!rawC.includes("/v2/") && !rawC.toLowerCase().includes("secretkey"),
+     "makeSubMeter: the path/key of a secret-bearing URL must never appear in the snapshot, got " + rawC);
+
+  // ت) tokenStart/tokenEnd — دلتاهای درست، به‌ترتیب؛ cacheOp/kvOp هرگز در byHost نمی‌نشینند
+  const savedGF4 = globalThis.fetch;
+  globalThis.fetch = async () => new Response("", { status: 200 });
+  const meterD = makeSubMeter();
+  globalThis.fetch = savedGF4;
+
+  meterD.stage("base-token");
+  meterD.tokenStart();
+  await meterD.fetch("https://host-d.example.com/a");
+  meterD.cacheOp();
+  meterD.tokenEnd(); // دلتا: ۲
+
+  meterD.stage("base-token");
+  meterD.tokenStart();
+  await meterD.fetch("https://host-d.example.com/b");
+  meterD.tokenEnd(); // دلتا: ۱
+
+  meterD.stage("sol-token");
+  meterD.tokenStart();
+  await meterD.fetch("https://host-d.example.com/c");
+  await meterD.fetch("https://host-d.example.com/d");
+  meterD.kvOp();
+  meterD.tokenEnd(); // دلتا: ۳
+
+  meterD.stage("pools"); // بیرونِ هر tokenStart/tokenEnd — نباید در هیچ آرایه‌ای بنشیند
+  await meterD.fetch("https://host-d.example.com/e");
+
+  const snapD = meterD.snapshot();
+  ok(JSON.stringify(snapD.baseTokens) === JSON.stringify([2, 1]),
+     "makeSubMeter: baseTokens must record each base-token window's delta, in order, got " +
+     JSON.stringify(snapD.baseTokens));
+  ok(JSON.stringify(snapD.solTokens) === JSON.stringify([3]),
+     "makeSubMeter: solTokens must record each sol-token window's delta, got " + JSON.stringify(snapD.solTokens));
+  ok(snapD.cache === 1, "makeSubMeter: cacheOp must be counted under cache, got " + snapD.cache);
+  ok(snapD.kv === 1, "makeSubMeter: kvOp must be counted under kv, got " + snapD.kv);
+  ok(!Object.prototype.hasOwnProperty.call(snapD.byHost, "cache") &&
+     !Object.prototype.hasOwnProperty.call(snapD.byHost, "kv"),
+     "makeSubMeter: cache/kv ops must never leak into byHost, got " + JSON.stringify(snapD.byHost));
+  ok(snapD.total === 7, "makeSubMeter: total must equal fetch+cache+kv operations combined, got " + snapD.total);
+
+  // ث) meterKv — فقط شمارش، هرگز مقدارِ برگشتیِ خودِ kv را عوض نمی‌کند
+  const meterE = makeSubMeter();
+  const storeE = new Map([["k1", "v1"]]);
+  const fakeKvE = {
+    get: async (k) => (storeE.has(k) ? storeE.get(k) : null),
+    put: async (k, v) => { storeE.set(k, v); },
+    list: async () => ({ keys: [{ name: "k1" }], list_complete: true }),
+  };
+  const wrappedE = meterKv(fakeKvE, meterE);
+  meterE.stage("kv-write");
+  const got1 = await wrappedE.get("k1");
+  const got2 = await wrappedE.get("missing");
+  await wrappedE.put("k2", "v2");
+  const gotList = await wrappedE.list({ prefix: "k" });
+
+  ok(got1 === "v1", "meterKv: get must return the exact same value as the underlying kv, got " + JSON.stringify(got1));
+  ok(got2 === null, "meterKv: a miss must still come back as null through the wrapper, got " + JSON.stringify(got2));
+  ok(storeE.get("k2") === "v2",
+     "meterKv: put must still reach the underlying kv unmodified, got " + JSON.stringify(storeE.get("k2")));
+  ok(gotList && Array.isArray(gotList.keys) && gotList.keys.length === 1,
+     "meterKv: list must return the exact same value as the underlying kv, got " + JSON.stringify(gotList));
+  const snapE = meterE.snapshot();
+  ok(snapE.kv === 4, "meterKv: get/put/list (2 gets + 1 put + 1 list) must all be counted as kv, got " + snapE.kv);
+  ok(snapE.byStage["kv-write"] === 4,
+     "meterKv: kv ops must also land under the current stage, got " + JSON.stringify(snapE.byStage));
+
+  console.log("[pass meter unit] makeSubMeter/meterKv ok — fetch counts under the current stage and under "
+    + "the target hostname only, never the path/query; an unparseable URL falls to host \"?\"; a secret-bearing "
+    + "URL (a Solana RPC-shaped path+key) is recorded only as its hostname; tokenStart/tokenEnd record the "
+    + "exact per-window delta into baseTokens/solTokens, in order; cacheOp/kvOp count into their own dedicated "
+    + "buckets and never leak into byHost; and meterKv counts get/put/list without ever changing what the "
+    + "underlying KV binding returns");
+}
+
+/* ---- ۴۷. runReportPass + meter — سیم‌کشیِ مرحله‌به‌مرحله — [pass meter wiring] ----
+   یک گذرِ کامل با fixtureهای تزریقی که هرکدام خودشان meter.fetch را صدا
+   می‌زنند — دقیقاً همان چیزی که worker/index.js با جایگزینیِ موقتِ
+   globalThis.fetch باعثش می‌شود، ولی اینجا صریح و قابل‌ردیابی. */
+{
+  function makeKvM() {
+    const store = new Map();
+    return { store, get: async (k) => (store.has(k) ? store.get(k) : null),
+      put: async (k, v) => { store.set(k, v); } };
+  }
+  function mkAddrM(n) { return "0x" + n.toString(16).padStart(40, "0"); }
+  function poolRowM(addr) {
+    return {
+      attributes: { reserve_in_usd: "9000", base_token_price_usd: "1",
+        pool_created_at: "2026-09-21T10:00:00Z", volume_usd: { h24: "0" }, fdv_usd: "0" },
+      relationships: { base_token: { data: { id: "base_" + addr } }, dex: { data: { id: "uniswap-v3-base" } } },
+    };
+  }
+  const B58_M = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
+  function mkSolAddrM(n) {
+    let s = "";
+    const x = n + 5000;
+    for (let i = 0; i < 44; i++) s += B58_M[(x + i * 7) % B58_M.length];
+    return s;
+  }
+  function solPoolRowM(addr) {
+    return {
+      attributes: { reserve_in_usd: "9000", base_token_price_usd: "1",
+        pool_created_at: "2026-09-21T09:00:00Z", volume_usd: { h24: "10" }, fdv_usd: "100" },
+      relationships: { base_token: { data: { id: "solana_" + addr } }, dex: { data: { id: "pumpswap" } } },
+    };
+  }
+  const NOWM = Date.parse("2026-09-21T12:00:00.000Z");
+  const oldIsoM = new Date(NOWM - 90 * 60000).toISOString();
+  const seedDateM = utcDateOf(NOWM);
+  const seedFollowAddr = mkAddrM(900);
+  const seedRecheckAddr = mkAddrM(901);
+
+  // دو ردیفِ «کاشته‌شده» از یک گذرِ فرضیِ قبلی — یکی کاندیدِ فالوآپ، یکی
+  // کاندیدِ رِی‌چک؛ هر دو ۹۰ دقیقه قدیمی‌اند (بازه‌ی ۵۵ تا ۱۸۰) تا حتماً همین
+  // گذر هر دو مرحله را واقعاً اجرا کند، نه فقط رد شود.
+  const seedDoc = {
+    date: seedDateM, generatedAt: oldIsoM, chains: ["base"], checked: 2,
+    rows: [
+      reportRow({ chain: "base", address: seedFollowAddr, symbol: "SF", name: "SF", verdict: "sell",
+        checkedAt: oldIsoM, poolCreatedAt: oldIsoM, priceUsd: 1, reserveUsd: 9000, vol24hUsd: 0, fdvUsd: 0,
+        dex: "uniswap-v3-base", why: null }),
+      reportRow({ chain: "base", address: seedRecheckAddr, symbol: "SR", name: "SR", verdict: null,
+        checkedAt: oldIsoM, poolCreatedAt: oldIsoM, priceUsd: 1, reserveUsd: 9000, vol24hUsd: 0, fdvUsd: 0,
+        dex: "uniswap-v3-base", why: "no-quote" }),
+    ],
+  };
+
+  function freshMeter() {
+    const saved = globalThis.fetch;
+    globalThis.fetch = async () => new Response("ok", { status: 200 });
+    const m = makeSubMeter();
+    globalThis.fetch = saved;
+    return m;
+  }
+
+  // fetcher: یا خودِ meter (اجرای متردار) یا یک شیءِ ساختگیِ هم‌شکل (اجرای
+  // بدونِ meter) — تا دو اجرا دقیقاً همان fetchهای واقعی را انجام دهند.
+  function makeFixture(fetcher) {
+    return {
+      fetchPools: async () => {
+        await fetcher.fetch("https://pools.example.com/networks/base/new_pools");
+        return [poolRowM(mkAddrM(1)), poolRowM(mkAddrM(2))];
+      },
+      metaOf: async (addr) => {
+        await fetcher.fetch("https://meta.example.com/networks/base/tokens/" + addr);
+        return { meta: { symbol: "T", name: "T" }, why: null };
+      },
+      verdictOf: async (addr) => {
+        await fetcher.fetch("https://verdict.example.com/rpc/" + addr + "?apikey=shouldnotleak12345");
+        return { v: "sell", why: null };
+      },
+      fetchPoolsSol: async () => {
+        await fetcher.fetch("https://solpools.example.com/networks/solana/new_pools");
+        return [solPoolRowM(mkSolAddrM(1))];
+      },
+      poolEmptyOf: async (addr) => {
+        await fetcher.fetch("https://poolempty.example.com/check/" + addr);
+        return true;
+      },
+      probeFetch: async () => {
+        await fetcher.fetch("https://probe.example.com/networks?page=1");
+        return new Response("", { status: 200 });
+      },
+      now: () => NOWM,
+      sleep: async () => {},
+    };
+  }
+
+  async function runOnce(withMeter) {
+    const kv = makeKvM();
+    await kv.put(reportKey(seedDateM), JSON.stringify(seedDoc));
+    const fetcher = withMeter ? freshMeter() : { fetch: async () => new Response("ok", { status: 200 }) };
+    const fx = makeFixture(fetcher);
+    const result = await runReportPass({
+      kv: withMeter ? meterKv(kv, fetcher) : kv,
+      meter: withMeter ? fetcher : undefined,
+      fetchPools: fx.fetchPools, metaOf: fx.metaOf, verdictOf: fx.verdictOf,
+      now: fx.now, sleep: fx.sleep, poolEmptyOf: fx.poolEmptyOf,
+      fetchPoolsSol: fx.fetchPoolsSol, probeFetch: fx.probeFetch,
+    });
+    const storedRaw = await kv.get(PASS_LOG_KEY);
+    const stored = JSON.parse(storedRaw)[0];
+    return { result, stored, storedRaw };
+  }
+
+  const withM = await runOnce(true);
+  const noM = await runOnce(false);
+
+  // الف) غیاب meter → بدونِ کلیدِ sub، در نتیجه و در سندِ ذخیره‌شده هر دو
+  ok(!Object.prototype.hasOwnProperty.call(noM.result, "sub"),
+     "runReportPass without an injected meter must never add a sub key to its result, got " +
+     JSON.stringify(noM.result));
+  ok(!Object.prototype.hasOwnProperty.call(noM.stored, "sub"),
+     "runReportPass without an injected meter must never add a sub key to the stored pass record, got " +
+     JSON.stringify(noM.stored));
+
+  // ب) غیاب meter → بایت‌به‌بایت همان چیزی که امروز برمی‌گشت (فقط sub فرق می‌کند)
+  const { sub: _s1, ...resultWithoutSub } = withM.result;
+  ok(JSON.stringify(resultWithoutSub) === JSON.stringify(noM.result),
+     "apart from sub, an injected meter must never change runReportPass's returned result, got with=" +
+     JSON.stringify(resultWithoutSub) + " without=" + JSON.stringify(noM.result));
+  const { sub: _s2, ...storedWithoutSub } = withM.stored;
+  ok(JSON.stringify(storedWithoutSub) === JSON.stringify(noM.stored),
+     "apart from sub, an injected meter must never change the stored pass record, got with=" +
+     JSON.stringify(storedWithoutSub) + " without=" + JSON.stringify(noM.stored));
+
+  // پ) sub — دقیقاً هشت مرحله، هرکدام با شمارِ دقیق (حاصلِ همین fixture،
+  // دست‌محاسبه‌شده: مرحله‌به‌مرحله زیرِ ویرایشِ report.js دنبال شده)
+  const sub = withM.stored.sub;
+  ok(sub && typeof sub === "object",
+     "the stored pass record must carry a sub object when a meter is injected, got " + JSON.stringify(withM.stored));
+  ok(sub.total === 18,
+     "sub.total must equal the exact number of metered ops up to where the pass record is snapshotted, got " +
+     sub.total);
+  ok(JSON.stringify(sub.byStage) === JSON.stringify({
+       pools: 2, "base-token": 4, "sol-pools": 1, "sol-token": 3, "kv-write": 4, follow: 1, recheck: 2, probe: 1,
+     }), "sub.byStage must attribute every metered op to the exact stage active at call time, got " +
+     JSON.stringify(sub.byStage));
+  ok(JSON.stringify(sub.byHost) === JSON.stringify({
+       "pools.example.com": 1, "meta.example.com": 4, "verdict.example.com": 4,
+       "solpools.example.com": 1, "poolempty.example.com": 1, "probe.example.com": 1,
+     }), "sub.byHost must key on hostname only, got " + JSON.stringify(sub.byHost));
+  ok(JSON.stringify(sub.baseTokens) === JSON.stringify([2, 2]),
+     "sub.baseTokens must carry one entry per Base token in check order, got " + JSON.stringify(sub.baseTokens));
+  ok(JSON.stringify(sub.solTokens) === JSON.stringify([2]),
+     "sub.solTokens must carry one entry per Solana token in check order, got " + JSON.stringify(sub.solTokens));
+  ok(JSON.stringify(Object.keys(sub.byStage).sort()) === JSON.stringify([...REPORT_METER_STAGES].sort()),
+     "this fixture must exercise every stage in the closed REPORT_METER_STAGES vocabulary at least once, got " +
+     JSON.stringify(Object.keys(sub.byStage).sort()));
+
+  // ت) هیچ مسیر/کوئری/رشته‌ی شبیه‌کلید هرگز در سندِ ذخیره‌شده نمی‌نشیند —
+  // فقط hostname/نامِ مرحله/عدد. قاعده‌ی «رشته‌ی شبیه‌کلید»: ۲۰+ نویسه‌ی
+  // پیوسته‌ی الفبایی‌عددی بدونِ نقطه‌ای در میانش — hostnameهای این فیکسچر
+  // (که خودشان باید بمانند) قبل از سنجش حذف می‌شوند.
+  ok(!/\/v2\//.test(withM.storedRaw),
+     "the stored pass record must never carry a \"/v2/\" path segment, got " + withM.storedRaw);
+  ok(!/apikey=/.test(withM.storedRaw) && !/shouldnotleak/i.test(withM.storedRaw),
+     "the stored pass record must never carry a query string, got " + withM.storedRaw);
+  const scrubbed = withM.storedRaw
+    .replace(/[a-z0-9-]+\.example\.com/gi, "")
+    .replace(/0x[0-9a-f]{40}/gi, "");
+  ok(!/[A-Za-z0-9]{20,}/.test(scrubbed),
+     "the stored pass record must never carry a key-looking (>=20 alnum, no dots) string outside of a known " +
+     "hostname or address, got " + withM.storedRaw);
+  for (const host of Object.keys(sub.byHost)) {
+    ok(withM.storedRaw.includes(host),
+       "each real hostname must still appear plainly in the stored record (that is the point), got missing " +
+       host);
+  }
+
+  console.log("[pass meter wiring] runReportPass+meter ok — a full pass (Base pool+token, follow, recheck, "
+    + "Solana pool+token, probe, kv-write) attributes every metered op to the exact stage active at call time "
+    + "and to its exact hostname, with baseTokens/solTokens carrying the exact per-token delta in check order; "
+    + "every stage in the closed REPORT_METER_STAGES vocabulary is exercised; no path, query, \"/v2/\" segment "
+    + "or key-looking string ever reaches the stored report:passlog record, only hostnames/stage names/numbers "
+    + "do; and omitting the meter leaves both the returned result and the stored record byte-for-byte identical "
+    + "to the metered run, minus the sub key itself");
+}
+
+/* ---- ۴۸. globalThis.fetch همیشه در finally برمی‌گردد — [pass meter restore] ---- */
+{
+  const kvSchedOk = { get: async () => null, put: async () => {} };
+  const okFetch = async (url) => {
+    const u = String(url);
+    if (u.includes("/new_pools")) return json({ data: [] });
+    if (u.includes("/networks?page=1")) return new Response("", { status: 200 });
+    return new Response("{}", { status: 200 });
+  };
+  globalThis.fetch = okFetch;
+  await scheduledReportPass({ ZX_KV: kvSchedOk }, {});
+  ok(globalThis.fetch === okFetch,
+     "scheduledReportPass must restore globalThis.fetch to its pre-call value after a normal pass, got a " +
+     "different function");
+
+  const kvSchedThrow = { get: async () => null, put: async () => {} };
+  const throwFetch = async () => { throw new Error("network exploded mid-stage"); };
+  globalThis.fetch = throwFetch;
+  await scheduledReportPass({ ZX_KV: kvSchedThrow }, {});
+  ok(globalThis.fetch === throwFetch,
+     "scheduledReportPass must restore globalThis.fetch to its pre-call value even when every stage's fetch " +
+     "throws, got a different function");
+
+  globalThis.fetch = trackingFetch; // برگرداندنِ حالتِ سراسریِ فایل تست
+
+  console.log("[pass meter restore] scheduledReportPass ok — globalThis.fetch is swapped for meter.fetch only "
+    + "for the duration of the pass and is always put back in a finally, whether the pass completes normally "
+    + "or every injected fetch throws mid-stage");
 }
 
 console.log(fails === 0
