@@ -31,6 +31,9 @@ export const CHECK_KIND_BY_CHAIN = Object.freeze({ base: "sell-quote", solana: "
 
 export const REPORT_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 export const PAIRS_KEY_BASE = "pairs:base:latest";
+// حلقه‌ی لاگِ گذر — فقط اندازه‌گیری (کجا گذر ایستاد)، هیچ آدرس/symbol/why.
+export const PASS_LOG_KEY = "report:passlog";
+export const REPORT_PASS_LOG_CAP = 48;
 
 export function reportKey(dateStr) {
   return "report:" + dateStr;
@@ -498,6 +501,56 @@ async function safeKvPutJson(kv, key, value) {
   }
 }
 
+// خواندنِ حلقه‌ی لاگِ گذر — کالرِ /vd/passes همین را صدا می‌زند، نه kv.get
+// مستقیم، تا شکلِ «آرایه یا []» یک‌جا تضمین شود.
+export async function readPassLog(kv) {
+  const arr = await safeKvGetJson(kv, PASS_LOG_KEY);
+  return Array.isArray(arr) ? arr : [];
+}
+
+/* واژه‌نامه‌ی بسته‌ی پروبِ سقفِ ساب‌ریکوئست — فقط برای اندازه‌گیریِ اینکه
+   گذرِ ساعتی به سقفِ ساب‌ریکوئستِ Worker می‌خورد یا نه، هیچ رفتاری از خودِ
+   گذر را عوض نمی‌کند. */
+export const REPORT_CAP_PROBE = Object.freeze(["ok", "cap", "timeout", "threw"]);
+
+/* probeFetch یک تزریق است (کالر در worker/index.js یک fetch با HEAD/AbortController
+   می‌سازد) — این تابع فقط نتیجه‌اش را به یکی از چهار برچسبِ بالا می‌بندد:
+     - هر Response (با هر status) یعنی درخواست واقعاً رفت‌وبرگشت کرد → "ok"
+     - AbortError یعنی به مهلتِ ۱۵۰۰ میلی‌ثانیه‌ای خورد، نه به سقفِ پلتفرم → "timeout"
+     - پیامی که با /too many subrequests/i جور دربیاید → "cap"؛ 🔴 این یک کلاس
+       تنها از رویِ متنِ پیام سنجیده می‌شود چون خودِ پلتفرم برایش هیچ کدِ
+       جداگانه‌ای نمی‌دهد — کنترلِ مثبتِ زیرِ تست‌ها (یک ۴۲۹ی واقعی → "ok"،
+       یک AbortError واقعی → "timeout") همان چیزی است که این کلاس را
+       قابل‌اعتماد می‌کند، نه حدس.
+     - هر چیزِ دیگر (شکلِ غیرِمنتظره، خطای دیگر) → "threw"
+   هرگز پرتاب نمی‌کند. */
+export async function classifyCapProbe(probeFetch) {
+  try {
+    const res = await probeFetch();
+    return res instanceof Response ? "ok" : "threw";
+  } catch (e) {
+    if (e && e.name === "AbortError") return "timeout";
+    if (e && typeof e.message === "string" && /too many subrequests/i.test(e.message)) return "cap";
+    return "threw";
+  }
+}
+
+// n/nulls/firstNullIdx ردیف‌های یک زنجیره‌ی *همین گذر*، به همان ترتیبِ چکیده‌شدن
+// (builtRows/builtRowsSol خودشان همان ترتیب را دارند، چون هر توکن پشتِ سرِ هم
+// push می‌شود). فقط عدد؛ هیچ آدرس/symbol/why اینجا وارد نمی‌شود.
+function passChainStats(builtRowsChain) {
+  const n = builtRowsChain.length;
+  let nulls = 0;
+  let firstNullIdx = -1;
+  for (let i = 0; i < n; i++) {
+    if (builtRowsChain[i].v === null) {
+      nulls++;
+      if (firstNullIdx === -1) firstNullIdx = i;
+    }
+  }
+  return { n, nulls, firstNullIdx };
+}
+
 /* سقفِ توکن‌های یک گذر. اجرای دستی (سنجش) عددِ کوچک‌تری می‌دهد تا پاسخ در
    چند ثانیه برگردد، ولی هیچ کالری نمی‌تواند سقف را از REPORT_MAX_TOKENS_PER_RUN
    بالاتر ببرد — وگرنه همان اندپوینتِ سنجش راهی می‌شد برای سوزاندنِ سهمیه. */
@@ -523,6 +576,7 @@ function solTokenCap(maxTokens) {
    یعنی شکستِ کل گذر. */
 export async function runReportPass({
   kv, fetchPools, metaOf, verdictOf, now, sleep, maxTokens, poolEmptyOf, fetchPoolsSol, solMaxTokens,
+  probeFetch,
 }) {
   try {
     // 🔴 بدون انباری برای نوشتن، هیچ تماسِ بالادستی مجاز نیست — قبل از هر
@@ -801,10 +855,37 @@ export async function runReportPass({
       rechecked = 0;
     }
 
-    return {
+    /* پروبِ سقفِ ساب‌ریکوئست — دقیقاً همین‌جا، بعدِ گامِ رِی‌چک، تا اندازه‌گیری
+       واقعاً *انتهای* همان گذری باشد که می‌خواهیم درباره‌اش بدانیم. صرفاً
+       اندازه‌گیری است: هیچ رفتاری از بالاتر عوض نمی‌شود، و نبودِ probeFetch
+       یعنی این فیلد کلاً غایب می‌ماند، نه یک حدس. */
+    let capProbe;
+    if (typeof probeFetch === "function") {
+      capProbe = await classifyCapProbe(probeFetch);
+    }
+
+    /* لاگِ گذر — تویِ try/catچِ خودش، هرگز نباید خودِ گذر را بشکند. فقط عدد و
+       رشته‌ی بسته‌ی capProbe؛ هیچ آدرس/symbol/why اینجا نمی‌نشیند. */
+    try {
+      const passRecord = {
+        at: generatedAt, checked, added: builtRows.length + builtRowsSol.length,
+        addedSol: builtRowsSol.length, followed, rechecked, recheckTried,
+        base: passChainStats(builtRows), sol: passChainStats(builtRowsSol),
+      };
+      if (capProbe !== undefined) passRecord.capProbe = capProbe;
+      const prevLog = await readPassLog(kv);
+      const nextLog = [passRecord, ...prevLog].slice(0, REPORT_PASS_LOG_CAP);
+      await safeKvPutJson(kv, PASS_LOG_KEY, nextLog);
+    } catch (e) {
+      /* اندازه‌گیری هرگز نباید خودِ گذر را بشکند */
+    }
+
+    const result = {
       checked, added: builtRows.length + builtRowsSol.length, addedSol: builtRowsSol.length, followed,
       rechecked, recheckTried,
     };
+    if (capProbe !== undefined) result.capProbe = capProbe;
+    return result;
   } catch (e) {
     return { checked: 0, added: 0 }; // این تابع هرگز نباید پرتاب کند
   }
@@ -838,8 +919,16 @@ function reportTextSymbolLabel(row) {
 }
 
 /* سندِ یک روز → متنِ ساده برای پُست، یا null. خالص، بدونِ I/O، هرگز پرتاب
-   نمی‌کند. */
-export function reportText(doc) {
+   نمی‌کند.
+   🔴 بلوکِ سولانا با تصمیمِ مالک، ۲۱ سپتامبرِ ۲۰۲۶، موقتاً مخفی است: اندازه‌گیری
+   نشان داد ۴۳ از ۴۴ ردیفِ سولانا «نمی‌توان چک کرد» می‌شوند، چون این پا آخرِ
+   گذر اجرا می‌شود و ظاهراً گذر پیش از رسیدن به آن سهمیه‌ی ساب‌ریکوئستِ Worker
+   را تمام کرده. تا رفعِ آن باگ، بلوکِ سولانا و خطِ پانویسِ آن فقط وقتی چاپ
+   می‌شوند که صراحتاً opts.solana===true پاس داده شود؛ پیش‌فرض (هر کالرِ
+   امروزی، ازجمله مسیرِ /report/<تاریخ>.txt) باید بایت‌به‌بایت همان چیزی بماند
+   که یک سندِ بدونِ ردیف‌های سولانا تولید می‌کرد. فعال‌سازیِ دوباره فقط با
+   پاس‌دادنِ {solana:true} در همان مسیر انجام می‌شود، نه با تغییرِ اینجا. */
+export function reportText(doc, opts) {
   try {
     if (!doc || typeof doc !== "object" || typeof doc.date !== "string" ||
         !REPORT_DATE_RE.test(doc.date) || !Array.isArray(doc.rows))
@@ -867,10 +956,10 @@ export function reportText(doc) {
     // همان‌جدول (roundtrip)، و mintِ base58 درست‌شکل. صفر ردیفِ شمرده‌شده
     // یعنی خروجیِ زیر باید بایت‌به‌بایت همان چیزی بماند که پیش از این تغییر
     // بود — solTotal===0 هیچ خطی به متن اضافه نمی‌کند، هیچ‌کجا.
-    const solRows = doc.rows.filter((r) =>
+    const solRows = (opts && opts.solana === true) ? doc.rows.filter((r) =>
       r && typeof r === "object" && r.chain === "solana" &&
       r.checkKind === CHECK_KIND_BY_CHAIN.solana &&
-      typeof r.address === "string" && SOL_MINT.test(r.address));
+      typeof r.address === "string" && SOL_MINT.test(r.address)) : [];
     const solNosellRows = solRows.filter((r) => r.v === "nosell");
     const solSellCount = solRows.filter((r) => r.v === "sell").length;
     const solUnchecked = solRows.length - solNosellRows.length - solSellCount;

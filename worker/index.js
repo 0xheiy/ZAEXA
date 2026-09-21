@@ -34,7 +34,7 @@ import { fetchVerdict, VD_VENUES, VD_RPCS } from "./verdict.js";
 import { EVM_ADDR, SOL_MINT, chainOf, gtNetworkOf } from "./chains.js";
 import {
   REPORT_DATE_RE, PAIRS_KEY_BASE, reportKey, utcDateOf, emptyReportDoc, runReportPass,
-  reportText, REPORT_TEXT_FIRST_DATE, followForRow, recheckForRow, causeForRow,
+  reportText, REPORT_TEXT_FIRST_DATE, followForRow, recheckForRow, causeForRow, readPassLog,
 } from "./report.js";
 import {
   fetchVerdictSol, VD_SOL_RPCS, VD_SOL_JUP_BASE, VD_SOL_PAYER,
@@ -1260,6 +1260,15 @@ async function diagVerdict(request, url, env, ctx) {
      همین تابع) را می‌خورد، سطلِ جداگانه ندارد. */
   if (url.pathname.startsWith("/vd/v4/")) return diagVerdictV4(url, env);
 
+  /* GET /vd/passes — رونوشتِ خواندنیِ لاگِ گذر (report:passlog)، فقط برای
+     اندازه‌گیری. متد/سطلِ نرخ همین بالای diagVerdict سنجیده شده، دوباره
+     تکرار نمی‌شود. بدونِ ZX_KV → passes:[]، نه خطا. */
+  if (url.pathname === "/vd/passes") {
+    const kv = env && env.ZX_KV;
+    const passes = kv ? await readPassLog(kv) : [];
+    return vdDone(200, { passes });
+  }
+
   const addr = url.pathname.slice("/vd/".length);
   const chain = chainOf(addr);
   if (chain === null) return vdDone(400, { error: "bad address" });
@@ -1384,7 +1393,9 @@ function robotsResponse() {
   });
 }
 
-/* sitemap.xml — دو صفحه‌ی همیشگی («/» و «/app») به‌علاوه‌ی صفحه‌های
+/* sitemap.xml — سه صفحه‌ی همیشگی («/»، «/app» و «/pairs» — تا ۲۱ سپتامبر
+   ۲۰۲۶ هیچ‌جای سایت به /pairs لینک نداشت و اینجا هم نبود، پس هیچ‌کس پیدایش
+   نمی‌کرد) به‌علاوه‌ی صفحه‌های
    `/t/<آدرس>` — همان دنباله‌ی بلندِ جست‌وجو («فلان توکن هانی‌پات است؟»،
    «می‌شود فلان را فروخت؟») که سرورساید با عنوان و رقمِ واقعیِ همان توکن
    رندر می‌شود، پس واقعاً قابلِ ایندکس است؛ فقط تا امروز هیچ‌جا فهرست
@@ -1489,15 +1500,15 @@ function renderSitemapXml(origin, paths, lastmod) {
   );
 }
 
-/* 🔴 هرگز شکست را کش نکن، هرگز یک سایت‌مپِ شکسته سرو نکن. «/» و «/app» همیشه
-   اول‌اند، هرچه پیش بیاید. توکن‌ها فقط وقتی اضافه می‌شوند که buildSitemapTokens
+/* 🔴 هرگز شکست را کش نکن، هرگز یک سایت‌مپِ شکسته سرو نکن. «/»، «/app» و
+   «/pairs» همیشه اول‌اند، هرچه پیش بیاید. توکن‌ها فقط وقتی اضافه می‌شوند که buildSitemapTokens
    واقعاً یک آرایه بدهد (حتی خالی — یعنی بالادست جواب داد ولی چیزِ قابلِ
    استفاده‌ای نداشت)؛ اگر بالادست پرتاب کرد یا ۲۰۰ نداد یا به چیزِ قابلِ فهم
    parse نشد (null)، دقیقاً همان دو مسیرِ ثابت با عمرِ کوتاه برمی‌گردد تا
    درخواستِ بعدی دوباره تلاش کند — نه یک روز کامل بدونِ صفحه‌های توکن. */
 async function sitemapResponse(url, env, ctx) {
   const origin = url.origin;
-  const staticPaths = ["/", "/app"];
+  const staticPaths = ["/", "/app", "/pairs"];
   const lastmod = new Date().toISOString().slice(0, 10);
 
   const store = (typeof caches !== "undefined" && caches.default) || null;
@@ -1794,6 +1805,21 @@ async function scheduledReportPass(env, ctx, opts) {
       poolEmptyOf: (addr) => v4PoolsEmpty(addr, env, Date.now() + 1200),
       fetchPoolsSol,
       solMaxTokens: 6,
+      /* پروبِ سقفِ ساب‌ریکوئست — فقط اندازه‌گیری: یک HEAD تک به همان بالادستِ
+         GeckoTerminal، پشتِ مهلتِ ۱۵۰۰ میلی‌ثانیه‌ایِ خودش. اثباتِ «گذرِ ساعتی
+         به سقفِ ساب‌ریکوئستِ Worker می‌خورد یا نه» — هیچ رفتاری از خودِ گذر
+         عوض نمی‌شود. */
+      probeFetch: async () => {
+        const controller = new AbortController();
+        const t = setTimeout(() => controller.abort(), REPORT_CAP_PROBE_TIMEOUT_MS);
+        try {
+          return await fetch(UPSTREAM_FREE + "/networks?page=1", {
+            method: "HEAD", signal: controller.signal,
+          });
+        } finally {
+          clearTimeout(t);
+        }
+      },
     });
   } catch (e) {
     return { checked: 0, added: 0 }; // یک اجرای زمان‌بندی‌شده هرگز نباید پرتاب کند
@@ -1814,6 +1840,9 @@ async function scheduledReportPass(env, ctx, opts) {
    ⚠️ سقفِ توکن اینجا ۵ است نه ۳۰ — پاسخ باید در چند ثانیه برگردد، و
    tokenCap در report.js هم اجازه نمی‌دهد هیچ کالری از سقفِ اصلی بالاتر برود. */
 const REPORT_RUN_MAX_TOKENS = 5;
+// سقفِ زمانیِ همان پروبِ سقفِ ساب‌ریکوئست — عمداً کوتاه، این یک اندازه‌گیریِ
+// اضافه در انتهای گذر است، نباید خودش کند شدنِ گذر را بسازد.
+const REPORT_CAP_PROBE_TIMEOUT_MS = 1500;
 
 async function reportRunRoute(request, env, ctx) {
   const want = (env && typeof env.RUN_KEY === "string" && env.RUN_KEY) || "";
@@ -1830,6 +1859,7 @@ async function reportRunRoute(request, env, ctx) {
     followed: r.followed,
     rechecked: r.rechecked,
     recheckTried: r.recheckTried,
+    capProbe: r.capProbe,
     ms: Date.now() - t0,
     store: !!(env && env.ZX_KV),
   });

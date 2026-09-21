@@ -22,6 +22,7 @@ import {
   followForRow, REPORT_FOLLOWS, applyFollowUps, pickFollowUpTargets,
   retForRow, REPORT_SOL_MAX_TOKENS,
   recheckForRow, REPORT_RECHECKS, applyRechecks, pickRecheckTargets,
+  PASS_LOG_KEY, REPORT_PASS_LOG_CAP, readPassLog, REPORT_CAP_PROBE, classifyCapProbe,
 } from "./report.js";
 import * as v4 from "./v4index.js";
 import {
@@ -3271,8 +3272,9 @@ function isSolidlyReqId(id) { return PROBE_KIND_BY_ID.get(id) === "SOLIDLY"; }
   ok(/^application\/xml/.test(sm.headers.get("content-type") || ""),
      "sitemap must be served as application/xml, got " + sm.headers.get("content-type"));
   ok(xml.startsWith("<?xml"), "sitemap must start with an XML declaration");
-  ok(xml.includes("<loc>" + ORIGIN + "/</loc>") && xml.includes("<loc>" + ORIGIN + "/app</loc>"),
-     "sitemap must list the landing page and the app");
+  ok(xml.includes("<loc>" + ORIGIN + "/</loc>") && xml.includes("<loc>" + ORIGIN + "/app</loc>") &&
+     xml.includes("<loc>" + ORIGIN + "/pairs</loc>"),
+     "sitemap must list the landing page, the app, and /pairs");
 }
 
 /* ---- sitemap.xml — صفحه‌های /t/<آدرس> از رویِ networks/base/pools ----
@@ -3350,9 +3352,9 @@ function isSolidlyReqId(id) { return PROBE_KIND_BY_ID.get(id) === "SOLIDLY"; }
      "sitemap must carry exactly one <urlset>: " + xml.slice(0, 120));
 
   const locs = Array.from(xml.matchAll(/<loc>([^<]+)<\/loc>/g)).map((m) => m[1]);
-  ok(locs[0] === ORIGIN + "/" && locs[1] === ORIGIN + "/app",
-     "the two static pages must come first, got: " + JSON.stringify(locs.slice(0, 2)));
-  const tokenLocs = locs.slice(2);
+  ok(locs[0] === ORIGIN + "/" && locs[1] === ORIGIN + "/app" && locs[2] === ORIGIN + "/pairs",
+     "the three static pages must come first, got: " + JSON.stringify(locs.slice(0, 3)));
+  const tokenLocs = locs.slice(3);
   ok(tokenLocs.length === SITEMAP_TOKEN_CAP,
      "token URLs must be capped at " + SITEMAP_TOKEN_CAP + ", got " + tokenLocs.length);
   const TOKEN_LOC_RE = new RegExp("^" + ORIGIN + "/t/0x[0-9a-fA-F]{40}$");
@@ -3389,7 +3391,8 @@ function isSolidlyReqId(id) { return PROBE_KIND_BY_ID.get(id) === "SOLIDLY"; }
   ok(xml2 === xml, "a cached sitemap must be served byte-identical on the next request");
 
   console.log("[sitemap tokens] up to " + SITEMAP_TOKEN_PAGES + " pages of networks/base/pools feed "
-    + "/t/<address> entries after the two static pages: reserve_in_usd of 0/null/\"\"/non-numeric "
+    + "/t/<address> entries after the three static pages (/, /app, /pairs): reserve_in_usd of "
+    + "0/null/\"\"/non-numeric "
     + "and a non-Base token id are all dropped without breaking the rest of the file, duplicates "
     + "across pools collapse to one, order follows upstream volume and stops exactly at " +
     SITEMAP_TOKEN_CAP + ", no <loc> repeats, a cold build makes exactly " + SITEMAP_TOKEN_PAGES +
@@ -3406,8 +3409,9 @@ function isSolidlyReqId(id) { return PROBE_KIND_BY_ID.get(id) === "SOLIDLY"; }
     const body1 = await r1.text();
     ok(r1.status === 200, "sitemap must stay 200 when " + label + " (got " + r1.status + ")");
     const ls1 = Array.from(body1.matchAll(/<loc>([^<]+)<\/loc>/g)).map((m) => m[1]);
-    ok(ls1.length === 2 && ls1[0] === ORIGIN + "/" && ls1[1] === ORIGIN + "/app",
-       "when " + label + ", sitemap must carry exactly the two static URLs, got: " + JSON.stringify(ls1));
+    ok(ls1.length === 3 && ls1[0] === ORIGIN + "/" && ls1[1] === ORIGIN + "/app" &&
+       ls1[2] === ORIGIN + "/pairs",
+       "when " + label + ", sitemap must carry exactly the three static URLs, got: " + JSON.stringify(ls1));
     ok(r1.headers.get("cache-control") === "public, max-age=300",
        "a failed sitemap build must be cached briefly at the edge (not 86400), got: " +
        r1.headers.get("cache-control"));
@@ -3419,7 +3423,7 @@ function isSolidlyReqId(id) { return PROBE_KIND_BY_ID.get(id) === "SOLIDLY"; }
     ok(calls > callsAfterFirst,
        "a failed sitemap build must never be cached — a second request must hit the upstream again, "
        + "when " + label + " (calls: " + callsAfterFirst + " -> " + calls + ")");
-    console.log("[sitemap fallback] " + label + " -> 200 with exactly the two static URLs, a short "
+    console.log("[sitemap fallback] " + label + " -> 200 with exactly the three static URLs, a short "
       + "cache-control, and never cached at the edge (the very next request tries the upstream again)");
   }
 
@@ -4774,6 +4778,9 @@ function isSolidlyReqId(id) { return PROBE_KIND_BY_ID.get(id) === "SOLIDLY"; }
           decimals: 18, price_usd: "2000",
         } } });
       }
+      // پروبِ سقفِ ساب‌ریکوئست (انتهای runReportPass) — یک HEAD ساده به
+      // GeckoTerminal، نه یک تماسِ RPC؛ نباید در rpcCalls شمرده شود.
+      if (u.includes("/networks?page=1")) return new Response("", { status: 200 });
       rpcCalls.push(u);
       if (u === SECRET3) {
         const reqs = JSON.parse(init.body);
@@ -6956,6 +6963,8 @@ console.log("[report cause] causeForRow enforces the closed REPORT_CAUSES vocabu
           decimals: 18, price_usd: "2000" } } }),
           { status: 200, headers: { "content-type": "application/json" } });
       }
+      // پروبِ سقفِ ساب‌ریکوئست — یک HEAD بدونِ بدنه، نه یک RPC batch.
+      if (u.includes("/networks?page=1")) return new Response("", { status: 200 });
       const body = JSON.parse(init.body);
       const method = Array.isArray(body) ? "eth_call" : body.method;
       order.push(method);
@@ -7455,6 +7464,8 @@ console.log("[report cause] causeForRow enforces the closed REPORT_CAUSES vocabu
       if (u.includes("/new_pools")) return new Response(JSON.stringify({ data: [POOL_ROW_E] }),
         { status: 200, headers: { "content-type": "application/json" } });
       if (u.startsWith(UF_E)) return new Response("rate limited", { status: 429 });
+      // پروبِ سقفِ ساب‌ریکوئست — انتظاری، نه یک تماسِ ناخواسته.
+      if (u.includes("/networks?page=1")) return new Response("", { status: 200 });
       throw new Error("unexpected upstream call in why-E: " + u);
     };
     const puts = [];
@@ -8807,9 +8818,9 @@ function stripAllowedWording(t) {
     date: "2026-09-20", generatedAt: T9, chains: ["base"], checked: 2,
     rows: [rowBaseSell, rowBaseNoSell],
   };
-  ok(reportText(docNoSolAtAll) === EXPECTED_ZERO_SOL,
+  ok(reportText(docNoSolAtAll, { solana: true }) === EXPECTED_ZERO_SOL,
      "a doc with no Solana rows at all must produce exactly the pre-Solana text, got " +
-     JSON.stringify(reportText(docNoSolAtAll)));
+     JSON.stringify(reportText(docNoSolAtAll, { solana: true })));
 
   // ب) یک ردیفِ سولانا با checkKindِ ناجور — شمرده نمی‌شود، پس همچنان صفر.
   const rowWrongKindOnly = { ...reportRow(solRowArgs({ verdict: "nosell" })), checkKind: "sell-quote" };
@@ -8817,9 +8828,9 @@ function stripAllowedWording(t) {
     date: "2026-09-20", generatedAt: T9, chains: ["base", "solana"], checked: 3,
     rows: [rowBaseSell, rowBaseNoSell, rowWrongKindOnly],
   };
-  ok(reportText(docWrongKindOnly) === EXPECTED_ZERO_SOL,
+  ok(reportText(docWrongKindOnly, { solana: true }) === EXPECTED_ZERO_SOL,
      "a solana-shaped row with the wrong checkKind must count as zero and leave the text byte-for-byte " +
-     "identical to the pre-Solana output, got " + JSON.stringify(reportText(docWrongKindOnly)));
+     "identical to the pre-Solana output, got " + JSON.stringify(reportText(docWrongKindOnly, { solana: true })));
 
   // پ) یک ردیفِ سولانا با mintِ بدشکل (کوتاه‌تر از ۳۲) — شمرده نمی‌شود.
   const rowBadMintOnly = reportRow(solRowArgs({ address: "short", verdict: "nosell" }));
@@ -8827,9 +8838,9 @@ function stripAllowedWording(t) {
     date: "2026-09-20", generatedAt: T9, chains: ["base", "solana"], checked: 3,
     rows: [rowBaseSell, rowBaseNoSell, rowBadMintOnly],
   };
-  ok(reportText(docBadMintOnly) === EXPECTED_ZERO_SOL,
+  ok(reportText(docBadMintOnly, { solana: true }) === EXPECTED_ZERO_SOL,
      "a solana row with a malformed (too-short) mint must count as zero and leave the text byte-for-byte " +
-     "identical to the pre-Solana output, got " + JSON.stringify(reportText(docBadMintOnly)));
+     "identical to the pre-Solana output, got " + JSON.stringify(reportText(docBadMintOnly, { solana: true })));
 
   // ت) سندِ آمیخته — دو ردیفِ Base + سه ردیفِ *شمردنیِ* سولانا (sell/nosell/null)
   // + یک ردیفِ سولانا با mintِ بدشکل و یکی با checkKindِ ناجور (هر دو نادیده
@@ -8851,7 +8862,7 @@ function stripAllowedWording(t) {
     rows: [rowBaseSell, rowBaseNoSell, rowSolSell, rowSolNosell, rowSolNull,
            rowSolBadMintUncounted, rowSolWrongKindUncounted],
   };
-  const textMixed = reportText(docMixed);
+  const textMixed = reportText(docMixed, { solana: true });
   const EXPECTED_MIXED = "Exit Report · 20 Sep\n\n2 new Base tokens checked.\n1 had no sell route "
     + "quoted.\n1 had a sell route quoted.\n0 could not be checked.\n\n$B4 — no sell route quoted\n"
     + "zaexa.com/t/0x4444444444444444444444444444444444444444\n\n3 new Solana tokens checked.\n"
@@ -8871,7 +8882,7 @@ function stripAllowedWording(t) {
     ["base nosell + sol sell", [rowBaseNoSell, rowSolSell]],
     ["both flagged", [rowBaseNoSell, rowSolNosell, rowSolNull]],
   ]) {
-    const tx = reportText({ date: "2026-09-20", generatedAt: T9, chains: ["base", "solana"], checked: rowsX.length, rows: rowsX });
+    const tx = reportText({ date: "2026-09-20", generatedAt: T9, chains: ["base", "solana"], checked: rowsX.length, rows: rowsX }, { solana: true });
     ok(typeof tx === "string" && !tx.includes("\n\n\n"),
        "report text (" + label + ") must never contain two blank lines in a row, got " + JSON.stringify(tx));
     ok(typeof tx === "string" && tx.includes("\n\nSell quotes on Base DEXes"),
@@ -8891,7 +8902,7 @@ function stripAllowedWording(t) {
     date: "2026-09-20", generatedAt: T9, chains: ["base", "solana"], checked: 2,
     rows: [rowBaseSell, rowSolEmoji],
   };
-  const textEmoji = reportText(docEmoji);
+  const textEmoji = reportText(docEmoji, { solana: true });
   ok(textEmoji.includes("3n5oQM…BcTh — failed the simulated buy and sell\n" +
      "zaexa.com/t/3n5oQMhqQ4c9y6d7bJtmuVQnU9UwbXPMTfxQCkmVBcTh"),
      "an emoji symbol must fall back to the truncated mint address, got " + JSON.stringify(textEmoji));
@@ -8906,7 +8917,7 @@ function stripAllowedWording(t) {
     date: "2026-09-20", generatedAt: T9, chains: ["base", "solana"], checked: 13,
     rows: [rowBaseSell, ...rows12Sol],
   };
-  const text12Sol = reportText(doc12Sol);
+  const text12Sol = reportText(doc12Sol, { solana: true });
   const solLinkMatches = (text12Sol.match(/zaexa\.com\/t\/Sun9/g) || []);
   ok(solLinkMatches.length === 10, "12 flagged solana rows must list exactly 10 token links, got " +
      solLinkMatches.length + " in " + JSON.stringify(text12Sol));
@@ -8930,15 +8941,108 @@ function stripAllowedWording(t) {
      "the narrow allowance must not strip arbitrary \"simulat\" text that is not one of the four exact " +
      "allowed phrases — got a false pass on: " + JSON.stringify(fakeWidening));
 
-  console.log("[report text solana] reportText ok — zero counted Solana rows (none at all, a wrong-" +
-    "checkKind row, or a malformed mint) leaves the text byte-for-byte identical to the pre-Solana " +
-    "output; the mixed Base+Solana fixture matches the exact spec'd string; the three Solana counts " +
-    "(failed/passed/could-not-check) sum to the printed total; a nosell Solana row is listed with its " +
-    "own zaexa.com/t/<mint> link; an emoji symbol falls back to the truncated mint address and never " +
-    "appears verbatim; 12 nosell rows cap the list at 10 with a \"+2 more\" pointer at the full JSON; " +
-    "and the shared banned-wording guard still rejects \"honeypot\"/\"round trip\" on every Solana-" +
-    "bearing text while its narrow allowance admits only the four exact fixed Solana phrases, never " +
-    "arbitrary \"simulat\" text");
+  console.log("[report text solana] reportText(doc, {solana:true}) ok — zero counted Solana rows " +
+    "(none at all, a wrong-checkKind row, or a malformed mint) leaves the text byte-for-byte identical " +
+    "to the pre-Solana output; the mixed Base+Solana fixture matches the exact spec'd string; the " +
+    "three Solana counts (failed/passed/could-not-check) sum to the printed total; a nosell Solana row " +
+    "is listed with its own zaexa.com/t/<mint> link; an emoji symbol falls back to the truncated mint " +
+    "address and never appears verbatim; 12 nosell rows cap the list at 10 with a \"+2 more\" pointer " +
+    "at the full JSON; and the shared banned-wording guard still rejects \"honeypot\"/\"round trip\" on " +
+    "every Solana-bearing text while its narrow allowance admits only the four exact fixed Solana " +
+    "phrases, never arbitrary \"simulat\" text");
+}
+
+/* ---- ۴۰. reportText — بلوکِ سولانا با تصمیمِ مالک پیش‌فرض مخفی است، تا رفعِ
+   باگِ سهمیه‌ی ساب‌ریکوئست (۲۱ سپتامبرِ ۲۰۲۶) — [report text solana hidden] ----
+   همان docMixed بالا (دو ردیفِ Base + سه ردیفِ سولانایِ شمردنی)، ولی بدونِ
+   opts یا با {solana:false}: خروجی باید بایت‌به‌بایت همان سندی باشد که اصلاً
+   ردیفِ سولانا نداشت — پس هیچ خطِ سولانایی، هیچ‌جا. */
+{
+  const T9H = "2026-09-20T00:00:00.000Z";
+  function baseRowArgsH(extra) {
+    return Object.assign({ chain: "base", address: "0x" + "3".repeat(40), symbol: "B3", name: "B3",
+      verdict: "sell", checkedAt: T9H, poolCreatedAt: null, priceUsd: 1, reserveUsd: 1, vol24hUsd: 1,
+      fdvUsd: 1, dex: "uniswap-v3-base", why: null }, extra);
+  }
+  function solRowArgsH(extra) {
+    return Object.assign({ chain: "solana", address: "eqNcWScchYa8SKsKS6cg3VyKh3Q3j5K1vKiDj26pump",
+      symbol: "JEANPHISOL", name: "Jean Phil Solana", verdict: "sell", checkedAt: T9H, poolCreatedAt: T9H,
+      priceUsd: 0.00005251157983698064, reserveUsd: 18543.59, vol24hUsd: 199.34, fdvUsd: 51122.81,
+      dex: "pumpswap", why: null }, extra);
+  }
+  const rowBaseSellH = reportRow(baseRowArgsH({}));
+  const rowBaseNoSellH = reportRow(baseRowArgsH({ address: "0x" + "4".repeat(40), symbol: "B4", verdict: "nosell" }));
+  const rowSolSellH = reportRow(solRowArgsH({
+    address: "So11111111111111111111111111111111111111112", verdict: "sell",
+  }));
+  const rowSolNosellH = reportRow(solRowArgsH({ verdict: "nosell" }));
+  const rowSolNullH = reportRow(solRowArgsH({
+    address: "9xQeWvG816bUx9EPjHmaT23yvVM2ZWbrrpZb9PusVFin", verdict: null,
+  }));
+  const docWithSol = {
+    date: "2026-09-20", generatedAt: T9H, chains: ["base", "solana"], checked: 5,
+    rows: [rowBaseSellH, rowBaseNoSellH, rowSolSellH, rowSolNosellH, rowSolNullH],
+  };
+  const docSolRemoved = {
+    date: "2026-09-20", generatedAt: T9H, chains: ["base"], checked: 2,
+    rows: [rowBaseSellH, rowBaseNoSellH],
+  };
+  const refText = reportText(docSolRemoved, { solana: true }); // مرجع: سندی که اصلاً ردیفِ سولانا ندارد
+
+  const noOpts = reportText(docWithSol);
+  ok(noOpts === refText,
+     "reportText(doc) with no opts (the owner's decision, 21 Sep 2026) must be byte-for-byte " +
+     "identical to the same doc with its Solana rows removed, got " + JSON.stringify(noOpts));
+  ok(!noOpts.includes("Solana"),
+     "with the Solana block hidden, the text must not say \"Solana\" anywhere, got " + JSON.stringify(noOpts));
+
+  const solFalse = reportText(docWithSol, { solana: false });
+  ok(solFalse === refText,
+     "reportText(doc, {solana:false}) must also be byte-for-byte identical to the Solana-removed " +
+     "reference, got " + JSON.stringify(solFalse));
+
+  const solTrue = reportText(docWithSol, { solana: true });
+  ok(solTrue !== refText && solTrue.includes("Solana"),
+     "sanity: {solana:true} on the very same doc must actually print the Solana block, got " +
+     JSON.stringify(solTrue));
+
+  console.log("[report text solana hidden] reportText(doc, opts) — the Solana block and its footer " +
+    "line print only when opts.solana===true; the default (no opts) and opts.solana:false are both " +
+    "byte-for-byte identical to the same doc with its Solana rows stripped, verified against a live " +
+    "sanity check that {solana:true} on the same doc does print the block");
+}
+
+/* ---- ۴۱. GET /report/<...>.txt با ردیف‌های سولانا در KV — پیش‌فرضِ مسیر ----
+   همان مسیرِ واقعی، نه یک فراخوانیِ مستقیمِ reportText: اثباتِ اینکه route
+   هم reportText(parsed) را بدونِ opts صدا می‌زند، دقیقاً مثلِ امروز. */
+{
+  const T9R = "2026-09-20T00:00:00.000Z";
+  const rowBaseR = reportRow({
+    chain: "base", address: "0x" + "5".repeat(40), symbol: "B5", name: "B5", verdict: "sell",
+    checkedAt: T9R, poolCreatedAt: null, priceUsd: 1, reserveUsd: 1, vol24hUsd: 1, fdvUsd: 1,
+    dex: "uniswap-v3-base", why: null,
+  });
+  const rowSolR = reportRow({
+    chain: "solana", address: "eqNcWScchYa8SKsKS6cg3VyKh3Q3j5K1vKiDj26pump", symbol: "JEANPHISOL",
+    name: "Jean Phil Solana", verdict: "nosell", checkedAt: T9R, poolCreatedAt: T9R,
+    priceUsd: 0.00005, reserveUsd: 18543.59, vol24hUsd: 199.34, fdvUsd: 51122.81, dex: "pumpswap",
+    why: null,
+  });
+  const docRouteSol = {
+    date: "2026-09-20", generatedAt: T9R, chains: ["base", "solana"], checked: 2,
+    rows: [rowBaseR, rowSolR],
+  };
+  const kvRouteSol = { get: async () => JSON.stringify(docRouteSol) };
+  const rRouteSol = await call("/report/2026-09-20.txt", { method: "GET" }, { ASSETS, ZX_KV: kvRouteSol });
+  ok(rRouteSol.status === 200, "GET /report/2026-09-20.txt with Solana rows in KV must still be 200, "
+    + "got " + rRouteSol.status);
+  const bodyRouteSol = await rRouteSol.text();
+  ok(!bodyRouteSol.includes("Solana"),
+     "GET /report/<date>.txt must not print \"Solana\" while the block is hidden by default, got " +
+     JSON.stringify(bodyRouteSol));
+
+  console.log("[report route solana hidden] GET /report/<date>.txt calls reportText(doc) with no opts "
+    + "— a stored doc that does carry Solana rows still produces a body with no \"Solana\" substring");
 }
 
 /* ---- ۴۰. استثنای پوششِ v4 — [cover v4 exception] ----
@@ -9545,6 +9649,267 @@ function stripAllowedWording(t) {
     "rechecked row exactly as it was, the same way a follow keeps its follow/followAt");
 }
 
+/* ---- ۴۲. classifyCapProbe — واژه‌نامه‌ی بسته‌ی REPORT_CAP_PROBE، با کنترلِ مثبت ----
+   این تنها کلاسی که روی متنِ پیام سنجیده می‌شود ("cap") بدونِ کنترلِ مثبت
+   قابلِ‌اعتماد نیست — پس همان‌جا کنارِ سه‌تای دیگر، هرکدام با یک fetchِ جعلیِ
+   واقعی، نه فرضی. */
+{
+  ok(JSON.stringify(REPORT_CAP_PROBE) === JSON.stringify(["ok", "cap", "timeout", "threw"]),
+     "REPORT_CAP_PROBE must be exactly the closed vocabulary [\"ok\",\"cap\",\"timeout\",\"threw\"], got "
+     + JSON.stringify(REPORT_CAP_PROBE));
+
+  const okC = await classifyCapProbe(async () => new Response("rate limited", { status: 429 }));
+  ok(okC === "ok", "a real 429 Response must classify as \"ok\" (any Response, any status), got " + okC);
+
+  const capC = await classifyCapProbe(async () => { throw new Error("Too many subrequests."); });
+  ok(capC === "cap", "a thrown \"Too many subrequests.\" must classify as \"cap\", got " + capC);
+
+  const timeoutC = await classifyCapProbe(async () => {
+    const e = new Error("The operation was aborted."); e.name = "AbortError"; throw e;
+  });
+  ok(timeoutC === "timeout", "a thrown AbortError must classify as \"timeout\", got " + timeoutC);
+
+  const threwC = await classifyCapProbe(async () => { throw new TypeError("x"); });
+  ok(threwC === "threw", "any other thrown error (e.g. TypeError) must classify as \"threw\", got " + threwC);
+
+  const oddC = await classifyCapProbe(async () => ({ status: 200 }));
+  ok(oddC === "threw", "a resolved non-Response value must classify as \"threw\", not a guess, got " + oddC);
+
+  console.log("[cap probe] classifyCapProbe ok — REPORT_CAP_PROBE is the closed [\"ok\",\"cap\","
+    + "\"timeout\",\"threw\"] vocabulary; positive controls: a real 429 Response -> \"ok\", a thrown "
+    + "\"Too many subrequests.\" -> \"cap\", a thrown AbortError -> \"timeout\", a thrown TypeError and "
+    + "a resolved non-Response value both -> \"threw\"");
+}
+
+/* ---- ۴۳. runReportPass — لاگِ گذر (report:passlog) و capProbe ---- */
+{
+  function makeKvP() {
+    const store = new Map();
+    return { store, get: async (k) => (store.has(k) ? store.get(k) : null),
+      put: async (k, v) => { store.set(k, v); } };
+  }
+  function mkAddrP(n) { return "0x" + n.toString(16).padStart(40, "0"); }
+  function poolRowP(addr, reserve, price) {
+    return {
+      attributes: { reserve_in_usd: String(reserve), base_token_price_usd: String(price),
+        pool_created_at: "2026-09-21T10:00:00Z", volume_usd: { h24: "0" }, fdv_usd: "0" },
+      relationships: { base_token: { data: { id: "base_" + addr } }, dex: { data: { id: "uniswap-v3-base" } } },
+    };
+  }
+  const NOWP = Date.parse("2026-09-21T12:00:00.000Z");
+
+  // الف) probeFetch غایب → capProbe کلاً غایب، هم در نتیجه هم در ردیفِ لاگ
+  const kvA1 = makeKvP();
+  const resNoProbe = await runReportPass({
+    kv: kvA1, fetchPools: async () => [poolRowP(mkAddrP(1), 9000, 1)],
+    metaOf: async () => ({ meta: { symbol: "P1", name: "P1" }, why: null }),
+    verdictOf: async () => ({ v: "sell", why: null }),
+    now: () => NOWP, sleep: async () => {},
+  });
+  ok(!Object.prototype.hasOwnProperty.call(resNoProbe, "capProbe"),
+     "with no probeFetch injected, capProbe must be absent from the pass result, got " +
+     JSON.stringify(resNoProbe));
+  const logA1 = JSON.parse(await kvA1.get(PASS_LOG_KEY));
+  ok(Array.isArray(logA1) && logA1.length === 1,
+     "the pass log must gain exactly one entry, got " + JSON.stringify(logA1));
+  ok(!Object.prototype.hasOwnProperty.call(logA1[0], "capProbe"),
+     "with no probeFetch, the stored pass record must not carry a capProbe key, got " + JSON.stringify(logA1[0]));
+
+  // ب) probeFetch حاضر → capProbe در نتیجه و در ردیفِ لاگ، هر دو
+  const kvA2 = makeKvP();
+  const resProbe = await runReportPass({
+    kv: kvA2, fetchPools: async () => [poolRowP(mkAddrP(2), 9000, 1)],
+    metaOf: async () => ({ meta: { symbol: "P2", name: "P2" }, why: null }),
+    verdictOf: async () => ({ v: "nosell", why: null }),
+    now: () => NOWP, sleep: async () => {},
+    probeFetch: async () => new Response("", { status: 200 }),
+  });
+  ok(resProbe.capProbe === "ok",
+     "with a probeFetch resolving to a Response, the returned capProbe must be \"ok\", got " +
+     JSON.stringify(resProbe.capProbe));
+  const logA2 = JSON.parse(await kvA2.get(PASS_LOG_KEY));
+  ok(logA2[0].capProbe === "ok", "the stored pass record must carry the same capProbe, got " +
+     JSON.stringify(logA2[0]));
+
+  // پ) شکلِ ردیفِ لاگ — فقط عدد/رشته‌ی بسته، هیچ آدرس/symbol/why
+  const rec = logA2[0];
+  ok(typeof rec.at === "string" && typeof rec.checked === "number" && typeof rec.added === "number" &&
+     typeof rec.addedSol === "number" && typeof rec.followed === "number" &&
+     typeof rec.rechecked === "number" && typeof rec.recheckTried === "number",
+     "the pass record must carry at/checked/added/addedSol/followed/rechecked/recheckTried as " +
+     "string/numbers, got " + JSON.stringify(rec));
+  for (const side of ["base", "sol"]) {
+    const s = rec[side];
+    ok(s && typeof s.n === "number" && typeof s.nulls === "number" && typeof s.firstNullIdx === "number",
+       "rec." + side + " must carry {n, nulls, firstNullIdx} as numbers, got " + JSON.stringify(s));
+  }
+  ok(REPORT_CAP_PROBE.includes(rec.capProbe),
+     "rec.capProbe must be a member of the closed REPORT_CAP_PROBE vocabulary, got " +
+     JSON.stringify(rec.capProbe));
+  const recKeys = Object.keys(rec).sort();
+  ok(JSON.stringify(recKeys) === JSON.stringify(
+       ["added", "addedSol", "at", "base", "capProbe", "checked", "followed", "recheckTried", "rechecked", "sol"]),
+     "the pass record must carry exactly its documented keys, nothing else, got " + JSON.stringify(recKeys));
+  const recRaw = JSON.stringify(logA2);
+  ok(!/0x[0-9a-f]{40}/i.test(recRaw),
+     "no 0x<40 hex> address may ever appear in the stored pass log, got " + recRaw);
+
+  // ت) base.n/nulls/firstNullIdx واقعاً از رویِ ردیف‌های همین گذر می‌آید، به‌ترتیبِ چک‌شدن
+  const kvA3 = makeKvP();
+  const rowsMixedNull = [poolRowP(mkAddrP(11), 9000, 1), poolRowP(mkAddrP(12), 9000, 1),
+    poolRowP(mkAddrP(13), 9000, 1)];
+  let callN = 0;
+  await runReportPass({
+    kv: kvA3, fetchPools: async () => rowsMixedNull,
+    metaOf: async () => ({ meta: { symbol: "M", name: "M" }, why: null }),
+    verdictOf: async () => {
+      callN++;
+      return callN === 2 ? { v: null, why: "no-quote" } : { v: "sell", why: null };
+    },
+    now: () => NOWP, sleep: async () => {},
+  });
+  const logA3 = JSON.parse(await kvA3.get(PASS_LOG_KEY));
+  ok(logA3[0].base.n === 3 && logA3[0].base.nulls === 1 && logA3[0].base.firstNullIdx === 1,
+     "with the 2nd of 3 tokens returning v:null, base must be {n:3, nulls:1, firstNullIdx:1}, got " +
+     JSON.stringify(logA3[0].base));
+
+  // چ) پایِ سولانا هم — هیچ mintِ base58ای در لاگِ ذخیره‌شده ننشیند
+  const B58_P = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
+  function mkSolAddrP(n) {
+    let s = "";
+    const x = n + 2000;
+    for (let i = 0; i < 44; i++) s += B58_P[(x + i * 7) % B58_P.length];
+    return s;
+  }
+  function solPoolRowP(addr) {
+    return {
+      attributes: { reserve_in_usd: "9000", base_token_price_usd: "1",
+        pool_created_at: "2026-09-21T09:00:00Z", volume_usd: { h24: "10" }, fdv_usd: "100" },
+      relationships: { base_token: { data: { id: "solana_" + addr } }, dex: { data: { id: "pumpswap" } } },
+    };
+  }
+  const kvA3b = makeKvP();
+  const solMint = mkSolAddrP(1);
+  await runReportPass({
+    kv: kvA3b, fetchPools: async () => [], fetchPoolsSol: async () => [solPoolRowP(solMint)],
+    metaOf: async () => ({ meta: { symbol: "SM", name: "SM" }, why: null }),
+    verdictOf: async () => ({ v: "sell", why: null }),
+    now: () => NOWP, sleep: async () => {},
+  });
+  const logA3b = JSON.parse(await kvA3b.get(PASS_LOG_KEY));
+  ok(logA3b[0].sol.n === 1,
+     "the Solana leg must still reach the pass record (sol.n:1), got " + JSON.stringify(logA3b[0].sol));
+  const logA3bRaw = JSON.stringify(logA3b);
+  ok(!logA3bRaw.includes(solMint),
+     "the base58 mint itself must never appear verbatim in the stored pass log, got " + logA3bRaw);
+  ok(!/0x[0-9a-f]{40}/i.test(logA3bRaw) && !new RegExp("[" + B58_P + "]{32,44}").test(logA3bRaw),
+     "no 0x<40 hex> address and no base58-shaped (32-44 char) mint string may ever appear in the " +
+     "stored pass log, got " + logA3bRaw);
+
+  // ث) حلقه — تازه‌ترین اول، سقف در REPORT_PASS_LOG_CAP
+  const kvA4 = makeKvP();
+  for (let i = 0; i < REPORT_PASS_LOG_CAP + 5; i++) {
+    await runReportPass({
+      kv: kvA4, fetchPools: async () => [], metaOf: async () => ({ meta: null, why: "meta:429" }),
+      verdictOf: async () => ({ v: null, why: "no-quote" }), now: () => NOWP + i, sleep: async () => {},
+    });
+  }
+  const logA4 = JSON.parse(await kvA4.get(PASS_LOG_KEY));
+  ok(logA4.length === REPORT_PASS_LOG_CAP,
+     "the pass log ring must cap at exactly REPORT_PASS_LOG_CAP (" + REPORT_PASS_LOG_CAP + "), got " +
+     logA4.length);
+  ok(logA4[0].at === new Date(NOWP + REPORT_PASS_LOG_CAP + 4).toISOString(),
+     "the newest pass must sort first in the ring, got " + JSON.stringify(logA4[0].at));
+
+  // ج) نوشتنِ لاگ هرگز نباید خودِ گذر را بشکند — یک KV که فقط put رویِ همین کلید پرتاب می‌کند
+  const kvThrowsPut = {
+    get: async () => null,
+    put: async (k) => { if (k === PASS_LOG_KEY) throw new Error("kv put is down"); },
+  };
+  const resThrowsLog = await runReportPass({
+    kv: kvThrowsPut, fetchPools: async () => [poolRowP(mkAddrP(9), 9000, 1)],
+    metaOf: async () => ({ meta: { symbol: "T9", name: "T9" }, why: null }),
+    verdictOf: async () => ({ v: "sell", why: null }),
+    now: () => NOWP, sleep: async () => {}, probeFetch: async () => new Response("", { status: 200 }),
+  });
+  ok(resThrowsLog.checked === 1 && resThrowsLog.added === 1,
+     "a throwing report:passlog kv.put must not break the pass itself, got " + JSON.stringify(resThrowsLog));
+
+  console.log("[report passlog] runReportPass ok — probeFetch missing leaves capProbe absent from both "
+    + "the result and the stored record; a resolving probeFetch classifies via classifyCapProbe and rides "
+    + "on both; each pass record carries exactly {at, checked, added, addedSol, followed, rechecked, "
+    + "recheckTried, base:{n,nulls,firstNullIdx}, sol:{n,nulls,firstNullIdx}, capProbe} with no address "
+    + "ever in it; base/sol n/nulls/firstNullIdx reflect the rows built in that pass in check order; the "
+    + "ring sorts newest-first and caps at " + REPORT_PASS_LOG_CAP + "; and a throwing report:passlog "
+    + "kv.put never breaks the pass itself");
+}
+
+/* ---- ۴۴. GET /report/run — capProbe در پاسخ ---- */
+{
+  const savedFetch = globalThis.fetch;
+  globalThis.fetch = async (url) => {
+    const u = String(url);
+    if (u.includes("/new_pools")) return new Response(JSON.stringify({ data: [] }),
+      { status: 200, headers: { "content-type": "application/json" } });
+    if (u.includes("/networks?page=1")) return new Response("", { status: 200 });
+    return new Response("must never be reached", { status: 500 });
+  };
+  const kvCP = { get: async () => null, put: async () => {} };
+  const res = await call("/report/run", { method: "GET", headers: { "x-run-key": "cap-probe-key" } },
+    { ASSETS, ZX_KV: kvCP, RUN_KEY: "cap-probe-key" });
+  globalThis.fetch = savedFetch;
+  ok(res.status === 200, "GET /report/run must be 200, got " + res.status);
+  const body = await res.json();
+  ok(REPORT_CAP_PROBE.includes(body.capProbe),
+     "GET /report/run's response must carry capProbe from the closed vocabulary, got " + JSON.stringify(body));
+  ok(body.capProbe === "ok",
+     "with the injected probe fetch resolving to a Response, capProbe must be \"ok\" end to end through " +
+     "GET /report/run, got " + JSON.stringify(body.capProbe));
+
+  console.log("[report run capProbe] GET /report/run's response now carries capProbe (\"ok\" end to end "
+    + "when the injected probe fetch resolves to a Response)");
+}
+
+/* ---- ۴۵. GET /vd/passes — رونوشتِ خواندنیِ لاگِ گذر ---- */
+{
+  const rNoKvP = await call("/vd/passes", { headers: { "cf-connecting-ip": "203.0.113.90" } },
+    { ASSETS });
+  ok(rNoKvP.status === 200, "GET /vd/passes without ZX_KV must still be 200, got " + rNoKvP.status);
+  const bNoKvP = await rNoKvP.json();
+  ok(Array.isArray(bNoKvP.passes) && bNoKvP.passes.length === 0,
+     "without ZX_KV, /vd/passes must answer {passes:[]}, got " + JSON.stringify(bNoKvP));
+  ok(rNoKvP.headers.get("cache-control") === "no-store",
+     "GET /vd/passes must be no-store, got " + rNoKvP.headers.get("cache-control"));
+
+  const fakeRing = [{ at: "2026-09-21T12:00:00.000Z", checked: 1, added: 1, addedSol: 0, followed: 0,
+    rechecked: 0, recheckTried: 0, base: { n: 1, nulls: 0, firstNullIdx: -1 },
+    sol: { n: 0, nulls: 0, firstNullIdx: -1 }, capProbe: "ok" }];
+  const kvWithLog = { get: async (k) => (k === PASS_LOG_KEY ? JSON.stringify(fakeRing) : null) };
+  const rWithLog = await call("/vd/passes", { headers: { "cf-connecting-ip": "203.0.113.91" } },
+    { ASSETS, ZX_KV: kvWithLog });
+  ok(rWithLog.status === 200, "GET /vd/passes with a stored ring must be 200, got " + rWithLog.status);
+  const bWithLog = await rWithLog.json();
+  ok(JSON.stringify(bWithLog.passes) === JSON.stringify(fakeRing),
+     "GET /vd/passes must return exactly the stored ring, got " + JSON.stringify(bWithLog));
+
+  const rPostP = await call("/vd/passes",
+    { method: "POST", headers: { "cf-connecting-ip": "203.0.113.92" } }, { ASSETS, ZX_KV: kvWithLog });
+  ok(rPostP.status === 405, "POST /vd/passes must be 405, got " + rPostP.status);
+
+  const { RL_LIMIT: RL_LIMIT_PASSES } = await import("./index.js");
+  const RL_IP_PASSES = "203.0.113.93";
+  for (let i = 0; i < RL_LIMIT_PASSES; i++) {
+    await call("/vd/passes", { headers: { "cf-connecting-ip": RL_IP_PASSES } }, { ASSETS, ZX_KV: kvWithLog });
+  }
+  const limitedPasses = await call("/vd/passes", { headers: { "cf-connecting-ip": RL_IP_PASSES } },
+    { ASSETS, ZX_KV: kvWithLog });
+  ok(limitedPasses.status === 429,
+     "the (RL_LIMIT+1)th /vd/passes request from one IP must be rate-limited, got " + limitedPasses.status);
+
+  console.log("[vd passes] GET /vd/passes ok — {passes:[]} without ZX_KV, the stored report:passlog ring "
+    + "returned verbatim when present, no-store, 405 for non-GET, and shares the \"vd\" rate-limit bucket");
+}
+
 console.log(fails === 0
   ? "[gt proxy] worker ok — " + REAL.length + " real paths proxied, " + BAD.length +
     " refused without touching the network, 429 passes through with CORS\n" +
@@ -9573,9 +9938,10 @@ console.log(fails === 0
     + "would never ship): the whole site is allowed, no crawler is singled out, and the "
     + "sitemap is pointed at\n" +
     "[sitemap tokens] the sitemap's long tail: up to 3 pages of networks/base/pools feed "
-    + "/t/<address> entries after the two always-first static pages, filtered, deduped, capped "
+    + "/t/<address> entries after the three always-first static pages (/, /app, /pairs), filtered, "
+    + "deduped, capped "
     + "at 50 and ordered by upstream volume; a failed or unusable upstream (500, a thrown fetch, "
-    + "or an unparseable body) degrades to exactly the two static URLs with a short cache-control "
+    + "or an unparseable body) degrades to exactly the three static URLs with a short cache-control "
     + "and is never cached at the edge, while a successful build is cached 24h"
 
   : "[gt proxy] " + fails + " FAILURES");

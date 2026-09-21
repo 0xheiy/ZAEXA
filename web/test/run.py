@@ -1321,6 +1321,27 @@ def check_landing_page():
           % (len(app_hashes), sorted(known_views)))
 
 
+def check_pairs_footer_link():
+    """پروبِ ۲۱ سپتامبرِ ۲۰۲۶: تا امروز هیچ‌جای سایت به /pairs لینک نداشت و در
+    سایت‌مپ هم نبود، پس هیچ‌کس پیدایش نمی‌کرد. قاعده‌ی مالک: نوارِ بالا برای
+    ابزارهاست، صفحه‌های سایت از فوتر لینک می‌شوند — پس اینجا، ستونِ Trade،
+    بعدِ Flow، نه نوارِ بالا."""
+    index_src = open(os.path.join(HERE, "..", "index.html"), encoding="utf-8").read()
+    landing_src = open(os.path.join(HERE, "..", "landing.html"), encoding="utf-8").read()
+
+    for label, src in (("web/index.html", index_src), ("web/landing.html", landing_src)):
+        m = re.search(r'<h4>Trade</h4>(.*?)</div>', src, re.S)
+        assert m, "%s: could not find the Trade footer column any more" % label
+        trade_block = m.group(1)
+        assert re.search(r'<a href="/pairs">New pairs</a>', trade_block), (
+            "%s: the Trade footer column has no \"New pairs\" link to /pairs — the top nav is for "
+            "tools, site pages are linked from the footer, and nothing points at /pairs without this "
+            "(block: %r)" % (label, trade_block))
+
+    print("[footer pairs link] /pairs is linked as \"New pairs\" in the Trade footer column of both "
+          "web/index.html and web/landing.html")
+
+
 def check_pairs_page():
     """web/pairs.html — نمای فقط-خوانده روی /pairs.json?chain=base.
 
@@ -1711,6 +1732,7 @@ check_cta_shadow_token()
 check_one_executor_address()
 check_dex_parity()
 check_landing_page()
+check_pairs_footer_link()
 check_pairs_page()
 
 
