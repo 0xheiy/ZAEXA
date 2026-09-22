@@ -637,16 +637,47 @@ export const GT_DEX_TO_VENUE = Object.freeze({
    دقیقاً همان کلاسِ drift است که این فایل جاهای دیگر هم رویش هشدار داده. */
 const VD_VENUE_ID_SET = new Set(VD_VENUES.map((v) => v.id));
 
+/* حافظه‌ی یک‌گذر — passPoolsMemo
+   =====================================================================
+   اندازه‌گیری: یک توکنِ v4 که به "nosell" خام می‌رسد، در طولِ همان یک گذرِ
+   ساعتی هم از رویِ ایندکسِ کلیدِ واقعی (fetchV4Pools ← runV4Index) هم از
+   رویِ گاردِ پوشش (baseVenueCoveredDetail ← ogFetchVerdictDetail) دقیقاً
+   همان یک آدرس را از networks/base/tokens/<addr>/pools می‌پرسد — یعنی
+   همان جواب، دوبار، دو ساب‌ریکوئست از سقفِ ۵۰تاییِ همان گذر برایِ یک
+   پرسش. fetchBaseTokenPoolsRaw پایین‌تر این دو تماس را در یک تابعِ خامِ
+   پایه یکی می‌کند؛ passPoolsMemo فقط دومین‌بار همان آدرس را در همان گذر
+   رایگان می‌کند.
+   ⚠️ scheduledReportPass دقیقاً کنارِ جایگزینیِ globalThis.fetch این را
+   new Map() می‌کند و در همان finally که fetch را برمی‌گرداند دوباره null
+   می‌کند (پایین‌تر همین فایل) — یعنی این حافظه فقط عمرِ یک گذرِ زنده را
+   دارد. بیرونِ یک گذر (کارتِ /t/، /vd، /vd/v4) همیشه null می‌ماند و این
+   تابع دقیقاً همان چیزی است که دیروز بود: هر تماس یک fetch واقعیِ خودش.
+   🔴 فقط موفقیت‌ها (ok:true) حافظه می‌شوند — همان قاعده‌ی cachedVerdict
+   بالاتر برایِ verdict: «نامعلوم را هرگز کش نکن». یک ۴۲۹/تایم‌اوتِ گذرا
+   نباید تماسِ دومِ همان توکن را هم کور کند؛ آن یکی باید دوباره واقعاً
+   بپرسد.
+   ⚠️ همان احتیاطِ هم‌زمانیِ globalThis.fetch بالاتر (توضیحِ
+   scheduledReportPass): یک درخواستِ هم‌زمان در همین ایزوله (اگر باشد) هم
+   می‌تواند از همین Map بخواند — یعنی جوابی که می‌بیند حداکثر یک گذر کهنه
+   است، هرگز یک حکمِ باطل؛ همان جوابِ بالادست است، فقط یک‌بار پرسیده شده. */
+let passPoolsMemo = null;
+
 /* آیا برای این توکن، دست‌کم یک استخر روی یکی از صرافی‌های *پوشش‌داده‌شده*
    واقعاً وجود دارد؟ true/false/null — هرگز پرتاب نمی‌کند.
    همان الگوی upstream/کلید که ogFetchMeta دارد (UPSTREAM_KEYED با هدرِ
    x-cg-demo-api-key وقتی env.CG_KEY هست، وگرنه UPSTREAM_FREE)، و همان
    سبکِ سقفِ زمانیِ سخت. */
-/* نسخه‌ی جزئیات‌دارِ baseVenueCovered — { covered, why }. baseVenueCovered
-   پایین‌تر فقط .covered همین تابع را برمی‌گرداند؛ خودِ تصمیمِ true/false/null
-   بایت‌به‌بایت دست‌نخورده می‌ماند، why فقط برای سنجش (ogFetchVerdictDetail)
-   اضافه شده. همان دلیلِ ogFetchMetaDetail بالا برای try جداگانه‌ی fetch. */
-async function baseVenueCoveredDetail(addr, env) {
+/* تماسِ خامِ پایه — یک fetch به networks/base/tokens/<addr>/pools، هرگز
+   پرتاب نمی‌کند: { ok:true, data } یا { ok:false, why }. baseVenueCoveredDetail
+   و fetchV4Pools هر دو رویِ همین یک تابع سوارند (پایین‌تر)، به‌جای دو کپیِ
+   جدا از همین fetch — passPoolsMemo بالا فقط همین‌جا خوانده/نوشته می‌شود. */
+async function fetchBaseTokenPoolsRaw(addr, env) {
+  const memoKey = typeof addr === "string" ? addr.toLowerCase() : "";
+  if (passPoolsMemo instanceof Map && passPoolsMemo.has(memoKey)) {
+    return passPoolsMemo.get(memoKey); // ضربه‌ی حافظه‌ی همین گذر — بدونِ fetch
+  }
+
+  let result;
   try {
     const key = (env && typeof env.CG_KEY === "string" && env.CG_KEY) || "";
     const target = (key ? UPSTREAM_KEYED : UPSTREAM_FREE) +
@@ -661,22 +692,41 @@ async function baseVenueCoveredDetail(addr, env) {
       try {
         up = await fetch(target, { headers: h, signal: ac.signal });
       } catch (e) {
-        return { covered: null, why: ac.signal.aborted ? "cover:timeout" : "cover:0" };
+        result = { ok: false, why: ac.signal.aborted ? "cover:timeout" : "cover:0" };
       }
     } finally {
       clearTimeout(timer);
     }
-    if (!up || !up.ok) return { covered: null, why: "cover:" + (up ? up.status : 0) }; // غیر-۲۰۰ → نامعلوم، نه false
+    if (!result) {
+      if (!up || !up.ok) {
+        result = { ok: false, why: "cover:" + (up ? up.status : 0) }; // غیر-۲۰۰ → نامعلوم، نه false
+      } else {
+        const body = await up.json();
+        result = (!body || !Array.isArray(body.data))
+          ? { ok: false, why: "cover:shape" } // شکلِ غیرقابلِ‌اعتماد → نامعلوم
+          : { ok: true, data: body.data };
+      }
+    }
+  } catch (e) {
+    result = { ok: false, why: "cover:shape" }; // پرتاب (پارس) → نامعلوم، هرگز false
+  }
 
-    const body = await up.json();
-    if (!body || !Array.isArray(body.data)) return { covered: null, why: "cover:shape" }; // شکلِ غیرقابلِ‌اعتماد → نامعلوم
+  if (result.ok === true && passPoolsMemo instanceof Map) passPoolsMemo.set(memoKey, result);
+  return result;
+}
 
+/* نسخه‌ی جزئیات‌دارِ baseVenueCovered — { covered, why }. baseVenueCovered
+   پایین‌تر فقط .covered همین تابع را برمی‌گرداند؛ خودِ تصمیمِ true/false/null
+   بایت‌به‌بایت دست‌نخورده می‌ماند، why فقط برای سنجش (ogFetchVerdictDetail)
+   اضافه شده. همان دلیلِ ogFetchMetaDetail بالا برای try جداگانه‌ی fetch. */
+async function baseVenueCoveredDetail(addr, env) {
+  const r = await fetchBaseTokenPoolsRaw(addr, env);
+  if (!r.ok) return { covered: null, why: r.why };
+  try {
     // v4Listed: آیا در همینِ بدنه‌ی سالم، دست‌کم یک استخر دقیقاً روی
-    // uniswap-v4-base دیده شد؟ فقط برای مسیرهایی که واقعاً بدنه را
-    // خوانده‌اند معنا دارد؛ هیچ‌کدام از return-های زودهنگامِ بالا از این خط
-    // رد نمی‌شوند، پس آن‌جا همیشه false/absent می‌ماند.
+    // uniswap-v4-base دیده شد؟
     let v4Listed = false;
-    for (const pool of body.data) {
+    for (const pool of r.data) {
       const dexId = pool && pool.relationships && pool.relationships.dex &&
         pool.relationships.dex.data && pool.relationships.dex.data.id;
       if (typeof dexId !== "string") continue;
@@ -686,7 +736,7 @@ async function baseVenueCoveredDetail(addr, env) {
     }
     return { covered: false, why: "cover:false", v4Listed }; // بدنه سالم بود، ولی هیچ استخری روی یک صرافیِ پوشش‌داده‌شده نبود
   } catch (e) {
-    return { covered: null, why: "cover:shape" }; // پرتاب (پارس) → نامعلوم، هرگز false
+    return { covered: null, why: "cover:shape" }; // پرتاب → نامعلوم، هرگز false
   }
 }
 
@@ -791,31 +841,14 @@ async function rpcCallBase(method, params, timeoutMs, collect) {
 }
 
 /* همان بالادستِ baseVenueCovered (networks/base/tokens/<addr>/pools) —
-   یک فراخوانیِ جداست، چون baseVenueCovered فقط true/false/null می‌خواهد و
-   خودِ ردیف‌های خام را دور می‌ریزد؛ v4PoolsFromGt (در v4index.js) به همان
-   ردیف‌های خام نیاز دارد و خودش شکلشان را می‌سنجد. */
+   امروز دیگر یک فراخوانیِ جدا نیست: هر دو رویِ همان fetchBaseTokenPoolsRaw
+   بالاتر سوارند، تا در طولِ یک گذر (passPoolsMemo) همان آدرس دوبار
+   پرسیده نشود. fetchV4Pools فقط شکلش با baseVenueCoveredDetail فرق دارد —
+   این‌جا ردیف‌های خامِ data برمی‌گردد (v4PoolsFromGt در v4index.js خودش
+   شکلشان را می‌سنجد)، آن‌جا فقط true/false/null. */
 async function fetchV4Pools(addr, env) {
-  try {
-    const key = (env && typeof env.CG_KEY === "string" && env.CG_KEY) || "";
-    const target = (key ? UPSTREAM_KEYED : UPSTREAM_FREE) +
-      "/networks/base/tokens/" + addr + "/pools";
-    const ac = new AbortController();
-    const timer = setTimeout(() => ac.abort(), OG_TIMEOUT_MS);
-    let up;
-    try {
-      const h = { accept: "application/json" };
-      if (key) h["x-cg-demo-api-key"] = key;
-      up = await fetch(target, { headers: h, signal: ac.signal });
-    } finally {
-      clearTimeout(timer);
-    }
-    if (!up || !up.ok) return null; // غیرِ۲۰۰/پرتاب → نامعلوم، نه فهرستِ خالی
-    const body = await up.json();
-    if (!body || !Array.isArray(body.data)) return null;
-    return body.data;
-  } catch (e) {
-    return null;
-  }
+  const r = await fetchBaseTokenPoolsRaw(addr, env);
+  return r.ok ? r.data : null; // غیرِ۲۰۰/پرتاب/شکلِ بد → نامعلوم، نه فهرستِ خالی
 }
 
 /* چه مدت (ثانیه) نتیجه‌ی ایندکس ذخیره شود، یا اصلاً ذخیره نشود.
@@ -1767,7 +1800,7 @@ async function reportTextRoute(request, url, env) {
   try {
     const parsed = JSON.parse(raw);
     if (!parsed || parsed.date !== dateStr) return textDone(503, "report unreadable\n");
-    text = reportText(parsed);
+    text = reportText(parsed, { solana: true });
     if (text === null) return textDone(503, "report unreadable\n");
   } catch (e) {
     return textDone(503, "report unreadable\n");
@@ -1961,10 +1994,23 @@ async function scheduledReportPass(env, ctx, opts) {
        خاموش کردنش یعنی همان بودجه برای فالوآپ/رِی‌چک/سولانا می‌ماند.
        ⚠️ یک درخواستِ هم‌زمان در همین ایزوله (اگر باشد) هم در طولِ گذر کش
        را میس می‌کند و رویش نمی‌نویسد — طرفِ امن: فقط یعنی آن درخواست
-       کارِ تازه انجام می‌دهد، هرگز یک حکمِ کهنه/باطل نمی‌بیند. */
+       کارِ تازه انجام می‌دهد، هرگز یک حکمِ کهنه/باطل نمی‌بیند.
+
+       🔴 passPoolsMemo (بالاترِ همین فایل، کنارِ fetchBaseTokenPoolsRaw) هم
+       دقیقاً همین‌جا زنده می‌شود: چرا لازم شد — یک توکنِ v4 که در همین گذر
+       به "nosell" خام می‌رسد، هم از رویِ ایندکسِ کلیدِ واقعی (fetchV4Pools)
+       هم از رویِ گاردِ پوشش (baseVenueCoveredDetail) دقیقاً همان یک آدرس را
+       از pools بالادست می‌پرسید — همان جواب، دوبار. فقط موفقیت‌ها حافظه
+       می‌شوند (یک ۴۲۹/تایم‌اوتِ گذرا باید دوباره واقعاً پرسیده شود)، و این
+       حافظه فقط عمرِ همین گذر را دارد — درست مثلِ globalThis.fetch بالا،
+       در همان finally پایین‌تر به null برمی‌گردد. همان احتیاطِ هم‌زمانی هم
+       اینجا صادق است: یک درخواستِ هم‌زمان در همین ایزوله (اگر باشد) هم
+       می‌تواند از همین Map بخواند — یعنی جوابی که می‌بیند حداکثر یک گذر
+       کهنه است، هرگز یک حکمِ باطل؛ همان جوابِ بالادست، فقط یک‌بار پرسیده‌شده. */
     const meter = makeSubMeter();
     const originalFetch = globalThis.fetch;
     globalThis.fetch = meter.fetch;
+    passPoolsMemo = new Map();
     const cacheStore = (typeof caches !== "undefined" && caches.default) || null;
     const originalCacheMatch = cacheStore ? cacheStore.match : null;
     const originalCachePut = cacheStore ? cacheStore.put : null;
@@ -1982,6 +2028,7 @@ async function scheduledReportPass(env, ctx, opts) {
       return await scheduledReportPassInner(env, ctx, opts, meter);
     } finally {
       globalThis.fetch = originalFetch;
+      passPoolsMemo = null;
       if (cacheStore) {
         cacheStore.match = originalCacheMatch;
         cacheStore.put = originalCachePut;

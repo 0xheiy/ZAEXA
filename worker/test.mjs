@@ -8257,7 +8257,9 @@ function stripAllowedWording(t) {
   const rGoodTxt = await call("/report/2026-09-14.txt", { method: "GET" }, { ASSETS, ZX_KV: kvGood });
   ok(rGoodTxt.status === 200, "a well-formed stored doc must answer 200, got " + rGoodTxt.status);
   const bodyGoodTxt = await rGoodTxt.text();
-  ok(bodyGoodTxt === reportText(docA), "the route's body must equal reportText(doc) exactly");
+  ok(bodyGoodTxt === reportText(docA, { solana: true }),
+     "the route's body must equal reportText(doc, {solana:true}) exactly — the route passes " +
+     "{solana:true} since 22 Sep 2026, got " + JSON.stringify(bodyGoodTxt));
   ok(rGoodTxt.headers.get("cache-control") === "public, max-age=86400",
      "a past date must cache 86400s at the edge, got " + rGoodTxt.headers.get("cache-control"));
   ok(askedKey === "report:2026-09-14", "the route must ask KV for reportKey(dateStr), got " +
@@ -9019,8 +9021,11 @@ function stripAllowedWording(t) {
 }
 
 /* ---- ۴۱. GET /report/<...>.txt با ردیف‌های سولانا در KV — پیش‌فرضِ مسیر ----
-   همان مسیرِ واقعی، نه یک فراخوانیِ مستقیمِ reportText: اثباتِ اینکه route
-   هم reportText(parsed) را بدونِ opts صدا می‌زند، دقیقاً مثلِ امروز. */
+   ۲۲ سپتامبر: مسیر دیگر reportText(parsed) را بدونِ opts صدا نمی‌زند —
+   {solana:true} می‌دهد (worker/index.js). این بخش همان مسیرِ واقعی را
+   می‌سنجد، نه یک فراخوانیِ مستقیمِ reportText: اثباتِ اینکه route با یک
+   سندِ دارایِ ردیف‌های سولانا دقیقاً همان چیزی را برمی‌گرداند که
+   reportText(doc, {solana:true}) می‌دهد. */
 {
   const T9R = "2026-09-20T00:00:00.000Z";
   const rowBaseR = reportRow({
@@ -9043,12 +9048,16 @@ function stripAllowedWording(t) {
   ok(rRouteSol.status === 200, "GET /report/2026-09-20.txt with Solana rows in KV must still be 200, "
     + "got " + rRouteSol.status);
   const bodyRouteSol = await rRouteSol.text();
-  ok(!bodyRouteSol.includes("Solana"),
-     "GET /report/<date>.txt must not print \"Solana\" while the block is hidden by default, got " +
+  ok(bodyRouteSol === reportText(docRouteSol, { solana: true }),
+     "GET /report/<date>.txt must equal reportText(doc, {solana:true}) exactly, got " +
+     JSON.stringify(bodyRouteSol));
+  ok(bodyRouteSol.includes("new Solana token"),
+     "since 22 Sep 2026 the route must print the Solana block for a doc that carries Solana rows, got " +
      JSON.stringify(bodyRouteSol));
 
-  console.log("[report route solana hidden] GET /report/<date>.txt calls reportText(doc) with no opts "
-    + "— a stored doc that does carry Solana rows still produces a body with no \"Solana\" substring");
+  console.log("[report route solana shown] GET /report/<date>.txt calls reportText(doc, {solana:true}) "
+    + "— a stored doc that carries Solana rows now produces a body with the Solana block, byte-for-byte "
+    + "equal to calling reportText directly with the same opts");
 }
 
 /* ---- ۴۰. استثنای پوششِ v4 — [cover v4 exception] ----
@@ -11193,6 +11202,380 @@ function stripAllowedWording(t) {
       "(snapshot().cacheSkipped), never bumpStage/total/byStage, and never touches the separate cacheOp() " +
       "counter");
   }
+}
+
+/* ---- ۵۲. یک تماسِ pools به‌ازای هر توکن در هر گذر — [pools memo] ----
+   مسئله: baseVenueCoveredDetail (گاردِ پوشش) و fetchV4Pools (ایندکسِ کلیدِ
+   واقعیِ v4) هر دو دقیقاً همان یک بالادست را می‌پرسند —
+   networks/base/tokens/<addr>/pools. یک توکنِ v4 که در همان گذر به "nosell"
+   خام می‌رسد هر دو را می‌زند، یعنی همان جواب، دوبار، دو ساب‌ریکوئست از سقفِ
+   ۵۰تاییِ همان گذر. fetchBaseTokenPoolsRaw (worker/index.js) این دو را در
+   یک تابعِ خامِ پایه یکی می‌کند و passPoolsMemo فقط دومین‌بار همان آدرس را
+   در همان گذر رایگان می‌کند — فقط موفقیت‌ها، فقط عمرِ همان گذر.
+   ⚠️ cover:429 و cover:timeout به‌عنوانِ why واقعی از baseVenueCoveredDetail
+   از قبل جای دیگری در همین فایل پروب شده‌اند (بخشِ ۲۷ب و بخشِ ۴۰، بالاتر) و
+   دست‌نخورده می‌مانند — این‌جا دوباره تکرار نمی‌شوند، فقط cover:0 و
+   cover:shape که هنوز هیچ‌جا با یک why مستقیم سنجیده نشده بودند تازه اضافه
+   می‌شوند (پایین‌تر، بخشِ ۵). */
+{
+  // ابزارِ مشترکِ همه‌ی زیربخش‌های داخلِ-گذر: یک fetch که هم fetchPools/
+  // fetchPoolsSol/metaMany/metaOf/probeFetch را جواب می‌دهد هم eth_getBlockByNumber/
+  // eth_getLogs (ایندکس) هم batchِ eth_call (حکم) — پاسخِ pools خودش از
+  // بیرون تزریق می‌شود تا هر زیربخش بتواند رفتارِ متفاوتی برایش بسازد.
+  function poolsMemoBody(poolId) {
+    return json({ data: [{
+      relationships: { dex: { data: { id: "uniswap-v4-base" } } },
+      attributes: { address: poolId, pool_created_at: "2026-09-19T00:00:00Z" },
+    }] });
+  }
+  function poolsMemoNewPoolsRow(addr) {
+    return {
+      attributes: {
+        base_token_price_usd: "1", reserve_in_usd: "9000",
+        pool_created_at: "2026-09-19T00:00:00Z", volume_usd: { h24: "0" }, fdv_usd: "0",
+      },
+      relationships: {
+        base_token: { data: { id: "base_" + addr } },
+        dex: { data: { id: "uniswap-v4-base" } },
+      },
+    };
+  }
+  function buildPoolsMemoDispatch({ addr, poolId, newPoolsRow, poolsHandler }) {
+    const logPM = v4BuildLog({
+      poolId, currency0: vd.NATIVE_ADDR, currency1: addr,
+      feeWord: v4wNum(0), tickWord: v4wNum(1), hooksWord: v4wAddrWord(vd.NATIVE_ADDR),
+    });
+    const mk4PM = (n) => "0x" + v4wNum(n) + v4wNum(0) + v4wNum(0) + v4wNum(0);
+    return async (url, init) => {
+      const u = String(url);
+      if (u.includes("/networks/base/new_pools")) return json({ data: [newPoolsRow] });
+      if (u.includes("/networks/solana/new_pools")) return json({ data: [] });
+      if (u.endsWith("/pools")) return poolsHandler();
+      if (u.includes("/tokens/multi/")) return new Response("nope", { status: 500 }); // batch ناموفق → fallback به metaOf
+      if (u.includes("/tokens/")) {
+        return json({ data: { attributes: {
+          name: "Pools Memo Token", symbol: "PMEMO", total_reserve_in_usd: "1000",
+          decimals: 18, price_usd: "1",
+        } } });
+      }
+      if (u.includes("/networks?page=1")) return new Response("", { status: 200 }); // پروبِ سقف
+
+      const parsed = JSON.parse(init.body);
+      if (!Array.isArray(parsed)) {
+        if (parsed.method === "eth_getBlockByNumber") {
+          return json({ jsonrpc: "2.0", id: parsed.id, result: { number: "0x4C4B40", timestamp: "0x68b6a1a0" } });
+        }
+        if (parsed.method === "eth_getLogs") {
+          return json({ jsonrpc: "2.0", id: parsed.id, result: [logPM] });
+        }
+        return json({ jsonrpc: "2.0", id: parsed.id, result: "0x" + "0".repeat(64) }); // v4PoolsEmpty
+      }
+      return json(parsed.map((r) => (r.id === 0
+        ? { id: 0, result: mk4PM(5) }
+        : (isSolidlyReqId(r.id) ? { id: r.id, error: { code: 3 } } : { id: r.id, result: "0x" }))));
+    };
+  }
+
+  // الف) بیرونِ یک گذر (passPoolsMemo === null) — دو تماسِ پشتِ‌سرهم برای
+  // همان آدرس باید دوبار fetch کند؛ هیچ حافظه‌ای نباید به درخواست‌های عادی
+  // نشت کند.
+  {
+    const { baseVenueCoveredDetail: bvcdPM1 } = await import("./index.js");
+    const savedFetch = globalThis.fetch;
+    let calls1 = 0;
+    const ADDR1 = "0x" + "61".repeat(20);
+    globalThis.fetch = async (url) => {
+      if (String(url).endsWith("/pools")) calls1++;
+      return json({ data: [] });
+    };
+    await bvcdPM1(ADDR1, {});
+    await bvcdPM1(ADDR1, {});
+    globalThis.fetch = savedFetch;
+    ok(calls1 === 2,
+       "[pools memo] outside a pass, two calls for the same address must fetch the pools endpoint twice " +
+       "— passPoolsMemo must be null/inert for ordinary (non-pass) callers, got " + calls1 + " calls");
+  }
+
+  // ب) داخلِ scheduledReportPass — یک توکنِ v4 که ایندکس → حکمِ خامِ nosell
+  // → گاردِ پوشش را طی می‌کند باید فقط یک‌بار pools را بزند.
+  {
+    const ADDR2 = "0x" + "6d".repeat(20);
+    const POOL_ID2 = "0x" + "5a".repeat(32);
+    let poolsCalls2 = 0;
+    const savedFetch = globalThis.fetch;
+    globalThis.fetch = buildPoolsMemoDispatch({
+      addr: ADDR2, poolId: POOL_ID2, newPoolsRow: poolsMemoNewPoolsRow(ADDR2),
+      poolsHandler: () => { poolsCalls2++; return poolsMemoBody(POOL_ID2); },
+    });
+    const store2 = new Map();
+    const kv2 = { get: async (k) => (store2.has(k) ? store2.get(k) : null),
+      put: async (k, v) => { store2.set(k, v); } };
+    const res2 = await call("/report/run", { method: "GET", headers: { "x-run-key": "pm-run-2" } },
+      { ASSETS, ZX_KV: kv2, CG_KEY: "SECRET-PM-2", RUN_KEY: "pm-run-2" });
+    globalThis.fetch = savedFetch;
+    ok(res2.status === 200, "[pools memo] GET /report/run must answer 200, got " + res2.status);
+
+    const dateStr2 = utcDateOf(Date.now());
+    const rawDoc2 = await kv2.get(reportKey(dateStr2));
+    const doc2 = rawDoc2 ? JSON.parse(rawDoc2) : null;
+    const row2 = doc2 && doc2.rows.find((r) => r.address === ADDR2);
+    ok(row2 && row2.v === "nosell",
+       "[pools memo] sanity: the fixture must really reach index → raw nosell → coverage guard end to " +
+       "end (not some other codepath that happens to call pools once), got " + JSON.stringify(row2));
+    ok(poolsCalls2 === 1,
+       "[pools memo] a v4 token that goes index -> raw nosell -> coverage guard inside ONE pass must " +
+       "fetch networks/base/tokens/<addr>/pools exactly once, got " + poolsCalls2 + " calls");
+  }
+
+  // ج) یک تماسِ اولِ pools که ۴۲۹ می‌گیرد در طولِ گذر حافظه نمی‌شود — تماسِ
+  // دومِ همان توکن در همان گذر باید واقعاً دوباره بپرسد.
+  {
+    const ADDR3 = "0x" + "6e".repeat(20);
+    const POOL_ID3 = "0x" + "5b".repeat(32);
+    let poolsCalls3 = 0;
+    const savedFetch = globalThis.fetch;
+    globalThis.fetch = buildPoolsMemoDispatch({
+      addr: ADDR3, poolId: POOL_ID3, newPoolsRow: poolsMemoNewPoolsRow(ADDR3),
+      poolsHandler: () => {
+        poolsCalls3++;
+        if (poolsCalls3 === 1) return new Response("rate limited", { status: 429 });
+        return poolsMemoBody(POOL_ID3);
+      },
+    });
+    const store3 = new Map();
+    const kv3 = { get: async (k) => (store3.has(k) ? store3.get(k) : null),
+      put: async (k, v) => { store3.set(k, v); } };
+    const res3 = await call("/report/run", { method: "GET", headers: { "x-run-key": "pm-run-3" } },
+      { ASSETS, ZX_KV: kv3, CG_KEY: "SECRET-PM-3", RUN_KEY: "pm-run-3" });
+    globalThis.fetch = savedFetch;
+    ok(res3.status === 200, "[pools memo] GET /report/run must answer 200, got " + res3.status);
+    ok(poolsCalls3 === 2,
+       "[pools memo] a failed (429) first pools fetch inside a pass must never be memoised (\"unknown is " +
+       "never cached\", same rule as cachedVerdict) — the second caller in the same pass must really " +
+       "fetch again, got " + poolsCalls3 + " calls");
+  }
+
+  // د) بعدِ برگشتنِ scheduledReportPass — هم گذرِ عادی هم گذری که هر fetch
+  // پرتاب می‌کند — یک تماسِ بعدیِ بیرونِ گذر باید دوباره fetch کند
+  // (passPoolsMemo در همان finally که fetch برمی‌گردد null می‌شود).
+  {
+    // د۱) گذرِ عادی — همان آدرسی که در طولِ گذر حافظه شد، بیرونِ گذر دوباره
+    {
+      const ADDR4A = "0x" + "6f".repeat(20);
+      const POOL_ID4A = "0x" + "5c".repeat(32);
+      let poolsCalls4a = 0;
+      const savedFetch = globalThis.fetch;
+      globalThis.fetch = buildPoolsMemoDispatch({
+        addr: ADDR4A, poolId: POOL_ID4A, newPoolsRow: poolsMemoNewPoolsRow(ADDR4A),
+        poolsHandler: () => { poolsCalls4a++; return poolsMemoBody(POOL_ID4A); },
+      });
+      const store4a = new Map();
+      const kv4a = { get: async (k) => (store4a.has(k) ? store4a.get(k) : null),
+        put: async (k, v) => { store4a.set(k, v); } };
+      const res4a = await call("/report/run", { method: "GET", headers: { "x-run-key": "pm-run-4a" } },
+        { ASSETS, ZX_KV: kv4a, CG_KEY: "SECRET-PM-4A", RUN_KEY: "pm-run-4a" });
+      globalThis.fetch = savedFetch;
+      ok(res4a.status === 200 && poolsCalls4a === 1,
+         "[pools memo] sanity setup for 4a: the pass itself must fetch pools exactly once, got " +
+         poolsCalls4a + " calls, status " + res4a.status);
+
+      const { baseVenueCoveredDetail: bvcd4a } = await import("./index.js");
+      let postPassCalls4a = 0;
+      globalThis.fetch = async (url) => {
+        if (String(url).endsWith("/pools")) postPassCalls4a++;
+        return poolsMemoBody(POOL_ID4A);
+      };
+      await bvcd4a(ADDR4A, {});
+      globalThis.fetch = savedFetch;
+      ok(postPassCalls4a === 1,
+         "[pools memo] after scheduledReportPass returns normally, passPoolsMemo must be cleared — a " +
+         "subsequent out-of-pass call for the SAME address that was memoised during the pass must fetch " +
+         "again, got " + postPassCalls4a + " calls");
+    }
+
+    // د۲) گذری که هر fetch پرتاب می‌کند — بازگردانی حتی وقتی هیچ توکنی چک نشد
+    {
+      const savedFetch = globalThis.fetch;
+      globalThis.fetch = async () => { throw new Error("network exploded mid-pass"); };
+      const kv4b = { get: async () => null, put: async () => {} };
+      const res4b = await scheduledReportPass({ ZX_KV: kv4b }, {});
+      globalThis.fetch = savedFetch;
+      ok(res4b && res4b.checked === 0,
+         "[pools memo] a pass where every injected fetch throws must still return gracefully, got " +
+         JSON.stringify(res4b));
+
+      const { baseVenueCoveredDetail: bvcd4b } = await import("./index.js");
+      const ADDR4B = "0x" + "70".repeat(20);
+      let postThrowCalls4b = 0;
+      globalThis.fetch = async () => { postThrowCalls4b++; return json({ data: [] }); };
+      await bvcd4b(ADDR4B, {});
+      globalThis.fetch = savedFetch;
+      ok(postThrowCalls4b === 1,
+         "[pools memo] after a pass where every fetch throws, passPoolsMemo must still be cleared in the " +
+         "same finally as globalThis.fetch — an out-of-pass call right afterward must perform a real " +
+         "fetch, got " + postThrowCalls4b + " calls");
+    }
+  }
+
+  // ه) هر why‌ای که امروز از baseVenueCoveredDetail می‌آید هنوز تولید می‌شود.
+  // cover:429 و cover:timeout از قبل جای دیگری (بخشِ ۲۷ب/۴۰) با یک حکمِ
+  // واقعیِ nosell پشتِ سرشان پروب شده‌اند و دست‌نخورده می‌مانند؛ فقط cover:0
+  // (پرتابِ غیرِ-abort) و cover:shape (بدنه‌ی بدونِ آرایه‌ی data) این‌جا تازه
+  // مستقیماً روی baseVenueCoveredDetail سنجیده می‌شوند.
+  {
+    const { baseVenueCoveredDetail: bvcd5 } = await import("./index.js");
+    const savedFetch = globalThis.fetch;
+
+    globalThis.fetch = async () => { throw new Error("dns lookup failed"); };
+    const r0 = await bvcd5("0x" + "71".repeat(20), {});
+    ok(r0.covered === null && r0.why === "cover:0",
+       "[pools memo] a thrown (non-abort) pools fetch must still surface why:\"cover:0\" through " +
+       "baseVenueCoveredDetail, got " + JSON.stringify(r0));
+
+    globalThis.fetch = async () => json({ data: "not-an-array" });
+    const rShape = await bvcd5("0x" + "72".repeat(20), {});
+    ok(rShape.covered === null && rShape.why === "cover:shape",
+       "[pools memo] a well-formed response whose data is not an array must surface why:\"cover:shape\", " +
+       "got " + JSON.stringify(rShape));
+
+    globalThis.fetch = savedFetch;
+  }
+
+  console.log("[pools memo] fetchBaseTokenPoolsRaw ok — outside a pass two calls for the same address " +
+    "still fetch twice; inside scheduledReportPass a v4 token that goes index -> raw nosell -> coverage " +
+    "guard fetches networks/base/tokens/<addr>/pools exactly once (the second caller reuses the first's " +
+    "answer); a failed (429) first fetch inside a pass is never memoised, so a second caller in the same " +
+    "pass really fetches again; passPoolsMemo is cleared in the same finally as globalThis.fetch, both " +
+    "after a normal pass and after a pass where every fetch throws, so an out-of-pass call right " +
+    "afterward always performs a real fetch; and every why value (cover:429, cover:timeout — already " +
+    "probed elsewhere — plus cover:0 and cover:shape here) still comes out of baseVenueCoveredDetail");
+}
+
+/* ---- ۵۳. سولانا در متنِ عمومیِ روزانه برگشت — [report text solana on] ----
+   ۲۲ سپتامبر: سقفِ ساب‌ریکوئستی که بلوکِ سولانا را ۲۱ سپتامبر مخفی کرده بود
+   رفع شد (بخشِ ۵۱، پاس کش خاموش + ترتیبِ تازه) و مسیرِ /report/<تاریخ>.txt
+   دوباره {solana:true} پاس می‌دهد (worker/index.js). این بخش سه چیز را
+   می‌سنجد: خودِ مسیر، قاعده‌ی تازه‌ی روزِ بدونِ هیچ توکنِ Base ولی با
+   ردیف‌های سولانا (B3)، و اینکه گیتِ opts.solana همچنان پابرجاست. */
+{
+  // ۶) مسیر — یک سندِ Base+Solana، خروجی باید دقیقاً reportText(doc,{solana:true}) باشد
+  {
+    const T6 = "2026-09-22T08:30:00.000Z";
+    const rowBase6 = reportRow({
+      chain: "base", address: "0x" + "9a".repeat(20), symbol: "B6", name: "B6", verdict: "sell",
+      checkedAt: T6, poolCreatedAt: null, priceUsd: 1, reserveUsd: 1, vol24hUsd: 1, fdvUsd: 1,
+      dex: "uniswap-v3-base", why: null,
+    });
+    const rowSol6 = reportRow({
+      chain: "solana", address: "eqNcWScchYa8SKsKS6cg3VyKh3Q3j5K1vKiDj26pump", symbol: "SOL6",
+      name: "Sol Six", verdict: "sell", checkedAt: T6, poolCreatedAt: T6,
+      priceUsd: 0.001, reserveUsd: 5000, vol24hUsd: 100, fdvUsd: 20000, dex: "pumpswap", why: null,
+    });
+    const doc6 = {
+      date: "2026-09-22", generatedAt: T6, chains: ["base", "solana"], checked: 2,
+      rows: [rowBase6, rowSol6],
+    };
+    const kv6 = { get: async () => JSON.stringify(doc6) };
+    const res6 = await call("/report/2026-09-22.txt", { method: "GET" }, { ASSETS, ZX_KV: kv6 });
+    ok(res6.status === 200, "[report text solana on] GET /report/<date>.txt must be 200, got " + res6.status);
+    const body6 = await res6.text();
+    ok(body6 === reportText(doc6, { solana: true }),
+       "[report text solana on] the route's body must equal reportText(doc, {solana:true}) exactly, got " +
+       JSON.stringify(body6));
+    ok(body6.includes("new Solana token"),
+       "[report text solana on] a doc with Base+Solana rows must print \"new Solana token\" through the " +
+       "route, got " + JSON.stringify(body6));
+  }
+
+  // ۷) صفر ردیفِ Base + دو ردیفِ سولانا (یک sell، یک nosell) — رشته‌ی دقیقِ B3
+  {
+    const T7 = "2026-09-22T10:05:00.000Z";
+    function solRow7(extra) {
+      return reportRow(Object.assign({
+        chain: "solana", address: "eqNcWScchYa8SKsKS6cg3VyKh3Q3j5K1vKiDj26pump", symbol: "SOLP7A",
+        name: "Sol P7 A", verdict: "sell", checkedAt: T7, poolCreatedAt: T7,
+        priceUsd: 0.001, reserveUsd: 5000, vol24hUsd: 100, fdvUsd: 20000, dex: "pumpswap", why: null,
+      }, extra));
+    }
+    const rowSellP7 = solRow7({});
+    const rowNosellP7 = solRow7({
+      address: "9xQeWvG816bUx9EPjHmaT23yvVM2ZWbrrpZb9PusVFin", symbol: "SOLP7B", verdict: "nosell",
+    });
+    const doc7 = {
+      date: "2026-09-22", generatedAt: T7, chains: ["solana"], checked: 2,
+      rows: [rowSellP7, rowNosellP7],
+    };
+    const EXPECTED_7 = "Exit Report · 22 Sep\n\nNo new Base tokens were checked.\n\n"
+      + "2 new Solana tokens checked.\n1 failed a simulated buy and sell.\n1 passed a simulated buy and "
+      + "sell.\n0 could not be checked.\n\n$SOLP7B — failed the simulated buy and sell\n"
+      + "zaexa.com/t/9xQeWvG816bUx9EPjHmaT23yvVM2ZWbrrpZb9PusVFin\n\n"
+      + "On Solana, the buy and the sell are simulated together.\nLast check 10:05 UTC.\n";
+    const t7 = reportText(doc7, { solana: true });
+    ok(t7 === EXPECTED_7,
+       "[report text solana on] a day with zero Base rows and two Solana rows must print the exact B3 " +
+       "string, got " + JSON.stringify(t7));
+  }
+
+  // ۸) صفر Base + صفر Solana — رشته‌ی قدیمیِ دست‌نخورده
+  {
+    const doc8 = { date: "2026-09-22", generatedAt: "2026-09-22T10:05:00.000Z", chains: [], checked: 0, rows: [] };
+    const EXPECTED_8 = "Exit Report · 22 Sep\n\nNo new Base tokens were checked.\n";
+    const t8NoOpts = reportText(doc8);
+    const t8True = reportText(doc8, { solana: true });
+    ok(t8NoOpts === EXPECTED_8,
+       "[report text solana on] zero Base + zero Solana rows without opts must be the exact old string, " +
+       "got " + JSON.stringify(t8NoOpts));
+    ok(t8True === EXPECTED_8,
+       "[report text solana on] zero Base + zero Solana rows must give the exact same old string even " +
+       "with {solana:true} — there are no Solana rows to print, got " + JSON.stringify(t8True));
+  }
+
+  // ۹) گیتِ opts.solana پابرجاست — بدونِ opts، هیچ خطِ سولانایی، نه در مسیرِ
+  // total>0 نه در مسیرِ تازه‌ی total===0
+  {
+    const T9 = "2026-09-22T11:00:00.000Z";
+    const rowBase9 = reportRow({
+      chain: "base", address: "0x" + "9b".repeat(20), symbol: "B9", name: "B9", verdict: "sell",
+      checkedAt: T9, poolCreatedAt: null, priceUsd: 1, reserveUsd: 1, vol24hUsd: 1, fdvUsd: 1,
+      dex: "uniswap-v3-base", why: null,
+    });
+    const rowSol9 = reportRow({
+      chain: "solana", address: "eqNcWScchYa8SKsKS6cg3VyKh3Q3j5K1vKiDj26pump", symbol: "SOL9",
+      name: "Sol Nine", verdict: "nosell", checkedAt: T9, poolCreatedAt: T9,
+      priceUsd: 0.001, reserveUsd: 5000, vol24hUsd: 100, fdvUsd: 20000, dex: "pumpswap", why: null,
+    });
+    const doc9WithBase = {
+      date: "2026-09-22", generatedAt: T9, chains: ["base", "solana"], checked: 2,
+      rows: [rowBase9, rowSol9],
+    };
+    const doc9NoBase = {
+      date: "2026-09-22", generatedAt: T9, chains: ["solana"], checked: 1,
+      rows: [rowSol9],
+    };
+    const t9WithBaseNoOpts = reportText(doc9WithBase);
+    ok(t9WithBaseNoOpts !== null && !t9WithBaseNoOpts.includes("Solana"),
+       "[report text solana on] the gate stays: total>0 without opts must still have no Solana line, " +
+       "got " + JSON.stringify(t9WithBaseNoOpts));
+
+    const t9NoBaseNoOpts = reportText(doc9NoBase);
+    const t9NoBaseFalse = reportText(doc9NoBase, { solana: false });
+    const EXPECTED_9 = "Exit Report · 22 Sep\n\nNo new Base tokens were checked.\n";
+    ok(t9NoBaseNoOpts === EXPECTED_9,
+       "[report text solana on] the gate stays on the NEW total===0 path too: without opts, zero Base " +
+       "rows with a Solana row present must still give the exact old string, got " +
+       JSON.stringify(t9NoBaseNoOpts));
+    ok(t9NoBaseFalse === EXPECTED_9,
+       "[report text solana on] {solana:false} on the same zero-Base doc must also give the exact old " +
+       "string, got " + JSON.stringify(t9NoBaseFalse));
+  }
+
+  console.log("[report text solana on] reportText/GET /report/<date>.txt ok — the route passes " +
+    "{solana:true} again (the 21 Sep subrequest cap was fixed on 22 Sep) and its body matches " +
+    "reportText(doc,{solana:true}) exactly for a Base+Solana doc; a day with zero Base tokens but real " +
+    "Solana rows now prints the Solana block with no Base footer line, matching the exact spec'd string; " +
+    "a day with zero rows on both chains is byte-for-byte the old string regardless of opts; and the " +
+    "opts.solana gate itself is unchanged — without it, neither the total>0 path nor the new total===0 " +
+    "path ever prints a Solana line");
 }
 
 console.log(fails === 0

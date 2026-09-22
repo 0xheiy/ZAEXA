@@ -1124,14 +1124,16 @@ function reportTextSymbolLabel(row) {
 
 /* سندِ یک روز → متنِ ساده برای پُست، یا null. خالص، بدونِ I/O، هرگز پرتاب
    نمی‌کند.
-   🔴 بلوکِ سولانا با تصمیمِ مالک، ۲۱ سپتامبرِ ۲۰۲۶، موقتاً مخفی است: اندازه‌گیری
-   نشان داد ۴۳ از ۴۴ ردیفِ سولانا «نمی‌توان چک کرد» می‌شوند، چون این پا آخرِ
-   گذر اجرا می‌شود و ظاهراً گذر پیش از رسیدن به آن سهمیه‌ی ساب‌ریکوئستِ Worker
-   را تمام کرده. تا رفعِ آن باگ، بلوکِ سولانا و خطِ پانویسِ آن فقط وقتی چاپ
-   می‌شوند که صراحتاً opts.solana===true پاس داده شود؛ پیش‌فرض (هر کالرِ
-   امروزی، ازجمله مسیرِ /report/<تاریخ>.txt) باید بایت‌به‌بایت همان چیزی بماند
-   که یک سندِ بدونِ ردیف‌های سولانا تولید می‌کرد. فعال‌سازیِ دوباره فقط با
-   پاس‌دادنِ {solana:true} در همان مسیر انجام می‌شود، نه با تغییرِ اینجا. */
+   🔴 بلوکِ سولانا از ۲۱ سپتامبرِ ۲۰۲۶ تا ۲۲ سپتامبر پشتِ opts.solana===true
+   مخفی بود: اندازه‌گیریِ ۲۱ سپتامبر نشان داد ۴۳ از ۴۴ ردیفِ سولانا «نمی‌توان
+   چک کرد» می‌شدند، چون آن پا آخرِ گذر اجرا می‌شد و گذر پیش از رسیدنش به
+   سهمیه‌ی ساب‌ریکوئستِ Worker می‌خورد. ۲۲ سپتامبر همان سقف رفع شد (کشِ
+   scheduledReportPass خاموش، و ترتیبِ Base→فالوآپ→رِی‌چک→سولانا) و نُه گذرِ
+   زنده‌ی پیاپی نه یک بار به سقف خوردند نه یک ردیف دورریختند — پس مسیرِ
+   /report/<تاریخ>.txt دوباره {solana:true} پاس می‌دهد (worker/index.js).
+   خودِ گیتِ opts.solana اینجا دست‌نخورده می‌ماند: پیش‌فرض (بدونِ opts، یا
+   {solana:false}) همچنان بایت‌به‌بایت همان چیزی است که یک سندِ بدونِ
+   ردیف‌های سولانا تولید می‌کرد — فقط کالرِ صریح می‌تواند بلوک را روشن کند. */
 export function reportText(doc, opts) {
   try {
     if (!doc || typeof doc !== "object" || typeof doc.date !== "string" ||
@@ -1172,10 +1174,56 @@ export function reportText(doc, opts) {
     const [y, m, d] = doc.date.split("-");
     const dateLabel = String(Number(d)) + " " + REPORT_TEXT_MONTHS[Number(m) - 1];
 
+    // بلوکِ سولانا — یک‌بار ساخته می‌شود تا هم مسیرِ total===0 (پایین‌تر) هم
+    // مسیرِ total>0 (پایین‌ترِ همین تابع) دقیقاً همان خط‌ها را چاپ کنند، نه
+    // دو کپیِ جدا که می‌توانند از هم جدا بیفتند. فقط وقتی صدا زده می‌شود که
+    // solTotal>0 (کالر خودش این شرط را می‌سنجد)؛ همیشه با یک خطِ خالی تمام
+    // می‌شود تا هرچه بعدش می‌آید به فهرست نچسبد.
+    function solanaBlockLines() {
+      const out = [
+        solTotal + " new Solana token" + (solTotal === 1 ? "" : "s") + " checked.",
+        solNosellRows.length + " failed a simulated buy and sell.",
+        solSellCount + " passed a simulated buy and sell.",
+        solUnchecked + " could not be checked.",
+      ];
+      if (solNosellRows.length > 0) {
+        out.push("");
+        const listedSol = solNosellRows.slice(0, REPORT_TEXT_MAX_LISTED);
+        listedSol.forEach((r, i) => {
+          if (i > 0) out.push("");
+          out.push(reportTextSymbolLabel(r) + " — failed the simulated buy and sell");
+          out.push("zaexa.com/t/" + r.address);
+        });
+        if (solNosellRows.length > REPORT_TEXT_MAX_LISTED) {
+          out.push("");
+          out.push("+" + (solNosellRows.length - REPORT_TEXT_MAX_LISTED) + " more: zaexa.com/report/" +
+            doc.date + ".json");
+        }
+      }
+      out.push("");
+      return out;
+    }
+
     const lines = ["Exit Report · " + dateLabel, ""];
 
     if (total === 0) {
       lines.push("No new Base tokens were checked.");
+      if (solTotal === 0) return lines.join("\n") + "\n";
+
+      /* ۲۲ سپتامبر: یک روز بدونِ هیچ توکنِ تازه‌ی Base هنوز می‌تواند
+         ردیف‌های سولانا داشته باشد — آن گذر نباید بی‌صدا گم شود. بلوکِ
+         سولانا همان شکلِ همیشگی را می‌گیرد (خودِ solanaBlockLines بالا)،
+         ولی پانویسِ Base («Sell quotes on Base DEXes…») چاپ نمی‌شود — این
+         روز هیچ ردیفِ Baseای ندارد که آن جمله توضیحش بدهد. */
+      lines.push("");
+      lines.push(...solanaBlockLines());
+      lines.push("On Solana, the buy and the sell are simulated together.");
+      if (typeof doc.generatedAt === "string" && Number.isFinite(Date.parse(doc.generatedAt))) {
+        const gd = new Date(doc.generatedAt);
+        const hh = String(gd.getUTCHours()).padStart(2, "0");
+        const mm = String(gd.getUTCMinutes()).padStart(2, "0");
+        lines.push("Last check " + hh + ":" + mm + " UTC.");
+      }
       return lines.join("\n") + "\n";
     }
 
@@ -1229,32 +1277,10 @@ export function reportText(doc, opts) {
 
     // 🔴 بلوکِ سولانا — فقط وقتی حداقل یک ردیفِ سولانا شمرده شده؛ بعدِ کلِ
     // بلوکِ Base (شمارش‌ها، خطِ اختیاریِ follow/ret، و فهرستِ پرچم‌خورده‌ها) و
-    // پیش از خط‌های پانویس. solTotal===0 هیچ خطی اینجا اضافه نمی‌کند.
-    if (solTotal > 0) {
-      // خطِ خالیِ جداکننده همان خطِ خالیِ پایانیِ بلوکِ Base است (همیشه
-      // پیش از پانویس چاپ می‌شود)؛ این بلوک هم مثلِ Base با یک خطِ خالی تمام
-      // می‌شود تا پانویس به فهرست نچسبد.
-      lines.push(solTotal + " new Solana token" + (solTotal === 1 ? "" : "s") + " checked.");
-      lines.push(solNosellRows.length + " failed a simulated buy and sell.");
-      lines.push(solSellCount + " passed a simulated buy and sell.");
-      lines.push(solUnchecked + " could not be checked.");
-
-      if (solNosellRows.length > 0) {
-        lines.push("");
-        const listedSol = solNosellRows.slice(0, REPORT_TEXT_MAX_LISTED);
-        listedSol.forEach((r, i) => {
-          if (i > 0) lines.push("");
-          lines.push(reportTextSymbolLabel(r) + " — failed the simulated buy and sell");
-          lines.push("zaexa.com/t/" + r.address);
-        });
-        if (solNosellRows.length > REPORT_TEXT_MAX_LISTED) {
-          lines.push("");
-          lines.push("+" + (solNosellRows.length - REPORT_TEXT_MAX_LISTED) + " more: zaexa.com/report/" +
-            doc.date + ".json");
-        }
-      }
-      lines.push("");
-    }
+    // پیش از خط‌های پانویس. solTotal===0 هیچ خطی اینجا اضافه نمی‌کند. خودِ
+    // خط‌ها از solanaBlockLines بالاتر می‌آیند — همان تابعی که مسیرِ
+    // total===0 هم استفاده می‌کند.
+    if (solTotal > 0) lines.push(...solanaBlockLines());
 
     lines.push("Sell quotes on Base DEXes, not a simulated round trip.");
     // 🔴 فقط وقتی بلوکِ سولانا واقعاً چاپ شده این خط هم می‌آید — هم‌رده‌ی
