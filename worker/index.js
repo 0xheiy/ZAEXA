@@ -1754,9 +1754,11 @@ async function reportRoute(request, url, env) {
 
   const dateStr = isToday ? utcDateOf(Date.now()) : datePart;
   const doc = await reportDocFor(env, dateStr);
+  const live = dateStr >= utcDateOf(Date.now());
   // امروز زود عوض می‌شود (اجرای ساعتی بعدی)، روزِ گذشته دیگر هرگز عوض
-  // نمی‌شود — عمرِ کش هم همین تفاوت را باید نشان بدهد.
-  const cacheControl = isToday ? "public, max-age=300" : "public, max-age=86400";
+  // نمی‌شود — عمرِ کش هم همین تفاوت را باید نشان بدهد. تاریخِ صریحِ امروز هم
+  // مثل today.json همین رفتار را می‌گیرد.
+  const cacheControl = live ? "public, max-age=300" : "public, max-age=86400";
   // 🔴 store فقط از بیرون دیده می‌شود، هرگز در KV نمی‌نشیند — یک بایندینگِ
   // بسته‌شده-ولی-خالی و یک ZX_KV کاملاً غایب امروز پاسخِ یکسان می‌دهند، و از
   // بیرون هیچ راهی برای فرق‌گذاشتنشان نیست. rows:[] با store:true یعنی
@@ -1806,8 +1808,10 @@ async function reportTextRoute(request, url, env) {
     return textDone(503, "report unreadable\n");
   }
 
-  // همان تفاوتِ عمرِ کشِ reportRoute: امروز زود عوض می‌شود، روزِ گذشته هرگز.
-  const cacheControl = isToday ? "public, max-age=300" : "public, max-age=86400";
+  // همان تفاوتِ عمرِ کشِ reportRoute: امروز زود عوض می‌شود، روزِ گذشته هرگز —
+  // و تاریخِ صریحِ امروز هم مثل today.txt همین رفتار را می‌گیرد.
+  const live = dateStr >= utcDateOf(Date.now());
+  const cacheControl = live ? "public, max-age=300" : "public, max-age=86400";
   return textDone(200, text, { "cache-control": cacheControl });
 }
 

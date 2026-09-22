@@ -11578,6 +11578,64 @@ function stripAllowedWording(t) {
     "path ever prints a Solana line");
 }
 
+/* ---- تاریخِ صریحِ امروز روی /report/<...>.json و .txt — همان کشِ کوتاهِ today ---- */
+{
+  const today = utcDateOf(Date.now());
+  const yesterday = utcDateOf(Date.now() - 86400000);
+  const envNoKv2 = { ASSETS };
+
+  // ۱. تاریخِ صریحِ امروز، JSON — باید مثل today.json کشِ ۵ دقیقه‌ای بگیرد
+  const rExplicitJson = await call("/report/" + today + ".json", { method: "GET" }, envNoKv2);
+  ok(rExplicitJson.status === 200 &&
+     rExplicitJson.headers.get("cache-control") === "public, max-age=300",
+     "GET /report/" + today + ".json must be 200 with public, max-age=300, got " +
+     rExplicitJson.status + " " + rExplicitJson.headers.get("cache-control"));
+
+  // ۲. تاریخِ صریحِ امروز، TXT — همان، با یک سندِ معتبر در KV برای امروز
+  const docExplicitToday = { date: today, generatedAt: null, rows: [] };
+  const kvExplicitToday = { get: async () => JSON.stringify(docExplicitToday) };
+  const rExplicitTxt = await call("/report/" + today + ".txt", { method: "GET" },
+    { ASSETS, ZX_KV: kvExplicitToday });
+  ok(rExplicitTxt.status === 200 &&
+     rExplicitTxt.headers.get("cache-control") === "public, max-age=300",
+     "GET /report/" + today + ".txt must be 200 with public, max-age=300, got " +
+     rExplicitTxt.status + " " + rExplicitTxt.headers.get("cache-control"));
+
+  // ۳. کنترلِ مثبت — دیروز باید همچنان ۸۶۴۰۰ بگیرد، هم JSON هم TXT
+  const rYestJson = await call("/report/" + yesterday + ".json", { method: "GET" }, envNoKv2);
+  ok(rYestJson.status === 200 &&
+     rYestJson.headers.get("cache-control") === "public, max-age=86400",
+     "GET /report/" + yesterday + ".json must be 200 with public, max-age=86400, got " +
+     rYestJson.status + " " + rYestJson.headers.get("cache-control"));
+
+  const docYesterday = { date: yesterday, generatedAt: null, rows: [] };
+  const kvYesterday = { get: async () => JSON.stringify(docYesterday) };
+  const rYestTxt = await call("/report/" + yesterday + ".txt", { method: "GET" },
+    { ASSETS, ZX_KV: kvYesterday });
+  ok(rYestTxt.status === 200 &&
+     rYestTxt.headers.get("cache-control") === "public, max-age=86400",
+     "GET /report/" + yesterday + ".txt must be 200 with public, max-age=86400, got " +
+     rYestTxt.status + " " + rYestTxt.headers.get("cache-control"));
+
+  // ۴. رگرسیون — today.json/today.txt همچنان ۵ دقیقه
+  const rTodayJson2 = await call("/report/today.json", { method: "GET" }, envNoKv2);
+  ok(rTodayJson2.status === 200 &&
+     rTodayJson2.headers.get("cache-control") === "public, max-age=300",
+     "GET /report/today.json must remain public, max-age=300, got " +
+     rTodayJson2.status + " " + rTodayJson2.headers.get("cache-control"));
+
+  const kvTodayTxt2 = { get: async () => JSON.stringify({ date: today, generatedAt: null, rows: [] }) };
+  const rTodayTxt2 = await call("/report/today.txt", { method: "GET" }, { ASSETS, ZX_KV: kvTodayTxt2 });
+  ok(rTodayTxt2.status === 200 &&
+     rTodayTxt2.headers.get("cache-control") === "public, max-age=300",
+     "GET /report/today.txt must remain public, max-age=300, got " +
+     rTodayTxt2.status + " " + rTodayTxt2.headers.get("cache-control"));
+
+  console.log("[report today cache] the explicit UTC date of today gets the same 300s cache as "
+    + "today.json/today.txt on both the JSON and text report routes, while a past date (positive "
+    + "control) still gets 86400s and today.json/today.txt themselves are unaffected");
+}
+
 console.log(fails === 0
   ? "[gt proxy] worker ok — " + REAL.length + " real paths proxied, " + BAD.length +
     " refused without touching the network, 429 passes through with CORS\n" +
