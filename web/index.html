@@ -1161,6 +1161,17 @@ footer .fine{max-width:78ch;margin:46px 0 0;font-size:11.5px;color:var(--tx3);li
     <button class="chip solid" id="connectBtn" aria-haspopup="menu" aria-expanded="false">Connect wallet</button>
     <div class="pop walletPop" id="walletPop" role="menu" aria-label="Wallet menu">
       <div class="walletHead"><span>Wallet</span><span class="walletAddr" id="walletAddr">—</span></div>
+      <!-- ۲۲ سپتامبر، به خواستِ مالک: همان «کپیِ آدرس»ی که در منوی والتِ
+           صفحه‌ی جفت‌های تازه بود، این‌جا هم می‌آید — بالای «قطع اتصال»،
+           چون یک کارِ بی‌خطر پیش از یک کارِ برگشت‌ناپذیر می‌نشیند. -->
+      <button class="walletAction" id="copyAddrBtn" role="menuitem">
+        <span>Copy address</span>
+        <svg class="wIcon" viewBox="0 0 24 24" width="15" height="15" fill="none"
+             stroke="currentColor" stroke-width="2" stroke-linecap="round"
+             stroke-linejoin="round" aria-hidden="true">
+          <rect x="9" y="9" width="11" height="11" rx="2"/>
+          <path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg>
+      </button>
       <!-- آیکون قبلی «⏻» (U+23FB) بود و روی خیلی از گوشی‌ها اصلاً فونت
            ندارد، پس جای آیکون خالی می‌ماند. SVG درون‌خطی به فونت دستگاه
            وابسته نیست و همه‌جا یک‌شکل است. -->
@@ -5969,6 +5980,14 @@ function wire(){
     if(!$("setPop").contains(e.target)&&!$("setBtn").contains(e.target))$("setPop").classList.remove("on");});
   document.addEventListener("mousedown",e=>{
     if(!$("walletPop").contains(e.target)&&!$("connectBtn").contains(e.target))closeWalletMenu();});
+/* کپیِ آدرسِ والت از منو — منو بسته نمی‌شود و متنِ دکمه ۱٫۴ ثانیه «Copied ✓»
+   می‌شود؛ همان قاعده‌ی copyLink که همه‌جای این فایل استفاده می‌شود (کلیپ‌بورد
+   که در دسترس نباشد، همان اعلانِ متنیِ خودش بالا می‌آید). */
+$("copyAddrBtn").onclick=(e)=>{
+  e.stopPropagation();
+  if(!account)return;
+  copyLink(account,$("copyAddrBtn").querySelector("span"));
+};
   document.querySelectorAll("#slipSeg [data-bps]").forEach(b=>b.onclick=()=>{
     slippageBps=+b.dataset.bps;
     document.querySelectorAll("#slipSeg [data-bps]").forEach(x=>x.classList.toggle("on",x===b));

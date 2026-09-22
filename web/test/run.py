@@ -774,6 +774,9 @@ def check_dark_tokens_unchanged():
     ویرایشِ تمِ روشن به‌طورِ ناخواسته روی تمِ تیره هم اثر گذاشته — دقیقاً
     همان ریسکی که «تمِ تیره نباید یک رنگ هم عوض شود» درباره‌اش هشدار داد.
 
+    ⚠️ از ۲۲ سپتامبر pairs.html همان تیره‌ی index.html را دارد و فقط
+    landing.html تیره‌ی بنفشِ خودش را نگه داشته است.
+
     ⚠️ --bg/--card این‌جا *مشترکِ* هر سه فایل نیستند: index.html از قبل
     (پیش از این تغییر، هیچ ربطی به این باگ ندارد) یک تیره‌ی مستقلِ خودش
     دارد (--bg:#0b0d13 / --card:#14171f) — ته‌رنگِ آبیِ برند که در
@@ -786,7 +789,9 @@ def check_dark_tokens_unchanged():
     }
     per_file_expected = {
         "web/landing.html": {"bg": "#0a0810", "card": "#131020"},
-        "web/pairs.html": {"bg": "#0a0810", "card": "#131020"},
+        # ۲۲ سپتامبر: به خواستِ مالک، تمِ تیره‌ی صفحه‌ی جفت‌ها با *اپ* یکی شد
+        # (ته‌رنگِ آبیِ برند)، نه با صفحه‌ی معرفی — چون این صفحه یکی از برگه‌های ابزار است.
+        "web/pairs.html": {"bg": "#0b0d13", "card": "#14171f"},
         "web/index.html": {"bg": "#0b0d13", "card": "#14171f"},
     }
     files = {
@@ -1781,8 +1786,39 @@ check_cta_shadow_token()
 check_one_executor_address()
 check_dex_parity()
 check_landing_page()
+def check_wallet_copy_address():
+    """۲۲ سپتامبر — مالک خواست همان «Copy address»ِ منوی والتِ صفحه‌ی جفت‌ها
+    در اپ هم باشد: داخلِ #walletPop، *پیش از* دکمه‌ی قطع اتصال، و با یک
+    هندلرِ کلیک که آدرسِ والت را کپی می‌کند (نه لینکِ صفحه)."""
+    src = open(os.path.join(HERE, "..", "index.html"), encoding="utf-8").read()
+    start = src.find('id="walletPop"')
+    assert start != -1, "could not find #walletPop in web/index.html"
+    # تا پایانِ همان خوشه‌ی هدر — نه تا اولین </div> که فقط walletHead را می‌بندد
+    end = src.find("</header>", start)
+    assert end != -1, "could not find the end of the header after #walletPop"
+    pop = src[start:end]
+    i_copy = pop.find('id="copyAddrBtn"')
+    i_disc = pop.find('id="disconnectBtn"')
+    assert i_copy != -1, "the wallet menu has no Copy address item (id=copyAddrBtn)"
+    assert i_disc != -1, "the wallet menu lost its Disconnect item"
+    assert i_copy < i_disc, (
+        "Copy address must sit above Disconnect in the wallet menu: a safe action before an "
+        "irreversible one")
+    assert "<span>Copy address</span>" in pop, (
+        "the Copy address item must be labelled exactly \"Copy address\"")
+    assert re.search(r'\$\("copyAddrBtn"\)\.onclick', src), (
+        "nothing wires #copyAddrBtn — the item would be dead markup")
+    handler = src[src.find('$("copyAddrBtn").onclick'):][:400]
+    assert "copyLink(account" in handler, (
+        "the Copy address handler must copy the wallet address (account), got: %s"
+        % handler[:200])
+    print("[wallet copy] the app's wallet menu has Copy address above Disconnect, labelled exactly, "
+          "wired to copyLink(account) — the same item the New pairs page already had")
+
+
 check_pairs_footer_link()
 check_pairs_page()
+check_wallet_copy_address()
 
 
 async def check_theme_migration(p, errors):
@@ -7995,20 +8031,22 @@ async def main():
         w1, werrs1, cerrs1 = await open_wallet_page()
         chip1_text = await w1.eval_on_selector("#walletChip", "e => e.textContent.trim()")
         chip1_href = await w1.eval_on_selector("#walletChip", "e => e.getAttribute('href')")
-        led1_off = await w1.eval_on_selector("#walletChip .led", "e => e.classList.contains('off')")
+        # ۲۲ سپتامبر: چراغ برداشته شد؛ حالا مثلِ اپ، حالتِ وصل‌نشده چیپِ گرادیانی
+        # (chip solid) است و حالتِ وصل چیپِ ساده — paintWallet در web/index.html
+        led1_off = await w1.eval_on_selector("#walletChip", "e => e.classList.contains('solid') && !e.querySelector('.led')")
         await w1.close()
         print("[pairs wallet] no provider/no keys: text=%r href=%s ledOff=%s errors=%s consoleErrs=%s"
               % (chip1_text, chip1_href, led1_off, werrs1, cerrs1))
         assert chip1_text == "Connect wallet", "wrong disconnected chip text: %r" % chip1_text
         assert chip1_href == "/app#swap", "disconnected chip must link to /app#swap, got %r" % chip1_href
-        assert led1_off is True, "disconnected chip's LED is missing the .off class"
+        assert led1_off is True, "the disconnected chip must be a .chip.solid with no LED, like the app's Connect wallet button"
         assert not werrs1 and not cerrs1, "errors on the no-provider load: %s %s" % (werrs1, cerrs1)
 
         # ۲) یک پروایدرِ ۶۹۶۳ که یک حساب اعلام می‌کند -> CONNECTED_INJECTED،
         # فقط eth_accounts، هرگز eth_requestAccounts
         w2, werrs2, cerrs2 = await open_wallet_page(init_script=fake_provider_script(FAKE_ADDR))
         chip2_text = await w2.eval_on_selector("#walletChip", "e => e.textContent.trim()")
-        led2_off = await w2.eval_on_selector("#walletChip .led", "e => e.classList.contains('off')")
+        led2_off = await w2.eval_on_selector("#walletChip", "e => e.classList.contains('solid') || !!e.querySelector('.led')")
         await w2.click("#walletChip")
         await w2.wait_for_timeout(100)
         pop2_addr = await w2.eval_on_selector("#walletPopAddr", "e => e.textContent.trim()")
@@ -8017,7 +8055,7 @@ async def main():
         print("[pairs wallet] injected: chipText=%r ledOff=%s popoverAddr=%r methods=%s errors=%s "
               "consoleErrs=%s" % (chip2_text, led2_off, pop2_addr, methods2, werrs2, cerrs2))
         assert chip2_text == FAKE_SHORT, "chip did not show the short address: %r" % chip2_text
-        assert led2_off is False, "connected chip's LED still has the .off class"
+        assert led2_off is False, "the connected chip must be a plain .chip with no LED, like the app"
         assert pop2_addr == FAKE_ADDR, "popover did not show the full address: %r" % pop2_addr
         assert methods2 == ["eth_accounts"], (
             "the fake provider received something other than exactly one eth_accounts call: %s" % methods2)
@@ -8072,7 +8110,7 @@ async def main():
         # CONNECTED_REMOTE؛ بدونِ کتابخانه‌ی WalletConnect، بدونِ Disconnectِ محلی
         w5, werrs5, cerrs5 = await open_wallet_page(init_script=(
             "localStorage.setItem('wc@2:client:0.3//session', JSON.stringify({topic:'abc'}));"))
-        led5_off = await w5.eval_on_selector("#walletChip .led", "e => e.classList.contains('off')")
+        led5_off = await w5.eval_on_selector("#walletChip", "e => e.classList.contains('solid') || !!e.querySelector('.led')")
         await w5.click("#walletChip")
         await w5.wait_for_timeout(100)
         pop5_html = await w5.eval_on_selector("#walletPop", "e => e.innerHTML")
@@ -8085,7 +8123,7 @@ async def main():
         print("[pairs wallet] wc session, no injected provider: ledOff=%s discAppHref=%s "
               "localDiscPresent=%s errors=%s consoleErrs=%s"
               % (led5_off, disc_app_href5, local_disc_present5, werrs5, cerrs5))
-        assert led5_off is False, "the WalletConnect-session chip still shows the off LED"
+        assert led5_off is False, "the WalletConnect-session chip must be a plain .chip with no LED"
         assert "WalletConnect" in pop5_html, (
             "the popover does not mention WalletConnect for a remote session: %r" % pop5_html)
         assert disc_app_href5 == "/app#swap", (
