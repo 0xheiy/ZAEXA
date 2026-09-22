@@ -1370,6 +1370,15 @@ def check_pairs_page():
     assert os.path.exists(path), "web/pairs.html is missing"
     src = open(path, encoding="utf-8").read()
 
+    # ---- فاویکان — همان خطِ web/landing.html، بایت‌به‌بایت (باگ: تا امروز
+    # pairs.html اصلاً <link rel="icon"> نداشت). ----
+    lnd_src_for_favicon = open(os.path.join(HERE, "..", "landing.html"), encoding="utf-8").read()
+    favicon_line = next(
+        (ln for ln in lnd_src_for_favicon.splitlines() if ln.startswith('<link rel="icon"')), None)
+    assert favicon_line, "web/landing.html has no <link rel=\"icon\"> line to compare against"
+    assert favicon_line in src, (
+        "web/pairs.html is missing web/landing.html's exact <link rel=\"icon\"> line")
+
     assert "<h1>New pairs</h1>" in src, (
         "web/pairs.html's <h1> must read exactly \"New pairs\"")
     sub_copy = ("The newest Base pools we found, each run through the same exit check as the "
@@ -1397,7 +1406,7 @@ def check_pairs_page():
     }
     for verdict, line in legend_lines.items():
         assert line in src, (
-            "web/pairs.html's always-visible legend is missing the exact %r markup: %r"
+            "web/pairs.html's present legend is missing the exact %r markup: %r"
             % (verdict, line))
 
     js_labels = {
@@ -1422,15 +1431,21 @@ def check_pairs_page():
         "an unknown-verdict badge also carries a positive/negative class: %s — unknown must "
         "never look like a pass or a fail" % tainted)
 
-    # ---- فقط دو اندپوینتِ بک‌اندِ مجاز: /pairs.json?chain=base و پراکسیِ
-    # لوگوی توکن (/gt/networks/base/tokens/multi/) — هرچیزِ دیگر رد می‌شود.
-    # ۲۲ سپتامبر ۲۰۲۶: تصمیمِ مالک برای لوگوهای این صفحه دومی را عمداً اضافه
-    # کرد؛ نگهبان همچنان می‌سنجد که چیزِ سومی اضافه نشده باشد.
+    # ---- فقط اندپوینت‌های بک‌اندِ مجاز: /pairs.json?chain=base|solana و
+    # پراکسیِ لوگوی توکن برای هر دو زنجیره (/gt/networks/base/tokens/multi/
+    # و /gt/networks/solana/tokens/multi/) — هرچیزِ دیگر رد می‌شود.
+    # ۲۲ سپتامبر ۲۰۲۶: ریدیزاینِ صفحه سولانا را هم اضافه کرد؛ نگهبان حالا هر
+    # دو زنجیره را با هم می‌پذیرد، ولی همچنان می‌سنجد که چیزِ سومی
+    # (زنجیره‌ی سوم یا اندپوینتِ دیگر) اضافه نشده باشد.
     assert "/pairs.json?chain=base" in src, (
         "web/pairs.html never calls /pairs.json?chain=base — it has no data to show")
-    GT_LOGO_PREFIX = "/gt/networks/base/tokens/multi/"
-    assert GT_LOGO_PREFIX in src, (
-        "web/pairs.html never calls %s — token logos have no data to show" % GT_LOGO_PREFIX)
+    GT_LOGO_PREFIX_BASE = "/gt/networks/base/tokens/multi/"
+    GT_LOGO_PREFIX_SOLANA = "/gt/networks/solana/tokens/multi/"
+    assert GT_LOGO_PREFIX_BASE in src, (
+        "web/pairs.html never calls %s — token logos have no data to show" % GT_LOGO_PREFIX_BASE)
+    assert GT_LOGO_PREFIX_SOLANA in src, (
+        "web/pairs.html never calls %s — Solana token logos have no data to show" % GT_LOGO_PREFIX_SOLANA)
+    GT_LOGO_PREFIXES = (GT_LOGO_PREFIX_BASE, GT_LOGO_PREFIX_SOLANA)
     # ⚠️ رشته‌های این صفحه با نقل‌قولِ تکی نوشته می‌شوند (همان قراردادِ خودِ
     # فایل، نه دوتایی) — نگهبانِ قبلی فقط رشته‌های دوتایی را می‌دید، پس
     # حتی خودِ /pairs.json?chain=base هم از دیدش پنهان بود. اینجا هر دو نوعِ
@@ -1438,15 +1453,20 @@ def check_pairs_page():
     # واقعاً گیر بیفتد.
     other_backend = [
         m[1] for m in re.findall(r'(["\'])(/(?:gt|vd|ev|report)(?:[/?][^"\']*)?)\1', src)
-        if not m[1].startswith(GT_LOGO_PREFIX)
+        if not m[1].startswith(GT_LOGO_PREFIXES)
     ]
     assert not other_backend, (
         "web/pairs.html references a backend path other than /pairs.json or %s: %s — this page "
-        "must add no new backend beyond the two allowed paths and must not reach into another "
-        "endpoint's traffic" % (GT_LOGO_PREFIX, other_backend))
+        "must add no new backend beyond the allowed paths and must not reach into another "
+        "endpoint's traffic" % (GT_LOGO_PREFIXES, other_backend))
     other_json = [m for m in re.findall(r'"([^"]*\.json[^"]*)"', src) if "pairs.json" not in m]
     assert not other_json, (
         "web/pairs.html references a .json path other than /pairs.json: %s" % other_json)
+    # پارامترِ chain فقط base یا solana — چیزِ سومی هرگز.
+    pairs_json_chains = set(re.findall(r"pairs\.json\?chain=([a-zA-Z]+)", src))
+    assert pairs_json_chains and pairs_json_chains <= {"base", "solana"}, (
+        "web/pairs.html references /pairs.json?chain=<x> with x outside {base, solana}: %s"
+        % pairs_json_chains)
 
     # ---- بدونِ منبعِ بیرونی، جز خودِ سایت ----
     # web/landing.html هیچ فونتی را از یک میزبانِ بیرونی نمی‌خواهد (هر دو
@@ -1483,10 +1503,10 @@ def check_pairs_page():
         "with no data baked in, only the fetch against /pairs.json?chain=base" % addrs)
 
     print("[pairs page] %d bytes, all 3 verdict labels/meanings present byte-for-byte, permanent "
-          "note present, only /pairs.json?chain=base and %s referenced (%d other backend/.json "
-          "refs), %d external refs (all allowed: %s), theme key %r shared with landing.html, "
-          "no baked-in token address"
-          % (len(src), GT_LOGO_PREFIX, len(other_backend) + len(other_json), len(refs),
+          "note present, only /pairs.json?chain=base|solana and %s referenced (%d other "
+          "backend/.json refs), %d external refs (all allowed: %s), theme key %r shared with "
+          "landing.html, no baked-in token address"
+          % (len(src), GT_LOGO_PREFIXES, len(other_backend) + len(other_json), len(refs),
              sorted(allowed_hosts), theme_key))
 
 
@@ -6966,7 +6986,7 @@ async def main():
                        "fdvUsd": None, "dex": "unknown-dex"}
 
         async def open_pairs(body_or_status, viewport=None, abort=False, gt_handler=None,
-                              extra_routes=None, console_sink=None):
+                              extra_routes=None, console_sink=None, path_suffix=""):
             ppg = await b.new_page(viewport=viewport or {"width": 1240, "height": 900})
             perrs = []
             ppg.on("pageerror", lambda e: perrs.append(str(e)))
@@ -6981,20 +7001,21 @@ async def main():
                                      body=_jsonPairs.dumps(body_or_status))
             await ppg.route("**/pairs.json**", stub_pairs)
 
-            # پیش‌فرض: پاسخِ خالی برای پراکسیِ لوگو — کاوشگرهای ۱ تا ۵ (بالا)
-            # کاری به لوگو ندارند، فقط نباید یک درخواستِ واقعیِ رهاشده به
-            # سرورِ استاتیکِ محلی بخورد. کاوشگرهای [pairs logos] خودشان
-            # gt_handler می‌دهند.
+            # پیش‌فرض: پاسخِ خالی برای پراکسیِ لوگو (هر دو زنجیره) — کاوشگرهای
+            # ۱ تا ۵ (بالا) کاری به لوگو ندارند، فقط نباید یک درخواستِ واقعیِ
+            # رهاشده به سرورِ استاتیکِ محلی بخورد. کاوشگرهای [pairs logos]
+            # خودشان gt_handler می‌دهند (فقط برای base).
             async def default_gt(route):
                 await route.fulfill(status=200, content_type="application/json",
                                      body=_jsonPairs.dumps({"data": []}))
             await ppg.route("**/gt/networks/base/tokens/multi/**", gt_handler or default_gt)
+            await ppg.route("**/gt/networks/solana/tokens/multi/**", default_gt)
 
             if extra_routes:
                 for pattern, handler in extra_routes:
                     await ppg.route(pattern, handler)
 
-            await ppg.goto("http://127.0.0.1:%d/pairs.html" % port)
+            await ppg.goto("http://127.0.0.1:%d/pairs.html%s" % (port, path_suffix))
             await ppg.wait_for_timeout(600)
             return ppg, perrs
 
@@ -7470,6 +7491,437 @@ async def main():
             assert box["whiteSpace"] != "nowrap", (
                 "the verdict-note's white-space is nowrap — it can never wrap at %s: %r"
                 % (label, box))
+
+        # ---- [pairs header] هدرِ تازه‌ی pairs.html — همان الگوی ناوبریِ اپ:
+        # برند/ناوبریِ مرکزی/دکمه‌ی تم، بدونِ .header-cta. ----
+        hpg, herrs = await open_pairs({"chain": "base", "rows": [], "store": True})
+        hinfo = await hpg.evaluate("""() => {
+            const nav = document.querySelector('.nav');
+            const links = nav ? [...nav.querySelectorAll('a')] : [];
+            const hdr = document.querySelector('.site-header').getBoundingClientRect();
+            const navR = nav.getBoundingClientRect();
+            return {
+                count: links.length,
+                hrefs: links.map(a => a.getAttribute('href')),
+                lastCurrent: links.length ? links[links.length - 1].getAttribute('aria-current') : null,
+                lastOn: links.length ? links[links.length - 1].classList.contains('on') : false,
+                navCenter: Math.round(navR.left + navR.width / 2),
+                hdrCenter: Math.round(hdr.left + hdr.width / 2),
+                hasCta: !!document.querySelector('.header-cta'),
+                hasFavicon: !!document.querySelector('link[rel="icon"]'),
+            };
+        }""")
+        await hpg.close()
+        print("[pairs header] links=%s hrefs=%s lastCurrent=%s lastOn=%s navCenter=%s hdrCenter=%s "
+              "hasCta=%s hasFavicon=%s errors=%s"
+              % (hinfo["count"], hinfo["hrefs"], hinfo["lastCurrent"], hinfo["lastOn"],
+                 hinfo["navCenter"], hinfo["hdrCenter"], hinfo["hasCta"], hinfo["hasFavicon"], herrs))
+        assert hinfo["count"] == 4, "expected 4 nav links in pairs.html's header, found %s" % hinfo["count"]
+        assert hinfo["hrefs"] == ["/app#swap", "/app#folio", "/app#flow", "/pairs"], (
+            "pairs.html's header nav hrefs are wrong: %s" % hinfo["hrefs"])
+        assert hinfo["lastCurrent"] == "page", "the New pairs link must carry aria-current=\"page\""
+        assert hinfo["lastOn"], "the New pairs link must carry the .on look"
+        assert abs(hinfo["navCenter"] - hinfo["hdrCenter"]) <= 2, (
+            "pairs.html's header nav is not centred at 1240px: nav=%s header=%s"
+            % (hinfo["navCenter"], hinfo["hdrCenter"]))
+        assert not hinfo["hasCta"], "pairs.html's header must not have a .header-cta any more"
+        assert hinfo["hasFavicon"], "pairs.html is missing a <link rel=\"icon\">"
+        assert not herrs, "web/pairs.html threw while rendering the header: %s" % herrs
+
+        hpg2, herrs2 = await open_pairs({"chain": "base", "rows": [], "store": True})
+        await hpg2.set_viewport_size({"width": 800, "height": 900})
+        await hpg2.wait_for_timeout(150)
+        band800 = await hpg2.evaluate(
+            """() => { const s = document.querySelector('.nav a span');
+                       return s ? getComputedStyle(s).display : null; }""")
+        print("[pairs header] 800px label display=%s" % band800)
+        assert band800 == "none", "pairs.html's nav labels are not hidden at 800px: %s" % band800
+
+        for w in (390, 360):
+            await hpg2.set_viewport_size({"width": w, "height": 844})
+            await hpg2.wait_for_timeout(150)
+            mob = await hpg2.evaluate("""() => {
+                const items = [...document.querySelectorAll('.nav a')];
+                const cs = getComputedStyle(document.querySelector('.nav'));
+                return {
+                    count: items.length,
+                    position: cs.position,
+                    widths: items.map(a => Math.round(a.getBoundingClientRect().width)),
+                    scrollW: document.documentElement.scrollWidth,
+                    innerW: innerWidth,
+                };
+            }""")
+            print("[pairs header] mobile %spx: %s" % (w, mob))
+            assert mob["count"] == 4, "expected 4 nav items at %spx, found %s" % (w, mob["count"])
+            assert mob["position"] == "fixed", "pairs.html's nav is not fixed at %spx" % w
+            assert max(mob["widths"]) - min(mob["widths"]) <= 4, (
+                "pairs.html's 4 bottom-nav items are not equal width at %spx: %s" % (w, mob["widths"]))
+            assert mob["scrollW"] <= mob["innerW"], (
+                "pairs.html scrolls horizontally at %spx (%s > %s)"
+                % (w, mob["scrollW"], mob["innerW"]))
+        await hpg2.close()
+        assert not herrs2, "web/pairs.html threw while resizing the header: %s" % herrs2
+
+        print("[pairs header] 4 nav links (Swap/Portfolio/Flow/New pairs) with the right hrefs, New "
+              "pairs carries aria-current=page and the .on look, centred at 1240px, labels hidden at "
+              "800px, fixed 4-equal-width bottom bar at 390/360px with no horizontal scroll, no "
+              ".header-cta, favicon present")
+
+        # ---- [pairs chain] تب‌های Base/Solana — URL، fetch، Trade فقط روی
+        # Base، برچسبِ چیپ‌های سولانا Passed/Failed/Unknown. ----
+        SOLANA_SELL_ROW = {"chain": "solana", "address": "Sol" + "1" * 41, "symbol": "SOLA",
+                            "name": "Sol Alpha", "v": "sell", "checkKind": "sell-quote",
+                            "checkedAt": "2020-01-01T00:00:00.000Z",
+                            "poolCreatedAt": "2020-01-01T00:00:00.000Z",
+                            "priceUsd": 0.05, "reserveUsd": 12000, "vol24hUsd": 3000,
+                            "fdvUsd": 500000, "dex": "raydium"}
+
+        requested_urls = []
+
+        async def stub_pairs_track(route):
+            requested_urls.append(route.request.url)
+            is_solana = "chain=solana" in (route.request.url.split("?", 1)[-1])
+            body = {"chain": "solana" if is_solana else "base",
+                    "rows": [SOLANA_SELL_ROW] if is_solana else [SELL_ROW], "store": True}
+            await route.fulfill(status=200, content_type="application/json", body=_jsonPairs.dumps(body))
+
+        async def empty_gt(route):
+            await route.fulfill(status=200, content_type="application/json",
+                                 body=_jsonPairs.dumps({"data": []}))
+
+        cpg = await b.new_page(viewport={"width": 1240, "height": 900})
+        cerrs = []
+        cpg.on("pageerror", lambda e: cerrs.append(str(e)))
+        await cpg.route("**/pairs.json**", stub_pairs_track)
+        await cpg.route("**/gt/networks/base/tokens/multi/**", empty_gt)
+        await cpg.route("**/gt/networks/solana/tokens/multi/**", empty_gt)
+        await cpg.goto("http://127.0.0.1:%d/pairs.html?chain=solana" % port)
+        await cpg.wait_for_timeout(500)
+        first_url = requested_urls[-1] if requested_urls else None
+        trade_count_solana = await cpg.eval_on_selector_all("#rowsBody .trade-btn", "els => els.length")
+        chip_texts_solana = await cpg.eval_on_selector_all(
+            "#statsStrip .stat-chip", "els => els.map(e => e.textContent)")
+        copy_solana = await cpg.evaluate(
+            "() => [document.querySelector('.pairs-main .sub').textContent,"
+            " document.querySelector('.pairs-main .note').textContent]")
+
+        await cpg.click('.chain-tabs button[data-chain="base"]')
+        await cpg.wait_for_timeout(500)
+        second_url = requested_urls[-1] if requested_urls else None
+        url_after_click = cpg.url
+        copy_base = await cpg.evaluate(
+            "() => [document.querySelector('.pairs-main .sub').textContent,"
+            " document.querySelector('.pairs-main .note').textContent]")
+        # زیرتیتر و یادداشتِ Base ادعای «کوتِ فروش» دارند — روی سولانا (شبیه‌سازی) غلط بود
+        print("[pairs chain] copy solana=%s base=%s" % (copy_solana, copy_base))
+        assert "Solana" in copy_solana[0] and "Base" not in copy_solana[0], (
+            "on the Solana tab the sub-heading must speak about Solana, got %r" % copy_solana[0])
+        assert "sell quote" not in copy_solana[1].lower(), (
+            "on the Solana tab the note must not claim a sell quote, got %r" % copy_solana[1])
+        assert copy_base[0] == ("The newest Base pools we found, each run through the same exit check "
+                                "as the app. Updated hourly."), (
+            "switching back to Base must restore the exact Base sub-heading, got %r" % copy_base[0])
+        assert copy_base[1].startswith("A sell quote is not a promise."), (
+            "switching back to Base must restore the exact permanent note, got %r" % copy_base[1])
+        trade_count_base = await cpg.eval_on_selector_all("#rowsBody .trade-btn", "els => els.length")
+        await cpg.close()
+
+        print("[pairs chain] initial url=%s trade(solana)=%s chips(solana)=%s -> click Base: url=%s "
+              "pageUrl=%s trade(base)=%s errors=%s"
+              % (first_url, trade_count_solana, chip_texts_solana, second_url, url_after_click,
+                 trade_count_base, cerrs))
+        assert first_url and "chain=solana" in first_url, (
+            "loading /pairs.html?chain=solana did not request chain=solana, got %s" % first_url)
+        assert trade_count_solana == 0, (
+            "a Solana row must never show a Trade link, found %d" % trade_count_solana)
+        assert chip_texts_solana == ["All 1", "Passed 1", "Failed 0", "Unknown 0"], (
+            "the Solana stat chips must read Passed/Failed/Unknown, got %s" % chip_texts_solana)
+        assert second_url and "chain=base" in second_url, (
+            "clicking the Base tab did not request chain=base, got %s" % second_url)
+        assert "chain=solana" not in url_after_click, (
+            "the page URL must drop ?chain= entirely for base (absent means base), got %s"
+            % url_after_click)
+        assert trade_count_base == 1, (
+            "a Base row must show a Trade link after switching back, found %d" % trade_count_base)
+        assert not cerrs, "web/pairs.html threw while switching chains: %s" % cerrs
+
+        print("[pairs chain] pairs.html?chain=solana requests /pairs.json?chain=solana; clicking the "
+              "Base tab switches both the request and the URL (absent chain param = base); Solana "
+              "rows show no Trade link; Solana chip labels read Passed/Failed/Unknown")
+
+        # ---- [pairs filters] چیپ‌های آمار × جست‌وجو × مرتب‌سازی — ترکیب‌های
+        # دقیق، رویِ یک استابِ ۶ ردیفی. ----
+        FILTER_ROWS = [
+            dict(SELL_ROW, address="0x" + "a1" * 20, symbol="FA1", name="Filter Alpha",
+                 reserveUsd=1000, vol24hUsd=50, poolCreatedAt="2020-01-01T00:00:00.000Z"),
+            dict(SELL_ROW, address="0x" + "a2" * 20, symbol="FA2", name="Filter Beta",
+                 reserveUsd=5000, vol24hUsd=10, poolCreatedAt="2020-01-03T00:00:00.000Z"),
+            dict(NOSELL_ROW, address="0x" + "a3" * 20, symbol="FA3", name="Filter Gamma",
+                 reserveUsd=2000, vol24hUsd=90, poolCreatedAt="2020-01-02T00:00:00.000Z"),
+            dict(NOSELL_ROW, address="0x" + "a4" * 20, symbol="FA4", name="Filter Delta",
+                 reserveUsd=None, vol24hUsd=None, poolCreatedAt=None),
+            dict(UNKNOWN_ROW, address="0x" + "a5" * 20, symbol="FA5", name="Filter Epsilon",
+                 reserveUsd=3000, vol24hUsd=70, poolCreatedAt="2020-01-04T00:00:00.000Z"),
+            dict(UNKNOWN_ROW, address="0x" + "a6" * 20, symbol="FA6", name="Filter Zeta",
+                 reserveUsd=4000, vol24hUsd=30, poolCreatedAt="2019-12-31T00:00:00.000Z"),
+        ]
+        fpg, ferrs = await open_pairs({"chain": "base", "rows": FILTER_ROWS, "store": True})
+
+        async def syms(page):
+            return await page.eval_on_selector_all(
+                "#rowsBody .token-sym", "els => els.map(e => e.textContent.trim())")
+
+        async def chip_counts(page):
+            return await page.eval_on_selector_all(
+                "#statsStrip .stat-chip", "els => els.map(e => e.textContent)")
+
+        async def click_chip(page, name):
+            await page.click('#statsStrip button[data-filter="%s"]' % name)
+            await page.wait_for_timeout(120)
+
+        async def set_sort(page, val):
+            await page.select_option("#pairSort", val)
+            await page.wait_for_timeout(120)
+
+        counts0 = await chip_counts(fpg)
+
+        await set_sort(fpg, "liq")
+        order_liq = await syms(fpg)
+
+        await click_chip(fpg, "sell")
+        await set_sort(fpg, "vol")
+        order_sell_vol = await syms(fpg)
+
+        await click_chip(fpg, "nosell")
+        await set_sort(fpg, "newest")
+        await fpg.fill("#pairSearch", "delta")
+        await fpg.wait_for_timeout(150)
+        order_nosell_delta = await syms(fpg)
+        counts_during_filter = await chip_counts(fpg)
+
+        await fpg.fill("#pairSearch", "")
+        await click_chip(fpg, "unknown")
+        await set_sort(fpg, "age")
+        order_unknown_age = await syms(fpg)
+
+        await click_chip(fpg, "all")
+        await set_sort(fpg, "newest")
+        await fpg.wait_for_timeout(150)
+        order_restored = await syms(fpg)
+        await fpg.close()
+
+        print("[pairs filters] chip counts=%s liq-sort=%s sell+vol=%s nosell+search(delta)=%s "
+              "countsDuringFilter=%s unknown+age=%s all-restored=%s errors=%s"
+              % (counts0, order_liq, order_sell_vol, order_nosell_delta, counts_during_filter,
+                 order_unknown_age, order_restored, ferrs))
+        assert counts0 == ["All 6", "Sell quoted 2", "No sell quote 2", "Unknown 2"], (
+            "the stat chip counts do not match the stub's verdict counts: %s" % counts0)
+        assert counts_during_filter == counts0, (
+            "the stat chip counts changed while a chip filter + search were active — they must "
+            "always reflect the full loaded chain, never the filtered/searched subset: %s != %s"
+            % (counts_during_filter, counts0))
+        assert order_liq == ["FA2", "FA6", "FA5", "FA3", "FA1", "FA4"], (
+            "Liquidity sort (desc, missing last) gave the wrong order: %s" % order_liq)
+        assert order_sell_vol == ["FA1", "FA2"], (
+            "sell filter + 24h volume sort gave the wrong order: %s" % order_sell_vol)
+        assert order_nosell_delta == ["FA4"], (
+            "no-sell-quote filter + search \"delta\" gave the wrong result: %s" % order_nosell_delta)
+        assert order_unknown_age == ["FA5", "FA6"], (
+            "unknown filter + pool-age sort gave the wrong order: %s" % order_unknown_age)
+        assert order_restored == ["FA1", "FA2", "FA3", "FA4", "FA5", "FA6"], (
+            "clicking All did not restore the full, server-order list: %s" % order_restored)
+        assert not ferrs, "web/pairs.html threw during the filters probe: %s" % ferrs
+
+        print("[pairs filters] stat-chip counts match the stub's per-verdict counts; chip filter x "
+              "search x sort combinations (Liquidity/24h volume/Pool age, missing values sorted last) "
+              "give the exact expected row order; clicking All restores the full server-order list")
+
+        # ---- [pairs rows] ردیفِ چگال — ارتفاع، Trade، Copy، سلولِ یک‌خطیِ توکن. ----
+        ROW_NAME_ROW = dict(SELL_ROW, address="0x" + "b1" * 20, symbol="ROWX",
+                             name="A Very Long Token Name For Truncation Test 12")
+        assert len(ROW_NAME_ROW["name"]) >= 40, "fixture name must be >=40 chars for the row-height probe"
+
+        rpg = await b.new_page(viewport={"width": 1280, "height": 900})
+        rerrs = []
+        rpg.on("pageerror", lambda e: rerrs.append(str(e)))
+        await rpg.route("**/pairs.json**", lambda route: route.fulfill(
+            status=200, content_type="application/json",
+            body=_jsonPairs.dumps({"chain": "base", "rows": [ROW_NAME_ROW, SELL_ROW], "store": True})))
+        await rpg.route("**/gt/networks/base/tokens/multi/**", empty_gt)
+        await rpg.route("**/gt/networks/solana/tokens/multi/**", empty_gt)
+        await rpg.add_init_script("""
+            window.__copyCalls = [];
+            Object.defineProperty(navigator, 'clipboard', {
+                value: { writeText: (t) => { window.__copyCalls.push(t); return Promise.resolve(); } },
+                configurable: true
+            });
+        """)
+        await rpg.goto("http://127.0.0.1:%d/pairs.html" % port)
+        await rpg.wait_for_timeout(500)
+
+        rowInfo = await rpg.evaluate("""() => {
+            const trs = [...document.querySelectorAll('#rowsBody tr')];
+            const heights = trs.map(tr => tr.getBoundingClientRect().height);
+            const sym = document.querySelector('#rowsBody .token-sym').getBoundingClientRect();
+            const name = document.querySelector('#rowsBody .token-name').getBoundingClientRect();
+            const trade = document.querySelector('#rowsBody .trade-btn');
+            return {
+                heights: heights, symTop: sym.top, nameTop: name.top,
+                tradeHref: trade ? trade.getAttribute('href') : null,
+            };
+        }""")
+        url_before = rpg.url
+        await rpg.click("#rowsBody .copy-btn >> nth=0")
+        await rpg.wait_for_timeout(150)
+        url_after = rpg.url
+        copyCalls = await rpg.evaluate("window.__copyCalls")
+        copiedText = await rpg.eval_on_selector("#rowsBody .copy-btn", "e => e.textContent.trim()")
+        await rpg.close()
+
+        print("[pairs rows] heights=%s symTop=%.1f nameTop=%.1f tradeHref=%s urlBefore=%s urlAfter=%s "
+              "copyCalls=%s copiedText=%r errors=%s"
+              % (rowInfo["heights"], rowInfo["symTop"], rowInfo["nameTop"], rowInfo["tradeHref"],
+                 url_before, url_after, copyCalls, copiedText, rerrs))
+        assert all(h <= 56 for h in rowInfo["heights"]), (
+            "a row is taller than 56px at 1280px with a 40+ char name: %s" % rowInfo["heights"])
+        assert rowInfo["tradeHref"] == "/app#swap?out=" + ROW_NAME_ROW["address"], (
+            "the Trade link href is wrong: %s" % rowInfo["tradeHref"])
+        assert abs(rowInfo["symTop"] - rowInfo["nameTop"]) <= 2, (
+            "the token symbol and name do not share one line box: symTop=%.1f nameTop=%.1f"
+            % (rowInfo["symTop"], rowInfo["nameTop"]))
+        assert url_before == url_after, (
+            "clicking Copy navigated the page: %s -> %s" % (url_before, url_after))
+        assert copyCalls == [ROW_NAME_ROW["address"]], (
+            "clicking Copy did not write the row's address to the clipboard: %s" % copyCalls)
+        assert copiedText == "Copied ✓", (
+            "the copy button did not show the \"Copied ✓\" confirmation text: %r" % copiedText)
+        assert not rerrs, "web/pairs.html threw during the rows probe: %s" % rerrs
+
+        # همان کاوشِ Copy، این‌بار روی کارتِ موبایل (۳۹۰px) — card-link کلِ
+        # کارت را می‌پوشاند، پس اگر card-actions یک stacking-context درست
+        # بالاتر نداشته باشد، کلیک روی Copy/Trade به‌جایش به ناوبریِ کارت
+        # می‌رسد؛ چیزی که در جدولِ دسکتاپ (ستون‌های جدا) هرگز رخ نمی‌داد.
+        mpg = await b.new_page(viewport={"width": 390, "height": 844})
+        merrs = []
+        mpg.on("pageerror", lambda e: merrs.append(str(e)))
+        await mpg.route("**/pairs.json**", lambda route: route.fulfill(
+            status=200, content_type="application/json",
+            body=_jsonPairs.dumps({"chain": "base", "rows": [ROW_NAME_ROW], "store": True})))
+        await mpg.route("**/gt/networks/base/tokens/multi/**", empty_gt)
+        await mpg.route("**/gt/networks/solana/tokens/multi/**", empty_gt)
+        await mpg.add_init_script("""
+            window.__copyCalls = [];
+            Object.defineProperty(navigator, 'clipboard', {
+                value: { writeText: (t) => { window.__copyCalls.push(t); return Promise.resolve(); } },
+                configurable: true
+            });
+        """)
+        await mpg.goto("http://127.0.0.1:%d/pairs.html" % port)
+        await mpg.wait_for_timeout(500)
+        murl_before = mpg.url
+        await mpg.click("#rowsCards .copy-btn")
+        await mpg.wait_for_timeout(150)
+        murl_after = mpg.url
+        mCopyCalls = await mpg.evaluate("window.__copyCalls")
+        await mpg.close()
+        print("[pairs rows] mobile card copy: urlBefore=%s urlAfter=%s copyCalls=%s errors=%s"
+              % (murl_before, murl_after, mCopyCalls, merrs))
+        assert murl_before == murl_after, (
+            "clicking Copy on the mobile CARD navigated the page (card-link painted over "
+            "card-actions): %s -> %s" % (murl_before, murl_after))
+        assert mCopyCalls == [ROW_NAME_ROW["address"]], (
+            "clicking Copy on the mobile card did not write the address to the clipboard: %s"
+            % mCopyCalls)
+        assert not merrs, "web/pairs.html threw during the mobile-card copy probe: %s" % merrs
+
+        print("[pairs rows] every row height <=56px at 1280px with a 40+ char name; the Trade link is "
+              "exactly /app#swap?out=<address>; clicking Copy never navigates and writes the address "
+              "to the clipboard, showing \"Copied ✓\" briefly (both the desktop row and the mobile "
+              "card, where card-link covers the whole card); the token symbol and name share one "
+              "line box")
+
+        # ---- [pairs refresh] بازخوانیِ خودکار هر ۵ دقیقه — با ساعتِ درون‌ساختِ
+        # Playwright؛ فیلتر/جست‌وجو باقی می‌مانند؛ شکستِ پس‌زمینه‌ای ردیف‌های
+        # قدیمی را نگه می‌دارد. ----
+        refresh_calls = {"n": 0}
+        REFRESH_ROW = dict(SELL_ROW, address="0x" + "c1" * 20, symbol="REFA")
+        REFRESH_ROW2 = dict(SELL_ROW, address="0x" + "c2" * 20, symbol="REFB")
+        REFRESH_ROW3 = dict(SELL_ROW, address="0x" + "c3" * 20, symbol="REFC")
+
+        async def stub_pairs_refresh(route):
+            refresh_calls["n"] += 1
+            n = refresh_calls["n"]
+            if n == 1:
+                body = {"chain": "base", "rows": [REFRESH_ROW, REFRESH_ROW2], "store": True}
+                await route.fulfill(status=200, content_type="application/json", body=_jsonPairs.dumps(body))
+            elif n == 2:
+                # بازخوانیِ دومِ *موفق* — یک ردیفِ تازه هم می‌آورد که با
+                # جست‌وجوی جاری نمی‌خورَد، تا معلوم شود واقعاً دادهٔ تازه
+                # نشسته (نه فقط دوباره همان قبلی)، و جست‌وجو هنوز اعمال است.
+                body = {"chain": "base", "rows": [REFRESH_ROW, REFRESH_ROW2, REFRESH_ROW3], "store": True}
+                await route.fulfill(status=200, content_type="application/json", body=_jsonPairs.dumps(body))
+            else:
+                await route.abort()
+
+        refpg = await b.new_page(viewport={"width": 1280, "height": 900})
+        referrs = []
+        refpg.on("pageerror", lambda e: referrs.append(str(e)))
+        await refpg.route("**/pairs.json**", stub_pairs_refresh)
+        await refpg.route("**/gt/networks/base/tokens/multi/**", empty_gt)
+        await refpg.route("**/gt/networks/solana/tokens/multi/**", empty_gt)
+        await refpg.clock.install()
+        await refpg.goto("http://127.0.0.1:%d/pairs.html" % port)
+        await refpg.wait_for_timeout(500)
+        await refpg.fill("#pairSearch", "REFA")
+        await refpg.wait_for_timeout(150)
+        calls_before = refresh_calls["n"]
+        syms_before = await refpg.eval_on_selector_all(
+            "#rowsBody .token-sym", "els => els.map(e => e.textContent.trim())")
+
+        # بازخوانیِ اول (بعدِ ۵ دقیقه): موفق، دادهٔ تازه می‌آورد؛ جست‌وجو باید بماند.
+        await refpg.clock.fast_forward(5 * 60 * 1000 + 1000)
+        await refpg.wait_for_timeout(300)
+        calls_after_success = refresh_calls["n"]
+        syms_after_success = await refpg.eval_on_selector_all(
+            "#rowsBody .token-sym", "els => els.map(e => e.textContent.trim())")
+        search_after_success = await refpg.eval_on_selector("#pairSearch", "e => e.value")
+
+        # بازخوانیِ دوم (۵ دقیقهٔ دیگر): ناموفق؛ ردیف‌های قدیمی و جست‌وجو باید بمانند.
+        await refpg.clock.fast_forward(5 * 60 * 1000 + 1000)
+        await refpg.wait_for_timeout(300)
+        calls_after_fail = refresh_calls["n"]
+        syms_after_fail = await refpg.eval_on_selector_all(
+            "#rowsBody .token-sym", "els => els.map(e => e.textContent.trim())")
+        search_after_fail = await refpg.eval_on_selector("#pairSearch", "e => e.value")
+        await refpg.close()
+
+        print("[pairs refresh] callsBefore=%s syms=%s -> afterSuccess: calls=%s syms=%s search=%r "
+              "-> afterFail: calls=%s syms=%s search=%r errors=%s"
+              % (calls_before, syms_before, calls_after_success, syms_after_success, search_after_success,
+                 calls_after_fail, syms_after_fail, search_after_fail, referrs))
+        assert calls_before == 1, "expected exactly 1 initial /pairs.json request, got %s" % calls_before
+        assert syms_before == ["REFA"], (
+            "the search filter was not applied before the refresh: %s" % syms_before)
+        assert calls_after_success == 2, (
+            "expected a second /pairs.json request after 5 minutes, got %s" % calls_after_success)
+        assert search_after_success == "REFA", (
+            "the search query box lost its value across a successful auto-refresh: %r"
+            % search_after_success)
+        assert syms_after_success == ["REFA"], (
+            "a successful background refresh must keep the search filter applied to the new rows "
+            "(REFC must stay hidden), got %s" % syms_after_success)
+        assert calls_after_fail == 3, (
+            "expected a third /pairs.json request after another 5 minutes, got %s" % calls_after_fail)
+        assert search_after_fail == "REFA", (
+            "the search query box lost its value across a failing auto-refresh: %r" % search_after_fail)
+        assert syms_after_fail == ["REFA"], (
+            "a failing background refresh must keep the old (filtered) rows, got %s" % syms_after_fail)
+        assert not referrs, "web/pairs.html threw during the auto-refresh probe: %s" % referrs
+
+        print("[pairs refresh] every 5 minutes (while visible) the page refetches /pairs.json, keeping "
+              "the chain/filter/search/sort applied; a successful background refresh re-applies the "
+              "search to the new rows and a failing one keeps the old rows — the search box's value "
+              "survives both")
 
         # ---- [server sell ret] fetchVdVerdict واقعی، /vd استاب‌شده روی سیم — نه
         # جایگزینیِ خودِ تابع؛ همان اعتبارسنجیِ بازه که در fetchVdVerdict نوشته شده

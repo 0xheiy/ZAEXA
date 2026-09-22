@@ -35,7 +35,7 @@ import { EVM_ADDR, SOL_MINT, chainOf, gtNetworkOf } from "./chains.js";
 import {
   REPORT_DATE_RE, PAIRS_KEY_BASE, reportKey, utcDateOf, emptyReportDoc, runReportPass,
   reportText, REPORT_TEXT_FIRST_DATE, followForRow, recheckForRow, causeForRow, readPassLog,
-  REPORT_METER_STAGES, REPORT_PASS_BASE_CAP,
+  REPORT_METER_STAGES, REPORT_PASS_BASE_CAP, REPORT_PAIRS_CAP,
 } from "./report.js";
 import {
   fetchVerdictSol, VD_SOL_RPCS, VD_SOL_JUP_BASE, VD_SOL_PAYER,
@@ -1678,9 +1678,9 @@ async function reportDocFor(env, dateStr) {
    سندِ خالی تخت می‌کند، پس هر شکست اینجا فقط یعنی «چیزی برای قرض‌گرفتن
    نیست»، نه شکستِ کل تابع — ردیف‌های حلقه همان می‌مانند که بودند. */
 async function pairsRowsFor(env, chain) {
-  // میدانِ chain همین امروز هم می‌پذیرد «solana» و فقط حلقه‌ی خالی می‌دهد —
-  // تا افزودنِ سولانا فردا هیچ مهاجرتِ شکلِ داده‌ای نخواهد.
-  if (chain === "solana") return [];
+  // سولانا مسیرِ جدایی دارد (سندهای روزانه، نه حلقه‌ی base) — مسیرِ Base
+  // زیر همان‌طور که بود دست‌نخورده می‌ماند.
+  if (chain === "solana") return pairsRowsForSolana(env);
   const kv = env && env.ZX_KV;
   if (!kv) return [];
   let ringRows;
@@ -1739,6 +1739,51 @@ async function pairsRowsFor(env, chain) {
 
     return out;
   });
+}
+
+/* ردیف‌های سولانا برای /pairs.json?chain=solana — بر خلافِ Base هیچ حلقه‌ی
+   جداگانه‌ای برای سولانا نداریم، پس مستقیماً از همان دو سندِ روزانه
+   (امروز و دیروز UTC) می‌خوانیم، همان دو reportDocFor بالا. فقط ردیف‌هایی
+   با chain === "solana" و آدرسِ رشته‌ای برداشته می‌شوند؛ یکتاسازی بر
+   اساسِ آدرس با برنده‌بودنِ امروز (دیروز اول نوشته می‌شود، امروز رویش
+   می‌نشیند)، سپس مرتب‌سازیِ نزولی بر اساسِ checkedAt — ردیف‌هایی که
+   checkedAt قابلِ‌پارس ندارند آخر صف می‌روند، نه اول یا وسط. سقف همان
+   REPORT_PAIRS_CAP است که حلقه‌ی Base هم دارد. هر ردیفِ خروجی یک کپیِ
+   دست‌نخورده است — هیچ کلیدی افزوده/کم نمی‌شود، برخلافِ پیوستِ follow/
+   recheck که فقط برای Base معنا دارد. */
+async function pairsRowsForSolana(env) {
+  const kv = env && env.ZX_KV;
+  if (!kv) return [];
+
+  const nowMs = Date.now();
+  const todayStr = utcDateOf(nowMs);
+  const yesterdayStr = utcDateOf(nowMs - 86400000);
+  const [todayDoc, yesterdayDoc] = await Promise.all([
+    reportDocFor(env, todayStr),
+    reportDocFor(env, yesterdayStr),
+  ]);
+
+  const byAddr = new Map();
+  for (const r of (yesterdayDoc && Array.isArray(yesterdayDoc.rows) ? yesterdayDoc.rows : [])) {
+    if (r && r.chain === "solana" && typeof r.address === "string") byAddr.set(r.address, r);
+  }
+  for (const r of (todayDoc && Array.isArray(todayDoc.rows) ? todayDoc.rows : [])) {
+    if (r && r.chain === "solana" && typeof r.address === "string") byAddr.set(r.address, r);
+  }
+
+  const rows = Array.from(byAddr.values());
+  rows.sort((a, b) => {
+    const at = Date.parse(a && a.checkedAt);
+    const bt = Date.parse(b && b.checkedAt);
+    const aOk = !Number.isNaN(at);
+    const bOk = !Number.isNaN(bt);
+    if (aOk && bOk) return bt - at;
+    if (aOk) return -1; // فقط a قابلِ‌پارس است → a جلوتر
+    if (bOk) return 1;  // فقط b قابلِ‌پارس است → b جلوتر
+    return 0;            // هیچ‌کدام قابلِ‌پارس نیستند → ترتیبِ نسبی دست‌نخورده
+  });
+
+  return rows.slice(0, REPORT_PAIRS_CAP).map((r) => ({ ...r }));
 }
 
 async function reportRoute(request, url, env) {

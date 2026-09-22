@@ -8496,6 +8496,92 @@ function stripAllowedWording(t) {
     + "length are always preserved");
 }
 
+/* ---- pairsRowsFor("solana") — از سندهای روزانه، نه حلقه‌ی base — [pairs solana] ----
+   سولانا حلقه‌ی جداگانه ندارد؛ رویِ همان دو سندِ روزانه (امروز/دیروز)
+   می‌نشیند که Base هم برای follow/recheck می‌خواند، این‌بار به‌عنوانِ تنها
+   منبعِ ردیف‌ها، نه فقط قرض‌گرفتنِ دو کلید. */
+{
+  const todayStr = utcDateOf(Date.now());
+  const yesterdayStr = utcDateOf(Date.now() - 86400000);
+
+  function mkKv(map) {
+    return { get: async (k) => (Object.prototype.hasOwnProperty.call(map, k) ? map[k] : null) };
+  }
+  function sol(n) { return "Sol" + n.toString().padStart(40, "1"); } // فقط برای تست، شکلِ base58 واقعی لازم نیست
+
+  const mintDupe = sol(1);      // در هر دو سند هست — نسخه‌ی امروز باید ببرد
+  const mintYesterday = sol(2); // فقط دیروز
+  const mintToday = sol(3);     // فقط امروز
+  const mintNoTime = sol(4);    // checkedAt نامعتبر — باید آخرِ صف برود
+  const mintBaseRow = "0x" + "1".repeat(40); // یک ردیفِ Base در همان سند — هرگز نباید بیرون بیاید
+
+  const todayDoc = {
+    date: todayStr, generatedAt: todayStr + "T00:00:00.000Z", chains: ["base", "solana"], checked: 4,
+    rows: [
+      { chain: "solana", address: mintDupe, v: "sell", checkedAt: "2026-09-20T12:00:00.000Z", tag: "today-wins" },
+      { chain: "solana", address: mintToday, v: "nosell", checkedAt: "2026-09-20T13:00:00.000Z" },
+      { chain: "solana", address: mintNoTime, v: null, checkedAt: "not-a-date" },
+      { chain: "base", address: mintBaseRow, v: "sell", checkedAt: "2026-09-20T14:00:00.000Z" },
+    ],
+  };
+  const yesterdayDoc = {
+    date: yesterdayStr, generatedAt: yesterdayStr + "T00:00:00.000Z", chains: ["base", "solana"], checked: 2,
+    rows: [
+      { chain: "solana", address: mintDupe, v: "nosell", checkedAt: "2026-09-19T12:00:00.000Z", tag: "yesterday-loses" },
+      { chain: "solana", address: mintYesterday, v: "sell", checkedAt: "2026-09-19T09:00:00.000Z" },
+    ],
+  };
+
+  const kv = mkKv({
+    [reportKey(todayStr)]: JSON.stringify(todayDoc),
+    [reportKey(yesterdayStr)]: JSON.stringify(yesterdayDoc),
+  });
+  const rows = await pairsRowsFor({ ZX_KV: kv }, "solana");
+
+  ok(Array.isArray(rows) && rows.length === 4,
+     "solana rows must be exactly the 4 deduped solana rows (dupe merged, no Base row), got " +
+     JSON.stringify(rows));
+  ok(!rows.some((r) => r.address === mintBaseRow),
+     "a Base row sitting in the same daily doc must never appear in the solana rows, got " +
+     JSON.stringify(rows.map((r) => r.address)));
+
+  const dupeRow = rows.find((r) => r.address === mintDupe);
+  ok(dupeRow && dupeRow.tag === "today-wins" && dupeRow.v === "sell",
+     "the same mint in both docs must resolve to today's copy, got " + JSON.stringify(dupeRow));
+
+  // ترتیب: نزولی بر اساسِ checkedAt، و ردیفِ بدونِ تاریخِ قابلِ‌پارس همیشه آخر
+  ok(rows.map((r) => r.address).join(",") === [mintToday, mintDupe, mintYesterday, mintNoTime].join(","),
+     "solana rows must sort by checkedAt descending, with an unparseable checkedAt sorted last, got " +
+     JSON.stringify(rows.map((r) => ({ a: r.address, c: r.checkedAt }))));
+
+  // سقف — بیش از REPORT_PAIRS_CAP ردیفِ سولانا در سندِ امروز
+  const manyRows = [];
+  for (let i = 0; i < REPORT_PAIRS_CAP + 20; i++) {
+    manyRows.push({
+      chain: "solana", address: "SolMany" + i, v: "sell",
+      checkedAt: new Date(Date.now() - i * 1000).toISOString(),
+    });
+  }
+  const kvMany = mkKv({
+    [reportKey(todayStr)]: JSON.stringify({ ...todayDoc, rows: manyRows }),
+    [reportKey(yesterdayStr)]: JSON.stringify({ ...yesterdayDoc, rows: [] }),
+  });
+  const rowsMany = await pairsRowsFor({ ZX_KV: kvMany }, "solana");
+  ok(rowsMany.length === REPORT_PAIRS_CAP,
+     "solana rows must cap at exactly REPORT_PAIRS_CAP (" + REPORT_PAIRS_CAP + "), got " + rowsMany.length);
+
+  // بدونِ ZX_KV → []
+  const rowsNoKv = await pairsRowsFor({}, "solana");
+  ok(Array.isArray(rowsNoKv) && rowsNoKv.length === 0,
+     "solana rows with no ZX_KV binding must be [], got " + JSON.stringify(rowsNoKv));
+
+  console.log("[pairs solana] pairsRowsFor(\"solana\") reads today's/yesterday's report docs (the same "
+    + "reportDocFor calls the Base path uses), keeps only chain===\"solana\" rows with a string address, "
+    + "dedupes by address with today's copy winning, sorts by checkedAt descending (an unparseable checkedAt "
+    + "sorted last), caps at REPORT_PAIRS_CAP, and returns [] with no ZX_KV binding; a Base row sitting in "
+    + "the same daily doc never leaks through; the Base path itself is untouched");
+}
+
 /* ---- ۳۶. worker/report.js — newPoolRowToTokenFor زنجیره‌آگاه ----
    فیکسچرِ سولانا امروز از خودِ پراکسیِ زنده گرفته شد: صفحه‌ی ۱ی new_pools
    هیچ استخری بالای آستانه‌ی رزرو نداشت، سه‌تای واجدِ شرطِ صفحه‌ی ۲ به‌ترتیب
