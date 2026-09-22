@@ -43,6 +43,46 @@ button{font:inherit;color:inherit;border:0;background:none;cursor:pointer}
 [data-theme=dark] .theme-toggle .sun{display:none}
 [data-theme=dark] .theme-toggle .moon{display:block}
 
+/* چیپِ کیف‌پول — این صفحه فقط-خوانده است، پس هیچ فلوی اتصال (EIP-6963
+   picker/WalletConnect/ethers) اینجا کپی نمی‌شود؛ فقط وضعیتِ فعلی نشان
+   داده می‌شود (eth_accounts بی‌صدا، هرگز eth_requestAccounts) و قطعِ
+   محلی. مقادیرِ .chip/.led عیناً از web/index.html (~۵۱۹-۵۲۹) با
+   توکن‌های همین صفحه — چیزی وارد نمی‌شود. */
+.chip{
+  display:inline-flex;align-items:center;gap:7px;height:38px;padding:0 15px;
+  border-radius:999px;background:var(--card);box-shadow:var(--sh);
+  font-size:13.5px;color:var(--tx2);transition:.16s;white-space:nowrap;text-decoration:none;
+}
+.chip:hover{color:var(--tx);transform:translateY(-1px);box-shadow:var(--sh)}
+.led{width:7px;height:7px;border-radius:50%;background:var(--pos)}
+.led.off{background:var(--tx3)}
+.rel{position:relative}
+/* بازشو — عیناً همان مقادیرِ .pop/.walletPop در web/index.html (~۹۰۶-۹۳۴)،
+   همان دلیلِ سقفِ ارتفاع (منو نباید از پایینِ صفحه بزند بیرون) و همان
+   ثابت‌شدنِ زیرِ گوشی (منو به لبه‌ی *صفحه* بچسبد، نه به دکمه‌ی خودش). */
+.pop{position:absolute;right:0;top:46px;width:256px;background:var(--card);border-radius:18px;
+  box-shadow:var(--sh);padding:16px;z-index:50;display:none;
+  max-height:calc(100vh - 76px);max-height:calc(100dvh - 76px);
+  overflow-y:auto;overscroll-behavior:contain}
+.pop.on{display:block}
+@media(max-width:720px){
+  .pop{position:fixed;top:58px;right:12px;left:auto;width:min(300px,calc(100vw - 24px))}
+}
+.walletPop{width:238px;padding:8px}
+.wp-addr{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12.5px;
+  word-break:break-all;padding:8px 9px;color:var(--tx2)}
+.wp-status{padding:0 9px 8px;font-size:11.5px;color:var(--tx3)}
+.walletAction{width:100%;display:flex;align-items:center;justify-content:space-between;gap:12px;
+  padding:10px 9px;border-radius:11px;text-align:left;font-size:13px;color:var(--tx2);text-decoration:none}
+.walletAction:hover{background:var(--card2);color:var(--tx)}
+.walletAction.danger{color:var(--neg)}
+.walletAction.danger:hover{background:color-mix(in srgb,var(--neg) 10%,transparent);color:var(--neg)}
+/* یادداشتِ زیرِ هدر — فقط بعدِ کلیکِ Disconnect (محلی) ظاهر می‌شود؛ عینِ
+   همان متنِ اپ (web/index.html، تابعِ disconnect)، هیچ ادعای بیشتری —
+   نمی‌توانیم اجازه را از سمتِ والت پس بگیریم. */
+#walletDisconnectNote{margin:0;padding:10px clamp(20px,3.4vw,56px);text-align:center;color:var(--tx3);
+  font-size:12.5px;border-bottom:1px solid var(--line)}
+
 /* ناوبریِ مرکزیِ هدر — عیناً «نگاهِ» .nav در web/index.html (پس‌زمینه‌ی
    card2، آیتمِ فعال روی سطحِ card با سایه و وزن ۶۲۰)؛ این‌جا هر چهار آیتم
    <a> هستند نه <button>، چون این صفحه یک سندِ جداست — «New pairs» همین‌جا
@@ -251,9 +291,15 @@ h1{font-size:28px;letter-spacing:-.03em;margin:0 0 10px;line-height:1.1}
         <path d="M4 6h10M4 12h10M4 18h7"/><path d="M19 3v4M17 5h4"/></svg><span>New pairs</span></a>
   </nav>
   <div class="header-actions">
+    <!-- چیپِ کیف‌پول — سمتِ چپِ دکمه‌ی تم، هر دو ۳۸px، هم‌تراز. پُر شدنش با
+         جاوااسکریپتِ پایینِ صفحه است (وضعیت روی لود و روی visibilitychange
+         دوباره محاسبه می‌شود)؛ اینجا فقط جایگاه. -->
+    <div class="rel" id="walletChipWrap"></div>
     <button class="theme-toggle" id="themeToggle" aria-label="Switch color theme"><span class="sun">☼</span><span class="moon">☾</span></button>
   </div>
 </header>
+
+<p id="walletDisconnectNote" hidden>Disconnected. Zaexa will not reconnect on its own. Your wallet may still list this site — remove it there to revoke access.</p>
 
 <main class="pairs-main">
   <h1>New pairs</h1>
@@ -630,8 +676,16 @@ h1{font-size:28px;letter-spacing:-.03em;margin:0 0 10px;line-height:1.1}
     if (SUB_EL) SUB_EL.textContent = c.sub;
     if (NOTE_EL) NOTE_EL.textContent = c.note;
   }
+  // عنوانِ سند هم زنجیره را دنبال می‌کند — TITLE_BASE از <title> نویسنده
+  // خوانده می‌شود (نه رشته‌ی تکراری) تا پیش‌فرض دقیقاً همان بمانَد.
+  var TITLE_BASE = document.title;
+  var TITLE_SOL = 'New pairs on Solana — Zaexa';
+  function setChainTitle(){
+    document.title = currentChain === 'solana' ? TITLE_SOL : TITLE_BASE;
+  }
   function setActiveChainTab(){
     setChainCopy();
+    setChainTitle();
     if (!chainTabsEl) return;
     Array.prototype.forEach.call(chainTabsEl.querySelectorAll('button[data-chain]'), function(b){
       var on = b.getAttribute('data-chain') === currentChain;
@@ -988,6 +1042,223 @@ h1{font-size:28px;letter-spacing:-.03em;margin:0 0 10px;line-height:1.1}
     });
     if (keys.length) fetchLogos(keys, chain);
   }
+})();
+</script>
+
+<script>
+/* چیپِ کیف‌پول — این صفحه فقط-خوانده است: فلوی کاملِ اتصال (EIP-6963
+   picker/WalletConnect/ethers) اینجا کپی نمی‌شود، چون کد دوبرابر می‌شد
+   و هیچ‌کدامش لازم نیست فقط برای نشان‌دادنِ وضعیت/قطعِ محلی. هر بخش
+   عیناً مطابقِ قراردادِ web/index.html:
+     • DISCONNECT_KEY = "zaexa.disconnected" — همان کلید، همان معنا:
+       تصمیمِ کاربر روی «قطع کردم» تا انتخابِ صریحِ بعدی می‌ماند.
+     • hasWcSession() — همان جست‌وجوی wc@2:…session… در localStorage.
+     • فقط eth_accounts — بی‌صدا، هیچ پنجره‌ای باز نمی‌کند؛ هرگز
+       eth_requestAccounts (آن دکمه فقط در اپ است).
+   هر تماسِ localStorage/پروایدر در try/catch است؛ هر شکست بی‌صدا به
+   DISCONNECTED تنزل می‌کند — هرگز پرتاب، هرگز console.error. */
+(function(){
+  var DISCONNECT_KEY = 'zaexa.disconnected';
+  function userDisconnected(){
+    try{ return localStorage.getItem(DISCONNECT_KEY) === '1'; }catch(e){ return false; }
+  }
+  function markDisconnected(on){
+    try{
+      if (on) localStorage.setItem(DISCONNECT_KEY, '1');
+      else localStorage.removeItem(DISCONNECT_KEY);
+    }catch(e){}
+  }
+  // عیناً همان جست‌وجوی hasWcSession در web/index.html.
+  function hasWcSession(){
+    try{
+      for (var i = 0; i < localStorage.length; i++){
+        var k = localStorage.key(i);
+        if (k && k.indexOf('wc@2:') === 0 && /session/i.test(k)){
+          var v = localStorage.getItem(k);
+          if (v && v !== '[]' && v !== '{}' && v !== 'null') return true;
+        }
+      }
+    }catch(e){}
+    return false;
+  }
+
+  function escHtml(s){
+    return String(s == null ? '' : s).replace(/[&<>"']/g, function(c){
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+    });
+  }
+  function shortAddr(a){
+    if (!a || a.length < 11) return a || '';
+    return a.slice(0, 6) + '…' + a.slice(-4);
+  }
+
+  // کشفِ کیف‌پول‌های تزریق‌شده — EIP-6963، با ۴۰۰ میلی‌ثانیه مکث برای
+  // اعلان‌هایی که ممکن است یک تیک بعد از درخواست برسند، به‌علاوه‌ی
+  // window.ethereum اگر باشد. اینجا فقط *کشفِ* پروایدرهاست — هیچ
+  // request ای هنوز زده نمی‌شود، پس این خودش «پروب کردن» به‌حساب نمی‌آید.
+  function collectInjectedProviders(){
+    return new Promise(function(resolve){
+      var out = [];
+      try{
+        var seen = {};
+        function onAnnounce(ev){
+          try{
+            var d = ev && ev.detail;
+            if (d && d.info && d.provider){
+              var key = d.info.rdns || d.info.uuid || d.info.name || ('p' + out.length);
+              if (!seen[key]){ seen[key] = true; out.push({ provider: d.provider, info: d.info }); }
+            }
+          }catch(e){}
+        }
+        window.addEventListener('eip6963:announceProvider', onAnnounce);
+        window.dispatchEvent(new Event('eip6963:requestProvider'));
+        setTimeout(function(){
+          try{ window.removeEventListener('eip6963:announceProvider', onAnnounce); }catch(e){}
+          try{ if (window.ethereum) out.push({ provider: window.ethereum, info: null }); }catch(e){}
+          resolve(out);
+        }, 400);
+      }catch(e){ resolve(out); }
+    });
+  }
+
+  // وضعیت — دقیقاً همان چهار حالتِ قرارداد؛ ۱ همیشه اول و همیشه کوتاه‌مدار.
+  function computeWalletState(){
+    return (async function(){
+      try{
+        if (userDisconnected()) return { kind: 'disconnected' };
+      }catch(e){ return { kind: 'disconnected' }; }
+      try{
+        var providers = await collectInjectedProviders();
+        for (var i = 0; i < providers.length; i++){
+          try{
+            var accs = await providers[i].provider.request({ method: 'eth_accounts' });
+            if (accs && accs.length){
+              return {
+                kind: 'injected', address: accs[0],
+                name: (providers[i].info && providers[i].info.name) || null
+              };
+            }
+          }catch(e){ /* این یکی جواب نداد یا خطا داد — بعدی را امتحان کن */ }
+        }
+      }catch(e){ /* کشفِ ۶۹۶۳ شکست خورد — می‌رویم سراغِ WalletConnect */ }
+      try{
+        if (hasWcSession()) return { kind: 'remote' };
+      }catch(e){}
+      return { kind: 'disconnected' };
+    })();
+  }
+
+  function closePop(){
+    var pop = document.getElementById('walletPop');
+    var chip = document.getElementById('walletChip');
+    if (pop) pop.classList.remove('on');
+    if (chip && chip.tagName === 'BUTTON') chip.setAttribute('aria-expanded', 'false');
+  }
+  document.addEventListener('mousedown', function(e){
+    var pop = document.getElementById('walletPop');
+    if (!pop) return;
+    var chip = document.getElementById('walletChip');
+    if (pop.contains(e.target)) return;
+    if (chip && chip.contains(e.target)) return;
+    closePop();
+  });
+  document.addEventListener('keydown', function(e){
+    if (e.key === 'Escape') closePop();
+  });
+
+  function showDisconnectNote(){
+    var note = document.getElementById('walletDisconnectNote');
+    if (note) note.hidden = false;
+  }
+
+  function renderChip(state){
+    var wrap = document.getElementById('walletChipWrap');
+    if (!wrap) return;
+    if (!state || state.kind === 'disconnected'){
+      wrap.innerHTML =
+        '<a class="chip" id="walletChip" href="/app#swap">' +
+          '<span class="led off"></span><span>Connect wallet</span></a>';
+      return;
+    }
+    var addr = state.address || '';
+    var isRemote = state.kind === 'remote';
+    // نشستِ WalletConnect فقط *بودنش* را می‌دانیم (hasWcSession)، نه
+    // آدرسِ داخلش — بازکردنِ کتابخانه برای خوانِدنش دقیقاً همان دوبرابرشدنِ
+    // کدی است که این صفحه نباید بکند. پس اینجا آدرسی برای نشان‌دادن نیست:
+    // چیپ یک برچسبِ عمومی می‌گیرد، بازشو فقط وضعیت را می‌گوید، و «Copy
+    // address» (که بدونِ آدرس بی‌معناست) اصلاً رندر نمی‌شود.
+    var chipLabel = isRemote ? 'Wallet connected' : escHtml(shortAddr(addr));
+    var addrRowHtml = isRemote ? '' :
+      '<div class="wp-addr" id="walletPopAddr">' + escHtml(addr) + '</div>';
+    var copyRowHtml = isRemote ? '' :
+      '<button type="button" class="walletAction" id="walletPopCopy"><span>Copy address</span></button>';
+    var statusHtml = isRemote
+      ? '<div class="wp-status">Connected with WalletConnect</div>' : '';
+    // فقط والت‌کانکت نشستِ واقعی دارد که هر دو طرف می‌بینند، پس فقط آنجا
+    // می‌توانیم واقعاً قطع کنیم؛ برای افزونه اینجا لینک به اپ می‌رود.
+    var discHtml = isRemote
+      ? '<a class="walletAction" href="/app#swap" id="walletPopDiscApp"><span>Disconnect in the app</span></a>'
+      : '<button type="button" class="walletAction danger" id="walletPopDisc"><span>Disconnect</span></button>';
+    wrap.innerHTML =
+      '<button type="button" class="chip" id="walletChip" aria-haspopup="dialog" aria-expanded="false">' +
+        '<span class="led"></span><span>' + chipLabel + '</span></button>' +
+      '<div class="pop walletPop" id="walletPop" role="dialog" aria-label="Wallet">' +
+        addrRowHtml +
+        statusHtml +
+        copyRowHtml +
+        discHtml +
+        '<a class="walletAction" href="/app#swap" id="walletPopOpenApp"><span>Open in the app</span></a>' +
+      '</div>';
+
+    var chipEl = document.getElementById('walletChip');
+    chipEl.onclick = function(){
+      var pop = document.getElementById('walletPop');
+      if (!pop) return;
+      var open = pop.classList.toggle('on');
+      chipEl.setAttribute('aria-expanded', open ? 'true' : 'false');
+    };
+    var copyBtn = document.getElementById('walletPopCopy');
+    if (copyBtn){
+      copyBtn.onclick = function(){
+        try{
+          if (navigator.clipboard && navigator.clipboard.writeText){
+            navigator.clipboard.writeText(addr).then(function(){
+              var s = copyBtn.querySelector('span');
+              if (s) s.textContent = 'Copied ✓';
+              setTimeout(function(){ var s2 = copyBtn.querySelector('span'); if (s2) s2.textContent = 'Copy address'; }, 1400);
+            }, function(){});
+          }
+        }catch(e){}
+      };
+    }
+    if (!isRemote){
+      var discBtn = document.getElementById('walletPopDisc');
+      discBtn.onclick = function(){
+        markDisconnected(true);
+        closePop();
+        renderChip({ kind: 'disconnected' });
+        showDisconnectNote();
+      };
+    }
+  }
+
+  var walletBusy = false;
+  function refreshWalletChip(){
+    if (walletBusy) return;
+    walletBusy = true;
+    computeWalletState().then(function(state){
+      walletBusy = false;
+      renderChip(state);
+    }).catch(function(){
+      walletBusy = false;
+      renderChip({ kind: 'disconnected' });
+    });
+  }
+
+  refreshWalletChip();
+  document.addEventListener('visibilitychange', function(){
+    if (document.visibilityState === 'visible') refreshWalletChip();
+  });
 })();
 </script>
 

@@ -7923,6 +7923,247 @@ async def main():
               "search to the new rows and a failing one keeps the old rows — the search box's value "
               "survives both")
 
+        # ---- [pairs wallet] چیپِ کیف‌پول در هدرِ pairs.html — فقط وضعیت/قطعِ
+        # محلی، هیچ فلوی اتصال (EIP-6963 picker/WalletConnect/ethers) کپی
+        # نمی‌شود. سه حالت: DISCONNECTED، CONNECTED_INJECTED (eth_accounts
+        # بی‌صدا)، CONNECTED_REMOTE (فقط hasWcSession-style، بدونِ کتابخانه). ----
+        FAKE_ADDR = "0x1234567890abcdef1234567890abcdef12345678"
+        FAKE_SHORT = FAKE_ADDR[:6] + "…" + FAKE_ADDR[-4:]
+
+        def fake_provider_script(addr):
+            return """
+                window.__fakeMethods = [];
+                (function(){
+                    var __addr = %r;
+                    var __provider = {
+                        request: function(args){
+                            window.__fakeMethods.push(args && args.method);
+                            if (args && args.method === 'eth_accounts') return Promise.resolve([__addr]);
+                            return Promise.reject(new Error('unexpected method'));
+                        }
+                    };
+                    window.addEventListener('eip6963:requestProvider', function(){
+                        window.dispatchEvent(new CustomEvent('eip6963:announceProvider', {
+                            detail: { info: { name: 'Fake Wallet', rdns: 'test.fake', uuid: 'fake-1' },
+                                      provider: __provider }
+                        }));
+                    });
+                })();
+            """ % (addr,)
+
+        def fake_provider_throws_script():
+            return """
+                window.__fakeMethods = [];
+                (function(){
+                    var __provider = {
+                        request: function(args){
+                            window.__fakeMethods.push(args && args.method);
+                            return Promise.reject(new Error('boom'));
+                        }
+                    };
+                    window.addEventListener('eip6963:requestProvider', function(){
+                        window.dispatchEvent(new CustomEvent('eip6963:announceProvider', {
+                            detail: { info: { name: 'Broken Wallet', rdns: 'test.broken', uuid: 'fake-2' },
+                                      provider: __provider }
+                        }));
+                    });
+                })();
+            """
+
+        async def open_wallet_page(init_script=None, viewport=None, color_scheme=None):
+            kwargs = {"viewport": viewport or {"width": 1280, "height": 900}}
+            if color_scheme:
+                kwargs["color_scheme"] = color_scheme
+            wpg = await b.new_page(**kwargs)
+            werrs = []
+            cerrs = []
+            wpg.on("pageerror", lambda e: werrs.append(str(e)))
+            wpg.on("console", lambda m: cerrs.append(m.text) if m.type == "error" else None)
+            await wpg.route("**/pairs.json**", lambda route: route.fulfill(
+                status=200, content_type="application/json",
+                body=_jsonPairs.dumps({"chain": "base", "rows": [SELL_ROW], "store": True})))
+            await wpg.route("**/gt/networks/base/tokens/multi/**", empty_gt)
+            await wpg.route("**/gt/networks/solana/tokens/multi/**", empty_gt)
+            if init_script:
+                await wpg.add_init_script(init_script)
+            await wpg.goto("http://127.0.0.1:%d/pairs.html" % port)
+            # ۴۰۰ میلی‌ثانیه‌ی مکثِ کشفِ ۶۹۶۳ + رفت‌وبرگشتِ eth_accounts
+            await wpg.wait_for_timeout(700)
+            return wpg, werrs, cerrs
+
+        # ۱) بدونِ هیچ پروایدر و بدونِ هیچ کلید -> «Connect wallet»
+        w1, werrs1, cerrs1 = await open_wallet_page()
+        chip1_text = await w1.eval_on_selector("#walletChip", "e => e.textContent.trim()")
+        chip1_href = await w1.eval_on_selector("#walletChip", "e => e.getAttribute('href')")
+        led1_off = await w1.eval_on_selector("#walletChip .led", "e => e.classList.contains('off')")
+        await w1.close()
+        print("[pairs wallet] no provider/no keys: text=%r href=%s ledOff=%s errors=%s consoleErrs=%s"
+              % (chip1_text, chip1_href, led1_off, werrs1, cerrs1))
+        assert chip1_text == "Connect wallet", "wrong disconnected chip text: %r" % chip1_text
+        assert chip1_href == "/app#swap", "disconnected chip must link to /app#swap, got %r" % chip1_href
+        assert led1_off is True, "disconnected chip's LED is missing the .off class"
+        assert not werrs1 and not cerrs1, "errors on the no-provider load: %s %s" % (werrs1, cerrs1)
+
+        # ۲) یک پروایدرِ ۶۹۶۳ که یک حساب اعلام می‌کند -> CONNECTED_INJECTED،
+        # فقط eth_accounts، هرگز eth_requestAccounts
+        w2, werrs2, cerrs2 = await open_wallet_page(init_script=fake_provider_script(FAKE_ADDR))
+        chip2_text = await w2.eval_on_selector("#walletChip", "e => e.textContent.trim()")
+        led2_off = await w2.eval_on_selector("#walletChip .led", "e => e.classList.contains('off')")
+        await w2.click("#walletChip")
+        await w2.wait_for_timeout(100)
+        pop2_addr = await w2.eval_on_selector("#walletPopAddr", "e => e.textContent.trim()")
+        methods2 = await w2.evaluate("window.__fakeMethods")
+        await w2.close()
+        print("[pairs wallet] injected: chipText=%r ledOff=%s popoverAddr=%r methods=%s errors=%s "
+              "consoleErrs=%s" % (chip2_text, led2_off, pop2_addr, methods2, werrs2, cerrs2))
+        assert chip2_text == FAKE_SHORT, "chip did not show the short address: %r" % chip2_text
+        assert led2_off is False, "connected chip's LED still has the .off class"
+        assert pop2_addr == FAKE_ADDR, "popover did not show the full address: %r" % pop2_addr
+        assert methods2 == ["eth_accounts"], (
+            "the fake provider received something other than exactly one eth_accounts call: %s" % methods2)
+        assert not werrs2 and not cerrs2, "errors on the injected-provider load: %s %s" % (werrs2, cerrs2)
+
+        # ۳) پرچمِ قطعِ محلی ست است، همان پروایدر هم حاضر است -> هیچ پروبی زده
+        # نمی‌شود، پروایدر صفر درخواست می‌بیند (کوتاه‌مدار پیش از هرچیز)
+        w3, werrs3, cerrs3 = await open_wallet_page(init_script=(
+            "localStorage.setItem('zaexa.disconnected','1');" + fake_provider_script(FAKE_ADDR)))
+        chip3_text = await w3.eval_on_selector("#walletChip", "e => e.textContent.trim()")
+        methods3 = await w3.evaluate("window.__fakeMethods")
+        await w3.close()
+        print("[pairs wallet] disconnected flag + provider present: chipText=%r methods=%s errors=%s "
+              "consoleErrs=%s" % (chip3_text, methods3, werrs3, cerrs3))
+        assert chip3_text == "Connect wallet", (
+            "the disconnected flag did not short-circuit the chip: %r" % chip3_text)
+        assert methods3 == [], (
+            "the disconnected flag did not short-circuit BEFORE probing — the fake provider "
+            "received requests: %s" % methods3)
+        assert not werrs3 and not cerrs3, "errors on the disconnected-flag load: %s %s" % (werrs3, cerrs3)
+
+        # ۴) کلیک روی Disconnect (حالتِ افزونه) -> پرچم ست می‌شود، چیپ برمی‌گردد
+        # به «Connect wallet»، متنِ دقیقِ زیرِ هدر یک‌بار ظاهر می‌شود
+        w4, werrs4, cerrs4 = await open_wallet_page(init_script=fake_provider_script(FAKE_ADDR))
+        await w4.click("#walletChip")
+        await w4.wait_for_timeout(100)
+        await w4.click("#walletPopDisc")
+        await w4.wait_for_timeout(100)
+        flag4 = await w4.evaluate("localStorage.getItem('zaexa.disconnected')")
+        chip4_text = await w4.eval_on_selector("#walletChip", "e => e.textContent.trim()")
+        note4_count = await w4.eval_on_selector_all(
+            "#walletDisconnectNote", "els => els.length")
+        note4_text = await w4.eval_on_selector("#walletDisconnectNote", "e => e.textContent.trim()")
+        note4_hidden = await w4.eval_on_selector("#walletDisconnectNote", "e => e.hidden")
+        await w4.close()
+        EXPECTED_DISCONNECT_TEXT = (
+            "Disconnected. Zaexa will not reconnect on its own. Your wallet may still "
+            "list this site — remove it there to revoke access.")
+        print("[pairs wallet] disconnect click: flag=%r chipText=%r noteCount=%s noteHidden=%s "
+              "noteText=%r errors=%s consoleErrs=%s"
+              % (flag4, chip4_text, note4_count, note4_hidden, note4_text, werrs4, cerrs4))
+        assert flag4 == "1", "clicking Disconnect did not set localStorage zaexa.disconnected=1"
+        assert chip4_text == "Connect wallet", (
+            "the chip did not switch back to Connect wallet after Disconnect: %r" % chip4_text)
+        assert note4_count == 1, "the disconnect note did not appear exactly once: %s" % note4_count
+        assert note4_hidden is False, "the disconnect note is still hidden after Disconnect"
+        assert note4_text == EXPECTED_DISCONNECT_TEXT, (
+            "the disconnect note's wording does not match exactly: %r" % note4_text)
+        assert not werrs4 and not cerrs4, "errors on the disconnect-click probe: %s %s" % (werrs4, cerrs4)
+
+        # ۵) یک کلیدِ wc@2:…session… غیرخالی، بدونِ هیچ پروایدرِ تزریق‌شده ->
+        # CONNECTED_REMOTE؛ بدونِ کتابخانه‌ی WalletConnect، بدونِ Disconnectِ محلی
+        w5, werrs5, cerrs5 = await open_wallet_page(init_script=(
+            "localStorage.setItem('wc@2:client:0.3//session', JSON.stringify({topic:'abc'}));"))
+        led5_off = await w5.eval_on_selector("#walletChip .led", "e => e.classList.contains('off')")
+        await w5.click("#walletChip")
+        await w5.wait_for_timeout(100)
+        pop5_html = await w5.eval_on_selector("#walletPop", "e => e.innerHTML")
+        disc_app_href5 = await w5.evaluate(
+            "() => { var e = document.getElementById('walletPopDiscApp'); "
+            "return e ? e.getAttribute('href') : null; }")
+        local_disc_present5 = await w5.evaluate(
+            "() => !!document.getElementById('walletPopDisc')")
+        await w5.close()
+        print("[pairs wallet] wc session, no injected provider: ledOff=%s discAppHref=%s "
+              "localDiscPresent=%s errors=%s consoleErrs=%s"
+              % (led5_off, disc_app_href5, local_disc_present5, werrs5, cerrs5))
+        assert led5_off is False, "the WalletConnect-session chip still shows the off LED"
+        assert "WalletConnect" in pop5_html, (
+            "the popover does not mention WalletConnect for a remote session: %r" % pop5_html)
+        assert disc_app_href5 == "/app#swap", (
+            "the \"Disconnect in the app\" link is missing or wrong: %r" % disc_app_href5)
+        assert local_disc_present5 is False, (
+            "a local Disconnect button must not exist for a WalletConnect (remote) session")
+        assert not werrs5 and not cerrs5, "errors on the wc-session load: %s %s" % (werrs5, cerrs5)
+
+        # ۶) پروایدری که eth_accounts در آن پرتاب می‌کند -> «Connect wallet»،
+        # هیچ خطای کنسولی
+        w6, werrs6, cerrs6 = await open_wallet_page(init_script=fake_provider_throws_script())
+        chip6_text = await w6.eval_on_selector("#walletChip", "e => e.textContent.trim()")
+        await w6.close()
+        print("[pairs wallet] throwing provider: chipText=%r errors=%s consoleErrs=%s"
+              % (chip6_text, werrs6, cerrs6))
+        assert chip6_text == "Connect wallet", (
+            "a throwing provider should degrade to Connect wallet, got %r" % chip6_text)
+        assert not werrs6, "a throwing provider must not become a page error: %s" % werrs6
+        assert not cerrs6, "a throwing provider must not print a console error: %s" % cerrs6
+
+        print("[pairs wallet] disconnected/injected/remote states render the right chip+popover; only "
+              "eth_accounts is ever called and never after the disconnected flag is set; Disconnect "
+              "(injected) sets the flag and shows the exact wording once; a WalletConnect session gets "
+              "no local Disconnect; a throwing provider degrades silently")
+
+        # ---- [pairs title] عنوانِ سند زنجیره را دنبال می‌کند ----
+        tpg = await b.new_page(viewport={"width": 1280, "height": 900})
+        terrs = []
+        tpg.on("pageerror", lambda e: terrs.append(str(e)))
+        await tpg.route("**/pairs.json**", lambda route: route.fulfill(
+            status=200, content_type="application/json",
+            body=_jsonPairs.dumps({"chain": "base", "rows": [SELL_ROW], "store": True})))
+        await tpg.route("**/gt/networks/base/tokens/multi/**", empty_gt)
+        await tpg.route("**/gt/networks/solana/tokens/multi/**", empty_gt)
+        await tpg.goto("http://127.0.0.1:%d/pairs.html" % port)
+        await tpg.wait_for_timeout(400)
+        title_default = await tpg.title()
+        await tpg.click("button[data-chain='solana']")
+        await tpg.wait_for_timeout(150)
+        title_solana = await tpg.title()
+        await tpg.click("button[data-chain='base']")
+        await tpg.wait_for_timeout(150)
+        title_base_again = await tpg.title()
+        await tpg.close()
+        print("[pairs title] default=%r solana=%r backToBase=%r errors=%s"
+              % (title_default, title_solana, title_base_again, terrs))
+        assert title_default == "New pairs on Base — Zaexa", (
+            "wrong default document title: %r" % title_default)
+        assert title_solana == "New pairs on Solana — Zaexa", (
+            "the title did not switch on the Solana tab: %r" % title_solana)
+        assert title_base_again == title_default, (
+            "the title did not restore exactly on switching back to Base: %r" % title_base_again)
+        assert not terrs, "web/pairs.html threw during the title probe: %s" % terrs
+
+        # ---- [pairs wallet] اسکرین‌شات‌ها — چیپ باید همان نگاهِ اپ را داشته
+        # باشد، بازشو از صفحه بیرون نزند، چیزی روی ناوبری نیفتد ----
+        shot_dir = "/tmp/pairs_wallet"
+        os.makedirs(shot_dir, exist_ok=True)
+        sA, sAerrs, _ = await open_wallet_page(
+            init_script=fake_provider_script(FAKE_ADDR), color_scheme="dark")
+        await sA.click("#walletChip")
+        await sA.wait_for_timeout(150)
+        await sA.screenshot(path=os.path.join(shot_dir, "1280-dark-connected-popover.png"))
+        await sA.close()
+
+        sB, sBerrs, _ = await open_wallet_page(color_scheme="light")
+        await sB.screenshot(path=os.path.join(shot_dir, "1280-light-disconnected.png"))
+        await sB.close()
+
+        sC, sCerrs, _ = await open_wallet_page(
+            init_script=fake_provider_script(FAKE_ADDR),
+            viewport={"width": 390, "height": 844}, color_scheme="dark")
+        await sC.screenshot(path=os.path.join(shot_dir, "390-dark-connected.png"))
+        await sC.close()
+        print("[pairs wallet] screenshots written to %s (errors: %s %s %s)"
+              % (shot_dir, sAerrs, sBerrs, sCerrs))
+        assert not sAerrs and not sBerrs and not sCerrs, "errors while taking wallet-chip screenshots"
+
         # ---- [server sell ret] fetchVdVerdict واقعی، /vd استاب‌شده روی سیم — نه
         # جایگزینیِ خودِ تابع؛ همان اعتبارسنجیِ بازه که در fetchVdVerdict نوشته شده
         # اینجا واقعاً اجرا می‌شود، تا شکستنِ عمدیِ سقفِ ۱۰۰۰ در پایین همین تست
