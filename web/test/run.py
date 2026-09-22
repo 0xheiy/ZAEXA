@@ -1,8 +1,22 @@
-import asyncio, base64, glob, os, re, sys
+import asyncio, base64, glob, os, re, struct, sys, zlib
 from urllib.parse import urlparse
 from playwright.async_api import async_playwright
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+
+def _png_chunk(tag, data):
+    """یک چانکِ استانداردِ PNG (طول + تگ + داده + CRC32). فقط برای ساختنِ یک
+    عکسِ ۱×۱ واقعی داخلِ همین فایل — نه یک base64 حفظ‌شده از جایی دیگر که
+    اگر اشتباه کپی می‌شد، آرام‌آرام خراب بود."""
+    return struct.pack(">I", len(data)) + tag + data + struct.pack(">I", zlib.crc32(tag + data) & 0xffffffff)
+
+def tiny_png_bytes():
+    """یک PNGِ معتبرِ ۱×۱ قرمز — برای کاوشگرهای [pairs logos] که باید یک
+    <img> واقعاً بارگذاری‌شده ببینند، نه فقط عنصرش را."""
+    sig = b"\x89PNG\r\n\x1a\n"
+    ihdr = struct.pack(">IIBBBBB", 1, 1, 8, 2, 0, 0, 0)  # ۸بیتی، رنگیِ RGB
+    idat = zlib.compress(b"\x00\xff\x00\x00", 9)          # بایتِ فیلتر + یک پیکسلِ قرمز
+    return sig + _png_chunk(b"IHDR", ihdr) + _png_chunk(b"IDAT", idat) + _png_chunk(b"IEND", b"")
 
 # کلیدِ localStorage قدیمی و منسوخِ تمِ صفحاتِ landing/pairs، پیش از یکی‌شدن
 # با کلیدِ خودِ اپ (zaexa.theme.v1). فقط برای سنجیدنِ اینکه دیگر جایی
@@ -1408,13 +1422,28 @@ def check_pairs_page():
         "an unknown-verdict badge also carries a positive/negative class: %s — unknown must "
         "never look like a pass or a fail" % tainted)
 
-    # ---- تنها یک اندپوینتِ بک‌اند: /pairs.json?chain=base ----
+    # ---- فقط دو اندپوینتِ بک‌اندِ مجاز: /pairs.json?chain=base و پراکسیِ
+    # لوگوی توکن (/gt/networks/base/tokens/multi/) — هرچیزِ دیگر رد می‌شود.
+    # ۲۲ سپتامبر ۲۰۲۶: تصمیمِ مالک برای لوگوهای این صفحه دومی را عمداً اضافه
+    # کرد؛ نگهبان همچنان می‌سنجد که چیزِ سومی اضافه نشده باشد.
     assert "/pairs.json?chain=base" in src, (
         "web/pairs.html never calls /pairs.json?chain=base — it has no data to show")
-    other_backend = re.findall(r'"(/(?:gt|vd|ev|report)(?:[/"?][^"]*)?)"', src)
+    GT_LOGO_PREFIX = "/gt/networks/base/tokens/multi/"
+    assert GT_LOGO_PREFIX in src, (
+        "web/pairs.html never calls %s — token logos have no data to show" % GT_LOGO_PREFIX)
+    # ⚠️ رشته‌های این صفحه با نقل‌قولِ تکی نوشته می‌شوند (همان قراردادِ خودِ
+    # فایل، نه دوتایی) — نگهبانِ قبلی فقط رشته‌های دوتایی را می‌دید، پس
+    # حتی خودِ /pairs.json?chain=base هم از دیدش پنهان بود. اینجا هر دو نوعِ
+    # نقل‌قول با یک بک‌رفرنس پذیرفته می‌شود تا هر مسیرِ سومی، با هر نقل‌قولی،
+    # واقعاً گیر بیفتد.
+    other_backend = [
+        m[1] for m in re.findall(r'(["\'])(/(?:gt|vd|ev|report)(?:[/?][^"\']*)?)\1', src)
+        if not m[1].startswith(GT_LOGO_PREFIX)
+    ]
     assert not other_backend, (
-        "web/pairs.html references a backend path other than /pairs.json: %s — this page must "
-        "add no new backend and must not reach into another endpoint's traffic" % other_backend)
+        "web/pairs.html references a backend path other than /pairs.json or %s: %s — this page "
+        "must add no new backend beyond the two allowed paths and must not reach into another "
+        "endpoint's traffic" % (GT_LOGO_PREFIX, other_backend))
     other_json = [m for m in re.findall(r'"([^"]*\.json[^"]*)"', src) if "pairs.json" not in m]
     assert not other_json, (
         "web/pairs.html references a .json path other than /pairs.json: %s" % other_json)
@@ -1454,11 +1483,11 @@ def check_pairs_page():
         "with no data baked in, only the fetch against /pairs.json?chain=base" % addrs)
 
     print("[pairs page] %d bytes, all 3 verdict labels/meanings present byte-for-byte, permanent "
-          "note present, only /pairs.json?chain=base referenced (%d other backend/.json refs), "
-          "%d external refs (all allowed: %s), theme key %r shared with landing.html, no baked-in "
-          "token address"
-          % (len(src), len(other_backend) + len(other_json), len(refs), sorted(allowed_hosts),
-             theme_key))
+          "note present, only /pairs.json?chain=base and %s referenced (%d other backend/.json "
+          "refs), %d external refs (all allowed: %s), theme key %r shared with landing.html, "
+          "no baked-in token address"
+          % (len(src), GT_LOGO_PREFIX, len(other_backend) + len(other_json), len(refs),
+             sorted(allowed_hosts), theme_key))
 
 
 def _canvas_script_block(landing_src):
@@ -4550,6 +4579,110 @@ async def main():
             "resizing the wordmark moved it out of vertical alignment with the mark: "
             "%.2fpx apart" % center_gap)
 
+        # ---- [pairs nav] «New pairs» در ناوبریِ بالای خودِ اپ — یک <a> به
+        # صفحه‌ی جداگانه‌ی /pairs، نه یک نما — پس هرگز data-view نمی‌گیرد و
+        # setView (که فقط [data-view] را می‌بیند) هرگز کلاسِ .on را رویش
+        # نمی‌گذارد. صفحه‌ی جداگانه‌ای برای این کاوشگرها، تا حالتِ pg
+        # (نما/مقدار/اسکرول) که بقیه‌ی فایل رویش حساب می‌کند دست‌نخورده بماند. ----
+        navpairspg = await b.new_page(viewport={"width": 1280, "height": 900})
+        await navpairspg.goto(URL)
+        await navpairspg.wait_for_timeout(700)
+        info = await navpairspg.evaluate("""() => {
+            const nav = document.getElementById("nav");
+            const links = [...nav.querySelectorAll('a[href="/pairs"]')];
+            const link = links[0];
+            const r = link ? link.getBoundingClientRect() : null;
+            const h = nav.getBoundingClientRect();
+            const hdr = document.querySelector("header").getBoundingClientRect();
+            return {
+                count: links.length,
+                text: link ? link.textContent.trim() : null,
+                hasDataView: link ? link.hasAttribute("data-view") : null,
+                visible: r ? (r.width > 0 && r.height > 0) : false,
+                navCenter: Math.round(h.left + h.width / 2),
+                hdrCenter: Math.round(hdr.left + hdr.width / 2),
+            };
+        }""")
+        print("[pairs nav] link count=%s text=%r hasDataView=%s visible=%s navCenter=%s "
+              "hdrCenter=%s (1280px)"
+              % (info["count"], info["text"], info["hasDataView"], info["visible"],
+                 info["navCenter"], info["hdrCenter"]))
+        assert info["count"] == 1, (
+            "expected exactly one a[href=\"/pairs\"] inside #nav, found %s" % info["count"])
+        assert info["text"] == "New pairs", (
+            "the New pairs nav link's text is wrong: %r" % info["text"])
+        assert info["hasDataView"] is False, (
+            "the New pairs nav link must never carry data-view — it navigates to a separate "
+            "page, not an in-app view, and must stay invisible to setView/[data-view]")
+        assert info["visible"], "the New pairs nav link is not visible at 1280px"
+        assert abs(info["navCenter"] - info["hdrCenter"]) <= 2, (
+            "adding the New pairs link knocked the nav off-center at 1280px: nav=%s header=%s"
+            % (info["navCenter"], info["hdrCenter"]))
+
+        # موبایل: نوارِ پایینِ ثابت باید چهار آیتم را بدونِ اسکرولِ افقی جا بدهد.
+        for w in (390, 360):
+            await navpairspg.set_viewport_size({"width": w, "height": 844})
+            await navpairspg.wait_for_timeout(200)
+            mobinfo = await navpairspg.evaluate("""() => ({
+                count: document.querySelectorAll("#nav > button, #nav > a").length,
+                scrollW: document.documentElement.scrollWidth,
+                innerW: innerWidth,
+                widths: [...document.querySelectorAll("#nav > button, #nav > a")].map(
+                    el => Math.round(el.getBoundingClientRect().width)),
+            })""")
+            print("[pairs nav] mobile %spx: items=%s scrollWidth=%s innerWidth=%s widths=%s"
+                  % (w, mobinfo["count"], mobinfo["scrollW"], mobinfo["innerW"], mobinfo["widths"]))
+            assert mobinfo["count"] == 4, (
+                "expected 4 items in the bottom nav at %spx, found %s" % (w, mobinfo["count"]))
+            # چهار آیتم باید flex:1 مشترک داشته باشند — یعنی پهنای تقریباً
+            # برابر، نه اینکه لینک به‌اندازه‌ی محتوایش جمع شود و سه دکمه‌ی
+            # دیگر برای جا شدنش بی‌قاعده جمع/باز شوند.
+            assert max(mobinfo["widths"]) - min(mobinfo["widths"]) <= 4, (
+                "the 4 bottom-nav items are not sharing width equally at %spx (widths=%s) — the "
+                "New pairs link is not getting the same flex:1 as the buttons"
+                % (w, mobinfo["widths"]))
+            assert mobinfo["scrollW"] <= mobinfo["innerW"], (
+                "the page scrolls horizontally at %spx (%s > %s) — the 4-item bottom nav does "
+                "not fit" % (w, mobinfo["scrollW"], mobinfo["innerW"]))
+
+        # ۸۰۰px — باندِ فقط-آیکون: برچسبِ لینک هم باید مثل دکمه‌ها مخفی شود.
+        await navpairspg.set_viewport_size({"width": 800, "height": 900})
+        await navpairspg.wait_for_timeout(200)
+        band = await navpairspg.evaluate("""() => {
+            const linkSpan = document.querySelector('#nav a[href="/pairs"] span');
+            const btnSpan = document.querySelector('#nav button span');
+            return {
+                linkSpanDisplay: linkSpan ? getComputedStyle(linkSpan).display : null,
+                btnSpanDisplay: btnSpan ? getComputedStyle(btnSpan).display : null,
+            };
+        }""")
+        print("[pairs nav] 800px icon-only band: link span display=%s button span display=%s"
+              % (band["linkSpanDisplay"], band["btnSpanDisplay"]))
+        assert band["linkSpanDisplay"] == "none", (
+            "the New pairs link's label is not hidden in the 721-960px icon-only band: %s"
+            % band["linkSpanDisplay"])
+        assert band["linkSpanDisplay"] == band["btnSpanDisplay"], (
+            "the New pairs link's label visibility (%s) does not match the buttons' (%s) at "
+            "800px" % (band["linkSpanDisplay"], band["btnSpanDisplay"]))
+
+        # کلیک روی سه دکمه هنوز نما را عوض می‌کند (کاوشگرهای قدیمی جای دیگر
+        # همین را می‌سنجند)؛ لینک هرگز کلاسِ .on را نمی‌گیرد چون setView فقط
+        # [data-view] را لمس می‌کند.
+        await navpairspg.set_viewport_size({"width": 1280, "height": 900})
+        await navpairspg.wait_for_timeout(200)
+        clicks = {}
+        for v in ("swap", "folio", "flow", "swap"):
+            await navpairspg.click('#nav [data-view="%s"]' % v)
+            await navpairspg.wait_for_timeout(300)
+            clicks[v] = await navpairspg.evaluate(
+                """() => document.querySelector('#nav a[href="/pairs"]').className""")
+        print("[pairs nav] link class across view switches: %s" % clicks)
+        for v, cls in clicks.items():
+            assert "on" not in cls.split(), (
+                "the New pairs nav link picked up the .on class from setView after switching "
+                "to %r: %r" % (v, cls))
+        await navpairspg.close()
+
         # کارت سواپ نباید کشیده شود تا هم‌قد نمودار شود — زیر دکمه فضای مرده
         # می‌ماند. ولی ارتفاع نمودار *از همان کشیدگی* تغذیه می‌شود، پس اگر کسی
         # به‌جای کارت، کل ردیف را از کشیدگی خارج کند، نمودار کوتاه می‌شود.
@@ -6832,10 +6965,13 @@ async def main():
                        "priceUsd": None, "reserveUsd": 0, "vol24hUsd": 0,
                        "fdvUsd": None, "dex": "unknown-dex"}
 
-        async def open_pairs(body_or_status, viewport=None, abort=False):
+        async def open_pairs(body_or_status, viewport=None, abort=False, gt_handler=None,
+                              extra_routes=None, console_sink=None):
             ppg = await b.new_page(viewport=viewport or {"width": 1240, "height": 900})
             perrs = []
             ppg.on("pageerror", lambda e: perrs.append(str(e)))
+            if console_sink is not None:
+                ppg.on("console", lambda m: console_sink.append(m.text) if m.type == "error" else None)
 
             async def stub_pairs(route):
                 if abort:
@@ -6844,6 +6980,20 @@ async def main():
                 await route.fulfill(status=200, content_type="application/json",
                                      body=_jsonPairs.dumps(body_or_status))
             await ppg.route("**/pairs.json**", stub_pairs)
+
+            # پیش‌فرض: پاسخِ خالی برای پراکسیِ لوگو — کاوشگرهای ۱ تا ۵ (بالا)
+            # کاری به لوگو ندارند، فقط نباید یک درخواستِ واقعیِ رهاشده به
+            # سرورِ استاتیکِ محلی بخورد. کاوشگرهای [pairs logos] خودشان
+            # gt_handler می‌دهند.
+            async def default_gt(route):
+                await route.fulfill(status=200, content_type="application/json",
+                                     body=_jsonPairs.dumps({"data": []}))
+            await ppg.route("**/gt/networks/base/tokens/multi/**", gt_handler or default_gt)
+
+            if extra_routes:
+                for pattern, handler in extra_routes:
+                    await ppg.route(pattern, handler)
+
             await ppg.goto("http://127.0.0.1:%d/pairs.html" % port)
             await ppg.wait_for_timeout(600)
             return ppg, perrs
@@ -6918,6 +7068,261 @@ async def main():
               % (table_display, cards_display, errs_narrow))
         assert table_display == "none", "the table did not hide on a narrow viewport"
         assert cards_display != "none", "the card list did not show on a narrow viewport"
+
+        # ---- [pairs search] جعبه‌ی جست‌وجو — روی نماد/نام/آدرس، بدونِ حساسیت
+        # به بزرگی‌کوچکیِ حروف، روی همان آرایه‌ی محلی (بدونِ درخواستِ تازه). ----
+        SEARCH_ROW_A = dict(SELL_ROW, address="0x" + "a" * 40, symbol="ALPHA", name="Alpha Rocket")
+        SEARCH_ROW_B = dict(NOSELL_ROW, address="0x" + "b" * 40, symbol="BETA", name="Beta Fox")
+        SEARCH_ROW_C = dict(UNKNOWN_ROW, address="0x" + "c" * 40, symbol="GAMMA", name="Gamma Wolf")
+        SEARCH_ROW_D = dict(SELL_ROW, address="0x" + "d" * 40, symbol="DELTA", name="Delta Owl")
+        SEARCH_ROWS = [SEARCH_ROW_A, SEARCH_ROW_B, SEARCH_ROW_C, SEARCH_ROW_D]
+
+        pg_s, errs_s = await open_pairs({"chain": "base", "rows": SEARCH_ROWS, "store": True})
+
+        async def visible_syms(page):
+            return await page.eval_on_selector_all(
+                "#rowsBody .token-sym", "els => els.map(e => e.textContent.trim())")
+
+        async def counts(page):
+            r = await page.eval_on_selector_all("#rowsBody tr", "els => els.length")
+            c = await page.eval_on_selector_all("#rowsCards > li", "els => els.length")
+            no_match_hidden = await page.evaluate("document.getElementById('noMatch').hidden")
+            return r, c, no_match_hidden
+
+        async def type_query(page, q):
+            await page.fill("#pairSearch", q)
+            await page.wait_for_timeout(150)
+
+        r0, c0, nm0 = await counts(pg_s)
+        await type_query(pg_s, "ALP")
+        r1, c1, nm1 = await counts(pg_s)
+        syms1 = await visible_syms(pg_s)
+        await type_query(pg_s, ("0x" + "b" * 40).upper())
+        r2, c2, nm2 = await counts(pg_s)
+        syms2 = await visible_syms(pg_s)
+        await type_query(pg_s, "wolf")
+        r3, c3, nm3 = await counts(pg_s)
+        syms3 = await visible_syms(pg_s)
+        await type_query(pg_s, "zzz-nomatch")
+        r4, c4, nm4 = await counts(pg_s)
+        await type_query(pg_s, "")
+        r5, c5, nm5 = await counts(pg_s)
+        await pg_s.close()
+
+        print("[pairs search] all=%d/%d(noMatchHidden=%s) symbol-substring=%d/%d %s "
+              "addr-substring(mixed case)=%d/%d %s name-substring=%d/%d %s "
+              "no-match=%d/%d(noMatchHidden=%s) cleared=%d/%d(noMatchHidden=%s) errors=%s"
+              % (r0, c0, nm0, r1, c1, syms1, r2, c2, syms2, r3, c3, syms3,
+                 r4, c4, nm4, r5, c5, nm5, errs_s))
+        assert (r0, c0) == (4, 4) and nm0 is True, "expected all 4 rows, #noMatch hidden, before typing"
+        assert (r1, c1) == (1, 1) and syms1 == ["ALPHA"], (
+            "typing a symbol substring did not leave exactly the matching row: %s" % syms1)
+        assert (r2, c2) == (1, 1) and syms2 == ["BETA"], (
+            "typing a mixed-case address substring did not match: %s" % syms2)
+        assert (r3, c3) == (1, 1) and syms3 == ["GAMMA"], (
+            "typing a name substring did not match: %s" % syms3)
+        assert (r4, c4) == (0, 0) and nm4 is False, (
+            "a query matching nothing did not empty the table/cards and show #noMatch")
+        assert (r5, c5) == (4, 4) and nm5 is True, (
+            "clearing the query did not restore all 4 rows and hide #noMatch")
+        assert not errs_s, "web/pairs.html threw while searching: %s" % errs_s
+
+        # ---- [pairs logos] جایگاهِ ۲۴×۲۴ کنارِ نماد — لوگو فقط وقتی پذیرفته
+        # می‌شود که image_url رشته باشد، با https:// شروع شود و missing را
+        # هم نداشته باشد؛ وگرنه جایگاه خالی می‌ماند (بدونِ حرفِ اول/پس‌زمینه). ----
+        LOGO_ROW_A = dict(SELL_ROW, address="0x" + "5" * 40, symbol="LOGA")
+        LOGO_ROW_B = dict(SELL_ROW, address="0x" + "6" * 40, symbol="LOGB")
+        LOGO_ROW_C = dict(SELL_ROW, address="0x" + "7" * 40, symbol="LOGC")
+        LOGO_ROW_D = dict(SELL_ROW, address="0x" + "8" * 40, symbol="LOGD")  # عمداً در پاسخ نیست
+        GOOD_LOGO_URL = "https://example.com/tiny.png"
+        TINY_PNG = tiny_png_bytes()
+        basic_gt_requests = {"n": 0}
+
+        async def serve_tiny_png(route):
+            await route.fulfill(status=200, content_type="image/png", body=TINY_PNG)
+
+        async def gt_route_basic(route):
+            basic_gt_requests["n"] += 1
+            addrs_part = route.request.url.split("multi/", 1)[-1].split("?", 1)[0]
+            req = set(a.lower() for a in addrs_part.split(",") if a)
+            data = []
+            if LOGO_ROW_A["address"].lower() in req:
+                data.append({"attributes": {"address": LOGO_ROW_A["address"], "image_url": GOOD_LOGO_URL}})
+            if LOGO_ROW_B["address"].lower() in req:
+                data.append({"attributes": {"address": LOGO_ROW_B["address"],
+                                             "image_url": "https://example.com/missing.png"}})
+            if LOGO_ROW_C["address"].lower() in req:
+                data.append({"attributes": {"address": LOGO_ROW_C["address"], "image_url": None}})
+            await route.fulfill(status=200, content_type="application/json",
+                                 body=_jsonPairs.dumps({"data": data}))
+
+        pg_logo, errs_logo = await open_pairs(
+            {"chain": "base", "rows": [LOGO_ROW_A, LOGO_ROW_B, LOGO_ROW_C, LOGO_ROW_D], "store": True},
+            gt_handler=gt_route_basic, extra_routes=[(GOOD_LOGO_URL, serve_tiny_png)])
+        await pg_logo.wait_for_timeout(700)
+
+        # ⚠️ جدول و کارت هیچ‌وقت هم‌زمان دیده نمی‌شوند (۷۶۰px مرزِ رسپانسیو
+        # است) — پس فقط نسخه‌ی *دیده‌شده* (اینجا: جدول، عرضِ صفحه ۱۲۴۰) واقعاً
+        # بارگذاری می‌شود؛ نسخه‌ی داخلِ display:none طبیعیِ loading="lazy"
+        # است که هیچ‌وقت بارگذاری نشود، نه باگِ کدِ ما. اندازه‌ی جایگاه‌ها هم
+        # با getComputedStyle سنجیده می‌شود نه getBoundingClientRect — مقدارِ
+        # محاسبه‌شده‌ی width/height مستقل از display:none است.
+        imgs_a = await pg_logo.evaluate("""() => [...document.querySelectorAll('img')].map(img => ({
+            addr: (img.closest('.tok-logo') || {}).getAttribute
+                ? img.closest('.tok-logo').getAttribute('data-addr') : null,
+            visible: img.offsetWidth > 0 && img.offsetHeight > 0,
+            loaded: img.complete && img.naturalWidth > 0,
+        }))""")
+
+        async def slot_report(addr):
+            return await pg_logo.evaluate("""(addr) => [...document.querySelectorAll(
+                '.tok-logo[data-addr="' + addr + '"]')].map(s => {
+                const cs = getComputedStyle(s);
+                return {children: s.childNodes.length, w: cs.width, h: cs.height,
+                        bg: cs.backgroundImage, borderW: cs.borderTopWidth};
+            })""", addr)
+
+        slots_b = await slot_report(LOGO_ROW_B["address"])
+        slots_c = await slot_report(LOGO_ROW_C["address"])
+        slots_d = await slot_report(LOGO_ROW_D["address"])
+        reqs_after_initial = basic_gt_requests["n"]
+
+        print("[pairs logos] basic: imgs=%s (want 2, both addr=%s) B-slots=%s C-slots=%s "
+              "D-slots=%s requests=%d errors=%s"
+              % (imgs_a, LOGO_ROW_A["address"], slots_b, slots_c, slots_d, reqs_after_initial, errs_logo))
+        assert len(imgs_a) == 2, "expected exactly 2 <img> on the page (table + card, A only): %s" % imgs_a
+        assert all(i["addr"] == LOGO_ROW_A["address"] for i in imgs_a), (
+            "the rendered <img>(s) are not both addressed to A: %s" % imgs_a)
+        visible_imgs = [i for i in imgs_a if i["visible"]]
+        assert visible_imgs and all(i["loaded"] for i in visible_imgs), (
+            "the visible <img> for A did not actually load from the stubbed PNG: %s" % imgs_a)
+        for label, slots in (("B (missing.png)", slots_b), ("C (image_url:null)", slots_c),
+                              ("D (absent from response)", slots_d)):
+            assert len(slots) == 2, "expected 2 tok-logo slots for %s, found %d" % (label, len(slots))
+            for s in slots:
+                assert s["children"] == 0 and s["w"] == "24px" and s["h"] == "24px" and \
+                    s["bg"] == "none" and s["borderW"] == "0px", (
+                    "the empty slot for %s is not a plain reserved 24x24 box: %s" % (label, s))
+
+        # ---- [pairs logos] بعدِ رندرِ دوباره‌ی جست‌وجو، لوگوی A دوباره ظاهر
+        # می‌شود بدونِ درخواستِ تازه به /gt (از رویِ Map، نه شبکه). ----
+        await pg_logo.fill("#pairSearch", "LOGA")
+        await pg_logo.wait_for_timeout(300)
+        imgs_after_search = await pg_logo.eval_on_selector_all("img", "els => els.length")
+        reqs_after_search = basic_gt_requests["n"]
+        await pg_logo.close()
+        print("[pairs logos] re-render after search: imgs=%s requests %d -> %d"
+              % (imgs_after_search, reqs_after_initial, reqs_after_search))
+        assert imgs_after_search == 2, (
+            "A's logo did not reappear (table+card) after a search re-render: %s img(s)"
+            % imgs_after_search)
+        assert reqs_after_search == reqs_after_initial, (
+            "a search re-render triggered a new /gt request for an address already answered: "
+            "%d -> %d" % (reqs_after_initial, reqs_after_search))
+        assert not errs_logo, "web/pairs.html threw during the logos probe: %s" % errs_logo
+
+        # ---- [pairs logos] هر درخواستِ /gt حداکثر ۳۰ آدرس دارد، و هیچ آدرسی
+        # دوبار پرسیده نمی‌شود — ۷۰ ردیف، اسکرول تا انتها. ----
+        CHUNK_ROWS = [dict(SELL_ROW, address="0x" + format(i + 1, "040x"), symbol="T%d" % i)
+                      for i in range(70)]
+        seen_requests = []
+
+        async def gt_route_recording(route):
+            addrs_part = route.request.url.split("multi/", 1)[-1].split("?", 1)[0]
+            seen_requests.append([a for a in addrs_part.split(",") if a])
+            await route.fulfill(status=200, content_type="application/json",
+                                 body=_jsonPairs.dumps({"data": []}))
+
+        pg_chunk, errs_chunk = await open_pairs(
+            {"chain": "base", "rows": CHUNK_ROWS, "store": True}, gt_handler=gt_route_recording)
+        await pg_chunk.wait_for_timeout(500)
+        await pg_chunk.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+        await pg_chunk.wait_for_timeout(1000)
+        await pg_chunk.close()
+
+        all_addrs = [a for req in seen_requests for a in req]
+        max_len = max((len(req) for req in seen_requests), default=0)
+        dup_count = len(all_addrs) - len(set(all_addrs))
+        print("[pairs logos] chunking: %d rows -> %d requests, max %d addrs/request, %d total, "
+              "%d duplicates, errors=%s"
+              % (len(CHUNK_ROWS), len(seen_requests), max_len, len(all_addrs), dup_count, errs_chunk))
+        assert seen_requests, "no /gt requests were made for 70 rows — logos never loaded"
+        assert max_len <= 25, "a /gt request carried more than 25 addresses: %d" % max_len
+        # همان سقفِ واقعیِ پراکسی (PATH_OK: هر بخش ≤۱۲۰۰ نویسه) — ۳۰ آدرس روی سایتِ زنده ۴۰۰ گرفت
+        max_seg = max((len(",".join(req)) for req in seen_requests), default=0)
+        assert max_seg <= 1200, "a /gt multi segment is %d chars; the proxy rejects >1200 with 400" % max_seg
+        assert dup_count == 0, "the same address was requested more than once: %d duplicates" % dup_count
+        assert not errs_chunk, "web/pairs.html threw during the chunking probe: %s" % errs_chunk
+
+        # ---- [pairs logos] شکستِ /gt هرگز به کاربر نشان داده نمی‌شود و صفحه
+        # نمی‌شکند. ⚠️ یک ۵۰۰ی واقعی را خودِ کرومیوم به‌صورت یک خطای بارگذاریِ
+        # منبع در کنسول ثبت می‌کند — چیزی که کدِ ما کنترلش نمی‌کند، نه شکستِ
+        # کدِ ما. برای سنجیدنِ *کدِ ما* (سکوتِ کامل)، همان مسیرِ شکست با
+        # ۲۰۰ + JSONِ نامعتبر ساخته شده: fetch موفق می‌شود، res.json() شکست
+        # می‌خورد، catch بی‌صدا می‌بلعدش — نتیجه برای کاربر یکسان است. ----
+        ERR_ROW = dict(SELL_ROW, address="0x" + "9" * 40, symbol="ERRT")
+
+        async def gt_route_broken(route):
+            await route.fulfill(status=200, content_type="application/json", body="not valid json{{{")
+
+        cerrs_gt = []
+        pg_500, errs_500 = await open_pairs(
+            {"chain": "base", "rows": [ERR_ROW], "store": True},
+            gt_handler=gt_route_broken, console_sink=cerrs_gt)
+        await pg_500.wait_for_timeout(700)
+        img_count6 = await pg_500.eval_on_selector_all("img", "els => els.length")
+        results_hidden6 = await pg_500.evaluate("document.getElementById('resultsWrap').hidden")
+        row_count6 = await pg_500.eval_on_selector_all("#rowsBody tr", "els => els.length")
+        await pg_500.close()
+        print("[pairs logos] /gt failure (200 + invalid JSON, standing in for a 500 — see report): "
+              "imgs=%s resultsHidden=%s rowCount=%s pageErrors=%s consoleErrors=%s"
+              % (img_count6, results_hidden6, row_count6, errs_500, cerrs_gt))
+        assert img_count6 == 0, "an <img> appeared even though the /gt response was invalid"
+        assert results_hidden6 is False, "the page hid its results because /gt failed — rows must still show"
+        assert row_count6 == 1, "the row disappeared because /gt failed"
+        assert not errs_500, "web/pairs.html threw while /gt failed: %s" % errs_500
+        assert not cerrs_gt, "our code logged a console error when /gt failed: %s" % cerrs_gt
+
+        # ---- [pairs logos] یک شکستِ گذرا نباید برای همیشه «لوگو ندارد» ثبت
+        # شود — بارِ اول /gt نامعتبر است، بعد یک رندرِ دوباره (جست‌وجو) جایگاه
+        # را تازه می‌سازد و دوباره صف می‌کند؛ این‌بار /gt جواب می‌دهد و باید
+        # لوگو را ببینیم. اگر شکست در Map ذخیره می‌شد، این آدرس دیگر هیچ‌وقت
+        # دوباره پرسیده نمی‌شد. ----
+        RECOVER_ROW = dict(SELL_ROW, address="0x" + "f" * 40, symbol="RECOV")
+        recover_calls = {"n": 0}
+
+        async def gt_route_recover(route):
+            recover_calls["n"] += 1
+            if recover_calls["n"] == 1:
+                await route.fulfill(status=200, content_type="application/json", body="not valid json{{{")
+                return
+            addrs_part = route.request.url.split("multi/", 1)[-1].split("?", 1)[0]
+            req = set(a.lower() for a in addrs_part.split(",") if a)
+            data = []
+            if RECOVER_ROW["address"].lower() in req:
+                data.append({"attributes": {"address": RECOVER_ROW["address"], "image_url": GOOD_LOGO_URL}})
+            await route.fulfill(status=200, content_type="application/json",
+                                 body=_jsonPairs.dumps({"data": data}))
+
+        pg_recover, errs_recover = await open_pairs(
+            {"chain": "base", "rows": [RECOVER_ROW], "store": True},
+            gt_handler=gt_route_recover, extra_routes=[(GOOD_LOGO_URL, serve_tiny_png)])
+        await pg_recover.wait_for_timeout(700)
+        imgs_before_recover = await pg_recover.eval_on_selector_all("img", "els => els.length")
+        # جست‌وجو -> رندرِ دوباره -> جایگاهِ تازه دوباره صف می‌شود -> این‌بار /gt جواب می‌دهد
+        await pg_recover.fill("#pairSearch", "RECOV")
+        await pg_recover.wait_for_timeout(700)
+        imgs_after_recover = await pg_recover.eval_on_selector_all("img", "els => els.length")
+        await pg_recover.close()
+        print("[pairs logos] retry after failure: imgs before=%s after re-render+gt-recovery=%s "
+              "gt-calls=%d errors=%s"
+              % (imgs_before_recover, imgs_after_recover, recover_calls["n"], errs_recover))
+        assert imgs_before_recover == 0, (
+            "an <img> appeared even though the first /gt request was invalid: %s" % imgs_before_recover)
+        assert imgs_after_recover == 2, (
+            "the logo never appeared after /gt recovered — a failed request must not be cached, "
+            "so the address is retried the next time its slot is observed: %s" % imgs_after_recover)
+        assert not errs_recover, "web/pairs.html threw during the retry-after-failure probe: %s" % errs_recover
 
         # ---- [pairs verdict note] یادداشتِ زیرِ نشانِ رأی — از رویِ کلیدهای تازه‌ی
         # Worker (ret/cause/follow/followAt/recheck/recheckAt/recheckCause). هر ردیف

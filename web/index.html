@@ -463,10 +463,10 @@ header>.navPad{grid-column:1;grid-row:1;width:0;min-width:0}
 }
 .nav{grid-column:2;grid-row:1;display:flex;gap:4px;background:var(--card2);border-radius:999px;padding:4px}
 .hdrRight{grid-column:3;grid-row:1;display:flex;align-items:center;gap:11px;min-width:0;justify-self:end}
-.nav button{display:flex;align-items:center;gap:7px;padding:7px 14px;border-radius:999px;
-  font-size:13.5px;color:var(--tx2);transition:.16s;white-space:nowrap}
-.nav button svg{width:16px;height:16px;flex-shrink:0}
-.nav button:hover{color:var(--tx)}
+.nav button,.nav .navLink{display:flex;align-items:center;gap:7px;padding:7px 14px;border-radius:999px;
+  font-size:13.5px;color:var(--tx2);transition:.16s;white-space:nowrap;text-decoration:none}
+.nav button svg,.nav .navLink svg{width:16px;height:16px;flex-shrink:0}
+.nav button:hover,.nav .navLink:hover{color:var(--tx)}
 .nav button.on{background:var(--card);color:var(--tx);font-weight:620;box-shadow:var(--shs)}
 /* --- موبایل ---
    هدر روی نمایشگر باریک جا نمی‌شد و کل صفحه را به پهلو می‌کشید.
@@ -478,9 +478,9 @@ header>.navPad{grid-column:1;grid-row:1;width:0;min-width:0}
   .nav{position:fixed;left:0;right:0;bottom:0;z-index:60;margin:0;border-radius:0;
     padding:6px 8px calc(6px + env(safe-area-inset-bottom));gap:6px;
     background:var(--card);box-shadow:0 -1px 0 var(--line),0 -10px 30px rgba(0,0,0,.18)}
-  .nav button{flex:1;flex-direction:column;gap:3px;padding:8px 0;font-size:11px;border-radius:14px}
-  .nav button svg{width:19px;height:19px}
-  .nav button span{display:block}
+  .nav button,.nav .navLink{flex:1;flex-direction:column;gap:3px;padding:8px 0;font-size:11px;border-radius:14px}
+  .nav button svg,.nav .navLink svg{width:19px;height:19px}
+  .nav button span,.nav .navLink span{display:block}
   body{padding-bottom:74px}
   #srcChip span:last-child{display:none}
   #srcChip{padding:0 12px}
@@ -498,14 +498,14 @@ header>.navPad{grid-column:1;grid-row:1;width:0;min-width:0}
   .card>header{padding:15px 14px 0}
   .stack,.flowbar,.flowbarCap{margin-left:14px;margin-right:14px}
 }
-@media(min-width:721px){.nav button span{display:inline}}
+@media(min-width:721px){.nav button span,.nav .navLink span{display:inline}}
 /* بین ۷۲۱ و ۹۶۰ ناوبری هنوز داخل هدر است ولی جا تنگ می‌شود: لوگو، سه
    دکمه‌ی برچسب‌دار، چیپ شبکه و «Connect wallet» با هم پهن‌تر از صفحه
    می‌شدند و کل صفحه به پهلو اسکرول می‌کرد. برچسب‌ها می‌روند، آیکون‌ها
    می‌مانند — همان اطلاعات، بدون سرریز. */
 @media(min-width:721px) and (max-width:960px){
-  .nav button span{display:none}
-  .nav button{padding:8px 11px}
+  .nav button span,.nav .navLink span{display:none}
+  .nav button,.nav .navLink{padding:8px 11px}
   #srcChip span:last-child{display:none}
   #srcChip{padding:0 12px}
 }
@@ -1087,6 +1087,13 @@ footer .fine{max-width:78ch;margin:46px 0 0;font-size:11.5px;color:var(--tx3);li
     <svg class="wordmark" role="img" viewBox="0 0 2581.74 300.00" fill="none" xmlns="http://www.w3.org/2000/svg"><title>Zaexa</title><g id="zxWordArt" transform="translate(0.0000,0.0000) scale(1.02023812) translate(-0.0000,0.0000)"><path d="M697.53 3.5001L530.53 294H559.53H571.03C581.03 294 588.53 289 594.03 280L717.248 71.6048L842.03 280C847.53 289 855.03 294 865.03 294H905.03L738.53 3.5001C727.53 -0.999901 708.53 -0.999901 697.53 3.5001ZM1117.53 243.5C1117.03 264 1135.1 281.73 1149.53 294H1422.53C1423.03 273 1405.04 254.405 1389.03 243.5H1117.53ZM1117.53 122C1116.84 142.578 1135.1 160.73 1149.53 173H1422.53C1423.03 152 1405.04 132.905 1389.03 122H1117.53ZM1117.53 9.67051e-05C1116.84 20.5924 1135.1 38.7299 1149.53 51.0001H1422.53C1423.03 30.0001 1405.04 10.9053 1389.03 9.67051e-05H1117.53ZM2325.03 3.50004L2157.03 294H2185.53H2204.03C2214.03 294 2221.53 289 2227.03 280L2343.85 71.6048L2464.03 280C2469.53 289 2477.03 294 2487.03 294H2530.53L2365.03 3.5001C2354.03 -0.999748 2336.03 -0.999959 2325.03 3.50004Z" fill="currentColor"/><path d="M1897.96 13.8242L1822.92 88.8711L1858.92 124.875L1983.77 0.0157217C1983.77 0.0157217 1932.09 0.0842197 1922.54 0.00890674C1913 -0.0703125 1904.65 6.82926 1897.96 13.8242Z" fill="currentColor"/><path d="M1619.76 0.0117188L1765.88 146.137L1617.75 294.012L1679.01 294.016C1688.46 294.016 1696.19 287.766 1703.53 280.224L1801.77 182.016L1900.01 280.238C1907.33 287.754 1915.02 294.012 1924.52 294.007L1985.79 294.012L1704.65 12.8994C1698.09 6.24181 1690.32 0.00293546 1681.02 0L1619.76 0.0117188Z" fill="currentColor"/><path d="M223.271 51.0454L82.7875 186.97L45.7503 221.177C45.7503 221.177 28.099 237.411 19.1656 246.092C2.28729 263.207 -1.43847 280.692 0.442681 294.045L299.224 294.046L326.22 294.049C326.696 287.876 324.264 276.416 315.859 265.019C306.515 251.714 292.713 243.011 292.713 243.011H260.223L102.509 243.825L243.838 107.093L281.029 72.6511L307.25 48.0897C324.971 31.0156 327.845 13.6258 326.13 0.0493162L305.708 0.0117188H6.30569C5.87802 6.15031 8.31159 17.7469 16.76 29.0982C24.718 40.7442 39.7948 51.0117 39.7948 51.0117H65.7863L223.271 51.0454Z" fill="currentColor"/></g></svg>
   </a>
   <div class="grow navPad"></div>
+  <!-- ۲۲ سپتامبر ۲۰۲۶: تصمیمِ مالک — «New pairs» همین‌جا، کنار ابزارهای
+       ناوبریِ بالا، لینک می‌شود. قاعده‌ی قدیمی («ناوبریِ بالا فقط برای
+       ابزارهاست، نه صفحاتِ سایت») برای همین یک صفحه عمداً کنار گذاشته شد.
+       این یک <a> است نه <button data-view>، چون به صفحه‌ی جداگانه‌ی /pairs
+       می‌رود، نه یک نمای داخلِ همین اپ — پس هرگز نباید data-view بگیرد
+       (setView و گزینشگرهای [data-view] فقط دکمه‌ها را می‌بینند). لینکِ
+       فوتر به /pairs همچنان سرِ جایش می‌ماند. -->
   <nav class="nav" id="nav">
     <button data-view="swap" class="on" title="Swap">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
@@ -1100,6 +1107,10 @@ footer .fine{max-width:78ch;margin:46px 0 0;font-size:11.5px;color:var(--tx3);li
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
            stroke-linecap="round" stroke-linejoin="round">
         <path d="M3 13h4l3 7 4-16 3 9h4"/></svg><span>Flow</span></button>
+    <a class="navLink" href="/pairs" title="New pairs">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+           stroke-linecap="round" stroke-linejoin="round">
+        <path d="M4 6h10M4 12h10M4 18h7"/><path d="M19 3v4M17 5h4"/></svg><span>New pairs</span></a>
   </nav>
   <!-- ۲۹ اوت: خوشه‌ی راست حالا یک واحد است (`.hdrRight`) تا در ستونِ سوم
        چیدمانِ سه‌ستونه‌ی هدر بنشیند — نه برای اینکه چیزی جابه‌جا شود، فقط

@@ -66,6 +66,15 @@ h1{font-size:clamp(28px,4vw,40px);letter-spacing:-.03em;margin:0 0 14px;line-hei
 .state-box button:hover{border-color:var(--acc);color:var(--acc)}
 .noscript-note{padding:14px 16px;border:1px solid var(--line2);border-radius:10px;color:var(--tx2);font-size:13px}
 
+/* جعبه‌ی جست‌وجو — بالای نتایج، فقط وقتی نتایج نشان داده می‌شوند (داخلِ
+   خودِ resultsWrap است، پس با آن مخفی/نمایان می‌شود). همان توکن‌های خودِ
+   این صفحه، بدونِ هیچ رنگِ تازه. حلقه‌ی فوکوس از قاعده‌ی سراسریِ
+   :focus-visible بالاتر می‌آید (var(--acc))، چیزِ تازه‌ای اینجا لازم نیست. */
+.pairs-search{margin-bottom:16px}
+#pairSearch{width:100%;height:40px;padding:0 14px;border:1px solid var(--line);border-radius:10px;
+  background:var(--card);color:var(--tx);font:inherit}
+#pairSearch::placeholder{color:var(--tx3)}
+
 .pairs-table{width:100%;border-collapse:collapse;font-size:13.5px}
 .pairs-table th{text-align:left;font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--tx3);border-bottom:1px solid var(--line);padding:10px 12px}
 .pairs-table td{padding:12px;border-bottom:1px solid var(--line);vertical-align:top}
@@ -74,17 +83,24 @@ h1{font-size:clamp(28px,4vw,40px);letter-spacing:-.03em;margin:0 0 14px;line-hei
 .col-token{position:relative}
 .row-link{position:absolute;inset:0;z-index:1}
 .row-link:focus-visible{outline-offset:-2px}
-.token-sym{position:relative;z-index:0;font-weight:700}
+.token-sym{position:relative;z-index:0;font-weight:700;display:flex;align-items:center;gap:8px}
 .token-name{color:var(--tx2);font-size:12px;margin-top:2px}
 .token-addr{color:var(--tx3);font-size:11px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;margin-top:2px}
 .num-cell{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12.5px}
 .checked-cell{color:var(--tx3);font-size:12px}
 .verdict-note{display:block;margin-top:4px;font-size:11px;line-height:1.3;color:var(--tx3)}
 
+/* جای لوگوی توکن — همیشه ۲۴×۲۴ رزرو می‌شود تا ردیف‌ها هم‌تراز بمانند.
+   تصمیمِ مالک: وقتی لوگو نداریم جای‌گزین/حرفِ اول/پس‌زمینه/حاشیه نمی‌گذاریم
+   — جا خالی می‌ماند، خودِ خالی‌بودن هیچ معنایی حمل نمی‌کند. */
+.tok-logo{width:24px;height:24px;flex:0 0 24px;display:block}
+.tok-logo img{width:24px;height:24px;display:block;border-radius:50%;object-fit:cover}
+
 .pairs-cards{list-style:none;padding:0;margin:0;display:none;flex-direction:column;gap:12px}
 .card{border:1px solid var(--line);border-radius:12px;background:var(--card);position:relative}
 .card-link{display:block;padding:14px;position:relative;z-index:1}
 .card-top{display:flex;justify-content:space-between;align-items:center;gap:10px}
+.card-symWrap{display:flex;align-items:center;gap:8px;min-width:0}
 .card-sym{font-weight:700}
 .card-name{color:var(--tx2);font-size:12.5px;margin-top:4px}
 .card-addr{color:var(--tx3);font-size:11px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;margin-top:2px}
@@ -167,6 +183,11 @@ h1{font-size:clamp(28px,4vw,40px);letter-spacing:-.03em;margin:0 0 14px;line-hei
   </div>
 
   <div id="resultsWrap" hidden>
+    <div class="pairs-search"><input type="search" id="pairSearch"
+      placeholder="Search name, symbol or address"
+      aria-label="Search pairs by name, symbol or address"
+      autocomplete="off" spellcheck="false"></div>
+    <p id="noMatch" class="state-box" role="status" hidden>No pairs match your search.</p>
     <table class="pairs-table">
       <caption class="visually-hidden">The newest pairs found on Base</caption>
       <thead>
@@ -190,7 +211,7 @@ h1{font-size:clamp(28px,4vw,40px);letter-spacing:-.03em;margin:0 0 14px;line-hei
 
 <footer class="landing-footer">
   <div class="footBrand"><svg class="mark" viewBox="0 0 1000 697.98" aria-hidden="true"><use href="#zxMark"/></svg><svg class="word" viewBox="0 0 2581.74 300" aria-hidden="true"><use href="#zxWord"/></svg></div>
-  <span>Non-custodial &middot; this page reads one endpoint of ours &middot; not audited</span>
+  <span>Non-custodial &middot; this page reads only our own endpoints &middot; not audited</span>
 </footer>
 
 <script>
@@ -227,8 +248,10 @@ h1{font-size:clamp(28px,4vw,40px);letter-spacing:-.03em;margin:0 0 14px;line-hei
 </script>
 
 <script>
-/* این صفحه فقط یک نمای فقط-خوانده روی /pairs.json?chain=base است. هیچ
-   بک‌اندِ تازه‌ای اینجا صدا زده نمی‌شود. */
+/* این صفحه یک نمای فقط-خوانده روی /pairs.json?chain=base است. برای لوگوی
+   توکن‌ها هم فقط از همان پراکسیِ GT خودِ سایت می‌خواند
+   (/gt/networks/base/tokens/multi/<آدرس‌ها>) — هیچ بک‌اندِ دیگری اینجا صدا
+   زده نمی‌شود. */
 (function(){
   var LABELS = {
     sell:    { cls: 'pos',     label: 'Sell quoted',   meaning: 'A venue quoted a sell for this token.' },
@@ -335,9 +358,17 @@ h1{font-size:clamp(28px,4vw,40px);letter-spacing:-.03em;margin:0 0 14px;line-hei
   var bodyEl = document.getElementById('rowsBody');
   var cardsEl = document.getElementById('rowsCards');
   var retryBtn = document.getElementById('retryBtn');
+  var searchEl = document.getElementById('pairSearch');
+  var noMatchEl = document.getElementById('noMatch');
 
   function hideAll(){
     [statusEl, errorEl, noStoreEl, emptyEl, resultsEl].forEach(function(el){ if (el) el.hidden = true; });
+  }
+
+  // جایِ رزروشده‌ی ۲۴×۲۴ کنارِ هر نماد، هم در جدول هم در کارت — پرشدنش
+  // پایین‌تر است (بعد از load، نگاه کن به fetchLogos)، اینجا فقط خودِ جایگاه.
+  function tokLogoSpan(addr){
+    return '<span class="tok-logo" data-addr="' + esc(addr) + '"></span>';
   }
 
   function rowMarkup(row, forCard){
@@ -363,7 +394,8 @@ h1{font-size:clamp(28px,4vw,40px);letter-spacing:-.03em;margin:0 0 14px;line-hei
     var noteHtml = noteFor(row) || '';
     if (forCard) {
       return '<a class="card-link" href="' + href + '" aria-label="' + rowAriaLabel + '">' +
-        '<div class="card-top"><span class="card-sym">' + symStr + '</span>' +
+        '<div class="card-top"><div class="card-symWrap">' + tokLogoSpan(addr) +
+        '<span class="card-sym">' + symStr + '</span></div>' +
         '<span class="badge badge-' + v.cls + '" title="' + esc(v.meaning) + '">' + esc(v.label) + '</span></div>' +
         noteHtml +
         (nameStr ? '<div class="card-name">' + nameStr + '</div>' : '') +
@@ -379,7 +411,7 @@ h1{font-size:clamp(28px,4vw,40px);letter-spacing:-.03em;margin:0 0 14px;line-hei
     }
     return '<td class="col-token">' +
         '<a class="row-link" href="' + href + '" aria-label="' + rowAriaLabel + '"></a>' +
-        '<div class="token-sym">' + symStr + '</div>' +
+        '<div class="token-sym">' + tokLogoSpan(addr) + '<span>' + symStr + '</span></div>' +
         (nameStr ? '<div class="token-name">' + nameStr + '</div>' : '') +
         '<div class="token-addr" title="' + esc(addr) + '">' + shortAddr(addr) + '</div>' +
       '</td>' +
@@ -422,6 +454,7 @@ h1{font-size:clamp(28px,4vw,40px);letter-spacing:-.03em;margin:0 0 14px;line-hei
       return res.json();
     }).then(function(data){
       if (!data || typeof data !== 'object' || !Array.isArray(data.rows)) throw new Error('bad body');
+      lastRows = data.rows; // آرایه‌ی کاملِ آخرین بارگذاریِ موفق — جست‌وجو روی همین فیلتر می‌کند
       // store:false یک حالتِ جداست، نه «صفر توکن» — بایندینگِ انبار هنوز
       // وصل نشده، پس این پیام باید جدا از «هنوز چیزی جمع نشده» دیده شود.
       if (data.store === false) {
@@ -434,9 +467,9 @@ h1{font-size:clamp(28px,4vw,40px);letter-spacing:-.03em;margin:0 0 14px;line-hei
         if (emptyEl) emptyEl.hidden = false;
         return;
       }
-      renderRows(data.rows);
       hideAll();
       if (resultsEl) resultsEl.hidden = false;
+      applyFilter(); // بارگذاریِ دوباره (Retry) عبارتِ جست‌وجوی جاری را نگه می‌دارد
     }).catch(function(){
       showError();
     });
@@ -444,6 +477,150 @@ h1{font-size:clamp(28px,4vw,40px);letter-spacing:-.03em;margin:0 0 14px;line-hei
 
   retryBtn && retryBtn.addEventListener('click', load);
   load();
+
+  /* ---------------------------------------------------------------------
+     لوگوی توکن‌ها — جایگاهش را rowMarkup بالاتر می‌سازد (tokLogoSpan)؛
+     پرشدنش اینجاست. داده از همان پراکسیِ GT خودِ سایت می‌آید (gtWire در
+     index.html همین مسیر را برای GeckoTerminal جایگزین می‌کند)؛ این صفحه
+     چون همیشه شبکه‌اش base است، مستقیم روی همان مسیر می‌نویسد.
+     دیدنِ کاهلانه: فقط وقتی جایگاه وارد صفحه می‌شود پرسیده می‌شود، با
+     صف‌بندیِ ۲۵۰ میلی‌ثانیه‌ای و دسته‌های حداکثر ۳۰تایی — همان محدودیتِ
+     خودِ GeckoTerminal برای multi. شکست هرگز به کاربر نشان داده نمی‌شود و
+     هرگز صفحه را نمی‌شکند؛ فقط بی‌صدا خالی می‌ماند و بار بعد که جایگاه
+     دوباره دیده شود دوباره پرسیده می‌شود (چون شکست در Map ذخیره نمی‌شود —
+     «نمی‌دانم» هیچ‌وقت ذخیره نمی‌شود، فقط «پرسیدیم و نداشت» ذخیره می‌شود).
+     ⚠️ این بلوک عمداً *بعد* از فراخوانیِ load() نشسته، نه کنارِ تعریفش:
+     تابع‌ها hoist می‌شوند و var-ها هم پیش از اینکه callbackِ آسنکرونِ
+     fetch اجرا شود مقداردهی شده‌اند، پس ترتیب مشکلی ندارد — و مهم‌تر،
+     res.json() اینجا بینِ دو تکه‌ی نقل‌قول‌دار گیر نمی‌افتد (کاوشگرِ
+     استاتیکِ [pairs page] که فقط نقل‌قول دوتایی می‌شمارد). */
+  var LOGO_ENDPOINT = '/gt/networks/base/tokens/multi/';
+  /* ۲۵، نه ۳۰: پراکسیِ خودمان (PATH_OK در worker/index.js) هر بخشِ مسیر را به ۱۲۰۰ نویسه
+     محدود می‌کند و ۳۰ آدرس با ویرگول ۱۲۸۹ نویسه است — زنده سنجیده شد: ۳۰ آدرس → ۴۰۰،
+     ۲۵ آدرس → ۲۰۰. سقفِ واقعی ۲۷ است؛ ۲۵ حاشیه می‌گذارد. */
+  var LOGO_CHUNK = 25, LOGO_DEBOUNCE_MS = 250;
+  var logoCache = new Map();   // آدرسِ کوچک‌شده -> url (empty یعنی پرسیدیم، لوگو نداشت)
+  var logoQueue = new Set();
+  var logoTimer = null;
+  var logoObserver = (typeof IntersectionObserver === 'function')
+    ? new IntersectionObserver(function(entries){
+        entries.forEach(function(entry){
+          if (!entry.isIntersecting) return;
+          var addr = (entry.target.getAttribute('data-addr') || '').toLowerCase();
+          if (addr) queueLogo(addr);
+          logoObserver.unobserve(entry.target);
+        });
+      }, { rootMargin: '200px' })
+    : null;
+
+  function paintLogo(slot, url){
+    var img = document.createElement('img');
+    img.alt = '';
+    img.width = 24;
+    img.height = 24;
+    img.loading = 'lazy';
+    img.decoding = 'async';
+    img.referrerPolicy = 'no-referrer';
+    img.addEventListener('error', function(){ img.remove(); }); // جایگاه خالی می‌ماند
+    img.src = url;
+    slot.appendChild(img);
+  }
+
+  // لوگوهایی که Map از قبل جوابشان را دارد، بی‌درنگ (بدونِ درخواستِ تازه)
+  // روی جایگاه‌های تازه‌رندرشده کشیده می‌شوند — برای رندرِ دوباره‌ی جست‌وجو.
+  function applyKnownLogos(){
+    document.querySelectorAll('.tok-logo[data-addr]').forEach(function(slot){
+      var addr = (slot.getAttribute('data-addr') || '').toLowerCase();
+      if (!addr || !logoCache.has(addr)) return;
+      var url = logoCache.get(addr);
+      if (url && !slot.firstChild) paintLogo(slot, url);
+    });
+  }
+
+  function observeLogoSlots(){
+    document.querySelectorAll('.tok-logo[data-addr]').forEach(function(slot){
+      var addr = (slot.getAttribute('data-addr') || '').toLowerCase();
+      if (!addr || logoCache.has(addr)) return;
+      if (logoObserver) logoObserver.observe(slot);
+      else queueLogo(addr); // بدونِ IntersectionObserver: همه یک‌جا صف می‌شوند
+    });
+  }
+
+  function queueLogo(addr){
+    if (!addr || logoCache.has(addr) || logoQueue.has(addr)) return;
+    logoQueue.add(addr);
+    if (!logoTimer) logoTimer = setTimeout(flushLogoQueue, LOGO_DEBOUNCE_MS);
+  }
+
+  function flushLogoQueue(){
+    logoTimer = null;
+    var addrs = Array.from(logoQueue);
+    logoQueue.clear();
+    for (var i = 0; i < addrs.length; i += LOGO_CHUNK) fetchLogos(addrs.slice(i, i + LOGO_CHUNK));
+  }
+
+  function paintAddrEverywhere(addr, url){
+    document.querySelectorAll('.tok-logo[data-addr]').forEach(function(slot){
+      if ((slot.getAttribute('data-addr') || '').toLowerCase() === addr && !slot.firstChild) {
+        paintLogo(slot, url);
+      }
+    });
+  }
+
+  function fetchLogos(addrs){
+    if (!addrs.length) return;
+    fetch(LOGO_ENDPOINT + addrs.join(',')).then(function(res){
+      if (!res.ok) throw new Error('bad status ' + res.status);
+      return res.json();
+    }).then(function(json){
+      var list = (json && Array.isArray(json.data)) ? json.data : [];
+      var seen = {};
+      list.forEach(function(item){
+        var at = (item && item.attributes) || {};
+        var a = (typeof at.address === 'string') ? at.address.toLowerCase() : '';
+        if (!a) return;
+        var u = at.image_url;
+        var good = (typeof u === 'string' && u.indexOf('https://') === 0 && !/missing/i.test(u)) ? u : '';
+        seen[a] = true;
+        logoCache.set(a, good);
+        if (good) paintAddrEverywhere(a, good);
+      });
+      // آدرس‌هایی که خواسته بودیم ولی در پاسخ نبودند هم «پرسیدیم، نداشت»‌اند —
+      // نه یک شکست؛ دوباره پرسیدنشان هرزگردی بی‌فایده است.
+      addrs.forEach(function(a){ if (!seen[a]) logoCache.set(a, ''); });
+    }).catch(function(){
+      // عمداً بی‌صدا: شکستِ /gt (شبکه، ۵۰۰، JSONِ نامعتبر) هرگز نباید به
+      // کاربر نشان داده شود یا صفحه را بشکند. چیزی در Map ذخیره نمی‌شود، پس
+      // همین آدرس‌ها بارِ بعد که دوباره دیده شوند دوباره پرسیده می‌شوند.
+    });
+  }
+
+  // جست‌وجو — روی همان آرایه‌ی کاملِ آخرین بارگذاریِ موفق فیلتر می‌کند، نه
+  // روی سرور. علامت/نام/آدرس، بدونِ حساسیت به بزرگی‌کوچکیِ حروف. lastRows
+  // را خودِ load بالاتر پر می‌کند (بعد از هر بارگذاریِ موفق).
+  var lastRows = [];
+  var currentQuery = '';
+
+  function matchesQuery(row, q){
+    var sym = ((row && row.symbol) || '').toLowerCase();
+    var name = ((row && row.name) || '').toLowerCase();
+    var addr = ((row && row.address) || '').toLowerCase();
+    return sym.indexOf(q) >= 0 || name.indexOf(q) >= 0 || addr.indexOf(q) >= 0;
+  }
+
+  function applyFilter(){
+    var q = currentQuery;
+    var filtered = q ? lastRows.filter(function(row){ return matchesQuery(row, q); }) : lastRows;
+    renderRows(filtered);
+    if (noMatchEl) noMatchEl.hidden = filtered.length !== 0;
+    applyKnownLogos();
+    observeLogoSlots();
+  }
+
+  searchEl && searchEl.addEventListener('input', function(){
+    currentQuery = searchEl.value.trim().toLowerCase();
+    applyFilter();
+  });
 })();
 </script>
 </body>
