@@ -30,7 +30,7 @@ const UPSTREAM_KEYED = "https://api.coingecko.com/api/v3/onchain";
 
 import { ogTags, ogTitle, pickTokenMeta } from "./og.js";
 import { ogImageResponse } from "./og-image.js";
-import { fetchVerdict, VD_VENUES, VD_RPCS } from "./verdict.js";
+import { fetchVerdict, VD_VENUES, VD_RPCS, VD_V4_STAGE_COUNTERS } from "./verdict.js";
 import { EVM_ADDR, SOL_MINT, chainOf, gtNetworkOf } from "./chains.js";
 import {
   REPORT_DATE_RE, PAIRS_KEY_BASE, reportKey, utcDateOf, emptyReportDoc, runReportPass, publishGuardRow,
@@ -870,6 +870,14 @@ async function fetchV4Pools(addr, env) {
   return r.ok ? r.data : null; // غیرِ۲۰۰/پرتاب/شکلِ بد → نامعلوم، نه فهرستِ خالی
 }
 
+/* ضدجفت‌های مجاز، مسطح و بدونِ تکرار، از رویِ VD_V4_STAGE_COUNTERS خودِ
+   worker/verdict.js — تنها جایی که آن قاعده نوشته می‌شود؛ اینجا فقط مصرف
+   می‌شود. v4PoolsFromGt خودش با حروفِ کوچک مقایسه می‌کند، لوئرکِردنِ اینجا
+   فقط برای dedupe است. */
+const V4_ALL_COUNTERS = Object.freeze(
+  [...new Set(Object.values(VD_V4_STAGE_COUNTERS).flat().map((a) => String(a).toLowerCase()))]
+);
+
 /* چه مدت (ثانیه) نتیجه‌ی ایندکس ذخیره شود، یا اصلاً ذخیره نشود.
    🔴 «ok» با V4_KEY_TTL_S (۳۰ روز — یک PoolKey هرگز عوض نمی‌شود) می‌نشیند.
    no-v4-pool/no-created-at/no-log با V4_MISS_TTL_S (۶ ساعت) — این سه از
@@ -882,11 +890,13 @@ async function fetchV4Pools(addr, env) {
    بودند) — ولی از همان جنسِ no-created-at است: هر دو از شکلِ دادهٔ خودِ
    GeckoTerminal می‌آیند (نه از یک RPCِ نامعلوم)، پس همان رفتار به آن هم
    داده شد؛ در گزارشِ نهایی به‌عنوانِ یک نکته گزارش می‌شود، نه یک تصمیمِ
-   بی‌صدا. */
+   بی‌صدا.
+   no-v4-counter هم از همین جنس است — از رویِ شکلِ خودِ pools (ضدجفتِ هیچ
+   ردیفی با VD_V4_STAGE_COUNTERS جور درنیامد)، نه یک RPCِ نامعلوم. */
 function v4StoreTtl(reason) {
   if (reason === "ok") return V4_KEY_TTL_S;
   if (reason === "no-v4-pool" || reason === "no-pool-id" ||
-      reason === "no-created-at" || reason === "no-log") return V4_MISS_TTL_S;
+      reason === "no-created-at" || reason === "no-log" || reason === "no-v4-counter") return V4_MISS_TTL_S;
   return null; // rpc-down / no-anchor / no-kv → هرگز نوشته نمی‌شود
 }
 
@@ -899,6 +909,7 @@ async function storeV4Result(addr, env, result) {
     const body = JSON.stringify({
       keys: Array.isArray(result && result.keys) ? result.keys : [],
       reason: result.reason,
+      complete: result && result.complete === true,
     });
     await kv.put(v4KvKey("base", addr), body, { expirationTtl: ttl });
     return true;
@@ -907,20 +918,23 @@ async function storeV4Result(addr, env, result) {
   }
 }
 
-/* { found, keys } — found فقط برای تشخیصِ «هیچ‌وقت ایندکس نشده» از «ایندکس
-   شده ولی میسِ خالی» لازم است (هر دو حالت آرایه‌ی [] می‌دهند). */
+/* { found, keys, complete } — found فقط برای تشخیصِ «هیچ‌وقت ایندکس نشده» از
+   «ایندکس شده ولی میسِ خالی» لازم است (هر دو حالت آرایه‌ی [] می‌دهند).
+   complete از رویِ همان فیلدی می‌آید که storeV4Result نوشته؛ یک ورودیِ
+   قدیمی‌تر که هنوز آن فیلد را ندارد → complete:false (نامعلوم هرگز true
+   فرض نمی‌شود). هر مسیرِ شکست هم complete:false می‌دهد. */
 async function readV4Entry(addr, env) {
   try {
     const kv = env && env.ZX_KV;
-    if (!kv) return { found: false, keys: [] };
+    if (!kv) return { found: false, keys: [], complete: false };
     const raw = await kv.get(v4KvKey("base", addr));
-    if (typeof raw !== "string") return { found: false, keys: [] };
+    if (typeof raw !== "string") return { found: false, keys: [], complete: false };
     let parsed;
-    try { parsed = JSON.parse(raw); } catch (e) { return { found: false, keys: [] }; }
-    if (!parsed || !Array.isArray(parsed.keys)) return { found: false, keys: [] };
-    return { found: true, keys: parsed.keys };
+    try { parsed = JSON.parse(raw); } catch (e) { return { found: false, keys: [], complete: false }; }
+    if (!parsed || !Array.isArray(parsed.keys)) return { found: false, keys: [], complete: false };
+    return { found: true, keys: parsed.keys, complete: parsed.complete === true };
   } catch (e) {
-    return { found: false, keys: [] };
+    return { found: false, keys: [], complete: false };
   }
 }
 
@@ -948,7 +962,15 @@ export const V4_EMPTY_MIN_MS = 400;
    ادعا تبدیل نمی‌شود.
    🔴 این تابع هرگز یک حکمِ منفی نمی‌سازد — فقط حکمِ منفی‌ای را که از جایی
    دیگر (پوششِ صرافی/اثباتِ لاگِ v4) آمده توضیح می‌دهد؛ کالر فقط زمانی
-   صدایش می‌زند که raw از قبل "nosell" است. */
+   صدایش می‌زند که raw از قبل "nosell" است.
+   🔴 ۲۳ سپتامبر — SPIKE بیست استخرِ v4 داشت، فقط سه‌تا ایندکس شدند و آن سه
+   دقیقاً همان استخرهایی نبودند که واقعاً معامله می‌شدند: هر کلیدِ *ایندکس‌شده*
+   صفر بود، ولی این هرگز به‌معنیِ «همه‌ی استخرهای v4 این توکن خالی‌اند» نبود —
+   یک empty-pool غلط که رویِ /vd زنده منتشر شد. entry.complete دقیقاً همین را
+   می‌سنجد: آیا آن‌چه ایندکس شده *همه‌ی* آن چیزی بود که باید ایندکس می‌شد؟
+   اگر نه، جواب null می‌ماند، نه false و نه true — ورودی‌های ذخیره‌شده‌ی
+   قدیمی‌تر (بدونِ این فیلد) هم تا دوباره ایندکس‌شدن همین‌طور نامعلوم
+   می‌مانند؛ نامعلوم هرگز «نه» نیست. */
 export async function v4PoolsEmpty(addr, env, deadlineAt) {
   /* ⚠️ بودجه‌ی زمانی: این تابع روی مسیرِ کارتِ OG هم اجرا می‌شود که کلِ
      بودجه‌اش OG_BUDGET_MS است. یک توضیح هرگز نباید خودِ جواب را دیر کند،
@@ -956,7 +978,9 @@ export async function v4PoolsEmpty(addr, env, deadlineAt) {
      و تایم‌اوتِ هر تماس هم به باقی‌مانده‌ی بودجه بریده می‌شود. */
   const left = typeof deadlineAt === "number" ? deadlineAt - Date.now() : V4_EMPTY_CALL_MS;
   if (left < V4_EMPTY_MIN_MS) return null;
-  const keys = await readV4Keys(addr, env);
+  const entry = await readV4Entry(addr, env);
+  if (entry.complete !== true) return null; // ایندکسِ ناقص/قدیمی — نامعلوم، نه ادعا
+  const keys = entry.keys;
   if (!Array.isArray(keys) || keys.length === 0) return null;
   const use = keys.slice(0, 4);
   for (const key of use) {
@@ -995,13 +1019,18 @@ async function runV4Index(addr, env, diag) {
        (هرگز نوشته نمی‌شود)، ولی دلیلش عمداً جداست: rpc-down یعنی آرپی‌سیِ
        زنجیره جواب نداد و no-pools یعنی بالادستِ قیمت. یکی‌کردنشان همان
        «کجا ایستاد» را کور می‌کند که این اندپوینت برای دیدنش ساخته شده. */
-    result = { keys: [], reason: "no-pools" };
+    result = { keys: [], reason: "no-pools", complete: false };
   } else {
     const rpcCall = (method, params) => rpcCallBase(method, params, V4_LOG_TIMEOUT_MS, rpcLog);
-    result = await indexV4Keys({ tokenAddr: addr, pools, rpcCall, now: Date.now, collect: winLog });
+    result = await indexV4Keys({
+      tokenAddr: addr, pools, rpcCall, now: Date.now, collect: winLog, counters: V4_ALL_COUNTERS,
+    });
   }
   const stored = await storeV4Result(addr, env, result);
-  return { reason: result.reason, keys: Array.isArray(result.keys) ? result.keys : [], stored };
+  return {
+    reason: result.reason, keys: Array.isArray(result.keys) ? result.keys : [], stored,
+    complete: result.complete === true,
+  };
 }
 
 /* آیا هنوز جایی این توکن قیمت فروش می‌دهد؟ — سمت سرور، فقط برای همین یک
@@ -1363,7 +1392,7 @@ async function diagVerdictV4(url, env) {
   const t0 = Date.now();
   const kv = env && env.ZX_KV;
   if (!kv) {
-    return vdDone(200, { addr, reason: "no-kv", keys: [], stored: false, store: false, ms: Date.now() - t0 });
+    return vdDone(200, { addr, reason: "no-kv", keys: [], stored: false, complete: false, store: false, ms: Date.now() - t0 });
   }
 
   /* ?debug=1 — همان گذر، ولی با دو مشاهده‌گر. چرا لازم است: «rpc-down» فقط
@@ -1376,7 +1405,7 @@ async function diagVerdictV4(url, env) {
   const result = await runV4Index(addr, env, diag);
   const body = {
     addr, reason: result.reason, keys: result.keys, stored: result.stored,
-    store: true, ms: Date.now() - t0,
+    complete: result.complete, store: true, ms: Date.now() - t0,
   };
   if (debug) { body.rpc = diag.rpc; body.windows = diag.windows; }
   return vdDone(200, body);

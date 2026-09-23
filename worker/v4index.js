@@ -63,6 +63,7 @@ export const V4_WINDOW_FWD = 100;  // بلاک، پس از تخمین — جمع
    تخمینِ کمی پرت، به‌جای «نامعلوم»، یک میسِ ذخیره‌شده‌ی شش‌ساعته می‌سازد —
    همان تبدیلِ نامعلوم به «نه» که کلِ این پروژه علیه آن نوشته شده. */
 export const V4_WINDOW_CHUNKS = 2;
+export const V4_GT_PAGE_SIZE = 20; // اندازه‌ی صفحه‌ی GeckoTerminal برای /tokens/<addr>/pools — یک صفحه‌ی پر ممکن است صفحه‌ی دوم را پنهان کرده باشد
 export const V4_MAX_POOLS = 3; // حداکثر چند استخرِ v4 به‌ازای هر توکن بررسی می‌شود
 export const V4_MAX_KEYS = 6;  // حداکثر چند کلید به‌ازای هر توکن ذخیره می‌شود
 export const V4_KEY_TTL_S = 2592000; // ۳۰ روز — یک PoolKey هرگز عوض نمی‌شود
@@ -112,7 +113,7 @@ export const V4_LOG_RPCS = [
    شکستی که این پروژه پیش‌تر دوبار برایش هزینه داده. */
 export const V4_REASONS = Object.freeze([
   "ok", "no-kv", "no-pools", "no-v4-pool", "no-pool-id", "no-created-at", "no-anchor",
-  "rpc-down", "no-log",
+  "rpc-down", "no-log", "no-v4-counter",
 ]);
 
 /* ⚠️ دو عضوِ این فهرست را خودِ indexV4Keys هرگز نمی‌سازد، چون هر دو پیش از
@@ -158,11 +159,63 @@ export function estimateBlock(tsMs, anchor) {
      • attributes.pool_created_at یک تاریخِ قابلِ‌پارس است
    sawV4/sawId جدا برگردانده می‌شوند تا indexV4Keys بتواند no-v4-pool را از
    no-pool-id و no-created-at تشخیص بدهد — سه دلیلِ متفاوت که همه‌شان از
-   بیرون فقط «هیچ کلیدی پیدا نشد» به‌نظر می‌رسند. */
-export function v4PoolsFromGt(pools) {
+   بیرون فقط «هیچ کلیدی پیدا نشد» به‌نظر می‌رسند.
+
+   🔴 ۲۳ سپتامبر — SPIKE (0x1685981068dc0ec45ee1d5a28ef051059e42a0f3) بیست
+   استخرِ v4 دارد؛ ترتیبِ قبلی (فقط تازه‌ترین‌اول) سه استخرِ خاک‌گرفته را
+   ایندکس کرد (ETH 8.9%، ETH 10%، USDC 4.87% — $۲۷ تا $۸۰) و هرگز استخرهای
+   واقعی را (ETH 1.6% با ۴۴۵ فروشنده/۲۴س، USDC 5% با ۱۵۲). این‌جا دو چیزِ
+   تازه اضافه شده:
+     ۱. رتبه‌بندی رویِ sellers24 (نزولی)، نه فقط تاریخ — تاریخ فقط شکننده است.
+     ۲. tokenAddr/counters اختیاری: اگر داده شوند، ردیفی که ضدجفتش شناخته‌شده
+        نیست (worker/verdict.js از قبل تصمیم گرفته کدام ضدجفت‌ها معنا دارند)
+        کنار گذاشته می‌شود — یک ضدجفتِ نامرتبط یک استخرِ *واقعی* است ولی
+        کوت‌گرفتن از آن چیزی درباره‌ی خروج اثبات نمی‌کند. یک شکلِ ناشناخته
+        (counter=null) هرگز فیلتر نمی‌شود — نامعلوم هرگز رد نمی‌شود. */
+function sellers24Of(row) {
+  const v = row && row.attributes && row.attributes.transactions &&
+    row.attributes.transactions.h24 && row.attributes.transactions.h24.sellers;
+  if (typeof v !== "number" && typeof v !== "string") return -1;
+  const n = Number(v);
+  return Number.isFinite(n) && n >= 0 ? n : -1;
+}
+
+// «base_0x…» / «solana_…» → آدرسِ خامِ بعد از اولین «_»، چپ‌چین‌شده، فقط اگر
+// دقیقاً شکلِ ۰x+۴۰هگز باشد — هرچیزِ دیگر یعنی این کلید اصلاً یک آدرس نیست.
+function counterSideAddr(id) {
+  if (typeof id !== "string") return null;
+  const idx = id.indexOf("_");
+  if (idx === -1) return null;
+  const addr = id.slice(idx + 1).toLowerCase();
+  return /^0x[0-9a-f]{40}$/.test(addr) ? addr : null;
+}
+
+// کدام سمتِ این ردیف «ضدجفت» است — سمتی که tokenAddr نیست. اگر tokenAddr یا
+// هرکدام از دو id نامعلوم/بدشکل باشد، یا هیچ سمتی tokenAddr نباشد، null —
+// یعنی این ردیف هرگز رویِ فیلترِ ضدجفت رد نمی‌شود.
+function counterOf(row, tokenAddr) {
+  if (typeof tokenAddr !== "string") return null;
+  const t = tokenAddr.toLowerCase();
+  const baseAddr = counterSideAddr(row && row.relationships && row.relationships.base_token &&
+    row.relationships.base_token.data && row.relationships.base_token.data.id);
+  const quoteAddr = counterSideAddr(row && row.relationships && row.relationships.quote_token &&
+    row.relationships.quote_token.data && row.relationships.quote_token.data.id);
+  if (baseAddr === null || quoteAddr === null) return null;
+  if (baseAddr === t) return quoteAddr;
+  if (quoteAddr === t) return baseAddr;
+  return null;
+}
+
+export function v4PoolsFromGt(pools, tokenAddr, counters) {
   const list = Array.isArray(pools) ? pools : [];
+  // مقایسه با حروفِ کوچک — counters هر حروف‌بزرگ/کوچکی می‌تواند داشته باشد.
+  const counterSet = Array.isArray(counters) && counters.length > 0
+    ? counters.filter((c) => typeof c === "string").map((c) => c.toLowerCase())
+    : null;
   let sawV4 = false;
   let sawId = false;
+  let sawCounter = false;
+  let listed = 0;
   const rows = [];
 
   for (const row of list) {
@@ -182,11 +235,24 @@ export function v4PoolsFromGt(pools) {
     const createdAtMs = typeof createdAtRaw === "string" ? Date.parse(createdAtRaw) : NaN;
     if (!Number.isFinite(createdAtMs)) continue;
 
-    rows.push({ poolId, createdAtMs });
+    // هر ردیفِ واجدِ شرایط، پیش از هر فیلترِ ضدجفت یا سقفِ V4_MAX_POOLS شمرده می‌شود.
+    listed++;
+
+    const sellers24 = sellers24Of(row);
+    const counter = counterOf(row, tokenAddr);
+
+    if (counterSet && counter !== null && !counterSet.includes(counter)) continue; // ضدجفتِ نامرتبط
+    if (counterSet) sawCounter = true; // این ردیف از فیلترِ ضدجفت عبور کرد (شاملِ counter===null)
+
+    rows.push({ poolId, createdAtMs, sellers24 });
   }
 
-  rows.sort((a, b) => b.createdAtMs - a.createdAtMs); // تازه‌ترین اول
-  return { rows: rows.slice(0, V4_MAX_POOLS), sawV4, sawId };
+  // فروشنده‌های ۲۴ساعته نزولی، تساوی → تازه‌ترین اول (قاعده‌ی قبلی).
+  rows.sort((a, b) => (b.sellers24 !== a.sellers24 ? b.sellers24 - a.sellers24 : b.createdAtMs - a.createdAtMs));
+  return {
+    rows: rows.slice(0, V4_MAX_POOLS).map((r) => ({ poolId: r.poolId, createdAtMs: r.createdAtMs })),
+    sawV4, sawId, sawCounter, listed,
+  };
 }
 
 /* ---------------------------------------------------------------------
@@ -370,15 +436,18 @@ function parseAnchor(res) {
    V4_LOG_RPCS کارِ کالر است (worker/index.js)، نه این ماژول — این ماژول
    هیچ fetchی ندارد.
    pools همان آرایه‌ی خامِ data از /networks/base/tokens/<addr>/pools است. */
-export async function indexV4Keys({ tokenAddr, pools, rpcCall, now, collect }) {
+export async function indexV4Keys({ tokenAddr, pools, rpcCall, now, collect, counters }) {
   try {
     void now; // برای تزریق‌پذیریِ یک‌دست با بقیه‌ی ماژول‌ها نگه داشته شده؛ امروز مصرفی ندارد
 
-    const { rows, sawV4, sawId } = v4PoolsFromGt(pools);
+    const { rows, sawV4, sawId, sawCounter, listed } = v4PoolsFromGt(pools, tokenAddr, counters);
     if (rows.length === 0) {
-      if (!sawV4) return { keys: [], reason: "no-v4-pool" };
-      if (!sawId) return { keys: [], reason: "no-pool-id" };
-      return { keys: [], reason: "no-created-at" };
+      if (!sawV4) return { keys: [], reason: "no-v4-pool", complete: false };
+      if (!sawId) return { keys: [], reason: "no-pool-id", complete: false };
+      // هر ردیفِ واجدِ شرایط رویِ فیلترِ ضدجفت رد شد — استخرها واقعی‌اند، ولی
+      // هیچ‌کدام با ضدجفتِ شناخته‌شده‌ی این مرحله جفت نشده‌اند.
+      if (listed > 0 && !sawCounter) return { keys: [], reason: "no-v4-counter", complete: false };
+      return { keys: [], reason: "no-created-at", complete: false };
     }
 
     // انکر: یک بلاکِ واقعی، نه یک ثابتِ هاردکد — تا رانشِ تاریخی جمع نشود.
@@ -386,10 +455,11 @@ export async function indexV4Keys({ tokenAddr, pools, rpcCall, now, collect }) {
     // جدا از هم‌اند و گفتنِ کدام‌یک شکست خورد کلِ نکته‌ی این واژه‌نامه است.
     const anchorRes = await rpcCall("eth_getBlockByNumber", ["latest", false]);
     const anchor = parseAnchor(anchorRes);
-    if (!anchor) return { keys: [], reason: "no-anchor" };
+    if (!anchor) return { keys: [], reason: "no-anchor", complete: false };
 
     let answered = 0; // چند eth_getLogs با آرایه‌ی خوش‌شکل جواب داد
     let failed = 0;   // چند تا شکست خورد (پرتاب/غیرِ۲۰۰/بدنه‌ی بد/آرایه نبود)
+    let allRowsHit = true; // هر ردیفِ rows دست‌کم یک کلیدِ قابلِ‌استفاده داد؟
     const found = [];
 
     /* collect فقط وقتی آرایه است فعال می‌شود — همان الگوی opts.collect در
@@ -398,6 +468,7 @@ export async function indexV4Keys({ tokenAddr, pools, rpcCall, now, collect }) {
     const log_ = Array.isArray(collect) ? collect : null;
 
     for (const row of rows) {
+      let rowHits = 0;
       for (let chunk = 0; chunk < V4_WINDOW_CHUNKS; chunk++) {
         const window = windowFor(row.createdAtMs, anchor, chunk);
         const params = window ? getLogsParams(window, row.poolId) : null;
@@ -421,20 +492,34 @@ export async function indexV4Keys({ tokenAddr, pools, rpcCall, now, collect }) {
           found.push(key);
           hitHere++;
         }
+        rowHits += hitHere;
         if (hitHere > 0) break; // کلیدِ این استخر پیدا شد — تکه‌ی عقب‌تر لازم نیست
       }
+      if (rowHits === 0) allRowsHit = false;
     }
 
     // 🔴 گاردِ اصلی: صفر پاسخِ خوش‌شکل یعنی نامعلوم (rpc-down)، نه میس. فقط
     // وقتی دست‌کم یک اندپوینت واقعاً جواب داد و هیچ کلیدی از آن درنیامد
     // no-log معنا دارد — یک منفیِ اثبات‌شده، نه یک حدس از رویِ سکوت.
-    if (answered === 0) return { keys: [], reason: "rpc-down" };
-    if (found.length === 0) return { keys: [], reason: "no-log" };
+    if (answered === 0) return { keys: [], reason: "rpc-down", complete: false };
+    if (found.length === 0) return { keys: [], reason: "no-log", complete: false };
 
-    return { keys: mergeV4Keys([], found), reason: "ok" };
+    /* 🔴 complete — تنها چیزی که به «هر کلیدِ ایندکس‌شده صفر بود» اجازه
+       می‌دهد معنیِ «استخرهای v4 این توکن خالی‌اند» بگیرد (v4PoolsEmpty در
+       worker/index.js). ۲۳ سپتامبر: SPIKE بیست استخر دارد، فقط سه‌تا
+       ایندکس شدند و آن سه دقیقاً همان استخرهایی نبودند که واقعاً معامله
+       می‌شدند — یک empty-pool غلط. پس complete فقط وقتی true است که: (الف)
+       pools یک صفحه‌ی *ناقص* بود (GeckoTerminal ۲۰تایی صفحه‌بندی می‌کند، یک
+       صفحه‌ی پر یعنی صفحه‌ی دوم ممکن است پنهان مانده باشد)، (ب) فیلترِ
+       ضدجفت/سقفِ V4_MAX_POOLS چیزی را کنار نگذاشته (rows همان listed است)،
+       و (ج) نتیجه واقعاً ok بود و هر ردیفِ ایندکس‌شده دست‌کم یک کلید داد. */
+    const complete = Array.isArray(pools) && pools.length < V4_GT_PAGE_SIZE &&
+      rows.length === listed && allRowsHit;
+
+    return { keys: mergeV4Keys([], found), reason: "ok", complete };
   } catch (e) {
     // این تابع هرگز نباید پرتاب کند — یک استثنای پیش‌بینی‌نشده هم باید
     // نامعلوم بماند (rpc-down)، نه اینکه بی‌صدا به یک میسِ ذخیره‌شدنی بیفتد.
-    return { keys: [], reason: "rpc-down" };
+    return { keys: [], reason: "rpc-down", complete: false };
   }
 }

@@ -5375,12 +5375,26 @@ function v4BuildLog({ poolId, currency0, currency1, feeWord, tickWord, hooksWord
   ok(rOk.reason === "ok" && rOk.keys.length === 1 && rOk.keys[0].poolId === POOL_ID_A.toLowerCase(),
     "a well-formed log carrying the token must decode into exactly one stored key, got " + JSON.stringify(rOk));
 
+  // یک ردیفِ v4 واقعی، ولی ضدجفتش در فهرستِ مجازِ این توکن نیست — no-v4-counter.
+  const UNRELATED = "0x" + "77".repeat(20);
+  const poolsWrongCounter = [{ relationships: { dex: { data: { id: "uniswap-v4-base" } },
+    base_token: { data: { id: "base_" + TOKEN_ADDR } }, quote_token: { data: { id: "base_" + UNRELATED } } },
+    attributes: { address: POOL_ID_A, pool_created_at: "2026-09-07T15:31:23Z" } }];
+  const rNoCounter = await v4.indexV4Keys({
+    tokenAddr: TOKEN_ADDR, pools: poolsWrongCounter, rpcCall: rpcNeverCall, now: () => 0,
+    counters: [COUNTER_ADDR],
+  });
+  ok(rNoCounter.reason === "no-v4-counter" && rNoCounter.keys.length === 0 && rNoCounter.complete === false,
+    "a real v4 row whose counter is not in the allowed list must give no-v4-counter without calling rpcCall, got " +
+    JSON.stringify(rNoCounter));
+
   /* گاردِ درایفت: هر عضوِ V4_REASONS باید بالا یک پروبِ اختصاصی داشته باشد،
      به‌جز دو تایی که خودِ indexV4Keys هرگز نمی‌سازد و سیم‌کشیِ
      worker/index.js می‌سازدشان — no-kv (بایندینگِ KV نیست) و no-pools
      (فهرستِ استخرها به‌دست نیامد). هر دو در ۲۷.۱۴ و ۲۷.۱۷ پوشش دارند. */
   const WIRING_ONLY_REASONS = ["no-kv", "no-pools"];
-  const coveredReasons = new Set(["ok", "no-v4-pool", "no-pool-id", "no-created-at", "no-anchor", "rpc-down", "no-log"]);
+  const coveredReasons = new Set(["ok", "no-v4-pool", "no-pool-id", "no-created-at", "no-anchor", "rpc-down", "no-log",
+    "no-v4-counter"]);
   const expectedReasons = new Set(v4.V4_REASONS.filter((r) => !WIRING_ONLY_REASONS.includes(r)));
   ok(coveredReasons.size === expectedReasons.size && [...expectedReasons].every((r) => coveredReasons.has(r)),
     "every V4_REASONS entry except " + JSON.stringify(WIRING_ONLY_REASONS) +
@@ -6080,6 +6094,236 @@ console.log("[v4 index wiring] worker/index.js ok — v4StoreTtl/storeV4Result f
   "and ogFetchVerdict schedules exactly one background index pass via ctx.waitUntil only when nothing is " +
   "stored yet, never again once an entry (even a miss) exists");
 
+/* ---- ۲۷.۲۰ [v4 pool selection] — انتخابِ استخرِ v4 و اثباتِ «خالی»ِ سالم ----
+   اسپکِ ۲۳ سپتامبر ۲۰۲۶: SPIKE (0x1685981068dc0ec45ee1d5a28ef051059e42a0f3) بیست
+   استخرِ v4 دارد؛ فیکسچرِ زیر همان بیست ردیفِ *زنده* هستند (عدد=عدد،
+   رشته=رشته، بدونِ نرمال‌سازی) — از
+   /tmp/claude-0/-home-claude/2b2607fa-7c0a-566b-abfa-b3625ebec5ea/scratchpad/spike_pools_live.json. */
+{
+  const SPIKE_ADDR = "0x1685981068dc0ec45ee1d5a28ef051059e42a0f3";
+  const NATIVE_0 = "0x0000000000000000000000000000000000000000";
+  const SPIKE_POOLS_FIXTURE = [{"id":"base_0xdb366ce311055bc3e275de10dbc320b4ade74c3ebc0179dd3fbb8efbcdb1b096","type":"pool","attributes":{"address":"0xdb366ce311055bc3e275de10dbc320b4ade74c3ebc0179dd3fbb8efbcdb1b096","name":"SPIKE / wtCOIN","pool_created_at":"2026-09-23T12:10:47Z","reserve_in_usd":"105513.4678","transactions":{"h1":{"buys":513,"sells":820,"buyers":177,"sellers":295},"h24":{"buys":12025,"sells":20241,"buyers":1296,"sellers":1623}}},"relationships":{"base_token":{"data":{"id":"base_0x1685981068dc0ec45ee1d5a28ef051059e42a0f3","type":"token"}},"quote_token":{"data":{"id":"base_0x5cda0e1ca4ce2af96315f7f8963c85399c172204","type":"token"}},"dex":{"data":{"id":"uniswap-v4-base","type":"dex"}}}},
+{"id":"base_0x3b64005cf262bd59424ee834873521baced07f1486ef32070b76104ea271d749","type":"pool","attributes":{"address":"0x3b64005cf262bd59424ee834873521baced07f1486ef32070b76104ea271d749","name":"SPIKE / mmETH","pool_created_at":"2026-09-23T12:45:33Z","reserve_in_usd":"2667645.2634","transactions":{"h1":{"buys":0,"sells":0,"buyers":0,"sellers":0},"h24":{"buys":10,"sells":0,"buyers":8,"sellers":0}}},"relationships":{"base_token":{"data":{"id":"base_0x1685981068dc0ec45ee1d5a28ef051059e42a0f3","type":"token"}},"quote_token":{"data":{"id":"base_0x4fc59c42653e052c7ab5c8381f839e2d70504131","type":"token"}},"dex":{"data":{"id":"uniswap-v4-base","type":"dex"}}}},
+{"id":"base_0xb6424e72909ec3473f12ac18dfeb3759c070b6da25606a64705ec3818bb55e6c","type":"pool","attributes":{"address":"0xb6424e72909ec3473f12ac18dfeb3759c070b6da25606a64705ec3818bb55e6c","name":"SPIKE / USDC 5%","pool_created_at":"2026-09-23T14:16:01Z","reserve_in_usd":"10230.7248","transactions":{"h1":{"buys":112,"sells":73,"buyers":78,"sellers":53},"h24":{"buys":829,"sells":652,"buyers":173,"sellers":152}}},"relationships":{"base_token":{"data":{"id":"base_0x1685981068dc0ec45ee1d5a28ef051059e42a0f3","type":"token"}},"quote_token":{"data":{"id":"base_0x833589fcd6edb6e08f4c7c32d4f71b54bda02913","type":"token"}},"dex":{"data":{"id":"uniswap-v4-base","type":"dex"}}}},
+{"id":"base_0x3d8b92502fed69fc3cd21fa1ed8e59b00fe3c9c944e4af64e99eccec8a1610aa","type":"pool","attributes":{"address":"0x3d8b92502fed69fc3cd21fa1ed8e59b00fe3c9c944e4af64e99eccec8a1610aa","name":"SPIKE / ETH 1.6%","pool_created_at":"2026-09-23T13:23:33Z","reserve_in_usd":"3480.3288","transactions":{"h1":{"buys":149,"sells":101,"buyers":83,"sellers":65},"h24":{"buys":2409,"sells":2188,"buyers":394,"sellers":445}}},"relationships":{"base_token":{"data":{"id":"base_0x1685981068dc0ec45ee1d5a28ef051059e42a0f3","type":"token"}},"quote_token":{"data":{"id":"base_0x0000000000000000000000000000000000000000","type":"token"}},"dex":{"data":{"id":"uniswap-v4-base","type":"dex"}}}},
+{"id":"base_0x630669c0230c7397cff28bc1be1312a5c414bcfd362d734db10d64235a801a0b","type":"pool","attributes":{"address":"0x630669c0230c7397cff28bc1be1312a5c414bcfd362d734db10d64235a801a0b","name":"SPIKE / mmETH","pool_created_at":"2026-09-23T12:47:47Z","reserve_in_usd":"2667663.996","transactions":{"h1":{"buys":0,"sells":0,"buyers":0,"sellers":0},"h24":{"buys":5,"sells":1,"buyers":4,"sellers":1}}},"relationships":{"base_token":{"data":{"id":"base_0x1685981068dc0ec45ee1d5a28ef051059e42a0f3","type":"token"}},"quote_token":{"data":{"id":"base_0x4fc59c42653e052c7ab5c8381f839e2d70504131","type":"token"}},"dex":{"data":{"id":"uniswap-v4-base","type":"dex"}}}},
+{"id":"base_0x3b4347aed806b0e310ad7d386307b0f40705b0e903c3bb0fd653fbb2a47c254c","type":"pool","attributes":{"address":"0x3b4347aed806b0e310ad7d386307b0f40705b0e903c3bb0fd653fbb2a47c254c","name":"SPIKE / ETH 20%","pool_created_at":"2026-09-23T12:45:31Z","reserve_in_usd":"7022.1544","transactions":{"h1":{"buys":2,"sells":13,"buyers":2,"sellers":12},"h24":{"buys":235,"sells":240,"buyers":109,"sellers":141}}},"relationships":{"base_token":{"data":{"id":"base_0x1685981068dc0ec45ee1d5a28ef051059e42a0f3","type":"token"}},"quote_token":{"data":{"id":"base_0x0000000000000000000000000000000000000000","type":"token"}},"dex":{"data":{"id":"uniswap-v4-base","type":"dex"}}}},
+{"id":"base_0xe911fb51967c3abb750da578f54149a92b25c5474de60f674402c9c000621cd7","type":"pool","attributes":{"address":"0xe911fb51967c3abb750da578f54149a92b25c5474de60f674402c9c000621cd7","name":"SPIKE / USDC 8%","pool_created_at":"2026-09-23T13:16:47Z","reserve_in_usd":"4155.1494","transactions":{"h1":{"buys":0,"sells":0,"buyers":0,"sellers":0},"h24":{"buys":644,"sells":486,"buyers":220,"sellers":202}}},"relationships":{"base_token":{"data":{"id":"base_0x1685981068dc0ec45ee1d5a28ef051059e42a0f3","type":"token"}},"quote_token":{"data":{"id":"base_0x833589fcd6edb6e08f4c7c32d4f71b54bda02913","type":"token"}},"dex":{"data":{"id":"uniswap-v4-base","type":"dex"}}}},
+{"id":"base_0xec6e17b1f243690c2743c132e4a99aa46038568b3875a52b6718ae4974ce1e13","type":"pool","attributes":{"address":"0xec6e17b1f243690c2743c132e4a99aa46038568b3875a52b6718ae4974ce1e13","name":"SPIKE / USDC 7%","pool_created_at":"2026-09-23T13:54:53Z","reserve_in_usd":"4736.4169","transactions":{"h1":{"buys":49,"sells":33,"buyers":38,"sellers":28},"h24":{"buys":364,"sells":323,"buyers":106,"sellers":124}}},"relationships":{"base_token":{"data":{"id":"base_0x1685981068dc0ec45ee1d5a28ef051059e42a0f3","type":"token"}},"quote_token":{"data":{"id":"base_0x833589fcd6edb6e08f4c7c32d4f71b54bda02913","type":"token"}},"dex":{"data":{"id":"uniswap-v4-base","type":"dex"}}}},
+{"id":"base_0xca3bad578de08d0c23d9dd5028ac1d3842fec2554fd6045675c222b99141e115","type":"pool","attributes":{"address":"0xca3bad578de08d0c23d9dd5028ac1d3842fec2554fd6045675c222b99141e115","name":"SPIKE / ETH 18%","pool_created_at":"2026-09-23T12:47:45Z","reserve_in_usd":"3243.409","transactions":{"h1":{"buys":0,"sells":0,"buyers":0,"sellers":0},"h24":{"buys":236,"sells":166,"buyers":132,"sellers":107}}},"relationships":{"base_token":{"data":{"id":"base_0x1685981068dc0ec45ee1d5a28ef051059e42a0f3","type":"token"}},"quote_token":{"data":{"id":"base_0x0000000000000000000000000000000000000000","type":"token"}},"dex":{"data":{"id":"uniswap-v4-base","type":"dex"}}}},
+{"id":"base_0xf5d1b28fd8ae162fb49bb79cc91faff561e2cd76fefea49f1a1d08a20e5cc7f4","type":"pool","attributes":{"address":"0xf5d1b28fd8ae162fb49bb79cc91faff561e2cd76fefea49f1a1d08a20e5cc7f4","name":"SPIKE / USDC 9%","pool_created_at":"2026-09-23T13:53:41Z","reserve_in_usd":"1383.801","transactions":{"h1":{"buys":0,"sells":0,"buyers":0,"sellers":0},"h24":{"buys":142,"sells":111,"buyers":60,"sellers":51}}},"relationships":{"base_token":{"data":{"id":"base_0x1685981068dc0ec45ee1d5a28ef051059e42a0f3","type":"token"}},"quote_token":{"data":{"id":"base_0x833589fcd6edb6e08f4c7c32d4f71b54bda02913","type":"token"}},"dex":{"data":{"id":"uniswap-v4-base","type":"dex"}}}},
+{"id":"base_0xa041805efebd9ca2d8f6804c7bcab14eb80cec8a71893dd4c7544198c7f96c4d","type":"pool","attributes":{"address":"0xa041805efebd9ca2d8f6804c7bcab14eb80cec8a71893dd4c7544198c7f96c4d","name":"SPIKE / USDC 6.54%","pool_created_at":"2026-09-23T14:58:33Z","reserve_in_usd":"157.6211","transactions":{"h1":{"buys":0,"sells":0,"buyers":0,"sellers":0},"h24":{"buys":88,"sells":73,"buyers":49,"sellers":47}}},"relationships":{"base_token":{"data":{"id":"base_0x1685981068dc0ec45ee1d5a28ef051059e42a0f3","type":"token"}},"quote_token":{"data":{"id":"base_0x833589fcd6edb6e08f4c7c32d4f71b54bda02913","type":"token"}},"dex":{"data":{"id":"uniswap-v4-base","type":"dex"}}}},
+{"id":"base_0x23dbdc65109486990646b0a9a5874bfde26e233bc4bd6856362b1d21a1885e35","type":"pool","attributes":{"address":"0x23dbdc65109486990646b0a9a5874bfde26e233bc4bd6856362b1d21a1885e35","name":"SPIKE / USDC 4.77%","pool_created_at":"2026-09-23T14:38:39Z","reserve_in_usd":"1007.0089","transactions":{"h1":{"buys":0,"sells":0,"buyers":0,"sellers":0},"h24":{"buys":7,"sells":7,"buyers":5,"sellers":6}}},"relationships":{"base_token":{"data":{"id":"base_0x1685981068dc0ec45ee1d5a28ef051059e42a0f3","type":"token"}},"quote_token":{"data":{"id":"base_0x833589fcd6edb6e08f4c7c32d4f71b54bda02913","type":"token"}},"dex":{"data":{"id":"uniswap-v4-base","type":"dex"}}}},
+{"id":"base_0x33e1b04e1ce66bc3114c2fa895bf1c420792984bc45032c526310081f46c9fee","type":"pool","attributes":{"address":"0x33e1b04e1ce66bc3114c2fa895bf1c420792984bc45032c526310081f46c9fee","name":"SPIKE / USDC 4.87%","pool_created_at":"2026-09-23T15:50:29Z","reserve_in_usd":"63.6907","transactions":{"h1":{"buys":0,"sells":0,"buyers":0,"sellers":0},"h24":{"buys":59,"sells":84,"buyers":40,"sellers":46}}},"relationships":{"base_token":{"data":{"id":"base_0x1685981068dc0ec45ee1d5a28ef051059e42a0f3","type":"token"}},"quote_token":{"data":{"id":"base_0x833589fcd6edb6e08f4c7c32d4f71b54bda02913","type":"token"}},"dex":{"data":{"id":"uniswap-v4-base","type":"dex"}}}},
+{"id":"base_0x15bbf8964770bbd93847aaf30920a56f363d833c17e2eb558f6aca7a21de175d","type":"pool","attributes":{"address":"0x15bbf8964770bbd93847aaf30920a56f363d833c17e2eb558f6aca7a21de175d","name":"SPIKE / USDC 7.9%","pool_created_at":"2026-09-23T13:26:01Z","reserve_in_usd":"60.747","transactions":{"h1":{"buys":0,"sells":0,"buyers":0,"sellers":0},"h24":{"buys":9,"sells":18,"buyers":5,"sellers":10}}},"relationships":{"base_token":{"data":{"id":"base_0x1685981068dc0ec45ee1d5a28ef051059e42a0f3","type":"token"}},"quote_token":{"data":{"id":"base_0x833589fcd6edb6e08f4c7c32d4f71b54bda02913","type":"token"}},"dex":{"data":{"id":"uniswap-v4-base","type":"dex"}}}},
+{"id":"base_0xa6890edaea8305f9033956d266199832b5a331f4c0d1206853b55a76f1637761","type":"pool","attributes":{"address":"0xa6890edaea8305f9033956d266199832b5a331f4c0d1206853b55a76f1637761","name":"SPIKE / ETH 14%","pool_created_at":"2026-09-23T13:25:03Z","reserve_in_usd":"51.1509","transactions":{"h1":{"buys":3,"sells":8,"buyers":3,"sellers":5},"h24":{"buys":147,"sells":105,"buyers":93,"sellers":70}}},"relationships":{"base_token":{"data":{"id":"base_0x1685981068dc0ec45ee1d5a28ef051059e42a0f3","type":"token"}},"quote_token":{"data":{"id":"base_0x0000000000000000000000000000000000000000","type":"token"}},"dex":{"data":{"id":"uniswap-v4-base","type":"dex"}}}},
+{"id":"base_0xb69c6352c4ae82cb2ac61d132c41764508b610ddebda30e6ee61aa8f0c1d6545","type":"pool","attributes":{"address":"0xb69c6352c4ae82cb2ac61d132c41764508b610ddebda30e6ee61aa8f0c1d6545","name":"SPIKE / ETH 8.9%","pool_created_at":"2026-09-23T18:45:55Z","reserve_in_usd":"80.2863","transactions":{"h1":{"buys":7,"sells":7,"buyers":6,"sellers":6},"h24":{"buys":9,"sells":12,"buyers":8,"sellers":8}}},"relationships":{"base_token":{"data":{"id":"base_0x1685981068dc0ec45ee1d5a28ef051059e42a0f3","type":"token"}},"quote_token":{"data":{"id":"base_0x0000000000000000000000000000000000000000","type":"token"}},"dex":{"data":{"id":"uniswap-v4-base","type":"dex"}}}},
+{"id":"base_0x081c301c28f8e3cd46b59b9a9bf61f2b50939e920a1c376b99ff48dbefae8128","type":"pool","attributes":{"address":"0x081c301c28f8e3cd46b59b9a9bf61f2b50939e920a1c376b99ff48dbefae8128","name":"SPIKE / ETH 10%","pool_created_at":"2026-09-23T17:56:19Z","reserve_in_usd":"27.5636","transactions":{"h1":{"buys":0,"sells":0,"buyers":0,"sellers":0},"h24":{"buys":38,"sells":2,"buyers":26,"sellers":1}}},"relationships":{"base_token":{"data":{"id":"base_0x1685981068dc0ec45ee1d5a28ef051059e42a0f3","type":"token"}},"quote_token":{"data":{"id":"base_0x0000000000000000000000000000000000000000","type":"token"}},"dex":{"data":{"id":"uniswap-v4-base","type":"dex"}}}},
+{"id":"base_0xd7af380bbde842685174828c9c512bf22f99e485ce1b08722951f2b661576674","type":"pool","attributes":{"address":"0xd7af380bbde842685174828c9c512bf22f99e485ce1b08722951f2b661576674","name":"SPIKE / USDC 5.1%","pool_created_at":"2026-09-23T15:29:45Z","reserve_in_usd":"7.2254","transactions":{"h1":{"buys":0,"sells":0,"buyers":0,"sellers":0},"h24":{"buys":13,"sells":3,"buyers":8,"sellers":2}}},"relationships":{"base_token":{"data":{"id":"base_0x1685981068dc0ec45ee1d5a28ef051059e42a0f3","type":"token"}},"quote_token":{"data":{"id":"base_0x833589fcd6edb6e08f4c7c32d4f71b54bda02913","type":"token"}},"dex":{"data":{"id":"uniswap-v4-base","type":"dex"}}}},
+{"id":"base_0x6b5138aa72bc85a2a53e0e17287e76c5afa4cae7d9f2f961f7bbd425265e9b0b","type":"pool","attributes":{"address":"0x6b5138aa72bc85a2a53e0e17287e76c5afa4cae7d9f2f961f7bbd425265e9b0b","name":"SPIKE / ETH 87.845%","pool_created_at":"2026-09-23T12:15:15Z","reserve_in_usd":"118.0151","transactions":{"h1":{"buys":0,"sells":0,"buyers":0,"sellers":0},"h24":{"buys":27,"sells":0,"buyers":15,"sellers":0}}},"relationships":{"base_token":{"data":{"id":"base_0x1685981068dc0ec45ee1d5a28ef051059e42a0f3","type":"token"}},"quote_token":{"data":{"id":"base_0x0000000000000000000000000000000000000000","type":"token"}},"dex":{"data":{"id":"uniswap-v4-base","type":"dex"}}}},
+{"id":"base_0xc6fc6d97be7b4d459191573eeba09b142e1da7b4b7031395c8a00ff82e819721","type":"pool","attributes":{"address":"0xc6fc6d97be7b4d459191573eeba09b142e1da7b4b7031395c8a00ff82e819721","name":"SPIKE / ETH 88.732%","pool_created_at":"2026-09-23T12:15:09Z","reserve_in_usd":"63.9583","transactions":{"h1":{"buys":0,"sells":0,"buyers":0,"sellers":0},"h24":{"buys":19,"sells":0,"buyers":13,"sellers":0}}},"relationships":{"base_token":{"data":{"id":"base_0x1685981068dc0ec45ee1d5a28ef051059e42a0f3","type":"token"}},"quote_token":{"data":{"id":"base_0x0000000000000000000000000000000000000000","type":"token"}},"dex":{"data":{"id":"uniswap-v4-base","type":"dex"}}}}];
+
+  // (۱) رتبه‌بندی + فیلترِ ضدجفت، رویِ فیکسچرِ زنده
+  const rSpike = v4.v4PoolsFromGt(SPIKE_POOLS_FIXTURE, SPIKE_ADDR, [NATIVE_0, vd.WETH_ADDR, vd.USDC_ADDR]);
+  const wantSpikeIds = [
+    "0x3d8b92502fed69fc3cd21fa1ed8e59b00fe3c9c944e4af64e99eccec8a1610aa",
+    "0xe911fb51967c3abb750da578f54149a92b25c5474de60f674402c9c000621cd7",
+    "0xb6424e72909ec3473f12ac18dfeb3759c070b6da25606a64705ec3818bb55e6c",
+  ];
+  ok(rSpike.rows.length === 3 && rSpike.rows.every((r, i) => r.poolId === wantSpikeIds[i]) &&
+    rSpike.listed === 20 && rSpike.sawCounter === true,
+    "SPIKE selection must be exactly [ETH 1.6%(445), USDC 8%(202), USDC 5%(152)] with listed=20/sawCounter=true, "
+    + "got " + JSON.stringify(rSpike));
+  const wtCoinId = "0xdb366ce311055bc3e275de10dbc320b4ade74c3ebc0179dd3fbb8efbcdb1b096";
+  const mmEthIds = ["0x3b64005cf262bd59424ee834873521baced07f1486ef32070b76104ea271d749",
+    "0x630669c0230c7397cff28bc1be1312a5c414bcfd362d734db10d64235a801a0b"];
+  ok(!rSpike.rows.some((r) => r.poolId === wtCoinId || mmEthIds.includes(r.poolId)),
+    "wtCOIN and both mmETH rows must be absent — none of their counters are in the allowed list, got " +
+    JSON.stringify(rSpike.rows));
+
+  // (۲) بدونِ فهرستِ ضدجفت‌ها — رتبه‌بندی همچنان رویِ sellers24 است، پس
+  // پرفروشنده‌ترین رویِ کلِ فیکسچر (wtCOIN، ۱۶۲۳) اول می‌آید.
+  const rSpikeNoCounters = v4.v4PoolsFromGt(SPIKE_POOLS_FIXTURE, SPIKE_ADDR);
+  ok(rSpikeNoCounters.rows[0] && rSpikeNoCounters.rows[0].poolId === wtCoinId,
+    "without a counters list the wtCOIN pool (1623 sellers, the fixture's highest) must rank first, got " +
+    JSON.stringify(rSpikeNoCounters.rows));
+
+  // (۳) فقط ردیفِ wtCOIN — ضدجفتش هیچ‌کجای فهرست نیست → no-v4-counter، بدونِ هیچ rpcCall.
+  let calls3 = 0;
+  const rpcCount3 = async () => { calls3++; return { ok: false, result: null }; };
+  const r3 = await v4.indexV4Keys({
+    tokenAddr: SPIKE_ADDR, pools: [SPIKE_POOLS_FIXTURE[0]], rpcCall: rpcCount3, now: () => 0,
+    counters: [NATIVE_0, vd.WETH_ADDR, vd.USDC_ADDR],
+  });
+  ok(r3.reason === "no-v4-counter" && r3.keys.length === 0 && r3.complete === false && calls3 === 0,
+    "a real v4 pool whose only counter is unrecognised must give no-v4-counter, no keys, complete:false, " +
+    "and zero rpcCall invocations, got " + JSON.stringify(r3) + " calls=" + calls3);
+
+  // (۴) رتبه‌بندیِ رشته‌ی عددی دقیقاً مثلِ عددِ خودش
+  function mkRow(addr, sellers, day) {
+    return { relationships: { dex: { data: { id: "uniswap-v4-base" } } },
+      attributes: { address: addr, pool_created_at: "2026-09-0" + day + "T00:00:00Z",
+        transactions: { h24: { sellers } } } };
+  }
+  const ADDR_HI = "0x" + "11".repeat(32);
+  const ADDR_LO = "0x" + "22".repeat(32);
+  const rNum = v4.v4PoolsFromGt([mkRow(ADDR_HI, 445, 1), mkRow(ADDR_LO, 300, 2)]);
+  const rStr = v4.v4PoolsFromGt([mkRow(ADDR_HI, "445", 1), mkRow(ADDR_LO, 300, 2)]);
+  ok(JSON.stringify(rNum.rows) === JSON.stringify(rStr.rows) && rNum.rows[0].poolId === ADDR_HI.toLowerCase(),
+    "a numeric-string sellers value (\"445\") must rank identically to the number 445, got " +
+    JSON.stringify({ rNum: rNum.rows, rStr: rStr.rows }));
+
+  // (۵) complete — فقط وقتی صفحه ناقص بود، هیچ‌چیز رویِ فیلتر/سقف کنار نرفت،
+  // و *هر* ردیفِ ایندکس‌شده دست‌کم یک کلید داد.
+  const TOKEN5 = "0x" + "66".repeat(20);
+  function mkV4Row5(poolId, day, sellers) {
+    return {
+      relationships: {
+        dex: { data: { id: "uniswap-v4-base" } },
+        base_token: { data: { id: "base_" + TOKEN5 } },
+        quote_token: { data: { id: "base_" + NATIVE_0 } },
+      },
+      attributes: { address: poolId, pool_created_at: "2026-09-0" + day + "T00:00:00Z",
+        transactions: { h24: { sellers } } },
+    };
+  }
+  const P1 = "0x" + "aa".repeat(32);
+  const P2 = "0x" + "bb".repeat(32);
+  const pools2 = [mkV4Row5(P1, 1, 500), mkV4Row5(P2, 2, 300)];
+  const anchorRes5 = { ok: true, result: { number: "0xf4240", timestamp: "0x64fc0d80" } };
+  function makeLogRpc(logsByPool) {
+    const calls = [];
+    return { calls, fn: async (method, params) => {
+      if (method === "eth_getBlockByNumber") return anchorRes5;
+      const poolId = params[0].topics[1];
+      calls.push(poolId);
+      const log = logsByPool[poolId];
+      return { ok: true, result: log ? [log] : [] };
+    } };
+  }
+  const logP1 = v4BuildLog({ poolId: P1, currency0: TOKEN5, currency1: NATIVE_0,
+    feeWord: v4wNum(500), tickWord: v4wNum(10), hooksWord: v4wAddrWord(NATIVE_0) });
+  const logP2 = v4BuildLog({ poolId: P2, currency0: TOKEN5, currency1: NATIVE_0,
+    feeWord: v4wNum(500), tickWord: v4wNum(10), hooksWord: v4wAddrWord(NATIVE_0) });
+
+  const bothFound = makeLogRpc({ [P1]: logP1, [P2]: logP2 });
+  const r5a = await v4.indexV4Keys({ tokenAddr: TOKEN5, pools: pools2, rpcCall: bothFound.fn, now: () => 0,
+    counters: [NATIVE_0] });
+  ok(r5a.reason === "ok" && r5a.complete === true,
+    "a 2-row fixture (under page size, nothing dropped, every row finding a log) must be complete:true, got " +
+    JSON.stringify(r5a));
+
+  const oneMissing = makeLogRpc({ [P1]: logP1 }); // P2 هرگز لاگ ندارد
+  const r5b = await v4.indexV4Keys({ tokenAddr: TOKEN5, pools: pools2, rpcCall: oneMissing.fn, now: () => 0,
+    counters: [NATIVE_0] });
+  ok(r5b.reason === "ok" && r5b.complete === false,
+    "the same fixture with one row's log missing must be complete:false even though reason stays ok, got " +
+    JSON.stringify(r5b));
+
+  const spikeIdSet = new Set(wantSpikeIds);
+  const spikeRpc = { fn: async (method, params) => {
+    if (method === "eth_getBlockByNumber") return anchorRes5;
+    const poolId = params[0].topics[1];
+    if (!spikeIdSet.has(poolId)) return { ok: true, result: [] };
+    const log = v4BuildLog({ poolId, currency0: SPIKE_ADDR, currency1: NATIVE_0,
+      feeWord: v4wNum(500), tickWord: v4wNum(10), hooksWord: v4wAddrWord(NATIVE_0) });
+    return { ok: true, result: [log] };
+  } };
+  const r5c = await v4.indexV4Keys({
+    tokenAddr: SPIKE_ADDR, pools: SPIKE_POOLS_FIXTURE, rpcCall: spikeRpc.fn, now: () => 0,
+    counters: [NATIVE_0, vd.WETH_ADDR, vd.USDC_ADDR],
+  });
+  ok(r5c.reason === "ok" && r5c.complete === false,
+    "the full 20-row SPIKE page (a full GeckoTerminal page) must stay complete:false even when all three " +
+    "selected rows find a log — a full page may hide a page 2, got " + JSON.stringify(r5c));
+
+  /* ⚠️ r5c به‌تنهایی قاعده‌ی «صفحه‌ی پر» را پین نمی‌کند: آن‌جا rows (۳) از listed
+     (۲۰) کمتر است و شرطِ (ب) خودش false می‌دهد. این‌جا فقط دو ردیفِ v4 هست و
+     بقیه‌ی صفحه ردیف‌های غیرِ v4اند — پس فقط شرطِ (الف) می‌تواند complete را
+     false کند. کنترلِ مثبت: همان با یک ردیفِ کمتر (صفحه‌ی ناقص) → true. */
+  function padNonV4(n) {
+    const out = [];
+    for (let i = 0; i < n; i++) {
+      out.push({ relationships: { dex: { data: { id: "uniswap-v3-base" } } },
+        attributes: { address: "0x" + String(i + 1).padStart(40, "0"), pool_created_at: "2026-09-01T00:00:00Z" } });
+    }
+    return out;
+  }
+  const fullPage = pools2.concat(padNonV4(v4.V4_GT_PAGE_SIZE - pools2.length));
+  const r5d = await v4.indexV4Keys({ tokenAddr: TOKEN5, pools: fullPage,
+    rpcCall: makeLogRpc({ [P1]: logP1, [P2]: logP2 }).fn, now: () => 0, counters: [NATIVE_0] });
+  ok(fullPage.length === v4.V4_GT_PAGE_SIZE && r5d.reason === "ok" && r5d.complete === false,
+    "two fully indexed v4 rows on a FULL GeckoTerminal page must stay complete:false (page 2 may hide more), got " +
+    JSON.stringify(r5d));
+  const shortPage = pools2.concat(padNonV4(v4.V4_GT_PAGE_SIZE - pools2.length - 1));
+  const r5e = await v4.indexV4Keys({ tokenAddr: TOKEN5, pools: shortPage,
+    rpcCall: makeLogRpc({ [P1]: logP1, [P2]: logP2 }).fn, now: () => 0, counters: [NATIVE_0] });
+  ok(r5e.reason === "ok" && r5e.complete === true,
+    "the same two rows on a page one short of full must be complete:true (positive control), got " +
+    JSON.stringify(r5e));
+
+  // (۶) v4PoolsEmpty رویِ یک ورودیِ ذخیره‌شده‌ی بدونِ complete → null، بدونِ eth_call
+  {
+    const ADDR6 = "0x" + "91".repeat(20);
+    let ethCalls6 = 0;
+    const savedFetch6 = globalThis.fetch;
+    globalThis.fetch = async () => { ethCalls6++; return new Response("must not be called", { status: 500 }); };
+    const kvNoComplete = {
+      get: async () => JSON.stringify({ keys: [{ poolId: POOL_ID_A }], reason: "ok" }), put: async () => {},
+    };
+    const val6 = await v4PoolsEmpty(ADDR6, { ZX_KV: kvNoComplete }, Date.now() + 5000);
+    ok(val6 === null && ethCalls6 === 0,
+      "a stored entry without a complete field must read as unknown (null) and make no eth_call at all, got " +
+      JSON.stringify({ val6, ethCalls6 }));
+    globalThis.fetch = savedFetch6;
+  }
+
+  // (۷) readV4Entry/storeV4Result — فیلدِ complete نوشته و خوانده می‌شود
+  {
+    function makeRecordingKv7() {
+      const store = new Map();
+      const puts = [];
+      return { store, puts,
+        get: async (k) => (store.has(k) ? store.get(k) : null),
+        put: async (k, v, opts) => { store.set(k, v); puts.push({ k, v, opts }); } };
+    }
+    const ADDR7A = "0x" + "92".repeat(20);
+    const kv7a = makeRecordingKv7();
+    await storeV4Result(ADDR7A, { ZX_KV: kv7a }, { reason: "ok", keys: [{ poolId: POOL_ID_A }], complete: true });
+    ok(kv7a.puts.length === 1 && JSON.parse(kv7a.puts[0].v).complete === true,
+      "storeV4Result must write complete:true into the stored body, got " + kv7a.puts[0].v);
+    const entry7a = await readV4Entry(ADDR7A, { ZX_KV: kv7a });
+    ok(entry7a.complete === true, "readV4Entry must expose complete:true for the entry just stored, got " +
+      JSON.stringify(entry7a));
+
+    const ADDR7B = "0x" + "93".repeat(20);
+    const kv7b = makeRecordingKv7();
+    await storeV4Result(ADDR7B, { ZX_KV: kv7b }, { reason: "no-v4-counter", keys: [], complete: false });
+    ok(kv7b.puts.length === 1 && JSON.parse(kv7b.puts[0].v).complete === false,
+      "storeV4Result must write complete:false for a proven miss, got " + kv7b.puts[0].v);
+    const entry7b = await readV4Entry(ADDR7B, { ZX_KV: kv7b });
+    ok(entry7b.complete === false, "readV4Entry must expose complete:false for the entry just stored, got " +
+      JSON.stringify(entry7b));
+  }
+
+  // (۸) v4StoreTtl / V4_REASONS
+  ok(v4StoreTtl("no-v4-counter") === v4.V4_MISS_TTL_S,
+    "v4StoreTtl('no-v4-counter') must equal V4_MISS_TTL_S, got " + v4StoreTtl("no-v4-counter"));
+  ok(v4.V4_REASONS.includes("no-v4-counter"), "V4_REASONS must include no-v4-counter, got " +
+    JSON.stringify(v4.V4_REASONS));
+}
+
+console.log("[v4 pool selection] v4PoolsFromGt now ranks by sellers24 (numeric or numeric-string) descending, "
+  + "ties by newest, and filters on the caller's known counters (an unrecognised counter drops the row, an "
+  + "unknown shape never does) — pinned against the live 23 Sep SPIKE fixture (20 v4 pools), which now "
+  + "selects the 3 real pools (ETH 1.6%/445, USDC 8%/202, USDC 5%/152) instead of the 3 dust pools the old "
+  + "newest-first rule picked, and gives no-v4-counter (zero rpcCall) for a token whose only listed v4 pool "
+  + "has an unrecognised counter; complete is true only when the GT page was under V4_GT_PAGE_SIZE, nothing "
+  + "was dropped by the counter filter or the V4_MAX_POOLS cap, and every selected row found a key — false "
+  + "for the full 20-row SPIKE page even when all 3 selected rows resolve; and v4PoolsEmpty now reads "
+  + "complete via readV4Entry, returning null (no eth_call) for any stored entry, old or new, that isn't "
+  + "complete:true, with storeV4Result/readV4Entry carrying that field end to end");
+
 /* ---- ۲۷ب. worker/index.js — v4PoolsEmpty و علتِ «empty-pool» رویِ یک nosell ----
    اندازه‌گیریِ ۲۰ شهریور بالای همین فایل: از ۹ nosellِ امروز، ۷ تا استخری
    بودند که نقدینگی‌اش ۱ تا ۵ دقیقه پیش از چکِ ما کشیده شده بود (اثبات از
@@ -6102,7 +6346,10 @@ console.log("[v4 index wiring] worker/index.js ok — v4StoreTtl/storeV4Result f
 
   const PID1 = "0x" + "aa".repeat(32);
   const PID2 = "0x" + "bb".repeat(32);
-  const kvWith = (keys) => ({ get: async () => JSON.stringify({ keys, reason: "ok" }), put: async () => {} });
+  // ⚠️ v4PoolsEmpty از این پس فقط رویِ ورودیِ complete:true اثبات می‌سنجد
+  // (بخشِ [v4 pool selection] پایین‌تر دلیلش را پین می‌کند)؛ فیکسچرهای این
+  // بخش پس complete:true می‌گذارند تا رفتارِ «قبلی» همان رفتار بماند.
+  const kvWith = (keys) => ({ get: async () => JSON.stringify({ keys, reason: "ok", complete: true }), put: async () => {} });
 
   /* یک fetchِ جعلیِ عمومی برای این بخش: /pools یک استخرِ پوشش‌داده‌شده
      می‌دهد، متادیتا برمی‌گردد، پروبِ صرافی‌ها همه‌جا ریوِرت می‌کند (nosellِ
@@ -9220,8 +9467,10 @@ function stripAllowedWording(t) {
   const singleEthCallOkX = (parsed) => new Response(JSON.stringify(
     { jsonrpc: "2.0", id: parsed.id, result: "0x" + "0".repeat(64) }),
     { status: 200, headers: { "content-type": "application/json" } });
+  // complete:true — این توکن‌ها واقعاً ایندکس شده‌اند (شاهدِ کاملِ ۲۷.۲۰)، پس
+  // v4PoolsEmpty باید مثلِ همیشه رویِ کلیدشان eth_call بزند.
   const realKvX = (addr, key) => ({
-    get: async (k) => (k === v4KvKeyX("base", addr) ? JSON.stringify({ keys: [key], reason: "ok" }) : null),
+    get: async (k) => (k === v4KvKeyX("base", addr) ? JSON.stringify({ keys: [key], reason: "ok", complete: true }) : null),
     put: async () => {},
   });
   const noKvX = () => ({ get: async () => null, put: async () => {} });
