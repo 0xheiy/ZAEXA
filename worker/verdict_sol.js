@@ -280,6 +280,14 @@ export const VD_SOL_MIN_PAYER_LAMPORTS = 1_000_000_000;
 // موجودیِ همین mint در مرحله‌ی ۲) هستند که واقعاً تصمیم می‌گیرند؛ این کد هرگز
 // فرض نمی‌کند این آدرس از قبل واجدِ شرایط است.
 export const VD_SOL_PAYER = "5tzFkiKscXHK5ZXCGbXZxdw7gTjjD1mBwuoFbhUvuAi9";
+/* جدولِ آدرسِ خودِ زَکسا روی سولانا (۲۳ سپتامبر). رفت‌وبرگشتِ توکن‌های پامپ‌فان
+   ۲۹ آدرسِ یکتا دارد و بدونِ جدول ۱۲۸۱ بایت می‌شود — بالای سقفِ ۱۲۳۲ — و ژوپیتر
+   برای پامپ‌فان هیچ جدولی نمی‌دهد. این جدول ۱۲ آدرسِ ثابتِ پامپ‌فان/ژوپیتر را دارد
+   (اندازه‌گیری‌شده: ۹۴۳ بایت با جدول). فقط وقتی واکشی می‌شود که پیام بدونِ آن جا
+   نشود، پس برای بقیه‌ی توکن‌ها هیچ درخواستِ اضافه‌ای نیست. خالی = خاموش.
+   جدول فقط فهرستِ عمومیِ آدرس است؛ اگر روزی بسته یا خراب شود، نتیجه همان
+   «too-big» (نامعلوم) است، هرگز یک حکمِ غلط. */
+export const VD_SOL_ALT = "9SppR56TAG7hE8AXeb7XLDK4C8YD4snna1pb3fTnLGbn"; // ساخته‌شده ۲۳ سپتامبر، ۱۲ آدرس، اعتبارسنجی‌شده روی زنجیره
 
 const TX_SIZE_LIMIT = 1232; // سقفِ سختِ پروتکلِ سولانا، چه legacy چه v0
 
@@ -753,6 +761,7 @@ export async function fetchVerdictSol(mint, opts) {
     const jupKey = (typeof o.jupKey === "string" && o.jupKey) || "";
     const timeoutMs = o.timeoutMs || 900;
     const payer = o.payer || VD_SOL_PAYER;
+    const zxAlt = typeof o.zxAlt === "string" ? o.zxAlt : VD_SOL_ALT;
 
     function pastDeadline() {
       return deadlineAt != null && (now() >= deadlineAt || deadlineAt - now() < 400);
@@ -859,6 +868,22 @@ export async function fetchVerdictSol(mint, opts) {
 
     let message;
     try { message = compileV0Message(payer, composed.instructions, lookupTables); } catch { return unknown("internal"); }
+
+    // جا نشد؟ یک بار با جدولِ خودِ زَکسا دوباره بساز (توضیح کنارِ VD_SOL_ALT).
+    if (transactionWireSize(message) > TX_SIZE_LIMIT && zxAlt &&
+        !lookupTables.some((t) => t.key === zxAlt)) {
+      if (pastDeadline()) return unknown("deadline");
+      const ownRes = await rpcCall(fetchImpl, rpc, "getMultipleAccounts",
+        [[zxAlt], { encoding: "base64", commitment: "confirmed" }], timeoutMs);
+      const info = ownRes.ok && ownRes.result && Array.isArray(ownRes.result.value) ? ownRes.result.value[0] : null;
+      const raw = info && Array.isArray(info.data) && typeof info.data[0] === "string" ? base64ToBytes(info.data[0]) : null;
+      const addrs = raw ? decodeLookupTable(raw) : null;
+      if (addrs) {
+        lookupTables.push({ key: zxAlt, addresses: addrs });
+        try { message = compileV0Message(payer, composed.instructions, lookupTables); } catch { return unknown("internal"); }
+      }
+      // واکشی یا رمزگشاییِ جدول شکست خورد → همان مسیرِ قبلی: پایین‌تر too-big.
+    }
 
     // ۶. سقفِ سختِ اندازه — رد شدن یعنی نتوانستیم سوال را بپرسیم، نه اینکه
     // جوابش «نه» بود.
