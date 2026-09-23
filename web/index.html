@@ -461,7 +461,10 @@ header.scrolled{border-bottom-color:var(--line);
    فرزند را جدا اندازه می‌گیرند) خودش را نشان می‌دهد. هر چهار فرزند را
    صریحاً `grid-row:1` می‌کنیم تا این نخ اصلاً باز نشود. */
 header>.navPad{grid-column:1;grid-row:1;width:0;min-width:0}
-.logo{grid-column:1;grid-row:1;display:flex;align-items:center;gap:13px;font-size:19px;font-weight:680;letter-spacing:-.4px;color:inherit;text-decoration:none}
+/* ۲۳ سپتامبر: justify-self:start — لینکِ لوگو قبلاً کلِ ستونِ اولِ گرید را پر می‌کرد، پس
+   روی گوشی (جایی که نوشتار پنهان است) کادرِ لمسش سه برابرِ خودِ نشان بود و زیرِ
+   چیپ‌ها می‌رفت. حالا هم‌اندازه‌ی نشان و نوشتار است. */
+.logo{grid-column:1;grid-row:1;justify-self:start;border-radius:10px;display:flex;align-items:center;gap:13px;font-size:19px;font-weight:680;letter-spacing:-.4px;color:inherit;text-decoration:none}
 /* نشان برند خودش گرادیان دارد، پس کاشی رنگی زیرش لازم نیست — دو گرادیان
    روی هم فقط همدیگر را خفه می‌کنند. */
 .logo .glyph{width:38px;height:38px;display:grid;place-items:center}

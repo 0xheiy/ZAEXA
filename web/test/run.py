@@ -2626,6 +2626,31 @@ async def check_canvas_resize(p, errors):
           "matches its frame and the drawing stays centred on the logo")
 
 
+async def check_logo_hit_area(p, errors):
+    """[logo hit area] — ۲۳ سپتامبر: روی گوشیِ مالک، لمسِ لوگو در اپ کادرِ آبیِ لمس را سه
+    برابرِ خودِ نشان نشان می‌داد (لینک کلِ ستونِ گرید را پر می‌کرد). کادرِ لینکِ لوگو باید
+    در هر سه صفحه و هر عرض فقط به اندازه‌ی جوهرِ نشان و نوشتارِ دیدنی باشد (±۴px)."""
+    b = await p.chromium.launch()
+    for name, sel in (("index.html", ".logo"), ("pairs.html", ".logo"), ("landing.html", ".landing-header .brand")):
+        for width in (360, 390, 768, 1440):
+            pg = await b.new_page(viewport={"width": width, "height": 800})
+            # بدونِ شنونده‌ی کنسول: pairs.html روی file:// نمی‌تواند /pairs.json را بخواند و این
+            # کاوشگر فقط هندسه‌ی هدر را می‌سنجد (کاوشگرهای pairs آن را با سرورِ محلی باز می‌کنند).
+            await pg.goto("file://" + os.path.join(HERE, "..", name))
+            await pg.wait_for_timeout(250)
+            r = await pg.evaluate("""s => {
+                const e = document.querySelector(s); const box = e.getBoundingClientRect();
+                const ink = [...e.querySelectorAll('svg')].map(x => x.getBoundingClientRect()).filter(x => x.width > 0);
+                return {left: box.left, right: box.right, inkLeft: Math.min(...ink.map(k => k.left)), inkRight: Math.max(...ink.map(k => k.right))};
+            }""", sel)
+            await pg.close()
+            assert abs(r["left"] - r["inkLeft"]) <= 4 and abs(r["right"] - r["inkRight"]) <= 4, (
+                "[logo hit area] %s@%dpx: the logo link spans %.0f..%.0f but its ink is %.0f..%.0f"
+                % (name, width, r["left"], r["right"], r["inkLeft"], r["inkRight"]))
+    await b.close()
+    print("[logo hit area] the logo link hugs its ink on app, pairs and landing at 360/390/768/1440px")
+
+
 async def main():
     errors = []
     # خطاهایی که یک کاوشگر *عمداً* تولید می‌کند. اجازه‌ی عبور می‌گیرند ولی
@@ -2666,6 +2691,7 @@ async def main():
         await check_canvas_route_on_ellipse(p, errors)
         await check_trust_glyph_in_circle(p, errors)
         await check_canvas_resize(p, errors)
+        await check_logo_hit_area(p, errors)
         await check_logo_parity(p, errors)
         await check_token_page_hash_links(p, errors)
         b = await p.chromium.launch()

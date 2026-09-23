@@ -89,7 +89,10 @@ header>.navPad{grid-column:1;grid-row:1;width:0;min-width:0}
    `.wordmark`)، نه یک نام‌گذاریِ جدا برای همین صفحه؛ چون کاوشگر همین
    گزینشگرها را روی هر دو صفحه می‌خواند و مقایسه می‌کند. ارتفاعِ وردمارک
    ۱۲.۷px، نسبتِ قدِ جوهرِ وردمارک به نشان طبقِ قاعده‌ی برند ۰.۴۸. */
-.logo{grid-column:1;grid-row:1;display:flex;align-items:center;gap:13px;font-size:19px;font-weight:680;letter-spacing:-.4px;color:inherit;text-decoration:none}
+/* ۲۳ سپتامبر: justify-self:start — لینکِ لوگو قبلاً کلِ ستونِ اولِ گرید را پر می‌کرد، پس
+   روی گوشی (جایی که نوشتار پنهان است) کادرِ لمسش سه برابرِ خودِ نشان بود و زیرِ
+   چیپ‌ها می‌رفت. حالا هم‌اندازه‌ی نشان و نوشتار است. */
+.logo{grid-column:1;grid-row:1;justify-self:start;border-radius:10px;display:flex;align-items:center;gap:13px;font-size:19px;font-weight:680;letter-spacing:-.4px;color:inherit;text-decoration:none}
 .logo .glyph{width:38px;height:38px;display:grid;place-items:center}
 .logo .glyph .mark{width:38px;height:auto;display:block;filter:drop-shadow(0 3px 10px var(--glow))}
 .logo .wordmark{height:12.7px;width:auto;display:block;color:var(--tx)}
