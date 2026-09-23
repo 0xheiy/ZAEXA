@@ -2308,14 +2308,18 @@ async def check_canvas_palette_live(p, errors):
     # مقادیرِ انتظار از خودِ فایل خوانده می‌شوند، نه هاردکد: چیزی که این پروب
     # ثابت می‌کند این است که بوم *همان* توکن‌های تمِ روشن را می‌خواند، نه اینکه
     # آن توکن‌ها یک رنگِ بخصوص‌اند — درستیِ خودِ رنگ‌ها کارِ check_viz_contrast است.
+    # عمداً: readViz حالا --hero1/--hero2 را می‌خواند، نه --viz1/--viz2
+    # مستقیم — چون در تمِ روشن رنگِ canvas باید همان رنگِ حرفِ n در «can»
+    # باشد (owner decision)، نه فیروزه‌ایِ viz1 قدیمی. --vizline دست‌نخورده
+    # می‌ماند.
     light_decls_f = merged_root_decls(
         open(path, encoding="utf-8").read())
     want_light = {k: _expand_hex(resolve_css_var(light_decls_f, n)).lower()
-                  for k, n in (("v1", "viz1"), ("v2", "viz2"), ("vl", "vizline"))}
+                  for k, n in (("v1", "hero1"), ("v2", "hero2"), ("vl", "vizline"))}
     got_light = {k: light_live.get(k, "").lower() for k in want_light}
     assert got_light == want_light, (
         "on load with the light theme active, the canvas script resolved %r instead of the "
-        "light --viz1/--viz2/--vizline set declared in landing.html (%r)" % (
+        "light --hero1/--hero2/--vizline set declared in landing.html (%r)" % (
             got_light, want_light))
 
     await pg.evaluate("() => { document.documentElement.dataset.theme = 'dark'; }")
@@ -2474,7 +2478,8 @@ async def check_canvas_labels(p, errors):
           () => {
             const c = document.getElementById('routeCanvas');
             const r = c.getBoundingClientRect();
-            return {labels: window.__zaexaCanvasLabels || [], w: r.width, h: r.height};
+            return {labels: window.__zaexaCanvasLabels || [], w: r.width, h: r.height,
+                    avoid: window.__zaexaCanvasAvoid || null};
           }
         """)
         await pg.close()
@@ -2493,9 +2498,62 @@ async def check_canvas_labels(p, errors):
                            and a["y"] < bx["y"] + bx["h"] and a["y"] + a["h"] > bx["y"])
                 assert not overlap, (
                     "label boxes %d %r and %d %r overlap at %dpx width" % (i, a, j, bx, width))
-        print("[canvas labels] %dpx: %d label boxes, none overlapping, all inside the canvas"
-              % (width, len(labels)))
+        # کادرهای readoutِ DOM روی canvas: هیچ برچسبی نباید زیرشان برود
+        # (۲۳ سپتامبر: «ALIENBASE» زیرِ کادرِ ROUTE ENGINE بریده می‌شد).
+        avoid = info["avoid"]
+        assert avoid, "window.__zaexaCanvasAvoid is missing at %dpx" % width
+        for i, a in enumerate(labels):
+            for r in avoid:
+                hit = (a["x"] < r["x"] + r["w"] and a["x"] + a["w"] > r["x"]
+                       and a["y"] < r["y"] + r["h"] and a["y"] + a["h"] > r["y"])
+                assert not hit, (
+                    "label box %d %r sits under a readout box %r at %dpx width" % (i, a, r, width))
+        print("[canvas labels] %dpx: %d label boxes, none overlapping, all inside the canvas, "
+              "clear of %d readout boxes" % (width, len(labels), len(avoid)))
     await b.close()
+
+
+async def check_canvas_route_on_ellipse(p, errors):
+    """پروبِ [canvas on ellipse]: صاحبِ‌کار گفت مسیرها در فازهای split و
+    simulate از داخلِ حلقه‌های سیگنال رد می‌شوند و بی‌نظم به نظر می‌رسند.
+    قاعده‌ی تازه این است که هر مسیر/کمان/ذره/دنباله‌ای که کشیده می‌شود
+    دقیقاً رویِ بیضیِ venue بنشیند. در ۱۴۴۰x۹۰۰، هر ۱۰۰ میلی‌ثانیه برای
+    ۱۰ ثانیه window.__zaexaCanvasRoutePts را می‌خوانیم و هر نقطه را با
+    معادله‌ی بیضی می‌سنجیم (۰.۹۶ تا ۱.۰۴، برای رواداریِ اعشاری) و مطمئن
+    می‌شویم هیچ نقطه‌ای به فاصله‌ی کمتر از coreR+4 از مرکز نیفتاده باشد."""
+    path = os.path.join(HERE, "..", "landing.html")
+    b = await p.chromium.launch()
+    pg = await b.new_page(viewport={"width": 1440, "height": 900})
+    pg.on("console", lambda m: errors.append(m.text) if m.type == "error" else None)
+    await pg.goto("file://" + path)
+    await pg.wait_for_timeout(300)
+
+    total = 0
+    for i in range(100):  # ~10s / 100ms
+        info = await pg.evaluate("() => window.__zaexaCanvasRoutePts || null")
+        if info and info.get("pts"):
+            cx, cy, rx, ry, core_r = info["cx"], info["cy"], info["rx"], info["ry"], info["coreR"]
+            for j, pt in enumerate(info["pts"]):
+                dx, dy = pt["x"] - cx, pt["y"] - cy
+                val = (dx / rx) ** 2 + (dy / ry) ** 2
+                assert 0.96 <= val <= 1.04, (
+                    "sample %d point %d %r is off the venue ellipse (x^2+y^2 term = %.4f, "
+                    "want 0.96..1.04) — cx=%.1f cy=%.1f rx=%.1f ry=%.1f"
+                    % (i, j, pt, val, cx, cy, rx, ry))
+                dist = (dx * dx + dy * dy) ** 0.5
+                assert dist >= core_r + 4, (
+                    "sample %d point %d %r is only %.1fpx from the centre, inside coreR+4 "
+                    "(coreR=%.1f) — a route must never cross over the core ring/logo"
+                    % (i, j, pt, dist, core_r))
+                total += 1
+        await pg.wait_for_timeout(100)
+    await b.close()
+    assert total > 0, (
+        "window.__zaexaCanvasRoutePts never carried any points over ~10s of sampling — "
+        "the canvas script must expose the sampled points of every route/lane/particle/trail "
+        "it draws")
+    print("[canvas on ellipse] %d points checked over ~10s, all on the venue ellipse and clear "
+          "of the core ring" % total)
 
 
 async def main():
@@ -2535,6 +2593,7 @@ async def main():
         await check_canvas_cost(p, errors)
         await check_canvas_reduced_motion(p, errors)
         await check_canvas_labels(p, errors)
+        await check_canvas_route_on_ellipse(p, errors)
         await check_logo_parity(p, errors)
         await check_token_page_hash_links(p, errors)
         b = await p.chromium.launch()
