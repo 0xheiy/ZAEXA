@@ -2469,7 +2469,9 @@ async def check_canvas_labels(p, errors):
     هم‌پوشانی ندارند و همه داخلِ خودِ canvas می‌مانند."""
     path = os.path.join(HERE, "..", "landing.html")
     b = await p.chromium.launch()
-    for width in (1440, 1024, 768, 375):
+    # ۲۳ سپتامبر: گوشیِ واقعیِ مالک ~۳۹۳px بود و برچسب‌ها زیرِ کادرها می‌رفتند؛
+    # عرض‌های رایجِ گوشی هم سنجیده می‌شوند.
+    for width in (1440, 1024, 768, 430, 412, 393, 375, 360):
         pg = await b.new_page(viewport={"width": width, "height": 900})
         pg.on("console", lambda m: errors.append(m.text) if m.type == "error" else None)
         await pg.goto("file://" + path)
@@ -2563,6 +2565,32 @@ async def check_canvas_route_on_ellipse(p, errors):
           "of the core ring" % total)
 
 
+async def check_trust_glyph_in_circle(p, errors):
+    """[trust glyph in circle] — ۲۳ سپتامبر: روی گوشیِ مالک علامتِ «?» بخشِ اعتماد
+    از دایره‌ی کوچکش بیرون می‌زد (دایره ۵۲px، فونت ۷۵px). جوهرِ «?» (با Range) باید
+    در هر عرض داخلِ کادرِ .trust-signal بماند."""
+    path = os.path.join(HERE, "..", "landing.html")
+    b = await p.chromium.launch()
+    for width in (1440, 768, 430, 393, 360):
+        pg = await b.new_page(viewport={"width": width, "height": 900})
+        pg.on("console", lambda m: errors.append(m.text) if m.type == "error" else None)
+        await pg.goto("file://" + path)
+        await pg.wait_for_timeout(300)
+        r = await pg.evaluate("""() => {
+            const s = document.querySelector('.trust-signal');
+            const c = s.getBoundingClientRect();
+            const rg = document.createRange(); rg.selectNodeContents(s);
+            const g = rg.getBoundingClientRect();
+            return {c: [c.left, c.top, c.right, c.bottom], g: [g.left, g.top, g.right, g.bottom]};
+        }""")
+        await pg.close()
+        c, g = r["c"], r["g"]
+        assert g[0] >= c[0] - 1 and g[1] >= c[1] - 1 and g[2] <= c[2] + 1 and g[3] <= c[3] + 1, (
+            "[trust glyph in circle] at %dpx the '?' box %r leaves its circle %r" % (width, g, c))
+    await b.close()
+    print("[trust glyph in circle] the '?' stays inside its circle at 1440/768/430/393/360px")
+
+
 async def main():
     errors = []
     # خطاهایی که یک کاوشگر *عمداً* تولید می‌کند. اجازه‌ی عبور می‌گیرند ولی
@@ -2601,6 +2629,7 @@ async def main():
         await check_canvas_reduced_motion(p, errors)
         await check_canvas_labels(p, errors)
         await check_canvas_route_on_ellipse(p, errors)
+        await check_trust_glyph_in_circle(p, errors)
         await check_logo_parity(p, errors)
         await check_token_page_hash_links(p, errors)
         b = await p.chromium.launch()
@@ -8651,7 +8680,15 @@ async def main():
                     "window.scrollTo({top: 1200, left: 0, behavior: 'instant'}); }")
                 await sh_pg.wait_for_function(
                     "() => (document.scrollingElement || document.documentElement).scrollTop > 100")
-                await sh_pg.wait_for_timeout(300)
+                # IntersectionObserver ناهم‌زمان است؛ زیرِ بارِ سوییت ۳۰۰ms گاهی کم بود
+                # (۲۳ سپتامبر یک بار روی landing@1440 لرزید، در ۵ اجرای جدا سبز).
+                # تا ۳ ثانیه منتظرِ کلاس می‌مانیم؛ اگر هرگز نیاید، assertِ پایین قرمز است.
+                try:
+                    await sh_pg.wait_for_function(
+                        "s => { const e = document.querySelector(s); return !!e && e.classList.contains('scrolled'); }",
+                        arg=sh_sel, timeout=3000)
+                except Exception:
+                    pass
                 sh_top = await sh_pg.eval_on_selector(sh_sel, "e => e.getBoundingClientRect().top")
                 sh_scrolled = await sh_pg.eval_on_selector(sh_sel, "e => e.classList.contains('scrolled')")
                 sh_nav_bottom_ok = True
