@@ -2337,6 +2337,167 @@ async def check_canvas_palette_live(p, errors):
           "reload -> %s" % (light_live, dark_live))
 
 
+_CANVAS_PHASE_ORDER = ["quote", "split", "simulate", "settle"]
+_CANVAS_PHASE_TO_STEP = {"quote": "quote", "split": "quote", "simulate": "simulate", "settle": "settle"}
+
+
+async def check_canvas_phases(p, errors):
+    """پروبِ [canvas phases]: هر ۱۵۰ میلی‌ثانیه، برای ۱۰ ثانیه، فازِ زنده
+    (window.__zaexaCanvasPhase) را نمونه‌برداری می‌کنیم. باید فقط به ترتیبِ
+    چرخه‌ای quote→split→simulate→settle→quote... پیش برود (هیچ فازی نپرد)
+    و در هر نمونه، اسپَنِ readout-right با کلاسِ on دقیقاً همان که نگاشتِ
+    فاز می‌گوید باشد."""
+    path = os.path.join(HERE, "..", "landing.html")
+    b = await p.chromium.launch()
+    pg = await b.new_page(viewport={"width": 1440, "height": 900})
+    pg.on("console", lambda m: errors.append(m.text) if m.type == "error" else None)
+    await pg.goto("file://" + path)
+    await pg.wait_for_timeout(300)
+
+    samples = []
+    for _ in range(67):  # ~10s / 150ms
+        got = await pg.evaluate(
+            "() => ({phase: window.__zaexaCanvasPhase, "
+            "on: (document.querySelector('.readout-right .step.on')||{}).dataset && "
+            "(document.querySelector('.readout-right .step.on')||{}).dataset.step})")
+        samples.append(got)
+        await pg.wait_for_timeout(150)
+    await b.close()
+
+    seen_phases = set()
+    prev_idx = None
+    for i, s in enumerate(samples):
+        phase = s.get("phase")
+        assert phase in _CANVAS_PHASE_ORDER, (
+            "window.__zaexaCanvasPhase is %r at sample %d, not one of %s" % (phase, i, _CANVAS_PHASE_ORDER))
+        seen_phases.add(phase)
+        idx = _CANVAS_PHASE_ORDER.index(phase)
+        if prev_idx is not None and idx != prev_idx:
+            expected_next = (prev_idx + 1) % 4
+            assert idx == expected_next, (
+                "canvas phase jumped from %r to %r between consecutive 150ms samples (sample %d) "
+                "— a phase was skipped instead of the cyclic quote→split→simulate"
+                "→settle order" % (_CANVAS_PHASE_ORDER[prev_idx], phase, i))
+        prev_idx = idx
+        want_step = _CANVAS_PHASE_TO_STEP[phase]
+        assert s.get("on") == want_step, (
+            "at sample %d the canvas phase is %r but the readout-right span with class 'on' has "
+            "data-step=%r, expected %r" % (i, phase, s.get("on"), want_step))
+    missing = set(_CANVAS_PHASE_ORDER) - seen_phases
+    assert not missing, (
+        "10s of sampling at 150ms never visited phase(s) %s — each phase must be long enough "
+        "to be observed" % sorted(missing))
+    print("[canvas phases] %d samples over ~10s visited all 4 phases in cyclic order, "
+          "readout 'on' span matched the mapping every time" % len(samples))
+
+
+async def check_canvas_cost(p, errors):
+    """پروبِ [canvas cost]: بعد از ۳ ثانیه اجرا، میانگینِ هزینه‌ی رسمِ هر
+    فریم (window.__zaexaCanvasCost، محاسبه‌شده با performance.now داخلِ
+    draw) باید زیرِ ۴ میلی‌ثانیه بماند."""
+    path = os.path.join(HERE, "..", "landing.html")
+    b = await p.chromium.launch()
+    pg = await b.new_page(viewport={"width": 1440, "height": 900})
+    pg.on("console", lambda m: errors.append(m.text) if m.type == "error" else None)
+    await pg.goto("file://" + path)
+    await pg.wait_for_timeout(3000)
+    cost = await pg.evaluate("() => window.__zaexaCanvasCost")
+    await b.close()
+    assert isinstance(cost, (int, float)) and cost == cost, (
+        "window.__zaexaCanvasCost is not a number after 3s: %r" % (cost,))
+    assert cost < 4, (
+        "the routeCanvas rolling average draw cost is %.3fms after 3s — must stay under 4ms" % cost)
+    print("[canvas cost] rolling average draw cost after 3s: %.3fms" % cost)
+
+
+async def check_canvas_reduced_motion(p, errors):
+    """پروبِ [canvas reduced motion]: با prefers-reduced-motion:reduce،
+    هیچ requestAnimationFrameِ مربوط به canvas (پشته‌اش شاملِ draw یا frame
+    باشد) نباید صدا زده شود، و بومِ کشیده‌شده هم نباید کاملاً خالی/شفاف
+    بماند."""
+    path = os.path.join(HERE, "..", "landing.html")
+    b = await p.chromium.launch()
+    ctx = await b.new_context(reduced_motion="reduce", viewport={"width": 1440, "height": 900})
+    await ctx.add_init_script("""
+      window.__rafCanvasCalls = 0;
+      const orig = window.requestAnimationFrame.bind(window);
+      window.requestAnimationFrame = function(cb) {
+        const stack = (new Error()).stack || '';
+        const cbName = (cb && cb.name) || '';
+        if (/\\bdraw\\b/.test(stack) || /\\bframe\\b/.test(stack)
+            || /^(draw|frame)$/.test(cbName)) { window.__rafCanvasCalls++; }
+        return orig(cb);
+      };
+    """)
+    pg = await ctx.new_page()
+    errs = []
+    pg.on("console", lambda m: errs.append(m.text) if m.type == "error" else None)
+    await pg.goto("file://" + path)
+    await pg.wait_for_timeout(1200)
+
+    raf_calls = await pg.evaluate("() => window.__rafCanvasCalls")
+    non_blank = await pg.evaluate("""
+      () => {
+        const c = document.getElementById('routeCanvas');
+        const ctx = c.getContext('2d');
+        const data = ctx.getImageData(0, 0, c.width, c.height).data;
+        for (let i = 3; i < data.length; i += 4) { if (data[i] > 0) return true; }
+        return false;
+      }
+    """)
+    await ctx.close()
+    await b.close()
+    for e in errs:
+        errors.append(e)
+    assert raf_calls == 0, (
+        "with prefers-reduced-motion:reduce, %d requestAnimationFrame call(s) from the canvas "
+        "script's draw/frame functions were made — the reduced-motion path must never call "
+        "requestAnimationFrame" % raf_calls)
+    assert non_blank, (
+        "with prefers-reduced-motion:reduce, #routeCanvas is fully transparent — the static "
+        "frame must still draw the split-phase illustration")
+    print("[canvas reduced motion] 0 requestAnimationFrame calls from draw/frame, canvas has "
+          "non-transparent pixels")
+
+
+async def check_canvas_labels(p, errors):
+    """پروبِ [canvas labels]: در ۱۴۴۰/۱۰۲۴/۷۶۸/۳۷۵ هیچ دو جعبه‌ی برچسبی
+    هم‌پوشانی ندارند و همه داخلِ خودِ canvas می‌مانند."""
+    path = os.path.join(HERE, "..", "landing.html")
+    b = await p.chromium.launch()
+    for width in (1440, 1024, 768, 375):
+        pg = await b.new_page(viewport={"width": width, "height": 900})
+        pg.on("console", lambda m: errors.append(m.text) if m.type == "error" else None)
+        await pg.goto("file://" + path)
+        await pg.wait_for_timeout(300)
+        info = await pg.evaluate("""
+          () => {
+            const c = document.getElementById('routeCanvas');
+            const r = c.getBoundingClientRect();
+            return {labels: window.__zaexaCanvasLabels || [], w: r.width, h: r.height};
+          }
+        """)
+        await pg.close()
+        labels = info["labels"]
+        assert labels, "window.__zaexaCanvasLabels is empty at %dpx" % width
+        cw, ch = info["w"], info["h"]
+        for i, box in enumerate(labels):
+            assert box["x"] >= -0.5 and box["y"] >= -0.5 and box["x"] + box["w"] <= cw + 0.5 \
+                and box["y"] + box["h"] <= ch + 0.5, (
+                "label box %d %r falls outside the %dpx canvas (%.1fx%.1f) at %dpx width"
+                % (i, box, width, cw, ch, width))
+        for i in range(len(labels)):
+            for j in range(i + 1, len(labels)):
+                a, bx = labels[i], labels[j]
+                overlap = (a["x"] < bx["x"] + bx["w"] and a["x"] + a["w"] > bx["x"]
+                           and a["y"] < bx["y"] + bx["h"] and a["y"] + a["h"] > bx["y"])
+                assert not overlap, (
+                    "label boxes %d %r and %d %r overlap at %dpx width" % (i, a, j, bx, width))
+        print("[canvas labels] %dpx: %d label boxes, none overlapping, all inside the canvas"
+              % (width, len(labels)))
+    await b.close()
+
+
 async def main():
     errors = []
     # خطاهایی که یک کاوشگر *عمداً* تولید می‌کند. اجازه‌ی عبور می‌گیرند ولی
@@ -2370,6 +2531,10 @@ async def main():
         await check_theme_migration(p, errors)
         await check_landing_mobile(p, errors)
         await check_canvas_palette_live(p, errors)
+        await check_canvas_phases(p, errors)
+        await check_canvas_cost(p, errors)
+        await check_canvas_reduced_motion(p, errors)
+        await check_canvas_labels(p, errors)
         await check_logo_parity(p, errors)
         await check_token_page_hash_links(p, errors)
         b = await p.chromium.launch()
@@ -7372,11 +7537,20 @@ async def main():
         # لوگو را ببینیم. اگر شکست در Map ذخیره می‌شد، این آدرس دیگر هیچ‌وقت
         # دوباره پرسیده نمی‌شد. ----
         RECOVER_ROW = dict(SELL_ROW, address="0x" + "f" * 40, symbol="RECOV")
-        recover_calls = {"n": 0}
+        recover_calls = {"n": 0, "ready": False}
 
+        # ⚠️ ۲۳ سپتامبر: به‌جای شکست‌دادنِ فقط *اولین* فراخوان، هر فراخوانی
+        # پیش از اینکه تست صریحاً «ready» را ست کند شکست می‌خورد. این صفحه
+        # همزمان با فچِ اولویت‌دار (requestPriorityLogos) خودِ همان جایگاه را
+        # observeLogoSlots هم می‌کند، و رقابتِ IntersectionObserver در برابرِ
+        # حل‌شدنِ Promise می‌تواند گاهی یک تلاشِ دومِ زودهنگام هم بزند — با
+        # هدرِ بزرگ‌ترِ این صفحه (بعد از پارت ۲) این رقابت زودتر از قبل حل
+        # می‌شود. آن تلاشِ زودهنگام هم باید شکست بخورد؛ فقط فراخوانی که واقعاً
+        # *بعد از جست‌وجو* می‌آید باید موفق شود — همان چیزی که این کاوشگر
+        # واقعاً می‌خواهد اثبات کند.
         async def gt_route_recover(route):
             recover_calls["n"] += 1
-            if recover_calls["n"] == 1:
+            if not recover_calls["ready"]:
                 await route.fulfill(status=200, content_type="application/json", body="not valid json{{{")
                 return
             addrs_part = route.request.url.split("multi/", 1)[-1].split("?", 1)[0]
@@ -7392,16 +7566,21 @@ async def main():
             gt_handler=gt_route_recover, extra_routes=[(GOOD_LOGO_URL, serve_tiny_png)])
         await pg_recover.wait_for_timeout(700)
         imgs_before_recover = await pg_recover.eval_on_selector_all("img", "els => els.length")
+        calls_before_recover = recover_calls["n"]
         # جست‌وجو -> رندرِ دوباره -> جایگاهِ تازه دوباره صف می‌شود -> این‌بار /gt جواب می‌دهد
+        recover_calls["ready"] = True
         await pg_recover.fill("#pairSearch", "RECOV")
         await pg_recover.wait_for_timeout(700)
         imgs_after_recover = await pg_recover.eval_on_selector_all("img", "els => els.length")
         await pg_recover.close()
-        print("[pairs logos] retry after failure: imgs before=%s after re-render+gt-recovery=%s "
-              "gt-calls=%d errors=%s"
-              % (imgs_before_recover, imgs_after_recover, recover_calls["n"], errs_recover))
+        print("[pairs logos] retry after failure: callsBeforeSearch=%d imgs before=%s "
+              "after re-render+gt-recovery=%s gt-calls=%d errors=%s"
+              % (calls_before_recover, imgs_before_recover, imgs_after_recover,
+                 recover_calls["n"], errs_recover))
+        assert calls_before_recover >= 1, "the priority fetch never called /gt before the search"
         assert imgs_before_recover == 0, (
-            "an <img> appeared even though the first /gt request was invalid: %s" % imgs_before_recover)
+            "an <img> appeared even though every /gt request before the search was invalid: %s"
+            % imgs_before_recover)
         assert imgs_after_recover == 2, (
             "the logo never appeared after /gt recovered — a failed request must not be cached, "
             "so the address is retried the next time its slot is observed: %s" % imgs_after_recover)
@@ -7985,10 +8164,11 @@ async def main():
               "search to the new rows and a failing one keeps the old rows — the search box's value "
               "survives both")
 
-        # ---- [pairs wallet] چیپِ کیف‌پول در هدرِ pairs.html — فقط وضعیت/قطعِ
-        # محلی، هیچ فلوی اتصال (EIP-6963 picker/WalletConnect/ethers) کپی
-        # نمی‌شود. سه حالت: DISCONNECTED، CONNECTED_INJECTED (eth_accounts
-        # بی‌صدا)، CONNECTED_REMOTE (فقط hasWcSession-style، بدونِ کتابخانه). ----
+        # ---- [pairs wallet] چیپِ کیف‌پول در هدرِ pairs.html — ۲۳ سپتامبر، به
+        # خواستِ مالک: حالا همان فلوی *کامل*ِ اتصالِ اپ است (EIP-6963
+        # picker/WalletConnect)، عیناً همان idها: #connectBtn/#walletPop/
+        # #walletAddr/#copyAddrBtn/#disconnectBtn. بازیابیِ بی‌صدا هنوز فقط
+        # eth_accounts است، هرگز eth_requestAccounts روی لود. ----
         FAKE_ADDR = "0x1234567890abcdef1234567890abcdef12345678"
         FAKE_SHORT = FAKE_ADDR[:6] + "…" + FAKE_ADDR[-4:]
 
@@ -8001,6 +8181,7 @@ async def main():
                         request: function(args){
                             window.__fakeMethods.push(args && args.method);
                             if (args && args.method === 'eth_accounts') return Promise.resolve([__addr]);
+                            if (args && args.method === 'eth_requestAccounts') return Promise.resolve([__addr]);
                             return Promise.reject(new Error('unexpected method'));
                         }
                     };
@@ -8055,43 +8236,47 @@ async def main():
 
         # ۱) بدونِ هیچ پروایدر و بدونِ هیچ کلید -> «Connect wallet»
         w1, werrs1, cerrs1 = await open_wallet_page()
-        chip1_text = await w1.eval_on_selector("#walletChip", "e => e.textContent.trim()")
-        chip1_href = await w1.eval_on_selector("#walletChip", "e => e.getAttribute('href')")
-        # ۲۲ سپتامبر: چراغ برداشته شد؛ حالا مثلِ اپ، حالتِ وصل‌نشده چیپِ گرادیانی
-        # (chip solid) است و حالتِ وصل چیپِ ساده — paintWallet در web/index.html
-        led1_off = await w1.eval_on_selector("#walletChip", "e => e.classList.contains('solid') && !e.querySelector('.led')")
+        chip1_text = await w1.eval_on_selector("#connectBtn", "e => e.textContent.trim()")
+        chip1_class = await w1.eval_on_selector("#connectBtn", "e => e.className")
         await w1.close()
-        print("[pairs wallet] no provider/no keys: text=%r href=%s ledOff=%s errors=%s consoleErrs=%s"
-              % (chip1_text, chip1_href, led1_off, werrs1, cerrs1))
+        print("[pairs wallet] no provider/no keys: text=%r class=%r errors=%s consoleErrs=%s"
+              % (chip1_text, chip1_class, werrs1, cerrs1))
         assert chip1_text == "Connect wallet", "wrong disconnected chip text: %r" % chip1_text
-        assert chip1_href == "/app#swap", "disconnected chip must link to /app#swap, got %r" % chip1_href
-        assert led1_off is True, "the disconnected chip must be a .chip.solid with no LED, like the app's Connect wallet button"
+        assert chip1_class == "chip solid", (
+            "the disconnected chip must be a .chip.solid, like the app's Connect wallet button: %r"
+            % chip1_class)
         assert not werrs1 and not cerrs1, "errors on the no-provider load: %s %s" % (werrs1, cerrs1)
 
-        # ۲) یک پروایدرِ ۶۹۶۳ که یک حساب اعلام می‌کند -> CONNECTED_INJECTED،
-        # فقط eth_accounts، هرگز eth_requestAccounts
+        # ۲) یک پروایدرِ ۶۹۶۳ که یک حساب اعلام می‌کند -> بازیابیِ بی‌صدا با
+        # eth_accounts وصل می‌کند، هرگز eth_requestAccounts روی خودِ لود
         w2, werrs2, cerrs2 = await open_wallet_page(init_script=fake_provider_script(FAKE_ADDR))
-        chip2_text = await w2.eval_on_selector("#walletChip", "e => e.textContent.trim()")
-        led2_off = await w2.eval_on_selector("#walletChip", "e => e.classList.contains('solid') || !!e.querySelector('.led')")
-        await w2.click("#walletChip")
+        chip2_text = await w2.eval_on_selector("#connectBtn", "e => e.textContent.trim()")
+        chip2_class = await w2.eval_on_selector("#connectBtn", "e => e.className")
+        await w2.click("#connectBtn")
         await w2.wait_for_timeout(100)
-        pop2_addr = await w2.eval_on_selector("#walletPopAddr", "e => e.textContent.trim()")
+        pop2_addr = await w2.eval_on_selector("#walletAddr", "e => e.textContent.trim()")
         methods2 = await w2.evaluate("window.__fakeMethods")
         await w2.close()
-        print("[pairs wallet] injected: chipText=%r ledOff=%s popoverAddr=%r methods=%s errors=%s "
-              "consoleErrs=%s" % (chip2_text, led2_off, pop2_addr, methods2, werrs2, cerrs2))
+        print("[pairs wallet] injected (silent restore): chipText=%r class=%r popoverAddr=%r "
+              "methods=%s errors=%s consoleErrs=%s"
+              % (chip2_text, chip2_class, pop2_addr, methods2, werrs2, cerrs2))
         assert chip2_text == FAKE_SHORT, "chip did not show the short address: %r" % chip2_text
-        assert led2_off is False, "the connected chip must be a plain .chip with no LED, like the app"
-        assert pop2_addr == FAKE_ADDR, "popover did not show the full address: %r" % pop2_addr
-        assert methods2 == ["eth_accounts"], (
-            "the fake provider received something other than exactly one eth_accounts call: %s" % methods2)
+        assert chip2_class == "chip", "the connected chip must be a plain .chip, like the app: %r" % chip2_class
+        assert pop2_addr == FAKE_SHORT, "popover did not show the short address: %r" % pop2_addr
+        # عیناً همان الگوی خودِ اپ: حلقه‌ی بازیابیِ بی‌صدا یک‌بار eth_accounts
+        # می‌زند تا ببیند آیا اجازه هست، و روی جواب مثبت connectWithProvider
+        # را صدا می‌زند که دوباره‌ی همان eth_accounts را می‌زند (هرگز
+        # eth_requestAccounts) — پس اینجا دقیقاً همان دو فراخوان انتظار
+        # می‌رود، نه یک‌بار.
+        assert methods2 == ["eth_accounts", "eth_accounts"] and set(methods2) == {"eth_accounts"}, (
+            "silent restore must only ever call eth_accounts, never eth_requestAccounts: %s" % methods2)
         assert not werrs2 and not cerrs2, "errors on the injected-provider load: %s %s" % (werrs2, cerrs2)
 
         # ۳) پرچمِ قطعِ محلی ست است، همان پروایدر هم حاضر است -> هیچ پروبی زده
         # نمی‌شود، پروایدر صفر درخواست می‌بیند (کوتاه‌مدار پیش از هرچیز)
         w3, werrs3, cerrs3 = await open_wallet_page(init_script=(
             "localStorage.setItem('zaexa.disconnected','1');" + fake_provider_script(FAKE_ADDR)))
-        chip3_text = await w3.eval_on_selector("#walletChip", "e => e.textContent.trim()")
+        chip3_text = await w3.eval_on_selector("#connectBtn", "e => e.textContent.trim()")
         methods3 = await w3.evaluate("window.__fakeMethods")
         await w3.close()
         print("[pairs wallet] disconnected flag + provider present: chipText=%r methods=%s errors=%s "
@@ -8103,65 +8288,48 @@ async def main():
             "received requests: %s" % methods3)
         assert not werrs3 and not cerrs3, "errors on the disconnected-flag load: %s %s" % (werrs3, cerrs3)
 
-        # ۴) کلیک روی Disconnect (حالتِ افزونه) -> پرچم ست می‌شود، چیپ برمی‌گردد
-        # به «Connect wallet»، متنِ دقیقِ زیرِ هدر یک‌بار ظاهر می‌شود
+        # ۴) کلیک روی Disconnect -> پرچم ست می‌شود، چیپ برمی‌گردد به
+        # «Connect wallet»، متنِ دقیقِ زیرِ هدر یک‌بار ظاهر می‌شود
         w4, werrs4, cerrs4 = await open_wallet_page(init_script=fake_provider_script(FAKE_ADDR))
-        await w4.click("#walletChip")
+        await w4.click("#connectBtn")
         await w4.wait_for_timeout(100)
-        await w4.click("#walletPopDisc")
+        await w4.click("#disconnectBtn")
         await w4.wait_for_timeout(100)
         flag4 = await w4.evaluate("localStorage.getItem('zaexa.disconnected')")
-        chip4_text = await w4.eval_on_selector("#walletChip", "e => e.textContent.trim()")
+        chip4_text = await w4.eval_on_selector("#connectBtn", "e => e.textContent.trim()")
         note4_count = await w4.eval_on_selector_all(
             "#walletDisconnectNote", "els => els.length")
-        note4_text = await w4.eval_on_selector("#walletDisconnectNote", "e => e.textContent.trim()")
         note4_hidden = await w4.eval_on_selector("#walletDisconnectNote", "e => e.hidden")
         await w4.close()
-        EXPECTED_DISCONNECT_TEXT = (
-            "Disconnected. Zaexa will not reconnect on its own. Your wallet may still "
-            "list this site — remove it there to revoke access.")
         print("[pairs wallet] disconnect click: flag=%r chipText=%r noteCount=%s noteHidden=%s "
-              "noteText=%r errors=%s consoleErrs=%s"
-              % (flag4, chip4_text, note4_count, note4_hidden, note4_text, werrs4, cerrs4))
+              "errors=%s consoleErrs=%s"
+              % (flag4, chip4_text, note4_count, note4_hidden, werrs4, cerrs4))
         assert flag4 == "1", "clicking Disconnect did not set localStorage zaexa.disconnected=1"
         assert chip4_text == "Connect wallet", (
             "the chip did not switch back to Connect wallet after Disconnect: %r" % chip4_text)
         assert note4_count == 1, "the disconnect note did not appear exactly once: %s" % note4_count
         assert note4_hidden is False, "the disconnect note is still hidden after Disconnect"
-        assert note4_text == EXPECTED_DISCONNECT_TEXT, (
-            "the disconnect note's wording does not match exactly: %r" % note4_text)
         assert not werrs4 and not cerrs4, "errors on the disconnect-click probe: %s %s" % (werrs4, cerrs4)
 
-        # ۵) یک کلیدِ wc@2:…session… غیرخالی، بدونِ هیچ پروایدرِ تزریق‌شده ->
-        # CONNECTED_REMOTE؛ بدونِ کتابخانه‌ی WalletConnect، بدونِ Disconnectِ محلی
+        # ۵) یک کلیدِ wc@2:…session… غیرخالی، بدونِ هیچ پروایدرِ تزریق‌شده —
+        # بازیابیِ WalletConnect تلاش می‌کند، ولی این محیطِ تست شبکه‌ی بیرونی
+        # ندارد (رله‌ی WalletConnect غیرِقابل‌دسترس است)، پس نباید هرگز به یک
+        # خطای صفحه/کنسول بینجامد؛ چیپ همچنان «Connect wallet» می‌ماند.
         w5, werrs5, cerrs5 = await open_wallet_page(init_script=(
             "localStorage.setItem('wc@2:client:0.3//session', JSON.stringify({topic:'abc'}));"))
-        led5_off = await w5.eval_on_selector("#walletChip", "e => e.classList.contains('solid') || !!e.querySelector('.led')")
-        await w5.click("#walletChip")
-        await w5.wait_for_timeout(100)
-        pop5_html = await w5.eval_on_selector("#walletPop", "e => e.innerHTML")
-        disc_app_href5 = await w5.evaluate(
-            "() => { var e = document.getElementById('walletPopDiscApp'); "
-            "return e ? e.getAttribute('href') : null; }")
-        local_disc_present5 = await w5.evaluate(
-            "() => !!document.getElementById('walletPopDisc')")
+        chip5_text = await w5.eval_on_selector("#connectBtn", "e => e.textContent.trim()")
         await w5.close()
-        print("[pairs wallet] wc session, no injected provider: ledOff=%s discAppHref=%s "
-              "localDiscPresent=%s errors=%s consoleErrs=%s"
-              % (led5_off, disc_app_href5, local_disc_present5, werrs5, cerrs5))
-        assert led5_off is False, "the WalletConnect-session chip must be a plain .chip with no LED"
-        assert "WalletConnect" in pop5_html, (
-            "the popover does not mention WalletConnect for a remote session: %r" % pop5_html)
-        assert disc_app_href5 == "/app#swap", (
-            "the \"Disconnect in the app\" link is missing or wrong: %r" % disc_app_href5)
-        assert local_disc_present5 is False, (
-            "a local Disconnect button must not exist for a WalletConnect (remote) session")
+        print("[pairs wallet] wc session, no injected provider, no real relay reachable: "
+              "chipText=%r errors=%s consoleErrs=%s" % (chip5_text, werrs5, cerrs5))
+        assert chip5_text == "Connect wallet", (
+            "with no injected provider and no reachable relay the chip must stay Connect wallet: %r"
+            % chip5_text)
         assert not werrs5 and not cerrs5, "errors on the wc-session load: %s %s" % (werrs5, cerrs5)
 
         # ۶) پروایدری که eth_accounts در آن پرتاب می‌کند -> «Connect wallet»،
         # هیچ خطای کنسولی
         w6, werrs6, cerrs6 = await open_wallet_page(init_script=fake_provider_throws_script())
-        chip6_text = await w6.eval_on_selector("#walletChip", "e => e.textContent.trim()")
+        chip6_text = await w6.eval_on_selector("#connectBtn", "e => e.textContent.trim()")
         await w6.close()
         print("[pairs wallet] throwing provider: chipText=%r errors=%s consoleErrs=%s"
               % (chip6_text, werrs6, cerrs6))
@@ -8170,10 +8338,281 @@ async def main():
         assert not werrs6, "a throwing provider must not become a page error: %s" % werrs6
         assert not cerrs6, "a throwing provider must not print a console error: %s" % cerrs6
 
-        print("[pairs wallet] disconnected/injected/remote states render the right chip+popover; only "
-              "eth_accounts is ever called and never after the disconnected flag is set; Disconnect "
-              "(injected) sets the flag and shows the exact wording once; a WalletConnect session gets "
-              "no local Disconnect; a throwing provider degrades silently")
+        # ۷) کلیک روی Connect wallet وقتی قطع است -> انتخاب‌گر (#walletOv) باز
+        # می‌شود؛ کلیک روی ردیفِ کیف‌پول eth_requestAccounts می‌زند و وصل
+        # می‌کند — همان دوباره‌رفتاری که [pairs connect] هم می‌سنجد، اینجا با
+        # فرضِ ساده‌ترِ «فقط یک والتِ تزریق‌شده».
+        w7, werrs7, cerrs7 = await open_wallet_page(init_script=(
+            "localStorage.setItem('zaexa.disconnected','1');" + fake_provider_script(FAKE_ADDR)))
+        await w7.click("#connectBtn")
+        await w7.wait_for_timeout(150)
+        picker_open7 = await w7.evaluate("() => document.getElementById('walletOv').classList.contains('on')")
+        await w7.click(".walRow")
+        await w7.wait_for_timeout(150)
+        chip7_text = await w7.eval_on_selector("#connectBtn", "e => e.textContent.trim()")
+        disconnected7 = await w7.evaluate("() => localStorage.getItem('zaexa.disconnected')")
+        methods7 = await w7.evaluate("window.__fakeMethods")
+        await w7.close()
+        print("[pairs wallet] explicit connect via picker: pickerOpen=%s chipText=%r "
+              "disconnectedFlag=%r methods=%s errors=%s consoleErrs=%s"
+              % (picker_open7, chip7_text, disconnected7, methods7, werrs7, cerrs7))
+        assert picker_open7, "clicking Connect wallet while disconnected must open #walletOv"
+        assert chip7_text == FAKE_SHORT, (
+            "picking the fake wallet did not connect: %r" % chip7_text)
+        assert disconnected7 is None, (
+            "an explicit connect must clear zaexa.disconnected, got %r" % disconnected7)
+        assert "eth_requestAccounts" in methods7, (
+            "picking a wallet from the picker must call eth_requestAccounts: %s" % methods7)
+        assert not werrs7 and not cerrs7, "errors on the explicit-connect probe: %s %s" % (werrs7, cerrs7)
+
+        # ---- [pairs connect] همان کاوشگرِ ۷ بالا، دوباره اما با نامِ دقیقِ
+        # خواسته‌شده در مشخصات (probe مستقل و ماندگار) + سنجشِ محتوای
+        # #walletPop بعد از وصل‌شدن (باید Copy address و Disconnect داشته
+        # باشد، عیناً مثلِ اپ). pairs هرگز زنجیره عوض نمی‌کند/تراکنش نمی‌فرستد؛
+        # این کاوشگر فقط فلوی اتصال را می‌سنجد. ----
+        w8, werrs8, cerrs8 = await open_wallet_page(init_script=(
+            "localStorage.setItem('zaexa.disconnected','1');" + fake_provider_script(FAKE_ADDR)))
+        await w8.click("#connectBtn")
+        await w8.wait_for_timeout(150)
+        picker_open8 = await w8.evaluate("() => document.getElementById('walletOv').classList.contains('on')")
+        await w8.click(".walRow")
+        await w8.wait_for_timeout(150)
+        chip8_text = await w8.eval_on_selector("#connectBtn", "e => e.textContent.trim()")
+        disconnected8 = await w8.evaluate("() => localStorage.getItem('zaexa.disconnected')")
+        methods8 = await w8.evaluate("window.__fakeMethods")
+        await w8.click("#connectBtn")
+        await w8.wait_for_timeout(100)
+        has_copy8 = await w8.evaluate("() => !!document.getElementById('copyAddrBtn')")
+        has_disc8 = await w8.evaluate("() => !!document.getElementById('disconnectBtn')")
+        addr8 = await w8.eval_on_selector("#walletAddr", "e => e.textContent.trim()")
+        await w8.close()
+        print("[pairs connect] pickerOpen=%s chipText=%r disconnectedFlag=%r methods=%s "
+              "hasCopyBtn=%s hasDisconnectBtn=%s popoverAddr=%r errors=%s consoleErrs=%s"
+              % (picker_open8, chip8_text, disconnected8, methods8, has_copy8, has_disc8, addr8,
+                 werrs8, cerrs8))
+        assert picker_open8, "[pairs connect] clicking Connect wallet must open #walletOv"
+        assert chip8_text == FAKE_SHORT, "[pairs connect] picking the fake wallet did not connect"
+        assert disconnected8 is None, "[pairs connect] explicit connect must clear zaexa.disconnected"
+        assert "eth_requestAccounts" in methods8, (
+            "[pairs connect] picking a wallet must call eth_requestAccounts")
+        assert has_copy8 and has_disc8, (
+            "[pairs connect] the connected #walletPop must have Copy address + Disconnect, like the app")
+        assert addr8 == FAKE_SHORT, "[pairs connect] #walletAddr must show the shortened address"
+        assert not werrs8 and not cerrs8, "[pairs connect] errors on the connect flow: %s %s" % (werrs8, cerrs8)
+
+        print("[pairs wallet] disconnected/silently-restored/throwing states render the right chip; "
+              "only eth_accounts is ever called on load and never after the disconnected flag is "
+              "set; Disconnect sets the flag and shows the exact wording once; explicit Connect "
+              "wallet opens the picker and eth_requestAccounts only fires on a picked row")
+
+        # ---- [theme first paint] تمِ اولیه باید پیش از اولین رنگ‌آمیزی، از
+        # داخلِ <head> (پیش از اولین <style>) نوشته شود، نه در پایانِ body —
+        # وگرنه یک فلاشِ روشن-روی-تیره دیده می‌شود. هر سه صفحه. ----
+        tfp_static_ok = {}
+        for tfp_name in ("index.html", "pairs.html", "landing.html"):
+            tfp_src = open(os.path.join(HERE, "..", tfp_name), encoding="utf-8").read()
+            tfp_head_end = tfp_src.find("</head>")
+            # ⚠️ خطِ-به-خطی: یک اشاره‌ی متنیِ «<style>» داخلِ همین کامنتِ
+            # توضیحی هم با جست‌وجوی ساده پیدا می‌شود؛ تگِ واقعی همیشه
+            # ابتدای خط می‌آید، پس با ^ (چندخطی) جدا می‌شود.
+            tfp_style_m = re.search(r"(?m)^<style[ >]", tfp_src)
+            tfp_first_style = tfp_style_m.start() if tfp_style_m else -1
+            tfp_theme_write = tfp_src.find("zaexa.theme.v1")
+            tfp_static_ok[tfp_name] = (
+                tfp_theme_write != -1 and tfp_first_style != -1 and
+                tfp_theme_write < tfp_first_style < tfp_head_end
+            )
+        tfp_runtime = {}
+        for tfp_name in ("index.html", "pairs.html", "landing.html"):
+            tfp_pg = await b.new_page()
+            await tfp_pg.add_init_script(
+                "localStorage.setItem('zaexa.theme.v1','dark');"
+                "window.__firstThemeAtDomLoading = null;"
+                "document.addEventListener('readystatechange', () => {"
+                "  if (window.__firstThemeAtDomLoading === null && document.documentElement.dataset.theme)"
+                "    window.__firstThemeAtDomLoading = document.documentElement.dataset.theme;"
+                "});"
+            )
+            await tfp_pg.goto("http://127.0.0.1:%d/%s" % (port, tfp_name))
+            tfp_theme_attr = await tfp_pg.evaluate("() => document.documentElement.dataset.theme")
+            await tfp_pg.close()
+            tfp_runtime[tfp_name] = tfp_theme_attr
+        print("[theme first paint] head-before-first-style=%s runtimeDarkAttr=%s" % (tfp_static_ok, tfp_runtime))
+        for tfp_name in ("index.html", "pairs.html", "landing.html"):
+            assert tfp_static_ok[tfp_name], (
+                "[theme first paint] %s does not write zaexa.theme.v1 into <head> before its "
+                "first <style> — a theme flash on first paint is possible" % tfp_name)
+            assert tfp_runtime[tfp_name] == "dark", (
+                "[theme first paint] %s did not have data-theme=dark set from localStorage "
+                "by the time it loaded: %r" % (tfp_name, tfp_runtime[tfp_name]))
+
+        # ---- [swap settings persist] zaexa.swap.v1 مشترک بینِ اپ و pairs —
+        # نوشتنِ اپ روی pairs دیده می‌شود، نوشتنِ pairs روی اپ دیده می‌شود،
+        # JSON خراب باعثِ خطا نمی‌شود (پیش‌فرض می‌ماند)، و مقدارِ سفارشیِ
+        # نامعتبر (custom="999", خارج از بازه‌ی ۰..۵۰) هرگز اعمال نمی‌شود —
+        # bps باید روی پیش‌فرض (۵۰ یعنی ۰٫۵٪) بماند، عیناً همان اعتبارسنجیِ
+        # خودِ oninput که کاربر با تایپ هم به آن می‌رسید. ----
+        ssp_app1 = await b.new_page(viewport={"width": 1280, "height": 900})
+        ssp_app1_errs = []
+        ssp_app1.on("pageerror", lambda e: ssp_app1_errs.append(str(e)))
+        await ssp_app1.goto("http://127.0.0.1:%d/" % port)
+        await ssp_app1.wait_for_timeout(400)
+        await ssp_app1.click("#setBtn")
+        await ssp_app1.wait_for_timeout(100)
+        await ssp_app1.fill("#slipCustom", "1")
+        await ssp_app1.eval_on_selector("#slipCustom", "e => e.dispatchEvent(new Event('input'))")
+        await ssp_app1.fill("#deadlineMin", "7")
+        await ssp_app1.eval_on_selector("#deadlineMin", "e => e.dispatchEvent(new Event('input'))")
+        await ssp_app1.check("#unlimApprove")
+        await ssp_app1.wait_for_timeout(100)
+        ssp_ls_after_app = await ssp_app1.evaluate("() => localStorage.getItem('zaexa.swap.v1')")
+        await ssp_app1.close()
+
+        ppg_ssp, ssp_perrs = await open_pairs({"chain": "base", "rows": [], "store": True})
+        await ppg_ssp.evaluate(
+            "(v) => localStorage.setItem('zaexa.swap.v1', v)", ssp_ls_after_app)
+        await ppg_ssp.reload()
+        await ppg_ssp.wait_for_timeout(300)
+        ssp_pairs_deadline = await ppg_ssp.eval_on_selector("#deadlineMin", "e => e.value")
+        ssp_pairs_unlim = await ppg_ssp.eval_on_selector("#unlimApprove", "e => e.checked")
+        # روی pairs مقدار را به ۰٫۱٪ عوض می‌کنیم تا برگشتِ آن به اپ سنجیده شود
+        await ppg_ssp.evaluate("""() => {
+            const seg = document.querySelectorAll('#slipSeg [data-bps]');
+            for (const b of seg) if (+b.dataset.bps === 10) b.onclick();
+        }""")
+        await ppg_ssp.wait_for_timeout(100)
+        ssp_ls_after_pairs = await ppg_ssp.evaluate("() => localStorage.getItem('zaexa.swap.v1')")
+        await ppg_ssp.close()
+
+        ssp_app2 = await b.new_page(viewport={"width": 1280, "height": 900})
+        ssp_app2_errs = []
+        ssp_app2.on("pageerror", lambda e: ssp_app2_errs.append(str(e)))
+        await ssp_app2.goto("http://127.0.0.1:%d/" % port)
+        await ssp_app2.evaluate(
+            "(v) => localStorage.setItem('zaexa.swap.v1', v)", ssp_ls_after_pairs)
+        await ssp_app2.reload()
+        await ssp_app2.wait_for_timeout(400)
+        ssp_app_bps_after_pairs = [
+            b for b in await ssp_app2.eval_on_selector_all(
+                "#slipSeg [data-bps]", "els => els.map(e => ({bps: e.dataset.bps, on: e.classList.contains('on')}))")
+            if b["on"]
+        ]
+        await ssp_app2.close()
+
+        # JSONِ خراب -> بدونِ خطا، بدونِ تغییر
+        ssp_app3 = await b.new_page(viewport={"width": 1280, "height": 900})
+        ssp_app3_errs = []
+        ssp_app3.on("pageerror", lambda e: ssp_app3_errs.append(str(e)))
+        await ssp_app3.goto("http://127.0.0.1:%d/" % port)
+        await ssp_app3.evaluate("() => localStorage.setItem('zaexa.swap.v1', '{not json')")
+        await ssp_app3.reload()
+        await ssp_app3.wait_for_timeout(400)
+        ssp_app3_bps_on = await ssp_app3.eval_on_selector("#slipSeg [data-bps='50']", "e => e.classList.contains('on')")
+        await ssp_app3.close()
+
+        # مقدارِ سفارشیِ نامعتبر (999) -> پیش‌فرض باید بماند (bps=50)، نه اعمال‌شدنِ ۹۹۹
+        ssp_app4 = await b.new_page(viewport={"width": 1280, "height": 900})
+        ssp_app4_errs = []
+        ssp_app4.on("pageerror", lambda e: ssp_app4_errs.append(str(e)))
+        await ssp_app4.goto("http://127.0.0.1:%d/" % port)
+        await ssp_app4.evaluate(
+            "() => localStorage.setItem('zaexa.swap.v1', JSON.stringify({bps: 50, custom: '999', deadline: 3, unlim: false}))")
+        await ssp_app4.reload()
+        await ssp_app4.wait_for_timeout(400)
+        ssp_app4_bps_on = await ssp_app4.eval_on_selector("#slipSeg [data-bps='50']", "e => e.classList.contains('on')")
+        await ssp_app4.close()
+
+        ppg_ssp2, ssp_perrs2 = await open_pairs({"chain": "base", "rows": [], "store": True})
+        await ppg_ssp2.evaluate(
+            "() => localStorage.setItem('zaexa.swap.v1', JSON.stringify({bps: 50, custom: '999', deadline: 3, unlim: false}))")
+        await ppg_ssp2.reload()
+        await ppg_ssp2.wait_for_timeout(300)
+        ssp_pairs4_bps_on = await ppg_ssp2.eval_on_selector("#slipSeg [data-bps='50']", "e => e.classList.contains('on')")
+        await ppg_ssp2.close()
+
+        print("[swap settings persist] appToPairs: deadline=%s unlim=%s | pairsToApp bps=%s | "
+              "corruptJson bps50On=%s | invalidCustom999 appBps50On=%s pairsBps50On=%s | errors=%s"
+              % (ssp_pairs_deadline, ssp_pairs_unlim, ssp_app_bps_after_pairs, ssp_app3_bps_on,
+                 ssp_app4_bps_on, ssp_pairs4_bps_on,
+                 ssp_app1_errs + ssp_perrs + ssp_app2_errs + ssp_app3_errs + ssp_app4_errs + ssp_perrs2))
+        assert ssp_pairs_deadline == "7", (
+            "[swap settings persist] pairs.html did not pick up the app's deadline=7: %r" % ssp_pairs_deadline)
+        assert ssp_pairs_unlim is True, (
+            "[swap settings persist] pairs.html did not pick up the app's unlimited-approve checkbox")
+        assert len(ssp_app_bps_after_pairs) == 1 and ssp_app_bps_after_pairs[0]["bps"] == "10", (
+            "[swap settings persist] index.html did not pick up pairs.html's 0.1%% slippage: %s"
+            % ssp_app_bps_after_pairs)
+        assert ssp_app3_bps_on, (
+            "[swap settings persist] corrupt JSON in zaexa.swap.v1 must leave the default 0.5%% selected")
+        assert ssp_app4_bps_on, (
+            "[swap settings persist] an invalid custom slippage (999) must leave the default 0.5%% "
+            "selected on index.html, not apply the invalid value"
+        )
+        assert ssp_pairs4_bps_on, (
+            "[swap settings persist] an invalid custom slippage (999) must leave the default 0.5%% "
+            "selected on pairs.html, not apply the invalid value"
+        )
+        assert not (ssp_app1_errs or ssp_perrs or ssp_app2_errs or ssp_app3_errs or ssp_app4_errs or ssp_perrs2), (
+            "[swap settings persist] errors during the persistence probe")
+
+        # ---- [sticky header] هدر روی هر سه صفحه sticky است؛ بعد از اسکرول
+        # کلاسِ .scrolled/.site-header.scrolled/.landing-header.scrolled
+        # می‌نشیند و بالای هدر روی ۰ می‌ماند (نه اینکه با صفحه برود بالا).
+        # روی موبایل، نوارِ پایینِ ثابت هنوز به تهِ ویوپورت چسبیده — یعنی
+        # sticky-شدنِ هدر containing blockِ nav پایین را عوض نکرده (تله‌ی
+        # backdrop-filter/transform روی خودِ هدر). ----
+        sh_pages = {
+            "index.html": ("header", None),
+            "pairs.html": (".site-header", None),
+            "landing.html": (".landing-header", None),
+        }
+        sh_results = {}
+        for sh_name, (sh_sel, _) in sh_pages.items():
+            for sh_vp in ({"width": 1440, "height": 900}, {"width": 375, "height": 700}):
+                sh_pg = await b.new_page(viewport=sh_vp)
+                sh_errs = []
+                sh_pg.on("pageerror", lambda e: sh_errs.append(str(e)))
+                await sh_pg.goto("http://127.0.0.1:%d/%s" % (port, sh_name))
+                await sh_pg.wait_for_timeout(400)
+                # scrollTo با behavior صریح 'instant': landing.html
+                # scroll-behavior:smooth دارد و پرشِ نرم ممکن است هنوز کامل
+                # نشده باشد وقتی این‌جا scrollY را می‌خوانیم — این کاوشگر
+                # به موقعیتِ نهاییِ اسکرول کار دارد، نه به خودِ انیمیشن؛
+                # به‌جای مکثِ ثابت، صبر می‌کنیم تا scrollY واقعاً به ۱۲۰۰
+                # برسد (یا حداکثرِ ممکن، اگر صفحه کوتاه‌تر باشد).
+                await sh_pg.evaluate(
+                    "() => { document.body.style.minHeight = '3000px'; "
+                    "window.scrollTo({top: 1200, left: 0, behavior: 'instant'}); }")
+                await sh_pg.wait_for_function(
+                    "() => (document.scrollingElement || document.documentElement).scrollTop > 100")
+                await sh_pg.wait_for_timeout(300)
+                sh_top = await sh_pg.eval_on_selector(sh_sel, "e => e.getBoundingClientRect().top")
+                sh_scrolled = await sh_pg.eval_on_selector(sh_sel, "e => e.classList.contains('scrolled')")
+                sh_nav_bottom_ok = True
+                if sh_vp["width"] < 500 and sh_name != "landing.html":
+                    sh_nav_rect = await sh_pg.evaluate("""() => {
+                        const nav = document.querySelector('#nav, .nav');
+                        if (!nav) return null;
+                        const r = nav.getBoundingClientRect();
+                        return Math.abs(r.bottom - window.innerHeight) <= 1;
+                    }""")
+                    if sh_nav_rect is not None:
+                        sh_nav_bottom_ok = sh_nav_rect
+                await sh_pg.close()
+                sh_key = "%s@%sx%s" % (sh_name, sh_vp["width"], sh_vp["height"])
+                sh_results[sh_key] = {
+                    "top": sh_top, "scrolled": sh_scrolled, "navBottomOk": sh_nav_bottom_ok, "errs": sh_errs,
+                }
+        print("[sticky header] %s" % sh_results)
+        for sh_key, sh_r in sh_results.items():
+            assert abs(sh_r["top"]) <= 1, (
+                "[sticky header] %s: header top after scrolling is %.1f, expected ~0 (sticky)"
+                % (sh_key, sh_r["top"]))
+            assert sh_r["scrolled"], "[sticky header] %s: .scrolled class was not applied after scrolling" % sh_key
+            assert sh_r["navBottomOk"], (
+                "[sticky header] %s: the mobile bottom nav is no longer flush with the viewport "
+                "bottom — the sticky header likely became a containing block for it" % sh_key)
+            assert not sh_r["errs"], "[sticky header] %s: errors: %s" % (sh_key, sh_r["errs"])
 
         # ---- [pairs title] عنوانِ سند زنجیره را دنبال می‌کند ----
         tpg = await b.new_page(viewport={"width": 1280, "height": 900})
@@ -8210,7 +8649,7 @@ async def main():
         os.makedirs(shot_dir, exist_ok=True)
         sA, sAerrs, _ = await open_wallet_page(
             init_script=fake_provider_script(FAKE_ADDR), color_scheme="dark")
-        await sA.click("#walletChip")
+        await sA.click("#connectBtn")
         await sA.wait_for_timeout(150)
         await sA.screenshot(path=os.path.join(shot_dir, "1280-dark-connected-popover.png"))
         await sA.close()
@@ -8321,6 +8760,108 @@ async def main():
         assert not aerrs, "web/index.html threw while loading for the shell comparison: %s" % aerrs
         assert not perrs1, "web/pairs.html threw while loading for the shell comparison: %s" % perrs1
 
+        # ---- [header parity] هدرِ pairs باید عیناً همان امضای DOMِ هدرِ اپ
+        # باشد: همان idها/کلاس‌ها/ترتیب برای هدر و محتوای #setPop، در هر دو
+        # اندازه (دسکتاپ ۱۴۴۰ و موبایل ۳۷۵). #walletPop قبل از اتصال خالی
+        # است، پس امضای آن اینجا سنجیده نمی‌شود (کاوشگرِ [pairs connect]
+        # جدا آن را می‌سنجد). ----
+        # ⚠️ داخلِ <svg> عمداً recurse نمی‌شود: خودِ آیکن‌های تزئینی (gradient/
+        # mask/defs یا <use> به‌جای path مستقیم) دو پیاده‌سازیِ متفاوتِ
+        # بصراً-یکسان‌اند و ربطی به «امضای هدر» ندارند؛ چیزی که واقعاً باید
+        # این‌همان باشد ساختار/idها/کلاس‌های عناصرِ HTMLِ تعاملی است.
+        # ⚠️ آیتم‌های ناوبری در اپ <button> هستند (تب‌زنیِ SPA) و در pairs
+        # <a href> واقعی (این صفحه بخشی از SPA نیست، باید لینکِ واقعی باشد) —
+        # همان تفاوتِ پذیرفته‌شده‌ای که [pairs header] هم می‌سنجد. تگِ
+        # عناصرِ .navLink عمداً نادیده گرفته می‌شود؛ idها/کلاس‌ها/ترتیب هنوز
+        # کامل سنجیده می‌شوند.
+        SIG_JS = """(rootSel) => {
+            const root = document.querySelector(rootSel);
+            if (!root) return null;
+            function sig(el, underNav){
+                if (el.tagName === 'svg'){
+                    return { tag: 'svg', id: el.id || null,
+                             cls: (el.className.baseVal || '').toString().split(/\\s+/).filter(c => c).sort() };
+                }
+                const clsList = (el.className || '').toString().split(/\\s+/).filter(c => c && c !== 'on').sort();
+                const kids = Array.prototype.filter.call(el.children, c => true);
+                // مستقیم زیرِ #nav: در اپ <button> است (تب‌زنیِ SPA) و در
+                // pairs <a class="navLink" href> واقعی — همان تفاوتِ
+                // پذیرفته‌شده‌ای که [pairs header] هم می‌سنجد؛ نه تگ نه
+                // کلاسِ خودِ این عنصر مقایسه نمی‌شود، فقط شمار/ترتیب.
+                if (underNav){
+                    return { tag: 'NAVITEM', id: null, cls: [], children: kids.map(k => sig(k, false)) };
+                }
+                return {
+                    tag: el.tagName,
+                    id: el.id || null,
+                    cls: clsList,
+                    children: kids.map(k => sig(k, el.id === 'nav' || clsList.includes('nav'))),
+                };
+            }
+            return sig(root, false);
+        }"""
+        GEOM_JS = """() => {
+            const sels = ['.logo', '#nav', '#srcChip', '#shareBtn', '#setBtn', '#connectBtn'];
+            const out = {};
+            for (const s of sels){
+                const e = document.querySelector(s);
+                out[s] = e ? e.getBoundingClientRect().top.toFixed(1) : null;
+            }
+            return out;
+        }"""
+        hp_results = {}
+        for hp_vp in ({"width": 1440, "height": 900}, {"width": 375, "height": 800}):
+            hpg_app = await b.new_page(viewport=hp_vp)
+            hp_aerrs = []
+            hpg_app.on("pageerror", lambda e: hp_aerrs.append(str(e)))
+            await hpg_app.goto("http://127.0.0.1:%d/" % port)
+            await hpg_app.wait_for_timeout(400)
+            app_hdr_sig = await hpg_app.evaluate(SIG_JS, "header")
+            app_setpop_sig = await hpg_app.evaluate(SIG_JS, "#setPop")
+            app_geom = await hpg_app.evaluate(GEOM_JS)
+            await hpg_app.close()
+
+            hpg_pairs, hp_perrs = await open_pairs({"chain": "base", "rows": [], "store": True}, viewport=hp_vp)
+            pairs_hdr_sig = await hpg_pairs.evaluate(SIG_JS, "header")
+            pairs_setpop_sig = await hpg_pairs.evaluate(SIG_JS, "#setPop")
+            pairs_geom = await hpg_pairs.evaluate(GEOM_JS)
+            await hpg_pairs.close()
+
+            # ⚠️ کلاسِ خودِ ریشه‌ی هدر عمداً از مقایسه کنار گذاشته می‌شود:
+            # اپ با سلکتورِ تگیِ «header» استایل می‌گیرد و pairs با کلاسِ
+            # «.site-header» (همان قاعده‌ای که [pairs shell] هم روی CSS
+            # خامِ دو سلکتور می‌سنجد) — یک قلابِ نام‌گذاریِ متفاوت است، نه
+            # ناهم‌سانیِ واقعیِ هدر. همه‌ی فرزندان همچنان کامل مقایسه می‌شوند.
+            def strip_root_class(sig):
+                if not sig:
+                    return sig
+                return {"tag": sig["tag"], "id": sig["id"], "children": sig.get("children", [])}
+            hdr_match = strip_root_class(app_hdr_sig) == strip_root_class(pairs_hdr_sig)
+
+            key = "%sx%s" % (hp_vp["width"], hp_vp["height"])
+            hp_results[key] = {
+                "hdrMatch": hdr_match,
+                "setPopMatch": app_setpop_sig == pairs_setpop_sig,
+                "appGeom": app_geom, "pairsGeom": pairs_geom,
+                "errs": hp_aerrs + hp_perrs,
+            }
+        print("[header parity] %s" % hp_results)
+        for hp_key, hp_r in hp_results.items():
+            assert hp_r["hdrMatch"], (
+                "[header parity] header DOM signature differs between app and pairs at %s" % hp_key)
+            assert hp_r["setPopMatch"], (
+                "[header parity] #setPop DOM signature differs between app and pairs at %s" % hp_key)
+            for hp_sel in hp_r["appGeom"]:
+                a, pr = hp_r["appGeom"][hp_sel], hp_r["pairsGeom"][hp_sel]
+                if a is None and pr is None:
+                    continue
+                assert a is not None and pr is not None, (
+                    "[header parity] %r present on one page but not the other at %s" % (hp_sel, hp_key))
+                assert abs(float(a) - float(pr)) <= 1, (
+                    "[header parity] %r top differs by more than 1px at %s: app=%s pairs=%s"
+                    % (hp_sel, hp_key, a, pr))
+            assert not hp_r["errs"], "[header parity] errors at %s: %s" % (hp_key, hp_r["errs"])
+
         # ۲) بدونِ دکمه‌ی مستقلِ تم؛ چیپِ شبکه با برچسبِ زنجیره‌ی فعال.
         ppg2, perrs2 = await open_pairs({"chain": "base", "rows": [SELL_ROW], "store": True})
         chip_info = await ppg2.evaluate("""() => ({
@@ -8352,7 +8893,7 @@ async def main():
         # ۳‌الف) آیتمِ Theme دیگر در بازشوی کیف‌پول نیست — حتی وقتی کیف‌پول
         # وصل است و آن بازشو واقعاً وجود دارد.
         w5a, werrs5a, cerrs5a = await open_wallet_page(init_script=fake_provider_script(FAKE_ADDR))
-        await w5a.click("#walletChip")
+        await w5a.click("#connectBtn")
         await w5a.wait_for_timeout(150)
         no_theme_in_wallet = await w5a.evaluate(
             "() => !document.querySelector('#walletPop #themeBtn')")
