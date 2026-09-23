@@ -667,7 +667,6 @@ svg.diag{display:block;width:100%;height:auto}
   function drawDots(){for(const d of bgDots){ctx.beginPath();ctx.fillStyle=hexToRgba(viz.vl,BAND_ALPHA[d.band]);ctx.arc(d.x*w,d.y*h,1.1,0,Math.PI*2);ctx.fill()}}
   /* بیضیِ venue: خطِ پایه‌ی کم‌رنگ، ثابت، همیشه کشیده می‌شود. مسیرها/ذره‌ها
      همیشه رویِ همینِ بیضی می‌نشینند — هیچ‌چیز از داخلِ آن رد نمی‌شود. */
-  function drawVenueEllipse(cx,cy,rx,ry){ctx.beginPath();ctx.ellipse(cx,cy,rx,ry,0,0,Math.PI*2);ctx.strokeStyle=hexToRgba(viz.vl,.28);ctx.lineWidth=1;ctx.stroke()}
   /* حلقه‌های سیگنال — عیناً نسخه‌ی قبلی به خواستِ مالک (۲۳ سپتامبر): سه بیضیِ کج
      که آرام دورِ هسته می‌چرخند. هم‌مرکز و ثابت‌کردنشان رد شد. */
   function drawOrbits(cx,cy,rx,ry,clock){ctx.save();ctx.translate(cx,cy);for(let i=0;i<3;i++){ctx.beginPath();ctx.ellipse(0,0,rx*(1-i*.11),ry*(1-i*.14),clock*.00006+i*.9,0,Math.PI*2);ctx.strokeStyle=i%2?hexToRgba(viz.v2,.18):hexToRgba(viz.v1,.18);ctx.lineWidth=1;ctx.stroke()}ctx.restore()}
@@ -724,7 +723,6 @@ svg.diag{display:block;width:100%;height:auto}
     const inN=ellipsePt(cx,cy,rx,ry,Math.PI), outN=ellipsePt(cx,cy,rx,ry,0);
     ctx.clearRect(0,0,w,h);
     drawDots();
-    drawVenueEllipse(cx,cy,rx,ry);
     drawOrbits(cx,cy,w*.37,h*.31,clockForOrbits);
     /* هالهٔ نرمِ زیرِ هستهٔ برند — هیچ چیزِ غیرِشفافی زیرِ visual-core کشیده نمی‌شود */
     glow(cx,cy,Math.min(w,h)*.14,spriteV1,.5);
@@ -764,50 +762,14 @@ svg.diag{display:block;width:100%;height:auto}
       ctx.restore();
     }
 
-    /* فازِ ۲ — SPLIT: کمانِ ضخیمِ بالا (IN→OUT) و کمانِ نازکِ پایین
-       (IN→OUT)، هر دو رویِ خودِ بیضی نمونه‌برداری‌شده — نه ریبونی که از
-       داخل رد شود. */
-    if(phase==='split'){
-      const gradThick=ctx.createLinearGradient(inN.x,inN.y,outN.x,outN.y);gradThick.addColorStop(0,hexToRgba(viz.v1,.9));gradThick.addColorStop(1,hexToRgba(viz.v2,.9));
-      const gradThin=ctx.createLinearGradient(inN.x,inN.y,outN.x,outN.y);gradThin.addColorStop(0,hexToRgba(viz.v1,.75));gradThin.addColorStop(1,hexToRgba(viz.v2,.75));
-      ctx.beginPath();ctx.ellipse(cx,cy,rx,ry,0,Math.PI,Math.PI*2);ctx.strokeStyle=gradThick;ctx.lineWidth=3;ctx.stroke();
-      ctx.beginPath();ctx.ellipse(cx,cy,rx,ry,0,0,Math.PI);ctx.strokeStyle=gradThin;ctx.lineWidth=1.6;ctx.stroke();
-      for(let k=0;k<=24;k++){routePts.push(ellipsePt(cx,cy,rx,ry,Math.PI+(k/24)*Math.PI))}
-      for(let k=0;k<=24;k++){routePts.push(ellipsePt(cx,cy,rx,ry,(k/24)*Math.PI))}
-      for(let i=0;i<8;i++){const u=animateParticles?((lt*.00035)+i/8)%1:i/8;const p=ellipsePt(cx,cy,rx,ry,Math.PI+u*Math.PI);glow(p.x,p.y,3,spriteV1,.9);routePts.push(p)}
-      for(let i=0;i<4;i++){const u=animateParticles?((lt*.00035)+i/4+.5)%1:i/4;const p=ellipsePt(cx,cy,rx,ry,Math.PI-u*Math.PI);glow(p.x,p.y,2,spriteV2,.8);routePts.push(p)}
-    }
-
-    /* فازِ ۳ — SIMULATE: یک ذره رویِ خودِ بیضی، IN→OUT از کمانِ بالا
-       (خرید) و بعد OUT→IN از کمانِ پایین (فروشِ برگشتی) — یک سوییپِ
-       زاویه‌ایِ پیوسته‌ی ۱۸۰°→۵۴۰° که کلِ بیضی را می‌بندد. کمانِ پشتِ سرِ
-       ذره هرچه جلوتر برود روشن‌تر کشیده می‌شود. */
-    if(phase==='simulate'){
-      const p3=animateParticles?clamp01((lt-T2)/(T3-T2)):.5;
-      const ang=Math.PI+p3*Math.PI*2;
-      ctx.beginPath();ctx.ellipse(cx,cy,rx,ry,0,Math.PI,ang);
-      const trailGrad=ctx.createLinearGradient(inN.x,inN.y,outN.x,outN.y);trailGrad.addColorStop(0,hexToRgba(viz.v1,.85));trailGrad.addColorStop(1,hexToRgba(viz.v2,.85));
-      ctx.strokeStyle=trailGrad;ctx.lineWidth=3;ctx.stroke();
-      const steps=Math.max(1,Math.round(p3*48));
-      for(let k=0;k<=steps;k++){routePts.push(ellipsePt(cx,cy,rx,ry,Math.PI+(k/48)*Math.PI*2))}
-      const pp=ellipsePt(cx,cy,rx,ry,ang);
-      glow(pp.x,pp.y,4,spriteV1,1);
-      routePts.push(pp);
-    }
-
+    /* ۲۳ سپتامبر، به خواستِ مالک: مسیرها (کمان‌ها، ذره‌ها، ردِ شبیه‌سازی و
+       خطِ بیضیِ زیرِ گره‌ها) حذف شدند؛ گره‌ها، برچسب‌ها، بارهای کوت، گوه‌ی
+       رادار، درخششِ حلقه‌ی هسته و ضربه‌موج می‌مانند. فاز‌ها و همگامیِ
+       readout دست‌نخورده‌اند. */
     /* فازِ ۴ — SETTLE: محوِ کمان‌ها + یک ضربه‌موجِ بیضی‌شکل (هم‌نسبتِ بیضیِ
        venue) که از شعاعِ حلقه‌ی هسته شروع و دقیقاً همان‌جا که به بیضیِ
        venue می‌رسد متوقف می‌شود — هرگز از آن فراتر نمی‌رود. */
     if(phase==='settle'){
-      const rf=clamp01(1-(lt-T3)/800);
-      if(rf>0){
-        const gradThick=ctx.createLinearGradient(inN.x,inN.y,outN.x,outN.y);gradThick.addColorStop(0,hexToRgba(viz.v1,.9*rf));gradThick.addColorStop(1,hexToRgba(viz.v2,.9*rf));
-        const gradThin=ctx.createLinearGradient(inN.x,inN.y,outN.x,outN.y);gradThin.addColorStop(0,hexToRgba(viz.v1,.75*rf));gradThin.addColorStop(1,hexToRgba(viz.v2,.75*rf));
-        ctx.beginPath();ctx.ellipse(cx,cy,rx,ry,0,Math.PI,Math.PI*2);ctx.strokeStyle=gradThick;ctx.lineWidth=3;ctx.stroke();
-        ctx.beginPath();ctx.ellipse(cx,cy,rx,ry,0,0,Math.PI);ctx.strokeStyle=gradThin;ctx.lineWidth=1.6;ctx.stroke();
-        for(let k=0;k<=24;k++){routePts.push(ellipsePt(cx,cy,rx,ry,Math.PI+(k/24)*Math.PI))}
-        for(let k=0;k<=24;k++){routePts.push(ellipsePt(cx,cy,rx,ry,(k/24)*Math.PI))}
-      }
       const p4=clamp01((lt-T3)/(T4-T3));
       const shockRx=coreR+(rx-coreR)*p4, shockRy=coreR+(ry-coreR)*p4, shockA=.35*(1-p4);
       ctx.beginPath();ctx.ellipse(cx,cy,shockRx,shockRy,0,0,Math.PI*2);ctx.strokeStyle=hexToRgba(viz.v1,shockA);ctx.lineWidth=1.4;ctx.stroke();

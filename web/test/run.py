@@ -2532,6 +2532,13 @@ async def check_canvas_route_on_ellipse(p, errors):
     for i in range(100):  # ~10s / 100ms
         info = await pg.evaluate("() => window.__zaexaCanvasRoutePts || null")
         if info and info.get("pts"):
+            # ۲۳ سپتامبر: مالک مسیرها را حذف کرد و فقط نقطه‌ها ماندند. پس در هر
+            # فریم فقط ۷ گره‌ی venue + IN + OUT = ۹ نقطه مجاز است؛ هر کمان،
+            # ذره یا ردی که برگردد تعداد را بالا می‌برد و این‌جا قرمز می‌شود.
+            assert len(info["pts"]) == 9, (
+                "sample %d carries %d drawn points in phase %r; only the 9 nodes (7 venues + IN + "
+                "OUT) may be drawn — the owner removed every route, particle and trail"
+                % (i, len(info["pts"]), await pg.evaluate("() => window.__zaexaCanvasPhase")))
             cx, cy, rx, ry, core_r = info["cx"], info["cy"], info["rx"], info["ry"], info["coreR"]
             for j, pt in enumerate(info["pts"]):
                 dx, dy = pt["x"] - cx, pt["y"] - cy
