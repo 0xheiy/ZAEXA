@@ -782,6 +782,10 @@ export const VD_BASE_WHY = Object.freeze([
   "meta:timeout", "meta:shape", "no-amount", "deadline", "rpc-down", "canary-dead",
   "no-quote", "proof-rpc", "proof-no-quote", "usdc-rpc", "usdc-no-proof",
   "cover:false", "cover:timeout", "cover:shape", "internal",
+  // ۲۳ سپتامبر — دو دلیلِ تازه برای «نامعلوم» به‌جای یک nosellِ اثبات‌نشده:
+  // v4:unproven — حکمِ منفی فقط از استخرِ v4 آمده و خالی‌بودنِ استخر ثابت نشده؛
+  // sells:recent — زنجیره در ساعتِ گذشته از چند فروشنده‌ی مختلف فروش دیده.
+  "v4:unproven", "sells:recent",
 ]);
 // این دو پیشوند به‌جای یک عضوِ ثابت، با یک کدِ عددیِ ۱ تا ۳ رقمی می‌آیند
 // ("meta:429"، "cover:503") — isBaseWhy پایین‌تر همین قاعده را می‌سنجد.

@@ -33,7 +33,7 @@ import { ogImageResponse } from "./og-image.js";
 import { fetchVerdict, VD_VENUES, VD_RPCS } from "./verdict.js";
 import { EVM_ADDR, SOL_MINT, chainOf, gtNetworkOf } from "./chains.js";
 import {
-  REPORT_DATE_RE, PAIRS_KEY_BASE, reportKey, utcDateOf, emptyReportDoc, runReportPass,
+  REPORT_DATE_RE, PAIRS_KEY_BASE, reportKey, utcDateOf, emptyReportDoc, runReportPass, publishGuardRow,
   reportText, REPORT_TEXT_FIRST_DATE, followForRow, recheckForRow, causeForRow, readPassLog,
   REPORT_METER_STAGES, REPORT_PASS_BASE_CAP, REPORT_PAIRS_CAP,
 } from "./report.js";
@@ -719,6 +719,21 @@ async function fetchBaseTokenPoolsRaw(addr, env) {
    پایین‌تر فقط .covered همین تابع را برمی‌گرداند؛ خودِ تصمیمِ true/false/null
    بایت‌به‌بایت دست‌نخورده می‌ماند، why فقط برای سنجش (ogFetchVerdictDetail)
    اضافه شده. همان دلیلِ ogFetchMetaDetail بالا برای try جداگانه‌ی fetch. */
+/* جمعِ فروشنده‌های یکتای ساعتِ گذشته روی همه‌ی استخرهای یک توکن (بدنه‌ی
+   tokens/<addr>/pools گِکوترمینال: attributes.transactions.h1.sellers). اگر حتی
+   یک استخر این عدد را به شکلِ درست نداشت → null («نمی‌دانیم»، نه صفر). */
+export function sellersH1Of(pools) {
+  if (!Array.isArray(pools)) return null;
+  let sum = 0;
+  for (const pool of pools) {
+    const t = pool && pool.attributes && pool.attributes.transactions;
+    const n = t && t.h1 && t.h1.sellers;
+    if (typeof n !== "number" || !Number.isFinite(n) || n < 0) return null;
+    sum += n;
+  }
+  return sum;
+}
+
 async function baseVenueCoveredDetail(addr, env) {
   const r = await fetchBaseTokenPoolsRaw(addr, env);
   if (!r.ok) return { covered: null, why: r.why };
@@ -726,15 +741,19 @@ async function baseVenueCoveredDetail(addr, env) {
     // v4Listed: آیا در همینِ بدنه‌ی سالم، دست‌کم یک استخر دقیقاً روی
     // uniswap-v4-base دیده شد؟
     let v4Listed = false;
+    /* فروشنده‌های یکتای ساعتِ گذشته، جمع روی همه‌ی استخرهای همین توکن — از
+       همین بدنه، بدونِ هیچ درخواستِ اضافه. کنترلِ منفیِ nosell پایین‌تر از آن
+       استفاده می‌کند. null یعنی شکل را نشناختیم (نه صفر). */
+    const sellersH1 = sellersH1Of(r.data);
     for (const pool of r.data) {
       const dexId = pool && pool.relationships && pool.relationships.dex &&
         pool.relationships.dex.data && pool.relationships.dex.data.id;
       if (typeof dexId !== "string") continue;
       if (dexId === "uniswap-v4-base") v4Listed = true;
       const venue = GT_DEX_TO_VENUE[dexId];
-      if (venue && VD_VENUE_ID_SET.has(venue)) return { covered: true, why: null, v4Listed };
+      if (venue && VD_VENUE_ID_SET.has(venue)) return { covered: true, why: null, v4Listed, sellersH1 };
     }
-    return { covered: false, why: "cover:false", v4Listed }; // بدنه سالم بود، ولی هیچ استخری روی یک صرافیِ پوشش‌داده‌شده نبود
+    return { covered: false, why: "cover:false", v4Listed, sellersH1 }; // بدنه سالم بود، ولی هیچ استخری روی یک صرافیِ پوشش‌داده‌شده نبود
   } catch (e) {
     return { covered: null, why: "cover:shape" }; // پرتاب → نامعلوم، هرگز false
   }
@@ -1078,7 +1097,7 @@ async function ogFetchVerdictDetail(addr, meta, deadlineAt, env, ctx, metaWhy) {
      می‌ماند)؛ این با v4PoolsEmpty که هرگز پرتاب نمی‌کند تضمین می‌شود. */
   if (covered.covered === true) {
     const empty = await v4PoolsEmpty(addr, env, deadlineAt);
-    return { v: "nosell", why: null, cause: empty === true ? "empty-pool" : undefined };
+    return finalizeBaseNosell(empty, covered, false);
   }
   /* 🔴 استثنای پوشش (۱۹ شهریور، با تصمیمِ صریحِ حسام): وقتی خودِ حکمِ منفی از
      شاهدِ «استخرِ واقعیِ این توکن هیچ اندازه‌ای را پر نمی‌کند» آمده باشد، ما
@@ -1089,7 +1108,7 @@ async function ogFetchVerdictDetail(addr, meta, deadlineAt, env, ctx, metaWhy) {
      توکن در درخواستِ بعدی جوابِ دیگری می‌گرفت. */
   if (cacheOut.v4Proof === true) {
     const empty = await v4PoolsEmpty(addr, env, deadlineAt);
-    return { v: "nosell", why: null, cause: empty === true ? "empty-pool" : undefined };
+    return finalizeBaseNosell(empty, covered, false); // شاهدِ واقعی از خودِ استخر: «هیچ اندازه‌ای پر نمی‌شود»
   }
   /* 🔴 استثنای پوششِ v4 (۲۹ شهریور): بالادست برای همین توکن یک استخرِ
      uniswap-v4-base *دید* (v4Listed) و ما دست‌کم یک کلیدِ واقعیِ ایندکس‌شده
@@ -1100,9 +1119,32 @@ async function ogFetchVerdictDetail(addr, meta, deadlineAt, env, ctx, metaWhy) {
      شاخه نمی‌رسد و همیشه نامعلوم می‌ماند — یک چکِ ناکام هرگز اتهام نیست. */
   if (covered.covered === false && covered.v4Listed === true && cacheOut.v4Keyed === true) {
     const empty = await v4PoolsEmpty(addr, env, deadlineAt);
-    return { v: "nosell", why: null, cause: empty === true ? "empty-pool" : undefined };
+    return finalizeBaseNosell(empty, covered, true);
   }
   return { v: null, why: covered.why || "cover:shape" };
+}
+
+/* ۲۳ سپتامبر — منفیِ کاذبِ منتشرشده ($SPIKE، ۰x1685…): تنها استخرش روی v4 با
+   ۲۰۶ هزار دلار نقدینگی و ۲۹۶ فروشنده‌ی یکتا در ساعتِ گذشته، ولی حکمِ ما
+   «nosell» بدونِ هیچ cause بود. ریشه: شاهدِ منفی از صرافی‌هایی آمد که این توکن
+   اصلاً روی‌شان استخر ندارد، و خودِ v4 فقط مثبت را می‌تواند ثابت کند (کوترِ ما
+   روی استخرهای هوک‌دار جواب نمی‌دهد). قاعده‌ها، به این ترتیب:
+   ۱. استخرِ خالی ثابت شد → nosell با cause="empty-pool" (مثلِ $WHEN).
+   ۲. کنترلِ منفی از خودِ زنجیره: اگر در ساعتِ گذشته دست‌کم SELLERS_H1_VETO
+      فروشنده‌ی *یکتا* فروخته‌اند، «فروش نمی‌رود» با واقعیت نقض شده → نامعلوم.
+      آستانه ۳ است نه ۱، چون هانی‌پات‌ها معمولاً یکی‌دو آدرسِ سفیدشده (سازنده)
+      دارند که می‌توانند بفروشند.
+   ۳. حکمی که فقط به v4 تکیه دارد و خالی‌بودن را ثابت نکرده → نامعلوم.
+   ۴. در بقیه (شاهدِ واقعیِ ریوِرت روی صرافیِ پوشش‌داده‌شده) → nosell، همان
+      هانی‌پاتِ کلاسیک که نقدینگی دارد و cause ندارد. این را عمداً نگه می‌داریم:
+      «هیچ nosellی بدونِ cause» کلِ یافته‌ی اصلیِ محصول را پاک می‌کرد. */
+export const SELLERS_H1_VETO = 3;
+export function finalizeBaseNosell(empty, covered, v4Only) {
+  if (empty === true) return { v: "nosell", why: null, cause: "empty-pool" };
+  const sellers = covered && covered.sellersH1;
+  if (typeof sellers === "number" && sellers >= SELLERS_H1_VETO) return { v: null, why: "sells:recent" };
+  if (v4Only) return { v: null, why: "v4:unproven" };
+  return { v: "nosell", why: null, cause: undefined };
 }
 
 async function ogFetchVerdict(addr, meta, deadlineAt, env, ctx) {
@@ -1662,7 +1704,8 @@ async function reportDocFor(env, dateStr) {
     if (typeof raw !== "string") return emptyReportDoc(dateStr);
     const parsed = JSON.parse(raw);
     if (!parsed || !Array.isArray(parsed.rows)) return emptyReportDoc(dateStr);
-    return parsed;
+    // گاردِ زمانِ انتشار (publishGuardRow در worker/report.js) — انبار دست نمی‌خورد.
+    return { ...parsed, rows: parsed.rows.map((r) => publishGuardRow(r, undefined)) };
   } catch (e) {
     // 🔴 خواندنِ KV پرتاب کرد یا JSON خراب بود — همان «سندِ خالی»، هرگز ۵۰۰
     return emptyReportDoc(dateStr);
@@ -1688,7 +1731,7 @@ async function pairsRowsFor(env, chain) {
     const raw = await kv.get(PAIRS_KEY_BASE);
     if (typeof raw !== "string") return [];
     const parsed = JSON.parse(raw);
-    ringRows = Array.isArray(parsed) ? parsed : [];
+    ringRows = Array.isArray(parsed) ? parsed.map((r) => publishGuardRow(r, "base")) : [];
   } catch (e) {
     return [];
   }
@@ -1847,6 +1890,7 @@ async function reportTextRoute(request, url, env) {
   try {
     const parsed = JSON.parse(raw);
     if (!parsed || parsed.date !== dateStr) return textDone(503, "report unreadable\n");
+    if (Array.isArray(parsed.rows)) parsed.rows = parsed.rows.map((r) => publishGuardRow(r, undefined));
     text = reportText(parsed, { solana: true });
     if (text === null) return textDone(503, "report unreadable\n");
   } catch (e) {

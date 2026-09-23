@@ -158,6 +158,30 @@ export const REPORT_CAUSES = Object.freeze(["empty-pool"]);
    واقعاً "nosell" است و خودِ رشته عضوِ همین واژه‌نامه‌ی بسته است، وگرنه
    undefined. هر cause‌ای که از انبار خوانده می‌شود یا کالر می‌دهد باید از
    همینجا رد شود، هیچ مسیرِ دیگری به یک ردیف نمی‌رسد. */
+/* ۲۳ سپتامبر — گاردِ زمانِ انتشار برای ردیف‌هایی که *پیش از* قاعده‌ی تازه‌ی
+   finalizeBaseNosell (worker/index.js) ذخیره شده‌اند، از جمله $SPIKE در
+   report:2026-09-23: یک nosellِ Base روی استخرِ v4 که cause="empty-pool" ندارد
+   اثبات‌نشده است و «نامعلوم» (v4:unproven) نشان داده می‌شود. خودِ انبار دست
+   نمی‌خورد؛ فقط نمای بیرونی (JSON، متن، /pairs.json). recheckِ منفی با همان
+   شرط هم کنار گذاشته می‌شود. */
+export function publishGuardRow(row, chainDefault) {
+  if (!row || typeof row !== "object") return row;
+  const chain = typeof row.chain === "string" ? row.chain : chainDefault;
+  const v4 = typeof row.dex === "string" && row.dex.startsWith("uniswap-v4");
+  if (chain !== "base" || !v4) return row;
+  let out = row;
+  if (row.v === "nosell" && row.cause !== "empty-pool") {
+    out = { ...out, v: null, why: "v4:unproven" };
+    delete out.cause;
+    delete out.ret;
+  }
+  if (row.recheck === "nosell" && row.recheckCause !== "empty-pool") {
+    out = { ...out };
+    delete out.recheck; delete out.recheckAt; delete out.recheckCause;
+  }
+  return out;
+}
+
 export function causeForRow(verdict, cause) {
   if (verdict !== "nosell") return undefined;
   return typeof cause === "string" && REPORT_CAUSES.includes(cause) ? cause : undefined;

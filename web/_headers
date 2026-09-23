@@ -66,11 +66,18 @@
 # می‌سازد، نه فرم. بستنشان چیزی را خراب نمی‌کند و مسیرهای کلاسیکِ تزریق را
 # می‌بندد.
 #
+# frame-src فقط دو میزبانِ Verify وال‌کانکت (۲۳ سپتامبر، دیده‌شده روی سایتِ زنده):
+# بدونش default-src 'self' قابِ verify.walletconnect.org را می‌بست و کیف‌پولِ موبایل
+# نمی‌توانست دامنه‌ی ما را (که در داشبوردِ Reown ثبت است) «تأییدشده» نشان دهد.
+# قاب از مبدأِ دیگری است و به DOM یا حافظه‌ی این صفحه دسترسی ندارد؛ هر دو نامِ
+# میزبان از خودِ باندلِ walletconnect.bundle.*.js آمده‌اند. فونت‌های fonts.reown.com
+# عمداً باز نشدند — فقط ظاهرِ پنجره‌ی وال‌کانکت است و فونتِ سیستم جایش می‌نشیند.
+#
 # frame-ancestors 'none': این سایت هیچ‌وقت قرار نیست داخلِ iframeِ سایتِ
 # دیگری بنشیند؛ بازش‌گذاشتن یعنی clickjacking روی صفحه‌ای که تراکنشِ
 # on-chain امضا می‌کند.
 /*
-  Content-Security-Policy: default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; font-src 'self' data:; connect-src 'self' https: wss:; worker-src 'self' blob:; base-uri 'self'; object-src 'none'; form-action 'none'; frame-ancestors 'none'
+  Content-Security-Policy: default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; font-src 'self' data:; connect-src 'self' https: wss:; worker-src 'self' blob:; frame-src https://verify.walletconnect.org https://verify.walletconnect.com; base-uri 'self'; object-src 'none'; form-action 'none'; frame-ancestors 'none'
   X-Content-Type-Options: nosniff
   Referrer-Policy: no-referrer
   Permissions-Policy: camera=(), microphone=(), geolocation=(), payment=(), usb=()

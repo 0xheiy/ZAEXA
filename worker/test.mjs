@@ -23,14 +23,16 @@ import {
   retForRow, REPORT_SOL_MAX_TOKENS,
   recheckForRow, REPORT_RECHECKS, applyRechecks, pickRecheckTargets,
   PASS_LOG_KEY, REPORT_PASS_LOG_CAP, readPassLog, REPORT_CAP_PROBE, classifyCapProbe,
-  REPORT_METER_STAGES, REPORT_PASS_BASE_CAP,
+  REPORT_METER_STAGES, REPORT_PASS_BASE_CAP, publishGuardRow,
 } from "./report.js";
 import * as v4 from "./v4index.js";
 import {
   readV4Keys, readV4Entry, rpcCallBase, fetchV4Pools, storeV4Result, v4StoreTtl, runV4Index,
   v4PoolsEmpty, V4_STATE_VIEW, V4_GET_LIQUIDITY_SEL, pairsRowsFor,
   makeSubMeter, meterKv, scheduledReportPass,
+  finalizeBaseNosell, SELLERS_H1_VETO, sellersH1Of,
 } from "./index.js";
+import { isBaseWhy as isBaseWhyT } from "./verdict.js";
 
 let fails = 0;
 function ok(cond, what) {
@@ -11720,6 +11722,65 @@ function stripAllowedWording(t) {
   console.log("[report today cache] the explicit UTC date of today gets the same 300s cache as "
     + "today.json/today.txt on both the JSON and text report routes, while a past date (positive "
     + "control) still gets 86400s and today.json/today.txt themselves are unaffected");
+}
+
+
+// ---- [false nosell] ۲۳ سپتامبر: $SPIKE (0x1685…) منتشر شد «no sell route quoted»
+// در حالی که تنها استخرِ v4 اش ۲۰۶ هزار دلار و ۲۹۶ فروشنده‌ی یکتا در ساعتِ گذشته داشت.
+// فیکسچرها از پاسخِ زنده‌ی /gt/networks/base/tokens/<addr>/pools همان روز (اعداد، نه رشته).
+{
+  const livePool = (dex, sellers) => ({
+    relationships: { dex: { data: { id: dex } } },
+    attributes: { reserve_in_usd: "205950.3715", transactions: { h1: { buys: 798, sells: 1294, buyers: 187, sellers } } },
+  });
+  const spikePools = [livePool("uniswap-v4-base", 296), livePool("uniswap-v4-base", 0), livePool("uniswap-v4-base", 94)];
+  ok(sellersH1Of(spikePools) === 390, "sellersH1Of sums sellers across a token's pools (296+0+94)");
+  ok(sellersH1Of([{ attributes: { transactions: { h1: { sellers: "5" } } } }]) === null, "sellersH1Of: a string count is 'unknown', never a number");
+  ok(sellersH1Of([{ attributes: {} }]) === null, "sellersH1Of: a missing h1 block is 'unknown', never zero");
+  ok(sellersH1Of(null) === null, "sellersH1Of: a non-array body is 'unknown'");
+  ok(SELLERS_H1_VETO === 3, "SELLERS_H1_VETO is 3 distinct sellers");
+
+  const r1 = finalizeBaseNosell(false, { sellersH1: 390 }, true);
+  ok(r1.v === null && r1.why === "sells:recent", "SPIKE shape: v4-only nosell with 390 recent sellers -> unknown/sells:recent");
+  const r2 = finalizeBaseNosell(undefined, { sellersH1: 0 }, true);
+  ok(r2.v === null && r2.why === "v4:unproven", "v4-only nosell without an empty-pool proof and no recent sellers -> unknown/v4:unproven");
+  const r3 = finalizeBaseNosell(true, { sellersH1: 27 }, true);
+  ok(r3.v === "nosell" && r3.cause === "empty-pool", "WHEN shape: a proven empty pool stays nosell/empty-pool even after earlier sells");
+  const r4 = finalizeBaseNosell(false, { sellersH1: 1 }, false);
+  ok(r4.v === "nosell" && r4.cause === undefined, "classic honeypot: proven reverts on a covered venue, one whitelisted seller -> still nosell");
+  const r5 = finalizeBaseNosell(false, { sellersH1: 3 }, false);
+  ok(r5.v === null && r5.why === "sells:recent", "covered-venue nosell but 3 distinct recent sellers -> unknown/sells:recent");
+  const r6 = finalizeBaseNosell(false, { sellersH1: null }, false);
+  ok(r6.v === "nosell", "an unreadable sellers count never vetoes a proven covered-venue nosell");
+  ok(isBaseWhyT("v4:unproven") && isBaseWhyT("sells:recent"), "both new reasons are in the closed Base why vocabulary");
+
+  // گاردِ زمانِ انتشار روی ردیف‌های ذخیره‌شده — ردیفِ واقعیِ $SPIKE از report:2026-09-23.
+  const spikeRow = { address: "0x1685981068dc0ec45ee1d5a28ef051059e42a0f3", chain: "base", checkKind: "sell-quote",
+    dex: "uniswap-v4-base", symbol: "SPIKE", v: "nosell", why: null, reserveUsd: 25094.0284 };
+  const g1 = publishGuardRow(spikeRow, undefined);
+  ok(g1.v === null && g1.why === "v4:unproven" && !("cause" in g1), "publishGuardRow: the stored SPIKE row is shown as unknown/v4:unproven");
+  ok(spikeRow.v === "nosell", "publishGuardRow never mutates the stored row");
+  const whenRow = { ...spikeRow, symbol: "WHEN", cause: "empty-pool" };
+  ok(publishGuardRow(whenRow, undefined) === whenRow, "publishGuardRow: a v4 nosell with cause=empty-pool is published unchanged");
+  const v2Row = { ...spikeRow, dex: "uniswap-v2-base" };
+  ok(publishGuardRow(v2Row, undefined) === v2Row, "publishGuardRow: a non-v4 nosell (classic honeypot) is published unchanged");
+  const solRow = { ...spikeRow, chain: "solana", dex: "meteora-dbc" };
+  ok(publishGuardRow(solRow, undefined) === solRow, "publishGuardRow: Solana rows are never touched");
+  const ringRow = { address: spikeRow.address, dex: "uniswap-v4-base", v: "nosell" };
+  ok(publishGuardRow(ringRow, "base").v === null, "publishGuardRow: a pairs-ring row (no chain key) uses the ring's chain");
+  const rc = publishGuardRow({ ...spikeRow, v: null, why: "cover:false", recheck: "nosell", recheckAt: "2026-09-23T13:17:48.576Z" }, undefined);
+  ok(!("recheck" in rc) && !("recheckAt" in rc), "publishGuardRow: an unproven v4 recheck=nosell is dropped");
+
+  // سرتاسری: متنِ عمومیِ همان روز دیگر $SPIKE را «no sell route quoted» نمی‌نویسد.
+  const doc = { date: "2026-09-23", generatedAt: "2026-09-23T16:17:00.000Z", chains: ["base"], checked: 2,
+    rows: [spikeRow, whenRow].map((r) => publishGuardRow(r, undefined)) };
+  const txt = reportText(doc, { solana: true }) || "";
+  ok(!/\$SPIKE — no sell route quoted/.test(txt), "report text: $SPIKE is no longer listed as 'no sell route quoted'");
+  ok(/\$WHEN — no sell route quoted · pool is empty/.test(txt), "report text: $WHEN keeps 'no sell route quoted · pool is empty'");
+  console.log("[false nosell] v4-only nosell needs an empty-pool proof (else v4:unproven); 3+ distinct "
+    + "sellers in the last hour veto any Base nosell (sells:recent) unless the pool is proven empty; "
+    + "stored rows are guarded at publish time (JSON, text, pairs ring) without touching the store; "
+    + "classic honeypots on covered venues keep their nosell");
 }
 
 console.log(fails === 0

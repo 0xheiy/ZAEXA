@@ -338,6 +338,10 @@ def check_security_headers():
 
     assert directive("object-src") == "'none'", \
         "object-src must be 'none' — this site has no <object>/<embed> to protect: %r" % directive("object-src")
+    # frame-src: فقط دو میزبانِ Verify وال‌کانکت — هرگز https: یا * یا 'self'ِ اضافه.
+    fsrc = sorted((directive("frame-src") or "").split())
+    assert fsrc == ["https://verify.walletconnect.com", "https://verify.walletconnect.org"], \
+        "frame-src must list exactly the two WalletConnect Verify hosts, nothing wider: %r" % fsrc
     assert directive("frame-ancestors") == "'none'", \
         "frame-ancestors must be 'none' — a page that signs on-chain transactions must " \
         "never be embeddable, or clickjacking becomes a wallet-draining vector: %r" % directive("frame-ancestors")
@@ -2591,6 +2595,37 @@ async def check_trust_glyph_in_circle(p, errors):
     print("[trust glyph in circle] the '?' stays inside its circle at 1440/768/430/393/360px")
 
 
+async def check_canvas_resize(p, errors):
+    """[canvas resize] — ۲۳ سپتامبر: کوچک و دوباره بزرگ‌کردنِ پنجره بوم را از قابش
+    بلندتر می‌کرد (ارتفاع از نسبتِ width/height‌ِ خودِ بوم می‌آمد) و مرکزِ رسم از
+    لوگوی وسط جدا می‌افتاد. بعد از هر تغییرِ اندازه، بوم باید دقیقاً هم‌اندازه‌ی
+    .hero-visual باشد و مرکزِ رسم (window.__zaexaCanvasRoutePts) روی مرکزِ .visual-core."""
+    path = os.path.join(HERE, "..", "landing.html")
+    b = await p.chromium.launch()
+    pg = await b.new_page(viewport={"width": 1900, "height": 1000})
+    pg.on("console", lambda m: errors.append(m.text) if m.type == "error" else None)
+    await pg.goto("file://" + path)
+    await pg.wait_for_timeout(600)
+    for (w, h) in [(1150, 1000), (1900, 1000), (800, 1000), (1440, 900), (393, 851), (1900, 1000)]:
+        await pg.set_viewport_size({"width": w, "height": h})
+        await pg.wait_for_timeout(500)
+        r = await pg.evaluate("""() => {
+            const c = document.getElementById('routeCanvas').getBoundingClientRect();
+            const v = document.querySelector('.hero-visual').getBoundingClientRect();
+            const k = document.querySelector('.visual-core').getBoundingClientRect();
+            const R = window.__zaexaCanvasRoutePts || {};
+            return {c: [c.width, c.height], v: [v.width, v.height],
+                    core: [k.x + k.width / 2 - c.x, k.y + k.height / 2 - c.y], draw: [R.cx, R.cy]};
+        }""")
+        assert abs(r["c"][0] - r["v"][0]) <= 1 and abs(r["c"][1] - r["v"][1]) <= 1, (
+            "[canvas resize] at %dx%d the canvas is %r but its frame is %r" % (w, h, r["c"], r["v"]))
+        assert r["draw"][0] is not None and abs(r["draw"][0] - r["core"][0]) <= 2 and abs(r["draw"][1] - r["core"][1]) <= 2, (
+            "[canvas resize] at %dx%d the drawing centre %r is off the logo centre %r" % (w, h, r["draw"], r["core"]))
+    await b.close()
+    print("[canvas resize] after 6 window resizes (1900->1150->1900->800->1440->393->1900) the canvas "
+          "matches its frame and the drawing stays centred on the logo")
+
+
 async def main():
     errors = []
     # خطاهایی که یک کاوشگر *عمداً* تولید می‌کند. اجازه‌ی عبور می‌گیرند ولی
@@ -2630,6 +2665,7 @@ async def main():
         await check_canvas_labels(p, errors)
         await check_canvas_route_on_ellipse(p, errors)
         await check_trust_glyph_in_circle(p, errors)
+        await check_canvas_resize(p, errors)
         await check_logo_parity(p, errors)
         await check_token_page_hash_links(p, errors)
         b = await p.chromium.launch()
