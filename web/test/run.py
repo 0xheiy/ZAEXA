@@ -1473,22 +1473,33 @@ def check_pairs_page():
         "web/pairs.html references /pairs.json?chain=<x> with x outside {base, solana}: %s"
         % pairs_json_chains)
 
-    # ---- بدونِ منبعِ بیرونی، جز خودِ سایت ----
+    # ---- بدونِ منبعِ بیرونیِ تازه — فقط همان مجموعه‌ای که خودِ اپ/لندینگ
+    # مجازند ----
     # web/landing.html هیچ فونتی را از یک میزبانِ بیرونی نمی‌خواهد (هر دو
     # @font-face به‌صورت data:font/woff2;base64 درون‌خطی‌اند)، پس «یک منبعِ
-    # فونتِ مجاز» برای این صفحه هم چیزی جز خودِ سایت نیست — مجموعه‌ی مجاز
-    # فقط zaexa.com است.
+    # فونتِ مجاز» برای این صفحه هم چیزی جز خودِ سایت نیست.
+    # ۲۲ سپتامبر ۲۰۲۶: فوترِ کاملِ اپ به این صفحه اضافه شد (شبکه‌های اجتماعی،
+    # لینکِ قرارداد روی BaseScan، GeckoTerminal) — همان مجموعه‌ی دقیقاً مجازِ
+    # check_landing_page (بالاتر همین فایل) برای همین میزبان‌ها، نه یک
+    # فهرستِ جداگانه، چون این پنج میزبان از قبل تأییدشده‌اند.
     lnd_src = open(os.path.join(HERE, "..", "landing.html"), encoding="utf-8").read()
     lnd_font_hosts = set(
         urlparse(u).hostname
         for u in re.findall(r'src:url\("(https?://[^"]+)"\)', lnd_src)
     )
-    allowed_hosts = {"zaexa.com"} | lnd_font_hosts
+    allowed_hosts = {"x.com", "github.com", "www.geckoterminal.com",
+                      "zaexa.com", "basescan.org"} | lnd_font_hosts
     refs = set(re.findall(r'(?:src|href)="(https?://[^"]*)"', src))
     stray = sorted(r for r in refs if urlparse(r).hostname not in allowed_hosts)
     assert not stray, (
         "web/pairs.html loads or links to a host outside the allowed set (self + web/landing.html's "
         "own font origin, if any): %s. Found refs: %s" % (stray, sorted(refs)))
+    # تلگرام هیچ‌جای این صفحه نباید ظاهر شود — LINKS.telegram در اپ خالی
+    # است و اپ خودش آن آیکون را در زمانِ اجرا حذف می‌کند؛ این صفحه اصلاً
+    # نباید آن را رندر کند.
+    assert "telegram" not in src.lower() and "t.me/" not in src.lower(), (
+        "web/pairs.html references Telegram, but LINKS.telegram is empty in web/index.html — "
+        "the footer must omit that icon entirely, the way the app does at runtime")
 
     # ---- همان کلیدِ localStorage که خودِ اپ (index.html) برای تم استفاده
     # می‌کند — هیچ‌وقت این رشته را دوباره دستی اینجا نمی‌نویسیم، از خودِ
@@ -1501,18 +1512,33 @@ def check_pairs_page():
         "web/pairs.html does not use the app's own theme storage key (%r) — a visitor's "
         "theme choice would not carry across the two pages" % theme_key)
 
-    # ---- این صفحه باید از داده خالی باشد: هیچ آدرس/توکن/قیمتِ واقعی ----
+    # ---- این صفحه باید از داده خالی باشد: هیچ آدرسِ *توکن*/قیمتِ واقعی ----
+    # ۲۲ سپتامبر ۲۰۲۶: فوترِ کاملِ اپ یک آدرس اضافه کرد — آدرسِ خودِ قرارداد
+    # (لینکِ BaseScan)، نه یک آدرسِ توکن/ردیف. این یکی آدرس مجاز است، دقیقاً
+    # همان که check_one_executor_address برای landing.html می‌سنجد: باید
+    # مو‌به‌مو با CHAIN.executor در index.html یکی باشد، وگرنه یک قراردادِ
+    # بازنشسته/جعلی بی‌صدا اینجا می‌ماند. هر آدرسِ دیگری همچنان ممنوع است —
+    # این صفحه هنوز نباید هیچ آدرسِ توکنی را هاردکد کند.
+    m_exec = re.search(r'executor:"(0x[0-9a-fA-F]{40})"', idx_src_for_key)
+    assert m_exec, "CHAIN.executor is gone from index.html — nothing to compare web/pairs.html against"
+    live_executor = m_exec.group(1)
     addrs = re.findall(r"0x[0-9a-fA-F]{40}", src)
-    assert not addrs, (
+    stray_addrs = sorted(a for a in addrs if a.lower() != live_executor.lower())
+    assert not stray_addrs, (
         "web/pairs.html contains what looks like a real token address: %s — this page must ship "
-        "with no data baked in, only the fetch against /pairs.json?chain=base" % addrs)
+        "with no data baked in, only the fetch against /pairs.json?chain=base" % stray_addrs)
+    if addrs:
+        short_exec = live_executor[:6] + "…" + live_executor[-4:]
+        assert short_exec in src, (
+            "web/pairs.html links the executor but does not show it as %s, so the text a reader "
+            "compares against BaseScan is not the address being linked" % short_exec)
 
     print("[pairs page] %d bytes, all 3 verdict labels/meanings present byte-for-byte, permanent "
           "note present, only /pairs.json?chain=base|solana and %s referenced (%d other "
-          "backend/.json refs), %d external refs (all allowed: %s), theme key %r shared with "
-          "landing.html, no baked-in token address"
+          "backend/.json refs), %d external refs (all allowed: %s, no Telegram), theme key %r "
+          "shared with landing.html, only address is the live executor %s, no baked-in token address"
           % (len(src), GT_LOGO_PREFIXES, len(other_backend) + len(other_json), len(refs),
-             sorted(allowed_hosts), theme_key))
+             sorted(allowed_hosts), theme_key, live_executor))
 
 
 def _canvas_script_block(landing_src):
@@ -8201,6 +8227,289 @@ async def main():
         print("[pairs wallet] screenshots written to %s (errors: %s %s %s)"
               % (shot_dir, sAerrs, sBerrs, sCerrs))
         assert not sAerrs and not sBerrs and not sCerrs, "errors while taking wallet-chip screenshots"
+
+        # ---- [pairs shell] هدرِ pairs.html باید همان پوسته‌ی اپ باشد —
+        # نشانِ برند در همان اندازه/جا، بدونِ خطِ زیرِ هدر، چیپِ شبکه به‌جایِ
+        # دکمه‌ی مستقلِ ماه، آیتمِ Theme بالای بازشوی کیف‌پول. ----
+        LIVE_EXECUTOR = "0x15e511Bf2Ea1a0F50F25E973d57Dce0D01946b6d"
+
+        # ۱‌الف) grid-template-columns/padding — از رویِ خودِ متنِ CSS، نه
+        # پیکسلِ محاسبه‌شده: index.html فونتِ سیستم دارد (Inter/Segoe UI) و
+        # pairs.html عمداً همان Manropeِ خودِ landing.html را — همان تصمیمِ
+        # قبلی، بیرون از این تسک. ناوبریِ وسط با دو فونتِ متفاوت چند پیکسل
+        # عرضِ متفاوت می‌گیرد، پس ستونِ auto وسط بینِ دو صفحه دقیقاً برابر
+        # نمی‌شود، هرچند مقدارِ *نوشته‌شده*‌ی grid-template-columns/padding در
+        # هر دو فایل باید مو‌به‌مو یکی باشد — همان چیزی که این کاوشگر واقعاً
+        # می‌خواهد، نه پیکسلِ نهاییِ وابسته به فونت.
+        idx_src_shell = open(os.path.join(HERE, "..", "index.html"), encoding="utf-8").read()
+        pairs_src_shell = open(os.path.join(HERE, "..", "pairs.html"), encoding="utf-8").read()
+        m_idx_hdr = re.search(r"\nheader\{([^}]*)\}", idx_src_shell)
+        m_pairs_hdr = re.search(r"\n\.site-header\{([^}]*)\}", pairs_src_shell)
+        assert m_idx_hdr, "could not find the header{...} rule in web/index.html"
+        assert m_pairs_hdr, "could not find the .site-header{...} rule in web/pairs.html"
+
+        def rule_value(rule_text, prop):
+            m = re.search(r"(?:^|;)\s*%s:([^;]+)" % re.escape(prop), rule_text)
+            return m.group(1).strip() if m else None
+
+        idx_padding_src = rule_value(m_idx_hdr.group(1), "padding")
+        pairs_padding_src = rule_value(m_pairs_hdr.group(1), "padding")
+        idx_gridcols_src = rule_value(m_idx_hdr.group(1), "grid-template-columns")
+        pairs_gridcols_src = rule_value(m_pairs_hdr.group(1), "grid-template-columns")
+        print("[pairs shell] header rule source: index padding=%r gridCols=%r | pairs padding=%r "
+              "gridCols=%r" % (idx_padding_src, idx_gridcols_src, pairs_padding_src, pairs_gridcols_src))
+        assert idx_padding_src == pairs_padding_src, (
+            "web/pairs.html's header padding value (%r) does not match web/index.html's (%r)"
+            % (pairs_padding_src, idx_padding_src))
+        assert idx_gridcols_src == pairs_gridcols_src, (
+            "web/pairs.html's header grid-template-columns value (%r) does not match "
+            "web/index.html's (%r)" % (pairs_gridcols_src, idx_gridcols_src))
+
+        # ۱‌ب) نشانِ برند و خودِ هدر — روی هر دو صفحه، هم‌زمان، اندازه‌گیریِ
+        # زنده. اندازه/جای «نشانِ برند» از رویِ .glyph∪.wordmark سنجیده
+        # می‌شود، نه رویِ .logo خودش — .logo یک آیتمِ گرید در ستونِ ۱fr است و
+        # پیش‌فرض تا تهِ ستون کشیده می‌شود (stretch)، پس عرضِ خودِ آن به عرضِ
+        # ستونِ وسط (که به فونت بستگی دارد) هم وابسته است؛ آنچه واقعاً دیده
+        # می‌شود فقط جعبه‌ی مارک+وردمارک است، هم‌ترازِ چپِ همان ستون.
+        # ⚠️ عمداً خودِ .mark سنجیده می‌شود، نه .glyph (جعبه‌ی ثابتِ ۳۸×۳۸ که
+        # مارک وسطِ آن جا می‌گیرد) — اگر فقط .glyph سنجیده شود، کوچک‌کردنِ
+        # عرضِ خودِ .mark هیچ اثری روی رِکتِ .glyph نمی‌گذارد (جعبه ثابت
+        # می‌ماند) و این کاوشگر دقیقاً همان شکستنِ عمدی را که باید بگیرد،
+        # از دست می‌دهد.
+        apg = await b.new_page(viewport={"width": 1280, "height": 900})
+        aerrs = []
+        apg.on("pageerror", lambda e: aerrs.append(str(e)))
+        await apg.goto("http://127.0.0.1:%d/" % port)
+        await apg.wait_for_timeout(400)
+        SHELL_JS = """() => {
+            const mark = document.querySelector('.logo .glyph .mark').getBoundingClientRect();
+            const wordmark = document.querySelector('.logo .wordmark').getBoundingClientRect();
+            const hdr = document.querySelector('header');
+            const cs = getComputedStyle(hdr);
+            return {
+                logoLeft: mark.left, logoWidth: wordmark.right - mark.left,
+                logoHeight: Math.max(mark.height, wordmark.height),
+                padding: cs.padding,
+                borderBottomWidth: cs.borderBottomWidth, borderBottomColor: cs.borderBottomColor,
+                backgroundColor: cs.backgroundColor,
+            };
+        }"""
+        idx_box = await apg.evaluate(SHELL_JS)
+
+        ppg1, perrs1 = await open_pairs({"chain": "base", "rows": [], "store": True},
+                                         viewport={"width": 1280, "height": 900})
+        pairs_box = await ppg1.evaluate(SHELL_JS)
+        await ppg1.close()
+        print("[pairs shell] brand rect index=%r pairs=%r errors=%s %s"
+              % (idx_box, pairs_box, aerrs, perrs1))
+        for k in ("logoLeft", "logoWidth", "logoHeight"):
+            assert abs(idx_box[k] - pairs_box[k]) <= 1, (
+                "web/pairs.html's brand lock %s does not match web/index.html within 1px: "
+                "index=%s pairs=%s" % (k, idx_box[k], pairs_box[k]))
+        assert idx_box["padding"] == pairs_box["padding"], (
+            "web/pairs.html's header computed padding (%r) does not match web/index.html's (%r)"
+            % (pairs_box["padding"], idx_box["padding"]))
+        assert idx_box["borderBottomWidth"] == pairs_box["borderBottomWidth"], (
+            "header border-bottom-width differs: index=%r pairs=%r"
+            % (idx_box["borderBottomWidth"], pairs_box["borderBottomWidth"]))
+        assert idx_box["borderBottomColor"] == pairs_box["borderBottomColor"] == "rgba(0, 0, 0, 0)", (
+            "header border-bottom-color must be transparent on both pages: index=%r pairs=%r"
+            % (idx_box["borderBottomColor"], pairs_box["borderBottomColor"]))
+        assert idx_box["backgroundColor"] == pairs_box["backgroundColor"] == "rgba(0, 0, 0, 0)", (
+            "header background-color must be transparent on both pages: index=%r pairs=%r"
+            % (idx_box["backgroundColor"], pairs_box["backgroundColor"]))
+        assert not aerrs, "web/index.html threw while loading for the shell comparison: %s" % aerrs
+        assert not perrs1, "web/pairs.html threw while loading for the shell comparison: %s" % perrs1
+
+        # ۲) بدونِ دکمه‌ی مستقلِ تم؛ چیپِ شبکه با برچسبِ زنجیره‌ی فعال.
+        ppg2, perrs2 = await open_pairs({"chain": "base", "rows": [SELL_ROW], "store": True})
+        chip_info = await ppg2.evaluate("""() => ({
+            hasThemeToggle: !!document.getElementById('themeToggle') ||
+                            !!document.querySelector('.theme-toggle'),
+            srcText: document.getElementById('srcTx') ?
+                     document.getElementById('srcTx').textContent : null,
+            ledOff: document.querySelector('#srcChip .led') ?
+                    document.querySelector('#srcChip .led').classList.contains('off') : null,
+        })""")
+        await ppg2.click('[data-chain="solana"]')
+        await ppg2.wait_for_timeout(200)
+        src_after_solana = await ppg2.eval_on_selector("#srcTx", "e => e.textContent")
+        await ppg2.close()
+        print("[pairs shell] no standalone theme button=%s srcChip base=%r solana=%r ledOff=%s "
+              "errors=%s" % (not chip_info["hasThemeToggle"], chip_info["srcText"],
+                              src_after_solana, chip_info["ledOff"], perrs2))
+        assert not chip_info["hasThemeToggle"], (
+            "web/pairs.html still has a standalone theme button — it must move into the wallet "
+            "popover instead")
+        assert chip_info["srcText"] == "Base", (
+            "#srcTx must read \"Base\" by default, got %r" % chip_info["srcText"]
+        )
+        assert chip_info["ledOff"] is True, "#srcChip's LED must stay .off — this page cannot prove a live source"
+        assert src_after_solana == "Solana", (
+            "#srcTx must read \"Solana\" after clicking the Solana tab, got %r" % src_after_solana)
+        assert not perrs2, "web/pairs.html threw during the network-chip probe: %s" % perrs2
+
+        # ۳‌الف) آیتمِ Theme دیگر در بازشوی کیف‌پول نیست — حتی وقتی کیف‌پول
+        # وصل است و آن بازشو واقعاً وجود دارد.
+        w5a, werrs5a, cerrs5a = await open_wallet_page(init_script=fake_provider_script(FAKE_ADDR))
+        await w5a.click("#walletChip")
+        await w5a.wait_for_timeout(150)
+        no_theme_in_wallet = await w5a.evaluate(
+            "() => !document.querySelector('#walletPop #themeBtn')")
+        wallet_pop_exists = await w5a.evaluate("() => !!document.getElementById('walletPop')")
+        await w5a.close()
+        print("[pairs shell] connected wallet popover has no theme item: %s (popover existed: %s) "
+              "errors=%s %s" % (no_theme_in_wallet, wallet_pop_exists, werrs5a, cerrs5a))
+        assert wallet_pop_exists, "expected #walletPop to exist for a connected wallet"
+        assert no_theme_in_wallet, "the wallet popover must not contain #themeBtn any more"
+        assert not werrs5a and not cerrs5a, "errors during the wallet-popover probe: %s %s" % (werrs5a, cerrs5a)
+
+        # ۳‌ب) بدونِ هیچ پروایدر/کلیدی — #setBtn بازشوی تنظیمات را باز می‌کند،
+        # آیتمِ Theme آن‌جا تم را عوض/ذخیره می‌کند، و بعدِ رفرش همان تم می‌ماند.
+        w5b, werrs5b, cerrs5b = await open_wallet_page()
+        before5 = await w5b.evaluate("""() => ({
+            theme: document.documentElement.dataset.theme,
+            setPopOpen: document.getElementById('setPop').classList.contains('on'),
+            themeBtnInSetPop: !!document.querySelector('#setPop #themeBtn'),
+        })""")
+        await w5b.click("#setBtn")
+        await w5b.wait_for_timeout(150)
+        setPopOpenAfterClick = await w5b.evaluate(
+            "() => document.getElementById('setPop').classList.contains('on')")
+        # Escape باید #setPop را ببندد — عیناً همان رفتارِ بازشوی کیف‌پول.
+        # ⚠️ بعد از این، به‌جای کلیکِ دوباره‌ی #setBtn (که toggle است و اگر
+        # Escape واقعاً نبسته باشد، این کلیک آن را می‌بندد نه باز — و کلیکِ
+        # themeBtn روی عنصرِ نامرئی ۳۰ ثانیه هنگ می‌کند)، مستقیماً با کلاس
+        # 'on' باز می‌شود تا ادعای بعدی (تعویضِ تم) مستقل از نتیجه‌ی همین
+        # سنجه بماند و کاوشگر همیشه سریع و تمیز جواب بدهد.
+        await w5b.keyboard.press("Escape")
+        await w5b.wait_for_timeout(100)
+        setPopClosedOnEscape = await w5b.evaluate(
+            "() => !document.getElementById('setPop').classList.contains('on')")
+        await w5b.evaluate("() => document.getElementById('setPop').classList.add('on')")
+        await w5b.wait_for_timeout(100)
+        await w5b.click("#themeBtn")
+        await w5b.wait_for_timeout(80)
+        after5 = await w5b.evaluate("""() => ({
+            theme: document.documentElement.dataset.theme,
+            ls: (function(){ try { return localStorage.getItem('zaexa.theme.v1'); } catch(e){ return null; } })(),
+            stateText: document.getElementById('themeState') ? document.getElementById('themeState').textContent : null,
+        })""")
+        await w5b.reload()
+        await w5b.wait_for_timeout(300)
+        reload5_theme = await w5b.evaluate("() => document.documentElement.dataset.theme")
+        await w5b.close()
+        print("[pairs shell] settings-popover theme item (no wallet): before=%r setPopAfterClick=%s "
+              "closedOnEscape=%s after=%r reload=%r errors=%s %s"
+              % (before5, setPopOpenAfterClick, setPopClosedOnEscape, after5, reload5_theme,
+                 werrs5b, cerrs5b))
+        assert before5["themeBtnInSetPop"], "#setPop must contain #themeBtn"
+        assert before5["setPopOpen"] is False, "#setPop must start closed"
+        assert setPopOpenAfterClick is True, "clicking #setBtn must open #setPop"
+        assert setPopClosedOnEscape, "pressing Escape must close #setPop, like the wallet popover"
+        assert after5["theme"] != before5["theme"], (
+            "clicking the Theme item did not flip document.documentElement.dataset.theme")
+        assert after5["ls"] == after5["theme"], (
+            "clicking the Theme item did not persist to localStorage under zaexa.theme.v1: %r"
+            % after5["ls"])
+        assert after5["stateText"] == ("Dark" if after5["theme"] == "dark" else "Light"), (
+            "#themeState did not update to match the new theme: %r" % after5["stateText"])
+        assert reload5_theme == after5["theme"], (
+            "the theme did not survive a reload: before-reload=%r after-reload=%r"
+            % (after5["theme"], reload5_theme))
+        assert not werrs5b and not cerrs5b, (
+            "errors during the settings theme-item probe (no wallet): %s %s" % (werrs5b, cerrs5b))
+
+        # ---- [pairs footer] فوترِ کاملِ اپ — footGrid با دقیقاً سه footCol +
+        # footBrand، لینک‌های ستونِ Trade، لینکِ قرارداد روی BaseScan، بدونِ
+        # تلگرام، دو اسپنِ دقیقِ footBottom. ----
+        ppg3, perrs3 = await open_pairs({"chain": "base", "rows": [], "store": True})
+        foot_info = await ppg3.evaluate("""() => {
+            const grid = document.querySelector('.footGrid');
+            const cols = grid ? grid.querySelectorAll(':scope > .footCol').length : 0;
+            const hasBrand = !!(grid && grid.querySelector(':scope > .footBrand'));
+            const tradeCol = grid ? grid.querySelectorAll(':scope > .footCol')[0] : null;
+            const tradeHrefs = tradeCol ? [...tradeCol.querySelectorAll('a')].map(a => a.getAttribute('href')) : [];
+            const anchors = [...document.querySelectorAll('footer a')];
+            const baseScan = anchors.find(a => (a.getAttribute('href') || '').includes('basescan.org'));
+            const hasTelegram = anchors.some(a =>
+                /telegram/i.test(a.getAttribute('title') || '') ||
+                /t\\.me\\//.test(a.getAttribute('href') || ''));
+            const bottom = document.querySelector('.footBottom');
+            const bottomSpans = bottom ? [...bottom.querySelectorAll(':scope > span')].map(s => s.textContent) : [];
+            return {cols, hasBrand, tradeHrefs, baseScanHref: baseScan ? baseScan.getAttribute('href') : null,
+                    hasTelegram, bottomSpans};
+        }""")
+        await ppg3.close()
+        print("[pairs footer] cols=%s hasBrand=%s tradeHrefs=%s baseScanHref=%s hasTelegram=%s "
+              "bottomSpans=%s errors=%s" % (foot_info["cols"], foot_info["hasBrand"],
+              foot_info["tradeHrefs"], foot_info["baseScanHref"], foot_info["hasTelegram"],
+              foot_info["bottomSpans"], perrs3))
+        assert foot_info["cols"] == 3, (
+            "web/pairs.html's .footGrid must have exactly 3 .footCol, found %s" % foot_info["cols"])
+        assert foot_info["hasBrand"], "web/pairs.html's .footGrid is missing its .footBrand child"
+        assert foot_info["tradeHrefs"] == ["/app#swap", "/app#folio", "/app#flow", "/pairs"], (
+            "the Trade footer column's hrefs are wrong: %s" % foot_info["tradeHrefs"])
+        assert foot_info["baseScanHref"] == (
+            "https://basescan.org/address/%s#code" % LIVE_EXECUTOR), (
+            "the BaseScan footer link does not point at the live executor with #code: %r"
+            % foot_info["baseScanHref"])
+        assert not foot_info["hasTelegram"], (
+            "web/pairs.html's footer renders a Telegram link/icon — LINKS.telegram is empty in "
+            "the app, so this page must omit it entirely")
+        assert foot_info["bottomSpans"] == [
+            "Non-custodial · this page reads only our own endpoints · not audited",
+            "© 2026 Zaexa",
+        ], ".footBottom's two spans are not exactly right: %s" % foot_info["bottomSpans"]
+        assert not perrs3, "web/pairs.html threw during the footer probe: %s" % perrs3
+
+        # ---- اسکرین‌شات‌ها — نگاهِ نهایی، برای چشم نه فقط برای کاوشگر ----
+        shell_shot_dir = "/tmp/pairs_shell"
+        os.makedirs(shell_shot_dir, exist_ok=True)
+        sd1, sd1errs, _ = await open_wallet_page(color_scheme="dark")
+        await sd1.screenshot(path=os.path.join(shell_shot_dir, "pairs-1280-dark.png"), full_page=True)
+        await sd1.close()
+
+        appd, appd_errs = [], []
+        adpg = await b.new_page(viewport={"width": 1280, "height": 900}, color_scheme="dark")
+        adpg.on("pageerror", lambda e: appd_errs.append(str(e)))
+        await adpg.goto("http://127.0.0.1:%d/" % port)
+        await adpg.wait_for_timeout(400)
+        await adpg.screenshot(path=os.path.join(shell_shot_dir, "app-1280-dark-header.png"))
+        await adpg.close()
+
+        sl1, sl1errs, _ = await open_wallet_page(color_scheme="light")
+        await sl1.screenshot(path=os.path.join(shell_shot_dir, "pairs-1280-light.png"), full_page=True)
+        await sl1.close()
+
+        sm1, sm1errs, _ = await open_wallet_page(
+            color_scheme="dark", viewport={"width": 390, "height": 844})
+        await sm1.screenshot(path=os.path.join(shell_shot_dir, "pairs-390-dark.png"))
+        await sm1.close()
+        print("[pairs shell] screenshots written to %s (errors: %s %s %s %s)"
+              % (shell_shot_dir, sd1errs, appd_errs, sl1errs, sm1errs))
+        assert not sd1errs and not appd_errs and not sl1errs and not sm1errs, (
+            "errors while taking shell/footer screenshots")
+
+        # ---- اسکرین‌شات‌های بازشوی تنظیمات — باز، تا دیده شود از صفحه/هدر
+        # بیرون نمی‌زند ----
+        shell2_shot_dir = "/tmp/pairs_shell2"
+        os.makedirs(shell2_shot_dir, exist_ok=True)
+        sp1, sp1errs, _ = await open_wallet_page(color_scheme="dark")
+        await sp1.click("#setBtn")
+        await sp1.wait_for_timeout(200)
+        await sp1.screenshot(path=os.path.join(shell2_shot_dir, "pairs-1280-dark-settings.png"))
+        await sp1.close()
+
+        sp2, sp2errs, _ = await open_wallet_page(
+            color_scheme="dark", viewport={"width": 390, "height": 844})
+        await sp2.click("#setBtn")
+        await sp2.wait_for_timeout(200)
+        await sp2.screenshot(path=os.path.join(shell2_shot_dir, "pairs-390-dark-settings.png"))
+        await sp2.close()
+        print("[pairs shell] settings-popover screenshots written to %s (errors: %s %s)"
+              % (shell2_shot_dir, sp1errs, sp2errs))
+        assert not sp1errs and not sp2errs, "errors while taking settings-popover screenshots"
 
         # ---- [server sell ret] fetchVdVerdict واقعی، /vd استاب‌شده روی سیم — نه
         # جایگزینیِ خودِ تابع؛ همان اعتبارسنجیِ بازه که در fetchVdVerdict نوشته شده

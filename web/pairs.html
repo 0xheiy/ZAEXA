@@ -30,18 +30,29 @@ html{scroll-behavior:smooth}
 body{margin:0;background:var(--bg);color:var(--tx);font:15px/1.55 Manrope,ui-sans-serif,-apple-system,"Segoe UI",Roboto,sans-serif;-webkit-font-smoothing:antialiased;transition:background .3s,color .3s}
 a{color:inherit;text-decoration:none}
 button{font:inherit;color:inherit;border:0;background:none;cursor:pointer}
+.mono{font-variant-numeric:tabular-nums;font-feature-settings:"tnum" 1}
 :focus-visible{outline:2px solid var(--acc);outline-offset:3px;border-radius:4px}
 .visually-hidden{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap}
 
-.site-header{display:grid;grid-template-columns:1fr auto 1fr;align-items:center;height:76px;padding:0 clamp(20px,3.4vw,56px);border-bottom:1px solid var(--line)}
-.brand{grid-column:1;display:inline-flex;align-items:center;gap:12px;font-weight:700;letter-spacing:.11em;font-size:14px}
-.brand .mark{width:22px;height:auto;color:var(--acc)}
-.brand .word{height:14px;width:auto;color:var(--tx)}
-.header-actions{grid-column:3;display:flex;align-items:center;gap:12px;justify-self:end}
-.theme-toggle{width:38px;height:38px;border:1px solid var(--line2);border-radius:50%;display:grid;place-items:center;font-size:17px}
-.theme-toggle .moon{display:none}
-[data-theme=dark] .theme-toggle .sun{display:none}
-[data-theme=dark] .theme-toggle .moon{display:block}
+/* هدر — عیناً هم‌ارزِ `header` در web/index.html (~۴۳۳): بدونِ خط/پس‌زمینه
+   (کاربر یک «نوار» نمی‌خواهد)، همان گرید سه‌ستونه، همان پدینگ. نامِ
+   گزینشگرِ خودِ این صفحه (`.site-header`) می‌ماند، فقط مقادیر عوض می‌شوند —
+   کاوشگرِ [pairs shell] رویِ خودِ عنصرِ `header` (نه کلاس) کارِ محاسبه‌شده
+   را می‌سنجد، پس اسمِ کلاس مهم نیست، مقدارها مهم‌اند. */
+.site-header{max-width:none;margin:0;width:100%;
+  padding:14px 26px;display:grid;grid-template-columns:1fr auto 1fr;grid-template-rows:1fr;
+  align-items:center;column-gap:11px;background:transparent;
+  border-bottom:1px solid transparent}
+/* نشانِ برند — این‌جا کلاس‌ها عیناً همانِ اپ‌اند (`.logo`/`.glyph`/`.mark`/
+   `.wordmark`)، نه یک نام‌گذاریِ جدا برای همین صفحه؛ چون کاوشگر همین
+   گزینشگرها را روی هر دو صفحه می‌خواند و مقایسه می‌کند. ارتفاعِ وردمارک
+   ۱۲.۷px، نسبتِ قدِ جوهرِ وردمارک به نشان طبقِ قاعده‌ی برند ۰.۴۸. */
+.logo{grid-column:1;display:flex;align-items:center;gap:13px;font-size:19px;font-weight:680;letter-spacing:-.4px;color:inherit;text-decoration:none}
+.logo .glyph{width:38px;height:38px;display:grid;place-items:center}
+.logo .glyph .mark{width:38px;height:auto;display:block;filter:drop-shadow(0 3px 10px var(--glow))}
+.logo .wordmark{height:12.7px;width:auto;display:block;color:var(--tx)}
+@media(max-width:380px){.logo .wordmark{display:none}}
+.header-actions{grid-column:3;display:flex;align-items:center;gap:11px;min-width:0;justify-self:end}
 
 /* چیپِ کیف‌پول — این صفحه فقط-خوانده است، پس هیچ فلوی اتصال (EIP-6963
    picker/WalletConnect/ethers) اینجا کپی نمی‌شود؛ فقط وضعیتِ فعلی نشان
@@ -55,6 +66,9 @@ button{font:inherit;color:inherit;border:0;background:none;cursor:pointer}
 }
 .chip:hover{color:var(--tx);transform:translateY(-1px);box-shadow:var(--sh)}
 .chip.solid{background:var(--grad);color:var(--on-acc);font-weight:620;box-shadow:0 4px 16px var(--glow)}
+/* دکمه‌ی گردِ تنظیمات (⚙) — عیناً .chip.round در web/index.html: همان
+   چیپ، فقط بدونِ پدینگِ افقی و عرضِ ثابتِ ۳۸px تا مربع بماند. */
+.chip.round{padding:0;width:38px;justify-content:center}
 .led{width:7px;height:7px;border-radius:50%;background:var(--pos)}
 .led.off{background:var(--tx3)}
 .rel{position:relative}
@@ -69,6 +83,11 @@ button{font:inherit;color:inherit;border:0;background:none;cursor:pointer}
 @media(max-width:720px){
   .pop{position:fixed;top:58px;right:12px;left:auto;width:min(300px,calc(100vw - 24px))}
 }
+/* عنوانِ بخشِ داخلِ بازشو — عیناً .pop h4 در web/index.html. این صفحه فقط
+   یک بخش دارد (Appearance)، اپ چند تا (Max slippage/Deadline/…) که اینجا
+   عمداً نیامده‌اند — این صفحه Swap ندارد. */
+.pop h4{margin:0 0 9px;font-size:11.5px;font-weight:640;letter-spacing:.05em;
+  text-transform:uppercase;color:var(--tx3)}
 .walletPop{width:238px;padding:8px}
 .wp-addr{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12.5px;
   word-break:break-all;padding:8px 9px;color:var(--tx2)}
@@ -76,6 +95,9 @@ button{font:inherit;color:inherit;border:0;background:none;cursor:pointer}
 .walletAction{width:100%;display:flex;align-items:center;justify-content:space-between;gap:12px;
   padding:10px 9px;border-radius:11px;text-align:left;font-size:13px;color:var(--tx2);text-decoration:none}
 .walletAction:hover{background:var(--card2);color:var(--tx)}
+/* آیتمِ تم — عیناً همان `.walletAction .right` در web/index.html (~۹۴۲):
+   واژه‌ی وضعیت + آیکون، هم‌ردیفِ سمتِ راستِ برچسب. */
+.walletAction .right{display:flex;align-items:center;gap:8px;color:var(--tx3);font-size:12px}
 .walletAction.danger{color:var(--neg)}
 .walletAction.danger:hover{background:color-mix(in srgb,var(--neg) 10%,transparent);color:var(--neg)}
 /* یادداشتِ زیرِ هدر — فقط بعدِ کلیکِ Disconnect (محلی) ظاهر می‌شود؛ عینِ
@@ -101,10 +123,16 @@ button{font:inherit;color:inherit;border:0;background:none;cursor:pointer}
 @media(min-width:721px) and (max-width:960px){
   .nav a span{display:none}
   .nav a{padding:8px 11px}
+  #srcChip span:last-child{display:none}
+  #srcChip{padding:0 12px}
 }
 /* ≤۷۲۰: ناوبری از هدر به نوارِ پایین می‌رود — عیناً همان اپ. */
 @media(max-width:720px){
-  .site-header{padding:14px 14px 6px;height:auto}
+  .site-header{padding:14px 14px 6px;height:auto;gap:8px}
+  .logo{font-size:17px}
+  #srcChip span:last-child{display:none}
+  #srcChip{padding:0 12px}
+  .chip{height:36px;font-size:13px}
   .nav{position:fixed;left:0;right:0;bottom:0;z-index:60;margin:0;border-radius:0;
     padding:6px 8px calc(6px + env(safe-area-inset-bottom));gap:6px;
     background:var(--card);box-shadow:0 -1px 0 var(--line),var(--sh)}
@@ -231,10 +259,44 @@ h1{font-size:28px;letter-spacing:-.03em;margin:0 0 10px;line-height:1.1}
   white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .card-actions{position:relative;z-index:2;display:flex;align-items:center;gap:6px;flex:0 0 auto}
 
-.landing-footer{width:100%;padding:30px clamp(20px,3.4vw,56px);border-top:1px solid var(--line);font-size:12px;color:var(--tx3)}
-.footBrand{display:flex;align-items:center;gap:12px;margin-bottom:8px}
-.footBrand .mark{width:16px;height:auto;color:var(--tx3)}
-.footBrand .word{height:11px;width:auto;color:var(--tx3)}
+/* فوتر — عیناً هم‌ارزِ footer در web/index.html (~۸۴۳-۸۸۴): چهار‌بخشی
+   (برند + Trade/About/Support)، بندِ fine، خطِ پایین. کلاس‌ها هم عیناً
+   همان‌ها (footGrid/footBrand/footLock/footTag/social/footCol/fine/
+   footBottom) — کاوشگرِ [pairs footer] دقیقاً همین گزینشگرها را می‌خواهد،
+   نه یک نسخه‌ی «شبیه». توکنِ سایه: اپ اینجا var(--shs) دارد؛ این صفحه
+   چنین توکنی تعریف نکرده، پس عیناً همان قاعده‌ی .chip/.led بالاتر ادامه
+   می‌یابد — var(--sh) خودِ این صفحه به‌جایش. */
+footer{width:100%;margin-top:auto;padding:40px clamp(20px,3.4vw,56px) 32px;
+  font-size:12px;color:var(--tx3);border-top:1px solid var(--line)}
+footer a{color:var(--tx3);text-decoration:none}
+.footGrid{display:grid;grid-template-columns:minmax(200px,1.3fr) repeat(3,minmax(120px,1fr));
+  gap:30px 28px}
+.footBrand .footLock{display:inline-flex;align-items:center;gap:13px;color:inherit;text-decoration:none}
+.footBrand .footLock .glyph{width:38px;height:38px;display:grid;place-items:center}
+.footBrand .footLock .wordmark{height:12.7px;width:auto;display:block;color:var(--tx)}
+.footBrand .footTag{margin:9px 0 16px;font-size:12px;line-height:1.55;max-width:32ch;color:var(--tx3)}
+.social{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.social a{width:34px;height:34px;border-radius:11px;display:grid;place-items:center;
+  background:var(--card);box-shadow:var(--sh);color:var(--tx2);transition:.16s}
+.social a svg{width:16px;height:16px}
+.social a:hover{color:var(--acc);transform:translateY(-1px);box-shadow:var(--sh)}
+.footCol{display:flex;flex-direction:column;gap:10px;min-width:0}
+.footCol h4{margin:0 0 2px;font-size:12.5px;font-weight:660;letter-spacing:.15px;color:var(--tx2)}
+.footCol a,.footCol .footRow{display:block;font-size:12.5px;color:var(--tx3);transition:.16s}
+.footCol a:hover{color:var(--acc)}
+.footCol .footLbl{display:block;font-size:11px;color:var(--tx3);opacity:.8}
+.footCol .footRow a{display:inline;padding:0}
+.footCol .feedback{width:fit-content;padding:8px 14px;border-radius:999px;
+  background:var(--card);box-shadow:var(--sh);font-size:12.5px;color:var(--tx2);transition:.16s}
+.footCol .feedback:hover{color:var(--acc);box-shadow:var(--sh)}
+footer .fine{max-width:78ch;margin:46px 0 0;font-size:11.5px;color:var(--tx3);line-height:1.65}
+.footBottom{display:flex;justify-content:space-between;gap:16px;flex-wrap:wrap;
+  margin-top:28px;padding-top:16px;border-top:1px solid var(--line);
+  font-size:11px;color:var(--tx3)}
+@media(max-width:720px){
+  .footGrid{grid-template-columns:1fr;gap:26px}
+  .footBrand .footTag{max-width:none}
+}
 
 @media(max-width:760px){
   .pairs-table{display:none}
@@ -270,7 +332,11 @@ h1{font-size:28px;letter-spacing:-.03em;margin:0 0 10px;line-height:1.1}
 </defs></svg>
 
 <header class="site-header">
-  <a class="brand" href="/" aria-label="Zaexa home"><svg class="mark" viewBox="0 0 1000 697.98" aria-hidden="true"><use href="#zxMark"/></svg><svg class="word" viewBox="0 0 2581.74 300" aria-hidden="true"><use href="#zxWord"/></svg></a>
+  <!-- نشانِ برند — عیناً همان مارک‌آپِ `.logo` در web/index.html (glyph+mark،
+       سپس wordmark)، فقط با همان الگویِ <use>ی خودِ این صفحه (بدونِ تکرارِ
+       گرادیان). ۲۲ سپتامبر: جای این نشان با اپ یکی شد — قبلاً اندازه/فاصله‌ی
+       جدا داشت (`.brand`، دیگر حذف شد). -->
+  <a class="logo" href="/" aria-label="Zaexa home"><span class="glyph"><svg class="mark" viewBox="0 0 1000 697.98" aria-hidden="true"><use href="#zxMark"/></svg></span><svg class="wordmark" viewBox="0 0 2581.74 300" aria-hidden="true"><use href="#zxWord"/></svg></a>
   <!-- ناوبریِ بالا — همان الگوی اپ، چهار آیتم؛ «New pairs» فعال است
        (aria-current="page" + نگاهِ .on) چون همین صفحه است. -->
   <nav class="nav" aria-label="Zaexa">
@@ -292,11 +358,33 @@ h1{font-size:28px;letter-spacing:-.03em;margin:0 0 10px;line-height:1.1}
         <path d="M4 6h10M4 12h10M4 18h7"/><path d="M19 3v4M17 5h4"/></svg><span>New pairs</span></a>
   </nav>
   <div class="header-actions">
-    <!-- چیپِ کیف‌پول — سمتِ چپِ دکمه‌ی تم، هر دو ۳۸px، هم‌تراز. پُر شدنش با
-         جاوااسکریپتِ پایینِ صفحه است (وضعیت روی لود و روی visibilitychange
-         دوباره محاسبه می‌شود)؛ اینجا فقط جایگاه. -->
+    <!-- چیپِ شبکه — عیناً همان الگوی #srcChip در web/index.html: چراغ +
+         برچسبِ زنجیره. این صفحه یک منبعِ زنده نمی‌خواند (فقط .pairs.json
+         خودِ سایت)، پس چراغ همیشه «خاموش» می‌ماند — وضعیتی که نمی‌توانیم
+         اثبات کنیم را ادعا نمی‌کنیم. برچسب از رویِ تبِ زنجیره‌ی فعال عوض
+         می‌شود (setActiveChainTab، پایینِ صفحه). -->
+    <div class="chip" id="srcChip"><span class="led off"></span><span id="srcTx">Base</span></div>
+    <!-- ۲۳ سپتامبر: جایِ درستِ آیتمِ Theme، عیناً مثلِ اپ، بازشوی تنظیمات
+         است (#setBtn/#setPop)، نه بازشوی کیف‌پول — اصلاحِ تصمیمِ قبلی؛ آنجا
+         کسی که وصل نیست هم به تم دسترسی نداشت. این‌جا مستقل از کیف‌پول است
+         و همیشه در دسترس. فقط «Appearance› Theme» — بدونِ اسلیپیج/RPC، آن‌ها
+         فقط مالِ Swap اند و این صفحه Swap ندارد. مارک‌آپ/چیدمانِ .pop عیناً
+         از #setPop در web/index.html (~۱۱۲۷-۱۱۵۹). -->
+    <div class="rel">
+      <button class="chip round" id="setBtn" aria-haspopup="menu" aria-expanded="false" title="Settings">⚙</button>
+      <div class="pop" id="setPop">
+        <h4>Appearance</h4>
+        <button type="button" class="walletAction" id="themeBtn">
+          <span>Theme</span><span class="right"><span id="themeState">Light</span>
+          <svg id="themeIcon" viewBox="0 0 24 24" width="15" height="15" aria-hidden="true">
+            <circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="2"/>
+            <path d="M12 3a9 9 0 0 1 0 18z" fill="currentColor"/></svg></span>
+        </button>
+      </div>
+    </div>
+    <!-- چیپِ کیف‌پول — پُر شدنش با جاوااسکریپتِ پایینِ صفحه است (وضعیت روی
+         لود و روی visibilitychange دوباره محاسبه می‌شود)؛ اینجا فقط جایگاه. -->
     <div class="rel" id="walletChipWrap"></div>
-    <button class="theme-toggle" id="themeToggle" aria-label="Switch color theme"><span class="sun">☼</span><span class="moon">☾</span></button>
   </div>
 </header>
 
@@ -380,13 +468,52 @@ h1{font-size:28px;letter-spacing:-.03em;margin:0 0 10px;line-height:1.1}
   <noscript><p class="noscript-note">This page needs JavaScript to load the list.</p></noscript>
 </main>
 
-<footer class="landing-footer">
-  <div class="footBrand"><svg class="mark" viewBox="0 0 1000 697.98" aria-hidden="true"><use href="#zxMark"/></svg><svg class="word" viewBox="0 0 2581.74 300" aria-hidden="true"><use href="#zxWord"/></svg></div>
-  <span>Non-custodial &middot; this page reads only our own endpoints &middot; not audited</span>
+<!-- فوتر — عیناً همان مارک‌آپِ footer در web/index.html (~۱۵۰۲-۱۵۴۰): چهار
+     بخش (برند + Trade/About/Support)، بندِ fine، خطِ پایین. تنها تفاوت‌ها
+     (به‌خواستِ مالک): لینک‌های هش‌درون‌اپی به /app#... تبدیل شده‌اند،
+     تلگرام (که در LINKS اپ خالی است) اصلاً رندر نمی‌شود، و بندِ Report a
+     problem یک mailto با بدنه‌ی ثابت است (بدونِ جفت‌توکن/آدرسِ کیف‌پول —
+     این صفحه آن‌ها را نمی‌داند)، نه دکمه‌ای که به منطقِ اپ نیاز دارد. -->
+<footer>
+  <div class="footGrid">
+    <div class="footBrand">
+      <a class="footLock" href="/" aria-label="Zaexa home"><span class="glyph"><svg class="mark" viewBox="0 0 1000 697.98" aria-hidden="true"><use href="#zxMark"/></svg></span><svg class="wordmark" viewBox="0 0 2581.74 300" aria-hidden="true"><use href="#zxWord"/></svg></a>
+      <p class="footTag">A DEX aggregator on Base. One transaction, every pool.</p>
+      <div class="social">
+        <a href="https://x.com/zaexadex" target="_blank" rel="noopener" title="X">
+          <svg viewBox="0 0 24 24" fill="currentColor"><path d="M18.9 2H22l-7 8 8.2 12h-6.4l-5-7.3L5.9 22H2.8l7.5-8.6L2.4 2h6.6l4.5 6.6zM17.8 20.1h1.7L7.3 3.8H5.5z"/></svg></a>
+        <a href="https://github.com/0xheiy/ZAEXA" target="_blank" rel="noopener" title="GitHub">
+          <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2a10 10 0 0 0-3.2 19.5c.5.1.7-.2.7-.5v-1.8c-2.8.6-3.4-1.3-3.4-1.3-.4-1.2-1.1-1.5-1.1-1.5-.9-.6.1-.6.1-.6 1 .1 1.5 1 1.5 1 .9 1.5 2.3 1.1 2.9.8.1-.7.4-1.1.6-1.4-2.2-.3-4.6-1.1-4.6-5 0-1.1.4-2 1-2.7-.1-.3-.4-1.3.1-2.6 0 0 .8-.3 2.7 1a9.4 9.4 0 0 1 5 0c1.9-1.3 2.7-1 2.7-1 .5 1.3.2 2.3.1 2.6.6.7 1 1.6 1 2.7 0 3.9-2.4 4.7-4.6 5 .4.3.7 1 .7 2v2.9c0 .3.2.6.7.5A10 10 0 0 0 12 2z"/></svg></a>
+      </div>
+    </div>
+    <div class="footCol">
+      <h4>Trade</h4>
+      <a href="/app#swap">Swap</a>
+      <a href="/app#folio">Portfolio</a>
+      <a href="/app#flow">Flow</a>
+      <a href="/pairs">New pairs</a>
+    </div>
+    <div class="footCol">
+      <h4>About</h4>
+      <a href="/app#faq">How it works &amp; FAQ</a>
+      <span class="footRow">
+        <span class="footLbl">Contract on BaseScan</span>
+        <a href="https://basescan.org/address/0x15e511Bf2Ea1a0F50F25E973d57Dce0D01946b6d#code" target="_blank" rel="noopener" class="mono">0x15e5…6b6d</a>
+      </span>
+      <a href="https://github.com/0xheiy/ZAEXA" target="_blank" rel="noopener">Source on GitHub</a>
+    </div>
+    <div class="footCol">
+      <h4>Support</h4>
+      <a id="feedbackLink" class="feedback" href="mailto:zaexadex@gmail.com">Report a problem</a>
+      <a href="https://www.geckoterminal.com" target="_blank" rel="noopener">Price history by GeckoTerminal</a>
+    </div>
+  </div>
+  <p class="fine">The safety checks are heuristics on public bytecode plus a live sell simulation — not an audit. A clean result is not a guarantee. The contract holds no funds between transactions and there is no account to create.</p>
+  <div class="footBottom"><span>Non-custodial &middot; this page reads only our own endpoints &middot; not audited</span><span>&copy; 2026 Zaexa</span></div>
 </footer>
 
 <script>
-/* سوییچ تم — عیناً همان منطق در web/landing.html، اکنون هم‌کلید با اپ.
+/* تمِ اولیه — عیناً همان منطق در web/landing.html، هم‌کلید با اپ.
    رفعِ باگِ «تم بین صفحه‌ها زنده نمی‌ماند» (۲۰۲۶-۰۹-۱۲): این صفحه زیرِ
    کلیدِ جداگانه‌ی zaexa.landing.theme ذخیره می‌کرد درحالی‌که اپ (index.html)
    زیرِ zaexa.theme.v1 — یعنی یک تمِ تیره‌ی انتخاب‌شده اینجا با یک اپِ روشن
@@ -394,9 +521,14 @@ h1{font-size:28px;letter-spacing:-.03em;margin:0 0 10px;line-height:1.1}
    اعتبارسنجیِ اپ: فقط "dark"/"light" یک انتخاب حساب می‌شود. مهاجرتِ
    یک‌باره: اگر کلیدِ تازه هنوز انتخابِ معتبری ندارد ولی کلیدِ قدیمی دارد،
    همان مقدار را می‌گیریم و بلافاصله در کلیدِ تازه هم می‌نویسیم تا کسی که
-   قبلاً انتخاب کرده بود چیزی را از دست ندهد. */
+   قبلاً انتخاب کرده بود چیزی را از دست ندهد.
+   ۲۲ سپتامبر: دکمه‌ی مستقلِ تم (id="themeToggle") حذف شد — این بلوک دیگر
+   هیچ دکمه‌ای را سیم‌کشی نمی‌کند، فقط تمِ اولیه را قبل از رنگ‌آمیزیِ صفحه
+   می‌گذارد (برای جلوگیری از پرشِ رنگ). خودِ سوییچ حالا آیتمِ Theme داخلِ
+   بازشوی کیف‌پول است — سیم‌کشیِ کلیک آنجاست (renderChip، اسکریپتِ بعدی)
+   چون آن دکمه هر بار با innerHTML از نو ساخته می‌شود. */
 (function(){
-  var root = document.documentElement, themeButton = document.getElementById('themeToggle');
+  var root = document.documentElement;
   var LS_THEME = 'zaexa.theme.v1', LS_OLD = 'zaexa.landing.theme';
   function readValid(key){ try { var v = localStorage.getItem(key); return (v === 'dark' || v === 'light') ? v : null; } catch (e) { return null; } }
   var theme = readValid(LS_THEME);
@@ -406,15 +538,6 @@ h1{font-size:28px;letter-spacing:-.03em;margin:0 0 10px;line-height:1.1}
   }
   if (!theme) { theme = (window.matchMedia && matchMedia('(prefers-color-scheme: dark)').matches) ? 'dark' : 'light'; }
   root.dataset.theme = theme;
-  function syncTheme(){
-    if (themeButton) themeButton.setAttribute('aria-label', root.dataset.theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme');
-  }
-  syncTheme();
-  themeButton && themeButton.addEventListener('click', function(){
-    root.dataset.theme = root.dataset.theme === 'dark' ? 'light' : 'dark';
-    try { localStorage.setItem(LS_THEME, root.dataset.theme); } catch (e) {}
-    syncTheme();
-  });
 })();
 </script>
 
@@ -684,9 +807,23 @@ h1{font-size:28px;letter-spacing:-.03em;margin:0 0 10px;line-height:1.1}
   function setChainTitle(){
     document.title = currentChain === 'solana' ? TITLE_SOL : TITLE_BASE;
   }
+  // برچسبِ زنجیره — «Base»/«Solana»، هم برای چیپِ شبکه‌ی هدر (#srcTx) هم
+  // برای بدنه‌ی ایمیلِ «Report a problem».
+  function chainLabel(){ return currentChain === 'solana' ? 'Solana' : 'Base'; }
+  // mailto فوتر — فقط «چه اتفاقی افتاد»، صفحه و زنجیره؛ هیچ دادهٔ دیگری
+  // (نه جفتِ توکن، نه آدرسِ کیف‌پول — این صفحه هیچ‌کدام را نمی‌داند).
+  function feedbackMailto(){
+    var body = 'What happened:\n\n\n---\nPage: new pairs\nChain: ' + chainLabel();
+    return 'mailto:zaexadex@gmail.com?subject=' + encodeURIComponent('Zaexa — problem report') +
+      '&body=' + encodeURIComponent(body);
+  }
   function setActiveChainTab(){
     setChainCopy();
     setChainTitle();
+    var srcTxEl = document.getElementById('srcTx');
+    if (srcTxEl) srcTxEl.textContent = chainLabel();
+    var fbEl = document.getElementById('feedbackLink');
+    if (fbEl) fbEl.href = feedbackMailto();
     if (!chainTabsEl) return;
     Array.prototype.forEach.call(chainTabsEl.querySelectorAll('button[data-chain]'), function(b){
       var on = b.getAttribute('data-chain') === currentChain;
@@ -1149,23 +1286,60 @@ h1{font-size:28px;letter-spacing:-.03em;margin:0 0 10px;line-height:1.1}
     })();
   }
 
-  function closePop(){
+  function closeWalletPop(){
     var pop = document.getElementById('walletPop');
     var chip = document.getElementById('walletChip');
     if (pop) pop.classList.remove('on');
     if (chip && chip.tagName === 'BUTTON') chip.setAttribute('aria-expanded', 'false');
   }
+  // بازشوی تنظیمات — استاتیک (renderChip هرگز آن را از نو نمی‌سازد)، پس
+  // closeSetPop/setBtn/themeBtn یک‌بار همین‌جا سیم‌کشی می‌شوند، نه داخلِ
+  // renderChip. عیناً همان جفتِ #setBtn/#setPop در web/index.html —
+  // Appearance/Theme، هیچ‌چیزِ دیگری (اسلیپیج/RPC فقط مالِ Swap است).
+  function closeSetPop(){
+    var pop = document.getElementById('setPop');
+    var btn = document.getElementById('setBtn');
+    if (pop) pop.classList.remove('on');
+    if (btn) btn.setAttribute('aria-expanded', 'false');
+  }
   document.addEventListener('mousedown', function(e){
-    var pop = document.getElementById('walletPop');
-    if (!pop) return;
-    var chip = document.getElementById('walletChip');
-    if (pop.contains(e.target)) return;
-    if (chip && chip.contains(e.target)) return;
-    closePop();
+    var wPop = document.getElementById('walletPop');
+    var wChip = document.getElementById('walletChip');
+    if (!(wPop && (wPop.contains(e.target) || (wChip && wChip.contains(e.target))))) closeWalletPop();
+    var sPop = document.getElementById('setPop');
+    var sBtn = document.getElementById('setBtn');
+    if (!(sPop && (sPop.contains(e.target) || (sBtn && sBtn.contains(e.target))))) closeSetPop();
   });
   document.addEventListener('keydown', function(e){
-    if (e.key === 'Escape') closePop();
+    if (e.key === 'Escape'){ closeWalletPop(); closeSetPop(); }
   });
+
+  var setBtnEl = document.getElementById('setBtn');
+  var setPopEl = document.getElementById('setPop');
+  if (setBtnEl && setPopEl){
+    setBtnEl.onclick = function(){
+      closeWalletPop();
+      var open = setPopEl.classList.toggle('on');
+      setBtnEl.setAttribute('aria-expanded', open ? 'true' : 'false');
+    };
+  }
+  // سوییچِ تم — کلیدِ مشترکِ zaexa.theme.v1، مستقیماً روی root. این دکمه
+  // استاتیک است (نه ساخته‌شده با innerHTML)، پس یک‌بار همین‌جا سیم‌کشی
+  // می‌شود و بدونِ هیچ کیف‌پولِ وصل‌شده‌ای هم کار می‌کند.
+  var themeBtnEl = document.getElementById('themeBtn');
+  var themeStateEl = document.getElementById('themeState');
+  if (themeStateEl) {
+    themeStateEl.textContent = document.documentElement.dataset.theme === 'dark' ? 'Dark' : 'Light';
+  }
+  if (themeBtnEl){
+    themeBtnEl.onclick = function(){
+      var root = document.documentElement;
+      var next = root.dataset.theme === 'dark' ? 'light' : 'dark';
+      root.dataset.theme = next;
+      try { localStorage.setItem('zaexa.theme.v1', next); } catch (e) {}
+      if (themeStateEl) themeStateEl.textContent = next === 'dark' ? 'Dark' : 'Light';
+    };
+  }
 
   function showDisconnectNote(){
     var note = document.getElementById('walletDisconnectNote');
@@ -1203,6 +1377,10 @@ h1{font-size:28px;letter-spacing:-.03em;margin:0 0 10px;line-height:1.1}
     var discHtml = isRemote
       ? '<a class="walletAction" href="/app#swap" id="walletPopDiscApp"><span>Disconnect in the app</span></a>'
       : '<button type="button" class="walletAction danger" id="walletPopDisc"><span>Disconnect</span></button>';
+    // ۲۳ سپتامبر: آیتمِ تم از این بازشو رفت — جای درستش، عیناً مثلِ اپ،
+    // بازشوی «تنظیمات» (#setBtn/#setPop) است، نه اینجا. بدونِ آن، بازشوی
+    // کیف‌پول فقط آدرس/کپی/قطعِ‌اتصال دارد؛ کسی که وصل نیست هم هنوز به تم
+    // دسترسی دارد چون #setBtn مستقل از وضعیتِ کیف‌پول است.
     wrap.innerHTML =
       '<button type="button" class="chip" id="walletChip" aria-haspopup="dialog" aria-expanded="false">' +
         '<span>' + chipLabel + '</span></button>' +
@@ -1218,6 +1396,7 @@ h1{font-size:28px;letter-spacing:-.03em;margin:0 0 10px;line-height:1.1}
     chipEl.onclick = function(){
       var pop = document.getElementById('walletPop');
       if (!pop) return;
+      closeSetPop();
       var open = pop.classList.toggle('on');
       chipEl.setAttribute('aria-expanded', open ? 'true' : 'false');
     };
@@ -1239,7 +1418,7 @@ h1{font-size:28px;letter-spacing:-.03em;margin:0 0 10px;line-height:1.1}
       var discBtn = document.getElementById('walletPopDisc');
       discBtn.onclick = function(){
         markDisconnected(true);
-        closePop();
+        closeWalletPop();
         renderChip({ kind: 'disconnected' });
         showDisconnectNote();
       };
