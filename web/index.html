@@ -625,7 +625,7 @@ main{max-width:1140px;margin:0 auto;padding:8px 20px 56px;display:flex;flex-dire
 /* ---------------- swap ---------------- */
 .leg{margin:0 14px;padding:15px 16px;border-radius:16px;background:var(--card2);transition:.16s}
 .leg:focus-within{box-shadow:0 0 0 2px var(--acc)}
-.legTop{display:flex;justify-content:space-between;font-size:12.5px;color:var(--tx3);margin-bottom:9px}
+.legTop{display:flex;justify-content:space-between;align-items:center;font-size:12.5px;color:var(--tx3);margin-bottom:9px}
 .legTop b{font-weight:560;color:var(--acc);cursor:pointer}
 .frac{margin-left:6px;padding:2px 7px;border-radius:999px;background:var(--card);
   font-size:10.5px;font-weight:700;letter-spacing:.04em;color:var(--acc);
@@ -671,6 +671,59 @@ main{max-width:1140px;margin:0 auto;padding:8px 20px 56px;display:flex;flex-dire
   border-top-color:transparent;animation:sp .7s linear infinite;display:inline-block;
   vertical-align:-2px;margin-right:8px}
 @keyframes sp{to{transform:rotate(360deg)}}
+
+/* ---------------- پیلِ «قابل‌فروش» بالای توکنِ دریافتی ---------------- */
+#balOut{margin-left:auto}
+.sellPill{display:inline-flex;align-items:center;gap:4px;margin-left:8px;padding:2px 8px;
+  border-radius:999px;font-size:11px;font-weight:600;line-height:16px;white-space:nowrap;cursor:default}
+.sellPill.ok{color:var(--pos);background:color-mix(in srgb,var(--pos) 14%,transparent)}
+.sellPill.warn{color:var(--warn);background:color-mix(in srgb,var(--warn) 14%,transparent)}
+.sellPill.no{color:var(--neg);background:color-mix(in srgb,var(--neg) 14%,transparent)}
+.sellPill.wait,.sellPill.unk{color:var(--tx2);background:var(--card2)}
+.sellPill.unk{color:var(--tx3)}
+/* ویژگیِ hidden به display:inline-flexِ بالا می‌بازد — همان الگوی .clr[hidden] */
+.sellPill[hidden]{display:none}
+.sellPill .dot{width:6px;height:6px;border-radius:50%;background:var(--tx3)}
+
+/* ---------------- نوار تقسیمِ مسیر ---------------- */
+.routeBar{margin:4px 14px 12px}
+.rbTop{display:flex;justify-content:space-between;font-size:12px;color:var(--tx2)}
+.rbTop .mono{color:var(--tx3)}
+.rbTrack{height:8px;border-radius:999px;overflow:hidden;display:flex;gap:2px;margin-top:8px;background:var(--card2)}
+.rbSeg{height:100%;min-width:3px}
+.rbLegend{display:flex;flex-wrap:wrap;gap:6px 12px;margin-top:8px;font-size:11.5px;color:var(--tx2)}
+.rbLegend i{display:inline-block;width:7px;height:7px;border-radius:50%;margin-right:5px;vertical-align:1px}
+.rbLegend .mono{color:var(--tx3);margin-left:4px}
+
+/* ---------------- نتیجه‌ی سواپِ تأییدشده ---------------- */
+.swapDone{margin:6px 14px 14px;text-align:center}
+.swapDone .ok{width:44px;height:44px;border-radius:50%;margin:6px auto 0;display:grid;place-items:center;
+  background:color-mix(in srgb,var(--pos) 16%,transparent)}
+.swapDone h3{margin:12px 0 4px;font-size:18px;font-weight:700;color:var(--tx)}
+.swapDone .amt2{font-size:15px;color:var(--tx)}
+.swapDone .gain{font-size:12.5px;color:var(--pos);margin-top:4px}
+.swapDone .acts{display:flex;gap:10px;margin-top:16px}
+.swapDone .acts .cta{flex:1;margin:0}
+.swapDone .acts a{text-decoration:none;display:inline-flex;align-items:center;justify-content:center}
+.swapDone .txl{font-size:11.5px;color:var(--tx3);margin-top:10px}
+section.card.isDone .facts,section.card.isDone #routeBar,section.card.isDone #revNote,
+section.card.isDone #notices,section.card.isDone #actBtn{display:none}
+
+/* ---------------- هاله‌ی کارتِ سواپ ----------------
+   تصمیم مالک، ۲۴ سپتامبر: هاله عمداً قابل‌حذف نگه داشته شده — برای حذفش
+   همین دو خط را پاک کن. */
+section.card.swapCard{box-shadow:var(--sh),-18px -14px 60px -12px rgb(34 239 246 / .20),18px 18px 64px -12px rgb(197 108 245 / .20)}
+[data-theme="dark"] section.card.swapCard{box-shadow:var(--sh),-18px -14px 60px -12px rgb(34 239 246 / .30),18px 18px 64px -12px rgb(197 108 245 / .30)}
+
+/* ---------------- حرکت — فقط وقتی کاربر آن را خواسته ---------------- */
+@media (prefers-reduced-motion:no-preference){
+  .rbSeg{animation:rbGrow .32s cubic-bezier(.2,.8,.2,1) both}
+  @keyframes rbGrow{from{transform:scaleX(0)}to{transform:scaleX(1)}}
+  .sellPill.anim{animation:pillIn .16s ease both}
+  @keyframes pillIn{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:translateY(0)}}
+  .swapDone{animation:doneIn .22s ease both}
+  @keyframes doneIn{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}
+}
 
 /* ---------------- venues ---------------- */
 .vrow{
@@ -1254,7 +1307,7 @@ footer .fine{max-width:78ch;margin:46px 0 0;font-size:11.5px;color:var(--tx3);li
     </section>
 
     <!-- swap -->
-    <section class="card">
+    <section class="card swapCard">
       <div style="height:16px"></div>
       <div class="leg">
         <div class="legTop"><span>You pay</span><b id="balIn"></b></div>
@@ -1269,7 +1322,7 @@ footer .fine{max-width:78ch;margin:46px 0 0;font-size:11.5px;color:var(--tx3);li
       </div>
       <div class="mid"><button id="flipBtn">⇅</button></div>
       <div class="leg">
-        <div class="legTop"><span>You receive</span><b id="balOut"></b></div>
+        <div class="legTop"><span>You receive</span><b id="balOut"></b><span class="sellPill" id="sellPill" hidden></span></div>
         <div class="legRow">
           <input class="amt mono" id="amtOut" placeholder="0" inputmode="decimal" autocomplete="off">
           <button class="tokbtn" id="tokOutBtn"><span class="av" id="tokOutAv">?</span><span id="tokOutSym">—</span></button>
@@ -1282,6 +1335,8 @@ footer .fine{max-width:78ch;margin:46px 0 0;font-size:11.5px;color:var(--tx3);li
         <div class="fact"><span class="k">Protocol fee</span><span class="v mono" id="kFee">0.00%</span></div>
         <div class="fact" id="vsRow"><span class="k">vs Uniswap direct</span><span class="v mono" id="kVs">—</span></div>
       </div>
+      <div class="routeBar" id="routeBar" hidden><div class="rbTop"><span>Route</span><span class="mono" id="rbMeta"></span></div><div class="rbTrack" id="rbTrack"></div><div class="rbLegend" id="rbLegend"></div></div>
+      <div class="swapDone" id="swapDone" hidden></div>
       <!-- اعلان‌ها *بالای* دکمه‌اند و دکمه ته کارت می‌نشیند.
            تاریخچه‌اش مهم است: یک بار همین ترتیب بود و به‌خاطر یک باگ عوض شد —
            ارتفاع اعلان به جفت توکن بستگی دارد، پس دکمه با هر تعویض توکن تا
@@ -2816,7 +2871,51 @@ function renderRoundTrip(box,x){
       : "From quotes. The live test needs a wallet with the balance and approval to run it."}</div>`;
 }
 
+/* تنها نویسنده‌ی #sellPill. هرجای دیگری که بخواهد این پیل را رنگ کند،
+   یعنی دوباره داریم دو مسیر برای یک حکم می‌سازیم — همان باگِ «پاکسازی که
+   فقط روی یک مسیر زندگی می‌کند» که در tripCost توضیح داده شده.
+   kind یکی از "exit" (نتیجه‌ی واقعیِ renderExit، x می‌تواند null باشد)،
+   "wait" (کوت در حال رفتن) یا "hidden" است. */
+function paintSellPill(kind,x){
+  const p=$("sellPill");
+  if(!p)return;
+  let cls,html,title;
+  if(kind==="hidden"||(kind==="exit"&&!x)){
+    p.hidden=true;p.className="sellPill";p.innerHTML="";p.title="";
+    return;
+  }
+  if(kind==="wait"){
+    cls="wait";html='<span class="dot"></span>Checking exit…';
+    title="Quoting a sell of this token now.";
+  }else{
+    const l=x.lossPct,tc=tripCost(l);
+    if(x.state==="blocked"||x.state==="noexit"){
+      cls="no";html="✕ Can't sell now";
+      title="No venue would quote the sell, or the simulated sell reverted.";
+    }else if(x.state==="unknown"||tc.state==="implausible"||typeof l!=="number"||!Number.isFinite(l)){
+      cls="unk";html="? Not checked";
+      title="No verdict — never shown as safe.";
+    }else{
+      const zeroish=tc.state==="zeroish";
+      const kept=Math.min(100,Math.max(0,100-l));
+      html="✓ Sellable · "+(zeroish?"~100":kept.toFixed(1))+"% back";
+      cls=(l<5||zeroish)?"ok":(l<15?"warn":"no");
+      title=x.state==="verified"?"Ran on chain":"From quotes";
+    }
+  }
+  // هر بار دوباره ساخته می‌شود تا انیمیشنِ ظاهرشدن با هر تغییرِ کلاس از نو
+  // شروع شود — بدون این، مرورگر چون کلاسِ anim از قبل حاضر است چیزی را
+  // دوباره اجرا نمی‌کند.
+  p.className="sellPill "+cls;
+  p.innerHTML=html;
+  p.title=title;
+  p.hidden=false;
+  void p.offsetWidth;
+  p.classList.add("anim");
+}
+
 function renderExit(x){
+  paintSellPill(x?"exit":"hidden",x);
   // نتیجه‌ی واقعی رسید — نوار دیگر منتظر نگهبانِ زمانی نیست. اسکلت (x=null)
   // چیزی را نمی‌بندد؛ همچنان در انتظار می‌ماند.
   if(x){tkExitSettled=tkExitSeq;clearTimeout(tkExitTimer);tkExitTimer=null;}
@@ -4076,9 +4175,11 @@ async function tokenExitFallback(seq,why){
 
 let qTimer=null;
 function scheduleQuote(){
+  hideSwapDone();
   clearTimeout(qTimer);currentPlan=null;
   $(mode==="exactIn"?"amtOut":"amtIn").value="";
   $("routeWrap").style.display="none";
+  $("routeBar").hidden=true;
   ["kRate","kImpact","kMin","kVs"].forEach(k=>$(k).textContent="—");
   exitSeq++;renderExit(null);
   tkExitSeq++;clearTimeout(tkExitTimer);tkExitTimer=null;
@@ -4325,6 +4426,11 @@ function renderVsUniswap(plan){
 function fmtOutField(v){
   return v.toLocaleString("en-US",{maximumFractionDigits:v>=1000?2:v>=1?6:8});
 }
+/* رنگِ نوارِ تقسیمِ مسیر. مالک فقط سه‌تای اول (یونی‌سواپ و آیرودروم) را
+   تأیید کرد؛ بقیه‌ی رنگ‌ها انتخابِ خودم است، نه یک تصمیمِ ثبت‌شده. */
+const VENUE_COLOR={ "uniswap-v2":"#FF007A","uniswap-v3":"#FF007A","uniswap-v4":"#FF007A",
+"aerodrome":"#2E6BFF","aerodrome-cl":"#6F9BFF","pancake-v3":"#1FC7D4","baseswap":"#8A94A6",
+"sushiswap":"#E86FD0","alienbase":"#9BE15D" };
 function renderPlan(plan,reverse){
   if(!reverse)
     $("amtOut").value=fmtOutField(Number(E.formatUnits(plan.totalOut,tokenOut.decimals)));
@@ -4356,6 +4462,22 @@ function renderPlan(plan,reverse){
   $("routeMeta").textContent=plan.parts.length>1
     ?"split "+plan.parts.map(p=>Math.round(Number((p.amountIn*100n)/plan.totalIn))+"%").join("/"):"single";
   $("routeWrap").style.display="";
+
+  // همان اعدادِ share بالا، این‌بار برای نوارِ تقسیمِ رنگی و راهنمایش.
+  // رنگ به‌تنهایی حامل چیزی نیست — راهنما همیشه نام + درصد هم دارد.
+  let rbSegs="",rbLeg="";
+  plan.parts.forEach((p,i)=>{
+    const share=Number((p.amountIn*10000n)/plan.totalIn)/100;
+    const color=VENUE_COLOR[p.route.hops[0].venue.dex.id]||"var(--tx3)";
+    rbSegs+=`<div class="rbSeg" style="background:${color};flex:0 0 ${share}%;animation-delay:${i*60}ms"></div>`;
+    const label=p.route.hops.map(x=>esc(venueLabel(x.venue))).join(" → ");
+    rbLeg+=`<span><i style="background:${color}"></i>${label}<span class="mono">${share.toFixed(0)}%</span></span>`;
+  });
+  $("rbTrack").innerHTML=rbSegs;
+  $("rbLegend").innerHTML=rbLeg;
+  $("rbMeta").textContent=plan.parts.length>1?plan.parts.length+" venues · split":"1 venue";
+  $("routeBar").hidden=false;
+  paintSellPill("wait");
 
   let n="";
   if(unreliable(plan.stats))
@@ -5379,6 +5501,7 @@ async function doSwap(){
     }
     // 🔑 از اینجا تراکنش ارسال شده — هر خطای بعدی فقط خواندن نتیجه است
     ev("swap:sent");
+    const t0=Date.now();
     const url=`${CHAIN.explorer}/tx/${tx.hash}`;
     setBusy(true,`Swapping ${esc(tokenIn.symbol)} → ${esc(tokenOut.symbol)}…`);
     setNotice(note("ok",`Sent — <a href="${url}" target="_blank" rel="noopener">${shortAddr(tx.hash)}</a>`));
@@ -5388,12 +5511,49 @@ async function doSwap(){
       setNotice(note("warn",`<b>The transaction was sent</b> but the receipt could not be read. Check <a href="${url}" target="_blank" rel="noopener">${shortAddr(tx.hash)}</a>.`));
       setBusy(false);return;}
     if(rec&&rec.status===1){
+      /* برای بلوکِ نتیجه لازم است — قبل از اینکه خطوطِ زیر فیلدها را پاک
+         کنند و نقشه را null، از همان نقشه‌ای که واقعاً امضا شد (chosen.plan)
+         می‌خوانیم، نه currentPlan که تا اینجا ممکن است چیزِ دیگری باشد. */
+      const paidTxt=fmt(chosen.plan.totalIn,tokenIn.decimals)+" "+tokenIn.symbol;
+      const gotTxt="≈ "+fmt(chosen.plan.totalOut*BigInt(10000-feeBps)/10000n,tokenOut.decimals)+" "+tokenOut.symbol;
+      const vsTxt=$("kVs")?$("kVs").textContent:"";
+      const vs=vsTxt&&vsTxt.startsWith("+")?vsTxt:null;
+      const secs=(Date.now()-t0)/1000;
       setNotice(note("ok",`<b>Swap complete.</b> <a href="${url}" target="_blank" rel="noopener">View on BaseScan</a>`));
       $("amtIn").value="";$("amtOut").value="";currentPlan=null;
       $("routeWrap").style.display="none";await refreshBalances();ev("swap:done");
+      showSwapDone({paidTxt,gotTxt,vs,url,hash:tx.hash,secs});
     }else{setNotice(note("err",`<b>Reverted.</b> <a href="${url}" target="_blank" rel="noopener">View on BaseScan</a>`));ev("swap:revert");}
   }catch(e){showError("Swap failed",e,chosenSig?{sentRoute:chosenSig}:undefined);ev("swap:fail");}
   finally{setBusy(false);refreshButton();}
+}
+/* بلوکِ نتیجه بعد از یک سواپِ تأییدشده. کوتِ نمایش‌داده‌شده عمداً با «≈»
+   علامت‌گذاری شده — همان کوت است، نه رسیدِ پارس‌شده. */
+function showSwapDone({paidTxt,gotTxt,vs,url,hash,secs}){
+  const el=$("swapDone");
+  if(!el)return;
+  el.innerHTML=`<div class="ok"><svg viewBox="0 0 24 24" width="22" height="22" fill="none"
+      stroke="var(--pos)" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M5 12.5l4.5 4.5L19 7"/></svg></div>
+    <h3>Swap complete</h3>
+    <div class="amt2 mono">${esc(paidTxt)} → ${esc(gotTxt)}</div>
+    ${vs?`<div class="gain">${esc(vs)} vs Uniswap direct</div>`:""}
+    <div class="acts">
+      <button class="cta" id="swapAgain" type="button">Swap again</button>
+      <a class="exitShare" href="${esc(url)}" target="_blank" rel="noopener">View on BaseScan</a>
+    </div>
+    <div class="txl">Tx ${esc(shortAddr(hash))} · confirmed in ${esc(secs.toFixed(1))}s</div>`;
+  el.hidden=false;
+  const card=el.closest("section.card");
+  if(card)card.classList.add("isDone");
+  paintSellPill("hidden");
+}
+function hideSwapDone(){
+  const el=$("swapDone");
+  if(!el||el.hidden)return;
+  el.hidden=true;
+  const card=el.closest("section.card");
+  if(card)card.classList.remove("isDone");
 }
 function showError(title,err,extra){
   console.error(title,err,extra);
@@ -5526,6 +5686,7 @@ async function importToken(addr){
 }
 function pickToken(t){
   if(!t)return;
+  hideSwapDone();
   if(pickerTarget==="in"){
     if(tokenOut&&t.address.toLowerCase()===tokenOut.address.toLowerCase())tokenOut=tokenIn;
     tokenIn=t;
@@ -6006,6 +6167,9 @@ function wire(){
      اولین رندر از بین می‌رفت. شنونده روی خودِ ظرف است که هرگز عوض نمی‌شود. */
   $("folioBody").onclick=e=>{if(e.target.closest('[data-act="connect"]'))connect();};
   $("flowBody").onclick=e=>{if(e.target.closest('[data-act="pickFlowToken"]'))openPicker("out");};
+  // innerHTML #swapDone با هر نتیجه بازنویسی می‌شود، پس شنونده روی خودِ
+  // ظرف است که هرگز عوض نمی‌شود — همان الگوی بالا.
+  $("swapDone").onclick=e=>{if(e.target.closest("#swapAgain")){hideSwapDone();$("amtIn").focus();}};
   $("tokInBtn").onclick=()=>openPicker("in");
   $("tokOutBtn").onclick=()=>openPicker("out");
   $("tokClose").onclick=closePicker;
@@ -6035,7 +6199,7 @@ function wire(){
   $("amtOut").onfocus=()=>{const el=$("amtOut");
     if(GROUPED.test(el.value))el.value=el.value.replace(/,/g,"");};
   $("amtOut").oninput=()=>{mode="targetOut";scheduleQuote();};
-  $("flipBtn").onclick=()=>{const a=tokenIn;tokenIn=tokenOut;tokenOut=a;
+  $("flipBtn").onclick=()=>{hideSwapDone();const a=tokenIn;tokenIn=tokenOut;tokenOut=a;
     paintToken("in",tokenIn);paintToken("out",tokenOut);
     $("amtIn").value="";$("amtOut").value="";paintBalances();
     runScan(tokenOut);loadChart();paintFlowToken();
