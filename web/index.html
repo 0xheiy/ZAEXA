@@ -380,23 +380,7 @@ body{
   min-height:100vh;min-height:100dvh;display:flex;flex-direction:column;
 }
 
-/* ---------------- درخشش سراسریِ صفحه ----------------
-   owner trial 24 Sep — to remove: delete this block and the .page-glow div.
-   عیناً از web/landing.html کپی شده (.page-glow/.glow-blob/@keyframes glowDrift)،
-   با دو تفاوتِ عمدی: opacity از توکنِ --glowop نمی‌آید (کاوشگرِ توکن‌های تیره
-   همین فایل را بایت‌به‌بایت می‌سنجد)، و انیمیشن فقط داخلِ
-   prefers-reduced-motion:no-preference است — کارت‌ها رنگ خودشان را نگه
-   می‌دارند، این فقط پشتِ همه‌چیز است. */
-.page-glow{position:fixed;inset:0;pointer-events:none;z-index:-1;overflow:hidden}
-.glow-blob{position:absolute;border-radius:50%;filter:blur(110px);opacity:.14}
-[data-theme="dark"] .page-glow .glow-blob{opacity:.26}
-.glow-blob.b1{width:520px;height:520px;top:-180px;left:-160px;background:radial-gradient(circle,#22EFF6 0%,transparent 70%)}
-.glow-blob.b2{width:620px;height:620px;top:-220px;right:-240px;background:radial-gradient(circle,#43B5F7 0%,transparent 70%)}
-.glow-blob.b3{width:420px;height:420px;bottom:-160px;left:-140px;background:radial-gradient(circle,#7396F8 0%,transparent 70%)}
-.glow-blob.b4{width:380px;height:380px;bottom:-150px;right:-120px;background:radial-gradient(circle,#C56CF5 0%,transparent 70%)}
-/* ۲۴ سپتامبر، دورِ سوم: در اپ عمداً ثابت — چهار لکه‌ی blur(110px)ِ متحرک یعنی
-   بازرنگ‌آمیزیِ دائمیِ کلِ صفحه در ابزاری که ساعت‌ها باز می‌ماند (باتری/لپ‌تاپِ
-   ضعیف). صفحه‌ی معرفی حرکتش را نگه می‌دارد. */
+/* درخششِ سراسریِ صفحه: ۲۴ سپتامبر امتحان و به تصمیمِ مالک از اپ برداشته شد (فقط صفحه‌ی معرفی دارد). */
 
 button{font:inherit;color:inherit;background:none;border:none;cursor:pointer;padding:0}
 input{font:inherit;color:inherit}
@@ -1180,7 +1164,6 @@ footer .fine{max-width:78ch;margin:46px 0 0;font-size:11.5px;color:var(--tx3);li
 </style>
 </head>
 <body>
-<div class="page-glow" aria-hidden="true" data-overlap-ok="fixed background glow at z-index:-1, always behind content"><div class="glow-blob b1"></div><div class="glow-blob b2"></div><div class="glow-blob b3"></div><div class="glow-blob b4"></div></div>
 
 <!-- ⚠️ اینجا و نه داخل کارت سواپ. دو دلیل، هر دو اندازه‌گیری‌شده:
      • کوت‌گیری با هر تغییر مبلغ `setNotice("")` می‌زند و هرچه در #notices
@@ -1315,11 +1298,7 @@ footer .fine{max-width:78ch;margin:46px 0 0;font-size:11.5px;color:var(--tx3);li
   var sentinel = document.createElement('div');
   sentinel.setAttribute('aria-hidden', 'true');
   sentinel.style.cssText = 'position:absolute;top:0;left:0;width:1px;height:1px;pointer-events:none';
-  // ⚠️ باید بعد از .page-glow بنشیند، نه قبلش — آن دیو باید فرزندِ اولِ
-  // body بماند (کاوشگر [page glow] همین را می‌سنجد). موقعیتِ بصریِ سنتینل
-  // فرقی نمی‌کند: page-glow با position:fixed از جریانِ عادی بیرون است.
-  var glow = document.querySelector('.page-glow');
-  document.body.insertBefore(sentinel, glow ? glow.nextSibling : document.body.firstChild);
+  document.body.insertBefore(sentinel, document.body.firstChild);
   new IntersectionObserver(function(entries){
     entries.forEach(function(e){ header.classList.toggle('scrolled', !e.isIntersecting); });
   }).observe(sentinel);
@@ -2425,11 +2404,31 @@ function unreliable(s){return s.attempted>0&&s.rpcFailed/s.attempted>0.25;}
 
 async function quoteMany(specs,stats){
   if(!specs.length)return[];
-  const enc=specs.map(s=>encodeQuote(s.venue,s.tokenIn,s.tokenOut,s.amountIn));
   stats.attempted+=specs.length;
+  return quoteBatch(specs,stats);
+}
+/* ۲۴ سپتامبر — «The network did not answer. 36 of 36 quotes failed» برای هر
+   فروشِ cbBTC. شبکه سالم بود: کلِ دسته‌ی aggregate3 با «out of gas: gas required
+   exceeds 50000000» برمی‌گشت، چون چند کوتِ Slipstream روی استخرِ بی‌نقدینگی
+   تقریباً همه‌ی گاز را می‌سوزانند و برای بقیه چیزی نمی‌ماند؛ تک‌تک پرسیده،
+   هر هجده صرافی جواب می‌دادند. Multicall3 سقفِ گازِ جدا برای هر فراخوانی ندارد،
+   پس وقتی خودِ دسته (نه انتقال) شکست می‌خورد، نصف می‌کنیم و دوباره می‌پرسیم تا
+   فقط همان فراخوانیِ پرخرج «نامعلوم» بماند. فقط شکستِ اجرایِ خودِ دسته
+   (isRevert) نصف می‌شود؛ خطای انتقال (cannotAsk) هرگز — آن‌جا واقعاً نپرسیده‌ایم
+   و تکرار فقط بارِ بیشتر است. */
+async function quoteBatch(specs,stats){
+  const enc=specs.map(s=>encodeQuote(s.venue,s.tokenIn,s.tokenOut,s.amountIn));
   let res;
   try{res=await multicall(enc.map(e=>({target:e.target,data:e.data})));}
-  catch{stats.rpcFailed+=specs.length;return specs.map(()=>({out:null,status:"unknown"}));}
+  catch(e){
+    if(specs.length>1&&!cannotAsk(e)&&isRevert(e)){
+      const mid=specs.length>>1;
+      const a=await quoteBatch(specs.slice(0,mid),stats);
+      const b=await quoteBatch(specs.slice(mid),stats);
+      return a.concat(b);
+    }
+    stats.rpcFailed+=specs.length;return specs.map(()=>({out:null,status:"unknown"}));
+  }
   return res.map((r,i)=>{
     if(!r.ok||!r.data||r.data==="0x"){stats.noPool++;return{out:null,status:"nopool"};}
     try{const v=enc[i].dec(r.data);
@@ -4221,6 +4220,10 @@ function paintRouteIdle(){
   $("rbTrack").innerHTML="";
   $("rbLegend").innerHTML='<span class="rbIdle">Enter an amount to see the route</span>';
   $("rbLegend").title="";
+  /* ۲۴ سپتامبر: یادداشتِ «حل برای هدف» از کوتِ معکوسِ قبلی بعد از پاک‌شدنِ
+     فیلدها می‌ماند و عددی را نشان می‌داد که دیگر روی صفحه نبود. هر جا نوار به
+     حالتِ بی‌مبلغ برمی‌گردد، این یادداشت هم پاک می‌شود. */
+  const rv=$("revNote");if(rv){rv.innerHTML="";rv.title="";}
 }
 
 let qTimer=null;
@@ -5212,18 +5215,36 @@ function markDisconnected(on){
   try{on?localStorage.setItem(DISCONNECT_KEY,"1"):localStorage.removeItem(DISCONNECT_KEY);}
   catch{}
 }
+/* ۲۴ سپتامبر: حسام دید متامسک بعد از Disconnect هنوز سایت را «وصل» می‌داند
+   و دفعه‌ی بعد خودبه‌خود وصل است. متامسک (و هر والتی که EIP-2255 را کامل دارد)
+   حالا wallet_revokePermissions دارد — پس برای افزونه هم قطعِ *واقعی* ممکن
+   است. بهترین‌تلاش: اگر والت آن را نشناسد، همان پرچمِ zaexa.disconnected
+   تنها نگهبان می‌ماند و متن هم صادقانه همین را می‌گوید. */
+async function revokeInjected(provider){
+  if(!provider||!provider.request)return false;
+  try{
+    await provider.request({method:"wallet_revokePermissions",params:[{eth_accounts:{}}]});
+    return true;
+  }catch{return false;}
+}
 async function disconnect(){
   markDisconnected(true);
   /* WalletConnect برخلاف افزونه‌ها قطع اتصال *واقعی* دارد: نشست را می‌بندد
      و گوشی هم آن را می‌بیند. پس آنجا واقعاً دسترسی برداشته می‌شود. */
-  const wasRemote=walletIsRemote;
+  const wasRemote=walletIsRemote,inj=walletEip1193;
   if(wasRemote&&wcProvider){try{await wcProvider.disconnect();}catch{}wcProvider=null;}
+  /* وضعیتِ ما همان لحظه پاک می‌شود (نه بعد از جوابِ والت) — clearWalletState
+     رویدادها را هم جدا می‌کند، پس accountsChanged([])ِ بعد از لغو اعلانِ
+     «Wallet disconnected.» خودش را روی اعلانِ ما نمی‌نویسد. */
   clearWalletState();
   if(view==="folio")renderFolio();
+  const revoked=!wasRemote&&await revokeInjected(inj);
   setNotice(note("ok",wasRemote
     ? "<b>Disconnected.</b> The WalletConnect session was closed on both sides."
-    : "<b>Disconnected.</b> We will not reconnect on our own. Your wallet may still "+
-      "list this site as allowed — remove it there if you want the access gone too."));
+    : revoked
+      ? "<b>Disconnected.</b> Access was removed in your wallet too — connecting again will ask you first."
+      : "<b>Disconnected.</b> We will not reconnect on our own. Your wallet may still "+
+        "list this site as allowed — remove it there if you want the access gone too."));
 }
 async function refreshBalances(){
   if(!account){balances={};paintBalances();return;}

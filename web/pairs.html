@@ -1680,12 +1680,21 @@ footer .fine{max-width:78ch;margin:46px 0 0;font-size:11.5px;color:var(--tx3);li
   async function connect(){ openWalletPicker(); }
   async function disconnect(){
     markDisconnected(true);
-    var wasRemote = walletIsRemote;
+    var wasRemote = walletIsRemote, inj = walletEip1193;
     if (wasRemote && wcProvider){ try{ await wcProvider.disconnect(); }catch(e){} wcProvider = null; }
+    // ۲۴ سپتامبر — عیناً همان اپ: لغوِ واقعیِ اجازه در متامسک (EIP-2255)؛ اگر والت
+    // نشناسد، فقط پرچمِ zaexa.disconnected نگهبان است و متنِ قدیمی می‌ماند.
+    var revoked = false;
+    if (!wasRemote && inj && inj.request){
+      try{ await inj.request({ method: 'wallet_revokePermissions', params: [{ eth_accounts: {} }] }); revoked = true; }catch(e){}
+    }
     account = null; walletEip1193 = null; walletIsRemote = false;
     paintWallet();
     var note = document.getElementById('walletDisconnectNote');
-    if (note) note.hidden = false;
+    if (note){
+      if (revoked) note.textContent = 'Disconnected. Access was removed in your wallet too — connecting again will ask you first.';
+      note.hidden = false;
+    }
   }
 
   function walletKindLabel(p){ return p ? 'Browser extension' : 'Browser extension'; }

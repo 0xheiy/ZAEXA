@@ -3267,69 +3267,99 @@ async def main():
             "light: swap card box-shadow still differs from the chart card's — halo not removed: %s vs %s" \
             % (halo_light["swapShadow"], halo_light["chartShadow"])
 
-        # ---- [page glow] درخششِ سراسریِ صفحه (وامِ آزمایشیِ صفحه‌ی معرفی) ----
-        async def glow_probe(color_scheme):
-            gp = await b.new_page(viewport={"width": 1100, "height": 900}, color_scheme=color_scheme)
-            await gp.goto(URL); await gp.wait_for_timeout(900)
-            data = await gp.evaluate("""() => {
-                const glow = document.body.firstElementChild;
-                const isGlow = !!glow && glow.classList.contains("page-glow");
-                const cs = isGlow ? getComputedStyle(glow) : null;
-                const blobs = isGlow ? [...glow.querySelectorAll(".glow-blob")] : [];
-                const blobOpacity = blobs.length ? getComputedStyle(blobs[0]).opacity : null;
-                const swap = document.querySelector("section.card.swapCard");
-                const btn = document.getElementById("actBtn");
-                const sr = swap.getBoundingClientRect(), br = btn.getBoundingClientRect();
-                const scx = sr.left + sr.width / 2, scy = sr.top + sr.height / 2;
-                const bcx = br.left + br.width / 2, bcy = br.top + br.height / 2;
-                // هاله z-index:-1 و pointer-events:none است — کارت و دکمه باید
-                // همچنان از همان نقطه hit-test شوند، نه خودِ هاله.
-                const insideAtSwap = swap.contains(document.elementFromPoint(scx, scy));
-                const insideAtBtn = btn.contains(document.elementFromPoint(bcx, bcy));
-                const before = swap.getBoundingClientRect();
-                const style = document.createElement("style");
-                style.textContent = ".page-glow{display:none!important}";
-                document.head.appendChild(style);
-                const after = swap.getBoundingClientRect();
-                style.remove();
-                return {
-                    isGlow, position: cs ? cs.position : null, zIndex: cs ? cs.zIndex : null,
-                    pointerEvents: cs ? cs.pointerEvents : null, blobCount: blobs.length,
-                    blobOpacity, insideAtSwap, insideAtBtn,
-                    rectDiff: Math.max(
-                        Math.abs(before.width - after.width), Math.abs(before.height - after.height),
-                        Math.abs(before.top - after.top), Math.abs(before.left - after.left))
-                };
-            }""")
-            await gp.close()
-            return data
-        glow_dark = await glow_probe("dark")
-        glow_light = await glow_probe("light")
-        print("[page glow] dark: first-child=%s position=%s z-index=%s pointer-events=%s blobs=%s "
-              "opacity=%s inside(swap/btn)=%s/%s rectDiff=%.2f | light: opacity=%s inside(swap/btn)=%s/%s "
-              "rectDiff=%.2f"
-              % (glow_dark["isGlow"], glow_dark["position"], glow_dark["zIndex"], glow_dark["pointerEvents"],
-                 glow_dark["blobCount"], glow_dark["blobOpacity"], glow_dark["insideAtSwap"],
-                 glow_dark["insideAtBtn"], glow_dark["rectDiff"], glow_light["blobOpacity"],
-                 glow_light["insideAtSwap"], glow_light["insideAtBtn"], glow_light["rectDiff"]))
-        assert glow_dark["isGlow"] and glow_light["isGlow"], \
-            "the .page-glow div must be the first child of <body>"
-        assert glow_dark["position"] == "fixed", "page-glow must be position:fixed: %s" % glow_dark["position"]
-        assert glow_dark["zIndex"] == "-1", "page-glow must be z-index:-1: %s" % glow_dark["zIndex"]
-        assert glow_dark["pointerEvents"] == "none", \
-            "page-glow must be pointer-events:none: %s" % glow_dark["pointerEvents"]
-        assert glow_dark["blobCount"] == 4, "page-glow must have 4 .glow-blobs: %s" % glow_dark["blobCount"]
-        assert abs(float(glow_dark["blobOpacity"]) - 0.26) < 0.01, \
-            "dark .glow-blob opacity must be .26: %s" % glow_dark["blobOpacity"]
-        assert abs(float(glow_light["blobOpacity"]) - 0.14) < 0.01, \
-            "light .glow-blob opacity must be .14: %s" % glow_light["blobOpacity"]
-        assert glow_dark["insideAtSwap"] and glow_dark["insideAtBtn"], \
-            "the page glow must not block hit-testing of the swap card / action button: %s" % glow_dark
-        assert glow_light["insideAtSwap"] and glow_light["insideAtBtn"], \
-            "the page glow must not block hit-testing of the swap card / action button: %s" % glow_light
-        assert glow_dark["rectDiff"] <= 0.5 and glow_light["rectDiff"] <= 0.5, \
-            "hiding .page-glow moved the swap card's geometry: dark=%.2f light=%.2f" \
-            % (glow_dark["rectDiff"], glow_light["rectDiff"])
+        # ---- [page glow] ۲۴ سپتامبر: امتحان شد و به تصمیمِ مالک از اپ برداشته شد ----
+        gp = await b.new_page(viewport={"width": 1100, "height": 900}, color_scheme="dark")
+        await gp.goto(URL); await gp.wait_for_timeout(500)
+        glow_n = await gp.evaluate("() => document.querySelectorAll('.page-glow,.glow-blob').length")
+        await gp.close()
+        print("[page glow] removed from the app: .page-glow/.glow-blob elements=%s" % glow_n)
+        assert glow_n == 0, "the page glow was removed from the app by the owner, but %s element(s) remain" % glow_n
+
+        # ---- [quote split] ۲۴ سپتامبر: فروشِ cbBTC «۳۶ از ۳۶ کوت شکست» می‌داد ----
+        # کلِ دسته‌ی aggregate3 از سقفِ گازِ eth_call رد می‌شد (چند کوتِ Slipstream
+        # تقریباً همه‌ی گاز را می‌سوزاندند). حالا شکستِ اجراییِ دسته نصف می‌شود تا
+        # فقط همان فراخوانی نامعلوم بماند؛ خطای انتقال هرگز نصف نمی‌شود.
+        qp = await b.new_page(viewport={"width": 1100, "height": 900})
+        await qp.goto(URL)
+        await qp.wait_for_function("() => typeof E !== 'undefined' && !!E", timeout=15000)
+        split = await qp.evaluate("""async () => {
+            const all = allTokens();
+            const A = routable(all.find(t => t.symbol === "USDC")), B = routable(all.find(t => t.symbol === "WETH"));
+            const specs = allVenues().map(v => ({venue: v, tokenIn: A.address, tokenOut: B.address, amountIn: 1000000n}));
+            const BAD = 5;
+            const badData = encodeQuote(specs[BAD].venue, A.address, B.address, 1000000n).data;
+            const real = multicall;
+            let n = 0;
+            multicall = async (calls) => {
+                n++;
+                if (calls.some(c => c.data === badData)) {
+                    const e = new Error("missing revert data");
+                    e.code = "CALL_EXCEPTION";
+                    e.info = {error: {code: -32003, message: "out of gas: gas required exceeds: 50000000"}};
+                    throw e;
+                }
+                return calls.map(() => ({ok: false, data: "0x"}));
+            };
+            const st1 = newStats();
+            const r1 = await quoteMany(specs, st1);
+            const n1 = n;
+            n = 0;
+            multicall = async () => { n++; throw new TypeError("Failed to fetch"); };
+            const st2 = newStats();
+            const r2 = await quoteMany(specs, st2);
+            const n2 = n;
+            multicall = real;
+            // یادداشتِ کوتِ معکوسِ قبلی نباید بعد از پاک‌شدنِ فیلدها بماند
+            document.getElementById("revNote").innerHTML = "Solved for your target: stale";
+            scheduleQuote();
+            const revAfter = document.getElementById("revNote").innerHTML;
+            return {N: specs.length, st1, badStatus: r1[BAD].status,
+                    others: r1.filter((x, i) => i !== BAD).map(x => x.status),
+                    calls1: n1, st2, calls2: n2, unknown2: r2.every(x => x.status === "unknown"), revAfter};
+        }""")
+        await qp.close()
+        print("[quote split] gas-cap batch of %s: bad=%s others=%s attempted=%s rpcFailed=%s noPool=%s calls=%s | "
+              "transport failure: rpcFailed=%s calls=%s | stale reverse note cleared=%s"
+              % (split["N"], split["badStatus"], sorted(set(split["others"])), split["st1"]["attempted"],
+                 split["st1"]["rpcFailed"], split["st1"]["noPool"], split["calls1"],
+                 split["st2"]["rpcFailed"], split["calls2"], split["revAfter"] == ""))
+        assert split["badStatus"] == "unknown", split
+        assert set(split["others"]) == {"nopool"}, "the other quotes must still be answered: %s" % split
+        assert split["st1"]["attempted"] == split["N"], "attempted must be counted once, not per retry: %s" % split
+        assert split["st1"]["rpcFailed"] == 1 and split["st1"]["noPool"] == split["N"] - 1, split
+        assert split["calls1"] > 1, "a gas-cap failure must be retried in halves: %s" % split
+        assert split["st2"]["rpcFailed"] == split["N"] and split["calls2"] == 1 and split["unknown2"], \
+            "a transport failure must never be split: %s" % split
+        assert split["revAfter"] == "", "a stale reverse-quote note survived scheduleQuote: %r" % split["revAfter"]
+
+        # ---- [wallet revoke] ۲۴ سپتامبر: Disconnect اجازه را در خودِ والت هم لغو کند ----
+        wp = await b.new_page(viewport={"width": 1100, "height": 900})
+        await wp.goto(URL)
+        await wp.wait_for_function("() => typeof E !== 'undefined' && !!E", timeout=15000)
+        rv = await wp.evaluate("""async () => {
+            const out = {};
+            const mk = (ok) => { const seen = []; return {seen, request: async (a) => { seen.push(a.method);
+                if (!ok) throw Object.assign(new Error("unsupported"), {code: 4200}); return null; }}; };
+            for (const ok of [true, false]) {
+                const p = mk(ok);
+                walletEip1193 = p; walletIsRemote = false; account = "0x1111111111111111111111111111111111111111";
+                try { localStorage.removeItem("zaexa.disconnected"); } catch (e) {}
+                await disconnect();
+                out[ok ? "ok" : "fail"] = {methods: p.seen, flag: localStorage.getItem("zaexa.disconnected"),
+                    notice: document.getElementById("notices").innerText, account};
+            }
+            setNotice("");
+            return out;
+        }""")
+        await wp.close()
+        print("[wallet revoke] supported: methods=%s flag=%s notice=%r | unsupported: flag=%s notice=%r"
+              % (rv["ok"]["methods"], rv["ok"]["flag"], rv["ok"]["notice"][:60], rv["fail"]["flag"], rv["fail"]["notice"][:60]))
+        assert rv["ok"]["methods"] == ["wallet_revokePermissions"], rv
+        assert rv["ok"]["flag"] == "1" and rv["fail"]["flag"] == "1", "the disconnect flag must be kept either way: %s" % rv
+        assert "removed in your wallet" in rv["ok"]["notice"], rv
+        assert "may still" in rv["fail"]["notice"] and "removed in your wallet" not in rv["fail"]["notice"], \
+            "an unsupported revoke must not claim access was removed: %s" % rv
+        assert rv["ok"]["account"] is None and rv["fail"]["account"] is None, rv
 
         # پاک کردن کیف پول ساختگی تا تست‌های بعدی حالت «بدون کیف پول» ببینند
         await pg.evaluate("""() => {
