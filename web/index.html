@@ -379,6 +379,30 @@ body{
      روی هم می‌افتاد. */
   min-height:100vh;min-height:100dvh;display:flex;flex-direction:column;
 }
+
+/* ---------------- درخشش سراسریِ صفحه ----------------
+   owner trial 24 Sep — to remove: delete this block and the .page-glow div.
+   عیناً از web/landing.html کپی شده (.page-glow/.glow-blob/@keyframes glowDrift)،
+   با دو تفاوتِ عمدی: opacity از توکنِ --glowop نمی‌آید (کاوشگرِ توکن‌های تیره
+   همین فایل را بایت‌به‌بایت می‌سنجد)، و انیمیشن فقط داخلِ
+   prefers-reduced-motion:no-preference است — کارت‌ها رنگ خودشان را نگه
+   می‌دارند، این فقط پشتِ همه‌چیز است. */
+.page-glow{position:fixed;inset:0;pointer-events:none;z-index:-1;overflow:hidden}
+.glow-blob{position:absolute;border-radius:50%;filter:blur(110px);opacity:.14}
+[data-theme="dark"] .page-glow .glow-blob{opacity:.26}
+.glow-blob.b1{width:520px;height:520px;top:-180px;left:-160px;background:radial-gradient(circle,#22EFF6 0%,transparent 70%)}
+.glow-blob.b2{width:620px;height:620px;top:-220px;right:-240px;background:radial-gradient(circle,#43B5F7 0%,transparent 70%)}
+.glow-blob.b3{width:420px;height:420px;bottom:-160px;left:-140px;background:radial-gradient(circle,#7396F8 0%,transparent 70%)}
+.glow-blob.b4{width:380px;height:380px;bottom:-150px;right:-120px;background:radial-gradient(circle,#C56CF5 0%,transparent 70%)}
+@media (prefers-reduced-motion:no-preference){
+  .glow-blob{animation:glowDrift ease-in-out infinite alternate}
+  .glow-blob.b1{animation-duration:18s;animation-delay:-3s}
+  .glow-blob.b2{animation-duration:22s;animation-delay:-11s}
+  .glow-blob.b3{animation-duration:16s;animation-delay:-7s}
+  .glow-blob.b4{animation-duration:14s;animation-delay:-2s}
+  @keyframes glowDrift{0%{transform:translate(0,0) scale(1)}50%{transform:translate(3vw,-2.5vw) scale(1.09)}100%{transform:translate(-2.5vw,2vw) scale(.95)}}
+}
+
 button{font:inherit;color:inherit;background:none;border:none;cursor:pointer;padding:0}
 input{font:inherit;color:inherit}
 .mono{font-variant-numeric:tabular-nums;font-feature-settings:"tnum" 1}
@@ -625,7 +649,9 @@ main{max-width:1140px;margin:0 auto;padding:8px 20px 56px;display:flex;flex-dire
 /* ---------------- swap ---------------- */
 .leg{margin:0 14px;padding:15px 16px;border-radius:16px;background:var(--card2);transition:.16s}
 .leg:focus-within{box-shadow:0 0 0 2px var(--acc)}
-.legTop{display:flex;justify-content:space-between;align-items:center;font-size:12.5px;color:var(--tx3);margin-bottom:9px}
+/* ۲۰ پیکسل: قد خودِ پیل (سطر بعدی) — بدونش، ظاهرشدنِ پیل خودِ سطر را کمی
+   بلندتر می‌کند و کارت یک تکانِ ریز می‌خورد. */
+.legTop{display:flex;justify-content:space-between;align-items:center;font-size:12.5px;color:var(--tx3);margin-bottom:9px;min-height:20px}
 .legTop b{font-weight:560;color:var(--acc);cursor:pointer}
 .frac{margin-left:6px;padding:2px 7px;border-radius:999px;background:var(--card);
   font-size:10.5px;font-weight:700;letter-spacing:.04em;color:var(--acc);
@@ -673,8 +699,11 @@ main{max-width:1140px;margin:0 auto;padding:8px 20px 56px;display:flex;flex-dire
 @keyframes sp{to{transform:rotate(360deg)}}
 
 /* ---------------- پیلِ «قابل‌فروش» بالای توکنِ دریافتی ---------------- */
-#balOut{margin-left:auto}
-.sellPill{display:inline-flex;align-items:center;gap:4px;margin-left:8px;padding:2px 8px;
+/* تصمیم مالک، ۲۴ سپتامبر: موجودی سمتِ دریافتی حذف شد — فقط سمتِ پرداختی
+   موجودی نشان می‌دهد. #balOut عمداً از DOM حذف نشده (جاوااسکریپت هنوز
+   می‌نویسدش)، فقط پنهان است؛ پیل حالا خودش لبه‌ی راست را نگه می‌دارد. */
+#balOut{display:none}
+.sellPill{display:inline-flex;align-items:center;gap:4px;margin-left:auto;padding:2px 8px;
   border-radius:999px;font-size:11px;font-weight:600;line-height:16px;white-space:nowrap;cursor:default}
 .sellPill.ok{color:var(--pos);background:color-mix(in srgb,var(--pos) 14%,transparent)}
 .sellPill.warn{color:var(--warn);background:color-mix(in srgb,var(--warn) 14%,transparent)}
@@ -686,14 +715,32 @@ main{max-width:1140px;margin:0 auto;padding:8px 20px 56px;display:flex;flex-dire
 .sellPill .dot{width:6px;height:6px;border-radius:50%;background:var(--tx3)}
 
 /* ---------------- نوار تقسیمِ مسیر ---------------- */
-.routeBar{margin:4px 14px 12px}
+/* حالا همیشه دیده می‌شود (به‌جز isDone و وقتی یک اعلان جایش را می‌گیرد)،
+   پس هیچ حاشیه‌ای خودش ندارد — فاصله‌ی بالا/پایین را #statusSlot می‌دهد.
+   🔴 عمداً نه ۴px بالا: اگر اینجا مانده بود، با display:none شدنِ نوار
+   (وقتی اعلانی جایش را می‌گیرد) آن حاشیه دیگر برای فروریختن نبود و
+   #statusSlot ۴ پیکسل بالاتر می‌نشست — دکمه بین جفت‌های مختلف تکان
+   می‌خورد، دقیقاً همان چیزی که کاوشگر [cta] گرفت. */
+.routeBar{margin:0 14px 0}
 .rbTop{display:flex;justify-content:space-between;font-size:12px;color:var(--tx2)}
 .rbTop .mono{color:var(--tx3)}
 .rbTrack{height:8px;border-radius:999px;overflow:hidden;display:flex;gap:2px;margin-top:8px;background:var(--card2)}
 .rbSeg{height:100%;min-width:3px}
-.rbLegend{display:flex;flex-wrap:wrap;gap:6px 12px;margin-top:8px;font-size:11.5px;color:var(--tx2)}
+/* یک‌خطی و بی‌شکست: با تعدادِ زیادِ پاره‌ها یا نام‌های بلند، راهنما به‌جای
+   شکستنِ کارت، با «…» بریده می‌شود؛ title کاملش را روی هاور نشان می‌دهد. */
+.rbLegend{display:flex;flex-wrap:nowrap;overflow:hidden;white-space:nowrap;gap:6px 12px;margin-top:8px;font-size:11.5px;color:var(--tx2)}
+.rbLegend>span{min-width:0;overflow:hidden;text-overflow:ellipsis}
 .rbLegend i{display:inline-block;width:7px;height:7px;border-radius:50%;margin-right:5px;vertical-align:1px}
 .rbLegend .mono{color:var(--tx3);margin-left:4px}
+.rbIdle{color:var(--tx3)}
+
+/* ---------------- جایگاهِ ثابتِ وضعیت (نوار مسیر + اعلان‌ها) ----------------
+   بازخوردِ مالک ۲۴ سپتامبر: فاصله‌ی خالی زیرِ فکت‌ها و پرش کارت رفع شد —
+   نوار مسیر و اعلان‌ها حالا یک جایگاهِ ثابت را با هم قسمت می‌کنند؛ اعلان
+   وقتی هست، نوار مسیر را می‌پوشاند نه اینکه کنارش بنشیند. */
+#statusSlot{margin:4px 0 12px;min-height:60px} /* روی گوشی هم: نوارِ مسیر همیشه ۶۰ است، پس رزرو هزینه‌ای ندارد و اعلانِ کوتاه کارت را جمع نمی‌کند */
+@media(min-width:941px){#statusSlot{min-height:64px}}
+#statusSlot:has(#notices:not(:empty)) #routeBar{display:none}
 
 /* ---------------- نتیجه‌ی سواپِ تأییدشده ---------------- */
 .swapDone{margin:6px 14px 14px;text-align:center}
@@ -706,14 +753,8 @@ main{max-width:1140px;margin:0 auto;padding:8px 20px 56px;display:flex;flex-dire
 .swapDone .acts .cta{flex:1;margin:0}
 .swapDone .acts a{text-decoration:none;display:inline-flex;align-items:center;justify-content:center}
 .swapDone .txl{font-size:11.5px;color:var(--tx3);margin-top:10px}
-section.card.isDone .facts,section.card.isDone #routeBar,section.card.isDone #revNote,
-section.card.isDone #notices,section.card.isDone #actBtn{display:none}
-
-/* ---------------- هاله‌ی کارتِ سواپ ----------------
-   تصمیم مالک، ۲۴ سپتامبر: هاله عمداً قابل‌حذف نگه داشته شده — برای حذفش
-   همین دو خط را پاک کن. */
-section.card.swapCard{box-shadow:var(--sh),-18px -14px 60px -12px rgb(34 239 246 / .20),18px 18px 64px -12px rgb(197 108 245 / .20)}
-[data-theme="dark"] section.card.swapCard{box-shadow:var(--sh),-18px -14px 60px -12px rgb(34 239 246 / .30),18px 18px 64px -12px rgb(197 108 245 / .30)}
+section.card.isDone .facts,section.card.isDone #statusSlot,section.card.isDone #revNote,
+section.card.isDone #actBtn{display:none}
 
 /* ---------------- حرکت — فقط وقتی کاربر آن را خواسته ---------------- */
 @media (prefers-reduced-motion:no-preference){
@@ -844,13 +885,9 @@ section.card.swapCard{box-shadow:var(--sh),-18px -14px 60px -12px rgb(34 239 246
 /* اعلان‌ها حالا زیر دکمه‌اند، پس فاصله باید پایین بیفتد نه بالا —
    وگرنه بین دکمه و اعلان یک شکاف دوبرابر می‌ماند. */
 .note{margin:0 14px 14px;padding:12px 14px;border-radius:14px;font-size:12.8px;line-height:1.55}
-/* جای اعلان از پیش رزرو می‌شود.
-   کارت سواپ به قد محتوایش است (کشیده نمی‌شود)، پس هر بار که اعلانی می‌آمد
-   یا می‌رفت کل کارت بالا و پایین می‌پرید. با یک ارتفاع کف، آمدن یک اعلان
-   یک‌خطی دیگر چیزی را تکان نمی‌دهد.
-   ⚠️ فقط در چیدمان دوستونه. روی موبایل کارت زیر نمودار است، جهشش آزاردهنده
-   نیست، و ۵۸ پیکسل رزروِ خالی روی نمایشگر کوچک گران است. */
-@media(min-width:941px){#notices{min-height:64px}}
+/* جای اعلان از پیش رزرو می‌شود؛ ارتفاعِ کف حالا روی #statusSlot است
+   (نوار مسیر + اعلان با هم)، نه فقط روی #notices — چون این دو حالا در
+   یک جایگاه با هم رقابت می‌کنند. جزئیات آنجا. */
 #revNote:empty{display:none}
 .note.warn{background:color-mix(in srgb,var(--warn) 11%,transparent);color:var(--warn)}
 .note.err{background:color-mix(in srgb,var(--neg) 11%,transparent);color:var(--neg)}
@@ -1140,6 +1177,7 @@ footer .fine{max-width:78ch;margin:46px 0 0;font-size:11.5px;color:var(--tx3);li
 </style>
 </head>
 <body>
+<div class="page-glow" aria-hidden="true" data-overlap-ok="fixed background glow at z-index:-1, always behind content"><div class="glow-blob b1"></div><div class="glow-blob b2"></div><div class="glow-blob b3"></div><div class="glow-blob b4"></div></div>
 
 <!-- ⚠️ اینجا و نه داخل کارت سواپ. دو دلیل، هر دو اندازه‌گیری‌شده:
      • کوت‌گیری با هر تغییر مبلغ `setNotice("")` می‌زند و هرچه در #notices
@@ -1274,7 +1312,11 @@ footer .fine{max-width:78ch;margin:46px 0 0;font-size:11.5px;color:var(--tx3);li
   var sentinel = document.createElement('div');
   sentinel.setAttribute('aria-hidden', 'true');
   sentinel.style.cssText = 'position:absolute;top:0;left:0;width:1px;height:1px;pointer-events:none';
-  document.body.insertBefore(sentinel, document.body.firstChild);
+  // ⚠️ باید بعد از .page-glow بنشیند، نه قبلش — آن دیو باید فرزندِ اولِ
+  // body بماند (کاوشگر [page glow] همین را می‌سنجد). موقعیتِ بصریِ سنتینل
+  // فرقی نمی‌کند: page-glow با position:fixed از جریانِ عادی بیرون است.
+  var glow = document.querySelector('.page-glow');
+  document.body.insertBefore(sentinel, glow ? glow.nextSibling : document.body.firstChild);
   new IntersectionObserver(function(entries){
     entries.forEach(function(e){ header.classList.toggle('scrolled', !e.isIntersecting); });
   }).observe(sentinel);
@@ -1335,25 +1377,21 @@ footer .fine{max-width:78ch;margin:46px 0 0;font-size:11.5px;color:var(--tx3);li
         <div class="fact"><span class="k">Protocol fee</span><span class="v mono" id="kFee">0.00%</span></div>
         <div class="fact" id="vsRow"><span class="k">vs Uniswap direct</span><span class="v mono" id="kVs">—</span></div>
       </div>
-      <div class="routeBar" id="routeBar" hidden><div class="rbTop"><span>Route</span><span class="mono" id="rbMeta"></span></div><div class="rbTrack" id="rbTrack"></div><div class="rbLegend" id="rbLegend"></div></div>
       <div class="swapDone" id="swapDone" hidden></div>
-      <!-- اعلان‌ها *بالای* دکمه‌اند و دکمه ته کارت می‌نشیند.
-           تاریخچه‌اش مهم است: یک بار همین ترتیب بود و به‌خاطر یک باگ عوض شد —
-           ارتفاع اعلان به جفت توکن بستگی دارد، پس دکمه با هر تعویض توکن تا
-           ۷۸ پیکسل بالا و پایین می‌پرید، درست همان لحظه‌ای که کاربر می‌خواهد
-           کلیک کند. آن موقع دکمه رفت بالای اعلان‌ها تا ثابت بماند.
-
-           حالا ترتیب برگشته ولی باگ برنگشته، چون ناحیه‌ی اعلان ارتفاع کف
-           دارد (`#notices{min-height}`): آمدن و رفتن یک اعلان معمولی دکمه را
-           تکان نمی‌دهد.
-           ⚠️ تنها ریسک باقی‌مانده: اعلانی بلندتر از آن ارتفاع کف باز هم دکمه
-           را جابه‌جا می‌کند. کاوشگر [cta] در run.py دقیقاً همین را می‌سنجد —
-           اگر روزی اعلان بلندتری اضافه شد، آنجا قرمز می‌شود و باید ارتفاع کف
-           بزرگ‌تر شود، نه اینکه ادعا شود مشکلی نیست. -->
       <div id="revNote" style="margin:0 14px 12px;padding:10px 12px;border-radius:12px;
         background:var(--card2);font-size:12px;color:var(--tx2);line-height:1.55"></div>
       <div id="devBanner" hidden></div>
-      <div id="notices"></div>
+      <!-- بازخوردِ مالک ۲۴ سپتامبر: نوار مسیر و اعلان‌ها یک جایگاهِ ثابت را
+           قسمت می‌کنند تا نه زیرِ فکت‌ها فضای خالی بماند و نه کارت با آمدن و
+           رفتنِ اعلان بالا و پایین بپرد. نوار مسیر حالا همیشه دیده می‌شود
+           (به‌جز isDone) — حالتِ بی‌مبلغش را paintRouteIdle() می‌نویسد — و
+           وقتی اعلانی هست جایش را می‌گیرد (#statusSlot:has در CSS).
+           اعلانی بلندتر از ارتفاعِ کف باز هم دکمه را جابه‌جا می‌کند؛ کاوشگر
+           [cta] در run.py همین را می‌سنجد. -->
+      <div id="statusSlot">
+        <div class="routeBar" id="routeBar"><div class="rbTop"><span>Route</span><span class="mono" id="rbMeta"></span></div><div class="rbTrack" id="rbTrack"></div><div class="rbLegend" id="rbLegend"></div></div>
+        <div id="notices"></div>
+      </div>
       <!-- متنِ اولیه باید با هدر یکی باشد. تا وقتی کیف پول وصل نیست، چیزی
            که از کاربر خواسته می‌شود «وصل کردن» است، نه «مبلغ را بنویس» —
            هدر همین را از همان اول می‌گوید (#connectBtn، خط بالاتر)، ولی این
@@ -4173,13 +4211,23 @@ async function tokenExitFallback(seq,why){
   else renderRoundTrip($("tk-exitBox"),{state:"unknown",reason:REASON[why]||REASON.timeout});
 }
 
+/* تنها نویسنده‌ی حالتِ بی‌مبلغِ نوار مسیر — نوار حالا هیچ‌وقت hidden نمی‌شود
+   (به‌جز isDone)، پس هر جا قبلاً routeBar.hidden=true می‌نوشت، حالا همین را
+   صدا می‌زند. */
+function paintRouteIdle(){
+  $("rbMeta").textContent="—";
+  $("rbTrack").innerHTML="";
+  $("rbLegend").innerHTML='<span class="rbIdle">Enter an amount to see the route</span>';
+  $("rbLegend").title="";
+}
+
 let qTimer=null;
 function scheduleQuote(){
   hideSwapDone();
   clearTimeout(qTimer);currentPlan=null;
   $(mode==="exactIn"?"amtOut":"amtIn").value="";
   $("routeWrap").style.display="none";
-  $("routeBar").hidden=true;
+  paintRouteIdle();
   ["kRate","kImpact","kMin","kVs"].forEach(k=>$(k).textContent="—");
   exitSeq++;renderExit(null);
   tkExitSeq++;clearTimeout(tkExitTimer);tkExitTimer=null;
@@ -4465,18 +4513,21 @@ function renderPlan(plan,reverse){
 
   // همان اعدادِ share بالا، این‌بار برای نوارِ تقسیمِ رنگی و راهنمایش.
   // رنگ به‌تنهایی حامل چیزی نیست — راهنما همیشه نام + درصد هم دارد.
-  let rbSegs="",rbLeg="";
+  let rbSegs="",rbLeg="",rbLegTitle="";
   plan.parts.forEach((p,i)=>{
     const share=Number((p.amountIn*10000n)/plan.totalIn)/100;
     const color=VENUE_COLOR[p.route.hops[0].venue.dex.id]||"var(--tx3)";
     rbSegs+=`<div class="rbSeg" style="background:${color};flex:0 0 ${share}%;animation-delay:${i*60}ms"></div>`;
     const label=p.route.hops.map(x=>esc(venueLabel(x.venue))).join(" → ");
     rbLeg+=`<span><i style="background:${color}"></i>${label}<span class="mono">${share.toFixed(0)}%</span></span>`;
+    // متنِ ساده‌ی همان راهنما، بدون HTML — برای title، که سطرِ بریده‌شده را
+    // با هاور قابل‌خواندن می‌کند.
+    rbLegTitle+=(rbLegTitle?", ":"")+plan.parts[i].route.hops.map(x=>venueLabel(x.venue)).join(" → ")+" "+share.toFixed(0)+"%";
   });
   $("rbTrack").innerHTML=rbSegs;
   $("rbLegend").innerHTML=rbLeg;
+  $("rbLegend").title=rbLegTitle;
   $("rbMeta").textContent=plan.parts.length>1?plan.parts.length+" venues · split":"1 venue";
-  $("routeBar").hidden=false;
   paintSellPill("wait");
 
   let n="";
@@ -6282,6 +6333,7 @@ $("copyAddrBtn").onclick=(e)=>{
 
 (async function(){
   applyTheme();
+  paintRouteIdle();
   /* سولانا فقط-چک باید همین اول تشخیص داده شود — پیش از wire() (که خودش
      scanWallets صدا می‌زند، فقط اگر solanaReadOnly=false باشد) و پیش از
      هر تلاشی برای بارگذاری ethers. الگو با همان SOL_MINT در

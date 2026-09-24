@@ -3048,9 +3048,7 @@ async def main():
             const pill = document.getElementById("sellPill");
             const mk = (state, lossPct) => ({state, lossPct, recovered: null, reason: null});
             const snap = () => ({cls: pill.className.split(" "), text: pill.textContent, hidden: pill.hidden,
-                display: getComputedStyle(pill).display,
-                balRight: document.getElementById("balOut").getBoundingClientRect().right,
-                btnRight: document.getElementById("tokOutBtn").getBoundingClientRect().right});
+                display: getComputedStyle(pill).display});
             const out = {};
             renderExit(mk("verified", 0.3));  out.ok03 = snap();
             renderExit(mk("estimated", 8));   out.warn8 = snap();
@@ -3065,16 +3063,25 @@ async def main():
             return out;
         }""")
 
+        # بازخوردِ مالک ۲۴ سپتامبر: موجودیِ سمتِ دریافتی حذف شد (فقط سمتِ
+        # پرداختی موجودی نشان می‌دهد)، پس «۸px فاصله‌ی موجودی→پیل» و «موجودی
+        # روی لبه‌ی دکمه وقتی پیل پنهان است» دیگر معنا ندارند — این دو چک
+        # برداشته شدند؛ جایشان: #balOut همیشه display:none است، و نوشتنِ متن
+        # در #balOut (که جاوااسکریپت هنوز انجامش می‌دهد) جای پیل را عوض نمی‌کند.
         async def sell_pill_geometry(width):
             gp = await b.new_page(viewport={"width": width, "height": 900}, color_scheme="dark")
             await gp.goto(URL); await gp.wait_for_timeout(900)
             geo = await gp.evaluate("""() => {
                 paintSellPill("exit", {state: "estimated", lossPct: 2, recovered: null, reason: null});
                 const p = document.getElementById("sellPill"), btn = document.getElementById("tokOutBtn");
-                const bal = document.getElementById("balOut");
-                const pr = p.getBoundingClientRect(), br = bal.getBoundingClientRect();
-                return {pillRight: pr.right, btnRight: btn.getBoundingClientRect().right,
-                        gap: pr.left - br.right};
+                const balOut = document.getElementById("balOut");
+                const before = p.getBoundingClientRect();
+                const balOutDisplay = getComputedStyle(balOut).display;
+                balOut.textContent = "123.45";
+                const after = p.getBoundingClientRect();
+                return {pillRight: before.right, btnRight: btn.getBoundingClientRect().right,
+                        balOutDisplay,
+                        shift: Math.max(Math.abs(after.left - before.left), Math.abs(after.right - before.right))};
             }""")
             await gp.close()
             return geo
@@ -3082,14 +3089,14 @@ async def main():
         geo390 = await sell_pill_geometry(390)
 
         print("[sell pill] ok03=%s/%r warn8=%s no20=%s/%r blocked=%r noexit=%r unknown=%s/%r "
-              "implausible=%s hiddenNull=%s | geom 1440 pill=%.1f btn=%.1f gap=%.1f "
-              "390 pill=%.1f btn=%.1f gap=%.1f"
+              "implausible=%s hiddenNull=%s | geom 1440 pill=%.1f btn=%.1f balOutDisplay=%s shift=%.2f "
+              "390 pill=%.1f btn=%.1f balOutDisplay=%s shift=%.2f"
               % (sell_pill["ok03"]["cls"], sell_pill["ok03"]["text"], sell_pill["warn8"]["cls"],
                  sell_pill["no20"]["cls"], sell_pill["no20"]["text"], sell_pill["blocked"]["text"],
                  sell_pill["noexit"]["text"], sell_pill["unknown"]["cls"], sell_pill["unknown"]["text"],
                  sell_pill["implausible"]["cls"], sell_pill["hiddenNull"]["hidden"],
-                 geo1440["pillRight"], geo1440["btnRight"], geo1440["gap"],
-                 geo390["pillRight"], geo390["btnRight"], geo390["gap"]))
+                 geo1440["pillRight"], geo1440["btnRight"], geo1440["balOutDisplay"], geo1440["shift"],
+                 geo390["pillRight"], geo390["btnRight"], geo390["balOutDisplay"], geo390["shift"]))
         assert "ok" in sell_pill["ok03"]["cls"] and "99.7% back" in sell_pill["ok03"]["text"], sell_pill["ok03"]
         assert "warn" in sell_pill["warn8"]["cls"], sell_pill["warn8"]
         assert "no" in sell_pill["no20"]["cls"] and "Sellable" in sell_pill["no20"]["text"], sell_pill["no20"]
@@ -3103,16 +3110,16 @@ async def main():
         # .sellPill[hidden]{display:none} یک قرصِ خالیِ نامرئی جا می‌گیرد و موجودی را هل می‌دهد.
         assert sell_pill["hiddenNull"]["display"] == "none", \
             "a hidden sell pill must not take space (display=%s)" % sell_pill["hiddenNull"]["display"]
-        assert abs(sell_pill["hiddenNull"]["balRight"] - sell_pill["hiddenNull"]["btnRight"]) <= 1, \
-            "with the pill hidden the balance must sit at the token button's right edge: %s" % sell_pill["hiddenNull"]
         assert abs(geo1440["pillRight"] - geo1440["btnRight"]) <= 1, \
             "sell pill right edge does not track #tokOutBtn at 1440px: %s" % geo1440
         assert abs(geo390["pillRight"] - geo390["btnRight"]) <= 1, \
             "sell pill right edge does not track #tokOutBtn at 390px: %s" % geo390
-        assert abs(geo1440["gap"] - 8) <= 2, \
-            "balance -> pill gap is not the 8px the design calls for at 1440px: %s" % geo1440
-        assert abs(geo390["gap"] - 8) <= 2, \
-            "balance -> pill gap is not the 8px the design calls for at 390px: %s" % geo390
+        assert geo1440["balOutDisplay"] == "none", "#balOut must be display:none at 1440px: %s" % geo1440
+        assert geo390["balOutDisplay"] == "none", "#balOut must be display:none at 390px: %s" % geo390
+        assert geo1440["shift"] <= 0.5, \
+            "writing a wallet-balance string into #balOut moved the sell pill at 1440px: %s" % geo1440
+        assert geo390["shift"] <= 0.5, \
+            "writing a wallet-balance string into #balOut moved the sell pill at 390px: %s" % geo390
 
         # ---- [route bar] نوارِ تقسیمِ مسیر ----
         # مبلغِ ۹۰۰٬۰۰۰ بالاتر تصادفاً ۵۰/۵۰ تقسیم می‌شود — تفاوتِ عرض را
@@ -3136,20 +3143,39 @@ async def main():
                 meta: document.getElementById("rbMeta").textContent
             };
         }""")
-        after_schedule_hidden = await pg.evaluate(
-            """() => { scheduleQuote(); return document.getElementById("routeBar").hidden; }""")
+        # بازخوردِ مالک ۲۴ سپتامبر: نوار مسیر دیگر هیچ‌وقت hidden نمی‌شود —
+        # scheduleQuote حالا حالتِ بی‌مبلغش را می‌کشد (paintRouteIdle)، نه
+        # اینکه پنهانش کند.
+        after_schedule = await pg.evaluate("""() => {
+            scheduleQuote();
+            return {
+                hidden: document.getElementById("routeBar").hidden,
+                meta: document.getElementById("rbMeta").textContent,
+                segCount: document.getElementById("rbTrack").children.length,
+                legend: document.getElementById("rbLegend").textContent.trim()
+            };
+        }""")
         max_diff = max(abs(w - e) for w, e in zip(route_bar["widths"], route_bar["expected"]))
         print("[route bar] visible=%s parts=%s segments=%s max width diff=%.2fpx legend=%s meta=%r "
-              "hidden after scheduleQuote=%s"
+              "after scheduleQuote: hidden=%s meta=%r segments=%s legend=%r"
               % (not route_bar["hidden"], route_bar["partsCount"], route_bar["segCount"], max_diff,
-                 route_bar["legendTexts"], route_bar["meta"], after_schedule_hidden))
+                 route_bar["legendTexts"], route_bar["meta"],
+                 after_schedule["hidden"], after_schedule["meta"], after_schedule["segCount"],
+                 after_schedule["legend"]))
         assert not route_bar["hidden"], "routeBar must be visible once a plan renders"
         assert route_bar["segCount"] == route_bar["partsCount"], \
             "segment count %s does not match plan.parts.length %s" % (route_bar["segCount"], route_bar["partsCount"])
         assert max_diff <= 1.5, "segment widths are not proportional to their share: %s" % route_bar
         assert all(t and re.search(r"\d+%", t) for t in route_bar["legendTexts"]), \
             "every legend item must show a name and a percent: %s" % route_bar["legendTexts"]
-        assert after_schedule_hidden, "routeBar must hide again once scheduleQuote resets the plan"
+        assert not after_schedule["hidden"], \
+            "routeBar must stay visible (never hidden) after scheduleQuote resets the plan: %s" % after_schedule
+        assert after_schedule["meta"] == "—", \
+            "idle route bar meta must read '—': %r" % after_schedule["meta"]
+        assert after_schedule["segCount"] == 0, \
+            "idle route bar must have no segments: %s" % after_schedule["segCount"]
+        assert "Enter an amount to see the route" in after_schedule["legend"], \
+            "idle route bar must show the idle legend text: %r" % after_schedule["legend"]
 
         # ---- [swap done] بلوکِ نتیجه بعد از یک سواپِ تأییدشده ----
         swap_done_1 = await pg.evaluate("""() => {
@@ -3197,56 +3223,100 @@ async def main():
         assert after_second, "scheduleQuote must hide #swapDone again"
         await pg.fill("#amtIn", "900000"); await pg.wait_for_timeout(3200)
 
-        # ---- [swap halo] هالهٔ قابل‌حذفِ کارتِ سواپ ----
+        # ---- [swap halo] هالهٔ حذف‌شدهٔ کارتِ سواپ ----
+        # بازخوردِ مالک ۲۴ سپتامبر: هاله برداشته شد. کاوشگر حالا می‌سنجد که
+        # سایه‌ی محاسبه‌شده‌ی کارتِ سواپ دقیقاً همان سایه‌ی کارتِ نمودار
+        # (اولین .card در .row.hero) است — یعنی هیچ هاله‌ای نمانده.
         async def halo_probe(color_scheme):
             hp = await b.new_page(viewport={"width": 1100, "height": 900}, color_scheme=color_scheme)
             await hp.goto(URL); await hp.wait_for_timeout(900)
             data = await hp.evaluate("""() => {
-                const card = document.querySelector("section.card.swapCard");
-                const before = card.getBoundingClientRect();
-                const shadow = getComputedStyle(card).boxShadow;
-                const cx = before.left + before.width / 2, cy = before.top + before.height / 2;
-                const insideBefore = card.contains(document.elementFromPoint(cx, cy));
-                const style = document.createElement("style");
-                style.textContent = "section.card.swapCard{box-shadow:var(--sh) !important}";
-                document.head.appendChild(style);
-                const after = card.getBoundingClientRect();
-                const insideAfter = card.contains(document.elementFromPoint(cx, cy));
-                style.remove();
+                const swap = document.querySelector("section.card.swapCard");
+                const chart = document.querySelector(".row.hero > .card");
                 return {
-                    shadow,
-                    rectDiff: Math.max(
-                        Math.abs(before.width - after.width), Math.abs(before.height - after.height),
-                        Math.abs(before.top - after.top), Math.abs(before.left - after.left)),
-                    insideBefore, insideAfter
+                    swapShadow: getComputedStyle(swap).boxShadow,
+                    chartShadow: getComputedStyle(chart).boxShadow
                 };
             }""")
             await hp.close()
             return data
         halo_dark = await halo_probe("dark")
         halo_light = await halo_probe("light")
-        def has_halo_colors(shadow):
-            # ⚠️ کرومیوم box-shadow را با کانالِ آلفا همیشه به‌صورت rgba(...)
-            # سریالایز می‌کند، نه rgb(...) — پس با یا بدونِ «a» می‌سنجیم؛
-            # عددهای رنگ همان‌هایی هستند که در CSS نوشته شده‌اند.
-            return re.search(r"rgba?\(34, 239, 246", shadow) is not None \
-                and re.search(r"rgba?\(197, 108, 245", shadow) is not None
-        print("[swap halo] dark has-both=%s light has-both=%s | rect diff dark=%.2fpx light=%.2fpx | "
-              "inside(before/after) dark=%s/%s light=%s/%s"
-              % (has_halo_colors(halo_dark["shadow"]), has_halo_colors(halo_light["shadow"]),
-                 halo_dark["rectDiff"], halo_light["rectDiff"],
-                 halo_dark["insideBefore"], halo_dark["insideAfter"],
-                 halo_light["insideBefore"], halo_light["insideAfter"]))
-        assert has_halo_colors(halo_dark["shadow"]), \
-            "dark swap-card box-shadow is missing an accent: %s" % halo_dark["shadow"]
-        assert has_halo_colors(halo_light["shadow"]), \
-            "light swap-card box-shadow is missing an accent: %s" % halo_light["shadow"]
-        assert halo_dark["rectDiff"] <= 0.5 and halo_light["rectDiff"] <= 0.5, \
-            "the halo box-shadow moved the card's geometry: dark=%.2f light=%.2f" \
-            % (halo_dark["rectDiff"], halo_light["rectDiff"])
-        assert halo_dark["insideBefore"] and halo_dark["insideAfter"] and \
-               halo_light["insideBefore"] and halo_light["insideAfter"], \
-            "the card centre must still hit-test inside the card, with or without the halo"
+        print("[swap halo] removed: dark swap=%r chart=%r equal=%s | light swap=%r chart=%r equal=%s"
+              % (halo_dark["swapShadow"], halo_dark["chartShadow"],
+                 halo_dark["swapShadow"] == halo_dark["chartShadow"],
+                 halo_light["swapShadow"], halo_light["chartShadow"],
+                 halo_light["swapShadow"] == halo_light["chartShadow"]))
+        assert halo_dark["swapShadow"] == halo_dark["chartShadow"], \
+            "dark: swap card box-shadow still differs from the chart card's — halo not removed: %s vs %s" \
+            % (halo_dark["swapShadow"], halo_dark["chartShadow"])
+        assert halo_light["swapShadow"] == halo_light["chartShadow"], \
+            "light: swap card box-shadow still differs from the chart card's — halo not removed: %s vs %s" \
+            % (halo_light["swapShadow"], halo_light["chartShadow"])
+
+        # ---- [page glow] درخششِ سراسریِ صفحه (وامِ آزمایشیِ صفحه‌ی معرفی) ----
+        async def glow_probe(color_scheme):
+            gp = await b.new_page(viewport={"width": 1100, "height": 900}, color_scheme=color_scheme)
+            await gp.goto(URL); await gp.wait_for_timeout(900)
+            data = await gp.evaluate("""() => {
+                const glow = document.body.firstElementChild;
+                const isGlow = !!glow && glow.classList.contains("page-glow");
+                const cs = isGlow ? getComputedStyle(glow) : null;
+                const blobs = isGlow ? [...glow.querySelectorAll(".glow-blob")] : [];
+                const blobOpacity = blobs.length ? getComputedStyle(blobs[0]).opacity : null;
+                const swap = document.querySelector("section.card.swapCard");
+                const btn = document.getElementById("actBtn");
+                const sr = swap.getBoundingClientRect(), br = btn.getBoundingClientRect();
+                const scx = sr.left + sr.width / 2, scy = sr.top + sr.height / 2;
+                const bcx = br.left + br.width / 2, bcy = br.top + br.height / 2;
+                // هاله z-index:-1 و pointer-events:none است — کارت و دکمه باید
+                // همچنان از همان نقطه hit-test شوند، نه خودِ هاله.
+                const insideAtSwap = swap.contains(document.elementFromPoint(scx, scy));
+                const insideAtBtn = btn.contains(document.elementFromPoint(bcx, bcy));
+                const before = swap.getBoundingClientRect();
+                const style = document.createElement("style");
+                style.textContent = ".page-glow{display:none!important}";
+                document.head.appendChild(style);
+                const after = swap.getBoundingClientRect();
+                style.remove();
+                return {
+                    isGlow, position: cs ? cs.position : null, zIndex: cs ? cs.zIndex : null,
+                    pointerEvents: cs ? cs.pointerEvents : null, blobCount: blobs.length,
+                    blobOpacity, insideAtSwap, insideAtBtn,
+                    rectDiff: Math.max(
+                        Math.abs(before.width - after.width), Math.abs(before.height - after.height),
+                        Math.abs(before.top - after.top), Math.abs(before.left - after.left))
+                };
+            }""")
+            await gp.close()
+            return data
+        glow_dark = await glow_probe("dark")
+        glow_light = await glow_probe("light")
+        print("[page glow] dark: first-child=%s position=%s z-index=%s pointer-events=%s blobs=%s "
+              "opacity=%s inside(swap/btn)=%s/%s rectDiff=%.2f | light: opacity=%s inside(swap/btn)=%s/%s "
+              "rectDiff=%.2f"
+              % (glow_dark["isGlow"], glow_dark["position"], glow_dark["zIndex"], glow_dark["pointerEvents"],
+                 glow_dark["blobCount"], glow_dark["blobOpacity"], glow_dark["insideAtSwap"],
+                 glow_dark["insideAtBtn"], glow_dark["rectDiff"], glow_light["blobOpacity"],
+                 glow_light["insideAtSwap"], glow_light["insideAtBtn"], glow_light["rectDiff"]))
+        assert glow_dark["isGlow"] and glow_light["isGlow"], \
+            "the .page-glow div must be the first child of <body>"
+        assert glow_dark["position"] == "fixed", "page-glow must be position:fixed: %s" % glow_dark["position"]
+        assert glow_dark["zIndex"] == "-1", "page-glow must be z-index:-1: %s" % glow_dark["zIndex"]
+        assert glow_dark["pointerEvents"] == "none", \
+            "page-glow must be pointer-events:none: %s" % glow_dark["pointerEvents"]
+        assert glow_dark["blobCount"] == 4, "page-glow must have 4 .glow-blobs: %s" % glow_dark["blobCount"]
+        assert abs(float(glow_dark["blobOpacity"]) - 0.26) < 0.01, \
+            "dark .glow-blob opacity must be .26: %s" % glow_dark["blobOpacity"]
+        assert abs(float(glow_light["blobOpacity"]) - 0.14) < 0.01, \
+            "light .glow-blob opacity must be .14: %s" % glow_light["blobOpacity"]
+        assert glow_dark["insideAtSwap"] and glow_dark["insideAtBtn"], \
+            "the page glow must not block hit-testing of the swap card / action button: %s" % glow_dark
+        assert glow_light["insideAtSwap"] and glow_light["insideAtBtn"], \
+            "the page glow must not block hit-testing of the swap card / action button: %s" % glow_light
+        assert glow_dark["rectDiff"] <= 0.5 and glow_light["rectDiff"] <= 0.5, \
+            "hiding .page-glow moved the swap card's geometry: dark=%.2f light=%.2f" \
+            % (glow_dark["rectDiff"], glow_light["rectDiff"])
 
         # پاک کردن کیف پول ساختگی تا تست‌های بعدی حالت «بدون کیف پول» ببینند
         await pg.evaluate("""() => {
@@ -5407,6 +5477,110 @@ async def main():
                 ("making the swap card taller dragged the chart from %s to %s — the chart is "
                  "still sizing itself from the row, so any change in the card next to it will "
                  "move it again" % (steady["back"], steady["whileNeighbourTaller"]))
+
+        # ---- [card steady] جایگاه ثابتِ وضعیت — نه فضای خالی، نه پرش ----
+        # بازخوردِ مالک ۲۴ سپتامبر: نوار مسیر همیشه دیده می‌شود و یک‌خطی/بی‌شکست
+        # است (rbLegend nowrap+ellipsis)، پس ارتفاعش با محتوا عوض نمی‌شود؛
+        # #statusSlot روی دسکتاپ ارتفاع کف ۶۴ دارد، پس هیچ حالتی (نه بی‌مبلغ،
+        # نه کوت‌شده، نه هیچ‌کدام از حالت‌های پیل، نه یک اعلانِ کوتاه) کارت را
+        # تکان نمی‌دهد. موبایل ارتفاعِ کف ندارد؛ چون نوار مسیر خودش ثابت است
+        # همه‌ی حالت‌ها به‌جز اعلان همچنان باید برابر باشند — فقط اعلان (که
+        # شکلی جدا از نوار مسیر دارد) ممکن است ارتفاعِ دیگری بدهد.
+        async def card_steady(width):
+            sp = await b.new_page(viewport={"width": width, "height": 900}, color_scheme="dark")
+            await sp.goto(URL)
+            await sp.wait_for_function("() => typeof E !== 'undefined' && !!E", timeout=15000)
+            await sp.wait_for_timeout(300)
+            data = await sp.evaluate("""() => {
+                const swap = document.querySelector("section.card.swapCard");
+                const btn = document.getElementById("actBtn");
+                const bar = document.getElementById("routeBar");
+                const snap = () => ({
+                    h: Math.round(swap.getBoundingClientRect().height),
+                    top: Math.round(btn.getBoundingClientRect().top),
+                    barH: Math.round(bar.getBoundingClientRect().height)
+                });
+                const out = {};
+
+                setNotice(""); paintSellPill("hidden"); paintRouteIdle();
+                out.idle = snap();
+
+                const unit = (t) => 10n ** BigInt(t.decimals);
+                const plan1 = {
+                    totalIn: 1000n * unit(tokenIn), totalOut: 1000n * unit(tokenOut),
+                    impact: 0.2, stats: {rpcFailed: 0, attempted: 1},
+                    parts: [{amountIn: 1000n * unit(tokenIn), route: {hops: [
+                        {tokenIn, tokenOut, venue: {dex: {kind: KIND.V3, id: "uniswap-v3", name: "Uniswap V3"}, feeTier: 3000}}
+                    ]}}]
+                };
+                renderPlan(plan1);
+                out.quoted1 = snap();
+
+                const partAmt = (1000n * unit(tokenIn)) / 3n;
+                const longVenue = (n) => ({dex: {kind: KIND.V3, id: "venue" + n,
+                    name: "A Very Long Aggregator Venue Name Number " + n}, feeTier: 3000});
+                const plan3 = {
+                    totalIn: partAmt * 3n, totalOut: 1000n * unit(tokenOut),
+                    impact: 0.4, stats: {rpcFailed: 0, attempted: 3},
+                    parts: [1, 2, 3].map(n => ({amountIn: partAmt,
+                        route: {hops: [{tokenIn, tokenOut, venue: longVenue(n)}]}}))
+                };
+                renderPlan(plan3);
+                out.quoted3 = snap();
+
+                // این سه حالتِ بعدی فقط پیل را عوض می‌کنند — نوار مسیرِ همین
+                // کوتِ سه‌پاره‌ای باید سرِ جایش بماند، نه یک اعلانِ باقی‌مانده
+                // (renderPlan خودش با impact بالا یک اعلان می‌ساخت؛ اینجا
+                // عمداً پاک نگه داشته می‌شود).
+                setNotice("");
+                paintSellPill("exit", {state: "verified", lossPct: 0.3, recovered: null, reason: null});
+                out.pillOk = snap();
+                paintSellPill("exit", {state: "estimated", lossPct: 8, recovered: null, reason: null});
+                out.pillWarn = snap();
+                paintSellPill("exit", {state: "estimated", lossPct: 20, recovered: null, reason: null});
+                out.pillNo = snap();
+                paintSellPill("exit", {state: "unknown", lossPct: null, recovered: null, reason: null});
+                out.pillUnk = snap();
+
+                paintSellPill("hidden");
+                setNotice(note("warn", "Just a short one-line notice."));
+                out.notice = snap();
+                setNotice("");
+
+                return out;
+            }""")
+            await sp.close()
+            return data
+        steady_desk = await card_steady(1440)
+        steady_mob = await card_steady(390)
+
+        def fmt_states(d):
+            return " ".join("%s=h%s/t%s/bar%s" % (k, v["h"], v["top"], v["barH"]) for k, v in d.items())
+        print("[card steady] desktop 1440: %s" % fmt_states(steady_desk))
+        print("[card steady] mobile 390: %s" % fmt_states(steady_mob))
+
+        desk_h = {k: v["h"] for k, v in steady_desk.items()}
+        desk_top = {k: v["top"] for k, v in steady_desk.items()}
+        assert max(desk_h.values()) - min(desk_h.values()) <= 1, \
+            "desktop 1440: swap card height moves between states: %s" % desk_h
+        assert max(desk_top.values()) - min(desk_top.values()) <= 1, \
+            "desktop 1440: #actBtn top moves between states: %s" % desk_top
+
+        # ۲۴ سپتامبر: روی گوشی هم رزروِ ۶۰پیکسلی هست، پس حالتِ اعلان هم باید ثابت بماند
+        mob_no_notice = dict(steady_mob)
+        mob_h = {k: v["h"] for k, v in mob_no_notice.items()}
+        mob_top = {k: v["top"] for k, v in mob_no_notice.items()}
+        assert max(mob_h.values()) - min(mob_h.values()) <= 1, \
+            "mobile 390: swap card height moves between non-notice states: %s" % mob_h
+        assert max(mob_top.values()) - min(mob_top.values()) <= 1, \
+            "mobile 390: #actBtn top moves between non-notice states: %s" % mob_top
+
+        # ۶۴ پیکسل: کفِ رزروشده‌ی #statusSlot روی دسکتاپ. اگر نوار مسیر از آن
+        # بلندتر شود، باید margin-bottom اش صفر شود (بالا) تا از رزرو رد نشود.
+        for k, v in steady_desk.items():
+            if k != "notice":
+                assert v["barH"] <= 64, \
+                    "routeBar content is %spx tall in state %r — taller than the 64px slot reserves" % (v["barH"], k)
 
         # عرض‌های میانی جایی است که هدر معمولاً می‌شکند: ناوبری هنوز در هدر
         # است ولی جا تنگ شده. هیچ چیزی نباید از لبه بزند بیرون یا بپیچد.
