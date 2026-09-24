@@ -104,6 +104,26 @@ export const V4_LOG_RPCS = [
   "https://mainnet.base.org",
 ];
 
+/* ۲۴ سپتامبر ۲۰۲۶ — هر سه‌ی بالا از داخلِ کلادفلر روی eth_getLogs رد شدند
+   (tenderly ۴۲۹ حتی روی getBlock، publicnode ۴۰۳، base.org ۴۲۹)، پس هیچ ورودیِ
+   تازه یا قدیمیِ v4 ایندکس نمی‌شد و «استخرِ خالی» برای WHEN برنگشت.
+   این فهرست فقط کاندیدِ *اندازه‌گیری* است، برای GET /vd/logrpc — ایندکس‌کننده
+   (rpcCallBase) هرگز از آن استفاده نمی‌کند. هیچ‌کدام هنوز از کلادفلر سنجیده
+   نشده‌اند؛ فقط بعد از خواندنِ /vd/logrpc روی سایتِ زنده، برنده‌ها به
+   V4_LOG_RPCS بالا منتقل می‌شوند. */
+export const V4_LOG_RPC_CANDIDATES = [
+  "https://base-rpc.publicnode.com",
+  "https://base.llamarpc.com",
+  "https://1rpc.io/base",
+  "https://base.meowrpc.com",
+  "https://base.drpc.org",
+  "https://developer-access-mainnet.base.org",
+  "https://base-pokt.nodies.app",
+  "https://endpoints.omniatech.io/v1/base/mainnet/public",
+  "https://base.blockpi.network/v1/rpc/public",
+  "https://rpc.ankr.com/base",
+];
+
 /* واژه‌نامه‌ی بسته‌ی دلیل — ساختاری، هرگز متنِ پیام. جدا نگه‌داشتنِ
    rpc-down از no-log دقیقاً همان قاعده‌ای است که کلِ این پروژه رویش
    ساخته شده: no-log یعنی یک اندپوینت با یک آرایه‌ی خالیِ خوش‌شکل جواب داد —

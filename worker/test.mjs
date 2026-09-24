@@ -12131,6 +12131,126 @@ function stripAllowedWording(t) {
     + "classic honeypots on covered venues keep their nosell");
 }
 
+/* ---- GET /vd/logrpc — کدام RPC از داخلِ کلادفلر لاگ می‌دهد (۲۴ سپتامبر) ----
+   فقط شکلِ مسیر سنجیده می‌شود، با fetchِ جعلی؛ اینکه کدام اندپوینتِ واقعی
+   جواب می‌دهد فقط با خواندنِ /vd/logrpc روی سایتِ زنده معلوم می‌شود. */
+{
+  const idx = await import("./index.js");
+  const SECRET_PATH = "/v2/sEcReTkEy123";
+  const env = {
+    ASSETS: { fetch: async () => new Response("not found", { status: 404 }) },
+    BASE_RPC: "https://base-mainnet.g.alchemy.com" + SECRET_PATH + "?k=zz",
+  };
+  const cands = idx.logRpcCandidates(env);
+  const allHosts = [...v4.V4_LOG_RPCS, ...v4.V4_LOG_RPC_CANDIDATES].map((u) => new URL(u).hostname);
+  ok(cands.length === new Set([...v4.V4_LOG_RPCS, ...v4.V4_LOG_RPC_CANDIDATES]).size + 1,
+    "logRpcCandidates: every log RPC and candidate once, plus env.BASE_RPC, got " + cands.length);
+  ok(cands.filter((c) => c.env).length === 1 && cands.find((c) => c.env).h === "base-mainnet.g.alchemy.com",
+    "logRpcCandidates: env.BASE_RPC appears exactly once, flagged env:true");
+  ok(idx.logRpcCandidates({}).every((c) => !c.env), "logRpcCandidates: no BASE_RPC → no env row");
+  ok(!v4.V4_LOG_RPCS.some((u) => v4.V4_LOG_RPC_CANDIDATES.includes(u)),
+    "V4_LOG_RPC_CANDIDATES must not repeat V4_LOG_RPCS (measurement list only)");
+
+  const calls = [];
+  const HEAD = 0x3000000;
+  globalThis.fetch = async (url, init) => {
+    const u = String(url);
+    const host = new URL(u).hostname;
+    const body = JSON.parse(init.body);
+    calls.push({ host, method: body.method, params: body.params, url: u });
+    const J = (o, st) => new Response(JSON.stringify(o), { status: st || 200 });
+    if (host === "base.gateway.tenderly.co") return J({ error: "rate" }, 429);
+    if (host === "base.llamarpc.com") throw new Error("connect refused");
+    if (body.method === "eth_blockNumber") {
+      if (host === "base.meowrpc.com") return J({ jsonrpc: "2.0", id: 1, result: "latest" });
+      return J({ jsonrpc: "2.0", id: 1, result: "0x" + HEAD.toString(16) });
+    }
+    if (body.method === "eth_getLogs") {
+      const f = body.params[0];
+      const span = parseInt(f.toBlock, 16) - parseInt(f.fromBlock, 16);
+      if (host === "base.drpc.org" && span > 100) return J({ jsonrpc: "2.0", id: 1, error: { code: 35, message: "ranges over 10000 blocks" } });
+      if (host === "1rpc.io" && parseInt(f.toBlock, 16) < HEAD - 1000) return J({ jsonrpc: "2.0", id: 1, error: { code: -32000, message: "pruned" } });
+      return J({ jsonrpc: "2.0", id: 1, result: [{}, {}, {}] });
+    }
+    return J({ jsonrpc: "2.0", id: 1, result: null });
+  };
+  const res = await worker.fetch(new Request(ORIGIN + "/vd/logrpc",
+    { headers: { "cf-connecting-ip": "203.0.113.241" } }), env, {});
+  ok(res.status === 200, "/vd/logrpc should be 200 (got " + res.status + ")");
+  ok(res.headers.get("cache-control") === "no-store", "/vd/logrpc must never be cached");
+  const raw = await res.text();
+  const b = JSON.parse(raw);
+  ok(!raw.includes("sEcReTkEy123") && !raw.includes("k=zz") && !raw.includes("https://"),
+    "/vd/logrpc must never echo a URL, path or query — BASE_RPC carries its key there: " + raw.slice(0, 300));
+  ok(Array.isArray(b.endpoints) && b.endpoints.length === cands.length,
+    "/vd/logrpc: one row per candidate (" + cands.length + "), got " + (b.endpoints || []).length);
+  ok(calls.length <= idx.LOGRPC_SUBREQ_CAP && b.subreq && b.subreq.used === calls.length && b.subreq.cap === idx.LOGRPC_SUBREQ_CAP,
+    "/vd/logrpc never exceeds LOGRPC_SUBREQ_CAP (" + idx.LOGRPC_SUBREQ_CAP + ") and reports what it used: used=" +
+    (b.subreq && b.subreq.used) + " calls=" + calls.length);
+  ok(idx.LOGRPC_SUBREQ_CAP < 50, "LOGRPC_SUBREQ_CAP stays under Cloudflare's 50 subrequests");
+  for (const e of b.endpoints || []) {
+    ok(Object.keys(e).sort().join(",") === "env,h,steps", "/vd/logrpc row keys are h/env/steps: " + JSON.stringify(e).slice(0, 200));
+    ok(Array.isArray(e.steps) && e.steps.map((x) => x.s).join(",") === idx.LOGRPC_STEPS.join(","),
+      "/vd/logrpc steps are exactly LOGRPC_STEPS in order for " + e.h);
+  }
+  const R = (h) => (b.endpoints || []).find((e) => e.h === h && !e.env);
+  const S = (h, s) => { const r = R(h); return r && r.steps.find((x) => x.s === s); };
+  // اندپوینتِ سالم: n شمرده می‌شود، recent10 لازم نشد.
+  const pn = S("base-rpc.publicnode.com", "recent1k");
+  ok(pn && pn.ok === true && pn.n === 3, "a healthy endpoint reports ok:true and the log count n: " + JSON.stringify(pn));
+  ok(S("base-rpc.publicnode.com", "recent10").skipped === "not-needed", "recent10 only runs after an rpc error on recent1k");
+  // ۴۲۹ روی head → بقیه‌ی قدم‌ها no-head، بی‌درخواست.
+  ok(S("base.gateway.tenderly.co", "head").status === 429 && S("base.gateway.tenderly.co", "recent1k").skipped === "no-head",
+    "a 429 on head is reported with its status and the log steps are skipped (no-head)");
+  ok(!calls.some((c) => c.host === "base.gateway.tenderly.co" && c.method === "eth_getLogs"),
+    "no getLogs is sent to an endpoint whose head failed");
+  // پرتابِ شبکه‌ای → status 0.
+  ok(S("base.llamarpc.com", "head").ok === false && S("base.llamarpc.com", "head").status === 0, "a thrown fetch shows ok:false/status:0");
+  // head غیرِ هگز → shape، هرگز عدد ساختگی.
+  ok(S("base.meowrpc.com", "head").shape === "not-hex" && S("base.meowrpc.com", "recent1k").skipped === "no-head",
+    "a non-hex head is not-hex and never becomes a block number");
+  // سقفِ بازه: کدِ عددی بیرون می‌آید، و recent10 امتحان می‌شود.
+  ok(S("base.drpc.org", "recent1k").code === 35 && S("base.drpc.org", "recent10").ok === true,
+    "a range-capped endpoint surfaces its numeric code on recent1k and passes recent10: " + JSON.stringify(R("base.drpc.org")));
+  ok(!raw.includes("ranges over") && !raw.includes("pruned"), "error message text never surfaces, only numeric codes");
+  // نودِ هرس‌شده: اخیر آری، قدیم نه.
+  ok(S("1rpc.io", "recent1k").ok === true && S("1rpc.io", "old1k").ok === false && S("1rpc.io", "old1k").code === -32000,
+    "a pruned node answers recent1k but not old1k — the two are reported apart");
+  // پارامترها: PoolManager + Initialize، ۱۰۰۰ بلاک.
+  const lg = calls.find((c) => c.method === "eth_getLogs");
+  const f = lg && lg.params[0];
+  ok(f && f.address === v4.V4_POOL_MANAGER && f.topics.length === 1 && f.topics[0] === v4.V4_INITIALIZE_TOPIC &&
+    parseInt(f.toBlock, 16) - parseInt(f.fromBlock, 16) === 1000,
+    "recent1k asks PoolManager for Initialize logs over exactly 1000 blocks: " + JSON.stringify(f));
+  // BASE_RPC با کلیدش صدا زده شد ولی فقط میزبانش گزارش شد.
+  ok(calls.some((c) => c.url.includes(SECRET_PATH)) && (b.endpoints || []).some((e) => e.env && e.h === "base-mainnet.g.alchemy.com"),
+    "env.BASE_RPC is probed with its full URL but reported by hostname only");
+  // سقفِ زیر‌درخواست واقعاً می‌گیرد: همه‌ی getLogsها خطای JSON-RPC → هر اندپوینت ۴ تماس
+  // می‌خواهد (۱۴×۴=۵۶)؛ دقیقاً LOGRPC_SUBREQ_CAP زده می‌شود و بقیه skipped:"budget".
+  calls.length = 0;
+  globalThis.fetch = async (url, init) => {
+    const body = JSON.parse(init.body);
+    calls.push({ host: new URL(String(url)).hostname, method: body.method, url: String(url) });
+    if (body.method === "eth_blockNumber") return new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, result: "0x3000000" }));
+    return new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, error: { code: -32005, message: "x" } }));
+  };
+  const bb = await (await worker.fetch(new Request(ORIGIN + "/vd/logrpc",
+    { headers: { "cf-connecting-ip": "203.0.113.242" } }), env, {})).json();
+  ok(cands.length * 4 > idx.LOGRPC_SUBREQ_CAP, "the budget fixture must actually exceed the cap");
+  ok(calls.length === idx.LOGRPC_SUBREQ_CAP && bb.subreq.used === idx.LOGRPC_SUBREQ_CAP,
+    "/vd/logrpc stops at exactly LOGRPC_SUBREQ_CAP subrequests: calls=" + calls.length);
+  ok((bb.endpoints || []).some((e) => e.steps.some((x) => x.skipped === "budget")),
+    "steps beyond the cap are reported skipped:\"budget\", not dropped");
+  // ایندکس‌کننده دست نخورد: rpcCallBase فقط V4_LOG_RPCS را می‌زند.
+  calls.length = 0;
+  await rpcCallBase("eth_blockNumber", [], 50, null);
+  ok(calls.length > 0 && calls.every((c) => v4.V4_LOG_RPCS.includes(c.url)),
+    "the indexer's rpcCallBase still uses only V4_LOG_RPCS, never the measurement candidates");
+  console.log("[log rpc] GET /vd/logrpc probes every log RPC candidate plus env.BASE_RPC from inside the Worker "
+    + "(head, 1000 recent blocks, 1000 old blocks, 10 blocks only after an rpc error), hostname and numeric codes only, "
+    + "under " + idx.LOGRPC_SUBREQ_CAP + " subrequests; the indexer itself is unchanged");
+}
+
 console.log(fails === 0
   ? "[gt proxy] worker ok — " + REAL.length + " real paths proxied, " + BAD.length +
     " refused without touching the network, 429 passes through with CORS\n" +

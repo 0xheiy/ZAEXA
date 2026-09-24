@@ -41,7 +41,8 @@ import {
   fetchVerdictSol, VD_SOL_RPCS, VD_SOL_JUP_BASE, VD_SOL_PAYER,
   VD_SOL_RPC_METHODS, VD_SOL_RPC_PROBE_PARAMS, probeRpcMethod,
 } from "./verdict_sol.js";
-import { indexV4Keys, v4KvKey, V4_LOG_RPCS, V4_KEY_TTL_S, V4_MISS_TTL_S } from "./v4index.js";
+import { indexV4Keys, v4KvKey, V4_LOG_RPCS, V4_LOG_RPC_CANDIDATES, V4_KEY_TTL_S, V4_MISS_TTL_S,
+  V4_POOL_MANAGER, V4_INITIALIZE_TOPIC } from "./v4index.js";
 
 /* پراکسی باز نیست. فقط شکل مسیرهایی که خودِ سایت می‌زند اجازه دارد:
      networks/base/tokens/<addr>
@@ -1453,6 +1454,123 @@ async function diagVerdictV4(url, env) {
   return vdDone(200, body);
 }
 
+/* =====================================================================
+   GET /vd/logrpc — ماتریسِ «کدام اندپوینت لاگ می‌دهد»، از داخلِ خودِ Worker
+   =====================================================================
+   ۲۴ سپتامبر ۲۰۲۶: هر سه‌ی V4_LOG_RPCS از کلادفلر رد کردند و ایندکسِ v4
+   بی‌صدا ایستاد. اندازه‌گیری از ویندوزِ حسام یا از کانتینر شاهد نیست (همان
+   اندپوینت از WSL جواب می‌دهد و از کلادفلر ۴۰۳)؛ فقط همین‌جا.
+   برای هر کاندید (V4_LOG_RPCS + V4_LOG_RPC_CANDIDATES + env.BASE_RPC، بدونِ تکرار):
+     head      eth_blockNumber — کنترلِ مثبت: اندپوینت اصلاً زنده است؟
+     recent1k  eth_getLogs روی PoolManager، topic=Initialize، ۱۰۰۰ بلاکِ آخر
+     old1k     همان، ۱۰۰۰ بلاک حدودِ ۴٫۶ روز عقب‌تر (ایندکس‌کننده پنجره‌ی
+               ساختِ استخر را می‌پرسد، نه نوکِ زنجیره را — یک نودِ هرس‌شده
+               اولی را می‌دهد و دومی را نه)
+     recent10  فقط وقتی recent1k با خطای JSON-RPC رد شد: همان با ۱۰ بلاک —
+               تا «سقفِ بازه» از «متد بسته است» جدا شود.
+   n = تعدادِ لاگِ برگشتی. عددِ صفر روی recent1k مشکوک است (روی Base در هر
+   نیم‌ساعت استخرِ v4 تازه ساخته می‌شود) ولی خودِ این ابزار حکم نمی‌کند.
+   🔴 فقط hostname بیرون می‌رود — BASE_RPC کلید را در مسیر دارد. دلیلِ رد
+   فقط از کدهای عددی (وضعیتِ HTTP و کدِ JSON-RPC)، هرگز از متنِ پیام.
+   🔴 سقفِ زیر‌درخواست: کلادفلرِ رایگان ۵۰ زیر‌درخواست در هر درخواست دارد؛
+   بیش از LOGRPC_SUBREQ_CAP هرگز زده نمی‌شود و بقیه skipped:"budget" می‌گیرند.
+   هیچ‌چیز در KV نوشته نمی‌شود و ایندکس‌کننده هیچ تغییری نمی‌کند. */
+export const LOGRPC_SUBREQ_CAP = 46;
+export const LOGRPC_TIMEOUT_MS = 3000;
+export const LOGRPC_BUDGET_MS = 20000;
+export const LOGRPC_OLD_BACK = 200000; // حدودِ ۴٫۶ روز روی Base (بلاکِ ۲ ثانیه‌ای)
+export const LOGRPC_STEPS = Object.freeze(["head", "recent1k", "old1k", "recent10"]);
+
+export function logRpcCandidates(env) {
+  const out = [];
+  const seen = new Set();
+  const add = (u, isEnv) => {
+    let h;
+    try { h = new URL(u).hostname; } catch (e) { return; }
+    const k = isEnv ? "env:" + u : u; // BASE_RPC با کلیدِ خودش جداست حتی اگر میزبانش تکراری باشد
+    if (seen.has(k)) return;
+    seen.add(k);
+    out.push({ url: u, h, env: isEnv });
+  };
+  for (const u of V4_LOG_RPCS) add(u, false);
+  for (const u of V4_LOG_RPC_CANDIDATES) add(u, false);
+  const baseRpc = (env && typeof env.BASE_RPC === "string" && env.BASE_RPC) || "";
+  if (baseRpc) add(baseRpc, true);
+  return out;
+}
+
+async function diagLogRpc(env) {
+  const deadlineAt = Date.now() + LOGRPC_BUDGET_MS;
+  let used = 0;
+  const hex = (n) => "0x" + Math.max(0, n).toString(16);
+
+  async function call(rpcUrl, method, params) {
+    if (used >= LOGRPC_SUBREQ_CAP) return { skipped: "budget" };
+    if (Date.now() >= deadlineAt) return { skipped: "deadline" };
+    used++;
+    const t0 = Date.now();
+    const ac = new AbortController();
+    const timer = setTimeout(() => ac.abort(), LOGRPC_TIMEOUT_MS);
+    try {
+      const res = await fetch(rpcUrl, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
+        signal: ac.signal,
+      });
+      if (!res || res.status !== 200) return { ok: false, status: res ? res.status : 0, code: null, ms: Date.now() - t0 };
+      let body;
+      try { body = await res.json(); } catch (e) { return { ok: false, status: 200, code: null, ms: Date.now() - t0, shape: "body" }; }
+      if (!body || typeof body !== "object" || body.error) {
+        const code = body && body.error && typeof body.error === "object" &&
+          typeof body.error.code === "number" ? body.error.code : null;
+        return { ok: false, status: 200, code, ms: Date.now() - t0, rpcError: true };
+      }
+      return { ok: true, status: 200, code: null, ms: Date.now() - t0, result: body.result };
+    } catch (e) {
+      return { ok: false, status: 0, code: null, ms: Date.now() - t0 };
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+  const row = (s, r, extra) => r.skipped
+    ? { s, ok: null, status: null, code: null, ms: 0, skipped: r.skipped }
+    : { s, ok: r.ok, status: r.status, code: r.code, ms: r.ms, ...(extra || {}) };
+  const logsRow = (s, r) => {
+    if (r.ok && !Array.isArray(r.result)) return { s, ok: false, status: r.status, code: null, ms: r.ms, shape: "not-array" };
+    return row(s, r, r.ok ? { n: r.result.length } : null);
+  };
+  const logParams = (from, to) => [{
+    address: V4_POOL_MANAGER, topics: [V4_INITIALIZE_TOPIC], fromBlock: hex(from), toBlock: hex(to),
+  }];
+
+  const endpoints = await Promise.all(logRpcCandidates(env).map(async (c) => {
+    const steps = [];
+    const h0 = await call(c.url, "eth_blockNumber", []);
+    let head = null;
+    if (h0.ok && typeof h0.result === "string" && /^0x[0-9a-f]+$/i.test(h0.result)) head = parseInt(h0.result, 16);
+    steps.push(h0.ok && head === null
+      ? { s: "head", ok: false, status: 200, code: null, ms: h0.ms, shape: "not-hex" }
+      : row("head", h0));
+    if (head === null) {
+      for (const s of LOGRPC_STEPS.slice(1)) steps.push({ s, ok: null, status: null, code: null, ms: 0, skipped: "no-head" });
+      return { h: c.h, env: c.env, steps };
+    }
+    const tip = head - 5; // نوکِ زنجیره روی بعضی نودها هنوز لاگ ندارد
+    const r1 = await call(c.url, "eth_getLogs", logParams(tip - 1000, tip));
+    steps.push(logsRow("recent1k", r1));
+    const r2 = await call(c.url, "eth_getLogs", logParams(tip - LOGRPC_OLD_BACK - 1000, tip - LOGRPC_OLD_BACK));
+    steps.push(logsRow("old1k", r2));
+    if (r1.rpcError) {
+      steps.push(logsRow("recent10", await call(c.url, "eth_getLogs", logParams(tip - 10, tip))));
+    } else {
+      steps.push({ s: "recent10", ok: null, status: null, code: null, ms: 0, skipped: "not-needed" });
+    }
+    return { h: c.h, env: c.env, steps };
+  }));
+  return vdDone(200, { endpoints, subreq: { used, cap: LOGRPC_SUBREQ_CAP } });
+}
+
 async function diagVerdict(request, url, env, ctx) {
   /* همیشه اولین خط، پیش از هر بررسیِ دیگری — همان قاعده‌ای که /gt و /ev
      دارند: یک اسکریپتِ کوبنده نباید حتی شکلِ درخواست را هم مجانی بسنجد. */
@@ -1472,6 +1590,10 @@ async function diagVerdict(request, url, env, ctx) {
      بدشکل رد می‌شد و هرگز به این تشخیص نمی‌رسید. همان سطلِ نرخِ «vd» (بالای
      همین تابع) را می‌خورد، سطلِ جداگانه ندارد. */
   if (url.pathname.startsWith("/vd/v4/")) return diagVerdictV4(url, env);
+
+  /* GET /vd/logrpc — کدام RPC از *داخلِ کلادفلر* eth_getLogs را جواب می‌دهد.
+     همان سطلِ نرخِ «vd» بالا را می‌خورد. */
+  if (url.pathname === "/vd/logrpc") return diagLogRpc(env);
 
   /* GET /vd/passes — رونوشتِ خواندنیِ لاگِ گذر (report:passlog)، فقط برای
      اندازه‌گیری. متد/سطلِ نرخ همین بالای diagVerdict سنجیده شده، دوباره
