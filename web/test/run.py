@@ -3192,6 +3192,7 @@ async def main():
 
         # ---- [swap done] بلوکِ نتیجه بعد از یک سواپِ تأییدشده ----
         swap_done_1 = await pg.evaluate("""() => {
+            const cardBefore = Math.round(document.querySelector("section.card.swapCard").getBoundingClientRect().height);
             showSwapDone({paidTxt: "1 ETH", gotTxt: "≈ 2,500 USDC", vs: "+1.20%",
                           url: "https://basescan.org/tx/0xabc",
                           hash: "0x" + "ab".repeat(32), secs: 4.2});
@@ -3201,7 +3202,8 @@ async def main():
                 hidden: block.hidden, isDone: card.classList.contains("isDone"),
                 actBtnDisplay: getComputedStyle(document.getElementById("actBtn")).display,
                 factsDisplay: getComputedStyle(document.querySelector("section.card .facts")).display,
-                text: block.textContent
+                text: block.textContent,
+                cardBefore, cardAfter: Math.round(card.getBoundingClientRect().height)
             };
         }""")
         await pg.click("#swapAgain"); await pg.wait_for_timeout(150)
@@ -3209,7 +3211,8 @@ async def main():
             const block = document.getElementById("swapDone");
             const card = block.closest("section.card");
             return {hidden: block.hidden, isDone: card.classList.contains("isDone"),
-                    focused: document.activeElement && document.activeElement.id};
+                    focused: document.activeElement && document.activeElement.id,
+                    minH: card.style.minHeight};
         }""")
         after_second = await pg.evaluate("""() => {
             showSwapDone({paidTxt: "1 ETH", gotTxt: "≈ 2,500 USDC", vs: null,
@@ -3233,6 +3236,13 @@ async def main():
         assert after_again["hidden"] and not after_again["isDone"], \
             "#swapAgain must hide the block and drop .isDone"
         assert after_again["focused"] == "amtIn", "#swapAgain must focus #amtIn"
+        # ۲۴ سپتامبر: کارت بعد از سواپ نباید کوچک شود
+        print("[swap done] card height before=%s after=%s | height lock after swapAgain=%r"
+              % (swap_done_1["cardBefore"], swap_done_1["cardAfter"], after_again["minH"]))
+        assert abs(swap_done_1["cardAfter"] - swap_done_1["cardBefore"]) <= 1, \
+            "the swap card must keep its height when the result block shows: %s -> %s" \
+            % (swap_done_1["cardBefore"], swap_done_1["cardAfter"])
+        assert after_again["minH"] == "", "hideSwapDone must release the height lock: %r" % after_again["minH"]
         assert after_second, "scheduleQuote must hide #swapDone again"
         await pg.fill("#amtIn", "900000"); await pg.wait_for_timeout(3200)
 

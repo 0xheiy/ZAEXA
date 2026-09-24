@@ -740,6 +740,8 @@ main{max-width:1140px;margin:0 auto;padding:8px 20px 56px;display:flex;flex-dire
 .swapDone .acts .cta{flex:1;margin:0}
 .swapDone .acts a{text-decoration:none;display:inline-flex;align-items:center;justify-content:center}
 .swapDone .txl{font-size:11.5px;color:var(--tx3);margin-top:10px}
+section.card.isDone{display:flex;flex-direction:column}
+section.card.isDone #swapDone{flex:1 1 auto;display:flex;flex-direction:column;justify-content:center}
 section.card.isDone .facts,section.card.isDone #statusSlot,section.card.isDone #revNote,
 section.card.isDone #actBtn{display:none}
 
@@ -5668,8 +5670,15 @@ function showSwapDone({paidTxt,gotTxt,vs,url,hash,secs}){
       <a class="exitShare" href="${esc(url)}" target="_blank" rel="noopener">View on BaseScan</a>
     </div>
     <div class="txl">Tx ${esc(shortAddr(hash))} · confirmed in ${esc(secs.toFixed(1))}s</div>`;
+  /* قد پیش از نمایشِ بلوک اندازه گرفته می‌شود — بعدش بلوک خودش به قد اضافه شده. */
+  const lockCard=el.closest("section.card");
+  if(lockCard&&!lockCard.classList.contains("isDone"))
+    lockCard.style.minHeight=Math.round(lockCard.getBoundingClientRect().height)+"px";
   el.hidden=false;
   const card=el.closest("section.card");
+  /* ۲۴ سپتامبر: حسام دید کارت بعد از سواپ کوچک می‌شود (فکت‌ها، جای ثابت و
+     دکمه پنهان می‌شوند و بلوکِ نتیجه کوتاه‌تر است). قدِ همین لحظه قفل می‌شود و
+     بلوکِ نتیجه وسطِ آن می‌نشیند؛ hideSwapDone قفل را برمی‌دارد. */
   if(card)card.classList.add("isDone");
   paintSellPill("hidden");
 }
@@ -5678,7 +5687,7 @@ function hideSwapDone(){
   if(!el||el.hidden)return;
   el.hidden=true;
   const card=el.closest("section.card");
-  if(card)card.classList.remove("isDone");
+  if(card){card.classList.remove("isDone");card.style.minHeight="";}
 }
 function showError(title,err,extra){
   console.error(title,err,extra);
