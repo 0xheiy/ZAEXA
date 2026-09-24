@@ -2609,6 +2609,19 @@ async def check_canvas_resize(p, errors):
     for (w, h) in [(1150, 1000), (1900, 1000), (800, 1000), (1440, 900), (393, 851), (1900, 1000)]:
         await pg.set_viewport_size({"width": w, "height": h})
         await pg.wait_for_timeout(500)
+        # ۲۴ سپتامبر: مرکزِ رسم فقط در فریمِ بعدیِ انیمیشن به‌روز می‌شود؛ زیرِ بار، ۵۰۰ms
+        # گاهی کم بود و کاوشگر با مختصاتِ فریمِ قبلی می‌لرزید (۲ از ۳ اجرا). تا ۳ ثانیه برای
+        # همان شرط صبر می‌کنیم — آستانه و ادعا دست نخورده‌اند.
+        try:
+            await pg.wait_for_function("""() => {
+                const c = document.getElementById('routeCanvas').getBoundingClientRect();
+                const k = document.querySelector('.visual-core').getBoundingClientRect();
+                const R = window.__zaexaCanvasRoutePts || {};
+                return R.cx != null && Math.abs(R.cx - (k.x + k.width / 2 - c.x)) <= 2
+                    && Math.abs(R.cy - (k.y + k.height / 2 - c.y)) <= 2;
+            }""", timeout=3000)
+        except Exception:
+            pass  # ادعای پایین همان شکست را با عدد گزارش می‌کند
         r = await pg.evaluate("""() => {
             const c = document.getElementById('routeCanvas').getBoundingClientRect();
             const v = document.querySelector('.hero-visual').getBoundingClientRect();
@@ -5546,6 +5559,18 @@ async def main():
                 setNotice(note("warn", "Just a short one-line notice."));
                 out.notice = snap();
                 setNotice("");
+
+                // ۲۴ سپتامبر، دورِ سوم: حسام دید کارت در حالتِ «مبلغ در مقصد» (کوتِ
+                // معکوس) می‌پرد — #revNote بیرونِ جای ثابت بود. حالا داخلِ آن است.
+                renderPlan(plan1, true);
+                setNotice("");
+                out.reverse = snap();
+                setNotice(note("warn", "<b>Price impact 1.94%</b> — the pool moves against you at this size."));
+                out.reverseNotice = snap();
+                setNotice("");
+                renderPlan(plan1);
+                setNotice("");
+                out.afterReverse = snap();
 
                 return out;
             }""")

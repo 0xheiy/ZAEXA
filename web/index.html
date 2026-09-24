@@ -394,14 +394,9 @@ body{
 .glow-blob.b2{width:620px;height:620px;top:-220px;right:-240px;background:radial-gradient(circle,#43B5F7 0%,transparent 70%)}
 .glow-blob.b3{width:420px;height:420px;bottom:-160px;left:-140px;background:radial-gradient(circle,#7396F8 0%,transparent 70%)}
 .glow-blob.b4{width:380px;height:380px;bottom:-150px;right:-120px;background:radial-gradient(circle,#C56CF5 0%,transparent 70%)}
-@media (prefers-reduced-motion:no-preference){
-  .glow-blob{animation:glowDrift ease-in-out infinite alternate}
-  .glow-blob.b1{animation-duration:18s;animation-delay:-3s}
-  .glow-blob.b2{animation-duration:22s;animation-delay:-11s}
-  .glow-blob.b3{animation-duration:16s;animation-delay:-7s}
-  .glow-blob.b4{animation-duration:14s;animation-delay:-2s}
-  @keyframes glowDrift{0%{transform:translate(0,0) scale(1)}50%{transform:translate(3vw,-2.5vw) scale(1.09)}100%{transform:translate(-2.5vw,2vw) scale(.95)}}
-}
+/* ۲۴ سپتامبر، دورِ سوم: در اپ عمداً ثابت — چهار لکه‌ی blur(110px)ِ متحرک یعنی
+   بازرنگ‌آمیزیِ دائمیِ کلِ صفحه در ابزاری که ساعت‌ها باز می‌ماند (باتری/لپ‌تاپِ
+   ضعیف). صفحه‌ی معرفی حرکتش را نگه می‌دارد. */
 
 button{font:inherit;color:inherit;background:none;border:none;cursor:pointer;padding:0}
 input{font:inherit;color:inherit}
@@ -738,9 +733,17 @@ main{max-width:1140px;margin:0 auto;padding:8px 20px 56px;display:flex;flex-dire
    بازخوردِ مالک ۲۴ سپتامبر: فاصله‌ی خالی زیرِ فکت‌ها و پرش کارت رفع شد —
    نوار مسیر و اعلان‌ها حالا یک جایگاهِ ثابت را با هم قسمت می‌کنند؛ اعلان
    وقتی هست، نوار مسیر را می‌پوشاند نه اینکه کنارش بنشیند. */
-#statusSlot{margin:4px 0 12px;min-height:60px} /* روی گوشی هم: نوارِ مسیر همیشه ۶۰ است، پس رزرو هزینه‌ای ندارد و اعلانِ کوتاه کارت را جمع نمی‌کند */
-@media(min-width:941px){#statusSlot{min-height:64px}}
+#statusSlot{margin:4px 0 12px;min-height:64px} /* گوشی و دسکتاپ یکسان: نوارِ مسیر ۶۰ است و اعلانِ دوخطی ~۶۳، پس ۶۴ هر دو را بی‌پرش جا می‌دهد */
 #statusSlot:has(#notices:not(:empty)) #routeBar{display:none}
+/* ۲۴ سپتامبر، دورِ سوم: یادداشتِ «حل برای هدف» (کوتِ معکوس) هم داخلِ همین جای
+   ثابت است — بیرونِ آن ۷۰ پیکسل به کارت اضافه می‌کرد و دکمه را پایین می‌برد.
+   اولویت: اعلان > یادداشت > نوارِ مسیر. یادداشت حداکثر دو خط؛ متنِ کامل در title. */
+#statusSlot #revNote{margin:0 14px;padding:8px 10px;border-radius:12px;background:var(--card2);
+  font-size:11.5px;line-height:1.5;color:var(--tx2);display:-webkit-box;-webkit-line-clamp:2;
+  -webkit-box-orient:vertical;overflow:hidden}
+#statusSlot #revNote:empty{display:none}
+#statusSlot:has(#revNote:not(:empty)) #routeBar{display:none}
+#statusSlot:has(#notices:not(:empty)) #revNote{display:none}
 
 /* ---------------- نتیجه‌ی سواپِ تأییدشده ---------------- */
 .swapDone{margin:6px 14px 14px;text-align:center}
@@ -1378,8 +1381,6 @@ footer .fine{max-width:78ch;margin:46px 0 0;font-size:11.5px;color:var(--tx3);li
         <div class="fact" id="vsRow"><span class="k">vs Uniswap direct</span><span class="v mono" id="kVs">—</span></div>
       </div>
       <div class="swapDone" id="swapDone" hidden></div>
-      <div id="revNote" style="margin:0 14px 12px;padding:10px 12px;border-radius:12px;
-        background:var(--card2);font-size:12px;color:var(--tx2);line-height:1.55"></div>
       <div id="devBanner" hidden></div>
       <!-- بازخوردِ مالک ۲۴ سپتامبر: نوار مسیر و اعلان‌ها یک جایگاهِ ثابت را
            قسمت می‌کنند تا نه زیرِ فکت‌ها فضای خالی بماند و نه کارت با آمدن و
@@ -1390,6 +1391,7 @@ footer .fine{max-width:78ch;margin:46px 0 0;font-size:11.5px;color:var(--tx3);li
            [cta] در run.py همین را می‌سنجد. -->
       <div id="statusSlot">
         <div class="routeBar" id="routeBar"><div class="rbTop"><span>Route</span><span class="mono" id="rbMeta"></span></div><div class="rbTrack" id="rbTrack"></div><div class="rbLegend" id="rbLegend"></div></div>
+        <div id="revNote"></div>
         <div id="notices"></div>
       </div>
       <!-- متنِ اولیه باید با هدر یکی باشد. تا وقتی کیف پول وصل نیست، چیزی
@@ -4490,11 +4492,14 @@ function renderPlan(plan,reverse){
   el.style.color=im===null?"var(--tx3)":im>=5?"var(--neg)":im>=1.5?"var(--warn)":"";
   $("kMin").textContent=fmt(minOutOf(plan),tokenOut.decimals)+" "+tokenOut.symbol;
   const rv=$("revNote");
-  if(rv)rv.innerHTML=reverse
-    ? `Solved for your target: paying <b>${fmt(plan.totalIn,tokenIn.decimals)} ${esc(tokenIn.symbol)}</b>
-       returns about <b>${fmt(plan.totalOut,tokenOut.decimals)} ${esc(tokenOut.symbol)}</b>.
-       AMMs price by input, so the exact amount can drift slightly.`
-    : "";
+  if(rv){
+    rv.innerHTML=reverse
+      ? `Solved for your target: pay <b>${fmt(plan.totalIn,tokenIn.decimals)} ${esc(tokenIn.symbol)}</b>
+         for about <b>${fmt(plan.totalOut,tokenOut.decimals)} ${esc(tokenOut.symbol)}</b>.
+         AMMs price by input, so it can drift slightly.`
+      : "";
+    rv.title=rv.textContent.replace(/\s+/g," ").trim();
+  }
   $("kFee").textContent=(feeBps/100).toFixed(2)+"%";
   renderVsUniswap(plan);
 
