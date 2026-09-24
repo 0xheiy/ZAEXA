@@ -3332,6 +3332,50 @@ async def main():
             "a transport failure must never be split: %s" % split
         assert split["revAfter"] == "", "a stale reverse-quote note survived scheduleQuote: %r" % split["revAfter"]
 
+        # ---- [wallet unlock] ۲۴ سپتامبر: ربیِ قفل «Already processing unlock» می‌داد ----
+        # ethers getSigner() بعد از eth_requestAccounts یک درخواستِ دوم می‌فرستاد؛ حالا
+        # فقط یک درخواست، و «در حالِ باز کردنِ قفل» با eth_accountsِ بی‌پنجره صبر می‌شود.
+        up = await b.new_page(viewport={"width": 1100, "height": 900})
+        await up.goto(URL)
+        await up.wait_for_function("() => typeof E !== 'undefined' && !!E", timeout=15000)
+        ul = await up.evaluate("""async () => {
+            const ADDR = "0x2222222222222222222222222222222222222222";
+            const mk = (script) => { const seen = []; let n = 0; return {seen, request: async (a) => {
+                seen.push(a.method); return script(a.method, n++); }}; };
+            const out = {};
+            const plain = mk((m) => [ADDR]);
+            out.plain = {a: await requestWalletAccounts(plain, true, 2000, 20), seen: plain.seen};
+            let acc = 0;
+            const rabby = mk((m) => {
+                if (m === "eth_requestAccounts") throw new Error("Already processing unlock. Please wait.");
+                return (acc++ < 2) ? [] : [ADDR];
+            });
+            out.rabby = {a: await requestWalletAccounts(rabby, true, 2000, 20), seen: rabby.seen};
+            const rej = mk((m) => { throw Object.assign(new Error("User rejected the request."), {code: 4001}); });
+            try { await requestWalletAccounts(rej, true, 2000, 20); out.rej = {threw: false}; }
+            catch (e) { out.rej = {threw: true, seen: rej.seen, isRej: isUserRejection(e)}; }
+            const sent = [];
+            const bp = {send: async (m) => { sent.push(m); return []; }, getSigner: async () => { sent.push("getSigner"); }};
+            const sg = await makeSigner(bp, ADDR);
+            out.signer = {address: sg && sg.address, sent};
+            out.rejShapes = [isUserRejection({code: "ACTION_REJECTED"}), isUserRejection({info: {error: {code: 4001}}}),
+                             isUserRejection(new Error("x"))];
+            return out;
+        }""")
+        await up.close()
+        print("[wallet unlock] plain=%s rabby-race=%s -> %s | rejected: calls=%s isRejection=%s | signer sent=%s | shapes=%s"
+              % (ul["plain"]["seen"], ul["rabby"]["seen"], ul["rabby"]["a"], ul["rej"].get("seen"),
+                 ul["rej"].get("isRej"), ul["signer"]["sent"], ul["rejShapes"]))
+        assert ul["plain"]["seen"] == ["eth_requestAccounts"], ul
+        assert ul["rabby"]["a"] and ul["rabby"]["seen"].count("eth_requestAccounts") == 1 \
+            and ul["rabby"]["seen"][1:] == ["eth_accounts"] * 3, \
+            "a busy/unlocking wallet must be waited out with eth_accounts only, never a second popup: %s" % ul
+        assert ul["rej"]["threw"] and ul["rej"]["seen"] == ["eth_requestAccounts"] and ul["rej"]["isRej"], \
+            "a user rejection must be rethrown at once, not polled: %s" % ul
+        assert ul["signer"]["sent"] == [] and ul["signer"]["address"], \
+            "the signer must be built from the address, with no extra wallet request: %s" % ul
+        assert ul["rejShapes"] == [True, True, False], ul
+
         # ---- [wallet revoke] ۲۴ سپتامبر: Disconnect اجازه را در خودِ والت هم لغو کند ----
         wp = await b.new_page(viewport={"width": 1100, "height": 900})
         await wp.goto(URL)

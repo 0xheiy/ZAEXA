@@ -5122,6 +5122,45 @@ function clearWalletState(){
   clearInterval(balTimer);liveSrc=null;
   closeWalletMenu();paintWallet();paintBalances();paintSrc();refreshButton();
 }
+/* ۲۴ سپتامبر — ربی بعد از بازکردنِ مرورگر (قفل): رمز را می‌زدی و «هیچ اتفاقی
+   نمی‌افتاد»، فقط «Already processing unlock. Please wait.». ریشه در کدِ خودمان
+   بود: بعد از eth_requestAccounts، ethers v6 در BrowserProvider.getSigner()
+   خودش یک بارِ دیگر eth_accounts و اگر خالی بود eth_requestAccounts می‌فرستد
+   (در ethers.umd.min.fd66c046.js خوانده شد). ربی هنوز وسطِ باز کردنِ قفل بود و
+   درخواستِ دوم را با همان پیام رد می‌کرد؛ اتصال همان‌جا می‌افتاد. حالا:
+   ۱) signer مستقیم از آدرسی که والت داد ساخته می‌شود — هیچ درخواستِ دومی نیست.
+   ۲) اگر خودِ درخواستِ اول با «در حالِ باز کردنِ قفل/در انتظار» برگردد، پنجره‌ی
+      تازه باز نمی‌کنیم؛ تا ۳۰ ثانیه فقط eth_accounts (بی‌پنجره) می‌پرسیم تا کاربر
+      کارش را در همان پنجره‌ی باز تمام کند. */
+function makeSigner(bp,addr){
+  return E.JsonRpcSigner?new E.JsonRpcSigner(bp,addr):bp.getSigner(addr);
+}
+function walletBusyError(e){
+  const m=[e&&e.message,e&&e.data&&e.data.message,e&&e.error&&e.error.message]
+    .filter(Boolean).join(" ").toLowerCase();
+  return /processing unlock|already processing|already pending|request.*pending|-32002/.test(m)||
+    (e&&(e.code===-32002||(e.error&&e.error.code===-32002)));
+}
+function isUserRejection(e){
+  const c=e&&(e.code??(e.error&&e.error.code)??(e.info&&e.info.error&&e.info.error.code));
+  return c===4001||c==="ACTION_REJECTED"||(e&&e.code==="ACTION_REJECTED");
+}
+async function requestWalletAccounts(provider,requestAccounts,waitMs=30000,stepMs=1000){
+  try{
+    return await provider.request({method:requestAccounts?"eth_requestAccounts":"eth_accounts"});
+  }catch(e){
+    if(!requestAccounts||!walletBusyError(e))throw e;
+    const until=Date.now()+waitMs;
+    while(Date.now()<until){
+      await new Promise(r=>setTimeout(r,stepMs));
+      try{
+        const a=await provider.request({method:"eth_accounts"});
+        if(a&&a[0])return a;
+      }catch{}
+    }
+    throw e;
+  }
+}
 async function handleAccountsChanged(accounts){
   if(!accounts||!accounts[0]){
     clearWalletState();
@@ -5131,7 +5170,7 @@ async function handleAccountsChanged(accounts){
   }
   try{
     account=E.getAddress(accounts[0]);
-    signer=await walletProvider.getSigner(account);
+    signer=await makeSigner(walletProvider,account);
     balances={};allowance=0n;allowanceKnown=false;
     paintWallet();await Promise.all([refreshBalances(),refreshAllowance()]);refreshButton();
   }catch(e){
@@ -5152,7 +5191,7 @@ function attachWalletEvents(provider){
 }
 async function connectWithProvider(provider,requestAccounts){
   try{
-    const a=await provider.request({method:requestAccounts?"eth_requestAccounts":"eth_accounts"});
+    const a=await requestWalletAccounts(provider,requestAccounts);
     if(!a||!a[0])throw new Error("No wallet account was returned.");
     // «راه دور» یعنی هر درخواست باید تا گوشی برود و برگردد → برای خواندن
     // استفاده نمی‌شود. wcProvider تنها چیزی است که این‌طور است.
@@ -5162,7 +5201,7 @@ async function connectWithProvider(provider,requestAccounts){
     detachWalletEvents();walletEip1193=provider;
     account=E.getAddress(a[0]);
     walletProvider=new E.BrowserProvider(provider,"any");
-    signer=await walletProvider.getSigner();
+    signer=await makeSigner(walletProvider,account);
     walletChainId=Number((await walletProvider.getNetwork()).chainId);
     attachWalletEvents(provider);
     paintWallet();
@@ -5171,7 +5210,9 @@ async function connectWithProvider(provider,requestAccounts){
     // فقط «افزونه» یا «WalletConnect» — نه نام والت، که خودش یک ویژگیِ
     // قابل‌ردیابی از کاربر است.
     ev("wallet:on",provider===wcProvider?"wc":"inj");
-  }catch(e){setNotice(note("err",esc(e.message||"Connection rejected.")));}
+  }catch(e){setNotice(isUserRejection(e)
+    ? note("warn","<b>Connection cancelled in your wallet.</b>")
+    : note("err",esc(e.message||"Connection rejected.")));}
 }
 /* همیشه پنجره‌ی انتخاب. حتی با یک افزونه، WalletConnect هم یک گزینه است،
    پس همیشه بیش از یک راه وجود دارد و انتخاب باید با کاربر باشد — نه اینکه
@@ -5429,7 +5470,10 @@ async function doApprove(){
     if(ok)ev("approve:done");
     setNotice(ok?note("ok",`<b>${esc(tokenIn.symbol)} approved.</b>`)
       :note("warn",`<b>Approval sent but not confirmed yet.</b> Check <a href="${url}" target="_blank" rel="noopener">${shortAddr(tx.hash)}</a> then press again.`));
-  }catch(e){showError("Approval failed",e);}
+  }catch(e){
+    if(isUserRejection(e))setNotice(note("warn","<b>Cancelled in your wallet.</b> Nothing was approved."));
+    else showError("Approval failed",e);
+  }
   finally{setBusy(false);refreshButton();}
 }
 /* وقتی تراکنش را خام فرستاده‌ایم فقط یک هش داریم، نه شیء ethers، پس
@@ -5601,7 +5645,11 @@ async function doSwap(){
       $("routeWrap").style.display="none";await refreshBalances();ev("swap:done");
       showSwapDone({paidTxt,gotTxt,vs,url,hash:tx.hash,secs});
     }else{setNotice(note("err",`<b>Reverted.</b> <a href="${url}" target="_blank" rel="noopener">View on BaseScan</a>`));ev("swap:revert");}
-  }catch(e){showError("Swap failed",e,chosenSig?{sentRoute:chosenSig}:undefined);ev("swap:fail");}
+  }catch(e){
+    // لغو در والت خطا نیست — یک جمله‌ی روشن، نه جعبه‌ی «Technical details»
+    if(isUserRejection(e)){setNotice(note("warn","<b>Cancelled in your wallet.</b> Nothing was sent."));ev("swap:fail");}
+    else{showError("Swap failed",e,chosenSig?{sentRoute:chosenSig}:undefined);ev("swap:fail");}
+  }
   finally{setBusy(false);refreshButton();}
 }
 /* بلوکِ نتیجه بعد از یک سواپِ تأییدشده. کوتِ نمایش‌داده‌شده عمداً با «≈»

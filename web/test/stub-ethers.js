@@ -293,6 +293,8 @@
   };
 
   function BrowserProvider() {}
+  // اپ signer را مستقیم از آدرس می‌سازد (بدونِ getSigner که درخواستِ دوم می‌فرستاد)
+  function JsonRpcSigner(provider, address) { this.provider = provider; this.address = address; }
   function Contract() {}
 
   function formatUnits(v, d) {
@@ -381,7 +383,7 @@
   };
 
   window.ethers = {
-    Interface, JsonRpcProvider, BrowserProvider, Contract,
+    Interface, JsonRpcProvider, BrowserProvider, JsonRpcSigner, Contract,
     getAddress: a => a,
     id: fakeId,
     formatUnits, parseUnits,
