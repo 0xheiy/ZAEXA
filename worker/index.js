@@ -734,6 +734,39 @@ export function sellersH1Of(pools) {
   return sum;
 }
 
+/* ۲۴ سپتامبر — SN80 (0x6f63…4378): «nosell» ولی استخرِ اصلی‌اش SN80/TAO روی
+   aerodrome-slipstream است، ۹۲ هزار دلار و ۲۵ فروشنده در ۲۴ ساعت. ما فقط به اتر و
+   USDC کوت می‌گیریم؛ استخرهای SN80 با آن دو خالی بودند، پس حکمِ منفی «از راه‌هایی
+   که پرسیدیم» درست بود ولی «نمی‌شود فروخت» غلط. (ادعای بازرس که وتوی فروشنده فقط
+   روی v4 است سنجیده و رد شد: sellersH1Of روی همه‌ی استخرهاست؛ جمعِ ساعتِ آخر ۲ بود.)
+   این شمارنده فروشنده‌های ۲۴ ساعتِ استخرهایی را جمع می‌کند که ضدجفتشان را اصلاً
+   نمی‌پرسیم. استخری که شکلش را نشناسیم شمرده نمی‌شود (وتو نمی‌سازد). */
+export function sellersElsewhere24Of(pools, tokenAddr, probed) {
+  if (!Array.isArray(pools) || typeof tokenAddr !== "string") return null;
+  const t = tokenAddr.toLowerCase();
+  const probedSet = new Set((probed || []).map((a) => String(a).toLowerCase()));
+  const side = (rel) => {
+    const id = rel && rel.data && rel.data.id;
+    if (typeof id !== "string") return null;
+    const i = id.indexOf("_");
+    const a = i === -1 ? null : id.slice(i + 1).toLowerCase();
+    return a && /^0x[0-9a-f]{40}$/.test(a) ? a : null;
+  };
+  let sum = 0;
+  for (const pool of pools) {
+    const rel = pool && pool.relationships;
+    const b = side(rel && rel.base_token), q = side(rel && rel.quote_token);
+    if (!b || !q) continue;
+    const counter = b === t ? q : q === t ? b : null;
+    if (!counter || probedSet.has(counter)) continue;
+    const n = pool.attributes && pool.attributes.transactions && pool.attributes.transactions.h24 &&
+      pool.attributes.transactions.h24.sellers;
+    if (typeof n !== "number" || !Number.isFinite(n) || n < 0) continue;
+    sum += n;
+  }
+  return sum;
+}
+
 async function baseVenueCoveredDetail(addr, env) {
   const r = await fetchBaseTokenPoolsRaw(addr, env);
   if (!r.ok) return { covered: null, why: r.why };
@@ -745,15 +778,16 @@ async function baseVenueCoveredDetail(addr, env) {
        همین بدنه، بدونِ هیچ درخواستِ اضافه. کنترلِ منفیِ nosell پایین‌تر از آن
        استفاده می‌کند. null یعنی شکل را نشناختیم (نه صفر). */
     const sellersH1 = sellersH1Of(r.data);
+    const sellersElsewhere24 = sellersElsewhere24Of(r.data, addr, V4_ALL_COUNTERS);
     for (const pool of r.data) {
       const dexId = pool && pool.relationships && pool.relationships.dex &&
         pool.relationships.dex.data && pool.relationships.dex.data.id;
       if (typeof dexId !== "string") continue;
       if (dexId === "uniswap-v4-base") v4Listed = true;
       const venue = GT_DEX_TO_VENUE[dexId];
-      if (venue && VD_VENUE_ID_SET.has(venue)) return { covered: true, why: null, v4Listed, sellersH1 };
+      if (venue && VD_VENUE_ID_SET.has(venue)) return { covered: true, why: null, v4Listed, sellersH1, sellersElsewhere24 };
     }
-    return { covered: false, why: "cover:false", v4Listed, sellersH1 }; // بدنه سالم بود، ولی هیچ استخری روی یک صرافیِ پوشش‌داده‌شده نبود
+    return { covered: false, why: "cover:false", v4Listed, sellersH1, sellersElsewhere24 }; // بدنه سالم بود، ولی هیچ استخری روی یک صرافیِ پوشش‌داده‌شده نبود
   } catch (e) {
     return { covered: null, why: "cover:shape" }; // پرتاب → نامعلوم، هرگز false
   }
@@ -932,7 +966,10 @@ async function readV4Entry(addr, env) {
     let parsed;
     try { parsed = JSON.parse(raw); } catch (e) { return { found: false, keys: [], complete: false }; }
     if (!parsed || !Array.isArray(parsed.keys)) return { found: false, keys: [], complete: false };
-    return { found: true, keys: parsed.keys, complete: parsed.complete === true };
+    // legacy: ورودیِ پیش از ۲۴ سپتامبر که فیلدِ complete ندارد — کالرِ /vd و کارت آن را
+    // در پس‌زمینه دوباره ایندکس می‌کند تا cause="empty-pool" (مثلِ WHEN) برگردد.
+    return { found: true, keys: parsed.keys, complete: parsed.complete === true,
+             legacy: !Object.prototype.hasOwnProperty.call(parsed, "complete") };
   } catch (e) {
     return { found: false, keys: [], complete: false };
   }
@@ -1081,7 +1118,7 @@ async function ogFetchVerdictDetail(addr, meta, deadlineAt, env, ctx, metaWhy) {
       if (env && env.ZX_KV) {
         const entry = await readV4Entry(addr, env);
         v4Keys = entry.keys;
-        if (!entry.found && ctx && typeof ctx.waitUntil === "function") {
+        if ((!entry.found || entry.legacy) && ctx && typeof ctx.waitUntil === "function") {
           ctx.waitUntil(runV4Index(addr, env));
         }
       }
@@ -1169,6 +1206,11 @@ async function ogFetchVerdictDetail(addr, meta, deadlineAt, env, ctx, metaWhy) {
       «هیچ nosellی بدونِ cause» کلِ یافته‌ی اصلیِ محصول را پاک می‌کرد. */
 export const SELLERS_H1_VETO = 3;
 export function finalizeBaseNosell(empty, covered, v4Only) {
+  /* ۰. (۲۴ سپتامبر، SN80) استخرِ زنده با ضدجفتی که نمی‌پرسیم و دست‌کم SELLERS_H1_VETO
+     فروشنده در ۲۴ ساعت → نامعلوم، حتی پیش از «استخرِ خالی»: خالی‌بودنِ استخرهای
+     اتر/USDC یعنی از راهِ ما نمی‌شود، نه اینکه هیچ راهی نیست. */
+  const elsewhere = covered && covered.sellersElsewhere24;
+  if (typeof elsewhere === "number" && elsewhere >= SELLERS_H1_VETO) return { v: null, why: "sells:elsewhere" };
   if (empty === true) return { v: "nosell", why: null, cause: "empty-pool" };
   const sellers = covered && covered.sellersH1;
   if (typeof sellers === "number" && sellers >= SELLERS_H1_VETO) return { v: null, why: "sells:recent" };

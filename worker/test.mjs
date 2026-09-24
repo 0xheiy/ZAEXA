@@ -30,7 +30,7 @@ import {
   readV4Keys, readV4Entry, rpcCallBase, fetchV4Pools, storeV4Result, v4StoreTtl, runV4Index,
   v4PoolsEmpty, V4_STATE_VIEW, V4_GET_LIQUIDITY_SEL, pairsRowsFor,
   makeSubMeter, meterKv, scheduledReportPass,
-  finalizeBaseNosell, SELLERS_H1_VETO, sellersH1Of,
+  finalizeBaseNosell, SELLERS_H1_VETO, sellersH1Of, sellersElsewhere24Of,
 } from "./index.js";
 import { isBaseWhy as isBaseWhyT } from "./verdict.js";
 
@@ -5642,6 +5642,10 @@ console.log("[v4 verdict wiring] VD_V4_STAGE_COUNTERS frozen with exactly the WE
     "readV4Entry must report found:true for a stored MISS — an empty-keys miss is not the same as \"never indexed\"");
 
   const okBody = JSON.stringify({ keys: [{ poolId: POOL_ID_A }], reason: "ok" });
+  // legacy (بدونِ فیلدِ complete) در برابرِ ورودیِ نو — کالر legacy را در پس‌زمینه دوباره ایندکس می‌کند
+  const legacyE = await readV4Entry(ADDR, { ZX_KV: makeKvWith(okBody) });
+  const newE = await readV4Entry(ADDR, { ZX_KV: makeKvWith(JSON.stringify({ keys: [], reason: "ok", complete: false })) });
+  ok(legacyE.legacy === true && newE.legacy === false, "readV4Entry flags a pre-24-Sep entry (no complete field) as legacy, and only that");
   const keysOk = await readV4Keys(ADDR, { ZX_KV: makeKvWith(okBody) });
   ok(keysOk.length === 1 && keysOk[0].poolId === POOL_ID_A, "readV4Keys must return the stored keys array, got " +
     JSON.stringify(keysOk));
@@ -5840,7 +5844,9 @@ console.log("[v4 verdict wiring] VD_V4_STAGE_COUNTERS frozen with exactly the WE
   // برنامه‌ریزی نمی‌شود و هیچ فراخوانیِ بالادستِ pools/RPCای هم نمی‌رود.
   const ADDR2 = "0x" + "b2".repeat(20);
   const kv2 = makeRecordingKv();
-  kv2.store.set(v4.v4KvKey("base", ADDR2), JSON.stringify({ keys: [], reason: "no-v4-pool" }));
+  // ۲۴ سپتامبر: ورودیِ امروزی فیلدِ complete دارد؛ ورودیِ بی‌آن legacy است و عمداً یک بار دوباره
+  // ایندکس می‌شود (پایین‌تر جدا سنجیده شده). این‌جا شکلِ امروزی — نباید دوباره ایندکس شود.
+  kv2.store.set(v4.v4KvKey("base", ADDR2), JSON.stringify({ keys: [], reason: "no-v4-pool", complete: false }));
   const waited2 = [];
   const ctx2 = { waitUntil: (p) => waited2.push(p) };
   let upstreamHit2 = false;
@@ -5867,6 +5873,20 @@ console.log("[v4 verdict wiring] VD_V4_STAGE_COUNTERS frozen with exactly the WE
     waited2.length);
   ok(upstreamHit2 === false,
     "an already-indexed token must never re-hit the pools or RPC upstream from ogFetchVerdict");
+
+  // پ) ورودیِ legacy (بدونِ complete، از پیش از ۲۴ سپتامبر) → دقیقاً یک ایندکسِ پس‌زمینه
+  const ADDR3 = "0x" + "b3".repeat(20);
+  const kv3 = makeRecordingKv();
+  kv3.store.set(v4.v4KvKey("base", ADDR3), JSON.stringify({ keys: [], reason: "no-v4-pool" }));
+  const waited3 = [];
+  globalThis.fetch = async (u, o) => {
+    const parsed = o && o.body ? JSON.parse(o.body) : null;
+    const reqs = Array.isArray(parsed) ? parsed : [parsed];
+    const body = reqs.map((r) => ({ id: r && r.id, result: mkStatic4(r && r.id === 0 ? 5 : 0) }));
+    return new Response(JSON.stringify(body), { status: 200, headers: { "content-type": "application/json" } });
+  };
+  await ogFetchVerdict(ADDR3, meta, Date.now() + 2000, { ZX_KV: kv3 }, { waitUntil: (p) => { waited3.push(p); p.catch(() => {}); } });
+  ok(waited3.length === 1, "a legacy v4 entry (no complete field) is re-indexed once in the background, got " + waited3.length);
 
   globalThis.fetch = savedFetch;
   if (savedCaches === undefined) delete globalThis.caches; else globalThis.caches = savedCaches;
@@ -12047,6 +12067,40 @@ function stripAllowedWording(t) {
   const r6 = finalizeBaseNosell(false, { sellersH1: null }, false);
   ok(r6.v === "nosell", "an unreadable sellers count never vetoes a proven covered-venue nosell");
   ok(isBaseWhyT("v4:unproven") && isBaseWhyT("sells:recent"), "both new reasons are in the closed Base why vocabulary");
+
+  /* ۲۴ سپتامبر — SN80: شکلِ زنده‌ی GeckoTerminal (اعداد عدد، شناسه‌ها «base_0x…»). استخرِ
+     اصلی SN80/TAO روی Slipstream با ۲۵ فروشنده در ۲۴ ساعت؛ استخرهای اتر/USDC خالی. */
+  const SN80 = "0x6f63d869011f95274498023b4abfc00b30c34378";
+  const TAO = "0xf3081494b87e8d5fb7960f066e931d1d0e6e3d67";
+  const USDC_B = "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913", NAT = "0x0000000000000000000000000000000000000000";
+  const OCTET = "0x1111111111111111111111111111111111111111";
+  const gp = (dex, base, quote, h1s, h24s) => ({
+    relationships: { dex: { data: { id: dex } }, base_token: { data: { id: "base_" + base } }, quote_token: { data: { id: "base_" + quote } } },
+    attributes: { transactions: { h1: { buys: 0, sells: h1s, buyers: 0, sellers: h1s }, h24: { buys: 0, sells: h24s, buyers: 0, sellers: h24s } } },
+  });
+  const sn80Pools = [
+    gp("aerodrome-slipstream", SN80, TAO, 1, 25),
+    gp("uniswap-v4-base", SN80, USDC_B, 1, 4),
+    gp("uniswap-v4-base", SN80, NAT, 0, 0),
+    gp("uniswap-v4-base", OCTET, SN80, 0, 0),
+    gp("aerodrome-base", SN80, USDC_B, 0, 0),
+  ];
+  const probedC = [NAT, "0x4200000000000000000000000000000000000006", USDC_B];
+  ok(sellersElsewhere24Of(sn80Pools, SN80, probedC) === 25, "SN80: only the TAO pool's 25 sellers count (USDC/ETH pools are ours; OCTET had 0)");
+  ok(sellersH1Of(sn80Pools) === 2, "SN80: the last-hour veto really was 2 across ALL pools — not a v4-only bug");
+  const r7 = finalizeBaseNosell(false, { sellersH1: 2, sellersElsewhere24: 25 }, false);
+  ok(r7.v === null && r7.why === "sells:elsewhere", "SN80 shape: a live pool against a counter we never quote -> unknown/sells:elsewhere");
+  const r8 = finalizeBaseNosell(true, { sellersH1: 0, sellersElsewhere24: 25 }, true);
+  ok(r8.v === null && r8.why === "sells:elsewhere", "our pools empty but a live pool elsewhere -> not 'cannot sell'");
+  const r9 = finalizeBaseNosell(false, { sellersH1: 1, sellersElsewhere24: 2 }, false);
+  ok(r9.v === "nosell", "a honeypot with two whitelisted sellers on an odd pair stays nosell");
+  const r10 = finalizeBaseNosell(true, { sellersH1: 0, sellersElsewhere24: null }, false);
+  ok(r10.v === "nosell" && r10.cause === "empty-pool", "unknown elsewhere-count never blocks a proven empty pool");
+  ok(sellersElsewhere24Of([{ attributes: {} }], SN80, probedC) === 0, "a pool with no relationships is skipped, never counted");
+  ok(sellersElsewhere24Of(null, SN80, probedC) === null, "a non-array body is unknown");
+  ok(isBaseWhyT("sells:elsewhere"), "sells:elsewhere is in the closed Base why vocabulary");
+  console.log("[sells elsewhere] SN80: a nosell is vetoed to unknown when a pool against a counter we never quote (TAO) " +
+    "had 3+ sellers in 24h — even over a proven empty pool of ours; unknown shapes and two whitelisted sellers never veto");
 
   // گاردِ زمانِ انتشار روی ردیف‌های ذخیره‌شده — ردیفِ واقعیِ $SPIKE از report:2026-09-23.
   const spikeRow = { address: "0x1685981068dc0ec45ee1d5a28ef051059e42a0f3", chain: "base", checkKind: "sell-quote",
