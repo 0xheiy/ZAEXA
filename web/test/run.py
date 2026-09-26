@@ -3799,6 +3799,13 @@ async def main():
                 % (k, v, k, gv_pairs.get(k))
             assert v in dex_ids, \
                 "GT_DEX_TO_DEX maps %r to %r, which is not a DEXES id in web/index.html" % (k, v)
+        # کامل‌بودن هم، نه فقط زیرمجموعه: هر نگاشتِ ورکر که صرافی‌اش در DEXES این صفحه هست باید
+        # این‌جا هم باشد — وگرنه نقدینگیِ آن صرافی بی‌صدا «سنجیده‌نشده» حساب می‌شود (۲۶ سپتامبر).
+        gd_keys = set(k for k, _ in gd_pairs)
+        for k, v in gv_pairs.items():
+            if v in dex_ids:
+                assert k in gd_keys, \
+                    "worker maps %r to %r, a DEXES id in web/index.html, but GT_DEX_TO_DEX lacks it" % (k, v)
         assert "Strongest honeypot signal" not in idx_src, \
             "the removed honeypot-signal wording must not reappear in web/index.html"
 
@@ -4639,6 +4646,38 @@ async def main():
         assert gate["uniBefore"] is True and gate["uniAfter"] is True, \
             "a targeted retry must not wipe DEXes that already verified"
         assert gate["uniReason"] == "verified", gate["uniReason"]
+
+        # ---- 2c-sexies. [slipstream v1] — gate 3 must block the old-factory
+        # router until the executor allow-lists it, and routing must never
+        # pick a venue gate 3 rejected. ----
+        slip_v1 = await pg.evaluate("""async () => {
+            await verifyDexes();
+            const before = Object.assign({}, dexStatus["aerodrome-cl-v1"]);
+            window.__STUB_ROUTER_ALLOWED__ =
+                {"0xbe6d8f0d05cc4be24d5167a3ef062215be6d18a5": false};
+            await verifyDexes();
+            const after = Object.assign({}, dexStatus["aerodrome-cl-v1"]);
+            const enabledIds = enabledDexes().map(d => d.id);
+            const venuesLeft = allVenues().some(v => v.dex.id === "aerodrome-cl-v1");
+            delete window.__STUB_ROUTER_ALLOWED__;
+            await verifyDexes();
+            const restored = Object.assign({}, dexStatus["aerodrome-cl-v1"]);
+            return {before, after, enabledIds, venuesLeft, restored};
+        }""")
+        print("[slipstream v1] default -> ok=%s | not-allow-listed -> ok=%s reason=%r"
+              % (slip_v1["before"]["ok"], slip_v1["after"]["ok"], slip_v1["after"]["reason"]))
+        assert slip_v1["before"]["ok"] is True, \
+            "aerodrome-cl-v1 must pass gates by default (stub answers allowedRouter=true)"
+        assert slip_v1["after"]["ok"] is False, \
+            "aerodrome-cl-v1 must be rejected once the executor does not allow-list its router"
+        assert slip_v1["after"]["reason"] == "not allow-listed on the executor contract yet", \
+            slip_v1["after"]["reason"]
+        assert "aerodrome-cl-v1" not in slip_v1["enabledIds"], \
+            "a not-allow-listed venue must not be in enabledDexes()"
+        assert slip_v1["venuesLeft"] is False, \
+            "a not-allow-listed venue must carry no leg into route search (allVenues())"
+        assert slip_v1["restored"]["ok"] is True, \
+            "restoring the stub's allowedRouter must restore aerodrome-cl-v1"
 
         # ---- 2c-bis. token logos load, initials survive failure ----
         await pg.wait_for_timeout(800)

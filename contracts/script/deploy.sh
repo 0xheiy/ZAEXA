@@ -47,13 +47,17 @@ WETH_ADDR="${WETH_ADDR:-0x4200000000000000000000000000000000000006}"
 # ششمی PancakeSwap V3 است — نسل اول SwapRouter، با kind=3 در رابط.
 # هفتمی روتر Aerodrome Slipstream (CL) روی Base است — با kind=4 (KIND_SLIPSTREAM)
 # در رابط v5؛ روی زنجیره با verify_slipstream.sh تأیید شده.
+# هشتمی روتر کارخانه‌ی قدیمیِ همان Slipstream است (aerodrome-cl-v1) — همان
+# kind=4، فکتوری و کوتر جدا؛ روی زنجیره ۲۴ سپتامبر ۲۰۲۶ با factory() و یک
+# eth_call واقعیِ exactInputSingle (سلکتور 0xa026383e) تأیید شده.
 ROUTERS="0x2626664c2603336E57B271c5C0b26F421741e481,\
 0xcF77a3Ba9A5CA399B7c97c74d54e5b1Beb874E43,\
 0x327Df1E6de05895d2ab08513aaDD9313Fe505d86,\
 0x6BDED42c6DA8FBf0d2bA55B2fa120C5e0c8D7891,\
 0x8c1A3cF8f83074169FE5D7aD50B978e1cD6b37c7,\
 0x1b81D678ffb9C0263b24A97847620C99d213eB14,\
-0x698Cb2b6dd822994581fEa6eA4Fc755d1363A92F"
+0x698Cb2b6dd822994581fEa6eA4Fc755d1363A92F,\
+0xBE6D8f0d05cC4be24d5167a3eF062215bE6D18a5"
 
 echo "==============================================================="
 echo " دیپلوی SwapExecutor"

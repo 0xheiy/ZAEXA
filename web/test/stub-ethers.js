@@ -45,6 +45,7 @@
     // Aerodrome Slipstream — کلید استخرش tickSpacing است، نه fee؛ prefix
     // "cl" جدا از "uni"/"pcs" است تا استخرهای دو نسل قاطی نشوند.
     "cl-100|weth-usdc": 5_000_000,
+    "cl1-100|weth-usdc": 5_000_000,
     "uni-500|weth-usdc": 9_000_000, "uni-3000|weth-usdc": 1_200_000,
     "uni-100|weth-usdc": 0,         "uni-10000|weth-usdc": 90_000,
     "aero-vol|weth-usdc": 6_500_000, "aero-stb|weth-usdc": 0,
@@ -65,15 +66,19 @@
 
   const FEE = { "uni-100":1n, "uni-500":5n, "uni-3000":30n, "uni-10000":100n,
                 "pcs-100":1n, "pcs-500":5n, "pcs-2500":25n, "pcs-10000":100n,
-                "aero-vol":30n, "aero-stb":5n, "cl-100":5n };  // در ده‌هزارم
+                "aero-vol":30n, "aero-stb":5n, "cl-100":5n, "cl1-100":5n };  // در ده‌هزارم
 
   const QUOTER = "0x3d4e44Eb1374240CE5F1B871ab261CD16335B76a".toLowerCase();
   const PCS_Q  = "0xB048Bbc1Ee6b733FFfCFb9e9cEF7375518e25997".toLowerCase();
   const CL_Q   = "0x514c8B5f54112481E28028F1166Bd78501089259".toLowerCase();
+  // کوتر کارخانه‌ی قدیمیِ Slipstream (aerodrome-cl-v1) — همان سلکتور CL،
+  // قرارداد جدا.
+  const CL_Q1  = "0x254cF9E1E6e233aa1AC962CB9B05b2cfeAaE15b0".toLowerCase();
   // هر کوتر (V3 یا Slipstream) به یک پیشوند venue نگاشت می‌شود، تا استخرهای
-  // چند صرافی قاطی نشوند. آرگومان چهارم برای "cl" همان tickSpacing است، ولی
-  // amm() فقط یک عدد کلید می‌خواهد و برایش فرقی نمی‌کند fee باشد یا tickSpacing.
-  const V3_QUOTERS = { [QUOTER]: "uni", [PCS_Q]: "pcs", [CL_Q]: "cl" };
+  // چند صرافی قاطی نشوند. آرگومان چهارم برای "cl"/"cl1" همان tickSpacing
+  // است، ولی amm() فقط یک عدد کلید می‌خواهد و برایش فرقی نمی‌کند fee باشد
+  // یا tickSpacing.
+  const V3_QUOTERS = { [QUOTER]: "uni", [PCS_Q]: "pcs", [CL_Q]: "cl", [CL_Q1]: "cl1" };
   const AERO_R = "0xcF77a3Ba9A5CA399B7c97c74d54e5b1Beb874E43".toLowerCase();
   const MC3    = "0xcA11bde05977b3631167028862bE2a173976CA11".toLowerCase();
   // باید با CHAIN.executor در index.html یکی باشد، وگرنه allowedRouter و feeBps
@@ -138,6 +143,7 @@
     "0xcF77a3Ba9A5CA399B7c97c74d54e5b1Beb874E43",   // Aerodrome router
     "0x1b81D678ffb9C0263b24A97847620C99d213eB14",   // PancakeSwap V3 router (نسل ۰۱)
     "0x698Cb2b6dd822994581fEa6eA4Fc755d1363A92F",   // Aerodrome Slipstream router
+    "0xBE6D8f0d05cC4be24d5167a3eF062215bE6D18a5",   // Aerodrome Slipstream v1 router (old factory)
   ].map(a => a.toLowerCase());
   // کوترها کد جدا دارند: دروازه‌ی جدید سلکتور کوتر را در بایت‌کد می‌گردد،
   // پس اگر کد کوتر همان کد روتر باشد تست چیزی را ثابت نمی‌کند.
@@ -145,6 +151,7 @@
     "0x3d4e44Eb1374240CE5F1B871ab261CD16335B76a",   // Uniswap V3 quoter
     "0xB048Bbc1Ee6b733FFfCFb9e9cEF7375518e25997",   // PancakeSwap V3 quoter
     "0x514c8B5f54112481E28028F1166Bd78501089259",   // Aerodrome Slipstream quoter
+    "0x254cF9E1E6e233aa1AC962CB9B05b2cfeAaE15b0",   // Aerodrome Slipstream v1 quoter (old factory)
   ].map(a => a.toLowerCase());
   const SWAP_SIGS = [
     "exactInputSingle((address,address,uint24,address,uint256,uint256,uint160))",
@@ -285,7 +292,15 @@
         if (c.name === "name")     return [true, pack(["Test Token"])];
         if (c.name === "decimals") return [true, pack([DEC[t] || 18])];
         if (t === EXEC && c.name === "feeBps") return [true, pack([0n])];
-        if (t === EXEC && c.name === "allowedRouter") return [true, pack([true])];
+        // پیش‌فرض true برای همه (وضعیت زنده‌ی امروز)، ولی قابل بازنویسی
+        // به‌ازای هر روتر — window.__STUB_ROUTER_ALLOWED__ = {"<router>": false}
+        // — تا دروازه‌ی ۳ (allowListGate) بدون لیست‌سفید شدن یک روتر خاص
+        // آزموده شود.
+        if (t === EXEC && c.name === "allowedRouter") {
+          const r = String(c.args[0]).toLowerCase();
+          const ov = (window.__STUB_ROUTER_ALLOWED__ || {})[r];
+          return [true, pack([ov === undefined ? true : ov])];
+        }
       } catch (e) { /* fallthrough */ }
       return [false, "0x"];
     });

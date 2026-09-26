@@ -75,6 +75,9 @@ DEXES=(
   # Aerodrome Slipstream — تنها بازارِ بعضی توکن‌های تازه‌ی Base. تا v5 اصلاً
   # قابل مسیریابی نبود، نه گران‌تر: هیچ شاخه‌ای سلکتورش را نمی‌ساخت.
   "Aerodrome Slipstream|slipstream|0x698Cb2b6dd822994581fEa6eA4Fc755d1363A92F|0x514c8B5f54112481E28028F1166Bd78501089259"
+  # Aerodrome Slipstream v1 — کارخانه‌ی قدیمیِ همان Slipstream. اجراکننده
+  # هنوز این روتر را لیست‌سفید نکرده؛ allow_router.sh این کار را می‌کند.
+  "Aerodrome Slipstream v1|slipstream|0xBE6D8f0d05cC4be24d5167a3eF062215bE6D18a5|0x254cF9E1E6e233aa1AC962CB9B05b2cfeAaE15b0"
 )
 
 sig_for() {
