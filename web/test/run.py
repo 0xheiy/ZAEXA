@@ -817,6 +817,39 @@ def check_dark_tokens_unchanged():
           "in all 3 files: %s" % sorted(files))
 
 
+def check_light_frames():
+    """پروب [light frames] — ۲۶ سپتامبر: کادرِ کارت‌ها در تمِ روشن دیده‌شدنی
+    شد. --line/--line2 یک پله تیره‌تر و اپ یک حلقه‌ی ۱پیکسلی (--ring) روی
+    .card گرفت؛ pairs.html فقط همان --line/--line2 تازه را دارد (بدون
+    حلقه — آن سلکتور فقط در index.html است). دقیقاً همین سه رقم را می‌سنجیم
+    تا اگر قانونِ حلقه یا رقم‌های تیره‌تر برداشته شود، همین‌جا سرخ شود."""
+    index_src = open(os.path.join(HERE, "..", "index.html"), encoding="utf-8").read()
+    pairs_src = open(os.path.join(HERE, "..", "pairs.html"), encoding="utf-8").read()
+
+    idx_light = merged_root_decls(index_src, "light")
+    assert idx_light.get("line", "").strip().lower() == "#d7dce4", \
+        "index.html light --line is %r, expected #d7dce4" % idx_light.get("line")
+    assert idx_light.get("line2", "").strip().lower() == "#c3cad4", \
+        "index.html light --line2 is %r, expected #c3cad4" % idx_light.get("line2")
+    assert "ring" in idx_light, "index.html light theme lost the --ring token"
+
+    pairs_light = merged_root_decls(pairs_src)
+    assert pairs_light.get("line", "").strip().lower() == "#d7dce4", \
+        "pairs.html --line is %r, expected #d7dce4" % pairs_light.get("line")
+    assert pairs_light.get("line2", "").strip().lower() == "#c3cad4", \
+        "pairs.html --line2 is %r, expected #c3cad4" % pairs_light.get("line2")
+
+    ring_rule = re.search(
+        r':root\[data-theme="light"\]\s*\.card\s*\{\s*box-shadow\s*:\s*0\s+0\s+0\s+1px\s+var\(--ring\)\s*,\s*var\(--sh\)\s*\}',
+        index_src)
+    assert ring_rule, "index.html is missing the light-theme .card 1px ring rule (box-shadow:0 0 0 1px var(--ring),var(--sh))"
+
+    print("[light frames] index.html light --line=%s --line2=%s ring token present; ring rule on .card present; "
+          "pairs.html light --line=%s --line2=%s"
+          % (idx_light["line"].strip(), idx_light["line2"].strip(),
+             pairs_light["line"].strip(), pairs_light["line2"].strip()))
+
+
 def check_og_tags():
     """کارت پیش‌نمایش لینک — دو چیزی که بی‌صدا خراب می‌شوند.
 
@@ -1806,6 +1839,7 @@ check_g1ui_token()
 check_no_cyan_in_swapped_selectors()
 check_theme_key_unified()
 check_dark_tokens_unchanged()
+check_light_frames()
 check_canvas_no_color_literal()
 check_viz_tokens_literal()
 check_viz_contrast()
@@ -3341,6 +3375,192 @@ async def main():
         assert split["st2"]["rpcFailed"] == split["N"] and split["calls2"] == 1 and split["unknown2"], \
             "a transport failure must never be split: %s" % split
         assert split["revAfter"] == "", "a stale reverse-quote note survived scheduleQuote: %r" % split["revAfter"]
+
+        # ---- [counter mids] ۲۶ سپتامبر: مسیریابی از طریق جفتِ اصلیِ خودِ توکن ----
+        # (SN80 -> TAO -> WETH). GT/multicall را با gtBook/erc20 دستی جواب می‌دهیم؛
+        # quoteMany عوض می‌شود تا فقط X->TAO (روی aerodrome-cl-v1) و TAO->WETH
+        # واقعاً کوت بدهند — دقیقاً شکلِ زنده‌ی اندازه‌گیری‌شده.
+        cmp_page = await b.new_page(viewport={"width": 1100, "height": 900})
+        await cmp_page.goto(URL)
+        await cmp_page.wait_for_function("() => typeof E !== 'undefined' && !!E", timeout=15000)
+        cm = await cmp_page.evaluate("""async () => {
+            const WETH = tokenBySymbol("WETH");
+            const XA = "0x1111111111111111111111111111111111111a";
+            const XB = "0x1111111111111111111111111111111111111b";
+            const XC = "0x1111111111111111111111111111111111111c";
+            const XD = "0x1111111111111111111111111111111111111d";
+            const XE = "0x1111111111111111111111111111111111111e";
+            const XF = "0x1111111111111111111111111111111111111f";
+            const TAO = "0x2222222222222222222222222222222222222a";
+
+            const realFetch = window.fetch, realMulticall = multicall, realQuoteMany = quoteMany;
+            const symCall = iErc.encodeFunctionData("symbol", []);
+            const decCall = iErc.encodeFunctionData("decimals", []);
+            const packRet = v => "0x" + Array.from(new TextEncoder().encode(
+                JSON.stringify({ret: v}))).map(x => x.toString(16).padStart(2, "0")).join("");
+            const erc20 = {};
+            erc20[TAO.toLowerCase()] = {symbol: "TAO", decimals: 18};
+            multicall = async (calls) => calls.map(c => {
+                const info = erc20[String(c.target).toLowerCase()];
+                if (!info) return {ok: false, data: "0x"};
+                if (c.data === symCall) return {ok: true, data: packRet([info.symbol])};
+                if (c.data === decCall) return {ok: true, data: packRet([info.decimals])};
+                return {ok: false, data: "0x"};
+            });
+
+            function pool(dexId, reserve, ourAddr, counterAddr) {
+                return {relationships: {dex: {data: {id: dexId}},
+                    base_token: {data: {id: "base_" + ourAddr}},
+                    quote_token: {data: {id: "base_" + counterAddr}}},
+                    attributes: {reserve_in_usd: reserve}};
+            }
+            const gtBook = {};
+            window.fetch = async (url, opts) => {
+                const u = String(url);
+                const m = u.match(/\\/tokens\\/(0x[0-9a-fA-Fx]+)\\/pools/i);
+                if (!m) return realFetch(url, opts);
+                const addr = m[1].toLowerCase();
+                const book = gtBook[addr];
+                if (book === undefined) return new Response("{}", {status: 200});
+                if (book === "fail500") return new Response("boom", {status: 500});
+                return new Response(JSON.stringify({data: book}), {status: 200,
+                    headers: {"content-type": "application/json"}});
+            };
+
+            function qmFor(x) {
+                return async (specs, stats) => {
+                    stats.attempted += specs.length;
+                    return specs.map(s => {
+                        const tin = s.tokenIn.toLowerCase(), tout = s.tokenOut.toLowerCase();
+                        if (tin === x.toLowerCase() && tout === TAO.toLowerCase()
+                            && s.venue.dex.id === "aerodrome-cl-v1") { stats.ok++; return {out: 500n, status: "ok"}; }
+                        if (tin === TAO.toLowerCase() && tout === WETH.address.toLowerCase()) { stats.ok++; return {out: 700n, status: "ok"}; }
+                        stats.noPool++; return {out: null, status: "nopool"};
+                    });
+                };
+            }
+            async function runWith(qm, tIn, amountIn, stats) {
+                quoteMany = qm;
+                try { return await findRoutes(tIn, WETH, amountIn, stats); }
+                finally { quoteMany = realQuoteMany; }
+            }
+            const has2hopViaTao = r => r.routes.some(rt => rt.hops.length === 2 && rt.hops[0].tokenOut.symbol === "TAO");
+            const out = {};
+
+            // (a) real liquid counter pool -> 2-hop X->TAO->WETH, rendered leg shows TAO
+            gtBook[XA.toLowerCase()] = [pool("aerodrome-slipstream", "96575.12", XA, TAO)];
+            const rA = await runWith(qmFor(XA), {symbol: "SN80A", address: XA, decimals: 18}, 1000000n, newStats());
+            out.a_has2hop = has2hopViaTao(rA);
+
+            // (b) reserve below the $10k threshold -> no TAO mid, hub-only behaviour
+            gtBook[XB.toLowerCase()] = [pool("aerodrome-slipstream", "9000", XB, TAO)];
+            const rB = await runWith(qmFor(XB), {symbol: "SN80B", address: XB, decimals: 18}, 1000000n, newStats());
+            out.b_has2hop = has2hopViaTao(rB);
+
+            // (c) GT 500 -> never throws, degrades to hub-only
+            gtBook[XC.toLowerCase()] = "fail500";
+            let threwC = false, rC = {routes: []};
+            try { rC = await runWith(qmFor(XC), {symbol: "SN80C", address: XC, decimals: 18}, 1000000n, newStats()); }
+            catch (e) { threwC = true; }
+            out.c_threw = threwC;
+            out.c_has2hop = has2hopViaTao(rC);
+            // یک GT 500 مصنوعی مدارِ قطع‌کننده را برای واقعی می‌اندازد — پاکش کن
+            // تا سنجش‌های بعدی (که در همین صفحه‌اند) قربانیِ همین یک شکست نشوند.
+            gtCoolUntil = 0; gtFails = 0;
+
+            // (d) pool on an unmapped dex id -> ignored
+            gtBook[XD.toLowerCase()] = [pool("aerodrome-slipstream-2", "999999", XD, TAO)];
+            const rD = await runWith(qmFor(XD), {symbol: "SN80D", address: XD, decimals: 18}, 1000000n, newStats());
+            out.d_has2hop = has2hopViaTao(rD);
+
+            // (e) a second findRoutes/priceImpact for the same (fresh) pair must not refetch GT
+            gtBook[XE.toLowerCase()] = [pool("aerodrome-slipstream", "96575.12", XE, TAO)];
+            let fetchHits = 0;
+            const countingFetch = window.fetch;
+            window.fetch = async (...args) => { fetchHits++; return countingFetch(...args); };
+            const tokE = {symbol: "SN80E", address: XE, decimals: 18};
+            await runWith(qmFor(XE), tokE, 1000000n, newStats());
+            out.e_firstCallFetches = fetchHits;
+            quoteMany = qmFor(XE);
+            try { await priceImpact(tokE, WETH, 1000000n, {totalOut: 1n}, newStats()); }
+            finally { quoteMany = realQuoteMany; }
+            out.e_secondCallExtraFetches = fetchHits - out.e_firstCallFetches;
+            window.fetch = countingFetch;
+
+            // (f) a pool whose counter is WETH itself must never become a duplicate hub mid
+            gtBook[XF.toLowerCase()] = [pool("aerodrome-slipstream", "999999", XF, WETH.address)];
+            let midCountF = -1;
+            const qmF = async (specs, stats) => {
+                stats.attempted += specs.length;
+                midCountF = new Set(specs.filter(s => s.tag === "h1").map(s => s.mid.address.toLowerCase())).size;
+                return specs.map(() => { stats.noPool++; return {out: null, status: "nopool"}; });
+            };
+            await runWith(qmF, {symbol: "SN80F", address: XF, decimals: 18}, 1000000n, newStats());
+            out.f_midCount = midCountF;   // expected: 1 (USDC hub only), never 2
+
+            // (g) two mids sharing a symbol (spoofed counter symbol "USDC") must not collide —
+            // b1/b2 are keyed by lower-cased address, not symbol, so both must survive.
+            const XG = "0x1111111111111111111111111111111111111111";
+            const FAKE_USDC = "0x3333333333333333333333333333333333333a";
+            const REAL_USDC = tokenBySymbol("USDC").address.toLowerCase();
+            erc20[FAKE_USDC.toLowerCase()] = {symbol: "USDC", decimals: 6};
+            gtBook[XG.toLowerCase()] = [pool("aerodrome-slipstream", "96575.12", XG, FAKE_USDC)];
+            const qmG = async (specs, stats) => {
+                stats.attempted += specs.length;
+                return specs.map(s => {
+                    const tin = s.tokenIn.toLowerCase(), tout = s.tokenOut.toLowerCase();
+                    if (tin === XG.toLowerCase() && tout === REAL_USDC) { stats.ok++; return {out: 400n, status: "ok"}; }
+                    if (tin === REAL_USDC && tout === WETH.address.toLowerCase()) { stats.ok++; return {out: 600n, status: "ok"}; }
+                    if (tin === XG.toLowerCase() && tout === FAKE_USDC.toLowerCase()) { stats.ok++; return {out: 500n, status: "ok"}; }
+                    if (tin === FAKE_USDC.toLowerCase() && tout === WETH.address.toLowerCase()) { stats.ok++; return {out: 700n, status: "ok"}; }
+                    stats.noPool++; return {out: null, status: "nopool"};
+                });
+            };
+            const rG = await runWith(qmG, {symbol: "SN80G", address: XG, decimals: 18}, 1000000n, newStats());
+            out.g_midAddrs = [...new Set(rG.routes.filter(rt => rt.hops.length === 2)
+                .map(rt => rt.hops[0].tokenOut.address.toLowerCase()))];
+
+            window.fetch = realFetch; multicall = realMulticall; quoteMany = realQuoteMany;
+            return out;
+        }""")
+        await cmp_page.close()
+        print("[counter mids] a(2hop via TAO)=%s b(thin pool, hub-only)=%s c(GT 500 threw=%s, hub-only)=%s "
+              "d(unmapped dex, hub-only)=%s e(fetches: first=%s, second-extra=%s) f(mid count, no dup hub)=%s "
+              "g(distinct mid addrs despite same symbol)=%s"
+              % (cm["a_has2hop"], not cm["b_has2hop"], cm["c_threw"], not cm["c_has2hop"],
+                 not cm["d_has2hop"], cm["e_firstCallFetches"], cm["e_secondCallExtraFetches"], cm["f_midCount"],
+                 len(cm["g_midAddrs"])))
+        assert cm["a_has2hop"], "no 2-hop route via TAO found for a liquid counter pool: %s" % cm
+        assert not cm["b_has2hop"], "a $9000 pool (below the $10k threshold) must not become a mid: %s" % cm
+        assert cm["c_threw"] is False, "counterMids must never throw, even on a GT 500: %s" % cm
+        assert not cm["c_has2hop"], "a GT 500 must degrade to hub-only routing, not a TAO mid: %s" % cm
+        assert not cm["d_has2hop"], "a pool on an unmapped dex id must be ignored: %s" % cm
+        assert cm["e_firstCallFetches"] == 1, "the first lookup for a fresh token must hit GT once: %s" % cm
+        assert cm["e_secondCallExtraFetches"] == 0, \
+            "a second findRoutes/priceImpact for the same pair must be served from cache: %s" % cm
+        assert cm["f_midCount"] == 1, "a counter equal to WETH must never become a duplicate hub mid: %s" % cm
+        assert len(cm["g_midAddrs"]) == 2, \
+            "two mids sharing a symbol collided — b1/b2 must be keyed by address, not symbol: %s" % cm
+
+        # ---- [light frames] computed box-shadow: 1px ring in light, none in dark ----
+        lf_page = await b.new_page(viewport={"width": 1100, "height": 900})
+        await lf_page.goto(URL)
+        await lf_page.wait_for_function("() => typeof E !== 'undefined' && !!E", timeout=15000)
+        lf = await lf_page.evaluate("""() => {
+            document.documentElement.setAttribute("data-theme", "light");
+            const card = document.querySelector("section.card");
+            const light = getComputedStyle(card).boxShadow;
+            document.documentElement.setAttribute("data-theme", "dark");
+            const dark = getComputedStyle(card).boxShadow;
+            return {light, dark};
+        }""")
+        await lf_page.close()
+        print("[light frames] computed .card box-shadow — light has-ring=%s, dark has-ring=%s"
+              % ("0px 0px 0px 1px" in lf["light"], "0px 0px 0px 1px" in lf["dark"]))
+        assert "0px 0px 0px 1px" in lf["light"], \
+            "light-theme .card computed box-shadow has no 1px ring: %r" % lf["light"]
+        assert "0px 0px 0px 1px" not in lf["dark"], \
+            "dark-theme .card computed box-shadow unexpectedly has the light-only ring: %r" % lf["dark"]
 
         # ---- [wallet unlock] ۲۴ سپتامبر: ربیِ قفل «Already processing unlock» می‌داد ----
         # ethers getSigner() بعد از eth_requestAccounts یک درخواستِ دوم می‌فرستاد؛ حالا

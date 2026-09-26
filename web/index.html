@@ -321,7 +321,10 @@ if(/^\/t\/(0x[0-9a-fA-F]{40}|[1-9A-HJ-NP-Za-km-z]{32,44})\/?$/.test(location.pat
 }
 :root[data-theme="light"]{
   --bg:#f4f5f7; --card:#fff; --card2:#f4f5f8; --raise:#eceef2;
-  --line:#e8eaee; --line2:#d6dae1;
+  /* ۲۶ سپتامبر ۲۰۲۶: حسام گفت در تمِ روشن کادرِ کارت‌ها دیده نمی‌شود — خط‌ها از
+     #e8eaee/#d6dae1 یک پله تیره‌تر شدند و کارت یک حلقه‌ی ۱پیکسلی (--ring) گرفت.
+     فقط تمِ روشن؛ تمِ تیره پیکسل‌به‌پیکسل همان است. */
+  --line:#d7dce4; --line2:#c3cad4; --ring:rgba(20,22,26,.13);
   --tx:#14161a; --tx2:#5b6270; --tx3:#8b93a1;
   /* ⚠️ ۱۴۰۵/۰۶/۰۷ (۲۰۲۶-۰۸-۲۹): مالک محصول عمداً همین گرادیانِ زندهٔ برند
      (همان شش‌ایستِ نشان) را به‌جای نسخه‌ی پرکنتراستِ قبلی انتخاب کرد — با
@@ -592,6 +595,8 @@ main{max-width:1140px;margin:0 auto;padding:8px 20px 56px;display:flex;flex-dire
 }
 
 .card{background:var(--card);border-radius:22px;box-shadow:var(--sh);overflow:hidden}
+/* حلقه با box-shadow، نه border — قدِ کارت یک پیکسل هم عوض نمی‌شود ([card fit]). */
+:root[data-theme="light"] .card{box-shadow:0 0 0 1px var(--ring),var(--sh)}
 .card>header{all:unset;display:flex;align-items:center;gap:10px;padding:17px 20px 0;max-width:none}
 .ttl{font-size:12px;font-weight:640;letter-spacing:.05em;text-transform:uppercase;color:var(--tx3)}
 
@@ -2477,11 +2482,95 @@ async function quoteRoutesAt(entries,stats){
   }
   return entries.map((e,i)=>alive[i]?amounts[i]:null);
 }
+/* =====================================================================
+   Counter mid — مسیر دوجهشی از طریق جفتِ اصلیِ خودِ توکن (مثلاً TAO برای
+   SN80)، نه فقط هاب‌های ثابت WETH/USDC.
+   ---------------------------------------------------------------------
+   خیلی از توکن‌های تازه نقدینگی واقعی‌شان در جفت خودشان با یک توکن دیگر
+   است، نه با WETH/USDC — مسیریابیِ فقط با هاب ثابت آن نقدینگی را اصلاً
+   نمی‌بیند. اینجا برای هر توکنِ کناریِ غیر-native/غیر-هاب، بزرگ‌ترین
+   استخرش را از GeckoTerminal می‌خوانیم و طرف مقابلش را روی زنجیره
+   می‌سنجیم (symbol/decimals واقعی، نه فرض).
+
+   هر شکستی — GT، شکل غیرمنتظره، مالتی‌کالِ ناموفق — باید بی‌صدا [] برگرداند؛
+   مسیریابی باید دقیقاً به رفتار امروز (فقط هاب) برگردد، هرگز throw نکند. */
+const counterMidCache=new Map();               // address(lower) -> {t:ms, v:[tokenObj]|[]}
+const COUNTER_MID_TTL=10*60*1000;
+function isHubAddr(addr){
+  const a=addr.toLowerCase();
+  return a===WETH_ADDR.toLowerCase()||a===tokenBySymbol("USDC").address.toLowerCase();
+}
+async function fetchCounterMid(t,otherAddrLower){
+  const key=t.address.toLowerCase();
+  const hit=counterMidCache.get(key);
+  if(hit&&Date.now()-hit.t<COUNTER_MID_TTL)return hit.v;
+  const store=v=>{counterMidCache.set(key,{t:Date.now(),v});return v;};
+  /* فقط نتیجه‌ی قطعی کش می‌شود؛ شکستِ گذرا (GT، مالتی‌کال) یا صدازدن پیش از تأییدِ
+     صرافی‌ها نباید ده دقیقه مسیرِ جفتِ خودِ توکن را خاموش نگه دارد. */
+  if(!enabledDexes().length)return [];
+  try{
+    const j=await gtJson(`${GT}/networks/${CHAIN.gtNetwork}/tokens/${t.address}/pools?page=1`);
+    const list=(j&&j.data)||[];
+    if(!Array.isArray(list)||!list.length)return store([]);
+    const wethAddr=WETH_ADDR.toLowerCase(),usdcAddr=tokenBySymbol("USDC").address.toLowerCase();
+    let best=null;
+    for(const pool of list){
+      const dex=pool?.relationships?.dex?.data?.id;
+      const base=pool?.relationships?.base_token?.data?.id;
+      const quote=pool?.relationships?.quote_token?.data?.id;
+      if(typeof dex!=="string"||typeof base!=="string"||typeof quote!=="string")continue;
+      const mapped=GT_DEX_TO_DEX[dex];
+      if(!mapped||!enabledDexes().some(d=>d.id===mapped))continue;
+      const strip=s=>s.replace(/^base_/,"").toLowerCase();
+      const b=strip(base),q=strip(quote);
+      let counter;
+      if(b===key)counter=q;else if(q===key)counter=b;else continue;
+      if(counter===key||counter===otherAddrLower)continue;
+      if(counter===wethAddr||counter===usdcAddr)continue;
+      const reserve=Number(pool?.attributes?.reserve_in_usd);
+      if(!isFinite(reserve)||reserve<10000)continue;
+      if(!best||reserve>best.reserve)best={counter,reserve};
+    }
+    if(!best)return store([]);
+    let sym,dec;
+    try{
+      const r=await multicall([
+        {target:best.counter,data:iErc.encodeFunctionData("symbol",[])},
+        {target:best.counter,data:iErc.encodeFunctionData("decimals",[])}]);
+      if(!r[0].ok||!r[1].ok)return [];
+      sym=iErc.decodeFunctionResult("symbol",r[0].data)[0];
+      dec=Number(iErc.decodeFunctionResult("decimals",r[1].data)[0]);
+    }catch{return [];}
+    if(!Number.isInteger(dec)||dec<0||dec>36)return store([]);
+    if(!sym||!String(sym).length)return store([]);
+    sym=String(sym).slice(0,12);
+    return store([{address:E.getAddress(best.counter),symbol:sym,decimals:dec,name:sym,counter:true}]);
+  }catch{return [];}
+}
+/**
+ * دو mid اضافه، حداکثر یکی برای هر طرف — طرفِ native یا هاب اصلاً پرسیده
+ * نمی‌شود. هر شکستی [] برای همان طرف است، هرگز throw.
+ */
+async function counterMids(tIn,tOut){
+  const pairs=[[tIn,tOut.address.toLowerCase()],[tOut,tIn.address.toLowerCase()]]
+    .filter(([t])=>!isNative(t)&&!isHubAddr(t.address));
+  const out=[];
+  for(const [t,other] of pairs){
+    try{const v=await fetchCounterMid(t,other);if(v&&v.length)out.push(v[0]);}catch{/* هرگز throw */}
+  }
+  return out;
+}
 async function findRoutes(tIn,tOut,amountIn,stats){
   const venues=allVenues(),routes=[];
-  const mids=[CHAIN.wrapped,CHAIN.reference].map(tokenBySymbol).filter(m=>m&&
+  const hubMids=[CHAIN.wrapped,CHAIN.reference].map(tokenBySymbol).filter(m=>m&&
     m.address.toLowerCase()!==tIn.address.toLowerCase()&&
     m.address.toLowerCase()!==tOut.address.toLowerCase());
+  const extra=(await counterMids(tIn,tOut)).filter(m=>
+    m.address.toLowerCase()!==tIn.address.toLowerCase()&&
+    m.address.toLowerCase()!==tOut.address.toLowerCase());
+  const seen=new Set(hubMids.map(m=>m.address.toLowerCase()));
+  const mids=hubMids.slice();
+  for(const m of extra){const k=m.address.toLowerCase();if(!seen.has(k)){seen.add(k);mids.push(m);}}
   const specs=[];
   venues.forEach(v=>specs.push({venue:v,tokenIn:tIn.address,tokenOut:tOut.address,amountIn,tag:"d"}));
   mids.forEach(m=>venues.forEach(v=>specs.push({venue:v,tokenIn:tIn.address,tokenOut:m.address,amountIn,tag:"h1",mid:m})));
@@ -2497,7 +2586,8 @@ async function findRoutes(tIn,tOut,amountIn,stats){
   const b1=new Map();
   specs.forEach((s,i)=>{
     if(s.tag!=="h1")return;const o=r1[i].out;if(!o||o<=0n)return;
-    const c=b1.get(s.mid.symbol);if(!c||o>c.out)b1.set(s.mid.symbol,{out:o,venue:s.venue,mid:s.mid});
+    const midKey=s.mid.address.toLowerCase();
+    const c=b1.get(midKey);if(!c||o>c.out)b1.set(midKey,{out:o,venue:s.venue,mid:s.mid});
   });
   const s2=[];
   b1.forEach(b=>venues.forEach(v=>s2.push({venue:v,tokenIn:b.mid.address,tokenOut:tOut.address,amountIn:b.out,b})));
@@ -2505,7 +2595,7 @@ async function findRoutes(tIn,tOut,amountIn,stats){
     const r2=await quoteMany(s2,stats),b2=new Map();
     s2.forEach((s,i)=>{
       const o=r2[i].out;if(!o||o<=0n)return;
-      const k=s.b.mid.symbol,c=b2.get(k);if(!c||o>c.out)b2.set(k,{out:o,venue:s.venue,b:s.b});
+      const k=s.b.mid.address.toLowerCase(),c=b2.get(k);if(!c||o>c.out)b2.set(k,{out:o,venue:s.venue,b:s.b});
     });
     b2.forEach(x=>routes.push({hops:[
       {venue:x.b.venue,tokenIn:tIn,tokenOut:x.b.mid,amountIn,amountOut:x.b.out},
