@@ -818,36 +818,23 @@ def check_dark_tokens_unchanged():
 
 
 def check_light_frames():
-    """پروب [light frames] — ۲۶ سپتامبر: کادرِ کارت‌ها در تمِ روشن دیده‌شدنی
-    شد. --line/--line2 یک پله تیره‌تر و اپ یک حلقه‌ی ۱پیکسلی (--ring) روی
-    .card گرفت؛ pairs.html فقط همان --line/--line2 تازه را دارد (بدون
-    حلقه — آن سلکتور فقط در index.html است). دقیقاً همین سه رقم را می‌سنجیم
-    تا اگر قانونِ حلقه یا رقم‌های تیره‌تر برداشته شود، همین‌جا سرخ شود."""
+    """پروب [light frames] — ۲۷ سپتامبر: کادرِ تیره‌ترِ ۲۶ سپتامبر (خط‌های #d7dce4/#c3cad4 و
+    حلقه‌ی --ring) به خواستِ حسام برداشته شد؛ به‌جایش زمینه‌ی تمِ روشن در اپ و /pairs یک پله
+    تیره‌تر شد (#f4f5f7 → #e6e9ee) تا کارت‌های سفید جدا دیده شوند. خط‌ها همان قبلی‌اند."""
     index_src = open(os.path.join(HERE, "..", "index.html"), encoding="utf-8").read()
     pairs_src = open(os.path.join(HERE, "..", "pairs.html"), encoding="utf-8").read()
-
+    want = {"bg": "#e6e9ee", "card": "#fff", "line": "#e8eaee", "line2": "#d6dae1"}
     idx_light = merged_root_decls(index_src, "light")
-    assert idx_light.get("line", "").strip().lower() == "#d7dce4", \
-        "index.html light --line is %r, expected #d7dce4" % idx_light.get("line")
-    assert idx_light.get("line2", "").strip().lower() == "#c3cad4", \
-        "index.html light --line2 is %r, expected #c3cad4" % idx_light.get("line2")
-    assert "ring" in idx_light, "index.html light theme lost the --ring token"
-
     pairs_light = merged_root_decls(pairs_src)
-    assert pairs_light.get("line", "").strip().lower() == "#d7dce4", \
-        "pairs.html --line is %r, expected #d7dce4" % pairs_light.get("line")
-    assert pairs_light.get("line2", "").strip().lower() == "#c3cad4", \
-        "pairs.html --line2 is %r, expected #c3cad4" % pairs_light.get("line2")
-
-    ring_rule = re.search(
-        r':root\[data-theme="light"\]\s*\.card\s*\{\s*box-shadow\s*:\s*0\s+0\s+0\s+1px\s+var\(--ring\)\s*,\s*var\(--sh\)\s*\}',
-        index_src)
-    assert ring_rule, "index.html is missing the light-theme .card 1px ring rule (box-shadow:0 0 0 1px var(--ring),var(--sh))"
-
-    print("[light frames] index.html light --line=%s --line2=%s ring token present; ring rule on .card present; "
-          "pairs.html light --line=%s --line2=%s"
-          % (idx_light["line"].strip(), idx_light["line2"].strip(),
-             pairs_light["line"].strip(), pairs_light["line2"].strip()))
+    for name, decls in (("index.html", idx_light), ("pairs.html", pairs_light)):
+        for k, v in want.items():
+            assert decls.get(k, "").strip().lower() == v, \
+                "%s light --%s is %r, expected %s" % (name, k, decls.get(k), v)
+        assert "ring" not in decls, "%s light theme still declares --ring (the rejected darker frame)" % name
+    assert not re.search(r':root\[data-theme="light"\]\s*\.card\s*\{[^}]*box-shadow', index_src), \
+        "index.html still has a light-only .card box-shadow override (the rejected 1px ring)"
+    print("[light frames] light --bg=%s (app and /pairs), --line/--line2 back to %s/%s, no ring"
+          % (want["bg"], want["line"], want["line2"]))
 
 
 def check_og_tags():
@@ -3547,20 +3534,27 @@ async def main():
         await lf_page.goto(URL)
         await lf_page.wait_for_function("() => typeof E !== 'undefined' && !!E", timeout=15000)
         lf = await lf_page.evaluate("""() => {
+            // بدنه transition:background دارد — بدونِ این، رنگِ وسطِ گذار خوانده می‌شود.
+            const off = document.createElement("style");
+            off.textContent = "*{transition:none!important}";
+            document.head.appendChild(off);
             document.documentElement.setAttribute("data-theme", "light");
             const card = document.querySelector("section.card");
             const light = getComputedStyle(card).boxShadow;
+            const lightBg = getComputedStyle(document.body).backgroundColor;
+            const cardBg = getComputedStyle(card).backgroundColor;
             document.documentElement.setAttribute("data-theme", "dark");
             const dark = getComputedStyle(card).boxShadow;
-            return {light, dark};
+            const darkBg = getComputedStyle(document.body).backgroundColor;
+            return {light, dark, lightBg, cardBg, darkBg};
         }""")
         await lf_page.close()
-        print("[light frames] computed .card box-shadow — light has-ring=%s, dark has-ring=%s"
-              % ("0px 0px 0px 1px" in lf["light"], "0px 0px 0px 1px" in lf["dark"]))
-        assert "0px 0px 0px 1px" in lf["light"], \
-            "light-theme .card computed box-shadow has no 1px ring: %r" % lf["light"]
-        assert "0px 0px 0px 1px" not in lf["dark"], \
-            "dark-theme .card computed box-shadow unexpectedly has the light-only ring: %r" % lf["dark"]
+        print("[light frames] computed — light body=%s card=%s ring=%s; dark body=%s"
+              % (lf["lightBg"], lf["cardBg"], "0px 0px 0px 1px" in lf["light"], lf["darkBg"]))
+        assert lf["lightBg"] == "rgb(230, 233, 238)", "light body background is %r, expected #e6e9ee" % lf["lightBg"]
+        assert lf["cardBg"] == "rgb(255, 255, 255)", "light card is %r, expected white" % lf["cardBg"]
+        assert "0px 0px 0px 1px" not in lf["light"], "light .card still carries the rejected 1px ring: %r" % lf["light"]
+        assert lf["darkBg"] == "rgb(11, 13, 19)", "dark body background moved: %r (must stay #0b0d13)" % lf["darkBg"]
 
         # ---- [wallet unlock] ۲۴ سپتامبر: ربیِ قفل «Already processing unlock» می‌داد ----
         # ethers getSigner() بعد از eth_requestAccounts یک درخواستِ دوم می‌فرستاد؛ حالا
