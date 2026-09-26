@@ -3832,11 +3832,14 @@ async function measureLiquidity(token){
   if(wethSeen&&eth===null)return null;
   return total*2;
 }
-/* دقیقاً worker/index.js GT_DEX_TO_VENUE منهای "uniswap-v2-base" — فهرست
-   DEXES این صفحه اصلاً Uniswap v2 ندارد. هر id دیگری (uniswap-v4-base،
-   aerodrome-slipstream-3، …) یعنی «اینجا سنجیده نشده» و باید به نامعلوم
+/* دقیقاً worker/index.js GT_DEX_TO_VENUE منهای "uniswap-v2-base" و منهای
+   "aerodrome-slipstream" — فهرستِ DEXES این صفحه نه Uniswap v2 دارد و نه
+   هیچ صرافی‌ای برایِ کارخانه‌ی قدیمیِ Slipstream (aerodrome-slipstream،
+   کوترش aerodrome-cl-v1 در ورکر است). aerodrome-slipstream-3 همان
+   کارخانه‌ی جدید است و به aerodrome-cl می‌رود. هر id دیگری (uniswap-v4-base،
+   aerodrome-slipstream-2، …) یعنی «اینجا سنجیده نشده» و باید به نامعلوم
    بیفتد، نه به اتهام. */
-const GT_DEX_TO_DEX=Object.freeze({"uniswap-v3-base":"uniswap-v3","pancakeswap-v3-base":"pancake-v3","aerodrome-slipstream":"aerodrome-cl","aerodrome-base":"aerodrome","baseswap":"baseswap","sushiswap-v2-base":"sushiswap","alien-base":"alienbase"});
+const GT_DEX_TO_DEX=Object.freeze({"uniswap-v3-base":"uniswap-v3","pancakeswap-v3-base":"pancake-v3","aerodrome-slipstream-3":"aerodrome-cl","aerodrome-base":"aerodrome","baseswap":"baseswap","sushiswap-v2-base":"sushiswap","alien-base":"alienbase"});
 /* شاهدِ پوشش برای measureLiquidity: آیا *همه‌ی* استخرهای این توکن روی
    GeckoTerminal در همان جفت‌هایی هستند که measureLiquidity می‌سنجد؟
    true فقط وقتی که مطمئن باشیم؛ در هر ابهامی null برمی‌گردد، هرگز false

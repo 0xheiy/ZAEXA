@@ -620,11 +620,22 @@ async function cachedVerdict(cacheKeyPath, computeFn, ctx, out) {
    همان شبکه (از‌جمله uniswap-v4-base، uniswap-v2-base، baseswap-v3،
    sushiswap-v3-base، alien-base-v3، aerodrome-slipstream-2) عمداً غایب
    است: قراردادهای دیگری‌اند که ما پروب نمی‌کنیم، پس نبایدِ نگاشت‌شدنشان
-   باید به‌سمتِ «نامعلوم» شکست بخورد، نه به‌سمتِ یک اتهام. */
+   باید به‌سمتِ «نامعلوم» شکست بخورد، نه به‌سمتِ یک اتهام.
+
+   ⚠️ Slipstream دو کارخانه دارد و GeckoTerminal برای هرکدام یک دکسِ جدا
+   می‌سازد: aerodrome-slipstream یعنی کارخانه‌ی قدیمی (0x5e7B…809A) که
+   کوترش ردیفِ aerodrome-cl-v1 است، و aerodrome-slipstream-3 یعنی
+   کارخانه‌ی جدید (0xf8f2…061Ef) که کوترش ردیفِ aerodrome-cl است. پیش‌ازاین
+   aerodrome-slipstream به‌اشتباه به aerodrome-cl نگاشته شده بود — کوترِ
+   aerodrome-cl رویِ استخرهای کارخانه‌ی قدیمی ریورت می‌کند، پس آن توکن‌ها
+   بی‌صدا «پوشش‌داده‌شده» به‌حساب می‌آمدند بدونِ آنکه واقعاً پرسیده شوند.
+   aerodrome-slipstream-2 (کارخانه‌ی سوم) هنوز کوترِ تأییدشده ندارد و عمداً
+   نگاشت نشده — نامعلوم می‌ماند، نه متهم. */
 export const GT_DEX_TO_VENUE = Object.freeze({
   "uniswap-v3-base": "uniswap-v3",
   "pancakeswap-v3-base": "pancake-v3",
-  "aerodrome-slipstream": "aerodrome-cl",
+  "aerodrome-slipstream": "aerodrome-cl-v1",
+  "aerodrome-slipstream-3": "aerodrome-cl",
   "aerodrome-base": "aerodrome",
   "baseswap": "baseswap",
   "sushiswap-v2-base": "sushiswap",

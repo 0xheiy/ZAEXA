@@ -918,13 +918,13 @@ function isSolidlyReqId(id) { return PROBE_KIND_BY_ID.get(id) === "SOLIDLY"; }
   }
 
   const probe = vd.buildProbe(TOKEN, vd.WETH_ADDR, amt);
-  ok(probe.length === 21, "buildProbe should produce exactly 21 calls (3+3+5+2+1+1+1+1+4), got " + probe.length);
+  ok(probe.length === 26, "buildProbe should produce exactly 26 calls (3+3+5+5+2+1+1+1+1+4), got " + probe.length);
 
   for (const p of probe) {
     const row = vd.VD_VENUES.find((r) => r.id === p.id);
     // این حلقه فقط شکلِ حدسیِ "fee:tickSpacing" را می‌فهمد؛ اگر یک کلیدِ
     // واقعیِ "real:..." این‌جا سر برآورد (یعنی گاردِ opts-غایب در بخشِ
-    // ۲۷.۱۱ شکسته)، شمارشِ ۲۱‌تاییِ بالا همین را از قبل «FAIL» کرده — ادامه‌ی
+    // ۲۷.۱۱ شکسته)، شمارشِ ۲۶‌تاییِ بالا همین را از قبل «FAIL» کرده — ادامه‌ی
     // این حلقه با فرضِ شکلِ غلط باید فقط رد شود، نه با کرش (split/Number
     // روی "real:" یک NaN می‌سازد و ethers را با underflow می‌ترکاند).
     if (typeof p.key === "string" && p.key.startsWith("real:")) continue;
@@ -1006,13 +1006,13 @@ function isSolidlyReqId(id) { return PROBE_KIND_BY_ID.get(id) === "SOLIDLY"; }
   // بی‌صدا حذف کند (نه بریده)، یکی کمتر باید هر چهار کلید را نگه دارد.
   {
     const overflow = vd.buildProbe(TOKEN, vd.WETH_ADDR, 2n ** 128n);
-    ok(overflow.length === 17, "an amountIn at exactly 2**128 must drop all four v4 entries, leaving the "
-      + "17 non-v4 calls, got " + overflow.length);
+    ok(overflow.length === 22, "an amountIn at exactly 2**128 must drop all four v4 entries, leaving the "
+      + "22 non-v4 calls, got " + overflow.length);
     ok(!overflow.some((p) => p.id === "uniswap-v4"), "an amountIn at 2**128 must never produce a "
       + "uniswap-v4 entry with truncated data");
 
     const atCap = vd.buildProbe(TOKEN, vd.WETH_ADDR, 2n ** 128n - 1n);
-    ok(atCap.length === 21, "an amountIn one below 2**128 must still produce all 21 calls, got " + atCap.length);
+    ok(atCap.length === 26, "an amountIn one below 2**128 must still produce all 26 calls, got " + atCap.length);
     ok(atCap.filter((p) => p.id === "uniswap-v4").length === 4, "an amountIn one below 2**128 must keep "
       + "all four v4 keys");
 
@@ -4888,7 +4888,10 @@ function isSolidlyReqId(id) { return PROBE_KIND_BY_ID.get(id) === "SOLIDLY"; }
   {
     const cases = [
       ["only uniswap-v4-base (a real dex, but not one VD_VENUES probes)", ["uniswap-v4-base"], false],
-      ["aerodrome-slipstream (mapped to aerodrome-cl, which is covered)", ["aerodrome-slipstream"], true],
+      ["aerodrome-slipstream (old factory, mapped to aerodrome-cl-v1, which is covered)",
+        ["aerodrome-slipstream"], true],
+      ["aerodrome-slipstream-3 (new factory, mapped to aerodrome-cl, which is covered)",
+        ["aerodrome-slipstream-3"], true],
       ["aerodrome-slipstream-2 (deliberately unmapped, not a typo)", ["aerodrome-slipstream-2"], false],
     ];
     for (const [label, dexIds, want] of cases) {
@@ -4906,10 +4909,11 @@ function isSolidlyReqId(id) { return PROBE_KIND_BY_ID.get(id) === "SOLIDLY"; }
     globalThis.fetch = async () => jsonRes({ notData: [] });
     ok(await baseVenueCovered(ADDR, {}) === null, "a body without a data array must give null, never false");
 
-    // نگاشت باید دقیقاً همان هفت idِ اندازه‌گیری‌شده را داشته باشد — نه
+    // نگاشت باید دقیقاً همان نُه idِ اندازه‌گیری‌شده را داشته باشد — نه
     // بیشتر نه کمتر — و uniswap-v4-base هرگز نباید عضوش شود.
     const wantIds = ["uniswap-v3-base", "pancakeswap-v3-base", "aerodrome-slipstream",
-      "aerodrome-base", "baseswap", "sushiswap-v2-base", "alien-base", "uniswap-v2-base"];
+      "aerodrome-slipstream-3", "aerodrome-base", "baseswap", "sushiswap-v2-base",
+      "alien-base", "uniswap-v2-base"];
     ok(Object.keys(GT_DEX_TO_VENUE).length === wantIds.length &&
       wantIds.every((id) => id in GT_DEX_TO_VENUE),
       "GT_DEX_TO_VENUE must have exactly the measured dex ids, got " +
@@ -5070,7 +5074,7 @@ function isSolidlyReqId(id) { return PROBE_KIND_BY_ID.get(id) === "SOLIDLY"; }
 
   globalThis.fetch = savedFetch;
   console.log("[base coverage gate] baseVenueCovered maps a pool's dex id through the frozen "
-    + "seven-entry GT_DEX_TO_VENUE table (uniswap-v4-base and every other unmeasured id stay "
+    + "nine-entry GT_DEX_TO_VENUE table (uniswap-v4-base and every other unmeasured id stay "
     + "absent on purpose) and is null (never false) on a non-200, a throw, or a body without a "
     + "data array; end to end through worker.fetch, an all-revert token with its only real pool "
     + "on an unprobed dex answers v:null while the identical probe outcome with a covered dex "
@@ -5078,6 +5082,79 @@ function isSolidlyReqId(id) { return PROBE_KIND_BY_ID.get(id) === "SOLIDLY"; }
     + "check (500 or throw) degrades an otherwise-nosell token to null; and ?probe=1 keeps "
     + "reporting the raw verdict plus the raw \"covered\" value while a plain /vd on the same "
     + "address reports the gated one — pinned side by side so the difference is never accidental");
+}
+
+/* ---- ۲۶ب. کارخانه‌های Slipstream — دو کوترِ جدا برایِ دو کارخانه‌ی جدا ----
+   Aerodrome Slipstream دو کارخانه دارد که GeckoTerminal با دو idِ دکسِ
+   جداگانه برچسب می‌زند (aerodrome-slipstream برایِ کارخانه‌ی قدیمی،
+   aerodrome-slipstream-3 برایِ کارخانه‌ی جدید) و کوترِ هرکدام فقط رویِ
+   استخرهای همان کارخانه جواب می‌دهد؛ کوترِ دیگری رویِ آن‌ها ریوِرت می‌کند.
+   قبلاً هر دو id به یک ردیف (aerodrome-cl، کوترِ کارخانه‌ی جدید) نگاشته
+   می‌شدند، پس توکنی که تنها استخرش رویِ کارخانه‌ی قدیمی بود «پوشش‌داده‌شده»
+   حساب می‌شد بدونِ آنکه کوترِ درست هرگز پرسیده شود. */
+{
+  const gt26b = new Set(vd.VD_VENUES.map((v) => v.id));
+  ok(gt26b.has("aerodrome-cl") && gt26b.has("aerodrome-cl-v1"),
+    "VD_VENUES must carry both aerodrome-cl (new factory) and aerodrome-cl-v1 (old factory)");
+
+  const rowNew = vd.VD_VENUES.find((r) => r.id === "aerodrome-cl");
+  const rowOld = vd.VD_VENUES.find((r) => r.id === "aerodrome-cl-v1");
+  ok(rowNew && rowNew.kind === "CL_INT24" &&
+    rowNew.to.toLowerCase() === "0x514c8b5f54112481e28028f1166bd78501089259",
+    "aerodrome-cl must stay a CL_INT24 quoter at the new-factory address, got " + JSON.stringify(rowNew));
+  ok(rowOld && rowOld.kind === "CL_INT24" &&
+    rowOld.to.toLowerCase() === "0x254cf9e1e6e233aa1ac962cb9b05b2cfeaae15b0",
+    "aerodrome-cl-v1 must be a CL_INT24 quoter at the old-factory address, got " + JSON.stringify(rowOld));
+
+  const { GT_DEX_TO_VENUE: GDV26b } = await import("./index.js");
+  ok(GDV26b["aerodrome-slipstream-3"] === "aerodrome-cl",
+    "GT_DEX_TO_VENUE[\"aerodrome-slipstream-3\"] (new factory) must map to aerodrome-cl, got " +
+    GDV26b["aerodrome-slipstream-3"]);
+  ok(GDV26b["aerodrome-slipstream"] === "aerodrome-cl-v1",
+    "GT_DEX_TO_VENUE[\"aerodrome-slipstream\"] (old factory) must map to aerodrome-cl-v1, got " +
+    GDV26b["aerodrome-slipstream"]);
+  ok(!("aerodrome-slipstream-2" in GDV26b),
+    "aerodrome-slipstream-2 (unverified third factory) must stay absent from GT_DEX_TO_VENUE");
+
+  // سرتاسری: fetchVerdict را با یک fetchImpl جعلی صدا می‌زنیم که *فقط* به
+  // آدرسِ کوترِ کارخانه‌ی قدیمی (0x254c…) کوتِ زنده می‌دهد؛ کوترِ کارخانه‌ی
+  // جدید (0x514c…) هرمیشه ریوِرت می‌کند. اگر aerodrome-cl-v1 واقعاً پرسیده
+  // نشود، هیچ کوتِ مثبتی هرگز نمی‌رسد و نتیجه sell نمی‌شود.
+  {
+    const w26b = (n) => BigInt(n).toString(16).padStart(64, "0");
+    const mkStatic4b = (amountOut) => "0x" + w26b(amountOut) + w26b(0) + w26b(0) + w26b(0);
+    const jsonRes26b = (body) => new Response(JSON.stringify(body), {
+      status: 200, headers: { "content-type": "application/json" },
+    });
+    const TOKEN26b = "0x6666666666666666666666666666666666666666";
+    const meta26b = { decimals: 18, priceUsd: 2000 };
+    // لفظی، نه از روی خودِ ردیف‌ها — وگرنه جابه‌جاشدنِ دو آدرس هم «sell» می‌گرفت.
+    const OLD_QUOTER = "0x254cf9e1e6e233aa1ac962cb9b05b2cfeaae15b0";
+    const NEW_QUOTER = "0x514c8b5f54112481e28028f1166bd78501089259";
+
+    const fetchImpl = async (url, init) => {
+      const reqs = JSON.parse(init.body);
+      const body = reqs.map((r) => {
+        if (r.id === 0) return { id: 0, result: mkStatic4b(5) }; // کاناری
+        const to = String(r.params[0].to).toLowerCase();
+        if (to === OLD_QUOTER) return { id: r.id, result: mkStatic4b(999) }; // کوترِ قدیمی زنده است
+        if (to === NEW_QUOTER) return { id: r.id, error: { code: 3 } }; // کوترِ جدید ریوِرت می‌کند
+        return isSolidlyReqId(r.id) ? { id: r.id, error: { code: 3 } } : { id: r.id, result: "0x" };
+      });
+      return jsonRes26b(body);
+    };
+    const res = await vd.fetchVerdict(TOKEN26b, meta26b, { fetchImpl, rpcs: ["https://rpc-slip.example"] });
+    ok(res === "sell", "when only the old-factory quoter (aerodrome-cl-v1) answers a live quote and the "
+      + "new-factory quoter (aerodrome-cl) reverts, fetchVerdict must still reach sell — proof the old "
+      + "quoter is actually asked, got " + res);
+  }
+
+  console.log("[slipstream factories] VD_VENUES carries aerodrome-cl (0x514c…, new factory) and "
+    + "aerodrome-cl-v1 (0x254c…, old factory) as separate CL_INT24 rows; GT_DEX_TO_VENUE routes "
+    + "aerodrome-slipstream-3 to aerodrome-cl and aerodrome-slipstream to aerodrome-cl-v1, with "
+    + "aerodrome-slipstream-2 staying absent; and end to end through fetchVerdict, a live quote from "
+    + "only the old-factory quoter still reaches sell, proving that quoter is really asked, not just "
+    + "declared");
 }
 
 /* ---- ۲۷. worker/v4index.js — کلیدِ واقعیِ v4، از رویِ لاگِ Initialize ----
@@ -5459,7 +5536,7 @@ console.log("[v4index] worker/v4index.js ok — decodeInitializeLog accepts a we
     gotOld + "\n  want " + wantOld);
 }
 
-/* --- ۲۷.۱۱ buildProbe بدونِ opts — دقیقاً همان ۲۱ تای امروز، بایت‌به‌بایت ----
+/* --- ۲۷.۱۱ buildProbe بدونِ opts — دقیقاً همان ۲۶ تای امروز، بایت‌به‌بایت ----
    فهرستِ موردانتظار از رویِ خودِ VD_VENUES ساخته می‌شود (همان الگویِ بخشِ
    ۱۲.۳)، نه یک بلابِ کپی‌شده. */
 {
@@ -5511,7 +5588,7 @@ console.log("[v4index] worker/v4index.js ok — decodeInitializeLog accepts a we
   for (const outAddr of [vd.WETH_ADDR, vd.USDC_ADDR]) {
     const got = vd.buildProbe(TOKEN, outAddr, amt);
     const want = expectedFor(outAddr);
-    ok(got.length === 21, "buildProbe with opts absent must still return exactly 21 items for stage " +
+    ok(got.length === 26, "buildProbe with opts absent must still return exactly 26 items for stage " +
       outAddr + ", got " + got.length);
     ok(JSON.stringify(got) === JSON.stringify(want),
       "buildProbe with opts absent must be byte-for-byte identical to the pre-change output for stage " + outAddr);
@@ -5576,7 +5653,7 @@ console.log("[v4 verdict wiring] VD_V4_STAGE_COUNTERS frozen with exactly the WE
   + "USDC entries; VD_V4_REAL_MAX=4; encodeV4QuoteExactInputSingleKey byte-matches ethers.Interface for a "
   + "non-zero-hooks key both ways of zeroForOne and refuses a foreign tokenIn/an amountIn at 2**128; "
   + "encodeV4QuoteExactInputSingle still emits today's exact bytes; buildProbe with opts absent (or an "
-  + "empty v4Keys) is byte-for-byte the pre-change 21-item output, rebuilt from VD_VENUES, not a pasted "
+  + "empty v4Keys) is byte-for-byte the pre-change 26-item output, rebuilt from VD_VENUES, not a pasted "
   + "blob; a real key is only appended when its counter is listed for that stage, never for an unrelated "
   + "counter, capped at VD_V4_REAL_MAX and always carrying id:\"uniswap-v4\"; and VD_POSITIVE_ONLY."
   + "V4_SINGLE stays true with uniswap-v4 still absent from GT_DEX_TO_VENUE's values");
