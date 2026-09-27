@@ -7540,9 +7540,9 @@ async def main():
         await sol_connect(bpg)
         await bpg.fill("#solAmt", "1")
         await bpg.wait_for_timeout(900)
-        b_out = await bpg.inner_text("#solOut")
-        b_min = await bpg.inner_text("#solMin")
-        b_route = await bpg.inner_text("#solRoute")
+        b_out = await bpg.input_value("#solOutRead")
+        b_min = await bpg.inner_text("#solMinF")
+        b_route = await bpg.inner_text("#solRouteF")
         await bpg.close()
         print("[sol swap] quote out=%r min=%r route=%r" % (b_out, b_min, b_route))
         assert b_out != "—" and b_min != "—", "typing a buy amount did not produce a quote readout: out=%r min=%r" % (b_out, b_min)
@@ -7587,21 +7587,16 @@ async def main():
 
         # ث) nosell — خرید غیرفعال با پیام، فروش همچنان مجاز
         epg = await open_sol_swap_page({"v": "nosell", "ms": 100})
-        e_buy_disabled = await epg.eval_on_selector('#solSideSeg [data-side="buy"]', "el => el.disabled")
         e_btn_text = await epg.inner_text("#solSwapBtn")
-        await epg.click('#solSideSeg [data-side="sell"]')
+        await epg.click("#solFlipBtn")
         await epg.wait_for_timeout(200)
-        e_sell_disabled = await epg.eval_on_selector('#solSideSeg [data-side="sell"]', "el => el.disabled")
         e_btn_text_sell = await epg.inner_text("#solSwapBtn")
         await epg.close()
-        print("[sol swap] nosell gate: buyDisabled=%s btn=%r sellDisabled=%s btnAfterSell=%r"
-              % (e_buy_disabled, e_btn_text, e_sell_disabled, e_btn_text_sell))
-        assert e_buy_disabled is True, "the Buy toggle must be disabled when the verdict is nosell"
+        print("[sol swap] nosell gate: btn=%r btnAfterFlip=%r" % (e_btn_text, e_btn_text_sell))
         assert "Buying is blocked" in e_btn_text and "sell-back check" in e_btn_text, \
             "the blocked CTA must name the reason, got %r" % e_btn_text
-        assert e_sell_disabled is False, "Sell must stay enabled even when the verdict is nosell"
         assert "Buying is blocked" not in e_btn_text_sell, \
-            "switching to Sell must clear the buy-blocked message, got %r" % e_btn_text_sell
+            "flipping to Sell must clear the buy-blocked message, got %r" % e_btn_text_sell
 
         # ج) کیف‌پول امضا را رد می‌کند
         fpg = await open_sol_swap_page({"v": "sell", "ms": 100})
@@ -7622,7 +7617,7 @@ async def main():
         gpg = await open_sol_swap_page({"v": "sell", "ms": 100}, quote_status=502, collect_errors=g_errs)
         await gpg.fill("#solAmt", "1")
         await gpg.wait_for_timeout(900)
-        g_out = await gpg.inner_text("#solOut")
+        g_out = await gpg.input_value("#solOutRead")
         g_notice = await gpg.inner_text("#solNotices")
         await gpg.close()
         # ⚠️ کروم خودش برای *هر* fetchِ غیرِ۲۰۰ یک «Failed to load resource»
@@ -7631,7 +7626,7 @@ async def main():
         # چیزی که واقعاً اهمیت دارد نبودِ خطای *دیگر* (استثنای جاوااسکریپت) است.
         g_real_errs = [e for e in g_errs if "Failed to load resource" not in e]
         print("[sol swap] quote 502 -> out=%r notice=%r errors=%s" % (g_out, g_notice[:50], g_errs))
-        assert g_out == "—", "a failed quote must not render a stale/garbage readout: %r" % g_out
+        assert g_out == "", "a failed quote must not render a stale/garbage readout: %r" % g_out
         assert "Could not get a quote" in g_notice, "a failed quote must show a friendly error, got %r" % g_notice
         assert not g_real_errs, "a failed quote must not raise a JS exception/console.error: %s" % g_real_errs
 
@@ -9078,6 +9073,237 @@ async def main():
               "Base tab switches both the request and the URL (absent chain param = base); Solana "
               "rows show no Trade link; Solana chip labels read Passed/Failed/Unknown")
 
+        # ---- [chain switch] گزینشگرِ شبکه در هدرِ /app — Base/Solana ----
+        # همان الگوی [sol swap]: کیف‌پولِ جعلیِ Wallet Standard با
+        # add_init_script، و استابِ /sol/quote، /gt/networks/solana/tokens/**،
+        # /vd/**، /sol/rpc. هیچ Jupiter/RPC/GT واقعی لمس نمی‌شود.
+        CS_MINT_USDC = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"
+
+        async def cs_stub_gt(route):
+            await route.fulfill(status=200, content_type="application/json", body=swap_gt_body())
+
+        async def cs_stub_vd(route):
+            await route.fulfill(status=200, content_type="application/json",
+                                 body=_json.dumps({"v": "sell", "ms": 100}))
+
+        async def cs_stub_quote(route):
+            await route.fulfill(status=200, content_type="application/json", body=_json.dumps(SOL_QUOTE_FIXTURE))
+
+        async def cs_stub_rpc(route):
+            payload = _json.loads(route.request.post_data or "{}")
+            method = payload.get("method")
+            if method == "getBalance":
+                result = {"value": 2000000000}
+            elif method == "getTokenAccountsByOwner":
+                result = {"value": []}
+            else:
+                result = None
+            await route.fulfill(status=200, content_type="application/json", body=_json.dumps({"result": result}))
+
+        async def cs_stub_ev(route):
+            await route.fulfill(status=204, body="")
+
+        async def open_app(hash_suffix="", inject_wallet=True, collect_errors=None, viewport=None):
+            apg = await b.new_page(viewport=viewport or {"width": 1280, "height": 900})
+            if collect_errors is not None:
+                apg.on("console", lambda m: collect_errors.append(m.text) if m.type == "error" else None)
+                apg.on("pageerror", lambda e: collect_errors.append(str(e)))
+            if inject_wallet:
+                # کیف‌پولِ جعلی — با add_init_script، پس همیشه *پیش* از هر
+                # اسکریپتِ خودِ صفحه شنونده‌ی app-ready را نصب می‌کند؛ یعنی
+                # دقیقاً سناریوی «کیف‌پولی که پیش از دست‌زدنِ کاربر ثبت شده».
+                # کشفش فقط به این بستگی دارد که *خودِ اپ* app-ready را زود
+                # بفرستد (solWalletStandardInit در همان اولِ بولوت) — نه به
+                # اینکه کاربر چه زمانی گزینشگر را باز می‌کند.
+                await apg.add_init_script(SOL_FAKE_WALLET_INIT)
+            await apg.route("**/ev", cs_stub_ev)
+            # جفتِ پیش‌فرضِ Base هم روی بارگذاریِ /app لوگو/نمودار می‌خواهد
+            # (multi، pools?page=1، ohlcv). اگر هیچ‌کدام استاب نشوند، چند
+            # تلاشِ ناموفقِ پیاپی روی شبکه‌ی این کانتینر یک backoffِ ۶۰ثانیه‌ای
+            # سراسری (gtCoolUntil) روشن می‌کند که بعداً fetchSolMeta را هم
+            # بی‌جهت شکست می‌دهد — پس اول یک استابِ عمومیِ «هیچی نیست» برای
+            # کلِ /gt، بعد استابِ اختصاصیِ سولانا رویش (آخرین route ثبت‌شده
+            # برنده است).
+            await apg.route("**/gt/**",
+                             lambda route: route.fulfill(status=200, content_type="application/json",
+                                                           body=_json.dumps({"data": []})))
+            await apg.route("**/gt/networks/solana/tokens/**", cs_stub_gt)
+            await apg.route("**/vd/**", cs_stub_vd)
+            await apg.route("**/sol/quote**", cs_stub_quote)
+            await apg.route("**/sol/rpc", cs_stub_rpc)
+            await apg.goto("http://127.0.0.1:%d/%s" % (port, hash_suffix))
+            await apg.wait_for_timeout(600)
+            return apg
+
+        # الف) گزینشگر Base/Solana را فهرست می‌کند
+        a1 = await open_app()
+        cs_opts = await a1.eval_on_selector_all(
+            "#srcPop [data-chain]", "els => els.map(e => e.textContent.trim())")
+        await a1.close()
+        print("[chain switch] selector options=%s" % cs_opts)
+        assert cs_opts == ["Base", "Solana"], "the network selector must list exactly Base then Solana: %s" % cs_opts
+
+        # ب) انتخابِ Solana کارتِ Solana را نشان و کارت‌های Base-only را
+        # پنهان می‌کند؛ برگشت به Base همه چیز را برمی‌گرداند.
+        b1 = await open_app()
+        await b1.click("#srcChip")
+        await b1.click('#srcPop [data-chain="solana"]')
+        await b1.wait_for_timeout(200)
+        b_state_sol = await b1.evaluate("""() => ({
+            appSolHeroHidden: document.getElementById('appSolHero').hidden,
+            baseHeroHidden: document.getElementById('baseHeroRow').hidden,
+            baseSubHidden: document.getElementById('baseSubRow').hidden,
+            solSwapHidden: document.getElementById('solSwap').hidden,
+            srcTx: document.getElementById('srcTx').textContent,
+        })""")
+        await b1.click("#srcChip")
+        await b1.click('#srcPop [data-chain="base"]')
+        await b1.wait_for_timeout(200)
+        b_state_base = await b1.evaluate("""() => ({
+            appSolHeroHidden: document.getElementById('appSolHero').hidden,
+            baseHeroHidden: document.getElementById('baseHeroRow').hidden,
+            baseSubHidden: document.getElementById('baseSubRow').hidden,
+            solSwapHidden: document.getElementById('solSwap').hidden,
+            srcTx: document.getElementById('srcTx').textContent,
+        })""")
+        await b1.close()
+        print("[chain switch] solana=%s base=%s" % (b_state_sol, b_state_base))
+        assert b_state_sol == {"appSolHeroHidden": False, "baseHeroHidden": True,
+                                "baseSubHidden": True, "solSwapHidden": False, "srcTx": "Solana"}, \
+            "choosing Solana must show the Solana swap card and hide the Base-only cards: %s" % b_state_sol
+        assert b_state_base == {"appSolHeroHidden": True, "baseHeroHidden": False,
+                                 "baseSubHidden": False, "solSwapHidden": True, "srcTx": "Base"}, \
+            "switching back to Base must restore the Base cards and hide the Solana card: %s" % b_state_base
+
+        # پ) هدر «Connect» روی Solana گزینشگرِ سولانا را باز می‌کند (نه منوی
+        # EVM)، فهرستِ کیف‌پولِ جعلی را نشان می‌دهد، و بعد از اتصال آدرسِ
+        # کوتاه را در هدر می‌نویسد.
+        c1 = await open_app()
+        await c1.click("#srcChip")
+        await c1.click('#srcPop [data-chain="solana"]')
+        await c1.wait_for_timeout(150)
+        await c1.click("#connectBtn")
+        await c1.wait_for_timeout(300)
+        c_picker_on = await c1.eval_on_selector("#solWalletOv", "el => el.classList.contains('on')")
+        c_evm_menu_on = await c1.eval_on_selector("#walletOv", "el => el.classList.contains('on')")
+        c_wal_text = await c1.inner_text("#solWalList")
+        await c1.click("#solWalList .walRow")
+        await c1.wait_for_timeout(300)
+        c_btn_text = await c1.inner_text("#connectBtn")
+        await c1.close()
+        print("[chain switch] connect picker=%s evmMenuOpen=%s wallets=%r afterConnect=%r"
+              % (c_picker_on, c_evm_menu_on, c_wal_text[:40], c_btn_text))
+        assert c_picker_on is True, "Connect on Solana must open the Solana wallet picker"
+        assert c_evm_menu_on is not True, "Connect on Solana must never open the EVM wallet picker"
+        assert "Fake Wallet" in c_wal_text, "the Solana picker must list the injected Wallet Standard wallet"
+        assert c_btn_text != "Connect wallet" and c_btn_text.strip(), \
+            "connecting must show the short Solana address in the header: %r" % c_btn_text
+
+        # ت) خرید/فروش SOL<->USDC روی /app — کوت زنده رندر می‌شود
+        d1 = await open_app()
+        await d1.click("#srcChip")
+        await d1.click('#srcPop [data-chain="solana"]')
+        await d1.wait_for_timeout(150)
+        await d1.click("#solBotBtn")
+        await d1.wait_for_timeout(200)
+        await d1.click('#solTokList .trow[data-mint="%s"]' % CS_MINT_USDC)
+        await d1.wait_for_timeout(1200)
+        d_exit_addr = await d1.inner_text("#appSolExitAddr")
+        d_bot_sym = await d1.inner_text("#solBotSym")
+        await d1.click("#connectBtn")
+        await d1.wait_for_timeout(200)
+        await d1.click("#solWalList .walRow")
+        await d1.wait_for_timeout(300)
+        await d1.fill("#solAmt", "1")
+        await d1.wait_for_timeout(900)
+        d_out = await d1.input_value("#solOutRead")
+        d_route = await d1.inner_text("#solRouteF")
+        await d1.close()
+        print("[chain switch] app quote SOL->USDC out=%r route=%r exitAddr=%r botSym=%r"
+              % (d_out, d_route, d_exit_addr, d_bot_sym))
+        assert d_exit_addr == CS_MINT_USDC, \
+            "the exit-check card must show the full mint address, not a shortened form: %r" % d_exit_addr
+        assert d_bot_sym == "TSWP", \
+            "the token chip must show the fetched symbol, never the word 'token': %r" % d_bot_sym
+        assert d_out != "—", "a SOL->USDC quote on /app must render an output amount: %r" % d_out
+        assert d_route != "—", "a SOL->USDC quote on /app must render a route label: %r" % d_route
+
+        # ث) انتخاب در localStorage می‌ماند — رفرش همان زنجیره را نگه می‌دارد
+        e1 = await open_app()
+        await e1.click("#srcChip")
+        await e1.click('#srcPop [data-chain="solana"]')
+        await e1.wait_for_timeout(150)
+        await e1.reload()
+        await e1.wait_for_timeout(600)
+        e_src_after_reload = await e1.inner_text("#srcTx")
+        e_hero_hidden_after_reload = await e1.eval_on_selector("#appSolHero", "el => el.hidden")
+        await e1.close()
+        print("[chain switch] persists across reload -> srcTx=%r appSolHeroHidden=%s"
+              % (e_src_after_reload, e_hero_hidden_after_reload))
+        assert e_src_after_reload == "Solana", "the chain choice must persist across reload: %r" % e_src_after_reload
+        assert e_hero_hidden_after_reload is False, \
+            "reloading with Solana persisted must keep the Solana card visible"
+
+        # ج) لینکِ اشتراکی #swap?chain=solana خودش زنجیره را انتخاب می‌کند
+        f1 = await open_app(hash_suffix="#swap?chain=solana")
+        f_src = await f1.inner_text("#srcTx")
+        f_hero_hidden = await f1.eval_on_selector("#appSolHero", "el => el.hidden")
+        await f1.close()
+        print("[chain switch] #swap?chain=solana -> srcTx=%r appSolHeroHidden=%s" % (f_src, f_hero_hidden))
+        assert f_src == "Solana", "#swap?chain=solana must select Solana on load: %r" % f_src
+        assert f_hero_hidden is False, "#swap?chain=solana must show the Solana card on load"
+
+        # چ) /pairs — همان گزینشگر تبِ زنجیره‌ی موجود را می‌زند
+        g1 = await b.new_page(viewport={"width": 1240, "height": 900})
+        gerrs = []
+        g1.on("pageerror", lambda e: gerrs.append(str(e)))
+        await g1.route("**/pairs.json**", stub_pairs_track)
+        await g1.route("**/gt/networks/base/tokens/multi/**", empty_gt)
+        await g1.route("**/gt/networks/solana/tokens/multi/**", empty_gt)
+        await g1.goto("http://127.0.0.1:%d/pairs.html" % port)
+        await g1.wait_for_timeout(400)
+        await g1.click("#srcChip")
+        await g1.click('#srcPop [data-chain="solana"]')
+        await g1.wait_for_timeout(400)
+        g_tab_on = await g1.eval_on_selector(
+            '.chain-tabs button[data-chain="solana"]', "el => el.classList.contains('on')")
+        g_url = g1.url
+        await g1.close()
+        print("[chain switch] pairs header selector -> tabOn=%s url=%s errors=%s" % (g_tab_on, g_url, gerrs))
+        assert g_tab_on is True, "picking Solana from the header selector must switch pairs.html's own chain tab"
+        assert "chain=solana" in g_url, "picking Solana from the header selector must update the URL: %s" % g_url
+        assert not gerrs, "web/pairs.html threw while switching chains from the header selector: %s" % gerrs
+
+        # ح) هر دو تم چیزِ نامرئی نمی‌گذارند — متنِ گزینه‌ها روی رنگِ پس‌زمینه
+        # خوانا می‌ماند (رنگِ متن با رنگِ پس‌زمینه‌ی پاپ‌آور یکی نیست).
+        for cs_theme in ("dark", "light"):
+            h1 = await b.new_page(viewport={"width": 1280, "height": 900}, color_scheme=cs_theme)
+            await h1.route("**/ev", cs_stub_ev)
+            await h1.goto("http://127.0.0.1:%d/" % port)
+            await h1.evaluate("t => { try { localStorage.setItem('zaexa.theme.v1', t); } catch(_){} }", cs_theme)
+            await h1.reload()
+            await h1.wait_for_timeout(500)
+            await h1.click("#srcChip")
+            await h1.wait_for_timeout(150)
+            h_colors = await h1.evaluate("""() => {
+                const pop = document.getElementById('srcPop');
+                const cs = getComputedStyle(pop);
+                const btn = document.querySelector('#srcPop [data-chain="solana"]');
+                const bs = getComputedStyle(btn);
+                return { popBg: cs.backgroundColor, txt: bs.color };
+            }""")
+            await h1.close()
+            print("[chain switch] theme=%s popover colors=%s" % (cs_theme, h_colors))
+            assert h_colors["popBg"] and h_colors["txt"] and h_colors["popBg"] != h_colors["txt"], \
+                "the network popover must not use matching text/background colors in %s mode: %s" \
+                % (cs_theme, h_colors)
+
+        print("[chain switch] header network selector (Base/Solana) on /app: lists both options, shows/hides "
+              "the right cards, routes Connect to the Solana picker (never the EVM menu) and paints the short "
+              "address, renders a live SOL<->USDC quote via the built-in token list, persists across reload, "
+              "honours #swap?chain=solana, drives pairs.html's own chain tabs from the same header selector, "
+              "and stays legible in both themes — all covered")
+
         # ---- [pairs filters] چیپ‌های آمار × جست‌وجو × مرتب‌سازی — ترکیب‌های
         # دقیق، رویِ یک استابِ ۶ ردیفی. ----
         FILTER_ROWS = [
@@ -9822,10 +10048,10 @@ async def main():
         await tpg.goto("http://127.0.0.1:%d/pairs.html" % port)
         await tpg.wait_for_timeout(400)
         title_default = await tpg.title()
-        await tpg.click("button[data-chain='solana']")
+        await tpg.click(".chain-tabs button[data-chain='solana']")
         await tpg.wait_for_timeout(150)
         title_solana = await tpg.title()
-        await tpg.click("button[data-chain='base']")
+        await tpg.click(".chain-tabs button[data-chain='base']")
         await tpg.wait_for_timeout(150)
         title_base_again = await tpg.title()
         await tpg.close()
@@ -10096,7 +10322,7 @@ async def main():
             ledOff: document.querySelector('#srcChip .led') ?
                     document.querySelector('#srcChip .led').classList.contains('off') : null,
         })""")
-        await ppg2.click('[data-chain="solana"]')
+        await ppg2.click('.chain-tabs [data-chain="solana"]')
         await ppg2.wait_for_timeout(200)
         src_after_solana = await ppg2.eval_on_selector("#srcTx", "e => e.textContent")
         await ppg2.close()

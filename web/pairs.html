@@ -439,7 +439,22 @@ footer .fine{max-width:78ch;margin:46px 0 0;font-size:11.5px;color:var(--tx3);li
        خودِ سایت)، پس چراغ همیشه «خاموش» می‌ماند — وضعیتی که نمی‌توانیم
        اثبات کنیم را ادعا نمی‌کنیم. برچسب از رویِ تبِ زنجیره‌ی فعال عوض
        می‌شود (setActiveChainTab، پایینِ صفحه). -->
-  <div class="chip" id="srcChip"><span class="led off"></span><span id="srcTx">Base</span></div>
+  <!-- ۲۷ سپتامبر — عیناً همان گزینشگرِ web/index.html؛ [header parity]
+       امضای DOM این بلوک را با اپ می‌سنجد. انتخاب از اینجا همان تبِ
+       chainTabs موجود را می‌زند (پایینِ صفحه). -->
+  <div class="rel" id="srcMenu">
+    <button class="chip" id="srcChip" aria-haspopup="menu" aria-expanded="false"><span class="led off"></span><span id="srcTx">Base</span></button>
+    <div class="pop" id="srcPop" role="menu" aria-label="Network">
+      <button type="button" class="walletAction" id="srcOptBase" data-chain="base" role="menuitemradio" aria-checked="true">
+        <span>Base</span>
+        <svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="10" fill="#0052FF"/></svg>
+      </button>
+      <button type="button" class="walletAction" id="srcOptSolana" data-chain="solana" role="menuitemradio" aria-checked="false">
+        <span>Solana</span>
+        <svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true"><defs><linearGradient id="srcSolGrad" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#9945FF"/><stop offset="1" stop-color="#14F195"/></linearGradient></defs><circle cx="12" cy="12" r="10" fill="url(#srcSolGrad)"/></svg>
+      </button>
+    </div>
+  </div>
   <button class="chip round" id="shareBtn" title="Copy a link to this page">
     <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor"
          stroke-width="2" stroke-linecap="round"><path d="M10 13a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-1 1"/>
@@ -935,16 +950,46 @@ footer .fine{max-width:78ch;margin:46px 0 0;font-size:11.5px;color:var(--tx3);li
   function setActiveChainTab(){
     setChainCopy();
     setChainTitle();
+    // ۲۷ سپتامبر — روی موبایل این چیپ با یک قاعده‌ی سراسری (max-width:960px)
+    // کاملاً مخفی می‌شود (لیبلِ Base جا نمی‌شود)؛ برای Solana یک لیبلِ کوتاه
+    // («SOL») به‌جای مخفی‌شدنِ کامل نشان داده می‌شود — عیناً همان قاعده در
+    // web/index.html. برچسبِ تبِ خودِ صفحه (chainLabel) دست‌نخورده می‌ماند.
     var srcTxEl = document.getElementById('srcTx');
-    if (srcTxEl) srcTxEl.textContent = chainLabel();
+    if (srcTxEl) {
+      var narrow = window.matchMedia && matchMedia('(max-width:960px)').matches;
+      if (currentChain === 'solana') {
+        srcTxEl.textContent = narrow ? 'SOL' : 'Solana';
+        srcTxEl.style.display = narrow ? 'inline' : '';
+      } else {
+        srcTxEl.textContent = 'Base';
+        srcTxEl.style.display = '';
+      }
+    }
     var fbEl = document.getElementById('feedbackLink');
     if (fbEl) fbEl.href = feedbackMailto();
+    // گزینشگرِ تازه‌ی هدر (#srcPop) — همان الگوی [header parity] با اپ.
+    var srcPopEl = document.getElementById('srcPop');
+    if (srcPopEl) {
+      Array.prototype.forEach.call(srcPopEl.querySelectorAll('button[data-chain]'), function(b){
+        b.setAttribute('aria-checked', (b.getAttribute('data-chain') === currentChain) ? 'true' : 'false');
+      });
+    }
     if (!chainTabsEl) return;
     Array.prototype.forEach.call(chainTabsEl.querySelectorAll('button[data-chain]'), function(b){
       var on = b.getAttribute('data-chain') === currentChain;
       b.classList.toggle('on', on);
       b.setAttribute('aria-selected', on ? 'true' : 'false');
     });
+  }
+  // یک‌جا برای هر دو گزینشگر (تب‌های پایین صفحه و منوی هدرِ تازه) — همان
+  // کاری که قبلاً فقط داخلِ هندلرِ chainTabsEl بود.
+  function setChain(chain){
+    chain = (chain === 'solana') ? 'solana' : 'base';
+    if (chain === currentChain) return;
+    currentChain = chain;
+    setChainInURL(chain);
+    setActiveChainTab();
+    load();
   }
 
   // --- آمار — رویِ آرایه‌ی کاملِ زنجیره‌ی جاری، نه رویِ نتیجه‌ی جست‌وجو ---
@@ -1021,12 +1066,41 @@ footer .fine{max-width:78ch;margin:46px 0 0;font-size:11.5px;color:var(--tx3);li
   chainTabsEl && chainTabsEl.addEventListener('click', function(e){
     var btn = e.target && e.target.closest ? e.target.closest('button[data-chain]') : null;
     if (!btn) return;
-    var chain = btn.getAttribute('data-chain') === 'solana' ? 'solana' : 'base';
-    if (chain === currentChain) return;
-    currentChain = chain;
-    setChainInURL(chain);
-    setActiveChainTab();
-    load();
+    setChain(btn.getAttribute('data-chain'));
+  });
+
+  // --- گزینشگرِ شبکه در هدر (#srcChip/#srcPop) — عیناً همان الگوی اپ ---
+  var srcChipEl = document.getElementById('srcChip');
+  var srcPopEl2 = document.getElementById('srcPop');
+  function closeSrcMenu(){
+    if (!srcPopEl2) return;
+    srcPopEl2.classList.remove('on');
+    if (srcChipEl) srcChipEl.setAttribute('aria-expanded', 'false');
+  }
+  if (srcChipEl && srcPopEl2) {
+    srcChipEl.addEventListener('click', function(e){
+      e.stopPropagation();
+      var open = srcPopEl2.classList.toggle('on');
+      srcChipEl.setAttribute('aria-expanded', String(open));
+    });
+    srcPopEl2.querySelectorAll('button[data-chain]').forEach(function(b){
+      b.addEventListener('click', function(){
+        setChain(b.getAttribute('data-chain'));
+        closeSrcMenu();
+      });
+    });
+    document.addEventListener('mousedown', function(e){
+      if (!srcPopEl2.contains(e.target) && !srcChipEl.contains(e.target)) closeSrcMenu();
+    });
+    document.addEventListener('keydown', function(e){
+      if (e.key === 'Escape' && srcPopEl2.classList.contains('on')) { closeSrcMenu(); srcChipEl.focus(); }
+    });
+  }
+  // چرخشِ صفحه/تغییرِ اندازه‌ی پنجره باید همان قاعده‌ی SOL/مخفی را دوباره بسنجد.
+  var srcResizeT = null;
+  window.addEventListener('resize', function(){
+    clearTimeout(srcResizeT);
+    srcResizeT = setTimeout(setActiveChainTab, 150);
   });
 
   statsStripEl && statsStripEl.addEventListener('click', function(e){

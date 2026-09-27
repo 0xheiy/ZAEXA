@@ -582,6 +582,14 @@ main{max-width:1140px;margin:0 auto;padding:8px 20px 56px;display:flex;flex-dire
    کارت‌ها دست‌نخورده می‌ماند و `[card fit]`/`[chart steady]` که رابطه
    می‌سنجند نه موقعیتِ مطلق، همچنان درست‌اند. */
 .row.hero{grid-template-columns:1fr 396px;align-items:start;margin-top:30px}
+/* ویژگیِ hidden به display:gridِ بالا می‌بازد — همان الگوی .clr[hidden]
+   بالاتر. سوییچِ Base/Solana با همین سه id، بدونِ این قاعده هر دو کارت
+   هم‌زمان دیده می‌شدند. */
+#baseHeroRow[hidden],#baseSubRow[hidden],#appSolHero[hidden]{display:none}
+/* روی /app کارتِ سولانا تکستونه می‌ماند — ستونِ اولِ خالیِ .row.hero فقط
+   برای هم‌ترازیِ گرید با Base بود و روی صفحه یک حفره‌ی بزرگ می‌ساخت. */
+#appSolHero{grid-template-columns:1fr;max-width:396px;margin-left:auto;margin-right:auto}
+#appSolHero>[aria-hidden]{display:none}
 .row.tkGrid{grid-template-columns:1fr 396px;align-items:start}
 @media(max-width:900px){.row.tkGrid{grid-template-columns:1fr}}
 .row.sub{grid-template-columns:1.35fr 1fr}
@@ -1228,7 +1236,22 @@ footer .fine{max-width:78ch;margin:46px 0 0;font-size:11.5px;color:var(--tx3);li
        سمتِ چپِ همین خوشه جمع می‌شود، پس چیپ‌ها به لبه‌ی راست می‌چسبند. -->
   <div class="hdrRight">
   <div class="grow"></div>
-  <div class="chip" id="srcChip"><span class="led off"></span><span id="srcTx">Base</span></div>
+  <!-- ۲۷ سپتامبر — چیپِ شبکه حالا گزینشگر است، نه فقط نشانگر: Base/Solana.
+       ساختار عیناً با web/pairs.html یکی نگه داشته می‌شود ([header parity]
+       امضای DOM هدر را با هم می‌سنجد) — فقط مقدارها/رفتار فرق دارد. -->
+  <div class="rel" id="srcMenu">
+    <button class="chip" id="srcChip" aria-haspopup="menu" aria-expanded="false"><span class="led off"></span><span id="srcTx">Base</span></button>
+    <div class="pop" id="srcPop" role="menu" aria-label="Network">
+      <button type="button" class="walletAction" id="srcOptBase" data-chain="base" role="menuitemradio" aria-checked="true">
+        <span>Base</span>
+        <svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="10" fill="#0052FF"/></svg>
+      </button>
+      <button type="button" class="walletAction" id="srcOptSolana" data-chain="solana" role="menuitemradio" aria-checked="false">
+        <span>Solana</span>
+        <svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true"><defs><linearGradient id="srcSolGrad" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#9945FF"/><stop offset="1" stop-color="#14F195"/></linearGradient></defs><circle cx="12" cy="12" r="10" fill="url(#srcSolGrad)"/></svg>
+      </button>
+    </div>
+  </div>
   <button class="chip round" id="shareBtn" title="Copy a link to this quote">
     <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor"
          stroke-width="2" stroke-linecap="round"><path d="M10 13a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-1 1"/>
@@ -1314,7 +1337,7 @@ footer .fine{max-width:78ch;margin:46px 0 0;font-size:11.5px;color:var(--tx3);li
 
 <main>
 <div class="view on" id="view-swap">
-  <div class="row hero">
+  <div class="row hero" id="baseHeroRow">
     <!-- chart -->
     <section class="card">
       <div class="chartTop">
@@ -1390,7 +1413,7 @@ footer .fine{max-width:78ch;margin:46px 0 0;font-size:11.5px;color:var(--tx3);li
     </section>
   </div>
 
-  <div class="row sub">
+  <div class="row sub" id="baseSubRow">
     <section class="card">
       <header><span class="ttl">Every pool on Base</span><span class="grow"></span>
         <span class="ttl mono" id="venueMeta">—</span></header>
@@ -1412,6 +1435,25 @@ footer .fine{max-width:78ch;margin:46px 0 0;font-size:11.5px;color:var(--tx3);li
       <div id="exitBox"></div>
       <div id="safetyBody"><div class="empty">Pick a token to scan its contract.</div></div>
     </section>
+  </div>
+
+  <!-- ۲۷ سپتامبر — سواپِ سولانا روی /app. ستونِ اول فقط برای هم‌ترازیِ
+       گرید با baseHeroRoW خالی می‌ماند (همان عرضِ ۳۹۶px برای کارتِ سواپ)؛
+       #solSwap و کارتِ exit check با updateSwapViewForChain به داخلِ
+       ستونِ دوم منتقل می‌شوند — همان یک نمونه‌ای که صفحه‌ی توکن هم دارد،
+       نه یک کپی. -->
+  <div class="row hero" id="appSolHero" hidden>
+    <div aria-hidden="true"></div>
+    <div id="appSolHeroCol" style="display:flex;flex-direction:column;gap:18px">
+      <!-- همان پوسته‌ی کارتِ Base — «Exit check & token safety»، فقط
+           safetyBody (بایت‌کدِ EVM) ندارد؛ محتوا از renderSolExit می‌آید. -->
+      <section class="card">
+        <header><span class="ttl">Exit check &amp; token safety</span><span class="grow"></span>
+          <span class="ttl mono" id="appSolExitSym"></span></header>
+        <div class="mono" id="appSolExitAddr" style="padding:12px 20px 0;color:var(--tx3);font-size:11.5px;word-break:break-all"></div>
+        <div id="appSolExitBox" style="padding:11px 20px 16px"></div>
+      </section>
+    </div>
   </div>
 </div><!-- /view-swap -->
 
@@ -1521,24 +1563,37 @@ footer .fine{max-width:78ch;margin:46px 0 0;font-size:11.5px;color:var(--tx3);li
        برای سولانا معنا ندارد (فرمِ اصلی فقط Base را می‌شناسد). کلاس‌ها عیناً
        همان‌های swapCard/leg/facts/seg/cta بالا هستند، هیچ رنگِ تازه‌ای نیست. -->
   <section class="card swapCard" id="solSwap" hidden>
-    <div class="seg" id="solSideSeg">
-      <button type="button" data-side="buy" class="on">Buy</button>
-      <button type="button" data-side="sell">Sell</button>
-    </div>
+    <!-- ۲۷ سپتامبر — عیناً چیدمانِ کارتِ Base: You pay / فلیپ / You receive،
+         بعد facts، بعد اعلان‌ها، بعد CTA. توکن با کلیک روی چیپش انتخاب
+         می‌شود (#solTokOv، پایین‌تر)، نه یک فیلدِ آدرسِ خام روی خودِ کارت.
+         فلیپ دقیقاً همان solSide («buy»=SOL بالا/می‌پردازی، «sell»=توکن
+         بالا) را می‌چرخاند — تبِ Buy/Sell قبلی حذف شد. -->
+    <div style="height:16px"></div>
     <div class="leg">
-      <div class="legTop"><span id="solLegLabel">You pay</span><b id="solBal">—</b></div>
+      <div class="legTop"><span id="solTopLabel">You pay</span><b id="solTopBal">—</b></div>
       <div class="legRow">
         <input class="amt mono" id="solAmt" placeholder="0" inputmode="decimal" autocomplete="off">
-        <button class="tokbtn" id="solMaxBtn" type="button">MAX</button>
+        <button class="tokbtn" id="solTopBtn" type="button"><span class="av" id="solTopAv">?</span><span id="solTopSym">SOL</span></button>
+      </div>
+    </div>
+    <div class="mid"><button id="solFlipBtn" type="button">⇅</button></div>
+    <div class="leg">
+      <div class="legTop"><span id="solBotLabel">You receive</span><b id="solBotBal">—</b></div>
+      <div class="legRow">
+        <input class="amt mono" id="solOutRead" placeholder="0" disabled>
+        <button class="tokbtn" id="solBotBtn" type="button"><span class="av" id="solBotAv">?</span><span id="solBotSym">—</span></button>
       </div>
     </div>
     <div class="facts">
-      <div class="fact"><span class="k">You receive</span><span class="v mono" id="solOut">—</span></div>
-      <div class="fact"><span class="k">Min received</span><span class="v mono" id="solMin">—</span></div>
-      <div class="fact"><span class="k">Price impact</span><span class="v mono" id="solImpact">—</span></div>
-      <div class="fact"><span class="k">Route</span><span class="v mono" id="solRoute">—</span></div>
+      <div class="fact"><span class="k">Rate</span><span class="v mono" id="solRate">—</span></div>
+      <div class="fact"><span class="k">Price impact</span><span class="v mono" id="solImpactF">—</span></div>
+      <div class="fact"><span class="k">Min received</span><span class="v mono" id="solMinF">—</span></div>
+      <div class="fact"><span class="k">Route</span><span class="v mono" id="solRouteF">—</span></div>
     </div>
     <div id="solNotices"></div>
+    <!-- ⚠️ فقط روی صفحه‌ی توکن دیده می‌شود (openSolanaTokenPage آن را
+         hidden=false می‌کند). روی /app هدر خودش کیف‌پول را نشان می‌دهد —
+         updateSwapViewForChain این را hidden نگه می‌دارد. -->
     <div class="rel" id="solWalletMenu">
       <button class="chip solid" id="solConnectBtn" type="button">Connect Solana wallet</button>
       <div class="pop" id="solWalPop">
@@ -1551,12 +1606,14 @@ footer .fine{max-width:78ch;margin:46px 0 0;font-size:11.5px;color:var(--tx3);li
     <button class="cta" id="solSwapBtn" disabled type="button">Connect wallet</button>
   </section>
 
-  <div class="ov" id="solWalletOv">
-    <div class="modal">
-      <h3>Connect a Solana wallet<span class="grow"></span><button id="solWalClose" type="button" style="color:var(--tx3)">✕</button></h3>
-      <div class="tlist" id="solWalList"></div>
-    </div>
-  </div>
+  <!-- ⚠️ جای اصلیِ #solSwap — updateSwapViewForChain آن را روی /app به
+       appSolHeroCol منتقل می‌کند و با همین جانگه‌دار (نه با #solWalletOv،
+       که تا ۲۷ سپتامبر همین‌جا بود) به اینجا برمی‌گرداند. خودِ اورلی حالا
+       جایی بیرون از هر .view است (کنارِ #walletOv/#tokOv) — این یک `.ov`
+       با position:fixed اگر داخلِ نمایی بماند که فعال نیست، خودِ نمایش‌اش
+       (display:none روی نیای غیرفعال) هرچه هم `.on` بگیرد رندر نمی‌شود؛
+       والتِ سولانا روی /app دقیقاً همین را می‌شکاند تا این جابه‌جایی. -->
+  <div id="solSwapAnchor" style="display:none"></div>
 
   <div class="row tkGrid" id="tk-grid">
     <div class="tkLeft">
@@ -1723,6 +1780,27 @@ footer .fine{max-width:78ch;margin:46px 0 0;font-size:11.5px;color:var(--tx3);li
     <h3>Select a token<span class="grow"></span><button id="tokClose" style="color:var(--tx3)">✕</button></h3>
     <input class="srch" id="tokSearch" placeholder="Search name or paste address" autocomplete="off" spellcheck="false">
     <div class="tlist" id="tokList"></div>
+  </div>
+</div>
+
+<!-- ۲۷ سپتامبر — بیرون از هر .view، عیناً مثلِ #walletOv/#tokOv بالا: این
+     پیکرِ کیف‌پولِ سولانا هم روی صفحه‌ی توکن باز می‌شود هم روی /app، پس
+     نمی‌تواند فرزندِ نمایی باشد که فقط یکی از آن دو فعال است. -->
+<div class="ov" id="solWalletOv">
+  <div class="modal">
+    <h3>Connect a Solana wallet<span class="grow"></span><button id="solWalClose" type="button" style="color:var(--tx3)">✕</button></h3>
+    <div class="tlist" id="solWalList"></div>
+  </div>
+</div>
+
+<!-- ۲۷ سپتامبر — انتخابِ توکنِ سولانا روی /app، عیناً چیدمانِ #tokOv بالا
+     (h3+جست‌وجو+فهرست). سه توکنِ شناخته‌شده + هر mint دلخواه (پیست در
+     همین فیلدِ جست‌وجو). آدرسِ خام دیگر روی خودِ کارت نیست. -->
+<div class="ov" id="solTokOv">
+  <div class="modal">
+    <h3>Select a token<span class="grow"></span><button id="solTokClose" type="button" style="color:var(--tx3)">✕</button></h3>
+    <input class="srch" id="solTokSearch" placeholder="Search name or paste a mint address" autocomplete="off" spellcheck="false">
+    <div class="tlist" id="solTokList"></div>
   </div>
 </div>
 
@@ -4221,6 +4299,8 @@ let solWalletApi=null;          // شیءِ خودِ کیف‌پولِ متصل 
 let solAccount=null;            // {address (base58), publicKey (Uint8Array 32)}
 let solMintCur=null;            // mint صفحه‌ی فعلی
 let solTokenDecimals=null;      // دسیمالِ توکن، از حسابِ توکن یا از GT
+let solTokenSymbol=null;        // نمادِ توکن (چیپ/فکت‌ها) — از fetchSolMeta
+let solTokenLogoUrl=null;       // image_url گِکوترمینال، برای چیپِ توکن
 let solBalSol=null,solBalTok=null; // موجودی‌ها، به واحدِ انسانی (نه lamports خام)
 let solSide="buy";              // "buy" (SOL→توکن) یا "sell" (توکن→SOL)
 let solVerdictV=null;           // "sell"/"nosell"/null از GET /vd/<mint>
@@ -4230,6 +4310,205 @@ let solQuoteTimer=null;
 let solSwapBusy=false;          // جلوِ دوبار زدنِ دکمه‌ی سواپ حین امضا/ارسال
 
 const SOL_WALLET_LS_KEY="zaexa.solwallet.v1";
+
+/* =====================================================================
+   سوییچِ شبکه‌ی هدر — Base/Solana روی /app
+   ---------------------------------------------------------------------
+   activeChain فقط برای نمای سواپِ اصلی معنا دارد (نه صفحه‌ی توکن، که خودش
+   از رویِ آدرس تشخیص می‌دهد). لینکِ اشتراکی `#swap?chain=solana` روی
+   localStorage اولویت دارد؛ نبودِ هردو یعنی Base، پیش‌فرضِ همیشگی. */
+const CHAIN_LS_KEY="zaexa.chain.v1";
+function readStoredChain(){
+  try{const v=localStorage.getItem(CHAIN_LS_KEY);return (v==="solana"||v==="base")?v:null;}
+  catch{return null;}
+}
+function storeChain(v){try{localStorage.setItem(CHAIN_LS_KEY,v);}catch{}}
+function initialChain(){
+  const q=parseHash().params.get("chain");
+  if(q==="solana"||q==="base")return q;
+  return readStoredChain()||"base";
+}
+let activeChain="base";
+const SOL_APP_TOKENS={USDC:"EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+  USDT:"Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB",
+  JUP:"JUPyiwrYJFskUPiHa7hkeR8VUtAeFLoSkaw7aW2guKZ"};
+const SOL_MINT_RE=/^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
+function paintSrc2(){
+  // امضای گزینشگر (تیک/نامعلوم روی گزینه‌ی فعال)
+  document.querySelectorAll('#srcPop [data-chain]').forEach(b=>{
+    b.setAttribute("aria-checked",String(b.dataset.chain===activeChain));
+  });
+}
+/* نمایِ سواپِ اصلی را روی Base/Solana می‌چیند. صفحه‌ی توکن (tokenPage)
+   دست‌نخورده می‌ماند — چیدمانِ خودش را دارد. */
+let solAppDefaulted=false;
+function updateSwapViewForChain(){
+  paintSrc();paintSrc2();
+  if(tokenPage)return;
+  const solana=activeChain==="solana";
+  const heroBase=document.getElementById("baseHeroRow");
+  const subBase=document.getElementById("baseSubRow");
+  if(heroBase)heroBase.hidden=solana;
+  if(subBase)subBase.hidden=solana;
+  const appHero=$("appSolHero");
+  if(appHero)appHero.hidden=!solana;
+  if(solana){
+    const col=$("appSolHeroCol");
+    if(col&&$("solSwap").parentElement!==col)col.insertBefore($("solSwap"),col.firstChild);
+    $("solSwap").hidden=false;
+    // هدر خودش کیف‌پول را نشان می‌دهد — پیلِ داخلِ کارت فقط مالِ صفحه‌ی
+    // توکن است (که هدرِ چنین چیزی ندارد).
+    $("solWalletMenu").hidden=true;
+    solPaintLegs();
+    // بدونِ توکنِ پیش‌فرض کارت «؟ —» نشان می‌داد؛ مثلِ Base که با ETH→USDC باز می‌شود،
+    // سولانا با SOL→USDC باز می‌شود — فقط بارِ اول، انتخابِ کاربر دست نمی‌خورد.
+    if(!solMintCur&&!solAppDefaulted){solAppDefaulted=true;solAppLoadToken(SOL_APP_TOKENS.USDC);}
+  }else{
+    // برگرداندنِ #solSwap به جای اصلی‌اش در نمای توکن، درست جلوِ جانگه‌دار
+    const anchor=$("solSwapAnchor");
+    if(anchor&&anchor.parentNode&&$("solSwap").parentElement!==anchor.parentNode){
+      anchor.parentNode.insertBefore($("solSwap"),anchor);
+    }
+    $("solSwap").hidden=true;
+  }
+  paintWallet();
+}
+function setChain(next){
+  next=(next==="solana")?"solana":"base";
+  closeSrcMenu();
+  if(next===activeChain)return;
+  activeChain=next;
+  storeChain(next);
+  updateSwapViewForChain();
+}
+function closeSrcMenu(focusBack){
+  $("srcPop").classList.remove("on");
+  $("srcChip").setAttribute("aria-expanded","false");
+  if(focusBack)$("srcChip").focus();
+}
+function toggleSrcMenu(e){
+  e.stopPropagation();
+  const open=$("srcPop").classList.toggle("on");
+  $("srcChip").setAttribute("aria-expanded",String(open));
+}
+/* توکنِ سولانا روی /app — فهرستِ کوتاهِ شناخته‌شده + هر آدرسِ دلخواه.
+   همان fetchSolMeta/fetchVdVerdict/renderSolExit که صفحه‌ی توکن استفاده
+   می‌کند، فقط مقصدِ رندرش عوض می‌شود (appSolExitBox به‌جای tk-exitBox). */
+async function solAppLoadToken(mint){
+  mint=(mint||"").trim();
+  if(!SOL_MINT_RE.test(mint)){
+    solSetNotice(note("err","<b>Enter a valid Solana token address.</b>"));
+    return;
+  }
+  solCloseTokenPicker();
+  solSwapReset(mint);
+  // نماد و لوگوی پیش‌فرض‌ها (USDC/USDT/JUP) از همین فهرست — کارت پیش از جوابِ GT هم «؟ —» نشان ندهد.
+  const preset=SOL_APP_TOKEN_LIST.find(t=>t.mint===mint);
+  if(preset){solTokenSymbol=preset.symbol;}
+  $("appSolExitSym").textContent=preset?preset.symbol:"";
+  $("appSolExitAddr").textContent=mint;
+  solPaintLegs();
+  renderSolExit(null,null,"appSolExitBox");
+  const[meta,verdict]=await Promise.all([fetchSolMeta(mint),fetchVdVerdict(mint)]);
+  solVerdictV=verdict.v;
+  if(meta&&Number.isInteger(meta.decimals))solTokenDecimals=meta.decimals;
+  solTokenSymbol=(meta&&meta.symbol)||(preset&&preset.symbol)||"Unknown";
+  solTokenLogoUrl=(meta&&meta.image_url)||null;
+  $("appSolExitSym").textContent=solTokenSymbol;
+  renderSolExit(verdict.v,verdict.why,"appSolExitBox");
+  solPaintLegs();
+  solSwapApplyGate();
+}
+/* ---- چیدمانِ دو پایه، عیناً چیدمانِ Base: بالا همیشه «You pay» (فیلدِ
+   قابلِ‌ویرایش)، پایین همیشه «You receive» (فقط‌خواندنی). فلیپ فقط این را
+   عوض می‌کند که کدام‌یک SOL است — solSide («buy»=SOL بالا). ---- */
+function solPaintAvatarInto(elId,symbol,logoUrl){
+  const el=$(elId);if(!el)return;
+  el.innerHTML="";
+  el.appendChild(document.createTextNode(symbol?symbol.slice(0,3).toUpperCase():"?"));
+  if(!logoUrl||!okLogo(logoUrl))return;
+  const img=new Image();
+  img.alt="";img.loading="lazy";
+  img.onload=()=>{img.classList.add("on");};
+  img.onerror=()=>{img.remove();};
+  img.src=logoUrl;
+  el.appendChild(img);
+}
+const SOL_ICON_SVG='<svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">'+
+  '<defs><linearGradient id="solLegGrad" x1="0" y1="0" x2="1" y2="1">'+
+  '<stop offset="0" stop-color="#9945FF"/><stop offset="1" stop-color="#14F195"/></linearGradient></defs>'+
+  '<circle cx="12" cy="12" r="10" fill="url(#solLegGrad)"/></svg>';
+function solPaintLegs(){
+  const buy=solSide==="buy";                 // buy: SOL بالا (می‌پردازی) — sell: توکن بالا
+  $("solTopLabel").textContent="You pay";
+  $("solBotLabel").textContent="You receive";
+  const topSym=buy?"SOL":(solTokenSymbol||"—");
+  const botSym=buy?(solTokenSymbol||"—"):"SOL";
+  $("solTopSym").textContent=topSym;
+  $("solBotSym").textContent=botSym;
+  if(buy){$("solTopAv").innerHTML=SOL_ICON_SVG;solPaintAvatarInto("solBotAv",solTokenSymbol,solTokenLogoUrl);}
+  else{solPaintAvatarInto("solTopAv",solTokenSymbol,solTokenLogoUrl);$("solBotAv").innerHTML=SOL_ICON_SVG;}
+  // فقط چیپِ توکن (نه SOL) گزینشگر را باز می‌کند — و فقط روی /app، چون
+  // صفحه‌ی توکن (tokenPage) خودش mint را از آدرس گرفته و قابل عوض‌کردن نیست.
+  const canPick=!tokenPage;
+  $("solTopBtn").onclick=(buy||!canPick)?null:solOpenTokenPicker;
+  $("solBotBtn").onclick=(!buy||!canPick)?null:solOpenTokenPicker;
+  $("solTopBtn").style.cursor=(!buy&&canPick)?"pointer":"default";
+  $("solBotBtn").style.cursor=(buy&&canPick)?"pointer":"default";
+  solPaintBalance();
+}
+/* ---- انتخابِ توکن — همان چیدمانِ #tokOv (h3+جست‌وجو+فهرست)، سه توکنِ
+   شناخته‌شده + هر mint دلخواه. ---- */
+const SOL_APP_TOKEN_LIST=[
+  {symbol:"USDC",name:"USD Coin",mint:SOL_APP_TOKENS.USDC},
+  {symbol:"USDT",name:"Tether USD",mint:SOL_APP_TOKENS.USDT},
+  {symbol:"JUP",name:"Jupiter",mint:SOL_APP_TOKENS.JUP},
+];
+function solOpenTokenPicker(){
+  $("solTokSearch").value="";
+  solRenderTokenPicker("");
+  $("solTokOv").classList.add("on");
+  setTimeout(()=>$("solTokSearch").focus(),30);
+}
+function solCloseTokenPicker(){$("solTokOv").classList.remove("on");}
+function solRenderTokenPicker(q){
+  const list=$("solTokList"),query=(q||"").trim();
+  const ql=query.toLowerCase();
+  let rows=SOL_APP_TOKEN_LIST.filter(t=>!ql||t.symbol.toLowerCase().includes(ql)||
+    t.name.toLowerCase().includes(ql)||t.mint.toLowerCase().includes(ql));
+  let html=rows.map((t,i)=>`<button class="trow" data-mint="${esc(t.mint)}">
+      <span class="av" data-picktok="${i}">${esc(t.symbol.slice(0,3).toUpperCase())}</span>
+      <span><span class="s">${esc(t.symbol)}</span><br><span class="a mono">${shortAddr(t.mint)}</span></span>
+    </button>`).join("");
+  if(!rows.length&&SOL_MINT_RE.test(query)){
+    html=`<button class="trow" data-mint="${esc(query)}">
+        <span class="av">?</span>
+        <span><span class="s">Use this address</span><br><span class="a mono">${shortAddr(query)}</span></span>
+      </button>`;
+  }else if(!rows.length){
+    html='<div class="empty">Nothing found. Paste a mint address to use it.</div>';
+  }
+  list.innerHTML=html;
+  list.querySelectorAll(".trow").forEach(el=>el.onclick=()=>solAppLoadToken(el.dataset.mint));
+  // لوگوهای سه‌تای شناخته‌شده — یک fetchSolMeta هرکدام، فقط وقتی گزینشگر باز است
+  rows.forEach((t,i)=>{
+    fetchSolMeta(t.mint).then(meta=>{
+      const el=list.querySelector(`[data-picktok="${i}"]`);
+      if(el)solPaintAvatarIntoEl(el,t.symbol,meta&&meta.image_url);
+    });
+  });
+}
+function solPaintAvatarIntoEl(el,symbol,logoUrl){
+  el.innerHTML="";
+  el.appendChild(document.createTextNode(symbol?symbol.slice(0,3).toUpperCase():"?"));
+  if(!logoUrl||!okLogo(logoUrl))return;
+  const img=new Image();
+  img.alt="";img.loading="lazy";
+  img.onload=()=>{img.classList.add("on");};
+  img.onerror=()=>{img.remove();};
+  img.src=logoUrl;
+  el.appendChild(img);
+}
 
 let statsSeq=0;
 async function renderTokenStats(t){
@@ -4315,6 +4594,21 @@ function note(k,h){return `<div class="note ${k}">${h}</div>`;}
 function setNotice(h){$("notices").innerHTML=h||"";}
 function paintSrc(){
   const led=$("srcChip").firstElementChild;
+  // چیپِ شبکه از ۲۷ سپتامبر یک گزینشگر است؛ روی Solana هیچ RPCِ زنده‌ای
+  // اینجا خوانده نمی‌شود (نه eth_call ای)، پس چراغ همیشه خاموش می‌ماند —
+  // همان قاعده‌ی «چیزی که نمی‌توانیم اثبات کنیم را ادعا نکنیم».
+  if(activeChain==="solana"){
+    led.className="led off";
+    // روی موبایل قاعده‌ی سراسریِ #srcChip span:last-child{display:none}
+    // برای برچسبِ بلندِ Base است؛ «SOL» آن‌قدر کوتاه است که جا می‌شود، پس
+    // با یک استایلِ این‌لاین (که همیشه بر قاعده‌ی خارجی می‌برد) مجبورش
+    // می‌کنیم دیده شود — رفتارِ Base دست‌نخورده می‌ماند.
+    const narrow=window.matchMedia&&matchMedia("(max-width:960px)").matches;
+    $("srcTx").textContent=narrow?"SOL":"Solana";
+    $("srcTx").style.display=narrow?"inline":"";
+    return;
+  }
+  $("srcTx").style.display="";
   if(!liveSrc){led.className="led off";$("srcTx").textContent="Base";return;}
   led.className="led";
   // اگر RPC اختصاصی فعال است باید *دیده شود*. یک منبع داده‌ی متفاوت که
@@ -5278,6 +5572,12 @@ function closeWalletMenu(){
   $("connectBtn").setAttribute("aria-expanded","false");
 }
 function toggleWalletMenu(){
+  if(activeChain==="solana"&&!tokenPage){
+    if(!solAccount)return;
+    const open=$("walletPop").classList.toggle("on");
+    $("connectBtn").setAttribute("aria-expanded",String(open));
+    return;
+  }
   if(!account||walletChainId!==CHAIN.id)return;
   const open=$("walletPop").classList.toggle("on");
   $("connectBtn").setAttribute("aria-expanded",String(open));
@@ -5406,6 +5706,15 @@ async function switchNetwork(){
 }
 function paintWallet(){
   const b=$("connectBtn"),addr=$("walletAddr");
+  // روی /app با زنجیره‌ی Solana، این دکمه کیف‌پولِ سولانا را نشان می‌دهد —
+  // کیف‌پولِ Base (account) دست‌نخورده در پس‌زمینه می‌ماند، فقط پنهان است.
+  if(activeChain==="solana"&&!tokenPage){
+    if(!solAccount){b.textContent="Connect wallet";b.className="chip solid";
+      addr.textContent="—";closeWalletMenu();return;}
+    b.textContent=shortAddr(solAccount.address);b.className="chip";
+    addr.textContent=shortAddr(solAccount.address);
+    return;
+  }
   if(!account){b.textContent="Connect wallet";b.className="chip solid";
     addr.textContent="—";closeWalletMenu();return;}
   b.textContent=walletChainId===CHAIN.id?shortAddr(account):"Switch to Base";
@@ -6217,8 +6526,8 @@ function renderSolStats(a){
    همین یک شاخه را می‌گیرد، حتی وقتی why دارد.
    زیرِ ?dev=1، why خام هم کنارش می‌آید — همان جایی که دفعه‌ی بعد از آنجا
    می‌خوانیمش (devMuted، نه یک پرچمِ تازه). */
-function renderSolExit(v,why){
-  const box=$("tk-exitBox");if(!box)return;
+function renderSolExit(v,why,targetId){
+  const box=$(targetId||"tk-exitBox");if(!box)return;
   if(v==="sell"){
     box.innerHTML=`<div class="tripHead">
         <span class="tripPct" style="color:var(--pos)">Sell route found</span>
@@ -6268,6 +6577,15 @@ async function openSolanaTokenPage(mint){
   renderRoundTrip($("tk-exitBox"),null);   // «داریم می‌سنجیم»، همان اسکلتِ Base
   ev("check:open");                        // همان شمارنده‌ی لینک بررسی
 
+  // ⚠️ #solSwap همان یک نمونه است که روی /app هم استفاده می‌شود
+  // (updateSwapViewForChain آن را جابه‌جا می‌کند)؛ اینجا همیشه به جای
+  // اصلی‌اش برمی‌گردد، و گزینشگرِ توکنِ مخصوصِ /app مخفی می‌ماند — این
+  // صفحه توکنش را از آدرس می‌گیرد، نه از انتخاب کاربر.
+  const solSwapAnchor=$("solSwapAnchor");
+  if(solSwapAnchor&&solSwapAnchor.parentNode&&$("solSwap").parentElement!==solSwapAnchor.parentNode){
+    solSwapAnchor.parentNode.insertBefore($("solSwap"),solSwapAnchor);
+  }
+  $("solWalletMenu").hidden=false;
   solSwapReset(mint);
   $("solSwap").hidden=false;
 
@@ -6284,6 +6602,9 @@ async function openSolanaTokenPage(mint){
 
   solVerdictV=verdict.v;
   if(meta&&Number.isInteger(meta.decimals))solTokenDecimals=meta.decimals;
+  solTokenSymbol=(meta&&meta.symbol)||(preset&&preset.symbol)||"Unknown";
+  solTokenLogoUrl=(meta&&meta.image_url)||null;
+  solPaintLegs();
   solSwapApplyGate();
   solWalletStandardInit();
   solTryAutoRestoreName();
@@ -6410,7 +6731,8 @@ function solRenderWalletList(){
     <span class="walName">${esc(w.name)}</span>
     <span class="walKind">Solana wallet</span></div>`).join("")
     :`<div class="empty">No Solana wallet found. Install one that supports Wallet Standard `+
-      `(Phantom, Solflare, Backpack…) and reopen this.</div>`;
+      `(Phantom, Solflare, Backpack…) and reopen this.<br>If you use Phantom, make sure Solana `+
+      `is enabled in its settings.</div>`;
   list.querySelectorAll(".walRow").forEach(el=>{
     el.onclick=()=>{solCloseWalletPicker();solConnectWallet(rows[+el.dataset.i]);};
   });
@@ -6452,6 +6774,10 @@ function solPaintWallet(){
     btn.textContent="Connect Solana wallet";
   }
   solUpdateSwapBtn();
+  // ⚠️ عمداً بدون شرط: paintWallet() خودش chain-aware است (پایین‌تر) و
+  // وقتی activeChain==="solana" و tokenPage نیستیم چیزی نمی‌نویسد جز
+  // همین وضعیتِ کیف‌پولِ سولانا — کیف‌پولِ Base دست‌نخورده می‌ماند.
+  paintWallet();
 }
 
 /* ---- موجودی‌ها — از طریقِ POST /sol/rpc، هرگز مستقیم به یک RPC ---- */
@@ -6492,10 +6818,13 @@ async function solRefreshBalances(){
   solSwapApplyGate();
 }
 function solPaintBalance(){
-  const b=$("solBal");
-  if(!solAccount){b.textContent="—";return;}
-  if(solSide==="buy")b.textContent=solBalSol!=null?solBalSol.toFixed(4)+" SOL":"—";
-  else b.textContent=solBalTok!=null?solBalTok.toLocaleString(undefined,{maximumFractionDigits:6})+" token":"—";
+  const buy=solSide==="buy";
+  const topB=$("solTopBal"),botB=$("solBotBal");
+  if(!solAccount){topB.textContent="—";botB.textContent="—";return;}
+  const solTxt=solBalSol!=null?solBalSol.toFixed(4)+" SOL":"—";
+  const tokTxt=solBalTok!=null?solBalTok.toLocaleString(undefined,{maximumFractionDigits:6})+" "+(solTokenSymbol||""):"—";
+  topB.textContent=buy?solTxt:tokTxt;
+  botB.textContent=buy?tokTxt:solTxt;
 }
 
 /* ---- کوت — دبانس ۴۰۰ms، شماره‌ی ترتیب برای دورریختنِ پاسخِ دیر ---- */
@@ -6555,70 +6884,72 @@ function solRouteLabel(q){
   return labels.length?labels.join(" → "):"—";
 }
 function solRenderReadout(){
+  const buy=solSide==="buy";
+  const inSym=buy?"SOL":(solTokenSymbol||"—");
+  const outSym=buy?(solTokenSymbol||"—"):"SOL";
   if(!solQuote){
-    $("solOut").textContent="—";$("solMin").textContent="—";
-    $("solImpact").textContent="—";$("solRoute").textContent="—";
+    $("solOutRead").value="";
+    $("solMinF").textContent="—";
+    $("solImpactF").textContent="—";
+    $("solRouteF").textContent="—";
+    $("solRate").textContent="—";
     return;
   }
-  const decOut=solSide==="buy"?solTokenDecimals:9;
+  const decIn=buy?9:solTokenDecimals;
+  const decOut=buy?solTokenDecimals:9;
   const decMin=decOut==null?9:decOut;
+  const inAmt=Number(solQuote.inAmount)/Math.pow(10,decIn==null?9:decIn);
   const out=Number(solQuote.outAmount)/Math.pow(10,decMin);
   const min=Number(solQuote.otherAmountThreshold)/Math.pow(10,decMin);
   const impact=Number(solQuote.priceImpactPct)*100;
-  $("solOut").textContent=isFinite(out)?out.toLocaleString(undefined,{maximumFractionDigits:6})+(solSide==="buy"?" token":" SOL"):"—";
-  $("solMin").textContent=isFinite(min)?min.toLocaleString(undefined,{maximumFractionDigits:6})+(solSide==="buy"?" token":" SOL"):"—";
-  $("solImpact").textContent=isFinite(impact)?impact.toFixed(2)+"%":"—";
-  $("solRoute").textContent=solRouteLabel(solQuote);
+  $("solOutRead").value=isFinite(out)?out.toLocaleString(undefined,{maximumFractionDigits:6}):"";
+  $("solMinF").textContent=isFinite(min)?min.toLocaleString(undefined,{maximumFractionDigits:6})+" "+outSym:"—";
+  $("solImpactF").textContent=isFinite(impact)?impact.toFixed(2)+"%":"—";
+  $("solRouteF").textContent=solRouteLabel(solQuote);
+  const rate=(isFinite(inAmt)&&inAmt>0&&isFinite(out))?(out/inAmt):null;
+  $("solRate").textContent=rate!=null
+    ?("1 "+inSym+" = "+rate.toLocaleString("en-US",{maximumFractionDigits:6})+" "+outSym):"—";
 }
 
 /* ---- گیت‌کردنِ خرید روی حکمِ فروش — قاعده‌ی امنیتیِ صاحب سایت ---- */
 function solSwapApplyGate(){
+  // این بنر فقط روی صفحه‌ی توکن هست؛ روی /app هیچ جای معادلی ندارد —
+  // خودِ کارتِ exit check (appSolExitBox) همان «نامعلوم» را می‌گوید.
   const notice=$("tk-solNotice");
-  if(solVerdictV===null){
-    notice.hidden=false;
-    notice.textContent="We could not confirm this token can be sold back.";
-  }else{
-    notice.hidden=true;notice.textContent="";
+  if(notice&&tokenPage){
+    if(solVerdictV===null){
+      notice.hidden=false;
+      notice.textContent="We could not confirm this token can be sold back.";
+    }else{
+      notice.hidden=true;notice.textContent="";
+    }
   }
-  const seg=$("solSideSeg");
-  const buyBtn=seg.querySelector('[data-side="buy"]');
-  // فقط دکمه‌ی سوییچ غیرفعال می‌شود — تبِ فعلی عوض نمی‌شود؛ خودِ کاربر اگر
-  // خواست دستی به Sell می‌رود. جابه‌جاییِ خودکار یعنی کاربری که تازه صفحه
-  // را باز کرده تبی را می‌بیند که خودش انتخاب نکرده.
-  buyBtn.disabled=solVerdictV==="nosell";
   solUpdateSwapBtn();
 }
+/* فلیپ — عیناً flipBtn در Base: جهت را برمی‌گرداند، مبلغ و کوت را صفر
+   می‌کند (Base هم amtIn/amtOut را پاک نمی‌کند ولی کوتِ قبلی برای جهتِ تازه
+   معنا ندارد)، و دو پایه را دوباره می‌کشد. */
 function solOnSideChange(){
-  $("solLegLabel").textContent=solSide==="buy"?"You pay":"You sell";
   $("solAmt").value="";
   solQuote=null;
-  solPaintBalance();
+  solPaintLegs();
   solRenderReadout();
   solUpdateSwapBtn();
 }
 function solUpdateSwapBtn(){
   const btn=$("solSwapBtn");
   if(solSwapBusy)return;                      // حین امضا/ارسال دست نمی‌زنیم
+  // روی /app تا وقتی کاربر توکنی انتخاب نکرده، هیچ mint‌ای نیست — دکمه
+  // باید همین را بگوید، نه «Enter an amount» که گمراه‌کننده است.
+  if(!tokenPage&&!solMintCur){btn.disabled=true;btn.textContent="Choose a token";return;}
   if(solVerdictV==="nosell"&&solSide==="buy"){
     btn.disabled=true;btn.textContent="Buying is blocked: this token failed the sell-back check.";
     return;
   }
   if(!solAccount){btn.disabled=true;btn.textContent="Connect wallet";return;}
-  if(!solQuote){btn.disabled=true;btn.textContent=solSide==="buy"?"Enter an amount":"Enter an amount";return;}
+  if(!solQuote){btn.disabled=true;btn.textContent="Enter an amount";return;}
   btn.disabled=false;
-  btn.textContent=solSide==="buy"?"Buy":"Sell";
-}
-function solMaxAmount(){
-  if(solSide==="sell"){
-    if(solBalTok==null)return;
-    $("solAmt").value=solBalTok>0?String(solBalTok):"";
-  }else{
-    if(solBalSol==null)return;
-    const leftover=0.01;                      // برای کارمزد/رِنت کنار گذاشته می‌شود
-    const v=Math.max(0,solBalSol-leftover);
-    $("solAmt").value=v>0?v.toFixed(6):"";
-  }
-  solScheduleQuote();
+  btn.textContent="Swap";
 }
 
 /* ---- خودِ سواپ — POST /sol/swap → چکِ پیش‌امضا → sign(&send) → پول‌کردن ---- */
@@ -6667,7 +6998,9 @@ async function solDoSwap(){
       return;
     }
 
-    btn.textContent="Waiting for your wallet…";
+    const swapInSym=solSide==="buy"?"SOL":(solTokenSymbol||"—");
+    const swapOutSym=solSide==="buy"?(solTokenSymbol||"—"):"SOL";
+    btn.textContent=`Confirm ${$("solAmt").value||""} ${swapInSym} → ${swapOutSym} in wallet…`;
     const f=solWalletApi.features;
     let sigB58=null;
     if(f["solana:signAndSendTransaction"]){
@@ -6708,15 +7041,14 @@ async function solDoSwap(){
 function solSwapReset(mint){
   solMintCur=mint;
   solTokenDecimals=null;solBalSol=null;solBalTok=null;
+  solTokenSymbol=null;solTokenLogoUrl=null;
   solSide="buy";solVerdictV=null;solQuote=null;
   clearTimeout(solQuoteTimer);solQuoteTimer=null;
   solSwapBusy=false;
   $("solAmt").value="";
-  $("solLegLabel").textContent="You pay";
-  $("solSideSeg").querySelectorAll("button").forEach(b=>b.classList.toggle("on",b.dataset.side==="buy"));
   solSetNotice("");
+  solPaintLegs();
   solRenderReadout();
-  solPaintBalance();
   // یک اتصال از یک توکنِ سولانا به توکنِ بعدی *می‌ماند* — همان چیزی که
   // کیف‌پولِ Base هم بینِ توکن‌ها حفظ می‌کند؛ فقط موجودی/کوت صفر می‌شوند.
   if(solAccount){solRefreshBalances();solScheduleQuote();}
@@ -6854,6 +7186,7 @@ function setView(v,push){
   // فقط وقتی نما باز می‌شود داده می‌گیریم — نه در پس‌زمینه
   if(v==="folio")renderFolio();
   if(v==="flow"){paintFlowToken();renderFlow();}
+  if(v==="swap"&&!tokenPage)updateSwapViewForChain();
   // سه نما در یک صفحه‌اند و با hash عوض می‌شوند، پس آمار معمولیِ «بازدید
   // صفحه» آن‌ها را از هم تفکیک نمی‌کند. اینجا تنها نقطه‌ی ورود هر سه است.
   ev("view:"+v);
@@ -6912,8 +7245,29 @@ function wire(){
   $("faqCtrLink").textContent=CHAIN.executor;
   $("themeBtn").onclick=()=>{theme=theme==="dark"?"light":"dark";storeTheme(theme);applyTheme();};
   $("shareBtn").onclick=()=>copyLink(shareUrl(),$("shareBtn"));
-  $("connectBtn").onclick=()=>{if(!account)connect();else if(walletChainId!==CHAIN.id)switchNetwork();else toggleWalletMenu();};
-  $("disconnectBtn").onclick=disconnect;
+  /* گزینشگرِ شبکه‌ی هدر — Base/Solana. */
+  $("srcChip").onclick=toggleSrcMenu;
+  document.querySelectorAll("#srcPop [data-chain]").forEach(b=>b.onclick=()=>setChain(b.dataset.chain));
+  document.addEventListener("mousedown",e=>{
+    if(!$("srcPop").contains(e.target)&&!$("srcChip").contains(e.target))closeSrcMenu();});
+  $("connectBtn").onclick=()=>{
+    if(activeChain==="solana"&&!tokenPage){
+      if(!solAccount){solOpenWalletPicker();return;}
+      toggleWalletMenu();
+      return;
+    }
+    if(!account)connect();else if(walletChainId!==CHAIN.id)switchNetwork();else toggleWalletMenu();
+  };
+  $("disconnectBtn").onclick=()=>{
+    if(activeChain==="solana"&&!tokenPage){solDisconnectWallet();closeWalletMenu();return;}
+    disconnect();
+  };
+  /* توکنِ سولانا روی /app — فهرستِ کوتاه + هر آدرسِ دلخواه. */
+  if($("solAppTokPresets"))$("solAppTokPresets").querySelectorAll("[data-mint]").forEach(b=>{
+    b.onclick=()=>{$("solAppTokAddr").value=b.dataset.mint;solAppLoadToken(b.dataset.mint);};
+  });
+  if($("solAppTokLoadBtn"))$("solAppTokLoadBtn").onclick=()=>solAppLoadToken($("solAppTokAddr").value);
+  if($("solAppTokAddr"))$("solAppTokAddr").onkeydown=e=>{if(e.key==="Enter")solAppLoadToken(e.target.value);};
   /* دکمه‌های داخل حالت خالی با delegation وصل می‌شوند، نه مستقیم: محتوای
      این دو ظرف با innerHTML بازنویسی می‌شود و یک onclick مستقیم بعد از
      اولین رندر از بین می‌رفت. شنونده روی خودِ ظرف است که هرگز عوض نمی‌شود. */
@@ -6958,7 +7312,11 @@ function wire(){
     if(view==="flow")renderFlow();
     refreshAllowance().then(scheduleQuote);};
   $("nav").querySelectorAll("[data-view]").forEach(b=>b.onclick=()=>setView(b.dataset.view));
-  addEventListener("hashchange",()=>setView(parseHash().view,false));
+  addEventListener("hashchange",()=>{
+    setView(parseHash().view,false);
+    const hc=parseHash().params.get("chain");
+    if(!tokenPage&&(hc==="solana"||hc==="base"))setChain(hc);
+  });
   $("flowTokBtn").onclick=()=>openPicker("out");
   /* ⚠️ این ناحیه یک بار با copy-paste خراب شده بود: تکه‌ای از خود wire()
      داخل هندلرهای کلیک تکرار شده بود. جاوااسکریپت پارسش می‌کرد و ظاهر
@@ -6982,6 +7340,11 @@ function wire(){
    که در دسترس نباشد، همان اعلانِ متنیِ خودش بالا می‌آید). */
 $("copyAddrBtn").onclick=(e)=>{
   e.stopPropagation();
+  if(activeChain==="solana"&&!tokenPage){
+    if(!solAccount)return;
+    copyLink(solAccount.address,$("copyAddrBtn").querySelector("span"));
+    return;
+  }
   if(!account)return;
   copyLink(account,$("copyAddrBtn").querySelector("span"));
 };
@@ -7026,17 +7389,14 @@ $("copyAddrBtn").onclick=(e)=>{
   };
   /* ---- سواپِ زنده‌ی سولانا — عناصر همیشه در DOM هستند (روی Base مخفی)،
      پس صدازدنِ wire() یک‌بار برای همیشه کافی است. ---- */
-  $("solSideSeg").querySelectorAll("button[data-side]").forEach(b=>{
-    b.onclick=()=>{
-      if(b.disabled)return;
-      if(solSide===b.dataset.side)return;
-      solSide=b.dataset.side;
-      $("solSideSeg").querySelectorAll("button").forEach(x=>x.classList.toggle("on",x===b));
-      solOnSideChange();
-    };
-  });
+  $("solFlipBtn").onclick=()=>{
+    solSide=solSide==="buy"?"sell":"buy";
+    solOnSideChange();
+  };
+  $("solTokClose").onclick=solCloseTokenPicker;
+  $("solTokOv").onclick=e=>{if(e.target===$("solTokOv"))solCloseTokenPicker();};
+  $("solTokSearch").oninput=e=>solRenderTokenPicker(e.target.value);
   $("solAmt").oninput=()=>{solScheduleQuote();solUpdateSwapBtn();};
-  $("solMaxBtn").onclick=solMaxAmount;
   $("solConnectBtn").onclick=()=>{
     if(!solAccount){solOpenWalletPicker();return;}
     $("solWalPop").classList.toggle("on");
@@ -7050,10 +7410,12 @@ $("copyAddrBtn").onclick=(e)=>{
   document.addEventListener("keydown",e=>{
     if(e.key!=="Escape")return;closePicker();closeWalletPicker();
     $("setPop").classList.remove("on");closeWalletMenu();
-    solCloseWalletPicker();$("solWalPop").classList.remove("on");});
+    solCloseWalletPicker();$("solWalPop").classList.remove("on");
+    solCloseTokenPicker();
+    if($("srcPop").classList.contains("on"))closeSrcMenu(true);});
   let rt=null;
   addEventListener("resize",()=>{clearTimeout(rt);
-    rt=setTimeout(()=>{if(chartData&&panel("plot").querySelector("svg"))drawChart(chartData);},180);});
+    rt=setTimeout(()=>{if(chartData&&panel("plot").querySelector("svg"))drawChart(chartData);paintSrc();},180);});
 }
 
 (async function(){
@@ -7068,6 +7430,12 @@ $("copyAddrBtn").onclick=(e)=>{
   const onTokenSol=!/^\/t\/0x[0-9a-fA-F]{40}\/?$/.test(location.pathname) &&
                     /^\/t\/([1-9A-HJ-NP-Za-km-z]{32,44})\/?$/.exec(location.pathname);
   solanaReadOnly=!!onTokenSol;
+  /* ⚠️ کشفِ Wallet Standard باید همین اول اجرا شود — نه فقط وقتی کاربر
+     خودش سراغِ سولانا می‌رود. کیف‌پولی که زودتر از این register شود، اگر
+     شنونده هنوز نصب نباشد، هرگز دیده نمی‌شود. صدازدنش idempotent است
+     (solWsInit)، پس فراخوانیِ دوباره در openSolanaTokenPage بی‌اثر است. */
+  solWalletStandardInit();
+  activeChain=initialChain();
   wire();
   /* ⚠️ همه‌ی این بلوک — ethers، همه‌ی Interfaceها، RPC، جفتِ پیش‌فرض،
      نمودار — فقط برای Base است. رویِ مسیرِ سولانا هیچ‌کدامشان صدا زده
@@ -7174,6 +7542,7 @@ $("copyAddrBtn").onclick=(e)=>{
   const onToken=/^\/t\/(0x[0-9a-fA-F]{40})\/?$/.exec(location.pathname);
   tokenPage=!!onToken;
   setView(tokenPage?"token":(parseHash().view||"swap"),false);
+  if(!tokenPage)updateSwapViewForChain();
   /* ⚠️ ترتیب اینجا سرعتِ دیده‌شدن را تعیین می‌کند. خواندنِ خودِ توکن به
      دروازه‌های صرافی ربطی ندارد، پس همان اول شروع می‌شود و موازی با
      verifyDexes پیش می‌رود؛ نام و لوگو و اعداد بازار چند ثانیه زودتر
