@@ -149,10 +149,11 @@ function whyForRow(chain, verdict, why) {
   return "internal";
 }
 
-// واژه‌نامه‌ی بسته‌ی cause — دقیقاً هم‌رده‌ی همان انضباطِ whyForRow. امروز
-// فقط یک عضو دارد، ولی فهرست است نه یک رشته‌ی تکی، برای همان روزی که عضوِ
-// دوم لازم شود.
-export const REPORT_CAUSES = Object.freeze(["empty-pool"]);
+// واژه‌نامه‌ی بسته‌ی cause — دقیقاً هم‌رده‌ی همان انضباطِ whyForRow.
+// ۲۷ سپتامبر — "sell-reverts" اضافه شد: poolDirectedProof (worker/verdict.js)
+// وقتی استخرِ واقعیِ توکن پرشده است ولی کوت‌گرفتن از کلیدِ واقعیِ خودش هم
+// ریوِرت می‌کند، دقیقاً همین علت را می‌دهد — هانی‌پاتِ کلاسیک، این‌بار با شاهد.
+export const REPORT_CAUSES = Object.freeze(["empty-pool", "sell-reverts"]);
 
 /* یک cause ساختگی/دست‌ساز هرگز نباید در انبار بنشیند — فقط وقتی verdict
    واقعاً "nosell" است و خودِ رشته عضوِ همین واژه‌نامه‌ی بسته است، وگرنه
@@ -163,19 +164,58 @@ export const REPORT_CAUSES = Object.freeze(["empty-pool"]);
    report:2026-09-23: یک nosellِ Base روی استخرِ v4 که cause="empty-pool" ندارد
    اثبات‌نشده است و «نامعلوم» (v4:unproven) نشان داده می‌شود. خودِ انبار دست
    نمی‌خورد؛ فقط نمای بیرونی (JSON، متن، /pairs.json). recheckِ منفی با همان
-   شرط هم کنار گذاشته می‌شود. */
+   شرط هم کنار گذاشته می‌شود.
+   ⚠️ ترتیبِ چک: اول زنجیره (سولانا)، بعد v4، بعد هر nosellِ دیگرِ Base بدونِ
+   causeِ عضوِ REPORT_CAUSES — گاردِ v4 هیچ‌وقت با گاردِ عمومیِ Base اشتباه
+   گرفته نمی‌شود، چون v4 اولین چکِ شاخه‌ی Base است و از آن‌جا برمی‌گردد. */
 export function publishGuardRow(row, chainDefault) {
   if (!row || typeof row !== "object") return row;
   const chain = typeof row.chain === "string" ? row.chain : chainDefault;
+
+  /* ۲۷ سپتامبر — هیچ توکنِ سولانایی هرگز به‌عنوانِ «nosell»ِ منتشرشده دیده
+     نمی‌شود تا وقتی کنترلِ منفیِ فروشنده‌های اخیر (solNosellVeto) یک هفته
+     زنده روی آن دوام آورده باشد — تصمیمِ صریحِ حسام، ۲۷ سپتامبر. این گاردِ
+     برداشته می‌شود فقط وقتی مالک خودش این را بخواهد، نه از رویِ حدس. */
+  if (chain === "solana") {
+    let out = row;
+    if (row.v === "nosell") {
+      out = { ...out, v: null, why: "sol:unconfirmed" };
+      delete out.cause; delete out.ret;
+    }
+    if (row.recheck === "nosell") {
+      out = { ...out };
+      delete out.recheck; delete out.recheckAt; delete out.recheckCause;
+    }
+    return out;
+  }
+
+  if (chain !== "base") return row;
+
   const v4 = typeof row.dex === "string" && row.dex.startsWith("uniswap-v4");
-  if (chain !== "base" || !v4) return row;
+  if (v4) {
+    let out = row;
+    if (row.v === "nosell" && row.cause !== "empty-pool") {
+      out = { ...out, v: null, why: "v4:unproven" };
+      delete out.cause;
+      delete out.ret;
+    }
+    if (row.recheck === "nosell" && row.recheckCause !== "empty-pool") {
+      out = { ...out };
+      delete out.recheck; delete out.recheckAt; delete out.recheckCause;
+    }
+    return out;
+  }
+
+  /* ۲۷ سپتامبر — همان قاعده، این‌بار برای هر ردیفِ Baseِ غیرِv4: یک nosell
+     که causeاش عضوِ REPORT_CAUSES نیست (empty-pool/sell-reverts) اثبات‌نشده
+     است — دقیقاً همان جایی که PAID/YAP/UCHI بی‌دلیل منتشر شده بودند. */
   let out = row;
-  if (row.v === "nosell" && row.cause !== "empty-pool") {
-    out = { ...out, v: null, why: "v4:unproven" };
+  if (row.v === "nosell" && !REPORT_CAUSES.includes(row.cause)) {
+    out = { ...out, v: null, why: "cause:unproven" };
     delete out.cause;
     delete out.ret;
   }
-  if (row.recheck === "nosell" && row.recheckCause !== "empty-pool") {
+  if (row.recheck === "nosell" && !REPORT_CAUSES.includes(row.recheckCause)) {
     out = { ...out };
     delete out.recheck; delete out.recheckAt; delete out.recheckCause;
   }
@@ -1288,10 +1328,12 @@ export function reportText(doc, opts) {
       const listed = flaggedRows.slice(0, REPORT_TEXT_MAX_LISTED);
       listed.forEach((r, i) => {
         if (i > 0) lines.push("");
-        // پسوندِ « · pool is empty» فقط وقتی خودِ ردیف cause="empty-pool"
-        // دارد — ردیف‌های بدونِ آن بایت‌به‌بایت همان خطِ امروز می‌مانند.
+        // پسوندِ « · pool is empty»/« · sells revert on a funded pool» فقط
+        // وقتی خودِ ردیف همان cause را دارد — ردیف‌های بدونِ آن بایت‌به‌بایت
+        // همان خطِ امروز می‌مانند.
         lines.push(reportTextSymbolLabel(r) + " — no sell route quoted" +
-          (r.cause === "empty-pool" ? " · pool is empty" : ""));
+          (r.cause === "empty-pool" ? " · pool is empty" :
+            r.cause === "sell-reverts" ? " · sells revert on a funded pool" : ""));
         lines.push("zaexa.com/t/" + r.address);
       });
       if (flagged > REPORT_TEXT_MAX_LISTED) {

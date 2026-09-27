@@ -480,6 +480,19 @@ function decodeStatic4(hex) {
   return BigInt("0x" + hexWordAt(body, 0));
 }
 
+/* بازگشتِ یک مقدارِ ایستایِ تک‌کلمه‌ای — balanceOf(address)، fee()، tickSpacing().
+   هرسه دقیقاً یک uint256/uint24/int24 در یک کلمه برمی‌گردانند؛ decodeStatic4
+   این‌ها را رد می‌کرد چون کوتاه‌تر از ظرفیتِ آن (۴ کلمه) است. tickSpacing در
+   واقع int24 امضادار است، ولی مقادیرِ واقعیِ آن (۱، ۵۰، ۱۰۰، ۲۰۰، ۲۰۰۰) همیشه
+   مثبت‌اند، پس خواندنِ بی‌علامت همیشه درست است — دقیقاً همان فرضِ
+   encodeQuoteSingle بالاتر برای همین میدان. */
+function decodeStatic1(hex) {
+  if (!isHexData(hex) || hex === "0x") return null;
+  const body = hex.slice(2);
+  if (body.length < 64) return null; // کوتاه‌تر از ۱ کلمه → ناقص
+  return BigInt("0x" + hexWordAt(body, 0));
+}
+
 /* بازگشتِ (uint256 amountOut,uint256 gasEstimate) — v4 فقط دو کلمه برمی‌گرداند،
    نه چهار. decodeStatic4 این را رد می‌کرد چون کوتاه‌تر از ظرفیتِ آن است، در
    حالی که یک بازگشتِ v4 معتبر است. کلمه‌ی *اول* amountOut است؛ کلمه‌ی آخر
@@ -815,6 +828,10 @@ export const VD_BASE_WHY = Object.freeze([
   // sells:recent — زنجیره در ساعتِ گذشته از چند فروشنده‌ی مختلف فروش دیده.
   // sells:elsewhere — استخرِ زنده با ضدجفتی که نمی‌پرسیم (SN80/TAO) در ۲۴ ساعت فروشنده داشته.
   "v4:unproven", "sells:recent", "sells:elsewhere",
+  // ۲۷ سپتامبر — گاردِ انتشار (publishGuardRow در worker/report.js) وقتی یک
+  // ردیفِ Baseِ غیرِv4 با nosellِ بدونِ cause می‌بیند، دقیقاً همان‌طور که
+  // v4:unproven برای v4 عمل می‌کند: نمایشِ بیرونی به نامعلوم تنزل می‌کند.
+  "cause:unproven",
 ]);
 // این دو پیشوند به‌جای یک عضوِ ثابت، با یک کدِ عددیِ ۱ تا ۳ رقمی می‌آیند
 // ("meta:429"، "cover:503") — isBaseWhy پایین‌تر همین قاعده را می‌سنجد.
@@ -1141,5 +1158,256 @@ export async function fetchCounterSell(tokenAddr, counterAddr, venueId, meta, op
     return { v: null };
   } catch (e) {
     return { v: null }; // این تابع هم هرگز نباید پرتاب کند
+  }
+}
+
+/* ---------------------------------------------------------------------
+   poolDirectedProof — اثباتِ کلید-واقعیِ استخر، فقط رویِ nosellِ خامِ Base
+   =========================================================================
+   ۲۷ سپتامبر — سه توکن («PAID»، «YAP»، «UCHI») بدونِ هیچ دلیلی «nosell»
+   منتشر شدند: کوترهای ما فقط کارمزدهای ایستای VD_VENUES (۵۰۰/۳۰۰۰/۱۰۰۰۰ برای
+   uniswap-v3) را می‌پرسند، ولی استخرِ *واقعیِ* PAID رویِ کارمزدِ ۱۰۰ نشسته و
+   استخرِ YAP رویِ ۳۰۰ — هیچ‌کدام جزوِ حدس‌های ایستای ما نبودند، پس هر پروب
+   ریوِرت کرد و ما هرگز از کلیدِ واقعی نپرسیدیم. UCHI برعکس بود: استخرش واقعاً
+   خالی است (liquidity=۰، WETH=۲wei) — یک nosellِ درست، ولی بدونِ هیچ اثباتی.
+
+   این تابع دقیقاً همان استخرهایی را که GeckoTerminal برای این توکن برمی‌گرداند
+   می‌خواند (بدونِ هیچ فراخوانیِ جدید — کالر همان بدنه‌ای را می‌دهد که
+   fetchBaseTokenPoolsRaw قبلاً برای گاردِ پوشش گرفته)، fee()/tickSpacing()ی
+   *واقعیِ* هر استخر را از رویِ خودِ زنجیره می‌خواند، و اگر آن کلید از قبل جزوِ
+   حدس‌های ایستا نبود، دقیقاً همان کلید را کوت می‌گیرد.
+
+   🔴 خالص نیست به همان معنایی که fetchVerdict خالص نیست: هیچ چیزی را خودش
+   fetch نمی‌کند مگر آنچه تزریق شده (opts.fetchImpl/rpcs/…)، و هرگز پرتاب
+   نمی‌کند — هر شکستی دقیقاً {v:"nosell", cause:undefined} می‌دهد، یعنی
+   رفتارِ امروز، بدونِ کم‌وکاست.
+
+   وصل‌شدنش (worker/index.js/ogFetchVerdictDetail) کارِ همین اسپک است؛ آن‌جا
+   GT_DEX_TO_VENUE را به‌عنوانِ opts.dexToVenue تزریق می‌کند — این ماژول خودش
+   هرگز آن جدول را نمی‌شناسد (drift همیشه یک‌جا نوشته می‌شود، این‌جا نه).
+   --------------------------------------------------------------------- */
+const SEL_ERC20_BALANCE_OF = "0x70a08231"; // balanceOf(address)
+const SEL_POOL_FEE = "0xddca3f43";         // fee() — استخرهای CL_UINT24
+const SEL_POOL_TICK_SPACING = "0xd0c93a7c"; // tickSpacing() — استخرهای CL_INT24
+
+function encodeCallNoArgs(selector) {
+  return "0x" + selector.slice(2);
+}
+
+function encodeBalanceOf(holder) {
+  return "0x" + SEL_ERC20_BALANCE_OF.slice(2) + wordAddr(holder);
+}
+
+// حداکثر چند استخرِ کاندید بررسی شود — بزرگ‌ترینِ reserve_in_usd اول.
+export const VD_POOL_PROOF_MAX_POOLS = 4;
+
+// «خاک» — موجودیِ ضدجفت که عملاً به‌معنیِ استخرِ خالی است.
+export const VD_POOL_PROOF_DUST_WETH_WEI = 1000000000000n; // ۱e12 wei
+export const VD_POOL_PROOF_DUST_USDC_UNITS = 10000n;       // $0.01 (۶ رقمِ اعشار)
+
+// «پرشده» — موجودیِ ضدجفتی که دیگر نمی‌شود آن را خالی دانست.
+export const VD_POOL_PROOF_FUNDED_USD = 50;
+const VD_POOL_PROOF_FUNDED_USDC_UNITS = BigInt(VD_POOL_PROOF_FUNDED_USD) * 1000000n;
+
+// شناسه‌ی رابطه‌ی GeckoTerminal («base_0x…»/«solana_…») → فقط بخشِ آدرس، هم‌شکل
+// با baseCounterTopOf در worker/index.js — این‌جا دوباره نوشته شده چون آن تابع
+// در worker/index.js است و این ماژول هرگز از آن‌جا ایمپورت نمی‌کند (خالص‌بودن).
+function poolSideAddr(rel) {
+  const id = rel && rel.data && rel.data.id;
+  if (typeof id !== "string") return null;
+  const i = id.indexOf("_");
+  const a = i === -1 ? null : id.slice(i + 1).toLowerCase();
+  return a && /^0x[0-9a-f]{40}$/.test(a) ? a : null;
+}
+
+export async function poolDirectedProof(tokenAddr, pools, opts) {
+  try {
+    const o = opts || {};
+    const causeless = { v: "nosell", cause: undefined };
+    if (!Array.isArray(pools) || pools.length === 0) return causeless;
+
+    const dexToVenue = (o.dexToVenue && typeof o.dexToVenue === "object") ? o.dexToVenue : {};
+    const t = String(tokenAddr).toLowerCase();
+    const weth = WETH_ADDR.toLowerCase();
+    const usdc = USDC_ADDR.toLowerCase();
+
+    // ۱. کاندیدها: فقط CL_UINT24/CL_INT24/V2، فقط ضدجفتِ WETH یا USDC —
+    // SOLIDLY و ردیف‌های positive-only (v4) هرگز کاندید نمی‌شوند.
+    const candidates = [];
+    for (const pool of pools) {
+      try {
+        const dexId = pool && pool.relationships && pool.relationships.dex &&
+          pool.relationships.dex.data && pool.relationships.dex.data.id;
+        if (typeof dexId !== "string") continue;
+        const venueId = dexToVenue[dexId];
+        if (typeof venueId !== "string") continue;
+        const row = VD_VENUES.find((r) => r.id === venueId);
+        if (!row) continue;
+        if (row.kind !== "CL_UINT24" && row.kind !== "CL_INT24" && row.kind !== "V2") continue;
+
+        const rel = pool.relationships;
+        const b = poolSideAddr(rel && rel.base_token), q = poolSideAddr(rel && rel.quote_token);
+        if (!b || !q) continue;
+        const counter = b === t ? q : q === t ? b : null;
+        if (!counter || (counter !== weth && counter !== usdc)) continue;
+
+        const poolAddr = pool.attributes && pool.attributes.address;
+        if (typeof poolAddr !== "string" || !/^0x[0-9a-fA-F]{40}$/.test(poolAddr)) continue;
+
+        const reserve = Number(pool.attributes && pool.attributes.reserve_in_usd);
+        candidates.push({
+          addr: poolAddr, venueId, kind: row.kind, to: row.to, staticKeys: row.keys,
+          counter, counterIsWeth: counter === weth,
+          reserve: Number.isFinite(reserve) ? reserve : 0,
+        });
+      } catch (e) { continue; } // یک استخرِ بدشکل فقط خودش رد می‌شود
+    }
+    if (candidates.length === 0) return causeless;
+
+    candidates.sort((a, b) => b.reserve - a.reserve);
+    const picked = candidates.slice(0, VD_POOL_PROOF_MAX_POOLS);
+
+    const amt = sellAmountFrom(o.meta && o.meta.priceUsd, o.meta && o.meta.decimals);
+    if (amt == null) return causeless;
+
+    const fetchImpl = o.fetchImpl || fetch;
+    const now = o.now || Date.now;
+    const deadlineAt = o.deadlineAt;
+    const rpcs = o.rpcs || VD_RPCS;
+    const timeoutMs = o.timeoutMs || 900;
+    const collect = Array.isArray(o.collect) ? o.collect : null;
+
+    function deadlineHit() {
+      return deadlineAt != null && (now() >= deadlineAt || deadlineAt - now() < 400);
+    }
+    if (deadlineHit()) return causeless;
+
+    const canary = canaryCall();
+
+    // ۲. مرحله‌ی «pool-meta» — یک batch: به‌ازای هر استخر یک balanceOf، و
+    // برای CL یک fee()/tickSpacing(). ترتیب و شناسه‌ی هر ردیف با آدرسِ
+    // خودِ استخر ساخته می‌شود تا رمزگشاییِ برگشتی گم نشود.
+    const metaItems = [];
+    for (const p of picked) {
+      metaItems.push({ id: "bal:" + p.addr, key: "balanceOf", to: p.counter, data: encodeBalanceOf(p.addr) });
+      if (p.kind === "CL_UINT24") {
+        metaItems.push({ id: "fee:" + p.addr, key: "fee", to: p.addr, data: encodeCallNoArgs(SEL_POOL_FEE) });
+      } else if (p.kind === "CL_INT24") {
+        metaItems.push({ id: "tick:" + p.addr, key: "tickSpacing", to: p.addr, data: encodeCallNoArgs(SEL_POOL_TICK_SPACING) });
+      }
+    }
+
+    let rpc = null;
+    let batchMeta = null;
+    for (const url of rpcs) {
+      if (deadlineHit()) return causeless;
+      const b = await callBatch(fetchImpl, url, canary, metaItems, timeoutMs, collect, "pool-meta");
+      if (b != null) { rpc = url; batchMeta = b; break; }
+    }
+    if (batchMeta == null) return causeless; // شکستِ RPC مرحله‌ی ۱ → دقیقاً رفتارِ امروز
+
+    const metaById = new Map();
+    for (let i = 0; i < metaItems.length; i++) metaById.set(metaItems[i].id, batchMeta.items[i]);
+
+    // ۳. کدام استخرها واقعاً قابلِ‌استفاده‌اند — موجودی و (برای CL) کلید هر
+    // دو باید با موفقیت رمزگشایی شده باشند.
+    const usable = [];
+    for (const p of picked) {
+      const balEntry = metaById.get("bal:" + p.addr);
+      const balVal = balEntry && !balEntry.error && typeof balEntry.result === "string"
+        ? decodeStatic1(balEntry.result) : null;
+      if (balVal == null) continue;
+
+      let realKey = null;
+      if (p.kind === "CL_UINT24" || p.kind === "CL_INT24") {
+        const keyEntry = metaById.get((p.kind === "CL_UINT24" ? "fee:" : "tick:") + p.addr);
+        const keyVal = keyEntry && !keyEntry.error && typeof keyEntry.result === "string"
+          ? decodeStatic1(keyEntry.result) : null;
+        if (keyVal == null) continue;
+        realKey = Number(keyVal);
+        if (!Number.isInteger(realKey) || realKey < 0) continue;
+      }
+      usable.push({ ...p, balance: balVal, realKey });
+    }
+    if (usable.length === 0) return causeless;
+
+    // ۴. مرحله‌ی «pool-quote» — فقط CLهایی که کلیدِ واقعی‌شان از قبل جزوِ
+    // حدس‌های ایستای VD_VENUES نبود. V2 چیزِ تازه‌ای برای پرسیدن ندارد
+    // (روترش قبلاً در گذرِ خامِ fetchVerdict همین توکن را پرسیده بود).
+    const quoteItems = [];
+    for (const p of usable) {
+      if (p.kind === "V2") continue;
+      if (p.staticKeys.includes(p.realKey)) continue;
+      const sel = p.kind === "CL_UINT24" ? SEL_CL_UINT24 : SEL_CL_INT24;
+      quoteItems.push({
+        id: p.addr, key: p.realKey, to: p.to,
+        data: encodeQuoteSingle(sel, tokenAddr, p.counter, amt, p.realKey),
+      });
+    }
+
+    let batchQuote = { canary: batchMeta.canary, items: [] };
+    if (quoteItems.length > 0) {
+      if (deadlineHit()) return causeless;
+      const b2 = await callBatch(fetchImpl, rpc, canary, quoteItems, timeoutMs, collect, "pool-quote");
+      if (b2 == null) return causeless; // شکستِ RPC مرحله‌ی ۲ → دقیقاً رفتارِ امروز
+      batchQuote = b2;
+    }
+
+    const quoteById = new Map();
+    for (let i = 0; i < quoteItems.length; i++) quoteById.set(quoteItems[i].id, batchQuote.items[i]);
+
+    // ۵. هر کوتِ مثبتی در همین مرحله برنده است — تصمیمِ صریحِ حسام (۱۶ شهریور):
+    // یک کوتِ مثبت با کلیدِ واقعیِ خودِ استخر خودش اثباتِ «قابلِ‌فروش» است.
+    let anyPositive = false;
+    let bestRet = null;
+    for (const p of usable) {
+      if (p.kind === "V2") continue;
+      const item = quoteById.get(p.addr);
+      if (!item || item.error || typeof item.result !== "string") continue;
+      const val = decodeQuote(p.kind, item.result);
+      if (val == null || val <= 0n) continue;
+      anyPositive = true;
+
+      let recoveredUsd = null;
+      if (p.counterIsWeth) {
+        const price = canaryUsdPerEth(batchQuote) || canaryUsdPerEth(batchMeta);
+        if (price != null) recoveredUsd = (Number(val) / 1e18) * price;
+      } else {
+        recoveredUsd = Number(val) / 1e6;
+      }
+      if (recoveredUsd != null && Number.isFinite(recoveredUsd)) {
+        const pct = Math.round((recoveredUsd / VD_NOTIONAL_USD) * 100 * 10) / 10;
+        if (Number.isFinite(pct) && pct > 0 && pct <= VD_RET_MAX_PCT && (bestRet == null || pct > bestRet)) {
+          bestRet = pct;
+        }
+      }
+    }
+    if (anyPositive) return { v: "sell", ret: bestRet == null ? undefined : bestRet, via: "pool-key" };
+
+    // ۶. بدونِ هیچ مثبتی: آیا همه‌ی استخرهای قابلِ‌استفاده «خاک»‌اند، یا
+    // دست‌کم یکی‌شان پرشده است (و رویِ کلیدِ واقعیِ خودش رد شده)؟
+    const ethUsd = canaryUsdPerEth(batchMeta) || canaryUsdPerEth(batchQuote);
+    let allDust = true;
+    let anyFunded = false;
+    for (const p of usable) {
+      const dust = p.counterIsWeth
+        ? p.balance < VD_POOL_PROOF_DUST_WETH_WEI
+        : p.balance < VD_POOL_PROOF_DUST_USDC_UNITS;
+      if (!dust) allDust = false;
+
+      if (p.counterIsWeth) {
+        if (ethUsd != null && ethUsd > 0) {
+          const fundedWei = BigInt(Math.floor((VD_POOL_PROOF_FUNDED_USD / ethUsd) * 1e18));
+          if (p.balance >= fundedWei) anyFunded = true;
+        }
+      } else if (p.balance >= VD_POOL_PROOF_FUNDED_USDC_UNITS) {
+        anyFunded = true;
+      }
+    }
+    if (allDust) return { v: "nosell", cause: "empty-pool" };
+    if (anyFunded) return { v: "nosell", cause: "sell-reverts" };
+    return causeless;
+  } catch (e) {
+    return { v: "nosell", cause: undefined }; // این تابع هم هرگز نباید پرتاب کند
   }
 }

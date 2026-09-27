@@ -6643,8 +6643,8 @@ console.log("[v4 pool selection] v4PoolsFromGt now ranks by sellers24 (numeric o
     "causeForRow must drop any string not in REPORT_CAUSES, even on a nosell row");
   ok(causeForRow("nosell", undefined) === undefined && causeForRow("nosell", null) === undefined,
     "causeForRow must give undefined (not null) for an absent cause");
-  ok(JSON.stringify(REPORT_CAUSES) === JSON.stringify(["empty-pool"]) && Object.isFrozen(REPORT_CAUSES),
-    "REPORT_CAUSES must be the frozen one-member closed vocabulary, got " + JSON.stringify(REPORT_CAUSES));
+  ok(JSON.stringify(REPORT_CAUSES) === JSON.stringify(["empty-pool", "sell-reverts"]) && Object.isFrozen(REPORT_CAUSES),
+    "REPORT_CAUSES must be the frozen closed vocabulary [\"empty-pool\",\"sell-reverts\"], got " + JSON.stringify(REPORT_CAUSES));
 
   const T9 = "2026-09-20T00:00:00.000Z";
   function rowArgs(extra) {
@@ -8648,8 +8648,13 @@ function stripAllowedWording(t) {
   const rGoodTxt = await call("/report/2026-09-14.txt", { method: "GET" }, { ASSETS, ZX_KV: kvGood });
   ok(rGoodTxt.status === 200, "a well-formed stored doc must answer 200, got " + rGoodTxt.status);
   const bodyGoodTxt = await rGoodTxt.text();
-  ok(bodyGoodTxt === reportText(docA, { solana: true }),
-     "the route's body must equal reportText(doc, {solana:true}) exactly — the route passes " +
+  // ۲۷ سپتامبر — خودِ روت پیش از reportText هر ردیف را از publishGuardRow رد
+  // می‌کند (از قبل هم همین‌طور بود، برای v4)؛ حالا RUGMEِ بدونِ cause هم از
+  // همان گاردِ عمومیِ تازه رد می‌شود، پس مرجعِ این مقایسه هم باید همان گاردِ
+  // یک‌به‌یکِ ردیف‌ها را قبل از reportText بزند، وگرنه دو مسیر از هم جدا می‌افتند.
+  const docAGuarded = { ...docA, rows: docA.rows.map((r) => publishGuardRow(r, undefined)) };
+  ok(bodyGoodTxt === reportText(docAGuarded, { solana: true }),
+     "the route's body must equal reportText(guarded doc, {solana:true}) exactly — the route passes " +
      "{solana:true} since 22 Sep 2026, got " + JSON.stringify(bodyGoodTxt));
   ok(rGoodTxt.headers.get("cache-control") === "public, max-age=86400",
      "a past date must cache 86400s at the edge, got " + rGoodTxt.headers.get("cache-control"));
@@ -8874,8 +8879,13 @@ function stripAllowedWording(t) {
     [reportKey(yesterdayStr)]: "{also not valid",
   });
   const rowsBadDoc = await pairsRowsFor({ ZX_KV: kvBadDoc }, "base");
-  ok(JSON.stringify(rowsBadDoc) === JSON.stringify(ring),
-     "invalid JSON in either report doc must leave the ring rows exactly as stored, got " +
+  // ۲۷ سپتامبر — pairsRowsFor از قبل هم هر ردیفِ حلقه را از publishGuardRow
+  // رد می‌کند (خطِ بالاتر، chainDefault="base")؛ addrWrongVerdict یک nosellِ
+  // بدونِ cause است، پس مرجعِ این مقایسه هم باید همان گاردِ عمومیِ تازه را
+  // روی ring بزند، نه خودِ ring را دست‌نخورده بخواهد.
+  const ringGuarded = ring.map((r) => publishGuardRow(r, "base"));
+  ok(JSON.stringify(rowsBadDoc) === JSON.stringify(ringGuarded),
+     "invalid JSON in either report doc must leave the ring rows exactly as guarded, got " +
      JSON.stringify(rowsBadDoc));
 
   console.log("[pairs merge] pairsRowsFor ok — follow+followAt and recheck+recheckAt(+recheckCause) are "
@@ -9525,8 +9535,12 @@ function stripAllowedWording(t) {
   ok(rRouteSol.status === 200, "GET /report/2026-09-20.txt with Solana rows in KV must still be 200, "
     + "got " + rRouteSol.status);
   const bodyRouteSol = await rRouteSol.text();
-  ok(bodyRouteSol === reportText(docRouteSol, { solana: true }),
-     "GET /report/<date>.txt must equal reportText(doc, {solana:true}) exactly, got " +
+  // ۲۷ سپتامبر — rowSolR یک nosellِ سولانا است؛ روت پیش از reportText آن را از
+  // publishGuardRow رد می‌کند (اکنون null/sol:unconfirmed می‌شود)، پس مرجعِ
+  // این مقایسه هم باید همان گاردِ یک‌به‌یکِ ردیف‌ها را بزند.
+  const docRouteSolGuarded = { ...docRouteSol, rows: docRouteSol.rows.map((r) => publishGuardRow(r, undefined)) };
+  ok(bodyRouteSol === reportText(docRouteSolGuarded, { solana: true }),
+     "GET /report/<date>.txt must equal reportText(guarded doc, {solana:true}) exactly, got " +
      JSON.stringify(bodyRouteSol));
   ok(bodyRouteSol.includes("new Solana token"),
      "since 22 Sep 2026 the route must print the Solana block for a doc that carries Solana rows, got " +
@@ -12196,10 +12210,23 @@ function stripAllowedWording(t) {
   ok(spikeRow.v === "nosell", "publishGuardRow never mutates the stored row");
   const whenRow = { ...spikeRow, symbol: "WHEN", cause: "empty-pool" };
   ok(publishGuardRow(whenRow, undefined) === whenRow, "publishGuardRow: a v4 nosell with cause=empty-pool is published unchanged");
+  // ۲۷ سپتامبر — این یکی هم دیگر بدونِ علت رد نمی‌شود: یک nosellِ غیرِv4
+  // بدونِ causeِ عضوِ REPORT_CAUSES هم به نامعلوم/cause:unproven تنزل می‌کند.
   const v2Row = { ...spikeRow, dex: "uniswap-v2-base" };
-  ok(publishGuardRow(v2Row, undefined) === v2Row, "publishGuardRow: a non-v4 nosell (classic honeypot) is published unchanged");
+  const gV2 = publishGuardRow(v2Row, undefined);
+  ok(gV2.v === null && gV2.why === "cause:unproven" && !("cause" in gV2),
+    "publishGuardRow: a causeless non-v4 nosell (classic honeypot without a proof) becomes null/cause:unproven, got " +
+    JSON.stringify(gV2));
+  ok(v2Row.v === "nosell", "publishGuardRow never mutates a non-v4 stored row either");
+  const v2RowWithCause = { ...spikeRow, dex: "uniswap-v2-base", cause: "sell-reverts" };
+  ok(publishGuardRow(v2RowWithCause, undefined) === v2RowWithCause,
+    "publishGuardRow: a non-v4 nosell with cause=sell-reverts is published unchanged");
+  // ۲۷ سپتامبر — سولانا دیگر هرگز نوسل‌شده منتشر نمی‌شود تا کنترلِ منفی دوام بیاورد.
   const solRow = { ...spikeRow, chain: "solana", dex: "meteora-dbc" };
-  ok(publishGuardRow(solRow, undefined) === solRow, "publishGuardRow: Solana rows are never touched");
+  const gSol = publishGuardRow(solRow, undefined);
+  ok(gSol.v === null && gSol.why === "sol:unconfirmed" && !("cause" in gSol),
+    "publishGuardRow: a Solana nosell becomes null/sol:unconfirmed, got " + JSON.stringify(gSol));
+  ok(solRow.v === "nosell", "publishGuardRow never mutates the stored Solana row");
   const ringRow = { address: spikeRow.address, dex: "uniswap-v4-base", v: "nosell" };
   ok(publishGuardRow(ringRow, "base").v === null, "publishGuardRow: a pairs-ring row (no chain key) uses the ring's chain");
   const rc = publishGuardRow({ ...spikeRow, v: null, why: "cover:false", recheck: "nosell", recheckAt: "2026-09-23T13:17:48.576Z" }, undefined);
@@ -12214,7 +12241,8 @@ function stripAllowedWording(t) {
   console.log("[false nosell] v4-only nosell needs an empty-pool proof (else v4:unproven); 3+ distinct "
     + "sellers in the last hour veto any Base nosell (sells:recent) unless the pool is proven empty; "
     + "stored rows are guarded at publish time (JSON, text, pairs ring) without touching the store; "
-    + "classic honeypots on covered venues keep their nosell");
+    + "a classic honeypot on a covered venue keeps its nosell only with a REPORT_CAUSES cause "
+    + "(else null/cause:unproven); a Solana nosell is always guarded to null/sol:unconfirmed");
 }
 
 /* ---- GET /vd/logrpc — کدام RPC از داخلِ کلادفلر لاگ می‌دهد (۲۴ سپتامبر) ----
@@ -12616,6 +12644,455 @@ function stripAllowedWording(t) {
   globalThis.fetch = saved;
   console.log("[counter budget] in the hourly pass the counter proof runs only at <= " + COUNTER_PROOF_PASS_MAX_USED
     + " subrequests used; above that it makes no call and keeps sells:elsewhere");
+}
+
+/* ---- ۴۳. اثباتِ کلید-واقعیِ استخر — [pool proof] ----
+   ۲۷ سپتامبر — PAID/YAP/UCHI بی‌دلیل «nosell» شدند: استخرهای واقعیِ PAID/YAP
+   کارمزدی داشتند (۱۰۰/۳۰۰) که جزوِ حدس‌های ایستای VD_VENUES نبود، و UCHI
+   واقعاً خالی بود ولی بدونِ هیچ اثباتی. این بخش poolDirectedProof
+   (worker/verdict.js) را مستقیم می‌سنجد. */
+{
+  const { GT_DEX_TO_VENUE } = await import("./index.js");
+  const SEL_BAL_PP = "0x70a08231", SEL_FEE_PP = "0xddca3f43", SEL_TICK_PP = "0xd0c93a7c";
+  const wPP = (n) => BigInt(n).toString(16).padStart(64, "0");
+  const mk1PP = (n) => "0x" + wPP(n);
+  const mk4PP = (n) => "0x" + wPP(n) + wPP(0) + wPP(0) + wPP(0);
+  const jsonPP = (body) => new Response(JSON.stringify(body), {
+    status: 200, headers: { "content-type": "application/json" },
+  });
+  const uniV3Row = vd.VD_VENUES.find((r) => r.id === "uniswap-v3");
+  const aeroRow = vd.VD_VENUES.find((r) => r.id === "aerodrome-cl");
+
+  const gtPoolPP = (dexId, tokenAddr, counterAddr, poolAddr, reserveUsd) => ({
+    relationships: {
+      dex: { data: { id: dexId } },
+      base_token: { data: { id: "base_" + tokenAddr } },
+      quote_token: { data: { id: "base_" + counterAddr } },
+    },
+    attributes: { address: poolAddr, reserve_in_usd: reserveUsd,
+      transactions: { h1: { sellers: 0 }, h24: { sellers: 0 } } },
+  });
+
+  // dispatch بر اساسِ selector/to؛ cfg = آرایه‌ی {poolAddr, key, balance,
+  // quoterTo, quoteBehavior:"positive"|"revert"|"zero"}. هر ردیفی که با
+  // هیچ cfgی جور درنیاید یک ریوِرتِ تمیز می‌گیرد (رفتارِ امروزِ راهِ خام).
+  function makeDispatchPP(cfg) {
+    const byAddr = new Map(cfg.map((p) => [p.poolAddr.toLowerCase(), p]));
+    return async (url, init) => {
+      const reqs = JSON.parse(init.body);
+      return jsonPP(reqs.map((r) => {
+        if (r.id === 0) return { id: 0, result: mk4PP(30000000) }; // کاناری زنده، ethUsd=3000
+        const { to, data } = r.params[0];
+        const toL = String(to).toLowerCase();
+        const sel = data.slice(0, 10).toLowerCase();
+        if (sel === SEL_BAL_PP) {
+          const holder = "0x" + data.slice(-40);
+          const p = byAddr.get(holder.toLowerCase());
+          return p ? { id: r.id, result: mk1PP(p.balance) } : { id: r.id, error: { code: 3 } };
+        }
+        if (sel === SEL_FEE_PP || sel === SEL_TICK_PP) {
+          const p = byAddr.get(toL);
+          return (p && p.key != null) ? { id: r.id, result: mk1PP(p.key) } : { id: r.id, error: { code: 3 } };
+        }
+        if (sel === vd.SEL_CL_UINT24 || sel === vd.SEL_CL_INT24) {
+          const feeOrTick = parseInt(data.slice(2 + 8 + 64 * 3, 2 + 8 + 64 * 4), 16);
+          const cand = cfg.find((p) => p.quoterTo && p.quoterTo.toLowerCase() === toL && p.key === feeOrTick);
+          if (cand && cand.quoteBehavior === "positive") return { id: r.id, result: mk4PP(cand.quoteAmount || 500000000000000000n) };
+          if (cand && cand.quoteBehavior === "zero") return { id: r.id, result: mk4PP(0) };
+          return { id: r.id, result: "0x" }; // کلیدهای ایستا و هرچیزِ نامرتبط: ریوِرتِ تمیز
+        }
+        return { id: r.id, result: "0x" };
+      }));
+    };
+  }
+
+  const meta = { priceUsd: 0.0001, decimals: 18 };
+
+  // الف) PAID-like — کارمزدِ واقعی ۱۰۰، جزوِ حدس‌های ایستا نیست، کوت مثبت.
+  {
+    const PAID = "0x18b5a87c6f7f1017b2f8627aeebafa2ea29ec93d";
+    const POOL = "0xe4ceb79622682262e3e0104d6c990769d7f6b291";
+    const pools = [gtPoolPP("uniswap-v3-base", PAID, vd.WETH_ADDR, POOL, "10")];
+    const cfg = [{ poolAddr: POOL, key: 100, balance: 92839184759797n, quoterTo: uniV3Row.to, quoteBehavior: "positive" }];
+    const res = await vd.poolDirectedProof(PAID, pools,
+      { dexToVenue: GT_DEX_TO_VENUE, meta, fetchImpl: makeDispatchPP(cfg), rpcs: ["https://rpc-pp-1.example"] });
+    ok(res && res.v === "sell" && res.via === "pool-key",
+      "[pool proof] PAID-like (real fee 100, not a static key) must quote positive and return sell/via:pool-key, got " +
+      JSON.stringify(res));
+    ok(typeof res.ret === "number" && res.ret > 0 || res.ret === undefined,
+      "[pool proof] PAID-like ret must be a finite positive number or absent, got " + JSON.stringify(res.ret));
+  }
+
+  // ب) YAP-like — کارمزدِ واقعی ۳۰۰، همان داستان.
+  {
+    const YAP = "0x11bea7fb26f8c7198573e61d8e7b61e549136d7f";
+    const POOL = "0x46796d05ae41d81fe37ad029d3762dba392610c5";
+    const pools = [gtPoolPP("uniswap-v3-base", YAP, vd.WETH_ADDR, POOL, "10")];
+    const cfg = [{ poolAddr: POOL, key: 300, balance: 92839184759797n, quoterTo: uniV3Row.to, quoteBehavior: "positive" }];
+    const res = await vd.poolDirectedProof(YAP, pools,
+      { dexToVenue: GT_DEX_TO_VENUE, meta, fetchImpl: makeDispatchPP(cfg), rpcs: ["https://rpc-pp-2.example"] });
+    ok(res && res.v === "sell" && res.via === "pool-key",
+      "[pool proof] YAP-like (real fee 300, not a static key) must quote positive and return sell/via:pool-key, got " +
+      JSON.stringify(res));
+  }
+
+  // پ) UCHI-like — کارمزدِ ۳۰۰۰ (جزوِ حدسِ ایستا)، موجودیِ WETH فقط ۲wei → خالی.
+  {
+    const UCHI = "0x5017f3145e261f5033eda9d12bd4a328cb5f1518";
+    const POOL = "0x96fc5bda91d93f387718b71e8c5aac8d6bcffbf1";
+    const pools = [gtPoolPP("uniswap-v3-base", UCHI, vd.WETH_ADDR, POOL, "10")];
+    const cfg = [{ poolAddr: POOL, key: 3000, balance: 2n, quoterTo: uniV3Row.to, quoteBehavior: "revert" }];
+    const res = await vd.poolDirectedProof(UCHI, pools,
+      { dexToVenue: GT_DEX_TO_VENUE, meta, fetchImpl: makeDispatchPP(cfg), rpcs: ["https://rpc-pp-3.example"] });
+    ok(res && res.v === "nosell" && res.cause === "empty-pool",
+      "[pool proof] UCHI-like (2 wei WETH, static key 3000) must be nosell/empty-pool, got " + JSON.stringify(res));
+  }
+
+  // ت) استخرِ پرشده (WETH=1e18) که رویِ کلیدِ واقعی‌اش هم ریوِرت می‌کند → sell-reverts.
+  {
+    const TOK = "0x" + "aa".repeat(20);
+    const POOL = "0x" + "bb".repeat(20);
+    const pools = [gtPoolPP("uniswap-v3-base", TOK, vd.WETH_ADDR, POOL, "10")];
+    const cfg = [{ poolAddr: POOL, key: 777, balance: 1000000000000000000n, quoterTo: uniV3Row.to, quoteBehavior: "revert" }];
+    const res = await vd.poolDirectedProof(TOK, pools,
+      { dexToVenue: GT_DEX_TO_VENUE, meta, fetchImpl: makeDispatchPP(cfg), rpcs: ["https://rpc-pp-4.example"] });
+    ok(res && res.v === "nosell" && res.cause === "sell-reverts",
+      "[pool proof] a funded pool (1e18 WETH) reverting at its own real key must be nosell/sell-reverts, got " +
+      JSON.stringify(res));
+    // با ۳ فروشنده در ساعتِ گذشته، finalizeBaseNosell باید veto را برنده کند —
+    // sell-reverts هرگز رویِ sells:recent برنده نمی‌شود.
+    const finalized = finalizeBaseNosell(undefined, { sellersH1: SELLERS_H1_VETO }, false, res.cause);
+    ok(finalized.v === null && finalized.why === "sells:recent",
+      "[pool proof] sell-reverts must never override the sells:recent veto, got " + JSON.stringify(finalized));
+  }
+
+  // ث) شکستِ RPC در مرحله‌ی ۱ یا ۲ → دقیقاً رفتارِ امروز (nosellِ بدونِ علت).
+  {
+    const TOK = "0x" + "cc".repeat(20);
+    const POOL = "0x" + "dd".repeat(20);
+    const pools = [gtPoolPP("uniswap-v3-base", TOK, vd.WETH_ADDR, POOL, "10")];
+    const failStep1 = async () => new Response("boom", { status: 500 });
+    const res1 = await vd.poolDirectedProof(TOK, pools,
+      { dexToVenue: GT_DEX_TO_VENUE, meta, fetchImpl: failStep1, rpcs: ["https://rpc-pp-5.example"] });
+    ok(res1 && res1.v === "nosell" && res1.cause === undefined,
+      "[pool proof] an RPC failure in step 1 must give exactly today's causeless nosell, got " + JSON.stringify(res1));
+
+    // مرحله‌ی ۱ سالم (کلیدِ واقعیِ غیرِایستا خوانده می‌شود)، مرحله‌ی ۲ شکست می‌خورد.
+    let metaDone = false;
+    const failStep2 = async (url, init) => {
+      const reqs = JSON.parse(init.body);
+      const hasFeeCall = reqs.some((r) => r.id !== 0 && String(r.params[0].data).toLowerCase().startsWith(SEL_FEE_PP));
+      if (hasFeeCall && !metaDone) {
+        metaDone = true;
+        return jsonPP(reqs.map((r) => (r.id === 0 ? { id: 0, result: mk4PP(30000000) }
+          : String(r.params[0].data).toLowerCase().startsWith(SEL_BAL_PP) ? { id: r.id, result: mk1PP(1000000000000000000n) }
+          : { id: r.id, result: mk1PP(777) })));
+      }
+      return new Response("boom", { status: 500 }); // مرحله‌ی کوت
+    };
+    const res2 = await vd.poolDirectedProof(TOK, pools,
+      { dexToVenue: GT_DEX_TO_VENUE, meta, fetchImpl: failStep2, rpcs: ["https://rpc-pp-6.example"] });
+    ok(res2 && res2.v === "nosell" && res2.cause === undefined,
+      "[pool proof] an RPC failure in step 2 must give exactly today's causeless nosell, got " + JSON.stringify(res2));
+  }
+
+  // ج) بدونِ هیچ استخرِ کاندید (دکسِ نگاشت‌نشده/SOLIDLY/ضدجفتِ نامربوط) →
+  // صفر fetch، دقیقاً همان nosellِ بدونِ علتِ امروز.
+  {
+    const TOK = "0x" + "ee".repeat(20);
+    const pools = [gtPoolPP("aerodrome-base", TOK, vd.WETH_ADDR, "0x" + "ff".repeat(20), "999999")]; // SOLIDLY
+    const res = await vd.poolDirectedProof(TOK, pools, {
+      dexToVenue: GT_DEX_TO_VENUE, meta,
+      fetchImpl: async () => { throw new Error("must never be called"); },
+      rpcs: ["https://rpc-pp-7.example"],
+    });
+    ok(res && res.v === "nosell" && res.cause === undefined && res !== null,
+      "[pool proof] SOLIDLY/unmapped-only pools must never trigger a fetch and stay causeless, got " + JSON.stringify(res));
+    const resEmpty = await vd.poolDirectedProof(TOK, [], { dexToVenue: GT_DEX_TO_VENUE, meta,
+      fetchImpl: async () => { throw new Error("must never be called"); } });
+    ok(resEmpty.v === "nosell" && resEmpty.cause === undefined, "[pool proof] an empty pools list is causeless, never a fetch");
+    const resBad = await vd.poolDirectedProof(TOK, "not an array", { dexToVenue: GT_DEX_TO_VENUE, meta });
+    ok(resBad.v === "nosell" && resBad.cause === undefined, "[pool proof] a non-array pools body is causeless, never throws");
+  }
+
+  // چ) finalizeBaseNosell: poolCause="empty-pool" باید رویِ sells:recent برنده شود،
+  // درست مثلِ empty===true — ولی هرگز رویِ sells:elsewhere.
+  {
+    const r1 = finalizeBaseNosell(undefined, { sellersH1: SELLERS_H1_VETO }, false, "empty-pool");
+    ok(r1.v === "nosell" && r1.cause === "empty-pool",
+      "[pool proof] poolCause empty-pool must win over sells:recent, got " + JSON.stringify(r1));
+    const r2 = finalizeBaseNosell(undefined, { sellersElsewhere24: SELLERS_H1_VETO }, false, "empty-pool");
+    ok(r2.v === null && r2.why === "sells:elsewhere",
+      "[pool proof] poolCause empty-pool must never override sells:elsewhere, got " + JSON.stringify(r2));
+    const r3 = finalizeBaseNosell(undefined, {}, false, "sell-reverts");
+    ok(r3.v === "nosell" && r3.cause === "sell-reverts",
+      "[pool proof] poolCause sell-reverts must reach the final cause slot when nothing vetoes, got " + JSON.stringify(r3));
+    const r4 = finalizeBaseNosell(undefined, {}, false, undefined);
+    ok(r4.v === "nosell" && r4.cause === undefined,
+      "[pool proof] no poolCause must stay byte-identical to today's causeless nosell, got " + JSON.stringify(r4));
+  }
+
+  console.log("[pool proof] poolDirectedProof (worker/verdict.js) covered: a real fee/tickSpacing not in the "
+    + "static VD_VENUES keys (PAID-like fee 100, YAP-like fee 300) is read from the pool itself and quoted, "
+    + "turning a causeless nosell into sell/via:pool-key; a 2-wei counter balance at a static key (UCHI-like) "
+    + "gives nosell/empty-pool; a funded (1e18) pool reverting at its own real key gives nosell/sell-reverts, "
+    + "which never overrides the sells:recent veto; an RPC failure in either step gives exactly today's "
+    + "causeless nosell; pools with no probeable venue never trigger a single fetch; and finalizeBaseNosell's "
+    + "poolCause wins over sells:recent like empty===true but never over sells:elsewhere");
+}
+
+/* ---- ۴۳ب. وصل‌شدنِ اثباتِ استخر به /vd، و گاردِ بودجه‌ی گذر — [pool proof] ---- */
+{
+  const { UPSTREAM_KEYED: UK_PP, UPSTREAM_FREE: UF_PP, ogFetchVerdictDetail: ogfvdPP,
+    COUNTER_PROOF_PASS_MAX_USED } = await import("./index.js");
+  const SEL_BAL_PP2 = "0x70a08231", SEL_FEE_PP2 = "0xddca3f43";
+  const wPP2 = (n) => BigInt(n).toString(16).padStart(64, "0");
+  const mk1PP2 = (n) => "0x" + wPP2(n);
+  const mk4PP2 = (n) => "0x" + wPP2(n) + wPP2(0) + wPP2(0) + wPP2(0);
+  const jsonPP2 = (body) => new Response(JSON.stringify(body), {
+    status: 200, headers: { "content-type": "application/json" },
+  });
+  const uniV3Row2 = vd.VD_VENUES.find((r) => r.id === "uniswap-v3");
+  const PAID2 = "0x" + "18".repeat(20);
+  const POOL2 = "0x" + "e4".repeat(20);
+
+  const gtMetaPP2 = () => new Response(JSON.stringify({ data: { attributes: {
+    name: "PAID-like", symbol: "PAID", total_reserve_in_usd: "1000", decimals: 18, price_usd: "0.0001",
+  } } }), { status: 200, headers: { "content-type": "application/json" } });
+  const gtPoolsPP2 = () => new Response(JSON.stringify({ data: [{
+    relationships: { dex: { data: { id: "uniswap-v3-base" } }, base_token: { data: { id: "base_" + PAID2 } },
+      quote_token: { data: { id: "base_" + vd.WETH_ADDR } } },
+    attributes: { address: POOL2, reserve_in_usd: "10", transactions: { h1: { sellers: 0 }, h24: { sellers: 0 } } },
+  }] }), { status: 200, headers: { "content-type": "application/json" } });
+
+  let poolCalls = 0;
+  function dispatchWired(url, init) {
+    const u = String(url);
+    if (u.endsWith("/pools")) return gtPoolsPP2();
+    if (u.startsWith(UK_PP) || u.startsWith(UF_PP)) return gtMetaPP2();
+    const reqs = JSON.parse(init.body);
+    const isPoolProofBatch = reqs.some((r) => r.id !== 0 &&
+      (String(r.params[0].data).toLowerCase().startsWith(SEL_BAL_PP2) ||
+       String(r.params[0].data).toLowerCase().startsWith(SEL_FEE_PP2)));
+    if (isPoolProofBatch) poolCalls++;
+    return jsonPP2(reqs.map((r) => {
+      if (r.id === 0) return { id: 0, result: mk4PP2(30000000) };
+      const { to, data } = r.params[0];
+      const sel = String(data).slice(0, 10).toLowerCase();
+      if (sel === SEL_BAL_PP2) return { id: r.id, result: mk1PP2(92839184759797n) };
+      if (sel === SEL_FEE_PP2) return { id: r.id, result: mk1PP2(100) };
+      if (sel === vd.SEL_CL_UINT24 && String(to).toLowerCase() === uniV3Row2.to.toLowerCase()) {
+        const feeOrTick = parseInt(String(data).slice(2 + 8 + 64 * 3, 2 + 8 + 64 * 4), 16);
+        if (feeOrTick === 100) return { id: r.id, result: mk4PP2(500000000000000000n) };
+      }
+      return { id: r.id, result: "0x" };
+    }));
+  }
+
+  // الف) وصل‌شده تا /vd — end to end.
+  {
+    poolCalls = 0;
+    const saved = globalThis.fetch;
+    globalThis.fetch = dispatchWired;
+    const res = await (await call("/vd/" + PAID2, { headers: { "cf-connecting-ip": "198.51.100.61" } },
+      { ASSETS, CG_KEY: "SECRET-CG-KEY-PP" })).json();
+    globalThis.fetch = saved;
+    ok(res.v === "sell" && res.via === "pool-key",
+      "[pool proof] end to end through /vd: PAID-like must resolve to sell/via:pool-key, got " + JSON.stringify(res));
+    ok(poolCalls >= 1, "[pool proof] the pool-directed batches must really have been sent");
+  }
+
+  // ب) بودجه‌ی گذر — meterHooks.used بالاتر از سقف باید حتی یک فراخوانیِ
+  // اضافه‌ی مرحله‌ی pool-meta/pool-quote را هم نزند، و ردیف همان nosellِ
+  // بدونِ علتِ امروز بماند.
+  {
+    poolCalls = 0;
+    const saved = globalThis.fetch;
+    globalThis.fetch = dispatchWired;
+    const meta = { priceUsd: 0.0001, decimals: 18 };
+    const overBudget = { used: () => COUNTER_PROOF_PASS_MAX_USED + 1, capHit: () => false, stage() {} };
+    const out = await ogfvdPP(PAID2, meta, Date.now() + 5000, { CG_KEY: "SECRET-CG-KEY-PP2" }, {}, undefined, overBudget);
+    globalThis.fetch = saved;
+    ok(poolCalls === 0,
+      "[pool proof] over the hourly pass budget, the pool proof must make zero extra pool-meta/pool-quote calls, got " +
+      poolCalls);
+    ok(out && out.v === "nosell" && out.cause === undefined,
+      "[pool proof] over budget, the row stays exactly today's causeless nosell (never sell), got " + JSON.stringify(out));
+  }
+
+  console.log("[pool proof] wiring: ogFetchVerdictDetail calls poolDirectedProof with the same pools body "
+    + "baseVenueCoveredDetail already fetched (no second GT call), before finalizeBaseNosell, and end to end "
+    + "through /vd a PAID-like fixture resolves to sell/via:pool-key; the shared pass-budget guard "
+    + "(passBudgetHasRoom, also used by withCounterProof) makes the pool proof skip both its subrequests "
+    + "entirely when the hourly pass has used more than COUNTER_PROOF_PASS_MAX_USED, leaving the row exactly "
+    + "today's causeless nosell");
+}
+
+/* ---- ۴۴. گاردِ انتشار — علتِ اثبات‌نشده و سولانای تأییدنشده — [publish guard base] ---- */
+{
+  const baseNosellRow = (cause) => ({ chain: "base", dex: "baseswap", v: "nosell", cause, address: "0x" + "11".repeat(20) });
+  const g1 = publishGuardRow(baseNosellRow(undefined), undefined);
+  ok(g1.v === null && g1.why === "cause:unproven" && !("cause" in g1) && !("ret" in g1),
+    "[publish guard base] a causeless nosell on a non-v4 Base row must become null/cause:unproven, got " + JSON.stringify(g1));
+
+  const g2 = publishGuardRow(baseNosellRow("empty-pool"), undefined);
+  ok(g2.v === "nosell" && g2.cause === "empty-pool",
+    "[publish guard base] cause:empty-pool must be shown unchanged, got " + JSON.stringify(g2));
+
+  const g3 = publishGuardRow(baseNosellRow("sell-reverts"), undefined);
+  ok(g3.v === "nosell" && g3.cause === "sell-reverts",
+    "[publish guard base] cause:sell-reverts must be shown unchanged, got " + JSON.stringify(g3));
+
+  const g4 = publishGuardRow({ chain: "base", dex: "baseswap", v: "sell", ret: 42, address: "0x" + "22".repeat(20) }, undefined);
+  ok(g4.v === "sell" && g4.ret === 42, "[publish guard base] a sell row must never be touched, got " + JSON.stringify(g4));
+
+  // v4 دست‌نخورده می‌ماند — چکِ v4 همیشه اول است.
+  const v4Row = { chain: "base", dex: "uniswap-v4-base", v: "nosell", cause: undefined, address: "0x" + "33".repeat(20) };
+  const g5 = publishGuardRow(v4Row, undefined);
+  ok(g5.v === null && g5.why === "v4:unproven",
+    "[publish guard base] v4 rows keep their own v4:unproven guard, unaffected by the new cause:unproven rule, got " +
+    JSON.stringify(g5));
+
+  // recheck هم‌ردیف: recheck:"nosell" بدونِ causeِ معتبر پاک می‌شود.
+  const rechecked = { chain: "base", dex: "baseswap", v: null, why: "cause:unproven",
+    recheck: "nosell", recheckAt: "x", recheckCause: undefined, address: "0x" + "44".repeat(20) };
+  const g6 = publishGuardRow(rechecked, undefined);
+  ok(!("recheck" in g6) && !("recheckAt" in g6) && !("recheckCause" in g6),
+    "[publish guard base] a recheck:nosell without a valid REPORT_CAUSES cause must be dropped, got " + JSON.stringify(g6));
+  const rechecked2 = { ...rechecked, recheckCause: "sell-reverts" };
+  const g7 = publishGuardRow(rechecked2, undefined);
+  ok(g7.recheck === "nosell" && g7.recheckCause === "sell-reverts",
+    "[publish guard base] a recheck:nosell with cause:sell-reverts must survive, got " + JSON.stringify(g7));
+
+  // انبار هرگز جهش نمی‌خورد — همیشه یک شیءِ تازه، یا همان شیء وقتی چیزی عوض نشد.
+  const original = baseNosellRow(undefined);
+  const frozenCopy = JSON.stringify(original);
+  publishGuardRow(original, undefined);
+  ok(JSON.stringify(original) === frozenCopy, "[publish guard base] publishGuardRow must never mutate the row it was given");
+
+  // سولانا — nosell هرگز منتشر نمی‌شود تا کنترلِ منفی یک هفته زنده دوام بیاورد.
+  const solRow = { chain: "solana", v: "nosell", address: "SomeMintAddressXXXXXXXXXXXXXXXXXXXXXXXXXXX" };
+  const gs1 = publishGuardRow(solRow, undefined);
+  ok(gs1.v === null && gs1.why === "sol:unconfirmed" && !("cause" in gs1),
+    "[publish guard base] a Solana nosell must become null/sol:unconfirmed, got " + JSON.stringify(gs1));
+  const solRecheck = { chain: "solana", v: null, why: "internal", recheck: "nosell", recheckAt: "x",
+    address: "SomeMintAddressXXXXXXXXXXXXXXXXXXXXXXXXXXX" };
+  const gs2 = publishGuardRow(solRecheck, undefined);
+  ok(!("recheck" in gs2) && !("recheckAt" in gs2), "[publish guard base] a Solana recheck:nosell must also be dropped");
+  const solSell = { chain: "solana", v: "sell", address: "SomeMintAddressXXXXXXXXXXXXXXXXXXXXXXXXXXX" };
+  const gs3 = publishGuardRow(solSell, undefined);
+  ok(gs3.v === "sell", "[publish guard base] a Solana sell row must never be touched");
+
+  // reportText: پسوندِ « · sells revert on a funded pool» فقط برای cause="sell-reverts".
+  {
+    const doc = {
+      date: "2026-09-27", generatedAt: "2026-09-27T12:00:00Z",
+      rows: [
+        { chain: "base", checkKind: CHECK_KIND_BY_CHAIN.base, address: "0x" + "55".repeat(20), v: "nosell", cause: "sell-reverts" },
+        { chain: "base", checkKind: CHECK_KIND_BY_CHAIN.base, address: "0x" + "66".repeat(20), v: "nosell", cause: "empty-pool" },
+        { chain: "base", checkKind: CHECK_KIND_BY_CHAIN.base, address: "0x" + "77".repeat(20), v: "sell" },
+      ],
+    };
+    const txt = reportText(doc);
+    ok(typeof txt === "string" && txt.includes("· sells revert on a funded pool"),
+      "[publish guard base] reportText must print the sell-reverts suffix, got:\n" + txt);
+    ok(txt.includes("· pool is empty"), "[publish guard base] the existing empty-pool suffix must still print");
+  }
+
+  console.log("[publish guard base] publishGuardRow (worker/report.js) extended: any non-v4 Base nosell whose "
+    + "cause is not in REPORT_CAUSES (now [\"empty-pool\",\"sell-reverts\"]) is shown as null/cause:unproven, "
+    + "with the matching recheck dropped the same way; v4's own v4:unproven guard is checked first and is "
+    + "unaffected; a Solana nosell (and a Solana recheck:nosell) is always shown as null/sol:unconfirmed until "
+    + "the owner lifts that guard; sell/null rows on every chain are never touched; the row given to the "
+    + "function is never mutated; and reportText prints \" · sells revert on a funded pool\" only for "
+    + "cause=\"sell-reverts\", alongside the unchanged \" · pool is empty\" suffix");
+}
+
+/* ---- ۴۵. کنترلِ منفیِ فروشنده‌های اخیر روی سولانا — [solana veto] ---- */
+{
+  const { solNosellVeto: sv, sellers24Of: s24, SOL_SELLERS_24_VETO: SV24, VD_CACHE_HOST: VCH,
+    solFetchVerdict } = await import("./index.js");
+  const poolSol = (h1, h24) => ({ attributes: { transactions: { h1: { sellers: h1 }, h24: { sellers: h24 } } } });
+
+  // الف) sellers24Of — همان انضباطِ sellersH1Of: شکلِ نامعتبر → null، نه صفر.
+  ok(s24([poolSol(0, 3), poolSol(0, 4)]) === 7, "[solana veto] sellers24Of sums h24.sellers across pools, got " + s24([poolSol(0, 3), poolSol(0, 4)]));
+  ok(s24([{ attributes: {} }]) === null, "[solana veto] sellers24Of on an unknown shape must be null, never zero");
+  ok(s24(null) === null, "[solana veto] sellers24Of on a non-array body must be null");
+
+  // ب) solNosellVeto — ساعتِ گذشته ≥ ۳ → sells:recent (رویِ ۲۴ساعته هم برنده است).
+  {
+    const saved = globalThis.fetch;
+    globalThis.fetch = async () => new Response(JSON.stringify({ data: [poolSol(SELLERS_H1_VETO, 1)] }),
+      { status: 200, headers: { "content-type": "application/json" } });
+    const why = await sv("MintH1XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX", {});
+    globalThis.fetch = saved;
+    ok(why === "sells:recent", "[solana veto] >= SELLERS_H1_VETO sellers in the last hour must give sells:recent, got " + why);
+  }
+
+  // پ) بدونِ فروشنده‌ی ساعتِ گذشته ولی ≥ SOL_SELLERS_24_VETO در ۲۴ ساعت → sells:recent24.
+  {
+    const saved = globalThis.fetch;
+    globalThis.fetch = async () => new Response(JSON.stringify({ data: [poolSol(0, SV24)] }),
+      { status: 200, headers: { "content-type": "application/json" } });
+    const why = await sv("MintH24XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX", {});
+    globalThis.fetch = saved;
+    ok(why === "sells:recent24", "[solana veto] >= SOL_SELLERS_24_VETO sellers in 24h must give sells:recent24, got " + why);
+  }
+
+  // ت) هیچ فروشنده‌ای → nosellِ خام دست‌نخورده (veto فقط null برمی‌گرداند).
+  {
+    const saved = globalThis.fetch;
+    globalThis.fetch = async () => new Response(JSON.stringify({ data: [poolSol(0, 0)] }),
+      { status: 200, headers: { "content-type": "application/json" } });
+    const why = await sv("MintCleanXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX", {});
+    globalThis.fetch = saved;
+    ok(why === null, "[solana veto] no recent sellers must leave the raw nosell untouched (null), got " + why);
+  }
+
+  // ث) شکستِ GT → nosellِ خام دست‌نخورده می‌ماند، هیچ‌چیز اختراع نمی‌شود.
+  {
+    const saved = globalThis.fetch;
+    globalThis.fetch = async () => new Response("boom", { status: 500 });
+    const why = await sv("MintFailXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX", {});
+    globalThis.fetch = saved;
+    ok(why === null, "[solana veto] a failed GT pools fetch must never invent a veto (null), got " + why);
+  }
+
+  // ج) وتو *بعدِ* کش هم اعمال می‌شود — یک "nosell"ِ از پیش کش‌شده هم وتو می‌شود.
+  {
+    const savedFetch = globalThis.fetch;
+    const savedCaches = globalThis.caches;
+    const cacheStore = new Map();
+    globalThis.caches = { default: {
+      match: async (req) => {
+        const b = cacheStore.get(String(req.url));
+        return b === undefined ? undefined : new Response(b, { headers: { "content-type": "application/json" } });
+      },
+      put: async (req, res) => { cacheStore.set(String(req.url), await res.text()); },
+    } };
+    const mint = "MintCachedXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX";
+    await globalThis.caches.default.put(new Request("https://" + VCH + "/v1/solana/" + mint),
+      new Response(JSON.stringify({ verdict: "nosell" })));
+    globalThis.fetch = async (url) => {
+      const u = String(url);
+      if (u.includes("/tokens/" + mint + "/pools")) {
+        return new Response(JSON.stringify({ data: [poolSol(SELLERS_H1_VETO, 0)] }),
+          { status: 200, headers: { "content-type": "application/json" } });
+      }
+      throw new Error("a cache hit must never call fetchVerdictSol's Jupiter/RPC path: " + u);
+    };
+    const res = await solFetchVerdict(mint, Date.now() + 5000, {}, {});
+    globalThis.fetch = savedFetch;
+    if (savedCaches === undefined) delete globalThis.caches; else globalThis.caches = savedCaches;
+    ok(res.v === null && res.why === "sells:recent",
+      "[solana veto] a cached nosell must still pass the veto — cache hits are not exempt, got " + JSON.stringify(res));
+  }
+
+  console.log("[solana veto] solNosellVeto (worker/index.js) covered: sellers24Of sums h24.sellers with the same "
+    + "unknown-shape-is-null discipline as sellersH1Of; >=" + SELLERS_H1_VETO + " sellers in the last hour gives "
+    + "sells:recent, >=" + SV24 + " in 24h (with no recent-hour veto) gives sells:recent24, no recent sellers or "
+    + "a failed GT pools fetch leaves the raw nosell untouched; and the veto is re-applied after a cache hit, "
+    + "not only on a fresh compute, via solFetchVerdict");
 }
 
 console.log(fails === 0

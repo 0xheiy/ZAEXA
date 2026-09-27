@@ -30,7 +30,7 @@ const UPSTREAM_KEYED = "https://api.coingecko.com/api/v3/onchain";
 
 import { ogTags, ogTitle, pickTokenMeta } from "./og.js";
 import { ogImageResponse } from "./og-image.js";
-import { fetchVerdict, fetchCounterSell, VD_VENUES, VD_RPCS, VD_V4_STAGE_COUNTERS,
+import { fetchVerdict, fetchCounterSell, poolDirectedProof, VD_VENUES, VD_RPCS, VD_V4_STAGE_COUNTERS,
   WETH_ADDR, USDC_ADDR } from "./verdict.js";
 import { EVM_ADDR, SOL_MINT, chainOf, gtNetworkOf } from "./chains.js";
 import {
@@ -684,8 +684,14 @@ let passPoolsMemo = null;
    پرتاب نمی‌کند: { ok:true, data } یا { ok:false, why }. baseVenueCoveredDetail
    و fetchV4Pools هر دو رویِ همین یک تابع سوارند (پایین‌تر)، به‌جای دو کپیِ
    جدا از همین fetch — passPoolsMemo بالا فقط همین‌جا خوانده/نوشته می‌شود. */
-async function fetchBaseTokenPoolsRaw(addr, env) {
-  const memoKey = typeof addr === "string" ? addr.toLowerCase() : "";
+/* network اختیاری است — پیش‌فرض "base"، دقیقاً رفتارِ امروز. سولانا
+   (solNosellVeto) با network="solana" همین تابع را صدا می‌زند تا کدِ
+   fetchِ خامِ GT دوباره نوشته نشود؛ passPoolsMemo با پیشوندِ شبکه کلید
+   می‌خورد تا آدرسِ سولانا (که هرگز چک‌سامِ EVM نیست) هرگز با یک آدرسِ Base
+   قاطی نشود — با اینکه امروز چنین برخوردی عملاً ناممکن است. */
+async function fetchBaseTokenPoolsRaw(addr, env, network) {
+  const net = typeof network === "string" && network ? network : "base";
+  const memoKey = net + ":" + (typeof addr === "string" ? addr.toLowerCase() : "");
   if (passPoolsMemo instanceof Map && passPoolsMemo.has(memoKey)) {
     return passPoolsMemo.get(memoKey); // ضربه‌ی حافظه‌ی همین گذر — بدونِ fetch
   }
@@ -694,7 +700,7 @@ async function fetchBaseTokenPoolsRaw(addr, env) {
   try {
     const key = (env && typeof env.CG_KEY === "string" && env.CG_KEY) || "";
     const target = (key ? UPSTREAM_KEYED : UPSTREAM_FREE) +
-      "/networks/base/tokens/" + addr + "/pools";
+      "/networks/" + net + "/tokens/" + addr + "/pools";
 
     const ac = new AbortController();
     const timer = setTimeout(() => ac.abort(), OG_TIMEOUT_MS);
@@ -741,6 +747,21 @@ export function sellersH1Of(pools) {
   for (const pool of pools) {
     const t = pool && pool.attributes && pool.attributes.transactions;
     const n = t && t.h1 && t.h1.sellers;
+    if (typeof n !== "number" || !Number.isFinite(n) || n < 0) return null;
+    sum += n;
+  }
+  return sum;
+}
+
+/* همان sellersH1Of، برای ۲۴ ساعت — کنترلِ منفیِ دومِ solNosellVeto پایین‌تر.
+   شکلِ ناشناخته یا عددِ نامعتبر در هر استخر → null («نمی‌دانیم»)، نه صفر —
+   دقیقاً همان انضباطِ sellersH1Of. */
+export function sellers24Of(pools) {
+  if (!Array.isArray(pools)) return null;
+  let sum = 0;
+  for (const pool of pools) {
+    const t = pool && pool.attributes && pool.attributes.transactions;
+    const n = t && t.h24 && t.h24.sellers;
     if (typeof n !== "number" || !Number.isFinite(n) || n < 0) return null;
     sum += n;
   }
@@ -840,15 +861,18 @@ async function baseVenueCoveredDetail(addr, env) {
     // همان بدنه، همان محاسبه — fetchCounterSell فقط وقتی صدا زده می‌شود که
     // این مقدار چیزی جز null باشد (finalizeBaseNosell/ogFetchVerdictDetail).
     const counterTop = baseCounterTopOf(r.data, addr);
+    // ۲۷ سپتامبر — pools: همان بدنه‌ی خام، برای poolDirectedProof
+    // (worker/verdict.js/ogFetchVerdictDetail) — بدونِ این، آن اثبات یک
+    // فراخوانیِ *دومِ* همین pools را لازم داشت؛ حالا فقط همین‌جا نشسته است.
     for (const pool of r.data) {
       const dexId = pool && pool.relationships && pool.relationships.dex &&
         pool.relationships.dex.data && pool.relationships.dex.data.id;
       if (typeof dexId !== "string") continue;
       if (dexId === "uniswap-v4-base") v4Listed = true;
       const venue = GT_DEX_TO_VENUE[dexId];
-      if (venue && VD_VENUE_ID_SET.has(venue)) return { covered: true, why: null, v4Listed, sellersH1, sellersElsewhere24, counterTop };
+      if (venue && VD_VENUE_ID_SET.has(venue)) return { covered: true, why: null, v4Listed, sellersH1, sellersElsewhere24, counterTop, pools: r.data };
     }
-    return { covered: false, why: "cover:false", v4Listed, sellersH1, sellersElsewhere24, counterTop }; // بدنه سالم بود، ولی هیچ استخری روی یک صرافیِ پوشش‌داده‌شده نبود
+    return { covered: false, why: "cover:false", v4Listed, sellersH1, sellersElsewhere24, counterTop, pools: r.data }; // بدنه سالم بود، ولی هیچ استخری روی یک صرافیِ پوشش‌داده‌شده نبود
   } catch (e) {
     return { covered: null, why: "cover:shape" }; // پرتاب → نامعلوم، هرگز false
   }
@@ -1151,20 +1175,28 @@ async function runV4Index(addr, env, diag) {
    eth_call‌ِ بدونِ متر را می‌زند که هر مسیرِ دیگر (مثلِ /vd) هم می‌زند. */
 export const COUNTER_PROOF_PASS_MAX_USED = 44; // ۵۰ منهای ۲ تماسِ اثبات منهای ۴ حاشیه
 
+/* ۲۷ سپتامبر — گاردِ بودجه‌ی هر دو گذرِ اثباتِ دو-ساب‌ریکوئستی (counter-sell و
+   حالا pool-directed proof): پیش از این هرکدام همین چک را جدا نوشته بودند —
+   این تابع همان یک‌بار-نوشتنِ قاعده است. capHit فقط *بعد* از خوردن به سقف
+   true می‌شود؛ used<=COUNTER_PROOF_PASS_MAX_USED یعنی دو زیر‌درخواستِ اضافه
+   هنوز جا دارد. بدونِ meterHooks (مثلِ /vd) هرگز محدود نمی‌کند — هرگز پرتاب
+   نمی‌کند. */
+function passBudgetHasRoom(meterHooks) {
+  if (!meterHooks) return true;
+  if (typeof meterHooks.capHit === "function") {
+    try { if (meterHooks.capHit()) return false; } catch (e) { return false; } // رصدگر هرگز نباید حکم را بشکند
+  }
+  if (typeof meterHooks.used === "function") {
+    try { if (!(meterHooks.used() <= COUNTER_PROOF_PASS_MAX_USED)) return false; } catch (e) { return false; }
+  }
+  return true;
+}
+
 export async function withCounterProof(result, addr, meta, deadlineAt, env, covered, meterHooks) {
   if (!result || result.why !== "sells:elsewhere") return result;
   if (!covered || !covered.counterTop) return result;
   if (deadlineAt != null && deadlineAt - Date.now() < 400) return result; // مهلت کافی برای دو eth_callِ دیگر نیست
-  if (meterHooks && typeof meterHooks.capHit === "function") {
-    try { if (meterHooks.capHit()) return result; } catch (e) { /* رصدگر هرگز نباید حکم را بشکند */ }
-  }
-  /* 🔴 capHit فقط *بعد* از خوردن به سقف true می‌شود؛ گذرِ ساعتی تا ۴۹ از ۵۰ رفته است.
-     این اثبات دو زیر‌درخواستِ دیگر می‌خواهد، پس در گذر فقط وقتی اجرا می‌شود که تا اینجا
-     حداکثر COUNTER_PROOF_PASS_MAX_USED مصرف شده باشد — وگرنه ردیف‌های بعدی «نامعلومِ جعلی»
-     می‌شدند (همان باگِ ۲۱ سپتامبر). مسیرِ /vd این قلاب را ندارد و محدود نمی‌شود. */
-  if (meterHooks && typeof meterHooks.used === "function") {
-    try { if (!(meterHooks.used() <= COUNTER_PROOF_PASS_MAX_USED)) return result; } catch (e) { return result; }
-  }
+  if (!passBudgetHasRoom(meterHooks)) return result;
   const hasStage = meterHooks && typeof meterHooks.stage === "function";
   if (hasStage) {
     try { meterHooks.stage("counter"); } catch (e) { /* رصدگر هرگز نباید حکم را بشکند */ }
@@ -1265,6 +1297,28 @@ async function ogFetchVerdictDetail(addr, meta, deadlineAt, env, ctx, metaWhy, m
       : { v: raw, why: null, ret: raw === "sell" && typeof ret === "number" ? ret : undefined };
   }
   const covered = await baseVenueCoveredDetail(addr, env);
+
+  /* 🔴 اثباتِ کلید-واقعیِ استخر (۲۷ سپتامبر) — پیش از finalizeBaseNosell،
+     چون یک کوتِ مثبت با کلیدِ واقعی می‌تواند کلِ nosellِ خام را باطل کند
+     (PAID/YAP: کارمزدِ واقعیِ استخر اصلاً جزوِ حدس‌های ایستا نبود). همان
+     بدنه‌ی pools که baseVenueCoveredDetail همین بالا گرفت، بدونِ هیچ
+     فراخوانیِ دومِ GT. زیرِ همان گاردِ بودجه‌ی گذرِ ساعتی که counter-sell هم
+     دارد — هر دو دقیقاً دو ساب‌ریکوئستِ اضافه‌اند. */
+  let poolProof = null;
+  if (deadlineAt == null || deadlineAt - Date.now() >= 400) {
+    if (passBudgetHasRoom(meterHooks)) {
+      poolProof = await poolDirectedProof(addr, covered.pools, {
+        meta, deadlineAt, fetchImpl: fetch, rpcs: baseRpcsFor(env), dexToVenue: GT_DEX_TO_VENUE,
+      });
+    }
+  }
+  if (poolProof && poolProof.v === "sell") {
+    return { v: "sell", why: null, ret: typeof poolProof.ret === "number" ? poolProof.ret : undefined, via: "pool-key" };
+  }
+  // فقط وقتی خودِ اثبات یک nosellِ باعلت داد؛ در غیرِاین‌صورت undefined —
+  // یعنی finalizeBaseNosell دقیقاً رفتارِ امروز را دارد.
+  const poolCause = poolProof && poolProof.v === "nosell" ? poolProof.cause : undefined;
+
   // 🔴 شکستِ خودِ چکِ پوشش (false یا null) هم به نامعلوم تنزل می‌کند —
   // «نتوانستیم پوشش را بسنجیم» هرگز اجازه‌ی اتهام نیست.
   /* ⚠️ تماسِ اضافه‌ی v4PoolsEmpty فقط همین‌جا، روی مسیرِ منفی، اتفاق
@@ -1273,7 +1327,7 @@ async function ogFetchVerdictDetail(addr, meta, deadlineAt, env, ctx, metaWhy, m
      می‌ماند)؛ این با v4PoolsEmpty که هرگز پرتاب نمی‌کند تضمین می‌شود. */
   if (covered.covered === true) {
     const empty = await v4PoolsEmpty(addr, env, deadlineAt);
-    return withCounterProof(finalizeBaseNosell(empty, covered, false), addr, meta, deadlineAt, env, covered, meterHooks);
+    return withCounterProof(finalizeBaseNosell(empty, covered, false, poolCause), addr, meta, deadlineAt, env, covered, meterHooks);
   }
   /* 🔴 استثنای پوشش (۱۹ شهریور، با تصمیمِ صریحِ حسام): وقتی خودِ حکمِ منفی از
      شاهدِ «استخرِ واقعیِ این توکن هیچ اندازه‌ای را پر نمی‌کند» آمده باشد، ما
@@ -1285,7 +1339,7 @@ async function ogFetchVerdictDetail(addr, meta, deadlineAt, env, ctx, metaWhy, m
   if (cacheOut.v4Proof === true) {
     const empty = await v4PoolsEmpty(addr, env, deadlineAt);
     // شاهدِ واقعی از خودِ استخر: «هیچ اندازه‌ای پر نمی‌شود»
-    return withCounterProof(finalizeBaseNosell(empty, covered, false), addr, meta, deadlineAt, env, covered, meterHooks);
+    return withCounterProof(finalizeBaseNosell(empty, covered, false, poolCause), addr, meta, deadlineAt, env, covered, meterHooks);
   }
   /* 🔴 استثنای پوششِ v4 (۲۹ شهریور): بالادست برای همین توکن یک استخرِ
      uniswap-v4-base *دید* (v4Listed) و ما دست‌کم یک کلیدِ واقعیِ ایندکس‌شده
@@ -1296,7 +1350,7 @@ async function ogFetchVerdictDetail(addr, meta, deadlineAt, env, ctx, metaWhy, m
      شاخه نمی‌رسد و همیشه نامعلوم می‌ماند — یک چکِ ناکام هرگز اتهام نیست. */
   if (covered.covered === false && covered.v4Listed === true && cacheOut.v4Keyed === true) {
     const empty = await v4PoolsEmpty(addr, env, deadlineAt);
-    return withCounterProof(finalizeBaseNosell(empty, covered, true), addr, meta, deadlineAt, env, covered, meterHooks);
+    return withCounterProof(finalizeBaseNosell(empty, covered, true, poolCause), addr, meta, deadlineAt, env, covered, meterHooks);
   }
   return { v: null, why: covered.why || "cover:shape" };
 }
@@ -1316,17 +1370,24 @@ async function ogFetchVerdictDetail(addr, meta, deadlineAt, env, ctx, metaWhy, m
       هانی‌پاتِ کلاسیک که نقدینگی دارد و cause ندارد. این را عمداً نگه می‌داریم:
       «هیچ nosellی بدونِ cause» کلِ یافته‌ی اصلیِ محصول را پاک می‌کرد. */
 export const SELLERS_H1_VETO = 3;
-export function finalizeBaseNosell(empty, covered, v4Only) {
+/* ۲۷ سپتامبر — poolCause از poolDirectedProof (worker/verdict.js) می‌آید،
+   فقط وقتی خودِ آن اثبات یک nosellِ باعلت داده باشد ("empty-pool" یا
+   "sell-reverts")؛ undefined یعنی رفتارِ امروز، بدونِ کم‌وکاست.
+   "empty-pool" دقیقاً هم‌ردیفِ empty===true قرار می‌گیرد — روی sells:recent
+   برنده می‌شود، درست مثلِ شاهدِ خالیِ v4. "sell-reverts" فقط در انتها، به‌جایِ
+   causeِ undefinedِ همیشگی می‌نشیند — هرگز رویِ sells:elsewhere یا
+   sells:recent برنده نمی‌شود. */
+export function finalizeBaseNosell(empty, covered, v4Only, poolCause) {
   /* ۰. (۲۴ سپتامبر، SN80) استخرِ زنده با ضدجفتی که نمی‌پرسیم و دست‌کم SELLERS_H1_VETO
      فروشنده در ۲۴ ساعت → نامعلوم، حتی پیش از «استخرِ خالی»: خالی‌بودنِ استخرهای
      اتر/USDC یعنی از راهِ ما نمی‌شود، نه اینکه هیچ راهی نیست. */
   const elsewhere = covered && covered.sellersElsewhere24;
   if (typeof elsewhere === "number" && elsewhere >= SELLERS_H1_VETO) return { v: null, why: "sells:elsewhere" };
-  if (empty === true) return { v: "nosell", why: null, cause: "empty-pool" };
+  if (empty === true || poolCause === "empty-pool") return { v: "nosell", why: null, cause: "empty-pool" };
   const sellers = covered && covered.sellersH1;
   if (typeof sellers === "number" && sellers >= SELLERS_H1_VETO) return { v: null, why: "sells:recent" };
   if (v4Only) return { v: null, why: "v4:unproven" };
-  return { v: "nosell", why: null, cause: undefined };
+  return { v: "nosell", why: null, cause: poolCause === "sell-reverts" ? "sell-reverts" : undefined };
 }
 
 async function ogFetchVerdict(addr, meta, deadlineAt, env, ctx) {
@@ -1379,6 +1440,23 @@ export function jupKeyFor(env) {
    شیءِ برگشتیِ fetchVerdictSol جدا می‌کنیم. هرگز کش نمی‌شود، چون فقط وقتی
    پر می‌شود که computeFn واقعاً اجرا شده باشد (نه از cache hit) و
    cachedVerdict فقط verdictِ sell/nosell را می‌نویسد، نه why را. */
+/* ۲۷ سپتامبر — کنترلِ منفیِ فروشنده‌های اخیر، هم‌ردیفِ SN80 روی Base: یک
+   شبیه‌سازیِ «nosell» درست است که فقط این آدرس نتوانست بفروشد، ولی زنجیره
+   خودش شاهدِ عکسِ آن را دارد اگر ساعتِ گذشته (یا ۲۴ ساعتِ گذشته) فروشنده‌ی
+   واقعی دیده باشد. همان بالادستِ GT_ که Base هم می‌زند (fetchBaseTokenPoolsRaw
+   با network="solana")، یک تماسِ اضافه به‌ازای هر nosellِ خام — شکستِ آن
+   تماس، nosell را دست‌نخورده می‌گذارد، هرگز چیزی اختراع نمی‌کند. */
+export const SOL_SELLERS_24_VETO = 10;
+async function solNosellVeto(mint, env) {
+  const r = await fetchBaseTokenPoolsRaw(mint, env, "solana");
+  if (!r.ok) return null; // GT شکست خورد → nosellِ خام دست‌نخورده می‌ماند
+  const h1 = sellersH1Of(r.data);
+  if (typeof h1 === "number" && h1 >= SELLERS_H1_VETO) return "sells:recent";
+  const h24 = sellers24Of(r.data);
+  if (typeof h24 === "number" && h24 >= SOL_SELLERS_24_VETO) return "sells:recent24";
+  return null;
+}
+
 async function solFetchVerdict(mint, deadlineAt, ctx, env) {
   let why; // فقط computeFn (نه cache hit) آن را پر می‌کند، و فقط وقتی v نهایی null باشد معنا دارد
   const v = await cachedVerdict(
@@ -1392,6 +1470,14 @@ async function solFetchVerdict(mint, deadlineAt, ctx, env) {
     },
     ctx,
   );
+  /* 🔴 وتو *بعدِ* کش هم اعمال می‌شود — یک "nosell"ِ کش‌شده هم باید همین گیت
+     را رد کند، دقیقاً همان انضباطِ گاردِ پوششِ Base بالاتر (ogFetchVerdictDetail).
+     چون این یک تماسِ GT دیگر است، فقط وقتی v واقعاً "nosell" شد اجرا می‌شود —
+     یک "sell"/null هرگز این هزینه را نمی‌پردازد. */
+  if (v === "nosell") {
+    const vetoWhy = await solNosellVeto(mint, env);
+    if (vetoWhy) return { v: null, why: vetoWhy };
+  }
   return v === null ? { v: null, why: why || "internal" } : { v };
 }
 
@@ -1783,7 +1869,7 @@ async function diagVerdict(request, url, env, ctx) {
     why: v === null ? why : undefined,
     cause: v === "nosell" ? cause : undefined,
     ret: v === "sell" && typeof ret === "number" ? ret : undefined,
-    via: v === "sell" && via === "counter" ? "counter" : undefined,
+    via: v === "sell" && (via === "counter" || via === "pool-key") ? via : undefined,
   });
 }
 
@@ -2719,7 +2805,8 @@ export default {
 export { PATH_OK, QUERY_OK, ttlFor, EV_OK, EV_DETAIL_OK, EV_SURFACE_OK, EV_MAX_BODY, pairsRowsFor };
 export { rateOk, rlHits, RL_LIMIT, RL_WINDOW_MS };
 export { OG_NETWORK, OG_TIMEOUT_MS, ogFetchMeta, ogFetchVerdict, ogFetchMetaMany };
-export { baseVenueCovered, baseVenueCoveredDetail };
+export { baseVenueCovered, baseVenueCoveredDetail, ogFetchVerdictDetail };
+export { solNosellVeto };
 export { UPSTREAM_FREE, UPSTREAM_KEYED };
 export { VD_ADDR_RE };
 export { TOKEN_PAGE, solFetchVerdict };

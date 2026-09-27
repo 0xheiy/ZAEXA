@@ -365,6 +365,11 @@ export const VD_SOL_WHY = Object.freeze([
   "jup:swap-instructions",
   "deadline",
   "internal",
+  // ۲۷ سپتامبر — کنترلِ منفیِ فروشنده‌های اخیر (worker/index.js/solNosellVeto)،
+  // هم‌رده‌ی sells:recent/sells:elsewhere روی Base: یک nosellِ خام که زنجیره
+  // در ساعت/۲۴ساعتِ گذشته فروشنده‌ی واقعی دیده، اثبات‌نشده است.
+  "sells:recent",
+  "sells:recent24",
 ]);
 
 /* ---------------------------------------------------------------------
