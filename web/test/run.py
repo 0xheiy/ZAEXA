@@ -24,6 +24,24 @@ def tiny_png_bytes():
 # دلِ index.html بیرون کشیده می‌شود (نگاه کن به theme_key_from_index).
 OLD_THEME_KEY = "zaexa.landing.theme"
 
+# همان الفبای SOL_MINT در worker/chains.js — برای ساختنِ ورودیِ فیکسچرها و
+# برای سنجیدنِ لینکِ Solscan که خودِ index.html با یک bs58 دستی می‌سازد؛
+# اینجا مستقل از آن کد، فقط برای اثباتِ درستیِ خروجی‌اش.
+def b58encode(data: bytes) -> str:
+    alphabet = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
+    zeros = 0
+    for b in data:
+        if b == 0:
+            zeros += 1
+        else:
+            break
+    n = int.from_bytes(data, "big")
+    out = ""
+    while n > 0:
+        n, r = divmod(n, 58)
+        out = alphabet[r] + out
+    return "1" * zeros + out
+
 def vendor_path(prefix):
     """مسیر باندل وندور با هر هشی که در نامش هست. دقیقاً یکی باید باشد."""
     matches = glob.glob(os.path.join(HERE, "..", prefix + ".*.js"))
@@ -7314,10 +7332,11 @@ async def main():
         assert "$1.00B" in sell["stats"] and "$1.20B" in sell["stats"] and \
                "$45.00M" in sell["stats"] and "$30.00M" in sell["stats"], \
             "the Solana token page is missing its market numbers: %r" % sell["stats"]
-        assert sell["noticeHidden"] is False and (
-            "Solana: checking only" in sell["noticeText"] and
-            "swapping on Solana is not live yet" in sell["noticeText"]), \
-            "the Solana checking-only notice did not render: %r" % sell["noticeText"]
+        # سواپ حالا زنده است — بنرِ «هنوز زنده نیست» دیگر نباید روی یک حکمِ
+        # sell معلوم دیده شود؛ همان عنصر حالا فقط برای verdict نامعلوم پر
+        # می‌شود (پایین‌تر، حالتِ «ج»).
+        assert sell["noticeHidden"] is True and sell["noticeText"] == "", \
+            "the old \"not live yet\" notice must stay empty/hidden once a sell route is confirmed: %r" % sell["noticeText"]
         assert "A sell route was quoted just now." in sell["exitText"], \
             "the \"sell\" verdict did not render its exact sentence: %r" % sell["exitText"]
         assert sell["tradeHidden"] and sell["walletHidden"], \
@@ -7355,6 +7374,13 @@ async def main():
             "the raw why leaked without ?dev=1: %r" % unknown["exitText"]
         assert not any("ethers" in u for u in unk_urls), \
             "ethers was requested on the Solana read-only path (unknown case): %s" % unk_urls
+        # نامعلوم بودنِ حکم = گیت روی خریدِ زنده هم روشن می‌شود — همان بنرِ
+        # قدیمی حالا فقط این یک پیام را می‌گوید، نه متنِ ثابتِ «هنوز زنده
+        # نیست» را.
+        assert unknown["noticeHidden"] is False and \
+            unknown["noticeText"] == "We could not confirm this token can be sold back.", \
+            "an unconfirmed verdict must show the sell-back warning, got hidden=%s text=%r" \
+            % (unknown["noticeHidden"], unknown["noticeText"])
 
         # د) همان نامعلوم، این‌بار زیرِ ?dev=1 — why خام باید کنارش بیاید
         devpg2, dev_urls = await open_sol_page({"v": None, "ms": 10, "why": "jup:quote:500"}, dev=True)
@@ -7371,6 +7397,260 @@ async def main():
               "correctly; the unknown state carries no reassurance and is never painted green; "
               "the raw why only shows up under ?dev=1; ethers is never requested on any of the four "
               "runs above (checked against recorded network requests, not a JS-side flag)")
+
+        # ---- [sol swap] سواپِ زنده‌ی سولانا ----
+        # هیچ کیف‌پول واقعی، هیچ Jupiter/RPC واقعی. یک کیف‌پولِ جعلیِ
+        # Wallet Standard با page.add_init_script تزریق می‌شود (پیش از هر
+        # اسکریپتِ خودِ صفحه) و روی eventِ app-ready ثبت می‌شود؛ /sol/quote،
+        # /sol/swap و /sol/rpc با page.route جایگزین می‌شوند — این کانتینر
+        # به هیچ Jupiter یا Solana RPC واقعی دسترسی ندارد.
+        SWAP_MINT = "DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263"
+        SOL_FEE_PAYER = bytes(range(1, 33))
+        SOL_WRONG_PAYER = bytes(range(101, 133))
+        SOL_OTHER_KEY = bytes(range(50, 82))
+        SOL_SIG_BYTES = bytes(range(1, 65))
+        SOL_SIG_B58 = b58encode(SOL_SIG_BYTES)
+
+        def build_v0_tx(fee_payer):
+            # sigCount(1) + یک امضای صفر + پیشوندِ نسخه(0x80) + هدرِ ۳بایتی +
+            # keyCount(2) + فی‌پیر + یک کلیدِ دیگر + blockhash + ۰ دستور + ۰ ALT.
+            return (bytes([1]) + bytes(64) + bytes([0x80]) + bytes([1, 0, 1]) + bytes([2]) +
+                    fee_payer + SOL_OTHER_KEY + bytes(32) + bytes([0]) + bytes([0]))
+
+        SOL_GOOD_TX_B64 = base64.b64encode(build_v0_tx(SOL_FEE_PAYER)).decode()
+        SOL_BAD_TX_B64 = base64.b64encode(build_v0_tx(SOL_WRONG_PAYER)).decode()
+
+        SOL_QUOTE_FIXTURE = {
+            "inputMint": "So11111111111111111111111111111111111111112",
+            "outputMint": SWAP_MINT, "inAmount": "1000000000", "outAmount": "5000000000",
+            "otherAmountThreshold": "4950000000", "priceImpactPct": "0.0123",
+            "routePlan": [{"swapInfo": {"label": "Whirlpool"}}, {"swapInfo": {"label": "Whirlpool"}},
+                          {"swapInfo": {"label": "Meteora DLMM"}}],
+        }
+
+        def swap_gt_body():
+            return _json.dumps({"data": {"attributes": {
+                "name": "Test Swap Token", "symbol": "TSWP", "price_usd": "0.01", "decimals": 6,
+                "market_cap_usd": "500000", "fdv_usd": "600000",
+                "volume_usd": {"h24": "10000"}, "total_reserve_in_usd": "5000",
+            }}})
+
+        SOL_FAKE_WALLET_INIT = ("""
+(function(){
+  const FEE_PAYER = new Uint8Array(%s);
+  const SIG_BYTES = new Uint8Array(%s);
+  window.__solCalls = [];
+  window.__solRejectSwap = false;
+  const fakeWallet = {
+    name: "Fake Wallet", icon: "", chains: ["solana:mainnet"],
+    features: {
+      "standard:connect": { connect: async () => ({accounts: [
+        {address: "FakeWa11etAddr11111111111111111111111111", publicKey: FEE_PAYER}]}) },
+      "standard:disconnect": { disconnect: async () => {} },
+      "solana:signAndSendTransaction": { signAndSendTransaction: async (input) => {
+        window.__solCalls.push(Array.from(input.transaction));
+        if (window.__solRejectSwap) { const e = new Error("User rejected the request."); e.code = 4001; throw e; }
+        return [{signature: SIG_BYTES}];
+      } }
+    }
+  };
+  window.addEventListener("wallet-standard:app-ready", (e) => {
+    try { e.detail.register(fakeWallet); } catch(_){}
+  });
+})();
+""" % (list(SOL_FEE_PAYER), list(SOL_SIG_BYTES)))
+
+        async def open_sol_swap_page(verdict_body, quote_status=200, quote_body=None,
+                                      swap_status=200, swap_body=None, inject_wallet=True,
+                                      collect_errors=None):
+            spg = await b.new_page(viewport={"width": 1240, "height": 1000})
+            if collect_errors is not None:
+                spg.on("console", lambda m: collect_errors.append(m.text) if m.type == "error" else None)
+                spg.on("pageerror", lambda e: collect_errors.append(str(e)))
+            if inject_wallet:
+                await spg.add_init_script(SOL_FAKE_WALLET_INIT)
+            async def stub_ev(route):
+                # سرورِ استاتیکِ محلی POST را اصلاً پشتیبانی نمی‌کند (۵۰۱)؛
+                # بی‌ربط به سواپ است، فقط بیکنِ رویدادها — همان‌طور که سایر
+                # صفحاتِ توکن جای دیگرِ همین فایل آن را نادیده می‌گیرند.
+                await route.fulfill(status=204, body="")
+            async def stub_gt(route):
+                await route.fulfill(status=200, content_type="application/json", body=swap_gt_body())
+            async def stub_vd(route):
+                await route.fulfill(status=200, content_type="application/json",
+                                     body=_json.dumps(verdict_body))
+            async def stub_quote(route):
+                if quote_status != 200:
+                    await route.fulfill(status=quote_status, content_type="application/json",
+                                         body=_json.dumps({"error": "jup:quote:%d" % quote_status}))
+                else:
+                    await route.fulfill(status=200, content_type="application/json",
+                                         body=_json.dumps(quote_body if quote_body is not None else SOL_QUOTE_FIXTURE))
+            async def stub_swap(route):
+                if swap_status != 200:
+                    await route.fulfill(status=swap_status, content_type="application/json",
+                                         body=_json.dumps({"error": "jup:swap:%d" % swap_status}))
+                else:
+                    body = swap_body if swap_body is not None else \
+                        {"swapTransaction": SOL_GOOD_TX_B64, "lastValidBlockHeight": 123}
+                    await route.fulfill(status=200, content_type="application/json", body=_json.dumps(body))
+            async def stub_rpc(route):
+                payload = _json.loads(route.request.post_data or "{}")
+                method = payload.get("method")
+                if method == "getBalance":
+                    result = {"value": 2000000000}
+                elif method == "getTokenAccountsByOwner":
+                    result = {"value": []}
+                elif method == "getSignatureStatuses":
+                    result = {"value": [{"confirmationStatus": "confirmed", "err": None}]}
+                else:
+                    result = None
+                await route.fulfill(status=200, content_type="application/json",
+                                     body=_json.dumps({"result": result}))
+            await spg.route("**/ev", stub_ev)
+            await spg.route("**/gt/networks/solana/tokens/**", stub_gt)
+            await spg.route("**/vd/**", stub_vd)
+            await spg.route("**/sol/quote**", stub_quote)
+            await spg.route("**/sol/swap", stub_swap)
+            await spg.route("**/sol/rpc", stub_rpc)
+            await spg.goto("http://127.0.0.1:%d/t/%s" % (port, SWAP_MINT))
+            await spg.wait_for_timeout(1200)
+            return spg
+
+        async def sol_connect(spg):
+            await spg.click("#solConnectBtn")
+            await spg.wait_for_timeout(400)
+            wal_text = await spg.inner_text("#solWalList")
+            await spg.click("#solWalList .walRow")
+            await spg.wait_for_timeout(300)
+            return wal_text
+
+        # الف) کشف و اتصال
+        apg = await open_sol_swap_page({"v": "sell", "ms": 100})
+        wal_text = await sol_connect(apg)
+        conn_btn = await apg.inner_text("#solConnectBtn")
+        await apg.close()
+        print("[sol swap] wallet picker=%r connected btn=%r" % (wal_text[:40], conn_btn))
+        assert "Fake Wallet" in wal_text, "the wallet picker did not list the injected Wallet Standard wallet: %r" % wal_text
+        assert conn_btn != "Connect Solana wallet" and conn_btn.strip(), \
+            "connecting did not update the button to the short address: %r" % conn_btn
+
+        # ب) کوت — «You receive»/«Min received»/«Route»
+        bpg = await open_sol_swap_page({"v": "sell", "ms": 100})
+        await sol_connect(bpg)
+        await bpg.fill("#solAmt", "1")
+        await bpg.wait_for_timeout(900)
+        b_out = await bpg.inner_text("#solOut")
+        b_min = await bpg.inner_text("#solMin")
+        b_route = await bpg.inner_text("#solRoute")
+        await bpg.close()
+        print("[sol swap] quote out=%r min=%r route=%r" % (b_out, b_min, b_route))
+        assert b_out != "—" and b_min != "—", "typing a buy amount did not produce a quote readout: out=%r min=%r" % (b_out, b_min)
+        assert b_route == "Whirlpool → Meteora DLMM", \
+            "the route label must dedupe repeated venues and join with \" → \", got %r" % b_route
+
+        # پ) سواپِ کامل — کیف‌پول دقیقاً یک‌بار با بایت‌های دقیق صدا زده می‌شود،
+        # وضعیت به Confirmed می‌رسد، لینک Solscan امضای درست را دارد
+        cpg = await open_sol_swap_page({"v": "sell", "ms": 100})
+        await sol_connect(cpg)
+        await cpg.fill("#solAmt", "1")
+        await cpg.wait_for_timeout(900)
+        await cpg.click("#solSwapBtn")
+        await cpg.wait_for_timeout(900)
+        calls = await cpg.evaluate("window.__solCalls")
+        await cpg.wait_for_timeout(2600)
+        notice_html = await cpg.inner_html("#solNotices")
+        await cpg.close()
+        print("[sol swap] wallet calls=%d confirmed=%s sig-in-link=%s"
+              % (len(calls), "Confirmed" in notice_html, SOL_SIG_B58 in notice_html))
+        assert len(calls) == 1, "the wallet's signAndSendTransaction must be called exactly once, got %d" % len(calls)
+        assert calls[0] == list(build_v0_tx(SOL_FEE_PAYER)), \
+            "the wallet was not called with the exact transaction bytes returned by /sol/swap"
+        assert "Confirmed" in notice_html, "status did not reach Confirmed after the fixture said so: %r" % notice_html[:200]
+        assert SOL_SIG_B58 in notice_html and ("solscan.io/tx/" + SOL_SIG_B58) in notice_html, \
+            "the Solscan link must carry the base58-encoded signature: %r" % notice_html[:200]
+
+        # ت) فی‌پیرِ غلط — کیف‌پول هرگز صدا زده نمی‌شود
+        dpg = await open_sol_swap_page({"v": "sell", "ms": 100}, swap_body={"swapTransaction": SOL_BAD_TX_B64, "lastValidBlockHeight": 1})
+        await sol_connect(dpg)
+        await dpg.fill("#solAmt", "1")
+        await dpg.wait_for_timeout(900)
+        await dpg.click("#solSwapBtn")
+        await dpg.wait_for_timeout(500)
+        d_calls = await dpg.evaluate("window.__solCalls")
+        d_notice = await dpg.inner_text("#solNotices")
+        await dpg.close()
+        print("[sol swap] fee-payer mismatch -> calls=%d notice=%r" % (len(d_calls), d_notice[:70]))
+        assert len(d_calls) == 0, "a transaction whose fee payer is not the wallet must never reach the wallet, got %d calls" % len(d_calls)
+        assert "Refused: the transaction's fee payer is not your wallet." in d_notice, \
+            "the fee-payer mismatch must show the exact refusal sentence: %r" % d_notice
+
+        # ث) nosell — خرید غیرفعال با پیام، فروش همچنان مجاز
+        epg = await open_sol_swap_page({"v": "nosell", "ms": 100})
+        e_buy_disabled = await epg.eval_on_selector('#solSideSeg [data-side="buy"]', "el => el.disabled")
+        e_btn_text = await epg.inner_text("#solSwapBtn")
+        await epg.click('#solSideSeg [data-side="sell"]')
+        await epg.wait_for_timeout(200)
+        e_sell_disabled = await epg.eval_on_selector('#solSideSeg [data-side="sell"]', "el => el.disabled")
+        e_btn_text_sell = await epg.inner_text("#solSwapBtn")
+        await epg.close()
+        print("[sol swap] nosell gate: buyDisabled=%s btn=%r sellDisabled=%s btnAfterSell=%r"
+              % (e_buy_disabled, e_btn_text, e_sell_disabled, e_btn_text_sell))
+        assert e_buy_disabled is True, "the Buy toggle must be disabled when the verdict is nosell"
+        assert "Buying is blocked" in e_btn_text and "sell-back check" in e_btn_text, \
+            "the blocked CTA must name the reason, got %r" % e_btn_text
+        assert e_sell_disabled is False, "Sell must stay enabled even when the verdict is nosell"
+        assert "Buying is blocked" not in e_btn_text_sell, \
+            "switching to Sell must clear the buy-blocked message, got %r" % e_btn_text_sell
+
+        # ج) کیف‌پول امضا را رد می‌کند
+        fpg = await open_sol_swap_page({"v": "sell", "ms": 100})
+        await sol_connect(fpg)
+        await fpg.fill("#solAmt", "1")
+        await fpg.wait_for_timeout(900)
+        await fpg.evaluate("window.__solRejectSwap = true")
+        await fpg.click("#solSwapBtn")
+        await fpg.wait_for_timeout(500)
+        f_notice = await fpg.inner_text("#solNotices")
+        await fpg.close()
+        print("[sol swap] wallet rejection -> %r" % f_notice[:60])
+        assert "Cancelled in your wallet." in f_notice, \
+            "a wallet rejection must show the same wording as the Base flow: %r" % f_notice
+
+        # چ) /sol/quote 502 — خطای مهربان، بدون کرش، بدون خطای کنسول
+        g_errs = []
+        gpg = await open_sol_swap_page({"v": "sell", "ms": 100}, quote_status=502, collect_errors=g_errs)
+        await gpg.fill("#solAmt", "1")
+        await gpg.wait_for_timeout(900)
+        g_out = await gpg.inner_text("#solOut")
+        g_notice = await gpg.inner_text("#solNotices")
+        await gpg.close()
+        # ⚠️ کروم خودش برای *هر* fetchِ غیرِ۲۰۰ یک «Failed to load resource»
+        # در کنسول می‌نویسد — این تشخیصِ خودِ مرورگر است، نه console.error یا
+        # throwِ کدِ ما؛ همان ۵۰۲ای که خودمان عمداً برای همین آزمون ساختیم.
+        # چیزی که واقعاً اهمیت دارد نبودِ خطای *دیگر* (استثنای جاوااسکریپت) است.
+        g_real_errs = [e for e in g_errs if "Failed to load resource" not in e]
+        print("[sol swap] quote 502 -> out=%r notice=%r errors=%s" % (g_out, g_notice[:50], g_errs))
+        assert g_out == "—", "a failed quote must not render a stale/garbage readout: %r" % g_out
+        assert "Could not get a quote" in g_notice, "a failed quote must show a friendly error, got %r" % g_notice
+        assert not g_real_errs, "a failed quote must not raise a JS exception/console.error: %s" % g_real_errs
+
+        # ح) صفحه‌ی Base دست‌نخورده می‌ماند — #solSwap مخفی
+        hpg = await b.new_page(viewport={"width": 1240, "height": 1000})
+        await hpg.goto("http://127.0.0.1:%d%s" % (port, ck_path))
+        await hpg.wait_for_timeout(2000)
+        h_hidden = await hpg.eval_on_selector("#solSwap", "el => el.hidden")
+        await hpg.close()
+        print("[sol swap] Base token page #solSwap hidden=%s" % h_hidden)
+        assert h_hidden is True, "the Solana swap card must stay hidden on a Base token page"
+
+        print("[sol swap] Wallet Standard discovery/connect against an injected fake wallet, a live quote "
+              "readout (You receive/Min received/deduped Route), a full swap that calls "
+              "signAndSendTransaction exactly once with the exact bytes and reaches Confirmed with a "
+              "base58 Solscan link, a fee-payer mismatch refused before the wallet is ever called, the "
+              "nosell buy-gate (Sell unaffected), a wallet rejection reusing the Base wording, a 502 quote "
+              "degrading to a friendly notice, and the Base token page left unchanged (#solSwap hidden) "
+              "all covered")
 
         # ---- [faq] پرسش‌های متداول: نه ابزار است، نه دکمه‌ای در ناوبری دارد ----
         # فقط از پانویس و از #faq می‌رسند به آن، دقیقاً مثل view-token که هیچ

@@ -1482,7 +1482,10 @@ footer .fine{max-width:78ch;margin:46px 0 0;font-size:11.5px;color:var(--tx3);li
   <!-- بنرِ فقط-چکِ سولانا. پیش‌فرض مخفی — فقط openSolanaTokenPage آن را
        نشان می‌دهد؛ روی Base همیشه hidden می‌ماند. متن دقیقاً همان چیزی است
        که صاحب سایت خواسته، کلمه‌به‌کلمه. -->
-  <div class="note warn" id="tk-solNotice" hidden>Solana: checking only. Zaexa can tell you whether this token can be sold back — swapping on Solana is not live yet.</div>
+  <!-- تا امروز اینجا فقط یک بنرِ «هنوز زنده نیست» بود. حالا سواپِ زنده جای
+       آن نشسته؛ همین یک عنصر برای هشدارهای سبکِ باقی‌مانده (verdict نامعلوم)
+       نگه داشته شده، نه برای متنِ ثابتِ قدیمی. -->
+  <div class="note warn" id="tk-solNotice" hidden></div>
   <!-- نوار هویت: چه توکنی، چه قیمتی، و راه رفتن سرِ معامله. دکمه کوچک است
        چون کسی که این صفحه را باز کرده هنوز نمی‌داند می‌خواهد معامله کند. -->
   <section class="card tkBar">
@@ -1509,6 +1512,51 @@ footer .fine{max-width:78ch;margin:46px 0 0;font-size:11.5px;color:var(--tx3);li
   <!-- امضای صفحه: خودِ رفت‌وبرگشت. تنها ادعایی که فقط ما داریم — «فروش را
        هم اجرا کردیم» — باید همان چیزی باشد که اول دیده می‌شود، نه قیمت. -->
   <section class="card tkTrip" id="tk-exitBox"></section>
+
+  <!-- =====================================================================
+       سواپِ زنده‌ی سولانا — فقط روی /t/<mint سولانا> دیده می‌شود
+       ---------------------------------------------------------------------
+       جایی که کارتِ Base دکمه‌ی «Trade» را نشان می‌دهد و کاربر را به فرمِ
+       سواپِ اصلی می‌فرستد، اینجا خودِ فرم است — چون رفتن به یک صفحه‌ی دیگر
+       برای سولانا معنا ندارد (فرمِ اصلی فقط Base را می‌شناسد). کلاس‌ها عیناً
+       همان‌های swapCard/leg/facts/seg/cta بالا هستند، هیچ رنگِ تازه‌ای نیست. -->
+  <section class="card swapCard" id="solSwap" hidden>
+    <div class="seg" id="solSideSeg">
+      <button type="button" data-side="buy" class="on">Buy</button>
+      <button type="button" data-side="sell">Sell</button>
+    </div>
+    <div class="leg">
+      <div class="legTop"><span id="solLegLabel">You pay</span><b id="solBal">—</b></div>
+      <div class="legRow">
+        <input class="amt mono" id="solAmt" placeholder="0" inputmode="decimal" autocomplete="off">
+        <button class="tokbtn" id="solMaxBtn" type="button">MAX</button>
+      </div>
+    </div>
+    <div class="facts">
+      <div class="fact"><span class="k">You receive</span><span class="v mono" id="solOut">—</span></div>
+      <div class="fact"><span class="k">Min received</span><span class="v mono" id="solMin">—</span></div>
+      <div class="fact"><span class="k">Price impact</span><span class="v mono" id="solImpact">—</span></div>
+      <div class="fact"><span class="k">Route</span><span class="v mono" id="solRoute">—</span></div>
+    </div>
+    <div id="solNotices"></div>
+    <div class="rel" id="solWalletMenu">
+      <button class="chip solid" id="solConnectBtn" type="button">Connect Solana wallet</button>
+      <div class="pop" id="solWalPop">
+        <button class="walletAction" id="solCopyAddrBtn" type="button">
+          <span>Copy address</span><span class="right" id="solWalAddr"></span></button>
+        <button class="walletAction danger" id="solDisconnectBtn" type="button">
+          <span>Disconnect</span></button>
+      </div>
+    </div>
+    <button class="cta" id="solSwapBtn" disabled type="button">Connect wallet</button>
+  </section>
+
+  <div class="ov" id="solWalletOv">
+    <div class="modal">
+      <h3>Connect a Solana wallet<span class="grow"></span><button id="solWalClose" type="button" style="color:var(--tx3)">✕</button></h3>
+      <div class="tlist" id="solWalList"></div>
+    </div>
+  </div>
 
   <div class="row tkGrid" id="tk-grid">
     <div class="tkLeft">
@@ -4161,6 +4209,28 @@ const panel=id=>$( (tokenPage?"tk-":"")+id );
    scanWallets را رویِ همین مسیر صدا نزند. */
 let solanaReadOnly=false;
 
+/* =====================================================================
+   سواپِ زنده‌ی سولانا — وضعیت
+   =====================================================================
+   همه‌ی این‌ها فقط وقتی معنا دارند که solanaReadOnly=false نیست، یعنی
+   openSolanaTokenPage صدا زده شده؛ بین دو بازِ صفحه‌ی توکن دوباره صفر
+   می‌شوند (solSwapReset). هیچ‌کدام در localStorage نمی‌روند به‌جز نامِ
+   آخرین کیف‌پول (solLastWalletName پایین‌تر). */
+let solWallets=[];              // کیف‌پول‌های Wallet Standard که register شده‌اند
+let solWalletApi=null;          // شیءِ خودِ کیف‌پولِ متصل (name/icon/features)
+let solAccount=null;            // {address (base58), publicKey (Uint8Array 32)}
+let solMintCur=null;            // mint صفحه‌ی فعلی
+let solTokenDecimals=null;      // دسیمالِ توکن، از حسابِ توکن یا از GT
+let solBalSol=null,solBalTok=null; // موجودی‌ها، به واحدِ انسانی (نه lamports خام)
+let solSide="buy";              // "buy" (SOL→توکن) یا "sell" (توکن→SOL)
+let solVerdictV=null;           // "sell"/"nosell"/null از GET /vd/<mint>
+let solQuoteSeq=0;              // برای دورریختنِ کوت‌های دیرِ رسیده
+let solQuote=null;              // آخرین quote موفق (شیءِ خامِ جوپیتر)
+let solQuoteTimer=null;
+let solSwapBusy=false;          // جلوِ دوبار زدنِ دکمه‌ی سواپ حین امضا/ارسال
+
+const SOL_WALLET_LS_KEY="zaexa.solwallet.v1";
+
 let statsSeq=0;
 async function renderTokenStats(t){
   const box=panel("tokStats");if(!box)return;
@@ -6177,10 +6247,10 @@ function renderSolExit(v,why){
 /* مقصدِ تنها راه‌اندازی‌کننده: هرچه لازم است پیش از خودِ داده نشان داده
    شود (بنر، حذفِ بخش‌های مخصوصِ Base) اینجاست، نه در بولوت. */
 async function openSolanaTokenPage(mint){
-  $("tk-solNotice").hidden=false;
   $("tk-chip").textContent="Solana";
   // پیشنهادِ اقدامی که نمی‌توانیم اجرا کنیم قولی است که نگه نمی‌داریم —
-  // پس این دو *مخفی* می‌شوند، نه فقط غیرفعال.
+  // پس این دو *مخفی* می‌شوند، نه فقط غیرفعال. کیف‌پولِ Base، نه کیف‌پولِ
+  // سولانا — آن یکی داخلِ خودِ #solSwap است.
   $("tk-trade").hidden=true;
   $("walletMenu").hidden=true;
   // بخش‌های مخصوصِ Base: نمودار (شبکه‌اش base است) و کارتِ ایمنی (بایت‌کدِ
@@ -6198,6 +6268,9 @@ async function openSolanaTokenPage(mint){
   renderRoundTrip($("tk-exitBox"),null);   // «داریم می‌سنجیم»، همان اسکلتِ Base
   ev("check:open");                        // همان شمارنده‌ی لینک بررسی
 
+  solSwapReset(mint);
+  $("solSwap").hidden=false;
+
   const [meta,verdict]=await Promise.all([fetchSolMeta(mint),fetchVdVerdict(mint)]);
   $("tk-sym").textContent=(meta&&meta.symbol)||"Unknown token";
   $("tk-name").textContent=(meta&&meta.name)||"";
@@ -6208,6 +6281,446 @@ async function openSolanaTokenPage(mint){
   paintSolAvatar(meta);
   renderSolStats(meta);
   renderSolExit(verdict.v,verdict.why);
+
+  solVerdictV=verdict.v;
+  if(meta&&Number.isInteger(meta.decimals))solTokenDecimals=meta.decimals;
+  solSwapApplyGate();
+  solWalletStandardInit();
+  solTryAutoRestoreName();
+}
+
+/* =====================================================================
+   سواپِ زنده‌ی سولانا — پیاده‌سازی
+   =====================================================================
+   بخش‌ها به همان ترتیبِ اسپک: base58/base64 دستی، Wallet Standard،
+   موجودی‌ها، quote، و خودِ سواپ (با چکِ پیش‌امضا). هیچ‌کدام از این‌ها
+   Base را لمس نمی‌کند؛ solanaReadOnly همان جداسازیِ همیشگی را نگه
+   می‌دارد. */
+
+/* ---- base58 دستی — فقط encode لازم است (امضا برای لینکِ Solscan)؛
+   آدرس‌ها را خودِ کیف‌پول از قبل به‌صورتِ base58 می‌دهد. ---- */
+const SOL_B58_ALPHABET="123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
+function solBs58Encode(bytes){
+  let zeros=0;
+  while(zeros<bytes.length&&bytes[zeros]===0)zeros++;
+  const digits=[0];
+  for(let i=zeros;i<bytes.length;i++){
+    let carry=bytes[i];
+    for(let j=0;j<digits.length;j++){
+      carry+=digits[j]<<8;
+      digits[j]=carry%58;
+      carry=(carry/58)|0;
+    }
+    while(carry>0){digits.push(carry%58);carry=(carry/58)|0;}
+  }
+  let out="";
+  for(let k=0;k<zeros;k++)out+="1";
+  for(let k=digits.length-1;k>=0;k--)out+=SOL_B58_ALPHABET[digits[k]];
+  return out;
+}
+function solBytesToB64(bytes){
+  let bin="";
+  for(let i=0;i<bytes.length;i++)bin+=String.fromCharCode(bytes[i]);
+  return btoa(bin);
+}
+function solB64ToBytes(b64){
+  const bin=atob(b64);
+  const out=new Uint8Array(bin.length);
+  for(let i=0;i<bin.length;i++)out[i]=bin.charCodeAt(i);
+  return out;
+}
+
+/* ---- چکِ پیش‌امضا — کیف‌پول هرگز صدا زده نمی‌شود مگر اینکه فی‌پیرِ همان
+   تراکنش دقیقاً همان کلیدِ عمومیِ حساب متصل باشد. compact-u16 دقیقاً طبق
+   قاعده‌ی سولانا: هر بایت ۷ بیتِ پایین‌تر + یک بیتِ ادامه. ---- */
+function solReadCompactU16(bytes,offset){
+  let value=0,size=0,shift=0;
+  for(;;){
+    if(offset+size>=bytes.length)throw new Error("truncated compact-u16");
+    const b=bytes[offset+size];
+    size++;
+    value|=(b&0x7f)<<shift;
+    if(!(b&0x80))break;
+    shift+=7;
+    if(size>3)throw new Error("bad compact-u16");
+  }
+  return{value,size};
+}
+function solParseFeePayer(bytes){
+  try{
+    let off=0;
+    const sig=solReadCompactU16(bytes,off);off+=sig.size;
+    off+=64*sig.value;                       // خودِ امضاها، هرکدام ۶۴ بایت
+    if(off>=bytes.length)return null;
+    if(bytes[off]&0x80)off+=1;                // پیشوندِ نسخه (v0) — فقط یک بایت
+    if(off+3>bytes.length)return null;
+    off+=3;                                   // هدرِ ۳-بایتی
+    const keys=solReadCompactU16(bytes,off);off+=keys.size;
+    if(keys.value<1)return null;
+    if(off+32>bytes.length)return null;
+    return bytes.slice(off,off+32);
+  }catch{return null;}
+}
+function solBytesEq(a,b){
+  if(!a||!b||a.length!==b.length)return false;
+  for(let i=0;i<a.length;i++)if(a[i]!==b[i])return false;
+  return true;
+}
+
+/* ---- Wallet Standard — کشف و اتصال ---- */
+function solWalletHasChain(w){return w&&Array.isArray(w.chains)&&w.chains.includes("solana:mainnet");}
+function solWalletUsable(w){
+  if(!solWalletHasChain(w))return false;
+  const f=w.features||{};
+  if(!f["standard:connect"])return false;
+  return !!(f["solana:signAndSendTransaction"]||f["solana:signTransaction"]);
+}
+function solRegisterWallets(...wallets){
+  for(const w of wallets){
+    if(!solWalletUsable(w))continue;
+    if(solWallets.some(x=>x.name===w.name))continue;
+    solWallets.push(w);
+  }
+  if($("solWalletOv").classList.contains("on"))solRenderWalletList();
+}
+let solWsInit=false;
+function solWalletStandardInit(){
+  if(solWsInit)return;                        // idempotent — هربار باز شدنِ صفحه دوباره ثبت نمی‌شود
+  solWsInit=true;
+  window.addEventListener("wallet-standard:register-wallet",(e)=>{
+    try{e.detail({register:solRegisterWallets});}catch{}
+  });
+  window.dispatchEvent(new CustomEvent("wallet-standard:app-ready",{detail:{register:solRegisterWallets}}));
+}
+let solLastWalletName=null;
+function solTryAutoRestoreName(){
+  // فقط نام — هرگز اتصالِ خودکار. اگر کاربر خودش دوباره وصل کند، همین نام
+  // بالای فهرست می‌آید.
+  try{solLastWalletName=localStorage.getItem(SOL_WALLET_LS_KEY)||null;}catch{solLastWalletName=null;}
+}
+function solRenderWalletList(){
+  const list=$("solWalList");
+  const rows=[...solWallets].sort((a,b)=>{
+    if(a.name===solLastWalletName)return -1;
+    if(b.name===solLastWalletName)return 1;
+    return a.name.localeCompare(b.name);
+  });
+  list.innerHTML=rows.length?rows.map((w,i)=>`<div class="walRow" data-i="${i}">
+    ${w.icon?`<img src="${esc(w.icon)}" alt="">`:`<span class="walFallback">${esc((w.name[0]||"?").toUpperCase())}</span>`}
+    <span class="walName">${esc(w.name)}</span>
+    <span class="walKind">Solana wallet</span></div>`).join("")
+    :`<div class="empty">No Solana wallet found. Install one that supports Wallet Standard `+
+      `(Phantom, Solflare, Backpack…) and reopen this.</div>`;
+  list.querySelectorAll(".walRow").forEach(el=>{
+    el.onclick=()=>{solCloseWalletPicker();solConnectWallet(rows[+el.dataset.i]);};
+  });
+}
+function solOpenWalletPicker(){solRenderWalletList();$("solWalletOv").classList.add("on");}
+function solCloseWalletPicker(){$("solWalletOv").classList.remove("on");}
+async function solConnectWallet(w){
+  try{
+    const res=await w.features["standard:connect"].connect();
+    const acc=res&&res.accounts&&res.accounts[0];
+    if(!acc)throw new Error("no account returned");
+    solWalletApi=w;solAccount=acc;
+    try{localStorage.setItem(SOL_WALLET_LS_KEY,w.name);}catch{}
+    solPaintWallet();
+    solRefreshBalances();
+    solScheduleQuote();
+  }catch(e){
+    if(isUserRejection(e)){solSetNotice(note("warn","<b>Cancelled in your wallet.</b> Nothing was connected."));return;}
+    solSetNotice(note("err","<b>Could not connect.</b> "+esc((e&&e.message)||"Unknown error")));
+  }
+}
+function solDisconnectWallet(){
+  try{
+    const f=solWalletApi&&solWalletApi.features;
+    if(f&&f["standard:disconnect"])f["standard:disconnect"].disconnect();
+  }catch{}
+  solWalletApi=null;solAccount=null;solBalSol=null;solBalTok=null;
+  $("solWalPop").classList.remove("on");
+  solPaintWallet();
+  solRenderReadout();
+  solUpdateSwapBtn();
+}
+function solPaintWallet(){
+  const btn=$("solConnectBtn");
+  if(solAccount){
+    btn.textContent=shortAddr(solAccount.address);
+    $("solWalAddr").textContent=shortAddr(solAccount.address);
+  }else{
+    btn.textContent="Connect Solana wallet";
+  }
+  solUpdateSwapBtn();
+}
+
+/* ---- موجودی‌ها — از طریقِ POST /sol/rpc، هرگز مستقیم به یک RPC ---- */
+async function solRpcCall(method,params){
+  const r=await withTimeout(fetch(location.origin+"/sol/rpc",{
+    method:"POST",headers:{"content-type":"application/json"},
+    body:JSON.stringify({method,params}),
+  }),9000);
+  const j=await r.json().catch(()=>null);
+  if(!r.ok||!j||j.error)throw new Error((j&&j.error)||("rpc:"+r.status));
+  return j.result;
+}
+async function solRefreshBalances(){
+  if(!solAccount)return;
+  const mint=solMintCur;
+  try{
+    const bal=await solRpcCall("getBalance",[solAccount.address,{commitment:"confirmed"}]);
+    solBalSol=bal&&typeof bal.value==="number"?bal.value/1e9:null;
+  }catch{solBalSol=null;}
+  try{
+    const r=await solRpcCall("getTokenAccountsByOwner",
+      [solAccount.address,{mint},{encoding:"jsonParsed"}]);
+    const accs=(r&&r.value)||[];
+    let sum=0,dec=null,found=false;
+    for(const a of accs){
+      const info=a&&a.account&&a.account.data&&a.account.data.parsed&&a.account.data.parsed.info;
+      const ta=info&&info.tokenAmount;
+      if(ta&&ta.uiAmountString!=null){
+        sum+=Number(ta.uiAmountString);
+        if(dec==null&&Number.isInteger(ta.decimals))dec=ta.decimals;
+        found=true;
+      }
+    }
+    solBalTok=found?sum:0;
+    if(dec!=null)solTokenDecimals=dec;         // اولویت با خودِ حسابِ توکن
+  }catch{solBalTok=null;}
+  solPaintBalance();
+  solSwapApplyGate();
+}
+function solPaintBalance(){
+  const b=$("solBal");
+  if(!solAccount){b.textContent="—";return;}
+  if(solSide==="buy")b.textContent=solBalSol!=null?solBalSol.toFixed(4)+" SOL":"—";
+  else b.textContent=solBalTok!=null?solBalTok.toLocaleString(undefined,{maximumFractionDigits:6})+" token":"—";
+}
+
+/* ---- کوت — دبانس ۴۰۰ms، شماره‌ی ترتیب برای دورریختنِ پاسخِ دیر ---- */
+function solSetNotice(h){$("solNotices").innerHTML=h||"";}
+function solScheduleQuote(){
+  clearTimeout(solQuoteTimer);
+  solQuoteTimer=setTimeout(solFetchQuote,400);
+}
+async function solFetchQuote(){
+  const seq=++solQuoteSeq;
+  const raw=($("solAmt").value||"").trim();
+  const amt=parseFloat(raw);
+  if(!raw||!(amt>0)){solQuote=null;solRenderReadout();solUpdateSwapBtn();return;}
+  if(solSide==="sell"&&solTokenDecimals==null){
+    solQuote=null;solRenderReadout();
+    solSetNotice(note("warn","Sell amount cannot be quoted yet — token decimals are unknown."));
+    solUpdateSwapBtn();
+    return;
+  }
+  const SOL_MINT_ADDR="So11111111111111111111111111111111111111112";
+  const inputMint=solSide==="buy"?SOL_MINT_ADDR:solMintCur;
+  const outputMint=solSide==="buy"?solMintCur:SOL_MINT_ADDR;
+  const decIn=solSide==="buy"?9:solTokenDecimals;
+  let amountRaw;
+  try{amountRaw=BigInt(Math.round(amt*Math.pow(10,decIn)));}catch{amountRaw=0n;}
+  if(!(amountRaw>0n)){solQuote=null;solRenderReadout();solUpdateSwapBtn();return;}
+  const q=new URLSearchParams({inputMint,outputMint,amount:String(amountRaw),slippageBps:String(slippageBps)});
+  try{
+    const r=await withTimeout(fetch(location.origin+"/sol/quote?"+q.toString(),
+      {headers:{accept:"application/json"}}),9000);
+    const j=await r.json().catch(()=>null);
+    if(seq!==solQuoteSeq)return;               // کوتِ دیرِ رسیده — دور ریخته می‌شود
+    if(!r.ok||!j||j.error){
+      solQuote=null;solRenderReadout();
+      solSetNotice(note("err","<b>Could not get a quote.</b> Try again in a moment."));
+      solUpdateSwapBtn();
+      return;
+    }
+    solQuote=j;
+    solSetNotice("");
+    solRenderReadout();
+    solUpdateSwapBtn();
+  }catch{
+    if(seq!==solQuoteSeq)return;
+    solQuote=null;solRenderReadout();
+    solSetNotice(note("err","<b>Could not get a quote.</b> Check your connection and try again."));
+    solUpdateSwapBtn();
+  }
+}
+function solRouteLabel(q){
+  if(!q||!Array.isArray(q.routePlan)||!q.routePlan.length)return "—";
+  const labels=[];
+  for(const step of q.routePlan){
+    const l=step&&step.swapInfo&&step.swapInfo.label;
+    if(l&&!labels.includes(l))labels.push(l);
+  }
+  return labels.length?labels.join(" → "):"—";
+}
+function solRenderReadout(){
+  if(!solQuote){
+    $("solOut").textContent="—";$("solMin").textContent="—";
+    $("solImpact").textContent="—";$("solRoute").textContent="—";
+    return;
+  }
+  const decOut=solSide==="buy"?solTokenDecimals:9;
+  const decMin=decOut==null?9:decOut;
+  const out=Number(solQuote.outAmount)/Math.pow(10,decMin);
+  const min=Number(solQuote.otherAmountThreshold)/Math.pow(10,decMin);
+  const impact=Number(solQuote.priceImpactPct)*100;
+  $("solOut").textContent=isFinite(out)?out.toLocaleString(undefined,{maximumFractionDigits:6})+(solSide==="buy"?" token":" SOL"):"—";
+  $("solMin").textContent=isFinite(min)?min.toLocaleString(undefined,{maximumFractionDigits:6})+(solSide==="buy"?" token":" SOL"):"—";
+  $("solImpact").textContent=isFinite(impact)?impact.toFixed(2)+"%":"—";
+  $("solRoute").textContent=solRouteLabel(solQuote);
+}
+
+/* ---- گیت‌کردنِ خرید روی حکمِ فروش — قاعده‌ی امنیتیِ صاحب سایت ---- */
+function solSwapApplyGate(){
+  const notice=$("tk-solNotice");
+  if(solVerdictV===null){
+    notice.hidden=false;
+    notice.textContent="We could not confirm this token can be sold back.";
+  }else{
+    notice.hidden=true;notice.textContent="";
+  }
+  const seg=$("solSideSeg");
+  const buyBtn=seg.querySelector('[data-side="buy"]');
+  // فقط دکمه‌ی سوییچ غیرفعال می‌شود — تبِ فعلی عوض نمی‌شود؛ خودِ کاربر اگر
+  // خواست دستی به Sell می‌رود. جابه‌جاییِ خودکار یعنی کاربری که تازه صفحه
+  // را باز کرده تبی را می‌بیند که خودش انتخاب نکرده.
+  buyBtn.disabled=solVerdictV==="nosell";
+  solUpdateSwapBtn();
+}
+function solOnSideChange(){
+  $("solLegLabel").textContent=solSide==="buy"?"You pay":"You sell";
+  $("solAmt").value="";
+  solQuote=null;
+  solPaintBalance();
+  solRenderReadout();
+  solUpdateSwapBtn();
+}
+function solUpdateSwapBtn(){
+  const btn=$("solSwapBtn");
+  if(solSwapBusy)return;                      // حین امضا/ارسال دست نمی‌زنیم
+  if(solVerdictV==="nosell"&&solSide==="buy"){
+    btn.disabled=true;btn.textContent="Buying is blocked: this token failed the sell-back check.";
+    return;
+  }
+  if(!solAccount){btn.disabled=true;btn.textContent="Connect wallet";return;}
+  if(!solQuote){btn.disabled=true;btn.textContent=solSide==="buy"?"Enter an amount":"Enter an amount";return;}
+  btn.disabled=false;
+  btn.textContent=solSide==="buy"?"Buy":"Sell";
+}
+function solMaxAmount(){
+  if(solSide==="sell"){
+    if(solBalTok==null)return;
+    $("solAmt").value=solBalTok>0?String(solBalTok):"";
+  }else{
+    if(solBalSol==null)return;
+    const leftover=0.01;                      // برای کارمزد/رِنت کنار گذاشته می‌شود
+    const v=Math.max(0,solBalSol-leftover);
+    $("solAmt").value=v>0?v.toFixed(6):"";
+  }
+  solScheduleQuote();
+}
+
+/* ---- خودِ سواپ — POST /sol/swap → چکِ پیش‌امضا → sign(&send) → پول‌کردن ---- */
+async function solPollStatus(sig){
+  const box=$("solNotices");
+  const started=Date.now();
+  while(Date.now()-started<60000){
+    await new Promise(r=>setTimeout(r,2000));
+    try{
+      const st=await solRpcCall("getSignatureStatuses",[[sig]]);
+      const row=st&&st.value&&st.value[0];
+      const status=row&&(row.confirmationStatus||null);
+      if(row&&row.err){
+        solSetNotice(note("err","<b>Failed.</b> The transaction landed but reverted. "+
+          `<a href="https://solscan.io/tx/${esc(sig)}" target="_blank" rel="noopener">View on Solscan</a>`));
+        return;
+      }
+      if(status==="confirmed"||status==="finalized"){
+        solSetNotice(note("ok","<b>Confirmed.</b> "+
+          `<a href="https://solscan.io/tx/${esc(sig)}" target="_blank" rel="noopener">View on Solscan</a>`));
+        solRefreshBalances();
+        return;
+      }
+    }catch{/* یک تلاشِ ناموفقِ پول‌کردن، خودش شکستِ تراکنش نیست — دوباره امتحان می‌شود */}
+  }
+  solSetNotice(note("warn","<b>Still pending — check Solscan.</b> "+
+    `<a href="https://solscan.io/tx/${esc(sig)}" target="_blank" rel="noopener">View on Solscan</a>`));
+}
+async function solDoSwap(){
+  if(solSwapBusy||!solAccount||!solQuote)return;
+  solSwapBusy=true;
+  const btn=$("solSwapBtn");
+  btn.disabled=true;btn.textContent="Building transaction…";
+  try{
+    const r=await withTimeout(fetch(location.origin+"/sol/swap",{
+      method:"POST",headers:{"content-type":"application/json"},
+      body:JSON.stringify({quoteResponse:solQuote,userPublicKey:solAccount.address}),
+    }),15000);
+    const j=await r.json().catch(()=>null);
+    if(!r.ok||!j||j.error||!j.swapTransaction)throw new Error((j&&j.error)||"could not build the transaction");
+
+    const txBytes=solB64ToBytes(j.swapTransaction);
+    const feePayer=solParseFeePayer(txBytes);
+    if(!feePayer||!solBytesEq(feePayer,solAccount.publicKey)){
+      solSetNotice(note("err","<b>Refused: the transaction's fee payer is not your wallet.</b>"));
+      return;
+    }
+
+    btn.textContent="Waiting for your wallet…";
+    const f=solWalletApi.features;
+    let sigB58=null;
+    if(f["solana:signAndSendTransaction"]){
+      const res=await f["solana:signAndSendTransaction"].signAndSendTransaction(
+        {account:solAccount,transaction:txBytes,chain:"solana:mainnet"});
+      const row=res&&res[0];
+      if(!row||!row.signature)throw new Error("wallet returned no signature");
+      sigB58=solBs58Encode(row.signature);
+    }else if(f["solana:signTransaction"]){
+      const res=await f["solana:signTransaction"].signTransaction(
+        {account:solAccount,transaction:txBytes,chain:"solana:mainnet"});
+      const row=res&&res[0];
+      if(!row||!row.signedTransaction)throw new Error("wallet returned no signed transaction");
+      const signedBytes=row.signedTransaction;
+      sigB58=solBs58Encode(signedBytes.slice(1,65)); // اولین امضا، بلافاصله بعدِ بایتِ compact-u16
+      btn.textContent="Sending…";
+      await solRpcCall("sendTransaction",[solBytesToB64(signedBytes),
+        {encoding:"base64",skipPreflight:false,maxRetries:5}]);
+    }else{
+      throw new Error("wallet supports neither signing feature");
+    }
+
+    solSetNotice(note("ok","<b>Submitted.</b> "+
+      `<a href="https://solscan.io/tx/${esc(sigB58)}" target="_blank" rel="noopener">View on Solscan</a>`));
+    $("solAmt").value="";solQuote=null;solRenderReadout();
+    solPollStatus(sigB58);
+  }catch(e){
+    if(isUserRejection(e)){solSetNotice(note("warn","<b>Cancelled in your wallet.</b> Nothing was sent."));}
+    else solSetNotice(note("err","<b>Swap failed.</b> "+esc((e&&e.message)||"Unknown error")));
+  }finally{
+    solSwapBusy=false;
+    solUpdateSwapBtn();
+  }
+}
+
+/* پاک‌کردنِ کاملِ وضعیت بینِ دو بارِ صفحه‌ی توکن — یک اتصال از توکنِ قبلی
+   نباید به توکنِ بعدی درز کند. */
+function solSwapReset(mint){
+  solMintCur=mint;
+  solTokenDecimals=null;solBalSol=null;solBalTok=null;
+  solSide="buy";solVerdictV=null;solQuote=null;
+  clearTimeout(solQuoteTimer);solQuoteTimer=null;
+  solSwapBusy=false;
+  $("solAmt").value="";
+  $("solLegLabel").textContent="You pay";
+  $("solSideSeg").querySelectorAll("button").forEach(b=>b.classList.toggle("on",b.dataset.side==="buy"));
+  solSetNotice("");
+  solRenderReadout();
+  solPaintBalance();
+  // یک اتصال از یک توکنِ سولانا به توکنِ بعدی *می‌ماند* — همان چیزی که
+  // کیف‌پولِ Base هم بینِ توکن‌ها حفظ می‌کند؛ فقط موجودی/کوت صفر می‌شوند.
+  if(solAccount){solRefreshBalances();solScheduleQuote();}
+  solPaintWallet();
 }
 
 function checkUrl(){
@@ -6511,9 +7024,33 @@ $("copyAddrBtn").onclick=(e)=>{
     setView("swap");
     $("amtIn").focus();
   };
+  /* ---- سواپِ زنده‌ی سولانا — عناصر همیشه در DOM هستند (روی Base مخفی)،
+     پس صدازدنِ wire() یک‌بار برای همیشه کافی است. ---- */
+  $("solSideSeg").querySelectorAll("button[data-side]").forEach(b=>{
+    b.onclick=()=>{
+      if(b.disabled)return;
+      if(solSide===b.dataset.side)return;
+      solSide=b.dataset.side;
+      $("solSideSeg").querySelectorAll("button").forEach(x=>x.classList.toggle("on",x===b));
+      solOnSideChange();
+    };
+  });
+  $("solAmt").oninput=()=>{solScheduleQuote();solUpdateSwapBtn();};
+  $("solMaxBtn").onclick=solMaxAmount;
+  $("solConnectBtn").onclick=()=>{
+    if(!solAccount){solOpenWalletPicker();return;}
+    $("solWalPop").classList.toggle("on");
+  };
+  $("solWalClose").onclick=solCloseWalletPicker;
+  $("solCopyAddrBtn").onclick=async()=>{
+    if(solAccount)await copyLink(solAccount.address,$("solCopyAddrBtn"));
+  };
+  $("solDisconnectBtn").onclick=solDisconnectWallet;
+  $("solSwapBtn").onclick=solDoSwap;
   document.addEventListener("keydown",e=>{
     if(e.key!=="Escape")return;closePicker();closeWalletPicker();
-    $("setPop").classList.remove("on");closeWalletMenu();});
+    $("setPop").classList.remove("on");closeWalletMenu();
+    solCloseWalletPicker();$("solWalPop").classList.remove("on");});
   let rt=null;
   addEventListener("resize",()=>{clearTimeout(rt);
     rt=setTimeout(()=>{if(chartData&&panel("plot").querySelector("svg"))drawChart(chartData);},180);});

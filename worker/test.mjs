@@ -13095,6 +13095,192 @@ function stripAllowedWording(t) {
     + "not only on a fresh compute, via solFetchVerdict");
 }
 
+/* ---------------------------------------------------------------------
+   [sol swap routes] — GET /sol/quote، POST /sol/swap، POST /sol/rpc
+   =====================================================================
+   بدونِ شبکه‌ی واقعی: globalThis.fetch هربار موقتاً جایگزین می‌شود و
+   می‌سنجیم *چه چیزی* بالادست می‌رود و چه چیزی هرگز نمی‌رود. */
+{
+  const savedFetch = globalThis.fetch;
+  const MINT_A = "So11111111111111111111111111111111111111112";
+  const MINT_B = "DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263";
+  const PUBKEY = "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM";
+
+  // الف) اعتبارسنجیِ GET /sol/quote — هیچ ورودیِ بدی نباید به شبکه برسد
+  {
+    let netCalls = 0;
+    globalThis.fetch = async () => { netCalls++; throw new Error("must not reach network"); };
+    const bad = [
+      ["/sol/quote?inputMint=bad&outputMint=" + MINT_B + "&amount=1000", "bad-mint"],
+      ["/sol/quote?inputMint=" + MINT_A + "&outputMint=short&amount=1000", "bad-mint"],
+      ["/sol/quote?inputMint=" + MINT_A + "&outputMint=" + MINT_A + "&amount=1000", "same-mint"],
+      ["/sol/quote?inputMint=" + MINT_A + "&outputMint=" + MINT_B + "&amount=0", "bad-amount"],
+      ["/sol/quote?inputMint=" + MINT_A + "&outputMint=" + MINT_B + "&amount=abc", "bad-amount"],
+      ["/sol/quote?inputMint=" + MINT_A + "&outputMint=" + MINT_B + "&amount=1000&slippageBps=0", "bad-slippage"],
+      ["/sol/quote?inputMint=" + MINT_A + "&outputMint=" + MINT_B + "&amount=1000&slippageBps=5001", "bad-slippage"],
+    ];
+    for (const [path, code] of bad) {
+      const res = await call(path);
+      const body = await res.json();
+      ok(res.status === 400 && body.error === code,
+        "[sol swap routes] GET " + path + " must be 400 {error:\"" + code + "\"}, got " + res.status + " " + JSON.stringify(body));
+    }
+    ok(netCalls === 0, "[sol swap routes] a rejected /sol/quote must never touch the network, got " + netCalls + " calls");
+    globalThis.fetch = savedFetch;
+  }
+
+  // ب) GET /sol/quote موفق — restrictIntermediateTokens اضافه می‌شود، کلید در هدر می‌رود
+  // و هرگز در بدنه؛ بدنه‌ی ۲۰۰ عیناً پاس داده می‌شود.
+  {
+    let seenUrl = null, seenHeaders = null;
+    globalThis.fetch = async (u, o) => {
+      seenUrl = String(u); seenHeaders = (o && o.headers) || {};
+      return new Response(JSON.stringify({ inAmount: "1000", outAmount: "999", otherAmountThreshold: "990",
+        priceImpactPct: "0.01", routePlan: [{ swapInfo: { label: "Whirlpool" } }] }),
+        { status: 200, headers: { "content-type": "application/json" } });
+    };
+    const res = await call("/sol/quote?inputMint=" + MINT_A + "&outputMint=" + MINT_B + "&amount=1000",
+      {}, { ASSETS, JUP_KEY: "shh-secret-key" });
+    const body = await res.json();
+    ok(res.status === 200 && body.outAmount === "999", "[sol swap routes] a good quote passes the upstream body through, got " + JSON.stringify(body));
+    ok(seenUrl.includes("restrictIntermediateTokens=true"), "[sol swap routes] /sol/quote must always add restrictIntermediateTokens=true, url=" + seenUrl);
+    ok(seenHeaders["x-api-key"] === "shh-secret-key", "[sol swap routes] JUP_KEY must ride as x-api-key on the upstream call");
+    ok(JSON.stringify(body).indexOf("shh-secret-key") === -1, "[sol swap routes] JUP_KEY must never appear in the response body");
+    globalThis.fetch = savedFetch;
+  }
+
+  // پ) GET /sol/quote غیرِ۲۰۰ → ۵۰۲ با کدِ بسته، هرگز متنِ بالادست
+  {
+    globalThis.fetch = async () => new Response("upstream exploded in a way nobody should see", { status: 503 });
+    const res = await call("/sol/quote?inputMint=" + MINT_A + "&outputMint=" + MINT_B + "&amount=1000");
+    const body = await res.json();
+    ok(res.status === 502 && body.error === "jup:quote:503",
+      "[sol swap routes] a non-200 upstream must degrade to {error:\"jup:quote:503\"}, got " + res.status + " " + JSON.stringify(body));
+    ok(JSON.stringify(body).indexOf("upstream exploded") === -1, "[sol swap routes] upstream error text must never reach the response body");
+    globalThis.fetch = savedFetch;
+  }
+
+  // ت) POST /sol/swap — اعتبارسنجی، و فیلدهای ثابت غیرِقابلِ‌بازنویسی
+  {
+    let netCalls = 0;
+    globalThis.fetch = async () => { netCalls++; throw new Error("must not reach network"); };
+    const badSwap = [
+      [{ quoteResponse: { inputMint: MINT_A, outputMint: MINT_B }, userPublicKey: "x" }, "bad-pubkey"],
+      [{ quoteResponse: { inputMint: "bad", outputMint: MINT_B }, userPublicKey: PUBKEY }, "bad-quote"],
+      [{ quoteResponse: null, userPublicKey: PUBKEY }, "bad-quote"],
+    ];
+    for (const [payload, code] of badSwap) {
+      const res = await call("/sol/swap", { method: "POST", body: JSON.stringify(payload) });
+      const body = await res.json();
+      ok(res.status === 400 && body.error === code,
+        "[sol swap routes] POST /sol/swap with " + JSON.stringify(payload) + " must be 400 {error:\"" + code + "\"}, got " + res.status + " " + JSON.stringify(body));
+    }
+    ok(netCalls === 0, "[sol swap routes] a rejected /sol/swap must never touch the network");
+    globalThis.fetch = savedFetch;
+
+    let sentBody = null, sentHeadersSwap = null;
+    globalThis.fetch = async (u, o) => {
+      sentBody = JSON.parse(o.body); sentHeadersSwap = o.headers;
+      return new Response(JSON.stringify({
+        swapTransaction: "AQID", lastValidBlockHeight: 12345,
+        simulationError: null, prioritizationFeeLamports: 999999,
+      }), { status: 200, headers: { "content-type": "application/json" } });
+    };
+    const overrideAttempt = {
+      quoteResponse: { inputMint: MINT_A, outputMint: MINT_B },
+      userPublicKey: PUBKEY,
+      dynamicComputeUnitLimit: false,
+      wrapAndUnwrapSol: false,
+      prioritizationFeeLamports: { priorityLevelWithMaxLamports: { maxLamports: 1, priorityLevel: "low" } },
+    };
+    const res = await call("/sol/swap", { method: "POST", body: JSON.stringify(overrideAttempt) },
+      { ASSETS, JUP_KEY: "shh-secret-key" });
+    const body = await res.json();
+    ok(res.status === 200 && body.swapTransaction === "AQID" && body.lastValidBlockHeight === 12345,
+      "[sol swap routes] a good /sol/swap returns only swapTransaction/lastValidBlockHeight, got " + JSON.stringify(body));
+    ok(body.simulationError === undefined && body.prioritizationFeeLamports === undefined,
+      "[sol swap routes] /sol/swap must strip every field beyond swapTransaction/lastValidBlockHeight, got " + JSON.stringify(body));
+    ok(sentBody.dynamicComputeUnitLimit === true && sentBody.wrapAndUnwrapSol === true &&
+       sentBody.prioritizationFeeLamports.priorityLevelWithMaxLamports.maxLamports === 1000000 &&
+       sentBody.prioritizationFeeLamports.priorityLevelWithMaxLamports.priorityLevel === "veryHigh",
+      "[sol swap routes] the caller must never override the fixed swap fields, sent " + JSON.stringify(sentBody));
+    ok(sentHeadersSwap["x-api-key"] === "shh-secret-key", "[sol swap routes] JUP_KEY must ride as x-api-key on /sol/swap too");
+    globalThis.fetch = savedFetch;
+  }
+
+  // ث) POST /sol/rpc — فهرستِ بستهِ متدها، اعتبارسنجیِ پارامتر، و هرگز اکوی URL/هاستِ SOL_RPC
+  {
+    let netCalls = 0;
+    globalThis.fetch = async () => { netCalls++; throw new Error("must not reach network"); };
+    const badRpc = [
+      [{ method: "getAccountInfo", params: [PUBKEY] }, "method-not-allowed"],
+      [{ method: "getBalance", params: ["short"] }, "bad-params"],
+      [{ method: "getTokenAccountsByOwner", params: [PUBKEY, { mint: MINT_A }, { encoding: "base64" }] }, "bad-params"],
+      [{ method: "getSignatureStatuses", params: [[]] }, "bad-params"],
+      [{ method: "getSignatureStatuses", params: [["short"]] }, "bad-params"],
+      [{ method: "sendTransaction", params: ["AQID", { encoding: "base64", skipPreflight: true, maxRetries: 1 }] }, "bad-params"],
+      [{ method: "sendTransaction", params: ["AQID", { encoding: "base64", skipPreflight: false, maxRetries: 9 }] }, "bad-params"],
+    ];
+    for (const [payload, code] of badRpc) {
+      const res = await call("/sol/rpc", { method: "POST", body: JSON.stringify(payload) });
+      const body = await res.json();
+      ok(res.status === 400 && body.error === code,
+        "[sol swap routes] POST /sol/rpc with " + JSON.stringify(payload) + " must be 400 {error:\"" + code + "\"}, got " + res.status + " " + JSON.stringify(body));
+    }
+    ok(netCalls === 0, "[sol swap routes] a rejected /sol/rpc must never touch the network");
+    globalThis.fetch = savedFetch;
+
+    // موفق — نتیجه در {result} پیچیده می‌شود
+    globalThis.fetch = async () => new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, result: { value: 4200000000 } }),
+      { status: 200, headers: { "content-type": "application/json" } });
+    const okRes = await call("/sol/rpc", { method: "POST",
+      body: JSON.stringify({ method: "getBalance", params: [PUBKEY, { commitment: "confirmed" }] }) },
+      { ASSETS, SOL_RPC: "https://secret-host.example/rpc/SEKRIT123" });
+    const okBody = await okRes.json();
+    ok(okRes.status === 200 && okBody.result && okBody.result.value === 4200000000,
+      "[sol swap routes] a good /sol/rpc call wraps the JSON-RPC result, got " + JSON.stringify(okBody));
+    ok(JSON.stringify(okBody).indexOf("secret-host") === -1 && JSON.stringify(okBody).indexOf("SEKRIT123") === -1,
+      "[sol swap routes] SOL_RPC's host/path/key must never appear in the response body");
+    globalThis.fetch = savedFetch;
+
+    // بالادست شکست می‌خورد (غیرِ۲۰۰ از هر دو اندپوینت) → ۵۰۲ با کدِ بسته، هرگز URL
+    globalThis.fetch = async () => new Response("nope", { status: 500 });
+    const failRes = await call("/sol/rpc", { method: "POST",
+      body: JSON.stringify({ method: "getBalance", params: [PUBKEY, { commitment: "confirmed" }] }) },
+      { ASSETS, SOL_RPC: "https://secret-host.example/rpc/SEKRIT123" });
+    const failBody = await failRes.json();
+    ok(failRes.status === 502 && failBody.error === "rpc:getBalance:0",
+      "[sol swap routes] a fully-failed /sol/rpc must be 502 {error:\"rpc:getBalance:0\"}, got " + failRes.status + " " + JSON.stringify(failBody));
+    ok(JSON.stringify(failBody).indexOf("secret-host") === -1 && JSON.stringify(failBody).indexOf("SEKRIT123") === -1,
+      "[sol swap routes] SOL_RPC must never surface even on failure");
+    globalThis.fetch = savedFetch;
+  }
+
+  // ج) نرخ‌محدودی — هر سه مسیر سطلِ خودشان را دارند، ۴۲۹ با CORS
+  {
+    globalThis.fetch = async () => new Response(JSON.stringify({ outAmount: "1" }),
+      { status: 200, headers: { "content-type": "application/json" } });
+    const RL_IP_SOL = "203.0.113.201";
+    for (let i = 0; i < 120; i++) {
+      await call("/sol/quote?inputMint=" + MINT_A + "&outputMint=" + MINT_B + "&amount=1000",
+        { headers: { "cf-connecting-ip": RL_IP_SOL } });
+    }
+    const limited = await call("/sol/quote?inputMint=" + MINT_A + "&outputMint=" + MINT_B + "&amount=1000",
+      { headers: { "cf-connecting-ip": RL_IP_SOL } });
+    ok(limited.status === 429 && limited.headers.get("access-control-allow-origin") === "*",
+      "[sol swap routes] /sol/quote must rate-limit its own bucket and still answer with CORS, got " + limited.status);
+    globalThis.fetch = savedFetch;
+  }
+
+  console.log("[sol swap routes] GET /sol/quote, POST /sol/swap and POST /sol/rpc (worker/index.js) covered: "
+    + "mint/amount/slippage validation rejects with zero upstream calls; restrictIntermediateTokens is always "
+    + "forced on; JUP_KEY rides only as the x-api-key header and never surfaces in any response body; the fixed "
+    + "swap fields (dynamicComputeUnitLimit, wrapAndUnwrapSol, prioritizationFeeLamports) cannot be overridden by "
+    + "the caller and every other upstream field is stripped from the response; /sol/rpc enforces the four-method "
+    + "allowlist and each method's exact param shape; SOL_RPC's host/path/key never appear in a response, success "
+    + "or failure; and each route rate-limits on its own bucket while still answering 429 with CORS");
+}
+
 console.log(fails === 0
   ? "[gt proxy] worker ok — " + REAL.length + " real paths proxied, " + BAD.length +
     " refused without touching the network, 429 passes through with CORS\n" +

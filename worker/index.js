@@ -1430,6 +1430,246 @@ export function jupKeyFor(env) {
   return (env && typeof env.JUP_KEY === "string" && env.JUP_KEY) || "";
 }
 
+/* =====================================================================
+   /sol/quote ، /sol/swap ، /sol/rpc — سوآپِ زنده‌ی سولانا
+   =====================================================================
+   سه مسیرِ تازه، هر سه پشتِ همان الگوی /gt: نرخ‌محدود با سطلِ خودشان،
+   cache-control: no-store، CORSِ باز، واژگانِ خطا بسته (هرگز متنِ بالادست).
+   کلیدها (JUP_KEY از jupKeyFor، SOL_RPC از solRpcsFor) فقط در هدر/به‌عنوانِ
+   اندپوینتِ داخلی به‌کار می‌روند و هرگز در بدنه‌ی پاسخ منعکس نمی‌شوند —
+   دقیقاً همان قاعده‌ای که diagVerdictRpc برای GET /vd/rpc رعایت می‌کند. */
+
+const SOL_CORS = {
+  "access-control-allow-origin": "*",
+  "access-control-allow-methods": "GET,POST,OPTIONS",
+  "access-control-max-age": "86400",
+};
+
+function solDone(status, body, extraHeaders) {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: Object.assign(
+      { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" },
+      SOL_CORS,
+      extraHeaders),
+  });
+}
+
+const SOL_JUP_TIMEOUT_MS = 4000;
+const SOL_RPC_TIMEOUT_MS = 6000;
+const SOL_SWAP_BODY_MAX = 65536; // ۶۴ کیلوبایت، طبق اسپک
+const SOL_RPC_BODY_MAX = 4096;
+
+function isSolMintStr(s) {
+  return typeof s === "string" && SOL_MINT.test(s);
+}
+// همان الفبای SOL_MINT، ولی برای رشته‌هایی که mint نیستند (آدرسِ کیف‌پول،
+// امضا) — طولِ مجاز جدا از هم پاس داده می‌شود، خودِ الگو یکی است.
+function isBase58Str(s, minLen, maxLen) {
+  return typeof s === "string" && s.length >= minLen && s.length <= maxLen &&
+    /^[1-9A-HJ-NP-Za-km-z]+$/.test(s);
+}
+function isAmountStr(s) {
+  if (typeof s !== "string" || !/^[0-9]{1,20}$/.test(s)) return false;
+  try { return BigInt(s) > 0n; } catch { return false; }
+}
+
+// همان jupCall الگوی worker/verdict_sol.js، ولی مستقل — این‌جا فقط برای
+// پراکسی‌کردنِ مستقیمِ بدنه/کدِ HTTPِ جوپیتر لازم است، نه محاسبه‌ی verdict.
+async function jupProxyFetch(env, path, init, timeoutMs) {
+  const jupKey = jupKeyFor(env);
+  const headers = Object.assign({}, init.headers);
+  if (jupKey) headers["x-api-key"] = jupKey;
+  const ac = new AbortController();
+  const timer = setTimeout(() => ac.abort(), timeoutMs);
+  let res;
+  try {
+    res = await fetch(VD_SOL_JUP_BASE + path, Object.assign({}, init, { headers, signal: ac.signal }));
+  } catch {
+    return { ok: false, status: 0, json: null };
+  } finally {
+    clearTimeout(timer);
+  }
+  let json = null;
+  try { json = await res.json(); } catch { /* بدنه‌ی غیرِ JSON پایین با json:null رد می‌شود */ }
+  return { ok: !!res.ok, status: res.status, json };
+}
+
+async function readJsonBody(request, maxBytes) {
+  const cl = Number(request.headers.get("content-length") || "0");
+  if (cl > maxBytes) return { error: "body-too-large" };
+  let text;
+  try { text = await request.text(); } catch { return { error: "bad-body" }; }
+  if (text.length > maxBytes) return { error: "body-too-large" };
+  let body;
+  try { body = JSON.parse(text); } catch { return { error: "bad-json" }; }
+  if (!body || typeof body !== "object") return { error: "bad-json" };
+  return { body };
+}
+
+/* GET /sol/quote?inputMint=&outputMint=&amount=&slippageBps= — پراکسیِ خامِ
+   Jupiter /swap/v1/quote. restrictIntermediateTokens همیشه اضافه می‌شود،
+   کاربر نمی‌تواند خاموشش کند. بدنه‌ی ۲۰۰ عیناً پاس داده می‌شود؛ غیرِ۲۰۰ →
+   ۵۰۲ با کدِ بسته، هرگز متنِ جوپیتر. */
+async function solQuoteRoute(request, url, env) {
+  if (!rateOk(request, "solq", RL_LIMIT, RL_WINDOW_MS))
+    return solDone(429, { error: "too many requests" }, { "retry-after": "60" });
+  if (request.method === "OPTIONS") return new Response(null, { status: 204, headers: SOL_CORS });
+  if (request.method !== "GET") return solDone(405, { error: "only GET" });
+
+  const inputMint = url.searchParams.get("inputMint") || "";
+  const outputMint = url.searchParams.get("outputMint") || "";
+  const amount = url.searchParams.get("amount") || "";
+  const slipRaw = url.searchParams.get("slippageBps");
+
+  if (!isSolMintStr(inputMint) || !isSolMintStr(outputMint)) return solDone(400, { error: "bad-mint" });
+  if (inputMint === outputMint) return solDone(400, { error: "same-mint" });
+  if (!isAmountStr(amount)) return solDone(400, { error: "bad-amount" });
+
+  let slippageBps = 100;
+  if (slipRaw != null) {
+    if (!/^[0-9]{1,4}$/.test(slipRaw)) return solDone(400, { error: "bad-slippage" });
+    slippageBps = Number(slipRaw);
+    if (!(slippageBps >= 1 && slippageBps <= 5000)) return solDone(400, { error: "bad-slippage" });
+  }
+
+  const q = new URLSearchParams({
+    inputMint, outputMint, amount, slippageBps: String(slippageBps),
+    restrictIntermediateTokens: "true",
+  });
+  const r = await jupProxyFetch(env, "/swap/v1/quote?" + q.toString(), { method: "GET" }, SOL_JUP_TIMEOUT_MS);
+  if (!r.ok || !r.json) return solDone(502, { error: "jup:quote:" + r.status });
+  return solDone(200, r.json);
+}
+
+/* POST /sol/swap {quoteResponse, userPublicKey} — فیلدهای ثابت
+   (dynamicComputeUnitLimit، wrapAndUnwrapSol، prioritizationFeeLamports)
+   همیشه همین‌جا تحمیل می‌شوند؛ کاربر هرچه در بدنه بفرستد رویشان اثر ندارد.
+   خروجی فقط swapTransaction/lastValidBlockHeight — هرچیزِ دیگری که
+   جوپیتر برگرداند دور ریخته می‌شود. */
+async function solSwapRoute(request, url, env) {
+  if (!rateOk(request, "sols", RL_LIMIT, RL_WINDOW_MS))
+    return solDone(429, { error: "too many requests" }, { "retry-after": "60" });
+  if (request.method === "OPTIONS") return new Response(null, { status: 204, headers: SOL_CORS });
+  if (request.method !== "POST") return solDone(405, { error: "only POST" });
+
+  const parsed = await readJsonBody(request, SOL_SWAP_BODY_MAX);
+  if (parsed.error) return solDone(parsed.error === "body-too-large" ? 413 : 400, { error: parsed.error });
+  const { quoteResponse, userPublicKey } = parsed.body;
+
+  if (!isBase58Str(userPublicKey, 32, 44)) return solDone(400, { error: "bad-pubkey" });
+  if (!quoteResponse || typeof quoteResponse !== "object" ||
+      !isSolMintStr(quoteResponse.inputMint) || !isSolMintStr(quoteResponse.outputMint))
+    return solDone(400, { error: "bad-quote" });
+
+  const payload = {
+    quoteResponse, userPublicKey,
+    dynamicComputeUnitLimit: true,
+    wrapAndUnwrapSol: true,
+    prioritizationFeeLamports: {
+      priorityLevelWithMaxLamports: { maxLamports: 1000000, priorityLevel: "veryHigh" },
+    },
+  };
+  const r = await jupProxyFetch(env, "/swap/v1/swap", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(payload),
+  }, SOL_JUP_TIMEOUT_MS);
+  if (!r.ok || !r.json || typeof r.json.swapTransaction !== "string")
+    return solDone(502, { error: "jup:swap:" + r.status });
+  return solDone(200, {
+    swapTransaction: r.json.swapTransaction,
+    lastValidBlockHeight: r.json.lastValidBlockHeight,
+  });
+}
+
+// فهرستِ بسته‌ی متدهای مجاز روی /sol/rpc — هرچیزِ دیگر، حتی یک متدِ
+// بی‌خطرِ خواندنی، رد می‌شود؛ افزودنِ متدِ تازه یعنی این فهرست دستی عوض شود.
+const SOL_RPC_METHODS_ALLOWED = new Set([
+  "getBalance", "getTokenAccountsByOwner", "getSignatureStatuses", "sendTransaction",
+]);
+
+function solRpcParamsOk(method, params) {
+  if (method === "getBalance") {
+    return Array.isArray(params) && params.length >= 1 && isBase58Str(params[0], 32, 44);
+  }
+  if (method === "getTokenAccountsByOwner") {
+    if (!Array.isArray(params) || params.length !== 3) return false;
+    const [owner, filt, enc] = params;
+    if (!isBase58Str(owner, 32, 44)) return false;
+    if (!filt || typeof filt !== "object" || Object.keys(filt).length !== 1 || !isSolMintStr(filt.mint)) return false;
+    if (!enc || typeof enc !== "object" || Object.keys(enc).length !== 1 || enc.encoding !== "jsonParsed") return false;
+    return true;
+  }
+  if (method === "getSignatureStatuses") {
+    if (!Array.isArray(params) || params.length < 1 || !Array.isArray(params[0])) return false;
+    const sigs = params[0];
+    if (sigs.length < 1 || sigs.length > 4) return false;
+    return sigs.every((s) => isBase58Str(s, 64, 100));
+  }
+  if (method === "sendTransaction") {
+    if (!Array.isArray(params) || params.length !== 2) return false;
+    const [tx, opts] = params;
+    if (typeof tx !== "string" || tx.length < 1 || tx.length > 1700) return false;
+    if (!/^[A-Za-z0-9+/]+=*$/.test(tx)) return false;
+    if (!opts || typeof opts !== "object") return false;
+    if (opts.encoding !== "base64" || opts.skipPreflight !== false) return false;
+    if (!Number.isInteger(opts.maxRetries) || opts.maxRetries < 0 || opts.maxRetries > 5) return false;
+    return true;
+  }
+  return false;
+}
+
+/* POST /sol/rpc {method, params} — تک‌تونلِ محدودِ RPCِ سولانا، عبورداده‌شده
+   از solRpcsFor(env) (همان SOL_RPC اختصاصی، اگر ست باشد، بعد فهرستِ
+   عمومی). فقط چهار متدِ بالا؛ هر پارامترِ دیگری رد می‌شود. اولین اندپوینتی
+   که ۲۰۰-JSON برگرداند نتیجه است — نه URL، نه هاست، فقط result/error در
+   پاسخ. */
+async function solRpcRoute(request, url, env) {
+  if (!rateOk(request, "solr", RL_LIMIT, RL_WINDOW_MS))
+    return solDone(429, { error: "too many requests" }, { "retry-after": "60" });
+  if (request.method === "OPTIONS") return new Response(null, { status: 204, headers: SOL_CORS });
+  if (request.method !== "POST") return solDone(405, { error: "only POST" });
+
+  const parsed = await readJsonBody(request, SOL_RPC_BODY_MAX);
+  if (parsed.error) return solDone(parsed.error === "body-too-large" ? 413 : 400, { error: parsed.error });
+  const { method, params } = parsed.body;
+
+  if (typeof method !== "string" || !SOL_RPC_METHODS_ALLOWED.has(method))
+    return solDone(400, { error: "method-not-allowed" });
+  if (!solRpcParamsOk(method, params)) return solDone(400, { error: "bad-params" });
+
+  const rpcs = solRpcsFor(env);
+  for (let i = 0; i < rpcs.length && i < 3; i++) {
+    const ac = new AbortController();
+    const timer = setTimeout(() => ac.abort(), SOL_RPC_TIMEOUT_MS);
+    let res;
+    try {
+      res = await fetch(rpcs[i], {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
+        signal: ac.signal,
+      });
+    } catch {
+      clearTimeout(timer);
+      continue;
+    }
+    clearTimeout(timer);
+    if (res.status !== 200) continue;
+    let json;
+    try { json = await res.json(); } catch { continue; }
+    if (!json || typeof json !== "object") continue;
+    if (json.error) {
+      const code = typeof json.error === "object" && typeof json.error.code === "number"
+        ? json.error.code : 200;
+      return solDone(502, { error: "rpc:" + method + ":" + code });
+    }
+    return solDone(200, { result: json.result });
+  }
+  return solDone(502, { error: "rpc:" + method + ":0" });
+}
+
 /* همان سوال، برای سولانا — بدونِ متادیتای GeckoTerminal، چون
    fetchVerdictSol چیزی از قیمت/دسیمال نمی‌خواهد (رفت‌وبرگشتش را جوپیتر با
    quote خودش حساب می‌کند، نه با priceUsd ما).
@@ -2687,6 +2927,12 @@ export default {
        به کد برسد، نه به فایل‌های ثابت. */
     if (url.pathname === "/vd" || url.pathname.startsWith("/vd/"))
       return diagVerdict(request, url, env, ctx);
+    /* سوآپِ زنده‌ی سولانا — هر سه پیش از /vd بررسی نمی‌شوند چون پیشوندشان
+       فرق دارد؛ ترتیب اینجا اهمیتی ندارد، فقط برای هم‌جواری با بقیه‌ی
+       مسیرهای تازه نگه داشته شده. */
+    if (url.pathname === "/sol/quote") return solQuoteRoute(request, url, env);
+    if (url.pathname === "/sol/swap") return solSwapRoute(request, url, env);
+    if (url.pathname === "/sol/rpc") return solRpcRoute(request, url, env);
     /* گزارشِ روزانه و نمای «تازه‌ها». نه فایل‌اند، نه بایندینگ ASSETS، پس
        باید مثلِ /gt و /ev و /vd همیشه به کد برسند — همان دلیلی که پایین‌تر
        برای robots.txt/sitemap.xml هم تکرار شده: خط Build در پنل فقط
