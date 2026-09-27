@@ -550,11 +550,14 @@ export const REPORT_CAP_PROBE = Object.freeze(["ok", "cap", "timeout", "threw"])
 /* واژه‌نامه‌ی بسته‌ی نامِ مرحله برای متر ساب‌ریکوئست (worker/index.js →
    makeSubMeter) — فقط اندازه‌گیریِ اینکه هر مرحله‌ی گذر چند ساب‌ریکوئست
    می‌خورد، هیچ رفتاری از خودِ گذر را عوض نمی‌کند. runReportPass زیرِ همین
-   فایل دقیقاً همین هشت نام را به meter.stage() می‌دهد، هیچ نامِ دیگری هرگز —
+   فایل این ۹ نام را به meter.stage() می‌دهد، هیچ نامِ دیگری هرگز —
    یک نامِ دست‌ساز/اشتباه‌تایپ‌شده فقط یعنی آن ساب‌ریکوئست‌ها زیرِ نامِ قبلی
-   می‌مانند، نه یک شکستِ خاموش. */
+   می‌مانند، نه یک شکستِ خاموش.
+   ⚠️ "counter" (۲۴ سپتامبر) از دلِ این فایل هرگز صدا زده نمی‌شود — کالرش
+   worker/index.js/withCounterProof است، درست وسطِ همان توکنِ "base-token"،
+   برای دو eth_callِ اثباتِ counter-sell وقتی حکم به sells:elsewhere رسیده. */
 export const REPORT_METER_STAGES = Object.freeze([
-  "pools", "base-token", "follow", "recheck", "sol-pools", "sol-token", "probe", "kv-write",
+  "pools", "base-token", "follow", "recheck", "sol-pools", "sol-token", "probe", "kv-write", "counter",
 ]);
 
 /* probeFetch یک تزریق است (کالر در worker/index.js یک fetch با HEAD/AbortController

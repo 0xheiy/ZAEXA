@@ -378,9 +378,19 @@ export function buildRealV4Probe(tokenAddr, outAddr, amountIn, v4Keys) {
   return out;
 }
 
-export function buildProbe(tokenAddr, outAddr, amountIn, opts) {
+/* هستهٔ ساختِ ردیف‌های حدسی — دقیقاً همان چیزی که buildProbe همیشه ساخته،
+   فقط این‌بار فیلترشده به venueIds (فهرستی از id های VD_VENUES). بدونِ این
+   جداسازی، fetchCounterSell (پایین‌تر همین فایل) مجبور بود همین منطقِ
+   رمزگذاری را یک‌بارِ دیگر خودش بنویسد — دقیقاً همان کلاسِ «دو مسیرِ
+   رمزگذاریِ جدا» که این فایل جای دیگر هم رویش هشدار داده (بالای فایل).
+   ⚠️ کلیدهای واقعیِ v4 (buildRealV4Probe) عمداً اینجا نیستند — آن‌ها همیشه
+   بیرون از این هسته، فقط داخلِ خودِ buildProbe اضافه می‌شوند؛ fetchCounterSell
+   هرگز به کلیدِ واقعیِ v4 نیاز ندارد (venueId اش هرگز uniswap-v4 نیست). */
+export function buildProbeFor(tokenAddr, outAddr, amountIn, venueIds) {
+  const allow = new Set(Array.isArray(venueIds) ? venueIds : []);
   const out = [];
   for (const row of VD_VENUES) {
+    if (!allow.has(row.id)) continue;
     if (row.kind === "CL_UINT24" || row.kind === "CL_INT24") {
       const sel = row.kind === "CL_UINT24" ? SEL_CL_UINT24 : SEL_CL_INT24;
       for (const key of row.keys) {
@@ -412,6 +422,15 @@ export function buildProbe(tokenAddr, outAddr, amountIn, opts) {
       }
     }
   }
+  return out;
+}
+
+// همه‌ی idهای VD_VENUES، به همان ترتیبِ جدول — buildProbe از همین برای
+// «همه‌ی صرافی‌ها» استفاده می‌کند، تا فقط یک فهرستِ id جایی نوشته شود.
+const ALL_VENUE_IDS = VD_VENUES.map((row) => row.id);
+
+export function buildProbe(tokenAddr, outAddr, amountIn, opts) {
+  const out = buildProbeFor(tokenAddr, outAddr, amountIn, ALL_VENUE_IDS);
 
   /* --- کلیدهای واقعیِ v4، پس از همه‌ی حدس‌ها ---
      ⚠️ opts غایب یا opts.v4Keys خالی یعنی خروجی باید بایت‌به‌بایت همان چیزی
@@ -1047,5 +1066,80 @@ export async function fetchVerdict(tokenAddr, meta, opts) {
     // "internal" می‌ماند.
     if (whyOut) whyOut.errName = (e && e.name) || "Error";
     return null; // این تابع هرگز نباید پرتاب کند
+  }
+}
+
+/* ---------------------------------------------------------------------
+   fetchCounterSell — اثباتِ مثبتِ دوجهشی، فقط برای «sells:elsewhere»
+   =========================================================================
+   ۲۴ سپتامبر — SN80: نقدینگیِ واقعی‌اش رویِ استخرِ SN80/TAO نشسته، نه
+   WETH/USDC؛ finalizeBaseNosell (worker/index.js) این حالت را با قاعده‌ی ۰
+   به "sells:elsewhere" تنزل می‌دهد چون ما هرگز از TAO نمی‌پرسیم. این تابع
+   دقیقاً همان یک ضدجفتِ اصلی را می‌پرسد: توکن→ضدجفت (فقط رویِ همان venueای
+   که آن استخر رویش زنده است)، بعد ضدجفت→WETH (همه‌ی venueها، بدونِ کلیدِ
+   واقعیِ v4). اگر هر دو جهش کوتِ مثبت بدهند، یک sellِ واقعی است.
+   🔴 positive-only محض: هر شکستی — ابهام، ریوِرت، کاناریِ مرده، مهلت، حتی
+   پرتاب — دقیقاً {v:null} می‌دهد، یعنی کالر همان "sells:elsewhere"ی امروز
+   را نگه می‌دارد. این تابع هرگز، تحتِ هیچ شرایطی، "nosell" نمی‌سازد — خودش
+   هیچ صرافیِ منفی‌ای را پروب نمی‌کند تا اثباتی برایش بسازد. */
+export async function fetchCounterSell(tokenAddr, counterAddr, venueId, meta, opts) {
+  try {
+    // venueId باید یکی از idهای VD_VENUES باشد و positive-only (uniswap-v4)
+    // نباشد — یک کوتِ حدسیِ v4 هیچ‌چیزی درباره‌ی این ضدجفتِ خاص اثبات نمی‌کند.
+    const kind = typeof venueId === "string" ? VENUE_KIND_BY_ID.get(venueId) : null;
+    if (!kind || VD_POSITIVE_ONLY[kind]) return { v: null };
+
+    const amt = sellAmountFrom(meta && meta.priceUsd, meta && meta.decimals);
+    if (amt == null) return { v: null };
+
+    const o = opts || {};
+    const fetchImpl = o.fetchImpl || fetch;
+    const now = o.now || Date.now;
+    const deadlineAt = o.deadlineAt;
+    const rpcs = o.rpcs || VD_RPCS;
+    const timeoutMs = o.timeoutMs || 900;
+    const collect = Array.isArray(o.collect) ? o.collect : null;
+
+    function deadlineHit() {
+      return deadlineAt != null && (now() >= deadlineAt || deadlineAt - now() < 400);
+    }
+
+    const canary = canaryCall();
+    let endpointsTried = 0;
+
+    for (const rpc of rpcs) {
+      if (endpointsTried >= VD_MAX_ENDPOINTS) break;
+      if (deadlineHit()) return { v: null };
+      endpointsTried++;
+
+      // جهشِ اول — فقط همان یک venue ای که استخرِ ضدجفت رویش زنده است.
+      const leg1Items = buildProbeFor(tokenAddr, counterAddr, amt, [venueId]);
+      const batch1 = await callBatch(fetchImpl, rpc, canary, leg1Items, timeoutMs, collect, "counter1");
+      if (batch1 == null) continue; // نامعلومِ سطحِ اتصال → اندپوینتِ بعدی
+
+      const canaryAlive =
+        batch1.canary && !batch1.canary.error && typeof batch1.canary.result === "string" &&
+        (() => { const v = decodeQuote("CL_UINT24", batch1.canary.result); return v != null && v > 0n; })();
+      if (!canaryAlive) continue; // کاناریِ مرده → اندپوینتِ بعدی
+
+      const best1 = bestPositive(batch1);
+      if (best1 == null || best1 <= 0n) return { v: null }; // جهشِ اول مثبت نداد → هرگز حدس نزن
+
+      if (deadlineHit()) return { v: null };
+      // جهشِ دوم — همان اندپوینت، همه‌ی venueها (بدونِ کلیدِ واقعیِ v4).
+      const leg2Items = buildProbe(counterAddr, WETH_ADDR, best1);
+      const batch2 = await callBatch(fetchImpl, rpc, canary, leg2Items, timeoutMs, collect, "counter2");
+      if (batch2 == null) return { v: null }; // شکستِ جهشِ دوم چیزی اثبات نمی‌کند، نه یک اندپوینتِ دیگر
+
+      const best2 = bestPositive(batch2);
+      if (best2 == null || best2 <= 0n) return { v: null };
+
+      // همان فرمولِ retPctFrom (stage="weth")، بدونِ نوشتنِ دوبارهٔ قاعده.
+      const ret = retPctFrom(batch2, "weth");
+      return { v: "sell", ret: typeof ret === "number" ? ret : undefined };
+    }
+    return { v: null };
+  } catch (e) {
+    return { v: null }; // این تابع هم هرگز نباید پرتاب کند
   }
 }

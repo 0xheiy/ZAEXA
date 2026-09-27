@@ -30,7 +30,8 @@ const UPSTREAM_KEYED = "https://api.coingecko.com/api/v3/onchain";
 
 import { ogTags, ogTitle, pickTokenMeta } from "./og.js";
 import { ogImageResponse } from "./og-image.js";
-import { fetchVerdict, VD_VENUES, VD_RPCS, VD_V4_STAGE_COUNTERS } from "./verdict.js";
+import { fetchVerdict, fetchCounterSell, VD_VENUES, VD_RPCS, VD_V4_STAGE_COUNTERS,
+  WETH_ADDR, USDC_ADDR } from "./verdict.js";
 import { EVM_ADDR, SOL_MINT, chainOf, gtNetworkOf } from "./chains.js";
 import {
   REPORT_DATE_RE, PAIRS_KEY_BASE, reportKey, utcDateOf, emptyReportDoc, runReportPass, publishGuardRow,
@@ -779,6 +780,51 @@ export function sellersElsewhere24Of(pools, tokenAddr, probed) {
   return sum;
 }
 
+/* ۲۴ سپتامبر — همان بدنه‌ای که sellersElsewhere24Of می‌بیند، این‌بار برای
+   پیداکردنِ *کدام* ضدجفت اصلی است — تا fetchCounterSell (worker/verdict.js)
+   بداند دقیقاً از کجا بپرسد. بزرگ‌ترینِ reserve_in_usd (رشته در بدنه‌ی
+   واقعی، پس همیشه با Number خوانده می‌شود) در میانِ استخرهایی که:
+     ۱. دکسشان از رویِ GT_DEX_TO_VENUE به یک venueِ پروب‌شونده نگاشته شود
+        (وگرنه fetchCounterSell اصلاً نمی‌داند کدام کوتر را بزند)،
+     ۲. رزروشان دست‌کم ده‌هزار دلار باشد (یک استخرِ خاک‌خورده دلیلِ کافی
+        برای دو eth_call اضافه نیست)،
+     ۳. ضدجفتشان نه خودِ توکن باشد نه WETH نه USDC — آن دو تا را همین حالا
+        می‌پرسیم؛ اگر آنجا نقدینگی داشت، حکم اصلاً به sells:elsewhere
+        نمی‌رسید.
+   شکلِ ناشناخته یا بدنه‌ی غیرِآرایه → null، هرگز پرتاب. */
+export function baseCounterTopOf(pools, tokenAddr) {
+  if (!Array.isArray(pools) || typeof tokenAddr !== "string") return null;
+  const t = tokenAddr.toLowerCase();
+  const weth = WETH_ADDR.toLowerCase();
+  const usdc = USDC_ADDR.toLowerCase();
+  const side = (rel) => {
+    const id = rel && rel.data && rel.data.id;
+    if (typeof id !== "string") return null;
+    const i = id.indexOf("_");
+    const a = i === -1 ? null : id.slice(i + 1).toLowerCase();
+    return a && /^0x[0-9a-f]{40}$/.test(a) ? a : null;
+  };
+  let best = null; // { counter, venue, reserve }
+  for (const pool of pools) {
+    try {
+      const dexId = pool && pool.relationships && pool.relationships.dex &&
+        pool.relationships.dex.data && pool.relationships.dex.data.id;
+      if (typeof dexId !== "string") continue;
+      const venue = GT_DEX_TO_VENUE[dexId];
+      if (!venue || !VD_VENUE_ID_SET.has(venue)) continue;
+      const rel = pool.relationships;
+      const b = side(rel && rel.base_token), q = side(rel && rel.quote_token);
+      if (!b || !q) continue;
+      const counter = b === t ? q : q === t ? b : null;
+      if (!counter || counter === t || counter === weth || counter === usdc) continue;
+      const reserve = Number(pool.attributes && pool.attributes.reserve_in_usd);
+      if (!Number.isFinite(reserve) || reserve < 10000) continue;
+      if (!best || reserve > best.reserve) best = { counter, venue, reserve };
+    } catch (e) { continue; } // یک استخرِ بدشکل فقط خودش رد می‌شود، نه کلِ حلقه
+  }
+  return best ? { counter: best.counter, venue: best.venue } : null;
+}
+
 async function baseVenueCoveredDetail(addr, env) {
   const r = await fetchBaseTokenPoolsRaw(addr, env);
   if (!r.ok) return { covered: null, why: r.why };
@@ -791,15 +837,18 @@ async function baseVenueCoveredDetail(addr, env) {
        استفاده می‌کند. null یعنی شکل را نشناختیم (نه صفر). */
     const sellersH1 = sellersH1Of(r.data);
     const sellersElsewhere24 = sellersElsewhere24Of(r.data, addr, V4_ALL_COUNTERS);
+    // همان بدنه، همان محاسبه — fetchCounterSell فقط وقتی صدا زده می‌شود که
+    // این مقدار چیزی جز null باشد (finalizeBaseNosell/ogFetchVerdictDetail).
+    const counterTop = baseCounterTopOf(r.data, addr);
     for (const pool of r.data) {
       const dexId = pool && pool.relationships && pool.relationships.dex &&
         pool.relationships.dex.data && pool.relationships.dex.data.id;
       if (typeof dexId !== "string") continue;
       if (dexId === "uniswap-v4-base") v4Listed = true;
       const venue = GT_DEX_TO_VENUE[dexId];
-      if (venue && VD_VENUE_ID_SET.has(venue)) return { covered: true, why: null, v4Listed, sellersH1, sellersElsewhere24 };
+      if (venue && VD_VENUE_ID_SET.has(venue)) return { covered: true, why: null, v4Listed, sellersH1, sellersElsewhere24, counterTop };
     }
-    return { covered: false, why: "cover:false", v4Listed, sellersH1, sellersElsewhere24 }; // بدنه سالم بود، ولی هیچ استخری روی یک صرافیِ پوشش‌داده‌شده نبود
+    return { covered: false, why: "cover:false", v4Listed, sellersH1, sellersElsewhere24, counterTop }; // بدنه سالم بود، ولی هیچ استخری روی یک صرافیِ پوشش‌داده‌شده نبود
   } catch (e) {
     return { covered: null, why: "cover:shape" }; // پرتاب → نامعلوم، هرگز false
   }
@@ -1092,7 +1141,56 @@ async function runV4Index(addr, env, diag) {
    دست‌نخورده می‌ماند. metaWhy اختیاری است: کالر (مثلاً scheduledReportPass)
    وقتی خودش متادیتا را جدا از ogFetchMetaDetail گرفته، دلیلِ نبودِ آن را
    همین‌جا پاس می‌دهد؛ نبودنش (undefined) یعنی "internal". */
-async function ogFetchVerdictDetail(addr, meta, deadlineAt, env, ctx, metaWhy) {
+/* ۲۴ سپتامبر — گذرِ اثباتِ counter، فقط روی «sells:elsewhere». finalizeBaseNosell
+   سه‌جا صدا زده می‌شود (پایین‌تر همین تابع)؛ این یک‌بار پیاده‌سازی، به‌جای سه
+   کپی، همانی است که خواسته شده. covered.counterTop از baseVenueCoveredDetail
+   می‌آید (همان یک تماسِ pools که پیش‌ازاین هم زده شده، هزینه‌ی اضافه‌ای ندارد).
+   meterHooks اختیاری است — فقط گذرِ ساعتی (scheduledReportPassInner) آن را
+   می‌دهد تا این دو تماس زیرِ سطلِ «counter» بنشینند و وقتی بودجه از قبل
+   خورده شده، اصلاً امتحان نشوند؛ نبودنش یعنی این تابع دقیقاً همان دو
+   eth_call‌ِ بدونِ متر را می‌زند که هر مسیرِ دیگر (مثلِ /vd) هم می‌زند. */
+export const COUNTER_PROOF_PASS_MAX_USED = 44; // ۵۰ منهای ۲ تماسِ اثبات منهای ۴ حاشیه
+
+export async function withCounterProof(result, addr, meta, deadlineAt, env, covered, meterHooks) {
+  if (!result || result.why !== "sells:elsewhere") return result;
+  if (!covered || !covered.counterTop) return result;
+  if (deadlineAt != null && deadlineAt - Date.now() < 400) return result; // مهلت کافی برای دو eth_callِ دیگر نیست
+  if (meterHooks && typeof meterHooks.capHit === "function") {
+    try { if (meterHooks.capHit()) return result; } catch (e) { /* رصدگر هرگز نباید حکم را بشکند */ }
+  }
+  /* 🔴 capHit فقط *بعد* از خوردن به سقف true می‌شود؛ گذرِ ساعتی تا ۴۹ از ۵۰ رفته است.
+     این اثبات دو زیر‌درخواستِ دیگر می‌خواهد، پس در گذر فقط وقتی اجرا می‌شود که تا اینجا
+     حداکثر COUNTER_PROOF_PASS_MAX_USED مصرف شده باشد — وگرنه ردیف‌های بعدی «نامعلومِ جعلی»
+     می‌شدند (همان باگِ ۲۱ سپتامبر). مسیرِ /vd این قلاب را ندارد و محدود نمی‌شود. */
+  if (meterHooks && typeof meterHooks.used === "function") {
+    try { if (!(meterHooks.used() <= COUNTER_PROOF_PASS_MAX_USED)) return result; } catch (e) { return result; }
+  }
+  const hasStage = meterHooks && typeof meterHooks.stage === "function";
+  if (hasStage) {
+    try { meterHooks.stage("counter"); } catch (e) { /* رصدگر هرگز نباید حکم را بشکند */ }
+  }
+  let proof;
+  try {
+    proof = await fetchCounterSell(addr, covered.counterTop.counter, covered.counterTop.venue, meta,
+      { deadlineAt, fetchImpl: fetch, rpcs: baseRpcsFor(env) });
+  } catch (e) {
+    proof = null; // fetchCounterSell خودش هم هرگز نباید پرتاب کند؛ این فقط احتیاط است
+  } finally {
+    // برگرداندنِ برچسبِ مرحله به "base-token" — کالرِ این تابع (فقط
+    // scheduledReportPassInner) همیشه از دلِ حلقه‌ی base-token صدایش
+    // می‌زند؛ بدونِ این، meter.tokenEnd() بعدِ همین توکن دیگر stage_ را
+    // "base-token" نمی‌دید و هزینه‌ی این توکن از آمارِ baseTokens می‌افتاد.
+    if (hasStage) {
+      try { meterHooks.stage("base-token"); } catch (e) { /* فقط رصد */ }
+    }
+  }
+  if (proof && proof.v === "sell") {
+    return { v: "sell", why: null, ret: typeof proof.ret === "number" ? proof.ret : undefined, via: "counter" };
+  }
+  return result; // هر شکستی، دقیقاً همان {v:null, why:"sells:elsewhere"} امروز
+}
+
+async function ogFetchVerdictDetail(addr, meta, deadlineAt, env, ctx, metaWhy, meterHooks) {
   if (!meta) return { v: null, why: typeof metaWhy === "string" ? metaWhy : "internal" }; // بدونِ متادیتا حتی یک تلاش هم لازم نیست
   const chain = chainOf(addr);
   if (chain === "solana") {
@@ -1175,7 +1273,7 @@ async function ogFetchVerdictDetail(addr, meta, deadlineAt, env, ctx, metaWhy) {
      می‌ماند)؛ این با v4PoolsEmpty که هرگز پرتاب نمی‌کند تضمین می‌شود. */
   if (covered.covered === true) {
     const empty = await v4PoolsEmpty(addr, env, deadlineAt);
-    return finalizeBaseNosell(empty, covered, false);
+    return withCounterProof(finalizeBaseNosell(empty, covered, false), addr, meta, deadlineAt, env, covered, meterHooks);
   }
   /* 🔴 استثنای پوشش (۱۹ شهریور، با تصمیمِ صریحِ حسام): وقتی خودِ حکمِ منفی از
      شاهدِ «استخرِ واقعیِ این توکن هیچ اندازه‌ای را پر نمی‌کند» آمده باشد، ما
@@ -1186,7 +1284,8 @@ async function ogFetchVerdictDetail(addr, meta, deadlineAt, env, ctx, metaWhy) {
      توکن در درخواستِ بعدی جوابِ دیگری می‌گرفت. */
   if (cacheOut.v4Proof === true) {
     const empty = await v4PoolsEmpty(addr, env, deadlineAt);
-    return finalizeBaseNosell(empty, covered, false); // شاهدِ واقعی از خودِ استخر: «هیچ اندازه‌ای پر نمی‌شود»
+    // شاهدِ واقعی از خودِ استخر: «هیچ اندازه‌ای پر نمی‌شود»
+    return withCounterProof(finalizeBaseNosell(empty, covered, false), addr, meta, deadlineAt, env, covered, meterHooks);
   }
   /* 🔴 استثنای پوششِ v4 (۲۹ شهریور): بالادست برای همین توکن یک استخرِ
      uniswap-v4-base *دید* (v4Listed) و ما دست‌کم یک کلیدِ واقعیِ ایندکس‌شده
@@ -1197,7 +1296,7 @@ async function ogFetchVerdictDetail(addr, meta, deadlineAt, env, ctx, metaWhy) {
      شاخه نمی‌رسد و همیشه نامعلوم می‌ماند — یک چکِ ناکام هرگز اتهام نیست. */
   if (covered.covered === false && covered.v4Listed === true && cacheOut.v4Keyed === true) {
     const empty = await v4PoolsEmpty(addr, env, deadlineAt);
-    return finalizeBaseNosell(empty, covered, true);
+    return withCounterProof(finalizeBaseNosell(empty, covered, true), addr, meta, deadlineAt, env, covered, meterHooks);
   }
   return { v: null, why: covered.why || "cover:shape" };
 }
@@ -1678,12 +1777,13 @@ async function diagVerdict(request, url, env, ctx) {
   // ret هم دقیقاً همین قاعده را دارد، ولی برعکس: فقط کنارِ v==="sell" —
   // چقدر از صد دلارِ فرضی برگشت، نه اینکه فروش رخ داد یا نه؛ nosell/null
   // هرگز ret نمی‌گیرد.
-  const { v, why, cause, ret } = await ogFetchVerdictDetail(addr, meta, t0 + OG_BUDGET_MS, env, ctx, metaWhy);
+  const { v, why, cause, ret, via } = await ogFetchVerdictDetail(addr, meta, t0 + OG_BUDGET_MS, env, ctx, metaWhy);
   return vdDone(200, {
     v, ms: Date.now() - t0,
     why: v === null ? why : undefined,
     cause: v === "nosell" ? cause : undefined,
     ret: v === "sell" && typeof ret === "number" ? ret : undefined,
+    via: v === "sell" && via === "counter" ? "counter" : undefined,
   });
 }
 
@@ -2203,6 +2303,7 @@ function makeSubMeter() {
     // می‌کند و خطایش را می‌گیرد) — همان تشخیصی که fetch بالا رویِ خودش دارد.
     noteThrow,
     isCapHit() { return capHit_; },
+    get total() { return total; },
     get capAt() { return capAt_; },
     stage(name) {
       // 🔴 فقط از REPORT_METER_STAGES — یک نامِ ناشناخته گذرِ آینده را
@@ -2401,7 +2502,8 @@ async function scheduledReportPassInner(env, ctx, opts, meter) {
             if (!entry.found) await runV4Index(addr, env);
           } catch (e) { /* ایندکس هرگز نباید گذرِ گزارش را بشکند */ }
         }
-        return ogFetchVerdictDetail(addr, meta, Date.now() + OG_BUDGET_MS, env, ctx, metaWhy);
+        return ogFetchVerdictDetail(addr, meta, Date.now() + OG_BUDGET_MS, env, ctx, metaWhy,
+          { stage: (name) => meter.stage(name), capHit: () => meter.isCapHit(), used: () => meter.total });
       },
       now: () => Date.now(),
       sleep: (ms) => new Promise((r) => setTimeout(r, ms)),

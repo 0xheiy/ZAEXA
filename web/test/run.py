@@ -819,11 +819,11 @@ def check_dark_tokens_unchanged():
 
 def check_light_frames():
     """پروب [light frames] — ۲۷ سپتامبر: کادرِ تیره‌ترِ ۲۶ سپتامبر (خط‌های #d7dce4/#c3cad4 و
-    حلقه‌ی --ring) به خواستِ حسام برداشته شد؛ به‌جایش زمینه‌ی تمِ روشن در اپ و /pairs یک پله
-    تیره‌تر شد (#f4f5f7 → #e6e9ee) تا کارت‌های سفید جدا دیده شوند. خط‌ها همان قبلی‌اند."""
+    حلقه‌ی --ring) برداشته شد؛ زمینه‌ی تیره‌تر (۲۷ سپتامبر) هم امتحان و برگردانده شد — حسام:
+    ایراد از مانیتور بود. تمِ روشن همان رقم‌های اولیه است، بدونِ حلقه."""
     index_src = open(os.path.join(HERE, "..", "index.html"), encoding="utf-8").read()
     pairs_src = open(os.path.join(HERE, "..", "pairs.html"), encoding="utf-8").read()
-    want = {"bg": "#e6e9ee", "card": "#fff", "line": "#e8eaee", "line2": "#d6dae1"}
+    want = {"bg": "#f4f5f7", "card": "#fff", "line": "#e8eaee", "line2": "#d6dae1"}
     idx_light = merged_root_decls(index_src, "light")
     pairs_light = merged_root_decls(pairs_src)
     for name, decls in (("index.html", idx_light), ("pairs.html", pairs_light)):
@@ -833,7 +833,7 @@ def check_light_frames():
         assert "ring" not in decls, "%s light theme still declares --ring (the rejected darker frame)" % name
     assert not re.search(r':root\[data-theme="light"\]\s*\.card\s*\{[^}]*box-shadow', index_src), \
         "index.html still has a light-only .card box-shadow override (the rejected 1px ring)"
-    print("[light frames] light --bg=%s (app and /pairs), --line/--line2 back to %s/%s, no ring"
+    print("[light frames] light --bg=%s (app and /pairs), --line/--line2 %s/%s, no ring"
           % (want["bg"], want["line"], want["line2"]))
 
 
@@ -3551,7 +3551,7 @@ async def main():
         await lf_page.close()
         print("[light frames] computed — light body=%s card=%s ring=%s; dark body=%s"
               % (lf["lightBg"], lf["cardBg"], "0px 0px 0px 1px" in lf["light"], lf["darkBg"]))
-        assert lf["lightBg"] == "rgb(230, 233, 238)", "light body background is %r, expected #e6e9ee" % lf["lightBg"]
+        assert lf["lightBg"] == "rgb(244, 245, 247)", "light body background is %r, expected #f4f5f7" % lf["lightBg"]
         assert lf["cardBg"] == "rgb(255, 255, 255)", "light card is %r, expected white" % lf["cardBg"]
         assert "0px 0px 0px 1px" not in lf["light"], "light .card still carries the rejected 1px ring: %r" % lf["light"]
         assert lf["darkBg"] == "rgb(11, 13, 19)", "dark body background moved: %r (must stay #0b0d13)" % lf["darkBg"]
@@ -9777,6 +9777,34 @@ async def main():
                     "[header parity] %r top differs by more than 1px at %s: app=%s pairs=%s"
                     % (hp_sel, hp_key, a, pr))
             assert not hp_r["errs"], "[header parity] errors at %s: %s" % (hp_key, hp_r["errs"])
+
+        # ---- [header no overlap] ۲۷ سپتامبر: در حالتِ دسکتاپِ مرورگرِ گوشی (~۹۸۰px) خوشه‌ی
+        # راست روی «New pairs» می‌افتاد. در هر پهنا از ۹۶۱ تا ۱۲۸۰، در اپ و /pairs، لوگو،
+        # ناوبری و خوشه‌ی راست نباید هم‌پوشانی کنند (فاصله ≥ ۴px). ----
+        HNO_JS = """() => {
+            const r = s => { const e = document.querySelector(s); if (!e) return null;
+                             const b = e.getBoundingClientRect(); return [b.left, b.right]; };
+            return { logo: r('header > .logo'), nav: r('header > .nav'), right: r('header > .hdrRight'),
+                     sw: document.documentElement.scrollWidth, w: innerWidth };
+        }"""
+        hno = []
+        for hno_w in (961, 980, 1024, 1100, 1180, 1280):
+            vp = {"width": hno_w, "height": 800}
+            hpa = await b.new_page(viewport=vp)
+            await hpa.goto("http://127.0.0.1:%d/" % port)
+            await hpa.wait_for_timeout(300)
+            ga = await hpa.evaluate(HNO_JS)
+            await hpa.close()
+            hpp, _hp_e = await open_pairs({"chain": "base", "rows": [], "store": True}, viewport=vp)
+            gp = await hpp.evaluate(HNO_JS)
+            await hpp.close()
+            for page_name, g in (("app", ga), ("pairs", gp)):
+                assert g["logo"] and g["nav"] and g["right"], "[header no overlap] %s@%d missing parts: %s" % (page_name, hno_w, g)
+                assert g["logo"][1] + 4 <= g["nav"][0], "[header no overlap] %s@%d logo runs into nav: %s" % (page_name, hno_w, g)
+                assert g["nav"][1] + 4 <= g["right"][0], "[header no overlap] %s@%d nav runs under the right cluster: %s" % (page_name, hno_w, g)
+                assert g["sw"] <= g["w"], "[header no overlap] %s@%d horizontal scroll: %s" % (page_name, hno_w, g)
+                hno.append("%s@%d gap=%d" % (page_name, hno_w, round(g["right"][0] - g["nav"][1])))
+        print("[header no overlap] " + ", ".join(hno))
 
         # ۲) بدونِ دکمه‌ی مستقلِ تم؛ چیپِ شبکه با برچسبِ زنجیره‌ی فعال.
         ppg2, perrs2 = await open_pairs({"chain": "base", "rows": [SELL_ROW], "store": True})

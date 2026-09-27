@@ -10697,9 +10697,18 @@ function stripAllowedWording(t) {
      "sub.baseTokens must carry one entry per Base token in check order, got " + JSON.stringify(sub.baseTokens));
   ok(JSON.stringify(sub.solTokens) === JSON.stringify([2]),
      "sub.solTokens must carry one entry per Solana token in check order, got " + JSON.stringify(sub.solTokens));
-  ok(JSON.stringify(Object.keys(sub.byStage).sort()) === JSON.stringify([...REPORT_METER_STAGES].sort()),
-     "this fixture must exercise every stage in the closed REPORT_METER_STAGES vocabulary at least once, got " +
-     JSON.stringify(Object.keys(sub.byStage).sort()));
+  // 🔴 ۲۴ سپتامبر — "counter" به REPORT_METER_STAGES اضافه شد، ولی صاحبش
+  // خودِ runReportPass نیست: worker/index.js/withCounterProof آن را فقط
+  // *بیرونِ* این تابع، دورِ فراخوانیِ verdictOf، صدا می‌زند (فقط وقتی حکم به
+  // sells:elsewhere برسد). این fixture اینجا verdictOf خودش را تزریق
+  // می‌کند و هرگز از آن مسیر رد نمی‌شود، پس این‌جا دقیقاً همان هشت مرحله‌ای
+  // که همیشه بوده باید دیده شود — نه ۹تا؛ پوششِ خودِ "counter" در بخشِ
+  // [counter sell] پایین‌تر است.
+  ok(JSON.stringify(Object.keys(sub.byStage).sort()) ===
+     JSON.stringify(REPORT_METER_STAGES.filter((s) => s !== "counter").sort()),
+     "this fixture must exercise every runReportPass-owned stage in the closed REPORT_METER_STAGES "
+     + "vocabulary at least once (all but \"counter\", which only worker/index.js's withCounterProof "
+     + "ever sets), got " + JSON.stringify(Object.keys(sub.byStage).sort()));
 
   // ت) هیچ مسیر/کوئری/رشته‌ی شبیه‌کلید هرگز در سندِ ذخیره‌شده نمی‌نشیند —
   // فقط hostname/نامِ مرحله/عدد. قاعده‌ی «رشته‌ی شبیه‌کلید»: ۲۰+ نویسه‌ی
@@ -12326,6 +12335,287 @@ function stripAllowedWording(t) {
   console.log("[log rpc] GET /vd/logrpc probes every log RPC candidate plus env.BASE_RPC from inside the Worker "
     + "(head, 1000 recent blocks, 1000 old blocks, 10 blocks only after an rpc error), hostname and numeric codes only, "
     + "under " + idx.LOGRPC_SUBREQ_CAP + " subrequests; the indexer itself is unchanged");
+}
+
+/* ---- ۴۲. اثباتِ counter-sell — [counter sell] ----
+   ۲۴ سپتامبر — SN80 (0x6f63…4378): finalizeBaseNosell به "sells:elsewhere"
+   می‌رسد چون نقدینگیِ واقعی‌اش رویِ SN80/TAO (aerodrome-slipstream →
+   aerodrome-cl-v1) نشسته، نه WETH/USDC. این بخش fetchCounterSell
+   (worker/verdict.js) و baseCounterTopOf/withCounterProof (worker/index.js)
+   را می‌سنجد: توکن→ضدجفت (فقط همان venue)، بعد ضدجفت→WETH (همه‌ی
+   venueها) — مثبتِ هر دو یعنی "sell"، هر شکستی دقیقاً همان
+   {v:null, why:"sells:elsewhere"}ِ امروز می‌ماند. */
+{
+  const { UPSTREAM_KEYED: UK_CS, UPSTREAM_FREE: UF_CS, baseCounterTopOf } = await import("./index.js");
+  // SN80/TAO خودشان فقط برایِ سنجشِ مستقیمِ baseCounterTopOf/fetchCounterSell
+  // به کار می‌روند؛ سناریوهای سرتاسری هرکدام آدرسِ توکنِ خودشان را می‌سازند
+  // (ADDR زیر)، چون تصویرِ استخر باید دقیقاً همان توکنی را که /vd می‌پرسد
+  // به‌عنوانِ base_token داشته باشد — وگرنه sellersElsewhere24Of/baseCounterTopOf
+  // آدرسی را می‌بینند که هیچ‌کدامِ استخرها به آن اشاره نمی‌کنند.
+  const SN80C = "0x6f63d869011f95274498023b4abfc00b30c34378";
+  const TAOC = "0xf3081494b87e8d5fb7960f066e931d1d0e6e3d67";
+  const USDC_C = vd.USDC_ADDR.toLowerCase();
+
+  const wC = (n) => BigInt(n).toString(16).padStart(64, "0");
+  const mkC = (n) => "0x" + wC(n) + wC(0) + wC(0) + wC(0);
+  const jsonResC = (body) => new Response(JSON.stringify(body), {
+    status: 200, headers: { "content-type": "application/json" },
+  });
+  // همان الگوی cleanNosellRowX — کدِ ۳ برای SOLIDLY، "0x" برای بقیه.
+  const cleanC = (r) => (isSolidlyReqId(r.id) ? { id: r.id, error: { code: 3 } } : { id: r.id, result: "0x" });
+
+  const gtMetaC = () => new Response(JSON.stringify({ data: { attributes: {
+    name: "SN80-like", symbol: "SN80", total_reserve_in_usd: "1000", decimals: 18, price_usd: "0.05",
+  } } }), { status: 200, headers: { "content-type": "application/json" } });
+
+  // shape واقعی: reserve_in_usd رشته، dexِ aerodrome-slipstream، شناسه‌ها base_0x…
+  const gpC = (dex, base, quote, reserve, h24Sellers) => ({
+    relationships: { dex: { data: { id: dex } }, base_token: { data: { id: "base_" + base } },
+      quote_token: { data: { id: "base_" + quote } } },
+    attributes: { reserve_in_usd: reserve, transactions: { h1: { sellers: 0 }, h24: { sellers: h24Sellers } } },
+  });
+  // pools body برای یک توکنِ دلخواه (tokenAddr) با ضدجفتِ TAOC، هم‌شکلِ SN80.
+  const sn80PoolsFor = (tokenAddr, reserve) => new Response(JSON.stringify({ data: [
+    gpC("aerodrome-slipstream", tokenAddr, TAOC, reserve, 25),
+    gpC("uniswap-v4-base", tokenAddr, USDC_C, "0", 0),
+  ] }), { status: 200, headers: { "content-type": "application/json" } });
+
+  // فراخوانیِ آرایه‌ای را بر اساسِ اینکه tokenIn/outAddرِ آن کدام است طبقه‌بندی
+  // می‌کند — هر دو آدرس مستقیم داخلِ calldata نشسته‌اند، پس یک substring کافی
+  // است؛ leg1 (توکن→TAO) هم آدرسِ توکن هم TAO دارد، leg2 (TAO→WETH) فقط TAO دارد.
+  function classify(reqs, tokenHex) {
+    const has = (hex) => reqs.some((r) => r.id >= 1 && String(r.params[0].data).toLowerCase().includes(hex));
+    const taoHex = TAOC.slice(2).toLowerCase();
+    if (has(tokenHex) && has(taoHex)) return "leg1";
+    if (has(taoHex)) return "leg2";
+    return "main";
+  }
+
+  function makeDispatch({ tokenAddr, leg1Positive = true, leg2Positive = true, poolsRes, counters }) {
+    const tokenHex = tokenAddr.slice(2).toLowerCase();
+    return async (url, init) => {
+      const u = String(url);
+      if (u.endsWith("/pools")) { if (counters) counters.pools = (counters.pools || 0) + 1; return poolsRes(); }
+      if (u.startsWith(UK_CS) || u.startsWith(UF_CS)) { if (counters) counters.meta = (counters.meta || 0) + 1; return gtMetaC(); }
+      const reqs = JSON.parse(init.body);
+      if (!Array.isArray(reqs)) {
+        return jsonResC({ jsonrpc: "2.0", id: reqs.id, result: "0x" + "0".repeat(64) }); // v4PoolsEmpty، نباید اصلاً پیش بیاید (بدونِ ZX_KV)
+      }
+      const kind = classify(reqs, tokenHex);
+      if (counters) {
+        counters[kind] = (counters[kind] || 0) + 1;
+        // اندازه‌ی واقعیِ همان batchی که fetchCounterSell فرستاد — leg1 باید
+        // همیشه دقیقاً ۶ باشد (کاناری + ۵ ردیفِ همان یک venue)؛ اگر روزی
+        // buildProbe (همه‌ی venueها) به‌جای buildProbeFor(single) به کار
+        // برود، این عدد فوراً بزرگ‌تر می‌شود و [buildProbeFor size] رد می‌کند.
+        if (kind === "leg1") counters.leg1Size = reqs.length;
+      }
+      if (kind === "leg1") {
+        return jsonResC(reqs.map((r) => (r.id === 0 ? { id: 0, result: mkC(20000000) }
+          : leg1Positive ? { id: r.id, result: mkC(999) } : cleanC(r))));
+      }
+      if (kind === "leg2") {
+        return jsonResC(reqs.map((r) => (r.id === 0 ? { id: 0, result: mkC(20000000) }
+          : leg2Positive && r.id === 1 ? { id: r.id, result: mkC("50000000000000000") } : cleanC(r))));
+      }
+      return jsonResC(reqs.map((r) => (r.id === 0 ? { id: 0, result: mkC(20000000) } : cleanC(r))));
+    };
+  }
+
+  async function askC(addr, env_, dispatch, ipTail) {
+    const saved = globalThis.fetch;
+    globalThis.fetch = dispatch;
+    const res = await call("/vd/" + addr, { headers: { "cf-connecting-ip": "198.51.100." + ipTail } }, env_);
+    const body = await res.json();
+    globalThis.fetch = saved;
+    return body;
+  }
+
+  // الف) هر دو جهش مثبت → sell با ret متناهی و via:"counter"، سرتاسری از /vd
+  {
+    const ADDR = "0x" + "c1".repeat(20);
+    const env_ = { ASSETS, CG_KEY: "SECRET-CG-KEY-CS-1" };
+    const counters = {};
+    const body = await askC(ADDR, env_, makeDispatch({ tokenAddr: ADDR, poolsRes: () => sn80PoolsFor(ADDR, "96600.5"), counters }), 21);
+    ok(body.v === "sell" && body.why === undefined && body.via === "counter",
+      "[counter sell] SN80 shape: both hops quoting must reach sell/via:counter end to end, got " + JSON.stringify(body));
+    ok(typeof body.ret === "number" && Number.isFinite(body.ret) && body.ret > 0,
+      "[counter sell] a successful counter-sell must carry a finite positive ret, got " + JSON.stringify(body.ret));
+    ok(counters.leg1 >= 1 && counters.leg2 >= 1,
+      "[counter sell] sanity: both leg1 and leg2 batches must really have been sent, got " + JSON.stringify(counters));
+    // leg1 باید فقط رویِ همان یک venueِ استخر باشد (کاناری + ۵ ردیفِ
+    // aerodrome-cl-v1 = ۶)، هرگز همه‌ی venueها.
+    ok(counters.leg1Size === 6,
+      "[counter sell] leg1 must probe only the pool's own venue (canary + 5 aerodrome-cl-v1 rows = 6), got " +
+      JSON.stringify(counters));
+  }
+
+  // ب) جهشِ اول همه‌جا ریوِرت می‌کند → نتیجه دقیقاً همان sells:elsewhere می‌ماند
+  {
+    const ADDR = "0x" + "c2".repeat(20);
+    const env_ = { ASSETS, CG_KEY: "SECRET-CG-KEY-CS-2" };
+    const counters = {};
+    const body = await askC(ADDR, env_,
+      makeDispatch({ tokenAddr: ADDR, leg1Positive: false, poolsRes: () => sn80PoolsFor(ADDR, "96600.5"), counters }), 22);
+    ok(body.v === null && body.why === "sells:elsewhere",
+      "[counter sell] leg1 reverting everywhere must leave the result exactly today's null/sells:elsewhere, got " +
+      JSON.stringify(body));
+    ok(counters.leg1 >= 1 && !counters.leg2,
+      "[counter sell] leg1 must never reach leg2 when it never quotes positive, got " + JSON.stringify(counters));
+  }
+
+  // پ) جهشِ اول مثبت، جهشِ دوم همه‌جا ریوِرت → همان sells:elsewhere
+  {
+    const ADDR = "0x" + "c3".repeat(20);
+    const env_ = { ASSETS, CG_KEY: "SECRET-CG-KEY-CS-3" };
+    const counters = {};
+    const body = await askC(ADDR, env_,
+      makeDispatch({ tokenAddr: ADDR, leg2Positive: false, poolsRes: () => sn80PoolsFor(ADDR, "96600.5"), counters }), 23);
+    ok(body.v === null && body.why === "sells:elsewhere",
+      "[counter sell] leg2 reverting everywhere must leave the result exactly today's null/sells:elsewhere, got " +
+      JSON.stringify(body));
+    ok(counters.leg1 >= 1 && counters.leg2 >= 1,
+      "[counter sell] leg2 sanity: leg1 must have quoted positive and leg2 must really have been asked, got " +
+      JSON.stringify(counters));
+  }
+
+  // ت) رزروِ زیرِ آستانه (۹۰۰۰ دلار) → counterTop می‌شود null، هیچ eth_callِ
+  // اضافه‌ای هرگز فرستاده نمی‌شود.
+  {
+    const ADDR = "0x" + "c4".repeat(20);
+    const env_ = { ASSETS, CG_KEY: "SECRET-CG-KEY-CS-4" };
+    const counters = {};
+    const body = await askC(ADDR, env_, makeDispatch({ tokenAddr: ADDR, poolsRes: () => sn80PoolsFor(ADDR, "9000"), counters }), 24);
+    ok(body.v === null && body.why === "sells:elsewhere",
+      "[counter sell] a below-threshold reserve must still leave the raw sells:elsewhere veto in place, got " +
+      JSON.stringify(body));
+    ok(!counters.leg1 && !counters.leg2,
+      "[counter sell] a below-threshold reserve must never trigger even one extra eth_call batch, got " +
+      JSON.stringify(counters));
+  }
+
+  // ث) baseCounterTopOf مستقیم — ضدجفتِ WETH/USDC یا دکسِ نگاشت‌نشده هرگز
+  // counterTop نمی‌سازد.
+  {
+    const poolsWeth = [gpC("aerodrome-slipstream", SN80C, vd.WETH_ADDR, "50000", 10)];
+    ok(baseCounterTopOf(poolsWeth, SN80C) === null,
+      "[counter sell] a counter that is WETH itself must never become counterTop");
+    const poolsUsdc = [gpC("aerodrome-slipstream", SN80C, vd.USDC_ADDR, "50000", 10)];
+    ok(baseCounterTopOf(poolsUsdc, SN80C) === null,
+      "[counter sell] a counter that is USDC itself must never become counterTop");
+    const poolsUnmapped = [gpC("aerodrome-slipstream-2", SN80C, TAOC, "50000", 10)];
+    ok(baseCounterTopOf(poolsUnmapped, SN80C) === null,
+      "[counter sell] an unmapped dex id must never become counterTop, even with a huge reserve");
+    const poolsGood = [gpC("aerodrome-slipstream", SN80C, TAOC, "96600.5", 25)];
+    const top = baseCounterTopOf(poolsGood, SN80C);
+    ok(top && top.counter === TAOC.toLowerCase() && top.venue === "aerodrome-cl-v1",
+      "[counter sell] the SN80/TAO shape must give counterTop {counter:TAO, venue:aerodrome-cl-v1}, got " +
+      JSON.stringify(top));
+    ok(baseCounterTopOf(null, SN80C) === null, "[counter sell] a non-array pools body is unknown, never a counterTop");
+  }
+
+  // ج) fetchCounterSell هرگز "nosell" برنمی‌گرداند — حتی زیرِ پرتاب/۵۰۰/کاناریِ مرده.
+  {
+    const meta = { decimals: 18, priceUsd: 0.05 };
+    const behaviours = [
+      { name: "network throw", fetchImpl: async () => { throw new Error("network is down"); } },
+      { name: "http 500", fetchImpl: async () => new Response("boom", { status: 500 }) },
+      { name: "dead canary", fetchImpl: async (url, init) => {
+          const reqs = JSON.parse(init.body);
+          return jsonResC(reqs.map((r) => (r.id === 0 ? { id: 0, error: { code: 3 } } : cleanC(r))));
+        } },
+      { name: "unparseable body", fetchImpl: async () => new Response("not json", { status: 200,
+          headers: { "content-type": "application/json" } }) },
+      { name: "non-array body", fetchImpl: async () => jsonResC({ not: "an array" }) },
+      { name: "leg1 clean nosell", fetchImpl: makeDispatch({ tokenAddr: SN80C, leg1Positive: false, poolsRes: () => sn80PoolsFor(SN80C, "96600.5") }) },
+      { name: "leg2 clean nosell", fetchImpl: makeDispatch({ tokenAddr: SN80C, leg2Positive: false, poolsRes: () => sn80PoolsFor(SN80C, "96600.5") }) },
+      { name: "both positive", fetchImpl: makeDispatch({ tokenAddr: SN80C, poolsRes: () => sn80PoolsFor(SN80C, "96600.5") }) },
+    ];
+    for (const b of behaviours) {
+      const res = await vd.fetchCounterSell(SN80C, TAOC, "aerodrome-cl-v1", meta,
+        { fetchImpl: b.fetchImpl, rpcs: ["https://rpc-cs.example"] });
+      ok(res && res.v !== "nosell", "[counter sell] fetchCounterSell must never return \"nosell\" (" + b.name +
+        "), got " + JSON.stringify(res));
+      ok(res && (res.v === null || res.v === "sell"), "[counter sell] fetchCounterSell's v must be null or " +
+        "\"sell\" only (" + b.name + "), got " + JSON.stringify(res));
+    }
+    // venueId نامعتبر/positive-only — هرگز پرسیده نمی‌شود.
+    const badVenue = await vd.fetchCounterSell(SN80C, TAOC, "uniswap-v4", meta, { fetchImpl: async () => { throw new Error("must never be called"); } });
+    ok(badVenue.v === null, "[counter sell] a positive-only venueId (uniswap-v4) must be refused before any fetch");
+    const unknownVenue = await vd.fetchCounterSell(SN80C, TAOC, "not-a-real-venue", meta, { fetchImpl: async () => { throw new Error("must never be called"); } });
+    ok(unknownVenue.v === null, "[counter sell] an unknown venueId must be refused before any fetch");
+    const noAmt = await vd.fetchCounterSell(SN80C, TAOC, "aerodrome-cl-v1", { decimals: 18, priceUsd: 0 }, { fetchImpl: async () => { throw new Error("must never be called"); } });
+    ok(noAmt.v === null, "[counter sell] a zero/unusable price must be refused before any fetch");
+  }
+
+  // چ) buildProbe بایت‌به‌بایت همان قبل، buildProbeFor فقط همان یک venue را می‌سازد.
+  {
+    const before = vd.buildProbe(SN80C, vd.WETH_ADDR, 12345n);
+    const after = vd.buildProbe(SN80C, vd.WETH_ADDR, 12345n);
+    ok(JSON.stringify(before) === JSON.stringify(after) && before.length === vd.VD_VENUES.reduce((n, r) => {
+        if (r.kind === "CL_UINT24" || r.kind === "CL_INT24") return n + r.keys.length;
+        if (r.kind === "SOLIDLY") return n + r.keys.length;
+        if (r.kind === "V2") return n + 1;
+        if (r.kind === "V4_SINGLE") return n + r.keys.length;
+        return n;
+      }, 0),
+      "[counter sell] buildProbe's row count must stay exactly the sum of every VD_VENUES row's keys, got " +
+      before.length);
+    const only = vd.buildProbeFor(SN80C, TAOC, 12345n, ["aerodrome-cl-v1"]);
+    ok(only.length === 5 && only.every((row) => row.id === "aerodrome-cl-v1"),
+      "[counter sell] buildProbeFor([\"aerodrome-cl-v1\"]) must contain only that venue's 5 rows, got " +
+      JSON.stringify(only.map((r) => r.id)));
+    const withRealV4 = vd.buildProbe(SN80C, vd.WETH_ADDR, 12345n, { v4Keys: [] });
+    ok(JSON.stringify(withRealV4) === JSON.stringify(before),
+      "[counter sell] buildProbe with an empty v4Keys array must stay byte-identical to no opts at all");
+  }
+
+  // ح) رازداری — یک BASE_RPC با کلید در مسیرش هرگز در بدنه‌ی /vd ظاهر نمی‌شود.
+  {
+    const ADDR = "0x" + "c5".repeat(20);
+    const SECRET = "SECRET-BASE-RPC-KEY-9f8e7d";
+    const env_ = { ASSETS, CG_KEY: "SECRET-CG-KEY-CS-5", BASE_RPC: "https://base-rpc.example/" + SECRET };
+    const counters = {};
+    const body = await askC(ADDR, env_, makeDispatch({ tokenAddr: ADDR, poolsRes: () => sn80PoolsFor(ADDR, "96600.5"), counters }), 25);
+    ok(body.v === "sell" && body.via === "counter",
+      "[counter sell] secrets sanity: this scenario must still reach sell/via:counter, got " + JSON.stringify(body));
+    const raw = JSON.stringify(body);
+    ok(!raw.includes(SECRET) && !raw.includes("base-rpc.example"),
+      "[counter sell] env.BASE_RPC's key/host must never appear in the /vd response body, got " + raw);
+  }
+
+  console.log("[counter sell] fetchCounterSell (worker/verdict.js) and baseCounterTopOf/withCounterProof "
+    + "(worker/index.js) covered: a live SN80/TAO-shaped pool with both hops quoting turns "
+    + "sells:elsewhere into sell/via:counter with a finite ret end to end through /vd; either hop "
+    + "reverting everywhere leaves the exact null/sells:elsewhere of today; a below-threshold reserve "
+    + "never even tries the extra eth_call batches; baseCounterTopOf refuses WETH/USDC counters and "
+    + "unmapped dex ids; fetchCounterSell never returns \"nosell\" under throws/500s/a dead canary/an "
+    + "unparseable or non-array body, and refuses a positive-only or unknown venueId before any fetch; "
+    + "buildProbe stays byte-identical (with or without an empty v4Keys) while buildProbeFor(single "
+    + "venue) yields only that venue's rows; and a BASE_RPC secret never surfaces in the /vd body");
+}
+
+/* ---- ۴۲ب. بودجه‌ی گذر برای اثباتِ counter-sell ----
+   در گذرِ ساعتی (meterHooks.used موجود) اثبات فقط وقتی اجرا می‌شود که مصرف ≤ COUNTER_PROOF_PASS_MAX_USED
+   باشد؛ بالاتر از آن هیچ fetchی زده نمی‌شود و همان sells:elsewhere برمی‌گردد. */
+{
+  const { withCounterProof, COUNTER_PROOF_PASS_MAX_USED } = await import("./index.js");
+  let n = 0;
+  const saved = globalThis.fetch;
+  globalThis.fetch = async () => { n++; return new Response("{}", { status: 500 }); };
+  const base = { v: null, why: "sells:elsewhere" };
+  const cov = { counterTop: { counter: "0x" + "ab".repeat(20), venue: "aerodrome-cl-v1" } };
+  const meta = { decimals: 18, priceUsd: 1 };
+  const over = await withCounterProof(base, "0x" + "cd".repeat(20), meta, Date.now() + 5000, {}, cov,
+    { stage() {}, capHit: () => false, used: () => COUNTER_PROOF_PASS_MAX_USED + 1 });
+  ok(over === base && n === 0, "[counter budget] over the pass budget: no fetch at all and sells:elsewhere unchanged (fetches=" + n + ")");
+  const under = await withCounterProof(base, "0x" + "cd".repeat(20), meta, Date.now() + 5000, {}, cov,
+    { stage() {}, capHit: () => false, used: () => COUNTER_PROOF_PASS_MAX_USED });
+  ok(under === base && n > 0, "[counter budget] within budget the proof is attempted (fetches=" + n + ") and a failed proof keeps sells:elsewhere");
+  ok(COUNTER_PROOF_PASS_MAX_USED + 2 < 50, "[counter budget] the pass limit leaves room for the two proof calls under Cloudflare's 50");
+  globalThis.fetch = saved;
+  console.log("[counter budget] in the hourly pass the counter proof runs only at <= " + COUNTER_PROOF_PASS_MAX_USED
+    + " subrequests used; above that it makes no call and keeps sells:elsewhere");
 }
 
 console.log(fails === 0

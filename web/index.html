@@ -320,10 +320,7 @@ if(/^\/t\/(0x[0-9a-fA-F]{40}|[1-9A-HJ-NP-Za-km-z]{32,44})\/?$/.test(location.pat
   --grad:linear-gradient(135deg,var(--g1),var(--g2));
 }
 :root[data-theme="light"]{
-  /* ۲۷ سپتامبر ۲۰۲۶: کارت‌های سفید روی #f4f5f7 از زمینه جدا نمی‌شدند. کادرِ تیره‌تر
-     (۲۶ سپتامبر) امتحان شد و حسام نپسندید؛ به‌جایش زمینه یک پله تیره‌تر شد و خط‌ها
-     همان قبلی ماندند. فقط تمِ روشن؛ تمِ تیره دست نخورد. */
-  --bg:#e6e9ee; --card:#fff; --card2:#f4f5f8; --raise:#eceef2;
+  --bg:#f4f5f7; --card:#fff; --card2:#f4f5f8; --raise:#eceef2;
   --line:#e8eaee; --line2:#d6dae1;
   --tx:#14161a; --tx2:#5b6270; --tx3:#8b93a1;
   /* ⚠️ ۱۴۰۵/۰۶/۰۷ (۲۰۲۶-۰۸-۲۹): مالک محصول عمداً همین گرادیانِ زندهٔ برند
@@ -489,6 +486,11 @@ header>.navPad{grid-column:1;grid-row:1;width:0;min-width:0}
 }
 .nav{grid-column:2;grid-row:1;display:flex;gap:4px;background:var(--card2);border-radius:999px;padding:4px}
 .hdrRight{grid-column:3;grid-row:1;display:flex;align-items:center;gap:11px;min-width:0;justify-self:end}
+/* ۲۷ سپتامبر ۲۰۲۶ — حالتِ دسکتاپِ مرورگرِ گوشی (~۹۸۰px): با برچسب‌ها ناوبری ۳۹۸px است و دو
+   ستونِ ۱fr هرکدام ~۲۵۴px، ولی خوشه‌ی راست ~۳۲۰px می‌خواهد؛ با min-width:0 از ستونش بیرون
+   می‌زد و روی «New pairs» می‌افتاد. از ۹۶۱ به بالا ستون نمی‌تواند از محتوایش کوچک‌تر شود —
+   ناوبری کمی از وسط کنار می‌رود ولی هیچ‌وقت زیرِ چیپ‌ها نمی‌رود ([header no overlap]). */
+@media(min-width:961px){.hdrRight{min-width:max-content}}
 .nav button,.nav .navLink{display:flex;align-items:center;gap:7px;padding:7px 14px;border-radius:999px;
   font-size:13.5px;color:var(--tx2);transition:.16s;white-space:nowrap;text-decoration:none}
 .nav button svg,.nav .navLink svg{width:16px;height:16px;flex-shrink:0}
