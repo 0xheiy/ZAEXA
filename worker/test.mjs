@@ -1925,9 +1925,10 @@ function isSolidlyReqId(id) { return PROBE_KIND_BY_ID.get(id) === "SOLIDLY"; }
   // شمارنده لازم است تا این دو از هم جدا بمانند).
   function makeFetch({ legs, lamports = 2_000_000_000, simErr = "SUCCESS", controlErr = "INSTR",
                        buyQuoteOk = true, buyQuoteEmpty = false, rpcStatus = {}, controlSimStatus = null,
-                       altData = null } = {}) {
+                       altData = null, fallbackQuoteOk = true } = {}) {
     const calls = [];
     let simCalls = 0;
+    let sellQuoteCalls = 0;
     const fetchImpl = async (url, init) => {
       const u = String(url);
       if (u.startsWith(JUP + "/swap/v1/quote")) {
@@ -1938,6 +1939,10 @@ function isSolidlyReqId(id) { return PROBE_KIND_BY_ID.get(id) === "SOLIDLY"; }
           if (buyQuoteEmpty) return jsonRes({ routePlan: [] }); // ۲۰۰ ولی بدونِ outAmount → "no-route"
           return jsonRes({ outAmount: "1000000", routePlan: [{}] });
         }
+        sellQuoteCalls++;
+        // دومین quoteِ فروش (اگر پیش بیاید) همان quoteِ کاملِ fallbackِ
+        // "payer-holds" گامِ ۸ است — نه quoteِ ۹۰٪ِ گامِ ۳.
+        if (sellQuoteCalls >= 2 && !fallbackQuoteOk) return jsonRes({ error: "no route" }, 404);
         return jsonRes({ outAmount: "40000000", routePlan: [{}] });
       }
       if (u.startsWith(JUP + "/swap/v1/swap-instructions")) {
@@ -2035,19 +2040,41 @@ function isSolidlyReqId(id) { return PROBE_KIND_BY_ID.get(id) === "SOLIDLY"; }
   }
 
   // ج) 🔴 رفت‌وبرگشت موفق می‌شود *و* کنترل (فقط‌فروش) هم به‌تنهایی موفق
-  // می‌شود → null/"payer-holds": فی‌پیر از قبل موجودی داشته، پس رفت‌وبرگشت
-  // هیچ چیزی اثبات نکرد — همان تله‌ای که چهار نتیجه‌ی اولِ اسپایک را
-  // بی‌معنی کرده بود، این‌بار گرفته‌شده با اجرا نه با یک lookup.
+  // می‌شود → فی‌پیر از قبل موجودی داشته، پس شبیه‌سازیِ رفت‌وبرگشت هیچ چیزی
+  // اثبات نکرد. ۲۷ سپتامبر: این دیگر مستقیم "payer-holds" نمی‌شود — یک
+  // fallbackِ صرفاً-قیمتی (quote خرید همان گامِ ۲ + quote فروشِ *کاملِ*
+  // همان مقدار) امتحان می‌شود؛ هر دو مثبت‌اند در این فیکسچر →
+  // sell/basis:"quote"/ret، هرگز "nosell".
   {
     const legs = makeLegs();
     const { fetchImpl, calls } = makeFetch({ legs, simErr: "SUCCESS", controlErr: "SUCCESS" });
     const res = await vs.fetchVerdictSol(MINT, opts({ fetchImpl }));
-    ok(res && res.v === null && res.why === "payer-holds" && isFrozenWhy(res.why),
-      "a payer for whom the sell-only control transaction also succeeds must give " +
-      "null/\"payer-holds\", never \"sell\" (got " + JSON.stringify(res) + ")");
+    ok(res && res.v === "sell" && res.basis === "quote" && typeof res.ret === "number",
+      "a payer for whom the sell-only control transaction also succeeds must fall back to a " +
+      "quote round trip and return sell/basis:\"quote\", never nosell/payer-holds when both " +
+      "quotes are positive (got " + JSON.stringify(res) + ")");
+    // fallbackِ quote روی همان مقدارِ کاملِ خریدِ quoteBuy.outAmount (۱۰۰۰۰۰۰)
+    // نه ۹۰٪ِ گامِ ۳ — و quoteSellRes موکِ ما همیشه ۴۰۰۰۰۰۰۰ می‌دهد، پس
+    // ret باید دقیقاً ۸۰٫۰ باشد (۴۰۰۰۰۰۰۰ / ۵۰۰۰۰۰۰۰ × ۱۰۰).
+    ok(res.ret === 80, "expected ret===80 from the fixture's fixed quote amounts, got " + res.ret);
     ok(calls.filter((c) => c === "rpc:simulateTransaction").length === 2,
-      "\"payer-holds\" must only be reached after the control simulation actually ran (both " +
+      "the quote fallback must only be reached after the control simulation actually ran (both " +
       "simulateTransaction calls), got: " + calls.join(","));
+    ok(calls.filter((c) => c === "quote:sell").length === 2,
+      "expected exactly two sell quotes — the 90% execution quote (step 3) and the full-amount " +
+      "fallback quote (step 8) — got: " + calls.join(","));
+  }
+
+  // ج۲) 🔴 همان حالت، ولی fallbackِ quote جواب ندهد (بدونِ route) →
+  // null/"payer-holds" همان‌طور که قبل از این تغییر بود — هرگز "sell" وقتی
+  // خودِ fallback هم چیزی اثبات نمی‌کند.
+  {
+    const legs = makeLegs();
+    const { fetchImpl } = makeFetch({ legs, simErr: "SUCCESS", controlErr: "SUCCESS", fallbackQuoteOk: false });
+    const res = await vs.fetchVerdictSol(MINT, opts({ fetchImpl }));
+    ok(res && res.v === null && res.why === "payer-holds" && isFrozenWhy(res.why),
+      "when the quote fallback itself has no route, the result must stay null/\"payer-holds\", " +
+      "never \"sell\" (got " + JSON.stringify(res) + ")");
   }
 
   // ج۲) 🔴 رفت‌وبرگشت موفق می‌شود، ولی خودِ تماسِ RPCِ کنترل شکست می‌خورد
@@ -2308,7 +2335,8 @@ function isSolidlyReqId(id) { return PROBE_KIND_BY_ID.get(id) === "SOLIDLY"; }
   console.log("[fetchVerdictSol] happy path -> roundtrip ok + control (sell-only) fails -> " +
     "{v:\"sell\"} with no why key, exactly two simulateTransaction calls; roundtrip " +
     "InstructionError -> {v:\"nosell\"} with the control never called (call count asserted); " +
-    "roundtrip ok + control also ok -> null/\"payer-holds\"; roundtrip ok + control's RPC call " +
+    "roundtrip ok + control also ok -> quote-fallback sell/basis:\"quote\"/ret when both quotes " +
+    "price positively, else null/\"payer-holds\"; roundtrip ok + control's RPC call " +
     "fails -> null/\"rpc:simulateTransaction\" (never \"sell\"); roundtrip ok + deadline hit right " +
     "before the control -> null/\"deadline\" (never \"sell\", control never attempted); " +
     "getTokenAccountsByOwner is asserted absent from the whole Solana path; an underfunded payer " +

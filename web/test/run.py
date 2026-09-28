@@ -7460,15 +7460,71 @@ async def main():
 })();
 """ % (list(SOL_FEE_PAYER), list(SOL_SIG_BYTES)))
 
+        # C — کیف‌پولی که signAndSendTransaction را با یک خطای *غیرِرد* می‌شکند
+        # (دقیقاً همان "Expected String"ی که فانتوم روی زنجیره داد) ولی
+        # signTransaction جدا هم دارد — برای سنجیدنِ fallbackِ Rule C.
+        # window.__solRejectSwap=true یعنی رد صریحِ کاربر (کدِ ۴۰۰۱)، که هرگز
+        # نباید به fallback برود.
+        SOL_SIGNED_TX_BYTES = bytes([1]) + bytes(64) + bytes([9, 9, 9, 9])
+        SOL_FALLBACK_WALLET_INIT = ("""
+(function(){
+  const FEE_PAYER = new Uint8Array(%s);
+  const SIGNED = new Uint8Array(%s);
+  window.__solSendCalls = [];
+  window.__solSignCalls = [];
+  window.__solRejectSwap = false;
+  const fakeWallet = {
+    name: "Fake Wallet", icon: "", chains: ["solana:mainnet"],
+    features: {
+      "standard:connect": { connect: async () => ({accounts: [
+        {address: "FakeWa11etAddr11111111111111111111111111", publicKey: FEE_PAYER}]}) },
+      "standard:disconnect": { disconnect: async () => {} },
+      "solana:signAndSendTransaction": { signAndSendTransaction: async (input) => {
+        window.__solSendCalls.push(1);
+        if (window.__solRejectSwap) { const e = new Error("User rejected the request."); e.code = 4001; throw e; }
+        throw new Error("Expected String");
+      } },
+      "solana:signTransaction": { signTransaction: async (input) => {
+        window.__solSignCalls.push(1);
+        return [{signedTransaction: SIGNED}];
+      } }
+    }
+  };
+  window.addEventListener("wallet-standard:app-ready", (e) => {
+    try { e.detail.register(fakeWallet); } catch(_){}
+  });
+})();
+""" % (list(SOL_FEE_PAYER), list(SOL_SIGNED_TX_BYTES)))
+
+        # E — یک ردیفِ واقع‌شکلِ GET /gt/networks/solana/pools?page=1 (فقط
+        # فیلدهایی که solLoadPopular واقعاً می‌خواند)، برای «Popular on
+        # Solana». SOL/USDC/USDT باید حذف شوند (از قبل ردیفِ خودشان هستند).
+        POPULAR_MINT = "DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263"
+        def gt_pools_fixture():
+            def row(mint, name, image=None):
+                return {
+                    "attributes": {"name": name + " / SOL", "image_url": image},
+                    "relationships": {"base_token": {"data": {"id": "solana_" + mint, "type": "token"}}},
+                }
+            return {"data": [
+                row("So11111111111111111111111111111111111111112", "Wrapped SOL"),  # حذف می‌شود
+                row(SOL_APP_TOKENS_USDC, "USD Coin"),  # حذف می‌شود
+                row(POPULAR_MINT, "Bonk"),
+                row(POPULAR_MINT, "Bonk (dup)"),  # dedupe — همان mint دوباره
+            ]}
+        SOL_APP_TOKENS_USDC = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"
+
         async def open_sol_swap_page(verdict_body, quote_status=200, quote_body=None,
                                       swap_status=200, swap_body=None, inject_wallet=True,
-                                      collect_errors=None):
+                                      collect_errors=None, balance_lamports=2_000_000_000,
+                                      sim_result="skip", token_accounts=None, rpc_log=None,
+                                      wallet_init=None):
             spg = await b.new_page(viewport={"width": 1240, "height": 1000})
             if collect_errors is not None:
                 spg.on("console", lambda m: collect_errors.append(m.text) if m.type == "error" else None)
                 spg.on("pageerror", lambda e: collect_errors.append(str(e)))
             if inject_wallet:
-                await spg.add_init_script(SOL_FAKE_WALLET_INIT)
+                await spg.add_init_script(wallet_init or SOL_FAKE_WALLET_INIT)
             async def stub_ev(route):
                 # سرورِ استاتیکِ محلی POST را اصلاً پشتیبانی نمی‌کند (۵۰۱)؛
                 # بی‌ربط به سواپ است، فقط بیکنِ رویدادها — همان‌طور که سایر
@@ -7497,12 +7553,23 @@ async def main():
             async def stub_rpc(route):
                 payload = _json.loads(route.request.post_data or "{}")
                 method = payload.get("method")
+                if rpc_log is not None:
+                    rpc_log.append(method)
                 if method == "getBalance":
-                    result = {"value": 2000000000}
+                    result = {"value": balance_lamports}
                 elif method == "getTokenAccountsByOwner":
-                    result = {"value": []}
+                    result = {"value": token_accounts if token_accounts is not None else []}
                 elif method == "getSignatureStatuses":
                     result = {"value": [{"confirmationStatus": "confirmed", "err": None}]}
+                elif method == "simulateTransaction":
+                    if sim_result == "skip":
+                        result = None
+                    elif sim_result == "ok":
+                        result = {"value": {"err": None}}
+                    elif sim_result == "fail":
+                        result = {"value": {"err": {"InstructionError": [1, {"Custom": 6001}]}}}
+                    else:
+                        result = sim_result
                 else:
                     result = None
                 await route.fulfill(status=200, content_type="application/json",
@@ -9103,11 +9170,14 @@ async def main():
         async def cs_stub_ev(route):
             await route.fulfill(status=204, body="")
 
-        async def open_app(hash_suffix="", inject_wallet=True, collect_errors=None, viewport=None):
+        async def open_app(hash_suffix="", inject_wallet=True, collect_errors=None, viewport=None,
+                            extra_init_script=None):
             apg = await b.new_page(viewport=viewport or {"width": 1280, "height": 900})
             if collect_errors is not None:
                 apg.on("console", lambda m: collect_errors.append(m.text) if m.type == "error" else None)
                 apg.on("pageerror", lambda e: collect_errors.append(str(e)))
+            if extra_init_script:
+                await apg.add_init_script(extra_init_script)
             if inject_wallet:
                 # کیف‌پولِ جعلی — با add_init_script، پس همیشه *پیش* از هر
                 # اسکریپتِ خودِ صفحه شنونده‌ی app-ready را نصب می‌کند؛ یعنی
@@ -9303,6 +9373,275 @@ async def main():
               "address, renders a live SOL<->USDC quote via the built-in token list, persists across reload, "
               "honours #swap?chain=solana, drives pairs.html's own chain tabs from the same header selector, "
               "and stays legible in both themes — all covered")
+
+        # ---- [sol fixes] بودجه‌ی SOL (A)، پیش‌شبیه‌سازی (B)، fallbackِ
+        # signTransaction (C)، پیش‌فرض‌های تأییدشده + Popular on Solana (E)،
+        # دکمه‌های سریع/×/پیل/Copy this check (F) ----
+
+        # A) موجودیِ کم — CTA غیرفعال با پیامِ دقیق، کیف‌پول هرگز صدا زده نمی‌شود
+        # (چه از رویِ دکمه، چه با صدازدنِ مستقیمِ solDoSwap — دفاعِ دومِ Rule A).
+        a1_log = []
+        a1pg = await open_sol_swap_page({"v": "sell", "ms": 100}, balance_lamports=1_400_000, rpc_log=a1_log)
+        await sol_connect(a1pg)
+        await a1pg.fill("#solAmt", "0.001")
+        await a1pg.wait_for_timeout(900)
+        a1_disabled = await a1pg.is_disabled("#solSwapBtn")
+        a1_text = await a1pg.inner_text("#solSwapBtn")
+        await a1pg.evaluate("() => { try { solDoSwap(); } catch(_){} }")
+        await a1pg.wait_for_timeout(300)
+        a1_wallet_calls = await a1pg.evaluate("window.__solCalls.length")
+        await a1pg.close()
+        print("[sol fixes][A] balance=0.0014 SOL, buy 0.001 -> disabled=%s text=%r walletCalls=%d"
+              % (a1_disabled, a1_text, a1_wallet_calls))
+        assert a1_disabled is True, "the CTA must be disabled when SOL is short of amount+fees+rent"
+        assert "Not enough SOL" in a1_text, "the disabled CTA must name the shortfall: %r" % a1_text
+        assert a1_wallet_calls == 0, "the wallet must never be called when the SOL budget guard fails"
+
+        # B) پیش‌شبیه‌سازی — err واقعی یعنی کیف‌پول هرگز صدا زده نمی‌شود، و
+        # simulateTransaction دقیقاً یک‌بار زده می‌شود؛ err:null یعنی کیف‌پول
+        # دقیقاً یک‌بار صدا زده می‌شود.
+        b1_log = []
+        b1pg = await open_sol_swap_page({"v": "sell", "ms": 100}, sim_result="fail", rpc_log=b1_log)
+        await sol_connect(b1pg)
+        await b1pg.fill("#solAmt", "1")
+        await b1pg.wait_for_timeout(900)
+        await b1pg.click("#solSwapBtn")
+        await b1pg.wait_for_timeout(700)
+        b1_wallet_calls = await b1pg.evaluate("window.__solCalls.length")
+        b1_notice = await b1pg.inner_text("#solNotices")
+        b1_sim_calls = b1_log.count("simulateTransaction")
+        await b1pg.close()
+        print("[sol fixes][B] sim err -> walletCalls=%d simCalls=%d notice=%r"
+              % (b1_wallet_calls, b1_sim_calls, b1_notice[:70]))
+        assert b1_wallet_calls == 0, "a failed pre-simulation must never call the wallet"
+        assert b1_sim_calls == 1, "the pre-simulation must be called exactly once, got %d" % b1_sim_calls
+        assert "would fail on-chain" in b1_notice, "expected the closed-vocabulary pre-sim failure message: %r" % b1_notice
+
+        b2_log = []
+        b2pg = await open_sol_swap_page({"v": "sell", "ms": 100}, sim_result="ok", rpc_log=b2_log)
+        await sol_connect(b2pg)
+        await b2pg.fill("#solAmt", "1")
+        await b2pg.wait_for_timeout(900)
+        await b2pg.click("#solSwapBtn")
+        await b2pg.wait_for_timeout(900)
+        b2_wallet_calls = await b2pg.evaluate("window.__solCalls.length")
+        b2_sim_calls = b2_log.count("simulateTransaction")
+        await b2pg.close()
+        print("[sol fixes][B] sim ok -> walletCalls=%d simCalls=%d" % (b2_wallet_calls, b2_sim_calls))
+        assert b2_wallet_calls == 1, "a clean pre-simulation must let the wallet be called exactly once"
+        assert b2_sim_calls == 1, "the pre-simulation must be called exactly once, got %d" % b2_sim_calls
+
+        # C) signAndSendTransaction با یک خطای غیرِرد ("Expected String") ->
+        # fallback به signTransaction+sendTransaction، دقیقاً یک‌بار هرکدام؛
+        # یک رد صریح هرگز به fallback نمی‌رود.
+        c1_log = []
+        c1pg = await open_sol_swap_page({"v": "sell", "ms": 100}, wallet_init=SOL_FALLBACK_WALLET_INIT, rpc_log=c1_log)
+        await sol_connect(c1pg)
+        await c1pg.fill("#solAmt", "1")
+        await c1pg.wait_for_timeout(900)
+        await c1pg.click("#solSwapBtn")
+        await c1pg.wait_for_timeout(900)
+        c1_send = await c1pg.evaluate("window.__solSendCalls.length")
+        c1_sign = await c1pg.evaluate("window.__solSignCalls.length")
+        c1_notice = await c1pg.inner_text("#solNotices")
+        c1_sendtx_rpc = c1_log.count("sendTransaction")
+        await c1pg.close()
+        print("[sol fixes][C] Expected String -> sendCalls=%d signCalls=%d sendTxRpc=%d notice=%r"
+              % (c1_send, c1_sign, c1_sendtx_rpc, c1_notice[:70]))
+        assert c1_send == 1 and c1_sign == 1, \
+            "a non-rejection signAndSendTransaction error must fall back to signTransaction exactly once"
+        assert c1_sendtx_rpc == 1, "the fallback path must submit via /sol/rpc sendTransaction exactly once"
+        assert "Swap failed" not in c1_notice, "the fallback succeeding must not still show a failure notice: %r" % c1_notice
+
+        c2pg = await open_sol_swap_page({"v": "sell", "ms": 100}, wallet_init=SOL_FALLBACK_WALLET_INIT)
+        await sol_connect(c2pg)
+        await c2pg.fill("#solAmt", "1")
+        await c2pg.wait_for_timeout(900)
+        await c2pg.evaluate("window.__solRejectSwap = true")
+        await c2pg.click("#solSwapBtn")
+        await c2pg.wait_for_timeout(500)
+        c2_sign = await c2pg.evaluate("window.__solSignCalls.length")
+        c2_notice = await c2pg.inner_text("#solNotices")
+        await c2pg.close()
+        print("[sol fixes][C] user rejection -> signCalls=%d notice=%r" % (c2_sign, c2_notice[:60]))
+        assert c2_sign == 0, "an explicit wallet rejection must never trigger the signTransaction fallback"
+        assert "Cancelled in your wallet." in c2_notice, \
+            "a rejection must still show the same wording as the Base flow: %r" % c2_notice
+
+        # E) پیش‌فرض‌ها دقیقاً USDC/USDT (بدونِ JUP) + «Popular on Solana» زنده
+        async def stub_sol_pools(route):
+            await route.fulfill(status=200, content_type="application/json", body=_json.dumps(gt_pools_fixture()))
+        epg = await open_app()
+        await epg.route("**/gt/networks/solana/pools**", stub_sol_pools)
+        await epg.click("#srcChip")
+        await epg.click('#srcPop [data-chain="solana"]')
+        await epg.wait_for_timeout(150)
+        await epg.click("#solBotBtn")
+        await epg.wait_for_timeout(500)
+        e_syms = await epg.eval_on_selector_all(
+            "#solTokList .trow .s", "els => els.map(e => e.textContent.trim())")
+        e_heading = await epg.eval_on_selector_all(
+            "#solTokList .ttl", "els => els.map(e => e.textContent.trim())")
+        await epg.close()
+        print("[sol fixes][E] token list=%s heading=%s" % (e_syms, e_heading))
+        assert e_syms[:2] == ["USDC", "USDT"], "the built-in presets must be exactly USDC then USDT: %s" % e_syms
+        assert "JUP" not in e_syms, "the unverified JUP preset must be gone: %s" % e_syms
+        assert e_heading == ["Popular on Solana"], "expected a single 'Popular on Solana' heading: %s" % e_heading
+        assert e_syms[2:] == ["Bonk"], \
+            "the popular section must dedupe by mint and skip SOL/USDC/USDT, got %s" % e_syms[2:]
+
+        # F) دکمه‌های سریع ۵۰٪/MAX و × روی «You pay»
+        f1pg = await open_sol_swap_page({"v": "sell", "ms": 100}, balance_lamports=2_000_000_000)
+        await sol_connect(f1pg)
+        await f1pg.wait_for_timeout(300)
+        f_clear_hidden_0 = await f1pg.eval_on_selector("#solAmtClear", "el => el.hidden")
+        await f1pg.click("#solHalf")
+        await f1pg.wait_for_timeout(150)
+        f_half_val = await f1pg.input_value("#solAmt")
+        f_clear_hidden_half = await f1pg.eval_on_selector("#solAmtClear", "el => el.hidden")
+        await f1pg.click("#solMaxb")
+        await f1pg.wait_for_timeout(150)
+        f_max_val = await f1pg.input_value("#solAmt")
+        await f1pg.click("#solAmtClear")
+        await f1pg.wait_for_timeout(150)
+        f_after_clear = await f1pg.input_value("#solAmt")
+        f_clear_hidden_after = await f1pg.eval_on_selector("#solAmtClear", "el => el.hidden")
+        await f1pg.close()
+        print("[sol fixes][F] 50%%=%r MAX=%r afterClear=%r clearHidden(0/half/after)=%s/%s/%s"
+              % (f_half_val, f_max_val, f_after_clear, f_clear_hidden_0, f_clear_hidden_half, f_clear_hidden_after))
+        assert f_clear_hidden_0 is True, "the clear × must start hidden with an empty amount"
+        assert f_half_val == "0.998475", "50%% of (2 SOL - the A reserve) should be 0.998475, got %r" % f_half_val
+        assert f_max_val == "1.996950", "MAX must leave exactly the A reserve behind, got %r" % f_max_val
+        assert f_clear_hidden_half is False, "the clear × must show once an amount is set"
+        assert f_after_clear == "", "clicking × must empty the amount field"
+        assert f_clear_hidden_after is True, "the clear × must hide itself again once the field is empty"
+
+        # F) پیلِ فروش در «You receive» — sell/basis:quote، nosell، sellِ ساده
+        f2pg = await open_sol_swap_page({"v": "sell", "ms": 100, "basis": "quote", "ret": 80})
+        await f2pg.wait_for_timeout(500)
+        f2_pill = await f2pg.inner_text("#solSellPill")
+        await f2pg.close()
+        f3pg = await open_sol_swap_page({"v": "nosell", "ms": 100})
+        await f3pg.wait_for_timeout(500)
+        f3_pill = await f3pg.inner_text("#solSellPill")
+        await f3pg.close()
+        f4pg = await open_sol_swap_page({"v": "sell", "ms": 100})
+        await f4pg.wait_for_timeout(500)
+        f4_pill = await f4pg.inner_text("#solSellPill")
+        await f4pg.close()
+        print("[sol fixes][F] pill quote=%r nosell=%r plainSell=%r" % (f2_pill, f3_pill, f4_pill))
+        assert "80.0% back" in f2_pill, "a quote-basis sell must show the estimated %% back, got %r" % f2_pill
+        assert "Can't sell now" in f3_pill, "a nosell verdict must show the blocked pill, got %r" % f3_pill
+        assert "~100% back" in f4_pill, "a plain (non-quote) sell must show the ~100%% pill, got %r" % f4_pill
+
+        # F) «Copy this check» روی کارتِ exit-checkِ /app — دقیقاً همان
+        # https://zaexa.com/t/<mint>?check=1 (اینجا origin محلی، نه دامنه‌ی واقعی)
+        copy_init = ("Object.defineProperty(navigator,'clipboard',{value:{writeText:(t)=>"
+                     "{window.__copied=t;return Promise.resolve();}},configurable:true});")
+        h1 = await open_app(extra_init_script=copy_init)
+        await h1.route("**/gt/networks/solana/pools**", stub_sol_pools)
+        await h1.click("#srcChip")
+        await h1.click('#srcPop [data-chain="solana"]')
+        await h1.wait_for_timeout(150)
+        await h1.click("#solBotBtn")
+        await h1.wait_for_timeout(200)
+        await h1.click('#solTokList .trow[data-mint="%s"]' % CS_MINT_USDC)
+        await h1.wait_for_timeout(800)
+        await h1.click("#appSolCheckShare")
+        await h1.wait_for_timeout(200)
+        h_copied = await h1.evaluate("window.__copied")
+        await h1.close()
+        expected_copy = "http://127.0.0.1:%d/t/%s?check=1" % (port, CS_MINT_USDC)
+        print("[sol fixes][F] copy this check -> %r" % h_copied)
+        assert h_copied == expected_copy, "Copy this check must copy the exact /t/<mint>?check=1 URL: %r" % h_copied
+
+        # F) کارتِ نمودار/آمار روی نمای سولانا — استخرِ برترِ همین mint +
+        # OHLCV، دقیقاً همان مسیرِ کدِ Base (drawChart/chartMsg/TFS)، فقط با
+        # منبعِ داده‌ی سولانا. mc>fdv باید هر دو عدد را پنهان کند (همان قاعده‌ی
+        # Base/renderSolStats).
+        SOL_CHART_POOL = "abcPoolId123"
+        def sol_pools_lookup_fixture():
+            return {"data": [{"id": "solana_" + SOL_CHART_POOL}]}
+        def sol_ohlcv_fixture():
+            return {"data": {"attributes": {"ohlcv_list": [
+                [1690000000, 1, 1.1, 0.9, 1.0, 1000],
+                [1690000900, 1.0, 1.2, 0.95, 1.05, 1200],
+                [1690001800, 1.05, 1.3, 1.0, 1.2, 1500],
+            ]}}}
+        async def stub_pools_lookup(route):
+            await route.fulfill(status=200, content_type="application/json", body=_json.dumps(sol_pools_lookup_fixture()))
+        async def stub_ohlcv(route):
+            await route.fulfill(status=200, content_type="application/json", body=_json.dumps(sol_ohlcv_fixture()))
+
+        ipg = await open_app()
+        # ⚠️ ترتیب مهم است: هر دوی این‌ها باید *بعد* از routeهای عمومیِ
+        # open_app ثبت شوند تا برنده باشند (Playwright آخرین ثبت را اول
+        # می‌آزماید) — /pools?page=1 زیرمجموعه‌ی همان الگویی است که
+        # cs_stub_gt (متادیتای توکن) قبلاً رویش نشسته.
+        await ipg.route("**/gt/networks/solana/tokens/*/pools**", stub_pools_lookup)
+        await ipg.route("**/gt/networks/solana/pools/%s/ohlcv/**" % SOL_CHART_POOL, stub_ohlcv)
+        await ipg.click("#srcChip")
+        await ipg.click('#srcPop [data-chain="solana"]')
+        await ipg.wait_for_timeout(150)
+        await ipg.click("#solBotBtn")
+        await ipg.wait_for_timeout(200)
+        await ipg.click('#solTokList .trow[data-mint="%s"]' % CS_MINT_USDC)
+        await ipg.wait_for_timeout(1200)
+        i_pair_name = await ipg.inner_text("#solPairName")
+        i_px_now = await ipg.inner_text("#solPxNow")
+        i_has_svg = await ipg.eval_on_selector("#solPlot", "el => !!el.querySelector('svg')")
+        i_stats_hidden = await ipg.eval_on_selector("#solTokStats", "el => el.hidden")
+        i_stats_rows = await ipg.eval_on_selector_all("#solTokStats .tstat .k", "els => els.map(e => e.textContent)")
+        await ipg.close()
+        print("[sol fixes][F-chart] pairName=%r pxNow=%r svg=%s statsHidden=%s statsRows=%s"
+              % (i_pair_name, i_px_now, i_has_svg, i_stats_hidden, i_stats_rows))
+        assert i_pair_name == "TSWP / SOL", "the chart header must show the token symbol vs SOL: %r" % i_pair_name
+        assert i_px_now != "—" and i_px_now != "", "a 3-point OHLCV fixture must render a current price: %r" % i_px_now
+        assert i_has_svg is True, "the Solana chart card must draw an SVG from the OHLCV fixture"
+        assert i_stats_hidden is False and i_stats_rows == ["Market cap", "FDV", "Volume 24h", "Liquidity"], \
+            "the Solana stats card must show the same four rows as Base: hidden=%s rows=%s" % (i_stats_hidden, i_stats_rows)
+
+        # F) نوارِ مسیرِ ژوپیتر — سه لگ از SOL_QUOTE_FIXTURE (Whirlpool،
+        # Whirlpool، Meteora DLMM)، دقیقاً همان سبکِ segment/legend رنگی.
+        jpg = await open_app()
+        await jpg.route("**/gt/networks/solana/tokens/*/pools**", stub_pools_lookup)
+        await jpg.route("**/gt/networks/solana/pools/%s/ohlcv/**" % SOL_CHART_POOL, stub_ohlcv)
+        await jpg.route("**/sol/quote**",
+                         lambda route: route.fulfill(status=200, content_type="application/json",
+                                                       body=_json.dumps(SOL_QUOTE_FIXTURE)))
+        await jpg.click("#srcChip")
+        await jpg.click('#srcPop [data-chain="solana"]')
+        await jpg.wait_for_timeout(150)
+        await jpg.click("#solBotBtn")
+        await jpg.wait_for_timeout(200)
+        await jpg.click('#solTokList .trow[data-mint="%s"]' % CS_MINT_USDC)
+        await jpg.wait_for_timeout(300)
+        j_hidden_before = await jpg.eval_on_selector("#solRouteBar", "el => el.hidden")
+        await jpg.fill("#solAmt", "1")
+        await jpg.wait_for_timeout(900)
+        j_hidden_after = await jpg.eval_on_selector("#solRouteBar", "el => el.hidden")
+        j_segs = await jpg.eval_on_selector_all("#solRbTrack .rbSeg", "els => els.length")
+        j_labels = await jpg.eval_on_selector_all("#solRbLegend > span",
+                                                    "els => els.map(e => e.textContent.replace(/\\d+%$/, ''))")
+        j_meta = await jpg.inner_text("#solRbMeta")
+        await jpg.close()
+        print("[sol fixes][F-route] hidden(before/after)=%s/%s segs=%d labels=%s meta=%r"
+              % (j_hidden_before, j_hidden_after, j_segs, j_labels, j_meta))
+        assert j_hidden_before is True, "the route bar must stay hidden before any quote exists"
+        assert j_hidden_after is False, "a live quote must reveal the route bar"
+        assert j_segs == 3, "expected exactly 3 route segments from the 3-leg fixture, got %d" % j_segs
+        assert j_labels == ["Whirlpool", "Whirlpool", "Meteora DLMM"], \
+            "the route legend must show each leg's venue label in order, got %s" % j_labels
+        assert j_meta == "3 legs", "the route meta must count legs like Base counts venues, got %r" % j_meta
+
+        print("[sol fixes] SOL budget pre-flight blocking both the CTA and a direct solDoSwap call (A); "
+              "RPC pre-simulation calling the wallet zero times on a real error and exactly once on a clean "
+              "simulation, always simulating exactly once (B); the signAndSendTransaction non-rejection "
+              "fallback to signTransaction+sendTransaction, never on an explicit rejection (C); the built-in "
+              "presets being exactly USDC/USDT with a live deduped Popular-on-Solana section (E); and the "
+              "quick 50%/MAX buttons, the clear x, the You-receive sell pill (quote/nosell/plain), the "
+              "Copy this check link, the price-chart+market-stats card (same MC>FDV sanity rule as Base) "
+              "and the Jupiter route-legs bar under the swap card (F) — all covered")
 
         # ---- [pairs filters] چیپ‌های آمار × جست‌وجو × مرتب‌سازی — ترکیب‌های
         # دقیق، رویِ یک استابِ ۶ ردیفی. ----

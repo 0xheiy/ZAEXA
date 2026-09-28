@@ -958,7 +958,25 @@ export async function fetchVerdictSol(mint, opts) {
     if (!controlSimRes.result || !controlSimRes.result.value ||
         !Object.prototype.hasOwnProperty.call(controlSimRes.result.value, "err")) return unknown("internal");
     const controlErr = controlSimRes.result.value.err;
-    if (controlErr === null) return unknown("payer-holds"); // فروشِ تنها هم موفق شد → رفت‌وبرگشت چیزی اثبات نکرد
+    if (controlErr === null) {
+      // ۲۷ سپتامبر — فی‌پیر از قبل این mint را داشت، پس شبیه‌سازیِ رفت‌وبرگشت
+      // هیچ چیزی اثبات نکرد. قبل از تسلیم به "payer-holds"، یک رفت‌وبرگشتِ
+      // *صرفاً قیمتی* را با همان دو quote (خرید در گامِ ۲، فروشِ کاملِ همان
+      // مقدار در همین‌جا — نه ۹۰٪ گامِ ۳، چون آن‌جا برای *اجرا* عمداً کم
+      // گرفته شده بود) امتحان می‌کنیم. هرگز nosell از این مسیر — فقط sell
+      // با basis:"quote"، یا همان payer-holds اگر quote هم جواب نداد.
+      if (pastDeadline()) return unknown("payer-holds");
+      const quoteSellFullRes = await jupCall(fetchImpl, jupBase, "/swap/v1/quote", {
+        query: { inputMint: mint, outputMint: SOL_MINT_ADDR, amount: quoteBuy.outAmount, slippageBps: "500" },
+      }, timeoutMs, jupKey);
+      if (!quoteSellFullRes.ok || !quoteSellFullRes.json || !quoteSellFullRes.json.outAmount)
+        return unknown("payer-holds");
+      const solBack = Number(quoteSellFullRes.json.outAmount);
+      if (!Number.isFinite(solBack) || solBack <= 0) return unknown("payer-holds");
+      const ret = Math.round((solBack / amountLamports) * 1000) / 10; // یک رقمِ اعشار
+      if (!Number.isFinite(ret) || ret <= 0) return unknown("payer-holds");
+      return { v: "sell", basis: "quote", ret };
+    }
     if (controlErr && typeof controlErr === "object" &&
         Object.prototype.hasOwnProperty.call(controlErr, "InstructionError"))
       return { v: "sell" }; // فقط اینجا — بعدِ شکستِ واقعیِ کنترل

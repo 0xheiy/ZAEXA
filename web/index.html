@@ -586,10 +586,9 @@ main{max-width:1140px;margin:0 auto;padding:8px 20px 56px;display:flex;flex-dire
    بالاتر. سوییچِ Base/Solana با همین سه id، بدونِ این قاعده هر دو کارت
    هم‌زمان دیده می‌شدند. */
 #baseHeroRow[hidden],#baseSubRow[hidden],#appSolHero[hidden]{display:none}
-/* روی /app کارتِ سولانا تکستونه می‌ماند — ستونِ اولِ خالیِ .row.hero فقط
-   برای هم‌ترازیِ گرید با Base بود و روی صفحه یک حفره‌ی بزرگ می‌ساخت. */
-#appSolHero{grid-template-columns:1fr;max-width:396px;margin-left:auto;margin-right:auto}
-#appSolHero>[aria-hidden]{display:none}
+/* F — ۲۷ سپتامبر: ستونِ اولِ appSolHero دیگر خالی نیست، کارتِ نمودار/آمار
+   دارد؛ پس همان چیدمانِ دوستونه‌ی baseHeroRow را می‌گیرد (1fr 396px)، بدونِ
+   override تکستونه‌ی قبلی. */
 .row.tkGrid{grid-template-columns:1fr 396px;align-items:start}
 @media(max-width:900px){.row.tkGrid{grid-template-columns:1fr}}
 .row.sub{grid-template-columns:1.35fr 1fr}
@@ -1443,12 +1442,37 @@ footer .fine{max-width:78ch;margin:46px 0 0;font-size:11.5px;color:var(--tx3);li
        ستونِ دوم منتقل می‌شوند — همان یک نمونه‌ای که صفحه‌ی توکن هم دارد،
        نه یک کپی. -->
   <div class="row hero" id="appSolHero" hidden>
-    <div aria-hidden="true"></div>
+    <!-- F — ۲۷ سپتامبر: کارتِ نمودار/آمارِ بازار برای توکنِ سولانایِ انتخاب‌شده،
+         عیناً چیدمانِ کارتِ Base (chartTop/tfs/plot/tstats)، فقط دادهٔ
+         solOhlcvSeries/renderSolStats. ---- -->
+    <section class="card">
+      <div class="chartTop">
+        <div>
+          <div class="pairName" id="solPairName">—</div>
+          <div class="px mono" id="solPxNow">—</div>
+          <div class="chg mono" id="solPxChg"></div>
+        </div>
+        <div class="tfs" id="solTfs">
+          <button data-tf="1H">1H</button>
+          <button data-tf="1D" class="on">1D</button>
+          <button data-tf="1W">1W</button>
+          <button data-tf="1M">1M</button>
+        </div>
+      </div>
+      <div class="plot" id="solPlot">
+        <div class="chartMsg" id="solChartMsg">Loading price history…</div>
+        <div class="tipbox" id="solTip"></div>
+      </div>
+      <div class="tstats" id="solTokStats" hidden></div>
+    </section>
     <div id="appSolHeroCol" style="display:flex;flex-direction:column;gap:18px">
       <!-- همان پوسته‌ی کارتِ Base — «Exit check & token safety»، فقط
            safetyBody (بایت‌کدِ EVM) ندارد؛ محتوا از renderSolExit می‌آید. -->
       <section class="card">
         <header><span class="ttl">Exit check &amp; token safety</span><span class="grow"></span>
+          <button class="exitShare" id="appSolCheckShare" type="button"
+            title="Copy a link that opens this token's page — no wallet needed"
+          ><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M20 9H11a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h9a2 2 0 0 0 2-2v-9a2 2 0 0 0-2-2Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>Copy this check</button>
           <span class="ttl mono" id="appSolExitSym"></span></header>
         <div class="mono" id="appSolExitAddr" style="padding:12px 20px 0;color:var(--tx3);font-size:11.5px;word-break:break-all"></div>
         <div id="appSolExitBox" style="padding:11px 20px 16px"></div>
@@ -1573,12 +1597,18 @@ footer .fine{max-width:78ch;margin:46px 0 0;font-size:11.5px;color:var(--tx3);li
       <div class="legTop"><span id="solTopLabel">You pay</span><b id="solTopBal">—</b></div>
       <div class="legRow">
         <input class="amt mono" id="solAmt" placeholder="0" inputmode="decimal" autocomplete="off">
+        <button class="clr" id="solAmtClear" type="button" title="Clear" aria-label="Clear amount"
+          hidden><svg viewBox="0 0 24 24" width="13" height="13" fill="none"
+          stroke="currentColor" stroke-width="2.4" stroke-linecap="round">
+          <path d="M6 6l12 12M18 6L6 18"/></svg></button>
         <button class="tokbtn" id="solTopBtn" type="button"><span class="av" id="solTopAv">?</span><span id="solTopSym">SOL</span></button>
       </div>
     </div>
     <div class="mid"><button id="solFlipBtn" type="button">⇅</button></div>
     <div class="leg">
-      <div class="legTop"><span id="solBotLabel">You receive</span><b id="solBotBal">—</b></div>
+      <div class="legTop"><span id="solBotLabel">You receive</span><b id="solBotBal">—</b><span class="sellPill" id="solSellPill" hidden></span></div>
+      <!-- وقتی برچسبِ فروش هست، موجودی کنارش جا نمی‌شود و به برچسب می‌چسبید («You receive—») — مثلِ Base فقط برچسب می‌ماند. -->
+      <style>.legTop:has(#solSellPill:not([hidden])) #solBotBal{display:none}</style>
       <div class="legRow">
         <input class="amt mono" id="solOutRead" placeholder="0" disabled>
         <button class="tokbtn" id="solBotBtn" type="button"><span class="av" id="solBotAv">?</span><span id="solBotSym">—</span></button>
@@ -1590,6 +1620,9 @@ footer .fine{max-width:78ch;margin:46px 0 0;font-size:11.5px;color:var(--tx3);li
       <div class="fact"><span class="k">Min received</span><span class="v mono" id="solMinF">—</span></div>
       <div class="fact"><span class="k">Route</span><span class="v mono" id="solRouteF">—</span></div>
     </div>
+    <!-- F — نوارِ مسیرِ ژوپیتر، عیناً سبکِ routeBar/rbTrack/rbLegend بالا؛
+         فقط وقتی کوتی هست دیده می‌شود (idle=hidden، نه اسکلتِ خالی). -->
+    <div class="routeBar" id="solRouteBar" hidden><div class="rbTop"><span>Route</span><span class="mono" id="solRbMeta"></span></div><div class="rbTrack" id="solRbTrack"></div><div class="rbLegend" id="solRbLegend"></div></div>
     <div id="solNotices"></div>
     <!-- ⚠️ فقط روی صفحه‌ی توکن دیده می‌شود (openSolanaTokenPage آن را
          hidden=false می‌کند). روی /app هدر خودش کیف‌پول را نشان می‌دهد —
@@ -3147,8 +3180,8 @@ function renderRoundTrip(box,x){
    فقط روی یک مسیر زندگی می‌کند» که در tripCost توضیح داده شده.
    kind یکی از "exit" (نتیجه‌ی واقعیِ renderExit، x می‌تواند null باشد)،
    "wait" (کوت در حال رفتن) یا "hidden" است. */
-function paintSellPill(kind,x){
-  const p=$("sellPill");
+function paintSellPill(kind,x,targetId){
+  const p=$(targetId||"sellPill");
   if(!p)return;
   let cls,html,title;
   if(kind==="hidden"||(kind==="exit"&&!x)){
@@ -3185,6 +3218,20 @@ function paintSellPill(kind,x){
   p.classList.add("anim");
 }
 
+/* F — همان #sellPill، همان کلاس‌ها، برای «You receive»یِ سولانا (solSwap)،
+   از رویِ حکمِ /vd (v/why/basis/ret) نه شیءِ x خودِ Base. یک "sell"ِ واقعاً
+   اجراشده (بدونِ basis:"quote") چیزی برای اندازه‌گیری ندارد — فقط اثباتِ
+   امکان — پس مثلِ رفت‌وبرگشتِ صفرهزینه‌ی Base نمایش داده می‌شود. */
+function solPaintSellPill(v,basis,ret){
+  let x;
+  if(v==="nosell")x={state:"blocked"};
+  else if(v==="sell"){
+    x=(basis==="quote"&&typeof ret==="number")
+      ?{state:"estimated",lossPct:Math.max(0,100-ret)}
+      :{state:"verified",lossPct:0};
+  }else x={state:"unknown"};
+  paintSellPill(x?"exit":"hidden",x,"solSellPill");
+}
 function renderExit(x){
   paintSellPill(x?"exit":"hidden",x);
   // نتیجه‌ی واقعی رسید — نوار دیگر منتظر نگهبانِ زمانی نیست. اسکلت (x=null)
@@ -3606,8 +3653,15 @@ async function pairSeries(tIn,tOut,cfg){
   const m=new Map(sIn.map(p=>[p.t,p.c]));
   return sOut.map(p=>{const a=m.get(p.t);return a?{t:p.t,c:p.c/a}:null;}).filter(Boolean);
 }
-function chartMsg(t){panel("chartMsg").style.display="grid";panel("chartMsg").textContent=t;
-  const s=panel("plot").querySelector("svg");if(s)s.remove();}
+// F — chartMsg/drawChart گرفتنِ عنصرها را می‌گذارند رویِ opts.msgEl/opts.plotEl
+// (پیش‌فرض همان panel("chartMsg")/panel("plot") امروز) تا solLoadChart همین
+// دو تابع را برای کارتِ نمودارِ سولانا هم به‌کار ببرد، بدونِ کپیِ SVG.
+function chartMsg(t,opts){
+  const o=opts||{};
+  const msgEl=o.msgEl||panel("chartMsg"),plotEl=o.plotEl||panel("plot");
+  msgEl.style.display="grid";msgEl.textContent=t;
+  const s=plotEl.querySelector("svg");if(s)s.remove();
+}
 
 let chartTries=0,chartRetry=null,chartKey="";
 async function loadChart(){
@@ -3659,8 +3713,11 @@ function fmtPx(n){
   if(n>=0.0001)return n.toFixed(6);
   return n.toExponential(3);
 }
-function drawChart(data){
-  const host=panel("plot");
+function drawChart(data,opts){
+  const o=opts||{};
+  const host=o.plotEl||panel("plot");
+  const tf=o.tf||timeframe;
+  const unitSymbol=o.unitSymbol!==undefined?o.unitSymbol:(tokenIn&&tokenIn.symbol);
   const old=host.querySelector("svg");if(old)old.remove();
   const W=host.clientWidth||620,H=host.clientHeight||236;
   const PL=8,PR=56,PT=14,PB=22;
@@ -3705,7 +3762,7 @@ function drawChart(data){
     tx.setAttribute("y",H-5);tx.setAttribute("font-size","11");
     tx.setAttribute("fill","var(--tx3)");
     tx.setAttribute("text-anchor",k===0?"start":k===2?"end":"middle");
-    tx.textContent=new Date(data[i].t*1000).toLocaleString("en-US",TFS[timeframe].fmt);
+    tx.textContent=new Date(data[i].t*1000).toLocaleString("en-US",TFS[tf].fmt);
     svg.appendChild(tx);
   });
 
@@ -3732,7 +3789,7 @@ function drawChart(data){
   dot.setAttribute("opacity","0");
   svg.appendChild(dot);
 
-  const tip=panel("tip");
+  const tip=o.tipEl||panel("tip");
   svg.addEventListener("mousemove",ev=>{
     const r=svg.getBoundingClientRect();
     const px=(ev.clientX-r.left)*(W/r.width);
@@ -3746,12 +3803,79 @@ function drawChart(data){
     tip.style.opacity="1";
     tip.style.left=(x/W*r.width)+"px";
     tip.style.top=(y/H*r.height)+"px";
-    tip.innerHTML=`<b class="mono">${fmtPx(data[i].c)} ${esc(tokenIn.symbol)}</b>
+    tip.innerHTML=`<b class="mono">${fmtPx(data[i].c)}${unitSymbol?" "+esc(unitSymbol):""}</b>
       <span>${new Date(data[i].t*1000).toLocaleString()}</span>`;
   });
   svg.addEventListener("mouseleave",()=>{
     cross.setAttribute("opacity","0");dot.setAttribute("opacity","0");tip.style.opacity="0";});
   host.appendChild(svg);
+}
+
+/* ---------------------------------------------------------------------
+   F — نمودارِ قیمت روی نمای سولانا: همان drawChart/chartMsg/fmtPx/TFS
+   بالا، فقط منبعِ داده جدا (استخرِ برترِ همین mint روی خودِ سولانا، نه
+   یک نسبتِ دو-پایه‌ی Base). کشِ خودش دارد — poolCache/lsGet بالا با
+   toLowerCase کار می‌کنند و mint سولانا حساسِ به حروف است، پس نباید در
+   همان کش بنشیند. --------------------------------------------------- */
+const solPoolCache=new Map();
+async function topPoolForSolana(mint){
+  if(solPoolCache.has(mint))return solPoolCache.get(mint);
+  const j=await gtJson(`${GT}/networks/solana/tokens/${mint}/pools?page=1`);
+  const list=(j&&j.data)||[];
+  const id=list.length?String(list[0].id||"").split("_").pop():null;
+  if(id)solPoolCache.set(mint,id);
+  return id;
+}
+async function solOhlcvSeries(mint,cfg){
+  const pool=await topPoolForSolana(mint);
+  if(!pool)throw new Error("no pool");
+  const j=await gtJson(`${GT}/networks/solana/pools/${pool}/ohlcv/${cfg.tf}`+
+    `?aggregate=${cfg.agg}&limit=${cfg.limit}&currency=usd`);
+  const raw=(((j||{}).data||{}).attributes||{}).ohlcv_list||[];
+  if(!raw.length)throw new Error("empty");
+  return raw.map(r=>({t:Number(r[0]),c:Number(r[4])}))
+            .filter(p=>isFinite(p.c)&&p.c>0).sort((a,b)=>a.t-b.t);
+}
+let solChartSeq=0,solChartTries=0,solChartRetry=null,solChartKey="",solTimeframe="1D";
+function solChartEls(){
+  return {plotEl:$("solPlot"),msgEl:$("solChartMsg"),tipEl:$("solTip")};
+}
+async function solLoadChart(){
+  const seq=++solChartSeq;
+  const mint=solMintCur;
+  if(!mint||!$("solPlot"))return;
+  const key=mint+">"+solTimeframe;
+  if(key!==solChartKey){solChartKey=key;solChartTries=0;clearTimeout(solChartRetry);}
+  const els=solChartEls();
+  chartMsg("Loading price history…",els);
+  if($("solPxNow")){$("solPxNow").textContent="—";}
+  if($("solPxChg")){$("solPxChg").textContent="";}
+  try{
+    const data=await solOhlcvSeries(mint,TFS[solTimeframe]);
+    if(seq!==solChartSeq)return;
+    if(!data||data.length<2){chartMsg("Not enough price history for this pair yet.",els);return;}
+    els.msgEl.style.display="none";
+    drawChart(data,Object.assign({unitSymbol:null,tf:solTimeframe},els));
+    const first=data[0].c,last=data[data.length-1].c;
+    if($("solPxNow"))$("solPxNow").textContent=fmtPx(last);
+    if($("solPxChg")){
+      const ch=((last-first)/first)*100;
+      const el=$("solPxChg");
+      el.className="chg mono "+(ch>=0?"up":"down");
+      el.textContent=(ch>=0?"▲ ":"▼ ")+Math.abs(ch).toFixed(2)+"%  ·  "+solTimeframe;
+    }
+    solChartTries=0;
+  }catch(e){
+    if(seq!==solChartSeq)return;
+    if(solChartTries<2){
+      solChartTries++;
+      chartMsg("Loading price history…",els);
+      clearTimeout(solChartRetry);
+      solChartRetry=setTimeout(()=>{if(seq===solChartSeq)solLoadChart();},1400*solChartTries);
+      return;
+    }
+    chartMsg("Price history is unavailable right now. Quotes and routing below are live and unaffected.",els);
+  }
 }
 
 /* =====================================================================
@@ -4302,6 +4426,9 @@ let solTokenDecimals=null;      // دسیمالِ توکن، از حسابِ ت�
 let solTokenSymbol=null;        // نمادِ توکن (چیپ/فکت‌ها) — از fetchSolMeta
 let solTokenLogoUrl=null;       // image_url گِکوترمینال، برای چیپِ توکن
 let solBalSol=null,solBalTok=null; // موجودی‌ها، به واحدِ انسانی (نه lamports خام)
+// آیا حسابِ توکنِ (ATA) خروجی از قبل روی زنجیره هست؟ null=هنوز نمی‌دانیم
+// (محافظه‌کارانه یعنی «رنت لازم است»، تا CTA زودتر از موعد باز نشود).
+let solOutAtaExists=null;
 let solSide="buy";              // "buy" (SOL→توکن) یا "sell" (توکن→SOL)
 let solVerdictV=null;           // "sell"/"nosell"/null از GET /vd/<mint>
 let solQuoteSeq=0;              // برای دورریختنِ کوت‌های دیرِ رسیده
@@ -4329,9 +4456,12 @@ function initialChain(){
   return readStoredChain()||"base";
 }
 let activeChain="base";
+// ۲۷ سپتامبر — JUP از این فهرست حذف شد: mint‌اش هیچ‌وقت راستی‌آزمایی نشده
+// بود و روی GeckoTerminal ۴۰۴ و روی جوپیتر خودش ۴۰۰ می‌گیرد. USDC/USDT
+// همین امروز از GT دوباره تأیید شدند (۶ رقمِ اعشار، هر دو).
+const SOL_MINT_ADDR="So11111111111111111111111111111111111111112";
 const SOL_APP_TOKENS={USDC:"EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
-  USDT:"Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB",
-  JUP:"JUPyiwrYJFskUPiHa7hkeR8VUtAeFLoSkaw7aW2guKZ"};
+  USDT:"Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB"};
 const SOL_MINT_RE=/^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
 function paintSrc2(){
   // امضای گزینشگر (تیک/نامعلوم روی گزینه‌ی فعال)
@@ -4409,15 +4539,22 @@ async function solAppLoadToken(mint){
   $("appSolExitAddr").textContent=mint;
   solPaintLegs();
   renderSolExit(null,null,"appSolExitBox");
+  solPaintSellPill(null,null,null);
   const[meta,verdict]=await Promise.all([fetchSolMeta(mint),fetchVdVerdict(mint)]);
   solVerdictV=verdict.v;
   if(meta&&Number.isInteger(meta.decimals))solTokenDecimals=meta.decimals;
   solTokenSymbol=(meta&&meta.symbol)||(preset&&preset.symbol)||"Unknown";
   solTokenLogoUrl=(meta&&meta.image_url)||null;
   $("appSolExitSym").textContent=solTokenSymbol;
-  renderSolExit(verdict.v,verdict.why,"appSolExitBox");
+  renderSolExit(verdict.v,verdict.why,"appSolExitBox",verdict.basis,verdict.ret);
+  solPaintSellPill(verdict.v,verdict.basis,verdict.ret);
   solPaintLegs();
   solSwapApplyGate();
+  // F — کارتِ نمودار/آمار: عنوانِ جفت فوراً (بدونِ صبر برای GT)، بعد
+  // renderSolStats از همان meta که بالاتر گرفته شد (تماسِ GTِ دومی لازم نیست).
+  if($("solPairName"))$("solPairName").textContent=solTokenSymbol+" / SOL";
+  renderSolStats(meta,"solTokStats");
+  solLoadChart();
 }
 /* ---- چیدمانِ دو پایه، عیناً چیدمانِ Base: بالا همیشه «You pay» (فیلدِ
    قابلِ‌ویرایش)، پایین همیشه «You receive» (فقط‌خواندنی). فلیپ فقط این را
@@ -4462,15 +4599,52 @@ function solPaintLegs(){
 const SOL_APP_TOKEN_LIST=[
   {symbol:"USDC",name:"USD Coin",mint:SOL_APP_TOKENS.USDC},
   {symbol:"USDT",name:"Tether USD",mint:SOL_APP_TOKENS.USDT},
-  {symbol:"JUP",name:"Jupiter",mint:SOL_APP_TOKENS.JUP},
 ];
 function solOpenTokenPicker(){
   $("solTokSearch").value="";
   solRenderTokenPicker("");
   $("solTokOv").classList.add("on");
   setTimeout(()=>$("solTokSearch").focus(),30);
+  solLoadPopular();
 }
 function solCloseTokenPicker(){$("solTokOv").classList.remove("on");}
+/* ---- E — «Popular on Solana»، زنده از GET /gt/networks/solana/pools ----
+   یک تماس، یک‌بار در هر بازشدنِ گزینشگر (نه به‌ازای هر حرفِ جست‌وجو).
+   dedupe با base_token.id؛ SOL/USDC/USDT (همان فهرستِ بالا) کنار گذاشته
+   می‌شوند چون از قبل ردیفِ خودشان را دارند. شکستِ این تماس یعنی بخش
+   اصلاً نیست — هیچ جای‌گزینِ ساختگی/کش‌شده‌ای نمی‌گذاریم. */
+let solPopularCache=null,solPopularLoading=null;
+async function solLoadPopular(){
+  if(solPopularCache){solRenderTokenPicker($("solTokSearch").value);return;}
+  if(!solPopularLoading){
+    solPopularLoading=(async()=>{
+      try{
+        const j=await gtJson(GT+"/networks/solana/pools?page=1");
+        const rows=(j&&j.data)||[];
+        const skip=new Set([SOL_MINT_ADDR,SOL_APP_TOKENS.USDC,SOL_APP_TOKENS.USDT]);
+        const seen=new Set();
+        const out=[];
+        for(const row of rows){
+          const rel=row&&row.relationships&&row.relationships.base_token&&row.relationships.base_token.data;
+          const id=rel&&rel.id; // شکل: "solana_<mint>"
+          if(!id||!id.startsWith("solana_"))continue;
+          const mint=id.slice("solana_".length);
+          if(!SOL_MINT_RE.test(mint)||skip.has(mint)||seen.has(mint))continue;
+          seen.add(mint);
+          const attrs=row.attributes||{};
+          const nm=(attrs.name||"").split(" / ")[0]||"";
+          const sym=nm.split(" ")[0]||shortAddr(mint);
+          out.push({symbol:sym,name:nm||sym,mint,image_url:attrs.image_url||null});
+          if(out.length>=8)break;
+        }
+        solPopularCache=out;
+      }catch{solPopularCache=[];}
+      finally{solPopularLoading=null;}
+    })();
+  }
+  await solPopularLoading;
+  solRenderTokenPicker($("solTokSearch").value);
+}
 function solRenderTokenPicker(q){
   const list=$("solTokList"),query=(q||"").trim();
   const ql=query.toLowerCase();
@@ -4488,14 +4662,29 @@ function solRenderTokenPicker(q){
   }else if(!rows.length){
     html='<div class="empty">Nothing found. Paste a mint address to use it.</div>';
   }
+  // بخشِ «Popular on Solana» — فقط وقتی چیزی داریم و جست‌وجو خالی است؛
+  // شکستِ تماس (solPopularCache===[]/null) یعنی این بخش اصلاً نیست.
+  const popularRows=(!ql&&solPopularCache&&solPopularCache.length)?solPopularCache:[];
+  const popOffset=rows.length;
+  if(popularRows.length){
+    html+='<div class="ttl" style="padding:10px 4px 4px;font-size:11px;color:var(--tx3)">Popular on Solana</div>'+
+      popularRows.map((t,i)=>`<button class="trow" data-mint="${esc(t.mint)}">
+          <span class="av" data-picktokpop="${i}">${esc(t.symbol.slice(0,3).toUpperCase())}</span>
+          <span><span class="s">${esc(t.symbol)}</span><br><span class="a mono">${shortAddr(t.mint)}</span></span>
+        </button>`).join("");
+  }
   list.innerHTML=html;
   list.querySelectorAll(".trow").forEach(el=>el.onclick=()=>solAppLoadToken(el.dataset.mint));
-  // لوگوهای سه‌تای شناخته‌شده — یک fetchSolMeta هرکدام، فقط وقتی گزینشگر باز است
+  // لوگوهای شناخته‌شده — یک fetchSolMeta هرکدام، فقط وقتی گزینشگر باز است
   rows.forEach((t,i)=>{
     fetchSolMeta(t.mint).then(meta=>{
       const el=list.querySelector(`[data-picktok="${i}"]`);
       if(el)solPaintAvatarIntoEl(el,t.symbol,meta&&meta.image_url);
     });
+  });
+  popularRows.forEach((t,i)=>{
+    const el=list.querySelector(`[data-picktokpop="${i}"]`);
+    if(el)solPaintAvatarIntoEl(el,t.symbol,t.image_url);
   });
 }
 function solPaintAvatarIntoEl(el,symbol,logoUrl){
@@ -6463,7 +6652,7 @@ async function fetchVdVerdict(mint){
   try{
     const r=await withTimeout(fetch(location.origin+"/vd/"+mint,
       {headers:{accept:"application/json"}}),9000);
-    if(!r.ok)return {v:null,why:null,cause:null,ret:null};
+    if(!r.ok)return {v:null,why:null,cause:null,ret:null,basis:null};
     const j=await r.json();
     const v=(j&&(j.v==="sell"||j.v==="nosell"))?j.v:null;
     const why=(j&&typeof j.why==="string")?j.why:null;
@@ -6474,8 +6663,12 @@ async function fetchVdVerdict(mint){
     // محدود به بازه‌ی معتبرِ (۰،۱۰۰۰] — بیرونِ این بازه یعنی نداریم، نه صفر.
     const ret=(v==="sell"&&typeof j.ret==="number"&&isFinite(j.ret)&&j.ret>0&&j.ret<=1000)
       ?j.ret:null;
-    return {v,why,cause,ret};
-  }catch{return {v:null,why:null,cause:null,ret:null};}
+    // basis:"quote" — فقط سولانا، وقتی فی‌پیر از قبل mint را داشت و حکم از
+    // رفت‌وبرگشتِ *قیمتی* (نه اجرا) آمده — کارتِ exit-check باید بگوید
+    // «تخمینی از quote»، نه اینکه مثلِ یک رفت‌وبرگشتِ واقعاً اجراشده جا بزند.
+    const basis=(v==="sell"&&j.basis==="quote")?"quote":null;
+    return {v,why,cause,ret,basis};
+  }catch{return {v:null,why:null,cause:null,ret:null,basis:null};}
 }
 
 /* هویت + عکسِ آواتار، از رویِ داده‌ی خامِ GeckoTerminal — نه paintAvatar
@@ -6498,9 +6691,10 @@ function paintSolAvatar(meta){
 /* چهار عددِ بازار — دقیقاً همان قاعده‌ی renderTokenStats (مارکت‌کپ > FDV
    محال است، آن جفت پنهان می‌شود؛ همه‌چیز «—» یعنی جعبه‌ای نشان نده)، ولی
    از رویِ attributes خامی که خودمان گرفته‌ایم، نه از tokenMeta/BASE_TOKENS. */
-function renderSolStats(a){
-  const box=$("tk-tokStats");if(!box)return;
+function renderSolStats(a,targetId){
+  const box=$(targetId||"tk-tokStats");if(!box)return;
   if(!a){box.hidden=true;return;}
+  const rowClass=(targetId==="solTokStats")?"tstat":"tkStat"; // همان قاعده‌ی renderTokenStats
   const num=v=>(v==null||v==="")?null:Number(v);
   const mc=num(a.market_cap_usd),fdv=num(a.fdv_usd);
   const impossiblePair=mc!=null&&fdv!=null&&isFinite(mc)&&isFinite(fdv)&&mc>0&&fdv>0&&mc>fdv*1.01;
@@ -6512,7 +6706,7 @@ function renderSolStats(a){
   ];
   if(rows.every(r=>r[1]==="—")){box.hidden=true;return;}
   box.innerHTML=rows.map(([k,v])=>
-    `<div class="tkStat"><div class="k">${esc(k)}</div><div class="v">${esc(v)}</div></div>`).join("")+
+    `<div class="${rowClass}"><div class="k">${esc(k)}</div><div class="v">${esc(v)}</div></div>`).join("")+
     (impossiblePair?'<div class="statNote">Market cap and FDV are hidden. The price source '+
       'reported a market cap larger than the fully diluted value, which is impossible — '+
       'one of the two is wrong and we cannot tell which.</div>':"");
@@ -6526,9 +6720,21 @@ function renderSolStats(a){
    همین یک شاخه را می‌گیرد، حتی وقتی why دارد.
    زیرِ ?dev=1، why خام هم کنارش می‌آید — همان جایی که دفعه‌ی بعد از آنجا
    می‌خوانیمش (devMuted، نه یک پرچمِ تازه). */
-function renderSolExit(v,why,targetId){
+function renderSolExit(v,why,targetId,basis,ret){
   const box=$(targetId||"tk-exitBox");if(!box)return;
   if(v==="sell"){
+    // basis:"quote" — فی‌پیر از قبل این mint را داشت؛ حکم از یک رفت‌وبرگشتِ
+    // *قیمتی* آمده، نه از شبیه‌سازیِ واقعاً اجراشده. همان واژه/سبکِ نشانِ
+    // Base برای این حالت: «Estimated from quotes».
+    if(basis==="quote"){
+      const pct=typeof ret==="number"?ret.toFixed(1)+"% back":"—";
+      box.innerHTML=`<div class="tripHead">
+          <span class="tripPct" style="color:var(--pos)">Sell route found</span>
+          <span class="tripBadge" style="color:var(--tx2);background:var(--raise)">ESTIMATED FROM QUOTES</span>
+        </div>
+        <div class="tripNote">From quotes — the fee-payer already holds this token, so we could not run a live round trip. ${esc(pct)}.</div>`;
+      return;
+    }
     box.innerHTML=`<div class="tripHead">
         <span class="tripPct" style="color:var(--pos)">Sell route found</span>
         <span class="tripBadge" style="color:var(--pos);background:var(--pglow)">Quoted just now</span>
@@ -6598,7 +6804,8 @@ async function openSolanaTokenPage(mint){
     :"—";
   paintSolAvatar(meta);
   renderSolStats(meta);
-  renderSolExit(verdict.v,verdict.why);
+  renderSolExit(verdict.v,verdict.why,null,verdict.basis,verdict.ret);
+  solPaintSellPill(verdict.v,verdict.basis,verdict.ret);
 
   solVerdictV=verdict.v;
   if(meta&&Number.isInteger(meta.decimals))solTokenDecimals=meta.decimals;
@@ -6812,10 +7019,65 @@ async function solRefreshBalances(){
       }
     }
     solBalTok=found?sum:0;
+    solOutAtaExists=found;                      // همان تماس، همان «ATA از قبل هست؟»
     if(dec!=null)solTokenDecimals=dec;         // اولویت با خودِ حسابِ توکن
-  }catch{solBalTok=null;}
+  }catch{solBalTok=null;solOutAtaExists=null;}
   solPaintBalance();
   solSwapApplyGate();
+}
+/* ---- بودجه‌ی SOL — پیش‌شرطِ ساختنِ تراکنش، قبل از هر چیزِ دیگر ----
+   A: کف SOL‌ای که فی‌پیر (خودِ کاربر) باید نگه دارد تا کارمزد و رنتِ
+   احتمالیِ همین تراکنش را بدهد. حالتِ نامعلوم (solOutAtaExists===null)
+   محافظه‌کارانه یعنی «رنت لازم است» — بهتر از قبول‌کردنِ چیزی که ممکن است
+   با «SOL کافی نیست» در کیف‌پول رد شود. */
+function solReserveSol(){
+  if(solSide==="sell"){
+    // فروش به SOL بومی: نیازی به ATA تازه نیست، فقط کارمزد.
+    return 0.00101;
+  }
+  // solOutAtaExists از همان getTokenAccountsByOwner که موجودی را هم می‌آورد:
+  // true یعنی حسابِ توکن از قبل هست (رنت لازم نیست)، false یعنی مطمئنیم
+  // نیست (رنت لازم است)، null یعنی هنوز نمی‌دانیم — محافظه‌کارانه یعنی رنت.
+  const needAta=solOutAtaExists!==true;
+  return (needAta?0.00204:0)+0.001+0.00001;
+}
+/* پیامِ دقیق کنارِ CTA وقتی SOL کم است — amt همان مبلغِ SOL این معامله
+   (side="buy": amtIn؛ side="sell": صفر، چون ورودی توکن است). */
+function solBudgetCheck(amtSol){
+  const reserve=solReserveSol();
+  const need=(solSide==="buy"?(Number(amtSol)||0):0)+reserve;
+  if(solBalSol==null)return {ok:true}; // موجودی هنوز نمی‌دانیم — گیتِ دیگری (Connect wallet) این را می‌گیرد
+  if(solBalSol<need){
+    return {ok:false,need,msg:"Not enough SOL — you need about "+need.toFixed(5)+
+      " SOL including network fees."};
+  }
+  return {ok:true};
+}
+/* MAX روی پایه‌ی SOL دقیقاً همین رزرو را کنار می‌گذارد — نه صفر. */
+function solMaxSolAmount(){
+  if(solBalSol==null)return 0;
+  return Math.max(0,solBalSol-solReserveSol());
+}
+// F — دقیقاً همان setPayFraction/frac بالا برای Base، برای پایه‌ی «You pay»
+// روی سولانا: 50%/MAX از رویِ موجودیِ *قابلِ‌خرج* (برای SOL، منهایِ همان
+// رزروِ قاعده‌ی A؛ برای توکن، کلِ موجودی).
+function solSpendableTop(){
+  if(solSide==="buy")return solBalSol==null?null:solMaxSolAmount();
+  return solBalTok;
+}
+function setSolPayFraction(num,den){
+  const v=solSpendableTop();
+  if(v==null)return;
+  const amt=(v*num)/den;
+  $("solAmt").value=amt>0?amt.toFixed(6):"";
+  solOnAmtInput();
+}
+// F — همان amtClear بالا، برای solAmt: × فقط وقتی فیلد مقدار دارد.
+function solOnAmtInput(){
+  const clr=$("solAmtClear");
+  if(clr)clr.hidden=!$("solAmt").value;
+  solScheduleQuote();
+  solUpdateSwapBtn();
 }
 function solPaintBalance(){
   const buy=solSide==="buy";
@@ -6823,7 +7085,15 @@ function solPaintBalance(){
   if(!solAccount){topB.textContent="—";botB.textContent="—";return;}
   const solTxt=solBalSol!=null?solBalSol.toFixed(4)+" SOL":"—";
   const tokTxt=solBalTok!=null?solBalTok.toLocaleString(undefined,{maximumFractionDigits:6})+" "+(solTokenSymbol||""):"—";
-  topB.textContent=buy?solTxt:tokTxt;
+  const topTxt=buy?solTxt:tokTxt;
+  if(solSpendableTop()!=null){
+    topB.innerHTML=esc(topTxt)+' <button class="frac" id="solHalf" type="button">50%</button>'+
+      '<button class="frac" id="solMaxb" type="button">MAX</button>';
+    $("solHalf").onclick=()=>setSolPayFraction(1,2);
+    $("solMaxb").onclick=()=>setSolPayFraction(1,1);
+  }else{
+    topB.textContent=topTxt;
+  }
   botB.textContent=buy?tokTxt:solTxt;
 }
 
@@ -6844,7 +7114,6 @@ async function solFetchQuote(){
     solUpdateSwapBtn();
     return;
   }
-  const SOL_MINT_ADDR="So11111111111111111111111111111111111111112";
   const inputMint=solSide==="buy"?SOL_MINT_ADDR:solMintCur;
   const outputMint=solSide==="buy"?solMintCur:SOL_MINT_ADDR;
   const decIn=solSide==="buy"?9:solTokenDecimals;
@@ -6883,6 +7152,30 @@ function solRouteLabel(q){
   }
   return labels.length?labels.join(" → "):"—";
 }
+// F — رنگ‌های نوارِ مسیر، فقط چرخشی روی چند رنگِ ثابتِ توکن — Jupiter dex id
+// یک فهرستِ بسته مثلِ VENUE_COLORِ Base ندارد که رویش نگاشت کنیم.
+const SOL_ROUTE_COLORS=["var(--pos)","var(--warn)","var(--neg)","var(--tx3)","#8b5cf6","#06b6d4"];
+function solRenderRouteBar(q){
+  const bar=$("solRouteBar");if(!bar)return;
+  const steps=(q&&Array.isArray(q.routePlan))?q.routePlan:[];
+  if(!steps.length){bar.hidden=true;return;}
+  let segs="",leg="",title="";
+  steps.forEach((step,i)=>{
+    const info=(step&&step.swapInfo)||{};
+    const label=info.label||"—";
+    const pctRaw=typeof step.percent==="number"?step.percent:(100/steps.length);
+    const pct=Math.round(pctRaw);
+    const color=SOL_ROUTE_COLORS[i%SOL_ROUTE_COLORS.length];
+    segs+=`<div class="rbSeg" style="background:${color};flex:0 0 ${pctRaw}%;animation-delay:${i*60}ms"></div>`;
+    leg+=`<span><i style="background:${color}"></i>${esc(label)}<span class="mono">${pct}%</span></span>`;
+    title+=(title?", ":"")+label+" "+pct+"%";
+  });
+  $("solRbTrack").innerHTML=segs;
+  $("solRbLegend").innerHTML=leg;
+  $("solRbLegend").title=title;
+  $("solRbMeta").textContent=steps.length>1?steps.length+" legs":"1 leg";
+  bar.hidden=false;
+}
 function solRenderReadout(){
   const buy=solSide==="buy";
   const inSym=buy?"SOL":(solTokenSymbol||"—");
@@ -6893,6 +7186,7 @@ function solRenderReadout(){
     $("solImpactF").textContent="—";
     $("solRouteF").textContent="—";
     $("solRate").textContent="—";
+    solRenderRouteBar(null);
     return;
   }
   const decIn=buy?9:solTokenDecimals;
@@ -6909,6 +7203,7 @@ function solRenderReadout(){
   const rate=(isFinite(inAmt)&&inAmt>0&&isFinite(out))?(out/inAmt):null;
   $("solRate").textContent=rate!=null
     ?("1 "+inSym+" = "+rate.toLocaleString("en-US",{maximumFractionDigits:6})+" "+outSym):"—";
+  solRenderRouteBar(solQuote);
 }
 
 /* ---- گیت‌کردنِ خرید روی حکمِ فروش — قاعده‌ی امنیتیِ صاحب سایت ---- */
@@ -6948,6 +7243,11 @@ function solUpdateSwapBtn(){
   }
   if(!solAccount){btn.disabled=true;btn.textContent="Connect wallet";return;}
   if(!solQuote){btn.disabled=true;btn.textContent="Enter an amount";return;}
+  // A — بودجه‌ی SOL، پیش از هرچیزِ دیگر: کیف‌پول اصلاً صدا زده نمی‌شود اگر
+  // این کاربر آشکارا کارمزد/رنتِ همین معامله را ندارد.
+  const amtSol=solSide==="buy"?parseFloat(($("solAmt").value||"0")):0;
+  const budget=solBudgetCheck(amtSol);
+  if(!budget.ok){btn.disabled=true;btn.textContent=budget.msg;return;}
   btn.disabled=false;
   btn.textContent="Swap";
 }
@@ -6978,8 +7278,34 @@ async function solPollStatus(sig){
   solSetNotice(note("warn","<b>Still pending — check Solscan.</b> "+
     `<a href="https://solscan.io/tx/${esc(sig)}" target="_blank" rel="noopener">View on Solscan</a>`));
 }
+/* واژه‌نامه‌ی بسته‌ی دلیلِ شکستِ شبیه‌سازی — هرگز از رویِ متنِ آزادِ خطا،
+   فقط از رویِ شکلِ err/simulationError. Rule B. */
+function solSimFailReason(err,simErr){
+  if(simErr&&typeof simErr.errorCode==="string")return simErr.errorCode;
+  if(err&&typeof err==="object"){
+    if(err.InstructionError){
+      const ie=err.InstructionError;
+      const code=Array.isArray(ie)?ie[1]:null;
+      const custom=code&&typeof code==="object"?code.Custom:null;
+      if(custom===6001||custom===0x1771)return "slippage";
+      const s=JSON.stringify(err);
+      if(/InsufficientFunds/i.test(s))return "insufficient-sol";
+    }
+  }
+  return null;
+}
+function solSimFailMessage(reason){
+  if(reason==="insufficient-sol")return "This swap would fail on-chain: not enough SOL for fees and account rent.";
+  if(reason==="slippage")return "This swap would fail on-chain: price moved — try again or raise slippage.";
+  return "This swap would fail on-chain: simulation failed.";
+}
 async function solDoSwap(){
   if(solSwapBusy||!solAccount||!solQuote)return;
+  // A — دوباره همین‌جا، نه فقط روی دکمه: یک رخدادِ مسابقه‌ای (دکمه فعال شد،
+  // بعد موجودی/کوت عوض شد) هرگز نباید کیف‌پول را صدا بزند.
+  const amtSolGuard=solSide==="buy"?parseFloat(($("solAmt").value||"0")):0;
+  const budgetGuard=solBudgetCheck(amtSolGuard);
+  if(!budgetGuard.ok){solSetNotice(note("err","<b>"+esc(budgetGuard.msg)+"</b>"));return;}
   solSwapBusy=true;
   const btn=$("solSwapBtn");
   btn.disabled=true;btn.textContent="Building transaction…";
@@ -6991,6 +7317,13 @@ async function solDoSwap(){
     const j=await r.json().catch(()=>null);
     if(!r.ok||!j||j.error||!j.swapTransaction)throw new Error((j&&j.error)||"could not build the transaction");
 
+    // B — simulationErrorِ خودِ جوپیتر، اگر آمده باشد، همان شکستِ زیر را
+    // می‌سازد؛ کیف‌پول اصلاً صدا زده نمی‌شود.
+    if(j.simulationError){
+      solSetNotice(note("err","<b>"+esc(solSimFailMessage(j.simulationError.errorCode))+"</b>"));
+      return;
+    }
+
     const txBytes=solB64ToBytes(j.swapTransaction);
     const feePayer=solParseFeePayer(txBytes);
     if(!feePayer||!solBytesEq(feePayer,solAccount.publicKey)){
@@ -6998,17 +7331,54 @@ async function solDoSwap(){
       return;
     }
 
+    // B — پیش‌شبیه‌سازیِ خودمان، پیش از رفتنِ سراغِ کیف‌پول. دقیقاً همان
+    // شکلِ توصیه‌شده‌ی فانتوم (sigVerify:false). شکستِ خودِ تماسِ RPC هرگز
+    // به‌معنیِ «تراکنش رد می‌شود» نیست — فقط یعنی نمی‌دانیم، پس در آن حالت
+    // به کیف‌پول اجازه می‌دهیم خودش تصمیم بگیرد (رفتارِ امروز).
+    btn.textContent="Checking the transaction…";
+    try{
+      const simRes=await solRpcCall("simulateTransaction",
+        [j.swapTransaction,{encoding:"base64",sigVerify:false,replaceRecentBlockhash:true,commitment:"processed"}]);
+      const err=simRes&&Object.prototype.hasOwnProperty.call(simRes,"value")?simRes.value.err:undefined;
+      if(err){
+        const reason=solSimFailReason(err,null);
+        solSetNotice(note("err","<b>"+esc(solSimFailMessage(reason))+"</b>"));
+        return;
+      }
+    }catch{/* شکستِ خودِ RPC — نامعلوم، نه ریوِرت؛ مسیرِ قدیمی ادامه پیدا می‌کند */}
+
     const swapInSym=solSide==="buy"?"SOL":(solTokenSymbol||"—");
     const swapOutSym=solSide==="buy"?(solTokenSymbol||"—"):"SOL";
     btn.textContent=`Confirm ${$("solAmt").value||""} ${swapInSym} → ${swapOutSym} in wallet…`;
     const f=solWalletApi.features;
     let sigB58=null;
     if(f["solana:signAndSendTransaction"]){
-      const res=await f["solana:signAndSendTransaction"].signAndSendTransaction(
-        {account:solAccount,transaction:txBytes,chain:"solana:mainnet"});
-      const row=res&&res[0];
-      if(!row||!row.signature)throw new Error("wallet returned no signature");
-      sigB58=solBs58Encode(row.signature);
+      try{
+        const res=await f["solana:signAndSendTransaction"].signAndSendTransaction(
+          {account:solAccount,transaction:txBytes,chain:"solana:mainnet"});
+        const row=res&&res[0];
+        if(!row||!row.signature)throw new Error("wallet returned no signature");
+        sigB58=solBs58Encode(row.signature);
+      }catch(e){
+        // C — یک رد صریحِ کاربر هرگز به fallback نمی‌رود؛ فقط یک خطای
+        // غیرِرد (مثلِ "Expected String" که فانتوم زده) و فقط اگر کیف‌پول
+        // امضای جدا هم دارد.
+        if(isUserRejection(e)||!f["solana:signTransaction"])throw e;
+        btn.textContent="Retrying with your wallet's signing method…";
+        const res2=await f["solana:signTransaction"].signTransaction(
+          {account:solAccount,transaction:txBytes,chain:"solana:mainnet"});
+        const row2=res2&&res2[0];
+        if(!row2||!row2.signedTransaction){
+          const err2=new Error("Swap failed in your wallet: "+((e&&e.message)||"unknown error"));
+          err2.walletDetails=(e&&(e.name||e.code))||null;
+          throw err2;
+        }
+        const signedBytes2=row2.signedTransaction;
+        sigB58=solBs58Encode(signedBytes2.slice(1,65));
+        btn.textContent="Sending…";
+        await solRpcCall("sendTransaction",[solBytesToB64(signedBytes2),
+          {encoding:"base64",skipPreflight:false,maxRetries:5}]);
+      }
     }else if(f["solana:signTransaction"]){
       const res=await f["solana:signTransaction"].signTransaction(
         {account:solAccount,transaction:txBytes,chain:"solana:mainnet"});
@@ -7029,6 +7399,12 @@ async function solDoSwap(){
     solPollStatus(sigB58);
   }catch(e){
     if(isUserRejection(e)){solSetNotice(note("warn","<b>Cancelled in your wallet.</b> Nothing was sent."));}
+    else if(e&&e.walletDetails!==undefined){
+      // C — از fallbackِ signTransaction آمده: پیامش خودش کامل است، فقط
+      // یک خطِ جزئیاتِ کوچک کنارش (name/code، اگر کیف‌پول داده باشد).
+      const details=e.walletDetails?`<div class="mono" style="opacity:.65;font-size:11px;margin-top:4px">Details: ${esc(String(e.walletDetails))}</div>`:"";
+      solSetNotice(note("err","<b>"+esc(e.message||"Swap failed in your wallet.")+"</b>"+details));
+    }
     else solSetNotice(note("err","<b>Swap failed.</b> "+esc((e&&e.message)||"Unknown error")));
   }finally{
     solSwapBusy=false;
@@ -7042,11 +7418,12 @@ function solSwapReset(mint){
   solMintCur=mint;
   solTokenDecimals=null;solBalSol=null;solBalTok=null;
   solTokenSymbol=null;solTokenLogoUrl=null;
-  solSide="buy";solVerdictV=null;solQuote=null;
+  solSide="buy";solVerdictV=null;solQuote=null;solOutAtaExists=null;
   clearTimeout(solQuoteTimer);solQuoteTimer=null;
   solSwapBusy=false;
   $("solAmt").value="";
   solSetNotice("");
+  solPaintSellPill(null,null,null);
   solPaintLegs();
   solRenderReadout();
   // یک اتصال از یک توکنِ سولانا به توکنِ بعدی *می‌ماند* — همان چیزی که
@@ -7330,6 +7707,10 @@ function wire(){
     timeframe=b.dataset.tf;
     $("tfs").querySelectorAll("[data-tf]").forEach(x=>x.classList.toggle("on",x===b));
     loadChart();});
+  if($("solTfs"))$("solTfs").querySelectorAll("[data-tf]").forEach(b=>b.onclick=()=>{
+    solTimeframe=b.dataset.tf;
+    $("solTfs").querySelectorAll("[data-tf]").forEach(x=>x.classList.toggle("on",x===b));
+    solLoadChart();});
   $("setBtn").onclick=e=>{e.stopPropagation();$("setPop").classList.toggle("on");};
   document.addEventListener("mousedown",e=>{
     if(!$("setPop").contains(e.target)&&!$("setBtn").contains(e.target))$("setPop").classList.remove("on");});
@@ -7373,6 +7754,11 @@ $("copyAddrBtn").onclick=(e)=>{
     if(!u){setNotice(note("warn","<b>Native ETH has no token page.</b> Pick an ERC-20 to share a check."));return;}
     if(await copyLink(u,$("checkShare")))ev("share:copy");
   };
+  if($("appSolCheckShare"))$("appSolCheckShare").onclick=async()=>{
+    if(!solMintCur)return;
+    const u=location.origin+"/t/"+solMintCur+"?check=1";
+    if(await copyLink(u,$("appSolCheckShare")))ev("share:copy");
+  };
   if($("tk-copy"))$("tk-copy").onclick=async()=>{
     if(await copyLink(location.href,$("tk-copy")))ev("share:copy");
   };
@@ -7396,7 +7782,9 @@ $("copyAddrBtn").onclick=(e)=>{
   $("solTokClose").onclick=solCloseTokenPicker;
   $("solTokOv").onclick=e=>{if(e.target===$("solTokOv"))solCloseTokenPicker();};
   $("solTokSearch").oninput=e=>solRenderTokenPicker(e.target.value);
-  $("solAmt").oninput=()=>{solScheduleQuote();solUpdateSwapBtn();};
+  $("solAmt").oninput=solOnAmtInput;
+  const solAmtClearBtn=$("solAmtClear");
+  if(solAmtClearBtn)solAmtClearBtn.onclick=()=>{$("solAmt").value="";solOnAmtInput();};
   $("solConnectBtn").onclick=()=>{
     if(!solAccount){solOpenWalletPicker();return;}
     $("solWalPop").classList.toggle("on");

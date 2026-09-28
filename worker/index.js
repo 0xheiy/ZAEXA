@@ -1577,9 +1577,24 @@ async function solSwapRoute(request, url, env) {
   }, SOL_JUP_TIMEOUT_MS);
   if (!r.ok || !r.json || typeof r.json.swapTransaction !== "string")
     return solDone(502, { error: "jup:swap:" + r.status });
+  // ۲۷ سپتامبر — پیش‌تر simulationError خودِ جوپیتر اینجا دور ریخته می‌شد؛
+  // یعنی وقتی جوپیتر از قبل می‌دانست این تراکنش شبیه‌سازی‌اش شکست می‌خورد،
+  // کلاینت هیچ‌وقت نمی‌فهمید و مستقیم سراغِ کیف‌پول می‌رفت — دقیقاً همان
+  // «Request blocked»ی که فانتوم بعداً نشان می‌داد. شکلِ بسته: فقط دو رشته،
+  // هرکدام حداکثر ۲۰۰ نویسه — هرگز شیءِ خام/تودرتوی جوپیتر که می‌تواند
+  // هرچیزی حمل کند.
+  const rawSimErr = r.json.simulationError;
+  // undefined (نه null) وقتی نیست — JSON.stringify کلیدِ undefined را حذف
+  // می‌کند، پس یک سواپِ سالم دقیقاً همان شکلِ امروز (فقط swapTransaction/
+  // lastValidBlockHeight) را بایت‌به‌بایت نگه می‌دارد.
+  const simulationError = (rawSimErr && typeof rawSimErr === "object" &&
+      typeof rawSimErr.errorCode === "string" && typeof rawSimErr.error === "string")
+    ? { errorCode: rawSimErr.errorCode.slice(0, 200), error: rawSimErr.error.slice(0, 200) }
+    : undefined;
   return solDone(200, {
     swapTransaction: r.json.swapTransaction,
     lastValidBlockHeight: r.json.lastValidBlockHeight,
+    simulationError,
   });
 }
 
@@ -1587,6 +1602,7 @@ async function solSwapRoute(request, url, env) {
 // بی‌خطرِ خواندنی، رد می‌شود؛ افزودنِ متدِ تازه یعنی این فهرست دستی عوض شود.
 const SOL_RPC_METHODS_ALLOWED = new Set([
   "getBalance", "getTokenAccountsByOwner", "getSignatureStatuses", "sendTransaction",
+  "simulateTransaction",
 ]);
 
 function solRpcParamsOk(method, params) {
@@ -1615,6 +1631,23 @@ function solRpcParamsOk(method, params) {
     if (!opts || typeof opts !== "object") return false;
     if (opts.encoding !== "base64" || opts.skipPreflight !== false) return false;
     if (!Number.isInteger(opts.maxRetries) || opts.maxRetries < 0 || opts.maxRetries > 5) return false;
+    return true;
+  }
+  // ۲۷ سپتامبر — پیش‌شبیه‌سازیِ کلاینت پیش از رفتن سراغِ کیف‌پول (Phantom
+  // «Request blocked» می‌دهد وقتی خودش نتواند شبیه‌سازی کند؛ ما همان کار را
+  // زودتر، با شکلِ دقیقِ توصیه‌شده‌ی خودِ فانتوم، انجام می‌دهیم). پارامترها
+  // دقیقاً همان شکلی که fetchVerdictSol/worker/verdict_sol.js هم برای
+  // simulateTransaction می‌سازد — sigVerify همیشه false، هرگز true.
+  if (method === "simulateTransaction") {
+    if (!Array.isArray(params) || params.length !== 2) return false;
+    const [tx, opts] = params;
+    if (typeof tx !== "string" || tx.length < 1 || tx.length > 1700) return false;
+    if (!/^[A-Za-z0-9+/]+=*$/.test(tx)) return false;
+    if (!opts || typeof opts !== "object" || Object.keys(opts).length !== 4) return false;
+    if (opts.encoding !== "base64") return false;
+    if (opts.sigVerify !== false) return false;
+    if (opts.replaceRecentBlockhash !== true) return false;
+    if (opts.commitment !== "processed") return false;
     return true;
   }
   return false;
@@ -1699,6 +1732,10 @@ async function solNosellVeto(mint, env) {
 
 async function solFetchVerdict(mint, deadlineAt, ctx, env) {
   let why; // فقط computeFn (نه cache hit) آن را پر می‌کند، و فقط وقتی v نهایی null باشد معنا دارد
+  // basis/ret هم فقط از computeFn پر می‌شوند، هرگز از ضربه‌ی کش — همان قاعده‌ی
+  // ret برای Base (بالاتر، ogFetchVerdictDetail): یک "sell"ِ کش‌شده بدونِ
+  // محاسبه‌ی تازه چیزی حدسی برایشان نمی‌گذارد.
+  let basis, ret;
   const v = await cachedVerdict(
     "/v1/solana/" + mint,
     async () => {
@@ -1706,6 +1743,7 @@ async function solFetchVerdict(mint, deadlineAt, ctx, env) {
         { deadlineAt, fetchImpl: fetch, rpcs: solRpcsFor(env), jupBase: VD_SOL_JUP_BASE, payer: VD_SOL_PAYER,
           jupKey: jupKeyFor(env) });
       why = res.why;
+      if (res.basis === "quote") { basis = "quote"; ret = typeof res.ret === "number" ? res.ret : undefined; }
       return res.v;
     },
     ctx,
@@ -1718,7 +1756,7 @@ async function solFetchVerdict(mint, deadlineAt, ctx, env) {
     const vetoWhy = await solNosellVeto(mint, env);
     if (vetoWhy) return { v: null, why: vetoWhy };
   }
-  return v === null ? { v: null, why: why || "internal" } : { v };
+  return v === null ? { v: null, why: why || "internal" } : { v, basis, ret };
 }
 
 /* تگ‌ها را داخل همان HTML می‌نشاند.
@@ -2049,8 +2087,12 @@ async function diagVerdict(request, url, env, ctx) {
     // «why» فقط وقتی v واقعاً null باشد چیزی غیرِ undefined است؛ JSON.stringify
     // کلیدی با مقدارِ undefined را خودش حذف می‌کند، پس یک sell/nosell همان
     // شکلِ {v,ms} امروز را بایت‌به‌بایت نگه می‌دارد.
-    const { v, why } = await solFetchVerdict(addr, t0 + OG_BUDGET_MS, ctx, env);
-    return vdDone(200, { v, ms: Date.now() - t0, why });
+    const { v, why, basis, ret } = await solFetchVerdict(addr, t0 + OG_BUDGET_MS, ctx, env);
+    return vdDone(200, {
+      v, ms: Date.now() - t0, why,
+      basis: v === "sell" && basis === "quote" ? "quote" : undefined,
+      ret: v === "sell" && typeof ret === "number" ? ret : undefined,
+    });
   }
   // چرا با ogFetchMetaDetail: پایین‌تر (شاخه‌ی غیرِ probe) metaWhy لازم است
   // تا وقتی خودِ متادیتا نیامد، دلیلش هم گزارش شود، نه فقط internal حدسی.
