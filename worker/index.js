@@ -1521,6 +1521,13 @@ async function solQuoteRoute(request, url, env) {
   const outputMint = url.searchParams.get("outputMint") || "";
   const amount = url.searchParams.get("amount") || "";
   const slipRaw = url.searchParams.get("slippageBps");
+  // ۲۸ سپتامبر — مورد E: swapMode برای «You receive را بنویس» (ExactOut).
+  // غیابش دقیقاً همان پیش‌فرضِ امروز (ExactIn) است — بایت‌به‌بایت همان
+  // چیزی که پیش از این round بود، وقتی کسی swapMode نمی‌فرستد.
+  const swapModeRaw = url.searchParams.get("swapMode");
+  const swapMode = (swapModeRaw === "ExactOut") ? "ExactOut" : "ExactIn";
+  if (swapModeRaw != null && swapModeRaw !== "ExactIn" && swapModeRaw !== "ExactOut")
+    return solDone(400, { error: "bad-swap-mode" });
 
   if (!isSolMintStr(inputMint) || !isSolMintStr(outputMint)) return solDone(400, { error: "bad-mint" });
   if (inputMint === outputMint) return solDone(400, { error: "same-mint" });
@@ -1535,7 +1542,7 @@ async function solQuoteRoute(request, url, env) {
 
   const q = new URLSearchParams({
     inputMint, outputMint, amount, slippageBps: String(slippageBps),
-    restrictIntermediateTokens: "true",
+    restrictIntermediateTokens: "true", swapMode,
   });
   const r = await jupProxyFetch(env, "/swap/v1/quote?" + q.toString(), { method: "GET" }, SOL_JUP_TIMEOUT_MS);
   if (!r.ok || !r.json) return solDone(502, { error: "jup:quote:" + r.status });
@@ -1562,12 +1569,15 @@ async function solSwapRoute(request, url, env) {
       !isSolMintStr(quoteResponse.inputMint) || !isSolMintStr(quoteResponse.outputMint))
     return solDone(400, { error: "bad-quote" });
 
+  // ۲۸ سپتامبر — round 3، مورد D: veryHigh/1,000,000 لَمپورت (~۰٫۰۰۱ SOL)
+  // روی یک سواپِ چندسنتی مسخره بود. سقفِ تازه medium/200,000 (~۰٫۰۰۰۲ SOL)،
+  // و کاربر نمی‌تواند این را در بدنه دور بزند — همیشه همین‌جا تحمیل می‌شود.
   const payload = {
     quoteResponse, userPublicKey,
     dynamicComputeUnitLimit: true,
     wrapAndUnwrapSol: true,
     prioritizationFeeLamports: {
-      priorityLevelWithMaxLamports: { maxLamports: 1000000, priorityLevel: "veryHigh" },
+      priorityLevelWithMaxLamports: { maxLamports: 200000, priorityLevel: "medium" },
     },
   };
   const r = await jupProxyFetch(env, "/swap/v1/swap", {
@@ -1591,10 +1601,18 @@ async function solSwapRoute(request, url, env) {
       typeof rawSimErr.errorCode === "string" && typeof rawSimErr.error === "string")
     ? { errorCode: rawSimErr.errorCode.slice(0, 200), error: rawSimErr.error.slice(0, 200) }
     : undefined;
+  // ۲۸ سپتامبر — مورد D: ردیفِ «Network fee» سمتِ کلاینت به همین عدد نیاز
+  // دارد (+۵۰۰۰ لَمپورت به‌ازای هر امضا، که کلاینت خودش می‌داند). فقط یک
+  // عددِ صحیحِ غیرِمنفی پاس داده می‌شود؛ هرچیزِ دیگر یعنی نداریم.
+  const rawPrioFee = r.json.prioritizationFeeLamports;
+  const prioritizationFeeLamports = (typeof rawPrioFee === "number" &&
+      Number.isFinite(rawPrioFee) && rawPrioFee >= 0)
+    ? Math.round(rawPrioFee) : undefined;
   return solDone(200, {
     swapTransaction: r.json.swapTransaction,
     lastValidBlockHeight: r.json.lastValidBlockHeight,
     simulationError,
+    prioritizationFeeLamports,
   });
 }
 
@@ -1696,7 +1714,26 @@ async function solRpcRoute(request, url, env) {
     if (json.error) {
       const code = typeof json.error === "object" && typeof json.error.code === "number"
         ? json.error.code : 200;
-      return solDone(502, { error: "rpc:" + method + ":" + code });
+      // ۲۸ سپتامبر — مورد B: پیش‌تر فقط همین کد برمی‌گشت و کلاینت هیچ‌وقت
+      // نمی‌فهمید -32002 (پیش‌شبیه‌سازیِ sendTransaction) از رویِ چه چیزی
+      // شکسته. برای sendTransaction/simulateTransaction یک detail بسته هم
+      // اضافه می‌شود: err (رشته‌ی JSONِ err، حداکثر ۲۰۰ نویسه) و logs (حداکثر
+      // ۵ خطِ آخر، هرکدام حداکثر ۲۰۰ نویسه) — هرگز شیءِ خامِ بالادست، و هیچ
+      // URLای در آن‌ها نمی‌ماند (می‌تواند کلیدِ RPC را در query لو بدهد).
+      let detail;
+      if (method === "sendTransaction" || method === "simulateTransaction") {
+        const data = (typeof json.error === "object" && json.error.data &&
+          typeof json.error.data === "object") ? json.error.data : {};
+        const stripUrls = (s) => String(s).replace(/https?:\/\/\S+/gi, "");
+        let errStr = "";
+        if (data.err !== undefined) {
+          try { errStr = stripUrls(JSON.stringify(data.err)).slice(0, 200); } catch { errStr = ""; }
+        }
+        const rawLogs = Array.isArray(data.logs) ? data.logs : [];
+        const logs = rawLogs.slice(-5).map((l) => stripUrls(String(l)).slice(0, 200));
+        detail = { err: errStr, logs };
+      }
+      return solDone(502, Object.assign({ error: "rpc:" + method + ":" + code }, detail ? { detail } : {}));
     }
     return solDone(200, { result: json.result });
   }

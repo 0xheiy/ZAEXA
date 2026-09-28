@@ -13225,13 +13225,17 @@ function stripAllowedWording(t) {
       { ASSETS, JUP_KEY: "shh-secret-key" });
     const body = await res.json();
     ok(res.status === 200 && body.swapTransaction === "AQID" && body.lastValidBlockHeight === 12345,
-      "[sol swap routes] a good /sol/swap returns only swapTransaction/lastValidBlockHeight, got " + JSON.stringify(body));
-    ok(body.simulationError === undefined && body.prioritizationFeeLamports === undefined,
-      "[sol swap routes] /sol/swap must strip every field beyond swapTransaction/lastValidBlockHeight, got " + JSON.stringify(body));
+      "[sol swap routes] a good /sol/swap returns only swapTransaction/lastValidBlockHeight(/prioritizationFeeLamports), got " + JSON.stringify(body));
+    // ۲۸ سپتامبر — round 3، مورد D: simulationError همچنان قطع می‌شود، ولی
+    // prioritizationFeeLamports حالا عمداً پاس داده می‌شود — ردیفِ «Network
+    // fee» سمتِ کلاینت دقیقاً همین عدد را می‌خواهد.
+    ok(body.simulationError === undefined && body.prioritizationFeeLamports === 999999,
+      "[sol swap routes] /sol/swap must strip simulationError but pass prioritizationFeeLamports through, got " + JSON.stringify(body));
     ok(sentBody.dynamicComputeUnitLimit === true && sentBody.wrapAndUnwrapSol === true &&
-       sentBody.prioritizationFeeLamports.priorityLevelWithMaxLamports.maxLamports === 1000000 &&
-       sentBody.prioritizationFeeLamports.priorityLevelWithMaxLamports.priorityLevel === "veryHigh",
-      "[sol swap routes] the caller must never override the fixed swap fields, sent " + JSON.stringify(sentBody));
+       sentBody.prioritizationFeeLamports.priorityLevelWithMaxLamports.maxLamports === 200000 &&
+       sentBody.prioritizationFeeLamports.priorityLevelWithMaxLamports.priorityLevel === "medium",
+      "[sol swap routes] round 3: the caller must never override the fixed swap fields, and the fee cap "
+      + "must be the lowered 200000/medium (not the old 1000000/veryHigh), sent " + JSON.stringify(sentBody));
     ok(sentHeadersSwap["x-api-key"] === "shh-secret-key", "[sol swap routes] JUP_KEY must ride as x-api-key on /sol/swap too");
     globalThis.fetch = savedFetch;
   }
@@ -13281,6 +13285,59 @@ function stripAllowedWording(t) {
       "[sol swap routes] a fully-failed /sol/rpc must be 502 {error:\"rpc:getBalance:0\"}, got " + failRes.status + " " + JSON.stringify(failBody));
     ok(JSON.stringify(failBody).indexOf("secret-host") === -1 && JSON.stringify(failBody).indexOf("SEKRIT123") === -1,
       "[sol swap routes] SOL_RPC must never surface even on failure");
+    globalThis.fetch = savedFetch;
+  }
+
+  // [sol round3][B] — POST /sol/rpc: sendTransaction/simulateTransaction روی
+  // یک خطای بالادست باید detail.err/detail.logs بستهبگذارند (حداکثر ۲۰۰
+  // نویسه هرکدام، حداکثر ۵ خطِ آخرِ logs)، URL از هر دو حذف شود، و متدهای
+  // دیگر (getBalance) هرگز detail نگیرند.
+  {
+    const upstreamErr = (data) => new Response(JSON.stringify({
+      jsonrpc: "2.0", id: 1,
+      error: { code: -32002, message: "Transaction simulation failed", data },
+    }), { status: 200, headers: { "content-type": "application/json" } });
+
+    globalThis.fetch = async () => upstreamErr({
+      err: "BlockhashNotFound",
+      logs: ["Program 11111111111111111111111111111111 invoke [1]",
+        "https://leaked-host.example/should/not/appear", "Program log: done"],
+    });
+    const r1 = await call("/sol/rpc", { method: "POST",
+      body: JSON.stringify({ method: "sendTransaction",
+        params: ["AQID", { encoding: "base64", skipPreflight: false, maxRetries: 1 }] }) },
+      { ASSETS, SOL_RPC: "https://secret-host.example/rpc/SEKRIT123" });
+    const b1 = await r1.json();
+    ok(r1.status === 502 && b1.error === "rpc:sendTransaction:-32002",
+      "[sol round3][B] the error code must stay rpc:sendTransaction:-32002, got " + JSON.stringify(b1));
+    ok(b1.detail && b1.detail.err === '"BlockhashNotFound"' && Array.isArray(b1.detail.logs) && b1.detail.logs.length === 3,
+      "[sol round3][B] detail.err/logs must carry the upstream shape, got " + JSON.stringify(b1.detail));
+    ok(b1.detail.logs.every((l) => l.indexOf("leaked-host") === -1) &&
+       JSON.stringify(b1).indexOf("secret-host") === -1 && JSON.stringify(b1).indexOf("SEKRIT123") === -1,
+      "[sol round3][B] no http(s) URL may survive in detail.logs, and SOL_RPC must never leak, got " + JSON.stringify(b1.detail));
+    globalThis.fetch = savedFetch;
+
+    // یک خطِ لاگِ طولانی و بیش از ۵ خط — هرکدام حداکثر ۲۰۰ نویسه، فقط ۵ خطِ آخر
+    const longLine = "x".repeat(300);
+    const manyLogs = Array.from({ length: 8 }, (_, i) => longLine + i);
+    globalThis.fetch = async () => upstreamErr({ err: { InstructionError: [1, { Custom: 6001 }] }, logs: manyLogs });
+    const r2 = await call("/sol/rpc", { method: "POST",
+      body: JSON.stringify({ method: "simulateTransaction",
+        params: ["AQID", { encoding: "base64", sigVerify: false, replaceRecentBlockhash: true, commitment: "processed" }] }) },
+      { ASSETS });
+    const b2 = await r2.json();
+    ok(b2.detail.logs.length === 5 && b2.detail.logs[4] === (longLine + "7").slice(0, 200),
+      "[sol round3][B] only the last 5 log lines survive, each capped at 200 chars, got " + JSON.stringify(b2.detail.logs.map((l) => l.length)));
+    ok(b2.detail.err.length <= 200 && b2.detail.err.indexOf("6001") !== -1,
+      "[sol round3][B] detail.err must carry the Custom code and stay under 200 chars, got " + JSON.stringify(b2.detail.err));
+    globalThis.fetch = savedFetch;
+
+    // getBalance روی همان خطا هرگز detail نمی‌گیرد — فقط sendTransaction/simulateTransaction
+    globalThis.fetch = async () => upstreamErr({ err: "BlockhashNotFound", logs: ["x"] });
+    const r3 = await call("/sol/rpc", { method: "POST",
+      body: JSON.stringify({ method: "getBalance", params: [PUBKEY] }) }, { ASSETS });
+    const b3 = await r3.json();
+    ok(b3.detail === undefined, "[sol round3][B] getBalance must never carry a detail field, got " + JSON.stringify(b3));
     globalThis.fetch = savedFetch;
   }
 

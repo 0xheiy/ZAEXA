@@ -7405,6 +7405,7 @@ async def main():
         # /sol/swap و /sol/rpc با page.route جایگزین می‌شوند — این کانتینر
         # به هیچ Jupiter یا Solana RPC واقعی دسترسی ندارد.
         SWAP_MINT = "DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263"
+        SOL_MINT_ADDR = "So11111111111111111111111111111111111111112"
         SOL_FEE_PAYER = bytes(range(1, 33))
         SOL_WRONG_PAYER = bytes(range(101, 133))
         SOL_OTHER_KEY = bytes(range(50, 82))
@@ -7496,6 +7497,57 @@ async def main():
 })();
 """ % (list(SOL_FEE_PAYER), list(SOL_SIGNED_TX_BYTES)))
 
+        # round 3 — کیف‌پولی که فقط signTransaction دارد (نه signAndSendTransaction)،
+        # برای سنجیدنِ مسیرِ مستقیمِ ارسال (solSendAndHandle) بدونِ درگیرشدنِ
+        # مسیرِ fallback. همان SIGNED جواب می‌دهد.
+        SOL_SIGN_ONLY_WALLET_INIT = ("""
+(function(){
+  const FEE_PAYER = new Uint8Array(%s);
+  const SIGNED = new Uint8Array(%s);
+  window.__solSignCalls = [];
+  const fakeWallet = {
+    name: "Fake Wallet", icon: "", chains: ["solana:mainnet"],
+    features: {
+      "standard:connect": { connect: async () => ({accounts: [
+        {address: "FakeWa11etAddr11111111111111111111111111", publicKey: FEE_PAYER}]}) },
+      "standard:disconnect": { disconnect: async () => {} },
+      "solana:signTransaction": { signTransaction: async (input) => {
+        window.__solSignCalls.push(1);
+        return [{signedTransaction: SIGNED}];
+      } }
+    }
+  };
+  window.addEventListener("wallet-standard:app-ready", (e) => {
+    try { e.detail.register(fakeWallet); } catch(_){}
+  });
+})();
+""" % (list(SOL_FEE_PAYER), list(SOL_SIGNED_TX_BYTES)))
+
+        # round 3 — C: کیف‌پولی که options.silent را ضبط می‌کند و standard:events
+        # هم دارد (برای سنجیدنِ change→disconnect). همیشه یک حساب برمی‌گرداند —
+        # تفاوتِ «باید وصل شود» با «نباید» با همین ضبط و با off-flag سنجیده می‌شود.
+        SOL_SILENT_CAPTURE_WALLET_INIT = ("""
+(function(){
+  const FEE_PAYER = new Uint8Array(%s);
+  window.__solConnectOpts = [];
+  const fakeWallet = {
+    name: "Fake Wallet", icon: "", chains: ["solana:mainnet"],
+    features: {
+      "standard:connect": { connect: async (opts) => {
+        window.__solConnectOpts.push(opts || {});
+        return {accounts: [{address: "FakeWa11etAddr11111111111111111111111111", publicKey: FEE_PAYER}]};
+      } },
+      "standard:disconnect": { disconnect: async () => {} },
+      "standard:events": { on: (ev, cb) => { window.__solEventsCb = cb; return () => { window.__solEventsOff = true; }; } },
+      "solana:signAndSendTransaction": { signAndSendTransaction: async () => [{signature: new Uint8Array(64)}] },
+    }
+  };
+  window.addEventListener("wallet-standard:app-ready", (e) => {
+    try { e.detail.register(fakeWallet); } catch(_){}
+  });
+})();
+""" % (list(SOL_FEE_PAYER),))
+
         # E — یک ردیفِ واقع‌شکلِ GET /gt/networks/solana/pools?page=1 (فقط
         # فیلدهایی که solLoadPopular واقعاً می‌خواند)، برای «Popular on
         # Solana». SOL/USDC/USDT باید حذف شوند (از قبل ردیفِ خودشان هستند).
@@ -7518,11 +7570,23 @@ async def main():
                                       swap_status=200, swap_body=None, inject_wallet=True,
                                       collect_errors=None, balance_lamports=2_000_000_000,
                                       sim_result="skip", token_accounts=None, rpc_log=None,
-                                      wallet_init=None):
+                                      wallet_init=None, swap_log=None, swap_bodies=None,
+                                      send_error=None, ls_wallet_name=None, ls_off=False,
+                                      sol_mint_image_url=None):
             spg = await b.new_page(viewport={"width": 1240, "height": 1000})
             if collect_errors is not None:
                 spg.on("console", lambda m: collect_errors.append(m.text) if m.type == "error" else None)
                 spg.on("pageerror", lambda e: collect_errors.append(str(e)))
+            if ls_wallet_name is not None or ls_off:
+                # C — پیش از هر اسکریپتِ صفحه: نامِ کیف‌پول/پرچمِ off را در
+                # localStorage می‌گذارد تا solTryAutoRestoreName آن را در همان
+                # بارگذاریِ اول ببیند.
+                setter = ""
+                if ls_wallet_name is not None:
+                    setter += "try{localStorage.setItem('zaexa.solwallet.v1',%s);}catch(_){}" % _json.dumps(ls_wallet_name)
+                if ls_off:
+                    setter += "try{localStorage.setItem('zaexa.solwallet.off.v1','1');}catch(_){}"
+                await spg.add_init_script(setter)
             if inject_wallet:
                 await spg.add_init_script(wallet_init or SOL_FAKE_WALLET_INIT)
             async def stub_ev(route):
@@ -7531,6 +7595,14 @@ async def main():
                 # صفحاتِ توکن جای دیگرِ همین فایل آن را نادیده می‌گیرند.
                 await route.fulfill(status=204, body="")
             async def stub_gt(route):
+                # G — round 3: چیپِ SOL آدرسِ wSOL را جدا می‌پرسد؛ فقط همان یکی
+                # (نه multi/، نه mintِ خودِ توکن) فیکسچرِ لوگو را می‌گیرد.
+                u = route.request.url
+                if sol_mint_image_url is not None and ("/tokens/" + SOL_MINT_ADDR) in u and "/tokens/multi/" not in u:
+                    await route.fulfill(status=200, content_type="application/json",
+                                         body=_json.dumps({"data": {"attributes":
+                                             {"symbol": "SOL", "image_url": sol_mint_image_url}}}))
+                    return
                 await route.fulfill(status=200, content_type="application/json", body=swap_gt_body())
             async def stub_vd(route):
                 await route.fulfill(status=200, content_type="application/json",
@@ -7543,18 +7615,33 @@ async def main():
                     await route.fulfill(status=200, content_type="application/json",
                                          body=_json.dumps(quote_body if quote_body is not None else SOL_QUOTE_FIXTURE))
             async def stub_swap(route):
+                if swap_log is not None:
+                    swap_log.append(1)
                 if swap_status != 200:
                     await route.fulfill(status=swap_status, content_type="application/json",
                                          body=_json.dumps({"error": "jup:swap:%d" % swap_status}))
                 else:
-                    body = swap_body if swap_body is not None else \
-                        {"swapTransaction": SOL_GOOD_TX_B64, "lastValidBlockHeight": 123}
+                    if swap_bodies is not None:
+                        # A — یک بدنه‌ی متفاوت به‌ازای هر تماس، برای اثباتِ اینکه
+                        # fallback واقعاً از ساختِ *دوم* استفاده می‌کند، نه اول.
+                        idx = min(len(swap_log) - 1 if swap_log is not None else 0, len(swap_bodies) - 1)
+                        body = swap_bodies[idx]
+                    else:
+                        body = swap_body if swap_body is not None else \
+                            {"swapTransaction": SOL_GOOD_TX_B64, "lastValidBlockHeight": 123}
                     await route.fulfill(status=200, content_type="application/json", body=_json.dumps(body))
             async def stub_rpc(route):
                 payload = _json.loads(route.request.post_data or "{}")
                 method = payload.get("method")
                 if rpc_log is not None:
                     rpc_log.append(method)
+                # B — round 3: یک sendTransactionِ شکست‌خورده با شکلِ بسته‌ی
+                # دقیقِ worker/index.js (error + detail.err/logs)، برای سنجیدنِ
+                # نگاشتِ سمتِ کلاینت جدا از خودِ Worker.
+                if method == "sendTransaction" and send_error is not None:
+                    await route.fulfill(status=502, content_type="application/json",
+                                         body=_json.dumps(send_error))
+                    return
                 if method == "getBalance":
                     result = {"value": balance_lamports}
                 elif method == "getTokenAccountsByOwner":
@@ -7580,6 +7667,12 @@ async def main():
             await spg.route("**/sol/quote**", stub_quote)
             await spg.route("**/sol/swap", stub_swap)
             await spg.route("**/sol/rpc", stub_rpc)
+            if sol_mint_image_url is not None:
+                # G — این route باید پیش از goto ثبت شود: <img src> بلافاصله
+                # بعدِ رسیدنِ fetchSolMeta شلیک می‌شود، خیلی زودتر از آنکه
+                # فراخوانِ بعدِ این تابع بتواند routeای اضافه کند.
+                await spg.route(sol_mint_image_url, lambda route: route.fulfill(
+                    status=200, content_type="image/png", body=tiny_png_bytes()))
             await spg.goto("http://127.0.0.1:%d/t/%s" % (port, SWAP_MINT))
             await spg.wait_for_timeout(1200)
             return spg
@@ -9510,8 +9603,11 @@ async def main():
         print("[sol fixes][F] 50%%=%r MAX=%r afterClear=%r clearHidden(0/half/after)=%s/%s/%s"
               % (f_half_val, f_max_val, f_after_clear, f_clear_hidden_0, f_clear_hidden_half, f_clear_hidden_after))
         assert f_clear_hidden_0 is True, "the clear × must start hidden with an empty amount"
-        assert f_half_val == "0.998475", "50%% of (2 SOL - the A reserve) should be 0.998475, got %r" % f_half_val
-        assert f_max_val == "1.996950", "MAX must leave exactly the A reserve behind, got %r" % f_max_val
+        # ۲۸ سپتامبر — round 3، مورد D: سقفِ کارمزدِ اولویت از ۰٫۰۰۱ به ۰٫۰۰۰۲
+        # SOL پایین آمد، پس رزروِ A هم عوض شد (۰٫۰۰۲۲۵ به‌جای ۰٫۰۰۳۰۵) و این
+        # دو عدد با آن جابه‌جا شدند — نه لق‌ترشدنِ قاعده، فقط دنبال‌کردنِ D.
+        assert f_half_val == "0.998875", "50%% of (2 SOL - the A reserve) should be 0.998875, got %r" % f_half_val
+        assert f_max_val == "1.997750", "MAX must leave exactly the A reserve behind, got %r" % f_max_val
         assert f_clear_hidden_half is False, "the clear × must show once an amount is set"
         assert f_after_clear == "", "clicking × must empty the amount field"
         assert f_clear_hidden_after is True, "the clear × must hide itself again once the field is empty"
@@ -9642,6 +9738,214 @@ async def main():
               "quick 50%/MAX buttons, the clear x, the You-receive sell pill (quote/nosell/plain), the "
               "Copy this check link, the price-chart+market-stats card (same MC>FDV sanity rule as Base) "
               "and the Jupiter route-legs bar under the swap card (F) — all covered")
+
+        # ---- [sol round3] Solana owner's live-test fixes: fresh build per wallet
+        # prompt (A), readable send errors (B), silent reconnect (C), lower
+        # priority fee + fee row (D), exact-out (E), balance refresh/click-MAX
+        # (F), logos (G), Base-size copy-check (H) ----
+
+        # A) fallback زدن باید ساختِ *دوم*ی بسازد، نه اول را دوباره بفرستد —
+        # سنجیده با شمارشِ تماس‌های POST /sol/swap (باید دقیقاً ۲ تا شود:
+        # یکی پیشِ signAndSendTransaction، یکی پیشِ signTransactionِ fallback).
+        ra_swap_log = []
+        rapg = await open_sol_swap_page({"v": "sell", "ms": 100}, wallet_init=SOL_FALLBACK_WALLET_INIT,
+                                         swap_log=ra_swap_log)
+        await sol_connect(rapg)
+        await rapg.fill("#solAmt", "1")
+        await rapg.wait_for_timeout(900)
+        await rapg.click("#solSwapBtn")
+        await rapg.wait_for_timeout(900)
+        ra_send = await rapg.evaluate("window.__solSendCalls.length")
+        ra_sign = await rapg.evaluate("window.__solSignCalls.length")
+        await rapg.close()
+        print("[sol round3][A] fallback -> /sol/swap calls=%d sendCalls=%d signCalls=%d"
+              % (len(ra_swap_log), ra_send, ra_sign))
+        assert len(ra_swap_log) == 2, \
+            "A: the fallback must build a fresh transaction right before each wallet call, expected 2 " \
+            "POST /sol/swap calls (primary + fallback), got %d" % len(ra_swap_log)
+        assert ra_send == 1 and ra_sign == 1, "A: exactly one call to each wallet method was expected"
+
+        # A) مسیرِ موفق (بدونِ fallback) باید فقط یک ساختِ تازه انجام بدهد —
+        # نه اینکه هر مسیر همیشه دوبار بسازد.
+        ra2_swap_log = []
+        ra2pg = await open_sol_swap_page({"v": "sell", "ms": 100}, swap_log=ra2_swap_log)
+        await sol_connect(ra2pg)
+        await ra2pg.fill("#solAmt", "1")
+        await ra2pg.wait_for_timeout(900)
+        await ra2pg.click("#solSwapBtn")
+        await ra2pg.wait_for_timeout(900)
+        await ra2pg.close()
+        print("[sol round3][A] no-fallback path -> /sol/swap calls=%d" % len(ra2_swap_log))
+        assert len(ra2_swap_log) == 1, "A: a clean signAndSendTransaction success must build exactly once, got %d" % len(ra2_swap_log)
+
+        # B) worker/index.js's closed detail shape (err/logs) mapped to the
+        # exact sentences from the spec — through the direct signTransaction
+        # path (solSendAndHandle), never the pre-simulation.
+        def send_err(err_str):
+            return {"error": "rpc:sendTransaction:-32002", "detail": {"err": err_str, "logs": []}}
+        B_CASES = [
+            ('"BlockhashNotFound"', "Took too long between quote and signature — press Swap again."),
+            ('"insufficient lamports for rent"', "Not enough SOL for fees and account rent."),
+            ('{"InstructionError":[1,{"Custom":6001}]}', "Price moved beyond your slippage — try again or raise slippage."),
+            ('{"InstructionError":[1,{"Custom":9}]}', "The network rejected the transaction."),
+        ]
+        for err_str, expected in B_CASES:
+            bpg2 = await open_sol_swap_page({"v": "sell", "ms": 100}, wallet_init=SOL_SIGN_ONLY_WALLET_INIT,
+                                             send_error=send_err(err_str))
+            await sol_connect(bpg2)
+            await bpg2.fill("#solAmt", "1")
+            await bpg2.wait_for_timeout(900)
+            await bpg2.click("#solSwapBtn")
+            await bpg2.wait_for_timeout(700)
+            b_notice = await bpg2.inner_text("#solNotices")
+            b_sign = await bpg2.evaluate("window.__solSignCalls.length")
+            await bpg2.close()
+            print("[sol round3][B] err=%r -> sign=%d notice=%r" % (err_str[:40], b_sign, b_notice[:80]))
+            assert b_sign == 1, "B: the sign-only wallet must still be called exactly once"
+            assert expected in b_notice, "B: err=%r must map to %r, got %r" % (err_str, expected, b_notice)
+            assert b_notice.strip() != "-32002" and "rpc:sendTransaction" not in b_notice, \
+                "B: a bare code must never be shown alone, got %r" % b_notice
+
+        # C) silent reconnect — نامِ آخرین کیف‌پول در localStorage + بدونِ پرچمِ
+        # off یعنی standard:connect با {silent:true} بدونِ هیچ کلیکی، و هدر
+        # آدرسِ کوتاه را نشان می‌دهد؛ off-flag یعنی هیچ تماسی زده نمی‌شود.
+        cpg2 = await open_sol_swap_page({"v": "sell", "ms": 100}, wallet_init=SOL_SILENT_CAPTURE_WALLET_INIT,
+                                         ls_wallet_name="Fake Wallet")
+        await cpg2.wait_for_timeout(600)
+        c_opts = await cpg2.evaluate("window.__solConnectOpts")
+        c_btn = await cpg2.inner_text("#solConnectBtn")
+        await cpg2.close()
+        print("[sol round3][C] stored name, no off -> connectOpts=%s btn=%r" % (c_opts, c_btn))
+        assert len(c_opts) >= 1 and c_opts[0].get("silent") is True, \
+            "C: a stored wallet name with no off-flag must call standard:connect with {silent:true}, got %s" % c_opts
+        assert c_btn != "Connect Solana wallet" and c_btn.strip(), \
+            "C: a successful silent reconnect must show the short address without any click, got %r" % c_btn
+
+        cpg3 = await open_sol_swap_page({"v": "sell", "ms": 100}, wallet_init=SOL_SILENT_CAPTURE_WALLET_INIT,
+                                         ls_wallet_name="Fake Wallet", ls_off=True)
+        await cpg3.wait_for_timeout(600)
+        c2_opts = await cpg3.evaluate("window.__solConnectOpts")
+        c2_btn = await cpg3.inner_text("#solConnectBtn")
+        await cpg3.close()
+        print("[sol round3][C] off-flag set -> connectOpts=%s btn=%r" % (c2_opts, c2_btn))
+        assert len(c2_opts) == 0, "C: the off-flag must block the silent reconnect entirely, got %s" % c2_opts
+        assert c2_btn == "Connect Solana wallet", "C: the off-flag must leave the wallet disconnected, got %r" % c2_btn
+
+        # D) worker forces the lower fee cap (covered in worker/test.mjs);
+        # here: the readout shows the placeholder before a build and the real
+        # ≈X SOL figure (from prioritizationFeeLamports+5000/signature) after.
+        dpg2 = await open_sol_swap_page({"v": "sell", "ms": 100},
+                                         swap_body={"swapTransaction": SOL_GOOD_TX_B64, "lastValidBlockHeight": 1,
+                                                    "prioritizationFeeLamports": 150000})
+        await sol_connect(dpg2)
+        d_fee_before = await dpg2.inner_text("#solFeeF")
+        await dpg2.fill("#solAmt", "1")
+        await dpg2.wait_for_timeout(900)
+        await dpg2.click("#solSwapBtn")
+        await dpg2.wait_for_timeout(900)
+        d_fee_after = await dpg2.inner_text("#solFeeF")
+        await dpg2.close()
+        print("[sol round3][D] fee before=%r after=%r" % (d_fee_before, d_fee_after))
+        assert d_fee_before == "≈ ≤0.0002 SOL", "D: the placeholder fee row is wrong before any build: %r" % d_fee_before
+        assert d_fee_after == "≈ 0.000155 SOL", \
+            "D: (150000+5000)/1e9 = 0.000155 SOL was expected after the build, got %r" % d_fee_after
+
+        # E) typing in "You receive" re-quotes with swapMode=ExactOut and fills
+        # "You pay"; a pair Jupiter refuses for ExactOut reverts to ExactIn.
+        e_quote_urls = []
+        SOL_EXACTOUT_FIXTURE = dict(SOL_QUOTE_FIXTURE, inAmount="2000000000")
+        epg2 = await open_sol_swap_page({"v": "sell", "ms": 100}, quote_body=SOL_EXACTOUT_FIXTURE)
+        async def record_quote(route):
+            e_quote_urls.append(route.request.url)
+            await route.fulfill(status=200, content_type="application/json", body=_json.dumps(SOL_EXACTOUT_FIXTURE))
+        await epg2.route("**/sol/quote**", record_quote)
+        await epg2.fill("#solOutRead", "5")
+        await epg2.wait_for_timeout(900)
+        e_pay = await epg2.input_value("#solAmt")
+        e_label = await epg2.inner_text("#solMinLabel")
+        await epg2.close()
+        print("[sol round3][E] You-receive=5 -> You-pay=%r label=%r lastUrl=%r"
+              % (e_pay, e_label, e_quote_urls[-1] if e_quote_urls else None))
+        assert e_quote_urls and "swapMode=ExactOut" in e_quote_urls[-1], \
+            "E: typing in You-receive must call /sol/quote with swapMode=ExactOut, got %s" % e_quote_urls
+        assert e_pay == "2.000000" or e_pay == "2", "E: You-pay must be filled from inAmount, got %r" % e_pay
+        assert e_label == "Max sent", "E: the Min-received label must read Max sent in ExactOut mode, got %r" % e_label
+
+        e2pg = await open_sol_swap_page({"v": "sell", "ms": 100}, quote_status=422)
+        await e2pg.fill("#solOutRead", "5")
+        await e2pg.wait_for_timeout(900)
+        e2_notice = await e2pg.inner_text("#solNotices")
+        e2_pay = await e2pg.input_value("#solAmt")
+        await e2pg.close()
+        print("[sol round3][E] ExactOut rejected -> notice=%r payFieldEmpty=%s" % (e2_notice[:70], e2_pay == ""))
+        assert "can't be quoted by output amount" in e2_notice, \
+            "E: a rejected ExactOut quote must show the exact fallback sentence, got %r" % e2_notice
+
+        # F) after Confirmed, getBalance is polled again promptly; clicking the
+        # pay-side balance figure fills the field with the full spendable amount.
+        f_rpc_log = []
+        fpg2 = await open_sol_swap_page({"v": "sell", "ms": 100}, balance_lamports=3_000_000_000, rpc_log=f_rpc_log)
+        await sol_connect(fpg2)
+        await fpg2.fill("#solAmt", "1")
+        await fpg2.wait_for_timeout(900)
+        f_bal_calls_before = f_rpc_log.count("getBalance")
+        await fpg2.click("#solSwapBtn")
+        await fpg2.wait_for_timeout(2600)                 # اولین دورِ solPollStatus
+        f_bal_calls_after = f_rpc_log.count("getBalance")
+        await fpg2.close()
+        print("[sol round3][F] getBalance calls before=%d after confirm=%d" % (f_bal_calls_before, f_bal_calls_after))
+        assert f_bal_calls_after > f_bal_calls_before, \
+            "F: a Confirmed swap must trigger a fresh getBalance promptly, before=%d after=%d" \
+            % (f_bal_calls_before, f_bal_calls_after)
+
+        f2pg2 = await open_sol_swap_page({"v": "sell", "ms": 100}, balance_lamports=3_000_000_000)
+        await sol_connect(f2pg2)
+        await f2pg2.wait_for_timeout(300)
+        # کلیکِ واقعیِ Playwright روی مرکزِ باکس می‌تواند به‌جای خودِ عدد، روی
+        # دکمه‌ی ۵۰٪/MAXِ کناری بیفتد (هر دو داخل همان <b> هستند) — دیسپچِ
+        # مستقیم روی خودِ گره تضمین می‌کند e.target داخلِ .frac نباشد.
+        await f2pg2.eval_on_selector("#solTopBal",
+            "el => el.dispatchEvent(new MouseEvent('click', {bubbles: true}))")
+        await f2pg2.wait_for_timeout(150)
+        f2_amt = await f2pg2.input_value("#solAmt")
+        await f2pg2.close()
+        print("[sol round3][F] clicking the pay balance figure -> #solAmt=%r" % f2_amt)
+        assert f2_amt == "2.997750", \
+            "F: clicking the balance figure above You-pay must fill the full spendable amount (MAX), got %r" % f2_amt
+
+        # G) the SOL chip's <img> src comes from the GT single-token fixture.
+        SOL_LOGO_URL = "https://assets.geckoterminal.com/fake/sol.png"
+        gpg = await open_sol_swap_page({"v": "sell", "ms": 100}, sol_mint_image_url=SOL_LOGO_URL)
+        await gpg.wait_for_timeout(700)
+        g_src = await gpg.eval_on_selector("#solTopAv img", "el => el ? el.src : null")
+        await gpg.close()
+        print("[sol round3][G] SOL chip img src=%r" % g_src)
+        assert g_src == SOL_LOGO_URL, "G: the SOL chip must show the GT-fetched wSOL logo, got %r" % g_src
+
+        # H) the Solana exit-check card's Copy-this-check button must match
+        # Base's size (±2px) at 1440px, and the card title must not wrap.
+        hpg2 = await open_app(viewport={"width": 1440, "height": 900})
+        await hpg2.wait_for_timeout(300)
+        h_base = await hpg2.eval_on_selector("#checkShare", "el => el.getBoundingClientRect().height")
+        await hpg2.click("#srcChip")
+        await hpg2.click('#srcPop [data-chain="solana"]')
+        await hpg2.wait_for_timeout(200)
+        h_sol = await hpg2.eval_on_selector("#appSolCheckShare", "el => el.getBoundingClientRect().height")
+        h_ttl = await hpg2.eval_on_selector("#appSolHeroCol .card>header>.ttl:first-child",
+                                             "el => el.getBoundingClientRect().height")
+        await hpg2.close()
+        print("[sol round3][H] button height base=%r solana=%r titleHeight=%r" % (h_base, h_sol, h_ttl))
+        assert abs(h_base - h_sol) <= 2, \
+            "H: the Solana Copy-this-check button must match Base's size within 2px, base=%r solana=%r" % (h_base, h_sol)
+        assert h_ttl <= 20, "H: the exit-check card title must stay on one line at 1440px, height=%r" % h_ttl
+
+        print("[sol round3] fresh transaction build right before each wallet prompt, never reusing the first "
+              "build (A); worker/index.js's closed sendTransaction detail mapped to readable sentences, never "
+              "a bare code (B); silent reconnect on start gated by the stored wallet name and the off-flag (C); "
+              "the lowered priority-fee cap with a live Network-fee row (D); ExactOut quoting from You-receive "
+              "with the ExactIn fallback on rejection (E); prompt balance refresh after Confirmed and the "
+              "pay-balance click filling MAX (F); the SOL chip's GT-fetched logo (G); and Copy-this-check's "
+              "Base-matching size at 1440px (H) — all covered")
 
         # ---- [pairs filters] چیپ‌های آمار × جست‌وجو × مرتب‌سازی — ترکیب‌های
         # دقیق، رویِ یک استابِ ۶ ردیفی. ----
