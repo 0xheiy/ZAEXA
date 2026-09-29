@@ -4445,6 +4445,8 @@ let solVerdictV=null;           // "sell"/"nosell"/null از GET /vd/<mint>
 let solQuoteSeq=0;              // برای دورریختنِ کوت‌های دیرِ رسیده
 let solQuote=null;              // آخرین quote موفق (شیءِ خامِ جوپیتر)
 let solQuoteTimer=null;
+let solIntentSeq=0,solBalanceSeq=0,solTokenSeq=0,solWalletConnectSeq=0;
+let solBalanceKey=null;
 let solQuoteAt=0;               // Date.now() لحظه‌ی موفقیتِ آخرین کوت — A: تازگیِ کوت پیش از ساختِ تراکنش
 let solSwapBusy=false;          // جلوِ دوبار زدنِ دکمه‌ی سواپ حین امضا/ارسال
 // E — "exactIn" (کاربر «You pay» را می‌نویسد) یا "exactOut" («You receive» را می‌نویسد)
@@ -4547,6 +4549,7 @@ async function solAppLoadToken(mint){
   }
   solCloseTokenPicker();
   solSwapReset(mint);
+  const tokenSeq=solTokenSeq;
   // نماد و لوگوی پیش‌فرض‌ها (USDC/USDT/JUP) از همین فهرست — کارت پیش از جوابِ GT هم «؟ —» نشان ندهد.
   const preset=SOL_APP_TOKEN_LIST.find(t=>t.mint===mint);
   if(preset){solTokenSymbol=preset.symbol;}
@@ -4556,6 +4559,7 @@ async function solAppLoadToken(mint){
   renderSolExit(null,null,"appSolExitBox");
   solPaintSellPill(null,null,null);
   const[meta,verdict]=await Promise.all([fetchSolMeta(mint),fetchVdVerdict(mint)]);
+  if(tokenSeq!==solTokenSeq||mint!==solMintCur)return;
   solVerdictV=verdict.v;
   if(meta&&Number.isInteger(meta.decimals))solTokenDecimals=meta.decimals;
   solTokenSymbol=(meta&&meta.symbol)||(preset&&preset.symbol)||"Unknown";
@@ -6908,9 +6912,12 @@ async function openSolanaTokenPage(mint){
   // چیپِ شبکه در هدر باید «Solana» بگوید، نه «Base» — بدونِ ذخیره در انتخابِ کاربر
   if(activeChain!=="solana"){activeChain="solana";paintSrc();paintSrc2();}
   solSwapReset(mint);
+  const tokenSeq=solTokenSeq;
   $("solSwap").hidden=false;
 
   const [meta,verdict]=await Promise.all([fetchSolMeta(mint),fetchVdVerdict(mint)]);
+  if(tokenSeq!==solTokenSeq||mint!==solMintCur)return;
+  const preset=SOL_APP_TOKEN_LIST.find(t=>t.mint===mint);
   $("tk-sym").textContent=(meta&&meta.symbol)||"Unknown token";
   $("tk-name").textContent=(meta&&meta.name)||"";
   const px=meta&&meta.price_usd!=null?Number(meta.price_usd):NaN;
@@ -7068,7 +7075,7 @@ function solSubscribeWalletEvents(w){
   if(!ev||typeof ev.on!=="function")return;
   try{
     solEventsUnsub=ev.on("change",(props)=>{
-      if(!props||!Object.prototype.hasOwnProperty.call(props,"accounts"))return;
+      if(w!==solWalletApi||!props||!Object.prototype.hasOwnProperty.call(props,"accounts"))return;
       const accs=props.accounts||[];
       if(!accs.length){solDisconnectWallet(false);return;}
       solAccount=accs[0];
@@ -7078,6 +7085,7 @@ function solSubscribeWalletEvents(w){
 }
 let solSilentTriedFor=new Set();
 async function solMaybeSilentConnect(w){
+  const connectSeq=solWalletConnectSeq;
   if(!w||!solLastWalletName||w.name!==solLastWalletName)return;
   if(solAccount||solWalletOff())return;
   if(solSilentTriedFor.has(w.name))return;       // یک تلاش برای هر کیف‌پول در این بارگذاری کافی است
@@ -7085,7 +7093,7 @@ async function solMaybeSilentConnect(w){
   try{
     const res=await w.features["standard:connect"].connect({silent:true});
     const acc=res&&res.accounts&&res.accounts[0];
-    if(!acc||solAccount)return;                  // در فاصله‌ی انتظار کاربر خودش وصل کرده باشد
+    if(!acc||solAccount||solWalletOff()||connectSeq!==solWalletConnectSeq)return;                  // در فاصله‌ی انتظار کاربر خودش وصل کرده باشد
     solWalletApi=w;solAccount=acc;
     solSubscribeWalletEvents(w);
     solPaintWallet();solRefreshBalances();solScheduleQuote();
@@ -7112,8 +7120,10 @@ function solRenderWalletList(){
 function solOpenWalletPicker(){solRenderWalletList();$("solWalletOv").classList.add("on");}
 function solCloseWalletPicker(){$("solWalletOv").classList.remove("on");}
 async function solConnectWallet(w){
+  const connectSeq=++solWalletConnectSeq;
   try{
     const res=await w.features["standard:connect"].connect();
+    if(connectSeq!==solWalletConnectSeq)return;
     const acc=res&&res.accounts&&res.accounts[0];
     if(!acc)throw new Error("no account returned");
     solWalletApi=w;solAccount=acc;
@@ -7135,18 +7145,21 @@ async function solConnectWallet(w){
 // بعد باز هم تلاشِ بی‌صدا می‌شود.
 function solDisconnectWallet(setOff){
   if(setOff===undefined)setOff=true;
-  try{
-    const f=solWalletApi&&solWalletApi.features;
-    if(f&&f["standard:disconnect"])f["standard:disconnect"].disconnect();
-  }catch{}
+  ++solWalletConnectSeq;++solBalanceSeq;
+  const wallet=solWalletApi;
   if(solEventsUnsub){try{solEventsUnsub();}catch{}solEventsUnsub=null;}
   if(setOff)solSetWalletOff(true);
-  solWalletApi=null;solAccount=null;solBalSol=null;solBalTok=null;
+  solWalletApi=null;solAccount=null;solBalSol=null;solBalTok=null;solOutAtaExists=null;
+  solInvalidateQuote();
   $("solWalPop").classList.remove("on");
-  solPaintWallet();
-  solRenderReadout();
-  solUpdateSwapBtn();
+  solPaintWallet();solPaintBalance();
+  // Unsubscribe and clear local state before a wallet can synchronously emit change.
+  if(setOff)try{
+    const f=wallet&&wallet.features&&wallet.features["standard:disconnect"];
+    if(f)Promise.resolve(f.disconnect()).catch(()=>{});
+  }catch{}
 }
+
 function solPaintWallet(){
   const btn=$("solConnectBtn");
   if(solAccount){
@@ -7180,34 +7193,45 @@ async function solRpcCall(method,params){
   return j.result;
 }
 async function solRefreshBalances(){
-  if(!solAccount)return;
-  const mint=solMintCur;
+  const seq=++solBalanceSeq;
+  const account=solAccount,mint=solMintCur;
+  const key=account?account.address+":"+mint:null;
+  // Keep the last known balance during a same-account refresh. Only a new
+  // account/token clears it; an in-flight refresh must not lift a known budget block.
+  if(key!==solBalanceKey){solBalSol=null;solBalTok=null;solOutAtaExists=null;}
+  solBalanceKey=key;
+  solPaintBalance();solPaintFeeRows();solSwapApplyGate();
+  if(!account)return;
+  const current=()=>seq===solBalanceSeq&&solAccount===account&&solMintCur===mint;
+  let nativeBalance=null,tokenBalance=null,exists=null,decimals=null;
   try{
-    const bal=await solRpcCall("getBalance",[solAccount.address,{commitment:"confirmed"}]);
-    solBalSol=bal&&typeof bal.value==="number"?bal.value/1e9:null;
-  }catch{solBalSol=null;}
-  try{
+    const bal=await solRpcCall("getBalance",[account.address,{commitment:"confirmed"}]);
+    if(!current())return;
+    nativeBalance=bal&&typeof bal.value==="number"?bal.value/1e9:null;
+  }catch{if(!current())return;}
+  if(mint)try{
     const r=await solRpcCall("getTokenAccountsByOwner",
-      [solAccount.address,{mint},{encoding:"jsonParsed"}]);
+      [account.address,{mint},{encoding:"jsonParsed"}]);
+    if(!current())return;
     const accs=(r&&r.value)||[];
-    let sum=0,dec=null,found=false;
+    let sum=0,found=false;
     for(const a of accs){
       const info=a&&a.account&&a.account.data&&a.account.data.parsed&&a.account.data.parsed.info;
       const ta=info&&info.tokenAmount;
       if(ta&&ta.uiAmountString!=null){
         sum+=Number(ta.uiAmountString);
-        if(dec==null&&Number.isInteger(ta.decimals))dec=ta.decimals;
+        if(decimals==null&&Number.isInteger(ta.decimals))decimals=ta.decimals;
         found=true;
       }
     }
-    solBalTok=found?sum:0;
-    solOutAtaExists=found;                      // همان تماس، همان «ATA از قبل هست؟»
-    if(dec!=null)solTokenDecimals=dec;         // اولویت با خودِ حسابِ توکن
-  }catch{solBalTok=null;solOutAtaExists=null;}
-  solPaintBalance();
-  solPaintFeeRows();
-  solSwapApplyGate();
+    tokenBalance=found?sum:0;exists=found;
+  }catch{if(!current())return;}
+  if(!current())return;
+  solBalSol=nativeBalance;solBalTok=tokenBalance;solOutAtaExists=exists;
+  if(decimals!=null)solTokenDecimals=decimals;
+  solPaintBalance();solPaintFeeRows();solSwapApplyGate();
 }
+
 /* ---- بودجه‌ی SOL — پیش‌شرطِ ساختنِ تراکنش، قبل از هر چیزِ دیگر ----
    A: کف SOL‌ای که فی‌پیر (خودِ کاربر) باید نگه دارد تا کارمزد و رنتِ
    احتمالیِ همین تراکنش را بدهد. حالتِ نامعلوم (solOutAtaExists===null)
@@ -7303,8 +7327,15 @@ function solPaintBalance(){
 
 /* ---- کوت — دبانس ۴۰۰ms، شماره‌ی ترتیب برای دورریختنِ پاسخِ دیر ---- */
 function solSetNotice(h){$("solNotices").innerHTML=h||"";}
+function solInvalidateQuote(){
+  ++solIntentSeq;
+  ++solQuoteSeq;
+  clearTimeout(solQuoteTimer);solQuoteTimer=null;
+  solQuote=null;solQuoteAt=0;solNetFeeLamports=null;
+  solRenderReadout();solPaintFeeRows();solUpdateSwapBtn();
+}
 function solScheduleQuote(){
-  clearTimeout(solQuoteTimer);
+  solInvalidateQuote();
   solQuoteTimer=setTimeout(solFetchQuote,400);
 }
 async function solFetchQuote(){
@@ -7459,6 +7490,7 @@ function solSwapApplyGate(){
    می‌کند (Base هم amtIn/amtOut را پاک نمی‌کند ولی کوتِ قبلی برای جهتِ تازه
    معنا ندارد)، و دو پایه را دوباره می‌کشد. */
 function solOnSideChange(){
+  solInvalidateQuote();
   $("solAmt").value="";
   $("solOutRead").value="";
   solMode="exactIn";
@@ -7575,19 +7607,34 @@ async function solSendAndHandle(txB64){
    شناخته‌شده (simulationError، فی‌پیرِ غلط، پیش‌شبیه‌سازیِ ما) با
    e.uiHandled=true/e.uiMessage پرتاب می‌شوند تا solDoSwap دقیقاً همان
    پیامِ آماده را نشان بدهد، نه یک خطای عمومی. */
-async function solBuildFreshTx(btn){
+function solSwapContext(){
+  return JSON.stringify([solIntentSeq,solTokenSeq,activeChain,solMintCur,solSide,solMode,
+    $(solMode==="exactOut"?"solOutRead":"solAmt").value,
+    solAccount&&solAccount.address,slippageBps]);
+}
+function solAssertSwapContext(context){
+  if(context!==solSwapContext()||!solAccount||!solWalletApi){
+    const msg="Your swap details or wallet changed. Review the new quote and press Swap again.";
+    throw Object.assign(new Error(msg),{uiHandled:true,uiMessage:msg});
+  }
+}
+async function solBuildFreshTx(btn,context=solSwapContext()){
+  solAssertSwapContext(context);
   if(!solQuote||Date.now()-solQuoteAt>20000){
     if(btn)btn.textContent="Refreshing quote…";
     await solFetchQuote();
+    solAssertSwapContext(context);
     if(!solQuote)throw Object.assign(new Error("could not refresh the quote"),
       {uiHandled:true,uiMessage:"Could not refresh the quote. Try again."});
   }
+  solAssertSwapContext(context);
   if(btn)btn.textContent="Building transaction…";
   const r=await withTimeout(fetch(location.origin+"/sol/swap",{
     method:"POST",headers:{"content-type":"application/json"},
     body:JSON.stringify({quoteResponse:solQuote,userPublicKey:solAccount.address}),
   }),15000);
   const j=await r.json().catch(()=>null);
+  solAssertSwapContext(context);
   if(!r.ok||!j||j.error||!j.swapTransaction)throw new Error((j&&j.error)||"could not build the transaction");
 
   // D — عددِ واقعیِ کارمزدِ اولویت، برای ردیفِ «Network fee».
@@ -7629,6 +7676,7 @@ async function solBuildFreshTx(btn){
     }
   }
 
+  solAssertSwapContext(context);
   return {txBytes,swapTxB64:j.swapTransaction};
 }
 async function solDoSwap(){
@@ -7639,11 +7687,12 @@ async function solDoSwap(){
   const budgetGuard=solBudgetCheck(amtSolGuard);
   if(!budgetGuard.ok){solSetNotice(note("err","<b>"+esc(budgetGuard.msg)+"</b>"));return;}
   solSwapBusy=true;
+  const context=solSwapContext();
   const btn=$("solSwapBtn");
   btn.disabled=true;btn.textContent="Building transaction…";
   try{
     // A — ساختِ اول، بلافاصله پیش از تماسِ اصلیِ کیف‌پول.
-    const built=await solBuildFreshTx(btn);
+    const built=await solBuildFreshTx(btn,context);
 
     const swapInSym=solSide==="buy"?"SOL":(solTokenSymbol||"—");
     const swapOutSym=solSide==="buy"?(solTokenSymbol||"—"):"SOL";
@@ -7664,8 +7713,9 @@ async function solDoSwap(){
         if(isUserRejection(e)||!f["solana:signTransaction"])throw e;
         // A — ساختِ دوم، بلافاصله پیش از fallback؛ هرگز بایت‌های ساختِ اول
         // (که ممکن است حینِ چند پاپ‌آپ blockhashش منقضی شده باشد).
+        solAssertSwapContext(context);
         btn.textContent="Retrying with your wallet's signing method…";
-        const built2=await solBuildFreshTx(btn);
+        const built2=await solBuildFreshTx(btn,context);
         const res2=await f["solana:signTransaction"].signTransaction(
           {account:solAccount,transaction:built2.txBytes,chain:"solana:mainnet"});
         const row2=res2&&res2[0];
@@ -7677,6 +7727,7 @@ async function solDoSwap(){
         const signedBytes2=row2.signedTransaction;
         sigB58=solBs58Encode(signedBytes2.slice(1,65));
         btn.textContent="Sending…";
+        solAssertSwapContext(context);
         await solSendAndHandle(solBytesToB64(signedBytes2));
       }
     }else if(f["solana:signTransaction"]){
@@ -7687,6 +7738,7 @@ async function solDoSwap(){
       const signedBytes=row.signedTransaction;
       sigB58=solBs58Encode(signedBytes.slice(1,65)); // اولین امضا، بلافاصله بعدِ بایتِ compact-u16
       btn.textContent="Sending…";
+      solAssertSwapContext(context);
       await solSendAndHandle(solBytesToB64(signedBytes));
     }else{
       throw new Error("wallet supports neither signing feature");
@@ -7726,14 +7778,17 @@ async function solDoSwap(){
 /* پاک‌کردنِ کاملِ وضعیت بینِ دو بارِ صفحه‌ی توکن — یک اتصال از توکنِ قبلی
    نباید به توکنِ بعدی درز کند. */
 function solSwapReset(mint){
+  ++solTokenSeq;
+  ++solBalanceSeq;
+  solInvalidateQuote();
   solMintCur=mint;
   solTokenDecimals=null;solBalSol=null;solBalTok=null;
   solTokenSymbol=null;solTokenLogoUrl=null;
   solSide="buy";solVerdictV=null;solQuote=null;solOutAtaExists=null;
   solQuoteAt=0;solNetFeeLamports=null;solMode="exactIn";
   clearTimeout(solQuoteTimer);solQuoteTimer=null;
-  solSwapBusy=false;
   $("solAmt").value="";
+  $("solOutRead").value="";
   solSetNotice("");
   solPaintSellPill(null,null,null);
   solPaintLegs();
@@ -8045,11 +8100,13 @@ $("copyAddrBtn").onclick=(e)=>{
     slippageBps=+b.dataset.bps;
     document.querySelectorAll("#slipSeg [data-bps]").forEach(x=>x.classList.toggle("on",x===b));
     $("slipCustom").value="";if(currentPlan)renderPlan(currentPlan,mode==="targetOut");
+    if(solMintCur)solScheduleQuote();
     saveSwapSettings();});
   $("slipCustom").oninput=e=>{const v=parseFloat(e.target.value);
     if(!isNaN(v)&&v>0&&v<=50){slippageBps=Math.round(v*100);
       document.querySelectorAll("#slipSeg [data-bps]").forEach(x=>x.classList.remove("on"));
-      if(currentPlan)renderPlan(currentPlan,mode==="targetOut");}
+      if(currentPlan)renderPlan(currentPlan,mode==="targetOut");
+      if(solMintCur)solScheduleQuote();}
     saveSwapSettings();};
   $("deadlineMin").oninput=e=>{const v=parseInt(e.target.value,10);
     if(!isNaN(v)&&v>0&&v<=60)deadlineMin=v;

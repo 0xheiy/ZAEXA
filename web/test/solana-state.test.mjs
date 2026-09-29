@@ -1,0 +1,220 @@
+import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import vm from 'node:vm';
+import test from 'node:test';
+
+// Run the actual browser functions with controlled network completion order.
+const html = readFileSync(new URL('../index.html', import.meta.url), 'utf8');
+function context(names, extras = {}) {
+  const elements = new Map();
+  const ctx = vm.createContext({
+    console, URLSearchParams, Uint8Array, Date, Math, BigInt,
+    setTimeout: () => 1, clearTimeout: () => {},
+    $: id => {
+      if (!elements.has(id)) elements.set(id, { value: '', textContent: '', hidden: false, style: {}, classList: { remove() {} } });
+      return elements.get(id);
+    },
+    solQuote: { inAmount: '1000000000' }, solQuoteSeq: 0, solQuoteAt: Date.now(),
+    solQuoteTimer: null, solMode: 'exactIn', solSide: 'buy', solMintCur: 'mintA',
+    solTokenDecimals: 6, solAccount: { address: 'walletA', publicKey: new Uint8Array(32) },
+    solWalletApi: {}, solBalanceSeq: 0, solBalanceKey: null, solTokenSeq: 0, solIntentSeq: 0, activeChain: 'solana',
+    solBalSol: null, solBalTok: null, solOutAtaExists: null, slippageBps: 50,
+    solRenderReadout() {}, solUpdateSwapBtn() {}, solPaintLegs() {}, solPaintBalance() {},
+    solPaintFeeRows() {}, solSwapApplyGate() {}, solFetchQuote() {}, solSetNotice() {},
+    ...extras,
+  });
+  for (const name of names) {
+    const match = new RegExp(`(?:async )?function ${name}\\(`).exec(html);
+    assert.ok(match, `missing ${name}`);
+    const end = html.indexOf('\n}', match.index);
+    vm.runInContext(html.slice(match.index, end + 2), ctx);
+  }
+  return ctx;
+}
+function deferred() {
+  let resolve;
+  const promise = new Promise(r => { resolve = r; });
+  return { promise, resolve };
+}
+
+test('editing amount immediately retires the old quote before debounce', () => {
+  const c = context(['solScheduleQuote', 'solInvalidateQuote']);
+  c.solScheduleQuote();
+  assert.equal(c.solQuote, null);
+  assert.equal(c.solQuoteSeq, 1);
+});
+
+test('flipping direction retires an outstanding quote request', () => {
+  const c = context(['solOnSideChange', 'solInvalidateQuote']);
+  c.solOnSideChange();
+  assert.equal(c.solQuoteSeq, 1);
+  assert.equal(c.solQuote, null);
+});
+
+test('late balances from a previous account cannot overwrite current balances', async () => {
+  const old = deferred();
+  const c = context(['solRefreshBalances'], {
+    solRpcCall: async (method, params) => {
+      if (params[0] === 'walletA') return old.promise;
+      return method === 'getBalance' ? { value: 2000000000 } : { value: [] };
+    },
+  });
+  const pending = c.solRefreshBalances();
+  c.solAccount = { address: 'walletB' };
+  await c.solRefreshBalances();
+  old.resolve({ value: 9000000000 });
+  await pending;
+  assert.equal(c.solBalSol, 2);
+});
+
+test('disconnect while fetching balances leaves balances cleared', async () => {
+  const old = deferred();
+  const c = context(['solRefreshBalances'], { solRpcCall: () => old.promise });
+  const pending = c.solRefreshBalances();
+  c.solAccount = null;
+  old.resolve({ value: 9000000000 });
+  await pending;
+  assert.equal(c.solBalSol, null);
+  assert.equal(c.solBalTok, null);
+});
+
+test('late token metadata cannot replace a newer token selection', async () => {
+  const old = deferred();
+  const c = context(['solAppLoadToken'], {
+    SOL_MINT_RE: /./, SOL_APP_TOKEN_LIST: [], solCloseTokenPicker() {},
+    solSwapReset(mint) { c.solMintCur = mint; ++c.solTokenSeq; },
+    renderSolExit() {}, solPaintSellPill() {}, renderSolStats() {}, solLoadChart() {},
+    fetchSolMeta: mint => mint === 'mintA' ? old.promise : Promise.resolve({ symbol: 'B', decimals: 6 }),
+    fetchVdVerdict: async () => ({ v: 'sell' }),
+  });
+  const pending = c.solAppLoadToken('mintA');
+  await c.solAppLoadToken('mintB');
+  old.resolve({ symbol: 'A', decimals: 9 });
+  await pending;
+  assert.equal(c.solTokenSymbol, 'B');
+  assert.equal(c.solTokenDecimals, 6);
+});
+
+test('changing amount during transaction build prevents wallet handoff', async () => {
+  const build = deferred();
+  const c = context(['solBuildFreshTx', 'solSwapContext', 'solAssertSwapContext'], {
+    location: { origin: 'https://example.test' }, fetch: () => build.promise,
+    withTimeout: p => p, solB64ToBytes: () => new Uint8Array(32),
+    solParseFeePayer: () => new Uint8Array(32), solBytesEq: () => true,
+    solRpcCall: async () => ({ value: { err: null } }),
+  });
+  c.$('solAmt').value = '1';
+  const pending = c.solBuildFreshTx(null);
+  c.$('solAmt').value = '2';
+  build.resolve({ ok: true, json: async () => ({ swapTransaction: 'test' }) });
+  await assert.rejects(pending, /changed/i);
+});
+
+test('an old quote arriving within the debounce window stays discarded', async () => {
+  const quote = deferred();
+  const c = context(['solFetchQuote', 'solScheduleQuote', 'solInvalidateQuote'], {
+    SOL_MINT_ADDR: 'SOL', location: { origin: 'https://example.test' },
+    withTimeout: p => p, fetch: () => quote.promise,
+  });
+  c.$('solAmt').value = '1';
+  const pending = c.solFetchQuote();
+  c.$('solAmt').value = '2';
+  c.solScheduleQuote();
+  quote.resolve({ ok: true, json: async () => ({ inAmount: '1000000000' }) });
+  await pending;
+  assert.equal(c.solQuote, null);
+});
+
+test('unchanged swap still builds successfully', async () => {
+  const c = context(['solBuildFreshTx', 'solSwapContext', 'solAssertSwapContext'], {
+    location: { origin: 'https://example.test' },
+    fetch: async () => ({ ok: true, json: async () => ({ swapTransaction: 'test' }) }),
+    withTimeout: p => p, solB64ToBytes: () => new Uint8Array(32),
+    solParseFeePayer: () => new Uint8Array(32), solBytesEq: () => true,
+    solRpcCall: async () => ({ value: { err: null } }),
+  });
+  c.$('solAmt').value = '1';
+  assert.equal((await c.solBuildFreshTx(null)).swapTxB64, 'test');
+});
+
+test('changing wallet during simulation cancels the prepared transaction', async () => {
+  const simulation = deferred();
+  const started = deferred();
+  const c = context(['solBuildFreshTx', 'solSwapContext', 'solAssertSwapContext'], {
+    location: { origin: 'https://example.test' },
+    fetch: async () => ({ ok: true, json: async () => ({ swapTransaction: 'test' }) }),
+    withTimeout: p => p, solB64ToBytes: () => new Uint8Array(32),
+    solParseFeePayer: () => new Uint8Array(32), solBytesEq: () => true,
+    solRpcCall: () => { started.resolve(); return simulation.promise; },
+  });
+  const pending = c.solBuildFreshTx(null);
+  await started.promise;
+  c.solAccount = { address: 'walletB' };
+  simulation.resolve({ value: { err: null } });
+  await assert.rejects(pending, /changed/i);
+});
+
+test('pending silent connection cannot undo an explicit disconnect', async () => {
+  const connection = deferred();
+  const c = context(['solMaybeSilentConnect', 'solDisconnectWallet', 'solInvalidateQuote'], {
+    solAccount: null, solWalletConnectSeq: 0, solLastWalletName: 'Fake',
+    solSilentTriedFor: new Set(), solEventsUnsub: null,
+    solWalletOff: () => false, solSetWalletOff() {}, solPaintWallet() {},
+    solSubscribeWalletEvents() {}, solRefreshBalances() {}, solScheduleQuote() {},
+  });
+  const pending = c.solMaybeSilentConnect({ name: 'Fake', features: {
+    'standard:connect': { connect: () => connection.promise },
+  } });
+  c.solDisconnectWallet();
+  connection.resolve({ accounts: [{ address: 'walletA' }] });
+  await pending;
+  assert.equal(c.solAccount, null);
+});
+
+test('wallet-originated disconnect does not call disconnect recursively', () => {
+  let calls = 0;
+  const c = context(['solDisconnectWallet', 'solInvalidateQuote'], {
+    solWalletConnectSeq: 0, solEventsUnsub: null, solSetWalletOff() {}, solPaintWallet() {},
+    solWalletApi: { features: { 'standard:disconnect': { disconnect() { ++calls; } } } },
+  });
+  c.solDisconnectWallet(false);
+  assert.equal(calls, 0);
+  assert.equal(c.solAccount, null);
+});
+
+test('resetting token does not unlock a wallet request already in progress', () => {
+  const c = context(['solSwapReset', 'solInvalidateQuote'], {
+    solSwapBusy: true, solAccount: null, solPaintSellPill() {}, solPaintWallet() {},
+  });
+  c.solSwapReset('mintB');
+  assert.equal(c.solSwapBusy, true);
+  assert.equal(c.solMintCur, 'mintB');
+});
+
+test('token page with missing metadata still initializes the wallet', async () => {
+  let initialized = false;
+  const c = context(['openSolanaTokenPage'], {
+    SOL_APP_TOKEN_LIST: [], shortAddr: s => s, solTokenUrl: s => s,
+    paintSolAvatar() {}, renderRoundTrip() {}, ev() {}, renderSolStats() {},
+    renderSolExit() {}, solPaintSellPill() {}, solTryAutoRestoreName() {},
+    solWalletStandardInit() { initialized = true; },
+    solSwapReset(mint) { c.solMintCur = mint; ++c.solTokenSeq; },
+    fetchSolMeta: async () => null, fetchVdVerdict: async () => ({ v: null }),
+  });
+  await c.openSolanaTokenPage('mintA');
+  assert.equal(c.solTokenSymbol, 'Unknown');
+  assert.equal(initialized, true);
+});
+
+test('same-account balance refresh preserves a known low balance until its response', async () => {
+  const balance = deferred();
+  const c = context(['solRefreshBalances'], {
+    solBalanceKey: 'walletA:mintA', solBalSol: 0.0001,
+    solRpcCall: method => method === 'getBalance' ? balance.promise : Promise.resolve({ value: [] }),
+  });
+  const pending = c.solRefreshBalances();
+  assert.equal(c.solBalSol, 0.0001);
+  balance.resolve({ value: 2000000000 });
+  await pending;
+  assert.equal(c.solBalSol, 2);
+});
