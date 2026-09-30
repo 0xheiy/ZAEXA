@@ -1631,7 +1631,10 @@ function solRpcParamsOk(method, params) {
     if (!Array.isArray(params) || params.length !== 3) return false;
     const [owner, filt, enc] = params;
     if (!isBase58Str(owner, 32, 44)) return false;
-    if (!filt || typeof filt !== "object" || Object.keys(filt).length !== 1 || !isSolMintStr(filt.mint)) return false;
+    if (!filt || typeof filt !== "object" || Object.keys(filt).length !== 1) return false;
+    const knownProgram = filt.programId === "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA" ||
+      filt.programId === "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb";
+    if (!isSolMintStr(filt.mint) && !knownProgram) return false;
     if (!enc || typeof enc !== "object" || Object.keys(enc).length !== 1 || enc.encoding !== "jsonParsed") return false;
     return true;
   }

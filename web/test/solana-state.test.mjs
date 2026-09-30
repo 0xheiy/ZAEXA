@@ -17,7 +17,7 @@ function context(names, extras = {}) {
     solQuote: { inAmount: '1000000000' }, solQuoteSeq: 0, solQuoteAt: Date.now(),
     solQuoteTimer: null, solMode: 'exactIn', solSide: 'buy', solMintCur: 'mintA',
     solTokenDecimals: 6, solAccount: { address: 'walletA', publicKey: new Uint8Array(32) },
-    solWalletApi: {}, solBalanceSeq: 0, solBalanceKey: null, solTokenSeq: 0, solIntentSeq: 0, activeChain: 'solana',
+    solWalletApi: {}, solBalanceSeq: 0, solBalanceKey: null, solTokenSeq: 0, solIntentSeq: 0, activeChain: 'solana', view: 'swap',
     solBalSol: null, solBalTok: null, solOutAtaExists: null, slippageBps: 50,
     solRenderReadout() {}, solUpdateSwapBtn() {}, solPaintLegs() {}, solPaintBalance() {},
     solPaintFeeRows() {}, solSwapApplyGate() {}, solFetchQuote() {}, solSetNotice() {},

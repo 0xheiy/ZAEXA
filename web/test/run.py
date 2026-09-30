@@ -10847,7 +10847,11 @@ async def main():
                     return { tag: 'svg', id: el.id || null,
                              cls: (el.className.baseVal || '').toString().split(/\\s+/).filter(c => c).sort() };
                 }
-                const clsList = (el.className || '').toString().split(/\\s+/).filter(c => c && c !== 'on').sort();
+                // The app LED follows its RPC heartbeat; the read-only pairs page has no
+                // RPC heartbeat. Ignore only LED status, while keeping every structural class.
+                const rawClasses = (el.className || '').toString().split(/\\s+/);
+                const clsList = rawClasses.filter(c => c && c !== 'on' &&
+                    !(c === 'off' && rawClasses.includes('led'))).sort();
                 const kids = Array.prototype.filter.call(el.children, c => true);
                 // مستقیم زیرِ #nav: در اپ <button> است (تب‌زنیِ SPA) و در
                 // pairs <a class="navLink" href> واقعی — همان تفاوتِ

@@ -4491,6 +4491,17 @@ function paintSrc2(){
 let solAppDefaulted=false;
 function updateSwapViewForChain(){
   paintSrc();paintSrc2();
+  const footerTag=document.querySelector(".footTag");
+  if(footerTag){
+    if(!footerTag.dataset.baseCopy)footerTag.dataset.baseCopy=footerTag.textContent;
+    footerTag.textContent=activeChain==="solana"
+      ?"Swap on Solana. Your portfolio and recent trades, in one place."
+      :footerTag.dataset.baseCopy;
+  }
+  const flowNote=document.querySelector("#view-flow > p");
+  if(flowNote)flowNote.textContent=activeChain==="solana"
+    ?"Recent Solana trades from GeckoTerminal. Samples may not cover every trade or pool."
+    :"Read live from the deepest pool for this token, in your browser — no server, nothing stored.";
   if(tokenPage)return;
   const solana=activeChain==="solana";
   const heroBase=document.getElementById("baseHeroRow");
@@ -4524,9 +4535,12 @@ function setChain(next){
   next=(next==="solana")?"solana":"base";
   closeSrcMenu();
   if(next===activeChain)return;
+  ++folioSeq;++flowSeq;
   activeChain=next;
   storeChain(next);
   updateSwapViewForChain();
+  if(view==="folio")renderFolio();
+  if(view==="flow"){paintFlowToken();renderFlow();}
 }
 function closeSrcMenu(focusBack){
   $("srcPop").classList.remove("on");
@@ -4574,6 +4588,7 @@ async function solAppLoadToken(mint){
   if($("solPairName"))$("solPairName").textContent=solTokenSymbol+" / SOL";
   renderSolStats(meta,"solTokStats");
   solLoadChart();
+  if(activeChain==="solana"&&view==="flow"){paintFlowToken();renderFlow();}
 }
 /* ---- چیدمانِ دو پایه، عیناً چیدمانِ Base: بالا همیشه «You pay» (فیلدِ
    قابلِ‌ویرایش)، پایین همیشه «You receive» (فقط‌خواندنی). فلیپ فقط این را
@@ -5333,7 +5348,166 @@ const SERIES=["var(--s1)","var(--s2)","var(--s3)","var(--s4)",
               "var(--s5)","var(--s6)","var(--s7)","var(--s8)"];
 let folioSeq=0;
 
+/* Solana holdings and trade flow. Wallet addresses stay in memory; no analytics. */
+const SOL_TOKEN_PROGRAMS=[
+  "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+  "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+];
+function solFormatUnits(raw,decimals){
+  const digits=String(raw).padStart(decimals+1,"0");
+  if(!decimals)return digits;
+  const fraction=digits.slice(-decimals).replace(/0+$/,"");
+  return digits.slice(0,-decimals)+(fraction?"."+fraction:"");
+}
+function solCollectHoldings(results){
+  const rows=new Map(),seen=new Set();
+  let incomplete=false;
+  const native=results[0];
+  if(native.status==="fulfilled"&&Number.isSafeInteger(native.value?.value)&&native.value.value>=0){
+    if(native.value.value>0)rows.set("native",{mint:SOL_MINT_ADDR,raw:BigInt(native.value.value),decimals:9,native:true});
+  }else incomplete=true;
+  for(const result of results.slice(1)){
+    if(result.status!=="fulfilled"||!Array.isArray(result.value?.value)){incomplete=true;continue;}
+    for(const account of result.value.value){
+      if(!account?.pubkey||seen.has(account.pubkey))continue;
+      seen.add(account.pubkey);
+      const info=account.account?.data?.parsed?.info,ta=info?.tokenAmount;
+      if(!SOL_MINT_RE.test(info?.mint||"")||!/^\d+$/.test(ta?.amount||"")||
+          !Number.isInteger(ta.decimals)||ta.decimals<0||ta.decimals>255){incomplete=true;continue;}
+      const raw=BigInt(ta.amount);if(raw===0n)continue;
+      const previous=rows.get(info.mint);
+      if(previous&&previous.decimals!==ta.decimals){incomplete=true;continue;}
+      if(previous)previous.raw+=raw;
+      else rows.set(info.mint,{mint:info.mint,raw,decimals:ta.decimals,native:false});
+    }
+  }
+  return {rows:[...rows.values()],incomplete};
+}
+async function renderSolFolio(){
+  const seq=++folioSeq,account=solAccount,body=$("folioBody");
+  $("folioTotal").textContent="";
+  if(!account){
+    body.innerHTML='<div class="empty intro"><span class="eTtl">Your Solana portfolio</span>'+
+      '<p>Connect a Solana wallet to see SOL and your tokens, valued and ranked by share.</p>'+
+      '<button class="chip solid" data-act="connect">Connect Solana wallet</button></div>';return;
+  }
+  const current=()=>seq===folioSeq&&activeChain==="solana"&&solAccount===account;
+  body.innerHTML='<div class="empty"><span class="spin"></span>Reading your Solana balances…</div>';
+  const results=await Promise.allSettled([
+    solRpcCall("getBalance",[account.address,{commitment:"confirmed"}]),
+    ...SOL_TOKEN_PROGRAMS.map(programId=>solRpcCall("getTokenAccountsByOwner",
+      [account.address,{programId},{encoding:"jsonParsed"}])),
+  ]);
+  if(!current())return;
+  const holdings=solCollectHoldings(results);
+  const coverage=holdings.incomplete?'<div class="fnote" style="color:var(--warn)">Some balances could not be read. This is a partial portfolio; missing balances are unknown, not zero.</div>':"";
+  if(!holdings.rows.length){body.innerHTML=coverage+'<div class="empty">'+
+    (holdings.incomplete?'Could not load your full Solana portfolio. Try refreshing.':'No SOL or token balances found on Solana.')+'</div>';return;}
+  // Bound price lookups for wallets with many unsolicited tokens. All holdings remain listed.
+  const priceMints=[...new Set(holdings.rows.map(r=>r.mint))].slice(0,100);
+  const metas=await fetchSolMetaMulti(priceMints);
+  if(!current())return;
+  const rows=holdings.rows.map(r=>{
+    const meta=metas[r.mint]||{},amount=solFormatUnits(r.raw,r.decimals);
+    const px=meta.price_usd==null?NaN:Number(meta.price_usd),usd=Number(amount)*px;
+    return {...r,amount,symbol:r.native?"SOL":(meta.symbol||shortAddr(r.mint)),
+      usd:Number.isFinite(px)&&px>0&&Number.isFinite(usd)?usd:null};
+  }).sort((a,b)=>(b.usd??-1)-(a.usd??-1));
+  const priced=rows.filter(r=>r.usd!==null),total=priced.reduce((n,r)=>n+r.usd,0);
+  const unknown=rows.length-priced.length;
+  $("folioTotal").textContent=!priced.length?"Value unavailable":(holdings.incomplete||unknown?"Known value ":"")+"$"+total.toLocaleString("en-US",{maximumFractionDigits:2});
+  let html=coverage;
+  if(total>0)html+='<div class="stack">'+priced.map((r,i)=>
+    `<i style="width:${r.usd/total*100}%;background:${SERIES[i%SERIES.length]}" title="${esc(r.symbol)}"></i>`).join("")+"</div>";
+  html+=rows.map((r,i)=>`<div class="frow"><span class="fchip" style="background:${r.usd===null?'var(--line2)':SERIES[i%SERIES.length]}"></span>
+    <span><a class="fsym" style="color:var(--tx);text-decoration:none" href="https://solscan.io/${r.native?'account/'+account.address:'token/'+r.mint}" target="_blank" rel="noopener">${esc(r.symbol)}</a><br>
+    <span class="fbal mono" style="overflow-wrap:anywhere">${esc(r.amount.replace(/\.$/,""))}${!r.native&&r.mint===SOL_MINT_ADDR?' (wrapped)':''}</span></span>
+    <span class="fval"><span class="u mono">${r.usd===null?'no price':'$'+r.usd.toLocaleString("en-US",{maximumFractionDigits:2})}</span><br>
+    <span class="p mono">${r.usd===null?'excluded':total>0?(r.usd/total*100).toFixed(1)+'%':'0%'}</span></span></div>`).join("");
+  if(unknown)html+='<div class="fnote">Tokens without a price are listed but excluded from the known value and percentages. Up to 100 different token prices are requested per refresh.</div>';
+  body.innerHTML=html;
+}
+function solFlowTrades(rows,mint,cutoff,now){
+  const seen=new Set(),out=[];
+  for(const row of rows){
+    const a=row?.attributes;if(!a)continue;
+    const time=Date.parse(a.block_timestamp);
+    if(!Number.isFinite(time)||time<cutoff||time>now+60000)continue;
+    const isBuy=a.to_token_address===mint&&a.from_token_address!==mint;
+    const isSell=a.from_token_address===mint&&a.to_token_address!==mint;
+    if(!isBuy&&!isSell)continue;
+    const key=row.id||[a.tx_hash,a.from_token_address,a.to_token_address,a.from_token_amount,a.to_token_amount,time].join(":");
+    if(seen.has(key))continue;seen.add(key);
+    const value=a.volume_in_usd==null?NaN:Number(a.volume_in_usd);
+    out.push({isBuy,time,usd:Number.isFinite(value)&&value>=0?value:null,
+      who:SOL_MINT_RE.test(a.tx_from_address||"")?a.tx_from_address:null,
+      signature:/^[1-9A-HJ-NP-Za-km-z]{64,100}$/.test(a.tx_hash||"")?a.tx_hash:null});
+  }
+  return out;
+}
+async function renderSolFlow(){
+  const seq=++flowSeq,mint=solMintCur,body=$("flowBody"),windowHours=flowWindow==="h6"?6:1;
+  paintFlowToken();
+  const current=()=>seq===flowSeq&&activeChain==="solana"&&mint===solMintCur;
+  if(!mint){body.innerHTML='<div class="empty intro"><span class="eTtl">Choose a Solana token</span><p>See recent buys, sells and the largest observed trades.</p><button class="chip solid" data-act="pickFlowToken">Choose a token</button></div>';return;}
+  body.innerHTML='<div class="empty"><span class="spin"></span>Reading recent Solana trades…</div>';
+  try{
+    const pools=await gtJson(GT+"/networks/solana/tokens/"+mint+"/pools?page=1");
+    if(!current())return;
+    if(!Array.isArray(pools?.data))throw new Error("pool response unavailable");
+    const candidates=pools.data.filter(p=>{
+      const refs=[p.relationships?.base_token?.data?.id,p.relationships?.quote_token?.data?.id];
+      return refs.includes("solana_"+mint)&&SOL_MINT_RE.test(p.attributes?.address||"");
+    }).sort((a,b)=>(Number(b.attributes.reserve_in_usd)||0)-(Number(a.attributes.reserve_in_usd)||0));
+    const pool=candidates[0];
+    if(!pool){body.innerHTML='<div class="empty">No indexed Solana pool was found for this token. Trade history is unavailable; this does not mean it cannot be traded.</div>';return;}
+    const response=await gtJson(GT+"/networks/solana/pools/"+pool.attributes.address+"/trades");
+    if(!current())return;
+    if(!Array.isArray(response?.data))throw new Error("trade response unavailable");
+    const now=Date.now(),trades=solFlowTrades(response.data,mint,now-windowHours*3600000,now);
+    const buys=trades.filter(t=>t.isBuy),sells=trades.filter(t=>!t.isBuy);
+    const sum=a=>a.reduce((n,t)=>n+(t.usd??0),0),bought=sum(buys),sold=sum(sells),total=bought+sold;
+    const unpriced=trades.some(t=>t.usd===null);
+    const money=n=>trades.some(t=>t.usd!==null)?"$"+n.toLocaleString("en-US",{maximumFractionDigits:2}):"—";
+    let html=`<div class="fnote" style="color:var(--warn)">Recent-trade sample, filtered to the last ${windowHours}h. GeckoTerminal returns up to 300 recent trades from one pool; totals below may not cover the entire time window or other pools.</div>`;
+    if(!trades.length)html+='<div class="empty">No matching trades in the returned sample. Activity outside this sample is unknown.</div>';
+    else{
+      if(total>0)html+=`<div class="flowbarCap"><span>Bought ${(bought/total*100).toFixed(0)}%</span><span>Sold ${(sold/total*100).toFixed(0)}%</span></div><div class="flowbar"><i style="width:${bought/total*100}%;background:var(--pos)"></i><i style="width:${sold/total*100}%;background:var(--neg)"></i></div>`;
+      if(unpriced)html+='<div class="fnote">Dollar totals and percentages include priced trades only.</div>';
+      html+=`<div class="flowkv"><span class="k">Bought in sample</span><span class="mono">${money(bought)}</span></div>
+        <div class="flowkv"><span class="k">Sold in sample</span><span class="mono">${money(sold)}</span></div>
+        <div class="flowkv"><span class="k">Net in sample</span><span class="mono">${bought>=sold?'+':'−'}${money(Math.abs(bought-sold))}</span></div>
+        <div class="flowkv"><span class="k">Swaps in sample</span><span class="mono">${buys.length} buys · ${sells.length} sells</span></div>`;
+      const counts=new Map();buys.forEach(t=>{if(t.who)counts.set(t.who,(counts.get(t.who)||0)+1);});
+      const largest=buys.filter(t=>t.usd!==null).sort((a,b)=>b.usd-a.usd).slice(0,5);
+      if(largest.length)html+='<div class="frow">Largest observed buys</div>';
+      html+=largest.map(t=>`<div class="trade"><span class="fchip" style="background:var(--pos)"></span><span class="amt2 mono">${money(t.usd)}</span>
+        ${t.who?`<a class="mono" style="color:var(--tx3);font-size:11.5px" target="_blank" rel="noopener" href="https://solscan.io/account/${t.who}">${shortAddr(t.who)}</a>`:'<span>unknown trader</span>'}
+        ${t.who&&counts.get(t.who)>1?`<span class="vtag">×${counts.get(t.who)}</span>`:''}
+        <span class="ago">${Math.max(0,Math.floor((now-t.time)/60000))}m ago</span>
+        ${t.signature?`<a target="_blank" rel="noopener" href="https://solscan.io/tx/${t.signature}">View</a>`:''}</div>`).join("");
+    }
+    html+=`<div class="flowkv"><span class="k">Pool</span><a style="color:var(--tx3);font-size:12px" target="_blank" rel="noopener" href="https://solscan.io/account/${pool.attributes.address}">${esc(pool.attributes.name||shortAddr(pool.attributes.address))}</a></div>
+      <div class="fnote">Solana trades supplied by GeckoTerminal. Addresses are the reported transaction senders, which can include routers. This is flow, not a forecast.</div>`;
+    body.innerHTML=html;
+  }catch{
+    if(!current())return;
+    body.innerHTML='<div class="empty">Solana trade history could not be loaded. Activity is unknown, not zero. Quotes and swaps are unaffected.</div>';
+  }
+}
+const solViewJobs={folio:null,flow:null};
+function solRunView(name,render){
+  const task=render();solViewJobs[name]=task;
+  return task.finally(()=>{if(solViewJobs[name]===task)solViewJobs[name]=null;});
+}
+function refreshSolanaViews(){
+  if(activeChain!=="solana")return;
+  if(view==="folio"&&!solViewJobs.folio)renderFolio();
+  if(view==="flow"&&!solViewJobs.flow){paintFlowToken();renderFlow();}
+}
+
 async function renderFolio(){
+  if(activeChain==="solana")return solRunView("folio",renderSolFolio);
   const seq=++folioSeq;
   const body=$("folioBody");
   if(!account){body.innerHTML=EMPTY_FOLIO;
@@ -5451,6 +5625,7 @@ async function deepestV3Pool(token){
 const WINDOWS={h1:{label:"1 hour",blocks:1800},h6:{label:"6 hours",blocks:10800}};
 
 async function renderFlow(){
+  if(activeChain==="solana")return solRunView("flow",renderSolFlow);
   const seq=++flowSeq,body=$("flowBody");
   const t=routable(tokenOut);
   if(!t){body.innerHTML=EMPTY_FLOW;return;}
@@ -7173,6 +7348,7 @@ function solPaintWallet(){
   // وقتی activeChain==="solana" و tokenPage نیستیم چیزی نمی‌نویسد جز
   // همین وضعیتِ کیف‌پولِ سولانا — کیف‌پولِ Base دست‌نخورده می‌ماند.
   paintWallet();
+  if(activeChain==="solana"&&view==="folio")renderFolio();
 }
 
 /* ---- موجودی‌ها — از طریقِ POST /sol/rpc، هرگز مستقیم به یک RPC ---- */
@@ -7937,6 +8113,10 @@ function setView(v,push){
   scrollTo({top:0,behavior:"instant"});
 }
 function paintFlowToken(){
+  if(activeChain==="solana"){
+    solPaintAvatarInto("flowTokAv",solTokenSymbol,solTokenLogoUrl);
+    $("flowTokSym").textContent=solTokenSymbol||"Choose token";return;
+  }
   paintAvatar($("flowTokAv"),tokenOut);
   $("flowTokSym").textContent=tokenOut?tokenOut.symbol:"—";
 }
@@ -8015,8 +8195,8 @@ function wire(){
   /* دکمه‌های داخل حالت خالی با delegation وصل می‌شوند، نه مستقیم: محتوای
      این دو ظرف با innerHTML بازنویسی می‌شود و یک onclick مستقیم بعد از
      اولین رندر از بین می‌رفت. شنونده روی خودِ ظرف است که هرگز عوض نمی‌شود. */
-  $("folioBody").onclick=e=>{if(e.target.closest('[data-act="connect"]'))connect();};
-  $("flowBody").onclick=e=>{if(e.target.closest('[data-act="pickFlowToken"]'))openPicker("out");};
+  $("folioBody").onclick=e=>{if(e.target.closest('[data-act="connect"]')){if(activeChain==="solana")solOpenWalletPicker();else connect();}};
+  $("flowBody").onclick=e=>{if(e.target.closest('[data-act="pickFlowToken"]')){if(activeChain==="solana")solOpenTokenPicker();else openPicker("out");}};
   // innerHTML #swapDone با هر نتیجه بازنویسی می‌شود، پس شنونده روی خودِ
   // ظرف است که هرگز عوض نمی‌شود — همان الگوی بالا.
   $("swapDone").onclick=e=>{if(e.target.closest("#swapAgain")){hideSwapDone();$("amtIn").focus();}};
@@ -8061,7 +8241,8 @@ function wire(){
     const hc=parseHash().params.get("chain");
     if(!tokenPage&&(hc==="solana"||hc==="base"))setChain(hc);
   });
-  $("flowTokBtn").onclick=()=>openPicker("out");
+  $("flowTokBtn").onclick=()=>{if(activeChain==="solana")solOpenTokenPicker();else openPicker("out");};
+  setInterval(()=>{if(!document.hidden)refreshSolanaViews();},30000);
   /* ⚠️ این ناحیه یک بار با copy-paste خراب شده بود: تکه‌ای از خود wire()
      داخل هندلرهای کلیک تکرار شده بود. جاوااسکریپت پارسش می‌کرد و ظاهر
      درست کار می‌کرد، ولی هر کلیک روی بازه‌های زمانی یک شنونده‌ی

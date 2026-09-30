@@ -13248,6 +13248,8 @@ function stripAllowedWording(t) {
       [{ method: "getAccountInfo", params: [PUBKEY] }, "method-not-allowed"],
       [{ method: "getBalance", params: ["short"] }, "bad-params"],
       [{ method: "getTokenAccountsByOwner", params: [PUBKEY, { mint: MINT_A }, { encoding: "base64" }] }, "bad-params"],
+      [{ method: "getTokenAccountsByOwner", params: [PUBKEY, { programId: PUBKEY }, { encoding: "jsonParsed" }] }, "bad-params"],
+      [{ method: "getTokenAccountsByOwner", params: [PUBKEY, { mint: MINT_A, programId: "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA" }, { encoding: "jsonParsed" }] }, "bad-params"],
       [{ method: "getSignatureStatuses", params: [[]] }, "bad-params"],
       [{ method: "getSignatureStatuses", params: [["short"]] }, "bad-params"],
       [{ method: "sendTransaction", params: ["AQID", { encoding: "base64", skipPreflight: true, maxRetries: 1 }] }, "bad-params"],
@@ -13265,6 +13267,12 @@ function stripAllowedWording(t) {
     // موفق — نتیجه در {result} پیچیده می‌شود
     globalThis.fetch = async () => new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, result: { value: 4200000000 } }),
       { status: 200, headers: { "content-type": "application/json" } });
+    for (const programId of ["TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA", "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb"]) {
+      const programRes = await call("/sol/rpc", { method: "POST", body: JSON.stringify({
+        method: "getTokenAccountsByOwner", params: [PUBKEY, { programId }, { encoding: "jsonParsed" }]
+      }) }, { ASSETS });
+      ok(programRes.status === 200, "[sol portfolio] known token program must be allowed: " + programId);
+    }
     const okRes = await call("/sol/rpc", { method: "POST",
       body: JSON.stringify({ method: "getBalance", params: [PUBKEY, { commitment: "confirmed" }] }) },
       { ASSETS, SOL_RPC: "https://secret-host.example/rpc/SEKRIT123" });
