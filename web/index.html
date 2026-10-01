@@ -1188,6 +1188,11 @@ footer .fine{max-width:78ch;margin:46px 0 0;font-size:11.5px;color:var(--tx3);li
 #solSafety .flowkv>span:last-child,#solPools .flowkv>span:last-child{overflow-wrap:anywhere}
 #solPools a{color:var(--tx);text-decoration:none}
 #solPools a:hover{text-decoration:underline}
+.tkStats[hidden]{display:none}
+.solBrowseWallet{text-decoration:none;color:var(--tx)}
+.phantomMark{background:#9886eb!important}
+#solWalletOv .walRow{width:100%;text-align:left}
+#solWalletOv .walKind{white-space:normal;text-align:right}
 #solPools .vrow{flex-wrap:wrap}
 #solPools .vname{overflow-wrap:anywhere}
 #solPools>.chip{margin:12px 20px 20px}
@@ -4564,6 +4569,7 @@ function setChain(next){
   next=(next==="solana")?"solana":"base";
   closeSrcMenu();
   if(next===activeChain)return;
+  if(tokenPage){location.assign("/app#swap?chain="+next);return;}
   ++folioSeq;++flowSeq;
   activeChain=next;
   storeChain(next);
@@ -6162,7 +6168,7 @@ function closeWalletMenu(){
   $("connectBtn").setAttribute("aria-expanded","false");
 }
 function toggleWalletMenu(){
-  if(activeChain==="solana"&&!tokenPage){
+  if(activeChain==="solana"){
     if(!solAccount)return;
     const open=$("walletPop").classList.toggle("on");
     $("connectBtn").setAttribute("aria-expanded",String(open));
@@ -6298,7 +6304,7 @@ function paintWallet(){
   const b=$("connectBtn"),addr=$("walletAddr");
   // روی /app با زنجیره‌ی Solana، این دکمه کیف‌پولِ سولانا را نشان می‌دهد —
   // کیف‌پولِ Base (account) دست‌نخورده در پس‌زمینه می‌ماند، فقط پنهان است.
-  if(activeChain==="solana"&&!tokenPage){
+  if(activeChain==="solana"){
     if(!solAccount){b.textContent="Connect wallet";b.className="chip solid";
       addr.textContent="—";closeWalletMenu();return;}
     b.textContent=shortAddr(solAccount.address);b.className="chip";
@@ -6982,6 +6988,7 @@ function tokenPageUrl(t){
    می‌رسد.
    ===================================================================== */
 async function openTokenPage(addr){
+  activeChain="base";paintSrc();paintSrc2();paintWallet();
   const t=await resolveTokenRef(addr);
   if(!t){
     $("tk-sym").textContent="Unknown token";
@@ -7164,19 +7171,18 @@ function renderSolExit(v,why,targetId,basis,ret,cause){
 /* مقصدِ تنها راه‌اندازی‌کننده: هرچه لازم است پیش از خودِ داده نشان داده
    شود (بنر، حذفِ بخش‌های مخصوصِ Base) اینجاست، نه در بولوت. */
 async function openSolanaTokenPage(mint){
-  for(const id of ["solSafety","solPools"]){$("view-token").appendChild($(id));}
+  $("tk-grid").appendChild($("solSafety"));
+  $("view-token").appendChild($("solPools"));
   $("tk-chip").textContent="Solana";
-  // پیشنهادِ اقدامی که نمی‌توانیم اجرا کنیم قولی است که نگه نمی‌داریم —
-  // پس این دو *مخفی* می‌شوند، نه فقط غیرفعال. کیف‌پولِ Base، نه کیف‌پولِ
-  // سولانا — آن یکی داخلِ خودِ #solSwap است.
-  $("tk-trade").hidden=true;
-  $("walletMenu").hidden=true;
+  // Both reports use Trade to open /app; the header controls the correct wallet.
+  $("tk-trade").hidden=false;
+  $("walletMenu").hidden=false;
   // بخش‌های مخصوصِ Base: نمودار (شبکه‌اش base است) و کارتِ ایمنی (بایت‌کدِ
   // EVM). اسکلتی که هرگز پر نمی‌شود از خودِ نبودشان بدتر است.
   $("tk-chartCard").hidden=false;
   $("tk-safetyBody").hidden=true;
   $("tk-fine").hidden=true;
-  $("tk-grid").style.gridTemplateColumns="1fr";
+  $("tk-grid").style.gridTemplateColumns="";
 
   $("tk-sym").textContent="—";
   $("tk-name").textContent="";
@@ -7194,12 +7200,13 @@ async function openSolanaTokenPage(mint){
   if(solSwapAnchor&&solSwapAnchor.parentNode&&$("solSwap").parentElement!==solSwapAnchor.parentNode){
     solSwapAnchor.parentNode.insertBefore($("solSwap"),solSwapAnchor);
   }
-  $("solWalletMenu").hidden=false;
+  $("solWalletMenu").hidden=true;
   // چیپِ شبکه در هدر باید «Solana» بگوید، نه «Base» — بدونِ ذخیره در انتخابِ کاربر
   if(activeChain!=="solana"){activeChain="solana";paintSrc();paintSrc2();}
   solSwapReset(mint);
   const tokenSeq=solTokenSeq;
-  $("solSwap").hidden=false;
+  $("solSwap").hidden=true;
+  paintWallet();
 
   const [meta,verdict]=await Promise.all([fetchSolMeta(mint),fetchVdVerdict(mint)]);
   if(tokenSeq!==solTokenSeq||mint!==solMintCur)return;
@@ -7224,7 +7231,8 @@ async function openSolanaTokenPage(mint){
   solWalletStandardInit();
   solTryAutoRestoreName();
   solLoadChart();solLoadDetails();
-  $("solSafety").hidden=false;$("solPools").hidden=false;
+  $("solSwap").hidden=true;
+  $("solSafety").hidden=false;$("solPools").hidden=true;
 }
 
 /* =====================================================================
@@ -7345,13 +7353,7 @@ function solTryAutoRestoreName(){
   // نمی‌کند کدام زودتر برسد.
   solWallets.forEach(solMaybeSilentConnect);
 }
-/* ---- C — اتصالِ بی‌صدا و پیگیریِ رویدادهای کیف‌پول ----
-   ۲۸ سپتامبر: کیف‌پول روی هر رفرش قطع می‌شد چون هیچ‌کس هیچ‌وقت واقعاً
-   standard:connect را با silent:true صدا نمی‌زد. حالا: اگر نامِ آخرین
-   کیف‌پول ذخیره است و کاربر خودش Disconnect نزده (پرچمِ off)، به محضِ
-   دیدنِ همان کیف‌پول (چه از قبل ثبت‌شده باشد چه دیرتر برسد) یک تلاشِ
-   silent می‌زنیم؛ رد یا نبودِ حساب یعنی «بی‌صدا بمان قطع» — هرگز پیامی
-   نشان داده نمی‌شود. */
+/* Wallet grants may persist in the extension, but each page waits for a user click. */
 function solWalletOff(){try{return localStorage.getItem(SOL_WALLET_OFF_KEY)==="1";}catch{return false;}}
 function solSetWalletOff(v){
   try{if(v)localStorage.setItem(SOL_WALLET_OFF_KEY,"1");else localStorage.removeItem(SOL_WALLET_OFF_KEY);}catch{}
@@ -7373,19 +7375,8 @@ function solSubscribeWalletEvents(w){
 }
 let solSilentTriedFor=new Set();
 async function solMaybeSilentConnect(w){
-  const connectSeq=solWalletConnectSeq;
-  if(!w||!solLastWalletName||w.name!==solLastWalletName)return;
-  if(solAccount||solWalletOff())return;
-  if(solSilentTriedFor.has(w.name))return;       // یک تلاش برای هر کیف‌پول در این بارگذاری کافی است
-  solSilentTriedFor.add(w.name);
-  try{
-    const res=await w.features["standard:connect"].connect({silent:true});
-    const acc=res&&res.accounts&&res.accounts[0];
-    if(!acc||solAccount||solWalletOff()||connectSeq!==solWalletConnectSeq)return;                  // در فاصله‌ی انتظار کاربر خودش وصل کرده باشد
-    solWalletApi=w;solAccount=acc;
-    solSubscribeWalletEvents(w);
-    solPaintWallet();solRefreshBalances();solScheduleQuote();
-  }catch{/* رد/نبودِ silent یعنی بی‌صدا قطع بمان — هیچ پیامی نشان داده نمی‌شود */}
+  // Connection must follow an explicit user action on this page.
+  return;
 }
 const SOL_WC_CHAIN="solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp";
 let solMobileLoad=null,solMobileProvider=null,solMobilePending=false,solMobileWallet=null;
@@ -7450,8 +7441,10 @@ async function solConnectMobile(){
   $("solWalList").innerHTML='<div class="empty">Preparing secure connection…</div>';
   ev("wallet:open","wc","solana");
   try{
+    await solDisconnectPending;
     const p=await solGetMobileProvider();
     if(seq!==solWalletConnectSeq)return;
+    if(p.session&&solWalletOff())await p.disconnect();
     if(!p.session)await p.connect({namespaces:{solana:{chains:[SOL_WC_CHAIN],methods:["solana_signTransaction"],events:["accountsChanged","chainChanged"]}}});
     if(seq!==solWalletConnectSeq){if(p.session)await p.disconnect();return;}
     solMobileWallet=solMakeMobileWallet(p);solMobilePending=false;solCloseWalletPicker();await solConnectWallet(solMobileWallet);
@@ -7459,6 +7452,11 @@ async function solConnectMobile(){
   finally{solMobilePending=false;}
 }
 
+function solPhantomBrowseUrl(wallet="phantom"){
+  const target=tokenPage?location.href:solShareUrl();
+  const base=wallet==="solflare"?"https://solflare.com/ul/v1/browse/":"https://phantom.app/ul/browse/";
+  return base+encodeURIComponent(target)+"?ref="+encodeURIComponent(location.origin);
+}
 function solRenderWalletList(){
   const list=$("solWalList");
   const rows=[...solWallets].sort((a,b)=>{
@@ -7466,14 +7464,23 @@ function solRenderWalletList(){
     if(b.name===solLastWalletName)return 1;
     return a.name.localeCompare(b.name);
   });
-  list.innerHTML=rows.length?rows.map((w,i)=>`<div class="walRow" data-i="${i}">
-    ${w.icon?`<img src="${esc(w.icon)}" alt="">`:`<span class="walFallback">${esc((w.name[0]||"?").toUpperCase())}</span>`}
-    <span class="walName">${esc(w.name)}</span>
-    <span class="walKind">Solana wallet</span></div>`).join("")
-    :`<div class="empty">No Solana wallet found. Install one that supports Wallet Standard `+
-      `(Phantom, Solflare, Backpack…) and reopen this.<br>If you use Phantom, make sure Solana `+
-      `is enabled in its settings.</div>`;
-  list.insertAdjacentHTML("beforeend",'<button class="walRow" id="solMobileConnect" type="button"><span class="walName">Mobile wallet</span><span class="walKind">WalletConnect · QR</span></button>');
+  const mobile=/Android|iPhone|iPad|iPod/i.test(navigator.userAgent)||(navigator.platform==="MacIntel"&&navigator.maxTouchPoints>1);
+  const icon=(letters)=>`<span class="walFallback" aria-hidden="true">${letters}</span>`;
+  list.innerHTML=rows.map((w,i)=>`<button class="walRow" data-i="${i}" type="button">
+    ${w.icon?`<img src="${esc(w.icon)}" alt="">`:icon(esc((w.name[0]||"?").toUpperCase()))}
+    <span class="walName">${esc(w.name)}</span><span class="walKind">Installed wallet</span></button>`).join("");
+  if(mobile&&!rows.some(w=>/phantom/i.test(w.name))){
+    list.insertAdjacentHTML("beforeend",`<a class="walRow solBrowseWallet" id="solPhantomOpen" href="${esc(solPhantomBrowseUrl())}">
+      <span class="walFallback phantomMark" aria-hidden="true"><svg viewBox="0 0 32 32" width="28" height="28"><path fill="white" d="M7 24C4 20 6 9 14 6c8-3 14 4 13 12-1 7-5 9-8 6-2 3-5 3-6 0-2 2-4 2-6 0Z"/><circle cx="16" cy="14" r="1.5" fill="#9886eb"/><circle cx="23" cy="14" r="1.5" fill="#9886eb"/></svg></span>
+      <span class="walName">Phantom</span><span class="walKind">Open on this phone ↗</span></a>`);
+  }
+  if(mobile&&!rows.some(w=>/solflare/i.test(w.name))){
+    list.insertAdjacentHTML("beforeend",`<a class="walRow solBrowseWallet" id="solSolflareOpen" href="${esc(solPhantomBrowseUrl("solflare"))}">
+      <span class="walFallback" style="background:#ffb229;color:#171717" aria-hidden="true"><svg viewBox="0 0 32 32" width="27" height="27" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="16" cy="16" r="6"/><path d="M16 2v5m0 18v5M2 16h5m18 0h5M6 6l4 4m12 12 4 4M6 26l4-4m12-12 4-4"/></svg></span>
+      <span class="walName">Solflare</span><span class="walKind">Open on this phone ↗</span></a>`);
+  }
+  list.insertAdjacentHTML("beforeend",`<button class="walRow" id="solMobileConnect" type="button"><span class="walFallback" aria-hidden="true"><svg viewBox="0 0 32 24" width="29" height="23" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><path d="M5 7c6-6 16-6 22 0M2 12l7 7 7-7 7 7 7-7"/></svg></span><span class="walName">WalletConnect</span><span class="walKind">Connect with QR</span></button>`);
+  list.insertAdjacentHTML("beforeend",`<p class="walNote">${mobile?"On this phone, open the site in your wallet and tap Connect. QR is for a wallet that supports WalletConnect.":"Choose an installed wallet, or scan a QR code with a compatible mobile wallet."}</p><p class="walNote">Your wallet controls unlocking and approvals. To request permission again, remove ZAEXA from its Connected apps.</p>`);
   $("solMobileConnect").onclick=solConnectMobile;
   list.querySelectorAll(".walRow[data-i]").forEach(el=>{
     el.onclick=()=>{solCloseWalletPicker();solConnectWallet(rows[+el.dataset.i]);};
@@ -7481,9 +7488,12 @@ function solRenderWalletList(){
 }
 function solOpenWalletPicker(){ev("wallet:open","","solana");solRenderWalletList();$("solWalletOv").classList.add("on");}
 function solCloseWalletPicker(){if(solMobilePending){++solWalletConnectSeq;solMobileProvider?.abortPairingAttempt();}$("solWalletOv").classList.remove("on");}
+let solDisconnectPending=Promise.resolve();
 async function solConnectWallet(w){
   const connectSeq=++solWalletConnectSeq;
   try{
+    await solDisconnectPending;
+    if(connectSeq!==solWalletConnectSeq)return;
     const res=await w.features["standard:connect"].connect();
     if(connectSeq!==solWalletConnectSeq)return;
     const acc=res&&res.accounts&&res.accounts[0];
@@ -7512,7 +7522,7 @@ function solDisconnectWallet(setOff){
   ++solWalletConnectSeq;++solBalanceSeq;
   const wallet=solWalletApi;
   if(solEventsUnsub){try{solEventsUnsub();}catch{}solEventsUnsub=null;}
-  if(setOff)solSetWalletOff(true);
+  if(setOff){solSetWalletOff(true);solLastWalletName=null;try{localStorage.removeItem(SOL_WALLET_LS_KEY);}catch{}}
   solWalletApi=null;solAccount=null;solBalSol=null;solBalTok=null;solBalRef=null;solRefAtaExists=null;solOutAtaExists=null;
   solInvalidateQuote();
   $("solWalPop").classList.remove("on");
@@ -7520,7 +7530,7 @@ function solDisconnectWallet(setOff){
   // Unsubscribe and clear local state before a wallet can synchronously emit change.
   if(setOff)try{
     const f=wallet&&wallet.features&&wallet.features["standard:disconnect"];
-    if(f)Promise.resolve(f.disconnect()).catch(()=>{});
+    if(f)solDisconnectPending=Promise.resolve(f.disconnect()).catch(()=>{});
   }catch{}
 }
 
@@ -8395,6 +8405,10 @@ function leaveTokenPage(v){
   history.pushState(null,"",backTo+"#"+v);
   $("amtIn").value="";$("amtOut").value="";
   mode="exactIn";setNotice("");
+  if(activeChain==="solana"){
+    storeChain("solana");solMode="exactIn";$("solAmt").value="";$("solOutRead").value="";
+    solInvalidateQuote();updateSwapViewForChain();solPaintLegs();solAppLoadToken(solMintCur);return;
+  }
   paintToken("in",tokenIn);paintToken("out",tokenOut);
   loadChart();paintBalances();paintFlowToken();
   runScan(tokenOut);
@@ -8484,7 +8498,7 @@ function wire(){
   document.addEventListener("mousedown",e=>{
     if(!$("srcPop").contains(e.target)&&!$("srcChip").contains(e.target))closeSrcMenu();});
   $("connectBtn").onclick=()=>{
-    if(activeChain==="solana"&&!tokenPage){
+    if(activeChain==="solana"){
       if(!solAccount){solOpenWalletPicker();return;}
       toggleWalletMenu();
       return;
@@ -8492,7 +8506,7 @@ function wire(){
     if(!account)connect();else if(walletChainId!==CHAIN.id)switchNetwork();else toggleWalletMenu();
   };
   $("disconnectBtn").onclick=()=>{
-    if(activeChain==="solana"&&!tokenPage){solDisconnectWallet();closeWalletMenu();return;}
+    if(activeChain==="solana"){solDisconnectWallet();closeWalletMenu();return;}
     disconnect();
   };
   /* توکنِ سولانا روی /app — فهرستِ کوتاه + هر آدرسِ دلخواه. */
@@ -8578,7 +8592,7 @@ function wire(){
    که در دسترس نباشد، همان اعلانِ متنیِ خودش بالا می‌آید). */
 $("copyAddrBtn").onclick=(e)=>{
   e.stopPropagation();
-  if(activeChain==="solana"&&!tokenPage){
+  if(activeChain==="solana"){
     if(!solAccount)return;
     copyLink(solAccount.address,$("copyAddrBtn").querySelector("span"));
     return;
@@ -8630,7 +8644,7 @@ $("copyAddrBtn").onclick=(e)=>{
        روی RPC خرج کرد و به خطای «شبکه جواب نداد» رسید. این ریست حالا در
        leaveTokenPage است؛ setView از همان‌جا رد می‌شود. */
     setView("swap");
-    $("amtIn").focus();
+    $(activeChain==="solana"?"solAmt":"amtIn").focus();
   };
   /* ---- سواپِ زنده‌ی سولانا — عناصر همیشه در DOM هستند (روی Base مخفی)،
      پس صدازدنِ wire() یک‌بار برای همیشه کافی است. ---- */
@@ -8799,6 +8813,7 @@ $("copyAddrBtn").onclick=(e)=>{
     return;
   }
   const onToken=/^\/t\/(0x[0-9a-fA-F]{40})\/?$/.exec(location.pathname);
+  if(onToken){activeChain="base";paintSrc();paintSrc2();}
   tokenPage=!!onToken;
   setView(tokenPage?"token":(parseHash().view||"swap"),false);
   if(!tokenPage)updateSwapViewForChain();

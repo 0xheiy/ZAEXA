@@ -7339,7 +7339,7 @@ async def main():
             "the old \"not live yet\" notice must stay empty/hidden once a sell route is confirmed: %r" % sell["noticeText"]
         assert "A sell route was quoted just now." in sell["exitText"], \
             "the \"sell\" verdict did not render its exact sentence: %r" % sell["exitText"]
-        assert sell["tradeHidden"] and sell["walletHidden"], \
+        assert not sell["tradeHidden"] and not sell["walletHidden"], \
             "the swap CTA and/or the wallet button are not hidden on the Solana page: %s" % sell
         assert not sell["chartHidden"] and sell["safetyHidden"], \
             "a Base-only panel (chart or bytecode safety) is still shown on a Solana page: %s" % sell
@@ -7675,10 +7675,12 @@ async def main():
                     status=200, content_type="image/png", body=tiny_png_bytes()))
             await spg.goto("http://127.0.0.1:%d/t/%s" % (port, SWAP_MINT))
             await spg.wait_for_timeout(1200)
+            await spg.click("#tk-trade")
+            await spg.wait_for_timeout(150)
             return spg
 
         async def sol_connect(spg):
-            await spg.click("#solConnectBtn")
+            await spg.click("#connectBtn")
             await spg.wait_for_timeout(400)
             wal_text = await spg.inner_text("#solWalList")
             await spg.click("#solWalList .walRow")
@@ -9813,23 +9815,22 @@ async def main():
                                          ls_wallet_name="Fake Wallet")
         await cpg2.wait_for_timeout(600)
         c_opts = await cpg2.evaluate("window.__solConnectOpts")
-        c_btn = await cpg2.inner_text("#solConnectBtn")
+        c_btn = await cpg2.inner_text("#connectBtn")
         await cpg2.close()
         print("[sol round3][C] stored name, no off -> connectOpts=%s btn=%r" % (c_opts, c_btn))
-        assert len(c_opts) >= 1 and c_opts[0].get("silent") is True, \
-            "C: a stored wallet name with no off-flag must call standard:connect with {silent:true}, got %s" % c_opts
-        assert c_btn != "Connect Solana wallet" and c_btn.strip(), \
-            "C: a successful silent reconnect must show the short address without any click, got %r" % c_btn
+        assert c_opts == [], "A new page must never connect a Solana wallet without a click"
+        assert c_btn == "Connect wallet", "Stored permissions must leave the site disconnected until a click"
+
 
         cpg3 = await open_sol_swap_page({"v": "sell", "ms": 100}, wallet_init=SOL_SILENT_CAPTURE_WALLET_INIT,
                                          ls_wallet_name="Fake Wallet", ls_off=True)
         await cpg3.wait_for_timeout(600)
         c2_opts = await cpg3.evaluate("window.__solConnectOpts")
-        c2_btn = await cpg3.inner_text("#solConnectBtn")
+        c2_btn = await cpg3.inner_text("#connectBtn")
         await cpg3.close()
         print("[sol round3][C] off-flag set -> connectOpts=%s btn=%r" % (c2_opts, c2_btn))
         assert len(c2_opts) == 0, "C: the off-flag must block the silent reconnect entirely, got %s" % c2_opts
-        assert c2_btn == "Connect Solana wallet", "C: the off-flag must leave the wallet disconnected, got %r" % c2_btn
+        assert c2_btn == "Connect wallet", "C: the off-flag must leave the wallet disconnected, got %r" % c2_btn
 
         # D) worker forces the lower fee cap (covered in worker/test.mjs);
         # here: the readout shows the placeholder before a build and the real

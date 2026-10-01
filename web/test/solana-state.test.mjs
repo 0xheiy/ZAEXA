@@ -156,21 +156,24 @@ test('changing wallet during simulation cancels the prepared transaction', async
   await assert.rejects(pending, /changed/i);
 });
 
-test('pending silent connection cannot undo an explicit disconnect', async () => {
-  const connection = deferred();
-  const c = context(['solMaybeSilentConnect', 'solDisconnectWallet', 'solInvalidateQuote'], {
-    solAccount: null, solWalletConnectSeq: 0, solLastWalletName: 'Fake',
-    solSilentTriedFor: new Set(), solEventsUnsub: null,
-    solWalletOff: () => false, solSetWalletOff() {}, solPaintWallet() {},
-    solSubscribeWalletEvents() {}, solRefreshBalances() {}, solScheduleQuote() {},
-  });
-  const pending = c.solMaybeSilentConnect({ name: 'Fake', features: {
-    'standard:connect': { connect: () => connection.promise },
-  } });
-  c.solDisconnectWallet();
-  connection.resolve({ accounts: [{ address: 'walletA' }] });
-  await pending;
-  assert.equal(c.solAccount, null);
+test('remembered wallet permission never triggers a silent connection', async () => {
+  let calls=0;
+  const c=context(['solMaybeSilentConnect'],{solAccount:null,solLastWalletName:'Fake',solWalletOff:()=>false});
+  await c.solMaybeSilentConnect({name:'Fake',features:{'standard:connect':{connect:async()=>{++calls;return {accounts:[{address:'walletA'}]};}}}});
+  assert.equal(calls,0);
+  assert.equal(c.solAccount,null);
+});
+
+test('explicit reconnect waits for the previous wallet disconnect to finish', async () => {
+  const disconnect=deferred();let calls=0;
+  const c=context(['solConnectWallet'],{solDisconnectPending:disconnect.promise,solWalletConnectSeq:0,
+    solSetWalletOff(){},solSubscribeWalletEvents(){},solPaintWallet(){},solRefreshBalances(){},solScheduleQuote(){},
+    solAccount:null,solWalletApi:null});
+  const wallet={name:'Fake',features:{'standard:connect':{connect:async()=>{++calls;return {accounts:[{address:'walletA'}]};}}}};
+  const pending=c.solConnectWallet(wallet);
+  await Promise.resolve();assert.equal(calls,0);
+  disconnect.resolve();await pending;
+  assert.equal(calls,1);assert.equal(c.solAccount.address,'walletA');
 });
 
 test('wallet-originated disconnect does not call disconnect recursively', () => {
@@ -197,7 +200,7 @@ test('token page with missing metadata still initializes the wallet', async () =
   let initialized = false;
   const c = context(['openSolanaTokenPage'], {
     SOL_APP_TOKEN_LIST: [], shortAddr: s => s, solTokenUrl: s => s,
-    paintSolAvatar() {}, renderRoundTrip() {}, ev() {}, renderSolStats() {},
+    paintSolAvatar() {}, paintWallet() {}, renderRoundTrip() {}, ev() {}, renderSolStats() {},
     renderSolExit() {}, solPaintSellPill() {}, solTryAutoRestoreName() {},
     solWalletStandardInit() { initialized = true; },
     solSwapReset(mint) { c.solMintCur = mint; ++c.solTokenSeq; },

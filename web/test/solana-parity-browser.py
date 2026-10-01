@@ -118,6 +118,24 @@ async def main():
   await page.wait_for_function('document.querySelector("#tk-plot svg")!==null')
   assert not await page.locator('#tk-chartCard').evaluate('e=>e.hidden')
   assert await page.locator('#solSafety').is_visible()
+  assert await page.locator('#tk-trade').is_visible()
+  assert not await page.locator('#solSwap').is_visible()
+  assert not await page.locator('#solPools').is_visible()
+  assert await page.evaluate('activeChain')=='solana'
+  assert await page.locator('#walletMenu').is_visible()
+  assert await page.locator('#solSafety').evaluate('e=>e.parentElement.id')=='tk-grid'
+  if os.environ.get('ZAEXA_TEST_ARTIFACTS'):
+   await page.set_viewport_size({'width':1280,'height':900})
+   await page.screenshot(path=str(Path(os.environ['ZAEXA_TEST_ARTIFACTS'])/'solana-check-desktop.png'),full_page=True)
+   await page.set_viewport_size({'width':390,'height':844})
+   assert await page.evaluate('document.documentElement.scrollWidth<=innerWidth')
+   await page.screenshot(path=str(Path(os.environ['ZAEXA_TEST_ARTIFACTS'])/'solana-check-mobile.png'),full_page=True)
+  await page.locator('#tk-trade').click()
+  assert await page.locator('#solSwap').is_visible()
+  assert '/app' in page.url
+  assert await page.evaluate('activeChain')=='solana'
+  await page.goto('http://zaexa.test/t/'+USDT)
+  await page.wait_for_function('() => document.querySelector("#solSafety").textContent.includes("60.00%")')
   config['missing']=True;await page.evaluate('solLoadDetails()');assert 'not a readable' in await page.locator('#solSafety').inner_text()
   await page.goto('http://zaexa.test/t/not-an-address');await page.wait_for_function('document.querySelector("#tk-sym").textContent==="Unreadable address"')
   assert await page.locator('#solSwap').evaluate('e=>e.hidden')
@@ -125,6 +143,16 @@ async def main():
   await page.goto('http://zaexa.test/app#swap?chain=solana')
   await page.wait_for_function('typeof solLoadMobileBundle==="function"')
   await page.set_viewport_size({'width':390,'height':844})
+  await page.evaluate("Object.defineProperty(navigator,'userAgent',{value:'Android Mobile',configurable:true})")
+  await page.evaluate('solOpenWalletPicker()')
+  assert await page.locator('#solPhantomOpen').is_visible()
+  assert await page.locator('#solSolflareOpen').is_visible()
+  assert (await page.locator('#solSolflareOpen').get_attribute('href')).startswith('https://solflare.com/ul/v1/browse/')
+  link=await page.locator('#solPhantomOpen').get_attribute('href')
+  assert link.startswith('https://phantom.app/ul/browse/') and 'chain%3Dsolana' in link,link
+  if os.environ.get('ZAEXA_TEST_ARTIFACTS'):
+   await page.screenshot(path=str(Path(os.environ['ZAEXA_TEST_ARTIFACTS'])/'solana-wallet-mobile.png'))
+  await page.locator('#solWalClose').click()
   await page.evaluate('solLoadMobileBundle()')
   await page.evaluate("""() => {
    const handlers={};window.mobileAborted=false;window.mobileSent=null;
