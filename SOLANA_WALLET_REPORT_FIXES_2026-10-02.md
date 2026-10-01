@@ -8,7 +8,7 @@ Implementation is local until deployment is verified.
 - Mobile connection shows Phantom and Solflare options that open the current page inside the wallet on the same phone. WalletConnect is a separate QR option with a visible icon. Installed Wallet Standard wallets remain selectable.
 - Unavailable market statistics do not leave a permanent loading skeleton.
 
-Wallet unlock/password prompts and previously trusted-site permissions belong to the wallet. The site cannot lock an extension or force a password prompt. To require a new wallet permission prompt, remove ZAEXA from the wallet's Connected/Trusted apps. No password or recovery phrase is requested by the site.
+The connection behavior described above was subsequently strengthened: every explicit connection requires fresh, verified message approval inside the wallet before the site shows connected. See SOLANA_CONNECTION_APPROVAL_2026-10-02.md.
 
 Sources:
 - https://docs.phantom.com/solana/establishing-a-connection

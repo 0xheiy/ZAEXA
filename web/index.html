@@ -1363,6 +1363,7 @@ footer .fine{max-width:78ch;margin:46px 0 0;font-size:11.5px;color:var(--tx3);li
 </script>
 
 <main>
+<div id="solConnectionNotices"></div>
 <div class="view on" id="view-swap">
   <div class="row hero" id="baseHeroRow">
     <!-- chart -->
@@ -6305,12 +6306,14 @@ function paintWallet(){
   // روی /app با زنجیره‌ی Solana، این دکمه کیف‌پولِ سولانا را نشان می‌دهد —
   // کیف‌پولِ Base (account) دست‌نخورده در پس‌زمینه می‌ماند، فقط پنهان است.
   if(activeChain==="solana"){
-    if(!solAccount){b.textContent="Connect wallet";b.className="chip solid";
+    b.disabled=solConnectionBusy;
+    if(!solAccount){b.textContent=solConnectionBusy?"Approve in wallet…":"Connect wallet";b.className="chip solid";
       addr.textContent="—";closeWalletMenu();return;}
     b.textContent=shortAddr(solAccount.address);b.className="chip";
     addr.textContent=shortAddr(solAccount.address);
     return;
   }
+  b.disabled=false;
   if(!account){b.textContent="Connect wallet";b.className="chip solid";
     addr.textContent="—";closeWalletMenu();return;}
   b.textContent=walletChainId===CHAIN.id?shortAddr(account):"Switch to Base";
@@ -7367,7 +7370,7 @@ function solSubscribeWalletEvents(w){
     solEventsUnsub=ev.on("change",(props)=>{
       if(w!==solWalletApi||!props||!Object.prototype.hasOwnProperty.call(props,"accounts"))return;
       const accs=props.accounts||[];
-      if(!accs.length){solDisconnectWallet(false);return;}
+      if(!accs.length||accs[0].address!==solAccount?.address||!solBytesEq(accs[0].publicKey||[],solAccount?.publicKey||[])){solDisconnectWallet(false);return;}
       solAccount=accs[0];
       solPaintWallet();solRefreshBalances();solScheduleQuote();
     });
@@ -7384,19 +7387,19 @@ function solLoadMobileBundle(){
   if(window.SolMobile)return Promise.resolve(window.SolMobile);
   if(solMobileLoad)return solMobileLoad;
   solMobileLoad=new Promise((resolve,reject)=>{
-    const script=document.createElement("script");script.src="/solana-wallet.bundle.c3b1f5f5.js";
+    const script=document.createElement("script");script.src="/solana-wallet.bundle.b8f1108c.js";
     script.onload=()=>window.SolMobile?resolve(window.SolMobile):reject(Error("Mobile wallet library unavailable"));
     script.onerror=()=>{script.remove();solMobileLoad=null;reject(Error("Could not load the mobile wallet library"));};document.head.appendChild(script);
   });return solMobileLoad;
 }
 function solMobileAccount(session){
   const ns=session?.namespaces?.solana;
-  if(!ns?.methods?.includes("solana_signTransaction"))throw Error("Wallet did not approve Solana transaction signing");
+  if(!ns?.methods?.includes("solana_signTransaction")||!ns.methods.includes("solana_signMessage"))throw Error("Wallet did not approve Solana connection confirmation and transaction signing");
   const qualified=ns.accounts?.find(a=>a.startsWith(SOL_WC_CHAIN+":"));
   if(!qualified)throw Error("Wallet did not approve Solana mainnet");
   const address=qualified.slice(SOL_WC_CHAIN.length+1),publicKey=window.SolMobile.bs58.decode(address);
   if(publicKey.length!==32)throw Error("Invalid wallet public key");
-  return {address,publicKey,chains:["solana:mainnet"],features:["solana:signTransaction"]};
+  return {address,publicKey,chains:["solana:mainnet"],features:["solana:signTransaction","solana:signMessage"]};
 }
 async function solGetMobileProvider(){
   const lib=await solLoadMobileBundle();if(solMobileProvider)return solMobileProvider;
@@ -7408,17 +7411,23 @@ async function solGetMobileProvider(){
     await lib.QRCode.toCanvas($("solQr"),uri,{width:256,margin:2});
     $("solCopyPairing").onclick=()=>navigator.clipboard.writeText(uri).then(()=>{$("solCopyPairing").textContent="Copied";}).catch(()=>{});
   });
-  p.on("session_delete",()=>{if(solWalletApi===solMobileWallet)solDisconnectWallet(false);});
+  p.on("session_delete",()=>{if(solWalletApi===solMobileWallet||solPendingWallet===solMobileWallet)solDisconnectWallet(false);});
   // A session account/chain change must retire quotes before any further signature.
-  const changed=()=>{if(solWalletApi===solMobileWallet)solDisconnectWallet(false);};
+  const changed=()=>{if(solWalletApi===solMobileWallet||solPendingWallet===solMobileWallet)solDisconnectWallet(false);};
   p.on("accountsChanged",changed);p.on("chainChanged",changed);
-  p.on("session_update",()=>{if(solWalletApi!==solMobileWallet)return;try{solAccount=solMobileAccount(p.session);solInvalidateQuote();solPaintWallet();solRefreshBalances();}catch{solDisconnectWallet(false);}});
+  p.on("session_update",()=>{if(solWalletApi===solMobileWallet||solPendingWallet===solMobileWallet)solDisconnectWallet(false);});
   return p;
 }
 function solMakeMobileWallet(p){
   return {name:"WalletConnect Solana",chains:["solana:mainnet"],features:{
     "standard:connect":{connect:async()=>({accounts:[solMobileAccount(p.session)]})},
     "standard:disconnect":{disconnect:async()=>{if(p.session)await p.disconnect();}},
+    "solana:signMessage":{signMessage:async({account,message})=>{
+      if(solMobileAccount(p.session).address!==account.address)throw Error("Wallet account changed");
+      const result=await p.request({method:"solana_signMessage",params:{pubkey:account.address,message:window.SolMobile.bs58.encode(message)}},SOL_WC_CHAIN);
+      if(solMobileAccount(p.session).address!==account.address)throw Error("Wallet account changed");
+      return [{account,signedMessage:message,signature:window.SolMobile.bs58.decode(result?.signature||""),signatureType:"ed25519"}];
+    }},
     "solana:signTransaction":{signTransaction:async({account,transaction})=>{
       if(solMobileAccount(p.session).address!==account.address)throw Error("Wallet account changed");
       const result=await p.request({method:"solana_signTransaction",params:{transaction:solBytesToB64(transaction)}},SOL_WC_CHAIN);
@@ -7445,7 +7454,7 @@ async function solConnectMobile(){
     const p=await solGetMobileProvider();
     if(seq!==solWalletConnectSeq)return;
     if(p.session&&solWalletOff())await p.disconnect();
-    if(!p.session)await p.connect({namespaces:{solana:{chains:[SOL_WC_CHAIN],methods:["solana_signTransaction"],events:["accountsChanged","chainChanged"]}}});
+    if(!p.session)await p.connect({namespaces:{solana:{chains:[SOL_WC_CHAIN],methods:["solana_signTransaction","solana_signMessage"],events:["accountsChanged","chainChanged"]}}});
     if(seq!==solWalletConnectSeq){if(p.session)await p.disconnect();return;}
     solMobileWallet=solMakeMobileWallet(p);solMobilePending=false;solCloseWalletPicker();await solConnectWallet(solMobileWallet);
   }catch(e){if(seq===solWalletConnectSeq)$("solWalList").textContent="Mobile connection failed: "+(e?.message||"Try again");}
@@ -7480,7 +7489,7 @@ function solRenderWalletList(){
       <span class="walName">Solflare</span><span class="walKind">Open on this phone ↗</span></a>`);
   }
   list.insertAdjacentHTML("beforeend",`<button class="walRow" id="solMobileConnect" type="button"><span class="walFallback" aria-hidden="true"><svg viewBox="0 0 32 24" width="29" height="23" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><path d="M5 7c6-6 16-6 22 0M2 12l7 7 7-7 7 7 7-7"/></svg></span><span class="walName">WalletConnect</span><span class="walKind">Connect with QR</span></button>`);
-  list.insertAdjacentHTML("beforeend",`<p class="walNote">${mobile?"On this phone, open the site in your wallet and tap Connect. QR is for a wallet that supports WalletConnect.":"Choose an installed wallet, or scan a QR code with a compatible mobile wallet."}</p><p class="walNote">Your wallet controls unlocking and approvals. To request permission again, remove ZAEXA from its Connected apps.</p>`);
+  list.insertAdjacentHTML("beforeend",`<p class="walNote">${mobile?"On this phone, open the site in your wallet and tap Connect. QR is for a wallet that supports WalletConnect.":"Choose an installed wallet, or scan a QR code with a compatible mobile wallet."}</p><p class="walNote">Approve the connection message in your wallet. It confirms your address and has no transaction or network fee.</p>`);
   $("solMobileConnect").onclick=solConnectMobile;
   list.querySelectorAll(".walRow[data-i]").forEach(el=>{
     el.onclick=()=>{solCloseWalletPicker();solConnectWallet(rows[+el.dataset.i]);};
@@ -7488,29 +7497,56 @@ function solRenderWalletList(){
 }
 function solOpenWalletPicker(){ev("wallet:open","","solana");solRenderWalletList();$("solWalletOv").classList.add("on");}
 function solCloseWalletPicker(){if(solMobilePending){++solWalletConnectSeq;solMobileProvider?.abortPairingAttempt();}$("solWalletOv").classList.remove("on");}
-let solDisconnectPending=Promise.resolve();
+let solDisconnectPending=Promise.resolve(),solConnectionBusy=false,solPendingWallet=null;
+async function solConfirmConnection(w,acc,seq){
+  const sign=w.features?.["solana:signMessage"]?.signMessage;
+  if(typeof sign!=="function")throw Error("This wallet cannot confirm a connection. Choose a wallet with message approval support.");
+  const lib=await solLoadMobileBundle();
+  if(seq!==solWalletConnectSeq)throw Error("Connection cancelled");
+  const key=new Uint8Array(acc.publicKey||[]);
+  if(key.length!==32||lib.bs58.encode(key)!==acc.address)throw Error("Invalid wallet account");
+  const nonce=Array.from(crypto.getRandomValues(new Uint8Array(24)),x=>x.toString(16).padStart(2,"0")).join("");
+  const issued=Date.now();
+  const message=new TextEncoder().encode("ZAEXA wallet connection\nWebsite: "+location.origin+"\nWallet: "+acc.address+
+    "\n\nApprove connecting this wallet to this page.\nNo transaction. No network fee. No permission to spend funds.\n\nNonce: "+nonce+"\nIssued at: "+new Date(issued).toISOString());
+  const result=await w.features["solana:signMessage"].signMessage({account:acc,message});
+  if(seq!==solWalletConnectSeq)throw Error("Connection cancelled");
+  const out=result?.[0];
+  if(!out||!solBytesEq(out.signedMessage||[],message)||out.account?.address!==acc.address||!solBytesEq(out.account?.publicKey||[],key))throw Error("Wallet did not approve this connection message");
+  if(out.signatureType&&out.signatureType!=="ed25519")throw Error("Unsupported connection signature");
+  const signature=new Uint8Array(out.signature||[]);
+  if(signature.length!==64||!lib.nacl.sign.detached.verify(message,signature,key))throw Error("Invalid connection approval signature");
+  if(Date.now()-issued>300000)throw Error("Connection approval expired. Try again.");
+  if(Array.isArray(w.accounts)&&!w.accounts.some(a=>a.address===acc.address&&solBytesEq(a.publicKey||[],key)))throw Error("Wallet account changed");
+}
 async function solConnectWallet(w){
+  if(solConnectionBusy)return;
+  if(solAccount)solDisconnectWallet(true);
+  solConnectionBusy=true;solPendingWallet=w;
   const connectSeq=++solWalletConnectSeq;
+  solPaintWallet();
+  solSetNotice(note("info","<b>Approve connection in your wallet.</b> This confirms your address without a transaction or fee. <button class=\"chip\" data-act=\"solCancelConnect\">Cancel</button>"));
   try{
     await solDisconnectPending;
     if(connectSeq!==solWalletConnectSeq)return;
-    const res=await w.features["standard:connect"].connect();
+    const res=await w.features["standard:connect"].connect({silent:false});
     if(connectSeq!==solWalletConnectSeq)return;
     const acc=res&&res.accounts&&res.accounts[0];
     if(!acc)throw new Error("no account returned");
+    await solConfirmConnection(w,acc,connectSeq);
+    if(connectSeq!==solWalletConnectSeq)return;
     solWalletApi=w;solAccount=acc;
     if(w.name==="WalletConnect Solana")ev("wallet:on","wc","solana");else ev("wallet:on","inj","solana");
     try{localStorage.setItem(SOL_WALLET_LS_KEY,w.name);}catch{}
-    solLastWalletName=w.name;
-    solSetWalletOff(false);                     // C — اتصالِ صریح یعنی دیگر خاموش نیست
-    solSubscribeWalletEvents(w);
-    solPaintWallet();
-    solRefreshBalances();
-    solScheduleQuote();
+    solLastWalletName=w.name;solSetWalletOff(false);
+    solSubscribeWalletEvents(w);solSetNotice("");solRefreshBalances();solScheduleQuote();
   }catch(e){
-    ev("swap:fail","","solana");
-    if(isUserRejection(e)){solSetNotice(note("warn","<b>Cancelled in your wallet.</b> Nothing was connected."));return;}
-    solSetNotice(note("err","<b>Could not connect.</b> "+esc((e&&e.message)||"Unknown error")));
+    if(connectSeq!==solWalletConnectSeq)return;
+    solSetWalletOff(true);
+    if(isUserRejection(e)){solSetNotice(note("warn","<b>Connection approval cancelled.</b> Your wallet is not connected."));return;}
+    solSetNotice(note("err","<b>Wallet not connected.</b> "+esc((e&&e.message)||"Approval failed")));
+  }finally{
+    if(connectSeq===solWalletConnectSeq){solConnectionBusy=false;solPendingWallet=null;solPaintWallet();}
   }
 }
 // C — setOff=true (دکمه‌ی خودِ کاربر) یعنی از این پس دیگر اتصالِ بی‌صدا
@@ -7520,7 +7556,8 @@ async function solConnectWallet(w){
 function solDisconnectWallet(setOff){
   if(setOff===undefined)setOff=true;
   ++solWalletConnectSeq;++solBalanceSeq;
-  const wallet=solWalletApi;
+  const wallet=solWalletApi||solPendingWallet;
+  solPendingWallet=null;solConnectionBusy=false;
   if(solEventsUnsub){try{solEventsUnsub();}catch{}solEventsUnsub=null;}
   if(setOff){solSetWalletOff(true);solLastWalletName=null;try{localStorage.removeItem(SOL_WALLET_LS_KEY);}catch{}}
   solWalletApi=null;solAccount=null;solBalSol=null;solBalTok=null;solBalRef=null;solRefAtaExists=null;solOutAtaExists=null;
@@ -7714,7 +7751,11 @@ function solPaintBalance(){
 }
 
 /* ---- کوت — دبانس ۴۰۰ms، شماره‌ی ترتیب برای دورریختنِ پاسخِ دیر ---- */
-function solSetNotice(h){$("solNotices").innerHTML=h||"";}
+function solSetNotice(h){
+  const outside=tokenPage||view!=="swap";
+  $("solNotices").innerHTML=outside?"":h||"";
+  $("solConnectionNotices").innerHTML=outside?h||"":"";
+}
 function solInvalidateQuote(){
   ++solIntentSeq;
   ++solQuoteSeq;
@@ -7990,7 +8031,7 @@ function solUpdateSwapBtn(){
     btn.disabled=true;btn.textContent="Buying is blocked: this token failed the sell-back check.";
     return;
   }
-  if(!solAccount){btn.disabled=false;btn.textContent="Connect wallet";return;}
+  if(!solAccount){btn.disabled=solConnectionBusy;btn.textContent=solConnectionBusy?"Approve in wallet…":"Connect wallet";return;}
 
   if(!solQuote){btn.disabled=true;btn.textContent="Enter an amount";return;}
   // A — بودجه‌ی SOL، پیش از هرچیزِ دیگر: کیف‌پول اصلاً صدا زده نمی‌شود اگر
@@ -8668,6 +8709,8 @@ $("copyAddrBtn").onclick=(e)=>{
     if(solAccount)await copyLink(solAccount.address,$("solCopyAddrBtn"));
   };
   $("solDisconnectBtn").onclick=()=>solDisconnectWallet(true);
+  $("solNotices").onclick=e=>{if(e.target.closest('[data-act="solCancelConnect"]')){solDisconnectWallet(true);solSetNotice(note("warn","Connection cancelled. Your wallet is not connected."));}};
+  $("solConnectionNotices").onclick=$("solNotices").onclick;
   $("solSwapBtn").onclick=()=>{if(!solAccount)solOpenWalletPicker();else solDoSwap();};
   document.addEventListener("keydown",e=>{
     if(e.key!=="Escape")return;closePicker();closeWalletPicker();

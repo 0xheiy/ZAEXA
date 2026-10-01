@@ -154,14 +154,61 @@ async def main():
    await page.screenshot(path=str(Path(os.environ['ZAEXA_TEST_ARTIFACTS'])/'solana-wallet-mobile.png'))
   await page.locator('#solWalClose').click()
   await page.evaluate('solLoadMobileBundle()')
+  approval_setup="""() => {
+   const kp=SolMobile.nacl.sign.keyPair();const account={address:SolMobile.bs58.encode(kp.publicKey),publicKey:kp.publicKey,chains:['solana:mainnet'],features:['solana:signMessage']};
+   window.approvalMessages=[];
+   window.approvalWallet={name:'Approval test',accounts:[account],features:{
+    'standard:connect':{connect:async()=>({accounts:[account]})},
+    'standard:disconnect':{disconnect:async()=>{}},
+    'solana:signMessage':{signMessage:({message})=>new Promise((resolve,reject)=>{
+     approvalMessages.push(SolMobile.bs58.encode(message));window.rejectApproval=()=>reject(Object.assign(Error('Rejected'),{code:4001}));
+     window.finishApproval=()=>resolve([{account,signedMessage:message,signature:SolMobile.nacl.sign.detached(message,kp.secretKey)}]);
+    })}
+   }};window.connectApprovalTest=()=>{window.approvalAttempt=solConnectWallet(approvalWallet);};
+  }"""
+  await page.evaluate(approval_setup)
+  await page.evaluate('connectApprovalTest()');await page.wait_for_function('approvalMessages.length===1')
+  assert await page.evaluate('solAccount===null && solWalletApi===null')
+  assert await page.locator('#connectBtn').inner_text()=='Approve in wallet…'
+  assert await page.locator('#connectBtn').is_disabled()
+  await page.evaluate('rejectApproval()');await page.wait_for_function('!solConnectionBusy')
+  assert await page.locator('#connectBtn').inner_text()=='Connect wallet'
+  await page.evaluate('connectApprovalTest()');await page.wait_for_function('approvalMessages.length===2')
+  await page.locator('[data-act="solCancelConnect"]').click()
+  await page.evaluate('finishApproval()');await page.evaluate('approvalAttempt')
+  assert await page.evaluate('solAccount===null')
+  await page.evaluate('connectApprovalTest()');await page.wait_for_function('approvalMessages.length===3')
+  await page.evaluate('finishApproval()');await page.wait_for_function('solAccount!==null')
+  assert await page.locator('#connectBtn').inner_text()!='Connect wallet'
+  await page.evaluate('solDisconnectWallet(true)')
+  await page.evaluate('connectApprovalTest()');await page.wait_for_function('approvalMessages.length===4')
+  assert await page.evaluate('solAccount===null && new Set(approvalMessages).size===4')
+  await page.evaluate('rejectApproval()');await page.wait_for_function('!solConnectionBusy')
+  print('real cryptographic connection approval: pending header, rejection, cancellation, late approval and fresh reconnect verified')
+  await page.goto('http://zaexa.test/t/'+USDT)
+  await page.wait_for_function('activeChain==="solana" && tokenPage')
+  await page.evaluate('solLoadMobileBundle()');await page.evaluate(approval_setup)
+  await page.evaluate('connectApprovalTest()');await page.wait_for_function('approvalMessages.length===1')
+  assert await page.locator('#solConnectionNotices [data-act="solCancelConnect"]').is_visible()
+  assert await page.evaluate('solAccount===null')
+  await page.locator('#solConnectionNotices [data-act="solCancelConnect"]').click()
+  await page.evaluate('finishApproval()');await page.evaluate('approvalAttempt')
+  assert await page.evaluate('solAccount===null')
+  assert await page.evaluate('document.documentElement.scrollWidth<=innerWidth')
+  print('token report: pending approval notice and Cancel visible on mobile; late approval remains disconnected')
+  await page.goto('http://zaexa.test/app#swap?chain=solana')
+  await page.wait_for_function('typeof solLoadMobileBundle==="function"')
+  await page.evaluate('solLoadMobileBundle()')
+
   await page.evaluate("""() => {
    const handlers={};window.mobileAborted=false;window.mobileSent=null;
-   const session={namespaces:{solana:{methods:['solana_signTransaction'],accounts:[SOL_WC_CHAIN+':11111111111111111111111111111111']}}};
+   const kp=SolMobile.nacl.sign.keyPair();window.mobileOwner=SolMobile.bs58.encode(kp.publicKey);
+   const session={namespaces:{solana:{methods:['solana_signTransaction','solana_signMessage'],accounts:[SOL_WC_CHAIN+':'+mobileOwner]}}};
    const provider={session:null,on:(name,fn)=>handlers[name]=fn,
     connect:()=>new Promise((resolve,reject)=>{window.finishMobile=()=>{provider.session=session;resolve(session);};window.cancelMobile=()=>reject(Error('cancelled'));handlers.display_uri('wc:test-pairing@2?relay-protocol=irn&symKey=0000000000000000000000000000000000000000000000000000000000000000');}),
     abortPairingAttempt:()=>{window.mobileAborted=true;window.cancelMobile?.();},
     disconnect:async()=>{provider.session=null;handlers.session_delete?.();},
-    request:async request=>{window.mobileSent=request;return {transaction:request.params.transaction};}};
+    request:async request=>{window.mobileSent=request;if(request.method==='solana_signMessage'){window.mobileApproval=request;return {signature:SolMobile.bs58.encode(SolMobile.nacl.sign.detached(SolMobile.bs58.decode(request.params.message),kp.secretKey))};}return {transaction:request.params.transaction};}};
    SolMobile.UniversalProvider.init=async()=>provider;
   }""")
   await page.evaluate('solOpenWalletPicker()');await page.locator('#solMobileConnect').click()
@@ -172,7 +219,8 @@ async def main():
   await page.evaluate('solOpenWalletPicker()');await page.locator('#solMobileConnect').click()
   await page.wait_for_function('document.querySelector("#solQr")?.width>100')
   await page.evaluate('finishMobile()');await page.wait_for_function('solAccount!==null')
-  assert await page.evaluate('solAccount.address')==OWNER
+  assert await page.evaluate('solAccount.address===mobileOwner')
+  assert await page.evaluate('mobileApproval.method')=='solana_signMessage'
   await page.evaluate("""async()=>{const tx=new Uint8Array(100);tx[0]=1;tx[70]=2;const out=await solWalletApi.features['solana:signTransaction'].signTransaction({account:solAccount,transaction:tx});if(!solBytesEq(out[0].signedTransaction,tx))throw Error('Adapter changed bytes');}""")
   assert await page.evaluate('mobileSent.method')=='solana_signTransaction'
   await page.evaluate('solDisconnectWallet(true)');assert await page.evaluate('solAccount===null')

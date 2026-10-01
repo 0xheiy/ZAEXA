@@ -7281,6 +7281,8 @@ async def main():
         async def open_sol_page(verdict_body, dev=False):
             seen_urls = []
             spg = await b.new_page(viewport={"width": 1240, "height": 1000})
+            # Transaction fixtures use fixed non-signing keys; real approval is tested in solana-approval.test.mjs.
+            await spg.add_init_script("window.addEventListener('load',()=>{solConfirmConnection=async()=>{};});")
             spg.on("request", lambda req: seen_urls.append(req.url))
             async def stub_gt(route):
                 await route.fulfill(status=200, content_type="application/json", body=gt_solana_body())
@@ -7574,6 +7576,8 @@ async def main():
                                       send_error=None, ls_wallet_name=None, ls_off=False,
                                       sol_mint_image_url=None):
             spg = await b.new_page(viewport={"width": 1240, "height": 1000})
+            # Transaction fixtures use fixed non-signing keys; real approval is tested in solana-approval.test.mjs.
+            await spg.add_init_script("window.addEventListener('load',()=>{solConfirmConnection=async()=>{};});")
             if collect_errors is not None:
                 spg.on("console", lambda m: collect_errors.append(m.text) if m.type == "error" else None)
                 spg.on("pageerror", lambda e: collect_errors.append(str(e)))
@@ -8298,6 +8302,8 @@ async def main():
         #    با آن پایداری را سنجید.
         async def synth_code(msg):
             spg = await b.new_page(viewport={"width": 1240, "height": 1000})
+            # Transaction fixtures use fixed non-signing keys; real approval is tested in solana-approval.test.mjs.
+            await spg.add_init_script("window.addEventListener('load',()=>{solConfirmConnection=async()=>{};});")
             seen = await watch_events(spg)
             await spg.goto("http://127.0.0.1:%d/test/harness.html#swap" % port)
             await spg.wait_for_timeout(1300)
@@ -9281,6 +9287,8 @@ async def main():
                 # بفرستد (solWalletStandardInit در همان اولِ بولوت) — نه به
                 # اینکه کاربر چه زمانی گزینشگر را باز می‌کند.
                 await apg.add_init_script(SOL_FAKE_WALLET_INIT)
+                # Real cryptographic approval has dedicated tests; this fixture tests chain routing.
+                await apg.add_init_script("window.addEventListener('load',()=>{solConfirmConnection=async()=>{};});")
             await apg.route("**/ev", cs_stub_ev)
             # جفتِ پیش‌فرضِ Base هم روی بارگذاریِ /app لوگو/نمودار می‌خواهد
             # (multi، pools?page=1، ohlcv). اگر هیچ‌کدام استاب نشوند، چند

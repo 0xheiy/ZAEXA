@@ -20,6 +20,8 @@ function context(names, extras = {}) {
     solWalletApi: {}, solBalanceSeq: 0, solBalanceKey: null, solTokenSeq: 0, solIntentSeq: 0, activeChain: 'solana', view: 'swap',
     SOL_MINT_ADDR:"SOL",solRefMint:"SOL",solRefDecimals:9,solRefSymbol:"SOL",solRefVerdict:null,solBalRef:null,solRefAtaExists:null,
     solCompareDirect(){},ev(){},solLoadDetails(){},solLoadChart(){},
+    solConnectionBusy:false,solPendingWallet:null,solConfirmConnection:async()=>{},
+    note:(type,text)=>text,isUserRejection:()=>false,esc:s=>s,
     solBalSol: null, solBalTok: null, solOutAtaExists: null, slippageBps: 50,
     solRenderReadout() {}, solUpdateSwapBtn() {}, solPaintLegs() {}, solPaintBalance() {},
     solPaintFeeRows() {}, solSwapApplyGate() {}, solFetchQuote() {}, solSetNotice() {},
