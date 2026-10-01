@@ -65,7 +65,7 @@ async def main():
         await page.goto('http://zaexa.test/app#folio?chain=solana')
         await page.wait_for_function("document.querySelector('#folioBody').textContent.includes('Connect Solana wallet')")
         await page.locator('#folioBody [data-act="connect"]').click()
-        await page.locator('#solWalList .walRow').click()
+        await page.locator('#solWalList .walRow[data-i]' ).click()
         await page.wait_for_function("document.querySelector('#folioTotal').textContent==='$208'")
         assert 'USDT' in await page.locator('#folioBody').inner_text()
         assert len({x['params'][1].get('programId') for x in calls if x['method']=='getTokenAccountsByOwner' and 'programId' in x['params'][1]})==2

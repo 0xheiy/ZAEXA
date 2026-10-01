@@ -370,9 +370,8 @@ export function pickFollowUpTargets(doc, nowMs, cap = 12) {
     const candidates = [];
     for (const row of doc.rows) {
       if (!row || typeof row !== "object") continue;
-      // 🔴 عمداً فقط Base: شاهدِ این فالوآپ (v4PoolsEmpty) یک قراردادِ Base
-      // است، نه یک جاماندگی — سولانا هنوز شاهدِ خودش را ندارد.
-      if (row.chain !== "base" || row.v !== "sell") continue;
+      // The caller supplies chain-specific pool evidence; unavailable data stays unknown.
+      if (!(row.chain==="base"||(row.chain==="solana"&&SOL_MINT.test(row.address))) || row.v !== "sell") continue;
       if (Object.prototype.hasOwnProperty.call(row, "follow")) continue;
       if (typeof row.checkedAt !== "string") continue;
       const checkedMs = Date.parse(row.checkedAt);
@@ -409,8 +408,8 @@ export function pickRecheckTargets(doc, nowMs, cap = 4) {
     const candidates = [];
     for (const row of doc.rows) {
       if (!row || typeof row !== "object") continue;
-      // 🔴 عمداً فقط Base، هم‌رده‌ی pickFollowUpTargets.
-      if (row.chain !== "base" || row.v !== null) continue;
+      // Both supported networks; Solana addresses retain their case.
+      if (!(row.chain==="base"||(row.chain==="solana"&&SOL_MINT.test(row.address))) || row.v !== null) continue;
       if (Object.prototype.hasOwnProperty.call(row, "recheck")) continue;
       if (typeof row.checkedAt !== "string") continue;
       const checkedMs = Date.parse(row.checkedAt);
@@ -1267,6 +1266,8 @@ export function reportText(doc, opts) {
             doc.date + ".json");
         }
       }
+      const followed=solRows.filter(r=>r.follow).length,rechecked=solRows.filter(r=>r.recheck).length;
+      if(followed||rechecked)out.push(followed+" indexed-pool follow-ups; "+rechecked+" resolved rechecks. See JSON for times and results.");
       out.push("");
       return out;
     }

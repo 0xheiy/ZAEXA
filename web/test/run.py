@@ -981,7 +981,7 @@ def check_event_allowlists():
             "an ev() call reads a property, so user data could reach the analytics row: "
             "ev(%s)" % c)
         for lit in re.findall(r'"([^"]*)"', c):
-            assert lit in page or lit in details or lit == "view:", (
+            assert lit in page or lit in details or lit in ("view:","solana","base"), (
                 "ev(%s) uses the string %r, which is in neither allowlist" % (c, lit))
     EV_PAGE_NAMES, EV_DETAILS = page, details
     print("[events] %d names, both pages and the worker agree (app %d, landing %d); "
@@ -7016,7 +7016,7 @@ async def main():
         ev_names = []
         for raw in ev_seen:
             body = _json.loads(raw)
-            assert set(body) == {"e", "d", "v"}, "a beacon carried unexpected fields: %s" % raw
+            assert set(body) == {"e", "d", "v", "c"} and body["c"] in ("base", "solana"), "a beacon carried unexpected fields: %s" % raw
             assert body["e"] in ev_page, "a beacon carried an unknown event name: %s" % raw
             is_err = body["e"].startswith("err:")
             assert body["d"] in ev_detail or (is_err and EV_ERR_HEX.match(body["d"])), (
@@ -7341,7 +7341,7 @@ async def main():
             "the \"sell\" verdict did not render its exact sentence: %r" % sell["exitText"]
         assert sell["tradeHidden"] and sell["walletHidden"], \
             "the swap CTA and/or the wallet button are not hidden on the Solana page: %s" % sell
-        assert sell["chartHidden"] and sell["safetyHidden"], \
+        assert not sell["chartHidden"] and sell["safetyHidden"], \
             "a Base-only panel (chart or bytecode safety) is still shown on a Solana page: %s" % sell
         assert sell["tokenPage"] is True, "tokenPage was not set for a Solana token page"
         assert not any("ethers" in u for u in sell_urls), \
@@ -9216,8 +9216,8 @@ async def main():
                  trade_count_base, cerrs))
         assert first_url and "chain=solana" in first_url, (
             "loading /pairs.html?chain=solana did not request chain=solana, got %s" % first_url)
-        assert trade_count_solana == 0, (
-            "a Solana row must never show a Trade link, found %d" % trade_count_solana)
+        assert trade_count_solana == 1, (
+            "a Solana row must show a Trade link, found %d" % trade_count_solana)
         assert chip_texts_solana == ["All 1", "Passed 1", "Failed 0", "Unknown 0"], (
             "the Solana stat chips must read Passed/Failed/Unknown, got %s" % chip_texts_solana)
         assert second_url and "chain=base" in second_url, (
@@ -9577,11 +9577,11 @@ async def main():
             "#solTokList .ttl", "els => els.map(e => e.textContent.trim())")
         await epg.close()
         print("[sol fixes][E] token list=%s heading=%s" % (e_syms, e_heading))
-        assert e_syms[:2] == ["USDC", "USDT"], "the built-in presets must be exactly USDC then USDT: %s" % e_syms
+        assert e_syms[:3] == ["SOL", "USDC", "USDT"], "the built-in presets must be exactly SOL, USDC then USDT: %s" % e_syms
         assert "JUP" not in e_syms, "the unverified JUP preset must be gone: %s" % e_syms
         assert e_heading == ["Popular on Solana"], "expected a single 'Popular on Solana' heading: %s" % e_heading
-        assert e_syms[2:] == ["Bonk"], \
-            "the popular section must dedupe by mint and skip SOL/USDC/USDT, got %s" % e_syms[2:]
+        assert e_syms[3:] == ["Bonk"], \
+            "the popular section must dedupe by mint and skip SOL/USDC/USDT, got %s" % e_syms[3:]
 
         # F) دکمه‌های سریع ۵۰٪/MAX و × روی «You pay»
         f1pg = await open_sol_swap_page({"v": "sell", "ms": 100}, balance_lamports=2_000_000_000)
@@ -9657,7 +9657,7 @@ async def main():
         # Base/renderSolStats).
         SOL_CHART_POOL = "abcPoolId123"
         def sol_pools_lookup_fixture():
-            return {"data": [{"id": "solana_" + SOL_CHART_POOL}]}
+            return {"data": [{"id": "solana_" + SOL_CHART_POOL, "attributes": {"address": SOL_CHART_POOL, "reserve_in_usd": "1000"}, "relationships": {"base_token": {"data": {"id": "solana_" + CS_MINT_USDC}}, "quote_token": {"data": {"id": "solana_" + SOL_MINT_ADDR}}}}]}
         def sol_ohlcv_fixture():
             return {"data": {"attributes": {"ohlcv_list": [
                 [1690000000, 1, 1.1, 0.9, 1.0, 1000],
@@ -9691,7 +9691,7 @@ async def main():
         await ipg.close()
         print("[sol fixes][F-chart] pairName=%r pxNow=%r svg=%s statsHidden=%s statsRows=%s"
               % (i_pair_name, i_px_now, i_has_svg, i_stats_hidden, i_stats_rows))
-        assert i_pair_name == "TSWP / SOL", "the chart header must show the token symbol vs SOL: %r" % i_pair_name
+        assert i_pair_name == "TSWP / USD", "the chart header must show the token symbol vs USD: %r" % i_pair_name
         assert i_px_now != "—" and i_px_now != "", "a 3-point OHLCV fixture must render a current price: %r" % i_px_now
         assert i_has_svg is True, "the Solana chart card must draw an SVG from the OHLCV fixture"
         assert i_stats_hidden is False and i_stats_rows == ["Market cap", "FDV", "Volume 24h", "Liquidity"], \
@@ -9734,7 +9734,7 @@ async def main():
               "RPC pre-simulation calling the wallet zero times on a real error and exactly once on a clean "
               "simulation, always simulating exactly once (B); the signAndSendTransaction non-rejection "
               "fallback to signTransaction+sendTransaction, never on an explicit rejection (C); the built-in "
-              "presets being exactly USDC/USDT with a live deduped Popular-on-Solana section (E); and the "
+              "presets being exactly SOL/USDC/USDT with a live deduped Popular-on-Solana section (E); and the "
               "quick 50%/MAX buttons, the clear x, the You-receive sell pill (quote/nosell/plain), the "
               "Copy this check link, the price-chart+market-stats card (same MC>FDV sanity rule as Base) "
               "and the Jupiter route-legs bar under the swap card (F) — all covered")
@@ -9853,7 +9853,7 @@ async def main():
         # E) typing in "You receive" re-quotes with swapMode=ExactOut and fills
         # "You pay"; a pair Jupiter refuses for ExactOut reverts to ExactIn.
         e_quote_urls = []
-        SOL_EXACTOUT_FIXTURE = dict(SOL_QUOTE_FIXTURE, inAmount="2000000000")
+        SOL_EXACTOUT_FIXTURE = dict(SOL_QUOTE_FIXTURE, inAmount="2000000000", swapMode="ExactOut")
         epg2 = await open_sol_swap_page({"v": "sell", "ms": 100}, quote_body=SOL_EXACTOUT_FIXTURE)
         async def record_quote(route):
             e_quote_urls.append(route.request.url)
@@ -9866,7 +9866,7 @@ async def main():
         await epg2.close()
         print("[sol round3][E] You-receive=5 -> You-pay=%r label=%r lastUrl=%r"
               % (e_pay, e_label, e_quote_urls[-1] if e_quote_urls else None))
-        assert e_quote_urls and "swapMode=ExactOut" in e_quote_urls[-1], \
+        assert e_quote_urls and all("swapMode=ExactOut" in url for url in e_quote_urls), \
             "E: typing in You-receive must call /sol/quote with swapMode=ExactOut, got %s" % e_quote_urls
         assert e_pay == "2.000000" or e_pay == "2", "E: You-pay must be filled from inAmount, got %r" % e_pay
         assert e_label == "Max sent", "E: the Min-received label must read Max sent in ExactOut mode, got %r" % e_label
@@ -9931,7 +9931,7 @@ async def main():
         await hpg2.click('#srcPop [data-chain="solana"]')
         await hpg2.wait_for_timeout(200)
         h_sol = await hpg2.eval_on_selector("#appSolCheckShare", "el => el.getBoundingClientRect().height")
-        h_ttl = await hpg2.eval_on_selector("#appSolHeroCol .card>header>.ttl:first-child",
+        h_ttl = await hpg2.eval_on_selector("#appSolSafetyCard>header>.ttl:first-child",
                                              "el => el.getBoundingClientRect().height")
         await hpg2.close()
         print("[sol round3][H] button height base=%r solana=%r titleHeight=%r" % (h_base, h_sol, h_ttl))

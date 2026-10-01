@@ -11,19 +11,21 @@ function context(names, extras = {}) {
     console, URLSearchParams, Uint8Array, Date, Math, BigInt,
     setTimeout: () => 1, clearTimeout: () => {},
     $: id => {
-      if (!elements.has(id)) elements.set(id, { value: '', textContent: '', hidden: false, style: {}, classList: { remove() {} } });
+      if (!elements.has(id)) elements.set(id, { value: '', textContent: '', hidden: false, appendChild() {}, style: {}, classList: { remove() {} } });
       return elements.get(id);
     },
     solQuote: { inAmount: '1000000000' }, solQuoteSeq: 0, solQuoteAt: Date.now(),
     solQuoteTimer: null, solMode: 'exactIn', solSide: 'buy', solMintCur: 'mintA',
     solTokenDecimals: 6, solAccount: { address: 'walletA', publicKey: new Uint8Array(32) },
     solWalletApi: {}, solBalanceSeq: 0, solBalanceKey: null, solTokenSeq: 0, solIntentSeq: 0, activeChain: 'solana', view: 'swap',
+    SOL_MINT_ADDR:"SOL",solRefMint:"SOL",solRefDecimals:9,solRefSymbol:"SOL",solRefVerdict:null,solBalRef:null,solRefAtaExists:null,
+    solCompareDirect(){},ev(){},solLoadDetails(){},solLoadChart(){},
     solBalSol: null, solBalTok: null, solOutAtaExists: null, slippageBps: 50,
     solRenderReadout() {}, solUpdateSwapBtn() {}, solPaintLegs() {}, solPaintBalance() {},
     solPaintFeeRows() {}, solSwapApplyGate() {}, solFetchQuote() {}, solSetNotice() {},
     ...extras,
   });
-  for (const name of names) {
+  for (const name of [...new Set(["solInputMint","solOutputMint","solInputDecimals","solOutputDecimals","solAmountRaw",...names])]) {
     const match = new RegExp(`(?:async )?function ${name}\\(`).exec(html);
     assert.ok(match, `missing ${name}`);
     const end = html.indexOf('\n}', match.index);
@@ -209,7 +211,7 @@ test('token page with missing metadata still initializes the wallet', async () =
 test('same-account balance refresh preserves a known low balance until its response', async () => {
   const balance = deferred();
   const c = context(['solRefreshBalances'], {
-    solBalanceKey: 'walletA:mintA', solBalSol: 0.0001,
+    solBalanceKey: 'walletA:mintA:SOL', solBalSol: 0.0001,
     solRpcCall: method => method === 'getBalance' ? balance.promise : Promise.resolve({ value: [] }),
   });
   const pending = c.solRefreshBalances();
@@ -217,4 +219,27 @@ test('same-account balance refresh preserves a known low balance until its respo
   balance.resolve({ value: 2000000000 });
   await pending;
   assert.equal(c.solBalSol, 2);
+});
+
+test('token amounts preserve integers above the floating-point safe range',()=>{
+  const c=context([]);
+  assert.equal(c.solAmountRaw('9007199254.740993',6),9007199254740993n);
+  assert.equal(c.solAmountRaw('0.0000001',6),null);
+  assert.equal(c.solAmountRaw('1e3',6),null);
+  assert.equal(c.solAmountRaw('0.000001',6),1n);
+});
+test('ExactOut budget uses the maximum input threshold',()=>{
+  const c=context(['solRequiredInput'],{solSide:'sell',solTokenDecimals:6,solQuote:{swapMode:'ExactOut',inAmount:'1000000',otherAmountThreshold:'1100000'}});
+  assert.equal(c.solRequiredInput(),1.1);
+});
+test('selecting a pay token on a reversed pair retains direction',async()=>{
+  const c=context(['solSelectToken'],{solPickerLeg:'token',solSide:'sell',solCloseTokenPicker(){},solOnSideChange(){},solAppLoadToken:async()=>{c.solSide='buy';}});
+  await c.solSelectToken('anotherMint');assert.equal(c.solSide,'sell');
+});
+test('Solana sharing preserves both mints and ExactOut mode',()=>{
+  const c=context(['solShareUrl'],{solRefMint:'USDCmint',solMintCur:'CaseSensitiveMint',solMode:'exactOut',location:{origin:'https://zaexa.test'}});
+  c.$('solOutRead').value='1.25';
+  const params=new URLSearchParams(c.solShareUrl().split('?')[1]);
+  assert.equal(params.get('chain'),'solana');assert.equal(params.get('in'),'USDCmint');
+  assert.equal(params.get('out'),'CaseSensitiveMint');assert.equal(params.get('mode'),'exactOut');assert.equal(params.get('amt'),'1.25');
 });

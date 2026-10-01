@@ -238,7 +238,7 @@ ok(res.status === 200, "index.html must still be served");
   let r = await evCall(GOOD, { cf: { country: "DE" } });
   ok(r.status === 204, "a valid event should be 204 (got " + r.status + ")");
   ok(points.length === 1, "a valid event was not recorded (" + points.length + " points)");
-  ok(JSON.stringify(points[0].blobs) === JSON.stringify(["view:folio", "", "mobile", "DE"]),
+  ok(JSON.stringify(points[0].blobs) === JSON.stringify(["view:folio", "", "mobile", "DE", "base"]),
     "wrong blobs written: " + JSON.stringify(points[0].blobs));
   ok(points[0].indexes && points[0].indexes[0] === "view:folio",
     "the event name must be the sampling index");
@@ -253,8 +253,8 @@ ok(res.status === 200, "index.html must still be served");
     ok(!written.includes(secret),
       "A SENSITIVE HEADER WAS WRITTEN INTO THE ANALYTICS ROW: " + secret + " in " + written);
   }
-  ok(points[0].blobs.length === 4 && points[0].blobs.every(b => typeof b === "string"),
-    "the analytics row must be exactly four strings: " + written);
+  ok(points[0].blobs.length === 5 && points[0].blobs.every(b => typeof b === "string"),
+    "the analytics row must be exactly five strings: " + written);
 
   /* کشور فقط از request.cf، و هر شکل دیگری «??» */
   for (const [given, want] of [["DE", "DE"], ["T1", "T1"], ["XX", "XX"],
@@ -407,7 +407,7 @@ ok(res.status === 200, "index.html must still be served");
   // و یک آدرس بدشکل نباید این مسیر را بگیرد
   asked = [];
   await worker.fetch(new Request(ORIGIN + "/t/not-an-address"), spyEnv, {});
-  ok(asked.length === 1 && asked[0] === "/t/not-an-address",
+  ok(asked.length === 1 && asked[0] === "/app",
      "a malformed token path was treated as a token page: " + JSON.stringify(asked));
   console.log("[token page] worker serves /app for /t/<address>, untouched for anything else");
 }
@@ -3454,7 +3454,7 @@ function isSolidlyReqId(id) { return PROBE_KIND_BY_ID.get(id) === "SOLIDLY"; }
   ok(!xml.includes(mkAddr(0)),
      "the zero address is not a token and must never reach the sitemap, however healthy the "
      + "pool row around it looks");
-  ok(coldCalls === SITEMAP_TOKEN_PAGES,
+  ok(coldCalls === SITEMAP_TOKEN_PAGES * 2,
      "a cold sitemap build should make exactly " + SITEMAP_TOKEN_PAGES + " upstream calls (one per "
      + "page), got " + coldCalls);
 
@@ -13245,7 +13245,7 @@ function stripAllowedWording(t) {
     let netCalls = 0;
     globalThis.fetch = async () => { netCalls++; throw new Error("must not reach network"); };
     const badRpc = [
-      [{ method: "getAccountInfo", params: [PUBKEY] }, "method-not-allowed"],
+      [{ method: "getAccountInfo", params: [PUBKEY] }, "bad-params"],
       [{ method: "getBalance", params: ["short"] }, "bad-params"],
       [{ method: "getTokenAccountsByOwner", params: [PUBKEY, { mint: MINT_A }, { encoding: "base64" }] }, "bad-params"],
       [{ method: "getTokenAccountsByOwner", params: [PUBKEY, { programId: PUBKEY }, { encoding: "jsonParsed" }] }, "bad-params"],

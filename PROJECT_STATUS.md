@@ -28,7 +28,7 @@
 ## پورتفولیو و جریان معاملات سولانا — ۳۰ سپتامبر
 
 دو بخش باقی‌ماندهٔ ممیزی اولیه پیاده شدند: پورتفولیوی سولانا و جریان معاملات سولانا.
-این مرحله آمادهٔ انتشار است: ۲۶ تست واحد، تست کامل سرور، مرورگر اختصاصی و تست کامل رابط موفق شدند. انتشار زنده پس از ارسال بررسی می‌شود.
+این مرحله با کامیت `deaaae1` به مخزن اصلی ارسال شد: ۲۶ تست واحد، تست کامل سرور، مرورگر اختصاصی و تست کامل رابط موفق شدند. پس از پایان صف کلادفلر، انتشار روی سایت تأیید شد: سه تابع جدید در صفحه، پاسخ ۲۰۰ برای موجودی هر دو برنامهٔ توکن، رد برنامهٔ غیرمجاز و قیمت‌گیری مثبت در هر دو جهت. امضا یا سواپ واقعی انجام نشد.
 شرح رفتار، محدودیت داده و روش آزمون در `SOLANA_VIEWS_2026-09-30.md`.
 
 ## ۰. کارهای باز — به‌روز ۲۸ سپتامبر ۲۰۲۶، به ترتیب
@@ -1154,3 +1154,7 @@ Retired) · `contracts/README.md` · `PROJECT_STATUS.md` · و
   کن و باقیمانده را بایت‌به‌بایت مقایسه کن (برش‌دهنده باید رشته‌های متنی را
   بشناسد تا `//` داخل یک رشته را کامنت نخواند). خودِ ابزار هم باید آزموده شود:
   تغییر کامنت → یکسان، جابه‌جایی یک فاصله در کد → متفاوت.
+
+## Solana parity — 2026-10-02
+
+Implemented the 21-item parity checklist; details and data-coverage limits in SOLANA_PARITY_2026-10-01.md. Matched the Base hero/lower-panel layout and mobile swap ordering. Passed 37 regression/server tests, full Worker/browser suites and dedicated portfolio/flow and mobile parity checks (six widths, both themes). Real mobile-wallet pairing and real swaps were not performed. Deployment must be confirmed on the live site after pushing.

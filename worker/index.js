@@ -262,6 +262,8 @@ async function collectEv(request, url, env) {
 
   const name = typeof msg.e === "string" ? msg.e : "";
   const detail = typeof msg.d === "string" ? msg.d : "";
+  const chain = msg.c == null ? "base" : msg.c;
+  if (chain !== "base" && chain !== "solana") return evDone(400);
   const surface = typeof msg.v === "string" ? msg.v : "";
   if (!EV_OK.has(name)) return evDone(400);
   /* فهرست بسته‌ی همیشگی، به‌علاوه‌ی همان استثنای باریک: کدِ چهار-رقمی فقط
@@ -283,7 +285,7 @@ async function collectEv(request, url, env) {
   const ds = env && env.ZX_EV;
   if (ds && typeof ds.writeDataPoint === "function") {
     ds.writeDataPoint({
-      blobs: [name, detail, surface, country],
+      blobs: [name, detail, surface, country, chain],
       doubles: [1],
       // ایندکس کلید نمونه‌برداری است؛ نام رویداد یعنی نمونه‌برداری
       // پُرترافیک‌ها به کم‌ترافیک‌ها آسیب نمی‌زند.
@@ -691,7 +693,7 @@ let passPoolsMemo = null;
    قاطی نشود — با اینکه امروز چنین برخوردی عملاً ناممکن است. */
 async function fetchBaseTokenPoolsRaw(addr, env, network) {
   const net = typeof network === "string" && network ? network : "base";
-  const memoKey = net + ":" + (typeof addr === "string" ? addr.toLowerCase() : "");
+  const memoKey = net + ":" + (typeof addr === "string" ? (net==="solana"?addr:addr.toLowerCase()) : "");
   if (passPoolsMemo instanceof Map && passPoolsMemo.has(memoKey)) {
     return passPoolsMemo.get(memoKey); // ضربه‌ی حافظه‌ی همین گذر — بدونِ fetch
   }
@@ -1544,6 +1546,9 @@ async function solQuoteRoute(request, url, env) {
     inputMint, outputMint, amount, slippageBps: String(slippageBps),
     restrictIntermediateTokens: "true", swapMode,
   });
+  const direct=url.searchParams.get("onlyDirectRoutes");
+  if(direct!=null&&direct!=="true"&&direct!=="false")return solDone(400,{error:"bad-direct-mode"});
+  if(direct==="true")q.set("onlyDirectRoutes","true");
   const r = await jupProxyFetch(env, "/swap/v1/quote?" + q.toString(), { method: "GET" }, SOL_JUP_TIMEOUT_MS);
   if (!r.ok || !r.json) return solDone(502, { error: "jup:quote:" + r.status });
   return solDone(200, r.json);
@@ -1620,10 +1625,13 @@ async function solSwapRoute(request, url, env) {
 // بی‌خطرِ خواندنی، رد می‌شود؛ افزودنِ متدِ تازه یعنی این فهرست دستی عوض شود.
 const SOL_RPC_METHODS_ALLOWED = new Set([
   "getBalance", "getTokenAccountsByOwner", "getSignatureStatuses", "sendTransaction",
-  "simulateTransaction",
+  "simulateTransaction", "getAccountInfo", "getTokenLargestAccounts", "getEpochInfo",
 ]);
 
 function solRpcParamsOk(method, params) {
+  if(method==="getAccountInfo")return Array.isArray(params)&&params.length===2&&isSolMintStr(params[0])&&params[1]?.encoding==="jsonParsed"&&Object.keys(params[1]).length===1;
+  if(method==="getTokenLargestAccounts")return Array.isArray(params)&&params.length===1&&isSolMintStr(params[0]);
+  if(method==="getEpochInfo")return Array.isArray(params)&&params.length===0;
   if (method === "getBalance") {
     return Array.isArray(params) && params.length >= 1 && isBase58Str(params[0], 32, 44);
   }
@@ -1760,6 +1768,16 @@ async function solRpcRoute(request, url, env) {
    با network="solana")، یک تماسِ اضافه به‌ازای هر nosellِ خام — شکستِ آن
    تماس، nosell را دست‌نخورده می‌گذارد، هرگز چیزی اختراع نمی‌کند. */
 export const SOL_SELLERS_24_VETO = 10;
+export async function solPoolsEmpty(mint,env){
+  const r=await fetchBaseTokenPoolsRaw(mint,env,"solana");
+  if(!r.ok||!Array.isArray(r.data)||!r.data.length)return null;
+  const rows=r.data.filter(p=>[p.relationships?.base_token?.data?.id,p.relationships?.quote_token?.data?.id].includes("solana_"+mint));
+  if(!rows.length)return null;
+  const values=rows.map(p=>p.attributes?.reserve_in_usd);
+  if(values.some(x=>x!=null&&x!==""&&Number.isFinite(Number(x))&&Number(x)>0))return false;
+  if(values.every(x=>x!=null&&x!==""&&Number.isFinite(Number(x))&&Number(x)===0))return true;
+  return null;
+}
 async function solNosellVeto(mint, env) {
   const r = await fetchBaseTokenPoolsRaw(mint, env, "solana");
   if (!r.ok) return null; // GT شکست خورد → nosellِ خام دست‌نخورده می‌ماند
@@ -1795,6 +1813,7 @@ async function solFetchVerdict(mint, deadlineAt, ctx, env) {
   if (v === "nosell") {
     const vetoWhy = await solNosellVeto(mint, env);
     if (vetoWhy) return { v: null, why: vetoWhy };
+    if(await solPoolsEmpty(mint,env)===true)return {v, cause:"empty-pool", basis, ret};
   }
   return v === null ? { v: null, why: why || "internal" } : { v, basis, ret };
 }
@@ -2127,9 +2146,9 @@ async function diagVerdict(request, url, env, ctx) {
     // «why» فقط وقتی v واقعاً null باشد چیزی غیرِ undefined است؛ JSON.stringify
     // کلیدی با مقدارِ undefined را خودش حذف می‌کند، پس یک sell/nosell همان
     // شکلِ {v,ms} امروز را بایت‌به‌بایت نگه می‌دارد.
-    const { v, why, basis, ret } = await solFetchVerdict(addr, t0 + OG_BUDGET_MS, ctx, env);
+    const { v, why, basis, ret, cause } = await solFetchVerdict(addr, t0 + OG_BUDGET_MS, ctx, env);
     return vdDone(200, {
-      v, ms: Date.now() - t0, why,
+      v, ms: Date.now() - t0, why, cause: v === "nosell" ? cause : undefined,
       basis: v === "sell" && basis === "quote" ? "quote" : undefined,
       ret: v === "sell" && typeof ret === "number" ? ret : undefined,
     });
@@ -2269,15 +2288,15 @@ const SITEMAP_TOKEN_CAP = 50;
    واقعاً درخواست نمی‌رود، فقط کلیدِ Cache API است، و عمداً از میزبانِ واقعیِ
    بالادست جداست تا کلیدش هرگز با یک ورودیِ کشِ /gt برخورد نکند. */
 const SITEMAP_CACHE_HOST = "zaexa-sitemap.internal";
-const SITEMAP_CACHE_PATH = "/tokens";
+const SITEMAP_CACHE_PATH = "/tokens-base-solana-v2";
 
 /* یک صفحه از networks/base/pools — بدونِ هیچ فرضی روی شکلِ پاسخ. اگر بدنه
    آرایه‌ی data نداشته باشد یعنی «قابلِ استفاده نیست»، دقیقاً هم‌ردیفِ ۴۰۴/۵۰۰:
    کالر باید هر دو را یک‌جور شکست بداند. */
-async function fetchSitemapPoolsPage(page, env) {
+async function fetchSitemapPoolsPage(page, env, network="base") {
   const key = (env && typeof env.CG_KEY === "string" && env.CG_KEY) || "";
   const target = (key ? UPSTREAM_KEYED : UPSTREAM_FREE) +
-    "/networks/base/pools?page=" + page;
+    "/networks/"+network+"/pools?page=" + page;
   const h = { accept: "application/json" };
   if (key) h["x-cg-demo-api-key"] = key;
   const up = await fetch(target, { headers: h });
@@ -2290,13 +2309,13 @@ async function fetchSitemapPoolsPage(page, env) {
 /* یک ردیفِ استخر → آدرسِ توکنِ پایه، یا null. هر فیلد «نامعتمد» است — از
    بالادستی می‌آید که کنترلش دستِ ما نیست — پس یک ردیفِ عجیب فقط خودش را رد
    می‌کند، نه کل فایل را می‌شکند. */
-function sitemapTokenFromPool(row) {
+function sitemapTokenFromPool(row, network="base") {
   try {
     const rawId = row && row.relationships && row.relationships.base_token &&
       row.relationships.base_token.data && row.relationships.base_token.data.id;
     if (typeof rawId !== "string") return null;
-    const addr = rawId.replace(/^base_/, "");
-    if (chainOf(addr) !== "base") return null; // شکلِ دیگر یا زنجیره‌ی دیگر → دور ریخته می‌شود، نه گزارش
+    const addr = rawId.replace(new RegExp("^"+network+"_"), "");
+    if (chainOf(addr) !== network) return null; // شکلِ دیگر یا زنجیره‌ی دیگر → دور ریخته می‌شود، نه گزارش
     /* 🔴 آدرسِ صفر یک توکن نیست و صفحه‌اش هیچ‌وقت چیزی برای نشان‌دادن ندارد.
        یک سایت‌مپِ واقعی یک بار همین را لیست کرد. newPoolRowToToken در
        worker/report.js از همان روز ردش می‌کند؛ این مسیر جا مانده بود، و
@@ -2320,27 +2339,19 @@ function sitemapTokenFromPool(row) {
    تکرار، سقف‌خورده در SITEMAP_TOKEN_CAP. null یعنی «بالادست قابلِ اعتماد
    نبود» — کالر باید دقیقاً مثلِ یک ۵۰۰/پرتاب رفتار کند، نه مثلِ فهرستِ خالی. */
 async function buildSitemapTokens(env) {
-  const seen = new Set();
-  const tokens = [];
-  for (let page = 1; page <= SITEMAP_TOKEN_PAGES; page++) {
-    let rows;
-    try {
-      rows = await fetchSitemapPoolsPage(page, env);
-    } catch (e) {
-      // اگر همان صفحه‌ی اول شکست بخورد، کل بالادست را خراب فرض کن.
-      // اگر صفحه‌ی بعدتری بود، آنچه تا اینجا جمع شده معتبر می‌ماند — فقط
-      // ادامه‌ی جمع‌آوری متوقف می‌شود، نه چیزی که تا الان داریم دور ریخته.
-      if (tokens.length === 0 && page === 1) return null;
-      break;
-    }
-    for (const row of rows) {
-      const addr = sitemapTokenFromPool(row);
-      if (!addr || seen.has(addr)) continue;
-      seen.add(addr);
-      tokens.push(addr);
+  const tokens=[],seen=new Set();let succeeded=false;
+  for(const network of ["base","solana"]){
+    let count=0;
+    for(let page=1;page<=SITEMAP_TOKEN_PAGES;page++){
+      let rows;try{rows=await fetchSitemapPoolsPage(page,env,network);succeeded=true;}catch{break;}
+      for(const row of rows){
+        const addr=sitemapTokenFromPool(row,network),key=network=== "base"?addr?.toLowerCase():addr;
+        if(!addr||seen.has(key)||count>=SITEMAP_TOKEN_CAP)continue;
+        seen.add(key);tokens.push(addr);count++;
+      }
     }
   }
-  return tokens.slice(0, SITEMAP_TOKEN_CAP);
+  return succeeded?tokens:null;
 }
 
 function renderSitemapXml(origin, paths, lastmod) {
@@ -2926,7 +2937,7 @@ async function scheduledReportPassInner(env, ctx, opts, meter) {
       // به ۳ آدرس در هر گذر سقف‌گذاری شده (از ۱۲، هم‌رده‌ی کاهشِ سهمِ Base) —
       // این حداکثر ۳ eth_call کوتاهِ اضافه در ساعت است، روی مسیری که هیچ
       // کاربری منتظرش نیست.
-      poolEmptyOf: (addr) => v4PoolsEmpty(addr, env, Date.now() + 1200),
+      poolEmptyOf: (addr) => chainOf(addr)==="solana"?solPoolsEmpty(addr,env):v4PoolsEmpty(addr, env, Date.now() + 1200),
       fetchPoolsSol,
       // از ۶ به ۲ — همان تنظیمِ سهمِ هر مرحله از رویِ لاگِ گذرِ زنده‌ی
       // ۱۹:۱۷ UTC (کنارِ REPORT_PASS_BASE_CAP در worker/report.js).
@@ -3031,6 +3042,10 @@ export default {
        /ev. یعنی برای اضافه‌شدنش لازم نیست کسی Build command را در پنل عوض
        کند، و انتشارش با خودِ کد اتمیک است. */
     if (url.pathname === "/og.png") return ogImageResponse(request);
+    if(/^\/t\/[^/]+\/?$/.test(url.pathname)&&!chainOf(url.pathname.split("/")[2])){
+      const asset=await env.ASSETS.fetch(new Request(new URL("/app",url.origin),request));
+      return new Response(asset.body,{status:404,headers:asset.headers});
+    }
     /* robots.txt و sitemap.xml هم از کد می‌آیند، نه از `_site` — به همان
        دلیلِ بالا: خط Build در پنل فقط `web/*.html`، `web/_headers` و
        `web/*.js` را کپی می‌کند، پس یک فایلِ `.txt` یا `.xml` کنارِ

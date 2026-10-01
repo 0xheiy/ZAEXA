@@ -14,7 +14,7 @@ function ctx(names,extra={}){
     folioSeq:0,flowSeq:0,flowWindow:'h1',activeChain:'solana',solAccount:account,solMintCur:USDC,
     $:id=>elements[id]??={innerHTML:'',textContent:''},paintFlowToken(){},
     esc:s=>String(s).replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('"','&quot;'),
-    shortAddr:s=>s.slice(0,5),...extra});
+    okLogo:()=>false,solPaintAvatarIntoEl(){},shortAddr:s=>s.slice(0,5),...extra});
   for(const name of names){
     const m=new RegExp(`(?:async )?function ${name}\\(`).exec(source);assert.ok(m,name);
     vm.runInContext(source.slice(m.index,source.indexOf('\n}',m.index)+2),c);

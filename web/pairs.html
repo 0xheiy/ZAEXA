@@ -667,7 +667,7 @@ footer .fine{max-width:78ch;margin:46px 0 0;font-size:11.5px;color:var(--tx3);li
       <a href="https://www.geckoterminal.com" target="_blank" rel="noopener">Price history by GeckoTerminal</a>
     </div>
   </div>
-  <p class="fine">The safety checks are heuristics on public bytecode plus a live sell simulation — not an audit. A clean result is not a guarantee. The contract holds no funds between transactions and there is no account to create.</p>
+  <p class="fine">Checks use public contract or token data and available quotes or simulations. They are not an audit or a guarantee. Your wallet authorizes transactions; there is no deposit account.</p>
   <div class="footBottom"><span>Non-custodial &middot; this page reads only our own endpoints &middot; not audited</span><span>&copy; 2026 Zaexa</span></div>
 </footer>
 
@@ -812,9 +812,9 @@ footer .fine{max-width:78ch;margin:46px 0 0;font-size:11.5px;color:var(--tx3);li
     'stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
     '<rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg>';
 
-  // Trade فقط روی ردیف‌های Base — سواپ روی سولانا هنوز وجود ندارد.
+  // Trade retains the selected network for both Base and Solana.
   function tradeBtnHtml(addr){
-    return '<a class="trade-btn" href="/app#swap?out=' + encodeURIComponent(addr) + '">Trade</a>';
+    return '<a class="trade-btn" href="/app#swap?out=' + encodeURIComponent(addr) + (currentChain === 'solana' ? '&chain=solana' : '') + '">Trade</a>';
   }
   function copyBtnHtml(addr){
     return '<button type="button" class="copy-btn" data-copy-addr="' + esc(addr) +
@@ -845,7 +845,7 @@ footer .fine{max-width:78ch;margin:46px 0 0;font-size:11.5px;color:var(--tx3);li
     var rowAriaLabel = esc(((row && row.symbol) || 'Unknown token') + ', ' + v.label + ', price ' + priceStr);
     var noteHtml = noteFor(row) || '';
     var isBase = (row && row.chain) === 'base';
-    var actionsHtml = (isBase ? tradeBtnHtml(addr) : '') + copyBtnHtml(addr);
+    var actionsHtml = tradeBtnHtml(addr) + copyBtnHtml(addr);
 
     if (forCard) {
       return '<a class="card-link" href="' + href + '" aria-label="' + rowAriaLabel + '"></a>' +
