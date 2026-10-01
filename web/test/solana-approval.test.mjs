@@ -10,7 +10,7 @@ const html=readFileSync(new URL('../index.html',import.meta.url),'utf8');
 function deferred(){let resolve,reject;const promise=new Promise((a,b)=>{resolve=a;reject=b;});return {promise,resolve,reject};}
 function setup(){
  const kp=nacl.sign.keyPair(),acc={address:bs58.encode(kp.publicKey),publicKey:kp.publicKey};
- const messages=[],events=[],storage=new Map();let approval=async message=>({account:acc,signedMessage:message,signature:nacl.sign.detached(message,kp.secretKey),signatureType:'ed25519'});
+ const messages=[],events=[],storage=new Map();let approval=async message=>({signedMessage:message,signature:nacl.sign.detached(message,kp.secretKey),signatureType:'ed25519'});
  const wallet={name:'Test wallet',accounts:[acc],features:{
   'standard:connect':{connect:async()=>({accounts:[acc]})},
   'standard:disconnect':{disconnect:async()=>{}},
@@ -70,4 +70,13 @@ test('account removed during approval cannot connect',async()=>{
 test('switching wallet account retires the approved connection',async()=>{
  const s=setup();let handler;s.wallet.features['standard:events']={on:(name,fn)=>{handler=fn;return ()=>{};}};
  await s.c.solConnectWallet(s.wallet);assert.ok(s.c.solAccount);handler({accounts:[{address:'different',publicKey:new Uint8Array(32)}]});assert.equal(s.c.solAccount,null);
+});
+
+test('Wallet Standard / Phantom output without an account connects after valid approval',async()=>{
+ const s=setup();s.setApproval(async message=>({signedMessage:message,signature:nacl.sign.detached(message,s.kp.secretKey)}));
+ await s.c.solConnectWallet(s.wallet);assert.equal(s.c.solAccount.address,s.acc.address);assert.equal(s.events.length,1);
+});
+test('signature by a different key cannot connect even without output account',async()=>{
+ const s=setup(),wrong=nacl.sign.keyPair();s.setApproval(async message=>({signedMessage:message,signature:nacl.sign.detached(message,wrong.secretKey)}));
+ await s.c.solConnectWallet(s.wallet);assert.equal(s.c.solAccount,null);assert.match(s.c.notice,/Invalid connection approval signature/);
 });

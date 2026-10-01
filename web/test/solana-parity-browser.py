@@ -162,7 +162,7 @@ async def main():
     'standard:disconnect':{disconnect:async()=>{}},
     'solana:signMessage':{signMessage:({message})=>new Promise((resolve,reject)=>{
      approvalMessages.push(SolMobile.bs58.encode(message));window.rejectApproval=()=>reject(Object.assign(Error('Rejected'),{code:4001}));
-     window.finishApproval=()=>resolve([{account,signedMessage:message,signature:SolMobile.nacl.sign.detached(message,kp.secretKey)}]);
+     window.finishApproval=()=>resolve([{signedMessage:message,signature:SolMobile.nacl.sign.detached(message,kp.secretKey)}]);
     })}
    }};window.connectApprovalTest=()=>{window.approvalAttempt=solConnectWallet(approvalWallet);};
   }"""

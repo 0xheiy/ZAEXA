@@ -7512,7 +7512,10 @@ async function solConfirmConnection(w,acc,seq){
   const result=await w.features["solana:signMessage"].signMessage({account:acc,message});
   if(seq!==solWalletConnectSeq)throw Error("Connection cancelled");
   const out=result?.[0];
-  if(!out||!solBytesEq(out.signedMessage||[],message)||out.account?.address!==acc.address||!solBytesEq(out.account?.publicKey||[],key))throw Error("Wallet did not approve this connection message");
+  if(!out||!solBytesEq(out.signedMessage||[],message))throw Error("Wallet did not approve this connection message");
+  // Wallet Standard signMessage returns signedMessage/signature, not an account.
+  // Verify against the selected account key; validate an extra account only if supplied.
+  if(out.account&&(out.account.address!==acc.address||!solBytesEq(out.account.publicKey||[],key)))throw Error("Wallet account changed");
   if(out.signatureType&&out.signatureType!=="ed25519")throw Error("Unsupported connection signature");
   const signature=new Uint8Array(out.signature||[]);
   if(signature.length!==64||!lib.nacl.sign.detached.verify(message,signature,key))throw Error("Invalid connection approval signature");
