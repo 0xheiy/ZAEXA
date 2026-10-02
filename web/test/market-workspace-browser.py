@@ -117,13 +117,15 @@ async def main():
   assert '<img' in await page.locator('#solRouteVisual .routeVenue').nth(2).inner_text()
   await page.evaluate('solRenderRouteBar(null)')
   print('Multiple route legs can expand; upstream labels are escaped',flush=True)
-  # Both networks share card order and bounds, including a route with many hops.
+  # Both networks keep an active quote and CTA clear of mobile navigation.
   for chain,hero in [('base','baseHeroRow'),('solana','appSolHero')]:
    await page.evaluate('(c)=>setChain(c)',chain)
+   await page.locator('#amtIn' if chain=='base' else '#solAmt').fill('10')
+   await page.wait_for_function('currentPlan!==null' if chain=='base' else 'solQuote!==null',timeout=45000)
    for theme in ['light','dark']:
     await page.evaluate('(t)=>{theme=t;applyTheme()}',theme);await page.wait_for_timeout(350)
     for width in [360,390,430,768,941,960,1280,1920]:
-     await page.set_viewport_size({'width':width,'height':844});await page.evaluate('scrollTo(0,0)')
+     await page.set_viewport_size({'width':width,'height':844});await page.evaluate('scrollTo(0,0)');await page.wait_for_timeout(200)
      geo=await page.evaluate('''id=>{
       const root=document.getElementById(id),rect=s=>{const r=root.querySelector(s).getBoundingClientRect();return {y:r.y,b:r.bottom};};
       return {watch:rect('.marketWatch'),swap:rect('.swapCard'),chart:rect('.swapChartCard'),overflow:document.documentElement.scrollWidth>innerWidth};
@@ -134,6 +136,8 @@ async def main():
       assert geo['swap']['y']<geo['watch']['y']<geo['chart']['y'],(chain,theme,width,geo)
       cta=page.locator('#actBtn' if chain=='base' else '#solSwapBtn')
       assert await cta.evaluate('e=>e.getBoundingClientRect().bottom')<=844,(chain,theme,width)
+      if width<=430:
+       assert await cta.evaluate('e=>e.getBoundingClientRect().bottom<=document.querySelector("#nav").getBoundingClientRect().top'),(chain,theme,width,await cta.evaluate('e=>({bottom:e.getBoundingClientRect().bottom,nav:document.querySelector("#nav").getBoundingClientRect().top,status:document.querySelector("#solStatusSlot").getBoundingClientRect().height})'),'CTA covered by bottom navigation')
      else:assert geo['watch']['b']<geo['chart']['y'],(chain,theme,width,geo)
      if os.environ.get('ZAEXA_TEST_ARTIFACTS') and width in [390,1280]:await page.screenshot(path=str(Path(os.environ['ZAEXA_TEST_ARTIFACTS'])/f'workspace-{chain}-{theme}-{width}.png'),full_page=True)
   await page.goto('http://zaexa.test/t/'+USDT+'?check=1')
