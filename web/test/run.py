@@ -1506,7 +1506,7 @@ def check_pairs_page():
         "web/pairs.html references a backend path other than /pairs.json or %s: %s — this page "
         "must add no new backend beyond the allowed paths and must not reach into another "
         "endpoint's traffic" % (GT_LOGO_PREFIXES, other_backend))
-    other_json = [m for m in re.findall(r'"([^"]*\.json[^"]*)"', src) if "pairs.json" not in m]
+    other_json = [m[1] for m in re.findall(r'(["\'])([^"\'\r\n]*\.json[^"\'\r\n]*)\1', src) if "pairs.json" not in m[1]]
     assert not other_json, (
         "web/pairs.html references a .json path other than /pairs.json: %s" % other_json)
     # پارامترِ chain فقط base یا solana — چیزِ سومی هرگز.

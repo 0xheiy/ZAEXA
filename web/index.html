@@ -7387,7 +7387,7 @@ function solLoadMobileBundle(){
   if(window.SolMobile)return Promise.resolve(window.SolMobile);
   if(solMobileLoad)return solMobileLoad;
   solMobileLoad=new Promise((resolve,reject)=>{
-    const script=document.createElement("script");script.src="/solana-wallet.bundle.b8f1108c.js";
+    const script=document.createElement("script");script.src="/solana-wallet.bundle.b6eb73e1.js";
     script.onload=()=>window.SolMobile?resolve(window.SolMobile):reject(Error("Mobile wallet library unavailable"));
     script.onerror=()=>{script.remove();solMobileLoad=null;reject(Error("Could not load the mobile wallet library"));};document.head.appendChild(script);
   });return solMobileLoad;
@@ -7499,28 +7499,8 @@ function solOpenWalletPicker(){ev("wallet:open","","solana");solRenderWalletList
 function solCloseWalletPicker(){if(solMobilePending){++solWalletConnectSeq;solMobileProvider?.abortPairingAttempt();}$("solWalletOv").classList.remove("on");}
 let solDisconnectPending=Promise.resolve(),solConnectionBusy=false,solPendingWallet=null;
 async function solConfirmConnection(w,acc,seq){
-  const sign=w.features?.["solana:signMessage"]?.signMessage;
-  if(typeof sign!=="function")throw Error("This wallet cannot confirm a connection. Choose a wallet with message approval support.");
   const lib=await solLoadMobileBundle();
-  if(seq!==solWalletConnectSeq)throw Error("Connection cancelled");
-  const key=new Uint8Array(acc.publicKey||[]);
-  if(key.length!==32||lib.bs58.encode(key)!==acc.address)throw Error("Invalid wallet account");
-  const nonce=Array.from(crypto.getRandomValues(new Uint8Array(24)),x=>x.toString(16).padStart(2,"0")).join("");
-  const issued=Date.now();
-  const message=new TextEncoder().encode("ZAEXA wallet connection\nWebsite: "+location.origin+"\nWallet: "+acc.address+
-    "\n\nApprove connecting this wallet to this page.\nNo transaction. No network fee. No permission to spend funds.\n\nNonce: "+nonce+"\nIssued at: "+new Date(issued).toISOString());
-  const result=await w.features["solana:signMessage"].signMessage({account:acc,message});
-  if(seq!==solWalletConnectSeq)throw Error("Connection cancelled");
-  const out=result?.[0];
-  if(!out||!solBytesEq(out.signedMessage||[],message))throw Error("Wallet did not approve this connection message");
-  // Wallet Standard signMessage returns signedMessage/signature, not an account.
-  // Verify against the selected account key; validate an extra account only if supplied.
-  if(out.account&&(out.account.address!==acc.address||!solBytesEq(out.account.publicKey||[],key)))throw Error("Wallet account changed");
-  if(out.signatureType&&out.signatureType!=="ed25519")throw Error("Unsupported connection signature");
-  const signature=new Uint8Array(out.signature||[]);
-  if(signature.length!==64||!lib.nacl.sign.detached.verify(message,signature,key))throw Error("Invalid connection approval signature");
-  if(Date.now()-issued>300000)throw Error("Connection approval expired. Try again.");
-  if(Array.isArray(w.accounts)&&!w.accounts.some(a=>a.address===acc.address&&solBytesEq(a.publicKey||[],key)))throw Error("Wallet account changed");
+  return lib.confirmConnection(w,acc,()=>seq===solWalletConnectSeq,location.origin);
 }
 async function solConnectWallet(w){
   if(solConnectionBusy)return;

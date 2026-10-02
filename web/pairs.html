@@ -989,6 +989,7 @@ footer .fine{max-width:78ch;margin:46px 0 0;font-size:11.5px;color:var(--tx3);li
     currentChain = chain;
     setChainInURL(chain);
     setActiveChainTab();
+    window.dispatchEvent(new CustomEvent("zaexa:pairs-chain",{detail:chain}));
     load();
   }
 
@@ -1716,6 +1717,7 @@ footer .fine{max-width:78ch;margin:46px 0 0;font-size:11.5px;color:var(--tx3);li
     var b = document.getElementById('connectBtn');
     var addr = document.getElementById('walletAddr');
     if (!b || !addr) return;
+    if(window.zaexaPairsSolana && window.zaexaPairsSolana.paint())return;
     if (!account){
       b.textContent = 'Connect wallet';
       b.className = 'chip solid';
@@ -1727,6 +1729,7 @@ footer .fine{max-width:78ch;margin:46px 0 0;font-size:11.5px;color:var(--tx3);li
     b.className = 'chip';
     addr.textContent = shortAddr(account);
   }
+  window.zaexaPairsBasePaint=paintWallet;
   function closeWalletMenu(){
     var pop = document.getElementById('walletPop');
     var btn = document.getElementById('connectBtn');
@@ -1881,7 +1884,7 @@ footer .fine{max-width:78ch;margin:46px 0 0;font-size:11.5px;color:var(--tx3);li
   (async function(){
     scanWallets();
     await new Promise(function(r){ setTimeout(r, 120); });
-    if (!userDisconnected()){
+    if (!userDisconnected() && new URL(location.href).searchParams.get("chain")!=="solana"){
       var back = false;
       var opts = walletOptions();
       for (var i = 0; i < opts.length; i++){
@@ -1896,5 +1899,6 @@ footer .fine{max-width:78ch;margin:46px 0 0;font-size:11.5px;color:var(--tx3);li
 })();
 </script>
 
+<script src="/pairs-solana.590aed1a.js"></script>
 </body>
 </html>

@@ -4,6 +4,7 @@ import vm from 'node:vm';
 import {readFileSync} from 'node:fs';
 import {webcrypto} from 'node:crypto';
 import nacl from '../../scripts/solana-wallet/node_modules/tweetnacl/nacl-fast.js';
+import {confirmConnection} from '../../scripts/solana-wallet/connection.js';
 import bs58 from '../../scripts/solana-wallet/node_modules/bs58/src/esm/index.js';
 
 const html=readFileSync(new URL('../index.html',import.meta.url),'utf8');
@@ -20,7 +21,7 @@ function setup(){
   solAccount:null,solWalletApi:null,solPendingWallet:null,solConnectionBusy:false,solWalletConnectSeq:0,
   solBalanceSeq:0,solEventsUnsub:null,solDisconnectPending:Promise.resolve(),SOL_WALLET_LS_KEY:'wallet',
   localStorage:{setItem:(k,v)=>storage.set(k,v),removeItem:k=>storage.delete(k)},
-  solLoadMobileBundle:async()=>({nacl,bs58}),solSetWalletOff(){},solSubscribeWalletEvents(){},
+  solLoadMobileBundle:async()=>({nacl,bs58,confirmConnection}),solSetWalletOff(){},solSubscribeWalletEvents(){},
   solPaintWallet(){},solRefreshBalances(){},solScheduleQuote(){},solPaintBalance(){},solInvalidateQuote(){},
   solSetNotice(text){c.notice=text;},note:(type,text)=>text,esc:s=>s,isUserRejection:e=>e.code===4001,
   ev:(...args)=>events.push(args),$:()=>({classList:{remove(){}}}),
