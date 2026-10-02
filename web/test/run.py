@@ -10856,6 +10856,8 @@ async def main():
         # همان تفاوتِ پذیرفته‌شده‌ای که [pairs header] هم می‌سنجد. تگِ
         # عناصرِ .navLink عمداً نادیده گرفته می‌شود؛ idها/کلاس‌ها/ترتیب هنوز
         # کامل سنجیده می‌شوند.
+        # Network selection intentionally lives in the active swap card; its placement/menu
+        # is covered by solana-parity-browser.py, not shared-header geometry.
         SIG_JS = """(rootSel) => {
             const root = document.querySelector(rootSel);
             if (!root) return null;
@@ -10869,7 +10871,7 @@ async def main():
                 const rawClasses = (el.className || '').toString().split(/\\s+/);
                 const clsList = rawClasses.filter(c => c && c !== 'on' &&
                     !(c === 'off' && rawClasses.includes('led'))).sort();
-                const kids = Array.prototype.filter.call(el.children, c => true);
+                const kids = Array.prototype.filter.call(el.children, c => !["srcMenu", "headerNetworkAnchor"].includes(c.id));
                 // مستقیم زیرِ #nav: در اپ <button> است (تب‌زنیِ SPA) و در
                 // pairs <a class="navLink" href> واقعی — همان تفاوتِ
                 // پذیرفته‌شده‌ای که [pairs header] هم می‌سنجد؛ نه تگ نه
@@ -10887,7 +10889,7 @@ async def main():
             return sig(root, false);
         }"""
         GEOM_JS = """() => {
-            const sels = ['.logo', '#nav', '#srcChip', '#setBtn', '#connectBtn'];
+            const sels = ['.logo', '#nav', '#setBtn', '#connectBtn'];
             const out = {};
             for (const s of sels){
                 const e = document.querySelector(s);

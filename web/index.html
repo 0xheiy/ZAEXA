@@ -510,7 +510,7 @@ header>.navPad{grid-column:1;grid-row:1;width:0;min-width:0}
   .nav button svg,.nav .navLink svg{width:19px;height:19px}
   .nav button span,.nav .navLink span{display:block}
   body{padding-bottom:74px}
-  #srcChip span:last-child{display:none}
+  #srcChip #srcTx{display:none}
   #srcChip{padding:0 12px}
   .chip{height:36px;font-size:13px}
   main{padding:8px 14px 40px}
@@ -534,7 +534,7 @@ header>.navPad{grid-column:1;grid-row:1;width:0;min-width:0}
 @media(min-width:721px) and (max-width:960px){
   .nav button span,.nav .navLink span{display:none}
   .nav button,.nav .navLink{padding:8px 11px}
-  #srcChip span:last-child{display:none}
+  #srcChip #srcTx{display:none}
   #srcChip{padding:0 12px}
 }
 /* روی موبایل ناوبری به نوار پایین می‌رود، پس فاصله‌ی کشسانِ کنارش
@@ -1204,6 +1204,20 @@ footer .fine{max-width:78ch;margin:46px 0 0;font-size:11.5px;color:var(--tx3);li
 #solStatusSlot:has(#solNotices:not(:empty)) #solRouteBar{display:none}
 @media(max-width:940px){#appSolHeroCol>#solSwap{order:1}}
 
+/* One network control moves with the active swap card; other views keep it in the header. */
+#swapNetworkBar{display:flex;align-items:center;gap:12px;padding:16px 16px 12px}
+#swapNetworkBar[hidden]{display:none}
+#swapNetworkBar>.ttl{font-size:15.5px;font-weight:660;color:var(--tx)}
+#srcNetworkIcon,.networkChevron{display:none}
+#swapNetworkBar #srcNetworkIcon{display:flex;width:18px;height:18px;flex:none}
+#srcNetworkIcon svg{width:18px;height:18px}
+#swapNetworkBar .networkChevron{display:block;flex:none;color:var(--tx3)}
+#swapNetworkBar #srcChip{gap:8px;max-width:240px;padding:8px 12px}
+#swapNetworkBar #srcChip .led{display:none}
+#swapNetworkBar #srcTx{display:inline!important;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#swapNetworkBar #srcPop{top:42px;width:220px;max-width:calc(100vw - 48px)}
+.swapCard:has(#swapNetworkBar){overflow:visible}
+
 </style>
 </head>
 <body>
@@ -1267,8 +1281,9 @@ footer .fine{max-width:78ch;margin:46px 0 0;font-size:11.5px;color:var(--tx3);li
   <!-- ۲۷ سپتامبر — چیپِ شبکه حالا گزینشگر است، نه فقط نشانگر: Base/Solana.
        ساختار عیناً با web/pairs.html یکی نگه داشته می‌شود ([header parity]
        امضای DOM هدر را با هم می‌سنجد) — فقط مقدارها/رفتار فرق دارد. -->
+  <span id="headerNetworkAnchor" hidden></span>
   <div class="rel" id="srcMenu">
-    <button class="chip" id="srcChip" aria-haspopup="menu" aria-expanded="false"><span class="led off"></span><span id="srcTx">Base</span></button>
+    <button class="chip" id="srcChip" aria-haspopup="menu" aria-expanded="false"><span class="led off"></span><span id="srcNetworkIcon" aria-hidden="true"></span><span id="srcTx">Base</span><svg class="networkChevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></button>
     <div class="pop" id="srcPop" role="menu" aria-label="Network">
       <button type="button" class="walletAction" id="srcOptBase" data-chain="base" role="menuitemradio" aria-checked="true">
         <span>Base</span>
@@ -1387,7 +1402,7 @@ footer .fine{max-width:78ch;margin:46px 0 0;font-size:11.5px;color:var(--tx3);li
 
     <!-- swap -->
     <section class="card swapCard">
-      <div style="height:16px"></div>
+      <div id="baseSwapNetworkSlot"><div id="swapNetworkBar"><span class="ttl">Swap</span><span class="grow"></span></div></div>
       <div class="leg">
         <div class="legTop"><span>You pay</span><b id="balIn"></b></div>
         <div class="legRow">
@@ -1619,7 +1634,7 @@ footer .fine{max-width:78ch;margin:46px 0 0;font-size:11.5px;color:var(--tx3);li
          می‌شود (#solTokOv، پایین‌تر)، نه یک فیلدِ آدرسِ خام روی خودِ کارت.
          فلیپ دقیقاً همان solSide («buy»=SOL بالا/می‌پردازی، «sell»=توکن
          بالا) را می‌چرخاند — تبِ Buy/Sell قبلی حذف شد. -->
-    <div style="height:16px"></div>
+    <div id="solSwapNetworkSlot"></div>
     <div class="leg">
       <div class="legTop"><span id="solTopLabel">You pay</span><b id="solTopBal">—</b></div>
       <div class="legRow">
@@ -4505,6 +4520,20 @@ const SOL_MINT_ADDR="So11111111111111111111111111111111111111112";
 const SOL_APP_TOKENS={USDC:"EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
   USDT:"Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB"};
 const SOL_MINT_RE=/^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
+function placeNetworkControl(){
+  const menu=$("srcMenu"),bar=$("swapNetworkBar");
+  if(!menu||!bar)return;
+  const inSwap=!tokenPage&&view==="swap";
+  if(inSwap){
+    const slot=$(activeChain==="solana"?"solSwapNetworkSlot":"baseSwapNetworkSlot");
+    if(bar.parentElement!==slot)slot.appendChild(bar);
+    if(menu.parentElement!==bar){closeSrcMenu();bar.appendChild(menu);}
+  }else{
+    const anchor=$("headerNetworkAnchor");
+    if(menu.parentElement!==anchor.parentElement){closeSrcMenu();anchor.after(menu);}
+  }
+  bar.hidden=!inSwap;
+}
 function paintSrc2(){
   // امضای گزینشگر (تیک/نامعلوم روی گزینه‌ی فعال)
   document.querySelectorAll('#srcPop [data-chain]').forEach(b=>{
@@ -4515,6 +4544,7 @@ function paintSrc2(){
    دست‌نخورده می‌ماند — چیدمانِ خودش را دارد. */
 let solAppDefaulted=false;
 function updateSwapViewForChain(){
+  placeNetworkControl();
   if(!tokenPage){
     $("appSolSubRow").hidden=activeChain!=="solana";
     for(const [id,parent] of [["solSafety","appSolSafetyBody"],["solPools","appSolSubRow"]]){
@@ -4569,9 +4599,11 @@ function setChain(next){
   if(next===activeChain)return;
   if(tokenPage){location.assign("/app#swap?chain="+next);return;}
   ++folioSeq;++flowSeq;
+  solInvalidateQuote();
   activeChain=next;
   storeChain(next);
   updateSwapViewForChain();
+  if(view==="swap"){if(next==="solana")solScheduleQuote();else scheduleQuote();}
   if(view==="folio")renderFolio();
   if(view==="flow"){paintFlowToken();renderFlow();}
 }
@@ -5021,17 +5053,20 @@ function note(k,h){return `<div class="note ${k}">${h}</div>`;}
 function setNotice(h){$("notices").innerHTML=h||"";}
 function paintSrc(){
   document.querySelectorAll('a[href^="/pairs"]').forEach(a=>a.href="/pairs"+(activeChain==="solana"?"?chain=solana":""));
+  const icon=$("srcNetworkIcon"),option=document.querySelector('#srcPop [data-chain="'+activeChain+'"] svg');
+  if(icon&&option){icon.replaceChildren(option.cloneNode(true));icon.querySelectorAll('[id]').forEach(el=>el.id+='Active');const fill=icon.querySelector('[fill^="url("]');if(fill)fill.setAttribute('fill',fill.getAttribute('fill').replace('srcSolGrad','srcSolGradActive'));}
+  $("srcChip").setAttribute("aria-label","Select network: "+(activeChain==="solana"?"Solana":"Base"));
   const led=$("srcChip").firstElementChild;
   // چیپِ شبکه از ۲۷ سپتامبر یک گزینشگر است؛ روی Solana هیچ RPCِ زنده‌ای
   // اینجا خوانده نمی‌شود (نه eth_call ای)، پس چراغ همیشه خاموش می‌ماند —
   // همان قاعده‌ی «چیزی که نمی‌توانیم اثبات کنیم را ادعا نکنیم».
   if(activeChain==="solana"){
     led.className="led off";
-    // روی موبایل قاعده‌ی سراسریِ #srcChip span:last-child{display:none}
+    // روی موبایل قاعده‌ی سراسریِ #srcChip #srcTx{display:none}
     // برای برچسبِ بلندِ Base است؛ «SOL» آن‌قدر کوتاه است که جا می‌شود، پس
     // با یک استایلِ این‌لاین (که همیشه بر قاعده‌ی خارجی می‌برد) مجبورش
     // می‌کنیم دیده شود — رفتارِ Base دست‌نخورده می‌ماند.
-    const narrow=window.matchMedia&&matchMedia("(max-width:960px)").matches;
+    const narrow=!$("swapNetworkBar").contains($("srcMenu"))&&window.matchMedia&&matchMedia("(max-width:960px)").matches;
     $("srcTx").textContent=narrow?"SOL":"Solana";
     $("srcTx").style.display=narrow?"inline":"";
     return;
@@ -8492,6 +8527,7 @@ function setView(v,push){
   const leaving=tokenPage&&v!=="token";
   if(leaving){leaveTokenPage(v);push=false;}
   view=v;
+  placeNetworkControl();paintSrc();
   document.querySelectorAll(".view").forEach(el=>el.classList.toggle("on",el.id==="view-"+v));
   $("nav").querySelectorAll("[data-view]").forEach(b=>b.classList.toggle("on",b.dataset.view===v));
   if(push!==false&&parseHash().view!==v)location.hash=v;
