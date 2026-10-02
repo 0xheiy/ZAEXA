@@ -48,12 +48,13 @@ async def main():
   await page.locator('#connectBtn').click();await page.locator('#walList .walRow').first.click();await page.wait_for_function('proofs.length===4')
   assert await page.evaluate('new Set(proofs).size')==4
   await page.locator('#walClose').click();await page.evaluate('approveTest()')
-  await page.locator('#srcChip').click();await page.locator('#srcOptBase').click();assert await page.locator('#connectBtn').inner_text()=='Connect wallet'
+  await page.locator('#chainTabs [data-chain="base"]').click();assert await page.locator('#connectBtn').inner_text()=='Connect wallet'
   await page.locator('#connectBtn').click();assert 'MetaMask' in await page.locator('#walList').inner_text()
   await page.locator('#walList .walRow').first.click();await page.wait_for_function('evmRequests.includes("eth_requestAccounts")')
-  await page.locator('#srcChip').click();await page.locator('#srcOptSolana').click();assert await page.locator('#connectBtn').inner_text()=='Connect wallet'
+  await page.locator('#chainTabs [data-chain="solana"]').click();assert await page.locator('#connectBtn').inner_text()=='Connect wallet'
   await page.reload();await page.wait_for_function('typeof zaexaPairsSolana!=="undefined"');assert await page.locator('#connectBtn').inner_text()=='Connect wallet'
   assert await page.evaluate('evmRequests.length')==0
+  assert await page.locator('#srcMenu, #srcChip').count()==0
   for width in [360,390,430,1280]:
    await page.set_viewport_size({'width':width,'height':844});assert await page.evaluate('document.documentElement.scrollWidth<=innerWidth')
   await page.evaluate('Object.defineProperty(navigator,"userAgent",{value:"Android Mobile",configurable:true})')

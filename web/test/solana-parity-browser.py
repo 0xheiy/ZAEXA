@@ -47,7 +47,7 @@ async def main():
     return await r.fulfill(content_type='text/html',body=src)
    if path=='/stub-ethers.js':return await r.fulfill(content_type='text/javascript',body=(ROOT/'test/stub-ethers.js').read_text())
    file=(ROOT/path.lstrip('/')).resolve()
-   if file.is_relative_to(ROOT) and file.is_file():return await r.fulfill(body=file.read_bytes(),content_type='text/javascript')
+   if file.is_relative_to(ROOT) and file.is_file():return await r.fulfill(body=file.read_bytes(),content_type='image/svg+xml' if file.suffix=='.svg' else 'text/javascript')
    return await r.fulfill(json={})
   await page.route('**/*',route)
   await page.goto(f'http://zaexa.test/app#swap?chain=solana&in={USDC}&out={USDT}&amt=1.25')
@@ -64,7 +64,10 @@ async def main():
   assert await page.locator('#swapNetworkBar').evaluate('e=>e.parentElement.id')=='solSwapNetworkSlot'
   for tab in ['folio','flow','faq']:
    await page.evaluate('(v)=>setView(v,false)',tab)
-   assert await page.locator('body>header #srcMenu').count()==1
+   if tab in ['folio','flow']:
+    assert await page.locator('#srcMenu').evaluate('e=>e.parentElement.id')==('folioNetworkSlot' if tab=='folio' else 'flowNetworkSlot')
+    assert await page.locator('body>header #srcMenu').count()==0
+   else:assert await page.locator('body>header #srcMenu').count()==1
    assert not await page.locator('#swapNetworkBar').is_visible()
   await page.evaluate('setView("swap",false)')
   assert await page.locator('body>header #srcMenu').count()==0
@@ -140,6 +143,19 @@ async def main():
     sol_leg=await page.locator('#solSwap .leg').first.evaluate('e=>e.getBoundingClientRect().height')
     assert abs(sol_leg-base['leg'])<1,(theme,width,sol_leg,base)
     assert await page.locator('#srcTx').inner_text()=='Solana'
+    assert await page.locator('#srcNetworkIcon img').evaluate('e=>e.complete&&e.naturalWidth>0')
+    for tab,slot in [('folio','folioNetworkSlot'),('flow','flowNetworkSlot')]:
+     await page.evaluate('(v)=>setView(v,false)',tab)
+     assert await page.locator('#srcMenu').evaluate('e=>e.parentElement.id')==slot
+     assert await page.locator('#srcTx').inner_text()=='Solana'
+     assert await page.evaluate('document.documentElement.scrollWidth<=innerWidth'),(theme,width,tab)
+     await page.locator('#srcChip').click()
+     assert await page.locator('#srcOptSolana').evaluate('e=>{const r=e.getBoundingClientRect();return document.elementFromPoint(r.x+r.width/2,r.y+r.height/2)?.closest("button")===e;}'),(theme,width,tab)
+     await page.keyboard.press('Escape')
+     if os.environ.get('ZAEXA_TEST_ARTIFACTS') and width in [390,1280]:
+      await page.screenshot(path=str(Path(os.environ['ZAEXA_TEST_ARTIFACTS'])/f'network-{tab}-{width}-{theme}.png'),full_page=True)
+    await page.evaluate('setView("swap",false)')
+
     await page.locator('#srcChip').click()
     menu=await page.locator('#srcPop').evaluate('e=>{const r=e.getBoundingClientRect();return {x:r.x,right:r.right,b:r.bottom,w:innerWidth};}')
     assert menu['x']>=0 and menu['right']<=menu['w'],(theme,width,menu)
@@ -180,7 +196,8 @@ async def main():
   assert await page.evaluate('activeChain')=='solana'
   assert await page.locator('#walletMenu').is_visible()
   assert await page.locator('#solSafety').evaluate('e=>e.parentElement.id')=='tk-grid'
-  assert await page.locator('body>header #srcMenu').count()==1
+  assert await page.locator('body>header #srcMenu').count()==0
+  assert not await page.locator('#srcMenu').is_visible()
   assert not await page.locator('#swapNetworkBar').is_visible()
   assert await page.locator('#solSafety .chkGroup .eyebrow').all_text_contents()==['2 to look at','2 checked and clear']
   assert await page.locator('#solSafety .chkNum').count()==4

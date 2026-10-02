@@ -1209,14 +1209,26 @@ footer .fine{max-width:78ch;margin:46px 0 0;font-size:11.5px;color:var(--tx3);li
 #swapNetworkBar[hidden]{display:none}
 #swapNetworkBar>.ttl{font-size:15.5px;font-weight:660;color:var(--tx)}
 #srcNetworkIcon,.networkChevron{display:none}
-#swapNetworkBar #srcNetworkIcon{display:flex;width:18px;height:18px;flex:none}
-#srcNetworkIcon svg{width:18px;height:18px}
-#swapNetworkBar .networkChevron{display:block;flex:none;color:var(--tx3)}
-#swapNetworkBar #srcChip{gap:8px;max-width:240px;padding:8px 12px}
-#swapNetworkBar #srcChip .led{display:none}
-#swapNetworkBar #srcTx{display:inline!important;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-#swapNetworkBar #srcPop{top:42px;width:220px;max-width:calc(100vw - 48px)}
+.view #srcNetworkIcon{display:flex;width:18px;height:18px;flex:none}
+#srcNetworkIcon img{width:18px;height:18px}
+.view #srcMenu .networkChevron{display:block;flex:none;color:var(--tx3)}
+.view #srcChip{gap:8px;max-width:240px;padding:8px 12px}
+.view #srcChip .led{display:none}
+.view #srcTx{display:inline!important;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.view #srcPop{top:42px;width:220px;max-width:calc(100vw - 48px)}
 .swapCard:has(#swapNetworkBar){overflow:visible}
+
+#folioNetworkSlot,#flowNetworkSlot{flex:none}
+#view-folio>.card:has(#srcMenu),#view-flow>.card:has(#srcMenu){overflow:visible}
+#view-folio>.card>header{flex-wrap:wrap}
+#view-flow>.card>header{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px}
+#view-flow>.card>header>.ttl{grid-column:1;grid-row:1}
+#flowNetworkSlot{grid-column:2;grid-row:1;justify-self:end}
+#flowTokBtn{grid-column:1;grid-row:2;justify-self:start;margin-left:0!important}
+#flowTfs{grid-column:2;grid-row:2;justify-self:end}
+#view-flow>.card>header>.grow{display:none}
+.view #srcChip #srcNetworkIcon{display:flex}
+.view #srcPop img{object-fit:contain}
 
 </style>
 </head>
@@ -1287,11 +1299,11 @@ footer .fine{max-width:78ch;margin:46px 0 0;font-size:11.5px;color:var(--tx3);li
     <div class="pop" id="srcPop" role="menu" aria-label="Network">
       <button type="button" class="walletAction" id="srcOptBase" data-chain="base" role="menuitemradio" aria-checked="true">
         <span>Base</span>
-        <svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="10" fill="#0052FF"/></svg>
+        <img src="/network-base.svg" width="18" height="18" alt="" aria-hidden="true">
       </button>
       <button type="button" class="walletAction" id="srcOptSolana" data-chain="solana" role="menuitemradio" aria-checked="false">
         <span>Solana</span>
-        <svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true"><defs><linearGradient id="srcSolGrad" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#9945FF"/><stop offset="1" stop-color="#14F195"/></linearGradient></defs><circle cx="12" cy="12" r="10" fill="url(#srcSolGrad)"/></svg>
+        <img src="/network-solana.svg" width="18" height="18" alt="" aria-hidden="true">
       </button>
     </div>
   </div>
@@ -1356,6 +1368,7 @@ footer .fine{max-width:78ch;margin:46px 0 0;font-size:11.5px;color:var(--tx3);li
   </div>
   </div>
 </header>
+<div id="networkControlParking" hidden></div>
 <script>
 /* کلاسِ scrolled روی header — با IntersectionObserver رویِ یک سنتینلِ
    ۱ پیکسلیِ بالای body، نه رویدادِ scroll (کمتر repaint، جنکِ اسکرول
@@ -1526,7 +1539,7 @@ footer .fine{max-width:78ch;margin:46px 0 0;font-size:11.5px;color:var(--tx3);li
 <div class="view" id="view-folio">
   <section class="card">
     <header><span class="ttl">Your portfolio</span><span class="grow"></span>
-      <span class="ttl mono" id="folioTotal"></span></header>
+      <span class="ttl mono" id="folioTotal"></span><div id="folioNetworkSlot"></div></header>
     <div id="folioBody"><div class="empty intro">
       <span class="eTtl">Connect a wallet to see what you hold</span>
       <!-- عمداً چیزی را که پانویسِ زیر کارت می‌گوید تکرار نمی‌کند: آنجا
@@ -1545,7 +1558,7 @@ footer .fine{max-width:78ch;margin:46px 0 0;font-size:11.5px;color:var(--tx3);li
 <div class="view" id="view-flow">
   <section class="card">
     <header>
-      <span class="ttl">Money flow</span>
+      <span class="ttl">Money flow</span><div id="flowNetworkSlot"></div>
       <button class="tokbtn" id="flowTokBtn" style="margin-left:10px;padding:5px 11px 5px 6px;font-size:13.5px">
         <span class="av" id="flowTokAv" style="width:20px;height:20px;font-size:8px">?</span>
         <span id="flowTokSym">—</span></button>
@@ -4524,16 +4537,23 @@ function placeNetworkControl(){
   const menu=$("srcMenu"),bar=$("swapNetworkBar");
   if(!menu||!bar)return;
   const inSwap=!tokenPage&&view==="swap";
+  let destination;
   if(inSwap){
     const slot=$(activeChain==="solana"?"solSwapNetworkSlot":"baseSwapNetworkSlot");
     if(bar.parentElement!==slot)slot.appendChild(bar);
-    if(menu.parentElement!==bar){closeSrcMenu();bar.appendChild(menu);}
-  }else{
-    const anchor=$("headerNetworkAnchor");
-    if(menu.parentElement!==anchor.parentElement){closeSrcMenu();anchor.after(menu);}
+    destination=bar;
+  }else if(tokenPage||view==="token")destination=$("networkControlParking");
+  else if(view==="folio")destination=$("folioNetworkSlot");
+  else if(view==="flow")destination=$("flowNetworkSlot");
+  else destination=$("headerNetworkAnchor").parentElement;
+  if(menu.parentElement!==destination){
+    closeSrcMenu();
+    if(destination===$("headerNetworkAnchor").parentElement)$("headerNetworkAnchor").after(menu);
+    else destination.appendChild(menu);
   }
   bar.hidden=!inSwap;
 }
+
 function paintSrc2(){
   // امضای گزینشگر (تیک/نامعلوم روی گزینه‌ی فعال)
   document.querySelectorAll('#srcPop [data-chain]').forEach(b=>{
@@ -5053,8 +5073,8 @@ function note(k,h){return `<div class="note ${k}">${h}</div>`;}
 function setNotice(h){$("notices").innerHTML=h||"";}
 function paintSrc(){
   document.querySelectorAll('a[href^="/pairs"]').forEach(a=>a.href="/pairs"+(activeChain==="solana"?"?chain=solana":""));
-  const icon=$("srcNetworkIcon"),option=document.querySelector('#srcPop [data-chain="'+activeChain+'"] svg');
-  if(icon&&option){icon.replaceChildren(option.cloneNode(true));icon.querySelectorAll('[id]').forEach(el=>el.id+='Active');const fill=icon.querySelector('[fill^="url("]');if(fill)fill.setAttribute('fill',fill.getAttribute('fill').replace('srcSolGrad','srcSolGradActive'));}
+  const icon=$("srcNetworkIcon"),option=document.querySelector('#srcPop [data-chain="'+activeChain+'"] img');
+  if(icon&&option)icon.replaceChildren(option.cloneNode(true));
   $("srcChip").setAttribute("aria-label","Select network: "+(activeChain==="solana"?"Solana":"Base"));
   const led=$("srcChip").firstElementChild;
   // چیپِ شبکه از ۲۷ سپتامبر یک گزینشگر است؛ روی Solana هیچ RPCِ زنده‌ای
@@ -5066,7 +5086,7 @@ function paintSrc(){
     // برای برچسبِ بلندِ Base است؛ «SOL» آن‌قدر کوتاه است که جا می‌شود، پس
     // با یک استایلِ این‌لاین (که همیشه بر قاعده‌ی خارجی می‌برد) مجبورش
     // می‌کنیم دیده شود — رفتارِ Base دست‌نخورده می‌ماند.
-    const narrow=!$("swapNetworkBar").contains($("srcMenu"))&&window.matchMedia&&matchMedia("(max-width:960px)").matches;
+    const narrow=!$("srcMenu").closest(".view")&&window.matchMedia&&matchMedia("(max-width:960px)").matches;
     $("srcTx").textContent=narrow?"SOL":"Solana";
     $("srcTx").style.display=narrow?"inline":"";
     return;

@@ -10990,7 +10990,7 @@ async def main():
         })""")
         await ppg2.click('.chain-tabs [data-chain="solana"]')
         await ppg2.wait_for_timeout(200)
-        src_after_solana = await ppg2.eval_on_selector("#srcTx", "e => e.textContent")
+        src_after_solana = await ppg2.eval_on_selector('.chain-tabs [data-chain="solana"]', 'e => e.classList.contains("on")')
         await ppg2.close()
         print("[pairs shell] no standalone theme button=%s srcChip base=%r solana=%r ledOff=%s "
               "errors=%s" % (not chip_info["hasThemeToggle"], chip_info["srcText"],
@@ -10998,12 +10998,8 @@ async def main():
         assert not chip_info["hasThemeToggle"], (
             "web/pairs.html still has a standalone theme button — it must move into the wallet "
             "popover instead")
-        assert chip_info["srcText"] == "Base", (
-            "#srcTx must read \"Base\" by default, got %r" % chip_info["srcText"]
-        )
-        assert chip_info["ledOff"] is True, "#srcChip's LED must stay .off — this page cannot prove a live source"
-        assert src_after_solana == "Solana", (
-            "#srcTx must read \"Solana\" after clicking the Solana tab, got %r" % src_after_solana)
+        assert chip_info["srcText"] is None and chip_info["ledOff"] is None, "New pairs must not have a header network control"
+        assert src_after_solana is True, "The Solana tab inside New pairs must remain functional"
         assert not perrs2, "web/pairs.html threw during the network-chip probe: %s" % perrs2
 
         # ۳‌الف) آیتمِ Theme دیگر در بازشوی کیف‌پول نیست — حتی وقتی کیف‌پول
