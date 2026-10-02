@@ -1421,7 +1421,7 @@ footer .fine{max-width:78ch;margin:46px 0 0;font-size:11.5px;color:var(--tx3);li
       <p>Every swap is simulated first. If the simulation fails, nothing is broadcast and no gas is spent.</p>
     </div>
   </div>
-  <button class="chip round" id="themeBtn" type="button" aria-label="Switch to dark mode" title="Switch to dark mode"><svg class="themeMoon" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"/></svg><svg class="themeSun" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2.5v2.2M12 19.3v2.2M4.6 4.6l1.6 1.6M17.8 17.8l1.6 1.6M2.5 12h2.2M19.3 12h2.2M4.6 19.4l1.6-1.6M17.8 6.2l1.6-1.6"/></svg><span id="themeState" hidden>Light</span></button>
+  <button class="chip round" id="themeBtn" type="button" role="switch" aria-checked="false" aria-label="Switch to dark mode" title="Switch to dark mode"><svg class="themeMoon" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"/></svg><svg class="themeSun" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2.5v2.2M12 19.3v2.2M4.6 4.6l1.6 1.6M17.8 17.8l1.6 1.6M2.5 12h2.2M19.3 12h2.2M4.6 19.4l1.6-1.6M17.8 6.2l1.6-1.6"/></svg><span id="themeState" hidden>Light</span></button>
   <div class="rel" id="walletMenu">
     <button class="chip solid" id="connectBtn" aria-haspopup="menu" aria-expanded="false">Connect wallet</button>
     <div class="pop walletPop" id="walletPop" role="menu" aria-label="Wallet menu">
@@ -1748,7 +1748,29 @@ footer .fine{max-width:78ch;margin:46px 0 0;font-size:11.5px;color:var(--tx3);li
     <div class="leg">
       <div class="legTop"><span id="solBotLabel">You receive</span><b id="solBotBal">—</b><span class="sellPill" id="solSellPill" hidden></span></div>
       <!-- وقتی برچسبِ فروش هست، موجودی کنارش جا نمی‌شود و به برچسب می‌چسبید («You receive—») — مثلِ Base فقط برچسب می‌ماند. -->
-      <style>.legTop:has(#solSellPill:not([hidden])) #solBotBal{display:none}</style>
+      <style>.legTop:has(#solSellPill:not([hidden])) #solBotBal{display:none}
+/* Soft sculpted controls shared across light and dark surfaces. */
+:root{--soft-hi:rgba(255,255,255,.9);--soft-lo:rgba(35,45,65,.13);--switch-track:#dfe5ee;--switch-knob:#f4f5f7}
+:root[data-theme="dark"]{--soft-hi:rgba(66,76,100,.24);--soft-lo:rgba(0,0,0,.55);--switch-track:#273247;--switch-knob:#202735}
+#themeBtn,#themeToggle{position:relative;display:inline-flex;flex:none;width:64px;height:38px;padding:0;border:1px solid var(--line);border-radius:999px;background:var(--switch-track);box-shadow:inset 3px 3px 6px var(--soft-lo),inset -3px -3px 6px var(--soft-hi);cursor:pointer;overflow:visible;transition:background .25s,border-color .25s;transform:none}
+#themeBtn::before,#themeToggle::before{content:"";position:absolute;left:3px;top:3px;width:30px;height:30px;border-radius:50%;background:var(--switch-knob);box-shadow:inset 0 1px 1px var(--soft-hi),2px 2px 5px var(--soft-lo);transition:transform .25s,background .25s}
+[data-theme="dark"] #themeBtn::before,[data-theme="dark"] #themeToggle::before{transform:translateX(26px)}
+#themeBtn .themeSun,#themeToggle .sun{display:block}
+#themeBtn .themeMoon,#themeToggle .moon{display:none}
+#themeBtn svg,#themeToggle>span:not([hidden]){position:absolute;left:9px;top:9px;width:18px;height:18px;color:#956c22;pointer-events:none}
+#themeToggle svg{display:block;width:18px;height:18px}
+[data-theme="dark"] #themeBtn .themeSun,[data-theme="dark"] #themeToggle .sun{display:none}
+[data-theme="dark"] #themeBtn .themeMoon,[data-theme="dark"] #themeToggle .moon{display:block;left:35px;color:#a9c9f6}
+#themeBtn:focus-visible,#themeToggle:focus-visible{outline:2px solid var(--acc);outline-offset:4px}
+.nav{background:var(--bg);box-shadow:4px 4px 9px var(--soft-lo),-3px -3px 8px var(--soft-hi),inset 0 1px 1px var(--soft-hi)}
+.nav button.on,.nav a.on{background:var(--bg);color:var(--acc);box-shadow:inset 2px 2px 5px var(--soft-lo),inset -2px -2px 5px var(--soft-hi)}
+.chip:not(.solid):not(#themeBtn),.tokbtn,.tfs button.on{box-shadow:2px 2px 5px var(--soft-lo),-2px -2px 5px var(--soft-hi)}
+.cta:not(:disabled),.chip.solid,.tkTrade,.button.primary,.header-cta{box-shadow:inset 0 1px 1px rgba(255,255,255,.4),inset 0 -2px 2px rgba(20,30,55,.16),0 3px 6px var(--soft-lo)}
+.cta:active:not(:disabled),.chip.solid:active,.tkTrade:active,.button.primary:active,.header-cta:active{transform:translateY(1px);box-shadow:inset 0 2px 4px rgba(20,30,55,.22)}
+@media(max-width:720px){.nav{background:var(--bg);box-shadow:0 -1px 0 var(--line),0 -4px 10px var(--soft-lo),inset 0 1px 1px var(--soft-hi)}}
+@media(max-width:480px){.logo .wordmark{display:none}}
+@media(prefers-reduced-motion:reduce){#themeBtn,#themeToggle,#themeBtn::before,#themeToggle::before{transition:none}}
+</style>
       <div class="legRow">
         <input class="amt mono" id="solOutRead" placeholder="0" inputmode="decimal" autocomplete="off">
         <button class="tokbtn" id="solBotBtn" type="button"><span class="av" id="solBotAv">?</span><span id="solBotSym">—</span></button>
@@ -8859,6 +8881,7 @@ function applyTheme(){document.documentElement.setAttribute("data-theme",theme);
   $("themeState").textContent=theme==="dark"?"Dark":"Light";
   $("themeBtn").setAttribute("aria-label",theme==="dark"?"Switch to light mode":"Switch to dark mode");
   $("themeBtn").title=$("themeBtn").getAttribute("aria-label");
+  $("themeBtn").setAttribute("aria-checked",String(theme==="dark"));
   if(chartData&&panel("plot").querySelector("svg"))drawChart(chartData);}
 
 function wire(){

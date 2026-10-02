@@ -240,6 +240,28 @@ svg.diag{display:block;width:100%;height:auto}
   .readout-top{right:0;top:0}
   .readout-right{right:0;bottom:0}
 }
+
+/* Soft sculpted controls shared across light and dark surfaces. */
+:root{--soft-hi:rgba(255,255,255,.9);--soft-lo:rgba(35,45,65,.13);--switch-track:#dfe5ee;--switch-knob:#f4f5f7}
+:root[data-theme="dark"]{--soft-hi:rgba(66,76,100,.24);--soft-lo:rgba(0,0,0,.55);--switch-track:#273247;--switch-knob:#202735}
+#themeBtn,#themeToggle{position:relative;display:inline-flex;flex:none;width:64px;height:38px;padding:0;border:1px solid var(--line);border-radius:999px;background:var(--switch-track);box-shadow:inset 3px 3px 6px var(--soft-lo),inset -3px -3px 6px var(--soft-hi);cursor:pointer;overflow:visible;transition:background .25s,border-color .25s;transform:none}
+#themeBtn::before,#themeToggle::before{content:"";position:absolute;left:3px;top:3px;width:30px;height:30px;border-radius:50%;background:var(--switch-knob);box-shadow:inset 0 1px 1px var(--soft-hi),2px 2px 5px var(--soft-lo);transition:transform .25s,background .25s}
+[data-theme="dark"] #themeBtn::before,[data-theme="dark"] #themeToggle::before{transform:translateX(26px)}
+#themeBtn .themeSun,#themeToggle .sun{display:block}
+#themeBtn .themeMoon,#themeToggle .moon{display:none}
+#themeBtn svg,#themeToggle>span:not([hidden]){position:absolute;left:9px;top:9px;width:18px;height:18px;color:#956c22;pointer-events:none}
+#themeToggle svg{display:block;width:18px;height:18px}
+[data-theme="dark"] #themeBtn .themeSun,[data-theme="dark"] #themeToggle .sun{display:none}
+[data-theme="dark"] #themeBtn .themeMoon,[data-theme="dark"] #themeToggle .moon{display:block;left:35px;color:#a9c9f6}
+#themeBtn:focus-visible,#themeToggle:focus-visible{outline:2px solid var(--acc);outline-offset:4px}
+.nav{background:var(--bg);box-shadow:4px 4px 9px var(--soft-lo),-3px -3px 8px var(--soft-hi),inset 0 1px 1px var(--soft-hi)}
+.nav button.on,.nav a.on{background:var(--bg);color:var(--acc);box-shadow:inset 2px 2px 5px var(--soft-lo),inset -2px -2px 5px var(--soft-hi)}
+.chip:not(.solid):not(#themeBtn),.tokbtn,.tfs button.on{box-shadow:2px 2px 5px var(--soft-lo),-2px -2px 5px var(--soft-hi)}
+.cta:not(:disabled),.chip.solid,.tkTrade,.button.primary,.header-cta{box-shadow:inset 0 1px 1px rgba(255,255,255,.4),inset 0 -2px 2px rgba(20,30,55,.16),0 3px 6px var(--soft-lo)}
+.cta:active:not(:disabled),.chip.solid:active,.tkTrade:active,.button.primary:active,.header-cta:active{transform:translateY(1px);box-shadow:inset 0 2px 4px rgba(20,30,55,.22)}
+@media(max-width:720px){.nav{background:var(--bg);box-shadow:0 -1px 0 var(--line),0 -4px 10px var(--soft-lo),inset 0 1px 1px var(--soft-hi)}}
+@media(max-width:480px){.logo .wordmark{display:none}}
+@media(prefers-reduced-motion:reduce){#themeBtn,#themeToggle,#themeBtn::before,#themeToggle::before{transition:none}}
 </style>
 </head>
 <body>
@@ -279,7 +301,7 @@ svg.diag{display:block;width:100%;height:auto}
   <a class="brand" href="/" aria-label="Zaexa home"><svg class="mark" viewBox="0 0 1000 697.98" aria-hidden="true"><use href="#zxMark"/></svg><svg class="word" viewBox="0 0 2581.74 300" aria-hidden="true"><use href="#zxWord"/></svg></a>
   <nav class="desktop-nav" aria-label="Landing navigation"><a href="#closing">Why Zaexa</a><a href="#features">Capabilities</a><a href="#faq">FAQ</a></nav>
   <div class="header-actions">
-    <button class="theme-toggle" id="themeToggle" aria-label="Switch color theme"><span class="sun"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2.5v2.2M12 19.3v2.2M4.6 4.6l1.6 1.6M17.8 17.8l1.6 1.6M2.5 12h2.2M19.3 12h2.2M4.6 19.4l1.6-1.6M17.8 6.2l1.6-1.6"/></svg></span><span class="moon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"/></svg></span></button>
+    <button class="theme-toggle" id="themeToggle" type="button" role="switch" aria-checked="false" aria-label="Switch color theme"><span class="sun"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2.5v2.2M12 19.3v2.2M4.6 4.6l1.6 1.6M17.8 17.8l1.6 1.6M2.5 12h2.2M19.3 12h2.2M4.6 19.4l1.6-1.6M17.8 6.2l1.6-1.6"/></svg></span><span class="moon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"/></svg></span></button>
     <a class="header-cta" href="/app">Open the app <span>↗</span></a>
     <button class="menu-toggle" id="menuToggle" aria-expanded="false" aria-label="Open navigation">☰</button>
   </div>
@@ -616,7 +638,7 @@ svg.diag{display:block;width:100%;height:auto}
 (function(){
   const root=document.documentElement, themeButton=document.getElementById('themeToggle');
   const LS_THEME='zaexa.theme.v1';
-  function syncTheme(){ document.body.classList.toggle('dark-preview',root.dataset.theme==='dark'); if(themeButton) themeButton.setAttribute('aria-label',root.dataset.theme==='dark'?'Switch to light theme':'Switch to dark theme'); }
+  function syncTheme(){ document.body.classList.toggle('dark-preview',root.dataset.theme==='dark'); if(themeButton){themeButton.setAttribute('aria-checked',String(root.dataset.theme==='dark'));themeButton.setAttribute('aria-label',root.dataset.theme==='dark'?'Switch to light theme':'Switch to dark theme');} }
   syncTheme();
     themeButton&&themeButton.addEventListener('click',function(){ root.dataset.theme=root.dataset.theme==='dark'?'light':'dark'; try{ localStorage.setItem(LS_THEME,root.dataset.theme); }catch(e){} syncTheme(); });
   /* پیش‌فرضِ اضطراری برای canvas: اگر خواندنِ توکنِ CSS چیزی برنگرداند (مثلاً
