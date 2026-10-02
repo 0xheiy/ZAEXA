@@ -30,6 +30,15 @@ async def main():
    return await r.fulfill(status=200,json={'data':[]})
   await page.route('**/*',route);await page.goto('http://zaexa.test/pairs?chain=solana')
   await page.wait_for_function('typeof zaexaPairsSolana!=="undefined"');await page.wait_for_timeout(250)
+
+  assert await page.locator('body>header #themeBtn').is_visible()
+  assert await page.locator('#setPop #themeBtn, #walletPop #themeBtn').count()==0
+  before=await page.get_attribute('html','data-theme')
+  await page.locator('#themeBtn').click()
+  after=await page.get_attribute('html','data-theme');assert after!=before
+  assert await page.evaluate('localStorage.getItem("zaexa.theme.v1")')==after
+  assert await page.locator('#themeBtn').get_attribute('aria-label')==('Switch to light mode' if after=='dark' else 'Switch to dark mode')
+  await page.locator('#themeBtn').click();assert await page.get_attribute('html','data-theme')==before
   assert await page.evaluate('evmRequests.length')==0
   await page.locator('#connectBtn').click();assert await page.locator('#walList .walName').all_text_contents()==['Phantom test','WalletConnect']
   await page.locator('#walList .walRow').first.click();await page.wait_for_function('proofs.length===1')

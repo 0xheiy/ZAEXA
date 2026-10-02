@@ -73,6 +73,15 @@ async def main():
   assert await page.locator('body>header #srcMenu').count()==0
   assert await page.locator('#swapNetworkBar').is_visible()
   print('one shared network control moves between Base/Solana cards and returns to header outside swap')
+
+  assert await page.locator('body>header #themeBtn').is_visible()
+  assert await page.locator('#setPop #themeBtn, #walletPop #themeBtn').count()==0
+  before=await page.get_attribute('html','data-theme')
+  await page.locator('#themeBtn').click()
+  after=await page.get_attribute('html','data-theme');assert after!=before
+  assert await page.evaluate('localStorage.getItem("zaexa.theme.v1")')==after
+  assert await page.locator('#themeBtn').get_attribute('aria-label')==('Switch to light mode' if after=='dark' else 'Switch to dark mode')
+  await page.locator('#themeBtn').click();assert await page.get_attribute('html','data-theme')==before
   assert await page.locator('#solSwapBtn').is_enabled()
   await page.locator('#solSwapBtn').click()
   assert await page.locator('#solWalletOv').is_visible()
@@ -196,6 +205,9 @@ async def main():
   assert await page.evaluate('activeChain')=='solana'
   assert await page.locator('#walletMenu').is_visible()
   assert await page.locator('#solSafety').evaluate('e=>e.parentElement.id')=='tk-grid'
+  assert await page.locator('#tk-chip').get_attribute('data-chain')=='solana'
+  assert await page.locator('#tk-chip svg').count()==1
+  assert 'linear-gradient' in await page.locator('#tk-chip').evaluate('e=>getComputedStyle(e).backgroundImage')
   assert await page.locator('body>header #srcMenu').count()==0
   assert not await page.locator('#srcMenu').is_visible()
   assert not await page.locator('#swapNetworkBar').is_visible()

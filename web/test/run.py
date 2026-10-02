@@ -6774,8 +6774,8 @@ async def main():
             "the theme switch belongs in Settings, not in the wallet menu"
         await pg.keyboard.press("Escape")
         await pg.click("#setBtn"); await pg.wait_for_timeout(200)
-        assert await pg.locator("#setPop #themeBtn").count() == 1, \
-            "the theme switch must be reachable from Settings"
+        assert await pg.locator("body>header #themeBtn").count() == 1, \
+            "the theme switch must be directly reachable in the header"
         await pg.click("#themeBtn"); await pg.wait_for_timeout(300)
         assert await pg.get_attribute("html", "data-theme") == "light"
         assert await pg.inner_text("#themeState") == "Light"
@@ -11023,7 +11023,7 @@ async def main():
         before5 = await w5b.evaluate("""() => ({
             theme: document.documentElement.dataset.theme,
             setPopOpen: document.getElementById('setPop').classList.contains('on'),
-            themeBtnInSetPop: !!document.querySelector('#setPop #themeBtn'),
+            themeBtnInHeader: !!document.querySelector('body>header #themeBtn'),
         })""")
         await w5b.click("#setBtn")
         await w5b.wait_for_timeout(150)
@@ -11056,7 +11056,7 @@ async def main():
               "closedOnEscape=%s after=%r reload=%r errors=%s %s"
               % (before5, setPopOpenAfterClick, setPopClosedOnEscape, after5, reload5_theme,
                  werrs5b, cerrs5b))
-        assert before5["themeBtnInSetPop"], "#setPop must contain #themeBtn"
+        assert before5["themeBtnInHeader"], "the header must contain #themeBtn"
         assert before5["setPopOpen"] is False, "#setPop must start closed"
         assert setPopOpenAfterClick is True, "clicking #setBtn must open #setPop"
         assert setPopClosedOnEscape, "pressing Escape must close #setPop, like the wallet popover"
