@@ -1279,10 +1279,6 @@ footer .fine{max-width:78ch;margin:46px 0 0;font-size:11.5px;color:var(--tx3);li
       </button>
     </div>
   </div>
-  <button class="chip round" id="shareBtn" title="Copy a link to this quote">
-    <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor"
-         stroke-width="2" stroke-linecap="round"><path d="M10 13a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-1 1"/>
-    <path d="M14 11a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l1-1"/></svg></button>
   <div class="rel">
     <button class="chip round" id="setBtn">⚙</button>
     <div class="pop" id="setPop">
@@ -5927,10 +5923,11 @@ function animateScore(score,C,arcId,numId){
   requestAnimationFrame(step);
 }
 
-function renderSafetyReport(rep){
-  const box=$("tk-safetyBody");if(!box)return;
+function renderSafetyReport(rep,boxId="tk-safetyBody",prefix="tk"){
+  const box=$(boxId);if(!box)return;
   const col=`var(--${rep.verdict.tone})`,C=2*Math.PI*25;
-  const bad=rep.findings.filter(f=>f.level!=="ok");
+  const bad=rep.findings.filter(f=>f.level!=="ok"&&(!rep.solana||f.level!=="info"));
+  const unknown=rep.solana?rep.findings.filter(f=>f.level==="info"):[];
   const good=rep.findings.filter(f=>f.level==="ok");
   const ord={critical:0,high:1,medium:2,info:3};
   bad.sort((a,b)=>ord[a.level]-ord[b.level]);
@@ -5951,18 +5948,19 @@ function renderSafetyReport(rep){
     <div class="scoreTop">
       <div class="ring"><svg width="60" height="60">
         <circle cx="30" cy="30" r="25" fill="none" stroke="var(--raise)" stroke-width="6"/>
-        <circle id="tk-arc" cx="30" cy="30" r="25" fill="none" stroke="${col}" stroke-width="6"
+        <circle id="${prefix}-arc" cx="30" cy="30" r="25" fill="none" stroke="${col}" stroke-width="6"
           stroke-dasharray="${C}" stroke-dashoffset="${C}"
           stroke-linecap="round"/></svg>
-        <b class="mono" id="tk-score" style="color:${col}">0</b></div>
+        <b class="mono" id="${prefix}-score" style="color:${col}">${rep.score==null?"—":0}</b></div>
       <div><div class="rv" style="color:${col}">${esc(rep.verdict.txt)}</div>
-        <div class="rs">Risk ${rep.score} out of 100 · lower is safer</div></div>
+        <div class="rs">${rep.score==null?"Risk unavailable":"Risk "+rep.score+" out of 100 · lower is safer"}${rep.unknown?" · "+rep.unknown+" not checked":""}</div></div>
     </div>
     ${bad.length?`<div class="chkGroup"><span class="eyebrow">${bad.length} to look at</span>
       ${bad.map((f,i)=>row(f,i+1)).join("")}</div>`:""}
+    ${unknown.length?`<div class="chkGroup"><span class="eyebrow">${unknown.length} not checked</span>${unknown.map((f,i)=>row(f,i+1)).join("")}</div>`:""}
     ${good.length?`<div class="chkGroup"><span class="eyebrow">${good.length} checked and clear</span>
       ${good.map((f,i)=>row(f,i+1)).join("")}</div>`:""}`;
-  animateScore(rep.score,C);
+  if(rep.score!=null)animateScore(rep.score,C,prefix+"-arc",prefix+"-score");
 }
 
 /* =====================================================================
@@ -7806,6 +7804,53 @@ async function solFetchQuote(){
     solUpdateSwapBtn();
   }
 }
+function solSafetyReport(info,owner,largest,epoch){
+  const findings=[];let score=0;
+  const add=(level,title,detail,weight=0)=>{findings.push({level,title,detail});score+=weight;};
+  const authority=(title,value,detail)=>{
+    if(value===null)add('ok',title,'Revoked. '+detail);
+    else if(typeof value==='string'&&SOL_MINT_RE.test(value))add('high',title,'Active · '+shortAddr(value)+'. '+detail,12);
+    else add('info',title,'Unknown — this authority could not be read.');
+  };
+  authority('Mint authority',info.mintAuthority,'An active authority can create more tokens.');
+  authority('Freeze authority',info.freezeAuthority,'An active authority can freeze token accounts.');
+  const exts=info.extensions,fee=Array.isArray(exts)?exts.find(e=>e.extension==='transferFeeConfig')?.state:null;
+  if(fee){
+    const current=Number.isInteger(epoch)&&epoch>=0&&Number.isFinite(Number(fee.newerTransferFee?.epoch))?
+      (epoch>=Number(fee.newerTransferFee.epoch)?fee.newerTransferFee:fee.olderTransferFee):null;
+    const bps=current?.transferFeeBasisPoints;
+    if(bps!=null&&Number.isInteger(Number(bps))&&Number(bps)>=0&&Number(bps)<=10000){
+      const value=Number(bps),cap=current.maximumFee!=null?' Maximum transfer fee: '+solFormatUnits(current.maximumFee,info.decimals)+' tokens.':'';
+      add(value>500?'high':value>0?'medium':'ok','Current transfer fee',(value/100).toFixed(2)+'% (capped).'+cap,value>500?12:value>0?5:0);
+    }else add('info','Current transfer fee','Unknown — current epoch or fee configuration unavailable.');
+    authority('Transfer fee authority',fee.transferFeeConfigAuthority,'An active authority can change transfer fees.');
+  }else if(owner===SOL_TOKEN_PROGRAMS[0]||Array.isArray(exts))add('ok','Transfer fee','No transfer-fee extension.');
+  else add('info','Transfer fee','Unknown — token extensions could not be read.');
+  let pct=null;
+  try{const supply=BigInt(info.supply);if(supply>0n&&Array.isArray(largest)&&largest.length<=20&&largest.every(x=>/^\d+$/.test(x.amount))){const n=largest.reduce((a,x)=>a+BigInt(x.amount),0n);if(n<=supply)pct=Number(n*10000n/supply)/100;}}catch{}
+  if(pct==null)add('info','Largest 20 token accounts','Unknown — supply or largest-account data unavailable.');
+  else add(pct>80?'high':pct>50?'medium':'ok','Largest 20 token accounts',pct.toFixed(2)+'% of supply. Accounts may be pools or custodians, not separate holders.',pct>80?12:pct>50?5:0);
+  for(const e of Array.isArray(exts)?exts:[]){
+    if(e.extension==='transferFeeConfig')continue;
+    if(e.extension==='permanentDelegate'){
+      const d=e.state?.delegate;
+      if(d===null)add('ok','Permanent delegate','No active permanent delegate.');
+      else if(typeof d==='string'&&SOL_MINT_RE.test(d))add('critical','Permanent delegate','Active · '+shortAddr(d)+'. Can transfer or burn tokens from token accounts.',25);
+      else add('info','Permanent delegate','Unknown — delegate data unavailable.');
+    }else if(e.extension==='nonTransferable')add('critical','Non-transferable token','This extension prevents ordinary token transfers.',25);
+    else if(e.extension==='transferHook'){
+      if(e.state?.programId===null)add('ok','Transfer hook','No active transfer-hook program.');
+      else add('info','Transfer hook','A transfer hook is configured; its program was not audited by this check.');
+    }else if(e.extension==='defaultAccountState'&&String(e.state?.state).toLowerCase()==='frozen')add('high','New accounts start frozen','Transfers require the freeze authority to thaw the account.',12);
+    else if(!['metadataPointer','tokenMetadata','groupPointer','groupMemberPointer','tokenGroup','tokenGroupMember'].includes(e.extension))add('info','Other token extension',String(e.extension||'Unknown extension')+' — its effects were not checked.');
+  }
+  const unknown=findings.filter(f=>f.level==='info').length;
+  const rep={findings,score:findings.some(f=>f.level!=='info')?Math.min(100,score):null,unknown,solana:true,
+    _c:findings.filter(f=>f.level==='critical').length,_h:findings.filter(f=>f.level==='high').length};
+  rep.verdict=rep.score===null?{txt:'Risk not assessed',tone:'warn'}:unknown&&score===0?{txt:'Checks incomplete',tone:'warn'}:verdictOf(rep);
+  return rep;
+}
+
 let solDetailsSeq=0;
 async function solLoadDetails(){
   const seq=++solDetailsSeq,mint=solMintCur;
@@ -7858,24 +7903,11 @@ async function solLoadDetails(){
       solTokenDecimals=info.decimals;
       if($("solAmt").value||$("solOutRead").value)solScheduleQuote();
     }
-    const row=(label,value,warn=false)=>`<div class="flowkv"><span class="k">${label}</span><span style="color:${warn?'var(--warn)':'var(--tx)'}">${esc(value)}</span></div>`;
-    const authority=x=>x===null?"Revoked":typeof x==="string"?"Active · "+shortAddr(x):"Unknown";
-    let h='<h3>Solana token controls</h3>'+row('Mint authority',authority(info.mintAuthority),typeof info.mintAuthority==='string')+row('Freeze authority',authority(info.freezeAuthority),typeof info.freezeAuthority==='string');
-    const exts=info.extensions,fee=Array.isArray(exts)?exts.find(e=>e.extension==="transferFeeConfig")?.state:null;
-    const epoch=results[2].status==="fulfilled"?results[2].value?.epoch:null;
-    if(fee){
-      const f=epoch==null?null:Number(epoch)>=Number(fee.newerTransferFee?.epoch)?fee.newerTransferFee:fee.olderTransferFee;
-      h+=row('Current transfer fee',f&&f.transferFeeBasisPoints!=null&&Number.isFinite(Number(f.transferFeeBasisPoints))?(Number(f.transferFeeBasisPoints)/100).toFixed(2)+'% (capped)':'Unknown',true);
-      if(f?.maximumFee!=null)h+=row('Maximum transfer fee',solFormatUnits(f.maximumFee,info.decimals)+' tokens');
-      h+=row('Transfer fee authority',authority(fee.transferFeeConfigAuthority),typeof fee.transferFeeConfigAuthority==='string');
-    }else h+=row('Transfer fee',account.owner===SOL_TOKEN_PROGRAMS[0]||Array.isArray(exts)?'No transfer-fee extension':'Unknown');
     const largest=results[1].status==="fulfilled"?results[1].value?.value:null;
-    let pct=null;
-    try{const supply=BigInt(info.supply);if(supply>0n&&Array.isArray(largest)){if(largest.length>20||largest.some(x=>!/^\d+$/.test(x.amount)))throw Error("Malformed largest accounts");const n=largest.reduce((a,x)=>a+BigInt(x.amount),0n);if(n<=supply)pct=Number(n*10000n/supply)/100;}}catch{}
-    h+=row('Largest 20 token accounts',pct==null?'Unknown':pct.toFixed(2)+'% of supply',pct>50);
-    const extra=Array.isArray(exts)?exts.map(x=>x.extension).filter(x=>x!=="transferFeeConfig"):[];
-    if(extra.length)h+=row('Other token extensions',extra.join(', '),true);
-    safety.innerHTML=h+'<p class="fnote">Largest accounts can include pools and custody accounts; they are not necessarily different holders. Token controls are not an audit or a guarantee that selling is possible.</p>';
+    const epoch=results[2].status==="fulfilled"?results[2].value?.epoch:null;
+    const rep=solSafetyReport(info,account.owner,largest,epoch);
+    renderSafetyReport(rep,"solSafety","sol-risk");
+    safety.insertAdjacentHTML("beforeend",'<p class="fnote">Token-control risk is a heuristic score from the checks shown, not a probability of loss or an audit. Unknown checks are listed separately. Largest accounts may include pools and custody accounts. This does not guarantee that selling is possible.</p>');
   })();
   await Promise.allSettled([poolTask,safetyTask]);
 }
@@ -8417,6 +8449,7 @@ async function applyShareParams(){
    می‌نوشت و کارت ایمنیِ نمای اصلی هرگز پر نمی‌شد؛ و مبلغِ مرجعِ ۱۰۰ که
    صفحه‌ی توکن گذاشته بود در فرم سواپ می‌ماند و مثل سفارشِ کاربر دیده
    می‌شد. حالا هر خروجی از همین‌جا رد می‌شود. */
+let renderedPath=location.pathname;
 function leaveTokenPage(v){
   tokenPage=false;
   /* ⚠️ «/» نه. از روزی که صفحه‌ی معرفی روی ریشه نشست، location.origin+"/#"+v
@@ -8427,6 +8460,7 @@ function leaveTokenPage(v){
      توکن باز می‌شود»، گزارشِ ۱۴ سپتامبر ۲۰۲۶). مقصدِ درست مسیرِ خودِ اپ است. */
   const backTo=/^\/t\//.test(location.pathname)?"/app":location.pathname;
   history.pushState(null,"",backTo+"#"+v);
+  renderedPath=location.pathname;
   $("amtIn").value="";$("amtOut").value="";
   mode="exactIn";setNotice("");
   if(activeChain==="solana"){
@@ -8515,7 +8549,6 @@ function wire(){
   $("faqCtrLink").href=`${CHAIN.explorer}/address/${CHAIN.executor}#code`;
   $("faqCtrLink").textContent=CHAIN.executor;
   $("themeBtn").onclick=()=>{theme=theme==="dark"?"light":"dark";storeTheme(theme);applyTheme();};
-  $("shareBtn").onclick=()=>copyLink(shareUrl(),$("shareBtn"));
   /* گزینشگرِ شبکه‌ی هدر — Base/Solana. */
   $("srcChip").onclick=toggleSrcMenu;
   document.querySelectorAll("#srcPop [data-chain]").forEach(b=>b.onclick=()=>setChain(b.dataset.chain));
@@ -8583,7 +8616,11 @@ function wire(){
     if(view==="flow")renderFlow();
     refreshAllowance().then(scheduleQuote);};
   $("nav").querySelectorAll("[data-view]").forEach(b=>b.onclick=()=>setView(b.dataset.view));
+  addEventListener("popstate",()=>{
+    if(location.pathname!==renderedPath)location.reload();
+  });
   addEventListener("hashchange",()=>{
+    if(location.pathname!==renderedPath)return;
     setView(parseHash().view,false);
     const hc=parseHash().params.get("chain");
     if(!tokenPage&&(hc==="solana"||hc==="base"))setChain(hc);

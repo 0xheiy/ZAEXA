@@ -67,6 +67,22 @@ async def main():
   await page.wait_for_function('document.querySelector("#solSafety").textContent.includes("60.00%")')
   safety=await page.locator('#solSafety').inner_text();assert 'Revoked' in safety and 'Active' in safety and 'No transfer-fee' in safety,safety
   await page.wait_for_function('document.querySelector("#solPools").textContent.includes("test-dex")')
+  assert await page.locator('#shareBtn').count()==0
+  assert await page.locator('#solSafety .chkGroup .eyebrow').all_text_contents()==['2 to look at','2 checked and clear']
+  await page.evaluate("""async()=>{
+   window.riskRaf=requestAnimationFrame;window.riskFrames=[];requestAnimationFrame=fn=>{riskFrames.push(fn);return 0;};
+   await solLoadDetails();
+  }""")
+  assert await page.locator('#sol-risk-score').inner_text()=='0'
+  circle=await page.locator('#sol-risk-arc').evaluate('e=>({offset:Number(e.getAttribute("stroke-dashoffset")),total:Number(e.getAttribute("stroke-dasharray"))})')
+  assert circle['offset']==circle['total']
+  await page.evaluate('requestAnimationFrame=riskRaf;for(const f of riskFrames)requestAnimationFrame(f)')
+  await page.wait_for_function('document.querySelector("#sol-risk-score").textContent==="17"')
+  await page.emulate_media(reduced_motion='reduce');await page.evaluate('solLoadDetails()')
+  assert await page.locator('#sol-risk-score').inner_text()=='17'
+  await page.emulate_media(reduced_motion='no-preference')
+  print('Solana numeric risk, warning/clear groups, animation from zero and reduced motion verified')
+
   await page.locator('#solTopBtn').click();await page.locator('#solTokList [data-mint="'+SOL+'"]').click()
   await page.wait_for_function('solInputMint()==="'+SOL+'"')
   config['impact']='0.02';await page.locator('#solAmt').fill('0.1');await page.wait_for_function('document.querySelector("#solImpactF").style.color==="var(--warn)"')
@@ -134,6 +150,13 @@ async def main():
   assert await page.locator('#solSwap').is_visible()
   assert '/app' in page.url
   assert await page.evaluate('activeChain')=='solana'
+  await page.go_back();await page.wait_for_function('tokenPage && location.pathname.startsWith("/t/")')
+  assert await page.locator('#tk-trade').is_visible()
+  assert not await page.locator('#solSwap').is_visible()
+  await page.go_forward();await page.wait_for_function('!tokenPage && location.pathname==="/app"')
+  assert await page.locator('#solSwap').is_visible()
+  print('report -> Trade -> browser Back -> report -> Forward -> swap verified')
+
   await page.goto('http://zaexa.test/t/'+USDT)
   await page.wait_for_function('() => document.querySelector("#solSafety").textContent.includes("60.00%")')
   config['missing']=True;await page.evaluate('solLoadDetails()');assert 'not a readable' in await page.locator('#solSafety').inner_text()

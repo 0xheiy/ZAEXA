@@ -6086,6 +6086,8 @@ async def main():
                 # base58ِ سولانا (همان بازه‌ی SOL_MINT در worker/chains.js) —
                 # چون /t/<mint سولانا> دیگر ۴۰۴ نمی‌گیرد.
                 clean = path.split("?")[0]
+                if clean in ("/app", "/app/"):
+                    return os.path.join(HERE, "harness.html")
                 if re.match(r"^/t/(0x[0-9a-fA-F]{40}|[1-9A-HJ-NP-Za-km-z]{32,44})/?$", clean):
                     return os.path.join(HERE, "harness.html")
                 # صفحه‌ی توکن یک <base href="/"> می‌گذارد، پس استاب از ریشه
@@ -7239,6 +7241,12 @@ async def main():
         nv_hash = await navpg.evaluate("() => location.hash")
         nv_path = await navpg.evaluate("() => location.pathname")
         nv_safety = await navpg.inner_text("#safetyBody")
+        await navpg.go_back()
+        await navpg.wait_for_function('() => tokenPage && location.pathname.startsWith("/t/")')
+        assert await navpg.locator("#view-token").is_visible()
+        await navpg.go_forward()
+        await navpg.wait_for_function('() => !tokenPage && location.pathname === "/app"')
+        assert await navpg.locator("#view-swap").is_visible()
         await navpg.close()
         print("[token page] nav out of token page resets: tokenPage=%s amtIn=%r hash=%s path=%s"
               % (nv_tokenPage, nv_amt, nv_hash, nv_path))
@@ -10879,7 +10887,7 @@ async def main():
             return sig(root, false);
         }"""
         GEOM_JS = """() => {
-            const sels = ['.logo', '#nav', '#srcChip', '#shareBtn', '#setBtn', '#connectBtn'];
+            const sels = ['.logo', '#nav', '#srcChip', '#setBtn', '#connectBtn'];
             const out = {};
             for (const s of sels){
                 const e = document.querySelector(s);
@@ -11298,18 +11306,10 @@ async def main():
         assert names3 == [], "a failing clipboard must never send share:copy, got %s" % names3
         assert names3b == [], "a failing clipboard must never send share:copy, got %s" % names3b
 
-        # ۴) #shareBtn یک کوت را به اشتراک می‌گذارد، نه یک چک — هرگز share:copy
+        # Header link button was removed on request; report copy actions above remain.
         p4, seen4 = await swap_share_page(True)
-        assert await p4.is_visible("#shareBtn"), "#shareBtn is not visible on the swap page"
-        before4 = len(seen4)
-        await p4.click("#shareBtn")
-        await p4.wait_for_timeout(500)
-        names4 = share_names(seen4[before4:])
+        assert await p4.locator("#shareBtn").count() == 0
         await p4.close()
-        print("[events share] #shareBtn, working clipboard -> %s" % names4)
-        assert names4 == [], (
-            "#shareBtn must never send share:copy — it shares a swap quote, not a check, "
-            "got %s" % names4)
 
         # ۵) Global Privacy Control روشن -> هیچ بیکنی
         p5, seen5 = await swap_share_page(True, gpc=True)
