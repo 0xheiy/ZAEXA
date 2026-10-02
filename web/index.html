@@ -1750,10 +1750,10 @@ footer .fine{max-width:78ch;margin:46px 0 0;font-size:11.5px;color:var(--tx3);li
       <!-- وقتی برچسبِ فروش هست، موجودی کنارش جا نمی‌شود و به برچسب می‌چسبید («You receive—») — مثلِ Base فقط برچسب می‌ماند. -->
       <style>.legTop:has(#solSellPill:not([hidden])) #solBotBal{display:none}
 /* Soft sculpted controls shared across light and dark surfaces. */
-:root{--soft-hi:rgba(255,255,255,.9);--soft-lo:rgba(35,45,65,.13);--switch-track:#dfe5ee;--switch-knob:#f4f5f7}
-:root[data-theme="dark"]{--soft-hi:rgba(66,76,100,.24);--soft-lo:rgba(0,0,0,.55);--switch-track:#273247;--switch-knob:#202735}
-#themeBtn,#themeToggle{position:relative;display:inline-flex;flex:none;width:64px;height:38px;padding:0;border:1px solid var(--line);border-radius:999px;background:var(--switch-track);box-shadow:inset 3px 3px 6px var(--soft-lo),inset -3px -3px 6px var(--soft-hi);cursor:pointer;overflow:visible;transition:background .25s,border-color .25s;transform:none}
-#themeBtn::before,#themeToggle::before{content:"";position:absolute;left:3px;top:3px;width:30px;height:30px;border-radius:50%;background:var(--switch-knob);box-shadow:inset 0 1px 1px var(--soft-hi),2px 2px 5px var(--soft-lo);transition:transform .25s,background .25s}
+:root{--soft-hi:rgba(255,255,255,.9);--soft-lo:rgba(35,45,65,.13);--switch-track:#cdd2da;--switch-knob:#e9ebee}
+:root[data-theme="dark"]{--soft-hi:rgba(66,76,100,.24);--soft-lo:rgba(0,0,0,.55);--switch-track:#111722;--switch-knob:#363f50}
+#themeBtn,#themeToggle{position:relative;display:inline-flex;flex:none;width:64px;height:38px;padding:0;border:1px solid var(--line);border-radius:999px;background:var(--switch-track);box-shadow:inset 3px 3px 5px var(--soft-lo),inset -2px -2px 4px var(--soft-hi),0 1px 0 var(--soft-hi);cursor:pointer;overflow:visible;transition:background .25s,border-color .25s;transform:none}
+#themeBtn::before,#themeToggle::before{content:"";position:absolute;left:1px;top:1px;width:34px;height:34px;border:1px solid color-mix(in srgb,var(--tx) 16%,transparent);border-radius:50%;background:var(--switch-knob);box-shadow:inset 0 1px 1px var(--soft-hi),2px 2px 4px var(--soft-lo);transition:transform .25s,background .25s}
 [data-theme="dark"] #themeBtn::before,[data-theme="dark"] #themeToggle::before{transform:translateX(26px)}
 #themeBtn .themeSun,#themeToggle .sun{display:block}
 #themeBtn .themeMoon,#themeToggle .moon{display:none}
@@ -1767,6 +1767,14 @@ footer .fine{max-width:78ch;margin:46px 0 0;font-size:11.5px;color:var(--tx3);li
 .chip:not(.solid):not(#themeBtn),.tokbtn,.tfs button.on{box-shadow:2px 2px 5px var(--soft-lo),-2px -2px 5px var(--soft-hi)}
 .cta:not(:disabled),.chip.solid,.tkTrade,.button.primary,.header-cta{box-shadow:inset 0 1px 1px rgba(255,255,255,.4),inset 0 -2px 2px rgba(20,30,55,.16),0 3px 6px var(--soft-lo)}
 .cta:active:not(:disabled),.chip.solid:active,.tkTrade:active,.button.primary:active,.header-cta:active{transform:translateY(1px);box-shadow:inset 0 2px 4px rgba(20,30,55,.22)}
+
+/* Recessed wallet control: a flat face fills the inset frame. */
+.cta:not(:disabled),#connectBtn.solid,#solConnectBtn.solid{position:relative;isolation:isolate;background:var(--card2);box-shadow:inset 2px 2px 4px var(--soft-lo),inset -2px -2px 4px var(--soft-hi),inset 0 0 0 1px var(--line);transform:none}
+.cta:not(:disabled)::before,#connectBtn.solid::before,#solConnectBtn.solid::before{content:"";position:absolute;inset:3px;z-index:-1;pointer-events:none;border-radius:inherit;background:var(--grad);box-shadow:inset 0 0 0 1px rgba(255,255,255,.12);transition:filter .16s}
+.cta:not(:disabled)::before{border-radius:13px}
+.cta:hover:not(:disabled),#connectBtn.solid:hover,#solConnectBtn.solid:hover,.cta:active:not(:disabled),#connectBtn.solid:active,#solConnectBtn.solid:active{transform:none;box-shadow:inset 2px 2px 4px var(--soft-lo),inset -2px -2px 4px var(--soft-hi),inset 0 0 0 1px var(--line)}
+.cta:hover:not(:disabled)::before,#connectBtn.solid:hover::before,#solConnectBtn.solid:hover::before{filter:brightness(1.04)}
+.cta:active:not(:disabled)::before,#connectBtn.solid:active::before,#solConnectBtn.solid:active::before{filter:brightness(.94)}
 @media(max-width:720px){.nav{background:var(--bg);box-shadow:0 -1px 0 var(--line),0 -4px 10px var(--soft-lo),inset 0 1px 1px var(--soft-hi)}}
 @media(max-width:480px){.logo .wordmark{display:none}}
 @media(prefers-reduced-motion:reduce){#themeBtn,#themeToggle,#themeBtn::before,#themeToggle::before{transition:none}}
