@@ -202,7 +202,7 @@ test('token page with missing metadata still initializes the wallet', async () =
   let initialized = false;
   const c = context(['openSolanaTokenPage'], {
     SOL_APP_TOKEN_LIST: [], shortAddr: s => s, solTokenUrl: s => s,
-    paintSolAvatar() {}, paintWallet() {}, renderRoundTrip() {}, ev() {}, renderSolStats() {},
+    paintSolAvatar() {}, paintReportNetwork() {}, paintWallet() {}, renderRoundTrip() {}, ev() {}, renderSolStats() {},
     renderSolExit() {}, solPaintSellPill() {}, solTryAutoRestoreName() {},
     solWalletStandardInit() { initialized = true; },
     solSwapReset(mint) { c.solMintCur = mint; ++c.solTokenSeq; },

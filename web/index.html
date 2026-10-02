@@ -1217,6 +1217,53 @@ footer .fine{max-width:78ch;margin:46px 0 0;font-size:11.5px;color:var(--tx3);li
   .row.hero .swapCard{order:1}
 }
 
+/* Shared trading workspace: restrained brand light, real market context. */
+#view-swap{position:relative;isolation:isolate}
+#view-swap::before{content:"";position:fixed;z-index:-1;pointer-events:none;
+  inset:0 0 auto;height:900px;opacity:.09;
+  background:radial-gradient(ellipse at 18% 28%,#00d9e8,transparent 48%),radial-gradient(ellipse at 85% 20%,#a855f7,transparent 45%)}
+[data-theme="dark"] #view-swap::before{opacity:.13}
+.marketWatch{grid-column:1/-1;display:flex;align-items:center;gap:12px;padding:10px 12px;
+  border:1px solid var(--line);border-radius:20px;background:var(--card);min-width:0;box-shadow:var(--shs)}
+.watchHeading{flex:none;font-size:12px;color:var(--tx3);padding:0 8px}
+.watchItems{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;flex:1;min-width:0}
+.watchPair{display:flex;align-items:center;gap:10px;min-width:0;text-align:left;padding:9px 12px;
+  background:var(--card2);border:1px solid transparent;border-radius:15px;transition:background .18s,border-color .18s}
+.watchPair:hover,.watchPair:focus-visible{border-color:var(--acc);background:var(--raise)}
+.watchPair .av{width:30px;height:30px;border-radius:50%;display:grid;place-items:center;background:var(--raise);font-size:9px;font-weight:700}
+.watchPair .av>svg{width:21px;height:21px}
+.watchInfo{min-width:0;flex:1}
+.watchName{display:block;font-size:12px;font-weight:620;white-space:nowrap}
+.watchName span{font-weight:400;color:var(--tx3)}
+.watchNumbers{display:flex;gap:8px;align-items:center;font-size:12px;white-space:nowrap}
+.watchPrice{font-weight:650}.watchChange{font-size:10.5px;color:var(--tx3)}
+.watchChange.up{color:var(--pos)}.watchChange.down{color:var(--neg)}
+.watchSpark{flex:none;width:65px;height:28px;color:var(--tx3)}
+.watchSpark svg{width:100%;height:100%;display:block}
+.routeVisual[hidden]{display:none}
+.routeVisual{margin-top:8px;display:flex;flex-direction:column;gap:8px}
+.routeVisualRow{display:flex;align-items:center;gap:6px;flex-wrap:wrap;font-size:11px}
+.routeToken{display:inline-flex;align-items:center;gap:4px;max-width:100%;color:var(--tx2)}
+.routeToken .av{width:21px;height:21px;border-radius:50%;background:var(--card);display:grid;place-items:center;font-size:7px;font-weight:700}
+.routeToken .av>svg{width:16px;height:16px}
+.routeVenue{border:1px solid var(--line);border-radius:999px;padding:3px 7px;color:var(--tx2);overflow-wrap:anywhere;max-width:100%}
+.routeShare{color:var(--tx3);font-size:10px;margin-left:auto}
+.routeArrow{color:var(--tx3)}
+.routeVisual details>summary{cursor:pointer;font-size:11px;color:var(--tx3);margin:3px 0 8px}
+.routeVisual details .routeVisualRow+.routeVisualRow{margin-top:8px}
+.routeBar:has(.routeVisual:not([hidden])) .rbTrack,.routeBar:has(.routeVisual:not([hidden])) .rbLegend{display:none}
+@media(max-width:1100px){.watchSpark{width:44px}.watchPair{padding:8px;gap:7px}.watchHeading{padding:0}.watchNumbers{gap:5px;font-size:11px}.watchChange{font-size:10px}}
+@media(min-width:941px) and (max-width:1100px){.watchSpark{display:none}}
+@media(max-width:940px){
+  .marketWatch{order:2;display:block;padding:10px;border-radius:18px}
+  .watchHeading{display:block;margin:0 0 8px 3px;font-size:11px}
+  .watchItems{display:flex;overflow-x:auto;gap:8px;scroll-snap-type:x proximity;padding-bottom:2px}
+  .watchPair{flex:0 0 260px;scroll-snap-align:start}
+  .watchSpark{width:42px}
+  .swapChartCard{order:3}.swapPoolsCard{order:4}.swapSafetyCard{order:5}
+}
+@media(prefers-reduced-motion:reduce){.watchPair{transition:none}}
+
 /* One network control moves with the active swap card; other views keep it in the header. */
 #swapNetworkBar{display:flex;align-items:center;gap:12px;padding:16px 16px 12px}
 #swapNetworkBar[hidden]{display:none}
@@ -1487,7 +1534,7 @@ footer .fine{max-width:78ch;margin:46px 0 0;font-size:11.5px;color:var(--tx3);li
            اعلانی بلندتر از ارتفاعِ کف باز هم دکمه را جابه‌جا می‌کند؛ کاوشگر
            [cta] در run.py همین را می‌سنجد. -->
       <div id="statusSlot">
-        <div class="routeBar" id="routeBar"><div class="rbTop"><span>Route</span><span class="mono" id="rbMeta"></span></div><div class="rbTrack" id="rbTrack"></div><div class="rbLegend" id="rbLegend"></div></div>
+        <div class="routeBar" id="routeBar"><div class="rbTop"><span>Route</span><span class="mono" id="rbMeta"></span></div><div class="rbTrack" id="rbTrack"></div><div class="rbLegend" id="rbLegend"></div><div class="routeVisual" id="baseRouteVisual" hidden></div></div>
         <div id="revNote"></div>
         <div id="notices"></div>
       </div>
@@ -1720,7 +1767,7 @@ footer .fine{max-width:78ch;margin:46px 0 0;font-size:11.5px;color:var(--tx3);li
     <!-- F — نوارِ مسیرِ ژوپیتر، عیناً سبکِ routeBar/rbTrack/rbLegend بالا؛
          فقط وقتی کوتی هست دیده می‌شود (idle=hidden، نه اسکلتِ خالی). -->
     <div id="solStatusSlot">
-    <div class="routeBar" id="solRouteBar" hidden><div class="rbTop"><span>Route</span><span class="mono" id="solRbMeta"></span></div><div class="rbTrack" id="solRbTrack"></div><div class="rbLegend" id="solRbLegend"></div></div>
+    <div class="routeBar" id="solRouteBar" hidden><div class="rbTop"><span>Route</span><span class="mono" id="solRbMeta"></span></div><div class="rbTrack" id="solRbTrack"></div><div class="rbLegend" id="solRbLegend"></div><div class="routeVisual" id="solRouteVisual" hidden></div></div>
     <div id="solNotices"></div>
     </div>
     <!-- ⚠️ فقط روی صفحه‌ی توکن دیده می‌شود (openSolanaTokenPage آن را
@@ -2608,6 +2655,11 @@ async function allowListGate(){
    قبلاً هر retry کل dexStatus را به «checking…» برمی‌گرداند، پس در آن
    پنجره enabledDexes() خالی بود و هر کوتی که وسط می‌افتاد «مسیری نیست»
    می‌گرفت — صرافی سالم قربانی صرافیِ جواب‌نداده می‌شد. */
+let baseDexInitPromise=null;
+function ensureBaseDexes(){
+  if(!baseDexInitPromise)baseDexInitPromise=verifyDexes().catch(e=>{baseDexInitPromise=null;throw e;});
+  return baseDexInitPromise;
+}
 async function verifyDexes(targets){
   const list=(targets&&targets.length)?targets:DEXES;
   if(list===DEXES)
@@ -4564,9 +4616,7 @@ function initialChain(){
   return readStoredChain()||"base";
 }
 let activeChain="base";
-// ۲۷ سپتامبر — JUP از این فهرست حذف شد: mint‌اش هیچ‌وقت راستی‌آزمایی نشده
-// بود و روی GeckoTerminal ۴۰۴ و روی جوپیتر خودش ۴۰۰ می‌گیرد. USDC/USDT
-// همین امروز از GT دوباره تأیید شدند (۶ رقمِ اعشار، هر دو).
+// Core swap defaults. The separate market presets below use verified mint addresses.
 const SOL_MINT_ADDR="So11111111111111111111111111111111111111112";
 const SOL_APP_TOKENS={USDC:"EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
   USDT:"Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB"};
@@ -4639,6 +4689,7 @@ function updateSwapViewForChain(){
   if(flowNote)flowNote.textContent=activeChain==="solana"
     ?"Recent Solana trades from GeckoTerminal. Samples may not cover every trade or pool."
     :"Read live from the deepest pool for this token, in your browser — no server, nothing stored.";
+  refreshMarketWatch();
   if(tokenPage)return;
   const solana=activeChain==="solana";
   const heroBase=document.getElementById("baseHeroRow");
@@ -4672,12 +4723,18 @@ function setChain(next){
   next=(next==="solana")?"solana":"base";
   closeSrcMenu();
   if(next===activeChain)return;
+  if(next==="base"&&!E){
+    // After a Solana-only report, Trade has already pushed /app without loading
+    // EVM dependencies. A hash-only navigation cannot initialize them.
+    storeChain("base");history.pushState(null,"","/app#swap?chain=base");location.reload();return;
+  }
   if(tokenPage){location.assign("/app#swap?chain="+next);return;}
-  ++folioSeq;++flowSeq;
+  ++folioSeq;++flowSeq;++marketPairSeq;
   solInvalidateQuote();
   activeChain=next;
   storeChain(next);
   updateSwapViewForChain();
+  if(next==="base")ensureBaseDexes().then(()=>{if(activeChain==="base"&&view==="swap")scheduleQuote();}).catch(()=>{});
   if(view==="swap"){if(next==="solana")solScheduleQuote();else scheduleQuote();}
   if(view==="folio")renderFolio();
   if(view==="flow"){paintFlowToken();renderFlow();}
@@ -4977,6 +5034,145 @@ async function fetchSolMetaMulti(mints){
   }
   return out;
 }
+// Network presets use a shared renderer and pair-selection flow.
+// Mint sources: Jupiter's official token page and BonkLabs/bonkswap-amm-integration.
+const MARKET_WATCH_SOL=[
+  {symbol:"SOL",mint:SOL_MINT_ADDR},
+  {symbol:"JUP",mint:"JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN"},
+  {symbol:"BONK",mint:"DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263"},
+];
+const marketWatchCache=new Map(),marketWatchInflight=new Map();
+let marketWatchSeq=0,marketPairSeq=0;
+function marketWatchTokens(chain){
+  return chain==="solana"?MARKET_WATCH_SOL:BASE_TOKENS.filter(t=>["ETH","AERO","cbBTC"].includes(t.symbol));
+}
+function initMarketWatch(){
+  for(const [chain,id] of [["base","baseHeroRow"],["solana","appSolHero"]]){
+    const box=document.createElement("section");box.className="marketWatch";box.dataset.chain=chain;
+    box.setAttribute("aria-label",chain==="base"?"Base market watch":"Solana market watch");
+    box.innerHTML='<span class="watchHeading">Market watch · 24h</span><div class="watchItems"></div>';
+    $(id).prepend(box);paintMarketWatch(chain);
+  }
+}
+function watchPrice(value){return value==null?"—":"$"+Number(value).toLocaleString("en-US",{maximumSignificantDigits:value<1?4:6});}
+function watchSpark(series){
+  if(!series||series.length<2)return "";
+  const vals=series.map(p=>p.c),lo=Math.min(...vals),hi=Math.max(...vals),range=hi-lo||lo*.01;
+  const points=vals.map((v,i)=>`${(i*64/(vals.length-1)).toFixed(1)},${(25-(v-lo)/range*22).toFixed(1)}`).join(" ");
+  return `<svg viewBox="0 0 66 28" fill="none" aria-hidden="true"><polyline points="${points}" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+}
+function paintWatchAvatar(el,t,logo){
+  el.textContent=t.symbol.slice(0,3);
+  if(t.native){const img=new Image();img.alt="";img.src=ETH_ICON;img.className="on";el.append(img);return;}
+  if(t.mint===SOL_MINT_ADDR){
+    const svg=$("srcOptSolana").querySelector("svg").cloneNode(true);
+    const gradient=svg.querySelector("linearGradient");
+    if(gradient){const old=gradient.id;gradient.id=old+"Watch"+Math.random().toString(36).slice(2);svg.querySelectorAll("[fill]").forEach(n=>{if(n.getAttribute("fill")===`url(#${old})`)n.setAttribute("fill",`url(#${gradient.id})`);});}
+    el.replaceChildren(svg);return;
+  }
+  if(!logo||!okLogo(logo))return;
+  const img=new Image();img.alt="";img.loading="lazy";img.onload=()=>img.classList.add("on");img.onerror=()=>img.remove();img.src=logo;el.append(img);
+}
+function paintMarketWatch(chain){
+  const box=document.querySelector(`.marketWatch[data-chain="${chain}"] .watchItems`);if(!box)return;
+  const data=marketWatchCache.get(chain)?.rows||[];
+  const focus=box.contains(document.activeElement)?document.activeElement.closest(".watchPair")?.dataset.watch:null;
+  const scroll=box.scrollLeft;
+  box.innerHTML=marketWatchTokens(chain).map((t,i)=>{
+    const row=data[i]||{},change=row.change,cls=change==null?"":change>=0?"up":"down";
+    return `<button class="watchPair" type="button" data-watch="${i}" aria-label="Trade ${esc(t.symbol)} / USDC" title="Select ${esc(t.symbol)} / USDC · prices in USD · chart from a sampled pool">
+      <span class="av"></span><span class="watchInfo"><span class="watchName">${esc(t.symbol)}<span> / USDC</span></span>
+      <span class="watchNumbers"><span class="watchPrice mono">${watchPrice(row.price)}</span><span class="watchChange ${cls} mono">${change==null?"—":(change>=0?"▲ ":"▼ ")+Math.abs(change).toFixed(2)+"%"}</span></span></span>
+      <span class="watchSpark" style="color:${cls==="up"?"var(--pos)":cls==="down"?"var(--neg)":"var(--tx3)"}">${watchSpark(row.series)}</span></button>`;
+  }).join("");
+  box.querySelectorAll(".watchPair").forEach((el,i)=>{
+    const t=marketWatchTokens(chain)[i];paintWatchAvatar(el.querySelector(".av"),t,data[i]?.logo);
+    el.onclick=()=>chooseMarketPair(chain,t).catch(()=>{});
+    el.querySelector(".watchChange").title=data[i]?.change==null?"24h change unavailable":"24h change in USD from pool candles";
+  });
+  if(focus!=null)box.querySelector(`[data-watch="${focus}"]`)?.focus({preventScroll:true});
+  box.scrollLeft=scroll;
+}
+async function fetchWatchSeries(chain,t){
+  const address=t.mint||(t.native?WETH_ADDR:t.address);
+  const j=await gtJson(`${GT}/networks/${chain}/tokens/${address}/pools?page=1`);
+  const eq=(id)=>chain==="base"?String(id).toLowerCase()===`${chain}_${address}`.toLowerCase():id===`${chain}_${address}`;
+  const pool=(j?.data||[]).find(p=>eq(p.relationships?.base_token?.data?.id)||eq(p.relationships?.quote_token?.data?.id));
+  if(!pool)return [];
+  const side=eq(pool.relationships?.quote_token?.data?.id)?"quote":"base";
+  const id=pool.attributes?.address||String(pool.id||"").slice(chain.length+1);
+  if(!okPool(id))return [];
+  const candles=await gtJson(`${GT}/networks/${chain}/pools/${id}/ohlcv/hour?aggregate=1&limit=25&currency=usd&token=${side}`);
+  return (candles?.data?.attributes?.ohlcv_list||[]).map(r=>({t:Number(r[0]),c:Number(r[4])}))
+    .filter(p=>Number.isFinite(p.t)&&Number.isFinite(p.c)&&p.c>0).sort((a,b)=>a.t-b.t);
+}
+async function loadMarketWatch(chain){
+  if(marketWatchInflight.has(chain))return marketWatchInflight.get(chain);
+  const task=(async()=>{
+    const tokens=marketWatchTokens(chain),addresses=tokens.map(t=>t.mint||(t.native?WETH_ADDR:t.address));
+    let metas={};
+    try{
+      const j=await gtJson(`${GT}/networks/${chain}/tokens/multi/`+addresses.join(","));
+      for(const r of j?.data||[]){const a=r.attributes;if(a?.address)metas[chain==="base"?a.address.toLowerCase():a.address]=a;}
+    }catch{}
+    const rows=tokens.map((t,i)=>{const a=metas[chain==="base"?addresses[i].toLowerCase():addresses[i]]||{};
+      const price=a.price_usd==null?NaN:Number(a.price_usd);
+      return {price:Number.isFinite(price)&&price>0?price:null,logo:okLogo(a.image_url)?a.image_url:null,series:[],change:null};});
+    marketWatchCache.set(chain,{t:Date.now(),rows});
+    if(activeChain===chain)paintMarketWatch(chain);
+    await Promise.all(tokens.map(async(t,i)=>{
+      try{
+        const series=await fetchWatchSeries(chain,t);
+        const first=series[0],last=series.at(-1),now=Date.now()/1000;
+        rows[i].series=last&&now-last.t>=0&&now-last.t<7200?series:[];
+        if(first&&last&&last.t-first.t>=23*3600&&last.t-first.t<=25*3600&&now-last.t>=0&&now-last.t<7200){rows[i].change=(last.c/first.c-1)*100;}
+      }catch{}
+      if(activeChain===chain)paintMarketWatch(chain);
+    }));
+  })().finally(()=>marketWatchInflight.delete(chain));
+  marketWatchInflight.set(chain,task);return task;
+}
+function refreshMarketWatch(){
+  if(tokenPage||view!=="swap"||document.hidden)return;
+  const chain=activeChain,seq=++marketWatchSeq;paintMarketWatch(chain);
+  if(Date.now()-(marketWatchCache.get(chain)?.t||0)<60000)return;
+  setTimeout(()=>{if(seq===marketWatchSeq&&activeChain===chain&&view==="swap"&&!tokenPage)loadMarketWatch(chain);},1200);
+}
+async function chooseMarketPair(chain,t){
+  if(activeChain!==chain||tokenPage)return;
+  const seq=++marketPairSeq;
+  if(chain==="solana"){
+    $("solAmt").value="";$("solOutRead").value="";solMode="exactIn";
+    solInvalidateQuote();solAppDefaulted=true;
+    await solAppLoadToken(t.mint);
+    if(seq!==marketPairSeq||activeChain!==chain)return;
+    await solSetReference(SOL_APP_TOKENS.USDC);
+    if(seq!==marketPairSeq||activeChain!==chain)return;
+    solSide="buy";solPaintLegs();solScheduleQuote();
+  }else{
+    hideSwapDone();mode="exactIn";$("amtIn").value="";$("amtOut").value="";
+    tokenIn=BASE_TOKENS.find(t=>t.symbol==="USDC");tokenOut=t;
+    paintToken("in",tokenIn);paintToken("out",tokenOut);paintBalances();paintAmtClear();
+    runScan(tokenOut);loadChart();paintFlowToken();refreshAllowance().then(scheduleQuote);
+  }
+}
+function routeTokenMarkup(t){return `<span class="routeToken"><span class="av" data-route-symbol="${esc(t.symbol||"?")}"></span>${esc(t.symbol||"?")}</span>`;}
+function paintRouteVisual(id,legs){
+  const box=$(id);if(!box)return;box.hidden=!legs?.length;if(box.hidden){box.innerHTML="";return;}
+  const row=leg=>'<div class="routeVisualRow">'+leg.tokens.map((t,i)=>routeTokenMarkup(t)+(i<leg.tokens.length-1?`<span class="routeArrow">→</span><span class="routeVenue">${esc(leg.venues[i]||"Venue")}</span><span class="routeArrow">→</span>`:"")).join("")+
+    `<span class="routeShare mono">${leg.share==null?"":leg.share.toFixed(0)+"%"}</span></div>`;
+  box.innerHTML=legs.slice(0,2).map(row).join("")+(legs.length>2?`<details><summary>${legs.length-2} more route legs</summary>${legs.slice(2).map(row).join("")}</details>`:"");
+  box.querySelectorAll("[data-route-symbol]").forEach(el=>{
+    const token=legs.flatMap(l=>l.tokens).find(t=>t.symbol===el.dataset.routeSymbol);
+    if(token.mint)paintWatchAvatar(el,token,token.logo);else paintAvatar(el,token);
+  });
+}
+function solRouteToken(mint,fallback){
+  const t=MARKET_WATCH_SOL.find(t=>t.mint===mint)||SOL_APP_TOKEN_LIST.find(t=>t.mint===mint);
+  const symbol=t?.symbol||(mint===solRefMint?solRefSymbol:mint===solMintCur?solTokenSymbol:mint?shortAddr(mint):fallback);
+  return {mint:mint||SOL_MINT_ADDR,symbol:symbol||"?",logo:mint===solRefMint?solRefLogo:mint===solMintCur?solTokenLogoUrl:solLogoCache[mint]};
+}
+
 async function solPrefetchLogos(){
   const need=[...SOL_APP_TOKEN_LIST.map(t=>t.mint),...((solPopularCache||[]).map(t=>t.mint))]
     .filter(m=>!(m in solLogoCache));
@@ -5232,6 +5428,7 @@ async function tokenExitFallback(seq,why){
 function paintRouteIdle(){
   $("rbMeta").textContent="—";
   $("rbTrack").innerHTML="";
+  paintRouteVisual("baseRouteVisual",null);
   $("rbLegend").innerHTML='<span class="rbIdle">Enter an amount to see the route</span>';
   $("rbLegend").title="";
   /* ۲۴ سپتامبر: یادداشتِ «حل برای هدف» از کوتِ معکوسِ قبلی بعد از پاک‌شدنِ
@@ -5550,6 +5747,7 @@ function renderPlan(plan,reverse){
   $("rbLegend").innerHTML=rbLeg;
   $("rbLegend").title=rbLegTitle;
   $("rbMeta").textContent=plan.parts.length>1?plan.parts.length+" venues · split":"1 venue";
+  paintRouteVisual("baseRouteVisual",plan.parts.map(p=>({tokens:[tokenIn,...p.route.hops.map((h,i)=>i===p.route.hops.length-1?tokenOut:h.tokenOut)],venues:p.route.hops.map(h=>venueLabel(h.venue)),share:Number(p.amountIn*10000n/plan.totalIn)/100})));
   paintSellPill("wait");
 
   let n="";
@@ -8078,7 +8276,7 @@ const SOL_ROUTE_COLORS=["var(--pos)","var(--warn)","var(--neg)","var(--tx3)","#8
 function solRenderRouteBar(q){
   const bar=$("solRouteBar");if(!bar)return;
   const steps=(q&&Array.isArray(q.routePlan))?q.routePlan:[];
-  if(!steps.length){bar.hidden=true;return;}
+  if(!steps.length){bar.hidden=true;paintRouteVisual("solRouteVisual",null);return;}
   let segs="",leg="",title="";
   steps.forEach((step,i)=>{
     const info=(step&&step.swapInfo)||{};
@@ -8094,6 +8292,7 @@ function solRenderRouteBar(q){
   $("solRbLegend").innerHTML=leg;
   $("solRbLegend").title=title;
   $("solRbMeta").textContent=steps.length>1?steps.length+" legs":"1 leg";
+  paintRouteVisual("solRouteVisual",steps.map(step=>({tokens:[solRouteToken(step.swapInfo?.inputMint||q.inputMint,solInputSymbol()),solRouteToken(step.swapInfo?.outputMint||q.outputMint,solOutputSymbol())],venues:[step.swapInfo?.label||"Venue"],share:typeof step.percent==="number"?step.percent:typeof step.bps==="number"?step.bps/100:null})));
   bar.hidden=false;
 }
 function solRenderReadout(){
@@ -8764,7 +8963,7 @@ function wire(){
     if(!tokenPage&&(hc==="solana"||hc==="base"))setChain(hc);
   });
   $("flowTokBtn").onclick=()=>{if(activeChain==="solana")solOpenTokenPicker();else openPicker("out");};
-  setInterval(()=>{if(!document.hidden)refreshSolanaViews();},30000);
+  setInterval(()=>{if(!document.hidden){refreshSolanaViews();refreshMarketWatch();}},30000);
   /* ⚠️ این ناحیه یک بار با copy-paste خراب شده بود: تکه‌ای از خود wire()
      داخل هندلرهای کلیک تکرار شده بود. جاوااسکریپت پارسش می‌کرد و ظاهر
      درست کار می‌کرد، ولی هر کلیک روی بازه‌های زمانی یک شنونده‌ی
@@ -8903,6 +9102,7 @@ $("copyAddrBtn").onclick=(e)=>{
   // اتصالِ بی‌صدایش را از دست می‌دهد چون solLastWalletName هنوز خالی است.
   solTryAutoRestoreName();
   activeChain=initialChain();
+  initMarketWatch();
   wire();
   /* ⚠️ همه‌ی این بلوک — ethers، همه‌ی Interfaceها، RPC، جفتِ پیش‌فرض،
      نمودار — فقط برای Base است. رویِ مسیرِ سولانا هیچ‌کدامشان صدا زده
@@ -9025,7 +9225,7 @@ $("copyAddrBtn").onclick=(e)=>{
      دانستنِ صرافی‌های قابل اتکا معنا ندارند. */
   const early=tokenPage?openTokenPage(onToken[1]):null;
   if(!tokenPage&&parseHash().params.get("chain")==="solana"){await applyShareParams();return;}
-  await verifyDexes();          // قبل از هر کوتی، بدان کدام صرافی قابل اتکاست
+  await ensureBaseDexes();      // قبل از هر کوتی، بدان کدام صرافی قابل اتکاست
   if(early){await early;runTokenQuote();}
   // لینک اشتراکی *بعد* از دروازه‌ها اعمال می‌شود: تا ندانیم کدام صرافی
   // قابل اتکاست، کوت گرفتن برای توکن ناشناس معنا ندارد.
