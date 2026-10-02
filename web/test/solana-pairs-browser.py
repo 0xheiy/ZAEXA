@@ -64,7 +64,7 @@ async def main():
   await page.reload();await page.wait_for_function('typeof zaexaPairsSolana!=="undefined"');assert await page.locator('#connectBtn').inner_text()=='Connect wallet'
   assert await page.evaluate('evmRequests.length')==0
   assert await page.locator('#srcMenu, #srcChip').count()==0
-  for width in [360,390,430,1280]:
+  for width in [360,390,430,768,960,1280]:
    await page.set_viewport_size({'width':width,'height':844});assert await page.evaluate('document.documentElement.scrollWidth<=innerWidth')
   await page.evaluate('Object.defineProperty(navigator,"userAgent",{value:"Android Mobile",configurable:true})')
   await page.set_viewport_size({'width':390,'height':844})
