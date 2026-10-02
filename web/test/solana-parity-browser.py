@@ -143,7 +143,7 @@ async def main():
     sol_leg=await page.locator('#solSwap .leg').first.evaluate('e=>e.getBoundingClientRect().height')
     assert abs(sol_leg-base['leg'])<1,(theme,width,sol_leg,base)
     assert await page.locator('#srcTx').inner_text()=='Solana'
-    assert await page.locator('#srcNetworkIcon img').evaluate('e=>e.complete&&e.naturalWidth>0')
+    assert await page.locator('#srcNetworkIcon svg path').count()>0
     for tab,slot in [('folio','folioNetworkSlot'),('flow','flowNetworkSlot')]:
      await page.evaluate('(v)=>setView(v,false)',tab)
      assert await page.locator('#srcMenu').evaluate('e=>e.parentElement.id')==slot
