@@ -618,7 +618,7 @@ main{max-width:1140px;margin:0 auto;padding:8px 20px 56px;display:flex;flex-dire
 .tfs{margin-left:auto;display:flex;gap:4px;background:var(--card2);padding:4px;border-radius:999px}
 .tfs button{padding:6px 13px;border-radius:999px;font-size:12.5px;color:var(--tx2);transition:.16s}
 .tfs button.on{background:var(--card);color:var(--tx);font-weight:620;box-shadow:var(--shs)}
-.row.hero>.card:first-child{display:flex;flex-direction:column}
+.swapChartCard{display:flex;flex-direction:column}
 .plot{position:relative;flex:1;min-height:236px;padding:0 6px 8px}
 /* در چیدمان دوستونه ارتفاع نمودار *ثابت* است، نه مشتق از ردیف.
    با `flex:1` ارتفاع نمودار از ارتفاع ردیف تغذیه می‌شد و ارتفاع ردیف هم به
@@ -1203,6 +1203,19 @@ footer .fine{max-width:78ch;margin:46px 0 0;font-size:11.5px;color:var(--tx3);li
 #solStatusSlot{margin:4px 0 12px;min-height:64px}
 #solStatusSlot:has(#solNotices:not(:empty)) #solRouteBar{display:none}
 @media(max-width:940px){#appSolHeroCol>#solSwap{order:1}}
+
+/* Each desktop column flows independently: a taller swap never leaves a hole
+   between the chart and pools. Mobile retains swap → chart → pools → safety. */
+.swapColumn{display:flex;flex-direction:column;gap:18px;min-width:0}
+#baseSubRow,#appSolSubRow{display:none}
+#solStatusSlot:has(#solRouteBar[hidden]):has(#solNotices:empty){min-height:0;margin:0}
+@media(max-width:940px){
+  .swapColumn{display:contents}
+  .swapChartCard{order:2}
+  .swapPoolsCard{order:3}
+  .swapSafetyCard{order:4}
+  .row.hero .swapCard{order:1}
+}
 
 /* One network control moves with the active swap card; other views keep it in the header. */
 #swapNetworkBar{display:flex;align-items:center;gap:12px;padding:16px 16px 12px}
@@ -4587,14 +4600,31 @@ function paintSrc2(){
 }
 /* نمایِ سواپِ اصلی را روی Base/Solana می‌چیند. صفحه‌ی توکن (tokenPage)
    دست‌نخورده می‌ماند — چیدمانِ خودش را دارد. */
+// Keep the same column layout for every network, using the existing cards.
+function prepareSwapColumns(){
+  for(const [heroId,subId] of [["baseHeroRow","baseSubRow"],["appSolHero","appSolSubRow"]]){
+    const hero=$(heroId),sub=$(subId);
+    if(hero.querySelector(".swapColumn"))continue;
+    const chart=hero.firstElementChild,trade=hero.lastElementChild;
+    const pools=sub.firstElementChild,safety=sub.lastElementChild;
+    chart.classList.add("swapChartCard");
+    pools.classList.add("swapPoolsCard");
+    safety.classList.add("swapSafetyCard");
+    const market=document.createElement("div"),actions=document.createElement("div");
+    market.className=actions.className="swapColumn";
+    market.append(chart,pools);actions.append(trade,safety);hero.append(market,actions);
+  }
+}
+prepareSwapColumns();
 let solAppDefaulted=false;
 function updateSwapViewForChain(){
   placeNetworkControl();
   if(!tokenPage){
     $("appSolSubRow").hidden=activeChain!=="solana";
-    for(const [id,parent] of [["solSafety","appSolSafetyBody"],["solPools","appSolSubRow"]]){
+    for(const [id,parent] of [["solSafety","appSolSafetyBody"],["solPools","appSolPoolsSlot"]]){
       const el=$(id);el.hidden=activeChain!=="solana";
-      if(activeChain==="solana"){if(id==="solPools")$(parent).insertBefore(el,$("appSolSafetyCard"));else $(parent).appendChild(el);}
+      if(id==="solPools")el.classList.add("swapPoolsCard");
+      if(activeChain==="solana"){$(parent).appendChild(el);}
     }
   }
   paintSrc();paintSrc2();

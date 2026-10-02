@@ -3294,7 +3294,7 @@ async def main():
             await hp.goto(URL); await hp.wait_for_timeout(900)
             data = await hp.evaluate("""() => {
                 const swap = document.querySelector("section.card.swapCard");
-                const chart = document.querySelector(".row.hero > .card");
+                const chart = document.querySelector("#baseHeroRow .swapChartCard");
                 return {
                     swapShadow: getComputedStyle(swap).boxShadow,
                     chartShadow: getComputedStyle(chart).boxShadow
@@ -5747,7 +5747,7 @@ async def main():
         fit = await pg.evaluate("""async () => {
             const hero = document.querySelector(".row.hero");
             if (getComputedStyle(hero).gridTemplateColumns.split(" ").length < 2) return null;
-            const [chart, swap] = [...hero.children];
+            const chart = hero.querySelector(".swapChartCard"), swap = hero.querySelector(".swapCard");
             const H = e => Math.round(e.getBoundingClientRect().height);
             const settle = () => new Promise(r =>
                 requestAnimationFrame(() => requestAnimationFrame(r)));
@@ -5787,7 +5787,7 @@ async def main():
         # است. اگر order به چیدمان دوستونه نشت کند، نمودار می‌رود سمت راست و
         # کل حساب‌های ارتفاعِ بالا بی‌معنا می‌شود.
         desk_order = await pg.evaluate("""() => {
-            const c = [...document.querySelectorAll(".row.hero > .card")];
+            const c = [...document.querySelectorAll("#baseHeroRow .swapChartCard, #baseHeroRow .swapCard")];
             const swap = c.find(x => x.querySelector("#amtIn"));
             const chart = c.find(x => x.querySelector("#plot"));
             return {chartLeft: Math.round(chart.getBoundingClientRect().left),
@@ -5807,7 +5807,7 @@ async def main():
         steady = await pg.evaluate("""async () => {
             const hero = document.querySelector(".row.hero");
             if (getComputedStyle(hero).gridTemplateColumns.split(" ").length < 2) return null;
-            const chart = hero.firstElementChild;
+            const chart = hero.querySelector(".swapChartCard");
             const H = e => Math.round(e.getBoundingClientRect().height);
             const wait = ms => new Promise(r => setTimeout(r, ms));
             const flip = () => { const t = tokenIn; tokenIn = tokenOut; tokenOut = t;
@@ -5821,7 +5821,7 @@ async def main():
                وابسته باشد. کارت سواپ را عمداً بلندتر می‌کنیم؛ اگر نمودار
                دنبالش برود یعنی هنوز از ردیف تغذیه می‌شود و همان پرش با هر
                تغییر محتوای کارت کناری برمی‌گردد. */
-            const swap = hero.children[1];
+            const swap = hero.querySelector(".swapCard");
             const keep = swap.style.minHeight;
             swap.style.minHeight = (H(swap) + 140) + "px";
             await wait(120);
@@ -6910,7 +6910,7 @@ async def main():
         # دو ادعا، چون هرکدام جدا می‌تواند بشکند: ترتیب روی گوشی عوض شده باشد،
         # و ترتیب روی دسکتاپ عوض *نشده* باشد.
         order = await mob.evaluate("""() => {
-            const c = [...document.querySelectorAll(".row.hero > .card")];
+            const c = [...document.querySelectorAll("#baseHeroRow .swapChartCard, #baseHeroRow .swapCard")];
             const swap = c.find(x => x.querySelector("#amtIn"));
             const chart = c.find(x => x.querySelector("#plot"));
             const cta = document.getElementById("actBtn");

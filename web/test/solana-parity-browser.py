@@ -59,6 +59,32 @@ async def main():
   await page.locator('#srcChip').click();await page.locator('#srcOptBase').click()
   assert await page.locator('#swapNetworkBar').evaluate('e=>e.parentElement.id')=='baseSwapNetworkSlot'
   assert await page.locator('#srcTx').inner_text()=='Base'
+  for theme in ['light','dark']:
+   await page.evaluate('(t)=>document.documentElement.dataset.theme=t',theme)
+   for width in [390,768,1280]:
+    await page.set_viewport_size({'width':width,'height':900})
+    geo=await page.evaluate("""() => {
+     const hero=document.querySelector('#baseHeroRow');
+     const rect=e=>{const r=e.getBoundingClientRect();return {x:r.x,y:r.y,b:r.bottom,h:r.height};};
+     return {chart:rect(hero.querySelector('.swapChartCard')),swap:rect(hero.querySelector('.swapCard')),
+       pools:rect(hero.querySelector('.swapPoolsCard')),safety:rect(hero.querySelector('.swapSafetyCard')),
+       overflow:document.documentElement.scrollWidth>innerWidth};
+    }""")
+    assert not geo['overflow'],(theme,width,geo)
+    if width>940:
+     assert abs(geo['pools']['y']-geo['chart']['b']-18)<1,(theme,width,geo)
+     assert abs(geo['safety']['y']-geo['swap']['b']-18)<1,(theme,width,geo)
+     await page.evaluate("(message)=>setNotice(message)", '<div class="note err">Connection failed. Try again.</div>')
+     assert await page.locator('#baseHeroRow .swapChartCard').evaluate('e=>e.getBoundingClientRect().height')==geo['chart']['h']
+     await page.evaluate('setNotice("")')
+    else:
+     assert geo['swap']['y']<geo['chart']['y']<geo['pools']['y']<geo['safety']['y'],(theme,width,geo)
+    if os.environ.get('ZAEXA_TEST_ARTIFACTS') and width in [390,1280]:
+     await page.screenshot(path=str(Path(os.environ['ZAEXA_TEST_ARTIFACTS'])/f'base-spacing-{width}-{theme}.png'),full_page=True)
+  await page.set_viewport_size({'width':1280,'height':900})
+  print('Base independent 18px column gaps, stable chart under notices and mobile order verified')
+  await page.evaluate('applyTheme()')
+
   await page.locator('#srcChip').click();await page.locator('#srcOptSolana').click()
   await page.wait_for_function('solQuote!==null')
   assert await page.locator('#swapNetworkBar').evaluate('e=>e.parentElement.id')=='solSwapNetworkSlot'
@@ -138,7 +164,7 @@ async def main():
     await page.evaluate('scrollTo(0,0)')
     geo=await page.evaluate("""() => {
      const rect=s=>{const r=document.querySelector(s).getBoundingClientRect();return {x:r.x,y:r.y,w:r.width,b:r.bottom};};
-     return {swap:rect('#solSwap'),chart:rect('#appSolHero>.card'),pools:rect('#solPools'),safety:rect('#appSolSafetyCard'),cta:rect('#solSwapBtn'),overflow:document.documentElement.scrollWidth>innerWidth};
+     return {swap:rect('#solSwap'),chart:rect('#appSolHero .swapChartCard'),pools:rect('#solPools'),safety:rect('#appSolSafetyCard'),cta:rect('#solSwapBtn'),overflow:document.documentElement.scrollWidth>innerWidth};
     }""")
     assert not geo['overflow'],(theme,width,geo)
     base=await page.evaluate("""() => {
@@ -181,7 +207,8 @@ async def main():
      assert geo['pools']['y']>=geo['chart']['b'] and geo['safety']['y']>=geo['pools']['b'],(width,geo)
     else:
      assert abs(geo['swap']['y']-geo['chart']['y'])<1,(width,geo)
-     assert abs(geo['pools']['y']-geo['safety']['y'])<1,(width,geo)
+     assert abs(geo['pools']['y']-geo['chart']['b']-18)<1,(width,geo)
+     assert abs(geo['safety']['y']-geo['swap']['b']-18)<1,(width,geo)
     if width<=430:
      await page.locator('#solTopBtn').click()
      picker=await page.locator('#solTokOv').evaluate('e=>{const r=e.firstElementChild.getBoundingClientRect();return {x:r.x,right:r.right,w:innerWidth};}')
@@ -195,6 +222,16 @@ async def main():
   if os.environ.get('ZAEXA_TEST_ARTIFACTS'):
    await page.screenshot(path=str(Path(os.environ['ZAEXA_TEST_ARTIFACTS'])/'solana-parity-preview.png'),full_page=True)
   print('pair selection, exact amounts, share URL, impact colours, live fee, direct comparison and safety verified')
+  await page.locator('#solAmt').fill('')
+  await page.wait_for_function('solQuote===null')
+  assert await page.locator('#solStatusSlot').evaluate('e=>e.getBoundingClientRect().height')==0
+  await page.evaluate('solSetNotice(note("err","Connection failed. Try again."))')
+  assert await page.locator('#solNotices').is_visible()
+  assert await page.locator('#solStatusSlot').evaluate('e=>e.getBoundingClientRect().height')>0
+  await page.evaluate('solSetNotice("")')
+  if os.environ.get('ZAEXA_TEST_ARTIFACTS'):
+   await page.screenshot(path=str(Path(os.environ['ZAEXA_TEST_ARTIFACTS'])/'solana-spacing-idle-dark.png'),full_page=True)
+
   await page.goto('http://zaexa.test/t/'+USDT)
   await page.wait_for_function('document.querySelector("#tk-plot svg")!==null')
   assert not await page.locator('#tk-chartCard').evaluate('e=>e.hidden')
