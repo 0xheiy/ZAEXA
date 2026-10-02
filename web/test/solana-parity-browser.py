@@ -68,7 +68,19 @@ async def main():
   safety=await page.locator('#solSafety').inner_text();assert 'Revoked' in safety and 'Active' in safety and 'No transfer-fee' in safety,safety
   await page.wait_for_function('document.querySelector("#solPools").textContent.includes("test-dex")')
   assert await page.locator('#shareBtn').count()==0
-  assert await page.locator('#solSafety .chkGroup .eyebrow').all_text_contents()==['2 to look at','2 checked and clear']
+  assert await page.locator('#solSafety .chkGroup, #solSafety .chkNum').count()==0
+  assert await page.locator('#solSafety .chk.high').count()==1
+  assert await page.locator('#solSafety .chk.medium').count()==1
+  assert await page.locator('#solSafety .chk.ok').count()==2
+  for row in await page.locator('#solSafety .chk').all():
+   assert await row.evaluate('e=>getComputedStyle(e).borderTopWidth')=='1px'
+  assert await page.locator('#appSolExitBox .exitTtl').evaluate('e=>getComputedStyle(e).fontSize')=='15.5px'
+  for v in ['sell','nosell',None]:
+   await page.evaluate('(v)=>renderSolExit(v,null,"appSolExitBox")',v)
+   assert await page.locator('#appSolExitBox .exitHead').count()==1
+   assert await page.locator('#appSolExitBox .tripPct').count()==0
+  await page.evaluate('renderSolExit("sell",null,"appSolExitBox","quote",99.5)')
+  assert await page.locator('#appSolExitBox .exitBadge').text_content()=='Estimated from quotes'
   await page.evaluate("""async()=>{
    window.riskRaf=requestAnimationFrame;window.riskFrames=[];requestAnimationFrame=fn=>{riskFrames.push(fn);return 0;};
    await solLoadDetails();
@@ -140,6 +152,9 @@ async def main():
   assert await page.evaluate('activeChain')=='solana'
   assert await page.locator('#walletMenu').is_visible()
   assert await page.locator('#solSafety').evaluate('e=>e.parentElement.id')=='tk-grid'
+  assert await page.locator('#solSafety .chkGroup .eyebrow').all_text_contents()==['2 to look at','2 checked and clear']
+  assert await page.locator('#solSafety .chkNum').count()==4
+  assert await page.locator('#tk-exitBox .tripPct').inner_text()=='Sell route found'
   if os.environ.get('ZAEXA_TEST_ARTIFACTS'):
    await page.set_viewport_size({'width':1280,'height':900})
    await page.screenshot(path=str(Path(os.environ['ZAEXA_TEST_ARTIFACTS'])/'solana-check-desktop.png'),full_page=True)

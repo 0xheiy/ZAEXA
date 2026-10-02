@@ -1198,6 +1198,7 @@ footer .fine{max-width:78ch;margin:46px 0 0;font-size:11.5px;color:var(--tx3);li
 #solPools>.chip{margin:12px 20px 20px}
 #solDirectF{max-width:50%;text-align:right}
 #solDirectF:first-letter{text-transform:uppercase}
+#appSolExitAddr{display:none}
 #appSolSafetyBody>#solSafety{border-radius:0;box-shadow:none;background:transparent}
 #solStatusSlot{margin:4px 0 12px;min-height:64px}
 #solStatusSlot:has(#solNotices:not(:empty)) #solRouteBar{display:none}
@@ -1501,7 +1502,7 @@ footer .fine{max-width:78ch;margin:46px 0 0;font-size:11.5px;color:var(--tx3);li
           ><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M20 9H11a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h9a2 2 0 0 0 2-2v-9a2 2 0 0 0-2-2Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>Copy this check</button>
           <span class="ttl mono" id="appSolExitSym"></span></header>
         <div class="mono" id="appSolExitAddr" style="padding:12px 20px 0;color:var(--tx3);font-size:11.5px;word-break:break-all"></div>
-        <div id="appSolExitBox" style="padding:11px 20px 16px"></div>
+        <div id="appSolExitBox"></div>
         <div id="appSolSafetyBody"></div>
       </section>
   </div>
@@ -5923,7 +5924,7 @@ function animateScore(score,C,arcId,numId){
   requestAnimationFrame(step);
 }
 
-function renderSafetyReport(rep,boxId="tk-safetyBody",prefix="tk"){
+function renderSafetyReport(rep,boxId="tk-safetyBody",prefix="tk",compact=false){
   const box=$(boxId);if(!box)return;
   const col=`var(--${rep.verdict.tone})`,C=2*Math.PI*25;
   const bad=rep.findings.filter(f=>f.level!=="ok"&&(!rep.solana||f.level!=="info"));
@@ -5938,6 +5939,7 @@ function renderSafetyReport(rep,boxId="tk-safetyBody",prefix="tk"){
     return['!','var(--warn)','color-mix(in srgb,var(--warn) 15%,transparent)'];
   };
   const row=(f,n)=>{const[m,c,bg]=mark(f);
+    if(compact)return `<div class="chk ${f.level}"><span class="ic">${m}</span><span><b>${esc(f.title)}</b><span>${esc(f.detail)}</span></span></div>`;
     return `<div class="chkRow"><span class="chkNum">${n}</span>
       <span class="chkMark" style="color:${c};background:${bg}">${m}</span>
       <span><b>${esc(f.title)}</b><span class="d">${esc(f.detail)}</span></span></div>`;};
@@ -5945,7 +5947,7 @@ function renderSafetyReport(rep,boxId="tk-safetyBody",prefix="tk"){
      سنجیده شد، نه اینکه از قبل آنجا بوده باشد. `dashoffset` روی خودِ
      محیط دایره شروع می‌شود، یعنی خالی. */
   box.innerHTML=`
-    <div class="scoreTop">
+    <div class="${compact?"rhead":"scoreTop"}">
       <div class="ring"><svg width="60" height="60">
         <circle cx="30" cy="30" r="25" fill="none" stroke="var(--raise)" stroke-width="6"/>
         <circle id="${prefix}-arc" cx="30" cy="30" r="25" fill="none" stroke="${col}" stroke-width="6"
@@ -5955,11 +5957,11 @@ function renderSafetyReport(rep,boxId="tk-safetyBody",prefix="tk"){
       <div><div class="rv" style="color:${col}">${esc(rep.verdict.txt)}</div>
         <div class="rs">${rep.score==null?"Risk unavailable":"Risk "+rep.score+" out of 100 · lower is safer"}${rep.unknown?" · "+rep.unknown+" not checked":""}</div></div>
     </div>
-    ${bad.length?`<div class="chkGroup"><span class="eyebrow">${bad.length} to look at</span>
+    ${compact?[...bad,...unknown,...good].map(f=>row(f)).join(""):`    ${bad.length?`<div class="chkGroup"><span class="eyebrow">${bad.length} to look at</span>
       ${bad.map((f,i)=>row(f,i+1)).join("")}</div>`:""}
     ${unknown.length?`<div class="chkGroup"><span class="eyebrow">${unknown.length} not checked</span>${unknown.map((f,i)=>row(f,i+1)).join("")}</div>`:""}
     ${good.length?`<div class="chkGroup"><span class="eyebrow">${good.length} checked and clear</span>
-      ${good.map((f,i)=>row(f,i+1)).join("")}</div>`:""}`;
+      ${good.map((f,i)=>row(f,i+1)).join("")}</div>`:""}`}`;
   if(rep.score!=null)animateScore(rep.score,C,prefix+"-arc",prefix+"-score");
 }
 
@@ -7132,6 +7134,15 @@ function renderSolStats(a,targetId){
    می‌خوانیمش (devMuted، نه یک پرچمِ تازه). */
 function renderSolExit(v,why,targetId,basis,ret,cause){
   const box=$(targetId||"tk-exitBox");if(!box)return;
+  if(targetId==="appSolExitBox"){
+    const tone=v==="sell"?"var(--pos)":v==="nosell"?"var(--neg)":"var(--warn)";
+    const title=v==="sell"?"Sell route found":v==="nosell"?"You may not be able to sell this back":"Exit not tested";
+    const badge=v==="sell"?(basis==="quote"?"Estimated from quotes":"Quoted just now"):v==="nosell"?"No sell route":"Unknown";
+    const bg=v==="sell"?(basis==="quote"?"var(--raise)":"var(--pglow)"):v==="nosell"?"color-mix(in srgb,var(--neg) 14%,transparent)":"color-mix(in srgb,var(--warn) 14%,transparent)";
+    const note=v==="sell"?(basis==="quote"?"From quotes — the fee-payer already holds this token, so we could not run a live round trip."+(typeof ret==="number"?" "+ret.toFixed(1)+"% back.":""):"A sell route was quoted just now."):v==="nosell"?(cause==="empty-pool"?"The returned indexed pools report zero liquidity. Other pools may exist.":"No sell route quoted — you may not be able to exit."):"We could not confirm this token can be sold back.";
+    box.innerHTML=`<div class="exit"><div class="exitHead"><span class="exitTtl" style="color:${tone}">${title}</span><span class="exitBadge" style="color:${basis==="quote"&&v==="sell"?"var(--tx2)":tone};background:${bg}">${badge}</span></div><div class="exitNote">${esc(note)}</div></div>`;
+    return;
+  }
   if(v==="sell"){
     // basis:"quote" — فی‌پیر از قبل این mint را داشت؛ حکم از یک رفت‌وبرگشتِ
     // *قیمتی* آمده، نه از شبیه‌سازیِ واقعاً اجراشده. همان واژه/سبکِ نشانِ
@@ -7906,7 +7917,7 @@ async function solLoadDetails(){
     const largest=results[1].status==="fulfilled"?results[1].value?.value:null;
     const epoch=results[2].status==="fulfilled"?results[2].value?.epoch:null;
     const rep=solSafetyReport(info,account.owner,largest,epoch);
-    renderSafetyReport(rep,"solSafety","sol-risk");
+    renderSafetyReport(rep,"solSafety","sol-risk",!tokenPage);
     safety.insertAdjacentHTML("beforeend",'<p class="fnote">Token-control risk is a heuristic score from the checks shown, not a probability of loss or an audit. Unknown checks are listed separately. Largest accounts may include pools and custody accounts. This does not guarantee that selling is possible.</p>');
   })();
   await Promise.allSettled([poolTask,safetyTask]);
