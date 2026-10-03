@@ -391,16 +391,17 @@ footer .fine{max-width:78ch;margin:46px 0 0;font-size:11.5px;color:var(--tx3);li
 @media(max-width:760px){.pairsTableScroll{display:none}}
 
 /* Soft sculpted controls shared across light and dark surfaces. */
-:root{--soft-hi:rgba(255,255,255,.9);--soft-lo:rgba(35,45,65,.13);--face-gap-shadow:rgba(24,31,45,.35);--switch-track:#e2e5ea;--switch-knob:#edeff2;--switch-knob-hi:#f8f9fb;--switch-rim:#f6f7f9;--switch-rim-edge:rgba(30,40,60,.08);--switch-line:rgba(40,50,70,.16);--switch-in-lo:rgba(40,50,70,.24);--switch-drop:rgba(40,50,70,.26)}
-:root[data-theme="dark"]{--soft-hi:rgba(66,76,100,.24);--soft-lo:rgba(0,0,0,.55);--face-gap-shadow:rgba(0,0,0,.85);--switch-track:#10151f;--switch-knob:#2c3444;--switch-knob-hi:#394357;--switch-rim:#232b39;--switch-rim-edge:rgba(0,0,0,.55);--switch-line:rgba(0,0,0,.6);--switch-in-lo:rgba(0,0,0,.7);--switch-drop:rgba(0,0,0,.6)}
+:root{--soft-hi:rgba(255,255,255,.9);--soft-lo:rgba(35,45,65,.13);--face-gap-shadow:rgba(24,31,45,.35);--switch-track:#e2e5ea;--switch-knob:#edeff2;--switch-knob-hi:#f8f9fb;--switch-rim:#f6f7f9;--switch-rim-edge:rgba(30,40,60,.08);--switch-line:rgba(40,50,70,.16);--switch-in-lo:rgba(40,50,70,.24);--switch-drop:rgba(40,50,70,.26);--switch-groove:rgba(30,40,60,.16);--switch-cap-hi:#ffffff;--switch-cap:#f4f5f8;--switch-cap-base:#c9cdd8}
+:root[data-theme="dark"]{--soft-hi:rgba(66,76,100,.24);--soft-lo:rgba(0,0,0,.55);--face-gap-shadow:rgba(0,0,0,.85);--switch-track:#10151f;--switch-knob:#2c3444;--switch-knob-hi:#394357;--switch-rim:#232b39;--switch-rim-edge:rgba(0,0,0,.55);--switch-line:rgba(0,0,0,.6);--switch-in-lo:rgba(0,0,0,.7);--switch-drop:rgba(0,0,0,.6);--switch-groove:rgba(0,0,0,.6);--switch-cap-hi:#14171f;--switch-cap:#1a1e28;--switch-cap-base:#0a0c12}
+/* ۴ اکتبر — سوییچ به انتخابِ مالک «کلیدِ کیبورد» شد (گزینه‌ی ۳): شیارِ کم‌عمق و دسته‌ای که لبه‌ی ضخامت دارد. */
 /* سوییچِ تم — ۳ اکتبر، به خواستِ مالک عیناً از روی تصویرِ مرجع: سینیِ بیضیِ گود با لبه‌ی برجسته و
    یک خط تیره‌ی نازک داخلِ لبه، و یک دسته‌ی بیضی‌گونِ بزرگ که سایه‌اش به چپ‌وپایین می‌افتد.
    هیچ آیکونی روی آن نیست — رنگ فقط در پس‌زمینه است؛ همه‌ی رنگ‌ها از متغیرهای بالا می‌آیند تا
    هر دو تم یک شکل باشند. */
-#themeBtn,#themeToggle{position:relative;display:inline-flex;flex:none;width:60px;height:32px;padding:0;border:0;border-radius:999px;background:var(--switch-track);box-shadow:0 0 0 2px var(--switch-rim),0 0 0 2.5px var(--switch-rim-edge),0 2px 5px 1px var(--soft-lo),inset 0 0 0 1px var(--switch-line),inset 4px 4px 7px var(--switch-in-lo),inset -2px -2px 4px var(--soft-hi);cursor:pointer;overflow:visible;transition:background .25s;transform:none}
-#themeBtn:hover,#themeToggle:hover{background:var(--switch-track);transform:none;color:inherit}
-#themeBtn::before,#themeToggle::before{content:"";position:absolute;left:2px;top:1.5px;width:31px;height:29px;box-sizing:border-box;border:0;border-radius:13px;background:linear-gradient(145deg,var(--switch-knob-hi) 0%,var(--switch-knob) 62%);box-shadow:-2px 3px 5px var(--switch-drop),0 1px 1px var(--soft-lo),inset 1px 1px 1px var(--soft-hi),inset -1px -2px 3px rgba(0,0,0,.06);transition:transform .25s,background .25s}
-[data-theme="dark"] #themeBtn::before,[data-theme="dark"] #themeToggle::before{transform:translateX(25px)}
+#themeBtn,#themeToggle{position:relative;display:inline-flex;flex:none;width:56px;height:30px;padding:0;border:0;border-radius:999px;background:var(--card2);box-shadow:inset 0 2px 3px var(--switch-groove),inset 0 -1px 0 var(--soft-hi);cursor:pointer;overflow:visible;transition:background .25s;transform:none}
+#themeBtn:hover,#themeToggle:hover{background:var(--card2);transform:none;color:inherit}
+#themeBtn::before,#themeToggle::before{content:"";position:absolute;left:3px;top:2px;width:24px;height:24px;box-sizing:border-box;border:0;border-radius:50%;background:linear-gradient(var(--switch-cap-hi),var(--switch-cap));box-shadow:inset 0 1px 0 var(--soft-hi),0 3px 0 var(--switch-cap-base),0 5px 8px -1px var(--switch-drop);transition:transform .25s}
+[data-theme="dark"] #themeBtn::before,[data-theme="dark"] #themeToggle::before{transform:translateX(26px)}
 #themeBtn svg,#themeToggle>span{display:none!important}
 #themeBtn:focus-visible,#themeToggle:focus-visible{outline:2px solid var(--acc);outline-offset:5px}
 .nav{background:var(--bg);box-shadow:4px 4px 9px var(--soft-lo),-3px -3px 8px var(--soft-hi),inset 0 1px 1px var(--soft-hi)}
@@ -409,18 +410,18 @@ footer .fine{max-width:78ch;margin:46px 0 0;font-size:11.5px;color:var(--tx3);li
 .cta:not(:disabled),.chip.solid,.tkTrade,.button.primary,.header-cta{box-shadow:inset 0 1px 1px rgba(255,255,255,.4),inset 0 -2px 2px rgba(20,30,55,.16),0 3px 6px var(--soft-lo)}
 .cta:active:not(:disabled),.chip.solid:active,.tkTrade:active,.button.primary:active,.header-cta:active{transform:translateY(1px);box-shadow:inset 0 2px 4px rgba(20,30,55,.22)}
 
-/* دکمه‌های اتصالِ کیف‌پول — ۳ اکتبر، به خواستِ مالک هم‌خانواده‌ی سوییچِ تم: همان سینیِ گود
-   (لبه‌ی برجسته + خط تیره‌ی نازک + سایه‌ی گودی)، و رویه‌ی گرادیانی ثابت داخلِ آن که با فاصله
-   و سایه‌ی زیرش معلق به نظر می‌رسد. رویه هرگز جابه‌جا نمی‌شود؛ هاور و فشار فقط روشنایی را عوض می‌کنند.
-   حالتِ غیرفعال همان سینی است با رویه‌ی خاکستری — شکل هیچ‌وقت عوض نمی‌شود، فقط رنگ. */
-.cta,#connectBtn.solid,#solConnectBtn.solid,.chip.solid[data-act="connect"]{position:relative;isolation:isolate;background:var(--switch-track);border:0;border-radius:999px;box-shadow:0 0 0 2px var(--switch-rim),0 0 0 2.5px var(--switch-rim-edge),0 2px 5px 1px var(--soft-lo),inset 0 0 0 1px var(--switch-line),inset 4px 4px 7px var(--switch-in-lo),inset -2px -2px 4px var(--soft-hi);transform:none}
-.cta::before,#connectBtn.solid::before,#solConnectBtn.solid::before,.chip.solid[data-act="connect"]::before{content:"";position:absolute;inset:4px;z-index:-1;pointer-events:none;border-radius:999px;background:var(--grad);box-shadow:0 4px 6px -1px var(--switch-drop),0 1px 2px var(--switch-drop),inset 0 1px 0 rgba(255,255,255,.3),inset 0 -1px 1px rgba(0,0,0,.08);transition:filter .16s,background .16s}
-.cta:disabled::before{background:var(--raise);box-shadow:0 2px 3px -1px var(--switch-drop),inset 0 1px 0 var(--soft-hi)}
-.cta:hover:not(:disabled),#connectBtn.solid:hover,#solConnectBtn.solid:hover,.chip.solid[data-act="connect"]:hover,.cta:active:not(:disabled),#connectBtn.solid:active,#solConnectBtn.solid:active,.chip.solid[data-act="connect"]:active{transform:none;background:var(--switch-track);box-shadow:0 0 0 2px var(--switch-rim),0 0 0 2.5px var(--switch-rim-edge),0 2px 5px 1px var(--soft-lo),inset 0 0 0 1px var(--switch-line),inset 4px 4px 7px var(--switch-in-lo),inset -2px -2px 4px var(--soft-hi)}
-.cta:hover:not(:disabled)::before,#connectBtn.solid:hover::before,#solConnectBtn.solid:hover::before,.chip.solid[data-act="connect"]:hover::before{filter:brightness(1.05)}
-.cta:active:not(:disabled)::before,#connectBtn.solid:active::before,#solConnectBtn.solid:active::before,.chip.solid[data-act="connect"]:active::before{filter:brightness(.94)}
+/* دکمه‌های اتصالِ کیف‌پول و دکمه‌ی اصلی — ۴ اکتبر، به خواستِ مالک: تخت (همان گرادیان)، و فقط وقتی
+   فشرده می‌شوند به داخل فرو می‌روند — همان زبانِ نوارِ تب‌ها و دکمه‌ی تنظیمات. هیچ جابه‌جایی‌ای ندارند. */
+.cta:not(:disabled),.cta,#connectBtn.solid,#solConnectBtn.solid,.chip.solid[data-act="connect"]{background:var(--grad);border:0;border-radius:999px;box-shadow:0 2px 6px -2px var(--soft-lo);transform:none;transition:filter .16s,box-shadow .12s}
+.cta:disabled{background:var(--raise);color:var(--tx3);box-shadow:none}
+.cta:hover:not(:disabled),#connectBtn.solid:hover,#solConnectBtn.solid:hover,.chip.solid[data-act="connect"]:hover{transform:none;filter:brightness(1.05);box-shadow:0 2px 6px -2px var(--soft-lo)}
+.cta:active:not(:disabled),#connectBtn.solid:active,#solConnectBtn.solid:active,.chip.solid[data-act="connect"]:active{transform:none;filter:none;box-shadow:inset 2px 2px 5px var(--soft-lo),inset -2px -2px 5px var(--soft-hi)}
+#setBtn:active{transform:none;background:var(--bg);box-shadow:inset 2px 2px 5px var(--soft-lo),inset -2px -2px 5px var(--soft-hi)}
 @media(max-width:720px){
-  .nav{left:8px;right:8px;bottom:calc(8px + env(safe-area-inset-bottom));border:1px solid var(--line);border-radius:22px;padding:6px 4px;gap:4px;background:var(--bg);box-shadow:4px 4px 10px var(--soft-lo),-2px -2px 6px var(--soft-hi),inset 0 1px 1px var(--soft-hi)}
+  /* ۴ اکتبر — به خواستِ مالک: نوار خودش تخت است (بی‌برجستگی، همان رنگِ تیره‌ی فعلی)، گوشه‌ها کاملاً گرد،
+     و فقط تبِ فعال در آن فرو رفته — همان رفتارِ نوارِ بالای دسکتاپ. */
+  .nav{left:8px;right:8px;bottom:calc(8px + env(safe-area-inset-bottom));border:1px solid var(--line);border-radius:999px;padding:6px;gap:4px;background:var(--bg);box-shadow:none}
+  .nav button,.nav a{border-radius:999px}
   body{padding-bottom:calc(90px + env(safe-area-inset-bottom))}
 }
 @media(max-width:480px){.logo .wordmark{display:none}}
