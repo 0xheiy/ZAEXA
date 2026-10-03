@@ -397,10 +397,10 @@ footer .fine{max-width:78ch;margin:46px 0 0;font-size:11.5px;color:var(--tx3);li
    یک خط تیره‌ی نازک داخلِ لبه، و یک دسته‌ی بیضی‌گونِ بزرگ که سایه‌اش به چپ‌وپایین می‌افتد.
    هیچ آیکونی روی آن نیست — رنگ فقط در پس‌زمینه است؛ همه‌ی رنگ‌ها از متغیرهای بالا می‌آیند تا
    هر دو تم یک شکل باشند. */
-#themeBtn,#themeToggle{position:relative;display:inline-flex;flex:none;width:72px;height:38px;padding:0;border:0;border-radius:999px;background:var(--switch-track);box-shadow:0 0 0 2px var(--switch-rim),0 0 0 2.5px var(--switch-rim-edge),0 2px 5px 1px var(--soft-lo),inset 0 0 0 1px var(--switch-line),inset 4px 4px 7px var(--switch-in-lo),inset -2px -2px 4px var(--soft-hi);cursor:pointer;overflow:visible;transition:background .25s;transform:none}
+#themeBtn,#themeToggle{position:relative;display:inline-flex;flex:none;width:60px;height:32px;padding:0;border:0;border-radius:999px;background:var(--switch-track);box-shadow:0 0 0 2px var(--switch-rim),0 0 0 2.5px var(--switch-rim-edge),0 2px 5px 1px var(--soft-lo),inset 0 0 0 1px var(--switch-line),inset 4px 4px 7px var(--switch-in-lo),inset -2px -2px 4px var(--soft-hi);cursor:pointer;overflow:visible;transition:background .25s;transform:none}
 #themeBtn:hover,#themeToggle:hover{background:var(--switch-track);transform:none;color:inherit}
-#themeBtn::before,#themeToggle::before{content:"";position:absolute;left:2px;top:1.5px;width:37px;height:35px;box-sizing:border-box;border:0;border-radius:16px;background:linear-gradient(145deg,var(--switch-knob-hi) 0%,var(--switch-knob) 62%);box-shadow:-2px 3px 5px var(--switch-drop),0 1px 1px var(--soft-lo),inset 1px 1px 1px var(--soft-hi),inset -1px -2px 3px rgba(0,0,0,.06);transition:transform .25s,background .25s}
-[data-theme="dark"] #themeBtn::before,[data-theme="dark"] #themeToggle::before{transform:translateX(31px)}
+#themeBtn::before,#themeToggle::before{content:"";position:absolute;left:2px;top:1.5px;width:31px;height:29px;box-sizing:border-box;border:0;border-radius:13px;background:linear-gradient(145deg,var(--switch-knob-hi) 0%,var(--switch-knob) 62%);box-shadow:-2px 3px 5px var(--switch-drop),0 1px 1px var(--soft-lo),inset 1px 1px 1px var(--soft-hi),inset -1px -2px 3px rgba(0,0,0,.06);transition:transform .25s,background .25s}
+[data-theme="dark"] #themeBtn::before,[data-theme="dark"] #themeToggle::before{transform:translateX(25px)}
 #themeBtn svg,#themeToggle>span{display:none!important}
 #themeBtn:focus-visible,#themeToggle:focus-visible{outline:2px solid var(--acc);outline-offset:5px}
 .nav{background:var(--bg);box-shadow:4px 4px 9px var(--soft-lo),-3px -3px 8px var(--soft-hi),inset 0 1px 1px var(--soft-hi)}
@@ -409,12 +409,15 @@ footer .fine{max-width:78ch;margin:46px 0 0;font-size:11.5px;color:var(--tx3);li
 .cta:not(:disabled),.chip.solid,.tkTrade,.button.primary,.header-cta{box-shadow:inset 0 1px 1px rgba(255,255,255,.4),inset 0 -2px 2px rgba(20,30,55,.16),0 3px 6px var(--soft-lo)}
 .cta:active:not(:disabled),.chip.solid:active,.tkTrade:active,.button.primary:active,.header-cta:active{transform:translateY(1px);box-shadow:inset 0 2px 4px rgba(20,30,55,.22)}
 
-/* Sculpted wallet cavity with a suspended brand-gradient face. */
-.cta:not(:disabled),#connectBtn.solid,#solConnectBtn.solid,.chip.solid[data-act="connect"]{position:relative;isolation:isolate;background:var(--card2);border-radius:999px;box-shadow:inset 3px 3px 5px var(--soft-lo),inset -2px -2px 4px var(--soft-hi),inset 0 0 0 1px var(--line);transform:none}
-.cta:not(:disabled)::before,#connectBtn.solid::before,#solConnectBtn.solid::before,.chip.solid[data-act="connect"]::before{content:"";position:absolute;inset:5px;z-index:-1;pointer-events:none;border-radius:inherit;background:var(--grad);box-shadow:0 3px 3px var(--face-gap-shadow),0 1px 2px var(--face-gap-shadow),inset 0 1px 0 rgba(255,255,255,.2);transition:filter .16s}
-.cta:not(:disabled)::before{border-radius:999px}
-.cta:hover:not(:disabled),#connectBtn.solid:hover,#solConnectBtn.solid:hover,.chip.solid[data-act="connect"]:hover,.cta:active:not(:disabled),#connectBtn.solid:active,#solConnectBtn.solid:active,.chip.solid[data-act="connect"]:active{transform:none;box-shadow:inset 2px 2px 4px var(--soft-lo),inset -2px -2px 4px var(--soft-hi),inset 0 0 0 1px var(--line)}
-.cta:hover:not(:disabled)::before,#connectBtn.solid:hover::before,#solConnectBtn.solid:hover::before,.chip.solid[data-act="connect"]:hover::before{filter:brightness(1.04)}
+/* دکمه‌های اتصالِ کیف‌پول — ۳ اکتبر، به خواستِ مالک هم‌خانواده‌ی سوییچِ تم: همان سینیِ گود
+   (لبه‌ی برجسته + خط تیره‌ی نازک + سایه‌ی گودی)، و رویه‌ی گرادیانی ثابت داخلِ آن که با فاصله
+   و سایه‌ی زیرش معلق به نظر می‌رسد. رویه هرگز جابه‌جا نمی‌شود؛ هاور و فشار فقط روشنایی را عوض می‌کنند.
+   حالتِ غیرفعال همان سینی است با رویه‌ی خاکستری — شکل هیچ‌وقت عوض نمی‌شود، فقط رنگ. */
+.cta,#connectBtn.solid,#solConnectBtn.solid,.chip.solid[data-act="connect"]{position:relative;isolation:isolate;background:var(--switch-track);border:0;border-radius:999px;box-shadow:0 0 0 2px var(--switch-rim),0 0 0 2.5px var(--switch-rim-edge),0 2px 5px 1px var(--soft-lo),inset 0 0 0 1px var(--switch-line),inset 4px 4px 7px var(--switch-in-lo),inset -2px -2px 4px var(--soft-hi);transform:none}
+.cta::before,#connectBtn.solid::before,#solConnectBtn.solid::before,.chip.solid[data-act="connect"]::before{content:"";position:absolute;inset:4px;z-index:-1;pointer-events:none;border-radius:999px;background:var(--grad);box-shadow:0 4px 6px -1px var(--switch-drop),0 1px 2px var(--switch-drop),inset 0 1px 0 rgba(255,255,255,.3),inset 0 -1px 1px rgba(0,0,0,.08);transition:filter .16s,background .16s}
+.cta:disabled::before{background:var(--raise);box-shadow:0 2px 3px -1px var(--switch-drop),inset 0 1px 0 var(--soft-hi)}
+.cta:hover:not(:disabled),#connectBtn.solid:hover,#solConnectBtn.solid:hover,.chip.solid[data-act="connect"]:hover,.cta:active:not(:disabled),#connectBtn.solid:active,#solConnectBtn.solid:active,.chip.solid[data-act="connect"]:active{transform:none;background:var(--switch-track);box-shadow:0 0 0 2px var(--switch-rim),0 0 0 2.5px var(--switch-rim-edge),0 2px 5px 1px var(--soft-lo),inset 0 0 0 1px var(--switch-line),inset 4px 4px 7px var(--switch-in-lo),inset -2px -2px 4px var(--soft-hi)}
+.cta:hover:not(:disabled)::before,#connectBtn.solid:hover::before,#solConnectBtn.solid:hover::before,.chip.solid[data-act="connect"]:hover::before{filter:brightness(1.05)}
 .cta:active:not(:disabled)::before,#connectBtn.solid:active::before,#solConnectBtn.solid:active::before,.chip.solid[data-act="connect"]:active::before{filter:brightness(.94)}
 @media(max-width:720px){
   .nav{left:8px;right:8px;bottom:calc(8px + env(safe-area-inset-bottom));border:1px solid var(--line);border-radius:22px;padding:6px 4px;gap:4px;background:var(--bg);box-shadow:4px 4px 10px var(--soft-lo),-2px -2px 6px var(--soft-hi),inset 0 1px 1px var(--soft-hi)}

@@ -3482,7 +3482,9 @@ async def main():
             gtBook[XE.toLowerCase()] = [pool("aerodrome-slipstream", "96575.12", XE, TAO)];
             let fetchHits = 0;
             const countingFetch = window.fetch;
-            window.fetch = async (...args) => { fetchHits++; return countingFetch(...args); };
+            // ۳ اکتبر — نوارِ «Market watch» (اتر/AERO/cbBTC) هم‌زمان استخرهای خودش را از GT می‌گیرد؛
+            // آن درخواست‌ها مالِ این توکن نیستند. فقط درخواستی شمرده می‌شود که آدرسِ همین توکن را دارد.
+            window.fetch = async (...args) => { const u = String(args[0] && args[0].url || args[0]).toLowerCase(); if (u.includes(XE.toLowerCase())) fetchHits++; return countingFetch(...args); };
             const tokE = {symbol: "SN80E", address: XE, decimals: 18};
             await runWith(qmFor(XE), tokE, 1000000n, newStats());
             out.e_firstCallFetches = fetchHits;
@@ -7309,7 +7311,7 @@ async def main():
                 sym: document.getElementById("tk-sym").textContent,
                 name: document.getElementById("tk-name").textContent,
                 addr: document.getElementById("tk-addr").textContent,
-                chip: document.getElementById("tk-chip").textContent,
+                chip: document.getElementById("tk-chip").textContent.trim(),  // ۳ اکتبر: چیپ حالا آیکونِ شبکه هم دارد
                 noticeHidden: document.getElementById("tk-solNotice").hidden,
                 noticeText: document.getElementById("tk-solNotice").textContent,
                 stats: document.getElementById("tk-tokStats").innerText.replace(/\\n/g, " "),
@@ -9443,8 +9445,10 @@ async def main():
         await g1.route("**/gt/networks/solana/tokens/multi/**", empty_gt)
         await g1.goto("http://127.0.0.1:%d/pairs.html" % port)
         await g1.wait_for_timeout(400)
-        await g1.click("#srcChip")
-        await g1.click('#srcPop [data-chain="solana"]')
+        # ۳ اکتبر — گزینشگرِ شبکه از هدر برداشته شد (۲ اکتبر، به خواستِ مالک)؛ در /pairs شبکه فقط
+        # با تب‌های خودِ صفحه عوض می‌شود. همان رفتار (تب + آدرس) از همان مسیر سنجیده می‌شود.
+        assert await g1.locator("#srcChip").count() == 0, "pairs.html must not carry a header network selector any more"
+        await g1.click('.chain-tabs button[data-chain="solana"]')
         await g1.wait_for_timeout(400)
         g_tab_on = await g1.eval_on_selector(
             '.chain-tabs button[data-chain="solana"]', "el => el.classList.contains('on')")
@@ -10676,7 +10680,11 @@ async def main():
                         const nav = document.querySelector('#nav, .nav');
                         if (!nav) return null;
                         const r = nav.getBoundingClientRect();
-                        return Math.abs(r.bottom - window.innerHeight) <= 1;
+                        // ۳ اکتبر — نوار حالا عمداً شناور است (bottom:8px از ۲ اکتبر)؛ پس باید دقیقاً به
+                        // اندازه‌ی bottomِ خودش بالای لبه‌ی viewport بنشیند — اگر هدر بلوکِ دربرگیرنده شود
+                        // همین عدد به‌هم می‌ریزد، که هدفِ اصلیِ این کاوشگر است.
+                        const gap = parseFloat(getComputedStyle(nav).bottom) || 0;
+                        return Math.abs(r.bottom - (window.innerHeight - gap)) <= 1;
                     }""")
                     if sh_nav_rect is not None:
                         sh_nav_bottom_ok = sh_nav_rect

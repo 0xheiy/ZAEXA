@@ -97,6 +97,10 @@ async def main():
   assert await page.evaluate('tokenIn.symbol+">"+tokenOut.symbol')=='USDC>AERO'
   await page.locator('#amtIn').fill('100')
   await page.wait_for_function('currentPlan!==null',timeout=45000)
+  # ۳ اکتبر — روی گوشی ردیفِ تصویری عمداً پنهان است (دکمه بالای نوارِ پایین بماند)؛ روی دسکتاپ دیده می‌شود.
+  assert not await page.locator('#baseRouteVisual').is_visible()
+  assert await page.locator('#rbTrack').is_visible()
+  await page.set_viewport_size({'width':1280,'height':900})
   assert await page.locator('#baseRouteVisual').is_visible()
   assert 'AERO' in await page.locator('#baseRouteVisual').inner_text()
   await page.locator('#amtIn').fill('')
@@ -110,7 +114,9 @@ async def main():
     {percent:100,swapInfo:{inputMint:solInputMint(),outputMint:solOutputMint(),label:'<img src=x onerror=alert(1)>'}},
     {percent:100,swapInfo:{inputMint:solInputMint(),outputMint:solOutputMint(),label:'Meteora'}}]});
   }""")
-  assert await page.locator('#solRouteVisual details summary').inner_text()=='2 more route legs'
+  # ۳ اکتبر — یک ردیف در کارت، بقیه‌ی پاها در پنجره‌ی شناورِ «+۳» (دکمه‌ی سواپ دیگر نمی‌پرد)
+  assert await page.locator('#solRouteVisual details summary').inner_text()=='+3'
+  assert await page.locator('#solRouteVisual details summary').get_attribute('aria-label')=='3 more route legs'
   assert await page.locator('#solRouteVisual .routeVenue img').count()==0
   await page.locator('#solRouteVisual details summary').click()
   assert await page.locator('#solRouteVisual details').get_attribute('open') is not None

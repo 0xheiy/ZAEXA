@@ -1,4 +1,4 @@
-import asyncio,json,re,os
+import asyncio,json,re,os,subprocess
 from pathlib import Path
 from urllib.parse import urlparse
 from datetime import datetime,timezone,timedelta
@@ -10,10 +10,15 @@ SOL='So11111111111111111111111111111111111111112'
 USDC='EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v'
 USDT='Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB'
 OWNER='11111111111111111111111111111111'
-INIT='''(()=>{const wallet={name:'Views Test Wallet',chains:['solana:mainnet'],features:{
-'standard:connect':{connect:async()=>({accounts:[{address:'11111111111111111111111111111111',publicKey:new Uint8Array(32)}]})},
+# ۳ اکتبر — از ۲ اکتبر اتصالِ سولانا یک تأییدِ امضاشده‌ی تازه می‌خواهد (confirmConnection در
+# scripts/solana-wallet/connection.js)؛ کیف‌پولِ جعلیِ قدیمی signMessage نداشت و هرگز وصل نمی‌شد.
+# همان الگوی solana-pairs-browser.py: یک کلیدِ واقعیِ ed25519 و امضای واقعی، بدونِ هیچ تراکنشی.
+KEY=json.loads(subprocess.check_output(['node','--input-type=module','-e',"import nacl from './scripts/solana-wallet/node_modules/tweetnacl/nacl-fast.js';import bs58 from './scripts/solana-wallet/node_modules/bs58/src/esm/index.js';const k=nacl.sign.keyPair();console.log(JSON.stringify({publicKey:[...k.publicKey],secretKey:[...k.secretKey],address:bs58.encode(k.publicKey)}));"],text=True,cwd=str(Path(__file__).resolve().parents[2])))
+INIT='''(()=>{const key=__KEY__;const wallet={name:'Views Test Wallet',chains:['solana:mainnet'],features:{
+'standard:connect':{connect:async()=>({accounts:[{address:key.address,publicKey:new Uint8Array(key.publicKey)}]})},
+'solana:signMessage':{signMessage:async({message})=>[{signedMessage:message,signature:SolMobile.nacl.sign.detached(message,new Uint8Array(key.secretKey))}]},
 'standard:disconnect':{disconnect:async()=>{}},'solana:signTransaction':{signTransaction:async()=>{throw Error('No real signing in this test');}}}};
-addEventListener('wallet-standard:app-ready',e=>e.detail.register(wallet));})();'''
+addEventListener('wallet-standard:app-ready',e=>e.detail.register(wallet));})();'''.replace('__KEY__',json.dumps(KEY))
 def tokens(mint,amount):
     return {'value':[{'pubkey':'account-'+mint,'account':{'data':{'parsed':{'info':{'mint':mint,'tokenAmount':{'amount':str(amount),'decimals':6,'uiAmountString':str(amount/1e6)}}}}}}]}
 async def main():
