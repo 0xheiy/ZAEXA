@@ -12,7 +12,7 @@ async def main():
  async with async_playwright() as pw:
   browser=await pw.chromium.launch()
   page=await browser.new_page(viewport={'width':1280,'height':900})
-  errors=[];quotes=[];events=[];rpc=[];config={'impact':'0.06','fee':25,'missing':False,'foreign':False,'bigpools':False}
+  errors=[];quotes=[];events=[];rpc=[];config={'impact':'0.06','fee':25,'missing':False,'foreign':False,'plan':None,'dplan':None,'mult':2,'tokaccts':[],'vd':{},'multi':None}
   page.on('pageerror',lambda e:errors.append(str(e)))
   async def route(r):
    u=urlparse(r.request.url);path=u.path;q=parse_qs(u.query)
@@ -20,7 +20,7 @@ async def main():
     events.append(json.loads(r.request.post_data));return await r.fulfill(status=204,body='')
    if path=='/sol/quote':
     quotes.append(q);amount=q['amount'][0];direct=q.get('onlyDirectRoutes')==['true'];exact=q.get('swapMode')==['ExactOut']
-    return await r.fulfill(json={'inputMint':q['inputMint'][0],'outputMint':q['outputMint'][0],'inAmount':str(int(amount)*(2 if direct else 1)) if exact else amount,'outAmount':amount if exact else str(int(amount)*(1 if direct else 2)),'otherAmountThreshold':amount,'swapMode':'ExactOut' if exact else 'ExactIn','slippageBps':50,'priceImpactPct':config['impact'],'platformFee':{'feeBps':config['fee']},'routePlan':[{'percent':100,'swapInfo':{'label':'Test DEX'}}]})
+    return await r.fulfill(json={'inputMint':q['inputMint'][0],'outputMint':q['outputMint'][0],'inAmount':str(int(amount)*(2 if direct else 1)) if exact else amount,'outAmount':amount if exact else str(int(int(amount)*(1 if direct else config['mult']))),'otherAmountThreshold':amount,'swapMode':'ExactOut' if exact else 'ExactIn','slippageBps':50,'priceImpactPct':config['impact'],'platformFee':{'feeBps':config['fee']},'routePlan':(config['dplan'] if direct and config['dplan'] is not None else config['plan'] if config['plan'] is not None else [{'percent':100,'swapInfo':{'label':'Test DEX'}}])})
    if path=='/sol/rpc':
     d=json.loads(r.request.post_data);rpc.append(d);method=d['method']
     result=None
@@ -28,20 +28,23 @@ async def main():
     elif method=='getTokenLargestAccounts':result={'value':[{'amount':'60000000'}]}
     elif method=='getEpochInfo':result={'epoch':100}
     elif method=='getBalance':result={'value':1000000000}
-    elif method=='getTokenAccountsByOwner':result={'value':[]}
+    elif method=='getTokenAccountsByOwner':result={'value':config['tokaccts']}
     else:raise AssertionError('Unexpected RPC '+method)
     return await r.fulfill(json={'result':result})
-   if path.startswith('/vd/'):return await r.fulfill(json={'v':'sell'})
+   if path.startswith('/vd/'):return await r.fulfill(json=config['vd'].get(path[4:],{'v':'sell'}))
    if '/gt/' in path:
     if '/ohlcv/' in path:return await r.fulfill(json={'data':{'attributes':{'ohlcv_list':[[1700000000,1,1,1,1,1],[1700000060,2,2,2,2,1]]}}})
     if path.endswith('/pools'):
      mint=path.split('/tokens/')[1].split('/')[0] if '/tokens/' in path else USDT
-     if config['bigpools']:
-      def pool(a,v):return {'id':'solana_'+a,'attributes':{'address':a,'name':'Pool '+a[-1],'reserve_in_usd':'1234','volume_usd':{'h24':v}},'relationships':{'base_token':{'data':{'id':'solana_'+mint}},'quote_token':{'data':{'id':'solana_'+SOL}},'dex':{'data':{'id':'test-dex'}}}}
-      if q.get('page')==['2']:return await r.fulfill(json={'data':[pool('1'*31+'z','777777')]})
-      return await r.fulfill(json={'data':[pool('1'*31+c,'200') for c in '23456789ABCDEFGHJKLM']})
      return await r.fulfill(json={'data':[{'id':'solana_'+SOL,'attributes':{'address':SOL,'name':'Token / SOL','reserve_in_usd':'100','volume_usd':{'h24':'200'}},'relationships':{'base_token':{'data':{'id':'solana_'+mint}},'quote_token':{'data':{'id':'solana_'+SOL}},'dex':{'data':{'id':'test-dex'}}}}]})
-    if '/multi/' in path:return await r.fulfill(json={'data':[]})
+    if '/multi/' in path:
+     if config['multi'] is None:return await r.fulfill(json={'data':[]})
+     m=config['multi'];mints=path.split('/multi/')[1].split(',');m['urls'].add(path);m['inflight']+=1;m['peak']=max(m['peak'],m['inflight'])
+     try:
+      await asyncio.sleep(0.05)
+      if mints[0] in m['fail']:return await r.fulfill(status=400,json={'error':'bad chunk'})  # 400 = permanent for gtJson (a 5xx would start its own 60s global backoff)
+      return await r.fulfill(json={'data':[{'attributes':{'address':a,'symbol':'T'+a[3:6],'price_usd':'1'}} for a in mints]})
+     finally:m['inflight']-=1
     if '/tokens/' in path:
      mint=path.split('/tokens/')[1]
      return await r.fulfill(json={'data':{'attributes':{'address':mint,'symbol':'USDC' if mint==USDC else 'USDT','decimals':6,'price_usd':'1'}}})
@@ -127,7 +130,7 @@ async def main():
   await page.wait_for_function('document.querySelector("#solDirectF").textContent.includes("more received")')
   await page.wait_for_function('document.querySelector("#solSafety").textContent.includes("60.00%")')
   safety=await page.locator('#solSafety').inner_text();assert 'Revoked' in safety and 'Active' in safety and 'No transfer-fee' in safety,safety
-  await page.wait_for_function('document.querySelector("#solPools").textContent.includes("test-dex")')
+  await page.wait_for_function('document.querySelector("#solPools").textContent.includes("Test DEX")')
   assert await page.locator('#shareBtn').count()==0
   assert await page.locator('#solSafety .chkGroup, #solSafety .chkNum').count()==0
   assert await page.locator('#solSafety .chk.high').count()==1
@@ -280,77 +283,50 @@ async def main():
   await page.wait_for_function('document.querySelector("#solSafety").textContent.includes("not a readable")')
   assert 'Safety is unknown' not in await page.locator('#solSafety').inner_text()
   config['foreign']=False
-  config['bigpools']=True;await page.goto('http://zaexa.test/app#swap?chain=solana&in='+SOL+'&out='+USDT)  # کشِ GT: بارگذاریِ تازه
-  await page.wait_for_function('document.querySelectorAll("#solPools .vrow").length===20')
-  await page.locator('#solPools button.chip').click()
-  await page.wait_for_function('document.querySelectorAll("#solPools .vrow").length===21')
-  p1=await page.evaluate('document.querySelector("#solPools .vrow").outerHTML.replace(/1{31}\\w/g,"X").replace(/Pool \\w/,"Pool X").replace("$200","$V")')
-  last=await page.evaluate('document.querySelector("[data-pool$=z]").outerHTML.replace(/1{31}\\w/g,"X").replace(/Pool \\w/,"Pool X").replace("$777,777","$V")')
-  assert p1==last,(p1,last)
-  assert '$777,777 volume' in await page.locator('[data-pool$=z]').inner_text()
-  config['bigpools']=False
-  print('pools Load more: page 2 rows use the same renderer (24h volume column, classes, number format); non-mint account shows the unreadable card')
-  await page.goto('http://zaexa.test/t/not-an-address');await page.wait_for_function('document.querySelector("#tk-sym").textContent==="Unreadable address"')
-  assert await page.locator('#solSwap').evaluate('e=>e.hidden')
-  assert await page.evaluate('document.baseURI')=='http://zaexa.test/'
-  await page.goto('http://zaexa.test/app#swap?chain=solana')
-  await page.wait_for_function('typeof solLoadMobileBundle==="function"')
-  # hashchange با in/out باید پارامترهای اشتراک را اعمال کند، نه فقط زنجیره را
-  await page.evaluate('location.hash="#swap?chain=solana&in=%s&out=%s"'%(USDT,USDC))
-  await page.wait_for_function('solInputMint()==="%s" && solOutputMint()==="%s"'%(USDT,USDC))
-  print('hashchange with chain=solana&in&out applies the share pair')
-  await page.set_viewport_size({'width':390,'height':844})
-  await page.evaluate("Object.defineProperty(navigator,'userAgent',{value:'Android Mobile',configurable:true})")
-  await page.evaluate('solOpenWalletPicker()')
-  assert await page.locator('#solPhantomOpen').is_visible()
-  assert await page.locator('#solSolflareOpen').is_visible()
-  assert (await page.locator('#solSolflareOpen').get_attribute('href')).startswith('https://solflare.com/ul/v1/browse/')
-  link=await page.locator('#solPhantomOpen').get_attribute('href')
-  assert link.startswith('https://phantom.app/ul/browse/') and 'chain%3Dsolana' in link,link
-  if os.environ.get('ZAEXA_TEST_ARTIFACTS'):
-   await page.screenshot(path=str(Path(os.environ['ZAEXA_TEST_ARTIFACTS'])/'solana-wallet-mobile.png'))
-  await page.locator('#solWalClose').click()
-  await page.evaluate('solLoadMobileBundle()')
-  approval_setup="""() => {
-   const kp=SolMobile.nacl.sign.keyPair();const account={address:SolMobile.bs58.encode(kp.publicKey),publicKey:kp.publicKey,chains:['solana:mainnet'],features:['solana:signMessage']};
-   window.approvalMessages=[];
-   window.approvalWallet={name:'Approval test',accounts:[account],features:{
-    'standard:connect':{connect:async()=>({accounts:[account]})},
-    'standard:disconnect':{disconnect:async()=>{}},
-    'solana:signMessage':{signMessage:({message})=>new Promise((resolve,reject)=>{
-     approvalMessages.push(SolMobile.bs58.encode(message));window.rejectApproval=()=>reject(Object.assign(Error('Rejected'),{code:4001}));
-     window.finishApproval=()=>resolve([{signedMessage:message,signature:SolMobile.nacl.sign.detached(message,kp.secretKey)}]);
-    })}
-   }};window.connectApprovalTest=()=>{window.approvalAttempt=solConnectWallet(approvalWallet);};
-  }"""
-  await page.evaluate(approval_setup)
-  await page.evaluate('connectApprovalTest()');await page.wait_for_function('approvalMessages.length===1')
-  assert await page.evaluate('solAccount===null && solWalletApi===null')
-  assert await page.locator('#connectBtn').inner_text()=='Approve in wallet…'
-  assert await page.locator('#connectBtn').is_disabled()
-  await page.evaluate('rejectApproval()');await page.wait_for_function('!solConnectionBusy')
-  assert await page.locator('#connectBtn').inner_text()=='Connect wallet'
-  await page.evaluate('connectApprovalTest()');await page.wait_for_function('approvalMessages.length===2')
-  await page.locator('[data-act="solCancelConnect"]').click()
-  await page.evaluate('finishApproval()');await page.evaluate('approvalAttempt')
-  assert await page.evaluate('solAccount===null')
-  await page.evaluate('connectApprovalTest()');await page.wait_for_function('approvalMessages.length===3')
-  await page.evaluate('finishApproval()');await page.wait_for_function('solAccount!==null')
-  assert await page.locator('#connectBtn').inner_text()!='Connect wallet'
-  await page.evaluate('solDisconnectWallet(true)')
-  await page.evaluate('connectApprovalTest()');await page.wait_for_function('approvalMessages.length===4')
-  assert await page.evaluate('solAccount===null && new Set(approvalMessages).size===4')
-  await page.evaluate('rejectApproval()');await page.wait_for_function('!solConnectionBusy')
-  print('real cryptographic connection approval: pending header, rejection, cancellation, late approval and fresh reconnect verified')
-  await page.goto('http://zaexa.test/t/'+USDT)
-  await page.wait_for_function('activeChain==="solana" && tokenPage')
-  await page.evaluate('solLoadMobileBundle()');await page.evaluate(approval_setup)
-  await page.evaluate('connectApprovalTest()');await page.wait_for_function('approvalMessages.length===1')
-  assert await page.locator('#solConnectionNotices [data-act="solCancelConnect"]').is_visible()
-  assert await page.evaluate('solAccount===null')
-  await page.locator('#solConnectionNotices [data-act="solCancelConnect"]').click()
-  await page.evaluate('finishApproval()');await page.evaluate('approvalAttempt')
-  assert await page.evaluate('solAccount===null')
+  # Venues card (replaces the GeckoTerminal indexed-pools list): empty until an amount, then Jupiter route steps + best single pool
+  await page.goto('http://zaexa.test/app#swap?chain=solana&in='+USDC+'&out='+USDT)
+  await page.wait_for_function('document.querySelector("#solPools .ttl")?.textContent==="Venues for this swap"')
+  assert 'Enter an amount and we will show every venue Jupiter routes through, plus the best single pool.' in await page.locator('#solPools').inner_text()
+  assert await page.locator('#solPools .vrow').count()==0 and await page.locator('#solVenueMeta').text_content()=='—'
+  assert await page.locator('#solPools button').count()==0 and 'Load more' not in await page.locator('#solPools').inner_text()
+  def step(label,amm,pct,out,a=USDC,b=USDT):return {'percent':pct,'swapInfo':{'label':label,'ammKey':amm,'inputMint':a,'outputMint':b,'outAmount':out}}
+  # 2 steps sharing one ammKey collapse to one row; direct quote (1.25) is worse than the route (2.5) so the route rows carry "best"
+  config['plan']=[step('Orca','AMM1',60,'1500000'),step('Orca again','AMM1',40,'1000000')]
+  config['dplan']=[step('Raydium','AMM9',100,'1250000')]
+  await page.wait_for_function('solInputDecimals()!=null && solOutputDecimals()!=null')
+  await page.fill('#solAmt','1.25')
+  await page.wait_for_function('document.querySelector("#solPools").textContent.includes("Best single pool · Raydium")')
+  assert await page.locator('#solPools .vrow').count()==2   # the duplicate ammKey must not become a third row
+  rows=await page.locator('#solPools .vrow').all_inner_texts()
+  assert 'Orca' in rows[0] and 'Orca again' not in rows[0] and 'USDC → USDT' in rows[0] and '1.5' in rows[0] and '60% of route' in rows[0],rows
+  assert 'Best single pool · Raydium' in rows[1] and '1.25' in rows[1],rows
+  assert await page.locator('#solPools .vrow').nth(1).locator('.vtag').count()==0 and await page.locator('#solPools .vrow').nth(0).locator('.vtag').count()==1
+  assert await page.locator('#solVenueMeta').text_content()=='2 venues',await page.locator('#solPools').inner_html()
+  assert await page.locator('#solPools .vrow.win').count()==1
+  assert await page.locator('#solPools .vrow .vdot').count()==2 and await page.locator('#solPools .vrow .vout .a').count()==2
+  # when the single pool beats the route, it (and only it) is marked best
+  config['mult']=0.5;config['dplan']=[step('Meteora','AMM8',100,'1250000')];config['plan']=[step('Orca','AMM1',100,'1000000')]
+  await page.fill('#solAmt','1.26');await page.wait_for_function('document.querySelector("#solPools").textContent.includes("Meteora")')
+  assert await page.locator('#solPools .vrow.win').count()==1 and 'Best single pool' in await page.locator('#solPools .vrow.win').inner_text()
+  config['mult']=2
+  # untrusted labels are escaped
+  config['plan']=[step('<img src=x onerror=window.pwned=1>','AMM2',100,'2000000')]
+  config['dplan']=[step('<b id=bold>x</b>','AMM3',100,'1000000')]
+  await page.fill('#solAmt','1.27');await page.wait_for_function('document.querySelector("#solPools").textContent.includes("<img src=x")')
+  assert await page.locator('#solPools img, #solPools #bold').count()==0 and await page.evaluate('window.pwned===undefined')
+  assert '<b id=bold>x</b>' in await page.locator('#solPools').inner_text()
+  # a failed direct quote omits the single-pool row only
+  config['dplan']=[];config['plan']=[step('Orca','AMM1',100,'2000000')]
+  await page.fill('#solAmt','1.28');await page.wait_for_function('document.querySelector("#solPools").textContent.includes("Orca")')
+  assert await page.locator('#solPools .vrow').count()==1 and 'Best single pool' not in await page.locator('#solPools').inner_text()
+  assert await page.locator('#solVenueMeta').text_content()=='1 venue'
+  # clearing the amount empties the card; a token change does too
+  await page.fill('#solAmt','');await page.wait_for_function('document.querySelectorAll("#solPools .vrow").length===0')
+  assert 'Enter an amount' in await page.locator('#solPools').inner_text() and await page.locator('#solVenueMeta').text_content()=='—'
+  await page.fill('#solAmt','1.3');await page.wait_for_function('document.querySelectorAll("#solPools .vrow").length===1')
+  await page.evaluate('solSwapReset(solMintCur)');assert await page.locator('#solPools .vrow').count()==0
+  config['plan']=None;config['dplan']=None
+  print('venues card: empty before an amount; one row per distinct ammKey plus Best single pool; best marked on the better side; labels escaped; failed direct quote omits only its row; clearing the amount or changing token empties it')
   assert await page.evaluate('document.documentElement.scrollWidth<=innerWidth')
   print('token report: pending approval notice and Cancel visible on mobile; late approval remains disconnected')
   await page.goto('http://zaexa.test/app#swap?chain=solana')
@@ -392,6 +368,69 @@ async def main():
   assert await page.evaluate('mobileSent.method')=='solana_signTransaction'
   await page.evaluate('solDisconnectWallet(true)');assert await page.evaluate('solAccount===null')
   print('mobile QR rendered with real local library; cancellation, reconnect, signing adapter and disconnect verified against fake wallet; no real signatures')
+  # ---- 4 Oct: injected wallet + sol:unconfirmed + 300-token portfolio, on a page where the big WalletConnect bundle is blocked ----
+  seedp=await browser.new_page()
+  await seedp.route('**/*',route);await seedp.goto('http://zaexa.test/app#swap?chain=solana')
+  await seedp.wait_for_function('typeof solLoadMobileBundle==="function"');await seedp.evaluate('solLoadMobileBundle()')
+  kp=await seedp.evaluate('()=>{const k=SolMobile.nacl.sign.keyPair();return {secret:Array.from(k.secretKey),address:SolMobile.bs58.encode(k.publicKey),pub:Array.from(k.publicKey)}}')
+  await seedp.close()
+  ip=await browser.new_page(viewport={'width':1280,'height':900});ip.on('pageerror',lambda e:errors.append(str(e)))
+  blocked=[];reqs=[]
+  async def block_route(r):
+   if 'solana-wallet.bundle' in r.request.url:blocked.append(r.request.url);return await r.abort()
+   return await route(r)
+  ip.on('request',lambda q:reqs.append(q.url) if q.resource_type=='script' else None)
+  await ip.route('**/*',block_route)
+  config['vd']={USDT:{'v':None,'why':'sol:unconfirmed'}}
+  await ip.goto('http://zaexa.test/app#swap?chain=solana&in='+SOL+'&out='+USDT+'&amt=0.1')
+  await ip.wait_for_function('solQuote!==null && solOutputDecimals()!=null')
+  before=len(reqs)
+  await ip.evaluate("""(kp)=>{const account={address:kp.address,publicKey:new Uint8Array(kp.pub),chains:['solana:mainnet'],features:['solana:signMessage']};
+   window.injWallet={name:'Injected test',accounts:[account],features:{'standard:connect':{connect:async()=>({accounts:[account]})},'standard:disconnect':{disconnect:async()=>{}},
+   'solana:signMessage':{signMessage:async({message})=>[{signedMessage:message,signature:SolConfirm.nacl.sign.detached(message,new Uint8Array(kp.secret)),signatureType:'ed25519'}]}}};
+   window.injAttempt=solConnectWallet(injWallet);}""",kp)
+  await ip.wait_for_function('solAccount!==null')
+  extra=[u for u in reqs[before:] if 'bundle' in u]
+  assert len(extra)==1 and 'solana-confirm.bundle.' in extra[0],extra
+  assert not blocked and await ip.evaluate('window.SolMobile===undefined && typeof SolConfirm==="object"'),blocked
+  print('injected wallet connects with only the small confirm bundle fetched; the WalletConnect bundle was never requested')
+  # buy into a sol:unconfirmed token: amber card, two-step button; sell side never gated
+  await ip.wait_for_function('document.querySelector("#appSolExitBox").textContent.includes("unconfirmed")')
+  box=await ip.locator('#appSolExitBox').inner_text()
+  assert 'Sell-back failed in our simulation' in box and 'we do not call it a honeypot yet. Treat it as high risk.' in box and 'No way out' not in box and 'No sell route' not in box,box
+  assert 'var(--warn)' in await ip.locator('#appSolExitBox .exitTtl').get_attribute('style')
+  await ip.wait_for_function('solQuote!==null')
+  await ip.wait_for_function('document.querySelector("#solSwapBtn").textContent!=="Connect wallet"')
+  assert await ip.locator('#solSwapBtn').inner_text()=='Buy anyway (sell-back unconfirmed)' and await ip.locator('#solSwapBtn').is_enabled()
+  swaps=[]
+  ip.on('request',lambda q:swaps.append(q.url) if '/sol/swap' in q.url else None)
+  await ip.locator('#solSwapBtn').click()
+  assert await ip.locator('#solSwapBtn').inner_text()=='Swap' and not swaps,swaps
+  await ip.evaluate('solSide="sell";solOnSideChange()')
+  assert not await ip.evaluate('solNeedsArm()') and 'Buy anyway' not in await ip.locator('#solSwapBtn').inner_text()
+  await ip.evaluate('solArmedMints.clear();solSide="buy";solOnSideChange()')
+  await ip.fill('#solAmt','0.1');await ip.wait_for_function('solQuote!==null')
+  assert await ip.locator('#solSwapBtn').inner_text()=='Buy anyway (sell-back unconfirmed)'
+  print('sol:unconfirmed: amber caution card, first click only arms the buy, sell side not gated, arming is per token')
+  # 320-mint wallet: only the first 300 are priced, 30 per request, at most 3 in flight; a failed chunk leaves its rows unpriced
+  def mint_of(i):return 'Tok'+''.join(chr(97+int(d)) for d in '%03d'%i)+'X'*37
+  mints=[mint_of(i) for i in range(320)]
+  config['tokaccts']=[{'pubkey':'Acct'+m,'account':{'data':{'parsed':{'info':{'mint':m,'tokenAmount':{'amount':'1000000','decimals':6}}}}}} for m in mints]
+  config['multi']={'urls':set(),'inflight':0,'peak':0,'fail':{mints[59]}}
+  await ip.evaluate('setView("folio",false)')
+  await ip.wait_for_function('document.querySelectorAll("#folioBody .frow").length===321')
+  m=config['multi']
+  assert len(m['urls'])==10 and m['peak']<=3,(len(m['urls']),m['peak'])
+  assert 'Only the first 300 tokens are priced.' in await ip.locator('#folioBody').inner_text()
+  assert await ip.locator('#folioBody .frow .u:text-is("no price")').count()==21+30
+  print('portfolio: 321 holdings -> 10 price requests of 30, at most 3 in flight, failed chunk leaves 30 rows unpriced, 21 beyond the cap unpriced, cap note shown')
+  config['multi']=None;config['tokaccts']=[]
+  await ip.goto('http://zaexa.test/t/'+USDT)
+  await ip.wait_for_function('document.querySelector("#tk-exitBox").textContent.includes("unconfirmed")')
+  tb=await ip.locator('#tk-exitBox').inner_text()
+  assert 'Our simulated sell of this token failed.' in tb and 'No way out' not in tb and 'var(--warn)' in await ip.locator('#tk-exitBox .tripPct').get_attribute('style'),tb
+  print('token page shows the same amber unconfirmed card, never the red No way out')
+  await ip.close()
   assert not errors,errors
   assert all(e.get('c') in ['base','solana'] for e in events),events
   print('token-page chart, unreadable-address card, network-labelled events; no page errors')

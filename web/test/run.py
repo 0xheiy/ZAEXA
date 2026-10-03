@@ -256,6 +256,23 @@ def check_asset_cache_headers():
             "index.html references \"./%s\" but no such file exists next to it — "
             "the page would 404 loading it." % r_)
 
+    # ۴ب) بسته‌های ولت سولانا با مسیر مطلق ("/name.bundle.<hash>.js") صدا زده می‌شوند —
+    #     هر ارجاع باید فایلِ واقعی داشته باشد، و بسته‌ی کوچکِ تأیید اتصال (کیف‌پولِ
+    #     تزریق‌شده) نباید WalletConnect را با خودش بکشد، وگرنه کل دلیلش از بین می‌رود.
+    bundle_refs = sorted(set(re.findall(r'"/(solana-[a-z]+\.bundle\.[0-9a-f]{8}\.js)"', idx_src)))
+    assert any(b.startswith("solana-confirm.bundle.") for b in bundle_refs) and \
+        any(b.startswith("solana-wallet.bundle.") for b in bundle_refs), \
+        "index.html must reference both the small confirm bundle and the WalletConnect bundle: %r" % bundle_refs
+    for b in bundle_refs:
+        assert os.path.exists(os.path.join(webdir, b)), "index.html references /%s but the file is missing" % b
+    confirm = [b for b in bundle_refs if b.startswith("solana-confirm.bundle.")][0]
+    confirm_src = open(os.path.join(webdir, confirm), encoding="utf-8").read()
+    assert os.path.getsize(os.path.join(webdir, confirm)) < 100_000 and "UniversalProvider" not in confirm_src \
+        and "walletconnect" not in confirm_src.lower(), \
+        "the confirm bundle grew back into the WalletConnect bundle (%d bytes)" % os.path.getsize(os.path.join(webdir, confirm))
+    print("[bundle refs] index.html references %s; the confirm bundle is %d bytes and carries no WalletConnect code"
+          % (", ".join(bundle_refs), os.path.getsize(os.path.join(webdir, confirm))))
+
     # ۵) دستور ساخت مستندشده باید هم _headers و هم همه‌ی js را کپی کند.
     wr_src = open(os.path.join(HERE, "..", "..", "wrangler.toml"), encoding="utf-8").read()
     build_line = next((l for l in wr_src.splitlines() if "cp web/index.html" in l), None)

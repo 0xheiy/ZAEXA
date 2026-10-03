@@ -11,7 +11,7 @@ function ctx(names,extra={}){
   const c=vm.createContext({console,URLSearchParams,Date,Map,Set,BigInt,
     SOL_MINT_ADDR:SOL,SOL_MINT_RE:/^[1-9A-HJ-NP-Za-km-z]{32,44}$/,
     SOL_TOKEN_PROGRAMS:['legacy','2022'],SERIES:['red','blue'],GT:'https://example.test/gt',
-    folioSeq:0,flowSeq:0,flowWindow:'h1',activeChain:'solana',solAccount:account,solMintCur:USDC,
+    SOL_FOLIO_PRICE_MAX:Number(/const SOL_FOLIO_PRICE_MAX=(\d+);/.exec(source)[1]),folioSeq:0,flowSeq:0,flowWindow:'h1',activeChain:'solana',solAccount:account,solMintCur:USDC,
     $:id=>elements[id]??={innerHTML:'',textContent:''},paintFlowToken(){},
     esc:s=>String(s).replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('"','&quot;'),
     okLogo:()=>false,solPaintAvatarIntoEl(){},shortAddr:s=>s.slice(0,5),...extra});
@@ -48,6 +48,17 @@ test('unknown prices remain visible and do not become a zero total',async()=>{
     solRpcCall:async method=>method==='getBalance'?{value:1000000000}:{value:[]},fetchSolMetaMulti:async()=>({}),
   });await c.renderSolFolio();
   assert.equal(c.$('folioTotal').textContent,'Value unavailable');assert.match(c.$('folioBody').innerHTML,/no price/);
+});
+test('portfolio prices at most 300 mints in chunks of 30 with 3 in flight and says so',async()=>{
+  let call=null;const accts=Array.from({length:320},(_,i)=>token('p'+i,('Tok'+[...String(i).padStart(3,'0')].map(d=>String.fromCharCode(97+Number(d))).join('')).padEnd(43,'X'),'1000000'));
+  const c=ctx(['renderSolFolio','solCollectHoldings','solFormatUnits'],{
+    solRpcCall:async method=>method==='getBalance'?{value:0}:{value:accts},fetchSolMetaMulti:async(m,size,conc)=>{call={n:m.length,size,conc};return {};},
+  });await c.renderSolFolio();
+  assert.deepEqual(call,{n:300,size:30,conc:3});assert.match(c.$('folioBody').innerHTML,/Only the first 300 tokens are priced\./);
+});
+test('portfolio under the cap shows no cap note',async()=>{
+  const c=ctx(['renderSolFolio','solCollectHoldings','solFormatUnits'],{solRpcCall:async method=>method==='getBalance'?{value:1000000000}:{value:[]},fetchSolMetaMulti:async()=>({})});
+  await c.renderSolFolio();assert.doesNotMatch(c.$('folioBody').innerHTML,/Only the first/);
 });
 test('old portfolio cannot overwrite a newly selected network',async()=>{
   let finish;const pending=new Promise(r=>finish=r);

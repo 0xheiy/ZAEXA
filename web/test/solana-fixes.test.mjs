@@ -21,11 +21,11 @@ function context(names, extras = {}) {
     solSide: 'buy', solMode: 'exactIn', solMintCur: JUP, solTokenDecimals: 6, solTokenSymbol: 'JUP',
     solRefMint: SOL, solRefDecimals: 9, solRefSymbol: 'SOL', solRefVerdict: null, solBalRef: null, solRefAtaExists: null,
     solBalSol: null, solBalTok: null, solOutAtaExists: null, solAccount: { address: 'w' }, solBalanceSeq: 0, solBalanceKey: null,
-    solTokenSeq: 0, solVerdictV: null, SOL_PRIO_FEE_RESERVE: 0.0002, slippageBps: 50,
+    solTokenSeq: 0, solVerdictV: null, solVerdictWhy: null, solRefVerdictWhy: null, SOL_UNCONF: 'sol:unconfirmed', solArmedMints: new Set(), solRenderVenues() {}, solDirectQuote: null, SOL_PRIO_FEE_RESERVE: 0.0002, slippageBps: 50,
     solPaintLegs() {}, solSetReference: async () => {}, activeChain: "base", view: "swap", solOnAmtInput() {}, solPaintBalance() {}, solPaintFeeRows() {}, solSwapApplyGate() {}, solRenderReadout() {}, solUpdateSwapBtn() {},
     ...extras,
   });
-  const all = [...new Set(['solInputMint', 'solOutputMint', 'solInputDecimals', 'solOutputDecimals', 'solAmountRaw', 'solFormatUnits', ...names])];
+  const all = [...new Set(['solInputMint', 'solOutputMint', 'solInputDecimals', 'solOutputDecimals', 'solAmountRaw', 'solFormatUnits', 'solNeedsArm', ...names])];
   for (const name of all) {
     const match = new RegExp(`(?:async )?function ${name}\\(`).exec(html);
     assert.ok(match, `missing ${name}`);

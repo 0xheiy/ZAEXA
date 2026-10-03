@@ -249,10 +249,12 @@ svg.diag{display:block;width:100%;height:auto}
    یک خط تیره‌ی نازک داخلِ لبه، و یک دسته‌ی بیضی‌گونِ بزرگ که سایه‌اش به چپ‌وپایین می‌افتد.
    هیچ آیکونی روی آن نیست — رنگ فقط در پس‌زمینه است؛ همه‌ی رنگ‌ها از متغیرهای بالا می‌آیند تا
    هر دو تم یک شکل باشند. */
-#themeBtn,#themeToggle{position:relative;isolation:isolate;display:inline-flex;align-items:center;justify-content:space-between;flex:none;width:64px;height:36px;padding:3px;box-sizing:border-box;border:1px solid var(--line);border-radius:999px;background:var(--bg);box-shadow:none;cursor:pointer;overflow:visible;transition:none;transform:none}
+#themeBtn,#themeToggle{position:relative;isolation:isolate;display:inline-flex;align-items:center;justify-content:space-between;gap:0;flex:none;width:64px;height:36px;padding:3px;box-sizing:border-box;border:1px solid var(--line);border-radius:999px;background:var(--bg);box-shadow:none;cursor:pointer;overflow:visible;transition:none;transform:none}
 #themeBtn:hover,#themeToggle:hover{background:var(--bg);transform:none;box-shadow:none;color:inherit}
 #themeBtn::before,#themeToggle::before{content:"";position:absolute;left:3px;top:3px;width:28px;height:28px;border-radius:999px;z-index:-1;background:var(--bg);box-shadow:inset 2px 2px 5px var(--soft-lo),inset -2px -2px 5px var(--soft-hi);transition:transform .25s}
 [data-theme="dark"] #themeBtn::before,[data-theme="dark"] #themeToggle::before{transform:translateX(28px)}
+/* ۴ اکتبر — .chip در اپ gap:7px دارد و ماه را ۷ پیکسل از گودی بیرون می‌برد (gap:0 بالا)؛ و در تمِ تیره همان سیاهیِ سوییچِ صفحه‌ی معرفی، نه رنگِ زمینه‌ی صفحه. */
+[data-theme="dark"] #themeBtn,[data-theme="dark"] #themeToggle,[data-theme="dark"] #themeBtn:hover,[data-theme="dark"] #themeToggle:hover,[data-theme="dark"] #themeBtn::before,[data-theme="dark"] #themeToggle::before{background:#08070d}
 #themeBtn svg,#themeToggle>span{display:grid!important;place-items:center;flex:none;position:static;width:28px;height:28px;margin:0;padding:6px;box-sizing:border-box;transform:none;color:var(--tx3);transition:color .25s}
 #themeToggle>span{padding:0}#themeToggle svg{width:16px;height:16px}
 #themeBtn .themeSun,#themeToggle .sun{order:0}#themeBtn .themeMoon,#themeToggle .moon{order:1}

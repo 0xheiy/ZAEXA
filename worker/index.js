@@ -1813,7 +1813,8 @@ async function solFetchVerdict(mint, deadlineAt, ctx, env) {
   if (v === "nosell") {
     const vetoWhy = await solNosellVeto(mint, env);
     if (vetoWhy) return { v: null, why: vetoWhy };
-    if(await solPoolsEmpty(mint,env)===true)return {v, cause:"empty-pool", basis, ret};
+    // ۴ اکتبر — تصمیمِ مالک: nosellِ سولانا (حتی empty-pool) هیچ‌جا منتشر نمی‌شود
+    return { v: null, why: "sol:unconfirmed" };
   }
   return v === null ? { v: null, why: why || "internal" } : { v, basis, ret };
 }

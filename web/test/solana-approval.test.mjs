@@ -21,7 +21,7 @@ function setup(){
   solAccount:null,solWalletApi:null,solPendingWallet:null,solConnectionBusy:false,solWalletConnectSeq:0,
   solBalanceSeq:0,solEventsUnsub:null,solDisconnectPending:Promise.resolve(),SOL_WALLET_LS_KEY:'wallet',
   localStorage:{setItem:(k,v)=>storage.set(k,v),removeItem:k=>storage.delete(k)},
-  solLoadMobileBundle:async()=>({nacl,bs58,confirmConnection}),solSetWalletOff(){},solSubscribeWalletEvents(){},
+  solLoadMobileBundle:async()=>{c.mobileLoads=(c.mobileLoads||0)+1;return {nacl,bs58,confirmConnection};},solLoadConfirmBundle:async()=>{c.confirmLoads=(c.confirmLoads||0)+1;return {nacl,bs58,confirmConnection};},solSetWalletOff(){},solSubscribeWalletEvents(){},
   solPaintWallet(){},solRefreshBalances(){},solScheduleQuote(){},solPaintBalance(){},solInvalidateQuote(){},
   solSetNotice(text){c.notice=text;},note:(type,text)=>text,esc:s=>s,isUserRejection:e=>e.code===4001,
   ev:(...args)=>events.push(args),$:()=>({classList:{remove(){}}}),
@@ -80,4 +80,13 @@ test('Wallet Standard / Phantom output without an account connects after valid a
 test('signature by a different key cannot connect even without output account',async()=>{
  const s=setup(),wrong=nacl.sign.keyPair();s.setApproval(async message=>({signedMessage:message,signature:nacl.sign.detached(message,wrong.secretKey)}));
  await s.c.solConnectWallet(s.wallet);assert.equal(s.c.solAccount,null);assert.match(s.c.notice,/Invalid connection approval signature/);
+});
+
+test('injected wallets confirm through the small bundle only; WalletConnect keeps the big one',async()=>{
+ const s=setup();
+ await s.c.solConnectWallet(s.wallet);
+ assert.equal(s.c.solAccount.address,s.acc.address);assert.equal(s.c.confirmLoads,1);assert.equal(s.c.mobileLoads,undefined);
+ const w2=setup();w2.wallet.name='WalletConnect Solana';
+ await w2.c.solConnectWallet(w2.wallet);
+ assert.equal(w2.c.solAccount.address,w2.acc.address);assert.equal(w2.c.mobileLoads,1);assert.equal(w2.c.confirmLoads,undefined);
 });

@@ -16,7 +16,7 @@ OWNER='11111111111111111111111111111111'
 KEY=json.loads(subprocess.check_output(['node','--input-type=module','-e',"import nacl from './scripts/solana-wallet/node_modules/tweetnacl/nacl-fast.js';import bs58 from './scripts/solana-wallet/node_modules/bs58/src/esm/index.js';const k=nacl.sign.keyPair();console.log(JSON.stringify({publicKey:[...k.publicKey],secretKey:[...k.secretKey],address:bs58.encode(k.publicKey)}));"],text=True,cwd=str(Path(__file__).resolve().parents[2])))
 INIT='''(()=>{const key=__KEY__;const wallet={name:'Views Test Wallet',chains:['solana:mainnet'],features:{
 'standard:connect':{connect:async()=>({accounts:[{address:key.address,publicKey:new Uint8Array(key.publicKey)}]})},
-'solana:signMessage':{signMessage:async({message})=>[{signedMessage:message,signature:SolMobile.nacl.sign.detached(message,new Uint8Array(key.secretKey))}]},
+'solana:signMessage':{signMessage:async({message})=>[{signedMessage:message,signature:SolConfirm.nacl.sign.detached(message,new Uint8Array(key.secretKey))}]},
 'standard:disconnect':{disconnect:async()=>{}},'solana:signTransaction':{signTransaction:async()=>{throw Error('No real signing in this test');}}}};
 addEventListener('wallet-standard:app-ready',e=>e.detail.register(wallet));})();'''.replace('__KEY__',json.dumps(KEY))
 def tokens(mint,amount):

@@ -2800,7 +2800,10 @@ function isSolidlyReqId(id) { return PROBE_KIND_BY_ID.get(id) === "SOLIDLY"; }
       { headers: { "cf-connecting-ip": "203.0.113.81" } }), spyEnv, {});
     const raw = await res.clone().text();
     const body = JSON.parse(raw);
-    ok(body.v === "nosell", "nosell scenario with env.JUP_KEY set did not surface \"nosell\": " + raw);
+    // ۴ اکتبر — nosellِ سولانا منتشر نمی‌شود؛ همان شبیه‌سازیِ شکست‌خورده حالا sol:unconfirmed است
+    ok(body.v === null && body.why === "sol:unconfirmed" && body.cause === undefined && body.ret === undefined &&
+      vs.VD_SOL_WHY.includes(body.why),
+      "a sim-failed sell with env.JUP_KEY set must surface as null/sol:unconfirmed (never nosell): " + raw);
     ok(!raw.includes(SECRET_JUP), "THE JUP KEY LEAKED INTO A \"nosell\" RESPONSE BODY: " + raw);
   }
 
@@ -3027,6 +3030,7 @@ function isSolidlyReqId(id) { return PROBE_KIND_BY_ID.get(id) === "SOLIDLY"; }
   const og = await import("./og.js");
 
   const SOL_VERDICT_META = { liquidity: "$5.00M", vol24: "$2.50M" };
+  const BASE_NOSELL_META = { liquidity: "$1.00M", vol24: "$2.00M" };
   const TODAY_SOL_DESC = "Solana · Liquidity $5.00M · Vol 24h $2.50M. Check whether you can sell it " +
     "back before you buy — exit simulation and risk flags, no wallet needed.";
 
@@ -3037,13 +3041,15 @@ function isSolidlyReqId(id) { return PROBE_KIND_BY_ID.get(id) === "SOLIDLY"; }
      "sell verdict sentence missing/misworded for a Solana description: " +
      og.ogDescription(SOL_VERDICT_META, "sell", "Solana"));
   ok(og.ogDescription(SOL_VERDICT_META, "nosell", "Solana") ===
-     "No sell route quoted — you may not be able to exit. " + TODAY_SOL_DESC,
-     "nosell verdict sentence missing/misworded for a Solana description: " +
+     TODAY_SOL_DESC,
+     "a Solana card must stay neutral even if a caller hands it nosell (owner decision 4 Oct): " +
      og.ogDescription(SOL_VERDICT_META, "nosell", "Solana"));
   ok(og.ogDescription(SOL_VERDICT_META, "sell", "Solana").indexOf("A sell route was quoted.") === 0,
      "the sell sentence must lead a Solana description too — Telegram cuts the tail");
-  ok(og.ogDescription(SOL_VERDICT_META, "nosell", "Solana").indexOf("No sell route quoted") === 0,
-     "the nosell sentence must lead a Solana description too — Telegram cuts the tail");
+  ok(!/sell route quoted|exit/i.test(og.ogDescription(SOL_VERDICT_META, "nosell", "Solana").split("Check whether")[0]),
+     "a Solana card must never carry a can't-sell sentence");
+  ok(og.ogDescription(BASE_NOSELL_META, "nosell", "Base").indexOf("No sell route quoted") === 0,
+     "Base nosell sentence must be unchanged");
 
   // یک Base صریح باید همان رشته‌ی همیشگی را بدهد — chain="Base" فقط اسمِ
   // همان پیش‌فرض را صریح می‌کند، رفتار را عوض نمی‌کند.
@@ -13141,6 +13147,38 @@ function stripAllowedWording(t) {
     if (savedCaches === undefined) delete globalThis.caches; else globalThis.caches = savedCaches;
     ok(res.v === null && res.why === "sells:recent",
       "[solana veto] a cached nosell must still pass the veto — cache hits are not exempt, got " + JSON.stringify(res));
+  }
+
+  // ج) ۴ اکتبر — nosellِ باقی‌مانده (بدون وتو) هرگز منتشر نمی‌شود: sol:unconfirmed،
+  // چه استخر خالی باشد (cause=empty-pool قدیمی) چه نه.
+  for (const emptyPool of [false, true]) {
+    const savedFetch = globalThis.fetch;
+    const savedCaches = globalThis.caches;
+    const cacheStore = new Map();
+    globalThis.caches = { default: {
+      match: async (req) => {
+        const b = cacheStore.get(String(req.url));
+        return b === undefined ? undefined : new Response(b, { headers: { "content-type": "application/json" } });
+      },
+      put: async (req, res) => { cacheStore.set(String(req.url), await res.text()); },
+    } };
+    const mint = (emptyPool ? "MintEmptyPool" : "MintSimFail") + "XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX".slice(0, 20);
+    await globalThis.caches.default.put(new Request("https://" + VCH + "/v1/solana/" + mint),
+      new Response(JSON.stringify({ verdict: "nosell" })));
+    globalThis.fetch = async (url) => {
+      if (String(url).includes("/tokens/" + mint + "/pools")) {
+        const pool = { attributes: { reserve_in_usd: emptyPool ? "0" : "5000",
+          transactions: { h1: { sellers: 0 }, h24: { sellers: 0 } } },
+          relationships: { base_token: { data: { id: "solana_" + mint } }, quote_token: { data: { id: "solana_So1" } } } };
+        return new Response(JSON.stringify({ data: [pool] }), { status: 200, headers: { "content-type": "application/json" } });
+      }
+      throw new Error("unexpected upstream: " + url);
+    };
+    const res = await solFetchVerdict(mint, Date.now() + 5000, {}, {});
+    globalThis.fetch = savedFetch;
+    if (savedCaches === undefined) delete globalThis.caches; else globalThis.caches = savedCaches;
+    ok(res.v === null && res.why === "sol:unconfirmed" && !("cause" in res) && !("ret" in res),
+      "[solana veto] an unvetoed Solana nosell (emptyPool=" + emptyPool + ") must be null/sol:unconfirmed, got " + JSON.stringify(res));
   }
 
   console.log("[solana veto] solNosellVeto (worker/index.js) covered: sellers24Of sums h24.sellers with the same "

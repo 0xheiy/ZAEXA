@@ -121,7 +121,8 @@ export function ogDescription(meta, verdict, chain) {
   if (meta && meta.liquidity) bits.push("Liquidity " + meta.liquidity);
   if (meta && meta.vol24) bits.push("Vol 24h " + meta.vol24);
   const base = bits.join(" · ") + ". " + PITCH;
-  if (verdict === "nosell") return "No sell route quoted — you may not be able to exit. " + base;
+  // سولانا: nosell هرگز در کارت نمی‌آید (تصمیمِ مالک ۴ اکتبر) — حتی اگر کالری بدهدش
+  if (verdict === "nosell" && chain !== "Solana") return "No sell route quoted — you may not be able to exit. " + base;
   if (verdict === "sell") return "A sell route was quoted. " + base;
   // هر چیزِ دیگری — از جمله نبودِ همین آرگومان — یعنی «نمی‌دانم»، و
   // «نمی‌دانم» نباید مثلِ «نه» رفتار کند: بدون جمله‌ی verdict، رشته‌ی قدیمی

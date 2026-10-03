@@ -1326,10 +1326,12 @@ footer .fine{max-width:78ch;margin:46px 0 0;font-size:11.5px;color:var(--tx3);li
    یک خط تیره‌ی نازک داخلِ لبه، و یک دسته‌ی بیضی‌گونِ بزرگ که سایه‌اش به چپ‌وپایین می‌افتد.
    هیچ آیکونی روی آن نیست — رنگ فقط در پس‌زمینه است؛ همه‌ی رنگ‌ها از متغیرهای بالا می‌آیند تا
    هر دو تم یک شکل باشند. */
-#themeBtn,#themeToggle{position:relative;isolation:isolate;display:inline-flex;align-items:center;justify-content:space-between;flex:none;width:64px;height:36px;padding:3px;box-sizing:border-box;border:1px solid var(--line);border-radius:999px;background:var(--bg);box-shadow:none;cursor:pointer;overflow:visible;transition:none;transform:none}
+#themeBtn,#themeToggle{position:relative;isolation:isolate;display:inline-flex;align-items:center;justify-content:space-between;gap:0;flex:none;width:64px;height:36px;padding:3px;box-sizing:border-box;border:1px solid var(--line);border-radius:999px;background:var(--bg);box-shadow:none;cursor:pointer;overflow:visible;transition:none;transform:none}
 #themeBtn:hover,#themeToggle:hover{background:var(--bg);transform:none;box-shadow:none;color:inherit}
 #themeBtn::before,#themeToggle::before{content:"";position:absolute;left:3px;top:3px;width:28px;height:28px;border-radius:999px;z-index:-1;background:var(--bg);box-shadow:inset 2px 2px 5px var(--soft-lo),inset -2px -2px 5px var(--soft-hi);transition:transform .25s}
 [data-theme="dark"] #themeBtn::before,[data-theme="dark"] #themeToggle::before{transform:translateX(28px)}
+/* ۴ اکتبر — .chip در اپ gap:7px دارد و ماه را ۷ پیکسل از گودی بیرون می‌برد (gap:0 بالا)؛ و در تمِ تیره همان سیاهیِ سوییچِ صفحه‌ی معرفی، نه رنگِ زمینه‌ی صفحه. */
+[data-theme="dark"] #themeBtn,[data-theme="dark"] #themeToggle,[data-theme="dark"] #themeBtn:hover,[data-theme="dark"] #themeToggle:hover,[data-theme="dark"] #themeBtn::before,[data-theme="dark"] #themeToggle::before{background:#08070d}
 #themeBtn svg,#themeToggle>span{display:grid!important;place-items:center;flex:none;position:static;width:28px;height:28px;margin:0;padding:6px;box-sizing:border-box;transform:none;color:var(--tx3);transition:color .25s}
 #themeToggle>span{padding:0}#themeToggle svg{width:16px;height:16px}
 #themeBtn .themeSun,#themeToggle .sun{order:0}#themeBtn .themeMoon,#themeToggle .moon{order:1}
@@ -4650,7 +4652,11 @@ let solBalSol=null,solBalTok=null; // موجودی‌ها، به واحدِ ان
 let solOutAtaExists=null;
 let solSide="buy";              // "buy" (SOL→توکن) یا "sell" (توکن→SOL)
 let solVerdictV=null;           // "sell"/"nosell"/null از GET /vd/<mint>
+let solVerdictWhy=null;         // why وقتی v===null — "sol:unconfirmed" یعنی شبیه‌سازیِ فروش شکست خورد ولی هانی‌پات اعلام نمی‌شود
+const SOL_UNCONF="sol:unconfirmed";
+const solArmedMints=new Set();  // mintهایی که کاربر در همین نشستِ صفحه «Buy anyway» را برایشان زده (به‌ازای هر توکن)
 let solQuoteSeq=0;              // برای دورریختنِ کوت‌های دیرِ رسیده
+let solDirectQuote=null;        // {q,j}: نتیجه‌ی solCompareDirect برای همان کوت q — کارتِ ونیوها از همین می‌خواند، درخواستِ تازه‌ای نیست
 let solQuote=null;              // آخرین quote موفق (شیءِ خامِ جوپیتر)
 let solQuoteTimer=null;
 let solIntentSeq=0,solBalanceSeq=0,solTokenSeq=0,solWalletConnectSeq=0;
@@ -4743,6 +4749,7 @@ function updateSwapViewForChain(){
       if(activeChain==="solana"){$(parent).appendChild(el);}
     }
   }
+  solRenderVenues();   // با تغییرِ زنجیره کارتِ ونیوها خالی می‌شود
   paintSrc();paintSrc2();
   const footerTag=document.querySelector(".footTag");
   if(footerTag){
@@ -4838,7 +4845,7 @@ async function solAppLoadToken(mint){
   solPaintSellPill(null,null,null);
   const[meta,verdict]=await Promise.all([fetchSolMeta(mint),fetchVdVerdict(mint)]);
   if(tokenSeq!==solTokenSeq||mint!==solMintCur)return;
-  solVerdictV=verdict.v;
+  solVerdictV=verdict.v;solVerdictWhy=verdict.why;
   if(meta&&Number.isInteger(meta.decimals))solTokenDecimals=meta.decimals;
   else{
     // GT دسیمال نداد: از روی زنجیره می‌خوانیم (مثل solSetReference) و با همان
@@ -4913,7 +4920,7 @@ function solPaintSolChip(elId){
   if(solWsolLogoUrl===undefined)solEnsureWsolLogo().then(u=>{if(u)solPaintLegs();});
 }
 // Both legs are selected independently; the reference leg defaults to native SOL.
-let solRefMint=SOL_MINT_ADDR,solRefDecimals=9,solRefSymbol="SOL",solRefLogo=null,solRefVerdict=null,solBalRef=null,solRefAtaExists=null,solRefSeq=0,solPickerLeg="token";
+let solRefMint=SOL_MINT_ADDR,solRefDecimals=9,solRefSymbol="SOL",solRefLogo=null,solRefVerdict=null,solRefVerdictWhy=null,solBalRef=null,solRefAtaExists=null,solRefSeq=0,solPickerLeg="token";
 function solInputMint(){return solSide==="buy"?solRefMint:solMintCur;}
 function solOutputMint(){return solSide==="buy"?solMintCur:solRefMint;}
 function solInputDecimals(){return solSide==="buy"?solRefDecimals:solTokenDecimals;}
@@ -4954,12 +4961,12 @@ async function solReadMintDecimals(mint){
 async function solSetReference(mint){
   const seq=++solRefSeq;solInvalidateQuote();++solBalanceSeq;
   solRefMint=mint;solBalRef=null;solRefAtaExists=null;
-  solRefDecimals=mint===SOL_MINT_ADDR?9:null;solRefSymbol=mint===SOL_MINT_ADDR?"SOL":"—";solRefLogo=null;solRefVerdict=null;
+  solRefDecimals=mint===SOL_MINT_ADDR?9:null;solRefSymbol=mint===SOL_MINT_ADDR?"SOL":"—";solRefLogo=null;solRefVerdict=null;solRefVerdictWhy=null;
   solPaintLegs();
   if(mint!==SOL_MINT_ADDR){
     const [meta,verdict]=await Promise.all([fetchSolMeta(mint),fetchVdVerdict(mint)]);
     if(seq!==solRefSeq)return;
-    solRefVerdict=verdict.v;
+    solRefVerdict=verdict.v;solRefVerdictWhy=verdict.why;
     const decimals=Number.isInteger(meta?.decimals)?meta.decimals:await solReadMintDecimals(mint);
     if(seq!==solRefSeq)return;
     solRefDecimals=decimals;
@@ -5091,24 +5098,31 @@ async function solLoadPopular(){
    ماند) — حداکثر ۱۰ mint در هر تماس؛ کِشِ سراسری یعنی گزینشگرِ بعدی رایگان
    است. شکستِ یک تکه فقط همان تکه را بی‌لوگو می‌گذارد، نه کلِ تابع را. */
 let solLogoCache={};
-async function fetchSolMetaMulti(mints){
+// size/conc پیش‌فرض (۱۰ و ۱) رفتارِ قدیمی را نگه می‌دارد؛ پرتفوی ۳۰ تایی و حداکثر ۳ درخواستِ هم‌زمان می‌خواهد
+async function fetchSolMetaMulti(mints,size=10,conc=1){
   const uniq=[...new Set(mints)].filter(m=>SOL_MINT_RE.test(m));
   const out={};
-  for(let i=0;i<uniq.length;i+=10){
-    const chunk=uniq.slice(i,i+10);
-    try{
-      const j=await gtJson(GT+"/networks/solana/tokens/multi/"+chunk.join(","));
-      const rows=(j&&j.data)||[];
-      for(const row of rows){
-        // همان قراردادی که web/pairs.html برای همین اندپوینت دارد:
-        // مینت از attributes.address می‌آید، نه از id (که شکلش قراردادی و
-        // مستندنشده است).
-        const at=row&&row.attributes;
-        const mint=at&&typeof at.address==="string"?at.address:null;
-        if(mint)out[mint]=at;
-      }
-    }catch{/* این تکه بی‌لوگو می‌ماند، نه کلِ فراخوانی */}
+  const chunks=[];
+  for(let i=0;i<uniq.length;i+=size)chunks.push(uniq.slice(i,i+size));
+  let next=0;
+  async function worker(){
+    while(next<chunks.length){
+      const chunk=chunks[next++];
+      try{
+        const j=await gtJson(GT+"/networks/solana/tokens/multi/"+chunk.join(","));
+        const rows=(j&&j.data)||[];
+        for(const row of rows){
+          // همان قراردادی که web/pairs.html برای همین اندپوینت دارد:
+          // مینت از attributes.address می‌آید، نه از id (که شکلش قراردادی و
+          // مستندنشده است).
+          const at=row&&row.attributes;
+          const mint=at&&typeof at.address==="string"?at.address:null;
+          if(mint)out[mint]=at;
+        }
+      }catch{/* این تکه بی‌قیمت می‌ماند، نه کلِ فراخوانی — بقیه‌ی تکه‌ها ادامه می‌دهند */}
+    }
   }
+  await Promise.all(Array.from({length:Math.min(conc,chunks.length)},worker));
   return out;
 }
 // Network presets use a shared renderer and pair-selection flow.
@@ -5884,6 +5898,7 @@ function solCollectHoldings(results){
   }
   return {rows:[...rows.values()],incomplete};
 }
+const SOL_FOLIO_PRICE_MAX=300;   // سقفِ قیمت‌گذاری؛ بقیه فهرست می‌شوند ولی «no price»
 async function renderSolFolio(){
   const seq=++folioSeq,account=solAccount,body=$("folioBody");
   $("folioTotal").textContent="";
@@ -5905,8 +5920,9 @@ async function renderSolFolio(){
   if(!holdings.rows.length){body.innerHTML=coverage+'<div class="empty">'+
     (holdings.incomplete?'Could not load your full Solana portfolio. Try refreshing.':'No SOL or token balances found on Solana.')+'</div>';return;}
   // Bound price lookups for wallets with many unsolicited tokens. All holdings remain listed.
-  const priceMints=[...new Set(holdings.rows.map(r=>r.mint))].slice(0,100);
-  const metas=await fetchSolMetaMulti(priceMints);
+  const allMints=[...new Set(holdings.rows.map(r=>r.mint))];
+  const priceMints=allMints.slice(0,SOL_FOLIO_PRICE_MAX);
+  const metas=await fetchSolMetaMulti(priceMints,30,3);
   if(!current())return;
   const rows=holdings.rows.map(r=>{
     const meta=metas[r.mint]||{},amount=solFormatUnits(r.raw,r.decimals);
@@ -5925,7 +5941,8 @@ async function renderSolFolio(){
     <span class="fbal mono" style="overflow-wrap:anywhere">${esc(r.amount.replace(/\.$/,""))}${!r.native&&r.mint===SOL_MINT_ADDR?' (wrapped)':''}</span></span>
     <span class="fval"><span class="u mono">${r.usd===null?'no price':'$'+r.usd.toLocaleString("en-US",{maximumFractionDigits:2})}</span><br>
     <span class="p mono">${r.usd===null?'excluded':total>0?(r.usd/total*100).toFixed(1)+'%':'0%'}</span></span></div>`).join("");
-  if(unknown)html+='<div class="fnote">Tokens without a price are listed but excluded from the known value and percentages. Up to 100 different token prices are requested per refresh.</div>';
+  if(unknown)html+='<div class="fnote">Tokens without a price are listed but excluded from the known value and percentages.</div>';
+  if(allMints.length>SOL_FOLIO_PRICE_MAX)html+='<div class="fnote">Only the first '+SOL_FOLIO_PRICE_MAX+' tokens are priced.</div>';
   body.innerHTML=html;
   rows.forEach((r,i)=>{if(r.logo)solPaintAvatarIntoEl(body.querySelector(`[data-sol-folio="${i}"]`),r.symbol,r.logo);});
 }
@@ -7535,8 +7552,24 @@ function renderSolStats(a,targetId){
    همین یک شاخه را می‌گیرد، حتی وقتی why دارد.
    زیرِ ?dev=1، why خام هم کنارش می‌آید — همان جایی که دفعه‌ی بعد از آنجا
    می‌خوانیمش (devMuted، نه یک پرچمِ تازه). */
+const SOL_UNCONF_TITLE="Sell-back failed in our simulation — unconfirmed";
+const SOL_UNCONF_NOTE="Our simulated sell of this token failed. That can be a temporary routing problem, so we do not call it a honeypot yet. Treat it as high risk.";
 function renderSolExit(v,why,targetId,basis,ret,cause){
   const box=$(targetId||"tk-exitBox");if(!box)return;
+  // ۴ اکتبر — شبیه‌سازیِ فروش شکست خورد ولی «nosell» منتشر نمی‌شود: کهربایی، نه قرمز
+  if(v===null&&why===SOL_UNCONF){
+    const warnBg="color-mix(in srgb,var(--warn) 14%,transparent)";
+    if(targetId==="appSolExitBox"){
+      box.innerHTML=`<div class="exit"><div class="exitHead"><span class="exitTtl" style="color:var(--warn)">${esc(SOL_UNCONF_TITLE)}</span><span class="exitBadge" style="color:var(--warn);background:${warnBg}">Unconfirmed</span></div><div class="exitNote">${esc(SOL_UNCONF_NOTE)}</div></div>`;
+    }else{
+      box.innerHTML=`<div class="tripHead">
+          <span class="tripPct" style="color:var(--warn)">${esc(SOL_UNCONF_TITLE)}</span>
+          <span class="tripBadge" style="color:var(--warn);background:${warnBg}">Unconfirmed</span>
+        </div>
+        <div class="tripNote">${esc(SOL_UNCONF_NOTE)}</div>`;
+    }
+    return;
+  }
   if(targetId==="appSolExitBox"){
     const tone=v==="sell"?"var(--pos)":v==="nosell"?"var(--neg)":"var(--warn)";
     const title=v==="sell"?"Sell route found":v==="nosell"?"You may not be able to sell this back":"Exit not tested";
@@ -7637,7 +7670,7 @@ async function openSolanaTokenPage(mint){
   renderSolExit(verdict.v,verdict.why,null,verdict.basis,verdict.ret,verdict.cause);
   solPaintSellPill(verdict.v,verdict.basis,verdict.ret,verdict.cause);
 
-  solVerdictV=verdict.v;
+  solVerdictV=verdict.v;solVerdictWhy=verdict.why;
   if(meta&&Number.isInteger(meta.decimals))solTokenDecimals=meta.decimals;
   solTokenSymbol=(meta&&meta.symbol)||(preset&&preset.symbol)||"Unknown";
   solTokenLogoUrl=(meta&&meta.image_url)||null;
@@ -7929,8 +7962,20 @@ function solRenderWalletList(){
 function solOpenWalletPicker(){ev("wallet:open","","solana");solRenderWalletList();$("solWalletOv").classList.add("on");}
 function solCloseWalletPicker(){if(solMobilePending)solCancelMobile();$("solWalletOv").classList.remove("on");}
 let solDisconnectPending=Promise.resolve(),solConnectionBusy=false,solPendingWallet=null;
+// بسته‌ی کوچکِ تأیید اتصال (confirmConnection+nacl+bs58) — کیف‌پولِ تزریق‌شده نباید برای ۵۰۰ کیلوبایتِ WalletConnect صبر کند
+let solConfirmLoad=null;
+function solLoadConfirmBundle(){
+  if(window.SolConfirm)return Promise.resolve(window.SolConfirm);
+  if(solConfirmLoad)return solConfirmLoad;
+  solConfirmLoad=new Promise((resolve,reject)=>{
+    const script=document.createElement("script");script.src="/solana-confirm.bundle.6a6dd398.js";
+    script.onload=()=>window.SolConfirm?resolve(window.SolConfirm):(solConfirmLoad=null,reject(Error("Wallet confirmation library unavailable")));
+    script.onerror=()=>{script.remove();solConfirmLoad=null;reject(Error("Could not load the wallet confirmation library"));};document.head.appendChild(script);
+  });return solConfirmLoad;
+}
 async function solConfirmConnection(w,acc,seq){
-  const lib=await solLoadMobileBundle();
+  // مسیرِ WalletConnect همان بسته‌ی بزرگ را نگه می‌دارد؛ بقیه فقط کوچک
+  const lib=w&&w.name==="WalletConnect Solana"?await solLoadMobileBundle():await solLoadConfirmBundle();
   return lib.confirmConnection(w,acc,()=>seq===solWalletConnectSeq,location.origin);
 }
 async function solConnectWallet(w){
@@ -8309,43 +8354,14 @@ function solSafetyReport(info,owner,largest,epoch){
   return rep;
 }
 
-// یک رندرِ مشترک برای ردیفِ استخر — صفحه‌ی ۱ و «Load more» باید یکسان باشند.
-function solPoolRowHtml(p){
-  const a=p.attributes,dex=p.relationships?.dex?.data?.id||"Unknown DEX";
-  const val=x=>x!=null&&Number.isFinite(Number(x))?"$"+Number(x).toLocaleString("en-US",{maximumFractionDigits:0}):"—";
-  return `<div class="vrow" data-pool="${a.address}"><div class="vname"><a target="_blank" rel="noopener" href="https://solscan.io/account/${a.address}">${esc(a.name||shortAddr(a.address))}</a><div class="rs">${esc(dex)}</div></div><div class="vout"><div class="a mono">${val(a.reserve_in_usd)} liquidity</div><div class="d">${val(a.volume_usd?.h24)} volume · 24h</div></div></div>`;
-}
 let solDetailsSeq=0;
 async function solLoadDetails(){
   const seq=++solDetailsSeq,mint=solMintCur;
   const current=()=>seq===solDetailsSeq&&mint===solMintCur;
-  const poolsEl=$("solPools"),safety=$("solSafety");
+  const safety=$("solSafety");
   if(!mint)return;
-  poolsEl.innerHTML='<div class="empty">Loading indexed pools…</div>';
+  solRenderVenues();   // کارتِ ونیوها دیگر از GeckoTerminal نمی‌آید؛ فقط از کوتِ فعلی
   safety.innerHTML='<div class="empty">Reading token controls…</div>';
-  const poolTask=(async()=>{
-    try{
-      const j=await gtJson(GT+"/networks/solana/tokens/"+mint+"/pools?page=1");
-      if(!current())return;if(!Array.isArray(j?.data))throw Error("unavailable");
-      const rows=j.data.filter(p=>SOL_MINT_RE.test(p.attributes?.address||"")&&[p.relationships?.base_token?.data?.id,p.relationships?.quote_token?.data?.id].includes("solana_"+mint));
-      poolsEl.innerHTML='<header><span class="ttl">Indexed Solana pools</span></header><p class="cov">Pools indexed by GeckoTerminal. Load more to see additional pages; unindexed pools and Jupiter routes may exist.</p>'+rows.map(solPoolRowHtml).join("")+(rows.length?'':'<div class="empty">No indexed pools returned. This does not prove a pool is empty or drained.</div>');
-      if(j.data.length>=20){
-        const more=document.createElement("button");more.className="chip";more.textContent="Load more pools";poolsEl.appendChild(more);let page=1;
-        more.onclick=async()=>{
-          more.disabled=true;more.textContent="Loading…";
-          try{
-            const next=await gtJson(GT+"/networks/solana/tokens/"+mint+"/pools?page="+(page+1));
-            if(!current())return;if(!Array.isArray(next?.data))throw Error("unavailable");
-            for(const p of next.data){const a=p.attributes,refs=[p.relationships?.base_token?.data?.id,p.relationships?.quote_token?.data?.id];
-              if(!SOL_MINT_RE.test(a?.address||"")||!refs.includes("solana_"+mint)||poolsEl.querySelector(`[data-pool="${a.address}"]`))continue;
-              more.insertAdjacentHTML("beforebegin",solPoolRowHtml(p));
-            }
-            ++page;more.hidden=next.data.length<20;more.textContent="Load more pools";
-          }catch{if(current())more.textContent="Could not load more — retry";}finally{more.disabled=false;}
-        };
-      }
-    }catch{if(current())poolsEl.innerHTML='<div class="empty">Pool data unavailable.</div>';}
-  })();
   const safetyTask=(async()=>{
     const results=await Promise.allSettled([solRpcCall("getAccountInfo",[mint,{encoding:"jsonParsed"}]),solRpcCall("getTokenLargestAccounts",[mint]),solRpcCall("getEpochInfo",[])]);
     if(!current())return;
@@ -8367,10 +8383,11 @@ async function solLoadDetails(){
     renderSafetyReport(rep,"solSafety","sol-risk",!tokenPage);
     safety.insertAdjacentHTML("beforeend",'<p class="fnote">Token-control risk is a heuristic score from the checks shown, not a probability of loss or an audit. Unknown checks are listed separately. Largest accounts may include pools and custody accounts. This does not guarantee that selling is possible.</p>');
   })();
-  await Promise.allSettled([poolTask,safetyTask]);
+  await safetyTask;
 }
 async function solCompareDirect(q,seq){
   const el=$("solDirectF");el.textContent="Checking…";
+  solDirectQuote=null;solRenderVenues();
   const p=new URLSearchParams({inputMint:q.inputMint,outputMint:q.outputMint,amount:q.swapMode==="ExactOut"?q.outAmount:q.inAmount,swapMode:q.swapMode||"ExactIn",slippageBps:String(q.slippageBps||slippageBps),onlyDirectRoutes:"true"});
   try{
     const r=await withTimeout(fetch(location.origin+"/sol/quote?"+p),9000),j=await r.json();
@@ -8383,7 +8400,88 @@ async function solCompareDirect(q,seq){
     const delta=(exact?base-best:best-base)/base*100;
     el.textContent=Math.abs(delta)<0.005?"Same as direct quote":Math.abs(delta).toFixed(2)+"% "+(delta>=0?(exact?"less paid":"more received"):(exact?"more paid":"less received"));
     el.title="Separate quotes can change between requests. This is not guaranteed execution savings.";
-  }catch{if(seq===solQuoteSeq&&solQuote===q)el.textContent="Direct quote unavailable";}
+    solDirectQuote={q,j};solRenderVenues();
+  }catch{if(seq===solQuoteSeq&&solQuote===q){el.textContent="Direct quote unavailable";solDirectQuote=null;solRenderVenues();}}
+}
+
+/* کارتِ «Venues for this swap» — همان قالبِ renderVenues در Base. تا مبلغ و کوت
+   نباشد خالی است؛ ردیف‌ها از routePlanِ همین کوت می‌آیند و ردیفِ «Best single
+   pool» از همان کوتِ direct-onlyِ solCompareDirect (درخواستِ اضافه نمی‌زنیم).
+   همه‌ی برچسب‌ها از بالادست‌اند، پس همه esc می‌شوند. */
+const SOL_VENUE_EMPTY="Enter an amount and we will show every venue Jupiter routes through, plus the best single pool.";
+const SOL_VENUE_DOTS=["u","a","b","s","n","p","c"];
+function solMintSymbol(mint){
+  if(!mint)return "?";
+  if(mint===SOL_MINT_ADDR)return "SOL";
+  const t=SOL_APP_TOKEN_LIST.find(t=>t.mint===mint);
+  if(t)return t.symbol;
+  if(mint===solRefMint&&solRefSymbol&&solRefSymbol!=="—")return solRefSymbol;
+  if(mint===solMintCur&&solTokenSymbol)return solTokenSymbol;
+  return shortAddr(mint);
+}
+function solMintDecimals(mint){
+  if(mint===SOL_MINT_ADDR)return 9;
+  if(mint===solRefMint&&Number.isInteger(solRefDecimals))return solRefDecimals;
+  if(mint===solMintCur&&Number.isInteger(solTokenDecimals))return solTokenDecimals;
+  return null;
+}
+function solVenueAmt(raw,mint){
+  if(!/^\d+$/.test(String(raw==null?"":raw)))return "—";
+  const dec=solMintDecimals(mint);
+  if(dec==null)return String(raw)+" raw";
+  const n=Number(solFormatUnits(String(raw),dec));
+  if(n===0)return "0";
+  if(n<1e-8)return "<0.00000001";
+  return n.toLocaleString("en-US",{maximumFractionDigits:n>=1000?2:n>=1?5:8});
+}
+function solRenderVenues(){
+  const body=$("solPools");if(!body)return;
+  const q=solQuote;
+  const steps=(activeChain==="solana"&&q&&Array.isArray(q.routePlan))?q.routePlan:[];
+  let hdr='<header><span class="ttl">Venues for this swap</span><span class="grow"></span><span class="ttl mono" id="solVenueMeta">—</span></header>';
+  if(!steps.length){body.innerHTML=hdr+'<div id="solVenueBody"><div class="empty">'+SOL_VENUE_EMPTY+'</div></div>';return;}
+  // یک ردیف به‌ازای هر ammKey؛ بدونِ ammKey، همان برچسب+جفت کلید است
+  const seen=new Set(),rows=[];
+  for(const step of steps){
+    const info=(step&&step.swapInfo)||{};
+    const key=info.ammKey||[info.label,info.inputMint,info.outputMint].join("|");
+    if(seen.has(key))continue;seen.add(key);
+    rows.push({label:String(info.label||"Unknown venue"),inMint:info.inputMint||q.inputMint,outMint:info.outputMint||q.outputMint,
+      out:info.outAmount,pct:typeof step.percent==="number"&&isFinite(step.percent)?step.percent:null});
+  }
+  const exact=q.swapMode==="ExactOut";
+  // کوتِ direct فقط وقتی برای همین کوت است و ردیفِ معتبری دارد
+  let single=null;
+  const d=solDirectQuote;
+  if(d&&d.q===q&&d.j&&Array.isArray(d.j.routePlan)&&d.j.routePlan.length){
+    const lbl=solRouteLabel(d.j);
+    const raw=exact?d.j.inAmount:d.j.outAmount;
+    if(lbl!=="—"&&/^\d+$/.test(String(raw)))single={label:lbl,raw:BigInt(raw),mint:exact?q.inputMint:q.outputMint};
+  }
+  let singleWins=false;
+  if(single){
+    const total=BigInt(/^\d+$/.test(String(exact?q.inAmount:q.outAmount))?(exact?q.inAmount:q.outAmount):"0");
+    singleWins=exact?(single.raw<total):(single.raw>total);
+  }
+  const count=rows.length+(single?1:0);
+  let h="";
+  rows.forEach((r,i)=>{
+    const win=!singleWins;
+    const pct=r.pct==null?null:Math.round(r.pct);
+    h+=`<div class="vrow ${win?"win":""}"><i class="vdot ${SOL_VENUE_DOTS[i%SOL_VENUE_DOTS.length]}"></i>
+      <span class="vname">${esc(r.label)}${win&&i===0?'<span class="vtag">best</span>':""}<div class="rs">${esc(solMintSymbol(r.inMint))} → ${esc(solMintSymbol(r.outMint))}</div></span>
+      <span class="bar"><i style="width:${Math.max(4,Math.min(100,pct==null?100:pct))}%"></i></span>
+      <span class="vout"><span class="a mono">${esc(solVenueAmt(r.out,r.outMint))}</span>
+      <span class="d mono">${pct==null?"—":pct+"% of route"}</span></span></div>`;
+  });
+  if(single){
+    h+=`<div class="vrow ${singleWins?"win":""}"><i class="vdot ${SOL_VENUE_DOTS[rows.length%SOL_VENUE_DOTS.length]}"></i>
+      <span class="vname">Best single pool · ${esc(single.label)}${singleWins?'<span class="vtag">best</span>':""}</span>
+      <span class="vout"><span class="a mono">${esc(solVenueAmt(single.raw.toString(),single.mint))}</span>
+      <span class="d mono">${esc(solMintSymbol(single.mint))}</span></span></div>`;
+  }
+  body.innerHTML=hdr+'<div id="solVenueBody">'+h+'</div>';
+  $("solVenueMeta").textContent=count+(count===1?" venue":" venues");
 }
 
 function solRouteLabel(q){
@@ -8436,6 +8534,7 @@ function solRenderReadout(){
     $("solRouteF").textContent="—";
     $("solRate").textContent="—";
     solRenderRouteBar(null);
+    solDirectQuote=null;solRenderVenues();
     return;
   }
   const decIn=solInputDecimals();
@@ -8463,6 +8562,7 @@ function solRenderReadout(){
   $("solRate").textContent=rate!=null
     ?("1 "+inSym+" = "+rate.toLocaleString("en-US",{maximumFractionDigits:6})+" "+outSym):"—";
   solRenderRouteBar(solQuote);
+  solRenderVenues();
 }
 
 /* ---- گیت‌کردنِ خرید روی حکمِ فروش — قاعده‌ی امنیتیِ صاحب سایت ---- */
@@ -8473,7 +8573,7 @@ function solSwapApplyGate(){
   if(notice&&tokenPage){
     if(solVerdictV===null){
       notice.hidden=false;
-      notice.textContent="We could not confirm this token can be sold back.";
+      notice.textContent=solVerdictWhy===SOL_UNCONF?"Sell-back failed in our simulation — unconfirmed. Treat it as high risk.":"We could not confirm this token can be sold back.";
     }else{
       notice.hidden=true;notice.textContent="";
     }
@@ -8519,7 +8619,15 @@ function solUpdateSwapBtn(){
   const spendable=solSpendableTop();
   if(spendable!=null&&spend>spendable){btn.disabled=true;btn.textContent="Insufficient "+solInputSymbol()+" balance";return;}
   btn.disabled=false;
-  btn.textContent="Swap";
+  // ۴ اکتبر — خریدنِ توکنِ sol:unconfirmed بسته نیست، ولی یک کلیکِ اضافه می‌خواهد؛ فروشش هرگز گیت نمی‌شود
+  btn.textContent=solNeedsArm()?"Buy anyway (sell-back unconfirmed)":"Swap";
+}
+// توکنِ خروجی (همان که می‌خریم) اگر unconfirmed باشد و هنوز مسلح نشده
+function solNeedsArm(){
+  const outMint=solSide==="buy"?solMintCur:solRefMint;
+  const why=solSide==="buy"?solVerdictWhy:solRefVerdictWhy;
+  const v=solSide==="buy"?solVerdictV:solRefVerdict;
+  return v===null&&why===SOL_UNCONF&&!!outMint&&!solArmedMints.has(outMint);
 }
 
 /* ---- خودِ سواپ — POST /sol/swap → چکِ پیش‌امضا → sign(&send) → پول‌کردن ---- */
@@ -8688,6 +8796,7 @@ async function solBuildFreshTx(btn,context=solSwapContext()){
 }
 async function solDoSwap(){
   if(solSwapBusy||!solAccount||!solQuote)return;
+  if(solNeedsArm())return;   // دفاعی: هیچ مسیری نباید بدونِ مسلح‌شدن به کیف‌پول برسد
   // A — دوباره همین‌جا، نه فقط روی دکمه: یک رخدادِ مسابقه‌ای (دکمه فعال شد،
   // بعد موجودی/کوت عوض شد) هرگز نباید کیف‌پول را صدا بزند.
   const amtSolGuard=solInputMint()===SOL_MINT_ADDR?solRequiredInput():0;
@@ -8795,7 +8904,7 @@ function solSwapReset(mint){
   solMintCur=mint;
   solTokenDecimals=null;solBalSol=null;solBalTok=null;
   solTokenSymbol=null;solTokenLogoUrl=null;
-  solSide="buy";solVerdictV=null;solQuote=null;solOutAtaExists=null;
+  solSide="buy";solVerdictV=null;solVerdictWhy=null;solQuote=null;solOutAtaExists=null;
   solQuoteAt=0;solNetFeeLamports=null;solMode="exactIn";
   clearTimeout(solQuoteTimer);solQuoteTimer=null;
   $("solAmt").value="";
@@ -9203,7 +9312,12 @@ $("copyAddrBtn").onclick=(e)=>{
   $("solDisconnectBtn").onclick=()=>solDisconnectWallet(true);
   $("solNotices").onclick=e=>{if(e.target.closest('[data-act="solCancelConnect"]')){solDisconnectWallet(true);solSetNotice(note("warn","Connection cancelled. Your wallet is not connected."));}};
   $("solConnectionNotices").onclick=$("solNotices").onclick;
-  $("solSwapBtn").onclick=()=>{if(!solAccount)solOpenWalletPicker();else solDoSwap();};
+  $("solSwapBtn").onclick=()=>{
+    if(!solAccount){solOpenWalletPicker();return;}
+    // کلیکِ اول فقط مسلح می‌کند؛ سواپ نمی‌شود
+    if(solNeedsArm()){solArmedMints.add(solSide==="buy"?solMintCur:solRefMint);solUpdateSwapBtn();return;}
+    solDoSwap();
+  };
   document.addEventListener("keydown",e=>{
     if(e.key!=="Escape")return;closePicker();closeWalletPicker();
     $("setPop").classList.remove("on");closeWalletMenu();
