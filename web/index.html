@@ -1750,18 +1750,18 @@ footer .fine{max-width:78ch;margin:46px 0 0;font-size:11.5px;color:var(--tx3);li
       <!-- وقتی برچسبِ فروش هست، موجودی کنارش جا نمی‌شود و به برچسب می‌چسبید («You receive—») — مثلِ Base فقط برچسب می‌ماند. -->
       <style>.legTop:has(#solSellPill:not([hidden])) #solBotBal{display:none}
 /* Soft sculpted controls shared across light and dark surfaces. */
-:root{--soft-hi:rgba(255,255,255,.9);--soft-lo:rgba(35,45,65,.13);--switch-track:#cdd2da;--switch-knob:#e9ebee;--face-gap-shadow:rgba(24,31,45,.35)}
-:root[data-theme="dark"]{--soft-hi:rgba(66,76,100,.24);--soft-lo:rgba(0,0,0,.55);--switch-track:#111722;--switch-knob:#363f50;--face-gap-shadow:rgba(0,0,0,.85)}
-#themeBtn,#themeToggle{position:relative;display:inline-flex;flex:none;width:64px;height:38px;padding:0;border:1px solid var(--line);border-radius:999px;background:var(--switch-track);box-shadow:inset 3px 3px 5px var(--soft-lo),inset -2px -2px 4px var(--soft-hi),0 1px 0 var(--soft-hi);cursor:pointer;overflow:visible;transition:background .25s,border-color .25s;transform:none}
-#themeBtn::before,#themeToggle::before{content:"";position:absolute;left:1px;top:1px;width:34px;height:34px;box-sizing:border-box;border:1px solid color-mix(in srgb,var(--tx) 16%,transparent);border-radius:12px;background:var(--switch-knob);box-shadow:inset 1px 1px 2px var(--soft-hi),inset -1px -2px 2px var(--soft-lo),3px 3px 5px var(--soft-lo);transition:transform .25s,background .25s}
-[data-theme="dark"] #themeBtn::before,[data-theme="dark"] #themeToggle::before{transform:translateX(26px)}
-#themeBtn .themeSun,#themeToggle .sun{display:block}
-#themeBtn .themeMoon,#themeToggle .moon{display:none}
-#themeBtn svg,#themeToggle>span:not([hidden]){position:absolute;left:9px;top:9px;width:18px;height:18px;margin:0;transform:none;color:#956c22;pointer-events:none}
-#themeToggle svg{display:block;width:18px;height:18px}
-[data-theme="dark"] #themeBtn .themeSun,[data-theme="dark"] #themeToggle .sun{display:none}
-[data-theme="dark"] #themeBtn .themeMoon,[data-theme="dark"] #themeToggle .moon{display:block;left:35px;color:#a9c9f6}
-#themeBtn:focus-visible,#themeToggle:focus-visible{outline:2px solid var(--acc);outline-offset:4px}
+:root{--soft-hi:rgba(255,255,255,.9);--soft-lo:rgba(35,45,65,.13);--face-gap-shadow:rgba(24,31,45,.35);--switch-track:#e2e5ea;--switch-knob:#edeff2;--switch-knob-hi:#f8f9fb;--switch-rim:#f6f7f9;--switch-rim-edge:rgba(30,40,60,.08);--switch-line:rgba(40,50,70,.16);--switch-in-lo:rgba(40,50,70,.24);--switch-drop:rgba(40,50,70,.26)}
+:root[data-theme="dark"]{--soft-hi:rgba(66,76,100,.24);--soft-lo:rgba(0,0,0,.55);--face-gap-shadow:rgba(0,0,0,.85);--switch-track:#10151f;--switch-knob:#2c3444;--switch-knob-hi:#394357;--switch-rim:#232b39;--switch-rim-edge:rgba(0,0,0,.55);--switch-line:rgba(0,0,0,.6);--switch-in-lo:rgba(0,0,0,.7);--switch-drop:rgba(0,0,0,.6)}
+/* سوییچِ تم — ۳ اکتبر، به خواستِ مالک عیناً از روی تصویرِ مرجع: سینیِ بیضیِ گود با لبه‌ی برجسته و
+   یک خط تیره‌ی نازک داخلِ لبه، و یک دسته‌ی بیضی‌گونِ بزرگ که سایه‌اش به چپ‌وپایین می‌افتد.
+   هیچ آیکونی روی آن نیست — رنگ فقط در پس‌زمینه است؛ همه‌ی رنگ‌ها از متغیرهای بالا می‌آیند تا
+   هر دو تم یک شکل باشند. */
+#themeBtn,#themeToggle{position:relative;display:inline-flex;flex:none;width:72px;height:38px;padding:0;border:0;border-radius:999px;background:var(--switch-track);box-shadow:0 0 0 2px var(--switch-rim),0 0 0 2.5px var(--switch-rim-edge),0 2px 5px 1px var(--soft-lo),inset 0 0 0 1px var(--switch-line),inset 4px 4px 7px var(--switch-in-lo),inset -2px -2px 4px var(--soft-hi);cursor:pointer;overflow:visible;transition:background .25s;transform:none}
+#themeBtn:hover,#themeToggle:hover{background:var(--switch-track);transform:none;color:inherit}
+#themeBtn::before,#themeToggle::before{content:"";position:absolute;left:2px;top:1.5px;width:37px;height:35px;box-sizing:border-box;border:0;border-radius:16px;background:linear-gradient(145deg,var(--switch-knob-hi) 0%,var(--switch-knob) 62%);box-shadow:-2px 3px 5px var(--switch-drop),0 1px 1px var(--soft-lo),inset 1px 1px 1px var(--soft-hi),inset -1px -2px 3px rgba(0,0,0,.06);transition:transform .25s,background .25s}
+[data-theme="dark"] #themeBtn::before,[data-theme="dark"] #themeToggle::before{transform:translateX(31px)}
+#themeBtn svg,#themeToggle>span{display:none!important}
+#themeBtn:focus-visible,#themeToggle:focus-visible{outline:2px solid var(--acc);outline-offset:5px}
 .nav{background:var(--bg);box-shadow:4px 4px 9px var(--soft-lo),-3px -3px 8px var(--soft-hi),inset 0 1px 1px var(--soft-hi)}
 .nav button.on,.nav a.on{background:var(--bg);color:var(--acc);box-shadow:inset 2px 2px 5px var(--soft-lo),inset -2px -2px 5px var(--soft-hi)}
 .chip:not(.solid):not(#themeBtn),.tokbtn,.tfs button.on{box-shadow:2px 2px 5px var(--soft-lo),-2px -2px 5px var(--soft-hi)}
