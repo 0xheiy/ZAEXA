@@ -3517,6 +3517,33 @@ function isSolidlyReqId(id) { return PROBE_KIND_BY_ID.get(id) === "SOLIDLY"; }
     return new Response("{}", { status: 200, headers: { "content-type": "application/json" } });
   });
 
+  /* ---- د) یک شبکه کامل شکست می‌خورد و دیگری سالم است: توکن‌های سالم می‌مانند
+     ولی عمرِ کش کوتاه است و کش لبه پر نمی‌شود ---- */
+  {
+    const SOL_TOK = "So11111111111111111111111111111111111111112";
+    let calls = 0;
+    globalThis.caches = freshCacheStore();
+    globalThis.fetch = async (u) => {
+      calls++;
+      if (String(u).includes("/networks/base/")) return new Response("boom", { status: 500 });
+      if (pageOf(u) === 1) return pageResponse([{
+        attributes: { reserve_in_usd: "1000" },
+        relationships: { base_token: { data: { id: "solana_" + SOL_TOK } } },
+      }]);
+      return pageResponse([]);
+    };
+    const r1 = await call("/sitemap.xml");
+    const b1 = await r1.text();
+    ok(r1.status === 200, "partial sitemap must stay 200, got " + r1.status);
+    ok(b1.includes("/t/" + SOL_TOK), "Solana entries must be present when only Base fails");
+    ok(r1.headers.get("cache-control") === "public, max-age=300",
+       "a sitemap with one network fully failed must use the short cache, got: " + r1.headers.get("cache-control"));
+    const first = calls;
+    await call("/sitemap.xml");
+    ok(calls > first, "a partial sitemap must not be stored in the edge cache");
+    console.log("[sitemap partial] Base 500 + Solana OK -> Solana entries kept, short cache-control, not edge-cached");
+  }
+
   delete globalThis.caches;
   globalThis.fetch = trackingFetch; // برگرداندنِ موکِ پیش‌فرض برای هرچه بعد از این اجرا می‌شود
 }

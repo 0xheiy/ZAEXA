@@ -9629,7 +9629,7 @@ async def main():
         # SOL پایین آمد، پس رزروِ A هم عوض شد (۰٫۰۰۲۲۵ به‌جای ۰٫۰۰۳۰۵) و این
         # دو عدد با آن جابه‌جا شدند — نه لق‌ترشدنِ قاعده، فقط دنبال‌کردنِ D.
         assert f_half_val == "0.998875", "50%% of (2 SOL - the A reserve) should be 0.998875, got %r" % f_half_val
-        assert f_max_val == "1.997750", "MAX must leave exactly the A reserve behind, got %r" % f_max_val
+        assert f_max_val == "1.99775", "MAX must leave exactly the A reserve behind, got %r" % f_max_val
         assert f_clear_hidden_half is False, "the clear × must show once an amount is set"
         assert f_after_clear == "", "clicking × must empty the amount field"
         assert f_clear_hidden_after is True, "the clear × must hide itself again once the field is empty"
@@ -9931,7 +9931,7 @@ async def main():
         f2_amt = await f2pg2.input_value("#solAmt")
         await f2pg2.close()
         print("[sol round3][F] clicking the pay balance figure -> #solAmt=%r" % f2_amt)
-        assert f2_amt == "2.997750", \
+        assert f2_amt == "2.99775", \
             "F: clicking the balance figure above You-pay must fill the full spendable amount (MAX), got %r" % f2_amt
 
         # G) the SOL chip's <img> src comes from the GT single-token fixture.

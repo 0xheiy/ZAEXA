@@ -1321,16 +1321,19 @@ footer .fine{max-width:78ch;margin:46px 0 0;font-size:11.5px;color:var(--tx3);li
 /* Soft sculpted controls shared across light and dark surfaces. */
 :root{--soft-hi:rgba(255,255,255,.9);--soft-lo:rgba(35,45,65,.13);--face-gap-shadow:rgba(24,31,45,.35);--switch-track:#e2e5ea;--switch-knob:#edeff2;--switch-knob-hi:#f8f9fb;--switch-rim:#f6f7f9;--switch-rim-edge:rgba(30,40,60,.08);--switch-line:rgba(40,50,70,.16);--switch-in-lo:rgba(40,50,70,.24);--switch-drop:rgba(40,50,70,.26);--switch-groove:rgba(30,40,60,.16);--switch-cap-hi:#ffffff;--switch-cap:#f4f5f8;--switch-cap-base:#c9cdd8}
 :root[data-theme="dark"]{--soft-hi:rgba(66,76,100,.24);--soft-lo:rgba(0,0,0,.55);--face-gap-shadow:rgba(0,0,0,.85);--switch-track:#10151f;--switch-knob:#2c3444;--switch-knob-hi:#394357;--switch-rim:#232b39;--switch-rim-edge:rgba(0,0,0,.55);--switch-line:rgba(0,0,0,.6);--switch-in-lo:rgba(0,0,0,.7);--switch-drop:rgba(0,0,0,.6);--switch-groove:rgba(0,0,0,.6);--switch-cap-hi:#14171f;--switch-cap:#1a1e28;--switch-cap-base:#0a0c12}
-/* ۴ اکتبر — سوییچ به انتخابِ مالک «کلیدِ کیبورد» شد (گزینه‌ی ۳): شیارِ کم‌عمق و دسته‌ای که لبه‌ی ضخامت دارد. */
+/* ۴ اکتبر (دورِ دوم) — سوییچ هم‌زبانِ نوارِ تب‌ها شد: همان قاب، و یک گودیِ لغزان زیرِ آیکونِ فعال (خورشید/ماه)، با همان سایه‌ی تبِ فعال. */
 /* سوییچِ تم — ۳ اکتبر، به خواستِ مالک عیناً از روی تصویرِ مرجع: سینیِ بیضیِ گود با لبه‌ی برجسته و
    یک خط تیره‌ی نازک داخلِ لبه، و یک دسته‌ی بیضی‌گونِ بزرگ که سایه‌اش به چپ‌وپایین می‌افتد.
    هیچ آیکونی روی آن نیست — رنگ فقط در پس‌زمینه است؛ همه‌ی رنگ‌ها از متغیرهای بالا می‌آیند تا
    هر دو تم یک شکل باشند. */
-#themeBtn,#themeToggle{position:relative;display:inline-flex;flex:none;width:56px;height:30px;padding:0;border:0;border-radius:999px;background:var(--card2);box-shadow:inset 0 2px 3px var(--switch-groove),inset 0 -1px 0 var(--soft-hi);cursor:pointer;overflow:visible;transition:background .25s;transform:none}
-#themeBtn:hover,#themeToggle:hover{background:var(--card2);transform:none;color:inherit}
-#themeBtn::before,#themeToggle::before{content:"";position:absolute;left:3px;top:2px;width:24px;height:24px;box-sizing:border-box;border:0;border-radius:50%;background:linear-gradient(var(--switch-cap-hi),var(--switch-cap));box-shadow:inset 0 1px 0 var(--soft-hi),0 3px 0 var(--switch-cap-base),0 5px 8px -1px var(--switch-drop);transition:transform .25s}
-[data-theme="dark"] #themeBtn::before,[data-theme="dark"] #themeToggle::before{transform:translateX(26px)}
-#themeBtn svg,#themeToggle>span{display:none!important}
+#themeBtn,#themeToggle{position:relative;isolation:isolate;display:inline-flex;align-items:center;justify-content:space-between;flex:none;width:64px;height:36px;padding:3px;box-sizing:border-box;border:1px solid var(--line);border-radius:999px;background:var(--bg);box-shadow:none;cursor:pointer;overflow:visible;transition:none;transform:none}
+#themeBtn:hover,#themeToggle:hover{background:var(--bg);transform:none;box-shadow:none;color:inherit}
+#themeBtn::before,#themeToggle::before{content:"";position:absolute;left:3px;top:3px;width:28px;height:28px;border-radius:999px;z-index:-1;background:var(--bg);box-shadow:inset 2px 2px 5px var(--soft-lo),inset -2px -2px 5px var(--soft-hi);transition:transform .25s}
+[data-theme="dark"] #themeBtn::before,[data-theme="dark"] #themeToggle::before{transform:translateX(28px)}
+#themeBtn svg,#themeToggle>span{display:grid!important;place-items:center;flex:none;position:static;width:28px;height:28px;margin:0;padding:6px;box-sizing:border-box;transform:none;color:var(--tx3);transition:color .25s}
+#themeToggle>span{padding:0}#themeToggle svg{width:16px;height:16px}
+#themeBtn .themeSun,#themeToggle .sun{order:0}#themeBtn .themeMoon,#themeToggle .moon{order:1}
+:root:not([data-theme="dark"]) #themeBtn .themeSun,:root:not([data-theme="dark"]) #themeToggle .sun,[data-theme="dark"] #themeBtn .themeMoon,[data-theme="dark"] #themeToggle .moon{color:var(--acc)}
 #themeBtn:focus-visible,#themeToggle:focus-visible{outline:2px solid var(--acc);outline-offset:5px}
 .nav{background:var(--bg);box-shadow:4px 4px 9px var(--soft-lo),-3px -3px 8px var(--soft-hi),inset 0 1px 1px var(--soft-hi)}
 .nav button.on,.nav a.on{background:var(--bg);color:var(--acc);box-shadow:inset 2px 2px 5px var(--soft-lo),inset -2px -2px 5px var(--soft-hi)}
@@ -1344,7 +1347,12 @@ footer .fine{max-width:78ch;margin:46px 0 0;font-size:11.5px;color:var(--tx3);li
 .cta:disabled{background:var(--raise);color:var(--tx3);box-shadow:none}
 .cta:hover:not(:disabled),#connectBtn.solid:hover,#solConnectBtn.solid:hover,.chip.solid[data-act="connect"]:hover{transform:none;filter:brightness(1.05);box-shadow:0 2px 6px -2px var(--soft-lo)}
 .cta:active:not(:disabled),#connectBtn.solid:active,#solConnectBtn.solid:active,.chip.solid[data-act="connect"]:active{transform:none;filter:none;box-shadow:inset 2px 2px 5px var(--soft-lo),inset -2px -2px 5px var(--soft-hi)}
-#setBtn:active{transform:none;background:var(--bg);box-shadow:inset 2px 2px 5px var(--soft-lo),inset -2px -2px 5px var(--soft-hi)}
+/* ۴ اکتبر — دکمه‌ی تنظیمات: آیکونِ SVG تا دقیقاً وسط بنشیند (نویسه‌ی ⚙ بسته به فونت از وسط در می‌رفت)؛
+   در تمِ تیره همان رنگ و لبه‌ی نوارِ تب‌ها؛ و تا وقتی منویش باز است همان فرورفتگیِ تبِ فعال را دارد. */
+#setBtn{display:inline-grid;place-items:center;padding:0;line-height:0}
+#setBtn .gearIcon{display:block;width:18px;height:18px}
+[data-theme="dark"] #setBtn{background:var(--bg);border:1px solid var(--line)}
+#setBtn:active,#setBtn:has(+ #setPop.on),#setBtn[aria-expanded="true"]{transform:none;background:var(--bg);color:var(--acc);box-shadow:inset 2px 2px 5px var(--soft-lo),inset -2px -2px 5px var(--soft-hi)}
 @media(max-width:720px){
   /* ۴ اکتبر — به خواستِ مالک: نوار خودش تخت است (بی‌برجستگی، همان رنگِ تیره‌ی فعلی)، گوشه‌ها کاملاً گرد،
      و فقط تبِ فعال در آن فرو رفته — همان رفتارِ نوارِ بالای دسکتاپ. */
@@ -1453,7 +1461,7 @@ html:not(.ctaReady) #actBtn:disabled,html:not(.ctaReady) #solSwapBtn:disabled{ba
     </div>
   </div>
   <div class="rel">
-    <button class="chip round" id="setBtn">⚙</button>
+    <button class="chip round" id="setBtn" aria-label="Settings" title="Settings"><svg class="gearIcon" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg></button>
     <div class="pop" id="setPop">
       <h4>Max slippage</h4>
       <div class="seg" id="slipSeg">
@@ -4832,6 +4840,14 @@ async function solAppLoadToken(mint){
   if(tokenSeq!==solTokenSeq||mint!==solMintCur)return;
   solVerdictV=verdict.v;
   if(meta&&Number.isInteger(meta.decimals))solTokenDecimals=meta.decimals;
+  else{
+    // GT دسیمال نداد: از روی زنجیره می‌خوانیم (مثل solSetReference) و با همان
+    // چکِ توالی/mint بازنقاشی می‌کنیم تا نتیجه‌ی کهنه توکنِ تازه‌تر را خراب نکند.
+    solReadMintDecimals(mint).then(d=>{
+      if(tokenSeq!==solTokenSeq||mint!==solMintCur||!Number.isInteger(d))return;
+      solTokenDecimals=d;solRenderReadout();solUpdateSwapBtn();
+    });
+  }
   solTokenSymbol=(meta&&meta.symbol)||(preset&&preset.symbol)||"Unknown";
   solTokenLogoUrl=(meta&&meta.image_url)||null;
   $("appSolExitSym").textContent=solTokenSymbol;
@@ -4911,7 +4927,10 @@ function solShareUrl(){
   return location.origin+"/app#swap?"+p;
 }
 async function solApplyShare(p){
-  const a=p.get("in")||SOL_MINT_ADDR,b=p.get("out")||SOL_APP_TOKENS.USDC;
+  // فقط یک سمت داده شده: سمتِ خالی SOL یا USDC می‌شود، هرکدام که با سمتِ داده‌شده برابر نیست.
+  const gi=p.get("in"),go=p.get("out");
+  const other=m=>m===SOL_MINT_ADDR?SOL_APP_TOKENS.USDC:SOL_MINT_ADDR;
+  const a=gi||(go?other(go):SOL_MINT_ADDR),b=go||(gi?other(gi):SOL_APP_TOKENS.USDC);
   if(!SOL_MINT_RE.test(a)||!SOL_MINT_RE.test(b)||a===b){setChain("solana");solSetNotice(note("err","This Solana link has an invalid token pair."));return;}
   // Prevent the chain switch from starting a competing default-token request.
   solAppDefaulted=true;setChain("solana");
@@ -7776,6 +7795,15 @@ async function solMaybeSilentConnect(w){
 }
 const SOL_WC_CHAIN="solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp";
 let solMobileLoad=null,solMobileProvider=null,solMobilePending=false,solMobileWallet=null;
+// abortPairingAttempt در بسته‌ی universal-provider عملاً کاری نمی‌کند؛ لغو را خودمان
+// محلی می‌کنیم: شناسه‌ی تلاشِ زنده + یک promise که مسیر لغو reject می‌کند.
+let solMobileLive=0,solMobileAttemptSeq=0,solMobileCancel=null;
+function solCancelMobile(){
+  solMobileLive=0;++solWalletConnectSeq;solMobilePending=false;
+  try{solMobileProvider?.abortPairingAttempt?.();}catch{}
+  const c=solMobileCancel;solMobileCancel=null;if(c)c();
+  const l=$("solWalList");if(l)l.innerHTML="";     // QR کهنه نماند
+}
 function solLoadMobileBundle(){
   if(window.SolMobile)return Promise.resolve(window.SolMobile);
   if(solMobileLoad)return solMobileLoad;
@@ -7799,9 +7827,12 @@ async function solGetMobileProvider(){
   const p=await lib.UniversalProvider.init({projectId:WC_PROJECT_ID,metadata:{name:"ZAEXA",description:"Swaps on Solana",url:location.origin,icons:[]}});
   solMobileProvider=p;
   p.on("display_uri",async uri=>{
-    if(!solMobilePending)return;
+    // فقط تلاشِ زنده؛ uriِ دیررسیده بعد از لغو/بستن نادیده گرفته می‌شود.
+    const attempt=solMobileLive;
+    if(!attempt||!solMobilePending)return;
     const list=$("solWalList");list.innerHTML='<p>Scan with a Solana wallet that supports WalletConnect.</p><canvas id="solQr" style="display:block;max-width:100%;margin:auto"></canvas><button class="chip" id="solCopyPairing">Copy connection code</button><p class="fnote">Keep this connection code private. You still approve each transaction in your wallet.</p>';
     await lib.QRCode.toCanvas($("solQr"),uri,{width:256,margin:2});
+    if(attempt!==solMobileLive||!$("solCopyPairing"))return;
     $("solCopyPairing").onclick=()=>navigator.clipboard.writeText(uri).then(()=>{$("solCopyPairing").textContent="Copied";}).catch(()=>{});
   });
   p.on("session_delete",()=>{if(solWalletApi===solMobileWallet||solPendingWallet===solMobileWallet)solDisconnectWallet(false);});
@@ -7840,6 +7871,9 @@ function solMakeMobileWallet(p){
 async function solConnectMobile(){
   if(solMobilePending)return;solMobilePending=true;
   const seq=++solWalletConnectSeq;
+  const attempt=solMobileLive=++solMobileAttemptSeq;
+  const cancelled=new Promise((_,reject)=>{solMobileCancel=()=>reject(Error("cancelled"));});
+  cancelled.catch(()=>{});
   $("solWalList").innerHTML='<div class="empty">Preparing secure connection…</div>';
   ev("wallet:open","wc","solana");
   try{
@@ -7847,11 +7881,15 @@ async function solConnectMobile(){
     const p=await solGetMobileProvider();
     if(seq!==solWalletConnectSeq)return;
     if(p.session&&solWalletOff())await p.disconnect();
-    if(!p.session)await p.connect({namespaces:{solana:{chains:[SOL_WC_CHAIN],methods:["solana_signTransaction","solana_signMessage"],events:["accountsChanged","chainChanged"]}}});
+    if(!p.session){
+      const conn=p.connect({namespaces:{solana:{chains:[SOL_WC_CHAIN],methods:["solana_signTransaction","solana_signMessage"],events:["accountsChanged","chainChanged"]}}});
+      conn.catch(()=>{});
+      await Promise.race([conn,cancelled]);
+    }
     if(seq!==solWalletConnectSeq){if(p.session)await p.disconnect();return;}
     solMobileWallet=solMakeMobileWallet(p);solMobilePending=false;solCloseWalletPicker();await solConnectWallet(solMobileWallet);
   }catch(e){if(seq===solWalletConnectSeq)$("solWalList").textContent="Mobile connection failed: "+(e?.message||"Try again");}
-  finally{solMobilePending=false;}
+  finally{if(attempt===solMobileLive){solMobilePending=false;solMobileLive=0;solMobileCancel=null;}}
 }
 
 function solPhantomBrowseUrl(wallet="phantom"){
@@ -7889,7 +7927,7 @@ function solRenderWalletList(){
   });
 }
 function solOpenWalletPicker(){ev("wallet:open","","solana");solRenderWalletList();$("solWalletOv").classList.add("on");}
-function solCloseWalletPicker(){if(solMobilePending){++solWalletConnectSeq;solMobileProvider?.abortPairingAttempt();}$("solWalletOv").classList.remove("on");}
+function solCloseWalletPicker(){if(solMobilePending)solCancelMobile();$("solWalletOv").classList.remove("on");}
 let solDisconnectPending=Promise.resolve(),solConnectionBusy=false,solPendingWallet=null;
 async function solConfirmConnection(w,acc,seq){
   const lib=await solLoadMobileBundle();
@@ -7997,7 +8035,9 @@ async function solRefreshBalances(){
     if(!current())return;
     nativeBalance=bal&&typeof bal.value==="number"?bal.value/1e9:null;
   }catch{if(!current())return;}
-  if(mint)try{
+  // SOL بومی به‌عنوان پایه‌ی توکن حسابِ wSOL ندارد؛ همان موجودیِ بومی است.
+  if(mint===SOL_MINT_ADDR){tokenBalance=nativeBalance;exists=true;decimals=9;}
+  else if(mint)try{
     const r=await solRpcCall("getTokenAccountsByOwner",
       [account.address,{mint},{encoding:"jsonParsed"}]);
     if(!current())return;
@@ -8075,13 +8115,28 @@ function solMaxSolAmount(){
 // رزروِ قاعده‌ی A؛ برای توکن، کلِ موجودی).
 function solSpendableTop(){
   if(solSide==="buy")return solRefMint===SOL_MINT_ADDR?(solBalSol==null?null:solMaxSolAmount()):solBalRef;
+  // SOL بومی به‌عنوان پایه‌ی توکن: موجودیِ بومی منهای رزرو، نه حسابِ wSOL.
+  if(solMintCur===SOL_MINT_ADDR)return solBalSol==null?null:solMaxSolAmount();
   return solBalTok;
 }
 function setSolPayFraction(num,den){
   const v=solSpendableTop();
   if(v==null)return;
-  const amt=(v*num)/den;
-  $("solAmt").value=amt>0?amt.toFixed(Math.min(6,solInputDecimals()??6)):"";
+  const d=solInputDecimals();
+  if(!Number.isInteger(d))return;
+  // کفِ واحدِ خام با BigInt — toFixed گرد می‌کرد و گاهی بیشتر از موجودی می‌نوشت.
+  // SOL: لامپورتِ دقیق منهای رزرو؛ توکن: رشته‌ی موجودی با دقتِ خودِ توکن.
+  let raw;
+  if(solInputMint()===SOL_MINT_ADDR){
+    if(solBalSol==null)return;
+    raw=BigInt(Math.round(solBalSol*1e9))-BigInt(Math.round(solReserveSol()*1e9));
+  }else raw=solAmountRaw(v.toFixed(d),d);
+  if(raw==null||raw<=0n){$("solAmt").value="";solOnAmtInput();return;}
+  const out=raw*BigInt(num)/BigInt(den);
+  let t=out.toString().padStart(d+1,"0");
+  if(d>0)t=t.slice(0,t.length-d)+"."+t.slice(t.length-d);
+  if(t.includes("."))t=t.replace(/\.?0+$/,"");
+  $("solAmt").value=out>0n?t:"";
   solOnAmtInput();
 }
 // F — همان amtClear بالا، برای solAmt: × فقط وقتی فیلد مقدار دارد.
@@ -8186,7 +8241,8 @@ async function solFetchQuote(){
     if(exactOut){
       const decIn=solInputDecimals();
       const inAmt=Number(j.inAmount)/Math.pow(10,decIn==null?9:decIn);
-      $("solAmt").value=isFinite(inAmt)?fmtOutField(inAmt):"";
+      // فیلدِ ورودی عددِ ساده می‌خواهد (بدونِ جداکننده‌ی هزارگان)، وگرنه دوباره پارس نمی‌شود.
+      $("solAmt").value=/^\d+$/.test(String(j.inAmount))?solFormatUnits(j.inAmount,decIn==null?9:decIn):"";
       const clr=$("solAmtClear");if(clr)clr.hidden=!$("solAmt").value;
     }
     solRenderReadout();
@@ -8218,11 +8274,16 @@ function solSafetyReport(info,owner,largest,epoch){
       const value=Number(bps),cap=current.maximumFee!=null?' Maximum transfer fee: '+solFormatUnits(current.maximumFee,info.decimals)+' tokens.':'';
       add(value>500?'high':value>0?'medium':'ok','Current transfer fee',(value/100).toFixed(2)+'% (capped).'+cap,value>500?12:value>0?5:0);
     }else add('info','Current transfer fee','Unknown — current epoch or fee configuration unavailable.');
+    // کارمزدِ آینده‌ی بالاتر: epochِ فعلی هنوز به آن نرسیده ولی در راه است.
+    const nf=fee.newerTransferFee,nbps=Number(nf?.transferFeeBasisPoints),ne=Number(nf?.epoch);
+    if(Number.isInteger(epoch)&&epoch>=0&&Number.isInteger(ne)&&ne>epoch&&Number.isInteger(nbps)&&nbps<=10000&&nbps>Number(fee.olderTransferFee?.transferFeeBasisPoints)){
+      add('medium','Transfer fee rises','Transfer fee rises to '+(nbps/100).toFixed(2)+'% at epoch '+ne+'.',5);
+    }
     authority('Transfer fee authority',fee.transferFeeConfigAuthority,'An active authority can change transfer fees.');
   }else if(owner===SOL_TOKEN_PROGRAMS[0]||Array.isArray(exts))add('ok','Transfer fee','No transfer-fee extension.');
   else add('info','Transfer fee','Unknown — token extensions could not be read.');
   let pct=null;
-  try{const supply=BigInt(info.supply);if(supply>0n&&Array.isArray(largest)&&largest.length<=20&&largest.every(x=>/^\d+$/.test(x.amount))){const n=largest.reduce((a,x)=>a+BigInt(x.amount),0n);if(n<=supply)pct=Number(n*10000n/supply)/100;}}catch{}
+  try{const supply=BigInt(info.supply);if(supply>0n&&Array.isArray(largest)&&largest.length>0&&largest.length<=20&&largest.every(x=>/^\d+$/.test(x.amount))){const n=largest.reduce((a,x)=>a+BigInt(x.amount),0n);if(n<=supply)pct=Number(n*10000n/supply)/100;}}catch{}
   if(pct==null)add('info','Largest 20 token accounts','Unknown — supply or largest-account data unavailable.');
   else add(pct>80?'high':pct>50?'medium':'ok','Largest 20 token accounts',pct.toFixed(2)+'% of supply. Accounts may be pools or custodians, not separate holders.',pct>80?12:pct>50?5:0);
   for(const e of Array.isArray(exts)?exts:[]){
@@ -8242,10 +8303,18 @@ function solSafetyReport(info,owner,largest,epoch){
   const unknown=findings.filter(f=>f.level==='info').length;
   const rep={findings,score:findings.some(f=>f.level!=='info')?Math.min(100,score):null,unknown,solana:true,
     _c:findings.filter(f=>f.level==='critical').length,_h:findings.filter(f=>f.level==='high').length};
-  rep.verdict=rep.score===null?{txt:'Risk not assessed',tone:'warn'}:unknown&&score===0?{txt:'Checks incomplete',tone:'warn'}:verdictOf(rep);
+  // نامعلوم هرگز نباید حکمِ مثبت بدهد، حتی اگر امتیازِ یافته‌های معلوم کم باشد.
+  const base=rep.score===null?null:verdictOf(rep);
+  rep.verdict=rep.score===null?{txt:'Risk not assessed',tone:'warn'}:unknown&&base.tone==='pos'?{txt:'Checks incomplete',tone:'warn'}:base;
   return rep;
 }
 
+// یک رندرِ مشترک برای ردیفِ استخر — صفحه‌ی ۱ و «Load more» باید یکسان باشند.
+function solPoolRowHtml(p){
+  const a=p.attributes,dex=p.relationships?.dex?.data?.id||"Unknown DEX";
+  const val=x=>x!=null&&Number.isFinite(Number(x))?"$"+Number(x).toLocaleString("en-US",{maximumFractionDigits:0}):"—";
+  return `<div class="vrow" data-pool="${a.address}"><div class="vname"><a target="_blank" rel="noopener" href="https://solscan.io/account/${a.address}">${esc(a.name||shortAddr(a.address))}</a><div class="rs">${esc(dex)}</div></div><div class="vout"><div class="a mono">${val(a.reserve_in_usd)} liquidity</div><div class="d">${val(a.volume_usd?.h24)} volume · 24h</div></div></div>`;
+}
 let solDetailsSeq=0;
 async function solLoadDetails(){
   const seq=++solDetailsSeq,mint=solMintCur;
@@ -8259,11 +8328,7 @@ async function solLoadDetails(){
       const j=await gtJson(GT+"/networks/solana/tokens/"+mint+"/pools?page=1");
       if(!current())return;if(!Array.isArray(j?.data))throw Error("unavailable");
       const rows=j.data.filter(p=>SOL_MINT_RE.test(p.attributes?.address||"")&&[p.relationships?.base_token?.data?.id,p.relationships?.quote_token?.data?.id].includes("solana_"+mint));
-      poolsEl.innerHTML='<header><span class="ttl">Indexed Solana pools</span></header><p class="cov">Pools indexed by GeckoTerminal. Load more to see additional pages; unindexed pools and Jupiter routes may exist.</p>'+rows.map(p=>{
-        const a=p.attributes,dex=p.relationships?.dex?.data?.id||"Unknown DEX";
-        const val=x=>x!=null&&Number.isFinite(Number(x))?"$"+Number(x).toLocaleString("en-US",{maximumFractionDigits:0}):"—";
-        return `<div class="vrow" data-pool="${a.address}"><div class="vname"><a target="_blank" rel="noopener" href="https://solscan.io/account/${a.address}">${esc(a.name||shortAddr(a.address))}</a><div class="rs">${esc(dex)}</div></div><div class="vout"><div class="a mono">${val(a.reserve_in_usd)} liquidity</div><div class="d">${val(a.volume_usd?.h24)} volume · 24h</div></div></div>`;
-      }).join("")+(rows.length?'':'<div class="empty">No indexed pools returned. This does not prove a pool is empty or drained.</div>');
+      poolsEl.innerHTML='<header><span class="ttl">Indexed Solana pools</span></header><p class="cov">Pools indexed by GeckoTerminal. Load more to see additional pages; unindexed pools and Jupiter routes may exist.</p>'+rows.map(solPoolRowHtml).join("")+(rows.length?'':'<div class="empty">No indexed pools returned. This does not prove a pool is empty or drained.</div>');
       if(j.data.length>=20){
         const more=document.createElement("button");more.className="chip";more.textContent="Load more pools";poolsEl.appendChild(more);let page=1;
         more.onclick=async()=>{
@@ -8273,9 +8338,7 @@ async function solLoadDetails(){
             if(!current())return;if(!Array.isArray(next?.data))throw Error("unavailable");
             for(const p of next.data){const a=p.attributes,refs=[p.relationships?.base_token?.data?.id,p.relationships?.quote_token?.data?.id];
               if(!SOL_MINT_RE.test(a?.address||"")||!refs.includes("solana_"+mint)||poolsEl.querySelector(`[data-pool="${a.address}"]`))continue;
-              const row=document.createElement("div");row.className="vrow";row.dataset.pool=a.address;
-              const link=document.createElement("a");link.href="https://solscan.io/account/"+a.address;link.target="_blank";link.rel="noopener";link.textContent=a.name||shortAddr(a.address);link.className="vname";row.appendChild(link);
-              const stats=document.createElement("span");stats.className="vout rs";stats.textContent=(p.relationships?.dex?.data?.id||"Unknown DEX")+" · Liquidity "+(a.reserve_in_usd!=null&&Number.isFinite(Number(a.reserve_in_usd))?"$"+Number(a.reserve_in_usd).toLocaleString():"—");row.appendChild(stats);poolsEl.insertBefore(row,more);
+              more.insertAdjacentHTML("beforebegin",solPoolRowHtml(p));
             }
             ++page;more.hidden=next.data.length<20;more.textContent="Load more pools";
           }catch{if(current())more.textContent="Could not load more — retry";}finally{more.disabled=false;}
@@ -8289,7 +8352,7 @@ async function solLoadDetails(){
     const account=results[0].status==="fulfilled"?results[0].value?.value:null;
     const parsed=account?.data?.parsed,info=parsed?.info;
     if(!info||parsed.type!=="mint"||!SOL_TOKEN_PROGRAMS.includes(account.owner)){
-      const missing=results[0].status==="fulfilled"&&(results[0].value?.value===null||!!parsed?.type);
+      const missing=results[0].status==="fulfilled"&&(results[0].value?.value===null||!!parsed?.type||(!!account&&!SOL_TOKEN_PROGRAMS.includes(account.owner)));
       safety.innerHTML=`<h3>Solana token controls</h3><div class="empty">${missing?'This address is not a readable Solana token mint.':'Token controls could not be read. Safety is unknown.'}</div>`;
       if(missing&&tokenPage)$("tk-name").textContent="This address is not a readable token mint.";
       return;
@@ -8386,11 +8449,13 @@ function solRenderReadout(){
   const thresholdDec=exactOut?decInSafe:decOutSafe;
   const thresholdSym=exactOut?inSym:outSym;
   const threshold=Number(solQuote.otherAmountThreshold)/Math.pow(10,thresholdDec);
-  const impact=Number(solQuote.priceImpactPct)*100;
+  // null/""/غیرعددی نباید «۰٫۰۰٪» شود (Number(null)===0).
+  const rawImpact=solQuote.priceImpactPct;
+  const impact=(rawImpact==null||rawImpact==="")?NaN:Number(rawImpact)*100;
   if(!exactOut)$("solOutRead").value=isFinite(out)?solFormatUnits(solQuote.outAmount,decOutSafe):"";
   $("solMinF").textContent=isFinite(threshold)?threshold.toLocaleString(undefined,{maximumFractionDigits:6})+" "+thresholdSym:"—";
   $("solImpactF").textContent=isFinite(impact)?impact.toFixed(2)+"%":"—";
-  $("solImpactF").style.color=impact>5?"var(--neg)":impact>1.5?"var(--warn)":"";
+  $("solImpactF").style.color=!isFinite(impact)?"":impact>=5?"var(--neg)":impact>=1.5?"var(--warn)":"";
   const bps=solQuote.platformFee?.feeBps;
   $("solProtocolF").textContent=solQuote.platformFee==null?"0%":Number.isFinite(bps)&&bps>=0?(bps/100).toFixed(2)+"%":"—";
   $("solRouteF").textContent=solRouteLabel(solQuote);
@@ -9026,7 +9091,11 @@ function wire(){
     if(location.pathname!==renderedPath)return;
     setView(parseHash().view,false);
     const hc=parseHash().params.get("chain");
-    if(!tokenPage&&(hc==="solana"||hc==="base"))setChain(hc);
+    if(tokenPage)return;
+    // لینکِ اشتراکِ سولانا (in/out/amt) باید همان مسیرِ بوت را برود، نه فقط تعویضِ زنجیره.
+    const hp=parseHash().params;
+    if(hc==="solana"&&(hp.has("in")||hp.has("out")||hp.has("amt")))applyShareParams();
+    else if(hc==="solana"||hc==="base")setChain(hc);
   });
   $("flowTokBtn").onclick=()=>{if(activeChain==="solana")solOpenTokenPicker();else openPicker("out");};
   setInterval(()=>{if(!document.hidden){refreshSolanaViews();refreshMarketWatch();}},30000);

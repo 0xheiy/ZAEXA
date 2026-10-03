@@ -2339,18 +2339,21 @@ function sitemapTokenFromPool(row, network="base") {
    تکرار، سقف‌خورده در SITEMAP_TOKEN_CAP. null یعنی «بالادست قابلِ اعتماد
    نبود» — کالر باید دقیقاً مثلِ یک ۵۰۰/پرتاب رفتار کند، نه مثلِ فهرستِ خالی. */
 async function buildSitemapTokens(env) {
-  const tokens=[],seen=new Set();let succeeded=false;
+  const tokens=[],seen=new Set();let succeeded=false,partial=false;
   for(const network of ["base","solana"]){
-    let count=0;
+    let count=0,netOk=false;
     for(let page=1;page<=SITEMAP_TOKEN_PAGES;page++){
-      let rows;try{rows=await fetchSitemapPoolsPage(page,env,network);succeeded=true;}catch{break;}
+      let rows;try{rows=await fetchSitemapPoolsPage(page,env,network);succeeded=true;netOk=true;}catch{break;}
       for(const row of rows){
         const addr=sitemapTokenFromPool(row,network),key=network=== "base"?addr?.toLowerCase():addr;
         if(!addr||seen.has(key)||count>=SITEMAP_TOKEN_CAP)continue;
         seen.add(key);tokens.push(addr);count++;
       }
     }
+    // شبکه‌ای که هیچ صفحه‌ای نداد یعنی فهرست ناقص است — کالر نباید یک روز کش‌اش کند.
+    if(!netOk)partial=true;
   }
+  Object.defineProperty(tokens,"partial",{value:partial}); // غیرقابل‌شمارش: آرایه همان آرایه‌ی ساده بماند
   return succeeded?tokens:null;
 }
 
@@ -2391,8 +2394,8 @@ async function sitemapResponse(url, env, ctx) {
   } catch (e) {
     tokens = null; // هرگز نباید به اینجا برسد (buildSitemapTokens خودش try/catch دارد)، ولی محافظِ آخر باشد
   }
-  const ok = Array.isArray(tokens);
-  const paths = staticPaths.concat(ok ? tokens.map((a) => "/t/" + a) : []);
+  const ok = Array.isArray(tokens) && !tokens.partial; // ناقص (یک شبکه بی‌جواب) = عمرِ کوتاه، ولی توکن‌های موجود می‌مانند
+  const paths = staticPaths.concat(Array.isArray(tokens) ? tokens.map((a) => "/t/" + a) : []);
   const body = renderSitemapXml(origin, paths, lastmod);
 
   const headers = {

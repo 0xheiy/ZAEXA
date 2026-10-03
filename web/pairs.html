@@ -393,16 +393,19 @@ footer .fine{max-width:78ch;margin:46px 0 0;font-size:11.5px;color:var(--tx3);li
 /* Soft sculpted controls shared across light and dark surfaces. */
 :root{--soft-hi:rgba(255,255,255,.9);--soft-lo:rgba(35,45,65,.13);--face-gap-shadow:rgba(24,31,45,.35);--switch-track:#e2e5ea;--switch-knob:#edeff2;--switch-knob-hi:#f8f9fb;--switch-rim:#f6f7f9;--switch-rim-edge:rgba(30,40,60,.08);--switch-line:rgba(40,50,70,.16);--switch-in-lo:rgba(40,50,70,.24);--switch-drop:rgba(40,50,70,.26);--switch-groove:rgba(30,40,60,.16);--switch-cap-hi:#ffffff;--switch-cap:#f4f5f8;--switch-cap-base:#c9cdd8}
 :root[data-theme="dark"]{--soft-hi:rgba(66,76,100,.24);--soft-lo:rgba(0,0,0,.55);--face-gap-shadow:rgba(0,0,0,.85);--switch-track:#10151f;--switch-knob:#2c3444;--switch-knob-hi:#394357;--switch-rim:#232b39;--switch-rim-edge:rgba(0,0,0,.55);--switch-line:rgba(0,0,0,.6);--switch-in-lo:rgba(0,0,0,.7);--switch-drop:rgba(0,0,0,.6);--switch-groove:rgba(0,0,0,.6);--switch-cap-hi:#14171f;--switch-cap:#1a1e28;--switch-cap-base:#0a0c12}
-/* ۴ اکتبر — سوییچ به انتخابِ مالک «کلیدِ کیبورد» شد (گزینه‌ی ۳): شیارِ کم‌عمق و دسته‌ای که لبه‌ی ضخامت دارد. */
+/* ۴ اکتبر (دورِ دوم) — سوییچ هم‌زبانِ نوارِ تب‌ها شد: همان قاب، و یک گودیِ لغزان زیرِ آیکونِ فعال (خورشید/ماه)، با همان سایه‌ی تبِ فعال. */
 /* سوییچِ تم — ۳ اکتبر، به خواستِ مالک عیناً از روی تصویرِ مرجع: سینیِ بیضیِ گود با لبه‌ی برجسته و
    یک خط تیره‌ی نازک داخلِ لبه، و یک دسته‌ی بیضی‌گونِ بزرگ که سایه‌اش به چپ‌وپایین می‌افتد.
    هیچ آیکونی روی آن نیست — رنگ فقط در پس‌زمینه است؛ همه‌ی رنگ‌ها از متغیرهای بالا می‌آیند تا
    هر دو تم یک شکل باشند. */
-#themeBtn,#themeToggle{position:relative;display:inline-flex;flex:none;width:56px;height:30px;padding:0;border:0;border-radius:999px;background:var(--card2);box-shadow:inset 0 2px 3px var(--switch-groove),inset 0 -1px 0 var(--soft-hi);cursor:pointer;overflow:visible;transition:background .25s;transform:none}
-#themeBtn:hover,#themeToggle:hover{background:var(--card2);transform:none;color:inherit}
-#themeBtn::before,#themeToggle::before{content:"";position:absolute;left:3px;top:2px;width:24px;height:24px;box-sizing:border-box;border:0;border-radius:50%;background:linear-gradient(var(--switch-cap-hi),var(--switch-cap));box-shadow:inset 0 1px 0 var(--soft-hi),0 3px 0 var(--switch-cap-base),0 5px 8px -1px var(--switch-drop);transition:transform .25s}
-[data-theme="dark"] #themeBtn::before,[data-theme="dark"] #themeToggle::before{transform:translateX(26px)}
-#themeBtn svg,#themeToggle>span{display:none!important}
+#themeBtn,#themeToggle{position:relative;isolation:isolate;display:inline-flex;align-items:center;justify-content:space-between;flex:none;width:64px;height:36px;padding:3px;box-sizing:border-box;border:1px solid var(--line);border-radius:999px;background:var(--bg);box-shadow:none;cursor:pointer;overflow:visible;transition:none;transform:none}
+#themeBtn:hover,#themeToggle:hover{background:var(--bg);transform:none;box-shadow:none;color:inherit}
+#themeBtn::before,#themeToggle::before{content:"";position:absolute;left:3px;top:3px;width:28px;height:28px;border-radius:999px;z-index:-1;background:var(--bg);box-shadow:inset 2px 2px 5px var(--soft-lo),inset -2px -2px 5px var(--soft-hi);transition:transform .25s}
+[data-theme="dark"] #themeBtn::before,[data-theme="dark"] #themeToggle::before{transform:translateX(28px)}
+#themeBtn svg,#themeToggle>span{display:grid!important;place-items:center;flex:none;position:static;width:28px;height:28px;margin:0;padding:6px;box-sizing:border-box;transform:none;color:var(--tx3);transition:color .25s}
+#themeToggle>span{padding:0}#themeToggle svg{width:16px;height:16px}
+#themeBtn .themeSun,#themeToggle .sun{order:0}#themeBtn .themeMoon,#themeToggle .moon{order:1}
+:root:not([data-theme="dark"]) #themeBtn .themeSun,:root:not([data-theme="dark"]) #themeToggle .sun,[data-theme="dark"] #themeBtn .themeMoon,[data-theme="dark"] #themeToggle .moon{color:var(--acc)}
 #themeBtn:focus-visible,#themeToggle:focus-visible{outline:2px solid var(--acc);outline-offset:5px}
 .nav{background:var(--bg);box-shadow:4px 4px 9px var(--soft-lo),-3px -3px 8px var(--soft-hi),inset 0 1px 1px var(--soft-hi)}
 .nav button.on,.nav a.on{background:var(--bg);color:var(--acc);box-shadow:inset 2px 2px 5px var(--soft-lo),inset -2px -2px 5px var(--soft-hi)}
@@ -416,7 +419,12 @@ footer .fine{max-width:78ch;margin:46px 0 0;font-size:11.5px;color:var(--tx3);li
 .cta:disabled{background:var(--raise);color:var(--tx3);box-shadow:none}
 .cta:hover:not(:disabled),#connectBtn.solid:hover,#solConnectBtn.solid:hover,.chip.solid[data-act="connect"]:hover{transform:none;filter:brightness(1.05);box-shadow:0 2px 6px -2px var(--soft-lo)}
 .cta:active:not(:disabled),#connectBtn.solid:active,#solConnectBtn.solid:active,.chip.solid[data-act="connect"]:active{transform:none;filter:none;box-shadow:inset 2px 2px 5px var(--soft-lo),inset -2px -2px 5px var(--soft-hi)}
-#setBtn:active{transform:none;background:var(--bg);box-shadow:inset 2px 2px 5px var(--soft-lo),inset -2px -2px 5px var(--soft-hi)}
+/* ۴ اکتبر — دکمه‌ی تنظیمات: آیکونِ SVG تا دقیقاً وسط بنشیند (نویسه‌ی ⚙ بسته به فونت از وسط در می‌رفت)؛
+   در تمِ تیره همان رنگ و لبه‌ی نوارِ تب‌ها؛ و تا وقتی منویش باز است همان فرورفتگیِ تبِ فعال را دارد. */
+#setBtn{display:inline-grid;place-items:center;padding:0;line-height:0}
+#setBtn .gearIcon{display:block;width:18px;height:18px}
+[data-theme="dark"] #setBtn{background:var(--bg);border:1px solid var(--line)}
+#setBtn:active,#setBtn:has(+ #setPop.on),#setBtn[aria-expanded="true"]{transform:none;background:var(--bg);color:var(--acc);box-shadow:inset 2px 2px 5px var(--soft-lo),inset -2px -2px 5px var(--soft-hi)}
 @media(max-width:720px){
   /* ۴ اکتبر — به خواستِ مالک: نوار خودش تخت است (بی‌برجستگی، همان رنگِ تیره‌ی فعلی)، گوشه‌ها کاملاً گرد،
      و فقط تبِ فعال در آن فرو رفته — همان رفتارِ نوارِ بالای دسکتاپ. */
@@ -490,7 +498,7 @@ footer .fine{max-width:78ch;margin:46px 0 0;font-size:11.5px;color:var(--tx3);li
        امضای DOM این بلوک را با اپ می‌سنجد. انتخاب از اینجا همان تبِ
        chainTabs موجود را می‌زند (پایینِ صفحه). -->
   <div class="rel">
-    <button class="chip round" id="setBtn" aria-haspopup="menu" aria-expanded="false" title="Settings">⚙</button>
+    <button class="chip round" id="setBtn" aria-haspopup="menu" aria-expanded="false" title="Settings" aria-label="Settings"><svg class="gearIcon" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg></button>
     <div class="pop" id="setPop">
       <!-- ۲۳ سپتامبر: عینِ جزءبه‌جزءِ #setPop در web/index.html
            (~۱۱۵۲-۱۱۵۷) — اسلیپیج/مهلت/تأییدها اینجا کاری «شبیه‌سازی»

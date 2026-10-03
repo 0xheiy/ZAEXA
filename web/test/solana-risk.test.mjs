@@ -30,3 +30,25 @@ test('seizure/transfer restrictions add risk; unreviewed extension effects remai
 test('all unknown facts never produce a numeric zero or a green verdict',()=>{
  const r=ctx.solSafetyReport({},'2022',null,null);assert.equal(r.score,null);assert.equal(r.verdict.tone,'warn');assert.equal(r.findings.filter(f=>f.level==='ok').length,0);
 });
+test('any unknown check can never yield a positive verdict, whatever the score',()=>{
+ // Medium finding (score 5, below the "acceptable" bar) plus an unreadable largest-accounts check.
+ const info={...clean,extensions:[{extension:'transferFeeConfig',state:{transferFeeConfigAuthority:null,olderTransferFee:{epoch:0,transferFeeBasisPoints:100,maximumFee:'0'},newerTransferFee:{epoch:0,transferFeeBasisPoints:100,maximumFee:'0'}}}]};
+ const r=ctx.solSafetyReport(info,'2022',null,100);
+ assert.ok(r.unknown>=1&&r.score>0);assert.equal(r.verdict.txt,'Checks incomplete');assert.equal(r.verdict.tone,'warn');
+ assert.equal(ctx.solSafetyReport(clean,'legacy',[{amount:'100000'}],100).verdict.tone,'pos');
+});
+test('empty largest-accounts list with supply is unknown, not 0.00%',()=>{
+ const r=ctx.solSafetyReport(clean,'legacy',[],100);
+ const f=r.findings.find(x=>x.title.startsWith('Largest'));
+ assert.equal(f.level,'info');assert.ok(!/0\.00%/.test(f.detail));assert.equal(r.verdict.txt,'Checks incomplete');
+});
+test('a scheduled higher transfer fee is flagged with its epoch',()=>{
+ const info={...clean,extensions:[{extension:'transferFeeConfig',state:{transferFeeConfigAuthority:null,olderTransferFee:{epoch:0,transferFeeBasisPoints:0,maximumFee:'0'},newerTransferFee:{epoch:105,transferFeeBasisPoints:250,maximumFee:'9'}}}]};
+ const r=ctx.solSafetyReport(info,'2022',[{amount:'100000'}],100);
+ const f=r.findings.find(x=>/rises/.test(x.title+x.detail));
+ assert.ok(f);assert.equal(f.level,'medium');assert.match(f.detail,/Transfer fee rises to 2\.50% at epoch 105/);
+ // already in effect or lower: no warning
+ assert.ok(!ctx.solSafetyReport(info,'2022',[{amount:'100000'}],105).findings.some(x=>/rises/.test(x.title)));
+ const lower={...info,extensions:[{extension:'transferFeeConfig',state:{...info.extensions[0].state,olderTransferFee:{epoch:0,transferFeeBasisPoints:900,maximumFee:'0'}}}]};
+ assert.ok(!ctx.solSafetyReport(lower,'2022',[{amount:'100000'}],100).findings.some(x=>/rises/.test(x.title)));
+});

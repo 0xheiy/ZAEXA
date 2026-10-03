@@ -12,7 +12,7 @@ async def main():
  async with async_playwright() as pw:
   browser=await pw.chromium.launch()
   page=await browser.new_page(viewport={'width':1280,'height':900})
-  errors=[];quotes=[];events=[];rpc=[];config={'impact':'0.06','fee':25,'missing':False}
+  errors=[];quotes=[];events=[];rpc=[];config={'impact':'0.06','fee':25,'missing':False,'foreign':False,'bigpools':False}
   page.on('pageerror',lambda e:errors.append(str(e)))
   async def route(r):
    u=urlparse(r.request.url);path=u.path;q=parse_qs(u.query)
@@ -24,7 +24,7 @@ async def main():
    if path=='/sol/rpc':
     d=json.loads(r.request.post_data);rpc.append(d);method=d['method']
     result=None
-    if method=='getAccountInfo':result={'value':None if config['missing'] else {'owner':LEGACY,'data':{'parsed':{'type':'mint','info':{'decimals':6,'supply':'100000000','mintAuthority':None,'freezeAuthority':OWNER}}}}}
+    if method=='getAccountInfo':result={'value':{'owner':OWNER,'data':['','base64']} if config['foreign'] else None if config['missing'] else {'owner':LEGACY,'data':{'parsed':{'type':'mint','info':{'decimals':6,'supply':'100000000','mintAuthority':None,'freezeAuthority':OWNER}}}}}
     elif method=='getTokenLargestAccounts':result={'value':[{'amount':'60000000'}]}
     elif method=='getEpochInfo':result={'epoch':100}
     elif method=='getBalance':result={'value':1000000000}
@@ -36,6 +36,10 @@ async def main():
     if '/ohlcv/' in path:return await r.fulfill(json={'data':{'attributes':{'ohlcv_list':[[1700000000,1,1,1,1,1],[1700000060,2,2,2,2,1]]}}})
     if path.endswith('/pools'):
      mint=path.split('/tokens/')[1].split('/')[0] if '/tokens/' in path else USDT
+     if config['bigpools']:
+      def pool(a,v):return {'id':'solana_'+a,'attributes':{'address':a,'name':'Pool '+a[-1],'reserve_in_usd':'1234','volume_usd':{'h24':v}},'relationships':{'base_token':{'data':{'id':'solana_'+mint}},'quote_token':{'data':{'id':'solana_'+SOL}},'dex':{'data':{'id':'test-dex'}}}}
+      if q.get('page')==['2']:return await r.fulfill(json={'data':[pool('1'*31+'z','777777')]})
+      return await r.fulfill(json={'data':[pool('1'*31+c,'200') for c in '23456789ABCDEFGHJKLM']})
      return await r.fulfill(json={'data':[{'id':'solana_'+SOL,'attributes':{'address':SOL,'name':'Token / SOL','reserve_in_usd':'100','volume_usd':{'h24':'200'}},'relationships':{'base_token':{'data':{'id':'solana_'+mint}},'quote_token':{'data':{'id':'solana_'+SOL}},'dex':{'data':{'id':'test-dex'}}}}]})
     if '/multi/' in path:return await r.fulfill(json={'data':[]})
     if '/tokens/' in path:
@@ -118,7 +122,8 @@ async def main():
   assert quotes[0]['amount']==['1250000'],quotes
   assert await page.locator('#solProtocolF').inner_text()=='0.25%'
   assert await page.locator('#solImpactF').evaluate('e=>e.style.color')=='var(--neg)'
-  assert 'chain=solana' in await page.locator('#hdr a[href^="/pairs"]').get_attribute('href') if await page.locator('#hdr').count() else True
+  assert await page.locator('body>header a[href^="/pairs"]').count()>=1
+  assert 'chain=solana' in await page.locator('body>header a[href^="/pairs"]').first.get_attribute('href')
   await page.wait_for_function('document.querySelector("#solDirectF").textContent.includes("more received")')
   await page.wait_for_function('document.querySelector("#solSafety").textContent.includes("60.00%")')
   safety=await page.locator('#solSafety').inner_text();assert 'Revoked' in safety and 'Active' in safety and 'No transfer-fee' in safety,safety
@@ -271,11 +276,29 @@ async def main():
   await page.goto('http://zaexa.test/t/'+USDT)
   await page.wait_for_function('() => document.querySelector("#solSafety").textContent.includes("60.00%")')
   config['missing']=True;await page.evaluate('solLoadDetails()');assert 'not a readable' in await page.locator('#solSafety').inner_text()
+  config['missing']=False;config['foreign']=True;await page.evaluate('solLoadDetails()')
+  await page.wait_for_function('document.querySelector("#solSafety").textContent.includes("not a readable")')
+  assert 'Safety is unknown' not in await page.locator('#solSafety').inner_text()
+  config['foreign']=False
+  config['bigpools']=True;await page.goto('http://zaexa.test/app#swap?chain=solana&in='+SOL+'&out='+USDT)  # کشِ GT: بارگذاریِ تازه
+  await page.wait_for_function('document.querySelectorAll("#solPools .vrow").length===20')
+  await page.locator('#solPools button.chip').click()
+  await page.wait_for_function('document.querySelectorAll("#solPools .vrow").length===21')
+  p1=await page.evaluate('document.querySelector("#solPools .vrow").outerHTML.replace(/1{31}\\w/g,"X").replace(/Pool \\w/,"Pool X").replace("$200","$V")')
+  last=await page.evaluate('document.querySelector("[data-pool$=z]").outerHTML.replace(/1{31}\\w/g,"X").replace(/Pool \\w/,"Pool X").replace("$777,777","$V")')
+  assert p1==last,(p1,last)
+  assert '$777,777 volume' in await page.locator('[data-pool$=z]').inner_text()
+  config['bigpools']=False
+  print('pools Load more: page 2 rows use the same renderer (24h volume column, classes, number format); non-mint account shows the unreadable card')
   await page.goto('http://zaexa.test/t/not-an-address');await page.wait_for_function('document.querySelector("#tk-sym").textContent==="Unreadable address"')
   assert await page.locator('#solSwap').evaluate('e=>e.hidden')
   assert await page.evaluate('document.baseURI')=='http://zaexa.test/'
   await page.goto('http://zaexa.test/app#swap?chain=solana')
   await page.wait_for_function('typeof solLoadMobileBundle==="function"')
+  # hashchange با in/out باید پارامترهای اشتراک را اعمال کند، نه فقط زنجیره را
+  await page.evaluate('location.hash="#swap?chain=solana&in=%s&out=%s"'%(USDT,USDC))
+  await page.wait_for_function('solInputMint()==="%s" && solOutputMint()==="%s"'%(USDT,USDC))
+  print('hashchange with chain=solana&in&out applies the share pair')
   await page.set_viewport_size({'width':390,'height':844})
   await page.evaluate("Object.defineProperty(navigator,'userAgent',{value:'Android Mobile',configurable:true})")
   await page.evaluate('solOpenWalletPicker()')
@@ -335,12 +358,13 @@ async def main():
   await page.evaluate('solLoadMobileBundle()')
 
   await page.evaluate("""() => {
-   const handlers={};window.mobileAborted=false;window.mobileSent=null;
+   const handlers={};window.fireUri=u=>handlers.display_uri(u);window.mobileConnects=0;window.mobileAborted=false;window.mobileSent=null;
    const kp=SolMobile.nacl.sign.keyPair();window.mobileOwner=SolMobile.bs58.encode(kp.publicKey);
    const session={namespaces:{solana:{methods:['solana_signTransaction','solana_signMessage'],accounts:[SOL_WC_CHAIN+':'+mobileOwner]}}};
    const provider={session:null,on:(name,fn)=>handlers[name]=fn,
-    connect:()=>new Promise((resolve,reject)=>{window.finishMobile=()=>{provider.session=session;resolve(session);};window.cancelMobile=()=>reject(Error('cancelled'));handlers.display_uri('wc:test-pairing@2?relay-protocol=irn&symKey=0000000000000000000000000000000000000000000000000000000000000000');}),
-    abortPairingAttempt:()=>{window.mobileAborted=true;window.cancelMobile?.();},
+    connect:()=>new Promise((resolve,reject)=>{window.mobileConnects++;window.finishMobile=()=>{provider.session=session;resolve(session);};window.cancelMobile=()=>reject(Error('cancelled'));handlers.display_uri('wc:test-pairing@2?relay-protocol=irn&symKey=0000000000000000000000000000000000000000000000000000000000000000');}),
+    abortPairingAttempt:()=>{window.mobileAborted=true;},  // مثلِ کتابخانه‌ی واقعی ۲٫۲۳٫۱۰: هیچ‌چیز را لغو نمی‌کند
+    
     disconnect:async()=>{provider.session=null;handlers.session_delete?.();},
     request:async request=>{window.mobileSent=request;if(request.method==='solana_signMessage'){window.mobileApproval=request;return {signature:SolMobile.bs58.encode(SolMobile.nacl.sign.detached(SolMobile.bs58.decode(request.params.message),kp.secretKey))};}return {transaction:request.params.transaction};}};
    SolMobile.UniversalProvider.init=async()=>provider;
@@ -349,9 +373,18 @@ async def main():
   await page.wait_for_function('document.querySelector("#solQr")?.width>100')
   await page.locator('#solWalClose').click();await page.wait_for_function('!solMobilePending')
   assert await page.evaluate('mobileAborted && solAccount===null')
+  # abortPairingAttempt — پوچ است؛ لغوِ محلی باید QR را پاک کند و uriِ دیررسیده را نادیده بگیرد
+  assert await page.evaluate('!solMobilePending && document.querySelector("#solQr")===null')
+  await page.evaluate('fireUri("wc:late-after-cancel@2?symKey=00")');await page.wait_for_timeout(300)
+  assert await page.evaluate('document.querySelector("#solQr")===null')
   assert await page.evaluate('document.documentElement.scrollWidth<=innerWidth')
+  # تلاشِ لغوشده باید واقعاً تمام شود (race با promiseِ لغو)، نه برای همیشه معلق بماند
+  await page.evaluate('void(window.att=solConnectMobile())');await page.wait_for_function('document.querySelector("#solQr")?.width>100')
+  await page.evaluate('solCloseWalletPicker()')
+  assert await page.evaluate('Promise.race([att.then(()=>"settled"),new Promise(r=>setTimeout(()=>r("hung"),1500))])')=='settled'
   await page.evaluate('solOpenWalletPicker()');await page.locator('#solMobileConnect').click()
   await page.wait_for_function('document.querySelector("#solQr")?.width>100')
+  assert await page.evaluate('mobileConnects')==3
   await page.evaluate('finishMobile()');await page.wait_for_function('solAccount!==null')
   assert await page.evaluate('solAccount.address===mobileOwner')
   assert await page.evaluate('mobileApproval.method')=='solana_signMessage'
