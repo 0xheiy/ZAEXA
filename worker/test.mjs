@@ -13253,6 +13253,69 @@ function stripAllowedWording(t) {
     globalThis.fetch = savedFetch;
   }
 
+  // [sol round5] پ۲) دلیلِ بسته‌ی شکستِ کوت — از رویِ HTTP status و errorCode، نه متنِ آزاد
+  {
+    const cases = [
+      [400, { error: "Could not find any route", errorCode: "COULD_NOT_FIND_ANY_ROUTE" }, "no-route"],
+      [400, { error: "No routes found", errorCode: "NO_ROUTES_FOUND" }, "no-route"],
+      [400, { error: "The token is not tradable", errorCode: "TOKEN_NOT_TRADABLE" }, "not-tradable"],
+      [429, { error: "Rate limit exceeded" }, "rate-limited"],
+      [503, { error: "Service unavailable" }, "upstream"],
+      [500, null, "upstream"],
+      [400, { error: "Invalid parameter", errorCode: "SOMETHING_ELSE" }, "bad-request"],
+      [404, { error: "Not found" }, "bad-request"],
+      [400, { error: "Amount too small", errorCode: "TOKEN_AMOUNT_TOO_SMALL" }, "amount-too-small"],
+    ];
+    for (const [st, jb, want] of cases) {
+      globalThis.fetch = async () => new Response(jb == null ? "oops" : JSON.stringify(jb),
+        { status: st, headers: { "content-type": "application/json" } });
+      const res = await call("/sol/quote?inputMint=" + MINT_A + "&outputMint=" + MINT_B + "&amount=1000");
+      const body = await res.json();
+      ok(res.status === 502 && body.reason === want && body.error === "jup:quote:" + st,
+        "[sol round5] Jupiter " + st + " " + JSON.stringify(jb) + " must give reason \"" + want + "\", got " + res.status + " " + JSON.stringify(body));
+      ok(JSON.stringify(body).indexOf("Could not find") === -1 && JSON.stringify(body).indexOf("not tradable") === -1,
+        "[sol round5] Jupiter's free text must never reach the response body: " + JSON.stringify(body));
+    }
+    globalThis.fetch = async () => { throw new Error("timeout"); };
+    const resT = await call("/sol/quote?inputMint=" + MINT_A + "&outputMint=" + MINT_B + "&amount=1000");
+    const bodyT = await resT.json();
+    ok(bodyT.reason === "upstream", "[sol round5] a network failure/timeout must be reason \"upstream\", got " + JSON.stringify(bodyT));
+    globalThis.fetch = savedFetch;
+  }
+
+  // [sol round5] پ۳) sendTransaction با preflightCommitment — فقط "confirmed" یا نبودنِ کلید
+  {
+    let netCalls = 0;
+    globalThis.fetch = async () => { netCalls++; return new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, result: "sig" }), { status: 200, headers: { "content-type": "application/json" } }); };
+    const send = async (opts) => {
+      const res = await call("/sol/rpc", { method: "POST", body: JSON.stringify({ method: "sendTransaction", params: ["AQID", opts] }) });
+      return { status: res.status, body: await res.json() };
+    };
+    for (const opts of [
+      { encoding: "base64", skipPreflight: false, maxRetries: 5, preflightCommitment: "confirmed" },
+      { encoding: "base64", skipPreflight: false, maxRetries: 0, preflightCommitment: "confirmed" },
+      { encoding: "base64", skipPreflight: false, maxRetries: 5 },
+    ]) {
+      const r = await send(opts);
+      ok(r.status === 200 && r.body.result === "sig", "[sol round5] sendTransaction opts " + JSON.stringify(opts) + " must be accepted, got " + JSON.stringify(r));
+    }
+    const before = netCalls;
+    for (const opts of [
+      { encoding: "base64", skipPreflight: false, maxRetries: 5, preflightCommitment: "finalized" },
+      { encoding: "base64", skipPreflight: false, maxRetries: 5, preflightCommitment: "processed" },
+      { encoding: "base64", skipPreflight: false, maxRetries: 5, preflightCommitment: "" },
+      { encoding: "base64", skipPreflight: false, maxRetries: 5, preflightCommitment: null },
+      { encoding: "base64", skipPreflight: false, maxRetries: 6, preflightCommitment: "confirmed" },
+      { encoding: "base64", skipPreflight: true, maxRetries: 5, preflightCommitment: "confirmed" },
+      { encoding: "base64", skipPreflight: false, maxRetries: 5, preflightCommitment: "confirmed", minContextSlot: 1 },
+    ]) {
+      const r = await send(opts);
+      ok(r.status === 400 && r.body.error === "bad-params", "[sol round5] sendTransaction opts " + JSON.stringify(opts) + " must be rejected, got " + JSON.stringify(r));
+    }
+    ok(netCalls === before, "[sol round5] rejected sendTransaction shapes must never reach the network");
+    globalThis.fetch = savedFetch;
+  }
+
   // ت) POST /sol/swap — اعتبارسنجی، و فیلدهای ثابت غیرِقابلِ‌بازنویسی
   {
     let netCalls = 0;
@@ -13471,7 +13534,10 @@ console.log(fails === 0
     + "deduped, capped "
     + "at 50 and ordered by upstream volume; a failed or unusable upstream (500, a thrown fetch, "
     + "or an unparseable body) degrades to exactly the three static URLs with a short cache-control "
-    + "and is never cached at the edge, while a successful build is cached 24h"
+    + "and is never cached at the edge, while a successful build is cached 24h\n" +
+    "[sol round5] /sol/quote failures carry a closed reason (no-route, not-tradable, rate-limited, "
+    + "amount-too-small, upstream, bad-request) derived from status and Jupiter's errorCode only; "
+    + "/sol/rpc sendTransaction accepts preflightCommitment \"confirmed\" or no key and rejects every other value"
 
   : "[gt proxy] " + fails + " FAILURES");
 process.exit(fails === 0 ? 0 : 1);

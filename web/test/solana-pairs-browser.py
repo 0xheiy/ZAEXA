@@ -11,7 +11,7 @@ INIT='''(() => {
  const wallet={name:'Phantom test',chains:['solana:mainnet'],accounts:[account],features:{
   'standard:connect':{connect:async()=>({accounts:[account]})},'standard:disconnect':{disconnect:async()=>{++disconnectCalls;}},
   'solana:signMessage':{signMessage:({message})=>new Promise((resolve,reject)=>{
-   proofs.push(SolMobile.bs58.encode(message));window.approveTest=()=>resolve([{signedMessage:message,signature:SolMobile.nacl.sign.detached(message,new Uint8Array(key.secretKey))}]);
+   proofs.push(SolConfirm.bs58.encode(message));window.approveTest=()=>resolve([{signedMessage:message,signature:SolConfirm.nacl.sign.detached(message,new Uint8Array(key.secretKey))}]);
    window.rejectTest=()=>reject(Object.assign(Error('Rejected'),{code:4001}));
   })}
  }};window.addEventListener('wallet-standard:app-ready',e=>e.detail.register(wallet));
@@ -19,7 +19,7 @@ INIT='''(() => {
 async def main():
  async with async_playwright() as p:
   b=await p.chromium.launch();page=await b.new_page(viewport={'width':390,'height':844});errors=[]
-  page.on('pageerror',lambda e:errors.append(str(e)));await page.add_init_script(INIT)
+  page.on('pageerror',lambda e:errors.append(str(e)));reqs=[];page.on('request',lambda r:reqs.append(urlparse(r.url).path));await page.add_init_script(INIT)
   async def route(r):
    path=urlparse(r.request.url).path
    if path in ['/pairs','/pairs.html']:return await r.fulfill(path=str(ROOT/'pairs.html'),content_type='text/html')
@@ -52,6 +52,9 @@ async def main():
   await page.evaluate('approveTest()');await page.wait_for_function('document.querySelector("#connectBtn").textContent!=="Approve in wallet…"')
   expected=KEY['address'][:6]+'…'+KEY['address'][-4:];assert await page.locator('#connectBtn').inner_text()==expected
   await page.locator('#connectBtn').click();assert await page.locator('#walletAddr').inner_text()==expected
+  # کیف‌پولِ تزریق‌شده فقط بسته‌ی کوچکِ تأیید را می‌گیرد؛ بسته‌ی بزرگِ WalletConnect هنوز نباید درخواست شده باشد
+  assert any(p.startswith('/solana-confirm.bundle.') for p in reqs),reqs
+  assert not any(p.startswith('/solana-wallet.bundle.') for p in reqs),reqs
   await page.locator('#disconnectBtn').click();assert await page.locator('#connectBtn').inner_text()=='Connect wallet'
   assert await page.evaluate('disconnectCalls')>=2
   await page.locator('#connectBtn').click();await page.locator('#walList .walRow').first.click();await page.wait_for_function('proofs.length===4')

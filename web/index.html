@@ -755,9 +755,12 @@ main{max-width:1140px;margin:0 auto;padding:8px 20px 56px;display:flex;flex-dire
 .swapDone .acts a{text-decoration:none;display:inline-flex;align-items:center;justify-content:center}
 .swapDone .txl{font-size:11.5px;color:var(--tx3);margin-top:10px}
 section.card.isDone{display:flex;flex-direction:column}
-section.card.isDone #swapDone{flex:1 1 auto;display:flex;flex-direction:column;justify-content:center}
+section.card.isDone #swapDone,section.card.isDone #solSwapDone{flex:1 1 auto;display:flex;flex-direction:column;justify-content:center}
 section.card.isDone .facts,section.card.isDone #statusSlot,section.card.isDone #revNote,
-section.card.isDone #actBtn{display:none}
+section.card.isDone #actBtn,section.card.isDone #solStatusSlot,section.card.isDone #solSwapBtn,section.card.isDone #solImpactWarn{display:none}
+/* ≥۵۰٪ price impact روی سولانا — یک خطِ هشدار زیرِ facts، نه بلوک */
+.impactWarn{margin:0 14px 8px;font-size:12px;line-height:1.4;color:var(--neg)}
+.impactWarn[hidden]{display:none}
 
 /* ---------------- حرکت — فقط وقتی کاربر آن را خواسته ---------------- */
 @media (prefers-reduced-motion:no-preference){
@@ -1349,11 +1352,19 @@ footer .fine{max-width:78ch;margin:46px 0 0;font-size:11.5px;color:var(--tx3);li
 .cta:disabled{background:var(--raise);color:var(--tx3);box-shadow:none}
 .cta:hover:not(:disabled),#connectBtn.solid:hover,#solConnectBtn.solid:hover,.chip.solid[data-act="connect"]:hover{transform:none;filter:brightness(1.05);box-shadow:0 2px 6px -2px var(--soft-lo)}
 .cta:active:not(:disabled),#connectBtn.solid:active,#solConnectBtn.solid:active,.chip.solid[data-act="connect"]:active{transform:none;filter:none;box-shadow:inset 2px 2px 5px var(--soft-lo),inset -2px -2px 5px var(--soft-hi)}
+/* دکمه‌های بلوکِ نتیجه: هر دو قرص کامل؛ همان زبانِ گرادیانِ تخت و فرورفتگیِ هنگام فشار */
+.swapDone .acts .cta,.swapDone .acts .exitShare{border-radius:999px;padding:13px 14px;font-size:14px;font-weight:660;letter-spacing:-.1px;min-height:46px;box-sizing:border-box}
+.swapDone .acts .cta{background:var(--grad);border:0;box-shadow:0 2px 6px -2px var(--soft-lo);transform:none;transition:filter .16s,box-shadow .12s}
+.swapDone .acts .cta:hover{transform:none;filter:brightness(1.05)}
+.swapDone .acts .cta:active{transform:none;filter:none;box-shadow:inset 2px 2px 5px var(--soft-lo),inset -2px -2px 5px var(--soft-hi)}
+.swapDone .acts .exitShare{flex:1;margin:0;justify-content:center}
+.swapDone .acts .exitShare:active{box-shadow:inset 2px 2px 5px var(--soft-lo),inset -2px -2px 5px var(--soft-hi)}
 /* ۴ اکتبر — دکمه‌ی تنظیمات: آیکونِ SVG تا دقیقاً وسط بنشیند (نویسه‌ی ⚙ بسته به فونت از وسط در می‌رفت)؛
    در تمِ تیره همان رنگ و لبه‌ی نوارِ تب‌ها؛ و تا وقتی منویش باز است همان فرورفتگیِ تبِ فعال را دارد. */
 #setBtn{display:inline-grid;place-items:center;padding:0;line-height:0}
 #setBtn .gearIcon{display:block;width:18px;height:18px}
-[data-theme="dark"] #setBtn{background:var(--bg);border:1px solid var(--line)}
+/* رنگ دکمه تنظیمات همان نوار تب است در هر دو تم */
+#setBtn{background:var(--bg);border:1px solid var(--line)}
 #setBtn:active,#setBtn:has(+ #setPop.on),#setBtn[aria-expanded="true"]{transform:none;background:var(--bg);color:var(--acc);box-shadow:inset 2px 2px 5px var(--soft-lo),inset -2px -2px 5px var(--soft-hi)}
 @media(max-width:720px){
   /* ۴ اکتبر — به خواستِ مالک: نوار خودش تخت است (بی‌برجستگی، همان رنگِ تیره‌ی فعلی)، گوشه‌ها کاملاً گرد،
@@ -1831,6 +1842,8 @@ html:not(.ctaReady) #actBtn:disabled,html:not(.ctaReady) #solSwapBtn:disabled{ba
       <div class="fact"><span class="k">Protocol fee</span><span class="v mono" id="solProtocolF">—</span></div>
     <div class="fact"><span class="k">Compared with direct route</span><span class="v mono" id="solDirectF">—</span></div>
     </div>
+    <div class="impactWarn" id="solImpactWarn" role="status" hidden>You would lose most of the value to price impact.</div>
+    <div class="swapDone" id="solSwapDone" hidden></div>
     <!-- F — نوارِ مسیرِ ژوپیتر، عیناً سبکِ routeBar/rbTrack/rbLegend بالا؛
          فقط وقتی کوتی هست دیده می‌شود (idle=hidden، نه اسکلتِ خالی). -->
     <div id="solStatusSlot">
@@ -3667,6 +3680,26 @@ const LOGO_TTL=7*864e5,POOL_TTL=864e5,LS_MAX=300;
 const LOGO_NONE_TTL=36e5;
 const ttlLogo=v=>v===""?LOGO_NONE_TTL:LOGO_TTL;
 const okLogo=v=>v===""||(typeof v==="string"&&/^https:\/\/[^\s"'<>]{4,300}$/.test(v));
+/* لوگوی جایگزین: دایره‌ی گرادیان با رنگِ پایدار از روی آدرس/mint و حرفِ اولِ نماد.
+   آدرسِ hex فقط برای Base کوچک می‌شود؛ mintِ سولانا عیناً (حساس به حروف). فقط textContent. */
+function fallbackAvatarStyle(seed,symbol){
+  let k=String(seed==null?"":seed);if(/^0x[0-9a-fA-F]{40}$/.test(k))k=k.toLowerCase();
+  let h=2166136261;for(let i=0;i<k.length;i++){h^=k.charCodeAt(i);h=Math.imul(h,16777619)>>>0;}
+  const hue=h%360,ch=symbol?String(symbol).trim().charAt(0).toUpperCase():"";
+  return {hue,letter:ch||"?",background:`linear-gradient(135deg, hsl(${hue} 72% 56%), hsl(${(hue+38)%360} 72% 46%))`};
+}
+function clearFallbackAvatar(el){
+  if(!el||!el.dataset.fb)return;
+  el.style.background=el.style.color=el.style.fontWeight=el.style.fontSize="";delete el.dataset.fb;
+}
+function paintFallbackAvatar(el,seed,symbol){
+  if(!el)return;
+  const st=fallbackAvatarStyle(seed,symbol);
+  el.textContent=st.letter;
+  const w=parseFloat(getComputedStyle(el).width)||24;
+  el.style.background=st.background;el.style.color="#fff";el.style.fontWeight="700";
+  el.style.fontSize=(Math.round(w*45)/100)+"px";el.dataset.fb="1";
+}
 const okPool=v=>typeof v==="string"&&/^[A-Za-z0-9_-]{1,80}$/.test(v);
 /* localStorage در حالت خصوصی و در file:// می‌تواند throw کند. نبودنش خطا
    نیست — فقط یعنی بدون کش ماندگار کار کن. */
@@ -4654,6 +4687,7 @@ let solSide="buy";              // "buy" (SOL→توکن) یا "sell" (توکن�
 let solVerdictV=null;           // "sell"/"nosell"/null از GET /vd/<mint>
 let solVerdictWhy=null;         // why وقتی v===null — "sol:unconfirmed" یعنی شبیه‌سازیِ فروش شکست خورد ولی هانی‌پات اعلام نمی‌شود
 const SOL_UNCONF="sol:unconfirmed";
+let solImpactArmedKey=null;     // کلیدِ کوتی که کاربر «Swap anyway» را برایش زده (impact ≥ ۱۵٪)
 const solArmedMints=new Set();  // mintهایی که کاربر در همین نشستِ صفحه «Buy anyway» را برایشان زده (به‌ازای هر توکن)
 let solQuoteSeq=0;              // برای دورریختنِ کوت‌های دیرِ رسیده
 let solDirectQuote=null;        // {q,j}: نتیجه‌ی solCompareDirect برای همان کوت q — کارتِ ونیوها از همین می‌خواند، درخواستِ تازه‌ای نیست
@@ -4873,10 +4907,10 @@ async function solAppLoadToken(mint){
 /* ---- چیدمانِ دو پایه، عیناً چیدمانِ Base: بالا همیشه «You pay» (فیلدِ
    قابلِ‌ویرایش)، پایین همیشه «You receive» (فقط‌خواندنی). فلیپ فقط این را
    عوض می‌کند که کدام‌یک SOL است — solSide («buy»=SOL بالا). ---- */
-function solPaintAvatarInto(elId,symbol,logoUrl){
+function solPaintAvatarInto(elId,symbol,logoUrl,mint){
   const el=$(elId);if(!el)return;
   el.innerHTML="";
-  el.appendChild(document.createTextNode(symbol?symbol.slice(0,3).toUpperCase():"?"));
+  paintFallbackAvatar(el,mint,symbol);
   if(!logoUrl||!okLogo(logoUrl))return;
   const img=new Image();
   img.alt="";img.loading="lazy";
@@ -4906,6 +4940,7 @@ async function solEnsureWsolLogo(){
 }
 function solPaintSolChip(elId){
   const el=$(elId);if(!el)return;
+  clearFallbackAvatar(el);
   if(solWsolLogoUrl){
     el.innerHTML="";
     const img=new Image();
@@ -4998,8 +5033,8 @@ function solPaintLegs(){
   $("solTopSym").textContent=topSym;
   $("solBotSym").textContent=botSym;
   const refAvatar=buy?"solTopAv":"solBotAv",tokAvatar=buy?"solBotAv":"solTopAv";
-  if(solRefMint===SOL_MINT_ADDR)solPaintSolChip(refAvatar);else solPaintAvatarInto(refAvatar,solRefSymbol,solRefLogo);
-  solPaintAvatarInto(tokAvatar,solTokenSymbol,solTokenLogoUrl);
+  if(solRefMint===SOL_MINT_ADDR)solPaintSolChip(refAvatar);else solPaintAvatarInto(refAvatar,solRefSymbol,solRefLogo,solRefMint);
+  solPaintAvatarInto(tokAvatar,solTokenSymbol,solTokenLogoUrl,solMintCur);
   // فقط چیپِ توکن (نه SOL) گزینشگر را باز می‌کند — و فقط روی /app، چون
   // صفحه‌ی توکن (tokenPage) خودش mint را از آدرس گرفته و قابل عوض‌کردن نیست.
   const pick=leg=>{solPickerLeg=leg;solOpenTokenPicker();};
@@ -5153,13 +5188,13 @@ function watchSpark(series){
   return `<svg viewBox="0 0 66 28" fill="none" aria-hidden="true"><polyline points="${points}" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
 }
 function paintWatchAvatar(el,t,logo){
-  el.textContent=t.symbol.slice(0,3);
+  paintFallbackAvatar(el,t.mint||t.address,t.symbol);
   if(t.native){const img=new Image();img.alt="";img.src=ETH_ICON;img.className="on";el.append(img);return;}
   if(t.mint===SOL_MINT_ADDR){
     const svg=$("srcOptSolana").querySelector("svg").cloneNode(true);
     const gradient=svg.querySelector("linearGradient");
     if(gradient){const old=gradient.id;gradient.id=old+"Watch"+Math.random().toString(36).slice(2);svg.querySelectorAll("[fill]").forEach(n=>{if(n.getAttribute("fill")===`url(#${old})`)n.setAttribute("fill",`url(#${gradient.id})`);});}
-    el.replaceChildren(svg);return;
+    clearFallbackAvatar(el);el.replaceChildren(svg);return;
   }
   if(!logo||!okLogo(logo))return;
   const img=new Image();img.alt="";img.loading="lazy";img.onload=()=>img.classList.add("on");img.onerror=()=>img.remove();img.src=logo;el.append(img);
@@ -5310,22 +5345,18 @@ function solRenderTokenPicker(q){
   // solLoadPopular) این تابع بعداً دوباره صدا زده می‌شود و همان لحظه پر می‌کند.
   rows.forEach((t,i)=>{
     const url=solLogoCache[t.mint];
-    if(url){
-      const el=list.querySelector(`[data-picktok="${i}"]`);
-      if(el)solPaintAvatarIntoEl(el,t.symbol,url);
-    }
+    const el=list.querySelector(`[data-picktok="${i}"]`);
+    if(el)solPaintAvatarIntoEl(el,t.symbol,url,t.mint);
   });
   popularRows.forEach((t,i)=>{
     const url=solLogoCache[t.mint];
-    if(url){
-      const el=list.querySelector(`[data-picktokpop="${i}"]`);
-      if(el)solPaintAvatarIntoEl(el,t.symbol,url);
-    }
+    const el=list.querySelector(`[data-picktokpop="${i}"]`);
+    if(el)solPaintAvatarIntoEl(el,t.symbol,url,t.mint);
   });
 }
-function solPaintAvatarIntoEl(el,symbol,logoUrl){
+function solPaintAvatarIntoEl(el,symbol,logoUrl,mint){
   el.innerHTML="";
-  el.appendChild(document.createTextNode(symbol?symbol.slice(0,3).toUpperCase():"?"));
+  paintFallbackAvatar(el,mint,symbol);
   if(!logoUrl||!okLogo(logoUrl))return;
   const img=new Image();
   img.alt="";img.loading="lazy";
@@ -5375,8 +5406,8 @@ async function priceUsdOf(t){
 function paintAvatar(el,t){
   if(!el)return;
   el.innerHTML="";
-  el.appendChild(document.createTextNode(t?t.symbol.slice(0,3).toUpperCase():"?"));
-  if(!t)return;
+  if(!t){el.textContent="?";return;}
+  paintFallbackAvatar(el,t.native?WETH_ADDR:t.address,t.symbol);
   tokenLogo(t).then(url=>{
     if(!url)return;
     /* دفاع دوم، سر خودِ چاه. tokenLogo قبلاً فیلتر می‌کند؛ این خط برای وقتی
@@ -5944,7 +5975,7 @@ async function renderSolFolio(){
   if(unknown)html+='<div class="fnote">Tokens without a price are listed but excluded from the known value and percentages.</div>';
   if(allMints.length>SOL_FOLIO_PRICE_MAX)html+='<div class="fnote">Only the first '+SOL_FOLIO_PRICE_MAX+' tokens are priced.</div>';
   body.innerHTML=html;
-  rows.forEach((r,i)=>{if(r.logo)solPaintAvatarIntoEl(body.querySelector(`[data-sol-folio="${i}"]`),r.symbol,r.logo);});
+  rows.forEach((r,i)=>{const el=body.querySelector(`[data-sol-folio="${i}"]`);if(el)solPaintAvatarIntoEl(el,r.symbol,r.logo,r.mint);});
 }
 function solFlowTrades(rows,mint,cutoff,now){
   const seen=new Set(),out=[];
@@ -7150,20 +7181,24 @@ async function doSwap(){
 }
 /* بلوکِ نتیجه بعد از یک سواپِ تأییدشده. کوتِ نمایش‌داده‌شده عمداً با «≈»
    علامت‌گذاری شده — همان کوت است، نه رسیدِ پارس‌شده. */
-function showSwapDone({paidTxt,gotTxt,vs,url,hash,secs}){
-  const el=$("swapDone");
-  if(!el)return;
-  el.innerHTML=`<div class="ok"><svg viewBox="0 0 24 24" width="22" height="22" fill="none"
+/* مارک‌آپِ مشترکِ بلوکِ نتیجه — Base و سولانا دقیقاً یک قالب و یک مجموعه کلاس. */
+function swapDoneHtml({paidTxt,gotTxt,gainLine,url,linkLabel,txShort,secs,againId}){
+  return `<div class="ok"><svg viewBox="0 0 24 24" width="22" height="22" fill="none"
       stroke="var(--pos)" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
       <path d="M5 12.5l4.5 4.5L19 7"/></svg></div>
     <h3>Swap complete</h3>
     <div class="amt2 mono">${esc(paidTxt)} → ${esc(gotTxt)}</div>
-    ${vs?`<div class="gain">${esc(vs)} vs Uniswap direct</div>`:""}
+    ${gainLine?`<div class="gain">${esc(gainLine)}</div>`:""}
     <div class="acts">
-      <button class="cta" id="swapAgain" type="button">Swap again</button>
-      <a class="exitShare" href="${esc(url)}" target="_blank" rel="noopener">View on BaseScan</a>
+      <button class="cta" id="${againId}" type="button">Swap again</button>
+      <a class="exitShare" href="${esc(url)}" target="_blank" rel="noopener">${esc(linkLabel)}</a>
     </div>
-    <div class="txl">Tx ${esc(shortAddr(hash))} · confirmed in ${esc(secs.toFixed(1))}s</div>`;
+    <div class="txl">Tx ${esc(txShort)} · confirmed in ${esc(secs.toFixed(1))}s</div>`;
+}
+function showDoneBlock(elId,html){
+  const el=$(elId);
+  if(!el)return;
+  el.innerHTML=html;
   /* قد پیش از نمایشِ بلوک اندازه گرفته می‌شود — بعدش بلوک خودش به قد اضافه شده. */
   const lockCard=el.closest("section.card");
   if(lockCard&&!lockCard.classList.contains("isDone"))
@@ -7172,17 +7207,24 @@ function showSwapDone({paidTxt,gotTxt,vs,url,hash,secs}){
   const card=el.closest("section.card");
   /* ۲۴ سپتامبر: حسام دید کارت بعد از سواپ کوچک می‌شود (فکت‌ها، جای ثابت و
      دکمه پنهان می‌شوند و بلوکِ نتیجه کوتاه‌تر است). قدِ همین لحظه قفل می‌شود و
-     بلوکِ نتیجه وسطِ آن می‌نشیند؛ hideSwapDone قفل را برمی‌دارد. */
+     بلوکِ نتیجه وسطِ آن می‌نشیند؛ hideDoneBlock قفل را برمی‌دارد. */
   if(card)card.classList.add("isDone");
-  paintSellPill("hidden");
 }
-function hideSwapDone(){
-  const el=$("swapDone");
+function hideDoneBlock(elId){
+  const el=$(elId);
   if(!el||el.hidden)return;
   el.hidden=true;
   const card=el.closest("section.card");
   if(card){card.classList.remove("isDone");card.style.minHeight="";}
 }
+/* بلوکِ نتیجه بعد از یک سواپِ تأییدشده. کوتِ نمایش‌داده‌شده عمداً با «≈»
+   علامت‌گذاری شده — همان کوت است، نه رسیدِ پارس‌شده. */
+function showSwapDone({paidTxt,gotTxt,vs,url,hash,secs}){
+  showDoneBlock("swapDone",swapDoneHtml({paidTxt,gotTxt,gainLine:vs?vs+" vs Uniswap direct":"",url,
+    linkLabel:"View on BaseScan",txShort:shortAddr(hash),secs,againId:"swapAgain"}));
+  paintSellPill("hidden");
+}
+function hideSwapDone(){hideDoneBlock("swapDone");}
 function showError(title,err,extra){
   console.error(title,err,extra);
   /* «could not coalesce error» یعنی خودِ ethers نتوانسته از پاسخ والت یک خطای
@@ -7509,7 +7551,7 @@ function paintSolAvatar(meta){
   const el=$("tk-av");if(!el)return;
   el.innerHTML="";
   const sym=meta&&meta.symbol;
-  el.appendChild(document.createTextNode(sym?sym.slice(0,3).toUpperCase():"?"));
+  paintFallbackAvatar(el,solMintCur,sym);
   const url=meta&&meta.image_url;
   if(!url||!okLogo(url))return;
   const img=new Image();
@@ -8233,6 +8275,7 @@ function solSetNotice(h){
   $("solConnectionNotices").innerHTML=outside?h||"":"";
 }
 function solInvalidateQuote(){
+  hideDoneBlock("solSwapDone");
   ++solIntentSeq;
   ++solQuoteSeq;
   clearTimeout(solQuoteTimer);solQuoteTimer=null;
@@ -8244,7 +8287,18 @@ function solScheduleQuote(){
   solInvalidateQuote();
   solQuoteTimer=setTimeout(solFetchQuote,400);
 }
-async function solFetchQuote(){
+/* ۴ اکتبر — دلیلِ بسته‌ی شکستِ کوت از worker (reason)؛ هرگز متنِ آزادِ جوپیتر. نبودِ reason = upstream. */
+function solQuoteFailMessage(reason,retried){
+  switch(reason){
+    case "no-route":return "No route for this pair right now — there may be no pool with enough liquidity.";
+    case "not-tradable":return "Jupiter does not trade this token.";
+    case "rate-limited":return retried?"Quotes are busy — try again in a moment.":"Quotes are busy — retrying in a few seconds.";
+    case "amount-too-small":return "Amount too small to route.";
+    case "bad-request":return "Could not get a quote for this pair.";
+    default:return "Quote service did not answer. Try again in a moment.";
+  }
+}
+async function solFetchQuote(isRetry){
   const seq=++solQuoteSeq;
   const exactOut=solMode==="exactOut";
   const raw=(($(exactOut?"solOutRead":"solAmt").value)||"").trim();
@@ -8265,6 +8319,15 @@ async function solFetchQuote(){
     if(seq!==solQuoteSeq)return;               // کوتِ دیرِ رسیده — دور ریخته می‌شود
     if(!r.ok||!j||j.error){
       ev("quote:none","","solana");
+      const reason=j&&typeof j.reason==="string"?j.reason:null;
+      if(reason==="rate-limited"){
+        solQuote=null;solRenderReadout();
+        solSetNotice(note("warn","<b>"+esc(solQuoteFailMessage(reason,isRetry===true))+"</b>"));
+        solUpdateSwapBtn();
+        // یک بار، ۳ ثانیه بعد — فقط اگر کاربر در این فاصله چیزی را عوض نکرده باشد
+        if(isRetry!==true)setTimeout(()=>{if(seq===solQuoteSeq)solFetchQuote(true);},3000);
+        return;
+      }
       if(exactOut){
         // E — این جفت با ExactOut جواب نمی‌دهد؛ برگشت به حالتِ عادی، نه
         // ماندن روی یک خطای مبهم.
@@ -8275,7 +8338,7 @@ async function solFetchQuote(){
         return;
       }
       solQuote=null;solRenderReadout();
-      solSetNotice(note("err","<b>Could not get a quote.</b> Try again in a moment."));
+      solSetNotice(note("err","<b>"+esc(solQuoteFailMessage(reason))+"</b>"));
       solUpdateSwapBtn();
       return;
     }
@@ -8530,6 +8593,7 @@ function solRenderReadout(){
     if(!exactOut)$("solOutRead").value="";      // ExactOut: این فیلد ورودیِ کاربر است، پاک نمی‌شود
     $("solMinF").textContent="—";
     $("solImpactF").textContent="—";$("solImpactF").style.color="";
+    const iw0=$("solImpactWarn");if(iw0)iw0.hidden=true;
     $("solProtocolF").textContent="—";
     $("solRouteF").textContent="—";
     $("solRate").textContent="—";
@@ -8555,6 +8619,7 @@ function solRenderReadout(){
   $("solMinF").textContent=isFinite(threshold)?threshold.toLocaleString(undefined,{maximumFractionDigits:6})+" "+thresholdSym:"—";
   $("solImpactF").textContent=isFinite(impact)?impact.toFixed(2)+"%":"—";
   $("solImpactF").style.color=!isFinite(impact)?"":impact>=5?"var(--neg)":impact>=1.5?"var(--warn)":"";
+  const iw=$("solImpactWarn");if(iw)iw.hidden=!(isFinite(impact)&&impact>=50);
   const bps=solQuote.platformFee?.feeBps;
   $("solProtocolF").textContent=solQuote.platformFee==null?"0%":Number.isFinite(bps)&&bps>=0?(bps/100).toFixed(2)+"%":"—";
   $("solRouteF").textContent=solRouteLabel(solQuote);
@@ -8620,7 +8685,20 @@ function solUpdateSwapBtn(){
   if(spendable!=null&&spend>spendable){btn.disabled=true;btn.textContent="Insufficient "+solInputSymbol()+" balance";return;}
   btn.disabled=false;
   // ۴ اکتبر — خریدنِ توکنِ sol:unconfirmed بسته نیست، ولی یک کلیکِ اضافه می‌خواهد؛ فروشش هرگز گیت نمی‌شود
-  btn.textContent=solNeedsArm()?"Buy anyway (sell-back unconfirmed)":"Swap";
+  if(solNeedsArm()){btn.textContent="Buy anyway (sell-back unconfirmed)";return;}
+  btn.textContent=solNeedsImpactArm()?"Swap anyway (price impact "+solQuoteImpactPct(solQuote).toFixed(1)+"%)":"Swap";
+}
+/* ۴ اکتبر — price impact ≥ ۱۵٪: Base گیتی ندارد (فقط اعلان)، برای سولانا یک کلیکِ اضافه
+   می‌خواهد؛ بلوک نیست. مسلح‌شدن به‌ازای هر کوت (جفت+مقدار+حالت)، نه یک‌بار برای همیشه. */
+const SOL_IMPACT_ARM_PCT=15;
+function solQuoteImpactPct(q){
+  const raw=q&&q.priceImpactPct;
+  return (raw==null||raw==="")?NaN:Number(raw)*100;
+}
+function solImpactKey(q){return q?[q.inputMint,q.outputMint,q.inAmount,q.swapMode||"ExactIn"].join("|"):null;}
+function solNeedsImpactArm(){
+  const im=solQuoteImpactPct(solQuote);
+  return isFinite(im)&&im>=SOL_IMPACT_ARM_PCT&&solImpactArmedKey!==solImpactKey(solQuote);
 }
 // توکنِ خروجی (همان که می‌خریم) اگر unconfirmed باشد و هنوز مسلح نشده
 function solNeedsArm(){
@@ -8631,7 +8709,43 @@ function solNeedsArm(){
 }
 
 /* ---- خودِ سواپ — POST /sol/swap → چکِ پیش‌امضا → sign(&send) → پول‌کردن ---- */
-async function solPollStatus(sig){
+/* خلاصه‌ی سواپِ اجراشده، از همان کوتی که ساخته و امضا شد (پیش از آنکه فیلدها پاک شوند). */
+function solFmtAmount(raw,dec){
+  const n=Number(solFormatUnits(raw,dec));
+  if(n===0)return "0";
+  if(n<1e-8)return "<0.00000001";
+  return n.toLocaleString("en-US",{maximumFractionDigits:n>=1000?2:n>=1?5:8});
+}
+function solDirectGainPct(q,d){
+  if(!q||!d||d.q!==q||!d.j)return null;
+  const exact=q.swapMode==="ExactOut";
+  const base=Number(exact?d.j.inAmount:d.j.outAmount),best=Number(exact?q.inAmount:q.outAmount);
+  if(!(base>0)||!Number.isFinite(best))return null;
+  const delta=(exact?base-best:best-base)/base*100;
+  return delta>=0.005?delta:null;   // مثلِ Base: فقط وقتی مثبت است نشان بده
+}
+function solSnapshotDone(){
+  const q=solQuote,decIn=solInputDecimals(),decOut=solOutputDecimals();
+  if(!q||decIn==null||decOut==null||q.inAmount==null||q.outAmount==null)return null;
+  const gain=solDirectGainPct(q,solDirectQuote);
+  return {paidTxt:solFmtAmount(q.inAmount,decIn)+" "+(solInputSymbol()||"—"),
+    gotTxt:"≈ "+solFmtAmount(q.outAmount,decOut)+" "+(solOutputSymbol()||"—"),
+    vs:gain==null?null:"+"+gain.toFixed(2)+"% vs best single pool"};
+}
+function showSolSwapDone(info,sig,secs){
+  showDoneBlock("solSwapDone",swapDoneHtml({paidTxt:info.paidTxt,gotTxt:info.gotTxt,gainLine:info.vs,
+    url:"https://solscan.io/tx/"+sig,linkLabel:"View on Solscan",txShort:shortAddr(sig),secs,againId:"solSwapAgain"}));
+}
+/* «Swap again»: کارت خالی، همان جفت، موجودی‌ها تازه */
+function solSwapAgain(){
+  solInvalidateQuote();
+  $("solAmt").value="";$("solOutRead").value="";solMode="exactIn";
+  const clr=$("solAmtClear");if(clr)clr.hidden=true;
+  solSetNotice("");
+  solRefreshBalances();
+  $("solAmt").focus();
+}
+async function solPollStatus(sig,doneInfo,t0,intent){
   const box=$("solNotices");
   const started=Date.now();
   while(Date.now()-started<60000){
@@ -8656,6 +8770,8 @@ async function solPollStatus(sig){
         solRefreshBalances();
         setTimeout(solRefreshBalances,3000);
         setTimeout(solRefreshBalances,8000);
+        // اگر کاربر در این فاصله چیز دیگری را شروع کرده، بلوکِ نتیجه رویش نمی‌نشیند
+        if(doneInfo&&intent===solIntentSeq&&solAccount)showSolSwapDone(doneInfo,sig,(Date.now()-t0)/1000);
         return;
       }
     }catch{/* یک تلاشِ ناموفقِ پول‌کردن، خودش شکستِ تراکنش نیست — دوباره امتحان می‌شود */}
@@ -8665,24 +8781,55 @@ async function solPollStatus(sig){
     `<a href="https://solscan.io/tx/${esc(sig)}" target="_blank" rel="noopener">View on Solscan</a>`));
 }
 /* واژه‌نامه‌ی بسته‌ی دلیلِ شکستِ شبیه‌سازی — هرگز از رویِ متنِ آزادِ خطا،
-   فقط از رویِ شکلِ err/simulationError. Rule B. */
-function solSimFailReason(err,simErr){
-  if(simErr&&typeof simErr.errorCode==="string")return simErr.errorCode;
-  if(err&&typeof err==="object"){
-    if(err.InstructionError){
-      const ie=err.InstructionError;
-      const code=Array.isArray(ie)?ie[1]:null;
-      const custom=code&&typeof code==="object"?code.Custom:null;
-      if(custom===6001||custom===0x1771)return "slippage";
-      const s=JSON.stringify(err);
-      if(/InsufficientFunds/i.test(s))return "insufficient-sol";
-    }
-  }
-  return null;
+   فقط از رویِ ساختارِ err و زیررشته‌های شناخته‌شده‌ی logs. Rule B.
+   err می‌تواند شیء (نتیجه‌ی simulateTransaction) یا رشته‌ی JSON (detail.err از worker) باشد.
+   خروجی: {reason: "insufficient-sol"|"slippage"|"frozen"|"other", code} — code فقط
+   «index:Custom n» یا «index:ErrorName» است، هرگز متنِ آزاد. */
+function solClassifySimFail(err,logs){
+  let e=err;
+  if(typeof e==="string"){try{e=JSON.parse(e);}catch{/* همان رشته می‌ماند */}}
+  const L=Array.isArray(logs)?logs.map(String):[];
+  let idx=null,name=null,custom=null;
+  if(e&&typeof e==="object"&&!Array.isArray(e)){
+    if(e.InstructionError){
+      const ie=e.InstructionError;
+      if(Array.isArray(ie)&&Number.isInteger(ie[0]))idx=ie[0];
+      const c=Array.isArray(ie)?ie[1]:null;
+      if(typeof c==="string")name=c;
+      else if(c&&typeof c==="object"){
+        const k=Object.keys(c)[0];
+        if(k==="Custom"&&Number.isInteger(c.Custom))custom=c.Custom;else if(k)name=k;
+      }
+    }else{const k=Object.keys(e)[0];if(k)name=k;}
+  }else if(typeof e==="string")name=e;
+  // برنامه‌ی مبدأ = اولین «Program X failed»؛ شکستِ CPI همان خطا را در برنامه‌های بیرونی تکرار می‌کند
+  let origin=null;
+  for(const l of L){const m=/^Program ([1-9A-HJ-NP-Za-km-z]{32,44}) failed/.exec(l);if(m){origin=m[1];break;}}
+  const logText=L.join("\n");
+  let reason="other";
+  if(name==="InsufficientFundsForRent"||name==="InsufficientFundsForFee"||name==="InsufficientFunds"||
+     /insufficient lamports/i.test(logText)||(custom===1&&origin==="11111111111111111111111111111111"))reason="insufficient-sol";
+  else if(custom===6001||/SlippageToleranceExceeded/.test(logText))reason="slippage";
+  else if(/Account is frozen|AccountFrozen|transfer.?hook/i.test(logText)||
+          (custom===17&&origin&&/^Token(keg|zQd)/.test(origin)))reason="frozen";
+  let code=(idx!=null?idx+":":"")+(custom!=null?"Custom "+custom:(name||""));
+  if(!/^[A-Za-z0-9 :_-]{1,40}$/.test(code))code="";
+  return {reason,code};
 }
-function solSimFailMessage(reason){
-  if(reason==="insufficient-sol")return "This swap would fail on-chain: not enough SOL for fees and account rent.";
-  if(reason==="slippage")return "This swap would fail on-chain: price moved — try again or raise slippage.";
+/* «حداقل چقدر SOL نگه دار»: کارمزدِ شبکه + ۰٫۰۰۲۰۴ به‌ازای هر حسابِ توکنِ تازه — فقط وقتی از
+   وضعیتِ ATAها قابلِ‌استنباط است؛ وگرنه عددِ تقریبی. */
+function solSimKeepSol(){
+  const out=solOutputMint();
+  const known=out===SOL_MINT_ADDR||(solSide==="buy"?solOutAtaExists:solRefAtaExists)!=null;
+  if(!known)return "about 0.005";
+  const n=out===SOL_MINT_ADDR?0:((solSide==="buy"?solOutAtaExists:solRefAtaExists)===true?0:1);
+  const feeLamports=(solNetFeeLamports!=null?solNetFeeLamports:SOL_PRIO_FEE_RESERVE*1e9)+5000;
+  return (Math.ceil((feeLamports/1e9+0.00204*n)*1e4)/1e4).toFixed(4);
+}
+function solSimFailMessage(reason,keepSol){
+  if(reason==="insufficient-sol")return "Not enough SOL for the network fee and one-time account rent. Keep at least "+(keepSol||"about 0.005")+" SOL.";
+  if(reason==="slippage")return "Price moved more than your slippage. Try again or raise slippage.";
+  if(reason==="frozen")return "This token's program rejected the transfer (it may be frozen or restricted).";
   return "This swap would fail on-chain: simulation failed.";
 }
 /* ۲۸ سپتامبر — B: نگاشتِ بسته‌ی دلیلِ شکستِ خودِ sendTransaction (نه
@@ -8693,7 +8840,8 @@ function solMapSendError(e){
   const detail=e&&e.rpcDetail;
   const errStr=(detail&&typeof detail.err==="string")?detail.err:"";
   let msg;
-  if(/BlockhashNotFound/i.test(errStr))
+  const stale=/BlockhashNotFound|blockhash.{0,12}(expired|not found)/i.test(errStr);
+  if(stale)
     msg="Took too long between quote and signature — press Swap again.";
   else if(/InsufficientFunds/i.test(errStr)||/insufficient lamports/i.test(errStr))
     msg="Not enough SOL for fees and account rent.";
@@ -8703,12 +8851,36 @@ function solMapSendError(e){
     msg="The network rejected the transaction.";
   const out=new Error(msg);
   out.sendMapped=true;
+  out.sendBlockhash=stale;
   out.sendDetailErr=errStr||((e&&e.message)||"");
   return out;
 }
+/* ارسالِ تراکنشِ امضاشده؛ اگر blockhash منقضی شده بود، فقط یک‌بار تراکنشِ تازه می‌سازد
+   (solBuildFreshTx) و دوباره از کیف‌پول امضا می‌گیرد. شکستِ دوم همان پیامِ موجود است. */
+async function solSendSignedWithRetry(btn,context,signer,signedBytes,label){
+  try{
+    await solSendAndHandle(solBytesToB64(signedBytes));
+    return solBs58Encode(signedBytes.slice(1,65));
+  }catch(e){
+    if(!(e&&e.sendBlockhash))throw e;
+    solSetNotice(note("warn","<b>Network moved on — please approve the refreshed transaction.</b>"));
+    solAssertSwapContext(context);
+    const fresh=await solBuildFreshTx(btn,context);
+    if(btn)btn.textContent=label||"Confirm in wallet…";
+    const res=await signer.signTransaction({account:solAccount,transaction:fresh.txBytes,chain:"solana:mainnet"});
+    const row=res&&res[0];
+    if(!row||!row.signedTransaction)throw new Error("wallet returned no signed transaction");
+    const bytes2=row.signedTransaction;
+    if(btn)btn.textContent="Sending…";
+    solAssertSwapContext(context);
+    await solSendAndHandle(solBytesToB64(bytes2));
+    return solBs58Encode(bytes2.slice(1,65));
+  }
+}
 async function solSendAndHandle(txB64){
   try{
-    await solRpcCall("sendTransaction",[txB64,{encoding:"base64",skipPreflight:false,maxRetries:5}]);
+    // preflightCommitment «confirmed»: جوپیتر blockhashِ تازه‌تر از finalized می‌دهد و preflightِ پیش‌فرض آن را پیدا نمی‌کرد
+    await solRpcCall("sendTransaction",[txB64,{encoding:"base64",skipPreflight:false,maxRetries:5,preflightCommitment:"confirmed"}]);
   }catch(e){
     throw solMapSendError(e);
   }
@@ -8739,6 +8911,10 @@ async function solBuildFreshTx(btn,context=solSwapContext()){
     solAssertSwapContext(context);
     if(!solQuote)throw Object.assign(new Error("could not refresh the quote"),
       {uiHandled:true,uiMessage:"Could not refresh the quote. Try again."});
+    if(solNeedsImpactArm()){
+      const msg="The price impact changed with the refreshed quote. Review it and press Swap again.";
+      throw Object.assign(new Error(msg),{uiHandled:true,uiMessage:msg});
+    }
   }
   solAssertSwapContext(context);
   if(btn)btn.textContent="Building transaction…";
@@ -8760,8 +8936,11 @@ async function solBuildFreshTx(btn,context=solSwapContext()){
   // می‌سازد؛ کیف‌پول اصلاً صدا زده نمی‌شود.
   if(j.simulationError){
     ev("swap:sim-fail","","solana");
-    const msg=solSimFailMessage(j.simulationError.errorCode);
-    throw Object.assign(new Error(msg),{uiHandled:true,uiMessage:msg});
+    // errorCode خودِ جوپیتر یک واژه‌نامه‌ی بسته است؛ فقط slippage را می‌شناسیم، بقیه «other» + همان کد
+    const jc=String(j.simulationError.errorCode||"");
+    const jr=/SLIPPAGE/i.test(jc)?"slippage":"other";
+    const msg=solSimFailMessage(jr);
+    throw Object.assign(new Error(msg),{uiHandled:true,uiMessage:msg,uiCode:jr==="other"&&/^[A-Z0-9_]{1,40}$/.test(jc)?jc:""});
   }
 
   const txBytes=solB64ToBytes(j.swapTransaction);
@@ -8785,9 +8964,9 @@ async function solBuildFreshTx(btn,context=solSwapContext()){
     const err=simRes&&Object.prototype.hasOwnProperty.call(simRes,"value")?simRes.value.err:undefined;
     if(err){
       ev("swap:sim-fail","","solana");
-      const reason=solSimFailReason(err,null);
-      const msg=solSimFailMessage(reason);
-      throw Object.assign(new Error(msg),{uiHandled:true,uiMessage:msg});
+      const info=solClassifySimFail(err,simRes.value&&simRes.value.logs);
+      const msg=solSimFailMessage(info.reason,info.reason==="insufficient-sol"?solSimKeepSol():null);
+      throw Object.assign(new Error(msg),{uiHandled:true,uiMessage:msg,uiCode:info.reason==="other"?info.code:""});
     }
   }
 
@@ -8796,7 +8975,7 @@ async function solBuildFreshTx(btn,context=solSwapContext()){
 }
 async function solDoSwap(){
   if(solSwapBusy||!solAccount||!solQuote)return;
-  if(solNeedsArm())return;   // دفاعی: هیچ مسیری نباید بدونِ مسلح‌شدن به کیف‌پول برسد
+  if(solNeedsArm()||solNeedsImpactArm())return;   // دفاعی: هیچ مسیری نباید بدونِ مسلح‌شدن به کیف‌پول برسد
   // A — دوباره همین‌جا، نه فقط روی دکمه: یک رخدادِ مسابقه‌ای (دکمه فعال شد،
   // بعد موجودی/کوت عوض شد) هرگز نباید کیف‌پول را صدا بزند.
   const amtSolGuard=solInputMint()===SOL_MINT_ADDR?solRequiredInput():0;
@@ -8843,10 +9022,9 @@ async function solDoSwap(){
           throw err2;
         }
         const signedBytes2=row2.signedTransaction;
-        sigB58=solBs58Encode(signedBytes2.slice(1,65));
         btn.textContent="Sending…";
         solAssertSwapContext(context);
-        await solSendAndHandle(solBytesToB64(signedBytes2));
+        sigB58=await solSendSignedWithRetry(btn,context,f["solana:signTransaction"],signedBytes2,`Confirm ${$("solAmt").value||""} ${swapInSym} → ${swapOutSym} in wallet…`);
       }
     }else if(f["solana:signTransaction"]){
       const res=await f["solana:signTransaction"].signTransaction(
@@ -8854,24 +9032,26 @@ async function solDoSwap(){
       const row=res&&res[0];
       if(!row||!row.signedTransaction)throw new Error("wallet returned no signed transaction");
       const signedBytes=row.signedTransaction;
-      sigB58=solBs58Encode(signedBytes.slice(1,65)); // اولین امضا، بلافاصله بعدِ بایتِ compact-u16
       btn.textContent="Sending…";
       solAssertSwapContext(context);
-      await solSendAndHandle(solBytesToB64(signedBytes));
+      // اولین امضا بلافاصله بعدِ بایتِ compact-u16 است (داخلِ solSendSignedWithRetry)
+      sigB58=await solSendSignedWithRetry(btn,context,f["solana:signTransaction"],signedBytes,`Confirm ${$("solAmt").value||""} ${swapInSym} → ${swapOutSym} in wallet…`);
     }else{
       throw new Error("wallet supports neither signing feature");
     }
 
     ev("swap:sent","","solana");
+    const doneInfo=solSnapshotDone(),sentAt=Date.now();
     solSetNotice(note("ok","<b>Submitted.</b> "+
       `<a href="https://solscan.io/tx/${esc(sigB58)}" target="_blank" rel="noopener">View on Solscan</a>`));
     $("solAmt").value="";$("solOutRead").value="";solMode="exactIn";solQuote=null;solRenderReadout();
-    solPollStatus(sigB58);
+    solPollStatus(sigB58,doneInfo,sentAt,solIntentSeq);
   }catch(e){
     ev("swap:fail","","solana");
     if(isUserRejection(e)){solSetNotice(note("warn","<b>Cancelled in your wallet.</b> Nothing was sent."));}
     else if(e&&e.uiHandled){
-      solSetNotice(note("err","<b>"+esc(e.uiMessage)+"</b>"));
+      const codeLine=e.uiCode?`<div class="mono" style="opacity:.65;font-size:11px;margin-top:4px">Code: ${esc(e.uiCode)}</div>`:"";
+      solSetNotice(note("err","<b>"+esc(e.uiMessage)+"</b>"+codeLine));
     }
     else if(e&&e.sendMapped){
       // B — پیامِ نگاشته‌شده + یک خطِ جزئیاتِ کوچک با خودِ err (هرگز فقط کد).
@@ -9069,7 +9249,7 @@ function setView(v,push){
 }
 function paintFlowToken(){
   if(activeChain==="solana"){
-    solPaintAvatarInto("flowTokAv",solTokenSymbol,solTokenLogoUrl);
+    solPaintAvatarInto("flowTokAv",solTokenSymbol,solTokenLogoUrl,solMintCur);
     $("flowTokSym").textContent=solTokenSymbol||"Choose token";return;
   }
   paintAvatar($("flowTokAv"),tokenOut);
@@ -9157,6 +9337,7 @@ function wire(){
   // innerHTML #swapDone با هر نتیجه بازنویسی می‌شود، پس شنونده روی خودِ
   // ظرف است که هرگز عوض نمی‌شود — همان الگوی بالا.
   $("swapDone").onclick=e=>{if(e.target.closest("#swapAgain")){hideSwapDone();$("amtIn").focus();}};
+  $("solSwapDone").onclick=e=>{if(e.target.closest("#solSwapAgain"))solSwapAgain();};
   $("tokInBtn").onclick=()=>openPicker("in");
   $("tokOutBtn").onclick=()=>openPicker("out");
   $("tokClose").onclick=closePicker;
@@ -9316,6 +9497,7 @@ $("copyAddrBtn").onclick=(e)=>{
     if(!solAccount){solOpenWalletPicker();return;}
     // کلیکِ اول فقط مسلح می‌کند؛ سواپ نمی‌شود
     if(solNeedsArm()){solArmedMints.add(solSide==="buy"?solMintCur:solRefMint);solUpdateSwapBtn();return;}
+    if(solNeedsImpactArm()){solImpactArmedKey=solImpactKey(solQuote);solUpdateSwapBtn();return;}
     solDoSwap();
   };
   document.addEventListener("keydown",e=>{

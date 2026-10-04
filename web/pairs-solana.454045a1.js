@@ -18,6 +18,13 @@
     if(!loading)loading=new Promise((resolve,reject)=>{const s=document.createElement('script');s.src='/solana-wallet.bundle.b6eb73e1.js';s.onload=()=>window.SolMobile?resolve(window.SolMobile):reject(Error('Wallet library unavailable'));s.onerror=()=>{loading=null;s.remove();reject(Error('Could not load wallet library'));};document.head.appendChild(s);});
     return loading;
   }
+  // بسته‌ی کوچکِ تأیید برای کیف‌پولِ تزریق‌شده؛ بسته‌ی بزرگ فقط برای WalletConnect
+  let confirmLoading=null;
+  async function confirmLib(){
+    if(window.SolConfirm)return window.SolConfirm;
+    if(!confirmLoading)confirmLoading=new Promise((resolve,reject)=>{const s=document.createElement('script');s.src='/solana-confirm.bundle.6a6dd398.js';s.onload=()=>window.SolConfirm?resolve(window.SolConfirm):(confirmLoading=null,reject(Error('Wallet confirmation library unavailable')));s.onerror=()=>{confirmLoading=null;s.remove();reject(Error('Could not load the wallet confirmation library'));};document.head.appendChild(s);});
+    return confirmLoading;
+  }
   function disconnect(callWallet=true){
     ++seq;const old=wallet||pendingWallet;account=null;wallet=null;pendingWallet=null;busy=false;mobile=false;
     try{unsubscribe?.();}catch{}unsubscribe=null;
@@ -34,7 +41,7 @@
       await disconnecting;if(id!==seq)return;
       const result=await w.features['standard:connect'].connect({silent:false});if(id!==seq)return;
       const acc=result?.accounts?.[0];if(!acc)throw Error('No account returned');
-      const l=await lib();await l.confirmConnection(w,acc,()=>id===seq&&isSol(),location.origin);if(id!==seq)return;
+      const l=w.name==='WalletConnect Solana'?await lib():await confirmLib();await l.confirmConnection(w,acc,()=>id===seq&&isSol(),location.origin);if(id!==seq)return;
       wallet=w;account=acc;
       try{localStorage.removeItem('zaexa.solwallet.off.v1');}catch{}
       const on=w.features['standard:events']?.on;

@@ -12,7 +12,7 @@ function ctx(names,extra={}){
     SOL_MINT_ADDR:SOL,SOL_MINT_RE:/^[1-9A-HJ-NP-Za-km-z]{32,44}$/,
     SOL_TOKEN_PROGRAMS:['legacy','2022'],SERIES:['red','blue'],GT:'https://example.test/gt',
     SOL_FOLIO_PRICE_MAX:Number(/const SOL_FOLIO_PRICE_MAX=(\d+);/.exec(source)[1]),folioSeq:0,flowSeq:0,flowWindow:'h1',activeChain:'solana',solAccount:account,solMintCur:USDC,
-    $:id=>elements[id]??={innerHTML:'',textContent:''},paintFlowToken(){},
+    $:id=>elements[id]??={innerHTML:'',textContent:'',querySelector:()=>null},paintFlowToken(){},
     esc:s=>String(s).replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('"','&quot;'),
     okLogo:()=>false,solPaintAvatarIntoEl(){},shortAddr:s=>s.slice(0,5),...extra});
   for(const name of names){

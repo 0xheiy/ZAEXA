@@ -1550,8 +1550,23 @@ async function solQuoteRoute(request, url, env) {
   if(direct!=null&&direct!=="true"&&direct!=="false")return solDone(400,{error:"bad-direct-mode"});
   if(direct==="true")q.set("onlyDirectRoutes","true");
   const r = await jupProxyFetch(env, "/swap/v1/quote?" + q.toString(), { method: "GET" }, SOL_JUP_TIMEOUT_MS);
-  if (!r.ok || !r.json) return solDone(502, { error: "jup:quote:" + r.status });
+  if (!r.ok || !r.json) return solDone(502, { error: "jup:quote:" + r.status, reason: solQuoteFailReason(r.status, r.json) });
   return solDone(200, r.json);
+}
+
+/* واژه‌نامه‌ی بسته‌ی دلیلِ شکستِ کوت — فقط از رویِ کدِ HTTP و فیلدِ errorCodeِ
+   JSONِ جوپیتر ({error, errorCode})؛ هرگز متنِ آزادِ error. */
+export function solQuoteFailReason(status, json) {
+  if (status === 429) return "rate-limited";
+  if (!status || status >= 500) return "upstream";
+  if (status >= 400) {
+    const code = json && typeof json === "object" && typeof json.errorCode === "string" ? json.errorCode : "";
+    if (code === "COULD_NOT_FIND_ANY_ROUTE" || code === "NO_ROUTES_FOUND") return "no-route";
+    if (code === "TOKEN_NOT_TRADABLE") return "not-tradable";
+    if (/AMOUNT.*SMALL|TOO_SMALL/.test(code)) return "amount-too-small";
+    return "bad-request";
+  }
+  return "upstream";
 }
 
 /* POST /sol/swap {quoteResponse, userPublicKey} — فیلدهای ثابت
@@ -1659,6 +1674,9 @@ function solRpcParamsOk(method, params) {
     if (!/^[A-Za-z0-9+/]+=*$/.test(tx)) return false;
     if (!opts || typeof opts !== "object") return false;
     if (opts.encoding !== "base64" || opts.skipPreflight !== false) return false;
+    // preflightCommitment فقط "confirmed" (یا نبودنِ کلید برای کلاینت‌های کشِ‌شده)؛ کلیدِ ناشناخته رد می‌شود
+    if (Object.keys(opts).some((k) => !["encoding", "skipPreflight", "maxRetries", "preflightCommitment"].includes(k))) return false;
+    if (Object.prototype.hasOwnProperty.call(opts, "preflightCommitment") && opts.preflightCommitment !== "confirmed") return false;
     if (!Number.isInteger(opts.maxRetries) || opts.maxRetries < 0 || opts.maxRetries > 5) return false;
     return true;
   }

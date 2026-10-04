@@ -24,7 +24,7 @@ function context(names, extras = {}) {
     note:(type,text)=>text,isUserRejection:()=>false,esc:s=>s,
     solBalSol: null, solBalTok: null, solOutAtaExists: null, slippageBps: 50,
     solRenderReadout() {}, solUpdateSwapBtn() {}, solPaintLegs() {}, solPaintBalance() {},
-    solPaintFeeRows() {}, solSwapApplyGate() {}, solFetchQuote() {}, solSetNotice() {},
+    solPaintFeeRows() {}, solSwapApplyGate() {}, solFetchQuote() {}, solSetNotice() {}, hideDoneBlock() {},
     ...extras,
   });
   for (const name of [...new Set(["solInputMint","solOutputMint","solInputDecimals","solOutputDecimals","solAmountRaw",...names])]) {

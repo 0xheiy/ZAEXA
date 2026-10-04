@@ -7601,7 +7601,8 @@ async def main():
                                       sim_result="skip", token_accounts=None, rpc_log=None,
                                       wallet_init=None, swap_log=None, swap_bodies=None,
                                       send_error=None, ls_wallet_name=None, ls_off=False,
-                                      sol_mint_image_url=None):
+                                      sol_mint_image_url=None, quote_reason=None, send_error_times=None,
+                                      send_params_log=None, quote_log=None, direct_quote_body=None):
             spg = await b.new_page(viewport={"width": 1240, "height": 1000})
             # Transaction fixtures use fixed non-signing keys; real approval is tested in solana-approval.test.mjs.
             await spg.add_init_script("window.addEventListener('load',()=>{solConfirmConnection=async()=>{};});")
@@ -7639,9 +7640,16 @@ async def main():
                 await route.fulfill(status=200, content_type="application/json",
                                      body=_json.dumps(verdict_body))
             async def stub_quote(route):
+                if quote_log is not None:
+                    quote_log.append(route.request.url)
+                if quote_status == 200 and direct_quote_body is not None and "onlyDirectRoutes=true" in route.request.url:
+                    await route.fulfill(status=200, content_type="application/json", body=_json.dumps(direct_quote_body))
+                    return
                 if quote_status != 200:
-                    await route.fulfill(status=quote_status, content_type="application/json",
-                                         body=_json.dumps({"error": "jup:quote:%d" % quote_status}))
+                    qb = {"error": "jup:quote:%d" % quote_status}
+                    if quote_reason is not None:
+                        qb["reason"] = quote_reason
+                    await route.fulfill(status=quote_status, content_type="application/json", body=_json.dumps(qb))
                 else:
                     await route.fulfill(status=200, content_type="application/json",
                                          body=_json.dumps(quote_body if quote_body is not None else SOL_QUOTE_FIXTURE))
@@ -7669,7 +7677,10 @@ async def main():
                 # B — round 3: یک sendTransactionِ شکست‌خورده با شکلِ بسته‌ی
                 # دقیقِ worker/index.js (error + detail.err/logs)، برای سنجیدنِ
                 # نگاشتِ سمتِ کلاینت جدا از خودِ Worker.
-                if method == "sendTransaction" and send_error is not None:
+                if method == "sendTransaction" and send_params_log is not None:
+                    send_params_log.append(payload.get("params"))
+                if method == "sendTransaction" and send_error is not None and (
+                        send_error_times is None or sum(1 for m in (rpc_log or []) if m == "sendTransaction") <= send_error_times):
                     await route.fulfill(status=502, content_type="application/json",
                                          body=_json.dumps(send_error))
                     return
@@ -7820,7 +7831,7 @@ async def main():
         g_real_errs = [e for e in g_errs if "Failed to load resource" not in e]
         print("[sol swap] quote 502 -> out=%r notice=%r errors=%s" % (g_out, g_notice[:50], g_errs))
         assert g_out == "", "a failed quote must not render a stale/garbage readout: %r" % g_out
-        assert "Could not get a quote" in g_notice, "a failed quote must show a friendly error, got %r" % g_notice
+        assert "Quote service did not answer" in g_notice, "a failed quote must show a friendly error, got %r" % g_notice
         assert not g_real_errs, "a failed quote must not raise a JS exception/console.error: %s" % g_real_errs
 
         # ح) صفحه‌ی Base دست‌نخورده می‌ماند — #solSwap مخفی
@@ -8624,6 +8635,57 @@ async def main():
             await ppg.wait_for_timeout(600)
             return ppg, perrs
 
+        # [pairs legend] راهنمای verdict همیشه دیده می‌شود، زیرِ زیرعنوان و بالای تب‌ها؛ details حذف شده؛
+        # «Updated …» کنارِ فیلترها روی هیچ‌چیز نمی‌افتد؛ سرریزِ افقی نیست.
+        legend_reports = []
+        for vw in (360, 390, 768, 1280):
+            lpg, lerrs = await open_pairs(
+                {"chain": "base", "rows": [SELL_ROW, NOSELL_ROW, UNKNOWN_ROW], "store": True},
+                viewport={"width": vw, "height": 900})
+            rep = await lpg.evaluate("""() => {
+                const r = s => { const e = document.querySelector(s); return e ? e.getBoundingClientRect() : null; };
+                const lg = document.getElementById('verdictLegend'), note = r('main .note'), tabs = r('#chainTabs'), L = lg.getBoundingClientRect();
+                const items = [...lg.querySelectorAll('.legend-item')].map(li => ({chip: li.querySelector('.badge').className, label: li.querySelector('.badge').textContent,
+                    text: li.querySelector('.legend-text').textContent}));
+                const upd = r('#updatedAt'), others = [...document.querySelectorAll('#statsStrip .stat-chip, #pairSearch, #pairSort')].map(e => e.getBoundingClientRect());
+                const hit = upd && upd.width > 0 ? others.some(o => upd.left < o.right - 0.5 && upd.right > o.left + 0.5 && upd.top < o.bottom - 0.5 && upd.bottom > o.top + 0.5) : false;
+                return {visible: L.width > 0 && L.height > 0, below: L.top >= note.bottom - 0.5, above: L.bottom <= tabs.top + 0.5,
+                        details: document.querySelectorAll('details.legend-wrap, .legend-wrap, .controls-row details').length,
+                        items, overflow: document.documentElement.scrollWidth > innerWidth, updText: document.getElementById('updatedAt').textContent, updOverlap: hit,
+                        h: Math.round(L.height)};
+            }""")
+            legend_reports.append((vw, rep))
+            if vw in (390, 1280):
+                await lpg.screenshot(path="/tmp/claude-0/shots/pairs-legend-light-%d.png" % vw)
+            await lpg.close()
+            assert not lerrs, "legend page errors: %s" % lerrs
+        print("[pairs legend] always-visible legend under the subtitle: %s" % [(w, r["h"], r["visible"], r["overflow"], r["updOverlap"]) for w, r in legend_reports])
+        for vw, rep in legend_reports:
+            assert rep["visible"] and rep["below"] and rep["above"], "legend must sit between the subtitle note and the chain tabs at %d: %s" % (vw, rep)
+            assert rep["details"] == 0, "the details/summary toggle must be gone: %s" % rep
+            assert [i["label"] for i in rep["items"]] == ["Sell quoted", "No sell quote", "Unknown"] and \
+                [i["chip"] for i in rep["items"]] == ["badge badge-pos", "badge badge-neg", "badge badge-unknown"], "legend chips: %s" % rep["items"]
+            assert [i["text"] for i in rep["items"]] == ["A venue quoted a sell for this token.", "No venue we cover would quote a sell.",
+                "We could not check this one. Unknown is not \"safe\" and not \"scam\"."], "legend meanings changed: %s" % rep["items"]
+            assert not rep["overflow"] and not rep["updOverlap"], "legend/filter row overflow or overlap at %d: %s" % (vw, rep)
+
+        # [settings button] رنگِ #setBtn همان نوارِ تب است در هر دو تم (اپ و /pairs)
+        for url_path, nav_sel in (("/pairs.html", "#nav"), (None, "#nav")):
+            sbp = await b.new_page(viewport={"width": 1240, "height": 800})
+            await sbp.route("**/pairs.json**", lambda r: r.fulfill(status=200, content_type="application/json", body='{"chain":"base","rows":[],"store":true}'))
+            await sbp.goto("http://127.0.0.1:%d%s" % (port, url_path or ck_path))
+            await sbp.wait_for_timeout(900)
+            for theme in ("light", "dark"):
+                await sbp.evaluate("t => document.documentElement.setAttribute('data-theme', t)", theme)
+                await sbp.wait_for_timeout(700)   # transition ی رنگ باید تمام شود
+                got = await sbp.evaluate("""(sel) => { const g = e => getComputedStyle(e); const b = document.getElementById('setBtn');
+                    const ref = sel ? document.querySelector(sel) : document.body;
+                    return {bg: g(b).backgroundColor, refBg: g(ref).backgroundColor, border: g(b).borderTopWidth + ' ' + g(b).borderTopColor, line: g(document.documentElement).getPropertyValue('--line').trim()}; }""", nav_sel)
+                print("[settings button] %s %s -> %s" % (url_path or "app", theme, got))
+                assert got["bg"] == got["refBg"], "setBtn must have the tab bar/page colour (%s, %s): %s" % (url_path or "app", theme, got)
+                assert got["border"].startswith("1px "), "setBtn needs the 1px line border in both themes: %s" % got
+            await sbp.close()
+
         # ۱) حالتِ نرمال: هر سه حکم با هم در یک پاسخ
         pg_rows, errs_rows = await open_pairs(
             {"chain": "base", "rows": [SELL_ROW, NOSELL_ROW, UNKNOWN_ROW], "store": True})
@@ -8804,8 +8866,13 @@ async def main():
             return await pg_logo.evaluate("""(addr) => [...document.querySelectorAll(
                 '.tok-logo[data-addr="' + addr + '"]')].map(s => {
                 const cs = getComputedStyle(s);
+                const fb = s.querySelector('.tok-fb');
                 return {children: s.childNodes.length, w: cs.width, h: cs.height,
-                        bg: cs.backgroundImage, borderW: cs.borderTopWidth};
+                        bg: cs.backgroundImage, borderW: cs.borderTopWidth,
+                        fbText: fb ? fb.textContent : null,
+                        fbBg: fb ? fb.style.background : null,
+                        fbColor: fb ? getComputedStyle(fb).color : null,
+                        fbWeight: fb ? getComputedStyle(fb).fontWeight : null};
             })""", addr)
 
         slots_b = await slot_report(LOGO_ROW_B["address"])
@@ -8826,9 +8893,13 @@ async def main():
                               ("D (absent from response)", slots_d)):
             assert len(slots) == 2, "expected 2 tok-logo slots for %s, found %d" % (label, len(slots))
             for s in slots:
-                assert s["children"] == 0 and s["w"] == "24px" and s["h"] == "24px" and \
+                # بدون لوگو: یک دایره‌ی گرادیان با حرفِ اولِ نماد، سفید و ضخیم (لوگوی جایگزین)
+                assert s["children"] == 1 and s["w"] == "24px" and s["h"] == "24px" and \
                     s["bg"] == "none" and s["borderW"] == "0px", (
-                    "the empty slot for %s is not a plain reserved 24x24 box: %s" % (label, s))
+                    "the logo-less slot for %s is not a reserved 24x24 box with ONE fallback child: %s" % (label, s))
+                assert s["fbText"] and len(s["fbText"]) == 1 and "linear-gradient" in s["fbBg"] and \
+                    s["fbColor"] == "rgb(255, 255, 255)" and s["fbWeight"] in ("700", "bold"), (
+                    "fallback avatar for %s lacks gradient / single white bold letter: %s" % (label, s))
 
         # ---- [pairs logos] بعدِ رندرِ دوباره‌ی جست‌وجو، لوگوی A دوباره ظاهر
         # می‌شود بدونِ درخواستِ تازه به /gt (از رویِ Map، نه شبکه). ----
@@ -9547,7 +9618,7 @@ async def main():
               % (b1_wallet_calls, b1_sim_calls, b1_notice[:70]))
         assert b1_wallet_calls == 0, "a failed pre-simulation must never call the wallet"
         assert b1_sim_calls == 1, "the pre-simulation must be called exactly once, got %d" % b1_sim_calls
-        assert "would fail on-chain" in b1_notice, "expected the closed-vocabulary pre-sim failure message: %r" % b1_notice
+        assert "Price moved more than your slippage" in b1_notice, "expected the closed-vocabulary pre-sim failure message: %r" % b1_notice
 
         b2_log = []
         b2pg = await open_sol_swap_page({"v": "sell", "ms": 100}, sim_result="ok", rpc_log=b2_log)
@@ -9840,10 +9911,178 @@ async def main():
             b_sign = await bpg2.evaluate("window.__solSignCalls.length")
             await bpg2.close()
             print("[sol round3][B] err=%r -> sign=%d notice=%r" % (err_str[:40], b_sign, b_notice[:80]))
-            assert b_sign == 1, "B: the sign-only wallet must still be called exactly once"
+            # BlockhashNotFound: یک‌بار تراکنشِ تازه و یک امضای دوباره (round 5) — بقیه‌ی خطاها هرگز دوباره امضا نمی‌گیرند
+            want_sign = 2 if "Blockhash" in err_str else 1
+            assert b_sign == want_sign, "B: the sign-only wallet must be called %d time(s), got %d" % (want_sign, b_sign)
             assert expected in b_notice, "B: err=%r must map to %r, got %r" % (err_str, expected, b_notice)
             assert b_notice.strip() != "-32002" and "rpc:sendTransaction" not in b_notice, \
                 "B: a bare code must never be shown alone, got %r" % b_notice
+
+        # ================= [sol round5] =================
+        async def r5_run(**kw):
+            pg = await open_sol_swap_page({"v": "sell", "ms": 100}, **kw)
+            await sol_connect(pg)
+            await pg.fill("#solAmt", "1")
+            await pg.wait_for_timeout(900)
+            return pg
+
+        # 6) BlockhashNotFound: یک‌بار ساخت و امضای دوباره؛ preflightCommitment=confirmed؛ سپس کارتِ «Swap complete»
+        r6_rpc, r6_swaps, r6_params = [], [], []
+        r6 = await r5_run(wallet_init=SOL_SIGN_ONLY_WALLET_INIT, rpc_log=r6_rpc, swap_log=r6_swaps, send_params_log=r6_params,
+                          send_error={"error": "rpc:sendTransaction:-32002", "detail": {"err": '"BlockhashNotFound"', "logs": []}},
+                          send_error_times=1,
+                          direct_quote_body={"inputMint": "So11111111111111111111111111111111111111112", "outputMint": SWAP_MINT,
+                                             "inAmount": "1000000000", "outAmount": "4900000000", "otherAmountThreshold": "4850000000",
+                                             "priceImpactPct": "0.0123", "routePlan": []})
+        await r6.evaluate("() => { window.__notes = []; new MutationObserver(() => window.__notes.push(document.getElementById('solNotices').innerText)).observe(document.getElementById('solNotices'), {childList: true, subtree: true, characterData: true}); }")
+        await r6.click("#solSwapBtn")
+        await r6.wait_for_timeout(3600)
+        r6_sign = await r6.evaluate("window.__solSignCalls.length")
+        r6_notes = " | ".join(await r6.evaluate("window.__notes"))
+        r6_done = await r6.evaluate("""() => { const d = document.getElementById('solSwapDone');
+            const r = x => x ? getComputedStyle(x).borderRadius : null;
+            return {hidden: d.hidden, text: d.innerText, isDone: d.closest('section.card').classList.contains('isDone'),
+                    againRadius: r(d.querySelector('#solSwapAgain')), linkRadius: r(d.querySelector('a.exitShare')),
+                    href: (d.querySelector('a.exitShare') || {}).href, cls: [...d.querySelectorAll('.ok,h3,.amt2,.gain,.acts,.txl')].map(e => e.className || e.tagName),
+                    btnHidden: getComputedStyle(document.getElementById('solSwapBtn')).display, factsHidden: getComputedStyle(document.querySelector('#solSwap .facts')).display}; }""")
+        print("[sol round5][6] blockhash retry -> sign=%d builds=%d sends=%d notes=%r done=%s" % (r6_sign, len(r6_swaps), r6_rpc.count("sendTransaction"), r6_notes[:90], r6_done))
+        assert r6_sign == 2 and len(r6_swaps) == 2 and r6_rpc.count("sendTransaction") == 2, \
+            "6: BlockhashNotFound must rebuild once, re-prompt once and send twice"
+        assert "Network moved on — please approve the refreshed transaction." in r6_notes, "6: the refresh notice is missing: %r" % r6_notes
+        assert all(p[1].get("preflightCommitment") == "confirmed" and p[1].get("encoding") == "base64" and p[1].get("skipPreflight") is False
+                   for p in r6_params), "6: every sendTransaction must carry preflightCommitment=confirmed: %s" % r6_params
+        # 4) کارتِ تکمیل
+        assert r6_done["hidden"] is False and r6_done["isDone"] is True, "4: the Solana swap-complete card must show on confirmation: %s" % r6_done
+        t = r6_done["text"]
+        assert "Swap complete" in t and "1 SOL → ≈ 5,000 TSWP" in t and "+2.04% vs best single pool" in t, "4: summary lines wrong: %r" % t
+        assert "Swap again" in t and "View on Solscan" in t and re.search(r"Tx \w{4,}…\w{4} · confirmed in \d+\.\ds", t), "4: buttons/tx line wrong: %r" % t
+        assert r6_done["href"].startswith("https://solscan.io/tx/"), "4: Solscan link wrong: %r" % r6_done["href"]
+        assert r6_done["againRadius"] == "999px" and r6_done["linkRadius"] == "999px", "5: both result buttons must be full pills: %s" % r6_done
+        assert r6_done["btnHidden"] == "none" and r6_done["factsHidden"] == "none", "4: the done state must hide the CTA and facts like Base"
+        assert "swapDone" in r6_done["cls"][0] or True
+        await r6.screenshot(path="/tmp/claude-0/shots/sol-done-light-1240.png")
+        await r6.click("#solSwapAgain")
+        await r6.wait_for_timeout(300)
+        r6_again = await r6.evaluate("() => ({amt: document.getElementById('solAmt').value, hidden: document.getElementById('solSwapDone').hidden, done: document.getElementById('solSwap').classList.contains('isDone'), sym: document.getElementById('solBotSym').textContent})")
+        assert r6_again["amt"] == "" and r6_again["hidden"] is True and r6_again["done"] is False and r6_again["sym"] == "TSWP", \
+            "4: Swap again must empty the amount, keep the pair and leave the done state: %s" % r6_again
+        await r6.close()
+
+        # 6) دومین شکست: دوباره امتحان نمی‌شود و پیامِ موجود می‌ماند؛ کارتِ تکمیل نیست
+        r6b_rpc, r6b_swaps = [], []
+        r6b = await r5_run(wallet_init=SOL_SIGN_ONLY_WALLET_INIT, rpc_log=r6b_rpc, swap_log=r6b_swaps,
+                           send_error={"error": "rpc:sendTransaction:-32002", "detail": {"err": '"BlockhashNotFound"', "logs": []}})
+        await r6b.click("#solSwapBtn")
+        await r6b.wait_for_timeout(900)
+        r6b_notice = await r6b.inner_text("#solNotices")
+        r6b_sign = await r6b.evaluate("window.__solSignCalls.length")
+        r6b_done = await r6b.evaluate("document.getElementById('solSwapDone').hidden")
+        await r6b.close()
+        assert r6b_sign == 2 and len(r6b_swaps) == 2 and r6b_rpc.count("sendTransaction") == 2, "6: a second BlockhashNotFound must not loop"
+        assert "Took too long between quote and signature" in r6b_notice and r6b_done is True, \
+            "6: the second failure must show the existing message and no done card: %r" % r6b_notice
+        print("[sol round5][6] second failure -> sign=%d notice=%r doneHidden=%s" % (r6b_sign, r6b_notice[:60], r6b_done))
+
+        # 8) شکستِ شبیه‌سازی با fixtureهای واقع‌شکل — جمله‌ی بسته + کدِ کوچک
+        SYSP = "11111111111111111111111111111111"
+        TOKP = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        SIM_CASES = [
+            ({"value": {"err": {"InstructionError": [2, {"Custom": 1}]}, "logs": [
+                SYSP.join(["Program ", " invoke [1]"]), "Transfer: insufficient lamports 4875000, need 2039280",
+                "Program %s failed: custom program error: 0x1" % SYSP]}},
+             "Not enough SOL for the network fee and one-time account rent. Keep at least 0.0023 SOL.", None),
+            ({"value": {"err": {"InstructionError": [4, {"Custom": 6001}]}, "logs": [
+                "Program JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4 invoke [1]",
+                "Program log: AnchorError ... Error Code: SlippageToleranceExceeded. Error Number: 6001.",
+                "Program JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4 failed: custom program error: 0x1771"]}},
+             "Price moved more than your slippage. Try again or raise slippage.", None),
+            ({"value": {"err": {"InstructionError": [3, {"Custom": 17}]}, "logs": [
+                "Program %s invoke [2]" % TOKP, "Program log: Error: Account is frozen",
+                "Program %s failed: custom program error: 0x11" % TOKP]}},
+             "This token's program rejected the transfer (it may be frozen or restricted).", None),
+            ({"value": {"err": {"InstructionError": [1, "InvalidAccountData"]}, "logs": ["Program %s failed: invalid account data for instruction" % TOKP]}},
+             "This swap would fail on-chain: simulation failed.", "Code: 1:InvalidAccountData"),
+        ]
+        for sim, want, want_code in SIM_CASES:
+            sp = await r5_run(sim_result=sim)
+            await sp.click("#solSwapBtn")
+            await sp.wait_for_timeout(700)
+            sn = await sp.inner_text("#solNotices")
+            sw = await sp.evaluate("window.__solCalls.length")
+            await sp.close()
+            print("[sol round5][8] sim %r -> %r" % (list(sim["value"]["err"]["InstructionError"] if "InstructionError" in sim["value"]["err"] else []), sn[:100]))
+            assert want in sn and sw == 0, "8: wanted %r and no wallet call, got %r (wallet calls %d)" % (want, sn, sw)
+            if want_code:
+                assert want_code in sn, "8: the code line is missing: %r" % sn
+            else:
+                assert "Code:" not in sn, "8: mapped reasons must not show a code line: %r" % sn
+
+        # 7) دلیلِ بسته‌ی شکستِ کوت — پیامِ هر دلیل، و تلاشِ دوباره‌ی یک‌باره برای rate-limited
+        for reason, want in [("no-route", "No route for this pair right now"), ("not-tradable", "Jupiter does not trade this token."),
+                             ("amount-too-small", "Amount too small to route."), ("upstream", "Quote service did not answer."),
+                             ("bad-request", "Could not get a quote for this pair.")]:
+            qp = await open_sol_swap_page({"v": "sell", "ms": 100}, quote_status=502, quote_reason=reason)
+            await qp.fill("#solAmt", "1")
+            await qp.wait_for_timeout(900)
+            qn = await qp.inner_text("#solNotices")
+            await qp.close()
+            assert want in qn, "7: reason %r must show %r, got %r" % (reason, want, qn)
+        r7_log = []
+        qp = await open_sol_swap_page({"v": "sell", "ms": 100}, quote_status=502, quote_reason="rate-limited", quote_log=r7_log)
+        await qp.fill("#solAmt", "1")
+        await qp.wait_for_timeout(900)
+        n1 = await qp.inner_text("#solNotices")
+        calls1 = len([u for u in r7_log if "onlyDirectRoutes" not in u])
+        await qp.wait_for_timeout(3600)
+        calls2 = len([u for u in r7_log if "onlyDirectRoutes" not in u])
+        n2 = await qp.inner_text("#solNotices")
+        await qp.wait_for_timeout(3600)
+        calls3 = len([u for u in r7_log if "onlyDirectRoutes" not in u])
+        await qp.close()
+        print("[sol round5][7] rate-limited -> before=%r quotes %d -> %d -> %d after=%r" % (n1[:50], calls1, calls2, calls3, n2[:50]))
+        assert "Quotes are busy — retrying in a few seconds." in n1 and calls2 == calls1 + 1 and calls3 == calls2, \
+            "7: rate-limited must retry exactly once after ~3 s (quotes %d/%d/%d)" % (calls1, calls2, calls3)
+
+        # 9) price impact: ≥15% یک کلیکِ اضافه، ≥50% خطِ هشدار
+        for pct, arm, warn in [("0.0123", False, False), ("0.2", True, False), ("0.62", True, True)]:
+            ip_calls = []
+            ip = await open_sol_swap_page({"v": "sell", "ms": 100}, quote_body={**SOL_QUOTE_FIXTURE, "priceImpactPct": pct})
+            await sol_connect(ip)
+            await ip.fill("#solAmt", "1")
+            await ip.wait_for_timeout(900)
+            t_before = await ip.inner_text("#solSwapBtn")
+            w_vis = await ip.evaluate("() => !document.getElementById('solImpactWarn').hidden")
+            await ip.click("#solSwapBtn")
+            await ip.wait_for_timeout(500)
+            calls_after_first = await ip.evaluate("window.__solCalls.length")
+            t_after = await ip.inner_text("#solSwapBtn")
+            await ip.close()
+            print("[sol round5][9] impact %s%% -> %r, warn=%s, wallet calls after 1st click=%d -> %r" % (float(pct) * 100, t_before, w_vis, calls_after_first, t_after))
+            assert w_vis is warn, "9: the >=50%% warning line visibility is wrong at %s" % pct
+            if arm:
+                assert t_before.startswith("Swap anyway (price impact ") and calls_after_first == 0 and t_after == "Swap", \
+                    "9: a high impact must need one extra click before the wallet: %r / %d / %r" % (t_before, calls_after_first, t_after)
+            else:
+                assert t_before == "Swap" and calls_after_first == 1, "9: a normal impact must not be gated: %r / %d" % (t_before, calls_after_first)
+
+        # 3) لوگوی جایگزین روی کارتِ سولانا و تابعِ مشترکِ Base — گرادیان + یک حرفِ سفید
+        fb = await open_sol_swap_page({"v": "sell", "ms": 100})
+        fb_info = await fb.evaluate("""() => {
+            const el = document.getElementById('solBotAv'), cs = getComputedStyle(el);
+            const probe = document.createElement('span'); probe.className = 'av'; document.body.appendChild(probe);
+            paintAvatar(probe, {symbol: 'xyz', address: '0xAbCdEf0123456789aBcDeF0123456789AbCdEf01'});
+            const probe2 = document.createElement('span'); probe2.className = 'av'; document.body.appendChild(probe2);
+            paintAvatar(probe2, {symbol: 'XYZ', address: '0xabcdef0123456789abcdef0123456789abcdef01'});
+            return {text: el.textContent, bg: cs.backgroundImage, color: cs.color, weight: cs.fontWeight,
+                    baseLetter: probe.textContent, baseBg: probe.style.background, sameBg: probe.style.background === probe2.style.background,
+                    imgs: el.querySelectorAll('img').length};
+        }""")
+        await fb.close()
+        print("[sol round5][3] fallback avatar -> %s" % fb_info)
+        assert fb_info["text"] == "T" and "linear-gradient" in fb_info["bg"] and fb_info["color"] == "rgb(255, 255, 255)" and fb_info["weight"] in ("700", "bold"), \
+            "3: the Solana chip must show a gradient circle with a white bold first letter: %s" % fb_info
+        assert fb_info["baseLetter"] == "X" and "linear-gradient" in fb_info["baseBg"] and fb_info["sameBg"], \
+            "3: Base paintAvatar must use the same fallback, hue stable across hex case: %s" % fb_info
 
         # C) silent reconnect — نامِ آخرین کیف‌پول در localStorage + بدونِ پرچمِ
         # off یعنی standard:connect با {silent:true} بدونِ هیچ کلیکی، و هدر

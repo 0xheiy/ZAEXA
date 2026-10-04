@@ -240,18 +240,9 @@ h1{font-size:28px;letter-spacing:-.03em;margin:0 0 10px;line-height:1.1}
 #pairSearch::placeholder{color:var(--tx3)}
 #pairSort{height:40px;padding:0 12px;border:1px solid var(--line);border-radius:10px;
   background:var(--card);color:var(--tx);font:inherit;font-size:13px}
-/* راهنما — همان سه‌آیتمیِ قبلی، عیناً همان‌طور (بایت‌به‌بایت داخلِ details)،
-   فقط حالا زیرِ یک <details> جمع می‌شود تا بالا شلوغ نکند — باز/بسته‌شدنش
-   با خودِ مرورگر است، بدونِ هیچ جاوااسکریپتِ تازه. */
-.legend-wrap{margin-left:auto;font-size:12.5px;color:var(--tx3)}
-.legend-wrap summary{cursor:pointer;color:var(--tx2);font-weight:600;list-style:none;user-select:none}
-.legend-wrap summary::-webkit-details-marker{display:none}
-.legend-wrap summary:before{content:"›";display:inline-block;margin-right:4px;transition:transform .16s}
-.legend-wrap[open] summary:before{transform:rotate(90deg)}
-.legend-wrap .legend{margin-top:10px}
-
-.legend{display:flex;flex-wrap:wrap;gap:10px 24px;list-style:none;padding:0;margin:0;border-top:1px solid var(--line);border-bottom:1px solid var(--line);padding-top:16px;padding-bottom:16px}
-.legend-item{display:flex;align-items:baseline;gap:8px;font-size:12.5px;max-width:320px}
+/* راهنمای verdict همیشه دیده می‌شود (زیر زیرعنوان)؛ بایت‌به‌بایت همان سه آیتم */
+.legend{display:flex;flex-wrap:wrap;gap:8px 20px;list-style:none;padding:0;margin:0 0 14px}
+.legend-item{display:flex;align-items:center;gap:8px;font-size:12.5px}
 .legend-text{color:var(--tx3)}
 
 .badge{display:inline-flex;align-items:center;padding:3px 10px;border-radius:999px;font-size:11.5px;font-weight:700;letter-spacing:.02em;white-space:nowrap}
@@ -309,8 +300,9 @@ h1{font-size:28px;letter-spacing:-.03em;margin:0 0 10px;line-height:1.1}
 /* جای لوگوی توکن — همیشه ۲۴×۲۴ رزرو می‌شود تا ردیف‌ها هم‌تراز بمانند.
    تصمیمِ مالک: وقتی لوگو نداریم جای‌گزین/حرفِ اول/پس‌زمینه/حاشیه نمی‌گذاریم
    — جا خالی می‌ماند، خودِ خالی‌بودن هیچ معنایی حمل نمی‌کند. */
-.tok-logo{width:24px;height:24px;flex:0 0 24px;display:block}
-.tok-logo img{width:24px;height:24px;display:block;border-radius:50%;object-fit:cover}
+.tok-logo{position:relative;width:24px;height:24px;flex:0 0 24px;display:block}
+.tok-logo img{position:absolute;inset:0;width:24px;height:24px;display:block;border-radius:50%;object-fit:cover;background:var(--card)}
+.tok-fb{position:absolute;inset:0;border-radius:50%;display:grid;place-items:center;color:#fff;font-weight:700;font-size:10.8px;line-height:1}
 
 /* کارتِ موبایل — فشرده، دو خط: خط ۱ لوگو+نماد+نشان+سن، خط ۲ قیمت·نقدینگی·حجم.
    Trade/Copy راستِ کارت، عمودی وسط‌چین. یادداشتِ زیرِ نشانِ رأی وقتی هست
@@ -427,7 +419,8 @@ footer .fine{max-width:78ch;margin:46px 0 0;font-size:11.5px;color:var(--tx3);li
    در تمِ تیره همان رنگ و لبه‌ی نوارِ تب‌ها؛ و تا وقتی منویش باز است همان فرورفتگیِ تبِ فعال را دارد. */
 #setBtn{display:inline-grid;place-items:center;padding:0;line-height:0}
 #setBtn .gearIcon{display:block;width:18px;height:18px}
-[data-theme="dark"] #setBtn{background:var(--bg);border:1px solid var(--line)}
+/* رنگ دکمه تنظیمات همان نوار تب است در هر دو تم */
+#setBtn{background:var(--bg);border:1px solid var(--line)}
 #setBtn:active,#setBtn:has(+ #setPop.on),#setBtn[aria-expanded="true"]{transform:none;background:var(--bg);color:var(--acc);box-shadow:inset 2px 2px 5px var(--soft-lo),inset -2px -2px 5px var(--soft-hi)}
 @media(max-width:720px){
   /* ۴ اکتبر — به خواستِ مالک: نوار خودش تخت است (بی‌برجستگی، همان رنگِ تیره‌ی فعلی)، گوشه‌ها کاملاً گرد،
@@ -589,6 +582,11 @@ footer .fine{max-width:78ch;margin:46px 0 0;font-size:11.5px;color:var(--tx3);li
   <h1>New pairs</h1>
   <p class="sub">The newest Base pools we found, each run through the same exit check as the app. Updated hourly.</p>
   <p class="note">A sell quote is not a promise. It is one quote, at one moment, from the venues we cover. Tokens can change after it.</p>
+  <ul class="legend" id="verdictLegend" aria-label="What each verdict means">
+          <li class="legend-item"><span class="badge badge-pos">Sell quoted</span><span class="legend-text">A venue quoted a sell for this token.</span></li>
+          <li class="legend-item"><span class="badge badge-neg">No sell quote</span><span class="legend-text">No venue we cover would quote a sell.</span></li>
+          <li class="legend-item"><span class="badge badge-unknown">Unknown</span><span class="legend-text">We could not check this one. Unknown is not "safe" and not "scam".</span></li>
+        </ul>
 
   <div class="pairsNetworks"><div class="chain-tabs" id="chainTabs" role="tablist" aria-label="Chain">
         <button type="button" class="on" data-chain="base" role="tab" aria-selected="true"><svg width="18" height="18" aria-hidden="true" viewBox="0 0 111 111" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -637,14 +635,6 @@ Solana</button>
         <option value="vol">24h volume</option>
         <option value="age">Pool age</option>
       </select>
-      <details class="legend-wrap">
-        <summary>What the verdicts mean</summary>
-        <ul class="legend" aria-label="What each verdict means">
-          <li class="legend-item"><span class="badge badge-pos">Sell quoted</span><span class="legend-text">A venue quoted a sell for this token.</span></li>
-          <li class="legend-item"><span class="badge badge-neg">No sell quote</span><span class="legend-text">No venue we cover would quote a sell.</span></li>
-          <li class="legend-item"><span class="badge badge-unknown">Unknown</span><span class="legend-text">We could not check this one. Unknown is not "safe" and not "scam".</span></li>
-        </ul>
-      </details>
     </div>
 
     <div class="stats-strip" id="statsStrip">
@@ -858,8 +848,31 @@ Solana</button>
 
   // جایِ رزروشده‌ی ۲۴×۲۴ کنارِ هر نماد، هم در جدول هم در کارت — پرشدنش
   // پایین‌تر است (بعد از load، نگاه کن به fetchLogos)، اینجا فقط خودِ جایگاه.
-  function tokLogoSpan(addr){
-    return '<span class="tok-logo" data-addr="' + esc(addr) + '"></span>';
+  function tokLogoSpan(addr, sym){
+    return '<span class="tok-logo" data-addr="' + esc(addr) + '" data-sym="' + esc(sym || '') + '"></span>';
+  }
+  // لوگوی جایگزین: دایره‌ی گرادیان از هشِ پایدارِ آدرس + حرفِ اول؛ فقط textContent.
+  // آدرسِ hex (Base) کوچک می‌شود، mintِ سولانا عیناً.
+  function fallbackAvatarStyle(seed, symbol){
+    var k = String(seed == null ? '' : seed);
+    if (/^0x[0-9a-fA-F]{40}$/.test(k)) k = k.toLowerCase();
+    var h = 2166136261;
+    for (var i = 0; i < k.length; i++){ h ^= k.charCodeAt(i); h = Math.imul(h, 16777619) >>> 0; }
+    var hue = h % 360;
+    var ch = symbol ? String(symbol).trim().charAt(0).toUpperCase() : '';
+    return { hue: hue, letter: ch || '?',
+      background: 'linear-gradient(135deg, hsl(' + hue + ' 72% 56%), hsl(' + ((hue + 38) % 360) + ' 72% 46%))' };
+  }
+  function fillFallbackSlots(){
+    document.querySelectorAll('.tok-logo[data-addr]').forEach(function(slot){
+      if (slot.querySelector('.tok-fb')) return;
+      var st = fallbackAvatarStyle(slot.getAttribute('data-addr') || '', slot.getAttribute('data-sym') || '');
+      var fb = document.createElement('span');
+      fb.className = 'tok-fb';
+      fb.textContent = st.letter;
+      fb.style.background = st.background;
+      slot.insertBefore(fb, slot.firstChild);
+    });
   }
 
   var COPY_SVG = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" ' +
@@ -885,6 +898,7 @@ Solana</button>
     var volStr = fmtMoney(row && row.vol24hUsd);
     var liqStr = fmtMoney(row && row.reserveUsd);
     var symStr = esc((row && row.symbol) || EM_DASH_NUM);
+    var rawSymForLogo = (row && row.symbol) || '';
     /* وقتی name و symbol یکی‌اند، نشان‌دادنِ هر دو فقط همان کلمه را دو بار
        می‌نویسد و ردیف را شلوغ می‌کند؛ یک رشته‌ی خالی یعنی همان خط اصلاً
        رندر نشود، نه اینکه خط‌تیره بگیرد (خط‌تیره یعنی «نداریم»، و این‌جا
@@ -905,7 +919,7 @@ Solana</button>
       return '<a class="card-link" href="' + href + '" aria-label="' + rowAriaLabel + '"></a>' +
         '<div class="card-inner">' +
           '<div class="card-main">' +
-            '<div class="card-row1">' + tokLogoSpan(addr) +
+            '<div class="card-row1">' + tokLogoSpan(addr, rawSymForLogo) +
               '<span class="card-sym">' + symStr + '</span>' +
               '<span class="badge badge-' + v.cls + '" title="' + esc(v.meaning) + '">' + esc(v.label) + '</span>' +
               '<time class="card-age" datetime="' + checkedAttr + '" title="' + checkedAttr + '">' + age.text + '</time>' +
@@ -918,7 +932,7 @@ Solana</button>
     }
     return '<td class="col-token">' +
         '<a class="row-link" href="' + href + '" aria-label="' + rowAriaLabel + '"></a>' +
-        '<div class="token-cell">' + tokLogoSpan(addr) +
+        '<div class="token-cell">' + tokLogoSpan(addr, rawSymForLogo) +
           '<span class="token-sym">' + symStr + '</span>' +
           (nameStr ? '<span class="token-name">' + nameStr + '</span>' : '') +
         '</div>' +
@@ -946,6 +960,7 @@ Solana</button>
       li.innerHTML = rowMarkup(row, true);
       cardsEl.appendChild(li);
     });
+    fillFallbackSlots();
   }
 
   function showError(){
@@ -1329,7 +1344,7 @@ Solana</button>
     img.loading = 'lazy';
     img.decoding = 'async';
     img.referrerPolicy = 'no-referrer';
-    img.addEventListener('error', function(){ img.remove(); }); // جایگاه خالی می‌ماند
+    img.addEventListener('error', function(){ img.remove(); }); // لوگوی جایگزین زیرش می‌ماند
     img.src = url;
     slot.appendChild(img);
   }
@@ -1341,7 +1356,7 @@ Solana</button>
       var key = logoKey(slot.getAttribute('data-addr') || '', currentChain);
       if (!key || !logoCache.has(key)) return;
       var url = logoCache.get(key);
-      if (url && !slot.firstChild) paintLogo(slot, url);
+      if (url && !slot.querySelector('img')) paintLogo(slot, url);
     });
   }
 
@@ -1370,7 +1385,7 @@ Solana</button>
 
   function paintAddrEverywhere(key, chain){
     document.querySelectorAll('.tok-logo[data-addr]').forEach(function(slot){
-      if (logoKey(slot.getAttribute('data-addr') || '', chain) === key && !slot.firstChild) {
+      if (logoKey(slot.getAttribute('data-addr') || '', chain) === key && !slot.querySelector('img')) {
         paintLogo(slot, logoCache.get(key));
       }
     });
@@ -1955,6 +1970,6 @@ Solana</button>
 })();
 </script>
 
-<script src="/pairs-solana.590aed1a.js"></script>
+<script src="/pairs-solana.454045a1.js"></script>
 </body>
 </html>

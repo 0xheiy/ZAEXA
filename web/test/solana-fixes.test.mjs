@@ -25,7 +25,7 @@ function context(names, extras = {}) {
     solPaintLegs() {}, solSetReference: async () => {}, activeChain: "base", view: "swap", solOnAmtInput() {}, solPaintBalance() {}, solPaintFeeRows() {}, solSwapApplyGate() {}, solRenderReadout() {}, solUpdateSwapBtn() {},
     ...extras,
   });
-  const all = [...new Set(['solInputMint', 'solOutputMint', 'solInputDecimals', 'solOutputDecimals', 'solAmountRaw', 'solFormatUnits', 'solNeedsArm', ...names])];
+  const all = [...new Set(['solInputMint', 'solOutputMint', 'solInputDecimals', 'solOutputDecimals', 'solAmountRaw', 'solFormatUnits', 'solNeedsArm', 'solNeedsImpactArm', 'solQuoteImpactPct', 'solImpactKey', ...names])];
   for (const name of all) {
     const match = new RegExp(`(?:async )?function ${name}\\(`).exec(html);
     assert.ok(match, `missing ${name}`);
