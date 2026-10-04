@@ -1038,6 +1038,12 @@ Solana</button>
     }
     var fbEl = document.getElementById('feedbackLink');
     if (fbEl) fbEl.href = feedbackMailto();
+    // تداومِ زنجیره: روی تبِ Solana لینک‌های /app شبکه را هم می‌برند (index.html همین را
+    // برای لینک‌های /pairs انجام می‌دهد)؛ روی Base دوباره لینکِ ساده.
+    Array.prototype.forEach.call(document.querySelectorAll('a[href^="/app#"]'), function(a){
+      var m = /^(\/app#(?:swap|folio|flow))(?:\?chain=solana)?$/.exec(a.getAttribute('href'));
+      if (m) a.setAttribute('href', m[1] + (currentChain === 'solana' ? '?chain=solana' : ''));
+    });
     // گزینشگرِ تازه‌ی هدر (#srcPop) — همان الگوی [header parity] با اپ.
     var srcPopEl = document.getElementById('srcPop');
     if (srcPopEl) {
@@ -1972,6 +1978,6 @@ Solana</button>
 })();
 </script>
 
-<script src="/pairs-solana.454045a1.js"></script>
+<script src="/pairs-solana.76019ace.js"></script>
 </body>
 </html>

@@ -11318,6 +11318,262 @@ async def main():
               "set; Disconnect sets the flag and shows the exact wording once; explicit Connect "
               "wallet opens the picker and eth_requestAccounts only fires on a picked row")
 
+        import time as _time
+        # ---- [sol carry] ۴ اکتبر — تأییدِ اتصالِ سولانا که *همین تب* داده، بین /app و
+        # /pairs (دو سندِ جدا) تا ۳۰ دقیقه منتقل می‌شود: sessionStorage
+        # (zaexa.solsession.v1)، نه localStorage؛ بازیابی فقط connect({silent:true})،
+        # بدون امضای تازه و بدون رویدادِ /ev. هر شکستی رکورد را پاک می‌کند. ----
+        CARRY_B58 = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
+        def carry_b58(bs):
+            n = int.from_bytes(bytes(bs), "big")
+            out = ""
+            while n:
+                n, r = divmod(n, 58)
+                out = CARRY_B58[r] + out
+            return "1" * (len(bs) - len(bytes(bs).lstrip(b"\0"))) + out
+        CARRY_PK = list(range(1, 33))
+        CARRY_PK2 = list(range(2, 34))
+        CARRY_ADDR = carry_b58(CARRY_PK)
+        CARRY_ADDR2 = carry_b58(CARRY_PK2)
+        CARRY_SHORT = CARRY_ADDR[:6] + "…" + CARRY_ADDR[-4:]
+        CARRY_ORIGIN = "http://127.0.0.1:%d" % port
+        CARRY_APP = CARRY_ORIGIN + "/app#swap?chain=solana"
+        CARRY_PAIRS = CARRY_ORIGIN + "/pairs.html?chain=solana"
+        CARRY_WALLET_INIT = """
+(function(){
+  var PK = new Uint8Array(__PK__), PK2 = new Uint8Array(__PK2__);
+  var cfg = {}; try { cfg = JSON.parse(sessionStorage.getItem('t.cfg') || '{}'); } catch(_) {}
+  window.__calls = []; window.__signs = 0; window.__confirmCalls = 0;
+  // تأییدِ امضاشده در تست‌های مرورگر جعلی است؛ شمارنده ثابت می‌کند بازیابی هرگز آن را صدا نمی‌زند.
+  window.SolConfirm = { confirmConnection: async function(){ window.__confirmCalls++; } };
+  var w = { name: cfg.name || 'Fake Wallet', icon: '', chains: ['solana:mainnet'], features: {
+    'standard:connect': { connect: async function(o){
+      window.__calls.push(o || {});
+      if (o && o.silent) {
+        if (cfg.silent === 'throw') throw new Error('wallet locked');
+        if (cfg.silent === 'none') return { accounts: [] };
+        if (cfg.silent === 'other') return { accounts: [{ address: '__ADDR2__', publicKey: PK2 }] };
+      }
+      return { accounts: [{ address: '__ADDR__', publicKey: PK }] };
+    } },
+    'standard:disconnect': { disconnect: async function(){} },
+    'standard:events': { on: function(ev, cb){ window.__evCb = cb; return function(){}; } },
+    'solana:signMessage': { signMessage: async function(){ window.__signs++; throw new Error('no signing during restore'); } },
+    'solana:signAndSendTransaction': { signAndSendTransaction: async function(){ return [{ signature: new Uint8Array(64) }]; } }
+  } };
+  if (cfg.late) setTimeout(function(){
+    window.dispatchEvent(new CustomEvent('wallet-standard:register-wallet', { detail: function(api){ api.register(w); } }));
+  }, cfg.late);
+  else window.addEventListener('wallet-standard:app-ready', function(e){ try { e.detail.register(w); } catch(_) {} });
+})();
+""".replace("__PK__", str(CARRY_PK)).replace("__PK2__", str(CARRY_PK2)).replace("__ADDR__", CARRY_ADDR).replace("__ADDR2__", CARRY_ADDR2)
+
+        async def carry_page(errs):
+            cpg = await b.new_page(viewport={"width": 1280, "height": 900})
+            cpg.on("console", lambda m: errs.append(m.text) if m.type == "error" and (m.location.get("url") or "").startswith(CARRY_ORIGIN) else None)
+            cpg.on("pageerror", lambda e: errs.append("PAGEERROR " + str(e)))
+            cpg.ev_log = []
+            await cpg.add_init_script(CARRY_WALLET_INIT)
+            async def c_ext(route): await route.abort()
+            async def c_empty(route): await route.fulfill(status=200, content_type="application/json", body='{"data":[]}')
+            async def c_ev(route):
+                cpg.ev_log.append(route.request.post_data or route.request.url)
+                await route.fulfill(status=204, body="")
+            async def c_vd(route): await route.fulfill(status=200, content_type="application/json", body='{"v":"sell","ms":100}')
+            async def c_sol(route): await route.fulfill(status=200, content_type="application/json", body='{"result":null}')
+            async def c_pairs(route):
+                ch = "solana" if "chain=solana" in route.request.url else "base"
+                await route.fulfill(status=200, content_type="application/json",
+                                    body=_json.dumps({"chain": ch, "rows": [], "store": True}))
+            await cpg.route("**/*", lambda r: r.continue_() if r.request.url.startswith(CARRY_ORIGIN) else c_ext(r))
+            await cpg.route("**/gt/**", c_empty)
+            await cpg.route("**/ev", c_ev)
+            await cpg.route("**/vd/**", c_vd)
+            await cpg.route("**/sol/**", c_sol)
+            await cpg.route("**/pairs.json**", c_pairs)
+            return cpg
+
+        async def carry_seed(cpg, cfg=None, rec=None, off=False):
+            # یک سندِ هم‌مبدأِ خالی؛ فقط برای نوشتنِ sessionStorage/localStorage پیش از صفحه‌ی اصلی
+            await cpg.goto(CARRY_ORIGIN + "/stub-ethers.js")
+            await cpg.evaluate("""([cfg, rec, off]) => { sessionStorage.clear(); localStorage.clear();
+                if (cfg) sessionStorage.setItem('t.cfg', JSON.stringify(cfg));
+                if (rec) sessionStorage.setItem('zaexa.solsession.v1', JSON.stringify(rec));
+                if (off) localStorage.setItem('zaexa.solwallet.off.v1', '1'); }""", [cfg, rec, off])
+
+        async def carry_state(cpg):
+            st = await cpg.evaluate("""() => { const rec = sessionStorage.getItem('zaexa.solsession.v1');
+                const n = document.getElementById('walletDisconnectNote'), sn = document.getElementById('solNotices');
+                return { calls: window.__calls, signs: window.__signs, confirms: window.__confirmCalls, rec: rec,
+                  lsHasRec: Object.keys(localStorage).some(k => k.indexOf('solsession') >= 0) ||
+                            Object.values(localStorage).some(v => String(v).indexOf('solsession') >= 0),
+                  btn: document.getElementById('connectBtn').textContent.trim(),
+                  note: ((n && !n.hidden) ? n.textContent : '') + ((sn && sn.textContent) || '') }; }""")
+            st["recObj"] = _json.loads(st["rec"]) if st["rec"] else None
+            st["wcOn"] = [e for e in cpg.ev_log if "wallet:on" in e]
+            return st
+
+        async def carry_load(cpg, url):
+            same = cpg.url.split("#")[0] == url.split("#")[0]
+            await cpg.goto(url)
+            if same:      # همان سند با هش: goto فقط هش را عوض می‌کند، پس بازبارگذاریِ واقعی لازم است
+                await cpg.reload()
+            await cpg.wait_for_timeout(1000)
+
+        async def carry_connect(cpg, kind):
+            await cpg.click("#connectBtn")
+            await cpg.wait_for_timeout(400)
+            await cpg.click("#solWalList .walRow[data-i]" if kind == "app" else "#walList .walRow")
+            await cpg.wait_for_timeout(700)
+
+        carry_errs = []
+        CARRY_NOW = lambda: int(_time.time() * 1000)
+
+        def carry_rec(t=None, name="Fake Wallet", addr=None):
+            return {"name": name, "address": addr or CARRY_ADDR, "t": t if t is not None else CARRY_NOW()}
+
+        # 1) app: fresh approval writes the record (sessionStorage only), then a reload restores silently
+        cpg = await carry_page(carry_errs)
+        await carry_seed(cpg)
+        await carry_load(cpg, CARRY_APP)
+        s1 = await carry_state(cpg)
+        assert s1["calls"] == [] and s1["btn"] != CARRY_SHORT and s1["rec"] is None, "[sol carry] a fresh page must start disconnected: %s" % s1
+        await carry_connect(cpg, "app")
+        s2 = await carry_state(cpg)
+        print("[sol carry app] connect: calls=%s confirms=%s rec=%s btn=%r lsHasRec=%s"
+              % (s2["calls"], s2["confirms"], s2["recObj"], s2["btn"], s2["lsHasRec"]))
+        assert s2["calls"] == [{"silent": False}] and s2["confirms"] == 1 and s2["btn"] == CARRY_SHORT, "[sol carry] app connect flow: %s" % s2
+        assert s2["recObj"] and s2["recObj"]["name"] == "Fake Wallet" and s2["recObj"]["address"] == CARRY_ADDR \
+            and abs(s2["recObj"]["t"] - CARRY_NOW()) < 15000, "[sol carry] the approval was not recorded for this tab: %s" % s2["rec"]
+        assert not s2["lsHasRec"], "[sol carry] the session record must never be written to localStorage"
+        assert len(s2["wcOn"]) == 1, "[sol carry] the fresh connection must fire wallet:on once (probe sanity): %s" % cpg.ev_log
+        t_before = s2["recObj"]["t"]
+        await cpg.wait_for_timeout(50)
+        await carry_load(cpg, CARRY_APP)
+        s3 = await carry_state(cpg)
+        print("[sol carry app] reload: calls=%s signs=%s confirms=%s btn=%r tRefreshed=%s wallet:on=%d"
+              % (s3["calls"], s3["signs"], s3["confirms"], s3["btn"], s3["recObj"] and s3["recObj"]["t"] >= t_before, len(s3["wcOn"])))
+        assert s3["calls"] == [{"silent": True}], "[sol carry] reload must make exactly one silent connect call: %s" % s3["calls"]
+        assert s3["signs"] == 0 and s3["confirms"] == 0, "[sol carry] restore must never ask for a signature: %s" % s3
+        assert s3["btn"] == CARRY_SHORT, "[sol carry] the header must show the short address after restore: %r" % s3["btn"]
+        assert s3["recObj"] and s3["recObj"]["t"] >= t_before, "[sol carry] a successful restore must refresh t"
+        assert not s3["lsHasRec"] and len(s3["wcOn"]) == len(s2["wcOn"]), "[sol carry] restore leaked into localStorage or fired wallet:on"
+        # 2) app -> pairs (same tab, full page load)
+        await carry_load(cpg, CARRY_PAIRS)
+        s4 = await carry_state(cpg)
+        print("[sol carry pairs] from app: calls=%s signs=%s confirms=%s btn=%r note=%r"
+              % (s4["calls"], s4["signs"], s4["confirms"], s4["btn"], s4["note"]))
+        assert s4["calls"] == [{"silent": True}] and s4["signs"] == 0 and s4["confirms"] == 0 and s4["btn"] == CARRY_SHORT, \
+            "[sol carry] app -> pairs must stay connected with one silent call and no signature: %s" % s4
+        # explicit Disconnect on pairs removes the record; reload stays disconnected with no connect call
+        await cpg.evaluate("document.getElementById('disconnectBtn').click()")
+        await cpg.wait_for_timeout(300)
+        s5 = await carry_state(cpg)
+        await carry_load(cpg, CARRY_PAIRS)
+        s6 = await carry_state(cpg)
+        print("[sol carry pairs] disconnect: recAfter=%s reload calls=%s btn=%r" % (s5["rec"], s6["calls"], s6["btn"]))
+        assert s5["rec"] is None, "[sol carry] pairs Disconnect must remove the session record"
+        assert s6["calls"] == [] and s6["btn"] != CARRY_SHORT, "[sol carry] after Disconnect a reload must stay disconnected with no connect call: %s" % s6
+        # 3) pairs: fresh approval -> record -> app restores
+        await carry_connect(cpg, "pairs")
+        s7 = await carry_state(cpg)
+        print("[sol carry pairs] connect: calls=%s rec=%s btn=%r lsHasRec=%s" % (s7["calls"], s7["recObj"], s7["btn"], s7["lsHasRec"]))
+        assert s7["calls"] == [{"silent": False}] and s7["btn"] == CARRY_SHORT, "[sol carry] pairs connect flow: %s" % s7
+        assert s7["recObj"] and s7["recObj"]["address"] == CARRY_ADDR and s7["recObj"]["name"] == "Fake Wallet" and not s7["lsHasRec"], \
+            "[sol carry] pairs must record the approval in sessionStorage only: %s" % s7
+        await carry_load(cpg, CARRY_APP)
+        s8 = await carry_state(cpg)
+        print("[sol carry app] from pairs: calls=%s signs=%s confirms=%s btn=%r" % (s8["calls"], s8["signs"], s8["confirms"], s8["btn"]))
+        assert s8["calls"] == [{"silent": True}] and s8["signs"] == 0 and s8["confirms"] == 0 and s8["btn"] == CARRY_SHORT, \
+            "[sol carry] pairs -> app must stay connected with one silent call and no signature: %s" % s8
+        # app explicit Disconnect
+        await cpg.evaluate("document.getElementById('solDisconnectBtn').click()")
+        await cpg.wait_for_timeout(300)
+        s9 = await carry_state(cpg)
+        await carry_load(cpg, CARRY_APP)
+        s10 = await carry_state(cpg)
+        print("[sol carry app] disconnect: recAfter=%s reload calls=%s btn=%r" % (s9["rec"], s10["calls"], s10["btn"]))
+        assert s9["rec"] is None, "[sol carry] app Disconnect must remove the session record"
+        assert s10["calls"] == [] and s10["btn"] != CARRY_SHORT, "[sol carry] after app Disconnect a reload must stay disconnected, no connect call: %s" % s10
+        await cpg.close()
+
+        # 4) failure / refusal matrix, on both pages
+        for kind, url in (("app", CARRY_APP), ("pairs", CARRY_PAIRS)):
+            cases = [
+                ("other address", {"silent": "other"}, carry_rec(), False, [{"silent": True}], True),
+                ("locked wallet throws", {"silent": "throw"}, carry_rec(), False, [{"silent": True}], True),
+                ("no account returned", {"silent": "none"}, carry_rec(), False, [{"silent": True}], True),
+                ("record older than 30 min", {}, carry_rec(CARRY_NOW() - 31 * 60 * 1000), False, [], False),
+                ("OFF flag set", {}, carry_rec(), True, [], False),
+                ("WalletConnect record", {"name": "WalletConnect Solana"}, carry_rec(name="WalletConnect Solana"), False, [], False),
+            ]
+            for label, cfg, rec, off, want_calls, want_removed in cases:
+                cpg = await carry_page(carry_errs)
+                await carry_seed(cpg, cfg, rec, off)
+                await carry_load(cpg, url)
+                st = await carry_state(cpg)
+                await cpg.close()
+                print("[sol carry %s] %s: calls=%s btn=%r recLeft=%s note=%r"
+                      % (kind, label, st["calls"], st["btn"], st["rec"] is not None, st["note"]))
+                assert st["calls"] == want_calls, "[sol carry] %s/%s: connect calls %s, wanted %s" % (kind, label, st["calls"], want_calls)
+                assert st["btn"] != CARRY_SHORT and "Approve" not in st["btn"] and "…" not in st["btn"], \
+                    "[sol carry] %s/%s must stay disconnected: %r" % (kind, label, st["btn"])
+                assert not any(c.get("silent") is False for c in st["calls"]), "[sol carry] restore must never prompt"
+                assert st["note"].strip() == "", "[sol carry] %s/%s must show no notice: %r" % (kind, label, st["note"])
+                if want_removed:
+                    assert st["rec"] is None, "[sol carry] %s/%s: a failed restore must remove the record" % (kind, label)
+            # a wallet that registers *after* the page code ran still restores
+            cpg = await carry_page(carry_errs)
+            await carry_seed(cpg, {"late": 300}, carry_rec(), False)
+            await carry_load(cpg, url)
+            st = await carry_state(cpg)
+            await cpg.close()
+            print("[sol carry %s] late wallet registration: calls=%s btn=%r" % (kind, st["calls"], st["btn"]))
+            assert st["calls"] == [{"silent": True}] and st["btn"] == CARRY_SHORT, "[sol carry] %s: a late-registering wallet must restore too: %s" % (kind, st)
+
+        # 5) wallet drops the account -> record removed (change event)
+        cpg = await carry_page(carry_errs)
+        await carry_seed(cpg, {}, carry_rec(), False)
+        await carry_load(cpg, CARRY_PAIRS)
+        await cpg.evaluate("window.__evCb({accounts: []})")
+        await cpg.wait_for_timeout(300)
+        st = await carry_state(cpg)
+        print("[sol carry pairs] wallet drops account: recLeft=%s btn=%r" % (st["rec"] is not None, st["btn"]))
+        assert st["rec"] is None and st["btn"] != CARRY_SHORT, "[sol carry] a change event dropping the account must remove the record: %s" % st
+        await carry_seed(cpg, {}, carry_rec(), False)
+        await carry_load(cpg, CARRY_APP)
+        await cpg.evaluate("window.__evCb({accounts: []})")
+        await cpg.wait_for_timeout(300)
+        st = await carry_state(cpg)
+        print("[sol carry app] wallet drops account: recLeft=%s btn=%r" % (st["rec"] is not None, st["btn"]))
+        assert st["rec"] is None and st["btn"] != CARRY_SHORT, "[sol carry] a change event dropping the account must remove the record: %s" % st
+        await cpg.close()
+
+        # 6) chain continuity: pairs on Solana carries ?chain=solana to the /app nav links, Base keeps them plain
+        cpg = await carry_page(carry_errs)
+        await carry_seed(cpg)
+        LINKS = """() => Array.from(document.querySelectorAll('a[href^="/app#"]')).filter(a => !a.classList.contains('trade-btn'))
+            .map(a => a.getAttribute('href')).filter(h => /^\\/app#(swap|folio|flow)/.test(h))"""
+        await carry_load(cpg, CARRY_PAIRS)
+        sol_links = await cpg.evaluate(LINKS)
+        await cpg.click("#chainTabs button[data-chain=base]")
+        await cpg.wait_for_timeout(300)
+        base_links = await cpg.evaluate(LINKS)
+        await cpg.click("#chainTabs button[data-chain=solana]")
+        await cpg.wait_for_timeout(300)
+        back_links = await cpg.evaluate(LINKS)
+        await carry_load(cpg, CARRY_ORIGIN + "/pairs.html")
+        base_load_links = await cpg.evaluate(LINKS)
+        await cpg.close()
+        print("[sol carry pairs] nav links solana=%s base=%s back=%s plainLoad=%s" % (sol_links, base_links, back_links, base_load_links))
+        want_sol = ["/app#swap?chain=solana", "/app#folio?chain=solana", "/app#flow?chain=solana"]
+        assert sol_links and all(h in want_sol for h in sol_links) and set(sol_links) == set(want_sol), "[sol carry] Solana tab: /app links must carry ?chain=solana: %s" % sol_links
+        assert base_links and all(h in ("/app#swap", "/app#folio", "/app#flow") for h in base_links), "[sol carry] Base tab: /app links must be plain: %s" % base_links
+        assert back_links == sol_links and base_load_links == base_links, "[sol carry] links must follow the chain switch both ways"
+        assert not carry_errs, "[sol carry] console errors: %s" % carry_errs
+        print("[sol carry] session-scoped carry-over verified on /app and /pairs: record only in sessionStorage, silent:true once, "
+              "same-address check, 30-minute window, OFF flag, WalletConnect excluded, failure/Disconnect/change clear the record, no signature, no /ev")
+
         # ---- [theme first paint] تمِ اولیه باید پیش از اولین رنگ‌آمیزی، از
         # داخلِ <head> (پیش از اولین <style>) نوشته شود، نه در پایانِ body —
         # وگرنه یک فلاشِ روشن-روی-تیره دیده می‌شود. هر سه صفحه. ----

@@ -4,6 +4,35 @@
   const chain='solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp',wallets=[];
   let seq=0,busy=false,account=null,wallet=null,pendingWallet=null,unsubscribe=null,disconnecting=Promise.resolve(),loading=null,provider=null,mobile=false;
   const short=s=>s.length>12?s.slice(0,6)+'…'+s.slice(-4):s;
+  // انتقالِ تأییدِ همین تب بین /app و /pairs (دو سندِ جدا): sessionStorage، نه localStorage،
+  // با بسته شدنِ تب پاک می‌شود و فقط ۳۰ دقیقه معتبر است. بازیابی فقط connect({silent:true})
+  // است و فقط اگر همان آدرسِ تأییدشده برگردد؛ بدون امضای تازه و بدون رویدادِ /ev.
+  const SKEY='zaexa.solsession.v1',TTL=30*60*1000;
+  function sRead(){try{const r=JSON.parse(sessionStorage.getItem(SKEY)||'null');if(r&&typeof r.name==='string'&&typeof r.address==='string'&&typeof r.t==='number')return r;}catch{}return null;}
+  function sWrite(name,address){try{sessionStorage.setItem(SKEY,JSON.stringify({name,address,t:Date.now()}));}catch{}}
+  function sClear(){try{sessionStorage.removeItem(SKEY);}catch{}}
+  let restoreStarted=false;
+  function offFlag(){try{return localStorage.getItem('zaexa.solwallet.off.v1')==='1';}catch{return false;}}
+  async function tryRestore(w){
+    if(restoreStarted||!isSol()||account||busy)return;
+    const rec=sRead();if(!rec||rec.name!==w.name)return;
+    if(rec.name==='WalletConnect Solana'||offFlag()||Date.now()-rec.t>TTL){sClear();return;}
+    restoreStarted=true;const id=seq;
+    try{
+      const result=await w.features['standard:connect'].connect({silent:true});
+      if(id!==seq||account||busy)return;
+      const a=result?.accounts?.[0];if(!a||a.address!==rec.address)throw Error('restore mismatch');
+      wallet=w;account=a;sWrite(w.name,rec.address);subscribe(w);paint();
+    }catch{if(id===seq)sClear();}
+  }
+  function restoreAll(){for(const w of wallets)tryRestore(w);}
+  function subscribe(w){
+    const on=w.features['standard:events']?.on;
+    if(on)unsubscribe=w.features['standard:events'].on('change',props=>{
+      if(wallet!==w||!Object.hasOwn(props,'accounts'))return;
+      const a=props.accounts?.[0];if(!a||a.address!==account.address)disconnect(false);
+    });
+  }
   function notice(text){$('walletDisconnectNote').textContent=text;$('walletDisconnectNote').hidden=!text;}
   function close(){ $('walletOv').classList.remove('on'); }
   function paint(){
@@ -26,7 +55,7 @@
     return confirmLoading;
   }
   function disconnect(callWallet=true){
-    ++seq;const old=wallet||pendingWallet;account=null;wallet=null;pendingWallet=null;busy=false;mobile=false;
+    sClear();++seq;const old=wallet||pendingWallet;account=null;wallet=null;pendingWallet=null;busy=false;mobile=false;
     try{unsubscribe?.();}catch{}unsubscribe=null;
     if(callWallet){try{localStorage.setItem('zaexa.solwallet.off.v1','1');localStorage.removeItem('zaexa.solwallet.v1');}catch{}
       try{const d=old?.features?.['standard:disconnect'];if(d)disconnecting=Promise.resolve(d.disconnect()).catch(()=>{});else provider?.abortPairingAttempt();}catch{}
@@ -44,11 +73,7 @@
       const l=w.name==='WalletConnect Solana'?await lib():await confirmLib();await l.confirmConnection(w,acc,()=>id===seq&&isSol(),location.origin);if(id!==seq)return;
       wallet=w;account=acc;
       try{localStorage.removeItem('zaexa.solwallet.off.v1');}catch{}
-      const on=w.features['standard:events']?.on;
-      if(on)unsubscribe=w.features['standard:events'].on('change',props=>{
-        if(wallet!==w||!Object.hasOwn(props,'accounts'))return;
-        const a=props.accounts?.[0];if(!a||a.address!==account.address)disconnect(false);
-      });
+      sWrite(w.name,acc.address);subscribe(w);
       close();notice('');
     }catch(e){if(id===seq)notice('Wallet not connected. '+(e?.message||'Approval cancelled.'));}
     finally{if(id===seq){busy=false;pendingWallet=null;close();paint();}}
@@ -111,7 +136,7 @@
     }}
     row('WalletConnect','Connect with QR',connectMobile);$('walletOv').classList.add('on');
   }
-  function register(...items){for(const w of items){if(w.chains?.includes('solana:mainnet')&&w.features?.['standard:connect']&&w.features?.['solana:signMessage']&&!wallets.includes(w))wallets.push(w);}if(isSol()&&$('walletOv').classList.contains('on')&&!busy)render();}
+  function register(...items){for(const w of items){if(w.chains?.includes('solana:mainnet')&&w.features?.['standard:connect']&&w.features?.['solana:signMessage']&&!wallets.includes(w)){wallets.push(w);tryRestore(w);}}if(isSol()&&$('walletOv').classList.contains('on')&&!busy)render();}
   window.addEventListener('wallet-standard:register-wallet',e=>{try{e.detail({register});}catch{}});
   window.dispatchEvent(new CustomEvent('wallet-standard:app-ready',{detail:{register}}));
   function capture(id,fn){$(id).addEventListener('click',e=>{if(!isSol())return;e.stopImmediatePropagation();fn(e);},true);}
@@ -121,6 +146,6 @@
   capture('walClose',()=>{if(busy)disconnect();else close();});
   $('walletOv').addEventListener('click',e=>{if(isSol()&&e.target===$('walletOv')){e.stopImmediatePropagation();if(busy)disconnect();else close();}},true);
   document.addEventListener('keydown',e=>{if(isSol()&&e.key==='Escape'){if(busy)disconnect();else close();$('walletPop').classList.remove('on');}},true);
-  window.addEventListener('zaexa:pairs-chain',()=>{if(busy)disconnect();close();notice('');$('walletPop').classList.remove('on');$('connectBtn').disabled=false;if(!paint()){$('walletOv').querySelector('h3').firstChild.nodeValue='Connect a wallet';window.zaexaPairsBasePaint?.();}});
+  window.addEventListener('zaexa:pairs-chain',()=>{restoreAll();if(busy)disconnect();close();notice('');$('walletPop').classList.remove('on');$('connectBtn').disabled=false;if(!paint()){$('walletOv').querySelector('h3').firstChild.nodeValue='Connect a wallet';window.zaexaPairsBasePaint?.();}});
   window.zaexaPairsSolana={paint};paint();
 })();

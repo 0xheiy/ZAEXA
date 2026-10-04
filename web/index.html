@@ -8013,6 +8013,7 @@ function solTryAutoRestoreName(){
 function solWalletOff(){try{return localStorage.getItem(SOL_WALLET_OFF_KEY)==="1";}catch{return false;}}
 function solSetWalletOff(v){
   try{if(v)localStorage.setItem(SOL_WALLET_OFF_KEY,"1");else localStorage.removeItem(SOL_WALLET_OFF_KEY);}catch{}
+  if(v)solSessionClear();
 }
 let solEventsUnsub=null;
 function solSubscribeWalletEvents(w){
@@ -8029,10 +8030,50 @@ function solSubscribeWalletEvents(w){
     });
   }catch{}
 }
-let solSilentTriedFor=new Set();
+/* Connection must follow an explicit user action: every fresh Solana connection
+   needs a new signed approval message (2 Oct security change). A remembered
+   wallet could return its address from standard:connect while the extension
+   was locked, so the site showed "connected" with no approval in that session.
+   — فقط یک استثنا: تأییدی که *همین تب* قبلاً داده (sessionStorage، با بسته
+   شدنِ تب پاک می‌شود؛ عمداً نه localStorage) هنگام رفتن بین /app و /pairs
+   (دو سندِ جدا) تا ۳۰ دقیقه منتقل می‌شود. بازیابی فقط با connect({silent:true})
+   و فقط اگر همان آدرسِ تأییدشده برگردد؛ هیچ امضای تازه‌ای خواسته نمی‌شود و هیچ
+   رویدادِ /ev ای شلیک نمی‌شود. هر شکستی رکورد را پاک می‌کند و بی‌صدا قطع می‌ماند. */
+const SOL_SESSION_KEY="zaexa.solsession.v1",SOL_SESSION_TTL=30*60*1000;
+function solSessionRead(){
+  try{
+    const r=JSON.parse(sessionStorage.getItem(SOL_SESSION_KEY)||"null");
+    if(r&&typeof r.name==="string"&&typeof r.address==="string"&&typeof r.t==="number")return r;
+  }catch{}
+  return null;
+}
+function solSessionWrite(name,address){
+  try{sessionStorage.setItem(SOL_SESSION_KEY,JSON.stringify({name,address,t:Date.now()}));}catch{}
+}
+function solSessionClear(){try{sessionStorage.removeItem(SOL_SESSION_KEY);}catch{}}
+let solRestoreStarted=false;
 async function solMaybeSilentConnect(w){
-  // Connection must follow an explicit user action on this page.
-  return;
+  // ⚠️ این تابع و solConnectWallet/solDisconnectWallet عمداً فقط با sessionStorageِ
+  // مستقیم (داخل try) کار می‌کنند، نه فقط با کمکی‌های بالا — solana-approval.test.mjs
+  // همین چند تابع را جدا در یک vm اجرا می‌کند.
+  let rec=null;
+  try{rec=JSON.parse(sessionStorage.getItem("zaexa.solsession.v1")||"null");}catch{}
+  if(!rec||typeof rec.name!=="string"||typeof rec.address!=="string"||typeof rec.t!=="number")return;
+  if(solRestoreStarted||!w||solAccount||solConnectionBusy||rec.name!==w.name)return;
+  if(rec.name==="WalletConnect Solana"||solWalletOff()||Date.now()-rec.t>SOL_SESSION_TTL){solSessionClear();return;}
+  solRestoreStarted=true;                      // دقیقاً یک تلاش در هر بارگذاری
+  const seq=solWalletConnectSeq;
+  try{
+    const res=await w.features["standard:connect"].connect({silent:true});
+    if(seq!==solWalletConnectSeq||solAccount||solConnectionBusy)return;   // کاربر در این فاصله خودش اقدام کرد
+    const acc=res&&res.accounts&&res.accounts[0];
+    if(!acc||acc.address!==rec.address||solBs58Encode(acc.publicKey||[])!==rec.address)throw new Error("restore mismatch");
+    solWalletApi=w;solAccount=acc;solLastWalletName=w.name;
+    solSessionWrite(w.name,rec.address);
+    solSubscribeWalletEvents(w);solPaintWallet();solRefreshBalances();solScheduleQuote();
+  }catch{
+    if(seq===solWalletConnectSeq)solSessionClear();
+  }
 }
 const SOL_WC_CHAIN="solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp";
 let solMobileLoad=null,solMobileProvider=null,solMobilePending=false,solMobileWallet=null;
@@ -8206,6 +8247,7 @@ async function solConnectWallet(w){
     if(w.name==="WalletConnect Solana")ev("wallet:on","wc","solana");else ev("wallet:on","inj","solana");
     try{localStorage.setItem(SOL_WALLET_LS_KEY,w.name);}catch{}
     solLastWalletName=w.name;solSetWalletOff(false);
+    try{sessionStorage.setItem("zaexa.solsession.v1",JSON.stringify({name:w.name,address:acc.address,t:Date.now()}));}catch{}
     solSubscribeWalletEvents(w);solSetNotice("");solRefreshBalances();solScheduleQuote();
   }catch(e){
     if(connectSeq!==solWalletConnectSeq)return;
@@ -8222,6 +8264,7 @@ async function solConnectWallet(w){
 // بعد باز هم تلاشِ بی‌صدا می‌شود.
 function solDisconnectWallet(setOff){
   if(setOff===undefined)setOff=true;
+  try{sessionStorage.removeItem("zaexa.solsession.v1");}catch{}
   ++solWalletConnectSeq;++solBalanceSeq;
   const wallet=solWalletApi||solPendingWallet;
   solPendingWallet=null;solConnectionBusy=false;

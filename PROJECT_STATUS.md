@@ -18,7 +18,7 @@
 ## ۰. کارهای باز — به‌روز ۴ اکتبر ۲۰۲۶، به ترتیب
 
 فقط کارهای انجام‌نشده. کارهای تمام‌شده در تاریخچه‌ی گیت هستند (آخرین: `55d1afd` «Round 5»).
-سوییت رابط **۵۵۳ کاوشگر** سبز؛ به‌علاوه‌ی `worker/test.mjs`، `worker/og_live_test.mjs`، `worker/solana-parity.test.mjs`،
+سوییت رابط **۵۷۸ کاوشگر** سبز؛ به‌علاوه‌ی `worker/test.mjs`، `worker/og_live_test.mjs`، `worker/solana-parity.test.mjs`،
 شش `web/test/solana-*.test.mjs` و چهار آزمونِ مرورگر (`solana-parity-browser.py`، `solana-views-browser.py`،
 `solana-pairs-browser.py`، `market-workspace-browser.py` — از ریشه‌ی مخزن اجرا شوند؛ `scripts/solana-wallet` باید `npm ci` شده باشد).
 
@@ -52,6 +52,12 @@
 سولانا: اگر ژوپیتر simulationError داد، اول شبیه‌سازیِ خودمان (همان بایت‌ها) — اگر آن سالم بود، بی‌هشدار ادامه.
 «حداقل SOL» حالا یک ۰٫۰۰۲۰۴ برای حسابِ موقتِ wrapped SOL هم حساب می‌کند. کاوشگرهای `[sim override …]`.
 آزمونِ واقعی با کیف‌پول هنوز نشده (بخشی از مورد ۱).
+
+### ۳ج. کیف‌پولِ سولانا بینِ /app و /pairs قطع می‌شد (۴ اکتبر، رفع شد)
+علت: دو سندِ جدا + تأییدِ تازه‌ی ۲ اکتبر (بدونِ وصلِ بی‌صدا). رفع: تأییدی که در همین تب داده شده تا ۳۰ دقیقه در
+`sessionStorage` (`zaexa.solsession.v1`) می‌ماند و صفحه‌ی بعد فقط با `connect({silent:true})` و همان آدرس برمی‌گردد — بدونِ امضای تازه.
+آدرسِ دیگر/خطا/قطعِ صریح/پرچمِ OFF = رکورد پاک و قطع. WalletConnect منتقل نمی‌شود. باندلِ جفت‌ها حالا `pairs-solana.76019ace.js`.
+لینک‌های /app در صفحه‌ی جفت‌ها روی سولانا `?chain=solana` دارند. کاوشگرهای `[sol carry …]`.
 
 ### ۴. آزمونِ دستیِ کیف‌پولِ Base (فقط حسام)
 ۱) مرورگر را ببند و باز کن → Connect → ربی: با **یک** بار وصل شود. ۲) لغوِ سواپ → فقط «Cancelled in your wallet».
