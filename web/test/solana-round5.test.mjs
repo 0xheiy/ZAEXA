@@ -141,15 +141,22 @@ test('simulation failures map to the closed vocabulary from structure and known 
   assert.equal(c.solClassifySimFail({ InstructionError: [1, '<script>alert(1)</script>'] }, []).code, '');
 });
 test('simulation messages: SOL hint is derived when ATA state is known, "about 0.005" otherwise', () => {
-  const unknown = load(['solSimKeepSol', 'solSimFailMessage'], { solOutputMint: () => USDC, solSide: 'sell' });
+  const unknown = load(['solSimKeepSol', 'solSimFailMessage'], { solInputMint: () => SOL, solOutputMint: () => USDC, solSide: 'sell' });
   assert.equal(unknown.solSimKeepSol(), 'about 0.005');
   assert.equal(unknown.solSimFailMessage('insufficient-sol', unknown.solSimKeepSol()),
     'Not enough SOL for the network fee and one-time account rent. Keep at least about 0.005 SOL.');
-  // خروجی USDC، حسابِ ATA وجود ندارد: کارمزد (۲۰۰۰۰۰+۵۰۰۰ لامپورت) + ۰٫۰۰۲۰۴
-  const needs = load(['solSimKeepSol'], { solOutputMint: () => USDC, solSide: 'buy', solOutAtaExists: false, solNetFeeLamports: 200000 });
-  assert.equal(needs.solSimKeepSol(), '0.0023');
-  const has = load(['solSimKeepSol'], { solOutputMint: () => USDC, solSide: 'buy', solOutAtaExists: true, solNetFeeLamports: 200000 });
-  assert.equal(has.solSimKeepSol(), '0.0003');
+  // ۴ اکتبر — ورودیِ SOL: جوپیتر یک حسابِ wrapped-SOL موقت می‌سازد، پس یک ۰٫۰۰۲۰۴ دیگر هم لازم است.
+  // خروجی USDC، حسابِ ATA وجود ندارد: کارمزد (۲۰۰۰۰۰+۵۰۰۰ لامپورت) + ۰٫۰۰۲۰۴ برای ATA + ۰٫۰۰۲۰۴ برای wSOL
+  const needs = load(['solSimKeepSol'], { solInputMint: () => SOL, solOutputMint: () => USDC, solSide: 'buy', solOutAtaExists: false, solNetFeeLamports: 200000 });
+  assert.equal(needs.solSimKeepSol(), '0.0043');
+  const has = load(['solSimKeepSol'], { solInputMint: () => SOL, solOutputMint: () => USDC, solSide: 'buy', solOutAtaExists: true, solNetFeeLamports: 200000 });
+  assert.equal(has.solSimKeepSol(), '0.0023');
+  // کنترل: نه ورودی و نه خروجی SOL نیست (توکن به توکن) -> فرمولِ قبلی بدونِ wSOL
+  const tokTok = load(['solSimKeepSol'], { solInputMint: () => 'So1ANOTHER', solOutputMint: () => USDC, solSide: 'buy', solOutAtaExists: false, solNetFeeLamports: 200000 });
+  assert.equal(tokTok.solSimKeepSol(), '0.0023');
+  // خروجی SOL (فروشِ توکن): ATA لازم نیست ولی wSOL موقت چرا
+  const toSol = load(['solSimKeepSol'], { solInputMint: () => USDC, solOutputMint: () => SOL, solSide: 'sell', solNetFeeLamports: 200000 });
+  assert.equal(toSol.solSimKeepSol(), '0.0023');
   const m = load(['solSimFailMessage']);
   assert.equal(m.solSimFailMessage('slippage'), 'Price moved more than your slippage. Try again or raise slippage.');
   assert.equal(m.solSimFailMessage('frozen'), "This token's program rejected the transfer (it may be frozen or restricted).");
@@ -225,4 +232,21 @@ test('other send errors are never retried', async () => {
   const { c, log, signer } = sendCtx(['{"InstructionError":[1,{"Custom":9}]}']);
   await assert.rejects(() => c.solSendSignedWithRetry({}, 'ctx', signer, new Uint8Array([1, 9, 9]), 'x'), e => e.sendMapped);
   assert.equal(log.built, 0); assert.equal(log.signs, 0); assert.equal(log.rpc.length, 1);
+});
+
+// ---- ۴ اکتبر: شکستِ شبیه‌سازی با تأییدِ کاربر ----
+test('[sim override] simulation arm is per quote key: failed key needs one confirmation, a new quote disarms', () => {
+  const q = (amt) => ({ inputMint: SOL, outputMint: USDC, inAmount: amt, swapMode: 'ExactIn' });
+  const c = load(['solNeedsSimArm', 'solImpactKey'], { solQuote: q('100'), solSimFailedKey: null, solSimArmedKey: null });
+  assert.equal(c.solNeedsSimArm(), false);                       // هنوز شکستی ندیده‌ایم
+  c.solSimFailedKey = c.solImpactKey(c.solQuote);
+  assert.equal(c.solNeedsSimArm(), true);
+  c.solSimArmedKey = c.solSimFailedKey;
+  assert.equal(c.solNeedsSimArm(), false);                       // تأیید شد
+  c.solQuote = q('200');
+  assert.equal(c.solNeedsSimArm(), false);                       // کوتِ تازه: شکستِ قبلی مالِ این نیست
+  c.solSimFailedKey = c.solImpactKey(c.solQuote);
+  assert.equal(c.solNeedsSimArm(), true);                        // و شکستِ تازه تأییدِ تازه می‌خواهد
+  c.solQuote = null;
+  assert.equal(c.solNeedsSimArm(), false);
 });

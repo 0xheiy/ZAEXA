@@ -18,7 +18,7 @@
 ## ۰. کارهای باز — به‌روز ۴ اکتبر ۲۰۲۶، به ترتیب
 
 فقط کارهای انجام‌نشده. کارهای تمام‌شده در تاریخچه‌ی گیت هستند (آخرین: `55d1afd` «Round 5»).
-سوییت رابط **۵۴۶ کاوشگر** سبز؛ به‌علاوه‌ی `worker/test.mjs`، `worker/og_live_test.mjs`، `worker/solana-parity.test.mjs`،
+سوییت رابط **۵۵۳ کاوشگر** سبز؛ به‌علاوه‌ی `worker/test.mjs`، `worker/og_live_test.mjs`، `worker/solana-parity.test.mjs`،
 شش `web/test/solana-*.test.mjs` و چهار آزمونِ مرورگر (`solana-parity-browser.py`، `solana-views-browser.py`،
 `solana-pairs-browser.py`، `market-workspace-browser.py` — از ریشه‌ی مخزن اجرا شوند؛ `scripts/solana-wallet` باید `npm ci` شده باشد).
 
@@ -41,12 +41,17 @@
 - والت‌های افزونه‌ای فقط `web/solana-confirm.bundle.6a6dd398.js` (۳۷KB) را بار می‌کنند؛ باندلِ بزرگِ WalletConnect فقط برای موبایل.
 - پورتفولیوی سولانا تا ۳۰۰ مینت قیمت می‌گذارد.
 
-### ۳. سنجش‌های بعد از دیپلوی (Base)
-- `/vd/0x18b5a87c6f7f1017b2f8627aeebafa2ea29ec93d` و `/vd/0x11bea7fb26f8c7198573e61d8e7b61e549136d7f` → `sell` با `via:"pool-key"`.
-- `/vd/0x5017f3145e261f5033eda9d12bd4a328cb5f1518` → `nosell` + `empty-pool`.
-- `/vd/0x6f63d869011f95274498023b4abfc00b30c34378` (SN80) → `sell` با `via:"counter"`.
-- در اپ «Aerodrome Slipstream v1» سبز باشد؛ سواپِ واقعی از مسیرِ ضدجفت هنوز دیده نشده.
-- ایندکسِ v4 فقط به tenderly بند است — هر وقت ایستاد، اول `/vd/logrpc`.
+### ۳. سنجش‌های بعد از دیپلوی (Base) — ۴ اکتبر روی سایتِ زنده سنجیده شد
+- ✅ `/vd/0x18b5…ec93d` → `sell` با `via:"pool-key"` · ✅ `/vd/0x5017…1518` → `nosell` + `empty-pool` · ✅ SN80 `/vd/0x6f63…4378` → `sell` با `via:"counter"`.
+- ⚠️ `/vd/0x11be…6d7f` → `v:null` با `why:"no-amount"`: گکوترمینال برایش قیمت ندارد (استخرِ v3 با حجمِ ۲۴ساعتهٔ صفر)؛ رفتارِ درستِ «نمی‌دانم» است، نه پسرفت.
+- هنوز دیده نشده: «Aerodrome Slipstream v1» سبز در اپ و سواپِ واقعی از مسیرِ ضدجفت. ایندکسِ v4 فقط به tenderly بند است — هر وقت ایستاد، اول `/vd/logrpc`.
+
+### ۳ب. شبیه‌سازیِ ناموفق دیگر سواپ را نمی‌بندد (۴ اکتبر، خواستِ حسام)
+هر دو شبکه: کلیکِ اول خطا + خطِ «You can still send it…» و دکمه‌ی «Swap anyway (simulation failed)»؛ کلیک روی همان دکمه تأییدِ کاربر است و کیف‌پول را باز می‌کند.
+مسلح‌شدن به‌ازای همان کوت (تغییرِ مبلغ = تأییدِ تازه). رد شدنِ fee payer هرگز قابلِ‌مسلح‌شدن نیست. Base با gasLimit ثابتِ ۱٬۵۰۰٬۰۰۰.
+سولانا: اگر ژوپیتر simulationError داد، اول شبیه‌سازیِ خودمان (همان بایت‌ها) — اگر آن سالم بود، بی‌هشدار ادامه.
+«حداقل SOL» حالا یک ۰٫۰۰۲۰۴ برای حسابِ موقتِ wrapped SOL هم حساب می‌کند. کاوشگرهای `[sim override …]`.
+آزمونِ واقعی با کیف‌پول هنوز نشده (بخشی از مورد ۱).
 
 ### ۴. آزمونِ دستیِ کیف‌پولِ Base (فقط حسام)
 ۱) مرورگر را ببند و باز کن → Connect → ربی: با **یک** بار وصل شود. ۲) لغوِ سواپ → فقط «Cancelled in your wallet».

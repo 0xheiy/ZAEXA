@@ -1099,11 +1099,9 @@ footer .fine{max-width:78ch;margin:46px 0 0;font-size:11.5px;color:var(--tx3);li
   margin-top:3px}
 .tkAddr{color:var(--tx3);font-size:12px;text-decoration:none}
 .tkAddr:hover{color:var(--tx1);text-decoration:underline}
-.tkTrade{padding:13px 28px;border:0;border-radius:12px;cursor:pointer;
-  background:var(--grad);color:var(--on-acc);font-size:14.5px;font-weight:640;
-  box-shadow:0 4px 14px var(--glow);transition:.16s}
-.tkTrade:hover{transform:translateY(-1px);box-shadow:0 7px 20px var(--glow)}
-.tkCopy{padding:13px 18px;border:1px solid var(--line);border-radius:12px;cursor:pointer;
+.tkTrade{padding:13px 28px;border:0;border-radius:999px;cursor:pointer;
+  background:var(--grad);color:var(--on-acc);font-size:14.5px;font-weight:640}
+.tkCopy{padding:13px 18px;border:1px solid var(--line);border-radius:999px;cursor:pointer;
   background:transparent;color:var(--tx3);font-size:13.5px}
 .tkCopy:hover{color:var(--tx1);border-color:var(--tx3)}
 /* هدف لمسی روی موبایل زیر ۴۴ پیکسل نرود، و تمرکز صفحه‌کلید دیده شود */
@@ -1376,15 +1374,16 @@ footer .fine{max-width:78ch;margin:46px 0 0;font-size:11.5px;color:var(--tx3);li
 .nav{background:var(--bg);box-shadow:4px 4px 9px var(--soft-lo),-3px -3px 8px var(--soft-hi),inset 0 1px 1px var(--soft-hi)}
 .nav button.on,.nav a.on{background:var(--bg);color:var(--acc);box-shadow:inset 2px 2px 5px var(--soft-lo),inset -2px -2px 5px var(--soft-hi)}
 .chip:not(.solid):not(#themeBtn),.tokbtn,.tfs button.on{box-shadow:2px 2px 5px var(--soft-lo),-2px -2px 5px var(--soft-hi)}
-.cta:not(:disabled),.chip.solid,.tkTrade,.button.primary,.header-cta{box-shadow:inset 0 1px 1px rgba(255,255,255,.4),inset 0 -2px 2px rgba(20,30,55,.16),0 3px 6px var(--soft-lo)}
-.cta:active:not(:disabled),.chip.solid:active,.tkTrade:active,.button.primary:active,.header-cta:active{transform:translateY(1px);box-shadow:inset 0 2px 4px rgba(20,30,55,.22)}
+.cta:not(:disabled),.chip.solid,.button.primary,.header-cta{box-shadow:inset 0 1px 1px rgba(255,255,255,.4),inset 0 -2px 2px rgba(20,30,55,.16),0 3px 6px var(--soft-lo)}
+.cta:active:not(:disabled),.chip.solid:active,.button.primary:active,.header-cta:active{transform:translateY(1px);box-shadow:inset 0 2px 4px rgba(20,30,55,.22)}
 
 /* دکمه‌های اتصالِ کیف‌پول و دکمه‌ی اصلی — ۴ اکتبر، به خواستِ مالک: تخت (همان گرادیان)، و فقط وقتی
-   فشرده می‌شوند به داخل فرو می‌روند — همان زبانِ نوارِ تب‌ها و دکمه‌ی تنظیمات. هیچ جابه‌جایی‌ای ندارند. */
-.cta:not(:disabled),.cta,#connectBtn.solid,#solConnectBtn.solid,.chip.solid[data-act="connect"]{background:var(--grad);border:0;border-radius:999px;box-shadow:0 2px 6px -2px var(--soft-lo);transform:none;transition:filter .16s,box-shadow .12s}
+   فشرده می‌شوند به داخل فرو می‌روند — همان زبانِ نوارِ تب‌ها و دکمه‌ی تنظیمات. هیچ جابه‌جایی‌ای ندارند.
+   ۴ اکتبر عصر: دکمه‌ی Trade صفحه‌ی توکن هم به همین گروه آمد (قبلاً سه‌بعدی و برجسته بود). */
+.cta:not(:disabled),.cta,#connectBtn.solid,#solConnectBtn.solid,.chip.solid[data-act="connect"],.tkTrade{background:var(--grad);border:0;border-radius:999px;box-shadow:0 2px 6px -2px var(--soft-lo);transform:none;transition:filter .16s,box-shadow .12s}
 .cta:disabled{background:var(--raise);color:var(--tx3);box-shadow:none}
-.cta:hover:not(:disabled),#connectBtn.solid:hover,#solConnectBtn.solid:hover,.chip.solid[data-act="connect"]:hover{transform:none;filter:brightness(1.05);box-shadow:0 2px 6px -2px var(--soft-lo)}
-.cta:active:not(:disabled),#connectBtn.solid:active,#solConnectBtn.solid:active,.chip.solid[data-act="connect"]:active{transform:none;filter:none;box-shadow:inset 2px 2px 5px var(--soft-lo),inset -2px -2px 5px var(--soft-hi)}
+.cta:hover:not(:disabled),#connectBtn.solid:hover,#solConnectBtn.solid:hover,.chip.solid[data-act="connect"]:hover,.tkTrade:hover{transform:none;filter:brightness(1.05);box-shadow:0 2px 6px -2px var(--soft-lo)}
+.cta:active:not(:disabled),#connectBtn.solid:active,#solConnectBtn.solid:active,.chip.solid[data-act="connect"]:active,.tkTrade:active{transform:none;filter:none;box-shadow:inset 2px 2px 5px var(--soft-lo),inset -2px -2px 5px var(--soft-hi)}
 /* دکمه‌های بلوکِ نتیجه: هر دو قرص کامل؛ همان زبانِ گرادیانِ تخت و فرورفتگیِ هنگام فشار */
 .swapDone .acts .cta,.swapDone .acts .exitShare{border-radius:999px;padding:13px 14px;font-size:14px;font-weight:660;letter-spacing:-.1px;min-height:46px;box-sizing:border-box}
 .swapDone .acts .cta{background:var(--grad);border:0;box-shadow:0 2px 6px -2px var(--soft-lo);transform:none;transition:filter .16s,box-shadow .12s}
@@ -4721,6 +4720,8 @@ let solSide="buy";              // "buy" (SOL→توکن) یا "sell" (توکن�
 let solVerdictV=null;           // "sell"/"nosell"/null از GET /vd/<mint>
 let solVerdictWhy=null;         // why وقتی v===null — "sol:unconfirmed" یعنی شبیه‌سازیِ فروش شکست خورد ولی هانی‌پات اعلام نمی‌شود
 const SOL_UNCONF="sol:unconfirmed";
+let solSimArmedKey=null;        // ۴ اکتبر — کلیدِ کوتی که کاربر «Swap anyway (simulation failed)» را برایش تأیید کرده
+let solSimFailedKey=null;       // کلیدِ کوتی که شبیه‌سازی‌اش شکست خورد
 let solImpactArmedKey=null;     // کلیدِ کوتی که کاربر «Swap anyway» را برایش زده (impact ≥ ۱۵٪)
 const solArmedMints=new Set();  // mintهایی که کاربر در همین نشستِ صفحه «Buy anyway» را برایشان زده (به‌ازای هر توکن)
 let solQuoteSeq=0;              // برای دورریختنِ کوت‌های دیرِ رسیده
@@ -7169,6 +7170,12 @@ async function waitForAllowance(min,ms){
 
 /** WETH → ETH بعد از سواپ، تا کاربر واقعاً ETH بگیرد. */
 
+/* ۴ اکتبر — شکستِ شبیه‌سازی بلوک نیست: با یک تأییدِ صریح به‌ازای همین (ورودی، خروجی، مقدار) ادامه می‌دهد */
+let baseSimArmedKey=null,baseSimFailedKey=null;
+function baseSimKey(amountIn){
+  if(!tokenIn||!tokenOut||amountIn==null)return null;
+  return [isNative(tokenIn)?"native":tokenIn.address,isNative(tokenOut)?"native":tokenOut.address,amountIn.toString()].join("|");
+}
 async function doSwap(){
   if(!currentPlan||parsedAmountIn()===null)return;
   // قیف ریزش از نسبت همین شمارش‌ها درمی‌آید: کلیک → شبیه‌سازی → ارسال → نتیجه.
@@ -7201,6 +7208,9 @@ async function doSwap(){
       const s={parts:[{route:r,amountIn}],totalIn:amountIn,totalOut:r.amountOut,bestSingleOut:r.amountOut};
       cands.push({label:venueLabel(r.hops[0].venue),plan:s,parts:buildParts(s),minOut:minOutOf(s)});});
     let chosen=null,firstErr=null;const attempts=[];
+    const simKey=baseSimKey(amountIn);
+    const simArmed=simKey!=null&&baseSimArmedKey===simKey;
+    let sentAnyway=false;
     for(const c of cands){
       if(chosen)break;
       const sig=c.plan.parts.map(p=>({path:[p.route.hops[0].tokenIn.symbol]
@@ -7235,9 +7245,20 @@ async function doSwap(){
               "receipt behave this way; swap to a plain address instead.";
         }catch(e){}
       }
+      if(simArmed){
+        // کاربر برای همین کوت تأیید کرده: بهترین نقشه، بدونِ تخمینِ گس (ethers خودش estimateGas می‌زد و پیش از کیف‌پول می‌افتاد)
+        chosen=cands[0];sentAnyway=true;
+        setNotice(note("warn","<b>Sending although our simulation failed.</b>"));
+      }else{
       showError("Simulation failed — nothing sent, no gas spent",firstErr,
         explain?{attempts,diagnosis:"recipient forwarded the output",explain}:{attempts});
+      baseSimFailedKey=simKey;
+      const nb=$("notices").querySelector(".note"),dt=nb&&nb.querySelector("details");
+      const line='<div style="margin-top:6px">You can still send it: if it reverts on-chain you pay only the gas, and your tokens stay with you.</div>';
+      if(dt)dt.insertAdjacentHTML("beforebegin",line);else if(nb)nb.insertAdjacentHTML("beforeend",line);
       setBusy(false);refreshButton();ev("swap:sim-fail","","base");return;}
+    }
+    if(!sentAnyway&&baseSimFailedKey===simKey)baseSimFailedKey=null;   // این بار شبیه‌سازی پاس شد
     chosenSig=chosen.plan.parts.map(p=>p.route.hops.map(h=>venueLabel(h.venue)).join("+"));
     /* ⚠️ کفی که روی صفحه نوشته است باید همان کفی باشد که امضا می‌شود.
        `kMin` از نقشه‌ی *اولیه* رندر شده بود و وقتی مسیر بهتر در شبیه‌سازی
@@ -7252,7 +7273,8 @@ async function doSwap(){
 
     setBusy(true,`Confirm ${fmt(amountIn,tokenIn.decimals,4)} ${tokenIn.symbol} → ${tokenOut.symbol} in wallet…`);
     let gasLimit;
-    try{
+    if(sentAnyway)gasLimit=1_500_000n;
+    else try{
       const g=await exec.executeSwap.estimateGas(asArg(tokenIn),asArg(tokenOut),amountIn,chosen.minOut,chosen.parts,deadline,
         isNative(tokenIn)?{value:amountIn}:{});
       gasLimit=(g*125n)/100n;
@@ -7270,6 +7292,7 @@ async function doSwap(){
             [asArg(tokenIn),asArg(tokenOut),amountIn,chosen.minOut,chosen.parts,deadline]);
           const p={from:account,to:E.getAddress(CHAIN.executor),data};
           if(isNative(tokenIn))p.value="0x"+amountIn.toString(16);
+          if(sentAnyway)p.gas="0x"+(1500000).toString(16);
           const h=await walletEip1193.request({method:"eth_sendTransaction",params:[p]});
           return{hash:h};
         })()
@@ -7307,6 +7330,7 @@ async function doSwap(){
       const vs=vsTxt&&vsTxt.startsWith("+")?vsTxt:null;
       const secs=(Date.now()-t0)/1000;
       setNotice(note("ok",`<b>Swap complete.</b> <a href="${url}" target="_blank" rel="noopener">View on BaseScan</a>`));
+      baseSimArmedKey=null;baseSimFailedKey=null;
       $("amtIn").value="";$("amtOut").value="";currentPlan=null;
       $("routeWrap").style.display="none";await refreshBalances();ev("swap:done","","base");
       showSwapDone({paidTxt,gotTxt,vs,url,hash:tx.hash,secs});
@@ -7449,6 +7473,9 @@ function refreshButton(){
   // فقط وقتی دکمه‌ی Approve را نشان بده که *بدانیم* allowance کم است
   if(!isNative(tokenIn)&&allowanceKnown&&allowance<amt)
     return set(`Approve ${tokenIn.symbol}`,true,doApprove);
+  const sk=baseSimKey(amt);
+  if(sk&&baseSimFailedKey===sk&&baseSimArmedKey!==sk)
+    return set("Swap anyway (simulation failed)",true,()=>{baseSimArmedKey=sk;doSwap();});   // همین کلیک تأییدِ کاربر است — مسلح و ارسال، بی‌کلیکِ سوم
   return set(isNative(tokenOut)?"Swap to ETH":"Swap",true,doSwap);
 }
 
@@ -8825,7 +8852,13 @@ function solUpdateSwapBtn(){
   btn.disabled=false;
   // ۴ اکتبر — خریدنِ توکنِ sol:unconfirmed بسته نیست، ولی یک کلیکِ اضافه می‌خواهد؛ فروشش هرگز گیت نمی‌شود
   if(solNeedsArm()){btn.textContent="Buy anyway (sell-back unconfirmed)";return;}
-  btn.textContent=solNeedsImpactArm()?"Swap anyway (price impact "+solQuoteImpactPct(solQuote).toFixed(1)+"%)":"Swap";
+  if(solNeedsImpactArm()){btn.textContent="Swap anyway (price impact "+solQuoteImpactPct(solQuote).toFixed(1)+"%)";return;}
+  btn.textContent=solNeedsSimArm()?"Swap anyway (simulation failed)":"Swap";
+}
+// ۴ اکتبر — شکستِ شبیه‌سازی: بعد از ناموفق‌بودن، یک کلیکِ تأیید (به‌ازای همان کوت) لازم است
+function solNeedsSimArm(){
+  const k=solImpactKey(solQuote);
+  return k!=null&&solSimFailedKey===k&&solSimArmedKey!==k;
 }
 /* ۴ اکتبر — price impact ≥ ۱۵٪: Base گیتی ندارد (فقط اعلان)، برای سولانا یک کلیکِ اضافه
    می‌خواهد؛ بلوک نیست. مسلح‌شدن به‌ازای هر کوت (جفت+مقدار+حالت)، نه یک‌بار برای همیشه. */
@@ -8963,7 +8996,9 @@ function solSimKeepSol(){
   if(!known)return "about 0.005";
   const n=out===SOL_MINT_ADDR?0:((solSide==="buy"?solOutAtaExists:solRefAtaExists)===true?0:1);
   const feeLamports=(solNetFeeLamports!=null?solNetFeeLamports:SOL_PRIO_FEE_RESERVE*1e9)+5000;
-  return (Math.ceil((feeLamports/1e9+0.00204*n)*1e4)/1e4).toFixed(4);
+  // ۴ اکتبر — جوپیتر برای SOL یک حسابِ wrapped-SOL موقت می‌سازد که رنتش باید حینِ سواپ موجود باشد
+  const wsol=(solInputMint()===SOL_MINT_ADDR||out===SOL_MINT_ADDR)?1:0;
+  return (Math.ceil((feeLamports/1e9+0.00204*(n+wsol))*1e4)/1e4).toFixed(4);
 }
 function solSimFailMessage(reason,keepSol){
   if(reason==="insufficient-sol")return "Not enough SOL for the network fee and one-time account rent. Keep at least "+(keepSol||"about 0.005")+" SOL.";
@@ -9071,42 +9106,50 @@ async function solBuildFreshTx(btn,context=solSwapContext()){
     solPaintFeeRows();
   }
 
-  // B — simulationErrorِ خودِ جوپیتر، اگر آمده باشد، همان شکستِ زیر را
-  // می‌سازد؛ کیف‌پول اصلاً صدا زده نمی‌شود.
-  if(j.simulationError){
-    ev("swap:sim-fail","","solana");
-    // errorCode خودِ جوپیتر یک واژه‌نامه‌ی بسته است؛ فقط slippage را می‌شناسیم، بقیه «other» + همان کد
-    const jc=String(j.simulationError.errorCode||"");
-    const jr=/SLIPPAGE/i.test(jc)?"slippage":"other";
-    const msg=solSimFailMessage(jr);
-    throw Object.assign(new Error(msg),{uiHandled:true,uiMessage:msg,uiCode:jr==="other"&&/^[A-Z0-9_]{1,40}$/.test(jc)?jc:""});
-  }
-
   const txBytes=solB64ToBytes(j.swapTransaction);
   const feePayer=solParseFeePayer(txBytes);
+  // فی‌پیرِ غلط بلوکِ سخت است و هرگز مسلح‌شدنی نیست (پیش از هر بررسیِ شبیه‌سازی)
   if(!feePayer||!solBytesEq(feePayer,solAccount.publicKey)){
     const msg="Refused: the transaction's fee payer is not your wallet.";
     throw Object.assign(new Error(msg),{uiHandled:true,uiMessage:msg});
   }
 
-  // B — پیش‌شبیه‌سازیِ خودمان، پیش از رفتنِ سراغِ کیف‌پول. دقیقاً همان
-  // شکلِ توصیه‌شده‌ی فانتوم (sigVerify:false). شکستِ خودِ تماسِ RPC هرگز
-  // به‌معنیِ «تراکنش رد می‌شود» نیست — فقط یعنی نمی‌دانیم، پس در آن حالت
-  // به کیف‌پول اجازه می‌دهیم خودش تصمیم بگیرد (رفتارِ امروز).
-  if(btn)btn.textContent="Checking the transaction…";
-  let simRes=null,simRpcFailed=false;
-  try{
-    simRes=await solRpcCall("simulateTransaction",
-      [j.swapTransaction,{encoding:"base64",sigVerify:false,replaceRecentBlockhash:true,commitment:"processed"}]);
-  }catch{simRpcFailed=true;}
-  if(!simRpcFailed){
-    const err=simRes&&Object.prototype.hasOwnProperty.call(simRes,"value")?simRes.value.err:undefined;
-    if(err){
-      ev("swap:sim-fail","","solana");
-      const info=solClassifySimFail(err,simRes.value&&simRes.value.logs);
-      const msg=solSimFailMessage(info.reason,info.reason==="insufficient-sol"?solSimKeepSol():null);
-      throw Object.assign(new Error(msg),{uiHandled:true,uiMessage:msg,uiCode:info.reason==="other"?info.code:""});
+  // ۴ اکتبر — شکستِ شبیه‌سازی دیگر بلوک نیست: کاربر با یک تأییدِ صریح (به‌ازای همین کوت)
+  // می‌تواند ادامه بدهد. اگر مسلح است، شبیه‌سازیِ خودمان را اصلاً نمی‌زنیم.
+  const simKey=solImpactKey(solQuote);
+  const simArmed=simKey!=null&&solSimArmedKey===simKey;
+  if(!simArmed){
+    // پیش‌شبیه‌سازیِ خودمان، پیش از رفتنِ سراغِ کیف‌پول، روی همان بایت‌هایی که کیف‌پول امضا می‌کند.
+    // شکلِ توصیه‌شده‌ی فانتوم (sigVerify:false). شکستِ خودِ تماسِ RPC هرگز
+    // به‌معنیِ «تراکنش رد می‌شود» نیست — فقط یعنی نمی‌دانیم.
+    if(btn)btn.textContent="Checking the transaction…";
+    let simRes=null,simRpcFailed=false;
+    try{
+      simRes=await solRpcCall("simulateTransaction",
+        [j.swapTransaction,{encoding:"base64",sigVerify:false,replaceRecentBlockhash:true,commitment:"processed"}]);
+    }catch{simRpcFailed=true;}
+    let fail=null;
+    if(!simRpcFailed){
+      // شبیه‌سازیِ ما روی بایت‌های دقیقِ امضا حرفِ آخر است؛ اگر پاس شد، simulationErrorِ جوپیتر نادیده می‌ماند
+      const err=simRes&&Object.prototype.hasOwnProperty.call(simRes,"value")?simRes.value.err:undefined;
+      if(err){
+        const info=solClassifySimFail(err,simRes.value&&simRes.value.logs);
+        fail={msg:solSimFailMessage(info.reason,info.reason==="insufficient-sol"?solSimKeepSol():null),
+          code:info.reason==="other"?info.code:""};
+      }
+    }else if(j.simulationError){
+      // خودِ تماسِ RPC ما شکست خورد: فقط همان errorCode جوپیتر
+      // errorCode خودِ جوپیتر یک واژه‌نامه‌ی بسته است؛ فقط slippage را می‌شناسیم، بقیه «other» + همان کد
+      const jc=String(j.simulationError.errorCode||"");
+      const jr=/SLIPPAGE/i.test(jc)?"slippage":"other";
+      fail={msg:solSimFailMessage(jr),code:jr==="other"&&/^[A-Z0-9_]{1,40}$/.test(jc)?jc:""};
     }
+    if(fail){
+      ev("swap:sim-fail","","solana");
+      solSimFailedKey=simKey;
+      throw Object.assign(new Error(fail.msg),{uiHandled:true,uiMessage:fail.msg,uiCode:fail.code,simFail:true});
+    }
+    if(solSimFailedKey===simKey)solSimFailedKey=null;   // این بار پاس شد (یا RPC ساکت بود و جوپیتر هم خطایی نداد)
   }
 
   solAssertSwapContext(context);
@@ -9180,6 +9223,7 @@ async function solDoSwap(){
     }
 
     ev("swap:sent","","solana");
+    solSimArmedKey=null;solSimFailedKey=null;
     const doneInfo=solSnapshotDone(),sentAt=Date.now();
     solSetNotice(note("ok","<b>Submitted.</b> "+
       `<a href="https://solscan.io/tx/${esc(sigB58)}" target="_blank" rel="noopener">View on Solscan</a>`));
@@ -9190,7 +9234,8 @@ async function solDoSwap(){
     if(isUserRejection(e)){solSetNotice(note("warn","<b>Cancelled in your wallet.</b> Nothing was sent."));}
     else if(e&&e.uiHandled){
       const codeLine=e.uiCode?`<div class="mono" style="opacity:.65;font-size:11px;margin-top:4px">Code: ${esc(e.uiCode)}</div>`:"";
-      solSetNotice(note("err","<b>"+esc(e.uiMessage)+"</b>"+codeLine));
+      const simLine=e.simFail?`<div style="margin-top:4px">You can still send it: if it fails on-chain you lose only the network fee (at most about 0.0002 SOL), and no tokens move.</div>`:"";
+      solSetNotice(note("err","<b>"+esc(e.uiMessage)+"</b>"+simLine+codeLine));
     }
     else if(e&&e.sendMapped){
       // B — پیامِ نگاشته‌شده + یک خطِ جزئیاتِ کوچک با خودِ err (هرگز فقط کد).
@@ -9638,6 +9683,7 @@ $("copyAddrBtn").onclick=(e)=>{
     // کلیکِ اول فقط مسلح می‌کند؛ سواپ نمی‌شود
     if(solNeedsArm()){solArmedMints.add(solSide==="buy"?solMintCur:solRefMint);solUpdateSwapBtn();return;}
     if(solNeedsImpactArm()){solImpactArmedKey=solImpactKey(solQuote);solUpdateSwapBtn();return;}
+    if(solNeedsSimArm()){solSimArmedKey=solSimFailedKey;solDoSwap();return;}   // کلیکِ «Swap anyway» خودش تأیید است: مسلح و بلافاصله ارسال
     solDoSwap();
   };
   document.addEventListener("keydown",e=>{

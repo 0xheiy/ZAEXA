@@ -22,12 +22,12 @@ function context(names, extras = {}) {
     solCompareDirect(){},ev(){},solLoadDetails(){},solLoadChart(){},
     solConnectionBusy:false,solPendingWallet:null,solConfirmConnection:async()=>{},
     note:(type,text)=>text,isUserRejection:()=>false,esc:s=>s,
-    solBalSol: null, solBalTok: null, solOutAtaExists: null, slippageBps: 50,
+    solBalSol: null, solBalTok: null, solOutAtaExists: null, slippageBps: 50, solSimFailedKey: null, solSimArmedKey: null,
     solRenderReadout() {}, solUpdateSwapBtn() {}, solPaintLegs() {}, solPaintBalance() {},
     solPaintFeeRows() {}, solSwapApplyGate() {}, solFetchQuote() {}, solSetNotice() {}, hideDoneBlock() {},
     ...extras,
   });
-  for (const name of [...new Set(["solInputMint","solOutputMint","solInputDecimals","solOutputDecimals","solAmountRaw",...names])]) {
+  for (const name of [...new Set(["solInputMint","solOutputMint","solInputDecimals","solOutputDecimals","solAmountRaw","solImpactKey",...names])]) {
     const match = new RegExp(`(?:async )?function ${name}\\(`).exec(html);
     assert.ok(match, `missing ${name}`);
     const end = html.indexOf('\n}', match.index);

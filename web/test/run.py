@@ -7093,6 +7093,109 @@ async def main():
         print("[fallback floor] the interrupted send was reported, not swallowed (%d log)"
               % len(probe_errs))
 
+        # ---- [sim override] ۴ اکتبر — Base: همهٔ کاندیدها در staticCall می‌افتند؛ با تأییدِ کاربر بهترین نقشه با gasLimit ثابت فرستاده می‌شود ----
+        simo_base = await pg.evaluate(r"""async () => {
+            const realContract = E.Contract, realErr = console.error;
+            const BIGV = 10n ** 40n;
+            window.__STUB_ALLOWANCE__ = BIGV.toString();
+            window.__STUB_BALANCE__ = BIGV.toString();
+            account = "0x8A0Dcb583C8CAdc481E34487c34f1B856fe97e23";
+            signer = {}; walletChainId = CHAIN.id; walletIsRemote = false;
+            balances[balKey(tokenIn)] = BIGV; allowance = BIGV; allowanceKnown = true;
+            baseSimArmedKey = null; baseSimFailedKey = null;
+            console.error = () => {};            // showError لاگ می‌کند؛ این خطا عمدی است
+            const j = x => JSON.stringify(x, (k, v) => typeof v === "bigint" ? v.toString() : v);
+            const sleep = ms => new Promise(r => setTimeout(r, ms));
+            const wait = async () => { for (let i = 0; i < 200 && busy; i++) await sleep(50); await sleep(50); };
+            let sent = [], firstParts = [], noticeAtSend = "", remoteReq = [];
+            E.Contract = function () {
+                const send = function (...a) {
+                    noticeAtSend = document.getElementById("notices").innerText.replace(/\s+/g, " ");
+                    sent.push({parts: j(a[4]), minOut: a[3].toString(), opts: a[6]});
+                    throw new Error("probe: stop before sending");
+                };
+                send.staticCall = async (...a) => {
+                    if (JSON.stringify(a[0]) === JSON.stringify(a[1])) return 1n;      // exit check
+                    firstParts.push(j(a[4]));
+                    throw new Error('execution reverted: "probe: every route fails"');
+                };
+                send.estimateGas = async () => { throw new Error("probe: estimateGas must not be needed"); };
+                return { executeSwap: send };
+            };
+            const btn = () => document.getElementById("actBtn");
+            const out = {};
+            try {
+                await doSwap(); await wait();
+                out.btn1 = btn().textContent.trim(); out.dis1 = btn().disabled;
+                out.notice1 = document.getElementById("notices").innerText.replace(/\s+/g, " ");
+                out.sent1 = sent.length;
+                const cand0Parts = firstParts[0];
+                firstParts.length = 0;
+                btn().click(); await wait();                          // کلیک روی «Swap anyway»: تأیید + ارسال، همان کلیک
+                out.sent2 = 0; out.btn2 = "Swap";
+                out.sent3 = sent.length;
+                const s3 = sent[0] || {};
+                out.gas = s3.opts && s3.opts.gasLimit !== undefined ? s3.opts.gasLimit.toString() : null;
+                out.samePlan = !!s3.parts && s3.parts === firstParts[0];
+                out.noticeAtSend = noticeAtSend;
+                out.candCount = firstParts.length;
+                // مسیرِ والتِ راه‌دور: p.gas
+                sent.length = 0;
+                walletIsRemote = true;
+                walletEip1193 = { request: async ({method, params}) => { remoteReq.push({method, params}); throw new Error("probe: stop before sending"); } };
+                btn().click(); await wait();
+                out.remote = remoteReq.length ? {method: remoteReq[0].method, gas: remoteReq[0].params[0].gas} : null;
+            } finally {
+                E.Contract = realContract; console.error = realErr;
+                walletIsRemote = false; baseSimArmedKey = null; baseSimFailedKey = null;
+                delete window.__STUB_BALANCE__;
+            }
+            return out;
+        }""")
+        print("[sim override] base all candidates fail -> btn=%r sent before/after arm/after 2nd click=%d/%d/%d gas=%s samePlan=%s remote=%s"
+              % (simo_base["btn1"], simo_base["sent1"], simo_base["sent2"], simo_base["sent3"], simo_base["gas"], simo_base["samePlan"], simo_base["remote"]))
+        assert "Simulation failed — nothing sent, no gas spent" in simo_base["notice1"] and \
+            "You can still send it: if it reverts on-chain you pay only the gas, and your tokens stay with you." in simo_base["notice1"], \
+            "sim override: Base must keep the failure notice and add the confirmation line: %r" % simo_base["notice1"][:200]
+        assert simo_base["btn1"] == "Swap anyway (simulation failed)" and simo_base["dis1"] is False and simo_base["sent1"] == 0, \
+            "sim override: Base must offer the override and not call the wallet yet: %s" % simo_base
+        assert simo_base["sent3"] == 1 and simo_base["gas"] == "1500000", \
+            "sim override: the armed click must send executeSwap with gasLimit 1500000: %s" % simo_base
+        assert simo_base["samePlan"], "sim override: the armed send must use the best candidate's parts: %s" % simo_base
+        assert "Sending although our simulation failed." in simo_base["noticeAtSend"], \
+            "sim override: the armed send must say so: %r" % simo_base["noticeAtSend"]
+        assert simo_base["remote"] and simo_base["remote"]["method"] == "eth_sendTransaction" and simo_base["remote"]["gas"] == "0x16e360", \
+            "sim override: the remote-wallet payload must carry gas 0x16e360: %s" % simo_base["remote"]
+
+        # عکسِ هشدارِ Base (روشن، ۱۴۴۰ و ۳۹۰) — حالتِ شکست + دکمهٔ «Swap anyway»
+        await pg.evaluate(r"""async () => {
+            const realContract = E.Contract, realErr = console.error;
+            const BIGV = 10n ** 40n;
+            window.__STUB_ALLOWANCE__ = BIGV.toString(); window.__STUB_BALANCE__ = BIGV.toString();
+            account = "0x8A0Dcb583C8CAdc481E34487c34f1B856fe97e23"; signer = {}; walletChainId = CHAIN.id; walletIsRemote = false;
+            balances[balKey(tokenIn)] = BIGV; allowance = BIGV; allowanceKnown = true;
+            baseSimArmedKey = null; baseSimFailedKey = null;
+            console.error = () => {};
+            E.Contract = function () {
+                const send = function () { throw new Error("probe: stop before sending"); };
+                send.staticCall = async (...a) => { if (JSON.stringify(a[0]) === JSON.stringify(a[1])) return 1n; throw new Error('execution reverted: "probe: every route fails"'); };
+                send.estimateGas = async () => { throw new Error("x"); };
+                return { executeSwap: send };
+            };
+            try { await doSwap(); } catch (e) {}
+            E.Contract = realContract; console.error = realErr; delete window.__STUB_BALANCE__;
+        }""")
+        os.makedirs("/tmp/claude-0/sim_shots", exist_ok=True)
+        await pg.emulate_media(color_scheme="light")
+        sim_old_theme = await pg.evaluate("() => { const t = theme; theme = 'light'; applyTheme(); return t; }")
+        for vw_ in (1440, 390):
+            await pg.set_viewport_size({"width": vw_, "height": 1000})
+            await pg.wait_for_timeout(300)
+            await pg.screenshot(path="/tmp/claude-0/sim_shots/base-warning-light-%d.png" % vw_)
+        await pg.set_viewport_size({"width": 1240, "height": 1000})
+        await pg.emulate_media(color_scheme="dark")
+        await pg.evaluate("(t) => { theme = t; applyTheme(); baseSimArmedKey = null; baseSimFailedKey = null; }", sim_old_theme)
+
         await pg.evaluate("""() => {
             account = null; signer = null; walletChainId = null; walletIsRemote = false;
             balances = {}; allowance = 0n; allowanceKnown = false;
@@ -7948,7 +8051,8 @@ async def main():
                                       wallet_init=None, swap_log=None, swap_bodies=None,
                                       send_error=None, ls_wallet_name=None, ls_off=False,
                                       sol_mint_image_url=None, quote_reason=None, send_error_times=None,
-                                      send_params_log=None, quote_log=None, direct_quote_body=None):
+                                      send_params_log=None, quote_log=None, direct_quote_body=None,
+                                      sim_rpc_fail=False):
             spg = await b.new_page(viewport={"width": 1240, "height": 1000})
             # Transaction fixtures use fixed non-signing keys; real approval is tested in solana-approval.test.mjs.
             await spg.add_init_script("window.addEventListener('load',()=>{solConfirmConnection=async()=>{};});")
@@ -8037,6 +8141,11 @@ async def main():
                 elif method == "getSignatureStatuses":
                     result = {"value": [{"confirmationStatus": "confirmed", "err": None}]}
                 elif method == "simulateTransaction":
+                    if sim_rpc_fail:
+                        # خودِ تماسِ RPC شکست می‌خورد (نه یک err در نتیجه) — «نمی‌دانیم»
+                        await route.fulfill(status=502, content_type="application/json",
+                                             body=_json.dumps({"error": "rpc:simulateTransaction:down"}))
+                        return
                     if sim_result == "skip":
                         result = None
                     elif sim_result == "ok":
@@ -10345,7 +10454,7 @@ async def main():
             ({"value": {"err": {"InstructionError": [2, {"Custom": 1}]}, "logs": [
                 SYSP.join(["Program ", " invoke [1]"]), "Transfer: insufficient lamports 4875000, need 2039280",
                 "Program %s failed: custom program error: 0x1" % SYSP]}},
-             "Not enough SOL for the network fee and one-time account rent. Keep at least 0.0023 SOL.", None),
+             "Not enough SOL for the network fee and one-time account rent. Keep at least 0.0043 SOL.", None),
             ({"value": {"err": {"InstructionError": [4, {"Custom": 6001}]}, "logs": [
                 "Program JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4 invoke [1]",
                 "Program log: AnchorError ... Error Code: SlippageToleranceExceeded. Error Number: 6001.",
@@ -10371,6 +10480,121 @@ async def main():
                 assert want_code in sn, "8: the code line is missing: %r" % sn
             else:
                 assert "Code:" not in sn, "8: mapped reasons must not show a code line: %r" % sn
+
+        # ================= [sim override] ۴ اکتبر — شکستِ شبیه‌سازی بلوک نیست، با تأییدِ کاربر ادامه می‌دهد =================
+        SIMO_ERR = {"value": {"err": {"InstructionError": [1, "InvalidAccountData"]},
+                              "logs": ["Program %s failed: invalid account data for instruction" % TOKP]}}
+        SIMO_BTN = "Swap anyway (simulation failed)"
+        SIMO_LINE = "You can still send it: if it fails on-chain you lose only the network fee (at most about 0.0002 SOL), and no tokens move."
+
+        async def simo_state(pg_):
+            return (await pg_.inner_text("#solSwapBtn")).strip(), await pg_.evaluate("window.__solCalls.length")
+
+        # 1) شبیه‌سازیِ خودمان err می‌دهد: اعلان + خط دوم + دکمه؛ کلیکِ دوم فقط مسلح می‌کند؛ کلیکِ سوم کیف‌پول را صدا می‌زند و شبیه‌سازی را نمی‌زند
+        simo_log = []
+        sp1 = await r5_run(sim_result=SIMO_ERR, rpc_log=simo_log)
+        await sp1.click("#solSwapBtn"); await sp1.wait_for_timeout(700)
+        n1 = await sp1.inner_text("#solNotices"); btn1, w1 = await simo_state(sp1)
+        sims_after_first = simo_log.count("simulateTransaction")
+        os.makedirs("/tmp/claude-0/sim_shots", exist_ok=True)
+        for vw_ in (1440, 390):
+            await sp1.set_viewport_size({"width": vw_, "height": 1000})
+            await sp1.wait_for_timeout(250)
+            await sp1.screenshot(path="/tmp/claude-0/sim_shots/sol-warning-light-%d.png" % vw_)
+        await sp1.set_viewport_size({"width": 1240, "height": 1000})
+        btn2, w2 = btn1, w1
+        await sp1.click("#solSwapBtn"); await sp1.wait_for_timeout(900)   # کلیک روی «Swap anyway» = تأیید + ارسال
+        btn3, w3 = await simo_state(sp1)
+        sims_total = simo_log.count("simulateTransaction")
+        await sp1.close()
+        print("[sim override] solana own-sim err -> btn=%r wallet=%d | after arm click btn=%r wallet=%d | after 3rd click wallet=%d sims %d->%d"
+              % (btn1, w1, btn2, w2, w3, sims_after_first, sims_total))
+        assert "This swap would fail on-chain: simulation failed." in n1 and SIMO_LINE in n1 and "Code: 1:InvalidAccountData" in n1, \
+            "sim override: the failure notice needs the reason, the second line and the code: %r" % n1
+        assert btn1 == SIMO_BTN and w1 == 0, "sim override: after the failure the button must offer the override with no wallet call: %r / %d" % (btn1, w1)
+        assert w3 == 1, "sim override: clicking 'Swap anyway' must reach the wallet exactly once (it is the confirmation), got %d" % w3
+        assert sims_after_first == 1 and sims_total == 1, \
+            "sim override: our own simulation must NOT run again once armed (calls %d -> %d)" % (sims_after_first, sims_total)
+
+        # 2) جوپیتر simulationError می‌دهد ولی شبیه‌سازیِ خودمان پاس است: همان کلیکِ اول، بدونِ هشدار
+        j_body = {"swapTransaction": SOL_GOOD_TX_B64, "lastValidBlockHeight": 123,
+                  "simulationError": {"errorCode": "SLIPPAGE_TOLERANCE_EXCEEDED", "error": "jup says no"}}
+        sp2 = await r5_run(swap_body=j_body, sim_result="ok")
+        await sp2.click("#solSwapBtn"); await sp2.wait_for_timeout(900)
+        btn_b, w_b = await simo_state(sp2)
+        n_b = await sp2.inner_text("#solNotices")
+        err_notes = await sp2.evaluate("document.querySelectorAll('#solNotices .note.err').length")
+        await sp2.close()
+        print("[sim override] solana jupiter simulationError but ours passes -> wallet=%d btn=%r errNotes=%d" % (w_b, btn_b, err_notes))
+        assert w_b == 1 and err_notes == 0 and SIMO_LINE not in n_b and "simulation failed" not in n_b, \
+            "sim override: when our own simulation passes, Jupiter's simulationError must not warn or block: %r" % n_b
+
+        # 3) جوپیتر simulationError و RPCِ ما می‌افتد: پیام از کدِ جوپیتر مثلِ قبل؛ مسلح‌شدن کار می‌کند
+        j_body3 = {"swapTransaction": SOL_GOOD_TX_B64, "lastValidBlockHeight": 123,
+                   "simulationError": {"errorCode": "SOME_JUP_CODE", "error": "x"}}
+        sp3 = await r5_run(swap_body=j_body3, sim_rpc_fail=True)
+        await sp3.click("#solSwapBtn"); await sp3.wait_for_timeout(700)
+        n3 = await sp3.inner_text("#solNotices"); btn3a, w3a = await simo_state(sp3)
+        await sp3.click("#solSwapBtn"); await sp3.wait_for_timeout(900)   # «Swap anyway» = تأیید + ارسال
+        btn3b, w3b = await simo_state(sp3)
+        await sp3.close()
+        print("[sim override] solana jupiter code + our rpc down -> btn=%r wallet=%d -> %d notice=%r" % (btn3a, w3a, w3b, n3[:70]))
+        assert "This swap would fail on-chain: simulation failed." in n3 and "Code: SOME_JUP_CODE" in n3 and SIMO_LINE in n3, \
+            "sim override: with our RPC down the Jupiter errorCode must be used as before: %r" % n3
+        assert btn3a == SIMO_BTN and w3a == 0 and w3b == 1, "sim override: arming must work on the Jupiter-code path: %r / %d / %d" % (btn3a, w3a, w3b)
+
+        # 4) فی‌پیرِ غلط: هرگز مسلح‌شدنی نیست (حتی وقتی شبیه‌سازی هم می‌افتد)
+        sp4 = await r5_run(swap_body={"swapTransaction": SOL_BAD_TX_B64, "lastValidBlockHeight": 1,
+                                      "simulationError": {"errorCode": "X_CODE", "error": "x"}}, sim_result=SIMO_ERR)
+        seen4 = []
+        for _ in range(3):
+            await sp4.click("#solSwapBtn"); await sp4.wait_for_timeout(600)
+            seen4.append((await sp4.inner_text("#solSwapBtn")).strip())
+        n4 = await sp4.inner_text("#solNotices"); w4 = await sp4.evaluate("window.__solCalls.length")
+        await sp4.close()
+        print("[sim override] solana fee-payer mismatch never armable -> buttons=%s wallet=%d" % (seen4, w4))
+        assert "Refused: the transaction's fee payer is not your wallet." in n4 and SIMO_LINE not in n4, "sim override: the refusal must stay a plain block: %r" % n4
+        assert SIMO_BTN not in seen4 and w4 == 0, "sim override: a fee-payer refusal must never become armable: %s / %d" % (seen4, w4)
+
+        # 5) تغییر مبلغ بعد از مسلح‌شدن: برچسب به «Swap» برمی‌گردد و شکستِ تازه تأییدِ تازه می‌خواهد
+        sp5 = await r5_run(sim_result=SIMO_ERR)
+        async def quote_by_amount(route):
+            u = route.request.url
+            m_ = re.search(r"amount=(\d+)", u)
+            await route.fulfill(status=200, content_type="application/json",
+                                 body=_json.dumps({**SOL_QUOTE_FIXTURE, "inAmount": m_.group(1) if m_ else "1"}))
+        await sp5.route("**/sol/quote**", quote_by_amount)
+        await sp5.fill("#solAmt", "0.5"); await sp5.wait_for_timeout(900)
+        await sp5.click("#solSwapBtn"); await sp5.wait_for_timeout(700)
+        b5a, _w = await simo_state(sp5)
+        # مسلح‌کردن بدونِ ارسال (همان حالتی که کلیکِ «Swap anyway» پیش از ارسال می‌سازد)
+        await sp5.evaluate("solSimArmedKey=solSimFailedKey; solUpdateSwapBtn()")
+        b5b, _w = await simo_state(sp5)
+        await sp5.fill("#solAmt", "0.75"); await sp5.wait_for_timeout(900)
+        b5c, w5c = await simo_state(sp5)
+        await sp5.click("#solSwapBtn"); await sp5.wait_for_timeout(800)
+        b5d, w5d = await simo_state(sp5)
+        await sp5.close()
+        print("[sim override] solana amount change disarms -> %r / %r / after change %r / after new failure %r wallet=%d" % (b5a, b5b, b5c, b5d, w5d))
+        assert b5a == SIMO_BTN and b5b == "Swap", "sim override: the arm sequence is wrong: %r / %r" % (b5a, b5b)
+        assert b5c == "Swap" and w5c == 0, "sim override: a changed amount must drop the confirmation: %r / %d" % (b5c, w5c)
+        assert w5d == 0 and b5d == SIMO_BTN, "sim override: a new failure needs a new confirmation, never reaches the wallet: %r / %d" % (b5d, w5d)
+
+        # 6) keepSol: SOL -> توکنِ بدونِ حسابِ خروجی = کارمزد + 2×0.00204 (یکی ATA، یکی wSOL موقتِ جوپیتر)
+        import math as _m
+        fee_l = 700000
+        want_keep = "%.4f" % (_m.ceil(((fee_l + 5000) / 1e9 + 0.00204 * 2) * 1e4) / 1e4)
+        SIMO_RENT = {"value": {"err": {"InstructionError": [2, {"Custom": 1}]}, "logs": [
+            "Program %s invoke [1]" % SYSP, "Transfer: insufficient lamports 4875000, need 2039280",
+            "Program %s failed: custom program error: 0x1" % SYSP]}}
+        sp6 = await r5_run(sim_result=SIMO_RENT, swap_body={"swapTransaction": SOL_GOOD_TX_B64, "lastValidBlockHeight": 123,
+                                                               "prioritizationFeeLamports": fee_l})
+        await sp6.click("#solSwapBtn"); await sp6.wait_for_timeout(700)
+        n6 = await sp6.inner_text("#solNotices")
+        await sp6.close()
+        print("[sim override] solana keepSol SOL->token without output account -> %r (want %s SOL)" % (n6[:110], want_keep))
+        assert ("Keep at least %s SOL." % want_keep) in n6, "sim override: keepSol must be fee + 2x0.00204 rounded up: wanted %s, got %r" % (want_keep, n6)
+
 
         # 7) دلیلِ بسته‌ی شکستِ کوت — پیامِ هر دلیل، و تلاشِ دوباره‌ی یک‌باره برای rate-limited
         for reason, want in [("no-route", "No route for this pair right now"), ("not-tradable", "Jupiter does not trade this token."),
