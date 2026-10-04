@@ -1281,6 +1281,39 @@ footer .fine{max-width:78ch;margin:46px 0 0;font-size:11.5px;color:var(--tx3);li
 }
 @media(prefers-reduced-motion:reduce){.watchPair{transition:none}}
 
+/* نوارِ «فعالیتِ زنده» زیرِ کارتِ سواپ — فقط نمای swap؛ داده از همان /pairs.json.
+   هیچ هاله/درخششی ندارد (قاعده‌ی مالک). */
+.liveStrip{display:flex;align-items:center;gap:10px;height:42px;padding:0 6px 0 14px;box-sizing:border-box;min-width:0;
+  background:var(--card);border:1px solid var(--line);border-radius:14px;font-size:12.5px;box-shadow:var(--shs)}
+#liveStrip[hidden]{display:none}
+.lsDot{flex:none;width:8px;height:8px;border-radius:50%;background:var(--pos)}
+.lsLive{flex:none;font:600 10.5px ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;letter-spacing:.1em;color:var(--tx3)}
+.lsSep{flex:none;width:1px;height:16px;background:var(--line)}
+.lsItem{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--tx2);text-decoration:none;transition:opacity .2s,color .15s}
+.lsItem.lsIn{opacity:0;transition:none}
+.lsItem b{color:var(--tx);font-weight:650}
+.lsItem:hover{color:var(--tx)}
+.lsItem .state.pass{color:var(--pos)}
+.lsItem .state.fail{color:var(--neg)}
+.lsItem .state.unconfirmed{color:var(--warn)}
+.lsCount{flex:none;color:var(--tx3);font-size:11.5px;white-space:nowrap}
+.lsTg{flex:none;display:inline-flex;align-items:center;justify-content:center;gap:6px;height:30px;padding:0 12px;box-sizing:border-box;
+  border-radius:999px;background:var(--grad);color:var(--on-acc);font-size:12px;font-weight:650;text-decoration:none;
+  box-shadow:0 2px 6px -2px var(--soft-lo);transition:filter .16s,box-shadow .12s}
+.lsTg svg{width:14px;height:14px;flex:none}
+.lsTg:hover{filter:brightness(1.05)}
+.lsTg:active{filter:none;box-shadow:inset 2px 2px 5px var(--soft-lo),inset -2px -2px 5px var(--soft-hi)}
+@media(max-width:940px){#liveStrip{order:1}}
+/* کارتِ سواپ روی دسکتاپ فقط ۳۹۶ پیکسل است — شمارنده و برچسبِ Channel جای
+   نامِ توکن را می‌خوردند و متن بریده می‌شد؛ پس روی دسکتاپ هم مثلِ گوشی جمع
+   می‌شوند و شمارنده در title نوار می‌ماند. فقط ۵۲۱ تا ۹۴۰ (نوار تمام‌عرض) کامل است. */
+@media(max-width:520px),(min-width:941px){
+  .lsCount{display:none}
+  .lsTg{width:30px;padding:0}
+  .lsTg span{display:none}
+}
+@media(prefers-reduced-motion:reduce){.lsItem{transition:none}}
+
 /* One network control moves with the active swap card; other views keep it in the header. */
 #swapNetworkBar{display:flex;align-items:center;gap:12px;padding:16px 16px 12px}
 #swapNetworkBar[hidden]{display:none}
@@ -1985,6 +2018,7 @@ html:not(.ctaReady) #actBtn:disabled,html:not(.ctaReady) #solSwapBtn:disabled{ba
     </div>
   </section>
 </div>
+<section id="liveStrip" class="liveStrip" aria-label="Live exit checks" hidden><i class="lsDot"></i><span class="lsLive">LIVE</span><span class="lsSep"></span><a class="lsItem" aria-live="off"></a><span class="lsCount"></span><a class="lsTg" target="_blank" rel="noopener" aria-label="Zaexa on Telegram"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M21.8 4.2 18.7 19c-.2 1-.9 1.3-1.7.8l-4.7-3.5-2.3 2.2c-.3.3-.5.5-1 .5l.3-4.8 8.8-8c.4-.3-.1-.5-.6-.2L6.7 12.9 2 11.4c-1-.3-1-1 .2-1.5l18.3-7c.9-.3 1.6.2 1.3 1.3z"/></svg><span>Channel</span></a></section>
 </main>
 
 <footer>
@@ -2080,7 +2114,7 @@ const BRAND="Zaexa";
 /* شبکه‌های اجتماعی و بازخورد — وقتی حساب‌ها ساخته شد فقط همین‌ها را پر کن. */
 const LINKS={
   x:"https://x.com/zaexadex",
-  telegram:"",          // مثال: https://t.me/zaexa
+  telegram:"https://t.me/zaexadex",
   github:"https://github.com/0xheiy/ZAEXA",
   feedback:"",          // فرم یا لینک؛ اگر خالی بماند ایمیل استفاده می‌شود
   email:"zaexadex@gmail.com",
@@ -4797,7 +4831,7 @@ function updateSwapViewForChain(){
     ?"Recent Solana trades from GeckoTerminal. Samples may not cover every trade or pool."
     :"Read live from the deepest pool for this token, in your browser — no server, nothing stored.";
   refreshMarketWatch();
-  if(tokenPage)return;
+  if(tokenPage){liveStripStop();return;}
   const solana=activeChain==="solana";
   const heroBase=document.getElementById("baseHeroRow");
   const subBase=document.getElementById("baseSubRow");
@@ -4824,9 +4858,114 @@ function updateSwapViewForChain(){
     }
     $("solSwap").hidden=true;
   }
+  // نوار را درست بعد از کارتِ سواپِ فعال می‌گذاریم (یک عنصر، جابه‌جا — نه کلون)
+  const swapAnchor=solana?$("solSwap"):document.querySelector("#baseHeroRow section.card.swapCard");
+  const strip=$("liveStrip");
+  if(strip&&swapAnchor&&swapAnchor.nextElementSibling!==strip)swapAnchor.after(strip);
+  refreshLiveStrip();
   paintWallet();
 }
+
+/* ---- نوارِ فعالیتِ زنده ----
+   فقط از همان /pairs.json?chain=… (هم‌مبدأ) می‌خواند. قواعد:
+   - سولانا هرگز حالتِ «fail» نشان نمی‌دهد (تصمیمِ ثابتِ مالک)
+   - نامِ توکن فقط با textContent؛ هیچ رشته‌ی کاربر وارد innerHTML نمی‌شود
+   - هر خطا یا نبودنِ داده یعنی نوار کامل پنهان است، بدون پیامِ خطا */
+const STRIP_TTL=300000,STRIP_DAY=86400000,STRIP_TICK=4000,STRIP_MAX=8,STRIP_CAP=200;
+const liveStripCache=new Map(),liveStripInflight=new Map();
+let liveStripSeq=0,liveStripTimer=null,liveStripItems=[],liveStripIdx=0;
+function liveStripStop(){
+  liveStripSeq++;
+  if(liveStripTimer!==null){clearInterval(liveStripTimer);liveStripTimer=null;}
+  liveStripItems=[];
+  const el=$("liveStrip");if(el)el.hidden=true;
+}
+function liveStripName(row,chain){
+  if(typeof row.symbol==="string"&&/^[A-Za-z0-9$._-]{1,10}$/.test(row.symbol))return row.symbol;
+  const a=row.address;
+  return chain==="base"?a.slice(0,6)+"…"+a.slice(-4):a.slice(0,4)+"…"+a.slice(-4);
+}
+function liveStripBuild(chain,j){
+  if(!j||j.store!==true||!Array.isArray(j.rows))return null;
+  const now=Date.now(),items=[];let count=0;
+  const addrRe=chain==="base"?/^0x[0-9a-fA-F]{40}$/:/^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
+  for(const row of j.rows){
+    if(!row||typeof row!=="object"||row.chain!==chain)continue;
+    const t=typeof row.checkedAt==="string"?Date.parse(row.checkedAt):NaN;
+    if(!Number.isFinite(t)||now-t>STRIP_DAY||t-now>300000)continue;
+    count++;
+    if(items.length>=STRIP_MAX||typeof row.address!=="string"||!addrRe.test(row.address))continue;
+    let state=null;
+    if(row.v==="sell")state="pass";
+    else if(chain==="base"){if(row.v==="nosell")state="fail";}
+    else if(row.v==="nosell"||(row.v===null&&row.why==="sol:unconfirmed"))state="unconfirmed";
+    if(!state)continue;
+    items.push({name:liveStripName(row,chain),address:row.address,t,state});
+  }
+  if(!items.length)return null;
+  return {items,countText:(j.rows.length>=STRIP_CAP?STRIP_CAP+"+":count)+" checked in 24h"};
+}
+function liveStripPaint(fade){
+  const strip=$("liveStrip"),a=strip.querySelector(".lsItem"),it=liveStripItems[liveStripIdx];
+  if(fade)a.classList.add("lsIn");
+  a.textContent="";
+  a.href="/t/"+it.address;
+  const b=document.createElement("b");b.textContent=it.name;
+  const sec=Math.max(0,Math.floor((Date.now()-it.t)/1000));
+  const age=sec<60?"now":sec<3600?Math.floor(sec/60)+"m ago":Math.floor(sec/3600)+"h ago";
+  const st=document.createElement("span");st.className="state "+it.state;
+  st.textContent=it.state==="pass"?"✓ sell-back passed":it.state==="fail"?"✕ sell-back failed":"! unconfirmed";
+  a.append(b," · "+age+" · ",st);
+  if(fade){void a.offsetWidth;a.classList.remove("lsIn");}
+}
+function liveStripTick(){
+  try{
+    const strip=$("liveStrip");
+    if(!strip||strip.hidden||!liveStripItems.length||document.hidden)return;
+    if(strip.matches(":hover")||strip.matches(":focus-within"))return;
+    liveStripIdx=(liveStripIdx+1)%liveStripItems.length;
+    liveStripPaint(true);
+  }catch{liveStripStop();}
+}
+function liveStripShow(chain,j){
+  try{
+    const built=liveStripBuild(chain,j);
+    if(!built){liveStripStop();return;}
+    const strip=$("liveStrip");
+    if(liveStripTimer!==null){clearInterval(liveStripTimer);liveStripTimer=null;}
+    liveStripItems=built.items;liveStripIdx=0;
+    strip.querySelector(".lsCount").textContent=built.countText;strip.title=built.countText;
+    liveStripPaint(false);
+    strip.hidden=false;
+    liveStripTimer=setInterval(liveStripTick,STRIP_TICK);
+  }catch{liveStripStop();}
+}
+function refreshLiveStrip(){
+  if(tokenPage||view!=="swap"||!/^https?:$/.test(location.protocol)){liveStripStop();return;}
+  const chain=activeChain;
+  liveStripStop();                       // seq جدید؛ جوابِ دیررسِ زنجیره/نمای قبلی نادیده گرفته می‌شود
+  const seq=liveStripSeq;
+  const hit=liveStripCache.get(chain);
+  if(hit&&Date.now()-hit.t<STRIP_TTL){liveStripShow(chain,hit.data);return;}
+  let task=liveStripInflight.get(chain);
+  if(!task){
+    task=fetch("/pairs.json?chain="+chain,{cache:"default"})
+      .then(r=>r.ok?r.json():null).catch(()=>null)
+      .then(j=>{if(j&&j.store===true)liveStripCache.set(chain,{t:Date.now(),data:j});return j;})
+      .finally(()=>liveStripInflight.delete(chain));
+    liveStripInflight.set(chain,task);
+  }
+  task.then(j=>{
+    if(seq!==liveStripSeq||activeChain!==chain||view!=="swap"||tokenPage)return;
+    liveStripShow(chain,j);
+  });
+}
+{
+  const tg=document.querySelector("#liveStrip .lsTg");
+  if(tg){if(LINKS.telegram)tg.href=LINKS.telegram;else tg.remove();}
+}
 function setChain(next){
+
   next=(next==="solana")?"solana":"base";
   closeSrcMenu();
   if(next===activeChain)return;
@@ -9242,6 +9381,7 @@ function setView(v,push){
   if(v==="folio")renderFolio();
   if(v==="flow"){paintFlowToken();renderFlow();}
   if(v==="swap"&&!tokenPage)updateSwapViewForChain();
+  else liveStripStop();
   // سه نما در یک صفحه‌اند و با hash عوض می‌شوند، پس آمار معمولیِ «بازدید
   // صفحه» آن‌ها را از هم تفکیک نمی‌کند. اینجا تنها نقطه‌ی ورود هر سه است.
   ev("view:"+v);

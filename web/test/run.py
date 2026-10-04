@@ -4,6 +4,15 @@ from playwright.async_api import async_playwright
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 
+
+def app_telegram_link():
+    """مقدارِ LINKS.telegram از خودِ web/index.html — تنها منبعِ لینکِ تلگرام.
+    لندینگ و pairs آن را دستی دارند و نگهبان‌ها می‌سنجند با این یکی برابر باشد."""
+    src = open(os.path.join(HERE, "..", "index.html"), encoding="utf-8").read()
+    m = re.search(r'\btelegram:"([^"]*)"', src)
+    assert m, "LINKS.telegram not found in web/index.html"
+    return m.group(1)
+
 def _png_chunk(tag, data):
     """یک چانکِ استانداردِ PNG (طول + تگ + داده + CRC32). فقط برای ساختنِ یک
     عکسِ ۱×۱ واقعی داخلِ همین فایل — نه یک base64 حفظ‌شده از جایی دیگر که
@@ -1344,13 +1353,20 @@ def check_landing_page():
     # نگهبانِ check_one_executor_address می‌سنجد. اگر اینجا هم آدرسِ کامل را
     # قفل کنیم، یک قراردادِ تازه دو نگهبان را با یک تغییر می‌شکند.
     allowed_hosts = {"x.com", "github.com", "www.geckoterminal.com",
-                     "zaexa.com", "basescan.org"}
+                     "zaexa.com", "basescan.org", "t.me"}
     refs = set(re.findall(r'(?:src|href)="(https?://[^"]*)"', src))
     stray = sorted(r for r in refs
                    if urlparse(r).hostname not in allowed_hosts)
     assert not stray, (
         "web/landing.html loads or links to a host outside the allowed set: %s. The page is "
         "meant to make zero third-party requests." % stray)
+    # تلگرامِ لندینگ = LINKS.telegram اپ (یا هیچ، اگر آن خالی است)
+    lnd_tg = sorted(r for r in refs if urlparse(r).hostname == "t.me")
+    want_tg = [app_telegram_link()] if app_telegram_link() else []
+    print("[landing telegram] %s" % lnd_tg)
+    assert lnd_tg == want_tg, (
+        "web/landing.html's Telegram link(s) %s do not equal LINKS.telegram %s in web/index.html"
+        % (lnd_tg, want_tg))
 
     faces = re.findall(r'src:url\("data:font/woff2;base64,([^"]+)"\)', src)
     assert len(faces) == 2, (
@@ -1547,18 +1563,25 @@ def check_pairs_page():
         for u in re.findall(r'src:url\("(https?://[^"]+)"\)', lnd_src)
     )
     allowed_hosts = {"x.com", "github.com", "www.geckoterminal.com",
-                      "zaexa.com", "basescan.org"} | lnd_font_hosts
+                      "zaexa.com", "basescan.org", "t.me"} | lnd_font_hosts
     refs = set(re.findall(r'(?:src|href)="(https?://[^"]*)"', src))
     stray = sorted(r for r in refs if urlparse(r).hostname not in allowed_hosts)
     assert not stray, (
         "web/pairs.html loads or links to a host outside the allowed set (self + web/landing.html's "
         "own font origin, if any): %s. Found refs: %s" % (stray, sorted(refs)))
-    # تلگرام هیچ‌جای این صفحه نباید ظاهر شود — LINKS.telegram در اپ خالی
-    # است و اپ خودش آن آیکون را در زمانِ اجرا حذف می‌کند؛ این صفحه اصلاً
-    # نباید آن را رندر کند.
-    assert "telegram" not in src.lower() and "t.me/" not in src.lower(), (
-        "web/pairs.html references Telegram, but LINKS.telegram is empty in web/index.html — "
-        "the footer must omit that icon entirely, the way the app does at runtime")
+    # تلگرام این صفحه باید دقیقاً همان LINKS.telegram اپ باشد: اگر آن خالی
+    # است اینجا هیچ اثری از تلگرام نباشد، و اگر پر است همان آدرس (نه
+    # آدرسی دستیِ دیگر) — مقدار از خودِ index.html خوانده می‌شود.
+    tg = app_telegram_link()
+    if not tg:
+        assert "telegram" not in src.lower() and "t.me/" not in src.lower(), (
+            "web/pairs.html references Telegram, but LINKS.telegram is empty in web/index.html — "
+            "the footer must omit that icon entirely, the way the app does at runtime")
+    else:
+        tg_refs = sorted(r for r in refs if urlparse(r).hostname == "t.me")
+        assert tg_refs == [tg], (
+            "web/pairs.html's Telegram link(s) %s do not equal LINKS.telegram %r in web/index.html"
+            % (tg_refs, tg))
 
     # ---- همان کلیدِ localStorage که خودِ اپ (index.html) برای تم استفاده
     # می‌کند — هیچ‌وقت این رشته را دوباره دستی اینجا نمی‌نویسیم، از خودِ
@@ -2720,6 +2743,328 @@ async def check_logo_hit_area(p, errors):
     print("[logo hit area] the logo link hugs its ink on app, pairs and landing at 360/390/768/1440px")
 
 
+async def check_live_strip(p, errors):
+    """نوارِ «فعالیتِ زنده» زیرِ کارتِ سواپ روی /app — فقط نمای swap.
+
+    داده فقط از همان /pairs.json?chain=… (هم‌مبدأ)؛ اینجا با page.route استاب می‌شود و فیکسچرها
+    شکلِ واقعیِ پاسخِ زنده را دارند (rows تازه‌ترین-اول، v = sell|nosell|null، why برای null).
+    قاعده‌ی ثابتِ مالک: سولانا هرگز حالتِ fail نشان نمی‌دهد."""
+    import functools, http.server, threading, json as _j
+    from datetime import datetime, timedelta, timezone
+
+    class Quiet(http.server.SimpleHTTPRequestHandler):
+        def log_message(self, *a):
+            pass
+
+        def translate_path(self, path):
+            clean = path.split("?")[0]
+            if clean in ("/app", "/app/"):
+                return os.path.join(HERE, "harness.html")
+            if re.match(r"^/t/(0x[0-9a-fA-F]{40}|[1-9A-HJ-NP-Za-km-z]{32,44})/?$", clean):
+                return os.path.join(HERE, "harness.html")
+            if clean == "/stub-ethers.js":
+                return os.path.join(HERE, "stub-ethers.js")
+            return super().translate_path(path)
+
+    srv = http.server.ThreadingHTTPServer(
+        ("127.0.0.1", 0), functools.partial(Quiet, directory=os.path.join(HERE, "..")))
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    port = srv.server_address[1]
+    origin = "http://127.0.0.1:%d" % port
+    b = await p.chromium.launch()
+
+    def iso(sec_ago):
+        t = datetime.now(timezone.utc) - timedelta(seconds=sec_ago)
+        return t.strftime("%Y-%m-%dT%H:%M:%S.") + "%03dZ" % (t.microsecond // 1000)
+
+    def row(chain, addr, symbol, v, why, ago, name="ZZNAME"):
+        return {"chain": chain, "address": addr, "symbol": symbol, "name": name, "v": v,
+                "checkKind": "roundtrip", "checkedAt": iso(ago), "poolCreatedAt": iso(ago + 60),
+                "priceUsd": 0.000012177989966011157, "reserveUsd": 21069.2534, "vol24hUsd": 1723.47,
+                "fdvUsd": 12143.31939, "dex": "meteora-damm-v2", "why": why}
+
+    def evm(i):
+        return "0x" + ("%x" % i) * 40 if i < 16 else "0x" + "%040x" % i
+
+    A_TRUMP = "0x41c9" + "0" * 32 + "a134"
+    A_IMG = "0x7777777777777777777777777777777777777777"
+    sol = lambda i: "S" + "ABCDEFGHJKLMN"[i] + "X" + "A" * 41
+
+    base_rows = [
+        row("base", evm(1), "PEPE", "sell", None, 125),
+        row("base", A_TRUMP, "Trump Moron Cake", "nosell", None, 300),
+        row("base", evm(2), "SKIPME", None, "no-quote", 400),
+        row("base", A_IMG, "<img src=x onerror=1>", "sell", None, 600),
+        row("solana", sol(1), "WRONGCHAIN", "sell", None, 650),
+    ] + [row("base", evm(i), "T%d" % i, "sell", None, 700 + i * 60) for i in range(4, 12)] + [
+        row("base", evm(3), "OLDIE", "sell", None, 25 * 3600),
+    ]
+    BASE_NAMES = ["PEPE", "0x41c9…a134", "0x7777…7777", "T4", "T5", "T6", "T7", "T8"]
+    # 12 ردیفِ base در ۲۴ ساعت: ۱+۱+۱+۱ + ۸ ؛ ردیفِ زنجیره‌ی دیگر و ردیفِ ۲۵ ساعته نباید شمرده شوند
+    BASE_COUNT = "12 checked in 24h"
+
+    sol_rows = [
+        row("solana", sol(1), "WIF", "sell", None, 100),
+        row("solana", sol(2), "NOSELLY", "nosell", "x", 200),
+        row("solana", sol(3), "UNCONF", None, "sol:unconfirmed", 300),
+        row("solana", sol(4), "HIDDEN", None, "sells:recent", 350),
+        row("solana", sol(5), "SKIP429", None, "jup:swap-instructions:429", 380),
+    ] + [row("solana", sol(i), "S%d" % i, "sell", None, 400 + i * 60) for i in range(6, 12)]
+    SOL_COUNT = "11 checked in 24h"
+
+    SKIP_HOSTS = ("127.0.0.1",)
+
+    async def open_page(path="/app", chains=None, viewport=None, scheme="light", abort=False,
+                        status=200, raw=None, init=None, calls=None, errs=None):
+        chains = chains if chains is not None else {"base": base_rows, "solana": sol_rows}
+        pg = await b.new_page(viewport=viewport or {"width": 1440, "height": 900}, color_scheme=scheme)
+        if errs is not None:
+            def on_msg(m):
+                if m.type == "error" and (m.location.get("url") or "").startswith(origin):
+                    errs.append(m.text)
+            pg.on("console", on_msg)
+            pg.on("pageerror", lambda e: errs.append("PAGEERROR " + str(e)))
+        await pg.add_init_script("""(()=>{const si=window.setInterval,ci=window.clearInterval;window.__iv=new Set();
+            window.setInterval=function(f,d,...a){const id=si.call(window,f,d,...a);if(d===4000)window.__iv.add(id);return id;};
+            window.clearInterval=function(id){window.__iv.delete(id);return ci.call(window,id);};})();""")
+        if init:
+            await pg.add_init_script(init)
+
+        async def external(route):
+            await route.abort()
+
+        async def empty(route):
+            await route.fulfill(status=200, content_type="application/json", body='{"data":[]}')
+
+        async def ok204(route):
+            await route.fulfill(status=204, body="")
+
+        async def vd(route):
+            await route.fulfill(status=200, content_type="application/json", body='{"v":"sell","ms":100}')
+
+        async def solstub(route):
+            await route.fulfill(status=200, content_type="application/json", body='{"result":null}')
+
+        async def pairs(route):
+            ch = "solana" if "chain=solana" in route.request.url else "base"
+            if calls is not None:
+                calls.append(ch)
+            if abort:
+                await route.abort()
+                return
+            if raw is not None:
+                await route.fulfill(status=status, content_type="application/json", body=raw)
+                return
+            await route.fulfill(status=status, content_type="application/json",
+                                body=_j.dumps({"chain": ch, "rows": chains.get(ch, []), "store": True}))
+        await pg.route("**/*", lambda r: r.continue_() if r.request.url.startswith(origin) else external(r))
+        await pg.route("**/gt/**", empty)
+        await pg.route("**/ev", ok204)
+        await pg.route("**/vd/**", vd)
+        await pg.route("**/sol/**", solstub)
+        await pg.route("**/pairs.json**", pairs)
+        await pg.goto(origin + path)
+        await pg.wait_for_timeout(700)
+        return pg
+
+    INFO = """() => { const s = document.getElementById('liveStrip'), a = s.querySelector('.lsItem'), st = a.querySelector('.state');
+        return {hidden: s.hidden, display: getComputedStyle(s).display, text: a.textContent,
+                name: (a.querySelector('b') || {}).textContent, href: a.getAttribute('href'),
+                state: st ? st.className : null, count: s.querySelector('.lsCount').textContent,
+                imgs: s.querySelectorAll('img').length, scripts: s.querySelectorAll('script').length,
+                nameLeak: s.textContent.includes('ZZNAME')}; }"""
+    CYCLE = """(n) => { const a = document.querySelector('#liveStrip .lsItem'), out = [];
+        const probe = document.createElement('span'); probe.style.color = 'var(--warn)'; document.body.appendChild(probe);
+        const warn = getComputedStyle(probe).color; probe.remove();
+        for (let i = 0; i < n; i++) { const st = a.querySelector('.state');
+            out.push({name: a.querySelector('b').textContent, text: a.textContent, href: a.getAttribute('href'),
+                      state: st.className, color: getComputedStyle(st).color, warn});
+            liveStripTick(); }
+        return out; }"""
+
+    # ---- 1) Base ----
+    errs1 = []
+    pg = await open_page(errs=errs1)
+    i1 = await pg.evaluate(INFO)
+    cyc = await pg.evaluate(CYCLE, 17)
+    await pg.close()
+    names = [c["name"] for c in cyc]
+    print("[live strip base] visible=%s first=%r state=%r href=%s count=%r cycle=%s imgs=%d nameLeak=%s"
+          % (not i1["hidden"], i1["text"], i1["state"], i1["href"], i1["count"], names[:9],
+             i1["imgs"], i1["nameLeak"]))
+    assert not i1["hidden"] and i1["display"] != "none", "the live strip is not shown on Base with live-shaped rows: %s" % i1
+    assert i1["text"] == "PEPE · 2m ago · ✓ sell-back passed", "first item text: %r" % i1["text"]
+    assert i1["state"] == "state pass", "first item state class: %r" % i1["state"]
+    assert i1["href"] == "/t/" + evm(1), "first item href: %r" % i1["href"]
+    assert i1["count"] == BASE_COUNT, "counter text: %r (want %r)" % (i1["count"], BASE_COUNT)
+    assert names[:8] == BASE_NAMES, (
+        "rotation order/labels wrong (symbol regex, short address, 24h cut, wrong-chain, null skip): %s" % names[:8])
+    assert names[8] == BASE_NAMES[0] and names[16] == BASE_NAMES[0], "rotation must cycle over exactly 8 items: %s" % names
+    assert cyc[1]["text"].endswith("✕ sell-back failed") and cyc[1]["state"] == "state fail", "Base nosell must show the fail state: %s" % cyc[1]
+    assert i1["imgs"] == 0 and i1["scripts"] == 0, "a symbol with markup injected an element into the strip"
+    assert not i1["nameLeak"] and not any("SKIPME" in c["text"] or "OLDIE" in c["text"] or "WRONGCHAIN" in c["text"] for c in cyc), (
+        "the strip rendered `name`, a skipped null row, a >24h row or another chain's row")
+    assert not errs1, "console errors on the Base live strip page: %s" % errs1
+
+    # ---- 2) Solana: هرگز fail ----
+    errs2 = []
+    pg = await open_page("/app#swap?chain=solana", errs=errs2)
+    i2 = await pg.evaluate(INFO)
+    cyc = await pg.evaluate(CYCLE, 17)
+    await pg.close()
+    texts = [c["text"] for c in cyc]
+    print("[live strip solana] visible=%s first=%r count=%r cycle=%s failedAnywhere=%s"
+          % (not i2["hidden"], i2["text"], i2["count"], [c["name"] for c in cyc[:9]],
+             any("failed" in t or "fail" in c["state"] for t, c in zip(texts, cyc))))
+    assert not i2["hidden"] and i2["text"] == "WIF · 1m ago · ✓ sell-back passed", "Solana first item: %s" % i2
+    assert i2["count"] == SOL_COUNT, "Solana counter: %r" % i2["count"]
+    assert not any("failed" in t or "✕" in t for t in texts), "Solana rendered a sell-back failed item: %s" % texts
+    assert not any("fail" in c["state"] for c in cyc), "Solana got a fail state class: %s" % cyc
+    assert [c["name"] for c in cyc[:8]] == ["WIF", "NOSELLY", "UNCONF", "S6", "S7", "S8", "S9", "S10"], (
+        "Solana rotation labels: %s" % [c["name"] for c in cyc[:8]])
+    unc = [c for c in cyc[:8] if c["name"] in ("NOSELLY", "UNCONF")]
+    assert len(unc) == 2 and all(c["text"].endswith("! unconfirmed") and c["state"] == "state unconfirmed"
+                                 and c["color"] == c["warn"] for c in unc), "unconfirmed must render amber: %s" % unc
+    assert not any(c["name"] in ("HIDDEN", "SKIP429") for c in cyc), "a sells:recent / other-null Solana row was shown"
+    assert not errs2, "console errors on the Solana live strip page: %s" % errs2
+
+    # ---- 3) خالی / خطا / store:false -> کاملاً پنهان ----
+    hid = {}
+    for label, kw in (("empty", dict(chains={"base": []})), ("abort", dict(abort=True)),
+                      ("store-false", dict(raw='{"chain":"base","rows":[],"store":false}')),
+                      ("store-false-with-rows", dict(raw=_j.dumps({"chain": "base", "rows": base_rows, "store": False}))),
+                      ("http-500", dict(status=500, raw="{}")),
+                      ("only-skippable", dict(chains={"base": [row("base", evm(2), "X", None, "no-quote", 60)]}))):
+        e = []
+        pg = await open_page(errs=e, **kw)
+        info = await pg.evaluate(INFO)
+        iv = await pg.evaluate("() => window.__iv.size")
+        await pg.close()
+        hid[label] = (info["hidden"], info["display"], iv, [x for x in e if "pairs.json" not in x and "ERR_" not in x and "status of 500" not in x])
+    print("[live strip hidden] %s" % hid)
+    for label, (h, d, iv, e) in hid.items():
+        assert h and d == "none", "live strip must be fully hidden for %s (hidden=%s display=%s)" % (label, h, d)
+        assert iv == 0, "no rotation timer may run while the strip is hidden (%s: %d)" % (label, iv)
+        assert not e, "console errors for %s: %s" % (label, e)
+
+    # ---- 4) جای نوار ----
+    GEO = """(solana) => { const r = e => e ? e.getBoundingClientRect() : null;
+        const s = document.getElementById('liveStrip');
+        const card = solana ? document.getElementById('solSwap') : document.querySelector('#baseHeroRow section.card.swapCard');
+        const chart = document.querySelector(solana ? '#appSolHero .swapChartCard' : '#baseHeroRow .swapChartCard');
+        const S = r(s), C = r(card), H = r(chart);
+        return {sTop: S.top, sBottom: S.bottom, sLeft: S.left, sW: S.width, sH: S.height, cBottom: C.bottom, cLeft: C.left, cW: C.width,
+                chartTop: H.top, chartBottom: H.bottom, sibling: card.nextElementSibling === s, hidden: s.hidden,
+                overflowX: document.documentElement.scrollWidth > innerWidth}; }"""
+    geo = {}
+    for vw in (1440, 390):
+        for chain in ("base", "solana"):
+            e = []
+            pg = await open_page("/app" + ("#swap?chain=solana" if chain == "solana" else ""),
+                                 viewport={"width": vw, "height": 900}, errs=e)
+            g = await pg.evaluate(GEO, chain == "solana")
+            geo[(vw, chain)] = g
+            assert not e, "console errors in geometry probe %s/%s: %s" % (vw, chain, e)
+            await pg.close()
+    print("[live strip geometry] %s" % {"%d-%s" % k: (round(v["sTop"] - v["cBottom"], 1), round(v["sW"] - v["cW"], 1),
+                                                     round(v["sH"]), v["sibling"]) for k, v in geo.items()})
+    for (vw, chain), g in geo.items():
+        tag = "%d/%s" % (vw, chain)
+        assert not g["hidden"], "%s: strip hidden" % tag
+        assert g["sTop"] >= g["cBottom"] - 0.5, "%s: strip is not below the swap card (strip top %.1f, card bottom %.1f)" % (tag, g["sTop"], g["cBottom"])
+        assert g["sTop"] - g["cBottom"] <= 20, "%s: gap between swap card and strip is %.1f" % (tag, g["sTop"] - g["cBottom"])
+        assert abs(g["sLeft"] - g["cLeft"]) <= 1 and abs(g["sW"] - g["cW"]) <= 1, "%s: strip left/width differ from the swap card: %s" % (tag, g)
+        assert g["sibling"], "%s: the strip is not the next sibling of the active swap card" % tag
+        assert abs(g["sH"] - 42) <= 1, "%s: strip height %.1f, want 42" % (tag, g["sH"])
+        assert not g["overflowX"], "%s: horizontal page scroll" % tag
+        if vw == 390:
+            assert g["sBottom"] <= g["chartTop"] + 0.5, "%s: on mobile the strip must come before the chart card (strip bottom %.1f, chart top %.1f)" % (tag, g["sBottom"], g["chartTop"])
+
+    # صفحه‌ی توکن و نماهای دیگر: پنهان، بی‌تایمر، بی‌درخواست
+    calls_t = []
+    pg = await open_page("/t/" + evm(1), calls=calls_t)
+    tinfo = await pg.evaluate(INFO)
+    tiv = await pg.evaluate("() => window.__iv.size")
+    await pg.close()
+    calls_v = []
+    pg = await open_page(calls=calls_v)
+    shown = (await pg.evaluate(INFO))["hidden"]
+    await pg.evaluate("() => { location.hash = 'folio'; }")
+    await pg.wait_for_timeout(400)
+    vinfo = await pg.evaluate(INFO)
+    viv = await pg.evaluate("() => window.__iv.size")
+    await pg.evaluate("() => { location.hash = 'swap'; }")
+    await pg.wait_for_timeout(500)
+    back = await pg.evaluate(INFO)
+    await pg.close()
+    print("[live strip views] token page hidden=%s timers=%d requests=%s; folio hidden=%s timers=%d; back on swap hidden=%s"
+          % (tinfo["hidden"], tiv, calls_t, vinfo["hidden"], viv, back["hidden"]))
+    assert tinfo["hidden"] and tinfo["display"] == "none" and tiv == 0 and not calls_t, (
+        "the strip must be hidden, timer-less and request-less on a /t/<address> page: %s %s %s" % (tinfo, tiv, calls_t))
+    assert not shown and vinfo["hidden"] and viv == 0, "leaving the swap view must hide the strip and stop its timer: %s %s" % (vinfo, viv)
+    assert not back["hidden"] and back["text"].startswith("PEPE"), "returning to the swap view must bring the strip back: %s" % back
+
+    # ---- 5) تلگرام ----
+    pg = await open_page()
+    tg = await pg.evaluate("""() => { const a = document.querySelector('#liveStrip .lsTg');
+        return {href: a.getAttribute('href'), target: a.target, rel: a.rel, label: a.getAttribute('aria-label'),
+                d: a.querySelector('svg path').getAttribute('d'), foot: document.querySelector('#lnkTg svg path').getAttribute('d')}; }""")
+    await pg.close()
+    print("[live strip telegram] href=%s target=%s rel=%s sameIconAsFooter=%s" % (tg["href"], tg["target"], tg["rel"], tg["d"] == tg["foot"]))
+    assert tg["href"] == app_telegram_link(), "the strip's Telegram button must use LINKS.telegram (%r), got %r" % (app_telegram_link(), tg["href"])
+    assert tg["target"] == "_blank" and "noopener" in tg["rel"] and tg["label"] == "Zaexa on Telegram", tg
+    assert tg["d"] == tg["foot"], "the Telegram icon path differs from the footer's #lnkTg"
+
+    # ---- 6) فقط یک interval، یک قدم در هر تیک، توقف روی hover/focus، کش ----
+    calls6 = []
+    errs6 = []
+    pg = await open_page(calls=calls6, errs=errs6)
+    for ch in ("solana", "base", "solana", "base"):
+        await pg.evaluate("(c) => setChain(c)", ch)
+        await pg.wait_for_timeout(250)
+    iv = await pg.evaluate("() => window.__iv.size")
+    first = (await pg.evaluate(INFO))["name"]
+    await pg.wait_for_timeout(4600)
+    second = (await pg.evaluate(INFO))["name"]
+    # hover: تیک نباید جلو ببرد
+    box = await pg.evaluate("() => { const e = document.getElementById('liveStrip'); e.scrollIntoView({block: 'center'}); const r = e.getBoundingClientRect(); return [r.left + 60, r.top + r.height / 2]; }")
+    await pg.mouse.move(box[0], box[1])
+    before_h = (await pg.evaluate(INFO))["name"]
+    await pg.evaluate("() => liveStripTick()")
+    after_h = (await pg.evaluate(INFO))["name"]
+    await pg.mouse.move(5, 5)
+    await pg.evaluate("() => document.querySelector('#liveStrip .lsItem').focus()")
+    await pg.evaluate("() => liveStripTick()")
+    after_f = (await pg.evaluate(INFO))["name"]
+    await pg.close()
+    print("[live strip rotation] intervals=%d after 4 switches; first=%s then %s after one tick period; hover %s->%s focus ->%s; requests=%s"
+          % (iv, first, second, before_h, after_h, after_f, calls6))
+    assert iv == 1, "exactly one 4s rotation interval may exist, found %d" % iv
+    assert first == BASE_NAMES[0] and second == BASE_NAMES[1], (
+        "one tick period must advance exactly one item (got %s -> %s); several intervals advance several" % (first, second))
+    assert after_h == before_h, "rotation must pause while the strip is hovered"
+    assert after_f == before_h, "rotation must pause while the strip has focus"
+    assert sorted(calls6) == ["base", "solana"], "each chain's /pairs.json must be fetched once and cached for 5 minutes: %s" % calls6
+    assert not errs6, "console errors in the rotation probe: %s" % errs6
+
+    # ---- اسکرین‌شات‌ها ----
+    shots = "/tmp/claude-0/ls_shots"
+    os.makedirs(shots, exist_ok=True)
+    for scheme in ("light", "dark"):
+        for vw, vh in ((1440, 900), (390, 844)):
+            for chain in ("base", "solana"):
+                pg = await open_page("/app" + ("#swap?chain=solana" if chain == "solana" else ""),
+                                     viewport={"width": vw, "height": vh}, scheme=scheme)
+                await pg.evaluate("() => document.getElementById('liveStrip').scrollIntoView({block: 'center'})")
+                await pg.wait_for_timeout(250)
+                await pg.screenshot(path=os.path.join(shots, "%s-%d-%s.png" % (scheme, vw, chain)))
+                await pg.close()
+    print("[live strip shots] written to %s" % shots)
+
+    await b.close()
+    srv.shutdown()
+
+
 async def main():
     errors = []
     # خطاهایی که یک کاوشگر *عمداً* تولید می‌کند. اجازه‌ی عبور می‌گیرند ولی
@@ -2763,6 +3108,7 @@ async def main():
         await check_logo_hit_area(p, errors)
         await check_logo_parity(p, errors)
         await check_token_page_hash_links(p, errors)
+        await check_live_strip(p, errors)
         b = await p.chromium.launch()
         pg = await b.new_page(viewport={"width": 1240, "height": 1000}, color_scheme="dark")
         pg.on("console", on_console)
@@ -8016,11 +8362,20 @@ async def main():
         assert chain_executor_f.lower() in wired["ctrHref"].lower(), (
             "#ctrLink's href (%r) does not contain CHAIN.executor (%r) — looks hardcoded"
             % (wired["ctrHref"], chain_executor_f))
-        assert not wired["lnkTg"], (
-            "LINKS.telegram is empty so #lnkTg must remove() itself, but it is still present")
-        assert wired["socialCount"] == 2, (
-            "expected exactly the X and GitHub icons left in .social after #lnkTg removed "
-            "itself, found %d children — a leftover empty slot or separator" % wired["socialCount"])
+        tg_f = app_telegram_link()
+        tg_href = await footpg.evaluate("() => { const a = document.getElementById('lnkTg'); return a ? a.href : null; }")
+        print("[footer] telegram LINKS=%r #lnkTg.href=%r" % (tg_f, tg_href))
+        if not tg_f:
+            assert not wired["lnkTg"], (
+                "LINKS.telegram is empty so #lnkTg must remove() itself, but it is still present")
+            assert wired["socialCount"] == 2, (
+                "expected exactly the X and GitHub icons left in .social after #lnkTg removed "
+                "itself, found %d children — a leftover empty slot or separator" % wired["socialCount"])
+        else:
+            assert wired["lnkTg"] and tg_href == tg_f, (
+                "LINKS.telegram is %r but #lnkTg is %r (href %r)" % (tg_f, wired["lnkTg"], tg_href))
+            assert wired["socialCount"] == 3, (
+                "expected X, Telegram and GitHub in .social, found %d children" % wired["socialCount"])
 
         # ۴. هندسه: نوارِ فوتر باید تمام‌عرضِ صفحه باشد، ولی محتوایش (.footGrid)
         #    باریک‌تر و وسط‌چین بماند. تا امروز هیچ کاوشگری هندسه‌ی فوتر را
@@ -11371,9 +11726,9 @@ async def main():
             "https://basescan.org/address/%s#code" % LIVE_EXECUTOR), (
             "the BaseScan footer link does not point at the live executor with #code: %r"
             % foot_info["baseScanHref"])
-        assert not foot_info["hasTelegram"], (
-            "web/pairs.html's footer renders a Telegram link/icon — LINKS.telegram is empty in "
-            "the app, so this page must omit it entirely")
+        assert foot_info["hasTelegram"] == bool(app_telegram_link()), (
+            "web/pairs.html's footer Telegram icon (%s) does not match LINKS.telegram in the app (%r)"
+            % (foot_info["hasTelegram"], app_telegram_link()))
         assert foot_info["bottomSpans"] == [
             "Non-custodial · this page reads only our own endpoints · not audited",
             "© 2026 Zaexa",
