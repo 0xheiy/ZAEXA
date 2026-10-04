@@ -1563,6 +1563,11 @@ export function solQuoteFailReason(status, json) {
     const code = json && typeof json === "object" && typeof json.errorCode === "string" ? json.errorCode : "";
     if (code === "COULD_NOT_FIND_ANY_ROUTE" || code === "NO_ROUTES_FOUND") return "no-route";
     if (code === "TOKEN_NOT_TRADABLE") return "not-tradable";
+    // ۴ اکتبر — از مستنداتِ رسمیِ جوپیتر (Swap API › Common Errors): کدِ «مقدار کوچک» وجود ندارد.
+    // ROUTE_PLAN_DOES_NOT_CONSUME_ALL_THE_AMOUNT = مسیر کلِ مبلغ را جذب نمی‌کند (مقدار بزرگ‌تر از نقدینگی)؛
+    // CANNOT_COMPUTE_OTHER_AMOUNT_THRESHOLD = کفِ خروجی حساب نشد (معمولاً مبلغی که خروجی‌اش صفر می‌شود — حدس، پیام خنثی).
+    if (code === "ROUTE_PLAN_DOES_NOT_CONSUME_ALL_THE_AMOUNT") return "amount-too-large";
+    if (code === "CANNOT_COMPUTE_OTHER_AMOUNT_THRESHOLD") return "amount-unpriced";
     if (/AMOUNT.*SMALL|TOO_SMALL/.test(code)) return "amount-too-small";
     return "bad-request";
   }
@@ -2745,6 +2750,9 @@ function makeSubMeter() {
     noteThrow,
     isCapHit() { return capHit_; },
     get total() { return total; },
+    // فقط خواندنی: شمارنده‌های fetch و Cache API (KV جدا و جزوِ این دو نیست)
+    get fetches() { return fetchN; },
+    get cacheOps() { return cacheN; },
     get capAt() { return capAt_; },
     stage(name) {
       // 🔴 فقط از REPORT_METER_STAGES — یک نامِ ناشناخته گذرِ آینده را
@@ -2804,6 +2812,16 @@ function meterKv(kv, meter) {
     put: (...args) => { meter.kvOp(); return kv.put(...args); },
     list: (...args) => { meter.kvOp(); return kv.list(...args); },
   };
+}
+
+/* بودجه‌ی ساب‌ریکوئستِ یک گذر. اندازه‌گیریِ زنده‌ی ۴ اکتبر ۲۰۲۶ از
+   /vd/passes: در ۴۸ گذرِ آخر ۱۶ تا به سقف خوردند (capProbe:"cap")، بیشترشان
+   وسطِ sol-token و یکی در recheck؛ سقف حدودِ ۵۱ فچ می‌افتد. ۴۸ یعنی دو
+   کمتر از سقفِ دیده‌شده، برای خودِ پروب و کمی حاشیه. */
+const REPORT_SUBREQ_BUDGET = 48;
+// فقط fetch + Cache API؛ KV عمداً شمرده نمی‌شود (سقفِ پلتفرم آن را نمی‌شمرد)
+function reportBudgetLeft(meter) {
+  return REPORT_SUBREQ_BUDGET - (meter.fetches + meter.cacheOps);
 }
 
 async function scheduledReportPass(env, ctx, opts) {
@@ -2968,6 +2986,8 @@ async function scheduledReportPassInner(env, ctx, opts, meter) {
       // بودجه بسوزاند؛ فقط رصدِ همان capHit_ی است که meter.fetch/noteThrow
       // بالاتر ثبت می‌کنند.
       capHit: () => meter.isCapHit(),
+      // بودجه‌ی برنامه‌ریزی‌شده — هم کرونِ ساعتی هم /report/run از همین مسیر می‌گذرند
+      budgetLeft: () => reportBudgetLeft(meter),
       // متادیتای دسته‌ایِ Base — یک تماس به‌جای N؛ غایب یا ناموفق یعنی
       // runReportPass دقیقاً مسیرِ metaOf تک‌آدرسه‌ی امروز را طی می‌کند.
       metaMany: (addrs) => ogFetchMetaMany(addrs, env),
@@ -3177,6 +3197,6 @@ export { VD_ADDR_RE };
 export { TOKEN_PAGE, solFetchVerdict };
 export { SITEMAP_TOKEN_PAGES, SITEMAP_TOKEN_CAP, sitemapResponse, buildSitemapTokens };
 export { reportRoute, pairsRoute, scheduledReportPass, reportRunRoute, REPORT_RUN_MAX_TOKENS };
-export { makeSubMeter, meterKv };
+export { makeSubMeter, meterKv, REPORT_SUBREQ_BUDGET, reportBudgetLeft };
 export { readV4Keys, readV4Entry, rpcCallBase, fetchV4Pools, storeV4Result, v4StoreTtl, runV4Index };
 export { V4_LOG_TIMEOUT_MS };

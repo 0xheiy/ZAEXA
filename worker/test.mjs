@@ -10317,8 +10317,8 @@ function stripAllowedWording(t) {
      JSON.stringify(rec.capProbe));
   const recKeys = Object.keys(rec).sort();
   ok(JSON.stringify(recKeys) === JSON.stringify(
-       ["added", "addedSol", "at", "base", "capAt", "capProbe", "checked", "discarded", "followed",
-        "metaBatch", "recheckTried", "rechecked", "sol", "stoppedAt"]),
+       ["added", "addedSol", "at", "base", "capAt", "capProbe", "checked", "deferred", "deferredAt",
+        "discarded", "followed", "metaBatch", "recheckTried", "rechecked", "sol", "stoppedAt"]),
      "the pass record must carry exactly its documented keys, nothing else, got " + JSON.stringify(recKeys));
   const recRaw = JSON.stringify(logA2);
   ok(!/0x[0-9a-f]{40}/i.test(recRaw),
@@ -11632,6 +11632,328 @@ function stripAllowedWording(t) {
       "key and a Solana row, the final stored doc carries all three (the Solana write onto latestDoc never " +
       "clobbers follow/recheck), doc.checked stays additive across both writes, and the Solana row still " +
       "never enters the Base pairs ring");
+  }
+}
+
+/* ---- ۵۰ب. بودجه‌ی برنامه‌ریزی‌شده‌ی ساب‌ریکوئست — [pass budget …] ----
+   budgetLeft تزریقی می‌گوید چند ساب‌ریکوئستِ شمرده‌شده‌ی دیگر می‌شود خرج
+   کرد؛ فالوآپ/رِی‌چک فقط اگر جای رزروِ سولانا بماند شروع می‌شوند، sol-pools
+   فقط اگر دست‌کم یک توکنِ سولانا بجا شود، و هر توکنِ سولانا فقط با ۱۲ در
+   دست. توکن‌های Base هرگز با این قاعده به تعویق نمی‌افتند. */
+{
+  const {
+    COST_BASE_TOKEN, COST_FOLLOW, COST_RECHECK, COST_SOL_TOKEN, COST_SOL_POOLS,
+  } = await import("./report.js");
+  const { REPORT_SUBREQ_BUDGET, reportBudgetLeft } = await import("./index.js");
+
+  function makeKvB() {
+    const store = new Map();
+    return { store, get: async (k) => (store.has(k) ? store.get(k) : null),
+      put: async (k, v) => { store.set(k, v); } };
+  }
+  const mkAddrB = (n) => "0x" + n.toString(16).padStart(40, "0");
+  const B58_B = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
+  function mkSolAddrB(n) {
+    let s = "";
+    const x = n + 9000;
+    for (let i = 0; i < 44; i++) s += B58_B[(x + i * 7) % B58_B.length];
+    return s;
+  }
+  const poolRowB = (addr) => ({
+    attributes: { reserve_in_usd: "9000", base_token_price_usd: "1",
+      pool_created_at: "2026-09-21T10:00:00Z", volume_usd: { h24: "0" }, fdv_usd: "0" },
+    relationships: { base_token: { data: { id: "base_" + addr } }, dex: { data: { id: "uniswap-v3-base" } } },
+  });
+  const solPoolRowB = (addr) => ({
+    attributes: { reserve_in_usd: "9000", base_token_price_usd: "1",
+      pool_created_at: "2026-09-21T09:00:00Z", volume_usd: { h24: "10" }, fdv_usd: "100" },
+    relationships: { base_token: { data: { id: "solana_" + addr } }, dex: { data: { id: "pumpswap" } } },
+  });
+  const NOWB = Date.parse("2026-09-21T16:00:00.000Z");
+  const DATEB = utcDateOf(NOWB);
+  const OLDB = new Date(NOWB - 90 * 60000).toISOString();
+  const seedRowB = (addr, verdict) => reportRow({ chain: "base", address: addr, symbol: "S", name: "S",
+    verdict, checkedAt: OLDB, poolCreatedAt: OLDB, priceUsd: 1, reserveUsd: 9000, vol24hUsd: 0, fdvUsd: 0,
+    dex: "uniswap-v3-base", why: verdict === null ? "no-quote" : null });
+  const seedDocB = (rows) => ({ date: DATEB, generatedAt: OLDB, chains: ["base"], checked: rows.length, rows });
+
+  /* fixture: runBudgetB({ seedRows, baseN, solN, solMax, budgetLeft, noSol, capHit })
+     calls = ثبتِ هر تابعِ تزریقی؛ cost = مدلِ هزینه‌ی ساختگی برای budgetLeft مبتنی بر شمارنده. */
+  async function runBudgetB(o) {
+    const kv = makeKvB();
+    await kv.put(reportKey(DATEB), JSON.stringify(seedDocB(o.seedRows || [])));
+    const calls = { fetchPools: 0, fetchPoolsSol: 0, poolEmptyOf: [], metaOf: [], verdictOf: [] };
+    const spent = { n: 0 };
+    const res = await runReportPass({
+      kv,
+      fetchPools: async () => { calls.fetchPools++; spent.n += 1;
+        return (o.baseAddrs || []).map(poolRowB); },
+      metaOf: async (a) => { calls.metaOf.push(a); spent.n += 3; return { meta: { symbol: "T", name: "T" }, why: null }; },
+      verdictOf: async (a) => { calls.verdictOf.push(a); spent.n += 2; return { v: "sell", why: null }; },
+      now: () => NOWB, sleep: async () => {},
+      poolEmptyOf: async (a) => { calls.poolEmptyOf.push(a); spent.n += 1; return true; },
+      ...(o.noSol ? {} : { fetchPoolsSol: async () => { calls.fetchPoolsSol++; spent.n += 2;
+        return (o.solAddrs || []).map(solPoolRowB); } }),
+      solMaxTokens: o.solMax === undefined ? 2 : o.solMax,
+      ...(o.capHit ? { capHit: o.capHit } : {}),
+      ...(o.budget === "absent" ? {} : { budgetLeft: o.budget(spent) }),
+    });
+    const doc = JSON.parse(await kv.get(reportKey(DATEB)));
+    const log = JSON.parse(await kv.get(PASS_LOG_KEY));
+    return { res, calls, doc, log, spent };
+  }
+  const OLD_FIELDS = ["checked", "added", "addedSol", "followed", "rechecked", "recheckTried"];
+  const pickOld = (r) => Object.fromEntries(OLD_FIELDS.map((k) => [k, r[k]]));
+
+  const FOLLOW1 = mkAddrB(601);
+  const RECH = [mkAddrB(611), mkAddrB(612)];
+  const seedMixed = () => [seedRowB(FOLLOW1, "sell"), seedRowB(RECH[0], null), seedRowB(RECH[1], null)];
+  const SOL2 = [mkSolAddrB(1), mkSolAddrB(2)];
+
+  // الف) budgetLeft غایب → همان نتیجه‌ی امروز
+  {
+    const a = await runBudgetB({ seedRows: seedMixed(), baseAddrs: [mkAddrB(1)], solAddrs: SOL2,
+      budget: "absent" });
+    const expected = { checked: 3, added: 3, addedSol: 2, followed: 1, rechecked: 2, recheckTried: 2 };
+    ok(JSON.stringify(pickOld(a.res)) === JSON.stringify(expected),
+       "with no budgetLeft the old result fields must be exactly today's, got " + JSON.stringify(pickOld(a.res)));
+    ok(a.res.deferred === 0 && a.res.deferredAt === null,
+       "with no budgetLeft nothing is deferred, got " + JSON.stringify([a.res.deferred, a.res.deferredAt]));
+    ok(a.log[0].deferred === 0 && a.log[0].deferredAt === null,
+       "the pass log must carry deferred:0/deferredAt:null, got " + JSON.stringify(a.log[0]));
+    const huge = await runBudgetB({ seedRows: seedMixed(), baseAddrs: [mkAddrB(1)], solAddrs: SOL2,
+      budget: () => () => 1e9 });
+    ok(JSON.stringify(pickOld(huge.res)) === JSON.stringify(expected) &&
+       JSON.stringify(huge.doc.rows) === JSON.stringify(a.doc.rows),
+       "a huge budget must equal the absent run byte for byte (result fields and stored rows)");
+    console.log("[pass budget absent] runReportPass ok — with budgetLeft absent (or huge) every old result " +
+      "field and the stored rows equal today's, deferred 0 and deferredAt null in both the result and the pass log");
+  }
+
+  // ب) recheck می‌خواست رزروِ سولانا را بخورد → recheck به تعویق، سولانا اجرا
+  {
+    // مدلِ هزینه‌ی شمارنده‌ای: ۳۸ در دست؛ پس از Base(6)+فالوآپ(1) → ۳۱ مانده < ۳۳
+    const b = await runBudgetB({ seedRows: seedMixed(), baseAddrs: [mkAddrB(2)], solAddrs: SOL2,
+      budget: (sp) => () => 38 - sp.n });
+    ok(b.calls.poolEmptyOf.length === 1, "follow must still run (32 >= 2+26), got " + b.calls.poolEmptyOf.length);
+    ok(b.res.followed === 1, "followed must be 1, got " + b.res.followed);
+    ok(b.res.recheckTried === 0 && b.res.rechecked === 0 &&
+       !b.calls.metaOf.some((a) => RECH.includes(a)),
+       "recheck must be deferred: no metaOf for its targets, got " + JSON.stringify(b.res));
+    ok(b.calls.fetchPoolsSol === 1 && b.res.addedSol === 2 && b.res.checked === 3,
+       "Solana must still run both tokens, got " + JSON.stringify(b.res));
+    ok(b.res.deferred === 2 && b.res.deferredAt === "recheck",
+       "deferred must be 2 at recheck, got " + JSON.stringify([b.res.deferred, b.res.deferredAt]));
+    ok(REPORT_METER_STAGES.includes(b.res.deferredAt), "deferredAt must be in REPORT_METER_STAGES");
+    ok(b.log[0].deferred === 2 && b.log[0].deferredAt === "recheck",
+       "the pass log must carry deferred 2/recheck, got " + JSON.stringify(b.log[0]));
+    for (const a of RECH) {
+      const r = b.doc.rows.find((x) => x.address === a);
+      ok(r && !("recheck" in r) && JSON.stringify(r) === JSON.stringify(JSON.parse(JSON.stringify(seedRowB(a, null)))),
+         "a deferred recheck target's row must be untouched, got " + JSON.stringify(r));
+    }
+    ok(b.log[0].discarded === 0 && b.log[0].stoppedAt === null,
+       "deferral is not a discard and not a stop, got " + JSON.stringify(b.log[0]));
+    // نشتِ آدرس
+    ok(!/0x[0-9a-f]{40}/i.test(JSON.stringify(b.log)) && !b.log[0].deferredAt.includes("0x"),
+       "no address in the pass log");
+    // گذرِ بعد: همان هدف‌ها دوباره برداشته می‌شوند (ردیف دست‌نخورده)
+    const again = pickRecheckTargets(b.doc, NOWB, 2).map((t) => t.address).sort();
+    ok(JSON.stringify(again) === JSON.stringify(RECH.slice().sort()),
+       "deferred recheck targets must be picked again by the next pass, got " + JSON.stringify(again));
+    console.log("[pass budget recheck deferred] runReportPass ok — with 31 left a recheck target would eat the " +
+      "Solana reserve (7+26), so both recheck targets are deferred (deferred 2, deferredAt recheck, rows untouched, " +
+      "picked again next pass) while follow and both Solana tokens still run");
+  }
+
+  // پ) بودجه برای حتی یک توکنِ سولانا نیست → sol-pools اصلاً صدا زده نمی‌شود
+  {
+    const c = await runBudgetB({ baseAddrs: [mkAddrB(3)], solAddrs: SOL2,
+      budget: (sp) => () => (COST_SOL_POOLS + COST_SOL_TOKEN - 1) + 6 - sp.n });
+    ok(c.calls.fetchPoolsSol === 0, "fetchPoolsSol must not be called, got " + c.calls.fetchPoolsSol);
+    ok(c.res.deferredAt === "sol-pools" && c.res.deferred === 1 && c.res.checked === 1,
+       "deferredAt sol-pools/deferred 1, got " + JSON.stringify(c.res));
+    ok(c.res.added === 1 && c.res.addedSol === 0, "only the Base row is added, got " + JSON.stringify(c.res));
+    ok(REPORT_METER_STAGES.includes("sol-pools"), "sol-pools must be a metered stage name");
+    // یک واحد بیشتر → sol-pools اجرا، یک توکن، دومی به تعویق
+    const c2 = await runBudgetB({ baseAddrs: [mkAddrB(3)], solAddrs: SOL2,
+      budget: (sp) => () => (COST_SOL_POOLS + COST_SOL_TOKEN) + 6 - sp.n });
+    ok(c2.calls.fetchPoolsSol === 1 && c2.res.addedSol === 1 && c2.res.deferred === 1 &&
+       c2.res.deferredAt === "sol-token",
+       "at the exact boundary one Solana token runs and the second is deferred, got " + JSON.stringify(c2.res));
+    console.log("[pass budget sol-pools deferred] runReportPass ok — one unit short of sol-pools+one token " +
+      "(14) leaves fetchPoolsSol uncalled (deferredAt sol-pools); at exactly 14 one token runs and the second " +
+      "is deferred at sol-token");
+  }
+
+  // ت) Base هرگز با budgetLeft به تعویق نمی‌افتد
+  {
+    const d = await runBudgetB({ baseAddrs: [1, 2, 3].map(mkAddrB), solAddrs: SOL2, budget: () => () => 0 });
+    ok(d.res.checked === 3 && d.res.added === 3 && d.calls.verdictOf.length === 3,
+       "all three Base tokens must run with budgetLeft 0, got " + JSON.stringify(d.res));
+    ok(d.calls.fetchPoolsSol === 0 && d.res.deferredAt === "sol-pools",
+       "with budget 0 only the Solana leg is deferred, got " + JSON.stringify(d.res));
+    console.log("[pass budget base never gated] runReportPass ok — budgetLeft 0 still checks and stores all " +
+      "Base tokens; only the Solana leg is deferred");
+  }
+  {
+    // isCapped برای Base سر جای خودش است (بدون budgetLeft در این بخش دخالت نمی‌کند)
+    const kv = makeKvB();
+    let m = 0;
+    const r = await runReportPass({ kv,
+      fetchPools: async () => [1, 2, 3].map(mkAddrB).map(poolRowB),
+      metaOf: async () => { m++; return { meta: { symbol: "T", name: "T" }, why: null }; },
+      verdictOf: async () => ({ v: "sell", why: null }), now: () => NOWB, sleep: async () => {},
+      capHit: () => m >= 2, budgetLeft: () => 0 });
+    const lg = JSON.parse(await kv.get(PASS_LOG_KEY));
+    ok(lg[0].stoppedAt === "base-token" && lg[0].discarded === 1 && lg[0].deferred === 0 && r.checked === 2,
+       "isCapped must still govern Base (stoppedAt base-token, discarded 1, deferred 0), got " + JSON.stringify(lg[0]));
+    console.log("[pass budget base capHit] runReportPass ok — isCapped/stoppedAt/discarded logic is unchanged and " +
+      "independent of budgetLeft for Base tokens");
+  }
+
+  // ث) budgetLeft خراب → Infinity
+  {
+    const ref = await runBudgetB({ seedRows: seedMixed(), baseAddrs: [mkAddrB(1)], solAddrs: SOL2, budget: "absent" });
+    for (const [name, fn] of [["throwing", () => { throw new Error("boom"); }], ["NaN", () => NaN],
+      ["string", () => "7"], ["undefined", () => undefined]]) {
+      const x = await runBudgetB({ seedRows: seedMixed(), baseAddrs: [mkAddrB(1)], solAddrs: SOL2, budget: () => fn });
+      ok(JSON.stringify(pickOld(x.res)) === JSON.stringify(pickOld(ref.res)) && x.res.deferred === 0 &&
+         JSON.stringify(x.doc.rows) === JSON.stringify(ref.doc.rows),
+         "a " + name + " budgetLeft must behave like Infinity, got " + JSON.stringify(x.res));
+    }
+    const notFn = await runReportPass({ kv: makeKvB(), fetchPools: async () => [poolRowB(mkAddrB(9))],
+      metaOf: async () => ({ meta: null, why: null }), verdictOf: async () => ({ v: "sell", why: null }),
+      now: () => NOWB, sleep: async () => {}, budgetLeft: 5 });
+    ok(notFn.checked === 1 && notFn.deferred === 0, "a non-function budgetLeft is Infinity, got " + JSON.stringify(notFn));
+    console.log("[pass budget bad budgetLeft] runReportPass ok — a throwing, NaN, string, undefined-returning " +
+      "or non-function budgetLeft behaves exactly like Infinity");
+  }
+
+  // ج) پس از اولین تعویق بقیه‌ی همان مرحله هم به تعویق می‌روند (بدون گزینشِ ارزان‌ترها)
+  {
+    const F3 = [621, 622, 623].map(mkAddrB);
+    // فالوآپ: بودجه‌ی هر هدف: خوب، بد، خوب — سومی نباید اجرا شود
+    let i = 0;
+    const script = [100, 1, 100];
+    const f = await runBudgetB({ noSol: true, seedRows: F3.map((a) => seedRowB(a, "sell")),
+      budget: () => () => (i < script.length ? script[i++] : 100) });
+    ok(f.calls.poolEmptyOf.length === 1 && f.res.deferred === 2 && f.res.deferredAt === "follow",
+       "after one follow deferral the rest are deferred too, got " + JSON.stringify([f.calls.poolEmptyOf.length, f.res.deferred, f.res.deferredAt]));
+    // رِی‌چک
+    let j = 0;
+    const R3 = [631, 632].map(mkAddrB);
+    const script2 = [100, 1];
+    const r = await runBudgetB({ noSol: true, seedRows: R3.map((a) => seedRowB(a, null)),
+      budget: () => () => (j < script2.length ? script2[j++] : 100) });
+    ok(r.res.recheckTried === 1 && r.res.deferred === 1 && r.res.deferredAt === "recheck",
+       "recheck: second target deferred, got " + JSON.stringify(r.res));
+    // سولانا: pools ok, token1 ok, token2 بد, token3 خوب → سومی اجرا نمی‌شود
+    let k = 0;
+    const script3 = [100, 100, 5, 100];
+    const S3 = [11, 12, 13].map(mkSolAddrB);
+    const s = await runBudgetB({ solAddrs: S3, solMax: 3, budget: () => () => (k < script3.length ? script3[k++] : 100) });
+    ok(s.res.checked === 1 && s.res.deferred === 2 && s.res.deferredAt === "sol-token",
+       "sol-token: tokens 2 and 3 deferred, got " + JSON.stringify(s.res));
+    console.log("[pass budget no cherry-picking] runReportPass ok — once one follow, recheck or Solana " +
+      "token is deferred the remaining items of that stage are deferred as well, even if a later " +
+      "budgetLeft call would have allowed them");
+  }
+
+  // چ) /vd/passes فیلدهای تازه را رد می‌کند؛ ردیفِ قدیمی بدونِ آن‌ها هنوز خوانده می‌شود
+  {
+    const oldEntry = { at: "2026-09-21T11:00:00.000Z", checked: 1, added: 1, addedSol: 0, followed: 0,
+      rechecked: 0, recheckTried: 0, base: { n: 1, nulls: 0, firstNullIdx: -1 },
+      sol: { n: 0, nulls: 0, firstNullIdx: -1 }, discarded: 0, stoppedAt: null, metaBatch: "absent", capAt: null };
+    const newEntry = { ...oldEntry, at: "2026-09-21T12:00:00.000Z", deferred: 3, deferredAt: "recheck" };
+    const ring = [newEntry, oldEntry];
+    const kvR = { get: async (k) => (k === PASS_LOG_KEY ? JSON.stringify(ring) : null) };
+    const got = await readPassLog(kvR);
+    ok(JSON.stringify(got) === JSON.stringify(ring), "readPassLog must pass both shapes through, got " + JSON.stringify(got));
+    ok(got[1].deferred === undefined && got[0].deferred === 3, "old entry stays without the fields");
+    const resR = await call("/vd/passes", { headers: { "cf-connecting-ip": "203.0.113.141" } },
+      { ASSETS, ZX_KV: kvR });
+    const bodyR = await resR.json();
+    ok(bodyR.passes[0].deferred === 3 && bodyR.passes[0].deferredAt === "recheck" &&
+       bodyR.passes[1].at === oldEntry.at && !("deferred" in bodyR.passes[1]),
+       "/vd/passes must carry deferred/deferredAt and still serve the old entry, got " + JSON.stringify(bodyR));
+    console.log("[pass budget passes route] GET /vd/passes ok — carries deferred/deferredAt on new entries and " +
+      "an old entry without them still reads fine");
+  }
+
+  // ح) makeSubMeter getters + reportBudgetLeft: KV شمرده نمی‌شود
+  {
+    const savedF = globalThis.fetch;
+    globalThis.fetch = async () => new Response("", { status: 200 });
+    const m = makeSubMeter();
+    globalThis.fetch = savedF;
+    ok(m.fetches === 0 && m.cacheOps === 0, "fresh meter getters must be 0");
+    await m.fetch("https://a.example/x?k=1");
+    await m.fetch("https://b.example/y");
+    await m.fetch("https://a.example/z");
+    m.cacheOp(); m.cacheOp();
+    m.cacheSkip(); m.cacheSkip(); m.cacheSkip();
+    m.kvOp(); m.kvOp(); m.kvOp(); m.kvOp();
+    ok(m.fetches === 3, "fetches getter must be 3, got " + m.fetches);
+    ok(m.cacheOps === 2, "cacheOps getter must be 2 (cacheSkip excluded), got " + m.cacheOps);
+    ok(m.total === 9, "total still counts everything (unchanged), got " + m.total);
+    ok(reportBudgetLeft(m) === REPORT_SUBREQ_BUDGET - 5 && REPORT_SUBREQ_BUDGET === 48,
+       "budget left = 48 - (fetch+cache) with KV excluded, got " + reportBudgetLeft(m));
+    ok(COST_BASE_TOKEN === 9 && COST_FOLLOW === 2 && COST_RECHECK === 7 && COST_SOL_TOKEN === 12 &&
+       COST_SOL_POOLS === 2, "cost constants");
+    console.log("[pass budget meter getters] makeSubMeter ok — fetches/cacheOps getters match a scripted " +
+      "sequence (3 fetches, 2 cache ops, cacheSkip and 4 KV ops excluded) and reportBudgetLeft is 48 minus " +
+      "fetch+cache only");
+  }
+
+  // خ) سیم‌کشیِ واقعی: scheduledReportPass بودجه را از meter می‌خواند و KV را نمی‌شمارد
+  {
+    async function wired(burn) {
+      wired.pre = undefined;
+      const savedF = globalThis.fetch;
+      const nowMs = Date.now();
+      const old = new Date(nowMs - 90 * 60000).toISOString();
+      const addr = mkAddrB(701);
+      const store = new Map();
+      const row = reportRow({ chain: "base", address: addr, symbol: "S", name: "S", verdict: null,
+        checkedAt: old, poolCreatedAt: old, priceUsd: 1, reserveUsd: 9000, vol24hUsd: 0, fdvUsd: 0,
+        dex: "uniswap-v3-base", why: "no-quote" });
+      store.set(reportKey(utcDateOf(nowMs)), JSON.stringify({ date: utcDateOf(nowMs), generatedAt: old,
+        chains: ["base"], checked: 1, rows: [row] }));
+      const kv = { get: async (k) => (store.has(k) ? store.get(k) : null), put: async (k, v) => { store.set(k, v); } };
+      let callsSeen = 0;
+      globalThis.fetch = async (url) => {
+        const u = String(url);
+        callsSeen++;
+        // اولین فچی که نه pools و نه burn است همان متای رِی‌چک است؛ هرچه پیش از آن شمرده شده پیش‌هزینه است
+        if (u.includes("/tokens/") && wired.pre === undefined) wired.pre = callsSeen - 1;
+        if (u.includes("/networks/base/new_pools")) {
+          for (let n = 0; n < burn; n++) await globalThis.fetch("https://burn.invalid/" + n);
+          return new Response(JSON.stringify({ data: [] }), { status: 200 });
+        }
+        if (u.includes("/networks/solana/new_pools")) return new Response(JSON.stringify({ data: [] }), { status: 200 });
+        if (u.startsWith("https://burn.invalid/")) return new Response("", { status: 200 });
+        return new Response("no", { status: 500 });
+      };
+      try { await scheduledReportPass({ ZX_KV: kv }, {}); } finally { globalThis.fetch = savedF; }
+      const rec = JSON.parse(store.get(PASS_LOG_KEY))[0];
+      rec.pre = wired.pre;
+      return rec;
+    }
+    // مرزِ دقیق: با یک اجرای کالیبره پیش‌هزینه‌ی fetch پیش از رِی‌چک را می‌خوانیم
+    const probe = await wired(0);
+    const used0 = probe.pre;
+    ok(Number.isInteger(used0) && used0 >= 1, "calibration run must reach the recheck fetch, got " + used0);
+    const need = COST_RECHECK + COST_SOL_POOLS + COST_SOL_TOKEN * 2;
+    const burnExact = REPORT_SUBREQ_BUDGET - need - used0;
+    const atEdge = await wired(burnExact);
+    ok(atEdge.deferred === 0 && atEdge.recheckTried === 1,
+       "with exactly enough fetch budget (KV excluded) the recheck target runs, got " + JSON.stringify(atEdge));
+    const over = await wired(burnExact + 1);
+    ok(over.deferredAt === "recheck" && over.deferred === 1 && over.recheckTried === 0,
+       "one fetch less and recheck is deferred, got " + JSON.stringify(over));
+    console.log("[pass budget wired] scheduledReportPass ok — budgetLeft is 48 minus metered fetches+cache " +
+      "(KV excluded): at the exact boundary recheck runs, one fetch less defers it");
   }
 }
 
@@ -13265,6 +13587,8 @@ function stripAllowedWording(t) {
       [400, { error: "Invalid parameter", errorCode: "SOMETHING_ELSE" }, "bad-request"],
       [404, { error: "Not found" }, "bad-request"],
       [400, { error: "Amount too small", errorCode: "TOKEN_AMOUNT_TOO_SMALL" }, "amount-too-small"],
+      [400, { error: "Route plan does not consume all the amount", errorCode: "ROUTE_PLAN_DOES_NOT_CONSUME_ALL_THE_AMOUNT" }, "amount-too-large"],
+      [400, { error: "Cannot compute other amount threshold", errorCode: "CANNOT_COMPUTE_OTHER_AMOUNT_THRESHOLD" }, "amount-unpriced"],
     ];
     for (const [st, jb, want] of cases) {
       globalThis.fetch = async () => new Response(jb == null ? "oops" : JSON.stringify(jb),
@@ -13536,7 +13860,7 @@ console.log(fails === 0
     + "or an unparseable body) degrades to exactly the three static URLs with a short cache-control "
     + "and is never cached at the edge, while a successful build is cached 24h\n" +
     "[sol round5] /sol/quote failures carry a closed reason (no-route, not-tradable, rate-limited, "
-    + "amount-too-small, upstream, bad-request) derived from status and Jupiter's errorCode only; "
+    + "amount-too-small, amount-too-large, amount-unpriced, upstream, bad-request) derived from status and Jupiter's errorCode only; "
     + "/sol/rpc sendTransaction accepts preflightCommitment \"confirmed\" or no key and rejects every other value"
 
   : "[gt proxy] " + fails + " FAILURES");

@@ -679,9 +679,19 @@ function solTokenCap(maxTokens) {
    شمارشِ همین ردیف‌های دورریخته است. metaMany اختیاری است: یک تماسِ
    دسته‌ای پیش از حلقه‌ی Base که به‌جای N تماسِ metaOf یکی می‌شود؛ غایب یا
    ناموفق (null) یعنی بایت‌به‌بایت همان مسیرِ metaOf تک‌آدرسه‌ی امروز. */
+/* هزینه‌ی بدترین حالتِ هر آیتم، به ساب‌ریکوئستِ شمرده‌شده (fetch + Cache API،
+   نه KV). از اندازه‌گیریِ زنده‌ی ۴ اکتبر ۲۰۲۶ روی /vd/passes (۴۸ گذرِ آخر،
+   ۱۶ تایشان capProbe:"cap"): توکنِ Base ۲ تا ۹ فچ، فالوآپ حدودِ ۱، رِی‌چک
+   ۴ تا ۷ به ازای هر هدف، توکنِ سولانا ۴ تا ۱۲، sol-pools ۲ (دو صفحه). */
+export const COST_BASE_TOKEN = 9;
+export const COST_FOLLOW = 2;
+export const COST_RECHECK = 7;
+export const COST_SOL_TOKEN = 12;
+export const COST_SOL_POOLS = 2;
+
 export async function runReportPass({
   kv, fetchPools, metaOf, verdictOf, now, sleep, maxTokens, poolEmptyOf, fetchPoolsSol, solMaxTokens,
-  probeFetch, meter, capHit, metaMany,
+  probeFetch, meter, capHit, metaMany, budgetLeft,
 }) {
   try {
     // 🔴 بدون انباری برای نوشتن، هیچ تماسِ بالادستی مجاز نیست — قبل از هر
@@ -706,6 +716,28 @@ export async function runReportPass({
       if (typeof capHit !== "function") return false;
       try { return !!capHit(); } catch (e) { return false; }
     }
+    /* budgetLeft اختیاری: چند ساب‌ریکوئستِ شمرده‌شده‌ی دیگر در این اجرا
+       می‌شود خرج کرد. غایب، غیرِتابع، پرتاب‌کننده یا غیرِعدد → Infinity
+       (یعنی هیچ مرحله‌ای به‌خاطرِ بودجه به تعویق نمی‌افتد، دقیقاً مثلِ امروز). */
+    function budgetOk(need) {
+      if (typeof budgetLeft !== "function") return true;
+      let b;
+      try { b = budgetLeft(); } catch (e) { return true; }
+      if (typeof b !== "number" || Number.isNaN(b)) return true;
+      return b >= need;
+    }
+    // تعویق ≠ دورریختن: برای آیتمِ به‌تعویق‌افتاده هیچ‌چیز نوشته نمی‌شود و
+    // گذرِ بعدی دوباره برش می‌دارد (توکن‌ها چون وارد حلقه‌ی pairs نشدند،
+    // هدف‌های فالوآپ/رِی‌چک چون ردیفشان دست‌نخورده ماند).
+    let deferred = 0;
+    let deferredAt = null;
+    function noteDeferred(stage, n) {
+      deferred += n;
+      if (deferredAt === null) deferredAt = stage;
+    }
+    const solQuota = solTokenCap(solMaxTokens);
+    const solReserve = solMaxTokens > 0 && typeof fetchPoolsSol === "function"
+      ? COST_SOL_POOLS + COST_SOL_TOKEN * solQuota : 0;
     // کجا گذر ایستاد (نامِ یکی از REPORT_METER_STAGES) — null یعنی هرگز
     // نایستاد. یک‌بار نوشته می‌شود، اولین مرحله‌ای که سقف را دید می‌برد.
     let stoppedAt = null;
@@ -885,9 +917,13 @@ export async function runReportPass({
         mStage("follow");
         const targets = pickFollowUpTargets(newDoc, nowMs, 3);
         const updates = [];
-        for (const address of targets) {
+        let followDeferredFrom = -1;
+        for (let ti = 0; ti < targets.length; ti++) {
+          const address = targets[ti];
           if (stoppedAt === null && isCapped()) stoppedAt = "follow";
           if (stoppedAt !== null) break; // سقف پیش از این هدف دیده شد
+          // بودجه‌ی برنامه‌ریزی‌شده: این هدف و بقیه‌ی مرحله به تعویق (بدونِ گزینشِ ارزان‌ترها)
+          if (!budgetOk(COST_FOLLOW + solReserve)) { followDeferredFrom = ti; break; }
 
           // هر آدرس تویِ try/catچِ خودش — یک پرتاب یعنی این یکی آدرس رد
           // می‌شود، هرگز یک حدس.
@@ -909,6 +945,7 @@ export async function runReportPass({
           else if (empty === false) updates.push({ address, follow: "pool-there" });
           // null/undefined/هرچیزِ دیگر → اصلاً آپدیتی برای این آدرس نیست
         }
+        if (followDeferredFrom >= 0) noteDeferred("follow", targets.length - followDeferredFrom);
         if (updates.length > 0) {
           const followedDoc = applyFollowUps(newDoc, updates, generatedAt);
           mStage("kv-write");
@@ -940,9 +977,12 @@ export async function runReportPass({
       mStage("recheck");
       const targets = pickRecheckTargets(latestDoc, nowMs, 2);
       const updates = [];
-      for (const t of targets) {
+      for (let ti = 0; ti < targets.length; ti++) {
+        const t = targets[ti];
         if (stoppedAt === null && isCapped()) stoppedAt = "recheck";
         if (stoppedAt !== null) break; // سقف پیش از این هدف دیده شد
+        // بودجه‌ی برنامه‌ریزی‌شده با رزروِ سولانا؛ این هدف و بقیه‌ی مرحله به تعویق
+        if (!budgetOk(COST_RECHECK + solReserve)) { noteDeferred("recheck", targets.length - ti); break; }
 
         recheckTried++;
         // هر هدف تویِ try/catچِ خودش — یک پرتاب یعنی این یکی هدف رد
@@ -1011,7 +1051,12 @@ export async function runReportPass({
        صدا زده نمی‌شود. */
     const builtRowsSol = [];
     let checkedSol = 0;
-    if (typeof fetchPoolsSol === "function" && stoppedAt === null) {
+    // حداقل یک توکنِ سولانا باید در بودجه بجا شود، وگرنه حتی sol-pools صدا زده نمی‌شود
+    // (تعداد توکن‌ها پیش از fetchPoolsSol معلوم نیست؛ خودِ مرحله یک آیتمِ به‌تعویق‌افتاده است)
+    const solPoolsOk = typeof fetchPoolsSol !== "function" || stoppedAt !== null ||
+      budgetOk(COST_SOL_POOLS + COST_SOL_TOKEN);
+    if (!solPoolsOk) noteDeferred("sol-pools", 1);
+    if (typeof fetchPoolsSol === "function" && stoppedAt === null && solPoolsOk) {
       mStage("sol-pools");
       let rawRowsSol;
       try {
@@ -1029,11 +1074,13 @@ export async function runReportPass({
           candidatesSol.push(t);
         }
 
-        const tokensSol = candidatesSol.slice(0, solTokenCap(solMaxTokens));
+        const tokensSol = candidatesSol.slice(0, solQuota);
 
-        for (const t of tokensSol) {
+        for (let ti = 0; ti < tokensSol.length; ti++) {
+          const t = tokensSol[ti];
           if (stoppedAt === null && isCapped()) stoppedAt = "sol-token";
           if (stoppedAt !== null) break;
+          if (!budgetOk(COST_SOL_TOKEN)) { noteDeferred("sol-token", tokensSol.length - ti); break; }
 
           await sleep(REPORT_PACE_MS);
           checkedSol++;
@@ -1134,6 +1181,9 @@ export async function runReportPass({
         // worker/index.js تضمینش می‌کند). هیچ‌کدام آدرس/symbol/URL ندارند.
         discarded,
         stoppedAt,
+        // تعداد و مرحله‌ی اولین تعویقِ بودجه‌ای — فقط عدد/نامِ بسته‌ی مرحله
+        deferred,
+        deferredAt,
         metaBatch,
         capAt: m && m.capAt ? m.capAt : null,
       };
@@ -1149,7 +1199,7 @@ export async function runReportPass({
 
     const result = {
       checked, added: builtRows.length + builtRowsSol.length, addedSol: builtRowsSol.length, followed,
-      rechecked, recheckTried,
+      rechecked, recheckTried, deferred, deferredAt,
     };
     if (capProbe !== undefined) result.capProbe = capProbe;
     // 🔴 غایب‌بودنِ meter یعنی این کلید کلاً روی result هم نمی‌نشیند — نتیجه‌ی

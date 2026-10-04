@@ -33,6 +33,8 @@ SWAP_STEP_COMPONENTS = [
     {"name": "feeTier", "type": "uint24"},
     {"name": "stable", "type": "bool"},
     {"name": "poolFactory", "type": "address"},
+    # ۴ اکتبر — v5: فیلدِ هشتم (Slipstream). بدونِ آن سلکتورِ executeSwap با قرارداد یکی نبود.
+    {"name": "tickSpacing", "type": "int24"},
 ]
 
 ROUTE_PART_COMPONENTS = [
@@ -103,6 +105,7 @@ def build_steps(route: Route) -> list:
             v.fee_tier or 0,
             bool(v.stable) if v.stable is not None else False,
             Web3.to_checksum_address(v.dex.factory),
+            0,  # tickSpacing — روترِ پایتون Slipstream ندارد؛ برای انواعِ دیگر قرارداد آن را نمی‌خواند
         ))
     return steps
 

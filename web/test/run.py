@@ -9477,14 +9477,24 @@ async def main():
         pg_recover, errs_recover = await open_pairs(
             {"chain": "base", "rows": [RECOVER_ROW], "store": True},
             gt_handler=gt_route_recover, extra_routes=[(GOOD_LOGO_URL, serve_tiny_png)])
-        await pg_recover.wait_for_timeout(700)
+        # ۴ اکتبر — لرزش: انتظارِ ثابتِ ۷۰۰ms گاهی کم بود (دیبانسِ جست‌وجو + صفِ لوگو).
+        # حالا تا وقتی شرط برقرار شود صبر می‌کنیم (سقفِ ۸ ثانیه) — خودِ ادعا عوض نشده.
+        for _ in range(80):
+            if recover_calls["n"] >= 1:
+                break
+            await pg_recover.wait_for_timeout(100)
+        await pg_recover.wait_for_timeout(300)
         imgs_before_recover = await pg_recover.eval_on_selector_all("img", "els => els.length")
         calls_before_recover = recover_calls["n"]
         # جست‌وجو -> رندرِ دوباره -> جایگاهِ تازه دوباره صف می‌شود -> این‌بار /gt جواب می‌دهد
         recover_calls["ready"] = True
         await pg_recover.fill("#pairSearch", "RECOV")
-        await pg_recover.wait_for_timeout(700)
-        imgs_after_recover = await pg_recover.eval_on_selector_all("img", "els => els.length")
+        imgs_after_recover = 0
+        for _ in range(80):
+            imgs_after_recover = await pg_recover.eval_on_selector_all("img", "els => els.length")
+            if imgs_after_recover >= 2:
+                break
+            await pg_recover.wait_for_timeout(100)
         await pg_recover.close()
         print("[pairs logos] retry after failure: callsBeforeSearch=%d imgs before=%s "
               "after re-render+gt-recovery=%s gt-calls=%d errors=%s"
@@ -10599,6 +10609,7 @@ async def main():
         # 7) دلیلِ بسته‌ی شکستِ کوت — پیامِ هر دلیل، و تلاشِ دوباره‌ی یک‌باره برای rate-limited
         for reason, want in [("no-route", "No route for this pair right now"), ("not-tradable", "Jupiter does not trade this token."),
                              ("amount-too-small", "Amount too small to route."), ("upstream", "Quote service did not answer."),
+                             ("amount-too-large", "Not enough liquidity for this amount"), ("amount-unpriced", "Could not price this amount"),
                              ("bad-request", "Could not get a quote for this pair.")]:
             qp = await open_sol_swap_page({"v": "sell", "ms": 100}, quote_status=502, quote_reason=reason)
             await qp.fill("#solAmt", "1")

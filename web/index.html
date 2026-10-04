@@ -8503,6 +8503,8 @@ function solQuoteFailMessage(reason,retried){
     case "not-tradable":return "Jupiter does not trade this token.";
     case "rate-limited":return retried?"Quotes are busy — try again in a moment.":"Quotes are busy — retrying in a few seconds.";
     case "amount-too-small":return "Amount too small to route.";
+    case "amount-too-large":return "Not enough liquidity for this amount — try a smaller amount.";
+    case "amount-unpriced":return "Could not price this amount — try a different amount.";
     case "bad-request":return "Could not get a quote for this pair.";
     default:return "Quote service did not answer. Try again in a moment.";
   }
