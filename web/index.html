@@ -72,6 +72,25 @@ if(/^\/t\/[^/]+\/?$/.test(location.pathname)){
 })();
 </script>
 <script>
+/* جلوگیری از فلاشِ نمای غلط: در HTML فقط #view-swap کلاسِ «on» دارد، پس
+   رفتن از /pairs به /app#flow (یا #folio و #faq) اول Swap را رنگ می‌کرد و
+   بعد راه‌انداز نما را عوض می‌کرد. اینجا — پیش از اولین رنگ‌آمیزی و بدون
+   هیچ شبکه‌ای — نامِ نما را از هش می‌خوانیم (همان تجزیه‌ی parseHash: متنِ
+   پیش از «?») و یک attribute روی <html> می‌گذاریم؛ CSSِ پایین با آن نمای
+   درست و دکمه‌ی ناوبری را از همان فریم اول نشان می‌دهد. setView بعد از
+   اجرای روتر attribute را برمی‌دارد. صفحه‌ی توکن (/t/<آدرس>) دست‌نخورده است. */
+(function(){
+  try{
+    if(/^\/t\/[^/]+\/?$/.test(location.pathname))return;
+    var r=location.hash.slice(1);
+    try{r=decodeURIComponent(r);}catch(e){}
+    var i=r.indexOf("?"),n=(i<0?r:r.slice(0,i)).trim();
+    if(n==="folio"||n==="flow"||n==="token"||n==="faq")
+      document.documentElement.setAttribute("data-boot-view",n);
+  }catch(e){}
+})();
+</script>
+<script>
 /* =====================================================================
    گیرنده‌ی خطای سراسری
    =====================================================================
@@ -549,6 +568,13 @@ header>.navPad{grid-column:1;grid-row:1;width:0;min-width:0}
 html,body{overflow-x:hidden;overflow-x:clip;max-width:100%}
 .view{display:none}
 .view.on{display:flex;flex-direction:column;gap:18px}
+/* فلاشِ نمای غلط — قاعده‌ی کامل در اسکریپتِ data-boot-view بالای صفحه. */
+html[data-boot-view] #view-swap.view.on{display:none}
+html[data-boot-view="folio"] #view-folio,html[data-boot-view="flow"] #view-flow,
+html[data-boot-view="token"] #view-token,html[data-boot-view="faq"] #view-faq{display:flex;flex-direction:column;gap:18px}
+html[data-boot-view] .nav button[data-view="swap"].on{background:none;color:var(--tx2);font-weight:inherit;box-shadow:none}
+html[data-boot-view="folio"] .nav button[data-view="folio"],html[data-boot-view="flow"] .nav button[data-view="flow"]{
+  background:var(--card);color:var(--tx);font-weight:620;box-shadow:var(--shs)}
 .chip{
   display:inline-flex;align-items:center;gap:7px;height:38px;padding:0 15px;
   border-radius:999px;background:var(--card);box-shadow:var(--shs);
@@ -1334,6 +1360,10 @@ footer .fine{max-width:78ch;margin:46px 0 0;font-size:11.5px;color:var(--tx3);li
 #flowNetworkSlot{grid-column:2;grid-row:1;justify-self:end}
 #flowTokBtn{grid-column:1;grid-row:2;justify-self:start;margin-left:0!important}
 #flowTfs{grid-column:2;grid-row:2;justify-self:end}
+/* پنج دکمه‌ی بازه کنارِ دکمه‌ی توکن جا نمی‌شود (در ۳۶۰px روی هم می‌افتاد)؛ زیر ۴۸۰px ردیفِ خودش را می‌گیرد
+   و دکمه‌ها کل پهنا را بین خود تقسیم می‌کنند. */
+@media(max-width:480px){#flowTfs{grid-column:1/-1;grid-row:3;justify-self:stretch;margin-left:0}
+  #flowTfs button{flex:1;padding:6px 0;text-align:center}}
 #view-flow>.card>header>.grow{display:none}
 .view #srcChip #srcNetworkIcon{display:flex}
 .view #srcPop svg{object-fit:contain}
@@ -1776,8 +1806,11 @@ try{(function(){
         <span id="flowTokSym">—</span></button>
       <span class="grow"></span>
       <div class="tfs" id="flowTfs" style="padding:3px">
+        <button data-w="m5">5M</button>
+        <button data-w="m15">15M</button>
         <button data-w="h1" class="on">1H</button>
         <button data-w="h6">6H</button>
+        <button data-w="h24">24H</button>
       </div></header>
     <div id="flowBody"><div class="empty intro">
       <span class="eTtl">Pick a token to see who is buying</span>
@@ -5179,6 +5212,15 @@ async function solSetReference(mint){
   solPaintLegs();if(solAccount)solRefreshBalances();solScheduleQuote();
 }
 async function solSelectToken(mint){
+  /* ⚠️ در Flow، SOL قابل انتخاب نبود: ارجاعِ پیش‌فرضِ سواپ خودِ SOL است، پس انتخابِ SOL
+     به شاخه‌ی «mint===solRefMint» می‌افتاد که فقط سمتِ سواپ را برمی‌گرداند و Flow هیچ
+     تغییری نمی‌کرد. اینجا ارجاع را به USDC می‌بریم تا SOL (همان wSOL برای استخر/معاملات)
+     توکنِ جاری شود؛ جفتِ SOL/SOL هم هرگز ساخته نمی‌شود. */
+  if(view==="flow"&&solPickerLeg==="token"&&mint===SOL_MINT_ADDR&&solRefMint===SOL_MINT_ADDR&&solMintCur!==SOL_MINT_ADDR){
+    await solSetReference(SOL_APP_TOKENS.USDC);
+    const side=solSide;await solAppLoadToken(mint);solSide=side;solOnSideChange();
+    solCloseTokenPicker();return;
+  }
   if(solPickerLeg==="reference"){
     if(mint===solMintCur){solSide=solSide==="buy"?"sell":"buy";solOnSideChange();}
     else await solSetReference(mint);
@@ -6141,14 +6183,16 @@ async function renderSolFolio(){
   if(total>0)html+='<div class="stack">'+priced.map((r,i)=>
     `<i style="width:${r.usd/total*100}%;background:${SERIES[i%SERIES.length]}" title="${esc(r.symbol)}"></i>`).join("")+"</div>";
   html+=rows.map((r,i)=>`<div class="frow"><span class="fchip" style="background:${r.usd===null?'var(--line2)':SERIES[i%SERIES.length]}"></span>
-    <span class="av" data-sol-folio="${i}">${esc(r.symbol.slice(0,3))}</span><span><a class="fsym" style="color:var(--tx);text-decoration:none" href="https://solscan.io/${r.native?'account/'+account.address:'token/'+r.mint}" target="_blank" rel="noopener">${esc(r.symbol)}</a><br>
+    <span><a class="fsym" style="color:var(--tx);text-decoration:none" href="https://solscan.io/${r.native?'account/'+account.address:'token/'+r.mint}" target="_blank" rel="noopener">${esc(r.symbol)}</a><br>
     <span class="fbal mono" style="overflow-wrap:anywhere">${esc(r.amount.replace(/\.$/,""))}${!r.native&&r.mint===SOL_MINT_ADDR?' (wrapped)':''}</span></span>
     <span class="fval"><span class="u mono">${r.usd===null?'no price':'$'+r.usd.toLocaleString("en-US",{maximumFractionDigits:2})}</span><br>
     <span class="p mono">${r.usd===null?'excluded':total>0?(r.usd/total*100).toFixed(1)+'%':'0%'}</span></span></div>`).join("");
   if(unknown)html+='<div class="fnote">Tokens without a price are listed but excluded from the known value and percentages.</div>';
   if(allMints.length>SOL_FOLIO_PRICE_MAX)html+='<div class="fnote">Only the first '+SOL_FOLIO_PRICE_MAX+' tokens are priced.</div>';
   body.innerHTML=html;
-  rows.forEach((r,i)=>{const el=body.querySelector(`[data-sol-folio="${i}"]`);if(el)solPaintAvatarIntoEl(el,r.symbol,r.logo,r.mint);});
+  /* ⚠️ ردیفِ Base آواتار ندارد (chip رنگی، نماد/مقدار، ارزش). اینجا یک <span class="av"> بی‌اندازه
+     بین chip و نماد بود: .av در ردیفِ portfolio هیچ width/height ندارد، پس به یک نوارِ ~۲×۶ پیکسلی
+     با حرفِ اولِ بریده‌شده فرومی‌پاشید — همان «ویرگولِ» کنارِ chip. حالا ردیف عینِ Base است. */
 }
 function solFlowTrades(rows,mint,cutoff,now){
   const seen=new Set(),out=[];
@@ -6169,7 +6213,10 @@ function solFlowTrades(rows,mint,cutoff,now){
   return out;
 }
 async function renderSolFlow(){
-  const seq=++flowSeq,mint=solMintCur,body=$("flowBody"),windowHours=flowWindow==="h6"?6:1;
+  const seq=++flowSeq,mint=solMintCur,body=$("flowBody"),w=flowWindow;
+  /* پنجره‌ها (میلی‌ثانیه) — کلیدها همان کلیدهای GeckoTerminal در volume_usd / transactions /
+     price_change_percentage‌اند. */
+  const WIN_MS={m5:300000,m15:900000,h1:3600000,h6:21600000,h24:86400000};
   paintFlowToken();
   const current=()=>seq===flowSeq&&activeChain==="solana"&&mint===solMintCur;
   const SPIN='<div class="empty"><span class="spin"></span>Reading recent Solana trades…</div>';
@@ -6179,62 +6226,93 @@ async function renderSolFlow(){
     if(!tokenPage&&solAppDefaultState!=="failed"){body.innerHTML=SPIN;return;}
     body.innerHTML='<div class="empty intro"><span class="eTtl">Choose a Solana token</span><p>See recent buys, sells and the largest observed trades.</p><button class="chip solid" data-act="pickFlowToken">Choose a token</button></div>';return;
   }
-  body.innerHTML=SPIN;
-  try{
-    const pools=await gtJson(GT+"/networks/solana/tokens/"+mint+"/pools?page=1");
-    if(!current())return;
-    if(!Array.isArray(pools?.data))throw new Error("pool response unavailable");
-    const all=pools.data.filter(p=>{
-      const refs=[p.relationships?.base_token?.data?.id,p.relationships?.quote_token?.data?.id];
-      return refs.includes("solana_"+mint)&&SOL_MINT_RE.test(p.attributes?.address||"");
-    });
-    // ۵ اکتبر — ذخیره‌ی جعلی/کهنه نباید برنده شود: استخرِ زیر ۱۰۰۰ دلار کنار می‌رود و
-    // بین بقیه حجمِ ۲۴ساعته تعیین می‌کند؛ اگر هیچ‌کدام نماند، همان مرتب‌سازیِ قدیمیِ ذخیره.
-    const reserveOf=p=>Number(p.attributes.reserve_in_usd)||0;
-    const volumeOf=p=>Number(p.attributes.volume_usd?.h24)||0;
-    const real=all.filter(p=>reserveOf(p)>=1000);
-    const candidates=real.length
-      ?real.sort((a,b)=>(volumeOf(b)-volumeOf(a))||(reserveOf(b)-reserveOf(a)))
-      :all.sort((a,b)=>reserveOf(b)-reserveOf(a));
-    const pool=candidates[0];
-    if(!pool){body.innerHTML='<div class="empty">No indexed Solana pool was found for this token. Trade history is unavailable; this does not mean it cannot be traded.</div>';return;}
-    const response=await gtJson(GT+"/networks/solana/pools/"+pool.attributes.address+"/trades");
-    if(!current())return;
-    if(!Array.isArray(response?.data))throw new Error("trade response unavailable");
-    const now=Date.now(),trades=solFlowTrades(response.data,mint,now-windowHours*3600000,now);
-    const buys=trades.filter(t=>t.isBuy),sells=trades.filter(t=>!t.isBuy);
-    const sum=a=>a.reduce((n,t)=>n+(t.usd??0),0),bought=sum(buys),sold=sum(sells),total=bought+sold,net=bought-sold;
-    const unpriced=trades.some(t=>t.usd===null),anyPriced=trades.some(t=>t.usd!==null);
-    const money=v=>anyPriced?"$"+Math.round(v).toLocaleString():"—";
-    let h="";
-    if(!trades.length)h+=`<div class="empty">No trades from this pool in the last ${windowHours}h of the returned sample. Activity outside this sample is unknown.</div>`;
-    else{
-      if(total>0)h+=`<div class="flowbarCap"><span style="color:var(--pos)">Bought ${((bought/total)*100).toFixed(0)}%</span><span style="color:var(--neg)">Sold ${((sold/total)*100).toFixed(0)}%</span></div>
-        <div class="flowbar"><i style="width:${((bought/total)*100).toFixed(1)}%;background:var(--pos)"></i><i style="width:${((sold/total)*100).toFixed(1)}%;background:var(--neg)"></i></div>`;
-      if(unpriced)h+='<div class="fnote">Dollar totals and percentages include priced trades only.</div>';
-      h+=`<div class="flowkv"><span class="k">Bought</span><span class="mono" style="color:var(--pos)">${money(bought)}</span></div>
-        <div class="flowkv"><span class="k">Sold</span><span class="mono" style="color:var(--neg)">${money(sold)}</span></div>
-        <div class="flowkv"><span class="k">Net</span><span class="mono" style="color:${net>=0?"var(--pos)":"var(--neg)"}">${anyPriced?(net>=0?"+":"−")+money(Math.abs(net)):"—"}</span></div>
-        <div class="flowkv"><span class="k">Swaps</span><span class="mono">${buys.length} buys · ${sells.length} sells</span></div>`;
+  /* ⚠️ عوض‌کردنِ فقط پنجره نباید دوباره استخر/معاملات را بگیرد: آخرین
+     {mint,pool,trades,fetchedAt} ۶۰ ثانیه نگه داشته می‌شود و رندر از روی آن
+     انجام می‌شود. (کشِ تابع روی خودِ تابع است تا تابع خودکفا بماند.) */
+  let cache=renderSolFlow._cache;
+  const fresh=cache&&cache.mint===mint&&Date.now()-cache.fetchedAt<60000;
+  if(!fresh){
+    body.innerHTML=SPIN;
+    try{
+      const pools=await gtJson(GT+"/networks/solana/tokens/"+mint+"/pools?page=1");
+      if(!current())return;
+      if(!Array.isArray(pools?.data))throw new Error("pool response unavailable");
+      const all=pools.data.filter(p=>{
+        const refs=[p.relationships?.base_token?.data?.id,p.relationships?.quote_token?.data?.id];
+        return refs.includes("solana_"+mint)&&SOL_MINT_RE.test(p.attributes?.address||"");
+      });
+      // ۵ اکتبر — ذخیره‌ی جعلی/کهنه نباید برنده شود: استخرِ زیر ۱۰۰۰ دلار کنار می‌رود و
+      // بین بقیه حجمِ ۲۴ساعته تعیین می‌کند؛ اگر هیچ‌کدام نماند، همان مرتب‌سازیِ قدیمیِ ذخیره.
+      const reserveOf=p=>Number(p.attributes.reserve_in_usd)||0;
+      const volumeOf=p=>Number(p.attributes.volume_usd?.h24)||0;
+      const real=all.filter(p=>reserveOf(p)>=1000);
+      const candidates=real.length
+        ?real.sort((a,b)=>(volumeOf(b)-volumeOf(a))||(reserveOf(b)-reserveOf(a)))
+        :all.sort((a,b)=>reserveOf(b)-reserveOf(a));
+      const pool=candidates[0];
+      if(!pool){body.innerHTML='<div class="empty">No indexed Solana pool was found for this token. Trade history is unavailable; this does not mean it cannot be traded.</div>';return;}
+      // مجموع‌ها از صفات‌ِ استخر می‌آیند؛ معاملات فقط برای «Largest buys» است و شکستش کلِ کارت را نمی‌اندازد.
+      let trades=null;
+      try{
+        const response=await gtJson(GT+"/networks/solana/pools/"+pool.attributes.address+"/trades");
+        if(Array.isArray(response?.data))trades=response.data;
+      }catch{trades=null;}
+      if(!current())return;
+      cache=renderSolFlow._cache={mint,pool,trades,fetchedAt:Date.now()};
+    }catch{
+      if(!current())return;
+      body.innerHTML='<div class="empty">Solana trade history could not be loaded. Activity is unknown, not zero. Quotes and swaps are unaffected.</div>';
+      return;
     }
-    h+=`<div class="flowkv"><span class="k">Pool</span><a class="mono" style="font-size:12px;color:var(--tx3)" target="_blank" rel="noopener" href="https://solscan.io/account/${pool.attributes.address}">${esc(pool.attributes.name||shortAddr(pool.attributes.address))}</a></div>`;
+  }
+  try{
+    const {pool,trades:sample}=cache,attrs=pool.attributes;
+    const now=Date.now(),winMs=WIN_MS[w]||WIN_MS.h1;
+    // عددِ نامعتبر/غایب «—» می‌شود، هرگز ۰ (رشته‌ی خالی هم عدد نیست).
+    const num=v=>{if(v==null||(typeof v==="string"&&v.trim()===""))return null;const n=Number(v);return Number.isFinite(n)?n:null;};
+    const cnt=v=>{const n=num(v);return n!==null&&n>=0?n:null;};
+    const tx=attrs.transactions?.[w];
+    const vol=cnt(attrs.volume_usd?.[w]),nBuys=cnt(tx?.buys),nSells=cnt(tx?.sells),
+      nBuyers=cnt(tx?.buyers),nSellers=cnt(tx?.sellers),chg=num(attrs.price_change_percentage?.[w]);
+    const fmtN=v=>v===null?"—":Math.round(v).toLocaleString();
+    let h="";
+    if(nBuys!==null&&nSells!==null&&nBuys+nSells>0){
+      const tot=nBuys+nSells,bp=nBuys/tot*100,sp=nSells/tot*100;
+      h+=`<div class="flowbarCap"><span style="color:var(--pos)">Buys ${bp.toFixed(0)}% <span style="color:var(--tx3)">· by count</span></span><span style="color:var(--neg)">Sells ${sp.toFixed(0)}%</span></div>
+        <div class="flowbar"><i style="width:${bp.toFixed(1)}%;background:var(--pos)"></i><i style="width:${sp.toFixed(1)}%;background:var(--neg)"></i></div>`;
+    }
+    const who=(n,label)=>n===null?"":` <span style="color:var(--tx3);font-size:12px">· ${fmtN(n)} ${label}</span>`;
+    h+=`<div class="flowkv"><span class="k">Volume</span><span class="mono">${vol===null?"—":"$"+fmtN(vol)}</span></div>
+      <div class="flowkv"><span class="k">Buys</span><span class="mono" style="color:var(--pos)">${fmtN(nBuys)}${who(nBuyers,"buyers")}</span></div>
+      <div class="flowkv"><span class="k">Sells</span><span class="mono" style="color:var(--neg)">${fmtN(nSells)}${who(nSellers,"sellers")}</span></div>
+      <div class="flowkv"><span class="k">Price</span><span class="mono" style="color:${chg===null?"var(--tx)":chg>=0?"var(--pos)":"var(--neg)"}">${chg===null?"—":(chg>=0?"+":"−")+Math.abs(chg).toFixed(2)+"%"}</span></div>`;
+    h+=`<div class="flowkv"><span class="k">Pool</span><a class="mono" style="font-size:12px;color:var(--tx3)" target="_blank" rel="noopener" href="https://solscan.io/account/${attrs.address}">${esc(attrs.name||shortAddr(attrs.address))}</a></div>`;
+    const list=Array.isArray(sample)?solFlowTrades(sample,mint,now-winMs,now):[];
+    const buys=list.filter(t=>t.isBuy);
     const counts=new Map();buys.forEach(t=>{if(t.who)counts.set(t.who,(counts.get(t.who)||0)+1);});
     const largest=buys.filter(t=>t.usd!==null).sort((a,b)=>b.usd-a.usd).slice(0,5);
+    // اگر قدیمی‌ترین معاملهٔ نمونه از شروعِ پنجره جدیدتر است، نمونه کلِ پنجره را نمی‌پوشاند.
+    let hint="";
+    const times=Array.isArray(sample)?sample.map(r=>Date.parse(r?.attributes?.block_timestamp)).filter(Number.isFinite):[];
+    if(times.length){
+      const oldest=Math.min(...times);
+      if(oldest>now-winMs)hint=` · from the last ${times.length} trades (covers ~${Math.max(1,Math.round((now-oldest)/60000))}m)`;
+    }
     if(largest.length){
       h+=`<div class="frow" style="color:var(--tx3);font-size:11px;letter-spacing:.05em;
            text-transform:uppercase;padding-bottom:2px">Largest buys
            <span style="text-transform:none;letter-spacing:0;color:var(--tx3)"
-             title="From the transaction's reported sender. For trades sent through an aggregator or router, this is that contract, not the trader.">· sender address</span></div>`;
+             title="From the transaction's reported sender. For trades sent through an aggregator or router, this is that contract, not the trader.">· sender address</span>${hint?`<span data-sample-hint style="text-transform:none;letter-spacing:0;color:var(--tx3)">${esc(hint)}</span>`:""}</div>`;
       for(const t of largest){
         h+=`<div class="trade"><span class="fchip" style="background:var(--pos)"></span>
-          <span class="amt2 mono">${money(t.usd)}</span>
+          <span class="amt2 mono">${"$"+Math.round(t.usd).toLocaleString()}</span>
           ${t.who?`<a class="mono" style="font-size:11.5px;color:var(--tx3)" target="_blank" rel="noopener" href="https://solscan.io/account/${t.who}">${shortAddr(t.who)}</a>`:'<span style="color:var(--tx3);font-size:11.5px">unknown trader</span>'}
           ${t.who&&counts.get(t.who)>1?`<span class="vtag" style="margin-left:0">×${counts.get(t.who)}</span>`:""}
           <span class="ago">${Math.max(0,Math.floor((now-t.time)/60000))}m ago</span>
           ${t.signature?`<a style="color:var(--tx3);font-size:11.5px" target="_blank" rel="noopener" href="https://solscan.io/tx/${t.signature}">View</a>`:""}</div>`;
       }
     }
-    h+=`<div class="fnote">Recent trades from GeckoTerminal (up to 300, from the busiest pool). Totals cover that sample, not every pool. Addresses are the reported transaction senders, which can include routers. This is <b>flow, not a forecast</b>.</div>`;
+    h+=`<div class="fnote">Volume, buys and sells are GeckoTerminal's totals for this pool over the selected window. Largest buys come from its recent-trade sample. Addresses are the reported transaction senders, which can include routers. This is <b>flow, not a forecast</b>.</div>`;
     body.innerHTML=h;
   }catch{
     if(!current())return;
@@ -6368,7 +6446,12 @@ async function deepestV3Pool(token){
    کوت می‌گیرد، و اگر کیف پول وصل باشد از اتصال خودِ کاربر. هیچ سرویس
    سومی در مسیر نیست.
    ===================================================================== */
-const WINDOWS={h1:{label:"1 hour",blocks:1800},h6:{label:"6 hours",blocks:10800}};
+/* بازه‌ها به بلوک‌اند؛ Base بلوکِ ۲ ثانیه‌ای دارد (۱۸۰۰ بلوک = ۱ ساعت). خواندنِ
+   ۲۴ ساعته حدود ۳۰ تکه‌ی getLogs است و تکه‌ی ناموفق همان یادداشتِ پوششِ
+   «We could only read X of Y hours» را می‌دهد، نه رقمِ نصفه‌ی بی‌صدا. */
+const WINDOWS={m5:{label:"5 minutes",blocks:150},m15:{label:"15 minutes",blocks:450},
+  h1:{label:"1 hour",blocks:1800},h6:{label:"6 hours",blocks:10800},
+  h24:{label:"24 hours",blocks:43200}};
 
 async function renderFlow(){
   if(activeChain==="solana")return solRunView("flow",renderSolFlow);
@@ -7836,8 +7919,14 @@ function renderSolExit(v,why,targetId,basis,ret,cause){
     return;
   }
   if(targetId==="appSolExitBox"){
+    /* ۵ اکتبر — کارتِ Exit check روی /app در Base برای «مسیر فروش هست» هیچ بلوکِ سبزِ جداگانه‌ای
+       ندارد (نشانِ Sell pill کافی است). اینجا هم همان: حکمِ زنده‌ی sell چیزی نمی‌نویسد.
+       فقط وقتی حکم از روی قیمت‌ها (basis:"quote") آمده، هشدارِ «شبیه‌سازیِ واقعی نبود»
+       می‌ماند — نادانستن نباید شبیهِ اطمینان شود — ولی بدونِ عنوانِ «Sell route found».
+       صفحه‌ی توکن (/t/<mint>) دست‌نخورده است. */
+    if(v==="sell"&&basis!=="quote"){box.innerHTML="";return;}
     const tone=v==="sell"?"var(--pos)":v==="nosell"?"var(--neg)":"var(--warn)";
-    const title=v==="sell"?"Sell route found":v==="nosell"?"You may not be able to sell this back":"Exit not tested";
+    const title=v==="sell"?"Exit estimated from quotes":v==="nosell"?"You may not be able to sell this back":"Exit not tested";
     const badge=v==="sell"?(basis==="quote"?"Estimated from quotes":"Quoted just now"):v==="nosell"?"No sell route":"Unknown";
     const bg=v==="sell"?(basis==="quote"?"var(--raise)":"var(--pglow)"):v==="nosell"?"color-mix(in srgb,var(--neg) 14%,transparent)":"color-mix(in srgb,var(--warn) 14%,transparent)";
     const note=v==="sell"?(basis==="quote"?"From quotes — the fee-payer already holds this token, so we could not run a live round trip."+(typeof ret==="number"?" "+ret.toFixed(1)+"% back.":""):"A sell route was quoted just now."):v==="nosell"?(cause==="empty-pool"?"The returned indexed pools report zero liquidity. Other pools may exist.":"No sell route quoted — you may not be able to exit."):"We could not confirm this token can be sold back.";
@@ -9548,6 +9637,8 @@ function setView(v,push){
   document.documentElement.classList.add("ctaReady");
   document.querySelectorAll(".view").forEach(el=>el.classList.toggle("on",el.id==="view-"+v));
   $("nav").querySelectorAll("[data-view]").forEach(b=>b.classList.toggle("on",b.dataset.view===v));
+  // روتر اجرا شد؛ attributeِ فلاشِ بوت دیگر لازم نیست (کلاس‌های «on» حالا درست‌اند).
+  document.documentElement.removeAttribute("data-boot-view");
   if(push!==false&&parseHash().view!==v)location.hash=v;
   // فقط وقتی نما باز می‌شود داده می‌گیریم — نه در پس‌زمینه
   if(v==="folio")renderFolio();
@@ -9559,12 +9650,26 @@ function setView(v,push){
   ev("view:"+v);
   scrollTo({top:0,behavior:"instant"});
 }
+/* ⚠️ عوض‌کردنِ بازه‌ی زمانی هم renderFlow و paintFlowToken را صدا می‌زند؛ بازنقاشیِ
+   آواتار با هر بار، لوگو را پاک و دوباره بار می‌کرد و سوسو می‌زد. حالا فقط وقتی
+   توکن (یا لوگو/نمادش) واقعاً عوض شده نقاشی می‌شود؛ کلیدِ آخر روی خودِ عنصر می‌ماند. */
 function paintFlowToken(){
+  const av=$("flowTokAv");
   if(activeChain==="solana"){
-    solPaintAvatarInto("flowTokAv",solTokenSymbol,solTokenLogoUrl,solMintCur);
-    $("flowTokSym").textContent=solTokenSymbol||"Choose token";return;
+    // SOL همان لوگوی واقعیِ wSOL (یا گرادیانِ جایگزین) را می‌گیرد که جای دیگر هم دارد.
+    const isSol=solMintCur===SOL_MINT_ADDR;
+    const key="sol|"+(solMintCur||"")+"|"+(isSol?"SOL|"+solWsolLogoUrl:(solTokenSymbol||"")+"|"+(solTokenLogoUrl||""));
+    if(av&&av._flowKey!==key){
+      av._flowKey=key;
+      if(isSol){
+        solPaintSolChip("flowTokAv");
+        if(solWsolLogoUrl===undefined)solEnsureWsolLogo().then(()=>{if(view==="flow")paintFlowToken();});
+      }else solPaintAvatarInto("flowTokAv",solTokenSymbol,solTokenLogoUrl,solMintCur);
+    }
+    $("flowTokSym").textContent=solMintCur===SOL_MINT_ADDR?"SOL":(solTokenSymbol||"Choose token");return;
   }
-  paintAvatar($("flowTokAv"),tokenOut);
+  const bkey="base|"+(tokenOut?(tokenOut.native?"native":tokenOut.address)+"|"+tokenOut.symbol:"");
+  if(av&&av._flowKey!==bkey){av._flowKey=bkey;paintAvatar(av,tokenOut);}
   $("flowTokSym").textContent=tokenOut?tokenOut.symbol:"—";
 }
 

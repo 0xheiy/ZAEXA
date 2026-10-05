@@ -6921,6 +6921,103 @@ async def main():
             "the Coverage row needs its own border so the split bar underneath it does not read " \
             "as belonging to Coverage: style=%r" % cov_m.group(1)
 
+        # ---- [flow tf] r10 — پنج بازه‌ی زمانی (5M/15M/1H/6H/24H) روی Base ----
+        # هر بازه باید دقیقاً همان‌قدر بلوک بخواند (Base بلوکِ ۲ثانیه‌ای: ۱۸۰۰ بلوک = ۱ ساعت)؛ ۲۴ساعته
+        # تکه‌تکه می‌شود و تکه‌ی ناموفق باید یادداشتِ پوشش بدهد، نه رقمِ نصفه‌ی بی‌صدا.
+        flow_tf = await pg.evaluate("""async () => {
+            const realGetLogs = ethers.JsonRpcProvider.prototype.getLogs;
+            const ser = (x) => JSON.stringify(x, (k, v) => (typeof v === "bigint" ? { __b: v.toString() } : v));
+            const toHex = (s) => "0x" + Array.from(new TextEncoder().encode(s)).map(b => b.toString(16).padStart(2, "0")).join("");
+            let dead = null; const calls = [];
+            ethers.JsonRpcProvider.prototype.getLogs = async function (f) {
+                const from = f.fromBlock, to = f.toBlock; calls.push([from, to]);
+                if (to - from > 2000) throw Object.assign(new Error("range"), { code: "SERVER_ERROR" });
+                if (dead && dead(from)) throw Object.assign(new Error("hiccup"), { code: "SERVER_ERROR" });
+                const logs = [];
+                for (let b = Math.ceil(from / 97) * 97; b <= to; b += 97) {
+                    const isBuy = (b % 2) === 0, our = BigInt(1 + (b % 5)) * 10n ** 17n, ref = BigInt(200 + (b % 7) * 100) * 10n ** 6n;
+                    logs.push({ blockNumber: b, data: toHex(ser({ amount0: isBuy ? -our : our, amount1: isBuy ? ref : -ref,
+                        recipient: "0x" + (b % 3 + 17).toString(16).repeat(20).slice(0, 40) })) });
+                }
+                return logs;
+            };
+            const settle = async () => { for (let i = 0; i < 120; i++) { await new Promise(r => setTimeout(r, 50));
+                if (!document.getElementById("flowBody").innerText.includes("Reading swaps")) break; } };
+            const av = document.getElementById("flowTokAv");
+            const muts = []; const mo = new MutationObserver(rs => rs.forEach(r => muts.push(r.type)));
+            mo.observe(av, { childList: true, subtree: true, characterData: true });
+            const realErr = console.error; console.error = () => {};
+            const out = { labels: Array.from(document.querySelectorAll("#flowTfs [data-w]")).map(b => [b.dataset.w, b.textContent.trim()]), runs: {} };
+            const mark = av; mark.__probe = "same-node";
+            for (const id of ["m5", "m15", "h1", "h6", "h24"]) {
+                calls.length = 0; dead = null;
+                document.querySelector('#flowTfs [data-w="' + id + '"]').click();
+                await settle();
+                out.runs[id] = { n: calls.length, span: calls.length ? Math.max(...calls.map(c => c[1])) - Math.min(...calls.map(c => c[0])) : -1,
+                    maxChunk: calls.length ? Math.max(...calls.map(c => c[1] - c[0])) : -1,
+                    on: Array.from(document.querySelectorAll("#flowTfs .on")).map(b => b.dataset.w),
+                    text: document.getElementById("flowBody").innerText };
+            }
+            out.avMutations = muts.length + mo.takeRecords().length;
+            out.sameNode = document.getElementById("flowTokAv") === av && av.__probe === "same-node";
+            // ۲۴ساعته با دو تکه‌ی همیشه‌شکست‌خورده
+            const deadSet = new Set();
+            calls.length = 0; dead = (from) => { if (deadSet.size < 2) deadSet.add(from); return deadSet.has(from); };
+            document.querySelector('#flowTfs [data-w="h24"]').click(); await settle();
+            out.h24partial = document.getElementById("flowBody").innerText;
+            console.error = realErr; mo.disconnect();
+            ethers.JsonRpcProvider.prototype.getLogs = realGetLogs; dead = null;
+            document.querySelector('#flowTfs [data-w="h1"]').click(); await settle();
+            return out;
+        }""")
+        print("[flow tf] buttons=%s" % flow_tf["labels"])
+        assert flow_tf["labels"] == [["m5", "5M"], ["m15", "15M"], ["h1", "1H"], ["h6", "6H"], ["h24", "24H"]], \
+            "[flow tf] the Money Flow buttons must be 5M, 15M, 1H, 6H, 24H: %s" % flow_tf["labels"]
+        for tf_id, tf_blocks in (("m5", 150), ("m15", 450), ("h1", 1800), ("h6", 10800), ("h24", 43200)):
+            tf_run = flow_tf["runs"][tf_id]
+            print("[flow tf %s] span=%d requests=%d maxChunk=%d on=%s" % (tf_id, tf_run["span"], tf_run["n"], tf_run["maxChunk"], tf_run["on"]))
+            assert tf_run["span"] == tf_blocks, "[flow tf] %s must read exactly %d blocks, read %d" % (tf_id, tf_blocks, tf_run["span"])
+            assert tf_run["on"] == [tf_id], "[flow tf] clicking %s must mark only that button active: %s" % (tf_id, tf_run["on"])
+            assert tf_run["maxChunk"] <= 1500, "[flow tf] %s: a chunk exceeds the 1500-block cap" % tf_id
+            assert "Net" in tf_run["text"], "[flow tf] %s did not render: %r" % (tf_id, tf_run["text"][:120])
+            assert "We could only read" not in tf_run["text"], "[flow tf] %s: a fully answered window must not claim partial coverage" % tf_id
+        assert flow_tf["runs"]["h24"]["n"] >= 28, "[flow tf] 24H must be chunked into ~29 requests: %d" % flow_tf["runs"]["h24"]["n"]
+        assert flow_tf["runs"]["m5"]["n"] == 1 and flow_tf["runs"]["m15"]["n"] == 1, "[flow tf] short windows are a single request"
+        assert re.search(r"We could only read [\d.]+ of 24 hours", flow_tf["h24partial"]), \
+            "[flow tf] 24H with failing chunks must say 'We could only read X of 24 hours', not show a silent partial: %r" % flow_tf["h24partial"][-300:]
+        print("[flow tf] 24H with failing chunks says: %r" % re.search(r"We could only read [\d.]+ of 24 hours", flow_tf["h24partial"]).group(0))
+        # [flow logo] — با عوض‌کردنِ بازه آواتارِ توکن نباید دوباره نقاشی شود (Base)
+        print("[flow logo] base: avatar childList mutations over 5 window switches=%d sameNode=%s" % (flow_tf["avMutations"], flow_tf["sameNode"]))
+        assert flow_tf["avMutations"] == 0 and flow_tf["sameNode"], \
+            "[flow logo] switching windows must not repaint the token avatar (Base): mutations=%d" % flow_tf["avMutations"]
+        # موبایلِ ۳۶۰: پنج دکمه بدونِ شکستنِ خط، بدونِ سرریز از کارت و بدونِ افتادن روی دکمه‌ی توکن
+        vp0 = pg.viewport_size
+        await pg.set_viewport_size({"width": 360, "height": 800}); await pg.wait_for_timeout(300)
+        tf_geo = await pg.evaluate("""() => { const t = document.getElementById("flowTfs"), c = t.closest(".card"), k = document.getElementById("flowTokBtn");
+            const cr = c.getBoundingClientRect(), cs = getComputedStyle(c), tr = t.getBoundingClientRect(), kr = k.getBoundingClientRect();
+            const bs = Array.from(t.querySelectorAll("button")).map(b => b.getBoundingClientRect());
+            return { n: bs.length, tops: bs.map(r => Math.round(r.top)), hs: bs.map(r => Math.round(r.height)),
+                     left: Math.min(...bs.map(r => r.left)), right: Math.max(...bs.map(r => r.right)),
+                     innerL: cr.left + parseFloat(cs.paddingLeft), innerR: cr.right - parseFloat(cs.paddingRight),
+                     tfsTop: tr.top, tokBottom: kr.bottom, tokRight: kr.right, tfsLeft: tr.left,
+                     sw: document.documentElement.scrollWidth, iw: innerWidth,
+                     wraps: Array.from(t.querySelectorAll("button")).some(b => b.scrollWidth > b.clientWidth + 1) }; }""")
+        await pg.screenshot(path="/tmp/claude-0/r10_shots/base-flow-360.png")
+        await pg.set_viewport_size(vp0); await pg.wait_for_timeout(300)
+        # عکسِ Base Flow ۲۴H، تم تیره، ۱۴۴۰ (فقط برای بازبینی؛ attribute بعد برمی‌گردد)
+        await pg.evaluate("document.documentElement.setAttribute('data-theme', 'dark')")
+        await pg.click('#flowTfs [data-w="h24"]'); await pg.wait_for_timeout(1500)
+        await pg.screenshot(path="/tmp/claude-0/r10_shots/base-flow-24h-dark-1440.png")
+        await pg.evaluate("document.documentElement.setAttribute('data-theme', theme)")
+        await pg.click('#flowTfs [data-w="h1"]'); await pg.wait_for_timeout(600)
+        print("[flow tf mobile 360] %s" % tf_geo)
+        assert tf_geo["n"] == 5 and len(set(tf_geo["tops"])) == 1 and max(tf_geo["hs"]) <= 40, "[flow tf] the five buttons must stay on one line at 360px: %s" % tf_geo
+        assert tf_geo["left"] >= tf_geo["innerL"] - 1 and tf_geo["right"] <= tf_geo["innerR"] + 1 and tf_geo["sw"] <= tf_geo["iw"], \
+            "[flow tf] the buttons overflow the card at 360px: %s" % tf_geo
+        assert tf_geo["tfsTop"] >= tf_geo["tokBottom"] - 1 or tf_geo["tfsLeft"] >= tf_geo["tokRight"], \
+            "[flow tf] the button group sits on top of the token button at 360px: %s" % tf_geo
+        assert not tf_geo["wraps"], "[flow tf] a button label is clipped at 360px: %s" % tf_geo
+
         await pg.screenshot(path=os.path.join(HERE, "shot-flow.png"), full_page=True)
 
         await pg.click('#nav [data-view="folio"]'); await pg.wait_for_timeout(500)
@@ -11598,10 +11695,29 @@ async def main():
         SF_WHO_A, SF_WHO_B = sf_b58(40), sf_b58(41)
         sf_sig = lambda n: carry_b58(list(range(n, n + 64)))
 
-        def sf_pool(addr, name, reserve, vol, mint=SF_USDC):
-            return {"id": "solana_" + addr, "attributes": {
-                        "address": addr, "name": name, "reserve_in_usd": str(reserve),
-                        "volume_usd": {"h24": str(vol)}},
+        # ۵ اکتبر (r10) — GeckoTerminal در صفاتِ استخر برای هر پنجره عددِ دقیقِ کلِ استخر می‌دهد:
+        # volume_usd و price_change_percentage رشته‌اند، transactions عددی (همان شکلِ واقعی).
+        SF_WIN = {
+            "m5":  ("412345.6",   120,   80,   90,   60, "0.12"),
+            "m15": ("1250000.4",  380,  250,  260,  170, "-0.31"),
+            "h1":  ("5100000.9", 1500, 1100,  800,  600, "0.85"),
+            "h6":  ("28750000.2", 8200, 7300, 3100, 2900, "-2.40"),
+            "h24": ("98400000.7", 31000, 29000, 9000, 8800, "4.75"),
+        }
+        def sf_windows(win=None):
+            win = SF_WIN if win is None else win
+            vol, tx, pc = {}, {}, {}
+            for k, v in win.items():
+                if v is None:
+                    continue
+                vol[k] = v[0]; tx[k] = {"buys": v[1], "sells": v[2], "buyers": v[3], "sellers": v[4]}; pc[k] = v[5]
+            return {"volume_usd": vol, "transactions": tx, "price_change_percentage": pc}
+
+        def sf_pool(addr, name, reserve, vol, mint=SF_USDC, win=False):
+            attrs = {"address": addr, "name": name, "reserve_in_usd": str(reserve), "volume_usd": {"h24": str(vol)}}
+            if win is not False:                 # None = فیکسچرِ کاملِ SF_WIN؛ dict = پنجره‌های دلخواه (کلیدِ غایب = صفتِ غایب)
+                attrs.update(sf_windows(win))
+            return {"id": "solana_" + addr, "attributes": attrs,
                     "relationships": {"base_token": {"data": {"id": "solana_" + mint, "type": "token"}},
                                       "quote_token": {"data": {"id": "solana_" + SOL_MINT_ADDR, "type": "token"}}}}
 
@@ -11621,7 +11737,7 @@ async def main():
 
         SF_POOLS_MAIN = {"data": [
             sf_pool(SF_POOL_APT, "APT / USDC", 5_000_000, 10),
-            sf_pool(SF_POOL_SOL, "SOL / USDC", 3_000_000, 9_000_000),
+            sf_pool(SF_POOL_SOL, "SOL / USDC", 3_000_000, 9_000_000, win=None),
             sf_pool(SF_POOL_JUNK, "JUNK / USDC", 500, 1e9)]}
 
         SF_INTRO_WATCH = """
@@ -11636,13 +11752,16 @@ async def main():
 """
 
         async def sf_page(w=1440, h=900, scheme="light", hash_="#flow?chain=solana", pools=None,
-                          pools_requests=None, trades_requests=None, delay=0.0, intro_watch=False, errs=None):
+                          pools_requests=None, trades_requests=None, delay=0.0, intro_watch=False, errs=None,
+                          path="/app", init=None, rpc=None, multi=None, vd='{"v":"sell","ms":100}'):
             spg = await b.new_page(viewport={"width": w, "height": h}, color_scheme=scheme)
             if errs is not None:
                 spg.on("console", lambda m: errs.append(m.text) if m.type == "error" and (m.location.get("url") or "").startswith(CARRY_ORIGIN) else None)
                 spg.on("pageerror", lambda e: errs.append("PAGEERROR " + str(e)))
             if intro_watch:
                 await spg.add_init_script(SF_INTRO_WATCH)
+            for script_ in (init or []):
+                await spg.add_init_script(script_)
             async def s_ext(route): await route.abort()
             async def s_ok(route, body='{"data":[]}'):
                 await route.fulfill(status=200, content_type="application/json", body=body)
@@ -11659,14 +11778,19 @@ async def main():
                         pools_requests.append(u)
                     await s_ok(route, _json.dumps(pools if pools is not None else SF_POOLS_MAIN))
                 elif "/tokens/multi/" in u:
-                    await s_ok(route)
+                    await s_ok(route, _json.dumps(multi) if multi is not None else '{"data":[]}')
                 elif "/tokens/" in u:
                     await s_ok(route, _json.dumps({"data": {"attributes": {"name": "USD Coin", "symbol": "USDC", "decimals": 6, "price_usd": "1"}}}))
                 else:
                     await s_ok(route)
             async def s_ev(route): await route.fulfill(status=204, body="")
-            async def s_vd(route): await s_ok(route, '{"v":"sell","ms":100}')
-            async def s_sol(route): await s_ok(route, '{"result":null}')
+            async def s_vd(route): await s_ok(route, vd)
+            async def s_sol(route):
+                if rpc is not None and route.request.url.split("?")[0].endswith("/rpc"):
+                    pl = _json.loads(route.request.post_data or "{}")
+                    await s_ok(route, _json.dumps({"result": rpc(pl.get("method"), pl.get("params"))}))
+                else:
+                    await s_ok(route, '{"result":null}')
             async def s_pairs(route):
                 await s_ok(route, _json.dumps({"chain": "solana", "rows": [], "store": True}))
             await spg.route("**/*", lambda r: r.continue_() if r.request.url.startswith(CARRY_ORIGIN) else s_ext(r))
@@ -11675,7 +11799,7 @@ async def main():
             await spg.route("**/vd/**", s_vd)
             await spg.route("**/sol/**", s_sol)
             await spg.route("**/pairs.json**", s_pairs)
-            await spg.goto(CARRY_ORIGIN + "/app" + hash_)
+            await spg.goto(CARRY_ORIGIN + path + hash_)
             return spg
 
         sf_errs = []
@@ -11726,43 +11850,288 @@ async def main():
             await spg.wait_for_selector("#flowBody .flowkv", timeout=15000)
             m1 = await spg.evaluate(SF_MEASURE)
             await spg.click('#flowTfs [data-w="h6"]')
-            await spg.wait_for_function("() => document.getElementById('flowBody').innerText.includes('109,651')", timeout=15000)
+            await spg.wait_for_function("() => document.getElementById('flowBody').innerText.includes('28,750,000')", timeout=15000)
             m6 = await spg.evaluate(SF_MEASURE)
             await spg.close()
             for tag, m in (("1H", m1), ("6H", m6)):
                 print("[sol flow2 layout %dpx %s] h3=%d keys=%s hdr=%s links=%d outside=%s trades=%d fnotes=%d"
                       % (sf_w, tag, m["h3"], m["keys"], m["hdr"][:1], len(m["links"]), m["outside"], m["trades"], m["notes"]))
                 assert m["h3"] == 0, "[sol flow2] %s: no <h3> may appear inside the flow card (Base has none)" % tag
-                assert m["keys"] == ["Bought", "Sold", "Net", "Swaps", "Pool"], "[sol flow2] %s: rows must match Base: %s" % (tag, m["keys"])
-                assert m["cap"] and m["bar"] and "Bought" in m["text"] and "Sold" in m["text"], "[sol flow2] %s: flowbar + caption missing" % tag
+                # r10: ردیف‌ها حالا مجموع‌های دقیقِ استخر در پنجره‌اند (حجم/خرید/فروش/قیمت)، نه جمعِ نمونه‌ی ۳۰۰تایی
+                assert m["keys"] == ["Volume", "Buys", "Sells", "Price", "Pool"], "[sol flow2] %s: rows must be the window totals: %s" % (tag, m["keys"])
+                assert m["cap"] and m["bar"] and "Buys" in m["text"] and "Sells" in m["text"], "[sol flow2] %s: flowbar + caption missing" % tag
                 assert any(h.startswith("Largest buys") and "sender address" in h for h in m["hdr"]), \
                     "[sol flow2] %s: the 'Largest buys' header row is missing: %s" % (tag, m["hdr"])
                 assert 1 <= m["trades"] <= 5, "[sol flow2] %s: trade rows: %d" % (tag, m["trades"])
                 assert m["links"] and all(l["c"] == m["tx3"] for l in m["links"]), \
                     "[sol flow2] %s: every link inside the card must use var(--tx3), not the browser blue: %s (tx3=%s)" % (tag, m["links"], m["tx3"])
                 assert not m["outside"], "[sol flow2] %s: elements extend outside the card padding box: %s" % (tag, m["outside"])
-                assert m["notes"] == 1 and "flow, not a forecast" in m["text"] and "up to 300" in m["text"], \
+                assert m["notes"] == 1 and "flow, not a forecast" in m["text"] and "totals for this pool over the selected window" in m["text"], \
                     "[sol flow2] %s: exactly one closing note expected: notes=%d" % (tag, m["notes"])
                 assert "Top buyers" not in m["text"] and "Top sellers" not in m["text"] and "Recent-trade sample" not in m["text"], \
                     "[sol flow2] %s: old sections/notes must be gone" % tag
             print("[sol flow2 layout %dpx] Base-identical row set and order, no <h3>, all %d links tx3-coloured, nothing outside the card" % (sf_w, len(m6["links"])))
 
-        # ---- [sol flow2] پنجره‌ی ۱ساعته با معاملاتِ همان ساعت: عددِ پُر؛ ۶ساعته شامل قدیمی‌ترها ----
+        # ---- [sol flow2] پنجره‌ی ۱ساعته و ۶ساعته: مجموع‌ها از صفاتِ استخر، «Largest buys» از نمونه‌ی معاملات ----
         spg = await sf_page(errs=sf_errs)
         await spg.wait_for_selector("#flowBody .flowkv", timeout=15000)
         w1 = await spg.inner_text("#flowBody")
         await spg.click('#flowTfs [data-w="h6"]')
-        await spg.wait_for_function("() => document.getElementById('flowBody').innerText.includes('109,651')", timeout=15000)
+        await spg.wait_for_function("() => document.getElementById('flowBody').innerText.includes('28,750,000')", timeout=15000)
         w6 = await spg.inner_text("#flowBody")
         await spg.close()
         w1f, w6f = " ".join(w1.split()), " ".join(w6.split())
         print("[sol flow2 window] 1H=%r" % w1f[:150])
         print("[sol flow2 window] 6H=%r" % w6f[:150])
-        assert "No trades from this pool" not in w1f and "Bought $9,651" in w1f and "Sold $3,000" in w1f \
-            and "Net +$6,651" in w1f and "3 buys · 1 sells" in w1f, "[sol flow2] 1H window numbers wrong: %r" % w1f
-        assert "Bought $109,651" in w6f and "Sold $5,500" in w6f and "Net +$104,151" in w6f and "4 buys · 2 sells" in w6f, \
+        assert "Volume $5,100,001" in w1f and "Buys 1,500" in w1f and "Sells 1,100" in w1f and "+0.85%" in w1f, \
+            "[sol flow2] 1H window numbers wrong: %r" % w1f
+        assert "Volume $28,750,000" in w6f and "Buys 8,200" in w6f and "Sells 7,300" in w6f and "−2.40%" in w6f, \
             "[sol flow2] 6H window numbers wrong: %r" % w6f
         assert "×2" in w1f, "[sol flow2] the repeated buyer must carry the ×N tag"
+        assert "$100,000" not in w1f and "$100,000" in w6f, \
+            "[sol flow2] Largest buys must be filtered to the window: the 3h-old $100,000 buy belongs to 6H only"
+
+        # ---- [sol flow3] r10 — پنجره‌ها = مجموع‌های دقیقِ استخر (صفاتِ GeckoTerminal) ----
+        # ۱H و ۶H قبلاً یکی بودند چون هر دو از «آخرین ≤۳۰۰ معامله» فیلتر می‌شدند (برای SOL/USDC فقط ۱–۲ دقیقه).
+        sf3_pr, sf3_tr = [], []
+        spg = await sf_page(pools_requests=sf3_pr, trades_requests=sf3_tr, errs=sf_errs)
+        await spg.wait_for_selector("#flowBody .flowkv", timeout=15000)
+        await spg.wait_for_timeout(500)
+        # ⚠️ gtJson خودش کشِ ۶۰ثانیه‌ای (و ۱۰دقیقه‌ای برای استخرها) دارد؛ پس شمردنِ درخواستِ شبکه نمی‌تواند «دوباره گرفتن»
+        # را ببیند. شمارنده روی خودِ gtJson می‌نشیند: هر فراخوانیِ استخر/معاملات از سمتِ رندرِ Flow شمرده می‌شود.
+        sf3_base = (len(sf3_pr), len(sf3_tr))
+        await spg.evaluate("""() => { window.__gtc = []; const orig = gtJson; gtJson = function (u) { window.__gtc.push(u); return orig(u); }; }""")
+        SF3_GTC = """() => ({ pools: window.__gtc.filter(u => /\\/tokens\\/[^/]+\\/pools\\?page=1$/.test(u)).length,
+                             trades: window.__gtc.filter(u => /\\/pools\\/[^/]+\\/trades$/.test(u)).length })"""
+        SF3_READ = """() => { const b = document.getElementById('flowBody');
+            const kv = {}; b.querySelectorAll('.flowkv').forEach(r => { const k = r.querySelector('.k'); kv[k.textContent.trim()] = r.innerText.replace(k.textContent, '').replace(/\\s+/g, ' ').trim(); });
+            const cap = b.querySelector('.flowbarCap'), bar = b.querySelectorAll('.flowbar i');
+            return { kv: kv, cap: cap ? cap.innerText.replace(/\\s+/g, ' ').trim() : null, bar: Array.from(bar).map(i => i.style.width),
+                     hint: (b.querySelector('[data-sample-hint]') || {}).textContent || null, text: b.innerText.replace(/\\s+/g, ' ') }; }"""
+        sf3 = {}
+        for sf3_id in ("m5", "m15", "h1", "h6", "h24"):
+            await spg.click('#flowTfs [data-w="%s"]' % sf3_id)
+            await spg.wait_for_function("(v) => document.querySelector('#flowBody .flowkv .mono') && document.querySelector('#flowBody .flowkv .mono').textContent.trim() === v",
+                                        arg="$" + format(round(float(SF_WIN[sf3_id][0])), ","), timeout=10000)
+            sf3[sf3_id] = await spg.evaluate(SF3_READ)
+        for sf3_id, sf3_v in SF_WIN.items():
+            r_ = sf3[sf3_id]; tot_ = sf3_v[1] + sf3_v[2]
+            want_pc = ("+" if float(sf3_v[5]) >= 0 else "−") + "%.2f%%" % abs(float(sf3_v[5]))
+            print("[sol flow3 %s] volume=%s buys=%s sells=%s price=%s cap=%r" % (sf3_id, r_["kv"]["Volume"], r_["kv"]["Buys"], r_["kv"]["Sells"], r_["kv"]["Price"], r_["cap"]))
+            assert r_["kv"]["Volume"] == "$" + format(round(float(sf3_v[0])), ","), "[sol flow3] %s volume: %s" % (sf3_id, r_["kv"])
+            assert r_["kv"]["Buys"] == "%s · %s buyers" % (format(sf3_v[1], ","), format(sf3_v[3], ",")), "[sol flow3] %s buys: %s" % (sf3_id, r_["kv"])
+            assert r_["kv"]["Sells"] == "%s · %s sellers" % (format(sf3_v[2], ","), format(sf3_v[4], ",")), "[sol flow3] %s sells: %s" % (sf3_id, r_["kv"])
+            assert r_["kv"]["Price"] == want_pc, "[sol flow3] %s price: %s want %s" % (sf3_id, r_["kv"], want_pc)
+            # نوار و عنوانش به‌شمارشِ معاملات‌اند، نه دلار
+            assert r_["cap"] and r_["cap"].startswith("Buys %d%%" % round(sf3_v[1] / tot_ * 100)) and "by count" in r_["cap"] \
+                and ("Sells %d%%" % round(sf3_v[2] / tot_ * 100)) in r_["cap"], "[sol flow3] %s: bar caption must be count-based: %r" % (sf3_id, r_["cap"])
+            assert r_["bar"] and abs(float(r_["bar"][0].rstrip("%")) - sf3_v[1] / tot_ * 100) < 0.06, "[sol flow3] %s: bar width must follow buys/(buys+sells) by count: %s" % (sf3_id, r_["bar"])
+        assert len({sf3[k]["kv"]["Volume"] for k in sf3}) == 5 and len({sf3[k]["kv"]["Buys"] for k in sf3}) == 5, \
+            "[sol flow3] the five windows must show five different numbers"
+        # نمونه‌ی معاملات: شروعِ ۱H پوشش داده نشده (قدیمی‌ترین معامله ۲۰۰ دقیقه پیش) → راهنما فقط وقتی نمونه پنجره را نمی‌پوشاند
+        print("[sol flow3 hint] 1H=%r 6H=%r 24H=%r" % (sf3["h1"]["hint"], sf3["h6"]["hint"], sf3["h24"]["hint"]))
+        for sf3_id in ("m5", "m15", "h1"):
+            assert sf3[sf3_id]["hint"] is None, "[sol flow3] %s must have no coverage hint (the sample reaches 200 min back): %r" % (sf3_id, sf3[sf3_id]["hint"])
+        for sf3_id in ("h6", "h24"):
+            assert re.search(r"· from the last 6 trades \(covers ~(19|20|21)\dm\)", sf3[sf3_id]["hint"] or ""), \
+                "[sol flow3] %s: the sample covers only ~200 min; Largest buys needs the hint: %r" % (sf3_id, sf3[sf3_id]["hint"])
+        assert "totals for this pool over the selected window" in sf3["h24"]["text"] and "flow, not a forecast" in sf3["h24"]["text"] \
+            and "Recent trades from GeckoTerminal" not in sf3["h24"]["text"], "[sol flow3] closing note wording"
+        # بدونِ درخواستِ تازه: ۵ بار عوض‌کردنِ پنجره، فقط یک‌بار pools و یک‌بار trades
+        sf3_gtc = await spg.evaluate(SF3_GTC)
+        print("[sol flow3 cache] gtJson calls after 5 window switches=%s; network pools=%d trades=%d (baseline %s)" % (sf3_gtc, len(sf3_pr), len(sf3_tr), sf3_base))
+        assert sf3_gtc == {"pools": 0, "trades": 0} and (len(sf3_pr), len(sf3_tr)) == sf3_base and sf3_base[1] == 1, \
+            "[sol flow3] switching windows must re-render from the 60 s cache, not refetch: gtJson=%s network pools=%d trades=%d base=%s" % (sf3_gtc, len(sf3_pr), len(sf3_tr), sf3_base)
+        # کش ۶۰ ثانیه می‌ماند و بعدش منقضی می‌شود
+        await spg.evaluate("renderSolFlow._cache.fetchedAt -= 61000")
+        await spg.click('#flowTfs [data-w="h1"]')
+        await spg.wait_for_function("() => document.querySelector('#flowBody .flowkv .mono').textContent.trim() === '$5,100,001'", timeout=10000)
+        await spg.wait_for_timeout(200)
+        sf3_gtc2 = await spg.evaluate(SF3_GTC)
+        print("[sol flow3 cache] after expiry: gtJson calls=%s" % sf3_gtc2)
+        assert sf3_gtc2 == {"pools": 1, "trades": 1}, "[sol flow3] a cache older than 60 s must be refetched exactly once: %s" % sf3_gtc2
+        # [flow logo] Solana — آواتار با عوض‌کردنِ پنجره دست نمی‌خورد؛ با عوض‌کردنِ توکن (SOL) دست می‌خورد
+        sf3_logo = await spg.evaluate("""async () => {
+            const av = document.getElementById('flowTokAv'); av.__probe = 'same';
+            const muts = []; const mo = new MutationObserver(rs => rs.forEach(r => muts.push(r.type)));
+            mo.observe(av, { childList: true, subtree: true, characterData: true });
+            const wait = (ms) => new Promise(r => setTimeout(r, ms));
+            for (const id of ['m5', 'm15', 'h6', 'h24', 'h1']) { document.querySelector('#flowTfs [data-w="' + id + '"]').click(); await wait(120); }
+            const n = muts.length + mo.takeRecords().length;
+            return { n: n, same: document.getElementById('flowTokAv') === av && av.__probe === 'same' }; }""")
+        print("[flow logo] solana: avatar mutations over 5 window switches=%d sameNode=%s" % (sf3_logo["n"], sf3_logo["same"]))
+        assert sf3_logo["n"] == 0 and sf3_logo["same"], "[flow logo] switching windows must not repaint the Solana token avatar: %s" % sf3_logo
+        # [sol flow3 SOL] SOL در انتخابگرِ Flow قابل‌انتخاب است: wSOL برای استخر/معاملات، برچسب «SOL»
+        n_gtc = await spg.evaluate("window.__gtc.length")
+        await spg.evaluate("""() => { window.__avMut = 0; const av = document.getElementById('flowTokAv');
+            window.__mo = new MutationObserver(rs => { window.__avMut += rs.length; }); window.__mo.observe(av, { childList: true, subtree: true, characterData: true }); }""")
+        await spg.click("#flowTokBtn")
+        await spg.click('#solTokList .trow[data-mint="%s"]' % SOL_MINT_ADDR)
+        await spg.wait_for_function("() => document.getElementById('flowTokSym').textContent === 'SOL'", timeout=10000)
+        await spg.wait_for_function("(n) => window.__gtc.slice(n).some(u => /\\/trades$/.test(u))", arg=n_gtc, timeout=10000)
+        await spg.wait_for_timeout(300)
+        sf3_calls = await spg.evaluate("(n) => window.__gtc.slice(n)", n_gtc)
+        sf3_sol = await spg.evaluate("() => ({ sym: document.getElementById('flowTokSym').textContent, cur: solMintCur, ref: solRefMint, "
+                                     "pool: document.querySelector('#flowBody .flowkv a').textContent, mut: window.__avMut })")
+        print("[sol flow3 SOL] picked SOL in Flow: %s; Flow lookups=%s" % (sf3_sol, [u.split("/networks/solana/")[1][:70] for u in sf3_calls]))
+        assert sf3_sol["sym"] == "SOL" and sf3_sol["cur"] == SOL_MINT_ADDR, "[sol flow3 SOL] Flow must switch to SOL: %s" % sf3_sol
+        assert sf3_sol["ref"] != SOL_MINT_ADDR, "[sol flow3 SOL] the swap reference must not become SOL as well (SOL/SOL): %s" % sf3_sol
+        assert any(("/tokens/%s/pools" % SOL_MINT_ADDR) in u for u in sf3_calls) and any(("/pools/%s/trades" % SF_POOL_SOL) in u for u in sf3_calls), \
+            "[sol flow3 SOL] pools must be looked up with the wrapped-SOL mint and trades read from the SOL/USDC pool: %s" % sf3_calls
+        assert sf3_sol["mut"] > 0, "[flow logo] a real token change must repaint the avatar (control for the no-repaint probe): %s" % sf3_sol
+        sf3_av = await spg.evaluate("() => { const a = document.getElementById('flowTokAv'); return { svg: !!a.querySelector('svg, img'), t: a.textContent.trim() }; }")
+        assert sf3_av["svg"], "[sol flow3 SOL] the SOL chip must carry the SOL logo (gradient dot or wSOL image), not a letter: %s" % sf3_av
+        await spg.close()
+
+        # ---- [sol flow3] صفتِ غایب/نامعتبر = «—»، هرگز ۰ ----
+        sf3_miss = {"data": [sf_pool(SF_POOL_SOL, "SOL / USDC", 3_000_000, 9_000_000, win={"h1": SF_WIN["h1"]})]}
+        sf3_miss["data"][0]["attributes"]["volume_usd"]["h6"] = ""                    # رشته‌ی خالی
+        sf3_miss["data"][0]["attributes"]["transactions"]["h6"] = {"buys": "x", "sells": None}   # نامعتبر
+        sf3_miss["data"][0]["attributes"]["price_change_percentage"]["h6"] = "NaN"
+        spg = await sf_page(pools=sf3_miss, errs=sf_errs)
+        await spg.wait_for_selector("#flowBody .flowkv", timeout=15000)
+        sf3_ok = await spg.evaluate(SF3_READ)
+        await spg.click('#flowTfs [data-w="h6"]'); await spg.wait_for_timeout(500)
+        sf3_h6 = await spg.evaluate(SF3_READ)
+        await spg.click('#flowTfs [data-w="h24"]'); await spg.wait_for_timeout(500)
+        sf3_h24 = await spg.evaluate(SF3_READ)
+        await spg.close()
+        print("[sol flow3 missing] 1H=%s | 6H=%s | 24H=%s" % (sf3_ok["kv"], sf3_h6["kv"], sf3_h24["kv"]))
+        assert sf3_ok["kv"]["Volume"] == "$5,100,001", "[sol flow3 missing] the present window must still render"
+        for tag_, r_ in (("6H invalid", sf3_h6), ("24H absent", sf3_h24)):
+            assert (r_["kv"]["Volume"], r_["kv"]["Buys"], r_["kv"]["Sells"], r_["kv"]["Price"]) == ("—", "—", "—", "—"), \
+                "[sol flow3 missing] %s: a missing/invalid attribute must read '—', never 0: %s" % (tag_, r_["kv"])
+            assert r_["cap"] is None and not r_["bar"], "[sol flow3 missing] %s: no bar without counts" % tag_
+
+        # ---- [sol flow3] چیدمان در موبایل و دسکتاپ (بدونِ سرریز) + عکس‌ها ----
+        for sf3_w, sf3_h, sf3_scheme, sf3_win, sf3_name in ((1440, 900, "light", "m5", "sol-flow-5m-light-1440"), (1440, 900, "light", "h24", "sol-flow-24h-light-1440"),
+                                                            (390, 844, "dark", "m5", "sol-flow-5m-dark-390"), (390, 844, "dark", "h24", "sol-flow-24h-dark-390")):
+            spg = await sf_page(w=sf3_w, h=sf3_h, scheme=sf3_scheme, errs=sf_errs)
+            await spg.wait_for_selector("#flowBody .flowkv", timeout=15000)
+            await spg.click('#flowTfs [data-w="%s"]' % sf3_win); await spg.wait_for_timeout(500)
+            sf3_m = await spg.evaluate(SF_MEASURE)
+            assert not sf3_m["outside"] and await spg.evaluate("document.documentElement.scrollWidth <= innerWidth"), \
+                "[sol flow3] %s: overflow: %s" % (sf3_name, sf3_m["outside"])
+            await spg.screenshot(path="/tmp/claude-0/r10_shots/%s.png" % sf3_name)
+            await spg.close()
+        print("[sol flow3 layout] 5M and 24H render without overflow at 1440 light and 390 dark")
+
+        # ---- [boot view] r10 — رفتن به /app#flow (و #folio, #faq) نباید یک فریمِ Swap نشان دهد ----
+        BOOT_WATCH = """
+(function(){ window.__boot = [];
+  function snap(tag){ var sw = document.getElementById('view-swap'); if (!sw) return;
+    var tgt = (location.hash.slice(1).split('?')[0] || ''), nav = {};
+    document.querySelectorAll('#nav [data-view]').forEach(function(b){ var bg = getComputedStyle(b).backgroundColor; nav[b.dataset.view] = !(bg === 'rgba(0, 0, 0, 0)' || bg === 'transparent'); });
+    var tv = document.getElementById('view-' + tgt);
+    window.__boot.push({tag: tag, swap: getComputedStyle(sw).display, tgt: tgt, tgtDisplay: tv ? getComputedStyle(tv).display : null, nav: nav,
+                        attr: document.documentElement.getAttribute('data-boot-view'), tokenView: getComputedStyle(document.getElementById('view-token')).display}); }
+  new MutationObserver(function(){ snap('mut'); }).observe(document, {subtree: true, childList: true, attributes: true, attributeFilter: ['class', 'data-boot-view', 'style']});
+  (function raf(){ snap('raf'); requestAnimationFrame(raf); })();
+})();
+"""
+        for bt_hash in ("#flow", "#folio", "#faq", "#flow?chain=solana", "#folio?chain=solana"):
+            bt_view = bt_hash[1:].split("?")[0]
+            spg = await sf_page(hash_=bt_hash, init=[BOOT_WATCH], errs=sf_errs)
+            await spg.wait_for_function("(v) => document.getElementById('view-' + v).classList.contains('on')", arg=bt_view, timeout=15000)
+            await spg.wait_for_timeout(500)
+            bt = await spg.evaluate("() => ({ log: window.__boot, attr: document.documentElement.hasAttribute('data-boot-view'), "
+                                    "swapOn: document.getElementById('view-swap').classList.contains('on'), navOn: Array.from(document.querySelectorAll('#nav [data-view].on')).map(b => b.dataset.view) })")
+            await spg.close()
+            bad_swap = [e for e in bt["log"] if e["swap"] != "none"]
+            bad_tgt = [e for e in bt["log"] if e["tgtDisplay"] == "none"]
+            # #faq هیچ دکمه‌ای در نوار ندارد: درست یعنی هیچ‌کدام روشن نیست (و Swap به‌خصوص نه)
+            bad_nav = [e for e in bt["log"] if e["nav"].get("swap", False) or (bt_view != "faq" and not e["nav"].get(bt_view, False))
+                       or (bt_view == "faq" and any(e["nav"].values()))]
+            print("[boot view %s] snapshots=%d swapVisible=%d targetHidden=%d wrongNav=%d attrAfterBoot=%s navOn=%s"
+                  % (bt_hash, len(bt["log"]), len(bad_swap), len(bad_tgt), len(bad_nav), bt["attr"], bt["navOn"]))
+            assert len(bt["log"]) >= 2, "[boot view] the watcher saw nothing"
+            assert not bad_swap, "[boot view] %s: #view-swap was painted before the router ran: %s" % (bt_hash, bad_swap[:2])
+            assert not bad_tgt, "[boot view] %s: the target view was hidden at first paint: %s" % (bt_hash, bad_tgt[:2])
+            assert not bad_nav, "[boot view] %s: the nav highlight was wrong at first paint: %s" % (bt_hash, bad_nav[:2])
+            assert not bt["attr"] and not bt["swapOn"] and bt["navOn"] == ([] if bt_view == "faq" else [bt_view]), \
+                "[boot view] %s: after the router ran the attribute must be gone and the class state right: %s" % (bt_hash, {k: v for k, v in bt.items() if k != "log"})
+        # بدونِ هش: Swap همچنان از همان فریم اول دیده می‌شود، هیچ attributeای نیست
+        spg = await sf_page(hash_="", init=[BOOT_WATCH], errs=sf_errs)
+        await spg.wait_for_function("() => document.getElementById('view-swap').classList.contains('on')", timeout=15000)
+        await spg.wait_for_timeout(300)
+        bt = await spg.evaluate("() => window.__boot")
+        await spg.close()
+        print("[boot view /app] snapshots=%d swapHidden=%d withAttr=%d" % (len(bt), len([e for e in bt if e["swap"] == "none"]), len([e for e in bt if e["attr"]])))
+        assert bt and not [e for e in bt if e["swap"] == "none" or e["attr"]], "[boot view] /app without a hash must show Swap from the first frame, no boot attribute: %s" % bt[:2]
+        assert all(e["nav"].get("swap") for e in bt), "[boot view] the Swap tab must stay highlighted on /app"
+        # صفحه‌ی توکن: دست‌نخورده — با هش و بی‌هش attribute هرگز نشسته نمی‌شود و نمای توکن دیده می‌شود
+        for bt_hash in ("", "#flow"):
+            spg = await sf_page(hash_=bt_hash, path="/t/" + SF_USDC, init=[BOOT_WATCH], errs=sf_errs)
+            await spg.wait_for_function("() => tokenPage === true", timeout=15000)
+            await spg.wait_for_timeout(500)
+            bt = await spg.evaluate("() => window.__boot")
+            tok_on = await spg.evaluate("() => document.getElementById('view-token').classList.contains('on')")
+            await spg.close()
+            print("[boot view /t/%s] snapshots=%d withAttr=%d tokenViewOn=%s" % (bt_hash or "", len(bt), len([e for e in bt if e["attr"]]), tok_on))
+            assert not [e for e in bt if e["attr"]], "[boot view] the token page must never get the boot attribute: %s" % [e for e in bt if e["attr"]][:2]
+            assert tok_on, "[boot view] the token page must still show its own view"
+
+        # ---- [sol folio] r10 — ردیفِ Portfolio سولانا عینِ ردیفِ Base، بدونِ نشانِ سرگردان ----
+        # علت: یک <span class="av"> بی‌اندازه بین chip و نماد؛ .av در ردیفِ portfolio width/height ندارد، پس به نواری
+        # ~۲×۶ پیکسل با حرفِ اولِ بریده‌شده فرومی‌پاشید — همان «ویرگول» کنارِ chip.
+        sfo_rpc = lambda m, pr: ({"value": 2_500_000_000} if m == "getBalance" else
+                                 {"value": ([] if (pr[1] or {}).get("programId", "").startswith("Tokenz") else
+                                            [{"pubkey": "acc1", "account": {"data": {"parsed": {"info": {"mint": SF_USDC, "tokenAmount": {"amount": "5000000", "decimals": 6}}}}}}])}
+                                 if m == "getTokenAccountsByOwner" else None)
+        sfo_multi = {"data": [{"attributes": {"address": SOL_MINT_ADDR, "symbol": "SOL", "price_usd": "150", "image_url": "https://example.test/sol.png"}},
+                              {"attributes": {"address": SF_USDC, "symbol": "USDC", "price_usd": "1"}}]}
+        spg = await sf_page(hash_="#folio?chain=solana", init=[CARRY_WALLET_INIT], rpc=sfo_rpc, multi=sfo_multi, errs=sf_errs)
+        await spg.wait_for_selector('#folioBody [data-act="connect"]', timeout=15000)
+        await spg.click('#folioBody [data-act="connect"]')
+        await spg.wait_for_selector("#solWalList .walRow[data-i]", timeout=10000)
+        await spg.click("#solWalList .walRow[data-i]")
+        await spg.wait_for_selector("#folioBody .frow", timeout=15000)
+        await spg.wait_for_timeout(600)
+        SFO_READ = """() => Array.from(document.querySelectorAll('#folioBody .frow')).map(r => {
+            const kids = Array.from(r.children).map(c => ({ cls: c.className, text: c.textContent.replace(/\\s+/g, ' ').trim(), r: c.getBoundingClientRect().toJSON() }));
+            const own = Array.from(r.childNodes).filter(n => n.nodeType === 3 && n.textContent.trim()).map(n => n.textContent.trim());
+            const small = Array.from(r.querySelectorAll('*')).filter(e => { const b = e.getBoundingClientRect(); return b.width > 0 && b.width < 8 && e.textContent.trim() && !e.classList.contains('fchip'); }).map(e => e.className + ':' + e.textContent.trim());
+            return { kids: kids, own: own, small: small, avs: r.querySelectorAll('.av').length }; })"""
+        sfo = await spg.evaluate(SFO_READ)
+        await spg.screenshot(path="/tmp/claude-0/r10_shots/sol-folio-row-light-1440.png", clip={"x": 150, "y": 100, "width": 1140, "height": 420})
+        await spg.close()
+        print("[sol folio] rows=%d kids=%s" % (len(sfo), [[k["cls"] for k in r["kids"]] for r in sfo]))
+        assert len(sfo) == 2, "[sol folio] expected the SOL and USDC rows: %s" % sfo
+        for r_ in sfo:
+            # عینِ ردیفِ Base: chip رنگی، [نماد/مقدار]، ارزش — بدون آواتار، بدون متنِ آزاد، بدون عنصرِ ریزتر از ۸ پیکسل
+            assert [k["cls"] for k in r_["kids"]] == ["fchip", "", "fval"], "[sol folio] the row must have the Base element order: %s" % r_["kids"]
+            assert r_["avs"] == 0 and not r_["own"] and all(x.split(":")[0] in ("fbal mono", "u mono", "p mono", "fsym") for x in r_["small"]), \
+                "[sol folio] stray element/text in the row: %s" % r_
+            assert re.fullmatch(r"(SOL|USDC) [\d.,]+", r_["kids"][1]["text"]) and re.fullmatch(r"\$[\d.,]+ [\d.]+%", r_["kids"][2]["text"]), \
+                "[sol folio] unexpected row text: %s" % r_["kids"]
+            assert r_["kids"][0]["r"]["right"] <= r_["kids"][1]["r"]["left"] + 0.5 and r_["kids"][1]["r"]["right"] <= r_["kids"][2]["r"]["left"], \
+                "[sol folio] the chip overlaps the amount: %s" % r_["kids"]
+
+        # ---- [sol exitcard] r10 — /app (سولانا): بلوکِ «Sell route found» حذف شد؛ صفحه‌ی توکن دست‌نخورده ----
+        spg = await sf_page(hash_="#swap?chain=solana", errs=sf_errs)
+        await spg.wait_for_function("() => solVerdictV === 'sell' && document.getElementById('appSolExitSym').textContent !== ''", timeout=15000)
+        await spg.wait_for_timeout(500)
+        sec = await spg.evaluate("() => ({ box: document.getElementById('appSolExitBox').innerText, boxHtml: document.getElementById('appSolExitBox').innerHTML, "
+                                 "card: document.getElementById('appSolSafetyCard').innerText, pill: (document.getElementById('solSellPill') || {}).innerText || '' })")
+        await spg.screenshot(path="/tmp/claude-0/r10_shots/sol-swap-exitcard-light-1440.png", full_page=True)
+        await spg.close()
+        print("[sol exitcard] /app Solana exit box=%r pill=%r" % (sec["box"], sec["pill"][:40]))
+        assert "sell route found" not in sec["card"].lower() and "quoted just now" not in sec["card"].lower(), \
+            "[sol exitcard] the Sell route found block must be gone from the /app Solana exit card: %r" % sec["card"]
+        assert sec["boxHtml"].strip() == "", "[sol exitcard] a live sell verdict leaves the exit box empty, like Base: %r" % sec["boxHtml"][:120]
+        spg = await sf_page(hash_="", path="/t/" + SF_USDC, errs=sf_errs)
+        await spg.wait_for_function("() => document.getElementById('tk-exitBox').innerText.includes('Sell route found')", timeout=15000)
+        tk_exit = await spg.evaluate("() => document.getElementById('tk-exitBox').innerText")
+        await spg.close()
+        print("[sol exitcard] token page still has it: %r" % tk_exit.replace("\n", " ")[:80])
+        assert "Sell route found" in tk_exit, "[sol exitcard] the token page (/t/<mint>) must keep its Sell route found block"
+        # کهربایی/تأییدنشده روی /app همچنان کار می‌کند
+        spg = await sf_page(hash_="#swap?chain=solana", vd='{"v":null,"ms":10,"why":"sol:unconfirmed"}', errs=sf_errs)
+        await spg.wait_for_function("() => document.getElementById('appSolExitBox').innerText.includes('unconfirmed')", timeout=15000)
+        unc = await spg.evaluate("() => document.getElementById('appSolExitBox').innerText")
+        await spg.close()
+        print("[sol exitcard] unconfirmed still amber/shown on /app: %r" % unc.replace("\n", " ")[:80])
+        assert "unconfirmed" in unc.lower() and "high risk" in unc, "[sol exitcard] the unconfirmed state must still render on /app: %r" % unc
 
         # ---- [sol flash] معرفیِ «Choose a Solana token» حینِ بارگذاریِ توکنِ پیش‌فرض ----
         spg = await sf_page(hash_="#flow?chain=solana", delay=0.6, intro_watch=True, errs=sf_errs)
@@ -11775,7 +12144,7 @@ async def main():
         print("[sol flash flow] intro ever added=%s early=%r final has Pool=%s" % (seen_intro, early[:50], "Pool" in final_txt))
         assert seen_intro is False, "[sol flash] the 'Choose a Solana token' intro must never appear while the default token loads"
         assert "Reading recent Solana trades" in early or "Reading" in early, "[sol flash] a spinner row must hold the place meanwhile: %r" % early
-        assert "Bought" in final_txt and "USDC" in final_txt, "[sol flash] the default token's flow must render afterwards: %r" % final_txt[:120]
+        assert "Volume" in final_txt and "USDC" in final_txt, "[sol flash] the default token's flow must render afterwards: %r" % final_txt[:120]
         # ناوبری از Swap به Flow در همان صفحه هم همین است
         spg = await sf_page(hash_="#swap?chain=solana", delay=0.4, intro_watch=True, errs=sf_errs)
         await spg.wait_for_timeout(100)

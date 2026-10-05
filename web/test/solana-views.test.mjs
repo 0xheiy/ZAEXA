@@ -78,14 +78,27 @@ test('missing dollar value does not become priced zero',()=>{
   const c=ctx(['solFlowTrades']);const now=Date.now();
   assert.equal(c.solFlowTrades([trade('a',SOL,USDC,now,null)],USDC,now-1,now)[0].usd,null);
 });
-test('flow renders sample coverage and safe pool labels',async()=>{
+test('flow renders window totals from pool attributes, sample trades and safe pool labels',async()=>{
   const now=Date.now();
+  const attrs={address:SOL,name:'<img src=x>',reserve_in_usd:'100',volume_usd:{h1:'1234567.8'},
+    transactions:{h1:{buys:60,sells:40,buyers:30,sellers:20}},price_change_percentage:{h1:'-1.5'}};
   const c=ctx(['renderSolFlow','solFlowTrades'],{gtJson:async url=>url.endsWith('/trades')?
     {data:[trade('a',SOL,USDC,now,'8'),trade('b',USDC,SOL,now,'3')]}:
-    {data:[{attributes:{address:SOL,name:'<img src=x>',reserve_in_usd:'100'},relationships:{base_token:{data:{id:'solana_'+USDC}}}}]},
+    {data:[{attributes:attrs,relationships:{base_token:{data:{id:'solana_'+USDC}}}}]},
   });await c.renderSolFlow();const html=c.$('flowBody').innerHTML;
-  assert.match(html,/Recent trades from GeckoTerminal/);assert.match(html,/1 buys · 1 sells/);
-  assert.match(html,/\$8/);assert.match(html,/\$3/);assert.match(html,/&lt;img/);assert.doesNotMatch(html,/<img/);
+  assert.match(html,/totals for this pool over the selected window/);
+  assert.match(html,/Buys 60%/);assert.match(html,/by count/);assert.match(html,/\$1,234,568/);
+  assert.match(html,/60 <span[^>]*>· 30 buyers/);assert.match(html,/−1\.50%/);
+  assert.match(html,/\$8/);assert.match(html,/&lt;img/);assert.doesNotMatch(html,/<img/);
+});
+test('missing pool attributes render as a dash, never zero',async()=>{
+  const now=Date.now();
+  const c=ctx(['renderSolFlow','solFlowTrades'],{gtJson:async url=>url.endsWith('/trades')?
+    {data:[trade('a',SOL,USDC,now,'8')]}:
+    {data:[{attributes:{address:SOL,name:'X',reserve_in_usd:'100',volume_usd:{h1:''},transactions:{h1:{buys:'x'}}},relationships:{base_token:{data:{id:'solana_'+USDC}}}}]},
+  });await c.renderSolFlow();const html=c.$('flowBody').innerHTML;
+  assert.match(html,/Volume<\/span><span class="mono">—/);assert.match(html,/Price<\/span><span[^>]*>—/);
+  assert.doesNotMatch(html,/flowbar"/);
 });
 test('history outage stays unknown instead of zero activity',async()=>{
   const c=ctx(['renderSolFlow','solFlowTrades'],{gtJson:async()=>{throw Error('offline');}});
