@@ -33,7 +33,7 @@ function context(names, extras = {}) {
   }
   return ctx;
 }
-const FRAC = ['setSolPayFraction', 'solSpendableTop', 'solReserveSol', 'solMaxSolAmount'];
+const FRAC = ['setSolPayFraction', 'solSpendableTop', 'solRentParts', 'solReserveSol', 'solMaxSolAmount'];
 
 // ---- 1: MAX / 50% floor to token decimals ----
 test('MAX on a 9-decimal token keeps every digit and never rounds up', () => {
@@ -49,15 +49,15 @@ test('50% floors instead of rounding half up', () => {
 test('SOL input keeps the native reserve and floors to lamports', () => {
   const c = context(FRAC, { solSide: 'buy', solBalSol: 1.123456789, solOutAtaExists: true });
   c.setSolPayFraction(1, 1);
-  assert.equal(c.$('solAmt').value, '1.123246789');   // 1.123456789 - (0.0002 + 0.00001)
+  assert.equal(c.$('solAmt').value, '1.121206789');   // 1.123456789 - (0.0002 + 0.00001 + 0.00204 wSOL rent، ۵ اکتبر)
   c.setSolPayFraction(1, 3);
-  assert.equal(c.$('solAmt').value, '0.374415596');   // floor((1123246789)/3) lamports
+  assert.equal(c.$('solAmt').value, '0.373735596');   // floor((1121206789)/3) lamports
 });
 
 // ---- 2: native SOL as the token leg ----
 test('native SOL token leg uses the native balance, with the reserve, not a wSOL lookup', async () => {
   const methods = [];
-  const c = context(['solRefreshBalances', 'solSpendableTop', 'solReserveSol', 'solMaxSolAmount', 'solBudgetCheck', 'solRequiredInput'], {
+  const c = context(['solRefreshBalances', 'solSpendableTop', 'solRentParts', 'solReserveSol', 'solMaxSolAmount', 'solBudgetCheck', 'solRequiredInput'], {
     solMintCur: SOL, solRefMint: JUP, solRefDecimals: 6, solSide: 'sell', solTokenDecimals: 9,
     solRpcCall: async (m, params) => {
       methods.push(m + ':' + (params[1]?.mint || ''));
@@ -72,7 +72,7 @@ test('native SOL token leg uses the native balance, with the reserve, not a wSOL
   assert.ok(spendable < 2 && spendable > 1.99, 'native reserve must be held back, got ' + spendable);
 });
 test('swap button blocks spending more native SOL than balance minus reserve (SOL as token leg)', () => {
-  const names = ['solUpdateSwapBtn', 'solSpendableTop', 'solReserveSol', 'solMaxSolAmount', 'solBudgetCheck', 'solRequiredInput'];
+  const names = ['solUpdateSwapBtn', 'solSpendableTop', 'solRentParts', 'solReserveSol', 'solMaxSolAmount', 'solBudgetCheck', 'solRequiredInput'];
   const mk = spend => context(names, {
     solMintCur: SOL, solRefMint: JUP, solSide: 'sell', solTokenDecimals: 9, solRefDecimals: 6, solBalSol: 2, solBalTok: 2,
     solRefAtaExists: true, solSwapBusy: false, tokenPage: false, solConnectionBusy: false,

@@ -1366,6 +1366,8 @@ footer .fine{max-width:78ch;margin:46px 0 0;font-size:11.5px;color:var(--tx3);li
 [data-theme="dark"] #themeBtn::before,[data-theme="dark"] #themeToggle::before{transform:translateX(28px)}
 /* ۴ اکتبر — .chip در اپ gap:7px دارد و ماه را ۷ پیکسل از گودی بیرون می‌برد (gap:0 بالا)؛ و در تمِ تیره همان سیاهیِ سوییچِ صفحه‌ی معرفی، نه رنگِ زمینه‌ی صفحه. */
 [data-theme="dark"] #themeBtn,[data-theme="dark"] #themeToggle,[data-theme="dark"] #themeBtn:hover,[data-theme="dark"] #themeToggle:hover,[data-theme="dark"] #themeBtn::before,[data-theme="dark"] #themeToggle::before{background:#08070d}
+/* ۵ اکتبر — حسام: در تمِ تیره نوارِ تب‌ها و دکمه‌ی تنظیمات طوسی‌تر از سوییچِ تم بودند؛ هر سه یک رنگ (#08070d). */
+[data-theme="dark"] .nav,[data-theme="dark"] .nav button.on,[data-theme="dark"] .nav a.on,[data-theme="dark"] #setBtn,[data-theme="dark"] #setBtn:active,[data-theme="dark"] #setBtn[aria-expanded="true"],[data-theme="dark"] #setBtn:has(+ #setPop.on){background:#08070d}
 #themeBtn svg,#themeToggle>span{display:grid!important;place-items:center;flex:none;position:static;width:28px;height:28px;margin:0;padding:6px;box-sizing:border-box;transform:none;color:var(--tx3);transition:color .25s}
 #themeToggle>span{padding:0}#themeToggle svg{width:16px;height:16px}
 #themeBtn .themeSun,#themeToggle .sun{order:0}#themeBtn .themeMoon,#themeToggle .moon{order:1}
@@ -1534,6 +1536,24 @@ html:not(.ctaReady) #actBtn:disabled,html:not(.ctaReady) #solSwapBtn:disabled{ba
   <button class="chip round" id="themeBtn" type="button" role="switch" aria-checked="false" aria-label="Switch to dark mode" title="Switch to dark mode"><svg class="themeMoon" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"/></svg><svg class="themeSun" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2.5v2.2M12 19.3v2.2M4.6 4.6l1.6 1.6M17.8 17.8l1.6 1.6M2.5 12h2.2M19.3 12h2.2M4.6 19.4l1.6-1.6M17.8 6.2l1.6-1.6"/></svg><span id="themeState" hidden>Light</span></button>
   <div class="rel" id="walletMenu">
     <button class="chip solid" id="connectBtn" aria-haspopup="menu" aria-expanded="false">Connect wallet</button>
+<script>
+/* ۵ اکتبر — پیش از اولین رنگ: اگر رکوردِ تازه‌ی نشستِ سولانا هست و صفحه روی سولاناست، هدر همان لحظه
+   «وصل» دیده می‌شود (فقط نمایش؛ هیچ حسابی از روی رکورد ست نمی‌شود). main آن را پایان می‌دهد. */
+try{(function(){
+  var r=JSON.parse(sessionStorage.getItem("zaexa.solsession.v1")||"null");
+  if(!r||typeof r.name!=="string"||typeof r.address!=="string"||typeof r.t!=="number")return;
+  if(Date.now()-r.t>30*60*1000||r.name==="WalletConnect Solana")return;
+  try{if(localStorage.getItem("zaexa.solwallet.off.v1")==="1")return;}catch(e){}
+  var raw=location.hash.slice(1);try{raw=decodeURIComponent(raw);}catch(e){}
+  var i=raw.indexOf("?"),q="";try{q=new URLSearchParams(i<0?"":raw.slice(i+1)).get("chain");}catch(e){}
+  var c=(q==="solana"||q==="base")?q:null;
+  if(!c){try{var v=localStorage.getItem("zaexa.chain.v1");c=(v==="solana"||v==="base")?v:null;}catch(e){}}
+  if(c!=="solana")return;
+  var b=document.getElementById("connectBtn");if(!b)return;
+  b.className="chip";b.textContent=r.address.slice(0,6)+"\u2026"+r.address.slice(-4);b.setAttribute("aria-busy","true");
+  globalThis.__zxSolPend={name:r.name,address:r.address};
+})();}catch(e){}
+</script>
     <div class="pop walletPop" id="walletPop" role="menu" aria-label="Wallet menu">
       <div class="walletHead"><span>Wallet</span><span class="walletAddr" id="walletAddr">—</span></div>
       <!-- ۲۲ سپتامبر، به خواستِ مالک: همان «کپیِ آدرس»ی که در منوی والتِ
@@ -4807,7 +4827,7 @@ function prepareSwapColumns(){
   }
 }
 prepareSwapColumns();
-let solAppDefaulted=false;
+let solAppDefaulted=false,solAppDefaultState="idle";   // idle|loading|done|failed
 function updateSwapViewForChain(){
   placeNetworkControl();
   if(!tokenPage){
@@ -4850,7 +4870,16 @@ function updateSwapViewForChain(){
     solPaintLegs();
     // بدونِ توکنِ پیش‌فرض کارت «؟ —» نشان می‌داد؛ مثلِ Base که با ETH→USDC باز می‌شود،
     // سولانا با SOL→USDC باز می‌شود — فقط بارِ اول، انتخابِ کاربر دست نمی‌خورد.
-    if(!solMintCur&&!solAppDefaulted){solAppDefaulted=true;solAppLoadToken(SOL_APP_TOKENS.USDC);}
+    if(!solMintCur&&!solAppDefaulted){
+      solAppDefaulted=true;solAppDefaultState="loading";
+      // ۵ اکتبر — پایانِ بارگذاریِ پیش‌فرض همیشه Flow را دوباره رندر می‌کند (موفق یا شکست)
+      (async()=>{await solAppLoadToken(SOL_APP_TOKENS.USDC);})().catch(()=>{})
+        .finally(()=>{
+          solAppDefaultState=solMintCur?"done":"failed";
+          if(activeChain==="solana"&&view==="flow"){paintFlowToken();renderFlow();}
+          if(activeChain==="solana"&&view==="folio")renderFolio();
+        });
+    }
   }else{
     // برگرداندنِ #solSwap به جای اصلی‌اش در نمای توکن، درست جلوِ جانگه‌دار
     const anchor=$("solSwapAnchor");
@@ -6073,6 +6102,10 @@ const SOL_FOLIO_PRICE_MAX=300;   // سقفِ قیمت‌گذاری؛ بقیه ف
 async function renderSolFolio(){
   const seq=++folioSeq,account=solAccount,body=$("folioBody");
   $("folioTotal").textContent="";
+  if(!account&&solPendingRestore()){
+    // بازیابیِ نشست در جریان است — معرفیِ «Connect» نباید یک لحظه پدیدار شود
+    body.innerHTML='<div class="empty"><span class="spin"></span>Reading your Solana balances…</div>';return;
+  }
   if(!account){
     body.innerHTML='<div class="empty intro"><span class="eTtl">Your Solana portfolio</span>'+
       '<p>Connect a Solana wallet to see SOL and your tokens, valued and ranked by share.</p>'+
@@ -6139,16 +6172,30 @@ async function renderSolFlow(){
   const seq=++flowSeq,mint=solMintCur,body=$("flowBody"),windowHours=flowWindow==="h6"?6:1;
   paintFlowToken();
   const current=()=>seq===flowSeq&&activeChain==="solana"&&mint===solMintCur;
-  if(!mint){body.innerHTML='<div class="empty intro"><span class="eTtl">Choose a Solana token</span><p>See recent buys, sells and the largest observed trades.</p><button class="chip solid" data-act="pickFlowToken">Choose a token</button></div>';return;}
-  body.innerHTML='<div class="empty"><span class="spin"></span>Reading recent Solana trades…</div>';
+  const SPIN='<div class="empty"><span class="spin"></span>Reading recent Solana trades…</div>';
+  if(!mint){
+    // ۵ اکتبر — تا وقتی توکنِ پیش‌فرض (USDC) هنوز در حال بارگذاری است معرفیِ «Choose a token» نباید
+    // لحظه‌ای پدیدار شود؛ معرفی فقط اگر بارگذاریِ پیش‌فرض شکست خورده باشد.
+    if(!tokenPage&&solAppDefaultState!=="failed"){body.innerHTML=SPIN;return;}
+    body.innerHTML='<div class="empty intro"><span class="eTtl">Choose a Solana token</span><p>See recent buys, sells and the largest observed trades.</p><button class="chip solid" data-act="pickFlowToken">Choose a token</button></div>';return;
+  }
+  body.innerHTML=SPIN;
   try{
     const pools=await gtJson(GT+"/networks/solana/tokens/"+mint+"/pools?page=1");
     if(!current())return;
     if(!Array.isArray(pools?.data))throw new Error("pool response unavailable");
-    const candidates=pools.data.filter(p=>{
+    const all=pools.data.filter(p=>{
       const refs=[p.relationships?.base_token?.data?.id,p.relationships?.quote_token?.data?.id];
       return refs.includes("solana_"+mint)&&SOL_MINT_RE.test(p.attributes?.address||"");
-    }).sort((a,b)=>(Number(b.attributes.reserve_in_usd)||0)-(Number(a.attributes.reserve_in_usd)||0));
+    });
+    // ۵ اکتبر — ذخیره‌ی جعلی/کهنه نباید برنده شود: استخرِ زیر ۱۰۰۰ دلار کنار می‌رود و
+    // بین بقیه حجمِ ۲۴ساعته تعیین می‌کند؛ اگر هیچ‌کدام نماند، همان مرتب‌سازیِ قدیمیِ ذخیره.
+    const reserveOf=p=>Number(p.attributes.reserve_in_usd)||0;
+    const volumeOf=p=>Number(p.attributes.volume_usd?.h24)||0;
+    const real=all.filter(p=>reserveOf(p)>=1000);
+    const candidates=real.length
+      ?real.sort((a,b)=>(volumeOf(b)-volumeOf(a))||(reserveOf(b)-reserveOf(a)))
+      :all.sort((a,b)=>reserveOf(b)-reserveOf(a));
     const pool=candidates[0];
     if(!pool){body.innerHTML='<div class="empty">No indexed Solana pool was found for this token. Trade history is unavailable; this does not mean it cannot be traded.</div>';return;}
     const response=await gtJson(GT+"/networks/solana/pools/"+pool.attributes.address+"/trades");
@@ -6156,35 +6203,39 @@ async function renderSolFlow(){
     if(!Array.isArray(response?.data))throw new Error("trade response unavailable");
     const now=Date.now(),trades=solFlowTrades(response.data,mint,now-windowHours*3600000,now);
     const buys=trades.filter(t=>t.isBuy),sells=trades.filter(t=>!t.isBuy);
-    const sum=a=>a.reduce((n,t)=>n+(t.usd??0),0),bought=sum(buys),sold=sum(sells),total=bought+sold;
-    const unpriced=trades.some(t=>t.usd===null);
-    const money=n=>trades.some(t=>t.usd!==null)?"$"+n.toLocaleString("en-US",{maximumFractionDigits:2}):"—";
-    let html=`<div class="fnote" style="color:var(--warn)">Recent-trade sample, filtered to the last ${windowHours}h. GeckoTerminal returns up to 300 recent trades from one pool; totals below may not cover the entire time window or other pools.</div>`;
-    if(!trades.length)html+='<div class="empty">No matching trades in the returned sample. Activity outside this sample is unknown.</div>';
+    const sum=a=>a.reduce((n,t)=>n+(t.usd??0),0),bought=sum(buys),sold=sum(sells),total=bought+sold,net=bought-sold;
+    const unpriced=trades.some(t=>t.usd===null),anyPriced=trades.some(t=>t.usd!==null);
+    const money=v=>anyPriced?"$"+Math.round(v).toLocaleString():"—";
+    let h="";
+    if(!trades.length)h+=`<div class="empty">No trades from this pool in the last ${windowHours}h of the returned sample. Activity outside this sample is unknown.</div>`;
     else{
-      if(total>0)html+=`<div class="flowbarCap"><span>Bought ${(bought/total*100).toFixed(0)}%</span><span>Sold ${(sold/total*100).toFixed(0)}%</span></div><div class="flowbar"><i style="width:${bought/total*100}%;background:var(--pos)"></i><i style="width:${sold/total*100}%;background:var(--neg)"></i></div>`;
-      if(unpriced)html+='<div class="fnote">Dollar totals and percentages include priced trades only.</div>';
-      html+=`<div class="flowkv"><span class="k">Bought in sample</span><span class="mono">${money(bought)}</span></div>
-        <div class="flowkv"><span class="k">Sold in sample</span><span class="mono">${money(sold)}</span></div>
-        <div class="flowkv"><span class="k">Net in sample</span><span class="mono">${bought>=sold?'+':'−'}${money(Math.abs(bought-sold))}</span></div>
-        <div class="flowkv"><span class="k">Swaps in sample</span><span class="mono">${buys.length} buys · ${sells.length} sells</span></div>`;
-      for(const [label,side] of [["Top buyers in sample",buys],["Top sellers in sample",sells]]){
-        const senders=new Map();for(const t of side)if(t.who&&t.usd!==null)senders.set(t.who,(senders.get(t.who)||0)+t.usd);
-        const ranked=[...senders].sort((a,b)=>b[1]-a[1]).slice(0,10);
-        if(ranked.length)html+='<h3>'+label+'</h3>'+ranked.map(([who,usd])=>`<div class="flowkv"><a target="_blank" rel="noopener" href="https://solscan.io/account/${who}">${shortAddr(who)}</a><span>${money(usd)}</span></div>`).join("");
-      }
-      const counts=new Map();buys.forEach(t=>{if(t.who)counts.set(t.who,(counts.get(t.who)||0)+1);});
-      const largest=buys.filter(t=>t.usd!==null).sort((a,b)=>b.usd-a.usd).slice(0,5);
-      if(largest.length)html+='<div class="frow">Largest observed buys</div>';
-      html+=largest.map(t=>`<div class="trade"><span class="fchip" style="background:var(--pos)"></span><span class="amt2 mono">${money(t.usd)}</span>
-        ${t.who?`<a class="mono" style="color:var(--tx3);font-size:11.5px" target="_blank" rel="noopener" href="https://solscan.io/account/${t.who}">${shortAddr(t.who)}</a>`:'<span>unknown trader</span>'}
-        ${t.who&&counts.get(t.who)>1?`<span class="vtag">×${counts.get(t.who)}</span>`:''}
-        <span class="ago">${Math.max(0,Math.floor((now-t.time)/60000))}m ago</span>
-        ${t.signature?`<a target="_blank" rel="noopener" href="https://solscan.io/tx/${t.signature}">View</a>`:''}</div>`).join("");
+      if(total>0)h+=`<div class="flowbarCap"><span style="color:var(--pos)">Bought ${((bought/total)*100).toFixed(0)}%</span><span style="color:var(--neg)">Sold ${((sold/total)*100).toFixed(0)}%</span></div>
+        <div class="flowbar"><i style="width:${((bought/total)*100).toFixed(1)}%;background:var(--pos)"></i><i style="width:${((sold/total)*100).toFixed(1)}%;background:var(--neg)"></i></div>`;
+      if(unpriced)h+='<div class="fnote">Dollar totals and percentages include priced trades only.</div>';
+      h+=`<div class="flowkv"><span class="k">Bought</span><span class="mono" style="color:var(--pos)">${money(bought)}</span></div>
+        <div class="flowkv"><span class="k">Sold</span><span class="mono" style="color:var(--neg)">${money(sold)}</span></div>
+        <div class="flowkv"><span class="k">Net</span><span class="mono" style="color:${net>=0?"var(--pos)":"var(--neg)"}">${anyPriced?(net>=0?"+":"−")+money(Math.abs(net)):"—"}</span></div>
+        <div class="flowkv"><span class="k">Swaps</span><span class="mono">${buys.length} buys · ${sells.length} sells</span></div>`;
     }
-    html+=`<div class="flowkv"><span class="k">Pool</span><a style="color:var(--tx3);font-size:12px" target="_blank" rel="noopener" href="https://solscan.io/account/${pool.attributes.address}">${esc(pool.attributes.name||shortAddr(pool.attributes.address))}</a></div>
-      <div class="fnote">Solana trades supplied by GeckoTerminal. Addresses are the reported transaction senders, which can include routers. This is flow, not a forecast.</div>`;
-    body.innerHTML=html;
+    h+=`<div class="flowkv"><span class="k">Pool</span><a class="mono" style="font-size:12px;color:var(--tx3)" target="_blank" rel="noopener" href="https://solscan.io/account/${pool.attributes.address}">${esc(pool.attributes.name||shortAddr(pool.attributes.address))}</a></div>`;
+    const counts=new Map();buys.forEach(t=>{if(t.who)counts.set(t.who,(counts.get(t.who)||0)+1);});
+    const largest=buys.filter(t=>t.usd!==null).sort((a,b)=>b.usd-a.usd).slice(0,5);
+    if(largest.length){
+      h+=`<div class="frow" style="color:var(--tx3);font-size:11px;letter-spacing:.05em;
+           text-transform:uppercase;padding-bottom:2px">Largest buys
+           <span style="text-transform:none;letter-spacing:0;color:var(--tx3)"
+             title="From the transaction's reported sender. For trades sent through an aggregator or router, this is that contract, not the trader.">· sender address</span></div>`;
+      for(const t of largest){
+        h+=`<div class="trade"><span class="fchip" style="background:var(--pos)"></span>
+          <span class="amt2 mono">${money(t.usd)}</span>
+          ${t.who?`<a class="mono" style="font-size:11.5px;color:var(--tx3)" target="_blank" rel="noopener" href="https://solscan.io/account/${t.who}">${shortAddr(t.who)}</a>`:'<span style="color:var(--tx3);font-size:11.5px">unknown trader</span>'}
+          ${t.who&&counts.get(t.who)>1?`<span class="vtag" style="margin-left:0">×${counts.get(t.who)}</span>`:""}
+          <span class="ago">${Math.max(0,Math.floor((now-t.time)/60000))}m ago</span>
+          ${t.signature?`<a style="color:var(--tx3);font-size:11.5px" target="_blank" rel="noopener" href="https://solscan.io/tx/${t.signature}">View</a>`:""}</div>`;
+      }
+    }
+    h+=`<div class="fnote">Recent trades from GeckoTerminal (up to 300, from the busiest pool). Totals cover that sample, not every pool. Addresses are the reported transaction senders, which can include routers. This is <b>flow, not a forecast</b>.</div>`;
+    body.innerHTML=h;
   }catch{
     if(!current())return;
     body.innerHTML='<div class="empty">Solana trade history could not be loaded. Activity is unknown, not zero. Quotes and swaps are unaffected.</div>';
@@ -6887,8 +6938,14 @@ function paintWallet(){
   const b=$("connectBtn"),addr=$("walletAddr");
   // روی /app با زنجیره‌ی Solana، این دکمه کیف‌پولِ سولانا را نشان می‌دهد —
   // کیف‌پولِ Base (account) دست‌نخورده در پس‌زمینه می‌ماند، فقط پنهان است.
+  if(activeChain!=="solana")b.removeAttribute("aria-busy");
   if(activeChain==="solana"){
     b.disabled=solConnectionBusy;
+    if(!solAccount&&solPendingRestore()){
+      // بازیابیِ نشست در جریان است: ظاهرِ «وصل» از اسکریپتِ درون‌خطی می‌ماند
+      b.textContent=shortAddr(globalThis.__zxSolPend.address);b.className="chip";b.setAttribute("aria-busy","true");return;
+    }
+    b.removeAttribute("aria-busy");
     if(!solAccount){b.textContent=solConnectionBusy?"Approve in wallet…":"Connect wallet";b.className="chip solid";
       addr.textContent="—";closeWalletMenu();return;}
     b.textContent=shortAddr(solAccount.address);b.className="chip";
@@ -8052,6 +8109,24 @@ function solSessionWrite(name,address){
 }
 function solSessionClear(){try{sessionStorage.removeItem(SOL_SESSION_KEY);}catch{}}
 let solRestoreStarted=false;
+// حالتِ «در انتظارِ بازیابی»: globalThis.__zxSolPend را اسکریپتِ درون‌خطیِ کنارِ #connectBtn می‌گذارد
+function solPendingRestore(){return !!(globalThis.__zxSolPend&&!solAccount&&!solConnectionBusy);}
+function solEndPending(){
+  if(!globalThis.__zxSolPend)return;
+  globalThis.__zxSolPend=null;
+  const b=$("connectBtn");if(b)b.removeAttribute("aria-busy");
+  paintWallet();
+  if(activeChain==="solana"&&view==="folio")renderFolio();
+}
+function solArmPendingTimeout(){
+  if(!globalThis.__zxSolPend)return;
+  setTimeout(()=>{
+    if(!globalThis.__zxSolPend)return;
+    // اتصالِ بی‌صدا شروع شده ولی هنوز جواب نداده: یک مهلتِ سخت‌تر
+    if(solRestoreStarted){setTimeout(()=>{if(globalThis.__zxSolPend&&!solAccount){solSessionClear();solEndPending();}},5000);return;}
+    solSessionClear();solEndPending();
+  },2500);
+}
 async function solMaybeSilentConnect(w){
   // ⚠️ این تابع و solConnectWallet/solDisconnectWallet عمداً فقط با sessionStorageِ
   // مستقیم (داخل try) کار می‌کنند، نه فقط با کمکی‌های بالا — solana-approval.test.mjs
@@ -8060,7 +8135,7 @@ async function solMaybeSilentConnect(w){
   try{rec=JSON.parse(sessionStorage.getItem("zaexa.solsession.v1")||"null");}catch{}
   if(!rec||typeof rec.name!=="string"||typeof rec.address!=="string"||typeof rec.t!=="number")return;
   if(solRestoreStarted||!w||solAccount||solConnectionBusy||rec.name!==w.name)return;
-  if(rec.name==="WalletConnect Solana"||solWalletOff()||Date.now()-rec.t>SOL_SESSION_TTL){solSessionClear();return;}
+  if(rec.name==="WalletConnect Solana"||solWalletOff()||Date.now()-rec.t>SOL_SESSION_TTL){solSessionClear();solEndPending();return;}
   solRestoreStarted=true;                      // دقیقاً یک تلاش در هر بارگذاری
   const seq=solWalletConnectSeq;
   try{
@@ -8070,9 +8145,10 @@ async function solMaybeSilentConnect(w){
     if(!acc||acc.address!==rec.address||solBs58Encode(acc.publicKey||[])!==rec.address)throw new Error("restore mismatch");
     solWalletApi=w;solAccount=acc;solLastWalletName=w.name;
     solSessionWrite(w.name,rec.address);
+    globalThis.__zxSolPend=null;
     solSubscribeWalletEvents(w);solPaintWallet();solRefreshBalances();solScheduleQuote();
   }catch{
-    if(seq===solWalletConnectSeq)solSessionClear();
+    if(seq===solWalletConnectSeq){solSessionClear();solEndPending();}
   }
 }
 const SOL_WC_CHAIN="solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp";
@@ -8265,6 +8341,7 @@ async function solConnectWallet(w){
 function solDisconnectWallet(setOff){
   if(setOff===undefined)setOff=true;
   try{sessionStorage.removeItem("zaexa.solsession.v1");}catch{}
+  globalThis.__zxSolPend=null;
   ++solWalletConnectSeq;++solBalanceSeq;
   const wallet=solWalletApi||solPendingWallet;
   solPendingWallet=null;solConnectionBusy=false;
@@ -8378,16 +8455,19 @@ async function solRefreshBalances(){
 // عدد را منعکس کند، وگرنه کاربری که دقیقاً هزینه‌ی جدید را دارد بی‌جهت
 // رد می‌شد.
 const SOL_PRIO_FEE_RESERVE=0.0002;
+/* رنتِ یک‌باره‌ی همین معامله — تنها منبعِ این عدد، هم برای بودجه (solReserveSol) و هم برای
+   پیامِ شبیه‌سازی (solSimKeepSol)، تا هرگز با هم اختلاف نکنند.
+   ata: حسابِ توکنِ خروجی (۰ اگر خروجی SOL بومی است یا حساب از قبل هست؛ ناشناخته یعنی لازم است)
+   wsol: حسابِ wrapped-SOL موقتِ جوپیتر وقتی ورودی یا خروجی SOL است. */
+function solRentParts(){
+  const out=solOutputMint();
+  const known=solSide==="buy"?solOutAtaExists:solRefAtaExists;
+  const ata=out===SOL_MINT_ADDR?0:(known===true?0:1);
+  const wsol=(solInputMint()===SOL_MINT_ADDR||out===SOL_MINT_ADDR)?1:0;
+  return {ata,wsol,known:out===SOL_MINT_ADDR||known!=null,sol:0.00204*(ata+wsol)};
+}
 function solReserveSol(){
-  if(solOutputMint()===SOL_MINT_ADDR){
-    // فروش به SOL بومی: نیازی به ATA تازه نیست، فقط کارمزد.
-    return SOL_PRIO_FEE_RESERVE+0.00001;
-  }
-  // solOutAtaExists از همان getTokenAccountsByOwner که موجودی را هم می‌آورد:
-  // true یعنی حسابِ توکن از قبل هست (رنت لازم نیست)، false یعنی مطمئنیم
-  // نیست (رنت لازم است)، null یعنی هنوز نمی‌دانیم — محافظه‌کارانه یعنی رنت.
-  const needAta=(solSide==="buy"?solOutAtaExists:solRefAtaExists)!==true;
-  return (needAta?0.00204:0)+SOL_PRIO_FEE_RESERVE+0.00001;
+  return solRentParts().sol+SOL_PRIO_FEE_RESERVE+0.00001;
 }
 /* پیامِ دقیق کنارِ CTA وقتی SOL کم است — amt همان مبلغِ SOL این معامله
    (side="buy": amtIn؛ side="sell": صفر، چون ورودی توکن است). */
@@ -9036,14 +9116,10 @@ function solClassifySimFail(err,logs){
 /* «حداقل چقدر SOL نگه دار»: کارمزدِ شبکه + ۰٫۰۰۲۰۴ به‌ازای هر حسابِ توکنِ تازه — فقط وقتی از
    وضعیتِ ATAها قابلِ‌استنباط است؛ وگرنه عددِ تقریبی. */
 function solSimKeepSol(){
-  const out=solOutputMint();
-  const known=out===SOL_MINT_ADDR||(solSide==="buy"?solOutAtaExists:solRefAtaExists)!=null;
-  if(!known)return "about 0.005";
-  const n=out===SOL_MINT_ADDR?0:((solSide==="buy"?solOutAtaExists:solRefAtaExists)===true?0:1);
+  const r=solRentParts();
+  if(!r.known)return "about 0.005";
   const feeLamports=(solNetFeeLamports!=null?solNetFeeLamports:SOL_PRIO_FEE_RESERVE*1e9)+5000;
-  // ۴ اکتبر — جوپیتر برای SOL یک حسابِ wrapped-SOL موقت می‌سازد که رنتش باید حینِ سواپ موجود باشد
-  const wsol=(solInputMint()===SOL_MINT_ADDR||out===SOL_MINT_ADDR)?1:0;
-  return (Math.ceil((feeLamports/1e9+0.00204*(n+wsol))*1e4)/1e4).toFixed(4);
+  return (Math.ceil((feeLamports/1e9+0.00204*(r.ata+r.wsol))*1e4)/1e4).toFixed(4);
 }
 function solSimFailMessage(reason,keepSol){
   if(reason==="insufficient-sol")return "Not enough SOL for the network fee and one-time account rent. Keep at least "+(keepSol||"about 0.005")+" SOL.";
@@ -9180,7 +9256,7 @@ async function solBuildFreshTx(btn,context=solSwapContext()){
       if(err){
         const info=solClassifySimFail(err,simRes.value&&simRes.value.logs);
         fail={msg:solSimFailMessage(info.reason,info.reason==="insufficient-sol"?solSimKeepSol():null),
-          code:info.reason==="other"?info.code:""};
+          code:info.reason==="other"?info.code:"",noSol:info.reason==="insufficient-sol"};
       }
     }else if(j.simulationError){
       // خودِ تماسِ RPC ما شکست خورد: فقط همان errorCode جوپیتر
@@ -9190,6 +9266,12 @@ async function solBuildFreshTx(btn,context=solSwapContext()){
       fail={msg:solSimFailMessage(jr),code:jr==="other"&&/^[A-Z0-9_]{1,40}$/.test(jc)?jc:""};
     }
     if(fail){
+      if(fail.noSol){
+        // ۵ اکتبر — SOL کافی نیست: بلوکِ ساده، هرگز «Swap anyway» (کیف‌پول هم همین را رد می‌کند)
+        ev("swap:sim-fail","","solana");
+        solSimFailedKey=null;
+        throw Object.assign(new Error(fail.msg),{uiHandled:true,uiMessage:fail.msg,uiCode:fail.code});
+      }
       ev("swap:sim-fail","","solana");
       solSimFailedKey=simKey;
       throw Object.assign(new Error(fail.msg),{uiHandled:true,uiMessage:fail.msg,uiCode:fail.code,simFail:true});
@@ -9542,6 +9624,7 @@ function wire(){
   document.addEventListener("mousedown",e=>{
     if(!$("srcPop").contains(e.target)&&!$("srcChip").contains(e.target))closeSrcMenu();});
   $("connectBtn").onclick=()=>{
+    if(activeChain==="solana"&&solPendingRestore())return;   // بازیابیِ نشست در جریان است
     if(activeChain==="solana"){
       if(!solAccount){solOpenWalletPicker();return;}
       toggleWalletMenu();
@@ -9764,6 +9847,8 @@ $("copyAddrBtn").onclick=(e)=>{
   // اتصالِ بی‌صدایش را از دست می‌دهد چون solLastWalletName هنوز خالی است.
   solTryAutoRestoreName();
   activeChain=initialChain();
+  if(activeChain!=="solana")globalThis.__zxSolPend=null;
+  solArmPendingTimeout();
   initMarketWatch();
   wire();
   /* ⚠️ همه‌ی این بلوک — ethers، همه‌ی Interfaceها، RPC، جفتِ پیش‌فرض،

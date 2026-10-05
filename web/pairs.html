@@ -398,6 +398,8 @@ footer .fine{max-width:78ch;margin:46px 0 0;font-size:11.5px;color:var(--tx3);li
 [data-theme="dark"] #themeBtn::before,[data-theme="dark"] #themeToggle::before{transform:translateX(28px)}
 /* ۴ اکتبر — .chip در اپ gap:7px دارد و ماه را ۷ پیکسل از گودی بیرون می‌برد (gap:0 بالا)؛ و در تمِ تیره همان سیاهیِ سوییچِ صفحه‌ی معرفی، نه رنگِ زمینه‌ی صفحه. */
 [data-theme="dark"] #themeBtn,[data-theme="dark"] #themeToggle,[data-theme="dark"] #themeBtn:hover,[data-theme="dark"] #themeToggle:hover,[data-theme="dark"] #themeBtn::before,[data-theme="dark"] #themeToggle::before{background:#08070d}
+/* ۵ اکتبر — حسام: در تمِ تیره نوارِ تب‌ها و دکمه‌ی تنظیمات طوسی‌تر از سوییچِ تم بودند؛ هر سه یک رنگ (#08070d). */
+[data-theme="dark"] .nav,[data-theme="dark"] .nav button.on,[data-theme="dark"] .nav a.on,[data-theme="dark"] #setBtn,[data-theme="dark"] #setBtn:active,[data-theme="dark"] #setBtn[aria-expanded="true"],[data-theme="dark"] #setBtn:has(+ #setPop.on){background:#08070d}
 #themeBtn svg,#themeToggle>span{display:grid!important;place-items:center;flex:none;position:static;width:28px;height:28px;margin:0;padding:6px;box-sizing:border-box;transform:none;color:var(--tx3);transition:color .25s}
 #themeToggle>span{padding:0}#themeToggle svg{width:16px;height:16px}
 #themeBtn .themeSun,#themeToggle .sun{order:0}#themeBtn .themeMoon,#themeToggle .moon{order:1}
@@ -530,6 +532,20 @@ footer .fine{max-width:78ch;margin:46px 0 0;font-size:11.5px;color:var(--tx3);li
   <button class="chip round" id="themeBtn" type="button" role="switch" aria-checked="false" aria-label="Switch to dark mode" title="Switch to dark mode"><svg class="themeMoon" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"/></svg><svg class="themeSun" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2.5v2.2M12 19.3v2.2M4.6 4.6l1.6 1.6M17.8 17.8l1.6 1.6M2.5 12h2.2M19.3 12h2.2M4.6 19.4l1.6-1.6M17.8 6.2l1.6-1.6"/></svg><span id="themeState" hidden>Light</span></button>
   <div class="rel" id="walletMenu">
     <button class="chip solid" id="connectBtn" aria-haspopup="menu" aria-expanded="false">Connect wallet</button>
+<script>
+/* ۵ اکتبر — پیش از اولین رنگ: رکوردِ تازه‌ی نشستِ سولانا + ?chain=solana یعنی هدر همان لحظه «وصل» دیده
+   می‌شود (فقط نمایش). بسته‌ی pairs-solana بازیابی را تمام می‌کند یا پس از ۲۵۰۰ms کنار می‌گذارد. */
+try{(function(){
+  var r=JSON.parse(sessionStorage.getItem("zaexa.solsession.v1")||"null");
+  if(!r||typeof r.name!=="string"||typeof r.address!=="string"||typeof r.t!=="number")return;
+  if(Date.now()-r.t>30*60*1000||r.name==="WalletConnect Solana")return;
+  try{if(localStorage.getItem("zaexa.solwallet.off.v1")==="1")return;}catch(e){}
+  if(new URLSearchParams(location.search).get("chain")!=="solana")return;
+  var b=document.getElementById("connectBtn");if(!b)return;
+  b.className="chip";b.textContent=r.address.slice(0,6)+"\u2026"+r.address.slice(-4);b.setAttribute("aria-busy","true");
+  window.__zxSolPend={name:r.name,address:r.address};
+})();}catch(e){}
+</script>
     <div class="pop walletPop" id="walletPop" role="menu" aria-label="Wallet menu">
       <div class="walletHead"><span>Wallet</span><span class="walletAddr" id="walletAddr">—</span></div>
       <button class="walletAction" id="copyAddrBtn" role="menuitem">
@@ -1794,6 +1810,7 @@ Solana</button>
     var b = document.getElementById('connectBtn');
     var addr = document.getElementById('walletAddr');
     if (!b || !addr) return;
+    if(window.__zxSolPend) return;   // بازیابیِ نشستِ سولانا در جریان است — بسته‌ی سولانا رنگ می‌کند
     if(window.zaexaPairsSolana && window.zaexaPairsSolana.paint())return;
     if (!account){
       b.textContent = 'Connect wallet';
@@ -1940,7 +1957,7 @@ Solana</button>
   if (walletOvEl) walletOvEl.onclick = function(e){ if (e.target === walletOvEl) closeWalletPicker(); };
 
   var connectBtnEl = document.getElementById('connectBtn');
-  if (connectBtnEl) connectBtnEl.onclick = function(){ if (!account) connect(); else toggleWalletMenu(); };
+  if (connectBtnEl) connectBtnEl.onclick = function(){ if (window.__zxSolPend) return; if (!account) connect(); else toggleWalletMenu(); };
   var copyAddrBtnEl = document.getElementById('copyAddrBtn');
   if (copyAddrBtnEl) copyAddrBtnEl.onclick = function(e){
     e.stopPropagation();
@@ -1978,6 +1995,6 @@ Solana</button>
 })();
 </script>
 
-<script src="/pairs-solana.76019ace.js"></script>
+<script src="/pairs-solana.b2469be4.js"></script>
 </body>
 </html>

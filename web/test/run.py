@@ -10190,8 +10190,9 @@ async def main():
         # ۲۸ سپتامبر — round 3، مورد D: سقفِ کارمزدِ اولویت از ۰٫۰۰۱ به ۰٫۰۰۰۲
         # SOL پایین آمد، پس رزروِ A هم عوض شد (۰٫۰۰۲۲۵ به‌جای ۰٫۰۰۳۰۵) و این
         # دو عدد با آن جابه‌جا شدند — نه لق‌ترشدنِ قاعده، فقط دنبال‌کردنِ D.
-        assert f_half_val == "0.998875", "50%% of (2 SOL - the A reserve) should be 0.998875, got %r" % f_half_val
-        assert f_max_val == "1.99775", "MAX must leave exactly the A reserve behind, got %r" % f_max_val
+        # ۵ اکتبر: رزرو حالا رنتِ wSOL موقتِ جوپیتر (۰٫۰۰۲۰۴) را هم دارد: ۰٫۰۰۴۲۹ = ۰٫۰۰۲۰۴ ATA + ۰٫۰۰۲۰۴ wSOL + کارمزد
+        assert f_half_val == "0.997855", "50%% of (2 SOL - the A reserve) should be 0.997855, got %r" % f_half_val
+        assert f_max_val == "1.99571", "MAX must leave exactly the A reserve behind, got %r" % f_max_val
         assert f_clear_hidden_half is False, "the clear × must show once an amount is set"
         assert f_after_clear == "", "clicking × must empty the amount field"
         assert f_clear_hidden_after is True, "the clear × must hide itself again once the field is empty"
@@ -10777,7 +10778,8 @@ async def main():
         f2_amt = await f2pg2.input_value("#solAmt")
         await f2pg2.close()
         print("[sol round3][F] clicking the pay balance figure -> #solAmt=%r" % f2_amt)
-        assert f2_amt == "2.99775", \
+        # ۵ اکتبر: رزرو شامل رنتِ wSOL است (۰٫۰۰۴۲۹)
+        assert f2_amt == "2.99571", \
             "F: clicking the balance figure above You-pay must fill the full spendable amount (MAX), got %r" % f2_amt
 
         # G) the SOL chip's <img> src comes from the GT single-token fixture.
@@ -11584,6 +11586,352 @@ async def main():
         assert not carry_errs, "[sol carry] console errors: %s" % carry_errs
         print("[sol carry] session-scoped carry-over verified on /app and /pairs: record only in sessionStorage, silent:true once, "
               "same-address check, 30-minute window, OFF flag, WalletConnect excluded, failure/Disconnect/change clear the record, no signature, no /ev")
+
+        # ---- [sol flow2] / [sol flash] / [sol budget] ۵ اکتبر — چهار گزارشِ مالک ----
+        # ۱) Money Flow سولانا: استخرِ درست (حجمِ ۲۴ساعته، نه ذخیره‌ی جعلی) و چیدمانِ عینِ Base؛
+        # ۲) معرفیِ «Choose a Solana token» حینِ بارگذاریِ توکنِ پیش‌فرض نباید پدیدار شود؛
+        # ۳) دکمه‌ی کیف‌پولِ هدر بینِ صفحه‌ها «Connect wallet» نشان ندهد؛
+        # ۴) SOL ناکافی هرگز «Swap anyway» نمی‌شود.
+        SF_USDC = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"
+        sf_b58 = lambda lo: carry_b58(list(range(lo, lo + 32)))
+        SF_POOL_APT, SF_POOL_SOL, SF_POOL_JUNK = sf_b58(10), sf_b58(20), sf_b58(30)
+        SF_WHO_A, SF_WHO_B = sf_b58(40), sf_b58(41)
+        sf_sig = lambda n: carry_b58(list(range(n, n + 64)))
+
+        def sf_pool(addr, name, reserve, vol, mint=SF_USDC):
+            return {"id": "solana_" + addr, "attributes": {
+                        "address": addr, "name": name, "reserve_in_usd": str(reserve),
+                        "volume_usd": {"h24": str(vol)}},
+                    "relationships": {"base_token": {"data": {"id": "solana_" + mint, "type": "token"}},
+                                      "quote_token": {"data": {"id": "solana_" + SOL_MINT_ADDR, "type": "token"}}}}
+
+        def sf_trades_body():
+            now_s = _time.time()
+            def iso(mins):
+                return _time.strftime("%Y-%m-%dT%H:%M:%SZ", _time.gmtime(now_s - mins * 60))
+            def row(i, mins, buy, usd, who):
+                return {"id": "sf-%d" % i, "attributes": {
+                    "block_timestamp": iso(mins),
+                    "from_token_address": SOL_MINT_ADDR if buy else SF_USDC,
+                    "to_token_address": SF_USDC if buy else SOL_MINT_ADDR,
+                    "volume_in_usd": usd, "tx_from_address": who, "tx_hash": sf_sig(i + 1)}}
+            return {"data": [row(1, 5, True, "1200.4", SF_WHO_A), row(2, 10, True, "450.5", SF_WHO_B),
+                             row(3, 20, True, "8000", SF_WHO_A), row(4, 15, False, "3000", SF_WHO_B),
+                             row(5, 180, True, "100000", SF_WHO_B), row(6, 200, False, "2500", SF_WHO_A)]}
+
+        SF_POOLS_MAIN = {"data": [
+            sf_pool(SF_POOL_APT, "APT / USDC", 5_000_000, 10),
+            sf_pool(SF_POOL_SOL, "SOL / USDC", 3_000_000, 9_000_000),
+            sf_pool(SF_POOL_JUNK, "JUNK / USDC", 500, 1e9)]}
+
+        SF_INTRO_WATCH = """
+(function(){ window.__introSeen = false;
+  new MutationObserver(function(rs){ rs.forEach(function(r){
+    var t = r.target, el = t && (t.nodeType === 1 ? t : t.parentNode);
+    if (!el || !el.closest || !el.closest('#flowBody')) return;
+    var nodes = Array.prototype.slice.call(r.addedNodes); if (r.type === 'characterData') nodes.push(r.target);
+    nodes.forEach(function(n){ if ((n.textContent || '').indexOf('Choose a Solana token') >= 0) window.__introSeen = true; });
+  }); }).observe(document, {subtree: true, childList: true, characterData: true});
+})();
+"""
+
+        async def sf_page(w=1440, h=900, scheme="light", hash_="#flow?chain=solana", pools=None,
+                          pools_requests=None, trades_requests=None, delay=0.0, intro_watch=False, errs=None):
+            spg = await b.new_page(viewport={"width": w, "height": h}, color_scheme=scheme)
+            if errs is not None:
+                spg.on("console", lambda m: errs.append(m.text) if m.type == "error" and (m.location.get("url") or "").startswith(CARRY_ORIGIN) else None)
+                spg.on("pageerror", lambda e: errs.append("PAGEERROR " + str(e)))
+            if intro_watch:
+                await spg.add_init_script(SF_INTRO_WATCH)
+            async def s_ext(route): await route.abort()
+            async def s_ok(route, body='{"data":[]}'):
+                await route.fulfill(status=200, content_type="application/json", body=body)
+            async def s_gt(route):
+                u = route.request.url.split("?")[0]
+                if delay:
+                    await asyncio.sleep(delay)
+                if u.endswith("/trades") and "/pools/" in u:
+                    if trades_requests is not None:
+                        trades_requests.append(u.split("/pools/")[1].split("/")[0])
+                    await s_ok(route, _json.dumps(sf_trades_body()))
+                elif u.endswith("/pools") and "/tokens/" in u:
+                    if pools_requests is not None:
+                        pools_requests.append(u)
+                    await s_ok(route, _json.dumps(pools if pools is not None else SF_POOLS_MAIN))
+                elif "/tokens/multi/" in u:
+                    await s_ok(route)
+                elif "/tokens/" in u:
+                    await s_ok(route, _json.dumps({"data": {"attributes": {"name": "USD Coin", "symbol": "USDC", "decimals": 6, "price_usd": "1"}}}))
+                else:
+                    await s_ok(route)
+            async def s_ev(route): await route.fulfill(status=204, body="")
+            async def s_vd(route): await s_ok(route, '{"v":"sell","ms":100}')
+            async def s_sol(route): await s_ok(route, '{"result":null}')
+            async def s_pairs(route):
+                await s_ok(route, _json.dumps({"chain": "solana", "rows": [], "store": True}))
+            await spg.route("**/*", lambda r: r.continue_() if r.request.url.startswith(CARRY_ORIGIN) else s_ext(r))
+            await spg.route("**/gt/**", s_gt)
+            await spg.route("**/ev", s_ev)
+            await spg.route("**/vd/**", s_vd)
+            await spg.route("**/sol/**", s_sol)
+            await spg.route("**/pairs.json**", s_pairs)
+            await spg.goto(CARRY_ORIGIN + "/app" + hash_)
+            return spg
+
+        sf_errs = []
+        # ---- [sol flow2] انتخابِ استخر: حجمِ ۲۴ساعته، ذخیره‌ی زیر ۱۰۰۰ دلار کنار ----
+        sf_tr, sf_pr = [], []
+        spg = await sf_page(trades_requests=sf_tr, pools_requests=sf_pr, errs=sf_errs)
+        await spg.wait_for_selector("#flowBody .flowkv", timeout=15000)
+        sf_pool_txt = await spg.inner_text("#flowBody")
+        await spg.close()
+        print("[sol flow2 pool] trades requested from %s (SOL/USDC=%s) pool row=%r"
+              % (sf_tr, SF_POOL_SOL, [l for l in sf_pool_txt.split("\n") if "USDC" in l][:1]))
+        assert sf_tr and set(sf_tr) == {SF_POOL_SOL}, \
+            "[sol flow2] the busiest real pool (by 24h volume, reserve >= $1000) must supply the trades, got %s" % sf_tr
+        assert "SOL / USDC" in sf_pool_txt and "APT" not in sf_pool_txt and "JUNK" not in sf_pool_txt, \
+            "[sol flow2] the Pool row must name the chosen pool: %r" % sf_pool_txt
+
+        # اگر هیچ استخری ۱۰۰۰ دلار ذخیره نداشت، همان مرتب‌سازیِ قدیمیِ ذخیره
+        sf_tr2 = []
+        sf_low = {"data": [sf_pool(SF_POOL_APT, "APT / USDC", 400, 900_000), sf_pool(SF_POOL_SOL, "SOL / USDC", 900, 5),
+                           sf_pool(SF_POOL_JUNK, "JUNK / USDC", 100, 1e9)]}
+        spg = await sf_page(trades_requests=sf_tr2, pools=sf_low, errs=sf_errs)
+        await spg.wait_for_selector("#flowBody .flowkv", timeout=15000)
+        await spg.close()
+        print("[sol flow2 pool] every pool under $1000 reserve -> fallback to reserve sort: %s" % sf_tr2)
+        assert set(sf_tr2) == {SF_POOL_SOL}, "[sol flow2] with no real pool the old reserve sort must apply, got %s" % sf_tr2
+
+        # ---- [sol flow2] چیدمان: همان اجزا و ترتیبِ Base، بدونِ <h3>، لینک‌ها tx3، داخلِ کارت ----
+        SF_MEASURE = """() => {
+          const body = document.getElementById('flowBody'), card = body.closest('.card');
+          const cs = getComputedStyle(card), cr = card.getBoundingClientRect();
+          const inner = { l: cr.left + parseFloat(cs.borderLeftWidth) + parseFloat(cs.paddingLeft),
+                          r: cr.right - parseFloat(cs.borderRightWidth) - parseFloat(cs.paddingRight) };
+          const probe = document.createElement('i'); probe.style.color = 'var(--tx3)'; document.body.appendChild(probe);
+          const tx3 = getComputedStyle(probe).color; probe.remove();
+          const out = [];
+          body.querySelectorAll('*').forEach(el => { const r = el.getBoundingClientRect();
+            if (r.width && (r.left < inner.l - 1 || r.right > inner.r + 1)) out.push(el.tagName + '.' + el.className + ':' + Math.round(r.left) + '-' + Math.round(r.right)); });
+          return { h3: body.querySelectorAll('h3').length,
+                   keys: Array.from(body.querySelectorAll('.flowkv .k')).map(e => e.textContent.trim()),
+                   hdr: Array.from(body.querySelectorAll('.frow')).map(e => e.textContent.replace(/\\s+/g, ' ').trim()),
+                   links: Array.from(body.querySelectorAll('a')).map(a => ({ t: a.textContent.trim(), c: getComputedStyle(a).color, u: getComputedStyle(a).textDecorationLine })),
+                   tx3: tx3, outside: out, trades: body.querySelectorAll('.trade').length, notes: body.querySelectorAll('.fnote').length,
+                   cap: !!body.querySelector('.flowbarCap'), bar: !!body.querySelector('.flowbar'),
+                   text: body.innerText.replace(/\\s+/g, ' ') };
+        }"""
+        for sf_w, sf_h in ((1440, 900), (390, 844)):
+            spg = await sf_page(w=sf_w, h=sf_h, errs=sf_errs)
+            await spg.wait_for_selector("#flowBody .flowkv", timeout=15000)
+            m1 = await spg.evaluate(SF_MEASURE)
+            await spg.click('#flowTfs [data-w="h6"]')
+            await spg.wait_for_function("() => document.getElementById('flowBody').innerText.includes('109,651')", timeout=15000)
+            m6 = await spg.evaluate(SF_MEASURE)
+            await spg.close()
+            for tag, m in (("1H", m1), ("6H", m6)):
+                print("[sol flow2 layout %dpx %s] h3=%d keys=%s hdr=%s links=%d outside=%s trades=%d fnotes=%d"
+                      % (sf_w, tag, m["h3"], m["keys"], m["hdr"][:1], len(m["links"]), m["outside"], m["trades"], m["notes"]))
+                assert m["h3"] == 0, "[sol flow2] %s: no <h3> may appear inside the flow card (Base has none)" % tag
+                assert m["keys"] == ["Bought", "Sold", "Net", "Swaps", "Pool"], "[sol flow2] %s: rows must match Base: %s" % (tag, m["keys"])
+                assert m["cap"] and m["bar"] and "Bought" in m["text"] and "Sold" in m["text"], "[sol flow2] %s: flowbar + caption missing" % tag
+                assert any(h.startswith("Largest buys") and "sender address" in h for h in m["hdr"]), \
+                    "[sol flow2] %s: the 'Largest buys' header row is missing: %s" % (tag, m["hdr"])
+                assert 1 <= m["trades"] <= 5, "[sol flow2] %s: trade rows: %d" % (tag, m["trades"])
+                assert m["links"] and all(l["c"] == m["tx3"] for l in m["links"]), \
+                    "[sol flow2] %s: every link inside the card must use var(--tx3), not the browser blue: %s (tx3=%s)" % (tag, m["links"], m["tx3"])
+                assert not m["outside"], "[sol flow2] %s: elements extend outside the card padding box: %s" % (tag, m["outside"])
+                assert m["notes"] == 1 and "flow, not a forecast" in m["text"] and "up to 300" in m["text"], \
+                    "[sol flow2] %s: exactly one closing note expected: notes=%d" % (tag, m["notes"])
+                assert "Top buyers" not in m["text"] and "Top sellers" not in m["text"] and "Recent-trade sample" not in m["text"], \
+                    "[sol flow2] %s: old sections/notes must be gone" % tag
+            print("[sol flow2 layout %dpx] Base-identical row set and order, no <h3>, all %d links tx3-coloured, nothing outside the card" % (sf_w, len(m6["links"])))
+
+        # ---- [sol flow2] پنجره‌ی ۱ساعته با معاملاتِ همان ساعت: عددِ پُر؛ ۶ساعته شامل قدیمی‌ترها ----
+        spg = await sf_page(errs=sf_errs)
+        await spg.wait_for_selector("#flowBody .flowkv", timeout=15000)
+        w1 = await spg.inner_text("#flowBody")
+        await spg.click('#flowTfs [data-w="h6"]')
+        await spg.wait_for_function("() => document.getElementById('flowBody').innerText.includes('109,651')", timeout=15000)
+        w6 = await spg.inner_text("#flowBody")
+        await spg.close()
+        w1f, w6f = " ".join(w1.split()), " ".join(w6.split())
+        print("[sol flow2 window] 1H=%r" % w1f[:150])
+        print("[sol flow2 window] 6H=%r" % w6f[:150])
+        assert "No trades from this pool" not in w1f and "Bought $9,651" in w1f and "Sold $3,000" in w1f \
+            and "Net +$6,651" in w1f and "3 buys · 1 sells" in w1f, "[sol flow2] 1H window numbers wrong: %r" % w1f
+        assert "Bought $109,651" in w6f and "Sold $5,500" in w6f and "Net +$104,151" in w6f and "4 buys · 2 sells" in w6f, \
+            "[sol flow2] 6H window numbers wrong: %r" % w6f
+        assert "×2" in w1f, "[sol flow2] the repeated buyer must carry the ×N tag"
+
+        # ---- [sol flash] معرفیِ «Choose a Solana token» حینِ بارگذاریِ توکنِ پیش‌فرض ----
+        spg = await sf_page(hash_="#flow?chain=solana", delay=0.6, intro_watch=True, errs=sf_errs)
+        await spg.wait_for_timeout(250)
+        early = await spg.inner_text("#flowBody")
+        await spg.wait_for_selector("#flowBody .flowkv", timeout=20000)
+        seen_intro = await spg.evaluate("window.__introSeen")
+        final_txt = " ".join((await spg.inner_text("#flowBody")).split())
+        await spg.close()
+        print("[sol flash flow] intro ever added=%s early=%r final has Pool=%s" % (seen_intro, early[:50], "Pool" in final_txt))
+        assert seen_intro is False, "[sol flash] the 'Choose a Solana token' intro must never appear while the default token loads"
+        assert "Reading recent Solana trades" in early or "Reading" in early, "[sol flash] a spinner row must hold the place meanwhile: %r" % early
+        assert "Bought" in final_txt and "USDC" in final_txt, "[sol flash] the default token's flow must render afterwards: %r" % final_txt[:120]
+        # ناوبری از Swap به Flow در همان صفحه هم همین است
+        spg = await sf_page(hash_="#swap?chain=solana", delay=0.4, intro_watch=True, errs=sf_errs)
+        await spg.wait_for_timeout(100)
+        await spg.evaluate("location.hash = '#flow?chain=solana'")
+        await spg.wait_for_selector("#flowBody .flowkv", timeout=20000)
+        seen_intro2 = await spg.evaluate("window.__introSeen")
+        await spg.close()
+        print("[sol flash flow] navigating Swap -> Flow: intro ever added=%s" % seen_intro2)
+        assert seen_intro2 is False, "[sol flash] navigating Swap -> Flow must not flash the intro either"
+        # ناوبری به Portfolio بدونِ کیف‌پول: همان معرفیِ «Connect» درست است، ولی با نشستِ در حالِ بازیابی نباید لحظه‌ای پدیدار شود
+        # (در بخشِ هدر زیر سنجیده می‌شود)
+
+        # ---- [sol flash] هدرِ کیف‌پول بینِ صفحه‌ها ----
+        HF_DCL = """
+(function(){ window.__hist = [];
+  function snap(tag){ var b = document.getElementById('connectBtn'); if (b && window.__hist.length < 4000)
+    window.__hist.push({tag: tag, t: b.textContent.trim(), cls: b.className, busy: b.getAttribute('aria-busy')}); }
+  document.addEventListener('DOMContentLoaded', function(){ snap('dcl'); });
+  new MutationObserver(function(){ snap('mut'); }).observe(document, {subtree: true, childList: true, characterData: true, attributes: true, attributeFilter: ['class', 'aria-busy']});
+})();
+"""
+        hf_errs = []
+        async def hf_open(url, cfg=None, rec=None, off=False, wait_after=0):
+            hpg = await carry_page(hf_errs)
+            await hpg.add_init_script(HF_DCL)
+            await carry_seed(hpg, cfg, rec, off)
+            await hpg.goto(url)
+            if wait_after:
+                await hpg.wait_for_timeout(wait_after)
+            return hpg
+        HF_STATE = """() => { const b = document.getElementById('connectBtn');
+            const h = window.__hist || []; const dcl = h.find(x => x.tag === 'dcl') || null;
+            return { dcl: dcl, now: { t: b.textContent.trim(), cls: b.className, busy: b.getAttribute('aria-busy') },
+                     everConnect: h.slice(Math.max(0, h.indexOf(dcl))).some(x => x.t === 'Connect wallet'), calls: window.__calls,
+                     rec: sessionStorage.getItem('zaexa.solsession.v1') }; }"""
+        for hf_kind, hf_url, hf_base_url in (("app", CARRY_APP, CARRY_ORIGIN + "/app#swap?chain=base"),
+                                              ("pairs", CARRY_PAIRS, CARRY_ORIGIN + "/pairs.html")):
+            ov = "#solWalletOv" if hf_kind == "app" else "#walletOv"
+            # الف) رکوردِ معتبر + کیف‌پولی که دیر register می‌شود: از اولین رنگ «وصل» است و کلیک کاری نمی‌کند
+            hpg = await hf_open(hf_url, {"late": 1500}, carry_rec(), False, wait_after=500)
+            s_mid = await hpg.evaluate(HF_STATE)
+            await hpg.click("#connectBtn")
+            await hpg.wait_for_timeout(250)
+            ov_on = await hpg.evaluate("(sel) => document.querySelector(sel).classList.contains('on')", ov)
+            await hpg.wait_for_timeout(1900)
+            s_end = await hpg.evaluate(HF_STATE)
+            await hpg.close()
+            print("[sol flash header %s] restore ok: first paint=%s mid=%s clickOpenedPicker=%s end=%s everConnectWallet=%s calls=%s"
+                  % (hf_kind, s_mid["dcl"], s_mid["now"], ov_on, s_end["now"], s_end["everConnect"], s_end["calls"]))
+            assert s_mid["dcl"] and s_mid["dcl"]["t"] == CARRY_SHORT and s_mid["dcl"]["cls"] == "chip" and s_mid["dcl"]["busy"] == "true", \
+                "[sol flash] %s: the very first paint must already show the connected look with the short address: %s" % (hf_kind, s_mid["dcl"])
+            assert not s_mid["everConnect"] and s_mid["now"]["t"] == CARRY_SHORT and s_mid["now"]["busy"] == "true", \
+                "[sol flash] %s: 'Connect wallet' must never show while the restore is pending: %s" % (hf_kind, s_mid)
+            assert ov_on is False and s_mid["calls"] == [], "[sol flash] %s: clicks must do nothing while pending (overlay=%s calls=%s)" % (hf_kind, ov_on, s_mid["calls"])
+            assert s_end["now"]["t"] == CARRY_SHORT and s_end["now"]["cls"] == "chip" and s_end["now"]["busy"] is None \
+                and s_end["calls"] == [{"silent": True}], "[sol flash] %s: the real connected paint must take over: %s" % (hf_kind, s_end)
+            # ب) رکورد هست ولی هیچ کیف‌پولی register نمی‌شود: ≤۲۵۰۰ms بعد «Connect wallet» و رکورد پاک
+            hpg = await hf_open(hf_url, {"late": 99999}, carry_rec(), False, wait_after=600)
+            f_mid = await hpg.evaluate(HF_STATE)
+            await hpg.wait_for_timeout(2900)
+            f_end = await hpg.evaluate(HF_STATE)
+            await hpg.close()
+            print("[sol flash header %s] no wallet registers: first=%s at0.6s=%s at3.5s=%s rec=%s"
+                  % (hf_kind, f_mid["dcl"], f_mid["now"]["t"], f_end["now"], f_end["rec"]))
+            assert f_mid["dcl"]["t"] == CARRY_SHORT and f_mid["now"]["t"] == CARRY_SHORT, "[sol flash] %s: pending look expected before the timeout" % hf_kind
+            assert f_end["now"]["t"] == "Connect wallet" and f_end["now"]["cls"] == "chip solid" and f_end["now"]["busy"] is None and f_end["rec"] is None, \
+                "[sol flash] %s: a restore that never gets a wallet must fall back to 'Connect wallet' and drop the record: %s" % (hf_kind, f_end)
+            # ج) بدونِ رکورد: همان لحظه «Connect wallet»
+            hpg = await hf_open(hf_url, {}, None, False, wait_after=300)
+            n0 = await hpg.evaluate(HF_STATE)
+            await hpg.close()
+            print("[sol flash header %s] no record: first paint=%s" % (hf_kind, n0["dcl"]))
+            assert n0["dcl"]["t"] == "Connect wallet" and n0["dcl"]["cls"] == "chip solid" and n0["dcl"]["busy"] is None, \
+                "[sol flash] %s: without a record the button must say 'Connect wallet' immediately: %s" % (hf_kind, n0["dcl"])
+            # د) رکورد هست ولی روی Base هستیم: دست‌نخورده
+            hpg = await hf_open(hf_base_url, {"late": 99999}, carry_rec(), False, wait_after=300)
+            b0 = await hpg.evaluate(HF_STATE)
+            await hpg.close()
+            print("[sol flash header %s] Base chain with a record: first paint=%s rec kept=%s" % (hf_kind, b0["dcl"], b0["rec"] is not None))
+            assert b0["dcl"]["busy"] is None and b0["dcl"]["cls"] == "chip solid", "[sol flash] %s: Base look expected: %s" % (hf_kind, b0["dcl"])
+        # Portfolio با نشستِ در حال بازیابی: معرفیِ «Connect Solana wallet» نباید پدیدار شود
+        hpg = await hf_open(CARRY_ORIGIN + "/app#folio?chain=solana", {"late": 1500}, carry_rec(), False, wait_after=600)
+        folio_mid = await hpg.inner_text("#folioBody")
+        await hpg.close()
+        print("[sol flash folio] pending restore -> %r" % folio_mid[:60])
+        assert "Connect Solana wallet" not in folio_mid, "[sol flash] Portfolio must not offer 'Connect' while a session restore is pending: %r" % folio_mid
+        assert not hf_errs, "[sol flash] console errors: %s" % hf_errs[:3]
+
+        # ---- [sol budget] ۰٫۰۰۴۳۸۵ SOL، ورودی ۰٫۰۰۱، حسابِ توکنِ خروجی هنوز نیست ----
+        sb_log = []
+        SB_QUOTE = dict(SOL_QUOTE_FIXTURE, inAmount="1000000")   # همان ۰٫۰۰۱ SOL که مالک وارد کرد
+        sbpg = await open_sol_swap_page({"v": "sell", "ms": 100}, balance_lamports=4_385_000, rpc_log=sb_log, quote_body=SB_QUOTE)
+        await sol_connect(sbpg)
+        await sbpg.fill("#solAmt", "0.001")
+        await sbpg.wait_for_timeout(900)
+        sb_disabled = await sbpg.is_disabled("#solSwapBtn")
+        sb_text = await sbpg.inner_text("#solSwapBtn")
+        await sbpg.evaluate("() => { try { solDoSwap(); } catch(_){} }")
+        await sbpg.wait_for_timeout(300)
+        sb_calls = await sbpg.evaluate("window.__solCalls.length")
+        await sbpg.close()
+        print("[sol budget] balance=0.004385 in=0.001 outputATA missing -> disabled=%s text=%r walletCalls=%d simCalls=%d"
+              % (sb_disabled, sb_text, sb_calls, sb_log.count("simulateTransaction")))
+        assert sb_disabled and "Not enough SOL" in sb_text and "0.00529" in sb_text, \
+            "[sol budget] amount + wSOL rent + token-account rent + fee must be demanded before any wallet call: %r" % sb_text
+        assert sb_calls == 0 and sb_log.count("simulateTransaction") == 0, "[sol budget] the wallet/simulation must never be reached"
+        # کنترلِ مثبت: ۰٫۰۰۶ SOL کافی است و دکمه باز می‌ماند
+        sb2pg = await open_sol_swap_page({"v": "sell", "ms": 100}, balance_lamports=6_000_000, quote_body=SB_QUOTE)
+        await sol_connect(sb2pg)
+        await sb2pg.fill("#solAmt", "0.001")
+        await sb2pg.wait_for_timeout(900)
+        sb2_text = await sb2pg.inner_text("#solSwapBtn")
+        sb2_disabled = await sb2pg.is_disabled("#solSwapBtn")
+        await sb2pg.close()
+        print("[sol budget] balance=0.006 in=0.001 -> disabled=%s text=%r" % (sb2_disabled, sb2_text))
+        assert not sb2_disabled and "Not enough SOL" not in sb2_text, "[sol budget] a sufficient balance must not be blocked: %r" % sb2_text
+        # کمکِ واحد: یادداشتِ «Keep at least» و بودجه از یک helper می‌آیند و نمی‌توانند اختلاف پیدا کنند
+        sb3pg = await open_sol_swap_page({"v": "sell", "ms": 100}, balance_lamports=2_000_000_000)
+        await sol_connect(sb3pg)
+        await sb3pg.fill("#solAmt", "0.001")
+        await sb3pg.wait_for_timeout(900)
+        sb3 = await sb3pg.evaluate("() => ({ keep: solSimKeepSol(), reserve: solReserveSol(), fee: (solNetFeeLamports != null ? solNetFeeLamports : SOL_PRIO_FEE_RESERVE * 1e9) + 5000 })")
+        await sb3pg.close()
+        print("[sol budget] helper agreement: keep=%s reserve=%.5f" % (sb3["keep"], sb3["reserve"]))
+        assert abs(float(sb3["keep"]) - sb3["reserve"]) < 0.0002, \
+            "[sol budget] the budget reserve and the 'keep at least' number must come from the same rent helper: %s" % sb3
+        # شبیه‌سازی با insufficient-sol: بلوکِ ساده، هرگز «Swap anyway»، کیف‌پول هرگز صدا زده نمی‌شود
+        SB_SYSP = "11111111111111111111111111111111"
+        sb_sim = {"value": {"err": {"InstructionError": [2, {"Custom": 1}]}, "logs": [
+            "Program %s invoke [1]" % SB_SYSP, "Transfer: insufficient lamports 4875000, need 2039280",
+            "Program %s failed: custom program error: 0x1" % SB_SYSP]}}
+        sb4pg = await open_sol_swap_page({"v": "sell", "ms": 100}, sim_result=sb_sim)
+        await sol_connect(sb4pg)
+        await sb4pg.fill("#solAmt", "1")
+        await sb4pg.wait_for_timeout(900)
+        sb4_texts, sb4_arm = [], []
+        for _ in range(3):
+            try:
+                await sb4pg.click("#solSwapBtn", timeout=3000)
+            except Exception:
+                pass   # دکمه غیرفعال/ناپدید شد — حالتِ بعدی را ثبت می‌کنیم و ادعا خودش می‌شکند
+            await sb4pg.wait_for_timeout(700)
+            sb4_texts.append(await sb4pg.inner_text("#solSwapBtn"))
+            sb4_arm.append(await sb4pg.evaluate("solNeedsSimArm()"))
+        sb4_notice = await sb4pg.inner_text("#solNotices")
+        sb4_calls = await sb4pg.evaluate("window.__solCalls.length")
+        await sb4pg.close()
+        print("[sol budget] sim insufficient-sol x3 clicks -> buttons=%s armed=%s walletCalls=%d notice=%r"
+              % (sb4_texts, sb4_arm, sb4_calls, sb4_notice[:90]))
+        assert all("Swap anyway" not in t for t in sb4_texts) and not any(sb4_arm), \
+            "[sol budget] insufficient-sol must never be armable: %s %s" % (sb4_texts, sb4_arm)
+        assert sb4_calls == 0, "[sol budget] the wallet must never be called after an insufficient-sol simulation"
+        assert "Not enough SOL for the network fee" in sb4_notice and "Keep at least" in sb4_notice, "[sol budget] message kept: %r" % sb4_notice
+        assert not sf_errs, "[sol flow2] console errors: %s" % sf_errs[:3]
+        print("[sol flow2] Solana Money Flow picks the busiest real pool, renders Base's rows in order with tx3 links inside the card, "
+              "no intro flash, no header flash on /app or /pairs, and not-enough-SOL is a plain block with a shared rent helper")
 
         # ---- [theme first paint] تمِ اولیه باید پیش از اولین رنگ‌آمیزی، از
         # داخلِ <head> (پیش از اولین <style>) نوشته شود، نه در پایانِ body —

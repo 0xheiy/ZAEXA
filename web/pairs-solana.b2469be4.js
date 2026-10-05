@@ -12,18 +12,30 @@
   function sWrite(name,address){try{sessionStorage.setItem(SKEY,JSON.stringify({name,address,t:Date.now()}));}catch{}}
   function sClear(){try{sessionStorage.removeItem(SKEY);}catch{}}
   let restoreStarted=false;
+  // حالتِ «در انتظارِ بازیابی»: window.__zxSolPend را اسکریپتِ درون‌خطیِ کنارِ #connectBtn می‌گذارد
+  const pend=()=>window.__zxSolPend&&!account&&!busy;
+  function endPending(){
+    if(!window.__zxSolPend)return;
+    window.__zxSolPend=null;const b=$('connectBtn');if(b)b.removeAttribute('aria-busy');
+    if(!paint())window.zaexaPairsBasePaint?.();
+  }
+  setTimeout(()=>{
+    if(!window.__zxSolPend)return;
+    if(restoreStarted){setTimeout(()=>{if(window.__zxSolPend&&!account){sClear();endPending();}},5000);return;}
+    sClear();endPending();
+  },2500);
   function offFlag(){try{return localStorage.getItem('zaexa.solwallet.off.v1')==='1';}catch{return false;}}
   async function tryRestore(w){
     if(restoreStarted||!isSol()||account||busy)return;
     const rec=sRead();if(!rec||rec.name!==w.name)return;
-    if(rec.name==='WalletConnect Solana'||offFlag()||Date.now()-rec.t>TTL){sClear();return;}
+    if(rec.name==='WalletConnect Solana'||offFlag()||Date.now()-rec.t>TTL){sClear();endPending();return;}
     restoreStarted=true;const id=seq;
     try{
       const result=await w.features['standard:connect'].connect({silent:true});
       if(id!==seq||account||busy)return;
       const a=result?.accounts?.[0];if(!a||a.address!==rec.address)throw Error('restore mismatch');
-      wallet=w;account=a;sWrite(w.name,rec.address);subscribe(w);paint();
-    }catch{if(id===seq)sClear();}
+      wallet=w;account=a;window.__zxSolPend=null;sWrite(w.name,rec.address);subscribe(w);paint();
+    }catch{if(id===seq){sClear();endPending();}}
   }
   function restoreAll(){for(const w of wallets)tryRestore(w);}
   function subscribe(w){
@@ -37,7 +49,9 @@
   function close(){ $('walletOv').classList.remove('on'); }
   function paint(){
     if(!isSol())return false;
-    const b=$('connectBtn');b.disabled=busy;b.textContent=busy?'Approve in wallet…':account?short(account.address):'Connect wallet';b.className=account?'chip':'chip solid';
+    const b=$('connectBtn');
+    if(pend()){b.disabled=false;b.textContent=short(window.__zxSolPend.address);b.className='chip';b.setAttribute('aria-busy','true');$('walletAddr').textContent='—';return true;}
+    b.removeAttribute('aria-busy');b.disabled=busy;b.textContent=busy?'Approve in wallet…':account?short(account.address):'Connect wallet';b.className=account?'chip':'chip solid';
     $('walletAddr').textContent=account?short(account.address):'—';
     if(!account){$('walletPop').classList.remove('on');b.setAttribute('aria-expanded','false');}
     return true;
@@ -55,7 +69,7 @@
     return confirmLoading;
   }
   function disconnect(callWallet=true){
-    sClear();++seq;const old=wallet||pendingWallet;account=null;wallet=null;pendingWallet=null;busy=false;mobile=false;
+    sClear();window.__zxSolPend=null;++seq;const old=wallet||pendingWallet;account=null;wallet=null;pendingWallet=null;busy=false;mobile=false;
     try{unsubscribe?.();}catch{}unsubscribe=null;
     if(callWallet){try{localStorage.setItem('zaexa.solwallet.off.v1','1');localStorage.removeItem('zaexa.solwallet.v1');}catch{}
       try{const d=old?.features?.['standard:disconnect'];if(d)disconnecting=Promise.resolve(d.disconnect()).catch(()=>{});else provider?.abortPairingAttempt();}catch{}
@@ -140,12 +154,12 @@
   window.addEventListener('wallet-standard:register-wallet',e=>{try{e.detail({register});}catch{}});
   window.dispatchEvent(new CustomEvent('wallet-standard:app-ready',{detail:{register}}));
   function capture(id,fn){$(id).addEventListener('click',e=>{if(!isSol())return;e.stopImmediatePropagation();fn(e);},true);}
-  capture('connectBtn',()=>{if(account){const pop=$('walletPop');const open=pop.classList.toggle('on');$('connectBtn').setAttribute('aria-expanded',String(open));}else render();});
+  capture('connectBtn',()=>{if(pend())return;if(account){const pop=$('walletPop');const open=pop.classList.toggle('on');$('connectBtn').setAttribute('aria-expanded',String(open));}else render();});
   capture('copyAddrBtn',()=>{if(account)navigator.clipboard.writeText(account.address).catch(()=>{});});
   capture('disconnectBtn',()=>{disconnect();notice('Disconnected. Connecting again requires fresh approval in your wallet.');});
   capture('walClose',()=>{if(busy)disconnect();else close();});
   $('walletOv').addEventListener('click',e=>{if(isSol()&&e.target===$('walletOv')){e.stopImmediatePropagation();if(busy)disconnect();else close();}},true);
   document.addEventListener('keydown',e=>{if(isSol()&&e.key==='Escape'){if(busy)disconnect();else close();$('walletPop').classList.remove('on');}},true);
-  window.addEventListener('zaexa:pairs-chain',()=>{restoreAll();if(busy)disconnect();close();notice('');$('walletPop').classList.remove('on');$('connectBtn').disabled=false;if(!paint()){$('walletOv').querySelector('h3').firstChild.nodeValue='Connect a wallet';window.zaexaPairsBasePaint?.();}});
+  window.addEventListener('zaexa:pairs-chain',()=>{if(!isSol()&&window.__zxSolPend){window.__zxSolPend=null;$('connectBtn').removeAttribute('aria-busy');}restoreAll();if(busy)disconnect();close();notice('');$('walletPop').classList.remove('on');$('connectBtn').disabled=false;if(!paint()){$('walletOv').querySelector('h3').firstChild.nodeValue='Connect a wallet';window.zaexaPairsBasePaint?.();}});
   window.zaexaPairsSolana={paint};paint();
 })();

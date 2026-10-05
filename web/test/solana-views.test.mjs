@@ -84,7 +84,7 @@ test('flow renders sample coverage and safe pool labels',async()=>{
     {data:[trade('a',SOL,USDC,now,'8'),trade('b',USDC,SOL,now,'3')]}:
     {data:[{attributes:{address:SOL,name:'<img src=x>',reserve_in_usd:'100'},relationships:{base_token:{data:{id:'solana_'+USDC}}}}]},
   });await c.renderSolFlow();const html=c.$('flowBody').innerHTML;
-  assert.match(html,/Recent-trade sample/);assert.match(html,/1 buys · 1 sells/);
+  assert.match(html,/Recent trades from GeckoTerminal/);assert.match(html,/1 buys · 1 sells/);
   assert.match(html,/\$8/);assert.match(html,/\$3/);assert.match(html,/&lt;img/);assert.doesNotMatch(html,/<img/);
 });
 test('history outage stays unknown instead of zero activity',async()=>{

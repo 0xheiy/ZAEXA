@@ -141,21 +141,21 @@ test('simulation failures map to the closed vocabulary from structure and known 
   assert.equal(c.solClassifySimFail({ InstructionError: [1, '<script>alert(1)</script>'] }, []).code, '');
 });
 test('simulation messages: SOL hint is derived when ATA state is known, "about 0.005" otherwise', () => {
-  const unknown = load(['solSimKeepSol', 'solSimFailMessage'], { solInputMint: () => SOL, solOutputMint: () => USDC, solSide: 'sell' });
+  const unknown = load(['solRentParts', 'solSimKeepSol', 'solSimFailMessage'], { solInputMint: () => SOL, solOutputMint: () => USDC, solSide: 'sell' });
   assert.equal(unknown.solSimKeepSol(), 'about 0.005');
   assert.equal(unknown.solSimFailMessage('insufficient-sol', unknown.solSimKeepSol()),
     'Not enough SOL for the network fee and one-time account rent. Keep at least about 0.005 SOL.');
   // ۴ اکتبر — ورودیِ SOL: جوپیتر یک حسابِ wrapped-SOL موقت می‌سازد، پس یک ۰٫۰۰۲۰۴ دیگر هم لازم است.
   // خروجی USDC، حسابِ ATA وجود ندارد: کارمزد (۲۰۰۰۰۰+۵۰۰۰ لامپورت) + ۰٫۰۰۲۰۴ برای ATA + ۰٫۰۰۲۰۴ برای wSOL
-  const needs = load(['solSimKeepSol'], { solInputMint: () => SOL, solOutputMint: () => USDC, solSide: 'buy', solOutAtaExists: false, solNetFeeLamports: 200000 });
+  const needs = load(['solRentParts', 'solSimKeepSol'], { solInputMint: () => SOL, solOutputMint: () => USDC, solSide: 'buy', solOutAtaExists: false, solNetFeeLamports: 200000 });
   assert.equal(needs.solSimKeepSol(), '0.0043');
-  const has = load(['solSimKeepSol'], { solInputMint: () => SOL, solOutputMint: () => USDC, solSide: 'buy', solOutAtaExists: true, solNetFeeLamports: 200000 });
+  const has = load(['solRentParts', 'solSimKeepSol'], { solInputMint: () => SOL, solOutputMint: () => USDC, solSide: 'buy', solOutAtaExists: true, solNetFeeLamports: 200000 });
   assert.equal(has.solSimKeepSol(), '0.0023');
   // کنترل: نه ورودی و نه خروجی SOL نیست (توکن به توکن) -> فرمولِ قبلی بدونِ wSOL
-  const tokTok = load(['solSimKeepSol'], { solInputMint: () => 'So1ANOTHER', solOutputMint: () => USDC, solSide: 'buy', solOutAtaExists: false, solNetFeeLamports: 200000 });
+  const tokTok = load(['solRentParts', 'solSimKeepSol'], { solInputMint: () => 'So1ANOTHER', solOutputMint: () => USDC, solSide: 'buy', solOutAtaExists: false, solNetFeeLamports: 200000 });
   assert.equal(tokTok.solSimKeepSol(), '0.0023');
   // خروجی SOL (فروشِ توکن): ATA لازم نیست ولی wSOL موقت چرا
-  const toSol = load(['solSimKeepSol'], { solInputMint: () => USDC, solOutputMint: () => SOL, solSide: 'sell', solNetFeeLamports: 200000 });
+  const toSol = load(['solRentParts', 'solSimKeepSol'], { solInputMint: () => USDC, solOutputMint: () => SOL, solSide: 'sell', solNetFeeLamports: 200000 });
   assert.equal(toSol.solSimKeepSol(), '0.0023');
   const m = load(['solSimFailMessage']);
   assert.equal(m.solSimFailMessage('slippage'), 'Price moved more than your slippage. Try again or raise slippage.');
