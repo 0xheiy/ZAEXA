@@ -3117,6 +3117,10 @@ async def check_report_page(p, errors):
     rows.push({ chain: "solana", address: solA(60), symbol: "SOLNOSELL", name: "raw solana nosell", v: "nosell", checkKind: "roundtrip", checkedAt: t(14, 0), reserveUsd: 1, why: null, cause: "empty-pool" });
     // یک نامِ خصمانه
     rows.push({ chain: "base", address: addr(9002), symbol: "<b>BOLD</b>", name: "</script><img src=x onerror=window.__xss=1>", v: "sell", checkKind: "sell-quote", checkedAt: t(15, 0), reserveUsd: 500, ret: 97, why: null });
+    // نمادِ ؟ / خالی / null و بازگشتِ بالای ۱۰۰٪ — کلاینت نباید «$?» بنویسد و ret>100 باید «—» با یادداشت باشد
+    rows.push({ chain: "base", address: "0xabcdef0123456789abcdef0123456789abcdef01", symbol: "?", name: "SymQ", v: "sell", checkKind: "sell-quote", checkedAt: t(16, 0), reserveUsd: 700, ret: 140, why: null });
+    rows.push({ chain: "base", address: "0x1234567890123456789012345678901234567890", symbol: "", name: "SymE", v: "sell", checkKind: "sell-quote", checkedAt: t(16, 1), reserveUsd: 700, ret: 96, why: null });
+    rows.push({ chain: "base", address: "0x9999999999999999999999999999999999999999", symbol: null, name: "SymN", v: "sell", checkKind: "sell-quote", checkedAt: t(16, 2), reserveUsd: 700, ret: 97, why: null });
     const guarded = rows.map((r) => publishGuardRow(r, undefined));
     const history = [];
     for (let d = 13; d >= 0; d--) {
@@ -3125,6 +3129,8 @@ async def check_report_page(p, errors):
     }
     const html = renderReportPage({ date: DATE, today: DATE, firstDate: FIRST, rows: guarded, history });
     fs.writeFileSync(process.argv[1], html);
+    // روزِ پیش از شروعِ Solana: همان ردیف‌ها، ولی صفحه نباید Solana نشان بدهد
+    fs.writeFileSync(process.argv[1] + ".early", renderReportPage({ date: "2026-09-21", today: DATE, firstDate: FIRST, rows: guarded, history: [] }));
     const cnt = (f) => guarded.filter(f).length;
     const isB = (r) => r.chain === "base", isS = (r) => r.chain === "solana";
     const meta = { date: DATE, bytes: Buffer.byteLength(html), days: history.map((h) => h.date) };
@@ -3139,6 +3145,7 @@ async def check_report_page(p, errors):
     assert r.returncode == 0, "[report page] could not render the fixture page:\n%s" % r.stderr
     meta = _j.load(open(meta_path))
     page_html = open(html_path, "rb").read()
+    early_html = open(html_path + ".early", "rb").read()
 
     hdrs = parse_headers_blocks(open(os.path.join(HERE, "..", "_headers"), encoding="utf-8").read())
     assert "/*" in hdrs, "[report page] web/_headers has no /* block"
@@ -3159,12 +3166,13 @@ async def check_report_page(p, errors):
             clean = self.path.split("?")[0]
             if clean == "/report" or re.match(r"^/report/\d{4}-\d{2}-\d{2}$", clean):
                 seen.append(clean)
+                body = early_html if clean == "/report/2026-09-21" else page_html
                 self.send_response(200)
                 self.send_header("Content-Type", "text/html; charset=utf-8")
                 self.send_header("Content-Security-Policy", csp)
-                self.send_header("Content-Length", str(len(page_html)))
+                self.send_header("Content-Length", str(len(body)))
                 self.end_headers()
-                self.wfile.write(page_html)
+                self.wfile.write(body)
                 return
             return super().do_GET()
 
@@ -3293,6 +3301,28 @@ async def check_report_page(p, errors):
     await pg.close()
     print("[report page xss] a token named </script><img onerror=...> and a <b> symbol render as text only; no handler ran")
 
+    # ---- [report page symbol+ret+solana-hidden] ----
+    pg = await open_report(1440, 900)
+    await pg.click('#filters [data-g="c"][data-k="base"]')
+    await pg.click('#filters [data-g="r"][data-k="sell"]')
+    while await pg.evaluate("() => !document.getElementById('more').hidden"):
+        await pg.click("#more")
+    trs = await pg.evaluate("""() => [...document.querySelectorAll('#tb tr')].map(tr => ({
+        name: (tr.querySelector('.nm') || {}).textContent, sym: (tr.querySelector('.sym') || {}).textContent, ret: tr.children[2].textContent}))""")
+    by = {t["name"]: t for t in trs}
+    assert by["SymQ"]["sym"] == "0xab…ef01" and by["SymE"]["sym"] == "0x12…7890" and by["SymN"]["sym"] == "0x99…9999", "[report page symbol] symbol-less rows show the short address: %s" % [by[k]["sym"] for k in ("SymQ", "SymE", "SymN")]
+    assert not any("$?" in (t["sym"] or "") or (t["sym"] or "").startswith("$") and len(t["sym"]) == 1 for t in trs), "[report page symbol] a row rendered '$?'"
+    assert by["SymQ"]["ret"] == "—price feed and pool disagreed", "[report page ret] ret 140 must be a dash with the note, got %r" % by["SymQ"]["ret"]
+    assert by["SymE"]["ret"] == "96%", "[report page ret] a normal ret stays a percentage, got %r" % by["SymE"]["ret"]
+    await pg.close()
+    pg = await open_report(1440, 900, "light", "/report/2026-09-21")
+    assert await pg.evaluate("() => document.querySelectorAll('#filters [data-g=\"c\"]').length") == 0, "[report page solana] 21 Sep must have no chain chips"
+    assert await pg.evaluate("() => document.querySelectorAll('#filters .sep').length") == 0, "[report page solana] 21 Sep must have no separator either"
+    assert await pg.evaluate("() => [...document.querySelectorAll('#tb .cb')].every(e => e.textContent === 'Base')"), "[report page solana] 21 Sep: a Solana row reached the table"
+    assert await pg.evaluate("() => document.querySelectorAll('.solnote').length") == 1 and "Solana checks are listed from 27 Sep 2026." in await pg.inner_text(".solnote"), "[report page solana] 21 Sep: the muted line is missing"
+    await pg.close()
+    print("[report page symbol] symbol-less rows show the short address, never '$?'; ret 140 is a dash with the note; the 21 Sep page has no chain chips, no Solana rows and the muted line")
+
     # ---- [report page chart] ----
     pg = await open_report(1440, 900)
     hrefs = await pg.evaluate("() => [...document.querySelectorAll('svg.chart a.col')].map(a => a.getAttribute('href'))")
@@ -3310,14 +3340,15 @@ async def check_report_page(p, errors):
     await pg.wait_for_url(origin + "/report/2026-09-30")
     await pg.close()
     pg = await open_report(1440, 900)
-    await pg.select_option("#day", "2026-10-01")
+    await pg.click("#pickBtn")
+    await pg.click('#pickList a.pkrow[href="/report/2026-10-01"]')
     await pg.wait_for_url(origin + "/report/2026-10-01")
     pg3 = await open_report(1440, 900)
-    opts = await pg3.evaluate("() => [...document.querySelectorAll('#day option')].map(o => o.value)")
+    opts = await pg3.evaluate("() => [...document.querySelectorAll('#pickList a.pkrow')].map(a => a.getAttribute('href').slice(8))")
     await pg3.close()
-    assert opts == list(reversed(meta["days"])), "[report page chart] date select order: %s" % opts
+    assert opts == list(reversed(meta["days"])) or opts[:len(meta["days"])] == list(reversed(meta["days"])), "[report page chart] date picker order: %s" % opts
     await pg.close()
-    print("[report page chart] 14 columns are real links to /report/<date>; hover shows the tooltip; click and Enter navigate; the date select navigates and lists newest first")
+    print("[report page chart] 14 columns are real links to /report/<date>; hover shows the tooltip; click and Enter navigate; the date picker navigates and lists newest first")
 
     # ---- [report page theme] ----
     pg = await open_report(1440, 900, "light")
@@ -3383,6 +3414,207 @@ async def check_report_page(p, errors):
     srv.shutdown()
 
 
+async def check_report_picker(p, errors):
+    """[report picker …] انتخابگرِ تاریخِ صفحه‌ی گزارش — کارتِ سفارشیِ خودِ صفحه، نه select بومی.
+
+    HTML همان renderReportPage واقعی است؛ دو فیکسچر: A (firstDate ده روز پیش از today، صفحه‌ی وسطی)
+    و B (۴۰ تاریخ، صفحه‌ی وسطی) تا اسکرولِ دوطرفه سنجیده شود، و C (صفحه‌ی اولین روز، فقط چند ستون)."""
+    import functools, http.server, json as _j, subprocess, tempfile, threading
+
+    worker_dir = os.path.join(HERE, "..", "..", "worker")
+    out_dir = tempfile.mkdtemp(prefix="r12_picker_")
+    gen = r"""
+    import fs from "node:fs";
+    import { renderReportPage, addDays } from "./report_page.js";
+    const TODAY = "2026-10-04";
+    const mk = (d, k) => ({ date: d, b: 40 + k, bSell: 30 + k, bNo: k % 3, bNa: 10 - (k % 3), bEmpty: 0, bFollowed: 0 });
+    function page(first, date) {
+      const hist = [];
+      for (let i = 13; i >= 0; i--) { const d = addDays(date, -i); if (d >= first) hist.push(mk(d, i)); }
+      return renderReportPage({ date, today: TODAY, firstDate: first, rows: [], history: hist });
+    }
+    const FA = addDays(TODAY, -10), FB = addDays(TODAY, -39);
+    fs.writeFileSync(process.argv[1] + "/A.html", page(FA, addDays(TODAY, -5)));
+    fs.writeFileSync(process.argv[1] + "/B.html", page(FB, addDays(TODAY, -20)));
+    fs.writeFileSync(process.argv[1] + "/C.html", page(FA, FA));
+    fs.writeFileSync(process.argv[1] + "/meta.json", JSON.stringify({ today: TODAY, aDate: addDays(TODAY, -5), bDate: addDays(TODAY, -20), first: FA, bFirst: FB }));
+    """
+    r = subprocess.run(["node", "--input-type=module", "-e", gen, out_dir], capture_output=True, text=True, cwd=worker_dir)
+    assert r.returncode == 0, "[report picker] could not render the fixtures:\n%s" % r.stderr
+    meta = _j.load(open(os.path.join(out_dir, "meta.json")))
+    pages = {k: open(os.path.join(out_dir, k + ".html"), "rb").read() for k in "ABC"}
+    cur = {"k": "A"}
+
+    hdrs = parse_headers_blocks(open(os.path.join(HERE, "..", "_headers"), encoding="utf-8").read())
+    star = {ln.split(":", 1)[0].strip().lower(): ln.split(":", 1)[1].strip() for ln in hdrs["/*"]}
+    csp = star["content-security-policy"]
+    theme_key = theme_key_from_index(open(os.path.join(HERE, "..", "index.html"), encoding="utf-8").read())
+    shots = "/tmp/claude-0/r12_shots"
+    os.makedirs(shots, exist_ok=True)
+    seen = []
+
+    class Quiet(http.server.SimpleHTTPRequestHandler):
+        def log_message(self, *a):
+            pass
+
+        def do_GET(self):
+            clean = self.path.split("?")[0]
+            if clean == "/report" or re.match(r"^/report/\d{4}-\d{2}-\d{2}$", clean):
+                seen.append(clean)
+                body = pages[cur["k"]]
+                self.send_response(200)
+                self.send_header("Content-Type", "text/html; charset=utf-8")
+                self.send_header("Content-Security-Policy", csp)
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+                return
+            return super().do_GET()
+
+    srv = http.server.ThreadingHTTPServer(("127.0.0.1", 0), functools.partial(Quiet, directory=os.path.join(HERE, "..")))
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    origin = "http://127.0.0.1:%d" % srv.server_address[1]
+    b = await p.chromium.launch()
+    errs = []
+
+    async def open_pg(vw, scheme, which, path):
+        cur["k"] = which
+        pg = await b.new_page(viewport={"width": vw, "height": 800}, color_scheme=scheme)
+        pg.on("console", lambda m: errs.append("[%s %s] %s" % (vw, scheme, m.text)) if m.type == "error" else None)
+        pg.on("pageerror", lambda e: errs.append("PAGEERROR %s" % e))
+        await pg.add_init_script("localStorage.setItem(%s, %s);" % (_j.dumps(theme_key), _j.dumps(scheme)))
+        await pg.route("**/*", lambda route: route.continue_() if route.request.url.startswith(origin) else route.abort())
+        await pg.goto(origin + path)
+        await pg.wait_for_selector("#pickBtn", timeout=10000)
+        return pg
+
+    GEO = """() => {
+        const l = document.getElementById('pickList'), t = document.getElementById('pickBtn');
+        const cur = l.querySelector('a[aria-current="date"]'), lr = l.getBoundingClientRect(), cr = cur.getBoundingClientRect();
+        const probe = document.createElement('i'); probe.style.background = 'var(--card)'; document.body.appendChild(probe);
+        const card = getComputedStyle(probe).backgroundColor; probe.remove();
+        const cs = getComputedStyle(l), vw = document.documentElement.clientWidth;
+        const rows = [...l.querySelectorAll('a.pkrow')];
+        return { hidden: l.hidden, w: lr.width, left: lr.left, right: lr.right, top: lr.top, bottom: lr.bottom, vw, vh: innerHeight,
+          radius: parseFloat(cs.borderTopLeftRadius), bg: cs.backgroundColor, card, border: cs.borderTopWidth + ' ' + cs.borderTopColor,
+          shadow: cs.boxShadow, overflowY: cs.overflowY, overscroll: cs.overscrollBehaviorY, maxH: cs.maxHeight, pos: cs.position,
+          scrollTop: l.scrollTop, scrollMax: l.scrollHeight - l.clientHeight,
+          curVisible: cr.top >= lr.top - 1 && cr.bottom <= lr.bottom + 1, curDate: cur.getAttribute('href').slice(8),
+          rowsOutX: rows.filter(a => { const r = a.getBoundingClientRect(); return r.left < 0 || r.right > vw; }).length,
+          dates: rows.map(a => a.getAttribute('href').slice(8)), nOpts: document.querySelectorAll('select').length,
+          expanded: t.getAttribute('aria-expanded'), curWeight: getComputedStyle(cur).fontWeight, curColor: getComputedStyle(cur).color,
+          accColor: (() => { const q = document.createElement('i'); q.style.color = 'var(--acc)'; document.body.appendChild(q); const c = getComputedStyle(q).color; q.remove(); return c; })(),
+          radiusRow: parseFloat(getComputedStyle(cur).borderTopLeftRadius), padRow: getComputedStyle(cur).padding };
+    }"""
+    ACTIVE = "() => document.activeElement && (document.activeElement.id || document.activeElement.getAttribute('href'))"
+
+    # ---- [report picker open] فیکسچر A: لیست کامل، تاریخ‌های جدیدتر و قدیمی‌تر، سطرِ جاری دیده می‌شود، ظاهر کارت ----
+    for scheme in ("light", "dark"):
+        for vw in (1440, 360):
+            pg = await open_pg(vw, scheme, "A", "/report/" + meta["aDate"])
+            g0 = await pg.evaluate(GEO)
+            assert g0["hidden"] and g0["expanded"] == "false", "[report picker open] the list starts closed: %s" % g0
+            await pg.click("#pickBtn")
+            g = await pg.evaluate(GEO)
+            assert not g["hidden"] and g["w"] > 0 and g["expanded"] == "true", "[report picker open] click must open the list: %s" % g
+            assert g["nOpts"] == 0, "[report picker open] no native <select> anywhere on the page"
+            assert any(d > meta["aDate"] for d in g["dates"]) and any(d < meta["aDate"] for d in g["dates"]), "[report picker open] the list must hold newer AND older dates: %s" % g["dates"]
+            assert g["dates"][0] == meta["today"] and g["dates"][-1] == meta["first"] and len(g["dates"]) == 11, "[report picker open] every date first..today newest first: %s" % g["dates"]
+            assert g["curVisible"] and g["curDate"] == meta["aDate"], "[report picker open] the current row must be inside the visible scroll area: %s" % g
+            assert g["radius"] >= 12 and g["radiusRow"] >= 8, "[report picker open] the popup is a rounded card, radius %s/%s" % (g["radius"], g["radiusRow"])
+            assert g["bg"] == g["card"], "[report picker open] popup background %s must equal the --card token %s (%s)" % (g["bg"], g["card"], scheme)
+            assert g["overflowY"] == "auto" and g["overscroll"] == "contain" and g["maxH"] == "320px" and g["pos"] == "absolute", "[report picker open] scroll box: %s" % g
+            assert g["border"].startswith("1px") and g["shadow"] != "none", "[report picker open] 1px border and a shadow: %s" % g
+            assert g["curWeight"] == "700" and g["curColor"] == g["accColor"], "[report picker open] current row is bold and accent: %s" % g
+            assert g["padRow"] == "8px 12px", "[report picker open] row padding: %s" % g["padRow"]
+            assert g["left"] >= 0 and g["right"] <= g["vw"] and g["top"] >= 0 and g["bottom"] <= g["vh"] and g["rowsOutX"] == 0, "[report picker open] the popup must stay inside the viewport at %d: %s" % (vw, g)
+            if vw == 360:
+                assert g["left"] >= 15.5 and g["right"] <= g["vw"] - 15.5, "[report picker open] 16px side margin at 360: %s" % g
+            if vw == 1440:
+                await pg.screenshot(path=os.path.join(shots, "picker-open-%s-1440.png" % scheme))
+            await pg.close()
+    pg = await open_pg(390, "dark", "A", "/report/" + meta["aDate"])
+    await pg.click("#pickBtn")
+    g = await pg.evaluate(GEO)
+    assert g["left"] >= 15.5 and g["right"] <= g["vw"] - 15.5, "[report picker open] 16px margin at 390: %s" % g
+    await pg.screenshot(path=os.path.join(shots, "picker-open-dark-390.png"))
+    await pg.close()
+    print("[report picker open] light and dark at 1440 and 360 (+ dark 390): closed at first, click opens a card (radius >= 12, background == --card token, 1px border, shadow, own scroll, overscroll contain, 320px max) listing all 11 dates first..today with newer and older than the page date, the current row bold accent and inside the visible area, no native select, nothing outside the viewport")
+
+    # ---- [report picker scroll] فیکسچر B: ۴۰ تاریخ، روزِ جاری وسطِ فهرست ----
+    pg = await open_pg(1440, "light", "B", "/report/" + meta["bDate"])
+    await pg.click("#pickBtn")
+    g = await pg.evaluate(GEO)
+    assert len(g["dates"]) == 40, "[report picker scroll] 40 dates in the fixture: %d" % len(g["dates"])
+    assert g["scrollTop"] > 0 and g["scrollTop"] < g["scrollMax"], "[report picker scroll] opening must scroll the current row into the middle, scrollTop=%s max=%s" % (g["scrollTop"], g["scrollMax"])
+    assert g["curVisible"], "[report picker scroll] the current row is inside the visible area: %s" % g
+    st = await pg.evaluate("() => { const l = document.getElementById('pickList'); const a = l.scrollTop; l.scrollTop = 0; const top = l.scrollTop; l.scrollTop = 1e6; return { a, top, bottom: l.scrollTop, max: l.scrollHeight - l.clientHeight, page: scrollY }; }")
+    assert st["top"] == 0 and st["bottom"] > 0 and abs(st["bottom"] - st["max"]) <= 1 and st["page"] == 0, "[report picker scroll] the list scrolls up and down by itself and never scrolls the page: %s" % st
+    await pg.close()
+    print("[report picker scroll] 40-date list opened on a middle date: scrollTop > 0 and below max, current row visible, the list scrolls to both ends on its own and the page does not move")
+
+    # ---- [report picker keys] ----
+    pg = await open_pg(1440, "light", "A", "/report/" + meta["aDate"])
+    cur_href = "/report/" + meta["aDate"]
+    await pg.focus("#pickBtn")
+    await pg.keyboard.press("Enter")
+    assert await pg.evaluate(ACTIVE) == cur_href and (await pg.evaluate(GEO))["expanded"] == "true", "[report picker keys] Enter on the trigger opens and focuses the current row"
+    await pg.keyboard.press("Escape")
+    g = await pg.evaluate(GEO)
+    assert g["hidden"] and g["expanded"] == "false" and await pg.evaluate(ACTIVE) == "pickBtn", "[report picker keys] Escape closes and returns focus to the trigger: %s / %s" % (g["hidden"], await pg.evaluate(ACTIVE))
+    await pg.keyboard.press("Space")
+    assert await pg.evaluate(ACTIVE) == cur_href, "[report picker keys] Space on the trigger opens and focuses the current row"
+    await pg.keyboard.press("Escape")
+    await pg.keyboard.press("ArrowDown")
+    assert await pg.evaluate(ACTIVE) == cur_href and not (await pg.evaluate(GEO))["hidden"], "[report picker keys] ArrowDown on the trigger opens and focuses the current row"
+    older = "/report/" + g["dates"][g["dates"].index(meta["aDate"]) + 1]
+    newer = "/report/" + g["dates"][g["dates"].index(meta["aDate"]) - 1]
+    await pg.keyboard.press("ArrowDown")
+    assert await pg.evaluate(ACTIVE) == older, "[report picker keys] ArrowDown moves to the next (older) row, got %s want %s" % (await pg.evaluate(ACTIVE), older)
+    await pg.keyboard.press("ArrowUp")
+    await pg.keyboard.press("ArrowUp")
+    assert await pg.evaluate(ACTIVE) == newer, "[report picker keys] ArrowUp moves to the newer row"
+    await pg.keyboard.press("End")
+    assert await pg.evaluate(ACTIVE) == "/report/" + meta["first"], "[report picker keys] End goes to the oldest row"
+    await pg.keyboard.press("Home")
+    assert await pg.evaluate(ACTIVE) == "/report/" + meta["today"], "[report picker keys] Home goes to the newest row"
+    await pg.keyboard.press("Tab")
+    g = await pg.evaluate(GEO)
+    assert g["hidden"] and g["expanded"] == "false", "[report picker keys] Tab closes the list"
+    await pg.click("#pickBtn")
+    await pg.mouse.click(5, 700)
+    assert (await pg.evaluate(GEO))["hidden"], "[report picker keys] a click outside closes the list"
+    await pg.click("#pickBtn")
+    before = len(seen)
+    await pg.keyboard.press("ArrowDown")
+    await pg.keyboard.press("Enter")
+    await pg.wait_for_url(origin + older)
+    assert seen[before:] == [older], "[report picker keys] Enter on a row follows its link: %s" % seen[before:]
+    await pg.close()
+    pg = await open_pg(1440, "dark", "A", "/report/" + meta["aDate"])
+    await pg.click("#pickBtn")
+    before = len(seen)
+    target = "/report/" + meta["today"]
+    await pg.click('#pickList a.pkrow[href="%s"]' % target)
+    await pg.wait_for_url(origin + target)
+    assert seen[before:] == [target], "[report picker keys] clicking a newer row navigates to its /report/<date>: %s" % seen[before:]
+    await pg.close()
+    print("[report picker keys] Enter/Space/ArrowDown open on the current row; ArrowUp/Down/Home/End move focus; Escape closes with focus back on the trigger; Tab and an outside click close; Enter and a click on a row navigate to /report/<date> (also to a newer day)")
+
+    # ---- [report picker first-date] صفحه‌ی اولین روز: چند ستون، میله‌ی باریک، «قبلی» غیرفعال ----
+    pg = await open_pg(1440, "dark", "C", "/report/" + meta["first"])
+    m = await pg.evaluate("""() => ({ cols: document.querySelectorAll('svg.chart a.col').length,
+        maxW: Math.max(...[...document.querySelectorAll('svg.chart a.col rect:not(.hit)')].map(r => r.getBoundingClientRect().width), 0),
+        prevOff: !!document.querySelector('.dnb.off[aria-label^="Previous day"]'), nextLink: !!document.querySelector('a.dnb[aria-label="Next day"]') })""")
+    assert m["cols"] == 1 and m["maxW"] <= 30 and m["prevOff"] and m["nextLink"], "[report picker first-date] %s" % m
+    await pg.screenshot(path=os.path.join(shots, "first-date-dark-1440.png"), full_page=True)
+    await pg.close()
+    print("[report picker first-date] the first report date's page: one chart column with a capped bar, 'previous' disabled, 'next' a link; screenshot saved")
+    assert not errs, "[report picker] console errors: %s" % errs[:5]
+    await b.close()
+    srv.shutdown()
+
+
 async def main():
     errors = []
     # خطاهایی که یک کاوشگر *عمداً* تولید می‌کند. اجازه‌ی عبور می‌گیرند ولی
@@ -3428,6 +3660,7 @@ async def main():
         await check_token_page_hash_links(p, errors)
         await check_live_strip(p, errors)
         await check_report_page(p, errors)
+        await check_report_picker(p, errors)
         b = await p.chromium.launch()
         pg = await b.new_page(viewport={"width": 1240, "height": 1000}, color_scheme="dark")
         pg.on("console", on_console)

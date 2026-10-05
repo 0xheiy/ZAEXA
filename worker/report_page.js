@@ -27,6 +27,15 @@ export const LANDING_THEME_TOGGLE = "<button class=\"theme-toggle\" id=\"themeTo
 export const REPORT_SITE_ORIGIN = "https://zaexa.com";
 export const REPORT_OG_IMAGE = "https://zaexa.com/og.png?v=4"; // همان تصویرِ کارتِ landing.html
 export const REPORT_HISTORY_DAYS = 14;
+/* 🔴 پیش از این روز بررسیِ Solana هنوز کار نمی‌کرد (۲۱ سپتامبر: ۳ ردیف قبول، ۵۳ «بررسی‌نشده»،
+   نمادِ «$?»). صفحه‌ی روزهای قبل از آن هیچ ردیف/کاشی/چیپِ Solana نشان نمی‌دهد و فقط یک خطِ
+   کم‌رنگ می‌گوید از کی فهرست می‌شود. فایل‌های JSON/txt همین‌طور که هستند می‌مانند. */
+export const REPORT_SOLANA_FIRST_DATE = "2026-09-27";
+// قبل از این آدرسِ کوتاه‌شده می‌نشیند: ۴ نویسه + … + ۴ نویسه.
+export function shortAddr(a) {
+  const s = typeof a === "string" ? a : "";
+  return s.length > 9 ? s.slice(0, 4) + "…" + s.slice(-4) : s;
+}
 
 const MON = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
@@ -143,7 +152,8 @@ function statsOf(rows) {
   const base = rows.filter((r) => r.chain === "base");
   const sol = rows.filter((r) => r.chain === "solana");
   const bs = base.filter((r) => r.v === "sell");
-  const rets = bs.map((r) => r.ret).filter((x) => typeof x === "number" && Number.isFinite(x)).sort((a, b) => a - b);
+  // 🔴 فقط 0 < ret ≤ 100: بالاتر از ۱۰۰٪ یعنی قیمتِ فید و استخر هم‌نظر نبوده‌اند، نه سود.
+  const rets = bs.map((r) => r.ret).filter((x) => typeof x === "number" && Number.isFinite(x) && x > 0 && x <= 100).sort((a, b) => a - b);
   const med = rets.length
     ? (rets.length % 2 ? rets[(rets.length - 1) / 2] : (rets[rets.length / 2 - 1] + rets[rets.length / 2]) / 2)
     : null;
@@ -165,10 +175,12 @@ function statsOf(rows) {
 
 const plural = (n, one, many) => n + " " + (n === 1 ? one : many);
 
-export function reportLede(st) {
-  let t = plural(st.b, "new Base token", "new Base tokens") + " and " +
-    plural(st.s, "new Solana token", "new Solana tokens") +
-    (st.b + st.s === 1 ? " was checked." : " were checked.");
+export function reportLede(st, solana = true) {
+  let t = solana
+    ? plural(st.b, "new Base token", "new Base tokens") + " and " +
+      plural(st.s, "new Solana token", "new Solana tokens") +
+      (st.b + st.s === 1 ? " was checked." : " were checked.")
+    : plural(st.b, "new Base token", "new Base tokens") + (st.b === 1 ? " was checked." : " were checked.");
   if (st.bFollowed > 0) {
     t += " " + st.bFollowed + " of the quoted tokens were re-checked 1–3 hours later. " +
       st.bEmpty + " had an empty pool.";
@@ -176,7 +188,10 @@ export function reportLede(st) {
   return t;
 }
 
-export function reportMetaDescription(date, st) {
+export function reportMetaDescription(date, st, solana = true) {
+  if (!solana)
+    return "On " + longDate(date) + " Zaexa checked " + plural(st.b, "new Base token", "new Base tokens") +
+      ". Base: " + st.bSell + " had a sell route, " + st.bNo + " had none, " + st.bNa + " could not be checked.";
   return "On " + longDate(date) + " Zaexa checked " + plural(st.b, "new Base token", "new Base tokens") +
     " and " + plural(st.s, "Solana token", "Solana tokens") + ". Base: " + st.bSell + " had a sell route, " +
     st.bNo + " had none, " + st.bNa + " could not be checked. Solana: " + st.sSell +
@@ -196,7 +211,8 @@ function islandRow(r) {
   const o = {
     chain: r.chain,
     address: typeof r.address === "string" ? r.address : "",
-    symbol: typeof r.symbol === "string" ? r.symbol : null,
+    // نمادِ خالی/«?» هرگز «$?» نمی‌شود: null می‌رود و کلاینت آدرسِ کوتاه نشان می‌دهد.
+    symbol: typeof r.symbol === "string" && r.symbol.trim() !== "" && r.symbol.trim() !== "?" ? r.symbol : null,
     name: typeof r.name === "string" ? r.name : null,
     v: r.v === "sell" || r.v === "nosell" ? r.v : null,
     reserveUsd: typeof r.reserveUsd === "number" && Number.isFinite(r.reserveUsd) ? r.reserveUsd : null,
@@ -212,20 +228,24 @@ function islandRow(r) {
 
 /* ---------------------------------------------------------------------
    نمودار — SVGِ سمتِ سرور؛ هر ستون یک <a> است به /report/<روز>. */
-function chartSvg(days, cur) {
+function chartSvg(days, cur, firstDate) {
+  // 🔴 ستونِ پیش از اولین گزارش هرگز کشیده نمی‌شود (دفاعِ دوم؛ مسیر هم همین را فیلتر می‌کند).
+  days = days.filter((d) => !firstDate || d.date >= firstDate);
   const W = 1040, H = 250, L = 34, R = 8, T = 14, B = 30, pw = W - L - R, ph = H - T - B;
   const maxB = Math.max(0, ...days.map((d) => d.bSell + d.bNo + d.bNa));
   const step = maxB <= 100 ? 25 : maxB <= 300 ? 50 : maxB <= 600 ? 100 : 200;
   const max = Math.max(step, Math.ceil(maxB / step) * step);
   const y = (v) => T + ph - (v / max) * ph;
   const f = (n) => (Math.round(n * 10) / 10).toString();
-  const band = pw / days.length, bw = Math.min(24, band * 0.5);
+  // پهنای هر ستون سقف دارد (۷۲) و گروه وسطِ نمودار می‌نشیند — با چند ستونِ کم میله‌ی غول‌پیکر نمی‌شود.
+  const band = Math.min(pw / Math.max(days.length, 1), 72), bw = Math.min(24, band * 0.5);
+  const x0 = L + (pw - band * days.length) / 2;
   let g = "";
   for (let v = 0; v <= max; v += step)
     g += '<line x1="' + L + '" x2="' + (W - R) + '" y1="' + f(y(v)) + '" y2="' + f(y(v)) +
       '" stroke="var(--line)" stroke-width="1"/><text x="' + (L - 8) + '" y="' + f(y(v) + 4) + '" text-anchor="end">' + v + "</text>";
   days.forEach((s, i) => {
-    const x = L + band * i + band / 2 - bw / 2;
+    const x = x0 + band * i + band / 2 - bw / 2;
     let acc = 0, segs = "";
     const parts = [[s.bSell, "--s-sell"], [s.bNo, "--s-nosell"], [s.bNa, "--s-none"]];
     parts.forEach(([v, c], k, arr) => {
@@ -241,8 +261,8 @@ function chartSvg(days, cur) {
     const label = shortDate(s.date) + ": " + s.bSell + " sell route, " + s.bNo + " no sell route, " + s.bNa + " not checked";
     g += '<a class="col' + (s.date === cur ? " sel" : "") + '" data-d="' + s.date + '" href="/report/' + s.date +
       '" aria-label="' + esc(label) + '"' + (s.date === cur ? ' aria-current="page"' : "") +
-      '><rect class="hit" x="' + f(L + band * i + 2) + '" y="' + (T - 6) + '" width="' + f(band - 4) + '" height="' +
-      (ph + B + 2) + '" rx="8" fill="transparent"/>' + segs + '<text x="' + f(L + band * i + band / 2) + '" y="' +
+      '><rect class="hit" x="' + f(x0 + band * i + 2) + '" y="' + (T - 6) + '" width="' + f(band - 4) + '" height="' +
+      (ph + B + 2) + '" rx="8" fill="transparent"/>' + segs + '<text x="' + f(x0 + band * i + band / 2) + '" y="' +
       (H - 9) + '" text-anchor="middle">' + esc(shortDate(s.date)) + "</text></a>";
   });
   return '<svg class="chart" id="chart" viewBox="0 0 ' + W + " " + H + '" role="img" aria-label="Stacked bars of Base check results per day">' + g + "</svg>";
@@ -266,7 +286,19 @@ h1 em{font-family:var(--serif);font-style:italic;font-weight:500;letter-spacing:
 .dnb{width:38px;height:38px;border:1px solid var(--line2);border-radius:50%;display:grid;place-items:center;font-size:16px;color:var(--tx2)}
 a.dnb:hover{border-color:var(--acc);color:var(--acc)}
 .dnb.off{opacity:.35;cursor:default}
-.daynav select{font:600 13px var(--sans);color:var(--tx);background:var(--card);border:1px solid var(--line2);border-radius:999px;padding:9px 14px;max-width:100%}
+/* انتخابگرِ تاریخ — کارتِ خودِ صفحه، نه listboxِ بومیِ سیستم‌عامل؛ فقط توکن‌ها (روشن و تیره یکسان). */
+.picker{position:relative;z-index:5}
+.pickbtn{font:600 13px var(--sans);color:var(--tx);background:var(--card);border:1px solid var(--line2);border-radius:999px;padding:9px 12px 9px 14px;display:inline-flex;align-items:center;gap:8px;cursor:pointer;max-width:100%}
+.pickbtn:hover,.pickbtn[aria-expanded=true]{border-color:var(--acc)}
+.pickbtn svg{width:12px;height:12px;transition:transform .15s}
+.pickbtn[aria-expanded=true] svg{transform:rotate(180deg)}
+.picklist{position:absolute;top:calc(100% + 6px);right:0;min-width:100%;max-width:calc(100vw - 32px);max-height:320px;overflow-y:auto;overscroll-behavior:contain;box-sizing:border-box;background:var(--card);border:1px solid var(--line2);border-radius:14px;box-shadow:var(--sh);padding:6px;z-index:5}
+.picklist[hidden]{display:none}
+.pkrow{display:flex;align-items:center;justify-content:space-between;gap:14px;padding:8px 12px;border-radius:9px;font:500 13px var(--sans);color:var(--tx);white-space:nowrap;outline:none}
+.pkrow:hover,.pkrow:focus{background:var(--raise)}
+.pkrow:focus-visible{box-shadow:inset 0 0 0 2px var(--acc)}
+.pkrow[aria-current=date]{font-weight:700;color:var(--acc)}
+.pkrow svg{width:12px;height:12px;flex:none}
 .chain{display:flex;flex-direction:column;gap:12px}
 .chainhd{display:flex;align-items:baseline;gap:12px;flex-wrap:wrap}
 .chainhd h2{margin:0;font-size:18px;letter-spacing:-.02em}
@@ -311,6 +343,8 @@ tbody tr:hover{background:var(--card2)}
 .pill.na{background:var(--raise);color:var(--tx2)}
 .why{display:block;margin-top:4px;max-width:34ch;white-space:normal;font-size:12px;line-height:1.4}
 .muted{color:var(--tx3)}
+.solnote{margin:12px 0 0;font-size:12.5px;color:var(--tx3)}
+.retnote{display:block;margin-top:3px;font-size:11px;line-height:1.3;color:var(--tx3);font-weight:500}
 .go{color:var(--acc);font-weight:700;white-space:nowrap}
 .more{margin-top:14px;display:flex;justify-content:center}
 .more button{padding:10px 18px;border-radius:999px;border:1px solid var(--line2);font-size:12.5px;font-weight:700}
@@ -358,10 +392,10 @@ const CLIENT_JS = String.raw`
   function renderFilters(){
     var box=$('filters'); if(!box) return;
     var inChain=rows.filter(CH[fChain]);
-    var items=[['c','all','All chains',rows.length],['c','base','Base',rows.filter(CH.base).length],['c','solana','Solana',rows.filter(CH.solana).length],null,
+    var items=(D.solana===false?[]:[['c','all','All chains',rows.length],['c','base','Base',rows.filter(CH.base).length],['c','solana','Solana',rows.filter(CH.solana).length],null]).concat([
       ['r','all','Every result',inChain.length],['r','nosell','No sell route',inChain.filter(RES.nosell).length],
       ['r','empty','Empty at follow-up',inChain.filter(RES.empty).length],['r','sell','Sell route',inChain.filter(RES.sell).length],
-      ['r','na','Not checked',inChain.filter(RES.na).length]];
+      ['r','na','Not checked',inChain.filter(RES.na).length]]);
     var active=document.activeElement, keep=active&&active.dataset?active.dataset.g+':'+active.dataset.k:null, again=null;
     box.textContent='';
     items.forEach(function(it){
@@ -382,7 +416,8 @@ const CLIENT_JS = String.raw`
     tb.textContent='';
     list.slice(0,shown).forEach(function(r){
       var base=r.chain==='base', tr=document.createElement('tr');
-      var td=el('td'); td.appendChild(el('span','sym','$'+(r.symbol||'?'))); td.appendChild(el('span','cb',base?'Base':'Solana'));
+      var td=el('td'); var sy=String(r.symbol==null?'':r.symbol).trim(), noSym=(sy===''||sy==='?'), ad=String(r.address||'');
+      td.appendChild(el('span','sym',noSym?(ad.length>9?ad.slice(0,4)+'…'+ad.slice(-4):(ad||'Unknown token')):'$'+sy)); td.appendChild(el('span','cb',base?'Base':'Solana'));
       td.appendChild(el('span','nm',r.name||'')); tr.appendChild(td);
       td=el('td');
       if(r.v==='sell') td.appendChild(pill('ok','✓ '+(base?'Sell route quoted':'Passed buy and sell')));
@@ -391,7 +426,10 @@ const CLIENT_JS = String.raw`
         td.appendChild(pill('no','⚠ No sell route'+cw));
       } else { td.appendChild(pill('na','? Could not be checked')); td.appendChild(el('span','why muted',r.why||'The check did not finish.')); }
       tr.appendChild(td);
-      tr.appendChild(el('td','num',typeof r.ret==='number'?Math.round(r.ret)+'%':'—'));
+      td=el('td','num');
+      if(typeof r.ret==='number'&&r.ret>100){ td.appendChild(document.createTextNode('—')); td.appendChild(el('span','retnote','price feed and pool disagreed')); }
+      else td.appendChild(document.createTextNode(typeof r.ret==='number'?Math.round(r.ret)+'%':'—'));
+      tr.appendChild(td);
       tr.appendChild(el('td','num',usd(r.reserveUsd)));
       td=el('td'); var h=hoursLater(r);
       if(r.follow==='pool-empty') td.appendChild(pill('no','⚠ Pool empty'+(h!=null?' '+h+' h later':' at follow-up')));
@@ -442,8 +480,48 @@ const CLIENT_JS = String.raw`
   })(cols[i]); }
   if(cbox) cbox.scrollLeft=cbox.scrollWidth; // موبایل: ستونِ روزِ جاری سمتِ راست است
 
-  var sel=$('day');
-  if(sel) sel.addEventListener('change',function(){ if(/^\d{4}-\d{2}-\d{2}$/.test(sel.value)) location.href='/report/'+sel.value; });
+  /* انتخابگرِ تاریخ: لینک‌ها از سرور آمده‌اند؛ اینجا فقط باز/بسته، اسکرولِ روزِ جاری به وسط، و کیبورد. */
+  var pb=$('pickBtn'), pl=$('pickList');
+  if(pb&&pl){
+    var rowsEl=function(){ return Array.prototype.slice.call(pl.querySelectorAll('a.pkrow')); };
+    var curRow=function(){ return pl.querySelector('a[aria-current="date"]')||rowsEl()[0]; };
+    var isOpen=function(){ return !pl.hidden; };
+    var clamp=function(){
+      pl.style.transform='';
+      var r=pl.getBoundingClientRect(), vw=document.documentElement.clientWidth, dx=0;
+      if(r.right>vw-16) dx=vw-16-r.right;
+      if(r.left+dx<16) dx=16-r.left;
+      if(dx) pl.style.transform='translateX('+Math.round(dx)+'px)';
+    };
+    var open=function(){
+      pl.hidden=false; pb.setAttribute('aria-expanded','true');
+      var c=curRow();
+      if(c){ pl.scrollTop=Math.max(0,c.offsetTop-(pl.clientHeight-c.offsetHeight)/2); c.focus({preventScroll:true}); }
+      clamp();
+    };
+    var close=function(back){
+      pl.hidden=true; pb.setAttribute('aria-expanded','false'); pl.style.transform='';
+      if(back) pb.focus();
+    };
+    pb.addEventListener('click',function(){ if(isOpen()) close(false); else open(); });
+    pb.addEventListener('keydown',function(e){
+      if(e.key==='ArrowDown'||e.key==='ArrowUp'){ e.preventDefault(); if(!isOpen()) open(); else { var c=curRow(); if(c) c.focus({preventScroll:true}); } }
+      else if(e.key==='Escape'&&isOpen()){ close(true); }
+      else if(e.key==='Tab'&&isOpen()){ close(false); }
+    });
+    pl.addEventListener('keydown',function(e){
+      var rs=rowsEl(), i=rs.indexOf(document.activeElement), k=e.key;
+      if(k==='ArrowDown'){ e.preventDefault(); if(i<rs.length-1) rs[i+1].focus(); }
+      else if(k==='ArrowUp'){ e.preventDefault(); if(i>0) rs[i-1].focus(); }
+      else if(k==='Home'){ e.preventDefault(); rs[0].focus(); }
+      else if(k==='End'){ e.preventDefault(); rs[rs.length-1].focus(); }
+      else if(k===' '){ e.preventDefault(); if(i>=0) rs[i].click(); }
+      else if(k==='Escape'){ e.preventDefault(); close(true); }
+      else if(k==='Tab'){ close(true); }
+    });
+    document.addEventListener('click',function(e){ if(isOpen()&&!$('picker').contains(e.target)) close(false); });
+    window.addEventListener('resize',function(){ if(isOpen()) clamp(); });
+  }
 })();
 `;
 
@@ -550,7 +628,9 @@ export function renderReportNotFound(message) {
 /* opts: { date, today, firstDate, rows (گاردشده)، history: [dayCounts…، قدیمی→جدید] } */
 export function renderReportPage(opts) {
   const { date, today, firstDate } = opts;
-  const rows = (Array.isArray(opts.rows) ? opts.rows : []).filter((r) => r && (r.chain === "base" || r.chain === "solana"));
+  // روزهای پیش از REPORT_SOLANA_FIRST_DATE: ردیفِ Solana اصلاً به صفحه (جدول/جزیره/کاشی) نمی‌رسد.
+  const showSol = date >= REPORT_SOLANA_FIRST_DATE;
+  const rows = (Array.isArray(opts.rows) ? opts.rows : []).filter((r) => r && (r.chain === "base" || (showSol && r.chain === "solana")));
   const history = Array.isArray(opts.history) ? opts.history : [];
   const st = statsOf(rows);
   const hasData = rows.length > 0;
@@ -558,14 +638,24 @@ export function renderReportPage(opts) {
   const canPrev = prev >= firstDate, canNext = next <= today;
   const title = "Exit Report, " + longDate(date) + " — Zaexa";
   const description = hasData
-    ? reportMetaDescription(date, st)
+    ? reportMetaDescription(date, st, showSol)
     : "Zaexa Exit Report for " + longDate(date) + ": no tokens were reported for this day.";
 
   const dnb = (ok, d, arrow, label) => ok
     ? '<a class="dnb" href="/report/' + d + '" aria-label="' + label + '">' + arrow + "</a>"
     : '<span class="dnb off" aria-disabled="true" aria-label="' + label + ' (not available)">' + arrow + "</span>";
-  const options = history.slice().reverse().map((h) =>
-    '<option value="' + h.date + '"' + (h.date === date ? " selected" : "") + ">" + esc(longDate(h.date)) + "</option>").join("");
+  // 🔴 فهرستِ انتخابگر: «همه‌ی» روزهای firstDate..today، تازه‌ترین بالا — نه ۱۴ روزِ تاریخچه.
+  // پیش از firstDate هرگز نمی‌آید. لینک‌ها همه در HTML هستند (خزنده می‌بیند)؛ JS فقط باز/بسته می‌کند.
+  const pickDates = [];
+  for (let d = today, n = 0; d >= firstDate && n < 3700; d = addDays(d, -1), n++) pickDates.push(d);
+  const CHECK = '<svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.5 6.5l2.3 2.3L9.5 3.6"/></svg>';
+  const CHEV = '<svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.5 4.5L6 8l3.5-3.5"/></svg>';
+  const pickRows = pickDates.map((d) => d === date
+    ? '<a class="pkrow" role="option" tabindex="-1" aria-selected="true" aria-current="date" href="/report/' + d + '"><span>' + esc(longDate(d)) + "</span>" + CHECK + "</a>"
+    : '<a class="pkrow" role="option" tabindex="-1" aria-selected="false" href="/report/' + d + '"><span>' + esc(longDate(d)) + "</span></a>").join("");
+  const picker = '<div class="picker" id="picker"><button type="button" class="pickbtn" id="pickBtn" aria-haspopup="listbox" aria-expanded="false" aria-controls="pickList" aria-label="Report date">' +
+    '<span id="pickVal">' + esc(longDate(date)) + "</span>" + CHEV + "</button>" +
+    '<div class="picklist" id="pickList" role="listbox" aria-label="Report date" hidden>' + pickRows + "</div></div>";
 
   const tile = (n, label, sub, color) =>
     '<div class="tile"><b>' + n + "</b><p>" + (color ? '<i class="dot" style="background:var(' + color + ')"></i>' : "") +
@@ -580,21 +670,24 @@ export function renderReportPage(opts) {
       tile(st.bSell, "Sell route quoted", st.med != null ? "Median quote returned " + Math.round(st.med) + "% of $100" : "", "--s-sell") +
       tile(st.bNo, "No sell route", causeParts.join(" · "), "--s-nosell") +
       tile(st.bEmpty, "Pool empty at follow-up", "of " + st.bFollowed + " quoted tokens re-checked 1–3 h later") +
-      '</div></section><section class="chain"><div class="chainhd"><h2>Solana</h2><span>A buy and a sell are simulated together.</span></div><div class="tiles three">' +
-      tile(st.s, "New tokens checked", "") +
-      tile(st.sSell, "Passed the simulated buy and sell", "", "--s-sell") +
-      tile(st.sNa, "Could not be checked", "", "--s-none") + "</div></section>"
+      "</div>" + (showSol ? "" : '<p class="solnote">Solana checks are listed from ' + esc(longDate(REPORT_SOLANA_FIRST_DATE)) + ".</p>") +
+      "</section>" + (showSol
+        ? '<section class="chain"><div class="chainhd"><h2>Solana</h2><span>A buy and a sell are simulated together.</span></div><div class="tiles three">' +
+          tile(st.s, "New tokens checked", "") +
+          tile(st.sSell, "Passed the simulated buy and sell", "", "--s-sell") +
+          tile(st.sNa, "Could not be checked", "", "--s-none") + "</div></section>"
+        : "")
     : "";
 
   const lede = hasData
-    ? reportLede(st)
+    ? reportLede(st, showSol)
     : (date === today ? "No tokens have been reported yet today (UTC)." : "No report is available for this day.");
 
   const chart = '<section class="panel"><div class="panelhd"><h2>New Base tokens per day</h2><div class="legend">' +
     '<span><i class="dot" style="background:var(--s-sell)"></i>Sell route quoted</span>' +
     '<span><i class="dot" style="background:var(--s-nosell)"></i>No sell route</span>' +
     '<span><i class="dot" style="background:var(--s-none)"></i>Could not be checked</span></div></div>' +
-    '<div class="chartbox" id="chartbox">' + chartSvg(history, date) + '<div class="tip" id="tip" hidden></div></div></section>';
+    '<div class="chartbox" id="chartbox">' + chartSvg(history, date, firstDate) + '<div class="tip" id="tip" hidden></div></div></section>';
 
   const table = hasData
     ? '<section class="panel"><div class="panelhd"><h2 id="tblTitle">Tokens checked on ' + esc(shortDate(date)) + "</h2></div>" +
@@ -605,7 +698,8 @@ export function renderReportPage(opts) {
     : '<section class="panel nodata"><p>Nothing to list for this day.</p><a class="go" href="/report">Go to the latest report →</a></section>';
 
   const method = '<section class="method"><div>' +
-    "<p><strong>How to read this.</strong> On Base the check is a sell quote from the DEXes, not a simulated round trip. On Solana the buy and the sell are simulated together.</p>" +
+    "<p><strong>How to read this.</strong> On Base the check is a sell quote from the DEXes, not a simulated round trip." +
+    (showSol ? " On Solana the buy and the sell are simulated together." : "") + " Returns above 100% are not shown: they mean the price feed and the pool disagreed at that moment, not a profit.</p>" +
     "<p>A working exit at the moment of the check says nothing about price, and nothing about an hour from now.</p>" +
     '<p class="raw">Raw files: <a href="/report/' + date + '.txt">text</a> · <a href="/report/' + date + '.json">JSON</a></p></div>' +
     '<a class="cta" href="/app">Check a token yourself</a></section>';
@@ -613,11 +707,11 @@ export function renderReportPage(opts) {
   const main = '<main class="wrap" id="top"><section class="top"><p class="eyebrow">Exit Report · daily · UTC</p>' +
     '<div class="toprow"><h1 id="h1">Exit Report, <em>' + esc(shortDate(date)) + "</em></h1>" +
     '<div class="daynav">' + dnb(canPrev, prev, "&#8592;", "Previous day") +
-    '<select id="day" aria-label="Report date">' + options + "</select>" +
+    picker +
     dnb(canNext, next, "&#8594;", "Next day") + '</div></div><p class="lede" id="lede">' + esc(lede) + "</p></section>" +
     tiles + chart + table + method + "</main>";
 
-  const data = { date, rows: rows.map(islandRow), days: history };
+  const data = { date, solana: showSol, rows: rows.map(islandRow), days: history.filter((h) => h.date >= firstDate) };
   const island = '<script type="application/json" id="reportData">' + jsonForScript(data) + "</script>\n";
   return pageShell({
     title, description, canonical: REPORT_SITE_ORIGIN + "/report/" + date,

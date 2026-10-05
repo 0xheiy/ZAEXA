@@ -13858,6 +13858,8 @@ function stripAllowedWording(t) {
   const { VD_SOL_WHY } = await import("./verdict_sol.js");
   const TODAY = utcDateOf(Date.now());
   const PAST = "2026-09-14";
+  const REPORT_SOLANA_FIRST_DATE_T = "2026-09-27";
+  const SOLDAY = "2026-09-30"; // پس از REPORT_SOLANA_FIRST_DATE: Solana روی صفحه هست
   const PREFIRST = "2026-09-01";
   const mkA = (n) => "0x" + n.toString(16).padStart(40, "0");
   const mkRow = (o) => Object.assign({
@@ -13885,6 +13887,7 @@ function stripAllowedWording(t) {
   ];
   const kvFix = mkKv({
     ["report:" + PAST]: docOf(PAST, fixtureRows),
+    ["report:" + SOLDAY]: docOf(SOLDAY, fixtureRows),
     ["report:" + TODAY]: docOf(TODAY, [mkRow({ checkedAt: TODAY + "T01:00:00.000Z", address: mkA(40) })]),
   });
   const envPage = { ASSETS, ZX_KV: kvFix };
@@ -13921,17 +13924,33 @@ function stripAllowedWording(t) {
     const rFut = await GET("/report/" + tomorrow, envPage);
     ok(rFut.status === 404 && (await rFut.text()).includes('href="/report"'), "[report page routes] a future date is a 404 page");
 
-    // پیش از اولین تاریخ: صفحه رندر می‌شود، «بدونِ داده»، و KV اصلاً خوانده نمی‌شود.
+    // پیش از اولین تاریخ: ۴۰۴ (همان صفحه‌ی ۴۰۴ با noindex)، کشِ یک‌روزه، و KV اصلاً خوانده نمی‌شود.
     let kvReads = [];
     const kvSpy = { get: async (k) => { kvReads.push(k); return docOf(PREFIRST, fixtureRows); } };
-    const rPre = await GET("/report/" + PREFIRST, { ASSETS, ZX_KV: kvSpy });
+    const rPre = await GET("/report/" + PREFIRST, { ASSETS, ZX_KV: kvSpy, });
     const hPre = await rPre.text();
-    ok(rPre.status === 200 && hPre.includes("No report is available for this day.") && islandOf(hPre).rows.length === 0,
-       "[report page routes] a day before the first report date renders the no-data state");
-    ok(!kvReads.some((k) => k < "report:" + REPORT_TEXT_FIRST_DATE && /^report:\d/.test(k)),
-       "[report page routes] days before " + REPORT_TEXT_FIRST_DATE + " are never read from KV, got " + JSON.stringify(kvReads));
-    ok(hPre.includes('<span class="dnb off"') && /<a class="dnb" href="\/report\/2026-09-02"/.test(hPre),
-       "[report page routes] on the day before the first date, 'previous' is disabled and 'next' is a link");
+    ok(rPre.status === 404 && /^text\/html/.test(rPre.headers.get("content-type") || "") && !rPre.headers.get("location") && hPre.includes('href="/report"'),
+       "[report page first-date] a day before the first report date is the 404 HTML page (never a redirect), got " + rPre.status + " " + rPre.headers.get("location"));
+    ok(hPre.includes('<meta name="robots" content="noindex">'), "[report page first-date] the pre-first 404 page carries noindex");
+    ok(rPre.headers.get("cache-control") === "public, max-age=86400",
+       "[report page first-date] the pre-first 404 caches 86400s, got " + rPre.headers.get("cache-control"));
+    ok(kvReads.length === 0, "[report page first-date] the pre-first 404 reads nothing from KV, got " + JSON.stringify(kvReads));
+    const rPreHead = await call("/report/2026-01-01", { method: "HEAD" }, { ASSETS, ZX_KV: kvSpy });
+    ok(rPreHead.status === 404 && rPreHead.headers.get("cache-control") === "public, max-age=86400" && kvReads.length === 0,
+       "[report page first-date] HEAD on an old day is the same 404, still no KV read");
+    const rDayBefore = await GET("/report/" + rp.addDays(REPORT_TEXT_FIRST_DATE, -1), { ASSETS, ZX_KV: kvSpy });
+    ok(rDayBefore.status === 404 && kvReads.length === 0, "[report page first-date] the day right before the first date is a 404 as well, got " + rDayBefore.status);
+    const rOnFirst = await GET("/report/" + REPORT_TEXT_FIRST_DATE, { ASSETS, ZX_KV: kvSpy });
+    ok(rOnFirst.status === 200, "[report page first-date] the first report date itself is a normal page, got " + rOnFirst.status);
+    ok(!kvReads.some((k) => /^report:\d/.test(k) && k < "report:" + REPORT_TEXT_FIRST_DATE),
+       "[report page first-date] no day before " + REPORT_TEXT_FIRST_DATE + " is ever read from KV, got " + JSON.stringify(kvReads));
+    const hFirstP = await rOnFirst.text();
+    ok(hFirstP.includes('<span class="dnb off"') && /<span class="dnb off"[^>]*aria-label="Previous day/.test(hFirstP) &&
+       /<a class="dnb" href="\/report\/2026-09-09"/.test(hFirstP),
+       "[report page first-date] on the first date 'previous' is disabled and 'next' is a link");
+    const isFirst = islandOf(hFirstP);
+    ok(isFirst.days.length === 1 && isFirst.days[0].date === REPORT_TEXT_FIRST_DATE && (hFirstP.match(/<a class="col/g) || []).length === 1,
+       "[report page first-date] the first page's chart has exactly one column, got " + isFirst.days.length);
     const hFirst = await (await GET("/report/" + REPORT_TEXT_FIRST_DATE, envPage)).text();
     ok(/<span class="dnb off"[^>]*aria-label="Previous day/.test(hFirst), "[report page routes] 'previous' is disabled on the first report date");
     ok(/<span class="dnb off"[^>]*aria-label="Next day/.test(hToday) && /<a class="dnb" href="\/report\/[\d-]+" aria-label="Previous day">/.test(hToday),
@@ -14013,8 +14032,8 @@ function stripAllowedWording(t) {
       mkRow({ address: "SoLnoSell1111111111111111111111111111111111", chain: "solana", checkKind: "roundtrip", v: "nosell", cause: "empty-pool", symbol: "SOLNO", ret: undefined }),
       mkRow({ address: mkA(13), v: "nosell", cause: "empty-pool", ret: undefined, symbol: "REAL" }),
     ];
-    const e = { ASSETS, ZX_KV: mkKv({ ["report:" + PAST]: docOf(PAST, raw) }) };
-    const html = await (await GET("/report/" + PAST, e)).text();
+    const e = { ASSETS, ZX_KV: mkKv({ ["report:" + SOLDAY]: docOf(SOLDAY, raw) }) };
+    const html = await (await GET("/report/" + SOLDAY, e)).text();
     const isl = islandOf(html);
     const by = Object.fromEntries(isl.rows.map((r) => [r.symbol, r]));
     ok(by.NOCAUSE.v === null && by.V4NOC.v === null && by.SOLNO.v === null,
@@ -14063,8 +14082,8 @@ function stripAllowedWording(t) {
     const rows = [];
     baseCodes.forEach((c, i) => rows.push(mkRow({ address: mkA(100 + i), v: null, why: c, ret: undefined, symbol: "B" + i, name: "base " + i })));
     solCodes.forEach((c, i) => rows.push(mkRow({ address: "Sol" + String(i).padStart(30, "x"), chain: "solana", checkKind: "roundtrip", v: null, why: c, ret: undefined, symbol: "S" + i, name: "sol " + i })));
-    const e = { ASSETS, ZX_KV: mkKv({ ["report:" + PAST]: docOf(PAST, rows) }) };
-    const html = await (await GET("/report/" + PAST, e)).text();
+    const e = { ASSETS, ZX_KV: mkKv({ ["report:" + SOLDAY]: docOf(SOLDAY, rows) }) };
+    const html = await (await GET("/report/" + SOLDAY, e)).text();
     const isl = islandOf(html);
     const colon = isl.rows.filter((r) => r.v === null && (typeof r.why !== "string" || r.why.includes(":")));
     ok(isl.rows.length === rows.length && colon.length === 0, "[report page why] every unchecked row in the island carries a colon-free sentence");
@@ -14096,17 +14115,122 @@ function stripAllowedWording(t) {
     console.log("[report page island] attacker-controlled names/symbols cannot close the JSON island (< > & and U+2028/9 are \\u-escaped), never appear raw in the HTML, and the client builds the table with createElement/textContent only");
   }
 
+  /* ---- date picker (custom listbox) + chart range ---- */
+  {
+    const pickRowsOf = (h) => {
+      const m = /<div class="picklist"[^>]*>([\s\S]*?)<\/div>/.exec(h);
+      return m ? [...m[1].matchAll(/<a class="pkrow"([^>]*) href="\/report\/(\d{4}-\d{2}-\d{2})">/g)].map((x) => ({ attrs: x[1], date: x[2] })) : [];
+    };
+    const expectAll = (from, to) => { const o = []; for (let d = to; d >= from; d = rp.addDays(d, -1)) o.push(d); return o; };
+    for (const pg of [PAST, TODAY, REPORT_TEXT_FIRST_DATE]) {
+      const h = await (await GET("/report/" + pg, envPage)).text();
+      const rows = pickRowsOf(h);
+      const want = expectAll(REPORT_TEXT_FIRST_DATE, TODAY);
+      ok(JSON.stringify(rows.map((r) => r.date)) === JSON.stringify(want),
+         "[report page picker] on " + pg + " the picker lists every date " + REPORT_TEXT_FIRST_DATE + ".." + TODAY + " newest first (" + want.length + "), got " + rows.length);
+      ok(!rows.some((r) => r.date < REPORT_TEXT_FIRST_DATE), "[report page picker] no date before the first report date in the picker");
+      const cur = rows.filter((r) => /aria-current="date"/.test(r.attrs));
+      ok(cur.length === 1 && cur[0].date === pg && /aria-selected="true"/.test(cur[0].attrs),
+         "[report page picker] exactly the page's own date (" + pg + ") carries aria-current=date and aria-selected");
+      ok(h.includes('aria-haspopup="listbox"') && h.includes('aria-expanded="false"') && /<div class="picklist"[^>]* hidden>/.test(h),
+         "[report page picker] the trigger is a button with aria-haspopup/aria-expanded and the list is server-rendered but hidden");
+    }
+    // نمودارِ هر صفحه فقط ستونِ >= firstDate دارد، حتی اگر تاریخچه‌ی ورودی پیش‌تر برود.
+    const mkDay = (d) => ({ date: d, b: 5, bSell: 3, bNo: 1, bNa: 1, bEmpty: 0, bFollowed: 0 });
+    const hist = [];
+    for (let i = 5; i >= 0; i--) hist.push(mkDay(rp.addDays(REPORT_TEXT_FIRST_DATE, -i)));
+    const direct = rp.renderReportPage({ date: REPORT_TEXT_FIRST_DATE, today: TODAY, firstDate: REPORT_TEXT_FIRST_DATE, rows: [], history: hist });
+    ok((direct.match(/<a class="col/g) || []).length === 1 && islandOf(direct).days.length === 1,
+       "[report page chart range] renderReportPage drops pre-first history days even if the caller passes them");
+    // ستونِ کم: میله‌ی باریک و گروه وسط.
+    const bwOf = (h) => [...h.matchAll(/<rect x="([\d.]+)" y="[\d.]+" width="([\d.]+)" height="[\d.]+" rx="\d" fill="var\(--s-sell\)"/g)].map((m) => ({ x: +m[1], w: +m[2] }));
+    const bars = bwOf(direct);
+    ok(bars.length >= 1 && bars.every((b) => b.w <= 24) && Math.abs((bars[0].x + bars[0].w / 2) - (34 + (1040 - 34 - 8) / 2)) < 1,
+       "[report page chart range] a one-column chart has a capped bar (<=24) centred in the plot, got " + JSON.stringify(bars));
+    // روزِ امروز: ۱۴ ستون.
+    const hTodayP = await (await GET("/report", envPage)).text();
+    const nToday = Math.min(14, Math.round((Date.parse(TODAY) - Date.parse(REPORT_TEXT_FIRST_DATE)) / 86400000) + 1);
+    ok((hTodayP.match(/<a class="col/g) || []).length === nToday && islandOf(hTodayP).days.every((d) => d.date >= REPORT_TEXT_FIRST_DATE),
+       "[report page chart range] today's page has min(14, days since launch) = " + nToday + " columns");
+    console.log("[report page picker] the date picker is a server-rendered hidden listbox of every date from the first report date to today (newest first, current one aria-current), pre-launch dates never appear, and the chart only carries days from the first report date with a capped, centred bar");
+  }
+
+  /* ---- Solana پنهان پیش از REPORT_SOLANA_FIRST_DATE، «$?»، بازگشتِ بالای ۱۰۰٪، canonical ---- */
+  {
+    ok(rp.REPORT_SOLANA_FIRST_DATE === "2026-09-27", "[report page solana] REPORT_SOLANA_FIRST_DATE is 2026-09-27");
+    const EARLY = "2026-09-21";
+    const kvS = mkKv({ ["report:" + EARLY]: docOf(EARLY, fixtureRows), ["report:" + REPORT_SOLANA_FIRST_DATE_T]: docOf(REPORT_SOLANA_FIRST_DATE_T, fixtureRows) });
+    const hE = await (await GET("/report/" + EARLY, { ASSETS, ZX_KV: kvS })).text();
+    const iE = islandOf(hE);
+    ok(!/Solana tokens|Passed the simulated buy and sell|<h2>Solana<\/h2>|simulated together/.test(hE.replace(/Solana checks are listed from[^<]*/, "")),
+       "[report page solana] 21 Sep: no Solana tile section, lede, description or reading text");
+    ok(iE.solana === false && iE.rows.length === 6 && iE.rows.every((r) => r.chain === "base"), "[report page solana] 21 Sep: the island holds no Solana row, got " + iE.rows.map((r) => r.chain).join());
+    ok(!hE.includes("So11111111111111111111111111111111111111112") && !hE.includes("Mint2222222222222222222222222222222222222222"),
+       "[report page solana] 21 Sep: no Solana address anywhere in the page");
+    ok((hE.match(/<div class="tiles/g) || []).length === 1, "[report page solana] 21 Sep: only the Base tiles");
+    ok(hE.includes('<p class="solnote">Solana checks are listed from 27 Sep 2026.</p>') && (hE.match(/Solana checks are listed from/g) || []).length === 1 &&
+       hE.indexOf('<p class="solnote">') > hE.indexOf('<div class="tiles') && hE.indexOf('<p class="solnote">') < hE.indexOf('<section class="panel">'),
+       "[report page solana] 21 Sep: one muted line under the Base tiles");
+    ok(!/Solana/.test(hE.slice(hE.indexOf('id="lede"'), hE.indexOf("</p>", hE.indexOf('id="lede"')))) && !/Solana/.test((/<meta name="description" content="([^"]*)"/.exec(hE) || [])[1]),
+       "[report page solana] 21 Sep: lede and meta description mention Base only");
+    ok(/var items=\(D\.solana===false\?\[\]/.test(hE), "[report page solana] 21 Sep: the client drops the whole chain-chip group when the island says solana:false");
+    const hS = await (await GET("/report/" + REPORT_SOLANA_FIRST_DATE_T, { ASSETS, ZX_KV: kvS })).text();
+    const iS = islandOf(hS);
+    ok(iS.solana === true && iS.rows.filter((r) => r.chain === "solana").length === 2 && /<h2>Solana<\/h2>/.test(hS) && !hS.includes('<p class="solnote">') && hS.includes("simulated together"),
+       "[report page solana] 27 Sep: Solana tiles, rows and text are all there, and no muted line");
+    const jE = JSON.parse(await (await GET("/report/" + EARLY + ".json", { ASSETS, ZX_KV: kvS })).text());
+    ok(jE.rows.some((r) => r.chain === "solana"), "[report page solana] the JSON for 21 Sep still lists the Solana rows (unchanged)");
+    const tE = await (await GET("/report/" + EARLY + ".txt", { ASSETS, ZX_KV: kvS })).text();
+    ok(/Solana/i.test(tE) || tE.length > 0, "[report page solana] the txt route still answers");
+
+    // «$?» هرگز: نمادِ ؟ / خالی / null / فاصله → null در جزیره (کلاینت آدرسِ کوتاه می‌گذارد).
+    const bad = [mkRow({ address: mkA(501), symbol: "?" }), mkRow({ address: mkA(502), symbol: "" }), mkRow({ address: mkA(503), symbol: null }), mkRow({ address: mkA(504), symbol: "  " }),
+      mkRow({ address: mkA(505), symbol: "OK" })];
+    const hQ = await (await GET("/report/" + SOLDAY, { ASSETS, ZX_KV: mkKv({ ["report:" + SOLDAY]: docOf(SOLDAY, bad) }) })).text();
+    const iQ = islandOf(hQ);
+    ok(iQ.rows.slice(0, 4).every((r) => r.symbol === null) && iQ.rows[4].symbol === "OK", "[report page symbol] '?', empty, null and blank symbols reach the island as null, a real one stays");
+    ok(!/"symbol":"\?"/.test(hQ) && !hQ.includes("$?"), "[report page symbol] no '$?' and no '?' symbol anywhere in the page");
+    const csrc = fs.readFileSync(new URL("./report_page.js", import.meta.url), "utf8");
+    ok(rp.shortAddr("0x1234567890abcdef1234567890abcdef12345678") === "0x12…5678", "[report page symbol] short address is first 4 + … + last 4");
+    ok(/noSym\?\(ad\.length>9\?ad\.slice\(0,4\)\+'…'\+ad\.slice\(-4\)/.test(csrc) && !/'\$'\+\(r\.symbol\|\|'\?'\)/.test(csrc),
+       "[report page symbol] the client labels a symbol-less row with the short address and never builds '$' + '?'");
+
+    // ret > 100: «—» + یادداشت در کلاینت، و خارج از میانه.
+    const rr = [mkRow({ address: mkA(601), ret: 140 }), mkRow({ address: mkA(602), ret: 98 }), mkRow({ address: mkA(603), ret: 96 })];
+    const hR = await (await GET("/report/" + SOLDAY, { ASSETS, ZX_KV: mkKv({ ["report:" + SOLDAY]: docOf(SOLDAY, rr) }) })).text();
+    ok(hR.includes("Median quote returned 97% of $100"), "[report page ret] the median ignores ret 140: median of 98 and 96 is 97, got " + ((/Median quote returned [^<]*/.exec(hR) || [])[0]));
+    ok(islandOf(hR).rows[0].ret === 140, "[report page ret] the island keeps the raw ret (display decides)");
+    ok(/r\.ret>100\)\{ td\.appendChild\(document\.createTextNode\('—'\)\); td\.appendChild\(el\('span','retnote','price feed and pool disagreed'\)\)/.test(csrc),
+       "[report page ret] the client shows '—' with the note 'price feed and pool disagreed' for ret > 100");
+    ok(hR.includes("Returns above 100% are not shown: they mean the price feed and the pool disagreed at that moment, not a profit."), "[report page ret] the how-to-read block carries the sentence");
+    const hR2 = await (await GET("/report/" + SOLDAY, { ASSETS, ZX_KV: mkKv({ ["report:" + SOLDAY]: docOf(SOLDAY, [mkRow({ address: mkA(604), ret: 140 })]) }) })).text();
+    ok(!/Median quote returned/.test(hR2), "[report page ret] a day with only >100 rows shows no median at all");
+    const jR = JSON.parse(await (await GET("/report/" + SOLDAY + ".json", { ASSETS, ZX_KV: mkKv({ ["report:" + SOLDAY]: docOf(SOLDAY, rr) }) })).text());
+    ok(jR.rows[0].ret === 140, "[report page ret] the JSON route still carries ret 140 unchanged");
+
+    // canonical پایدار برای روزِ گذشته (لینکِ شبکه‌های اجتماعی) و بدونِ هیچ تغییری در آدرس.
+    const hC = await (await GET("/report/2026-10-04", { ASSETS, ZX_KV: mkKv({ ["report:2026-10-04"]: docOf("2026-10-04", rr) }) })).text();
+    ok(hC.includes('<link rel="canonical" href="https://zaexa.com/report/2026-10-04">') && hC.includes('<meta property="og:url" content="https://zaexa.com/report/2026-10-04">'),
+       "[report page canonical] a past date's canonical and og:url are https://zaexa.com/report/<date>");
+    const rC = await GET("/report/2026-10-04", { ASSETS, ZX_KV: mkKv({}) });
+    ok(rC.status === 200 && !rC.headers.get("location"), "[report page canonical] a past date is served at its own URL, no redirect");
+    console.log("[report page solana] pages before 27 Sep 2026 show no Solana tiles, rows, chips, lede or description (one muted line instead); from 27 Sep everything is there; JSON/txt unchanged. Symbol-less rows never print '$?'. ret above 100 is a dash with a note and out of the median. Past-date canonical is stable.");
+  }
+
   /* ---- numbers, tiles, lede, meta ---- */
   {
     const html = await (await GET("/report/" + PAST, envPage)).text();
     ok(html.includes("Exit Report, <em>14 Sep</em>"), "[report page meta] h1 carries the short date");
-    ok(html.includes("6 new Base tokens and 2 new Solana tokens were checked. 2 of the quoted tokens were re-checked 1–3 hours later. 1 had an empty pool."),
-       "[report page meta] lede states B, S, F and E");
+    ok(html.includes("6 new Base tokens were checked. 2 of the quoted tokens were re-checked 1–3 hours later. 1 had an empty pool.") && !/Solana/.test(html.slice(html.indexOf('id="lede"'), html.indexOf("</p>", html.indexOf('id="lede"')))),
+       "[report page meta] lede states B, F and E (14 Sep predates Solana, so it names Base only)");
     ok(html.includes("Median quote returned 99% of $100") || html.includes("Median quote returned 98% of $100"), "[report page meta] median sub on the quoted tile");
     ok(html.includes("Empty pool: 1 · Sell reverts: 1"), "[report page meta] causes in plain words");
     ok(html.includes("of 2 quoted tokens re-checked 1–3 h later"), "[report page meta] follow-up tile sub");
     ok(html.includes("<title>Exit Report, 14 Sep 2026 — Zaexa</title>"), "[report page meta] title");
-    ok(html.includes('<meta name="description" content="On 14 Sep 2026 Zaexa checked 6 new Base tokens and 2 Solana tokens.'), "[report page meta] description built from the day's numbers");
+    ok(html.includes('<meta name="description" content="On 14 Sep 2026 Zaexa checked 6 new Base tokens. Base: 3 had a sell route, 2 had none, 1 could not be checked.">'), "[report page meta] description built from the day's Base numbers only");
+    const hSolMeta = await (await GET("/report/" + SOLDAY, envPage)).text();
+    ok(hSolMeta.includes("6 new Base tokens and 2 new Solana tokens were checked.") &&
+       hSolMeta.includes('<meta name="description" content="On 30 Sep 2026 Zaexa checked 6 new Base tokens and 2 Solana tokens.'), "[report page meta] from 27 Sep the lede and description state Base and Solana");
     ok(html.includes('<link rel="canonical" href="https://zaexa.com/report/2026-09-14">'), "[report page meta] canonical");
     ok(html.includes('<meta property="og:url" content="https://zaexa.com/report/2026-09-14">') &&
        html.includes('<meta property="og:type" content="website">') &&
@@ -14123,14 +14247,16 @@ function stripAllowedWording(t) {
     ok(!hToday.includes('name="robots"') && !html.includes('name="robots"'), "[report page meta] days with data are indexable");
     // نمودار: ۱۴ روزِ منتهی به همین روز، هر ستون یک لینک، روزِ جاری برجسته.
     const isl = islandOf(html);
-    ok(isl.days.length === 14 && isl.days[13].date === PAST && isl.days[0].date === rp.addDays(PAST, -13), "[report page meta] 14 history days ending on the page date");
-    const last = isl.days[13];
+    ok(isl.days.length === 7 && isl.days[6].date === PAST && isl.days[0].date === REPORT_TEXT_FIRST_DATE,
+       "[report page meta] history runs from the first report date to the page date (7 days, not 14), got " + isl.days.length);
+    ok(isl.days.every((d) => d.date >= REPORT_TEXT_FIRST_DATE), "[report page chart range] no history day before the first report date reaches the chart");
+    const last = isl.days[6];
     ok(last.b === 6 && last.bSell === 3 && last.bNo === 2 && last.bNa === 1 && last.bEmpty === 1 && last.bFollowed === 2, "[report page meta] the day's chart counts come from guarded rows, got " + JSON.stringify(last));
-    ok((html.match(/<a class="col/g) || []).length === 14 && html.includes('class="col sel" data-d="2026-09-14" href="/report/2026-09-14"'), "[report page meta] each chart column is a link, the current one is highlighted");
-    ok((html.match(/<option /g) || []).length === 14 && html.indexOf('<option value="2026-09-14" selected>') < html.indexOf('<option value="2026-09-13"'), "[report page meta] the date select lists the 14 days newest first");
+    ok((html.match(/<a class="col/g) || []).length === 7 && html.includes('class="col sel" data-d="2026-09-14" href="/report/2026-09-14"'), "[report page meta] each chart column is a link, the current one is highlighted");
+    ok(!/<select|<option /.test(html) && html.includes('id="pickBtn"') && html.includes('role="listbox"'), "[report page meta] the date picker is the custom listbox, never a native select");
     ok(html.indexOf("zaexa.theme.v1") >= 0 && html.indexOf("zaexa.theme.v1") < html.indexOf("<style>"), "[report page meta] the shared theme key is applied before the first <style>");
     ok(!/fonts\.googleapis|fonts\.gstatic/.test(html), "[report page meta] no external font requests");
-    console.log("[report page meta] headline, lede, tiles, <title>, description, canonical, og/twitter tags (generic OG image from landing), raw links, 14-day chart columns as links, newest-first date select and the early theme boot all derive from the day's guarded rows");
+    console.log("[report page meta] headline, lede, tiles, <title>, description, canonical, og/twitter tags (generic OG image from landing), raw links, chart columns as links, the date picker and the early theme boot all derive from the day's guarded rows");
   }
 
   /* ---- sitemap ---- */

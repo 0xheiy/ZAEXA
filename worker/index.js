@@ -2613,8 +2613,7 @@ function reportHtmlDone(status, html, extraHeaders, method) {
 /* GET /report و GET /report/<YYYY-MM-DD> (بدونِ پسوند) — صفحه‌ی HTML.
    هر ردیف فقط از reportDocFor می‌آید (publishGuardRow روی همه‌ی ردیف‌ها
    زده شده)؛ هیچ مسیرِ دیگری به KV نیست. روزهای پیش از REPORT_TEXT_FIRST_DATE
-   هرگز خوانده نمی‌شوند (ردیف‌های nosellِ نادرستِ قدیمی) — «بدونِ داده» رندر
-   می‌شوند. */
+   هرگز خوانده نمی‌شوند (ردیف‌های nosellِ نادرستِ قدیمی) — ۴۰۴ با noindex. */
 async function reportPageRoute(request, url, env) {
   if (!rateOk(request, "report", RL_LIMIT, RL_WINDOW_MS))
     return reportHtmlDone(429, "too many requests\n", { "content-type": "text/plain; charset=utf-8", "retry-after": "60" }, "GET");
@@ -2631,11 +2630,17 @@ async function reportPageRoute(request, url, env) {
   if (date > today)
     return reportHtmlDone(404, renderReportNotFound("There is no report for a date that has not happened yet."), notFoundHeaders, method);
 
-  // ۱۴ روزِ منتهی به همین روز، موازی؛ روزِ پیش از اولین گزارش اصلاً خوانده نمی‌شود.
+  // 🔴 روزِ پیش از اولین گزارش: ۴۰۴ (همان صفحه‌ی ۴۰۴، با noindex) — صفحه‌ی خالی در گوگل نمی‌ماند؛ بدونِ هیچ خواندنی از KV.
+  if (date < REPORT_TEXT_FIRST_DATE)
+    return reportHtmlDone(404, renderReportNotFound("There is no report for a date before the first report."), { "cache-control": "public, max-age=86400" }, method);
+
+  // حداکثر ۱۴ روزِ منتهی به همین روز، فقط روزهای >= اولین گزارش (ستونِ پیش از آن هرگز نمی‌آید)؛ موازی.
   const dates = [];
-  for (let i = REPORT_HISTORY_DAYS - 1; i >= 0; i--) dates.push(addDays(date, -i));
-  const docs = await Promise.all(dates.map((d) =>
-    d < REPORT_TEXT_FIRST_DATE ? Promise.resolve(emptyReportDoc(d)) : reportDocFor(env, d)));
+  for (let i = REPORT_HISTORY_DAYS - 1; i >= 0; i--) {
+    const d = addDays(date, -i);
+    if (d >= REPORT_TEXT_FIRST_DATE) dates.push(d);
+  }
+  const docs = await Promise.all(dates.map((d) => reportDocFor(env, d)));
   const history = dates.map((d, i) => dayCounts(d, docs[i].rows));
   const rows = docs[dates.length - 1].rows;
 

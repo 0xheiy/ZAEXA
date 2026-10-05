@@ -18,7 +18,7 @@
 ## ۰. کارهای باز — به‌روز ۴ اکتبر ۲۰۲۶، به ترتیب
 
 فقط کارهای انجام‌نشده. کارهای تمام‌شده در تاریخچه‌ی گیت هستند (آخرین: `55d1afd` «Round 5»).
-سوییت رابط **۶۶۲ کاوشگر** سبز؛ به‌علاوه‌ی `worker/test.mjs`، `worker/og_live_test.mjs`، `worker/solana-parity.test.mjs`،
+سوییت رابط **۶۶۹ کاوشگر** سبز؛ به‌علاوه‌ی `worker/test.mjs`، `worker/og_live_test.mjs`، `worker/solana-parity.test.mjs`،
 شش `web/test/solana-*.test.mjs` و چهار آزمونِ مرورگر (`solana-parity-browser.py`، `solana-views-browser.py`،
 `solana-pairs-browser.py`، `market-workspace-browser.py` — از ریشه‌ی مخزن اجرا شوند؛ `scripts/solana-wallet` باید `npm ci` شده باشد).
 
@@ -80,6 +80,9 @@
 - `plainWhy` برای کلِ واژه‌نامه‌ی why؛ کدِ خام هرگز دیده نمی‌شود. فونت‌ها کپیِ landing (نگهبانِ هم‌سانی). CSP پاسخ = `web/_headers`.
 - sitemap: `/report` + ۳۰ روزِ اخیر. تبِ پنجمِ «Exit Report» در هدرِ اپ و جفت‌ها (بین ۹۶۱ تا ۱۱۲۰ پیکسل فقط آیکون)، و در لندینگ.
 - متنِ گزارش: «F of the quoted tokens were re-checked 1–3 hours later. E had an empty pool.» (در txt و صفحه).
+- ۵ اکتبر (دورِ دوم): انتخابِ تاریخ = منوی سفارشیِ گرد با همه‌ی روزها از ۸ سپتامبر تا امروز (اسکرول در هر دو جهت). پیش از ۸ سپتامبر ← ۴۰۴ + noindex. نمودار فقط از ۸ سپتامبر.
+  سولانا پیش از ۲۷ سپتامبر (`REPORT_SOLANA_FIRST_DATE`) در صفحه نشان داده نمی‌شود. نمادِ خالی/«?» ← آدرسِ کوتاه. برگشتِ بالای ۱۰۰٪ ← «—» (قیمتِ گکو و استخر ناهمخوان؛ از میانه بیرون).
+  [stated] حسام از ۵ اکتبر لینکِ پست‌ها را به `/report/<date>` می‌دهد — آدرس و canonical این صفحه‌ها نباید عوض شود.
 
 ### ۴. آزمونِ دستیِ کیف‌پولِ Base (فقط حسام)
 ۱) مرورگر را ببند و باز کن → Connect → ربی: با **یک** بار وصل شود. ۲) لغوِ سواپ → فقط «Cancelled in your wallet».
