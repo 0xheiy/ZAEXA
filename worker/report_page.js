@@ -292,6 +292,12 @@ a.dnb:hover{border-color:var(--acc);color:var(--acc)}
 .pickbtn:hover,.pickbtn[aria-expanded=true]{border-color:var(--acc)}
 .pickbtn svg{width:12px;height:12px;transition:transform .15s}
 .pickbtn[aria-expanded=true] svg{transform:rotate(180deg)}
+:root[data-theme=dark]{color-scheme:dark;scrollbar-color:var(--line2) transparent}
+:root:not([data-theme=dark]){color-scheme:light}
+.picklist,.tblwrap{scrollbar-width:thin;scrollbar-color:var(--line2) transparent}
+.picklist::-webkit-scrollbar,.tblwrap::-webkit-scrollbar{width:8px;height:8px}
+.picklist::-webkit-scrollbar-track,.tblwrap::-webkit-scrollbar-track{background:transparent}
+.picklist::-webkit-scrollbar-thumb,.tblwrap::-webkit-scrollbar-thumb{background:var(--line2);border-radius:999px;border:2px solid var(--card)}
 .picklist{position:absolute;top:calc(100% + 6px);right:0;min-width:100%;max-width:calc(100vw - 32px);max-height:320px;overflow-y:auto;overscroll-behavior:contain;box-sizing:border-box;background:var(--card);border:1px solid var(--line2);border-radius:14px;box-shadow:var(--sh);padding:6px;z-index:5}
 .picklist[hidden]{display:none}
 .pkrow{display:flex;align-items:center;justify-content:space-between;gap:14px;padding:8px 12px;border-radius:9px;font:500 13px var(--sans);color:var(--tx);white-space:nowrap;outline:none}

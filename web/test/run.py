@@ -839,8 +839,9 @@ def check_dark_tokens_unchanged():
         "web/landing.html": {"bg": "#0a0810", "card": "#131020"},
         # ۲۲ سپتامبر: به خواستِ مالک، تمِ تیره‌ی صفحه‌ی جفت‌ها با *اپ* یکی شد
         # (ته‌رنگِ آبیِ برند)، نه با صفحه‌ی معرفی — چون این صفحه یکی از برگه‌های ابزار است.
-        "web/pairs.html": {"bg": "#0b0d13", "card": "#14171f"},
-        "web/index.html": {"bg": "#0b0d13", "card": "#14171f"},
+        # ۵ اکتبر: به خواستِ مالک، اپ و جفت‌ها هم تیره‌ی بنفشِ landing / Exit Report را گرفتند.
+        "web/pairs.html": {"bg": "#0a0810", "card": "#131020"},
+        "web/index.html": {"bg": "#0a0810", "card": "#131020"},
     }
     files = {
         "web/landing.html": open(os.path.join(HERE, "..", "landing.html"), encoding="utf-8").read(),
@@ -4489,7 +4490,7 @@ async def main():
         assert lf["lightBg"] == "rgb(244, 245, 247)", "light body background is %r, expected #f4f5f7" % lf["lightBg"]
         assert lf["cardBg"] == "rgb(255, 255, 255)", "light card is %r, expected white" % lf["cardBg"]
         assert "0px 0px 0px 1px" not in lf["light"], "light .card still carries the rejected 1px ring: %r" % lf["light"]
-        assert lf["darkBg"] == "rgb(11, 13, 19)", "dark body background moved: %r (must stay #0b0d13)" % lf["darkBg"]
+        assert lf["darkBg"] == "rgb(10, 8, 16)", "dark body background moved: %r (must stay #0a0810)" % lf["darkBg"]
 
         # ---- [wallet unlock] ۲۴ سپتامبر: ربیِ قفل «Already processing unlock» می‌داد ----
         # ethers getSigner() بعد از eth_requestAccounts یک درخواستِ دوم می‌فرستاد؛ حالا
