@@ -383,34 +383,28 @@ footer .fine{max-width:78ch;margin:46px 0 0;font-size:11.5px;color:var(--tx3);li
 .chain-tabs button{display:inline-flex;align-items:center;gap:7px}
 .chain-tabs svg{object-fit:contain;flex:none}
 
-#themeBtn .themeSun{display:none}
-[data-theme="dark"] #themeBtn .themeSun{display:block}
-[data-theme="dark"] #themeBtn .themeMoon{display:none}
-#themeBtn svg{flex:none}
 .pairsTableScroll{position:relative;max-width:100%;overflow-x:auto}
 @media(max-width:760px){.pairsTableScroll{display:none}}
 
 /* Soft sculpted controls shared across light and dark surfaces. */
 :root{--soft-hi:rgba(255,255,255,.9);--soft-lo:rgba(35,45,65,.13);--face-gap-shadow:rgba(24,31,45,.35);--switch-track:#e2e5ea;--switch-knob:#edeff2;--switch-knob-hi:#f8f9fb;--switch-rim:#f6f7f9;--switch-rim-edge:rgba(30,40,60,.08);--switch-line:rgba(40,50,70,.16);--switch-in-lo:rgba(40,50,70,.24);--switch-drop:rgba(40,50,70,.26);--switch-groove:rgba(30,40,60,.16);--switch-cap-hi:#ffffff;--switch-cap:#f4f5f8;--switch-cap-base:#c9cdd8}
 :root[data-theme="dark"]{--soft-hi:rgba(66,76,100,.24);--soft-lo:rgba(0,0,0,.55);--face-gap-shadow:rgba(0,0,0,.85);--switch-track:#10151f;--switch-knob:#2c3444;--switch-knob-hi:#394357;--switch-rim:#232b39;--switch-rim-edge:rgba(0,0,0,.55);--switch-line:rgba(0,0,0,.6);--switch-in-lo:rgba(0,0,0,.7);--switch-drop:rgba(0,0,0,.6);--switch-groove:rgba(0,0,0,.6);--switch-cap-hi:#14171f;--switch-cap:#1a1e28;--switch-cap-base:#0a0c12}
-/* ۴ اکتبر (دورِ دوم) — سوییچ هم‌زبانِ نوارِ تب‌ها شد: همان قاب، و یک گودیِ لغزان زیرِ آیکونِ فعال (خورشید/ماه)، با همان سایه‌ی تبِ فعال. */
-/* سوییچِ تم — ۳ اکتبر، به خواستِ مالک عیناً از روی تصویرِ مرجع: سینیِ بیضیِ گود با لبه‌ی برجسته و
-   یک خط تیره‌ی نازک داخلِ لبه، و یک دسته‌ی بیضی‌گونِ بزرگ که سایه‌اش به چپ‌وپایین می‌افتد.
-   هیچ آیکونی روی آن نیست — رنگ فقط در پس‌زمینه است؛ همه‌ی رنگ‌ها از متغیرهای بالا می‌آیند تا
-   هر دو تم یک شکل باشند. */
-#themeBtn,#themeToggle{position:relative;isolation:isolate;display:inline-flex;align-items:center;justify-content:space-between;gap:0;flex:none;width:64px;height:36px;padding:3px;box-sizing:border-box;border:1px solid var(--line);border-radius:999px;background:var(--bg);box-shadow:none;cursor:pointer;overflow:visible;transition:none;transform:none}
-#themeBtn:hover,#themeToggle:hover{background:var(--bg);transform:none;box-shadow:none;color:inherit}
-#themeBtn::before,#themeToggle::before{content:"";position:absolute;left:3px;top:3px;width:28px;height:28px;border-radius:999px;z-index:-1;background:var(--bg);box-shadow:inset 2px 2px 5px var(--soft-lo),inset -2px -2px 5px var(--soft-hi);transition:transform .25s}
-[data-theme="dark"] #themeBtn::before,[data-theme="dark"] #themeToggle::before{transform:translateX(28px)}
-/* ۴ اکتبر — .chip در اپ gap:7px دارد و ماه را ۷ پیکسل از گودی بیرون می‌برد (gap:0 بالا)؛ و در تمِ تیره همان سیاهیِ سوییچِ صفحه‌ی معرفی، نه رنگِ زمینه‌ی صفحه. */
-[data-theme="dark"] #themeBtn,[data-theme="dark"] #themeToggle,[data-theme="dark"] #themeBtn:hover,[data-theme="dark"] #themeToggle:hover,[data-theme="dark"] #themeBtn::before,[data-theme="dark"] #themeToggle::before{background:#08070d}
+/* دکمه‌ی تم — ۶ اکتبر، به خواستِ مالک از روی تصویرِ مرجع: دکمه‌ی گردِ فشاری، لبه‌ی گود، صفحه‌ی برجسته‌ی داخلی و یک آیکونِ نازک (خورشید در روشن، ماه در تیره). عمداً بدونِ هاله/درخشش — قاعده‌ی ثابتِ اپ. */
+:root{--tb-rim:#dfe3e9;--tb-rim-lo:rgba(40,50,70,.22);--tb-rim-hi:#fff;--tb-face-hi:#fff;--tb-face-lo:#eceef2;--tb-face-edge:rgba(30,40,60,.07);--tb-drop:rgba(35,45,65,.18);--tb-ico:#6b7385;--tb-ico-hover:#14161a}
+:root[data-theme="dark"]{--tb-rim:#08070d;--tb-rim-lo:rgba(0,0,0,.8);--tb-rim-hi:rgba(255,255,255,.05);--tb-face-hi:#2a2537;--tb-face-lo:#15121e;--tb-face-edge:rgba(255,255,255,.07);--tb-drop:rgba(0,0,0,.6);--tb-ico:#b9b4c9;--tb-ico-hover:#f0eef7}
+#themeBtn,#themeToggle{position:relative;isolation:isolate;display:grid;place-items:center;flex:none;width:38px;height:38px;padding:0;gap:0;box-sizing:border-box;border:0;border-radius:50%;background:var(--tb-rim);box-shadow:inset 1px 1px 2px var(--tb-rim-lo),inset -1px -1px 1px var(--tb-rim-hi);color:var(--tb-ico);cursor:pointer;overflow:visible;transition:color .2s;transform:none}
+#themeBtn:hover,#themeToggle:hover{background:var(--tb-rim);box-shadow:inset 1px 1px 2px var(--tb-rim-lo),inset -1px -1px 1px var(--tb-rim-hi);transform:none;color:var(--tb-ico-hover)}
+#themeBtn::before,#themeToggle::before{content:"";position:absolute;inset:3px;border-radius:50%;z-index:-1;background:linear-gradient(150deg,var(--tb-face-hi),var(--tb-face-lo));box-shadow:inset 0 0 0 1px var(--tb-face-edge),0 2px 4px var(--tb-drop);transition:transform .12s,box-shadow .12s}
+#themeBtn:active::before,#themeToggle:active::before{transform:scale(.95);box-shadow:inset 0 0 0 1px var(--tb-face-edge),inset 1px 2px 3px var(--tb-drop)}
+#themeBtn svg,#themeToggle>span{grid-area:1/1;display:grid;place-items:center;position:static;width:18px;height:18px;margin:0;padding:0;box-sizing:border-box;color:inherit;transition:opacity .2s,transform .3s}
+#themeToggle svg{width:18px;height:18px}
+#themeBtn .themeMoon,#themeToggle .moon{opacity:0;transform:rotate(-40deg) scale(.6);pointer-events:none}
+[data-theme="dark"] #themeBtn .themeSun,[data-theme="dark"] #themeToggle .sun{opacity:0;transform:rotate(40deg) scale(.6);pointer-events:none}
+[data-theme="dark"] #themeBtn .themeMoon,[data-theme="dark"] #themeToggle .moon{opacity:1;transform:none}
+#themeBtn:focus-visible,#themeToggle:focus-visible{outline:2px solid var(--acc);outline-offset:3px}
 /* ۵ اکتبر — حسام: در تمِ تیره نوارِ تب‌ها و دکمه‌ی تنظیمات طوسی‌تر از سوییچِ تم بودند؛ هر سه یک رنگ (#08070d). */
 [data-theme="dark"] .nav,[data-theme="dark"] .nav button.on,[data-theme="dark"] .nav a.on,[data-theme="dark"] #setBtn,[data-theme="dark"] #setBtn:active,[data-theme="dark"] #setBtn[aria-expanded="true"],[data-theme="dark"] #setBtn:has(+ #setPop.on){background:#08070d}
-#themeBtn svg,#themeToggle>span{display:grid!important;place-items:center;flex:none;position:static;width:28px;height:28px;margin:0;padding:6px;box-sizing:border-box;transform:none;color:var(--tx3);transition:color .25s}
 #themeToggle>span{padding:0}#themeToggle svg{width:16px;height:16px}
-#themeBtn .themeSun,#themeToggle .sun{order:0}#themeBtn .themeMoon,#themeToggle .moon{order:1}
-:root:not([data-theme="dark"]) #themeBtn .themeSun,:root:not([data-theme="dark"]) #themeToggle .sun,[data-theme="dark"] #themeBtn .themeMoon,[data-theme="dark"] #themeToggle .moon{color:var(--acc)}
-#themeBtn:focus-visible,#themeToggle:focus-visible{outline:2px solid var(--acc);outline-offset:5px}
 .nav{background:var(--bg);box-shadow:4px 4px 9px var(--soft-lo),-3px -3px 8px var(--soft-hi),inset 0 1px 1px var(--soft-hi)}
 .nav button.on,.nav a.on{background:var(--bg);color:var(--acc);box-shadow:inset 2px 2px 5px var(--soft-lo),inset -2px -2px 5px var(--soft-hi)}
 .chip:not(.solid):not(#themeBtn),.tokbtn,.tfs button.on{box-shadow:2px 2px 5px var(--soft-lo),-2px -2px 5px var(--soft-hi)}
@@ -438,7 +432,7 @@ footer .fine{max-width:78ch;margin:46px 0 0;font-size:11.5px;color:var(--tx3);li
   body{padding-bottom:calc(90px + env(safe-area-inset-bottom))}
 }
 @media(max-width:480px){.logo .wordmark{display:none}}
-@media(prefers-reduced-motion:reduce){#themeBtn,#themeToggle,#themeBtn::before,#themeToggle::before{transition:none}}
+@media(prefers-reduced-motion:reduce){#themeBtn,#themeToggle,#themeBtn::before,#themeToggle::before,#themeBtn svg,#themeToggle>span{transition:none}}
 </style>
 </head>
 <body>
@@ -539,7 +533,7 @@ footer .fine{max-width:78ch;margin:46px 0 0;font-size:11.5px;color:var(--tx3);li
       <p>Every swap is simulated first. If the simulation fails, nothing is broadcast and no gas is spent.</p>
     </div>
   </div>
-  <button class="chip round" id="themeBtn" type="button" role="switch" aria-checked="false" aria-label="Switch to dark mode" title="Switch to dark mode"><svg class="themeMoon" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"/></svg><svg class="themeSun" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2.5v2.2M12 19.3v2.2M4.6 4.6l1.6 1.6M17.8 17.8l1.6 1.6M2.5 12h2.2M19.3 12h2.2M4.6 19.4l1.6-1.6M17.8 6.2l1.6-1.6"/></svg><span id="themeState" hidden>Light</span></button>
+  <button class="chip round" id="themeBtn" type="button" role="switch" aria-checked="false" aria-label="Switch to dark mode" title="Switch to dark mode"><svg class="themeMoon" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"/></svg><svg class="themeSun" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2.5v2.2M12 19.3v2.2M4.6 4.6l1.6 1.6M17.8 17.8l1.6 1.6M2.5 12h2.2M19.3 12h2.2M4.6 19.4l1.6-1.6M17.8 6.2l1.6-1.6"/></svg><span id="themeState" hidden>Light</span></button>
   <div class="rel" id="walletMenu">
     <button class="chip solid" id="connectBtn" aria-haspopup="menu" aria-expanded="false">Connect wallet</button>
 <script>

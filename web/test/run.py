@@ -1935,6 +1935,65 @@ check_pairs_page()
 check_wallet_copy_address()
 
 
+# دکمه‌ی گردِ تم (۶ اکتبر): یک آیکونِ دیده‌شده در هر تم، ۳۸×۳۸، کاملاً گرد.
+THEME_BTN_JS = """(a) => {
+    const b = document.querySelector(a.btn);
+    const r = b.getBoundingClientRect();
+    const cs = getComputedStyle(b);
+    const op = s => { const e = b.querySelector(s); return e ? getComputedStyle(e).opacity : null; };
+    return {theme: document.documentElement.dataset.theme, checked: b.getAttribute('aria-checked'),
+            w: r.width, h: r.height, radius: cs.borderRadius, sun: op(a.sun), moon: op(a.moon)};
+}"""
+
+async def theme_button_probe(pg, label, btn, sun, moon):
+    """هر دو تم را می‌سنجد: اندازه، گردی، فقط یک آیکونِ دیده‌شده، و اینکه کلیک
+    تم و aria-checked را برمی‌گرداند و آیکونِ دیگر دیده می‌شود. خلاصه برمی‌گرداند."""
+    a = {"btn": btn, "sun": sun, "moon": moon}
+    seen = []
+    await pg.wait_for_timeout(400)  # گذارِ opacity/transform پس از اعمالِ تمِ آغازین تمام شود
+    for _ in range(2):
+        # زیرِ بارِ سنگینِ سوئیت گذارِ opacity دیرتر تمام می‌شود؛ تا ۳ ثانیه تکرار می‌کنیم
+        # (سنجشِ ثابت ۴۰۰ms زیرِ بار وسطِ گذار می‌افتاد).
+        for _try in range(20):
+            st = await pg.evaluate(THEME_BTN_JS, a)
+            if sorted(n for n in ("sun", "moon") if st[n] == "1") in (["sun"], ["moon"]):
+                break
+            await pg.wait_for_timeout(150)
+        dark = st["theme"] == "dark"
+        assert abs(st["w"] - 38) <= 0.5 and abs(st["h"] - 38) <= 0.5, \
+            "[theme button] %s %s: expected 38x38, got %sx%s" % (label, st["theme"], st["w"], st["h"])
+        assert st["radius"] == "50%", "[theme button] %s: border-radius %r is not 50%%" % (label, st["radius"])
+        vis = [n for n in ("sun", "moon") if st[n] == "1"]
+        assert vis == (["moon"] if dark else ["sun"]), \
+            "[theme button] %s %s: visible icons %s (sun=%s moon=%s)" % (label, st["theme"], vis, st["sun"], st["moon"])
+        assert st["checked"] == ("true" if dark else "false"), \
+            "[theme button] %s: aria-checked %r in %s" % (label, st["checked"], st["theme"])
+        seen.append(st["theme"])
+        await pg.click(btn)
+        await pg.wait_for_timeout(400)
+        st2 = await pg.evaluate(THEME_BTN_JS, a)
+        assert st2["theme"] != st["theme"], "[theme button] %s: click did not toggle data-theme" % label
+        assert st2["checked"] != st["checked"], "[theme button] %s: click did not toggle aria-checked" % label
+    return "%s %s->%s ok" % (label, seen[0], seen[1] if len(seen) > 1 else "")
+
+async def check_theme_button(p, errors):
+    """[theme button] اپ، pairs و لندینگ — دسکتاپ و موبایل ۳۹۰ (گزارش جداگانه در check_report_page)."""
+    out = []
+    b = await p.chromium.launch()
+    for name, btn, sun, moon in (("index.html", "#themeBtn", ".themeSun", ".themeMoon"),
+                                 ("pairs.html", "#themeBtn", ".themeSun", ".themeMoon"),
+                                 ("landing.html", "#themeToggle", ".sun", ".moon")):
+        for vw in (1440, 390):
+            for scheme in ("light", "dark"):
+                pg = await b.new_page(viewport={"width": vw, "height": 900}, color_scheme=scheme)
+                await pg.route("**/*", lambda route: route.continue_() if route.request.url.startswith("file:") else route.abort())
+                await pg.goto("file://" + os.path.join(HERE, "..", name), wait_until="domcontentloaded")
+                await pg.wait_for_timeout(500)
+                out.append(await theme_button_probe(pg, "%s@%d/%s" % (name, vw, scheme), btn, sun, moon))
+                await pg.close()
+    await b.close()
+    print("[theme button] round 38x38 push button, border-radius 50%%, exactly one icon visible per theme, click toggles theme+aria-checked: %d runs on app/pairs/landing" % len(out))
+
 async def check_theme_migration(p, errors):
     """رفعِ باگِ «تم بین صفحه‌ها زنده نمی‌ماند» — پروبِ ۶ (پویا): مهاجرتِ
     یک‌باره‌ی کلیدِ localStorage واقعاً روی یک صفحه‌ی بارگذاری‌شده اتفاق
@@ -3012,10 +3071,11 @@ async def check_live_strip(p, errors):
     # ---- 5) تلگرام ----
     pg = await open_page()
     tg = await pg.evaluate("""() => { const a = document.querySelector('#liveStrip .lsTg');
-        return {href: a.getAttribute('href'), target: a.target, rel: a.rel, label: a.getAttribute('aria-label'),
+        return {href: a.getAttribute('href'), target: a.target, rel: a.rel, label: a.getAttribute('aria-label'), title: a.title, span: a.querySelector('span').textContent,
                 d: a.querySelector('svg path').getAttribute('d'), foot: document.querySelector('#lnkTg svg path').getAttribute('d')}; }""")
     await pg.close()
-    print("[live strip telegram] href=%s target=%s rel=%s sameIconAsFooter=%s" % (tg["href"], tg["target"], tg["rel"], tg["d"] == tg["foot"]))
+    print("[live strip telegram] href=%s target=%s rel=%s sameIconAsFooter=%s title=%r span=%r" % (tg["href"], tg["target"], tg["rel"], tg["d"] == tg["foot"], tg["title"], tg["span"]))
+    assert tg["title"] == "Daily Exit Report and updates on our Telegram channel" and tg["span"] == "Daily report", tg
     assert tg["href"] == app_telegram_link(), "the strip's Telegram button must use LINKS.telegram (%r), got %r" % (app_telegram_link(), tg["href"])
     assert tg["target"] == "_blank" and "noopener" in tg["rel"] and tg["label"] == "Zaexa on Telegram", tg
     assert tg["d"] == tg["foot"], "the Telegram icon path differs from the footer's #lnkTg"
@@ -3363,6 +3423,10 @@ async def check_report_page(p, errors):
     old = await pg.evaluate("(k) => localStorage.getItem(k)", OLD_THEME_KEY)
     assert old is None, "[report page theme] the retired theme key must not be written"
     await pg.close()
+    pg = await open_report(1440, 900, "light")
+    await theme_button_probe(pg, "report", "#themeToggle", ".sun", ".moon")
+    print("[theme button] report page: round 38x38, one icon per theme, click toggles")
+    await pg.close()
     print("[report page theme] the toggle flips data-theme and writes the shared key %s (never the retired one)" % theme_key)
     assert not errs, "[report page] console errors: %s" % errs[:5]
 
@@ -3647,6 +3711,7 @@ async def main():
     async with async_playwright() as p:
         await check_real_page_from_disk(p)
         await check_theme_migration(p, errors)
+        await check_theme_button(p, errors)
         await check_landing_mobile(p, errors)
         await check_canvas_palette_live(p, errors)
         await check_canvas_phases(p, errors)
@@ -8844,6 +8909,22 @@ async def main():
         assert conn_btn != "Connect Solana wallet" and conn_btn.strip(), \
             "connecting did not update the button to the short address: %r" % conn_btn
 
+        # [sol rent rows] ردیفِ rent فقط وقتی حسابِ توکن ساخته می‌شود؛ ردیفِ wSOL (برگشت‌پذیر) وقتی SOL در یک سمت است
+        rpg = await open_sol_swap_page({"v": "sell", "ms": 100})
+        rent_js = """(st) => { solSide = "buy"; solRefMint = SOL_MINT_ADDR; solMintCur = st.cur; solOutAtaExists = st.ata; solPaintFeeRows();
+            const d = (id) => getComputedStyle(document.getElementById(id)).display !== "none";
+            return { rent: d("solRentRow"), wsol: d("solWsolRow") }; }"""
+        rr_a = await rpg.evaluate(rent_js, {"cur": SWAP_MINT, "ata": True})
+        rr_b = await rpg.evaluate(rent_js, {"cur": SWAP_MINT, "ata": False})
+        rr_c = await rpg.evaluate(rent_js, {"cur": SWAP_MINT, "ata": None})
+        rr_d = await rpg.evaluate(rent_js, {"cur": None, "ata": False})
+        await rpg.close()
+        print("[sol rent rows] ata exists=%s; missing=%s; unknown=%s; no token=%s" % (rr_a, rr_b, rr_c, rr_d))
+        assert rr_a == {"rent": False, "wsol": True}, "[sol rent rows] existing token account: rent row must be hidden, refunded row shown: %s" % rr_a
+        assert rr_b == {"rent": True, "wsol": True}, "[sol rent rows] missing token account: both rows shown: %s" % rr_b
+        assert rr_c == {"rent": True, "wsol": True}, "[sol rent rows] unknown token account is assumed needed: %s" % rr_c
+        assert rr_d == {"rent": False, "wsol": False}, "[sol rent rows] no token chosen: both rows hidden: %s" % rr_d
+
         # ب) کوت — «You receive»/«Min received»/«Route»
         bpg = await open_sol_swap_page({"v": "sell", "ms": 100})
         await sol_connect(bpg)
@@ -12577,7 +12658,7 @@ async def main():
     document.querySelectorAll('#nav [data-view]').forEach(function(b){ var bg = getComputedStyle(b).backgroundColor; nav[b.dataset.view] = !(bg === 'rgba(0, 0, 0, 0)' || bg === 'transparent'); });
     var tv = document.getElementById('view-' + tgt);
     window.__boot.push({tag: tag, swap: getComputedStyle(sw).display, tgt: tgt, tgtDisplay: tv ? getComputedStyle(tv).display : null, nav: nav,
-                        attr: document.documentElement.getAttribute('data-boot-view'), tokenView: getComputedStyle(document.getElementById('view-token')).display}); }
+                        attr: document.documentElement.getAttribute('data-boot-view'), tokenView: document.getElementById('view-token') ? getComputedStyle(document.getElementById('view-token')).display : null}); }
   new MutationObserver(function(){ snap('mut'); }).observe(document, {subtree: true, childList: true, attributes: true, attributeFilter: ['class', 'data-boot-view', 'style']});
   (function raf(){ snap('raf'); requestAnimationFrame(raf); })();
 })();
