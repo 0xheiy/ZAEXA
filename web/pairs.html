@@ -202,6 +202,12 @@ header>.navPad{grid-column:1;grid-row:1;width:0;min-width:0}
   #srcChip span:last-child{display:none}
   #srcChip{padding:0 12px}
 }
+/* ۲۰ اکتبر: با تبِ پنجمِ «Exit Report» ناوبریِ برچسب‌دار در ۹۶۱ تا ~۱۱۰۰ از هدر بیرون می‌زد؛
+   در این بازه هم فقط آیکون می‌ماند (همان قاعده‌ی بازه‌ی ۷۲۱–۹۶۰، فقط برای ناوبری). */
+@media(min-width:961px) and (max-width:1120px){
+  .nav a span{display:none}
+  .nav a{padding:8px 11px;min-height:35px} /* ارتفاعِ همان نوارِ برچسب‌دار: لوگو یک پیکسل نپرد */
+}
 /* ≤۷۲۰: ناوبری از هدر به نوارِ پایین می‌رود — عیناً همان اپ. */
 @media(max-width:720px){
   .site-header{padding:14px 14px 6px;height:auto;gap:8px}
@@ -486,6 +492,10 @@ footer .fine{max-width:78ch;margin:46px 0 0;font-size:11.5px;color:var(--tx3);li
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
            stroke-linecap="round" stroke-linejoin="round">
         <path d="M4 6h10M4 12h10M4 18h7"/><path d="M19 3v4M17 5h4"/></svg><span>New pairs</span></a>
+    <a class="navLink" href="/report" title="Exit Report">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+           stroke-linecap="round" stroke-linejoin="round">
+        <path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/><path d="M9 14l2 2 4-4"/></svg><span>Exit Report</span></a>
   </nav>
   <div class="hdrRight">
   <div class="grow"></div>

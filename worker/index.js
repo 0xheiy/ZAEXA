@@ -38,6 +38,7 @@ import {
   reportText, REPORT_TEXT_FIRST_DATE, followForRow, recheckForRow, causeForRow, readPassLog,
   REPORT_METER_STAGES, REPORT_PASS_BASE_CAP, REPORT_PAIRS_CAP,
 } from "./report.js";
+import { renderReportPage, renderReportNotFound, dayCounts, addDays, isRealDate, REPORT_HISTORY_DAYS } from "./report_page.js";
 import {
   fetchVerdictSol, VD_SOL_RPCS, VD_SOL_JUP_BASE, VD_SOL_PAYER,
   VD_SOL_RPC_METHODS, VD_SOL_RPC_PROBE_PARAMS, probeRpcMethod,
@@ -2311,6 +2312,7 @@ const SITEMAP_TOKEN_CAP = 50;
 /* میزبانِ خصوصیِ کشِ سایت‌مپ — دقیقاً همان تکنیکِ VD_CACHE_HOST بالاتر: هیچ‌جا
    واقعاً درخواست نمی‌رود، فقط کلیدِ Cache API است، و عمداً از میزبانِ واقعیِ
    بالادست جداست تا کلیدش هرگز با یک ورودیِ کشِ /gt برخورد نکند. */
+const SITEMAP_REPORT_DAYS = 30;
 const SITEMAP_CACHE_HOST = "zaexa-sitemap.internal";
 const SITEMAP_CACHE_PATH = "/tokens-base-solana-v2";
 
@@ -2419,7 +2421,14 @@ async function sitemapResponse(url, env, ctx) {
     tokens = null; // هرگز نباید به اینجا برسد (buildSitemapTokens خودش try/catch دارد)، ولی محافظِ آخر باشد
   }
   const ok = Array.isArray(tokens) && !tokens.partial; // ناقص (یک شبکه بی‌جواب) = عمرِ کوتاه، ولی توکن‌های موجود می‌مانند
-  const paths = staticPaths.concat(Array.isArray(tokens) ? tokens.map((a) => "/t/" + a) : []);
+  // گزارش: «/report» + هر روزِ ۳۰ روزِ اخیر (امروز به عقب، نه پیش از اولین گزارش).
+  const reportPaths = ["/report"];
+  for (let i = 0; i < SITEMAP_REPORT_DAYS; i++) {
+    const d = addDays(lastmod, -i);
+    if (d < REPORT_TEXT_FIRST_DATE) break;
+    reportPaths.push("/report/" + d);
+  }
+  const paths = staticPaths.concat(reportPaths, Array.isArray(tokens) ? tokens.map((a) => "/t/" + a) : []);
   const body = renderSitemapXml(origin, paths, lastmod);
 
   const headers = {
@@ -2577,6 +2586,62 @@ async function pairsRowsForSolana(env) {
   });
 
   return rows.slice(0, REPORT_PAIRS_CAP).map((r) => ({ ...r }));
+}
+
+/* 🔴 هدرهای امنیتیِ صفحه‌ی HTMLِ گزارش — عیناً همان مقدارهای بلوکِ `/*`
+   در web/_headers. خودِ فایلِ _headers فقط روی فایل‌های ثابتِ سرو‌شده از
+   _site اعمال می‌شود، نه روی پاسخی که Worker می‌سازد؛ پس همان‌ها را اینجا
+   یک‌بار تعریف می‌کنیم. تستِ worker/test.mjs خودِ _headers را می‌خواند و
+   برابری را می‌سنجد — اگر یکی را عوض کردی، آن یکی را هم عوض کن. */
+const REPORT_PAGE_CSP = "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; font-src 'self' data:; connect-src 'self' https: wss:; worker-src 'self' blob:; frame-src https://verify.walletconnect.org https://verify.walletconnect.com; base-uri 'self'; object-src 'none'; form-action 'none'; frame-ancestors 'none'";
+const REPORT_PAGE_SEC_HEADERS = Object.freeze({
+  "content-security-policy": REPORT_PAGE_CSP,
+  "x-content-type-options": "nosniff",
+  "referrer-policy": "no-referrer",
+  "permissions-policy": "camera=(), microphone=(), geolocation=(), payment=(), usb=()",
+});
+
+function reportHtmlDone(status, html, extraHeaders, method) {
+  return new Response(method === "HEAD" ? null : html, {
+    status,
+    headers: Object.assign(
+      { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" },
+      REPORT_PAGE_SEC_HEADERS, extraHeaders),
+  });
+}
+
+/* GET /report و GET /report/<YYYY-MM-DD> (بدونِ پسوند) — صفحه‌ی HTML.
+   هر ردیف فقط از reportDocFor می‌آید (publishGuardRow روی همه‌ی ردیف‌ها
+   زده شده)؛ هیچ مسیرِ دیگری به KV نیست. روزهای پیش از REPORT_TEXT_FIRST_DATE
+   هرگز خوانده نمی‌شوند (ردیف‌های nosellِ نادرستِ قدیمی) — «بدونِ داده» رندر
+   می‌شوند. */
+async function reportPageRoute(request, url, env) {
+  if (!rateOk(request, "report", RL_LIMIT, RL_WINDOW_MS))
+    return reportHtmlDone(429, "too many requests\n", { "content-type": "text/plain; charset=utf-8", "retry-after": "60" }, "GET");
+  if (request.method !== "GET" && request.method !== "HEAD")
+    return reportHtmlDone(405, "only GET or HEAD\n", { "content-type": "text/plain; charset=utf-8", allow: "GET, HEAD" }, "GET");
+  const method = request.method;
+
+  const today = utcDateOf(Date.now());
+  const rest = url.pathname.slice("/report".length).replace(/^\//, "");
+  const date = rest === "" ? today : rest;
+  const notFoundHeaders = { "cache-control": "public, max-age=300" };
+  if (!REPORT_DATE_RE.test(date) || !isRealDate(date))
+    return reportHtmlDone(404, renderReportNotFound("That is not a valid report date."), notFoundHeaders, method);
+  if (date > today)
+    return reportHtmlDone(404, renderReportNotFound("There is no report for a date that has not happened yet."), notFoundHeaders, method);
+
+  // ۱۴ روزِ منتهی به همین روز، موازی؛ روزِ پیش از اولین گزارش اصلاً خوانده نمی‌شود.
+  const dates = [];
+  for (let i = REPORT_HISTORY_DAYS - 1; i >= 0; i--) dates.push(addDays(date, -i));
+  const docs = await Promise.all(dates.map((d) =>
+    d < REPORT_TEXT_FIRST_DATE ? Promise.resolve(emptyReportDoc(d)) : reportDocFor(env, d)));
+  const history = dates.map((d, i) => dayCounts(d, docs[i].rows));
+  const rows = docs[dates.length - 1].rows;
+
+  const html = renderReportPage({ date, today, firstDate: REPORT_TEXT_FIRST_DATE, rows, history });
+  const live = date >= today;
+  return reportHtmlDone(200, html, { "cache-control": live ? "public, max-age=300" : "public, max-age=86400" }, method);
 }
 
 async function reportRoute(request, url, env) {
@@ -3076,6 +3141,10 @@ export default {
     /* پیش از reportRoute: وگرنه «run» یک تاریخِ بدشکل حساب می‌شد و ۴۰۰
        می‌گرفت، نه اجرا. */
     if (url.pathname === "/report/run") return reportRunRoute(request, env, ctx);
+    /* صفحه‌ی HTML: «/report» و «/report/<تاریخ>» بدونِ پسوند. هر چیزی با پسوند
+       (.json/.txt) یا زیرمسیرِ بیشتر همان‌جا که بود می‌ماند. */
+    if (url.pathname === "/report" || url.pathname === "/report/" || /^\/report\/[^/.]+$/.test(url.pathname))
+      return reportPageRoute(request, url, env);
     if (url.pathname.startsWith("/report/") && url.pathname.endsWith(".txt"))
       return reportTextRoute(request, url, env);
     if (url.pathname.startsWith("/report/")) return reportRoute(request, url, env);

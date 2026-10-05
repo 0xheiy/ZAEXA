@@ -1364,13 +1364,15 @@ export function reportText(doc, opts) {
 
     lines.push(unchecked + " could not be checked.");
 
-    // پیگیریِ یک‌ساعته: فقط وقتی حداقل یک ردیفِ sell در همین مجموعه‌ی
-    // فیلترشده follow="pool-empty" دارد، درست بعدِ خطِ «could not be
-    // checked» — با شمارشِ صفر، این خط اصلاً اضافه نمی‌شود و متن بایت‌به‌بایت
-    // همان چیزی می‌ماند که پیش از این تغییر بود.
-    const followEmptyCount = rows.filter((r) => r.v === "sell" && r.follow === "pool-empty").length;
-    if (followEmptyCount > 0) {
-      lines.push(followEmptyCount + " of the quoted tokens had an empty pool an hour later.");
+    // پیگیریِ ۱ تا ۳ ساعته (۲۰ اکتبر: متن دو جمله شد): F = ردیف‌های sellِ همین مجموعه‌ی
+    // فیلترشده که هر مقدارِ follow دارند، E = آن‌هایی که follow="pool-empty". فقط وقتی
+    // F>0 چاپ می‌شود — E صفر هم مجاز است («0 had an empty pool.»)، چون گفتنِ
+    // «بررسی شدند و هیچ‌کدام خالی نبود» خودش خبر است. درست بعدِ خطِ «could not be checked».
+    const followedRows = rows.filter((r) => r.v === "sell" && typeof r.follow === "string" && r.follow.length > 0);
+    const followEmptyCount = followedRows.filter((r) => r.follow === "pool-empty").length;
+    if (followedRows.length > 0) {
+      lines.push(followedRows.length + " of the quoted tokens were re-checked 1–3 hours later. " +
+        followEmptyCount + " had an empty pool.");
     }
 
     // خطِ خالی همیشه — وگرنه وقتی هیچ توکنی پرچم نخورده، پانویس به شمارش‌ها می‌چسبد.

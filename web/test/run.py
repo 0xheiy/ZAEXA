@@ -1531,8 +1531,12 @@ def check_pairs_page():
     # حتی خودِ /pairs.json?chain=base هم از دیدش پنهان بود. اینجا هر دو نوعِ
     # نقل‌قول با یک بک‌رفرنس پذیرفته می‌شود تا هر مسیرِ سومی، با هر نقل‌قولی،
     # واقعاً گیر بیفتد.
+    # ۲۰ اکتبر: تبِ پنجمِ ناوبری یک لینکِ سادهٔ <a href="/report"> است، نه ترافیکِ بک‌اند —
+    # فقط همین یک شکلِ دقیق (href + «/report» بدونِ زیرمسیر/کوئری) کنار گذاشته می‌شود؛
+    # fetch("/report")، "/report/…" و هر نقل‌قولِ دیگرِ آن همچنان گیر می‌افتند.
+    scan_src = src.replace('<a class="navLink" href="/report" title="Exit Report">', '<a class="navLink" title="Exit Report">')
     other_backend = [
-        m[1] for m in re.findall(r'(["\'])(/(?:gt|vd|ev|report)(?:[/?][^"\']*)?)\1', src)
+        m[1] for m in re.findall(r'(["\'])(/(?:gt|vd|ev|report)(?:[/?][^"\']*)?)\1', scan_src)
         if not m[1].startswith(GT_LOGO_PREFIXES)
     ]
     assert not other_backend, (
@@ -3065,6 +3069,320 @@ async def check_live_strip(p, errors):
     srv.shutdown()
 
 
+async def check_report_page(p, errors):
+    """صفحه‌ی گزارش (/report) و تبِ پنجمِ «Exit Report» در هدرِ اپ و pairs.
+
+    HTML همان renderReportPage واقعیِ worker/report_page.js است، از یک فیکسچرِ
+    «شکلِ زنده» (ردیف‌ها از publishGuardRow می‌گذرند)، و با *همان* CSP فایلِ
+    web/_headers سرو می‌شود — پس هر اسکریپت/استایل/فونتی که CSP نپذیرد اینجا
+    خطای کنسول می‌دهد، نه فقط روی سایتِ زنده."""
+    import functools, http.server, json as _j, subprocess, tempfile, threading
+
+    worker_dir = os.path.join(HERE, "..", "..", "worker")
+    out_dir = tempfile.mkdtemp(prefix="r11_page_")
+    html_path = os.path.join(out_dir, "report.html")
+    meta_path = os.path.join(out_dir, "meta.json")
+    gen = r"""
+    import fs from "node:fs";
+    import { renderReportPage, dayCounts, addDays } from "./report_page.js";
+    import { publishGuardRow } from "./report.js";
+    const DATE = "2026-10-04", FIRST = "2026-09-08";
+    const addr = (n) => "0x" + n.toString(16).padStart(40, "0");
+    const solA = (n) => "S" + String(n).padStart(2, "0") + "x".repeat(40);
+    const rows = [];
+    const t = (h, m) => DATE + "T" + String(h).padStart(2, "0") + ":" + String(m).padStart(2, "0") + ":00.000Z";
+    let i = 0;
+    const NAMES = ["Pepe Classic", "Zaexa Test Token With A Very Long Name Indeed", "Base God", "Tiny Cat", "Moon Dog", "Aero Bunny"];
+    // Base: ۸۰ sell (۱۲ با follow: ۳ خالی، ۹ هنوز هست)، ۳ nosell، ۱۴ نامعلوم
+    for (let k = 0; k < 80; k++, i++) {
+      const r = { chain: "base", address: addr(1000 + i), symbol: "T" + i, name: NAMES[i % NAMES.length], v: "sell", checkKind: "sell-quote",
+        checkedAt: t(0 + (i % 23), (i * 7) % 60), poolCreatedAt: null, priceUsd: 0.01, reserveUsd: 1000 + i * 913.7, vol24hUsd: 10, fdvUsd: 1000, dex: "aerodrome",
+        why: null, ret: 90 + (i % 10) + 0.5 };
+      if (k < 3) { r.follow = "pool-empty"; r.followAt = new Date(Date.parse(r.checkedAt) + 2 * 3600e3).toISOString(); }
+      else if (k < 12) { r.follow = "pool-there"; r.followAt = new Date(Date.parse(r.checkedAt) + 1.4 * 3600e3).toISOString(); }
+      rows.push(r);
+    }
+    for (let k = 0; k < 3; k++, i++) rows.push({ chain: "base", address: addr(1000 + i), symbol: "N" + k, name: "No exit " + k, v: "nosell", checkKind: "sell-quote",
+      checkedAt: t(5 + k, 10), poolCreatedAt: null, priceUsd: null, reserveUsd: 2500, vol24hUsd: null, fdvUsd: null, dex: "aerodrome", why: null, cause: k === 2 ? "sell-reverts" : "empty-pool" });
+    const WHYS = ["rpc-down", "no-quote", "meta:429", "cover:false", "internal", "deadline", "v4:unproven", "sells:recent", "usdc-no-proof", "cover:503", "meta:timeout", "proof-rpc", "cause:unproven", "no-amount"];
+    for (let k = 0; k < 14; k++, i++) rows.push({ chain: "base", address: addr(1000 + i), symbol: "U" + k, name: "Unknown " + k, v: null, checkKind: "sell-quote",
+      checkedAt: t(9, k), poolCreatedAt: null, priceUsd: null, reserveUsd: null, vol24hUsd: null, fdvUsd: null, dex: null, why: WHYS[k] });
+    // دو ردیفِ خامِ ناقضِ گارد باید از publishGuardRow بگذرند
+    rows.push({ chain: "base", address: addr(9001), symbol: "NOCAUSE", name: "no cause", v: "nosell", checkKind: "sell-quote", checkedAt: t(11, 1), reserveUsd: 10, why: null });
+    // Solana: ۲۸ sell، ۳ نامعلوم، و یک nosell خام که گارد باید بپوشاند
+    for (let k = 0; k < 28; k++, i++) rows.push({ chain: "solana", address: solA(k), symbol: "S" + k, name: "Sol token " + k, v: "sell", checkKind: "roundtrip",
+      checkedAt: t(12, k), poolCreatedAt: null, priceUsd: null, reserveUsd: 8000 + k * 100, vol24hUsd: null, fdvUsd: null, dex: "raydium", why: null });
+    const SW = ["jup:quote:429", "internal", "rpc:getBalance:500"];
+    for (let k = 0; k < 3; k++) rows.push({ chain: "solana", address: solA(40 + k), symbol: "X" + k, name: "Sol unknown " + k, v: null, checkKind: "roundtrip", checkedAt: t(13, k), reserveUsd: null, why: SW[k] });
+    rows.push({ chain: "solana", address: solA(60), symbol: "SOLNOSELL", name: "raw solana nosell", v: "nosell", checkKind: "roundtrip", checkedAt: t(14, 0), reserveUsd: 1, why: null, cause: "empty-pool" });
+    // یک نامِ خصمانه
+    rows.push({ chain: "base", address: addr(9002), symbol: "<b>BOLD</b>", name: "</script><img src=x onerror=window.__xss=1>", v: "sell", checkKind: "sell-quote", checkedAt: t(15, 0), reserveUsd: 500, ret: 97, why: null });
+    const guarded = rows.map((r) => publishGuardRow(r, undefined));
+    const history = [];
+    for (let d = 13; d >= 0; d--) {
+      const date = addDays(DATE, -d);
+      history.push(d === 0 ? dayCounts(date, guarded) : { date, b: 60 + d * 3, bSell: 50 + d, bNo: d % 4, bNa: 10 + d * 2 - (d % 4), bEmpty: d % 3, bFollowed: 8 + d });
+    }
+    const html = renderReportPage({ date: DATE, today: DATE, firstDate: FIRST, rows: guarded, history });
+    fs.writeFileSync(process.argv[1], html);
+    const cnt = (f) => guarded.filter(f).length;
+    const isB = (r) => r.chain === "base", isS = (r) => r.chain === "solana";
+    const meta = { date: DATE, bytes: Buffer.byteLength(html), days: history.map((h) => h.date) };
+    for (const [k, f] of Object.entries({ all: () => true, base: isB, solana: isS })) {
+      meta[k] = { all: cnt((r) => f(r)), nosell: cnt((r) => f(r) && r.v === "nosell"), sell: cnt((r) => f(r) && r.v === "sell"),
+        na: cnt((r) => f(r) && r.v !== "sell" && r.v !== "nosell"), empty: cnt((r) => f(r) && r.v === "sell" && r.follow === "pool-empty") };
+    }
+    fs.writeFileSync(process.argv[2], JSON.stringify(meta));
+    """
+    r = subprocess.run(["node", "--input-type=module", "-e", gen, html_path, meta_path],
+                       capture_output=True, text=True, cwd=worker_dir)
+    assert r.returncode == 0, "[report page] could not render the fixture page:\n%s" % r.stderr
+    meta = _j.load(open(meta_path))
+    page_html = open(html_path, "rb").read()
+
+    hdrs = parse_headers_blocks(open(os.path.join(HERE, "..", "_headers"), encoding="utf-8").read())
+    assert "/*" in hdrs, "[report page] web/_headers has no /* block"
+    star = {ln.split(":", 1)[0].strip().lower(): ln.split(":", 1)[1].strip() for ln in hdrs["/*"]}
+    csp = star["content-security-policy"]
+
+    app_src = open(os.path.join(HERE, "..", "index.html"), encoding="utf-8").read()
+    theme_key = theme_key_from_index(app_src)
+    shots = "/tmp/claude-0/r11_shots"
+    os.makedirs(shots, exist_ok=True)
+    seen = []
+
+    class Quiet(http.server.SimpleHTTPRequestHandler):
+        def log_message(self, *a):
+            pass
+
+        def do_GET(self):
+            clean = self.path.split("?")[0]
+            if clean == "/report" or re.match(r"^/report/\d{4}-\d{2}-\d{2}$", clean):
+                seen.append(clean)
+                self.send_response(200)
+                self.send_header("Content-Type", "text/html; charset=utf-8")
+                self.send_header("Content-Security-Policy", csp)
+                self.send_header("Content-Length", str(len(page_html)))
+                self.end_headers()
+                self.wfile.write(page_html)
+                return
+            return super().do_GET()
+
+        def translate_path(self, path):
+            clean = path.split("?")[0]
+            if clean in ("/app", "/app/"):
+                return os.path.join(HERE, "harness.html")
+            if clean == "/pairs":
+                return os.path.join(HERE, "..", "pairs.html")
+            if clean == "/stub-ethers.js":
+                return os.path.join(HERE, "stub-ethers.js")
+            return super().translate_path(path)
+
+    srv = http.server.ThreadingHTTPServer(("127.0.0.1", 0), functools.partial(Quiet, directory=os.path.join(HERE, "..")))
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    origin = "http://127.0.0.1:%d" % srv.server_address[1]
+    b = await p.chromium.launch()
+    errs = []
+
+    async def open_report(vw, vh, scheme="light", path="/report"):
+        pg = await b.new_page(viewport={"width": vw, "height": vh}, color_scheme=scheme)
+        def on_msg(m):
+            if m.type == "error":
+                errs.append("[%sx%s %s] %s" % (vw, vh, scheme, m.text))
+        pg.on("console", on_msg)
+        pg.on("pageerror", lambda e: errs.append("PAGEERROR %s" % e))
+        await pg.add_init_script("localStorage.setItem(%s, %s);" % (_j.dumps(theme_key), _j.dumps(scheme)))
+        await pg.route("**/*", lambda route: route.continue_() if route.request.url.startswith(origin) else route.abort())
+        await pg.goto(origin + path)
+        await pg.wait_for_selector("#tb tr", timeout=10000)
+        return pg
+
+    ROWS_JS = "() => document.querySelectorAll('#tb tr').length"
+    CHIP_JS = """() => Object.fromEntries([...document.querySelectorAll('#filters .chip')].map(c =>
+        [c.dataset.g + ':' + c.dataset.k, +c.querySelector('span').textContent]))"""
+
+    # ---- [report page render] روشن و تیره، دو اندازه ----
+    for scheme in ("light", "dark"):
+        for vw, vh in ((1440, 900), (390, 844)):
+            pg = await open_report(vw, vh, scheme)
+            info = await pg.evaluate("""() => ({
+                theme: document.documentElement.dataset.theme,
+                bg: getComputedStyle(document.body).backgroundColor,
+                h1: document.getElementById('h1').textContent,
+                baseTiles: document.querySelectorAll('#top .chain:nth-of-type(1) .tile').length,
+                allTiles: document.querySelectorAll('.tile').length,
+                cols: document.querySelectorAll('svg.chart a.col').length,
+                header: !!document.querySelector('header.landing-header .desktop-nav a.on'),
+                font: getComputedStyle(document.body).fontFamily.slice(0, 20),
+                gradClip: getComputedStyle(document.querySelector('h1 em')).webkitBackgroundClip,
+                shown: document.querySelectorAll('#tb tr').length })""")
+            assert info["theme"] == scheme, "[report page render] theme %s expected, got %s" % (scheme, info["theme"])
+            assert info["h1"] == "Exit Report, 4 Oct", "[report page render] h1: %r" % info["h1"]
+            assert info["allTiles"] == 7 and info["cols"] == 14 and info["header"], "[report page render] structure: %s" % info
+            assert info["shown"] == 25, "[report page render] first 25 rows, got %s" % info["shown"]
+            dark_bg = info["bg"] == "rgb(10, 8, 16)"
+            assert dark_bg == (scheme == "dark"), "[report page render] body background %s in %s" % (info["bg"], scheme)
+            await pg.screenshot(path=os.path.join(shots, "report-%s-%d.png" % (scheme, vw)), full_page=True)
+            await pg.close()
+    print("[report page render] light and dark at 1440 and 390: theme token applied, background %s/%s, 7 tiles, 14 chart links, 25 rows first; real page %d bytes served under the web/_headers CSP"
+          % ("rgb(244, 245, 247)", "rgb(10, 8, 16)", meta["bytes"]))
+
+    # ---- [report page overflow] ----
+    for vw in (360, 390, 1440):
+        pg = await open_report(vw, 900)
+        m = await pg.evaluate("""() => { const w = document.querySelector('.tblwrap'), t = document.querySelector('.tblwrap table');
+            const lefts = new Set([...document.querySelectorAll('.tiles')][0] ? [...document.querySelectorAll('.tiles')[0].children].map(e => Math.round(e.getBoundingClientRect().left)) : []);
+            return { sw: document.documentElement.scrollWidth, bw: document.body.scrollWidth, iw: innerWidth, wrapScroll: w.scrollWidth, wrapClient: w.clientWidth,
+                     ov: getComputedStyle(w).overflowX, tableW: t.getBoundingClientRect().width, tileCols: lefts.size }; }""")
+        assert m["sw"] <= m["iw"] and m["bw"] <= m["iw"], "[report page overflow] page scrolls horizontally at %d: %s" % (vw, m)
+        if vw <= 390:
+            assert m["wrapScroll"] > m["wrapClient"] and m["ov"] == "auto", "[report page overflow] the table must scroll inside .tblwrap at %d: %s" % (vw, m)
+            assert m["tileCols"] == 2, "[report page overflow] tiles must be 2 columns at %d: %s" % (vw, m)
+        else:
+            assert m["tileCols"] == 4, "[report page overflow] Base tiles are 4 columns at 1440: %s" % m
+        await pg.close()
+    print("[report page overflow] 360/390/1440: no page-level horizontal scroll; at phone widths the table scrolls inside .tblwrap and the tiles are 2 columns")
+
+    # ---- [report page filters] + «Show more» ----
+    pg = await open_report(1440, 900)
+    chips = await pg.evaluate(CHIP_JS)
+    assert chips["c:all"] == meta["all"]["all"] and chips["c:base"] == meta["base"]["all"] and chips["c:solana"] == meta["solana"]["all"], "[report page filters] chain chips %s vs %s" % (chips, meta)
+    assert chips["r:nosell"] == meta["all"]["nosell"] and chips["r:sell"] == meta["all"]["sell"] and chips["r:na"] == meta["all"]["na"] and chips["r:empty"] == meta["all"]["empty"], "[report page filters] result chips %s vs %s" % (chips, meta["all"])
+    assert meta["solana"]["nosell"] == 0, "[report page filters] the guard must have removed every Solana nosell from the fixture"
+    total = meta["all"]["all"]
+    more_txt = await pg.inner_text("#more")
+    assert more_txt == "Show 50 more of %d" % (total - 25), "[report page filters] button: %r" % more_txt
+    shown = 25
+    while total - shown > 0:
+        await pg.click("#more")
+        shown = min(total, shown + 50)
+        assert await pg.evaluate(ROWS_JS) == shown, "[report page filters] Show more must reveal 50 at a time, expected %d" % shown
+    assert await pg.evaluate("() => document.getElementById('more').hidden"), "[report page filters] the button hides when everything is shown"
+    await pg.click('#filters [data-g="c"][data-k="solana"]')
+    assert await pg.evaluate(ROWS_JS) == min(25, meta["solana"]["all"]), "[report page filters] Solana chip row count (first 25, then Show more)"
+    assert await pg.inner_text("#more") == "Show %d more of %d" % (min(50, meta["solana"]["all"] - 25), meta["solana"]["all"] - 25), "[report page filters] Solana chip: Show more counts the remainder"
+    chips = await pg.evaluate(CHIP_JS)
+    assert chips["r:empty"] == 0 and chips["r:nosell"] == 0 and chips["r:na"] == meta["solana"]["na"], "[report page filters] result chips follow the chain chip: %s" % chips
+    await pg.click('#filters [data-g="r"][data-k="na"]')
+    n_na = await pg.evaluate(ROWS_JS)
+    assert n_na == meta["solana"]["na"], "[report page filters] Solana + not checked: %d" % n_na
+    reasons = await pg.evaluate("() => [...document.querySelectorAll('#tb .why')].map(e => e.textContent)")
+    assert len(reasons) == n_na and all(r and ":" not in r and r[-1] == "." for r in reasons), "[report page filters] each unchecked row shows a plain sentence: %s" % reasons
+    await pg.click('#filters [data-g="c"][data-k="base"]')
+    await pg.click('#filters [data-g="r"][data-k="nosell"]')
+    rows_txt = await pg.evaluate("() => [...document.querySelectorAll('#tb tr td:nth-child(2)')].map(e => e.textContent)")
+    assert len(rows_txt) == meta["base"]["nosell"] and any("pool is empty" in t for t in rows_txt) and any("the sell reverts" in t for t in rows_txt), "[report page filters] nosell rows carry the cause in words: %s" % rows_txt
+    await pg.click('#filters [data-g="r"][data-k="empty"]')
+    follow = await pg.evaluate("() => [...document.querySelectorAll('#tb tr td:nth-child(5)')].map(e => e.textContent)")
+    assert len(follow) == meta["base"]["empty"] and all(t.startswith("⚠ Pool empty 2 h later") for t in follow), "[report page filters] follow-up column: %s" % follow
+    await pg.click('#filters [data-g="r"][data-k="all"]')
+    await pg.click('#filters [data-g="c"][data-k="all"]')
+    await pg.close()
+    print("[report page filters] chain and result chips change the row counts (%d/%d/%d chain, result chips from the guarded rows), 'Show more' reveals 50 at a time and hides at the end, unchecked rows show a plain reason, no-sell rows carry the cause, follow-up column says 'Pool empty 2 h later'"
+          % (meta["all"]["all"], meta["base"]["all"], meta["solana"]["all"]))
+
+    # ---- [report page xss] ----
+    pg = await open_report(1440, 900)
+    await pg.click('#filters [data-g="c"][data-k="base"]')
+    await pg.click('#filters [data-g="r"][data-k="sell"]')
+    while await pg.evaluate("() => !document.getElementById('more').hidden"):
+        await pg.click("#more")
+    cells = await pg.evaluate("() => [...document.querySelectorAll('#tb .nm')].map(e => e.textContent)")
+    assert "</script><img src=x onerror=window.__xss=1>" in cells, "[report page xss] the hostile name must show as plain text"
+    assert await pg.evaluate("() => window.__xss === undefined && !document.querySelector('#tb img') && !document.querySelector('#tb b')"), "[report page xss] nothing injected ran or rendered"
+    await pg.close()
+    print("[report page xss] a token named </script><img onerror=...> and a <b> symbol render as text only; no handler ran")
+
+    # ---- [report page chart] ----
+    pg = await open_report(1440, 900)
+    hrefs = await pg.evaluate("() => [...document.querySelectorAll('svg.chart a.col')].map(a => a.getAttribute('href'))")
+    assert hrefs == ["/report/" + d for d in meta["days"]], "[report page chart] column links: %s" % hrefs
+    await pg.hover('svg.chart a.col[data-d="2026-10-03"]')
+    tip = await pg.evaluate("() => { const t = document.getElementById('tip'); return t.hidden ? null : t.textContent; }")
+    assert tip and "3 Oct" in tip and "checked" in tip, "[report page chart] hover tooltip: %r" % tip
+    before = len(seen)
+    await pg.click('svg.chart a.col[data-d="2026-10-02"]')
+    await pg.wait_for_url(origin + "/report/2026-10-02")
+    assert seen[before:] == ["/report/2026-10-02"], "[report page chart] clicking a column must request /report/<its date>: %s" % seen[before:]
+    await pg.wait_for_selector("#tb tr")
+    await pg.focus('svg.chart a.col[data-d="2026-09-30"]')
+    await pg.keyboard.press("Enter")
+    await pg.wait_for_url(origin + "/report/2026-09-30")
+    await pg.close()
+    pg = await open_report(1440, 900)
+    await pg.select_option("#day", "2026-10-01")
+    await pg.wait_for_url(origin + "/report/2026-10-01")
+    pg3 = await open_report(1440, 900)
+    opts = await pg3.evaluate("() => [...document.querySelectorAll('#day option')].map(o => o.value)")
+    await pg3.close()
+    assert opts == list(reversed(meta["days"])), "[report page chart] date select order: %s" % opts
+    await pg.close()
+    print("[report page chart] 14 columns are real links to /report/<date>; hover shows the tooltip; click and Enter navigate; the date select navigates and lists newest first")
+
+    # ---- [report page theme] ----
+    pg = await open_report(1440, 900, "light")
+    await pg.click("#themeToggle")
+    await pg.wait_for_timeout(500)  # body{transition:background .3s} از landing
+    st = await pg.evaluate("(k) => ({ theme: document.documentElement.dataset.theme, ls: localStorage.getItem(k), bg: getComputedStyle(document.body).backgroundColor })", theme_key)
+    assert st["theme"] == "dark" and st["ls"] == "dark" and st["bg"] == "rgb(10, 8, 16)", "[report page theme] toggle: %s" % st
+    await pg.click("#themeToggle")
+    st = await pg.evaluate("(k) => localStorage.getItem(k)", theme_key)
+    assert st == "light", "[report page theme] toggle back: %s" % st
+    old = await pg.evaluate("(k) => localStorage.getItem(k)", OLD_THEME_KEY)
+    assert old is None, "[report page theme] the retired theme key must not be written"
+    await pg.close()
+    print("[report page theme] the toggle flips data-theme and writes the shared key %s (never the retired one)" % theme_key)
+    assert not errs, "[report page] console errors: %s" % errs[:5]
+
+    # ---- [report page tabs] تبِ پنجم در اپ و pairs ----
+    async def tabs(path, vw):
+        pg = await b.new_page(viewport={"width": vw, "height": 800})
+        terrs = []
+        pg.on("pageerror", lambda e: terrs.append(str(e)))
+        async def stub(route):
+            u = route.request.url
+            if not u.startswith(origin):
+                return await route.abort()
+            if "pairs.json" in u:
+                return await route.fulfill(status=200, content_type="application/json", body='{"chain":"base","rows":[],"store":true}')
+            if "/gt/" in u:
+                return await route.fulfill(status=200, content_type="application/json", body='{"data":[]}')
+            if u.endswith("/ev"):
+                return await route.fulfill(status=204, body="")
+            if "/vd/" in u or "/sol/" in u:
+                return await route.fulfill(status=200, content_type="application/json", body="{}")
+            return await route.continue_()
+        await pg.route("**/*", stub)
+        await pg.goto(origin + path)
+        await pg.wait_for_timeout(700)
+        m = await pg.evaluate("""() => { const items = [...document.querySelectorAll('#nav > *')];
+            const r = items.map(e => e.getBoundingClientRect());
+            const sp = items.map(e => { const s = e.querySelector('span'); return s ? [s.scrollWidth, s.clientWidth, getComputedStyle(s).display] : null; });
+            return { n: items.length, tags: items.map(e => e.tagName), last: items[items.length - 1].getAttribute('href'),
+                     lastText: items[items.length - 1].textContent.trim(), left: Math.min(...r.map(x => x.left)), right: Math.max(...r.map(x => x.right)),
+                     gaps: r.slice(1).map((x, i) => x.left - r[i].right), w: r.map(x => Math.round(x.width)), sp,
+                     sw: document.documentElement.scrollWidth, iw: innerWidth, navBottom: document.getElementById('nav').getBoundingClientRect().bottom }; }""")
+        if vw == 360:
+            await pg.screenshot(path=os.path.join(shots, "%s-header-360.png" % ("app" if path == "/app" else "pairs")))
+        await pg.close()
+        assert not terrs, "[report page tabs] errors on %s: %s" % (path, terrs)
+        return m
+    for path in ("/app", "/pairs"):
+        for vw in (360, 390, 1440):
+            m = await tabs(path, vw)
+            assert m["n"] == 5, "[report page tabs] %s at %d must have 5 tabs: %s" % (path, vw, m)
+            assert m["last"] == "/report" or m["tags"][-1] == "A" and m["last"] == "/report", "[report page tabs] 5th tab must link to /report: %s" % m
+            assert m["lastText"] == "Exit Report", "[report page tabs] label: %r" % m["lastText"]
+            assert m["left"] >= 0 and m["right"] <= m["iw"] + 0.5, "[report page tabs] %s at %d tabs leave the viewport: %s" % (path, vw, m)
+            assert m["sw"] <= m["iw"], "[report page tabs] %s at %d scrolls horizontally: %s" % (path, vw, m)
+            assert all(g >= 0 for g in m["gaps"]), "[report page tabs] %s at %d tabs overlap: %s" % (path, vw, m)
+            if vw <= 390:
+                assert all(s and s[0] <= s[1] + 1 and s[2] == "block" for s in m["sp"]), "[report page tabs] %s at %d a label is clipped or hidden: %s" % (path, vw, m["sp"])
+    print("[report page tabs] the app and /pairs tab bars both carry 5 tabs (…, New pairs, Exit Report → /report); at 360, 390 and 1440 they stay inside the viewport, do not overlap, show every label unclipped on phones, and add no page scroll")
+    await b.close()
+    srv.shutdown()
+
+
 async def main():
     errors = []
     # خطاهایی که یک کاوشگر *عمداً* تولید می‌کند. اجازه‌ی عبور می‌گیرند ولی
@@ -3109,6 +3427,7 @@ async def main():
         await check_logo_parity(p, errors)
         await check_token_page_hash_links(p, errors)
         await check_live_strip(p, errors)
+        await check_report_page(p, errors)
         b = await p.chromium.launch()
         pg = await b.new_page(viewport={"width": 1240, "height": 1000}, color_scheme="dark")
         pg.on("console", on_console)
@@ -6041,7 +6360,7 @@ async def main():
             "adding the New pairs link knocked the nav off-center at 1280px: nav=%s header=%s"
             % (info["navCenter"], info["hdrCenter"]))
 
-        # موبایل: نوارِ پایینِ ثابت باید چهار آیتم را بدونِ اسکرولِ افقی جا بدهد.
+        # موبایل: نوارِ پایینِ ثابت باید پنج آیتم (تبِ Exit Report از ۲۰ اکتبر) را بدونِ اسکرولِ افقی جا بدهد.
         for w in (390, 360):
             await navpairspg.set_viewport_size({"width": w, "height": 844})
             await navpairspg.wait_for_timeout(200)
@@ -6054,17 +6373,17 @@ async def main():
             })""")
             print("[pairs nav] mobile %spx: items=%s scrollWidth=%s innerWidth=%s widths=%s"
                   % (w, mobinfo["count"], mobinfo["scrollW"], mobinfo["innerW"], mobinfo["widths"]))
-            assert mobinfo["count"] == 4, (
-                "expected 4 items in the bottom nav at %spx, found %s" % (w, mobinfo["count"]))
+            assert mobinfo["count"] == 5, (
+                "expected 5 items in the bottom nav at %spx, found %s" % (w, mobinfo["count"]))
             # چهار آیتم باید flex:1 مشترک داشته باشند — یعنی پهنای تقریباً
             # برابر، نه اینکه لینک به‌اندازه‌ی محتوایش جمع شود و سه دکمه‌ی
             # دیگر برای جا شدنش بی‌قاعده جمع/باز شوند.
             assert max(mobinfo["widths"]) - min(mobinfo["widths"]) <= 4, (
-                "the 4 bottom-nav items are not sharing width equally at %spx (widths=%s) — the "
+                "the 5 bottom-nav items are not sharing width equally at %spx (widths=%s) — the "
                 "New pairs link is not getting the same flex:1 as the buttons"
                 % (w, mobinfo["widths"]))
             assert mobinfo["scrollW"] <= mobinfo["innerW"], (
-                "the page scrolls horizontally at %spx (%s > %s) — the 4-item bottom nav does "
+                "the page scrolls horizontally at %spx (%s > %s) — the 5-item bottom nav does "
                 "not fit" % (w, mobinfo["scrollW"], mobinfo["innerW"]))
 
         # ۸۰۰px — باندِ فقط-آیکون: برچسبِ لینک هم باید مثل دکمه‌ها مخفی شود.
@@ -9764,8 +10083,8 @@ async def main():
             return {
                 count: links.length,
                 hrefs: links.map(a => a.getAttribute('href')),
-                lastCurrent: links.length ? links[links.length - 1].getAttribute('aria-current') : null,
-                lastOn: links.length ? links[links.length - 1].classList.contains('on') : false,
+                lastCurrent: (links.find(a => a.getAttribute('href') === '/pairs') || {getAttribute: () => null}).getAttribute('aria-current'),
+                lastOn: links.some(a => a.getAttribute('href') === '/pairs' && a.classList.contains('on')),
                 navCenter: Math.round(navR.left + navR.width / 2),
                 hdrCenter: Math.round(hdr.left + hdr.width / 2),
                 hasCta: !!document.querySelector('.header-cta'),
@@ -9777,8 +10096,8 @@ async def main():
               "hasCta=%s hasFavicon=%s errors=%s"
               % (hinfo["count"], hinfo["hrefs"], hinfo["lastCurrent"], hinfo["lastOn"],
                  hinfo["navCenter"], hinfo["hdrCenter"], hinfo["hasCta"], hinfo["hasFavicon"], herrs))
-        assert hinfo["count"] == 4, "expected 4 nav links in pairs.html's header, found %s" % hinfo["count"]
-        assert hinfo["hrefs"] == ["/app#swap", "/app#folio", "/app#flow", "/pairs"], (
+        assert hinfo["count"] == 5, "expected 5 nav links in pairs.html's header, found %s" % hinfo["count"]
+        assert hinfo["hrefs"] == ["/app#swap", "/app#folio", "/app#flow", "/pairs", "/report"], (
             "pairs.html's header nav hrefs are wrong: %s" % hinfo["hrefs"])
         assert hinfo["lastCurrent"] == "page", "the New pairs link must carry aria-current=\"page\""
         assert hinfo["lastOn"], "the New pairs link must carry the .on look"
@@ -9813,19 +10132,19 @@ async def main():
                 };
             }""")
             print("[pairs header] mobile %spx: %s" % (w, mob))
-            assert mob["count"] == 4, "expected 4 nav items at %spx, found %s" % (w, mob["count"])
+            assert mob["count"] == 5, "expected 5 nav items at %spx, found %s" % (w, mob["count"])
             assert mob["position"] == "fixed", "pairs.html's nav is not fixed at %spx" % w
             assert max(mob["widths"]) - min(mob["widths"]) <= 4, (
-                "pairs.html's 4 bottom-nav items are not equal width at %spx: %s" % (w, mob["widths"]))
+                "pairs.html's 5 bottom-nav items are not equal width at %spx: %s" % (w, mob["widths"]))
             assert mob["scrollW"] <= mob["innerW"], (
                 "pairs.html scrolls horizontally at %spx (%s > %s)"
                 % (w, mob["scrollW"], mob["innerW"]))
         await hpg2.close()
         assert not herrs2, "web/pairs.html threw while resizing the header: %s" % herrs2
 
-        print("[pairs header] 4 nav links (Swap/Portfolio/Flow/New pairs) with the right hrefs, New "
+        print("[pairs header] 5 nav links (Swap/Portfolio/Flow/New pairs/Exit Report) with the right hrefs, New "
               "pairs carries aria-current=page and the .on look, centred at 1240px, labels hidden at "
-              "800px, fixed 4-equal-width bottom bar at 390/360px with no horizontal scroll, no "
+              "800px, fixed 5-equal-width bottom bar at 390/360px with no horizontal scroll, no "
               ".header-cta, favicon present")
 
         # ---- [pairs chain] تب‌های Base/Solana — URL، fetch، Trade فقط روی

@@ -3360,6 +3360,21 @@ function isSolidlyReqId(id) { return PROBE_KIND_BY_ID.get(id) === "SOLIDLY"; }
      "sitemap must list the landing page, the app, and /pairs");
 }
 
+/* مسیرهای گزارش در سایت‌مپ (۲۰ اکتبر): «/report» + هر روزِ ۳۰ روزِ اخیر، نه پیش از
+   اولین گزارش. تست‌های پایین فقط همین قطعه را جدا می‌کنند و بقیه‌ی منطقِ توکن را دست
+   نمی‌زنند. */
+function expectedReportLocs() {
+  const out = [ORIGIN + "/report"];
+  const t = utcDateOf(Date.now());
+  for (let i = 0; i < 30; i++) {
+    const d = new Date(Date.parse(t + "T00:00:00Z") - i * 86400000).toISOString().slice(0, 10);
+    if (d < REPORT_TEXT_FIRST_DATE) break;
+    out.push(ORIGIN + "/report/" + d);
+  }
+  return out;
+}
+const REPORT_LOCS_EXPECTED = expectedReportLocs();
+
 /* ---- sitemap.xml — صفحه‌های /t/<آدرس> از رویِ networks/base/pools ----
    ⚠️ اینجا هم globalThis.fetch هم globalThis.caches جعل می‌شوند — سایت‌مپ
    هم به بالادست می‌زند هم روی کشِ لبه می‌نشیند. هر سناریو کشِ خودش را تازه
@@ -3437,7 +3452,10 @@ function isSolidlyReqId(id) { return PROBE_KIND_BY_ID.get(id) === "SOLIDLY"; }
   const locs = Array.from(xml.matchAll(/<loc>([^<]+)<\/loc>/g)).map((m) => m[1]);
   ok(locs[0] === ORIGIN + "/" && locs[1] === ORIGIN + "/app" && locs[2] === ORIGIN + "/pairs",
      "the three static pages must come first, got: " + JSON.stringify(locs.slice(0, 3)));
-  const tokenLocs = locs.slice(3);
+  ok(JSON.stringify(locs.slice(3, 3 + REPORT_LOCS_EXPECTED.length)) === JSON.stringify(REPORT_LOCS_EXPECTED),
+     "the report pages (/report plus the last 30 days) must follow the static pages, got: " +
+     JSON.stringify(locs.slice(3, 3 + REPORT_LOCS_EXPECTED.length)));
+  const tokenLocs = locs.slice(3 + REPORT_LOCS_EXPECTED.length);
   ok(tokenLocs.length === SITEMAP_TOKEN_CAP,
      "token URLs must be capped at " + SITEMAP_TOKEN_CAP + ", got " + tokenLocs.length);
   const TOKEN_LOC_RE = new RegExp("^" + ORIGIN + "/t/0x[0-9a-fA-F]{40}$");
@@ -3492,9 +3510,8 @@ function isSolidlyReqId(id) { return PROBE_KIND_BY_ID.get(id) === "SOLIDLY"; }
     const body1 = await r1.text();
     ok(r1.status === 200, "sitemap must stay 200 when " + label + " (got " + r1.status + ")");
     const ls1 = Array.from(body1.matchAll(/<loc>([^<]+)<\/loc>/g)).map((m) => m[1]);
-    ok(ls1.length === 3 && ls1[0] === ORIGIN + "/" && ls1[1] === ORIGIN + "/app" &&
-       ls1[2] === ORIGIN + "/pairs",
-       "when " + label + ", sitemap must carry exactly the three static URLs, got: " + JSON.stringify(ls1));
+    ok(JSON.stringify(ls1) === JSON.stringify([ORIGIN + "/", ORIGIN + "/app", ORIGIN + "/pairs"].concat(REPORT_LOCS_EXPECTED)),
+       "when " + label + ", sitemap must carry exactly the three static URLs plus the report pages, got: " + JSON.stringify(ls1));
     ok(r1.headers.get("cache-control") === "public, max-age=300",
        "a failed sitemap build must be cached briefly at the edge (not 86400), got: " +
        r1.headers.get("cache-control"));
@@ -3506,7 +3523,7 @@ function isSolidlyReqId(id) { return PROBE_KIND_BY_ID.get(id) === "SOLIDLY"; }
     ok(calls > callsAfterFirst,
        "a failed sitemap build must never be cached — a second request must hit the upstream again, "
        + "when " + label + " (calls: " + callsAfterFirst + " -> " + calls + ")");
-    console.log("[sitemap fallback] " + label + " -> 200 with exactly the three static URLs, a short "
+    console.log("[sitemap fallback] " + label + " -> 200 with exactly the three static URLs plus the report pages, a short "
       + "cache-control, and never cached at the edge (the very next request tries the upstream again)");
   }
 
@@ -7086,7 +7103,7 @@ console.log("[report cause] causeForRow enforces the closed REPORT_CAUSES vocabu
   const t1 = reportText(doc1);
   const lines1 = t1.split("\n");
   const idx1 = lines1.findIndex((l) => l.endsWith("could not be checked."));
-  ok(idx1 >= 0 && lines1[idx1 + 1] === "1 of the quoted tokens had an empty pool an hour later.",
+  ok(idx1 >= 0 && lines1[idx1 + 1] === "1 of the quoted tokens were re-checked 1–3 hours later. 1 had an empty pool.",
      "the singular line must sit immediately after the \"could not be checked.\" line, got " +
      JSON.stringify(lines1));
   ok(lines1[idx1 + 2] === "", "a blank line must still follow the new line, got " + JSON.stringify(lines1));
@@ -7097,7 +7114,7 @@ console.log("[report cause] causeForRow enforces the closed REPORT_CAUSES vocabu
   const rowFollowedC = row5({ address: mkAddr(13), follow: "pool-empty" });
   const doc3 = { date: "2026-09-20", generatedAt: null, rows: [rowFollowedA, rowFollowedB, rowFollowedC] };
   const t3 = reportText(doc3);
-  ok(t3.includes("3 of the quoted tokens had an empty pool an hour later."),
+  ok(t3.includes("3 of the quoted tokens were re-checked 1–3 hours later. 3 had an empty pool."),
      "three pool-empty rows must produce the count 3 with the same sentence, got " + JSON.stringify(t3));
 
   // ج) صفر ردیفِ pool-empty — بایت‌به‌بایت همان سندِ بدونِ هیچ followی
@@ -7111,16 +7128,21 @@ console.log("[report cause] causeForRow enforces the closed REPORT_CAUSES vocabu
   };
   const tNoField = reportText(docNoFollowField);
   const tNotEmpty = reportText(docFollowButNotEmpty);
-  ok(tNoField === tNotEmpty,
-     "with zero pool-empty rows, the output must be byte-for-byte identical to the same document " +
-     "without any follow fields, got:\n" + JSON.stringify(tNoField) + "\nvs\n" + JSON.stringify(tNotEmpty));
-  ok(!tNoField.includes("empty pool an hour later"),
-     "with zero pool-empty rows, no such line may appear at all, got " + JSON.stringify(tNoField));
+  // ۲۰ اکتبر: با یک ردیفِ pool-there خطِ دو جمله‌ای حالا چاپ می‌شود («0 had an empty pool.»)؛
+  // بدونِ هیچ followی هنوز هیچ خطی نیست و متن بایت‌به‌بایت همان قبلی است.
+  ok(!tNoField.includes("re-checked 1–3 hours later") && !tNoField.includes("empty pool"),
+     "with no follow value at all, no re-check line may appear, got " + JSON.stringify(tNoField));
+  ok(tNotEmpty.split("\n").includes("1 of the quoted tokens were re-checked 1–3 hours later. 0 had an empty pool."),
+     "one re-checked row with pool-there must print F=1 and E=0 on one line, got " + JSON.stringify(tNotEmpty));
+  ok(tNotEmpty.replace("1 of the quoted tokens were re-checked 1–3 hours later. 0 had an empty pool.\n", "") === tNoField,
+     "apart from that one line the two documents must render byte-for-byte the same");
+  ok(!tNoField.includes("an hour later") && !tNotEmpty.includes("an hour later"),
+     "the old \"an hour later\" wording must be gone");
 
-  console.log("[report follow text] reportText inserts \"N of the quoted tokens had an empty pool an " +
-    "hour later.\" immediately after the \"could not be checked.\" line whenever a pool-empty row is " +
-    "present, with correct singular/plural wording, and is byte-for-byte identical to the same document " +
-    "with no follow fields at all when the count is zero");
+  console.log("[report follow text] reportText inserts \"F of the quoted tokens were re-checked 1–3 hours later. " +
+    "E had an empty pool.\" immediately after the \"could not be checked.\" line whenever at least one sell " +
+    "row carries a follow value (E may be 0), and is byte-for-byte identical to the same document with no " +
+    "follow fields at all otherwise");
 }
 
 /* ---- ۲۷الف. کوروم شاهد — یک صرافیِ مبهم نباید اثباتِ بقیه را پاک کند ----
@@ -13824,6 +13846,330 @@ function stripAllowedWording(t) {
     + "the caller and every other upstream field is stripped from the response; /sol/rpc enforces the four-method "
     + "allowlist and each method's exact param shape; SOL_RPC's host/path/key never appear in a response, success "
     + "or failure; and each route rate-limits on its own bucket while still answering 429 with CORS");
+}
+
+/* ---- ۴۵. صفحه‌ی HTMLِ گزارش — GET /report و GET /report/<تاریخ> ----
+   🔴 مسیرِ تازه‌ای که پسوند ندارد؛ .json/.txt/run باید بایت‌به‌بایت همان قبلی بمانند.
+   هر نگهبانِ این بخش با خراب‌کردنِ عمدی قرمز شده (گزارشِ تحویل). */
+{
+  const rp = await import("./report_page.js");
+  const { VD_BASE_WHY } = await import("./verdict.js");
+  const { RL_LIMIT: RL_LIMIT_T } = await import("./index.js");
+  const { VD_SOL_WHY } = await import("./verdict_sol.js");
+  const TODAY = utcDateOf(Date.now());
+  const PAST = "2026-09-14";
+  const PREFIRST = "2026-09-01";
+  const mkA = (n) => "0x" + n.toString(16).padStart(40, "0");
+  const mkRow = (o) => Object.assign({
+    chain: "base", address: mkA(1), symbol: "AAA", name: "Aaa token", v: "sell", checkKind: "sell-quote",
+    checkedAt: PAST + "T10:00:00.000Z", poolCreatedAt: null, priceUsd: 1, reserveUsd: 5000,
+    vol24hUsd: null, fdvUsd: null, dex: null, why: null, ret: 99.5,
+  }, o);
+  const mkKv = (docs) => ({ get: async (k) => (Object.prototype.hasOwnProperty.call(docs, k) ? docs[k] : null) });
+  const docOf = (date, rows) => JSON.stringify({ date, generatedAt: date + "T12:00:00.000Z", chains: ["base", "solana"], checked: rows.length, rows });
+  const islandOf = (html) => {
+    const m = /<script type="application\/json" id="reportData">([\s\S]*?)<\/script>/.exec(html);
+    return m ? JSON.parse(m[1]) : null;
+  };
+  const GET = (path, e, init) => call(path, Object.assign({ method: "GET" }, init || {}), e);
+
+  const fixtureRows = [
+    mkRow({ address: mkA(1), ret: 99.9, follow: "pool-there", followAt: PAST + "T11:30:00.000Z" }),
+    mkRow({ address: mkA(2), ret: 98.1, follow: "pool-empty", followAt: PAST + "T12:30:00.000Z" }),
+    mkRow({ address: mkA(3), ret: 97.0 }),
+    mkRow({ address: mkA(4), v: "nosell", cause: "empty-pool", ret: undefined }),
+    mkRow({ address: mkA(5), v: "nosell", cause: "sell-reverts", ret: undefined }),
+    mkRow({ address: mkA(6), v: null, why: "rpc-down", ret: undefined }),
+    mkRow({ address: "So11111111111111111111111111111111111111112", chain: "solana", checkKind: "roundtrip", v: "sell", ret: undefined }),
+    mkRow({ address: "Mint2222222222222222222222222222222222222222", chain: "solana", checkKind: "roundtrip", v: null, why: "jup:quote:429", ret: undefined }),
+  ];
+  const kvFix = mkKv({
+    ["report:" + PAST]: docOf(PAST, fixtureRows),
+    ["report:" + TODAY]: docOf(TODAY, [mkRow({ checkedAt: TODAY + "T01:00:00.000Z", address: mkA(40) })]),
+  });
+  const envPage = { ASSETS, ZX_KV: kvFix };
+
+  /* ---- routes ---- */
+  {
+    const rToday = await GET("/report", envPage);
+    const hToday = await rToday.text();
+    ok(rToday.status === 200 && /^text\/html; charset=utf-8$/.test(rToday.headers.get("content-type") || ""),
+       "[report page routes] /report must be 200 text/html, got " + rToday.status + " " + rToday.headers.get("content-type"));
+    ok(hToday.includes("<title>Exit Report, " + rp.longDate(TODAY) + " — Zaexa</title>"),
+       "[report page routes] /report is today's page (UTC)");
+    ok(rToday.headers.get("cache-control") === "public, max-age=300",
+       "[report page routes] today caches 300s, got " + rToday.headers.get("cache-control"));
+
+    const rPast = await GET("/report/" + PAST, envPage);
+    const hPast = await rPast.text();
+    ok(rPast.status === 200 && rPast.headers.get("cache-control") === "public, max-age=86400",
+       "[report page routes] a past date is 200 and caches 86400s, got " + rPast.status + " " + rPast.headers.get("cache-control"));
+    ok(hPast.includes("<title>Exit Report, 14 Sep 2026 — Zaexa</title>"), "[report page routes] past page carries its own date");
+    const rTodayExplicit = await GET("/report/" + TODAY, envPage);
+    ok(rTodayExplicit.status === 200 && rTodayExplicit.headers.get("cache-control") === "public, max-age=300",
+       "[report page routes] the explicit date of today gets the 300s cache as well");
+
+    for (const [path, label] of [["/report/nope", "garbage"], ["/report/2026-13-45", "impossible calendar day"],
+      ["/report/2026-9-4", "short date"], ["/report/today", "the word today (no extension)"]]) {
+      const r = await GET(path, envPage);
+      const h = await r.text();
+      ok(r.status === 404 && /^text\/html/.test(r.headers.get("content-type") || "") && h.includes('href="/report"'),
+         "[report page routes] " + label + " -> 404 HTML page with a link to /report, got " + r.status + " " + r.headers.get("content-type"));
+      ok(!h.trim().startsWith("{"), "[report page routes] the 404 is HTML, never JSON (" + label + ")");
+    }
+    const tomorrow = rp.addDays(TODAY, 1);
+    const rFut = await GET("/report/" + tomorrow, envPage);
+    ok(rFut.status === 404 && (await rFut.text()).includes('href="/report"'), "[report page routes] a future date is a 404 page");
+
+    // پیش از اولین تاریخ: صفحه رندر می‌شود، «بدونِ داده»، و KV اصلاً خوانده نمی‌شود.
+    let kvReads = [];
+    const kvSpy = { get: async (k) => { kvReads.push(k); return docOf(PREFIRST, fixtureRows); } };
+    const rPre = await GET("/report/" + PREFIRST, { ASSETS, ZX_KV: kvSpy });
+    const hPre = await rPre.text();
+    ok(rPre.status === 200 && hPre.includes("No report is available for this day.") && islandOf(hPre).rows.length === 0,
+       "[report page routes] a day before the first report date renders the no-data state");
+    ok(!kvReads.some((k) => k < "report:" + REPORT_TEXT_FIRST_DATE && /^report:\d/.test(k)),
+       "[report page routes] days before " + REPORT_TEXT_FIRST_DATE + " are never read from KV, got " + JSON.stringify(kvReads));
+    ok(hPre.includes('<span class="dnb off"') && /<a class="dnb" href="\/report\/2026-09-02"/.test(hPre),
+       "[report page routes] on the day before the first date, 'previous' is disabled and 'next' is a link");
+    const hFirst = await (await GET("/report/" + REPORT_TEXT_FIRST_DATE, envPage)).text();
+    ok(/<span class="dnb off"[^>]*aria-label="Previous day/.test(hFirst), "[report page routes] 'previous' is disabled on the first report date");
+    ok(/<span class="dnb off"[^>]*aria-label="Next day/.test(hToday) && /<a class="dnb" href="\/report\/[\d-]+" aria-label="Previous day">/.test(hToday),
+       "[report page routes] 'next' is disabled today, 'previous' is a real link");
+    const noKv = await GET("/report/" + PAST, { ASSETS });
+    ok(noKv.status === 200 && (await noKv.text()).includes("No report is available for this day."),
+       "[report page routes] with no KV binding the page is the no-data state, never a 500");
+
+    // .json/.txt/run: بایت‌به‌بایتِ همان چیزی که پیش از این مسیر بود (انتظار مستقل از مسیرِ HTML ساخته می‌شود).
+    const parsed = JSON.parse(docOf(PAST, fixtureRows));
+    const guarded = { ...parsed, rows: parsed.rows.map((r) => publishGuardRow(r, undefined)) };
+    const rJson = await GET("/report/" + PAST + ".json", envPage);
+    ok((await rJson.text()) === JSON.stringify({ ...guarded, store: true }) &&
+       rJson.headers.get("content-type") === "application/json; charset=utf-8" &&
+       rJson.headers.get("cache-control") === "public, max-age=86400",
+       "[report page routes] /report/<date>.json is byte-for-byte the JSON document, with its own headers");
+    const rJsonToday = await GET("/report/today.json", envPage);
+    ok(rJsonToday.status === 200 && rJsonToday.headers.get("content-type") === "application/json; charset=utf-8",
+       "[report page routes] /report/today.json is still JSON");
+    const rTxt = await GET("/report/" + PAST + ".txt", envPage);
+    ok((await rTxt.text()) === reportText(guarded, { solana: true }) &&
+       /^text\/plain/.test(rTxt.headers.get("content-type") || "") && rTxt.headers.get("cache-control") === "public, max-age=86400",
+       "[report page routes] /report/<date>.txt is byte-for-byte the text report");
+    const rTxtToday = await GET("/report/today.txt", envPage);
+    ok(rTxtToday.status === 200 && /^text\/plain/.test(rTxtToday.headers.get("content-type") || ""), "[report page routes] /report/today.txt is still text");
+    const rBadJson = await GET("/report/nope.json", envPage);
+    ok(rBadJson.status === 400 && (await rBadJson.json()).error === "bad date", "[report page routes] /report/nope.json still answers JSON 400");
+    const rRunNoKey = await GET("/report/run", envPage);
+    ok(rRunNoKey.status === 404 && !/text\/html/.test(rRunNoKey.headers.get("content-type") || ""),
+       "[report page routes] /report/run never reaches the HTML route, got " + rRunNoKey.status);
+
+    // متد
+    for (const m of ["POST", "PUT", "DELETE"]) {
+      for (const path of ["/report", "/report/" + PAST]) {
+        const r = await call(path, { method: m }, envPage);
+        ok(r.status === 405 && r.headers.get("allow") === "GET, HEAD", "[report page routes] " + m + " " + path + " must be 405 with Allow, got " + r.status);
+      }
+    }
+    const rHead = await call("/report/" + PAST, { method: "HEAD" }, envPage);
+    ok(rHead.status === 200 && (await rHead.text()) === "" && /text\/html/.test(rHead.headers.get("content-type") || ""),
+       "[report page routes] HEAD is 200 with the HTML headers and no body");
+
+    // نرخ: همان سطلِ «report» که JSON هم دارد.
+    const IP = "203.0.113.77";
+    let limited = null;
+    for (let i = 0; i < RL_LIMIT_T + 2; i++) {
+      const r = await GET("/report/" + PAST, envPage, { headers: { "cf-connecting-ip": IP } });
+      if (r.status === 429) { limited = r; break; }
+    }
+    ok(limited !== null && limited.headers.get("retry-after") === "60", "[report page routes] the page is rate-limited with retry-after");
+    const sameBucket = await GET("/report/" + PAST + ".json", envPage, { headers: { "cf-connecting-ip": IP } });
+    ok(sameBucket.status === 429, "[report page routes] the JSON route shares the page's 'report' bucket, got " + sameBucket.status);
+
+    // سرصفحه‌های امنیتی عیناً همان web/_headers
+    const hdrFile = fs.readFileSync(new URL("../web/_headers", import.meta.url), "utf8");
+    const star = hdrFile.slice(hdrFile.search(/^\/\*\s*$/m));
+    const want = {};
+    for (const line of star.split("\n").slice(1)) {
+      const m = /^\s{2}([A-Za-z-]+):\s*(.+?)\s*$/.exec(line);
+      if (m) want[m[1].toLowerCase()] = m[2];
+    }
+    for (const h of ["content-security-policy", "x-content-type-options", "referrer-policy", "permissions-policy"]) {
+      ok(typeof want[h] === "string" && want[h].length > 0, "[report page routes] web/_headers /* block has " + h);
+      for (const [label, r] of [["200", rPast], ["404", rFut], ["405", await call("/report", { method: "POST" }, envPage)]]) {
+        ok(r.headers.get(h) === want[h], "[report page routes] " + label + " response must carry the same " + h + " as web/_headers, got " + r.headers.get(h));
+      }
+    }
+    console.log("[report page routes] GET /report and /report/<date> serve HTML (today 300s, past 86400s, HEAD ok, 405 with Allow), bad/impossible/"
+      + "future dates are 404 HTML pages linking to /report, a day before the first report is the no-data state without touching KV, the "
+      + "prev/next limits are right, .json/.txt/run stay byte-for-byte what they were, the page shares the 'report' rate bucket, and "
+      + "CSP/nosniff/referrer/permissions equal web/_headers on 200/404/405");
+  }
+
+  /* ---- guard inheritance ---- */
+  {
+    const raw = [
+      mkRow({ address: mkA(11), v: "nosell", cause: undefined, ret: undefined, symbol: "NOCAUSE" }),
+      mkRow({ address: mkA(12), v: "nosell", cause: undefined, ret: undefined, symbol: "V4NOC", dex: "uniswap-v4" }),
+      mkRow({ address: "SoLnoSell1111111111111111111111111111111111", chain: "solana", checkKind: "roundtrip", v: "nosell", cause: "empty-pool", symbol: "SOLNO", ret: undefined }),
+      mkRow({ address: mkA(13), v: "nosell", cause: "empty-pool", ret: undefined, symbol: "REAL" }),
+    ];
+    const e = { ASSETS, ZX_KV: mkKv({ ["report:" + PAST]: docOf(PAST, raw) }) };
+    const html = await (await GET("/report/" + PAST, e)).text();
+    const isl = islandOf(html);
+    const by = Object.fromEntries(isl.rows.map((r) => [r.symbol, r]));
+    ok(by.NOCAUSE.v === null && by.V4NOC.v === null && by.SOLNO.v === null,
+       "[report page guard] a Base nosell without a cause and a Solana nosell reach the page as 'could not be checked', got " + JSON.stringify([by.NOCAUSE.v, by.V4NOC.v, by.SOLNO.v]));
+    ok(by.REAL.v === "nosell" && by.REAL.cause === "empty-pool", "[report page guard] a nosell with a real cause stays a nosell");
+    const noTile = /<b>(\d+)<\/b><p><i class="dot"[^>]*><\/i>No sell route<\/p>/.exec(html);
+    ok(noTile && noTile[1] === "1", "[report page guard] the 'No sell route' tile counts only the one real nosell, got " + (noTile && noTile[1]));
+    ok(isl.rows.filter((r) => r.chain === "solana" && r.v === "nosell").length === 0, "[report page guard] no Solana nosell anywhere on the page");
+    ok(isl.rows.filter((r) => r.chain === "base" && r.v === "nosell" && !r.cause).length === 0, "[report page guard] no Base nosell without a cause anywhere on the page");
+    ok(by.NOCAUSE.why === rp.plainWhy("base", "cause:unproven") && by.SOLNO.why === rp.plainWhy("solana", "sol:unconfirmed"),
+       "[report page guard] the guarded rows carry the plain-language reason for their guard code");
+    console.log("[report page guard] the page only ever sees rows through reportDocFor/publishGuardRow: raw KV rows with a Base nosell without a cause (v4 or not) and a Solana nosell show as could-not-be-checked, never as 'No sell route'");
+  }
+
+  /* ---- plainWhy: واژه‌نامه‌ی کاملِ بسته ---- */
+  {
+    const FALLBACK = "The check did not finish.";
+    const sentenceOk = (t, code) => typeof t === "string" && /^[A-Z][^:]*[.]$/.test(t) && !t.includes(":") &&
+      !t.includes("undefined") && !t.toLowerCase().includes(String(code).toLowerCase());
+    const baseCodes = VD_BASE_WHY.slice().concat(["meta:429", "meta:500", "meta:0", "meta:404", "cover:503", "cover:0", "cover:404", "cover:429"]);
+    for (const code of baseCodes) {
+      ok(isBaseWhyT(code), "[report page why] test list member must be a real Base why: " + code);
+      const t = rp.plainWhy("base", code);
+      ok(sentenceOk(t, code), "[report page why] base " + code + " -> a plain sentence, got " + JSON.stringify(t));
+      ok(t !== FALLBACK, "[report page why] base " + code + " must have its own sentence, not the fallback");
+    }
+    const solCodes = [];
+    for (const w of VD_SOL_WHY) {
+      if (w.startsWith("rpc:") || w.startsWith("jup:")) for (const n of [0, 400, 401, 404, 429, 500, 503].concat(w.startsWith("rpc:") ? [-32005] : [])) solCodes.push(w + ":" + n);
+      solCodes.push(w);
+    }
+    solCodes.push("jup:swap-instructions:200", "rpc:getBalance:0");
+    for (const code of solCodes) {
+      const t = rp.plainWhy("solana", code);
+      ok(sentenceOk(t, code), "[report page why] solana " + code + " -> a plain sentence, got " + JSON.stringify(t));
+      ok(t !== FALLBACK, "[report page why] solana " + code + " must have its own sentence, not the fallback");
+    }
+    ok(rp.plainWhy("solana", "jup:quote:404") === "Jupiter would not quote a trade for this token." &&
+       rp.plainWhy("solana", "jup:quote:429") === "The quote service was busy; it will be tried again." &&
+       rp.plainWhy("solana", "jup:swap-instructions:503") === "The quote service was busy; it will be tried again.",
+       "[report page why] jup 4xx and 429/5xx families map to the two required sentences");
+    for (const [chain, code] of [["base", "totally-new"], ["solana", "totally-new"], ["base", null], ["solana", undefined], ["base", 42], ["base", "meta:12345"], ["other", "internal"], ["base", "no-route"], ["solana", "no-quote"]]) {
+      ok(rp.plainWhy(chain, code) === FALLBACK, "[report page why] unknown " + chain + "/" + String(code) + " -> the fallback sentence");
+    }
+    // سرتاسر: هیچ کدِ خامی در جزیره یا متنِ صفحه نیست، حتی با همه‌ی کدها روی ردیف‌ها.
+    const rows = [];
+    baseCodes.forEach((c, i) => rows.push(mkRow({ address: mkA(100 + i), v: null, why: c, ret: undefined, symbol: "B" + i, name: "base " + i })));
+    solCodes.forEach((c, i) => rows.push(mkRow({ address: "Sol" + String(i).padStart(30, "x"), chain: "solana", checkKind: "roundtrip", v: null, why: c, ret: undefined, symbol: "S" + i, name: "sol " + i })));
+    const e = { ASSETS, ZX_KV: mkKv({ ["report:" + PAST]: docOf(PAST, rows) }) };
+    const html = await (await GET("/report/" + PAST, e)).text();
+    const isl = islandOf(html);
+    const colon = isl.rows.filter((r) => r.v === null && (typeof r.why !== "string" || r.why.includes(":")));
+    ok(isl.rows.length === rows.length && colon.length === 0, "[report page why] every unchecked row in the island carries a colon-free sentence");
+    let leaked = 0;
+    for (const c of baseCodes.concat(solCodes)) if (html.includes('"why":"' + c + '"') || html.includes(">" + c + "<")) leaked++;
+    ok(leaked === 0, "[report page why] no raw why code appears in the page or its JSON island, leaked " + leaked);
+    const mism = isl.rows.filter((r) => r.v === null && r.why !== rp.plainWhy(r.chain, rows.find((x) => x.address === r.address).why));
+    ok(mism.length === 0, "[report page why] the island carries exactly plainWhy(chain, why) for each row, mismatches: " + JSON.stringify(mism.slice(0, 2)));
+    console.log("[report page why] plainWhy covers the whole closed vocabulary (" + VD_BASE_WHY.length + " Base members plus meta/cover status forms, every VD_SOL_WHY family with numeric suffixes): "
+      + "each maps to its own colon-free sentence, unknown codes to 'The check did not finish.', and the page/island only ever carry the sentence");
+  }
+
+  /* ---- JSON island ---- */
+  {
+    const evil = "</script><img src=x onerror=alert(1)>";
+    const rows = [mkRow({ address: mkA(200), symbol: "<b>X</b>&\u2028", name: evil })];
+    const e = { ASSETS, ZX_KV: mkKv({ ["report:" + PAST]: docOf(PAST, rows) }) };
+    const html = await (await GET("/report/" + PAST, e)).text();
+    ok(!html.includes(evil) && !html.includes("<img src=x") && !html.includes("<b>X</b>"),
+       "[report page island] a hostile token name/symbol never appears raw in the HTML");
+    const isl = islandOf(html);
+    ok(isl && isl.rows[0].name === evil && isl.rows[0].symbol === "<b>X</b>&\u2028",
+       "[report page island] the island still round-trips the exact name (escaped as \\u003c, not stripped)");
+    const m = /<script type="application\/json" id="reportData">([\s\S]*?)<\/script>/.exec(html);
+    ok(m && !/[<>&\u2028\u2029]/.test(m[1]), "[report page island] the island text contains no raw < > & or line separators");
+    const src = fs.readFileSync(new URL("./report_page.js", import.meta.url), "utf8");
+    ok(!/\.innerHTML\s*=/.test(src) && !/insertAdjacentHTML|document\.write/.test(src),
+       "[report page island] client rendering never assigns innerHTML (textContent/createElement only)");
+    console.log("[report page island] attacker-controlled names/symbols cannot close the JSON island (< > & and U+2028/9 are \\u-escaped), never appear raw in the HTML, and the client builds the table with createElement/textContent only");
+  }
+
+  /* ---- numbers, tiles, lede, meta ---- */
+  {
+    const html = await (await GET("/report/" + PAST, envPage)).text();
+    ok(html.includes("Exit Report, <em>14 Sep</em>"), "[report page meta] h1 carries the short date");
+    ok(html.includes("6 new Base tokens and 2 new Solana tokens were checked. 2 of the quoted tokens were re-checked 1–3 hours later. 1 had an empty pool."),
+       "[report page meta] lede states B, S, F and E");
+    ok(html.includes("Median quote returned 99% of $100") || html.includes("Median quote returned 98% of $100"), "[report page meta] median sub on the quoted tile");
+    ok(html.includes("Empty pool: 1 · Sell reverts: 1"), "[report page meta] causes in plain words");
+    ok(html.includes("of 2 quoted tokens re-checked 1–3 h later"), "[report page meta] follow-up tile sub");
+    ok(html.includes("<title>Exit Report, 14 Sep 2026 — Zaexa</title>"), "[report page meta] title");
+    ok(html.includes('<meta name="description" content="On 14 Sep 2026 Zaexa checked 6 new Base tokens and 2 Solana tokens.'), "[report page meta] description built from the day's numbers");
+    ok(html.includes('<link rel="canonical" href="https://zaexa.com/report/2026-09-14">'), "[report page meta] canonical");
+    ok(html.includes('<meta property="og:url" content="https://zaexa.com/report/2026-09-14">') &&
+       html.includes('<meta property="og:type" content="website">') &&
+       html.includes('<meta property="og:title" content="Exit Report, 14 Sep 2026 — Zaexa">') &&
+       html.includes('<meta name="twitter:card" content="summary_large_image">') &&
+       html.includes('<meta name="twitter:site" content="@zaexadex">'), "[report page meta] og/twitter tags");
+    const landing = fs.readFileSync(new URL("../web/landing.html", import.meta.url), "utf8");
+    const ogImg = /<meta data-og property="og:image" content="([^"]+)"/.exec(landing)[1];
+    ok(html.includes('<meta property="og:image" content="' + ogImg + '">'), "[report page meta] og:image is landing's generic card");
+    ok(html.includes('href="/report/2026-09-14.txt"') && html.includes('href="/report/2026-09-14.json"') && html.includes('href="/app">Check a token yourself'),
+       "[report page meta] raw-file links and the CTA");
+    const hToday = await (await GET("/report", envPage)).text();
+    ok(hToday.includes('<link rel="canonical" href="https://zaexa.com/report/' + TODAY + '">'), "[report page meta] /report uses today's canonical");
+    ok(!hToday.includes('name="robots"') && !html.includes('name="robots"'), "[report page meta] days with data are indexable");
+    // نمودار: ۱۴ روزِ منتهی به همین روز، هر ستون یک لینک، روزِ جاری برجسته.
+    const isl = islandOf(html);
+    ok(isl.days.length === 14 && isl.days[13].date === PAST && isl.days[0].date === rp.addDays(PAST, -13), "[report page meta] 14 history days ending on the page date");
+    const last = isl.days[13];
+    ok(last.b === 6 && last.bSell === 3 && last.bNo === 2 && last.bNa === 1 && last.bEmpty === 1 && last.bFollowed === 2, "[report page meta] the day's chart counts come from guarded rows, got " + JSON.stringify(last));
+    ok((html.match(/<a class="col/g) || []).length === 14 && html.includes('class="col sel" data-d="2026-09-14" href="/report/2026-09-14"'), "[report page meta] each chart column is a link, the current one is highlighted");
+    ok((html.match(/<option /g) || []).length === 14 && html.indexOf('<option value="2026-09-14" selected>') < html.indexOf('<option value="2026-09-13"'), "[report page meta] the date select lists the 14 days newest first");
+    ok(html.indexOf("zaexa.theme.v1") >= 0 && html.indexOf("zaexa.theme.v1") < html.indexOf("<style>"), "[report page meta] the shared theme key is applied before the first <style>");
+    ok(!/fonts\.googleapis|fonts\.gstatic/.test(html), "[report page meta] no external font requests");
+    console.log("[report page meta] headline, lede, tiles, <title>, description, canonical, og/twitter tags (generic OG image from landing), raw links, 14-day chart columns as links, newest-first date select and the early theme boot all derive from the day's guarded rows");
+  }
+
+  /* ---- sitemap ---- */
+  {
+    const savedFetch = globalThis.fetch, savedCaches = globalThis.caches;
+    globalThis.caches = undefined;
+    globalThis.fetch = async () => new Response("nope", { status: 500 });
+    const r = await call("/sitemap.xml");
+    const locs = Array.from((await r.text()).matchAll(/<loc>([^<]+)<\/loc>/g)).map((m) => m[1]);
+    globalThis.fetch = savedFetch; globalThis.caches = savedCaches;
+    ok(locs.includes(ORIGIN + "/report") && locs.includes(ORIGIN + "/report/" + TODAY) && !locs.some((l) => l.startsWith(ORIGIN + "/report/") && l.slice(-10) < REPORT_TEXT_FIRST_DATE),
+       "[report page sitemap] /report and /report/<today> are listed, none before the first report date");
+    ok(locs.filter((l) => l.includes("/report/")).length === REPORT_LOCS_EXPECTED.length - 1, "[report page sitemap] one entry per day, at most 30");
+    ok(locs.slice(0, 3).join() === [ORIGIN + "/", ORIGIN + "/app", ORIGIN + "/pairs"].join(), "[report page sitemap] the three static pages stay first");
+    console.log("[report page sitemap] /report plus /report/<date> for the last 30 days (not before " + REPORT_TEXT_FIRST_DATE + ") join the static paths");
+  }
+
+  /* ---- fonts: drift guard ---- */
+  {
+    const landing = fs.readFileSync(new URL("../web/landing.html", import.meta.url), "utf8");
+    const rules = landing.match(/@font-face\{[^}]*\}/g);
+    ok(rules && rules.length === 2, "[report page fonts] landing.html embeds exactly two @font-face rules");
+    ok(rules[0] === rp.FONT_RULE_MANROPE && rules[1] === rp.FONT_RULE_PLAYFAIR,
+       "[report page fonts] worker/report_page.js copies of Manrope and Playfair must be byte-identical to web/landing.html (regenerate them, do not edit)");
+    const html = await (await GET("/report/" + PAST, envPage)).text();
+    ok(html.includes(rules[0]) && html.includes(rules[1]), "[report page fonts] the served page embeds both landing rules verbatim");
+    console.log("[report page fonts] the two embedded @font-face rules are byte-identical to web/landing.html and appear verbatim in the page");
+  }
+
+  /* ---- txt sentence ---- */
+  {
+    const mk = (extra) => Object.assign({ chain: "base", address: mkA(300), symbol: null, name: null, v: "sell", checkKind: "sell-quote",
+      checkedAt: PAST + "T00:00:00.000Z", poolCreatedAt: null, priceUsd: null, reserveUsd: null, vol24hUsd: null, fdvUsd: null, dex: null }, extra);
+    const t = reportText({ date: PAST, generatedAt: null, rows: [mk({ address: mkA(301), follow: "pool-empty" }), mk({ address: mkA(302), follow: "pool-there" }), mk({ address: mkA(303) })] });
+    ok(t.split("\n").includes("2 of the quoted tokens were re-checked 1–3 hours later. 1 had an empty pool."), "[report page txt] F counts every sell row with a follow value, E the pool-empty ones, on one line");
+    const t0 = reportText({ date: PAST, generatedAt: null, rows: [mk({ address: mkA(304) })] });
+    ok(!t0.includes("re-checked"), "[report page txt] no follow value at all prints no line");
+    console.log("[report page txt] the text report says 'F of the quoted tokens were re-checked 1–3 hours later. E had an empty pool.' only when F > 0");
+  }
 }
 
 console.log(fails === 0

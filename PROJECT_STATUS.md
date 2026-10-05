@@ -18,7 +18,7 @@
 ## ۰. کارهای باز — به‌روز ۴ اکتبر ۲۰۲۶، به ترتیب
 
 فقط کارهای انجام‌نشده. کارهای تمام‌شده در تاریخچه‌ی گیت هستند (آخرین: `55d1afd` «Round 5»).
-سوییت رابط **۶۴۷ کاوشگر** سبز؛ به‌علاوه‌ی `worker/test.mjs`، `worker/og_live_test.mjs`، `worker/solana-parity.test.mjs`،
+سوییت رابط **۶۶۲ کاوشگر** سبز؛ به‌علاوه‌ی `worker/test.mjs`، `worker/og_live_test.mjs`، `worker/solana-parity.test.mjs`،
 شش `web/test/solana-*.test.mjs` و چهار آزمونِ مرورگر (`solana-parity-browser.py`، `solana-views-browser.py`،
 `solana-pairs-browser.py`، `market-workspace-browser.py` — از ریشه‌ی مخزن اجرا شوند؛ `scripts/solana-wallet` باید `npm ci` شده باشد).
 
@@ -72,6 +72,14 @@
 - SOL در Flow قابلِ انتخاب؛ چشمکِ لوگو موقعِ تغییرِ بازه رفع؛ کاراکترِ اضافه‌ی پورتفولیوی سولانا (span.av بی‌اندازه) حذف.
 - /app#flow دیگر اول سواپ را نشان نمی‌دهد (`data-boot-view` در head).
 - کارتِ Exit check سولانا روی /app: «Sell route found» حذف؛ فقط حکمِ قیمتی («Exit estimated from quotes») می‌ماند. صفحه‌ی توکن دست‌نخورده.
+
+### ۳و. صفحه‌ی Exit Report (۵ اکتبر، طرحِ تأییدشده‌ی حسام)
+- `/report` = امروز (UTC)، `/report/<YYYY-MM-DD>` = همان روز (HTML). `.json`/`.txt`/`today.*`/`run` بایت‌به‌بایت همان.
+  پیش از تغییر: هیچ مصرف‌کننده‌ای در مخزن `/report/<date>`ِ بی‌پسوند نمی‌خواند.
+- سرورساخت در `worker/report_page.js` از `reportDocFor` (پس publishGuardRow همیشه اعمال است). نمودارِ ۱۴ روزه = ۱۴ خواندنِ KV به‌ازای هر درخواستِ کش‌نشده (کش: امروز ۳۰۰ث، گذشته ۲۴ساعت).
+- `plainWhy` برای کلِ واژه‌نامه‌ی why؛ کدِ خام هرگز دیده نمی‌شود. فونت‌ها کپیِ landing (نگهبانِ هم‌سانی). CSP پاسخ = `web/_headers`.
+- sitemap: `/report` + ۳۰ روزِ اخیر. تبِ پنجمِ «Exit Report» در هدرِ اپ و جفت‌ها (بین ۹۶۱ تا ۱۱۲۰ پیکسل فقط آیکون)، و در لندینگ.
+- متنِ گزارش: «F of the quoted tokens were re-checked 1–3 hours later. E had an empty pool.» (در txt و صفحه).
 
 ### ۴. آزمونِ دستیِ کیف‌پولِ Base (فقط حسام)
 ۱) مرورگر را ببند و باز کن → Connect → ربی: با **یک** بار وصل شود. ۲) لغوِ سواپ → فقط «Cancelled in your wallet».
