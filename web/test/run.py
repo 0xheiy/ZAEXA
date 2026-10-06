@@ -2689,6 +2689,73 @@ async def check_canvas_labels(p, errors):
     await b.close()
 
 
+async def check_hero_core(p, errors):
+    """پروبِ [hero core]: نشانِ لوگو دقیقاً وسطِ هسته است، برچسبِ ZAEXA بزرگ‌تر
+    شده ولی داخلِ دایره‌ی درونی می‌ماند، اندازه‌ی هسته عوض نشده، و رنگ‌های
+    hero/شفافیتِ مدارها در هر دو تم همان‌اند که مالک خواسته (۶ اکتبر)."""
+    path = os.path.join(HERE, "..", "landing.html")
+    b = await p.chromium.launch()
+    cases = ((1440, 900, 145, 10.0), (390, 844, 96, 8.5))
+    for (vw, vh, core_size, small_px) in cases:
+        for theme in ("light", "dark"):
+            ctx = await b.new_context(reduced_motion="reduce", viewport={"width": vw, "height": vh})
+            pg = await ctx.new_page()
+            pg.on("console", lambda m: errors.append(m.text) if m.type == "error" else None)
+            await pg.goto("file://" + path)
+            await pg.evaluate("t => { document.documentElement.dataset.theme = t; }", theme)
+            # انیمیشنِ breathe مقیاس می‌دهد؛ برای اندازه‌گیریِ هندسه خاموش می‌شود
+            await pg.add_style_tag(content="*{animation:none!important;transition:none!important}")
+            await pg.wait_for_timeout(400)
+            m = await pg.evaluate("""() => {
+              const core = document.querySelector('.visual-core');
+              const mark = core.querySelector('.core-mark');
+              const small = core.querySelector('small');
+              const r = e => { const b = e.getBoundingClientRect(); return {x:b.x,y:b.y,w:b.width,h:b.height}; };
+              const cs = getComputedStyle(core);
+              const rs = getComputedStyle(document.documentElement);
+              // small تمام‌عرض است (left/right:0)؛ جعبه‌ی خودِ متن با Range سنجیده می‌شود
+              const rg = document.createRange(); rg.selectNodeContents(small);
+              const tb = rg.getBoundingClientRect();
+              return {core:r(core), mark:r(mark), small:{x:tb.x,y:tb.y,w:tb.width,h:tb.height}, fs:getComputedStyle(small).fontSize,
+                      bw:parseFloat(cs.borderTopWidth), viz:{...window.__zaexaViz},
+                      cv1:rs.getPropertyValue('--viz1').trim(), cv2:rs.getPropertyValue('--viz2').trim()};
+            }""")
+            await ctx.close()
+            c, mk, sm = m["core"], m["mark"], m["small"]
+            ccx, ccy = c["x"] + c["w"] / 2, c["y"] + c["h"] / 2
+            dx = (mk["x"] + mk["w"] / 2) - ccx
+            dy = (mk["y"] + mk["h"] / 2) - ccy
+            assert abs(dx) <= 0.75 and abs(dy) <= 0.75, (
+                "[hero core] mark is off-centre in the core at %dpx %s: dx=%.2f dy=%.2f" % (vw, theme, dx, dy))
+            assert abs(c["w"] - core_size) < 0.01 and abs(c["h"] - core_size) < 0.01, (
+                "[hero core] core size changed at %dpx %s: %.2fx%.2f, expected %d" % (vw, theme, c["w"], c["h"], core_size))
+            assert m["fs"] == "%gpx" % small_px, (
+                "[hero core] ZAEXA label font-size at %dpx %s is %s, expected %gpx" % (vw, theme, m["fs"], small_px))
+            inner = c["w"] / 2 - m["bw"]
+            worst = 0.0
+            for px in (sm["x"], sm["x"] + sm["w"]):
+                for py in (sm["y"], sm["y"] + sm["h"]):
+                    worst = max(worst, ((px - ccx) ** 2 + (py - ccy) ** 2) ** 0.5)
+            assert worst < inner, (
+                "[hero core] ZAEXA label corner reaches %.1fpx from the centre but the inner radius is %.1fpx at %dpx %s"
+                % (worst, inner, vw, theme))
+            gap = sm["y"] - (mk["y"] + mk["h"])
+            assert gap >= 4, (
+                "[hero core] gap between mark bottom and label top is %.1fpx (<4) at %dpx %s" % (gap, vw, theme))
+            v = m["viz"]
+            if theme == "light":
+                ok = (v["v1"].lower() == "#3f7cf2" and v["v2"].lower() == "#7a5af0" and abs(v["oa"] - 0.4) < 1e-9)
+                assert ok, "[hero core] light live palette is %r, expected #3F7CF2/#7A5AF0/oa 0.4 at %dpx" % (v, vw)
+            else:
+                ok = (v["v1"].lower() == m["cv1"].lower() and v["v2"].lower() == m["cv2"].lower()
+                      and abs(v["oa"] - 0.18) < 1e-9)
+                assert ok, "[hero core] dark live palette is %r, expected viz1/viz2 (%s/%s) and oa 0.18 at %dpx" % (
+                    v, m["cv1"], m["cv2"], vw)
+            print("[hero core] %dpx %s: mark offset dx=%.2f dy=%.2f, core %dpx, label %s corners<=%.1f of inner r=%.1f gap=%.1fpx, "
+                  "palette %s/%s oa=%g" % (vw, theme, dx, dy, core_size, m["fs"], worst, inner, gap, v["v1"], v["v2"], v["oa"]))
+    await b.close()
+
+
 async def check_canvas_route_on_ellipse(p, errors):
     """پروبِ [canvas on ellipse]: صاحبِ‌کار گفت مسیرها در فازهای split و
     simulate از داخلِ حلقه‌های سیگنال رد می‌شوند و بی‌نظم به نظر می‌رسند.
@@ -3745,6 +3812,7 @@ async def main():
         await check_canvas_cost(p, errors)
         await check_canvas_reduced_motion(p, errors)
         await check_canvas_labels(p, errors)
+        await check_hero_core(p, errors)
         await check_canvas_route_on_ellipse(p, errors)
         await check_trust_glyph_in_circle(p, errors)
         await check_canvas_resize(p, errors)
