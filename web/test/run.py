@@ -1942,7 +1942,20 @@ THEME_BTN_JS = """(a) => {
     const cs = getComputedStyle(b);
     const op = s => { const e = b.querySelector(s); return e ? getComputedStyle(e).opacity : null; };
     return {theme: document.documentElement.dataset.theme, checked: b.getAttribute('aria-checked'),
-            w: r.width, h: r.height, radius: cs.borderRadius, sun: op(a.sun), moon: op(a.moon)};
+            w: r.width, h: r.height, radius: cs.borderRadius, sun: op(a.sun), moon: op(a.moon),
+            shadow: cs.boxShadow, color: cs.color, bg: cs.backgroundColor,
+            before: getComputedStyle(b, '::before').boxShadow,
+            ...(() => {
+              // مرجع‌ها: .nav و برگه‌ی انتخاب‌شده اگر در صفحه باشند، وگرنه عنصرِ موقتِ با همان توکن‌ها
+              const nav = document.querySelector('.nav'), on = document.querySelector('.nav button.on, .nav a.on');
+              const t = document.createElement('i');
+              t.style.cssText = 'position:absolute;visibility:hidden;color:var(--acc);box-shadow:4px 4px 9px var(--soft-lo),-3px -3px 8px var(--soft-hi),inset 0 1px 1px var(--soft-hi)';
+              document.body.appendChild(t);
+              const ts = getComputedStyle(t), res = {accColor: ts.color, litShadow: ts.boxShadow,
+                navShadow: nav && getComputedStyle(nav).boxShadow !== 'none' ? getComputedStyle(nav).boxShadow : null, onColor: on ? getComputedStyle(on).color : null};
+              t.remove();
+              return res;
+            })()};
 }"""
 
 async def theme_button_probe(pg, label, btn, sun, moon):
@@ -1956,8 +1969,8 @@ async def theme_button_probe(pg, label, btn, sun, moon):
         # (سنجشِ ثابت ۴۰۰ms زیرِ بار وسطِ گذار می‌افتاد).
         for _try in range(20):
             st = await pg.evaluate(THEME_BTN_JS, a)
-            if sorted(n for n in ("sun", "moon") if st[n] == "1") in (["sun"], ["moon"]):
-                break
+            if sorted(n for n in ("sun", "moon") if st[n] == "1") in (["sun"], ["moon"]) and st["color"] == st["accColor"]:
+                break  # رنگ هم گذارِ .2s دارد؛ تا نشستن صبر می‌کنیم
             await pg.wait_for_timeout(150)
         dark = st["theme"] == "dark"
         assert abs(st["w"] - 38) <= 0.5 and abs(st["h"] - 38) <= 0.5, \
@@ -1968,6 +1981,20 @@ async def theme_button_probe(pg, label, btn, sun, moon):
             "[theme button] %s %s: visible icons %s (sun=%s moon=%s)" % (label, st["theme"], vis, st["sun"], st["moon"])
         assert st["checked"] == ("true" if dark else "false"), \
             "[theme button] %s: aria-checked %r in %s" % (label, st["checked"], st["theme"])
+        # زبانِ نوارِ برگه‌ها: بدنه مثلِ .nav برآمده، صفحه‌ی داخلی گود، آیکون به رنگِ برگه‌ی فعال
+        ctx = "[theme button] %s %s" % (label, st["theme"])
+        want = st["navShadow"] or st["litShadow"]  # در موبایل .nav عمداً بی‌سایه است
+        assert st["shadow"] == want, "%s: button box-shadow %r != tab-bar raised shadow %r" % (ctx, st["shadow"], want)
+        assert "inset" in st["shadow"] and len(re.findall(r"rgba?\(", st["shadow"])) == 3, \
+            "%s: button shadow must have 3 layers incl. inset: %r" % (ctx, st["shadow"])
+        assert "0px 1px 1px" in st["shadow"] and st["shadow"] == st["litShadow"], \
+            "%s: button shadow differs from literal 4px/-3px/inset 0 1px 1px: %r" % (ctx, st["shadow"])
+        assert st["before"].count("inset") == 2 and len(re.findall(r"rgba?\(", st["before"])) == 2, \
+            "%s: ::before must be pressed in (two inset layers): %r" % (ctx, st["before"])
+        assert st["color"] == st["accColor"] and (st["onColor"] is None or st["color"] == st["onColor"]), \
+            "%s: icon colour %r != selected-tab colour %r/%r" % (ctx, st["color"], st["accColor"], st["onColor"])
+        if dark:
+            assert st["bg"] == "rgb(8, 7, 13)", "%s: dark background %r is not rgb(8, 7, 13)" % (ctx, st["bg"])
         seen.append(st["theme"])
         await pg.click(btn)
         await pg.wait_for_timeout(400)
