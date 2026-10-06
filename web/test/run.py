@@ -4453,9 +4453,278 @@ async def main():
         assert split["st1"]["attempted"] == split["N"], "attempted must be counted once, not per retry: %s" % split
         assert split["st1"]["rpcFailed"] == 1 and split["st1"]["noPool"] == split["N"] - 1, split
         assert split["calls1"] > 1, "a gas-cap failure must be retried in halves: %s" % split
-        assert split["st2"]["rpcFailed"] == split["N"] and split["calls2"] == 1 and split["unknown2"], \
+        # ۶ اکتبر: دسته حالا در تکه‌های ۱۶تایی می‌رود؛ خطای انتقال باز هم نصف نمی‌شود،
+        # پس هر تکه دقیقاً یک بار پرسیده می‌شود (نه یک بار برای کل)
+        assert split["st2"]["rpcFailed"] == split["N"] and split["calls2"] == -(-split["N"] // 16) and split["unknown2"], \
             "a transport failure must never be split: %s" % split
         assert split["revAfter"] == "", "a stale reverse-quote note survived scheduleQuote: %r" % split["revAfter"]
+
+        # ---- [quote chunks] ۶ اکتبر: دسته‌ی ~۶۹تایی (cbETH→wstETH) revert می‌کرد و نیمه‌کردنِ
+        # پشت‌سرهم یک دور را ۱٫۰۵ تا ۱٫۳۵ ثانیه می‌کرد؛ تکه‌های ۱۶تایی و موازی ۰٫۲۳ ثانیه. ----
+        qc = await b.new_page(viewport={"width": 1100, "height": 900})
+        await qc.goto(URL)
+        await qc.wait_for_function("() => typeof E !== 'undefined' && !!E", timeout=15000)
+        qchunks = await qc.evaluate("""async () => {
+            const all = allTokens();
+            const A = routable(all.find(t => t.symbol === "USDC")), B = routable(all.find(t => t.symbol === "WETH"));
+            const V = allVenues();
+            const N = 69;
+            const specs = Array.from({length: N}, (_, i) => ({venue: V[i % V.length], tokenIn: A.address,
+                                                               tokenOut: B.address, amountIn: BigInt(i + 1) * 1000n}));
+            const realMc = multicall, realEnc = encodeQuote;
+            // کوت به‌جای ABI، مبلغ ورودی را در calldata می‌گذارد و جوابش همان را برمی‌گرداند
+            encodeQuote = (v, a, b2, amt) => ({target: "0x" + "11".repeat(20),
+                data: "0x" + amt.toString(16).padStart(64, "0"), dec: d => BigInt(d)});
+            const run = async (limit) => {
+                const sizes = []; let inflight = 0, maxInflight = 0, resolved = 0, issuedBeforeFirst = null;
+                multicall = async (calls) => {
+                    sizes.push(calls.length); inflight++; maxInflight = Math.max(maxInflight, inflight);
+                    await new Promise(r => setTimeout(r, 15));
+                    if (issuedBeforeFirst === null) issuedBeforeFirst = sizes.length;
+                    inflight--; resolved++;
+                    if (limit && calls.length > limit) {
+                        const e = new Error("missing revert data"); e.code = "CALL_EXCEPTION";
+                        e.info = {error: {code: -32003, message: "out of gas: gas required exceeds: 50000000"}};
+                        throw e;
+                    }
+                    return calls.map(c => ({ok: true, data: c.data}));
+                };
+                const st = newStats();
+                const r = await quoteMany(specs, st);
+                const ordered = r.length === N && r.every((x, i) => x.status === "ok" && x.out === BigInt(i + 1) * 1000n);
+                return {sizes, maxInflight, issuedBeforeFirst, ordered, attempted: st.attempted, ok: st.ok, rpcFailed: st.rpcFailed};
+            };
+            try {
+                const plain = await run(0);
+                const bis = await run(8);
+                return {plain, bis};
+            } finally { multicall = realMc; encodeQuote = realEnc; }
+        }""")
+        await qc.close()
+        qp_, qb_ = qchunks["plain"], qchunks["bis"]
+        print("[quote chunks] 69 specs: calls=%s maxSize=%s maxInflight=%s issuedBeforeFirstResolve=%s ordered=%s attempted=%s"
+              % (len(qp_["sizes"]), max(qp_["sizes"]), qp_["maxInflight"], qp_["issuedBeforeFirst"], qp_["ordered"], qp_["attempted"]))
+        print("[quote chunks] bisect (batch>8 reverts): calls=%s ok=%s rpcFailed=%s maxInflight=%s ordered=%s"
+              % (len(qb_["sizes"]), qb_["ok"], qb_["rpcFailed"], qb_["maxInflight"], qb_["ordered"]))
+        assert max(qp_["sizes"]) <= 16 and len(qp_["sizes"]) == 5 and sum(qp_["sizes"]) == 69, \
+            "69 quotes must go out as 5 multicalls of at most 16: %s" % qp_
+        assert qp_["issuedBeforeFirst"] == 5 and qp_["maxInflight"] >= 2, \
+            "the chunks must be in flight together, not one after another: %s" % qp_
+        assert qp_["ordered"] and qp_["attempted"] == 69 and qp_["ok"] == 69, \
+            "results must keep the original order and attempted must count once: %s" % qp_
+        assert qb_["ordered"] and qb_["ok"] == 69 and qb_["rpcFailed"] == 0 and qb_["maxInflight"] >= 2, \
+            "a reverting batch must still return everything in order, halves in parallel: %s" % qb_
+
+        # ---- [impact parallel] ۶ اکتبر: نرخِ مبلغ کوچک هم‌زمان با تقسیم‌بندی؛ عددها باید همان قبلی باشند ----
+        ip = await b.new_page(viewport={"width": 1100, "height": 900})
+        await ip.goto(URL)
+        await ip.wait_for_function("() => typeof E !== 'undefined' && !!E", timeout=15000)
+        impact = await ip.evaluate("""async () => {
+            const realFR = findRoutes;
+            const oldImpact = async (tIn, tOut, amountIn, plan, stats) => {   // نسخه‌ی قبلیِ priceImpact، عیناً
+                const small = amountIn / 1000n > 0n ? amountIn / 1000n : 1n;
+                const {routes} = await findRoutes(tIn, tOut, small, stats);
+                if (!routes.length) return null;
+                const SC = 10n ** 18n;
+                const rs = (routes[0].amountOut * SC) / small, rb = (plan.totalOut * SC) / amountIn;
+                if (rs <= 0n) return null;
+                return Math.max(0, Number(((rs - rb) * 10000n) / rs) / 100);
+            };
+            const cases = [
+                {amountIn: 1000000000000000000n, smallOut: 2010000000000000n, totalOut: 1980000000000000000n},
+                {amountIn: 5n, smallOut: 7n, totalOut: 9n},
+                {amountIn: 1000n, smallOut: 0n, totalOut: 500n},
+                {amountIn: 1000000n, smallOut: 3000n, totalOut: 3100000n},
+                {amountIn: 777777777n, smallOut: 123456n, totalOut: 98765432n},
+            ];
+            const out = [];
+            try {
+                for (const c of cases) {
+                    findRoutes = async () => ({routes: [{amountOut: c.smallOut}], direct: []});
+                    const plan = {totalOut: c.totalOut};
+                    const o = await oldImpact({}, {}, c.amountIn, plan, newStats());
+                    const n = await priceImpact({}, {}, c.amountIn, plan, newStats());
+                    const sr = await smallRate({}, {}, c.amountIn, newStats());
+                    const n2 = impactFrom(sr, c.amountIn, plan);
+                    out.push({o, n, n2});
+                }
+                findRoutes = async () => ({routes: [], direct: []});
+                const none = [await priceImpact({}, {}, 1000n, {totalOut: 1n}, newStats()),
+                              await smallRate({}, {}, 1000n, newStats())];
+                return {out, none};
+            } finally { findRoutes = realFR; }
+        }""")
+        await ip.close()
+        print("[impact parallel] %s cases identical=%s no-route=%s"
+              % (len(impact["out"]), all(x["o"] == x["n"] == x["n2"] for x in impact["out"]), impact["none"]))
+        for x in impact["out"]:
+            assert x["o"] == x["n"] == x["n2"], "price impact differs from the old formula: %s" % impact
+        assert impact["none"] == [None, None], impact
+
+        # ---- [cta one line] ۶ اکتبر (حسام): ارتفاع دکمه‌ی سواپ هرگز عوض نشود ----
+        cta_res = {}
+        for vw in (390, 1440):
+            cp = await b.new_page(viewport={"width": vw, "height": 900})
+            await cp.goto(URL)
+            await cp.wait_for_function("() => typeof E !== 'undefined' && !!E", timeout=15000)
+            cta_res[vw] = await cp.evaluate("""() => {
+                const bt = document.getElementById("actBtn");
+                setBusy(true, "Swap"); const h0 = bt.getBoundingClientRect().height;
+                setBusy(true, "Confirm 0.8254 MORPHO → DEGEN in wallet… and a much longer tail to be sure it overflows"); const h1 = bt.getBoundingClientRect().height;
+                setBusy(false); refreshButton();
+                return {h0, h1};
+            }""")
+            await cp.close()
+        print("[cta one line] 390px short=%.1f long=%.1f | 1440px short=%.1f long=%.1f"
+              % (cta_res[390]["h0"], cta_res[390]["h1"], cta_res[1440]["h0"], cta_res[1440]["h1"]))
+        for vw in (390, 1440):
+            assert abs(cta_res[vw]["h0"] - cta_res[vw]["h1"]) <= 0.5 and cta_res[vw]["h0"] > 20, \
+                "the swap button changed height with a long busy label at %spx: %s" % (vw, cta_res)
+
+        # ---- [base autoconnect] ۶ اکتبر: Base فقط به کیفی وصل می‌شود که کاربر برای Base انتخاب کرده ----
+        # فانتوم یک اجازه‌ی سایت را بین زنجیره‌ها مشترک دارد؛ بعد از اتصال روی سولانا،
+        # eth_accounts آن هم جواب می‌داد و Base بی‌صدا به آدرس EVM فانتوم وصل می‌شد.
+        PH_ADDR = "0x1111111111111111111111111111111111111111"
+        MM_ADDR = "0x2222222222222222222222222222222222222222"
+        def two_wallets_script(pre=""):
+            return pre + """
+                window.__m = {phantom: [], metamask: []};
+                (function(){
+                    function mk(tag, addr){
+                        return {request: function(a){
+                            window.__m[tag].push(a && a.method);
+                            if (a.method === 'eth_accounts' || a.method === 'eth_requestAccounts') return Promise.resolve([addr]);
+                            if (a.method === 'eth_chainId') return Promise.resolve('0x2105');
+                            return Promise.resolve(null);
+                        }, on: function(){}, removeListener: function(){}};
+                    }
+                    var W = [
+                        {info: {name: 'Phantom', rdns: 'app.phantom', uuid: 'u-ph'}, provider: mk('phantom', '%s')},
+                        {info: {name: 'MetaMask', rdns: 'io.metamask', uuid: 'u-mm'}, provider: mk('metamask', '%s')}];
+                    window.addEventListener('eip6963:requestProvider', function(){
+                        W.forEach(function(w){ window.dispatchEvent(new CustomEvent('eip6963:announceProvider', {detail: w})); });
+                    });
+                })();
+            """ % (PH_ADDR, MM_ADDR)
+        async def autoconnect_page(pre, wait_ms):
+            ap = await b.new_page(viewport={"width": 1100, "height": 900})
+            await ap.add_init_script(two_wallets_script(pre))
+            await ap.goto(URL)
+            await ap.wait_for_function("() => typeof E !== 'undefined' && !!E", timeout=15000)
+            await ap.wait_for_timeout(wait_ms)
+            st = await ap.evaluate("""() => ({account: account, m: window.__m,
+                key: localStorage.getItem("zaexa.base.wallet")})""")
+            return ap, st
+        # (ii) اول، تا زمانِ لازم برای پایانِ راه‌اندازی اندازه‌گیری شود
+        import time as _t
+        t_ii = _t.time()
+        ap2, st2 = await autoconnect_page("localStorage.setItem('zaexa.base.wallet','io.metamask');", 0)
+        await ap2.wait_for_function("() => !!account", timeout=60000)
+        st2 = await ap2.evaluate("() => ({account: account, m: window.__m})")
+        settle_ms = int((_t.time() - t_ii) * 1000) + 2500
+        await ap2.close()
+        ap1, st1 = await autoconnect_page("", settle_ms)
+        await ap1.close()
+        ap3, st3 = await autoconnect_page(
+            "localStorage.setItem('zaexa.base.wallet','io.metamask');localStorage.setItem('zaexa.disconnected','1');", settle_ms)
+        await ap3.close()
+        # (iv) و (v): انتخاب صریح فانتوم از انتخاب‌گر، سپس Disconnect
+        ap4, st4 = await autoconnect_page("", settle_ms)
+        # استابِ ethers بدونِ getNetwork است؛ بدونِ این، اتصالِ «کامل» در هارنس هرگز تمام نمی‌شود
+        await ap4.evaluate("""() => { E.BrowserProvider = function(){
+            this.getNetwork = async () => ({chainId: 8453n});
+            this.getSigner = async () => ({getAddress: async () => account}); }; }""")
+        await ap4.evaluate("() => openWalletPicker()")
+        await ap4.wait_for_timeout(300)
+        await ap4.evaluate("""() => [...document.querySelectorAll('#walList .walRow')]
+                                     .find(r => /Phantom/.test(r.textContent)).click()""")
+        # کلید فقط بعد از اتصالِ کامل (بعد از خواندن موجودی‌ها) ذخیره می‌شود
+        await ap4.wait_for_function("() => !!account && !!localStorage.getItem('zaexa.base.wallet')", timeout=60000)
+        st4b = await ap4.evaluate("""() => ({account: account, key: localStorage.getItem("zaexa.base.wallet"),
+                                              m: window.__m})""")
+        await ap4.evaluate("() => disconnect()")
+        st5 = await ap4.evaluate("""() => ({account: account, key: localStorage.getItem("zaexa.base.wallet")})""")
+        await ap4.close()
+        print("[base autoconnect] (i) no key: account=%s asked=%s | (ii) key=io.metamask: account=%s phantomAsked=%s"
+              % (st1["account"], st1["m"], st2["account"], st2["m"]["phantom"]))
+        print("[base autoconnect] (iii) key + disconnected flag: account=%s asked=%s | (iv) explicit Phantom: key=%r account=%s | (v) after disconnect: key=%r account=%s"
+              % (st3["account"], st3["m"], st4b["key"], st4b["account"], st5["key"], st5["account"]))
+        assert not st1["account"] and st1["m"]["phantom"] == [] and st1["m"]["metamask"] == [], \
+            "with no stored Base wallet nothing may connect silently or even be asked: %s" % st1
+        assert st2["account"] and st2["account"].lower() == MM_ADDR and st2["m"]["phantom"] == [], \
+            "the stored wallet must be the only one asked and connected: %s" % st2
+        assert not st3["account"] and st3["m"]["phantom"] == [] and st3["m"]["metamask"] == [], \
+            "the disconnected flag must beat the stored wallet: %s" % st3
+        assert st4b["account"] and st4b["account"].lower() == PH_ADDR and st4b["key"] == "app.phantom", \
+            "an explicit pick must connect and remember that wallet: %s" % st4b
+        assert st5["key"] is None and not st5["account"], "disconnect must forget the Base wallet: %s" % st5
+
+        # ---- [swap refresh] ۶ اکتبر: کلیکِ سواپ منتظرِ exit check نمی‌ماند، ولی نتیجه رندر می‌شود ----
+        sr = await b.new_page(viewport={"width": 1100, "height": 900})
+        await sr.goto(URL)
+        await sr.wait_for_function("() => typeof E !== 'undefined' && !!E", timeout=15000)
+        swr = await sr.evaluate("""async () => {
+            const save = {findRoutes, findBestSplit, smallRate, renderVenues, renderPlan, refreshAllowance,
+                          refreshButton, runExitCheck, renderExit, tokenIn, tokenOut};
+            tokenIn = routable(allTokens().find(t => t.symbol === "USDC"));
+            tokenOut = routable(allTokens().find(t => t.symbol === "WETH"));
+            $("amtIn").value = "1";
+            findRoutes = async () => ({routes: [{amountOut: 5n}], direct: []});
+            findBestSplit = async () => ({totalOut: 5n, parts: [], totalIn: 1000000n});
+            smallRate = async () => null;
+            renderVenues = () => {}; renderPlan = () => {}; refreshAllowance = async () => {}; refreshButton = () => {};
+            let exitResolved = false, rendered = 0, called = 0;
+            runExitCheck = () => { called++; return new Promise(r => setTimeout(() => { exitResolved = true; r({state: "verified", lossPct: 1}); }, 400)); };
+            renderExit = () => { rendered++; };
+            const out = {};
+            try {
+                await runQuote({forSwap: true});
+                out.swapReturnedBeforeExit = !exitResolved; out.swapCalled = called; out.swapRenderedAtReturn = rendered;
+                await new Promise(r => setTimeout(r, 600));
+                out.swapRenderedAfter = rendered;
+                exitResolved = false; rendered = 0; called = 0;
+                await runQuote();
+                out.plainReturnedAfterExit = exitResolved; out.plainCalled = called; out.plainRendered = rendered;
+            } finally { ({findRoutes, findBestSplit, smallRate, renderVenues, renderPlan, refreshAllowance,
+                          refreshButton, runExitCheck, renderExit, tokenIn, tokenOut} = save); }
+            return out;
+        }""")
+        await sr.close()
+        print("[swap refresh] forSwap: returnedBeforeExit=%s exitCalls=%s renderedAtReturn=%s renderedAfter=%s | plain: returnedAfterExit=%s exitCalls=%s rendered=%s"
+              % (swr["swapReturnedBeforeExit"], swr["swapCalled"], swr["swapRenderedAtReturn"], swr["swapRenderedAfter"],
+                 swr["plainReturnedAfterExit"], swr["plainCalled"], swr["plainRendered"]))
+        assert swr["swapReturnedBeforeExit"] and swr["swapCalled"] == 1 and swr["swapRenderedAtReturn"] == 0 \
+            and swr["swapRenderedAfter"] == 1, "a swap refresh must not wait for the exit check, but must still render it: %s" % swr
+        assert swr["plainReturnedAfterExit"] and swr["plainCalled"] == 1 and swr["plainRendered"] == 1, \
+            "a normal quote must still await the exit check: %s" % swr
+
+        # ---- [switch rejected] ۶ اکتبر: رد کردنِ تعویض شبکه در والت بنرِ «Something stopped working» نسازد ----
+        sw = await b.new_page(viewport={"width": 1100, "height": 900})
+        await sw.goto(URL)
+        await sw.wait_for_function("() => typeof E !== 'undefined' && !!E", timeout=15000)
+        swres = {}
+        for label, err in (("4001", "{code: 4001, message: 'User rejected the request.'}"),
+                           ("boom", "{code: -32603, message: 'boom'}")):
+            swres[label] = await sw.evaluate("""async (errSrc) => {
+                setNotice("");
+                const err = eval("(" + errSrc + ")");
+                walletEip1193 = {request: async (a) => { if (a.method === "wallet_switchEthereumChain") throw err; return null; }};
+                account = "0x1111111111111111111111111111111111111111"; walletChainId = 1; walletIsRemote = false;
+                paintWallet();
+                const label = document.getElementById("connectBtn").textContent.trim();
+                document.getElementById("connectBtn").click();
+                await new Promise(r => setTimeout(r, 400));
+                return {label, notice: document.getElementById("notices").innerText,
+                        bannerHidden: document.getElementById("errBanner").hidden};
+            }""", err)
+        await sw.close()
+        print("[switch rejected] rejection 4001: button=%r notice=%r bannerHidden=%s | error boom: notice=%r bannerHidden=%s"
+              % (swres["4001"]["label"], swres["4001"]["notice"][:60], swres["4001"]["bannerHidden"],
+                 swres["boom"]["notice"][:60], swres["boom"]["bannerHidden"]))
+        assert swres["4001"]["label"] == "Switch to Base" and "Network switch cancelled" in swres["4001"]["notice"] \
+            and swres["4001"]["bannerHidden"], "a rejected switch must show the warn notice and no banner: %s" % swres
+        assert "boom" in swres["boom"]["notice"] and swres["boom"]["bannerHidden"], \
+            "any other switch error must show the err notice and no banner: %s" % swres
 
         # ---- [counter mids] ۲۶ سپتامبر: مسیریابی از طریق جفتِ اصلیِ خودِ توکن ----
         # (SN80 -> TAO -> WETH). GT/multicall را با gtBook/erc20 دستی جواب می‌دهیم؛

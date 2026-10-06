@@ -722,6 +722,9 @@ main{max-width:1140px;margin:0 auto;padding:8px 20px 56px;display:flex;flex-dire
 }
 .cta:hover:not(:disabled){transform:translateY(-1px);box-shadow:0 9px 26px var(--glow)}
 .cta:disabled{background:var(--raise);color:var(--tx3);box-shadow:none;cursor:not-allowed}
+/* ۶ اکتبر (حسام): ارتفاع دکمه‌ی سواپ هرگز نباید وسط سواپ عوض شود؛ برچسبِ بلند
+   دو خطی می‌شد و دکمه بزرگ‌تر می‌شد. */
+.cta{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .spin{width:14px;height:14px;border-radius:50%;border:2px solid currentColor;
   border-top-color:transparent;animation:sp .7s linear infinite;display:inline-block;
   vertical-align:-2px;margin-right:8px}
@@ -2911,7 +2914,14 @@ function unreliable(s){return s.attempted>0&&s.rpcFailed/s.attempted>0.25;}
 async function quoteMany(specs,stats){
   if(!specs.length)return[];
   stats.attempted+=specs.length;
-  return quoteBatch(specs,stats);
+  // اندازه‌گیری روی سایت زنده: برای cbETH→wstETH دسته‌ی ~۶۹تایی revert می‌کرد و
+  // نیمه‌کردنِ پشت‌سرهم یک دور را ۱٫۰۵ تا ۱٫۳۵ ثانیه می‌کرد؛ همان مشخصات در تکه‌های
+  // ۱۶تایی و موازی ۰٫۲۳ ثانیه شد. برای جفت‌هایی که دسته‌شان revert نمی‌کرد بی‌اثر بود.
+  const QUOTE_CHUNK=16;
+  const chunks=[];
+  for(let i=0;i<specs.length;i+=QUOTE_CHUNK)chunks.push(specs.slice(i,i+QUOTE_CHUNK));
+  const parts=await Promise.all(chunks.map(c=>quoteBatch(c,stats)));
+  return [].concat(...parts);
 }
 /* ۲۴ سپتامبر — «The network did not answer. 36 of 36 quotes failed» برای هر
    فروشِ cbBTC. شبکه سالم بود: کلِ دسته‌ی aggregate3 با «out of gas: gas required
@@ -2929,8 +2939,8 @@ async function quoteBatch(specs,stats){
   catch(e){
     if(specs.length>1&&!cannotAsk(e)&&isRevert(e)){
       const mid=specs.length>>1;
-      const a=await quoteBatch(specs.slice(0,mid),stats);
-      const b=await quoteBatch(specs.slice(mid),stats);
+      // دو نیمه موازی پرسیده می‌شوند؛ ترتیب نتیجه همان a سپس b است
+      const [a,b]=await Promise.all([quoteBatch(specs.slice(0,mid),stats),quoteBatch(specs.slice(mid),stats)]);
       return a.concat(b);
     }
     stats.rpcFailed+=specs.length;return specs.map(()=>({out:null,status:"unknown"}));
@@ -3112,14 +3122,24 @@ async function findBestSplit(routes,amountIn,stats){
   }
   return plan;
 }
-async function priceImpact(tIn,tOut,amountIn,plan,stats){
+// نیمه‌ی اول priceImpact: بهترین نرخ در مبلغ کوچک؛ مستقل از plan است و می‌تواند
+// هم‌زمان با findBestSplit گرفته شود
+async function smallRate(tIn,tOut,amountIn,stats){
   const small=amountIn/1000n>0n?amountIn/1000n:1n;
   const {routes}=await findRoutes(tIn,tOut,small,stats);
   if(!routes.length)return null;
+  return {small,out:routes[0].amountOut};
+}
+// نیمه‌ی دوم: فقط حساب با plan.totalOut (همان فرمول قبلی)
+function impactFrom(sr,amountIn,plan){
+  if(!sr)return null;
   const SC=10n**18n;
-  const rs=(routes[0].amountOut*SC)/small,rb=(plan.totalOut*SC)/amountIn;
+  const rs=(sr.out*SC)/sr.small,rb=(plan.totalOut*SC)/amountIn;
   if(rs<=0n)return null;
   return Math.max(0,Number(((rs-rb)*10000n)/rs)/100);
+}
+async function priceImpact(tIn,tOut,amountIn,plan,stats){
+  return impactFrom(await smallRate(tIn,tOut,amountIn,stats),amountIn,plan);
 }
 /* قرارداد جدید ETH بومی را با address(0) می‌شناسد و خودش wrap/unwrap می‌کند.
    مسیرها همچنان با WETH ساخته می‌شوند. */
@@ -5862,7 +5882,9 @@ async function solveForOutput(tIn,tOut,target,stats,seq){
   return best;
 }
 
-async function runQuote(){
+/* ۶ اکتبر: روی کلیکِ سواپ (forSwap) منتظرِ exit check نمی‌مانیم؛ نتیجه هر وقت رسید
+   رندر می‌شود تا کلیک ۰٫۴ تا ۲ ثانیه عقب نیفتد و برچسبِ «Checking exit…» هم تا ابد نماند. */
+async function runQuote(opts){
   const seq=++quoteSeq;
   // در حالت معکوس، اول مبلغ ورودی را پیدا می‌کنیم
   if(mode==="targetOut"){
@@ -5891,7 +5913,8 @@ async function runQuote(){
       await refreshAllowance();
       if(seq!==quoteSeq)return;
       refreshButton();
-      renderExit(rememberExit2(await runExitCheck(plan,r.amountIn)));
+      if(opts&&opts.forSwap)runExitCheck(plan,r.amountIn).then(x=>{if(seq===quoteSeq)renderExit(rememberExit2(x));}).catch(()=>{});
+      else renderExit(rememberExit2(await runExitCheck(plan,r.amountIn)));
     }catch(err){
       if(seq!==quoteSeq)return;
       showError("Quote failed",err);currentPlan=null;refreshButton();tokenExitFallback(tkExitSeq,"noroute");
@@ -5925,9 +5948,11 @@ async function runQuote(){
       setNotice(noRouteNote(stats,`No direct pool, and no path through ${CHAIN.wrapped}/${CHAIN.reference} has liquidity for this pair.`));
       currentPlan=null;refreshButton();ev("quote:none","","base");tokenExitFallback(tkExitSeq,"noroute");return;
     }
-    const plan=await findBestSplit(routes,amountIn,stats);
+    // نرخ مبلغ کوچک هم‌زمان با تقسیم‌بندی گرفته می‌شود
+    const [plan,sr]=await Promise.all([findBestSplit(routes,amountIn,stats),
+      smallRate(routable(tokenIn),routable(tokenOut),amountIn,stats)]);
     if(seq!==quoteSeq)return;
-    plan.impact=await priceImpact(routable(tokenIn),routable(tokenOut),amountIn,plan,stats);
+    plan.impact=impactFrom(sr,amountIn,plan);
     if(seq!==quoteSeq)return;
     plan.stats=stats;currentPlan=plan;ev("quote:ok","","base");
     renderVenues(direct,plan);renderPlan(plan);
@@ -5935,7 +5960,8 @@ async function runQuote(){
     if(seq!==quoteSeq)return;
     refreshButton();
     // بعد از رندر اجرا می‌شود تا قیمت را عقب نیندازد
-    renderExit(rememberExit2(await runExitCheck(plan,amountIn)));
+    if(opts&&opts.forSwap)runExitCheck(plan,amountIn).then(x=>{if(seq===quoteSeq)renderExit(rememberExit2(x));}).catch(()=>{});
+    else renderExit(rememberExit2(await runExitCheck(plan,amountIn)));
   }catch(err){
     if(seq!==quoteSeq)return;
     showError("Quote failed",err);currentPlan=null;refreshButton();tokenExitFallback(tkExitSeq,"noroute");
@@ -6865,7 +6891,7 @@ async function connectWalletConnect(){
 function renderWalletList(){
   const list=$("walList"),opts=walletOptions();
   const rows=opts.map(o=>({name:o.name,icon:o.icon,kind:o.kind,
-    go:()=>connectWithProvider(o.provider,true)}));
+    go:()=>connectWithProvider(o.provider,true,o.key)}));
   // WalletConnect همیشه هست — چیزی نصب نمی‌خواهد و تنها راه کیف پول موبایل است
   rows.push({name:"WalletConnect",icon:WC_ICON,kind:"Mobile wallet · QR",
     go:connectWalletConnect});
@@ -6993,7 +7019,7 @@ function attachWalletEvents(provider){
     provider.on("chainChanged",walletEventHandlers.chainChanged);
   }
 }
-async function connectWithProvider(provider,requestAccounts){
+async function connectWithProvider(provider,requestAccounts,walletKey){
   try{
     const a=await requestWalletAccounts(provider,requestAccounts);
     if(!a||!a[0])throw new Error("No wallet account was returned.");
@@ -7014,6 +7040,8 @@ async function connectWithProvider(provider,requestAccounts){
     // فقط «افزونه» یا «WalletConnect» — نه نام والت، که خودش یک ویژگیِ
     // قابل‌ردیابی از کاربر است.
     ev("wallet:on",provider===wcProvider?"wc":"inj","base");
+    // فقط انتخاب صریح و اتصالِ کامل؛ WalletConnect کلید نمی‌دهد (نشستِ خودش را دارد)
+    if(requestAccounts&&typeof walletKey==="string"&&walletKey)setBaseWallet(walletKey);
   }catch(e){setNotice(isUserRejection(e)
     ? note("warn","<b>Connection cancelled in your wallet.</b>")
     : note("err",esc(e.message||"Connection rejected.")));}
@@ -7023,13 +7051,22 @@ async function connectWithProvider(provider,requestAccounts){
    ما به‌جایش تصمیم بگیریم. */
 async function connect(){ev("wallet:open","","base");openWalletPicker();}
 async function switchNetwork(){
-  const inj=walletEip1193||legacyInjected();if(!inj)return;
-  try{await inj.request({method:"wallet_switchEthereumChain",params:[{chainId:CHAIN.hexId}]});}
-  catch(e){
-    if(e.code===4902)await inj.request({method:"wallet_addEthereumChain",params:[{
-      chainId:CHAIN.hexId,chainName:"Base",nativeCurrency:{name:"Ether",symbol:"ETH",decimals:18},
-      rpcUrls:["https://mainnet.base.org"],blockExplorerUrls:[CHAIN.explorer]}]});
-    else throw e;}
+  /* ۶ اکتبر: مالک کنار فانتوم با دکمه‌ی «Switch to Base» بنر E-PR-9A82 را دید؛ این مسیر
+     همان رد‌شدنِ بدونِ catch است که در کد پیدا شد (متنِ دقیقِ خطا به‌دست نیامد). رد کردنِ
+     تعویض در والت خطای برنامه نیست و هرگز نباید از این تابع بیرون بزند. */
+  try{
+    const inj=walletEip1193||legacyInjected();if(!inj)return;
+    try{await inj.request({method:"wallet_switchEthereumChain",params:[{chainId:CHAIN.hexId}]});}
+    catch(e){
+      if(e&&e.code===4902)await inj.request({method:"wallet_addEthereumChain",params:[{
+        chainId:CHAIN.hexId,chainName:"Base",nativeCurrency:{name:"Ether",symbol:"ETH",decimals:18},
+        rpcUrls:["https://mainnet.base.org"],blockExplorerUrls:[CHAIN.explorer]}]});
+      else throw e;}
+  }catch(e){
+    setNotice(isUserRejection(e)
+      ? note("warn","<b>Network switch cancelled in your wallet.</b>")
+      : note("err",esc((e&&e.message)||"Could not switch the network.")));
+  }
 }
 function paintWallet(){
   const b=$("connectBtn"),addr=$("walletAddr");
@@ -7077,6 +7114,20 @@ function markDisconnected(on){
   try{on?localStorage.setItem(DISCONNECT_KEY,"1"):localStorage.removeItem(DISCONNECT_KEY);}
   catch{}
 }
+/* ۶ اکتبر: کیفِ پولی که کاربر *برای Base* انتخاب کرده. فانتوم یک اجازه‌ی سایت را
+   بین زنجیره‌ها مشترک نگه می‌دارد؛ پس وقتی روی سولانا وصل می‌شد، فراهم‌کننده‌ی EVM
+   آن هم به eth_accounts جواب می‌داد و Base بی‌صدا به آدرس EVM فانتوم وصل می‌شد.
+   حالا اتصال خودکار فقط به همین کلید برمی‌گردد. */
+const BASE_WALLET_KEY="zaexa.base.wallet";
+function getBaseWallet(){
+  try{return localStorage.getItem(BASE_WALLET_KEY)||"";}catch{return "";}
+}
+function setBaseWallet(k){
+  try{localStorage.setItem(BASE_WALLET_KEY,k);}catch{}
+}
+function clearBaseWallet(){
+  try{localStorage.removeItem(BASE_WALLET_KEY);}catch{}
+}
 /* ۲۴ سپتامبر: حسام دید متامسک بعد از Disconnect هنوز سایت را «وصل» می‌داند
    و دفعه‌ی بعد خودبه‌خود وصل است. متامسک (و هر والتی که EIP-2255 را کامل دارد)
    حالا wallet_revokePermissions دارد — پس برای افزونه هم قطعِ *واقعی* ممکن
@@ -7090,7 +7141,7 @@ async function revokeInjected(provider){
   }catch{return false;}
 }
 async function disconnect(){
-  markDisconnected(true);
+  markDisconnected(true);clearBaseWallet();
   /* WalletConnect برخلاف افزونه‌ها قطع اتصال *واقعی* دارد: نشست را می‌بندد
      و گوشی هم آن را می‌بیند. پس آنجا واقعاً دسترسی برداشته می‌شود. */
   const wasRemote=walletIsRemote,inj=walletEip1193;
@@ -7337,7 +7388,7 @@ async function doSwap(){
   let chosenSig=null;
   setBusy(true,"Refreshing price…");
   try{
-    await runQuote();
+    await runQuote({forSwap:true});
     if(!currentPlan){setBusy(false);refreshButton();return;}
     /* ⚠️ مقدار ورودی *بعد* از runQuote خوانده می‌شود، و از خودِ نقشه.
        در حالت «کوت معکوس» runQuote مقدار ورودی را دوباره حل می‌کند و کادر
@@ -7425,7 +7476,7 @@ async function doSwap(){
       setNotice(note("warn",`<b>The best route failed simulation; fell back to ${esc(chosen.label)}.</b><br>`+
         `Minimum received is now <b>${fmt(chosen.minOut,tokenOut.decimals)} ${esc(tokenOut.symbol)}</b>.`));
 
-    setBusy(true,`Confirm ${fmt(amountIn,tokenIn.decimals,4)} ${tokenIn.symbol} → ${tokenOut.symbol} in wallet…`);
+    setBusy(true,"Confirm in wallet…");
     let gasLimit;
     if(sentAnyway)gasLimit=1_500_000n;
     else try{
@@ -9405,7 +9456,7 @@ async function solDoSwap(){
 
     const swapInSym=solSide==="buy"?solRefSymbol:(solTokenSymbol||"—");
     const swapOutSym=solSide==="buy"?(solTokenSymbol||"—"):solRefSymbol;
-    btn.textContent=`Confirm ${$("solAmt").value||""} ${swapInSym} → ${swapOutSym} in wallet…`;
+    btn.textContent="Confirm in wallet…";
     const f=solWalletApi.features;
     let sigB58=null;
     if(f["solana:signAndSendTransaction"]){
@@ -9436,7 +9487,7 @@ async function solDoSwap(){
         const signedBytes2=row2.signedTransaction;
         btn.textContent="Sending…";
         solAssertSwapContext(context);
-        sigB58=await solSendSignedWithRetry(btn,context,f["solana:signTransaction"],signedBytes2,`Confirm ${$("solAmt").value||""} ${swapInSym} → ${swapOutSym} in wallet…`);
+        sigB58=await solSendSignedWithRetry(btn,context,f["solana:signTransaction"],signedBytes2,"Confirm in wallet…");
       }
     }else if(f["solana:signTransaction"]){
       const res=await f["solana:signTransaction"].signTransaction(
@@ -9447,7 +9498,7 @@ async function solDoSwap(){
       btn.textContent="Sending…";
       solAssertSwapContext(context);
       // اولین امضا بلافاصله بعدِ بایتِ compact-u16 است (داخلِ solSendSignedWithRetry)
-      sigB58=await solSendSignedWithRetry(btn,context,f["solana:signTransaction"],signedBytes,`Confirm ${$("solAmt").value||""} ${swapInSym} → ${swapOutSym} in wallet…`);
+      sigB58=await solSendSignedWithRetry(btn,context,f["solana:signTransaction"],signedBytes,"Confirm in wallet…");
     }else{
       throw new Error("wallet supports neither signing feature");
     }
@@ -10105,12 +10156,20 @@ $("copyAddrBtn").onclick=(e)=>{
   await new Promise(r=>setTimeout(r,120));
   // اگر کاربر خودش قطع کرده، هیچ اتصال خودکاری — حتی اگر والت هنوز مجاز بداند
   if(!userDisconnected()){
+    /* ریشه‌ی باگ فانتوم: قبلاً از میان *همه‌ی* کیف‌پول‌ها اولین کسی که به eth_accounts
+       حساب می‌داد وصل می‌شد، و فانتوم بعد از اتصال روی سولانا همیشه جواب می‌دهد.
+       حالا فقط کیفی که کاربر صریحاً برای Base انتخاب کرده (BASE_WALLET_KEY) پرسیده
+       می‌شود. کاربرانِ قبلی که کلیدی ذخیره ندارند باید یک بار Connect را بزنند. */
     let back=false;
-    for(const o of walletOptions()){
-      try{
-        const a=await o.provider.request({method:"eth_accounts"});
-        if(a&&a.length){await connectWithProvider(o.provider,false);back=true;break;}
-      }catch{}
+    const wk=getBaseWallet();
+    if(wk){
+      const o=walletOptions().find(x=>x.key===wk);
+      if(o){
+        try{
+          const a=await o.provider.request({method:"eth_accounts"});
+          if(a&&a.length){await connectWithProvider(o.provider,false);back=true;}
+        }catch{}
+      }
     }
     // و اگر افزونه‌ای نبود، شاید نشست WalletConnect هنوز زنده باشد
     if(!back)await restoreWalletConnect();
