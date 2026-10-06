@@ -11867,6 +11867,97 @@ async def main():
         assert "can't be quoted by output amount" in e2_notice, \
             "E: a rejected ExactOut quote must show the exact fallback sentence, got %r" % e2_notice
 
+        # [sol reverse solve] ExactOut همیشه شکست می‌خورد؛ ExactIn یک AMMِ قطعی است.
+        # راهکار باید با ExactIn مقدارِ پرداخت را پیدا کند (حداکثر ۵ تماسِ حل).
+        from urllib.parse import urlparse as _up, parse_qs as _pq
+        def rs_fwd(x):
+            return x * 1000 * 10**12 // (x + 10**12) * 9975 // 10000
+        def rs_rev_guess(y):
+            return y // 1000 * 98 // 100       # حدود ۲٪ دور از جوابِ واقعی
+        async def rs_open(mode, delay=0.0):
+            rs_state = {"mode": mode, "log": [], "delay": delay}
+            rpg = await open_sol_swap_page({"v": "sell", "ms": 100})
+            async def rs_stub(route):
+                qs = {k: v[0] for k, v in _pq(_up(route.request.url).query).items()}
+                m = rs_state["mode"]
+                if rs_state["delay"]:
+                    await asyncio.sleep(rs_state["delay"])
+                if "onlyDirectRoutes" not in qs:
+                    rs_state["log"].append(qs)
+                amt = int(qs.get("amount", "0"))
+                is_out = qs.get("swapMode") == "ExactOut"
+                forward = qs.get("inputMint") != SWAP_MINT
+                bad = is_out or m == "allfail" \
+                    or (m == "norev" and not forward and "onlyDirectRoutes" not in qs) \
+                   
+                if bad:
+                    await route.fulfill(status=400, content_type="application/json",
+                                         body=_json.dumps({"error": "jup:quote:400"}))
+                    return
+                if forward:
+                    body = dict(SOL_QUOTE_FIXTURE, inAmount=str(amt), outAmount=str(rs_fwd(amt)))
+                else:
+                    body = dict(SOL_QUOTE_FIXTURE, inAmount=str(amt), outAmount=str(rs_rev_guess(amt)))
+                await route.fulfill(status=200, content_type="application/json", body=_json.dumps(body))
+            await rpg.route("**/sol/quote**", rs_stub)
+            return rpg, rs_state
+
+        RS_TARGET = 10000 * 10**6
+        # (a) حلِ عادی با حدسِ اولِ معکوس
+        rpg, rs_a = await rs_open("normal")
+        await rpg.fill("#solOutRead", "10000")
+        await rpg.wait_for_timeout(1500)
+        ra_mode = await rpg.evaluate("solMode")
+        ra_amt = await rpg.input_value("#solAmt")
+        ra_out = int(await rpg.evaluate("solQuote ? solQuote.outAmount : '0'"))
+        ra_note = await rpg.inner_text("#solNotices")
+        await rpg.close()
+        ra_calls = [c for c in rs_a["log"] if c.get("swapMode") != "ExactOut"]
+        print("[sol reverse solve] (a) mode=%s pay=%r out=%d target=%d solveCalls=%d" % (ra_mode, ra_amt, ra_out, RS_TARGET, len(ra_calls)))
+        assert ra_mode == "exactIn" and ra_amt != "", "reverse solve (a): mode must become exactIn with the pay field filled, got %r / %r" % (ra_mode, ra_amt)
+        assert RS_TARGET <= ra_out <= RS_TARGET * 101 // 100, "reverse solve (a): quoted out must be within [target, target+1%%], got %d" % ra_out
+        assert 1 <= len(ra_calls) <= 5, "reverse solve (a): at most 5 solver calls, got %d" % len(ra_calls)
+        assert "so we found the amount to pay" in ra_note, "reverse solve (a): the ok notice is missing: %r" % ra_note
+
+        # (b) معکوس هم شکست می‌خورد ولی پروبِ یک توکن جواب می‌دهد
+        rpg, rs_b = await rs_open("norev")
+        await rpg.fill("#solOutRead", "10000")
+        await rpg.wait_for_timeout(1500)
+        rb_mode = await rpg.evaluate("solMode")
+        rb_out = int(await rpg.evaluate("solQuote ? solQuote.outAmount : '0'"))
+        rb_calls = [c for c in rs_b["log"] if c.get("swapMode") != "ExactOut"]
+        await rpg.close()
+        print("[sol reverse solve] (b) no reverse quote -> mode=%s out=%d solveCalls=%d" % (rb_mode, rb_out, len(rb_calls)))
+        assert rb_mode == "exactIn" and rb_out >= RS_TARGET, "reverse solve (b): the probe path must still solve, got %s / %d" % (rb_mode, rb_out)
+        assert len(rb_calls) <= 5, "reverse solve (b): at most 5 solver calls, got %d" % len(rb_calls)
+
+        # (ج) همه‌ی ExactIn ها شکست می‌خورند — رفتارِ قدیمی
+        rpg, rs_c = await rs_open("allfail")
+        await rpg.fill("#solOutRead", "10000")
+        await rpg.wait_for_timeout(1500)
+        rc_note = await rpg.inner_text("#solNotices")
+        rc_quote = await rpg.evaluate("solQuote")
+        rc_mode = await rpg.evaluate("solMode")
+        await rpg.close()
+        print("[sol reverse solve] (c) everything fails -> mode=%s quote=%r notice=%r" % (rc_mode, rc_quote, rc_note[:70]))
+        assert "This pair can't be quoted by output amount — enter the amount you pay." in rc_note, "reverse solve (c): old warn notice expected, got %r" % rc_note
+        assert rc_quote is None and rc_mode == "exactIn", "reverse solve (c): quote must be null and mode exactIn, got %r / %s" % (rc_quote, rc_mode)
+
+        # (د) کهنگی — وسطِ حل مبلغ عوض می‌شود؛ حلِ اول نباید چیزی بنویسد
+        rpg, rs_d = await rs_open("normal", delay=0.5)
+        await rpg.fill("#solOutRead", "10000")
+        await rpg.wait_for_timeout(1000)               # ExactOut برگشته، معکوس در راه است
+        rs_d["mode"] = "allfail"
+        await rpg.fill("#solOutRead", "20000")
+        await rpg.wait_for_timeout(4500)
+        rd_amt = await rpg.input_value("#solAmt")
+        rd_quote = await rpg.evaluate("solQuote")
+        rd_note = await rpg.inner_text("#solNotices")
+        await rpg.close()
+        print("[sol reverse solve] (d) stale solve writes nothing -> pay=%r quote=%r notice=%r" % (rd_amt, rd_quote, rd_note[:50]))
+        assert rd_amt == "" and rd_quote is None, "reverse solve (d): a stale solve must not write, got %r / %r" % (rd_amt, rd_quote)
+        assert "so we found the amount to pay" not in rd_note, "reverse solve (d): the stale ok notice leaked: %r" % rd_note
+
         # F) after Confirmed, getBalance is polled again promptly; clicking the
         # pay-side balance figure fills the field with the full spendable amount.
         f_rpc_log = []

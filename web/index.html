@@ -8758,6 +8758,58 @@ function solQuoteFailMessage(reason,retried){
     default:return "Quote service did not answer. Try again in a moment.";
   }
 }
+/* ۶ اکتبر — جوپیتر ExactOut را فقط روی بعضی AMMها پشتیبانی می‌کند، پس برای خیلی از توکن‌ها
+   «مقدارِ دریافتی» کوت نمی‌گیرد. مثلِ solveForOutput در Base، مقدارِ پرداخت را با ExactIn
+   عددی پیدا می‌کنیم (حداکثر ۵ تماس)؛ سواپ بعد از آن یک ExactInِ عادی است، با همان
+   محافظِ حداقلِ دریافتی. */
+async function solSolveForOutput(seq,target,inputMint,outputMint){
+  const q=async(inMint,outMint,amt)=>{
+    try{
+      const p=new URLSearchParams({inputMint:inMint,outputMint:outMint,amount:String(amt),slippageBps:String(slippageBps)});
+      const r=await withTimeout(fetch(location.origin+"/sol/quote?"+p.toString(),{headers:{accept:"application/json"}}),9000);
+      const j=await r.json().catch(()=>null);
+      if(!r.ok||!j||j.error)return null;
+      return j;
+    }catch{return null;}
+  };
+  const posOut=j=>{
+    if(!j||!/^\d+$/.test(String(j.outAmount)))return null;
+    const o=BigInt(j.outAmount);
+    return o>0n?o:null;
+  };
+  const decIn=solInputDecimals();
+  let guess=null;
+  const rev=await q(outputMint,inputMint,target);
+  if(seq!==solQuoteSeq)return {stale:true};
+  const revOut=posOut(rev);
+  if(revOut!=null)guess=revOut;
+  else{
+    if(!Number.isInteger(decIn)||decIn<0)return {fail:true};
+    const unit=10n**BigInt(decIn);
+    const pr=await q(inputMint,outputMint,unit);
+    if(seq!==solQuoteSeq)return {stale:true};
+    const o=posOut(pr);
+    if(o==null)return {fail:true};
+    guess=unit*target/o;
+  }
+  let r=null,out=0n;
+  for(let i=0;i<3;i++){
+    if(guess<=0n)return {fail:true};
+    r=await q(inputMint,outputMint,guess);
+    if(seq!==solQuoteSeq)return {stale:true};
+    const o=posOut(r);
+    if(o==null)return {fail:true};
+    out=o;
+    if(out>=target&&(out-target)*10000n<=target*100n)return {quote:r,guess};
+    if(i<2){
+      const old=guess;
+      guess=guess*target/out;
+      if(guess*out/old<target)guess=guess*10030n/10000n;
+    }
+  }
+  if(out>=target)return {quote:r,guess};
+  return {fail:true};
+}
 async function solFetchQuote(isRetry){
   const seq=++solQuoteSeq;
   const exactOut=solMode==="exactOut";
@@ -8791,7 +8843,21 @@ async function solFetchQuote(isRetry){
       if(exactOut){
         // E — این جفت با ExactOut جواب نمی‌دهد؛ برگشت به حالتِ عادی، نه
         // ماندن روی یک خطای مبهم.
+        const sv=await solSolveForOutput(seq,amountRaw,inputMint,outputMint);
+        if(sv.stale)return;
         solMode="exactIn";
+        if(sv.quote){
+          const decIn=solInputDecimals();
+          $("solAmt").value=solFormatUnits(sv.guess.toString(),decIn==null?9:decIn);
+          const clr=$("solAmtClear");if(clr)clr.hidden=!$("solAmt").value;
+          solQuote=sv.quote;
+          solQuoteAt=Date.now();
+          ev("quote:ok", "", "solana");solCompareDirect(sv.quote,seq);
+          solSetNotice(note("ok","This pair can't be quoted by output amount, so we found the amount to pay that gives at least what you asked for. You receive at least the minimum shown below."));
+          solRenderReadout();
+          solUpdateSwapBtn();
+          return;
+        }
         solQuote=null;solRenderReadout();
         solSetNotice(note("warn","This pair can't be quoted by output amount — enter the amount you pay."));
         solUpdateSwapBtn();
