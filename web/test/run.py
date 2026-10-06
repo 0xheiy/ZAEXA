@@ -2051,6 +2051,32 @@ async def check_theme_button(p, errors):
     await b.close()
     print("[theme button] round 38x38 push button, border-radius 50%%, exactly one icon visible per theme, click toggles theme+aria-checked: %d runs on app/pairs/landing" % len(out))
 
+async def check_setbtn_pressed(p, errors):
+    """[settings pressed] ۶ اکتبر — دکمه‌ی تنظیمات با کلیک (active) و با منوی باز باید گود شود؛
+    قبلاً .chip:not(.solid):not(#themeBtn) سایه‌ی برآمده را نگه می‌داشت."""
+    b = await p.chromium.launch()
+    rows = []
+    for name in ("index.html", "pairs.html"):
+        for scheme in ("light", "dark"):
+            pg = await b.new_page(viewport={"width": 1440, "height": 900}, color_scheme=scheme)
+            await pg.route("**/*", lambda route: route.continue_() if route.request.url.startswith("file:") else route.abort())
+            await pg.goto("file://" + os.path.join(HERE, "..", name), wait_until="domcontentloaded")
+            await pg.wait_for_timeout(400)
+            rest = await pg.evaluate("() => getComputedStyle(document.getElementById('setBtn')).boxShadow")
+            exp = await pg.evaluate("() => { const b = document.getElementById('setBtn'); b.setAttribute('aria-expanded','true'); const s = getComputedStyle(b).boxShadow; b.setAttribute('aria-expanded','false'); return s; }")
+            bb = await (await pg.query_selector("#setBtn")).bounding_box()
+            await pg.mouse.move(bb["x"] + bb["width"] / 2, bb["y"] + bb["height"] / 2)
+            await pg.mouse.down()
+            act = await pg.evaluate("() => getComputedStyle(document.getElementById('setBtn')).boxShadow")
+            await pg.mouse.up()
+            await pg.close()
+            rows.append((name, scheme, "inset" in rest, "inset" in exp, "inset" in act))
+            assert "inset" not in rest, "[settings pressed] %s/%s: resting settings button must stay raised: %r" % (name, scheme, rest)
+            assert "inset" in exp, "[settings pressed] %s/%s: expanded settings button must be inset: %r" % (name, scheme, exp)
+            assert "inset" in act, "[settings pressed] %s/%s: settings button under the mouse (active) must be inset: %r" % (name, scheme, act)
+    await b.close()
+    print("[settings pressed] " + "; ".join("%s/%s rest=%s expanded=%s active=%s" % r for r in rows))
+
 async def check_theme_migration(p, errors):
     """رفعِ باگِ «تم بین صفحه‌ها زنده نمی‌ماند» — پروبِ ۶ (پویا): مهاجرتِ
     یک‌باره‌ی کلیدِ localStorage واقعاً روی یک صفحه‌ی بارگذاری‌شده اتفاق
@@ -3839,6 +3865,7 @@ async def main():
         await check_real_page_from_disk(p)
         await check_theme_migration(p, errors)
         await check_theme_button(p, errors)
+        await check_setbtn_pressed(p, errors)
         await check_landing_mobile(p, errors)
         await check_canvas_palette_live(p, errors)
         await check_canvas_phases(p, errors)

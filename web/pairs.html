@@ -460,7 +460,8 @@ a.walletAction{text-decoration:none}
 #setBtn .gearIcon{display:block;width:18px;height:18px}
 /* رنگ دکمه تنظیمات همان نوار تب است در هر دو تم */
 #setBtn{background:var(--bg);border:1px solid var(--line)}
-#setBtn:active,#setBtn:has(+ #setPop.on),#setBtn[aria-expanded="true"]{transform:none;background:var(--bg);color:var(--acc);box-shadow:inset 2px 2px 5px var(--soft-lo),inset -2px -2px 5px var(--soft-hi)}
+/* ۶ اکتبر — حالتِ فشرده‌ی تنظیمات با کلیک دیده نمی‌شد: .chip:not(.solid):not(#themeBtn) با وزنِ (1,2,0) از #setBtn:active با وزنِ (1,1,0) می‌برد و سایه را برآمده نگه می‌داشت. .chip.round وزن را به (1,3,0) می‌رساند؛ رنگِ زمینه عمداً این‌جا نیست تا قاعده‌ی تیره‌ی #08070d بماند. */
+#setBtn.chip.round:active,#setBtn.chip.round:has(+ #setPop.on),#setBtn.chip.round[aria-expanded="true"]{transform:none;color:var(--acc);box-shadow:inset 2px 2px 5px var(--soft-lo),inset -2px -2px 5px var(--soft-hi)}
 @media(max-width:720px){
   /* ۴ اکتبر — به خواستِ مالک: نوار خودش تخت است (بی‌برجستگی، همان رنگِ تیره‌ی فعلی)، گوشه‌ها کاملاً گرد،
      و فقط تبِ فعال در آن فرو رفته — همان رفتارِ نوارِ بالای دسکتاپ. */
