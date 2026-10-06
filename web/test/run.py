@@ -9873,6 +9873,29 @@ async def main():
         assert pr_code.startswith("E-PR-"), (
             "a rejection must be labelled as one, not folded into E-JS: %r" % pr_code)
 
+        # ---- [provider rejection] ۶ اکتبر: ردِ بی‌پشته‌ی EIP-1193 از والت شمرده می‌شود، بنر نمی‌آورد ----
+        # (مالک: E-PR-87AD، wallet_getCapabilities، فانتوم روی Base). هر حالت در صفحه‌ی تازه.
+        pr_cases = [
+            ("a wallet object", "Promise.reject({code: -32601, message: 'the method wallet_getCapabilities does not exist/is not available'})", True),
+            ("an Error", "Promise.reject(new Error('ours'))", False),
+            ("no numeric code", "Promise.reject({message: 'no code'})", False),
+            ("has a stack", "Promise.reject({code: 4001, message: 'x', stack: 'Error: x\\n at https://zaexa.com/app:1:1'})", False),
+        ]
+        pr_res = []
+        for label, js, want_hidden in pr_cases:
+            ppg, p_seen = await err_page()
+            before = len(p_seen)
+            await ppg.evaluate("() => { %s; }" % js)
+            await ppg.wait_for_timeout(700)
+            hidden = await ppg.evaluate("() => document.getElementById('errBanner').hidden")
+            pr_res.append((label, hidden, err_names(p_seen[before:]), err_details(p_seen[before:]), want_hidden))
+            await ppg.close()
+        print("[provider rejection] " + " | ".join("%s: bannerHidden=%s beacons=%s hex=%s" % r[:4] for r in pr_res))
+        for label, hidden, names, hexes, want_hidden in pr_res:
+            assert hidden == want_hidden, "%s: banner hidden=%s, expected %s" % (label, hidden, want_hidden)
+            assert names == ["err:promise"], "%s: must still be counted exactly once: %s" % (label, names)
+        assert pr_res[0][3] == ["87AD"], "the counted hex must stay the owner's 87AD: %s" % pr_res[0][3]
+
         # 4) لوگوی توکنی که ۴۰۴ می‌دهد رفتار *عادی* است. اگر اینجا بنر بالا
         #    بیاید، روی سایت زنده روی هر توکن بی‌لوگو یک خطای دروغین می‌نشیند.
         impg, im_seen = await err_page()
