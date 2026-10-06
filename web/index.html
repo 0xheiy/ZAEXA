@@ -597,7 +597,8 @@ html[data-boot-view] #view-swap.view.on{display:none}
 html[data-boot-view="folio"] #view-folio,html[data-boot-view="flow"] #view-flow,
 html[data-boot-view="token"] #view-token,html[data-boot-view="faq"] #view-faq{display:flex;flex-direction:column;gap:18px}
 html[data-boot-view] .nav button[data-view="swap"].on{background:none;color:var(--tx2);font-weight:inherit;box-shadow:none}
-html[data-boot-view="folio"] .nav button[data-view="folio"],html[data-boot-view="flow"] .nav button[data-view="flow"]{
+/* ۶ اکتبر: Portfolio دیگر تب ندارد؛ نمای flow حالا تبِ Markets را روشن می‌کند. */
+html[data-boot-view="flow"] .nav #navMarkets{
   background:var(--card);color:var(--tx);font-weight:620;box-shadow:var(--shs)}
 .chip{
   display:inline-flex;align-items:center;gap:7px;height:38px;padding:0 15px;
@@ -1409,12 +1410,11 @@ footer .fine{max-width:78ch;margin:46px 0 0;font-size:11.5px;color:var(--tx3);li
 /* Soft sculpted controls shared across light and dark surfaces. */
 :root{--soft-hi:rgba(255,255,255,.9);--soft-lo:rgba(35,45,65,.13);--face-gap-shadow:rgba(24,31,45,.35);--switch-track:#e2e5ea;--switch-knob:#edeff2;--switch-knob-hi:#f8f9fb;--switch-rim:#f6f7f9;--switch-rim-edge:rgba(30,40,60,.08);--switch-line:rgba(40,50,70,.16);--switch-in-lo:rgba(40,50,70,.24);--switch-drop:rgba(40,50,70,.26);--switch-groove:rgba(30,40,60,.16);--switch-cap-hi:#ffffff;--switch-cap:#f4f5f8;--switch-cap-base:#c9cdd8}
 :root[data-theme="dark"]{--soft-hi:rgba(66,76,100,.24);--soft-lo:rgba(0,0,0,.55);--face-gap-shadow:rgba(0,0,0,.85);--switch-track:#10151f;--switch-knob:#2c3444;--switch-knob-hi:#394357;--switch-rim:#232b39;--switch-rim-edge:rgba(0,0,0,.55);--switch-line:rgba(0,0,0,.6);--switch-in-lo:rgba(0,0,0,.7);--switch-drop:rgba(0,0,0,.6);--switch-groove:rgba(0,0,0,.6);--switch-cap-hi:#14171f;--switch-cap:#1a1e28;--switch-cap-base:#0a0c12}
-/* دکمه‌ی تم — ۶ اکتبر (دورِ دوم): همان زبانِ نوارِ برگه‌ها — بدنه مثلِ .nav برآمده، صفحه‌ی داخلی مثلِ برگه‌ی انتخاب‌شده گود، آیکون به رنگِ برگه‌ی فعال. بدونِ هاله. */
-#themeBtn,#themeToggle{position:relative;isolation:isolate;display:grid;place-items:center;flex:none;width:38px;height:38px;padding:0;gap:0;box-sizing:border-box;border:0;border-radius:50%;background:var(--bg);box-shadow:4px 4px 9px var(--soft-lo),-3px -3px 8px var(--soft-hi),inset 0 1px 1px var(--soft-hi);color:var(--acc);cursor:pointer;overflow:visible;transition:color .2s;transform:none}
-#themeBtn:hover,#themeToggle:hover{background:var(--bg);box-shadow:4px 4px 9px var(--soft-lo),-3px -3px 8px var(--soft-hi),inset 0 1px 1px var(--soft-hi);transform:none;color:var(--acc)}
-#themeBtn::before,#themeToggle::before{content:"";position:absolute;inset:4px;border-radius:50%;z-index:-1;background:var(--bg);box-shadow:inset 2px 2px 5px var(--soft-lo),inset -2px -2px 5px var(--soft-hi);transition:box-shadow .12s}
-#themeBtn:active::before,#themeToggle:active::before{box-shadow:inset 3px 3px 7px var(--soft-lo),inset -1px -1px 3px var(--soft-hi)}
-[data-theme="dark"] #themeBtn,[data-theme="dark"] #themeToggle,[data-theme="dark"] #themeBtn:hover,[data-theme="dark"] #themeToggle:hover,[data-theme="dark"] #themeBtn::before,[data-theme="dark"] #themeToggle::before{background:#08070d}
+/* دکمه‌ی تم — ۶ اکتبر (دورِ سوم، به خواستِ مالک): همان دکمه‌ی تنظیمات وقتی فشرده است — زمینه‌ی var(--bg)، حاشیه‌ی var(--line)، سایه‌ی گودِ دولایه، آیکون به رنگِ var(--acc) — همیشه، نه فقط هنگامِ کلیک؛ بدونِ دیسکِ ::before و بدونِ برآمدگی. */
+#themeBtn,#themeToggle{position:relative;isolation:isolate;display:grid;place-items:center;flex:none;width:38px;height:38px;padding:0;gap:0;box-sizing:border-box;border-radius:50%;cursor:pointer;overflow:visible;transition:color .2s}
+#themeBtn,#themeToggle,#themeBtn:hover,#themeToggle:hover{background:var(--bg);border:1px solid var(--line);box-shadow:inset 2px 2px 5px var(--soft-lo),inset -2px -2px 5px var(--soft-hi);color:var(--acc);transform:none}
+#themeBtn::before,#themeToggle::before{display:none}
+[data-theme="dark"] #themeBtn,[data-theme="dark"] #themeToggle,[data-theme="dark"] #themeBtn:hover,[data-theme="dark"] #themeToggle:hover{background:#08070d}
 #themeBtn svg,#themeToggle>span{grid-area:1/1;display:grid;place-items:center;position:static;width:18px;height:18px;margin:0;padding:0;box-sizing:border-box;color:inherit;transition:opacity .2s,transform .3s}
 #themeToggle svg{width:18px;height:18px}
 #themeBtn .themeMoon,#themeToggle .moon{opacity:0;transform:rotate(-40deg) scale(.6);pointer-events:none}
@@ -1426,6 +1426,37 @@ footer .fine{max-width:78ch;margin:46px 0 0;font-size:11.5px;color:var(--tx3);li
 #themeToggle>span{padding:0}#themeToggle svg{width:16px;height:16px}
 .nav{background:var(--bg);box-shadow:4px 4px 9px var(--soft-lo),-3px -3px 8px var(--soft-hi),inset 0 1px 1px var(--soft-hi)}
 .nav button.on,.nav a.on{background:var(--bg);color:var(--acc);box-shadow:inset 2px 2px 5px var(--soft-lo),inset -2px -2px 5px var(--soft-hi)}
+/* ۶ اکتبر — تبِ «Markets» (بازشو با Flow و New pairs) و برچسبِ «Stocks · Soon». منو داخلِ .nav می‌نشیند، پس
+   قاعده‌های عمومیِ .nav button / .nav a روی ردیف‌های منو هم می‌افتند؛ همه‌ی قاعده‌های ردیف عمداً با گزینشگرِ
+   .nav .navMenu … (ویژگیِ بالاتر) نوشته شده تا از آن‌ها جان به در ببرند. */
+.navMenuWrap{display:flex}
+.nav .navMarkets .navChev{width:13px;height:13px;margin-left:-2px;opacity:.7;transition:transform .16s}
+.nav .navMarkets[aria-expanded="true"] .navChev{transform:rotate(180deg)}
+.nav .navSoon{display:flex;align-items:center;gap:7px;padding:7px 14px;border-radius:999px;font-size:13.5px;color:var(--tx3);cursor:default;white-space:nowrap;user-select:none}
+.nav .navSoon svg{width:16px;height:16px;flex-shrink:0}
+.soonPill{font-size:10px;font-weight:650;padding:1px 6px;border-radius:99px;color:var(--acc);background:color-mix(in srgb,var(--acc) 14%,transparent)}
+#navMenu{left:0;right:auto;top:calc(100% + 10px);width:auto;min-width:230px;padding:6px;border-radius:16px;background:var(--card);border:1px solid var(--line);box-shadow:var(--sh);z-index:50}
+.nav .navMenu .navItem{display:flex;flex-direction:row;align-items:center;justify-content:flex-start;gap:10px;width:100%;flex:none;padding:9px 10px;border-radius:11px;text-align:left;font-size:13.5px;font-weight:inherit;color:var(--tx);white-space:nowrap;text-decoration:none;background:none;box-shadow:none;cursor:pointer}
+.nav .navMenu .navItem:hover,.nav .navMenu .navItem.on:hover{background:var(--card2);color:var(--tx)}
+.nav .navMenu .navItem.on{background:none;box-shadow:none;font-weight:inherit}
+.nav .navMenu .navIco{display:grid;place-items:center;flex:none;width:30px;height:30px;border-radius:9px;background:var(--bg);box-shadow:inset 2px 2px 5px var(--soft-lo),inset -2px -2px 5px var(--soft-hi);color:var(--acc)}
+.nav .navMenu .navIco svg{width:16px;height:16px}
+.nav .navMenu .navTxt{display:flex;flex-direction:column;gap:1px;min-width:0}
+.nav .navMenu .navTtl{display:block;font-size:13.5px;font-weight:640;color:var(--tx)}
+.nav .navMenu .navItem.on .navTtl{color:var(--acc)}
+.nav .navMenu .navSub{display:block;font-size:12px;font-weight:400;color:var(--tx3)}
+/* بازه‌ی فقط-آیکون (۷۲۱–۱۱۲۰): برچسبِ Markets و Stocks هم مثلِ بقیه می‌رود (عنوانشان در title می‌ماند). */
+@media(min-width:721px) and (max-width:1120px){.nav .navSoon>span{display:none}.nav .navSoon{padding:8px 11px}}
+@media(max-width:720px){
+  .navMenuWrap{flex:1;min-width:0}
+  .nav .navMarkets .navChev{display:none}
+  .nav .navSoon{flex:1;flex-direction:column;justify-content:center;gap:3px;padding:8px 0;font-size:11px}
+  .nav .navSoon svg{width:19px;height:19px}
+  .nav .navSoon .soonPill{display:none}
+  /* منو بالای نوار باز می‌شود و به دو لبه‌ی صفحه می‌چسبد، پس هرگز بیرون نمی‌زند. */
+  #navMenu{position:fixed;left:12px;right:12px;top:auto;bottom:calc(84px + env(safe-area-inset-bottom));min-width:0}
+}
+@media(min-width:961px) and (max-width:1120px){.nav .navSoon{min-height:35px}}
 .chip:not(.solid):not(#themeBtn),.tokbtn,.tfs button.on{box-shadow:2px 2px 5px var(--soft-lo),-2px -2px 5px var(--soft-hi)}
 .cta:not(:disabled),.chip.solid,.button.primary,.header-cta{box-shadow:inset 0 1px 1px rgba(255,255,255,.4),inset 0 -2px 2px rgba(20,30,55,.16),0 3px 6px var(--soft-lo)}
 .cta:active:not(:disabled),.chip.solid:active,.button.primary:active,.header-cta:active{transform:translateY(1px);box-shadow:inset 0 2px 4px rgba(20,30,55,.22)}
@@ -1505,22 +1536,25 @@ html:not(.ctaReady) #actBtn:disabled,html:not(.ctaReady) #solSwapBtn:disabled{ba
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
            stroke-linecap="round" stroke-linejoin="round">
         <path d="M7 4v13M4 14l3 3 3-3M17 20V7M14 10l3-3 3 3"/></svg><span>Swap</span></button>
-    <button data-view="folio" title="Portfolio">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
-           stroke-linecap="round" stroke-linejoin="round">
-        <path d="M21 12a9 9 0 1 1-9-9v9z"/><path d="M15.5 3.5A9 9 0 0 1 20.5 8.5L12 12z"/></svg><span>Portfolio</span></button>
-    <button data-view="flow" title="Money flow">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
-           stroke-linecap="round" stroke-linejoin="round">
-        <path d="M3 13h4l3 7 4-16 3 9h4"/></svg><span>Flow</span></button>
-    <a class="navLink" href="/pairs" title="New pairs">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
-           stroke-linecap="round" stroke-linejoin="round">
-        <path d="M4 6h10M4 12h10M4 18h7"/><path d="M19 3v4M17 5h4"/></svg><span>New pairs</span></a>
+    <!-- ۶ اکتبر — مالک: «Markets» یک تبِ بازشو است (Flow و New pairs زیرش)؛ «Portfolio» به منوی والت رفت؛
+         «Stocks» فقط یک برچسبِ «به‌زودی» است (span، نه لینک و نه دکمه: فوکوس نمی‌گیرد). منو داخلِ همین ردیفِ nav
+         می‌نشیند (navMenuWrap) تا nav یک ردیفِ فلکس بماند. -->
+    <div class="navMenuWrap rel">
+      <button class="navMarkets" id="navMarkets" type="button" aria-haspopup="menu" aria-expanded="false" title="Markets">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="M7 15l4-4 3 3 5-6"/></svg><span>Markets</span><svg class="navChev" viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></button>
+      <div class="pop navMenu" id="navMenu" role="menu" aria-label="Markets">
+        <button class="navItem" role="menuitem" data-view="flow">
+          <span class="navIco"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 13h4l3 7 4-16 3 9h4"/></svg></span><span class="navTxt"><span class="navTtl">Flow</span><span class="navSub">Who is buying and selling</span></span></button>
+        <a class="navItem" role="menuitem" href="/pairs">
+          <span class="navIco"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6h10M4 12h10M4 18h7"/><path d="M19 3v4M17 5h4"/></svg></span><span class="navTxt"><span class="navTtl">New pairs</span><span class="navSub">Fresh pools, exit-checked</span></span></a>
+      </div>
+    </div>
     <a class="navLink" href="/report" title="Exit Report">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
            stroke-linecap="round" stroke-linejoin="round">
         <path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/><path d="M9 14l2 2 4-4"/></svg><span>Exit Report</span></a>
+    <span class="navSoon" aria-disabled="true" title="Coming soon">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 15l3-3 3 2 4-5"/></svg><span>Stocks</span><span class="soonPill">Soon</span></span>
   </nav>
   <!-- ۲۹ اوت: خوشه‌ی راست حالا یک واحد است (`.hdrRight`) تا در ستونِ سوم
        چیدمانِ سه‌ستونه‌ی هدر بنشیند — نه برای اینکه چیزی جابه‌جا شود، فقط
@@ -1611,6 +1645,8 @@ try{(function(){
 </script>
     <div class="pop walletPop" id="walletPop" role="menu" aria-label="Wallet menu">
       <div class="walletHead"><span>Wallet</span><span class="walletAddr" id="walletAddr">—</span></div>
+      <!-- ۶ اکتبر — مالک: «Portfolio» از نوارِ تب‌ها به اینجا آمد؛ نمای folio و هش و لینکِ فوتر سرِ جایشان‌اند. -->
+      <button class="walletAction" id="folioMenuBtn" role="menuitem"><span>Portfolio</span><svg class="wIcon" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-9-9v9z"/><path d="M15.5 3.5A9 9 0 0 1 20.5 8.5L12 12z"/></svg></button>
       <!-- ۲۲ سپتامبر، به خواستِ مالک: همان «کپیِ آدرس»ی که در منوی والتِ
            صفحه‌ی جفت‌های تازه بود، این‌جا هم می‌آید — بالای «قطع اتصال»،
            چون یک کارِ بی‌خطر پیش از یک کارِ برگشت‌ناپذیر می‌نشیند. -->
@@ -9769,6 +9805,12 @@ function leaveTokenPage(v){
   scheduleQuote();
   paintAmtClear();refreshButton();
 }
+/* منوی Markets — باز/بسته با aria-expanded؛ هر بار نمایی عوض شود بسته می‌شود (انتخابِ ردیف هم از همین راه). */
+function closeNavMenu(){
+  const m=$("navMenu"),b=$("navMarkets");
+  if(m)m.classList.remove("on");
+  if(b)b.setAttribute("aria-expanded","false");
+}
 function setView(v,push){
   if(v&&v.indexOf("?")>=0)v=v.slice(0,v.indexOf("?"));
   if(!["swap","folio","flow","token","faq"].includes(v))v="swap";
@@ -9783,6 +9825,7 @@ function setView(v,push){
   document.documentElement.classList.add("ctaReady");
   document.querySelectorAll(".view").forEach(el=>el.classList.toggle("on",el.id==="view-"+v));
   $("nav").querySelectorAll("[data-view]").forEach(b=>b.classList.toggle("on",b.dataset.view===v));
+  $("navMarkets").classList.toggle("on",v==="flow");closeNavMenu();
   // روتر اجرا شد؛ attributeِ فلاشِ بوت دیگر لازم نیست (کلاس‌های «on» حالا درست‌اند).
   document.documentElement.removeAttribute("data-boot-view");
   if(push!==false&&parseHash().view!==v)location.hash=v;
@@ -9970,6 +10013,15 @@ function wire(){
     $("solTfs").querySelectorAll("[data-tf]").forEach(x=>x.classList.toggle("on",x===b));
     solLoadChart();});
   $("setBtn").onclick=e=>{e.stopPropagation();$("setPop").classList.toggle("on");};
+  $("navMarkets").onclick=e=>{
+    e.stopPropagation();
+    const open=!$("navMenu").classList.contains("on");
+    $("navMenu").classList.toggle("on",open);
+    $("navMarkets").setAttribute("aria-expanded",String(open));};
+  document.addEventListener("mousedown",e=>{
+    if(!$("navMenu").contains(e.target)&&!$("navMarkets").contains(e.target))closeNavMenu();});
+  /* ردیفِ New pairs یک لینکِ ساده است (صفحه‌ی جدا)؛ منو همان لحظه بسته می‌شود. */
+  $("navMenu").querySelectorAll("a.navItem").forEach(a=>a.addEventListener("click",closeNavMenu));
   document.addEventListener("mousedown",e=>{
     if(!$("setPop").contains(e.target)&&!$("setBtn").contains(e.target))$("setPop").classList.remove("on");});
   document.addEventListener("mousedown",e=>{
@@ -9977,6 +10029,8 @@ function wire(){
 /* کپیِ آدرسِ والت از منو — منو بسته نمی‌شود و متنِ دکمه ۱٫۴ ثانیه «Copied ✓»
    می‌شود؛ همان قاعده‌ی copyLink که همه‌جای این فایل استفاده می‌شود (کلیپ‌بورد
    که در دسترس نباشد، همان اعلانِ متنیِ خودش بالا می‌آید). */
+/* «Portfolio» در منوی والت — همان setView("folio") که تبِ قدیمی می‌زد؛ روی هر دو شبکه یک منو کار می‌کند. */
+$("folioMenuBtn").onclick=()=>{closeWalletMenu();setView("folio");};
 $("copyAddrBtn").onclick=(e)=>{
   e.stopPropagation();
   if(activeChain==="solana"){
@@ -10067,6 +10121,7 @@ $("copyAddrBtn").onclick=(e)=>{
   };
   document.addEventListener("keydown",e=>{
     if(e.key!=="Escape")return;closePicker();closeWalletPicker();
+    if($("navMenu").classList.contains("on")){closeNavMenu();$("navMarkets").focus();}
     $("setPop").classList.remove("on");closeWalletMenu();
     solCloseWalletPicker();$("solWalPop").classList.remove("on");
     solCloseTokenPicker();

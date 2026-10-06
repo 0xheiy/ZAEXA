@@ -1935,6 +1935,19 @@ check_pairs_page()
 check_wallet_copy_address()
 
 
+# ۶ اکتبر — «Flow» از نوار به منوی Markets رفت و «Portfolio» به منوی والت؛ هیچ‌کدام دیگر تبِ مستقیم نیستند.
+# این کمکی همان مسیرِ کاربر را می‌رود: swap = کلیکِ تب، flow = بازکردنِ Markets و کلیک روی ردیفِ Flow،
+# folio = setView("folio") (همان کاری که دکمه‌ی «Portfolio» در منوی والت می‌کند؛ منوی والت خودش در [wallet portfolio] سنجیده می‌شود).
+async def go_view(pg, v):
+    if v == "flow":
+        await pg.click("#navMarkets")
+        await pg.click('#navMenu [data-view="flow"]')
+    elif v == "folio":
+        await pg.evaluate("() => setView('folio')")
+    else:
+        await pg.click('#nav [data-view="%s"]' % v)
+
+
 # دکمه‌ی گردِ تم (۶ اکتبر): یک آیکونِ دیده‌شده در هر تم، ۳۸×۳۸، کاملاً گرد.
 THEME_BTN_JS = """(a) => {
     const b = document.querySelector(a.btn);
@@ -1944,16 +1957,32 @@ THEME_BTN_JS = """(a) => {
     return {theme: document.documentElement.dataset.theme, checked: b.getAttribute('aria-checked'),
             w: r.width, h: r.height, radius: cs.borderRadius, sun: op(a.sun), moon: op(a.moon),
             shadow: cs.boxShadow, color: cs.color, bg: cs.backgroundColor,
-            before: getComputedStyle(b, '::before').boxShadow,
+            borderW: cs.borderTopWidth, borderC: cs.borderTopColor,
+            before: getComputedStyle(b, '::before').display,
             ...(() => {
-              // مرجع‌ها: .nav و برگه‌ی انتخاب‌شده اگر در صفحه باشند، وگرنه عنصرِ موقتِ با همان توکن‌ها
-              const nav = document.querySelector('.nav'), on = document.querySelector('.nav button.on, .nav a.on');
+              // ۶ اکتبر (دورِ سوم): مرجع = دکمه‌ی تنظیماتِ فشرده (#setBtn با aria-expanded=true، گذار خاموش)؛
+              // در صفحه‌هایی که #setBtn ندارند (لندینگ/گزارش) عنصرِ موقتی با همان توکن‌های سایه/زمینه/حاشیه.
               const t = document.createElement('i');
-              t.style.cssText = 'position:absolute;visibility:hidden;color:var(--acc);box-shadow:4px 4px 9px var(--soft-lo),-3px -3px 8px var(--soft-hi),inset 0 1px 1px var(--soft-hi)';
+              t.style.cssText = 'position:absolute;visibility:hidden;color:var(--acc);background:var(--bg);border:1px solid var(--line);box-shadow:inset 2px 2px 5px var(--soft-lo),inset -2px -2px 5px var(--soft-hi)';
               document.body.appendChild(t);
-              const ts = getComputedStyle(t), res = {accColor: ts.color, litShadow: ts.boxShadow,
-                navShadow: nav && getComputedStyle(nav).boxShadow !== 'none' ? getComputedStyle(nav).boxShadow : null, onColor: on ? getComputedStyle(on).color : null};
+              const ts = getComputedStyle(t), res = {accColor: ts.color, litShadow: ts.boxShadow, litBg: ts.backgroundColor, litBorderC: ts.borderTopColor,
+                setShadow: null, setBg: null, setColor: null, setBorderC: null};
               t.remove();
+              const sb = document.getElementById('setBtn');
+              if (sb) {
+                const prevT = sb.style.transition, prevE = sb.getAttribute('aria-expanded');
+                sb.style.transition = 'none'; sb.setAttribute('aria-expanded', 'true');
+                const ss = getComputedStyle(sb);
+                // سایه‌ی «تعریف‌شده»ی حالتِ فشرده را از خودِ قاعده‌ی CSS می‌خوانیم، نه از computed: قاعده‌ی عمومیِ
+                // .chip:not(.solid):not(#themeBtn) (ویژگیِ بالاتر) سایه‌ی computedِ #setBtn را همیشه برآمده نگه می‌دارد.
+                let decl = null;
+                for (const sh of document.styleSheets) { let rules; try { rules = sh.cssRules; } catch (e) { continue; }
+                  for (const r of rules) if (r.selectorText && r.selectorText.includes('#setBtn[aria-expanded') && r.style && r.style.boxShadow) decl = r.style.boxShadow; }
+                if (decl) { const t2 = document.createElement('i'); t2.style.cssText = 'position:absolute;visibility:hidden'; t2.style.boxShadow = decl; document.body.appendChild(t2); res.setShadow = getComputedStyle(t2).boxShadow; t2.remove(); }
+                res.setBg = ss.backgroundColor; res.setColor = ss.color; res.setBorderC = ss.borderTopColor;
+                if (prevE === null) sb.removeAttribute('aria-expanded'); else sb.setAttribute('aria-expanded', prevE);
+                sb.style.transition = prevT;
+              }
               return res;
             })()};
 }"""
@@ -1981,18 +2010,19 @@ async def theme_button_probe(pg, label, btn, sun, moon):
             "[theme button] %s %s: visible icons %s (sun=%s moon=%s)" % (label, st["theme"], vis, st["sun"], st["moon"])
         assert st["checked"] == ("true" if dark else "false"), \
             "[theme button] %s: aria-checked %r in %s" % (label, st["checked"], st["theme"])
-        # زبانِ نوارِ برگه‌ها: بدنه مثلِ .nav برآمده، صفحه‌ی داخلی گود، آیکون به رنگِ برگه‌ی فعال
+        # ۶ اکتبر (دورِ سوم، مالک): دکمه‌ی تم همیشه همان ظاهرِ دکمه‌ی تنظیماتِ فشرده است
         ctx = "[theme button] %s %s" % (label, st["theme"])
-        want = st["navShadow"] or st["litShadow"]  # در موبایل .nav عمداً بی‌سایه است
-        assert st["shadow"] == want, "%s: button box-shadow %r != tab-bar raised shadow %r" % (ctx, st["shadow"], want)
-        assert "inset" in st["shadow"] and len(re.findall(r"rgba?\(", st["shadow"])) == 3, \
-            "%s: button shadow must have 3 layers incl. inset: %r" % (ctx, st["shadow"])
-        assert "0px 1px 1px" in st["shadow"] and st["shadow"] == st["litShadow"], \
-            "%s: button shadow differs from literal 4px/-3px/inset 0 1px 1px: %r" % (ctx, st["shadow"])
-        assert st["before"].count("inset") == 2 and len(re.findall(r"rgba?\(", st["before"])) == 2, \
-            "%s: ::before must be pressed in (two inset layers): %r" % (ctx, st["before"])
-        assert st["color"] == st["accColor"] and (st["onColor"] is None or st["color"] == st["onColor"]), \
-            "%s: icon colour %r != selected-tab colour %r/%r" % (ctx, st["color"], st["accColor"], st["onColor"])
+        want_sh = st["setShadow"] or st["litShadow"]
+        assert st["shadow"] == want_sh, "%s: button box-shadow %r != the shadow declared for the settings button's pressed state %r" % (ctx, st["shadow"], want_sh)
+        assert st["shadow"].count("inset") == 2 and len(re.findall(r"rgba?\(", st["shadow"])) == 2, \
+            "%s: shadow must be exactly the two pressed (inset) layers: %r" % (ctx, st["shadow"])
+        want_bg = st["setBg"] or ("rgb(8, 7, 13)" if dark else st["litBg"])
+        assert st["bg"] == want_bg, "%s: background %r != the settings button's pressed background %r" % (ctx, st["bg"], want_bg)
+        assert st["borderW"] == "1px" and st["borderC"] == (st["setBorderC"] or st["litBorderC"]), \
+            "%s: border %s %r != the settings button's 1px line border %r" % (ctx, st["borderW"], st["borderC"], st["setBorderC"] or st["litBorderC"])
+        assert st["before"] == "none", "%s: the old raised-disc ::before must be gone (display none): %r" % (ctx, st["before"])
+        assert st["color"] == st["accColor"] and (st["setColor"] is None or st["color"] == st["setColor"]), \
+            "%s: icon colour %r != accent %r / pressed settings colour %r" % (ctx, st["color"], st["accColor"], st["setColor"])
         if dark:
             assert st["bg"] == "rgb(8, 7, 13)", "%s: dark background %r is not rgb(8, 7, 13)" % (ctx, st["bg"])
         seen.append(st["theme"])
@@ -3548,8 +3578,10 @@ async def check_report_page(p, errors):
         m = await pg.evaluate("""() => { const items = [...document.querySelectorAll('#nav > *')];
             const r = items.map(e => e.getBoundingClientRect());
             const sp = items.map(e => { const s = e.querySelector('span'); return s ? [s.scrollWidth, s.clientWidth, getComputedStyle(s).display] : null; });
-            return { n: items.length, tags: items.map(e => e.tagName), last: items[items.length - 1].getAttribute('href'),
-                     lastText: items[items.length - 1].textContent.trim(), left: Math.min(...r.map(x => x.left)), right: Math.max(...r.map(x => x.right)),
+            const rep = document.querySelector('#nav > a[href="/report"]');
+            return { n: items.length, tags: items.map(e => e.tagName), last: rep ? rep.getAttribute('href') : null,
+                     lastText: rep ? rep.textContent.trim() : null,
+                     order: items.map(e => (e.querySelector('span') || e).textContent.trim()), left: Math.min(...r.map(x => x.left)), right: Math.max(...r.map(x => x.right)),
                      gaps: r.slice(1).map((x, i) => x.left - r[i].right), w: r.map(x => Math.round(x.width)), sp,
                      sw: document.documentElement.scrollWidth, iw: innerWidth, navBottom: document.getElementById('nav').getBoundingClientRect().bottom }; }""")
         if vw == 360:
@@ -3560,15 +3592,16 @@ async def check_report_page(p, errors):
     for path in ("/app", "/pairs"):
         for vw in (360, 390, 1440):
             m = await tabs(path, vw)
-            assert m["n"] == 5, "[report page tabs] %s at %d must have 5 tabs: %s" % (path, vw, m)
-            assert m["last"] == "/report" or m["tags"][-1] == "A" and m["last"] == "/report", "[report page tabs] 5th tab must link to /report: %s" % m
+            # ۶ اکتبر: نوار حالا چهار آیتم است — Swap · Markets · Exit Report · Stocks (Soon)؛ Exit Report هنوز لینکِ /report است.
+            assert m["n"] == 4 and m["order"] == ["Swap", "Markets", "Exit Report", "Stocks"], "[report page tabs] %s at %d must have the 4 items Swap, Markets, Exit Report, Stocks: %s" % (path, vw, m)
+            assert m["last"] == "/report", "[report page tabs] Exit Report must link to /report: %s" % m
             assert m["lastText"] == "Exit Report", "[report page tabs] label: %r" % m["lastText"]
             assert m["left"] >= 0 and m["right"] <= m["iw"] + 0.5, "[report page tabs] %s at %d tabs leave the viewport: %s" % (path, vw, m)
             assert m["sw"] <= m["iw"], "[report page tabs] %s at %d scrolls horizontally: %s" % (path, vw, m)
             assert all(g >= 0 for g in m["gaps"]), "[report page tabs] %s at %d tabs overlap: %s" % (path, vw, m)
             if vw <= 390:
                 assert all(s and s[0] <= s[1] + 1 and s[2] == "block" for s in m["sp"]), "[report page tabs] %s at %d a label is clipped or hidden: %s" % (path, vw, m["sp"])
-    print("[report page tabs] the app and /pairs tab bars both carry 5 tabs (…, New pairs, Exit Report → /report); at 360, 390 and 1440 they stay inside the viewport, do not overlap, show every label unclipped on phones, and add no page scroll")
+    print("[report page tabs] the app and /pairs tab bars both carry 4 items (Swap, Markets, Exit Report → /report, Stocks soon); at 360, 390 and 1440 they stay inside the viewport, do not overlap, show every label unclipped on phones, and add no page scroll")
     await b.close()
     srv.shutdown()
 
@@ -6991,6 +7024,8 @@ async def main():
         navpairspg = await b.new_page(viewport={"width": 1280, "height": 900})
         await navpairspg.goto(URL)
         await navpairspg.wait_for_timeout(700)
+        # ۶ اکتبر: «New pairs» حالا ردیفِ منوی Markets است؛ برای دیدنش اول منو باز می‌شود.
+        await navpairspg.click("#navMarkets")
         info = await navpairspg.evaluate("""() => {
             const nav = document.getElementById("nav");
             const links = [...nav.querySelectorAll('a[href="/pairs"]')];
@@ -7000,7 +7035,7 @@ async def main():
             const hdr = document.querySelector("header").getBoundingClientRect();
             return {
                 count: links.length,
-                text: link ? link.textContent.trim() : null,
+                text: link ? link.querySelector(".navTtl").textContent.trim() : null,
                 hasDataView: link ? link.hasAttribute("data-view") : null,
                 visible: r ? (r.width > 0 && r.height > 0) : false,
                 navCenter: Math.round(h.left + h.width / 2),
@@ -7023,37 +7058,37 @@ async def main():
             "adding the New pairs link knocked the nav off-center at 1280px: nav=%s header=%s"
             % (info["navCenter"], info["hdrCenter"]))
 
-        # موبایل: نوارِ پایینِ ثابت باید پنج آیتم (تبِ Exit Report از ۲۰ اکتبر) را بدونِ اسکرولِ افقی جا بدهد.
+        await navpairspg.keyboard.press("Escape")
+        # موبایل: نوارِ پایینِ ثابت باید چهار آیتم (Swap، Markets، Exit Report، Stocks — از ۶ اکتبر) را بدونِ اسکرولِ افقی جا بدهد.
         for w in (390, 360):
             await navpairspg.set_viewport_size({"width": w, "height": 844})
             await navpairspg.wait_for_timeout(200)
             mobinfo = await navpairspg.evaluate("""() => ({
-                count: document.querySelectorAll("#nav > button, #nav > a").length,
+                count: document.querySelectorAll("#nav > *").length,
                 scrollW: document.documentElement.scrollWidth,
                 innerW: innerWidth,
-                widths: [...document.querySelectorAll("#nav > button, #nav > a")].map(
+                widths: [...document.querySelectorAll("#nav > *")].map(
                     el => Math.round(el.getBoundingClientRect().width)),
             })""")
             print("[pairs nav] mobile %spx: items=%s scrollWidth=%s innerWidth=%s widths=%s"
                   % (w, mobinfo["count"], mobinfo["scrollW"], mobinfo["innerW"], mobinfo["widths"]))
-            assert mobinfo["count"] == 5, (
-                "expected 5 items in the bottom nav at %spx, found %s" % (w, mobinfo["count"]))
-            # چهار آیتم باید flex:1 مشترک داشته باشند — یعنی پهنای تقریباً
-            # برابر، نه اینکه لینک به‌اندازه‌ی محتوایش جمع شود و سه دکمه‌ی
-            # دیگر برای جا شدنش بی‌قاعده جمع/باز شوند.
+            assert mobinfo["count"] == 4, (
+                "expected 4 items in the bottom nav at %spx, found %s" % (w, mobinfo["count"]))
+            # هر چهار آیتم باید flex:1 مشترک داشته باشند — یعنی پهنای تقریباً
+            # برابر، نه اینکه یکی به‌اندازه‌ی محتوایش جمع شود و بقیه بی‌قاعده جمع/باز شوند.
             assert max(mobinfo["widths"]) - min(mobinfo["widths"]) <= 4, (
-                "the 5 bottom-nav items are not sharing width equally at %spx (widths=%s) — the "
-                "New pairs link is not getting the same flex:1 as the buttons"
+                "the 4 bottom-nav items are not sharing width equally at %spx (widths=%s) — "
+                "Markets/Stocks are not getting the same flex:1 as Swap and Exit Report"
                 % (w, mobinfo["widths"]))
             assert mobinfo["scrollW"] <= mobinfo["innerW"], (
-                "the page scrolls horizontally at %spx (%s > %s) — the 5-item bottom nav does "
+                "the page scrolls horizontally at %spx (%s > %s) — the 4-item bottom nav does "
                 "not fit" % (w, mobinfo["scrollW"], mobinfo["innerW"]))
 
         # ۸۰۰px — باندِ فقط-آیکون: برچسبِ لینک هم باید مثل دکمه‌ها مخفی شود.
         await navpairspg.set_viewport_size({"width": 800, "height": 900})
         await navpairspg.wait_for_timeout(200)
         band = await navpairspg.evaluate("""() => {
-            const linkSpan = document.querySelector('#nav a[href="/pairs"] span');
+            const linkSpan = document.querySelector('#nav a[href="/report"] span');
             const btnSpan = document.querySelector('#nav button span');
             return {
                 linkSpanDisplay: linkSpan ? getComputedStyle(linkSpan).display : null,
@@ -7063,10 +7098,10 @@ async def main():
         print("[pairs nav] 800px icon-only band: link span display=%s button span display=%s"
               % (band["linkSpanDisplay"], band["btnSpanDisplay"]))
         assert band["linkSpanDisplay"] == "none", (
-            "the New pairs link's label is not hidden in the 721-960px icon-only band: %s"
+            "the Exit Report link's label is not hidden in the 721-960px icon-only band: %s"
             % band["linkSpanDisplay"])
         assert band["linkSpanDisplay"] == band["btnSpanDisplay"], (
-            "the New pairs link's label visibility (%s) does not match the buttons' (%s) at "
+            "the Exit Report link's label visibility (%s) does not match the buttons' (%s) at "
             "800px" % (band["linkSpanDisplay"], band["btnSpanDisplay"]))
 
         # کلیک روی سه دکمه هنوز نما را عوض می‌کند (کاوشگرهای قدیمی جای دیگر
@@ -7076,7 +7111,7 @@ async def main():
         await navpairspg.wait_for_timeout(200)
         clicks = {}
         for v in ("swap", "folio", "flow", "swap"):
-            await navpairspg.click('#nav [data-view="%s"]' % v)
+            await go_view(navpairspg, v)
             await navpairspg.wait_for_timeout(300)
             clicks[v] = await navpairspg.evaluate(
                 """() => document.querySelector('#nav a[href="/pairs"]').className""")
@@ -7086,6 +7121,145 @@ async def main():
                 "the New pairs nav link picked up the .on class from setView after switching "
                 "to %r: %r" % (v, cls))
         await navpairspg.close()
+
+        # ---- [nav markets] ۶ اکتبر — نوار: Swap · Markets ▾ (Flow، New pairs) · Exit Report · Stocks (Soon).
+        # اپ در ۱۴۴۰ و ۳۹۰ و هر دو تم؛ /pairs در ۱۴۴۰. منو داخلِ viewport، در موبایل بالای نوارِ پایین. ----
+        NM_ORDER_JS = """() => [...document.querySelectorAll('#nav > *')].map(e => (e.querySelector('span') || e).textContent.trim())"""
+        NM_STATE_JS = """() => {
+            const m = document.getElementById('navMenu'), bt = document.getElementById('navMarkets'), nav = document.getElementById('nav');
+            const r = m.getBoundingClientRect(), br = bt.getBoundingClientRect(), nr = nav.getBoundingClientRect();
+            const cs = getComputedStyle(m), bs = getComputedStyle(bt);
+            return {display: cs.display, expanded: bt.getAttribute('aria-expanded'), on: bt.classList.contains('on'),
+                    top: r.top, bottom: r.bottom, left: r.left, right: r.right, vw: innerWidth, vh: innerHeight,
+                    btnBottom: br.bottom, btnLeft: br.left, navTop: nr.top, z: cs.zIndex,
+                    btnShadow: bs.boxShadow, btnColor: bs.color,
+                    items: [...m.querySelectorAll('.navItem')].map(i => ({tag: i.tagName, ttl: i.querySelector('.navTtl').textContent.trim(),
+                        sub: i.querySelector('.navSub').textContent.trim(), href: i.getAttribute('href'), view: i.dataset.view || null,
+                        role: i.getAttribute('role'), on: i.classList.contains('on'), ttlColor: getComputedStyle(i.querySelector('.navTtl')).color})),
+                    role: m.getAttribute('role'), haspopup: bt.getAttribute('aria-haspopup')};
+        }"""
+        NM_SOON_JS = """() => { const s = document.querySelector('#nav .navSoon'); s.focus();
+            return {tag: s.tagName, disabled: s.getAttribute('aria-disabled'), tabIndex: s.tabIndex, focused: document.activeElement === s,
+                    cursor: getComputedStyle(s).cursor, pill: s.querySelector('.soonPill') ? getComputedStyle(s.querySelector('.soonPill')).display : null,
+                    pillText: s.querySelector('.soonPill') ? s.querySelector('.soonPill').textContent.trim() : null,
+                    interactive: !!s.closest('a,button'), inTabOrder: s.matches('a[href],button,[tabindex]:not([tabindex="-1"])')}; }"""
+        nm_runs = 0
+        for nm_vw, nm_scheme in ((1440, "light"), (1440, "dark"), (390, "light"), (390, "dark")):
+            nm_ctx = "[nav markets] app@%d/%s" % (nm_vw, nm_scheme)
+            nm_errs = []
+            nm = await b.new_page(viewport={"width": nm_vw, "height": 900 if nm_vw > 500 else 844},
+                                  color_scheme=nm_scheme, device_scale_factor=1.5)
+            nm.on("pageerror", lambda e, _l=nm_errs: _l.append(str(e)))
+            await nm.goto(URL)
+            await nm.wait_for_timeout(800)
+            assert await nm.evaluate(NM_ORDER_JS) == ["Swap", "Markets", "Exit Report", "Stocks"], \
+                "%s: bar order is %s" % (nm_ctx, await nm.evaluate(NM_ORDER_JS))
+            assert await nm.locator('#nav [data-view="folio"]').count() == 0, "%s: Portfolio must not be a tab any more" % nm_ctx
+            closed = await nm.evaluate(NM_STATE_JS)
+            assert closed["display"] == "none" and closed["expanded"] == "false" and not closed["on"], "%s: menu must start closed: %s" % (nm_ctx, closed)
+            assert closed["haspopup"] == "menu" and closed["role"] == "menu", "%s: aria-haspopup/role: %s" % (nm_ctx, closed)
+            soon = await nm.evaluate(NM_SOON_JS)
+            assert soon["tag"] == "SPAN" and soon["disabled"] == "true" and not soon["focused"] and soon["tabIndex"] == -1 \
+                and not soon["inTabOrder"] and not soon["interactive"] and soon["cursor"] == "default", "%s: Stocks must be an inert aria-disabled span: %s" % (nm_ctx, soon)
+            assert soon["pillText"] == "Soon" and (soon["pill"] == "none") == (nm_vw <= 720), \
+                "%s: the Soon pill must show on desktop and hide on mobile: %s" % (nm_ctx, soon)
+            # باز شدن
+            await nm.click("#navMarkets"); await nm.wait_for_timeout(250)
+            op = await nm.evaluate(NM_STATE_JS)
+            assert op["display"] == "block" and op["expanded"] == "true", "%s: click did not open the menu: %s" % (nm_ctx, op)
+            assert [(i["ttl"], i["sub"]) for i in op["items"]] == [("Flow", "Who is buying and selling"), ("New pairs", "Fresh pools, exit-checked")], \
+                "%s: menu rows are wrong: %s" % (nm_ctx, op["items"])
+            assert [i["role"] for i in op["items"]] == ["menuitem", "menuitem"] and op["items"][0]["view"] == "flow" \
+                and op["items"][1]["href"] == "/pairs" and op["items"][1]["tag"] == "A", "%s: Flow must keep data-view, New pairs must link /pairs: %s" % (nm_ctx, op["items"])
+            assert op["left"] >= 0 and op["right"] <= op["vw"] and op["top"] >= 0 and op["bottom"] <= op["vh"], "%s: the menu leaves the viewport: %s" % (nm_ctx, op)
+            assert op["z"] == "50", "%s: menu z-index %s is not the .pop level 50" % (nm_ctx, op["z"])
+            if nm_vw > 720:
+                assert 8 <= op["top"] - op["btnBottom"] <= 12 and abs(op["left"] - op["btnLeft"]) <= 1.5, "%s: menu is not 10px under the button, left aligned: %s" % (nm_ctx, op)
+            else:
+                assert op["bottom"] <= op["navTop"] and op["navTop"] - op["bottom"] <= 40, "%s: the menu must open above the bottom bar: %s" % (nm_ctx, op)
+            if nm_scheme != "dark" or nm_vw == 1440:
+                await nm.screenshot(path="/tmp/nm_%s.png" % (nm_scheme if nm_vw == 1440 else "mobile"),
+                                    clip={"x": 0, "y": 0, "width": 1440, "height": 260} if nm_vw == 1440
+                                    else {"x": 0, "y": 0, "width": nm_vw, "height": 844})
+            # Escape
+            await nm.keyboard.press("Escape"); await nm.wait_for_timeout(150)
+            cl = await nm.evaluate(NM_STATE_JS)
+            assert cl["display"] == "none" and cl["expanded"] == "false", "%s: Escape did not close the menu: %s" % (nm_ctx, cl)
+            # mousedown بیرون
+            await nm.click("#navMarkets"); await nm.wait_for_timeout(150)
+            await nm.mouse.move(nm_vw // 2, 12 if nm_vw > 720 else 300); await nm.mouse.down(); await nm.mouse.up(); await nm.wait_for_timeout(150)
+            cl = await nm.evaluate(NM_STATE_JS)
+            assert cl["display"] == "none" and cl["expanded"] == "false", "%s: an outside mousedown did not close the menu: %s" % (nm_ctx, cl)
+            # انتخابِ Flow
+            await nm.click("#navMarkets"); await nm.wait_for_timeout(150)
+            await nm.click('#navMenu [data-view="flow"]'); await nm.wait_for_timeout(500)
+            fl = await nm.evaluate(NM_STATE_JS)
+            assert await nm.evaluate("() => document.getElementById('view-flow').classList.contains('on')"), "%s: Flow did not switch the view" % nm_ctx
+            assert fl["display"] == "none" and fl["expanded"] == "false", "%s: choosing Flow must close the menu: %s" % (nm_ctx, fl)
+            assert fl["on"] and "inset" in fl["btnShadow"], "%s: Markets must wear the selected-tab look on the flow view: %s" % (nm_ctx, fl)
+            assert await nm.evaluate("() => document.querySelector('#nav button[data-view=\"swap\"]').classList.contains('on')") is False, "%s: Swap must not stay selected" % nm_ctx
+            await nm.click("#navMarkets"); await nm.wait_for_timeout(150)
+            fo = await nm.evaluate(NM_STATE_JS)
+            assert fo["items"][0]["on"] and fo["items"][0]["ttlColor"] == fo["btnColor"], "%s: the Flow row must carry .on with the accent title colour: %s" % (nm_ctx, fo["items"])
+            await nm.keyboard.press("Escape")
+            await go_view(nm, "swap"); await nm.wait_for_timeout(300)
+            assert (await nm.evaluate(NM_STATE_JS))["on"] is False, "%s: Markets stays selected after leaving flow" % nm_ctx
+            assert not nm_errs, "%s: page errors: %s" % (nm_ctx, nm_errs)
+            await nm.close()
+            nm_runs += 1
+        # /pairs در ۱۴۴۰ — هر دو تم
+        for nm_scheme in ("light", "dark"):
+            nm_ctx = "[nav markets] pairs@1440/%s" % nm_scheme
+            nm_errs = []
+            nm = await b.new_page(viewport={"width": 1440, "height": 900}, color_scheme=nm_scheme)
+            nm.on("pageerror", lambda e, _l=nm_errs: _l.append(str(e)))
+            await nm.route("**/*", lambda r: r.continue_() if r.request.url.startswith("file:") else r.abort())
+            await nm.goto("file://" + os.path.join(HERE, "..", "pairs.html"), wait_until="domcontentloaded")
+            await nm.wait_for_timeout(800)
+            assert await nm.evaluate(NM_ORDER_JS) == ["Swap", "Markets", "Exit Report", "Stocks"], "%s: bar order is %s" % (nm_ctx, await nm.evaluate(NM_ORDER_JS))
+            st = await nm.evaluate(NM_STATE_JS)
+            assert st["on"] and "inset" in st["btnShadow"] and st["display"] == "none", "%s: Markets must be selected on /pairs: %s" % (nm_ctx, st)
+            soon = await nm.evaluate(NM_SOON_JS)
+            assert soon["tag"] == "SPAN" and soon["disabled"] == "true" and not soon["focused"] and not soon["inTabOrder"], "%s: Stocks: %s" % (nm_ctx, soon)
+            await nm.click("#navMarkets"); await nm.wait_for_timeout(200)
+            st = await nm.evaluate(NM_STATE_JS)
+            assert st["display"] == "block" and st["expanded"] == "true", "%s: click did not open the menu: %s" % (nm_ctx, st)
+            assert [(i["ttl"], i["href"], i["tag"]) for i in st["items"]] == [("Flow", "/app#flow", "A"), ("New pairs", "/pairs", "A")], "%s: rows: %s" % (nm_ctx, st["items"])
+            assert st["items"][1]["on"] and st["left"] >= 0 and st["right"] <= st["vw"], "%s: New pairs must be the current row, menu inside the viewport: %s" % (nm_ctx, st)
+            assert await nm.evaluate("() => document.querySelector('#navMenu a[href=\"/pairs\"]').getAttribute('aria-current')") == "page", "%s: aria-current" % nm_ctx
+            await nm.keyboard.press("Escape"); await nm.wait_for_timeout(150)
+            st = await nm.evaluate(NM_STATE_JS)
+            assert st["display"] == "none" and st["expanded"] == "false", "%s: Escape did not close the menu" % nm_ctx
+            assert not nm_errs, "%s: page errors: %s" % (nm_ctx, nm_errs)
+            await nm.close()
+            nm_runs += 1
+        print("[nav markets] bar is exactly Swap, Markets, Exit Report, Stocks; the Markets menu (Flow, New pairs) opens on click, closes on Escape / outside mousedown / choosing a row, "
+              "Flow selects Markets, /pairs shows Markets selected, the menu stays inside the viewport (above the bottom bar at 390), Stocks is an inert aria-disabled span: %d runs (app 1440+390 x light+dark, pairs 1440 x light+dark)" % nm_runs)
+
+        # ---- [wallet portfolio] ۶ اکتبر — «Portfolio» اولین کارِ منوی والت است: در اپ نمای folio را باز می‌کند و منو را می‌بندد؛ در /pairs لینکِ /app#folio است. ----
+        wp_errs = []
+        wp = await b.new_page(viewport={"width": 1440, "height": 900}, color_scheme="light", device_scale_factor=1.5)
+        wp.on("pageerror", lambda e: wp_errs.append(str(e)))
+        await wp.goto(URL); await wp.wait_for_timeout(800)
+        await wp.evaluate("""() => { account = "0x8A0Dcb583C8CAdc481E34487c34f1B856fe97e23"; walletChainId = CHAIN.id; paintWallet(); }""")
+        await wp.click("#connectBtn"); await wp.wait_for_timeout(250)
+        wp_first = await wp.evaluate("() => [...document.querySelectorAll('#walletPop .walletAction')].map(e => e.id + ':' + e.querySelector('span').textContent.trim())")
+        assert wp_first[:3] == ["folioMenuBtn:Portfolio", "copyAddrBtn:Copy address", "disconnectBtn:Disconnect"], "[wallet portfolio] menu order: %s" % wp_first
+        assert await wp.evaluate("() => document.getElementById('folioMenuBtn').getAttribute('role')") == "menuitem"
+        await wp.screenshot(path="/tmp/nm_wallet.png", clip={"x": 740, "y": 0, "width": 700, "height": 300})
+        await wp.click("#folioMenuBtn"); await wp.wait_for_timeout(500)
+        wp_after = await wp.evaluate("() => ({folio: document.getElementById('view-folio').classList.contains('on'), popOn: document.getElementById('walletPop').classList.contains('on'), exp: document.getElementById('connectBtn').getAttribute('aria-expanded'), hash: location.hash})")
+        assert wp_after == {"folio": True, "popOn": False, "exp": "false", "hash": "#folio"}, "[wallet portfolio] click result: %s" % wp_after
+        await wp.close()
+        wp = await b.new_page(viewport={"width": 1440, "height": 900})
+        wp.on("pageerror", lambda e: wp_errs.append(str(e)))
+        await wp.route("**/*", lambda r: r.continue_() if r.request.url.startswith("file:") else r.abort())
+        await wp.goto("file://" + os.path.join(HERE, "..", "pairs.html"), wait_until="domcontentloaded"); await wp.wait_for_timeout(800)
+        wp_p = await wp.evaluate("() => { const a = [...document.querySelectorAll('#walletPop .walletAction')]; return {ids: a.map(e => e.id), tag: a[0].tagName, href: a[0].getAttribute('href'), role: a[0].getAttribute('role'), txt: a[0].querySelector('span').textContent.trim()}; }")
+        assert wp_p["ids"][:3] == ["folioMenuBtn", "copyAddrBtn", "disconnectBtn"] and wp_p["tag"] == "A" and wp_p["href"] == "/app#folio" and wp_p["role"] == "menuitem" and wp_p["txt"] == "Portfolio", "[wallet portfolio] pairs: %s" % wp_p
+        await wp.close()
+        assert not wp_errs, "[wallet portfolio] page errors: %s" % wp_errs
+        print("[wallet portfolio] Portfolio is the first wallet-menu action: in the app it opens the folio view (#folio) and closes the menu; on /pairs it links to /app#folio")
 
         # کارت سواپ نباید کشیده شود تا هم‌قد نمودار شود — زیر دکمه فضای مرده
         # می‌ماند. ولی ارتفاع نمودار *از همان کشیدگی* تغذیه می‌شود، پس اگر کسی
@@ -7733,7 +7907,7 @@ async def main():
         assert not await pg.is_visible("#flowBody"), "flow must not sit on the swap page"
         assert not await pg.is_visible("#folioBody"), "portfolio must not sit on the swap page"
 
-        await pg.click('#nav [data-view="flow"]'); await pg.wait_for_timeout(400)
+        await go_view(pg, "flow"); await pg.wait_for_timeout(400)
         assert await pg.evaluate("location.hash") == "#flow", "view must be linkable"
         print("[nav] flow page token: %s" % await pg.inner_text("#flowTokSym"))
         await pg.wait_for_selector("#flowBody .flowkv", timeout=20000)
@@ -8002,7 +8176,7 @@ async def main():
 
         await pg.screenshot(path=os.path.join(HERE, "shot-flow.png"), full_page=True)
 
-        await pg.click('#nav [data-view="folio"]'); await pg.wait_for_timeout(500)
+        await go_view(pg, "folio"); await pg.wait_for_timeout(500)
         folio = await pg.inner_text("#folioBody")
         print("[portfolio] %s" % folio.replace("\n", " | ")[:120])
         assert "Connect a wallet" in folio, "with no wallet the portfolio must say so, not show zeros"
@@ -8336,7 +8510,7 @@ async def main():
         # می‌چسبید زیر محتوا و وسط صفحه شناور می‌شد.
         foot = {}
         for view in ["swap", "folio", "flow"]:
-            await pg.click(f'.nav button[data-view="{view}"]'); await pg.wait_for_timeout(400)
+            await go_view(pg, view); await pg.wait_for_timeout(400)
             foot[view] = await pg.evaluate("""() => {
                 const f = document.querySelector("footer").getBoundingClientRect();
                 return {bottom: Math.round(f.bottom), vh: innerHeight,
@@ -8359,7 +8533,7 @@ async def main():
         # (دو سنجه‌ی دیگر را امتحان کردم و کنار گذاشتم چون باگ را جدا نمی‌کردند:
         #  «عرض تکه‌ها» — تکه‌ی اول به‌درستی وسط سطر تمام می‌شود؛ و «شروع افقی
         #  سطرها» — client rects به‌ازای هر تکه‌ی متن است، نه هر سطر.)
-        await pg.click('.nav button[data-view="flow"]'); await pg.wait_for_timeout(1200)
+        await go_view(pg, "flow"); await pg.wait_for_timeout(1200)
         note = await pg.evaluate("""() => {
             const el = document.querySelector("#flowBody .fnote");
             if (!el) return {missing: true};
@@ -8405,7 +8579,7 @@ async def main():
         # تا اینجای تست یک والت وصل شده، پس برای دیدن حالت خالی موقتاً قطعش
         # می‌کنیم. رندرِ دوباره هم عمداً همین‌جاست: کلیکِ بعدی روی محتوایی
         # می‌افتد که تازه با innerHTML ساخته شده.
-        await pg.click('.nav button[data-view="folio"]'); await pg.wait_for_timeout(500)
+        await go_view(pg, "folio"); await pg.wait_for_timeout(500)
         await pg.evaluate("window.__acct = account; account = null; renderFolio();")
         await pg.wait_for_timeout(400)
         intro = await pg.evaluate("""() => {
@@ -8553,7 +8727,7 @@ async def main():
         await evpg.goto("http://127.0.0.1:%d/test/harness.html#swap" % port)
         await evpg.wait_for_timeout(1400)
         for v in ("folio", "flow", "swap"):
-            await evpg.click('#nav [data-view="%s"]' % v)
+            await go_view(evpg, v)
             await evpg.wait_for_timeout(320)
         await evpg.close()
 
@@ -9677,7 +9851,7 @@ async def main():
         gpc_seen = await watch_events(gpcpg)
         await gpcpg.goto("http://127.0.0.1:%d/test/harness.html" % port)
         await gpcpg.wait_for_timeout(1400)
-        await gpcpg.click('#nav [data-view="folio"]')
+        await go_view(gpcpg, "folio")
         await gpcpg.wait_for_timeout(400)
         await gpcpg.close()
         print("[events] with Global Privacy Control on: %d beacons" % len(gpc_seen))
@@ -10779,7 +10953,7 @@ async def main():
         hpg, herrs = await open_pairs({"chain": "base", "rows": [], "store": True})
         hinfo = await hpg.evaluate("""() => {
             const nav = document.querySelector('.nav');
-            const links = nav ? [...nav.querySelectorAll('a')] : [];
+            const links = nav ? [...nav.querySelectorAll('a')] : [];   // لینک‌های داخلِ منوی Markets هم در DOM هستند (بسته‌اند)
             const hdr = document.querySelector('.site-header').getBoundingClientRect();
             const navR = nav.getBoundingClientRect();
             return {
@@ -10798,8 +10972,8 @@ async def main():
               "hasCta=%s hasFavicon=%s errors=%s"
               % (hinfo["count"], hinfo["hrefs"], hinfo["lastCurrent"], hinfo["lastOn"],
                  hinfo["navCenter"], hinfo["hdrCenter"], hinfo["hasCta"], hinfo["hasFavicon"], herrs))
-        assert hinfo["count"] == 5, "expected 5 nav links in pairs.html's header, found %s" % hinfo["count"]
-        assert hinfo["hrefs"] == ["/app#swap", "/app#folio", "/app#flow", "/pairs", "/report"], (
+        assert hinfo["count"] == 4, "expected 4 nav links in pairs.html's header (Swap, Flow, New pairs, Exit Report), found %s" % hinfo["count"]
+        assert hinfo["hrefs"] == ["/app#swap", "/app#flow", "/pairs", "/report"], (
             "pairs.html's header nav hrefs are wrong: %s" % hinfo["hrefs"])
         assert hinfo["lastCurrent"] == "page", "the New pairs link must carry aria-current=\"page\""
         assert hinfo["lastOn"], "the New pairs link must carry the .on look"
@@ -10814,7 +10988,7 @@ async def main():
         await hpg2.set_viewport_size({"width": 800, "height": 900})
         await hpg2.wait_for_timeout(150)
         band800 = await hpg2.evaluate(
-            """() => { const s = document.querySelector('.nav a span');
+            """() => { const s = document.querySelector('.nav > a span');
                        return s ? getComputedStyle(s).display : null; }""")
         print("[pairs header] 800px label display=%s" % band800)
         assert band800 == "none", "pairs.html's nav labels are not hidden at 800px: %s" % band800
@@ -10823,7 +10997,7 @@ async def main():
             await hpg2.set_viewport_size({"width": w, "height": 844})
             await hpg2.wait_for_timeout(150)
             mob = await hpg2.evaluate("""() => {
-                const items = [...document.querySelectorAll('.nav a')];
+                const items = [...document.querySelectorAll('.nav > *')];
                 const cs = getComputedStyle(document.querySelector('.nav'));
                 return {
                     count: items.length,
@@ -10834,19 +11008,19 @@ async def main():
                 };
             }""")
             print("[pairs header] mobile %spx: %s" % (w, mob))
-            assert mob["count"] == 5, "expected 5 nav items at %spx, found %s" % (w, mob["count"])
+            assert mob["count"] == 4, "expected 4 nav items at %spx, found %s" % (w, mob["count"])
             assert mob["position"] == "fixed", "pairs.html's nav is not fixed at %spx" % w
             assert max(mob["widths"]) - min(mob["widths"]) <= 4, (
-                "pairs.html's 5 bottom-nav items are not equal width at %spx: %s" % (w, mob["widths"]))
+                "pairs.html's 4 bottom-nav items are not equal width at %spx: %s" % (w, mob["widths"]))
             assert mob["scrollW"] <= mob["innerW"], (
                 "pairs.html scrolls horizontally at %spx (%s > %s)"
                 % (w, mob["scrollW"], mob["innerW"]))
         await hpg2.close()
         assert not herrs2, "web/pairs.html threw while resizing the header: %s" % herrs2
 
-        print("[pairs header] 5 nav links (Swap/Portfolio/Flow/New pairs/Exit Report) with the right hrefs, New "
+        print("[pairs header] 4 nav links (Swap/Flow/New pairs/Exit Report; Flow and New pairs sit in the Markets menu) with the right hrefs, New "
               "pairs carries aria-current=page and the .on look, centred at 1240px, labels hidden at "
-              "800px, fixed 5-equal-width bottom bar at 390/360px with no horizontal scroll, no "
+              "800px, fixed 4-equal-width bottom bar at 390/360px with no horizontal scroll, no "
               ".header-cta, favicon present")
 
         # ---- [pairs chain] تب‌های Base/Solana — URL، fetch، Trade فقط روی
@@ -13133,7 +13307,8 @@ async def main():
 (function(){ window.__boot = [];
   function snap(tag){ var sw = document.getElementById('view-swap'); if (!sw) return;
     var tgt = (location.hash.slice(1).split('?')[0] || ''), nav = {};
-    document.querySelectorAll('#nav [data-view]').forEach(function(b){ var bg = getComputedStyle(b).backgroundColor; nav[b.dataset.view] = !(bg === 'rgba(0, 0, 0, 0)' || bg === 'transparent'); });
+    document.querySelectorAll('#nav > button[data-view]').forEach(function(b){ var bg = getComputedStyle(b).backgroundColor; nav[b.dataset.view] = !(bg === 'rgba(0, 0, 0, 0)' || bg === 'transparent'); });
+    var mk = document.getElementById('navMarkets'); if (mk) { var mbg = getComputedStyle(mk).backgroundColor; nav.markets = !(mbg === 'rgba(0, 0, 0, 0)' || mbg === 'transparent'); }
     var tv = document.getElementById('view-' + tgt);
     window.__boot.push({tag: tag, swap: getComputedStyle(sw).display, tgt: tgt, tgtDisplay: tv ? getComputedStyle(tv).display : null, nav: nav,
                         attr: document.documentElement.getAttribute('data-boot-view'), tokenView: document.getElementById('view-token') ? getComputedStyle(document.getElementById('view-token')).display : null}); }
@@ -13147,20 +13322,20 @@ async def main():
             await spg.wait_for_function("(v) => document.getElementById('view-' + v).classList.contains('on')", arg=bt_view, timeout=15000)
             await spg.wait_for_timeout(500)
             bt = await spg.evaluate("() => ({ log: window.__boot, attr: document.documentElement.hasAttribute('data-boot-view'), "
-                                    "swapOn: document.getElementById('view-swap').classList.contains('on'), navOn: Array.from(document.querySelectorAll('#nav [data-view].on')).map(b => b.dataset.view) })")
+                                    "swapOn: document.getElementById('view-swap').classList.contains('on'), navOn: Array.from(document.querySelectorAll('#nav [data-view].on')).map(b => b.dataset.view), marketsOn: document.getElementById('navMarkets').classList.contains('on') })")
             await spg.close()
             bad_swap = [e for e in bt["log"] if e["swap"] != "none"]
             bad_tgt = [e for e in bt["log"] if e["tgtDisplay"] == "none"]
-            # #faq هیچ دکمه‌ای در نوار ندارد: درست یعنی هیچ‌کدام روشن نیست (و Swap به‌خصوص نه)
-            bad_nav = [e for e in bt["log"] if e["nav"].get("swap", False) or (bt_view != "faq" and not e["nav"].get(bt_view, False))
-                       or (bt_view == "faq" and any(e["nav"].values()))]
+            # ۶ اکتبر: flow حالا تبِ Markets را روشن می‌کند؛ folio و faq هیچ تبی در نوار ندارند (فقط Swap نباید روشن باشد).
+            bad_nav = [e for e in bt["log"] if e["nav"].get("swap", False) or (bt_view == "flow" and not e["nav"].get("markets", False))
+                       or (bt_view != "flow" and e["nav"].get("markets", False))]
             print("[boot view %s] snapshots=%d swapVisible=%d targetHidden=%d wrongNav=%d attrAfterBoot=%s navOn=%s"
                   % (bt_hash, len(bt["log"]), len(bad_swap), len(bad_tgt), len(bad_nav), bt["attr"], bt["navOn"]))
             assert len(bt["log"]) >= 2, "[boot view] the watcher saw nothing"
             assert not bad_swap, "[boot view] %s: #view-swap was painted before the router ran: %s" % (bt_hash, bad_swap[:2])
             assert not bad_tgt, "[boot view] %s: the target view was hidden at first paint: %s" % (bt_hash, bad_tgt[:2])
             assert not bad_nav, "[boot view] %s: the nav highlight was wrong at first paint: %s" % (bt_hash, bad_nav[:2])
-            assert not bt["attr"] and not bt["swapOn"] and bt["navOn"] == ([] if bt_view == "faq" else [bt_view]), \
+            assert not bt["attr"] and not bt["swapOn"] and bt["navOn"] == ([bt_view] if bt_view == "flow" else []) and bt["marketsOn"] == (bt_view == "flow"), \
                 "[boot view] %s: after the router ran the attribute must be gone and the class state right: %s" % (bt_hash, {k: v for k, v in bt.items() if k != "log"})
         # بدونِ هش: Swap همچنان از همان فریم اول دیده می‌شود، هیچ attributeای نیست
         spg = await sf_page(hash_="", init=[BOOT_WATCH], errs=sf_errs)
@@ -13815,7 +13990,8 @@ async def main():
                 // pairs <a class="navLink" href> واقعی — همان تفاوتِ
                 // پذیرفته‌شده‌ای که [pairs header] هم می‌سنجد؛ نه تگ نه
                 // کلاسِ خودِ این عنصر مقایسه نمی‌شود، فقط شمار/ترتیب.
-                if (underNav){
+                // ۶ اکتبر: ردیف‌های منوی Markets (.navItem) هم همین تفاوتِ تگ را دارند (اپ <button data-view>، pairs <a>).
+                if (underNav || el.id === 'folioMenuBtn' || (el.classList && el.classList.contains('navItem'))){   // folioMenuBtn: اپ <button>، pairs <a href="/app#folio">
                     return { tag: 'NAVITEM', id: null, cls: [], children: kids.map(k => sig(k, false)) };
                 }
                 return {
