@@ -273,7 +273,7 @@ const PAGE_CSS = String.raw`
 :root{--s-sell:#3b82f6;--s-nosell:#d97706;--s-none:#a9b0bc;--sans:Manrope,ui-sans-serif,-apple-system,"Segoe UI",Roboto,sans-serif;--serif:'Playfair Display',Georgia,serif;--mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
 :root[data-theme=dark]{--s-sell:#3b93e8;--s-nosell:#e0931a;--s-none:#5b5670}
 html{scroll-behavior:auto}
-body{overflow-x:hidden}
+body{overflow-x:hidden;overflow-x:clip}
 .wrap{width:min(1120px,100%);margin:auto;padding-inline:20px;padding-block:44px 80px;display:flex;flex-direction:column;gap:40px}
 .eyebrow{margin:0;color:var(--tx3);font:500 10px/1.2 var(--mono);letter-spacing:.13em;text-transform:uppercase}
 .top{display:flex;flex-direction:column;gap:18px}
@@ -530,46 +530,515 @@ const CLIENT_JS = String.raw`
 })();
 `;
 
-/* اسکریپتِ تم/منو/هدر — منطقِ landing.html، همان کلیدِ مشترک zaexa.theme.v1. */
+/* اسکریپتِ هدرِ اپ (Swap) — کپیِ رفتارِ هدرِ /pairs؛ تم همان کلیدِ مشترکِ zaexa.theme.v1. */
 const SHELL_JS = String.raw`
+/* هدرِ اپ — رفتارِ هدرِ /pairs: سایهٔ هدر هنگام اسکرول، منوی Markets، تنظیمات، تم و اتصالِ کیف‌پول.
+   این صفحه فقط-خوانده است: هرگز wallet_switchEthereumChain و هرگز تراکنش؛ اتصال فقط برای نشان‌دادنِ آدرس است.
+   هیچ رشته‌ی قالبی (backtick) و هیچ innerHTML اینجا نیست. */
 (function(){
-  var root=document.documentElement, btn=document.getElementById('themeToggle'), LS='zaexa.theme.v1';
-  function sync(){ document.body.classList.toggle('dark-preview',root.dataset.theme==='dark'); if(btn){btn.setAttribute('aria-checked',String(root.dataset.theme==='dark'));btn.setAttribute('aria-label',root.dataset.theme==='dark'?'Switch to light theme':'Switch to dark theme');} }
-  sync();
-  if(btn) btn.addEventListener('click',function(){ root.dataset.theme=root.dataset.theme==='dark'?'light':'dark'; try{ localStorage.setItem(LS,root.dataset.theme); }catch(e){} sync(); });
-  var header=document.querySelector('.landing-header');
-  if(header&&window.IntersectionObserver){
-    var s=document.createElement('div'); s.setAttribute('aria-hidden','true');
-    s.style.cssText='position:absolute;top:0;left:0;width:1px;height:1px;pointer-events:none';
-    document.body.insertBefore(s,document.body.firstChild);
-    new IntersectionObserver(function(es){ es.forEach(function(e){ header.classList.toggle('scrolled',!e.isIntersecting); }); }).observe(s);
-  }
-  var mb=document.getElementById('menuToggle'), panel=document.getElementById('mobileMenu');
-  if(mb&&panel){
-    var setOpen=function(v){ panel.dataset.open=v?'1':'0'; mb.setAttribute('aria-expanded',v?'true':'false'); };
-    mb.addEventListener('click',function(){ setOpen(panel.dataset.open!=='1'); });
-    panel.addEventListener('click',function(e){ if(e.target.closest('a')) setOpen(false); });
-    document.addEventListener('keydown',function(e){ if(e.key==='Escape') setOpen(false); });
-  }
+  var header = document.querySelector('.site-header');
+  if (!header || !window.IntersectionObserver) return;
+  var sentinel = document.createElement('div');
+  sentinel.setAttribute('aria-hidden', 'true');
+  sentinel.style.cssText = 'position:absolute;top:0;left:0;width:1px;height:1px;pointer-events:none';
+  document.body.insertBefore(sentinel, document.body.firstChild);
+  new IntersectionObserver(function(entries){
+    entries.forEach(function(e){ header.classList.toggle('scrolled', !e.isIntersecting); });
+  }).observe(sentinel);
 })();
-/* منوی Markets در نوارِ تبِ موبایل — همان رفتارِ /pairs: کلیک باز/بسته می‌کند، Escape و mousedownِ بیرون می‌بندد، انتخابِ ردیف می‌بندد. */
+
+/* تنظیماتِ سواپ — کلیدِ مشترکِ zaexa.swap.v1 با اپ؛ این صفحه Swap ندارد، فقط مقدارها را نگه می‌دارد. */
 (function(){
-  var nb=document.getElementById('navMarkets'), nm=document.getElementById('navMenu');
-  if(!(nb&&nm)) return;
-  function closeNavMenu(){ nm.classList.remove('on'); nb.setAttribute('aria-expanded','false'); }
-  nb.onclick=function(e){
+  var SWAP_LS_KEY = 'zaexa.swap.v1';
+  var slippageBps = 50, deadlineMinVal = 3, unlimitedApprove = false;
+  var slipSeg = document.getElementById('slipSeg');
+  var slipCustom = document.getElementById('slipCustom');
+  var deadlineMin = document.getElementById('deadlineMin');
+  var unlimApprove = document.getElementById('unlimApprove');
+  function saveSwapSettings(){
+    try{
+      localStorage.setItem(SWAP_LS_KEY, JSON.stringify({
+        bps: slippageBps,
+        custom: slipCustom && slipCustom.value ? slipCustom.value : null,
+        deadline: deadlineMinVal,
+        unlim: unlimitedApprove
+      }));
+    }catch(e){}
+  }
+  if (slipSeg){
+    Array.prototype.forEach.call(slipSeg.querySelectorAll('[data-bps]'), function(b){
+      b.onclick = function(){
+        slippageBps = +b.dataset.bps;
+        Array.prototype.forEach.call(slipSeg.querySelectorAll('[data-bps]'), function(x){
+          x.classList.toggle('on', x === b);
+        });
+        if (slipCustom) slipCustom.value = '';
+        saveSwapSettings();
+      };
+    });
+  }
+  if (slipCustom){
+    slipCustom.oninput = function(e){
+      var v = parseFloat(e.target.value);
+      if (!isNaN(v) && v > 0 && v <= 50){
+        slippageBps = Math.round(v * 100);
+        Array.prototype.forEach.call(slipSeg.querySelectorAll('[data-bps]'), function(x){ x.classList.remove('on'); });
+      }
+      saveSwapSettings();
+    };
+  }
+  if (deadlineMin){
+    deadlineMin.oninput = function(e){
+      var v = parseInt(e.target.value, 10);
+      if (!isNaN(v) && v > 0 && v <= 60) deadlineMinVal = v;
+      saveSwapSettings();
+    };
+  }
+  if (unlimApprove){
+    unlimApprove.onchange = function(e){ unlimitedApprove = e.target.checked; saveSwapSettings(); };
+  }
+  function loadSwapSettings(){
+    try{
+      var raw = localStorage.getItem(SWAP_LS_KEY);
+      if (!raw) return;
+      var d = JSON.parse(raw);
+      if (!d || typeof d !== 'object') return;
+      if (d.custom){
+        slipCustom.value = d.custom;
+        slipCustom.oninput({ target: slipCustom });
+      }else if (typeof d.bps === 'number'){
+        var btn = null;
+        Array.prototype.forEach.call(slipSeg.querySelectorAll('[data-bps]'), function(b){
+          if (+b.dataset.bps === d.bps) btn = b;
+        });
+        if (btn) btn.onclick();
+      }
+      if (typeof d.deadline === 'number'){
+        deadlineMin.value = d.deadline;
+        deadlineMin.oninput({ target: deadlineMin });
+      }
+      if (typeof d.unlim === 'boolean'){
+        unlimApprove.checked = d.unlim;
+        unlimApprove.onchange({ target: unlimApprove });
+      }
+    }catch(e){}
+  }
+  loadSwapSettings();
+})();
+
+/* RPCِ اختصاصی — کلیدِ مشترکِ zaexa.rpc با اپ؛ تستِ اندپوینت با eth_chainId خام (باید Base، ۸۴۵۳، باشد). */
+(function(){
+  var RPC_KEY = 'zaexa.rpc';
+  function maskRpc(u){
+    try{ var h = new URL(u); return h.origin + (h.pathname.length > 1 ? '/…' : ''); }
+    catch(e){ return 'the endpoint'; }
+  }
+  function rpcState(kind, text){
+    var el = document.getElementById('rpcState');
+    if (!el) return;
+    el.textContent = text;
+    el.style.color = kind === 'err' ? 'var(--neg)' : kind === 'ok' ? 'var(--pos)' : 'var(--tx3)';
+  }
+  function withTimeout(p, ms){
+    var ctrl = new AbortController();
+    var t = setTimeout(function(){ ctrl.abort(); }, ms);
+    return p(ctrl.signal).finally(function(){ clearTimeout(t); });
+  }
+  function testChainId(url){
+    return withTimeout(function(signal){
+      return fetch(url, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'eth_chainId', params: [] }),
+        signal: signal
+      }).then(function(r){
+        if (!r.ok) throw new Error('http ' + r.status);
+        return r.json();
+      });
+    }, 8000);
+  }
+  async function saveCustomRpc(raw){
+    var v = (raw || '').trim();
+    if (!v){ clearCustomRpc(); return; }
+    if (!/^https:\/\//i.test(v)){ rpcState('err', 'Only https endpoints are accepted.'); return; }
+    rpcState('', 'Testing…');
+    try{
+      var j = await testChainId(v);
+      var id = j && j.result ? parseInt(j.result, 16) : NaN;
+      if (id !== 8453){
+        rpcState('err', 'That endpoint is chain ' + (isNaN(id) ? '?' : id) + ', not Base (8453).');
+        return;
+      }
+      try{ localStorage.setItem(RPC_KEY, v); rpcState('ok', 'Saved — ' + maskRpc(v)); }
+      catch(e){ rpcState('ok', 'Using ' + maskRpc(v) + ' — this tab only, storage is blocked.'); }
+    }catch(e){
+      rpcState('err', e && e.name === 'AbortError'
+        ? 'Could not reach that endpoint.'
+        : 'That endpoint did not answer as a Base node.');
+    }
+  }
+  function clearCustomRpc(){
+    try{ localStorage.removeItem(RPC_KEY); }catch(e){}
+    var input = document.getElementById('rpcCustom');
+    if (input) input.value = '';
+    rpcState('', 'Using the built-in public endpoints.');
+  }
+  function restoreCustomRpc(){
+    var v = null;
+    try{ v = localStorage.getItem(RPC_KEY); }catch(e){}
+    var input = document.getElementById('rpcCustom');
+    if (v && /^https:\/\//i.test(v)){
+      if (input) input.value = v;
+      rpcState('', 'Using your saved endpoint — ' + maskRpc(v));
+    }else{
+      rpcState('', 'Optional. Use your own endpoint if the public ones are blocked where you are.');
+    }
+  }
+  var rpcSave = document.getElementById('rpcSave');
+  var rpcCustom = document.getElementById('rpcCustom');
+  var rpcClear = document.getElementById('rpcClear');
+  if (rpcSave) rpcSave.onclick = function(){ saveCustomRpc(rpcCustom.value); };
+  if (rpcCustom) rpcCustom.onkeydown = function(e){ if (e.key === 'Enter') saveCustomRpc(e.target.value); };
+  if (rpcClear) rpcClear.onclick = clearCustomRpc;
+  restoreCustomRpc();
+})();
+
+/* کیف‌پول، منوها و تم — همان فلوی EIP-6963 / WalletConnect در /pairs. */
+(function(){
+  var DISCONNECT_KEY = 'zaexa.disconnected';
+  function userDisconnected(){
+    try{ return localStorage.getItem(DISCONNECT_KEY) === '1'; }catch(e){ return false; }
+  }
+  function markDisconnected(on){
+    try{
+      if (on) localStorage.setItem(DISCONNECT_KEY, '1');
+      else localStorage.removeItem(DISCONNECT_KEY);
+    }catch(e){}
+  }
+  function hasWcSession(){
+    try{
+      for (var i = 0; i < localStorage.length; i++){
+        var k = localStorage.key(i);
+        if (k && k.indexOf('wc@2:') === 0 && /session/i.test(k)){
+          var v = localStorage.getItem(k);
+          if (v && v !== '[]' && v !== '{}' && v !== 'null') return true;
+        }
+      }
+    }catch(e){}
+    return false;
+  }
+  function shortAddr(a){
+    if (!a || a.length < 11) return a || '';
+    return a.slice(0, 6) + '…' + a.slice(-4);
+  }
+
+  var account = null, walletEip1193 = null, walletIsRemote = false;
+  var discoveredWallets = new Map();
+  function onWalletAnnounce(ev){
+    var d = ev && ev.detail;
+    if (!d || !d.info || !d.provider) return;
+    var key = d.info.rdns || d.info.uuid || d.info.name;
+    if (!key) return;
+    discoveredWallets.set(key, d);
+    var ov = document.getElementById('walletOv');
+    if (ov && ov.classList.contains('on')) renderWalletList();
+  }
+  window.addEventListener('eip6963:announceProvider', onWalletAnnounce);
+  function scanWallets(){ window.dispatchEvent(new Event('eip6963:requestProvider')); }
+  function legacyInjected(){
+    var e = window.ethereum;
+    if (!e) return null;
+    if (e.providers && e.providers.length) return e.providers.find(function(p){ return p.isMetaMask; }) || e.providers[0];
+    return e;
+  }
+  function injectedName(p){
+    if (!p) return 'Browser wallet';
+    if (p.isRabby) return 'Rabby';
+    if (p.isZerion) return 'Zerion';
+    if (p.isCoinbaseWallet) return 'Coinbase Wallet';
+    if (p.isTrust || p.isTrustWallet) return 'Trust Wallet';
+    if (p.isBraveWallet) return 'Brave Wallet';
+    if (p.isMetaMask) return 'MetaMask';
+    return 'Browser wallet';
+  }
+  function walletOptions(){
+    var out = Array.from(discoveredWallets.values()).map(function(d){
+      return { key: d.info.rdns || d.info.uuid, name: d.info.name || 'Wallet',
+        icon: d.info.icon || null, provider: d.provider, kind: 'Browser extension' };
+    });
+    out.sort(function(a, b){ return a.name.localeCompare(b.name); });
+    if (!out.length){
+      var inj = legacyInjected();
+      if (inj) out.push({ key: 'legacy', name: injectedName(inj), icon: null, provider: inj, kind: 'Browser extension' });
+    }
+    return out;
+  }
+
+  // WalletConnect — همان بسته‌ی محلی و همان projectId اپ، فقط روی درخواست بار می‌شود.
+  var WC_PROJECT_ID = 'c1fcdd7d857fb7f0c54788295dfd09fc';
+  var WC_ICON = 'data:image/svg+xml;utf8,' + encodeURIComponent(
+    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">' +
+    '<rect width="32" height="32" rx="9" fill="#3b99fc"/>' +
+    '<path d="M9.6 12.6a9 9 0 0 1 12.8 0l.4.4a.4.4 0 0 1 0 .6l-1.4 1.4a.2.2 0 0 1-.3 0l-.6-.6a6.3 6.3 0 0 0-8.9 0l-.6.6a.2.2 0 0 1-.3 0L9.3 13.6a.4.4 0 0 1 0-.6z" fill="#fff"/>' +
+    '<path d="M24.6 14.9l1.2 1.2a.4.4 0 0 1 0 .6l-5.5 5.4a.4.4 0 0 1-.6 0l-3.9-3.8a.1.1 0 0 0-.2 0l-3.9 3.8a.4.4 0 0 1-.6 0l-5.5-5.4a.4.4 0 0 1 0-.6l1.2-1.2a.4.4 0 0 1 .6 0l3.9 3.8a.1.1 0 0 0 .2 0l3.9-3.8a.4.4 0 0 1 .6 0l3.9 3.8a.1.1 0 0 0 .2 0l3.9-3.8a.4.4 0 0 1 .6 0z" fill="#fff"/></svg>');
+  var wcProvider = null, wcLoading = null;
+  function loadWalletConnect(){
+    if (window.WCProvider) return Promise.resolve(window.WCProvider);
+    if (wcLoading) return wcLoading;
+    wcLoading = new Promise(function(res, rej){
+      var s = document.createElement('script');
+      s.src = '/walletconnect.bundle.9d119cbe.js';
+      s.onload = function(){ window.WCProvider ? res(window.WCProvider) : rej(new Error('WalletConnect loaded but did not register.')); };
+      s.onerror = function(){ rej(new Error('WalletConnect could not be loaded.')); };
+      document.head.appendChild(s);
+    });
+    wcLoading.catch(function(){ wcLoading = null; });
+    return wcLoading;
+  }
+  function wcInitOptions(showQrModal){
+    return {
+      projectId: WC_PROJECT_ID,
+      chains: [8453],
+      optionalChains: [8453],
+      showQrModal: showQrModal,
+      metadata: {
+        name: 'Zaexa',
+        description: 'Zaexa — a DEX aggregator on Base',
+        url: location.origin,
+        icons: [location.origin + '/og.png']
+      }
+    };
+  }
+  async function restoreWalletConnect(){
+    if (!hasWcSession()) return false;
+    try{
+      var lib = await loadWalletConnect();
+      if (!wcProvider) wcProvider = await lib.EthereumProvider.init(wcInitOptions(false));
+      if (wcProvider.accounts && wcProvider.accounts.length){
+        await connectWithProvider(wcProvider, false);
+        return !!account;
+      }
+    }catch(e){}
+    return false;
+  }
+  async function connectWalletConnect(){
+    try{
+      var lib = await loadWalletConnect();
+      if (!wcProvider) wcProvider = await lib.EthereumProvider.init(wcInitOptions(true));
+      var accs = await wcProvider.enable();
+      if (!accs || !accs.length) throw new Error('WalletConnect returned no account.');
+      await connectWithProvider(wcProvider, false);
+    }catch(e){ /* بستنِ QR توسط کاربر خطا نیست، انصراف است */ }
+  }
+
+  function paintWallet(){
+    var b = document.getElementById('connectBtn');
+    var addr = document.getElementById('walletAddr');
+    if (!b || !addr) return;
+    if (!account){
+      b.textContent = 'Connect wallet';
+      b.className = 'chip solid';
+      addr.textContent = '—';
+      closeWalletMenu();
+      return;
+    }
+    b.textContent = shortAddr(account);
+    b.className = 'chip';
+    addr.textContent = shortAddr(account);
+  }
+  function closeWalletMenu(){
+    var pop = document.getElementById('walletPop');
+    var btn = document.getElementById('connectBtn');
+    if (pop) pop.classList.remove('on');
+    if (btn) btn.setAttribute('aria-expanded', 'false');
+  }
+  function toggleWalletMenu(){
+    if (!account) return;
+    var pop = document.getElementById('walletPop');
+    var btn = document.getElementById('connectBtn');
+    if (!pop || !btn) return;
+    closeSetPop();
+    var open = pop.classList.toggle('on');
+    btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+  }
+  async function connectWithProvider(provider, requestAccounts){
+    try{
+      var a = await provider.request({ method: requestAccounts ? 'eth_requestAccounts' : 'eth_accounts' });
+      if (!a || !a[0]) throw new Error('No wallet account was returned.');
+      walletIsRemote = (provider === wcProvider);
+      if (requestAccounts) markDisconnected(false);
+      walletEip1193 = provider;
+      account = a[0];
+      paintWallet();
+      closeWalletMenu();
+      var note = document.getElementById('walletDisconnectNote');
+      if (note) note.hidden = true;
+    }catch(e){ /* رد یا شکستِ اتصال — بی‌صدا، همان وضعیتِ قطع می‌ماند */ }
+  }
+  async function connect(){ openWalletPicker(); }
+  async function disconnect(){
+    markDisconnected(true);
+    var wasRemote = walletIsRemote, inj = walletEip1193;
+    if (wasRemote && wcProvider){ try{ await wcProvider.disconnect(); }catch(e){} wcProvider = null; }
+    var revoked = false;
+    if (!wasRemote && inj && inj.request){
+      try{ await inj.request({ method: 'wallet_revokePermissions', params: [{ eth_accounts: {} }] }); revoked = true; }catch(e){}
+    }
+    account = null; walletEip1193 = null; walletIsRemote = false;
+    paintWallet();
+    var note = document.getElementById('walletDisconnectNote');
+    if (note){
+      if (revoked) note.textContent = 'Disconnected. Access was removed in your wallet too — connecting again will ask you first.';
+      note.hidden = false;
+    }
+  }
+
+  function mkEl(tag, cls, text){
+    var e = document.createElement(tag);
+    if (cls) e.className = cls;
+    if (text != null) e.textContent = text;
+    return e;
+  }
+  function renderWalletList(){
+    var list = document.getElementById('walList');
+    var note = document.getElementById('walNote');
+    if (!list) return;
+    var opts = walletOptions();
+    var rows = opts.map(function(o){
+      return { name: o.name, icon: o.icon, kind: o.kind, go: function(){ connectWithProvider(o.provider, true); } };
+    });
+    rows.push({ name: 'WalletConnect', icon: WC_ICON, kind: 'Mobile wallet · QR', go: connectWalletConnect });
+    while (list.firstChild) list.removeChild(list.firstChild);
+    rows.forEach(function(o){
+      var row = mkEl('div', 'walRow');
+      if (o.icon){
+        var img = document.createElement('img');
+        img.src = o.icon; img.alt = '';
+        row.appendChild(img);
+      }else{
+        row.appendChild(mkEl('span', 'walFallback', (o.name[0] || '?').toUpperCase()));
+      }
+      row.appendChild(mkEl('span', 'walName', o.name));
+      row.appendChild(mkEl('span', 'walKind', o.kind));
+      row.onclick = function(){ closeWalletPicker(); o.go(); };
+      list.appendChild(row);
+    });
+    if (note) note.textContent = opts.length
+      ? 'Zaexa never sees your keys. Connecting only shares your address so we can show it here — this page never sends a transaction.'
+      : 'No browser extension detected. WalletConnect works without one — scan the code with your phone wallet.';
+  }
+  function openWalletPicker(){
+    scanWallets();
+    renderWalletList();
+    var ov = document.getElementById('walletOv');
+    if (ov) ov.classList.add('on');
+    setTimeout(function(){ if (ov && ov.classList.contains('on')) renderWalletList(); }, 250);
+  }
+  function closeWalletPicker(){
+    var ov = document.getElementById('walletOv');
+    if (ov) ov.classList.remove('on');
+  }
+
+  function closeSetPop(){
+    var pop = document.getElementById('setPop');
+    var btn = document.getElementById('setBtn');
+    if (pop) pop.classList.remove('on');
+    if (btn) btn.setAttribute('aria-expanded', 'false');
+  }
+  document.addEventListener('mousedown', function(e){
+    var wPop = document.getElementById('walletPop');
+    var wBtn = document.getElementById('connectBtn');
+    if (!(wPop && (wPop.contains(e.target) || (wBtn && wBtn.contains(e.target))))) closeWalletMenu();
+    var sPop = document.getElementById('setPop');
+    var sBtn = document.getElementById('setBtn');
+    if (!(sPop && (sPop.contains(e.target) || (sBtn && sBtn.contains(e.target))))) closeSetPop();
+  });
+  document.addEventListener('keydown', function(e){
+    if (e.key === 'Escape'){ closeWalletMenu(); closeSetPop(); closeWalletPicker();
+      var nm = document.getElementById('navMenu');
+      if (nm && nm.classList.contains('on')){ closeNavMenu(); var nb = document.getElementById('navMarkets'); if (nb) nb.focus(); } }
+  });
+  function closeNavMenu(){
+    var m = document.getElementById('navMenu'), b = document.getElementById('navMarkets');
+    if (m) m.classList.remove('on');
+    if (b) b.setAttribute('aria-expanded', 'false');
+  }
+  var navMarketsEl = document.getElementById('navMarkets');
+  var navMenuEl = document.getElementById('navMenu');
+  if (navMarketsEl && navMenuEl){
+    navMarketsEl.onclick = function(e){
+      e.stopPropagation();
+      var open = !navMenuEl.classList.contains('on');
+      navMenuEl.classList.toggle('on', open);
+      navMarketsEl.setAttribute('aria-expanded', String(open));
+    };
+    document.addEventListener('mousedown', function(e){
+      if (!navMenuEl.contains(e.target) && !navMarketsEl.contains(e.target)) closeNavMenu();
+    });
+    Array.prototype.forEach.call(navMenuEl.querySelectorAll('a.navItem'), function(a){ a.addEventListener('click', closeNavMenu); });
+  }
+
+  var setBtnEl = document.getElementById('setBtn');
+  var setPopEl = document.getElementById('setPop');
+  if (setBtnEl && setPopEl){
+    setBtnEl.onclick = function(){
+      closeWalletMenu();
+      var open = setPopEl.classList.toggle('on');
+      setBtnEl.setAttribute('aria-expanded', open ? 'true' : 'false');
+    };
+  }
+  var themeBtnEl = document.getElementById('themeBtn');
+  function labelTheme(){if(themeBtnEl){var label=document.documentElement.dataset.theme==='dark'?'Switch to light mode':'Switch to dark mode';themeBtnEl.setAttribute('aria-label',label);themeBtnEl.title=label;themeBtnEl.setAttribute('aria-checked',String(document.documentElement.dataset.theme==='dark'));}}
+  labelTheme();
+  if (themeBtnEl){
+    themeBtnEl.onclick = function(){
+      var root = document.documentElement;
+      var next = root.dataset.theme === 'dark' ? 'light' : 'dark';
+      root.dataset.theme = next;labelTheme();
+      try { localStorage.setItem('zaexa.theme.v1', next); } catch (e) {}
+    };
+  }
+
+  var walCloseEl = document.getElementById('walClose');
+  var walletOvEl = document.getElementById('walletOv');
+  if (walCloseEl) walCloseEl.onclick = closeWalletPicker;
+  if (walletOvEl) walletOvEl.onclick = function(e){ if (e.target === walletOvEl) closeWalletPicker(); };
+
+  var connectBtnEl = document.getElementById('connectBtn');
+  if (connectBtnEl) connectBtnEl.onclick = function(){ if (!account) connect(); else toggleWalletMenu(); };
+  var copyAddrBtnEl = document.getElementById('copyAddrBtn');
+  if (copyAddrBtnEl) copyAddrBtnEl.onclick = function(e){
     e.stopPropagation();
-    var open=!nm.classList.contains('on');
-    nm.classList.toggle('on',open);
-    nb.setAttribute('aria-expanded',String(open));
+    if (!account) return;
+    var span = copyAddrBtnEl.querySelector('span');
+    var old = span ? span.textContent : null;
+    try{
+      if (navigator.clipboard && window.isSecureContext){
+        navigator.clipboard.writeText(account).then(function(){
+          if (span){ span.textContent = 'Copied ✓'; setTimeout(function(){ if (span) span.textContent = old; }, 1400); }
+        });
+      }
+    }catch(e2){}
   };
-  document.addEventListener('mousedown',function(e){
-    if(!nm.contains(e.target)&&!nb.contains(e.target)) closeNavMenu();
-  });
-  document.addEventListener('keydown',function(e){
-    if(e.key==='Escape'&&nm.classList.contains('on')){ closeNavMenu(); nb.focus(); }
-  });
-  Array.prototype.forEach.call(nm.querySelectorAll('a.navItem'),function(a){ a.addEventListener('click',closeNavMenu); });
+  var disconnectBtnEl = document.getElementById('disconnectBtn');
+  if (disconnectBtnEl) disconnectBtnEl.onclick = disconnect;
+
+  // بازیابیِ بی‌صدا: فقط eth_accounts، هرگز پنجره‌ای باز نمی‌کند؛ اگر کاربر صریحاً قطع کرده بود، اتصالِ خودکار نیست.
+  (async function(){
+    scanWallets();
+    await new Promise(function(r){ setTimeout(r, 120); });
+    if (!userDisconnected()){
+      var back = false;
+      var opts = walletOptions();
+      for (var i = 0; i < opts.length; i++){
+        try{
+          var a = await opts[i].provider.request({ method: 'eth_accounts' });
+          if (a && a.length){ await connectWithProvider(opts[i].provider, false); back = true; break; }
+        }catch(e){}
+      }
+      if (!back) await restoreWalletConnect();
+    }
+  })();
 })();
 `;
 
@@ -589,64 +1058,270 @@ const THEME_BOOT_JS = String.raw`
 })();
 `;
 
-const BRAND_HTML = '<a class="brand" href="/" aria-label="Zaexa home"><svg class="mark" viewBox="0 0 1000 697.98" aria-hidden="true"><use href="#zxMark"/></svg><svg class="word" viewBox="0 0 2581.74 300" aria-hidden="true"><use href="#zxWord"/></svg></a>';
+/* هدرِ اپ — کپیِ عنصربه‌عنصرِ <header> در web/pairs.html؛ تفاوتِ مجاز فقط تبِ فعال (Exit Report) و ترتیبِ تب‌هاست. */
+const HEADER_HTML = String.raw`<header class="site-header">
+  <a class="logo" href="/" aria-label="Zaexa home"><span class="glyph"><svg class="mark" viewBox="0 0 1000 697.98" aria-hidden="true"><use href="#zxMark"/></svg></span><svg class="wordmark" viewBox="0 0 2581.74 300" aria-hidden="true"><use href="#zxWord"/></svg></a>
+  <div class="grow navPad"></div>
+  <nav class="nav" id="nav">
+    <a class="navLink" href="/app#swap" title="Swap">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+           stroke-linecap="round" stroke-linejoin="round">
+        <path d="M7 4v13M4 14l3 3 3-3M17 20V7M14 10l3-3 3 3"/></svg><span>Swap</span></a>
+    <div class="navMenuWrap rel">
+      <button class="navMarkets" id="navMarkets" type="button" aria-haspopup="menu" aria-expanded="false" title="Markets">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="M7 15l4-4 3 3 5-6"/></svg><span>Markets</span><svg class="navChev" viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></button>
+      <div class="pop navMenu" id="navMenu" role="menu" aria-label="Markets">
+        <a class="navItem" role="menuitem" href="/app#flow">
+          <span class="navIco"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 13h4l3 7 4-16 3 9h4"/></svg></span><span class="navTxt"><span class="navTtl">Flow</span><span class="navSub">Who is buying and selling</span></span></a>
+        <a class="navItem" role="menuitem" href="/pairs">
+          <span class="navIco"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6h10M4 12h10M4 18h7"/><path d="M19 3v4M17 5h4"/></svg></span><span class="navTxt"><span class="navTtl">New pairs</span><span class="navSub">Fresh pools, exit-checked</span></span></a>
+      </div>
+    </div>
+    <a class="navLink" href="/app#stocks" title="Stocks"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 15l3-3 3 2 4-5"/></svg><span>Stocks</span></a>
+    <a class="navLink on" href="/report" title="Exit Report" aria-current="page">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+           stroke-linecap="round" stroke-linejoin="round">
+        <path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/><path d="M9 14l2 2 4-4"/></svg><span>Exit Report</span></a>
+  </nav>
+  <div class="hdrRight">
+  <div class="grow"></div>
+  <div class="rel">
+    <button class="chip round" id="setBtn" aria-haspopup="menu" aria-expanded="false" title="Settings" aria-label="Settings"><svg class="gearIcon" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg></button>
+    <div class="pop" id="setPop">
+      <h4>Max slippage</h4>
+      <div class="seg" id="slipSeg">
+        <button type="button" data-bps="10">0.1%</button>
+        <button type="button" data-bps="50" class="on">0.5%</button>
+        <button type="button" data-bps="100">1%</button>
+        <input id="slipCustom" placeholder="…" inputmode="decimal">
+      </div>
+      <h4>Deadline (min)</h4>
+      <div class="seg"><input id="deadlineMin" value="3" inputmode="numeric" style="width:100%"></div>
+      <h4>Approvals</h4>
+      <label class="optrow"><input type="checkbox" id="unlimApprove">
+        <span>Approve unlimited instead of the exact amount</span></label>
+      <h4>Custom RPC</h4>
+      <div class="seg" style="margin-bottom:7px">
+        <input id="rpcCustom" placeholder="https://…" style="width:100%"
+          autocomplete="off" spellcheck="false" inputmode="url"></div>
+      <div class="seg" style="margin-bottom:7px">
+        <button type="button" id="rpcSave" style="flex:2">Test &amp; save</button>
+        <button type="button" id="rpcClear" style="flex:1">Clear</button></div>
+      <p id="rpcState" style="margin:0 0 14px"></p>
+      <p>Every swap is simulated first. If the simulation fails, nothing is broadcast and no gas is spent.</p>
+    </div>
+  </div>
+  <button class="chip round" id="themeBtn" type="button" role="switch" aria-checked="false" aria-label="Switch to dark mode" title="Switch to dark mode"><svg class="themeMoon" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"/></svg><svg class="themeSun" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2.5v2.2M12 19.3v2.2M4.6 4.6l1.6 1.6M17.8 17.8l1.6 1.6M2.5 12h2.2M19.3 12h2.2M4.6 19.4l1.6-1.6M17.8 6.2l1.6-1.6"/></svg><span id="themeState" hidden>Light</span></button>
+  <div class="rel" id="walletMenu">
+    <button class="chip solid" id="connectBtn" aria-haspopup="menu" aria-expanded="false">Connect wallet</button>
+    <div class="pop walletPop" id="walletPop" role="menu" aria-label="Wallet menu">
+      <div class="walletHead"><span>Wallet</span><span class="walletAddr" id="walletAddr">—</span></div>
+      <a class="walletAction" id="folioMenuBtn" role="menuitem" href="/app#folio"><span>Portfolio</span><svg class="wIcon" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-9-9v9z"/><path d="M15.5 3.5A9 9 0 0 1 20.5 8.5L12 12z"/></svg></a>
+      <button class="walletAction" id="copyAddrBtn" role="menuitem">
+        <span>Copy address</span>
+        <svg class="wIcon" viewBox="0 0 24 24" width="15" height="15" fill="none"
+             stroke="currentColor" stroke-width="2" stroke-linecap="round"
+             stroke-linejoin="round" aria-hidden="true">
+          <rect x="9" y="9" width="11" height="11" rx="2"/>
+          <path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg>
+      </button>
+      <button class="walletAction danger" id="disconnectBtn" role="menuitem">
+        <span>Disconnect</span>
+        <svg class="wIcon" viewBox="0 0 24 24" width="15" height="15" fill="none"
+             stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
+          <path d="M12 3v9"/><path d="M7.6 6.6a7.5 7.5 0 1 0 8.8 0"/></svg>
+      </button>
+    </div>
+  </div>
+  </div>
+</header>`;
 
-const HEADER_HTML =
-  '<header class="landing-header">\n  ' + BRAND_HTML + "\n" +
-  '  <nav class="desktop-nav" aria-label="Main navigation"><a href="/app">Swap</a><a href="/pairs">New pairs</a><a class="on" href="/report" aria-current="page">Exit Report</a><a href="/app#faq">FAQ</a></nav>\n' +
-  '  <div class="header-actions">\n    ' + LANDING_THEME_TOGGLE + "\n" +
-  '    <a class="header-cta" href="/app">Check a token <span>↗</span></a>\n' +
-  '    <button class="menu-toggle" id="menuToggle" aria-expanded="false" aria-label="Open navigation">☰</button>\n  </div>\n' +
-  '<nav class="nav" id="nav"><a class="navLink" href="/app#swap" title="Swap"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 4v13M4 14l3 3 3-3M17 20V7M14 10l3-3 3 3"/></svg><span>Swap</span></a><div class="navMenuWrap rel"><button class="navMarkets" id="navMarkets" type="button" aria-haspopup="menu" aria-expanded="false" title="Markets"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="M7 15l4-4 3 3 5-6"/></svg><span>Markets</span><svg class="navChev" viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></button><div class="pop navMenu" id="navMenu" role="menu" aria-label="Markets"><a class="navItem" role="menuitem" href="/app#flow"><span class="navIco"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 13h4l3 7 4-16 3 9h4"/></svg></span><span class="navTxt"><span class="navTtl">Flow</span><span class="navSub">Who is buying and selling</span></span></a><a class="navItem" role="menuitem" href="/pairs"><span class="navIco"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6h10M4 12h10M4 18h7"/><path d="M19 3v4M17 5h4"/></svg></span><span class="navTxt"><span class="navTtl">New pairs</span><span class="navSub">Fresh pools, exit-checked</span></span></a></div></div><a class="navLink on" href="/report" title="Exit Report" aria-current="page"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/><path d="M9 14l2 2 4-4"/></svg><span>Exit Report</span></a><span class="navSoon" aria-disabled="true" title="Coming soon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 15l3-3 3 2 4-5"/></svg><span>Stocks</span><span class="soonPill">Soon</span></span></nav>\n' +
-  '<div class="mobile-menu" id="mobileMenu" data-open="0"><nav aria-label="Mobile navigation"><a href="/app">Swap</a><a href="/pairs">New pairs</a><a href="/report">Exit Report</a><a href="/app#faq">FAQ</a><a class="button button-primary" href="/app">Check a token <span>↗</span></a></nav></div>\n</header>';
+/* انتخاب‌گرِ کیف‌پول و یادداشتِ قطع — بعد از هدر، مثلِ /pairs. این صفحه فقط-خوانده است: هرگز تراکنش، هرگز switchNetwork. */
+const WALLET_PICKER_HTML = String.raw`<div class="ov" id="walletOv">
+  <div class="modal">
+    <h3>Connect a wallet<span class="grow"></span><button type="button" id="walClose" style="color:var(--tx3)">✕</button></h3>
+    <div class="tlist" id="walList"></div>
+    <p class="walNote" id="walNote"></p>
+  </div>
+</div>
+<p id="walletDisconnectNote" hidden>Disconnected. Zaexa will not reconnect on its own. Your wallet may still list this site — remove it there to revoke access.</p>`;
 
-// نبِ فعالِ «Exit Report» و رنگِ دسکتاپ؛ پاسخگو (≤۹۰۰) را کدِ landing.html خودش دارد.
+// استایلِ هدر — از web/pairs.html، با قاعده‌های عمومی (.chip) محدود به .site-header تا بدنه‌ی گزارش عوض نشود.
 const HEADER_CSS = String.raw`
-.desktop-nav a.on{color:var(--tx);font-weight:700}
-@media(max-width:900px){
-  .landing-header{padding:14px 26px;height:69px;display:flex;justify-content:space-between}
-  .desktop-nav{display:none}.header-cta{display:none}.menu-toggle{display:block;font-size:20px}
-  .footGrid{grid-template-columns:1fr 1fr;gap:26px}.footBottom{flex-direction:column;gap:10px}.footBrand .footTag{max-width:none}
+/* هدرِ اپ (Swap) — کپیِ هدر و نوارِ تبِ web/pairs.html. هر قاعده‌ای که نامِ عمومی دارد (.chip) زیرِ .site-header
+   می‌رود تا چیپ‌های فیلترِ بدنه‌ی گزارش دست‌نخورده بمانند. هشدار: روی خودِ <header> هرگز transform/filter/
+   backdrop-filter نگذار (نوارِ fixed ی موبایل داخلش است)؛ شیشه فقط روی ::before. z-index: هدر ۳۰، .pop ۵۰، نوارِ موبایل ۶۰. */
+:root{--glow:rgba(91,83,232,.12)}
+:root[data-theme=dark]{--glow:rgba(79,195,247,.16)}
+.site-header{max-width:none;margin:0;width:100%;
+  padding:14px 26px;display:grid;grid-template-columns:1fr auto 1fr;grid-template-rows:1fr;
+  align-items:center;column-gap:11px;background:transparent;
+  border-bottom:1px solid transparent;
+  position:sticky;top:0;z-index:30;
+  transition:border-color .2s,box-shadow .2s}
+header>.navPad{grid-column:1;grid-row:1;width:0;min-width:0}
+.grow{flex:1}
+.site-header::before{content:"";position:absolute;inset:0;z-index:-1;pointer-events:none;
+  opacity:0;transition:opacity .2s}
+.site-header.scrolled::before{opacity:1;background:color-mix(in srgb,var(--bg) 72%,transparent);
+  backdrop-filter:saturate(1.5) blur(14px);-webkit-backdrop-filter:saturate(1.5) blur(14px)}
+.site-header.scrolled{border-bottom-color:var(--line);
+  box-shadow:0 8px 24px -12px rgba(0,0,0,.18)}
+:root[data-theme="dark"] .site-header.scrolled{box-shadow:0 8px 24px -12px rgba(0,0,0,.5)}
+.logo{grid-column:1;grid-row:1;justify-self:start;border-radius:10px;display:flex;align-items:center;gap:13px;font-size:19px;font-weight:680;letter-spacing:-.4px;color:inherit;text-decoration:none}
+.logo .glyph{width:38px;height:38px;display:grid;place-items:center}
+.logo .glyph .mark{width:38px;height:auto;display:block;filter:drop-shadow(0 3px 10px var(--glow))}
+.logo .wordmark{height:12.7px;width:auto;display:block;color:var(--tx)}
+@media(max-width:380px){.logo .wordmark{display:none}}
+.hdrRight{grid-column:3;grid-row:1;display:flex;align-items:center;gap:11px;min-width:0;justify-self:end}
+@media(min-width:961px){.hdrRight{min-width:max-content}}
+.site-header .chip{
+  display:inline-flex;align-items:center;gap:7px;height:38px;padding:0 15px;
+  border-radius:999px;background:var(--card);box-shadow:var(--sh);
+  font-size:13.5px;color:var(--tx2);transition:.16s;white-space:nowrap;text-decoration:none;
 }
-@media(max-width:720px){.landing-header{height:59px;padding:14px 14px 6px}}
-/* ≤۷۲۰: نوارِ تبِ پایینِ موبایل — عیناً همان نوارِ /pairs (و اپ). بالاتر از ۷۲۰ پنهان است.
-   هشدار: روی خودِ <header> هرگز transform/filter/backdrop-filter نگذار، وگرنه این نوارِ fixed
-   نسبت به هدر جایگزین می‌شود نه صفحه (شیشه‌ی هدر فقط روی ::before است). */
-.nav{display:none}
+.site-header .chip:hover{color:var(--tx);transform:translateY(-1px);box-shadow:var(--sh)}
+.site-header .chip.solid{background:var(--grad);color:var(--on-acc);font-weight:620;box-shadow:0 4px 16px var(--glow)}
+.site-header .chip.round{padding:0;width:38px;justify-content:center}
+.rel{position:relative}
+.pop{position:absolute;right:0;top:46px;width:256px;background:var(--card);border-radius:18px;
+  box-shadow:var(--sh);padding:16px;z-index:50;display:none;
+  max-height:calc(100vh - 76px);max-height:calc(100dvh - 76px);
+  overflow-y:auto;overscroll-behavior:contain}
+.pop.on{display:block}
 @media(max-width:720px){
-  #menuToggle,.mobile-menu{display:none}
-  body{padding-bottom:calc(90px + env(safe-area-inset-bottom))}
-  .nav{display:flex;position:fixed;left:8px;right:8px;bottom:calc(8px + env(safe-area-inset-bottom));z-index:60;margin:0;gap:4px;padding:6px;border:1px solid var(--line);border-radius:999px;background:var(--bg);box-shadow:none}
-  [data-theme="dark"] .nav,[data-theme="dark"] .nav a.on{background:#08070d}
-  .nav a{display:flex;flex:1;flex-direction:column;align-items:center;gap:3px;padding:8px 0;font-size:11px;color:var(--tx2);transition:.16s;white-space:nowrap;text-decoration:none;border-radius:999px}
-  .nav a svg{width:19px;height:19px;flex-shrink:0}
-  .nav a:hover{color:var(--tx)}
-  .nav a.on{background:var(--bg);color:var(--acc);font-weight:620;box-shadow:inset 2px 2px 5px var(--soft-lo),inset -2px -2px 5px var(--soft-hi)}
-  .navMenuWrap{display:flex;flex:1;min-width:0;position:relative}
-  .nav .navMarkets{display:grid;grid-template-columns:1fr auto auto 1fr;grid-template-rows:auto auto;column-gap:2px;row-gap:3px;align-content:center;justify-items:center;flex:1;padding:8px 0;border-radius:999px;font-size:11px;color:var(--tx2);transition:.16s;white-space:nowrap}
-  .nav .navMarkets:hover{color:var(--tx)}
-  .nav .navMarkets.on{color:var(--acc);font-weight:620}
-  .nav .navMarkets svg{width:19px;height:19px;flex-shrink:0}
+  .pop,.walletPop{position:fixed;top:58px;right:12px;left:auto;width:min(300px,calc(100vw - 24px))}
+}
+.pop h4{margin:0 0 9px;font-size:11.5px;font-weight:640;letter-spacing:.05em;
+  text-transform:uppercase;color:var(--tx3)}
+.walletPop{width:238px;padding:8px}
+.ov{position:fixed;inset:0;background:rgba(10,25,20,.36);backdrop-filter:blur(4px);
+  display:none;align-items:flex-start;justify-content:center;padding:80px 16px;z-index:70}
+.ov.on{display:flex}
+.modal{background:var(--card);border-radius:22px;box-shadow:var(--sh);width:100%;max-width:404px;
+  max-height:72vh;display:flex;flex-direction:column;overflow:hidden}
+.modal h3{margin:0;padding:18px 20px 4px;font-size:16px;font-weight:660;display:flex;align-items:center}
+.tlist{overflow-y:auto;padding:4px 8px 12px}
+.optrow{display:flex;gap:9px;align-items:flex-start;font-size:12.5px;color:var(--tx2);
+  margin:-2px 0 4px;cursor:pointer;line-height:1.4}
+.optrow input{margin:2px 0 0;flex:none}
+.seg{display:flex;gap:6px;margin-bottom:15px}
+.seg button{flex:1;padding:8px 0;border-radius:11px;background:var(--card2);font-size:13px;color:var(--tx2)}
+.seg button.on{background:var(--acc);color:var(--on-acc);font-weight:620}
+.seg input{width:62px;padding:8px;border-radius:11px;text-align:right;background:var(--card2);
+  border:none;outline:none}
+.pop p{margin:0;font-size:11.5px;color:var(--tx3);line-height:1.55}
+.walletHead{display:flex;align-items:center;justify-content:space-between;gap:10px;
+  padding:7px 8px 10px;font-size:11px;font-weight:640;letter-spacing:.05em;
+  text-transform:uppercase;color:var(--tx3)}
+.walletAddr{font-variant-numeric:tabular-nums;text-transform:none;letter-spacing:0;color:var(--tx2)}
+.walletAction{width:100%;display:flex;align-items:center;justify-content:space-between;gap:12px;
+  padding:10px 9px;border-radius:11px;text-align:left;font-size:13px;color:var(--tx2)}
+.walletAction:hover{background:var(--card2);color:var(--tx)}
+.walletAction .right{display:flex;align-items:center;gap:8px;color:var(--tx3);font-size:12px}
+.walletAction.danger{color:var(--neg)}
+.walletAction.danger:hover{background:color-mix(in srgb,var(--neg) 10%,transparent);color:var(--neg)}
+.walRow{display:flex;align-items:center;gap:12px;padding:12px 16px;cursor:pointer;text-align:left;width:100%}
+.walRow:hover{background:var(--card2)}
+.walRow img,.walRow .walFallback{width:30px;height:30px;border-radius:9px;flex:none;object-fit:contain}
+.walRow .walFallback{display:grid;place-items:center;background:var(--card2);font-weight:700}
+.walRow .walName{font-weight:620;font-size:14.5px}
+.walRow .walKind{margin-left:auto;font-size:11px;color:var(--tx3)}
+.walNote{margin:6px 16px 16px;font-size:11.5px;color:var(--tx3);line-height:1.55}
+#walletDisconnectNote{margin:0;padding:10px clamp(20px,3.4vw,56px);text-align:center;color:var(--tx3);
+  font-size:12.5px;border-bottom:1px solid var(--line)}
+#walletDisconnectNote[hidden]{display:none}
+.nav{grid-column:2;grid-row:1;display:flex;gap:4px;background:var(--card2);border-radius:999px;padding:4px}
+.nav a{display:flex;align-items:center;gap:7px;padding:7px 14px;border-radius:999px;
+  font-size:13.5px;color:var(--tx2);transition:.16s;white-space:nowrap;text-decoration:none}
+.nav a svg{width:16px;height:16px;flex-shrink:0}
+.nav a:hover{color:var(--tx)}
+.nav a.on{background:var(--card);color:var(--tx);font-weight:620;box-shadow:var(--sh)}
+@media(min-width:721px){.nav a span{display:inline}}
+@media(min-width:721px) and (max-width:960px){
+  .nav a span{display:none}
+  .nav a{padding:8px 11px}
+}
+@media(min-width:961px) and (max-width:1120px){
+  .nav a span{display:none}
+  .nav a{padding:8px 11px;min-height:35px}
+}
+@media(max-width:720px){
+  .site-header{padding:14px 14px 6px;height:auto;gap:8px}
+  .logo{font-size:17px}
+  .site-header .chip{height:36px;font-size:13px}
+  .nav{position:fixed;left:0;right:0;bottom:0;z-index:60;margin:0;border-radius:0;
+    padding:6px 8px calc(6px + env(safe-area-inset-bottom));gap:6px;
+    background:var(--card);box-shadow:0 -1px 0 var(--line),var(--sh)}
+  .nav a{flex:1;flex-direction:column;gap:3px;padding:8px 0;font-size:11px;border-radius:14px}
+  .nav a svg{width:19px;height:19px}
+  .nav a span{display:block}
+  body{padding-bottom:74px}
+}
+@media(max-width:720px){.navPad{display:none}}
+:root{--soft-hi:rgba(255,255,255,.9);--soft-lo:rgba(35,45,65,.13)}
+:root[data-theme="dark"]{--soft-hi:rgba(66,76,100,.24);--soft-lo:rgba(0,0,0,.55)}
+#themeBtn{position:relative;isolation:isolate;display:grid;place-items:center;flex:none;width:38px;height:38px;padding:0;gap:0;box-sizing:border-box;border-radius:50%;cursor:pointer;overflow:visible;transition:color .2s}
+#themeBtn,#themeBtn:hover{background:var(--bg);border:1px solid var(--line);box-shadow:inset 2px 2px 5px var(--soft-lo),inset -2px -2px 5px var(--soft-hi);color:var(--acc);transform:none}
+#themeBtn::before{display:none}
+[data-theme="dark"] #themeBtn,[data-theme="dark"] #themeBtn:hover{background:#08070d}
+#themeBtn svg{grid-area:1/1;display:grid;place-items:center;position:static;width:18px;height:18px;margin:0;padding:0;box-sizing:border-box;color:inherit;transition:opacity .2s,transform .3s}
+#themeBtn .themeMoon{opacity:0;transform:rotate(-40deg) scale(.6);pointer-events:none}
+[data-theme="dark"] #themeBtn .themeSun{opacity:0;transform:rotate(40deg) scale(.6);pointer-events:none}
+[data-theme="dark"] #themeBtn .themeMoon{opacity:1;transform:none}
+#themeBtn:focus-visible{outline:2px solid var(--acc);outline-offset:3px}
+[data-theme="dark"] .nav,[data-theme="dark"] .nav button.on,[data-theme="dark"] .nav a.on,[data-theme="dark"] #setBtn,[data-theme="dark"] #setBtn:active,[data-theme="dark"] #setBtn[aria-expanded="true"],[data-theme="dark"] #setBtn:has(+ #setPop.on){background:#08070d}
+.nav{background:var(--bg);box-shadow:4px 4px 9px var(--soft-lo),-3px -3px 8px var(--soft-hi),inset 0 1px 1px var(--soft-hi)}
+.nav button.on,.nav a.on{background:var(--bg);color:var(--acc);box-shadow:inset 2px 2px 5px var(--soft-lo),inset -2px -2px 5px var(--soft-hi)}
+.nav .navMarkets{display:flex;align-items:center;gap:7px;padding:7px 14px;border-radius:999px;font-size:13.5px;color:var(--tx2);transition:.16s;white-space:nowrap}
+.nav .navMarkets:hover{color:var(--tx)}
+.nav .navMarkets.on{color:var(--acc);font-weight:620}
+.nav .navMarkets svg{width:16px;height:16px;flex-shrink:0}
+a.walletAction{text-decoration:none}
+@media(min-width:721px) and (max-width:1120px){.nav .navMarkets>span{display:none}.nav .navMarkets{padding:8px 11px}}
+@media(min-width:961px) and (max-width:1120px){.nav .navMarkets{min-height:35px}}
+@media(max-width:720px){.nav .navMarkets{flex:1;flex-direction:column;justify-content:center;gap:3px;padding:8px 0;font-size:11px}.nav .navMarkets svg{width:19px;height:19px}}
+.navMenuWrap{display:flex}
+.nav .navMarkets .navChev{width:13px;height:13px;margin-left:-2px;opacity:.7;transition:transform .16s}
+.nav .navMarkets[aria-expanded="true"] .navChev{transform:rotate(180deg)}
+#navMenu{left:0;right:auto;top:calc(100% + 10px);width:auto;min-width:230px;padding:6px;border-radius:16px;background:var(--card);border:1px solid var(--line);box-shadow:var(--sh);z-index:50}
+.nav .navMenu .navItem{display:flex;flex-direction:row;align-items:center;justify-content:flex-start;gap:10px;width:100%;flex:none;padding:9px 10px;border-radius:11px;text-align:left;font-size:13.5px;font-weight:inherit;color:var(--tx);white-space:nowrap;text-decoration:none;background:none;box-shadow:none;cursor:pointer}
+.nav .navMenu .navItem:hover,.nav .navMenu .navItem.on:hover{background:var(--card2);color:var(--tx)}
+.nav .navMenu .navItem.on{background:none;box-shadow:none;font-weight:inherit}
+.nav .navMenu .navIco{display:grid;place-items:center;flex:none;width:30px;height:30px;border-radius:9px;background:var(--bg);box-shadow:inset 2px 2px 5px var(--soft-lo),inset -2px -2px 5px var(--soft-hi);color:var(--acc)}
+.nav .navMenu .navIco svg{width:16px;height:16px}
+.nav .navMenu .navTxt{display:flex;flex-direction:column;gap:1px;min-width:0}
+.nav .navMenu .navTtl{display:block;font-size:13.5px;font-weight:640;color:var(--tx)}
+.nav .navMenu .navItem.on .navTtl{color:var(--acc)}
+.nav .navMenu .navSub{display:block;font-size:12px;font-weight:400;color:var(--tx3)}
+@media(max-width:720px){
+  .navMenuWrap{flex:1;min-width:0}
+  .nav .navMarkets{display:grid;grid-template-columns:1fr auto auto 1fr;grid-template-rows:auto auto;column-gap:2px;row-gap:3px;align-content:center;justify-items:center}
   .nav .navMarkets>svg:first-child{grid-column:2/4;grid-row:1}
   .nav .navMarkets>span{grid-column:2;grid-row:2}
-  .nav .navMarkets .navChev{display:block;grid-column:3;grid-row:2;align-self:center;width:10px;height:10px;margin:0;opacity:.7;transform:rotate(180deg);transition:transform .16s}
+  .nav .navMarkets .navChev{display:block;grid-column:3;grid-row:2;align-self:center;width:10px;height:10px;margin:0;opacity:.7;transform:rotate(180deg)}
   .nav .navMarkets[aria-expanded="true"] .navChev{transform:none}
-  .nav .navSoon{display:flex;flex:1;flex-direction:column;align-items:center;justify-content:center;gap:3px;padding:8px 0;border-radius:999px;font-size:11px;color:var(--tx3);cursor:default;white-space:nowrap;user-select:none}
-  .nav .navSoon svg{width:19px;height:19px;flex-shrink:0}
-  .nav .navSoon .soonPill{display:none}
-  #navMenu{display:none;position:fixed;left:12px;right:12px;top:auto;bottom:calc(84px + env(safe-area-inset-bottom));width:auto;min-width:0;padding:6px;border-radius:16px;background:var(--card);border:1px solid var(--line);box-shadow:var(--sh);z-index:50;max-height:calc(100vh - 76px);max-height:calc(100dvh - 76px);overflow-y:auto;overscroll-behavior:contain}
-  #navMenu.on{display:block}
-  .nav .navMenu .navItem{display:flex;flex-direction:row;align-items:center;justify-content:flex-start;gap:10px;width:100%;flex:none;padding:9px 10px;border-radius:11px;text-align:left;font-size:13.5px;font-weight:inherit;color:var(--tx);white-space:nowrap;text-decoration:none;background:none;box-shadow:none;cursor:pointer}
-  .nav .navMenu .navItem:hover,.nav .navMenu .navItem.on:hover{background:var(--card2);color:var(--tx)}
-  .nav .navMenu .navItem.on{background:none;box-shadow:none;font-weight:inherit}
-  .nav .navMenu .navIco{display:grid;place-items:center;flex:none;width:30px;height:30px;border-radius:9px;background:var(--bg);box-shadow:inset 2px 2px 5px var(--soft-lo),inset -2px -2px 5px var(--soft-hi);color:var(--acc)}
-  .nav .navMenu .navIco svg{width:16px;height:16px}
-  .nav .navMenu .navTxt{display:flex;flex-direction:column;gap:1px;min-width:0}
-  .nav .navMenu .navTtl{display:block;font-size:13.5px;font-weight:640;color:var(--tx)}
-  .nav .navMenu .navItem.on .navTtl{color:var(--acc)}
-  .nav .navMenu .navSub{display:block;font-size:12px;font-weight:400;color:var(--tx3)}
+  #navMenu{position:fixed;left:12px;right:12px;top:auto;bottom:calc(84px + env(safe-area-inset-bottom));min-width:0}
 }
-.soonPill{font-size:10px;font-weight:650;padding:1px 6px;border-radius:99px;color:var(--acc);background:color-mix(in srgb,var(--acc) 14%,transparent)}
+.site-header .chip:not(.solid):not(#themeBtn){box-shadow:2px 2px 5px var(--soft-lo),-2px -2px 5px var(--soft-hi)}
+.site-header .chip.solid{box-shadow:inset 0 1px 1px rgba(255,255,255,.4),inset 0 -2px 2px rgba(20,30,55,.16),0 3px 6px var(--soft-lo)}
+.site-header .chip.solid:active{transform:translateY(1px);box-shadow:inset 0 2px 4px rgba(20,30,55,.22)}
+#connectBtn.solid{background:var(--grad);border:0;border-radius:999px;box-shadow:0 2px 6px -2px var(--soft-lo);transform:none;transition:filter .16s,box-shadow .12s}
+#connectBtn.solid:hover{transform:none;filter:brightness(1.05);box-shadow:0 2px 6px -2px var(--soft-lo)}
+#connectBtn.solid:active{transform:none;filter:none;box-shadow:inset 2px 2px 5px var(--soft-lo),inset -2px -2px 5px var(--soft-hi)}
+#setBtn{display:inline-grid;place-items:center;padding:0;line-height:0}
+#setBtn .gearIcon{display:block;width:18px;height:18px}
+#setBtn{background:var(--bg);border:1px solid var(--line)}
+#setBtn.chip.round:active,#setBtn.chip.round:has(+ #setPop.on),#setBtn.chip.round[aria-expanded="true"]{transform:none;color:var(--acc);box-shadow:inset 2px 2px 5px var(--soft-lo),inset -2px -2px 5px var(--soft-hi)}
+@media(max-width:720px){
+  .nav{left:8px;right:8px;bottom:calc(8px + env(safe-area-inset-bottom));border:1px solid var(--line);border-radius:999px;padding:6px;gap:4px;background:var(--bg);box-shadow:none}
+  .nav button,.nav a{border-radius:999px}
+  body{padding-bottom:calc(90px + env(safe-area-inset-bottom))}
+}
+@media(max-width:480px){.logo .wordmark{display:none}}
+@media(prefers-reduced-motion:reduce){#themeBtn,#themeBtn::before,#themeBtn svg{transition:none}}
+/* فوتر — ستون‌های واکنش‌گرای landing.html */
+@media(max-width:900px){.footGrid{grid-template-columns:1fr 1fr;gap:26px}.footBottom{flex-direction:column;gap:10px}.footBrand .footTag{max-width:none}}
 `;
 
 function pageShell({ title, description, canonical, noindex, main, island }) {
@@ -669,7 +1344,7 @@ function pageShell({ title, description, canonical, noindex, main, island }) {
     '<meta name="twitter:description" content="' + esc(description) + '">\n' +
     "<script>" + THEME_BOOT_JS + "</script>\n" +
     "<style>\n" + FONT_RULE_MANROPE + "\n" + FONT_RULE_PLAYFAIR + "\n" + LANDING_CSS + "\n" + HEADER_CSS + PAGE_CSS + "</style>\n" +
-    "</head>\n<body>\n" + LANDING_SVG_DEFS + "\n" + HEADER_HTML + "\n" + main + "\n" + LANDING_FOOTER_HTML + "\n" +
+    "</head>\n<body>\n" + LANDING_SVG_DEFS + "\n" + HEADER_HTML + "\n" + WALLET_PICKER_HTML + "\n" + main + "\n" + LANDING_FOOTER_HTML + "\n" +
     (island || "") + "<script>" + SHELL_JS + "</script>\n" +
     (island ? "<script>" + CLIENT_JS + "</script>\n" : "") + "</body>\n</html>\n";
 }

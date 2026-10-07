@@ -3584,7 +3584,7 @@ async def check_report_page(p, errors):
     b = await p.chromium.launch()
     errs = []
 
-    async def open_report(vw, vh, scheme="light", path="/report"):
+    async def open_report(vw, vh, scheme="light", path="/report", init=None):
         pg = await b.new_page(viewport={"width": vw, "height": vh}, color_scheme=scheme)
         def on_msg(m):
             if m.type == "error":
@@ -3592,6 +3592,8 @@ async def check_report_page(p, errors):
         pg.on("console", on_msg)
         pg.on("pageerror", lambda e: errs.append("PAGEERROR %s" % e))
         await pg.add_init_script("localStorage.setItem(%s, %s);" % (_j.dumps(theme_key), _j.dumps(scheme)))
+        if init:
+            await pg.add_init_script(init)
         await pg.route("**/*", lambda route: route.continue_() if route.request.url.startswith(origin) else route.abort())
         await pg.goto(origin + path)
         await pg.wait_for_selector("#tb tr", timeout=10000)
@@ -3601,19 +3603,40 @@ async def check_report_page(p, errors):
     CHIP_JS = """() => Object.fromEntries([...document.querySelectorAll('#filters .chip')].map(c =>
         [c.dataset.g + ':' + c.dataset.k, +c.querySelector('span').textContent]))"""
 
-    # ---- [report tabbar desktop] بالای ۷۲۰ نوار پنهان است؛ ۷۲۱–۹۰۰ همبرگرِ همیشگی؛ بالای ۹۰۰ بی‌تغییر ----
+    # ---- [report header desktop] هدرِ اپ روی دسکتاپ: نوارِ تب داخلِ هدر (نه fixed)، چسبان، بدونِ همبرگر ----
+    HDRDOM_JS = """() => { const nav = document.getElementById('nav'), cs = getComputedStyle(nav), hd = document.querySelector('header');
+        const t = e => (e.getAttribute('title') || (e.querySelector('button') || {getAttribute: () => ''}).getAttribute('title'));
+        return { nav: cs.display, pos: cs.position, hdPos: getComputedStyle(hd).position, hdCls: hd.className, hdZ: getComputedStyle(hd).zIndex,
+                 titles: [...nav.children].map(e => e.querySelector('button') ? e.querySelector('button').getAttribute('title') : e.getAttribute('title')),
+                 labels: [...nav.querySelectorAll(':scope > a, :scope button')].map(e => e.textContent.trim()),
+                 spans: [...nav.querySelectorAll(':scope > a > span')].map(e => getComputedStyle(e).display),
+                 on: [...nav.querySelectorAll(':scope > a.on')].map(e => [e.textContent.trim(), e.getAttribute('aria-current'), e.getAttribute('href')]),
+                 gone: ['.landing-header', '.desktop-nav', '#menuToggle', '.mobile-menu', '#mobileMenu', '#themeToggle', '.header-cta', '.navSoon', '.soonPill'].filter(q => document.querySelector(q)),
+                 ids: ['setBtn', 'setPop', 'themeBtn', 'connectBtn', 'walletMenu', 'walletPop', 'navMarkets', 'navMenu', 'walletOv'].filter(i => !document.getElementById(i)),
+                 menu: [...document.querySelectorAll('#navMenu a')].map(a => [a.getAttribute('href'), a.classList.contains('on'), a.getAttribute('aria-current')]),
+                 stocks: (document.querySelector('#nav a[href="/app#stocks"]') || {}).tagName || null }; }"""
     pg = await open_report(1440, 900)
-    d = await pg.evaluate("""() => ({ nav: getComputedStyle(document.getElementById('nav')).display,
-        links: [...document.querySelectorAll('.desktop-nav a')].map(a => a.textContent.trim()),
-        on: [...document.querySelectorAll('.desktop-nav a.on')].map(a => a.textContent.trim()) })""")
-    assert d["nav"] == "none", "[report tabbar desktop] the bottom tab bar must be hidden at 1440: %s" % d
-    assert len(d["links"]) == 4 and d["on"] == ["Exit Report"], "[report tabbar desktop] the 4 desktop links (Exit Report on) must be unchanged: %s" % d
+    d = await pg.evaluate(HDRDOM_JS)
+    assert d["nav"] == "flex" and d["pos"] != "fixed", "[report header desktop] at 1440 the tab bar sits in the header, not fixed: %s" % d
+    assert d["hdPos"] == "sticky" and d["hdZ"] == "30" and "site-header" in d["hdCls"], "[report header desktop] the header must be sticky with z-index 30: %s" % d
+    assert d["labels"] == ["Swap", "Markets", "Stocks", "Exit Report"], "[report header desktop] tab order must be Swap, Markets, Stocks, Exit Report: %s" % d["labels"]
+    assert d["titles"] == ["Swap", "Markets", "Stocks", "Exit Report"], "[report header desktop] tab titles: %s" % d["titles"]
+    assert d["on"] == [["Exit Report", "page", "/report"]], "[report header desktop] only Exit Report is active (aria-current=page): %s" % d["on"]
+    assert d["stocks"] == "A", "[report header desktop] Stocks is a real link to /app#stocks (no Soon span): %s" % d["stocks"]
+    assert d["menu"] == [["/app#flow", False, None], ["/pairs", False, None]], "[report header desktop] the Markets menu has Flow and New pairs, neither active: %s" % d["menu"]
+    assert not d["gone"], "[report header desktop] the landing header leftovers must be gone from the DOM: %s" % d["gone"]
+    assert not d["ids"], "[report header desktop] app-header ids missing: %s" % d["ids"]
+    await pg.evaluate("() => window.scrollTo(0, 500)")
+    await pg.wait_for_timeout(450)
+    st = await pg.evaluate("() => ({ top: document.querySelector('header').getBoundingClientRect().top, cls: document.querySelector('header').className, sy: scrollY, bf: getComputedStyle(document.querySelector('header')).backdropFilter, tf: getComputedStyle(document.querySelector('header')).transform })")
+    assert st["sy"] > 100 and abs(st["top"]) <= 0.5 and "scrolled" in st["cls"], "[report header desktop] after scrolling the header stays at the top and gets .scrolled: %s" % st
+    assert st["bf"] == "none" and st["tf"] == "none", "[report header desktop] no backdrop-filter/transform on the <header> itself: %s" % st
     await pg.close()
     pg = await open_report(800, 900)
-    d = await pg.evaluate("() => ({ nav: getComputedStyle(document.getElementById('nav')).display, mt: getComputedStyle(document.getElementById('menuToggle')).display })")
-    assert d["nav"] == "none" and d["mt"] != "none", "[report tabbar desktop] at 800 the tab bar stays hidden and the hamburger stays: %s" % d
+    d = await pg.evaluate(HDRDOM_JS)
+    assert d["nav"] == "flex" and d["pos"] != "fixed" and set(d["spans"]) == {"none"}, "[report header desktop] at 800 the bar stays in the header with icons only: %s" % d
     await pg.close()
-    print("[report tabbar desktop] 1440: no tab bar, the 4 desktop links with Exit Report on; 800: no tab bar, hamburger shown")
+    print("[report header desktop] 1440: sticky app header (z 30, .scrolled glass on scroll, no filter/transform on the element), tab bar in the header in the order Swap, Markets, Stocks, Exit Report with only Exit Report active, Stocks a real link, Markets menu Flow + New pairs; 800: icons only; no landing-header/hamburger/mobile-menu/Soon left")
 
     # ---- [report page render] روشن و تیره، دو اندازه ----
     for scheme in ("light", "dark"):
@@ -3626,7 +3649,7 @@ async def check_report_page(p, errors):
                 baseTiles: document.querySelectorAll('#top .chain:nth-of-type(1) .tile').length,
                 allTiles: document.querySelectorAll('.tile').length,
                 cols: document.querySelectorAll('svg.chart a.col').length,
-                header: !!document.querySelector('header.landing-header .desktop-nav a.on'),
+                header: !!document.querySelector('header.site-header #nav a.on[href="/report"]'),
                 font: getComputedStyle(document.body).fontFamily.slice(0, 20),
                 gradClip: getComputedStyle(document.querySelector('h1 em')).webkitBackgroundClip,
                 shown: document.querySelectorAll('#tb tr').length })""")
@@ -3758,18 +3781,18 @@ async def check_report_page(p, errors):
 
     # ---- [report page theme] ----
     pg = await open_report(1440, 900, "light")
-    await pg.click("#themeToggle")
+    await pg.click("#themeBtn")
     await pg.wait_for_timeout(500)  # body{transition:background .3s} از landing
     st = await pg.evaluate("(k) => ({ theme: document.documentElement.dataset.theme, ls: localStorage.getItem(k), bg: getComputedStyle(document.body).backgroundColor })", theme_key)
     assert st["theme"] == "dark" and st["ls"] == "dark" and st["bg"] == "rgb(10, 8, 16)", "[report page theme] toggle: %s" % st
-    await pg.click("#themeToggle")
+    await pg.click("#themeBtn")
     st = await pg.evaluate("(k) => localStorage.getItem(k)", theme_key)
     assert st == "light", "[report page theme] toggle back: %s" % st
     old = await pg.evaluate("(k) => localStorage.getItem(k)", OLD_THEME_KEY)
     assert old is None, "[report page theme] the retired theme key must not be written"
     await pg.close()
     pg = await open_report(1440, 900, "light")
-    await theme_button_probe(pg, "report", "#themeToggle", ".sun", ".moon")
+    await theme_button_probe(pg, "report", "#themeBtn", ".themeSun", ".themeMoon")
     print("[theme button] report page: round 38x38, one icon per theme, click toggles")
     await pg.close()
     print("[report page theme] the toggle flips data-theme and writes the shared key %s (never the retired one)" % theme_key)
@@ -3813,8 +3836,8 @@ async def check_report_page(p, errors):
     for path in ("/app", "/pairs"):
         for vw in (360, 390, 1440):
             m = await tabs(path, vw)
-            # ۶ اکتبر: نوار حالا چهار آیتم است — Swap · Markets · Exit Report · Stocks (Soon)؛ Exit Report هنوز لینکِ /report است.
-            assert m["n"] == 4 and m["order"] == ["Swap", "Markets", "Exit Report", "Stocks"], "[report page tabs] %s at %d must have the 4 items Swap, Markets, Exit Report, Stocks: %s" % (path, vw, m)
+            # ۷ اکتبر (تغییر عمدی): «Stocks · Soon» برداشته شد و تبِ واقعیِ Stocks پیش از Exit Report نشست — Swap · Markets · Stocks · Exit Report؛ Exit Report هنوز لینکِ /report است.
+            assert m["n"] == 4 and m["order"] == ["Swap", "Markets", "Stocks", "Exit Report"], "[report page tabs] %s at %d must have the 4 items Swap, Markets, Stocks, Exit Report: %s" % (path, vw, m)
             assert m["last"] == "/report", "[report page tabs] Exit Report must link to /report: %s" % m
             assert m["lastText"] == "Exit Report", "[report page tabs] label: %r" % m["lastText"]
             assert m["left"] >= 0 and m["right"] <= m["iw"] + 0.5, "[report page tabs] %s at %d tabs leave the viewport: %s" % (path, vw, m)
@@ -3822,37 +3845,38 @@ async def check_report_page(p, errors):
             assert all(g >= 0 for g in m["gaps"]), "[report page tabs] %s at %d tabs overlap: %s" % (path, vw, m)
             if vw <= 390:
                 assert all(s and s[0] <= s[1] + 1 and s[2] == "block" for s in m["sp"]), "[report page tabs] %s at %d a label is clipped or hidden: %s" % (path, vw, m["sp"])
-    print("[report page tabs] the app and /pairs tab bars both carry 4 items (Swap, Markets, Exit Report → /report, Stocks soon); at 360, 390 and 1440 they stay inside the viewport, do not overlap, show every label unclipped on phones, and add no page scroll")
-    # ---- [report tabbar] ۷ اکتبر — نوارِ تبِ پایینِ موبایل روی /report مثلِ اپ و pairs؛ همبرگر فقط بالای ۷۲۰ ----
+    print("[report page tabs] the app and /pairs tab bars both carry 4 items (Swap, Markets, Stocks, Exit Report → /report); at 360, 390 and 1440 they stay inside the viewport, do not overlap, show every label unclipped on phones, and add no page scroll")
+    # ---- [report header] هدرِ اپ روی موبایل: نوارِ تبِ شناورِ پایین، چهار آیتم، منوی Markets بالای نوار ----
     NAVJS = """() => { const nav = document.getElementById('nav'), cs = getComputedStyle(nav), r = nav.getBoundingClientRect();
         const items = [...nav.children];
-        const mm = document.querySelector('.mobile-menu'), mt = document.getElementById('menuToggle');
         const mk = document.getElementById('navMarkets'), ch = mk && mk.querySelector('.navChev'), lab = mk && mk.querySelector(':scope > span');
         const cr = ch && ch.getBoundingClientRect(), lr = lab && lab.getBoundingClientRect();
         const rep = document.querySelector('#nav > a[href="/report"]');
         return { disp: cs.display, pos: cs.position, top: r.top, bottom: r.bottom, vh: innerHeight,
                  labels: items.map(e => e.innerText.trim()),
                  rep: rep ? [rep.classList.contains('on'), rep.getAttribute('aria-current')] : null,
-                 mt: mt ? getComputedStyle(mt).display : null, mm: mm ? getComputedStyle(mm).display : null,
+                 gone: ['.landing-header', '.desktop-nav', '#menuToggle', '.mobile-menu', '#mobileMenu', '.navSoon'].filter(q => document.querySelector(q)),
                  chDisp: ch ? getComputedStyle(ch).display : null, chW: cr ? cr.width : 0,
-                 chDy: cr && lr ? Math.abs((cr.top + cr.bottom) / 2 - (lr.top + lr.bottom) / 2) : 99 }; }"""
+                 chDy: cr && lr ? Math.abs((cr.top + cr.bottom) / 2 - (lr.top + lr.bottom) / 2) : 99,
+                 hdZ: getComputedStyle(document.querySelector('header')).zIndex, navZ: cs.zIndex, popZ: getComputedStyle(document.getElementById('setPop')).zIndex }; }"""
     for scheme in ("light", "dark"):
         for vw, vh in ((390, 844), (360, 780)):
             pg = await open_report(vw, vh, scheme)
             m = await pg.evaluate(NAVJS)
-            tag = "[report tabbar] %dx%d %s" % (vw, vh, scheme)
+            tag = "[report header] %dx%d %s" % (vw, vh, scheme)
             assert m["disp"] != "none" and m["pos"] == "fixed", "%s: the tab bar must be visible and position:fixed: %s" % (tag, m)
             assert vh - 20 <= m["bottom"] <= vh, "%s: the bar's bottom must sit within 20px of the viewport bottom: %s" % (tag, m)
-            assert m["labels"] == ["Swap", "Markets", "Exit Report", "Stocks"], "%s: the 4 items must read Swap, Markets, Exit Report, Stocks: %s" % (tag, m["labels"])
+            assert m["labels"] == ["Swap", "Markets", "Stocks", "Exit Report"], "%s: the 4 items must read Swap, Markets, Stocks, Exit Report: %s" % (tag, m["labels"])
             assert m["rep"] == [True, "page"], "%s: Exit Report must carry class on and aria-current=page: %s" % (tag, m["rep"])
-            assert m["mt"] == "none" and m["mm"] == "none", "%s: the hamburger and its panel must be hidden at phone width: %s" % (tag, m)
+            assert not m["gone"], "%s: no hamburger, mobile menu, landing header or Soon span may remain in the DOM: %s" % (tag, m["gone"])
+            assert (m["hdZ"], m["navZ"], m["popZ"]) == ("30", "60", "50"), "%s: z-index header/phone bar/popover must be 30/60/50: %s" % (tag, m)
             assert m["chDisp"] != "none" and 9 <= m["chW"] <= 11 and m["chDy"] <= 1.5, "%s: the Markets chevron must be visible, 9-11px wide and centred on the label: %s" % (tag, m)
             await pg.click("#navMarkets")
             o = await pg.evaluate("""() => { const mn = document.getElementById('navMenu'), r = mn.getBoundingClientRect(), n = document.getElementById('nav').getBoundingClientRect();
                 return { disp: getComputedStyle(mn).display, bottom: r.bottom, navTop: n.top, exp: document.getElementById('navMarkets').getAttribute('aria-expanded'),
                          hrefs: [...mn.querySelectorAll('a')].map(a => a.getAttribute('href')) }; }""")
             assert o["disp"] != "none" and o["exp"] == "true" and o["bottom"] <= o["navTop"], "%s: clicking Markets must open the menu above the bar: %s" % (tag, o)
-            assert "/app#flow" in o["hrefs"] and "/pairs" in o["hrefs"], "%s: the Markets menu must link /app#flow and /pairs: %s" % (tag, o["hrefs"])
+            assert o["hrefs"] == ["/app#flow", "/pairs"], "%s: the Markets menu must link /app#flow and /pairs: %s" % (tag, o["hrefs"])
             await pg.keyboard.press("Escape")
             c = await pg.evaluate("() => [getComputedStyle(document.getElementById('navMenu')).display, document.getElementById('navMarkets').getAttribute('aria-expanded')]")
             assert c == ["none", "false"], "%s: Escape must close the Markets menu: %s" % (tag, c)
@@ -3865,9 +3889,9 @@ async def check_report_page(p, errors):
                 return { last: last, navTop: document.getElementById('nav').getBoundingClientRect().top }; }""")
             assert f and f["last"] is not None and f["last"] <= f["navTop"], "%s: after scrolling to the bottom the footer's last line must clear the bar: %s" % (tag, f)
             await pg.close()
-    print("[report tabbar] 390x844 and 360x780, light and dark: fixed bar within 20px of the bottom, Swap/Markets/Exit Report/Stocks with Exit Report active, hamburger hidden, Markets menu opens above the bar and Escape closes it, chevron 9-11px and centred, footer clears the bar")
+    print("[report header] 390x844 and 360x780, light and dark: fixed bar within 20px of the bottom, Swap/Markets/Stocks/Exit Report with Exit Report active, no hamburger/mobile-menu/landing header in the DOM, z-index 30/60/50, Markets menu (/app#flow, /pairs) opens above the bar and Escape closes it, chevron 9-11px and centred, footer clears the bar")
 
-    # ---- [report tabbar parity] همان نوارِ /pairs، به‌پیکسل ----
+    # ---- [report header parity] همان هدرِ /pairs، عنصربه‌عنصر ----
     async def open_pairs_pg(vw, vh, scheme):
         pg = await b.new_page(viewport={"width": vw, "height": vh}, color_scheme=scheme)
         async def stub(route):
@@ -3888,39 +3912,215 @@ async def check_report_page(p, errors):
         await pg.goto(origin + "/pairs")
         await pg.wait_for_timeout(700)
         return pg
-    PARJS = """() => { const nav = document.getElementById('nav'), cs = getComputedStyle(nav), r = nav.getBoundingClientRect();
-        const act = nav.querySelector('button.on, a.on'), ac = getComputedStyle(act);
-        const rc = e => { const x = e.getBoundingClientRect(); return [x.left, x.right, x.top, x.bottom]; };
-        return { nav: [r.left, r.right, r.bottom, r.height], items: [...nav.children].map(rc), bg: cs.backgroundColor, rad: cs.borderRadius,
-                 abg: ac.backgroundColor, ash: ac.boxShadow, n: nav.children.length }; }"""
-    for scheme in ("light", "dark"):
-        pg = await open_report(390, 844, scheme)
-        a = await pg.evaluate(PARJS)
-        await pg.close()
-        pp = await open_pairs_pg(390, 844, scheme)
-        q = await pp.evaluate(PARJS)
-        await pp.close()
-        tag = "[report tabbar parity] %s" % scheme
-        assert a["n"] == q["n"] == 4, "%s: both bars must have 4 items: %s vs %s" % (tag, a["n"], q["n"])
-        assert all(abs(x - y) <= 1 for x, y in zip(a["nav"], q["nav"])), "%s: bar left/right/bottom/height differ: /report %s vs /pairs %s" % (tag, a["nav"], q["nav"])
-        for i, (x, y) in enumerate(zip(a["items"], q["items"])):
-            assert all(abs(u - v) <= 1 for u, v in zip(x, y)), "%s: item %d rect differs: /report %s vs /pairs %s" % (tag, i, x, y)
-        assert a["bg"] == q["bg"] and a["rad"] == q["rad"], "%s: bar background/radius differ: %s %s vs %s %s" % (tag, a["bg"], a["rad"], q["bg"], q["rad"])
-        assert a["abg"] == q["abg"] and a["ash"] == q["ash"], "%s: active tab background/shadow differ: %s | %s vs %s | %s" % (tag, a["abg"], a["ash"], q["abg"], q["ash"])
-    print("[report tabbar parity] 390x844 light and dark: /report's phone tab bar matches /pairs within 1px (bar and all 4 items) with the same background, radius and active-tab look")
+    SIGSEL = ["header", ".logo", ".logo .glyph", ".logo .mark", ".logo .wordmark", ".navPad", "#nav", "#navMarkets", "#navMenu", ".hdrRight", "#setBtn", "#setPop",
+              "#themeBtn", "#walletMenu", "#connectBtn", "#walletPop", "#walletAddr", "#folioMenuBtn", "#copyAddrBtn", "#disconnectBtn", "#walletOv"]
+    PARJS = """(sel) => { const q = s => document.querySelector(s);
+        const rc = e => { const x = e.getBoundingClientRect(); return [x.left, x.top, x.right, x.bottom]; };
+        const sig = sel.map(s => { const e = q(s); return e ? e.tagName + '#' + e.id + '.' + [...e.classList].filter(c => c !== 'on' && c !== 'scrolled').sort().join('.') : null; });
+        const nav = q('#nav'), kids = [...nav.children];
+        const keyOf = e => (e.tagName === 'DIV' ? e.querySelector('button') : e).getAttribute('title');
+        const items = {};
+        kids.forEach(e => { const el = e.tagName === 'DIV' ? e.querySelector('button') : e; const cs = getComputedStyle(el);
+            items[keyOf(e)] = { rect: rc(e), tag: el.tagName, cls: el.className.replace(/\\bon\\b/, '').trim(), on: el.classList.contains('on'), bg: cs.backgroundColor, sh: cs.boxShadow, color: cs.color, fw: cs.fontWeight, rad: cs.borderRadius }; });
+        const sty = s => { const cs = getComputedStyle(q(s)); return [cs.backgroundColor, cs.boxShadow, cs.borderTopColor, cs.borderTopWidth, cs.color, cs.height, cs.width, cs.borderRadius]; };
+        const ncs = getComputedStyle(nav), hd = q('header'), hcs = getComputedStyle(hd);
+        const act = nav.querySelector(':scope > a.on, .navMarkets.on'), acs = getComputedStyle(act);
+        return { sig: sig, order: kids.map(keyOf), items: items, nav: rc(nav), navBg: ncs.backgroundColor, navSh: ncs.boxShadow, navPos: ncs.position, navRad: ncs.borderRadius, navZ: ncs.zIndex,
+                 hdH: hd.getBoundingClientRect().height, hd: [hcs.position, hcs.zIndex, hcs.paddingTop, hcs.paddingLeft, hcs.display, hcs.backgroundColor, hcs.borderBottomColor],
+                 logo: rc(q('.logo')), mark: rc(q('.logo .mark')), word: rc(q('.logo .wordmark')),
+                 setBtn: [rc(q('#setBtn')), sty('#setBtn')], themeBtn: [rc(q('#themeBtn')), sty('#themeBtn')], connectBtn: [rc(q('#connectBtn')), sty('#connectBtn')],
+                 act: [acs.backgroundColor, acs.boxShadow, acs.color, acs.fontWeight],
+                 setPop: [...q('#setPop').querySelectorAll('[id]')].map(e => e.id), walletPop: [...q('#walletPop').querySelectorAll('[id]')].map(e => e.id),
+                 menu: [...q('#navMenu').querySelectorAll('a')].map(a => [a.getAttribute('href'), a.querySelector('.navTtl').textContent, a.querySelector('.navSub').textContent]) }; }"""
+    close = lambda x, y, t=1.0: all(abs(u - v) <= t for u, v in zip(x, y))
+    for vw, vh in ((1440, 900), (390, 844)):
+        for scheme in ("light", "dark"):
+            pg = await open_report(vw, vh, scheme)
+            a = await pg.evaluate(PARJS, SIGSEL)
+            await pg.close()
+            pp = await open_pairs_pg(vw, vh, scheme)
+            # the only intended state difference is the active tab: move pairs' active look from Markets to Exit Report, then measure
+            q_on = await pp.evaluate("() => document.getElementById('navMarkets').classList.contains('on')")
+            await pp.evaluate("() => { document.getElementById('navMarkets').classList.remove('on'); document.querySelector('#nav a[title=\"Exit Report\"]').classList.add('on'); }")
+            await pp.wait_for_timeout(300)
+            q = await pp.evaluate(PARJS, SIGSEL)
+            await pp.close()
+            tag = "[report header parity] %dx%d %s" % (vw, vh, scheme)
+            assert a["sig"] == q["sig"], "%s: header element set (tag#id.classes) differs: /report %s vs /pairs %s" % (tag, a["sig"], q["sig"])
+            assert a["order"] == ["Swap", "Markets", "Stocks", "Exit Report"], "%s: /report tab order: %s" % (tag, a["order"])
+            assert a["setPop"] == q["setPop"] and a["walletPop"] == q["walletPop"], "%s: popover control ids differ: %s %s vs %s %s" % (tag, a["setPop"], a["walletPop"], q["setPop"], q["walletPop"])
+            assert a["menu"] == q["menu"], "%s: Markets menu rows differ: %s vs %s" % (tag, a["menu"], q["menu"])
+            assert abs(a["hdH"] - q["hdH"]) <= 1 and a["hd"] == q["hd"], "%s: header height/position/padding/background differ: %s %s vs %s %s" % (tag, a["hdH"], a["hd"], q["hdH"], q["hd"])
+            assert all(close(a[k], q[k]) for k in ("logo", "mark", "word")), "%s: logo rects differ: %s vs %s" % (tag, [a[k] for k in ("logo", "mark", "word")], [q[k] for k in ("logo", "mark", "word")])
+            for k in ("setBtn", "themeBtn", "connectBtn"):
+                assert close(a[k][0], q[k][0]) and a[k][1] == q[k][1], "%s: #%s rect/computed style differ: %s vs %s" % (tag, k, a[k], q[k])
+            keys = ("navBg", "navSh", "navPos", "navRad", "navZ")
+            assert [a[k] for k in keys] == [q[k] for k in keys], "%s: nav background/shadow/position/radius/z differ: %s vs %s" % (tag, [a[k] for k in keys], [q[k] for k in keys])
+            assert a["act"] == q["act"], "%s: active tab background/shadow/colour/weight differ: %s vs %s" % (tag, a["act"], q["act"])
+            assert a["items"]["Exit Report"]["on"] and not a["items"]["Markets"]["on"] and q_on, "%s: the active tab must be Exit Report on /report and Markets on /pairs" % tag
+            # pairs may still carry the old order (Swap, Markets, Exit Report, Stocks·Soon) until the other change merges;
+            # then tabs are matched by title and only their size/row are compared, otherwise everything is compared strictly.
+            strict = q["order"] == a["order"] and all(i["tag"] == "A" for k, i in q["items"].items() if k != "Markets")
+            for role in ("Swap", "Markets", "Exit Report") + (("Stocks",) if strict else ()):
+                x, y = a["items"][role]["rect"], q["items"][role]["rect"]
+                wh = lambda r: (r[2] - r[0], r[3] - r[1])
+                assert close(wh(x), wh(y)) and abs(x[1] - y[1]) <= 1, "%s: '%s' size/top differ: /report %s vs /pairs %s" % (tag, role, x, y)
+                for k in ("tag", "cls", "rad", "bg", "sh", "color", "fw"):
+                    assert a["items"][role][k] == q["items"][role][k], "%s: '%s' %s differs: %r vs %r" % (tag, role, k, a["items"][role][k], q["items"][role][k])
+            if strict:
+                assert close(a["nav"], q["nav"]) and all(close(a["items"][r]["rect"], q["items"][r]["rect"]) for r in a["order"]), "%s: nav/item rects differ: %s vs %s" % (tag, a["nav"], q["nav"])
+            else:
+                assert abs((a["nav"][0] + a["nav"][2]) / 2 - (q["nav"][0] + q["nav"][2]) / 2) <= 1 and abs(a["nav"][1] - q["nav"][1]) <= 1 and abs(a["nav"][3] - q["nav"][3]) <= 1, "%s: nav centre/top/bottom differ: %s vs %s" % (tag, a["nav"], q["nav"])
+                rel = lambda d, role: [d["items"][role]["rect"][0] - d["nav"][0], d["items"][role]["rect"][2] - d["nav"][0]]
+                for role in ("Swap", "Markets"):
+                    assert close(rel(a, role), rel(q, role)), "%s: '%s' offset inside the bar differs: %s vs %s" % (tag, role, rel(a, role), rel(q, role))
+    print("[report header parity] 1440x900 and 390x844, light and dark: /report's app header matches /pairs element for element (ids/classes of logo, nav, settings, theme, wallet, popovers), same header height, logo, nav, tab and button rects within 1px and the same computed background/shadow; only the active tab (Exit Report vs Markets, compared with pairs' active look moved onto Exit Report) and the tab order differ")
 
-    # ---- [report menu] منوی همبرگری: ارتفاعِ کافی و رنگِ متنِ دکمه‌ی CTA ----
-    for scheme, want in (("light", "rgb(255, 255, 255)"), ("dark", "rgb(5, 18, 26)")):
-        pg = await open_report(800, 900, scheme)
-        await pg.click("#menuToggle")
-        await pg.wait_for_timeout(450)
-        m = await pg.evaluate("""() => { const mn = document.getElementById('mobileMenu').getBoundingClientRect(), c = document.querySelector('#mobileMenu a.button-primary');
-            return { cta: c.getBoundingClientRect().bottom, menu: mn.bottom, color: getComputedStyle(c).color, maxH: getComputedStyle(document.getElementById('mobileMenu')).maxHeight }; }""")
-        assert m["maxH"] == "480px", "[report menu] %s: the open hamburger menu must allow 480px of height (the 320px cap was too tight): %s" % (scheme, m)
-        assert m["cta"] <= m["menu"] - 8, "[report menu] %s: the 'Check a token' button must fit inside the open menu: %s" % (scheme, m)
-        assert m["color"] == want, "[report menu] %s: the 'Check a token' text colour must be %s: %s" % (scheme, want, m["color"])
+    # ---- [report wallet] چیپِ اتصال روی /report: picker، اتصال، هرگز سوییچِ زنجیره یا تراکنش ----
+    def wallet_script(authorized):
+        return """
+            window.__m = [];
+            (function(){
+                var auth = %s, ADDR = '0x1234567890abcdef1234567890abcdef12345678';
+                var prov = { request: function(a){
+                    window.__m.push(a && a.method);
+                    if (a.method === 'eth_accounts') return Promise.resolve(auth ? [ADDR] : []);
+                    if (a.method === 'eth_requestAccounts') { auth = true; return Promise.resolve([ADDR]); }
+                    if (a.method === 'wallet_revokePermissions') { auth = false; return Promise.resolve(null); }
+                    return Promise.reject(new Error('unexpected method ' + a.method)); } };
+                window.addEventListener('eip6963:requestProvider', function(){
+                    window.dispatchEvent(new CustomEvent('eip6963:announceProvider', { detail: { info: { name: 'Fake Wallet', rdns: 'test.fake', uuid: 'fake-1' }, provider: prov } }));
+                });
+            })();""" % ("true" if authorized else "false")
+    FAKE = "0x1234567890abcdef1234567890abcdef12345678"
+    SHORT = FAKE[:6] + "…" + FAKE[-4:]
+    BAD = {"eth_sendTransaction", "wallet_switchEthereumChain", "wallet_addEthereumChain", "eth_sendRawTransaction", "personal_sign", "eth_signTypedData_v4"}
+    n_err = len(errs)
+    # no wallet: the chip opens the picker with WalletConnect only, Escape closes it
+    pg = await open_report(1440, 900)
+    t0 = await pg.inner_text("#connectBtn")
+    await pg.click("#connectBtn")
+    pk = await pg.evaluate("() => ({ on: document.getElementById('walletOv').classList.contains('on'), rows: [...document.querySelectorAll('#walList .walRow .walName')].map(e => e.textContent), note: document.getElementById('walNote').textContent })")
+    assert t0 == "Connect wallet" and pk["on"] and pk["rows"] == ["WalletConnect"] and "No browser extension" in pk["note"], "[report wallet] no wallet: the Connect chip must open the picker with WalletConnect only: %s %s" % (t0, pk)
+    await pg.keyboard.press("Escape")
+    assert not await pg.evaluate("() => document.getElementById('walletOv').classList.contains('on')"), "[report wallet] Escape must close the picker"
+    await pg.close()
+    # a wallet that has not authorised the site: picker, row, eth_requestAccounts, address chip, menu, Disconnect
+    pg = await open_report(1440, 900, init=wallet_script(False))
+    await pg.wait_for_timeout(500)
+    assert await pg.inner_text("#connectBtn") == "Connect wallet", "[report wallet] an unauthorised wallet must not connect on load"
+    await pg.click("#connectBtn")
+    rows = await pg.evaluate("() => [...document.querySelectorAll('#walList .walRow .walName')].map(e => e.textContent)")
+    assert rows == ["Fake Wallet", "WalletConnect"], "[report wallet] the picker must list the EIP-6963 wallet and WalletConnect: %s" % rows
+    await pg.click("#walList .walRow:first-child")
+    await pg.wait_for_timeout(200)
+    txt = await pg.inner_text("#connectBtn")
+    assert txt == SHORT, "[report wallet] after choosing the wallet the chip must show %s, got %r" % (SHORT, txt)
+    await pg.click("#connectBtn")
+    mn = await pg.evaluate("() => ({ on: document.getElementById('walletPop').classList.contains('on'), addr: document.getElementById('walletAddr').textContent, exp: document.getElementById('connectBtn').getAttribute('aria-expanded'), folio: document.getElementById('folioMenuBtn').getAttribute('href') })")
+    assert mn == {"on": True, "addr": SHORT, "exp": "true", "folio": "/app#folio"}, "[report wallet] the connected chip must open #walletPop with the address: %s" % mn
+    await pg.click("#disconnectBtn")
+    await pg.wait_for_timeout(200)
+    after = await pg.evaluate("() => ({ chip: document.getElementById('connectBtn').textContent, cls: document.getElementById('connectBtn').className, note: !document.getElementById('walletDisconnectNote').hidden, ls: localStorage.getItem('zaexa.disconnected'), m: window.__m })")
+    assert after["chip"] == "Connect wallet" and after["cls"] == "chip solid" and after["note"] and after["ls"] == "1", "[report wallet] Disconnect must reset the chip and set the flag: %s" % after
+    assert not (set(after["m"]) & BAD) and set(after["m"]) <= {"eth_accounts", "eth_requestAccounts", "wallet_revokePermissions"}, "[report wallet] only account requests may reach the wallet, never a chain switch or a transaction: %s" % after["m"]
+    await pg.close()
+    # a wallet that already authorised the site: silent restore with eth_accounts only
+    pg = await open_report(1440, 900, init=wallet_script(True))
+    await pg.wait_for_timeout(600)
+    r2 = await pg.evaluate("() => [document.getElementById('connectBtn').textContent, window.__m]")
+    assert r2[0] == SHORT and set(r2[1]) == {"eth_accounts"}, "[report wallet] a previously authorised wallet restores silently with eth_accounts only: %s" % r2
+    await pg.close()
+    assert len(errs) == n_err, "[report wallet] console errors: %s" % errs[n_err:]
+    print("[report wallet] Connect chip opens the picker (WalletConnect only without an extension, the EIP-6963 wallet when present), choosing it shows the short address and opens #walletPop, Disconnect resets; silent restore uses eth_accounts only; no eth_sendTransaction / wallet_switchEthereumChain / wallet_addEthereumChain ever reached the wallet; no console errors")
+
+    # ---- [report body unchanged] the report body under the header is the same as on origin/main ----
+    import pathlib, shutil
+    main_src = subprocess.run(["git", "show", "origin/main:worker/report_page.js"], capture_output=True, text=True, cwd=worker_dir)
+    assert main_src.returncode == 0, "[report body unchanged] cannot read origin/main:worker/report_page.js: %s" % main_src.stderr
+    cmp_dir = pathlib.Path(tempfile.mkdtemp(prefix="r11_main_"))
+    (cmp_dir / "report_page_main.mjs").write_text(
+        main_src.stdout.replace('from "./report.js"', 'from "%s"' % pathlib.Path(worker_dir, "report.js").resolve().as_uri()), encoding="utf-8")
+
+    def mkrow(i, chain, v, **kw):
+        r = {"chain": chain, "address": ("0x%040x" % (5000 + i)) if chain == "base" else ("S%02d" % i + "x" * 40), "symbol": "T%d" % i, "name": "Token %d" % i, "v": v,
+             "checkKind": "sell-quote" if chain == "base" else "roundtrip", "checkedAt": "2026-10-04T%02d:%02d:00.000Z" % (i % 24, (i * 7) % 60), "poolCreatedAt": None,
+             "priceUsd": 0.01, "reserveUsd": 1000 + i * 77, "vol24hUsd": 10, "fdvUsd": 1000, "dex": "aerodrome", "why": None}
+        r.update(kw)
+        return r
+    rows_o = [mkrow(i, "base", "sell", ret=90 + i % 9) for i in range(40)] + [mkrow(100 + i, "base", "nosell", cause="empty-pool") for i in range(3)] + \
+             [mkrow(200 + i, "base", None, why="rpc-down") for i in range(5)] + [mkrow(300 + i, "solana", "sell") for i in range(6)] + [mkrow(400, "solana", None, why="internal")]
+    hist_o = [{"date": "2026-09-%02d" % (21 + k), "b": 60 + k * 3, "bSell": 50 + k, "bNo": k % 4, "bNa": 10 + k, "bEmpty": k % 3, "bFollowed": 8 + k} for k in range(13)]
+    hist_o.append({"date": "2026-10-04", "b": 48, "bSell": 40, "bNo": 3, "bNa": 5, "bEmpty": 0, "bFollowed": 0})
+    (cmp_dir / "opts.json").write_text(_j.dumps({"date": "2026-10-04", "today": "2026-10-04", "firstDate": "2026-09-08", "rows": rows_o, "history": hist_o}), encoding="utf-8")
+    gen2 = r"""
+    import fs from "node:fs";
+    import { renderReportPage as renderNew } from "./report_page.js";
+    import { renderReportPage as renderOld } from %s;
+    const o = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+    fs.writeFileSync(process.argv[2], renderNew(o)); fs.writeFileSync(process.argv[3], renderOld(o));
+    """ % _j.dumps((cmp_dir / "report_page_main.mjs").resolve().as_uri())
+    r2 = subprocess.run(["node", "--input-type=module", "-e", gen2, str(cmp_dir / "opts.json"), str(cmp_dir / "new.html"), str(cmp_dir / "old.html")],
+                        capture_output=True, text=True, cwd=worker_dir)
+    assert r2.returncode == 0, "[report body unchanged] could not render both versions:\n%s" % r2.stderr
+    new_b = (cmp_dir / "new.html").read_bytes()
+    old_b = (cmp_dir / "old.html").read_bytes()
+    assert new_b != old_b and b"landing-header" in old_b and b"site-header" in new_b, "[report body unchanged] the two renders must really be the old and the new page"
+    shutil.rmtree(cmp_dir, ignore_errors=True)
+    srv.shutdown()
+
+    class Two(http.server.SimpleHTTPRequestHandler):
+        def log_message(self, *a):
+            pass
+
+        def do_GET(self):
+            clean = self.path.split("?")[0]
+            body = new_b if clean == "/new" else old_b if clean == "/old" else None
+            if body is None:
+                return super().do_GET()
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Security-Policy", csp)
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+    srv = http.server.ThreadingHTTPServer(("127.0.0.1", 0), functools.partial(Two, directory=os.path.join(HERE, "..")))
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    origin = "http://127.0.0.1:%d" % srv.server_address[1]
+    BODYJS = """() => { const m = document.querySelector('main'), mr = m.getBoundingClientRect();
+        const out = []; const els = [m, ...m.querySelectorAll('*')];
+        for (const e of els) { const r = e.getBoundingClientRect(), cs = getComputedStyle(e);
+            out.push([e.tagName + '.' + (e.getAttribute('class') || '') + '#' + e.id, [r.left - mr.left, r.top - mr.top, r.width, r.height].map(x => Math.round(x * 10) / 10),
+                      cs.color, cs.backgroundColor, cs.borderTopColor, cs.borderTopWidth, cs.boxShadow, cs.fontSize, cs.fontWeight, cs.fill, cs.stroke, cs.display, cs.opacity]); }
+        const f = document.querySelector('footer'), fr = f.getBoundingClientRect(), fc = getComputedStyle(f);
+        return { els: out, foot: [fr.height, fc.color, fc.backgroundColor, fc.borderTopColor], bodyBg: getComputedStyle(document.body).backgroundColor,
+                 sw: document.documentElement.scrollWidth, iw: innerWidth }; }"""
+    async def render_body(path, vw, vh, scheme):
+        pg = await b.new_page(viewport={"width": vw, "height": vh}, color_scheme=scheme)
+        await pg.add_init_script("localStorage.setItem(%s, %s);" % (_j.dumps(theme_key), _j.dumps(scheme)))
+        await pg.route("**/*", lambda route: route.continue_() if route.request.url.startswith(origin) else route.abort())
+        await pg.goto(origin + path)
+        await pg.wait_for_selector("#tb tr", timeout=10000)
+        await pg.add_style_tag(content="*,*::before,*::after{animation:none!important;transition:none!important}")
+        await pg.wait_for_timeout(500)
+        res = await pg.evaluate(BODYJS)
         await pg.close()
-    print("[report menu] 800x900 light and dark: the hamburger menu fits its CTA with room to spare and the CTA text is rgb(255, 255, 255) / rgb(5, 18, 26)")
+        return res
+    n_checked = 0
+    for vw, vh in ((1440, 900), (390, 844)):
+        for scheme in ("light", "dark"):
+            o_, n_ = await render_body("/old", vw, vh, scheme), await render_body("/new", vw, vh, scheme)
+            tag = "[report body unchanged] %dx%d %s" % (vw, vh, scheme)
+            assert len(o_["els"]) == len(n_["els"]) > 300, "%s: element count differs: %d vs %d" % (tag, len(o_["els"]), len(n_["els"]))
+            for x, y in zip(o_["els"], n_["els"]):
+                assert x[0] == y[0], "%s: element order differs: %s vs %s" % (tag, x[0], y[0])
+                assert all(abs(u - v) <= 1 for u, v in zip(x[1], y[1])), "%s: %s rect differs: main %s vs branch %s" % (tag, x[0], x[1], y[1])
+                assert x[2:] == y[2:], "%s: %s computed colours/style differ: main %s vs branch %s" % (tag, x[0], x[2:], y[2:])
+            assert o_["foot"][1:] == n_["foot"][1:] and abs(o_["foot"][0] - n_["foot"][0]) <= 1 and o_["bodyBg"] == n_["bodyBg"], "%s: footer/body differ: %s vs %s" % (tag, o_["foot"], n_["foot"])
+            assert n_["sw"] <= n_["iw"], "%s: the branch page scrolls horizontally: %s" % (tag, n_)
+            n_checked += len(n_["els"])
+    print("[report body unchanged] 1440x900 and 390x844, light and dark, animations off: every element under <main> (%d element checks) has the same rect (relative to <main>, within 1px) and the same computed colours/borders/shadows/fonts as origin/main; footer and body background unchanged" % n_checked)
 
     await b.close()
     srv.shutdown()
@@ -4127,6 +4327,388 @@ async def check_report_picker(p, errors):
     srv.shutdown()
 
 
+# =====================================================================
+# ۷ اکتبر — کاوشگرهای نمای US stocks و ترتیبِ تازه‌ی نوار: Swap · Markets · Stocks · Exit Report.
+# استاب ethers (web/test/stub-ethers.js) کوتر و فیدِ Chainlink را نمی‌شناسد و pools/multi را هم نه؛
+# پس همین‌جا، با یک init-script، `window.ethers` را در لحظه‌ی انتساب می‌گیریم و call() و fetch() را
+# برای همین فراخوانی‌ها می‌پوشانیم. بقیه‌ی فراخوانی‌ها دست‌نخورده به استاب می‌رسند.
+# مقدارها واقعی‌اند: TSLAc — کوتِ ۱۰۰ USDC = 26522108 (۸ رقم)، فید 37573000000 با updatedAt = اکنون − ۳۰۰ ثانیه،
+# حجم "3488482.1" و تغییر "-1.42" هر دو *رشته* (GeckoTerminal رشته می‌فرستد، نه عدد).
+# =====================================================================
+import json as _stkjson
+STK_ORDER = ["AAPLc", "AMZNc", "GOOGLc", "METAc", "MSFTc", "MSTRc", "NVDAc", "SNDKc", "SPCXc", "TSLAc"]
+STK_NAMES = {"AAPLc": "Apple", "AMZNc": "Amazon", "GOOGLc": "Alphabet", "METAc": "Meta", "MSFTc": "Microsoft",
+             "MSTRc": "Strategy", "NVDAc": "NVIDIA", "SNDKc": "Sandisk", "SPCXc": "SpaceX", "TSLAc": "Tesla"}
+# sym: (قیمتِ استخر، پاسخِ کوتِ ۸رقمی، پاسخِ فید ×1e8، حجمِ رشته، تغییرِ رشته)
+STK_FIX = {
+    "AAPLc": (258.31, 38711500, 25802000000, "4512300.5", "0.85"),
+    "AMZNc": (224.87, 44470500, 22510000000, "850000.2", "-0.40"),
+    "GOOGLc": (187.42, 53357000, 18760000000, "1262000", "1.12"),
+    "METAc": (612.15, 16336000, 61120000000, "980400.7", "-2.30"),
+    "MSFTc": (431.08, 23198000, 43150000000, "2210000.9", "0.05"),
+    "MSTRc": (328.40, 30450000, 32790000000, "6120000.3", "-4.75"),
+    "NVDAc": (142.63, 70112000, 14250000000, "9840000.1", "2.01"),
+    "SNDKc": (61.27, 163213000, 6110000000, "45200.0", "-0.90"),
+    "SPCXc": (118.90, 84104000, 11930000000, "310500.4", "3.30"),
+    "TSLAc": (377.04, 26522108, 37573000000, "3488482.1", "-1.42"),
+}
+
+
+def stk_cfg(**over):
+    """پیکربندی فیکسچر از روی خودِ index.html — آدرس‌ها را دستی کپی نمی‌کنیم تا با کد یکی بمانند."""
+    src = open(os.path.join(HERE, "..", "index.html"), encoding="utf-8").read()
+    feeds, pools = {}, {}
+    for m in re.finditer(r'\{sym:"(\w+)",name:"[^"]*",feed:"(0x[0-9a-fA-F]{40})",pool:"(0x[0-9a-f]{40})"\}', src):
+        feeds[m.group(2).lower()] = m.group(1)
+        pools[m.group(3).lower()] = m.group(1)
+    block = re.search(r"const BASE_TOKENS=\[(.*?)\n\];", src, re.S).group(1)
+    tokens = {}
+    for m in re.finditer(r'\{symbol:"([^"]+)",name:"[^"]*",address:"(0x[0-9a-fA-F]{40})"', block):
+        if m.group(1) in STK_FIX:
+            tokens[m.group(2).lower()] = m.group(1)
+    quoter = re.search(r'\{id:"aerodrome-cl",.*?quoter:"(0x[0-9a-fA-F]{40})"', src, re.S).group(1).lower()
+    assert len(feeds) == 10 and len(pools) == 10 and len(tokens) == 10, (
+        "[stocks] could not read the 10 feeds/pools/tokens from index.html: %d/%d/%d" % (len(feeds), len(pools), len(tokens)))
+    cfg = {"feeds": feeds, "pools": pools, "tokens": tokens, "quoter": quoter,
+           "fix": {s: {"out": f[1], "answer": f[2], "vol": f[3], "chg": f[4]} for s, f in STK_FIX.items()},
+           "ageSec": 300, "failQuote": [], "failAll": False, "failGt": False}
+    cfg.update(over)
+    return cfg
+
+
+STK_INIT_JS = """(() => {
+  const cfg = %s;
+  window.__STK__ = {batches: 0, gt: 0, cfg: cfg};
+  const ser = x => JSON.stringify(x, (k, v) => typeof v === "bigint" ? {__b: v.toString()} : v);
+  const de = s => JSON.parse(s, (k, v) => (v && v.__b !== undefined ? BigInt(v.__b) : v));
+  const toHex = s => "0x" + Array.from(new TextEncoder().encode(s)).map(b => b.toString(16).padStart(2, "0")).join("");
+  const fromHex = h => new TextDecoder().decode(new Uint8Array((h.slice(2).match(/../g) || []).map(x => parseInt(x, 16))));
+  let _e;
+  Object.defineProperty(window, "ethers", {configurable: true, get() { return _e; }, set(v) { _e = v; patch(v); }});
+  document.addEventListener("DOMContentLoaded", () => {
+    const v = document.getElementById("view-stocks"), s = document.getElementById("view-swap");
+    window.__STK__.boot = {attr: document.documentElement.getAttribute("data-boot-view"),
+      stocks: v ? getComputedStyle(v).display : null, swap: s ? getComputedStyle(s).display : null};
+  });
+  function patch(E) {
+    const P = E.JsonRpcProvider.prototype, orig = P.call;
+    P.call = async function (tx) {
+      const c = window.__STK__.cfg;
+      let calls = null;
+      try { calls = de(fromHex(tx.data)).args[0]; } catch (e) {}
+      const kind = ([target, , data]) => {
+        let inner; try { inner = de(fromHex(data)); } catch (e) { return null; }
+        const t = String(target).toLowerCase();
+        if (t === c.quoter && inner.name === "quoteExactInputSingle" && c.tokens[String(inner.args[0][1]).toLowerCase()])
+          return ["q", c.tokens[String(inner.args[0][1]).toLowerCase()]];
+        if (inner.name === "latestRoundData" && c.feeds[t]) return ["f", c.feeds[t]];
+        return null;
+      };
+      const kinds = calls ? calls.map(kind) : [];
+      if (!calls || !calls.length || kinds.some(k => !k)) return orig.apply(this, arguments);
+      window.__STK__.batches++;
+      if (c.failAll) throw Object.assign(new Error("Failed to fetch"), {code: "NETWORK_ERROR"});
+      const results = kinds.map(([k, sym]) => {
+        if (k === "q") {
+          if (c.failQuote.includes(sym)) return [false, "0x"];
+          return [true, toHex(ser({ret: [BigInt(c.fix[sym].out), 0n, 0, 0n]}))];
+        }
+        return [true, toHex(ser({ret: [1n, BigInt(c.fix[sym].answer), 0n, BigInt(Math.floor(Date.now() / 1000) - c.ageSec), 1n]}))];
+      });
+      return toHex(ser({ret: [results]}));
+    };
+    const f = window.fetch;
+    window.fetch = async function (url, opts) {
+      const u = String(url);
+      if (u.includes("/pools/multi/")) {
+        const c = window.__STK__.cfg;
+        window.__STK__.gt++;
+        if (c.failGt) return {ok: false, status: 404, headers: {get: () => null}, json: async () => ({})};
+        const addrs = u.split("/pools/multi/")[1].split("?")[0].split(",");
+        const data = addrs.map(a => { const x = c.fix[c.pools[a.toLowerCase()]];
+          return {id: "base_" + a.toLowerCase(), type: "pool", attributes: {address: a.toLowerCase(),
+            volume_usd: {h24: x.vol}, price_change_percentage: {h24: x.chg}}}; });
+        return {ok: true, status: 200, headers: {get: () => null}, json: async () => ({data})};
+      }
+      return f.apply(this, arguments);
+    };
+  }
+})();"""
+
+# عدد/رشته‌هایی که انتظار داریم، با فرمول مستقل از کدِ صفحه (پایتون)
+def stk_expect(sym):
+    px, out, ans, vol, chg = STK_FIX[sym]
+    price = 100 / (out / 1e8)
+    ref = ans / 1e8
+    gap = (price / ref - 1) * 100
+    v = float(vol)
+    volt = "$%.1fM" % (v / 1e6) if v >= 1e6 else ("$%dK" % round(v / 1e3) if v >= 1e3 else "$%d" % round(v))
+    c = float(chg)
+    return {"price": "${:,.2f}".format(price), "ref": "${:,.2f}".format(ref),
+            "gap": "%s%.2f%% pool gap" % ("−" if gap < 0 else "+", abs(gap)), "vol": volt,
+            "chg": "%s %.2f%%" % ("▼" if c < 0 else "▲", abs(c)), "dn": c < 0}
+
+
+STK_ROWS_JS = """() => [...document.querySelectorAll('#view-stocks tr[data-sym]')].map(tr => ({
+    sym: tr.dataset.sym, name: tr.querySelector('.nm small').textContent, b: tr.querySelector('.nm b').textContent,
+    av: tr.querySelector('.av').textContent,
+    px: tr.querySelector('.cPx .v').textContent, chg: tr.querySelector('.cPx small').textContent,
+    chgCls: tr.querySelector('.cPx small').className,
+    ref: tr.querySelector('.colRef .v').textContent, gap: tr.querySelector('.colRef small').textContent,
+    vol: tr.querySelector('.colVol').textContent,
+    refDisp: getComputedStyle(tr.querySelector('.colRef')).display, volDisp: getComputedStyle(tr.querySelector('.colVol')).display,
+    trade: tr.querySelector('.trade').textContent }))"""
+
+
+async def stk_open(b, vw, vh, scheme, errs, cfg=None, hash_="#stocks", clock_ms=None, init_extra=None):
+    """صفحه‌ی اپ با فیکسچر؛ pg.on('pageerror') به errs می‌ریزد (خطای ناخواسته = شکست)."""
+    ctx = await b.new_context(viewport={"width": vw, "height": vh}, color_scheme=scheme)
+    pg = await ctx.new_page()
+    pg.on("pageerror", lambda e: errs.append("PAGEERROR %s" % e))
+    # روی file:// هیچ Worker نیست: Trade (runScan → /vd) و setChain('solana') (→ /sol/rpc) فراخوانی‌های اپ را می‌زنند و کرومِ بدونِ
+    # شبکه با «URL scheme "file" is not supported» لاگ می‌کند. این خطا از هارنس است نه از نمای Stocks؛ فقط همین متن نادیده می‌ماند.
+    pg.on("console", lambda m: errs.append("CONSOLE %s" % m.text)
+          if m.type == "error" and 'URL scheme "file" is not supported' not in m.text else None)
+    await pg.add_init_script(STK_INIT_JS % _stkjson.dumps(cfg or stk_cfg()))
+    if clock_ms is not None:
+        await pg.clock.install(time=clock_ms / 1000)
+    await pg.goto(URL.rsplit("#", 1)[0] + hash_)
+    return pg
+
+
+async def stk_wait_loaded(pg, vol=True):
+    await pg.wait_for_function(
+        "() => document.querySelector('#view-stocks tr[data-sym=\"TSLAc\"] .cPx .v').textContent !== '—'", timeout=20000)
+    if vol:
+        await pg.wait_for_function(
+            "() => document.querySelector('#view-stocks tr[data-sym=\"TSLAc\"] .colVol').textContent !== '—'", timeout=20000)
+    await pg.wait_for_timeout(150)
+
+
+async def check_stocks(p, errors):
+    b = await p.chromium.launch()
+    errs = []
+
+    # ---- [stocks nav] ----
+    NAV_JS = """() => { const nav = document.getElementById('nav'); const items = [...nav.children];
+        const st = nav.querySelector('[title="Stocks"]');
+        const soon = [...document.querySelectorAll('*')].filter(e => e.children.length === 0 && /^\\s*Soon\\s*$/i.test(e.textContent)).length;
+        return {order: items.map(e => (e.querySelector('span') || e).textContent.trim()), soon: soon,
+                stocksTag: st ? st.tagName : null, href: st ? st.getAttribute('href') : null, dv: st ? st.dataset.view || null : null,
+                soonClass: !!document.querySelector('.navSoon, .soonPill')}; }"""
+    for vw, vh in ((1280, 800), (390, 844)):
+        for page_name in ("app", "pairs"):
+            ctx = await b.new_context(viewport={"width": vw, "height": vh})
+            pg = await ctx.new_page()
+            pg.on("pageerror", lambda e: errs.append("PAGEERROR %s" % e))
+            if page_name == "app":
+                await pg.add_init_script(STK_INIT_JS % _stkjson.dumps(stk_cfg()))
+                await pg.goto(URL)
+                await pg.wait_for_timeout(700)
+            else:
+                await pg.route("**/*", lambda r: r.continue_() if r.request.url.startswith("file:") else r.abort())
+                await pg.goto("file://" + os.path.join(HERE, "..", "pairs.html"), wait_until="domcontentloaded")
+                await pg.wait_for_timeout(500)
+            m = await pg.evaluate(NAV_JS)
+            ctxn = "[stocks nav] %s@%d" % (page_name, vw)
+            assert m["order"] == ["Swap", "Markets", "Stocks", "Exit Report"], "%s: tab order is %s" % (ctxn, m["order"])
+            assert m["soon"] == 0 and not m["soonClass"], "%s: an element still says Soon: %s" % (ctxn, m)
+            if page_name == "app":
+                assert m["stocksTag"] == "BUTTON" and m["dv"] == "stocks", "%s: Stocks must be a <button data-view=stocks>: %s" % (ctxn, m)
+                await pg.click('#nav [data-view="stocks"]')
+                await pg.wait_for_timeout(250)
+                st = await pg.evaluate("""() => ({on: document.getElementById('view-stocks').classList.contains('on'),
+                    swap: document.getElementById('view-swap').classList.contains('on'),
+                    btn: document.querySelector('#nav [data-view="stocks"]').classList.contains('on'),
+                    swapBtn: document.querySelector('#nav [data-view="swap"]').classList.contains('on'),
+                    hash: location.hash})""")
+                assert st["on"] and not st["swap"] and st["btn"] and not st["swapBtn"] and st["hash"] == "#stocks", \
+                    "%s: clicking Stocks must open #view-stocks with the button lit: %s" % (ctxn, st)
+            else:
+                assert m["stocksTag"] == "A" and m["href"] == "/app#stocks", "%s: Stocks must link /app#stocks: %s" % (ctxn, m)
+            await ctx.close()
+    print("[stocks nav] app and /pairs at 1280x800 and 390x844: order Swap, Markets, Stocks, Exit Report; no Soon left; the app's Stocks is a button that lights and opens #view-stocks (#stocks), /pairs' Stocks links /app#stocks")
+
+    # ---- [stocks view] ----
+    for vw, vh, scheme in ((1280, 800, "light"), (1280, 800, "dark"), (390, 844, "light"), (390, 844, "dark")):
+        ctxn = "[stocks view] %dx%d %s" % (vw, vh, scheme)
+        pg = await stk_open(b, vw, vh, scheme, errs)
+        await stk_wait_loaded(pg)
+        boot = await pg.evaluate("() => window.__STK__.boot")
+        assert boot and boot["attr"] == "stocks" and boot["stocks"] == "flex" and boot["swap"] == "none", \
+            "%s: the first paint must already show the Stocks view (data-boot-view): %s" % (ctxn, boot)
+        assert await pg.evaluate("() => document.documentElement.hasAttribute('data-boot-view')") is False, "%s: the boot attribute must be removed by setView" % ctxn
+        rows = await pg.evaluate(STK_ROWS_JS)
+        assert [r["sym"] for r in rows] == STK_ORDER, "%s: row order %s" % (ctxn, [r["sym"] for r in rows])
+        for r in rows:
+            e = stk_expect(r["sym"])
+            assert r["b"] == r["sym"] and r["name"] == STK_NAMES[r["sym"]] and r["av"] == r["sym"][:-1][:4], "%s: stock cell %s" % (ctxn, r)
+            assert r["px"] == e["price"], "%s: %s price %r != %r" % (ctxn, r["sym"], r["px"], e["price"])
+            assert r["chg"] == e["chg"] and r["chgCls"] == ("dn" if e["dn"] else "up"), "%s: %s change %r/%r != %r" % (ctxn, r["sym"], r["chg"], r["chgCls"], e["chg"])
+            assert r["ref"] == e["ref"] and r["gap"] == e["gap"], "%s: %s reference/gap %r %r != %r %r" % (ctxn, r["sym"], r["ref"], r["gap"], e["ref"], e["gap"])
+            assert r["vol"] == e["vol"], "%s: %s volume %r != %r" % (ctxn, r["sym"], r["vol"], e["vol"])
+            assert r["trade"] == "Trade", "%s: the last cell must be a Trade button" % ctxn
+        t = rows[-1]
+        assert (t["px"], t["ref"], t["gap"], t["vol"], t["chg"], t["chgCls"]) == (
+            "$377.04", "$375.73", "+0.35% pool gap", "$3.5M", "▼ 1.42%", "dn"), "%s: TSLAc row %s" % (ctxn, t)
+        for r in rows:
+            assert r["refDisp"] == ("none" if vw <= 720 else "table-cell") and r["volDisp"] == ("none" if vw <= 720 else "table-cell"), \
+                "%s: Reference/Volume columns must be hidden on phones only: %s" % (ctxn, r)
+        txt = await pg.inner_text("#view-stocks")
+        assert "NaN" not in txt and "undefined" not in txt and "$0.00" not in txt, "%s: junk in the table: %s" % (ctxn, txt[:300])
+        # رنگ‌ها از توکن‌های خودِ اپ در هر دو تم
+        col = await pg.evaluate("""() => { const probe = v => { const s = document.createElement('span'); s.style.color = v; document.body.appendChild(s);
+                const c = getComputedStyle(s).color; s.remove(); return c; };
+            const dn = document.querySelector('#view-stocks small.dn'), up = document.querySelector('#view-stocks small.up'),
+                  tr = document.querySelector('#view-stocks .trade'), av = document.querySelector('#view-stocks .av');
+            return {dn: getComputedStyle(dn).color, neg: probe('var(--neg)'), up: getComputedStyle(up).color, pos: probe('var(--pos)'),
+                    tradeInk: getComputedStyle(tr).color, ink: probe('var(--on-acc)'), avInk: getComputedStyle(av).color,
+                    tradeBg: getComputedStyle(tr).backgroundImage, avBg: getComputedStyle(av).backgroundImage,
+                    tradeBorder: getComputedStyle(tr).borderTopWidth, tradeRadius: getComputedStyle(tr).borderRadius}; }""")
+        assert col["dn"] == col["neg"] and col["up"] == col["pos"], "%s: ▲/▼ colours must be --pos/--neg: %s" % (ctxn, col)
+        assert col["tradeInk"] == col["ink"] and col["avInk"] == col["ink"], "%s: Trade/avatar ink must follow --on-acc in this theme: %s" % (ctxn, col)
+        assert "gradient" in col["tradeBg"] and "gradient" in col["avBg"] and col["tradeBorder"] == "0px", "%s: Trade/avatar must carry the brand gradient, no border: %s" % (ctxn, col)
+        note = await pg.inner_text("#view-stocks .note")
+        assert note == "Prices are live quotes from the deepest Aerodrome pool for $100. Issuer terms: not offered to US persons. Not investment advice.", "%s: note text %r" % (ctxn, note)
+        await pg.context.close()
+    print("[stocks view] /app#stocks on first load (1280x800 and 390x844, light and dark): boot view shown from the first paint; 10 rows in the fixed order; TSLAc $377.04 / ref $375.73 / +0.35% pool gap / $3.5M / ▼ 1.42% (dn); every row matches an independent calculation; Reference and Volume columns hidden at 390; colours follow --pos/--neg/--on-acc")
+
+    # ---- [stocks pill] وضعیتِ بازار با ساعتِ جعلی: نیویورک در ۷ اکتبر UTC-4 است ----
+    import datetime as _dt
+    def ms(y, mo, d, h, mi):
+        return int(_dt.datetime(y, mo, d, h, mi, tzinfo=_dt.timezone.utc).timestamp() * 1000)
+    PILL = [("Wed 11:00 NY", ms(2026, 10, 7, 15, 0), True, 300, "US market open · reference updated 5m ago"),
+            ("Wed 09:29 NY", ms(2026, 10, 7, 13, 29), False, 300, "US market closed · reference updated 5m ago"),
+            ("Wed 09:30 NY", ms(2026, 10, 7, 13, 30), True, 300, "US market open · reference updated 5m ago"),
+            ("Wed 15:59 NY", ms(2026, 10, 7, 19, 59), True, 300, "US market open · reference updated 5m ago"),
+            ("Wed 16:00 NY", ms(2026, 10, 7, 20, 0), False, 10800, "US market closed · reference updated 3h ago"),
+            ("Sat 11:00 NY", ms(2026, 10, 10, 15, 0), False, 172800, "US market closed · reference updated 2d ago")]
+    for label, t, want_open, age, want_txt in PILL:
+        pg = await stk_open(b, 1280, 800, "light", errs, cfg=stk_cfg(ageSec=age), clock_ms=t)
+        await stk_wait_loaded(pg)
+        got = await pg.evaluate("() => ({txt: document.getElementById('stkMktTxt').textContent, open: document.getElementById('stkMkt').classList.contains('open')})")
+        assert got["txt"] == want_txt and got["open"] == want_open, "[stocks pill] %s: %s (wanted %r open=%s)" % (label, got, want_txt, want_open)
+        await pg.context.close()
+    print("[stocks pill] market pill with a fake New York clock: open Wed 09:30-15:59, closed at 09:29 / 16:00 / Saturday; reference age shown as 5m, 3h, 2d")
+
+    # ---- [stocks edges] قاعده‌ی مالک: ۲۰px از چپ برای عنوان/توضیح/ستونِ اول، ۲۰px از راست برای Trade ----
+    EDGE_JS = """() => { const card = document.querySelector('#view-stocks .card'), c = card.getBoundingClientRect();
+        const L = s => document.querySelector(s).getBoundingClientRect().left - c.left;
+        return {ttl: L('#view-stocks .ttl'), lede: L('#view-stocks .lede'), tk: L('#view-stocks tr[data-sym] .tk'),
+                trades: [...document.querySelectorAll('#view-stocks .trade')].map(t => c.right - t.getBoundingClientRect().right),
+                sw: document.documentElement.scrollWidth, iw: innerWidth}; }"""
+    for vw, vh in ((1280, 800), (390, 844)):
+        for scheme in ("light", "dark"):
+            ctxn = "[stocks edges] %d %s" % (vw, scheme)
+            pg = await stk_open(b, vw, vh, scheme, errs)
+            await stk_wait_loaded(pg)
+            e = await pg.evaluate(EDGE_JS)
+            for k in ("ttl", "lede", "tk"):
+                assert abs(e[k] - 20) <= 0.5, "%s: .%s starts %.2fpx from the card's left edge, not 20: %s" % (ctxn, k, e[k], e)
+            assert len(e["trades"]) == 10 and all(abs(x - 20) <= 0.5 for x in e["trades"]), \
+                "%s: every Trade button must end 20px from the card's right edge: %s" % (ctxn, e["trades"])
+            assert e["sw"] <= e["iw"], "%s: the page scrolls horizontally: %s" % (ctxn, e)
+            await pg.context.close()
+    print("[stocks edges] 1280 and 390, light and dark: title, lede and first column start 20px from the card's left edge; all 10 Trade buttons end 20px from its right edge; no horizontal page scroll")
+
+    # ---- [stocks fail] ----
+    pg = await stk_open(b, 1280, 800, "light", errs, cfg=stk_cfg(failQuote=["NVDAc"], failGt=True))
+    await stk_wait_loaded(pg, vol=False)
+    await pg.wait_for_timeout(500)
+    rows = {r["sym"]: r for r in await pg.evaluate(STK_ROWS_JS)}
+    nv = rows["NVDAc"]
+    assert nv["px"] == "—" and nv["gap"] == "" and nv["chg"] in ("", "—"), "[stocks fail] the failed quote must show a dash, not a number: %s" % nv
+    txt = await pg.inner_text("#view-stocks")
+    assert "NaN" not in txt and "$0.00" not in txt and "undefined" not in txt, "[stocks fail] junk in the table: %s" % txt[:400]
+    for s in STK_ORDER:
+        r = rows[s]
+        assert r["vol"] == "—", "[stocks fail] %s volume must be a dash when pools/multi fails: %s" % (s, r)
+        if s != "NVDAc":
+            e = stk_expect(s)
+            assert r["px"] == e["price"] and r["ref"] == e["ref"] and r["gap"] == e["gap"], "[stocks fail] %s must still price from the chain: %s" % (s, r)
+            assert r["chg"] in ("", "—"), "[stocks fail] %s change without GT: %s" % (s, r)
+    assert nv["ref"] == stk_expect("NVDAc")["ref"], "[stocks fail] a failed quote must not hide the Chainlink reference: %s" % nv
+    pill = await pg.inner_text("#stkMktTxt")
+    assert pill.startswith("US market ") and "reference updated" in pill, "[stocks fail] the pill must stay normal when prices mostly work: %r" % pill
+    await pg.context.close()
+    # همه‌چیز می‌شکند: ردیف‌ها می‌مانند با «—» و پیل می‌گوید در حال تلاش مجدد
+    pg = await stk_open(b, 1280, 800, "light", errs, cfg=stk_cfg(failAll=True, failGt=True))
+    await pg.wait_for_function("() => document.getElementById('stkMktTxt').textContent.includes('unavailable')", timeout=30000)
+    rows = await pg.evaluate(STK_ROWS_JS)
+    assert len(rows) == 10 and all(r["px"] == "—" and r["ref"] == "—" and r["gap"] == "" and r["vol"] == "—" for r in rows), "[stocks fail] total failure rows: %s" % rows
+    assert await pg.inner_text("#stkMktTxt") == "Prices unavailable — retrying", "[stocks fail] total failure pill"
+    txt = await pg.inner_text("#view-stocks")
+    assert "NaN" not in txt and "$0.00" not in txt, "[stocks fail] junk after total failure: %s" % txt[:300]
+    # و وقتی شبکه برگشت، تلاشِ بعدی ردیف‌ها را پر می‌کند (بدون بازکردنِ دوباره‌ی صفحه)
+    await pg.evaluate("() => { window.__STK__.cfg.failAll = false; window.__STK__.cfg.failGt = false; }")
+    await pg.evaluate("() => setView('swap')")
+    await pg.evaluate("() => setView('stocks')")
+    await stk_wait_loaded(pg)
+    assert await pg.evaluate("() => document.querySelector('#view-stocks tr[data-sym=\"TSLAc\"] .cPx .v').textContent") == "$377.04", "[stocks fail] the table must recover"
+    assert (await pg.inner_text("#stkMktTxt")).startswith("US market "), "[stocks fail] pill after recovery"
+    await pg.context.close()
+    print("[stocks fail] one failed quote and a failed pools/multi: that row shows a dash (no NaN, no $0.00) while its Chainlink reference and the other 9 rows stay; volume and change show dashes; total failure keeps 10 dash rows with 'Prices unavailable — retrying' and recovers on the next open")
+
+    # ---- [stocks trade] ----
+    pg = await stk_open(b, 1280, 800, "light", errs)
+    await stk_wait_loaded(pg)
+    await pg.evaluate("() => { document.getElementById('amtIn').value = '123'; }")
+    await pg.click('#view-stocks tr[data-sym="TSLAc"] .trade')
+    await pg.wait_for_timeout(400)
+    st = await pg.evaluate("""() => ({swap: document.getElementById('view-swap').classList.contains('on'),
+        stocks: document.getElementById('view-stocks').classList.contains('on'),
+        out: document.getElementById('tokOutSym').textContent, inn: document.getElementById('tokInSym').textContent,
+        amt: document.getElementById('amtIn').value, amtOut: document.getElementById('amtOut').value,
+        focus: document.activeElement && document.activeElement.id, chain: activeChain, hash: location.hash})""")
+    assert st["swap"] and not st["stocks"] and st["out"] == "TSLAc" and st["inn"] == "USDC" and st["amt"] == "" and st["amtOut"] == "" \
+        and st["focus"] == "amtIn" and st["chain"] == "base", "[stocks trade] Trade must open the swap USDC -> TSLAc with an empty, focused amount: %s" % st
+    # از سولانا هم: اول شبکه به Base برمی‌گردد
+    await pg.evaluate("() => setChain('solana')")
+    await pg.wait_for_timeout(300)
+    await pg.evaluate("() => setView('stocks')")
+    await pg.wait_for_timeout(300)
+    await pg.click('#view-stocks tr[data-sym="AAPLc"] .trade')
+    await pg.wait_for_timeout(500)
+    st = await pg.evaluate("""() => ({swap: document.getElementById('view-swap').classList.contains('on'), chain: activeChain,
+        out: document.getElementById('tokOutSym').textContent, inn: document.getElementById('tokInSym').textContent,
+        focus: document.activeElement && document.activeElement.id})""")
+    assert st["swap"] and st["chain"] == "base" and st["out"] == "AAPLc" and st["inn"] == "USDC" and st["focus"] == "amtIn", \
+        "[stocks trade] from Solana, Trade must switch to Base first: %s" % st
+    await pg.context.close()
+    print("[stocks trade] TSLAc Trade opens the swap view with USDC -> TSLAc and an empty, focused 'You pay' (a typed amount is cleared); from the Solana network it switches to Base first (AAPLc)")
+
+    # ---- [stocks timer] ----
+    pg = await stk_open(b, 1280, 800, "light", errs, clock_ms=ms(2026, 10, 7, 15, 0))
+    await stk_wait_loaded(pg)
+    n0 = await pg.evaluate("() => window.__STK__.batches")
+    g0 = await pg.evaluate("() => window.__STK__.gt")
+    assert n0 == 1 and g0 == 1, "[stocks timer] opening the view must send exactly one 20-call batch and one pools/multi request: %s/%s" % (n0, g0)
+    await pg.clock.run_for(61000)
+    await pg.wait_for_timeout(400)
+    n1 = await pg.evaluate("() => window.__STK__.batches")
+    assert n1 == 2, "[stocks timer] a visible Stocks view must refresh every 60 s: %s batches after 61 s" % n1
+    await pg.click('#nav [data-view="swap"]')
+    await pg.wait_for_timeout(200)
+    await pg.clock.run_for(5 * 60000)
+    await pg.wait_for_timeout(400)
+    n2 = await pg.evaluate("() => window.__STK__.batches")
+    assert n2 == n1, "[stocks timer] the refresh must stop while another view is active: %s -> %s after 5 min on Swap" % (n1, n2)
+    await pg.click('#nav [data-view="stocks"]')
+    await pg.wait_for_timeout(500)
+    n3 = await pg.evaluate("() => window.__STK__.batches")
+    assert n3 == n2 + 1, "[stocks timer] reopening the view must refresh once at once: %s -> %s" % (n2, n3)
+    await pg.clock.run_for(61000)
+    await pg.wait_for_timeout(400)
+    n4 = await pg.evaluate("() => window.__STK__.batches")
+    assert n4 == n3 + 1, "[stocks timer] and the 60 s cadence resumes: %s -> %s" % (n3, n4)
+    await pg.context.close()
+    print("[stocks timer] one batch on open, one more per 60 s while visible, none during 5 minutes on another view, one at once on reopening, cadence resumes")
+
+    await b.close()
+    assert not errs, "[stocks] console/page errors: %s" % errs[:5]
+    print("[stocks] no console or page errors across the nav, view, edges, fail, trade and timer pages")
+
+
 async def main():
     errors = []
     # خطاهایی که یک کاوشگر *عمداً* تولید می‌کند. اجازه‌ی عبور می‌گیرند ولی
@@ -4180,6 +4762,7 @@ async def main():
         await check_live_strip(p, errors)
         await check_report_page(p, errors)
         await check_report_picker(p, errors)
+        await check_stocks(p, errors)
         b = await p.chromium.launch()
         pg = await b.new_page(viewport={"width": 1240, "height": 1000}, color_scheme="dark")
         pg.on("console", on_console)
@@ -7384,7 +7967,7 @@ async def main():
             % (info["navCenter"], info["hdrCenter"]))
 
         await navpairspg.keyboard.press("Escape")
-        # موبایل: نوارِ پایینِ ثابت باید چهار آیتم (Swap، Markets، Exit Report، Stocks — از ۶ اکتبر) را بدونِ اسکرولِ افقی جا بدهد.
+        # موبایل: نوارِ پایینِ ثابت باید چهار آیتم (Swap، Markets، Stocks، Exit Report — از ۷ اکتبر) را بدونِ اسکرولِ افقی جا بدهد.
         for w in (390, 360):
             await navpairspg.set_viewport_size({"width": w, "height": 844})
             await navpairspg.wait_for_timeout(200)
@@ -7447,7 +8030,7 @@ async def main():
                 "to %r: %r" % (v, cls))
         await navpairspg.close()
 
-        # ---- [nav markets] ۶ اکتبر — نوار: Swap · Markets ▾ (Flow، New pairs) · Exit Report · Stocks (Soon).
+        # ---- [nav markets] ۶ اکتبر — نوار: Swap · Markets ▾ (Flow، New pairs) · Exit Report · Stocks (Soon)؛ از ۷ اکتبر: Swap · Markets ▾ · Stocks · Exit Report.
         # اپ در ۱۴۴۰ و ۳۹۰ و هر دو تم؛ /pairs در ۱۴۴۰. منو داخلِ viewport، در موبایل بالای نوارِ پایین. ----
         NM_ORDER_JS = """() => [...document.querySelectorAll('#nav > *')].map(e => (e.querySelector('span') || e).textContent.trim())"""
         NM_STATE_JS = """() => {
@@ -7463,11 +8046,13 @@ async def main():
                         role: i.getAttribute('role'), on: i.classList.contains('on'), ttlColor: getComputedStyle(i.querySelector('.navTtl')).color})),
                     role: m.getAttribute('role'), haspopup: bt.getAttribute('aria-haspopup')};
         }"""
-        NM_SOON_JS = """() => { const s = document.querySelector('#nav .navSoon'); s.focus();
-            return {tag: s.tagName, disabled: s.getAttribute('aria-disabled'), tabIndex: s.tabIndex, focused: document.activeElement === s,
-                    cursor: getComputedStyle(s).cursor, pill: s.querySelector('.soonPill') ? getComputedStyle(s.querySelector('.soonPill')).display : null,
-                    pillText: s.querySelector('.soonPill') ? s.querySelector('.soonPill').textContent.trim() : null,
-                    interactive: !!s.closest('a,button'), inTabOrder: s.matches('a[href],button,[tabindex]:not([tabindex="-1"])')}; }"""
+        # ۷ اکتبر (تغییر عمدی): Stocks دیگر span بی‌جانِ «Soon» نیست؛ تبِ واقعی است. این کمکی همان اطلاعاتِ تب را می‌خواند:
+        # در اپ <button data-view="stocks">، در /pairs <a href="/app#stocks">؛ هر دو فوکوس‌پذیر و بدونِ هیچ نشانِ Soon.
+        NM_STOCKS_JS = """() => { const s = document.querySelector('#nav [title="Stocks"]'); s.focus();
+            return {tag: s.tagName, view: s.dataset.view || null, href: s.getAttribute('href'), disabled: s.getAttribute('aria-disabled'),
+                    focused: document.activeElement === s, cursor: getComputedStyle(s).cursor,
+                    pill: !!document.querySelector('#nav .soonPill, #nav .navSoon'), label: s.textContent.trim(),
+                    inTabOrder: s.matches('a[href],button,[tabindex]:not([tabindex="-1"])')}; }"""
         nm_runs = 0
         for nm_vw, nm_scheme in ((1440, "light"), (1440, "dark"), (390, "light"), (390, "dark")):
             nm_ctx = "[nav markets] app@%d/%s" % (nm_vw, nm_scheme)
@@ -7477,17 +8062,15 @@ async def main():
             nm.on("pageerror", lambda e, _l=nm_errs: _l.append(str(e)))
             await nm.goto(URL)
             await nm.wait_for_timeout(800)
-            assert await nm.evaluate(NM_ORDER_JS) == ["Swap", "Markets", "Exit Report", "Stocks"], \
+            assert await nm.evaluate(NM_ORDER_JS) == ["Swap", "Markets", "Stocks", "Exit Report"], \
                 "%s: bar order is %s" % (nm_ctx, await nm.evaluate(NM_ORDER_JS))
             assert await nm.locator('#nav [data-view="folio"]').count() == 0, "%s: Portfolio must not be a tab any more" % nm_ctx
             closed = await nm.evaluate(NM_STATE_JS)
             assert closed["display"] == "none" and closed["expanded"] == "false" and not closed["on"], "%s: menu must start closed: %s" % (nm_ctx, closed)
             assert closed["haspopup"] == "menu" and closed["role"] == "menu", "%s: aria-haspopup/role: %s" % (nm_ctx, closed)
-            soon = await nm.evaluate(NM_SOON_JS)
-            assert soon["tag"] == "SPAN" and soon["disabled"] == "true" and not soon["focused"] and soon["tabIndex"] == -1 \
-                and not soon["inTabOrder"] and not soon["interactive"] and soon["cursor"] == "default", "%s: Stocks must be an inert aria-disabled span: %s" % (nm_ctx, soon)
-            assert soon["pillText"] == "Soon" and (soon["pill"] == "none") == (nm_vw <= 720), \
-                "%s: the Soon pill must show on desktop and hide on mobile: %s" % (nm_ctx, soon)
+            stk = await nm.evaluate(NM_STOCKS_JS)
+            assert stk["tag"] == "BUTTON" and stk["view"] == "stocks" and stk["disabled"] is None and stk["focused"] and stk["inTabOrder"] \
+                and not stk["pill"] and stk["cursor"] != "default", "%s: Stocks must be a live, focusable tab (button data-view=stocks) with no Soon pill: %s" % (nm_ctx, stk)
             # باز شدن
             await nm.click("#navMarkets"); await nm.wait_for_timeout(250)
             op = await nm.evaluate(NM_STATE_JS)
@@ -7541,11 +8124,11 @@ async def main():
             await nm.route("**/*", lambda r: r.continue_() if r.request.url.startswith("file:") else r.abort())
             await nm.goto("file://" + os.path.join(HERE, "..", "pairs.html"), wait_until="domcontentloaded")
             await nm.wait_for_timeout(800)
-            assert await nm.evaluate(NM_ORDER_JS) == ["Swap", "Markets", "Exit Report", "Stocks"], "%s: bar order is %s" % (nm_ctx, await nm.evaluate(NM_ORDER_JS))
+            assert await nm.evaluate(NM_ORDER_JS) == ["Swap", "Markets", "Stocks", "Exit Report"], "%s: bar order is %s" % (nm_ctx, await nm.evaluate(NM_ORDER_JS))
             st = await nm.evaluate(NM_STATE_JS)
             assert st["on"] and "inset" in st["btnShadow"] and st["display"] == "none", "%s: Markets must be selected on /pairs: %s" % (nm_ctx, st)
-            soon = await nm.evaluate(NM_SOON_JS)
-            assert soon["tag"] == "SPAN" and soon["disabled"] == "true" and not soon["focused"] and not soon["inTabOrder"], "%s: Stocks: %s" % (nm_ctx, soon)
+            stk = await nm.evaluate(NM_STOCKS_JS)
+            assert stk["tag"] == "A" and stk["href"] == "/app#stocks" and stk["disabled"] is None and stk["focused"] and stk["inTabOrder"] and not stk["pill"], "%s: Stocks must be a live link to /app#stocks: %s" % (nm_ctx, stk)
             await nm.click("#navMarkets"); await nm.wait_for_timeout(200)
             st = await nm.evaluate(NM_STATE_JS)
             assert st["display"] == "block" and st["expanded"] == "true", "%s: click did not open the menu: %s" % (nm_ctx, st)
@@ -7558,8 +8141,8 @@ async def main():
             assert not nm_errs, "%s: page errors: %s" % (nm_ctx, nm_errs)
             await nm.close()
             nm_runs += 1
-        print("[nav markets] bar is exactly Swap, Markets, Exit Report, Stocks; the Markets menu (Flow, New pairs) opens on click, closes on Escape / outside mousedown / choosing a row, "
-              "Flow selects Markets, /pairs shows Markets selected, the menu stays inside the viewport (above the bottom bar at 390), Stocks is an inert aria-disabled span: %d runs (app 1440+390 x light+dark, pairs 1440 x light+dark)" % nm_runs)
+        print("[nav markets] bar is exactly Swap, Markets, Stocks, Exit Report; the Markets menu (Flow, New pairs) opens on click, closes on Escape / outside mousedown / choosing a row, "
+              "Flow selects Markets, /pairs shows Markets selected, the menu stays inside the viewport (above the bottom bar at 390), Stocks is a live tab (button in the app, link to /app#stocks on /pairs) with no Soon pill: %d runs (app 1440+390 x light+dark, pairs 1440 x light+dark)" % nm_runs)
 
         # ---- [wallet portfolio] ۶ اکتبر — «Portfolio» اولین کارِ منوی والت است: در اپ نمای folio را باز می‌کند و منو را می‌بندد؛ در /pairs لینکِ /app#folio است. ----
         wp_errs = []
@@ -11297,8 +11880,9 @@ async def main():
               "hasCta=%s hasFavicon=%s errors=%s"
               % (hinfo["count"], hinfo["hrefs"], hinfo["lastCurrent"], hinfo["lastOn"],
                  hinfo["navCenter"], hinfo["hdrCenter"], hinfo["hasCta"], hinfo["hasFavicon"], herrs))
-        assert hinfo["count"] == 4, "expected 4 nav links in pairs.html's header (Swap, Flow, New pairs, Exit Report), found %s" % hinfo["count"]
-        assert hinfo["hrefs"] == ["/app#swap", "/app#flow", "/pairs", "/report"], (
+        # ۷ اکتبر (تغییر عمدی): لینکِ Stocks (/app#stocks) پیش از Exit Report نشست، پس <a>های هدر پنج‌تاست (نوارِ پایینِ موبایل همچنان چهار آیتم دارد).
+        assert hinfo["count"] == 5, "expected 5 nav links in pairs.html's header (Swap, Flow, New pairs, Stocks, Exit Report), found %s" % hinfo["count"]
+        assert hinfo["hrefs"] == ["/app#swap", "/app#flow", "/pairs", "/app#stocks", "/report"], (
             "pairs.html's header nav hrefs are wrong: %s" % hinfo["hrefs"])
         assert hinfo["lastCurrent"] == "page", "the New pairs link must carry aria-current=\"page\""
         assert hinfo["lastOn"], "the New pairs link must carry the .on look"

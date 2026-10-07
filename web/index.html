@@ -85,7 +85,7 @@ if(/^\/t\/[^/]+\/?$/.test(location.pathname)){
     var r=location.hash.slice(1);
     try{r=decodeURIComponent(r);}catch(e){}
     var i=r.indexOf("?"),n=(i<0?r:r.slice(0,i)).trim();
-    if(n==="folio"||n==="flow"||n==="token"||n==="faq")
+    if(n==="folio"||n==="flow"||n==="token"||n==="faq"||n==="stocks")
       document.documentElement.setAttribute("data-boot-view",n);
   }catch(e){}
 })();
@@ -595,11 +595,13 @@ html,body{overflow-x:hidden;overflow-x:clip;max-width:100%}
 /* فلاشِ نمای غلط — قاعده‌ی کامل در اسکریپتِ data-boot-view بالای صفحه. */
 html[data-boot-view] #view-swap.view.on{display:none}
 html[data-boot-view="folio"] #view-folio,html[data-boot-view="flow"] #view-flow,
-html[data-boot-view="token"] #view-token,html[data-boot-view="faq"] #view-faq{display:flex;flex-direction:column;gap:18px}
+html[data-boot-view="token"] #view-token,html[data-boot-view="faq"] #view-faq,html[data-boot-view="stocks"] #view-stocks{display:flex;flex-direction:column;gap:18px}
 html[data-boot-view] .nav button[data-view="swap"].on{background:none;color:var(--tx2);font-weight:inherit;box-shadow:none}
 /* ۶ اکتبر: Portfolio دیگر تب ندارد؛ نمای flow حالا تبِ Markets را روشن می‌کند. */
 html[data-boot-view="flow"] .nav #navMarkets{
   background:var(--card);color:var(--tx);font-weight:620;box-shadow:var(--shs)}
+/* ۷ اکتبر — همین فلاشِ بوت برای تبِ Stocks: با /app#stocks دکمه‌اش از فریمِ اول «روشن» است. */
+html[data-boot-view="stocks"] .nav button[data-view="stocks"]{background:var(--bg);color:var(--acc);box-shadow:inset 2px 2px 5px var(--soft-lo),inset -2px -2px 5px var(--soft-hi)}
 .chip{
   display:inline-flex;align-items:center;gap:7px;height:38px;padding:0 15px;
   border-radius:999px;background:var(--card);box-shadow:var(--shs);
@@ -1394,6 +1396,32 @@ footer .fine{max-width:78ch;margin:46px 0 0;font-size:11.5px;color:var(--tx3);li
 @media(max-width:480px){#flowTfs{grid-column:1/-1;grid-row:3;justify-self:stretch;margin-left:0}
   #flowTfs button{flex:1;padding:6px 0;text-align:center}}
 #view-flow>.card>header>.grow{display:none}
+
+/* ۷ اکتبر — نمای US stocks. همه‌ی قاعده‌ها زیرِ #view-stocks تا با .trade/.note/.av/.tkChip‌ِ عمومیِ اپ قاطی نشوند.
+   قاعده‌ی مالک: عنوان، توضیح و ستونِ اولِ جدول دقیقاً ۲۰px از لبه‌ی چپِ کارت می‌نشینند و دکمه‌های Trade دقیقاً ۲۰px
+   مانده به لبه‌ی راست — در دسکتاپ و موبایل (قاعده‌ی موبایلِ .card>header با ۱۴px اینجا عمداً بازنویسی می‌شود). */
+#view-stocks .card>header{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:17px 20px 0}
+#view-stocks .tkChip{padding:3px 9px;border-radius:999px;font-size:12px}
+#view-stocks .mkt{display:inline-flex;align-items:center;gap:7px;font-size:12.5px;color:var(--tx2);padding:5px 11px;border-radius:999px;background:var(--bg);box-shadow:inset 2px 2px 5px var(--soft-lo),inset -2px -2px 5px var(--soft-hi)}
+#view-stocks .mkt i{width:7px;height:7px;border-radius:50%;background:var(--tx3)}
+#view-stocks .mkt.open i{background:var(--pos)}
+#view-stocks .lede{margin:8px 20px 14px;color:var(--tx2);font-size:13.5px;line-height:1.55;max-width:70ch}
+#view-stocks table{width:100%;border-collapse:collapse;font-size:13.5px;margin-bottom:6px}
+#view-stocks th{font-size:11.5px;font-weight:600;color:var(--tx3);text-align:right;padding:8px 10px;border-bottom:1px solid var(--line);letter-spacing:.02em}
+#view-stocks th:first-child,#view-stocks td:first-child{text-align:left;padding-left:20px}
+#view-stocks th:last-child,#view-stocks td:last-child{padding-right:20px;width:1%}
+#view-stocks td{padding:11px 10px;border-bottom:1px solid var(--line);text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+#view-stocks tr:last-child td{border-bottom:0}
+#view-stocks .tk{display:flex;align-items:center;gap:11px}
+#view-stocks .tk .av{display:grid;place-items:center;width:30px;height:30px;border-radius:50%;background:var(--grad);color:var(--on-acc);font-size:10px;font-weight:700}
+#view-stocks .tk .nm{display:flex;flex-direction:column;align-items:flex-start;min-width:0}
+#view-stocks .tk b{font-weight:650;color:var(--tx)}
+#view-stocks td small{display:block;font-size:12px;color:var(--tx3)}
+#view-stocks td small.up{color:var(--pos)}
+#view-stocks td small.dn{color:var(--neg)}
+#view-stocks .trade{display:inline-block;gap:0;margin:0;padding:7px 16px;border:0;border-radius:999px;font-size:13px;font-weight:650;line-height:1.3;color:var(--on-acc);background:var(--grad);cursor:pointer}
+#view-stocks .note{margin:0;padding:0 6px;border-radius:0;font-size:12px;color:var(--tx3);line-height:1.55}
+@media(max-width:720px){#view-stocks .colRef,#view-stocks .colVol{display:none}#view-stocks td,#view-stocks th{padding:10px 6px}#view-stocks th:first-child,#view-stocks td:first-child{padding-left:20px}#view-stocks th:last-child,#view-stocks td:last-child{padding-right:20px}#view-stocks .trade{padding:7px 12px}}
 .view #srcChip #srcNetworkIcon{display:flex}
 .view #srcPop svg{object-fit:contain}
 
@@ -1426,15 +1454,12 @@ footer .fine{max-width:78ch;margin:46px 0 0;font-size:11.5px;color:var(--tx3);li
 #themeToggle>span{padding:0}#themeToggle svg{width:16px;height:16px}
 .nav{background:var(--bg);box-shadow:4px 4px 9px var(--soft-lo),-3px -3px 8px var(--soft-hi),inset 0 1px 1px var(--soft-hi)}
 .nav button.on,.nav a.on{background:var(--bg);color:var(--acc);box-shadow:inset 2px 2px 5px var(--soft-lo),inset -2px -2px 5px var(--soft-hi)}
-/* ۶ اکتبر — تبِ «Markets» (بازشو با Flow و New pairs) و برچسبِ «Stocks · Soon». منو داخلِ .nav می‌نشیند، پس
+/* ۶ اکتبر — تبِ «Markets» (بازشو با Flow و New pairs) و تبِ «Stocks». منو داخلِ .nav می‌نشیند، پس
    قاعده‌های عمومیِ .nav button / .nav a روی ردیف‌های منو هم می‌افتند؛ همه‌ی قاعده‌های ردیف عمداً با گزینشگرِ
    .nav .navMenu … (ویژگیِ بالاتر) نوشته شده تا از آن‌ها جان به در ببرند. */
 .navMenuWrap{display:flex}
 .nav .navMarkets .navChev{width:13px;height:13px;margin-left:-2px;opacity:.7;transition:transform .16s}
 .nav .navMarkets[aria-expanded="true"] .navChev{transform:rotate(180deg)}
-.nav .navSoon{display:flex;align-items:center;gap:7px;padding:7px 14px;border-radius:999px;font-size:13.5px;color:var(--tx3);cursor:default;white-space:nowrap;user-select:none}
-.nav .navSoon svg{width:16px;height:16px;flex-shrink:0}
-.soonPill{font-size:10px;font-weight:650;padding:1px 6px;border-radius:99px;color:var(--acc);background:color-mix(in srgb,var(--acc) 14%,transparent)}
 #navMenu{left:0;right:auto;top:calc(100% + 10px);width:auto;min-width:230px;padding:6px;border-radius:16px;background:var(--card);border:1px solid var(--line);box-shadow:var(--sh);z-index:50}
 .nav .navMenu .navItem{display:flex;flex-direction:row;align-items:center;justify-content:flex-start;gap:10px;width:100%;flex:none;padding:9px 10px;border-radius:11px;text-align:left;font-size:13.5px;font-weight:inherit;color:var(--tx);white-space:nowrap;text-decoration:none;background:none;box-shadow:none;cursor:pointer}
 .nav .navMenu .navItem:hover,.nav .navMenu .navItem.on:hover{background:var(--card2);color:var(--tx)}
@@ -1445,8 +1470,7 @@ footer .fine{max-width:78ch;margin:46px 0 0;font-size:11.5px;color:var(--tx3);li
 .nav .navMenu .navTtl{display:block;font-size:13.5px;font-weight:640;color:var(--tx)}
 .nav .navMenu .navItem.on .navTtl{color:var(--acc)}
 .nav .navMenu .navSub{display:block;font-size:12px;font-weight:400;color:var(--tx3)}
-/* بازه‌ی فقط-آیکون (۷۲۱–۱۱۲۰): برچسبِ Markets و Stocks هم مثلِ بقیه می‌رود (عنوانشان در title می‌ماند). */
-@media(min-width:721px) and (max-width:1120px){.nav .navSoon>span{display:none}.nav .navSoon{padding:8px 11px}}
+/* بازه‌ی فقط-آیکون (۷۲۱–۱۱۲۰): برچسبِ Markets هم مثلِ بقیه می‌رود (عنوانشان در title می‌ماند). */
 @media(max-width:720px){
   .navMenuWrap{flex:1;min-width:0}
   /* ۷ اکتبر — شورونِ تبِ Markets روی نوارِ موبایل: برچسب و شورون به‌صورت یک گروه زیرِ آیکون وسط‌چین می‌شوند
@@ -1456,13 +1480,9 @@ footer .fine{max-width:78ch;margin:46px 0 0;font-size:11.5px;color:var(--tx3);li
   .nav .navMarkets>span{grid-column:2;grid-row:2}
   .nav .navMarkets .navChev{display:block;grid-column:3;grid-row:2;align-self:center;width:10px;height:10px;margin:0;opacity:.7;transform:rotate(180deg)}
   .nav .navMarkets[aria-expanded="true"] .navChev{transform:none}
-  .nav .navSoon{flex:1;flex-direction:column;justify-content:center;gap:3px;padding:8px 0;font-size:11px}
-  .nav .navSoon svg{width:19px;height:19px}
-  .nav .navSoon .soonPill{display:none}
   /* منو بالای نوار باز می‌شود و به دو لبه‌ی صفحه می‌چسبد، پس هرگز بیرون نمی‌زند. */
   #navMenu{position:fixed;left:12px;right:12px;top:auto;bottom:calc(84px + env(safe-area-inset-bottom));min-width:0}
 }
-@media(min-width:961px) and (max-width:1120px){.nav .navSoon{min-height:35px}}
 .chip:not(.solid):not(#themeBtn),.tokbtn,.tfs button.on{box-shadow:2px 2px 5px var(--soft-lo),-2px -2px 5px var(--soft-hi)}
 .cta:not(:disabled),.chip.solid,.button.primary,.header-cta{box-shadow:inset 0 1px 1px rgba(255,255,255,.4),inset 0 -2px 2px rgba(20,30,55,.16),0 3px 6px var(--soft-lo)}
 .cta:active:not(:disabled),.chip.solid:active,.button.primary:active,.header-cta:active{transform:translateY(1px);box-shadow:inset 0 2px 4px rgba(20,30,55,.22)}
@@ -1544,7 +1564,7 @@ html:not(.ctaReady) #actBtn:disabled,html:not(.ctaReady) #solSwapBtn:disabled{ba
            stroke-linecap="round" stroke-linejoin="round">
         <path d="M7 4v13M4 14l3 3 3-3M17 20V7M14 10l3-3 3 3"/></svg><span>Swap</span></button>
     <!-- ۶ اکتبر — مالک: «Markets» یک تبِ بازشو است (Flow و New pairs زیرش)؛ «Portfolio» به منوی والت رفت؛
-         «Stocks» فقط یک برچسبِ «به‌زودی» است (span، نه لینک و نه دکمه: فوکوس نمی‌گیرد). منو داخلِ همین ردیفِ nav
+         «Stocks» از ۷ اکتبر تبِ واقعی است و پیش از Exit Report می‌نشیند. منو داخلِ همین ردیفِ nav
          می‌نشیند (navMenuWrap) تا nav یک ردیفِ فلکس بماند. -->
     <div class="navMenuWrap rel">
       <button class="navMarkets" id="navMarkets" type="button" aria-haspopup="menu" aria-expanded="false" title="Markets">
@@ -1556,12 +1576,12 @@ html:not(.ctaReady) #actBtn:disabled,html:not(.ctaReady) #solSwapBtn:disabled{ba
           <span class="navIco"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6h10M4 12h10M4 18h7"/><path d="M19 3v4M17 5h4"/></svg></span><span class="navTxt"><span class="navTtl">New pairs</span><span class="navSub">Fresh pools, exit-checked</span></span></a>
       </div>
     </div>
+    <button data-view="stocks" title="Stocks">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 15l3-3 3 2 4-5"/></svg><span>Stocks</span></button>
     <a class="navLink" href="/report" title="Exit Report">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
            stroke-linecap="round" stroke-linejoin="round">
         <path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/><path d="M9 14l2 2 4-4"/></svg><span>Exit Report</span></a>
-    <span class="navSoon" aria-disabled="true" title="Coming soon">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 15l3-3 3 2 4-5"/></svg><span>Stocks</span><span class="soonPill">Soon</span></span>
   </nav>
   <!-- ۲۹ اوت: خوشه‌ی راست حالا یک واحد است (`.hdrRight`) تا در ستونِ سوم
        چیدمانِ سه‌ستونه‌ی هدر بنشیند — نه برای اینکه چیزی جابه‌جا شود، فقط
@@ -1890,6 +1910,39 @@ try{(function(){
   <p style="padding:0 6px;color:var(--tx3);font-size:12px;margin:0">
     Read live from the deepest pool for this token, in your browser — no server, nothing stored.
   </p>
+</div>
+
+<!-- =====================================================================
+     ۷ اکتبر — نمای «US stocks»: ده سهمِ توکنیزه‌ی Coinbase روی Base.
+     قیمت از کوترِ Slipstream (tickSpacing ۱۰) و مرجع از Chainlink، هر دو در یک
+     دسته‌ی multicall؛ حجم و تغییرِ ۲۴ساعته از یک درخواستِ GeckoTerminal.
+     ===================================================================== -->
+<div class="view" id="view-stocks">
+  <section class="card">
+    <header>
+      <span class="ttl">US stocks</span>
+      <span class="tkChip" data-chain="base">Base</span>
+      <span class="grow"></span>
+      <span class="mkt" id="stkMkt"><i></i><span id="stkMktTxt"></span></span>
+    </header>
+    <p class="lede">Tokenized shares issued by Coinbase, each backed 1:1 by a real share. Trade them on-chain any time against USDC; the reference price comes from Chainlink and moves only while the US market is open.</p>
+    <table id="stkTable">
+      <thead><tr><th>Stock</th><th>Price</th><th class="colRef">Reference</th><th class="colVol">Volume 24h</th><th></th></tr></thead>
+      <tbody>
+        <tr data-sym="AAPLc"><td><div class="tk"><span class="av">AAPL</span><span class="nm"><b>AAPLc</b><small>Apple</small></span></div></td><td class="cPx"><span class="v">—</span><small></small></td><td class="colRef"><span class="v">—</span><small class="gap"></small></td><td class="colVol">—</td><td><button class="trade" type="button" data-sym="AAPLc">Trade</button></td></tr>
+        <tr data-sym="AMZNc"><td><div class="tk"><span class="av">AMZN</span><span class="nm"><b>AMZNc</b><small>Amazon</small></span></div></td><td class="cPx"><span class="v">—</span><small></small></td><td class="colRef"><span class="v">—</span><small class="gap"></small></td><td class="colVol">—</td><td><button class="trade" type="button" data-sym="AMZNc">Trade</button></td></tr>
+        <tr data-sym="GOOGLc"><td><div class="tk"><span class="av">GOOG</span><span class="nm"><b>GOOGLc</b><small>Alphabet</small></span></div></td><td class="cPx"><span class="v">—</span><small></small></td><td class="colRef"><span class="v">—</span><small class="gap"></small></td><td class="colVol">—</td><td><button class="trade" type="button" data-sym="GOOGLc">Trade</button></td></tr>
+        <tr data-sym="METAc"><td><div class="tk"><span class="av">META</span><span class="nm"><b>METAc</b><small>Meta</small></span></div></td><td class="cPx"><span class="v">—</span><small></small></td><td class="colRef"><span class="v">—</span><small class="gap"></small></td><td class="colVol">—</td><td><button class="trade" type="button" data-sym="METAc">Trade</button></td></tr>
+        <tr data-sym="MSFTc"><td><div class="tk"><span class="av">MSFT</span><span class="nm"><b>MSFTc</b><small>Microsoft</small></span></div></td><td class="cPx"><span class="v">—</span><small></small></td><td class="colRef"><span class="v">—</span><small class="gap"></small></td><td class="colVol">—</td><td><button class="trade" type="button" data-sym="MSFTc">Trade</button></td></tr>
+        <tr data-sym="MSTRc"><td><div class="tk"><span class="av">MSTR</span><span class="nm"><b>MSTRc</b><small>Strategy</small></span></div></td><td class="cPx"><span class="v">—</span><small></small></td><td class="colRef"><span class="v">—</span><small class="gap"></small></td><td class="colVol">—</td><td><button class="trade" type="button" data-sym="MSTRc">Trade</button></td></tr>
+        <tr data-sym="NVDAc"><td><div class="tk"><span class="av">NVDA</span><span class="nm"><b>NVDAc</b><small>NVIDIA</small></span></div></td><td class="cPx"><span class="v">—</span><small></small></td><td class="colRef"><span class="v">—</span><small class="gap"></small></td><td class="colVol">—</td><td><button class="trade" type="button" data-sym="NVDAc">Trade</button></td></tr>
+        <tr data-sym="SNDKc"><td><div class="tk"><span class="av">SNDK</span><span class="nm"><b>SNDKc</b><small>Sandisk</small></span></div></td><td class="cPx"><span class="v">—</span><small></small></td><td class="colRef"><span class="v">—</span><small class="gap"></small></td><td class="colVol">—</td><td><button class="trade" type="button" data-sym="SNDKc">Trade</button></td></tr>
+        <tr data-sym="SPCXc"><td><div class="tk"><span class="av">SPCX</span><span class="nm"><b>SPCXc</b><small>SpaceX</small></span></div></td><td class="cPx"><span class="v">—</span><small></small></td><td class="colRef"><span class="v">—</span><small class="gap"></small></td><td class="colVol">—</td><td><button class="trade" type="button" data-sym="SPCXc">Trade</button></td></tr>
+        <tr data-sym="TSLAc"><td><div class="tk"><span class="av">TSLA</span><span class="nm"><b>TSLAc</b><small>Tesla</small></span></div></td><td class="cPx"><span class="v">—</span><small></small></td><td class="colRef"><span class="v">—</span><small class="gap"></small></td><td class="colVol">—</td><td><button class="trade" type="button" data-sym="TSLAc">Trade</button></td></tr>
+      </tbody>
+    </table>
+  </section>
+  <p class="note">Prices are live quotes from the deepest Aerodrome pool for $100. Issuer terms: not offered to US persons. Not investment advice.</p>
 </div>
 
 <!-- =====================================================================
@@ -9836,9 +9889,192 @@ function closeNavMenu(){
   if(m)m.classList.remove("on");
   if(b)b.setAttribute("aria-expanded","false");
 }
+/* =====================================================================
+   نمای US stocks — ده سهمِ توکنیزه‌ی Coinbase روی Base (۷ اکتبر ۲۰۲۶)
+   ---------------------------------------------------------------------
+   قیمت: کوترِ Slipstream (همان aerodrome-cl در جدول DEXES) با tickSpacing ۱۰،
+   ۱۰۰ USDC → سهم. مرجع: latestRoundData() از پراکسیِ Chainlink. هر بیست
+   فراخوانی در *یک* دسته‌ی multicall می‌رود (همان مسیرِ کوتِ سواپ، نه یک
+   provider تازه). حجم و تغییرِ ۲۴ساعته از یک درخواستِ GeckoTerminal
+   (pools/multi) می‌آید و هرگز جلوی قیمت‌ها را نمی‌گیرد.
+   ⚠️ «نمی‌دانم» هرگز عدد نمی‌شود: شکستِ یک فراخوانی یعنی «—»، نه NaN و نه $0.00.
+   ===================================================================== */
+// اندازه‌گیری روی زنجیره، ۷ اکتبر ۲۰۲۶. پراکسی‌های Chainlink از مستنداتِ Base (۸ رقم اعشار)؛
+// استخرها = استخرِ X/USDC از نوع Slipstream با tickSpacing ۱۰ روی کارخانه‌ی
+// 0xf8f2eB4940CFE7d13603DDDD87f123820Fc061Ef.
+const STK=[
+  {sym:"AAPLc",name:"Apple",feed:"0x787f13dEa48Db0897CbCDD985de77809D837F988",pool:"0xa3b1e3f9747065e2073722ff4c9027d3ea4994f0"},
+  {sym:"AMZNc",name:"Amazon",feed:"0x06A8E4b3aBB3B7543d8396FB2B763d22820cB295",pool:"0xd03bc8c7f2faedce2aac81bf0444aea08ea06e9b"},
+  {sym:"GOOGLc",name:"Alphabet",feed:"0x5bF49E0ffA937CE2FfF033c739aD7C634c4D34F2",pool:"0xb1987cad1682841b4b641d50e520777ec5ab5542"},
+  {sym:"METAc",name:"Meta",feed:"0x6526aE6797A76123638b863AeE4dD27Ba4E4b27D",pool:"0xeaf57753bc382e0324a1d43f72e7027705a2273e"},
+  {sym:"MSFTc",name:"Microsoft",feed:"0xeB10A6c9aa7E537aEd766C08c35Dae35B321b18c",pool:"0x7103eb3c9590d1281f7dc03b2a9ee27c39df5d54"},
+  {sym:"MSTRc",name:"Strategy",feed:"0xB3cE282CD188b35DA0E38D8Bc7d58e33173D202a",pool:"0x8b27f626ab668197000bc722a1012022caed10e2"},
+  {sym:"NVDAc",name:"NVIDIA",feed:"0x04689a41629776563E6822F76f2e57D148d28513",pool:"0x853f5f1b92b16714fe6cda67caad0856b83c7ab9"},
+  {sym:"SNDKc",name:"Sandisk",feed:"0x388b0dC46C0Fb05A74BeE0994fa5b02c6Fcca2eA",pool:"0x5a8236f575471e7bfca2c8462a200c28f737246e"},
+  {sym:"SPCXc",name:"SpaceX",feed:"0x6A634B235903C4ad6376892180d6fF8612e3Fa68",pool:"0x0bf58fe0fac935ac69595c19b12ba0d75e3f8c0e"},
+  {sym:"TSLAc",name:"Tesla",feed:"0xFaf869185383a24F8cb00e27BdA6b63B9905DCb4",pool:"0x469337fdcc5e8f38e2e4b670b04f57865d13a7bb"},
+];
+const STK_FEED_ABI=["function latestRoundData() view returns (uint80 roundId,int256 answer,uint256 startedAt,uint256 updatedAt,uint80 answeredInRound)"];
+const STK_REFRESH_MS=60000,STK_RETRY_MS=15000;
+let stkData={px:{},ref:{},vol:{},chg:{},refAt:0,gtOk:false,loaded:false,failed:false};
+let stkSeq=0,stkRun=0,stkTimer=0,stkFeedIface=null;
+const stkUsd=n=>"$"+n.toLocaleString("en-US",{minimumFractionDigits:2,maximumFractionDigits:2});
+function stkVol(v){
+  if(!(v>=0))return "—";
+  if(v>=1e6)return "$"+(v/1e6).toFixed(1)+"M";
+  if(v>=1e3)return "$"+Math.round(v/1e3)+"K";
+  return "$"+Math.round(v);
+}
+// بازار باز = دوشنبه تا جمعه، ۰۹:۳۰ تا ۱۶:۰۰ به وقتِ نیویورک (تعطیلاتِ رسمی را نمی‌شناسیم).
+function stkMarketOpen(ms){
+  try{
+    const p=new Intl.DateTimeFormat("en-US",{timeZone:"America/New_York",weekday:"short",hour:"2-digit",minute:"2-digit",hourCycle:"h23"}).formatToParts(new Date(ms));
+    const g=t=>(p.find(x=>x.type===t)||{}).value;
+    const mins=(+g("hour"))*60+(+g("minute"));
+    return ["Mon","Tue","Wed","Thu","Fri"].includes(g("weekday"))&&mins>=570&&mins<960;
+  }catch{return false;}
+}
+function stkAgo(sec){
+  const m=Math.max(0,Math.floor(sec/60));
+  if(m<60)return m+"m";
+  const h=Math.floor(m/60);
+  return h<24?h+"h":Math.floor(h/24)+"d";
+}
+function stkPaint(){
+  const d=stkData;
+  const anyPx=STK.some(s=>d.px[s.sym]>0),anyRef=STK.some(s=>d.ref[s.sym]>0);
+  const pill=$("stkMkt"),txt=$("stkMktTxt");
+  if(d.failed&&!anyPx&&!anyRef){
+    pill.classList.remove("open");txt.textContent="Prices unavailable — retrying";
+  }else{
+    const open=stkMarketOpen(Date.now());
+    pill.classList.toggle("open",open);
+    txt.textContent=(open?"US market open":"US market closed")+
+      (d.refAt>0?" · reference updated "+stkAgo(Date.now()/1000-d.refAt)+" ago":"");
+  }
+  document.querySelectorAll("#stkTable tr[data-sym]").forEach(tr=>{
+    const sym=tr.dataset.sym,px=d.px[sym],ref=d.ref[sym];
+    const hasPx=px>0&&isFinite(px),hasRef=ref>0&&isFinite(ref);
+    tr.querySelector(".cPx .v").textContent=hasPx?stkUsd(px):"—";
+    const ch=tr.querySelector(".cPx small"),c=d.chg[sym];
+    if(hasPx&&d.gtOk&&isFinite(c)){
+      ch.className=c<0?"dn":"up";
+      ch.textContent=(c<0?"▼ ":"▲ ")+Math.abs(c).toFixed(2)+"%";
+    }else{ch.className="";ch.textContent=hasPx&&d.loaded&&!d.gtOk?"—":"";}
+    tr.querySelector(".colRef .v").textContent=hasRef?stkUsd(ref):"—";
+    const gap=tr.querySelector(".colRef small");
+    if(hasPx&&hasRef){
+      const g=(px/ref-1)*100;
+      gap.textContent=(g<0?"−":"+")+Math.abs(g).toFixed(2)+"% pool gap";
+    }else gap.textContent="";
+    tr.querySelector(".colVol").textContent=d.gtOk&&isFinite(d.vol[sym])?stkVol(d.vol[sym]):"—";
+  });
+}
+// دسته‌ی multicall؛ اگر کلِ دسته revert کند نصف می‌کنیم (همان درسِ quoteBatch)، و نیمه‌ی شکست‌خورده null می‌دهد نه استثنا.
+async function stkMulticall(calls){
+  try{return await multicall(calls);}
+  catch(e){
+    if(calls.length>1&&!cannotAsk(e)&&isRevert(e)){
+      const mid=calls.length>>1;
+      const [a,b]=await Promise.all([stkMulticall(calls.slice(0,mid)),stkMulticall(calls.slice(mid))]);
+      return a.concat(b);
+    }
+    return calls.map(()=>null);
+  }
+}
+// برمی‌گرداند true اگر هیچ قیمت و مرجعی نیامد (برای تلاشِ سریع‌ترِ بعدی).
+async function stocksLoad(){
+  const seq=++stkSeq;
+  if(!E||!iMulti||!iQuoterCL){stkData.failed=true;stkPaint();return true;}
+  if(!stkFeedIface)stkFeedIface=new E.Interface(STK_FEED_ABI);
+  const usdc=E.getAddress(tokenBySymbol("USDC").address);
+  const quoter=E.getAddress(DEXES.find(d=>d.id==="aerodrome-cl").quoter);
+  const feedData=stkFeedIface.encodeFunctionData("latestRoundData",[]);
+  const calls=[];
+  for(const s of STK){
+    const tok=BASE_TOKENS.find(t=>t.symbol===s.sym);
+    calls.push({target:quoter,data:iQuoterCL.encodeFunctionData("quoteExactInputSingle",[[usdc,E.getAddress(tok.address),100000000n,10,0]])});
+    calls.push({target:E.getAddress(s.feed),data:feedData});
+  }
+  let gotAny=false;
+  const chainP=stkMulticall(calls).then(res=>{
+    if(seq!==stkSeq)return;
+    const px={},ref={};let refAt=0;
+    STK.forEach((s,i)=>{
+      const q=res[2*i],f=res[2*i+1];
+      try{
+        if(q&&q.ok&&q.data&&q.data!=="0x"){
+          const out=Number(iQuoterCL.decodeFunctionResult("quoteExactInputSingle",q.data)[0])/1e8;
+          const p=100/out;
+          if(out>0&&isFinite(p)&&p>0)px[s.sym]=p;
+        }
+      }catch{}
+      try{
+        if(f&&f.ok&&f.data&&f.data!=="0x"){
+          const r=stkFeedIface.decodeFunctionResult("latestRoundData",f.data);
+          const a=Number(r[1])/1e8,u=Number(r[3]);
+          if(a>0&&isFinite(a)){ref[s.sym]=a;if(u>refAt)refAt=u;}
+        }
+      }catch{}
+    });
+    gotAny=Object.keys(px).length>0||Object.keys(ref).length>0;
+    stkData.px=px;stkData.ref=ref;stkData.refAt=refAt;stkData.loaded=true;stkData.failed=!gotAny;
+    stkPaint();
+  }).catch(()=>{if(seq!==stkSeq)return;stkData.failed=true;stkPaint();});
+  const gtP=gtJson(`${GT}/networks/${CHAIN.gtNetwork}/pools/multi/${STK.map(s=>s.pool).join(",")}`).then(j=>{
+    if(seq!==stkSeq)return;
+    const vol={},chg={};
+    for(const row of ((j&&j.data)||[])){
+      const a=row&&row.attributes||{};
+      const id=String(row&&row.id||a.address||"").replace(/^base_/,"").toLowerCase();
+      const s=STK.find(x=>x.pool===id);
+      if(!s)continue;
+      const v=Number(a.volume_usd&&a.volume_usd.h24),c=Number(a.price_change_percentage&&a.price_change_percentage.h24);
+      if(isFinite(v))vol[s.sym]=v;
+      if(isFinite(c))chg[s.sym]=c;
+    }
+    stkData.vol=vol;stkData.chg=chg;stkData.gtOk=Object.keys(vol).length>0;
+    stkPaint();
+  }).catch(()=>{if(seq!==stkSeq)return;stkData.gtOk=false;stkPaint();});
+  await Promise.all([chainP,gtP]);
+  return !gotAny;
+}
+async function stocksTick(){
+  const run=stkRun;
+  clearTimeout(stkTimer);stkTimer=0;
+  let failed=false;
+  if(!document.hidden)failed=await stocksLoad();
+  if(run!==stkRun||view!=="stocks")return;
+  stkTimer=setTimeout(stocksTick,failed?STK_RETRY_MS:STK_REFRESH_MS);
+}
+// setView هنگامِ نوشتنِ hash یک بار دیگر از hashchange صدا می‌خورد؛ stkActive نمی‌گذارد همان بازشدن دو دسته‌ی multicall بفرستد.
+let stkActive=false;
+function stocksStart(){if(stkActive)return;stkActive=true;stkPaint();stocksTick();}
+function stocksStop(){stkActive=false;++stkRun;++stkSeq;clearTimeout(stkTimer);stkTimer=0;}
+// «Trade»: همان کاری که انتخابگرِ توکن می‌کند — USDC → سهم، مبلغ خالی، فوکوس روی «You pay».
+function stocksTrade(sym){
+  const t=BASE_TOKENS.find(x=>x.symbol===sym),usdc=tokenBySymbol("USDC");
+  if(!E||!t||!usdc)return;
+  if(activeChain==="solana")setChain("base");
+  if(activeChain==="solana")return;     // setChain می‌تواند صفحه را بارگذاری مجدد کند
+  hideSwapDone();
+  tokenIn=usdc;tokenOut=t;mode="exactIn";
+  $("amtIn").value="";$("amtOut").value="";
+  setView("swap");
+  paintToken("in",tokenIn);paintToken("out",tokenOut);paintBalances();
+  runScan(tokenOut);loadChart();paintFlowToken();
+  paintAmtClear();
+  refreshAllowance().then(scheduleQuote);
+  $("amtIn").focus();
+}
+$("stkTable").addEventListener("click",e=>{
+  const b=e.target.closest&&e.target.closest(".trade");
+  if(b)stocksTrade(b.dataset.sym);
+});
+
 function setView(v,push){
   if(v&&v.indexOf("?")>=0)v=v.slice(0,v.indexOf("?"));
-  if(!["swap","folio","flow","token","faq"].includes(v))v="swap";
+  if(!["swap","folio","flow","token","faq","stocks"].includes(v))v="swap";
   /* اگر از صفحه‌ی توکن بیرون می‌رویم، آدرس را خودِ leaveTokenPage عوض
      می‌کند، پس دیگر hash نباید دوباره نوشته شود. */
   const leaving=tokenPage&&v!=="token";
@@ -9857,11 +10093,14 @@ function setView(v,push){
   // فقط وقتی نما باز می‌شود داده می‌گیریم — نه در پس‌زمینه
   if(v==="folio")renderFolio();
   if(v==="flow"){paintFlowToken();renderFlow();}
+  // ۷ اکتبر — Stocks: تازه‌سازیِ ۶۰ثانیه‌ای فقط تا وقتی نما باز است؛ با رفتن به نمای دیگر قطع می‌شود.
+  if(v==="stocks")stocksStart();else stocksStop();
   if(v==="swap"&&!tokenPage)updateSwapViewForChain();
   else liveStripStop();
   // سه نما در یک صفحه‌اند و با hash عوض می‌شوند، پس آمار معمولیِ «بازدید
   // صفحه» آن‌ها را از هم تفکیک نمی‌کند. اینجا تنها نقطه‌ی ورود هر سه است.
-  ev("view:"+v);
+  // نامِ رویدادِ تازه نمی‌سازیم (قاعده‌ی مالک: هیچ نامِ /ev جدیدی)، پس نمای Stocks شمرده نمی‌شود.
+  if(v!=="stocks")ev("view:"+v);
   scrollTo({top:0,behavior:"instant"});
 }
 /* ⚠️ عوض‌کردنِ بازه‌ی زمانی هم renderFlow و paintFlowToken را صدا می‌زند؛ بازنقاشیِ
