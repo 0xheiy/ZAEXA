@@ -2957,6 +2957,150 @@ async def check_logo_hit_area(p, errors):
     print("[logo hit area] the logo link hugs its ink on app, pairs and landing at 360/390/768/1440px")
 
 
+async def check_nav_chevron_mobile(p, errors):
+    """[nav chevron mobile] — ۷ اکتبر: مالک گفت شورونِ تبِ Markets روی نوارِ موبایل نیست
+    (display:none بود). حالا برچسب و شورون یک گروهِ وسط‌چین زیرِ آیکون‌اند؛ هندسه را
+    در اپ و pairs، سه عرضِ گوشی و هر دو تم می‌سنجیم، و دسکتاپ دست‌نخورده می‌ماند."""
+    b = await p.chromium.launch()
+    js = """() => {
+        const r = e => e.getBoundingClientRect();
+        const btn = document.querySelector('.nav .navMarkets');
+        const ch = btn.querySelector('.navChev'), lab = btn.querySelector('span'), ico = btn.querySelector('svg');
+        const cs = getComputedStyle(ch);
+        return {display: cs.display, transform: cs.transform, expanded: btn.getAttribute('aria-expanded'),
+                btn: r(btn), ch: r(ch), lab: r(lab), ico: r(ico)};
+    }"""
+    n = 0
+    for name in ("index.html", "pairs.html"):
+        for (w, h) in ((360, 780), (390, 844), (430, 932)):
+            for theme in ("light", "dark"):
+                pg = await b.new_page(viewport={"width": w, "height": h})
+                await pg.goto("file://" + os.path.join(HERE, "..", name))
+                await pg.wait_for_timeout(250)
+                await pg.evaluate("t => { document.documentElement.dataset.theme = t; }", theme)
+                await pg.wait_for_timeout(150)
+                m = await pg.evaluate(js)
+                tag = "%s@%dx%d/%s" % (name, w, h, theme)
+                assert m["display"] != "none", "[nav chevron mobile] %s: the Markets chevron is display:none" % tag
+                assert 9 <= m["ch"]["width"] <= 11, "[nav chevron mobile] %s: chevron width %.1f not 9-11px" % (tag, m["ch"]["width"])
+                cy = m["ch"]["y"] + m["ch"]["height"] / 2
+                ly = m["lab"]["y"] + m["lab"]["height"] / 2
+                assert abs(cy - ly) <= 1.5, "[nav chevron mobile] %s: chevron centre %.1f vs label centre %.1f" % (tag, cy, ly)
+                gap = m["ch"]["x"] - (m["lab"]["x"] + m["lab"]["width"])
+                assert 0 <= gap <= 5, "[nav chevron mobile] %s: label->chevron gap %.1fpx not within 0-5" % (tag, gap)
+                b_ = m["btn"]
+                assert (m["ch"]["x"] >= b_["x"] and m["ch"]["x"] + m["ch"]["width"] <= b_["x"] + b_["width"]
+                        and m["ch"]["y"] >= b_["y"] and m["ch"]["y"] + m["ch"]["height"] <= b_["y"] + b_["height"]), (
+                    "[nav chevron mobile] %s: chevron %s is not inside the Markets button %s" % (tag, m["ch"], b_))
+                icx = m["ico"]["x"] + m["ico"]["width"] / 2
+                bcx = b_["x"] + b_["width"] / 2
+                assert abs(icx - bcx) <= 8, "[nav chevron mobile] %s: icon centre %.1f vs button centre %.1f" % (tag, icx, bcx)
+                await pg.click(".nav .navMarkets")
+                await pg.wait_for_timeout(350)
+                m2 = await pg.evaluate(js)
+                assert m2["expanded"] == "true", "[nav chevron mobile] %s: click did not open the menu" % tag
+                assert m2["transform"] != m["transform"], (
+                    "[nav chevron mobile] %s: chevron transform unchanged when open (%s)" % (tag, m2["transform"]))
+                await pg.close()
+                n += 1
+        pg = await b.new_page(viewport={"width": 1280, "height": 800})
+        await pg.goto("file://" + os.path.join(HERE, "..", name))
+        await pg.wait_for_timeout(250)
+        m = await pg.evaluate(js)
+        assert m["transform"] == "none", "[nav chevron mobile] %s desktop: closed chevron transform is %s, expected none" % (name, m["transform"])
+        assert m["ch"]["x"] >= m["lab"]["x"] + m["lab"]["width"] - 0.5, "[nav chevron mobile] %s desktop: chevron not to the right of the label" % name
+        await pg.close()
+    await b.close()
+    print("[nav chevron mobile] chevron visible, centred with the label and flips when open on app and pairs (%d phone combos); desktop unchanged" % n)
+
+
+async def check_landing_glow_lvh(p, errors):
+    """[landing glow lvh] — ۷ اکتبر: روی گوشی با جمع‌شدنِ نوارِ آدرس، لایه‌ی fixed با inset:0
+    ارتفاعِ کوچک را نگه می‌داشت و نواری پایین بدونِ درخشش می‌ماند (پس‌زمینه‌ی «دو‌فاز»)."""
+    path = os.path.join(HERE, "..", "landing.html")
+    b = await p.chromium.launch()
+    pg = await b.new_page(viewport={"width": 390, "height": 844})
+    await pg.goto("file://" + path)
+    await pg.wait_for_timeout(300)
+    # bottom در getComputedStyle مقدارِ «استفاده‌شده» (px) برمی‌گرداند و با height=100lvh در مرورگرِ بدونِ نوارِ آدرس
+    # هم‌اندازه‌ی ویوپورت می‌شود (۰px)؛ پس قاعده‌ی نوشته‌شده را از خودِ CSSOM می‌خوانیم تا auto بودنش دیده شود.
+    m = await pg.evaluate("""() => { const cs = getComputedStyle(document.querySelector('.page-glow'));
+        let decl = null;
+        for (const sh of document.styleSheets) for (const r of sh.cssRules)
+            if (r.selectorText === '.page-glow') decl = r.style.bottom;
+        return {bottom: decl, used: cs.bottom, height: parseFloat(cs.height), ih: window.innerHeight}; }""")
+    await b.close()
+    src = open(path, encoding="utf-8").read()
+    assert m["bottom"] == "auto" and m["bottom"] != "0px", (
+        "[landing glow lvh] .page-glow declares bottom=%r (inset:0 / bottom:0 keeps the small viewport height); expected auto" % m["bottom"])
+    assert abs(m["height"] - m["ih"]) <= 0.5, "[landing glow lvh] glow height %s != innerHeight %s" % (m["height"], m["ih"])
+    assert "100lvh" in src, "[landing glow lvh] landing.html does not contain 100lvh"
+    print("[landing glow lvh] declared bottom=%s height=%s innerHeight=%s, 100lvh present" % (m["bottom"], m["height"], m["ih"]))
+
+
+async def check_landing_menu(p, errors):
+    """[landing menu fits] و [landing menu cta text] — ۷ اکتبر: منوی موبایلِ landing با max-height:320px
+    دکمه‌ی «Open the app» را می‌برید، و قاعده‌ی .mobile-menu a روی .button-primary غالب می‌شد و متنِ
+    دکمه‌ی گرادیانی خاکستری/کمرنگ می‌شد."""
+    path = os.path.join(HERE, "..", "landing.html")
+    b = await p.chromium.launch()
+    rows = []
+    for theme, want in (("light", "rgb(255, 255, 255)"), ("dark", "rgb(5, 18, 26)")):
+        ctx = await b.new_context(viewport={"width": 390, "height": 844}, device_scale_factor=2, is_mobile=True, has_touch=True)
+        pg = await ctx.new_page()
+        await pg.goto("file://" + path)
+        await pg.wait_for_timeout(300)
+        await pg.evaluate("t => { document.documentElement.dataset.theme = t; }", theme)
+        await pg.wait_for_timeout(150)
+        await pg.click("#menuToggle")
+        await pg.wait_for_timeout(450)
+        m = await pg.evaluate("""() => {
+            const menu = document.getElementById('mobileMenu'), cta = menu.querySelector('a.button-primary');
+            const hero = document.querySelector('.hero .button-primary');
+            return {menuBottom: menu.getBoundingClientRect().bottom, ctaBottom: cta.getBoundingClientRect().bottom,
+                    sh: menu.scrollHeight, ch: menu.clientHeight,
+                    ctaColor: getComputedStyle(cta).color, heroColor: getComputedStyle(hero).color};
+        }""")
+        await ctx.close()
+        assert m["ctaBottom"] <= m["menuBottom"] - 8, (
+            "[landing menu fits] %s: CTA bottom %.1f is not 8px above menu bottom %.1f (button clipped)" % (theme, m["ctaBottom"], m["menuBottom"]))
+        assert m["sh"] <= m["ch"] + 1, "[landing menu fits] %s: menu scrollHeight %s > clientHeight %s" % (theme, m["sh"], m["ch"])
+        assert m["ctaColor"] == want, "[landing menu cta text] %s: CTA colour %s, expected %s" % (theme, m["ctaColor"], want)
+        assert m["ctaColor"] == m["heroColor"], "[landing menu cta text] %s: CTA colour %s != hero button %s" % (theme, m["ctaColor"], m["heroColor"])
+        rows.append("%s cta=%s" % (theme, m["ctaColor"]))
+    await b.close()
+    print("[landing menu fits] open menu holds the whole CTA at 390x844 in light and dark")
+    print("[landing menu cta text] CTA text matches the hero button (%s)" % "; ".join(rows))
+
+
+async def check_hero_desktop_mode(p, errors):
+    """[hero desktop-mode] — ۷ اکتبر: گوشی در حالتِ «سایتِ دسکتاپ» (~۹۸۰×۲۰۰۰) هیرو را ۱۹۰۰px
+    می‌کرد و انیمیشن وسطِ فضای خالی شناور بود؛ min-height حالا با max(680px,62.5vw) سقف دارد."""
+    path = os.path.join(HERE, "..", "landing.html")
+    b = await p.chromium.launch()
+    out = {}
+    for (w, h) in ((980, 2000), (1440, 900), (1920, 1080)):
+        pg = await b.new_page(viewport={"width": w, "height": h})
+        await pg.goto("file://" + path)
+        await pg.wait_for_timeout(300)
+        out[(w, h)] = await pg.evaluate("""() => { const r = e => e.getBoundingClientRect();
+            const hero = document.querySelector('.hero'), v = hero.querySelector('.hero-visual');
+            return {h: r(hero).height, mh: parseFloat(getComputedStyle(hero).minHeight), hero: r(hero), vis: r(v)}; }""")
+        await pg.close()
+    await b.close()
+    d = out[(980, 2000)]
+    assert d["h"] <= 1000, "[hero desktop-mode] hero is %.0fpx tall at 980x2000 (cap is 1000)" % d["h"]
+    hr, vr = d["hero"], d["vis"]
+    assert (vr["x"] >= hr["x"] - 0.5 and vr["y"] >= hr["y"] - 0.5 and vr["x"] + vr["width"] <= hr["x"] + hr["width"] + 0.5
+            and vr["y"] + vr["height"] <= hr["y"] + hr["height"] + 0.5), (
+        "[hero desktop-mode] hero visual %s is not inside the hero %s at 980x2000" % (vr, hr))
+    # در این دو اندازه ارتفاعِ واقعیِ هیرو را محتوا تعیین می‌کند (padding + ستون‌ها) نه min-height؛ پس خودِ
+    # min-height محاسبه‌شده باید همان 100vh-90 بماند (۸۱۰ و ۹۹۰) — یعنی سقفِ تازه آن‌جا اثری ندارد.
+    assert abs(out[(1440, 900)]["mh"] - 810) <= 1, "[hero desktop-mode] hero min-height %.1f at 1440x900, expected 810" % out[(1440, 900)]["mh"]
+    assert abs(out[(1920, 1080)]["mh"] - 990) <= 1, "[hero desktop-mode] hero min-height %.1f at 1920x1080, expected 990" % out[(1920, 1080)]["mh"]
+    print("[hero desktop-mode] hero %.0fpx at 980x2000 (visual inside), min-height 810 at 1440x900, 990 at 1920x1080" % d["h"])
+
+
 async def check_live_strip(p, errors):
     """نوارِ «فعالیتِ زنده» زیرِ کارتِ سواپ روی /app — فقط نمای swap.
 
@@ -3420,6 +3564,20 @@ async def check_report_page(p, errors):
     CHIP_JS = """() => Object.fromEntries([...document.querySelectorAll('#filters .chip')].map(c =>
         [c.dataset.g + ':' + c.dataset.k, +c.querySelector('span').textContent]))"""
 
+    # ---- [report tabbar desktop] بالای ۷۲۰ نوار پنهان است؛ ۷۲۱–۹۰۰ همبرگرِ همیشگی؛ بالای ۹۰۰ بی‌تغییر ----
+    pg = await open_report(1440, 900)
+    d = await pg.evaluate("""() => ({ nav: getComputedStyle(document.getElementById('nav')).display,
+        links: [...document.querySelectorAll('.desktop-nav a')].map(a => a.textContent.trim()),
+        on: [...document.querySelectorAll('.desktop-nav a.on')].map(a => a.textContent.trim()) })""")
+    assert d["nav"] == "none", "[report tabbar desktop] the bottom tab bar must be hidden at 1440: %s" % d
+    assert len(d["links"]) == 4 and d["on"] == ["Exit Report"], "[report tabbar desktop] the 4 desktop links (Exit Report on) must be unchanged: %s" % d
+    await pg.close()
+    pg = await open_report(800, 900)
+    d = await pg.evaluate("() => ({ nav: getComputedStyle(document.getElementById('nav')).display, mt: getComputedStyle(document.getElementById('menuToggle')).display })")
+    assert d["nav"] == "none" and d["mt"] != "none", "[report tabbar desktop] at 800 the tab bar stays hidden and the hamburger stays: %s" % d
+    await pg.close()
+    print("[report tabbar desktop] 1440: no tab bar, the 4 desktop links with Exit Report on; 800: no tab bar, hamburger shown")
+
     # ---- [report page render] روشن و تیره، دو اندازه ----
     for scheme in ("light", "dark"):
         for vw, vh in ((1440, 900), (390, 844)):
@@ -3628,6 +3786,105 @@ async def check_report_page(p, errors):
             if vw <= 390:
                 assert all(s and s[0] <= s[1] + 1 and s[2] == "block" for s in m["sp"]), "[report page tabs] %s at %d a label is clipped or hidden: %s" % (path, vw, m["sp"])
     print("[report page tabs] the app and /pairs tab bars both carry 4 items (Swap, Markets, Exit Report → /report, Stocks soon); at 360, 390 and 1440 they stay inside the viewport, do not overlap, show every label unclipped on phones, and add no page scroll")
+    # ---- [report tabbar] ۷ اکتبر — نوارِ تبِ پایینِ موبایل روی /report مثلِ اپ و pairs؛ همبرگر فقط بالای ۷۲۰ ----
+    NAVJS = """() => { const nav = document.getElementById('nav'), cs = getComputedStyle(nav), r = nav.getBoundingClientRect();
+        const items = [...nav.children];
+        const mm = document.querySelector('.mobile-menu'), mt = document.getElementById('menuToggle');
+        const mk = document.getElementById('navMarkets'), ch = mk && mk.querySelector('.navChev'), lab = mk && mk.querySelector(':scope > span');
+        const cr = ch && ch.getBoundingClientRect(), lr = lab && lab.getBoundingClientRect();
+        const rep = document.querySelector('#nav > a[href="/report"]');
+        return { disp: cs.display, pos: cs.position, top: r.top, bottom: r.bottom, vh: innerHeight,
+                 labels: items.map(e => e.innerText.trim()),
+                 rep: rep ? [rep.classList.contains('on'), rep.getAttribute('aria-current')] : null,
+                 mt: mt ? getComputedStyle(mt).display : null, mm: mm ? getComputedStyle(mm).display : null,
+                 chDisp: ch ? getComputedStyle(ch).display : null, chW: cr ? cr.width : 0,
+                 chDy: cr && lr ? Math.abs((cr.top + cr.bottom) / 2 - (lr.top + lr.bottom) / 2) : 99 }; }"""
+    for scheme in ("light", "dark"):
+        for vw, vh in ((390, 844), (360, 780)):
+            pg = await open_report(vw, vh, scheme)
+            m = await pg.evaluate(NAVJS)
+            tag = "[report tabbar] %dx%d %s" % (vw, vh, scheme)
+            assert m["disp"] != "none" and m["pos"] == "fixed", "%s: the tab bar must be visible and position:fixed: %s" % (tag, m)
+            assert vh - 20 <= m["bottom"] <= vh, "%s: the bar's bottom must sit within 20px of the viewport bottom: %s" % (tag, m)
+            assert m["labels"] == ["Swap", "Markets", "Exit Report", "Stocks"], "%s: the 4 items must read Swap, Markets, Exit Report, Stocks: %s" % (tag, m["labels"])
+            assert m["rep"] == [True, "page"], "%s: Exit Report must carry class on and aria-current=page: %s" % (tag, m["rep"])
+            assert m["mt"] == "none" and m["mm"] == "none", "%s: the hamburger and its panel must be hidden at phone width: %s" % (tag, m)
+            assert m["chDisp"] != "none" and 9 <= m["chW"] <= 11 and m["chDy"] <= 1.5, "%s: the Markets chevron must be visible, 9-11px wide and centred on the label: %s" % (tag, m)
+            await pg.click("#navMarkets")
+            o = await pg.evaluate("""() => { const mn = document.getElementById('navMenu'), r = mn.getBoundingClientRect(), n = document.getElementById('nav').getBoundingClientRect();
+                return { disp: getComputedStyle(mn).display, bottom: r.bottom, navTop: n.top, exp: document.getElementById('navMarkets').getAttribute('aria-expanded'),
+                         hrefs: [...mn.querySelectorAll('a')].map(a => a.getAttribute('href')) }; }""")
+            assert o["disp"] != "none" and o["exp"] == "true" and o["bottom"] <= o["navTop"], "%s: clicking Markets must open the menu above the bar: %s" % (tag, o)
+            assert "/app#flow" in o["hrefs"] and "/pairs" in o["hrefs"], "%s: the Markets menu must link /app#flow and /pairs: %s" % (tag, o["hrefs"])
+            await pg.keyboard.press("Escape")
+            c = await pg.evaluate("() => [getComputedStyle(document.getElementById('navMenu')).display, document.getElementById('navMarkets').getAttribute('aria-expanded')]")
+            assert c == ["none", "false"], "%s: Escape must close the Markets menu: %s" % (tag, c)
+            await pg.evaluate("() => window.scrollTo(0, document.documentElement.scrollHeight)")
+            await pg.wait_for_timeout(250)
+            f = await pg.evaluate("""() => { const foot = document.querySelector('footer'); if (!foot) return null;
+                const w = document.createTreeWalker(foot, NodeFilter.SHOW_TEXT); let last = null, n;
+                while ((n = w.nextNode())) { if (!n.textContent.trim()) continue; const rg = document.createRange(); rg.selectNodeContents(n);
+                    const rs = [...rg.getClientRects()].filter(x => x.height > 0); if (rs.length) last = Math.max(...rs.map(x => x.bottom)); }
+                return { last: last, navTop: document.getElementById('nav').getBoundingClientRect().top }; }""")
+            assert f and f["last"] is not None and f["last"] <= f["navTop"], "%s: after scrolling to the bottom the footer's last line must clear the bar: %s" % (tag, f)
+            await pg.close()
+    print("[report tabbar] 390x844 and 360x780, light and dark: fixed bar within 20px of the bottom, Swap/Markets/Exit Report/Stocks with Exit Report active, hamburger hidden, Markets menu opens above the bar and Escape closes it, chevron 9-11px and centred, footer clears the bar")
+
+    # ---- [report tabbar parity] همان نوارِ /pairs، به‌پیکسل ----
+    async def open_pairs_pg(vw, vh, scheme):
+        pg = await b.new_page(viewport={"width": vw, "height": vh}, color_scheme=scheme)
+        async def stub(route):
+            u = route.request.url
+            if not u.startswith(origin):
+                return await route.abort()
+            if "pairs.json" in u:
+                return await route.fulfill(status=200, content_type="application/json", body='{"chain":"base","rows":[],"store":true}')
+            if "/gt/" in u:
+                return await route.fulfill(status=200, content_type="application/json", body='{"data":[]}')
+            if u.endswith("/ev"):
+                return await route.fulfill(status=204, body="")
+            if "/vd/" in u or "/sol/" in u:
+                return await route.fulfill(status=200, content_type="application/json", body="{}")
+            return await route.continue_()
+        await pg.add_init_script("localStorage.setItem(%s, %s);" % (_j.dumps(theme_key), _j.dumps(scheme)))
+        await pg.route("**/*", stub)
+        await pg.goto(origin + "/pairs")
+        await pg.wait_for_timeout(700)
+        return pg
+    PARJS = """() => { const nav = document.getElementById('nav'), cs = getComputedStyle(nav), r = nav.getBoundingClientRect();
+        const act = nav.querySelector('button.on, a.on'), ac = getComputedStyle(act);
+        const rc = e => { const x = e.getBoundingClientRect(); return [x.left, x.right, x.top, x.bottom]; };
+        return { nav: [r.left, r.right, r.bottom, r.height], items: [...nav.children].map(rc), bg: cs.backgroundColor, rad: cs.borderRadius,
+                 abg: ac.backgroundColor, ash: ac.boxShadow, n: nav.children.length }; }"""
+    for scheme in ("light", "dark"):
+        pg = await open_report(390, 844, scheme)
+        a = await pg.evaluate(PARJS)
+        await pg.close()
+        pp = await open_pairs_pg(390, 844, scheme)
+        q = await pp.evaluate(PARJS)
+        await pp.close()
+        tag = "[report tabbar parity] %s" % scheme
+        assert a["n"] == q["n"] == 4, "%s: both bars must have 4 items: %s vs %s" % (tag, a["n"], q["n"])
+        assert all(abs(x - y) <= 1 for x, y in zip(a["nav"], q["nav"])), "%s: bar left/right/bottom/height differ: /report %s vs /pairs %s" % (tag, a["nav"], q["nav"])
+        for i, (x, y) in enumerate(zip(a["items"], q["items"])):
+            assert all(abs(u - v) <= 1 for u, v in zip(x, y)), "%s: item %d rect differs: /report %s vs /pairs %s" % (tag, i, x, y)
+        assert a["bg"] == q["bg"] and a["rad"] == q["rad"], "%s: bar background/radius differ: %s %s vs %s %s" % (tag, a["bg"], a["rad"], q["bg"], q["rad"])
+        assert a["abg"] == q["abg"] and a["ash"] == q["ash"], "%s: active tab background/shadow differ: %s | %s vs %s | %s" % (tag, a["abg"], a["ash"], q["abg"], q["ash"])
+    print("[report tabbar parity] 390x844 light and dark: /report's phone tab bar matches /pairs within 1px (bar and all 4 items) with the same background, radius and active-tab look")
+
+    # ---- [report menu] منوی همبرگری: ارتفاعِ کافی و رنگِ متنِ دکمه‌ی CTA ----
+    for scheme, want in (("light", "rgb(255, 255, 255)"), ("dark", "rgb(5, 18, 26)")):
+        pg = await open_report(800, 900, scheme)
+        await pg.click("#menuToggle")
+        await pg.wait_for_timeout(450)
+        m = await pg.evaluate("""() => { const mn = document.getElementById('mobileMenu').getBoundingClientRect(), c = document.querySelector('#mobileMenu a.button-primary');
+            return { cta: c.getBoundingClientRect().bottom, menu: mn.bottom, color: getComputedStyle(c).color, maxH: getComputedStyle(document.getElementById('mobileMenu')).maxHeight }; }""")
+        assert m["maxH"] == "480px", "[report menu] %s: the open hamburger menu must allow 480px of height (the 320px cap was too tight): %s" % (scheme, m)
+        assert m["cta"] <= m["menu"] - 8, "[report menu] %s: the 'Check a token' button must fit inside the open menu: %s" % (scheme, m)
+        assert m["color"] == want, "[report menu] %s: the 'Check a token' text colour must be %s: %s" % (scheme, want, m["color"])
+        await pg.close()
+    print("[report menu] 800x900 light and dark: the hamburger menu fits its CTA with room to spare and the CTA text is rgb(255, 255, 255) / rgb(5, 18, 26)")
+
     await b.close()
     srv.shutdown()
 
@@ -3877,6 +4134,10 @@ async def main():
         await check_trust_glyph_in_circle(p, errors)
         await check_canvas_resize(p, errors)
         await check_logo_hit_area(p, errors)
+        await check_nav_chevron_mobile(p, errors)
+        await check_landing_glow_lvh(p, errors)
+        await check_landing_menu(p, errors)
+        await check_hero_desktop_mode(p, errors)
         await check_logo_parity(p, errors)
         await check_token_page_hash_links(p, errors)
         await check_live_strip(p, errors)
