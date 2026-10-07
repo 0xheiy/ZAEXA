@@ -918,13 +918,13 @@ function isSolidlyReqId(id) { return PROBE_KIND_BY_ID.get(id) === "SOLIDLY"; }
   }
 
   const probe = vd.buildProbe(TOKEN, vd.WETH_ADDR, amt);
-  ok(probe.length === 26, "buildProbe should produce exactly 26 calls (3+3+5+5+2+1+1+1+1+4), got " + probe.length);
+  ok(probe.length === 27, "buildProbe should produce exactly 27 calls (3+3+6+5+2+1+1+1+1+4), got " + probe.length);
 
   for (const p of probe) {
     const row = vd.VD_VENUES.find((r) => r.id === p.id);
     // این حلقه فقط شکلِ حدسیِ "fee:tickSpacing" را می‌فهمد؛ اگر یک کلیدِ
     // واقعیِ "real:..." این‌جا سر برآورد (یعنی گاردِ opts-غایب در بخشِ
-    // ۲۷.۱۱ شکسته)، شمارشِ ۲۶‌تاییِ بالا همین را از قبل «FAIL» کرده — ادامه‌ی
+    // ۲۷.۱۱ شکسته)، شمارشِ ۲۷‌تاییِ بالا همین را از قبل «FAIL» کرده — ادامه‌ی
     // این حلقه با فرضِ شکلِ غلط باید فقط رد شود، نه با کرش (split/Number
     // روی "real:" یک NaN می‌سازد و ethers را با underflow می‌ترکاند).
     if (typeof p.key === "string" && p.key.startsWith("real:")) continue;
@@ -945,6 +945,23 @@ function isSolidlyReqId(id) { return PROBE_KIND_BY_ID.get(id) === "SOLIDLY"; }
     ok(p.data === want, row.kind + " encoding mismatch for " + p.id + "/" + p.key + ":\n  got  " +
       p.data + "\n  want " + want);
     ok(p.to === row.to, "wrong contract address for " + p.id);
+  }
+
+  // ۷ اکتبر ۲۰۲۶: tickSpacing ۱۰ برای سهام توکنیزه‌ی Coinbase.
+  {
+    const clRow = vd.VD_VENUES.find((r) => r.id === "aerodrome-cl");
+    const clV1Row = vd.VD_VENUES.find((r) => r.id === "aerodrome-cl-v1");
+    ok(clRow.keys.includes(10), "aerodrome-cl keys must include tickSpacing 10, got " + JSON.stringify(clRow.keys));
+    ok(!clV1Row.keys.includes(10), "aerodrome-cl-v1 keys must NOT include tickSpacing 10, got " + JSON.stringify(clV1Row.keys));
+
+    const STOCK = "0xb2000000000000000000001e800a7f5189430cD0";
+    const stockProbe = vd.buildProbe(STOCK, vd.USDC_ADDR, amt);
+    const wantStock = ifaceI.encodeFunctionData("quoteExactInputSingle", [[STOCK, vd.USDC_ADDR, amt, 10, 0]]);
+    ok(stockProbe.some((p) => p.id === "aerodrome-cl" && p.to === clRow.to && p.data === wantStock),
+      "[stock pools] a probe for TSLAc must include an aerodrome-cl quoter call with tickSpacing 10");
+    ok(!stockProbe.some((p) => p.id === "aerodrome-cl-v1" && p.data === wantStock),
+      "[stock pools] the aerodrome-cl-v1 quoter must not be asked for tickSpacing 10");
+    console.log("[stock pools] TSLAc probe carries the aerodrome-cl tickSpacing-10 quote; v1 row untouched");
   }
 
   // همان چهار کلید، ولی مرحله‌ی USDC — اینجا TOKEN از ضدجفتش کوچک‌تر است،
@@ -1006,13 +1023,13 @@ function isSolidlyReqId(id) { return PROBE_KIND_BY_ID.get(id) === "SOLIDLY"; }
   // بی‌صدا حذف کند (نه بریده)، یکی کمتر باید هر چهار کلید را نگه دارد.
   {
     const overflow = vd.buildProbe(TOKEN, vd.WETH_ADDR, 2n ** 128n);
-    ok(overflow.length === 22, "an amountIn at exactly 2**128 must drop all four v4 entries, leaving the "
-      + "22 non-v4 calls, got " + overflow.length);
+    ok(overflow.length === 23, "an amountIn at exactly 2**128 must drop all four v4 entries, leaving the "
+      + "23 non-v4 calls, got " + overflow.length);
     ok(!overflow.some((p) => p.id === "uniswap-v4"), "an amountIn at 2**128 must never produce a "
       + "uniswap-v4 entry with truncated data");
 
     const atCap = vd.buildProbe(TOKEN, vd.WETH_ADDR, 2n ** 128n - 1n);
-    ok(atCap.length === 26, "an amountIn one below 2**128 must still produce all 26 calls, got " + atCap.length);
+    ok(atCap.length === 27, "an amountIn one below 2**128 must still produce all 27 calls, got " + atCap.length);
     ok(atCap.filter((p) => p.id === "uniswap-v4").length === 4, "an amountIn one below 2**128 must keep "
       + "all four v4 keys");
 
@@ -5666,7 +5683,7 @@ console.log("[v4index] worker/v4index.js ok — decodeInitializeLog accepts a we
   for (const outAddr of [vd.WETH_ADDR, vd.USDC_ADDR]) {
     const got = vd.buildProbe(TOKEN, outAddr, amt);
     const want = expectedFor(outAddr);
-    ok(got.length === 26, "buildProbe with opts absent must still return exactly 26 items for stage " +
+    ok(got.length === 27, "buildProbe with opts absent must still return exactly 27 items for stage " +
       outAddr + ", got " + got.length);
     ok(JSON.stringify(got) === JSON.stringify(want),
       "buildProbe with opts absent must be byte-for-byte identical to the pre-change output for stage " + outAddr);
@@ -5731,7 +5748,7 @@ console.log("[v4 verdict wiring] VD_V4_STAGE_COUNTERS frozen with exactly the WE
   + "USDC entries; VD_V4_REAL_MAX=4; encodeV4QuoteExactInputSingleKey byte-matches ethers.Interface for a "
   + "non-zero-hooks key both ways of zeroForOne and refuses a foreign tokenIn/an amountIn at 2**128; "
   + "encodeV4QuoteExactInputSingle still emits today's exact bytes; buildProbe with opts absent (or an "
-  + "empty v4Keys) is byte-for-byte the pre-change 26-item output, rebuilt from VD_VENUES, not a pasted "
+  + "empty v4Keys) is byte-for-byte the pre-change 27-item output, rebuilt from VD_VENUES, not a pasted "
   + "blob; a real key is only appended when its counter is listed for that stage, never for an unrelated "
   + "counter, capped at VD_V4_REAL_MAX and always carrying id:\"uniswap-v4\"; and VD_POSITIVE_ONLY."
   + "V4_SINGLE stays true with uniswap-v4 still absent from GT_DEX_TO_VENUE's values");

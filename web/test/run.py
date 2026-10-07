@@ -1900,6 +1900,42 @@ check_cta_shadow_token()
 check_one_executor_address()
 check_dex_parity()
 check_landing_page()
+def check_stock_tokens():
+    """۷ اکتبر ۲۰۲۶ — سهام توکنیزه‌ی Coinbase روی Base در استخرهای Aerodrome
+    Slipstream با tickSpacing ۱۰ معامله می‌شوند. این نگهبان ثابت می‌کند:
+    ردیف aerodrome-cl عدد ۱۰ را دارد، ردیف قدیمی aerodrome-cl-v1 دست‌نخورده
+    مانده، و هر ده توکن با آدرسِ چک‌سام‌شده‌ی دقیق در BASE_TOKENS هستند."""
+    src = open(os.path.join(HERE, "..", "index.html"), encoding="utf-8").read()
+    def spacings(dex_id):
+        m = re.search(r'\{id:"%s",.*?tickSpacings:\[([0-9,\s]*)\]' % re.escape(dex_id), src, re.S)
+        assert m, "could not find the %s entry with tickSpacings in index.html" % dex_id
+        return [int(x) for x in m.group(1).split(",") if x.strip()]
+    got = spacings("aerodrome-cl")
+    assert got == [1, 10, 50, 100, 200, 2000], "aerodrome-cl tickSpacings must be exactly [1,10,50,100,200,2000], got %s" % got
+    got_v1 = spacings("aerodrome-cl-v1")
+    assert got_v1 == [1, 50, 100, 200, 2000], "aerodrome-cl-v1 tickSpacings must stay [1,50,100,200,2000], got %s" % got_v1
+    block = re.search(r"const BASE_TOKENS=\[(.*?)\n\];", src, re.S)
+    assert block, "could not find BASE_TOKENS in index.html"
+    toks = {m.group(1): (m.group(2), int(m.group(3))) for m in re.finditer(
+        r'\{symbol:"([^"]+)",name:"[^"]*",address:"([^"]+)",decimals:(\d+)', block.group(1))}
+    want = {
+        "AAPLc": "0xb200000000000000000000C2e324d24d7eEcd1fb",
+        "AMZNc": "0xb200000000000000000000d9192b6B456483C2E8",
+        "GOOGLc": "0xb2000000000000000000002D0BA3164cc74f58B7",
+        "METAc": "0xb2000000000000000000008bC8786B856E61707C",
+        "MSFTc": "0xB200000000000000000000Ab99cFa739E253872B",
+        "MSTRc": "0xb2000000000000000000004884b426556b92883d",
+        "NVDAc": "0xb20000000000000000000078ee7ce2fE4908108C",
+        "SNDKc": "0xb200000000000000000000397293Cb8cda9a10c5",
+        "SPCXc": "0xb2000000000000000000007b9fcbd005511aCBd5",
+        "TSLAc": "0xb2000000000000000000001e800a7f5189430cD0",
+    }
+    for sym, addr in want.items():
+        assert sym in toks, "stock token %s is missing from BASE_TOKENS" % sym
+        assert toks[sym] == (addr, 8), "stock token %s must be %s with 8 decimals, got %s" % (sym, addr, toks[sym])
+    print("[stock tokens] aerodrome-cl has tickSpacing 10, v1 unchanged, all %d stock tokens present with 8 decimals and exact addresses" % len(want))
+
+
 def check_wallet_copy_address():
     """۲۲ سپتامبر — مالک خواست همان «Copy address»ِ منوی والتِ صفحه‌ی جفت‌ها
     در اپ هم باشد: داخلِ #walletPop، *پیش از* دکمه‌ی قطع اتصال، و با یک
@@ -1933,6 +1969,7 @@ def check_wallet_copy_address():
 check_pairs_footer_link()
 check_pairs_page()
 check_wallet_copy_address()
+check_stock_tokens()
 
 
 # ۶ اکتبر — «Flow» از نوار به منوی Markets رفت و «Portfolio» به منوی والت؛ هیچ‌کدام دیگر تبِ مستقیم نیستند.

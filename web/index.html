@@ -2384,10 +2384,13 @@ const DEXES=[
   // getPool فکتوری‌اش هر دو *تابع* متفاوتی‌اند (سلکتور فرق دارد)، نه فقط
   // مقدار پارامتر. هنوز core:true نیست — کاندید است تا چهار دروازه را رد کند.
   // فکتوری‌اش GT id «aerodrome-slipstream-3» است (کارخانه‌ی جدید).
+  // tickSpacing ۱۰ جایی است که سهام توکنیزه‌ی Coinbase روی Base معامله می‌شوند.
+  // فکتوری ۸۰، ۱۵۰ و ۵۰۰ را هم لیست می‌کند ولی عمداً هنوز اضافه‌شان نکرده‌ایم:
+  // هر tickSpacing اضافه تعداد فراخوانی‌های کوت را چندبرابر می‌کند.
   {id:"aerodrome-cl",name:"Aerodrome Slipstream",cls:"c",kind:KIND.SLIPSTREAM,
    router:"0x698Cb2b6dd822994581fEa6eA4Fc755d1363A92F",
    factory:"0xf8f2eB4940CFE7d13603DDDD87f123820Fc061Ef",
-   quoter:"0x514c8B5f54112481E28028F1166Bd78501089259",tickSpacings:[1,50,100,200,2000]},
+   quoter:"0x514c8B5f54112481E28028F1166Bd78501089259",tickSpacings:[1,10,50,100,200,2000]},
   // کارخانه‌ی قدیمیِ Slipstream — GT id «aerodrome-slipstream» (کوترش در
   // ورکر aerodrome-cl-v1 است)، همان استخری که استخر ۸.۸ میلیون دلاریِ
   // WETH/USDC ts100 در آن نشسته. آدرس‌ها ۲۴ سپتامبر ۲۰۲۶ روی زنجیره تأیید
@@ -2476,6 +2479,21 @@ const BASE_TOKENS=[
   {symbol:"VIRTUAL",name:"Virtuals Protocol",address:"0x0b3e328455c4059EEb9e3f84b5543F74E24e7E1b",decimals:18},
   {symbol:"MORPHO",name:"Morpho",address:"0xBAa5CC21fd487B8Fcc2F632f3F4E8D37262a0842",decimals:18},
   {symbol:"DEGEN",name:"Degen",address:"0x4ed4E862860beD51a9570b96d89aF5E1B0Efefed",decimals:18},
+
+  /* ده توکنِ زیر هم فقط در *فهرست انتخاب* هستند، نه توکن مرجع: سهام توکنیزه‌ی
+     Coinbase روی Base (B20). نماد، نام و اعشار هر کدام ۷ اکتبر ۲۰۲۶ از خود
+     قراردادها خوانده شد؛ همه ۸ اعشار و ERC-20 ساده بدون کارمزد انتقال‌اند و
+     در استخرهای Aerodrome Slipstream با tickSpacing ۱۰ معامله می‌شوند. */
+  {symbol:"AAPLc",name:"Apple Inc.",address:"0xb200000000000000000000C2e324d24d7eEcd1fb",decimals:8},
+  {symbol:"AMZNc",name:"Amazon.com Inc.",address:"0xb200000000000000000000d9192b6B456483C2E8",decimals:8},
+  {symbol:"GOOGLc",name:"Alphabet Inc.",address:"0xb2000000000000000000002D0BA3164cc74f58B7",decimals:8},
+  {symbol:"METAc",name:"Meta Platforms Inc.",address:"0xb2000000000000000000008bC8786B856E61707C",decimals:8},
+  {symbol:"MSFTc",name:"Microsoft Corporation",address:"0xB200000000000000000000Ab99cFa739E253872B",decimals:8},
+  {symbol:"MSTRc",name:"Strategy Inc.",address:"0xb2000000000000000000004884b426556b92883d",decimals:8},
+  {symbol:"NVDAc",name:"NVIDIA Corporation",address:"0xb20000000000000000000078ee7ce2fE4908108C",decimals:8},
+  {symbol:"SNDKc",name:"Sandisk Corporation",address:"0xb200000000000000000000397293Cb8cda9a10c5",decimals:8},
+  {symbol:"SPCXc",name:"Space Exploration Technologies Corp.",address:"0xb2000000000000000000007b9fcbd005511aCBd5",decimals:8},
+  {symbol:"TSLAc",name:"Tesla Inc.",address:"0xb2000000000000000000001e800a7f5189430cD0",decimals:8},
 ];
 const ABI={
   multicall3:["function aggregate3((address target,bool allowFailure,bytes callData)[] calls) payable returns ((bool success,bytes returnData)[])"],
