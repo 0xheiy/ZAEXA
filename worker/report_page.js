@@ -1,3 +1,4 @@
+import { sellReturnMedian } from "./report.js";
 /* worker/report_page.js — صفحه‌ی HTMLِ «Exit Report» (GET /report و /report/<تاریخ>).
    قالب و فونت‌ها از web/landing.html آمده‌اند (بلوکِ GENERATED پایین، با اسکریپتِ
    یک‌باره ساخته شده — دست‌نویس نیست)؛ web/ فایلِ تازه نمی‌گیرد چون خطِ Build در
@@ -152,11 +153,9 @@ function statsOf(rows) {
   const base = rows.filter((r) => r.chain === "base");
   const sol = rows.filter((r) => r.chain === "solana");
   const bs = base.filter((r) => r.v === "sell");
-  // 🔴 فقط 0 < ret ≤ 100: بالاتر از ۱۰۰٪ یعنی قیمتِ فید و استخر هم‌نظر نبوده‌اند، نه سود.
-  const rets = bs.map((r) => r.ret).filter((x) => typeof x === "number" && Number.isFinite(x) && x > 0 && x <= 100).sort((a, b) => a - b);
-  const med = rets.length
-    ? (rets.length % 2 ? rets[(rets.length - 1) / 2] : (rets[rets.length / 2 - 1] + rets[rets.length / 2]) / 2)
-    : null;
+  // 🔴 میانه فقط از sellReturnMedian (worker/report.js) — همان تابعی که متنِ .txt می‌سازد؛
+  // ۷ اکتبر دو محاسبه‌ی جدا برای ۴ اکتبر ۹۸٪ و ۱۰۱٪ دادند.
+  const med = sellReturnMedian(rows);
   const nos = base.filter((r) => r.v === "nosell");
   return {
     b: base.length, bSell: bs.length, bNo: nos.length,

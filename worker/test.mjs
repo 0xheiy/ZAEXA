@@ -14196,9 +14196,16 @@ function stripAllowedWording(t) {
        "[report page symbol] the client labels a symbol-less row with the short address and never builds '$' + '?'");
 
     // ret > 100: «—» + یادداشت در کلاینت، و خارج از میانه.
-    const rr = [mkRow({ address: mkA(601), ret: 140 }), mkRow({ address: mkA(602), ret: 98 }), mkRow({ address: mkA(603), ret: 96 })];
+    // ۷ اکتبر: میانه‌ی صفحه و متن از یک تابع (sellReturnMedian) — بالای ۱۰۰ بیرون، حداقل ۵، پایینیِ دو وسطی.
+    const rr = [140, 98, 96, 101.5, 90, 94, 97, 92].map((v, i) => mkRow({ address: mkA(601 + i), ret: v }));
     const hR = await (await GET("/report/" + SOLDAY, { ASSETS, ZX_KV: mkKv({ ["report:" + SOLDAY]: docOf(SOLDAY, rr) }) })).text();
-    ok(hR.includes("Median quote returned 97% of $100"), "[report page ret] the median ignores ret 140: median of 98 and 96 is 97, got " + ((/Median quote returned [^<]*/.exec(hR) || [])[0]));
+    ok(hR.includes("Median quote returned 94% of $100"), "[report page ret] the median ignores 140 and 101.5 and takes the lower middle of 90,92,94,96,97,98 = 94, got " + ((/Median quote returned [^<]*/.exec(hR) || [])[0]));
+    const tR = await (await GET("/report/" + SOLDAY + ".txt", { ASSETS, ZX_KV: mkKv({ ["report:" + SOLDAY]: docOf(SOLDAY, rr) }) })).text();
+    const pageMed = (/Median quote returned (\d+)%/.exec(hR) || [])[1], textMed = (/came back at (\d+)% for the median/.exec(tR) || [])[1];
+    ok(pageMed !== undefined && pageMed === textMed, "[report median parity] /report and /report/<date>.txt must print the same median: page=" + pageMed + " text=" + textMed);
+    const hFew = await (await GET("/report/" + SOLDAY, { ASSETS, ZX_KV: mkKv({ ["report:" + SOLDAY]: docOf(SOLDAY, rr.slice(0, 4)) }) })).text();
+    ok(!/Median quote returned/.test(hFew), "[report page ret] fewer than 5 returns at or under 100 → no median on the page (same rule as the text)");
+    console.log("[report median parity] page and .txt print the same median (" + pageMed + "%) from sellReturnMedian: >100 dropped, 5+ values, lower middle");
     ok(islandOf(hR).rows[0].ret === 140, "[report page ret] the island keeps the raw ret (display decides)");
     ok(/r\.ret>100\)\{ td\.appendChild\(document\.createTextNode\('—'\)\); td\.appendChild\(el\('span','retnote','price feed and pool disagreed'\)\)/.test(csrc),
        "[report page ret] the client shows '—' with the note 'price feed and pool disagreed' for ret > 100");
@@ -14223,7 +14230,9 @@ function stripAllowedWording(t) {
     ok(html.includes("Exit Report, <em>14 Sep</em>"), "[report page meta] h1 carries the short date");
     ok(html.includes("6 new Base tokens were checked. 2 of the quoted tokens were re-checked 1–3 hours later. 1 had an empty pool.") && !/Solana/.test(html.slice(html.indexOf('id="lede"'), html.indexOf("</p>", html.indexOf('id="lede"')))),
        "[report page meta] lede states B, F and E (14 Sep predates Solana, so it names Base only)");
-    ok(html.includes("Median quote returned 99% of $100") || html.includes("Median quote returned 98% of $100"), "[report page meta] median sub on the quoted tile");
+    // ۷ اکتبر: این روز کمتر از ۵ برگشت دارد، پس مثلِ متنِ .txt هیچ میانه‌ای نمی‌نویسد (sellReturnMedian).
+    const txtPast = await (await GET("/report/" + PAST + ".txt", envPage)).text();
+    ok(!/Median quote returned/.test(html) && !/for the median of them/.test(txtPast), "[report page meta] under 5 returns: neither the tile nor the .txt prints a median");
     ok(html.includes("Empty pool: 1 · Sell reverts: 1"), "[report page meta] causes in plain words");
     ok(html.includes("of 2 quoted tokens re-checked 1–3 h later"), "[report page meta] follow-up tile sub");
     ok(html.includes("<title>Exit Report, 14 Sep 2026 — Zaexa</title>"), "[report page meta] title");

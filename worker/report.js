@@ -1250,6 +1250,30 @@ function reportTextSymbolLabel(row) {
    خودِ گیتِ opts.solana اینجا دست‌نخورده می‌ماند: پیش‌فرض (بدونِ opts، یا
    {solana:false}) همچنان بایت‌به‌بایت همان چیزی است که یک سندِ بدونِ
    ردیف‌های سولانا تولید می‌کرد — فقط کالرِ صریح می‌تواند بلوک را روشن کند. */
+/* میانه‌ی درصدِ برگشتِ فروشِ ۱۰۰ دلاری — تنها منبعِ این عدد، هم برای متنِ
+   /report/<date>.txt و هم برای کاشیِ صفحه‌ی /report/<date>.
+   ۷ اکتبر: صفحه برگشت‌های بالای ۱۰۰٪ را کنار می‌گذاشت و میانگینِ دو وسطی را
+   می‌گرفت، متن هیچ‌کدام را نه؛ برای ۴ اکتبر صفحه ۹۸٪ و متن ۱۰۱٪ نوشت.
+   قاعده‌ی واحد:
+   - فقط ردیف‌های Base با checkKindِ همان‌جدول و آدرسِ درست‌شکل، با حکمِ sell؛
+   - فقط 0 < ret ≤ 100 — بالاتر از ۱۰۰ یعنی فیدِ قیمت و استخر هم‌نظر نبوده‌اند، نه سود؛
+   - کمتر از ۵ مقدار → null (هیچ عددی منتشر نمی‌شود)؛
+   - تعدادِ زوج → عضوِ پایین‌ترِ دو وسطی، بدونِ میانگین‌گیری، تا عدد همیشه یکی از
+     همان برگشت‌های واقعی باشد. */
+export function sellReturnMedian(rows) {
+  if (!Array.isArray(rows)) return null;
+  const vals = rows
+    .filter((r) => r && typeof r === "object" && r.chain === "base" &&
+      r.checkKind === CHECK_KIND_BY_CHAIN.base &&
+      typeof r.address === "string" && REPORT_TEXT_ADDR_OK.test(r.address) &&
+      r.v === "sell" && typeof r.ret === "number" && Number.isFinite(r.ret) &&
+      r.ret > 0 && r.ret <= 100)
+    .map((r) => r.ret)
+    .sort((a, b) => a - b);
+  if (vals.length < 5) return null;
+  return vals[Math.floor((vals.length - 1) / 2)];
+}
+
 export function reportText(doc, opts) {
   try {
     if (!doc || typeof doc !== "object" || typeof doc.date !== "string" ||
@@ -1349,16 +1373,10 @@ export function reportText(doc, opts) {
     lines.push(flagged + " had no sell route quoted.");
     lines.push(quoted + " had a sell route quoted.");
 
-    // میانه‌ی درصدِ برگشت — فقط وقتی حداقل ۵ ردیفِ همین مجموعه‌ی فیلترشده
-    // ret عددی دارند؛ کمتر از ۵ یعنی متن بایت‌به‌بایت همان چیزی می‌ماند که
-    // پیش از این تغییر بود. برای تعدادِ زوج، عضوِ پایین‌ترِ دو وسطی انتخاب
-    // می‌شود — بدونِ میانگین‌گیری، تا نتیجه همیشه یکی از همان اعدادِ واقعی باشد.
-    const retValues = rows
-      .filter((r) => r.v === "sell" && typeof r.ret === "number" && Number.isFinite(r.ret))
-      .map((r) => r.ret)
-      .sort((a, b) => a - b);
-    if (retValues.length >= 5) {
-      const median = retValues[Math.floor((retValues.length - 1) / 2)];
+    // میانه‌ی درصدِ برگشت — از همان تابعِ مشترکی که صفحه‌ی /report هم صدا می‌زند
+    // (sellReturnMedian)، تا متن و صفحه هرگز دو عددِ متفاوت برای یک روز ندهند.
+    const median = sellReturnMedian(rows);
+    if (median != null) {
       lines.push("A $100 sell quote came back at " + Math.round(median) + "% for the median of them.");
     }
 
