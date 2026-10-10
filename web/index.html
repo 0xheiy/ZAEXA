@@ -1929,13 +1929,7 @@ try{(function(){
       <span class="grow"></span>
       <span class="mkt" id="stkMkt"><i></i><span id="stkMktTxt"></span></span>
     </header>
-    <p class="lede">Tokenized shares issued by Coinbase, each backed 1:1 by a real share. Trade them on-chain any time against USDC; the reference price comes from Chainlink and moves only while the US market is open.</p>
-    <!-- روی سولانا: سهامِ توکنیِ کوین‌بیس فقط روی Base است؛ جدول پنهان و این بلوک پیدا. -->
-    <div class="empty intro" id="stkSolNote" hidden>
-      <span class="eTtl">US stocks trade on Base</span>
-      <p>Coinbase's tokenized stocks live on Base. Switch the network to Base to see prices and trade them.</p>
-      <button class="chip solid" id="stkToBase" type="button">Switch to Base</button>
-    </div>
+    <p class="lede" id="stkLede">Tokenized shares issued by Coinbase, each backed 1:1 by a real share. Trade them on-chain any time against USDC; the reference price comes from Chainlink and moves only while the US market is open.</p>
     <table id="stkTable">
       <thead><tr><th>Stock</th><th>Price</th><th class="colRef">Reference</th><th class="colVol">Volume 24h</th><th></th></tr></thead>
       <tbody>
@@ -1952,7 +1946,7 @@ try{(function(){
       </tbody>
     </table>
   </section>
-  <p class="note">Prices are live quotes from the deepest Aerodrome pool for $100. Issuer terms: not offered to US persons. Not investment advice.</p>
+  <p class="note" id="stkNote">Prices are live quotes from the deepest Aerodrome pool for $100. Issuer terms: not offered to US persons. Not investment advice.</p>
 </div>
 
 <!-- =====================================================================
@@ -5215,7 +5209,8 @@ function setChain(next){
   if(view==="swap"){if(next==="solana")solScheduleQuote();else scheduleQuote();}
   if(view==="folio")renderFolio();
   if(view==="flow"){paintFlowToken();renderFlow();}
-  if(view==="stocks"){stkChainPaint();if(next==="base"){stocksStop();stocksStart();}}
+  // تعویض زنجیره: توقف، دادهٔ زنجیرهٔ قبلی پاک، نقاشی دوباره و شروع (stkSeq پاسخ‌های کهنه را می‌اندازد)
+  if(view==="stocks"){stocksStop();stkResetData();stkChainPaint();stocksStart();}
 }
 function closeSrcMenu(focusBack){
   $("srcPop").classList.remove("on");
@@ -7324,7 +7319,7 @@ function startBalanceWatch(){
 }
 document.addEventListener("visibilitychange",()=>{if(!document.hidden&&account)refreshBalances();});
 // نمای Stocks در تبِ پنهان چیزی نمی‌خواند؛ وقتی تب دوباره دیده شد و هنوز داده‌ای نیامده، همان لحظه بخوان (نه ۶۰ ثانیه بعد).
-document.addEventListener("visibilitychange",()=>{if(!document.hidden&&stkActive&&view==="stocks"&&activeChain==="base"&&!stkData.loaded)stocksTick();});
+document.addEventListener("visibilitychange",()=>{if(!document.hidden&&stkActive&&view==="stocks"&&!stkData.loaded)stocksTick();});
 addEventListener("focus",()=>{if(account)refreshBalances();});
 async function readFee(){
   try{
@@ -9928,9 +9923,25 @@ const STK=[
   {sym:"SPCXc",name:"SpaceX",feed:"0x6A634B235903C4ad6376892180d6fF8612e3Fa68",pool:"0x0bf58fe0fac935ac69595c19b12ba0d75e3f8c0e"},
   {sym:"TSLAc",name:"Tesla",feed:"0xFaf869185383a24F8cb00e27BdA6b63B9905DCb4",pool:"0x469337fdcc5e8f38e2e4b670b04f57865d13a7bb"},
 ];
+// xStocks از Backed روی سولانا؛ mintها ۱۰ اکتبر با DefiLlama و GeckoTerminal تأیید شد (۸ رقم اعشار).
+// قیمتِ مرجع = همان فیدِ Chainlink همین سهم روی Base.
+const STK_SOL=[
+  {sym:"AAPLx",base:"AAPLc",mint:"XsbEhLAtcf6HdfpFZ5xEMdqW8nfAvcsP5bdudRLJzJp"},
+  {sym:"AMZNx",base:"AMZNc",mint:"Xs3eBt7uRfJX8QUs4suhyU8p2M6DoUDrJyWBa8LLZsg"},
+  {sym:"GOOGLx",base:"GOOGLc",mint:"XsCPL9dNWBMvFtTmwcCA5v3xWPSMEBCszbQdiLLq6aN"},
+  {sym:"METAx",base:"METAc",mint:"Xsa62P5mvPszXL1krVUnU5ar38bBSVcWAB6fmPCo5Zu"},
+  {sym:"MSFTx",base:"MSFTc",mint:"XspzcW1PRtgf6Wj92HCiZdjzKCyFekVD8P5Ueh3dRMX"},
+  {sym:"MSTRx",base:"MSTRc",mint:"XsP7xzNPvEHS1m6qfanPUGjNmdnmsLKEoNAnHjdxxyZ"},
+  {sym:"NVDAx",base:"NVDAc",mint:"Xsc9qvGR1efVDFGLrVsmkzv3qi45LTBjeUKSPmx9qEh"},
+  {sym:"SNDKx",base:"SNDKc",mint:"Xswbpc8UqU6e1j9QZEWCjBMjyvz4twqD7PCy6j2e7jj"},
+  {sym:"SPCXx",base:"SPCXc",mint:"Xs3oZwbHvqis4NYcf4YKWmEia2eC84wSiVrcYcTqpH8"},
+  {sym:"TSLAx",base:"TSLAc",mint:"XsDoVfqeBukxuZHWhdvWHBhgEHjGNst4MLodqsJHzoB"},
+];
 const STK_FEED_ABI=["function latestRoundData() view returns (uint80 roundId,int256 answer,uint256 startedAt,uint256 updatedAt,uint80 answeredInRound)"];
 const STK_REFRESH_MS=60000,STK_RETRY_MS=15000;
-let stkData={px:{},ref:{},vol:{},chg:{},refAt:0,gtOk:false,loaded:false,failed:false};
+const stkFresh=()=>({px:{},ref:{},vol:{},chg:{},logo:{},refAt:0,gtOk:false,loaded:false,failed:false});
+let stkData=stkFresh(),stkDataChain="base";
+function stkResetData(){stkData=stkFresh();stkDataChain=activeChain;}
 let stkSeq=0,stkRun=0,stkTimer=0,stkFeedIface=null;
 const stkUsd=n=>"$"+n.toLocaleString("en-US",{minimumFractionDigits:2,maximumFractionDigits:2});
 function stkVol(v){
@@ -10053,45 +10064,150 @@ async function stocksLoad(){
   await Promise.all([chainP,gtP]);
   return !gotAny;
 }
+// سولانا: قیمت و حجم از GeckoTerminal، تغییرِ ۲۴ساعته از استخرِ برتر، مرجع از فیدِ Chainlink روی Base (دستهٔ JSON-RPC دستی؛ بدون ethers).
+const stkNum=x=>(x==null||x==="")?NaN:Number(x);
+// اندازه‌گیری روی سایت زنده (۱۰ اکتبر): دسته‌ی JSON-RPC روی publicnode «Failed to fetch»، روی meowrpc خطای ۴۰۰ غیر JSON و روی drpc
+// آرایه‌ای از خطاها (HTTP 500) می‌دهد؛ تک‌درخواست‌ها روی publicnode و drpc ۱۰ از ۱۰ جواب می‌دهند. پس هر فید جدا و موازی؛ فقط فیدهای جامانده به اندپوینت بعدی می‌روند.
+async function stkRefBatch(){
+  const ref={};let refAt=0,missing=STK.map((s,i)=>i);
+  for(const url of CHAIN.rpcs){
+    if(!missing.length)break;
+    let live=true;
+    const one=async i=>{
+      try{
+        const r=await fetch(url,{method:"POST",headers:{"Content-Type":"application/json"},
+          body:JSON.stringify({jsonrpc:"2.0",id:i,method:"eth_call",params:[{to:STK[i].feed,data:"0xfeaf968c"},"latest"]})});
+        const j=await r.json();
+        const h=j&&!Array.isArray(j)&&j.result;
+        if(!live||typeof h!=="string"||!/^0x[0-9a-fA-F]{320,}$/.test(h))return;
+        const w=k=>BigInt("0x"+h.slice(2+64*k,2+64*(k+1)));
+        const ans=w(1);
+        if(ans>=(1n<<255n))return;
+        const a=Number(ans)/1e8,u=Number(w(3));
+        if(a>0&&isFinite(a)){ref[STK[i].sym]=a;if(u>refAt)refAt=u;}
+      }catch{}
+    };
+    try{await withTimeout(Promise.all(missing.map(one)),6000);}catch{}
+    live=false;
+    missing=missing.filter(i=>!(STK[i].sym in ref));
+  }
+  return Object.keys(ref).length?{ref,refAt}:null;
+}
+async function stocksLoadSol(){
+  const seq=++stkSeq;
+  const byMint=new Map(STK_SOL.map(s=>[s.mint,s]));
+  const gtP=(async()=>{
+    const j=await gtJson(`${GT}/networks/solana/tokens/multi/${STK_SOL.map(s=>s.mint).join(",")}`);
+    if(seq!==stkSeq)return;
+    const px={},vol={},logo={},pools=[],poolOf={};
+    for(const row of ((j&&j.data)||[])){
+      const a=row&&row.attributes||{};
+      const s=byMint.get(a.address);
+      if(!s)continue;
+      const p=stkNum(a.price_usd),v=stkNum(a.volume_usd&&a.volume_usd.h24);
+      if(p>0&&isFinite(p))px[s.base]=p;
+      if(isFinite(v))vol[s.base]=v;
+      if(typeof a.image_url==="string"&&okLogo(a.image_url))logo[s.base]=a.image_url;
+      const tp=row&&row.relationships&&row.relationships.top_pools&&row.relationships.top_pools.data;
+      const id=tp&&tp[0]&&tp[0].id;
+      if(typeof id==="string"){const pa=id.replace(/^solana_/,"");pools.push(pa);poolOf[pa]=s.base;}
+    }
+    stkData.px=px;stkData.vol=vol;stkData.logo=logo;stkData.gtOk=Object.keys(vol).length>0;
+    stkPaint();stkPaintLogos();
+    if(!pools.length)return;
+    const k=await gtJson(`${GT}/networks/solana/pools/multi/${pools.join(",")}`);
+    if(seq!==stkSeq)return;
+    const chg={};
+    for(const row of ((k&&k.data)||[])){
+      const a=row&&row.attributes||{};
+      const base=poolOf[String(row&&row.id||a.address||"").replace(/^solana_/,"")];
+      const c=stkNum(a.price_change_percentage&&a.price_change_percentage.h24);
+      if(base&&isFinite(c))chg[base]=c;
+    }
+    stkData.chg=chg;stkPaint();
+  })().catch(()=>{});
+  const refP=stkRefBatch().then(r=>{
+    if(seq!==stkSeq||!r)return;
+    stkData.ref=r.ref;stkData.refAt=r.refAt;stkPaint();
+  }).catch(()=>{});
+  await Promise.all([gtP,refP]);
+  if(seq!==stkSeq)return false;
+  const gotAny=Object.keys(stkData.px).length>0||Object.keys(stkData.ref).length>0;
+  stkData.loaded=true;stkData.failed=!gotAny;
+  stkPaint();
+  return !gotAny;
+}
 async function stocksTick(){
   const run=stkRun;
   clearTimeout(stkTimer);stkTimer=0;
   let failed=false;
-  if(!document.hidden)failed=await stocksLoad();
+  if(!document.hidden)failed=await(activeChain==="solana"?stocksLoadSol():stocksLoad());
   if(run!==stkRun||view!=="stocks")return;
   stkTimer=setTimeout(stocksTick,failed?STK_RETRY_MS:STK_REFRESH_MS);
 }
 // setView هنگامِ نوشتنِ hash یک بار دیگر از hashchange صدا می‌خورد؛ stkActive نمی‌گذارد همان بازشدن دو دسته‌ی multicall بفرستد.
-let stkActive=false,stkLogosDone=false;
-/* ۱۰ اکتبر — مالک: لوگوها لوگوی خودِ سهام باشند. همان مسیرِ لوگوی توکن‌ها (paintAvatar → tokenLogo →
-   GeckoTerminal image_url، دسته‌ای و ماندگار در zaexa.logo.v1)؛ نبودِ لوگو یعنی همان حروف. منبعِ تازه‌ای نیست. */
+let stkActive=false,stkLogosDone=false,stkLogoGen=0;
+/* ۱۰ اکتبر — مالک: لوگوها لوگوی خودِ سهام باشند. Base: همان مسیرِ لوگوی توکن‌ها (tokenLogo →
+   GeckoTerminal image_url، دسته‌ای و ماندگار در zaexa.logo.v1). سولانا: image_url همان پاسخِ tokens/multi.
+   نبودِ لوگو یعنی همان حروف. با هر تعویضِ زنجیره تصویرهای قبلی برداشته و نسل عوض می‌شود. */
+function stkAddLogo(av,url,gen){
+  if(gen!==stkLogoGen||!url||!okLogo(url)||av.dataset.logo===url)return;
+  av.dataset.logo=url;
+  const img=new Image();img.alt="";img.loading="lazy";
+  img.onload=()=>img.classList.add("on");img.onerror=()=>img.remove();
+  img.src=url;av.appendChild(img);
+}
 function stkPaintLogos(){
-  if(stkLogosDone)return;stkLogosDone=true;
+  const gen=stkLogoGen,sol=activeChain==="solana";
+  if(!sol){if(stkLogosDone)return;stkLogosDone=true;}
   document.querySelectorAll("#stkTable tr[data-sym]").forEach(tr=>{
-    const t=BASE_TOKENS.find(x=>x.symbol===tr.dataset.sym),av=tr.querySelector(".av");
-    if(!t||!av)return;
+    const av=tr.querySelector(".av");
+    if(!av)return;
+    if(sol){stkAddLogo(av,stkData.logo[tr.dataset.sym],gen);return;}
+    const t=BASE_TOKENS.find(x=>x.symbol===tr.dataset.sym);
+    if(!t)return;
     // نه paintAvatar: آن حروفِ گرادیانیِ همین کارت را با رنگِ بذری عوض می‌کند. فقط تصویر روی همان حروف می‌نشیند.
-    tokenLogo(t).then(url=>{
-      if(!url||!okLogo(url))return;
-      const img=new Image();img.alt="";img.loading="lazy";
-      img.onload=()=>img.classList.add("on");img.onerror=()=>img.remove();
-      img.src=url;av.appendChild(img);
-    });
+    tokenLogo(t).then(url=>{if(activeChain==="base")stkAddLogo(av,url,gen);});
   });
 }
-// سولانا: سهامِ توکنی فقط روی Base است — جدول پنهان، بلوکِ «Switch to Base» پیدا، و هیچ درخواستی.
+const STK_LEDE_BASE="Tokenized shares issued by Coinbase, each backed 1:1 by a real share. Trade them on-chain any time against USDC; the reference price comes from Chainlink and moves only while the US market is open.";
+const STK_NOTE_BASE="Prices are live quotes from the deepest Aerodrome pool for $100. Issuer terms: not offered to US persons. Not investment advice.";
+const STK_LEDE_SOL="Tokenized shares issued by Backed (xStocks), each backed 1:1 by a real share. Trade them on-chain any time against USDC; the reference price comes from Chainlink and moves only while the US market is open.";
+const STK_NOTE_SOL="Prices are the latest on-chain trade prices from GeckoTerminal; your swap quote comes from Jupiter. Issuer terms: not offered to US persons. Not investment advice.";
+// متن‌ها، نمادِ هر ردیف و لوگوها را بر اساس زنجیره می‌کشد؛ ردیف‌ها با data-sym (نمادِ Base) کلید می‌خورند.
 function stkChainPaint(){
   const sol=activeChain==="solana";
-  $("stkSolNote").hidden=!sol;$("stkTable").hidden=sol;$("stkMkt").hidden=sol;
+  $("stkLede").textContent=sol?STK_LEDE_SOL:STK_LEDE_BASE;
+  $("stkNote").textContent=sol?STK_NOTE_SOL:STK_NOTE_BASE;
+  ++stkLogoGen;stkLogosDone=false;
+  document.querySelectorAll("#stkTable tr[data-sym]").forEach(tr=>{
+    const e=STK_SOL.find(x=>x.base===tr.dataset.sym),b=tr.querySelector(".nm b"),av=tr.querySelector(".av");
+    if(b)b.textContent=sol&&e?e.sym:tr.dataset.sym;
+    if(av){av.querySelectorAll("img").forEach(i=>i.remove());delete av.dataset.logo;}
+  });
 }
-function stocksStart(){if(stkActive)return;stkActive=true;stkChainPaint();if(activeChain!=="base")return;stkPaintLogos();stkPaint();stocksTick();}
+function stocksStart(){
+  if(stkActive)return;stkActive=true;
+  if(stkDataChain!==activeChain)stkResetData();
+  stkChainPaint();stkPaintLogos();stkPaint();stocksTick();
+}
 function stocksStop(){stkActive=false;++stkRun;++stkSeq;clearTimeout(stkTimer);stkTimer=0;}
 // «Trade»: همان کاری که انتخابگرِ توکن می‌کند — USDC → سهم، مبلغ خالی، فوکوس روی «You pay».
-function stocksTrade(sym){
+async function stocksTrade(sym){
+  if(activeChain==="solana"){
+    const e=STK_SOL.find(x=>x.base===sym);
+    if(!e)return;
+    // همان مسیرِ solApplyShare: توکن، سپس مرجعِ USDC، سپس سمتِ buy (solOnSideChange مبلغ را پاک می‌کند)
+    solAppDefaulted=true;
+    setView("swap");
+    await solAppLoadToken(e.mint);
+    await solSetReference(SOL_APP_TOKENS.USDC);
+    solSide="buy";solOnSideChange();
+    $("solAmt").focus();
+    return;
+  }
   const t=BASE_TOKENS.find(x=>x.symbol===sym),usdc=tokenBySymbol("USDC");
   if(!E||!t||!usdc)return;
-  if(activeChain==="solana")setChain("base");
-  if(activeChain==="solana")return;     // setChain می‌تواند صفحه را بارگذاری مجدد کند
   hideSwapDone();
   tokenIn=usdc;tokenOut=t;mode="exactIn";
   $("amtIn").value="";$("amtOut").value="";
@@ -10102,7 +10218,6 @@ function stocksTrade(sym){
   refreshAllowance().then(scheduleQuote);
   $("amtIn").focus();
 }
-$("stkToBase").addEventListener("click",()=>setChain("base"));
 $("stkTable").addEventListener("click",e=>{
   const b=e.target.closest&&e.target.closest(".trade");
   if(b)stocksTrade(b.dataset.sym);

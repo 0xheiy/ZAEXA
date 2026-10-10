@@ -4463,7 +4463,7 @@ STK_ROWS_JS = """() => [...document.querySelectorAll('#view-stocks tr[data-sym]'
     trade: tr.querySelector('.trade').textContent }))"""
 
 
-async def stk_open(b, vw, vh, scheme, errs, cfg=None, hash_="#stocks", clock_ms=None, init_extra=None):
+async def stk_open(b, vw, vh, scheme, errs, cfg=None, hash_="#stocks", clock_ms=None, init_extra=None, routes=None):
     """صفحه‌ی اپ با فیکسچر؛ pg.on('pageerror') به errs می‌ریزد (خطای ناخواسته = شکست)."""
     ctx = await b.new_context(viewport={"width": vw, "height": vh}, color_scheme=scheme)
     pg = await ctx.new_page()
@@ -4472,6 +4472,8 @@ async def stk_open(b, vw, vh, scheme, errs, cfg=None, hash_="#stocks", clock_ms=
     # شبکه با «URL scheme "file" is not supported» لاگ می‌کند. این خطا از هارنس است نه از نمای Stocks؛ فقط همین متن نادیده می‌ماند.
     pg.on("console", lambda m: errs.append("CONSOLE %s" % m.text)
           if m.type == "error" and 'URL scheme "file" is not supported' not in m.text else None)
+    for pat, handler in (routes or []):
+        await ctx.route(pat, handler)
     await pg.add_init_script(STK_INIT_JS % _stkjson.dumps(cfg or stk_cfg()))
     if init_extra:
         await pg.add_init_script(init_extra)
@@ -4488,6 +4490,414 @@ async def stk_wait_loaded(pg, vol=True):
         await pg.wait_for_function(
             "() => document.querySelector('#view-stocks tr[data-sym=\"TSLAc\"] .colVol').textContent !== '—'", timeout=20000)
     await pg.wait_for_timeout(150)
+
+
+# =====================================================================
+# ۱۰ اکتبر — سهامِ آمریکا روی سولانا (xStocks از Backed) داخلِ همان نمای #stocks.
+# فیکسچر جدا از STK_INIT_JS است: فقط fetch را (بیرونی‌ترین لایه، حتی بعد از استاب و پچِ ethers) می‌پوشاند و
+# سه نوع درخواست را می‌شمارد: tokens/multi با ده mint، pools/multi، و دسته‌ی JSON-RPC به فیدهای Chainlink روی Base.
+# مقدارهای انتظار در پایتون و مستقل از کدِ صفحه محاسبه می‌شوند؛ mintها دستی و جدا از index.html نوشته شده‌اند.
+# =====================================================================
+import hashlib as _stkhash
+
+STK_SOL_EXPECT = [
+    ("AAPLx", "AAPLc", "XsbEhLAtcf6HdfpFZ5xEMdqW8nfAvcsP5bdudRLJzJp"),
+    ("AMZNx", "AMZNc", "Xs3eBt7uRfJX8QUs4suhyU8p2M6DoUDrJyWBa8LLZsg"),
+    ("GOOGLx", "GOOGLc", "XsCPL9dNWBMvFtTmwcCA5v3xWPSMEBCszbQdiLLq6aN"),
+    ("METAx", "METAc", "Xsa62P5mvPszXL1krVUnU5ar38bBSVcWAB6fmPCo5Zu"),
+    ("MSFTx", "MSFTc", "XspzcW1PRtgf6Wj92HCiZdjzKCyFekVD8P5Ueh3dRMX"),
+    ("MSTRx", "MSTRc", "XsP7xzNPvEHS1m6qfanPUGjNmdnmsLKEoNAnHjdxxyZ"),
+    ("NVDAx", "NVDAc", "Xsc9qvGR1efVDFGLrVsmkzv3qi45LTBjeUKSPmx9qEh"),
+    ("SNDKx", "SNDKc", "Xswbpc8UqU6e1j9QZEWCjBMjyvz4twqD7PCy6j2e7jj"),
+    ("SPCXx", "SPCXc", "Xs3oZwbHvqis4NYcf4YKWmEia2eC84wSiVrcYcTqpH8"),
+    ("TSLAx", "TSLAc", "XsDoVfqeBukxuZHWhdvWHBhgEHjGNst4MLodqsJHzoB"),
+]
+STK_SOL_USDC = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"
+STK_AV = {"AAPLc": "AAPL", "AMZNc": "AMZN", "GOOGLc": "GOOG", "METAc": "META", "MSFTc": "MSFT",
+          "MSTRc": "MSTR", "NVDAc": "NVDA", "SNDKc": "SNDK", "SPCXc": "SPCX", "TSLAc": "TSLA"}
+# base: (price_usd رشته، حجم رشته، تغییر رشته). SPCXc با قیمتِ صفر = «—»؛ MSTRc فیدش خراب است = مرجعِ «—».
+STK_SOL_FIX = {
+    "AAPLc": ("259.04", "5120000.5", "0.50"),
+    "AMZNc": ("225.1175", "912345.2", "-1.00"),
+    "GOOGLc": ("187.99", "1310000", "1.25"),
+    "METAc": ("611.5", "1020400.7", "-2.10"),
+    "MSFTc": ("432.1012345", "2330000.9", "0.10"),
+    "MSTRc": ("329.9", "6310000.3", "-4.00"),
+    "NVDAc": ("143.07", "9910000.1", "2.50"),
+    "SNDKc": ("61.0", "712.3", "-0.75"),
+    "SPCXc": ("0", "310500.4", "3.00"),
+    "TSLAc": ("378.5599", "3588482.1", "-1.50"),
+}
+STK_SOL_BADFEED = ["MSTRc"]
+STK_SOL_LEDE = ("Tokenized shares issued by Backed (xStocks), each backed 1:1 by a real share. Trade them on-chain any time "
+                "against USDC; the reference price comes from Chainlink and moves only while the US market is open.")
+STK_SOL_NOTE = ("Prices are the latest on-chain trade prices from GeckoTerminal; your swap quote comes from Jupiter. "
+                "Issuer terms: not offered to US persons. Not investment advice.")
+STK_BASE_LEDE = ("Tokenized shares issued by Coinbase, each backed 1:1 by a real share. Trade them on-chain any time "
+                 "against USDC; the reference price comes from Chainlink and moves only while the US market is open.")
+STK_BASE_NOTE = ("Prices are live quotes from the deepest Aerodrome pool for $100. Issuer terms: not offered to US persons. "
+                 "Not investment advice.")
+
+
+def stk_sol_logo(base):
+    return "https://assets.geckoterminal.com/stk/%s.png" % base
+
+
+def stk_sol_pool(base):
+    return b58encode(_stkhash.sha256((base + "-pool").encode()).digest())
+
+
+def stk_sol_parse():
+    """STK_SOL از دلِ index.html (فقط برای ساختنِ فیکسچر؛ درستیِ خودِ جدول را [stocks sol mints] با کپیِ مستقل می‌سنجد)."""
+    src = open(os.path.join(HERE, "..", "index.html"), encoding="utf-8").read()
+    blk = re.search(r"const STK_SOL=\[(.*?)\n\];", src, re.S)
+    assert blk, "[stocks sol] STK_SOL not found in index.html"
+    return re.findall(r'\{sym:"(\w+)",base:"(\w+)",mint:"([^"]+)"\}', blk.group(1))
+
+
+def stk_sol_rpcs():
+    src = open(os.path.join(HERE, "..", "index.html"), encoding="utf-8").read()
+    m = re.search(r"const CHAIN=\{.*?\n  rpcs:\[(.*?)\]", src, re.S)
+    return re.findall(r'"(https://[^"]+)"', m.group(1))
+
+
+def stk_sol_cfg(sol=True, **over):
+    ent = stk_sol_parse()
+    base_cfg = stk_cfg()
+    feed_by_sym = {sym: addr for addr, sym in base_cfg["feeds"].items()}
+    rows, chg_by_pool, meta = {}, {}, {}
+    for xs, base, mint in ent:
+        price, vol, chg = STK_SOL_FIX[base]
+        pool = stk_sol_pool(base)
+        rows[mint] = {"price": price, "vol": vol, "logo": stk_sol_logo(base), "pool": pool}
+        chg_by_pool[pool] = chg
+        meta[mint] = {"symbol": xs, "name": xs, "decimals": 8}
+    meta[STK_SOL_USDC] = {"symbol": "USDC", "name": "USD Coin", "decimals": 6}
+    cfg = {"sol": sol, "allMints": [m for _, _, m in ent], "rows": rows, "chgByPool": chg_by_pool, "meta": meta,
+           "feedSym": {feed_by_sym[base]: base for _, base, _ in ent},
+           "answer": {base: STK_FIX[base][2] for _, base, _ in ent},
+           "badFeeds": list(STK_SOL_BADFEED), "failTokens": False, "failPools": False, "rpcFail": False, "rpcFailFirst": 0, "rpcErrorFirst": False, "rpcBadRequestFirst": False,
+           "rpcMissingFirst": [], "rpcs": stk_sol_rpcs()}
+    cfg.update(over)
+    return cfg
+
+
+STKSOL_INIT_JS = """(() => {
+  const cfg = %s;
+  const S = window.__STKSOL__ = {tokens: 0, pools: 0, rpc: 0, quote: 0, tokensUrl: null, poolsUrl: null, rpcReqs: [], rpcArrays: 0, rpcUrls: []};
+  if (cfg.sol) { try { localStorage.setItem('zaexa.chain.v1', 'solana'); } catch (e) {} }
+  const R = (status, body) => ({ok: status < 400, status: status, headers: {get: () => null}, json: async () => body, text: async () => JSON.stringify(body)});
+  const hex = n => BigInt(n).toString(16).padStart(64, '0');
+  const wrap = f0 => async function (url, opts) {
+    const u = String(url);
+    if (u.includes('/sol/quote')) S.quote++;
+    if (u.includes('/networks/solana/tokens/multi/') && u.split('/tokens/multi/')[1].split('?')[0] === cfg.allMints.join(',')) {
+      S.tokens++; S.tokensUrl = u;
+      if (cfg.failTokens) return R(500, {});
+      return R(200, {data: cfg.allMints.map(m => { const x = cfg.rows[m];
+        return {id: 'solana_' + m, type: 'token', attributes: {address: m, price_usd: x.price, volume_usd: {h24: x.vol}, image_url: x.logo},
+                relationships: {top_pools: {data: [{id: 'solana_' + x.pool, type: 'pool'}]}}}; })});
+    }
+    if (u.includes('/networks/solana/pools/multi/')) {
+      S.pools++; S.poolsUrl = u;
+      if (cfg.failPools) return R(500, {});
+      const addrs = u.split('/pools/multi/')[1].split('?')[0].split(',');
+      return R(200, {data: addrs.map(a => ({id: 'solana_' + a, type: 'pool', attributes: {address: a, price_change_percentage: {h24: cfg.chgByPool[a]}}}))});
+    }
+    const mm = /\\/networks\\/solana\\/tokens\\/([1-9A-HJ-NP-Za-km-z]{32,44})$/.exec(u.split('?')[0]);
+    if (mm && cfg.meta[mm[1]]) return R(200, {data: {id: 'solana_' + mm[1], type: 'token', attributes: Object.assign({address: mm[1]}, cfg.meta[mm[1]])}});
+    if (opts && opts.method === 'POST' && typeof opts.body === 'string') {
+      let b = null; try { b = JSON.parse(opts.body); } catch (e) {}
+      const isCall = x => x && x.method === 'eth_call' && x.params && x.params[0] && cfg.feedSym[String(x.params[0].to).toLowerCase()];
+      if (Array.isArray(b) && b.length && b.every(isCall)) { S.rpcArrays++; throw new TypeError('Failed to fetch'); }
+      if (b && !Array.isArray(b) && isCall(b)) {
+        const ep = cfg.rpcs.indexOf(u), sym = cfg.feedSym[String(b.params[0].to).toLowerCase()];
+        S.rpc++; S.rpcReqs.push({url: u, body: b, headers: opts.headers, method: opts.method}); S.rpcUrls.push(u);
+        if (cfg.rpcFail || ep < cfg.rpcFailFirst) throw new TypeError('Failed to fetch');
+        if (ep === 0 && cfg.rpcErrorFirst) return R(500, {jsonrpc: '2.0', id: b.id, error: {code: -32000, message: 'upstream error'}});
+        if (ep === 0 && cfg.rpcBadRequestFirst) return {ok: false, status: 400, headers: {get: () => null}, json: async () => { throw new SyntaxError('Unexpected token B'); }, text: async () => 'Bad Request'};
+        if (ep === 0 && cfg.rpcMissingFirst.includes(sym)) return R(200, {jsonrpc: '2.0', id: b.id, error: {code: -32000, message: 'missing trie node'}});
+        const now = Math.floor(Date.now() / 1000);
+        if (cfg.badFeeds.includes(sym)) return R(200, {jsonrpc: '2.0', id: b.id, result: '0x'});
+        return R(200, {jsonrpc: '2.0', id: b.id, result: '0x' + hex(1) + hex(cfg.answer[sym]) + hex(now - 300) + hex(now - 300) + hex(1)});
+      }
+    }
+    return f0.apply(this, arguments);
+  };
+  let cur = wrap(window.fetch);
+  Object.defineProperty(window, 'fetch', {configurable: true, get() { return cur; }, set(v) { cur = wrap(v); }});
+})();"""
+
+STK_HID_INIT = """(() => { window.__HID = true;
+  Object.defineProperty(Document.prototype, 'hidden', {configurable: true, get() { return window.__HID; }});
+  Object.defineProperty(Document.prototype, 'visibilityState', {configurable: true, get() { return window.__HID ? 'hidden' : 'visible'; }}); })();"""
+
+
+def stk_sol_init(**over):
+    return STKSOL_INIT_JS % _stkjson.dumps(stk_sol_cfg(**over))
+
+
+def _stk_fmt_vol(v):
+    return "$%.1fM" % (v / 1e6) if v >= 1e6 else ("$%dK" % round(v / 1e3) if v >= 1e3 else "$%d" % round(v))
+
+
+def stk_sol_expect(base, ref_ok=True, tokens_ok=True, bad=None):
+    """انتظارِ یک ردیفِ سولانا؛ فرمول مستقل از صفحه. tokens_ok=False یعنی tokens/multi شکست خورده."""
+    price_s, vol_s, chg_s = STK_SOL_FIX[base]
+    price = float(price_s)
+    has_px = tokens_ok and price > 0
+    ref = STK_FIX[base][2] / 1e8 if (ref_ok and base not in (STK_SOL_BADFEED if bad is None else bad)) else None
+    c = float(chg_s)
+    out = {"price": "${:,.2f}".format(price) if has_px else "—",
+           "ref": "${:,.2f}".format(ref) if ref else "—",
+           "gap": "", "vol": _stk_fmt_vol(float(vol_s)) if tokens_ok else "—",
+           "chg": "", "chgCls": ""}
+    if has_px:
+        out["chg"] = "%s %.2f%%" % ("▼" if c < 0 else "▲", abs(c))
+        out["chgCls"] = "dn" if c < 0 else "up"
+    if has_px and ref:
+        g = (price / ref - 1) * 100
+        out["gap"] = "%s%.2f%% pool gap" % ("−" if g < 0 else "+", abs(g))
+    return out
+
+
+async def stk_sol_wait(pg):
+    """منتظرِ آمدنِ قیمت، حجم، تغییر و مرجعِ TSLAx (هر چهار تا)."""
+    await pg.wait_for_function(
+        "() => { const t = document.querySelector('#view-stocks tr[data-sym=\"TSLAc\"]');"
+        " return t.querySelector('.cPx .v').textContent !== '—' && t.querySelector('.cPx small').textContent !== ''"
+        " && t.querySelector('.colRef small').textContent !== '' && t.querySelector('.colVol').textContent !== '—'; }", timeout=20000)
+    await pg.wait_for_timeout(200)
+
+
+async def stk_sol_rows_check(pg, tag, **kw):
+    rows = await pg.evaluate(STK_ROWS_JS)
+    assert len(rows) == 10, "%s: expected 10 rows, got %d" % (tag, len(rows))
+    for (xs, base, mint), r in zip(STK_SOL_EXPECT, rows):
+        e = stk_sol_expect(base, **kw)
+        assert r["sym"] == base and r["b"] == xs, "%s: row %s must show %s: %s" % (tag, base, xs, r)
+        assert r["name"] == STK_NAMES[base] and r["av"] == STK_AV[base], "%s: company name/letters unchanged for %s: %s" % (tag, base, r)
+        assert r["px"] == e["price"], "%s: %s price %r != %r" % (tag, xs, r["px"], e["price"])
+        assert r["chg"] == e["chg"] and r["chgCls"] == e["chgCls"], "%s: %s change %r/%r != %r/%r" % (tag, xs, r["chg"], r["chgCls"], e["chg"], e["chgCls"])
+        assert r["ref"] == e["ref"], "%s: %s reference %r != %r" % (tag, xs, r["ref"], e["ref"])
+        assert r["gap"] == e["gap"], "%s: %s gap %r != %r" % (tag, xs, r["gap"], e["gap"])
+        assert r["vol"] == e["vol"], "%s: %s volume %r != %r" % (tag, xs, r["vol"], e["vol"])
+    return rows
+
+
+async def check_stocks_sol(p, errors):
+    b = await p.chromium.launch()
+    errs = []
+    PNG1 = base64.b64decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==")
+
+    async def open_sol(sol=True, extra="", **over):
+        return await stk_open(b, 1280, 800, "light", errs, init_extra=stk_sol_init(sol=sol, **over) + extra,
+                              routes=[("https://assets.geckoterminal.com/stk/**", lambda r: r.fulfill(status=200, content_type="image/png", body=PNG1))])
+
+    # ---- [stocks sol mints] ----
+    ent = stk_sol_parse()
+    assert ent == STK_SOL_EXPECT, "[stocks sol mints] STK_SOL in index.html differs from the verified list: %s" % (ent,)
+    for xs, base, mint in ent:
+        assert re.match(r"^[1-9A-HJ-NP-Za-km-z]{32,44}$", mint), "[stocks sol mints] %s is not a base58 mint: %r" % (xs, mint)
+    assert len({m for _, _, m in ent}) == 10, "[stocks sol mints] ten distinct mints"
+    print("[stocks sol mints] STK_SOL holds exactly the 10 verified (symbol, Base symbol, mint) triples in order, every mint is base58 (32-44 chars) and distinct")
+
+    # ---- [stocks sol view] ----
+    pg = await open_sol()
+    await stk_sol_wait(pg)
+    await pg.wait_for_function("() => document.querySelectorAll('#view-stocks .av img.on').length === 10", timeout=15000)
+    assert await pg.evaluate("() => activeChain") == "solana", "[stocks sol view] the fixture must boot on Solana"
+    await stk_sol_rows_check(pg, "[stocks sol view]")
+    st = await pg.evaluate("""() => ({lede: document.getElementById('stkLede').textContent, note: document.getElementById('stkNote').textContent,
+        table: getComputedStyle(document.getElementById('stkTable')).display, mkt: getComputedStyle(document.getElementById('stkMkt')).display,
+        pill: document.getElementById('stkMktTxt').textContent,
+        imgs: [...document.querySelectorAll('#view-stocks tr[data-sym]')].map(tr => [tr.dataset.sym, (tr.querySelector('.av img') || {}).src || null])})""")
+    assert st["lede"] == STK_SOL_LEDE, "[stocks sol view] lede text: %r" % st["lede"]
+    assert st["note"] == STK_SOL_NOTE, "[stocks sol view] note text: %r" % st["note"]
+    assert st["table"] != "none" and st["mkt"] != "none", "[stocks sol view] table and market pill are visible on Solana: %s" % st
+    assert re.match(r"^US market (open|closed) · reference updated 5m ago$", st["pill"]), "[stocks sol view] pill: %r" % st["pill"]
+    for base, src in st["imgs"]:
+        assert src == stk_sol_logo(base), "[stocks sol view] %s logo must be the image_url from tokens/multi: %r" % (base, src)
+    await pg.context.close()
+    print("[stocks sol view] Solana boot on #stocks: 10 rows with AAPLx...TSLAx, GeckoTerminal prices (string price_usd), 24h change from the top pool, Chainlink reference and gap, volume, a zero price and a dead feed shown as dashes, exact lede/note, market pill, own image_url logos")
+
+    # ---- [stocks sol requests] ----
+    pg = await open_sol(badFeeds=[])
+    await stk_sol_wait(pg)
+    await pg.wait_for_timeout(1500)
+    rq = await pg.evaluate("() => Object.assign({}, window.__STKSOL__, {batches: window.__STK__.batches})")
+    assert rq["tokens"] == 1 and rq["pools"] == 1 and rq["rpc"] == 10, "[stocks sol requests] exactly one tokens/multi, one pools/multi, ten single eth_call requests: %s" % {k: rq[k] for k in ("tokens", "pools", "rpc")}
+    assert rq["quote"] == 0, "[stocks sol requests] loading the view must not call /sol/quote (%d calls)" % rq["quote"]
+    assert rq["batches"] == 0, "[stocks sol requests] the Solana path must not use ethers/multicall (%d multicall batches)" % rq["batches"]
+    assert rq["tokensUrl"].endswith("/networks/solana/tokens/multi/" + ",".join(m for _, _, m in ent)), "[stocks sol requests] tokens/multi URL: %s" % rq["tokensUrl"]
+    assert rq["poolsUrl"].endswith("/networks/solana/pools/multi/" + ",".join(stk_sol_pool(b_) for _, b_, _ in ent)), "[stocks sol requests] pools/multi URL: %s" % rq["poolsUrl"]
+    feeds = {s: a for a, s in stk_cfg()["feeds"].items()}
+    reqs = rq["rpcReqs"]
+    assert rq["rpcArrays"] == 0, "[stocks sol requests] no JSON-RPC array (batch) body may be sent: %d" % rq["rpcArrays"]
+    first = stk_sol_rpcs()[0]
+    assert len(reqs) == 10 and all(r["url"] == first and r["method"] == "POST" and "application/json" in _stkjson.dumps(r["headers"]) for r in reqs), \
+        "[stocks sol requests] all ten eth_call requests go to the first Base endpoint as JSON POSTs: %s" % [r["url"] for r in reqs]
+    got = sorted(reqs, key=lambda r: r["body"]["id"])
+    assert all(r["body"] == {"jsonrpc": "2.0", "id": i, "method": "eth_call", "params": [{"to": r["body"]["params"][0]["to"], "data": "0xfeaf968c"}, "latest"]}
+               and r["body"]["params"][0]["to"].lower() == feeds[STK_ORDER[i]] for i, r in enumerate(got)), \
+        "[stocks sol requests] eth_call bodies: %s" % [r["body"] for r in got]
+    await pg.context.close()
+    print("[stocks sol requests] one tokens/multi (10 mints, STK_SOL order), one pools/multi (top pools), ten single eth_call requests (one per feed, exact bodies, no batch array) all to the first Base endpoint; zero /sol/quote; zero multicall batches (the page's ethers is never used for these rows)")
+
+    # ---- [stocks sol note gone] ----
+    GONE_JS = """() => { const v = document.getElementById('view-stocks');
+        return [!!document.getElementById('stkSolNote'), !!document.getElementById('stkToBase'), v.textContent.includes('Switch to Base'),
+                v.innerHTML.includes('Switch to Base'), v.textContent.includes('US stocks trade on Base')]; }"""
+    pg = await open_sol(sol=False)
+    await stk_wait_loaded(pg)
+    g = await pg.evaluate(GONE_JS)
+    assert g == [False] * 5, "[stocks sol note gone] Base: the old Solana note must be gone: %s" % g
+    await pg.context.close()
+    pg = await open_sol()
+    await stk_sol_wait(pg)
+    g = await pg.evaluate(GONE_JS)
+    assert g == [False] * 5, "[stocks sol note gone] Solana: the old Solana note must be gone: %s" % g
+    await pg.context.close()
+    print("[stocks sol note gone] on both chains there is no #stkSolNote, no #stkToBase and no 'Switch to Base' / 'US stocks trade on Base' text in #view-stocks")
+
+    # ---- [stocks sol switch] ----
+    base_px = {STK_ORDER[i]: stk_expect(STK_ORDER[i])["price"] for i in range(10)}
+    sol_px = {s: stk_sol_expect(s)["price"] for s in STK_ORDER}
+    assert not (set(base_px.values()) & set(sol_px.values())), "fixture prices must differ between the chains"
+    pg = await open_sol(sol=False)
+    await stk_wait_loaded(pg)
+    assert (await pg.evaluate(STK_ROWS_JS))[9]["b"] == "TSLAc"
+    await pg.evaluate("""() => { const S = window.__SNAP = []; let last = '';
+        setInterval(() => { const rs = [...document.querySelectorAll('#view-stocks tr[data-sym]')];
+          const s = JSON.stringify({n: rs.map(r => r.querySelector('.nm b').textContent), p: rs.map(r => r.querySelector('.cPx .v').textContent),
+            imgs: [...document.querySelectorAll('#view-stocks .av img')].map(i => i.src)});
+          if (s !== last) { last = s; S.push(JSON.parse(s)); } }, 10); }""")
+    await pg.click("#srcChip")
+    await pg.click('#srcPop [data-chain="solana"]')
+    await stk_sol_wait(pg)
+    await pg.wait_for_function("() => document.querySelectorAll('#view-stocks .av img.on').length === 10", timeout=15000)
+    await stk_sol_rows_check(pg, "[stocks sol switch] on Solana")
+    txt = await pg.evaluate("() => [document.getElementById('stkLede').textContent, document.getElementById('stkNote').textContent]")
+    assert txt == [STK_SOL_LEDE, STK_SOL_NOTE], "[stocks sol switch] Solana texts after the switch: %s" % txt
+    await pg.click("#srcChip")
+    await pg.click('#srcPop [data-chain="base"]')
+    await stk_wait_loaded(pg)
+    await pg.wait_for_timeout(400)
+    rows = await pg.evaluate(STK_ROWS_JS)
+    for sym, r in zip(STK_ORDER, rows):
+        e = stk_expect(sym)
+        assert r["b"] == sym and r["px"] == e["price"] and r["ref"] == e["ref"] and r["gap"] == e["gap"] and r["vol"] == e["vol"] and r["chg"] == e["chg"], \
+            "[stocks sol switch] back on Base %s must show the Base numbers: %s" % (sym, r)
+    txt = await pg.evaluate("() => [document.getElementById('stkLede').textContent, document.getElementById('stkNote').textContent]")
+    assert txt == [STK_BASE_LEDE, STK_BASE_NOTE], "[stocks sol switch] Base texts after switching back: %s" % txt
+    snaps = await pg.evaluate("() => window.__SNAP")
+    saw_x = False
+    for s in snaps:
+        xs = all(n.endswith("x") for n in s["n"]); cs = all(n.endswith("c") for n in s["n"])
+        assert xs or cs, "[stocks sol switch] mixed symbols in one snapshot: %s" % s
+        saw_x = saw_x or xs
+        if xs:
+            assert not (set(s["p"]) & set(base_px.values())), "[stocks sol switch] a Base price lingered on the Solana view: %s" % s
+            assert not any("stk/" not in i for i in s["imgs"]), "[stocks sol switch] a non-Solana logo on the Solana view: %s" % s
+        elif saw_x:
+            assert not (set(s["p"]) & set(sol_px.values())), "[stocks sol switch] a Solana price lingered after going back to Base: %s" % s
+            assert not any("assets.geckoterminal.com/stk/" in i for i in s["imgs"]), "[stocks sol switch] a Solana logo lingered on the Base view: %s" % s
+    assert saw_x, "[stocks sol switch] the sampler never saw the Solana view"
+    final_imgs = await pg.evaluate("() => [...document.querySelectorAll('#view-stocks .av img')].map(i => i.src)")
+    assert not any("assets.geckoterminal.com/stk/" in i for i in final_imgs), "[stocks sol switch] Solana logos must be removed on Base: %s" % final_imgs
+    await pg.context.close()
+    print("[stocks sol switch] Base -> Solana via the real selector: x-symbols, Solana numbers and logos with no Base price in any 10 ms snapshot; back to Base: c-symbols, Base numbers, Base texts, no Solana price or logo left")
+
+    # ---- [stocks sol fail] ----
+    pg = await open_sol(failTokens=True, badFeeds=[])
+    await pg.wait_for_function("() => stkData.loaded", timeout=30000)
+    await pg.wait_for_timeout(300)
+    rows = await pg.evaluate(STK_ROWS_JS)
+    for (xs, base, _), r in zip(STK_SOL_EXPECT, rows):
+        e = stk_sol_expect(base, tokens_ok=False, bad=[])
+        assert r["px"] == "—" and r["vol"] == "—" and r["chg"] == "" and r["gap"] == "" and r["ref"] == e["ref"] and r["ref"] != "—", \
+            "[stocks sol fail] tokens/multi 500: %s must show a dash price with its reference kept: %s" % (xs, r)
+    txt = await pg.inner_text("#view-stocks")
+    assert "NaN" not in txt and "$0.00" not in txt and "undefined" not in txt, "[stocks sol fail] junk text: %s" % txt[:300]
+    await pg.context.close()
+    pg = await open_sol(rpcFail=True)
+    await pg.wait_for_function("() => stkData.loaded", timeout=40000)
+    await pg.wait_for_timeout(300)
+    await stk_sol_rows_check(pg, "[stocks sol fail] all rpc endpoints dead", ref_ok=False)
+    n_rpc = await pg.evaluate("() => window.__STKSOL__.rpc")
+    assert n_rpc == 10 * len(stk_sol_rpcs()), "[stocks sol fail] every Base endpoint is asked for all 10 feeds before giving up: %d" % n_rpc
+    assert "reference updated" not in await pg.inner_text("#stkMktTxt"), "[stocks sol fail] no reference age without a reference"
+    await pg.context.close()
+    pg = await open_sol(rpcFailFirst=2, badFeeds=[])
+    await stk_sol_wait(pg)
+    await stk_sol_rows_check(pg, "[stocks sol fail] two dead endpoints", bad=[])
+    n_rpc = await pg.evaluate("() => window.__STKSOL__.rpc")
+    assert n_rpc == 30, "[stocks sol fail] the third endpoint answers after two dead ones (10 requests each): %d requests" % n_rpc
+    await pg.context.close()
+    pg = await open_sol(failTokens=True, rpcFail=True)
+    await pg.wait_for_function("() => document.getElementById('stkMktTxt').textContent.includes('unavailable')", timeout=60000)
+    rows = await pg.evaluate(STK_ROWS_JS)
+    assert all(r["px"] == "—" and r["ref"] == "—" and r["vol"] == "—" for r in rows), "[stocks sol fail] total failure rows: %s" % rows
+    await pg.context.close()
+    print("[stocks sol fail] tokens/multi 500: dash prices/volume with the references kept; every RPC endpoint dead: prices kept, references dashes; two dead endpoints: the third answers; both failing: 'Prices unavailable'; never NaN/$0.00/pageerror")
+
+    # ---- [stocks sol trade] ----
+    pg = await open_sol()
+    await stk_sol_wait(pg)
+    await pg.evaluate("() => { document.getElementById('solAmt').value = '123'; }")
+    await pg.click('#view-stocks tr[data-sym="TSLAc"] .trade')
+    await pg.wait_for_function("() => document.getElementById('solBotSym').textContent === 'TSLAx' && document.getElementById('solTopSym').textContent === 'USDC' && document.activeElement && document.activeElement.id === 'solAmt'", timeout=15000)
+    st = await pg.evaluate("""() => ({swap: document.getElementById('view-swap').classList.contains('on'), stocks: document.getElementById('view-stocks').classList.contains('on'),
+        top: document.getElementById('solTopSym').textContent, bot: document.getElementById('solBotSym').textContent,
+        mint: solMintCur, ref: solRefMint, side: solSide, amt: document.getElementById('solAmt').value, out: document.getElementById('solOutRead').value,
+        focus: document.activeElement && document.activeElement.id, chain: activeChain})""")
+    assert st["swap"] and not st["stocks"] and st["chain"] == "solana", "[stocks sol trade] must land on the Solana swap view: %s" % st
+    assert st["top"] == "USDC" and st["bot"] == "TSLAx" and st["side"] == "buy", "[stocks sol trade] pay USDC, receive TSLAx: %s" % st
+    assert st["mint"] == ent[9][2] and st["ref"] == STK_SOL_USDC, "[stocks sol trade] the card's mints: %s" % st
+    assert st["amt"] == "" and st["out"] == "" and st["focus"] == "solAmt", "[stocks sol trade] empty amount, 'You pay' focused: %s" % st
+    assert await pg.evaluate("() => window.__STKSOL__.quote") == 0, "[stocks sol trade] Trade alone must not request a quote"
+    await pg.context.close()
+    print("[stocks sol trade] Trade on TSLAx opens the Solana card paying USDC and receiving TSLAx (current mint = the TSLAx mint, side buy), a typed amount cleared, the 'You pay' input focused, no quote requested")
+
+    # ---- [stocks sol rpc fallback] ----
+    for mode in ({"rpcErrorFirst": True}, {"rpcBadRequestFirst": True}):
+        pg = await open_sol(badFeeds=[], **mode)
+        await stk_sol_wait(pg)
+        await stk_sol_rows_check(pg, "[stocks sol rpc fallback] %s" % list(mode)[0], bad=[])
+        rq = await pg.evaluate("() => window.__STKSOL__")
+        eps = stk_sol_rpcs()
+        assert rq["rpcArrays"] == 0 and [r["url"] for r in rq["rpcReqs"]] == [eps[0]] * 10 + [eps[1]] * 10, \
+            "[stocks sol rpc fallback] %s: 10 requests to the first endpoint, then the same 10 to the second: %s" % (list(mode)[0], [r["url"] for r in rq["rpcReqs"]])
+        await pg.context.close()
+    miss = ["AAPLc", "TSLAc"]
+    pg = await open_sol(badFeeds=[], rpcMissingFirst=miss)
+    await stk_sol_wait(pg)
+    await stk_sol_rows_check(pg, "[stocks sol rpc fallback] two feeds missing on the first endpoint", bad=[])
+    rq = await pg.evaluate("() => window.__STKSOL__")
+    eps = stk_sol_rpcs()
+    assert [r["url"] for r in rq["rpcReqs"]] == [eps[0]] * 10 + [eps[1]] * 2 and sorted(r["body"]["id"] for r in rq["rpcReqs"][10:]) == [0, 9], \
+        "[stocks sol rpc fallback] only the two missing feeds go to the second endpoint: %s" % [(r["url"], r["body"]["id"]) for r in rq["rpcReqs"]]
+    await pg.context.close()
+    print("[stocks sol rpc fallback] first endpoint answering HTTP 500 JSON errors, or 400 'Bad Request': all 10 references come from the second endpoint; two feeds missing on the first are asked of the second only; a batch array is never sent")
+
+    # ---- [stocks sol hidden tab] ----
+    pg = await open_sol(extra=STK_HID_INIT, badFeeds=[])
+    await pg.wait_for_timeout(1500)
+    h0 = await pg.evaluate("() => [window.__STKSOL__.tokens, window.__STKSOL__.pools, window.__STKSOL__.rpc, stkData.loaded]")
+    assert h0 == [0, 0, 0, False], "[stocks sol hidden tab] a hidden tab must not read prices: %s" % (h0,)
+    await pg.evaluate("() => { window.__HID = false; document.dispatchEvent(new Event('visibilitychange')); }")
+    try:
+        await stk_sol_wait(pg)
+    except Exception:
+        raise AssertionError("[stocks sol hidden tab] becoming visible did not load the prices within 20 s")
+    h1 = await pg.evaluate("() => [window.__STKSOL__.tokens, window.__STKSOL__.pools, window.__STKSOL__.rpc]")
+    assert h1 == [1, 1, 10], "[stocks sol hidden tab] visible must load exactly once (1 tokens, 1 pools, 10 eth_call): %s" % (h1,)
+    await pg.context.close()
+    print("[stocks sol hidden tab] a Solana tab opened hidden sends no tokens/pools/rpc request; the moment it becomes visible it loads once")
+
+    await b.close()
+    assert not errs, "[stocks sol] console/page errors: %s" % errs[:5]
+    print("[stocks sol] no console or page errors across the Solana stocks pages")
 
 
 async def check_stocks(p, errors):
@@ -4655,7 +5065,7 @@ async def check_stocks(p, errors):
     print("[stocks fail] one failed quote and a failed pools/multi: that row shows a dash (no NaN, no $0.00) while its Chainlink reference and the other 9 rows stay; volume and change show dashes; total failure keeps 10 dash rows with 'Prices unavailable — retrying' and recovers on the next open")
 
     # ---- [stocks trade] ----
-    pg = await stk_open(b, 1280, 800, "light", errs)
+    pg = await stk_open(b, 1280, 800, "light", errs, init_extra=stk_sol_init(sol=False))
     await stk_wait_loaded(pg)
     await pg.evaluate("() => { document.getElementById('amtIn').value = '123'; }")
     await pg.click('#view-stocks tr[data-sym="TSLAc"] .trade')
@@ -4667,24 +5077,15 @@ async def check_stocks(p, errors):
         focus: document.activeElement && document.activeElement.id, chain: activeChain, hash: location.hash})""")
     assert st["swap"] and not st["stocks"] and st["out"] == "TSLAc" and st["inn"] == "USDC" and st["amt"] == "" and st["amtOut"] == "" \
         and st["focus"] == "amtIn" and st["chain"] == "base", "[stocks trade] Trade must open the swap USDC -> TSLAc with an empty, focused amount: %s" % st
-    # از سولانا: ۱۰ اکتبر به بعد جدول روی سولانا پنهان است (بلوکِ «Switch to Base» جایش)؛ کاربر اول به Base برمی‌گردد، بعد Trade
+    # از سولانا: جدول همان‌جا نمایش داده می‌شود و Trade کارتِ سولانا را باز می‌کند ([stocks sol trade] جزئیاتش را می‌سنجد)
     await pg.evaluate("() => setChain('solana')")
     await pg.wait_for_timeout(300)
     await pg.evaluate("() => setView('stocks')")
     await pg.wait_for_timeout(300)
-    hid = await pg.evaluate("() => [getComputedStyle(document.getElementById('stkTable')).display === 'none', getComputedStyle(document.getElementById('stkSolNote')).display === 'none']")
-    assert hid == [True, False], "[stocks trade] on Solana the table is hidden behind the Switch to Base note: %s" % hid
-    await pg.click('#stkToBase')
-    await pg.wait_for_timeout(400)
-    await pg.click('#view-stocks tr[data-sym="AAPLc"] .trade')
-    await pg.wait_for_timeout(500)
-    st = await pg.evaluate("""() => ({swap: document.getElementById('view-swap').classList.contains('on'), chain: activeChain,
-        out: document.getElementById('tokOutSym').textContent, inn: document.getElementById('tokInSym').textContent,
-        focus: document.activeElement && document.activeElement.id})""")
-    assert st["swap"] and st["chain"] == "base" and st["out"] == "AAPLc" and st["inn"] == "USDC" and st["focus"] == "amtIn", \
-        "[stocks trade] from Solana, Trade must switch to Base first: %s" % st
+    hid = await pg.evaluate("() => [getComputedStyle(document.getElementById('stkTable')).display !== 'none', !!document.getElementById('stkToBase')]")
+    assert hid == [True, False], "[stocks trade] on Solana the table stays visible and there is no Switch to Base button: %s" % hid
     await pg.context.close()
-    print("[stocks trade] TSLAc Trade opens the swap view with USDC -> TSLAc and an empty, focused 'You pay' (a typed amount is cleared); from Solana the table waits behind 'Switch to Base', then Trade works (AAPLc)")
+    print("[stocks trade] TSLAc Trade opens the swap view with USDC -> TSLAc and an empty, focused 'You pay' (a typed amount is cleared); on Solana the table stays visible (the Solana Trade flow is [stocks sol trade])")
 
     # ---- [stocks timer] ----
     pg = await stk_open(b, 1280, 800, "light", errs, clock_ms=ms(2026, 10, 7, 15, 0))
@@ -4713,20 +5114,20 @@ async def check_stocks(p, errors):
     await pg.context.close()
     print("[stocks timer] one batch on open, one more per 60 s while visible, none during 5 minutes on another view, one at once on reopening, cadence resumes")
 
-    # ---- [stocks network] ۱۰ اکتبر — مالک: انتخابِ شبکه داخلِ کارتِ Stocks، نه در هدر؛ روی سولانا جدول جای خود را به «Switch to Base» می‌دهد ----
+    # ---- [stocks network] ۱۰ اکتبر — مالک: انتخابِ شبکه داخلِ کارتِ Stocks، نه در هدر؛ روی سولانا هم جدول نشان داده می‌شود و یادداشتی نیست ----
     NET_JS = """() => { const m = document.getElementById('srcMenu'), slot = document.getElementById('stocksNetworkSlot');
         const card = document.querySelector('#view-stocks .card');
         return {inSlot: !!(m && slot && slot.contains(m)), inHeader: !!(m && m.closest('body > header, header.site-header, #hdr, .hdrRight')),
                 inCard: !!(m && card && card.contains(m)), chip: !!document.querySelector('#view-stocks .tkChip'),
-                note: getComputedStyle(document.getElementById('stkSolNote')).display !== 'none', table: getComputedStyle(document.getElementById('stkTable')).display !== 'none',
+                note: !!document.getElementById('stkSolNote') || !!document.getElementById('stkToBase'), table: getComputedStyle(document.getElementById('stkTable')).display !== 'none',
                 cardOverflow: getComputedStyle(card).overflow}; }"""
     for vw, vh in ((1280, 800), (390, 844)):
-        pg = await stk_open(b, vw, vh, "light", errs)
+        pg = await stk_open(b, vw, vh, "light", errs, init_extra=stk_sol_init(sol=False))
         await stk_wait_loaded(pg)
         n = await pg.evaluate(NET_JS)
         assert n["inSlot"] and n["inCard"] and not n["inHeader"], "[stocks network] %d: the network control must sit inside the Stocks card, not in the header: %s" % (vw, n)
         assert not n["chip"], "[stocks network] the static Base chip is gone (the real selector replaced it): %s" % n
-        assert n["table"] and not n["note"], "[stocks network] on Base the table shows and the Solana note is hidden: %s" % n
+        assert n["table"] and not n["note"], "[stocks network] on Base the table shows and there is no Solana note: %s" % n
         assert n["cardOverflow"] == "visible", "[stocks network] the card must not clip the network popover: %s" % n
         # بقیه‌ی نماها هنوز همان جای خودشان را دارند
         await pg.evaluate("() => setView('flow')")
@@ -4739,17 +5140,16 @@ async def check_stocks(p, errors):
         await pg.evaluate("() => setChain('solana')")
         await pg.wait_for_timeout(300)
         n = await pg.evaluate(NET_JS)
-        assert n["note"] and not n["table"] and n["inSlot"], "[stocks network] on Solana the table hides and 'Switch to Base' shows, selector still in the card: %s" % n
-        txt = await pg.evaluate("() => document.getElementById('stkSolNote').innerText")
-        assert "US stocks trade on Base" in txt and "Switch to Base" in txt, "[stocks network] note text: %r" % txt
-        await pg.click("#stkToBase")
+        assert n["table"] and not n["note"] and n["inSlot"], "[stocks network] on Solana the table shows, there is no note, selector still in the card: %s" % n
+        await pg.click("#srcChip")
+        await pg.click('#srcPop [data-chain="base"]')
         await pg.wait_for_timeout(500)
         n = await pg.evaluate(NET_JS)
-        assert n["table"] and not n["note"], "[stocks network] 'Switch to Base' brings the table back: %s" % n
+        assert n["table"] and not n["note"], "[stocks network] switching back to Base keeps the table: %s" % n
         b1 = await pg.evaluate("() => window.__STK__.batches")
         assert b1 > b0, "[stocks network] back on Base the prices reload: %s -> %s" % (b0, b1)
         await pg.context.close()
-    print("[stocks network] 1280 and 390: the network selector sits inside the Stocks card (not the header, no static Base chip), Flow keeps its slot; on Solana the table hides behind 'US stocks trade on Base' and 'Switch to Base' restores and reloads it")
+    print("[stocks network] 1280 and 390: the network selector sits inside the Stocks card (not the header, no static Base chip), Flow keeps its slot; on Solana the table shows with no note, and switching back to Base reloads the Base prices")
 
     # ---- [stocks hidden tab] ۱۰ اکتبر — تبی که پنهان باز شده چیزی نمی‌خواند، ولی به‌محضِ دیده‌شدن می‌خواند (نه ۶۰ ثانیه بعد) ----
     HID_INIT = """(() => { window.__HID = true;
@@ -4863,6 +5263,7 @@ async def main():
         await check_report_page(p, errors)
         await check_report_picker(p, errors)
         await check_stocks(p, errors)
+        await check_stocks_sol(p, errors)
         b = await p.chromium.launch()
         pg = await b.new_page(viewport={"width": 1240, "height": 1000}, color_scheme="dark")
         pg.on("console", on_console)
