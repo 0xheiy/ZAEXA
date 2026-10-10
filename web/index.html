@@ -1383,7 +1383,8 @@ footer .fine{max-width:78ch;margin:46px 0 0;font-size:11.5px;color:var(--tx3);li
 .view #srcPop{top:42px;width:220px;max-width:calc(100vw - 48px)}
 .swapCard:has(#swapNetworkBar){overflow:visible}
 
-#folioNetworkSlot,#flowNetworkSlot{flex:none}
+#folioNetworkSlot,#flowNetworkSlot,#stocksNetworkSlot{flex:none}
+#view-stocks>.card:has(#srcMenu){overflow:visible}
 #view-folio>.card:has(#srcMenu),#view-flow>.card:has(#srcMenu){overflow:visible}
 #view-folio>.card>header{flex-wrap:wrap}
 #view-flow>.card>header{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px}
@@ -1921,11 +1922,18 @@ try{(function(){
   <section class="card">
     <header>
       <span class="ttl">US stocks</span>
-      <span class="tkChip" data-chain="base">Base</span>
+      <!-- ۱۰ اکتبر — مالک: انتخابِ شبکه داخلِ همین کارت، مثلِ بقیه‌ی صفحه‌ها (نه در هدر). placeNetworkControl همان #srcMenu را اینجا می‌آورد. -->
+      <div id="stocksNetworkSlot"></div>
       <span class="grow"></span>
       <span class="mkt" id="stkMkt"><i></i><span id="stkMktTxt"></span></span>
     </header>
     <p class="lede">Tokenized shares issued by Coinbase, each backed 1:1 by a real share. Trade them on-chain any time against USDC; the reference price comes from Chainlink and moves only while the US market is open.</p>
+    <!-- روی سولانا: سهامِ توکنیِ کوین‌بیس فقط روی Base است؛ جدول پنهان و این بلوک پیدا. -->
+    <div class="empty intro" id="stkSolNote" hidden>
+      <span class="eTtl">US stocks trade on Base</span>
+      <p>Coinbase's tokenized stocks live on Base. Switch the network to Base to see prices and trade them.</p>
+      <button class="chip solid" id="stkToBase" type="button">Switch to Base</button>
+    </div>
     <table id="stkTable">
       <thead><tr><th>Stock</th><th>Price</th><th class="colRef">Reference</th><th class="colVol">Volume 24h</th><th></th></tr></thead>
       <tbody>
@@ -4983,6 +4991,7 @@ function placeNetworkControl(){
   }else if(tokenPage||view==="token")destination=$("networkControlParking");
   else if(view==="folio")destination=$("folioNetworkSlot");
   else if(view==="flow")destination=$("flowNetworkSlot");
+  else if(view==="stocks")destination=$("stocksNetworkSlot");
   else destination=$("headerNetworkAnchor").parentElement;
   if(menu.parentElement!==destination){
     closeSrcMenu();
@@ -5204,6 +5213,7 @@ function setChain(next){
   if(view==="swap"){if(next==="solana")solScheduleQuote();else scheduleQuote();}
   if(view==="folio")renderFolio();
   if(view==="flow"){paintFlowToken();renderFlow();}
+  if(view==="stocks"){stkChainPaint();if(next==="base"){stocksStop();stocksStart();}}
 }
 function closeSrcMenu(focusBack){
   $("srcPop").classList.remove("on");
@@ -10048,8 +10058,29 @@ async function stocksTick(){
   stkTimer=setTimeout(stocksTick,failed?STK_RETRY_MS:STK_REFRESH_MS);
 }
 // setView هنگامِ نوشتنِ hash یک بار دیگر از hashchange صدا می‌خورد؛ stkActive نمی‌گذارد همان بازشدن دو دسته‌ی multicall بفرستد.
-let stkActive=false;
-function stocksStart(){if(stkActive)return;stkActive=true;stkPaint();stocksTick();}
+let stkActive=false,stkLogosDone=false;
+/* ۱۰ اکتبر — مالک: لوگوها لوگوی خودِ سهام باشند. همان مسیرِ لوگوی توکن‌ها (paintAvatar → tokenLogo →
+   GeckoTerminal image_url، دسته‌ای و ماندگار در zaexa.logo.v1)؛ نبودِ لوگو یعنی همان حروف. منبعِ تازه‌ای نیست. */
+function stkPaintLogos(){
+  if(stkLogosDone)return;stkLogosDone=true;
+  document.querySelectorAll("#stkTable tr[data-sym]").forEach(tr=>{
+    const t=BASE_TOKENS.find(x=>x.symbol===tr.dataset.sym),av=tr.querySelector(".av");
+    if(!t||!av)return;
+    // نه paintAvatar: آن حروفِ گرادیانیِ همین کارت را با رنگِ بذری عوض می‌کند. فقط تصویر روی همان حروف می‌نشیند.
+    tokenLogo(t).then(url=>{
+      if(!url||!okLogo(url))return;
+      const img=new Image();img.alt="";img.loading="lazy";
+      img.onload=()=>img.classList.add("on");img.onerror=()=>img.remove();
+      img.src=url;av.appendChild(img);
+    });
+  });
+}
+// سولانا: سهامِ توکنی فقط روی Base است — جدول پنهان، بلوکِ «Switch to Base» پیدا، و هیچ درخواستی.
+function stkChainPaint(){
+  const sol=activeChain==="solana";
+  $("stkSolNote").hidden=!sol;$("stkTable").hidden=sol;$("stkMkt").hidden=sol;
+}
+function stocksStart(){if(stkActive)return;stkActive=true;stkChainPaint();if(activeChain!=="base")return;stkPaintLogos();stkPaint();stocksTick();}
 function stocksStop(){stkActive=false;++stkRun;++stkSeq;clearTimeout(stkTimer);stkTimer=0;}
 // «Trade»: همان کاری که انتخابگرِ توکن می‌کند — USDC → سهم، مبلغ خالی، فوکوس روی «You pay».
 function stocksTrade(sym){
@@ -10067,6 +10098,7 @@ function stocksTrade(sym){
   refreshAllowance().then(scheduleQuote);
   $("amtIn").focus();
 }
+$("stkToBase").addEventListener("click",()=>setChain("base"));
 $("stkTable").addEventListener("click",e=>{
   const b=e.target.closest&&e.target.closest(".trade");
   if(b)stocksTrade(b.dataset.sym);

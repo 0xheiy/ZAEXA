@@ -4034,10 +4034,13 @@ async def check_report_page(p, errors):
     assert len(errs) == n_err, "[report wallet] console errors: %s" % errs[n_err:]
     print("[report wallet] Connect chip opens the picker (WalletConnect only without an extension, the EIP-6963 wallet when present), choosing it shows the short address and opens #walletPop, Disconnect resets; silent restore uses eth_accounts only; no eth_sendTransaction / wallet_switchEthereumChain / wallet_addEthereumChain ever reached the wallet; no console errors")
 
-    # ---- [report body unchanged] the report body under the header is the same as on origin/main ----
+    # ---- [report body unchanged] the report body under the header is the same as before the header change (commit 6944652) ----
     import pathlib, shutil
-    main_src = subprocess.run(["git", "show", "origin/main:worker/report_page.js"], capture_output=True, text=True, cwd=worker_dir)
-    assert main_src.returncode == 0, "[report body unchanged] cannot read origin/main:worker/report_page.js: %s" % main_src.stderr
+    # ۱۰ اکتبر: پایه یک کامیتِ ثابت است، نه origin/main — بعد از پوشِ هدرِ تازه origin/main خودش همان صفحه‌ی نو شد و
+    # این کاوشگر «نو» را با «نو» می‌سنجید و قرمز می‌شد. 6944652 آخرین کامیت پیش از هدرِ تازه‌ی گزارش است (هدرِ landing).
+    REPORT_BODY_BASE = "6944652"
+    main_src = subprocess.run(["git", "show", REPORT_BODY_BASE + ":worker/report_page.js"], capture_output=True, text=True, cwd=worker_dir)
+    assert main_src.returncode == 0, "[report body unchanged] cannot read %s:worker/report_page.js (a shallow clone needs: git fetch --deepen=20): %s" % (REPORT_BODY_BASE, main_src.stderr)
     cmp_dir = pathlib.Path(tempfile.mkdtemp(prefix="r11_main_"))
     (cmp_dir / "report_page_main.mjs").write_text(
         main_src.stdout.replace('from "./report.js"', 'from "%s"' % pathlib.Path(worker_dir, "report.js").resolve().as_uri()), encoding="utf-8")
@@ -4120,7 +4123,7 @@ async def check_report_page(p, errors):
             assert o_["foot"][1:] == n_["foot"][1:] and abs(o_["foot"][0] - n_["foot"][0]) <= 1 and o_["bodyBg"] == n_["bodyBg"], "%s: footer/body differ: %s vs %s" % (tag, o_["foot"], n_["foot"])
             assert n_["sw"] <= n_["iw"], "%s: the branch page scrolls horizontally: %s" % (tag, n_)
             n_checked += len(n_["els"])
-    print("[report body unchanged] 1440x900 and 390x844, light and dark, animations off: every element under <main> (%d element checks) has the same rect (relative to <main>, within 1px) and the same computed colours/borders/shadows/fonts as origin/main; footer and body background unchanged" % n_checked)
+    print("[report body unchanged] 1440x900 and 390x844, light and dark, animations off: every element under <main> (%d element checks) has the same rect (relative to <main>, within 1px) and the same computed colours/borders/shadows/fonts as before the header change (6944652); footer and body background unchanged" % n_checked)
 
     await b.close()
     srv.shutdown()
@@ -4470,6 +4473,8 @@ async def stk_open(b, vw, vh, scheme, errs, cfg=None, hash_="#stocks", clock_ms=
     pg.on("console", lambda m: errs.append("CONSOLE %s" % m.text)
           if m.type == "error" and 'URL scheme "file" is not supported' not in m.text else None)
     await pg.add_init_script(STK_INIT_JS % _stkjson.dumps(cfg or stk_cfg()))
+    if init_extra:
+        await pg.add_init_script(init_extra)
     if clock_ms is not None:
         await pg.clock.install(time=clock_ms / 1000)
     await pg.goto(URL.rsplit("#", 1)[0] + hash_)
@@ -4662,11 +4667,15 @@ async def check_stocks(p, errors):
         focus: document.activeElement && document.activeElement.id, chain: activeChain, hash: location.hash})""")
     assert st["swap"] and not st["stocks"] and st["out"] == "TSLAc" and st["inn"] == "USDC" and st["amt"] == "" and st["amtOut"] == "" \
         and st["focus"] == "amtIn" and st["chain"] == "base", "[stocks trade] Trade must open the swap USDC -> TSLAc with an empty, focused amount: %s" % st
-    # از سولانا هم: اول شبکه به Base برمی‌گردد
+    # از سولانا: ۱۰ اکتبر به بعد جدول روی سولانا پنهان است (بلوکِ «Switch to Base» جایش)؛ کاربر اول به Base برمی‌گردد، بعد Trade
     await pg.evaluate("() => setChain('solana')")
     await pg.wait_for_timeout(300)
     await pg.evaluate("() => setView('stocks')")
     await pg.wait_for_timeout(300)
+    hid = await pg.evaluate("() => [document.getElementById('stkTable').hidden, document.getElementById('stkSolNote').hidden]")
+    assert hid == [True, False], "[stocks trade] on Solana the table is hidden behind the Switch to Base note: %s" % hid
+    await pg.click('#stkToBase')
+    await pg.wait_for_timeout(400)
     await pg.click('#view-stocks tr[data-sym="AAPLc"] .trade')
     await pg.wait_for_timeout(500)
     st = await pg.evaluate("""() => ({swap: document.getElementById('view-swap').classList.contains('on'), chain: activeChain,
@@ -4675,7 +4684,7 @@ async def check_stocks(p, errors):
     assert st["swap"] and st["chain"] == "base" and st["out"] == "AAPLc" and st["inn"] == "USDC" and st["focus"] == "amtIn", \
         "[stocks trade] from Solana, Trade must switch to Base first: %s" % st
     await pg.context.close()
-    print("[stocks trade] TSLAc Trade opens the swap view with USDC -> TSLAc and an empty, focused 'You pay' (a typed amount is cleared); from the Solana network it switches to Base first (AAPLc)")
+    print("[stocks trade] TSLAc Trade opens the swap view with USDC -> TSLAc and an empty, focused 'You pay' (a typed amount is cleared); from Solana the table waits behind 'Switch to Base', then Trade works (AAPLc)")
 
     # ---- [stocks timer] ----
     pg = await stk_open(b, 1280, 800, "light", errs, clock_ms=ms(2026, 10, 7, 15, 0))
@@ -4703,6 +4712,79 @@ async def check_stocks(p, errors):
     assert n4 == n3 + 1, "[stocks timer] and the 60 s cadence resumes: %s -> %s" % (n3, n4)
     await pg.context.close()
     print("[stocks timer] one batch on open, one more per 60 s while visible, none during 5 minutes on another view, one at once on reopening, cadence resumes")
+
+    # ---- [stocks network] ۱۰ اکتبر — مالک: انتخابِ شبکه داخلِ کارتِ Stocks، نه در هدر؛ روی سولانا جدول جای خود را به «Switch to Base» می‌دهد ----
+    NET_JS = """() => { const m = document.getElementById('srcMenu'), slot = document.getElementById('stocksNetworkSlot');
+        const card = document.querySelector('#view-stocks .card');
+        return {inSlot: !!(m && slot && slot.contains(m)), inHeader: !!(m && m.closest('body > header, header.site-header, #hdr, .hdrRight')),
+                inCard: !!(m && card && card.contains(m)), chip: !!document.querySelector('#view-stocks .tkChip'),
+                note: !document.getElementById('stkSolNote').hidden, table: !document.getElementById('stkTable').hidden,
+                cardOverflow: getComputedStyle(card).overflow}; }"""
+    for vw, vh in ((1280, 800), (390, 844)):
+        pg = await stk_open(b, vw, vh, "light", errs)
+        await stk_wait_loaded(pg)
+        n = await pg.evaluate(NET_JS)
+        assert n["inSlot"] and n["inCard"] and not n["inHeader"], "[stocks network] %d: the network control must sit inside the Stocks card, not in the header: %s" % (vw, n)
+        assert not n["chip"], "[stocks network] the static Base chip is gone (the real selector replaced it): %s" % n
+        assert n["table"] and not n["note"], "[stocks network] on Base the table shows and the Solana note is hidden: %s" % n
+        assert n["cardOverflow"] == "visible", "[stocks network] the card must not clip the network popover: %s" % n
+        # بقیه‌ی نماها هنوز همان جای خودشان را دارند
+        await pg.evaluate("() => setView('flow')")
+        await pg.wait_for_timeout(150)
+        fl = await pg.evaluate("() => document.getElementById('flowNetworkSlot').contains(document.getElementById('srcMenu'))")
+        assert fl, "[stocks network] Flow keeps its own in-card slot"
+        await pg.evaluate("() => setView('stocks')")
+        await pg.wait_for_timeout(150)
+        b0 = await pg.evaluate("() => window.__STK__.batches")
+        await pg.evaluate("() => setChain('solana')")
+        await pg.wait_for_timeout(300)
+        n = await pg.evaluate(NET_JS)
+        assert n["note"] and not n["table"] and n["inSlot"], "[stocks network] on Solana the table hides and 'Switch to Base' shows, selector still in the card: %s" % n
+        txt = await pg.evaluate("() => document.getElementById('stkSolNote').innerText")
+        assert "US stocks trade on Base" in txt and "Switch to Base" in txt, "[stocks network] note text: %r" % txt
+        await pg.click("#stkToBase")
+        await pg.wait_for_timeout(500)
+        n = await pg.evaluate(NET_JS)
+        assert n["table"] and not n["note"], "[stocks network] 'Switch to Base' brings the table back: %s" % n
+        b1 = await pg.evaluate("() => window.__STK__.batches")
+        assert b1 > b0, "[stocks network] back on Base the prices reload: %s -> %s" % (b0, b1)
+        await pg.context.close()
+    print("[stocks network] 1280 and 390: the network selector sits inside the Stocks card (not the header, no static Base chip), Flow keeps its slot; on Solana the table hides behind 'US stocks trade on Base' and 'Switch to Base' restores and reloads it")
+
+    # ---- [stocks logos] ۱۰ اکتبر — مالک: لوگوی خودِ هر سهم (image_url گِکوترمینال از همان مسیرِ tokenLogo)، حروف فقط تا رسیدنِ تصویر ----
+    # استابِ هارنس window.fetch را بعداً بازنویسی می‌کند (متای ساختگی با image_url از نوعِ data:)؛ پس هر انتسابِ بعدی هم پیچیده می‌شود.
+    LOGO_INIT = """(() => { window.__LOGO__ = {multi: 0};
+      const wrap = f0 => async function (url, opts) { const u = String(url);
+        if (u.includes('/tokens/multi/') && u.toLowerCase().includes('0xb2000000')) { window.__LOGO__.multi++;
+          const addrs = u.split('/tokens/multi/')[1].split('?')[0].split(',');
+          const data = addrs.map(a => ({id: 'base_' + a.toLowerCase(), type: 'token', attributes: {address: a.toLowerCase(), symbol: 'X', name: 'X', decimals: 8,
+            image_url: 'https://coin-images.coingecko.com/coins/images/1/large/' + a.toLowerCase() + '.png'}}));
+          return {ok: true, status: 200, headers: {get: () => null}, json: async () => ({data}), text: async () => JSON.stringify({data})}; }
+        return f0.apply(this, arguments); };
+      let cur = wrap(window.fetch);
+      Object.defineProperty(window, 'fetch', {configurable: true, get() { return cur; }, set(v) { cur = wrap(v); }}); })();"""
+    PNG1 = base64.b64decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==")
+    # فیکسچر از اولین بارگذاری نصب است (کشِ ماندگارِ gtJson جوابِ هارنس را نگه می‌داشت)؛ مسیرِ تصویر بعد از باز شدن ثبت و صفحه یک بار بازخوانی می‌شود.
+    pg = await stk_open(b, 1280, 800, "dark", errs, init_extra=LOGO_INIT)
+    await pg.context.route("https://coin-images.coingecko.com/**", lambda r: r.fulfill(status=200, content_type="image/png", body=PNG1))
+    await pg.reload()
+    await stk_wait_loaded(pg)
+    try:
+        await pg.wait_for_function("() => document.querySelectorAll('#view-stocks .av img.on').length === 10", timeout=15000)
+    except Exception:
+        dbg = await pg.evaluate("async () => ({fsrc: String(window.fetch).slice(0,80), mc: JSON.stringify(metaCache['0xb2000000000000000000001e800a7f5189430cd0']||null).slice(0,120), ls: (()=>{try{return (localStorage.getItem('zaexa.logo.v1')||'').slice(0,200)}catch(e){return 'ERR'}})(), tl: await tokenLogo(BASE_TOKENS.find(x => x.symbol === 'TSLAc')).catch(e => 'ERR ' + e), done: typeof stkLogosDone !== 'undefined' ? stkLogosDone : 'undef', chain: activeChain, view: view, multi: window.__LOGO__ && window.__LOGO__.multi, imgs: document.querySelectorAll('#view-stocks .av img').length, on: document.querySelectorAll('#view-stocks .av img.on').length, srcs: [...document.querySelectorAll('#view-stocks .av img')].slice(0,2).map(i => i.src)})")
+        raise AssertionError("[stocks logos] logos did not load: %s" % dbg)
+    lg = await pg.evaluate("""() => [...document.querySelectorAll('#view-stocks tr[data-sym]')].map(tr => { const av = tr.querySelector('.av'), img = av.querySelector('img');
+        return {sym: tr.dataset.sym, src: img ? img.src : null, letters: av.firstChild && av.firstChild.nodeType === 3 ? av.firstChild.textContent : null, fb: av.dataset.fb || null, bg: av.style.background}; })""")
+    for r in lg:
+        assert r["src"] and r["src"].endswith(".png") and "coin-images.coingecko.com" in r["src"], "[stocks logos] %s must show its own image_url: %s" % (r["sym"], r)
+        assert r["letters"] and not r["fb"] and not r["bg"], "[stocks logos] %s keeps the card's own gradient letters underneath (no seeded fallback restyle): %s" % (r["sym"], r)
+    srcs = [r["src"] for r in lg]
+    assert len(set(srcs)) == 10, "[stocks logos] ten different logos, one per stock: %s" % srcs
+    multi = await pg.evaluate("() => window.__LOGO__.multi")
+    assert multi >= 1 and multi <= 2, "[stocks logos] logos come in a batched tokens/multi request (not one per stock): %s" % multi
+    await pg.context.close()
+    print("[stocks logos] each of the 10 rows shows its own token logo from the batched tokens/multi image_url over the card's gradient letters (" + str(multi) + " request)")
 
     await b.close()
     assert not errs, "[stocks] console/page errors: %s" % errs[:5]
