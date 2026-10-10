@@ -4672,7 +4672,7 @@ async def check_stocks(p, errors):
     await pg.wait_for_timeout(300)
     await pg.evaluate("() => setView('stocks')")
     await pg.wait_for_timeout(300)
-    hid = await pg.evaluate("() => [document.getElementById('stkTable').hidden, document.getElementById('stkSolNote').hidden]")
+    hid = await pg.evaluate("() => [getComputedStyle(document.getElementById('stkTable')).display === 'none', getComputedStyle(document.getElementById('stkSolNote')).display === 'none']")
     assert hid == [True, False], "[stocks trade] on Solana the table is hidden behind the Switch to Base note: %s" % hid
     await pg.click('#stkToBase')
     await pg.wait_for_timeout(400)
@@ -4718,7 +4718,7 @@ async def check_stocks(p, errors):
         const card = document.querySelector('#view-stocks .card');
         return {inSlot: !!(m && slot && slot.contains(m)), inHeader: !!(m && m.closest('body > header, header.site-header, #hdr, .hdrRight')),
                 inCard: !!(m && card && card.contains(m)), chip: !!document.querySelector('#view-stocks .tkChip'),
-                note: !document.getElementById('stkSolNote').hidden, table: !document.getElementById('stkTable').hidden,
+                note: getComputedStyle(document.getElementById('stkSolNote')).display !== 'none', table: getComputedStyle(document.getElementById('stkTable')).display !== 'none',
                 cardOverflow: getComputedStyle(card).overflow}; }"""
     for vw, vh in ((1280, 800), (390, 844)):
         pg = await stk_open(b, vw, vh, "light", errs)
@@ -4750,6 +4750,24 @@ async def check_stocks(p, errors):
         assert b1 > b0, "[stocks network] back on Base the prices reload: %s -> %s" % (b0, b1)
         await pg.context.close()
     print("[stocks network] 1280 and 390: the network selector sits inside the Stocks card (not the header, no static Base chip), Flow keeps its slot; on Solana the table hides behind 'US stocks trade on Base' and 'Switch to Base' restores and reloads it")
+
+    # ---- [stocks hidden tab] ۱۰ اکتبر — تبی که پنهان باز شده چیزی نمی‌خواند، ولی به‌محضِ دیده‌شدن می‌خواند (نه ۶۰ ثانیه بعد) ----
+    HID_INIT = """(() => { window.__HID = true;
+      Object.defineProperty(Document.prototype, 'hidden', {configurable: true, get() { return window.__HID; }});
+      Object.defineProperty(Document.prototype, 'visibilityState', {configurable: true, get() { return window.__HID ? 'hidden' : 'visible'; }}); })();"""
+    pg = await stk_open(b, 1280, 800, "light", errs, init_extra=HID_INIT)
+    await pg.wait_for_timeout(1500)
+    h0 = await pg.evaluate("() => [window.__STK__.batches, stkData.loaded]")
+    assert h0 == [0, False], "[stocks hidden tab] a hidden tab must not read prices: %s" % (h0,)
+    await pg.evaluate("() => { window.__HID = false; document.dispatchEvent(new Event('visibilitychange')); }")
+    try:
+        await stk_wait_loaded(pg)
+    except Exception:
+        raise AssertionError("[stocks hidden tab] becoming visible did not load the prices within 20 s (it would wait for the 60 s timer)")
+    h1 = await pg.evaluate("() => window.__STK__.batches")
+    assert h1 == 1, "[stocks hidden tab] becoming visible must load at once, exactly one batch: %s" % h1
+    await pg.context.close()
+    print("[stocks hidden tab] a tab opened hidden sends no batch; the moment it becomes visible it loads once instead of waiting 60 s")
 
     # ---- [stocks logos] ۱۰ اکتبر — مالک: لوگوی خودِ هر سهم (image_url گِکوترمینال از همان مسیرِ tokenLogo)، حروف فقط تا رسیدنِ تصویر ----
     # استابِ هارنس window.fetch را بعداً بازنویسی می‌کند (متای ساختگی با image_url از نوعِ data:)؛ پس هر انتسابِ بعدی هم پیچیده می‌شود.
