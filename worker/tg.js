@@ -24,6 +24,11 @@ export const HELP_TEXT =
   "Solana: the token's mint address.\n" +
   "In a group: /check <address>, or mention me with the address.\n\n" +
   "Example:\n/check 0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913\n\n" + LAST_LINE;
+// فقط برای /start — یک خط معرفی پیش از همان راهنما
+export const START_TEXT =
+  "Zaexa is a DEX aggregator on Base and Solana. This bot runs the same exit check " +
+  "as zaexa.com: before you buy a token, see whether there is a route to sell it back.\n\n" + HELP_TEXT;
+export const REPORT_URL = "https://zaexa.com/report";
 
 /* ---------- رمزها ---------- */
 
@@ -131,26 +136,39 @@ function classify(chain, r) {
   let why = r.why;
   if (v === "sell" && chain === "base") {
     return { outcome: "sell", body: goodRet(ret)
-      ? "Sell route quoted. A $100 sell quote returned " + Math.round(ret) + "%."
-      : "Sell route quoted." };
+      ? "✓ Sell route quoted. A $100 sell quote returned " + Math.round(ret) + "%."
+      : "✓ Sell route quoted." };
   }
   if (v === "sell" && chain === "solana") {
-    if (basis !== "quote") return { outcome: "sell", body: "Passed a simulated buy and sell." };
-    return { outcome: "sell", body: "Sell route quoted, not simulated." +
+    if (basis !== "quote") return { outcome: "sell", body: "✓ Passed a simulated buy and sell." };
+    return { outcome: "sell", body: "✓ Sell route quoted, not simulated." +
       (goodRet(ret) ? " A $100 sell quote returned " + Math.round(ret) + "%." : "") };
   }
   if (v === "nosell" && chain === "base") {
-    if (cause === "empty-pool") return { outcome: "nosell", body: "No sell route quoted · pool is empty" };
-    if (cause === "sell-reverts") return { outcome: "nosell", body: "No sell route quoted · the sell reverts" };
+    if (cause === "empty-pool") return { outcome: "nosell", body: "⚠ No sell route quoted · pool is empty" };
+    if (cause === "sell-reverts") return { outcome: "nosell", body: "⚠ No sell route quoted · the sell reverts" };
     why = "cause:unproven";
   } else if (v === "nosell" && chain === "solana") {
     why = "sol:unconfirmed"; // سولانا هرگز nosell منتشر نمی‌کند
   }
-  return { outcome: "na", body: "Could not be checked\n" + plainWhy(chain, why) };
+  return { outcome: "na", body: "? Could not be checked\n" + plainWhy(chain, why) };
 }
 
-export function verdictText(chain, r) {
-  return classify(chain, r).body + "\n\n" + LAST_LINE;
+/* خطِ عنوان: نماد + شبکه. نماد فقط از فهرستِ سفید (همان قاعده‌ی متنِ گزارش)،
+   و هر نمادی که safe یا risk در خودش دارد کنار می‌رود — نامِ توکن را سازنده‌اش
+   انتخاب کرده، نه ما؛ نباید از دهانِ ربات حرفی بزند. جایگزین: آدرسِ کوتاه. */
+const SYMBOL_OK = /^[A-Za-z0-9_-]{1,16}$/;
+const CHAIN_NAME = { base: "Base", solana: "Solana" };
+export function headerLine(chain, symbol, addr) {
+  const sym = typeof symbol === "string" && SYMBOL_OK.test(symbol) && !/safe|risk/i.test(symbol) ? symbol : null;
+  const a = typeof addr === "string" ? addr : "";
+  const label = sym || (a.length > 12 ? a.slice(0, 6) + "…" + a.slice(-4) : a);
+  return label + " · " + (CHAIN_NAME[chain] || "?");
+}
+
+export function verdictText(chain, r, addr) {
+  const head = addr ? headerLine(chain, r && r.symbol, addr) + "\n" : "";
+  return head + classify(chain, r).body + "\n\n" + LAST_LINE;
 }
 
 /* ---------- مسیر ---------- */
@@ -167,7 +185,10 @@ function replyObj(message, text, address) {
     link_preview_options: { is_disabled: true },
   };
   if (address) {
-    o.reply_markup = { inline_keyboard: [[{ text: "Open on Zaexa", url: "https://zaexa.com/t/" + address }]] };
+    o.reply_markup = { inline_keyboard: [[
+      { text: "Open on Zaexa", url: "https://zaexa.com/t/" + address },
+      { text: "Daily report", url: REPORT_URL },
+    ]] };
   }
   return o;
 }
@@ -194,7 +215,7 @@ function plan(message, username) {
       const suffix = word.slice(at + 1).toLowerCase();
       if (!username || suffix !== username) return null; // مالِ بات دیگری
     }
-    if (name === "start" || name === "help") return { help: true };
+    if (name === "start" || name === "help") return { help: true, start: name === "start" };
     if (name === "check") return { extract: arg };
     return priv ? { extract: text } : null;
   }
@@ -239,7 +260,11 @@ export async function tgRoute(request, url, env, deps) {
     try { update = JSON.parse(new TextDecoder().decode(buf)); } catch (e) { return empty(200); }
     const message = update && typeof update === "object" ? update.message : null;
     if (!message || typeof message !== "object" || typeof message.text !== "string") return empty(200);
-    if (message.from && message.from.is_bot === true) return empty(200);
+    /* ادمینِ ناشناس (و پیام به نامِ کانال) از طرفِ یک رباتِ سیستمیِ تلگرام می‌آید
+       ولی sender_chat دارد — آن آدم است، نه ربات. رونوشتِ خودکارِ کانال نه. */
+    if (message.is_automatic_forward === true) return empty(200);
+    if (message.from && message.from.is_bot === true && !(message.sender_chat && typeof message.sender_chat === "object"))
+      return empty(200);
     const chat = message.chat;
     if (!chat || !["private", "group", "supergroup"].includes(chat.type)) return empty(200);
 
@@ -248,7 +273,7 @@ export async function tgRoute(request, url, env, deps) {
 
     const p = plan(message, username);
     if (!p) return empty(200);
-    if (p.help) return jsonReply(replyObj(message, HELP_TEXT));
+    if (p.help) return jsonReply(replyObj(message, p.start ? START_TEXT : HELP_TEXT));
 
     const addrs = extractAddresses(p.extract);
     if (addrs.length === 0) return jsonReply(replyObj(message, NOT_ADDRESS));
@@ -263,9 +288,9 @@ export async function tgRoute(request, url, env, deps) {
 
     let r;
     try { r = await deps.verdict(addr); } catch (e) { r = { v: null, why: "internal" }; }
-    const { outcome, body } = classify(chain, r);
+    const { outcome } = classify(chain, r);
     count(env, outcome, chain);
-    return jsonReply(replyObj(message, body + "\n\n" + LAST_LINE, addr));
+    return jsonReply(replyObj(message, verdictText(chain, r, addr), addr));
   } catch (e) {
     return empty(200);
   }

@@ -2132,16 +2132,23 @@ async function diagLogRpc(env) {
 
 /* حکمِ یک توکن برای هر مصرف‌کننده‌ی غیرِ probe (/vd و بات تلگرام) — یک مسیر،
    نه دو نسخه. آدرس باید پیشتر معتبر باشد؛ chain=null فقط دفاعی است. */
-export async function tokenVerdict(addr, env, ctx, deadlineAt) {
+export async function tokenVerdict(addr, env, ctx, deadlineAt, opts) {
   const chain = chainOf(addr);
   if (chain === "solana") {
-    const r = await solFetchVerdict(addr, deadlineAt, ctx, env);
-    return { chain, v: r.v, why: r.why, cause: r.cause, basis: r.basis, ret: r.ret };
+    /* نماد فقط برای بات خواسته می‌شود (opts.withSymbol) — /vd همان هزینه‌ی
+       امروز را می‌دهد. متادیتا هم‌زمان با حکم، نه پشتِ سرش. */
+    const want = !!(opts && opts.withSymbol);
+    const [r, m] = await Promise.all([
+      solFetchVerdict(addr, deadlineAt, ctx, env),
+      want ? ogFetchMetaDetail(addr, env).catch(() => ({ meta: null })) : Promise.resolve({ meta: null }),
+    ]);
+    return { chain, v: r.v, why: r.why, cause: r.cause, basis: r.basis, ret: r.ret,
+      symbol: m.meta && m.meta.symbol ? m.meta.symbol : undefined };
   }
   if (chain === "base") {
     const { meta, why: metaWhy } = await ogFetchMetaDetail(addr, env);
     const { v, why, cause, ret, via } = await ogFetchVerdictDetail(addr, meta, deadlineAt, env, ctx, metaWhy);
-    return { chain, v, why, cause, ret, via };
+    return { chain, v, why, cause, ret, via, symbol: meta && meta.symbol ? meta.symbol : undefined };
   }
   return { chain: null, v: null, why: "internal" };
 }
@@ -3150,7 +3157,7 @@ export default {
       return diagVerdict(request, url, env, ctx);
     /* وب‌هوکِ بات تلگرام — هیچ درخواستِ خروجی ندارد؛ جواب در بدنه‌ی پاسخ است. */
     if (url.pathname === "/tg" || url.pathname.startsWith("/tg/"))
-      return tgRoute(request, url, env, { verdict: (a) => tokenVerdict(a, env, ctx, Date.now() + OG_BUDGET_MS) });
+      return tgRoute(request, url, env, { verdict: (a) => tokenVerdict(a, env, ctx, Date.now() + OG_BUDGET_MS, { withSymbol: true }) });
     /* سوآپِ زنده‌ی سولانا — هر سه پیش از /vd بررسی نمی‌شوند چون پیشوندشان
        فرق دارد؛ ترتیب اینجا اهمیتی ندارد، فقط برای هم‌جواری با بقیه‌ی
        مسیرهای تازه نگه داشته شده. */
