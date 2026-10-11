@@ -1121,10 +1121,10 @@ const HEADER_HTML = String.raw`<header class="site-header">
     <a class="navLink" href="/app#swap" title="Swap">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
            stroke-linecap="round" stroke-linejoin="round">
-        <path d="M7 4v13M4 14l3 3 3-3M17 20V7M14 10l3-3 3 3"/></svg><span>Swap</span></a>
+        <path d="M7 4v13M4 14l3 3 3-3M17 20V7M14 10l3-3 3 3"/></svg><span data-t="Swap">Swap</span></a>
     <div class="navMenuWrap rel">
       <button class="navMarkets" id="navMarkets" type="button" aria-haspopup="menu" aria-expanded="false" title="Markets">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="M7 15l4-4 3 3 5-6"/></svg><span>Markets</span><svg class="navChev" viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></button>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="M7 15l4-4 3 3 5-6"/></svg><span data-t="Markets">Markets</span><svg class="navChev" viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></button>
       <div class="pop navMenu" id="navMenu" role="menu" aria-label="Markets">
         <a class="navItem" role="menuitem" href="/app#flow">
           <span class="navIco"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 13h4l3 7 4-16 3 9h4"/></svg></span><span class="navTxt"><span class="navTtl">Flow</span><span class="navSub">Who is buying and selling</span></span></a>
@@ -1132,11 +1132,11 @@ const HEADER_HTML = String.raw`<header class="site-header">
           <span class="navIco"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6h10M4 12h10M4 18h7"/><path d="M19 3v4M17 5h4"/></svg></span><span class="navTxt"><span class="navTtl">New pairs</span><span class="navSub">Fresh pools, exit-checked</span></span></a>
       </div>
     </div>
-    <a class="navLink" href="/app#stocks" title="Stocks"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 15l3-3 3 2 4-5"/></svg><span>Stocks</span></a>
+    <a class="navLink" href="/app#stocks" title="Stocks"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 15l3-3 3 2 4-5"/></svg><span data-t="Stocks">Stocks</span></a>
     <a class="navLink on" href="/report" title="Exit Report" aria-current="page">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
            stroke-linecap="round" stroke-linejoin="round">
-        <path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/><path d="M9 14l2 2 4-4"/></svg><span>Exit Report</span></a>
+        <path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/><path d="M9 14l2 2 4-4"/></svg><span data-t="Exit Report">Exit Report</span></a>
   </nav>
   <div class="hdrRight">
   <div class="grow"></div>
@@ -1327,6 +1327,16 @@ header>.navPad{grid-column:1;grid-row:1;width:0;min-width:0}
 .nav a svg{width:16px;height:16px;flex-shrink:0}
 .nav a:hover{color:var(--tx)}
 .nav a.on{background:var(--card);color:var(--tx);font-weight:620;box-shadow:var(--sh)}
+/* ۱۱ اکتبر — هدر عیناً فونتِ اپ را می‌گیرد (اپ Manrope ندارد؛ بدنه‌ی این صفحه دارد) تا پهنای نوار و جای دکمه‌ها بین سه صفحه یکی بماند. بدنه دست‌نخورده. */
+.site-header,#walletOv{font-family:ui-sans-serif,-apple-system,"Segoe UI",Inter,Roboto,sans-serif}
+.site-header input,#walletOv input{font-family:inherit}
+/* ۱۱ اکتبر — پهنای تبِ فعال (وزن ۶۲۰) از قبل رزرو می‌شود تا با عوض‌شدنِ تبِ فعال، پهنای نوار و جای دکمه‌های بعدی نپرد.
+   روح: ::after با همان متن، ضخیم، بی‌ارتفاع و نامرئی؛ «/ ""» متنِ جایگزین را خالی می‌کند تا صفحه‌خوان دوبار نخواند.
+   فقط در بازه‌ی برچسب‌دار (≥۱۱۲۱)؛ زیرش برچسب‌ها یا پنهان‌اند یا نوارِ موبایل flex:1 است. */
+@media(min-width:1121px){
+  #nav [data-t]{display:inline-flex;flex-direction:column}
+  #nav [data-t]::after{content:attr(data-t);content:attr(data-t) / "";font-weight:620;height:0;visibility:hidden;overflow:hidden;pointer-events:none;user-select:none}
+}
 @media(min-width:721px){.nav a span{display:inline}}
 @media(min-width:721px) and (max-width:960px){
   .nav a span{display:none}
@@ -1339,7 +1349,7 @@ header>.navPad{grid-column:1;grid-row:1;width:0;min-width:0}
 @media(max-width:720px){
   .site-header{padding:14px 14px 6px;height:auto;gap:8px}
   .logo{font-size:17px}
-  .site-header .chip{height:36px;font-size:13px}
+  .site-header .chip{height:36px;font-size:13.5px}
   .nav{position:fixed;left:0;right:0;bottom:0;z-index:60;margin:0;border-radius:0;
     padding:6px 8px calc(6px + env(safe-area-inset-bottom));gap:6px;
     background:var(--card);box-shadow:0 -1px 0 var(--line),var(--sh)}

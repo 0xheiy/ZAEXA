@@ -3608,6 +3608,96 @@ async def check_report_page(p, errors):
         await pg.wait_for_selector("#tb tr", timeout=10000)
         return pg
 
+    # ---- [header identical] ۱۱ اکتبر — هدرِ بالا روی /app (هر سه نما)، /pairs و /report دقیقاً یکی است و با عوض‌شدنِ تبِ فعال نمی‌پرد ----
+    # علتِ اندازه‌گیری‌شده: (۱) هدرِ /app فونتِ ui-sans-serif دارد ولی بدنه‌ی /pairs و /report با Manrope است → پهنای نوار و x هر دکمه فرق می‌کرد؛
+    # (۲) تبِ فعال وزن ۶۲۰ می‌گیرد و پهن‌تر می‌شود → نوار با عوض‌شدنِ تبِ فعال می‌پرید.
+    HID_JS = """() => { const q = s => document.querySelector(s);
+        const r5 = v => Math.round(v * 2) / 2;
+        const bx = e => { if (!e) return null; const x = e.getBoundingClientRect(); return [r5(x.left), r5(x.width)]; };
+        const ff = e => e ? getComputedStyle(e).fontFamily : null;
+        const nav = q('#nav'), items = {};
+        [...nav.children].forEach(e => { const el = e.tagName === 'DIV' ? e.querySelector('button') : e; items[el.getAttribute('title')] = bx(el); });
+        const labels = {};
+        [...nav.querySelectorAll('span[data-t]')].forEach(e => { labels[e.getAttribute('data-t')] = ff(e); });
+        return { logo: bx(q('.logo')), nav: bx(nav), items: items, setBtn: bx(q('#setBtn')), themeBtn: bx(q('#themeBtn')), connectBtn: bx(q('#connectBtn')),
+                 connectTxt: q('#connectBtn').textContent.trim(),
+                 fonts: { nav: ff(nav), connectBtn: ff(q('#connectBtn')), labels: labels, navTtl: ff(q('#navMenu .navTtl')), setH4: ff(q('#setPop h4')),
+                          slip: ff(q('#slipCustom')), walletPop: ff(q('#walletPop button')), walletOv: ff(q('#walletOv h3')) },
+                 manrope: [...document.fonts].some(f => f.family.replace(/['"]/g, '') === 'Manrope' && f.status === 'loaded'),
+                 ghosts: [...nav.querySelectorAll('span[data-t]')].map(e => getComputedStyle(e, '::after').content) }; }"""
+    async def hid_open(vw, vh, path):
+        pg = await b.new_page(viewport={"width": vw, "height": vh}, color_scheme="light")
+        pg.on("pageerror", lambda e: errs.append("PAGEERROR %s" % e))
+        await pg.add_init_script("localStorage.setItem(%s, %s);" % (_j.dumps(theme_key), _j.dumps("light")))
+        async def hid_stub(route):
+            u = route.request.url
+            if not u.startswith(origin):
+                return await route.abort()
+            if "pairs.json" in u:
+                return await route.fulfill(status=200, content_type="application/json", body='{"chain":"base","rows":[],"store":true}')
+            if "/gt/" in u or "/vd/" in u or "/sol/" in u:
+                return await route.fulfill(status=200, content_type="application/json", body="{}")
+            if u.endswith("/ev"):
+                return await route.fulfill(status=204, body="")
+            return await route.continue_()
+        await pg.route("**/*", hid_stub)
+        await pg.goto(origin + path)
+        await pg.wait_for_selector("#nav", timeout=10000)
+        await pg.wait_for_timeout(900)
+        await pg.evaluate("() => document.fonts.ready")
+        return pg
+    def hid_diff(a, ref, tol=0.5, skip=()):
+        out = []
+        for k in tuple(x for x in ("logo", "nav", "setBtn", "themeBtn", "connectBtn") if x not in skip):
+            if a[k] is None or ref[k] is None or any(abs(u - v) > tol for u, v in zip(a[k], ref[k])):
+                out.append("%s %s vs %s" % (k, a[k], ref[k]))
+        if sorted(a["items"]) != sorted(ref["items"]):
+            out.append("nav items %s vs %s" % (sorted(a["items"]), sorted(ref["items"])))
+        for t, v in a["items"].items():
+            if t in ref["items"] and any(abs(u - w) > tol for u, w in zip(v, ref["items"][t])):
+                out.append("nav item %s %s vs %s" % (t, v, ref["items"][t]))
+        if a["fonts"] != ref["fonts"]:
+            out.append("computed font-family %s vs %s" % (a["fonts"], ref["fonts"]))
+        return out
+    HID_STATES = (("/app#swap", "app#swap"), ("/app#stocks", "app#stocks"), ("/app#flow", "app#flow"), ("/pairs", "pairs"), ("/report", "report"))
+    hid_nav = {}
+    for vw, vh in ((1906, 900), (1280, 800), (390, 844)):
+        ref = None
+        for path, name in HID_STATES:
+            pg = await hid_open(vw, vh, path)
+            m = await pg.evaluate(HID_JS)
+            await pg.close()
+            tag = "[header identical] %dx%d %s" % (vw, vh, name)
+            assert m["connectTxt"] == "Connect wallet", "%s: the probe needs the 'Connect wallet' state, got %r" % (tag, m["connectTxt"])
+            if name in ("pairs", "report"):
+                assert m["manrope"], "%s: the embedded Manrope did not load, so this probe could not see a font difference" % tag
+            if name == "app#swap":
+                ref = m
+            d = hid_diff(m, ref)
+            assert not d, "%s differs from /app#swap: %s" % (tag, d)
+            if vw >= 1121:
+                assert m["ghosts"] and all(g not in ("none", "normal") for g in m["ghosts"]), "%s: the bold ghost is missing on a nav label: %s" % (tag, m["ghosts"])
+            hid_nav[(vw, name)] = m["nav"][1]
+    print("[header identical] 1906x900, 1280x800 and 390x844, light: logo, nav, every nav item, settings, theme and 'Connect wallet' (x and width, 0.5 px) and the computed font-family of nav, labels, popovers and the connect button are equal on /app (swap, stocks, flow), /pairs and /report; Manrope verified loaded on /pairs and /report; nav width 1906 app#swap %s vs report %s" % (hid_nav[(1906, "app#swap")], hid_nav[(1906, "report")]))
+
+    # ---- [nav width stable] با عوض‌شدنِ تبِ فعال روی /app (Swap → Stocks → Flow) پهنای نوار و x هر آیتم ثابت می‌ماند ----
+    for vw, vh in ((1906, 900), (1280, 800), (390, 844)):
+        pg = await hid_open(vw, vh, "/app#swap")
+        seq = []
+        for step, js in (("swap", "() => document.querySelector('#nav button[data-view=\"swap\"]').click()"),
+                         ("stocks", "() => document.querySelector('#nav button[data-view=\"stocks\"]').click()"),
+                         ("flow", "() => document.querySelector('#navMenu [data-view=\"flow\"]').click()")):
+            await pg.evaluate(js)
+            await pg.wait_for_timeout(500)
+            on = await pg.evaluate("() => [...document.querySelectorAll('#nav .on, #nav #navMarkets[style]')].map(e => e.getAttribute('title') || e.id).join(',')")
+            m = await pg.evaluate(HID_JS)
+            seq.append((step, on, m))
+        await pg.close()
+        for step, on, m in seq[1:]:
+            d = hid_diff(m, seq[0][2])
+            assert not d, "[nav width stable] %dx%d: switching the active tab %s -> %s moved the header: %s" % (vw, vh, seq[0][0], step, d)
+    print("[nav width stable] 1906x900, 1280x800 and 390x844: switching the active tab Swap -> Stocks -> Flow on /app leaves the nav width and every item x (0.5 px) unchanged")
+
     ROWS_JS = "() => document.querySelectorAll('#tb tr').length"
     CHIP_JS = """() => Object.fromEntries([...document.querySelectorAll('#filters .chip')].map(c =>
         [c.dataset.g + ':' + c.dataset.k, +c.querySelector('span').textContent]))"""

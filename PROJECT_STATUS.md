@@ -18,7 +18,7 @@
 ## ۰. کارهای باز — به‌روز ۱۰ اکتبر ۲۰۲۶، به ترتیب
 
 فقط کارهای انجام‌نشده و تصمیم‌های ثابت. کارهای تمام‌شده در تاریخچه‌ی گیت هستند (آخرین: «Base wallet: same restore rule on app, pairs and report…; market watch updates in place…»).
-سوییت رابط **۷۵۲ کاوشگر** سبز (`python3 web/test/run.py`، ۲۰ دقیقه یا بیشتر — در پس‌زمینه اجرا کن)؛ به‌علاوه‌ی `worker/test.mjs`، `worker/og_live_test.mjs`، `worker/solana-parity.test.mjs`،
+سوییت رابط **۷۵۴ کاوشگر** سبز (`python3 web/test/run.py`، ۲۰ دقیقه یا بیشتر — در پس‌زمینه اجرا کن)؛ به‌علاوه‌ی `worker/test.mjs`، `worker/og_live_test.mjs`، `worker/solana-parity.test.mjs`،
 شش `web/test/solana-*.test.mjs` و چهار آزمونِ مرورگر (`solana-parity-browser.py`، `solana-views-browser.py`،
 `solana-pairs-browser.py`، `market-workspace-browser.py` — از ریشه‌ی مخزن؛ `scripts/solana-wallet` باید `npm ci` شده باشد).
 ⚠️ کاوشگرِ `[report body unchanged]` بدنه‌ی گزارش را با کامیتِ ثابتِ `6944652` می‌سنجد؛ کلونِ کم‌عمق اول `git fetch --deepen=20` می‌خواهد.
@@ -83,6 +83,8 @@
 **/report و سولانا** (۱۱ اکتبر) — هدرِ گزارش زنجیره را از `?chain=` و بعد `zaexa.chain.v1` می‌خواند. روی سولانا `window.__zxForceSol` و بسته‌ی `web/pairs-solana.9ab7ff67.js` (همان بسته‌ی /pairs، فقط `isSol()` پرچم را هم می‌پذیرد؛ نسخه‌ی b2469be4 برای کلاینت‌های کش‌شده می‌ماند) — هیچ `eth_accounts`، هیچ بازیابیِ Base. قاعده‌ی `.chip` محتوای گزارش به `main .chip` محدود شد تا به دکمه‌ی هدر نخورد (`[report chip parity]`).
 
 **سواپِ سولانا** (۱۱ اکتبر) — ۴۲۹ِ ژوپیتر روی ساختِ تراکنش یک‌بار با ۱۱۰۰ms تکرار می‌شود (کلید ≈ ۱ درخواست در ثانیه). کیف‌پولی که جواب نمی‌دهد (مثلاً بعد از بستنِ پنجره‌ی قرمزِ فانتوم وقتی Pocket Universe روشن است): ۴ث بعد از برگشتِ فوکوس یا ۱۲۰ث، کارت آزاد می‌شود؛ امضای دیر فقط برای همان سواپ ادامه می‌دهد. وضعیت با `searchTransactionHistory` تا ۳ دقیقه؛ گذشتنِ `lastValidBlockHeight` (از `getEpochInfo`) → «Not executed … No funds moved». ریورتِ Custom 6001 → جمله‌ی لغزش. شاهد: tx 3N94Dz…kBe2 نهایی با `{InstructionError:[4,{Custom:6001}]}`. پنجره‌ی قرمزِ «Request blocked» فانتوم فقط با Pocket Universe روشن دیده شد (ضبطِ ۱۱ اکتبر)، بدونِ آن فقط هشدارِ زردِ دامنه‌ی تازه.
+
+**هدرِ یکسان** (۱۲ اکتبر) — نوارِ بالا روی /app، /pairs و /report باید پیکسل‌به‌پیکسل یکی باشد (`[header identical]` در ۱۹۰۶، ۱۲۸۰ و ۳۹۰). دو علتِ جابه‌جایی: بدنه‌ی /pairs و /report فونتِ Manrope دارد و اپ فونتِ سیستم → هدرِ آن دو صفحه حالا فونتِ اپ را می‌گیرد (بدنه همان Manrope)؛ و تبِ فعال وزنِ ۶۲۰ دارد و پهن‌تر است → هر برچسب `data-t` و یک روحِ نامرئیِ ضخیم دارد که پهنا را رزرو می‌کند (فقط ≥۱۱۲۱px). اندازه‌ی چیپ‌های هدر در موبایل ۱۳٫۵px مثلِ اپ.
 
 **گیرنده‌ی خطای سراسری** — ردِ بی‌پشته‌ای که Error نیست و `code` عددی دارد (شکلِ ردِ EIP-1193ِ یک provider) فقط شمرده می‌شود (`countOnly`)، بنر نمی‌آید. نمونه: `E-PR-87AD` = «wallet_getCapabilities does not exist» از اسکریپتی بیرون از کدِ ما.
 

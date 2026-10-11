@@ -535,6 +535,13 @@ header>.navPad{grid-column:1;grid-row:1;width:0;min-width:0}
 .nav button svg,.nav .navLink svg{width:16px;height:16px;flex-shrink:0}
 .nav button:hover,.nav .navLink:hover{color:var(--tx)}
 .nav button.on{background:var(--card);color:var(--tx);font-weight:620;box-shadow:var(--shs)}
+/* ۱۱ اکتبر — پهنای تبِ فعال (وزن ۶۲۰) از قبل رزرو می‌شود تا با عوض‌شدنِ تبِ فعال، پهنای نوار و جای دکمه‌های بعدی نپرد.
+   روح: ::after با همان متن، ضخیم، بی‌ارتفاع و نامرئی؛ «/ ""» متنِ جایگزین را خالی می‌کند تا صفحه‌خوان دوبار نخواند.
+   فقط در بازه‌ی برچسب‌دار (≥۱۱۲۱)؛ زیرش برچسب‌ها یا پنهان‌اند یا نوارِ موبایل flex:1 است. */
+@media(min-width:1121px){
+  #nav [data-t]{display:inline-flex;flex-direction:column}
+  #nav [data-t]::after{content:attr(data-t);content:attr(data-t) / "";font-weight:620;height:0;visibility:hidden;overflow:hidden;pointer-events:none;user-select:none}
+}
 /* --- موبایل ---
    هدر روی نمایشگر باریک جا نمی‌شد و کل صفحه را به پهلو می‌کشید.
    راه‌حل: ناوبری از هدر به نوار پایین منتقل می‌شود (دم‌دست انگشت شست)،
@@ -1567,13 +1574,13 @@ html:not(.ctaReady) #actBtn:disabled,html:not(.ctaReady) #solSwapBtn:disabled{ba
     <button data-view="swap" class="on" title="Swap">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
            stroke-linecap="round" stroke-linejoin="round">
-        <path d="M7 4v13M4 14l3 3 3-3M17 20V7M14 10l3-3 3 3"/></svg><span>Swap</span></button>
+        <path d="M7 4v13M4 14l3 3 3-3M17 20V7M14 10l3-3 3 3"/></svg><span data-t="Swap">Swap</span></button>
     <!-- ۶ اکتبر — مالک: «Markets» یک تبِ بازشو است (Flow و New pairs زیرش)؛ «Portfolio» به منوی والت رفت؛
          «Stocks» از ۷ اکتبر تبِ واقعی است و پیش از Exit Report می‌نشیند. منو داخلِ همین ردیفِ nav
          می‌نشیند (navMenuWrap) تا nav یک ردیفِ فلکس بماند. -->
     <div class="navMenuWrap rel">
       <button class="navMarkets" id="navMarkets" type="button" aria-haspopup="menu" aria-expanded="false" title="Markets">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="M7 15l4-4 3 3 5-6"/></svg><span>Markets</span><svg class="navChev" viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></button>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="M7 15l4-4 3 3 5-6"/></svg><span data-t="Markets">Markets</span><svg class="navChev" viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></button>
       <div class="pop navMenu" id="navMenu" role="menu" aria-label="Markets">
         <button class="navItem" role="menuitem" data-view="flow">
           <span class="navIco"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 13h4l3 7 4-16 3 9h4"/></svg></span><span class="navTxt"><span class="navTtl">Flow</span><span class="navSub">Who is buying and selling</span></span></button>
@@ -1582,11 +1589,11 @@ html:not(.ctaReady) #actBtn:disabled,html:not(.ctaReady) #solSwapBtn:disabled{ba
       </div>
     </div>
     <button data-view="stocks" title="Stocks">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 15l3-3 3 2 4-5"/></svg><span>Stocks</span></button>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 15l3-3 3 2 4-5"/></svg><span data-t="Stocks">Stocks</span></button>
     <a class="navLink" href="/report" title="Exit Report">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
            stroke-linecap="round" stroke-linejoin="round">
-        <path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/><path d="M9 14l2 2 4-4"/></svg><span>Exit Report</span></a>
+        <path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/><path d="M9 14l2 2 4-4"/></svg><span data-t="Exit Report">Exit Report</span></a>
   </nav>
   <!-- ۲۹ اوت: خوشه‌ی راست حالا یک واحد است (`.hdrRight`) تا در ستونِ سوم
        چیدمانِ سه‌ستونه‌ی هدر بنشیند — نه برای اینکه چیزی جابه‌جا شود، فقط
