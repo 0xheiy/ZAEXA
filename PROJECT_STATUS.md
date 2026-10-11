@@ -17,8 +17,8 @@
 
 ## ۰. کارهای باز — به‌روز ۱۰ اکتبر ۲۰۲۶، به ترتیب
 
-فقط کارهای انجام‌نشده و تصمیم‌های ثابت. کارهای تمام‌شده در تاریخچه‌ی گیت هستند (آخرین: «Stocks: per-chain data-driven lists — Base 12, Solana 19»).
-سوییت رابط **۷۲۹ کاوشگر** سبز (`python3 web/test/run.py`، ۲۰ دقیقه یا بیشتر — در پس‌زمینه اجرا کن)؛ به‌علاوه‌ی `worker/test.mjs`، `worker/og_live_test.mjs`، `worker/solana-parity.test.mjs`،
+فقط کارهای انجام‌نشده و تصمیم‌های ثابت. کارهای تمام‌شده در تاریخچه‌ی گیت هستند (آخرین: «Base wallet: same restore rule on app, pairs and report…; market watch updates in place…»).
+سوییت رابط **۷۳۵ کاوشگر** سبز (`python3 web/test/run.py`، ۲۰ دقیقه یا بیشتر — در پس‌زمینه اجرا کن)؛ به‌علاوه‌ی `worker/test.mjs`، `worker/og_live_test.mjs`، `worker/solana-parity.test.mjs`،
 شش `web/test/solana-*.test.mjs` و چهار آزمونِ مرورگر (`solana-parity-browser.py`، `solana-views-browser.py`،
 `solana-pairs-browser.py`، `market-workspace-browser.py` — از ریشه‌ی مخزن؛ `scripts/solana-wallet` باید `npm ci` شده باشد).
 ⚠️ کاوشگرِ `[report body unchanged]` بدنه‌ی گزارش را با کامیتِ ثابتِ `6944652` می‌سنجد؛ کلونِ کم‌عمق اول `git fetch --deepen=20` می‌خواهد.
@@ -64,9 +64,13 @@
 - مبلغِ دریافتی (ExactOut): اگر ژوپیتر نتوانست، `solSolveForOutput` با حداکثر ۵ کوتِ ExactIn مبلغِ پرداخت را حل می‌کند؛ نتیجه ≥ هدف و معمولاً ≤۱٪ بیشتر؛ اجرا ExactIn با حداقلِ دریافتی.
 
 **Base — کیف‌پول**
+- اتصالِ خودکارِ بی‌صدا روی هر سه صفحه (اپ، /pairs، /report) با یک قاعده: فقط کیف‌پولِ `zaexa.base.wallet`؛ تا ۱۱ اکتبر /pairs و /report به هر والتی که `eth_accounts` جواب می‌داد وصل می‌شدند (همان باگِ فانتوم؛ «Switch to Base» روی گزارش). اتصالِ صریح کلید را می‌نویسد، Disconnect پاکش می‌کند.
+- بینِ صفحه‌ها چیپِ آدرس با `aria-busy` از رکوردِ `sessionStorage` `zaexa.basesession.v1` ({key,address,t}، ۳۰ دقیقه) همان لحظه کشیده می‌شود (همتای `zaexa.solsession.v1`)؛ هرگز `account` را نمی‌گذارد؛ شکست یا ۴ ثانیه → «Connect wallet» و پاک‌شدنِ رکورد. در اپ بازیابی موازی با دروازه‌ها شروع می‌شود، نه آخرِ راه‌اندازی.
 - اتصالِ خودکارِ بی‌صدا فقط به کیف‌پولی که کاربر آخرین بار صریحاً برای Base انتخاب کرده (`localStorage` `zaexa.base.wallet`؛ Disconnect پاکش می‌کند). علت: فانتوم با اجازه‌ی سولانا روی Base هم `eth_accounts` می‌داد.
 - فانتوم (EVM) `wallet_revokePermissions` ندارد (۶ اکتبر روی کیف‌پولِ حسام سنجیده شد) → قطعِ کامل فقط با حذفِ زائکسا از «Trusted apps» خودِ فانتوم. فانتوم برای سایتِ مورد اعتماد آدرس را بی‌رمز می‌دهد؛ امضا رمز می‌خواهد (حسام تأیید کرد). از سمتِ سایت درست‌شدنی نیست — دوباره دنبالش نرو.
 - ردِ تغییرِ شبکه (`switchNetwork`) هرگز throw نمی‌کند: پیامِ «Network switch cancelled in your wallet.».
+
+**نوارِ Market watch** — یک بار ساخته می‌شود و فقط عدد/اسپارک/کلاس در جا عوض می‌شود؛ آواتار فقط با تغییرِ آدرسِ لوگو؛ آدرسِ لوگوها در `localStorage` `zaexa.watchlogo.v1`. (تا ۱۱ اکتبر هر به‌روزرسانی innerHTML می‌ریخت و لوگوها حرف↔لوگو چشمک می‌زدند.) `html{scrollbar-gutter:stable}` روی اپ، /pairs و /report تا هدر بینِ صفحه‌ها نپرد.
 
 **گیرنده‌ی خطای سراسری** — ردِ بی‌پشته‌ای که Error نیست و `code` عددی دارد (شکلِ ردِ EIP-1193ِ یک provider) فقط شمرده می‌شود (`countOnly`)، بنر نمی‌آید. نمونه: `E-PR-87AD` = «wallet_getCapabilities does not exist» از اسکریپتی بیرون از کدِ ما.
 

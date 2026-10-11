@@ -3979,8 +3979,9 @@ async def check_report_page(p, errors):
     print("[report header parity] 1440x900 and 390x844, light and dark: /report's app header matches /pairs element for element (ids/classes of logo, nav, settings, theme, wallet, popovers), same header height, logo, nav, tab and button rects within 1px and the same computed background/shadow; only the active tab (Exit Report vs Markets, compared with pairs' active look moved onto Exit Report) and the tab order differ")
 
     # ---- [report wallet] چیپِ اتصال روی /report: picker، اتصال، هرگز سوییچِ زنجیره یا تراکنش ----
-    def wallet_script(authorized):
-        return """
+    def wallet_script(authorized, stored_key=False):
+        # ۱۱ اکتبر: بازیابیِ بی‌صدا فقط از والتی است که کاربر برای Base انتخاب کرده (zaexa.base.wallet) — فیکسچرِ «قبلاً مجاز» حالا آن کلید را هم دارد
+        return ("localStorage.setItem('zaexa.base.wallet','test.fake');" if stored_key else "") + """
             window.__m = [];
             (function(){
                 var auth = %s, ADDR = '0x1234567890abcdef1234567890abcdef12345678';
@@ -4028,7 +4029,7 @@ async def check_report_page(p, errors):
     assert not (set(after["m"]) & BAD) and set(after["m"]) <= {"eth_accounts", "eth_requestAccounts", "wallet_revokePermissions"}, "[report wallet] only account requests may reach the wallet, never a chain switch or a transaction: %s" % after["m"]
     await pg.close()
     # a wallet that already authorised the site: silent restore with eth_accounts only
-    pg = await open_report(1440, 900, init=wallet_script(True))
+    pg = await open_report(1440, 900, init=wallet_script(True, True))
     await pg.wait_for_timeout(600)
     r2 = await pg.evaluate("() => [document.getElementById('connectBtn').textContent, window.__m]")
     assert r2[0] == SHORT and set(r2[1]) == {"eth_accounts"}, "[report wallet] a previously authorised wallet restores silently with eth_accounts only: %s" % r2
@@ -4107,7 +4108,8 @@ async def check_report_page(p, errors):
         await pg.route("**/*", lambda route: route.continue_() if route.request.url.startswith(origin) else route.abort())
         await pg.goto(origin + path)
         await pg.wait_for_selector("#tb tr", timeout=10000)
-        await pg.add_style_tag(content="*,*::before,*::after{animation:none!important;transition:none!important}")
+        # ۱۱ اکتبر: html{scrollbar-gutter:stable} عمداً به صفحه‌ی تازه اضافه شد (هدر بین صفحه‌ها نپرد)؛ برای اینکه این کاوشگر همچنان فقط «بدنه تغییر نکرده» را بسنجد، شیار در هر دو طرف خنثی می‌شود
+        await pg.add_style_tag(content="*,*::before,*::after{animation:none!important;transition:none!important}html{scrollbar-gutter:auto!important}")
         await pg.wait_for_timeout(500)
         res = await pg.evaluate(BODYJS)
         await pg.close()
@@ -5380,6 +5382,410 @@ async def check_stocks(p, errors):
     print("[stocks] no console or page errors across the nav, view, edges, fail, trade and timer pages")
 
 
+async def check_wallet_watch(p, errors):
+    """۱۱ اکتبر — والتِ Base روی سه صفحه (قاعده‌ی یکسان + چیپِ خوش‌بینانه) و نوارِ بازارِ /app (ساخت یک‌بار، به‌روزرسانی درجا).
+
+    هر سه صفحه از یک سرورِ هم‌مبدأ می‌آیند (/app = هارنسِ استاب، /pairs، و /report از renderReportPage واقعی، با CSPِ web/_headers)؛
+    والتِ جعلی با EIP-6963 معرفی می‌شود و تأخیرِ eth_accounts قابل‌تنظیم است. هدر از اولین لحظه با MutationObserver و تایمر ۱۰ms نمونه‌برداری می‌شود."""
+    import functools, http.server, json as _j, subprocess, tempfile, threading
+
+    worker_dir = os.path.join(HERE, "..", "..", "worker")
+    out_dir = tempfile.mkdtemp(prefix="ww_page_")
+    html_path = os.path.join(out_dir, "report.html")
+    gen = """
+    import fs from "node:fs";
+    import { renderReportPage } from "./report_page.js";
+    fs.writeFileSync(process.argv[1], renderReportPage({ date: "2026-10-04", today: "2026-10-04", firstDate: "2026-09-08", rows: [], history: [] }));
+    """
+    r = subprocess.run(["node", "--input-type=module", "-e", gen, html_path], capture_output=True, text=True, cwd=worker_dir)
+    assert r.returncode == 0, "[wallet watch] could not render the /report fixture:\n%s" % r.stderr
+    report_html = open(html_path, "rb").read()
+    hdrs = parse_headers_blocks(open(os.path.join(HERE, "..", "_headers"), encoding="utf-8").read())
+    star = {ln.split(":", 1)[0].strip().lower(): ln.split(":", 1)[1].strip() for ln in hdrs["/*"]}
+    csp = star["content-security-policy"]
+
+    class Quiet(http.server.SimpleHTTPRequestHandler):
+        def log_message(self, *a):
+            pass
+
+        def do_GET(self):
+            clean = self.path.split("?")[0]
+            if clean == "/report":
+                self.send_response(200)
+                self.send_header("Content-Type", "text/html; charset=utf-8")
+                self.send_header("Content-Security-Policy", csp)
+                self.send_header("Content-Length", str(len(report_html)))
+                self.end_headers()
+                self.wfile.write(report_html)
+                return
+            return super().do_GET()
+
+        def translate_path(self, path):
+            clean = path.split("?")[0]
+            if clean in ("/app", "/app/"):
+                return os.path.join(HERE, "harness.html")
+            if clean == "/pairs":
+                return os.path.join(HERE, "..", "pairs.html")
+            if clean == "/stub-ethers.js":
+                return os.path.join(HERE, "stub-ethers.js")
+            return super().translate_path(path)
+
+    srv = http.server.ThreadingHTTPServer(("127.0.0.1", 0), functools.partial(Quiet, directory=os.path.join(HERE, "..")))
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    origin = "http://127.0.0.1:%d" % srv.server_address[1]
+    b = await p.chromium.launch()
+    errs = []
+    png = tiny_png_bytes()
+
+    ADDR = "0x1234567890abcdef1234567890abcdef12345678"
+    SHORT = ADDR[:6] + "…" + ADDR[-4:]
+    ADDR_B = "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+    SHORT_B = ADDR_B[:6] + "…" + ADDR_B[-4:]
+
+    # ---- فیکسچرهای صفحه ----
+    def wallets_script(wallets):
+        # wallets: [{rdns, name, addr, delay, empty}] — delay فقط روی eth_accounts اعمال می‌شود
+        return """
+        window.__calls = {};
+        (function(){
+            var W = %s;
+            W.forEach(function(w){
+                window.__calls[w.rdns] = [];
+                w.provider = { request: function(a){
+                    window.__calls[w.rdns].push(a && a.method);
+                    if (a.method === 'eth_accounts' || a.method === 'eth_requestAccounts'){
+                        var res = (w.empty && a.method === 'eth_accounts') ? [] : [w.addr];
+                        return new Promise(function(r){ setTimeout(function(){ r(res); }, a.method === 'eth_accounts' ? (w.delay || 0) : 0); });
+                    }
+                    if (a.method === 'eth_chainId') return Promise.resolve('0x2105');
+                    return Promise.resolve(null);
+                }, on: function(){}, removeListener: function(){} };
+            });
+            window.addEventListener('eip6963:requestProvider', function(){
+                W.forEach(function(w){
+                    window.dispatchEvent(new CustomEvent('eip6963:announceProvider', { detail: { info: { name: w.name, rdns: w.rdns, uuid: 'u-' + w.rdns }, provider: w.provider } }));
+                });
+            });
+        })();
+        """ % _j.dumps(wallets)
+
+    def ethers_patch_script(gate_delay_ms=0):
+        # استابِ ethers BrowserProvider.getNetwork ندارد؛ بدونِ آن اتصالِ «کامل» در هارنس تمام نمی‌شود.
+        # gate_delay_ms: getCode (همان که دروازه‌های صرافی با آن می‌پرسند) را این‌قدر عقب می‌اندازد.
+        return """
+        (function(){ var _e;
+            Object.defineProperty(window, 'ethers', { configurable: true, get: function(){ return _e; }, set: function(v){
+                _e = v;
+                if (v && v.BrowserProvider) v.BrowserProvider = function(){ this.getNetwork = async function(){ return { chainId: 8453n }; }; };
+                if (v && v.JsonRpcProvider && %d){ var g = v.JsonRpcProvider.prototype.getCode;
+                    v.JsonRpcProvider.prototype.getCode = async function(){ await new Promise(function(r){ setTimeout(r, %d); }); return g.apply(this, arguments); }; }
+            } });
+        })();
+        """ % (gate_delay_ms, gate_delay_ms)
+
+    SAMPLER = """
+    window.__s = [];
+    // لحظه‌ای که اسکریپتِ درون‌خطیِ کنارِ دکمه اجرا شد (برای شرط «آدرسِ خوش‌بینانه» ثبت می‌شود): پارسر ممکن است زیرِ بار بینِ دکمه و اسکریپتش
+    // یک تایمر را اجرا کند؛ آن نمونه‌ی پیش از اسکریپت رنگ‌شده نیست و شاملِ ادعا نمی‌شود.
+    Object.defineProperty(window, '__zxBasePend', { configurable: true, get: function(){ return window.__pv; },
+        set: function(v){ window.__pv = v; if (v && !window.__pendAt) window.__pendAt = Math.round(performance.now()); } });
+    (function(){
+        // ۱۰ms تایمر + هر فرصتِ رنگ‌آمیزی (rAF). MutationObserver عمداً نیست: در میانِ پارس، پیش از اجرای اسکریپتِ درون‌خطیِ کنارِ دکمه
+        // یک چک‌پوینتِ میکروتسک می‌افتد و متنِ ثابتِ HTML را نشان می‌دهد که هرگز رنگ نمی‌شود.
+        function snap(){ var bt = document.getElementById('connectBtn'); if (!bt) return;
+            window.__s.push({ t: Math.round(performance.now()), txt: bt.textContent.trim(), busy: bt.getAttribute('aria-busy') }); }
+        setInterval(snap, 10);
+        (function raf(){ snap(); requestAnimationFrame(raf); })();
+    })();
+    """
+
+    def seed_script(key="test.a", addr=ADDR, age_ms=0, stored=True, record=True, disconnected=False):
+        js = ""
+        if stored:
+            js += "try{localStorage.setItem('zaexa.base.wallet', %s);}catch(e){}" % _j.dumps(key)
+        if record:
+            js += "try{sessionStorage.setItem('zaexa.basesession.v1', JSON.stringify({key:%s,address:%s,t:Date.now()-%d}));}catch(e){}" % (_j.dumps(key), _j.dumps(addr), age_ms)
+        if disconnected:
+            js += "try{localStorage.setItem('zaexa.disconnected','1');}catch(e){}"
+        return js
+
+    gt_state = {"epoch": 0, "multi": 0, "multi_delay": 0.0, "paths": []}
+
+    async def gt_route(route):
+        u = route.request.url
+        path = u.split("/gt", 1)[1].split("?")[0]
+        gt_state["paths"].append(path)
+        hdr = {"x-zaexa-proxy": "1"}
+        m = re.match(r"^/networks/(base|solana)/tokens/multi/(.+)$", path)
+        if m:
+            gt_state["multi"] += 1
+            if gt_state["multi_delay"]:
+                await asyncio.sleep(gt_state["multi_delay"])
+            chain, addrs = m.group(1), m.group(2).split(",")
+            body = {"data": [{"attributes": {"address": a, "price_usd": "%.4f" % (100 + i), "image_url": "https://logos.test/%s/%s.png" % (chain, a)}} for i, a in enumerate(addrs)]}
+            return await route.fulfill(status=200, content_type="application/json", headers=hdr, body=_j.dumps(body))
+        m = re.match(r"^/networks/(base|solana)/tokens/([^/]+)/pools$", path)
+        if m:
+            chain, a = m.group(1), m.group(2)
+            body = {"data": [{"id": "%s_pool%s" % (chain, a[-6:]), "attributes": {"address": "pool" + a[-6:]},
+                              "relationships": {"base_token": {"data": {"id": "%s_%s" % (chain, a)}}, "quote_token": {"data": {"id": "%s_other" % chain}}}}]}
+            return await route.fulfill(status=200, content_type="application/json", headers=hdr, body=_j.dumps(body))
+        m = re.match(r"^/networks/(base|solana)/pools/([^/]+)/ohlcv/hour$", path)
+        if m:
+            gt_state["epoch"] += 1
+            now = int(__import__("time").time())
+            lst = [[now - (24 - i) * 3600, 0, 0, 0, 100 + i * 0.5 + (i % 3) * gt_state["epoch"], 0] for i in range(25)]
+            return await route.fulfill(status=200, content_type="application/json", headers=hdr, body=_j.dumps({"data": {"attributes": {"ohlcv_list": lst}}}))
+        return await route.fulfill(status=200, content_type="application/json", headers=hdr, body='{"data":[]}')
+
+    async def open_pg(path, init="", viewport=None):
+        pg = await b.new_page(viewport=viewport or {"width": 1280, "height": 900})
+        def on_msg(m):
+            if m.type == "error" and (m.location.get("url") or "").startswith(origin):
+                errs.append("[%s] %s" % (path, m.text))
+        pg.on("console", on_msg)
+        pg.on("pageerror", lambda e: errs.append("[%s] PAGEERROR %s" % (path, e)))
+        await pg.add_init_script(init)
+        async def other(route):
+            u = route.request.url
+            if u.startswith("https://logos.test/"):
+                return await route.fulfill(status=200, content_type="image/png", headers={"cache-control": "max-age=3600"}, body=png)
+            if u.startswith(origin):
+                return await route.continue_()
+            return await route.abort()
+        await pg.route("**/*", other)
+        await pg.route("**/gt/**", gt_route)
+        await pg.route("**/ev", lambda r: r.fulfill(status=204, body=""))
+        await pg.route("**/vd/**", lambda r: r.fulfill(status=200, content_type="application/json", body='{"v":"sell","ms":100}'))
+        await pg.route("**/sol/**", lambda r: r.fulfill(status=200, content_type="application/json", body='{"result":null}'))
+        await pg.route("**/pairs.json**", lambda r: r.fulfill(status=200, content_type="application/json", body='{"chain":"base","rows":[],"store":true}'))
+        await pg.goto(origin + path)
+        return pg
+
+    PAGES = [("/app", "/app#swap"), ("/pairs", "/pairs"), ("/report", "/report")]
+    GET_S = "() => window.__s"
+    FINAL = "(s) => { const bt = document.getElementById('connectBtn'); return bt && bt.textContent.trim() === s && !bt.hasAttribute('aria-busy'); }"
+    n_err = len(errs)
+
+    # ---- [base pending chip] ----
+    summary = []
+    for name, url in PAGES:
+        base_init = ethers_patch_script() + SAMPLER
+        # (a) والت با تأخیر ۶۰۰ms جواب می‌دهد: «Connect wallet» هرگز دیده نمی‌شود، aria-busy تا اتصال می‌ماند، پایان = آدرس
+        pg = await open_pg(url, base_init + seed_script() + wallets_script([{"rdns": "test.a", "name": "Wallet A", "addr": ADDR, "delay": 600}]))
+        if name == "/pairs":
+            # paintWallet را بیرون هم می‌شود صدا زد (بسته‌ی سولانا از zaexaPairsBasePaint استفاده می‌کند): وسطِ بازیابی نباید «Connect wallet» بنویسد
+            await pg.wait_for_timeout(300)
+            mid = await pg.evaluate("() => { window.zaexaPairsBasePaint(); const bt = document.getElementById('connectBtn'); return [bt.textContent.trim(), bt.getAttribute('aria-busy')]; }")
+            assert mid == [SHORT, "true"], "[base pending chip] /pairs: a repaint during the pending restore must keep the pending chip, got %s" % mid
+        await pg.wait_for_function(FINAL, arg=SHORT, timeout=15000)
+        s = await pg.evaluate(GET_S)
+        pend_at = await pg.evaluate("() => window.__pendAt")
+        rec = await pg.evaluate("() => JSON.parse(sessionStorage.getItem('zaexa.basesession.v1') || 'null')")
+        await pg.close()
+        assert pend_at is not None and pend_at < 600, "[base pending chip] %s: the inline pending script never ran (or ran late): %s" % (name, pend_at)
+        s = [x for x in s if x["t"] >= pend_at]
+        assert s, "[base pending chip] %s: no header samples" % name
+        assert not [x for x in s if x["txt"] == "Connect wallet"], "[base pending chip] %s: 'Connect wallet' appeared while the session record was fresh: %s" % (name, [x for x in s if x["txt"] == "Connect wallet"][:3])
+        assert s[0]["txt"] == SHORT and s[0]["busy"] == "true", "[base pending chip] %s: the first paint must already be the short address with aria-busy: %s" % (name, s[0])
+        busy = [x for x in s if x["busy"] == "true"]
+        assert busy and all(x["txt"] == SHORT for x in busy), "[base pending chip] %s: a busy chip must show the address: %s" % (name, busy[:3])
+        assert busy[-1]["t"] - busy[0]["t"] >= 400, "[base pending chip] %s: the pending chip must last until the wallet answers (lasted %d ms)" % (name, busy[-1]["t"] - busy[0]["t"])
+        assert s[-1]["txt"] == SHORT and s[-1]["busy"] is None, "[base pending chip] %s: the end state must be the address without aria-busy: %s" % (name, s[-1])
+        assert rec and rec["key"] == "test.a" and rec["address"].lower() == ADDR, "[base pending chip] %s: a successful connect must refresh the session record: %s" % (name, rec)
+        pend_ms = busy[-1]["t"] - busy[0]["t"]
+        # (b) والت [] می‌دهد: چیپ می‌رود روی «Connect wallet» و رکورد پاک می‌شود
+        pg = await open_pg(url, base_init + seed_script() + wallets_script([{"rdns": "test.a", "name": "Wallet A", "addr": ADDR, "delay": 600, "empty": True}]))
+        await pg.wait_for_function(FINAL, arg="Connect wallet", timeout=15000)
+        s = await pg.evaluate(GET_S)
+        pend_at = await pg.evaluate("() => window.__pendAt")
+        rec = await pg.evaluate("() => sessionStorage.getItem('zaexa.basesession.v1')")
+        await pg.close()
+        s = [x for x in s if pend_at is not None and x["t"] >= pend_at]
+        assert s and s[0]["txt"] == SHORT and s[0]["busy"] == "true", "[base pending chip] %s: (empty wallet) the first paint is still the optimistic chip: %s" % (name, s[0])
+        assert s[-1]["txt"] == "Connect wallet" and s[-1]["busy"] is None and rec is None, "[base pending chip] %s: a wallet that answers [] must end on 'Connect wallet', no aria-busy and no session record: %s %s" % (name, s[-1], rec)
+        # (c) رکورد کهنه (۳۱ دقیقه) و (d) کاربر قطع کرده: از همان اولین رنگ «Connect wallet»، هرگز چیپِ آدرس با aria-busy
+        for label, sd in (("stale 31 min", seed_script(age_ms=31 * 60 * 1000)), ("user disconnected", seed_script(disconnected=True))):
+            pg = await open_pg(url, base_init + sd + wallets_script([{"rdns": "test.a", "name": "Wallet A", "addr": ADDR, "delay": 300}]))
+            await pg.wait_for_selector("#connectBtn", state="attached")
+            await pg.wait_for_timeout(1800)
+            s = await pg.evaluate(GET_S)
+            await pg.close()
+            assert s and s[0]["txt"] == "Connect wallet", "[base pending chip] %s (%s): must paint 'Connect wallet' from the first paint: %s" % (name, label, s[:2])
+            assert not [x for x in s if x["busy"] == "true"], "[base pending chip] %s (%s): no pending chip may ever appear" % (name, label)
+        summary.append("%s pending %d ms" % (name, pend_ms))
+    assert len(errs) == n_err, "[base pending chip] console errors: %s" % errs[n_err:]
+    print("[base pending chip] /app, /pairs, /report: with a fresh session record and the stored wallet key, 10 ms samples from the first paint never show 'Connect wallet' (%s), aria-busy holds until the wallet answers and the end state is the address; a wallet answering [] ends on 'Connect wallet' with the record removed; a 31-minute-old record or the disconnected flag paints 'Connect wallet' from the start" % ", ".join(summary))
+
+    # ---- [base restore key] /pairs و /report ----
+    CALLS = "() => window.__calls"
+    two = [{"rdns": "test.a", "name": "Wallet A", "addr": ADDR, "delay": 0}, {"rdns": "app.phantom", "name": "Phantom", "addr": ADDR_B, "delay": 0}]
+    for name, url in PAGES[1:]:
+        # کلید = A: فقط A پرسیده می‌شود و وصل می‌شود، «فانتوم» صفر درخواست
+        pg = await open_pg(url, seed_script(record=False) + wallets_script(two))
+        await pg.wait_for_function(FINAL, arg=SHORT, timeout=10000)
+        await pg.wait_for_timeout(300)
+        c = await pg.evaluate(CALLS)
+        await pg.close()
+        assert c["app.phantom"] == [] and c["test.a"] and set(c["test.a"]) == {"eth_accounts"}, "[base restore key] %s: only the stored wallet may be asked, and only with eth_accounts: %s" % (name, c)
+        # بدون کلید: هیچ والتی پرسیده نمی‌شود و بدون اتصال می‌ماند
+        pg = await open_pg(url, wallets_script(two))
+        await pg.wait_for_timeout(1200)
+        c = await pg.evaluate(CALLS)
+        txt = await pg.inner_text("#connectBtn")
+        await pg.close()
+        assert c["app.phantom"] == [] and c["test.a"] == [] and txt == "Connect wallet", "[base restore key] %s: without a stored key no wallet is asked and the page stays disconnected: %s %r" % (name, c, txt)
+        # انتخاب صریح از انتخاب‌گر کلید را می‌نویسد؛ Disconnect کلید و رکورد را پاک می‌کند
+        pg = await open_pg(url, wallets_script(two))
+        await pg.wait_for_timeout(400)
+        await pg.click("#connectBtn")
+        await pg.wait_for_selector("#walList .walRow")
+        await pg.evaluate("() => [...document.querySelectorAll('#walList .walRow')].find(r => /Phantom/.test(r.textContent)).click()")
+        await pg.wait_for_function(FINAL, arg=SHORT_B, timeout=10000)
+        st = await pg.evaluate("() => ({key: localStorage.getItem('zaexa.base.wallet'), rec: JSON.parse(sessionStorage.getItem('zaexa.basesession.v1') || 'null')})")
+        assert st["key"] == "app.phantom" and st["rec"] and st["rec"]["key"] == "app.phantom" and st["rec"]["address"].lower() == ADDR_B, "[base restore key] %s: an explicit pick must store the wallet key and the session record: %s" % (name, st)
+        await pg.click("#connectBtn")
+        await pg.click("#disconnectBtn")
+        await pg.wait_for_timeout(300)
+        st = await pg.evaluate("() => ({key: localStorage.getItem('zaexa.base.wallet'), rec: sessionStorage.getItem('zaexa.basesession.v1'), flag: localStorage.getItem('zaexa.disconnected')})")
+        await pg.close()
+        assert st["key"] is None and st["rec"] is None and st["flag"] == "1", "[base restore key] %s: Disconnect must clear the key and the record: %s" % (name, st)
+    assert len(errs) == n_err, "[base restore key] console errors: %s" % errs[n_err:]
+    print("[base restore key] /pairs and /report: with two announced wallets only the one whose key is stored is asked (eth_accounts, the phantom-like one gets 0 calls); with no stored key no wallet is asked at all; an explicit pick from the picker stores the key and the session record, Disconnect clears both")
+
+    # ---- [base restore early] /app ----
+    pg = await open_pg("/app#swap", ethers_patch_script(gate_delay_ms=3000) + seed_script(record=False) + """
+        window.__early = null;
+        (function poll(){ if (typeof account !== 'undefined' && account && !window.__early) {
+            var bt = document.getElementById('connectBtn');
+            window.__early = { t: Math.round(performance.now()), txt: bt.textContent.trim(), busy: bt.getAttribute('aria-busy'),
+                gatesDone: Object.keys(dexStatus).length > 0 && Object.values(dexStatus).every(function(x){ return x.reason !== 'checking…'; }) };
+            return; } setTimeout(poll, 10); })();
+        """ + wallets_script([{"rdns": "test.a", "name": "Wallet A", "addr": ADDR, "delay": 0}]))
+    try:
+        await pg.wait_for_function("() => !!window.__early", timeout=10000)
+    except Exception:
+        pass
+    ea = await pg.evaluate("() => window.__early")
+    await pg.close()
+    assert ea, "[base restore early] the account was never set"
+    assert ea["t"] < 1000, "[base restore early] the account must be set before the gates finish (took %d ms with the gate RPC held back 3 s): %s" % (ea["t"], ea)
+    assert not ea["gatesDone"], "[base restore early] the probe is wrong: the gates had already finished when the account was set: %s" % ea
+    assert len(errs) == n_err, "[base restore early] console errors: %s" % errs[n_err:]
+    print("[base restore early] /app with the exchange-gate RPC (getCode) held back 3 s in the fixture: the stored wallet is connected at %d ms while the gates are still 'checking…' (restore no longer waits for gates, applyShareParams or runScan)" % ea["t"])
+
+    # ---- [watch stable] ----
+    WM = """
+    window.__wm = { pairAdds: 0, pairRemoves: 0, imgAdds: {}, imgRemoves: 0 };
+    (function(){
+        function slot(av){ var pair = av.closest('.watchPair'), box = av.closest('.marketWatch');
+            return box.dataset.chain + ':' + Array.prototype.indexOf.call(pair.parentNode.children, pair); }
+        new MutationObserver(function(recs){
+            recs.forEach(function(r){
+                var el = r.target.nodeType === 1 ? r.target : r.target.parentElement;
+                if (!el || !el.closest || !el.closest('.marketWatch')) return;
+                if (r.type !== 'childList') return;
+                r.addedNodes.forEach(function(n){
+                    if (n.nodeType !== 1) return;
+                    if (n.classList.contains('watchPair')) window.__wm.pairAdds++;
+                    if (n.tagName === 'IMG' && el.classList.contains('av')){ var k = slot(el); window.__wm.imgAdds[k] = (window.__wm.imgAdds[k] || 0) + 1; }
+                });
+                r.removedNodes.forEach(function(n){
+                    if (n.nodeType !== 1) return;
+                    if (n.classList.contains('watchPair')) window.__wm.pairRemoves++;
+                    if (n.tagName === 'IMG') window.__wm.imgRemoves++;
+                });
+            });
+        }).observe(document, { childList: true, subtree: true });
+    })();
+    """
+    WATCH_STATE = """(chain) => { const box = document.querySelector('.marketWatch[data-chain=' + chain + '] .watchItems');
+        return { pairs: box.querySelectorAll(':scope > .watchPair').length, sparks: box.querySelectorAll('.watchSpark svg').length,
+                 imgs: box.querySelectorAll('.av img').length, prices: [...box.querySelectorAll('.watchPrice')].map(e => e.textContent),
+                 sp: [...box.querySelectorAll('.watchSpark')].map(e => e.innerHTML) }; }"""
+    watch_out = []
+    for chain, url, nimg in (("base", "/app#swap", 3), ("solana", "/app#swap?chain=solana", 2)):
+        gt_state["epoch"] = 0
+        pg = await open_pg(url, ethers_patch_script() + WM)
+        await pg.wait_for_function("(c) => document.querySelectorAll('.marketWatch[data-chain=' + c + '] .watchSpark svg').length === 3", arg=chain, timeout=30000)
+        before = await pg.evaluate(WATCH_STATE, chain)
+        await pg.evaluate("(c) => { document.querySelectorAll('.marketWatch[data-chain=' + c + '] .watchPair').forEach(e => { e.__keep = 1; }); }", chain)
+        await pg.evaluate("(c) => { gtCache.clear(); marketWatchCache.get(c).t = 0; refreshMarketWatch(); }", chain)
+        await pg.wait_for_timeout(6000)
+        after = await pg.evaluate(WATCH_STATE, chain)
+        kept = await pg.evaluate("(c) => [...document.querySelectorAll('.marketWatch[data-chain=' + c + '] .watchPair')].every(e => e.__keep === 1)", chain)
+        wm = await pg.evaluate("() => window.__wm")
+        await pg.close()
+        assert before["pairs"] == 3 and after["pairs"] == 3 and kept, "[watch stable] %s: the three buttons must be the same elements after the refresh: %s %s kept=%s" % (chain, before, after, kept)
+        assert wm["pairAdds"] == 6 and wm["pairRemoves"] == 0, "[watch stable] %s: .watchPair buttons are built once per chain (2 chains x 3) and never removed or re-added: %s" % (chain, wm)
+        assert wm["imgRemoves"] == 0, "[watch stable] %s: an avatar <img> was removed after being painted: %s" % (chain, wm)
+        assert wm["imgAdds"] and max(wm["imgAdds"].values()) <= 1 and sum(1 for k in wm["imgAdds"] if k.startswith(chain + ":")) == nimg, "[watch stable] %s: each slot creates its <img> exactly once for a stable URL (want %d slots): %s" % (chain, nimg, wm)
+        assert before["sp"] != after["sp"], "[watch stable] %s: the refresh brought new series, so the sparklines must have updated in place: %s" % (chain, before["sp"])
+        assert all(x != "—" for x in after["prices"]), "[watch stable] %s: prices must be painted: %s" % (chain, after["prices"])
+        watch_out.append("%s: %d imgs total" % (chain, sum(wm["imgAdds"].values())))
+    assert len(errs) == n_err, "[watch stable] console errors: %s" % errs[n_err:]
+    print("[watch stable] /app Base and Solana, MutationObserver from the first paint through tokens/multi, every series and one forced refresh (new series, same button elements): the six .watchPair buttons are added once and never removed, no avatar <img> is ever removed, each slot creates its <img> at most once (%s), sparklines still update" % "; ".join(watch_out))
+
+    # ---- [watch logo cache] ----
+    gt_state["multi_delay"] = 0.0
+    pg = await open_pg("/app#swap", ethers_patch_script() + WM)
+    await pg.wait_for_function("() => document.querySelectorAll('.marketWatch[data-chain=base] .watchSpark svg').length === 3", timeout=30000)
+    await pg.wait_for_function("() => document.querySelectorAll('.marketWatch[data-chain=base] .av img.on').length === 3", timeout=10000)
+    cache_raw = await pg.evaluate("() => localStorage.getItem('zaexa.watchlogo.v1')")
+    await pg.close()
+    cache = _j.loads(cache_raw or "{}")
+    assert len(cache.get("base", {})) == 2 and all(u.startswith("https://logos.test/base/") for u in cache["base"].values()), "[watch logo cache] the first visit must persist {chain: {address: url}} for the non-native slots: %s" % cache_raw
+    # بازدیدِ دوم: tokens/multi عمداً ۴ ثانیه دیر می‌آید؛ اولین رنگ باید لوگوها را از کش داشته باشد
+    gt_state["multi"] = 0
+    gt_state["multi_delay"] = 4.0
+    pg = await open_pg("/app#swap", ethers_patch_script() + WM + "try{localStorage.setItem('zaexa.watchlogo.v1', %s);}catch(e){}" % _j.dumps(cache_raw))
+    await pg.wait_for_function("() => document.querySelectorAll('.marketWatch[data-chain=base] .av img').length === 3", timeout=3500)
+    multi_at_paint = gt_state["multi"]
+    imgs = await pg.evaluate("() => [...document.querySelectorAll('.marketWatch[data-chain=base] .watchPair')].map(p => !!p.querySelector('.av img'))")
+    await pg.wait_for_timeout(300)
+    on = await pg.evaluate("() => document.querySelectorAll('.marketWatch[data-chain=base] .av img.on').length")
+    # لوگویی که قبلاً بارگذاری شده (کش حافظه) باید همان لحظه‌ی ساخته‌شدنِ <img> کلاس on بگیرد و loading=lazy نداشته باشد.
+    # Chromiumِ headless برای تصویرِ routeشده هرگز complete=true همزمان نمی‌دهد، پس «کش‌شده بودن» را با getterهای complete/naturalWidth شبیه‌سازی می‌کنیم.
+    warm = await pg.evaluate("""() => { const proto = HTMLImageElement.prototype, dc = Object.getOwnPropertyDescriptor(proto, 'complete'), dw = Object.getOwnPropertyDescriptor(proto, 'naturalWidth');
+        Object.defineProperty(proto, 'complete', { configurable: true, get() { return true; } });
+        Object.defineProperty(proto, 'naturalWidth', { configurable: true, get() { return 1; } });
+        try {
+            const toks = marketWatchTokens('base'), i = toks.findIndex(t => !t.native);
+            const url = document.querySelectorAll('.marketWatch[data-chain=base] .watchPair')[i].querySelector('.av img').src;
+            const div = document.createElement('span'); div.className = 'av'; document.body.appendChild(div);
+            paintWatchAvatar(div, toks[i], url);
+            const img = div.querySelector('img'), r = { on: img.classList.contains('on'), loading: img.getAttribute('loading') };
+            div.remove(); return r;
+        } finally { Object.defineProperty(proto, 'complete', dc); Object.defineProperty(proto, 'naturalWidth', dw); } }""")
+    await pg.close()
+    gt_state["multi_delay"] = 0.0
+    assert all(imgs), "[watch logo cache] on the second load every slot must already have its <img> at first paint: %s" % imgs
+    assert on == 3, "[watch logo cache] a cached (already complete) logo must get class 'on' immediately: %d of 3" % on
+    assert warm["on"] and warm["loading"] is None, "[watch logo cache] an already-loaded logo must be 'on' the moment its <img> is created, and must not be loading=lazy: %s" % warm
+    # کش خراب/خطرناک نادیده گرفته می‌شود (okLogo هنگام خواندن)
+    bad = _j.dumps({"base": {a: "javascript:alert(1)" for a in cache["base"]}, "solana": "x"})
+    pg = await open_pg("/app#swap", ethers_patch_script() + "try{localStorage.setItem('zaexa.watchlogo.v1', %s);}catch(e){}" % _j.dumps(bad))
+    await pg.wait_for_timeout(800)
+    bad_imgs = await pg.evaluate("() => [...document.querySelectorAll('.marketWatch[data-chain=base] .av img')].map(i => i.getAttribute('src'))")
+    await pg.close()
+    assert not [s for s in bad_imgs if s and s.startswith("javascript")], "[watch logo cache] an unsafe cached URL must never reach an <img>: %s" % bad_imgs
+    assert len(errs) == n_err, "[watch logo cache] console errors: %s" % errs[n_err:]
+    print("[watch logo cache] the first visit stores {base: {address: https url}} (2 non-native slots); on the second load, with tokens/multi held back 4 s (%d requests had arrived), all 3 base slots already hold their <img> with class 'on' at first paint; an already-loaded logo is 'on' the moment its <img> is created (no loading=lazy); an unsafe cached URL is ignored" % multi_at_paint)
+
+    # ---- [header gutter] ----
+    for name, url in PAGES:
+        pg = await open_pg(url, ethers_patch_script())
+        g = await pg.evaluate("() => getComputedStyle(document.documentElement).scrollbarGutter")
+        await pg.close()
+        assert g.split()[0] == "stable", "[header gutter] %s: html must reserve the scrollbar gutter, got %r" % (name, g)
+    print("[header gutter] /app, /pairs and /report: html computes scrollbar-gutter: stable, so the header does not shift when a page gains or loses a vertical scrollbar")
+
+    await b.close()
+    srv.shutdown()
+    __import__("shutil").rmtree(out_dir, ignore_errors=True)
+    assert not errs, "[wallet watch] console/page errors: %s" % errs
+
+
 async def main():
     errors = []
     # خطاهایی که یک کاوشگر *عمداً* تولید می‌کند. اجازه‌ی عبور می‌گیرند ولی
@@ -5435,6 +5841,7 @@ async def main():
         await check_report_picker(p, errors)
         await check_stocks(p, errors)
         await check_stocks_sol(p, errors)
+        await check_wallet_watch(p, errors)
         b = await p.chromium.launch()
         pg = await b.new_page(viewport={"width": 1240, "height": 1000}, color_scheme="dark")
         pg.on("console", on_console)
@@ -8517,7 +8924,11 @@ async def main():
             const m = document.querySelector("main").getBoundingClientRect();
             const cs = getComputedStyle(document.querySelector("header"));
             return {hl: Math.round(h.left), hr: Math.round(h.right),
-                    ml: Math.round(m.left), mr: Math.round(m.right), vw: innerWidth,
+                    ml: Math.round(m.left), mr: Math.round(m.right),
+                    // ۱۱ اکتبر: با html{scrollbar-gutter:stable} عرضِ قابل‌استفاده‌ی صفحه عرضِ <body> است (شیارِ اسکرول‌بار کنارش رزرو می‌ماند و
+                    // هم innerWidth هم clientWidth آن را شامل می‌شوند)؛ خطری که کاوشگر می‌گیرد (هدر به اندازه‌ی محتوای خودش جمع شود) با همین مرجع
+                    // هم دقیقاً همان‌قدر قرمز می‌شود
+                    vw: Math.round(document.body.getBoundingClientRect().right),
                     surface: cs.backgroundColor, rule: cs.borderBottomWidth,
                     ruleColor: cs.borderBottomColor};
         }""")
@@ -11344,7 +11755,8 @@ async def main():
         #    ⚠️ و شرطِ محتوا روی عددِ ۱۱۰۰ پین شده، نه «باریک‌تر از نوار»: با
         #    شرطِ شل، محتوا تا ۱۴۰۰ پیکسل کش می‌آمد و باز هم از نگهبان رد می‌شد.
         geo = await footpg.evaluate("""() => {
-            const vw = document.documentElement.clientWidth;
+            // ۱۱ اکتبر: با html{scrollbar-gutter:stable} عرضِ قابل‌استفاده‌ی صفحه عرضِ <body> است (شیارِ اسکرول‌بار کنارش رزرو می‌ماند و clientWidth آن را شامل می‌شود)؛ «نوار تمام‌عرض است» همچنان یعنی هم‌عرض با body
+            const vw = document.body.getBoundingClientRect().width;
             const f = document.querySelector("footer").getBoundingClientRect();
             const g = document.querySelector("footer .footGrid").getBoundingClientRect();
             const cs = getComputedStyle(document.querySelector("footer"));
@@ -14139,7 +14551,9 @@ async def main():
 
         # ۲) یک پروایدرِ ۶۹۶۳ که یک حساب اعلام می‌کند -> بازیابیِ بی‌صدا با
         # eth_accounts وصل می‌کند، هرگز eth_requestAccounts روی خودِ لود
-        w2, werrs2, cerrs2 = await open_wallet_page(init_script=fake_provider_script(FAKE_ADDR))
+        # ۱۱ اکتبر: بازیابیِ بی‌صدا فقط از والتی که کاربر برای Base انتخاب کرده؛ فیکسچر کلیدِ آن را هم دارد
+        STORED_FAKE = "localStorage.setItem('zaexa.base.wallet','test.fake');"
+        w2, werrs2, cerrs2 = await open_wallet_page(init_script=STORED_FAKE + fake_provider_script(FAKE_ADDR))
         chip2_text = await w2.eval_on_selector("#connectBtn", "e => e.textContent.trim()")
         chip2_class = await w2.eval_on_selector("#connectBtn", "e => e.className")
         await w2.click("#connectBtn")
@@ -14180,7 +14594,7 @@ async def main():
 
         # ۴) کلیک روی Disconnect -> پرچم ست می‌شود، چیپ برمی‌گردد به
         # «Connect wallet»، متنِ دقیقِ زیرِ هدر یک‌بار ظاهر می‌شود
-        w4, werrs4, cerrs4 = await open_wallet_page(init_script=fake_provider_script(FAKE_ADDR))
+        w4, werrs4, cerrs4 = await open_wallet_page(init_script=STORED_FAKE + fake_provider_script(FAKE_ADDR))
         await w4.click("#connectBtn")
         await w4.wait_for_timeout(100)
         await w4.click("#disconnectBtn")

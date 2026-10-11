@@ -273,6 +273,8 @@ const PAGE_CSS = String.raw`
 :root{--s-sell:#3b82f6;--s-nosell:#d97706;--s-none:#a9b0bc;--sans:Manrope,ui-sans-serif,-apple-system,"Segoe UI",Roboto,sans-serif;--serif:'Playfair Display',Georgia,serif;--mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
 :root[data-theme=dark]{--s-sell:#3b93e8;--s-nosell:#e0931a;--s-none:#5b5670}
 html{scroll-behavior:auto}
+/* ۱۱ اکتبر: شیارِ اسکرول‌بار همیشه رزرو است تا هدر بین صفحه‌ها نپرد */
+html{scrollbar-gutter:stable}
 body{overflow-x:hidden;overflow-x:clip}
 .wrap{width:min(1120px,100%);margin:auto;padding-inline:20px;padding-block:44px 80px;display:flex;flex-direction:column;gap:40px}
 .eyebrow{margin:0;color:var(--tx3);font:500 10px/1.2 var(--mono);letter-spacing:.13em;text-transform:uppercase}
@@ -715,6 +717,25 @@ const SHELL_JS = String.raw`
       else localStorage.removeItem(DISCONNECT_KEY);
     }catch(e){}
   }
+  /* ۱۱ اکتبر — کلیدِ والتِ Base و رکوردِ نشست، عیناً همان اپ: بازیابیِ بی‌صدا فقط از والتی که کاربر برای Base
+     انتخاب کرده؛ رکورد (sessionStorage) فقط برای نمایشِ خوش‌بینانهٔ چیپ بین صفحه‌هاست. */
+  var BASE_WALLET_KEY = 'zaexa.base.wallet', BASE_SESSION_KEY = 'zaexa.basesession.v1', BASE_PEND_MS = 4000;
+  function getBaseWallet(){ try{ return localStorage.getItem(BASE_WALLET_KEY) || ''; }catch(e){ return ''; } }
+  function setBaseWallet(k){ try{ localStorage.setItem(BASE_WALLET_KEY, k); }catch(e){} }
+  function clearBaseWallet(){ try{ localStorage.removeItem(BASE_WALLET_KEY); }catch(e){} }
+  function baseSessionWrite(key, address){
+    try{ sessionStorage.setItem(BASE_SESSION_KEY, JSON.stringify({ key: key, address: address, t: Date.now() })); }catch(e){}
+  }
+  function baseSessionClear(){ try{ sessionStorage.removeItem(BASE_SESSION_KEY); }catch(e){} }
+  var basePendTimer = null;
+  function baseEndPending(){
+    if (!window.__zxBasePend && basePendTimer === null) return;
+    window.__zxBasePend = null;
+    clearTimeout(basePendTimer); basePendTimer = null;
+    var b = document.getElementById('connectBtn');
+    if (b) b.removeAttribute('aria-busy');
+    paintWallet();
+  }
   function hasWcSession(){
     try{
       for (var i = 0; i < localStorage.length; i++){
@@ -835,6 +856,14 @@ const SHELL_JS = String.raw`
     var b = document.getElementById('connectBtn');
     var addr = document.getElementById('walletAddr');
     if (!b || !addr) return;
+    if (!account && window.__zxBasePend){
+      // بازیابیِ نشستِ Base در جریان است — چیپِ آدرسِ اسکریپتِ درون‌خطی می‌ماند، «Connect wallet» نه
+      b.textContent = shortAddr(window.__zxBasePend.address);
+      b.className = 'chip';
+      b.setAttribute('aria-busy', 'true');
+      return;
+    }
+    b.removeAttribute('aria-busy');
     if (!account){
       b.textContent = 'Connect wallet';
       b.className = 'chip solid';
@@ -861,7 +890,7 @@ const SHELL_JS = String.raw`
     var open = pop.classList.toggle('on');
     btn.setAttribute('aria-expanded', open ? 'true' : 'false');
   }
-  async function connectWithProvider(provider, requestAccounts){
+  async function connectWithProvider(provider, requestAccounts, walletKey){
     try{
       var a = await provider.request({ method: requestAccounts ? 'eth_requestAccounts' : 'eth_accounts' });
       if (!a || !a[0]) throw new Error('No wallet account was returned.');
@@ -869,6 +898,11 @@ const SHELL_JS = String.raw`
       if (requestAccounts) markDisconnected(false);
       walletEip1193 = provider;
       account = a[0];
+      // انتخابِ صریح کلیدِ والت را ذخیره می‌کند (مثل اپ)؛ بازیابیِ بی‌صدا همان کلیدِ ذخیره را پاس می‌دهد؛ WalletConnect کلید ندارد
+      if (requestAccounts && walletKey) setBaseWallet(walletKey);
+      var sk = provider === wcProvider ? '' : (walletKey || getBaseWallet());
+      if (sk) baseSessionWrite(sk, account); else baseSessionClear();
+      baseEndPending();
       paintWallet();
       closeWalletMenu();
       var note = document.getElementById('walletDisconnectNote');
@@ -878,6 +912,7 @@ const SHELL_JS = String.raw`
   async function connect(){ openWalletPicker(); }
   async function disconnect(){
     markDisconnected(true);
+    clearBaseWallet(); baseSessionClear(); window.__zxBasePend = null;
     var wasRemote = walletIsRemote, inj = walletEip1193;
     if (wasRemote && wcProvider){ try{ await wcProvider.disconnect(); }catch(e){} wcProvider = null; }
     var revoked = false;
@@ -905,7 +940,7 @@ const SHELL_JS = String.raw`
     if (!list) return;
     var opts = walletOptions();
     var rows = opts.map(function(o){
-      return { name: o.name, icon: o.icon, kind: o.kind, go: function(){ connectWithProvider(o.provider, true); } };
+      return { name: o.name, icon: o.icon, kind: o.kind, go: function(){ connectWithProvider(o.provider, true, o.key); } };
     });
     rows.push({ name: 'WalletConnect', icon: WC_ICON, kind: 'Mobile wallet · QR', go: connectWalletConnect });
     while (list.firstChild) list.removeChild(list.firstChild);
@@ -1023,20 +1058,33 @@ const SHELL_JS = String.raw`
   var disconnectBtnEl = document.getElementById('disconnectBtn');
   if (disconnectBtnEl) disconnectBtnEl.onclick = disconnect;
 
-  // بازیابیِ بی‌صدا: فقط eth_accounts، هرگز پنجره‌ای باز نمی‌کند؛ اگر کاربر صریحاً قطع کرده بود، اتصالِ خودکار نیست.
+  // بازیابیِ بی‌صدا — عیناً همان اپ: فقط eth_accounts (هرگز eth_requestAccounts)، فقط از والتی که کاربر برای Base
+  // انتخاب کرده (BASE_WALLET_KEY)، بدون حلقه روی همهٔ والت‌ها (ریشهٔ باگِ فانتوم)؛ بعد WalletConnect. ۱۲۰ms صبر برای EIP-6963.
+  // اگر کاربر صریحاً قطع کرده بود، هیچ اتصال خودکاری نیست. هر شکست رکوردِ نشست را پاک و چیپ را به «Connect wallet» برمی‌گرداند.
+  if (window.__zxBasePend){
+    basePendTimer = setTimeout(function(){ basePendTimer = null; if (!account) baseSessionClear(); baseEndPending(); }, BASE_PEND_MS);
+  }
   (async function(){
     scanWallets();
     await new Promise(function(r){ setTimeout(r, 120); });
-    if (!userDisconnected()){
-      var back = false;
-      var opts = walletOptions();
-      for (var i = 0; i < opts.length; i++){
-        try{
-          var a = await opts[i].provider.request({ method: 'eth_accounts' });
-          if (a && a.length){ await connectWithProvider(opts[i].provider, false); back = true; break; }
-        }catch(e){}
-      }
-      if (!back) await restoreWalletConnect();
+    {
+      try{
+        if (!userDisconnected()){
+          var back = false;
+          var wk = getBaseWallet();
+          if (wk){
+            var o = walletOptions().filter(function(x){ return x.key === wk; })[0];
+            if (o){
+              try{
+                var a = await o.provider.request({ method: 'eth_accounts' });
+                if (a && a.length){ await connectWithProvider(o.provider, false, wk); back = !!account; }
+              }catch(e){}
+            }
+          }
+          if (!back) await restoreWalletConnect();
+        }
+      }catch(e){}
+      if (!account){ baseSessionClear(); baseEndPending(); }
     }
   })();
 })();
@@ -1114,6 +1162,22 @@ const HEADER_HTML = String.raw`<header class="site-header">
   <button class="chip round" id="themeBtn" type="button" role="switch" aria-checked="false" aria-label="Switch to dark mode" title="Switch to dark mode"><svg class="themeMoon" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"/></svg><svg class="themeSun" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2.5v2.2M12 19.3v2.2M4.6 4.6l1.6 1.6M17.8 17.8l1.6 1.6M2.5 12h2.2M19.3 12h2.2M4.6 19.4l1.6-1.6M17.8 6.2l1.6-1.6"/></svg><span id="themeState" hidden>Light</span></button>
   <div class="rel" id="walletMenu">
     <button class="chip solid" id="connectBtn" aria-haspopup="menu" aria-expanded="false">Connect wallet</button>
+<script>
+/* ۱۱ اکتبر — همتای Base برای اسکریپتِ بالا: رکوردِ تازه‌ی نشستِ Base (zaexa.basesession.v1) + کاربرِ قطع‌نکرده +
+   کلیدِ والتِ ذخیره‌شده (zaexa.base.wallet) برابرِ رکورد + صفحه (گزارش همیشه Base است) ⇒ هدر همان لحظه آدرسِ کوتاه را با aria-busy نشان می‌دهد.
+   فقط نمایش؛ هیچ حسابی از روی رکورد ست نمی‌شود. baseEndPending آن را پایان می‌دهد؛ سقفِ ۴ ثانیه هم دارد. */
+try{(function(){
+  var r=JSON.parse(sessionStorage.getItem("zaexa.basesession.v1")||"null");
+  if(!r||typeof r.key!=="string"||!r.key||typeof r.address!=="string"||typeof r.t!=="number")return;
+  if(!/^0x[0-9a-fA-F]{40}$/.test(r.address))return;
+  var age=Date.now()-r.t;if(!(age<30*60*1000&&age>-60000))return;
+  try{if(localStorage.getItem("zaexa.disconnected")==="1")return;}catch(e){return;}
+  try{if(localStorage.getItem("zaexa.base.wallet")!==r.key)return;}catch(e){return;}
+  var b=document.getElementById("connectBtn");if(!b)return;
+  b.className="chip";b.textContent=r.address.slice(0,6)+"\u2026"+r.address.slice(-4);b.setAttribute("aria-busy","true");
+  window.__zxBasePend={key:r.key,address:r.address};
+})();}catch(e){}
+</script>
     <div class="pop walletPop" id="walletPop" role="menu" aria-label="Wallet menu">
       <div class="walletHead"><span>Wallet</span><span class="walletAddr" id="walletAddr">—</span></div>
       <a class="walletAction" id="folioMenuBtn" role="menuitem" href="/app#folio"><span>Portfolio</span><svg class="wIcon" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-9-9v9z"/><path d="M15.5 3.5A9 9 0 0 1 20.5 8.5L12 12z"/></svg></a>
