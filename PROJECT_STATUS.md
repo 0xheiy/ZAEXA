@@ -18,7 +18,7 @@
 ## ۰. کارهای باز — به‌روز ۱۰ اکتبر ۲۰۲۶، به ترتیب
 
 فقط کارهای انجام‌نشده و تصمیم‌های ثابت. کارهای تمام‌شده در تاریخچه‌ی گیت هستند (آخرین: «Base wallet: same restore rule on app, pairs and report…; market watch updates in place…»).
-سوییت رابط **۷۳۵ کاوشگر** سبز (`python3 web/test/run.py`، ۲۰ دقیقه یا بیشتر — در پس‌زمینه اجرا کن)؛ به‌علاوه‌ی `worker/test.mjs`، `worker/og_live_test.mjs`، `worker/solana-parity.test.mjs`،
+سوییت رابط **۷۴۳ کاوشگر** سبز (`python3 web/test/run.py`، ۲۰ دقیقه یا بیشتر — در پس‌زمینه اجرا کن)؛ به‌علاوه‌ی `worker/test.mjs`، `worker/og_live_test.mjs`، `worker/solana-parity.test.mjs`،
 شش `web/test/solana-*.test.mjs` و چهار آزمونِ مرورگر (`solana-parity-browser.py`، `solana-views-browser.py`،
 `solana-pairs-browser.py`، `market-workspace-browser.py` — از ریشه‌ی مخزن؛ `scripts/solana-wallet` باید `npm ci` شده باشد).
 ⚠️ کاوشگرِ `[report body unchanged]` بدنه‌ی گزارش را با کامیتِ ثابتِ `6944652` می‌سنجد؛ کلونِ کم‌عمق اول `git fetch --deepen=20` می‌خواهد.
@@ -71,6 +71,12 @@
 - ردِ تغییرِ شبکه (`switchNetwork`) هرگز throw نمی‌کند: پیامِ «Network switch cancelled in your wallet.».
 
 **نوارِ Market watch** — یک بار ساخته می‌شود و فقط عدد/اسپارک/کلاس در جا عوض می‌شود؛ آواتار فقط با تغییرِ آدرسِ لوگو؛ آدرسِ لوگوها در `localStorage` `zaexa.watchlogo.v1`. (تا ۱۱ اکتبر هر به‌روزرسانی innerHTML می‌ریخت و لوگوها حرف↔لوگو چشمک می‌زدند.) `html{scrollbar-gutter:stable}` روی اپ، /pairs و /report تا هدر بینِ صفحه‌ها نپرد.
+
+**ربات تلگرام** (۱۱ اکتبر، `worker/tg.js`، آزمون `worker/tg_test.mjs` که run.py هم اجرا می‌کند) — حکم از همان `tokenVerdict` که `/vd` و کارتِ OG می‌خوانند، یک مسیر نه دو نسخه.
+- Worker هیچ درخواستی به تلگرام نمی‌فرستد؛ جواب در بدنه‌ی پاسخِ وب‌هوک است، پس توکن هرگز در آدرس یا لاگ نمی‌آید. مسیرِ مخفی `/tg/<path>` و هدرِ `x-telegram-bot-api-secret-token` هر دو از خودِ توکن مشتق می‌شوند (sha256 با پیشوندهای `zaexa-tg-path:` و `zaexa-tg-header:`).
+- رازهای پنل: `TG_BOT_TOKEN` و `TG_BOT_USERNAME` (بی @؛ بدونش ربات در گروه ساکت است). بدونِ توکن هر درخواست ۴۰۴؛ مسیرِ غلط ۴۰۴؛ هدرِ غلط ۴۰۱؛ ۲۰۰ فقط برای تلگرامِ واقعی.
+- سولانا: حکمی که فقط از کوت آمده «Sell route quoted, not simulated.» می‌گوید، نه «شبیه‌سازی شد». علتِ دومِ nosell مثلِ صفحه‌ی گزارش.
+- محدودیتِ نرخ (۱۰ در دقیقه برای هر چت، ۳۰ برای کل) فقط در حافظه‌ی همان نمونه‌ی Worker است؛ زیرِ ترافیکِ واقعی سنجیده نشده. آزمونِ مثبتِ زنده (USDC روی Base) بعد از ثبتِ وب‌هوک با حسام است.
 
 **گیرنده‌ی خطای سراسری** — ردِ بی‌پشته‌ای که Error نیست و `code` عددی دارد (شکلِ ردِ EIP-1193ِ یک provider) فقط شمرده می‌شود (`countOnly`)، بنر نمی‌آید. نمونه: `E-PR-87AD` = «wallet_getCapabilities does not exist» از اسکریپتی بیرون از کدِ ما.
 

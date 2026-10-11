@@ -176,6 +176,13 @@ def check_gt_proxy_worker():
                        cwd=os.path.dirname(w))
     sys.stdout.write(r.stdout)
     assert r.returncode == 0, "the GeckoTerminal proxy worker failed its tests:\n" + r.stderr
+    # ۱۱ اکتبر: آزمونِ ربات تلگرام (worker/tg_test.mjs) هم با همین سوییت اجرا می‌شود — وب‌هوکِ /tg روی همین دامنه است.
+    t = os.path.join(HERE, "..", "..", "worker", "tg_test.mjs")
+    if not os.path.exists(t):
+        raise AssertionError("worker/tg_test.mjs is missing — the Telegram webhook is untested")
+    r = subprocess.run(["node", t], capture_output=True, text=True, cwd=os.path.dirname(t))
+    sys.stdout.write(r.stdout)
+    assert r.returncode == 0, "the Telegram bot failed its tests:\n" + r.stderr
 
 def check_asset_cache_headers():
     """باندل‌های وندور یک سال immutable کش می‌شوند (web/_headers) و این فقط
