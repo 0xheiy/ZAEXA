@@ -1925,7 +1925,9 @@ def check_stock_tokens():
         "METAc": "0xb2000000000000000000008bC8786B856E61707C",
         "MSFTc": "0xB200000000000000000000Ab99cFa739E253872B",
         "MSTRc": "0xb2000000000000000000004884b426556b92883d",
+        "MUc": "0xb200000000000000000000Fd2f87532B90095211",
         "NVDAc": "0xb20000000000000000000078ee7ce2fE4908108C",
+        "PLTRc": "0xb2000000000000000000007d16372840dF4dAbbe",
         "SNDKc": "0xb200000000000000000000397293Cb8cda9a10c5",
         "SPCXc": "0xb2000000000000000000007b9fcbd005511aCBd5",
         "TSLAc": "0xb2000000000000000000001e800a7f5189430cD0",
@@ -4339,10 +4341,24 @@ async def check_report_picker(p, errors):
 # حجم "3488482.1" و تغییر "-1.42" هر دو *رشته* (GeckoTerminal رشته می‌فرستد، نه عدد).
 # =====================================================================
 import json as _stkjson
-STK_ORDER = ["AAPLc", "AMZNc", "GOOGLc", "METAc", "MSFTc", "MSTRc", "NVDAc", "SNDKc", "SPCXc", "TSLAc"]
-STK_NAMES = {"AAPLc": "Apple", "AMZNc": "Amazon", "GOOGLc": "Alphabet", "METAc": "Meta", "MSFTc": "Microsoft",
-             "MSTRc": "Strategy", "NVDAc": "NVIDIA", "SNDKc": "Sandisk", "SPCXc": "SpaceX", "TSLAc": "Tesla"}
-# sym: (قیمتِ استخر، پاسخِ کوتِ ۸رقمی، پاسخِ فید ×1e8، حجمِ رشته، تغییرِ رشته)
+# ۱۱ اکتبر — فهرستِ مستقلِ Base (۱۲ تا): نماد، نام، توکن، استخر، فید (None = بدون فیدِ Chainlink). عمداً کپیِ جدا از index.html.
+STK_BASE_EXPECT = [
+    ('AAPLc', 'Apple', '0xb200000000000000000000C2e324d24d7eEcd1fb', '0xa3b1e3f9747065e2073722ff4c9027d3ea4994f0', '0x787f13dEa48Db0897CbCDD985de77809D837F988'),
+    ('AMZNc', 'Amazon', '0xb200000000000000000000d9192b6B456483C2E8', '0xd03bc8c7f2faedce2aac81bf0444aea08ea06e9b', '0x06A8E4b3aBB3B7543d8396FB2B763d22820cB295'),
+    ('GOOGLc', 'Alphabet', '0xb2000000000000000000002D0BA3164cc74f58B7', '0xb1987cad1682841b4b641d50e520777ec5ab5542', '0x5bF49E0ffA937CE2FfF033c739aD7C634c4D34F2'),
+    ('METAc', 'Meta', '0xb2000000000000000000008bC8786B856E61707C', '0xeaf57753bc382e0324a1d43f72e7027705a2273e', '0x6526aE6797A76123638b863AeE4dD27Ba4E4b27D'),
+    ('MSFTc', 'Microsoft', '0xB200000000000000000000Ab99cFa739E253872B', '0x7103eb3c9590d1281f7dc03b2a9ee27c39df5d54', '0xeB10A6c9aa7E537aEd766C08c35Dae35B321b18c'),
+    ('MSTRc', 'Strategy', '0xb2000000000000000000004884b426556b92883d', '0x8b27f626ab668197000bc722a1012022caed10e2', '0xB3cE282CD188b35DA0E38D8Bc7d58e33173D202a'),
+    ('MUc', 'Micron', '0xb200000000000000000000Fd2f87532B90095211', '0x17e1beb2cd65493da73ed4bbbc7becaaa0f91c73', None),
+    ('NVDAc', 'NVIDIA', '0xb20000000000000000000078ee7ce2fE4908108C', '0x853f5f1b92b16714fe6cda67caad0856b83c7ab9', '0x04689a41629776563E6822F76f2e57D148d28513'),
+    ('PLTRc', 'Palantir', '0xb2000000000000000000007d16372840dF4dAbbe', '0x650cc267aa248191978013d5ae421e5dc2a6e242', None),
+    ('SNDKc', 'Sandisk', '0xb200000000000000000000397293Cb8cda9a10c5', '0x5a8236f575471e7bfca2c8462a200c28f737246e', '0x388b0dC46C0Fb05A74BeE0994fa5b02c6Fcca2eA'),
+    ('SPCXc', 'SpaceX', '0xb2000000000000000000007b9fcbd005511aCBd5', '0x0bf58fe0fac935ac69595c19b12ba0d75e3f8c0e', '0x6A634B235903C4ad6376892180d6fF8612e3Fa68'),
+    ('TSLAc', 'Tesla', '0xb2000000000000000000001e800a7f5189430cD0', '0x469337fdcc5e8f38e2e4b670b04f57865d13a7bb', '0xFaf869185383a24F8cb00e27BdA6b63B9905DCb4'),
+]
+STK_ORDER = [e[0] for e in STK_BASE_EXPECT]
+STK_NAMES = {e[0]: e[1] for e in STK_BASE_EXPECT}
+# sym: (قیمتِ استخر، پاسخِ کوتِ ۸رقمی، پاسخِ فید ×1e8 یا None، حجمِ رشته، تغییرِ رشته)
 STK_FIX = {
     "AAPLc": (258.31, 38711500, 25802000000, "4512300.5", "0.85"),
     "AMZNc": (224.87, 44470500, 22510000000, "850000.2", "-0.40"),
@@ -4350,19 +4366,24 @@ STK_FIX = {
     "METAc": (612.15, 16336000, 61120000000, "980400.7", "-2.30"),
     "MSFTc": (431.08, 23198000, 43150000000, "2210000.9", "0.05"),
     "MSTRc": (328.40, 30450000, 32790000000, "6120000.3", "-4.75"),
+    "MUc": (95.50, 104712042, None, "720300.4", "1.75"),
     "NVDAc": (142.63, 70112000, 14250000000, "9840000.1", "2.01"),
+    "PLTRc": (178.25, 56100982, None, "1530000.8", "-0.65"),
     "SNDKc": (61.27, 163213000, 6110000000, "45200.0", "-0.90"),
     "SPCXc": (118.90, 84104000, 11930000000, "310500.4", "3.30"),
     "TSLAc": (377.04, 26522108, 37573000000, "3488482.1", "-1.42"),
 }
+# جوابِ هر فیدِ Chainlink (به آدرس؛ هر دو زنجیره از همین فیدها می‌خوانند)
+FEED_ANS = {e[4].lower(): STK_FIX[e[0]][2] for e in STK_BASE_EXPECT if e[4]}
 
 
 def stk_cfg(**over):
     """پیکربندی فیکسچر از روی خودِ index.html — آدرس‌ها را دستی کپی نمی‌کنیم تا با کد یکی بمانند."""
     src = open(os.path.join(HERE, "..", "index.html"), encoding="utf-8").read()
     feeds, pools = {}, {}
-    for m in re.finditer(r'\{sym:"(\w+)",name:"[^"]*",feed:"(0x[0-9a-fA-F]{40})",pool:"(0x[0-9a-f]{40})"\}', src):
-        feeds[m.group(2).lower()] = m.group(1)
+    for m in re.finditer(r'\{sym:"(\w+)",name:"[^"]*",feed:(null|"0x[0-9a-fA-F]{40}"),pool:"(0x[0-9a-f]{40})"\}', src):
+        if m.group(2) != "null":
+            feeds[m.group(2).strip('"').lower()] = m.group(1)
         pools[m.group(3).lower()] = m.group(1)
     block = re.search(r"const BASE_TOKENS=\[(.*?)\n\];", src, re.S).group(1)
     tokens = {}
@@ -4370,8 +4391,8 @@ def stk_cfg(**over):
         if m.group(1) in STK_FIX:
             tokens[m.group(2).lower()] = m.group(1)
     quoter = re.search(r'\{id:"aerodrome-cl",.*?quoter:"(0x[0-9a-fA-F]{40})"', src, re.S).group(1).lower()
-    assert len(feeds) == 10 and len(pools) == 10 and len(tokens) == 10, (
-        "[stocks] could not read the 10 feeds/pools/tokens from index.html: %d/%d/%d" % (len(feeds), len(pools), len(tokens)))
+    assert len(feeds) == 10 and len(pools) == 12 and len(tokens) == 12, (
+        "[stocks] could not read the 10 feeds / 12 pools / 12 tokens from index.html: %d/%d/%d" % (len(feeds), len(pools), len(tokens)))
     cfg = {"feeds": feeds, "pools": pools, "tokens": tokens, "quoter": quoter,
            "fix": {s: {"out": f[1], "answer": f[2], "vol": f[3], "chg": f[4]} for s, f in STK_FIX.items()},
            "ageSec": 300, "failQuote": [], "failAll": False, "failGt": False}
@@ -4381,7 +4402,7 @@ def stk_cfg(**over):
 
 STK_INIT_JS = """(() => {
   const cfg = %s;
-  window.__STK__ = {batches: 0, gt: 0, cfg: cfg};
+  window.__STK__ = {batches: 0, gt: 0, cfg: cfg, kinds: [], gtUrls: []};
   const ser = x => JSON.stringify(x, (k, v) => typeof v === "bigint" ? {__b: v.toString()} : v);
   const de = s => JSON.parse(s, (k, v) => (v && v.__b !== undefined ? BigInt(v.__b) : v));
   const toHex = s => "0x" + Array.from(new TextEncoder().encode(s)).map(b => b.toString(16).padStart(2, "0")).join("");
@@ -4410,6 +4431,7 @@ STK_INIT_JS = """(() => {
       const kinds = calls ? calls.map(kind) : [];
       if (!calls || !calls.length || kinds.some(k => !k)) return orig.apply(this, arguments);
       window.__STK__.batches++;
+      window.__STK__.kinds.push(kinds.map(k => k[0] + ":" + k[1]));
       if (c.failAll) throw Object.assign(new Error("Failed to fetch"), {code: "NETWORK_ERROR"});
       const results = kinds.map(([k, sym]) => {
         if (k === "q") {
@@ -4425,7 +4447,7 @@ STK_INIT_JS = """(() => {
       const u = String(url);
       if (u.includes("/pools/multi/")) {
         const c = window.__STK__.cfg;
-        window.__STK__.gt++;
+        window.__STK__.gt++; window.__STK__.gtUrls.push(u);
         if (c.failGt) return {ok: false, status: 404, headers: {get: () => null}, json: async () => ({})};
         const addrs = u.split("/pools/multi/")[1].split("?")[0].split(",");
         const data = addrs.map(a => { const x = c.fix[c.pools[a.toLowerCase()]];
@@ -4442,13 +4464,13 @@ STK_INIT_JS = """(() => {
 def stk_expect(sym):
     px, out, ans, vol, chg = STK_FIX[sym]
     price = 100 / (out / 1e8)
-    ref = ans / 1e8
-    gap = (price / ref - 1) * 100
+    ref = ans / 1e8 if ans else None  # بدون فید: مرجع «—» و فاصله خالی
+    gap = (price / ref - 1) * 100 if ref else None
     v = float(vol)
     volt = "$%.1fM" % (v / 1e6) if v >= 1e6 else ("$%dK" % round(v / 1e3) if v >= 1e3 else "$%d" % round(v))
     c = float(chg)
-    return {"price": "${:,.2f}".format(price), "ref": "${:,.2f}".format(ref),
-            "gap": "%s%.2f%% pool gap" % ("−" if gap < 0 else "+", abs(gap)), "vol": volt,
+    return {"price": "${:,.2f}".format(price), "ref": "${:,.2f}".format(ref) if ref else "—",
+            "gap": "%s%.2f%% pool gap" % ("−" if gap < 0 else "+", abs(gap)) if ref else "", "vol": volt,
             "chg": "%s %.2f%%" % ("▼" if c < 0 else "▲", abs(c)), "dn": c < 0}
 
 
@@ -4500,51 +4522,75 @@ async def stk_wait_loaded(pg, vol=True):
 # =====================================================================
 import hashlib as _stkhash
 
+# ۱۱ اکتبر — فهرستِ مستقلِ سولانا (۱۹ تا): نماد، نام، mint، فیدِ Chainlink روی Base (None = ندارد). کپیِ جدا از index.html.
 STK_SOL_EXPECT = [
-    ("AAPLx", "AAPLc", "XsbEhLAtcf6HdfpFZ5xEMdqW8nfAvcsP5bdudRLJzJp"),
-    ("AMZNx", "AMZNc", "Xs3eBt7uRfJX8QUs4suhyU8p2M6DoUDrJyWBa8LLZsg"),
-    ("GOOGLx", "GOOGLc", "XsCPL9dNWBMvFtTmwcCA5v3xWPSMEBCszbQdiLLq6aN"),
-    ("METAx", "METAc", "Xsa62P5mvPszXL1krVUnU5ar38bBSVcWAB6fmPCo5Zu"),
-    ("MSFTx", "MSFTc", "XspzcW1PRtgf6Wj92HCiZdjzKCyFekVD8P5Ueh3dRMX"),
-    ("MSTRx", "MSTRc", "XsP7xzNPvEHS1m6qfanPUGjNmdnmsLKEoNAnHjdxxyZ"),
-    ("NVDAx", "NVDAc", "Xsc9qvGR1efVDFGLrVsmkzv3qi45LTBjeUKSPmx9qEh"),
-    ("SNDKx", "SNDKc", "Xswbpc8UqU6e1j9QZEWCjBMjyvz4twqD7PCy6j2e7jj"),
-    ("SPCXx", "SPCXc", "Xs3oZwbHvqis4NYcf4YKWmEia2eC84wSiVrcYcTqpH8"),
-    ("TSLAx", "TSLAc", "XsDoVfqeBukxuZHWhdvWHBhgEHjGNst4MLodqsJHzoB"),
+    ('AAPLx', 'Apple', 'XsbEhLAtcf6HdfpFZ5xEMdqW8nfAvcsP5bdudRLJzJp', '0x787f13dEa48Db0897CbCDD985de77809D837F988'),
+    ('AMZNx', 'Amazon', 'Xs3eBt7uRfJX8QUs4suhyU8p2M6DoUDrJyWBa8LLZsg', '0x06A8E4b3aBB3B7543d8396FB2B763d22820cB295'),
+    ('COINx', 'Coinbase', 'Xs7ZdzSHLU9ftNJsii5fCeJhoRWSC32SQGzGQtePxNu', None),
+    ('CRCLx', 'Circle', 'XsueG8BtpquVJX9LVLLEGuViXUungE6WmK5YZ3p3bd1', None),
+    ('GLDx', 'Gold ETF', 'Xsv9hRk1z5ystj9MhnA7Lq4vjSsLwzL2nxrwmwtD3re', None),
+    ('GMEx', 'GameStop', 'Xsf9mBktVB9BSU5kf4nHxPq5hCBJ2j2ui3ecFGxPRGc', None),
+    ('GOOGLx', 'Alphabet', 'XsCPL9dNWBMvFtTmwcCA5v3xWPSMEBCszbQdiLLq6aN', '0x5bF49E0ffA937CE2FfF033c739aD7C634c4D34F2'),
+    ('HOODx', 'Robinhood', 'XsvNBAYkrDRNhA7wPHQfX3ZUXZyZLdnCQDfHZ56bzpg', None),
+    ('MCDx', "McDonald's", 'XsqE9cRRpzxcGKDXj1BJ7Xmg4GRhZoyY1KpmGSxAWT2', None),
+    ('METAx', 'Meta', 'Xsa62P5mvPszXL1krVUnU5ar38bBSVcWAB6fmPCo5Zu', '0x6526aE6797A76123638b863AeE4dD27Ba4E4b27D'),
+    ('MSFTx', 'Microsoft', 'XspzcW1PRtgf6Wj92HCiZdjzKCyFekVD8P5Ueh3dRMX', '0xeB10A6c9aa7E537aEd766C08c35Dae35B321b18c'),
+    ('MSTRx', 'Strategy', 'XsP7xzNPvEHS1m6qfanPUGjNmdnmsLKEoNAnHjdxxyZ', '0xB3cE282CD188b35DA0E38D8Bc7d58e33173D202a'),
+    ('NVDAx', 'NVIDIA', 'Xsc9qvGR1efVDFGLrVsmkzv3qi45LTBjeUKSPmx9qEh', '0x04689a41629776563E6822F76f2e57D148d28513'),
+    ('PLTRx', 'Palantir', 'XsoBhf2ufR8fTyNSjqfU71DYGaE6Z3SUGAidpzriAA4', None),
+    ('QQQx', 'Nasdaq-100 ETF', 'Xs8S1uUs1zvS2p7iwtsG3b6fkhpvmwz4GYU3gWAmWHZ', None),
+    ('SPCXx', 'SpaceX', 'Xs3oZwbHvqis4NYcf4YKWmEia2eC84wSiVrcYcTqpH8', '0x6A634B235903C4ad6376892180d6fF8612e3Fa68'),
+    ('SPYx', 'S&P 500 ETF', 'XsoCS1TfEyfFhfvj8EtZ528L3CaKBDBRqRapnBbDF2W', None),
+    ('STRCx', 'Strategy Preferred', 'Xs78JED6PFZxWc2wCEPspZW9kL3Se5J7L5TChKgsidH', None),
+    ('TSLAx', 'Tesla', 'XsDoVfqeBukxuZHWhdvWHBhgEHjGNst4MLodqsJHzoB', '0xFaf869185383a24F8cb00e27BdA6b63B9905DCb4'),
 ]
+STK_SOL_ORDER = [e[0] for e in STK_SOL_EXPECT]
+STK_SOL_NAMES = {e[0]: e[1] for e in STK_SOL_EXPECT}
 STK_SOL_USDC = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"
-STK_AV = {"AAPLc": "AAPL", "AMZNc": "AMZN", "GOOGLc": "GOOG", "METAc": "META", "MSFTc": "MSFT",
-          "MSTRc": "MSTR", "NVDAc": "NVDA", "SNDKc": "SNDK", "SPCXc": "SPCX", "TSLAc": "TSLA"}
-# base: (price_usd رشته، حجم رشته، تغییر رشته). SPCXc با قیمتِ صفر = «—»؛ MSTRc فیدش خراب است = مرجعِ «—».
+# حروفِ آواتار = نماد بدونِ حرفِ آخر (c یا x)، حداکثر ۴ حرف
+def stk_av(sym):
+    return sym[:-1][:4]
+
+
+# sym: (price_usd رشته، حجم رشته، تغییر رشته). SPCXx با قیمتِ صفر = «—»؛ MSTRx فیدش خراب است = مرجعِ «—».
 STK_SOL_FIX = {
-    "AAPLc": ("259.04", "5120000.5", "0.50"),
-    "AMZNc": ("225.1175", "912345.2", "-1.00"),
-    "GOOGLc": ("187.99", "1310000", "1.25"),
-    "METAc": ("611.5", "1020400.7", "-2.10"),
-    "MSFTc": ("432.1012345", "2330000.9", "0.10"),
-    "MSTRc": ("329.9", "6310000.3", "-4.00"),
-    "NVDAc": ("143.07", "9910000.1", "2.50"),
-    "SNDKc": ("61.0", "712.3", "-0.75"),
-    "SPCXc": ("0", "310500.4", "3.00"),
-    "TSLAc": ("378.5599", "3588482.1", "-1.50"),
+    "AAPLx": ("259.04", "5120000.5", "0.50"),
+    "AMZNx": ("225.1175", "912345.2", "-1.00"),
+    "COINx": ("301.77", "2410000.4", "2.20"),
+    "CRCLx": ("142.3301", "1780000.9", "-3.10"),
+    "GLDx": ("312.45", "654321.7", "0.35"),
+    "GMEx": ("27.6", "88000.2", "-0.80"),
+    "GOOGLx": ("187.99", "1310000", "1.25"),
+    "HOODx": ("118.042", "990100.3", "4.40"),
+    "MCDx": ("296.83", "430000.6", "-0.20"),
+    "METAx": ("611.5", "1020400.7", "-2.10"),
+    "MSFTx": ("432.1012345", "2330000.9", "0.10"),
+    "MSTRx": ("329.9", "6310000.3", "-4.00"),
+    "NVDAx": ("143.07", "9910000.1", "2.50"),
+    "PLTRx": ("179.31", "3120000.2", "1.05"),
+    "QQQx": ("531.22", "7210000.8", "0.65"),
+    "SPCXx": ("0", "310500.4", "3.00"),
+    "SPYx": ("601.18", "8120000.5", "0.45"),
+    "STRCx": ("98.7", "712.3", "-0.75"),
+    "TSLAx": ("378.5599", "3588482.1", "-1.50"),
 }
-STK_SOL_BADFEED = ["MSTRc"]
-STK_SOL_LEDE = ("Tokenized shares issued by Backed (xStocks), each backed 1:1 by a real share. Trade them on-chain any time "
-                "against USDC; the reference price comes from Chainlink and moves only while the US market is open.")
+STK_SOL_BADFEED = ["MSTRx"]
+STK_SOL_LEDE = ("Tokenized shares and ETFs issued by Backed (xStocks), each backed 1:1 by the real asset. Trade them on-chain any time "
+                "against USDC; where shown, the reference price comes from Chainlink and moves only while the US market is open.")
 STK_SOL_NOTE = ("Prices are the latest on-chain trade prices from GeckoTerminal; your swap quote comes from Jupiter. "
                 "Issuer terms: not offered to US persons. Not investment advice.")
 STK_BASE_LEDE = ("Tokenized shares issued by Coinbase, each backed 1:1 by a real share. Trade them on-chain any time "
-                 "against USDC; the reference price comes from Chainlink and moves only while the US market is open.")
+                 "against USDC; where shown, the reference price comes from Chainlink and moves only while the US market is open.")
 STK_BASE_NOTE = ("Prices are live quotes from the deepest Aerodrome pool for $100. Issuer terms: not offered to US persons. "
                  "Not investment advice.")
 
 
-def stk_sol_logo(base):
-    return "https://assets.geckoterminal.com/stk/%s.png" % base
+def stk_sol_logo(sym):
+    return "https://assets.geckoterminal.com/stk/%s.png" % sym
 
 
-def stk_sol_pool(base):
-    return b58encode(_stkhash.sha256((base + "-pool").encode()).digest())
+def stk_sol_pool(sym):
+    return b58encode(_stkhash.sha256((sym + "-pool").encode()).digest())
 
 
 def stk_sol_parse():
@@ -4552,7 +4598,8 @@ def stk_sol_parse():
     src = open(os.path.join(HERE, "..", "index.html"), encoding="utf-8").read()
     blk = re.search(r"const STK_SOL=\[(.*?)\n\];", src, re.S)
     assert blk, "[stocks sol] STK_SOL not found in index.html"
-    return re.findall(r'\{sym:"(\w+)",base:"(\w+)",mint:"([^"]+)"\}', blk.group(1))
+    return [(a, b_, c.strip('"') if c != "null" else None)
+            for a, b_, c in re.findall(r'\{sym:"(\w+)",name:"[^"]*",mint:"([^"]+)",feed:(null|"0x[0-9a-fA-F]{40}")\}', blk.group(1))]
 
 
 def stk_sol_rpcs():
@@ -4562,20 +4609,18 @@ def stk_sol_rpcs():
 
 
 def stk_sol_cfg(sol=True, **over):
-    ent = stk_sol_parse()
-    base_cfg = stk_cfg()
-    feed_by_sym = {sym: addr for addr, sym in base_cfg["feeds"].items()}
+    ent = stk_sol_parse()  # (sym, mint, feed|None)
     rows, chg_by_pool, meta = {}, {}, {}
-    for xs, base, mint in ent:
-        price, vol, chg = STK_SOL_FIX[base]
-        pool = stk_sol_pool(base)
-        rows[mint] = {"price": price, "vol": vol, "logo": stk_sol_logo(base), "pool": pool}
+    for xs, mint, _f in ent:
+        price, vol, chg = STK_SOL_FIX[xs]
+        pool = stk_sol_pool(xs)
+        rows[mint] = {"price": price, "vol": vol, "logo": stk_sol_logo(xs), "pool": pool}
         chg_by_pool[pool] = chg
         meta[mint] = {"symbol": xs, "name": xs, "decimals": 8}
     meta[STK_SOL_USDC] = {"symbol": "USDC", "name": "USD Coin", "decimals": 6}
-    cfg = {"sol": sol, "allMints": [m for _, _, m in ent], "rows": rows, "chgByPool": chg_by_pool, "meta": meta,
-           "feedSym": {feed_by_sym[base]: base for _, base, _ in ent},
-           "answer": {base: STK_FIX[base][2] for _, base, _ in ent},
+    cfg = {"sol": sol, "allMints": [m for _, m, _ in ent], "rows": rows, "chgByPool": chg_by_pool, "meta": meta,
+           "feedSym": {f.lower(): xs for xs, _, f in ent if f},
+           "answer": {xs: FEED_ANS[f.lower()] for xs, _, f in ent if f},
            "badFeeds": list(STK_SOL_BADFEED), "failTokens": False, "failPools": False, "rpcFail": False, "rpcFailFirst": 0, "rpcErrorFirst": False, "rpcBadRequestFirst": False,
            "rpcMissingFirst": [], "rpcs": stk_sol_rpcs()}
     cfg.update(over)
@@ -4584,13 +4629,14 @@ def stk_sol_cfg(sol=True, **over):
 
 STKSOL_INIT_JS = """(() => {
   const cfg = %s;
-  const S = window.__STKSOL__ = {tokens: 0, pools: 0, rpc: 0, quote: 0, tokensUrl: null, poolsUrl: null, rpcReqs: [], rpcArrays: 0, rpcUrls: []};
+  const S = window.__STKSOL__ = {tokensAll: 0, tokens: 0, pools: 0, rpc: 0, quote: 0, tokensUrl: null, poolsUrl: null, rpcReqs: [], rpcArrays: 0, rpcUrls: []};
   if (cfg.sol) { try { localStorage.setItem('zaexa.chain.v1', 'solana'); } catch (e) {} }
   const R = (status, body) => ({ok: status < 400, status: status, headers: {get: () => null}, json: async () => body, text: async () => JSON.stringify(body)});
   const hex = n => BigInt(n).toString(16).padStart(64, '0');
   const wrap = f0 => async function (url, opts) {
     const u = String(url);
     if (u.includes('/sol/quote')) S.quote++;
+    if (u.includes('/networks/solana/tokens/multi/')) S.tokensAll++;
     if (u.includes('/networks/solana/tokens/multi/') && u.split('/tokens/multi/')[1].split('?')[0] === cfg.allMints.join(',')) {
       S.tokens++; S.tokensUrl = u;
       if (cfg.failTokens) return R(500, {});
@@ -4641,12 +4687,17 @@ def _stk_fmt_vol(v):
     return "$%.1fM" % (v / 1e6) if v >= 1e6 else ("$%dK" % round(v / 1e3) if v >= 1e3 else "$%d" % round(v))
 
 
+def stk_sol_feed(sym):
+    return next(e[3] for e in STK_SOL_EXPECT if e[0] == sym)
+
+
 def stk_sol_expect(base, ref_ok=True, tokens_ok=True, bad=None):
     """انتظارِ یک ردیفِ سولانا؛ فرمول مستقل از صفحه. tokens_ok=False یعنی tokens/multi شکست خورده."""
     price_s, vol_s, chg_s = STK_SOL_FIX[base]
     price = float(price_s)
     has_px = tokens_ok and price > 0
-    ref = STK_FIX[base][2] / 1e8 if (ref_ok and base not in (STK_SOL_BADFEED if bad is None else bad)) else None
+    fd = stk_sol_feed(base)
+    ref = FEED_ANS[fd.lower()] / 1e8 if (fd and ref_ok and base not in (STK_SOL_BADFEED if bad is None else bad)) else None
     c = float(chg_s)
     out = {"price": "${:,.2f}".format(price) if has_px else "—",
            "ref": "${:,.2f}".format(ref) if ref else "—",
@@ -4664,7 +4715,7 @@ def stk_sol_expect(base, ref_ok=True, tokens_ok=True, bad=None):
 async def stk_sol_wait(pg):
     """منتظرِ آمدنِ قیمت، حجم، تغییر و مرجعِ TSLAx (هر چهار تا)."""
     await pg.wait_for_function(
-        "() => { const t = document.querySelector('#view-stocks tr[data-sym=\"TSLAc\"]');"
+        "() => { const t = document.querySelector('#view-stocks tr[data-sym=\"TSLAx\"]');"
         " return t.querySelector('.cPx .v').textContent !== '—' && t.querySelector('.cPx small').textContent !== ''"
         " && t.querySelector('.colRef small').textContent !== '' && t.querySelector('.colVol').textContent !== '—'; }", timeout=20000)
     await pg.wait_for_timeout(200)
@@ -4672,11 +4723,12 @@ async def stk_sol_wait(pg):
 
 async def stk_sol_rows_check(pg, tag, **kw):
     rows = await pg.evaluate(STK_ROWS_JS)
-    assert len(rows) == 10, "%s: expected 10 rows, got %d" % (tag, len(rows))
-    for (xs, base, mint), r in zip(STK_SOL_EXPECT, rows):
+    assert len(rows) == 19, "%s: expected 19 rows, got %d" % (tag, len(rows))
+    for (xs, _n, mint, _f), r in zip(STK_SOL_EXPECT, rows):
+        base = xs
         e = stk_sol_expect(base, **kw)
-        assert r["sym"] == base and r["b"] == xs, "%s: row %s must show %s: %s" % (tag, base, xs, r)
-        assert r["name"] == STK_NAMES[base] and r["av"] == STK_AV[base], "%s: company name/letters unchanged for %s: %s" % (tag, base, r)
+        assert r["sym"] == xs and r["b"] == xs, "%s: row %s must show %s: %s" % (tag, base, xs, r)
+        assert r["name"] == STK_SOL_NAMES[xs] and r["av"] == stk_av(xs), "%s: company name/letters for %s: %s" % (tag, xs, r)
         assert r["px"] == e["price"], "%s: %s price %r != %r" % (tag, xs, r["px"], e["price"])
         assert r["chg"] == e["chg"] and r["chgCls"] == e["chgCls"], "%s: %s change %r/%r != %r/%r" % (tag, xs, r["chg"], r["chgCls"], e["chg"], e["chgCls"])
         assert r["ref"] == e["ref"], "%s: %s reference %r != %r" % (tag, xs, r["ref"], e["ref"])
@@ -4696,16 +4748,18 @@ async def check_stocks_sol(p, errors):
 
     # ---- [stocks sol mints] ----
     ent = stk_sol_parse()
-    assert ent == STK_SOL_EXPECT, "[stocks sol mints] STK_SOL in index.html differs from the verified list: %s" % (ent,)
-    for xs, base, mint in ent:
+    assert ent == [(a_, m_, f_) for a_, _n, m_, f_ in STK_SOL_EXPECT], "[stocks sol mints] STK_SOL in index.html differs from the verified list: %s" % (ent,)
+    assert len(ent) == 19 and "SNDKx" not in [e[0] for e in ent], "[stocks sol mints] 19 entries, no SNDKx"
+    for xs, mint, _f in ent:
         assert re.match(r"^[1-9A-HJ-NP-Za-km-z]{32,44}$", mint), "[stocks sol mints] %s is not a base58 mint: %r" % (xs, mint)
-    assert len({m for _, _, m in ent}) == 10, "[stocks sol mints] ten distinct mints"
-    print("[stocks sol mints] STK_SOL holds exactly the 10 verified (symbol, Base symbol, mint) triples in order, every mint is base58 (32-44 chars) and distinct")
+    assert len({m for _, m, _ in ent}) == 19, "[stocks sol mints] nineteen distinct mints"
+    assert [e[0] for e in ent] == sorted(e[0] for e in ent), "[stocks sol mints] alphabetical by symbol"
+    print("[stocks sol mints] STK_SOL holds exactly the 19 verified (symbol, mint, feed-or-null) entries in order, every mint is base58 (32-44 chars) and distinct, no SNDKx")
 
     # ---- [stocks sol view] ----
     pg = await open_sol()
     await stk_sol_wait(pg)
-    await pg.wait_for_function("() => document.querySelectorAll('#view-stocks .av img.on').length === 10", timeout=15000)
+    await pg.wait_for_function("() => document.querySelectorAll('#view-stocks .av img.on').length === 19", timeout=15000)
     assert await pg.evaluate("() => activeChain") == "solana", "[stocks sol view] the fixture must boot on Solana"
     await stk_sol_rows_check(pg, "[stocks sol view]")
     st = await pg.evaluate("""() => ({lede: document.getElementById('stkLede').textContent, note: document.getElementById('stkNote').textContent,
@@ -4719,30 +4773,36 @@ async def check_stocks_sol(p, errors):
     for base, src in st["imgs"]:
         assert src == stk_sol_logo(base), "[stocks sol view] %s logo must be the image_url from tokens/multi: %r" % (base, src)
     await pg.context.close()
-    print("[stocks sol view] Solana boot on #stocks: 10 rows with AAPLx...TSLAx, GeckoTerminal prices (string price_usd), 24h change from the top pool, Chainlink reference and gap, volume, a zero price and a dead feed shown as dashes, exact lede/note, market pill, own image_url logos")
+    print("[stocks sol view] Solana boot on #stocks: 19 rows with AAPLx...TSLAx, GeckoTerminal prices (string price_usd), 24h change from the top pool, Chainlink reference and gap, volume, a zero price, a dead feed and rows without a feed shown as dashes, exact lede/note, market pill, own image_url logos")
 
     # ---- [stocks sol requests] ----
     pg = await open_sol(badFeeds=[])
     await stk_sol_wait(pg)
     await pg.wait_for_timeout(1500)
     rq = await pg.evaluate("() => Object.assign({}, window.__STKSOL__, {batches: window.__STK__.batches})")
-    assert rq["tokens"] == 1 and rq["pools"] == 1 and rq["rpc"] == 10, "[stocks sol requests] exactly one tokens/multi, one pools/multi, ten single eth_call requests: %s" % {k: rq[k] for k in ("tokens", "pools", "rpc")}
+    sol_feeds = [f_ for _, _, f_ in ent if f_]
+    assert len(sol_feeds) == 9, "[stocks sol requests] fixture: nine entries with a feed"
+    assert rq["tokensAll"] == 1 and rq["tokens"] == 1 and rq["pools"] == 1 and rq["rpc"] == 9, "[stocks sol requests] exactly one tokens/multi (all 19 mints), one pools/multi, nine single eth_call requests: %s" % {k: rq[k] for k in ("tokensAll", "tokens", "pools", "rpc")}
     assert rq["quote"] == 0, "[stocks sol requests] loading the view must not call /sol/quote (%d calls)" % rq["quote"]
     assert rq["batches"] == 0, "[stocks sol requests] the Solana path must not use ethers/multicall (%d multicall batches)" % rq["batches"]
-    assert rq["tokensUrl"].endswith("/networks/solana/tokens/multi/" + ",".join(m for _, _, m in ent)), "[stocks sol requests] tokens/multi URL: %s" % rq["tokensUrl"]
-    assert rq["poolsUrl"].endswith("/networks/solana/pools/multi/" + ",".join(stk_sol_pool(b_) for _, b_, _ in ent)), "[stocks sol requests] pools/multi URL: %s" % rq["poolsUrl"]
-    feeds = {s: a for a, s in stk_cfg()["feeds"].items()}
+    assert rq["tokensUrl"].endswith("/networks/solana/tokens/multi/" + ",".join(m for _, m, _ in ent)), "[stocks sol requests] tokens/multi URL: %s" % rq["tokensUrl"]
+    # فرستنده‌ی پراکسی بخش‌های بلندتر از ۱۲۰۰ نویسه را رد می‌کند: طولِ مسیر و بخشِ آخر را از روی URLِ واقعی می‌سنجیم
+    tpath = urlparse(rq["tokensUrl"]).path
+    assert len(tpath) < 1200 and len(tpath.rsplit("/", 1)[1]) < 1200, "[stocks sol requests] tokens/multi path is %d chars (must stay < 1200): %s" % (len(tpath), tpath[:80])
+    assert rq["poolsUrl"].endswith("/networks/solana/pools/multi/" + ",".join(stk_sol_pool(xs) for xs, _, _ in ent)), "[stocks sol requests] pools/multi URL: %s" % rq["poolsUrl"]
     reqs = rq["rpcReqs"]
     assert rq["rpcArrays"] == 0, "[stocks sol requests] no JSON-RPC array (batch) body may be sent: %d" % rq["rpcArrays"]
     first = stk_sol_rpcs()[0]
-    assert len(reqs) == 10 and all(r["url"] == first and r["method"] == "POST" and "application/json" in _stkjson.dumps(r["headers"]) for r in reqs), \
-        "[stocks sol requests] all ten eth_call requests go to the first Base endpoint as JSON POSTs: %s" % [r["url"] for r in reqs]
+    assert len(reqs) == 9 and all(r["url"] == first and r["method"] == "POST" and "application/json" in _stkjson.dumps(r["headers"]) for r in reqs), \
+        "[stocks sol requests] all nine eth_call requests go to the first Base endpoint as JSON POSTs: %s" % [r["url"] for r in reqs]
     got = sorted(reqs, key=lambda r: r["body"]["id"])
-    assert all(r["body"] == {"jsonrpc": "2.0", "id": i, "method": "eth_call", "params": [{"to": r["body"]["params"][0]["to"], "data": "0xfeaf968c"}, "latest"]}
-               and r["body"]["params"][0]["to"].lower() == feeds[STK_ORDER[i]] for i, r in enumerate(got)), \
+    want_idx = [i for i, e in enumerate(ent) if e[2]]  # شناسه‌ی درخواست = جای ورودی در STK_SOL
+    assert [r["body"]["id"] for r in got] == want_idx, "[stocks sol requests] request ids: %s" % [r["body"]["id"] for r in got]
+    assert all(r["body"] == {"jsonrpc": "2.0", "id": r["body"]["id"], "method": "eth_call", "params": [{"to": r["body"]["params"][0]["to"], "data": "0xfeaf968c"}, "latest"]}
+               and r["body"]["params"][0]["to"].lower() == ent[r["body"]["id"]][2].lower() for r in got), \
         "[stocks sol requests] eth_call bodies: %s" % [r["body"] for r in got]
     await pg.context.close()
-    print("[stocks sol requests] one tokens/multi (10 mints, STK_SOL order), one pools/multi (top pools), ten single eth_call requests (one per feed, exact bodies, no batch array) all to the first Base endpoint; zero /sol/quote; zero multicall batches (the page's ethers is never used for these rows)")
+    print("[stocks sol requests] exactly one tokens/multi (19 mints, STK_SOL order, path < 1200 chars), one pools/multi (top pools), nine single eth_call requests (one per entry that has a feed, exact bodies, no batch array) all to the first Base endpoint; zero /sol/quote; zero multicall batches")
 
     # ---- [stocks sol note gone] ----
     GONE_JS = """() => { const v = document.getElementById('view-stocks');
@@ -4761,12 +4821,12 @@ async def check_stocks_sol(p, errors):
     print("[stocks sol note gone] on both chains there is no #stkSolNote, no #stkToBase and no 'Switch to Base' / 'US stocks trade on Base' text in #view-stocks")
 
     # ---- [stocks sol switch] ----
-    base_px = {STK_ORDER[i]: stk_expect(STK_ORDER[i])["price"] for i in range(10)}
-    sol_px = {s: stk_sol_expect(s)["price"] for s in STK_ORDER}
+    base_px = {sy: stk_expect(sy)["price"] for sy in STK_ORDER}
+    sol_px = {sy: stk_sol_expect(sy)["price"] for sy in STK_SOL_ORDER if stk_sol_expect(sy)["price"] != "—"}
     assert not (set(base_px.values()) & set(sol_px.values())), "fixture prices must differ between the chains"
     pg = await open_sol(sol=False)
     await stk_wait_loaded(pg)
-    assert (await pg.evaluate(STK_ROWS_JS))[9]["b"] == "TSLAc"
+    assert (await pg.evaluate(STK_ROWS_JS))[-1]["b"] == "TSLAc"
     await pg.evaluate("""() => { const S = window.__SNAP = []; let last = '';
         setInterval(() => { const rs = [...document.querySelectorAll('#view-stocks tr[data-sym]')];
           const s = JSON.stringify({n: rs.map(r => r.querySelector('.nm b').textContent), p: rs.map(r => r.querySelector('.cPx .v').textContent),
@@ -4775,7 +4835,7 @@ async def check_stocks_sol(p, errors):
     await pg.click("#srcChip")
     await pg.click('#srcPop [data-chain="solana"]')
     await stk_sol_wait(pg)
-    await pg.wait_for_function("() => document.querySelectorAll('#view-stocks .av img.on').length === 10", timeout=15000)
+    await pg.wait_for_function("() => document.querySelectorAll('#view-stocks .av img.on').length === 19", timeout=15000)
     await stk_sol_rows_check(pg, "[stocks sol switch] on Solana")
     txt = await pg.evaluate("() => [document.getElementById('stkLede').textContent, document.getElementById('stkNote').textContent]")
     assert txt == [STK_SOL_LEDE, STK_SOL_NOTE], "[stocks sol switch] Solana texts after the switch: %s" % txt
@@ -4813,9 +4873,9 @@ async def check_stocks_sol(p, errors):
     await pg.wait_for_function("() => stkData.loaded", timeout=30000)
     await pg.wait_for_timeout(300)
     rows = await pg.evaluate(STK_ROWS_JS)
-    for (xs, base, _), r in zip(STK_SOL_EXPECT, rows):
-        e = stk_sol_expect(base, tokens_ok=False, bad=[])
-        assert r["px"] == "—" and r["vol"] == "—" and r["chg"] == "" and r["gap"] == "" and r["ref"] == e["ref"] and r["ref"] != "—", \
+    for (xs, _n, _m, fd), r in zip(STK_SOL_EXPECT, rows):
+        e = stk_sol_expect(xs, tokens_ok=False, bad=[])
+        assert r["px"] == "—" and r["vol"] == "—" and r["chg"] == "" and r["gap"] == "" and r["ref"] == e["ref"] and (r["ref"] != "—" or fd is None), \
             "[stocks sol fail] tokens/multi 500: %s must show a dash price with its reference kept: %s" % (xs, r)
     txt = await pg.inner_text("#view-stocks")
     assert "NaN" not in txt and "$0.00" not in txt and "undefined" not in txt, "[stocks sol fail] junk text: %s" % txt[:300]
@@ -4825,14 +4885,14 @@ async def check_stocks_sol(p, errors):
     await pg.wait_for_timeout(300)
     await stk_sol_rows_check(pg, "[stocks sol fail] all rpc endpoints dead", ref_ok=False)
     n_rpc = await pg.evaluate("() => window.__STKSOL__.rpc")
-    assert n_rpc == 10 * len(stk_sol_rpcs()), "[stocks sol fail] every Base endpoint is asked for all 10 feeds before giving up: %d" % n_rpc
+    assert n_rpc == 9 * len(stk_sol_rpcs()), "[stocks sol fail] every Base endpoint is asked for all 9 feeds before giving up: %d" % n_rpc
     assert "reference updated" not in await pg.inner_text("#stkMktTxt"), "[stocks sol fail] no reference age without a reference"
     await pg.context.close()
     pg = await open_sol(rpcFailFirst=2, badFeeds=[])
     await stk_sol_wait(pg)
     await stk_sol_rows_check(pg, "[stocks sol fail] two dead endpoints", bad=[])
     n_rpc = await pg.evaluate("() => window.__STKSOL__.rpc")
-    assert n_rpc == 30, "[stocks sol fail] the third endpoint answers after two dead ones (10 requests each): %d requests" % n_rpc
+    assert n_rpc == 27, "[stocks sol fail] the third endpoint answers after two dead ones (9 requests each): %d requests" % n_rpc
     await pg.context.close()
     pg = await open_sol(failTokens=True, rpcFail=True)
     await pg.wait_for_function("() => document.getElementById('stkMktTxt').textContent.includes('unavailable')", timeout=60000)
@@ -4845,7 +4905,7 @@ async def check_stocks_sol(p, errors):
     pg = await open_sol()
     await stk_sol_wait(pg)
     await pg.evaluate("() => { document.getElementById('solAmt').value = '123'; }")
-    await pg.click('#view-stocks tr[data-sym="TSLAc"] .trade')
+    await pg.click('#view-stocks tr[data-sym="TSLAx"] .trade')
     await pg.wait_for_function("() => document.getElementById('solBotSym').textContent === 'TSLAx' && document.getElementById('solTopSym').textContent === 'USDC' && document.activeElement && document.activeElement.id === 'solAmt'", timeout=15000)
     st = await pg.evaluate("""() => ({swap: document.getElementById('view-swap').classList.contains('on'), stocks: document.getElementById('view-stocks').classList.contains('on'),
         top: document.getElementById('solTopSym').textContent, bot: document.getElementById('solBotSym').textContent,
@@ -4853,7 +4913,7 @@ async def check_stocks_sol(p, errors):
         focus: document.activeElement && document.activeElement.id, chain: activeChain})""")
     assert st["swap"] and not st["stocks"] and st["chain"] == "solana", "[stocks sol trade] must land on the Solana swap view: %s" % st
     assert st["top"] == "USDC" and st["bot"] == "TSLAx" and st["side"] == "buy", "[stocks sol trade] pay USDC, receive TSLAx: %s" % st
-    assert st["mint"] == ent[9][2] and st["ref"] == STK_SOL_USDC, "[stocks sol trade] the card's mints: %s" % st
+    assert st["mint"] == ent[-1][1] and st["ref"] == STK_SOL_USDC, "[stocks sol trade] the card's mints: %s" % st
     assert st["amt"] == "" and st["out"] == "" and st["focus"] == "solAmt", "[stocks sol trade] empty amount, 'You pay' focused: %s" % st
     assert await pg.evaluate("() => window.__STKSOL__.quote") == 0, "[stocks sol trade] Trade alone must not request a quote"
     await pg.context.close()
@@ -4866,19 +4926,19 @@ async def check_stocks_sol(p, errors):
         await stk_sol_rows_check(pg, "[stocks sol rpc fallback] %s" % list(mode)[0], bad=[])
         rq = await pg.evaluate("() => window.__STKSOL__")
         eps = stk_sol_rpcs()
-        assert rq["rpcArrays"] == 0 and [r["url"] for r in rq["rpcReqs"]] == [eps[0]] * 10 + [eps[1]] * 10, \
-            "[stocks sol rpc fallback] %s: 10 requests to the first endpoint, then the same 10 to the second: %s" % (list(mode)[0], [r["url"] for r in rq["rpcReqs"]])
+        assert rq["rpcArrays"] == 0 and [r["url"] for r in rq["rpcReqs"]] == [eps[0]] * 9 + [eps[1]] * 9, \
+            "[stocks sol rpc fallback] %s: 9 requests to the first endpoint, then the same 9 to the second: %s" % (list(mode)[0], [r["url"] for r in rq["rpcReqs"]])
         await pg.context.close()
-    miss = ["AAPLc", "TSLAc"]
+    miss = ["AAPLx", "TSLAx"]
     pg = await open_sol(badFeeds=[], rpcMissingFirst=miss)
     await stk_sol_wait(pg)
     await stk_sol_rows_check(pg, "[stocks sol rpc fallback] two feeds missing on the first endpoint", bad=[])
     rq = await pg.evaluate("() => window.__STKSOL__")
     eps = stk_sol_rpcs()
-    assert [r["url"] for r in rq["rpcReqs"]] == [eps[0]] * 10 + [eps[1]] * 2 and sorted(r["body"]["id"] for r in rq["rpcReqs"][10:]) == [0, 9], \
+    assert [r["url"] for r in rq["rpcReqs"]] == [eps[0]] * 9 + [eps[1]] * 2 and sorted(r["body"]["id"] for r in rq["rpcReqs"][9:]) == [0, 18], \
         "[stocks sol rpc fallback] only the two missing feeds go to the second endpoint: %s" % [(r["url"], r["body"]["id"]) for r in rq["rpcReqs"]]
     await pg.context.close()
-    print("[stocks sol rpc fallback] first endpoint answering HTTP 500 JSON errors, or 400 'Bad Request': all 10 references come from the second endpoint; two feeds missing on the first are asked of the second only; a batch array is never sent")
+    print("[stocks sol rpc fallback] first endpoint answering HTTP 500 JSON errors, or 400 'Bad Request': all 9 references come from the second endpoint; two feeds missing on the first are asked of the second only; a batch array is never sent")
 
     # ---- [stocks sol hidden tab] ----
     pg = await open_sol(extra=STK_HID_INIT, badFeeds=[])
@@ -4891,9 +4951,99 @@ async def check_stocks_sol(p, errors):
     except Exception:
         raise AssertionError("[stocks sol hidden tab] becoming visible did not load the prices within 20 s")
     h1 = await pg.evaluate("() => [window.__STKSOL__.tokens, window.__STKSOL__.pools, window.__STKSOL__.rpc]")
-    assert h1 == [1, 1, 10], "[stocks sol hidden tab] visible must load exactly once (1 tokens, 1 pools, 10 eth_call): %s" % (h1,)
+    assert h1 == [1, 1, 9], "[stocks sol hidden tab] visible must load exactly once (1 tokens, 1 pools, 9 eth_call): %s" % (h1,)
     await pg.context.close()
     print("[stocks sol hidden tab] a Solana tab opened hidden sends no tokens/pools/rpc request; the moment it becomes visible it loads once")
+
+    # ---- [stocks lists] ۱۱ اکتبر — هر زنجیره فهرستِ خودش را دارد؛ جدول از داده ساخته می‌شود ----
+    src_ix = open(os.path.join(HERE, "..", "index.html"), encoding="utf-8").read()
+    tbl = re.search(r'<table id="stkTable">.*?</table>', src_ix, re.S).group(0)
+    assert re.search(r"<tbody>\s*</tbody>", tbl) and "<tr data-sym" not in tbl and "data-sym=" not in tbl, "[stocks lists] #stkTable tbody must start empty in the HTML"
+    ST_JS = """() => { const rs = [...document.querySelectorAll('#stkTable tbody tr')];
+        return {rows: rs.map(r => [r.dataset.sym, r.querySelector('.nm b').textContent, r.querySelector('.nm small').textContent, r.querySelector('.av').textContent,
+                                   r.querySelector('.trade').dataset.sym]),
+                total: document.querySelectorAll('#view-stocks tr[data-sym]').length, bodyRows: rs.length}; }"""
+
+    async def lists_check(pg, tag, sol):
+        st = await pg.evaluate(ST_JS)
+        exp = STK_SOL_EXPECT if sol else [(e[0], e[1]) for e in STK_BASE_EXPECT]
+        names = STK_SOL_NAMES if sol else STK_NAMES
+        n = 19 if sol else 12
+        assert st["bodyRows"] == n and st["total"] == n, "%s: exactly %d rows, got %s" % (tag, n, st["bodyRows"])
+        assert [r[0] for r in st["rows"]] == [e[0] for e in exp], "%s: row order %s" % (tag, [r[0] for r in st["rows"]])
+        for r in st["rows"]:
+            assert r[0] == r[1] == r[4] and r[2] == names[r[0]] and r[3] == stk_av(r[0]), "%s: row %s" % (tag, r)
+        other = set(STK_ORDER) if sol else set(STK_SOL_ORDER)
+        assert not ({r[0] for r in st["rows"]} & other), "%s: a symbol of the other chain is left in the DOM" % tag
+        return st
+
+    async def inject_check(pg, tag, arr):
+        weird = "<b>A</b>&amp;'\" x"
+        r = await pg.evaluate("""([arr, weird]) => { const L = arr === 'sol' ? STK_SOL : STK; L.push({sym: 'ZZZ' + (arr === 'sol' ? 'x' : 'c'), name: weird, mint: 'x', pool: 'x', feed: null});
+            stkChainPaint(); const tr = document.querySelector('#stkTable tbody tr:last-child'); const sm = tr.querySelector('.nm small');
+            const out = {text: sm.textContent, kids: sm.children.length, bold: tr.querySelectorAll('b').length, n: document.querySelectorAll('#stkTable tbody tr').length};
+            L.pop(); stkChainPaint(); out.after = document.querySelectorAll('#stkTable tbody tr').length; return out; }""", [arr, weird])
+        assert r["text"] == weird and r["kids"] == 0 and r["bold"] == 1, "%s: names must be set as text, never parsed as HTML: %s" % (tag, r)
+
+    pg = await open_sol(sol=False)
+    await stk_wait_loaded(pg)
+    await lists_check(pg, "[stocks lists] Base boot", False)
+    await inject_check(pg, "[stocks lists] Base text-only names", "base")
+    for rnd in range(3):
+        await pg.click("#srcChip")
+        await pg.click('#srcPop [data-chain="solana"]')
+        await stk_sol_wait(pg)
+        st = await lists_check(pg, "[stocks lists] Solana #%d" % (rnd + 1), True)
+        rr = {r[0]: r for r in st["rows"]}
+        assert rr["SPYx"][2] == "S&P 500 ETF" and rr["MCDx"][2] == "McDonald's", "[stocks lists] names with & and ' must render literally: %s %s" % (rr["SPYx"], rr["MCDx"])
+        assert rr["GOOGLx"][3] == "GOOG" and rr["STRCx"][3] == "STRC" and rr["QQQx"][3] == "QQQ", "[stocks lists] avatar letters: %s" % [rr[k][3] for k in ("GOOGLx", "STRCx", "QQQx")]
+        if rnd == 0:
+            await inject_check(pg, "[stocks lists] Solana text-only names", "sol")
+        await pg.click("#srcChip")
+        await pg.click('#srcPop [data-chain="base"]')
+        await stk_wait_loaded(pg)
+        st = await lists_check(pg, "[stocks lists] Base again #%d" % (rnd + 1), False)
+        assert dict((r[0], r[3]) for r in st["rows"])["GOOGLc"] == "GOOG", "[stocks lists] GOOGLc avatar letters"
+    await pg.context.close()
+    print("[stocks lists] #stkTable tbody is empty in the HTML; Base boot builds exactly 12 rows in STK order; Solana exactly 19 in STK_SOL order with no Base symbol left; three round trips never duplicate rows; avatar letters GOOG / STRC / QQQ; 'S&P 500 ETF' and \"McDonald's\" render literally; names are set as text (an HTML-looking name stays text)")
+
+    # ---- [stocks no feed] ۱۱ اکتبر — بدون فید: مرجع «—»، فاصله خالی؛ قیمت و تغییر و حجم سر جایشان ----
+    FEEDLESS_JS = """() => Object.fromEntries([...document.querySelectorAll('#stkTable tbody tr')].map(r => [r.dataset.sym, {
+        ref: r.querySelector('.colRef .v').textContent, gap: r.querySelector('.colRef small').textContent, gapCls: r.querySelector('.colRef small').className,
+        refCls: r.querySelector('.colRef .v').className, px: r.querySelector('.cPx .v').textContent, chg: r.querySelector('.cPx small').textContent,
+        vol: r.querySelector('.colVol').textContent}]))"""
+    pg = await open_sol(sol=False)
+    await stk_wait_loaded(pg)
+    fr = await pg.evaluate(FEEDLESS_JS)
+    for sym_, _n, _t, _p, fd in STK_BASE_EXPECT:
+        e = stk_expect(sym_)
+        r = fr[sym_]
+        assert r["px"] == e["price"] and r["chg"] == e["chg"] and r["vol"] == e["vol"], "[stocks no feed] Base %s price/change/volume: %s" % (sym_, r)
+        if fd is None:
+            assert r["ref"] == "—" and r["gap"] == "" and r["gapCls"] == "gap" and r["refCls"] == "v", "[stocks no feed] Base %s: dash reference, empty gap, no error class: %s" % (sym_, r)
+        else:
+            assert r["ref"] == e["ref"] and r["gap"] == e["gap"], "[stocks no feed] Base %s keeps its reference: %s" % (sym_, r)
+    kinds = await pg.evaluate("() => window.__STK__.kinds")
+    assert len(kinds) == 1 and len(kinds[0]) == 22, "[stocks no feed] one multicall batch of 12 quotes + 10 feeds: %s" % [len(k_) for k_ in kinds]
+    assert sum(1 for k_ in kinds[0] if k_.startswith("q:")) == 12 and sum(1 for k_ in kinds[0] if k_.startswith("f:")) == 10, "[stocks no feed] 12 quotes and 10 feeds: %s" % kinds[0]
+    assert not ({"f:MUc", "f:PLTRc"} & set(kinds[0])) and {"q:MUc", "q:PLTRc"} <= set(kinds[0]), "[stocks no feed] MUc/PLTRc are quoted but never asked for a feed: %s" % kinds[0]
+    await pg.context.close()
+    pg = await open_sol(badFeeds=[])
+    await stk_sol_wait(pg)
+    await pg.wait_for_timeout(500)
+    fr = await pg.evaluate(FEEDLESS_JS)
+    nofeed = [e[0] for e in STK_SOL_EXPECT if e[3] is None]
+    assert len(nofeed) == 10, "[stocks no feed] fixture: ten Solana entries without a feed"
+    for sym_ in nofeed:
+        e = stk_sol_expect(sym_)
+        r = fr[sym_]
+        assert r["ref"] == "—" and r["gap"] == "" and r["gapCls"] == "gap" and r["refCls"] == "v", "[stocks no feed] Solana %s: dash reference, empty gap, no error class: %s" % (sym_, r)
+        assert r["px"] == e["price"] and r["chg"] == e["chg"] and r["vol"] == e["vol"] and r["px"] != "—", "[stocks no feed] Solana %s keeps price/change/volume: %s" % (sym_, r)
+    rq = await pg.evaluate("() => window.__STKSOL__")
+    assert rq["rpc"] == 9 and sorted(r["body"]["params"][0]["to"].lower() for r in rq["rpcReqs"]) == sorted(f_.lower() for _, _, _, f_ in STK_SOL_EXPECT if f_), \
+        "[stocks no feed] Solana asks exactly the 9 feeds that exist (%d eth_call)" % rq["rpc"]
+    await pg.context.close()
+    print("[stocks no feed] Base MUc/PLTRc and Solana COINx/CRCLx/GLDx/GMEx/HOODx/MCDx/PLTRx/QQQx/SPYx/STRCx show a dash reference with an empty gap (no error class) while price, change and volume still show; the Base batch is 12 quotes + 10 feeds and never reads a feed for MUc/PLTRc; Solana makes exactly 9 eth_call")
 
     await b.close()
     assert not errs, "[stocks sol] console/page errors: %s" % errs[:5]
@@ -4903,6 +5053,26 @@ async def check_stocks_sol(p, errors):
 async def check_stocks(p, errors):
     b = await p.chromium.launch()
     errs = []
+
+    # ---- [stocks base list] ۱۱ اکتبر — فهرستِ Base از داده؛ کپیِ مستقل در بالای همین بخش ----
+    src_ix = open(os.path.join(HERE, "..", "index.html"), encoding="utf-8").read()
+    blk = re.search(r"const STK=\[(.*?)\n\];", src_ix, re.S)
+    assert blk, "[stocks base list] STK not found in index.html"
+    got_b = [(a_, n_, None if f_ == "null" else f_.strip('"'), p_) for a_, n_, f_, p_ in
+             re.findall(r'\{sym:"(\w+)",name:"([^"]*)",feed:(null|"0x[0-9a-fA-F]{40}"),pool:"(0x[0-9a-f]{40})"\}', blk.group(1))]
+    assert got_b == [(a_, n_, f_, p_) for a_, n_, _t, p_, f_ in STK_BASE_EXPECT], "[stocks base list] STK differs from the verified list: %s" % (got_b,)
+    assert len(got_b) == 12 and [e[0] for e in got_b] == sorted(e[0] for e in got_b), "[stocks base list] 12 entries, alphabetical"
+    bt_block = re.search(r"const BASE_TOKENS=\[(.*?)\n\];", src_ix, re.S).group(1)
+    for sym_, _n, tok_, _p, _f in STK_BASE_EXPECT:
+        m_ = re.search(r'\{symbol:"%s",name:"[^"]*",address:"(0x[0-9a-fA-F]{40})",decimals:(\d+)\}' % sym_, bt_block)
+        assert m_ and m_.group(1) == tok_ and m_.group(2) == "8", "[stocks base list] BASE_TOKENS entry for %s must be %s with 8 decimals: %s" % (sym_, tok_, m_ and m_.groups())
+    for sym_, name_, addr_ in (("MUc", "Micron Technology Inc.", "0xb200000000000000000000Fd2f87532B90095211"),
+                               ("PLTRc", "Palantir Technologies Inc.", "0xb2000000000000000000007d16372840dF4dAbbe")):
+        assert '{symbol:"%s",name:"%s",address:"%s",decimals:8}' % (sym_, name_, addr_) in bt_block, "[stocks base list] %s missing from BASE_TOKENS" % sym_
+    solblk = re.search(r"const STK_SOL=\[(.*?)\n\];", src_ix, re.S).group(1)
+    assert "SNDKx" not in solblk and "Xswbpc8UqU6e1j9QZEWCjBMjyvz4twqD7PCy6j2e7jj" not in src_ix, "[stocks base list] SNDKx must be gone from STK_SOL"
+    print("[stocks base list] STK holds exactly the 12 verified (symbol, name, feed-or-null, pool) entries in order; MUc and PLTRc are in BASE_TOKENS with exactly the verified addresses and 8 decimals; no SNDKx on Solana")
+
 
     # ---- [stocks nav] ----
     NAV_JS = """() => { const nav = document.getElementById('nav'); const items = [...nav.children];
@@ -4957,7 +5127,7 @@ async def check_stocks(p, errors):
         assert [r["sym"] for r in rows] == STK_ORDER, "%s: row order %s" % (ctxn, [r["sym"] for r in rows])
         for r in rows:
             e = stk_expect(r["sym"])
-            assert r["b"] == r["sym"] and r["name"] == STK_NAMES[r["sym"]] and r["av"] == r["sym"][:-1][:4], "%s: stock cell %s" % (ctxn, r)
+            assert r["b"] == r["sym"] and r["name"] == STK_NAMES[r["sym"]] and r["av"] == stk_av(r["sym"]), "%s: stock cell %s" % (ctxn, r)
             assert r["px"] == e["price"], "%s: %s price %r != %r" % (ctxn, r["sym"], r["px"], e["price"])
             assert r["chg"] == e["chg"] and r["chgCls"] == ("dn" if e["dn"] else "up"), "%s: %s change %r/%r != %r" % (ctxn, r["sym"], r["chg"], r["chgCls"], e["chg"])
             assert r["ref"] == e["ref"] and r["gap"] == e["gap"], "%s: %s reference/gap %r %r != %r %r" % (ctxn, r["sym"], r["ref"], r["gap"], e["ref"], e["gap"])
@@ -4986,7 +5156,7 @@ async def check_stocks(p, errors):
         note = await pg.inner_text("#view-stocks .note")
         assert note == "Prices are live quotes from the deepest Aerodrome pool for $100. Issuer terms: not offered to US persons. Not investment advice.", "%s: note text %r" % (ctxn, note)
         await pg.context.close()
-    print("[stocks view] /app#stocks on first load (1280x800 and 390x844, light and dark): boot view shown from the first paint; 10 rows in the fixed order; TSLAc $377.04 / ref $375.73 / +0.35% pool gap / $3.5M / ▼ 1.42% (dn); every row matches an independent calculation; Reference and Volume columns hidden at 390; colours follow --pos/--neg/--on-acc")
+    print("[stocks view] /app#stocks on first load (1280x800 and 390x844, light and dark): boot view shown from the first paint; 12 rows in the fixed order; TSLAc $377.04 / ref $375.73 / +0.35% pool gap / $3.5M / ▼ 1.42% (dn); every row matches an independent calculation; Reference and Volume columns hidden at 390; colours follow --pos/--neg/--on-acc")
 
     # ---- [stocks pill] وضعیتِ بازار با ساعتِ جعلی: نیویورک در ۷ اکتبر UTC-4 است ----
     import datetime as _dt
@@ -5020,11 +5190,11 @@ async def check_stocks(p, errors):
             e = await pg.evaluate(EDGE_JS)
             for k in ("ttl", "lede", "tk"):
                 assert abs(e[k] - 20) <= 0.5, "%s: .%s starts %.2fpx from the card's left edge, not 20: %s" % (ctxn, k, e[k], e)
-            assert len(e["trades"]) == 10 and all(abs(x - 20) <= 0.5 for x in e["trades"]), \
+            assert len(e["trades"]) == 12 and all(abs(x - 20) <= 0.5 for x in e["trades"]), \
                 "%s: every Trade button must end 20px from the card's right edge: %s" % (ctxn, e["trades"])
             assert e["sw"] <= e["iw"], "%s: the page scrolls horizontally: %s" % (ctxn, e)
             await pg.context.close()
-    print("[stocks edges] 1280 and 390, light and dark: title, lede and first column start 20px from the card's left edge; all 10 Trade buttons end 20px from its right edge; no horizontal page scroll")
+    print("[stocks edges] 1280 and 390, light and dark: title, lede and first column start 20px from the card's left edge; all 12 Trade buttons end 20px from its right edge; no horizontal page scroll")
 
     # ---- [stocks fail] ----
     pg = await stk_open(b, 1280, 800, "light", errs, cfg=stk_cfg(failQuote=["NVDAc"], failGt=True))
@@ -5050,7 +5220,7 @@ async def check_stocks(p, errors):
     pg = await stk_open(b, 1280, 800, "light", errs, cfg=stk_cfg(failAll=True, failGt=True))
     await pg.wait_for_function("() => document.getElementById('stkMktTxt').textContent.includes('unavailable')", timeout=30000)
     rows = await pg.evaluate(STK_ROWS_JS)
-    assert len(rows) == 10 and all(r["px"] == "—" and r["ref"] == "—" and r["gap"] == "" and r["vol"] == "—" for r in rows), "[stocks fail] total failure rows: %s" % rows
+    assert len(rows) == 12 and all(r["px"] == "—" and r["ref"] == "—" and r["gap"] == "" and r["vol"] == "—" for r in rows), "[stocks fail] total failure rows: %s" % rows
     assert await pg.inner_text("#stkMktTxt") == "Prices unavailable — retrying", "[stocks fail] total failure pill"
     txt = await pg.inner_text("#view-stocks")
     assert "NaN" not in txt and "$0.00" not in txt, "[stocks fail] junk after total failure: %s" % txt[:300]
@@ -5062,7 +5232,7 @@ async def check_stocks(p, errors):
     assert await pg.evaluate("() => document.querySelector('#view-stocks tr[data-sym=\"TSLAc\"] .cPx .v').textContent") == "$377.04", "[stocks fail] the table must recover"
     assert (await pg.inner_text("#stkMktTxt")).startswith("US market "), "[stocks fail] pill after recovery"
     await pg.context.close()
-    print("[stocks fail] one failed quote and a failed pools/multi: that row shows a dash (no NaN, no $0.00) while its Chainlink reference and the other 9 rows stay; volume and change show dashes; total failure keeps 10 dash rows with 'Prices unavailable — retrying' and recovers on the next open")
+    print("[stocks fail] one failed quote and a failed pools/multi: that row shows a dash (no NaN, no $0.00) while its Chainlink reference and the other 11 rows stay; volume and change show dashes; total failure keeps 12 dash rows with 'Prices unavailable — retrying' and recovers on the next open")
 
     # ---- [stocks trade] ----
     pg = await stk_open(b, 1280, 800, "light", errs, init_extra=stk_sol_init(sol=False))
@@ -5092,7 +5262,8 @@ async def check_stocks(p, errors):
     await stk_wait_loaded(pg)
     n0 = await pg.evaluate("() => window.__STK__.batches")
     g0 = await pg.evaluate("() => window.__STK__.gt")
-    assert n0 == 1 and g0 == 1, "[stocks timer] opening the view must send exactly one 20-call batch and one pools/multi request: %s/%s" % (n0, g0)
+    assert [len(k_) for k_ in await pg.evaluate("() => window.__STK__.kinds")] == [22], "[stocks timer] the single batch holds 12 quotes + 10 feed reads"
+    assert n0 == 1 and g0 == 1, "[stocks timer] opening the view must send exactly one 22-call batch and one pools/multi request: %s/%s" % (n0, g0)
     await pg.clock.run_for(61000)
     await pg.wait_for_timeout(400)
     n1 = await pg.evaluate("() => window.__STK__.batches")
@@ -5188,7 +5359,7 @@ async def check_stocks(p, errors):
     await pg.reload()
     await stk_wait_loaded(pg)
     try:
-        await pg.wait_for_function("() => document.querySelectorAll('#view-stocks .av img.on').length === 10", timeout=15000)
+        await pg.wait_for_function("() => document.querySelectorAll('#view-stocks .av img.on').length === 12", timeout=15000)
     except Exception:
         dbg = await pg.evaluate("async () => ({fsrc: String(window.fetch).slice(0,80), mc: JSON.stringify(metaCache['0xb2000000000000000000001e800a7f5189430cd0']||null).slice(0,120), ls: (()=>{try{return (localStorage.getItem('zaexa.logo.v1')||'').slice(0,200)}catch(e){return 'ERR'}})(), tl: await tokenLogo(BASE_TOKENS.find(x => x.symbol === 'TSLAc')).catch(e => 'ERR ' + e), done: typeof stkLogosDone !== 'undefined' ? stkLogosDone : 'undef', chain: activeChain, view: view, multi: window.__LOGO__ && window.__LOGO__.multi, imgs: document.querySelectorAll('#view-stocks .av img').length, on: document.querySelectorAll('#view-stocks .av img.on').length, srcs: [...document.querySelectorAll('#view-stocks .av img')].slice(0,2).map(i => i.src)})")
         raise AssertionError("[stocks logos] logos did not load: %s" % dbg)
@@ -5198,11 +5369,11 @@ async def check_stocks(p, errors):
         assert r["src"] and r["src"].endswith(".png") and "coin-images.coingecko.com" in r["src"], "[stocks logos] %s must show its own image_url: %s" % (r["sym"], r)
         assert r["letters"] and not r["fb"] and not r["bg"], "[stocks logos] %s keeps the card's own gradient letters underneath (no seeded fallback restyle): %s" % (r["sym"], r)
     srcs = [r["src"] for r in lg]
-    assert len(set(srcs)) == 10, "[stocks logos] ten different logos, one per stock: %s" % srcs
+    assert len(set(srcs)) == 12, "[stocks logos] twelve different logos, one per stock: %s" % srcs
     multi = await pg.evaluate("() => window.__LOGO__.multi")
     assert multi >= 1 and multi <= 2, "[stocks logos] logos come in a batched tokens/multi request (not one per stock): %s" % multi
     await pg.context.close()
-    print("[stocks logos] each of the 10 rows shows its own token logo from the batched tokens/multi image_url over the card's gradient letters (" + str(multi) + " request)")
+    print("[stocks logos] each of the 12 rows shows its own token logo from the batched tokens/multi image_url over the card's gradient letters (" + str(multi) + " request)")
 
     await b.close()
     assert not errs, "[stocks] console/page errors: %s" % errs[:5]

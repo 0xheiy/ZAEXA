@@ -1916,7 +1916,7 @@ try{(function(){
 </div>
 
 <!-- =====================================================================
-     ۷ اکتبر — نمای «US stocks»: ده سهمِ توکنیزه‌ی Coinbase روی Base.
+     ۷ اکتبر — نمای «US stocks»: فهرستِ هر زنجیره از داده (STK / STK_SOL) ساخته می‌شود.
      قیمت از کوترِ Slipstream (tickSpacing ۱۰) و مرجع از Chainlink، هر دو در یک
      دسته‌ی multicall؛ حجم و تغییرِ ۲۴ساعته از یک درخواستِ GeckoTerminal.
      ===================================================================== -->
@@ -1929,21 +1929,10 @@ try{(function(){
       <span class="grow"></span>
       <span class="mkt" id="stkMkt"><i></i><span id="stkMktTxt"></span></span>
     </header>
-    <p class="lede" id="stkLede">Tokenized shares issued by Coinbase, each backed 1:1 by a real share. Trade them on-chain any time against USDC; the reference price comes from Chainlink and moves only while the US market is open.</p>
+    <p class="lede" id="stkLede">Tokenized shares issued by Coinbase, each backed 1:1 by a real share. Trade them on-chain any time against USDC; where shown, the reference price comes from Chainlink and moves only while the US market is open.</p>
     <table id="stkTable">
       <thead><tr><th>Stock</th><th>Price</th><th class="colRef">Reference</th><th class="colVol">Volume 24h</th><th></th></tr></thead>
-      <tbody>
-        <tr data-sym="AAPLc"><td><div class="tk"><span class="av">AAPL</span><span class="nm"><b>AAPLc</b><small>Apple</small></span></div></td><td class="cPx"><span class="v">—</span><small></small></td><td class="colRef"><span class="v">—</span><small class="gap"></small></td><td class="colVol">—</td><td><button class="trade" type="button" data-sym="AAPLc">Trade</button></td></tr>
-        <tr data-sym="AMZNc"><td><div class="tk"><span class="av">AMZN</span><span class="nm"><b>AMZNc</b><small>Amazon</small></span></div></td><td class="cPx"><span class="v">—</span><small></small></td><td class="colRef"><span class="v">—</span><small class="gap"></small></td><td class="colVol">—</td><td><button class="trade" type="button" data-sym="AMZNc">Trade</button></td></tr>
-        <tr data-sym="GOOGLc"><td><div class="tk"><span class="av">GOOG</span><span class="nm"><b>GOOGLc</b><small>Alphabet</small></span></div></td><td class="cPx"><span class="v">—</span><small></small></td><td class="colRef"><span class="v">—</span><small class="gap"></small></td><td class="colVol">—</td><td><button class="trade" type="button" data-sym="GOOGLc">Trade</button></td></tr>
-        <tr data-sym="METAc"><td><div class="tk"><span class="av">META</span><span class="nm"><b>METAc</b><small>Meta</small></span></div></td><td class="cPx"><span class="v">—</span><small></small></td><td class="colRef"><span class="v">—</span><small class="gap"></small></td><td class="colVol">—</td><td><button class="trade" type="button" data-sym="METAc">Trade</button></td></tr>
-        <tr data-sym="MSFTc"><td><div class="tk"><span class="av">MSFT</span><span class="nm"><b>MSFTc</b><small>Microsoft</small></span></div></td><td class="cPx"><span class="v">—</span><small></small></td><td class="colRef"><span class="v">—</span><small class="gap"></small></td><td class="colVol">—</td><td><button class="trade" type="button" data-sym="MSFTc">Trade</button></td></tr>
-        <tr data-sym="MSTRc"><td><div class="tk"><span class="av">MSTR</span><span class="nm"><b>MSTRc</b><small>Strategy</small></span></div></td><td class="cPx"><span class="v">—</span><small></small></td><td class="colRef"><span class="v">—</span><small class="gap"></small></td><td class="colVol">—</td><td><button class="trade" type="button" data-sym="MSTRc">Trade</button></td></tr>
-        <tr data-sym="NVDAc"><td><div class="tk"><span class="av">NVDA</span><span class="nm"><b>NVDAc</b><small>NVIDIA</small></span></div></td><td class="cPx"><span class="v">—</span><small></small></td><td class="colRef"><span class="v">—</span><small class="gap"></small></td><td class="colVol">—</td><td><button class="trade" type="button" data-sym="NVDAc">Trade</button></td></tr>
-        <tr data-sym="SNDKc"><td><div class="tk"><span class="av">SNDK</span><span class="nm"><b>SNDKc</b><small>Sandisk</small></span></div></td><td class="cPx"><span class="v">—</span><small></small></td><td class="colRef"><span class="v">—</span><small class="gap"></small></td><td class="colVol">—</td><td><button class="trade" type="button" data-sym="SNDKc">Trade</button></td></tr>
-        <tr data-sym="SPCXc"><td><div class="tk"><span class="av">SPCX</span><span class="nm"><b>SPCXc</b><small>SpaceX</small></span></div></td><td class="cPx"><span class="v">—</span><small></small></td><td class="colRef"><span class="v">—</span><small class="gap"></small></td><td class="colVol">—</td><td><button class="trade" type="button" data-sym="SPCXc">Trade</button></td></tr>
-        <tr data-sym="TSLAc"><td><div class="tk"><span class="av">TSLA</span><span class="nm"><b>TSLAc</b><small>Tesla</small></span></div></td><td class="cPx"><span class="v">—</span><small></small></td><td class="colRef"><span class="v">—</span><small class="gap"></small></td><td class="colVol">—</td><td><button class="trade" type="button" data-sym="TSLAc">Trade</button></td></tr>
-      </tbody>
+      <tbody></tbody>
     </table>
   </section>
   <p class="note" id="stkNote">Prices are live quotes from the deepest Aerodrome pool for $100. Issuer terms: not offered to US persons. Not investment advice.</p>
@@ -2547,7 +2536,9 @@ const BASE_TOKENS=[
   {symbol:"METAc",name:"Meta Platforms Inc.",address:"0xb2000000000000000000008bC8786B856E61707C",decimals:8},
   {symbol:"MSFTc",name:"Microsoft Corporation",address:"0xB200000000000000000000Ab99cFa739E253872B",decimals:8},
   {symbol:"MSTRc",name:"Strategy Inc.",address:"0xb2000000000000000000004884b426556b92883d",decimals:8},
+{symbol:"MUc",name:"Micron Technology Inc.",address:"0xb200000000000000000000Fd2f87532B90095211",decimals:8},
   {symbol:"NVDAc",name:"NVIDIA Corporation",address:"0xb20000000000000000000078ee7ce2fE4908108C",decimals:8},
+  {symbol:"PLTRc",name:"Palantir Technologies Inc.",address:"0xb2000000000000000000007d16372840dF4dAbbe",decimals:8},
   {symbol:"SNDKc",name:"Sandisk Corporation",address:"0xb200000000000000000000397293Cb8cda9a10c5",decimals:8},
   {symbol:"SPCXc",name:"Space Exploration Technologies Corp.",address:"0xb2000000000000000000007b9fcbd005511aCBd5",decimals:8},
   {symbol:"TSLAc",name:"Tesla Inc.",address:"0xb2000000000000000000001e800a7f5189430cD0",decimals:8},
@@ -9899,7 +9890,7 @@ function closeNavMenu(){
   if(b)b.setAttribute("aria-expanded","false");
 }
 /* =====================================================================
-   نمای US stocks — ده سهمِ توکنیزه‌ی Coinbase روی Base (۷ اکتبر ۲۰۲۶)
+   نمای US stocks — سهمِ توکنیزه روی Base و سولانا (۷ اکتبر ۲۰۲۶)
    ---------------------------------------------------------------------
    قیمت: کوترِ Slipstream (همان aerodrome-cl در جدول DEXES) با tickSpacing ۱۰،
    ۱۰۰ USDC → سهم. مرجع: latestRoundData() از پراکسیِ Chainlink. هر بیست
@@ -9911,6 +9902,7 @@ function closeNavMenu(){
 // اندازه‌گیری روی زنجیره، ۷ اکتبر ۲۰۲۶. پراکسی‌های Chainlink از مستنداتِ Base (۸ رقم اعشار)؛
 // استخرها = استخرِ X/USDC از نوع Slipstream با tickSpacing ۱۰ روی کارخانه‌ی
 // 0xf8f2eB4940CFE7d13603DDDD87f123820Fc061Ef.
+// فهرستِ Base: رسمیِ Coinbase ∩ نقدینگی ≥ ۲۵۰ هزار دلار (۱۲ از ۱۲۷ در ۱۱ اکتبر)؛ پیشوندِ 0xb2… به‌تنهایی چیزی را ثابت نمی‌کند (استانداردِ B20 باز است، تقلبی هم هست).
 const STK=[
   {sym:"AAPLc",name:"Apple",feed:"0x787f13dEa48Db0897CbCDD985de77809D837F988",pool:"0xa3b1e3f9747065e2073722ff4c9027d3ea4994f0"},
   {sym:"AMZNc",name:"Amazon",feed:"0x06A8E4b3aBB3B7543d8396FB2B763d22820cB295",pool:"0xd03bc8c7f2faedce2aac81bf0444aea08ea06e9b"},
@@ -9918,24 +9910,35 @@ const STK=[
   {sym:"METAc",name:"Meta",feed:"0x6526aE6797A76123638b863AeE4dD27Ba4E4b27D",pool:"0xeaf57753bc382e0324a1d43f72e7027705a2273e"},
   {sym:"MSFTc",name:"Microsoft",feed:"0xeB10A6c9aa7E537aEd766C08c35Dae35B321b18c",pool:"0x7103eb3c9590d1281f7dc03b2a9ee27c39df5d54"},
   {sym:"MSTRc",name:"Strategy",feed:"0xB3cE282CD188b35DA0E38D8Bc7d58e33173D202a",pool:"0x8b27f626ab668197000bc722a1012022caed10e2"},
+  {sym:"MUc",name:"Micron",feed:null,pool:"0x17e1beb2cd65493da73ed4bbbc7becaaa0f91c73"},
   {sym:"NVDAc",name:"NVIDIA",feed:"0x04689a41629776563E6822F76f2e57D148d28513",pool:"0x853f5f1b92b16714fe6cda67caad0856b83c7ab9"},
+  {sym:"PLTRc",name:"Palantir",feed:null,pool:"0x650cc267aa248191978013d5ae421e5dc2a6e242"},
   {sym:"SNDKc",name:"Sandisk",feed:"0x388b0dC46C0Fb05A74BeE0994fa5b02c6Fcca2eA",pool:"0x5a8236f575471e7bfca2c8462a200c28f737246e"},
   {sym:"SPCXc",name:"SpaceX",feed:"0x6A634B235903C4ad6376892180d6fF8612e3Fa68",pool:"0x0bf58fe0fac935ac69595c19b12ba0d75e3f8c0e"},
   {sym:"TSLAc",name:"Tesla",feed:"0xFaf869185383a24F8cb00e27BdA6b63B9905DCb4",pool:"0x469337fdcc5e8f38e2e4b670b04f57865d13a7bb"},
 ];
-// xStocks از Backed روی سولانا؛ mintها ۱۰ اکتبر با DefiLlama و GeckoTerminal تأیید شد (۸ رقم اعشار).
-// قیمتِ مرجع = همان فیدِ Chainlink همین سهم روی Base.
+// فهرستِ سولانا: هر ۱۹ تا ۱۱ اکتبر تأیید شد — mint از DefiLlama + تطابقِ دقیقِ نام/نماد در GeckoTerminal + برچسبِ verified/xstocks در Jupiter + mint authority و freeze authority یکسان در هر ۱۹ تا (بررسیِ صادرکننده که فهرستِ خودکارِ بعدی هم می‌کند)؛ مشمول = نقدینگی ≥ ۲۵۰ هزار دلار؛ SNDKx حذف شد (نقدینگی در سولانا ندارد).
+// feed = فیدِ Chainlink همان سهم روی Base یا null.
 const STK_SOL=[
-  {sym:"AAPLx",base:"AAPLc",mint:"XsbEhLAtcf6HdfpFZ5xEMdqW8nfAvcsP5bdudRLJzJp"},
-  {sym:"AMZNx",base:"AMZNc",mint:"Xs3eBt7uRfJX8QUs4suhyU8p2M6DoUDrJyWBa8LLZsg"},
-  {sym:"GOOGLx",base:"GOOGLc",mint:"XsCPL9dNWBMvFtTmwcCA5v3xWPSMEBCszbQdiLLq6aN"},
-  {sym:"METAx",base:"METAc",mint:"Xsa62P5mvPszXL1krVUnU5ar38bBSVcWAB6fmPCo5Zu"},
-  {sym:"MSFTx",base:"MSFTc",mint:"XspzcW1PRtgf6Wj92HCiZdjzKCyFekVD8P5Ueh3dRMX"},
-  {sym:"MSTRx",base:"MSTRc",mint:"XsP7xzNPvEHS1m6qfanPUGjNmdnmsLKEoNAnHjdxxyZ"},
-  {sym:"NVDAx",base:"NVDAc",mint:"Xsc9qvGR1efVDFGLrVsmkzv3qi45LTBjeUKSPmx9qEh"},
-  {sym:"SNDKx",base:"SNDKc",mint:"Xswbpc8UqU6e1j9QZEWCjBMjyvz4twqD7PCy6j2e7jj"},
-  {sym:"SPCXx",base:"SPCXc",mint:"Xs3oZwbHvqis4NYcf4YKWmEia2eC84wSiVrcYcTqpH8"},
-  {sym:"TSLAx",base:"TSLAc",mint:"XsDoVfqeBukxuZHWhdvWHBhgEHjGNst4MLodqsJHzoB"},
+  {sym:"AAPLx",name:"Apple",mint:"XsbEhLAtcf6HdfpFZ5xEMdqW8nfAvcsP5bdudRLJzJp",feed:"0x787f13dEa48Db0897CbCDD985de77809D837F988"},
+  {sym:"AMZNx",name:"Amazon",mint:"Xs3eBt7uRfJX8QUs4suhyU8p2M6DoUDrJyWBa8LLZsg",feed:"0x06A8E4b3aBB3B7543d8396FB2B763d22820cB295"},
+  {sym:"COINx",name:"Coinbase",mint:"Xs7ZdzSHLU9ftNJsii5fCeJhoRWSC32SQGzGQtePxNu",feed:null},
+  {sym:"CRCLx",name:"Circle",mint:"XsueG8BtpquVJX9LVLLEGuViXUungE6WmK5YZ3p3bd1",feed:null},
+  {sym:"GLDx",name:"Gold ETF",mint:"Xsv9hRk1z5ystj9MhnA7Lq4vjSsLwzL2nxrwmwtD3re",feed:null},
+  {sym:"GMEx",name:"GameStop",mint:"Xsf9mBktVB9BSU5kf4nHxPq5hCBJ2j2ui3ecFGxPRGc",feed:null},
+  {sym:"GOOGLx",name:"Alphabet",mint:"XsCPL9dNWBMvFtTmwcCA5v3xWPSMEBCszbQdiLLq6aN",feed:"0x5bF49E0ffA937CE2FfF033c739aD7C634c4D34F2"},
+  {sym:"HOODx",name:"Robinhood",mint:"XsvNBAYkrDRNhA7wPHQfX3ZUXZyZLdnCQDfHZ56bzpg",feed:null},
+  {sym:"MCDx",name:"McDonald's",mint:"XsqE9cRRpzxcGKDXj1BJ7Xmg4GRhZoyY1KpmGSxAWT2",feed:null},
+  {sym:"METAx",name:"Meta",mint:"Xsa62P5mvPszXL1krVUnU5ar38bBSVcWAB6fmPCo5Zu",feed:"0x6526aE6797A76123638b863AeE4dD27Ba4E4b27D"},
+  {sym:"MSFTx",name:"Microsoft",mint:"XspzcW1PRtgf6Wj92HCiZdjzKCyFekVD8P5Ueh3dRMX",feed:"0xeB10A6c9aa7E537aEd766C08c35Dae35B321b18c"},
+  {sym:"MSTRx",name:"Strategy",mint:"XsP7xzNPvEHS1m6qfanPUGjNmdnmsLKEoNAnHjdxxyZ",feed:"0xB3cE282CD188b35DA0E38D8Bc7d58e33173D202a"},
+  {sym:"NVDAx",name:"NVIDIA",mint:"Xsc9qvGR1efVDFGLrVsmkzv3qi45LTBjeUKSPmx9qEh",feed:"0x04689a41629776563E6822F76f2e57D148d28513"},
+  {sym:"PLTRx",name:"Palantir",mint:"XsoBhf2ufR8fTyNSjqfU71DYGaE6Z3SUGAidpzriAA4",feed:null},
+  {sym:"QQQx",name:"Nasdaq-100 ETF",mint:"Xs8S1uUs1zvS2p7iwtsG3b6fkhpvmwz4GYU3gWAmWHZ",feed:null},
+  {sym:"SPCXx",name:"SpaceX",mint:"Xs3oZwbHvqis4NYcf4YKWmEia2eC84wSiVrcYcTqpH8",feed:"0x6A634B235903C4ad6376892180d6fF8612e3Fa68"},
+  {sym:"SPYx",name:"S&P 500 ETF",mint:"XsoCS1TfEyfFhfvj8EtZ528L3CaKBDBRqRapnBbDF2W",feed:null},
+  {sym:"STRCx",name:"Strategy Preferred",mint:"Xs78JED6PFZxWc2wCEPspZW9kL3Se5J7L5TChKgsidH",feed:null},
+  {sym:"TSLAx",name:"Tesla",mint:"XsDoVfqeBukxuZHWhdvWHBhgEHjGNst4MLodqsJHzoB",feed:"0xFaf869185383a24F8cb00e27BdA6b63B9905DCb4"},
 ];
 const STK_FEED_ABI=["function latestRoundData() view returns (uint80 roundId,int256 answer,uint256 startedAt,uint256 updatedAt,uint80 answeredInRound)"];
 const STK_REFRESH_MS=60000,STK_RETRY_MS=15000;
@@ -9965,9 +9968,10 @@ function stkAgo(sec){
   const h=Math.floor(m/60);
   return h<24?h+"h":Math.floor(h/24)+"d";
 }
+const stkList=()=>activeChain==="solana"?STK_SOL:STK;
 function stkPaint(){
   const d=stkData;
-  const anyPx=STK.some(s=>d.px[s.sym]>0),anyRef=STK.some(s=>d.ref[s.sym]>0);
+  const L=stkList(),anyPx=L.some(s=>d.px[s.sym]>0),anyRef=L.some(s=>d.ref[s.sym]>0);
   const pill=$("stkMkt"),txt=$("stkMktTxt");
   if(d.failed&&!anyPx&&!anyRef){
     pill.classList.remove("open");txt.textContent="Prices unavailable — retrying";
@@ -9988,7 +9992,7 @@ function stkPaint(){
     }else{ch.className="";ch.textContent=hasPx&&d.loaded&&!d.gtOk?"—":"";}
     tr.querySelector(".colRef .v").textContent=hasRef?stkUsd(ref):"—";
     const gap=tr.querySelector(".colRef small");
-    if(hasPx&&hasRef){
+    if(hasPx&&hasRef){ // feed:null → ref نیست → فاصله خالی می‌ماند
       const g=(px/ref-1)*100;
       gap.textContent=(g<0?"−":"+")+Math.abs(g).toFixed(2)+"% pool gap";
     }else gap.textContent="";
@@ -10015,18 +10019,20 @@ async function stocksLoad(){
   const usdc=E.getAddress(tokenBySymbol("USDC").address);
   const quoter=E.getAddress(DEXES.find(d=>d.id==="aerodrome-cl").quoter);
   const feedData=stkFeedIface.encodeFunctionData("latestRoundData",[]);
-  const calls=[];
+  const calls=[],idx=[]; // idx[i] = جای quote و feed (یا -1) سهمِ i در calls
   for(const s of STK){
     const tok=BASE_TOKENS.find(t=>t.symbol===s.sym);
+    const e={q:calls.length,f:-1};
     calls.push({target:quoter,data:iQuoterCL.encodeFunctionData("quoteExactInputSingle",[[usdc,E.getAddress(tok.address),100000000n,10,0]])});
-    calls.push({target:E.getAddress(s.feed),data:feedData});
+    if(s.feed){e.f=calls.length;calls.push({target:E.getAddress(s.feed),data:feedData});}
+    idx.push(e);
   }
   let gotAny=false;
   const chainP=stkMulticall(calls).then(res=>{
     if(seq!==stkSeq)return;
     const px={},ref={};let refAt=0;
     STK.forEach((s,i)=>{
-      const q=res[2*i],f=res[2*i+1];
+      const q=res[idx[i].q],f=idx[i].f>=0?res[idx[i].f]:null;
       try{
         if(q&&q.ok&&q.data&&q.data!=="0x"){
           const out=Number(iQuoterCL.decodeFunctionResult("quoteExactInputSingle",q.data)[0])/1e8;
@@ -10069,14 +10075,16 @@ const stkNum=x=>(x==null||x==="")?NaN:Number(x);
 // اندازه‌گیری روی سایت زنده (۱۰ اکتبر): دسته‌ی JSON-RPC روی publicnode «Failed to fetch»، روی meowrpc خطای ۴۰۰ غیر JSON و روی drpc
 // آرایه‌ای از خطاها (HTTP 500) می‌دهد؛ تک‌درخواست‌ها روی publicnode و drpc ۱۰ از ۱۰ جواب می‌دهند. پس هر فید جدا و موازی؛ فقط فیدهای جامانده به اندپوینت بعدی می‌روند.
 async function stkRefBatch(){
-  const ref={};let refAt=0,missing=STK.map((s,i)=>i);
+  const ref={};let refAt=0;
+  const L=STK_SOL; // فقط سهم‌هایی که فید دارند
+  let missing=L.map((s,i)=>s.feed?i:-1).filter(i=>i>=0);
   for(const url of CHAIN.rpcs){
     if(!missing.length)break;
     let live=true;
     const one=async i=>{
       try{
         const r=await fetch(url,{method:"POST",headers:{"Content-Type":"application/json"},
-          body:JSON.stringify({jsonrpc:"2.0",id:i,method:"eth_call",params:[{to:STK[i].feed,data:"0xfeaf968c"},"latest"]})});
+          body:JSON.stringify({jsonrpc:"2.0",id:i,method:"eth_call",params:[{to:L[i].feed,data:"0xfeaf968c"},"latest"]})});
         const j=await r.json();
         const h=j&&!Array.isArray(j)&&j.result;
         if(!live||typeof h!=="string"||!/^0x[0-9a-fA-F]{320,}$/.test(h))return;
@@ -10084,12 +10092,12 @@ async function stkRefBatch(){
         const ans=w(1);
         if(ans>=(1n<<255n))return;
         const a=Number(ans)/1e8,u=Number(w(3));
-        if(a>0&&isFinite(a)){ref[STK[i].sym]=a;if(u>refAt)refAt=u;}
+        if(a>0&&isFinite(a)){ref[L[i].sym]=a;if(u>refAt)refAt=u;}
       }catch{}
     };
     try{await withTimeout(Promise.all(missing.map(one)),6000);}catch{}
     live=false;
-    missing=missing.filter(i=>!(STK[i].sym in ref));
+    missing=missing.filter(i=>!(L[i].sym in ref));
   }
   return Object.keys(ref).length?{ref,refAt}:null;
 }
@@ -10105,12 +10113,12 @@ async function stocksLoadSol(){
       const s=byMint.get(a.address);
       if(!s)continue;
       const p=stkNum(a.price_usd),v=stkNum(a.volume_usd&&a.volume_usd.h24);
-      if(p>0&&isFinite(p))px[s.base]=p;
-      if(isFinite(v))vol[s.base]=v;
-      if(typeof a.image_url==="string"&&okLogo(a.image_url))logo[s.base]=a.image_url;
+      if(p>0&&isFinite(p))px[s.sym]=p;
+      if(isFinite(v))vol[s.sym]=v;
+      if(typeof a.image_url==="string"&&okLogo(a.image_url))logo[s.sym]=a.image_url;
       const tp=row&&row.relationships&&row.relationships.top_pools&&row.relationships.top_pools.data;
       const id=tp&&tp[0]&&tp[0].id;
-      if(typeof id==="string"){const pa=id.replace(/^solana_/,"");pools.push(pa);poolOf[pa]=s.base;}
+      if(typeof id==="string"){const pa=id.replace(/^solana_/,"");pools.push(pa);poolOf[pa]=s.sym;}
     }
     stkData.px=px;stkData.vol=vol;stkData.logo=logo;stkData.gtOk=Object.keys(vol).length>0;
     stkPaint();stkPaintLogos();
@@ -10170,21 +10178,30 @@ function stkPaintLogos(){
     tokenLogo(t).then(url=>{if(activeChain==="base")stkAddLogo(av,url,gen);});
   });
 }
-const STK_LEDE_BASE="Tokenized shares issued by Coinbase, each backed 1:1 by a real share. Trade them on-chain any time against USDC; the reference price comes from Chainlink and moves only while the US market is open.";
+const STK_LEDE_BASE="Tokenized shares issued by Coinbase, each backed 1:1 by a real share. Trade them on-chain any time against USDC; where shown, the reference price comes from Chainlink and moves only while the US market is open.";
 const STK_NOTE_BASE="Prices are live quotes from the deepest Aerodrome pool for $100. Issuer terms: not offered to US persons. Not investment advice.";
-const STK_LEDE_SOL="Tokenized shares issued by Backed (xStocks), each backed 1:1 by a real share. Trade them on-chain any time against USDC; the reference price comes from Chainlink and moves only while the US market is open.";
+const STK_LEDE_SOL="Tokenized shares and ETFs issued by Backed (xStocks), each backed 1:1 by the real asset. Trade them on-chain any time against USDC; where shown, the reference price comes from Chainlink and moves only while the US market is open.";
 const STK_NOTE_SOL="Prices are the latest on-chain trade prices from GeckoTerminal; your swap quote comes from Jupiter. Issuer terms: not offered to US persons. Not investment advice.";
-// متن‌ها، نمادِ هر ردیف و لوگوها را بر اساس زنجیره می‌کشد؛ ردیف‌ها با data-sym (نمادِ Base) کلید می‌خورند.
+// متن‌ها و ردیف‌ها را از فهرستِ زنجیره می‌سازد (DOM API و textContent، نه innerHTML)؛ ردیف‌ها با data-sym همان زنجیره کلید می‌خورند.
 function stkChainPaint(){
   const sol=activeChain==="solana";
   $("stkLede").textContent=sol?STK_LEDE_SOL:STK_LEDE_BASE;
   $("stkNote").textContent=sol?STK_NOTE_SOL:STK_NOTE_BASE;
   ++stkLogoGen;stkLogosDone=false;
-  document.querySelectorAll("#stkTable tr[data-sym]").forEach(tr=>{
-    const e=STK_SOL.find(x=>x.base===tr.dataset.sym),b=tr.querySelector(".nm b"),av=tr.querySelector(".av");
-    if(b)b.textContent=sol&&e?e.sym:tr.dataset.sym;
-    if(av){av.querySelectorAll("img").forEach(i=>i.remove());delete av.dataset.logo;}
-  });
+  const tb=document.querySelector("#stkTable tbody");
+  tb.textContent="";
+  const mk=(tag,cls,txt)=>{const e=document.createElement(tag);if(cls)e.className=cls;if(txt!=null)e.textContent=txt;return e;};
+  for(const s of stkList()){
+    const tr=mk("tr");tr.dataset.sym=s.sym;
+    const td1=mk("td"),tk=mk("div","tk"),nm=mk("span","nm");
+    nm.append(mk("b",null,s.sym),mk("small",null,s.name));
+    tk.append(mk("span","av",s.sym.slice(0,-1).slice(0,4)),nm);td1.append(tk);
+    const td2=mk("td","cPx");td2.append(mk("span","v","—"),mk("small"));
+    const td3=mk("td","colRef");td3.append(mk("span","v","—"),mk("small","gap"));
+    const td4=mk("td","colVol","—");
+    const td5=mk("td"),bt=mk("button","trade","Trade");bt.type="button";bt.dataset.sym=s.sym;td5.append(bt);
+    tr.append(td1,td2,td3,td4,td5);tb.append(tr);
+  }
 }
 function stocksStart(){
   if(stkActive)return;stkActive=true;
@@ -10195,7 +10212,7 @@ function stocksStop(){stkActive=false;++stkRun;++stkSeq;clearTimeout(stkTimer);s
 // «Trade»: همان کاری که انتخابگرِ توکن می‌کند — USDC → سهم، مبلغ خالی، فوکوس روی «You pay».
 async function stocksTrade(sym){
   if(activeChain==="solana"){
-    const e=STK_SOL.find(x=>x.base===sym);
+    const e=STK_SOL.find(x=>x.sym===sym);
     if(!e)return;
     // همان مسیرِ solApplyShare: توکن، سپس مرجعِ USDC، سپس سمتِ buy (solOnSideChange مبلغ را پاک می‌کند)
     solAppDefaulted=true;
