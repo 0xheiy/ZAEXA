@@ -5793,6 +5793,301 @@ async def check_wallet_watch(p, errors):
     assert not errs, "[wallet watch] console/page errors: %s" % errs
 
 
+# ۱۱ اکتبر — ظاهرِ چیپ‌های محتوای /report پیش از جداکردنِ قاعده‌ی .chip از هدر (commit 8d4f175، همین فیکسچر، همین مرورگر).
+# هر کلید "<عرض>-<تم>" است؛ برای چیپِ فشرده/نفشرده و spanهایشان استایلِ computed ثبت شده. اگر قاعده‌ی محتوا عوض شود این قرمز می‌شود.
+REPORT_CHIP_BASELINE = '{"1280-dark":{"n":8,"pressed":{"backgroundColor":"rgb(240, 238, 247)","borderTopColor":"rgb(240, 238, 247)","borderTopLeftRadius":"999px","borderTopStyle":"solid","borderTopWidth":"1px","boxShadow":"none","color":"rgb(10, 8, 16)","fontSize":"12.5px","fontWeight":"600","height":"35.375px","marginLeft":"0px","paddingBottom":"7px","paddingLeft":"13px","paddingRight":"13px","paddingTop":"7px"},"pressedSpan":{"backgroundColor":"rgba(0, 0, 0, 0)","borderTopColor":"rgb(10, 8, 16)","borderTopLeftRadius":"0px","borderTopStyle":"none","borderTopWidth":"0px","boxShadow":"none","color":"rgb(10, 8, 16)","fontSize":"12.5px","fontWeight":"500","height":"auto","marginLeft":"5px","paddingBottom":"0px","paddingLeft":"0px","paddingRight":"0px","paddingTop":"0px"},"span":{"backgroundColor":"rgba(0, 0, 0, 0)","borderTopColor":"rgb(115, 109, 138)","borderTopLeftRadius":"0px","borderTopStyle":"none","borderTopWidth":"0px","boxShadow":"none","color":"rgb(115, 109, 138)","fontSize":"12.5px","fontWeight":"500","height":"auto","marginLeft":"5px","paddingBottom":"0px","paddingLeft":"0px","paddingRight":"0px","paddingTop":"0px"},"unpressed":{"backgroundColor":"rgb(19, 16, 32)","borderTopColor":"rgb(48, 40, 66)","borderTopLeftRadius":"999px","borderTopStyle":"solid","borderTopWidth":"1px","boxShadow":"none","color":"rgb(164, 159, 184)","fontSize":"12.5px","fontWeight":"600","height":"35.375px","marginLeft":"0px","paddingBottom":"7px","paddingLeft":"13px","paddingRight":"13px","paddingTop":"7px"}},"1280-light":{"n":8,"pressed":{"backgroundColor":"rgb(20, 22, 26)","borderTopColor":"rgb(20, 22, 26)","borderTopLeftRadius":"999px","borderTopStyle":"solid","borderTopWidth":"1px","boxShadow":"none","color":"rgb(244, 245, 247)","fontSize":"12.5px","fontWeight":"600","height":"35.375px","marginLeft":"0px","paddingBottom":"7px","paddingLeft":"13px","paddingRight":"13px","paddingTop":"7px"},"pressedSpan":{"backgroundColor":"rgba(0, 0, 0, 0)","borderTopColor":"rgb(244, 245, 247)","borderTopLeftRadius":"0px","borderTopStyle":"none","borderTopWidth":"0px","boxShadow":"none","color":"rgb(244, 245, 247)","fontSize":"12.5px","fontWeight":"500","height":"auto","marginLeft":"5px","paddingBottom":"0px","paddingLeft":"0px","paddingRight":"0px","paddingTop":"0px"},"span":{"backgroundColor":"rgba(0, 0, 0, 0)","borderTopColor":"rgb(139, 147, 161)","borderTopLeftRadius":"0px","borderTopStyle":"none","borderTopWidth":"0px","boxShadow":"none","color":"rgb(139, 147, 161)","fontSize":"12.5px","fontWeight":"500","height":"auto","marginLeft":"5px","paddingBottom":"0px","paddingLeft":"0px","paddingRight":"0px","paddingTop":"0px"},"unpressed":{"backgroundColor":"rgb(255, 255, 255)","borderTopColor":"rgb(214, 218, 225)","borderTopLeftRadius":"999px","borderTopStyle":"solid","borderTopWidth":"1px","boxShadow":"none","color":"rgb(91, 98, 112)","fontSize":"12.5px","fontWeight":"600","height":"35.375px","marginLeft":"0px","paddingBottom":"7px","paddingLeft":"13px","paddingRight":"13px","paddingTop":"7px"}},"390-dark":{"n":8,"pressed":{"backgroundColor":"rgb(240, 238, 247)","borderTopColor":"rgb(240, 238, 247)","borderTopLeftRadius":"999px","borderTopStyle":"solid","borderTopWidth":"1px","boxShadow":"none","color":"rgb(10, 8, 16)","fontSize":"12.5px","fontWeight":"600","height":"35.375px","marginLeft":"0px","paddingBottom":"7px","paddingLeft":"13px","paddingRight":"13px","paddingTop":"7px"},"pressedSpan":{"backgroundColor":"rgba(0, 0, 0, 0)","borderTopColor":"rgb(10, 8, 16)","borderTopLeftRadius":"0px","borderTopStyle":"none","borderTopWidth":"0px","boxShadow":"none","color":"rgb(10, 8, 16)","fontSize":"12.5px","fontWeight":"500","height":"auto","marginLeft":"5px","paddingBottom":"0px","paddingLeft":"0px","paddingRight":"0px","paddingTop":"0px"},"span":{"backgroundColor":"rgba(0, 0, 0, 0)","borderTopColor":"rgb(115, 109, 138)","borderTopLeftRadius":"0px","borderTopStyle":"none","borderTopWidth":"0px","boxShadow":"none","color":"rgb(115, 109, 138)","fontSize":"12.5px","fontWeight":"500","height":"auto","marginLeft":"5px","paddingBottom":"0px","paddingLeft":"0px","paddingRight":"0px","paddingTop":"0px"},"unpressed":{"backgroundColor":"rgb(19, 16, 32)","borderTopColor":"rgb(48, 40, 66)","borderTopLeftRadius":"999px","borderTopStyle":"solid","borderTopWidth":"1px","boxShadow":"none","color":"rgb(164, 159, 184)","fontSize":"12.5px","fontWeight":"600","height":"35.375px","marginLeft":"0px","paddingBottom":"7px","paddingLeft":"13px","paddingRight":"13px","paddingTop":"7px"}},"390-light":{"n":8,"pressed":{"backgroundColor":"rgb(20, 22, 26)","borderTopColor":"rgb(20, 22, 26)","borderTopLeftRadius":"999px","borderTopStyle":"solid","borderTopWidth":"1px","boxShadow":"none","color":"rgb(244, 245, 247)","fontSize":"12.5px","fontWeight":"600","height":"35.375px","marginLeft":"0px","paddingBottom":"7px","paddingLeft":"13px","paddingRight":"13px","paddingTop":"7px"},"pressedSpan":{"backgroundColor":"rgba(0, 0, 0, 0)","borderTopColor":"rgb(244, 245, 247)","borderTopLeftRadius":"0px","borderTopStyle":"none","borderTopWidth":"0px","boxShadow":"none","color":"rgb(244, 245, 247)","fontSize":"12.5px","fontWeight":"500","height":"auto","marginLeft":"5px","paddingBottom":"0px","paddingLeft":"0px","paddingRight":"0px","paddingTop":"0px"},"span":{"backgroundColor":"rgba(0, 0, 0, 0)","borderTopColor":"rgb(139, 147, 161)","borderTopLeftRadius":"0px","borderTopStyle":"none","borderTopWidth":"0px","boxShadow":"none","color":"rgb(139, 147, 161)","fontSize":"12.5px","fontWeight":"500","height":"auto","marginLeft":"5px","paddingBottom":"0px","paddingLeft":"0px","paddingRight":"0px","paddingTop":"0px"},"unpressed":{"backgroundColor":"rgb(255, 255, 255)","borderTopColor":"rgb(214, 218, 225)","borderTopLeftRadius":"999px","borderTopStyle":"solid","borderTopWidth":"1px","boxShadow":"none","color":"rgb(91, 98, 112)","fontSize":"12.5px","fontWeight":"600","height":"35.375px","marginLeft":"0px","paddingBottom":"7px","paddingLeft":"13px","paddingRight":"13px","paddingTop":"7px"}}}'
+
+
+async def check_report_chain(p, errors):
+    """[report sol header] [report base header] [report chip parity] — هدرِ /report زنجیره‌ی فعال را دنبال می‌کند و چیپِ والتش با /pairs یکی است.
+
+    سه صفحه از یک سرورِ هم‌مبدأ (/pairs، /report از renderReportPage واقعی با CSPِ web/_headers). کیف‌پولِ EVM با EIP-6963 معرفی
+    می‌شود و هر request ثبت می‌شود؛ کیف‌پولِ سولانا Wallet Standard است. هدر از اولین لحظه با تایمر ۱۰ms و rAF نمونه‌برداری می‌شود."""
+    import functools, http.server, json as _j, subprocess, tempfile, threading
+
+    worker_dir = os.path.join(HERE, "..", "..", "worker")
+    out_dir = tempfile.mkdtemp(prefix="rc_page_")
+    html_path = os.path.join(out_dir, "report.html")
+    gen = r"""
+    import fs from "node:fs";
+    import { renderReportPage, dayCounts } from "./report_page.js";
+    import { publishGuardRow } from "./report.js";
+    const DATE = "2026-10-04";
+    const addr = (n) => "0x" + n.toString(16).padStart(40, "0");
+    const rows = [];
+    for (let k = 0; k < 6; k++) rows.push({ chain: "base", address: addr(1000 + k), symbol: "T" + k, name: "Tok " + k, v: "sell", checkKind: "sell-quote",
+      checkedAt: DATE + "T0" + k + ":10:00.000Z", reserveUsd: 1000 + k, vol24hUsd: 1, fdvUsd: 1, dex: "aerodrome", why: null, ret: 95 });
+    for (let k = 0; k < 3; k++) rows.push({ chain: "solana", address: "S0" + k + "x".repeat(40), symbol: "S" + k, name: "Sol " + k, v: "sell", checkKind: "roundtrip",
+      checkedAt: DATE + "T1" + k + ":10:00.000Z", reserveUsd: 8000, dex: "raydium", why: null });
+    const guarded = rows.map((r) => publishGuardRow(r, undefined));
+    fs.writeFileSync(process.argv[1], renderReportPage({ date: DATE, today: DATE, firstDate: "2026-09-08", rows: guarded, history: [dayCounts(DATE, guarded)] }));
+    """
+    r = subprocess.run(["node", "--input-type=module", "-e", gen, html_path], capture_output=True, text=True, cwd=worker_dir)
+    assert r.returncode == 0, "[report chain] could not render the /report fixture:\n%s" % r.stderr
+    report_html = open(html_path, "rb").read()
+    hdrs = parse_headers_blocks(open(os.path.join(HERE, "..", "_headers"), encoding="utf-8").read())
+    star = {ln.split(":", 1)[0].strip().lower(): ln.split(":", 1)[1].strip() for ln in hdrs["/*"]}
+    csp = star["content-security-policy"]
+
+    class Quiet(http.server.SimpleHTTPRequestHandler):
+        def log_message(self, *a):
+            pass
+
+        def do_GET(self):
+            clean = self.path.split("?")[0]
+            if clean == "/report":
+                self.send_response(200)
+                self.send_header("Content-Type", "text/html; charset=utf-8")
+                self.send_header("Content-Security-Policy", csp)
+                self.send_header("Content-Length", str(len(report_html)))
+                self.end_headers()
+                self.wfile.write(report_html)
+                return
+            return super().do_GET()
+
+        def translate_path(self, path):
+            clean = path.split("?")[0]
+            if clean == "/pairs":
+                return os.path.join(HERE, "..", "pairs.html")
+            if clean == "/stub-ethers.js":
+                return os.path.join(HERE, "stub-ethers.js")
+            return super().translate_path(path)
+
+    srv = http.server.ThreadingHTTPServer(("127.0.0.1", 0), functools.partial(Quiet, directory=os.path.join(HERE, "..")))
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    origin = "http://127.0.0.1:%d" % srv.server_address[1]
+    b = await p.chromium.launch()
+    errs = []
+    app_src = open(os.path.join(HERE, "..", "index.html"), encoding="utf-8").read()
+    theme_key = theme_key_from_index(app_src)
+
+    ADDR = "0x1234567890abcdef1234567890abcdef12345678"
+    SHORT = ADDR[:6] + "…" + ADDR[-4:]
+    SOL_ADDR = "FakeWa11etAddr11111111111111111111111111"
+    SOL_SHORT = SOL_ADDR[:6] + "…" + SOL_ADDR[-4:]
+    BUNDLE = "pairs-solana.9ab7ff67.js"
+
+    # کیف‌پولِ EVM (EIP-6963) که هر درخواست را ثبت می‌کند
+    EVM_WALLET = """
+    window.__calls = {};
+    (function(){
+        var W = [{rdns: 'test.a', name: 'Wallet A', addr: %s, delay: %d}];
+        W.forEach(function(w){
+            window.__calls[w.rdns] = [];
+            w.provider = { request: function(a){
+                window.__calls[w.rdns].push(a && a.method);
+                if (a.method === 'eth_accounts' || a.method === 'eth_requestAccounts')
+                    return new Promise(function(r){ setTimeout(function(){ r([w.addr]); }, a.method === 'eth_accounts' ? w.delay : 0); });
+                if (a.method === 'eth_chainId') return Promise.resolve('0x2105');
+                return Promise.resolve(null);
+            }, on: function(){}, removeListener: function(){} };
+        });
+        window.addEventListener('eip6963:requestProvider', function(){
+            W.forEach(function(w){ window.dispatchEvent(new CustomEvent('eip6963:announceProvider', { detail: { info: { name: w.name, rdns: w.rdns, uuid: 'u-' + w.rdns }, provider: w.provider } })); });
+        });
+    })();
+    """
+
+    def evm_wallet(delay=0):
+        return EVM_WALLET % (_j.dumps(ADDR), delay)
+
+    ETHERS_PATCH = """
+    (function(){ var _e;
+        Object.defineProperty(window, 'ethers', { configurable: true, get: function(){ return _e; }, set: function(v){
+            _e = v; if (v && v.BrowserProvider) v.BrowserProvider = function(){ this.getNetwork = async function(){ return { chainId: 8453n }; }; };
+        } });
+    })();
+    """
+
+    # کیف‌پولِ Wallet Standard سولانا: connect را با/بدونِ silent ثبت می‌کند
+    SOL_WALLET = """
+    window.__solOps = [];
+    (function(){
+        var pk = new Uint8Array(32); pk[0] = 7;
+        var w = { name: 'Fake Wallet', icon: '', chains: ['solana:mainnet'], features: {
+            'standard:connect': { connect: async function(o){ window.__solOps.push(o && o.silent ? 'connect-silent' : 'connect'); return { accounts: [{ address: %s, publicKey: pk }] }; } },
+            'standard:disconnect': { disconnect: async function(){ window.__solOps.push('disconnect'); } },
+            'solana:signMessage': { signMessage: async function(){ return [{ signedMessage: new Uint8Array(1), signature: new Uint8Array(64) }]; } } } };
+        window.addEventListener('wallet-standard:app-ready', function(e){ try { e.detail.register(w); } catch (_) {} });
+    })();
+    """ % _j.dumps(SOL_ADDR)
+
+    SAMPLER = """
+    window.__s = [];
+    Object.defineProperty(window, '__zxSolPend', { configurable: true, get: function(){ return window.__sp; },
+        set: function(v){ window.__sp = v; if (v && !window.__pendAt) window.__pendAt = Math.round(performance.now()); } });
+    (function(){
+        function snap(){ var bt = document.getElementById('connectBtn'), h = document.querySelector('.site-header'); if (!bt) return;
+            window.__s.push({ t: Math.round(performance.now()), txt: bt.textContent.trim(), busy: bt.getAttribute('aria-busy'),
+                              zero: /0x[0-9a-fA-F]{4}/.test((h ? h.innerText : '') + ' ' + bt.textContent) }); }
+        setInterval(snap, 10);
+        (function raf(){ snap(); requestAnimationFrame(raf); })();
+    })();
+    """
+    BASE_SAMPLER = SAMPLER.replace("__zxSolPend", "__zxBasePend").replace("__sp", "__bp")
+
+    def seed(chain_ls=None, sol=True, base=False, sol_age=0):
+        js = ""
+        if chain_ls:
+            js += "try{localStorage.setItem('zaexa.chain.v1', %s);}catch(e){}" % _j.dumps(chain_ls)
+        if sol:
+            js += "try{sessionStorage.setItem('zaexa.solsession.v1', JSON.stringify({name:'Fake Wallet',address:%s,t:Date.now()-%d}));}catch(e){}" % (_j.dumps(SOL_ADDR), sol_age)
+        if base:
+            js += ("try{localStorage.setItem('zaexa.base.wallet','test.a');sessionStorage.setItem('zaexa.basesession.v1', "
+                   "JSON.stringify({key:'test.a',address:%s,t:Date.now()}));}catch(e){}") % _j.dumps(ADDR)
+        return js
+
+    async def open_pg(path, init="", vw=1280, vh=900, scheme="light", reqs=None):
+        pg = await b.new_page(viewport={"width": vw, "height": vh}, color_scheme=scheme)
+        pg.on("console", lambda m: errs.append("[%s] %s" % (path, m.text)) if m.type == "error" and (m.location.get("url") or "").startswith(origin) else None)
+        pg.on("pageerror", lambda e: errs.append("[%s] PAGEERROR %s" % (path, e)))
+        if reqs is not None:
+            pg.on("request", lambda rq: reqs.append(rq.url))
+        await pg.add_init_script("localStorage.setItem(%s, %s);" % (_j.dumps(theme_key), _j.dumps(scheme)) + init)
+
+        async def other(route):
+            return await (route.continue_() if route.request.url.startswith(origin) else route.abort())
+        await pg.route("**/*", other)
+        await pg.route("**/gt/**", lambda r: r.fulfill(status=200, content_type="application/json", body='{"data":[]}'))
+        await pg.route("**/ev", lambda r: r.fulfill(status=204, body=""))
+        await pg.route("**/vd/**", lambda r: r.fulfill(status=200, content_type="application/json", body='{"v":"sell","ms":100}'))
+        await pg.route("**/sol/**", lambda r: r.fulfill(status=200, content_type="application/json", body='{"result":null}'))
+        await pg.route("**/pairs.json**", lambda r: r.fulfill(status=200, content_type="application/json", body='{"chain":"base","rows":[],"store":true}'))
+        await pg.goto(origin + path)
+        return pg
+
+    GET_S = "() => window.__s"
+    n_err = len(errs)
+
+    # ---- [report sol header] ----
+    sol_runs = []
+    for label, path, ls_chain in (("chain from localStorage", "/report", "solana"), ("chain from ?chain=solana (URL wins over localStorage base)", "/report?chain=solana", "base")):
+        reqs = []
+        # پیشِ خوشبینانه را مقایسه‌ی عمدی با رکوردهای Base هم می‌سنجیم: Base هم seed است، ولی چیپِ Base هرگز نباید بیاید
+        pg = await open_pg(path, ETHERS_PATCH + SAMPLER + seed(ls_chain, sol=True, base=True) + evm_wallet(300) + SOL_WALLET, reqs=reqs)
+        await pg.wait_for_function("() => { const bt = document.getElementById('connectBtn'); return bt && !bt.hasAttribute('aria-busy') && bt.textContent.trim() !== 'Connect wallet' && !window.__sp; }", timeout=10000)
+        await pg.wait_for_timeout(1500)   # اگر بازیابیِ Base اشتباهاً بود، تا اینجا eth_accounts را زده بود
+        s = await pg.evaluate(GET_S)
+        pend_at = await pg.evaluate("() => window.__pendAt")
+        calls = await pg.evaluate("() => window.__calls")
+        ops = await pg.evaluate("() => window.__solOps")
+        force = await pg.evaluate("() => window.__zxForceSol")
+        base_pend = await pg.evaluate("() => window.__zxBasePend || null")
+        rec = await pg.evaluate("() => JSON.parse(sessionStorage.getItem('zaexa.solsession.v1') || 'null')")
+        brec = await pg.evaluate("() => sessionStorage.getItem('zaexa.basesession.v1')")
+        await pg.close()
+        assert force is True and base_pend is None, "[report sol header] %s: the Solana chain must be detected (forceSol=%s) and no Base pending state may exist: %s" % (label, force, base_pend)
+        assert pend_at is not None and pend_at < 800, "[report sol header] %s: the inline pending script never ran (or ran late): %s" % (label, pend_at)
+        s = [x for x in s if x["t"] >= pend_at]
+        assert s, "[report sol header] %s: no header samples" % label
+        assert not [x for x in s if x["zero"]], "[report sol header] %s: a 0x address appeared in the header on the Solana chain: %s" % (label, [x for x in s if x["zero"]][:3])
+        assert not [x for x in s if x["txt"] == "Connect wallet"], "[report sol header] %s: 'Connect wallet' flashed while a fresh Solana session record existed: %s" % (label, [x for x in s if x["txt"] == "Connect wallet"][:3])
+        assert s[0]["txt"] == SOL_SHORT and s[0]["busy"] == "true", "[report sol header] %s: the first paint must be the Solana pending chip: %s" % (label, s[0])
+        assert s[-1]["txt"] == SOL_SHORT and s[-1]["busy"] is None, "[report sol header] %s: the final state must be the connected Solana address without aria-busy: %s" % (label, s[-1])
+        assert all(v == [] for v in calls.values()), "[report sol header] %s: no EVM provider may be touched on the Solana chain (eth_accounts etc.): %s" % (label, calls)
+        assert ops == ["connect-silent"], "[report sol header] %s: the restore is exactly one silent Wallet Standard connect: %s" % (label, ops)
+        assert rec and rec["address"] == SOL_ADDR and brec is not None, "[report sol header] %s: the Solana record is refreshed and the Base record is left alone: %s %s" % (label, rec, brec)
+        assert any(u.endswith("/" + BUNDLE) for u in reqs), "[report sol header] %s: the Solana wallet bundle was never requested: %s" % (label, [u for u in reqs if ".js" in u])
+        sol_runs.append("%s: %d samples" % (label.split(" (")[0], len(s)))
+    # بدونِ رکورد: «Connect wallet»، انتخاب‌گرِ سولانا فقط کیف‌پولِ سولانا را نشان می‌دهد، هیچ EVM و هیچ 0x
+    pg = await open_pg("/report", ETHERS_PATCH + SAMPLER + seed("solana", sol=False) + evm_wallet(0) + SOL_WALLET)
+    await pg.wait_for_timeout(1200)
+    txt0 = await pg.inner_text("#connectBtn")
+    await pg.click("#connectBtn")
+    await pg.wait_for_selector("#walList .walRow")
+    pick = await pg.evaluate("() => ({h: document.querySelector('#walletOv h3').firstChild.nodeValue, rows: [...document.querySelectorAll('#walList .walRow .walName')].map(e => e.textContent), on: document.getElementById('walletOv').classList.contains('on')})")
+    await pg.wait_for_timeout(300)
+    calls = await pg.evaluate("() => window.__calls")
+    s = await pg.evaluate(GET_S)
+    await pg.close()
+    assert txt0 == "Connect wallet" and pick["on"] and pick["h"] == "Connect a Solana wallet", "[report sol header] without a record the chip is 'Connect wallet' and the picker is the Solana one: %r %s" % (txt0, pick)
+    assert "Fake Wallet" in pick["rows"] and "Wallet A" not in pick["rows"], "[report sol header] the picker must list the Solana wallet and never an EVM one: %s" % pick["rows"]
+    assert all(v == [] for v in calls.values()) and not [x for x in s if x["zero"]], "[report sol header] no EVM call and no 0x address without a record either: %s" % calls
+    # رکوردِ کهنه (۳۱ دقیقه): از اولین رنگ «Connect wallet» و هرگز چیپ آدرس
+    pg = await open_pg("/report", ETHERS_PATCH + SAMPLER + seed("solana", sol=True, sol_age=31 * 60 * 1000) + SOL_WALLET)
+    await pg.wait_for_timeout(1500)
+    s = await pg.evaluate(GET_S)
+    await pg.close()
+    assert s and s[0]["txt"] == "Connect wallet" and not [x for x in s if x["busy"] == "true"], "[report sol header] a 31-minute-old record must paint 'Connect wallet' from the start: %s" % s[:2]
+    assert len(errs) == n_err, "[report sol header] console errors: %s" % errs[n_err:]
+    print("[report sol header] /report on the Solana chain (%s): the header is the Solana pending chip from the first paint (never 'Connect wallet', never a 0x address in 10 ms samples), ends on the connected Solana address after exactly one silent Wallet Standard connect, announced EVM wallets get 0 requests (no eth_accounts), the Base record and the Base chip are untouched, the wallet bundle %s is loaded; no record = 'Connect wallet' + a Solana-only picker; a 31-minute-old record = 'Connect wallet'" % ("; ".join(sol_runs), BUNDLE))
+
+    # ---- [report base header] ----
+    base_runs = []
+    for label, path, ls_chain in (("no chain anywhere", "/report", None), ("?chain=base over localStorage solana", "/report?chain=base", "solana"), ("localStorage base", "/report", "base")):
+        reqs = []
+        pg = await open_pg(path, ETHERS_PATCH + BASE_SAMPLER + seed(ls_chain, sol=True, base=True) + evm_wallet(500) + SOL_WALLET, reqs=reqs)
+        await pg.wait_for_function("(s) => { const bt = document.getElementById('connectBtn'); return bt && bt.textContent.trim() === s && !bt.hasAttribute('aria-busy'); }", arg=SHORT, timeout=10000)
+        s = await pg.evaluate(GET_S)
+        pend_at = await pg.evaluate("() => window.__pendAt")
+        calls = await pg.evaluate("() => window.__calls")
+        ops = await pg.evaluate("() => window.__solOps")
+        force = await pg.evaluate("() => window.__zxForceSol")
+        await pg.close()
+        assert pend_at is not None and pend_at < 500, "[report base header] %s: the Base pending script never ran (or ran late): %s" % (label, pend_at)
+        s = [x for x in s if x["t"] >= pend_at]
+        assert s[0]["txt"] == SHORT and s[0]["busy"] == "true" and not [x for x in s if x["txt"] == "Connect wallet" or SOL_SHORT in x["txt"]], "[report base header] %s: the Base chip is pending from the first paint: %s" % (label, s[:2])
+        assert s[-1]["txt"] == SHORT and s[-1]["busy"] is None, "[report base header] %s: ends on the connected Base address: %s" % (label, s[-1])
+        assert set(calls["test.a"]) == {"eth_accounts"}, "[report base header] %s: Base restore asks only the stored wallet, with eth_accounts: %s" % (label, calls)
+        assert not force and ops == [] and not [u for u in reqs if BUNDLE in u], "[report base header] %s: the Solana bundle and wallet stay out of a Base report (force=%s ops=%s)" % (label, force, ops)
+        base_runs.append(label)
+    assert len(errs) == n_err, "[report base header] console errors: %s" % errs[n_err:]
+    print("[report base header] /report on the Base chain (%s): behaviour unchanged from the Base restore rules — pending Base chip from the first paint, one eth_accounts to the stored wallet only, ends on the connected address; a fresh Solana session record and a Solana wallet change nothing and the Solana bundle is never requested" % "; ".join(base_runs))
+
+    # ---- [report chip parity] ----
+    MEASURE = """() => { const b = document.getElementById('connectBtn'), cs = getComputedStyle(b), r = b.getBoundingClientRect();
+        return { cls: b.className, busy: b.getAttribute('aria-busy'), txt: b.textContent.trim(), height: Math.round(r.height * 100) / 100,
+                 pt: cs.paddingTop, pr: cs.paddingRight, pb: cs.paddingBottom, pl: cs.paddingLeft, fs: cs.fontSize, fw: cs.fontWeight,
+                 bw: cs.borderTopWidth, br: cs.borderTopLeftRadius + '/' + cs.borderBottomRightRadius, sh: cs.boxShadow, bi: cs.backgroundImage, bg: cs.backgroundColor, color: cs.color }; }"""
+    KEYS = ["height", "pt", "pr", "pb", "pl", "fs", "fw", "bw", "br", "sh", "bi", "bg", "color"]
+    n_cmp = 0
+    for vw in (1280, 390):
+        for scheme in ("light", "dark"):
+            for state, init in (("Connect wallet", ""), ("connected", seed(None, sol=False, base=True) + evm_wallet(0)), ("pending", seed(None, sol=False, base=True) + evm_wallet(20000))):
+                got = {}
+                for name in ("/pairs", "/report"):
+                    pg = await open_pg(name, ETHERS_PATCH + init, vw=vw, scheme=scheme)
+                    if state == "connected":
+                        await pg.wait_for_function("(s) => { const bt = document.getElementById('connectBtn'); return bt.textContent.trim() === s && !bt.hasAttribute('aria-busy'); }", arg=SHORT, timeout=10000)
+                    elif state == "pending":
+                        await pg.wait_for_function("(s) => { const bt = document.getElementById('connectBtn'); return bt.textContent.trim() === s && bt.getAttribute('aria-busy') === 'true'; }", arg=SHORT, timeout=10000)
+                    else:
+                        await pg.wait_for_timeout(800)
+                    await pg.wait_for_timeout(450)   # گذارِ .16s
+                    got[name] = await pg.evaluate(MEASURE)
+                    await pg.close()
+                want_cls = {"Connect wallet": "chip solid", "connected": "chip", "pending": "chip"}[state]
+                for name in got:
+                    assert got[name]["cls"] == want_cls, "[report chip parity] %s %d %s: %s is not in the %r state: %s" % (scheme, vw, state, name, state, got[name])
+                diff = {k: (got["/pairs"][k], got["/report"][k]) for k in KEYS if got["/pairs"][k] != got["/report"][k]}
+                assert not diff, "[report chip parity] %s %dpx %s: #connectBtn differs between /pairs and /report (pairs, report): %s" % (scheme, vw, state, diff)
+                n_cmp += len(KEYS)
+    # چیپ‌های محتوای گزارش: همان استایلِ پیش از جداکردنِ قاعده (فیکسچر و مرورگرِ یکسان)
+    CHIP_JS = """() => { const props = ['paddingTop','paddingRight','paddingBottom','paddingLeft','borderTopWidth','borderTopStyle','borderTopColor','borderTopLeftRadius','fontSize','fontWeight','color','backgroundColor','boxShadow','height','marginLeft'];
+        const sig = el => { const cs = getComputedStyle(el); const o = {}; props.forEach(p => o[p] = cs[p]); return o; };
+        const chips = [...document.querySelectorAll('#filters .chip')];
+        const pressed = chips.find(c => c.getAttribute('aria-pressed') === 'true'), un = chips.find(c => c.getAttribute('aria-pressed') === 'false');
+        return { n: chips.length, pressed: sig(pressed), unpressed: sig(un), span: sig(un.querySelector('span')), pressedSpan: sig(pressed.querySelector('span')) }; }"""
+    baseline = _j.loads(REPORT_CHIP_BASELINE)
+    for vw in (1280, 390):
+        for scheme in ("light", "dark"):
+            pg = await open_pg("/report", "", vw=vw, scheme=scheme)
+            await pg.wait_for_selector("#filters .chip")
+            await pg.wait_for_timeout(500)
+            cur = await pg.evaluate(CHIP_JS)
+            await pg.close()
+            want = baseline["%d-%s" % (vw, scheme)]
+            for part in want:
+                assert cur[part] == want[part], "[report chip parity] content chips changed (%s %d, %s): now %s, before %s" % (scheme, vw, part, cur[part], want[part])
+    assert len(errs) == n_err, "[report chip parity] console errors: %s" % errs[n_err:]
+    print("[report chip parity] #connectBtn on /pairs and /report at 1280 and 390, light and dark, in 'Connect wallet', connected and pending (aria-busy) states: height, 4 paddings, font-size, font-weight, border-top-width, radius, box-shadow, background-image/colour and text colour are identical (%d comparisons); the 8 report filter chips (pressed, unpressed and their count spans) keep exactly their pre-change computed style in all four viewport/theme combinations" % n_cmp)
+
+    await b.close()
+    srv.shutdown()
+    __import__("shutil").rmtree(out_dir, ignore_errors=True)
+    assert not errs, "[report chain] console/page errors: %s" % errs
+
+
 async def main():
     errors = []
     # خطاهایی که یک کاوشگر *عمداً* تولید می‌کند. اجازه‌ی عبور می‌گیرند ولی
@@ -5849,6 +6144,7 @@ async def main():
         await check_stocks(p, errors)
         await check_stocks_sol(p, errors)
         await check_wallet_watch(p, errors)
+        await check_report_chain(p, errors)
         b = await p.chromium.launch()
         pg = await b.new_page(viewport={"width": 1240, "height": 1000}, color_scheme="dark")
         pg.on("console", on_console)
@@ -11303,8 +11599,12 @@ async def main():
                                       send_error=None, ls_wallet_name=None, ls_off=False,
                                       sol_mint_image_url=None, quote_reason=None, send_error_times=None,
                                       send_params_log=None, quote_log=None, direct_quote_body=None,
-                                      sim_rpc_fail=False):
+                                      sim_rpc_fail=False, status_value=None, epoch_height=None,
+                                      status_params_log=None, swap_error=None, clock=False):
             spg = await b.new_page(viewport={"width": 1240, "height": 1000})
+            if clock:
+                # ۱۱ اکتبر — ساعتِ جعلی که طبیعی می‌گذرد؛ کاوشگرهای نگهبانِ کیف‌پول و پول‌کردن با run_for جلو می‌روند
+                await spg.clock.install()
             # Transaction fixtures use fixed non-signing keys; real approval is tested in solana-approval.test.mjs.
             await spg.add_init_script("window.addEventListener('load',()=>{solConfirmConnection=async()=>{};});")
             if collect_errors is not None:
@@ -11357,7 +11657,10 @@ async def main():
             async def stub_swap(route):
                 if swap_log is not None:
                     swap_log.append(1)
-                if swap_status != 200:
+                if swap_error is not None:
+                    # شکلِ واقعیِ Worker: ۵۰۲ با {error:"jup:swap:<status>"}
+                    await route.fulfill(status=502, content_type="application/json", body=_json.dumps({"error": swap_error}))
+                elif swap_status != 200:
                     await route.fulfill(status=swap_status, content_type="application/json",
                                          body=_json.dumps({"error": "jup:swap:%d" % swap_status}))
                 else:
@@ -11390,7 +11693,11 @@ async def main():
                 elif method == "getTokenAccountsByOwner":
                     result = {"value": token_accounts if token_accounts is not None else []}
                 elif method == "getSignatureStatuses":
-                    result = {"value": [{"confirmationStatus": "confirmed", "err": None}]}
+                    if status_params_log is not None:
+                        status_params_log.append(payload.get("params"))
+                    result = {"value": status_value if status_value is not None else [{"confirmationStatus": "confirmed", "err": None}]}
+                elif method == "getEpochInfo":
+                    result = {"blockHeight": epoch_height, "epoch": 1} if epoch_height is not None else None
                 elif method == "simulateTransaction":
                     if sim_rpc_fail:
                         # خودِ تماسِ RPC شکست می‌خورد (نه یک err در نتیجه) — «نمی‌دانیم»
@@ -13783,6 +14090,238 @@ async def main():
                 assert want_code in sn, "8: the code line is missing: %r" % sn
             else:
                 assert "Code:" not in sn, "8: mapped reasons must not show a code line: %r" % sn
+
+        # ================= [sol swap 429] [sol wallet hang] [sol expiry] [sol revert reason] — ۱۱ اکتبر =================
+        async def sol_advance(pg, total_ms, step=2000):
+            # ساعتِ جعلی را پله‌پله جلو می‌بَرد و بینِ پله‌ها به fetchهای واقعیِ (route) وقت می‌دهد
+            done_ms = 0
+            while done_ms < total_ms:
+                n = min(step, total_ms - done_ms)
+                await pg.clock.run_for(n)
+                await pg.wait_for_timeout(45)
+                done_ms += n
+
+        SOL_NOTICE_JS = "() => document.getElementById('solNotices').innerText.replace(/\\s+/g, ' ').trim()"
+        SOL_STATE_JS = """() => ({btn: document.getElementById('solSwapBtn').textContent, disabled: document.getElementById('solSwapBtn').disabled,
+            busy: solSwapBusy, notice: document.getElementById('solNotices').innerText.replace(/\\s+/g, ' ').trim(),
+            done: !document.getElementById('solSwapDone').hidden, page: document.getElementById('solSwap').innerText})"""
+
+        # ---- [sol swap 429] ----
+        c429_log = []
+        c429 = await r5_run(swap_error="jup:swap:429", swap_log=c429_log)
+        c429_errs = []
+        c429.on("console", lambda m: c429_errs.append(m.text) if m.type == "error" else None)
+        await c429.click("#solSwapBtn")
+        await c429.wait_for_timeout(900)
+        c429_st = await c429.evaluate(SOL_STATE_JS)
+        c429_bold = await c429.evaluate("() => [...document.querySelectorAll('#solNotices b')].map(e => e.textContent)")
+        c429_wallet = await c429.evaluate("window.__solCalls.length")
+        await c429.close()
+        want_429 = "Jupiter is busy right now. Nothing was sent — press Swap again in a few seconds."
+        assert c429_bold == [want_429], "[sol swap 429] the bold text must be exactly the friendly sentence, got %s" % c429_bold
+        assert "jup:swap:429" not in "".join(c429_bold) and "Swap failed" not in c429_st["notice"], \
+            "[sol swap 429] no raw code in the bold text and no generic 'Swap failed': %r" % c429_st["notice"]
+        assert "Code: jup:swap:429" in c429_st["notice"], "[sol swap 429] the code may stay in the small Code: line: %r" % c429_st["notice"]
+        assert c429_wallet == 0 and c429_st["busy"] is False and c429_st["disabled"] is False and c429_st["btn"] == "Swap" and len(c429_log) == 1, \
+            "[sol swap 429] the wallet is never called, the button is back to Swap, one build request: %s wallet=%d builds=%d" % (c429_st, c429_wallet, len(c429_log))
+        print("[sol swap 429] a Jupiter 429 on the build shows %r (bold, no raw code; the small Code: line keeps jup:swap:429), the wallet is never called, one build request, the button is back to Swap" % want_429)
+
+        # ---- [sol wallet hang] ----
+        SOL_HANG_NOTICE = "Your wallet didn't answer. If a wallet window is still open, finish or close it before swapping again."
+        def hang_wallet(kind):
+            api = ("signAndSendTransaction", "[{signature: SIG_BYTES}]") if kind == "send" else ("signTransaction", "[{signedTransaction: SIGNED}]")
+            return ("""
+(function(){
+  const FEE_PAYER = new Uint8Array(%s);
+  const SIG_BYTES = new Uint8Array(%s);
+  const SIGNED = new Uint8Array(%s);
+  window.__hang = {calls: 0, resolve: null, reject: null};
+  const fakeWallet = {
+    name: "Fake Wallet", icon: "", chains: ["solana:mainnet"],
+    features: {
+      "standard:connect": { connect: async () => ({accounts: [
+        {address: "FakeWa11etAddr11111111111111111111111111", publicKey: FEE_PAYER}]}) },
+      "standard:disconnect": { disconnect: async () => {} },
+      "solana:%s": { %s: (input) => {
+        window.__hang.calls++;
+        return new Promise((res, rej) => { window.__hang.resolve = () => res(%s); window.__hang.reject = () => rej(new Error("late failure")); });
+      } }
+    }
+  };
+  window.addEventListener("wallet-standard:app-ready", (e) => { try { e.detail.register(fakeWallet); } catch(_){} });
+})();
+""" % (list(SOL_FEE_PAYER), list(SOL_SIG_BYTES), list(SOL_SIGNED_TX_BYTES), api[0], api[0], api[1]))
+
+        async def hang_open(kind, **kw):
+            pg = await r5_run(wallet_init=hang_wallet(kind), clock=True, **kw)
+            pg_errs = []
+            pg.on("console", lambda m: pg_errs.append(m.text) if m.type == "error" else None)
+            pg.on("pageerror", lambda e: pg_errs.append(str(e)))
+            await pg.click("#solSwapBtn")
+            await pg.wait_for_timeout(900)
+            st = await pg.evaluate(SOL_STATE_JS)
+            assert st["btn"] == "Confirm in wallet…" and st["busy"] is True and await pg.evaluate("window.__hang.calls") == 1, \
+                "[sol wallet hang] the swap must be waiting on the wallet: %s" % st
+            return pg, pg_errs
+
+        # الف) فوکوس + ۴ ثانیه
+        hg, hg_errs = await hang_open("send")
+        await hg.evaluate("() => window.dispatchEvent(new Event('focus'))")
+        await sol_advance(hg, 3000, 500)
+        st_wait = await hg.evaluate(SOL_STATE_JS)
+        await sol_advance(hg, 1500, 500)
+        st_rel = await hg.evaluate(SOL_STATE_JS)
+        assert st_wait["btn"] == "Confirm in wallet…" and st_wait["busy"] is True, "[sol wallet hang] 3 s after the focus the swap must still be waiting: %s" % st_wait
+        assert st_rel["notice"] == SOL_HANG_NOTICE and st_rel["busy"] is False and st_rel["btn"] == "Swap" and st_rel["disabled"] is False, \
+            "[sol wallet hang] 4 s after the focus the UI must be released with the exact text: %s" % st_rel
+        # ب) ردِ دیرهنگام: بی‌صدا
+        await hg.evaluate("() => window.__hang.reject()")
+        await sol_advance(hg, 2500, 500)
+        st_rej = await hg.evaluate(SOL_STATE_JS)
+        assert st_rej["notice"] == SOL_HANG_NOTICE and st_rej["btn"] == "Swap" and not st_rej["done"], "[sol wallet hang] a late rejection must change nothing: %s" % st_rej
+        assert not hg_errs, "[sol wallet hang] a late rejection must not surface as a console error: %s" % hg_errs
+        await hg.close()
+        # پ) بدونِ فوکوس: ۱۲۰ ثانیه در کل
+        hg, _ = await hang_open("send")
+        await sol_advance(hg, 100000, 5000)
+        st_wait = await hg.evaluate(SOL_STATE_JS)
+        await sol_advance(hg, 32000, 2000)   # ۱۲۰ ثانیه + حاشیه‌ی امن برای کندیِ ساختِ تراکنش
+        st_rel = await hg.evaluate(SOL_STATE_JS)
+        assert st_wait["busy"] is True and st_wait["btn"] == "Confirm in wallet…", "[sol wallet hang] after 100 s without a focus the swap still waits: %s" % st_wait
+        assert st_rel["notice"] == SOL_HANG_NOTICE and st_rel["busy"] is False and st_rel["btn"] == "Swap", "[sol wallet hang] after 120 s the UI is released: %s" % st_rel
+        await hg.close()
+        # ت) تمام‌شدنِ دیرهنگام، همان سواپ ⇒ Submitted + پول‌کردن + «Swap complete»
+        h_rpc, h_stat = [], []
+        hg, hg_errs = await hang_open("send", rpc_log=h_rpc, status_params_log=h_stat)
+        await hg.evaluate("() => window.dispatchEvent(new Event('focus'))")
+        await sol_advance(hg, 4500, 500)
+        await hg.evaluate("() => window.__hang.resolve()")
+        await hg.wait_for_timeout(200)
+        st_sub = await hg.evaluate(SOL_STATE_JS)
+        await sol_advance(hg, 6000, 2000)
+        st_fin = await hg.evaluate(SOL_STATE_JS)
+        sub_href = await hg.evaluate("() => (document.querySelector('#solNotices a') || {}).href || null")
+        await hg.close()
+        assert "Submitted." in st_sub["notice"] and "View on Solscan" in st_sub["notice"], "[sol wallet hang] a late signature in the same swap continues as normal (Submitted): %s" % st_sub
+        assert h_stat and h_stat[0] == [[SOL_SIG_B58], {"searchTransactionHistory": True}], "[sol wallet hang] the poll reads getSignatureStatuses with searchTransactionHistory: %s" % h_stat[:1]
+        assert st_fin["done"] is True and "Swap complete" in st_fin["page"] and h_rpc.count("sendTransaction") == 0, \
+            "[sol wallet hang] the late path ends on the normal Swap complete card (the wallet sent it, we never send): %s sends=%d" % (st_fin["done"], h_rpc.count("sendTransaction"))
+        assert not hg_errs, "[sol wallet hang] console errors: %s" % hg_errs
+        # ث) تمام‌شدنِ دیرهنگام بعد از عوض‌شدنِ سواپ ⇒ فقط یادداشتِ کوچک با لینکِ Solscan، هنوز پول می‌شود، بدونِ کارتِ تکمیل
+        h_rpc, h_stat = [], []
+        hg, _ = await hang_open("send", rpc_log=h_rpc, status_params_log=h_stat)
+        await hg.evaluate("() => window.dispatchEvent(new Event('focus'))")
+        await sol_advance(hg, 4500, 500)
+        await hg.fill("#solAmt", "2")
+        await sol_advance(hg, 1500, 500)
+        await hg.evaluate("() => window.__hang.resolve()")
+        await hg.wait_for_timeout(200)
+        st_info = await hg.evaluate(SOL_STATE_JS)
+        info_href = await hg.evaluate("() => (document.querySelector('#solNotices a') || {}).href || null")
+        await sol_advance(hg, 6000, 2000)
+        st_after = await hg.evaluate(SOL_STATE_JS)
+        await hg.close()
+        assert "Submitted." not in st_info["notice"] and "earlier swap" in st_info["notice"] and info_href == "https://solscan.io/tx/" + SOL_SIG_B58, \
+            "[sol wallet hang] a late signature after the swap changed must only show a small info notice with the Solscan link: %s %s" % (st_info, info_href)
+        assert h_stat and st_after["done"] is False and "Swap complete" not in st_after["page"], \
+            "[sol wallet hang] the stranded signature is still polled, but never shows the done card for a different swap: polls=%d %s" % (len(h_stat), st_after["done"])
+        # ج) فقط signTransaction: تمام‌شدنِ دیرهنگام، همان سواپ ⇒ دقیقاً یک sendTransaction؛ سواپِ عوض‌شده ⇒ هیچ
+        h_rpc = []
+        hg, _ = await hang_open("sign", rpc_log=h_rpc)
+        await hg.evaluate("() => window.dispatchEvent(new Event('focus'))")
+        await sol_advance(hg, 4500, 500)
+        st_rel = await hg.evaluate(SOL_STATE_JS)
+        await hg.evaluate("() => window.__hang.resolve()")
+        await hg.wait_for_timeout(300)
+        await hg.evaluate("() => window.__hang.resolve && window.__hang.resolve()")   # دومین resolve روی همان promise بی‌اثر است
+        await hg.wait_for_timeout(300)
+        st_sub = await hg.evaluate(SOL_STATE_JS)
+        sends_same = h_rpc.count("sendTransaction")
+        await hg.close()
+        assert st_rel["notice"] == SOL_HANG_NOTICE, "[sol wallet hang] (sign-only) released with the exact text: %s" % st_rel
+        assert sends_same == 1 and "Submitted." in st_sub["notice"], "[sol wallet hang] (sign-only) a late signed transaction for the same swap is sent exactly once: sends=%d %s" % (sends_same, st_sub)
+        h_rpc = []
+        hg, _ = await hang_open("sign", rpc_log=h_rpc)
+        await hg.evaluate("() => window.dispatchEvent(new Event('focus'))")
+        await sol_advance(hg, 4500, 500)
+        await hg.fill("#solAmt", "2")
+        await sol_advance(hg, 1500, 500)
+        await hg.evaluate("() => window.__hang.resolve()")
+        await hg.wait_for_timeout(300)
+        st_chg = await hg.evaluate(SOL_STATE_JS)
+        sends_chg = h_rpc.count("sendTransaction")
+        await hg.close()
+        assert sends_chg == 0 and "not sent" in st_chg["notice"], "[sol wallet hang] (sign-only) a signed transaction that arrives after the swap changed is never sent: sends=%d %s" % (sends_chg, st_chg)
+        print("[sol wallet hang] a wallet promise that never settles: focus + 4 s (and not before: still waiting at 3 s) or 120 s in total releases the card with the exact text and the Swap button; a late rejection changes nothing (no console error); a late signature continues as normal (Submitted, polled with searchTransactionHistory, Swap complete) only for the same swap, otherwise a small info notice with the Solscan link and no done card; a late signed transaction is sent once for the same swap and never after it changed")
+
+        # ---- [sol expiry] ----
+        SOL_EXPIRED = "Not executed — the transaction expired before it landed. No funds moved."
+        ex_rpc, ex_stat = [], []
+        ex = await r5_run(clock=True, rpc_log=ex_rpc, status_params_log=ex_stat, status_value=[None], epoch_height=5000)
+        await ex.click("#solSwapBtn")
+        await ex.wait_for_timeout(900)
+        epoch_base = ex_rpc.count("getEpochInfo")   # صفحه‌ی توکن خودش یک getEpochInfo می‌زند؛ فقط افزایش مهم است
+        await sol_advance(ex, 50000, 2000)
+        st_early = await ex.evaluate(SOL_STATE_JS)
+        epoch_early = ex_rpc.count("getEpochInfo") - epoch_base
+        await sol_advance(ex, 18000, 2000)
+        st_exp = await ex.evaluate(SOL_STATE_JS)
+        polls_at_exp = ex_rpc.count("getSignatureStatuses")
+        await sol_advance(ex, 20000, 2000)
+        polls_late = ex_rpc.count("getSignatureStatuses")
+        await ex.close()
+        assert "Submitted." in st_early["notice"] and epoch_early == 0, "[sol expiry] inside the first 60 s the poll is unchanged: no getEpochInfo, still Submitted: %s epoch=%d" % (st_early["notice"], epoch_early)
+        assert st_exp["notice"] == SOL_EXPIRED and st_exp["done"] is False and "Swap complete" not in st_exp["page"], "[sol expiry] blockHeight past lastValidBlockHeight with no status must say exactly %r and show no done block: %s" % (SOL_EXPIRED, st_exp["notice"])
+        assert polls_late == polls_at_exp, "[sol expiry] polling stops after the verdict: %d -> %d" % (polls_at_exp, polls_late)
+        assert ex_stat and all(pr == [[SOL_SIG_B58], {"searchTransactionHistory": True}] for pr in ex_stat), "[sol expiry] every status read carries searchTransactionHistory: %s" % ex_stat[:2]
+        # هنوز منقضی نشده (blockHeight < lastValid) ⇒ تا ۳ دقیقه «Still pending»، نه «Not executed»
+        ex_rpc = []
+        ex = await r5_run(clock=True, rpc_log=ex_rpc, status_value=[None], epoch_height=100)
+        await ex.click("#solSwapBtn")
+        await ex.wait_for_timeout(900)
+        epoch_base2 = ex_rpc.count("getEpochInfo")
+        await sol_advance(ex, 170000, 2000)
+        st_mid = await ex.evaluate(SOL_STATE_JS)
+        await sol_advance(ex, 20000, 2000)
+        st_pend = await ex.evaluate(SOL_STATE_JS)
+        epoch_n = ex_rpc.count("getEpochInfo") - epoch_base2
+        await ex.close()
+        assert "Submitted." in st_mid["notice"] and epoch_n >= 20, "[sol expiry] a not-yet-expired transaction keeps being polled for 3 minutes (epoch reads=%d): %s" % (epoch_n, st_mid["notice"])
+        assert st_pend["notice"].startswith("Still pending — check Solscan.") and "View on Solscan" in st_pend["notice"], "[sol expiry] 3 minutes without a verdict ends on the existing 'Still pending' notice: %s" % st_pend["notice"]
+        # lastValidBlockHeight باید از ساختِ دومِ (تازه‌شده) بیاید، نه ساختِ اول
+        lv_bodies = [{"swapTransaction": SOL_GOOD_TX_B64, "lastValidBlockHeight": 111}, {"swapTransaction": SOL_GOOD_TX_B64, "lastValidBlockHeight": 222}]
+        for height, want_exp in ((150, False), (300, True)):
+            ex = await r5_run(clock=True, wallet_init=SOL_SIGN_ONLY_WALLET_INIT, swap_bodies=lv_bodies, swap_log=[], rpc_log=[],
+                              send_error={"error": "rpc:sendTransaction:-32002", "detail": {"err": '"BlockhashNotFound"', "logs": []}}, send_error_times=1,
+                              status_value=[None], epoch_height=height)
+            await ex.click("#solSwapBtn")
+            await ex.wait_for_timeout(1200)
+            await sol_advance(ex, 185000, 2000)
+            st_lv = await ex.evaluate(SOL_STATE_JS)
+            await ex.close()
+            if want_exp:
+                assert st_lv["notice"] == SOL_EXPIRED, "[sol expiry] refreshed-transaction path, blockHeight 300 > its lastValidBlockHeight 222: expected the expiry notice, got %r" % st_lv["notice"]
+            else:
+                assert st_lv["notice"].startswith("Still pending"), "[sol expiry] refreshed-transaction path, blockHeight 150 is past the FIRST build's 111 but not the signed one's 222: must not claim expiry, got %r" % st_lv["notice"]
+        print("[sol expiry] statuses stay null: nothing new in the first 60 s (no getEpochInfo), then every 4 s up to 3 min with getEpochInfo; blockHeight > lastValidBlockHeight plus one more status read gives exactly %r and no done block, polling stops; a transaction that has not expired ends on 'Still pending' at 3 min; after the BlockhashNotFound refresh the lastValidBlockHeight of the re-signed build decides (150 stays pending, 300 expires); every status read carries searchTransactionHistory" % SOL_EXPIRED)
+
+        # ---- [sol revert reason] ----
+        REV_CASES = [
+            ({"InstructionError": [4, {"Custom": 6001}]}, "finalized",
+             "Failed — the price moved more than your slippage allows. Nothing was swapped; only the network fee was paid. View on Solscan"),
+            ("InsufficientFundsForRent", "confirmed", "Failed. Not enough SOL for the network fee and one-time account rent. Keep at least"),
+            ({"InstructionError": [1, "InvalidAccountData"]}, "confirmed", "Failed. The transaction landed but reverted. View on Solscan"),
+        ]
+        for err, conf, want in REV_CASES:
+            rv = await r5_run(status_value=[{"confirmationStatus": conf, "err": err}])
+            await rv.click("#solSwapBtn")
+            await rv.wait_for_timeout(3200)
+            st_rv = await rv.evaluate(SOL_STATE_JS)
+            await rv.close()
+            assert st_rv["notice"].startswith(want) and "View on Solscan" in st_rv["notice"], "[sol revert reason] err %s: wanted %r, got %r" % (err, want, st_rv["notice"])
+            assert st_rv["done"] is False and "Swap complete" not in st_rv["page"] and "Confirmed." not in st_rv["notice"], \
+                "[sol revert reason] a status with err must never show the done block, even when %s: %s" % (conf, st_rv)
+        print("[sol revert reason] a finalized/confirmed status with err: Custom 6001 gives the slippage sentence, InsufficientFundsForRent the existing SOL-and-rent wording, anything else 'landed but reverted' (Solscan link kept); in all three the Swap complete block never shows")
 
         # ================= [sim override] ۴ اکتبر — شکستِ شبیه‌سازی بلوک نیست، با تأییدِ کاربر ادامه می‌دهد =================
         SIMO_ERR = {"value": {"err": {"InstructionError": [1, "InvalidAccountData"]},

@@ -9542,40 +9542,67 @@ function solSwapAgain(){
   solRefreshBalances();
   $("solAmt").focus();
 }
-async function solPollStatus(sig,doneInfo,t0,intent){
-  const box=$("solNotices");
+/* ۱۱ اکتبر — پول‌کردنِ نتیجه. ۶۰ثانیه‌ی اول مثلِ قبل (هر ۲ ثانیه)؛ اگر هنوز وضعیتی نیامده، تا ۳ دقیقه هر ۴ ثانیه ادامه
+   می‌دهد و هر دور blockHeight را (getEpochInfo) با lastValidBlockHeightِ همان بایت‌هایی که امضا شد می‌سنجد: وقتی از آن گذشت و
+   یک بررسیِ وضعیتِ دیگر هم چیزی نداد، تراکنش قطعاً هرگز اجرا نمی‌شود. وضعیت با searchTransactionHistory خوانده می‌شود تا
+   تراکنشِ قدیمی‌تر از کشِ RPC «پیدا نشد» به‌نظر نیاید. «Swap complete» فقط با err===null و confirmed/finalized. */
+const SOL_POLL_FAST_MS=60000,SOL_POLL_MAX_MS=180000;
+async function solPollStatus(sig,doneInfo,t0,intent,lastValid){
   const started=Date.now();
-  while(Date.now()-started<60000){
-    await new Promise(r=>setTimeout(r,2000));
+  const link=`<a href="https://solscan.io/tx/${esc(sig)}" target="_blank" rel="noopener">View on Solscan</a>`;
+  const readRow=async()=>{
+    const st=await solRpcCall("getSignatureStatuses",[[sig],{searchTransactionHistory:true}]);
+    return st&&st.value&&st.value[0];
+  };
+  // true = نتیجه‌ی قطعی نشان داده شد (ریورت یا تأیید)
+  const settle=(row)=>{
+    const status=row&&(row.confirmationStatus||null);
+    if(row&&row.err){
+      ev("swap:revert","","solana");
+      // C4 — دلیلِ ریورت از رویِ ساختارِ err (همان واژه‌نامه‌ی بسته‌ی شبیه‌سازی)، نه متنِ آزاد
+      const reason=solClassifySimFail(row.err).reason;
+      if(reason==="slippage")
+        solSetNotice(note("err","<b>Failed — the price moved more than your slippage allows.</b> Nothing was swapped; only the network fee was paid. "+link));
+      else if(reason==="insufficient-sol")
+        solSetNotice(note("err","<b>Failed.</b> "+esc(solSimFailMessage("insufficient-sol",solSimKeepSol()))+" "+link));
+      else
+        solSetNotice(note("err","<b>Failed.</b> The transaction landed but reverted. "+link));
+      solRefreshBalances();                      // F — فروختنِ تراکنش کارمزد خورده، حتی روی ریورت
+      return true;
+    }
+    if(status==="confirmed"||status==="finalized"){
+      ev("swap:done","","solana");
+      solSetNotice(note("ok","<b>Confirmed.</b> "+link));
+      // F — ۲۸ سپتامبر: یک بار همین الان کافی نبود؛ RPCها گاهی موجودیِ
+      // تازه را چند ثانیه دیرتر نشان می‌دهند. سه تلاش: فوری، +۳ث، +۸ث.
+      solRefreshBalances();
+      setTimeout(solRefreshBalances,3000);
+      setTimeout(solRefreshBalances,8000);
+      // اگر کاربر در این فاصله چیز دیگری را شروع کرده، بلوکِ نتیجه رویش نمی‌نشیند
+      if(doneInfo&&intent===solIntentSeq&&solAccount)showSolSwapDone(doneInfo,sig,(Date.now()-t0)/1000);
+      return true;
+    }
+    return false;
+  };
+  while(Date.now()-started<SOL_POLL_MAX_MS){
+    const extended=Date.now()-started>=SOL_POLL_FAST_MS;
+    await new Promise(r=>setTimeout(r,extended?4000:2000));
     try{
-      const st=await solRpcCall("getSignatureStatuses",[[sig]]);
-      const row=st&&st.value&&st.value[0];
-      const status=row&&(row.confirmationStatus||null);
-      if(row&&row.err){
-        ev("swap:revert","","solana");
-        solSetNotice(note("err","<b>Failed.</b> The transaction landed but reverted. "+
-          `<a href="https://solscan.io/tx/${esc(sig)}" target="_blank" rel="noopener">View on Solscan</a>`));
-        solRefreshBalances();                    // F — فروختنِ تراکنش کارمزد خورده، حتی روی ریورت
-        return;
-      }
-      if(status==="confirmed"||status==="finalized"){
-        ev("swap:done","","solana");
-        solSetNotice(note("ok","<b>Confirmed.</b> "+
-          `<a href="https://solscan.io/tx/${esc(sig)}" target="_blank" rel="noopener">View on Solscan</a>`));
-        // F — ۲۸ سپتامبر: یک بار همین الان کافی نبود؛ RPCها گاهی موجودیِ
-        // تازه را چند ثانیه دیرتر نشان می‌دهند. سه تلاش: فوری، +۳ث، +۸ث.
-        solRefreshBalances();
-        setTimeout(solRefreshBalances,3000);
-        setTimeout(solRefreshBalances,8000);
-        // اگر کاربر در این فاصله چیز دیگری را شروع کرده، بلوکِ نتیجه رویش نمی‌نشیند
-        if(doneInfo&&intent===solIntentSeq&&solAccount)showSolSwapDone(doneInfo,sig,(Date.now()-t0)/1000);
-        return;
+      if(settle(await readRow()))return;
+      if(extended&&Number.isFinite(lastValid)){
+        const ep=await solRpcCall("getEpochInfo",[]);
+        const bh=ep&&Number(ep.blockHeight);
+        if(Number.isFinite(bh)&&bh>lastValid){
+          if(settle(await readRow()))return;     // یک بررسیِ وضعیتِ دیگر، بعد از دیدنِ انقضا
+          ev("swap:lost","","solana");
+          solSetNotice(note("warn","<b>Not executed — the transaction expired before it landed.</b> No funds moved."));
+          return;
+        }
       }
     }catch{/* یک تلاشِ ناموفقِ پول‌کردن، خودش شکستِ تراکنش نیست — دوباره امتحان می‌شود */}
   }
   ev("swap:lost","","solana");
-  solSetNotice(note("warn","<b>Still pending — check Solscan.</b> "+
-    `<a href="https://solscan.io/tx/${esc(sig)}" target="_blank" rel="noopener">View on Solscan</a>`));
+  solSetNotice(note("warn","<b>Still pending — check Solscan.</b> "+link));
 }
 /* واژه‌نامه‌ی بسته‌ی دلیلِ شکستِ شبیه‌سازی — هرگز از رویِ متنِ آزادِ خطا،
    فقط از رویِ ساختارِ err و زیررشته‌های شناخته‌شده‌ی logs. Rule B.
@@ -9652,7 +9679,7 @@ function solMapSendError(e){
 }
 /* ارسالِ تراکنشِ امضاشده؛ اگر blockhash منقضی شده بود، فقط یک‌بار تراکنشِ تازه می‌سازد
    (solBuildFreshTx) و دوباره از کیف‌پول امضا می‌گیرد. شکستِ دوم همان پیامِ موجود است. */
-async function solSendSignedWithRetry(btn,context,signer,signedBytes,label){
+async function solSendSignedWithRetry(btn,context,signer,signedBytes,label,attempt){
   try{
     await solSendAndHandle(solBytesToB64(signedBytes));
     return solBs58Encode(signedBytes.slice(1,65));
@@ -9661,8 +9688,10 @@ async function solSendSignedWithRetry(btn,context,signer,signedBytes,label){
     solSetNotice(note("warn","<b>Network moved on — please approve the refreshed transaction.</b>"));
     solAssertSwapContext(context);
     const fresh=await solBuildFreshTx(btn,context);
+    if(attempt)attempt.lastValid=fresh.lastValid;     // C3 — از این به بعد بایتِ امضاشده همین ساخت است
     if(btn)btn.textContent=label||"Confirm in wallet…";
-    const res=await signer.signTransaction({account:solAccount,transaction:fresh.txBytes,chain:"solana:mainnet"});
+    const res=await solWatchWallet(signer.signTransaction({account:solAccount,transaction:fresh.txBytes,chain:"solana:mainnet"}),
+      v=>solLateWalletResult("sign",v,context,fresh.lastValid));
     const row=res&&res[0];
     if(!row||!row.signedTransaction)throw new Error("wallet returned no signed transaction");
     const bytes2=row.signedTransaction;
@@ -9671,6 +9700,83 @@ async function solSendSignedWithRetry(btn,context,signer,signedBytes,label){
     await solSendAndHandle(solBytesToB64(bytes2));
     return solBs58Encode(bytes2.slice(1,65));
   }
+}
+/* ۱۱ اکتبر — C2: کیف‌پولی که هرگز جواب نمی‌دهد. فانتوم پشتِ «Request blocked»ِ Pocket Universe گاهی promise را
+   هیچ‌وقت تمام نمی‌کند و کارت برای همیشه روی «Confirm in wallet…» می‌ماند. نگهبان: ۴ ثانیه بعد از اینکه صفحه دوباره فوکوس
+   گرفت (focus یا visibilitychange→visible) و هنوز جواب نیامده، یا ۱۲۰ ثانیه در کل، رابط آزاد می‌شود (promiseِ کیف‌پول
+   همچنان زنده می‌ماند). اگر بعداً تمام شد، onLate صدا زده می‌شود؛ ردِ دیرهنگام بی‌صدا نادیده گرفته می‌شود. */
+const SOL_WALLET_FOCUS_MS=4000,SOL_WALLET_MAX_MS=120000;
+function solWatchWallet(promise,onLate){
+  return new Promise((resolve,reject)=>{
+    let finished=false,released=false,focusT=null,maxT=null;
+    const stop=()=>{
+      clearTimeout(focusT);clearTimeout(maxT);focusT=null;maxT=null;
+      window.removeEventListener("focus",arm);window.removeEventListener("blur",disarm);
+      document.removeEventListener("visibilitychange",onVis);
+    };
+    const release=()=>{
+      if(finished||released)return;
+      released=true;stop();
+      reject(Object.assign(new Error("wallet did not answer"),{walletHung:true}));
+    };
+    function arm(){if(finished||released||focusT!=null)return;focusT=setTimeout(release,SOL_WALLET_FOCUS_MS);}
+    function disarm(){clearTimeout(focusT);focusT=null;}
+    function onVis(){if(document.visibilityState==="visible")arm();else disarm();}
+    window.addEventListener("focus",arm);window.addEventListener("blur",disarm);
+    document.addEventListener("visibilitychange",onVis);
+    maxT=setTimeout(release,SOL_WALLET_MAX_MS);
+    Promise.resolve(promise).then(v=>{
+      if(released){try{onLate&&onLate(v);}catch{}return;}
+      finished=true;stop();resolve(v);
+    },e=>{
+      if(released)return;                         // ردِ دیرهنگام: بی‌صدا
+      finished=true;stop();reject(e);
+    });
+  });
+}
+/* نتیجه‌ای که بعد از آزادشدنِ رابط رسید. فقط وقتی ادامه می‌دهد که همان سواپ باشد (context) و سواپِ تازه‌ای شروع نشده
+   (solIntentSeq عوض نشده، solSwapBusy خاموش)؛ وگرنه فقط یک یادداشتِ کوچک. هر نتیجه فقط یک‌بار رسیدگی می‌شود، پس
+   بایتِ امضاشده هرگز دوبار فرستاده نمی‌شود. */
+function solLateSame(context){
+  let intent=null;try{intent=JSON.parse(context)[0];}catch{}
+  return intent===solIntentSeq&&context===solSwapContext()&&!solSwapBusy&&!!solAccount&&!!solWalletApi;
+}
+function solFinishSubmitted(sigB58,lastValid){
+  ev("swap:sent","","solana");
+  solSimArmedKey=null;solSimFailedKey=null;
+  const doneInfo=solSnapshotDone(),sentAt=Date.now();
+  solSetNotice(note("ok","<b>Submitted.</b> "+
+    `<a href="https://solscan.io/tx/${esc(sigB58)}" target="_blank" rel="noopener">View on Solscan</a>`));
+  $("solAmt").value="";$("solOutRead").value="";solMode="exactIn";solQuote=null;solRenderReadout();
+  solPollStatus(sigB58,doneInfo,sentAt,solIntentSeq,lastValid);
+}
+async function solLateWalletResult(kind,value,context,lastValid){
+  const row=value&&value[0];
+  const link=sig=>`<a href="https://solscan.io/tx/${esc(sig)}" target="_blank" rel="noopener">View on Solscan</a>`;
+  if(kind==="send"){
+    if(!row||!row.signature)return;
+    const sig=solBs58Encode(row.signature);
+    if(solLateSame(context)){solFinishSubmitted(sig,lastValid);return;}
+    solSetNotice(note("info","<b>Your wallet finished an earlier swap after you moved on.</b> It was submitted: "+link(sig)));
+    solPollStatus(sig,null,Date.now(),solIntentSeq,lastValid);
+    return;
+  }
+  if(!row||!row.signedTransaction)return;
+  const bytes=row.signedTransaction;
+  if(!solLateSame(context)){
+    // بایتِ امضاشده برای سواپی است که دیگر آن نیست؛ ارسالش غافل‌گیری است. فرستاده نمی‌شود.
+    solSetNotice(note("info","<b>Your wallet approved an earlier swap after you moved on.</b> It was not sent. Review the current quote and press Swap again."));
+    return;
+  }
+  try{
+    await solSendAndHandle(solBytesToB64(bytes));
+  }catch(e){
+    solSetNotice(note("err","<b>"+esc((e&&e.message)||"Swap failed.")+"</b>"));
+    solRefreshBalances();
+    return;
+  }
+  if(!solLateSame(context))return;
+  solFinishSubmitted(solBs58Encode(bytes.slice(1,65)),lastValid);
 }
 async function solSendAndHandle(txB64){
   try{
@@ -9719,6 +9825,11 @@ async function solBuildFreshTx(btn,context=solSwapContext()){
   }),15000);
   const j=await r.json().catch(()=>null);
   solAssertSwapContext(context);
+  // ۱۱ اکتبر — کلیدِ Jupiter ما نرخ‌محدود است؛ Worker یک‌بار تکرار کرده و باز ۴۲۹ آمده. هیچ‌چیز ارسال نشده.
+  if(j&&j.error==="jup:swap:429"){
+    const msg="Jupiter is busy right now. Nothing was sent — press Swap again in a few seconds.";
+    throw Object.assign(new Error(msg),{uiHandled:true,uiMessage:msg,uiCode:"jup:swap:429"});
+  }
   if(!r.ok||!j||j.error||!j.swapTransaction)throw new Error((j&&j.error)||"could not build the transaction");
 
   // D — عددِ واقعیِ کارمزدِ اولویت، برای ردیفِ «Network fee».
@@ -9780,7 +9891,9 @@ async function solBuildFreshTx(btn,context=solSwapContext()){
   }
 
   solAssertSwapContext(context);
-  return {txBytes,swapTxB64:j.swapTransaction};
+  // C3 — lastValidBlockHeightِ همین پاسخ، برای بایت‌هایی که دقیقاً امضا می‌شوند
+  const lastValid=Number.isFinite(Number(j.lastValidBlockHeight))&&j.lastValidBlockHeight!=null?Number(j.lastValidBlockHeight):null;
+  return {txBytes,swapTxB64:j.swapTransaction,lastValid};
 }
 async function solDoSwap(){
   if(solSwapBusy||!solAccount||!solQuote)return;
@@ -9799,6 +9912,7 @@ async function solDoSwap(){
   try{
     // A — ساختِ اول، بلافاصله پیش از تماسِ اصلیِ کیف‌پول.
     const built=await solBuildFreshTx(btn,context);
+    const attempt={lastValid:built.lastValid};      // C3 — blockHeightِ انقضا برای بایتی که واقعاً امضا می‌شود
 
     const swapInSym=solSide==="buy"?solRefSymbol:(solTokenSymbol||"—");
     const swapOutSym=solSide==="buy"?(solTokenSymbol||"—"):solRefSymbol;
@@ -9807,12 +9921,14 @@ async function solDoSwap(){
     let sigB58=null;
     if(f["solana:signAndSendTransaction"]){
       try{
-        const res=await f["solana:signAndSendTransaction"].signAndSendTransaction(
-          {account:solAccount,transaction:built.txBytes,chain:"solana:mainnet"});
+        const res=await solWatchWallet(f["solana:signAndSendTransaction"].signAndSendTransaction(
+          {account:solAccount,transaction:built.txBytes,chain:"solana:mainnet"}),
+          v=>solLateWalletResult("send",v,context,built.lastValid));
         const row=res&&res[0];
         if(!row||!row.signature)throw new Error("wallet returned no signature");
         sigB58=solBs58Encode(row.signature);
       }catch(e){
+        if(e&&e.walletHung)throw e;                 // C2 — بی‌پاسخ ≠ خطا؛ هرگز به fallback نمی‌رود
         // C — یک رد صریحِ کاربر هرگز به fallback نمی‌رود؛ فقط یک خطای
         // غیرِرد (مثلِ "Expected String" که فانتوم زده) و فقط اگر کیف‌پول
         // امضای جدا هم دارد.
@@ -9822,8 +9938,10 @@ async function solDoSwap(){
         solAssertSwapContext(context);
         btn.textContent="Retrying with your wallet's signing method…";
         const built2=await solBuildFreshTx(btn,context);
-        const res2=await f["solana:signTransaction"].signTransaction(
-          {account:solAccount,transaction:built2.txBytes,chain:"solana:mainnet"});
+        attempt.lastValid=built2.lastValid;
+        const res2=await solWatchWallet(f["solana:signTransaction"].signTransaction(
+          {account:solAccount,transaction:built2.txBytes,chain:"solana:mainnet"}),
+          v=>solLateWalletResult("sign",v,context,built2.lastValid));
         const row2=res2&&res2[0];
         if(!row2||!row2.signedTransaction){
           const err2=new Error("Swap failed in your wallet: "+((e&&e.message)||"unknown error"));
@@ -9833,30 +9951,30 @@ async function solDoSwap(){
         const signedBytes2=row2.signedTransaction;
         btn.textContent="Sending…";
         solAssertSwapContext(context);
-        sigB58=await solSendSignedWithRetry(btn,context,f["solana:signTransaction"],signedBytes2,"Confirm in wallet…");
+        sigB58=await solSendSignedWithRetry(btn,context,f["solana:signTransaction"],signedBytes2,"Confirm in wallet…",attempt);
       }
     }else if(f["solana:signTransaction"]){
-      const res=await f["solana:signTransaction"].signTransaction(
-        {account:solAccount,transaction:built.txBytes,chain:"solana:mainnet"});
+      const res=await solWatchWallet(f["solana:signTransaction"].signTransaction(
+        {account:solAccount,transaction:built.txBytes,chain:"solana:mainnet"}),
+        v=>solLateWalletResult("sign",v,context,built.lastValid));
       const row=res&&res[0];
       if(!row||!row.signedTransaction)throw new Error("wallet returned no signed transaction");
       const signedBytes=row.signedTransaction;
       btn.textContent="Sending…";
       solAssertSwapContext(context);
       // اولین امضا بلافاصله بعدِ بایتِ compact-u16 است (داخلِ solSendSignedWithRetry)
-      sigB58=await solSendSignedWithRetry(btn,context,f["solana:signTransaction"],signedBytes,"Confirm in wallet…");
+      sigB58=await solSendSignedWithRetry(btn,context,f["solana:signTransaction"],signedBytes,"Confirm in wallet…",attempt);
     }else{
       throw new Error("wallet supports neither signing feature");
     }
 
-    ev("swap:sent","","solana");
-    solSimArmedKey=null;solSimFailedKey=null;
-    const doneInfo=solSnapshotDone(),sentAt=Date.now();
-    solSetNotice(note("ok","<b>Submitted.</b> "+
-      `<a href="https://solscan.io/tx/${esc(sigB58)}" target="_blank" rel="noopener">View on Solscan</a>`));
-    $("solAmt").value="";$("solOutRead").value="";solMode="exactIn";solQuote=null;solRenderReadout();
-    solPollStatus(sigB58,doneInfo,sentAt,solIntentSeq);
+    solFinishSubmitted(sigB58,attempt.lastValid);
   }catch(e){
+    if(e&&e.walletHung){
+      // C2 — رابط آزاد می‌شود (finally)؛ ev تازه‌ای نمی‌سازیم (فهرستِ رویدادها بسته است)
+      solSetNotice(note("warn","<b>Your wallet didn't answer.</b> If a wallet window is still open, finish or close it before swapping again."));
+      return;
+    }
     ev("swap:fail","","solana");
     if(isUserRejection(e)){solSetNotice(note("warn","<b>Cancelled in your wallet.</b> Nothing was sent."));}
     else if(e&&e.uiHandled){

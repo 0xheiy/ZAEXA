@@ -13731,6 +13731,44 @@ function stripAllowedWording(t) {
     globalThis.fetch = savedFetch;
   }
 
+  // پ) ۱۱ اکتبر — ۴۲۹ از جوپیتر روی /sol/swap: فقط یک بار، پس از ۱۱۰۰ms، با همان بدنه؛ ۵۰۰ هرگز تکرار نمی‌شود
+  {
+    const payload = { quoteResponse: { inputMint: MINT_A, outputMint: MINT_B }, userPublicKey: PUBKEY };
+    const okJson = () => new Response(JSON.stringify({ swapTransaction: "AQID", lastValidBlockHeight: 777 }),
+      { status: 200, headers: { "content-type": "application/json" } });
+    const mk = (statuses) => {
+      const seen = { n: 0, bodies: [], times: [] };
+      globalThis.fetch = async (u, o) => {
+        const st = statuses[Math.min(seen.n, statuses.length - 1)];
+        seen.n++; seen.bodies.push(o.body); seen.times.push(Date.now());
+        return st === 200 ? okJson() : new Response(JSON.stringify({ error: "x" }), { status: st, headers: { "content-type": "application/json" } });
+      };
+      return seen;
+    };
+    // ۴۲۹ ← ۲۰۰: دقیقاً دو تماسِ بالادست، همان بدنه، حداقل ۱۰۰۰ms فاصله، و موفقیت
+    let seen = mk([429, 200]);
+    let res = await call("/sol/swap", { method: "POST", body: JSON.stringify(payload) }, { ASSETS, JUP_KEY: "k" });
+    let body = await res.json();
+    ok(res.status === 200 && body.swapTransaction === "AQID" && body.lastValidBlockHeight === 777 && seen.n === 2 &&
+       seen.bodies[0] === seen.bodies[1] && seen.times[1] - seen.times[0] >= 1000,
+      "[sol swap 429 retry] 429 then 200 must make exactly one retry with the same payload after >= 1000 ms and succeed, got "
+      + res.status + " calls=" + seen.n + " gap=" + (seen.times[1] - seen.times[0]));
+    // ۴۲۹ ← ۴۲۹: دقیقاً دو تماس (نه سه) و همان jup:swap:429
+    seen = mk([429]);
+    res = await call("/sol/swap", { method: "POST", body: JSON.stringify(payload) }, { ASSETS, JUP_KEY: "k" });
+    body = await res.json();
+    ok(res.status === 502 && body.error === "jup:swap:429" && seen.n === 2,
+      "[sol swap 429 retry] 429 then 429 must be exactly two upstream calls and jup:swap:429, got " + res.status + " " + JSON.stringify(body) + " calls=" + seen.n);
+    // ۵۰۰: بدونِ تکرار
+    seen = mk([500]);
+    res = await call("/sol/swap", { method: "POST", body: JSON.stringify(payload) }, { ASSETS, JUP_KEY: "k" });
+    body = await res.json();
+    ok(res.status === 502 && body.error === "jup:swap:500" && seen.n === 1,
+      "[sol swap 429 retry] a 500 must never be retried (one upstream call, jup:swap:500), got " + res.status + " " + JSON.stringify(body) + " calls=" + seen.n);
+    globalThis.fetch = savedFetch;
+    console.log("[sol swap 429 retry] /sol/swap: 429 then 200 = one retry (same payload, >= 1 s apart) and success; 429 then 429 = exactly two upstream calls and jup:swap:429; 500 = one call, no retry");
+  }
+
   // ث) POST /sol/rpc — فهرستِ بستهِ متدها، اعتبارسنجیِ پارامتر، و هرگز اکوی URL/هاستِ SOL_RPC
   {
     let netCalls = 0;

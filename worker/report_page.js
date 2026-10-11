@@ -331,10 +331,12 @@ svg.chart .col.sel text{fill:var(--tx);font-weight:700}
 .tip b{display:block;font-size:12.5px}
 .filters{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
 .sep{width:1px;height:22px;background:var(--line2);margin:0 4px}
-.chip{padding:7px 13px;border-radius:999px;border:1px solid var(--line2);font-size:12.5px;font-weight:600;color:var(--tx2);background:var(--card)}
-.chip span{color:var(--tx3);font-weight:500;margin-left:5px;font-variant-numeric:tabular-nums}
-.chip[aria-pressed="true"]{background:var(--tx);color:var(--bg);border-color:var(--tx)}
-.chip[aria-pressed="true"] span{color:inherit;opacity:.7}
+/* ۱۱ اکتبر — چیپ‌های فیلترِ محتوا فقط داخلِ main: قاعده‌ی عمومیِ .chip به #connectBtn و دکمه‌های هدر هم می‌خورد
+   (حاشیه‌ی ۱px و وزنِ ۶۰۰) و چیپِ وصل‌شده با /app و /pairs فرق می‌کرد. */
+main .chip{padding:7px 13px;border-radius:999px;border:1px solid var(--line2);font-size:12.5px;font-weight:600;color:var(--tx2);background:var(--card)}
+main .chip span{color:var(--tx3);font-weight:500;margin-left:5px;font-variant-numeric:tabular-nums}
+main .chip[aria-pressed="true"]{background:var(--tx);color:var(--bg);border-color:var(--tx)}
+main .chip[aria-pressed="true"] span{color:inherit;opacity:.7}
 .tblwrap{overflow-x:auto;margin-top:14px}
 table{width:100%;border-collapse:collapse;font-size:13px;min-width:680px}
 th{text-align:left;font:500 10px/1.2 var(--mono);letter-spacing:.1em;text-transform:uppercase;color:var(--tx3);padding:10px 12px;border-bottom:1px solid var(--line2);white-space:nowrap}
@@ -762,6 +764,7 @@ const SHELL_JS = String.raw`
     if (!key) return;
     discoveredWallets.set(key, d);
     var ov = document.getElementById('walletOv');
+    if (window.__zxForceSol) return;   // روی سولانا فهرستِ EVM نباید فهرستِ بسته‌ی سولانا را بپوشاند
     if (ov && ov.classList.contains('on')) renderWalletList();
   }
   window.addEventListener('eip6963:announceProvider', onWalletAnnounce);
@@ -856,6 +859,8 @@ const SHELL_JS = String.raw`
     var b = document.getElementById('connectBtn');
     var addr = document.getElementById('walletAddr');
     if (!b || !addr) return;
+    if (window.__zxSolPend) return;   // بازیابیِ نشستِ سولانا در جریان است — بسته‌ی سولانا رنگ می‌کند
+    if (window.zaexaPairsSolana && window.zaexaPairsSolana.paint()) return;
     if (!account && window.__zxBasePend){
       // بازیابیِ نشستِ Base در جریان است — چیپِ آدرسِ اسکریپتِ درون‌خطی می‌ماند، «Connect wallet» نه
       b.textContent = shortAddr(window.__zxBasePend.address);
@@ -875,6 +880,7 @@ const SHELL_JS = String.raw`
     b.className = 'chip';
     addr.textContent = shortAddr(account);
   }
+  window.zaexaPairsBasePaint = paintWallet;
   function closeWalletMenu(){
     var pop = document.getElementById('walletPop');
     var btn = document.getElementById('connectBtn');
@@ -1061,10 +1067,11 @@ const SHELL_JS = String.raw`
   // بازیابیِ بی‌صدا — عیناً همان اپ: فقط eth_accounts (هرگز eth_requestAccounts)، فقط از والتی که کاربر برای Base
   // انتخاب کرده (BASE_WALLET_KEY)، بدون حلقه روی همهٔ والت‌ها (ریشهٔ باگِ فانتوم)؛ بعد WalletConnect. ۱۲۰ms صبر برای EIP-6963.
   // اگر کاربر صریحاً قطع کرده بود، هیچ اتصال خودکاری نیست. هر شکست رکوردِ نشست را پاک و چیپ را به «Connect wallet» برمی‌گرداند.
-  if (window.__zxBasePend){
+  if (window.__zxBasePend && !window.__zxForceSol){
     basePendTimer = setTimeout(function(){ basePendTimer = null; if (!account) baseSessionClear(); baseEndPending(); }, BASE_PEND_MS);
   }
   (async function(){
+    if (window.__zxForceSol) return;   // سولانا: نه اسکنِ EIP-6963، نه eth_accounts، نه WalletConnect — بسته‌ی سولانا کارِ خودش را می‌کند
     scanWallets();
     await new Promise(function(r){ setTimeout(r, 120); });
     {
@@ -1163,10 +1170,29 @@ const HEADER_HTML = String.raw`<header class="site-header">
   <div class="rel" id="walletMenu">
     <button class="chip solid" id="connectBtn" aria-haspopup="menu" aria-expanded="false">Connect wallet</button>
 <script>
+/* ۱۱ اکتبر — زنجیره‌ی گزارش: ?chain= (solana/base) و اگر نبود localStorage "zaexa.chain.v1" (همان خوانشِ اسکریپتِ اپ)، پیش‌فرض base.
+   روی solana هدر دقیقاً مثلِ /pairs?chain=solana رفتار می‌کند: چیپِ در انتظارِ رکوردِ نشستِ سولانا (zaexa.solsession.v1) و
+   پرچمِ __zxForceSol که بسته‌ی pairs-solana را روشن می‌کند. هیچ بازیابیِ Base و هیچ چیپِ Base در این حالت نیست. */
+try{(function(){
+  var q=new URLSearchParams(location.search).get("chain"),c=(q==="solana"||q==="base")?q:null;
+  if(!c){try{var v=localStorage.getItem("zaexa.chain.v1");c=(v==="solana"||v==="base")?v:null;}catch(e){}}
+  if(c!=="solana")return;
+  window.__zxForceSol=true;
+  var r=JSON.parse(sessionStorage.getItem("zaexa.solsession.v1")||"null");
+  if(!r||typeof r.name!=="string"||typeof r.address!=="string"||typeof r.t!=="number")return;
+  if(Date.now()-r.t>30*60*1000||r.name==="WalletConnect Solana")return;
+  try{if(localStorage.getItem("zaexa.solwallet.off.v1")==="1")return;}catch(e){}
+  var b=document.getElementById("connectBtn");if(!b)return;
+  b.className="chip";b.textContent=r.address.slice(0,6)+"\u2026"+r.address.slice(-4);b.setAttribute("aria-busy","true");
+  window.__zxSolPend={name:r.name,address:r.address};
+})();}catch(e){}
+</script>
+<script>
 /* ۱۱ اکتبر — همتای Base برای اسکریپتِ بالا: رکوردِ تازه‌ی نشستِ Base (zaexa.basesession.v1) + کاربرِ قطع‌نکرده +
    کلیدِ والتِ ذخیره‌شده (zaexa.base.wallet) برابرِ رکورد + صفحه (گزارش همیشه Base است) ⇒ هدر همان لحظه آدرسِ کوتاه را با aria-busy نشان می‌دهد.
    فقط نمایش؛ هیچ حسابی از روی رکورد ست نمی‌شود. baseEndPending آن را پایان می‌دهد؛ سقفِ ۴ ثانیه هم دارد. */
 try{(function(){
+  if(window.__zxForceSol)return;   // زنجیره‌ی گزارش سولاناست: چیپِ Base هرگز
   var r=JSON.parse(sessionStorage.getItem("zaexa.basesession.v1")||"null");
   if(!r||typeof r.key!=="string"||!r.key||typeof r.address!=="string"||typeof r.t!=="number")return;
   if(!/^0x[0-9a-fA-F]{40}$/.test(r.address))return;
@@ -1388,6 +1414,11 @@ a.walletAction{text-decoration:none}
 @media(max-width:900px){.footGrid{grid-template-columns:1fr 1fr;gap:26px}.footBottom{flex-direction:column;gap:10px}.footBrand .footTag{max-width:none}}
 `;
 
+/* ۱۱ اکتبر — بسته‌ی ولتِ سولانا فقط وقتی بارگذاری می‌شود که اسکریپتِ هدر زنجیره را solana تشخیص داده باشد
+   (window.__zxForceSol). نام فایل هشِ محتوایش را دارد (web/pairs-solana.<hash>.js؛ نسخه‌ی قبلی برای کلاینت‌های کش‌شده می‌ماند). */
+const SOL_BUNDLE_SRC = "/pairs-solana.9ab7ff67.js";
+const SOL_BUNDLE_LOADER = '<script>if(window.__zxForceSol===true){var zs=document.createElement("script");zs.src="' + SOL_BUNDLE_SRC + '";document.body.appendChild(zs);}</script>\n';
+
 function pageShell({ title, description, canonical, noindex, main, island }) {
   const robots = noindex ? '<meta name="robots" content="noindex">\n' : "";
   return "<!DOCTYPE html>\n" +
@@ -1410,7 +1441,8 @@ function pageShell({ title, description, canonical, noindex, main, island }) {
     "<style>\n" + FONT_RULE_MANROPE + "\n" + FONT_RULE_PLAYFAIR + "\n" + LANDING_CSS + "\n" + HEADER_CSS + PAGE_CSS + "</style>\n" +
     "</head>\n<body>\n" + LANDING_SVG_DEFS + "\n" + HEADER_HTML + "\n" + WALLET_PICKER_HTML + "\n" + main + "\n" + LANDING_FOOTER_HTML + "\n" +
     (island || "") + "<script>" + SHELL_JS + "</script>\n" +
-    (island ? "<script>" + CLIENT_JS + "</script>\n" : "") + "</body>\n</html>\n";
+    (island ? "<script>" + CLIENT_JS + "</script>\n" : "") +
+    SOL_BUNDLE_LOADER + "</body>\n</html>\n";
 }
 
 /* صفحه‌ی ۴۰۴ — همان قالب، با لینک به /report. */

@@ -1607,11 +1607,18 @@ async function solSwapRoute(request, url, env) {
       priorityLevelWithMaxLamports: { maxLamports: 200000, priorityLevel: "medium" },
     },
   };
-  const r = await jupProxyFetch(env, "/swap/v1/swap", {
+  const swapInit = {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify(payload),
-  }, SOL_JUP_TIMEOUT_MS);
+  };
+  let r = await jupProxyFetch(env, "/swap/v1/swap", swapInit, SOL_JUP_TIMEOUT_MS);
+  // ۱۱ اکتبر — کلیدِ ما حدودِ ۱ درخواست در ثانیه دارد و ساختِ تراکنش گاهی ۴۲۹ می‌خورد. فقط برای ۴۲۹
+  // و فقط یک‌بار: ۱۱۰۰ms صبر، همان بدنه، با همان سقفِ زمانِ هر تماس. هیچ وضعیتِ دیگری تکرار نمی‌شود.
+  if (r.status === 429) {
+    await new Promise((resolve) => setTimeout(resolve, 1100));
+    r = await jupProxyFetch(env, "/swap/v1/swap", swapInit, SOL_JUP_TIMEOUT_MS);
+  }
   if (!r.ok || !r.json || typeof r.json.swapTransaction !== "string")
     return solDone(502, { error: "jup:swap:" + r.status });
   // ۲۷ سپتامبر — پیش‌تر simulationError خودِ جوپیتر اینجا دور ریخته می‌شد؛
