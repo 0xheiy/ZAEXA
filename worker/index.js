@@ -33,6 +33,7 @@ import { ogImageResponse } from "./og-image.js";
 import { fetchVerdict, fetchCounterSell, poolDirectedProof, VD_VENUES, VD_RPCS, VD_V4_STAGE_COUNTERS,
   WETH_ADDR, USDC_ADDR } from "./verdict.js";
 import { EVM_ADDR, SOL_MINT, chainOf, gtNetworkOf } from "./chains.js";
+import { tgRoute } from "./tg.js";
 import {
   REPORT_DATE_RE, PAIRS_KEY_BASE, reportKey, utcDateOf, emptyReportDoc, runReportPass, publishGuardRow,
   reportText, REPORT_TEXT_FIRST_DATE, followForRow, recheckForRow, causeForRow, readPassLog,
@@ -2129,6 +2130,22 @@ async function diagLogRpc(env) {
   return vdDone(200, { endpoints, subreq: { used, cap: LOGRPC_SUBREQ_CAP } });
 }
 
+/* حکمِ یک توکن برای هر مصرف‌کننده‌ی غیرِ probe (/vd و بات تلگرام) — یک مسیر،
+   نه دو نسخه. آدرس باید پیشتر معتبر باشد؛ chain=null فقط دفاعی است. */
+export async function tokenVerdict(addr, env, ctx, deadlineAt) {
+  const chain = chainOf(addr);
+  if (chain === "solana") {
+    const r = await solFetchVerdict(addr, deadlineAt, ctx, env);
+    return { chain, v: r.v, why: r.why, cause: r.cause, basis: r.basis, ret: r.ret };
+  }
+  if (chain === "base") {
+    const { meta, why: metaWhy } = await ogFetchMetaDetail(addr, env);
+    const { v, why, cause, ret, via } = await ogFetchVerdictDetail(addr, meta, deadlineAt, env, ctx, metaWhy);
+    return { chain, v, why, cause, ret, via };
+  }
+  return { chain: null, v: null, why: "internal" };
+}
+
 async function diagVerdict(request, url, env, ctx) {
   /* همیشه اولین خط، پیش از هر بررسیِ دیگری — همان قاعده‌ای که /gt و /ev
      دارند: یک اسکریپتِ کوبنده نباید حتی شکلِ درخواست را هم مجانی بسنجد. */
@@ -2171,7 +2188,7 @@ async function diagVerdict(request, url, env, ctx) {
     // «why» فقط وقتی v واقعاً null باشد چیزی غیرِ undefined است؛ JSON.stringify
     // کلیدی با مقدارِ undefined را خودش حذف می‌کند، پس یک sell/nosell همان
     // شکلِ {v,ms} امروز را بایت‌به‌بایت نگه می‌دارد.
-    const { v, why, basis, ret, cause } = await solFetchVerdict(addr, t0 + OG_BUDGET_MS, ctx, env);
+    const { v, why, basis, ret, cause } = await tokenVerdict(addr, env, ctx, t0 + OG_BUDGET_MS);
     return vdDone(200, {
       v, ms: Date.now() - t0, why, cause: v === "nosell" ? cause : undefined,
       basis: v === "sell" && basis === "quote" ? "quote" : undefined,
@@ -2181,8 +2198,6 @@ async function diagVerdict(request, url, env, ctx) {
   // چرا با ogFetchMetaDetail: پایین‌تر (شاخه‌ی غیرِ probe) metaWhy لازم است
   // تا وقتی خودِ متادیتا نیامد، دلیلش هم گزارش شود، نه فقط internal حدسی.
   // شاخه‌ی ?probe=1 دست‌نخورده همان meta را می‌گیرد، پس رفتارش عوض نمی‌شود.
-  const { meta, why: metaWhy } = await ogFetchMetaDetail(addr, env);
-
   // ?probe=1 — همان سطلِ نرخِ «vd» بالا را می‌خورد (هیچ مسیرِ ارزان‌تری
   // ندارد)، ولی ogFetchVerdict را دور می‌زند: آن تابع از کشِ verdict
   // می‌خواند و در آن می‌نویسد، و یک برخوردِ کش دقیقاً یک verdict بدونِ هیچ
@@ -2197,6 +2212,7 @@ async function diagVerdict(request, url, env, ctx) {
   // این تابع را «تعمیر» نکند تا با /vd هم‌رنگ شود؛ آن هم‌رنگی خودِ این
   // ابزارِ تشخیصی را کور می‌کند.
   if (url.searchParams.get("probe") === "1") {
+    const { meta } = await ogFetchMetaDetail(addr, env);
     const collect = [];
     /* 🔴 کلیدهای واقعیِ ذخیره‌شده *باید* اینجا هم داده شوند. بدونشان این
        ابزار دقیقاً همان چیزی را نمی‌بیند که برای دیدنش هست: مسیرِ واقعی
@@ -2229,7 +2245,7 @@ async function diagVerdict(request, url, env, ctx) {
   // ret هم دقیقاً همین قاعده را دارد، ولی برعکس: فقط کنارِ v==="sell" —
   // چقدر از صد دلارِ فرضی برگشت، نه اینکه فروش رخ داد یا نه؛ nosell/null
   // هرگز ret نمی‌گیرد.
-  const { v, why, cause, ret, via } = await ogFetchVerdictDetail(addr, meta, t0 + OG_BUDGET_MS, env, ctx, metaWhy);
+  const { v, why, cause, ret, via } = await tokenVerdict(addr, env, ctx, t0 + OG_BUDGET_MS);
   return vdDone(200, {
     v, ms: Date.now() - t0,
     why: v === null ? why : undefined,
@@ -3132,6 +3148,9 @@ export default {
        به کد برسد، نه به فایل‌های ثابت. */
     if (url.pathname === "/vd" || url.pathname.startsWith("/vd/"))
       return diagVerdict(request, url, env, ctx);
+    /* وب‌هوکِ بات تلگرام — هیچ درخواستِ خروجی ندارد؛ جواب در بدنه‌ی پاسخ است. */
+    if (url.pathname === "/tg" || url.pathname.startsWith("/tg/"))
+      return tgRoute(request, url, env, { verdict: (a) => tokenVerdict(a, env, ctx, Date.now() + OG_BUDGET_MS) });
     /* سوآپِ زنده‌ی سولانا — هر سه پیش از /vd بررسی نمی‌شوند چون پیشوندشان
        فرق دارد؛ ترتیب اینجا اهمیتی ندارد، فقط برای هم‌جواری با بقیه‌ی
        مسیرهای تازه نگه داشته شده. */
