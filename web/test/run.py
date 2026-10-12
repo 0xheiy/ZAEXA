@@ -183,6 +183,13 @@ def check_gt_proxy_worker():
     r = subprocess.run(["node", t], capture_output=True, text=True, cwd=os.path.dirname(t))
     sys.stdout.write(r.stdout)
     assert r.returncode == 0, "the Telegram bot failed its tests:\n" + r.stderr
+    # ۱۲ اکتبر: GET /logo.png (worker/logo_test.mjs) — لوگوی مربعی برای فرم‌های فهرست‌شدن.
+    t = os.path.join(HERE, "..", "..", "worker", "logo_test.mjs")
+    if not os.path.exists(t):
+        raise AssertionError("worker/logo_test.mjs is missing — /logo.png is untested")
+    r = subprocess.run(["node", t], capture_output=True, text=True, cwd=os.path.dirname(t))
+    sys.stdout.write(r.stdout)
+    assert r.returncode == 0, "/logo.png failed its tests:\n" + r.stderr
 
 def check_asset_cache_headers():
     """باندل‌های وندور یک سال immutable کش می‌شوند (web/_headers) و این فقط

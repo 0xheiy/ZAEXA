@@ -30,6 +30,7 @@ const UPSTREAM_KEYED = "https://api.coingecko.com/api/v3/onchain";
 
 import { ogTags, ogTitle, pickTokenMeta } from "./og.js";
 import { ogImageResponse } from "./og-image.js";
+import { logoResponse } from "./logo-image.js";
 import { fetchVerdict, fetchCounterSell, poolDirectedProof, VD_VENUES, VD_RPCS, VD_V4_STAGE_COUNTERS,
   WETH_ADDR, USDC_ADDR } from "./verdict.js";
 import { EVM_ADDR, SOL_MINT, chainOf, gtNetworkOf } from "./chains.js";
@@ -3191,6 +3192,8 @@ export default {
        /ev. یعنی برای اضافه‌شدنش لازم نیست کسی Build command را در پنل عوض
        کند، و انتشارش با خودِ کد اتمیک است. */
     if (url.pathname === "/og.png") return ogImageResponse(request);
+    /* لوگوی مربعی برای فرم‌های فهرست‌شدن — همان دلیلِ og.png: داخلِ کد، نه _site. */
+    if (url.pathname === "/logo.png") return logoResponse(request);
     if(/^\/t\/[^/]+\/?$/.test(url.pathname)&&!chainOf(url.pathname.split("/")[2])){
       const asset=await env.ASSETS.fetch(new Request(new URL("/app",url.origin),request));
       return new Response(asset.body,{status:404,headers:asset.headers});
