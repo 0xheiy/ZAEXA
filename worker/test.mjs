@@ -47,7 +47,16 @@ let sentHeaders = [];
 /* موکِ ردیاب — تابعِ نام‌دار، نه یک بسته‌شده‌ی بی‌نام، تا هر بخشی که موقتاً
    globalThis.fetch را برای آزمودنِ چیزِ دیگری عوض می‌کند (مثلاً بخشِ ogFetchVerdict)
    بتواند دقیقاً همین را برگرداند، نه یک کپیِ دوم که رفتارش کمی فرق دارد. */
+/* DexScreener (پشتیبانِ کارتِ تک‌توکن) جدا شمرده می‌شود تا شمارشِ قدیمیِ «sent»
+   که فقط بالادستِ GT/CG را می‌سنجد دست‌نخورده بماند. پیش‌فرض: ۴۰۴ */
+let dsSent = [];
+let dsReply = null;
 async function trackingFetch(u, o) {
+  if (String(u).startsWith("https://api.dexscreener.com/")) {
+    dsSent.push(String(u));
+    if (dsReply instanceof Error) throw dsReply;
+    return dsReply ? dsReply.clone() : new Response("{}", { status: 404 });
+  }
   sent.push(String(u));
   sentHeaders.push((o && o.headers) || {});
   if (reply instanceof Error) throw reply;
@@ -64,7 +73,9 @@ function json(obj, status = 200) {
   });
 }
 
+let keepCgFlag = false; // فقط بخش‌های [gt fallback] پرچمِ کلیدِ افتاده را بینِ تماس‌ها نگه می‌دارند
 async function call(path, init, e) {
+  if (!keepCgFlag) (await import("./index.js"))._cgKeyDownUntil(0);
   sent = []; sentHeaders = [];
   return await worker.fetch(new Request(ORIGIN + path, init), e || env, {});
 }
@@ -8141,7 +8152,8 @@ console.log("[report cause] causeForRow enforces the closed REPORT_CAUSES vocabu
     {
       const { res, body } = await probe("0x" + "1".repeat(40), async (url) => {
         const u = String(url);
-        if (u.startsWith(UK_C)) return new Response("rate limited", { status: 429 });
+        // مسیرِ تازه: ۴۲۹ی کلیددار → همان مسیر بی‌کلید؛ آن هم ۴۲۹ می‌دهد
+        if (u.startsWith(UK_C) || u.startsWith("https://api.geckoterminal.com/")) return new Response("rate limited", { status: 429 });
         throw new Error("unexpected upstream call in why-C1: " + u);
       });
       ok(res.status === 200, "a 429 from the GT tokens endpoint must still answer 200, got " + res.status);
@@ -14763,6 +14775,323 @@ function stripAllowedWording(t) {
     const t0 = reportText({ date: PAST, generatedAt: null, rows: [mk({ address: mkA(304) })] });
     ok(!t0.includes("re-checked"), "[report page txt] no follow value at all prints no line");
     console.log("[report page txt] the text report says 'F of the quoted tokens were re-checked 1–3 hours later. E had an empty pool.' only when F > 0");
+  }
+}
+
+/* ---- ۹۹. کلیدِ CoinGecko افتاد: gtUpstream، پشتیبانِ DexScreener، /vd/src ----
+   ⚠️ هر بخش globalThis.fetch را عوض می‌کند و در finally به trackingFetch برمی‌گرداند؛
+   keepCgFlag فقط همین بخش‌ها را از بازنشانیِ خودکارِ پرچمِ cgKeyDownUntil معاف می‌کند. */
+{
+  const idx = await import("./index.js");
+  const { UPSTREAM_KEYED: UK, UPSTREAM_FREE: UF, _cgKeyDownUntil, ogFetchMeta, ogFetchMetaMany, ogFetchVerdict, RL_LIMIT } = idx;
+  const { pickDsMeta, ogTitle, ogDescription } = await import("./og.js");
+  const KEY = "SECRET-CG-KEY-FOR-GTFB";
+  const USDC = "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913";
+  const SOLM = "5ZoUg31NuEfDLDJfTh8hJGiavENmE2deDUBT4hhcpump";
+  const envK = { ASSETS, CG_KEY: KEY };
+  const limited = () => new Response(JSON.stringify({ status: { error_code: 10006,
+    error_message: "You've reached 10,000 calls limit" } }), { status: 429, headers: { "content-type": "application/json" } });
+  const gtBody = () => new Response(JSON.stringify({ data: { attributes: { name: "USD Coin", symbol: "USDC",
+    decimals: 6, price_usd: "1.0", total_reserve_in_usd: "722000", volume_usd: { h24: "5000" } } } }),
+    { status: 200, headers: { "content-type": "application/json" } });
+  let ipN = 10;
+  const ipH = () => ({ headers: { "cf-connecting-ip": "198.51.100." + (++ipN) } });
+  let log = [];
+  async function withFetch(handler, fn) {
+    const saved = globalThis.fetch, savedKeep = keepCgFlag;
+    log = [];
+    globalThis.fetch = async (u, o) => { log.push({ u: String(u), h: (o && o.headers) || {} }); return handler(String(u), o || {}); };
+    keepCgFlag = true;
+    try { return await fn(); } finally { globalThis.fetch = saved; keepCgFlag = savedKeep; }
+  }
+  const isCg = (u) => u.startsWith(UK), isGt = (u) => u.startsWith(UF), isDs = (u) => u.startsWith("https://api.dexscreener.com/");
+  const REST = "networks/base/tokens/" + USDC;
+
+  // ---------- [gt fallback] ----------
+  {
+    // الف) کلید سالم → فقط یک تماسِ کلیددار، همان URL، هدر هست
+    _cgKeyDownUntil(0);
+    await withFetch((u) => gtBody(), async () => {
+      const res = await call("/gt/" + REST, ipH(), envK);
+      ok(res.status === 200 && log.length === 1, "[gt fallback] key ok must make exactly one upstream call, got " + log.length);
+      ok(log[0].u === UK + "/" + REST, "[gt fallback] key ok must call the identical keyed URL, got " + log[0].u);
+      ok(log[0].h["x-cg-demo-api-key"] === KEY, "[gt fallback] key ok must send the key header");
+      ok(res.headers.get("x-zaexa-proxy") === "miss-keyed", "[gt fallback] key ok must answer miss-keyed, got " + res.headers.get("x-zaexa-proxy"));
+      ok(_cgKeyDownUntil() === 0, "[gt fallback] key ok must not set the down flag");
+    });
+
+    // ب) ۴۲۹ با error_code 10006 → یک تماسِ بی‌کلید، پرچم، و تماسِ بعدی اصلاً کلیددار نمی‌زند
+    const puts = [], matches = [];
+    globalThis.caches = { default: { match: async (r) => { matches.push(r.url); return undefined; }, put: async (r) => { puts.push(r.url); } } };
+    try {
+      await withFetch((u) => (isCg(u) ? limited() : gtBody()), async () => {
+        const res = await call("/gt/" + REST, ipH(), envK);
+        ok(res.status === 200 && log.length === 2 && isCg(log[0].u) && isGt(log[1].u),
+           "[gt fallback] keyed 429 must be followed by exactly one free call, got " + JSON.stringify(log.map((l) => l.u)));
+        ok(log[1].u === UF + "/" + REST, "[gt fallback] the free call must hit the same path");
+        ok(!("x-cg-demo-api-key" in log[1].h) && !JSON.stringify(log[1].h).includes(KEY), "[gt fallback] the free call must carry no key header");
+        ok(res.headers.get("x-zaexa-proxy") === "miss-free", "[gt fallback] fallback answer must be miss-free, got " + res.headers.get("x-zaexa-proxy"));
+        ok(_cgKeyDownUntil() > Date.now() + 9 * 60 * 1000 && _cgKeyDownUntil() <= Date.now() + 10 * 60 * 1000 + 1000,
+           "[gt fallback] a keyed 429 must set the down flag ~10 minutes ahead");
+        ok(puts.length === 1 && puts[0] === UK + "/" + REST && matches[0] === UK + "/" + REST,
+           "[gt fallback] the proxy cache key must stay the KEYED target whichever source answered, got " + JSON.stringify([puts, matches]));
+        const txt = await res.text();
+        ok(!txt.includes(KEY) && !JSON.stringify(Object.fromEntries(res.headers)).includes(KEY) && log.every((l) => !l.u.includes(KEY)),
+           "[gt fallback] the key must not appear in a URL, body or response header");
+        const res2 = await call("/gt/" + REST, ipH(), envK);
+        ok(res2.status === 200 && log.length === 3 && isGt(log[2].u),
+           "[gt fallback] while the flag is fresh the next call must skip keyed entirely, got " + JSON.stringify(log.map((l) => l.u)));
+        ok(puts.length === 2 && puts[1] === UK + "/" + REST && matches[1] === UK + "/" + REST,
+           "[gt fallback] even while the key is flagged down the cache key stays the KEYED target, got " + JSON.stringify([puts, matches]));
+        // انقضای پرچم → دوباره کلیددار امتحان می‌شود
+        _cgKeyDownUntil(Date.now() - 1);
+        await call("/gt/" + REST, ipH(), envK);
+        ok(isCg(log[3].u), "[gt fallback] after the flag expires the keyed call is tried again");
+      });
+      // هر دو ۴۲۹ → ۴۲۹ با upstream-429 و بدونِ put
+      puts.length = 0; _cgKeyDownUntil(0);
+      await withFetch(() => limited(), async () => {
+        const res = await call("/gt/" + REST, ipH(), envK);
+        ok(res.status === 429 && res.headers.get("x-zaexa-proxy") === "upstream-429" && puts.length === 0,
+           "[gt fallback] both 429 must answer 429 / upstream-429 and cache nothing, got " + res.status + "/" + res.headers.get("x-zaexa-proxy") + "/" + puts.length);
+        ok(log.every((l) => !isDs(l.u)), "[gt fallback] the proxy must never call DexScreener");
+      });
+      // بدونِ کلید → فقط بی‌کلید، کلیدِ کش = آدرسِ بی‌کلید
+      puts.length = 0; _cgKeyDownUntil(0);
+      await withFetch(() => gtBody(), async () => {
+        const res = await call("/gt/" + REST, ipH(), { ASSETS });
+        ok(log.length === 1 && log[0].u === UF + "/" + REST && res.headers.get("x-zaexa-proxy") === "miss-free" && puts[0] === UF + "/" + REST,
+           "[gt fallback] without CG_KEY only the free URL is called and it is the cache key");
+      });
+    } finally { delete globalThis.caches; }
+
+    // 401/403 هم پرچم می‌گذارند
+    for (const st of [401, 403]) {
+      _cgKeyDownUntil(0);
+      await withFetch((u) => (isCg(u) ? new Response("no", { status: st }) : gtBody()), async () => {
+        await call("/gt/" + REST, ipH(), envK);
+        ok(_cgKeyDownUntil() > Date.now() && log.length === 2, "[gt fallback] keyed " + st + " must set the flag and fall through");
+      });
+    }
+    // 500 کلیددار پرچم نمی‌گذارد و همان جواب برمی‌گردد (رفتارِ امروز)
+    _cgKeyDownUntil(0);
+    await withFetch((u) => new Response("x", { status: 500 }), async () => {
+      const res = await call("/gt/" + REST, ipH(), envK);
+      ok(res.status === 500 && log.length === 1 && _cgKeyDownUntil() === 0, "[gt fallback] a keyed 500 passes through untouched, no flag, no second call");
+    });
+    // پرتابِ شبکه روی کلیددار → بی‌کلید، پرچم نه
+    _cgKeyDownUntil(0);
+    await withFetch((u) => { if (isCg(u)) throw new TypeError("network down"); return gtBody(); }, async () => {
+      const res = await call("/gt/" + REST, ipH(), envK);
+      ok(res.status === 200 && log.length === 2 && isGt(log[1].u), "[gt fallback] a keyed throw must fall through to one free call");
+      ok(_cgKeyDownUntil() === 0, "[gt fallback] a keyed throw must NOT set the flag");
+    });
+    // مصرف‌کننده‌های دیگر از همین دروازه می‌گذرند: پرچم نشسته → صفر تماسِ کلیددار
+    _cgKeyDownUntil(Date.now() + 5 * 60 * 1000);
+    await withFetch((u) => gtBody(), async () => {
+      await ogFetchMeta(USDC, { CG_KEY: KEY });
+      await ogFetchMetaMany([USDC], { CG_KEY: KEY });
+      ok(log.length === 2 && log.every((l) => isGt(l.u) && !("x-cg-demo-api-key" in l.h)),
+         "[gt fallback] ogFetchMeta/ogFetchMetaMany must honour the shared flag, got " + JSON.stringify(log.map((l) => l.u)));
+    });
+    _cgKeyDownUntil(0);
+    console.log("[gt fallback] key ok -> one keyed call, identical URL and header, miss-keyed; keyed 429 (error_code 10006), 401 and 403 -> one free call without header, miss-free, flag ~10 min and the next call skips keyed; flag expiry retries keyed; keyed throw -> free call, no flag; 500 passes through; both 429 -> upstream-429 and nothing cached; proxy cache key stays the keyed target; key never in URL, body or headers; no DexScreener from the proxy; meta/metaMany share the flag");
+  }
+
+  // ---------- [meta ds] ----------
+  {
+    const pair = (o) => Object.assign({ chainId: "base", dexId: "uniswap", pairAddress: "0xp", baseToken: { address: USDC, name: "USD Coin", symbol: "USDC" },
+      quoteToken: { address: "0xq", name: "WETH", symbol: "WETH" }, priceUsd: "1.0", liquidity: { usd: 100, base: 1, quote: 1 },
+      volume: { h24: 1, h6: 1, h1: 1, m5: 1 }, info: { imageUrl: "https://cdn.dexscreener.com/x.png" } }, o);
+    const upper = USDC.toUpperCase().replace("0X", "0x");
+    const pairs = [
+      pair({ liquidity: { usd: 100 }, baseToken: { address: USDC, name: "Small", symbol: "SML" } }),
+      pair({ liquidity: { usd: 996000 }, baseToken: { address: upper, name: "USD Coin", symbol: "USDC" } }),
+      pair({ chainId: "ethereum", liquidity: { usd: 9e9 }, baseToken: { address: USDC, name: "Wrong chain", symbol: "WCH" } }),
+      pair({ liquidity: { usd: 8e9 }, baseToken: { address: "0x" + "9".repeat(40), name: "Other", symbol: "OTH" } }),
+    ];
+    const m = pickDsMeta(pairs, USDC, "base");
+    ok(m && m.symbol === "USDC" && m.name === "USD Coin" && m.src === "ds", "[meta ds] pickDsMeta must pick the highest-liquidity matching pair, ignoring other chains and other base tokens, got " + JSON.stringify(m));
+    ok(m.liquidity === null && m.vol24 === null && m.priceUsd === null && m.decimals === null && m.imageUrl === null,
+       "[meta ds] liquidity/vol24/priceUsd/decimals/imageUrl must all be null, got " + JSON.stringify(m));
+    ok(pickDsMeta(pairs, upper, "base") !== null, "[meta ds] Base address match is case-insensitive");
+    const solPairs = [
+      { chainId: "solana", baseToken: { address: SOLM, name: "Pump", symbol: "PUMP" }, liquidity: { usd: 5 } },
+      { chainId: "solana", baseToken: { address: SOLM.toLowerCase(), name: "Lower", symbol: "LOW" }, liquidity: { usd: 99 } },
+    ];
+    const sm = pickDsMeta(solPairs, SOLM, "solana");
+    ok(sm && sm.symbol === "PUMP", "[meta ds] Solana match is exact (a lower-cased mint is a different token), got " + JSON.stringify(sm));
+    ok(pickDsMeta([], USDC, "base") === null && pickDsMeta(null, USDC, "base") === null && pickDsMeta({}, USDC, "base") === null
+       && pickDsMeta([pair({ chainId: "solana" })], USDC, "base") === null, "[meta ds] no matching pair / bad shape -> null");
+
+    // ogFetchMeta: CG ۴۲۹ و GT ۴۲۹ → DexScreener
+    _cgKeyDownUntil(0);
+    const dsOk = () => new Response(JSON.stringify(pairs), { status: 200, headers: { "content-type": "application/json" } });
+    await withFetch((u) => (isDs(u) ? dsOk() : limited()), async () => {
+      const meta = await ogFetchMeta(USDC, { CG_KEY: KEY });
+      ok(meta && meta.src === "ds" && meta.symbol === "USDC", "[meta ds] both GT paths 429 -> DexScreener identity, got " + JSON.stringify(meta));
+      const dsCalls = log.filter((l) => isDs(l.u));
+      ok(dsCalls.length === 1 && dsCalls[0].u === "https://api.dexscreener.com/token-pairs/v1/base/" + USDC, "[meta ds] exactly one DexScreener call on the right URL, got " + JSON.stringify(dsCalls.map((l) => l.u)));
+      ok(log.filter((l) => !isCg(l.u)).every((l) => !JSON.stringify(l.h).includes(KEY)), "[meta ds] key never goes to the free or DexScreener hosts");
+      ok(ogTitle(meta) === "USDC · USD Coin — Zaexa", "[meta ds] card title uses the DS symbol and name, got " + ogTitle(meta));
+      ok(!/Liquidity|Vol 24h/.test(ogDescription(meta, null, "Base")), "[meta ds] the card description carries no DexScreener numbers");
+    });
+    // Base: priceUsd null → حکم بدونِ تماسِ شبکه نامعلوم
+    _cgKeyDownUntil(0);
+    await withFetch((u) => (isDs(u) ? dsOk() : limited()), async () => {
+      const meta = await ogFetchMeta(USDC, { CG_KEY: KEY });
+      log.length = 0;
+      const v = await ogFetchVerdict(USDC, meta, Date.now() + 2000, { CG_KEY: KEY }, { waitUntil() {} });
+      ok(v === null && log.length === 0, "[meta ds] Base verdict with priceUsd null must be unknown with zero network calls, got " + v + "/" + log.length);
+    });
+    // سرتاسری از /vd/<addr>
+    _cgKeyDownUntil(0);
+    await withFetch((u) => (isDs(u) ? dsOk() : limited()), async () => {
+      const res = await call("/vd/" + USDC, ipH(), envK);
+      const body = await res.json();
+      ok(res.status === 200 && body.v === null, "[meta ds] /vd on DS-only meta must be unknown, got " + JSON.stringify(body));
+      ok(log.every((l) => isCg(l.u) || isGt(l.u) || isDs(l.u)), "[meta ds] no RPC call may happen for a DS-only Base meta, got " + JSON.stringify(log.map((l) => l.u)));
+    });
+    // سولانا: mint دقیق
+    _cgKeyDownUntil(0);
+    await withFetch((u) => (isDs(u) ? new Response(JSON.stringify(solPairs), { status: 200 }) : limited()), async () => {
+      const meta = await ogFetchMeta(SOLM, { CG_KEY: KEY });
+      ok(meta && meta.symbol === "PUMP" && meta.src === "ds", "[meta ds] Solana falls back to DexScreener with exact mint match");
+      ok(log.filter((l) => isDs(l.u))[0].u === "https://api.dexscreener.com/token-pairs/v1/solana/" + SOLM, "[meta ds] Solana DS URL");
+    });
+    // شکستِ DexScreener → null مثل امروز
+    for (const [name, h] of [["500", () => new Response("x", { status: 500 })], ["throw", () => { throw new TypeError("down"); }],
+                             ["bad shape", () => new Response("{\"a\":1}", { status: 200 })], ["no match", () => new Response("[]", { status: 200 })]]) {
+      _cgKeyDownUntil(0);
+      await withFetch((u) => (isDs(u) ? h() : limited()), async () => {
+        const meta = await ogFetchMeta(USDC, { CG_KEY: KEY });
+        ok(meta === null, "[meta ds] DexScreener failure (" + name + ") must leave meta null, got " + JSON.stringify(meta));
+      });
+    }
+    // کلیددار ۲۰۰ ولی شکلِ بد → هم DS
+    _cgKeyDownUntil(0);
+    await withFetch((u) => (isDs(u) ? dsOk() : new Response("{\"data\":{}}", { status: 200 })), async () => {
+      const meta = await ogFetchMeta(USDC, { CG_KEY: KEY });
+      ok(meta && meta.src === "ds", "[meta ds] a 200 with a bad shape also falls back to DexScreener");
+    });
+    // GT سالم → DexScreener هرگز
+    _cgKeyDownUntil(0);
+    await withFetch((u) => (isDs(u) ? dsOk() : gtBody()), async () => {
+      const meta = await ogFetchMeta(USDC, { CG_KEY: KEY });
+      ok(meta && !meta.src && log.every((l) => !isDs(l.u)), "[meta ds] a healthy GT answer never touches DexScreener");
+    });
+    // metaMany / سایت‌مپ: هرگز DS
+    _cgKeyDownUntil(0);
+    await withFetch((u) => (isDs(u) ? dsOk() : limited()), async () => {
+      const r = await ogFetchMetaMany([USDC], { CG_KEY: KEY });
+      await call("/sitemap.xml", ipH(), envK);
+      ok(r === null && log.every((l) => !isDs(l.u)), "[meta ds] metaMany and the sitemap never call DexScreener");
+    });
+    _cgKeyDownUntil(0);
+    console.log("[meta ds] both GT paths 429 -> DexScreener identity only (highest-liquidity matching pair; other chains and other base tokens ignored; Base case-insensitive, Solana exact; liquidity/vol24/price/decimals/imageUrl null); card title uses the DS symbol and carries no numbers; Base verdict with null price makes zero network calls and /vd stays unknown; DS failure (500, throw, bad shape, no match) -> meta null; healthy GT never calls DS; metaMany and sitemap never call DS");
+  }
+
+  // ---------- [vd src] ----------
+  {
+    const dsOk = () => new Response("[]", { status: 200 });
+    _cgKeyDownUntil(0);
+    const ip = { headers: { "cf-connecting-ip": "198.51.100.200" } };
+    await withFetch((u) => (isCg(u) ? limited() : isDs(u) ? dsOk() : gtBody()), async () => {
+      const res = await call("/vd/src", ip, envK);
+      const raw = await res.text();
+      const b = JSON.parse(raw);
+      ok(res.status === 200 && res.headers.get("cache-control") === "no-store", "[vd src] 200 + no-store");
+      ok(JSON.stringify(Object.keys(b).sort()) === JSON.stringify(["cg", "down", "ds", "gt", "ms"]), "[vd src] exact top-level keys, got " + Object.keys(b));
+      ok(b.cg.s === 429 && b.cg.code === 10006 && b.gt.s === 200 && b.ds.s === 200 && typeof b.ms === "number" && b.down === false,
+         "[vd src] statuses and error_code, got " + raw);
+      ok(!raw.includes("http") && !raw.includes("/") && !raw.includes(KEY) && !raw.includes("833589"), "[vd src] body carries only labels and numbers, got " + raw);
+      ok(log.length === 3 && log.some((l) => l.u === UK + "/" + REST && l.h["x-cg-demo-api-key"] === KEY)
+         && log.some((l) => l.u === UF + "/" + REST) && log.some((l) => l.u === "https://api.dexscreener.com/token-pairs/v1/base/" + USDC),
+         "[vd src] one call each to the three sources");
+      ok(_cgKeyDownUntil() === 0, "[vd src] must not set cgKeyDownUntil");
+      // پرچم نشسته: باز هم کلیددار امتحان می‌شود و پرچم دست نمی‌خورد
+      const future = Date.now() + 7 * 60 * 1000;
+      _cgKeyDownUntil(future); log.length = 0;
+      const b2 = await (await call("/vd/src", ip, envK)).json();
+      ok(log.filter((l) => isCg(l.u)).length === 1 && b2.down === true && _cgKeyDownUntil() === future, "[vd src] bypasses and never modifies the flag");
+      _cgKeyDownUntil(0);
+      const res405 = await call("/vd/src", { method: "POST", headers: ip.headers }, envK);
+      ok(res405.status === 405, "[vd src] POST -> 405, got " + res405.status);
+      // بدونِ کلید
+      log.length = 0;
+      const b3 = await (await call("/vd/src", ip, { ASSETS })).json();
+      ok(b3.cg.s === "nokey" && log.every((l) => !isCg(l.u)), "[vd src] no CG_KEY -> nokey and no keyed call, got " + JSON.stringify(b3.cg));
+    });
+    // پرتاب → s:0
+    await withFetch((u) => { throw new TypeError("down"); }, async () => {
+      const b = await (await call("/vd/src", ip, envK)).json();
+      ok(b.cg.s === 0 && b.gt.s === 0 && b.ds.s === 0 && b.cg.code === null, "[vd src] a throw is reported as s:0, got " + JSON.stringify(b));
+    });
+    // سطلِ نرخِ vd مشترک است
+    await withFetch(() => gtBody(), async () => {
+      const ip2 = { headers: { "cf-connecting-ip": "198.51.100.201" } };
+      let last;
+      for (let i = 0; i < RL_LIMIT; i++) last = await call("/vd/src", ip2, envK);
+      ok(last.status === 200, "[vd src] within the limit stays 200");
+      const over = await call("/vd/src", ip2, envK);
+      const other = await call("/vd/rpc", ip2, envK);
+      ok(over.status === 429 && other.status === 429, "[vd src] shares the vd bucket (over the limit -> 429 here and on /vd/rpc), got " + over.status + "/" + other.status);
+    });
+    _cgKeyDownUntil(0);
+    console.log("[vd src] GET /vd/src answers {cg:{s,code},gt:{s},ds:{s},down,ms} with no-store; keyed 429 shows s:429 code:10006; a throw is s:0; no CG_KEY -> nokey; POST 405; body has no URL, path or key; it always tries the keyed call even while the flag is set and never changes the flag; shares the vd rate bucket");
+  }
+
+  // ---------- [report pass upstream calls] ----------
+  {
+    const hex = (n) => "0x" + n.toString(16).padStart(40, "0");
+    const B58 = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
+    const solA = (n) => { let s = ""; for (let i = 0; i < 44; i++) s += B58[(n * 7 + i * 13 + (i % 5) * n) % 58]; return s; };
+    const baseAddrs = [1, 2, 3, 4, 5, 6].map((n) => hex(0x4000 + n));
+    const solAddrs = [1, 2].map(solA);
+    const row = (net, a, dex) => ({ attributes: { reserve_in_usd: "48000", base_token_price_usd: "0.5", pool_created_at: "2026-10-13T09:00:00Z",
+      volume_usd: { h24: "100" }, fdv_usd: "1000" }, relationships: { base_token: { data: { id: net + "_" + a } }, dex: { data: { id: dex } } } });
+    const tokAttrs = (a, i) => ({ address: a, name: "Tok" + i, symbol: "T" + i, decimals: 18, price_usd: "0.5", total_reserve_in_usd: "48000", volume_usd: { h24: "100" } });
+    const fx = (u) => {
+      const j = (o) => new Response(JSON.stringify(o), { status: 200, headers: { "content-type": "application/json" } });
+      if (u.includes("/networks/base/new_pools")) return j({ data: baseAddrs.map((a) => row("base", a, "uniswap-v3-base")) });
+      if (u.includes("/networks/solana/new_pools")) return j({ data: u.includes("page=2") ? [] : solAddrs.map((a) => row("solana", a, "pumpswap")) });
+      if (u.includes("/tokens/multi/")) return j({ data: baseAddrs.map((a, i) => ({ attributes: tokAttrs(a, i) })) });
+      if (u.endsWith("/pools")) return j({ data: [row("base", baseAddrs[0], "uniswap-v3-base")] });
+      if (u.includes("/tokens/")) return j({ data: { attributes: tokAttrs(baseAddrs[0], 0) } });
+      if (u.includes("/networks?page=1")) return new Response("", { status: 200 });
+      return j({ jsonrpc: "2.0", id: 1, result: "0x" });
+    };
+    const kind = (u) => {
+      const p = new URL(u).pathname.replace("/api/v3/onchain/", "");
+      if (p.includes("new_pools")) return p.includes("solana") ? "sol-new_pools" : "base-new_pools";
+      if (p.includes("tokens/multi")) return "tokens/multi";
+      if (p.endsWith("/pools")) return "token-pools";
+      if (p.includes("/tokens/")) return "token-single";
+      return "other";
+    };
+    _cgKeyDownUntil(0);
+    const store = new Map();
+    const kv = { get: async (k) => (store.has(k) ? store.get(k) : null), put: async (k, v) => { store.set(k, v); } };
+    let urls = null;
+    await withFetch(fx, async () => { await scheduledReportPass({ ZX_KV: kv, CG_KEY: KEY }, {}); urls = log.map((l) => l.u); });
+    const cg = urls.filter((u) => u.startsWith("https://api.coingecko.com/"));
+    const by = {};
+    for (const u of cg) by[kind(u)] = (by[kind(u)] || 0) + 1;
+    const breakdown = Object.keys(by).sort().map((k) => k + "=" + by[k]).join(", ");
+    console.log("[report pass upstream calls] " + cg.length + " CoinGecko calls per pass (" + breakdown + ")");
+    ok(cg.length > 0 && cg.length <= 60, "[report pass upstream calls] expected 0 < n <= 60, got " + cg.length);
+    ok(urls.every((u) => !u.startsWith("https://api.dexscreener.com/")), "[report pass upstream calls] the pass never calls DexScreener");
+    // کلید سقف‌خورده: فقط اولین تماس کلیددار است، بقیه بی‌کلید
+    _cgKeyDownUntil(0);
+    let capped = null;
+    const store2 = new Map();
+    const kv2 = { get: async (k) => (store2.has(k) ? store2.get(k) : null), put: async (k, v) => { store2.set(k, v); } };
+    await withFetch((u) => (isCg(u) ? limited() : fx(u)), async () => { await scheduledReportPass({ ZX_KV: kv2, CG_KEY: KEY }, {}); capped = log.map((l) => l.u); });
+    ok(capped.filter((u) => isCg(u)).length === 1 && capped.some((u) => isGt(u) && u.includes("new_pools")),
+       "[gt fallback] a capped key costs the pass exactly one keyed call, then everything goes free, got " + capped.filter((u) => isCg(u)).length);
+    ok(capped.every((u) => !u.startsWith("https://api.dexscreener.com/")), "[gt fallback] a capped-key pass never calls DexScreener");
+    console.log("[gt fallback] capped key through a whole hourly pass: " + capped.filter((u) => isCg(u)).length + " keyed call, " + capped.filter((u) => isGt(u)).length + " keyless calls");
+    _cgKeyDownUntil(0);
   }
 }
 

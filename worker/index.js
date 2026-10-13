@@ -28,7 +28,38 @@
 const UPSTREAM_FREE = "https://api.geckoterminal.com/api/v2";
 const UPSTREAM_KEYED = "https://api.coingecko.com/api/v3/onchain";
 
-import { ogTags, ogTitle, pickTokenMeta } from "./og.js";
+/* ⚠️ ۱۳ اکتبر: کلیدِ Demo به سقفِ ماهانه (۱۰٬۰۰۰ تماس) خورد و هر تماسِ
+   کلیددار ۴۲۹ (error_code 10006) داد. gtUpstream تنها دروازه‌ی بالادست است:
+   اول کلیددار، و اگر ۴۲۹/۴۰۱/۴۰۳ آمد برای ۱۰ دقیقه (در همین ایزوله) کلید را
+   کنار می‌گذارد و همان مسیر را بی‌کلید از GeckoTerminal می‌زند. بی‌کلید از
+   IPِ مشترکِ کلادفلر فقط بهترین‌تلاش است، نه منبعِ اصلی (اوت ۲۰۲۶: همان
+   تماسِ اول ۴۲۹ بود). هرگز به‌خاطرِ وضعیتِ HTTP پرتاب نمی‌کند؛ شبکه‌ی
+   تماسِ بی‌کلید می‌تواند پرتاب کند و کالر try/catchِ خودش را دارد.
+   src: "cg" کلیددار، "gt" بی‌کلید. کلید فقط در هدر می‌رود، هرگز در URL. */
+let cgKeyDownUntil = 0;
+const CG_KEY_DOWN_MS = 10 * 60 * 1000;
+async function gtUpstream(rest, env, opts) {
+  const key = (env && typeof env.CG_KEY === "string" && env.CG_KEY) || "";
+  const sig = opts && opts.signal ? { signal: opts.signal } : {};
+  if (key && cgKeyDownUntil <= Date.now()) {
+    try {
+      const res = await fetch(UPSTREAM_KEYED + "/" + rest,
+        { headers: { accept: "application/json", "x-cg-demo-api-key": key }, ...sig });
+      if (res.status === 429 || res.status === 401 || res.status === 403) {
+        cgKeyDownUntil = Date.now() + CG_KEY_DOWN_MS; // سقف/کلید خراب → کنار بگذار
+      } else {
+        return { res, src: "cg" };
+      }
+    } catch (e) {
+      // مهلت تمام شده (abort) → تماسِ دوم فایده‌ای ندارد؛ بقیه‌ی پرتاب‌ها بی‌پرچم می‌افتند به بی‌کلید
+      if (opts && opts.signal && opts.signal.aborted) throw e;
+    }
+  }
+  const res = await fetch(UPSTREAM_FREE + "/" + rest, { headers: { accept: "application/json" }, ...sig });
+  return { res, src: "gt" };
+}
+
+import { ogTags, ogTitle, pickTokenMeta, pickDsMeta } from "./og.js";
 import { ogImageResponse } from "./og-image.js";
 import { tokenCardPng, renderable, logoFromJpeg } from "./og-token.js";
 import { logoResponse } from "./logo-image.js";
@@ -344,8 +375,9 @@ async function proxyGt(request, url, ctx, env) {
   }
 
   const key = (env && typeof env.CG_KEY === "string" && env.CG_KEY) || "";
-  const target = (key ? UPSTREAM_KEYED : UPSTREAM_FREE) + "/" + rest +
-    (qs.length ? "?" + qs.join("&") : "");
+  const restQ = rest + (qs.length ? "?" + qs.join("&") : "");
+  // کلیدِ کش همیشه آدرسِ کلیددار است، هر کدام از دو منبع که جواب داد
+  const target = (key ? UPSTREAM_KEYED : UPSTREAM_FREE) + "/" + restQ;
   const ttl = ttlFor(rest);
 
   /* کش لبه. عمداً از Cache API استفاده می‌شود و نه از cf.cacheTtl، چون
@@ -360,14 +392,12 @@ async function proxyGt(request, url, ctx, env) {
     if (hit) return hit;
   }
 
-  let up;
+  let up, src;
   try {
     /* هیچ‌کدام از هدرهای کاربر (کوکی، Referer، …) به بالادست نمی‌رود؛ هدرها
-       از نو ساخته می‌شوند. کلید فقط اینجاست — نه در URL (وگرنه در کش و در
-       لاگ‌ها می‌نشست) و نه در هیچ پاسخی که برمی‌گردانیم. */
-    const h = { accept: "application/json" };
-    if (key) h["x-cg-demo-api-key"] = key;
-    up = await fetch(target, { headers: h });
+       در gtUpstream از نو ساخته می‌شوند. کلید فقط در هدر است — نه در URL
+       (وگرنه در کش و در لاگ‌ها می‌نشست) و نه در هیچ پاسخی که برمی‌گردانیم. */
+    ({ res: up, src } = await gtUpstream(restQ, env));
   } catch (e) {
     return fail(502, "the price service is unreachable");
   }
@@ -379,7 +409,7 @@ async function proxyGt(request, url, ctx, env) {
     "cache-control": up.ok ? "public, max-age=" + ttl : "no-store",
     /* برای بازرسی از بیرون: هم معلوم است پاسخ از پراکسی آمده، هم اینکه
        کلید واقعاً به Worker رسیده یا نه. خودِ کلید هرگز چاپ نمی‌شود. */
-    "x-zaexa-proxy": up.ok ? (key ? "miss-keyed" : "miss-free")
+    "x-zaexa-proxy": up.ok ? (src === "cg" ? "miss-keyed" : "miss-free")
                            : "upstream-" + up.status,
   };
   const res = new Response(body, { status: up.status, headers });
@@ -464,22 +494,52 @@ async function ogFetchMetaDetail(addr, env) {
      منتظر نمی‌ماند — «نمی‌دانم» نباید به «صفحه بالا نیامد» ترجمه شود. */
   const ac = new AbortController();
   const timer = setTimeout(() => ac.abort(), OG_TIMEOUT_MS);
+  let out;
   try {
-    const h = { accept: "application/json" };
-    if (key) h["x-cg-demo-api-key"] = key;
     let up;
     try {
-      up = await fetch(target, { headers: h, signal: ac.signal });
+      ({ res: up } = await gtUpstream(rest, env, { signal: ac.signal }));
     } catch (e) {
-      return { meta: null, why: ac.signal.aborted ? "meta:timeout" : "meta:0" };
+      out = { meta: null, why: ac.signal.aborted ? "meta:timeout" : "meta:0" };
     }
-    if (!up.ok) return { meta: null, why: "meta:" + up.status };
-    try {
-      const meta = pickTokenMeta(await up.json());
-      return { meta, why: meta ? null : "meta:shape" };
-    } catch (e) {
-      return { meta: null, why: "meta:shape" };
+    if (!out) {
+      if (!up.ok) out = { meta: null, why: "meta:" + up.status };
+      else {
+        try {
+          const meta = pickTokenMeta(await up.json());
+          out = { meta, why: meta ? null : "meta:shape" };
+        } catch (e) {
+          out = { meta: null, why: "meta:shape" };
+        }
+      }
     }
+  } finally {
+    clearTimeout(timer);
+  }
+  /* پشتیبانِ DexScreener — فقط برای کارتِ تک‌توکن (/t/، /og/t، /vd)، هرگز در
+     گذرِ گزارش، metaMany، پراکسی یا سایت‌مپ. اعدادِ نقدینگی/حجمِ آن با
+     عددِ صفحه (GeckoTerminal) نمی‌خواند (اندازه‌گیری: ۹۹۶k در برابر ۷۲۲k)،
+     پس فقط هویت (نام و نماد) می‌دهد و بقیه null است. وقتی priceUsd و
+     decimals null باشند حکمِ Base صادقانه «نامعلوم» می‌شود؛ حکمِ سولانا
+     هیچ‌کدام را لازم ندارد. تایم‌اوتِ جداگانه؛ بعد از تایم‌اوتِ GT نمی‌رود. */
+  if (!out.meta && out.why !== "meta:timeout") {
+    const ds = await dsFetchMeta(addr, chainOf(addr));
+    if (ds) return { meta: ds, why: null };
+  }
+  return out;
+}
+
+async function dsFetchMeta(addr, chain) {
+  if (chain !== "base" && chain !== "solana") return null;
+  const ac = new AbortController();
+  const timer = setTimeout(() => ac.abort(), OG_TIMEOUT_MS);
+  try {
+    const up = await fetch("https://api.dexscreener.com/token-pairs/v1/" + chain + "/" + addr,
+      { headers: { accept: "application/json" }, signal: ac.signal });
+    if (!up.ok) return null;
+    return pickDsMeta(await up.json(), addr, chain);
+  } catch (e) {
+    return null;
   } finally {
     clearTimeout(timer);
   }
@@ -507,18 +567,14 @@ async function ogFetchMeta(addr, env) {
 async function ogFetchMetaMany(addrs, env) {
   try {
     if (!Array.isArray(addrs) || addrs.length === 0) return null;
-    const key = (env && typeof env.CG_KEY === "string" && env.CG_KEY) || "";
     const rest = "networks/base/tokens/multi/" + addrs.join(",");
-    const target = (key ? UPSTREAM_KEYED : UPSTREAM_FREE) + "/" + rest;
 
     const ac = new AbortController();
     const timer = setTimeout(() => ac.abort(), OG_TIMEOUT_MS);
     try {
-      const h = { accept: "application/json" };
-      if (key) h["x-cg-demo-api-key"] = key;
       let up;
       try {
-        up = await fetch(target, { headers: h, signal: ac.signal });
+        ({ res: up } = await gtUpstream(rest, env, { signal: ac.signal }));
       } catch (e) {
         return null;
       }
@@ -704,18 +760,14 @@ async function fetchBaseTokenPoolsRaw(addr, env, network) {
 
   let result;
   try {
-    const key = (env && typeof env.CG_KEY === "string" && env.CG_KEY) || "";
-    const target = (key ? UPSTREAM_KEYED : UPSTREAM_FREE) +
-      "/networks/" + net + "/tokens/" + addr + "/pools";
+    const rest = "networks/" + net + "/tokens/" + addr + "/pools";
 
     const ac = new AbortController();
     const timer = setTimeout(() => ac.abort(), OG_TIMEOUT_MS);
     let up;
     try {
-      const h = { accept: "application/json" };
-      if (key) h["x-cg-demo-api-key"] = key;
       try {
-        up = await fetch(target, { headers: h, signal: ac.signal });
+        ({ res: up } = await gtUpstream(rest, env, { signal: ac.signal }));
       } catch (e) {
         result = { ok: false, why: ac.signal.aborted ? "cover:timeout" : "cover:0" };
       }
@@ -2278,6 +2330,41 @@ export async function tokenVerdict(addr, env, ctx, deadlineAt, opts) {
   return { chain: null, v: null, why: "internal" };
 }
 
+async function diagSrc(env) {
+  const t0 = Date.now();
+  const rest = "networks/base/tokens/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913";
+  const key = (env && typeof env.CG_KEY === "string" && env.CG_KEY) || "";
+  const probe = async (url, headers, withCode) => {
+    const ac = new AbortController();
+    const timer = setTimeout(() => ac.abort(), OG_TIMEOUT_MS * 2);
+    try {
+      const r = await fetch(url, { headers, signal: ac.signal });
+      const o = { s: r.status };
+      if (withCode) {
+        let code = null;
+        try {
+          const j = await r.json();
+          const c = j && j.status && j.status.error_code;
+          if (typeof c === "number" && Number.isFinite(c)) code = c;
+        } catch (e) { /* بدنه‌ی غیر JSON */ }
+        o.code = code;
+      }
+      return o;
+    } catch (e) {
+      return withCode ? { s: 0, code: null } : { s: 0 };
+    } finally {
+      clearTimeout(timer);
+    }
+  };
+  const [cg, gt, ds] = await Promise.all([
+    key ? probe(UPSTREAM_KEYED + "/" + rest, { accept: "application/json", "x-cg-demo-api-key": key }, true)
+        : Promise.resolve({ s: "nokey", code: null }),
+    probe(UPSTREAM_FREE + "/" + rest, { accept: "application/json" }, false),
+    probe("https://api.dexscreener.com/token-pairs/v1/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
+      { accept: "application/json" }, false),
+  ]);
+  return vdDone(200, { cg, gt, ds, down: cgKeyDownUntil > Date.now(), ms: Date.now() - t0 });
+}
 async function diagVerdict(request, url, env, ctx) {
   /* همیشه اولین خط، پیش از هر بررسیِ دیگری — همان قاعده‌ای که /gt و /ev
      دارند: یک اسکریپتِ کوبنده نباید حتی شکلِ درخواست را هم مجانی بسنجد. */
@@ -2291,6 +2378,11 @@ async function diagVerdict(request, url, env, ctx) {
   // می‌شد، نه با پاسخِ خودِ probe. همان سطلِ نرخِ «vd» بالا برایش هم سنجیده
   // شده، پس این مسیر نمی‌تواند سهمیه‌ای جدا از /vd/<mint> بخورد.
   if (url.pathname === "/vd/rpc") return diagVerdictRpc(env);
+
+  /* GET /vd/src — از دیدِ خودِ Worker: کدام منبعِ داده جواب می‌دهد. cgKeyDownUntil
+     را نه می‌خواند نه می‌نویسد (همیشه واقعاً کلیددار را امتحان می‌کند). بدنه
+     فقط برچسب و عدد است — هرگز URL، مسیر، کوئری یا کلید. */
+  if (url.pathname === "/vd/src") return diagSrc(env);
 
   /* GET /vd/v4/<address> — دقیقاً پیش از پارسِ آدرسِ خودِ /vd/<address> زیر،
      درست مثلِ /vd/rpc بالا؛ وگرنه «v4/<address>» خودش به‌عنوانِ یک آدرسِ
@@ -2468,12 +2560,7 @@ const SITEMAP_CACHE_PATH = "/tokens-base-solana-v2";
    آرایه‌ی data نداشته باشد یعنی «قابلِ استفاده نیست»، دقیقاً هم‌ردیفِ ۴۰۴/۵۰۰:
    کالر باید هر دو را یک‌جور شکست بداند. */
 async function fetchSitemapPoolsPage(page, env, network="base") {
-  const key = (env && typeof env.CG_KEY === "string" && env.CG_KEY) || "";
-  const target = (key ? UPSTREAM_KEYED : UPSTREAM_FREE) +
-    "/networks/"+network+"/pools?page=" + page;
-  const h = { accept: "application/json" };
-  if (key) h["x-cg-demo-api-key"] = key;
-  const up = await fetch(target, { headers: h });
+  const { res: up } = await gtUpstream("networks/"+network+"/pools?page=" + page, env);
   if (!up.ok) throw new Error("sitemap upstream status " + up.status);
   const body = await up.json();
   if (!body || !Array.isArray(body.data)) throw new Error("sitemap upstream: unusable body");
@@ -3121,11 +3208,7 @@ async function scheduledReportPassInner(env, ctx, opts, meter) {
   try {
     const fetchPools = async () => {
       try {
-        const key = (env && typeof env.CG_KEY === "string" && env.CG_KEY) || "";
-        const target = (key ? UPSTREAM_KEYED : UPSTREAM_FREE) + "/networks/base/new_pools";
-        const h = { accept: "application/json" };
-        if (key) h["x-cg-demo-api-key"] = key;
-        const up = await fetch(target, { headers: h });
+        const { res: up } = await gtUpstream("networks/base/new_pools", env);
         if (!up.ok) return [];
         const body = await up.json();
         if (!body || !Array.isArray(body.data)) return [];
@@ -3141,13 +3224,10 @@ async function scheduledReportPassInner(env, ctx, opts, meter) {
        عملاً همیشه خالی می‌ماند. هر صفحه try/catchِ خودش را دارد؛ شکستِ یکی
        فقط یعنی هرچه صفحه‌ی دیگر داد، نه شکستِ کلِ fetchPoolsSol. */
     const fetchPoolsSol = async () => {
-      const key = (env && typeof env.CG_KEY === "string" && env.CG_KEY) || "";
-      const h = { accept: "application/json" };
-      if (key) h["x-cg-demo-api-key"] = key;
-      const base = (key ? UPSTREAM_KEYED : UPSTREAM_FREE) + "/networks/solana/new_pools";
-      const fetchPage = async (target) => {
+      const base = "networks/solana/new_pools";
+      const fetchPage = async (rest) => {
         try {
-          const up = await fetch(target, { headers: h });
+          const { res: up } = await gtUpstream(rest, env);
           if (!up.ok) return [];
           const body = await up.json();
           if (!body || !Array.isArray(body.data)) return [];
@@ -3423,6 +3503,8 @@ export { OG_NETWORK, OG_TIMEOUT_MS, ogFetchMeta, ogFetchVerdict, ogFetchMetaMany
 export { baseVenueCovered, baseVenueCoveredDetail, ogFetchVerdictDetail };
 export { solNosellVeto };
 export { UPSTREAM_FREE, UPSTREAM_KEYED };
+// فقط برای تست: پرچمِ «کلید افتاده» در سطحِ ایزوله است و بینِ بخش‌ها نشت می‌کند
+export function _cgKeyDownUntil(set) { if (set !== undefined) cgKeyDownUntil = set; return cgKeyDownUntil; }
 export { VD_ADDR_RE };
 export { TOKEN_PAGE, solFetchVerdict };
 export { SITEMAP_TOKEN_PAGES, SITEMAP_TOKEN_CAP, sitemapResponse, buildSitemapTokens };

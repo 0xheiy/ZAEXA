@@ -1412,6 +1412,51 @@ Solana</button>
     base: '/gt/networks/base/tokens/multi/',
     solana: '/gt/networks/solana/tokens/multi/',
   };
+  /* ۱۳ اکتبر: کلیدِ Worker به سقفِ ماهانه خورد و /gt هر چیزی را ۴۲۹ می‌داد؛
+     GeckoTerminal بی‌کلید و مستقیم از مرورگر ۲۰۰ و CORS-خوانا بود. پس اول
+     مستقیم (سهمِ IPِ خودِ کاربر) و /gt پشتیبان — همان ترتیب و همان پرچمِ
+     sessionStorage (zaexa.gtroute.v1، ۱۰ دقیقه) که web/index.html دارد.
+     مستقیم پرتاب کند (۴۲۹ِ مستقیم هدر CORS ندارد و دقیقاً همین‌شکل است) یا
+     ۴۲۹/۵xx بدهد → پرچم و یک بارِ همان آدرس از /gt. پرچم تازه: اول /gt و
+     اگر ۴۲۹/۵xx/پرتاب داد، مستقیم و پاک‌کردنِ پرچم. ۴۰۴ِ مستقیم پشتیبان ندارد. */
+  var GT_DIRECT = 'https://api.geckoterminal.com/api/v2/';
+  var GT_ROUTE_KEY = 'zaexa.gtroute.v1', GT_ROUTE_MS = 600000;
+  function gtRouteProxyFirst(){
+    try {
+      var j = JSON.parse(sessionStorage.getItem(GT_ROUTE_KEY) || 'null');
+      var age = j ? Date.now() - j.t : -1;
+      return !!(j && j.r === 'proxy' && typeof j.t === 'number' && age >= 0 && age < GT_ROUTE_MS);
+    } catch (e) { return false; }
+  }
+  function gtRouteSet(){ try { sessionStorage.setItem(GT_ROUTE_KEY, JSON.stringify({ r: 'proxy', t: Date.now() })); } catch (e) {} }
+  function gtRouteClear(){ try { sessionStorage.removeItem(GT_ROUTE_KEY); } catch (e) {} }
+  function gtTimed(url){
+    return new Promise(function(resolve, reject){
+      var t = setTimeout(function(){ reject(new Error('timeout')); }, 9000);
+      fetch(url, { headers: { accept: 'application/json' } }).then(
+        function(r){ clearTimeout(t); resolve(r); },
+        function(e){ clearTimeout(t); reject(e); });
+    });
+  }
+  function gtBad(r){ return r.status === 429 || r.status >= 500; }
+  // proxyUrl = آدرسِ نسبیِ /gt (همان LOGO_ENDPOINTS + آدرس‌ها)؛ مستقیم = همان مسیر روی GT_DIRECT
+  function gtFetchRoute(proxyUrl){
+    var direct = function(){ return gtTimed(GT_DIRECT + proxyUrl.replace(/^\/gt\//, '')); };
+    var proxy = function(){ return gtTimed(proxyUrl); };
+    if (gtRouteProxyFirst()) {
+      return proxy().then(function(r){ return { r: r }; }, function(e){ return { e: e }; }).then(function(pr){
+        if (pr.r && !gtBad(pr.r)) return pr.r;
+        gtRouteClear();
+        return direct().catch(function(e){ if (pr.r) return pr.r; throw pr.e || e; });
+      });
+    }
+    return direct().then(function(r){ return { r: r }; }, function(e){ return { e: e }; }).then(function(dr){
+      if (dr.r && !gtBad(dr.r)) return dr.r;
+      gtRouteSet();
+      return proxy().catch(function(e){ if (dr.r) return dr.r; throw dr.e || e; });
+    });
+  }
+
   /* ۲۵، نه ۳۰: پراکسیِ خودمان (PATH_OK در worker/index.js) هر بخشِ مسیر را به ۱۲۰۰ نویسه
      محدود می‌کند و ۳۰ آدرس با ویرگول ۱۲۸۹ نویسه است — زنده سنجیده شد: ۳۰ آدرس → ۴۰۰،
      ۲۵ آدرس → ۲۰۰. سقفِ واقعی ۲۷ است؛ ۲۵ حاشیه می‌گذارد. */
@@ -1496,7 +1541,7 @@ Solana</button>
     if (!keys.length) return;
     keys.forEach(function(k){ logoInFlight.add(k); });
     var endpoint = LOGO_ENDPOINTS[chain] || LOGO_ENDPOINTS.base;
-    fetch(endpoint + keys.join(',')).then(function(res){
+    gtFetchRoute(endpoint + keys.join(',')).then(function(res){
       if (!res.ok) throw new Error('bad status ' + res.status);
       return res.json();
     }).then(function(json){

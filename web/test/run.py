@@ -1,6 +1,32 @@
 import asyncio, base64, glob, os, re, struct, sys, zlib
 from urllib.parse import urlparse
-from playwright.async_api import async_playwright
+from playwright.async_api import async_playwright, Browser
+
+# ۱۳ اکتبر: سایت اول مستقیم از GeckoTerminal می‌پرسد و /gt پشتیبان است؛ پرچمِ
+# sessionStorage به نام zaexa.gtroute.v1 ترتیب را برمی‌گرداند. کاوشگرهای قدیمی همه
+# مسیرِ /gt را استاب کرده‌اند و همان را می‌سنجند، پس هر contextی که اینجا ساخته
+# می‌شود (new_page هم از new_context می‌گذرد) با پرچمِ «اول پراکسی» شروع می‌کند و
+# سنجششان بدونِ تغییر می‌ماند. فقط کاوشگرهای [gt direct first] و [pairs logo route]
+# با GT_ROUTE_DEFAULT["on"]=False بدونِ پرچم می‌سازند و ترتیبِ تازه را می‌سنجند.
+GT_ROUTE_DEFAULT = {"on": True}
+GT_ROUTE_PROXY_FIRST_JS = ("try{sessionStorage.setItem('zaexa.gtroute.v1',"
+                           "JSON.stringify({r:'proxy',t:Date.now()}))}catch(e){}")
+_orig_new_context = Browser.new_context
+async def _new_context_with_gt_flag(self, *a, **k):
+    ctx = await _orig_new_context(self, *a, **k)
+    if GT_ROUTE_DEFAULT["on"]:
+        await ctx.add_init_script(GT_ROUTE_PROXY_FIRST_JS)
+    return ctx
+Browser.new_context = _new_context_with_gt_flag
+# ⚠️ new_page در لایه‌ی wrapper از new_context‌ی wrapper نمی‌گذرد (مستقیم می‌رود سراغ impl)،
+# پس جداگانه قلاب می‌شود؛ init script روی ناوبری‌های بعدی اعمال می‌شود (همه‌جا پیش از goto).
+_orig_new_page = Browser.new_page
+async def _new_page_with_gt_flag(self, *a, **k):
+    pg = await _orig_new_page(self, *a, **k)
+    if GT_ROUTE_DEFAULT["on"]:
+        await pg.context.add_init_script(GT_ROUTE_PROXY_FIRST_JS)
+    return pg
+Browser.new_page = _new_page_with_gt_flag
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 
@@ -6269,6 +6295,215 @@ async def check_report_chain(p, errors):
     assert not errs, "[report chain] console/page errors: %s" % errs
 
 
+async def check_gt_direct_first(p, errors):
+    """[gt direct first] [pairs logo route] — ترتیبِ تازه: اول مستقیم از GeckoTerminal، /gt پشتیبان.
+
+    صفحه‌ها از یک سرورِ هم‌مبدأ می‌آیند (پس gtProxy روشن است) و هیچ شبکه‌ی واقعی‌ای در کار نیست:
+    api.geckoterminal.com با page.route جواب می‌دهد یا abort می‌شود (دقیقاً شکلِ ۴۲۹ِ مستقیم بدونِ CORS)."""
+    import functools, http.server, json as _j, threading, time as _t
+
+    class Quiet(http.server.SimpleHTTPRequestHandler):
+        def log_message(self, *a):
+            pass
+
+        def translate_path(self, path):
+            clean = path.split("?")[0]
+            # ⚠️ index.html واقعی، نه harness.html: stub-ethers.js خودِ api.geckoterminal.com را
+            # داخل صفحه جعل می‌کند و page.route هرگز آن درخواست را نمی‌بیند.
+            if clean in ("/app", "/app/"):
+                return os.path.join(HERE, "..", "index.html")
+            if clean == "/pairs":
+                return os.path.join(HERE, "..", "pairs.html")
+            return super().translate_path(path)
+
+    srv = http.server.ThreadingHTTPServer(("127.0.0.1", 0), functools.partial(Quiet, directory=os.path.join(HERE, "..")))
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    origin = "http://127.0.0.1:%d" % srv.server_address[1]
+    GTD = "https://api.geckoterminal.com/"
+    CORS = {"access-control-allow-origin": "*"}
+    FLAG = "zaexa.gtroute.v1"
+    GT_ROUTE_DEFAULT["on"] = False
+    b = await p.chromium.launch()
+    try:
+        # ---------------- index.html: gtJson ----------------
+        calls = []          # (via, url) به ترتیب، فقط برای آدرس‌های یکتای این کاوشگر
+        mode = {"direct": "ok", "proxy": "ok"}
+
+        def body_for(u):
+            return _j.dumps({"data": {"attributes": {"name": "probe", "u": u.split("/tokens/")[-1]}}})
+
+        async def stub(route):
+            u = route.request.url
+            if u.startswith(origin):
+                if "/gt/" in u:
+                    if "gtprobe" in u:
+                        calls.append(("proxy", u))
+                        m = mode["proxy"]
+                        if m == "429":
+                            return await route.fulfill(status=429, headers=dict(CORS, **{"x-zaexa-proxy": "upstream-429"}), body="{}")
+                        return await route.fulfill(status=200, content_type="application/json",
+                                                   headers={"x-zaexa-proxy": "miss-free"}, body=body_for(u))
+                    return await route.fulfill(status=200, content_type="application/json", body='{"data":[]}')
+                if u.endswith("/ev"):
+                    return await route.fulfill(status=204, body="")
+                if "/vd/" in u or "/sol/" in u:
+                    return await route.fulfill(status=200, content_type="application/json", body="{}")
+                return await route.continue_()
+            if u.startswith(GTD):
+                if "gtprobe" in u:
+                    calls.append(("direct", u))
+                    m = mode["direct"]
+                    if m == "abort":
+                        return await route.abort()
+                    if m == "404":
+                        return await route.fulfill(status=404, headers=CORS, body="{}")
+                    return await route.fulfill(status=200, content_type="application/json", headers=CORS, body=body_for(u))
+                return await route.fulfill(status=200, content_type="application/json", headers=CORS, body='{"data":[]}')
+            return await route.abort()
+
+        async def open_index():
+            pg = await b.new_page()
+            pg.on("pageerror", lambda e: errors.append("PAGEERROR %s" % e))
+            await pg.route("**/*", stub)
+            await pg.goto(origin + "/app#swap")
+            await pg.wait_for_timeout(1500)
+            assert await pg.evaluate("() => !!gtProxy"), "[gt direct first] the probe page must have the /gt proxy on (http origin)"
+            return pg
+
+        pg = await open_index()
+
+        async def fresh():
+            calls.clear()
+            await pg.evaluate("() => { gtCache.clear(); gtInflight.clear(); gtFails = 0; gtCoolUntil = 0; gtProxy = location.origin + '/gt'; sessionStorage.removeItem('zaexa.gtroute.v1'); }")
+
+        async def run(tag):
+            return await pg.evaluate("""async (a) => {
+                try { const j = await gtJson(GT + '/networks/base/tokens/' + a); return {ok: true, j}; }
+                catch (e) { return {ok: false, perm: !!e.gtPermanent, rl: !!e.gtRateLimited}; }
+            }""", tag)
+
+        async def flag():
+            return await pg.evaluate("(k) => sessionStorage.getItem(k)", FLAG)
+
+        # (1) مستقیم جواب می‌دهد -> صفر درخواست به /gt و هیچ پرچمی
+        await fresh(); mode.update(direct="ok", proxy="ok")
+        r1 = await run("gtprobe1")
+        assert r1["ok"], "[gt direct first] (1) the direct answer was not used: %s" % r1
+        assert [c[0] for c in calls] == ["direct"] and calls[0][1] == GTD + "api/v2/networks/base/tokens/gtprobe1", \
+            "[gt direct first] (1) expected exactly one direct request and no /gt, got %s" % calls
+        assert await flag() is None, "[gt direct first] (1) a healthy direct answer must not set the route flag"
+
+        # (2) مستقیم abort (شکلِ ۴۲۹ بدونِ CORS) -> دقیقاً یک تلاشِ /gt برای همان URL و پرچم
+        await fresh(); mode.update(direct="abort", proxy="ok")
+        r2 = await run("gtprobe2")
+        assert r2["ok"], "[gt direct first] (2) the /gt retry did not rescue the request: %s" % r2
+        assert [c[0] for c in calls] == ["direct", "proxy"] and calls[1][1] == origin + "/gt/networks/base/tokens/gtprobe2", \
+            "[gt direct first] (2) expected one aborted direct then exactly one /gt retry of the same URL, got %s" % calls
+        fl = _j.loads(await flag() or "null")
+        assert fl and fl.get("r") == "proxy" and abs(fl.get("t", 0) - _t.time() * 1000) < 60000, \
+            "[gt direct first] (2) the route flag was not stored: %s" % fl
+
+        # (3) پرچمِ تازه -> /gt اول؛ مستقیم اصلاً پرسیده نمی‌شود
+        calls.clear(); mode.update(direct="abort", proxy="ok")
+        await pg.evaluate("() => { gtCache.clear(); gtInflight.clear(); }")
+        r3 = await run("gtprobe3")
+        assert r3["ok"] and [c[0] for c in calls] == ["proxy"], \
+            "[gt direct first] (3) with a fresh flag /gt must go first and alone, got %s" % calls
+        assert await flag() is not None, "[gt direct first] (3) the flag must survive a healthy proxy answer"
+
+        # (3b) پرچمِ تازه ولی /gt ۴۲۹ می‌دهد -> مستقیم، و پرچم پاک می‌شود
+        calls.clear(); mode.update(direct="ok", proxy="429")
+        await pg.evaluate("() => { gtCache.clear(); gtInflight.clear(); }")
+        r3b = await run("gtprobe3b")
+        assert r3b["ok"] and [c[0] for c in calls] == ["proxy", "direct"], \
+            "[gt direct first] (3b) a /gt 429 under the flag must fall back to direct, got %s" % calls
+        assert await flag() is None, "[gt direct first] (3b) the flag must be cleared after the proxy failed"
+
+        # (3c) پرچمِ منقضی (۱۱ دقیقه پیش) -> دوباره مستقیم اول
+        await fresh(); mode.update(direct="ok", proxy="ok")
+        await pg.evaluate("(k) => sessionStorage.setItem(k, JSON.stringify({r:'proxy', t: Date.now() - 11*60*1000}))", FLAG)
+        r3c = await run("gtprobe3c")
+        assert r3c["ok"] and [c[0] for c in calls] == ["direct"], \
+            "[gt direct first] (3c) an 11-minute-old flag must be ignored, got %s" % calls
+
+        # (3d) sessionStorage پرتاب‌کننده -> صفحه نمی‌شکند و مستقیم می‌رود
+        await fresh(); mode.update(direct="ok", proxy="ok")
+        await pg.evaluate("() => { Object.defineProperty(window, 'sessionStorage', {configurable: true, get() { throw new Error('blocked'); }}); }")
+        r3d = await run("gtprobe3d")
+        assert r3d["ok"] and [c[0] for c in calls] == ["direct"], \
+            "[gt direct first] (3d) a throwing sessionStorage must not break the request, got %s" % calls
+        await pg.close()
+
+        # (4) ۴۰۴ِ مستقیم = «پیدا نشد»ِ واقعی -> هیچ درخواستی به /gt، خطای دائمی، پرچم نه
+        pg = await open_index()
+        await fresh(); mode.update(direct="404", proxy="ok")
+        r4 = await run("gtprobe4")
+        assert (not r4["ok"]) and r4["perm"] and [c[0] for c in calls] == ["direct"], \
+            "[gt direct first] (4) a direct 404 must be permanent with no /gt request, got %s %s" % (r4, calls)
+        assert await flag() is None, "[gt direct first] (4) a direct 404 must not set the route flag"
+        assert await pg.evaluate("() => !!gtProxy"), "[gt direct first] (4) a direct 404 must not switch the proxy off"
+        await pg.close()
+        print("[gt direct first] direct answers -> zero /gt requests and no flag; direct aborted -> exactly one /gt retry of the same URL and zaexa.gtroute.v1 stored; fresh flag -> /gt first and alone; /gt 429 under the flag -> direct and flag cleared; 11-minute-old flag ignored; throwing sessionStorage harmless; direct 404 -> permanent, no /gt request, no flag")
+
+        # ---------------- pairs.html: لوگوها ----------------
+        ROW = {"chain": "base", "address": "0x" + "a" * 40, "symbol": "AAA", "name": "Alpha", "v": "sell", "checkKind": "sell-quote",
+               "checkedAt": "2020-01-01T00:00:00.000Z", "poolCreatedAt": "2020-01-01T00:00:00.000Z",
+               "priceUsd": 1.0, "reserveUsd": 28800, "vol24hUsd": 1, "fdvUsd": 1, "dex": "uniswap_v3"}
+        LOGO = "https://assets.example.invalid/logo.png"
+        logo_body = _j.dumps({"data": [{"attributes": {"address": ROW["address"], "image_url": LOGO}}]})
+        PNG = base64.b64decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==")
+
+        async def pairs_scenario(direct_mode):
+            seq = []
+            pg2 = await b.new_page(viewport={"width": 1240, "height": 900})
+            perrs = []
+            pg2.on("pageerror", lambda e: perrs.append(str(e)))
+
+            async def route(r):
+                u = r.request.url
+                if u.startswith(origin):
+                    if "pairs.json" in u:
+                        return await r.fulfill(status=200, content_type="application/json",
+                                               body=_j.dumps({"chain": "base", "rows": [ROW], "store": True}))
+                    if "/gt/networks/base/tokens/multi/" in u:
+                        seq.append("proxy")
+                        return await r.fulfill(status=200, content_type="application/json", body=logo_body)
+                    if "/gt/" in u:
+                        return await r.fulfill(status=200, content_type="application/json", body='{"data":[]}')
+                    return await r.continue_()
+                if u.startswith(GTD + "api/v2/networks/base/tokens/multi/"):
+                    seq.append("direct")
+                    if direct_mode == "abort":
+                        return await r.abort()
+                    return await r.fulfill(status=200, content_type="application/json", headers=CORS, body=logo_body)
+                if u.startswith(GTD):
+                    return await r.fulfill(status=200, content_type="application/json", headers=CORS, body='{"data":[]}')
+                if u == LOGO:
+                    return await r.fulfill(status=200, content_type="image/png", body=PNG)
+                return await r.abort()
+            await pg2.route("**/*", route)
+            await pg2.goto(origin + "/pairs")
+            await pg2.wait_for_timeout(1500)
+            n_img = await pg2.evaluate("() => document.querySelectorAll('.tok-logo img').length")
+            fl2 = await pg2.evaluate("(k) => { try { return sessionStorage.getItem(k); } catch (e) { return 'ERR'; } }", FLAG)
+            await pg2.close()
+            assert not perrs, "[pairs logo route] web/pairs.html threw: %s" % perrs
+            return seq, n_img, fl2
+
+        s1, i1, f1 = await pairs_scenario("ok")
+        assert s1 == ["direct"] and i1 >= 1 and f1 is None, \
+            "[pairs logo route] (1) direct answers -> one direct request, zero /gt, logo painted, no flag; got %s imgs=%s flag=%s" % (s1, i1, f1)
+        s2, i2, f2 = await pairs_scenario("abort")
+        fl2 = _j.loads(f2 or "null")
+        assert s2 == ["direct", "proxy"] and i2 >= 1 and fl2 and fl2.get("r") == "proxy", \
+            "[pairs logo route] (2) direct aborted -> exactly one /gt retry, logo painted, flag stored; got %s imgs=%s flag=%s" % (s2, i2, f2)
+        print("[pairs logo route] direct answers -> one direct multi request, zero /gt, logo painted, no flag; direct aborted -> exactly one /gt retry of the same chunk, logo painted from /gt, zaexa.gtroute.v1 stored")
+    finally:
+        GT_ROUTE_DEFAULT["on"] = True
+        srv.shutdown()
+        await b.close()
+
+
 async def main():
     errors = []
     # خطاهایی که یک کاوشگر *عمداً* تولید می‌کند. اجازه‌ی عبور می‌گیرند ولی
@@ -6328,6 +6563,7 @@ async def main():
         await check_stocks_sol(p, errors)
         await check_wallet_watch(p, errors)
         await check_report_chain(p, errors)
+        await check_gt_direct_first(p, errors)
         b = await p.chromium.launch()
         pg = await b.new_page(viewport={"width": 1240, "height": 1000}, color_scheme="dark")
         pg.on("console", on_console)
@@ -9003,6 +9239,9 @@ async def main():
             });
 
             // ۱) با پراکسی: آدرس بازنویسی می‌شود، کلید کش همان می‌ماند
+            // ۱۳ اکتبر: ترتیبِ پیش‌فرض مستقیم‌اول شد؛ این کاوشگر «وقتی مسیرِ
+            // /gt انتخاب شده» را می‌سنجد، پس پرچمِ اول‌پراکسی را صریح می‌گذارد.
+            sessionStorage.setItem(GT_ROUTE_KEY, JSON.stringify({r: "proxy", t: Date.now()}));
             gtProxy = "https://zaexa.com/gt";
             gtCache.clear(); gtInflight.clear(); gtFails = 0; gtCoolUntil = 0;
             window.fetch = async (u) => { seen.push(String(u)); return reply(200, true); };
@@ -9042,6 +9281,7 @@ async def main():
             out.afterGiveUp = seen[0];
 
             window.fetch = realFetch;
+            sessionStorage.removeItem(GT_ROUTE_KEY);
             gtProxy = null; gtCache.clear(); gtInflight.clear();
             gtFails = 0; gtCoolUntil = 0;
             return out;

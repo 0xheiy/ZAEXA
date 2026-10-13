@@ -93,6 +93,32 @@ export function pickTokenMeta(body) {
   };
 }
 
+/* پاسخ DexScreener (token-pairs/v1/<chain>/<addr>: آرایه‌ی جفت‌ها) → متای
+   کارت، فقط هویت. اعدادِ نقدینگی و حجمِ DexScreener با عددِ صفحه
+   (total_reserve_in_usd در GeckoTerminal) نمی‌خواند (۹۹۶k در برابر ۷۲۲k
+   اندازه‌گیری شد)، پس هرگز به‌جای آن عدد نشان داده نمی‌شود: liquidity/vol24/
+   decimals/priceUsd/imageUrl همه null. با priceUsd و decimals برابرِ null حکمِ
+   Base صادقانه «نامعلوم» می‌شود؛ حکمِ سولانا هیچ‌کدام را لازم ندارد.
+   فقط جفت‌هایی که chainId و baseToken.address می‌خوانند (Base بدونِ حساسیتِ
+   حروف، سولانا دقیقاً)؛ از بین‌شان بیشترین liquidity.usd. */
+export function pickDsMeta(pairs, addr, chain) {
+  if (!Array.isArray(pairs) || typeof addr !== "string" || (chain !== "base" && chain !== "solana")) return null;
+  const same = (a) => typeof a === "string" &&
+    (chain === "base" ? a.toLowerCase() === addr.toLowerCase() : a === addr);
+  let best = null, bestLiq = -1;
+  for (const p of pairs) {
+    if (!p || p.chainId !== chain || !p.baseToken || !same(p.baseToken.address)) continue;
+    const l = p.liquidity && typeof p.liquidity.usd === "number" && Number.isFinite(p.liquidity.usd)
+      ? p.liquidity.usd : 0;
+    if (l > bestLiq) { best = p; bestLiq = l; }
+  }
+  if (!best) return null;
+  const name = ogClean(best.baseToken.name, 48);
+  const symbol = ogClean(best.baseToken.symbol, 16);
+  if (!name && !symbol) return null;
+  return { name, symbol, liquidity: null, vol24: null, decimals: null, priceUsd: null, imageUrl: null, src: "ds" };
+}
+
 const PITCH =
   "Check whether you can sell it back before you buy — exit simulation and " +
   "risk flags, no wallet needed.";

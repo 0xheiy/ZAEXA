@@ -3819,10 +3819,35 @@ const GT="https://api.geckoterminal.com/api/v2";
 
    حالا Worker کلید دارد (`CG_KEY` به‌شکل secret در پنل کلادفلر) و از
    CoinGecko زیر /onchain می‌خواند، پس سقف روی *کلید ما*ست نه روی IP.
-   ⚠️ اگر روزی کلید برداشته شود، این پرچم هم باید خاموش شود. */
+   ⚠️ اگر روزی کلید برداشته شود، این پرچم هم باید خاموش شود.
+
+   ۱۳ اکتبر: کلید Demo به سقف ماهانه (۱۰٬۰۰۰ تماس) خورد و هر تماس
+   کلیددارِ Worker ۴۲۹ داد. اندازه‌گیری از مرورگرِ مالک، همان لحظه:
+   GeckoTerminal بی‌کلید و مستقیم ۲۰۰ می‌داد و CORS-خوانا بود. پس ترتیب
+   برعکس شد: اول مستقیم (هر کاربر سهمِ IP خودش را دارد)، و پراکسی /gt
+   پشتیبان است. اگر مستقیم پرتاب کرد (۴۲۹ِ مستقیم هدر CORS ندارد و
+   دقیقاً همین‌شکل می‌شود)، یا ۴۲۹/۵xx داد، ده دقیقه «اول پراکسی» را در
+   sessionStorage (`zaexa.gtroute.v1`) یادداشت می‌کنیم و همان لحظه همان
+   URL را یک بار از پراکسی می‌پرسیم؛ تا وقتی پرچم تازه است اول پراکسی و
+   اگر آن ۴۲۹/۵xx/پرتاب داد، مستقیم (و پرچم پاک می‌شود). ۴۰۴ِ مستقیم یک
+   «پیدا نشد»ِ واقعی است و هرگز پشتیبان نمی‌گیرد.
+   ⚠️ Worker هم خودش کلید را رها می‌کند و بی‌کلید می‌زند، ولی IPِ مشترکِ
+   کلادفلر آن را فقط بهترین‌تلاش می‌کند — پراکسی منبعِ اصلی نیست. */
 const GT_PROXY_ENABLED=true;
 let gtProxy=(GT_PROXY_ENABLED&&/^https?:$/.test(location.protocol))?location.origin+"/gt":null;
 function gtWire(u){return gtProxy&&u.startsWith(GT)?gtProxy+u.slice(GT.length):u;}
+/* پرچم «اول پراکسی» — فقط تا ۱۰ دقیقه و فقط در همین تب؛ هر دسترسی به
+   storage ممکن است پرتاب کند (حالت خصوصی/مسدود) و صفحه نباید بشکند. */
+const GT_ROUTE_KEY="zaexa.gtroute.v1",GT_ROUTE_MS=600000;
+function gtRouteProxyFirst(){
+  try{
+    const j=JSON.parse(sessionStorage.getItem(GT_ROUTE_KEY)||"null");
+    const age=j?Date.now()-j.t:-1;
+    return !!(j&&j.r==="proxy"&&typeof j.t==="number"&&age>=0&&age<GT_ROUTE_MS);
+  }catch{return false;}
+}
+function gtRouteSet(){try{sessionStorage.setItem(GT_ROUTE_KEY,JSON.stringify({r:"proxy",t:Date.now()}));}catch{}}
+function gtRouteClear(){try{sessionStorage.removeItem(GT_ROUTE_KEY);}catch{}}
 
 /* ---------------------------------------------------------------------
    شمارش رویداد — /ev روی همان Worker
@@ -4064,6 +4089,29 @@ function gtBackoffError(msg){
   const e=new Error(msg);e.gtBackoff=true;return e;
 }
 function rateLimited(e){return !!(e&&e.gtBackoff);}
+/* یک «تلاش» روی سیم، با ترتیبِ مسیر (توضیحِ بالای GT_PROXY_ENABLED).
+   → {r:Response, via:"direct"|"proxy"}؛ فقط وقتی هر دو مسیر پرتاب کنند پرتاب می‌کند. */
+async function gtFetch(url){
+  const init={headers:{accept:"application/json"}};
+  const direct=()=>withTimeout(fetch(url,init),9000);
+  const proxy=()=>withTimeout(fetch(gtWire(url),init),9000);
+  const bad=r=>r.status===429||r.status>=500;
+  if(!gtProxy)return {r:await direct(),via:"direct"};
+  if(gtRouteProxyFirst()){
+    let pr=null,perr=null;
+    try{pr=await proxy();}catch(e){perr=e;}
+    if(pr&&!bad(pr))return {r:pr,via:"proxy"};
+    gtRouteClear();
+    try{return {r:await direct(),via:"direct"};}
+    catch(e){if(pr)return {r:pr,via:"proxy"};throw perr||e;}
+  }
+  let dr=null,derr=null;
+  try{dr=await direct();}catch(e){derr=e;}
+  if(dr&&!bad(dr))return {r:dr,via:"direct"};
+  gtRouteSet();
+  try{return {r:await proxy(),via:"proxy"};}
+  catch(e){if(dr)return {r:dr,via:"direct"};throw derr||e;}
+}
 function gtJson(url){
   const hit=gtCache.get(url);
   if(hit&&Date.now()-hit.t<gtTtl(url))return Promise.resolve(hit.v);
@@ -4077,13 +4125,13 @@ function gtJson(url){
       if(wait)await new Promise(r=>setTimeout(r,wait));
       gtLast=Date.now();
       try{
-        let r=await withTimeout(fetch(gtWire(url),{headers:{accept:"application/json"}}),9000);
+        let {r,via}=await gtFetch(url);
         /* ۴۰۴ *بدون* نشان پراکسی یعنی مسیر /gt روی این استقرار وجود ندارد
            (پاسخِ خود GeckoTerminal همیشه با نشان می‌آید، چون از پراکسی رد
            شده). همان‌جا یک بار مستقیم می‌پرسیم و از این به بعد سراغ پراکسی
            نمی‌رویم — تا یک استقرار ناقص، نمودار و لوگو را روی سایت زنده
-           نکشد. */
-        if(r.status===404&&gtProxy&&!r.headers.get("x-zaexa-proxy")){
+           نکشد. (فقط برای پاسخِ پراکسی؛ ۴۰۴ِ مستقیم «پیدا نشد»ِ واقعی است.) */
+        if(via==="proxy"&&r.status===404&&gtProxy&&!r.headers.get("x-zaexa-proxy")){
           gtProxy=null;
           r=await withTimeout(fetch(url,{headers:{accept:"application/json"}}),9000);
         }
