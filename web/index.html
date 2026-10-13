@@ -91,6 +91,30 @@ if(/^\/t\/[^/]+\/?$/.test(location.pathname)){
 })();
 </script>
 <script>
+/* ۱۳ اکتبر — جلوگیری از فلاشِ Base روی بوتِ سولانا: HTML همه‌چیز را با محتوای Base می‌کشد و
+   فقط جاوااسکریپتِ پایین به سولانا می‌چرخاند. همان قاعده‌ی initialChain (پارامتر chain در هش،
+   وگرنه انتخابِ ذخیره‌شده، وگرنه Base) را اینجا تکرار می‌کنیم و اگر سولانا بود یک attribute
+   می‌گذاریم؛ CSS با آن نواحیِ Base را visibility:hidden می‌کند (چیدمان می‌ماند). main بعد از
+   اولین چیدنِ سولانا برش می‌دارد؛ تایمرِ ۳ ثانیه‌ای هم هرگز اجازه نمی‌دهد همیشه پنهان بماند.
+   بوتِ Base هرگز attribute نمی‌گیرد. */
+(function(){
+  try{
+    if(/^\/t\/[^/]+\/?$/.test(location.pathname))return;
+    var r=location.hash.slice(1);
+    try{r=decodeURIComponent(r);}catch(e){}
+    var i=r.indexOf("?"),c=null;
+    try{c=new URLSearchParams(i<0?"":r.slice(i+1)).get("chain");}catch(e){}
+    if(c!=="solana"&&c!=="base"){
+      c=null;
+      try{var v=localStorage.getItem("zaexa.chain.v1");c=(v==="solana"||v==="base")?v:null;}catch(e){}
+    }
+    if(c!=="solana")return;
+    document.documentElement.dataset.bootchain="solana";
+    setTimeout(function(){document.documentElement.removeAttribute("data-bootchain");},3000);
+  }catch(e){}
+})();
+</script>
+<script>
 /* =====================================================================
    گیرنده‌ی خطای سراسری
    =====================================================================
@@ -608,6 +632,12 @@ html[data-boot-view] #view-swap.view.on{display:none}
 html[data-boot-view="folio"] #view-folio,html[data-boot-view="flow"] #view-flow,
 html[data-boot-view="token"] #view-token,html[data-boot-view="faq"] #view-faq,html[data-boot-view="stocks"] #view-stocks{display:flex;flex-direction:column;gap:18px}
 html[data-boot-view] .nav button[data-view="swap"].on{background:none;color:var(--tx2);font-weight:inherit;box-shadow:none}
+/* ۱۳ اکتبر: بوتِ سولانا — تا main سولانا را نچیده، نواحیِ Base پنهان می‌مانند (چیدمان نمی‌پرد؛ هرگز display:none).
+   attribute را اسکریپتِ سرِ صفحه می‌گذارد و main برمی‌دارد. */
+html[data-bootchain="solana"] #baseHeroRow,html[data-bootchain="solana"] #baseSubRow,
+html[data-bootchain="solana"] #liveStrip,html[data-bootchain="solana"] #srcChip,
+html[data-bootchain="solana"] #view-flow,html[data-bootchain="solana"] #view-stocks,
+html[data-bootchain="solana"] #view-folio{visibility:hidden}
 /* ۶ اکتبر: Portfolio دیگر تب ندارد؛ نمای flow حالا تبِ Markets را روشن می‌کند. */
 html[data-boot-view="flow"] .nav #navMarkets{
   background:var(--card);color:var(--tx);font-weight:620;box-shadow:var(--shs)}
@@ -4070,6 +4100,65 @@ function gtTtl(u){
   if(/\/ohlcv\//.test(u))return 45000;
   return 60000;
 }
+/* ۱۳ اکتبر — لایه‌ی ماندگارِ کشِ GT در localStorage (zaexa.gtcache.v1).
+   هدف: رفرش‌های پیاپی در بازه‌ی TTL هیچ درخواستی نفرستند تا IP کاربر زیرِ سقفِ ۳۰ در دقیقه‌ی
+   GeckoTerminal بماند. قاعده‌ی مرداد همچنان برقرار است: ورودی هرگز از عمرِ gtTtl(url) — همان
+   TTLِ کشِ حافظه — کهنه‌تر خوانده نمی‌شود (قیمتِ کهنه بدتر از نبودنِ قیمت است). ورودی با زمانِ
+   اصلیِ خودش به حافظه برمی‌گردد، نه با زمانِ خواندن. هر پاسخِ بزرگ‌تر از ۱۵۰KB ذخیره نمی‌شود؛
+   سقفِ کل ۱.۵MB و قدیمی‌ترها اول می‌روند؛ هر دسترسی try/catch؛ انبارِ خراب نادیده و بازنشانی. */
+const LS_GTC="zaexa.gtcache.v1",GTC_ENTRY_MAX=150*1024,GTC_TOTAL_MAX=1536*1024;
+let gtcMem=null;     // {url:{t,v}}؛ gtcSize: طولِ سریال‌شده‌ی هر ورودی
+const gtcSize=new Map();
+const gtcLen=(u,e)=>u.length+JSON.stringify(e).length+4;
+function gtcLoad(){
+  if(gtcMem)return gtcMem;
+  gtcMem={};
+  try{
+    const raw=localStorage.getItem(LS_GTC);
+    if(raw==null)return gtcMem;
+    const o=JSON.parse(raw);
+    if(!o||typeof o!=="object"||Array.isArray(o))throw 0;
+    const now=Date.now();
+    for(const [u,e] of Object.entries(o)){
+      if(!e||typeof e!=="object"||typeof e.t!=="number"||!("v" in e))continue;
+      const age=now-e.t;
+      if(age<0||age>=gtTtl(u))continue;          // منقضی یا از آینده: دور بریز
+      gtcMem[u]={t:e.t,v:e.v};gtcSize.set(u,gtcLen(u,gtcMem[u]));
+    }
+  }catch{
+    gtcMem={};gtcSize.clear();
+    try{localStorage.removeItem(LS_GTC);}catch{}   // خراب بود: بازنشانی
+  }
+  return gtcMem;
+}
+function gtcGet(url){
+  try{
+    const e=gtcLoad()[url];
+    if(!e)return undefined;
+    const age=Date.now()-e.t;
+    if(age<0||age>=gtTtl(url)){delete gtcMem[url];gtcSize.delete(url);return undefined;}
+    return e;
+  }catch{return undefined;}
+}
+function gtcPut(url,entry){
+  try{
+    const mem=gtcLoad();
+    const e={t:entry.t,v:entry.v},len=gtcLen(url,e);
+    if(len>GTC_ENTRY_MAX)return;
+    mem[url]=e;gtcSize.set(url,len);
+    const now=Date.now();
+    for(const k of Object.keys(mem)){const a=now-mem[k].t;if(a<0||a>=gtTtl(k)){delete mem[k];gtcSize.delete(k);}}   // منقضی‌ها نمی‌مانند
+    let total=0;for(const n of gtcSize.values())total+=n;
+    if(total>GTC_TOTAL_MAX){
+      for(const k of Object.keys(mem).sort((a,b)=>mem[a].t-mem[b].t)){
+        if(total<=GTC_TOTAL_MAX)break;
+        total-=gtcSize.get(k)||0;delete mem[k];gtcSize.delete(k);
+      }
+    }
+    try{localStorage.setItem(LS_GTC,JSON.stringify(mem));}
+    catch{delete mem[url];gtcSize.delete(url);}   // ذخیره نشد: آینه هم نگهش نمی‌دارد (آینه = آنچه واقعاً ماندگار است)
+  }catch{}
+}
 /* قطع‌کننده‌ی مدار.
 
    وقتی GeckoTerminal سقف نرخ را اعمال می‌کند، پاسخ ۴۲۹ هدر CORS ندارد، پس
@@ -4108,13 +4197,20 @@ async function gtFetch(url){
   let dr=null,derr=null;
   try{dr=await direct();}catch(e){derr=e;}
   if(dr&&!bad(dr))return {r:dr,via:"direct"};
-  gtRouteSet();
-  try{return {r:await proxy(),via:"proxy"};}
-  catch(e){if(dr)return {r:dr,via:"direct"};throw derr||e;}
+  /* ۱۳ اکتبر: پرچمِ «اول پراکسی» فقط وقتی می‌نشیند که پراکسی همان تلاش جواب سالم داده باشد.
+     اگر خودش ۴۲۹/≥۵۰۰ بدهد یا پرتاب کند، هر دو مسیر شکسته‌اند و ترتیب «اول مستقیم» می‌ماند. */
+  let pr=null,perr=null;
+  try{pr=await proxy();}catch(e){perr=e;}
+  if(pr&&!bad(pr)){gtRouteSet();return {r:pr,via:"proxy"};}
+  if(pr)return {r:pr,via:"proxy"};
+  if(dr)return {r:dr,via:"direct"};
+  throw derr||perr;
 }
 function gtJson(url){
   const hit=gtCache.get(url);
   if(hit&&Date.now()-hit.t<gtTtl(url))return Promise.resolve(hit.v);
+  const kept=gtcGet(url);     // رفرشِ نزدیک: از انبارِ ماندگار، با همان TTL
+  if(kept){gtCacheSet(url,{t:kept.t,v:kept.v});return Promise.resolve(kept.v);}
   if(Date.now()<gtCoolUntil)
     return Promise.reject(gtBackoffError("gt: backing off after repeated failures"));
   const flying=gtInflight.get(url);
@@ -4160,7 +4256,7 @@ function gtJson(url){
     throw new Error("gt: exhausted retries");
   };
   const next=gtChain.then(run,run).then(
-    v=>{gtFails=0;gtCacheSet(url,{t:Date.now(),v});gtInflight.delete(url);return v;},
+    v=>{gtFails=0;const ent={t:Date.now(),v};gtCacheSet(url,ent);gtcPut(url,ent);gtInflight.delete(url);return v;},
     e=>{
       gtInflight.delete(url);
       /* شکست انتقالی — یعنی اصلاً پاسخ HTTP نگرفتیم — هیچ‌وقت مربوط به یک
@@ -5097,6 +5193,7 @@ function prepareSwapColumns(){
   }
 }
 prepareSwapColumns();
+let solAppDefaultFailedAt=0;
 let solAppDefaulted=false,solAppDefaultState="idle";   // idle|loading|done|failed
 function updateSwapViewForChain(){
   placeNetworkControl();
@@ -5140,12 +5237,14 @@ function updateSwapViewForChain(){
     solPaintLegs();
     // بدونِ توکنِ پیش‌فرض کارت «؟ —» نشان می‌داد؛ مثلِ Base که با ETH→USDC باز می‌شود،
     // سولانا با SOL→USDC باز می‌شود — فقط بارِ اول، انتخابِ کاربر دست نمی‌خورد.
-    if(!solMintCur&&!solAppDefaulted){
+    // ۱۳ اکتبر: شکستِ بارگذاریِ پیش‌فرض چسبنده نیست — پس از ۳۰ ثانیه، در به‌روزرسانیِ بعدیِ نما دوباره تلاش می‌شود
+    if(!solMintCur&&(!solAppDefaulted||(solAppDefaultState==="failed"&&Date.now()-solAppDefaultFailedAt>=SOL_RETRY_MS))){
       solAppDefaulted=true;solAppDefaultState="loading";
       // ۵ اکتبر — پایانِ بارگذاریِ پیش‌فرض همیشه Flow را دوباره رندر می‌کند (موفق یا شکست)
       (async()=>{await solAppLoadToken(SOL_APP_TOKENS.USDC);})().catch(()=>{})
         .finally(()=>{
           solAppDefaultState=solMintCur?"done":"failed";
+          if(!solMintCur)solAppDefaultFailedAt=Date.now();
           if(activeChain==="solana"&&view==="flow"){paintFlowToken();renderFlow();}
           if(activeChain==="solana"&&view==="folio")renderFolio();
         });
@@ -5264,6 +5363,7 @@ function refreshLiveStrip(){
   const tg=document.querySelector("#liveStrip .lsTg");
   if(tg){if(LINKS.telegram)tg.href=LINKS.telegram;else tg.remove();}
 }
+let baseBootPaintPending=false;
 function setChain(next){
 
   next=(next==="solana")?"solana":"base";
@@ -5279,6 +5379,7 @@ function setChain(next){
   solInvalidateQuote();
   activeChain=next;
   storeChain(next);
+  if(next==="base"&&baseBootPaintPending){baseBootPaintPending=false;paintToken("in",tokenIn);paintToken("out",tokenOut);loadChart();}
   updateSwapViewForChain();
   if(next==="base")ensureBaseDexes().then(()=>{if(activeChain==="base"&&view==="swap")scheduleQuote();}).catch(()=>{});
   if(view==="swap"){if(next==="solana")solScheduleQuote();else scheduleQuote();}
@@ -5538,7 +5639,14 @@ function solCloseTokenPicker(){$("solTokOv").classList.remove("on");}
    می‌شوند چون از قبل ردیفِ خودشان را دارند. شکستِ این تماس یعنی بخش
    اصلاً نیست — هیچ جای‌گزینِ ساختگی/کش‌شده‌ای نمی‌گذاریم. */
 let solPopularCache=null,solPopularLoading=null;
+/* ۱۳ اکتبر: شکست چسبنده نیست — زمانِ شکست نگه داشته می‌شود و بازشدنِ بعدیِ گزینشگر پس از ۳۰ ثانیه دوباره می‌پرسد
+   (پاسخِ واقعاً خالی شکست نیست و کش می‌ماند). */
+const SOL_RETRY_MS=30000;
+let solPopularFailedAt=0;
 async function solLoadPopular(){
+  if(solPopularCache&&solPopularFailedAt&&Date.now()-solPopularFailedAt>=SOL_RETRY_MS&&!solPopularLoading){
+    solPopularCache=null;solPopularFailedAt=0;
+  }
   // G — ۲۸ سپتامبر: رندر هرگز منتظرِ لوگو نمی‌ماند — فهرست بی‌درنگ با
   // حروفِ اول ظاهر می‌شود، لوگوها وقتی رسیدند (batched، ممکن است چند
   // صدمِ ثانیه طول بکشد) روی همان ردیف‌ها می‌نشینند. قبلاً await کردنِ
@@ -5574,8 +5682,8 @@ async function solLoadPopular(){
           out.push({symbol:sym,name:nm||sym,mint});
           if(out.length>=8)break;
         }
-        solPopularCache=out;
-      }catch{solPopularCache=[];}
+        solPopularCache=out;solPopularFailedAt=0;
+      }catch{solPopularCache=[];solPopularFailedAt=Date.now();}
       finally{solPopularLoading=null;}
     })();
   }
@@ -5589,8 +5697,9 @@ async function solLoadPopular(){
    ماند) — حداکثر ۱۰ mint در هر تماس؛ کِشِ سراسری یعنی گزینشگرِ بعدی رایگان
    است. شکستِ یک تکه فقط همان تکه را بی‌لوگو می‌گذارد، نه کلِ تابع را. */
 let solLogoCache={};
+const solLogoFailAt={};
 // size/conc پیش‌فرض (۱۰ و ۱) رفتارِ قدیمی را نگه می‌دارد؛ پرتفوی ۳۰ تایی و حداکثر ۳ درخواستِ هم‌زمان می‌خواهد
-async function fetchSolMetaMulti(mints,size=10,conc=1){
+async function fetchSolMetaMulti(mints,size=10,conc=1,failed=null){
   const uniq=[...new Set(mints)].filter(m=>SOL_MINT_RE.test(m));
   const out={};
   const chunks=[];
@@ -5610,7 +5719,8 @@ async function fetchSolMetaMulti(mints,size=10,conc=1){
           const mint=at&&typeof at.address==="string"?at.address:null;
           if(mint)out[mint]=at;
         }
-      }catch{/* این تکه بی‌قیمت می‌ماند، نه کلِ فراخوانی — بقیه‌ی تکه‌ها ادامه می‌دهند */}
+      }catch{/* این تکه بی‌قیمت می‌ماند، نه کلِ فراخوانی — بقیه‌ی تکه‌ها ادامه می‌دهند */
+        if(failed)for(const m of chunk)failed.add(m);}
     }
   }
   await Promise.all(Array.from({length:Math.min(conc,chunks.length)},worker));
@@ -5815,11 +5925,18 @@ function solRouteToken(mint,fallback){
 }
 
 async function solPrefetchLogos(){
+  // ۱۳ اکتبر: مینتی که تکه‌اش شکست خورد «بی‌لوگو» ثبت نمی‌شود؛ پس از ۳۰ ثانیه دوباره پرسیده می‌شود
+  const now=Date.now();
   const need=[...SOL_APP_TOKEN_LIST.map(t=>t.mint),...((solPopularCache||[]).map(t=>t.mint))]
-    .filter(m=>!(m in solLogoCache));
+    .filter(m=>!(m in solLogoCache)&&!(solLogoFailAt[m]&&now-solLogoFailAt[m]<SOL_RETRY_MS));
   if(!need.length)return;
-  const metaMap=await fetchSolMetaMulti(need);
-  for(const m of need)solLogoCache[m]=(metaMap[m]&&okLogo(metaMap[m].image_url))?metaMap[m].image_url:null;
+  const failed=new Set();
+  const metaMap=await fetchSolMetaMulti(need,10,1,failed);
+  for(const m of need){
+    if(failed.has(m)){solLogoFailAt[m]=Date.now();continue;}
+    delete solLogoFailAt[m];
+    solLogoCache[m]=(metaMap[m]&&okLogo(metaMap[m].image_url))?metaMap[m].image_url:null;
+  }
 }
 function solRenderTokenPicker(q){
   const list=$("solTokList"),query=(q||"").trim();
@@ -6564,7 +6681,8 @@ async function renderSolFlow(){
         if(Array.isArray(response?.data))trades=response.data;
       }catch{trades=null;}
       if(!current())return;
-      cache=renderSolFlow._cache={mint,pool,trades,fetchedAt:Date.now()};
+      // نمونه‌ی معاملات نیامد: کش نیمه‌کاره فقط ۳۰ ثانیه می‌ماند (نه ۶۰) تا بازرندرِ بعدی دوباره بپرسد
+      cache=renderSolFlow._cache={mint,pool,trades,fetchedAt:Date.now()-(trades?0:60000-SOL_RETRY_MS)};
     }catch{
       if(!current())return;
       body.innerHTML='<div class="empty">Solana trade history could not be loaded. Activity is unknown, not zero. Quotes and swaps are unaffected.</div>';
@@ -10431,6 +10549,7 @@ async function stkRefBatch(){
 }
 async function stocksLoadSol(){
   const seq=++stkSeq;
+  stkPaintLogos();   // لوگوهای نگه‌داشته‌شده بی‌درنگ، پیش از هر درخواست
   const byMint=new Map(STK_SOL.map(s=>[s.mint,s]));
   const gtP=(async()=>{
     const j=await gtJson(`${GT}/networks/solana/tokens/multi/${STK_SOL.map(s=>s.mint).join(",")}`);
@@ -10443,7 +10562,10 @@ async function stocksLoadSol(){
       const p=stkNum(a.price_usd),v=stkNum(a.volume_usd&&a.volume_usd.h24);
       if(p>0&&isFinite(p))px[s.sym]=p;
       if(isFinite(v))vol[s.sym]=v;
-      if(typeof a.image_url==="string"&&okLogo(a.image_url))logo[s.sym]=a.image_url;
+      if(typeof a.image_url==="string"&&okLogo(a.image_url)&&a.image_url!==""){
+        logo[s.sym]=a.image_url;
+        if(lsGet(LS_LOGO,s.mint,ttlLogo,okLogo)!==a.image_url)lsSet(LS_LOGO,s.mint,a.image_url);   // ۱۳ اکتبر: لوگو بین بازدیدها می‌ماند (قواعدِ lsSet: https و okLogo)
+      }
       const tp=row&&row.relationships&&row.relationships.top_pools&&row.relationships.top_pools.data;
       const id=tp&&tp[0]&&tp[0].id;
       if(typeof id==="string"){const pa=id.replace(/^solana_/,"");pools.push(pa);poolOf[pa]=s.sym;}
@@ -10490,7 +10612,8 @@ function stkAddLogo(av,url,gen){
   if(gen!==stkLogoGen||!url||!okLogo(url)||av.dataset.logo===url)return;
   av.dataset.logo=url;
   const img=new Image();img.alt="";img.loading="lazy";
-  img.onload=()=>img.classList.add("on");img.onerror=()=>img.remove();
+  const old=[...av.querySelectorAll("img")];   // لوگوی تازه جای نگه‌داشته‌شده را می‌گیرد
+  img.onload=()=>{img.classList.add("on");old.forEach(o=>o.remove());};img.onerror=()=>img.remove();
   img.src=url;av.appendChild(img);
 }
 function stkPaintLogos(){
@@ -10499,7 +10622,11 @@ function stkPaintLogos(){
   document.querySelectorAll("#stkTable tr[data-sym]").forEach(tr=>{
     const av=tr.querySelector(".av");
     if(!av)return;
-    if(sol){stkAddLogo(av,stkData.logo[tr.dataset.sym],gen);return;}
+    if(sol){
+      const s=STK_SOL.find(x=>x.sym===tr.dataset.sym);
+      // لوگوی تازه برنده است؛ وگرنه همان که بازدیدِ قبلی نگه داشته (پیش از شبکه)
+      stkAddLogo(av,stkData.logo[tr.dataset.sym]||(s?lsGet(LS_LOGO,s.mint,ttlLogo,okLogo):""),gen);return;
+    }
     const t=BASE_TOKENS.find(x=>x.symbol===tr.dataset.sym);
     if(!t)return;
     // نه paintAvatar: آن حروفِ گرادیانیِ همین کارت را با رنگِ بذری عوض می‌کند. فقط تصویر روی همان حروف می‌نشیند.
@@ -10927,7 +11054,7 @@ $("copyAddrBtn").onclick=(e)=>{
        (قبلاً بعد از دروازه‌ها و applyShareParams و runScan بود). */
     walletsReady=baseWalletsReady();
     try{E=await loadEthers();}
-    catch{setNotice(note("err","<b>Could not load ethers.</b> Check your connection or ad-blocker and reload."));return;}
+    catch{document.documentElement.removeAttribute("data-bootchain");setNotice(note("err","<b>Could not load ethers.</b> Check your connection or ad-blocker and reload."));return;}
     iMulti=new E.Interface(ABI.multicall3);iQuoter=new E.Interface(ABI.quoterV2);
     iQuoterCL=new E.Interface(ABI.quoterCL);
     iV2=new E.Interface(ABI.v2);iSol=new E.Interface(ABI.solidly);
@@ -10966,8 +11093,10 @@ $("copyAddrBtn").onclick=(e)=>{
        است نه ادعای اثبات‌شده. اگر روزی راهی برای آزمودنش پیدا شد، اضافه شود. */
     $("amtIn").value="";$("amtOut").value="";
     restorePair();                // انتخاب قبلیِ خودِ کاربر، اگر بود
-    paintToken("in",tokenIn);paintToken("out",tokenOut);
-    readFee();loadChart();
+    // ۱۳ اکتبر: روی بوتِ سولانا هیچ درخواستِ Base (لوگوی USDC، استخر و نمودار) نمی‌رود؛ با سوییچ به Base همان لحظه نقاشی می‌شود
+    if(activeChain!=="solana")paintToken("in",tokenIn),paintToken("out",tokenOut);
+    readFee();
+    if(activeChain!=="solana")loadChart();else baseBootPaintPending=true;
     /* ۱۱ اکتبر: بازیابیِ بی‌صدای Base *همین‌جا* شروع می‌شود، نه آخرِ راه‌اندازی، و منتظر هیچ‌چیز نمی‌ماند
        (نه دروازه‌ها، نه applyShareParams، نه runScan). وابستگی‌های connectWithProvider — E، iErc، iExec،
        iMulti، readProvider، tokenIn و allTokens — همه تا این خط ساخته شده‌اند؛ دروازه‌ها فقط به
@@ -11048,6 +11177,7 @@ $("copyAddrBtn").onclick=(e)=>{
   tokenPage=!!onToken;
   setView(tokenPage?"token":(parseHash().view||"swap"),false);
   if(!tokenPage)updateSwapViewForChain();
+  if(activeChain==="solana")document.documentElement.removeAttribute("data-bootchain");   // سولانا چیده شد
   /* ⚠️ ترتیب اینجا سرعتِ دیده‌شدن را تعیین می‌کند. خواندنِ خودِ توکن به
      دروازه‌های صرافی ربطی ندارد، پس همان اول شروع می‌شود و موازی با
      verifyDexes پیش می‌رود؛ نام و لوگو و اعداد بازار چند ثانیه زودتر

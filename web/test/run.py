@@ -11,11 +11,20 @@ from playwright.async_api import async_playwright, Browser
 GT_ROUTE_DEFAULT = {"on": True}
 GT_ROUTE_PROXY_FIRST_JS = ("try{sessionStorage.setItem('zaexa.gtroute.v1',"
                            "JSON.stringify({r:'proxy',t:Date.now()}))}catch(e){}")
+# ۱۳ اکتبر: لایه‌ی ماندگارِ کشِ GT (localStorage zaexa.gtcache.v1) پاسخ‌ها را بین بارگذاری‌ها نگه می‌دارد، ولی
+# کاوشگرهای قدیمی با gtCache.clear() «شبکه‌ی تازه» می‌خواهند. پس به‌طور پیش‌فرض آن کلید در همه‌ی contextها
+# نادیده گرفته می‌شود (خواندنش null، نوشتنش پرتاب می‌کند — مثل حالت خصوصی) و فقط کاوشگرِ [gt persist] آن را روشن می‌کند.
+GT_PERSIST_OFF = {"on": True}
+GT_PERSIST_OFF_JS = ("(function(){var K='zaexa.gtcache.v1',g=Storage.prototype.getItem,s=Storage.prototype.setItem;"
+                     "Storage.prototype.getItem=function(k){return k===K?null:g.apply(this,arguments)};"
+                     "Storage.prototype.setItem=function(k,v){if(k===K)throw new Error('blocked');return s.apply(this,arguments)};})();")
 _orig_new_context = Browser.new_context
 async def _new_context_with_gt_flag(self, *a, **k):
     ctx = await _orig_new_context(self, *a, **k)
     if GT_ROUTE_DEFAULT["on"]:
         await ctx.add_init_script(GT_ROUTE_PROXY_FIRST_JS)
+    if GT_PERSIST_OFF["on"]:
+        await ctx.add_init_script(GT_PERSIST_OFF_JS)
     return ctx
 Browser.new_context = _new_context_with_gt_flag
 # ⚠️ new_page در لایه‌ی wrapper از new_context‌ی wrapper نمی‌گذرد (مستقیم می‌رود سراغ impl)،
@@ -25,6 +34,8 @@ async def _new_page_with_gt_flag(self, *a, **k):
     pg = await _orig_new_page(self, *a, **k)
     if GT_ROUTE_DEFAULT["on"]:
         await pg.context.add_init_script(GT_ROUTE_PROXY_FIRST_JS)
+    if GT_PERSIST_OFF["on"]:
+        await pg.context.add_init_script(GT_PERSIST_OFF_JS)
     return pg
 Browser.new_page = _new_page_with_gt_flag
 
@@ -6746,6 +6757,417 @@ async def check_gt_direct_first(p, errors):
         await b.close()
 
 
+async def check_sol_boot_gt(p, errors):
+    """[sol boot no flash] [sol boot no base calls] [gt persist] [sol popular retry] [sol stock logos persist] [gt route both fail]
+
+    ۱۳ اکتبر: بوتِ سولانا بدون فلاشِ Base و بدون درخواستِ Base، کشِ ماندگارِ GT، شکستِ غیرچسبنده،
+    لوگوی سهامِ سولانا بین بازدیدها، و پرچمِ مسیرِ /gt. index.html واقعی روی یک سرورِ هم‌مبدأ؛
+    api.geckoterminal.com و /gt با page.route جواب می‌دهند یا abort می‌شوند — هیچ شبکه‌ی واقعی‌ای نیست."""
+    import functools, http.server, json as _j, threading, time as _t
+
+    class Quiet(http.server.SimpleHTTPRequestHandler):
+        def log_message(self, *a):
+            pass
+
+        def translate_path(self, path):
+            clean = path.split("?")[0]
+            if clean in ("/app", "/app/"):
+                return os.path.join(HERE, "..", "index.html")
+            return super().translate_path(path)
+
+    srv = http.server.ThreadingHTTPServer(("127.0.0.1", 0), functools.partial(Quiet, directory=os.path.join(HERE, "..")))
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    origin = "http://127.0.0.1:%d" % srv.server_address[1]
+    GTD = "https://api.geckoterminal.com/"
+    CORS = {"access-control-allow-origin": "*"}
+    PNG1 = tiny_png_bytes()
+    JUP = "JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN"
+    BONK = "DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263"
+    AAPL = "XsbEhLAtcf6HdfpFZ5xEMdqW8nfAvcsP5bdudRLJzJp"
+    AAPL_LOGO = "https://assets.example.invalid/aapl.png"
+    GT_ROUTE_DEFAULT["on"] = False
+    GT_PERSIST_OFF["on"] = False          # فقط همین کاوشگر لایه‌ی ماندگار را می‌خواهد
+    b = await p.chromium.launch()
+    log = []                      # (via, url) به ترتیب؛ via: direct|proxy
+    hook = {"gt": None, "proxy": None, "on_req": None}
+
+    def gt_path(u):
+        return u.split("/api/v2", 1)[1] if "/api/v2" in u else u.split("/gt", 1)[1]
+
+    async def stub(route):
+        u = route.request.url
+        if u.startswith(origin):
+            if "/gt/" in u:
+                log.append(("proxy", u))
+                if hook["on_req"]:
+                    await hook["on_req"](u)
+                if hook["proxy"]:
+                    r = hook["proxy"](u)
+                    if r == "abort":
+                        return await route.abort()
+                    return await route.fulfill(status=r[0], content_type="application/json",
+                                               headers={"x-zaexa-proxy": "probe"}, body=r[1])
+                return await route.fulfill(status=200, content_type="application/json",
+                                           headers={"x-zaexa-proxy": "probe"}, body='{"data":[]}')
+            if u.endswith("/ev"):
+                return await route.fulfill(status=204, body="")
+            if "/vd/" in u or "/sol/" in u:
+                return await route.fulfill(status=200, content_type="application/json", body="{}")
+            return await route.continue_()
+        if u.startswith(GTD):
+            log.append(("direct", u))
+            if hook["on_req"]:
+                await hook["on_req"](u)
+            if hook["gt"]:
+                r = hook["gt"](u)
+                if r == "abort":
+                    return await route.abort()
+                return await route.fulfill(status=r[0], content_type="application/json", headers=CORS, body=r[1])
+            return await route.fulfill(status=200, content_type="application/json", headers=CORS, body='{"data":[]}')
+        if u.startswith("https://assets.example.invalid/"):
+            return await route.fulfill(status=200, content_type="image/png", body=PNG1)
+        return await route.abort()
+
+    def reset_hooks():
+        hook.update(gt=None, proxy=None, on_req=None)
+        log.clear()
+
+    async def open_page(ctx, hash_, init=None, wait=1800):
+        pg = await ctx.new_page()
+        pg.on("pageerror", lambda e: errors.append("PAGEERROR %s" % e))
+        await pg.route("**/*", stub)
+        if init:
+            await pg.add_init_script(init)
+        await pg.goto(origin + "/app" + hash_)
+        await pg.wait_for_timeout(wait)
+        return pg
+
+    def base_calls():
+        return [u for _, u in log if "/networks/base/" in u]
+
+    try:
+        # ---------------- [sol boot no flash] ----------------
+        FLASH_JS = """(() => {
+            window.__flash = []; window.__attr = [];
+            const vis = el => { if (!el) return false; const cs = getComputedStyle(el);
+                if (cs.display === 'none' || cs.visibility === 'hidden') return false;
+                const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0; };
+            const txt = (s) => { const e = document.querySelector(s); return e ? e.textContent : ''; };
+            new MutationObserver(() => window.__attr.push(document.documentElement.getAttribute('data-bootchain')))
+                .observe(document, {attributes: true, subtree: true, attributeFilter: ['data-bootchain']});
+            const t0 = performance.now();
+            window.__frames = 0;
+            (function tick() {
+                window.__frames++;
+                const bad = [];
+                if (vis(document.getElementById('baseHeroRow'))) bad.push('baseHeroRow');
+                if (vis(document.getElementById('baseSubRow'))) bad.push('baseSubRow');
+                if (vis(document.getElementById('srcChip')) && /Base/.test(txt('#srcTx'))) bad.push('srcChip=Base');
+                if (vis(document.getElementById('view-stocks')) && /Coinbase/.test(txt('#stkLede'))) bad.push('stocks Base lede');
+                if (vis(document.getElementById('view-flow')) && /deepest pool/.test(txt('#view-flow > p'))) bad.push('flow Base note');
+                if (bad.length) window.__flash.push([Math.round(performance.now() - t0), bad.join(',')]);
+                if (performance.now() - t0 < 1500 + 1000) requestAnimationFrame(tick);
+            })();
+        })();"""
+
+        async def flash_run(hash_, init_extra=""):
+            reset_hooks()
+            ctx = await b.new_context()
+            pg = await open_page(ctx, hash_, init_extra + FLASH_JS, wait=2800)
+            res = await pg.evaluate("() => ({flash: window.__flash, attr: window.__attr, frames: window.__frames, left: document.documentElement.hasAttribute('data-bootchain'), chain: typeof activeChain === 'undefined' ? null : activeChain})")
+            await ctx.close()
+            return res
+
+        STORE = "try{localStorage.setItem('zaexa.chain.v1','solana')}catch(e){}"
+        for label, h, ini in (("hash #swap?chain=solana", "#swap?chain=solana", ""),
+                              ("stored choice on #swap", "#swap", STORE),
+                              ("hash #stocks?chain=solana", "#stocks?chain=solana", ""),
+                              ("hash #flow?chain=solana", "#flow?chain=solana", "")):
+            r = await flash_run(h, ini)
+            assert r["chain"] == "solana", "[sol boot no flash] %s: the fixture must boot on Solana: %s" % (label, r)
+            assert r["frames"] > 20, "[sol boot no flash] %s: the frame recorder barely ran (%s frames)" % (label, r["frames"])
+            assert not r["flash"], "[sol boot no flash] %s: Base content was visible during a Solana boot: %s" % (label, r["flash"][:4])
+            assert not r["left"] and r["attr"] and r["attr"][-1] is None, \
+                "[sol boot no flash] %s: data-bootchain must be gone once Solana is applied: %s" % (label, r)
+        # بوتِ Base: attribute هرگز گذاشته نمی‌شود
+        for label, h, ini in (("plain #swap", "#swap", ""), ("#swap?chain=base over a stored Solana choice", "#swap?chain=base", STORE)):
+            r = await flash_run(h, ini)
+            assert r["chain"] == "base", "[sol boot no flash] %s: must boot on Base: %s" % (label, r)
+            assert r["attr"] == [] and not r["left"], "[sol boot no flash] %s: a Base boot must never set data-bootchain: %s" % (label, r)
+        # تایمرِ ۳ ثانیه: اگر main هیچ‌وقت نرسد، attribute نمی‌ماند
+        reset_hooks()
+        ctx = await b.new_context()
+        pg = await ctx.new_page()
+        await pg.route("**/*", stub)
+
+        async def hang(r):
+            await asyncio.sleep(8)
+            try:
+                await r.abort()
+            except Exception:
+                pass
+        await pg.route("**/ethers.umd*", hang)                  # ethers هرگز نمی‌رسد: main گیر می‌کند و فقط تایمر کار می‌کند
+        await pg.goto(origin + "/app#swap?chain=solana", wait_until="commit")   # load منتظر ethersِ معلق می‌ماند
+        await pg.wait_for_timeout(1500)
+        held = await pg.evaluate("() => document.documentElement.hasAttribute('data-bootchain')")
+        assert held, "[sol boot no flash] while the app is still booting data-bootchain must be present"
+        await pg.wait_for_timeout(2100)
+        left = await pg.evaluate("() => document.documentElement.hasAttribute('data-bootchain')")
+        assert not left, "[sol boot no flash] the 3 s fallback timer must remove data-bootchain even when the app never finishes booting"
+        await ctx.close()
+        print("[sol boot no flash] Solana boots (hash on #swap/#stocks/#flow and stored choice): on every animation frame for 2.5 s no Base-only element (baseHeroRow, baseSubRow, the 'Base' network chip, the Coinbase stocks lede, the deepest-pool flow note) was visible, data-bootchain was set and is gone afterwards; Base boots never set it; the 3 s fallback clears it when ethers never loads")
+
+        # ---------------- [sol boot no base calls] ----------------
+        for label, h, ini in (("hash", "#swap?chain=solana", ""), ("stored choice", "#swap", STORE)):
+            reset_hooks()
+            ctx = await b.new_context()
+            pg = await open_page(ctx, h, ini, wait=2500)
+            assert await pg.evaluate("() => activeChain") == "solana", "[sol boot no base calls] %s: must boot on Solana" % label
+            assert any("/networks/solana/" in u for _, u in log), "[sol boot no base calls] %s: the Solana boot made no Solana GT call at all (stub broken?)" % label
+            assert not base_calls(), "[sol boot no base calls] %s: a Solana boot sent Base GeckoTerminal requests: %s" % (label, base_calls())
+            # سوییچ به Base همان نقاشیِ عقب‌افتاده را انجام می‌دهد
+            await pg.evaluate("() => setChain('base')")
+            await pg.wait_for_timeout(1800)
+            assert base_calls(), "[sol boot no base calls] %s: switching to Base afterwards must still load the Base chart/logos" % label
+            await ctx.close()
+        reset_hooks()
+        ctx = await b.new_context()
+        pg = await open_page(ctx, "#swap", None, wait=2500)
+        assert await pg.evaluate("() => activeChain") == "base"
+        assert any("/networks/base/tokens/0x4200000000000000000000000000000000000006/pools" in u for u in base_calls()) and \
+            any("/networks/base/tokens/multi/" in u for u in base_calls()), \
+            "[sol boot no base calls] a Base boot must keep its usual Base calls (top pool for the chart, token logos): %s" % base_calls()
+        await ctx.close()
+        print("[sol boot no base calls] Solana boot by hash and by stored choice sends zero requests containing /networks/base/ (while Solana calls do go out); switching to Base afterwards loads the Base chart and logos; a plain Base boot still makes its top-pool and token-logo calls")
+
+        # ---------------- [gt persist] ----------------
+        BIG = _j.dumps({"data": {"x": "a" * 140000}})
+        OVER = _j.dumps({"data": {"x": "a" * 160000}})
+
+        def persist_gt(u):
+            if "gtbig" in u:
+                return (200, OVER)
+            if "gtfill" in u:
+                return (200, BIG)
+            return (200, _j.dumps({"data": {"attributes": {"u": u.split("/networks/", 1)[-1]}}}))
+
+        reset_hooks()
+        hook["gt"] = persist_gt
+        ctx = await b.new_context()
+        pg = await open_page(ctx, "#swap", None, wait=1500)
+        UA = "/networks/base/tokens/gtprobeA"                  # ۶۰ ثانیه
+        UB = "/networks/base/pools/gtprobeB/ohlcv/minute"      # ۴۵ ثانیه
+        UP = "/networks/base/tokens/gtprobeP/pools?page=1"     # ۱۰ دقیقه
+        urls = [UA, UB, UP]
+
+        async def run_all(page, which):
+            return await page.evaluate("""async (xs) => { const out = [];
+                for (const x of xs) { try { out.push(await gtJson(GT + x)); } catch (e) { out.push({err: String(e && e.message)}); } }
+                return out; }""", which)
+
+        def probes():
+            return [u for _, u in log if "gtprobe" in u]
+
+        first = await run_all(pg, urls)
+        assert len(probes()) == 3 and all("err" not in j for j in first), "[gt persist] first load: three probe requests expected, got %s %s" % (probes(), first)
+        await pg.reload()
+        await pg.wait_for_timeout(1200)
+        log.clear()
+        again = await run_all(pg, urls)
+        assert probes() == [] and again == first, "[gt persist] a reload inside every TTL must send zero requests and return the same data: %s" % probes()
+        # TTL: ۴۸ ثانیه بعد فقط ohlcv (۴۵ ثانیه) کهنه است
+        await pg.evaluate("() => { gtCache.clear(); const o = Date.now.bind(Date); Date.now = () => o() + 48000; window.__restoreNow = () => { Date.now = o; }; }")
+        log.clear()
+        await run_all(pg, urls)
+        got = probes()
+        assert len(got) == 1 and "ohlcv" in got[0], "[gt persist] at +48 s only the 45 s ohlcv entry may be refetched: %s" % got
+        # +۷۰۰ ثانیه: هر سه کهنه
+        await pg.evaluate("() => { gtCache.clear(); const o = Date.now; Date.now = () => o() + 652000; }")
+        log.clear()
+        await run_all(pg, urls)
+        assert len(probes()) == 3, "[gt persist] past every TTL all three entries must be refetched: %s" % probes()
+        await pg.evaluate("() => window.__restoreNow()")
+        await pg.close()
+        # حجم: پاسخِ بزرگ‌تر از ۱۵۰KB ذخیره نمی‌شود، پاسخِ کوچک می‌شود
+        pg = await open_page(ctx, "#swap", None, wait=1200)
+        await pg.evaluate("() => localStorage.removeItem('zaexa.gtcache.v1')")
+        await pg.reload()
+        await pg.wait_for_timeout(1000)
+        log.clear()
+        UBIG = "/networks/base/tokens/gtbig1"
+        await run_all(pg, [UBIG, UA])
+        stored = await pg.evaluate("() => localStorage.getItem('zaexa.gtcache.v1')")
+        sj = _j.loads(stored)
+        assert not any("gtbig1" in k for k in sj), "[gt persist] a response over 150 KB must not be stored"
+        assert any(k.endswith(UA) for k in sj), "[gt persist] a small response must be stored"
+        await pg.reload()
+        await pg.wait_for_timeout(1000)
+        log.clear()
+        await run_all(pg, [UBIG])
+        assert len(probes()) == 0 and len([1 for _, u in log if "gtbig1" in u]) == 1, "[gt persist] the oversized response must be refetched after a reload"
+        # بودجه ۱.۵MB: قدیمی‌ترین‌ها اول می‌روند
+        fills = ["/networks/base/tokens/gtfill%02d" % i for i in range(14)]
+        for f in fills:
+            await run_all(pg, [f])
+        stored = await pg.evaluate("() => localStorage.getItem('zaexa.gtcache.v1')")
+        sj = _j.loads(stored)
+        ks = [k.split("/networks/base/tokens/")[-1] for k in sj if "gtfill" in k]
+        assert len(stored) <= 1536 * 1024 + 256, "[gt persist] the store must stay within the 1.5 MB budget, it is %d bytes" % len(stored)
+        assert "gtfill13" in ks and "gtfill00" not in ks and len(ks) >= 8, "[gt persist] eviction must drop the oldest first and keep the newest: %s" % sorted(ks)
+        await pg.close()
+        # انبارِ خراب: نادیده گرفته می‌شود و بازنشانی
+        for junk in ("{not json", "[1,2,3]", '{"x":{"t":"nope","v":1}}'):
+            pg = await open_page(ctx, "#swap", "try{localStorage.setItem('zaexa.gtcache.v1'," + _j.dumps(junk) + ")}catch(e){}", wait=1200)
+            log.clear()
+            r = await run_all(pg, [UA])
+            assert "err" not in r[0] and len(probes()) == 1, "[gt persist] corrupt store %r must be ignored (one normal request): %s %s" % (junk, probes(), r)
+            ok = await pg.evaluate("() => { try { const o = JSON.parse(localStorage.getItem('zaexa.gtcache.v1')); return !!o && typeof o === 'object' && !Array.isArray(o); } catch (e) { return false; } }")
+            assert ok, "[gt persist] corrupt store %r must be replaced by a valid one" % junk
+            await pg.close()
+        await ctx.close()
+        print("[gt persist] zaexa.gtcache.v1: a reload inside the TTL sends zero requests for URLs the first load cached (same data back); at +48 s only the 45 s OHLCV entry is refetched, past 10 min all three are; a response over 150 KB is never stored (small ones are); 14 x 140 KB responses stay within 1.5 MB with the oldest evicted first; corrupt JSON, a non-object and bad entries are ignored and the store is reset")
+
+        # ---------------- [sol popular retry] ----------------
+        POP = _j.dumps({"data": [
+            {"relationships": {"base_token": {"data": {"id": "solana_" + JUP}}}, "attributes": {"name": "JUP / SOL"}},
+            {"relationships": {"base_token": {"data": {"id": "solana_" + BONK}}}, "attributes": {"name": "BONK / SOL"}}]})
+        pops = {"n": 0, "mode": "404"}
+
+        def pop_gt(u):
+            if u.endswith("/networks/solana/pools?page=1"):
+                pops["n"] += 1
+                if pops["n"] == 1:
+                    return (404, "{}") if pops["mode"] == "404" else "abort"
+                return (200, POP)
+            return (200, '{"data":[]}')
+
+        async def picker_rows(page):
+            return await page.evaluate("() => [...document.querySelectorAll('#solTokList .trow .s')].map(e => e.textContent)")
+
+        for mode in ("404", "abort"):
+            reset_hooks()
+            pops.update(n=0, mode=mode)
+            hook["gt"] = pop_gt
+            hook["proxy"] = lambda u: (429, "{}") if (mode == "abort" and u.endswith("/networks/solana/pools?page=1") and pops["n"] == 1) else (200, '{"data":[]}')
+            ctx = await b.new_context()
+            pg = await open_page(ctx, "#swap?chain=solana", None, wait=1500)
+            await pg.evaluate("() => solOpenTokenPicker()")
+            await pg.wait_for_timeout(700)
+            assert pops["n"] == 1 and await picker_rows(pg) == ["SOL", "USDC", "USDT"], \
+                "[sol popular retry] (%s) the failed first call must leave only the 3 defaults: %s calls=%d" % (mode, await picker_rows(pg), pops["n"])
+            await pg.evaluate("() => { solCloseTokenPicker(); const o = Date.now.bind(Date); Date.now = () => o() + 31000; }")
+            await pg.evaluate("() => solOpenTokenPicker()")
+            await pg.wait_for_timeout(700)
+            if mode == "404":
+                assert pops["n"] == 2 and await picker_rows(pg) == ["SOL", "USDC", "USDT", "JUP", "BONK"], \
+                    "[sol popular retry] (404) 31 s later the picker must retry once and show the popular tokens: %s calls=%d" % (await picker_rows(pg), pops["n"])
+            else:
+                # شکستِ انتقالی قطع‌کننده‌ی ۶۰ ثانیه‌ای را روشن کرده: تا پایانش به شبکه نمی‌رود، بعدش می‌رود
+                assert pops["n"] == 1, "[sol popular retry] (abort) inside the 60 s breaker window no request may go out: %d" % pops["n"]
+                await pg.evaluate("() => { solCloseTokenPicker(); const o = Date.now; Date.now = () => o() + 31000; }")
+                await pg.evaluate("() => solOpenTokenPicker()")
+                await pg.wait_for_timeout(700)
+                assert pops["n"] == 2 and await picker_rows(pg) == ["SOL", "USDC", "USDT", "JUP", "BONK"], \
+                    "[sol popular retry] (abort) once the breaker is over the picker must retry and show popular tokens: %s calls=%d" % (await picker_rows(pg), pops["n"])
+            # بازشدنِ بعدی دوباره نمی‌پرسد (موفقیت کش می‌شود)
+            await pg.evaluate("() => { solCloseTokenPicker(); solOpenTokenPicker(); }")
+            await pg.wait_for_timeout(500)
+            assert pops["n"] == 2, "[sol popular retry] (%s) a success must stay cached" % mode
+            await ctx.close()
+        # دفعه‌ی قبل زودتر از ۳۰ ثانیه: دوباره نمی‌پرسد
+        reset_hooks()
+        pops.update(n=0, mode="404")
+        hook["gt"] = pop_gt
+        ctx = await b.new_context()
+        pg = await open_page(ctx, "#swap?chain=solana", None, wait=1500)
+        await pg.evaluate("() => solOpenTokenPicker()")
+        await pg.wait_for_timeout(600)
+        await pg.evaluate("() => { solCloseTokenPicker(); const o = Date.now.bind(Date); Date.now = () => o() + 10000; }")
+        await pg.evaluate("() => solOpenTokenPicker()")
+        await pg.wait_for_timeout(600)
+        assert pops["n"] == 1, "[sol popular retry] before 30 s the failure must not be retried (%d calls)" % pops["n"]
+        await ctx.close()
+        print("[sol popular retry] a failed GT pools call leaves the picker with SOL/USDC/USDT; reopening before 30 s asks nothing; after 30 s (404) or once the 60 s breaker of a transport error is over (abort) it asks again and 'Popular on Solana' appears; the success stays cached")
+
+        # ---------------- [sol stock logos persist] ----------------
+        def stk_gt(u):
+            if "/networks/solana/tokens/multi/" in u and AAPL in u and "Xs" in u:
+                return (200, _j.dumps({"data": [{"attributes": {"address": AAPL, "price_usd": "200", "volume_usd": {"h24": "1000"}, "image_url": AAPL_LOGO},
+                                                  "relationships": {"top_pools": {"data": []}}}]}))
+            return (200, '{"data":[]}')
+
+        reset_hooks()
+        hook["gt"] = stk_gt
+        ctx = await b.new_context()
+        pg = await open_page(ctx, "#stocks?chain=solana", None, wait=2200)
+        sel = '#stkTable tr[data-sym="AAPLx"] .av img'
+        n1 = await pg.evaluate("(s) => document.querySelectorAll(s).length", sel)
+        assert n1 == 1, "[sol stock logos persist] first load: the AAPLx logo from tokens/multi must show (%d)" % n1
+        kept = await pg.evaluate("() => localStorage.getItem('zaexa.logo.v1')")
+        assert kept and AAPL_LOGO in kept, "[sol stock logos persist] the logo must be written to zaexa.logo.v1: %r" % kept
+        await pg.close()
+        # بار دوم: کشِ GT را پاک می‌کنیم تا فقط logo.v1 بماند؛ درخواستِ tokens/multi را نگه می‌داریم و در همان لحظه DOM را می‌خوانیم
+        reset_hooks()
+        snap = {}
+
+        async def on_req(u):
+            if "/networks/solana/tokens/multi/" in u and "Xs" in u and "n" not in snap:
+                snap["n"] = await pages2[0].evaluate("(s) => { const i = document.querySelector(s); return i ? i.getAttribute('src') : null; }", sel)
+
+        pages2 = []
+        hook["on_req"] = on_req
+        # tokens/multi جواب می‌دهد ولی بی‌لوگو: لوگو فقط می‌تواند از انبار آمده باشد
+        pg2 = await ctx.new_page()
+        pages2.append(pg2)
+        pg2.on("pageerror", lambda e: errors.append("PAGEERROR %s" % e))
+        await pg2.route("**/*", stub)
+        await pg2.add_init_script("try{localStorage.removeItem('zaexa.gtcache.v1')}catch(e){}")
+        await pg2.goto(origin + "/app#stocks?chain=solana")
+        await pg2.wait_for_timeout(2200)
+        assert snap.get("n") == AAPL_LOGO, "[sol stock logos persist] the kept logo must already be on the row when the tokens/multi request goes out: %r" % snap.get("n")
+        final = await pg2.evaluate("(s) => document.querySelectorAll(s).length", sel)
+        assert final == 1, "[sol stock logos persist] the logo must stay after an answer without a logo (%d)" % final
+        other = await pg2.evaluate("() => document.querySelectorAll('#stkTable tr[data-sym] .av img').length")
+        assert other == 1, "[sol stock logos persist] only the one seen logo may be painted (%d)" % other
+        await ctx.close()
+        print("[sol stock logos persist] a Solana stock logo seen once is written to zaexa.logo.v1 and painted on the next load before the tokens/multi request goes out, and survives a tokens/multi answer without a logo; no other row gets an invented logo")
+
+        # ---------------- [gt route both fail] ----------------
+        FLAG = "zaexa.gtroute.v1"
+        reset_hooks()
+        ctx = await b.new_context()
+        pg = await open_page(ctx, "#swap", None, wait=1500)
+
+        async def rt(mode_direct, mode_proxy, tag):
+            reset_hooks()
+            hook["gt"] = (lambda u: "abort") if mode_direct == "abort" else (lambda u: (200, _j.dumps({"data": {"u": u}})))
+            hook["proxy"] = ((lambda u: "abort") if mode_proxy == "abort" else
+                             (lambda u: (429, "{}")) if mode_proxy == "429" else
+                             (lambda u: (500, "{}")) if mode_proxy == "500" else
+                             (lambda u: (200, _j.dumps({"data": {"u": u}}))))
+            await pg.evaluate("() => { gtCache.clear(); gtInflight.clear(); gtFails = 0; gtCoolUntil = 0; gtProxy = location.origin + '/gt'; sessionStorage.removeItem('zaexa.gtroute.v1'); localStorage.removeItem('zaexa.gtcache.v1'); }")
+            r = await pg.evaluate("""async (a) => { try { return {ok: true, j: await gtJson(GT + '/networks/base/tokens/' + a)}; }
+                catch (e) { return {ok: false}; } }""", tag)
+            fl = await pg.evaluate("(k) => sessionStorage.getItem(k)", FLAG)
+            return r, fl, [v for v, u in log if tag in u]
+
+        r, fl, via = await rt("abort", "429", "gtroute1")
+        assert not r["ok"] and fl is None and via[:2] == ["direct", "proxy"], "[gt route both fail] direct aborted + proxy 429 must not set the flag: %s %s %s" % (r, fl, via)
+        r, fl, via = await rt("abort", "abort", "gtroute2")
+        assert not r["ok"] and fl is None, "[gt route both fail] direct aborted + proxy throwing must not set the flag: %s %s" % (r, fl)
+        r, fl, via = await rt("abort", "500", "gtroute3")
+        assert fl is None, "[gt route both fail] direct aborted + proxy 5xx must not set the flag: %s" % fl
+        r, fl, via = await rt("abort", "ok", "gtroute4")
+        assert r["ok"] and fl is not None, "[gt route both fail] control: direct aborted + a healthy proxy must still set the flag: %s %s" % (r, fl)
+        await ctx.close()
+        print("[gt route both fail] direct aborted with the proxy answering 429, 5xx or throwing leaves zaexa.gtroute.v1 unset (direct stays first); the control, direct aborted with a healthy proxy, still sets it")
+    finally:
+        GT_ROUTE_DEFAULT["on"] = True
+        GT_PERSIST_OFF["on"] = True
+        srv.shutdown()
+        await b.close()
+
+
 async def main():
     errors = []
     # خطاهایی که یک کاوشگر *عمداً* تولید می‌کند. اجازه‌ی عبور می‌گیرند ولی
@@ -6806,6 +7228,7 @@ async def main():
         await check_wallet_watch(p, errors)
         await check_report_chain(p, errors)
         await check_gt_direct_first(p, errors)
+        await check_sol_boot_gt(p, errors)
         b = await p.chromium.launch()
         pg = await b.new_page(viewport={"width": 1240, "height": 1000}, color_scheme="dark")
         pg.on("console", on_console)
