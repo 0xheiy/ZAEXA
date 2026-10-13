@@ -6498,6 +6498,248 @@ async def check_gt_direct_first(p, errors):
         assert s2 == ["direct", "proxy"] and i2 >= 1 and fl2 and fl2.get("r") == "proxy", \
             "[pairs logo route] (2) direct aborted -> exactly one /gt retry, logo painted, flag stored; got %s imgs=%s flag=%s" % (s2, i2, f2)
         print("[pairs logo route] direct answers -> one direct multi request, zero /gt, logo painted, no flag; direct aborted -> exactly one /gt retry of the same chunk, logo painted from /gt, zaexa.gtroute.v1 stored")
+
+        # ---------------- pairs.html: اولین رنگ، کشِ ماندگارِ لوگو، پشتیبانِ Jupiter ----------------
+        import asyncio as _aio, time as _time
+        BASE_TITLE = "New pairs on Base — Zaexa"
+        SOL_TITLE = "New pairs on Solana — Zaexa"
+        BASE_SUB = "The newest Base pools we found, each run through the same exit check as the app. Updated hourly."
+        BASE_NOTE = "A sell quote is not a promise. It is one quote, at one moment, from the venues we cover. Tokens can change after it."
+        SOL_SUB = "The newest Solana pools we found, each run through a simulated buy and sell. Updated hourly."
+        PNG1 = PNG
+        REC = """(() => { window.__fp = [];
+          (function rec(){
+            var tab = document.querySelector('#chainTabs button.on'), sub = document.querySelector('.pairs-main .sub');
+            var tx = document.getElementById('srcTx');
+            if (tab && sub) window.__fp.push({title: document.title, tx: tx ? tx.textContent : null,
+              tab: tab.getAttribute('data-chain'), sub: sub.textContent, rs: document.readyState});
+            if (document.readyState !== 'complete') requestAnimationFrame(rec);
+          })(); })();"""
+
+        async def first_paint(query, then_base=False):
+            pg3 = await b.new_page(viewport={"width": 1240, "height": 900})
+            perrs = []
+            pg3.on("pageerror", lambda e: perrs.append(str(e)))
+            await pg3.add_init_script(REC)
+
+            async def route(r):
+                u = r.request.url
+                if u.startswith(origin):
+                    path = u[len(origin):]
+                    if path.startswith("/__slow.js"):
+                        await _aio.sleep(0.8)   # شبیه‌ساز parse کند: اسکریپتِ اصلیِ صفحه دیر می‌رسد
+                        return await r.fulfill(status=200, content_type="application/javascript", body="")
+                    if path.startswith("/pairs.json"):
+                        return await r.fulfill(status=200, content_type="application/json",
+                                               body=_j.dumps({"chain": "base", "rows": [], "store": True}))
+                    if path.startswith("/gt/"):
+                        return await r.fulfill(status=200, content_type="application/json", body='{"data":[]}')
+                    if path.startswith("/pairs"):
+                        resp = await r.fetch()
+                        html = (await resp.text()).replace("</footer>\n", '</footer>\n<script src="/__slow.js"></script>\n', 1)
+                        return await r.fulfill(response=resp, body=html)
+                    return await r.continue_()
+                if u.startswith(GTD):
+                    return await r.fulfill(status=200, content_type="application/json", headers=CORS, body='{"data":[]}')
+                return await r.abort()
+            await pg3.route("**/*", route)
+            await pg3.goto(origin + "/pairs" + query)
+            await pg3.wait_for_load_state("load")
+            await pg3.wait_for_timeout(300)
+            frames = await pg3.evaluate("() => window.__fp")
+            after = None
+            if then_base:
+                await pg3.click('#chainTabs button[data-chain="base"]')
+                await pg3.wait_for_timeout(300)
+                after = await pg3.evaluate("""() => ({title: document.title, sub: document.querySelector('.pairs-main .sub').textContent,
+                    note: document.querySelector('.pairs-main .note').textContent,
+                    tab: document.querySelector('#chainTabs button.on').getAttribute('data-chain')})""")
+            await pg3.close()
+            assert not perrs, "[pairs first paint] web/pairs.html threw: %s" % perrs
+            return frames, after
+
+        fr_sol, aft = await first_paint("?chain=solana", then_base=True)
+        loading_sol = [f for f in fr_sol if f["rs"] == "loading"]
+        assert fr_sol and loading_sol, "[pairs first paint] no frame was recorded while the page was still parsing: %s" % fr_sol
+        assert all(f["title"] == SOL_TITLE and f["tab"] == "solana" and f["sub"] == SOL_SUB and f["tx"] in (None, "Solana", "SOL")
+                   for f in fr_sol), "[pairs first paint] a frame painted something other than Solana on ?chain=solana: %s" % fr_sol
+        assert aft == {"title": BASE_TITLE, "sub": BASE_SUB, "note": BASE_NOTE, "tab": "base"}, \
+            "[pairs first paint] switching Solana->Base after a Solana load did not restore the exact Base copy/title: %s" % aft
+        fr_base, _ = await first_paint("")
+        assert fr_base and all(f["title"] == BASE_TITLE and f["tab"] == "base" and f["sub"] == BASE_SUB and f["tx"] in (None, "Base")
+                               for f in fr_base), "[pairs first paint] ?chain absent: a frame did not show Base: %s" % fr_base
+        print("[pairs first paint] ?chain=solana: %d frames (%d while parsing) all Solana (title, tab, copy); no chain param: %d frames all Base; Solana->Base switch restores exact Base title/sub/note"
+              % (len(fr_sol), len(loading_sol), len(fr_base)))
+
+        # ---- فراخوانِ مشترکِ کاوشگرهای لوگو ----
+        def sol_mint(n):
+            return ("M%02d" % n) + "1" * 41      # ۴۴ نویسه، base58-سالم
+
+        async def logo_page(chain, rows, ls=None, gt_data=None, jup=None, hold_gt=None, throw_ls=False):
+            pg4 = await b.new_page(viewport={"width": 1240, "height": 900})
+            perrs = []
+            pg4.on("pageerror", lambda e: perrs.append(str(e)))
+            if ls is not None:
+                await pg4.add_init_script("try{ if(!sessionStorage.getItem('__seeded')){ localStorage.setItem('zaexa.pairlogo.v1', %s); sessionStorage.setItem('__seeded','1'); } }catch(e){}" % _j.dumps(ls))
+            if throw_ls:
+                await pg4.add_init_script("(() => { const g = Storage.prototype.getItem, s = Storage.prototype.setItem; Storage.prototype.getItem = function(k){ if (k === 'zaexa.pairlogo.v1') throw new Error('blocked'); return g.apply(this, arguments); }; Storage.prototype.setItem = function(k){ if (k === 'zaexa.pairlogo.v1') throw new Error('blocked'); return s.apply(this, arguments); }; })();")
+            net = {"gt": [], "jup": []}
+            imgs_at_gt = []
+
+            async def route(r):
+                u = r.request.url
+                if u.startswith(origin):
+                    path = u[len(origin):]
+                    if path.startswith("/pairs.json"):
+                        return await r.fulfill(status=200, content_type="application/json",
+                                               body=_j.dumps({"chain": chain, "rows": rows, "store": True}))
+                    if path.startswith("/gt/"):
+                        return await r.fulfill(status=200, content_type="application/json", body='{"data":[]}')
+                    return await r.continue_()
+                if u.startswith(GTD):
+                    addrs = u.split("multi/", 1)[-1].split("?", 1)[0].split(",")
+                    net["gt"].append(addrs)
+                    imgs_at_gt.append(await pg4.evaluate("() => document.querySelectorAll('.tok-logo img').length"))
+                    if hold_gt is not None:
+                        await hold_gt.wait()
+                    data = (gt_data(addrs) if gt_data else [])
+                    return await r.fulfill(status=200, content_type="application/json", headers=CORS,
+                                           body=_j.dumps({"data": data}))
+                if u.startswith("https://lite-api.jup.ag/"):
+                    net["jup"].append(u)
+                    if jup is None:
+                        return await r.fulfill(status=200, content_type="application/json", headers=CORS, body="[]")
+                    return await jup(r, u)
+                if u.startswith("https://img.test/"):
+                    return await r.fulfill(status=200, content_type="image/png", body=PNG1)
+                return await r.abort()
+            await pg4.route("**/*", route)
+            await pg4.goto(origin + "/pairs" + ("?chain=solana" if chain == "solana" else ""))
+            return pg4, perrs, net, imgs_at_gt
+
+        async def img_addrs(pg4):
+            return await pg4.evaluate("""() => [...new Set([...document.querySelectorAll('.tok-logo img')].map(i => i.closest('.tok-logo').getAttribute('data-addr')))].sort()""")
+
+        async def store_of(pg4):
+            return await pg4.evaluate("() => { try { return localStorage.getItem('zaexa.pairlogo.v1'); } catch (e) { return 'ERR'; } }")
+
+        # ---- [pairs logo cache] ----
+        now_ms = int(_time.time() * 1000)
+        mk = lambda i: dict(ROW, address="0x" + ("%02x" % i) * 20, symbol="C%d" % i)
+        rA, rB, rC, rD, rE, rF, rG = [mk(i) for i in range(1, 8)]
+        ls_seed = {
+            "base:" + rA["address"]: {"u": "https://img.test/a.png", "t": now_ms - 3600 * 1000},                  # found, fresh
+            "base:" + rB["address"]: {"u": "https://img.test/b.png", "t": now_ms - 8 * 24 * 3600 * 1000},         # found but 8 days old
+            "base:" + rC["address"]: {"u": "", "t": now_ms - 10 * 60 * 1000},                                      # none, fresh
+            "base:" + rD["address"]: {"u": "", "t": now_ms - 2 * 3600 * 1000},                                     # none but 2h old
+            "base:" + rE["address"]: {"u": "http://img.test/e.png", "t": now_ms},                                  # not https
+            "base:" + rF["address"]: {"u": "https://img.test/" + "x" * 600, "t": now_ms},                          # oversized
+            "base:" + rG["address"]: {"u": "https://img.test/g.png", "t": now_ms - 6 * 24 * 3600 * 1000},         # found, still within 7d
+        }
+        gate = _aio.Event()
+        pgc, ec, netc, imgs_gt = await logo_page("base", [rA, rB, rC, rD, rE, rF, rG], ls=_j.dumps(ls_seed), hold_gt=gate)
+        await pgc.wait_for_timeout(1000)
+        painted_before = await img_addrs(pgc)
+        gate.set()
+        await pgc.wait_for_timeout(500)
+        asked = sorted(a for call in netc["gt"] for a in call)
+        want_asked = sorted(x["address"] for x in (rB, rD, rE, rF))
+        await pgc.close()
+        assert not ec, "[pairs logo cache] web/pairs.html threw: %s" % ec
+        assert painted_before == sorted([rA["address"], rG["address"]]) and imgs_gt and imgs_gt[0] >= 2, (
+            "[pairs logo cache] cached logos must be painted before the GeckoTerminal answer: painted=%s imgsAtFirstGT=%s" % (painted_before, imgs_gt))
+        assert asked == want_asked, "[pairs logo cache] only expired/invalid/uncached entries may be requested: asked=%s want=%s" % (asked, want_asked)
+
+        # همه‌ی ردیف‌ها کش‌شده -> صفر درخواست به GT
+        ls_all = {"base:" + x["address"]: {"u": "https://img.test/z.png", "t": now_ms} for x in (rA, rB)}
+        pgz, ez, netz, _ = await logo_page("base", [rA, rB], ls=_j.dumps(ls_all))
+        await pgz.wait_for_timeout(1200)
+        painted_z = await img_addrs(pgz)
+        await pgz.close()
+        assert painted_z == sorted([rA["address"], rB["address"]]) and netz["gt"] == [], \
+            "[pairs logo cache] fully cached page must paint with zero GeckoTerminal requests: painted=%s gt=%s" % (painted_z, netz["gt"])
+
+        # سقفِ ۶۰۰: ۷۰۰ ورودیِ معتبر + یک پاسخِ تازه -> دقیقاً ۶۰۰، قدیمی‌ترین‌ها افتاده
+        rX = mk(200)
+        big = {"base:0x%040x" % (i + 1000): {"u": "https://img.test/p.png", "t": now_ms - i * 1000 - 5000} for i in range(700)}
+
+        def gt_x(addrs):
+            return [{"attributes": {"address": a, "image_url": "https://img.test/new.png"}} for a in addrs]
+        pgm, em, netm, _ = await logo_page("base", [rX], ls=_j.dumps(big), gt_data=gt_x)
+        await pgm.wait_for_timeout(1500)
+        stored = _j.loads(await store_of(pgm))
+        await pgm.close()
+        assert len(stored) == 600 and ("base:" + rX["address"]) in stored and "base:0x%040x" % (1000 + 699) not in stored \
+            and "base:0x%040x" % 1000 in stored, "[pairs logo cache] cap of 600 entries (drop oldest) not enforced: n=%d" % len(stored)
+
+        # JSONِ خراب: نادیده و بازنویسی؛ ذخیره‌ی پرتاب‌کننده: صفحه نمی‌شکند
+        for bad in ("{not json", "[1,2,3]", "\"str\""):
+            pgb, eb, netb, _ = await logo_page("base", [rX], ls=bad, gt_data=gt_x)
+            await pgb.wait_for_timeout(1500)
+            imgs_b = await img_addrs(pgb)
+            st_b = await store_of(pgb)
+            await pgb.close()
+            assert not eb and imgs_b == [rX["address"]], "[pairs logo cache] corrupt value %r broke the page: errs=%s imgs=%s" % (bad, eb, imgs_b)
+            parsed = _j.loads(st_b)
+            assert isinstance(parsed, dict) and ("base:" + rX["address"]) in parsed, "[pairs logo cache] corrupt value %r was not overwritten: %s" % (bad, st_b)
+        pgt, et, nett, _ = await logo_page("base", [rX], gt_data=gt_x, throw_ls=True)
+        await pgt.wait_for_timeout(1500)
+        imgs_t = await img_addrs(pgt)
+        await pgt.close()
+        assert not et and imgs_t == [rX["address"]], "[pairs logo cache] throwing localStorage broke logos: errs=%s imgs=%s" % (et, imgs_t)
+        print("[pairs logo cache] fresh cached logos painted before the GT answer (%s imgs at first GT request); expired / http / oversized / 'none' handled (asked %d of 7); fully cached page makes zero GT requests; cap 600 enforced (oldest dropped); corrupt JSON ignored+overwritten; throwing localStorage harmless"
+              % (imgs_gt[0], len(asked)))
+
+        # ---- [pairs jup fallback] ----
+        M = [sol_mint(i) for i in range(1, 10)]
+        srows = [dict(ROW, chain="solana", address=m, symbol="S%d" % i) for i, m in enumerate(M)]
+
+        def gt_sol(addrs):
+            out = []
+            if M[0] in addrs: out.append({"attributes": {"address": M[0], "image_url": "https://img.test/m1.png"}})
+            if M[1] in addrs: out.append({"attributes": {"address": M[1], "image_url": "https://img.test/m2.png"}})
+            if M[3] in addrs: out.append({"attributes": {"address": M[3], "image_url": "https://img.test/missing.png"}})
+            if M[4] in addrs: out.append({"attributes": {"address": M[4], "image_url": None}})
+            return out                                  # M[2], M[5..8] اصلاً در پاسخ نیستند
+
+        async def jup_ok(r, u):
+            arr = [{"id": M[2], "icon": "https://img.test/m3.png"},
+                   {"id": M[3], "icon": "http://img.test/m4.png"},
+                   {"id": M[4], "icon": "://gateway.pinata.cloud/ipfs/x"},
+                   {"id": M[5], "icon": "https://img.test/" + "y" * 600},
+                   {"id": M[6], "icon": "https://"},
+                   {"id": M[7], "icon": 123}]
+            await r.fulfill(status=200, content_type="application/json", headers=CORS, body=_j.dumps(arr))
+        pgj, ej, netj, _ = await logo_page("solana", srows, gt_data=gt_sol, jup=jup_ok)
+        await pgj.wait_for_timeout(2500)
+        imgs_j = await img_addrs(pgj)
+        st_j = _j.loads(await store_of(pgj))
+        await pgj.close()
+        from urllib.parse import urlparse as _up, parse_qs as _pq
+        assert not ej, "[pairs jup fallback] web/pairs.html threw: %s" % ej
+        assert len(netj["jup"]) == 1, "[pairs jup fallback] expected exactly one Jupiter request, got %d" % len(netj["jup"])
+        q = _pq(_up(netj["jup"][0]).query)["query"][0].split(",")
+        assert sorted(q) == sorted(M[2:]), "[pairs jup fallback] Jupiter must be asked for exactly the mints without a GT image: %s" % q
+        assert imgs_j == sorted([M[0], M[1], M[2]]), "[pairs jup fallback] only GT-good and the one valid Jupiter icon may paint: %s" % imgs_j
+        assert st_j.get("solana:" + M[2], {}).get("u") == "https://img.test/m3.png" and \
+            all(st_j.get("solana:" + m, {}).get("u") == "" for m in M[3:]), "[pairs jup fallback] cache after Jupiter wrong: %s" % st_j
+
+        async def jup_500(r, u):
+            await r.fulfill(status=500, content_type="application/json", headers=CORS, body="{}")
+        pgf, ef, netf, _ = await logo_page("solana", srows, gt_data=gt_sol, jup=jup_500)
+        await pgf.wait_for_timeout(2500)
+        imgs_f = await img_addrs(pgf)
+        st_f = _j.loads((await store_of(pgf)) or "{}")
+        n_letters = await pgf.evaluate("() => document.querySelectorAll('.tok-logo .tok-fb').length")
+        await pgf.close()
+        assert not ef and len(netf["jup"]) == 1 and imgs_f == sorted([M[0], M[1]]) and n_letters > 0 \
+            and not any(("solana:" + m) in st_f for m in M[2:]), \
+            "[pairs jup fallback] Jupiter 500 must be silent: errs=%s jup=%d imgs=%s letters=%d store=%s" % (ef, len(netf["jup"]), imgs_f, n_letters, sorted(st_f))
+        pgbb, ebb, netbb, _ = await logo_page("base", [rA, rB])
+        await pgbb.wait_for_timeout(1500)
+        await pgbb.close()
+        assert not ebb and netbb["jup"] == [] and netbb["gt"], "[pairs jup fallback] Base must never call Jupiter: %s" % netbb
+        print("[pairs jup fallback] Solana: one Jupiter request for exactly the 7 imageless mints; http / non-URL / overlong / unparsable / non-string icons rejected, only the valid one painted and cached; Jupiter 500 -> letters, no exception, nothing persisted; Base: zero Jupiter requests")
     finally:
         GT_ROUTE_DEFAULT["on"] = True
         srv.shutdown()

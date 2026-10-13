@@ -27,6 +27,50 @@
   root.dataset.theme = theme;
 })();
 </script>
+<script>
+/* منبعِ یگانه‌ی متنِ هر زنجیره + حالتِ سولانا پیش از اولین رنگ: اگر ?chain=solana باشد، عنوان همین‌جا
+   عوض می‌شود و اسکریپت‌های کوچکِ بعد از مارک‌آپ (هدر، تب‌ها، متنِ زیرِ تیتر) بقیه را پیش از رنگ می‌نشانند؛
+   وگرنه صفحه اول Base رنگ می‌شد و بعد می‌پرید. متنِ Base بایت‌به‌بایت همان HTML است. */
+(function(){
+  var z = window.__zxPairsCopy = {
+    sol: false,
+    TITLE_BASE: 'New pairs on Base \u2014 Zaexa',
+    TITLE_SOL: 'New pairs on Solana \u2014 Zaexa',
+    COPY_BASE: {
+      sub: 'The newest Base pools we found, each run through the same exit check as the app. Updated hourly.',
+      note: 'A sell quote is not a promise. It is one quote, at one moment, from the venues we cover. Tokens can change after it.'
+    },
+    COPY_SOL: {
+      sub: 'The newest Solana pools we found, each run through a simulated buy and sell. Updated hourly.',
+      note: 'A passed simulation is not a promise. It is one simulation, at one moment. Tokens can change after it.'
+    },
+    copy: function(){
+      if (!z.sol) return;
+      var sub = document.querySelector('.pairs-main .sub'), note = document.querySelector('.pairs-main .note');
+      if (sub) sub.textContent = z.COPY_SOL.sub;
+      if (note) note.textContent = z.COPY_SOL.note;
+    },
+    tabs: function(){
+      if (!z.sol) return;
+      var tabs = document.getElementById('chainTabs');
+      if (tabs) Array.prototype.forEach.call(tabs.querySelectorAll('button[data-chain]'), function(b){
+        var on = b.getAttribute('data-chain') === 'solana';
+        b.classList.toggle('on', on);
+        b.setAttribute('aria-selected', on ? 'true' : 'false');
+      });
+    },
+    links: function(){
+      if (!z.sol) return;
+      Array.prototype.forEach.call(document.querySelectorAll('a[href^="/app#"]'), function(a){
+        var m = /^(\/app#(?:swap|folio|flow))(?:\?chain=solana)?$/.exec(a.getAttribute('href'));
+        if (m) a.setAttribute('href', m[1] + '?chain=solana');
+      });
+    }
+  };
+  try { z.sol = new URLSearchParams(location.search).get('chain') === 'solana'; } catch (e) {}
+  if (z.sol) document.title = z.TITLE_SOL;
+})();
+</script>
 <style>
 /* توکن‌های طراحی — عیناً از web/landing.html (هر دو بلاکِ :root، همان
    کلیدها و همان مقادیر) تا این صفحه از همان سیستمِ رنگ/سایه/انحنا استفاده
@@ -643,6 +687,23 @@ try{(function(){
   </div>
   </div>
 </header>
+<script>
+/* سولانا پیش از رنگ: چیپِ شبکه و گزینشگرِ هدر (اگر در مارک‌آپ باشند) و لینک‌های /app تا اینجا. */
+(function(){
+  var z = window.__zxPairsCopy; if (!z || !z.sol) return;
+  var t = document.getElementById('srcTx');
+  if (t) {
+    var narrow = window.matchMedia && matchMedia('(max-width:960px)').matches;
+    t.textContent = narrow ? 'SOL' : 'Solana';
+    t.style.display = narrow ? 'inline' : '';
+  }
+  var pop = document.getElementById('srcPop');
+  if (pop) Array.prototype.forEach.call(pop.querySelectorAll('button[data-chain]'), function(b){
+    b.setAttribute('aria-checked', b.getAttribute('data-chain') === 'solana' ? 'true' : 'false');
+  });
+  z.links();
+})();
+</script>
 <!-- انتخاب‌گرِ اتصالِ کیف‌پول — عیناً مارک‌آپِ #walletOv در web/index.html.
      این صفحه فقط-خوانده است: هرگز switchNetwork، هرگز تراکنش. اتصال فقط
      برای نشان‌دادنِ آدرس/چیپ به کاربر است. -->
@@ -674,7 +735,9 @@ try{(function(){
 <main class="pairs-main">
   <h1>New pairs</h1>
   <p class="sub">The newest Base pools we found, each run through the same exit check as the app. Updated hourly.</p>
+<script>if(window.__zxPairsCopy)window.__zxPairsCopy.copy();</script>
   <p class="note">A sell quote is not a promise. It is one quote, at one moment, from the venues we cover. Tokens can change after it.</p>
+<script>if(window.__zxPairsCopy)window.__zxPairsCopy.copy();</script>
   <ul class="legend" id="verdictLegend" aria-label="What each verdict means">
           <li class="legend-item"><span class="badge badge-pos">Sell quoted</span><span class="legend-text">A venue quoted a sell for this token.</span></li>
           <li class="legend-item"><span class="badge badge-neg">No sell quote</span><span class="legend-text">No venue we cover would quote a sell.</span></li>
@@ -685,7 +748,7 @@ try{(function(){
         <button type="button" class="on" data-chain="base" role="tab" aria-selected="true"><svg width="18" height="18" aria-hidden="true" viewBox="0 0 111 111" fill="none" xmlns="http://www.w3.org/2000/svg">
 <path d="M54.921 110.034C85.359 110.034 110.034 85.402 110.034 55.017C110.034 24.6319 85.359 0 54.921 0C26.0432 0 2.35281 22.1714 0 50.3923H72.8467V59.6416H3.9565e-07C2.35281 87.8625 26.0432 110.034 54.921 110.034Z" fill="#0052FF"/>
 </svg>
-Base</button>
+Base</button><script>if(window.__zxPairsCopy)window.__zxPairsCopy.tabs();</script>
         <button type="button" data-chain="solana" role="tab" aria-selected="false"><svg width="18" height="18" aria-hidden="true" viewBox="0 0 101 88" fill="none" xmlns="http://www.w3.org/2000/svg">
 <path d="M100.48 69.3817L83.8068 86.8015C83.4444 87.1799 83.0058 87.4816 82.5185 87.6878C82.0312 87.894 81.5055 88.0003 80.9743 88H1.93563C1.55849 88 1.18957 87.8926 0.874202 87.6912C0.558829 87.4897 0.31074 87.2029 0.160416 86.8659C0.0100923 86.529 -0.0359181 86.1566 0.0280382 85.7945C0.0919944 85.4324 0.263131 85.0964 0.520422 84.8278L17.2061 67.408C17.5676 67.0306 18.0047 66.7295 18.4904 66.5234C18.9762 66.3172 19.5002 66.2104 20.0301 66.2095H99.0644C99.4415 66.2095 99.8104 66.3169 100.126 66.5183C100.441 66.7198 100.689 67.0067 100.84 67.3436C100.99 67.6806 101.036 68.0529 100.972 68.415C100.908 68.7771 100.737 69.1131 100.48 69.3817ZM83.8068 34.3032C83.4444 33.9248 83.0058 33.6231 82.5185 33.4169C82.0312 33.2108 81.5055 33.1045 80.9743 33.1048H1.93563C1.55849 33.1048 1.18957 33.2121 0.874202 33.4136C0.558829 33.6151 0.31074 33.9019 0.160416 34.2388C0.0100923 34.5758 -0.0359181 34.9482 0.0280382 35.3103C0.0919944 35.6723 0.263131 36.0083 0.520422 36.277L17.2061 53.6968C17.5676 54.0742 18.0047 54.3752 18.4904 54.5814C18.9762 54.7875 19.5002 54.8944 20.0301 54.8952H99.0644C99.4415 54.8952 99.8104 54.7879 100.126 54.5864C100.441 54.3849 100.689 54.0981 100.84 53.7612C100.99 53.4242 101.036 53.0518 100.972 52.6897C100.908 52.3277 100.737 51.9917 100.48 51.723L83.8068 34.3032ZM1.93563 21.7905H80.9743C81.5055 21.7907 82.0312 21.6845 82.5185 21.4783C83.0058 21.2721 83.4444 20.9704 83.8068 20.592L100.48 3.17219C100.737 2.90357 100.908 2.56758 100.972 2.2055C101.036 1.84342 100.99 1.47103 100.84 1.13408C100.689 0.79713 100.441 0.510296 100.126 0.308823C99.8104 0.107349 99.4415 1.24074e-05 99.0644 0L20.0301 0C19.5002 0.000878397 18.9762 0.107699 18.4904 0.313848C18.0047 0.519998 17.5676 0.821087 17.2061 1.19848L0.524723 18.6183C0.267681 18.8866 0.0966198 19.2223 0.0325185 19.5839C-0.0315829 19.9456 0.0140624 20.3177 0.163856 20.6545C0.31365 20.9913 0.561081 21.2781 0.875804 21.4799C1.19053 21.6817 1.55886 21.7896 1.93563 21.7905Z" fill="url(#paint0_linear_174_4403)"/>
 <defs>
@@ -699,7 +762,7 @@ Base</button>
 </linearGradient>
 </defs>
 </svg>
-Solana</button>
+Solana</button><script>if(window.__zxPairsCopy){window.__zxPairsCopy.tabs();window.__zxPairsCopy.links();}</script>
       </div></div>
   <div id="status" role="status" aria-live="polite">Loading the newest pairs&hellip;</div>
 
@@ -809,6 +872,7 @@ Solana</button>
   <p class="fine">Checks use public contract or token data and available quotes or simulations. They are not an audit or a guarantee. Your wallet authorizes transactions; there is no deposit account.</p>
   <div class="footBottom"><span>Non-custodial &middot; this page reads only our own endpoints &middot; not audited</span><span>&copy; 2026 Zaexa</span></div>
 </footer>
+<script>if(window.__zxPairsCopy)window.__zxPairsCopy.links();</script>
 
 <script>
 /* این صفحه یک نمای فقط-خوانده روی /pairs.json?chain=base|solana است. برای
@@ -1084,20 +1148,17 @@ Solana</button>
      متنِ Base بایت‌به‌بایت همان متنِ HTML می‌ماند و فقط روی سولانا عوض می‌شود. */
   var SUB_EL = document.querySelector('.pairs-main .sub');
   var NOTE_EL = document.querySelector('.pairs-main .note');
-  var COPY_BASE = { sub: SUB_EL ? SUB_EL.textContent : '', note: NOTE_EL ? NOTE_EL.textContent : '' };
-  var COPY_SOL = {
-    sub: 'The newest Solana pools we found, each run through a simulated buy and sell. Updated hourly.',
-    note: 'A passed simulation is not a promise. It is one simulation, at one moment. Tokens can change after it.'
-  };
+  // ثابت‌ها از اسکریپتِ سرِ صفحه می‌آیند؛ DOM روی بارِ سولانا از قبل متنِ سولانا دارد.
+  var COPY_BASE = window.__zxPairsCopy.COPY_BASE;
+  var COPY_SOL = window.__zxPairsCopy.COPY_SOL;
   function setChainCopy(){
     var c = currentChain === 'solana' ? COPY_SOL : COPY_BASE;
     if (SUB_EL) SUB_EL.textContent = c.sub;
     if (NOTE_EL) NOTE_EL.textContent = c.note;
   }
-  // عنوانِ سند هم زنجیره را دنبال می‌کند — TITLE_BASE از <title> نویسنده
-  // خوانده می‌شود (نه رشته‌ی تکراری) تا پیش‌فرض دقیقاً همان بمانَد.
-  var TITLE_BASE = document.title;
-  var TITLE_SOL = 'New pairs on Solana — Zaexa';
+  // عنوانِ سند هم زنجیره را دنبال می‌کند (ثابت‌ها از اسکریپتِ سرِ صفحه).
+  var TITLE_BASE = window.__zxPairsCopy.TITLE_BASE;
+  var TITLE_SOL = window.__zxPairsCopy.TITLE_SOL;
   function setChainTitle(){
     document.title = currentChain === 'solana' ? TITLE_SOL : TITLE_BASE;
   }
@@ -1466,6 +1527,63 @@ Solana</button>
   var logoInFlight = new Set(); // کلیدهایی که همین الان در حالِ فچ‌اند — نه صف، نه کش
   var logoTimer = null;
 
+  /* کشِ ماندگارِ لوگو (localStorage، zaexa.pairlogo.v1) — { "<chain>:<key>": {u, t} }.
+     پیدا شده ۷ روز معتبر، «لوگو ندارد» ۱ ساعت؛ حداکثر ۶۰۰ ورودی (قدیمی‌ترین بر اساس t می‌افتد)؛
+     فقط https ≤۵۱۲ نویسه ذخیره می‌شود. هر دسترسی در try/catch؛ مقدارِ خراب نادیده و بازنویسی می‌شود. */
+  var LOGO_LS_KEY = 'zaexa.pairlogo.v1';
+  var LOGO_FOUND_MS = 7 * 24 * 3600 * 1000, LOGO_NONE_MS = 3600 * 1000;
+  var LOGO_STORE_MAX = 600, LOGO_URL_MAX = 512;
+  var JUP_SEARCH = 'https://lite-api.jup.ag/tokens/v2/search?query=';
+  function logoUrlOk(u){
+    if (typeof u !== 'string' || u.indexOf('https://') !== 0 || u.length > LOGO_URL_MAX) return false;
+    try { new URL(u); return true; } catch (e) { return false; }
+  }
+  function logoEntryLive(e, now){
+    if (!e || typeof e !== 'object' || typeof e.u !== 'string' || typeof e.t !== 'number' || !isFinite(e.t)) return false;
+    var age = now - e.t;
+    if (age < -60000) return false;
+    if (e.u === '') return age < LOGO_NONE_MS;
+    return logoUrlOk(e.u) && age < LOGO_FOUND_MS;
+  }
+  var logoStore = null;
+  function logoStoreLoad(){
+    if (logoStore) return logoStore;
+    logoStore = {};
+    try {
+      var j = JSON.parse(localStorage.getItem(LOGO_LS_KEY) || 'null');
+      if (j && typeof j === 'object' && !Array.isArray(j)) {
+        var now = Date.now();
+        Object.keys(j).forEach(function(k){ if (logoEntryLive(j[k], now)) logoStore[k] = { u: j[k].u, t: j[k].t }; });
+      }
+    } catch (e) {}
+    return logoStore;
+  }
+  function logoStoreSet(chain, key, u){
+    var st = logoStoreLoad();
+    st[chain + ':' + key] = { u: logoUrlOk(u) ? u : '', t: Date.now() };
+  }
+  function logoStoreFlush(){
+    var st = logoStoreLoad();
+    var now = Date.now();
+    var ks = Object.keys(st).filter(function(k){ return logoEntryLive(st[k], now); });
+    if (ks.length > LOGO_STORE_MAX) {
+      ks.sort(function(a, b){ return st[b].t - st[a].t; });
+      ks = ks.slice(0, LOGO_STORE_MAX);
+    }
+    var out = {};
+    ks.forEach(function(k){ out[k] = st[k]; });
+    logoStore = out;
+    try { localStorage.setItem(LOGO_LS_KEY, JSON.stringify(out)); } catch (e) {}
+  }
+  // آیا جوابِ این کلید را داریم؟ اول حافظه، بعد کشِ ماندگار (که در حافظه هم می‌نشیند).
+  function logoKnown(key, chain){
+    if (logoCache.has(key)) return true;
+    var e = logoStoreLoad()[chain + ':' + key];
+    if (!logoEntryLive(e, Date.now())) return false;
+    logoCache.set(key, e.u);
+    return true;
+  }
+
   function logoKey(addr, chain){
     return chain === 'solana' ? String(addr) : String(addr).toLowerCase();
   }
@@ -1500,7 +1618,7 @@ Solana</button>
   function applyKnownLogos(){
     document.querySelectorAll('.tok-logo[data-addr]').forEach(function(slot){
       var key = logoKey(slot.getAttribute('data-addr') || '', currentChain);
-      if (!key || !logoCache.has(key)) return;
+      if (!key || !logoKnown(key, currentChain)) return;
       var url = logoCache.get(key);
       if (url && !slot.querySelector('img')) paintLogo(slot, url);
     });
@@ -1509,14 +1627,14 @@ Solana</button>
   function observeLogoSlots(){
     document.querySelectorAll('.tok-logo[data-addr]').forEach(function(slot){
       var key = logoKey(slot.getAttribute('data-addr') || '', currentChain);
-      if (!key || logoCache.has(key)) return;
+      if (!key || logoKnown(key, currentChain)) return;
       if (logoObserver) logoObserver.observe(slot);
       else queueLogo(key); // بدونِ IntersectionObserver: همه یک‌جا صف می‌شوند
     });
   }
 
   function queueLogo(key){
-    if (!key || logoCache.has(key) || logoQueue.has(key) || logoInFlight.has(key)) return;
+    if (!key || logoKnown(key, currentChain) || logoQueue.has(key) || logoInFlight.has(key)) return;
     logoQueue.add(key);
     if (!logoTimer) logoTimer = setTimeout(flushLogoQueue, LOGO_DEBOUNCE_MS);
   }
@@ -1554,19 +1672,67 @@ Solana</button>
         var key = logoKey(rawAddr, chain);
         var u = at.image_url;
         var good = (typeof u === 'string' && u.indexOf('https://') === 0 && !/missing/i.test(u)) ? u : '';
-        seen[key] = true;
-        logoCache.set(key, good);
-        if (good) paintAddrEverywhere(key, chain);
+        if (good) {
+          seen[key] = true;
+          logoCache.set(key, good);
+          logoStoreSet(chain, key, good);
+          paintAddrEverywhere(key, chain);
+        }
       });
-      // آدرس‌هایی که خواسته بودیم ولی در پاسخ نبودند هم «پرسیدیم، نداشت»‌اند —
-      // نه یک شکست؛ دوباره پرسیدنشان هرزگردی بی‌فایده است.
-      keys.forEach(function(k){ if (!seen[k]) logoCache.set(k, ''); });
+      // آدرس‌هایی که خواسته بودیم ولی در پاسخ نبودند، یا تصویرِ قابل‌استفاده نداشتند:
+      // سولانا → پشتیبانِ Jupiter؛ Base → «پرسیدیم، نداشت» (نه یک شکست).
+      var missing = keys.filter(function(k){ return seen[k] !== true; });
+      var toJup = [];
+      missing.forEach(function(k){
+        if (chain === 'solana') { toJup.push(k); return; }
+        logoCache.set(k, '');
+        logoStoreSet(chain, k, '');
+      });
+      logoStoreFlush();
+      if (toJup.length) {
+        toJup.forEach(function(k){ jupQueue.add(k); inJup[k] = true; });
+        if (!jupTimer) jupTimer = setTimeout(flushJupQueue, LOGO_DEBOUNCE_MS);
+      }
     }).catch(function(){
       // عمداً بی‌صدا: شکستِ /gt (شبکه، ۵۰۰، JSONِ نامعتبر) هرگز نباید به
       // کاربر نشان داده شود یا صفحه را بشکند. چیزی در Map ذخیره نمی‌شود، پس
       // همین آدرس‌ها بارِ بعد که دوباره دیده شوند دوباره پرسیده می‌شوند.
     }).then(function(){
-      keys.forEach(function(k){ logoInFlight.delete(k); });
+      keys.forEach(function(k){ if (!inJup[k]) logoInFlight.delete(k); });
+    });
+  }
+
+  /* پشتیبانِ سولانا: Jupiter برای مینت‌هایی که GeckoTerminal تصویرِ قابل‌استفاده نداد (بیشتر pump.fun).
+     همان صفِ دیبانس، حداکثر ۲۵ مینت در هر درخواست. شکستش بی‌صدا است و مسیرِ GT را نمی‌بندد؛
+     در این حالت فقط حافظه «بدونِ لوگو» می‌ماند و چیزی ماندگار نمی‌شود تا بارِ بعد دوباره امتحان شود. */
+  var jupQueue = new Set(), jupTimer = null, inJup = {};
+  function flushJupQueue(){
+    jupTimer = null;
+    var keys = Array.from(jupQueue);
+    jupQueue.clear();
+    for (var i = 0; i < keys.length; i += LOGO_CHUNK) fetchJupLogos(keys.slice(i, i + LOGO_CHUNK));
+  }
+  function fetchJupLogos(keys){
+    var ok = false, icons = {};
+    gtTimed(JUP_SEARCH + keys.join(',')).then(function(res){
+      if (!res.ok) throw new Error('bad status ' + res.status);
+      return res.json();
+    }).then(function(arr){
+      if (!Array.isArray(arr)) throw new Error('bad body');
+      arr.forEach(function(it){
+        if (it && typeof it.id === 'string' && logoUrlOk(it.icon)) icons[it.id] = it.icon;
+      });
+      ok = true;
+    }).catch(function(){}).then(function(){
+      keys.forEach(function(k){
+        var u = icons[k] || '';
+        logoCache.set(k, u);
+        if (ok) logoStoreSet('solana', k, u);
+        if (u) paintAddrEverywhere(k, 'solana');
+        delete inJup[k];
+        logoInFlight.delete(k);
+      });
+      if (ok) logoStoreFlush();
     });
   }
 
@@ -1579,7 +1745,7 @@ Solana</button>
       var raw = (row && row.address) || '';
       if (!raw) return;
       var key = logoKey(raw, chain);
-      if (!key || logoCache.has(key) || logoInFlight.has(key) || seen[key]) return;
+      if (!key || logoKnown(key, chain) || logoInFlight.has(key) || seen[key]) return;
       seen[key] = true;
       keys.push(key);
     });

@@ -19,7 +19,7 @@
 ## ۰. کارهای باز — به‌روز ۱۳ اکتبر ۲۰۲۶، به ترتیب
 
 فقط کارهای انجام‌نشده و تصمیم‌های ثابت. کارهای تمام‌شده در تاریخچه‌ی گیت هستند (آخرین: کارتِ پیش‌نمایشِ هر توکن `/og/t/<آدرس>.png` و نوارِ اسکرولِ حالتِ روز — ۱۳ اکتبر).
-سوییت رابط **۷۷۳ کاوشگر** سبز (`python3 web/test/run.py`، ۲۰ دقیقه یا بیشتر — در پس‌زمینه اجرا کن)؛ به‌علاوه‌ی `worker/test.mjs`، `worker/og_live_test.mjs`، `worker/solana-parity.test.mjs`،
+سوییت رابط **۷۷۶ کاوشگر** سبز (`python3 web/test/run.py`، ۲۰ دقیقه یا بیشتر — در پس‌زمینه اجرا کن)؛ به‌علاوه‌ی `worker/test.mjs`، `worker/og_live_test.mjs`، `worker/solana-parity.test.mjs`،
 شش `web/test/solana-*.test.mjs` و چهار آزمونِ مرورگر (`solana-parity-browser.py`، `solana-views-browser.py`،
 `solana-pairs-browser.py`، `market-workspace-browser.py` — از ریشه‌ی مخزن؛ `scripts/solana-wallet` باید `npm ci` شده باشد).
 ⚠️ کاوشگرِ `[report body unchanged]` بدنه‌ی گزارش را با کامیتِ ثابتِ `6944652` می‌سنجد؛ کلونِ کم‌عمق اول `git fetch --deepen=20` می‌خواهد.
@@ -74,6 +74,11 @@
 - اتصالِ خودکارِ بی‌صدا فقط به کیف‌پولی که کاربر آخرین بار صریحاً برای Base انتخاب کرده (`localStorage` `zaexa.base.wallet`؛ Disconnect پاکش می‌کند). علت: فانتوم با اجازه‌ی سولانا روی Base هم `eth_accounts` می‌داد.
 - فانتوم (EVM) `wallet_revokePermissions` ندارد (۶ اکتبر روی کیف‌پولِ حسام سنجیده شد) → قطعِ کامل فقط با حذفِ زائکسا از «Trusted apps» خودِ فانتوم. فانتوم برای سایتِ مورد اعتماد آدرس را بی‌رمز می‌دهد؛ امضا رمز می‌خواهد (حسام تأیید کرد). از سمتِ سایت درست‌شدنی نیست — دوباره دنبالش نرو.
 - ردِ تغییرِ شبکه (`switchNetwork`) هرگز throw نمی‌کند: پیامِ «Network switch cancelled in your wallet.».
+
+**/pairs — اولین نقاشی و لوگوها** (۱۳ اکتبر، از ویدیوی حسام)
+- با `?chain=solana` تب، `.sub`/`.note` و عنوان پیش از اولین نقاشی سولانا هستند (اسکریپت‌های کوچکِ درجا بعد از هر عنصر، مثلِ چیپِ کیف‌پول). `COPY_BASE`/`TITLE_BASE` حالا ثابت‌اند، نه خوانده از DOM. کاوشگرِ `[pairs first paint]`.
+- لوگوها در `localStorage` `zaexa.pairlogo.v1` (یافت‌شده ۷ روز، «ندارد» ۱ ساعت، سقفِ ۶۰۰، فقط https) و پیش از هر شبکه نقاشی می‌شوند. کاوشگرِ `[pairs logo cache]`.
+- سولانا: مینتی که GeckoTerminal لوگو ندارد (۲۲ از ۴۰ ردیفِ اول در ۱۳ اکتبر؛ DexScreener هم صفر) از `lite-api.jup.ag/tokens/v2/search` (≤۲۵ در هر تماس) — فقط `icon`ِ https و ≤۵۱۲ نویسه؛ میزبان‌ها متفرق‌اند و تصویرِ خراب با onerror کنار می‌رود. هرگز برای Base. کاوشگرِ `[pairs jup fallback]`.
 
 **دادهٔ بازار بدونِ وابستگی به کلید** (۱۳ اکتبر — کلیدِ Demoِ کوین‌گکو به سقفِ ماهانه‌ی ۱۰٬۰۰۰ خورد: هر تماسِ کلیددار ۴۲۹ با `error_code` ۱۰۰۰۶)
 - مرورگر (`gtJson` در اپ و لوگوهای /pairs): اول **مستقیم** و بی‌کلید از GeckoTerminal (هر کاربر سهمِ IP خودش)؛ اگر مستقیم پرتاب کرد یا ۴۲۹/۵xx داد → همان لحظه از /gt، و ۱۰ دقیقه «اول پراکسی» در `sessionStorage` `zaexa.gtroute.v1`. ۴۰۴ِ مستقیم «پیدا نشد»ِ واقعی است. کاوشگرهای `[gt direct first]` و `[pairs logo route]`.
