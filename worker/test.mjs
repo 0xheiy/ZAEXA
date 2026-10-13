@@ -11299,6 +11299,38 @@ function stripAllowedWording(t) {
     + "or every injected fetch throws mid-stage");
 }
 
+/* ---- ۱۳ اکتبر — [cron awaits pass]: کرون گذر را await می‌کند، نه waitUntil ----
+   کارِ waitUntil بعد از برگشتنِ هندلر فقط ~۳۰ث فرصت دارد؛ گذرِ ریتم‌دارِ رله
+   بیشتر طول می‌کشد و پیش از نوشتنِ report:passlog قطع می‌شد. */
+{
+  const store = new Map();
+  const kvCron = {
+    get: async (k) => (store.has(k) ? store.get(k) : null),
+    put: async (k, v) => { store.set(k, v); },
+    list: async () => ({ keys: [], list_complete: true }),
+  };
+  const savedF = globalThis.fetch;
+  globalThis.fetch = async (url) => {
+    const u = String(url);
+    if (u.includes("/new_pools")) return json({ data: [] });
+    return new Response("{}", { status: 200 });
+  };
+  const waited = [];
+  try {
+    await worker.scheduled({ cron: "18 * * * *" }, { ZX_KV: kvCron }, { waitUntil: (p) => waited.push(p) });
+  } finally {
+    globalThis.fetch = savedF;
+  }
+  ok(waited.length === 0,
+     "scheduled() must await the report pass itself, never hand it to ctx.waitUntil (~30 s cap after return), got " +
+     waited.length + " waitUntil call(s)");
+  ok(store.has(PASS_LOG_KEY),
+     "by the time scheduled() resolves the pass must already have written " + PASS_LOG_KEY + ", got keys " +
+     JSON.stringify([...store.keys()]));
+  console.log("[cron awaits pass] scheduled() awaits the hourly pass (no ctx.waitUntil), so report:passlog is "
+    + "written before the handler returns");
+}
+
 /* ---- ۴۹. سقفِ ساب‌ریکوئست: توقفِ گذر، هرگز ذخیره‌ی ردیفِ آلوده، متادیتای
    دسته‌ای — [pass budget] ----
    makeSubMeter.capHit/capAt، capHit تزریقیِ runReportPass، دورریختنِ ردیفِ

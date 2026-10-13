@@ -3625,10 +3625,13 @@ export default {
   // اجرای ساعتیِ کرون (wrangler.toml، [triggers]). بدنه‌ی واقعی در
   // scheduledReportPass است تا worker/test.mjs بتواند بدونِ event واقعیِ
   // کرون آن را صدا بزند.
+  /* ۱۳ اکتبر: گذر باید await شود، نه waitUntil. کارِ waitUntil بعد از
+     برگشتنِ هندلر فقط حدودِ ۳۰ ثانیه فرصت دارد؛ از وقتی ریتم‌دهیِ رله
+     (≥۲۱۰۰ms بینِ تماس‌ها + انتظارِ ۴۲۹) آمد، گذر از ۳۰ ثانیه گذشت و پیش
+     از نوشتنِ لاگ قطع شد — گذرهای ۱۹:۱۸ و ۲۰:۱۸ UTC هیچ رکوردی نداشتند.
+     خودِ هندلرِ کرونِ ساعتی تا چند دقیقه زمانِ دیواری دارد. */
   async scheduled(event, env, ctx) {
-    const p = scheduledReportPass(env, ctx);
-    if (ctx && typeof ctx.waitUntil === "function") ctx.waitUntil(p);
-    else await p;
+    await scheduledReportPass(env, ctx);
   },
 };
 
