@@ -51,24 +51,82 @@ function relayCfg(env) {
   if (!u || !k || !u.startsWith("https://")) return null;
   return { base: u.replace(/\/+$/, ""), key: k };
 }
+/* ۱۳ اکتبر: ریتم‌دهیِ گذرِ ساعتی. رله یک IPv4 دارد و GeckoTerminal بی‌کلید
+   حدود ۳۰ تماس در دقیقه به ازای هر IP می‌دهد؛ گذر ~۲۰ تماس را در چند ثانیه
+   می‌زد و ۴۲۹ می‌خورد. فقط در طولِ گذر (passPace != null): تماس‌های رله
+   یکی‌یکی و با فاصله‌ی ≥ ۲۱۰۰ms شروع می‌شوند، و ۴۲۹ با انتظار دوباره
+   امتحان می‌شود. بیرون از گذر هیچ‌چیز عوض نمی‌شود. */
+const PACE_GAP_MS = 2100;
+const PACE_RETRY_WAITS = [8000, 20000];
+const PACE_WALL_MS = 8 * 60 * 1000;
+let passPace = null;
+const defaultPaceSleep = (ms) => new Promise((r) => setTimeout(r, ms));
+let paceSleepImpl = defaultPaceSleep;
+let paceNowImpl = () => Date.now();
+function paceStart() {
+  passPace = {
+    gate: Promise.resolve(), next: 0, t0: paceNowImpl(),
+    calls: 0, waitsMs: 0, r429: 0, retries: 0, ok: 0,
+  };
+  return passPace;
+}
+// یک نوبت: زنجیره‌ی وعده‌ها، نه حلقه‌ی مشغول
+async function paceSlot(pc) {
+  const prev = pc.gate;
+  let release;
+  pc.gate = new Promise((r) => { release = r; });
+  try {
+    await prev;
+    const wait = Math.max(0, pc.next - paceNowImpl());
+    if (wait > 0) { pc.waitsMs += wait; await paceSleepImpl(wait); }
+    pc.next = paceNowImpl() + PACE_GAP_MS;
+  } finally {
+    release();
+  }
+}
+// مهلتِ هر تماس؛ در گذر تا گرفتنِ نوبت شروع نمی‌شود (انتظار از مهلت کم نشود)
+function makeDeadline(ac, ms) {
+  let t = null;
+  const clear = () => { if (t !== null) { clearTimeout(t); t = null; } };
+  const arm = () => { clear(); t = setTimeout(() => ac.abort(), ms); };
+  if (!passPace) arm();
+  return { arm, clear };
+}
 async function gtUpstream(rest, env, opts) {
   const key = (env && typeof env.CG_KEY === "string" && env.CG_KEY) || "";
   const sig = opts && opts.signal ? { signal: opts.signal } : {};
+  const dl = opts && opts.dl;
   const rl = relayCfg(env);
+  const pc = passPace;
+  if (pc && dl) dl.clear();
   if (rl && relayDownUntil <= Date.now()) {
-    try {
-      const res = await fetch(rl.base + "/gt/" + rest,
-        { headers: { accept: "application/json", "x-zaexa-relay": rl.key }, ...sig });
-      if (res.status === 403 || res.status >= 500) {
+    for (let attempt = 0; ; attempt++) {
+      try {
+        if (pc) { await paceSlot(pc); if (dl) dl.arm(); pc.calls++; }
+        const res = await fetch(rl.base + "/gt/" + rest,
+          { headers: { accept: "application/json", "x-zaexa-relay": rl.key }, ...sig });
+        if (res.status === 403 || res.status >= 500) {
+          relayDownUntil = Date.now() + RELAY_DOWN_MS;
+        } else if (res.status !== 429) {
+          if (pc) pc.ok++;
+          return { res, src: "relay" };
+        } else if (pc) {
+          pc.r429++;
+          if (attempt < PACE_RETRY_WAITS.length && paceNowImpl() - pc.t0 <= PACE_WALL_MS) {
+            pc.retries++;
+            if (dl) dl.clear();
+            await paceSleepImpl(PACE_RETRY_WAITS[attempt]);
+            continue;
+          }
+        }
+      } catch (e) {
+        if (opts && opts.signal && opts.signal.aborted) throw e;
         relayDownUntil = Date.now() + RELAY_DOWN_MS;
-      } else if (res.status !== 429) {
-        return { res, src: "relay" };
       }
-    } catch (e) {
-      if (opts && opts.signal && opts.signal.aborted) throw e;
-      relayDownUntil = Date.now() + RELAY_DOWN_MS;
+      break;
     }
   }
+  if (pc && dl) dl.arm();
   if (key && cgKeyDownUntil <= Date.now()) {
     try {
       const res = await fetch(UPSTREAM_KEYED + "/" + rest,
@@ -98,7 +156,7 @@ import { tgRoute } from "./tg.js";
 import {
   REPORT_DATE_RE, PAIRS_KEY_BASE, reportKey, utcDateOf, emptyReportDoc, runReportPass, publishGuardRow,
   reportText, REPORT_TEXT_FIRST_DATE, followForRow, recheckForRow, causeForRow, readPassLog,
-  REPORT_METER_STAGES, REPORT_PASS_BASE_CAP, REPORT_PAIRS_CAP,
+  REPORT_METER_STAGES, REPORT_PASS_BASE_CAP, REPORT_PAIRS_CAP, PASS_LOG_KEY,
 } from "./report.js";
 import { renderReportPage, renderReportNotFound, dayCounts, addDays, isRealDate, REPORT_HISTORY_DAYS } from "./report_page.js";
 import {
@@ -521,12 +579,12 @@ async function ogFetchMetaDetail(addr, env) {
   /* سقف زمانی سخت. اگر بالادست کند بود، کارت عمومی می‌شود ولی صفحه‌ی کاربر
      منتظر نمی‌ماند — «نمی‌دانم» نباید به «صفحه بالا نیامد» ترجمه شود. */
   const ac = new AbortController();
-  const timer = setTimeout(() => ac.abort(), OG_TIMEOUT_MS);
+  const dl = makeDeadline(ac, OG_TIMEOUT_MS);
   let out;
   try {
     let up;
     try {
-      ({ res: up } = await gtUpstream(rest, env, { signal: ac.signal }));
+      ({ res: up } = await gtUpstream(rest, env, { signal: ac.signal, dl }));
     } catch (e) {
       out = { meta: null, why: ac.signal.aborted ? "meta:timeout" : "meta:0" };
     }
@@ -542,7 +600,7 @@ async function ogFetchMetaDetail(addr, env) {
       }
     }
   } finally {
-    clearTimeout(timer);
+    dl.clear();
   }
   /* پشتیبانِ DexScreener — فقط برای کارتِ تک‌توکن (/t/، /og/t، /vd)، هرگز در
      گذرِ گزارش، metaMany، پراکسی یا سایت‌مپ. اعدادِ نقدینگی/حجمِ آن با
@@ -611,11 +669,11 @@ async function ogFetchMetaMany(addrs, env) {
     const rest = "networks/base/tokens/multi/" + addrs.join(",");
 
     const ac = new AbortController();
-    const timer = setTimeout(() => ac.abort(), OG_TIMEOUT_MS);
+    const dl = makeDeadline(ac, OG_TIMEOUT_MS);
     try {
       let up;
       try {
-        ({ res: up } = await gtUpstream(rest, env, { signal: ac.signal }));
+        ({ res: up } = await gtUpstream(rest, env, { signal: ac.signal, dl }));
       } catch (e) {
         return null;
       }
@@ -645,7 +703,7 @@ async function ogFetchMetaMany(addrs, env) {
       }
       return out;
     } finally {
-      clearTimeout(timer);
+      dl.clear();
     }
   } catch (e) {
     return null;
@@ -804,16 +862,16 @@ async function fetchBaseTokenPoolsRaw(addr, env, network) {
     const rest = "networks/" + net + "/tokens/" + addr + "/pools";
 
     const ac = new AbortController();
-    const timer = setTimeout(() => ac.abort(), OG_TIMEOUT_MS);
+    const dl = makeDeadline(ac, OG_TIMEOUT_MS);
     let up;
     try {
       try {
-        ({ res: up } = await gtUpstream(rest, env, { signal: ac.signal }));
+        ({ res: up } = await gtUpstream(rest, env, { signal: ac.signal, dl }));
       } catch (e) {
         result = { ok: false, why: ac.signal.aborted ? "cover:timeout" : "cover:0" };
       }
     } finally {
-      clearTimeout(timer);
+      dl.clear();
     }
     if (!result) {
       if (!up || !up.ok) {
@@ -3251,6 +3309,38 @@ async function scheduledReportPass(env, ctx, opts) {
 // خودِ منطقِ گذر (اینجا) قاطی نشوند؛ همان تقسیمِ مسئولیتی که خودِ
 // runReportPass با kv/fetchPools/... تزریقی رعایت می‌کند.
 async function scheduledReportPassInner(env, ctx, opts, meter) {
+  paceStart();
+  try {
+    return await scheduledReportPassBody(env, ctx, opts, meter);
+  } finally {
+    passPace = null; // ریتم‌دهی فقط عمرِ همین گذر را دارد
+  }
+}
+
+/* خلاصه‌ی رله (فقط عدد) را روی اولین رکوردِ لاگِ گذر می‌نشاند — همان put
+   که runReportPass می‌زند؛ هر خطایی → put بدونِ دست‌کاری. */
+function paceKv(kv) {
+  if (!kv) return kv;
+  return {
+    get: (...a) => kv.get(...a),
+    list: (...a) => kv.list(...a),
+    put: (k, v, ...rest) => {
+      try {
+        const pc = passPace;
+        if (pc && k === PASS_LOG_KEY && typeof v === "string") {
+          const arr = JSON.parse(v);
+          if (Array.isArray(arr) && arr[0] && typeof arr[0] === "object") {
+            arr[0].relay = { calls: pc.calls, waitsMs: pc.waitsMs, r429: pc.r429, retries: pc.retries, ok: pc.ok };
+            v = JSON.stringify(arr);
+          }
+        }
+      } catch (e) { /* بدونِ دست‌کاری */ }
+      return kv.put(k, v, ...rest);
+    },
+  };
+}
+
+async function scheduledReportPassBody(env, ctx, opts, meter) {
   try {
     const fetchPools = async () => {
       try {
@@ -3288,7 +3378,7 @@ async function scheduledReportPassInner(env, ctx, opts, meter) {
     };
 
     return await runReportPass({
-      kv: meterKv(env.ZX_KV, meter),
+      kv: paceKv(meterKv(env.ZX_KV, meter)),
       meter,
       fetchPools,
       metaOf: (addr) => ogFetchMetaDetail(addr, env),
@@ -3550,6 +3640,10 @@ export { baseVenueCovered, baseVenueCoveredDetail, ogFetchVerdictDetail };
 export { solNosellVeto };
 export { UPSTREAM_FREE, UPSTREAM_KEYED };
 // فقط برای تست: پرچمِ «کلید افتاده» در سطحِ ایزوله است و بینِ بخش‌ها نشت می‌کند
+export function _paceHooks(h) { if (h && h.sleep) paceSleepImpl = h.sleep; if (h && h.now) paceNowImpl = h.now; if (h && h.reset) { paceSleepImpl = defaultPaceSleep; paceNowImpl = () => Date.now(); } }
+export function _paceActive() { return passPace; }
+export function _paceBegin() { return paceStart(); }
+export function _paceEnd() { passPace = null; }
 export function _relayDownUntil(set) { if (set !== undefined) relayDownUntil = set; return relayDownUntil; }
 export function _cgKeyDownUntil(set) { if (set !== undefined) cgKeyDownUntil = set; return cgKeyDownUntil; }
 export { VD_ADDR_RE };

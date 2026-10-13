@@ -15151,6 +15151,106 @@ function stripAllowedWording(t) {
     console.log("[gt relay] relay first (one call, header, path+query, miss-relay, zero CoinGecko); 404 final; 429 falls to keyed without the flag; 403/5xx/throw fall through and set a 60 s flag that skips the relay; expiry retries; non-https/missing key/url ignored; key and host never in response; /vd/src relay:{s}|unset never touching the flag; DexScreener via relay first then direct");
   }
 
+  // ---------- [pass pacing] ----------
+  {
+    const { _paceHooks, _paceBegin, _paceEnd, _paceActive, _relayDownUntil } = idx;
+    const RL = "https://gtc.example.test:9443", RK = "RELAY-SECRET-KEY-XYZ";
+    const envP = { ASSETS, GT_RELAY_URL: RL, GT_RELAY_KEY: RK };
+    const envPK = { ...envP, CG_KEY: KEY };
+    const isRl = (u) => u.startsWith(RL);
+    let T = 0, sleeps = [];
+    const fake = () => _paceHooks({ now: () => T, sleep: async (ms) => { sleeps.push(ms); T += ms; } });
+    const reset = () => { _paceHooks({ reset: true }); T = 0; sleeps = []; _relayDownUntil(0); _cgKeyDownUntil(0); };
+    const starts = [];
+    const okBody = () => new Response(JSON.stringify({ data: [] }), { status: 200, headers: { "content-type": "application/json" } });
+    const gtc = async (n) => call("/gt/networks/base/new_pools?page=" + n, ipH(), envP);
+
+    // الف) در گذر: شروعِ تماس‌های رله ≥ ۲۱۰۰ms از هم (ترتیبی و هم‌زمان)
+    reset(); fake(); _paceBegin(); starts.length = 0;
+    await withFetch((u) => { if (isRl(u)) starts.push(T); return okBody(); }, async () => {
+      for (let n = 1; n <= 4; n++) await gtc(100 + n);
+    });
+    ok(starts.length === 4, "[pass pacing] expected 4 relay calls, got " + starts.length);
+    ok(starts.every((t, i) => i === 0 || t - starts[i - 1] >= 2100), "[pass pacing] relay call starts must be >= 2100 ms apart, got " + JSON.stringify(starts));
+    // هم‌زمان: ساعتِ جعلی مشترک است، پس فقط جمعِ انتظارها را می‌سنجیم (چهار تماس → سه انتظارِ ۲۱۰۰)
+    sleeps = []; T = 1e6;
+    await withFetch(() => okBody(), async () => { await Promise.all([1, 2, 3, 4].map((n) => gtc(150 + n))); });
+    _paceEnd();
+    ok(sleeps.length === 3 && sleeps.every((x) => x === 2100), "[pass pacing] 4 concurrent relay calls must serialize into 3 waits of 2100, got " + JSON.stringify(sleeps));
+
+    // ب) بیرون از گذر: هیچ ریتم‌دهی
+    reset(); fake(); starts.length = 0;
+    await withFetch((u) => { if (isRl(u)) starts.push(T); return okBody(); }, async () => {
+      await Promise.all([1, 2, 3, 4].map((n) => gtc(200 + n)));
+    });
+    ok(_paceActive() === null && sleeps.length === 0 && starts.length === 4 && starts.every((t) => t === 0),
+       "[pass pacing] outside a pass there must be zero pacing, got sleeps " + JSON.stringify(sleeps));
+
+    // ج) ۴۲۹ سپس ۲۰۰ → یک تلاشِ دوباره (۸ ثانیه)، موفقیت از رله، صفر CoinGecko/GT
+    reset(); fake(); const pcC = _paceBegin(); let nC = 0;
+    await withFetch((u) => (isRl(u) ? (++nC === 1 ? new Response("{}", { status: 429 }) : okBody()) : okBody()), async () => {
+      const r = await gtc(300);
+      ok(r.status === 200, "[pass pacing] 429 then 200 must succeed, got " + r.status);
+      ok(log.filter((l) => isRl(l.u)).length === 2 && log.every((l) => isRl(l.u)), "[pass pacing] 429 then 200: two relay calls, nothing else, got " + JSON.stringify(log.map((l) => l.u)));
+    });
+    ok(sleeps.includes(8000) && pcC.retries === 1 && pcC.r429 === 1 && pcC.ok === 1 && pcC.calls === 2,
+       "[pass pacing] retry accounting wrong: " + JSON.stringify(pcC) + " sleeps " + JSON.stringify(sleeps));
+    _paceEnd();
+
+    // د) ۴۲۹×۳ → بعد از دو تلاشِ دوباره (۸ و ۲۰) می‌افتد پایین؛ کلیدِ خاموش → بدونِ تماسِ کلیددار
+    reset(); fake(); const pcD = _paceBegin(); _cgKeyDownUntil(Date.now() + 1e7);
+    await withFetch((u) => (isRl(u) ? new Response("{}", { status: 429 }) : okBody()), async () => {
+      const r = await call("/gt/networks/base/new_pools?page=400", ipH(), envPK);
+      ok(r.status === 200, "[pass pacing] fall-through after 429x3 must answer from GT, got " + r.status);
+      ok(log.filter((l) => isRl(l.u)).length === 3 && log.filter((l) => isGt(l.u)).length === 1 && log.filter((l) => isCg(l.u)).length === 0,
+         "[pass pacing] 429x3: 3 relay calls, 1 keyless GT, 0 keyed, got " + JSON.stringify(log.map((l) => l.u)));
+    });
+    ok(sleeps.filter((x) => x === 8000 || x === 20000).join() === "8000,20000" && pcD.retries === 2 && pcD.r429 === 3,
+       "[pass pacing] 429x3 retry waits must be 8000 then 20000, got " + JSON.stringify(sleeps) + " " + JSON.stringify(pcD));
+    _paceEnd();
+
+    // هـ) سقفِ زمانیِ ۸ دقیقه: دیگر تلاشِ دوباره نیست
+    reset(); fake(); const pcE = _paceBegin(); T = 8 * 60 * 1000 + 1;
+    await withFetch((u) => (isRl(u) ? new Response("{}", { status: 429 }) : okBody()), async () => {
+      await call("/gt/networks/base/new_pools?page=500", ipH(), envP);
+      ok(log.filter((l) => isRl(l.u)).length === 1 && log.filter((l) => isGt(l.u)).length === 1,
+         "[pass pacing] past the 8 min guard: one relay call, no retry, fall through, got " + JSON.stringify(log.map((l) => l.u)));
+    });
+    ok(pcE.retries === 0 && !sleeps.includes(8000), "[pass pacing] time guard must stop retries, got " + JSON.stringify(pcE));
+    _paceEnd();
+
+    // و) انتظارِ نوبت از مهلتِ تماس کم نمی‌شود (انتظارِ واقعیِ ~۲.۱ ثانیه > OG_TIMEOUT_MS)
+    reset(); _paceBegin();
+    const addrsP = ["0x" + "1".repeat(40)];
+    let metaRes = null;
+    await withFetch((u, o) => {
+      if (o.signal && o.signal.aborted) throw new Error("aborted");
+      return new Response(JSON.stringify({ data: [{ attributes: { address: addrsP[0], name: "A", symbol: "A", decimals: 18, price_usd: "1", total_reserve_in_usd: "1", volume_usd: { h24: "1" } } }] }), { status: 200, headers: { "content-type": "application/json" } });
+    }, async () => {
+      metaRes = await Promise.all([idx.ogFetchMetaMany(addrsP, envP), idx.ogFetchMetaMany(addrsP, envP)]);
+    });
+    _paceEnd();
+    ok(metaRes[0] !== null && metaRes[1] !== null, "[pass pacing] a call that waited for its slot must still get its full timeout, got " + JSON.stringify(metaRes.map((x) => x === null)));
+
+    // ز) /vd/passes: خلاصه‌ی رله (فقط عدد)
+    reset(); fake();
+    const storeP = new Map();
+    const kvP = { get: async (k) => (storeP.has(k) ? storeP.get(k) : null), put: async (k, v) => { storeP.set(k, v); } };
+    let n429 = 0;
+    await withFetch((u) => {
+      if (isRl(u) && u.includes("base/new_pools") && ++n429 === 1) return new Response("{}", { status: 429 });
+      return okBody();
+    }, async () => { await scheduledReportPass({ ZX_KV: kvP, GT_RELAY_URL: RL, GT_RELAY_KEY: RK }, {}); });
+    const rp = await call("/vd/passes", ipH(), { ASSETS, ZX_KV: kvP });
+    const pj = await rp.json();
+    const rs = pj.passes && pj.passes[0] && pj.passes[0].relay;
+    ok(rs && ["calls", "waitsMs", "r429", "retries", "ok"].every((k) => Number.isFinite(rs[k])) && Object.keys(rs).length === 5 && rs.r429 === 1 && rs.retries === 1 && rs.calls >= 2,
+       "[pass pacing] /vd/passes must show the relay summary (numbers only), got " + JSON.stringify(rs));
+    ok(_paceActive() === null, "[pass pacing] pacing must be cleared after the pass");
+    reset();
+    console.log("[pass pacing] relay calls in a pass start >= 2100 ms apart (serial and concurrent), zero pacing outside a pass, relay 429 retried after 8 s then 20 s via the relay (max 2) and then falls through (keyed call skipped while the key is down), the 8 min guard stops retries, the slot wait never eats the call timeout, and /vd/passes carries {calls,waitsMs,r429,retries,ok}");
+  }
+
   // ---------- [report pass upstream calls] ----------
   {
     const hex = (n) => "0x" + n.toString(16).padStart(40, "0");
