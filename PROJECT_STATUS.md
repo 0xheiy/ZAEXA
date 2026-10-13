@@ -52,7 +52,7 @@
 - Pocket Universe برای zaexa.com خاموش یا پذیرفته شود: وقتی روشن است، پنجره‌ی قرمزِ «Request blocked» فانتوم می‌آید و امضا بی‌جواب می‌ماند (از سایت رفع‌شدنی نیست؛ سایت فقط بعد از ۴ث آزاد می‌شود).
 - فرمِ بازبینیِ فانتوم برای «Request blocked — dApp could be malicious» (مالِ فهرستِ دامنه‌ی خودِ فانتوم؛ از کد رفع نمی‌شود):
   https://docs.google.com/forms/d/1JgIxdmolgh_80xMfQKBKx9-QPC7LRdN6LHpFFW8BlKM/viewform
-- روشن کردنِ «تبدیلِ تصویر» (Image Transformations) برای zaexa.com در پنلِ کلادفلر — رایگان تا ۵۰۰۰ تبدیلِ یکتا در ماه. بدونِ آن لوگوی توکن روی کارت نمی‌آید و دایره‌ی حرفِ اول می‌آید (`x-zaexa-logo: type` یا `size`).
+- ✅ ۱۳ اکتبر روشن شد؛ Sources باید Specified origins باشد با coin-images.coingecko.com و assets.geckoterminal.com (نه This zone only — آن لوگوهای بیرونی را رد می‌کند؛ نه Any origin). «تبدیلِ تصویر» (Image Transformations) برای zaexa.com در پنلِ کلادفلر — رایگان تا ۵۰۰۰ تبدیلِ یکتا در ماه. بدونِ آن لوگوی توکن روی کارت نمی‌آید و دایره‌ی حرفِ اول می‌آید (`x-zaexa-logo: type` یا `size`).
 - فعال کردنِ کارمزدِ Base وقتی آماده بود:
   `cast send $SWAP_EXECUTOR "setFee(uint256)" 10 --rpc-url $RPC --private-key $PRIVATE_KEY`
 
@@ -82,7 +82,7 @@
 - لوگو: `image_url`ِ GeckoTerminal با `cf.image` ۶۸×۶۸ baseline-jpeg؛ هر شکست → دایره‌ی گرادیانِ برند با حرفِ اول. نتیجه در هدرِ `x-zaexa-logo` (ok|none|fetch|status|type|size|decode). نماد با نویسه‌ی بیرونِ اطلس → کارتِ عمومی.
 - کارتِ عمومی v5 (`OG_IMAGE_V="5"`): بدونِ گرید، درخشش‌های فیروزه‌ای و بنفش با مرکزِ بیرونِ کادر، دیترِ Bayer ضدِ پله. [حسام] این ظاهر را تأیید کرد — درخشش‌ها را کدر نکن و گرید را برنگردان.
 
-**نوارِ اسکرولِ حالتِ روز** (۱۳ اکتبر): روی هر چهار صفحه `:root:not([data-theme=dark]){color-scheme:light;scrollbar-color:var(--line2) var(--bg)}` — کاوشگرِ `[light scrollbar]`. صفحه‌ی معرفی: دانه‌ی ۶۴×۶۴ با آلفای ۲/۲۵۵ (`--dither`) روی درخشش‌های بزرگ — کاوشگرِ `[landing dither]`. آلفای ۴ در حالتِ شب دیده می‌شد.
+**نوارِ اسکرولِ حالتِ روز** (۱۳ اکتبر): روی هر چهار صفحه `:root:not([data-theme=dark]){color-scheme:light;scrollbar-color:var(--line2) var(--bg)}` — کاوشگرِ `[light scrollbar]`. صفحه‌ی معرفی: یک لایه‌ی ثابتِ تمام‌صفحه `body:after` با دانه‌ی ۱۲۸×۱۲۸ و آلفای ۳/۲۵۵ (`--dither`) — کاوشگرِ `[landing dither]`. روکشِ تک‌عنصری شکست خورد (۱۳ اکتبر، حسام روی مانیتورش حلقه‌ها را می‌دید): روی عنصرهای blurدار دانه محو می‌شد و لبه‌ی روکشِ دایره‌ایِ hero خودش حلقه می‌ساخت. آلفای ۴ دیده می‌شد، ۲ کافی نبود.
 
 **نوارِ Market watch** — یک بار ساخته می‌شود و فقط عدد/اسپارک/کلاس در جا عوض می‌شود؛ آواتار فقط با تغییرِ آدرسِ لوگو؛ آدرسِ لوگوها در `localStorage` `zaexa.watchlogo.v1`. (تا ۱۱ اکتبر هر به‌روزرسانی innerHTML می‌ریخت و لوگوها حرف↔لوگو چشمک می‌زدند.) `html{scrollbar-gutter:stable}` روی اپ، /pairs و /report تا هدر بینِ صفحه‌ها نپرد.
 

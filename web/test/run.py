@@ -2127,28 +2127,54 @@ async def check_light_scrollbar(p, errors):
     print("[light scrollbar] light theme: color-scheme light and scrollbar track rgb(244, 245, 247) on app/pairs/landing; dark stays dark (%s)" % ", ".join(rows))
 
 def check_landing_dither():
-    """[landing dither] دانه‌ی دیترینگ روی درخشش‌های بزرگِ لندینگ — بررسیِ ایستا روی منبع.
-    روی عنصرِ دارای filter:blur دانه محو می‌شود، پس برای blobها و هاله‌ی hero یک لایه‌ی :after بدونِ فیلتر می‌نشیند."""
+    """[landing dither] دانه‌ی دیترینگ ضدِ پله روی کلِ لندینگ — بررسیِ ایستا روی منبع.
+    ۱۳ اکتبر: روکش‌های تک‌عنصری کافی نبود (blur دانه را محو می‌کرد و لبه‌ی روکشِ hero حلقه می‌ساخت)؛
+    حالا یک لایه‌ی ثابتِ تمام‌صفحه با body:after. هیچ عنصرِ دیگری نباید var(--dither) داشته باشد."""
     src = open(os.path.join(HERE, "..", "landing.html"), encoding="utf-8").read()
     m = re.search(r':root\{--dither:url\("data:image/png;base64,([A-Za-z0-9+/=]+)"\)\}', src)
     assert m, "[landing dither] --dither is not defined on :root of web/landing.html"
     png = base64.b64decode(m.group(1))
     assert png[:8] == b"\x89PNG\r\n\x1a\n", "[landing dither] --dither is not a PNG"
     w, h = struct.unpack(">II", png[16:24])
-    assert (w, h) == (64, 64), "[landing dither] grain must be 64x64, got %dx%d" % (w, h)
-    assert len(png) <= 4096, "[landing dither] grain PNG is %d bytes (limit 4096)" % len(png)
-    sels = (".page-glow:after", ".hero-visual:after", ".feature-highlight", ".trust-art")
-    for sel in sels:
-        found = []
-        for rm in re.finditer(r'(?:^|[}\s])' + re.escape(sel) + r'\{([^}]*)\}', src):
-            for bg in re.findall(r'(?:^|;)background(?:-image)?:([^;]*)', rm.group(1)):
-                found.append(bg.strip())
-        assert found, "[landing dither] %s has no background declaration" % sel
-        assert any(f.startswith("var(--dither)") for f in found), "[landing dither] %s: var(--dither) is not the first background layer (%r)" % (sel, found)
-        for f in found:
-            if "gradient(" in f:
-                assert f.startswith("var(--dither)"), "[landing dither] %s: gradient layer without the grain on top: %r" % (sel, f)
-    print("[landing dither] --dither on :root is a 64x64 PNG of %d bytes; var(--dither) is the top background layer on %s" % (len(png), ", ".join(sels)))
+    assert (w, h) == (128, 128), "[landing dither] grain must be 128x128, got %dx%d" % (w, h)
+    assert len(png) <= 8192, "[landing dither] grain PNG is %d bytes (limit 8192)" % len(png)
+    # آلفای هر پیکسل باید دقیقاً ۳ باشد: ۴ در حالتِ شب دیده می‌شد و ۲ پله را نمی‌شکست
+    import zlib
+    pos, idat = 8, b""
+    while pos < len(png):
+        ln = struct.unpack(">I", png[pos:pos + 4])[0]; typ = png[pos + 4:pos + 8]
+        if typ == b"IDAT": idat += png[pos + 8:pos + 8 + ln]
+        pos += 12 + ln
+    color_type = png[25]
+    assert color_type == 6, "[landing dither] grain must be RGBA (colour type 6), got %d" % color_type
+    raw = zlib.decompress(idat)
+    stride = 1 + 4 * w
+    prev, rows = bytearray(4 * w), []
+    for i in range(h):
+        f, line = raw[i * stride], bytearray(raw[i * stride + 1:(i + 1) * stride])
+        for x in range(len(line)):
+            a = line[x - 4] if x >= 4 else 0
+            b = prev[x]
+            c = prev[x - 4] if x >= 4 else 0
+            if f == 1: line[x] = (line[x] + a) & 255
+            elif f == 2: line[x] = (line[x] + b) & 255
+            elif f == 3: line[x] = (line[x] + (a + b) // 2) & 255
+            elif f == 4:
+                pa, pb, pc = abs(b - c), abs(a - c), abs(a + b - 2 * c)
+                line[x] = (line[x] + (a if pa <= pb and pa <= pc else b if pb <= pc else c)) & 255
+        rows.append(line); prev = line
+    alphas = set(r[3 + 4 * x] for r in rows for x in range(w))
+    assert alphas == {3}, "[landing dither] grain alpha must be exactly 3/255, got %r" % sorted(alphas)
+    rule = re.search(r'body:after\{([^}]*)\}', src)
+    assert rule, "[landing dither] no full-page body:after overlay"
+    body = rule.group(1)
+    for need in ("position:fixed", "inset:0", "pointer-events:none", "background:var(--dither) repeat"):
+        assert need in body, "[landing dither] body:after overlay lacks %r: %r" % (need, body)
+    z = re.search(r'z-index:(\d+)', body)
+    assert z and int(z.group(1)) >= 2147483000, "[landing dither] overlay must sit above every layer: %r" % body
+    users = len(re.findall(r'var\(--dither\)', src))
+    assert users == 1, "[landing dither] var(--dither) must be used only by the page overlay, found %d uses" % users
+    print("[landing dither] --dither is a 128x128 RGBA PNG of %d bytes, alpha 3/255; one fixed full-page body:after overlay, no per-element grain" % len(png))
 
 async def check_setbtn_pressed(p, errors):
     """[settings pressed] ۶ اکتبر — دکمه‌ی تنظیمات با کلیک (active) و با منوی باز باید گود شود؛
