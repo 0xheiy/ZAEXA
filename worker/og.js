@@ -16,6 +16,8 @@
    منبعِ خودِ صفحه می‌آید: هویت توکن و دو عدد بازار.
    ===================================================================== */
 
+import { renderable } from "./og-token.js";
+
 /* گریز برای *مقدار یک ویژگی* در HTML.
    نام و نماد توکن از یک منبع بیرونی می‌آید و ما آن را داخل HTML تزریق
    می‌کنیم — یعنی دقیقاً همان جایی که XSS متولد می‌شود. صفحه‌ی سواپ همین
@@ -74,6 +76,12 @@ export function pickTokenMeta(body) {
     Number.isInteger(a.decimals) && a.decimals >= 0 && a.decimals <= 36 ? a.decimals : null;
   const n = Number(a.price_usd);
   const priceUsd = Number.isFinite(n) && n > 0 ? n : null;
+  // نشانی لوگو: فقط https، حداکثر ۵۱۲ نویسه، و نه جایگزینِ «missing.png» ی GT
+  const iu = a.image_url;
+  const imageUrl =
+    typeof iu === "string" && iu.startsWith("https://") && iu.length <= 512 && !iu.includes("missing.png")
+      ? iu
+      : null;
   return {
     name: ogClean(a.name, 48),
     symbol: ogClean(a.symbol, 16),
@@ -81,6 +89,7 @@ export function pickTokenMeta(body) {
     vol24: ogBig(a.volume_usd && a.volume_usd.h24),
     decimals,
     priceUsd,
+    imageUrl,
   };
 }
 
@@ -135,12 +144,33 @@ export function ogDescription(meta, verdict, chain) {
    `v` در آدرس تصویر برای شکستن کش ربات‌هاست؛ اگر روزی تصویر عوض شد، همین
    عدد را جلو ببر — وگرنه تلگرام ماه‌ها تصویر قدیمی را نشان می‌دهد. */
 export const OG_IMAGE_PATH = "/og.png";
-export const OG_IMAGE_V = "4";
+export const OG_IMAGE_V = "5";
+/* نسخه‌ی تصویرِ مخصوصِ توکن (/og/t/<آدرس>.png) — اگر چیدمان یا فونتِ آن عوض
+   شد، همین را جلو ببر؛ بخشِ h= در آدرس فقط به داده‌ی همان توکن حساس است. */
+export const OG_TOKEN_IMAGE_V = "1";
+
+// هش FNV-1a ۳۲بیتی، ۸ رقمِ هگز — فقط برای شکستنِ کشِ ربات وقتی داده‌ی کارت عوض شد
+function fnv1aHex(str) {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < str.length; i++) {
+    h ^= str.charCodeAt(i);
+    h = Math.imul(h, 0x01000193) >>> 0;
+  }
+  return h.toString(16).padStart(8, "0");
+}
 
 export function ogTags(meta, addr, origin, verdict, chain) {
   const title = ogTitle(meta);
   const desc = ogDescription(meta, verdict, chain);
-  const img = origin + OG_IMAGE_PATH + "?v=" + OG_IMAGE_V;
+  let img = origin + OG_IMAGE_PATH + "?v=" + OG_IMAGE_V;
+  let alt = "Zaexa";
+  // نمادِ قابل‌رندر → کارتِ مخصوصِ توکن؛ وگرنه دقیقاً همان تگ‌های قدیمیِ عمومی
+  if (meta && meta.symbol && renderable(meta.symbol)) {
+    const ch = chain || "Base";
+    const h = fnv1aHex([meta.symbol, meta.name || "", meta.liquidity || "", meta.vol24 || "", verdict || "", ch].join("|"));
+    img = origin + "/og/t/" + addr + ".png?v=" + OG_TOKEN_IMAGE_V + "&h=" + h;
+    alt = meta.symbol + " on " + ch + " — Zaexa";
+  }
   const canonical = origin + "/t/" + addr;
   const m = (attr, k, v) =>
     "<meta " + attr + '="' + k + '" content="' + ogEscape(v) + '">';
@@ -153,7 +183,7 @@ export function ogTags(meta, addr, origin, verdict, chain) {
     m("property", "og:image", img),
     m("property", "og:image:width", "1200"),
     m("property", "og:image:height", "630"),
-    m("property", "og:image:alt", "Zaexa"),
+    m("property", "og:image:alt", alt),
     m("name", "twitter:card", "summary_large_image"),
     m("name", "twitter:site", "@zaexadex"),
     m("name", "twitter:title", title),

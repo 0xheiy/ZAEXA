@@ -30,6 +30,7 @@ const UPSTREAM_KEYED = "https://api.coingecko.com/api/v3/onchain";
 
 import { ogTags, ogTitle, pickTokenMeta } from "./og.js";
 import { ogImageResponse } from "./og-image.js";
+import { tokenCardPng, renderable, logoFromJpeg } from "./og-token.js";
 import { logoResponse } from "./logo-image.js";
 import { fetchVerdict, fetchCounterSell, poolDirectedProof, VD_VENUES, VD_RPCS, VD_V4_STAGE_COUNTERS,
   WETH_ADDR, USDC_ADDR } from "./verdict.js";
@@ -1886,6 +1887,122 @@ function injectOg(res, url, addr, metaPromise, vdPromise, chain) {
 }
 
 /* =====================================================================
+   /og/t/<آدرس>.png — کارتِ پیش‌نمایشِ مخصوصِ توکن (worker/og-token.js)
+   =====================================================================
+   همان خط‌لوله‌ی صفحه‌ی /t/: متا با ogFetchMetaDetail، verdict با
+   ogFetchVerdict و همان مهلتِ OG_BUDGET_MS که از لحظه‌ی رسیدنِ درخواست شروع
+   می‌شود — تصویر هرگز بیشتر از صفحه نمی‌گوید. بستهٔ نرخ همان «og»ِ صفحه‌ی
+   توکن است (کلید مشترکِ CoinGecko را همین دو مصرف می‌کنند).
+   هر خطا → کارتِ عمومی؛ ربات هرگز ۵۰۰ نمی‌بیند. */
+const OG_LOGO_TIMEOUT_MS = 1500;
+const OG_LOGO_MAX_BYTES = 65536;
+const OG_LOGO_OUTCOMES = ["ok", "none", "fetch", "status", "type", "size", "decode"];
+
+/* لوگو → { logo: Uint8Array(68*68*3) | null, why: یکی از OG_LOGO_OUTCOMES }.
+   ⚠️ نشانیِ لوگو هرگز لاگ یا بازتاب نمی‌شود (فقط میزبانش می‌توانست). */
+async function ogFetchLogo(imageUrl) {
+  if (!imageUrl) return { logo: null, why: "none" };
+  const ac = new AbortController();
+  const timer = setTimeout(() => ac.abort(), OG_LOGO_TIMEOUT_MS);
+  try {
+    let r;
+    try {
+      r = await fetch(imageUrl, {
+        cf: { image: { width: 68, height: 68, fit: "cover", format: "baseline-jpeg", background: "#151821", quality: 85 } },
+        signal: ac.signal,
+      });
+    } catch (e) {
+      return { logo: null, why: "fetch" };
+    }
+    if (r.status !== 200) return { logo: null, why: "status" };
+    const ct = (r.headers.get("content-type") || "").split(";")[0].trim().toLowerCase();
+    if (ct !== "image/jpeg") return { logo: null, why: "type" };
+    const cl = Number(r.headers.get("content-length"));
+    if (Number.isFinite(cl) && cl > OG_LOGO_MAX_BYTES) return { logo: null, why: "size" };
+    let bytes;
+    try {
+      const chunks = [];
+      let n = 0;
+      const rd = r.body.getReader();
+      for (;;) {
+        const { done, value } = await rd.read();
+        if (done) break;
+        n += value.length;
+        if (n > OG_LOGO_MAX_BYTES) { try { rd.cancel(); } catch (e) { /* مهم نیست */ } return { logo: null, why: "size" }; }
+        chunks.push(value);
+      }
+      bytes = new Uint8Array(n);
+      let o = 0;
+      for (const c of chunks) { bytes.set(c, o); o += c.length; }
+    } catch (e) {
+      return { logo: null, why: "fetch" };
+    }
+    try {
+      return { logo: logoFromJpeg(bytes), why: "ok" };
+    } catch (e) {
+      return { logo: null, why: e && e.message === "size" ? "size" : "decode" };
+    }
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+function ogGenericFallback(request, url) {
+  const r = ogImageResponse(new Request(url.origin + "/og.png", { method: request.method === "HEAD" ? "HEAD" : "GET" }));
+  const h = new Headers(r.headers);
+  h.set("cache-control", "public, max-age=60");
+  h.delete("etag");
+  return new Response(r.body, { status: 200, headers: h });
+}
+
+async function ogTokenRoute(request, url, env, ctx, addr) {
+  if (request.method !== "GET" && request.method !== "HEAD") return new Response(null, { status: 405 });
+  try {
+    const chainKey = chainOf(addr);
+    if (!chainKey) return ogGenericFallback(request, url);
+    const store = (typeof caches !== "undefined" && caches.default) || null;
+    const cacheKey = new Request(url.toString(), { method: "GET" });
+    if (store) {
+      try {
+        const hit = await store.match(cacheKey);
+        if (hit) return request.method === "HEAD" ? new Response(null, { status: hit.status, headers: hit.headers }) : hit;
+      } catch (e) { /* کش خراب = بی‌کش */ }
+    }
+    if (!rateOk(request, "og", RL_LIMIT, RL_WINDOW_MS)) return ogGenericFallback(request, url);
+    const deadlineAt = Date.now() + OG_BUDGET_MS;
+    const { meta } = await ogFetchMetaDetail(addr, env);
+    if (!meta || !meta.symbol || !renderable(meta.symbol)) return ogGenericFallback(request, url);
+    const chain = chainKey === "solana" ? "Solana" : "Base";
+    const [verdict, lg] = await Promise.all([
+      ogFetchVerdict(addr, meta, deadlineAt, env, ctx).catch(() => null),
+      ogFetchLogo(meta.imageUrl).catch(() => ({ logo: null, why: "fetch" })),
+    ]);
+    const png = await tokenCardPng({
+      symbol: meta.symbol, name: meta.name, liquidity: meta.liquidity, vol24: meta.vol24,
+      verdict, chain, logo: lg.logo,
+    });
+    const res = new Response(request.method === "HEAD" ? null : png, {
+      status: 200,
+      headers: {
+        "content-type": "image/png",
+        "content-length": String(png.length),
+        "cache-control": "public, max-age=900",
+        "access-control-allow-origin": "*",
+        "x-zaexa-logo": OG_LOGO_OUTCOMES.includes(lg.why) ? lg.why : "fetch",
+      },
+    });
+    if (store && request.method === "GET") {
+      let put = null;
+      try { put = Promise.resolve(store.put(cacheKey, res.clone())).catch(() => {}); } catch (e) { /* کش خراب = بی‌کش */ }
+      if (put && ctx && typeof ctx.waitUntil === "function") ctx.waitUntil(put);
+    }
+    return res;
+  } catch (e) {
+    return ogGenericFallback(request, url);
+  }
+}
+
+/* =====================================================================
    /vd/<آدرس> — پروبِ تشخیصیِ verdict، بدونِ کارت
    =====================================================================
    مسئله: یک verdictِ نامعلوم روی کارت بایت‌به‌بایت همان توضیحِ قدیمی است،
@@ -3192,6 +3309,9 @@ export default {
        /ev. یعنی برای اضافه‌شدنش لازم نیست کسی Build command را در پنل عوض
        کند، و انتشارش با خودِ کد اتمیک است. */
     if (url.pathname === "/og.png") return ogImageResponse(request);
+    // کارتِ مخصوصِ توکن — آدرس همان شکل‌هایی که /t/ می‌پذیرد
+    const ogTok = /^\/og\/t\/([^/.]+)\.png$/.exec(url.pathname);
+    if (ogTok) return ogTokenRoute(request, url, env, ctx, ogTok[1]);
     /* لوگوی مربعی برای فرم‌های فهرست‌شدن — همان دلیلِ og.png: داخلِ کد، نه _site. */
     if (url.pathname === "/logo.png") return logoResponse(request);
     if(/^\/t\/[^/]+\/?$/.test(url.pathname)&&!chainOf(url.pathname.split("/")[2])){

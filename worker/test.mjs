@@ -566,8 +566,27 @@ ok(res.status === 200, "index.html must still be served");
       total_reserve_in_usd:
         "864686.88844287130299348404259937249318777297342779422871533805033929852051014022",
       volume_usd: { h24: "72419.9274686212" },
+      // شکلِ واقعیِ GT: رشته‌ی https با query (اندازه‌گیری‌شده روی payload زنده)
+      image_url: "https://coin-images.coingecko.com/coins/images/34515/large/android-chrome-512x512.png?1706198225",
     };
     const live = og.pickTokenMeta({ data: { attributes: LIVE_ATTRS } });
+    ok(live && live.imageUrl === LIVE_ATTRS.image_url,
+       "the live-shape image_url (a string) was not carried into meta.imageUrl: " + JSON.stringify(live));
+    for (const [label, iu] of [
+      ["an http:// url", "http://x.example/a.png"],
+      ["a url over 512 chars", "https://x.example/" + "a".repeat(512)],
+      ["GT's missing.png placeholder", "https://assets.geckoterminal.com/missing.png"],
+      ["a non-string (object)", { u: "https://x.example/a.png" }],
+      ["a protocol-relative url", "//x.example/a.png"],
+      ["null", null],
+    ]) {
+      const m = og.pickTokenMeta({ data: { attributes: { ...LIVE_ATTRS, image_url: iu } } });
+      ok(m && m.imageUrl === null, "[pickTokenMeta imageUrl] " + label + " must give imageUrl null: " + JSON.stringify(m && m.imageUrl));
+    }
+    const exact512 = "https://x.example/" + "a".repeat(512 - 18);
+    ok(og.pickTokenMeta({ data: { attributes: { ...LIVE_ATTRS, image_url: exact512 } } }).imageUrl === exact512,
+       "[pickTokenMeta imageUrl] a url of exactly 512 chars must be accepted");
+    console.log("[og token imageUrl] image_url kept only when it is an https string <= 512 chars without missing.png");
     ok(live && typeof live.priceUsd === "number" && live.priceUsd > 0 && live.decimals === 18,
        "the measured live-shape fixture did not yield a usable priceUsd/decimals: " +
        JSON.stringify(live));
@@ -645,8 +664,33 @@ ok(res.status === 200, "index.html must still be served");
                          addr, "https://zaexa.com");
   ok((tags.match(/property="og:title"/g) || []).length === 1,
      "ogTags produced more than one og:title");
-  ok(tags.includes('content="https://zaexa.com/og.png?v=' + og.OG_IMAGE_V + '"'),
-     "og:image must be absolute and versioned: " + tags);
+  ok(/property="og:image" content="https:\/\/zaexa\.com\/og\/t\/0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913\.png\?v=1&amp;h=[0-9a-f]{8}"/.test(tags),
+     "og:image for a token with a renderable symbol must be its own absolute versioned card: " + tags);
+  ok(/name="twitter:image" content="https:\/\/zaexa\.com\/og\/t\/[^"]+\.png\?v=1&amp;h=[0-9a-f]{8}"/.test(tags),
+     "twitter:image must point at the token card too: " + tags);
+  ok(tags.includes('property="og:image:alt" content="USDC on Base — Zaexa"'), "og:image:alt: " + tags);
+  ok(og.OG_TOKEN_IMAGE_V === "1" && og.OG_IMAGE_V === "5", "image versions: " + og.OG_TOKEN_IMAGE_V + "/" + og.OG_IMAGE_V);
+  {
+    // نمادِ غیرقابل‌رندر → دقیقاً همان تگ‌های قدیمیِ عمومی
+    const g = og.ogTags({ symbol: "日本", name: "Nihon" }, addr, "https://zaexa.com");
+    ok(g.includes('content="https://zaexa.com/og.png?v=' + og.OG_IMAGE_V + '"') && !g.includes("/og/t/"),
+       "[og token fallback] an unrenderable symbol must keep the generic og:image: " + g);
+    ok(g.includes('property="og:image:alt" content="Zaexa"'), "[og token fallback] generic alt");
+    const g2 = og.ogTags(null, addr, "https://zaexa.com");
+    ok(g2.includes('content="https://zaexa.com/og.png?v=' + og.OG_IMAGE_V + '"') && !g2.includes("/og/t/"),
+       "no meta must keep the generic og:image");
+    // هش به هر فیلدِ کارت حساس است
+    const h = (m, v, c) => /h=([0-9a-f]{8})/.exec(og.ogTags(m, addr, "https://zaexa.com", v, c))[1];
+    const base = { symbol: "AAA", name: "Aaa", liquidity: "$1.00K", vol24: "$2.00K" };
+    const h0 = h(base, "sell", "Base");
+    ok(h0 === h(base, "sell", "Base"), "the h= hash must be deterministic");
+    for (const [lab, hh] of [["verdict", h(base, "nosell", "Base")], ["chain", h(base, "sell", "Solana")],
+      ["liquidity", h({ ...base, liquidity: "$9.00K" }, "sell", "Base")], ["vol24", h({ ...base, vol24: "$9.00K" }, "sell", "Base")],
+      ["name", h({ ...base, name: "Bbb" }, "sell", "Base")], ["symbol", h({ ...base, symbol: "AAB" }, "sell", "Base")]])
+      ok(hh !== h0, "[og token hash] changing " + lab + " must change h=");
+    console.log("[og token tags] renderable symbol -> /og/t/<addr>.png?v=1&h=<fnv>, alt \"SYM on Chain — Zaexa\"; "
+      + "unrenderable or no meta -> the old generic tags byte for byte; h= reacts to every card field");
+  }
   ok(tags.includes('content="https://zaexa.com/t/' + addr + '"'),
      "og:url is not the canonical token url");
   ok(tags.includes('name="twitter:card" content="summary_large_image"'),
@@ -740,6 +784,364 @@ ok(res.status === 200, "index.html must still be served");
   console.log("[og] card text, escaping, upstream call and /og.png ok " +
               "(injection itself: worker/og_live_test.mjs)");
   console.log("[og etag] OG_PNG_ETAG matches the bytes actually served: " + OG_PNG_ETAG);
+}
+
+/* ---- ۱۰ب. کارتِ مخصوصِ توکن: /og/t/<آدرس>.png ----
+   رندرِ PNG (worker/og-token.js)، چیدمان، فالبک، لوگو و بودجه‌ی CPU.
+   ⚠️ هر بخشی که globalThis.fetch را عوض می‌کند، آخرش به trackingFetch برمی‌گرداند —
+   وگرنه همه‌ی assertهای بعدی روی یک موکِ مرده سبز می‌شدند. */
+{
+  const zlib = await import("node:zlib");
+  const ogt = await import("./og-token.js");
+  const D = await import("./og-token-data.js");
+  const { ogImageResponse } = await import("./og-image.js");
+  const { rateOk, RL_LIMIT, RL_WINDOW_MS } = await import("./index.js");
+  const B64 = (s) => Buffer.from(s, "base64");
+
+  // CRC-32 و adler32ِ مستقل از کدِ رندر
+  const crcT = new Uint32Array(256);
+  for (let n = 0; n < 256; n++) {
+    let c = n;
+    for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
+    crcT[n] = c >>> 0;
+  }
+  const crc32 = (buf) => {
+    let c = 0xffffffff;
+    for (let i = 0; i < buf.length; i++) c = crcT[(c ^ buf[i]) & 255] ^ (c >>> 8);
+    return (c ^ 0xffffffff) >>> 0;
+  };
+  const adler = (buf) => {
+    let a = 1, b = 0;
+    for (let i = 0; i < buf.length; i++) { a = (a + buf[i]) % 65521; b = (b + a) % 65521; }
+    return ((b << 16) | a) >>> 0;
+  };
+  const eq = (a, b) => a.length === b.length && Buffer.compare(Buffer.from(a), Buffer.from(b)) === 0;
+
+  /* PNG → { inflated, problems[] } — هر ناسازگاریِ ساختاری یک رشته‌ی مشکل است */
+  function decodePng(u8) {
+    const problems = [];
+    const b = Buffer.from(u8);
+    if (!eq(b.subarray(0, 8), Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))) problems.push("signature");
+    let o = 8;
+    const idat = [];
+    let ihdr = null, sawIend = false, nChunks = 0;
+    while (o + 12 <= b.length) {
+      const len = b.readUInt32BE(o);
+      const type = b.toString("latin1", o + 4, o + 8);
+      if (o + 12 + len > b.length) { problems.push("truncated chunk " + type); break; }
+      const body = b.subarray(o + 8, o + 8 + len);
+      const crc = b.readUInt32BE(o + 8 + len);
+      if (crc32(b.subarray(o + 4, o + 8 + len)) !== crc) problems.push("bad CRC in " + type + "#" + nChunks);
+      if (type === "IHDR") ihdr = body;
+      if (type === "IDAT") idat.push(body);
+      if (type === "IEND") sawIend = true;
+      nChunks++;
+      o += 12 + len;
+    }
+    if (!sawIend || o !== b.length) problems.push("IEND missing or trailing bytes");
+    if (!ihdr || ihdr.readUInt32BE(0) !== 1200 || ihdr.readUInt32BE(4) !== 630 || ihdr[8] !== 8 || ihdr[9] !== 2 ||
+        ihdr[10] !== 0 || ihdr[11] !== 0 || ihdr[12] !== 0) problems.push("IHDR");
+    if (idat.length !== 3) problems.push("expected 3 IDAT chunks, got " + idat.length);
+    const z = Buffer.concat(idat);
+    let inflated = null;
+    try { inflated = zlib.inflateSync(z); } catch (e) { problems.push("inflate: " + e.message); }
+    if (inflated) {
+      if (inflated.length !== 630 * 3601) problems.push("inflated length " + inflated.length);
+      if (z.readUInt32BE(z.length - 4) !== adler(inflated)) problems.push("zlib adler mismatch");
+      for (let y = 0; y < 630; y++) if (inflated[y * 3601] !== 0) { problems.push("filter byte != 0 at row " + y); break; }
+    }
+    return { inflated, problems };
+  }
+  const px = (inf, x, y) => [inf[y * 3601 + 1 + x * 3], inf[y * 3601 + 2 + x * 3], inf[y * 3601 + 3 + x * 3]];
+  const near = (p, q, t) => Math.abs(p[0] - q[0]) <= t && Math.abs(p[1] - q[1]) <= t && Math.abs(p[2] - q[2]) <= t;
+  const bandBg = B64(D.BAND_RAW); // ردیف‌های ۲۹۶..۴۷۹ بدونِ هیچ متنی
+  const bgPx = (x, y) => [bandBg[(y - 296) * 3601 + 1 + x * 3], bandBg[(y - 296) * 3601 + 2 + x * 3], bandBg[(y - 296) * 3601 + 3 + x * 3]];
+  const inkMaxX = (inf, y0, y1, x0 = 0, thr = 30) => {
+    let mx = -1;
+    for (let y = y0; y < y1; y++) for (let x = x0; x < 1200; x++) {
+      const p = px(inf, x, y), q = bgPx(x, y);
+      if (Math.abs(p[0] - q[0]) + Math.abs(p[1] - q[1]) + Math.abs(p[2] - q[2]) > thr && x > mx) mx = x;
+    }
+    return mx;
+  };
+  const inkCount = (inf, x0, y0, x1, y1, thr = 30) => {
+    let n = 0;
+    for (let y = y0; y < y1; y++) for (let x = x0; x < x1; x++) {
+      const p = px(inf, x, y), q = bgPx(x, y);
+      if (Math.abs(p[0] - q[0]) + Math.abs(p[1] - q[1]) + Math.abs(p[2] - q[2]) > thr) n++;
+    }
+    return n;
+  };
+
+  const BASE = { symbol: "DEGEN", name: "Degen Token", liquidity: "$865.9K", vol24: "$69.1K", verdict: "sell", chain: "Base", logo: null };
+  const render = async (o) => {
+    try { return await ogt.tokenCardPng({ ...BASE, ...o }); }
+    catch (e) { ok(false, "[og token layout] the renderer threw for " + JSON.stringify(o) + ": " + e.message); throw e; }
+  };
+
+  /* ---------- [og token png] ---------- */
+  {
+    for (const [lab, o] of [["Base sell", {}], ["Base nosell", { verdict: "nosell" }], ["Solana none", { chain: "Solana", verdict: null }],
+      ["no data", { name: null, liquidity: null, vol24: null, verdict: null }]]) {
+      const png = await render(o);
+      const { inflated, problems } = decodePng(png);
+      ok(problems.length === 0, "[og token png] " + lab + " is not a valid PNG: " + problems.join("; "));
+      if (!inflated) continue;
+      const topRaw = zlib.inflateRawSync(B64(D.TOP[o.chain || "Base"].z), { finishFlush: zlib.constants.Z_SYNC_FLUSH });
+      const botRaw = zlib.inflateRawSync(B64(D.BOTTOM_Z));
+      ok(topRaw.length === D.TOP[o.chain || "Base"].len && eq(inflated.subarray(0, 296 * 3601), topRaw),
+         "[og token png] " + lab + ": TOP region differs from the stored background");
+      ok(botRaw.length === D.BOTTOM_LEN && eq(inflated.subarray(480 * 3601), botRaw),
+         "[og token png] " + lab + ": BOTTOM region differs from the stored background");
+    }
+    // اعتبارسنجِ خودِ بازبین: یک بایتِ خراب در IDAT#2 باید پیدا شود (وگرنه این بخش چیزی را نمی‌سنجید)
+    const bad = Buffer.from(await render({}));
+    bad[8 + 25 + 12 + 2 + 50] ^= 0xff; // وسطِ IDAT#1
+    ok(decodePng(bad).problems.length > 0, "[og token png] the PNG checker did not notice a corrupted byte");
+    console.log("[og token png] output decodes as a valid 1200x630 PNG: signature, IHDR, every chunk CRC, zlib adler, "
+      + "630x3601 inflated bytes, TOP and BOTTOM byte-identical to the stored backgrounds (Base, Solana, with and without data)");
+  }
+
+  /* ---------- [og token layout] ---------- */
+  {
+    const sell = decodePng(await render({})).inflated;
+    ok(inkCount(sell, 180, 310, 400, 353) > 400, "[og token layout] symbol ink missing near (180-400, 310-352)");
+    // اینک سفیدِ نماد: روشن‌ترین پیکسل‌ها نزدیکِ (242,244,250)
+    let white = 0;
+    for (let y = 310; y < 353; y++) for (let x = 180; x < 400; x++) if (near(px(sell, x, y), [242, 244, 250], 6)) white++;
+    ok(white > 200, "[og token layout] the symbol is not drawn in the white ink colour");
+    ok(near(px(sell, 112, 451), [52, 211, 153], 12), "[og token layout] sell: the pill dot colour is missing at (112,451): " + px(sell, 112, 451));
+    ok(inkCount(sell, 130, 436, 420, 466) > 300, "[og token layout] sell: pill text missing");
+
+    const none = decodePng(await render({ verdict: null })).inflated;
+    ok(inkCount(none, 88, 424, 440, 478) === 0, "[og token layout] a null verdict must draw no pill at all");
+    const sellNull = await render({ verdict: null });
+    const sellJunk = await render({ verdict: "maybe" });
+    ok(eq(sellNull, sellJunk), "[og token layout] a junk verdict value must draw nothing");
+
+    const nsB = decodePng(await render({ verdict: "nosell" })).inflated;
+    ok(near(px(nsB, 112, 451), [248, 113, 113], 12), "[og token layout] nosell on Base: NEG dot missing: " + px(nsB, 112, 451));
+    const nsS = await render({ verdict: "nosell", chain: "Solana" });
+    const nnS = await render({ verdict: null, chain: "Solana" });
+    ok(eq(nsS, nnS), "[og token layout] a nosell verdict on Solana must never be drawn");
+    const slS = decodePng(await render({ verdict: "sell", chain: "Solana" })).inflated;
+    ok(near(px(slS, 112, 451), [52, 211, 153], 12), "[og token layout] a sell verdict on Solana is still drawn");
+    // پیلِ سولانا در TOP: نقطه‌ی بنفشِ #9945FF دیده می‌شود، روی Base نه
+    const findPurple = (inf) => { for (let y = 80; y < 91; y++) for (let x = 900; x < 1115; x++) if (near(px(inf, x, y), [153, 69, 255], 6)) return true; return false; };
+    ok(findPurple(slS) && !findPurple(sell), "[og token layout] the Solana pill dot is missing, or present on Base");
+
+    // نام
+    const noName = await render({ name: null });
+    ok(eq(await render({ name: "degen" }), noName) && eq(await render({ name: "DEGEN" }), noName),
+       "[og token layout] a name equal to the symbol (case-insensitive) must be omitted");
+    ok(eq(await render({ name: "" }), noName), "[og token layout] an empty name must be omitted");
+    ok(eq(await render({ name: "日本" }), noName), "[og token layout] an unrenderable name must be omitted");
+    ok(!eq(await render({ name: "Degen Token" }), noName), "[og token layout] a real name must be drawn");
+    ok(inkCount(sell, 340, 310, 600, 360) > 200, "[og token layout] the name ink is missing after the symbol");
+
+    // ردیف ۲: مقدارِ null → آن جفت نمی‌آید
+    const none2 = decodePng(await render({ liquidity: null, vol24: null })).inflated;
+    ok(inkCount(none2, 80, 380, 700, 420) === 0, "[og token layout] null figures must leave row 2 empty");
+    const liqOnly = await render({ vol24: null });
+    const volOnly = await render({ liquidity: null });
+    ok(!eq(liqOnly, volOnly), "[og token layout] liquidity-only and volume-only must differ");
+
+    // کوتاه‌سازی: ردیفِ ۱ هرگز از ۹۰۰ پیکسل بیرون نمی‌زند
+    const longName = "An Extremely Long Token Name That Cannot Possibly Fit In The Row Ever";
+    const tr = decodePng(await render({ symbol: "AAAA", name: longName })).inflated;
+    const mx = inkMaxX(tr, 305, 365, 180);
+    ok(mx <= 900, "[og token layout] row 1 ink reaches x=" + mx + " > 900");
+    ok(mx >= 780, "[og token layout] the long name was dropped instead of truncated (ink ends at x=" + mx + ")");
+    const hugeSym = decodePng(await render({ symbol: "WWWWWWWWWWWWWWWW", name: longName })).inflated;
+    const mx2 = inkMaxX(hugeSym, 305, 365, 180);
+    ok(mx2 <= 900 && mx2 >= 600, "[og token layout] an oversized symbol must be truncated within the row, ink ends at x=" + mx2);
+    const exact = decodePng(await render({ symbol: "AAAA", name: "Short" })).inflated;
+    ok(inkMaxX(exact, 305, 365, 180) < 600, "[og token layout] a short name must not be padded or truncated");
+
+    // renderable
+    ok(ogt.renderable("DEGEN $1.0K…") && ogt.renderable("") && !ogt.renderable("日本") && !ogt.renderable("é") &&
+       !ogt.renderable("a\nb") && !ogt.renderable(null) && !ogt.renderable(5), "[og token layout] renderable() classification");
+    console.log("[og token layout] symbol ink and colours, sell/nosell pill present only when it should be (never nosell on Solana), "
+      + "Solana pill drawn, name omitted when equal/empty/unrenderable, null figures skipped, row 1 stays within 900 px");
+  }
+
+  /* ---------- [og token cpu] ---------- */
+  {
+    const args = { ...BASE, name: "Degen Token" };
+    await ogt.tokenCardPng(args);
+    const ts = [];
+    for (let i = 0; i < 50; i++) {
+      const t0 = performance.now();
+      await ogt.tokenCardPng(args);
+      ts.push(performance.now() - t0);
+    }
+    ts.sort((a, b) => a - b);
+    const med = ts[25], p95 = ts[47];
+    ok(med < 5, "[og token cpu] median render time " + med.toFixed(2) + " ms >= 5 ms (the free plan allows ~10 ms CPU per request)");
+    console.log("[og token cpu] warm render median " + med.toFixed(2) + " ms, p95 " + p95.toFixed(2) + " ms over 50 runs (limit: median < 5 ms)");
+  }
+
+  /* ---------- مسیرِ کامل: worker.fetch(/og/t/<addr>.png) ---------- */
+  const ADDR_T = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913";
+  const addrN = (n) => "0x" + n.toString(16).padStart(40, "a");
+  const SOLM = "So11111111111111111111111111111111111111112";
+  const JPG_OK = B64("/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAgGBgcGBQgHBwcJCQgKDBQNDAsLDBkSEw8UHRofHh0aHBwgJC4nICIsIxwcKDcpLDAxNDQ0Hyc5PTgyPC4zNDL/2wBDAQkJCQwLDBgNDRgyIRwhMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjL/wAARCABEAEQDAREAAhEBAxEB/8QAHwAAAQUBAQEBAQEAAAAAAAAAAAECAwQFBgcICQoL/8QAtRAAAgEDAwIEAwUFBAQAAAF9AQIDAAQRBRIhMUEGE1FhByJxFDKBkaEII0KxwRVS0fAkM2JyggkKFhcYGRolJicoKSo0NTY3ODk6Q0RFRkdISUpTVFVWV1hZWmNkZWZnaGlqc3R1dnd4eXqDhIWGh4iJipKTlJWWl5iZmqKjpKWmp6ipqrKztLW2t7i5usLDxMXGx8jJytLT1NXW19jZ2uHi4+Tl5ufo6erx8vP09fb3+Pn6/8QAHwEAAwEBAQEBAQEBAQAAAAAAAAECAwQFBgcICQoL/8QAtREAAgECBAQDBAcFBAQAAQJ3AAECAxEEBSExBhJBUQdhcRMiMoEIFEKRobHBCSMzUvAVYnLRChYkNOEl8RcYGRomJygpKjU2Nzg5OkNERUZHSElKU1RVVldYWVpjZGVmZ2hpanN0dXZ3eHl6goOEhYaHiImKkpOUlZaXmJmaoqOkpaanqKmqsrO0tba3uLm6wsPExcbHyMnK0tPU1dbX2Nna4uPk5ebn6Onq8vP09fb3+Pn6/9oADAMBAAIRAxEAPwDxetCQoA63w/8AD7VdbijupitlZyLuWSQbmcHOCqenA6kcHIzXnYnM6VFuK96X9df+HO/D5fVrJSei/rodvYfDDQrXa10bm8bZtYPJsTdxlgFwR9CT179a8mpm+Il8Nl/Xn/kelTyujH4rv+vIv/8ACvvC/wD0C/8AyYl/+KrL+08V/P8Agv8AI1/s/Dfy/i/8zA1D4T2jRZ03UZo5ArfLcgOGPYZUDaPU4P8Aj2Us6nf95FW8v6f6HLUymNv3cvvPPtb0DUfD90INQg2b8mORTuSQA4yD+XBweRkDNezh8TTxEeam/wDgHlV8PUoStNGZW5gFABQB6t4F8C/YvK1fV4v9K4a3t3H+q9GYf3vQdvr9357Mcx570qT06vv5Ly/P0393A4HktVqrXou3/B/L129DrxT1hCwUZYgD1NNJt2QJN7DRLGTgSISfeqdKoldxf3Fckuw+oJIL2yttRs5bS7hWaCVdro3Qj+h757VdOpKnJTg7NEzhGcXGSumeI+LvCNz4ZvNy7ptPlb9zORyD/db0b+fUdwPqsFjY4mPaS3X6ry/I+axeElh5d4vZnN13HGdb8PvD8et66ZrqJZLOzUPIjDIdjnapGenBPcfLg9a87M8S6NK0X70v6f8AXmd+X4dVqt5LRf0j2yvlT6Qr3Nz5OFUZc889AK6sPh/a6vY1p0+fV7Ge7s7bmYk+9erGEYK0VY60klZDaoZNDcPCcDlfQ1hWw8Ku+jM501I0o3EiB16GvHnBwk4s45RcXZlDXNHttd0mewuVXDqfLcrkxvjhhyOR9eeR0NaYevKhUU4/8OuxhXoxrQcJHz5c28tpdTW067JoXaN1yDhgcEZHvX2kJKcVKOzPlJRcZOL3R6/8MLD7L4WN0yx7ruZnDKPm2L8oBOOxDED39zXzOb1ObEcvZf8AB/yPfyuny0ebu/8AgHaMQqlj0Aya8xJt2R6SV3YyHcu5ZupNe9CKhFRR6CSSsjG8QeIIdBto3eNpZpSRHGDjOMZJOOMZH5/l00KDquy2OPG42OFim1dvZHK2nxCuxcD7baQtCeD5OVYc9eSQeM8cfWuyeBjb3XqeRSzupzfvIq3kd7BNHc28c8Tbo5FDo2MZBGQa81pxdmfRQmpxUo7Mv2MmJDGTwwyPrXBjad4qa6GVeN1cv15hyniPxFsPsPjC4cLGqXSLOqoMdRtJPHUsrH8a+ryupz4ZLtp/XyPmsxp8ldvvqekfD7/kRtO/7a/+jXrw8z/3qfy/JHsZf/u0fn+bOjlBMLgDJKmuOk0qkW+6O+HxIyK947zz74hWkov7W9xmFovKyAeGBJ57cg8fQ16eBmuVx6nzed0pe0jU6WscbXeeIeu+GrSWx8O2cE42yBSxXBBG5i2DnuM8+9eHiJqdVtH2eApSpYaEZb/56m7Zgm5Xjpn+VcGLa9kzet8DNOvHOM8f+Kv/ACNFt/15L/6G9fS5N/Afr+iPn81/jL0/Vm38J9Qjawv9NO0SJKJ1+flgwCnA9BtHP+0Px5c6pPnjU6Wt/X3/AIHTlNRcsqfzPRa8Q9cy7iHyZcD7p5Fe1h63tYX6o7ac+ZFWaCK5iaKeJJY26o6hge/Q10JuLuipwjNcsldGbaeGtHsbgTwWKCRfus7M+DnORuJweOvWtZ4irNWbOWlgMNSlzRhr9/5mtWJ2F+yh2r5h6sOPpXl4ytzPkXQ5a07vlRbriMDwDxdqEeqeK9RuotvlmXYpV9wYIAgYH0O3P419jgqTpYeMXvb89T5XF1FUrykv6toQaBrc/h/WIdQgXfsyrxliokQ9QcfmOvIBwcVeJw8cRTdOX/DE4evKhUU0e/2V7bajZxXdpMs0Eq7kdehH9D2x2r46pTlTk4TVmj6qE4zipRd0yV41kXa4yKUJyg7xZcZOLuilJYuCTGQw9Dwa9GnjYvSasdMa6e5GLOcn7mPfIrV4ulbcr20O5YhslU5kwx9O1clbGOWkNDKdZvSJbriMDkvHvicaFpJtbaRf7QulKoAxDRoQQZOOh7Dkc884Ir0stwnt6nNJe6vxfb/P/gnBj8V7GHLH4n/VzxOvqT5sKAOk8JeLrnwzebW3TafK376AHkH+8vo38+h7EcONwUcTHtJbP9H5fkdmExcsPLvF7o9k0fXNP12zW5sLhXG0F4yRvjJzwy9jwfrjjIr5ivh6lCXLNf5P0PoaNeFaPNBmjWJsFABQByXifx7p+hLJbWpW71DaQEQgpGwOPnIPB6/KOeOcZBr0sJltSvaUtI/i/T/P8zgxWPhR92Osv63PGr29udRvJbu7maaeVtzu3Un+g7Y7V9PTpxpxUIKyR89OcpycpO7ZBVEBQAUAS29zPaTrPbTSQzLnbJG5VhkYOCPalKEZrlkroqMpRd4uzOmsPiL4isdoe5ju0VNgS4jB9OcrhieOpJ61wVMrw09lb0/qx2U8xrw3d/Uvf8LV13/n007/AL9v/wDF1j/Y1Du/w/yNf7Vrdl+P+Zgah4u1/VIvKutTmMe1lKR4jDA9QwUDcPrn9a7KWCw9J3jFX+/8zlqYuvUVpS/T8jFrqOYKACgD/9k=");
+  const JPG_64 = B64("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"); // 64x64: right format, wrong size
+  const JPG_TINY = B64("/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAgGBgcGBQgHBwcJCQgKDBQNDAsLDBkSEw8UHRofHh0aHBwgJC4nICIsIxwcKDcpLDAxNDQ0Hyc5PTgyPC4zNDL/2wBDAQkJCQwLDBgNDRgyIRwhMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjL/wAARCAAQABADAREAAhEBAxEB/8QAHwAAAQUBAQEBAQEAAAAAAAAAAAECAwQFBgcICQoL/8QAtRAAAgEDAwIEAwUFBAQAAAF9AQIDAAQRBRIhMUEGE1FhByJxFDKBkaEII0KxwRVS0fAkM2JyggkKFhcYGRolJicoKSo0NTY3ODk6Q0RFRkdISUpTVFVWV1hZWmNkZWZnaGlqc3R1dnd4eXqDhIWGh4iJipKTlJWWl5iZmqKjpKWmp6ipqrKztLW2t7i5usLDxMXGx8jJytLT1NXW19jZ2uHi4+Tl5ufo6erx8vP09fb3+Pn6/8QAHwEAAwEBAQEBAQEBAQAAAAAAAAECAwQFBgcICQoL/8QAtREAAgECBAQDBAcFBAQAAQJ3AAECAxEEBSExBhJBUQdhcRMiMoEIFEKRobHBCSMzUvAVYnLRChYkNOEl8RcYGRomJygpKjU2Nzg5OkNERUZHSElKU1RVVldYWVpjZGVmZ2hpanN0dXZ3eHl6goOEhYaHiImKkpOUlZaXmJmaoqOkpaanqKmqsrO0tba3uLm6wsPExcbHyMnK0tPU1dbX2Nna4uPk5ebn6Onq8vP09fb3+Pn6/9oADAMBAAIRAxEAPwDXryT9CCgAoAKAP//Z");
+  const IMG_URL = "https://coin-images.coingecko.com/coins/images/34515/large/logo-secret-name.png?1706198225";
+  const genericBytes = new Uint8Array(await ogImageResponse(new Request("https://x/og.png")).arrayBuffer());
+  const shelf = new Map();
+  const pending = [];
+  const ctx = { waitUntil: (p) => pending.push(p) };
+  let ipN = 0;
+  const calls = [];
+  let attrs = null;      // پاسخ GT (null → ۵۰۰)
+  let imgReply = null;   // () => Response | throw
+
+  const stub = async (u, o) => {
+    u = String(u);
+    calls.push({ u, o });
+    if (u.includes("api.geckoterminal.com")) {
+      if (!attrs) return new Response("x", { status: 500 });
+      return new Response(JSON.stringify({ data: { attributes: attrs } }), { status: 200, headers: { "content-type": "application/json" } });
+    }
+    if (u === IMG_URL) return imgReply();
+    throw new Error("no route in test");
+  };
+  const GT = { name: "Degen", symbol: "DEGEN", decimals: 18, price_usd: "0.001096077838",
+    total_reserve_in_usd: "865900.12", volume_usd: { h24: "69100.5" }, image_url: IMG_URL };
+  const jpgReply = (body, type = "image/jpeg", status = 200, extra = {}) => () =>
+    new Response(body, { status, headers: { "content-type": type, ...extra } });
+  async function getTok(addr, { method = "GET", ip, c = ctx } = {}) {
+    const r = new Request(ORIGIN + "/og/t/" + addr + ".png?v=1&h=deadbeef", { method, headers: { "cf-connecting-ip": ip || "198.51.100." + (++ipN) } });
+    return await worker.fetch(r, env, c);
+  }
+
+  globalThis.caches = { default: {
+    match: async (req) => { const v = shelf.get(req.url); return v ? v.clone() : undefined; },
+    put: async (req, r) => { shelf.set(req.url, r); },
+  } };
+  globalThis.fetch = stub;
+  try {
+    /* [og token logo] */
+    attrs = GT; imgReply = jpgReply(JPG_OK);
+    let a = addrN(1);
+    calls.length = 0;
+    let res = await getTok(a);
+    const png = new Uint8Array(await res.arrayBuffer());
+    await Promise.all(pending);
+    ok(res.status === 200 && res.headers.get("content-type") === "image/png", "[og token logo] route did not answer an image/png (" + res.status + ")");
+    ok(res.headers.get("cache-control") === "public, max-age=900", "[og token logo] cache-control: " + res.headers.get("cache-control"));
+    ok(res.headers.get("x-zaexa-logo") === "ok", "[og token logo] a baseline JPEG must give X-Zaexa-Logo: ok, got " + res.headers.get("x-zaexa-logo"));
+    const dec = decodePng(png);
+    ok(dec.problems.length === 0, "[og token logo] route output is not a valid PNG: " + dec.problems.join("; "));
+    if (dec.inflated) {
+      ok(near(px(dec.inflated, 122, 334), [40, 30, 60], 30), "[og token logo] fixture centre colour missing in the avatar: " + px(dec.inflated, 122, 334));
+      ok(near(px(dec.inflated, 135, 334), [255, 107, 107], 40), "[og token logo] fixture ring colour missing: " + px(dec.inflated, 135, 334));
+      ok(near(px(dec.inflated, 148, 334), [255, 159, 67], 40), "[og token logo] fixture outer colour missing: " + px(dec.inflated, 148, 334));
+    }
+    const imgCall = calls.find((c) => c.u === IMG_URL);
+    const cfi = imgCall && imgCall.o && imgCall.o.cf && imgCall.o.cf.image;
+    ok(cfi && cfi.width === 68 && cfi.height === 68 && cfi.fit === "cover" && cfi.format === "baseline-jpeg" &&
+       cfi.background === "#151821" && cfi.quality === 85, "[og token logo] the logo fetch must ask Cloudflare for a 68x68 baseline-jpeg: " + JSON.stringify(cfi));
+    ok(imgCall && imgCall.o && imgCall.o.signal, "[og token logo] the logo fetch has no abort signal (1500 ms cap)");
+    let leaked = false;
+    res.headers.forEach((v, k) => { if (/coin-images|logo-secret/.test(v + k)) leaked = true; });
+    ok(!leaked, "[og token logo] the logo url leaked into a response header");
+
+    // کش: کلید = آدرسِ کاملِ درخواست؛ دومین درخواست از کش می‌آید و به شبکه نمی‌رود
+    const full = ORIGIN + "/og/t/" + a + ".png?v=1&h=deadbeef";
+    ok(shelf.has(full), "[og token route] the card was not cached under the full request URL");
+    calls.length = 0;
+    const res2 = await getTok(a);
+    const png2 = new Uint8Array(await res2.arrayBuffer());
+    ok(calls.length === 0, "[og token route] a cached card still went to the network: " + calls.map((c) => c.u).join(","));
+    ok(eq(png2, png), "[og token route] the cached card differs from the first render");
+    // ولی h= دیگر یعنی کلیدِ دیگر
+    calls.length = 0;
+    const r3 = await worker.fetch(new Request(ORIGIN + "/og/t/" + a + ".png?v=1&h=00000000", { headers: { "cf-connecting-ip": "203.0.113." + (++ipN) } }), env, ctx);
+    await r3.arrayBuffer();
+    ok(calls.length > 0, "[og token route] a different h= must be a different cache key");
+    await Promise.all(pending);
+
+    // نتایجِ دیگر
+    const cases = [
+      ["type", jpgReply(Buffer.from("\x89PNG\r\n\x1a\n" + "x".repeat(200), "latin1"), "image/png")],
+      ["status", jpgReply("nope", "image/jpeg", 404)],
+      ["decode", jpgReply(Buffer.from("this is not a jpeg at all".repeat(10)), "image/jpeg")],
+      ["size", jpgReply(JPG_TINY, "image/jpeg")],
+      ["size", jpgReply(JPG_64, "image/jpeg")],
+      ["size", jpgReply(Buffer.alloc(70000, 7), "image/jpeg")],
+      ["size", jpgReply(JPG_OK, "image/jpeg", 200, { "content-length": "99999" })],
+      ["fetch", () => { throw new Error("boom"); }],
+    ];
+    let n = 10;
+    for (const [want, rep] of cases) {
+      imgReply = rep;
+      const r = await getTok(addrN(n++));
+      const pb = new Uint8Array(await r.arrayBuffer());
+      ok(r.headers.get("x-zaexa-logo") === want, "[og token logo] expected X-Zaexa-Logo: " + want + " got " + r.headers.get("x-zaexa-logo"));
+      ok(decodePng(pb).problems.length === 0, "[og token logo] " + want + ": the card must still be a valid PNG (letter avatar)");
+      if (want === "type") ok(near(px(decodePng(pb).inflated, 122, 334), [40, 30, 60], 8) === false, "[og token logo] a PNG body must fall back to the letter avatar");
+    }
+    // imageUrl نیست → none
+    attrs = { ...GT, image_url: null };
+    calls.length = 0;
+    res = await getTok(addrN(30));
+    await res.arrayBuffer();
+    ok(res.headers.get("x-zaexa-logo") === "none", "[og token logo] missing imageUrl must give none, got " + res.headers.get("x-zaexa-logo"));
+    ok(!calls.some((c) => c.u === IMG_URL), "[og token logo] with no imageUrl nothing may be fetched for the logo");
+    ok(res.headers.get("x-zaexa-logo") && ["ok", "none", "fetch", "status", "type", "size", "decode"].includes(res.headers.get("x-zaexa-logo")), "closed vocabulary");
+    console.log("[og token logo] Cloudflare-resized baseline JPEG -> ok and drawn; PNG body -> type; 404 -> status; garbage -> decode; "
+      + "tiny/oversized -> size; throw -> fetch; no imageUrl -> none; url never echoed; card cached under the full URL");
+
+    /* [og token fallback] */
+    attrs = { ...GT, symbol: "日本" };
+    calls.length = 0;
+    res = await getTok(addrN(40));
+    let fb = new Uint8Array(await res.arrayBuffer());
+    ok(res.status === 200 && eq(fb, genericBytes), "[og token fallback] an unrenderable symbol must return the generic card bytes");
+    ok(res.headers.get("cache-control") === "public, max-age=60", "[og token fallback] cache-control: " + res.headers.get("cache-control"));
+    ok(!shelf.has(ORIGIN + "/og/t/" + addrN(40) + ".png?v=1&h=deadbeef"), "[og token fallback] the generic fallback must not be cached as the token card");
+    attrs = null; // GT ۵۰۰ → meta null
+    res = await getTok(addrN(41));
+    fb = new Uint8Array(await res.arrayBuffer());
+    ok(res.status === 200 && eq(fb, genericBytes) && res.headers.get("cache-control") === "public, max-age=60",
+       "[og token fallback] no metadata must return the generic card");
+    res = await getTok("0xnotanaddress");
+    fb = new Uint8Array(await res.arrayBuffer());
+    ok(res.status === 200 && eq(fb, genericBytes), "[og token fallback] an invalid address must return the generic card");
+    // هر استثنا → کارتِ عمومی، نه ۵۰۰
+    attrs = GT; imgReply = jpgReply(JPG_OK);
+    res = await getTok(addrN(42), { c: { waitUntil() { throw new Error("boom"); } } });
+    fb = new Uint8Array(await res.arrayBuffer());
+    ok(res.status === 200 && eq(fb, genericBytes), "[og token fallback] an exception inside the route must give the generic card, got " + res.status);
+    // سقفِ نرخ: همان سطلِ «og»ِ صفحه‌ی /t/
+    const ipFull = "192.0.2.77";
+    const rq = new Request(ORIGIN + "/x", { headers: { "cf-connecting-ip": ipFull } });
+    for (let i = 0; i < RL_LIMIT; i++) rateOk(rq, "og", RL_LIMIT, RL_WINDOW_MS);
+    calls.length = 0;
+    res = await getTok(addrN(43), { ip: ipFull });
+    fb = new Uint8Array(await res.arrayBuffer());
+    ok(res.status === 200 && eq(fb, genericBytes) && calls.length === 0,
+       "[og token fallback] past the shared \"og\" rate limit the route must serve the generic card without touching upstream (calls: " + calls.length + ")");
+    ok(!(await getTok(addrN(44), { method: "POST" })).ok, "[og token fallback] POST must not be served");
+    console.log("[og token fallback] unrenderable symbol, no metadata, bad address, a thrown exception and the shared \"og\" rate limit all answer 200 "
+      + "with the generic card bytes (cache-control 60), never a 500");
+
+    /* Solana */
+    attrs = { ...GT, name: "Bonk", symbol: "BONK" };
+    imgReply = jpgReply("nope", "image/jpeg", 404);
+    res = await getTok(SOLM);
+    const sp = new Uint8Array(await res.arrayBuffer());
+    const sd = decodePng(sp);
+    ok(res.status === 200 && sd.problems.length === 0, "[og token png] a Solana mint must render a valid card: " + sd.problems.join("; "));
+    ok(calls.some((c) => c.u.includes("networks/solana/tokens/" + SOLM)), "[og token route] the Solana card must read the solana network");
+    console.log("[og token route] /og/t/<mint>.png renders for Solana from the solana network, same route and bucket as Base");
+  } finally {
+    globalThis.fetch = trackingFetch;
+    delete globalThis.caches;
+  }
 }
 
 /* ---- ۱۱. محدودکننده‌ی نرخ — درون‌ایزوله، بدون هیچ بایندینگ ----

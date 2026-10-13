@@ -26,7 +26,7 @@ export const LANDING_THEME_TOGGLE = "<button class=\"theme-toggle\" id=\"themeTo
    «why» هم هرگز کد نیست: همان جمله‌ی plainWhy داخلِ جزیره می‌نشیند. */
 
 export const REPORT_SITE_ORIGIN = "https://zaexa.com";
-export const REPORT_OG_IMAGE = "https://zaexa.com/og.png?v=4"; // همان تصویرِ کارتِ landing.html
+export const REPORT_OG_IMAGE = "https://zaexa.com/og.png?v=5"; // همان تصویرِ کارتِ landing.html
 export const REPORT_HISTORY_DAYS = 14;
 /* 🔴 پیش از این روز بررسیِ Solana هنوز کار نمی‌کرد (۲۱ سپتامبر: ۳ ردیف قبول، ۵۳ «بررسی‌نشده»،
    نمادِ «$?»). صفحه‌ی روزهای قبل از آن هیچ ردیف/کاشی/چیپِ Solana نشان نمی‌دهد و فقط یک خطِ
@@ -294,7 +294,7 @@ a.dnb:hover{border-color:var(--acc);color:var(--acc)}
 .pickbtn svg{width:12px;height:12px;transition:transform .15s}
 .pickbtn[aria-expanded=true] svg{transform:rotate(180deg)}
 :root[data-theme=dark]{color-scheme:dark;scrollbar-color:var(--line2) transparent}
-:root:not([data-theme=dark]){color-scheme:light}
+:root:not([data-theme=dark]){color-scheme:light;scrollbar-color:var(--line2) var(--bg)}
 .picklist,.tblwrap{scrollbar-width:thin;scrollbar-color:var(--line2) transparent}
 .picklist::-webkit-scrollbar,.tblwrap::-webkit-scrollbar{width:8px;height:8px}
 .picklist::-webkit-scrollbar-track,.tblwrap::-webkit-scrollbar-track{background:transparent}

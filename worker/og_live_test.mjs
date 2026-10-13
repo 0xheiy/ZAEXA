@@ -113,8 +113,9 @@ const GOOD = {
      "og:title does not carry the token:\n" + html.slice(0, 900));
   ok(html.includes("Liquidity $12.40M"), "the description lost the liquidity figure");
   ok(html.includes("Vol 24h $3.12M"), "the description lost the 24h volume");
-  ok(html.includes('content="https://zaexa.com/og.png?v=' + OG_IMAGE_V + '"'),
-     "og:image is not absolute, or its version is stale (expected v=" + OG_IMAGE_V + ")");
+  ok(/property="og:image" content="https:\/\/zaexa\.com\/og\/t\/0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913\.png\?v=1&amp;h=[0-9a-f]{8}"/.test(html),
+     "og:image is not the absolute, versioned per-token card");
+  ok(html.includes('property="og:image:alt" content="USDC on Base — Zaexa"'), "og:image:alt is not the token's");
   ok(html.includes('content="https://zaexa.com/t/' + ADDR + '"'),
      "og:url is not the canonical token url");
   ok(!html.includes("DEX aggregator on Base"),
@@ -186,6 +187,39 @@ for (const [mode, label] of [["error", "a 500 from upstream"], ["slow", "an upst
   ok(buf.length > 100000, "/og.png looks truncated (" + buf.length + " bytes)");
   ok(res304.status === 304, "/og.png ignores if-none-match (" + res304.status + ")");
   console.log("[og live] /og.png serves the real image and answers 304 on revalidation");
+}
+
+/* ---- ۴ب. کارتِ مخصوصِ توکن روی workerd واقعی ---- */
+{
+  // الف) بالادست در دسترس نیست → کارتِ عمومی با ۲۰۰، و خودِ صفحه هنوز رندر می‌شود
+  upstreamHits = []; upstreamReply = "error";
+  let m = mf();
+  const gen = new Uint8Array(await (await m.dispatchFetch("https://zaexa.com/og.png")).arrayBuffer());
+  let res = await m.dispatchFetch("https://zaexa.com/og/t/" + ADDR + ".png?v=1&h=00000000");
+  let buf = new Uint8Array(await res.arrayBuffer());
+  const page = await m.dispatchFetch("https://zaexa.com/t/" + ADDR);
+  const html = await page.text();
+  await m.dispose();
+  ok(res.status === 200 && res.headers.get("content-type") === "image/png",
+     "[og token live] unreachable upstream: /og/t/<addr>.png did not answer 200 image/png (" + res.status + ")");
+  ok(buf.length === gen.length && buf.every((b, i) => b === gen[i]),
+     "[og token live] unreachable upstream: the response is not the generic card");
+  ok(res.headers.get("cache-control") === "public, max-age=60", "[og token live] fallback cache-control: " + res.headers.get("cache-control"));
+  ok(page.status === 200 && html.includes("<body>app</body>") && html.includes('content="Token on Base — Zaexa"'),
+     "[og token live] the /t/ page must still render with a generic card when upstream is down");
+  console.log("[og token live] upstream unreachable: /og/t/<addr>.png -> 200 image/png (generic card), /t/<addr> still renders");
+
+  // ب) بالادست سالم → کارتِ واقعی با DecompressionStream و بقیه‌ی APIهای workerd
+  upstreamHits = []; upstreamReply = GOOD;
+  m = mf();
+  res = await m.dispatchFetch("https://zaexa.com/og/t/" + ADDR + ".png?v=1&h=00000000");
+  buf = new Uint8Array(await res.arrayBuffer());
+  await m.dispose();
+  ok(res.status === 200 && res.headers.get("content-type") === "image/png" && res.headers.get("x-zaexa-logo") === "none",
+     "[og token live] real card: status/type/logo header wrong (" + res.status + ", " + res.headers.get("x-zaexa-logo") + ")");
+  ok(buf[0] === 0x89 && buf[1] === 0x50 && buf.length > 800000 && buf.length !== gen.length,
+     "[og token live] real card does not look like a rendered token card (" + buf.length + " bytes)");
+  console.log("[og token live] healthy upstream: workerd renders the token card (" + buf.length + " bytes, logo none)");
 }
 
 /* ---- ۵. صفحه‌ی اصلی دست‌نخورده می‌ماند ---- */

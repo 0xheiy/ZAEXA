@@ -2104,6 +2104,52 @@ async def check_theme_button(p, errors):
     await b.close()
     print("[theme button] round 38x38 push button, border-radius 50%%, exactly one icon visible per theme, click toggles theme+aria-checked: %d runs on app/pairs/landing" % len(out))
 
+async def check_light_scrollbar(p, errors):
+    """[light scrollbar] تمِ روشن: ترکِ اسکرولِ صفحه هم‌رنگِ پس‌زمینه (app، pairs، landing؛ report در check_report_page)."""
+    b = await p.chromium.launch()
+    rows = []
+    for name in ("index.html", "pairs.html", "landing.html"):
+        for scheme in ("light", "dark"):
+            pg = await b.new_page(viewport={"width": 1440, "height": 900}, color_scheme=scheme)
+            await pg.route("**/*", lambda route: route.continue_() if route.request.url.startswith("file:") else route.abort())
+            await pg.goto("file://" + os.path.join(HERE, "..", name), wait_until="domcontentloaded")
+            await pg.wait_for_timeout(400)
+            st = await pg.evaluate("() => { const c = getComputedStyle(document.documentElement); return { t: document.documentElement.dataset.theme, cs: c.colorScheme, sc: c.scrollbarColor }; }")
+            assert st["t"] == scheme, "[light scrollbar] %s: expected theme %s, got %s" % (name, scheme, st["t"])
+            if scheme == "light":
+                assert st["cs"] == "light", "[light scrollbar] %s light: color-scheme is %r" % (name, st["cs"])
+                assert st["sc"] == "rgb(214, 218, 225) rgb(244, 245, 247)", "[light scrollbar] %s light: scrollbar-color is %r" % (name, st["sc"])
+            else:
+                assert st["cs"] == "dark", "[light scrollbar] %s dark: color-scheme is %r" % (name, st["cs"])
+            rows.append("%s/%s=%s" % (name, scheme, st["cs"]))
+            await pg.close()
+    await b.close()
+    print("[light scrollbar] light theme: color-scheme light and scrollbar track rgb(244, 245, 247) on app/pairs/landing; dark stays dark (%s)" % ", ".join(rows))
+
+def check_landing_dither():
+    """[landing dither] دانه‌ی دیترینگ روی درخشش‌های بزرگِ لندینگ — بررسیِ ایستا روی منبع.
+    روی عنصرِ دارای filter:blur دانه محو می‌شود، پس برای blobها و هاله‌ی hero یک لایه‌ی :after بدونِ فیلتر می‌نشیند."""
+    src = open(os.path.join(HERE, "..", "landing.html"), encoding="utf-8").read()
+    m = re.search(r':root\{--dither:url\("data:image/png;base64,([A-Za-z0-9+/=]+)"\)\}', src)
+    assert m, "[landing dither] --dither is not defined on :root of web/landing.html"
+    png = base64.b64decode(m.group(1))
+    assert png[:8] == b"\x89PNG\r\n\x1a\n", "[landing dither] --dither is not a PNG"
+    w, h = struct.unpack(">II", png[16:24])
+    assert (w, h) == (64, 64), "[landing dither] grain must be 64x64, got %dx%d" % (w, h)
+    assert len(png) <= 4096, "[landing dither] grain PNG is %d bytes (limit 4096)" % len(png)
+    sels = (".page-glow:after", ".hero-visual:after", ".feature-highlight", ".trust-art")
+    for sel in sels:
+        found = []
+        for rm in re.finditer(r'(?:^|[}\s])' + re.escape(sel) + r'\{([^}]*)\}', src):
+            for bg in re.findall(r'(?:^|;)background(?:-image)?:([^;]*)', rm.group(1)):
+                found.append(bg.strip())
+        assert found, "[landing dither] %s has no background declaration" % sel
+        assert any(f.startswith("var(--dither)") for f in found), "[landing dither] %s: var(--dither) is not the first background layer (%r)" % (sel, found)
+        for f in found:
+            if "gradient(" in f:
+                assert f.startswith("var(--dither)"), "[landing dither] %s: gradient layer without the grain on top: %r" % (sel, f)
+    print("[landing dither] --dither on :root is a 64x64 PNG of %d bytes; var(--dither) is the top background layer on %s" % (len(png), ", ".join(sels)))
+
 async def check_setbtn_pressed(p, errors):
     """[settings pressed] ۶ اکتبر — دکمه‌ی تنظیمات با کلیک (active) و با منوی باز باید گود شود؛
     قبلاً .chip:not(.solid):not(#themeBtn) سایه‌ی برآمده را نگه می‌داشت."""
@@ -3901,6 +3947,18 @@ async def check_report_page(p, errors):
     await theme_button_probe(pg, "report", "#themeBtn", ".themeSun", ".themeMoon")
     print("[theme button] report page: round 38x38, one icon per theme, click toggles")
     await pg.close()
+    rs = []
+    for sch in ("light", "dark"):
+        pg = await open_report(1440, 900, sch)
+        st = await pg.evaluate("() => { const c = getComputedStyle(document.documentElement); return { t: document.documentElement.dataset.theme, cs: c.colorScheme, sc: c.scrollbarColor }; }")
+        await pg.close()
+        assert st["t"] == sch, "[light scrollbar] report: expected theme %s, got %s" % (sch, st["t"])
+        if sch == "light":
+            assert st["cs"] == "light" and st["sc"] == "rgb(214, 218, 225) rgb(244, 245, 247)", "[light scrollbar] report light: %s" % st
+        else:
+            assert st["cs"] == "dark", "[light scrollbar] report dark: %s" % st
+        rs.append("%s=%s" % (sch, st["cs"]))
+    print("[light scrollbar] report page: light has color-scheme light and track rgb(244, 245, 247); dark stays dark (%s)" % ", ".join(rs))
     print("[report page theme] the toggle flips data-theme and writes the shared key %s (never the retired one)" % theme_key)
     assert not errs, "[report page] console errors: %s" % errs[:5]
 
@@ -6217,6 +6275,8 @@ async def main():
         await check_real_page_from_disk(p)
         await check_theme_migration(p, errors)
         await check_theme_button(p, errors)
+        await check_light_scrollbar(p, errors)
+        check_landing_dither()
         await check_setbtn_pressed(p, errors)
         await check_landing_mobile(p, errors)
         await check_canvas_palette_live(p, errors)
