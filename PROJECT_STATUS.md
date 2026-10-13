@@ -19,7 +19,7 @@
 ## ۰. کارهای باز — به‌روز ۱۳ اکتبر ۲۰۲۶، به ترتیب
 
 فقط کارهای انجام‌نشده و تصمیم‌های ثابت. کارهای تمام‌شده در تاریخچه‌ی گیت هستند (آخرین: کارتِ پیش‌نمایشِ هر توکن `/og/t/<آدرس>.png` و نوارِ اسکرولِ حالتِ روز — ۱۳ اکتبر).
-سوییت رابط **۷۸۲ کاوشگر** سبز (`python3 web/test/run.py`، ۲۰ دقیقه یا بیشتر — در پس‌زمینه اجرا کن)؛ به‌علاوه‌ی `worker/test.mjs`، `worker/og_live_test.mjs`، `worker/solana-parity.test.mjs`،
+سوییت رابط **۷۸۵ کاوشگر** سبز (`python3 web/test/run.py`، ۲۰ دقیقه یا بیشتر — در پس‌زمینه اجرا کن)؛ به‌علاوه‌ی `worker/test.mjs`، `worker/og_live_test.mjs`، `worker/solana-parity.test.mjs`،
 شش `web/test/solana-*.test.mjs` و چهار آزمونِ مرورگر (`solana-parity-browser.py`، `solana-views-browser.py`،
 `solana-pairs-browser.py`، `market-workspace-browser.py` — از ریشه‌ی مخزن؛ `scripts/solana-wallet` باید `npm ci` شده باشد).
 ⚠️ کاوشگرِ `[report body unchanged]` بدنه‌ی گزارش را با کامیتِ ثابتِ `6944652` می‌سنجد؛ کلونِ کم‌عمق اول `git fetch --deepen=20` می‌خواهد.
@@ -76,6 +76,8 @@
 - ردِ تغییرِ شبکه (`switchNetwork`) هرگز throw نمی‌کند: پیامِ «Network switch cancelled in your wallet.».
 
 **وضعیتِ منابعِ داده از سمتِ سرور** (۱۳ اکتبر، `/vd/src` از خودِ Worker): کوین‌گکو ۴۲۹ (`10006`، سقفِ ماهانه)، GeckoTerminalِ بی‌کلید ۴۲۹، DexScreener ۴۲۹ — IPهای خروجیِ مشترکِ کلادفلر. یعنی گذرِ ساعتی، کارت‌ها و پراکسیِ /gt تا پر شدنِ سهمیه یا یک منبعِ سرورِ دیگر (مثلاً پراکسیِ کش‌دار روی VPSِ خودِ حسام) بی‌داده‌اند؛ ردیف‌های بی‌نماد در /pairs از همین است.
+
+**رله‌ی کش روی سرورِ حسام** (۱۳ اکتبر): `gtUpstream` اول از رله می‌پرسد اگر هر دو secret `GT_RELAY_URL` (فقط https، با پورتِ ۹۴۴۳ روی میزبانِ DNS-only) و `GT_RELAY_KEY` (هدرِ `x-zaexa-relay`) پر باشند؛ ۲۰۰/۴۰۴/سایرِ ۴xx نهایی، ۴۲۹ → کلیددار بدونِ پرچم، ۴۰۳/۵xx/پرتاب → ۶۰ث `relayDownUntil`. مسیرها: `/gt/…` → GeckoTerminal v2، `/ds/…` → DexScreener (فقط فال‌بکِ هویتِ کارت). `/vd/src` حالا `relay` هم دارد. کاوشگرِ `[gt relay]`. روی سرور: nginx با proxy_cache (۲۰۰ ← ۶۰ث، کهنه هنگامِ ۴۲۹/۵xx) — پیکربندی در `/etc/nginx/sites-available/gtc`.
 
 **اپ روی سولانا** (۱۳ اکتبر، از ویدیوی دومِ حسام)
 - بوتِ سولانا بی‌چشمک: اسکریپتِ head `html[data-bootchain=solana]` می‌گذارد و نواحیِ Base-اول تا اعمالِ سولانا `visibility:hidden` می‌مانند (سقفِ ۳ ثانیه). بوتِ سولانا هیچ درخواستِ `/networks/base/` نمی‌زند. کاوشگرهای `[sol boot no flash]` و `[sol boot no base calls]`.

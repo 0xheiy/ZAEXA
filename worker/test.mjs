@@ -75,7 +75,7 @@ function json(obj, status = 200) {
 
 let keepCgFlag = false; // فقط بخش‌های [gt fallback] پرچمِ کلیدِ افتاده را بینِ تماس‌ها نگه می‌دارند
 async function call(path, init, e) {
-  if (!keepCgFlag) (await import("./index.js"))._cgKeyDownUntil(0);
+  if (!keepCgFlag) { const m = await import("./index.js"); m._cgKeyDownUntil(0); m._relayDownUntil(0); }
   sent = []; sentHeaders = [];
   return await worker.fetch(new Request(ORIGIN + path, init), e || env, {});
 }
@@ -15001,7 +15001,7 @@ function stripAllowedWording(t) {
       const raw = await res.text();
       const b = JSON.parse(raw);
       ok(res.status === 200 && res.headers.get("cache-control") === "no-store", "[vd src] 200 + no-store");
-      ok(JSON.stringify(Object.keys(b).sort()) === JSON.stringify(["cg", "down", "ds", "gt", "ms"]), "[vd src] exact top-level keys, got " + Object.keys(b));
+      ok(JSON.stringify(Object.keys(b).sort()) === JSON.stringify(["cg", "down", "ds", "gt", "ms", "relay"]), "[vd src] exact top-level keys, got " + Object.keys(b));
       ok(b.cg.s === 429 && b.cg.code === 10006 && b.gt.s === 200 && b.ds.s === 200 && typeof b.ms === "number" && b.down === false,
          "[vd src] statuses and error_code, got " + raw);
       ok(!raw.includes("http") && !raw.includes("/") && !raw.includes(KEY) && !raw.includes("833589"), "[vd src] body carries only labels and numbers, got " + raw);
@@ -15039,6 +15039,116 @@ function stripAllowedWording(t) {
     });
     _cgKeyDownUntil(0);
     console.log("[vd src] GET /vd/src answers {cg:{s,code},gt:{s},ds:{s},down,ms} with no-store; keyed 429 shows s:429 code:10006; a throw is s:0; no CG_KEY -> nokey; POST 405; body has no URL, path or key; it always tries the keyed call even while the flag is set and never changes the flag; shares the vd rate bucket");
+  }
+
+  // ---------- [gt relay] ----------
+  {
+    const { _relayDownUntil } = idx;
+    const RL = "https://gtc.example.test:9443", RK = "RELAY-SECRET-KEY-XYZ";
+    const envR = { ASSETS, CG_KEY: KEY, GT_RELAY_URL: RL, GT_RELAY_KEY: RK };
+    const isRl = (u) => u.startsWith(RL);
+    const jr = (o, st = 200) => new Response(JSON.stringify(o), { status: st, headers: { "content-type": "application/json" } });
+    const REL = RL + "/gt/" + REST + "?page=2";
+    const nonRelay = () => log.filter((l) => !isRl(l.u));
+    async function relayCase(status, kind) { // kind: "status" | "throw"
+      _cgKeyDownUntil(0); _relayDownUntil(0);
+      return await withFetch((u) => {
+        if (isRl(u)) { if (kind === "throw") throw new TypeError("down"); return new Response("{}", { status }); }
+        return gtBody();
+      }, async () => {
+        const res = await call("/gt/" + REST + "?page=2", ipH(), envR);
+        return { res, n: log.length, urls: log.map((l) => l.u) };
+      });
+    }
+    // الف) رله ۲۰۰ → فقط یک تماس به رله، هدر و مسیر درست، صفر تماس به CoinGecko
+    _cgKeyDownUntil(0); _relayDownUntil(0);
+    await withFetch(() => gtBody(), async () => {
+      const res = await call("/gt/" + REST + "?page=2", ipH(), envR);
+      ok(res.status === 200 && log.length === 1 && log[0].u === REL, "[gt relay] 200 must make exactly one call to the relay path+query, got " + JSON.stringify(log.map((l) => l.u)));
+      ok(log[0].h["x-zaexa-relay"] === RK && log[0].h.accept === "application/json", "[gt relay] relay call must carry the header");
+      ok(log.every((l) => !isCg(l.u) && !isGt(l.u)), "[gt relay] zero CoinGecko/GeckoTerminal calls");
+      ok(res.headers.get("x-zaexa-proxy") === "miss-relay", "[gt relay] src relay -> miss-relay, got " + res.headers.get("x-zaexa-proxy"));
+      const hs = JSON.stringify([...res.headers.entries()]), body = await res.text();
+      ok(!hs.includes(RK) && !body.includes(RK) && !hs.includes("gtc.example") && !body.includes("gtc.example") && !log[0].u.includes(RK),
+         "[gt relay] relay key/host never in the response or the URL");
+      ok(_relayDownUntil() === 0, "[gt relay] 200 must not set the flag");
+    });
+    // ب) ۴۰۴ نهایی است
+    { const r = await relayCase(404, "status");
+      ok(r.res.status === 404 && r.n === 1 && _relayDownUntil() === 0, "[gt relay] 404 is final, no fallthrough, got " + r.res.status + "/" + r.n); }
+    // پ) ۴۲۹ → کلیددار، پرچم نمی‌نشیند
+    { const r = await relayCase(429, "status");
+      ok(r.res.status === 200 && r.n === 2 && isRl(r.urls[0]) && r.urls[1] === UK + "/" + REST + "?page=2" && _relayDownUntil() === 0,
+         "[gt relay] 429 falls to keyed and does not set the flag, got " + JSON.stringify(r.urls) + " " + _relayDownUntil());
+      ok(r.res.headers.get("x-zaexa-proxy") === "miss-keyed", "[gt relay] fallthrough answers miss-keyed"); }
+    // ت) ۴۰۳/۵۰۰/پرتاب → پرچم، و تماسِ بعدی رله را رد می‌کند
+    for (const [st, kind] of [[403, "status"], [500, "status"], [503, "status"], [0, "throw"]]) {
+      const r = await relayCase(st, kind);
+      ok(r.res.status === 200 && r.n === 2 && isRl(r.urls[0]) && isCg(r.urls[1]), "[gt relay] " + (kind === "throw" ? "throw" : st) + " falls through to keyed, got " + JSON.stringify(r.urls));
+      ok(_relayDownUntil() > Date.now() + 55 * 1000 && _relayDownUntil() <= Date.now() + 60 * 1000 + 1000, "[gt relay] " + (kind === "throw" ? "throw" : st) + " sets the 60 s flag");
+      await withFetch(() => gtBody(), async () => {
+        await call("/gt/" + REST + "?page=2", ipH(), envR);
+        ok(log.every((l) => !isRl(l.u)), "[gt relay] next call within 60 s skips the relay");
+      });
+    }
+    // ث) پایانِ پرچم → دوباره رله
+    _relayDownUntil(Date.now() - 1);
+    await withFetch(() => gtBody(), async () => {
+      await call("/gt/" + REST + "?page=2", ipH(), envR);
+      ok(log.length === 1 && isRl(log[0].u), "[gt relay] flag expiry retries the relay");
+    });
+    // ج) غیر https / کلیدِ خالی / آدرسِ خالی → نادیده
+    for (const [name, e] of [["http url", { ASSETS, CG_KEY: KEY, GT_RELAY_URL: "http://gtc.example.test:9443", GT_RELAY_KEY: RK }],
+                             ["missing key", { ASSETS, CG_KEY: KEY, GT_RELAY_URL: RL }],
+                             ["empty key", { ASSETS, CG_KEY: KEY, GT_RELAY_URL: RL, GT_RELAY_KEY: "" }],
+                             ["missing url", { ASSETS, CG_KEY: KEY, GT_RELAY_KEY: RK }]]) {
+      _cgKeyDownUntil(0); _relayDownUntil(0);
+      await withFetch(() => gtBody(), async () => {
+        await call("/gt/" + REST, ipH(), e);
+        ok(log.length === 1 && isCg(log[0].u), "[gt relay] " + name + " -> relay ignored, keyed call only, got " + JSON.stringify(log.map((l) => l.u)));
+      });
+    }
+    // چ) /vd/src
+    _cgKeyDownUntil(0); _relayDownUntil(0);
+    await withFetch((u) => (isRl(u) ? new Response("{}", { status: 429 }) : isDs(u) ? new Response("[]") : gtBody()), async () => {
+      const ip = { headers: { "cf-connecting-ip": "198.51.100.210" } };
+      _relayDownUntil(Date.now() + 30 * 1000); const fl = _relayDownUntil();
+      const res = await call("/vd/src", ip, envR); const raw = await res.text(); const b = JSON.parse(raw);
+      ok(b.relay && b.relay.s === 429 && Object.keys(b.relay).join() === "s", "[gt relay] /vd/src relay:{s:429} even while the flag is set, got " + raw);
+      ok(_relayDownUntil() === fl, "[gt relay] /vd/src never modifies the flag");
+      ok(!raw.includes(RK) && !raw.includes("gtc.example") && !raw.includes("9443"), "[gt relay] /vd/src body has no relay key/host");
+      ok(log.some((l) => l.u === RL + "/gt/" + REST && l.h["x-zaexa-relay"] === RK), "[gt relay] /vd/src probes the relay /gt path with the header");
+      const b2 = await (await call("/vd/src", ip, envK)).json();
+      ok(b2.relay.s === "unset", "[gt relay] /vd/src without relay -> unset, got " + JSON.stringify(b2.relay));
+    });
+    await withFetch((u) => { if (isRl(u)) throw new TypeError("x"); return gtBody(); }, async () => {
+      const b = await (await call("/vd/src", { headers: { "cf-connecting-ip": "198.51.100.211" } }, envR)).json();
+      ok(b.relay.s === 0, "[gt relay] /vd/src relay throw -> s:0");
+    });
+    _relayDownUntil(0);
+    // ح) DexScreener از رله اول
+    const pairR = [{ chainId: "base", dexId: "u", baseToken: { address: USDC, name: "USD Coin", symbol: "USDC" }, liquidity: { usd: 5 } }];
+    const dsR = () => jr(pairR);
+    await withFetch((u) => (isRl(u) && u.includes("/gt/") ? new Response("{}", { status: 429 }) : isRl(u) ? dsR() : isDs(u) ? dsR() : limited()), async () => {
+      _cgKeyDownUntil(0); _relayDownUntil(0);
+      const meta = await ogFetchMeta(USDC, envR);
+      const dsCalls = log.filter((l) => l.u.includes("/ds/") || isDs(l.u));
+      ok(meta && meta.src === "ds" && dsCalls.length === 1 && dsCalls[0].u === RL + "/ds/token-pairs/v1/base/" + USDC && dsCalls[0].h["x-zaexa-relay"] === RK,
+         "[gt relay] DS fallback goes through the relay first, got " + JSON.stringify(dsCalls.map((l) => l.u)));
+    });
+    await withFetch((u) => (isRl(u) && u.includes("/ds/") ? new Response("x", { status: 500 }) : isRl(u) ? new Response("{}", { status: 429 }) : isDs(u) ? dsR() : limited()), async () => {
+      _cgKeyDownUntil(0); _relayDownUntil(0);
+      const meta = await ogFetchMeta(USDC, envR);
+      ok(meta && meta.src === "ds" && log.some((l) => l.u === "https://api.dexscreener.com/token-pairs/v1/base/" + USDC),
+         "[gt relay] DS relay failure falls back to the direct DexScreener URL");
+    });
+    await withFetch((u) => (isDs(u) ? dsR() : limited()), async () => {
+      _cgKeyDownUntil(0); _relayDownUntil(0);
+      await ogFetchMeta(USDC, { CG_KEY: KEY });
+      ok(log.every((l) => !isRl(l.u)), "[gt relay] no relay configured -> DS direct only");
+    });
+    _cgKeyDownUntil(0); _relayDownUntil(0);
+    console.log("[gt relay] relay first (one call, header, path+query, miss-relay, zero CoinGecko); 404 final; 429 falls to keyed without the flag; 403/5xx/throw fall through and set a 60 s flag that skips the relay; expiry retries; non-https/missing key/url ignored; key and host never in response; /vd/src relay:{s}|unset never touching the flag; DexScreener via relay first then direct");
   }
 
   // ---------- [report pass upstream calls] ----------

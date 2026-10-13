@@ -38,9 +38,37 @@ const UPSTREAM_KEYED = "https://api.coingecko.com/api/v3/onchain";
    src: "cg" کلیددار، "gt" بی‌کلید. کلید فقط در هدر می‌رود، هرگز در URL. */
 let cgKeyDownUntil = 0;
 const CG_KEY_DOWN_MS = 10 * 60 * 1000;
+/* ۱۳ اکتبر: رله‌ی کش (nginx روی سرورِ خودِ مالک، IPِ اختصاصی) اولین گزینه است
+   چون IPِ مشترکِ کلادفلر از هر سه منبع ۴۲۹ می‌گیرد. فقط اگر هر دو secret پر
+   باشند و آدرس https باشد. ۲۰۰/۴۰۴/سایرِ ۴xx نهایی‌اند؛ ۴۲۹/۴۰۳/۵xx یا پرتاب
+   → زنجیره‌ی قبلی. ۴۰۳/۵xx/پرتاب رله را ۶۰ ثانیه کنار می‌گذارد، ۴۲۹ نه
+   (بودجه‌ی خودِ رله تمام شده، مرده نیست). آدرس و کلید هرگز در پاسخ/لاگ نیست. */
+let relayDownUntil = 0;
+const RELAY_DOWN_MS = 60 * 1000;
+function relayCfg(env) {
+  const u = env && typeof env.GT_RELAY_URL === "string" ? env.GT_RELAY_URL : "";
+  const k = env && typeof env.GT_RELAY_KEY === "string" ? env.GT_RELAY_KEY : "";
+  if (!u || !k || !u.startsWith("https://")) return null;
+  return { base: u.replace(/\/+$/, ""), key: k };
+}
 async function gtUpstream(rest, env, opts) {
   const key = (env && typeof env.CG_KEY === "string" && env.CG_KEY) || "";
   const sig = opts && opts.signal ? { signal: opts.signal } : {};
+  const rl = relayCfg(env);
+  if (rl && relayDownUntil <= Date.now()) {
+    try {
+      const res = await fetch(rl.base + "/gt/" + rest,
+        { headers: { accept: "application/json", "x-zaexa-relay": rl.key }, ...sig });
+      if (res.status === 403 || res.status >= 500) {
+        relayDownUntil = Date.now() + RELAY_DOWN_MS;
+      } else if (res.status !== 429) {
+        return { res, src: "relay" };
+      }
+    } catch (e) {
+      if (opts && opts.signal && opts.signal.aborted) throw e;
+      relayDownUntil = Date.now() + RELAY_DOWN_MS;
+    }
+  }
   if (key && cgKeyDownUntil <= Date.now()) {
     try {
       const res = await fetch(UPSTREAM_KEYED + "/" + rest,
@@ -409,7 +437,7 @@ async function proxyGt(request, url, ctx, env) {
     "cache-control": up.ok ? "public, max-age=" + ttl : "no-store",
     /* برای بازرسی از بیرون: هم معلوم است پاسخ از پراکسی آمده، هم اینکه
        کلید واقعاً به Worker رسیده یا نه. خودِ کلید هرگز چاپ نمی‌شود. */
-    "x-zaexa-proxy": up.ok ? (src === "cg" ? "miss-keyed" : "miss-free")
+    "x-zaexa-proxy": up.ok ? (src === "cg" ? "miss-keyed" : src === "relay" ? "miss-relay" : "miss-free")
                            : "upstream-" + up.status,
   };
   const res = new Response(body, { status: up.status, headers });
@@ -523,18 +551,31 @@ async function ogFetchMetaDetail(addr, env) {
      decimals null باشند حکمِ Base صادقانه «نامعلوم» می‌شود؛ حکمِ سولانا
      هیچ‌کدام را لازم ندارد. تایم‌اوتِ جداگانه؛ بعد از تایم‌اوتِ GT نمی‌رود. */
   if (!out.meta && out.why !== "meta:timeout") {
-    const ds = await dsFetchMeta(addr, chainOf(addr));
+    const ds = await dsFetchMeta(addr, chainOf(addr), env);
     if (ds) return { meta: ds, why: null };
   }
   return out;
 }
 
-async function dsFetchMeta(addr, chain) {
+async function dsFetchMeta(addr, chain, env) {
   if (chain !== "base" && chain !== "solana") return null;
   const ac = new AbortController();
   const timer = setTimeout(() => ac.abort(), OG_TIMEOUT_MS);
   try {
-    const up = await fetch("https://api.dexscreener.com/token-pairs/v1/" + chain + "/" + addr,
+    const path = "token-pairs/v1/" + chain + "/" + addr;
+    /* اول رله (IPِ اختصاصی)؛ شکست → همان تماسِ مستقیمِ قبلی */
+    const rl = relayCfg(env);
+    if (rl) {
+      try {
+        const r = await fetch(rl.base + "/ds/" + path,
+          { headers: { accept: "application/json", "x-zaexa-relay": rl.key }, signal: ac.signal });
+        if (r.ok) {
+          const m = pickDsMeta(await r.json(), addr, chain);
+          if (m) return m;
+        }
+      } catch (e) { if (ac.signal.aborted) return null; }
+    }
+    const up = await fetch("https://api.dexscreener.com/" + path,
       { headers: { accept: "application/json" }, signal: ac.signal });
     if (!up.ok) return null;
     return pickDsMeta(await up.json(), addr, chain);
@@ -2356,14 +2397,19 @@ async function diagSrc(env) {
       clearTimeout(timer);
     }
   };
-  const [cg, gt, ds] = await Promise.all([
+  /* رله: relayDownUntil را نه می‌خواند نه می‌نویسد؛ فقط وضعیت، هرگز آدرس */
+  const rl = relayCfg(env);
+  const relayP = rl ? probe(rl.base + "/gt/" + rest,
+    { accept: "application/json", "x-zaexa-relay": rl.key }, false) : Promise.resolve({ s: "unset" });
+  const [cg, gt, ds, relay] = await Promise.all([
     key ? probe(UPSTREAM_KEYED + "/" + rest, { accept: "application/json", "x-cg-demo-api-key": key }, true)
         : Promise.resolve({ s: "nokey", code: null }),
     probe(UPSTREAM_FREE + "/" + rest, { accept: "application/json" }, false),
     probe("https://api.dexscreener.com/token-pairs/v1/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
       { accept: "application/json" }, false),
+    relayP,
   ]);
-  return vdDone(200, { cg, gt, ds, down: cgKeyDownUntil > Date.now(), ms: Date.now() - t0 });
+  return vdDone(200, { cg, gt, ds, relay, down: cgKeyDownUntil > Date.now(), ms: Date.now() - t0 });
 }
 async function diagVerdict(request, url, env, ctx) {
   /* همیشه اولین خط، پیش از هر بررسیِ دیگری — همان قاعده‌ای که /gt و /ev
@@ -3504,6 +3550,7 @@ export { baseVenueCovered, baseVenueCoveredDetail, ogFetchVerdictDetail };
 export { solNosellVeto };
 export { UPSTREAM_FREE, UPSTREAM_KEYED };
 // فقط برای تست: پرچمِ «کلید افتاده» در سطحِ ایزوله است و بینِ بخش‌ها نشت می‌کند
+export function _relayDownUntil(set) { if (set !== undefined) relayDownUntil = set; return relayDownUntil; }
 export function _cgKeyDownUntil(set) { if (set !== undefined) cgKeyDownUntil = set; return cgKeyDownUntil; }
 export { VD_ADDR_RE };
 export { TOKEN_PAGE, solFetchVerdict };
