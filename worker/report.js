@@ -691,7 +691,7 @@ export const COST_SOL_POOLS = 2;
 
 export async function runReportPass({
   kv, fetchPools, metaOf, verdictOf, now, sleep, maxTokens, poolEmptyOf, fetchPoolsSol, solMaxTokens,
-  probeFetch, meter, capHit, metaMany, budgetLeft,
+  probeFetch, meter, capHit, metaMany, budgetLeft, metaFix,
 }) {
   try {
     // 🔴 بدون انباری برای نوشتن، هیچ تماسِ بالادستی مجاز نیست — قبل از هر
@@ -820,6 +820,9 @@ export async function runReportPass({
       } else {
         try { metaResult = await metaOf(t.address); } catch (e) { metaResult = null; }
       }
+      // پشتیبانِ اختیاری (metaFix): فقط برای متایی که مبلغِ فروش نمی‌دهد؛ گزینشِ
+      // زنجیره/گذر در خودِ فراخوان است، اینجا فقط اگر داده شده باشد صدا زده می‌شود.
+      if (typeof metaFix === "function") { try { const f = await metaFix(t.address, metaResult, t.priceUsd); if (f && typeof f === "object" && Object.prototype.hasOwnProperty.call(f, "meta")) metaResult = f; } catch (e) { /* بدونِ تغییر */ } }
       const metaOk = !!metaResult && typeof metaResult === "object" &&
         Object.prototype.hasOwnProperty.call(metaResult, "meta");
       const meta = metaOk && metaResult.meta && typeof metaResult.meta === "object" ? metaResult.meta : null;
@@ -992,6 +995,9 @@ export async function runReportPass({
 
           let metaResult;
           try { metaResult = await metaOf(t.address); } catch (e) { metaResult = null; }
+          // پشتیبانِ اختیاری (metaFix): فقط برای متایی که مبلغِ فروش نمی‌دهد؛ گزینشِ
+          // زنجیره/گذر در خودِ فراخوان است، اینجا فقط اگر داده شده باشد صدا زده می‌شود.
+          if (typeof metaFix === "function") { try { const f = await metaFix(t.address, metaResult, undefined); if (f && typeof f === "object" && Object.prototype.hasOwnProperty.call(f, "meta")) metaResult = f; } catch (e) { /* بدونِ تغییر */ } }
           const metaOk = !!metaResult && typeof metaResult === "object" &&
             Object.prototype.hasOwnProperty.call(metaResult, "meta");
           const meta = metaOk && metaResult.meta && typeof metaResult.meta === "object" ? metaResult.meta : null;
@@ -1092,6 +1098,9 @@ export async function runReportPass({
           // تزریق‌شده‌ی کالر برای هر دو پا کافی است.
           let metaResult;
           try { metaResult = await metaOf(t.address); } catch (e) { metaResult = null; }
+          // پشتیبانِ اختیاری (metaFix): فقط برای متایی که مبلغِ فروش نمی‌دهد؛ گزینشِ
+          // زنجیره/گذر در خودِ فراخوان است، اینجا فقط اگر داده شده باشد صدا زده می‌شود.
+          if (typeof metaFix === "function") { try { const f = await metaFix(t.address, metaResult, undefined); if (f && typeof f === "object" && Object.prototype.hasOwnProperty.call(f, "meta")) metaResult = f; } catch (e) { /* بدونِ تغییر */ } }
           const metaOk = !!metaResult && typeof metaResult === "object" &&
             Object.prototype.hasOwnProperty.call(metaResult, "meta");
           const meta = metaOk && metaResult.meta && typeof metaResult.meta === "object" ? metaResult.meta : null;

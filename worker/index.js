@@ -51,6 +51,12 @@ function relayCfg(env) {
   if (!u || !k || !u.startsWith("https://")) return null;
   return { base: u.replace(/\/+$/, ""), key: k };
 }
+/* ۱۴ اکتبر: CoinMarketCap فقط پشتیبانِ متادیتای بدونِ مبلغ در گذرِ ساعتی است.
+   کلید فقط در هدر می‌رود — هرگز در URL، پاسخ، لاگ یا رکوردِ گذر. */
+const CMC_TOKEN_URL = "https://pro-api.coinmarketcap.com/v1/dex/token";
+function cmcKey(env) {
+  return env && typeof env.CMC_KEY === "string" && env.CMC_KEY ? env.CMC_KEY : "";
+}
 /* ۱۳ اکتبر: ریتم‌دهیِ گذرِ ساعتی. رله یک IPv4 دارد و GeckoTerminal بی‌کلید
    حدود ۳۰ تماس در دقیقه به ازای هر IP می‌دهد؛ گذر ~۲۰ تماس را در چند ثانیه
    می‌زد و ۴۲۹ می‌خورد. فقط در طولِ گذر (passPace != null): تماس‌های رله
@@ -67,6 +73,7 @@ function paceStart() {
   passPace = {
     gate: Promise.resolve(), next: 0, t0: paceNowImpl(),
     calls: 0, waitsMs: 0, r429: 0, retries: 0, ok: 0,
+    cmc: { calls: 0, ok: 0, used: 0, rej: 0 },
   };
   return passPace;
 }
@@ -145,12 +152,12 @@ async function gtUpstream(rest, env, opts) {
   return { res, src: "gt" };
 }
 
-import { ogTags, ogTitle, pickTokenMeta, pickDsMeta } from "./og.js";
+import { ogTags, ogTitle, pickTokenMeta, pickDsMeta, pickCmcMeta } from "./og.js";
 import { ogImageResponse } from "./og-image.js";
 import { tokenCardPng, renderable, logoFromJpeg } from "./og-token.js";
 import { logoResponse } from "./logo-image.js";
 import { fetchVerdict, fetchCounterSell, poolDirectedProof, VD_VENUES, VD_RPCS, VD_V4_STAGE_COUNTERS,
-  WETH_ADDR, USDC_ADDR } from "./verdict.js";
+  WETH_ADDR, USDC_ADDR, sellAmountFrom } from "./verdict.js";
 import { EVM_ADDR, SOL_MINT, chainOf, gtNetworkOf } from "./chains.js";
 import { tgRoute } from "./tg.js";
 import {
@@ -2429,11 +2436,56 @@ export async function tokenVerdict(addr, env, ctx, deadlineAt, opts) {
   return { chain: null, v: null, why: "internal" };
 }
 
+/* ۱۴ اکتبر: پشتیبانِ CMC برای متایی که مبلغِ فروش نمی‌دهد. فقط در گذر، فقط
+   Base، فقط با کلید، و فقط وقتی متای فعلی قیمت+decimals ندارد؛ وگرنه ورودی
+   همان شیء برمی‌گردد. هرگز پرتاب نمی‌کند. دو چکِ عقل: decimals با متای موجود
+   نخواند، یا قیمت بیش از ۳ برابر با قیمتِ استخر فاصله داشته باشد → رد. */
+async function cmcMetaFix(addr, metaResult, poolPriceUsd, env) {
+  try {
+    const pc = passPace;
+    if (pc === null) return metaResult;
+    if (chainOf(addr) !== "base") return metaResult;
+    const key = cmcKey(env);
+    if (!key) return metaResult;
+    if (metaResult && metaResult.meta &&
+        sellAmountFrom(metaResult.meta.priceUsd, metaResult.meta.decimals) != null) return metaResult;
+    pc.cmc.calls++;
+    const ac = new AbortController();
+    const dl = makeDeadline(ac, OG_TIMEOUT_MS);
+    dl.arm(); // در گذر makeDeadline خودش مسلح نمی‌کند
+    let json;
+    try {
+      const r = await fetch(CMC_TOKEN_URL + "?platform=base&address=" + addr.toLowerCase(),
+        { headers: { accept: "application/json", "X-CMC_PRO_API_KEY": key }, signal: ac.signal });
+      if (!r.ok) return metaResult;
+      json = await r.json();
+    } finally {
+      dl.clear();
+    }
+    const c = pickCmcMeta(json, addr);
+    if (!c) return metaResult;
+    pc.cmc.ok++;
+    const old = metaResult && metaResult.meta && typeof metaResult.meta === "object" ? metaResult.meta : null;
+    if (old && Number.isInteger(old.decimals) && old.decimals !== c.decimals) { pc.cmc.rej++; return metaResult; }
+    if (typeof poolPriceUsd === "number" && Number.isFinite(poolPriceUsd) && poolPriceUsd > 0 &&
+        (c.priceUsd / poolPriceUsd > 3 || poolPriceUsd / c.priceUsd > 3)) { pc.cmc.rej++; return metaResult; }
+    pc.cmc.used++;
+    const base = old || { name: null, symbol: null, liquidity: null, vol24: null, imageUrl: null };
+    return {
+      meta: { ...base, name: base.name || c.name, symbol: base.symbol || c.symbol,
+        decimals: c.decimals, priceUsd: c.priceUsd, src: "cmc" },
+      why: null,
+    };
+  } catch (e) {
+    return metaResult;
+  }
+}
+
 async function diagSrc(env) {
   const t0 = Date.now();
   const rest = "networks/base/tokens/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913";
   const key = (env && typeof env.CG_KEY === "string" && env.CG_KEY) || "";
-  const probe = async (url, headers, withCode) => {
+  const probe = async (url, headers, withCode, strCode) => {
     const ac = new AbortController();
     const timer = setTimeout(() => ac.abort(), OG_TIMEOUT_MS * 2);
     try {
@@ -2445,6 +2497,7 @@ async function diagSrc(env) {
           const j = await r.json();
           const c = j && j.status && j.status.error_code;
           if (typeof c === "number" && Number.isFinite(c)) code = c;
+          else if (strCode && typeof c === "string" && c.trim() !== "" && Number.isFinite(Number(c))) code = Number(c);
         } catch (e) { /* بدنه‌ی غیر JSON */ }
         o.code = code;
       }
@@ -2459,15 +2512,19 @@ async function diagSrc(env) {
   const rl = relayCfg(env);
   const relayP = rl ? probe(rl.base + "/gt/" + rest,
     { accept: "application/json", "x-zaexa-relay": rl.key }, false) : Promise.resolve({ s: "unset" });
-  const [cg, gt, ds, relay] = await Promise.all([
+  const cmcK = cmcKey(env);
+  const [cg, gt, ds, relay, cmc] = await Promise.all([
     key ? probe(UPSTREAM_KEYED + "/" + rest, { accept: "application/json", "x-cg-demo-api-key": key }, true)
         : Promise.resolve({ s: "nokey", code: null }),
     probe(UPSTREAM_FREE + "/" + rest, { accept: "application/json" }, false),
     probe("https://api.dexscreener.com/token-pairs/v1/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
       { accept: "application/json" }, false),
     relayP,
+    cmcK ? probe(CMC_TOKEN_URL + "?platform=base&address=0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
+      { accept: "application/json", "X-CMC_PRO_API_KEY": cmcK }, true, true)
+         : Promise.resolve({ s: "unset" }),
   ]);
-  return vdDone(200, { cg, gt, ds, relay, down: cgKeyDownUntil > Date.now(), ms: Date.now() - t0 });
+  return vdDone(200, { cg, gt, ds, relay, cmc, down: cgKeyDownUntil > Date.now(), ms: Date.now() - t0 });
 }
 async function diagVerdict(request, url, env, ctx) {
   /* همیشه اولین خط، پیش از هر بررسیِ دیگری — همان قاعده‌ای که /gt و /ev
@@ -3331,6 +3388,7 @@ function paceKv(kv) {
           const arr = JSON.parse(v);
           if (Array.isArray(arr) && arr[0] && typeof arr[0] === "object") {
             arr[0].relay = { calls: pc.calls, waitsMs: pc.waitsMs, r429: pc.r429, retries: pc.retries, ok: pc.ok };
+            arr[0].cmc = { calls: pc.cmc.calls, ok: pc.cmc.ok, used: pc.cmc.used, rej: pc.cmc.rej };
             v = JSON.stringify(arr);
           }
         }
@@ -3382,6 +3440,7 @@ async function scheduledReportPassBody(env, ctx, opts, meter) {
       meter,
       fetchPools,
       metaOf: (addr) => ogFetchMetaDetail(addr, env),
+      metaFix: (addr, r, poolPriceUsd) => cmcMetaFix(addr, r, poolPriceUsd, env),
       /* 🔴 ۱۹ شهریور: تا امروز کلیدِ واقعیِ v4 با ctx.waitUntil *بعد* از حکم
          ساخته می‌شد، و چون گزارش هر توکن را فقط یک بار می‌بیند (حلقه‌ی
          pairs)، آن کلید هرگز روی هیچ ردیفی اثر نمی‌گذاشت — اندازه‌گیری:
@@ -3644,6 +3703,7 @@ export { solNosellVeto };
 export { UPSTREAM_FREE, UPSTREAM_KEYED };
 // فقط برای تست: پرچمِ «کلید افتاده» در سطحِ ایزوله است و بینِ بخش‌ها نشت می‌کند
 export function _paceHooks(h) { if (h && h.sleep) paceSleepImpl = h.sleep; if (h && h.now) paceNowImpl = h.now; if (h && h.reset) { paceSleepImpl = defaultPaceSleep; paceNowImpl = () => Date.now(); } }
+export { cmcMetaFix };
 export function _paceActive() { return passPace; }
 export function _paceBegin() { return paceStart(); }
 export function _paceEnd() { passPace = null; }

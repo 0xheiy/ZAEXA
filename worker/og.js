@@ -119,6 +119,25 @@ export function pickDsMeta(pairs, addr, chain) {
   return { name, symbol, liquidity: null, vol24: null, decimals: null, priceUsd: null, imageUrl: null, src: "ds" };
 }
 
+/* ۱۴ اکتبر: متادیتای CoinMarketCap (v1/dex/token) — فقط برای گذرِ ساعتی، وقتی
+   متای دیگر مبلغِ فروش نمی‌دهد. error_code رشته‌ی "0" است، p رشته‌ی اعشاری،
+   dec عددِ صحیح. بدونِ قیمت یا decimals به درد گذر نمی‌خورد → null.
+   liquidity/vol24/imageUrl عمداً null (مثلِ pickDsMeta: عددِ منبعِ دیگر با
+   صفحه نمی‌خواند). */
+export function pickCmcMeta(body, addr) {
+  if (!body || typeof body !== "object" || typeof addr !== "string") return null;
+  if (String(body.status && body.status.error_code) !== "0") return null;
+  const data = body.data;
+  if (!data || typeof data !== "object" || Array.isArray(data)) return null;
+  if (!(typeof data.addr === "string" && data.addr.toLowerCase() === addr.toLowerCase())) return null;
+  const decimals = Number.isInteger(data.dec) && data.dec >= 0 && data.dec <= 36 ? data.dec : null;
+  const n = Number(data.p);
+  const priceUsd = Number.isFinite(n) && n > 0 ? n : null;
+  if (decimals === null || priceUsd === null) return null;
+  return { name: ogClean(data.n, 48), symbol: ogClean(data.sym, 16), liquidity: null, vol24: null,
+    decimals, priceUsd, imageUrl: null, src: "cmc" };
+}
+
 const PITCH =
   "Check whether you can sell it back before you buy — exit simulation and " +
   "risk flags, no wallet needed.";

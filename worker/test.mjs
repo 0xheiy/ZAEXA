@@ -15033,7 +15033,7 @@ function stripAllowedWording(t) {
       const raw = await res.text();
       const b = JSON.parse(raw);
       ok(res.status === 200 && res.headers.get("cache-control") === "no-store", "[vd src] 200 + no-store");
-      ok(JSON.stringify(Object.keys(b).sort()) === JSON.stringify(["cg", "down", "ds", "gt", "ms", "relay"]), "[vd src] exact top-level keys, got " + Object.keys(b));
+      ok(JSON.stringify(Object.keys(b).sort()) === JSON.stringify(["cg", "cmc", "down", "ds", "gt", "ms", "relay"]), "[vd src] exact top-level keys, got " + Object.keys(b));
       ok(b.cg.s === 429 && b.cg.code === 10006 && b.gt.s === 200 && b.ds.s === 200 && typeof b.ms === "number" && b.down === false,
          "[vd src] statuses and error_code, got " + raw);
       ok(!raw.includes("http") && !raw.includes("/") && !raw.includes(KEY) && !raw.includes("833589"), "[vd src] body carries only labels and numbers, got " + raw);
@@ -15281,6 +15281,191 @@ function stripAllowedWording(t) {
     ok(_paceActive() === null, "[pass pacing] pacing must be cleared after the pass");
     reset();
     console.log("[pass pacing] relay calls in a pass start >= 2100 ms apart (serial and concurrent), zero pacing outside a pass, relay 429 retried after 8 s then 20 s via the relay (max 2) and then falls through (keyed call skipped while the key is down), the 8 min guard stops retries, the slot wait never eats the call timeout, and /vd/passes carries {calls,waitsMs,r429,retries,ok}");
+  }
+
+  // ---------- [cmc meta] ----------
+  {
+    const { _paceBegin, _paceEnd, _paceActive, cmcMetaFix } = idx;
+    const { pickCmcMeta } = await import("./og.js");
+    const CK = "CMC-SECRET-KEY-DO-NOT-LEAK";
+    const CMC_URL = "https://pro-api.coinmarketcap.com/v1/dex/token";
+    const LAPTOP = "0x58d67db06203499061b810b7e65c45505f83b490";
+    // بدنه‌های واقعیِ اندازه‌گیری‌شده‌ی CMC (۱۴ اکتبر) — فقط فیلدها کم شده، نوع‌ها دست‌نخورده
+    const usdcBody = { data: { n: "USD Coin", sym: "USDC", addr: USDC, plt: "Base", dec: 6, p: "0.999892809105392", liqUsd: "266471338.034152508683980141" },
+      status: { timestamp: "2026-10-14T05:25:53.270Z", error_code: "0", error_message: "", elapsed: 179, credit_count: 1 } };
+    const laptopBody = { data: { n: "LAPTOP", sym: "LAPTOP", addr: LAPTOP, plt: "Base", dec: 18, p: "0.000001333310138407258820591899811343", liqUsd: "9875.291373269489009869" },
+      status: { timestamp: "2026-10-14T05:25:59.980Z", error_code: "0", error_message: "", elapsed: 173, credit_count: 1 } };
+    const err400 = { status: { timestamp: "2026-10-14T05:25:54.070Z", error_code: "4002", error_message: "Missing required parameter.", elapsed: 0, credit_count: 0, category: "VALIDATION", error_detail: "'Failed to read HTTP message' is required." } };
+    const clone = (o) => JSON.parse(JSON.stringify(o));
+    const jb = (o, s = 200) => new Response(JSON.stringify(o), { status: s, headers: { "content-type": "application/json" } });
+    const envC = { ASSETS, CMC_KEY: CK };
+
+    // ۱) pickCmcMeta
+    const pl = pickCmcMeta(laptopBody, LAPTOP);
+    ok(pl && pl.decimals === 18 && Math.abs(pl.priceUsd - 1.3333e-6) < 1e-9 && pl.symbol === "LAPTOP" && pl.src === "cmc"
+       && pl.liquidity === null && pl.vol24 === null && pl.imageUrl === null, "[cmc meta] laptop pick, got " + JSON.stringify(pl));
+    const pu = pickCmcMeta(usdcBody, USDC.toUpperCase().replace("0X", "0x"));
+    ok(pu && pu.decimals === 6, "[cmc meta] usdc decimals 6 (address compare case-insensitive), got " + JSON.stringify(pu));
+    ok(pickCmcMeta(err400, LAPTOP) === null, "[cmc meta] err_400 body -> null");
+    ok(pickCmcMeta(laptopBody, USDC) === null, "[cmc meta] wrong addr -> null");
+    const noDec = clone(laptopBody); delete noDec.data.dec;
+    ok(pickCmcMeta(noDec, LAPTOP) === null, "[cmc meta] dec missing -> null");
+    const p0 = clone(laptopBody); p0.data.p = "0";
+    ok(pickCmcMeta(p0, LAPTOP) === null, "[cmc meta] p \"0\" -> null");
+    const e1002 = clone(laptopBody); e1002.status.error_code = "1002";
+    ok(pickCmcMeta(e1002, LAPTOP) === null, "[cmc meta] error_code \"1002\" -> null");
+
+    // ۲) runReportPass با metaFix
+    {
+      const NOW_R = Date.parse("2026-10-14T12:00:00.000Z");
+      const addrR = "0x" + (0x7777).toString(16).padStart(40, "0");
+      const rowR = { attributes: { reserve_in_usd: "20000", base_token_price_usd: "0.5", pool_created_at: "2026-10-14T10:00:00Z",
+        volume_usd: { h24: "10" }, fdv_usd: "100" }, relationships: { base_token: { data: { id: "base_" + addrR } }, dex: { data: { id: "uniswap-v3-base" } } } };
+      const FIXED = { symbol: "FIX", name: "Fixed", priceUsd: 0.5, decimals: 18, src: "cmc" };
+      const run = async (extra) => {
+        let seen = "unset"; let fixPrice = "unset";
+        const store = new Map(); // هر اجرا انبارِ تازه، تا ردیفِ قبلی جلوی بررسی را نگیرد
+        const kvR = { get: async (k) => (store.has(k) ? store.get(k) : null), put: async (k, v) => { store.set(k, v); } };
+        await runReportPass({ kv: kvR, fetchPools: async () => [rowR],
+          metaOf: async () => ({ meta: null, why: "meta:429" }),
+          verdictOf: async (a, meta) => { seen = meta; return { v: null, why: "no-quote" }; },
+          now: () => NOW_R, sleep: async () => {},
+          ...(extra ? { metaFix: async (a, r, price) => { fixPrice = price; return extra(a, r); } } : {}) });
+        return { seen, fixPrice };
+      };
+      const withFix = await run(async () => ({ meta: FIXED, why: null }));
+      ok(withFix.seen === FIXED && withFix.fixPrice === 0.5, "[cmc meta] verdictOf must receive the metaFix meta and metaFix the pool price, got " + JSON.stringify(withFix));
+      const noFix = await run(null);
+      ok(noFix.seen === null, "[cmc meta] without metaFix verdictOf gets null meta, got " + JSON.stringify(noFix.seen));
+      const bad = await run(async () => { throw new Error("boom"); });
+      ok(bad.seen === null, "[cmc meta] a throwing metaFix leaves the meta unchanged, got " + JSON.stringify(bad.seen));
+      const junk = await run(async () => ({ nope: 1 }));
+      ok(junk.seen === null, "[cmc meta] a metaFix result without a meta key is ignored, got " + JSON.stringify(junk.seen));
+    }
+
+    // ۳) cmcMetaFix مستقیم
+    const nullRes = { meta: null, why: "meta:429" };
+    let hdrSeen = null;
+    const cmcOk = (body, status = 200) => (u, o) => { hdrSeen = o.headers; return jb(body, status); };
+    _paceEnd();
+    await withFetch(cmcOk(laptopBody), async () => {
+      const r = await cmcMetaFix(LAPTOP, nullRes, undefined, envC);
+      ok(r === nullRes && log.length === 0, "[cmc meta] outside a pass: same object and zero fetches, got " + log.length);
+    });
+    {
+      const pc = _paceBegin();
+      await withFetch(cmcOk(laptopBody), async () => {
+        const r = await cmcMetaFix(LAPTOP.toUpperCase().replace("0X", "0x"), nullRes, undefined, envC);
+        ok(log.length === 1 && log[0].u.startsWith(CMC_URL) && log[0].u.includes("platform=base&address=" + LAPTOP),
+           "[cmc meta] exactly one CMC call with lowercase address, got " + JSON.stringify(log.map((l) => l.u)));
+        ok(hdrSeen["X-CMC_PRO_API_KEY"] === CK && !log[0].u.includes(CK), "[cmc meta] key in the header only");
+        ok(r.meta && r.meta.priceUsd === Number(laptopBody.data.p) && r.meta.decimals === 18 && r.meta.src === "cmc" && r.why === null,
+           "[cmc meta] fixed meta from fixture, got " + JSON.stringify(r));
+        ok(!JSON.stringify(r).includes(CK), "[cmc meta] key never in the result");
+      });
+      ok(JSON.stringify(pc.cmc) === JSON.stringify({ calls: 1, ok: 1, used: 1, rej: 0 }), "[cmc meta] counters, got " + JSON.stringify(pc.cmc));
+      ok(!JSON.stringify(pc).includes(CK), "[cmc meta] pass record never holds the key");
+
+      // meta موجود: name/symbol قدیمی می‌مانند، فیلدهای دیگر حفظ
+      const keep = { meta: { name: "Old", symbol: "OLD", liquidity: 5, vol24: 6, imageUrl: "u", decimals: null, priceUsd: null }, why: "x" };
+      await withFetch(cmcOk(laptopBody), async () => {
+        const r = await cmcMetaFix(LAPTOP, keep, undefined, envC);
+        ok(r.meta.name === "Old" && r.meta.symbol === "OLD" && r.meta.liquidity === 5 && r.meta.imageUrl === "u" && r.meta.decimals === 18 && r.why === null,
+           "[cmc meta] existing identity/numbers kept, got " + JSON.stringify(r));
+      });
+
+      // قبلاً قابلِ‌اندازه → صفر تماس
+      const sizable = { meta: { priceUsd: 1, decimals: 18, symbol: "S" }, why: null };
+      await withFetch(cmcOk(laptopBody), async () => {
+        const r = await cmcMetaFix(LAPTOP, sizable, undefined, envC);
+        ok(r === sizable && log.length === 0, "[cmc meta] sizable meta: zero fetches, unchanged");
+      });
+      // بدونِ کلید
+      await withFetch(cmcOk(laptopBody), async () => {
+        const r1 = await cmcMetaFix(LAPTOP, nullRes, undefined, { ASSETS });
+        const r2 = await cmcMetaFix(LAPTOP, nullRes, undefined, { ASSETS, CMC_KEY: "" });
+        ok(r1 === nullRes && r2 === nullRes && log.length === 0, "[cmc meta] no CMC_KEY: zero fetches, unchanged");
+      });
+      // mint سولانا
+      await withFetch(cmcOk(laptopBody), async () => {
+        const r = await cmcMetaFix(SOLM, nullRes, undefined, envC);
+        ok(r === nullRes && log.length === 0, "[cmc meta] Solana mint: zero fetches, unchanged");
+      });
+      _paceEnd();
+    }
+    // خطاها: ۴۲۹ / پرتاب / err_400 / JSON خراب
+    for (const [name, h] of [["429", () => jb({}, 429)], ["throw", () => { throw new TypeError("down"); }],
+        ["err_400", () => jb(err400)], ["bad json", () => new Response("<html>", { status: 200 })]]) {
+      _paceBegin();
+      await withFetch(h, async () => {
+        let r, threw = false;
+        try { r = await cmcMetaFix(LAPTOP, nullRes, undefined, envC); } catch (e) { threw = true; }
+        ok(!threw && r === nullRes && log.length === 1, "[cmc meta] " + name + " -> unchanged and no throw");
+      });
+      _paceEnd();
+    }
+    // رد: decimals ناهمخوان
+    {
+      const pc = _paceBegin();
+      const old9 = { meta: { name: "N", symbol: "N", decimals: 9, priceUsd: null }, why: null };
+      await withFetch(cmcOk(laptopBody), async () => {
+        const r = await cmcMetaFix(LAPTOP, old9, undefined, envC);
+        ok(r === old9 && pc.cmc.rej === 1 && pc.cmc.used === 0, "[cmc meta] decimals mismatch -> unchanged, rej 1, got " + JSON.stringify(pc.cmc));
+      });
+      _paceEnd();
+    }
+    // رد: قیمتِ استخر ۱۰ برابر دور؛ داخلِ ۲ برابر → استفاده
+    {
+      const pc = _paceBegin();
+      const P = Number(laptopBody.data.p);
+      await withFetch(cmcOk(laptopBody), async () => {
+        const far = await cmcMetaFix(LAPTOP, nullRes, P * 10, envC);
+        const farLow = await cmcMetaFix(LAPTOP, nullRes, P / 10, envC);
+        ok(far === nullRes && farLow === nullRes && pc.cmc.rej === 2 && pc.cmc.used === 0, "[cmc meta] pool price 10x off (both ways) -> unchanged, rej 2, got " + JSON.stringify(pc.cmc));
+        const near = await cmcMetaFix(LAPTOP, nullRes, P * 1.9, envC);
+        ok(near && near.meta && near.meta.src === "cmc" && pc.cmc.used === 1, "[cmc meta] pool price within 2x -> used, got " + JSON.stringify(pc.cmc));
+      });
+      _paceEnd();
+    }
+    ok(_paceActive() === null, "[cmc meta] pass cleared");
+
+    // ۴) /vd/src
+    {
+      const ipS = ipH();
+      await withFetch((u) => (u.startsWith(CMC_URL) ? jb({ status: { error_code: "0" } }) : isCg(u) ? limited() : isDs(u) ? new Response("[]") : gtBody()), async () => {
+        const rawU = await (await call("/vd/src", ipS, envK)).text();
+        const bU = JSON.parse(rawU);
+        ok(bU.cmc && bU.cmc.s === "unset" && log.every((l) => !l.u.startsWith(CMC_URL)), "[cmc meta] /vd/src without CMC_KEY -> unset and zero CMC fetches, got " + JSON.stringify(bU.cmc));
+        log.length = 0;
+        const rawK = await (await call("/vd/src", ipS, { ...envK, CMC_KEY: CK })).text();
+        const bK = JSON.parse(rawK);
+        const calls = log.filter((l) => l.u.startsWith(CMC_URL));
+        ok(bK.cmc && bK.cmc.s === 200 && bK.cmc.code === 0 && calls.length === 1 && calls[0].h["X-CMC_PRO_API_KEY"] === CK && !calls[0].u.includes(CK),
+           "[cmc meta] /vd/src with key -> {s:200,code:0}, key in header only, got " + rawK);
+        ok(!rawK.includes(CK) && !rawU.includes(CK), "[cmc meta] /vd/src body never contains the key");
+      });
+    }
+
+    // ۵) لاگِ گذر
+    {
+      const store = new Map();
+      const kvP = { get: async (k) => (store.has(k) ? store.get(k) : null), put: async (k, v) => { store.set(k, v); } };
+      const poolR = { attributes: { reserve_in_usd: "48000", base_token_price_usd: "0.0000013", pool_created_at: new Date(Date.now() - 600000).toISOString(),
+        volume_usd: { h24: "10" }, fdv_usd: "100" }, relationships: { base_token: { data: { id: "base_" + LAPTOP } }, dex: { data: { id: "uniswap-v3-base" } } } };
+      await withFetch((u) => {
+        if (u.startsWith(CMC_URL)) return jb(laptopBody);
+        if (u.includes("/networks/base/new_pools")) return jb({ data: [poolR] });
+        if (u.includes("/networks/solana/")) return jb({ data: [] });
+        return new Response("{}", { status: 404 });
+      }, async () => { await scheduledReportPass({ ZX_KV: kvP, CMC_KEY: CK }, {}); });
+      const pj = await (await call("/vd/passes", ipH(), { ASSETS, ZX_KV: kvP })).json();
+      const cm = pj.passes && pj.passes[0] && pj.passes[0].cmc;
+      ok(cm && Object.keys(cm).sort().join() === "calls,ok,rej,used" && Object.values(cm).every((x) => Number.isFinite(x)),
+         "[cmc meta] pass log carries cmc {calls,ok,used,rej}, got " + JSON.stringify(cm));
+      ok(cm && cm.calls >= 1 && cm.calls === cm.ok && cm.used === 1, "[cmc meta] end to end pass used the CMC fallback once, got " + JSON.stringify(cm));
+      ok(!JSON.stringify(pj).includes(CK) && !JSON.stringify([...store.values()]).includes(CK), "[cmc meta] key not in pass log or stored data");
+    }
+    console.log("[cmc meta] pickCmcMeta on real CMC bodies (laptop/usdc ok; err_400, wrong address, missing dec, p 0, error_code 1002 -> null); runReportPass applies metaFix only when supplied and survives a throwing/odd one; cmcMetaFix acts only inside a pass, on Base, with a key and an amount-less meta (key in header only), never throws, rejects a decimals mismatch or a pool price more than 3x away; /vd/src cmc probe unset|{s,code}; the pass log carries {calls,ok,used,rej}");
   }
 
   // ---------- [report pass upstream calls] ----------
