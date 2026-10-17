@@ -2761,9 +2761,12 @@ async function saveCustomRpc(raw){
   if(!/^https:\/\//i.test(v)){
     rpcState("err","Only https endpoints are accepted.");return;}
   rpcState("","Testing…");
+  let p;
   try{
-    const p=makeProvider(v);
-    const id=Number((await withTimeout(p.getNetwork(),8000)).chainId);
+    p=makeProvider(v);
+    const chainId=await withTimeout(p.send("eth_chainId",[]),8000);
+    if(typeof chainId!=="string"||!/^0x[0-9a-f]+$/i.test(chainId))throw new Error("Invalid chain ID response");
+    const id=Number(chainId);
     if(id!==CHAIN.id){
       rpcState("err",`That endpoint is chain ${id}, not Base (${CHAIN.id}).`);return;}
     useRpc(v);
@@ -2773,7 +2776,7 @@ async function saveCustomRpc(raw){
     rpcState("err",isTransportError(e)
       ?"Could not reach that endpoint."
       :"That endpoint did not answer as a Base node.");
-  }
+  }finally{if(p)p.destroy();}
 }
 function clearCustomRpc(){
   try{localStorage.removeItem(RPC_KEY);}catch{}
@@ -4576,6 +4579,7 @@ const DANGEROUS=[
   ["withdrawToken(address,uint256)","Owner withdrawal","medium","The owner can pull tokens out of the contract"],
   ["rescueTokens(address,uint256)","Owner withdrawal","medium","The owner can pull tokens out"],
 ];
+const SLOT_BEACON="0xa3f0ad74e5423aebfd80d3ef4346578335a9a72aeaee59ff6cb3582b35133d50";
 const SLOT_IMPL="0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc";
 const selectorOf=s=>E.id(s).slice(2,10).toLowerCase();
 
@@ -4653,16 +4657,17 @@ async function scanToken(token){
       rep.owner=iOwn.decodeFunctionResult("owner",r[0].data)[0];
       const o=rep.owner.toLowerCase();
       if(o===ZERO.toLowerCase()||o===DEAD.toLowerCase())
-        add("ok","Ownership renounced","No one holds privileged control any more.");
+        add("info","Standard owner renounced","owner() is zero or a burn address. Roles, other administrators and proxy control have not been ruled out.");
       else add("high","Owner still active","Owner "+shortAddr(rep.owner)+" can call any admin function that exists.");
-    }else add("ok","No standard owner()","The contract exposes no owner() function.");
+    }else add("info","No standard owner()","No standard owner() was found. Other access-control mechanisms may exist.");
   }catch{rep.unknown++;add("info","Ownership unknown","The network did not answer.");}
 
   try{
-    const slot=await getStorage(E.getAddress(token.address),SLOT_IMPL);
+    const [slot,beacon]=await Promise.all([getStorage(E.getAddress(token.address),SLOT_IMPL),getStorage(E.getAddress(token.address),SLOT_BEACON)]);
     if(slot&&BigInt(slot)!==0n){rep.isProxy=true;
       add("high","Upgradeable (proxy)","The code can be replaced later — safe today does not mean safe tomorrow. Implementation "+shortAddr("0x"+slot.slice(-40)));
-    }else add("ok","Not upgradeable","No EIP-1967 implementation slot — the code is fixed.");
+    }else if(beacon&&BigInt(beacon)!==0n){rep.isProxy=true;add("high","Upgradeable (beacon proxy)","A beacon can change the implementation. Beacon "+shortAddr("0x"+beacon.slice(-40)));}
+    else add("info","No standard proxy detected","EIP-1967 implementation and beacon slots are empty. Custom proxies and other upgrade mechanisms have not been ruled out.");
   }catch{rep.unknown++;add("info","Proxy check unknown","The network did not answer.");}
 
   // عمق را از سمت توکن *شناخته‌شده* می‌سنجیم؛ قیمت خود توکن می‌تواند ساختگی باشد.
@@ -4743,12 +4748,9 @@ async function scanToken(token){
 }
 function riskScore(rep){
   const ownerActive=rep.owner&&![ZERO.toLowerCase(),DEAD.toLowerCase()].includes(rep.owner.toLowerCase());
-  const structural=["Cannot get a sell quote","Very thin liquidity","Shallow liquidity",
-    "Heavy round-trip loss","Not a contract","Sell simulation reverted","No sell route"];
-  const down={critical:"high",high:"medium",medium:"info"};
   let c=0,h=0,m=0;
   rep.findings.forEach(f=>{
-    const l=(ownerActive||structural.includes(f.title))?f.level:(down[f.level]||f.level);
+    const l=f.level;
     if(l==="critical")c++;else if(l==="high")h++;else if(l==="medium")m++;
   });
   let s=c*25+h*12+m*5;
@@ -7833,16 +7835,30 @@ async function waitForAllowance(min,ms){
 let baseSimArmedKey=null,baseSimFailedKey=null;
 function baseSimKey(amountIn){
   if(!tokenIn||!tokenOut||amountIn==null)return null;
-  return [isNative(tokenIn)?"native":tokenIn.address,isNative(tokenOut)?"native":tokenOut.address,amountIn.toString()].join("|");
+  return JSON.stringify([baseSwapContext(),amountIn.toString(),currentPlan?buildParts(currentPlan):null,currentPlan?minOutOf(currentPlan):null],(_,v)=>typeof v==="bigint"?v.toString():v);
+}
+function baseSwapContext(){
+  return JSON.stringify([activeChain,account,tokenIn?.address,!!tokenIn?.native,
+    tokenOut?.address,!!tokenOut?.native,mode,$(mode==="targetOut"?"amtOut":"amtIn").value,
+    slippageBps,deadlineMin,CHAIN.executor]);
+}
+function baseAssertSwapContext(context,expectedSigner,expectedWallet){
+  if(context!==baseSwapContext()||signer!==expectedSigner||walletEip1193!==expectedWallet)
+    throw new Error("The swap details or wallet changed. Review the new quote and try again. Nothing was sent.");
 }
 async function doSwap(){
-  if(!currentPlan||parsedAmountIn()===null)return;
+  if(busy||!currentPlan||parsedAmountIn()===null)return;
+  const context=baseSwapContext(),expectedSigner=signer,expectedWallet=walletEip1193;
+  let expectedQuoteSeq=null;
+  const assertContext=()=>{baseAssertSwapContext(context,expectedSigner,expectedWallet);
+    if(expectedQuoteSeq!==null&&quoteSeq!==expectedQuoteSeq)throw new Error("The quote changed. Review it and try again. Nothing was sent.");};
   // قیف ریزش از نسبت همین شمارش‌ها درمی‌آید: کلیک → شبیه‌سازی → ارسال → نتیجه.
   ev("swap:click","","base");
   let chosenSig=null;
   setBusy(true,"Refreshing price…");
   try{
     await runQuote({forSwap:true});
+    assertContext();
     if(!currentPlan){setBusy(false);refreshButton();return;}
     /* ⚠️ مقدار ورودی *بعد* از runQuote خوانده می‌شود، و از خودِ نقشه.
        در حالت «کوت معکوس» runQuote مقدار ورودی را دوباره حل می‌کند و کادر
@@ -7851,14 +7867,17 @@ async function doSwap(){
        شده بود — یعنی محافظت لغزش ضعیف‌تر از آنچه روی صفحه نوشته بود. */
     const amountIn=currentPlan.totalIn;
     setBusy(true,"Safety checks…");
-    const problems=await preflight(currentPlan,amountIn);
+    const fresh=currentPlan;
+    expectedQuoteSeq=quoteSeq;
+    const problems=await preflight(fresh,amountIn);
+    assertContext();
+    if(currentPlan!==fresh)throw new Error("The quote changed. Review it and try again.");
     if(problems.includes("__APPROVE__")){setBusy(false);refreshButton();
       setNotice(note("warn",`Approve ${esc(tokenIn.symbol)} first.`));return;}
     if(problems.length){
       setNotice(note("err","<b>Pre-flight failed — nothing sent.</b><br>• "+problems.map(esc).join("<br>• ")));
       setBusy(false);refreshButton();ev("swap:blocked","","base");return;}
 
-    const fresh=currentPlan;
     const deadline=BigInt(Math.floor(Date.now()/1000)+Math.max(1,deadlineMin)*60);
     const exec=new E.Contract(CHAIN.executor,ABI.executor,signer);
     setBusy(true,"Simulating…");
@@ -7878,9 +7897,11 @@ async function doSwap(){
       try{
         await exec.executeSwap.staticCall(asArg(tokenIn),asArg(tokenOut),amountIn,c.minOut,c.parts,deadline,
           isNative(tokenIn)?{value:amountIn}:{});
+        assertContext();
         chosen=c;attempts.push({tried:sig,result:"ok"});
       }catch(e){if(!firstErr)firstErr=e;
         attempts.push({tried:sig,result:(e&&(e.shortMessage||e.message))||"failed"});}}
+    assertContext();
     if(!chosen){
       /* «لغزش» تنها دلیلِ افتادنِ آن require نیست. قرارداد چیزی را می‌سنجد که
          *در کیف پول می‌ماند*، و کیف پول قراردادی‌ای که در همان تراکنش پول را
@@ -7904,6 +7925,7 @@ async function doSwap(){
               "receipt behave this way; swap to a plain address instead.";
         }catch(e){}
       }
+      assertContext();
       if(simArmed){
         // کاربر برای همین کوت تأیید کرده: بهترین نقشه، بدونِ تخمینِ گس (ethers خودش estimateGas می‌زد و پیش از کیف‌پول می‌افتاد)
         chosen=cands[0];sentAnyway=true;
@@ -7938,6 +7960,7 @@ async function doSwap(){
         isNative(tokenIn)?{value:amountIn}:{});
       gasLimit=(g*125n)/100n;
     }catch{}
+    assertContext();
     const opts=isNative(tokenIn)?{value:amountIn}:{};
     if(gasLimit)opts.gasLimit=gasLimit;
     const outBefore=balances[balKey(tokenOut)];

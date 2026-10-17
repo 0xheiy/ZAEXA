@@ -1,3 +1,4 @@
+import { reportContext, fetch, cacheStore } from './request-context.js';
 /* =====================================================================
    پراکسی GeckoTerminal — روی همان Worker که خود سایت را سرو می‌کند
    =====================================================================
@@ -65,17 +66,20 @@ function cmcKey(env) {
 const PACE_GAP_MS = 2100;
 const PACE_RETRY_WAITS = [8000, 20000];
 const PACE_WALL_MS = 8 * 60 * 1000;
-let passPace = null;
+let testPace = null;
+const currentPace = () => reportContext.getStore()?.pace || testPace;
 const defaultPaceSleep = (ms) => new Promise((r) => setTimeout(r, ms));
 let paceSleepImpl = defaultPaceSleep;
 let paceNowImpl = () => Date.now();
 function paceStart() {
-  passPace = {
+  const pc = {
     gate: Promise.resolve(), next: 0, t0: paceNowImpl(),
     calls: 0, waitsMs: 0, r429: 0, retries: 0, ok: 0,
     cmc: { calls: 0, ok: 0, used: 0, rej: 0 },
   };
-  return passPace;
+  const scope = reportContext.getStore();
+  if (scope) scope.pace = pc; else testPace = pc;
+  return pc;
 }
 // یک نوبت: زنجیره‌ی وعده‌ها، نه حلقه‌ی مشغول
 async function paceSlot(pc) {
@@ -96,7 +100,7 @@ function makeDeadline(ac, ms) {
   let t = null;
   const clear = () => { if (t !== null) { clearTimeout(t); t = null; } };
   const arm = () => { clear(); t = setTimeout(() => ac.abort(), ms); };
-  if (!passPace) arm();
+  if (!currentPace()) arm();
   return { arm, clear };
 }
 async function gtUpstream(rest, env, opts) {
@@ -104,7 +108,7 @@ async function gtUpstream(rest, env, opts) {
   const sig = opts && opts.signal ? { signal: opts.signal } : {};
   const dl = opts && opts.dl;
   const rl = relayCfg(env);
-  const pc = passPace;
+  const pc = currentPace();
   if (pc && dl) dl.clear();
   if (rl && relayDownUntil <= Date.now()) {
     for (let attempt = 0; ; attempt++) {
@@ -377,16 +381,9 @@ async function collectEv(request, url, env) {
   const origin = request.headers.get("origin");
   if (origin && origin !== url.origin) return evDone(403);
 
-  if (Number(request.headers.get("content-length") || "0") > EV_MAX_BODY)
-    return evDone(413);
-
-  let body;
-  try { body = await request.text(); } catch (e) { return evDone(400); }
-  if (body.length > EV_MAX_BODY) return evDone(413);
-
-  let msg;
-  try { msg = JSON.parse(body); } catch (e) { return evDone(400); }
-  if (!msg || typeof msg !== "object") return evDone(400);
+  const parsed = await readJsonBody(request, EV_MAX_BODY);
+  if (parsed.error) return evDone(parsed.error === "body-too-large" ? 413 : 400);
+  const msg = parsed.body;
 
   const name = typeof msg.e === "string" ? msg.e : "";
   const detail = typeof msg.d === "string" ? msg.d : "";
@@ -478,7 +475,7 @@ async function proxyGt(request, url, ctx, env) {
      «نمی‌دانم = نه» که قاعده‌ی اول این پروژه است.
      `caches` بیرون از محیط Workers وجود ندارد (مثلاً در تست Node)، پس
      نبودنش خطا نیست — فقط یعنی بدون کش کار کن. */
-  const store = (typeof caches !== "undefined" && caches.default) || null;
+  const store = cacheStore();
   const cacheKey = new Request(target, { method: "GET" });
   if (store) {
     const hit = await store.match(cacheKey);
@@ -572,7 +569,7 @@ async function ogFetchMetaDetail(addr, env) {
   const rest = "networks/" + network + "/tokens/" + addr;
   const target = (key ? UPSTREAM_KEYED : UPSTREAM_FREE) + "/" + rest;
 
-  const store = (typeof caches !== "undefined" && caches.default) || null;
+  const store = cacheStore();
   if (store) {
     try {
       const hit = await store.match(new Request(target, { method: "GET" }));
@@ -733,7 +730,7 @@ async function ogFetchMetaMany(addrs, env) {
    متفاوت داد. یک حکم نباید بینِ دو درخواستِ یک‌دقیقه‌ای عوض شود. */
 async function cachedVerdict(cacheKeyPath, computeFn, ctx, out) {
   try {
-    const store = (typeof caches !== "undefined" && caches.default) || null;
+    const store = cacheStore();
     const cacheKey = new Request("https://" + VD_CACHE_HOST + cacheKeyPath);
 
     if (store) {
@@ -818,30 +815,9 @@ export const GT_DEX_TO_VENUE = Object.freeze({
    دقیقاً همان کلاسِ drift است که این فایل جاهای دیگر هم رویش هشدار داده. */
 const VD_VENUE_ID_SET = new Set(VD_VENUES.map((v) => v.id));
 
-/* حافظه‌ی یک‌گذر — passPoolsMemo
-   =====================================================================
-   اندازه‌گیری: یک توکنِ v4 که به "nosell" خام می‌رسد، در طولِ همان یک گذرِ
-   ساعتی هم از رویِ ایندکسِ کلیدِ واقعی (fetchV4Pools ← runV4Index) هم از
-   رویِ گاردِ پوشش (baseVenueCoveredDetail ← ogFetchVerdictDetail) دقیقاً
-   همان یک آدرس را از networks/base/tokens/<addr>/pools می‌پرسد — یعنی
-   همان جواب، دوبار، دو ساب‌ریکوئست از سقفِ ۵۰تاییِ همان گذر برایِ یک
-   پرسش. fetchBaseTokenPoolsRaw پایین‌تر این دو تماس را در یک تابعِ خامِ
-   پایه یکی می‌کند؛ passPoolsMemo فقط دومین‌بار همان آدرس را در همان گذر
-   رایگان می‌کند.
-   ⚠️ scheduledReportPass دقیقاً کنارِ جایگزینیِ globalThis.fetch این را
-   new Map() می‌کند و در همان finally که fetch را برمی‌گرداند دوباره null
-   می‌کند (پایین‌تر همین فایل) — یعنی این حافظه فقط عمرِ یک گذرِ زنده را
-   دارد. بیرونِ یک گذر (کارتِ /t/، /vd، /vd/v4) همیشه null می‌ماند و این
-   تابع دقیقاً همان چیزی است که دیروز بود: هر تماس یک fetch واقعیِ خودش.
-   🔴 فقط موفقیت‌ها (ok:true) حافظه می‌شوند — همان قاعده‌ی cachedVerdict
-   بالاتر برایِ verdict: «نامعلوم را هرگز کش نکن». یک ۴۲۹/تایم‌اوتِ گذرا
-   نباید تماسِ دومِ همان توکن را هم کور کند؛ آن یکی باید دوباره واقعاً
-   بپرسد.
-   ⚠️ همان احتیاطِ هم‌زمانیِ globalThis.fetch بالاتر (توضیحِ
-   scheduledReportPass): یک درخواستِ هم‌زمان در همین ایزوله (اگر باشد) هم
-   می‌تواند از همین Map بخواند — یعنی جوابی که می‌بیند حداکثر یک گذر کهنه
-   است، هرگز یک حکمِ باطل؛ همان جوابِ بالادست است، فقط یک‌بار پرسیده شده. */
-let passPoolsMemo = null;
+// Successful token-pool responses are memoized only within the current pass.
+// AsyncLocalStorage isolates this map from parallel passes and public requests.
+const poolsMemo = () => reportContext.getStore()?.poolsMemo;
 
 /* آیا برای این توکن، دست‌کم یک استخر روی یکی از صرافی‌های *پوشش‌داده‌شده*
    واقعاً وجود دارد؟ true/false/null — هرگز پرتاب نمی‌کند.
@@ -860,6 +836,7 @@ let passPoolsMemo = null;
 async function fetchBaseTokenPoolsRaw(addr, env, network) {
   const net = typeof network === "string" && network ? network : "base";
   const memoKey = net + ":" + (typeof addr === "string" ? (net==="solana"?addr:addr.toLowerCase()) : "");
+  const passPoolsMemo = poolsMemo();
   if (passPoolsMemo instanceof Map && passPoolsMemo.has(memoKey)) {
     return passPoolsMemo.get(memoKey); // ضربه‌ی حافظه‌ی همین گذر — بدونِ fetch
   }
@@ -1659,16 +1636,33 @@ async function jupProxyFetch(env, path, init, timeoutMs) {
   return { ok: !!res.ok, status: res.status, json };
 }
 
+// Read bounded bytes, including chunked requests without Content-Length.
 async function readJsonBody(request, maxBytes) {
   const cl = Number(request.headers.get("content-length") || "0");
-  if (cl > maxBytes) return { error: "body-too-large" };
-  let text;
-  try { text = await request.text(); } catch { return { error: "bad-body" }; }
-  if (text.length > maxBytes) return { error: "body-too-large" };
-  let body;
-  try { body = JSON.parse(text); } catch { return { error: "bad-json" }; }
-  if (!body || typeof body !== "object") return { error: "bad-json" };
-  return { body };
+  if (cl > maxBytes) { request.body?.cancel().catch(() => {}); return { error: "body-too-large" }; }
+  if (!request.body) return { error: "bad-json" };
+  const reader = request.body.getReader();
+  let size = 0, timer, timedOut = false;
+  const chunks = [];
+  const deadline = new Promise((_, reject) => {
+    timer = setTimeout(() => { timedOut = true; reader.cancel().catch(() => {}); reject(new Error("body timeout")); }, 5000);
+  });
+  try {
+    for (;;) {
+      const { done, value } = await Promise.race([reader.read(), deadline]);
+      if (timedOut) return { error: "bad-body" };
+      if (done) break;
+      size += value.byteLength;
+      if (size > maxBytes) { reader.cancel().catch(() => {}); return { error: "body-too-large" }; }
+      chunks.push(value);
+    }
+    const bytes = new Uint8Array(size);
+    let offset = 0;
+    for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.byteLength; }
+    const body = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes));
+    return body && typeof body === "object" && !Array.isArray(body) ? { body } : { error: "bad-json" };
+  } catch { return { error: "bad-body" }; }
+  finally { clearTimeout(timer); reader.releaseLock(); }
 }
 
 /* GET /sol/quote?inputMint=&outputMint=&amount=&slippageBps= — پراکسیِ خامِ
@@ -2118,7 +2112,7 @@ async function ogTokenRoute(request, url, env, ctx, addr) {
   try {
     const chainKey = chainOf(addr);
     if (!chainKey) return ogGenericFallback(request, url);
-    const store = (typeof caches !== "undefined" && caches.default) || null;
+    const store = cacheStore();
     const cacheKey = new Request(url.toString(), { method: "GET" });
     if (store) {
       try {
@@ -2442,7 +2436,7 @@ export async function tokenVerdict(addr, env, ctx, deadlineAt, opts) {
    نخواند، یا قیمت بیش از ۳ برابر با قیمتِ استخر فاصله داشته باشد → رد. */
 async function cmcMetaFix(addr, metaResult, poolPriceUsd, env) {
   try {
-    const pc = passPace;
+    const pc = currentPace();
     if (pc === null) return metaResult;
     if (chainOf(addr) !== "base") return metaResult;
     const key = cmcKey(env);
@@ -2532,6 +2526,11 @@ async function diagVerdict(request, url, env, ctx) {
   if (!rateOk(request, "vd", RL_LIMIT, RL_WINDOW_MS))
     return vdDone(429, { error: "too many requests" }, { "retry-after": "60" });
   if (request.method !== "GET") return vdDone(405, { error: "only GET" });
+
+  const diagnostic = ["/vd/rpc", "/vd/src", "/vd/logrpc"].includes(url.pathname)
+    || url.pathname.startsWith("/vd/v4/") || url.searchParams.get("probe") === "1";
+  if (diagnostic && (!env?.RUN_KEY || request.headers.get("x-run-key") !== env.RUN_KEY))
+    return vdDone(404, { error: "not found" });
 
   // «rpc» هرگز نمی‌تواند با یک mint واقعی قاطی شود — کوتاه‌ترین SOL_MINT
   // معتبر ۳۲ نویسه‌ی base58 است، «rpc» فقط ۳ نویسه. پس این چک باید پیش از
@@ -2801,7 +2800,7 @@ async function sitemapResponse(url, env, ctx) {
   const staticPaths = ["/", "/app", "/pairs"];
   const lastmod = new Date().toISOString().slice(0, 10);
 
-  const store = (typeof caches !== "undefined" && caches.default) || null;
+  const store = cacheStore();
   const cacheKey = store ? new Request("https://" + SITEMAP_CACHE_HOST + SITEMAP_CACHE_PATH) : null;
   if (store) {
     try {
@@ -3296,67 +3295,9 @@ async function scheduledReportPass(env, ctx, opts) {
     // runReportPass، اینجا هم پیش از ساختنِ fetchPools تکرار می‌شود.
     if (!env || !env.ZX_KV) return { checked: 0, added: 0 };
 
-    /* متر ساب‌ریکوئست — برای *هر* اجرا (چه کرونِ ساعتی چه /report/run)
-       ساخته می‌شود. globalThis.fetch فقط برای طولِ همین گذر جایگزین
-       می‌شود و در finally همیشه برمی‌گردد — حتی وقتی یک مرحله در وسطِ راه
-       throw کند. این جایگزینی خودِ رفتارِ هیچ fetchی را عوض نمی‌کند
-       (meter.fetch همان fetchِ واقعی را صدا می‌زند)، فقط رهگیری‌اش می‌کند.
-       ⚠️ این اجرای زمان‌بندی‌شده «درخواستِ خودش» است؛ درخواست‌های هم‌زمانِ
-       دیگر در همین ایزوله (اگر باشند) هم می‌توانند از همین globalThis.fetch
-       جایگزین‌شده رد شوند و زیرِ همین شمارش بنشینند — پس عددها یک بالاسری
-       هستند، نه یک اندازه‌گیریِ دقیقِ ایزوله‌شده. برای بودجه‌بندی این طرفِ
-       امن است: کم‌شماری خطرناک‌تر از بیش‌شماری بود.
-
-       🔴 Cache API در طولِ همین گذر کاملاً خاموش است — caches.default.match
-       هیچ‌وقت واقعاً صدا زده نمی‌شود، فقط undefined برمی‌گرداند، و .put هم
-       هیچ‌وقت واقعاً چیزی نمی‌نویسد. دلیل: اندازه‌گیریِ زنده نشان داد ۱۵ از
-       ۵۱ ساب‌ریکوئستِ یک گذر عملیاتِ Cache API بودند، و کلادفلر همین
-       عملیات‌ها را هم جزوِ سقفِ ۵۰تایی می‌شمرد — درحالی‌که کش تقریباً همیشه
-       برای توکن‌های تازه خالی است (یک توکنِ تازه‌کشف‌شده هیچ‌وقت از قبل کش
-       نشده)، پس آن ۱۵ تماس تقریباً همیشه فقط برای رسیدن به یک miss بودند.
-       خاموش کردنش یعنی همان بودجه برای فالوآپ/رِی‌چک/سولانا می‌ماند.
-       ⚠️ یک درخواستِ هم‌زمان در همین ایزوله (اگر باشد) هم در طولِ گذر کش
-       را میس می‌کند و رویش نمی‌نویسد — طرفِ امن: فقط یعنی آن درخواست
-       کارِ تازه انجام می‌دهد، هرگز یک حکمِ کهنه/باطل نمی‌بیند.
-
-       🔴 passPoolsMemo (بالاترِ همین فایل، کنارِ fetchBaseTokenPoolsRaw) هم
-       دقیقاً همین‌جا زنده می‌شود: چرا لازم شد — یک توکنِ v4 که در همین گذر
-       به "nosell" خام می‌رسد، هم از رویِ ایندکسِ کلیدِ واقعی (fetchV4Pools)
-       هم از رویِ گاردِ پوشش (baseVenueCoveredDetail) دقیقاً همان یک آدرس را
-       از pools بالادست می‌پرسید — همان جواب، دوبار. فقط موفقیت‌ها حافظه
-       می‌شوند (یک ۴۲۹/تایم‌اوتِ گذرا باید دوباره واقعاً پرسیده شود)، و این
-       حافظه فقط عمرِ همین گذر را دارد — درست مثلِ globalThis.fetch بالا،
-       در همان finally پایین‌تر به null برمی‌گردد. همان احتیاطِ هم‌زمانی هم
-       اینجا صادق است: یک درخواستِ هم‌زمان در همین ایزوله (اگر باشد) هم
-       می‌تواند از همین Map بخواند — یعنی جوابی که می‌بیند حداکثر یک گذر
-       کهنه است، هرگز یک حکمِ باطل؛ همان جوابِ بالادست، فقط یک‌بار پرسیده‌شده. */
     const meter = makeSubMeter();
-    const originalFetch = globalThis.fetch;
-    globalThis.fetch = meter.fetch;
-    passPoolsMemo = new Map();
-    const cacheStore = (typeof caches !== "undefined" && caches.default) || null;
-    const originalCacheMatch = cacheStore ? cacheStore.match : null;
-    const originalCachePut = cacheStore ? cacheStore.put : null;
-    if (cacheStore) {
-      cacheStore.match = async () => {
-        meter.cacheSkip();
-        return undefined;
-      };
-      cacheStore.put = async () => {
-        meter.cacheSkip();
-      };
-    }
-
-    try {
-      return await scheduledReportPassInner(env, ctx, opts, meter);
-    } finally {
-      globalThis.fetch = originalFetch;
-      passPoolsMemo = null;
-      if (cacheStore) {
-        cacheStore.match = originalCacheMatch;
-        cacheStore.put = originalCachePut;
-      }
-    }
+    return await reportContext.run({ meter, pace: null, poolsMemo: new Map() },
+      () => scheduledReportPassInner(env, ctx, opts, meter));
   } catch (e) {
     return { checked: 0, added: 0 }; // یک اجرای زمان‌بندی‌شده هرگز نباید پرتاب کند
   }
@@ -3370,7 +3311,7 @@ async function scheduledReportPassInner(env, ctx, opts, meter) {
   try {
     return await scheduledReportPassBody(env, ctx, opts, meter);
   } finally {
-    passPace = null; // ریتم‌دهی فقط عمرِ همین گذر را دارد
+    reportContext.getStore().pace = null;
   }
 }
 
@@ -3383,7 +3324,7 @@ function paceKv(kv) {
     list: (...a) => kv.list(...a),
     put: (k, v, ...rest) => {
       try {
-        const pc = passPace;
+        const pc = currentPace();
         if (pc && k === PASS_LOG_KEY && typeof v === "string") {
           const arr = JSON.parse(v);
           if (Array.isArray(arr) && arr[0] && typeof arr[0] === "object") {
@@ -3704,9 +3645,9 @@ export { UPSTREAM_FREE, UPSTREAM_KEYED };
 // فقط برای تست: پرچمِ «کلید افتاده» در سطحِ ایزوله است و بینِ بخش‌ها نشت می‌کند
 export function _paceHooks(h) { if (h && h.sleep) paceSleepImpl = h.sleep; if (h && h.now) paceNowImpl = h.now; if (h && h.reset) { paceSleepImpl = defaultPaceSleep; paceNowImpl = () => Date.now(); } }
 export { cmcMetaFix };
-export function _paceActive() { return passPace; }
+export function _paceActive() { return currentPace(); }
 export function _paceBegin() { return paceStart(); }
-export function _paceEnd() { passPace = null; }
+export function _paceEnd() { testPace = null; }
 export function _relayDownUntil(set) { if (set !== undefined) relayDownUntil = set; return relayDownUntil; }
 export function _cgKeyDownUntil(set) { if (set !== undefined) cgKeyDownUntil = set; return cgKeyDownUntil; }
 export { VD_ADDR_RE };

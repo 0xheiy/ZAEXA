@@ -230,34 +230,8 @@ def check_basics(w3: Web3, report: TokenReport, addr: str):
 
 
 def adjust_severity_by_ownership(report: TokenReport):
-    """
-    شدت یافته‌ها را با توجه به وضعیت مالکیت تنظیم می‌کند.
-
-    چرا لازم است؟ وجود تابع mint به‌تنهایی لزوماً کلاهبرداری نیست — خیلی از
-    پروتکل‌های معتبر (مثل توکن‌های انتشاری) عمداً mint دارند و کنترلش دست یک
-    قرارداد حاکمیتی است. چیزی که واقعاً خطرناک است، ترکیب «تابع خطرناک» با
-    «یک مالک فعال که می‌تواند صدایش بزند» است.
-
-    پس اگر مالکیت واگذار شده یا تابع owner وجود ندارد، شدت را یک پله کم می‌کنیم
-    و دلیلش را شفاف می‌نویسیم.
-    """
-    owner_active = (report.owner is not None
-                    and report.owner.lower() not in (ZERO.lower(), DEAD.lower()))
-    if owner_active:
-        return          # خطر کامل سر جایش می‌ماند
-
-    downgrade = {"critical": "high", "high": "medium", "medium": "info"}
-    note = "  ⓘ چون مالک فعالی پیدا نشد، شدت یک پله کم شد (ولی کنترل ممکن است دست قرارداد دیگری باشد)."
-    for f in report.findings:
-        if f.level in downgrade and f.title not in (
-                "قرارداد نیست", "ERC20 معتبر نیست", "هیچ استخری پیدا نشد",
-                # ⚠️ عنوان «کوت فروش نگرفت» به «کوت فروش رد شد» تغییر کرد؛
-                #    اگر اینجا به‌روز نشود، یک یافته‌ی honeypot بی‌صدا تنزل
-                #    پیدا می‌کند چون توکن مالک فعال ندارد.
-                "نقدینگی بسیار کم", "کوت فروش رد شد", "کوت خرید نگرفت",
-                "افت شدید در رفت‌وبرگشت"):
-            f.level = downgrade[f.level]
-            f.detail = f.detail + "\n" + note
+    """Compatibility hook: owner() alone cannot rule out other privileges."""
+    return
 
 
 def check_bytecode(report: TokenReport, code: bytes):
@@ -298,8 +272,8 @@ def check_ownership(w3: Web3, report: TokenReport, addr: str):
 
     if owner.lower() in (ZERO.lower(), DEAD.lower()):
         report.ownership_renounced = True
-        report.add("info", "مالکیت واگذار شده ✓",
-                   "مالک به آدرس صفر منتقل شده — یعنی دیگر کسی کنترل ویژه ندارد.")
+        report.add("info", "owner() استاندارد واگذار شده",
+                   "owner() به آدرس صفر یا سوزاندن اشاره می‌کند؛ نقش‌ها و مدیران دیگر بررسی نشده‌اند.")
     else:
         report.add("high", "مالکیت واگذار نشده",
                    f"مالک هنوز فعال است: {owner}\n"
@@ -310,6 +284,11 @@ def check_proxy(w3: Web3, report: TokenReport, addr: str):
     """آیا قرارداد قابل ارتقاست؟ (کدش می‌تواند بعداً عوض شود)"""
     a = Web3.to_checksum_address(addr)
     impl = _safe_call(lambda: w3.eth.get_storage_at(a, EIP1967_IMPL_SLOT))
+    beacon_slot = int("a3f0ad74e5423aebfd80d3ef4346578335a9a72aeaee59ff6cb3582b35133d50", 16)
+    beacon = _safe_call(lambda: w3.eth.get_storage_at(a, beacon_slot))
+    if beacon and int(beacon.hex(), 16) != 0:
+        report.is_proxy = True
+        report.add("high", "پروکسی beacon قابل ارتقا", "Beacon: 0x" + beacon.hex()[-40:])
     if impl and int(impl.hex(), 16) != 0:
         report.is_proxy = True
         impl_addr = "0x" + impl.hex()[-40:]
@@ -317,6 +296,10 @@ def check_proxy(w3: Web3, report: TokenReport, addr: str):
                    f"کد این قرارداد می‌تواند بعداً کاملاً عوض شود.\n"
                    f"       پیاده‌سازی فعلی: {impl_addr}\n"
                    f"       یعنی حتی اگر الان امن باشد، فردا ممکن است نباشد.")
+    if impl is None or beacon is None:
+        report.add("info", "بررسی پروکسی ناقص", "خواندن یکی از اسلات‌ها موفق نبود.")
+    elif not report.is_proxy:
+        report.add("info", "پروکسی استاندارد پیدا نشد", "اسلات‌های استاندارد خالی‌اند؛ تغییرناپذیری کد یا نبود پروکسی سفارشی اثبات نشده است.")
 
 
 def find_pools(w3: Web3, chain: Chain, token_addr: str) -> List[PoolInfo]:

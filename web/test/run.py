@@ -39,6 +39,15 @@ async def _new_page_with_gt_flag(self, *a, **k):
     return pg
 Browser.new_page = _new_page_with_gt_flag
 
+# Select an installed Chromium explicitly when testing on Windows or CI.
+from playwright.async_api import BrowserType
+_original_launch = BrowserType.launch
+async def _launch_selected_browser(self, *args, **kwargs):
+    if self.name == "chromium" and os.environ.get("ZAEXA_CHROMIUM_PATH"):
+        kwargs.setdefault("executable_path", os.environ["ZAEXA_CHROMIUM_PATH"])
+    return await _original_launch(self, *args, **kwargs)
+BrowserType.launch = _launch_selected_browser
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 
 

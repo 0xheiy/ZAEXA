@@ -201,6 +201,13 @@
   }
 
   function JsonRpcProvider(url) { this.url = url; }
+  JsonRpcProvider.prototype.destroy = function () {};
+  JsonRpcProvider.prototype.send = async function (method) {
+    stubAlive(this.url);
+    if (method !== "eth_chainId") throw new Error("unexpected RPC method: " + method);
+    const cfg = (window.__STUB_RPC__ || {})[this.url];
+    return "0x" + BigInt(cfg === undefined ? 8453 : cfg).toString(16);
+  };
   JsonRpcProvider.prototype.getBalance = async function () {
     stubAlive(this.url);
     return 42n * 10n ** 15n;

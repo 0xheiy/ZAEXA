@@ -6,12 +6,25 @@
    اجرا:  node worker/test.mjs
    run.py هم پیش از سوییت مرورگر همین را صدا می‌زند. */
 
-import worker from "./index.js";
+import rawWorker from "./index.js";
+import { fetch as scopedFetch } from "./request-context.js";
+// Existing diagnostic fixtures represent authenticated operator requests.
+// Anonymous/incorrect-key coverage lives in security.test.mjs.
+const worker = { ...rawWorker, fetch(request, env, ctx) {
+  const url = new URL(request.url);
+  if (["/vd/rpc", "/vd/src", "/vd/logrpc"].includes(url.pathname) || url.pathname.startsWith("/vd/v4/") || url.searchParams.get("probe") === "1") {
+    const key = env?.RUN_KEY || "test-diagnostics-key";
+    const headers = new Headers(request.headers); headers.set("x-run-key", key);
+    request = new Request(request, { headers }); env = { ...env, RUN_KEY: key };
+  }
+  return rawWorker.fetch(request, env, ctx);
+} };
 import { REPORT_RUN_MAX_TOKENS } from "./index.js";
 import { createHash } from "node:crypto";
 import { OG_PNG_ETAG } from "./og-image.js";
 import fs from "node:fs";
 import { createRequire } from "node:module";
+import { fileURLToPath } from "node:url";
 import {
   REPORT_MIN_RESERVE_USD, REPORT_MAX_TOKENS_PER_RUN, REPORT_PAIRS_CAP, REPORT_PACE_MS,
   CHECK_KIND_BY_CHAIN, REPORT_DATE_RE, PAIRS_KEY_BASE,
@@ -1246,7 +1259,7 @@ const vd = await import("./verdict.js");
 const webDir = new URL("../web/", import.meta.url);
 const ethersFile = fs.readdirSync(webDir).find((f) => /^ethers\.umd\.min\..*\.js$/.test(f));
 if (!ethersFile) throw new Error("could not find the vendored ethers bundle under web/");
-createRequire(import.meta.url)(new URL(ethersFile, webDir).pathname);
+createRequire(import.meta.url)(fileURLToPath(new URL(ethersFile, webDir)));
 const ethers = globalThis.ethers;
 
 /* نگاشتِ id (همان idِ عددیِ eth_call که callBatch در verdict.js می‌سازد —
@@ -12415,7 +12428,7 @@ function stripAllowedWording(t) {
         // اولین فچی که نه pools و نه burn است همان متای رِی‌چک است؛ هرچه پیش از آن شمرده شده پیش‌هزینه است
         if (u.includes("/tokens/") && wired.pre === undefined) wired.pre = callsSeen - 1;
         if (u.includes("/networks/base/new_pools")) {
-          for (let n = 0; n < burn; n++) await globalThis.fetch("https://burn.invalid/" + n);
+          for (let n = 0; n < burn; n++) await scopedFetch("https://burn.invalid/" + n);
           return new Response(JSON.stringify({ data: [] }), { status: 200 });
         }
         if (u.includes("/networks/solana/new_pools")) return new Response(JSON.stringify({ data: [] }), { status: 200 });

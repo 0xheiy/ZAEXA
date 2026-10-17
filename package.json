@@ -1,6 +1,15 @@
 {
   "type": "module",
+  "scripts": {
+    "test:security": "node --test web/test/security.test.mjs worker/security.test.mjs worker/runtime-security.test.mjs worker/solana-parity.test.mjs worker/tg_test.mjs",
+    "test:worker": "node worker/test.mjs"
+  },
   "devDependencies": {
-    "miniflare": "^3.20250718.3"
+    "miniflare": "4.20260730.0"
+  },
+  "overrides": {
+    "undici": "7.29.1",
+    "sharp": "0.35.5",
+    "workerd": "1.20261016.1"
   }
 }
