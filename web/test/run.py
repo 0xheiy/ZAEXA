@@ -18,6 +18,11 @@ GT_PERSIST_OFF = {"on": True}
 GT_PERSIST_OFF_JS = ("(function(){var K='zaexa.gtcache.v1',g=Storage.prototype.getItem,s=Storage.prototype.setItem;"
                      "Storage.prototype.getItem=function(k){return k===K?null:g.apply(this,arguments)};"
                      "Storage.prototype.setItem=function(k,v){if(k===K)throw new Error('blocked');return s.apply(this,arguments)};})();")
+# ۱۸ اکتبر: تورِ اولین بازدید (zaexa.tour.v1) روی /app تازه خودش را نشان می‌دهد. کاوشگرهای قدیمی همه «بدون تور»
+# نوشته شده‌اند، پس هر contextی که اینجا ساخته می‌شود با کلیدِ "done" شروع می‌کند و سنجششان بدونِ تغییر می‌ماند.
+# فقط کاوشگرِ [first-visit tour] با TOUR_DEFAULT["on"]=False بدونِ کلید می‌سازد.
+TOUR_DEFAULT = {"on": True}
+TOUR_DONE_JS = "try{localStorage.setItem('zaexa.tour.v1','done')}catch(e){}"
 _orig_new_context = Browser.new_context
 async def _new_context_with_gt_flag(self, *a, **k):
     ctx = await _orig_new_context(self, *a, **k)
@@ -25,6 +30,8 @@ async def _new_context_with_gt_flag(self, *a, **k):
         await ctx.add_init_script(GT_ROUTE_PROXY_FIRST_JS)
     if GT_PERSIST_OFF["on"]:
         await ctx.add_init_script(GT_PERSIST_OFF_JS)
+    if TOUR_DEFAULT["on"]:
+        await ctx.add_init_script(TOUR_DONE_JS)
     return ctx
 Browser.new_context = _new_context_with_gt_flag
 # ⚠️ new_page در لایه‌ی wrapper از new_context‌ی wrapper نمی‌گذرد (مستقیم می‌رود سراغ impl)،
@@ -36,6 +43,8 @@ async def _new_page_with_gt_flag(self, *a, **k):
         await pg.context.add_init_script(GT_ROUTE_PROXY_FIRST_JS)
     if GT_PERSIST_OFF["on"]:
         await pg.context.add_init_script(GT_PERSIST_OFF_JS)
+    if TOUR_DEFAULT["on"]:
+        await pg.context.add_init_script(TOUR_DONE_JS)
     return pg
 Browser.new_page = _new_page_with_gt_flag
 
@@ -2054,13 +2063,14 @@ check_wallet_copy_address()
 check_stock_tokens()
 
 
-# ۶ اکتبر — «Flow» از نوار به منوی Markets رفت و «Portfolio» به منوی والت؛ هیچ‌کدام دیگر تبِ مستقیم نیستند.
-# این کمکی همان مسیرِ کاربر را می‌رود: swap = کلیکِ تب، flow = بازکردنِ Markets و کلیک روی ردیفِ Flow،
+# ۶ اکتبر — «Flow» از نوار رفت و «Portfolio» به منوی والت؛ هیچ‌کدام دیگر تبِ مستقیم نیستند.
+# ۱۸ اکتبر — Markets بازشو نیست: انتخابِ ذخیره‌شده zaexa.markets.v1 = flow را می‌گذاریم و روی تبِ Markets کلیک می‌کنیم.
+# این کمکی همان مسیرِ کاربر را می‌رود: swap = کلیکِ تب، flow = کلیکِ تبِ Markets با انتخابِ flow،
 # folio = setView("folio") (همان کاری که دکمه‌ی «Portfolio» در منوی والت می‌کند؛ منوی والت خودش در [wallet portfolio] سنجیده می‌شود).
 async def go_view(pg, v):
     if v == "flow":
+        await pg.evaluate("() => localStorage.setItem('zaexa.markets.v1', 'flow')")
         await pg.click("#navMarkets")
-        await pg.click('#navMenu [data-view="flow"]')
     elif v == "folio":
         await pg.evaluate("() => setView('folio')")
     else:
@@ -3149,17 +3159,17 @@ async def check_logo_hit_area(p, errors):
 
 
 async def check_nav_chevron_mobile(p, errors):
-    """[nav chevron mobile] — ۷ اکتبر: مالک گفت شورونِ تبِ Markets روی نوارِ موبایل نیست
-    (display:none بود). حالا برچسب و شورون یک گروهِ وسط‌چین زیرِ آیکون‌اند؛ هندسه را
-    در اپ و pairs، سه عرضِ گوشی و هر دو تم می‌سنجیم، و دسکتاپ دست‌نخورده می‌ماند."""
+    """[nav chevron mobile] — ۱۸ اکتبر: «Markets» دیگر بازشو نیست و شورون ندارد؛ روی نوارِ موبایل باید دقیقاً مثلِ
+    بقیه‌ی تب‌ها باشد (آیکون بالا، برچسب زیرش، هر دو وسط‌چین، هم‌قد و هم‌پهنای Stocks). قبلاً شورونِ ۹ تا ۱۱ پیکسلی
+    و باز/بسته‌شدنش سنجیده می‌شد؛ آن بخش‌ها عمداً حذف شد چون شورون و منو دیگر وجود ندارند."""
     b = await p.chromium.launch()
     js = """() => {
         const r = e => e.getBoundingClientRect();
         const btn = document.querySelector('.nav .navMarkets');
-        const ch = btn.querySelector('.navChev'), lab = btn.querySelector('span'), ico = btn.querySelector('svg');
-        const cs = getComputedStyle(ch);
-        return {display: cs.display, transform: cs.transform, expanded: btn.getAttribute('aria-expanded'),
-                btn: r(btn), ch: r(ch), lab: r(lab), ico: r(ico)};
+        const sib = document.querySelector('.nav [title="Stocks"]');
+        const lab = btn.querySelector('span'), ico = btn.querySelector('svg');
+        return {chev: !!btn.querySelector('.navChev') || !!document.querySelector('.navChev'), kids: btn.children.length, disp: getComputedStyle(btn).display,
+                btn: r(btn), sib: r(sib), lab: r(lab), ico: r(ico), haspopup: btn.getAttribute('aria-haspopup'), expanded: btn.getAttribute('aria-expanded')};
     }"""
     n = 0
     for name in ("index.html", "pairs.html"):
@@ -3172,37 +3182,29 @@ async def check_nav_chevron_mobile(p, errors):
                 await pg.wait_for_timeout(150)
                 m = await pg.evaluate(js)
                 tag = "%s@%dx%d/%s" % (name, w, h, theme)
-                assert m["display"] != "none", "[nav chevron mobile] %s: the Markets chevron is display:none" % tag
-                assert 9 <= m["ch"]["width"] <= 11, "[nav chevron mobile] %s: chevron width %.1f not 9-11px" % (tag, m["ch"]["width"])
-                cy = m["ch"]["y"] + m["ch"]["height"] / 2
-                ly = m["lab"]["y"] + m["lab"]["height"] / 2
-                assert abs(cy - ly) <= 1.5, "[nav chevron mobile] %s: chevron centre %.1f vs label centre %.1f" % (tag, cy, ly)
-                gap = m["ch"]["x"] - (m["lab"]["x"] + m["lab"]["width"])
-                assert 0 <= gap <= 5, "[nav chevron mobile] %s: label->chevron gap %.1fpx not within 0-5" % (tag, gap)
-                b_ = m["btn"]
-                assert (m["ch"]["x"] >= b_["x"] and m["ch"]["x"] + m["ch"]["width"] <= b_["x"] + b_["width"]
-                        and m["ch"]["y"] >= b_["y"] and m["ch"]["y"] + m["ch"]["height"] <= b_["y"] + b_["height"]), (
-                    "[nav chevron mobile] %s: chevron %s is not inside the Markets button %s" % (tag, m["ch"], b_))
+                assert not m["chev"], "[nav chevron mobile] %s: a chevron is still in the DOM" % tag
+                assert m["kids"] == 2, "[nav chevron mobile] %s: Markets button has %d children, expected icon + label" % (tag, m["kids"])
+                assert m["haspopup"] is None and m["expanded"] is None, "[nav chevron mobile] %s: Markets still carries menu aria attributes" % tag
+                assert m["disp"] == "flex", "[nav chevron mobile] %s: Markets display is %s, expected flex like the other tabs" % (tag, m["disp"])
                 icx = m["ico"]["x"] + m["ico"]["width"] / 2
-                bcx = b_["x"] + b_["width"] / 2
-                assert abs(icx - bcx) <= 8, "[nav chevron mobile] %s: icon centre %.1f vs button centre %.1f" % (tag, icx, bcx)
-                await pg.click(".nav .navMarkets")
-                await pg.wait_for_timeout(350)
-                m2 = await pg.evaluate(js)
-                assert m2["expanded"] == "true", "[nav chevron mobile] %s: click did not open the menu" % tag
-                assert m2["transform"] != m["transform"], (
-                    "[nav chevron mobile] %s: chevron transform unchanged when open (%s)" % (tag, m2["transform"]))
+                lcx = m["lab"]["x"] + m["lab"]["width"] / 2
+                bcx = m["btn"]["x"] + m["btn"]["width"] / 2
+                assert abs(icx - bcx) <= 1.5 and abs(lcx - bcx) <= 1.5, (
+                    "[nav chevron mobile] %s: icon centre %.1f / label centre %.1f vs button centre %.1f" % (tag, icx, lcx, bcx))
+                assert m["lab"]["y"] >= m["ico"]["y"] + m["ico"]["height"] - 0.5, "[nav chevron mobile] %s: label is not below the icon" % tag
+                assert abs(m["btn"]["height"] - m["sib"]["height"]) <= 1 and abs(m["btn"]["width"] - m["sib"]["width"]) <= 1.5, (
+                    "[nav chevron mobile] %s: Markets %.1fx%.1f vs Stocks %.1fx%.1f" % (tag, m["btn"]["width"], m["btn"]["height"], m["sib"]["width"], m["sib"]["height"]))
                 await pg.close()
                 n += 1
         pg = await b.new_page(viewport={"width": 1280, "height": 800})
         await pg.goto("file://" + os.path.join(HERE, "..", name))
         await pg.wait_for_timeout(250)
         m = await pg.evaluate(js)
-        assert m["transform"] == "none", "[nav chevron mobile] %s desktop: closed chevron transform is %s, expected none" % (name, m["transform"])
-        assert m["ch"]["x"] >= m["lab"]["x"] + m["lab"]["width"] - 0.5, "[nav chevron mobile] %s desktop: chevron not to the right of the label" % name
+        assert not m["chev"] and m["kids"] == 2, "[nav chevron mobile] %s desktop: chevron present or extra children" % name
+        assert m["lab"]["x"] >= m["ico"]["x"] + m["ico"]["width"] - 0.5, "[nav chevron mobile] %s desktop: label not to the right of the icon" % name
         await pg.close()
     await b.close()
-    print("[nav chevron mobile] chevron visible, centred with the label and flips when open on app and pairs (%d phone combos); desktop unchanged" % n)
+    print("[nav chevron mobile] no chevron; Markets is built and sized like Stocks on the phone bar of app and pairs (%d phone combos); desktop label sits right of the icon" % n)
 
 
 async def check_landing_glow_lvh(p, errors):
@@ -3511,6 +3513,10 @@ async def check_live_strip(p, errors):
             e = []
             pg = await open_page("/app" + ("#swap?chain=solana" if chain == "solana" else ""),
                                  viewport={"width": vw, "height": 900}, errs=e)
+            # ۱۸ اکتبر [mobile compact]: روی گوشی فقط کارتِ تبِ انتخاب‌شده دیده می‌شود، و توکنِ پیش‌فرضِ هارنس
+            # (استاب) یافته‌ی critical دارد و تبِ Exit check را خودکار انتخاب می‌کند؛ این کاوشگر موقعیتِ
+            # کارتِ نمودار را می‌سنجد، پس تبِ Chart را صریحاً انتخاب می‌کند.
+            await pg.evaluate("mtabSelect('chart', false)")
             g = await pg.evaluate(GEO, chain == "solana")
             geo[(vw, chain)] = g
             assert not e, "console errors in geometry probe %s/%s: %s" % (vw, chain, e)
@@ -3613,6 +3619,754 @@ async def check_live_strip(p, errors):
 
     await b.close()
     srv.shutdown()
+
+
+async def check_mobile_compact(p, errors):
+    """[mobile compact] / [desktop unchanged] — نمای سواپِ /app روی گوشی با نوارِ تب و فوترِ جمع‌شونده.
+
+    زیر ۹۴۱px زیرِ کارتِ سواپ یک نوارِ تب (Chart / Every pool / Exit check) است و فقط یکی از
+    سه کارت دیده می‌شود؛ زیر ۷۲۱px «Market watch» پنهان است و ستون‌های فوتر در یک
+    <details class="fMore"> جمع می‌شوند. قاعده‌ی ایمنی: نتیجه‌ی منفیِ Exit check هرگز بی‌صدا
+    پشتِ یک تبِ دیگر نمی‌ماند. ≥۹۴۱px هیچ پیکسلی نباید عوض شود — با رندرِ index.html
+    از کامیتِ پدر در همین اجرا مقایسه می‌شود."""
+    import functools, http.server, json as _j, subprocess, tempfile, threading
+
+    root = os.path.abspath(os.path.join(HERE, "..", ".."))
+    shots = os.environ.get("ZX_MOB_SHOTS", "/tmp/claude-0/mob_shots")
+    os.makedirs(shots, exist_ok=True)
+
+    # ---- خطِ پایه: index.html از کامیتِ پدر ----
+    # اگر index.html/pairs.html/report_page.js هنوز کامیت نشده‌اند، پدر = HEAD؛ بعد از کامیت = HEAD~1.
+    def git(*a):
+        return subprocess.run(["git", "-C", root] + list(a), capture_output=True, text=True)
+    # پدر = نزدیک‌ترین کامیتِ (HEAD، HEAD~1، …) که هنوز نوارِ تبِ mtabBuild را ندارد.
+    rev = "HEAD"
+    for cand in ("HEAD", "HEAD~1", "HEAD~2", "HEAD~3"):
+        o_ = git("show", cand + ":web/index.html")
+        if o_.returncode == 0 and "mtabBuild" not in o_.stdout:
+            rev = cand
+            break
+    old = git("show", rev + ":web/index.html")
+    base_dir = tempfile.mkdtemp(prefix="mc_base_")
+    base_ok = old.returncode == 0 and "mtabBuild" not in old.stdout
+    if base_ok:
+        src = old.stdout
+        src = re.sub(r'const ETHERS_SRC="[^"]*";', 'const ETHERS_SRC="./stub-ethers.js";', src, count=1)
+        src = re.sub(r'const ETHERS_SRI="[^"]*";', 'const ETHERS_SRI="";', src, count=1)
+        open(os.path.join(base_dir, "harness.html"), "w", encoding="utf-8").write(src)
+
+    def make_server(app_file):
+        class Quiet(http.server.SimpleHTTPRequestHandler):
+            def log_message(self, *a):
+                pass
+
+            def translate_path(self, path):
+                clean = path.split("?")[0]
+                if clean in ("/app", "/app/"):
+                    return app_file
+                if clean == "/stub-ethers.js":
+                    return os.path.join(HERE, "stub-ethers.js")
+                return super().translate_path(path)
+        srv = http.server.ThreadingHTTPServer(
+            ("127.0.0.1", 0), functools.partial(Quiet, directory=os.path.join(HERE, "..")))
+        threading.Thread(target=srv.serve_forever, daemon=True).start()
+        return srv, "http://127.0.0.1:%d" % srv.server_address[1]
+
+    srv_new, origin_new = make_server(os.path.join(HERE, "harness.html"))
+    srv_old, origin_old = (make_server(os.path.join(base_dir, "harness.html")) if base_ok else (None, None))
+    b = await p.chromium.launch()
+
+    SOL_ADDR = "So11111111111111111111111111111111111111112"
+    # ⚠️ توکنِ پیش‌فرضِ هارنس (USDC با بایت‌کدِ استاب) خودش یافته‌ی critical دارد («Fee is mutable») و طبقِ
+    # قاعده‌ی ایمنی تبِ Exit check را خودکار انتخاب می‌کند. پس کاوشگرهای چیدمان بعد از بارگذاری وضعیتِ
+    # ایمنی را پاک می‌کنند تا «تبِ پیش‌فرض» سنجیده شود؛ کاوشگرهای ایمنی خودشان نتیجه تزریق می‌کنند.
+    RESET = "mtabParts = Object.create(null); mtabForced.clear(); mtabSelect('chart', false); mtabRefresh();"
+    # اولین مقداری که data-mtab می‌گیرد (قبل از اینکه اسکن/چکِ خروج چیزی عوض کند) = خواندنِ localStorage.
+    FIRST = ("window.__firstMtab = null; new MutationObserver(() => { if (window.__firstMtab === null) { "
+             "const h = document.querySelector('.row.hero[data-mtab]'); if (h) window.__firstMtab = h.dataset.mtab; } })"
+             ".observe(document, {subtree: true, attributes: true, attributeFilter: ['data-mtab']});")
+
+    async def open_app(origin, path, vw=390, vh=844, scheme="light", vd=None, sol_mint=None, init=None, errs=None, wait=1300):
+        pg = await b.new_page(viewport={"width": vw, "height": vh}, color_scheme=scheme)
+        await pg.add_init_script(FIRST)
+        if errs is not None:
+            pg.on("console", lambda m: errs.append(m.text) if m.type == "error" and (m.location.get("url") or "").startswith(origin) else None)
+            pg.on("pageerror", lambda e: errs.append("PAGEERROR " + str(e)))
+        if init:
+            await pg.add_init_script(init)
+
+        async def external(route):
+            await route.abort()
+
+        async def empty(route):
+            await route.fulfill(status=200, content_type="application/json", body='{"data":[]}')
+
+        async def ok204(route):
+            await route.fulfill(status=204, body="")
+
+        async def vd_h(route):
+            await route.fulfill(status=200, content_type="application/json",
+                                body=_j.dumps(vd or {"v": "sell", "ms": 100}))
+
+        async def rpc(route):
+            payload = _j.loads(route.request.post_data or "{}")
+            m = payload.get("method")
+            result = None
+            if sol_mint is not None and m == "getAccountInfo":
+                result = {"value": {"owner": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA", "data": {"parsed": {
+                    "type": "mint", "info": dict({"decimals": 6, "supply": "1000", "isInitialized": True,
+                                                  "mintAuthority": None, "freezeAuthority": None}, **sol_mint)}}}}
+            elif sol_mint is not None and m == "getTokenLargestAccounts":
+                result = {"value": []}
+            elif sol_mint is not None and m == "getEpochInfo":
+                result = {"epoch": 700}
+            await route.fulfill(status=200, content_type="application/json", body=_j.dumps({"result": result}))
+
+        await pg.route("**/*", lambda r: r.continue_() if r.request.url.startswith(origin) else external(r))
+        await pg.route("**/gt/**", empty)
+        await pg.route("**/ev", ok204)
+        await pg.route("**/vd/**", vd_h)
+        await pg.route("**/sol/rpc", rpc)
+        await pg.route("**/pairs.json**", lambda r: r.fulfill(status=200, content_type="application/json", body='{"rows":[],"store":false}'))
+        await pg.goto(origin + path)
+        await pg.wait_for_timeout(wait)
+        return pg
+
+    STATE = """() => {
+        const vis = e => { if (!e) return false; const cs = getComputedStyle(e), r = e.getBoundingClientRect();
+                           return cs.display !== 'none' && cs.visibility !== 'hidden' && r.height > 0; };
+        const hero = [...document.querySelectorAll('.row.hero')].find(h => !h.hidden);
+        const sol = hero.id === 'appSolHero';
+        const cards = {chart: hero.querySelector('.swapChartCard'),
+                       pools: sol ? document.getElementById('solPools') : document.getElementById('venueBody').closest('.card'),
+                       exit: hero.querySelector('.swapSafetyCard')};
+        const swap = sol ? document.getElementById('solSwap') : hero.querySelector('.swapCard');
+        const strips = [...document.querySelectorAll('.mTabs')];
+        const strip = strips.find(vis) || null;
+        const tabs = strip ? [...strip.querySelectorAll('[role=tab]')] : [];
+        const mw = document.querySelector('.marketWatch');
+        const mwv = [...document.querySelectorAll('.marketWatch')].some(vis);
+        const exitTab = tabs[2] || null;
+        return {sol, stripCount: strips.length, stripVisible: !!strip, role: strip ? strip.getAttribute('role') : null,
+                names: tabs.map(t => t.textContent.trim()), roles: tabs.map(t => t.getAttribute('role')),
+                selected: tabs.map(t => t.getAttribute('aria-selected')),
+                dot: exitTab ? (exitTab.classList.contains('warn') ? 'warn' : exitTab.classList.contains('ok') ? 'ok' : 'none') : null,
+                dotShown: exitTab ? getComputedStyle(exitTab, '::after').content !== 'none' : null,
+                mtab: hero.dataset.mtab || null,
+                visible: Object.keys(cards).filter(k => vis(cards[k])),
+                stripTop: strip ? Math.round(strip.getBoundingClientRect().top + scrollY) : null,
+                stripW: strip ? Math.round(strip.getBoundingClientRect().width) : null, swapW: Math.round(swap.getBoundingClientRect().width),
+                swapBottom: Math.round(swap.getBoundingClientRect().bottom + scrollY),
+                pageH: document.documentElement.scrollHeight, overflowX: document.documentElement.scrollWidth > innerWidth,
+                plotH: Math.round(hero.querySelector('.plot').getBoundingClientRect().height),
+                mwVisible: mwv, mwCount: document.querySelectorAll('.marketWatch').length,
+                stored: (() => { try { return localStorage.getItem('zaexa.mtab.v1'); } catch (e) { return 'ERR'; } })()};
+    }"""
+    FOOT = """() => {
+        const vis = e => { if (!e) return false; const r = e.getBoundingClientRect();
+                           return e.checkVisibility({contentVisibilityAuto: true, visibilityProperty: true}) && r.height > 0; };
+        const f = document.querySelector('footer'), d = f.querySelector('details.fMore');
+        const cols = [...f.querySelectorAll('.footCol')];
+        return {hasDetails: !!d, summary: d ? d.querySelector('summary').textContent.trim() : null,
+                summaryVisible: d ? vis(d.querySelector('summary')) : false, open: d ? d.open : null,
+                colsVisible: cols.filter(vis).length, cols: cols.length,
+                linksVisible: [...f.querySelectorAll('.footCol a')].filter(vis).length,
+                brand: vis(f.querySelector('.footBrand')), fine: vis(f.querySelector('.fine')), bottom: vis(f.querySelector('.footBottom')),
+                copyright: /2026 Zaexa/.test(f.querySelector('.footBottom').textContent),
+                lefts: [...new Set(cols.filter(vis).map(c => Math.round(c.getBoundingClientRect().left)))].length,
+                overflowX: document.documentElement.scrollWidth > innerWidth};
+    }"""
+
+    async def foot_collapsed_and_opens(pg, label):
+        await pg.evaluate("document.querySelector('footer').scrollIntoView()")
+        f0 = await pg.evaluate(FOOT)
+        assert f0["hasDetails"] and f0["summary"] == "About, links & support", "%s: footer lost the fMore details row: %s" % (label, f0)
+        assert f0["summaryVisible"] and f0["open"] is False, "%s: the fMore row must show closed on a phone: %s" % (label, f0)
+        assert f0["colsVisible"] == 0 and f0["linksVisible"] == 0, "%s: footer link columns are still visible while collapsed: %s" % (label, f0)
+        assert f0["brand"] and f0["fine"] and f0["bottom"] and f0["copyright"], "%s: brand, legal line and copyright must stay visible: %s" % (label, f0)
+        await pg.click("footer details.fMore > summary"); await pg.wait_for_timeout(250)
+        f1 = await pg.evaluate(FOOT)
+        assert f1["open"] is True and f1["colsVisible"] == 3 and f1["linksVisible"] >= 6, "%s: tapping the row did not open the link columns: %s" % (label, f1)
+        assert not f1["overflowX"], "%s: opened footer overflows horizontally" % label
+        return f0, f1
+
+    # ================== الف) نمای سواپ، Base و Solana، ۳۹۰px ==================
+    results = {}
+    for name, path, scheme in (("base-light", "/app#swap", "light"), ("base-dark", "/app#swap", "dark"),
+                               ("sol-light", "/app#swap?chain=solana", "light")):
+        errs = []
+        pg = await open_app(origin_new, path, scheme=scheme, errs=errs)
+        if not name.startswith("sol"):
+            await pg.evaluate(RESET)
+        s = await pg.evaluate(STATE)
+        results[name] = s
+        assert s["stripCount"] == 2 and s["stripVisible"], "%s: the tab strip is missing from the swap view: %s" % (name, s)
+        assert s["role"] == "tablist" and s["roles"] == ["tab"] * 3 and s["names"] == ["Chart", "Every pool", "Exit check"], \
+            "%s: the strip needs a tablist with the three named tabs: %s" % (name, s)
+        assert s["stripTop"] >= s["swapBottom"] - 1, "%s: the strip must sit under the swap card (strip top %s, card bottom %s)" % (name, s["stripTop"], s["swapBottom"])
+        assert abs(s["stripW"] - s["swapW"]) <= 1, "%s: the strip must span the full column (strip %s, swap card %s)" % (name, s["stripW"], s["swapW"])
+        assert len(s["visible"]) == 1 and s["visible"] == ["chart"] and s["selected"][0] == "true" and s["mtab"] == "chart", \
+            "%s: default must show exactly the chart card: %s" % (name, s)
+        assert s["plotH"] == 200, "%s: the chart plot must be 200px on a phone, got %s" % (name, s["plotH"])
+        assert not s["mwVisible"], "%s: Market watch must be hidden at 390px" % name
+        assert not s["overflowX"], "%s: horizontal overflow at 390px" % name
+        assert s["pageH"] <= 1600, "%s: page is %spx tall, target <= 1600" % (name, s["pageH"])
+        before = None
+        if base_ok:
+            og = await open_app(origin_old, path, scheme=scheme)
+            before = (await og.evaluate("document.documentElement.scrollHeight"))
+            await og.close()
+        results[name]["before"] = before
+        # روی گوشی عنوانِ «همه‌ی استخرها» و «Exit check» با کلیک عوض می‌شود
+        for idx, key in ((1, "pools"), (2, "exit"), (0, "chart")):
+            await pg.click('.mTabs:visible [role=tab] >> nth=%d' % idx) if False else await pg.locator(".mTabs >> visible=true").locator("[role=tab]").nth(idx).click()
+            await pg.wait_for_timeout(150)
+            t = await pg.evaluate(STATE)
+            assert t["visible"] == [key] and t["selected"][idx] == "true" and t["selected"].count("true") == 1 and t["mtab"] == key, \
+                "%s: switching to %s should show exactly that card: %s" % (name, key, t)
+            assert not t["overflowX"], "%s: horizontal overflow on tab %s" % (name, key)
+        await pg.locator(".mTabs >> visible=true").locator("[role=tab]").nth(1).click()
+        await pg.wait_for_timeout(150)
+        stored = (await pg.evaluate(STATE))["stored"]
+        await pg.reload(); await pg.wait_for_timeout(1300)
+        first = await pg.evaluate("window.__firstMtab")
+        await pg.evaluate(RESET.replace("mtabSelect('chart', false);", "mtabInit();"))
+        r = await pg.evaluate(STATE)
+        assert stored == "pools" and first == "pools" and r["visible"] == ["pools"] and r["mtab"] == "pools", \
+            "%s: the chosen tab did not persist across reload (stored=%r, first paint=%r): %s" % (name, stored, first, r)
+        # مقدارِ نامعتبر -> chart
+        await pg.evaluate("localStorage.setItem('zaexa.mtab.v1','nope')"); await pg.reload(); await pg.wait_for_timeout(1300)
+        first2 = await pg.evaluate("window.__firstMtab")
+        assert first2 == "chart", "%s: an invalid stored tab must fall back to the chart, first paint was %r" % (name, first2)
+        await pg.evaluate("localStorage.removeItem('zaexa.mtab.v1')")
+        await pg.reload(); await pg.wait_for_timeout(1300)
+        if not name.startswith("sol"):
+            await pg.evaluate(RESET)
+        await pg.evaluate("window.scrollTo(0,0)")
+        # برچسب‌ها بعد از تمام‌شدنِ transition سنجیده می‌شوند: RESET همین الان تب را عوض کرده بود و عکسِ وسطِ
+        # transition (.16s) برچسب‌های «Chart» و «Exit check» را کمرنگ نشان می‌داد.
+        await pg.wait_for_timeout(600)
+        lab = await pg.evaluate("""() => {
+            const p = document.createElement('span'); p.style.color = 'var(--tx2)'; document.body.appendChild(p);
+            const tx2 = getComputedStyle(p).color; p.remove();
+            const strip = [...document.querySelectorAll('.mTabs')].find(e => e.getBoundingClientRect().height > 0);
+            return {tx2, tabs: [...strip.querySelectorAll('[role=tab]')].map(t => {
+                const cs = getComputedStyle(t);
+                return {sel: t.getAttribute('aria-selected') === 'true', color: cs.color, opacity: cs.opacity};
+            })};
+        }""")
+        for i, t in enumerate(lab["tabs"]):
+            want_c = "rgb(255, 255, 255)" if t["sel"] else lab["tx2"]
+            assert t["color"] == want_c and t["opacity"] == "1", \
+                "%s: tab %d label is %s at opacity %s, want %s at 1 (selected=%s)" % (name, i, t["color"], t["opacity"], want_c, t["sel"])
+        await pg.screenshot(path=os.path.join(shots, "%s-390-top.png" % name), full_page=True)
+        await foot_collapsed_and_opens(pg, name)
+        await pg.close()
+        assert not errs, "%s: console errors: %s" % (name, errs)
+        print("[mobile compact] %s: strip=%s visible=%s plot=%spx page %s -> %spx marketWatch=%s overflow=%s"
+              % (name, s["names"], s["visible"], s["plotH"], before, s["pageH"], s["mwVisible"], s["overflowX"]))
+
+    # ================== ب) قاعده‌ی ایمنی ==================
+    BAD_X = "renderExit({state:'noexit', lossPct:null, recovered:null, reason:'no pool'})"
+    OK_X = "renderExit({state:'verified', lossPct:0.4, recovered:99.6, reason:null})"
+    UNK_X = "renderExit({state:'unknown', lossPct:null, recovered:null, reason:'no quote'})"
+    rep = ("(level, canSell) => ({address: tokenOut.address, findings: [{level: level, title: 'T', detail: 'D'}], "
+           "verdict: {txt: 'Caution', tone: 'warn'}, score: 30, unknown: 0, canSell: canSell, owner: null})")
+    for label, inj, forces in (
+            ("no-sell exit result", BAD_X, True),
+            ("no sell quote (canSell=false, critical finding)", "renderSafety((%s)('critical', false))" % rep, True),
+            ("high safety finding with a positive sell verdict", "renderSafety((%s)('high', true)); %s" % (rep, OK_X), False),
+            ("critical safety finding with a positive sell verdict", "renderSafety((%s)('critical', true)); %s" % (rep, OK_X), False)):
+        pg = await open_app(origin_new, "/app#swap")
+        await pg.evaluate(RESET)
+        await pg.evaluate(inj); await pg.wait_for_timeout(200)
+        s = await pg.evaluate(STATE)
+        want = ["exit"] if forces else ["chart"]
+        assert s["dot"] == "warn" and s["dotShown"] and s["visible"] == want and s["mtab"] == want[0], \
+            "Base %s: red dot always; the tab is switched automatically only for a negative exit verdict (want %s): %s" % (label, want, s)
+        assert s["stored"] in (None, "ERR") or s["stored"] == "", "Base %s: the automatic switch must not overwrite the saved choice: %r" % (label, s["stored"])
+        if forces:
+            await pg.locator(".mTabs >> visible=true").locator("[role=tab]").nth(0).click(); await pg.wait_for_timeout(150)
+            s2 = await pg.evaluate(STATE)
+            assert s2["dot"] == "warn" and s2["dotShown"] and s2["visible"] == ["chart"], \
+                "Base %s: the red dot must stay visible while another tab is selected: %s" % (label, s2)
+            await pg.evaluate(inj); await pg.wait_for_timeout(150)
+            s3 = await pg.evaluate(STATE)
+            assert s3["visible"] == ["chart"], "Base %s: the switch happens once per token, not on every repaint: %s" % (label, s3)
+        else:
+            await pg.locator(".mTabs >> visible=true").locator("[role=tab]").nth(1).click(); await pg.wait_for_timeout(150)
+            s2 = await pg.evaluate(STATE)
+            assert s2["dot"] == "warn" and s2["visible"] == ["pools"], "Base %s: dot must survive a manual tab change: %s" % (label, s2)
+        if label == "no-sell exit result":
+            await pg.locator(".mTabs >> visible=true").locator("[role=tab]").nth(2).click(); await pg.wait_for_timeout(500)
+            await pg.screenshot(path=os.path.join(shots, "base-light-390-exit-warning.png"), full_page=True)
+        await pg.close()
+        print("[mobile compact] Base %s -> red dot, %s" % (label, "Exit check selected once" if forces else "tab NOT changed"))
+    pg = await open_app(origin_new, "/app#swap")
+    await pg.evaluate(RESET)
+    await pg.evaluate("renderSafety((%s)('ok', true))" % rep); await pg.evaluate(OK_X); await pg.wait_for_timeout(200)
+    s = await pg.evaluate(STATE)
+    assert s["dot"] == "ok" and s["dotShown"] and s["visible"] == ["chart"] and s["mtab"] == "chart", \
+        "Base clean result: green dot and the tab must not be forced: %s" % s
+    await pg.evaluate(RESET)
+    await pg.evaluate(UNK_X); await pg.wait_for_timeout(200)
+    s = await pg.evaluate(STATE)
+    assert s["dot"] == "none" and s["visible"] == ["chart"], "Base unknown exit: no dot, not forced: %s" % s
+    await pg.evaluate(RESET)
+    s = await pg.evaluate(STATE)
+    assert s["dot"] == "none", "pending state shows a dot: %s" % s
+    await pg.close()
+    print("[mobile compact] Base clean -> green dot, tab not forced; unknown/pending -> no dot")
+
+    for label, kw, want_dot, want_vis in (
+            ("no-sell verdict", dict(vd={"v": "nosell", "ms": 100}), "warn", ["exit"]),
+            ("unconfirmed sell-back", dict(vd={"v": None, "why": "sol:unconfirmed", "ms": 100}), "warn", ["exit"]),
+            ("active mint authority (high finding, positive sell verdict: dot only)", dict(sol_mint={"mintAuthority": SOL_ADDR}), "warn", ["chart"]),
+            ("clean", dict(sol_mint={}), "ok", ["chart"]),
+            ("unknown verdict", dict(vd={"v": None, "why": "internal", "ms": 100}), "none", ["chart"])):
+        pg = await open_app(origin_new, "/app#swap?chain=solana", wait=1800, **kw)
+        s = await pg.evaluate(STATE)
+        assert s["sol"] and s["dot"] == want_dot and s["visible"] == want_vis, \
+            "Solana %s: expected dot=%s with %s shown: %s" % (label, want_dot, want_vis, s)
+        if label == "no-sell verdict":
+            await pg.screenshot(path=os.path.join(shots, "sol-light-390-exit-warning.png"), full_page=True)
+        await pg.close()
+    print("[mobile compact] Solana no-sell / unconfirmed -> red dot + Exit check; high finding alone -> red dot only; clean -> green; unknown -> none")
+
+    # ================== پ) فوتر روی pairs و صفحه‌ی گزارش ==================
+    pairs_pg = await b.new_page(viewport={"width": 390, "height": 844})
+    async def ext(route):
+        await route.abort()
+    await pairs_pg.route("**/*", lambda r: r.continue_() if r.request.url.startswith(origin_new) else ext(r))
+    await pairs_pg.route("**/pairs.json**", lambda r: r.fulfill(status=200, content_type="application/json", body='{"rows":[],"store":false}'))
+    await pairs_pg.goto(origin_new + "/pairs.html"); await pairs_pg.wait_for_timeout(900)
+    await foot_collapsed_and_opens(pairs_pg, "pairs")
+    await pairs_pg.close()
+
+    worker_dir = os.path.join(root, "worker")
+    out = tempfile.mkdtemp(prefix="mc_report_")
+    gen = ('import fs from "node:fs"; import { renderReportPage } from "./report_page.js"; '
+           'fs.writeFileSync(process.argv[1], renderReportPage({ date: "2026-10-04", today: "2026-10-04", '
+           'firstDate: "2026-09-08", rows: [], history: [] }));')
+    rp = os.path.join(out, "report.html")
+    r = subprocess.run(["node", "--input-type=module", "-e", gen, rp], cwd=worker_dir, capture_output=True, text=True)
+    assert r.returncode == 0 and os.path.exists(rp), "could not render the report page: %s" % r.stderr[-400:]
+    report_html = open(rp, encoding="utf-8").read()
+    rpg = await b.new_page(viewport={"width": 390, "height": 844})
+    await rpg.route("**/*", lambda r: r.abort())
+    await rpg.set_content(report_html); await rpg.wait_for_timeout(500)
+    await foot_collapsed_and_opens(rpg, "report")
+    await rpg.close()
+    # دسکتاپ: هر سه فوتر عیناً همان سه ستون و بدون ردیفِ summary
+    for label, loader in (("app", None), ("pairs", "/pairs.html"), ("report", "report")):
+        if label == "app":
+            dpg = await open_app(origin_new, "/app#swap", vw=1440, vh=900)
+        else:
+            dpg = await b.new_page(viewport={"width": 1440, "height": 900})
+            await dpg.route("**/*", lambda r: r.continue_() if r.request.url.startswith(origin_new) else r.abort())
+            await dpg.route("**/pairs.json**", lambda r: r.fulfill(status=200, content_type="application/json", body='{"rows":[],"store":false}'))
+            if loader == "report":
+                await dpg.set_content(report_html)
+            else:
+                await dpg.goto(origin_new + loader)
+            await dpg.wait_for_timeout(700)
+        fd = await dpg.evaluate(FOOT)
+        if label == "app":
+            st1440 = await dpg.evaluate("[...document.querySelectorAll('.mTabs')].map(e => getComputedStyle(e).display)")
+            assert st1440 and all(d == "none" for d in st1440), "the tab strip must stay hidden at 1440, got display=%s" % st1440
+        await dpg.close()
+        assert fd["hasDetails"] and not fd["summaryVisible"] and fd["colsVisible"] == 3 and fd["lefts"] == 3, \
+            "%s: at 1440 the footer must show its three columns with no summary row: %s" % (label, fd)
+    print("[mobile compact] footer: collapsed + opens on tap at 390 (app, pairs, report); three columns and no summary row at 1440")
+
+    # ================== پ-۲) landing.html و تکرارِ فوتر در report_page.js ==================
+    # ⚠️ بلوکِ GENERATED در report_page.js با یک اسکریپتِ یک‌باره (که در مخزن نیست) از landing.html ساخته شده بود؛
+    # پس منبع landing.html است. این کاوشگر ثابت می‌کند فوترِ report_page.js و قاعده‌های CSSِ جمع‌شدن عیناً همان
+    # landing.html هستند (به‌جز لینکِ Exit Report که فقط در گزارش هست)، تا بازسازیِ دوباره یا ویرایشِ یکی از
+    # آن‌ها بی‌صدا از دیگری جدا نشود.
+    landing_src = open(os.path.join(HERE, "..", "landing.html"), encoding="utf-8").read()
+    rep_src = open(os.path.join(worker_dir, "report_page.js"), encoding="utf-8").read()
+    gen2 = ('import { LANDING_FOOTER_HTML as f } from "./report_page.js"; process.stdout.write(f);')
+    rf = subprocess.run(["node", "--input-type=module", "-e", gen2], cwd=worker_dir, capture_output=True, text=True)
+    assert rf.returncode == 0, rf.stderr[-300:]
+    lf = re.search(r"<footer.*?</footer>", landing_src, re.S).group(0)
+    rf_norm = "\n".join(l for l in rf.stdout.split("\n") if '<a href="/report">Exit Report</a>' not in l)
+    assert rf_norm == lf, "worker/report_page.js's footer HTML no longer matches web/landing.html's footer (apart from the Exit Report link)"
+    css_start = rep_src.index("@media(max-width:720px){.footGrid{grid-template-columns:1fr}}\n")
+    css_blk = rep_src[css_start:rep_src.index("`;\n", css_start)]
+    assert "fMore" in css_blk and css_blk in landing_src, "the footer-collapse CSS in worker/report_page.js is not byte-identical to the one in web/landing.html"
+    land_new = landing_src
+    lg = git("show", rev + ":web/landing.html")
+    assert lg.returncode == 0 and "fMore" not in lg.stdout, "cannot read the parent commit's web/landing.html (git %s)" % rev
+    land_old = lg.stdout
+    LFREEZE = "*,*::before,*::after{animation:none!important;transition:none!important}"
+    async def land_page(html, vw, scheme):
+        lp = await b.new_page(viewport={"width": vw, "height": 900}, color_scheme=scheme)
+        await lp.route("**/*", lambda r: r.abort())
+        await lp.set_content(html); await lp.add_style_tag(content=LFREEZE); await lp.wait_for_timeout(400)
+        return lp
+    for scheme in ("light", "dark"):
+        shots_l = []
+        for html in (land_old, land_new):
+            lp = await land_page(html, 1440, scheme)
+            shots_l.append(await lp.locator("footer").screenshot())
+            await lp.close()
+        assert shots_l[0] == shots_l[1], "landing footer at 1440 (%s) differs from the parent commit's render" % scheme
+    lp = await land_page(land_new, 390, "light")
+    await foot_collapsed_and_opens(lp, "landing")
+    await lp.close()
+    print("[mobile compact] landing.html: footer byte-identical at 1440 (light/dark), collapsed + opens at 390; report_page.js footer HTML and CSS identical to landing.html (source of the GENERATED block)")
+
+    # ================== ت) [desktop unchanged] ==================
+    if not base_ok:
+        raise AssertionError("[desktop unchanged] could not read the parent commit's web/index.html (git %s) — baseline missing" % rev)
+    FREEZE = ("document.addEventListener('DOMContentLoaded',()=>{const s=document.createElement('style');"
+              "s.textContent='*,*::before,*::after{animation:none!important;transition:none!important;caret-color:transparent!important}';"
+              "document.head.appendChild(s)});")
+    compared = []
+    for path, scheme in (("/app#swap", "light"), ("/app#swap", "dark"), ("/app#swap?chain=solana", "light")):
+        for vw in (1440, 1000):
+            shot = []
+            for origin in (origin_old, origin_new):
+                pg = await open_app(origin, path, vw=vw, vh=900, scheme=scheme, init=FREEZE, wait=1800)
+                await pg.evaluate("window.scrollTo(0,0)")
+                shot.append(await pg.screenshot(full_page=True))
+                await pg.close()
+            compared.append((path, scheme, vw, len(shot[1])))
+            assert shot[0] == shot[1], \
+                ("[desktop unchanged] %s %s at %dpx differs from the parent commit's render (%d vs %d bytes)"
+                 % (path, scheme, vw, len(shot[0]), len(shot[1])))
+    print("[desktop unchanged] /app swap at 1440 and 1000, Base light/dark and Solana, animations off: %d screenshots byte-identical to the parent commit (%s)"
+          % (len(compared), rev))
+    srv_new.shutdown()
+    if srv_old:
+        srv_old.shutdown()
+    await b.close()
+
+
+async def check_first_visit_tour(p, errors):
+    """[first-visit tour] — تورِ شش‌قدمیِ اولین بازدید روی نمای swapِ /app.
+
+    فقط یک‌بار (zaexa.tour.v1)، فقط روی /app swap (نه /t/، نه flow، نه لینکِ اشتراکی)، با لکه‌ی نور روی
+    هدفِ هر قدم، تبِ Exit check روی گوشی، باز/بسته شدنِ تنظیمات در قدم‌های ۴ تا ۶، تله‌ی فوکوس،
+    و بدونِ هیچ رویدادِ /ev یا درخواستِ شبکه‌ی تازه. «Take the tour» ته‌ی پنلِ تنظیمات دوباره شروعش می‌کند."""
+    import functools, http.server, json as _j, threading
+    shots = os.environ.get("ZX_TOUR_SHOTS", "/tmp/claude-0/tour_shots")
+    os.makedirs(shots, exist_ok=True)
+
+    class Quiet(http.server.SimpleHTTPRequestHandler):
+        def log_message(self, *a):
+            pass
+
+        def translate_path(self, path):
+            clean = path.split("?")[0]
+            if clean in ("/app", "/app/") or clean.startswith("/t/"):
+                return os.path.join(HERE, "harness.html")
+            if clean == "/stub-ethers.js":
+                return os.path.join(HERE, "stub-ethers.js")
+            return super().translate_path(path)
+    srv = http.server.ThreadingHTTPServer(("127.0.0.1", 0), functools.partial(Quiet, directory=os.path.join(HERE, "..")))
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    origin = "http://127.0.0.1:%d" % srv.server_address[1]
+    prev_default = TOUR_DEFAULT["on"]
+    TOUR_DEFAULT["on"] = False
+    b = await p.chromium.launch()
+    errs, ev_seen = [], []
+    TITLES = ["Swap on Base and Solana", "Every token gets an exit check", "Your wallet, your keys",
+              "Approvals: exact by default", "Use your own RPC", "Your portfolio"]
+    BODIES = ["Pick what you pay and what you receive. We check every pool and split your order when that pays you more.",
+              "Before you buy, we simulate selling it back. “No sell quote” means no venue we cover would buy it back — treat that as a warning, not a bug.",
+              "Zaexa never holds your funds. Every swap is one transaction you sign in your own wallet.",
+              "By default you approve only the amount of each swap. Turning this on approves an unlimited amount so later swaps skip that step — only do it if you trust the contract.",
+              "Paste your own https RPC address here if public nodes are slow. We check that it answers as Base before saving it.",
+              "After you connect, Portfolio is the first item in your wallet menu — balances and recent swaps in one place."]
+
+    async def open_app(path="/app", vw=1440, vh=900, scheme="light", init=None, wait_tour=True):
+        pg = await b.new_page(viewport={"width": vw, "height": vh}, color_scheme=scheme)
+        pg.on("console", lambda m: errs.append(m.text) if m.type == "error" and (m.location.get("url") or "").startswith(origin) else None)
+        pg.on("pageerror", lambda e: errs.append("PAGEERROR " + str(e)))
+        if init:
+            await pg.add_init_script(init)
+
+        async def external(route):
+            await route.abort()
+
+        async def empty(route):
+            await route.fulfill(status=200, content_type="application/json", body='{"data":[]}')
+
+        async def ev204(route):
+            ev_seen.append(route.request.url + " " + (route.request.post_data or ""))
+            await route.fulfill(status=204, body="")
+
+        async def vd_h(route):
+            await route.fulfill(status=200, content_type="application/json", body='{"v":"sell","ms":100}')
+
+        async def rpc(route):
+            await route.fulfill(status=200, content_type="application/json", body='{"result":null}')
+        await pg.route("**/*", lambda r: r.continue_() if r.request.url.startswith(origin) else external(r))
+        await pg.route("**/gt/**", empty)
+        await pg.route("**/ev", ev204)
+        await pg.route("**/vd/**", vd_h)
+        await pg.route("**/sol/rpc", rpc)
+        await pg.route("**/pairs.json**", lambda r: r.fulfill(status=200, content_type="application/json", body='{"rows":[],"store":false}'))
+        await pg.goto(origin + path)
+        if wait_tour:
+            await pg.wait_for_selector("#zxTour .tCard", timeout=15000)
+        return pg
+
+    async def absent(pg, why, ms=2600):
+        await pg.wait_for_timeout(ms)
+        n = await pg.evaluate("document.querySelectorAll('#zxTour').length")
+        assert n == 0, "[first-visit tour] the tour must not appear: %s" % why
+
+    async def stored(pg):
+        return await pg.evaluate("(() => { try { return localStorage.getItem('zaexa.tour.v1'); } catch (e) { return 'ERR'; } })()")
+
+    TARGET = """(i) => {
+        const sol = typeof activeChain !== 'undefined' && activeChain === 'solana';
+        const q = s => document.querySelector(s);
+        let els;
+        if (i === 0) els = [sol ? q('#solSwap') : q('#baseHeroRow .swapCard')];
+        else if (i === 1) els = [sol ? q('#appSolSafetyCard') : q('#baseHeroRow .swapSafetyCard')];
+        else if (i === 2) els = [sol ? q('#solSwapBtn') : q('#actBtn')];
+        else if (i === 3) els = [q('#unlimApprove').closest('.optrow')];
+        else if (i === 4) els = [[...document.querySelectorAll('#setPop h4')].find(h => /custom rpc/i.test(h.textContent)), q('#rpcSave').parentElement];
+        else els = [q('#connectBtn')];
+        let L = 1e9, T = 1e9, R = -1e9, B = -1e9;
+        for (const e of els) { const r = e.getBoundingClientRect(); L = Math.min(L, r.left); T = Math.min(T, r.top); R = Math.max(R, r.right); B = Math.max(B, r.bottom); }
+        return {left: L, top: T, right: R, bottom: B};
+    }"""
+    STEP = """() => {
+        const c = document.querySelector('#zxTour .tCard'), s = document.querySelector('#zxTour .tSpot');
+        const cr = c.getBoundingClientRect(), sr = s.getBoundingClientRect();
+        const pop = document.getElementById('setPop');
+        const hero = [...document.querySelectorAll('.row.hero')].find(h => !h.hidden);
+        const ex = document.querySelector('.mTabs [data-mtab="exit"]');
+        const vis = b => !b.hidden && getComputedStyle(b).display !== 'none';
+        return {count: c.querySelector('.tCount').textContent, title: c.querySelector('.tTitle').textContent,
+                body: c.querySelector('.tBody').textContent, popOn: pop.classList.contains('on'),
+                spot: {left: sr.left, top: sr.top, right: sr.right, bottom: sr.bottom},
+                card: {left: cr.left, top: cr.top, right: cr.right, bottom: cr.bottom, width: cr.width},
+                btns: [...c.querySelectorAll('button')].filter(vis).map(b => b.textContent),
+                dots: [...c.querySelectorAll('.tDots i')].map(d => d.classList.contains('on')),
+                mtab: hero ? hero.dataset.mtab : null, exitSel: ex ? ex.getAttribute('aria-selected') : null,
+                vw: document.getElementById('zxTour').getBoundingClientRect().width, vh: document.getElementById('zxTour').getBoundingClientRect().height,
+                navTop: document.getElementById('nav').getBoundingClientRect().top,
+                hdrBottom: document.querySelector('body > header').getBoundingClientRect().bottom,
+                inCard: c.contains(document.activeElement)};
+    }"""
+    COLORS = """() => {
+        const c = document.querySelector('#zxTour .tCard'), pr = document.createElement('span');
+        document.body.appendChild(pr);
+        const col = v => { pr.style.color = v; return getComputedStyle(pr).color; };
+        const out = {title: getComputedStyle(c.querySelector('.tTitle')).color, body: getComputedStyle(c.querySelector('.tBody')).color,
+                     tx: col('var(--tx)'), tx2: col('var(--tx2)'), card: getComputedStyle(c).backgroundColor, cardVar: (pr.style.color = 'var(--card)', pr.style.backgroundColor = 'var(--card)', getComputedStyle(pr).backgroundColor),
+                     next: getComputedStyle(c.querySelector('.tNext')).color, nextBg: getComputedStyle(c.querySelector('.tNext')).backgroundImage,
+                     outline: getComputedStyle(document.querySelector('#zxTour .tSpot')).outline,
+                     shadow: getComputedStyle(document.querySelector('#zxTour .tSpot')).boxShadow};
+        pr.remove(); return out;
+    }"""
+
+    def lum(rgb):
+        ch = [int(x) / 255 for x in re.findall(r"\d+", rgb)[:3]]
+        ch = [c / 12.92 if c <= 0.03928 else ((c + 0.055) / 1.055) ** 2.4 for c in ch]
+        return 0.2126 * ch[0] + 0.7152 * ch[1] + 0.0722 * ch[2]
+
+    def contrast(a, b_):
+        la, lb = sorted((lum(a), lum(b_)), reverse=True)
+        return (la + 0.05) / (lb + 0.05)
+
+    def near(spot, t, what):
+        for k, d in (("left", -8), ("top", -8), ("right", 8), ("bottom", 8)):
+            assert abs(spot[k] - (t[k] + d)) <= 12, "[first-visit tour] %s: spotlight %s %.1f is not within 12px of the target rect + 8px padding (%.1f)" % (what, k, spot[k], t[k] + d)
+
+    async def walk(pg, vw, scheme, tag, shot_steps=()):
+        """از قدمِ ۱ تا ۶ با Next؛ هر قدم را می‌سنجد."""
+        prev_tab = await pg.evaluate("document.querySelector('.row.hero[data-mtab]') && document.querySelector('.row.hero[data-mtab]').dataset.mtab")
+        for i in range(6):
+            st = await pg.evaluate(STEP)
+            what = "%s step %d" % (tag, i + 1)
+            assert st["count"] == "WELCOME TO ZAEXA · %d OF 6" % (i + 1), "[first-visit tour] %s counter: %r" % (what, st["count"])
+            assert st["title"] == TITLES[i] and st["body"] == BODIES[i], "[first-visit tour] %s text: %r" % (what, st["title"])
+            assert st["dots"] == [k == i for k in range(6)], "[first-visit tour] %s dots: %s" % (what, st["dots"])
+            assert st["btns"] == (["Skip", "Next"] if i == 0 else (["Back", "Skip", "Done"] if i == 5 else ["Back", "Skip", "Next"])), "[first-visit tour] %s buttons: %s" % (what, st["btns"])
+            assert st["popOn"] == (i in (3, 4)), "[first-visit tour] %s: #setPop open=%s but it must be open only on steps 4 and 5" % (what, st["popOn"])
+            t = await pg.evaluate(TARGET, i)
+            near(st["spot"], t, what)
+            c = st["card"]
+            assert c["left"] >= 0 and c["right"] <= st["vw"] + 0.5 and c["top"] >= 0 and c["bottom"] <= st["vh"] + 0.5, "[first-visit tour] %s: card leaves the viewport %s" % (what, c)
+            if vw > 720:
+                assert abs(c["width"] - 330) < 1, "[first-visit tour] %s: desktop card width %s" % (what, c["width"])
+                inter = not (c["right"] <= t["left"] or c["left"] >= t["right"] or c["bottom"] <= t["top"] or c["top"] >= t["bottom"])
+                assert not inter, "[first-visit tour] %s: the card covers its target %s %s" % (what, c, t)
+            else:
+                assert abs(c["left"] - 16) < 1 and abs(st["vw"] - c["right"] - 16) < 1, "[first-visit tour] %s: docked card must keep 16px gutters %s" % (what, c)
+                assert c["bottom"] <= st["navTop"] + 0.5, "[first-visit tour] %s: docked card sits on the bottom bar (%s vs %s)" % (what, c["bottom"], st["navTop"])
+                assert t["top"] >= (0 if i == 5 else st["hdrBottom"] - 1) and t["top"] < c["top"] - 16, "[first-visit tour] %s: the target must be scrolled into view above the card %s %s" % (what, t, c)
+                if t["bottom"] - t["top"] <= c["top"] - st["hdrBottom"] - 30:
+                    assert t["bottom"] <= c["top"] + 1, "[first-visit tour] %s: target hidden under the docked card %s %s" % (what, t, c)
+            if vw <= 940 and i == 1:
+                assert st["mtab"] == "exit" and st["exitSel"] == "true", "[first-visit tour] %s: the Exit check tab must be selected (%s)" % (what, st["mtab"])
+            elif vw <= 940:
+                assert st["mtab"] == prev_tab, "[first-visit tour] %s: the previous tab %r must be restored, got %r" % (what, prev_tab, st["mtab"])
+            assert st["inCard"], "[first-visit tour] %s: focus must sit inside the card" % what
+            if i in shot_steps:
+                await pg.screenshot(path=os.path.join(shots, "%s-step%d.png" % (tag, i + 1)))
+            if i < 5:
+                await pg.click("#zxTour .tNext")
+        return
+
+    # ---- 1) ۱۴۴۰ روشن: قدم‌ها، رنگ‌ها، اسکرین‌شات ----
+    for vw, vh, scheme, shot_steps in ((1440, 900, "light", (0, 1, 3, 5)), (390, 844, "dark", (1, 4)), (390, 844, "light", ()), (1440, 900, "dark", ())):
+        tag = "%d-%s" % (vw, scheme)
+        pg = await open_app("/app", vw, vh, scheme)
+        assert await stored(pg) in ("pending", None), "[first-visit tour] a first visit must not already be done"
+        st = await pg.evaluate(STEP)
+        assert st["count"].endswith("1 OF 6") and st["btns"] == ["Skip", "Next"], "[first-visit tour] first visit must show step 1 (%s)" % st
+        col = await pg.evaluate(COLORS)
+        assert col["title"] == col["tx"], "[first-visit tour] %s: the title must use var(--tx) (%s vs %s)" % (tag, col["title"], col["tx"])
+        assert col["body"] == col["tx2"], "[first-visit tour] %s: the body must use var(--tx2)" % tag
+        assert col["next"] == "rgb(255, 255, 255)" and "gradient" in col["nextBg"], "[first-visit tour] %s: Next must be white on var(--grad): %s %s" % (tag, col["next"], col["nextBg"])
+        assert contrast(col["title"], col["card"]) >= 7 and contrast(col["body"], col["card"]) >= 4.5, "[first-visit tour] %s: title/body not legible on the card %s" % (tag, col)
+        assert "rgba(10, 14, 30, 0.62) 0px 0px 0px 9999px" in col["shadow"] and ("2px" in col["outline"] and "solid" in col["outline"] and "197, 108, 245" in col["outline"] or "var(--g2)" in col["outline"]), "[first-visit tour] %s: spotlight style %s | %s" % (tag, col["shadow"], col["outline"])
+        await walk(pg, vw, scheme, tag, shot_steps)
+        # Back از قدمِ ۶ تا ۴ و دوباره جلو
+        await pg.click("#zxTour .tBack")
+        await pg.click("#zxTour .tBack")
+        st = await pg.evaluate(STEP)
+        assert st["count"].endswith("4 OF 6") and st["popOn"], "[first-visit tour] %s: Back twice from step 6 must land on step 4 with Settings open (%s)" % (tag, st["count"])
+        await pg.click("#zxTour .tBack")
+        st = await pg.evaluate(STEP)
+        assert st["count"].endswith("3 OF 6") and not st["popOn"], "[first-visit tour] %s: Back to step 3 must close Settings" % tag
+        for _ in range(3):
+            await pg.click("#zxTour .tNext")
+        st = await pg.evaluate(STEP)
+        assert st["count"].endswith("6 OF 6") and st["btns"] == ["Back", "Skip", "Done"], "[first-visit tour] %s: step 6 ends with Done" % tag
+        await pg.click("#zxTour .tNext")
+        assert await pg.evaluate("document.querySelectorAll('#zxTour').length") == 0, "[first-visit tour] %s: Done must remove the tour" % tag
+        assert await stored(pg) == "done", "[first-visit tour] %s: Done must write 'done'" % tag
+        assert not await pg.evaluate("document.getElementById('setPop').classList.contains('on')"), "[first-visit tour] %s: Settings closed after Done" % tag
+        await pg.reload()
+        await absent(pg, "a reload after Done (%s)" % tag)
+        await pg.close()
+    print("[first-visit tour] first visit shows step 1; Next walks 1 to 6 with the spotlight within 12px of each target (swap card, exit-check card, main Connect button, unlimited-approval row, Custom RPC block, header wallet chip) at 1440 and 390, light and dark; Settings open on steps 4 and 5 only; Back works; Done writes 'done' and a reload shows nothing; shots in %s" % shots)
+
+    # ---- 2) تبِ موبایل: قدمِ ۲ انتخاب، بعد برمی‌گرداند — از تبِ غیرپیش‌فرض ----
+    pg = await open_app("/app", 390, 844, "light", init="try{localStorage.setItem('zaexa.mtab.v1','pools')}catch(e){}")
+    await pg.evaluate("mtabParts = Object.create(null); mtabForced.clear(); mtabSelect('pools', false); mtabRefresh();")
+    await pg.click("#zxTour .tNext")
+    assert (await pg.evaluate(STEP))["mtab"] == "exit", "[first-visit tour] step 2 on a phone must select the Exit check tab"
+    await pg.click("#zxTour .tNext")
+    st = await pg.evaluate(STEP)
+    assert st["mtab"] == "pools" and st["exitSel"] == "false", "[first-visit tour] leaving step 2 must restore the previous tab (pools), got %s" % st["mtab"]
+    await pg.click("#zxTour .tBack")
+    assert (await pg.evaluate(STEP))["mtab"] == "exit"
+    await pg.click("#zxTour .tBack")
+    assert (await pg.evaluate(STEP))["mtab"] == "pools", "[first-visit tour] Back from step 2 must restore the previous tab"
+    await pg.click("#zxTour .tNext")
+    await pg.click("#zxTour .tSkip")
+    assert (await pg.evaluate("document.querySelector('.row.hero').dataset.mtab")) == "pools", "[first-visit tour] Skip on step 2 must restore the tab"
+    assert await stored(pg) == "done", "[first-visit tour] Skip must write 'done'"
+    assert await pg.evaluate("localStorage.getItem('zaexa.mtab.v1')") == "pools", "[first-visit tour] the tour must never persist its temporary tab choice"
+    await pg.close()
+
+    # ---- 3) Skip / Esc روی قدم‌های با تنظیماتِ باز ----
+    pg = await open_app("/app", 1440, 900, "light")
+    for _ in range(3):
+        await pg.click("#zxTour .tNext")
+    assert (await pg.evaluate(STEP))["popOn"]
+    await pg.click("#zxTour .tSkip")
+    assert await stored(pg) == "done" and not await pg.evaluate("document.getElementById('setPop').classList.contains('on')"), "[first-visit tour] Skip must write 'done' and close the Settings the tour opened"
+    await pg.reload(); await absent(pg, "a reload after Skip")
+    await pg.close()
+    pg = await open_app("/app", 1440, 900, "light")
+    for _ in range(4):
+        await pg.click("#zxTour .tNext")
+    assert (await pg.evaluate(STEP))["popOn"]
+    await pg.keyboard.press("Escape")
+    assert await pg.evaluate("document.querySelectorAll('#zxTour').length") == 0 and await stored(pg) == "done", "[first-visit tour] Esc must skip and write 'done'"
+    assert not await pg.evaluate("document.getElementById('setPop').classList.contains('on')"), "[first-visit tour] Esc must close the Settings the tour opened"
+    await pg.reload(); await absent(pg, "a reload after Esc")
+    await pg.close()
+    print("[first-visit tour] Skip and Esc write 'done', close the Settings the tour opened, restore the phone tab, and a reload shows nothing")
+
+    # ---- 4) فوکوس و کلیکِ بیرون از کارت ----
+    pg = await open_app("/app", 1440, 900, "light")
+    for _ in range(3):
+        await pg.click("#zxTour .tNext")
+    for k in range(9):
+        await pg.keyboard.press("Tab")
+        assert (await pg.evaluate(STEP))["inCard"], "[first-visit tour] Tab #%d left the card" % k
+    for k in range(5):
+        await pg.keyboard.press("Shift+Tab")
+        assert (await pg.evaluate(STEP))["inCard"], "[first-visit tour] Shift+Tab #%d left the card" % k
+    await pg.mouse.click(120, 520)
+    await pg.mouse.click(700, 300)
+    st = await pg.evaluate(STEP)
+    assert st["count"].endswith("4 OF 6") and st["popOn"], "[first-visit tour] a click outside the card must do nothing (step %s, Settings open=%s)" % (st["count"], st["popOn"])
+    assert await pg.evaluate("document.querySelectorAll('.ov.on').length") == 0, "[first-visit tour] a click outside the card must not open anything"
+    await pg.keyboard.press("Escape")
+    await pg.close()
+
+    # ---- 5) «Take the tour» ----
+    for vw, vh in ((1440, 900), (390, 844)):
+        pg = await open_app("/app", vw, vh, "light", init="try{localStorage.setItem('zaexa.tour.v1','done')}catch(e){}", wait_tour=False)
+        await absent(pg, "a visitor who already finished it", 1800)
+        await pg.click("#setBtn")
+        label = (await pg.inner_text("#setPop .tourBtn")).strip()
+        assert label == "Take the tour", "[first-visit tour] the Settings popover must end with a 'Take the tour' button, got %r" % label
+        last = await pg.evaluate("document.querySelector('#setPop').lastElementChild.id")
+        assert last == "tourBtn", "[first-visit tour] 'Take the tour' must be the last thing in Settings (%s)" % last
+        await pg.click("#tourBtn")
+        await pg.wait_for_selector("#zxTour .tCard", timeout=4000)
+        st = await pg.evaluate(STEP)
+        assert st["count"].endswith("1 OF 6") and not st["popOn"], "[first-visit tour] 'Take the tour' must restart at step 1 with Settings closed (%s)" % st["count"]
+        await pg.keyboard.press("Escape")
+        assert await stored(pg) == "done"
+        await pg.close()
+    print("[first-visit tour] 'Take the tour' at the bottom of Settings restarts the tour at 1440 and 390 even after it was finished")
+
+    # ---- 6) فوکوس‌اولیه و localStorageی که پرتاب می‌کند ----
+    THROW_GET = "Storage.prototype.getItem = function(){ throw new Error('blocked'); };"
+    THROW_SET = "(() => { const s = Storage.prototype.setItem; Storage.prototype.setItem = function(k){ if (k === 'zaexa.tour.v1') throw new Error('blocked'); return s.apply(this, arguments); }; })();"
+    for name, init in (("getItem throws", THROW_GET), ("setItem throws", THROW_SET)):
+        pg = await open_app("/app", 1440, 900, "light", init=init, wait_tour=False)
+        await absent(pg, "localStorage %s, so the tour would nag on every visit" % name, 3000)
+        await pg.close()
+    print("[first-visit tour] localStorage that throws (read or write) -> the tour never shows")
+
+    # ---- 7) جاهایی که نباید نشان دهد ----
+    for path, why in (("/t/0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913", "a /t/<token> page"),
+                      ("/app#flow", "the Flow view"), ("/app#folio", "the Portfolio view"), ("/app#stocks", "the Stocks view"),
+                      ("/app#swap?in=ETH&out=USDC&amt=1", "a shared swap link"), ("/app#swap?amt=2", "a shared amount")):
+        pg = await open_app(path, 1440, 900, "light", wait_tour=False)
+        await absent(pg, why)
+        assert await stored(pg) is None, "[first-visit tour] %s must not touch the stored flag (%r)" % (why, await stored(pg))
+        await pg.close()
+    print("[first-visit tour] no tour on /t/<token>, #flow, #folio, #stocks, or a shared swap link / amount")
+
+    # ---- 8) Solana: همان هدف‌ها با معادلِ سولانا ----
+    pg = await open_app("/app#swap?chain=solana", 1440, 900, "light")
+    for i in range(3):
+        st = await pg.evaluate(STEP)
+        t = await pg.evaluate(TARGET, i)
+        assert st["count"].startswith("WELCOME TO ZAEXA") and st["count"].endswith("%d OF 6" % (i + 1))
+        near(st["spot"], t, "solana step %d" % (i + 1))
+        assert t["right"] - t["left"] > 100, "[first-visit tour] solana step %d target is empty %s" % (i + 1, t)
+        await pg.click("#zxTour .tNext")
+    assert await pg.evaluate("activeChain") == "solana"
+    await pg.keyboard.press("Escape")
+    await pg.close()
+    print("[first-visit tour] on Solana the spotlight uses the Solana swap card, exit-check card and Connect button; nothing is switched")
+
+    # ---- 9) هیچ رویدادِ /ev و هیچ خطا ----
+    bad = [e for e in ev_seen if "tour" in e.lower()]
+    assert not bad, "[first-visit tour] the tour must not send any /ev event: %s" % bad
+    assert not errs, "[first-visit tour] console errors: %s" % errs[:5]
+    print("[first-visit tour] no /ev event mentions the tour (%d /ev requests seen), no console errors" % len(ev_seen))
+    TOUR_DEFAULT["on"] = prev_default
+    srv.shutdown()
+    await b.close()
 
 
 async def check_report_page(p, errors):
@@ -3761,12 +4515,12 @@ async def check_report_page(p, errors):
         const bx = e => { if (!e) return null; const x = e.getBoundingClientRect(); return [r5(x.left), r5(x.width)]; };
         const ff = e => e ? getComputedStyle(e).fontFamily : null;
         const nav = q('#nav'), items = {};
-        [...nav.children].forEach(e => { const el = e.tagName === 'DIV' ? e.querySelector('button') : e; items[el.getAttribute('title')] = bx(el); });
+        [...nav.children].forEach(e => { items[e.getAttribute('title')] = bx(e); });
         const labels = {};
         [...nav.querySelectorAll('span[data-t]')].forEach(e => { labels[e.getAttribute('data-t')] = ff(e); });
         return { logo: bx(q('.logo')), nav: bx(nav), items: items, setBtn: bx(q('#setBtn')), themeBtn: bx(q('#themeBtn')), connectBtn: bx(q('#connectBtn')),
                  connectTxt: q('#connectBtn').textContent.trim(),
-                 fonts: { nav: ff(nav), connectBtn: ff(q('#connectBtn')), labels: labels, navTtl: ff(q('#navMenu .navTtl')), setH4: ff(q('#setPop h4')),
+                 fonts: { nav: ff(nav), connectBtn: ff(q('#connectBtn')), labels: labels, setH4: ff(q('#setPop h4')),
                           slip: ff(q('#slipCustom')), walletPop: ff(q('#walletPop button')), walletOv: ff(q('#walletOv h3')) },
                  manrope: [...document.fonts].some(f => f.family.replace(/['"]/g, '') === 'Manrope' && f.status === 'loaded'),
                  ghosts: [...nav.querySelectorAll('span[data-t]')].map(e => getComputedStyle(e, '::after').content) }; }"""
@@ -3831,7 +4585,7 @@ async def check_report_page(p, errors):
         seq = []
         for step, js in (("swap", "() => document.querySelector('#nav button[data-view=\"swap\"]').click()"),
                          ("stocks", "() => document.querySelector('#nav button[data-view=\"stocks\"]').click()"),
-                         ("flow", "() => document.querySelector('#navMenu [data-view=\"flow\"]').click()")):
+                         ("flow", "() => { localStorage.setItem('zaexa.markets.v1', 'flow'); document.getElementById('navMarkets').click(); }")):
             await pg.evaluate(js)
             await pg.wait_for_timeout(500)
             on = await pg.evaluate("() => [...document.querySelectorAll('#nav .on, #nav #navMarkets[style]')].map(e => e.getAttribute('title') || e.id).join(',')")
@@ -3843,6 +4597,111 @@ async def check_report_page(p, errors):
             assert not d, "[nav width stable] %dx%d: switching the active tab %s -> %s moved the header: %s" % (vw, vh, seq[0][0], step, d)
     print("[nav width stable] 1906x900, 1280x800 and 390x844: switching the active tab Swap -> Stocks -> Flow on /app leaves the nav width and every item x (0.5 px) unchanged")
 
+    # ---- [markets switch] ۱۸ اکتبر — «Markets» تبِ ساده است؛ انتخاب بین Flow و New pairs سوییچِ بالای خودِ صفحه است.
+    # کلید zaexa.markets.v1 («flow» یا «pairs»؛ هر چیزِ دیگر = pairs) تصمیم می‌گیرد کلیکِ تب کجا برود. ----
+    MKT_KEY = "zaexa.markets.v1"
+    mkt_shots = "/tmp/claude-0/mkt_shots"
+    os.makedirs(mkt_shots, exist_ok=True)
+    MS_JS = """() => {
+        const sw = document.querySelector('.mktSwitch'); if (!sw) return null;
+        const probe = document.createElement('div'); probe.style.cssText = 'color:var(--tx2);background:var(--card);position:absolute;left:-9999px';
+        document.body.appendChild(probe); const pcs = getComputedStyle(probe), tx2 = pcs.color, card = pcs.backgroundColor; probe.remove();
+        const cs = getComputedStyle(sw), r = sw.getBoundingClientRect();
+        const links = [...sw.querySelectorAll('a')];
+        const host = sw.parentElement;
+        const title = document.querySelector('#view-flow .ttl, .pairs-main h1');
+        const vis = links.map(a => { const c = getComputedStyle(a); return {t: a.textContent, href: a.getAttribute('href'), mkt: a.dataset.mkt, on: a.classList.contains('on'), cur: a.getAttribute('aria-current'),
+            color: c.color, bg: c.backgroundColor, bgi: c.backgroundImage, pad: c.padding, fs: c.fontSize, fw: c.fontWeight, rad: c.borderRadius}; });
+        return {tag: sw.tagName, aria: sw.getAttribute('aria-label'), first: host.firstElementChild === sw, hostId: host.id || host.className,
+                disp: cs.display, pad: cs.padding, gap: cs.columnGap, rad: cs.borderRadius, bg: cs.backgroundColor, card: card, tx2: tx2, sh: cs.boxShadow, mb: cs.marginBottom,
+                links: vis, left: r.left, right: r.right, bottom: r.bottom, vw: innerWidth, sw: document.documentElement.scrollWidth,
+                titleTop: title ? title.getBoundingClientRect().top : null, stored: (() => { try { return localStorage.getItem('zaexa.markets.v1'); } catch (e) { return 'ERR'; } })()};
+    }"""
+    for ms_page, ms_path, ms_on in (("app-flow", "/app#flow", "flow"), ("pairs", "/pairs", "pairs")):
+        for ms_scheme in ("light", "dark"):
+            for ms_vw, ms_vh in ((1440, 900), (390, 844)):
+                pg = await hid_open(ms_vw, ms_vh, ms_path)
+                await pg.evaluate("t => { document.documentElement.dataset.theme = t; }", ms_scheme)
+                await pg.wait_for_timeout(300)
+                m = await pg.evaluate(MS_JS)
+                tag = "[markets switch] %s %s %dpx" % (ms_page, ms_scheme, ms_vw)
+                assert m, "%s: no .mktSwitch on the page" % tag
+                assert m["tag"] == "NAV" and m["aria"] == "Markets" and m["first"], "%s: the switch must be a <nav aria-label=Markets> and the first element of its page content (%s): %s" % (tag, m["hostId"], m)
+                assert [(l["t"], l["href"], l["mkt"]) for l in m["links"]] == [("Flow", "/app#flow", "flow"), ("New pairs", "/pairs", "pairs")], "%s: links: %s" % (tag, m["links"])
+                assert [l["on"] for l in m["links"]] == [ms_on == "flow", ms_on == "pairs"], "%s: wrong item carries .on: %s" % (tag, m["links"])
+                assert [l["cur"] for l in m["links"]] == [("page" if ms_on == "flow" else None), ("page" if ms_on == "pairs" else None)], "%s: aria-current: %s" % (tag, m["links"])
+                assert m["disp"] in ("inline-flex", "flex") and m["pad"] == "4px" and m["gap"] == "4px" and m["rad"] == "999px", "%s: container css: %s" % (tag, m)
+                assert m["bg"] == m["card"] and m["mb"] == "18px" and m["sh"] not in ("none", ""), "%s: container background must be var(--card), margin-bottom 18px, with a shadow: %s" % (tag, m)
+                for l in m["links"]:
+                    assert l["pad"] == "8px 18px" and l["fs"] == "14px" and l["fw"] == "560" and l["rad"] == "999px", "%s: link metrics: %s" % (tag, l)
+                    if l["on"]:
+                        assert l["color"] == "rgb(255, 255, 255)" and "gradient" in l["bgi"], "%s: the current item must be white on the CTA gradient: %s" % (tag, l)
+                    else:
+                        assert l["color"] == m["tx2"] and l["bgi"] == "none", "%s: an inactive item must use var(--tx2) and no fill: %s" % (tag, l)
+                assert m["titleTop"] is None or m["bottom"] <= m["titleTop"], "%s: the switch must sit above the page title (%s vs %s)" % (tag, m["bottom"], m["titleTop"])
+                assert m["stored"] == ms_on, "%s: visiting the page must store %r, got %r" % (tag, ms_on, m["stored"])
+                assert m["left"] >= 0 and m["right"] <= m["vw"] and m["sw"] <= m["vw"], "%s: the switch overflows the viewport / page scrolls horizontally: %s" % (tag, m)
+                await pg.screenshot(path=os.path.join(mkt_shots, "%s-%s-%d.png" % (ms_page, ms_scheme, ms_vw)))
+                await pg.close()
+    # کلیکِ تب: از اپ، /pairs و /report؛ انتخابِ ذخیره‌شده: flow، pairs، هیچ، و مقدارِ بی‌معنی
+    async def ms_click(path, stored):
+        pg = await hid_open(1440, 900, path)
+        await pg.evaluate("() => { window.__noReload = 1; }")
+        if stored == "none":
+            await pg.evaluate("k => localStorage.removeItem(k)", MKT_KEY)
+        else:
+            await pg.evaluate("([k, v]) => localStorage.setItem(k, v)", [MKT_KEY, stored])
+        await pg.click("#navMarkets")
+        await pg.wait_for_timeout(1200)
+        out = await pg.evaluate("() => ({path: location.pathname, hash: location.hash, noReload: window.__noReload === 1, flow: !!document.getElementById('view-flow') && document.getElementById('view-flow').classList.contains('on')})")
+        await pg.close()
+        return out
+    for ms_from in ("/app#swap", "/pairs", "/report"):
+        for ms_stored, ms_want in (("flow", "flow"), ("pairs", "pairs"), ("none", "pairs"), ("garbage", "pairs")):
+            o = await ms_click(ms_from, ms_stored)
+            tag = "[markets switch] Markets tab on %s with stored %s" % (ms_from, ms_stored)
+            if ms_want == "flow":
+                if ms_from == "/app#swap":
+                    assert o["path"] == "/app" and o["hash"] == "#flow" and o["flow"] and o["noReload"], "%s: must switch to the Flow view in place (no reload): %s" % (tag, o)
+                else:
+                    assert o["path"] == "/app" and o["hash"] == "#flow", "%s: must navigate to /app#flow: %s" % (tag, o)
+            else:
+                if ms_from == "/pairs":
+                    assert o["path"] == "/pairs" and o["noReload"], "%s: on /pairs it must do nothing: %s" % (tag, o)
+                else:
+                    assert o["path"] == "/pairs", "%s: must open /pairs: %s" % (tag, o)
+    # کلیک روی آیتم‌های سوییچ: مقدار پیش از ناوبری نوشته می‌شود؛ Flow در اپ درجا عوض می‌کند
+    pg = await hid_open(1440, 900, "/app#flow")
+    await pg.evaluate("([k]) => { window.__noReload = 1; localStorage.setItem(k, 'pairs'); }", [MKT_KEY])
+    await pg.click('.mktSwitch a[data-mkt="flow"]')
+    await pg.wait_for_timeout(500)
+    o = await pg.evaluate("([k]) => ({v: localStorage.getItem(k), nr: window.__noReload === 1, h: location.hash, flow: document.getElementById('view-flow').classList.contains('on')})", [MKT_KEY])
+    assert o == {"v": "flow", "nr": True, "h": "#flow", "flow": True}, "[markets switch] the Flow link in the app must store flow and stay in place (no reload): %s" % o
+    await pg.evaluate("""() => { const a = document.querySelector('.mktSwitch a[data-mkt="pairs"]');
+        a.addEventListener('click', e => { window.__seen = localStorage.getItem('zaexa.markets.v1'); e.preventDefault(); }); }""")
+    await pg.click('.mktSwitch a[data-mkt="pairs"]')
+    assert await pg.evaluate("() => window.__seen") == "pairs", "[markets switch] the New pairs link must write 'pairs' before navigating"
+    await pg.close()
+    pg = await hid_open(1440, 900, "/pairs")
+    await pg.evaluate("""() => { const a = document.querySelector('.mktSwitch a[data-mkt="flow"]');
+        a.addEventListener('click', e => { window.__seen = localStorage.getItem('zaexa.markets.v1'); e.preventDefault(); }); }""")
+    await pg.click('.mktSwitch a[data-mkt="flow"]')
+    assert await pg.evaluate("() => window.__seen") == "flow", "[markets switch] the Flow link on /pairs must write 'flow' before navigating"
+    await pg.close()
+    # هیچ #navMenu / .navChev: در DOMِ هر سه صفحه و در متنِ سه فایل
+    for ms_path in ("/app#flow", "/pairs", "/report"):
+        pg = await hid_open(1440, 900, ms_path)
+        n = await pg.evaluate("() => document.querySelectorAll('#navMenu, .navChev, .navMenuWrap, [aria-haspopup=\"menu\"]#navMarkets').length")
+        await pg.close()
+        assert n == 0, "[markets switch] %s still has a navMenu/navChev/navMenuWrap in the DOM" % ms_path
+    for ms_file in (os.path.join(HERE, "..", "index.html"), os.path.join(HERE, "..", "pairs.html"), os.path.join(HERE, "..", "..", "worker", "report_page.js")):
+        ms_src = open(ms_file, encoding="utf-8").read()
+        for ms_bad in ("navMenu", "navChev", "closeNavMenu"):
+            assert ms_bad not in ms_src, "[markets switch] %s still contains %r" % (os.path.basename(ms_file), ms_bad)
+    print("[markets switch] /app Flow view and /pairs carry the same segmented switch as the first element (light + dark, 1440 + 390: current item white on the gradient, others var(--tx2), no overflow, above the title), "
+          "visiting stores flow/pairs, the Markets tab opens Flow for stored flow and /pairs for pairs/none/garbage (in place on /app, navigation from /pairs and /report, nothing on /pairs), switch clicks store before navigating and Flow stays in place, "
+          "no navMenu/navChev in the DOM or the source of the three files; screenshots in %s" % mkt_shots)
+
     ROWS_JS = "() => document.querySelectorAll('#tb tr').length"
     CHIP_JS = """() => Object.fromEntries([...document.querySelectorAll('#filters .chip')].map(c =>
         [c.dataset.g + ':' + c.dataset.k, +c.querySelector('span').textContent]))"""
@@ -3851,13 +4710,13 @@ async def check_report_page(p, errors):
     HDRDOM_JS = """() => { const nav = document.getElementById('nav'), cs = getComputedStyle(nav), hd = document.querySelector('header');
         const t = e => (e.getAttribute('title') || (e.querySelector('button') || {getAttribute: () => ''}).getAttribute('title'));
         return { nav: cs.display, pos: cs.position, hdPos: getComputedStyle(hd).position, hdCls: hd.className, hdZ: getComputedStyle(hd).zIndex,
-                 titles: [...nav.children].map(e => e.querySelector('button') ? e.querySelector('button').getAttribute('title') : e.getAttribute('title')),
+                 titles: [...nav.children].map(e => e.getAttribute('title')),
                  labels: [...nav.querySelectorAll(':scope > a, :scope button')].map(e => e.textContent.trim()),
                  spans: [...nav.querySelectorAll(':scope > a > span')].map(e => getComputedStyle(e).display),
                  on: [...nav.querySelectorAll(':scope > a.on')].map(e => [e.textContent.trim(), e.getAttribute('aria-current'), e.getAttribute('href')]),
                  gone: ['.landing-header', '.desktop-nav', '#menuToggle', '.mobile-menu', '#mobileMenu', '#themeToggle', '.header-cta', '.navSoon', '.soonPill'].filter(q => document.querySelector(q)),
-                 ids: ['setBtn', 'setPop', 'themeBtn', 'connectBtn', 'walletMenu', 'walletPop', 'navMarkets', 'navMenu', 'walletOv'].filter(i => !document.getElementById(i)),
-                 menu: [...document.querySelectorAll('#navMenu a')].map(a => [a.getAttribute('href'), a.classList.contains('on'), a.getAttribute('aria-current')]),
+                 ids: ['setBtn', 'setPop', 'themeBtn', 'connectBtn', 'walletMenu', 'walletPop', 'navMarkets', 'walletOv'].filter(i => !document.getElementById(i)),
+                 menu: document.querySelectorAll('#navMenu, .navChev, .navMenuWrap').length,
                  stocks: (document.querySelector('#nav a[href="/app#stocks"]') || {}).tagName || null }; }"""
     pg = await open_report(1440, 900)
     d = await pg.evaluate(HDRDOM_JS)
@@ -3867,7 +4726,7 @@ async def check_report_page(p, errors):
     assert d["titles"] == ["Swap", "Markets", "Stocks", "Exit Report"], "[report header desktop] tab titles: %s" % d["titles"]
     assert d["on"] == [["Exit Report", "page", "/report"]], "[report header desktop] only Exit Report is active (aria-current=page): %s" % d["on"]
     assert d["stocks"] == "A", "[report header desktop] Stocks is a real link to /app#stocks (no Soon span): %s" % d["stocks"]
-    assert d["menu"] == [["/app#flow", False, None], ["/pairs", False, None]], "[report header desktop] the Markets menu has Flow and New pairs, neither active: %s" % d["menu"]
+    assert d["menu"] == 0, "[report header desktop] Markets is a plain tab now: no #navMenu, .navChev or .navMenuWrap in the DOM (%s found)" % d["menu"]
     assert not d["gone"], "[report header desktop] the landing header leftovers must be gone from the DOM: %s" % d["gone"]
     assert not d["ids"], "[report header desktop] app-header ids missing: %s" % d["ids"]
     await pg.evaluate("() => window.scrollTo(0, 500)")
@@ -3880,7 +4739,7 @@ async def check_report_page(p, errors):
     d = await pg.evaluate(HDRDOM_JS)
     assert d["nav"] == "flex" and d["pos"] != "fixed" and set(d["spans"]) == {"none"}, "[report header desktop] at 800 the bar stays in the header with icons only: %s" % d
     await pg.close()
-    print("[report header desktop] 1440: sticky app header (z 30, .scrolled glass on scroll, no filter/transform on the element), tab bar in the header in the order Swap, Markets, Stocks, Exit Report with only Exit Report active, Stocks a real link, Markets menu Flow + New pairs; 800: icons only; no landing-header/hamburger/mobile-menu/Soon left")
+    print("[report header desktop] 1440: sticky app header (z 30, .scrolled glass on scroll, no filter/transform on the element), tab bar in the header in the order Swap, Markets, Stocks, Exit Report with only Exit Report active, Stocks a real link, Markets a plain tab (no menu/chevron); 800: icons only; no landing-header/hamburger/mobile-menu/Soon left")
 
     # ---- [report page render] روشن و تیره، دو اندازه ----
     for scheme in ("light", "dark"):
@@ -4102,7 +4961,7 @@ async def check_report_page(p, errors):
             if vw <= 390:
                 assert all(s and s[0] <= s[1] + 1 and s[2] == "block" for s in m["sp"]), "[report page tabs] %s at %d a label is clipped or hidden: %s" % (path, vw, m["sp"])
     print("[report page tabs] the app and /pairs tab bars both carry 4 items (Swap, Markets, Stocks, Exit Report → /report); at 360, 390 and 1440 they stay inside the viewport, do not overlap, show every label unclipped on phones, and add no page scroll")
-    # ---- [report header] هدرِ اپ روی موبایل: نوارِ تبِ شناورِ پایین، چهار آیتم، منوی Markets بالای نوار ----
+    # ---- [report header] هدرِ اپ روی موبایل: نوارِ تبِ شناورِ پایین، چهار آیتم؛ Markets از ۱۸ اکتبر تبِ ساده است (بی‌منو، بی‌شورون) ----
     NAVJS = """() => { const nav = document.getElementById('nav'), cs = getComputedStyle(nav), r = nav.getBoundingClientRect();
         const items = [...nav.children];
         const mk = document.getElementById('navMarkets'), ch = mk && mk.querySelector('.navChev'), lab = mk && mk.querySelector(':scope > span');
@@ -4126,16 +4985,9 @@ async def check_report_page(p, errors):
             assert m["rep"] == [True, "page"], "%s: Exit Report must carry class on and aria-current=page: %s" % (tag, m["rep"])
             assert not m["gone"], "%s: no hamburger, mobile menu, landing header or Soon span may remain in the DOM: %s" % (tag, m["gone"])
             assert (m["hdZ"], m["navZ"], m["popZ"]) == ("30", "60", "50"), "%s: z-index header/phone bar/popover must be 30/60/50: %s" % (tag, m)
-            assert m["chDisp"] != "none" and 9 <= m["chW"] <= 11 and m["chDy"] <= 1.5, "%s: the Markets chevron must be visible, 9-11px wide and centred on the label: %s" % (tag, m)
-            await pg.click("#navMarkets")
-            o = await pg.evaluate("""() => { const mn = document.getElementById('navMenu'), r = mn.getBoundingClientRect(), n = document.getElementById('nav').getBoundingClientRect();
-                return { disp: getComputedStyle(mn).display, bottom: r.bottom, navTop: n.top, exp: document.getElementById('navMarkets').getAttribute('aria-expanded'),
-                         hrefs: [...mn.querySelectorAll('a')].map(a => a.getAttribute('href')) }; }""")
-            assert o["disp"] != "none" and o["exp"] == "true" and o["bottom"] <= o["navTop"], "%s: clicking Markets must open the menu above the bar: %s" % (tag, o)
-            assert o["hrefs"] == ["/app#flow", "/pairs"], "%s: the Markets menu must link /app#flow and /pairs: %s" % (tag, o["hrefs"])
-            await pg.keyboard.press("Escape")
-            c = await pg.evaluate("() => [getComputedStyle(document.getElementById('navMenu')).display, document.getElementById('navMarkets').getAttribute('aria-expanded')]")
-            assert c == ["none", "false"], "%s: Escape must close the Markets menu: %s" % (tag, c)
+            assert m["chDisp"] is None and m["chW"] == 0, "%s: Markets has no chevron any more: %s" % (tag, m)
+            o = await pg.evaluate("""() => ({ menu: !!document.getElementById('navMenu'), hp: document.getElementById('navMarkets').getAttribute('aria-haspopup'), exp: document.getElementById('navMarkets').getAttribute('aria-expanded') })""")
+            assert o == {"menu": False, "hp": None, "exp": None}, "%s: Markets must be a plain tab (no #navMenu, no aria-haspopup/expanded): %s" % (tag, o)
             await pg.evaluate("() => window.scrollTo(0, document.documentElement.scrollHeight)")
             await pg.wait_for_timeout(250)
             f = await pg.evaluate("""() => { const foot = document.querySelector('footer'); if (!foot) return null;
@@ -4145,7 +4997,7 @@ async def check_report_page(p, errors):
                 return { last: last, navTop: document.getElementById('nav').getBoundingClientRect().top }; }""")
             assert f and f["last"] is not None and f["last"] <= f["navTop"], "%s: after scrolling to the bottom the footer's last line must clear the bar: %s" % (tag, f)
             await pg.close()
-    print("[report header] 390x844 and 360x780, light and dark: fixed bar within 20px of the bottom, Swap/Markets/Stocks/Exit Report with Exit Report active, no hamburger/mobile-menu/landing header in the DOM, z-index 30/60/50, Markets menu (/app#flow, /pairs) opens above the bar and Escape closes it, chevron 9-11px and centred, footer clears the bar")
+    print("[report header] 390x844 and 360x780, light and dark: fixed bar within 20px of the bottom, Swap/Markets/Stocks/Exit Report with Exit Report active, no hamburger/mobile-menu/landing header in the DOM, z-index 30/60/50, Markets is a plain tab (no menu, no chevron, no aria-haspopup), footer clears the bar")
 
     # ---- [report header parity] همان هدرِ /pairs، عنصربه‌عنصر ----
     async def open_pairs_pg(vw, vh, scheme):
@@ -4168,15 +5020,15 @@ async def check_report_page(p, errors):
         await pg.goto(origin + "/pairs")
         await pg.wait_for_timeout(700)
         return pg
-    SIGSEL = ["header", ".logo", ".logo .glyph", ".logo .mark", ".logo .wordmark", ".navPad", "#nav", "#navMarkets", "#navMenu", ".hdrRight", "#setBtn", "#setPop",
+    SIGSEL = ["header", ".logo", ".logo .glyph", ".logo .mark", ".logo .wordmark", ".navPad", "#nav", "#navMarkets", ".hdrRight", "#setBtn", "#setPop",
               "#themeBtn", "#walletMenu", "#connectBtn", "#walletPop", "#walletAddr", "#folioMenuBtn", "#copyAddrBtn", "#disconnectBtn", "#walletOv"]
     PARJS = """(sel) => { const q = s => document.querySelector(s);
         const rc = e => { const x = e.getBoundingClientRect(); return [x.left, x.top, x.right, x.bottom]; };
         const sig = sel.map(s => { const e = q(s); return e ? e.tagName + '#' + e.id + '.' + [...e.classList].filter(c => c !== 'on' && c !== 'scrolled').sort().join('.') : null; });
         const nav = q('#nav'), kids = [...nav.children];
-        const keyOf = e => (e.tagName === 'DIV' ? e.querySelector('button') : e).getAttribute('title');
+        const keyOf = e => e.getAttribute('title');
         const items = {};
-        kids.forEach(e => { const el = e.tagName === 'DIV' ? e.querySelector('button') : e; const cs = getComputedStyle(el);
+        kids.forEach(e => { const el = e; const cs = getComputedStyle(el);
             items[keyOf(e)] = { rect: rc(e), tag: el.tagName, cls: el.className.replace(/\\bon\\b/, '').trim(), on: el.classList.contains('on'), bg: cs.backgroundColor, sh: cs.boxShadow, color: cs.color, fw: cs.fontWeight, rad: cs.borderRadius }; });
         const sty = s => { const cs = getComputedStyle(q(s)); return [cs.backgroundColor, cs.boxShadow, cs.borderTopColor, cs.borderTopWidth, cs.color, cs.height, cs.width, cs.borderRadius]; };
         const ncs = getComputedStyle(nav), hd = q('header'), hcs = getComputedStyle(hd);
@@ -4187,7 +5039,7 @@ async def check_report_page(p, errors):
                  setBtn: [rc(q('#setBtn')), sty('#setBtn')], themeBtn: [rc(q('#themeBtn')), sty('#themeBtn')], connectBtn: [rc(q('#connectBtn')), sty('#connectBtn')],
                  act: [acs.backgroundColor, acs.boxShadow, acs.color, acs.fontWeight],
                  setPop: [...q('#setPop').querySelectorAll('[id]')].map(e => e.id), walletPop: [...q('#walletPop').querySelectorAll('[id]')].map(e => e.id),
-                 menu: [...q('#navMenu').querySelectorAll('a')].map(a => [a.getAttribute('href'), a.querySelector('.navTtl').textContent, a.querySelector('.navSub').textContent]) }; }"""
+                 menu: document.querySelectorAll('#navMenu, .navChev, .navMenuWrap').length }; }"""
     close = lambda x, y, t=1.0: all(abs(u - v) <= t for u, v in zip(x, y))
     for vw, vh in ((1440, 900), (390, 844)):
         for scheme in ("light", "dark"):
@@ -4205,7 +5057,7 @@ async def check_report_page(p, errors):
             assert a["sig"] == q["sig"], "%s: header element set (tag#id.classes) differs: /report %s vs /pairs %s" % (tag, a["sig"], q["sig"])
             assert a["order"] == ["Swap", "Markets", "Stocks", "Exit Report"], "%s: /report tab order: %s" % (tag, a["order"])
             assert a["setPop"] == q["setPop"] and a["walletPop"] == q["walletPop"], "%s: popover control ids differ: %s %s vs %s %s" % (tag, a["setPop"], a["walletPop"], q["setPop"], q["walletPop"])
-            assert a["menu"] == q["menu"], "%s: Markets menu rows differ: %s vs %s" % (tag, a["menu"], q["menu"])
+            assert a["menu"] == 0 and q["menu"] == 0, "%s: Markets is a plain tab: no #navMenu/.navChev/.navMenuWrap on /report (%s) or /pairs (%s)" % (tag, a["menu"], q["menu"])
             assert abs(a["hdH"] - q["hdH"]) <= 1 and a["hd"] == q["hd"], "%s: header height/position/padding/background differ: %s %s vs %s %s" % (tag, a["hdH"], a["hd"], q["hdH"], q["hd"])
             assert all(close(a[k], q[k]) for k in ("logo", "mark", "word")), "%s: logo rects differ: %s vs %s" % (tag, [a[k] for k in ("logo", "mark", "word")], [q[k] for k in ("logo", "mark", "word")])
             for k in ("setBtn", "themeBtn", "connectBtn"):
@@ -4378,7 +5230,10 @@ async def check_report_page(p, errors):
                 assert x[0] == y[0], "%s: element order differs: %s vs %s" % (tag, x[0], y[0])
                 assert all(abs(u - v) <= 1 for u, v in zip(x[1], y[1])), "%s: %s rect differs: main %s vs branch %s" % (tag, x[0], x[1], y[1])
                 assert x[2:] == y[2:], "%s: %s computed colours/style differ: main %s vs branch %s" % (tag, x[0], x[2:], y[2:])
-            assert o_["foot"][1:] == n_["foot"][1:] and abs(o_["foot"][0] - n_["foot"][0]) <= 1 and o_["bodyBg"] == n_["bodyBg"], "%s: footer/body differ: %s vs %s" % (tag, o_["foot"], n_["foot"])
+            # ۱۸ اکتبر [mobile compact]: فقط ارتفاعِ فوتر روی ۳۹۰px عمداً کوتاه‌تر شد (ستون‌های لینک در <details class="fMore">
+            # جمع شدند)؛ رنگ‌ها و بدنه عیناً همان‌اند و روی ۱۴۴۰ ارتفاع هم همان است.
+            foot_h_ok = (n_["foot"][0] < o_["foot"][0] - 100) if vw == 390 else abs(o_["foot"][0] - n_["foot"][0]) <= 1
+            assert o_["foot"][1:] == n_["foot"][1:] and foot_h_ok and o_["bodyBg"] == n_["bodyBg"], "%s: footer/body differ: %s vs %s" % (tag, o_["foot"], n_["foot"])
             assert n_["sw"] <= n_["iw"], "%s: the branch page scrolls horizontally: %s" % (tag, n_)
             n_checked += len(n_["els"])
     print("[report body unchanged] 1440x900 and 390x844, light and dark, animations off: every element under <main> (%d element checks) has the same rect (relative to <main>, within 1px) and the same computed colours/borders/shadows/fonts as before the header change (6944652); footer and body background unchanged" % n_checked)
@@ -7443,6 +8298,8 @@ async def main():
         await check_logo_parity(p, errors)
         await check_token_page_hash_links(p, errors)
         await check_live_strip(p, errors)
+        await check_mobile_compact(p, errors)
+        await check_first_visit_tour(p, errors)
         await check_report_page(p, errors)
         await check_report_picker(p, errors)
         await check_stocks(p, errors)
@@ -9887,6 +10744,84 @@ async def main():
         assert slip_v1["restored"]["ok"] is True, \
             "restoring the stub's allowedRouter must restore aerodrome-cl-v1"
 
+        # ---- 2c-septies. [uniswap v2 venue] — Uniswap V2 on Base is a V2 candidate:
+        # exact EIP-55 addresses, never core, and gate 3 keeps it out of routing
+        # until the executor allow-lists the router. ----
+        UV2_ROUTER = "0x4752ba5DBc23f44D87826276BF6Fd6b1C372aD24"
+        UV2_FACTORY = "0x8909Dc15e40173Ff4699343b6eB8132c65e18eC6"
+        uv2_static = await pg.evaluate("""() => {
+            const d = DEXES.find(x => x.id === "uniswap-v2");
+            return {row: d ? {name: d.name, cls: d.cls, kind: d.kind, core: !!d.core,
+                              router: d.router, factory: d.factory} : null,
+                    v2kind: KIND.V2,
+                    clsUsers: DEXES.filter(x => d && x.cls === d.cls).map(x => x.id),
+                    gtMap: GT_DEX_TO_DEX["uniswap-v2-base"]};
+        }""")
+        uv2 = uv2_static["row"]
+        assert uv2, "DEXES has no uniswap-v2 row — 36 of 112 new Base pairs get no route"
+        assert uv2["router"] == UV2_ROUTER and uv2["factory"] == UV2_FACTORY, \
+            "uniswap-v2 addresses must be the exact EIP-55 forms: %s" % uv2
+        assert uv2["kind"] == uv2_static["v2kind"] and uv2["name"] == "Uniswap V2", uv2
+        assert not uv2["core"], "uniswap-v2 is a candidate, not core: it was never swapped with real money"
+        assert uv2_static["clsUsers"] == ["uniswap-v2"], \
+            "the dex colour class %r is shared: %s" % (uv2["cls"], uv2_static["clsUsers"])
+        assert uv2_static["gtMap"] == "uniswap-v2", \
+            "GeckoTerminal id uniswap-v2-base must map to the uniswap-v2 row"
+        idx_src = open(os.path.join(HERE, "..", "index.html"), encoding="utf-8").read()
+        assert re.search(r"\.vdot\.%s\{background:#[0-9a-fA-F]{6}\}" % uv2["cls"], idx_src), \
+            "the .vdot.%s colour rule is missing" % uv2["cls"]
+        deploy_sh = open(os.path.join(HERE, "..", "..", "contracts", "script", "deploy.sh"),
+                         encoding="utf-8").read()
+        dep_block = re.search(r'ROUTERS="(.*?)"', deploy_sh, re.S).group(1)
+        dep_routers = re.findall(r"0x[0-9a-fA-F]{40}", dep_block)
+        assert UV2_ROUTER in dep_routers, \
+            "deploy.sh does not allow-list the Uniswap V2 router (byte for byte): %s" % dep_routers
+        app_all = await pg.evaluate("() => DEXES.map(d => d.router)")
+        assert sorted(dep_routers) == sorted(app_all), \
+            "deploy.sh ROUTERS and the app's DEXES routers differ: %s vs %s" % (dep_routers, app_all)
+
+        uv2_dyn = await pg.evaluate("""async () => {
+            const run = async () => {
+                await verifyDexes();
+                const st = Object.assign({}, dexStatus["uniswap-v2"]);
+                const cov = document.getElementById("coverage").innerText;
+                const enabled = enabledDexes().map(d => d.id);
+                const stats = newStats();
+                const tIn = tokenBySymbol("WETH"), tOut = tokenBySymbol("USDC");
+                const {routes, direct} = await findRoutes(tIn, tOut, 10n ** 18n, stats);
+                return {st, cov, enabled,
+                        directIds: direct.map(r => r.venue.dex.id),
+                        directV2: direct.filter(r => r.venue.dex.id === "uniswap-v2")
+                                        .map(r => r.out !== null && r.out > 0n),
+                        routeIds: routes.map(r => r.hops.map(h => h.venue.dex.id))};
+            };
+            const before = await run();
+            window.__STUB_ROUTER_ALLOWED__ = {"0x4752ba5dbc23f44d87826276bf6fd6b1c372ad24": true};
+            const after = await run();
+            delete window.__STUB_ROUTER_ALLOWED__;
+            const restored = await run();
+            return {before, after, restored};
+        }""")
+        ub, ua, ur = uv2_dyn["before"], uv2_dyn["after"], uv2_dyn["restored"]
+        print("[uniswap v2 venue] %s / %s / kind V2 / not core | executor not allow-listing -> %r, "
+              "legs=%s | allow-listed -> ok=%s, quoted=%s"
+              % (UV2_ROUTER, UV2_FACTORY, ub["st"]["reason"],
+                 ub["directIds"].count("uniswap-v2"), ua["st"]["ok"], ua["directV2"]))
+        assert ub["st"]["ok"] is False and ub["st"]["reason"] == "not allow-listed on the executor contract yet", ub["st"]
+        assert "Uniswap V2" in ub["cov"] and "not allow-listed" in ub["cov"], \
+            "the coverage list must show Uniswap V2 with its reason: " + ub["cov"]
+        assert "uniswap-v2" not in ub["enabled"], "a not-allow-listed venue must not be enabled"
+        assert "uniswap-v2" not in ub["directIds"] and \
+            not any("uniswap-v2" in r for r in ub["routeIds"]), \
+            "a not-allow-listed venue must never be quoted or used in a route"
+        assert ua["st"]["ok"] is True and ua["st"]["reason"] == "verified", ua["st"]
+        assert "uniswap-v2" in ua["enabled"] and ua["directV2"] == [True], \
+            "once allow-listed, Uniswap V2 must quote like the other V2 venues: %s" % ua["directV2"]
+        assert any("uniswap-v2" in r for r in ua["routeIds"]), \
+            "once allow-listed, Uniswap V2 must appear as a route: %s" % ua["routeIds"]
+        assert ur["st"]["ok"] is False and "uniswap-v2" not in ur["directIds"], \
+            "removing the allow-list entry must take the venue out of routing again"
+
         # ---- 2c-bis. token logos load, initials survive failure ----
         await pg.wait_for_timeout(800)
         logos = await pg.eval_on_selector_all("#tokInAv img, #tokOutAv img", "e => e.length")
@@ -10628,38 +11563,41 @@ async def main():
         navpairspg = await b.new_page(viewport={"width": 1280, "height": 900})
         await navpairspg.goto(URL)
         await navpairspg.wait_for_timeout(700)
-        # ۶ اکتبر: «New pairs» حالا ردیفِ منوی Markets است؛ برای دیدنش اول منو باز می‌شود.
-        await navpairspg.click("#navMarkets")
+        # ۱۸ اکتبر: «New pairs» دیگر در نوار یا منو نیست؛ لینکش سوییچِ بالای نمای Flow است. اینجا فقط می‌سنجیم که
+        # هیچ لینکِ /pairs در #nav نمانده و تبِ Markets (بدونِ data-view) دیده می‌شود و نوار وسط می‌ماند.
         info = await navpairspg.evaluate("""() => {
             const nav = document.getElementById("nav");
             const links = [...nav.querySelectorAll('a[href="/pairs"]')];
-            const link = links[0];
-            const r = link ? link.getBoundingClientRect() : null;
+            const mk = document.getElementById("navMarkets");
+            const r = mk.getBoundingClientRect();
             const h = nav.getBoundingClientRect();
             const hdr = document.querySelector("header").getBoundingClientRect();
             return {
                 count: links.length,
-                text: link ? link.querySelector(".navTtl").textContent.trim() : null,
-                hasDataView: link ? link.hasAttribute("data-view") : null,
-                visible: r ? (r.width > 0 && r.height > 0) : false,
+                text: mk.querySelector("span").textContent.trim(),
+                hasDataView: mk.hasAttribute("data-view"),
+                visible: r.width > 0 && r.height > 0,
                 navCenter: Math.round(h.left + h.width / 2),
                 hdrCenter: Math.round(hdr.left + hdr.width / 2),
+                sw: [...document.querySelectorAll('.view.on a[href="/pairs"], #view-flow a[href="/pairs"]')].map(a => a.textContent.trim()),
             };
         }""")
-        print("[pairs nav] link count=%s text=%r hasDataView=%s visible=%s navCenter=%s "
-              "hdrCenter=%s (1280px)"
+        print("[pairs nav] navLinks=%s markets=%r hasDataView=%s visible=%s navCenter=%s "
+              "hdrCenter=%s switchLinks=%s (1280px)"
               % (info["count"], info["text"], info["hasDataView"], info["visible"],
-                 info["navCenter"], info["hdrCenter"]))
-        assert info["count"] == 1, (
-            "expected exactly one a[href=\"/pairs\"] inside #nav, found %s" % info["count"])
-        assert info["text"] == "New pairs", (
-            "the New pairs nav link's text is wrong: %r" % info["text"])
+                 info["navCenter"], info["hdrCenter"], info["sw"]))
+        assert info["count"] == 0, (
+            "#nav must hold no a[href=\"/pairs\"] any more (New pairs lives in the page switch), found %s" % info["count"])
+        assert info["text"] == "Markets", (
+            "the Markets tab's label is wrong: %r" % info["text"])
+        assert info["sw"] == ["New pairs"], (
+            "the Flow view's switch must hold exactly one New pairs link: %r" % info["sw"])
         assert info["hasDataView"] is False, (
-            "the New pairs nav link must never carry data-view — it navigates to a separate "
-            "page, not an in-app view, and must stay invisible to setView/[data-view]")
-        assert info["visible"], "the New pairs nav link is not visible at 1280px"
+            "the Markets tab must never carry data-view — it picks Flow or /pairs from the stored choice, "
+            "and must stay invisible to setView/[data-view]")
+        assert info["visible"], "the Markets tab is not visible at 1280px"
         assert abs(info["navCenter"] - info["hdrCenter"]) <= 2, (
-            "adding the New pairs link knocked the nav off-center at 1280px: nav=%s header=%s"
+            "the nav is off-center at 1280px: nav=%s header=%s"
             % (info["navCenter"], info["hdrCenter"]))
 
         await navpairspg.keyboard.press("Escape")
@@ -10708,39 +11646,32 @@ async def main():
             "the Exit Report link's label visibility (%s) does not match the buttons' (%s) at "
             "800px" % (band["linkSpanDisplay"], band["btnSpanDisplay"]))
 
-        # کلیک روی سه دکمه هنوز نما را عوض می‌کند (کاوشگرهای قدیمی جای دیگر
-        # همین را می‌سنجند)؛ لینک هرگز کلاسِ .on را نمی‌گیرد چون setView فقط
-        # [data-view] را لمس می‌کند.
+        # کلیک روی دکمه‌ها هنوز نما را عوض می‌کند (کاوشگرهای قدیمی جای دیگر همین را می‌سنجند).
+        # ۱۸ اکتبر (تغییر عمدی): لینکِ /pairs در نوار نیست؛ به‌جایش می‌سنجیم که تبِ Markets فقط در نمای flow «روشن» است
+        # و هیچ <a href="/pairs"> هرگز به #nav برنمی‌گردد.
         await navpairspg.set_viewport_size({"width": 1280, "height": 900})
         await navpairspg.wait_for_timeout(200)
         clicks = {}
-        for v in ("swap", "folio", "flow", "swap"):
+        for i, v in enumerate(("swap", "folio", "flow", "swap")):
             await go_view(navpairspg, v)
             await navpairspg.wait_for_timeout(300)
-            clicks[v] = await navpairspg.evaluate(
-                """() => document.querySelector('#nav a[href="/pairs"]').className""")
-        print("[pairs nav] link class across view switches: %s" % clicks)
-        for v, cls in clicks.items():
-            assert "on" not in cls.split(), (
-                "the New pairs nav link picked up the .on class from setView after switching "
-                "to %r: %r" % (v, cls))
+            clicks["%s#%d" % (v, i)] = await navpairspg.evaluate(
+                """() => [document.getElementById('navMarkets').classList.contains('on'), document.querySelectorAll('#nav a[href="/pairs"]').length]""")
+        print("[pairs nav] Markets selected / /pairs links in the bar across view switches: %s" % clicks)
+        assert clicks == {"swap#0": [False, 0], "folio#1": [False, 0], "flow#2": [True, 0], "swap#3": [False, 0]}, (
+            "Markets must be selected only on the flow view and the bar must never hold a /pairs link: %s" % clicks)
         await navpairspg.close()
 
-        # ---- [nav markets] ۶ اکتبر — نوار: Swap · Markets ▾ (Flow، New pairs) · Exit Report · Stocks (Soon)؛ از ۷ اکتبر: Swap · Markets ▾ · Stocks · Exit Report.
-        # اپ در ۱۴۴۰ و ۳۹۰ و هر دو تم؛ /pairs در ۱۴۴۰. منو داخلِ viewport، در موبایل بالای نوارِ پایین. ----
+        # ---- [nav markets] ۱۸ اکتبر — نوار: Swap · Markets · Stocks · Exit Report؛ «Markets» تبِ ساده است (بدونِ منو و شورون).
+        # قبلاً بازشو بودنِ منو (باز/بسته‌شدن با کلیک، Escape، mousedownِ بیرون، جای منو، ردیف‌های Flow/New pairs) سنجیده می‌شد؛
+        # همه‌ی آن‌ها عمداً برداشته شد چون منو وجود ندارد. رفتارِ کلیک و سوییچ در [markets switch] سنجیده می‌شود.
+        # اپ در ۱۴۴۰ و ۳۹۰ و هر دو تم؛ /pairs در ۱۴۴۰. ----
         NM_ORDER_JS = """() => [...document.querySelectorAll('#nav > *')].map(e => (e.querySelector('span') || e).textContent.trim())"""
         NM_STATE_JS = """() => {
-            const m = document.getElementById('navMenu'), bt = document.getElementById('navMarkets'), nav = document.getElementById('nav');
-            const r = m.getBoundingClientRect(), br = bt.getBoundingClientRect(), nr = nav.getBoundingClientRect();
-            const cs = getComputedStyle(m), bs = getComputedStyle(bt);
-            return {display: cs.display, expanded: bt.getAttribute('aria-expanded'), on: bt.classList.contains('on'),
-                    top: r.top, bottom: r.bottom, left: r.left, right: r.right, vw: innerWidth, vh: innerHeight,
-                    btnBottom: br.bottom, btnLeft: br.left, navTop: nr.top, z: cs.zIndex,
-                    btnShadow: bs.boxShadow, btnColor: bs.color,
-                    items: [...m.querySelectorAll('.navItem')].map(i => ({tag: i.tagName, ttl: i.querySelector('.navTtl').textContent.trim(),
-                        sub: i.querySelector('.navSub').textContent.trim(), href: i.getAttribute('href'), view: i.dataset.view || null,
-                        role: i.getAttribute('role'), on: i.classList.contains('on'), ttlColor: getComputedStyle(i.querySelector('.navTtl')).color})),
-                    role: m.getAttribute('role'), haspopup: bt.getAttribute('aria-haspopup')};
+            const bt = document.getElementById('navMarkets'), bs = getComputedStyle(bt);
+            return {on: bt.classList.contains('on'), btnShadow: bs.boxShadow, tag: bt.tagName, type: bt.getAttribute('type'), title: bt.getAttribute('title'),
+                    haspopup: bt.getAttribute('aria-haspopup'), expanded: bt.getAttribute('aria-expanded'), view: bt.dataset.view || null,
+                    menu: document.querySelectorAll('#navMenu, .navChev, .navMenuWrap').length, label: bt.querySelector('span').textContent.trim()};
         }"""
         # ۷ اکتبر (تغییر عمدی): Stocks دیگر span بی‌جانِ «Soon» نیست؛ تبِ واقعی است. این کمکی همان اطلاعاتِ تب را می‌خواند:
         # در اپ <button data-view="stocks">، در /pairs <a href="/app#stocks">؛ هر دو فوکوس‌پذیر و بدونِ هیچ نشانِ Soon.
@@ -10761,51 +11692,20 @@ async def main():
             assert await nm.evaluate(NM_ORDER_JS) == ["Swap", "Markets", "Stocks", "Exit Report"], \
                 "%s: bar order is %s" % (nm_ctx, await nm.evaluate(NM_ORDER_JS))
             assert await nm.locator('#nav [data-view="folio"]').count() == 0, "%s: Portfolio must not be a tab any more" % nm_ctx
-            closed = await nm.evaluate(NM_STATE_JS)
-            assert closed["display"] == "none" and closed["expanded"] == "false" and not closed["on"], "%s: menu must start closed: %s" % (nm_ctx, closed)
-            assert closed["haspopup"] == "menu" and closed["role"] == "menu", "%s: aria-haspopup/role: %s" % (nm_ctx, closed)
+            st0 = await nm.evaluate(NM_STATE_JS)
+            assert st0["menu"] == 0 and st0["haspopup"] is None and st0["expanded"] is None and not st0["on"] and st0["view"] is None \
+                and st0["tag"] == "BUTTON" and st0["type"] == "button" and st0["label"] == "Markets" and st0["title"] == "Markets", \
+                "%s: Markets must be a plain, unselected tab (no menu/chevron/aria-haspopup, no data-view): %s" % (nm_ctx, st0)
             stk = await nm.evaluate(NM_STOCKS_JS)
             assert stk["tag"] == "BUTTON" and stk["view"] == "stocks" and stk["disabled"] is None and stk["focused"] and stk["inTabOrder"] \
                 and not stk["pill"] and stk["cursor"] != "default", "%s: Stocks must be a live, focusable tab (button data-view=stocks) with no Soon pill: %s" % (nm_ctx, stk)
-            # باز شدن
-            await nm.click("#navMarkets"); await nm.wait_for_timeout(250)
-            op = await nm.evaluate(NM_STATE_JS)
-            assert op["display"] == "block" and op["expanded"] == "true", "%s: click did not open the menu: %s" % (nm_ctx, op)
-            assert [(i["ttl"], i["sub"]) for i in op["items"]] == [("Flow", "Who is buying and selling"), ("New pairs", "Fresh pools, exit-checked")], \
-                "%s: menu rows are wrong: %s" % (nm_ctx, op["items"])
-            assert [i["role"] for i in op["items"]] == ["menuitem", "menuitem"] and op["items"][0]["view"] == "flow" \
-                and op["items"][1]["href"] == "/pairs" and op["items"][1]["tag"] == "A", "%s: Flow must keep data-view, New pairs must link /pairs: %s" % (nm_ctx, op["items"])
-            assert op["left"] >= 0 and op["right"] <= op["vw"] and op["top"] >= 0 and op["bottom"] <= op["vh"], "%s: the menu leaves the viewport: %s" % (nm_ctx, op)
-            assert op["z"] == "50", "%s: menu z-index %s is not the .pop level 50" % (nm_ctx, op["z"])
-            if nm_vw > 720:
-                assert 8 <= op["top"] - op["btnBottom"] <= 12 and abs(op["left"] - op["btnLeft"]) <= 1.5, "%s: menu is not 10px under the button, left aligned: %s" % (nm_ctx, op)
-            else:
-                assert op["bottom"] <= op["navTop"] and op["navTop"] - op["bottom"] <= 40, "%s: the menu must open above the bottom bar: %s" % (nm_ctx, op)
-            if nm_scheme != "dark" or nm_vw == 1440:
-                await nm.screenshot(path="/tmp/nm_%s.png" % (nm_scheme if nm_vw == 1440 else "mobile"),
-                                    clip={"x": 0, "y": 0, "width": 1440, "height": 260} if nm_vw == 1440
-                                    else {"x": 0, "y": 0, "width": nm_vw, "height": 844})
-            # Escape
-            await nm.keyboard.press("Escape"); await nm.wait_for_timeout(150)
-            cl = await nm.evaluate(NM_STATE_JS)
-            assert cl["display"] == "none" and cl["expanded"] == "false", "%s: Escape did not close the menu: %s" % (nm_ctx, cl)
-            # mousedown بیرون
-            await nm.click("#navMarkets"); await nm.wait_for_timeout(150)
-            await nm.mouse.move(nm_vw // 2, 12 if nm_vw > 720 else 300); await nm.mouse.down(); await nm.mouse.up(); await nm.wait_for_timeout(150)
-            cl = await nm.evaluate(NM_STATE_JS)
-            assert cl["display"] == "none" and cl["expanded"] == "false", "%s: an outside mousedown did not close the menu: %s" % (nm_ctx, cl)
-            # انتخابِ Flow
-            await nm.click("#navMarkets"); await nm.wait_for_timeout(150)
-            await nm.click('#navMenu [data-view="flow"]'); await nm.wait_for_timeout(500)
+            # با انتخابِ ذخیره‌شده‌ی flow کلیکِ Markets نمای Flow را درجا باز می‌کند و تب «روشن» می‌شود
+            await nm.evaluate("() => localStorage.setItem('zaexa.markets.v1', 'flow')")
+            await nm.click("#navMarkets"); await nm.wait_for_timeout(500)
             fl = await nm.evaluate(NM_STATE_JS)
-            assert await nm.evaluate("() => document.getElementById('view-flow').classList.contains('on')"), "%s: Flow did not switch the view" % nm_ctx
-            assert fl["display"] == "none" and fl["expanded"] == "false", "%s: choosing Flow must close the menu: %s" % (nm_ctx, fl)
+            assert await nm.evaluate("() => document.getElementById('view-flow').classList.contains('on')"), "%s: Markets (stored flow) did not switch to the Flow view" % nm_ctx
             assert fl["on"] and "inset" in fl["btnShadow"], "%s: Markets must wear the selected-tab look on the flow view: %s" % (nm_ctx, fl)
             assert await nm.evaluate("() => document.querySelector('#nav button[data-view=\"swap\"]').classList.contains('on')") is False, "%s: Swap must not stay selected" % nm_ctx
-            await nm.click("#navMarkets"); await nm.wait_for_timeout(150)
-            fo = await nm.evaluate(NM_STATE_JS)
-            assert fo["items"][0]["on"] and fo["items"][0]["ttlColor"] == fo["btnColor"], "%s: the Flow row must carry .on with the accent title colour: %s" % (nm_ctx, fo["items"])
-            await nm.keyboard.press("Escape")
             await go_view(nm, "swap"); await nm.wait_for_timeout(300)
             assert (await nm.evaluate(NM_STATE_JS))["on"] is False, "%s: Markets stays selected after leaving flow" % nm_ctx
             assert not nm_errs, "%s: page errors: %s" % (nm_ctx, nm_errs)
@@ -10822,23 +11722,17 @@ async def main():
             await nm.wait_for_timeout(800)
             assert await nm.evaluate(NM_ORDER_JS) == ["Swap", "Markets", "Stocks", "Exit Report"], "%s: bar order is %s" % (nm_ctx, await nm.evaluate(NM_ORDER_JS))
             st = await nm.evaluate(NM_STATE_JS)
-            assert st["on"] and "inset" in st["btnShadow"] and st["display"] == "none", "%s: Markets must be selected on /pairs: %s" % (nm_ctx, st)
+            assert st["on"] and "inset" in st["btnShadow"] and st["menu"] == 0 and st["haspopup"] is None and st["expanded"] is None, "%s: Markets must be a selected plain tab on /pairs: %s" % (nm_ctx, st)
             stk = await nm.evaluate(NM_STOCKS_JS)
             assert stk["tag"] == "A" and stk["href"] == "/app#stocks" and stk["disabled"] is None and stk["focused"] and stk["inTabOrder"] and not stk["pill"], "%s: Stocks must be a live link to /app#stocks: %s" % (nm_ctx, stk)
-            await nm.click("#navMarkets"); await nm.wait_for_timeout(200)
-            st = await nm.evaluate(NM_STATE_JS)
-            assert st["display"] == "block" and st["expanded"] == "true", "%s: click did not open the menu: %s" % (nm_ctx, st)
-            assert [(i["ttl"], i["href"], i["tag"]) for i in st["items"]] == [("Flow", "/app#flow", "A"), ("New pairs", "/pairs", "A")], "%s: rows: %s" % (nm_ctx, st["items"])
-            assert st["items"][1]["on"] and st["left"] >= 0 and st["right"] <= st["vw"], "%s: New pairs must be the current row, menu inside the viewport: %s" % (nm_ctx, st)
-            assert await nm.evaluate("() => document.querySelector('#navMenu a[href=\"/pairs\"]').getAttribute('aria-current')") == "page", "%s: aria-current" % nm_ctx
-            await nm.keyboard.press("Escape"); await nm.wait_for_timeout(150)
-            st = await nm.evaluate(NM_STATE_JS)
-            assert st["display"] == "none" and st["expanded"] == "false", "%s: Escape did not close the menu" % nm_ctx
+            u0 = nm.url
+            await nm.click("#navMarkets"); await nm.wait_for_timeout(250)
+            assert nm.url == u0, "%s: clicking Markets on /pairs must do nothing (url %s -> %s)" % (nm_ctx, u0, nm.url)
             assert not nm_errs, "%s: page errors: %s" % (nm_ctx, nm_errs)
             await nm.close()
             nm_runs += 1
-        print("[nav markets] bar is exactly Swap, Markets, Stocks, Exit Report; the Markets menu (Flow, New pairs) opens on click, closes on Escape / outside mousedown / choosing a row, "
-              "Flow selects Markets, /pairs shows Markets selected, the menu stays inside the viewport (above the bottom bar at 390), Stocks is a live tab (button in the app, link to /app#stocks on /pairs) with no Soon pill: %d runs (app 1440+390 x light+dark, pairs 1440 x light+dark)" % nm_runs)
+        print("[nav markets] bar is exactly Swap, Markets, Stocks, Exit Report; Markets is a plain tab (no menu, chevron, aria-haspopup or data-view), with stored flow it opens the Flow view in place and shows selected, "
+              "/pairs shows Markets selected and a click there does nothing, Stocks is a live tab (button in the app, link to /app#stocks on /pairs) with no Soon pill: %d runs (app 1440+390 x light+dark, pairs 1440 x light+dark)" % nm_runs)
 
         # ---- [wallet portfolio] ۶ اکتبر — «Portfolio» اولین کارِ منوی والت است: در اپ نمای folio را باز می‌کند و منو را می‌بندد؛ در /pairs لینکِ /app#folio است. ----
         wp_errs = []
@@ -12234,6 +13128,9 @@ async def main():
         # اول می‌آمد و کارِ اصلی صفحه کامل زیر خط تاشو می‌افتاد.
         # دو ادعا، چون هرکدام جدا می‌تواند بشکند: ترتیب روی گوشی عوض شده باشد،
         # و ترتیب روی دسکتاپ عوض *نشده* باشد.
+        # ۱۸ اکتبر [mobile compact]: فقط کارتِ تبِ انتخاب‌شده دیده می‌شود و توکنِ پیش‌فرضِ هارنس تبِ Exit check را
+        # خودکار انتخاب می‌کند؛ این کاوشگر جای کارتِ نمودار را می‌سنجد، پس تبِ Chart را صریحاً انتخاب می‌کند.
+        await mob.evaluate("mtabSelect('chart', false)")
         order = await mob.evaluate("""() => {
             const c = [...document.querySelectorAll("#baseHeroRow .swapChartCard, #baseHeroRow .swapCard")];
             const swap = c.find(x => x.querySelector("#amtIn"));
@@ -14569,14 +15466,14 @@ async def main():
         hpg, herrs = await open_pairs({"chain": "base", "rows": [], "store": True})
         hinfo = await hpg.evaluate("""() => {
             const nav = document.querySelector('.nav');
-            const links = nav ? [...nav.querySelectorAll('a')] : [];   // لینک‌های داخلِ منوی Markets هم در DOM هستند (بسته‌اند)
+            const links = nav ? [...nav.querySelectorAll('a')] : [];   // از ۱۸ اکتبر Markets دکمه است و منو ندارد؛ <a>ها فقط Swap/Stocks/Exit Report اند
             const hdr = document.querySelector('.site-header').getBoundingClientRect();
             const navR = nav.getBoundingClientRect();
             return {
                 count: links.length,
                 hrefs: links.map(a => a.getAttribute('href')),
-                lastCurrent: (links.find(a => a.getAttribute('href') === '/pairs') || {getAttribute: () => null}).getAttribute('aria-current'),
-                lastOn: links.some(a => a.getAttribute('href') === '/pairs' && a.classList.contains('on')),
+                lastCurrent: links.some(a => a.getAttribute('href') === '/pairs'),
+                lastOn: document.getElementById('navMarkets').classList.contains('on'),
                 navCenter: Math.round(navR.left + navR.width / 2),
                 hdrCenter: Math.round(hdr.left + hdr.width / 2),
                 hasCta: !!document.querySelector('.header-cta'),
@@ -14588,12 +15485,13 @@ async def main():
               "hasCta=%s hasFavicon=%s errors=%s"
               % (hinfo["count"], hinfo["hrefs"], hinfo["lastCurrent"], hinfo["lastOn"],
                  hinfo["navCenter"], hinfo["hdrCenter"], hinfo["hasCta"], hinfo["hasFavicon"], herrs))
-        # ۷ اکتبر (تغییر عمدی): لینکِ Stocks (/app#stocks) پیش از Exit Report نشست، پس <a>های هدر پنج‌تاست (نوارِ پایینِ موبایل همچنان چهار آیتم دارد).
-        assert hinfo["count"] == 5, "expected 5 nav links in pairs.html's header (Swap, Flow, New pairs, Stocks, Exit Report), found %s" % hinfo["count"]
-        assert hinfo["hrefs"] == ["/app#swap", "/app#flow", "/pairs", "/app#stocks", "/report"], (
+        # ۱۸ اکتبر (تغییر عمدی): Flow و New pairs از منو رفتند و Markets دکمه‌ی ساده است، پس <a>های هدر سه‌تاست
+        # (Swap، Stocks، Exit Report) و هیچ <a href="/pairs"> در نوار نیست؛ «روشن‌بودنِ» Markets جای aria-current را می‌گیرد.
+        assert hinfo["count"] == 3, "expected 3 nav links in pairs.html's header (Swap, Stocks, Exit Report), found %s" % hinfo["count"]
+        assert hinfo["hrefs"] == ["/app#swap", "/app#stocks", "/report"], (
             "pairs.html's header nav hrefs are wrong: %s" % hinfo["hrefs"])
-        assert hinfo["lastCurrent"] == "page", "the New pairs link must carry aria-current=\"page\""
-        assert hinfo["lastOn"], "the New pairs link must carry the .on look"
+        assert hinfo["lastCurrent"] is False, "no a[href=\"/pairs\"] may remain in the header nav"
+        assert hinfo["lastOn"], "the Markets tab must carry the .on look on /pairs"
         assert abs(hinfo["navCenter"] - hinfo["hdrCenter"]) <= 2, (
             "pairs.html's header nav is not centred at 1240px: nav=%s header=%s"
             % (hinfo["navCenter"], hinfo["hdrCenter"]))
@@ -14635,8 +15533,8 @@ async def main():
         await hpg2.close()
         assert not herrs2, "web/pairs.html threw while resizing the header: %s" % herrs2
 
-        print("[pairs header] 4 nav links (Swap/Flow/New pairs/Exit Report; Flow and New pairs sit in the Markets menu) with the right hrefs, New "
-              "pairs carries aria-current=page and the .on look, centred at 1240px, labels hidden at "
+        print("[pairs header] 3 nav links (Swap/Stocks/Exit Report) plus the Markets button, with the right hrefs, no /pairs link in the bar, "
+              "Markets carries the .on look, centred at 1240px, labels hidden at "
               "800px, fixed 4-equal-width bottom bar at 390/360px with no horizontal scroll, no "
               ".header-cta, favicon present")
 
@@ -17186,7 +18084,8 @@ async def main():
             assert not bad_swap, "[boot view] %s: #view-swap was painted before the router ran: %s" % (bt_hash, bad_swap[:2])
             assert not bad_tgt, "[boot view] %s: the target view was hidden at first paint: %s" % (bt_hash, bad_tgt[:2])
             assert not bad_nav, "[boot view] %s: the nav highlight was wrong at first paint: %s" % (bt_hash, bad_nav[:2])
-            assert not bt["attr"] and not bt["swapOn"] and bt["navOn"] == ([bt_view] if bt_view == "flow" else []) and bt["marketsOn"] == (bt_view == "flow"), \
+            # ۱۸ اکتبر (تغییر عمدی): Flow دیگر دکمه‌ی data-view در #nav نیست، پس navOn همیشه خالی است؛ روشن‌بودنِ Markets جداگانه (marketsOn) سنجیده می‌شود.
+            assert not bt["attr"] and not bt["swapOn"] and bt["navOn"] == [] and bt["marketsOn"] == (bt_view == "flow"), \
                 "[boot view] %s: after the router ran the attribute must be gone and the class state right: %s" % (bt_hash, {k: v for k, v in bt.items() if k != "log"})
         # بدونِ هش: Swap همچنان از همان فریم اول دیده می‌شود، هیچ attributeای نیست
         spg = await sf_page(hash_="", init=[BOOT_WATCH], errs=sf_errs)
@@ -17836,13 +18735,14 @@ async def main():
                 const rawClasses = (el.className || '').toString().split(/\\s+/);
                 const clsList = rawClasses.filter(c => c && c !== 'on' &&
                     !(c === 'off' && rawClasses.includes('led'))).sort();
-                const kids = Array.prototype.filter.call(el.children, c => !["srcMenu", "headerNetworkAnchor"].includes(c.id));
+                // ۱۸ اکتبر: «Take the tour» فقط در اپ است (تور فقط روی /app می‌گردد)؛ pairs نه تور دارد نه دکمه‌اش.
+                const kids = Array.prototype.filter.call(el.children, c => !["srcMenu", "headerNetworkAnchor", "tourBtn"].includes(c.id));
                 // مستقیم زیرِ #nav: در اپ <button> است (تب‌زنیِ SPA) و در
                 // pairs <a class="navLink" href> واقعی — همان تفاوتِ
                 // پذیرفته‌شده‌ای که [pairs header] هم می‌سنجد؛ نه تگ نه
                 // کلاسِ خودِ این عنصر مقایسه نمی‌شود، فقط شمار/ترتیب.
-                // ۶ اکتبر: ردیف‌های منوی Markets (.navItem) هم همین تفاوتِ تگ را دارند (اپ <button data-view>، pairs <a>).
-                if (underNav || el.id === 'folioMenuBtn' || (el.classList && el.classList.contains('navItem'))){   // folioMenuBtn: اپ <button>، pairs <a href="/app#folio">
+                // ۱۸ اکتبر: منوی Markets (و ردیف‌های .navItem) برداشته شد؛ Markets الان خودش یک آیتمِ مستقیمِ #nav است.
+                if (underNav || el.id === 'folioMenuBtn'){   // folioMenuBtn: اپ <button>، pairs <a href="/app#folio">
                     return { tag: 'NAVITEM', id: null, cls: [], children: kids.map(k => sig(k, false)) };
                 }
                 return {
@@ -18043,11 +18943,12 @@ async def main():
         # footBrand، لینک‌های ستونِ Trade، لینکِ قرارداد روی BaseScan، بدونِ
         # تلگرام، دو اسپنِ دقیقِ footBottom. ----
         ppg3, perrs3 = await open_pairs({"chain": "base", "rows": [], "store": True})
+        # ۱۸ اکتبر [mobile compact]: سه footCol حالا داخل <details class="fMore"> هستند که خودش فرزندِ footGrid است.
         foot_info = await ppg3.evaluate("""() => {
             const grid = document.querySelector('.footGrid');
-            const cols = grid ? grid.querySelectorAll(':scope > .footCol').length : 0;
+            const cols = grid ? grid.querySelectorAll(':scope > .footCol, :scope > .fMore > .footCol').length : 0;
             const hasBrand = !!(grid && grid.querySelector(':scope > .footBrand'));
-            const tradeCol = grid ? grid.querySelectorAll(':scope > .footCol')[0] : null;
+            const tradeCol = grid ? grid.querySelectorAll(':scope > .footCol, :scope > .fMore > .footCol')[0] : null;
             const tradeHrefs = tradeCol ? [...tradeCol.querySelectorAll('a')].map(a => a.getAttribute('href')) : [];
             const anchors = [...document.querySelectorAll('footer a')];
             const baseScan = anchors.find(a => (a.getAttribute('href') || '').includes('basescan.org'));

@@ -69,6 +69,7 @@ DEXES=(
   "BaseSwap|v2|0x327Df1E6de05895d2ab08513aaDD9313Fe505d86|"
   "SushiSwap|v2|0x6BDED42c6DA8FBf0d2bA55B2fa120C5e0c8D7891|"
   "Alien Base|v2|0x8c1A3cF8f83074169FE5D7aD50B978e1cD6b37c7|"
+  "Uniswap V2|v2|0x4752ba5DBc23f44D87826276BF6Fd6b1C372aD24|"
   # روی زنجیره بررسی شد: بایت‌کد این روتر 0x414bf389 دارد و 0x04e45aaf ندارد،
   # یعنی نسل اول SwapRouter است. کوترش اما QuoterV2 است (0xc6a5026a).
   "PancakeSwap V3|v3legacy|0x1b81D678ffb9C0263b24A97847620C99d213eB14|0xB048Bbc1Ee6b733FFfCFb9e9CeF7375518e25997"

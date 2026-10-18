@@ -50,6 +50,9 @@ WETH_ADDR="${WETH_ADDR:-0x4200000000000000000000000000000000000006}"
 # هشتمی روتر کارخانه‌ی قدیمیِ همان Slipstream است (aerodrome-cl-v1) — همان
 # kind=4، فکتوری و کوتر جدا؛ روی زنجیره ۲۴ سپتامبر ۲۰۲۶ با factory() و یک
 # eth_call واقعیِ exactInputSingle (سلکتور 0xa026383e) تأیید شده.
+# نهمی UniswapV2Router02 روی Base است (kind=0، مثل BaseSwap) — آدرس از
+# docs.uniswap.org؛ در verify_dexes.sh فهرست شده، و روی زنجیره باید پیش از
+# استفاده با آن اسکریپت تأیید شود.
 ROUTERS="0x2626664c2603336E57B271c5C0b26F421741e481,\
 0xcF77a3Ba9A5CA399B7c97c74d54e5b1Beb874E43,\
 0x327Df1E6de05895d2ab08513aaDD9313Fe505d86,\
@@ -57,7 +60,8 @@ ROUTERS="0x2626664c2603336E57B271c5C0b26F421741e481,\
 0x8c1A3cF8f83074169FE5D7aD50B978e1cD6b37c7,\
 0x1b81D678ffb9C0263b24A97847620C99d213eB14,\
 0x698Cb2b6dd822994581fEa6eA4Fc755d1363A92F,\
-0xBE6D8f0d05cC4be24d5167a3eF062215bE6D18a5"
+0xBE6D8f0d05cC4be24d5167a3eF062215bE6D18a5,\
+0x4752ba5DBc23f44D87826276BF6Fd6b1C372aD24"
 
 echo "==============================================================="
 echo " دیپلوی SwapExecutor"

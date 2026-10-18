@@ -431,6 +431,28 @@ footer .fine{max-width:78ch;margin:46px 0 0;font-size:11.5px;color:var(--tx3);li
   .footGrid{grid-template-columns:1fr;gap:26px}
   .footBrand .footTag{max-width:none}
 }
+/* ۱۸ اکتبر — ستون‌های لینک زیرِ ۷۲۱px در یک <details class="fMore"> جمع می‌شوند
+   (بدونِ JS)؛ عیناً همان قاعده‌های web/index.html. روی دسکتاپ details و محتوایش
+   display:contents است تا سه footCol همان آیتم‌های گریدِ قبل بمانند. */
+@media(min-width:721px){
+  .fMore{display:contents}
+  .fMore>summary{display:none}
+  .fMore::details-content{content-visibility:visible;display:contents}
+}
+@media(max-width:720px){
+  .fMore>summary{display:flex;align-items:center;justify-content:space-between;min-height:44px;padding:0 2px;cursor:pointer;list-style:none;border-top:1px solid var(--line);border-bottom:1px solid var(--line);font-size:13px;font-weight:600;color:var(--tx2)}
+  .fMore>summary::-webkit-details-marker{display:none}
+  .fMore>summary::after{content:"";width:7px;height:7px;border-right:2px solid currentColor;border-bottom:2px solid currentColor;transform:rotate(45deg);transition:transform .16s}
+  .fMore[open]>summary::after{transform:rotate(-135deg)}
+  .fMore>summary:focus-visible{outline:2px solid var(--acc);outline-offset:2px}
+  .fMore::details-content{display:flex;flex-direction:column;gap:26px}
+  .fMore[open]::details-content{padding-top:22px}
+  footer{padding-top:20px;padding-bottom:20px}
+  .footGrid{gap:16px}
+  .footBrand .footTag{margin:8px 0 10px}
+  footer .fine{margin-top:16px}
+  .footBottom{margin-top:14px;padding-top:12px;gap:6px 16px}
+}
 
 @media(max-width:760px){
   .pairs-table{display:none}
@@ -473,35 +495,16 @@ a.walletAction{text-decoration:none}
 @media(min-width:721px) and (max-width:1120px){.nav .navMarkets>span{display:none}.nav .navMarkets{padding:8px 11px}}
 @media(min-width:961px) and (max-width:1120px){.nav .navMarkets{min-height:35px}}
 @media(max-width:720px){.nav .navMarkets{flex:1;flex-direction:column;justify-content:center;gap:3px;padding:8px 0;font-size:11px}.nav .navMarkets svg{width:19px;height:19px}}
-/* ۶ اکتبر — تبِ «Markets» (بازشو با Flow و New pairs) و تبِ «Stocks». منو داخلِ .nav می‌نشیند، پس
-   قاعده‌های عمومیِ .nav button / .nav a روی ردیف‌های منو هم می‌افتند؛ همه‌ی قاعده‌های ردیف عمداً با گزینشگرِ
-   .nav .navMenu … (ویژگیِ بالاتر) نوشته شده تا از آن‌ها جان به در ببرند. */
-.navMenuWrap{display:flex}
-.nav .navMarkets .navChev{width:13px;height:13px;margin-left:-2px;opacity:.7;transition:transform .16s}
-.nav .navMarkets[aria-expanded="true"] .navChev{transform:rotate(180deg)}
-#navMenu{left:0;right:auto;top:calc(100% + 10px);width:auto;min-width:230px;padding:6px;border-radius:16px;background:var(--card);border:1px solid var(--line);box-shadow:var(--sh);z-index:50}
-.nav .navMenu .navItem{display:flex;flex-direction:row;align-items:center;justify-content:flex-start;gap:10px;width:100%;flex:none;padding:9px 10px;border-radius:11px;text-align:left;font-size:13.5px;font-weight:inherit;color:var(--tx);white-space:nowrap;text-decoration:none;background:none;box-shadow:none;cursor:pointer}
-.nav .navMenu .navItem:hover,.nav .navMenu .navItem.on:hover{background:var(--card2);color:var(--tx)}
-.nav .navMenu .navItem.on{background:none;box-shadow:none;font-weight:inherit}
-.nav .navMenu .navIco{display:grid;place-items:center;flex:none;width:30px;height:30px;border-radius:9px;background:var(--bg);box-shadow:inset 2px 2px 5px var(--soft-lo),inset -2px -2px 5px var(--soft-hi);color:var(--acc)}
-.nav .navMenu .navIco svg{width:16px;height:16px}
-.nav .navMenu .navTxt{display:flex;flex-direction:column;gap:1px;min-width:0}
-.nav .navMenu .navTtl{display:block;font-size:13.5px;font-weight:640;color:var(--tx)}
-.nav .navMenu .navItem.on .navTtl{color:var(--acc)}
-.nav .navMenu .navSub{display:block;font-size:12px;font-weight:400;color:var(--tx3)}
-/* بازه‌ی فقط-آیکون (۷۲۱–۱۱۲۰): برچسبِ Markets هم مثلِ بقیه می‌رود (عنوانشان در title می‌ماند). */
-@media(max-width:720px){
-  .navMenuWrap{flex:1;min-width:0}
-  /* ۷ اکتبر — شورونِ تبِ Markets روی نوارِ موبایل: برچسب و شورون به‌صورت یک گروه زیرِ آیکون وسط‌چین می‌شوند
-     (ستون‌های 1fr دو طرف)، و شورون رو به بالاست چون منو بالای نوار باز می‌شود؛ بازشده رو به پایین. */
-  .nav .navMarkets{display:grid;grid-template-columns:1fr auto auto 1fr;grid-template-rows:auto auto;column-gap:2px;row-gap:3px;align-content:center;justify-items:center}
-  .nav .navMarkets>svg:first-child{grid-column:2/4;grid-row:1}
-  .nav .navMarkets>span{grid-column:2;grid-row:2}
-  .nav .navMarkets .navChev{display:block;grid-column:3;grid-row:2;align-self:center;width:10px;height:10px;margin:0;opacity:.7;transform:rotate(180deg)}
-  .nav .navMarkets[aria-expanded="true"] .navChev{transform:none}
-  /* منو بالای نوار باز می‌شود و به دو لبه‌ی صفحه می‌چسبد، پس هرگز بیرون نمی‌زند. */
-  #navMenu{position:fixed;left:12px;right:12px;top:auto;bottom:calc(84px + env(safe-area-inset-bottom));min-width:0}
-}
+/* ۱۸ اکتبر — تبِ «Markets» یک دکمه‌ی ساده است (بدون بازشو و شورون)؛ کلیکش طبق انتخابِ ذخیره‌شده (zaexa.markets.v1)
+   به Flow یا New pairs می‌رود. «Stocks» از ۷ اکتبر تبِ واقعی است و پیش از Exit Report می‌نشیند. */
+/* ۱۸ اکتبر — «Markets» دیگر بازشو نیست: یک تبِ ساده است و انتخابِ بین Flow و New pairs به سوییچِ بالای خودِ صفحه
+   رفته (هر دو صفحه عیناً همین CSS و همین markup را دارند). رنگِ گزینه‌ی فعال همان گرادیانِ دکمه‌های اصلی (--grad) است
+   و متنش همیشه سفید؛ سایه همان سایه‌ی پیلِ هدر. */
+.mktSwitch{display:inline-flex;align-self:flex-start;max-width:100%;box-sizing:border-box;padding:4px;gap:4px;border-radius:999px;background:var(--card);box-shadow:4px 4px 9px var(--soft-lo),-3px -3px 8px var(--soft-hi),inset 0 1px 1px var(--soft-hi);margin-bottom:18px}
+.mktSwitch a{padding:8px 18px;border-radius:999px;font-size:14px;font-weight:560;color:var(--tx2);text-decoration:none;white-space:nowrap;transition:.16s}
+.mktSwitch a:hover{color:var(--tx)}
+.mktSwitch a.on{background:var(--grad);color:#fff}
+.mktSwitch a:focus-visible{outline:2px solid var(--acc);outline-offset:2px}
 .chip:not(.solid):not(#themeBtn),.tokbtn,.tfs button.on{box-shadow:2px 2px 5px var(--soft-lo),-2px -2px 5px var(--soft-hi)}
 .cta:not(:disabled),.chip.solid,.tkTrade,.button.primary,.header-cta{box-shadow:inset 0 1px 1px rgba(255,255,255,.4),inset 0 -2px 2px rgba(20,30,55,.16),0 3px 6px var(--soft-lo)}
 .cta:active:not(:disabled),.chip.solid:active,.tkTrade:active,.button.primary:active,.header-cta:active{transform:translateY(1px);box-shadow:inset 0 2px 4px rgba(20,30,55,.22)}
@@ -570,19 +573,9 @@ a.walletAction{text-decoration:none}
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
            stroke-linecap="round" stroke-linejoin="round">
         <path d="M7 4v13M4 14l3 3 3-3M17 20V7M14 10l3-3 3 3"/></svg><span data-t="Swap">Swap</span></a>
-    <!-- ۶ اکتبر — مالک: «Markets» یک تبِ بازشو است (Flow و New pairs زیرش)؛ «Portfolio» به منوی والت رفت؛
-         «Stocks» از ۷ اکتبر تبِ واقعی است و پیش از Exit Report می‌نشیند. منو داخلِ همین ردیفِ nav
-         می‌نشیند (navMenuWrap) تا nav یک ردیفِ فلکس بماند. -->
-    <div class="navMenuWrap rel">
-      <button class="navMarkets on" id="navMarkets" type="button" aria-haspopup="menu" aria-expanded="false" title="Markets">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="M7 15l4-4 3 3 5-6"/></svg><span data-t="Markets">Markets</span><svg class="navChev" viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></button>
-      <div class="pop navMenu" id="navMenu" role="menu" aria-label="Markets">
-        <a class="navItem" role="menuitem" href="/app#flow">
-          <span class="navIco"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 13h4l3 7 4-16 3 9h4"/></svg></span><span class="navTxt"><span class="navTtl">Flow</span><span class="navSub">Who is buying and selling</span></span></a>
-        <a class="navItem on" role="menuitem" href="/pairs" aria-current="page">
-          <span class="navIco"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6h10M4 12h10M4 18h7"/><path d="M19 3v4M17 5h4"/></svg></span><span class="navTxt"><span class="navTtl">New pairs</span><span class="navSub">Fresh pools, exit-checked</span></span></a>
-      </div>
-    </div>
+    <!-- ۱۸ اکتبر — «Markets» تبِ ساده است؛ انتخابِ Flow/New pairs سوییچِ بالای خودِ صفحه است. -->
+    <button class="navMarkets on" id="navMarkets" type="button" title="Markets">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="M7 15l4-4 3 3 5-6"/></svg><span data-t="Markets">Markets</span></button>
     <a class="navLink" href="/app#stocks" title="Stocks">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 15l3-3 3 2 4-5"/></svg><span data-t="Stocks">Stocks</span></a>
     <a class="navLink" href="/report" title="Exit Report">
@@ -733,6 +726,7 @@ try{(function(){
 <p id="walletDisconnectNote" hidden>Disconnected. Zaexa will not reconnect on its own. Your wallet may still list this site — remove it there to revoke access.</p>
 
 <main class="pairs-main">
+  <nav class="mktSwitch" aria-label="Markets"><a href="/app#flow" data-mkt="flow">Flow</a><a href="/pairs" data-mkt="pairs" class="on" aria-current="page">New pairs</a></nav>
   <h1>New pairs</h1>
   <p class="sub">The newest Base pools we found, each run through the same exit check as the app. Updated hourly.</p>
 <script>if(window.__zxPairsCopy)window.__zxPairsCopy.copy();</script>
@@ -847,6 +841,7 @@ Solana</button><script>if(window.__zxPairsCopy){window.__zxPairsCopy.tabs();wind
           <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2a10 10 0 0 0-3.2 19.5c.5.1.7-.2.7-.5v-1.8c-2.8.6-3.4-1.3-3.4-1.3-.4-1.2-1.1-1.5-1.1-1.5-.9-.6.1-.6.1-.6 1 .1 1.5 1 1.5 1 .9 1.5 2.3 1.1 2.9.8.1-.7.4-1.1.6-1.4-2.2-.3-4.6-1.1-4.6-5 0-1.1.4-2 1-2.7-.1-.3-.4-1.3.1-2.6 0 0 .8-.3 2.7 1a9.4 9.4 0 0 1 5 0c1.9-1.3 2.7-1 2.7-1 .5 1.3.2 2.3.1 2.6.6.7 1 1.6 1 2.7 0 3.9-2.4 4.7-4.6 5 .4.3.7 1 .7 2v2.9c0 .3.2.6.7.5A10 10 0 0 0 12 2z"/></svg></a>
       </div>
     </div>
+    <details class="fMore"><summary>About, links &amp; support</summary>
     <div class="footCol">
       <h4>Trade</h4>
       <a href="/app#swap">Swap</a>
@@ -868,6 +863,7 @@ Solana</button><script>if(window.__zxPairsCopy){window.__zxPairsCopy.tabs();wind
       <a id="feedbackLink" class="feedback" href="mailto:zaexadex@gmail.com">Report a problem</a>
       <a href="https://www.geckoterminal.com" target="_blank" rel="noopener">Price history by GeckoTerminal</a>
     </div>
+    </details>
   </div>
   <p class="fine">Checks use public contract or token data and available quotes or simulations. They are not an audit or a guarantee. Your wallet authorizes transactions; there is no deposit account.</p>
   <div class="footBottom"><span>Non-custodial &middot; this page reads only our own endpoints &middot; not audited</span><span>&copy; 2026 Zaexa</span></div>
@@ -2245,30 +2241,22 @@ Solana</button><script>if(window.__zxPairsCopy){window.__zxPairsCopy.tabs();wind
     if (!(sPop && (sPop.contains(e.target) || (sBtn && sBtn.contains(e.target))))) closeSetPop();
   });
   document.addEventListener('keydown', function(e){
-    if (e.key === 'Escape'){ closeWalletMenu(); closeSetPop(); closeWalletPicker();
-      var nm = document.getElementById('navMenu');
-      if (nm && nm.classList.contains('on')){ closeNavMenu(); var nb = document.getElementById('navMarkets'); if (nb) nb.focus(); } }
+    if (e.key === 'Escape'){ closeWalletMenu(); closeSetPop(); closeWalletPicker(); }
   });
-  /* منوی Markets — همان رفتارِ اپ: کلیک باز/بسته می‌کند، Escape و mousedownِ بیرون می‌بندد، انتخابِ ردیف می‌بندد. */
-  function closeNavMenu(){
-    var m = document.getElementById('navMenu'), b = document.getElementById('navMarkets');
-    if (m) m.classList.remove('on');
-    if (b) b.setAttribute('aria-expanded', 'false');
-  }
+  /* ۱۸ اکتبر — تبِ Markets بازشو نیست: کلید zaexa.markets.v1 («flow» یا «pairs»؛ هر چیزِ دیگر = pairs) می‌گوید کدام
+     صفحه باز شود. اینجا (/pairs) انتخابِ «pairs» کاری نمی‌کند؛ «flow» به /app#flow می‌رود. */
+  var MKT_KEY = 'zaexa.markets.v1';
+  function mktGet(){ try { return localStorage.getItem(MKT_KEY) === 'flow' ? 'flow' : 'pairs'; } catch (e) { return 'pairs'; } }
+  function mktSet(v){ try { localStorage.setItem(MKT_KEY, v); } catch (e) {} }
+  mktSet('pairs');   // دیدنِ این صفحه انتخابِ Markets را «pairs» می‌کند
   var navMarketsEl = document.getElementById('navMarkets');
-  var navMenuEl = document.getElementById('navMenu');
-  if (navMarketsEl && navMenuEl){
-    navMarketsEl.onclick = function(e){
-      e.stopPropagation();
-      var open = !navMenuEl.classList.contains('on');
-      navMenuEl.classList.toggle('on', open);
-      navMarketsEl.setAttribute('aria-expanded', String(open));
-    };
-    document.addEventListener('mousedown', function(e){
-      if (!navMenuEl.contains(e.target) && !navMarketsEl.contains(e.target)) closeNavMenu();
-    });
-    Array.prototype.forEach.call(navMenuEl.querySelectorAll('a.navItem'), function(a){ a.addEventListener('click', closeNavMenu); });
+  if (navMarketsEl){
+    navMarketsEl.onclick = function(){ if (mktGet() === 'flow') location.href = '/app#flow'; };
   }
+  /* سوییچِ بالای صفحه: اول انتخاب ذخیره می‌شود، بعد پیوند ناوبری می‌کند. */
+  Array.prototype.forEach.call(document.querySelectorAll('.mktSwitch a[data-mkt]'), function(a){
+    a.addEventListener('click', function(){ mktSet(a.getAttribute('data-mkt')); });
+  });
 
   var setBtnEl = document.getElementById('setBtn');
   var setPopEl = document.getElementById('setPop');

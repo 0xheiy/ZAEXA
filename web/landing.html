@@ -156,6 +156,29 @@ svg.diag{display:block;width:100%;height:auto}
 
 /* بیانیه‌ی پایانی — پاراگرافِ ریزِ صداقت، عیناً از current-landing.html */
 .landing-footer .fine{max-width:78ch;margin:46px 0 0;font-size:11.5px;color:var(--tx3);line-height:1.65}
+@media(max-width:720px){.footGrid{grid-template-columns:1fr}}
+/* ۱۸ اکتبر — ستون‌های لینک زیرِ ۷۲۱px در یک <details class="fMore"> جمع می‌شوند
+   (بدونِ JS)؛ عیناً همان قاعده‌های web/index.html. روی دسکتاپ details و محتوایش
+   display:contents است تا سه footCol همان آیتم‌های گریدِ قبل بمانند. */
+@media(min-width:721px){
+  .fMore{display:contents}
+  .fMore>summary{display:none}
+  .fMore::details-content{content-visibility:visible;display:contents}
+}
+@media(max-width:720px){
+  .fMore>summary{display:flex;align-items:center;justify-content:space-between;min-height:44px;padding:0 2px;cursor:pointer;list-style:none;border-top:1px solid var(--line);border-bottom:1px solid var(--line);font-size:13px;font-weight:600;color:var(--tx2)}
+  .fMore>summary::-webkit-details-marker{display:none}
+  .fMore>summary::after{content:"";width:7px;height:7px;border-right:2px solid currentColor;border-bottom:2px solid currentColor;transform:rotate(45deg);transition:transform .16s}
+  .fMore[open]>summary::after{transform:rotate(-135deg)}
+  .fMore>summary:focus-visible{outline:2px solid var(--acc);outline-offset:2px}
+  .fMore::details-content{display:flex;flex-direction:column;gap:26px}
+  .fMore[open]::details-content{padding-top:22px}
+  footer.landing-footer{padding-top:20px;padding-bottom:20px}
+  .footGrid{gap:16px}
+  .footBrand .footTag{margin:8px 0 10px}
+  footer.landing-footer .fine{margin-top:16px}
+  .footBottom{margin-top:14px;padding-top:12px;gap:6px 16px}
+}
 
 /* «هیچ‌کس تو نمی‌ماند بیرون» — کنتراستِ پیش/پس، عیناً از SPEC2 بخشِ ۲a */
 .contrast{padding-top:100px;padding-bottom:100px;border-top:1px solid var(--line)}
@@ -611,6 +634,7 @@ svg.diag{display:block;width:100%;height:auto}
         <a href="https://github.com/0xheiy/ZAEXA" target="_blank" rel="noopener" title="GitHub" aria-label="GitHub"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2a10 10 0 0 0-3.2 19.5c.5.1.7-.2.7-.5v-1.8c-2.8.6-3.4-1.3-3.4-1.3-.4-1.2-1.1-1.5-1.1-1.5-.9-.6.1-.6.1-.6 1 .1 1.5 1 1.5 1 .9 1.5 2.3 1.1 2.9.8.1-.7.4-1.1.6-1.4-2.2-.3-4.6-1.1-4.6-5 0-1.1.4-2 1-2.7-.1-.3-.4-1.3.1-2.6 0 0 .8-.3 2.7 1a9.4 9.4 0 0 1 5 0c1.9-1.3 2.7-1 2.7-1 .5 1.3.2 2.3.1 2.6.6.7 1 1.6 1 2.7 0 3.9-2.4 4.7-4.6 5 .4.3.7 1 .7 2v2.9c0 .3.2.6.7.5A10 10 0 0 0 12 2z"/></svg></a>
       </div>
     </div>
+    <details class="fMore"><summary>About, links &amp; support</summary>
     <div class="footCol">
       <h4>Trade</h4>
       <a href="/app">Swap</a>
@@ -630,6 +654,7 @@ svg.diag{display:block;width:100%;height:auto}
       <a class="feedback" href="/app">Report a problem</a>
       <a href="https://www.geckoterminal.com" target="_blank" rel="noopener">Price history by GeckoTerminal</a>
     </div>
+    </details>
   </div>
   <p class="fine">Checks use public contract or token data and available quotes or simulations. They are not an audit or a guarantee. Your wallet authorizes transactions; there is no deposit account.</p>
   <div class="footBottom"><span>Non-custodial · wallet-signed transactions · not audited</span><span>© 2026 Zaexa</span></div>

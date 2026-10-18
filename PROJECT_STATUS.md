@@ -195,6 +195,10 @@ feeRecipient : همان owner
 کارمزد       : 0 bps  (سقف سخت ۱۰۰ bps = ۱٪، غیرقابل عبور حتی برای owner)
 روترها       : هر هفت تا لیست‌سفید — Uniswap V3، Aerodrome، BaseSwap،
                SushiSwap، Alien Base، PancakeSwap V3، Aerodrome Slipstream
+               ➕ Uniswap V2 (`0x4752ba5DBc23f44D87826276BF6Fd6b1C372aD24`) در اپ و در
+               deploy.sh ثبت شد ولی **هنوز لیست‌سفید نیست**: دروازه‌ی ۳ در اپ
+               «not allow-listed» می‌گوید تا owner اجرا کند: allow_router.sh با آن
+               آدرس. (۱۸ اکتبر؛ ۳۶ از ۱۱۲ جفتِ تازه‌ی Base روی uniswap-v2-base بودند.)
 آداپتورها    : هیچ‌کدام. `allowedAdapter` خالی است و عمداً خالی مانده.
 تست‌ها       : ۸۲ تست واحد سبز + ۱۱ تست fork سبز روی مین‌نت
                (۳۳ واحد + ۱۱ v2 + ۳ v3 + ۷ v4 + ۲۱ v5 + ۷ سلکتور + ۱۱ fork)

@@ -881,7 +881,7 @@ section.card.isDone #actBtn,section.card.isDone #solStatusSlot,section.card.isDo
 .vdot.u{background:#f06ec0}.vdot.a{background:#4fc3f7}
 .vdot.b{background:#f59e0b}.vdot.s{background:#60a5fa}
 .vdot.n{background:#34d399}.vdot.p{background:#a78bfa}
-.vdot.c{background:#2dd4bf}
+.vdot.c{background:#2dd4bf}.vdot.v{background:#ff4d94}
 .vname{font-size:14px;font-weight:560;min-width:0}
 .vtag{font-size:10.5px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;
   color:var(--pos);background:var(--pglow);border-radius:999px;padding:3px 8px;margin-left:7px}
@@ -1106,6 +1106,28 @@ footer .fine{max-width:78ch;margin:46px 0 0;font-size:11.5px;color:var(--tx3);li
 @media(max-width:720px){
   .footGrid{grid-template-columns:1fr;gap:26px}
   .footBrand .footTag{max-width:none}
+}
+/* ۱۸ اکتبر — ستون‌های لینک زیرِ ۷۲۱px در یک <details class="fMore"> جمع می‌شوند
+   (بدونِ JS). روی دسکتاپ details و محتوایش display:contents است تا سه footCol
+   عیناً همان آیتم‌های گریدِ قبل بمانند و summary دیده نشود. */
+@media(min-width:721px){
+  .fMore{display:contents}
+  .fMore>summary{display:none}
+  .fMore::details-content{content-visibility:visible;display:contents}
+}
+@media(max-width:720px){
+  .fMore>summary{display:flex;align-items:center;justify-content:space-between;min-height:44px;padding:0 2px;cursor:pointer;list-style:none;border-top:1px solid var(--line);border-bottom:1px solid var(--line);font-size:13px;font-weight:600;color:var(--tx2)}
+  .fMore>summary::-webkit-details-marker{display:none}
+  .fMore>summary::after{content:"";width:7px;height:7px;border-right:2px solid currentColor;border-bottom:2px solid currentColor;transform:rotate(45deg);transition:transform .16s}
+  .fMore[open]>summary::after{transform:rotate(-135deg)}
+  .fMore>summary:focus-visible{outline:2px solid var(--acc);outline-offset:2px}
+  .fMore::details-content{display:flex;flex-direction:column;gap:26px}
+  .fMore[open]::details-content{padding-top:22px}
+  footer{padding-top:20px;padding-bottom:20px}
+  .footGrid{gap:16px}
+  .footBrand .footTag{margin:8px 0 10px}
+  footer .fine{margin-top:16px}
+  .footBottom{margin-top:14px;padding-top:12px;gap:6px 16px}
 }
 
 /* ---------------- modal / popover ---------------- */
@@ -1376,6 +1398,57 @@ footer .fine{max-width:78ch;margin:46px 0 0;font-size:11.5px;color:var(--tx3);li
   .swapCard .fact{padding:2.5px 0}
 }
 @media(prefers-reduced-motion:reduce){.watchPair{transition:none}}
+/* ۱۸ اکتبر — [mobile compact]: روی گوشی نمای سواپ سه کارتِ بلند را زیرِ هم
+   می‌گذاشت (~۲۸۲۰px). حالا زیرِ کارتِ سواپ یک نوارِ تب است و فقط یکی از سه
+   کارت (نمودار / همه‌ی استخرها / Exit check) دیده می‌شود. DOM دست‌نخورده است:
+   فقط data-mtab روی ردیفِ hero و display. ≥۹۴۱px نوار پنهان است و هیچ قاعده‌ای
+   اینجا اثر ندارد. ⚠️ کارتِ Exit check هرگز بی‌صدا پنهان نمی‌ماند — نقطه‌ی
+   قرمز/سبز روی خودِ تب؛ تعویضِ خودکار فقط برای حکمِ خروجِ منفی در mtabRefresh. */
+.mTabs{display:none}
+@media(max-width:940px){
+  .mTabs{display:flex;order:2;box-sizing:border-box;width:100%;padding:4px;gap:4px;border-radius:999px;background:var(--card);box-shadow:4px 4px 9px var(--soft-lo),-3px -3px 8px var(--soft-hi),inset 0 1px 1px var(--soft-hi)}
+  .mTabs [role=tab]{position:relative;flex:1;padding:8px 6px;border-radius:999px;font-size:13px;font-weight:560;color:var(--tx2);white-space:nowrap;transition:.16s}
+  .mTabs [role=tab][aria-selected=true]{background:var(--grad);color:#fff}
+  .mTabs [role=tab]:focus-visible{outline:2px solid var(--acc);outline-offset:2px}
+  .mTabs [role=tab].warn::after,.mTabs [role=tab].ok::after{content:"";display:inline-block;width:7px;height:7px;margin-left:6px;border-radius:50%;vertical-align:middle;box-shadow:0 0 0 1.5px var(--card)}
+  .mTabs [role=tab].warn::after{background:var(--neg)}
+  .mTabs [role=tab].ok::after{background:var(--pos)}
+  .row.hero[data-mtab="chart"] :is(.swapPoolsCard,.swapSafetyCard),
+  .row.hero[data-mtab="pools"] :is(.swapChartCard,.swapSafetyCard),
+  .row.hero[data-mtab="exit"] :is(.swapChartCard,.swapPoolsCard){display:none}
+  .swapChartCard .plot{flex:0 0 200px;min-height:200px}
+}
+@media(max-width:720px){
+  .marketWatch{display:none}
+  main:has(>#view-swap.on){padding-bottom:28px}
+  main:has(>#view-swap.on)>#solConnectionNotices:empty{display:none}
+}
+@media(max-width:940px){.row.hero{margin-top:18px}}
+
+/* ۱۸ اکتبر — [first-visit tour]: تورِ کوتاهِ اولین بازدید. هر چیزِ آن فقط وقتی تور روشن است در DOM می‌آید
+   (#zxTour)؛ بدونِ تور تنها چیزِ تازه دکمه‌ی «Take the tour» ته‌ی پنلِ تنظیمات است. */
+.tourBtn{display:block;margin:12px 0 0;padding:2px 0;font-size:12.5px;font-weight:620;color:var(--acc);text-align:left}
+.tourBtn:hover{text-decoration:underline}
+.tourBtn[hidden]{display:none}
+#zxTour{position:fixed;inset:0;z-index:2000;pointer-events:none}
+#zxTour .tBlock{position:fixed;inset:0;pointer-events:auto;background:transparent}
+#zxTour .tSpot{position:fixed;border-radius:22px;box-shadow:0 0 0 9999px rgba(10,14,30,.62);outline:2px solid var(--g2);pointer-events:none}
+#zxTour .tCard{position:fixed;box-sizing:border-box;width:330px;padding:18px 18px 16px;border-radius:18px;background:var(--card);color:var(--tx);box-shadow:var(--sh),0 18px 48px -12px rgba(10,14,30,.45);pointer-events:auto}
+#zxTour .tCard.dock{left:16px;right:16px;width:auto}
+#zxTour .tCount{font-size:10.5px;font-weight:640;letter-spacing:.1em;color:var(--tx2)}
+#zxTour .tTitle{margin:8px 0 6px;font-size:16px;font-weight:660;line-height:1.3;color:var(--tx)}
+#zxTour .tBody{margin:0;font-size:13.5px;line-height:1.55;color:var(--tx2)}
+#zxTour .tFoot{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:16px}
+#zxTour .tDots{display:flex;gap:6px}
+#zxTour .tDots i{width:7px;height:7px;border-radius:50%;background:var(--line2)}
+#zxTour .tDots i.on{background:var(--grad)}
+#zxTour .tBtns{display:flex;align-items:center;gap:4px}
+#zxTour .tBtns button{padding:8px 12px;border-radius:999px;font-size:13px;font-weight:600;color:var(--tx2)}
+#zxTour .tBtns button[hidden]{display:none}
+#zxTour .tBtns button:hover{color:var(--tx)}
+#zxTour .tBtns .tNext{padding:8px 18px;background:var(--grad);color:#fff;font-weight:640}
+#zxTour .tBtns .tNext:hover{color:#fff;filter:brightness(1.05)}
+#zxTour button:focus-visible{outline:2px solid var(--acc);outline-offset:2px}
 
 /* نوارِ «فعالیتِ زنده» زیرِ کارتِ سواپ — فقط نمای swap؛ داده از همان /pairs.json.
    هیچ هاله/درخششی ندارد (قاعده‌ی مالک). */
@@ -1498,35 +1571,16 @@ footer .fine{max-width:78ch;margin:46px 0 0;font-size:11.5px;color:var(--tx3);li
 #themeToggle>span{padding:0}#themeToggle svg{width:16px;height:16px}
 .nav{background:var(--bg);box-shadow:4px 4px 9px var(--soft-lo),-3px -3px 8px var(--soft-hi),inset 0 1px 1px var(--soft-hi)}
 .nav button.on,.nav a.on{background:var(--bg);color:var(--acc);box-shadow:inset 2px 2px 5px var(--soft-lo),inset -2px -2px 5px var(--soft-hi)}
-/* ۶ اکتبر — تبِ «Markets» (بازشو با Flow و New pairs) و تبِ «Stocks». منو داخلِ .nav می‌نشیند، پس
-   قاعده‌های عمومیِ .nav button / .nav a روی ردیف‌های منو هم می‌افتند؛ همه‌ی قاعده‌های ردیف عمداً با گزینشگرِ
-   .nav .navMenu … (ویژگیِ بالاتر) نوشته شده تا از آن‌ها جان به در ببرند. */
-.navMenuWrap{display:flex}
-.nav .navMarkets .navChev{width:13px;height:13px;margin-left:-2px;opacity:.7;transition:transform .16s}
-.nav .navMarkets[aria-expanded="true"] .navChev{transform:rotate(180deg)}
-#navMenu{left:0;right:auto;top:calc(100% + 10px);width:auto;min-width:230px;padding:6px;border-radius:16px;background:var(--card);border:1px solid var(--line);box-shadow:var(--sh);z-index:50}
-.nav .navMenu .navItem{display:flex;flex-direction:row;align-items:center;justify-content:flex-start;gap:10px;width:100%;flex:none;padding:9px 10px;border-radius:11px;text-align:left;font-size:13.5px;font-weight:inherit;color:var(--tx);white-space:nowrap;text-decoration:none;background:none;box-shadow:none;cursor:pointer}
-.nav .navMenu .navItem:hover,.nav .navMenu .navItem.on:hover{background:var(--card2);color:var(--tx)}
-.nav .navMenu .navItem.on{background:none;box-shadow:none;font-weight:inherit}
-.nav .navMenu .navIco{display:grid;place-items:center;flex:none;width:30px;height:30px;border-radius:9px;background:var(--bg);box-shadow:inset 2px 2px 5px var(--soft-lo),inset -2px -2px 5px var(--soft-hi);color:var(--acc)}
-.nav .navMenu .navIco svg{width:16px;height:16px}
-.nav .navMenu .navTxt{display:flex;flex-direction:column;gap:1px;min-width:0}
-.nav .navMenu .navTtl{display:block;font-size:13.5px;font-weight:640;color:var(--tx)}
-.nav .navMenu .navItem.on .navTtl{color:var(--acc)}
-.nav .navMenu .navSub{display:block;font-size:12px;font-weight:400;color:var(--tx3)}
-/* بازه‌ی فقط-آیکون (۷۲۱–۱۱۲۰): برچسبِ Markets هم مثلِ بقیه می‌رود (عنوانشان در title می‌ماند). */
-@media(max-width:720px){
-  .navMenuWrap{flex:1;min-width:0}
-  /* ۷ اکتبر — شورونِ تبِ Markets روی نوارِ موبایل: برچسب و شورون به‌صورت یک گروه زیرِ آیکون وسط‌چین می‌شوند
-     (ستون‌های 1fr دو طرف)، و شورون رو به بالاست چون منو بالای نوار باز می‌شود؛ بازشده رو به پایین. */
-  .nav .navMarkets{display:grid;grid-template-columns:1fr auto auto 1fr;grid-template-rows:auto auto;column-gap:2px;row-gap:3px;align-content:center;justify-items:center}
-  .nav .navMarkets>svg:first-child{grid-column:2/4;grid-row:1}
-  .nav .navMarkets>span{grid-column:2;grid-row:2}
-  .nav .navMarkets .navChev{display:block;grid-column:3;grid-row:2;align-self:center;width:10px;height:10px;margin:0;opacity:.7;transform:rotate(180deg)}
-  .nav .navMarkets[aria-expanded="true"] .navChev{transform:none}
-  /* منو بالای نوار باز می‌شود و به دو لبه‌ی صفحه می‌چسبد، پس هرگز بیرون نمی‌زند. */
-  #navMenu{position:fixed;left:12px;right:12px;top:auto;bottom:calc(84px + env(safe-area-inset-bottom));min-width:0}
-}
+/* ۱۸ اکتبر — تبِ «Markets» یک دکمه‌ی ساده است (بدون بازشو و شورون)؛ کلیکش طبق انتخابِ ذخیره‌شده (zaexa.markets.v1)
+   به Flow یا New pairs می‌رود. «Stocks» از ۷ اکتبر تبِ واقعی است و پیش از Exit Report می‌نشیند. */
+/* ۱۸ اکتبر — «Markets» دیگر بازشو نیست: یک تبِ ساده است و انتخابِ بین Flow و New pairs به سوییچِ بالای خودِ صفحه
+   رفته (هر دو صفحه عیناً همین CSS و همین markup را دارند). رنگِ گزینه‌ی فعال همان گرادیانِ دکمه‌های اصلی (--grad) است
+   و متنش همیشه سفید؛ سایه همان سایه‌ی پیلِ هدر. */
+.mktSwitch{display:inline-flex;align-self:flex-start;max-width:100%;box-sizing:border-box;padding:4px;gap:4px;border-radius:999px;background:var(--card);box-shadow:4px 4px 9px var(--soft-lo),-3px -3px 8px var(--soft-hi),inset 0 1px 1px var(--soft-hi);margin-bottom:18px}
+.mktSwitch a{padding:8px 18px;border-radius:999px;font-size:14px;font-weight:560;color:var(--tx2);text-decoration:none;white-space:nowrap;transition:.16s}
+.mktSwitch a:hover{color:var(--tx)}
+.mktSwitch a.on{background:var(--grad);color:#fff}
+.mktSwitch a:focus-visible{outline:2px solid var(--acc);outline-offset:2px}
 .chip:not(.solid):not(#themeBtn),.tokbtn,.tfs button.on{box-shadow:2px 2px 5px var(--soft-lo),-2px -2px 5px var(--soft-hi)}
 .cta:not(:disabled),.chip.solid,.button.primary,.header-cta{box-shadow:inset 0 1px 1px rgba(255,255,255,.4),inset 0 -2px 2px rgba(20,30,55,.16),0 3px 6px var(--soft-lo)}
 .cta:active:not(:disabled),.chip.solid:active,.button.primary:active,.header-cta:active{transform:translateY(1px);box-shadow:inset 0 2px 4px rgba(20,30,55,.22)}
@@ -1607,19 +1661,9 @@ html:not(.ctaReady) #actBtn:disabled,html:not(.ctaReady) #solSwapBtn:disabled{ba
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
            stroke-linecap="round" stroke-linejoin="round">
         <path d="M7 4v13M4 14l3 3 3-3M17 20V7M14 10l3-3 3 3"/></svg><span data-t="Swap">Swap</span></button>
-    <!-- ۶ اکتبر — مالک: «Markets» یک تبِ بازشو است (Flow و New pairs زیرش)؛ «Portfolio» به منوی والت رفت؛
-         «Stocks» از ۷ اکتبر تبِ واقعی است و پیش از Exit Report می‌نشیند. منو داخلِ همین ردیفِ nav
-         می‌نشیند (navMenuWrap) تا nav یک ردیفِ فلکس بماند. -->
-    <div class="navMenuWrap rel">
-      <button class="navMarkets" id="navMarkets" type="button" aria-haspopup="menu" aria-expanded="false" title="Markets">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="M7 15l4-4 3 3 5-6"/></svg><span data-t="Markets">Markets</span><svg class="navChev" viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></button>
-      <div class="pop navMenu" id="navMenu" role="menu" aria-label="Markets">
-        <button class="navItem" role="menuitem" data-view="flow">
-          <span class="navIco"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 13h4l3 7 4-16 3 9h4"/></svg></span><span class="navTxt"><span class="navTtl">Flow</span><span class="navSub">Who is buying and selling</span></span></button>
-        <a class="navItem" role="menuitem" href="/pairs">
-          <span class="navIco"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6h10M4 12h10M4 18h7"/><path d="M19 3v4M17 5h4"/></svg></span><span class="navTxt"><span class="navTtl">New pairs</span><span class="navSub">Fresh pools, exit-checked</span></span></a>
-      </div>
-    </div>
+    <!-- ۱۸ اکتبر — «Markets» تبِ ساده است؛ انتخابِ Flow/New pairs سوییچِ بالای خودِ صفحه است. -->
+    <button class="navMarkets" id="navMarkets" type="button" title="Markets">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="M7 15l4-4 3 3 5-6"/></svg><span data-t="Markets">Markets</span></button>
     <button data-view="stocks" title="Stocks">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 15l3-3 3 2 4-5"/></svg><span data-t="Stocks">Stocks</span></button>
     <a class="navLink" href="/report" title="Exit Report">
@@ -1691,6 +1735,7 @@ html:not(.ctaReady) #actBtn:disabled,html:not(.ctaReady) #solSwapBtn:disabled{ba
         <button id="rpcClear" style="flex:1">Clear</button></div>
       <p id="rpcState" style="margin:0 0 14px"></p>
       <p>Every swap is simulated first. If the simulation fails, nothing is broadcast and no gas is spent.</p>
+      <button type="button" class="tourBtn" id="tourBtn">Take the tour</button>
     </div>
   </div>
   <button class="chip round" id="themeBtn" type="button" role="switch" aria-checked="false" aria-label="Switch to dark mode" title="Switch to dark mode"><svg class="themeMoon" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"/></svg><svg class="themeSun" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2.5v2.2M12 19.3v2.2M4.6 4.6l1.6 1.6M17.8 17.8l1.6 1.6M2.5 12h2.2M19.3 12h2.2M4.6 19.4l1.6-1.6M17.8 6.2l1.6-1.6"/></svg><span id="themeState" hidden>Light</span></button>
@@ -1955,6 +2000,7 @@ try{(function(){
 </div>
 
 <div class="view" id="view-flow">
+  <nav class="mktSwitch" aria-label="Markets"><a href="/app#flow" data-mkt="flow" class="on" aria-current="page">Flow</a><a href="/pairs" data-mkt="pairs">New pairs</a></nav>
   <section class="card">
     <header>
       <span class="ttl">Money flow</span><div id="flowNetworkSlot"></div>
@@ -2268,6 +2314,7 @@ try{(function(){
           <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2a10 10 0 0 0-3.2 19.5c.5.1.7-.2.7-.5v-1.8c-2.8.6-3.4-1.3-3.4-1.3-.4-1.2-1.1-1.5-1.1-1.5-.9-.6.1-.6.1-.6 1 .1 1.5 1 1.5 1 .9 1.5 2.3 1.1 2.9.8.1-.7.4-1.1.6-1.4-2.2-.3-4.6-1.1-4.6-5 0-1.1.4-2 1-2.7-.1-.3-.4-1.3.1-2.6 0 0 .8-.3 2.7 1a9.4 9.4 0 0 1 5 0c1.9-1.3 2.7-1 2.7-1 .5 1.3.2 2.3.1 2.6.6.7 1 1.6 1 2.7 0 3.9-2.4 4.7-4.6 5 .4.3.7 1 .7 2v2.9c0 .3.2.6.7.5A10 10 0 0 0 12 2z"/></svg></a>
       </div>
     </div>
+    <details class="fMore"><summary>About, links &amp; support</summary>
     <div class="footCol">
       <h4>Trade</h4>
       <a href="#swap">Swap</a>
@@ -2289,6 +2336,7 @@ try{(function(){
       <button id="feedbackBtn" class="feedback">Report a problem</button>
       <a href="https://www.geckoterminal.com" target="_blank" rel="noopener">Price history by GeckoTerminal</a>
     </div>
+    </details>
   </div>
   <p class="fine">Checks use public contract or token data and available quotes or simulations. They are not an audit or a guarantee. Your wallet authorizes transactions; there is no deposit account.</p>
   <div class="footBottom"><span>Non-custodial · wallet-signed transactions · not audited</span><span>© 2026 Zaexa</span></div>
@@ -2475,6 +2523,13 @@ const DEXES=[
   {id:"alienbase",name:"Alien Base",cls:"n",kind:KIND.V2,
    router:"0x8c1A3cF8f83074169FE5D7aD50B978e1cD6b37c7",
    factory:"0x3E84D913803b02A4a7f027165E8cA42C14C0FdE7"},
+  // Uniswap V2 روی Base: ۳۶ از ۱۱۲ جفتِ تازه‌ی دیروز (GT id «uniswap-v2-base»)
+  // روی همین بودند و ردیفی نداشتند. کاندید است، نه core: دروازه‌ی ۳ تا وقتی
+  // owner روتر را setRoutersAllowed نکرده «not allow-listed» می‌گوید
+  // (contracts/script/allow_router.sh). چک‌سام EIP-55 با ethers.getAddress.
+  {id:"uniswap-v2",name:"Uniswap V2",cls:"v",kind:KIND.V2,
+   router:"0x4752ba5DBc23f44D87826276BF6Fd6b1C372aD24",
+   factory:"0x8909Dc15e40173Ff4699343b6eB8132c65e18eC6"},
   // نسل اول SwapRouter (ساختار هشت‌فیلدی، با deadline). روی زنجیره بررسی شد:
   // بایت‌کد این روتر `0x414bf389` دارد و `0x04e45aaf` ندارد. با KIND.V3
   // فراخوانی به تابعی می‌رفت که وجود ندارد → revert بدون پیام.
@@ -3778,6 +3833,7 @@ function renderExit(x){
   if(x){tkExitSettled=tkExitSeq;clearTimeout(tkExitTimer);tkExitTimer=null;}
   const box=panel("exitBox");
   if(!box)return;
+  if(!tokenPage&&tokenOut)mtabSet("base:"+balKey(tokenOut),"exit",mtabExitSig(x));
   if(tokenPage)return renderRoundTrip(box,x);
   if(!x){box.innerHTML="";return;}
   const badgeMap={
@@ -4827,7 +4883,7 @@ function reconcileExit(rep){
 /* عمق را از سمت توکن *شناخته‌شده* می‌سنجیم، نه از قیمت خود توکن که می‌تواند
    ساختگی باشد. دو اصلاح نسبت به نسخه‌ی قبل:
 
-   ۱) استخرهای V2 (BaseSwap، SushiSwap، Alien Base) اصلاً شمرده نمی‌شدند.
+   ۱) استخرهای V2 (BaseSwap، SushiSwap، Alien Base، Uniswap V2) اصلاً شمرده نمی‌شدند.
       توکنی که تمام عمقش روی آن‌ها بود «نقدینگی بسیار کم» گزارش می‌شد.
    ۲) اگر قیمت ETH خوانده نمی‌شد، `(eth||0)` سهم هر استخر جفت‌شده با WETH را
       صفر حساب می‌کرد و نتیجه «حدود ۰ دلار» می‌شد — یک قطعی RPC به شکل
@@ -4885,7 +4941,7 @@ async function measureLiquidity(token){
    حالا به aerodrome-cl-v1 می‌رود و aerodrome-slipstream-3 (کارخانه‌ی جدید)
    به aerodrome-cl. هر id دیگری (uniswap-v4-base، aerodrome-slipstream-2،
    …) یعنی «اینجا سنجیده نشده» و باید به نامعلوم بیفتد، نه به اتهام. */
-const GT_DEX_TO_DEX=Object.freeze({"uniswap-v3-base":"uniswap-v3","pancakeswap-v3-base":"pancake-v3","aerodrome-slipstream":"aerodrome-cl-v1","aerodrome-slipstream-3":"aerodrome-cl","aerodrome-base":"aerodrome","baseswap":"baseswap","sushiswap-v2-base":"sushiswap","alien-base":"alienbase"});
+const GT_DEX_TO_DEX=Object.freeze({"uniswap-v3-base":"uniswap-v3","pancakeswap-v3-base":"pancake-v3","aerodrome-slipstream":"aerodrome-cl-v1","aerodrome-slipstream-3":"aerodrome-cl","aerodrome-base":"aerodrome","baseswap":"baseswap","sushiswap-v2-base":"sushiswap","alien-base":"alienbase","uniswap-v2-base":"uniswap-v2"});
 /* شاهدِ پوشش برای measureLiquidity: آیا *همه‌ی* استخرهای این توکن روی
    GeckoTerminal در همان جفت‌هایی هستند که measureLiquidity می‌سنجد؟
    true فقط وقتی که مطمئن باشیم؛ در هر ابهامی null برمی‌گردد، هرگز false
@@ -5212,9 +5268,90 @@ function prepareSwapColumns(){
     const market=document.createElement("div"),actions=document.createElement("div");
     market.className=actions.className="swapColumn";
     market.append(chart,pools);actions.append(trade,safety);hero.append(market,actions);
+    hero.append(mtabBuild());
   }
 }
+/* ۱۸ اکتبر — [mobile compact]. نوارِ تبِ زیرِ کارتِ سواپ (فقط زیر ۹۴۱px دیده
+   می‌شود). انتخاب روی data-mtab ردیفِ hero است و CSS بقیه را می‌کند.
+   قاعده‌ی ایمنی: اگر نتیجه‌ی Exit check برای توکنِ فعلی منفی باشد (فروش
+   ممکن نیست / شبیه‌سازی برگشت خورد / «No sell quote») یا یافته‌ای critical یا
+   high داشته باشد، تبِ Exit check نقطه‌ی قرمز می‌گیرد؛ فقط برای حکمِ منفیِ خروج
+   (نه یافته‌ها) یک‌بار برای هر توکن خودکار انتخاب هم می‌شود. نتیجه‌ی تمیز نقطه‌ی سبز؛ نامعلوم/در انتظار بی‌نقطه. */
+const MTAB_KEY="zaexa.mtab.v1",MTAB_IDS=["chart","pools","exit"];
+var mtabSel="chart",mtabParts=Object.create(null),mtabForced=new Set();
+function mtabBuild(){
+  const el=document.createElement("div");
+  el.className="mTabs";el.setAttribute("role","tablist");el.setAttribute("aria-label","Swap details");
+  el.innerHTML=[["chart","Chart"],["pools","Every pool"],["exit","Exit check"]]
+    .map(([id,t])=>`<button type="button" role="tab" data-mtab="${id}">${t}</button>`).join("");
+  el.addEventListener("click",e=>{
+    const b=e.target.closest("[role=tab]");if(!b)return;
+    mtabSelect(b.dataset.mtab,true);
+  });
+  el.addEventListener("keydown",e=>{
+    if(e.key!=="ArrowRight"&&e.key!=="ArrowLeft")return;
+    const i=MTAB_IDS.indexOf(mtabSel),n=MTAB_IDS[(i+(e.key==="ArrowRight"?1:MTAB_IDS.length-1))%MTAB_IDS.length];
+    mtabSelect(n,true);
+    const b=el.querySelector(`[data-mtab="${n}"]`);if(b)b.focus();
+    e.preventDefault();
+  });
+  return el;
+}
+function mtabSelect(id,persist){
+  if(!MTAB_IDS.includes(id))id="chart";
+  mtabSel=id;
+  document.querySelectorAll(".row.hero").forEach(h=>h.dataset.mtab=id);
+  document.querySelectorAll(".mTabs [role=tab]").forEach(b=>{
+    const on=b.dataset.mtab===id;
+    b.setAttribute("aria-selected",String(on));b.tabIndex=on?0:-1;
+  });
+  if(persist){try{localStorage.setItem(MTAB_KEY,id);}catch{}}
+}
+function mtabInit(){
+  let id="chart";
+  try{const v=localStorage.getItem(MTAB_KEY);if(MTAB_IDS.includes(v))id=v;}catch{}
+  mtabSelect(id,false);
+}
+function mtabKey(){
+  if(activeChain==="solana")return solMintCur?"sol:"+solMintCur:null;
+  return tokenOut?"base:"+balKey(tokenOut):null;
+}
+/* part: "exit" | "safe"؛ sig: "bad" | "ok" | "unk" | null */
+function mtabSet(key,part,sig){
+  if(!key||tokenPage)return;
+  (mtabParts[key]||(mtabParts[key]={}))[part]=sig;
+  mtabRefresh();
+}
+function mtabStatus(key){
+  const p=mtabParts[key];if(!p)return null;
+  if(p.exit==="bad"||p.safe==="bad"||p.safe==="nosell")return "bad";
+  if(p.exit==="unk"||p.safe==="unk")return null;
+  return(p.exit==="ok"||p.safe==="ok")?"ok":null;
+}
+function mtabRefresh(){
+  const key=mtabKey(),st=key?mtabStatus(key):null;
+  document.querySelectorAll('.mTabs [data-mtab="exit"]').forEach(b=>{
+    b.classList.toggle("warn",st==="bad");b.classList.toggle("ok",st==="ok");
+    b.title=st==="bad"?"Exit check found a problem":st==="ok"?"Exit check is clean":"";
+  });
+  /* فقط حکمِ خروجِ منفی (شبیه‌سازی/کوتِ فروش شکست خورد) تب را خودکار عوض می‌کند؛
+     یافته‌ی critical/high به‌تنهایی فقط نقطه‌ی قرمز می‌دهد. */
+  const p=key?mtabParts[key]:null;
+  if(p&&(p.exit==="bad"||p.safe==="nosell")&&!mtabForced.has(key)){mtabForced.add(key);mtabSelect("exit",false);}
+}
+function mtabExitSig(x){
+  if(!x)return null;
+  if(x.state==="blocked"||x.state==="noexit")return "bad";
+  if(x.state==="verified"||x.state==="estimated")return tripCost(x.lossPct).state==="implausible"?"unk":"ok";
+  return "unk";
+}
+function mtabSafeSig(rep){
+  if(!rep||!Array.isArray(rep.findings))return null;
+  if(rep.canSell===false)return "nosell";
+  return rep.findings.some(f=>f.level==="critical"||f.level==="high")?"bad":"ok";
+}
 prepareSwapColumns();
+mtabInit();
 let solAppDefaultFailedAt=0;
 let solAppDefaulted=false,solAppDefaultState="idle";   // idle|loading|done|failed
 function updateSwapViewForChain(){
@@ -5285,6 +5422,7 @@ function updateSwapViewForChain(){
   if(strip&&swapAnchor&&swapAnchor.nextElementSibling!==strip)swapAnchor.after(strip);
   refreshLiveStrip();
   paintWallet();
+  mtabRefresh();
 }
 
 /* ---- نوارِ فعالیتِ زنده ----
@@ -7086,6 +7224,7 @@ async function runScan(token){
   const key=token.address.toLowerCase();
   if(safetyCache[key]){renderSafety(safetyCache[key]);return;}
   panel("safetyBody").innerHTML='<div class="empty"><span class="spin"></span>Scanning bytecode, ownership and liquidity…</div>';
+  mtabSet("base:"+key,"safe",null);
   try{
     const rep=await scanToken(token);
     if(seq!==scanSeq)return;
@@ -7114,6 +7253,8 @@ function renderSafety(rep){
   h+=`<div class="chk" style="color:var(--tx3);font-size:11.5px">
     <span></span><span>Heuristics on public bytecode, not an audit. A clean score is not a guarantee.</span></div>`;
   if(tokenPage)return renderSafetyReport(rep);
+  if(rep.address)mtabSet("base:"+rep.address.toLowerCase(),"safe",mtabSafeSig(rep));
+  else if(tokenOut)mtabSet("base:"+balKey(tokenOut),"safe",mtabSafeSig(rep));
   panel("safetyBody").innerHTML=h;
   animateScore(rep.score,C,"sf-arc","sf-score");
 }
@@ -8521,6 +8662,10 @@ const SOL_UNCONF_TITLE="Sell-back failed in our simulation — unconfirmed";
 const SOL_UNCONF_NOTE="Our simulated sell of this token failed. That can be a temporary routing problem, so we do not call it a honeypot yet. Treat it as high risk.";
 function renderSolExit(v,why,targetId,basis,ret,cause){
   const box=$(targetId||"tk-exitBox");if(!box)return;
+  if(targetId==="appSolExitBox"&&solMintCur){
+    mtabSet("sol:"+solMintCur,"exit",
+      v==="nosell"||(v===null&&why===SOL_UNCONF)?"bad":v==="sell"?"ok":(v===null&&!why)?null:"unk");
+  }
   // ۴ اکتبر — شبیه‌سازیِ فروش شکست خورد ولی «nosell» منتشر نمی‌شود: کهربایی، نه قرمز
   if(v===null&&why===SOL_UNCONF){
     const warnBg="color-mix(in srgb,var(--warn) 14%,transparent)";
@@ -9488,6 +9633,7 @@ async function solLoadDetails(){
   if(!mint)return;
   solRenderVenues();   // کارتِ ونیوها دیگر از GeckoTerminal نمی‌آید؛ فقط از کوتِ فعلی
   safety.innerHTML='<div class="empty">Reading token controls…</div>';
+  mtabSet("sol:"+mint,"safe",null);
   const safetyTask=(async()=>{
     const results=await Promise.allSettled([solRpcCall("getAccountInfo",[mint,{encoding:"jsonParsed"}]),solRpcCall("getTokenLargestAccounts",[mint]),solRpcCall("getEpochInfo",[])]);
     if(!current())return;
@@ -9507,6 +9653,7 @@ async function solLoadDetails(){
     const epoch=results[2].status==="fulfilled"?results[2].value?.epoch:null;
     const rep=solSafetyReport(info,account.owner,largest,epoch);
     renderSafetyReport(rep,"solSafety","sol-risk",!tokenPage);
+    mtabSet("sol:"+mint,"safe",mtabSafeSig(rep));
     safety.insertAdjacentHTML("beforeend",'<p class="fnote">Token-control risk is a heuristic score from the checks shown, not a probability of loss or an audit. Unknown checks are listed separately. Largest accounts may include pools and custody accounts. This does not guarantee that selling is possible.</p>');
   })();
   await safetyTask;
@@ -10426,12 +10573,6 @@ function leaveTokenPage(v){
   scheduleQuote();
   paintAmtClear();refreshButton();
 }
-/* منوی Markets — باز/بسته با aria-expanded؛ هر بار نمایی عوض شود بسته می‌شود (انتخابِ ردیف هم از همین راه). */
-function closeNavMenu(){
-  const m=$("navMenu"),b=$("navMarkets");
-  if(m)m.classList.remove("on");
-  if(b)b.setAttribute("aria-expanded","false");
-}
 /* =====================================================================
    نمای US stocks — سهمِ توکنیزه روی Base و سولانا (۷ اکتبر ۲۰۲۶)
    ---------------------------------------------------------------------
@@ -10792,6 +10933,10 @@ $("stkTable").addEventListener("click",e=>{
   if(b)stocksTrade(b.dataset.sym);
 });
 
+/* ۱۸ اکتبر — انتخابِ آخرِ Markets؛ خواندن/نوشتن هرگز استثنا نمی‌دهد (حالت خصوصی، ذخیره‌ساز بسته). */
+const MKT_KEY="zaexa.markets.v1";
+function mktGet(){try{return localStorage.getItem(MKT_KEY)==="flow"?"flow":"pairs";}catch(e){return "pairs";}}
+function mktSet(v){try{localStorage.setItem(MKT_KEY,v);}catch(e){}}
 function setView(v,push){
   if(v&&v.indexOf("?")>=0)v=v.slice(0,v.indexOf("?"));
   if(!["swap","folio","flow","token","faq","stocks"].includes(v))v="swap";
@@ -10806,7 +10951,8 @@ function setView(v,push){
   document.documentElement.classList.add("ctaReady");
   document.querySelectorAll(".view").forEach(el=>el.classList.toggle("on",el.id==="view-"+v));
   $("nav").querySelectorAll("[data-view]").forEach(b=>b.classList.toggle("on",b.dataset.view===v));
-  $("navMarkets").classList.toggle("on",v==="flow");closeNavMenu();
+  $("navMarkets").classList.toggle("on",v==="flow");
+  if(v==="flow")mktSet("flow");   // ۱۸ اکتبر: دیدنِ نمای Flow انتخابِ Markets را به یاد می‌سپارد
   // روتر اجرا شد؛ attributeِ فلاشِ بوت دیگر لازم نیست (کلاس‌های «on» حالا درست‌اند).
   document.documentElement.removeAttribute("data-boot-view");
   if(push!==false&&parseHash().view!==v)location.hash=v;
@@ -10997,15 +11143,14 @@ function wire(){
     $("solTfs").querySelectorAll("[data-tf]").forEach(x=>x.classList.toggle("on",x===b));
     solLoadChart();});
   $("setBtn").onclick=e=>{e.stopPropagation();$("setPop").classList.toggle("on");};
-  $("navMarkets").onclick=e=>{
-    e.stopPropagation();
-    const open=!$("navMenu").classList.contains("on");
-    $("navMenu").classList.toggle("on",open);
-    $("navMarkets").setAttribute("aria-expanded",String(open));};
-  document.addEventListener("mousedown",e=>{
-    if(!$("navMenu").contains(e.target)&&!$("navMarkets").contains(e.target))closeNavMenu();});
-  /* ردیفِ New pairs یک لینکِ ساده است (صفحه‌ی جدا)؛ منو همان لحظه بسته می‌شود. */
-  $("navMenu").querySelectorAll("a.navItem").forEach(a=>a.addEventListener("click",closeNavMenu));
+  /* ۱۸ اکتبر — تبِ Markets بازشو نیست: کلید zaexa.markets.v1 («flow» یا «pairs»؛ هر چیزِ دیگر = pairs) می‌گوید کدام
+     صفحه باز شود. Flow همین‌جا نما را عوض می‌کند، pairs به /pairs می‌رود. */
+  $("navMarkets").onclick=()=>{
+    if(mktGet()==="flow")setView("flow");else location.href="/pairs";};
+  /* سوییچِ بالای نمای Flow: اول انتخاب ذخیره می‌شود، بعد Flow درجا (بدونِ بارگذاریِ دوباره) و New pairs با ناوبری. */
+  document.querySelectorAll(".mktSwitch a[data-mkt]").forEach(a=>a.addEventListener("click",e=>{
+    mktSet(a.dataset.mkt);
+    if(a.dataset.mkt==="flow"){e.preventDefault();setView("flow");}}));
   document.addEventListener("mousedown",e=>{
     if(!$("setPop").contains(e.target)&&!$("setBtn").contains(e.target))$("setPop").classList.remove("on");});
   document.addEventListener("mousedown",e=>{
@@ -11105,7 +11250,6 @@ $("copyAddrBtn").onclick=(e)=>{
   };
   document.addEventListener("keydown",e=>{
     if(e.key!=="Escape")return;closePicker();closeWalletPicker();
-    if($("navMenu").classList.contains("on")){closeNavMenu();$("navMarkets").focus();}
     $("setPop").classList.remove("on");closeWalletMenu();
     solCloseWalletPicker();$("solWalPop").classList.remove("on");
     solCloseTokenPicker();
@@ -11114,6 +11258,185 @@ $("copyAddrBtn").onclick=(e)=>{
   addEventListener("resize",()=>{clearTimeout(rt);
     rt=setTimeout(()=>{if(chartData&&panel("plot").querySelector("svg"))drawChart(chartData);paintSrc();},180);});
 }
+
+/* ۱۸ اکتبر — [first-visit tour]. تورِ شش‌قدمی با لکه‌ی نور (یک div با box-shadow) و کارتِ راهنما.
+   قواعد: فقط یک‌بار، فقط روی نمای swapِ /app (نه /t/، نه flow/folio/stocks، نه لینکِ اشتراکی)، حدود ۸۰۰ms
+   بعد از بوت، و فقط وقتی هیچ مودال/بازشویی باز نیست. اگر localStorage پرتاب کند هرگز نشان نمی‌دهیم
+   (مزاحمِ هر بازدید نشویم). Done/Skip/Esc کلیدِ zaexa.tour.v1 را "done" می‌کنند.
+   هیچ نامِ رویدادِ /ev تازه‌ای نیست و هیچ درخواستِ شبکه‌ای. روی Solana همان هدف‌ها با معادلِ سولانا. */
+const TOUR_KEY="zaexa.tour.v1";
+const TOUR_STEPS=[
+  ["Swap on Base and Solana","Pick what you pay and what you receive. We check every pool and split your order when that pays you more."],
+  ["Every token gets an exit check","Before you buy, we simulate selling it back. “No sell quote” means no venue we cover would buy it back — treat that as a warning, not a bug."],
+  ["Your wallet, your keys","Zaexa never holds your funds. Every swap is one transaction you sign in your own wallet."],
+  ["Approvals: exact by default","By default you approve only the amount of each swap. Turning this on approves an unlimited amount so later swaps skip that step — only do it if you trust the contract."],
+  ["Use your own RPC","Paste your own https RPC address here if public nodes are slow. We check that it answers as Base before saving it."],
+  ["Your portfolio","After you connect, Portfolio is the first item in your wallet menu — balances and recent swaps in one place."]
+];
+let tour=null;
+function tourTargets(i){
+  const sol=activeChain==="solana";
+  switch(i){
+    case 0:return [sol?$("solSwap"):document.querySelector("#baseHeroRow .swapCard")];
+    case 1:return [sol?$("appSolSafetyCard"):document.querySelector("#baseHeroRow .swapSafetyCard")];
+    case 2:return [sol?$("solSwapBtn"):$("actBtn")];
+    case 3:return [$("unlimApprove").closest(".optrow")];
+    case 4:{
+      const h=[...document.querySelectorAll("#setPop h4")].find(x=>/custom rpc/i.test(x.textContent));
+      return [h,$("rpcCustom").parentElement,$("rpcSave").parentElement];
+    }
+    default:return [$("connectBtn")];
+  }
+}
+function tourRect(i){
+  let L=1e9,T=1e9,R=-1e9,B=-1e9;
+  for(const e of tourTargets(i)){
+    if(!e)continue;
+    const r=e.getBoundingClientRect();
+    if(!r.width&&!r.height)continue;
+    L=Math.min(L,r.left);T=Math.min(T,r.top);R=Math.max(R,r.right);B=Math.max(B,r.bottom);
+  }
+  return R<L?null:{left:L,top:T,right:R,bottom:B};
+}
+function tourStoreOk(){
+  try{
+    const v=localStorage.getItem(TOUR_KEY);
+    if(v==="done")return false;
+    localStorage.setItem(TOUR_KEY,v||"pending");   // نوشتن هم باید کار کند، وگرنه هر بازدید مزاحم می‌شدیم
+    return true;
+  }catch{return false;}
+}
+function tourMaybe(){
+  if(tour||tokenPage||view!=="swap"||/^\/t\//.test(location.pathname))return;
+  const h=parseHash();
+  if(h.view&&h.view!=="swap")return;
+  if(["in","out","amt","check"].some(k=>h.params.has(k)))return;
+  if(document.querySelector(".ov.on,.pop.on"))return;
+  if(!tourStoreOk())return;
+  tourStart();
+}
+function tourStart(){
+  if(tour||tokenPage)return;
+  if(view!=="swap")setView("swap");
+  $("setPop").classList.remove("on");
+  const root=document.createElement("div");root.id="zxTour";
+  root.innerHTML='<div class="tBlock"></div><div class="tSpot"></div>'+
+    '<div class="tCard" role="dialog" aria-modal="true" aria-label="Welcome tour" tabindex="-1">'+
+    '<div class="tCount"></div><h3 class="tTitle"></h3><p class="tBody"></p>'+
+    '<div class="tFoot"><div class="tDots" aria-hidden="true">'+TOUR_STEPS.map(()=>"<i></i>").join("")+'</div>'+
+    '<div class="tBtns"><button type="button" class="tBack">Back</button><button type="button" class="tSkip">Skip</button>'+
+    '<button type="button" class="tNext">Next</button></div></div></div>';
+  document.body.appendChild(root);
+  const t=tour={i:0,root,spot:root.querySelector(".tSpot"),card:root.querySelector(".tCard"),
+    prevFocus:document.activeElement,prevTab:null,openedPop:false,raf:0};
+  const stop=e=>{e.preventDefault();e.stopPropagation();};
+  const blk=root.querySelector(".tBlock");
+  ["mousedown","mouseup","click","pointerdown","contextmenu"].forEach(n=>blk.addEventListener(n,stop));
+  // mousedown داخلِ کارت نباید به شنونده‌ی «کلیک بیرون = بستنِ تنظیمات» برسد
+  t.card.addEventListener("mousedown",e=>e.stopPropagation());
+  t.card.querySelector(".tBack").onclick=()=>tourGo(t.i-1);
+  t.card.querySelector(".tSkip").onclick=()=>tourEnd(true);
+  t.card.querySelector(".tNext").onclick=()=>{if(t.i>=TOUR_STEPS.length-1)tourEnd(true);else tourGo(t.i+1);};
+  t.onKey=e=>{
+    if(e.key==="Escape"){e.preventDefault();e.stopImmediatePropagation();tourEnd(true);return;}
+    if(e.key!=="Tab")return;
+    const f=[...t.card.querySelectorAll("button")].filter(b=>!b.hidden);
+    if(!f.length)return;
+    const a=document.activeElement,k=f.indexOf(a);
+    e.preventDefault();
+    f[k<0?0:(k+(e.shiftKey?f.length-1:1))%f.length].focus();
+  };
+  t.onFocus=e=>{if(!t.card.contains(e.target))tourFocus(true);};
+  t.onLayout=()=>{cancelAnimationFrame(t.raf);t.raf=requestAnimationFrame(()=>tourLayout(false));};
+  t.onHash=()=>tourEnd(false);
+  document.addEventListener("keydown",t.onKey,true);
+  document.addEventListener("focusin",t.onFocus,true);
+  addEventListener("resize",t.onLayout);addEventListener("scroll",t.onLayout,{passive:true});
+  addEventListener("hashchange",t.onHash);
+  tourGo(0);
+}
+function tourFocus(force){
+  const t=tour;if(!t)return;
+  const a=document.activeElement;
+  if(force||!t.card.contains(a)||a.hidden)t.card.querySelector(".tNext").focus();
+}
+function tourGo(i){
+  const t=tour;if(!t||i<0||i>=TOUR_STEPS.length)return;
+  t.i=i;
+  // تنظیمات: قدم‌های ۴ و ۵ بازش می‌کنند؛ اگر خودِ تور بازش کرده باشد، بیرون از آن دو قدم می‌بندد
+  const pop=$("setPop"),wantPop=i===3||i===4;
+  if(wantPop&&!pop.classList.contains("on")){pop.classList.add("on");t.openedPop=true;}
+  else if(!wantPop&&t.openedPop){pop.classList.remove("on");t.openedPop=false;}
+  // موبایل/تبلت: قدمِ ۲ تبِ Exit check را انتخاب می‌کند و با رفتن به قدمِ دیگر تبِ قبلی برمی‌گردد
+  if(i===1&&matchMedia("(max-width:940px)").matches){
+    if(t.prevTab===null)t.prevTab=mtabSel;
+    mtabSelect("exit",false);
+  }else tourRestoreTab(t);
+  const c=t.card,last=i===TOUR_STEPS.length-1;
+  c.querySelector(".tCount").textContent="WELCOME TO ZAEXA · "+(i+1)+" OF "+TOUR_STEPS.length;
+  c.querySelector(".tTitle").textContent=TOUR_STEPS[i][0];
+  c.querySelector(".tBody").textContent=TOUR_STEPS[i][1];
+  c.querySelector(".tBack").hidden=i===0;
+  c.querySelector(".tNext").textContent=last?"Done":"Next";
+  c.querySelectorAll(".tDots i").forEach((d,k)=>d.classList.toggle("on",k===i));
+  tourLayout(true);
+  tourFocus(false);
+}
+function tourRestoreTab(t){
+  if(!t||t.prevTab===null)return;
+  mtabSelect(t.prevTab,false);t.prevTab=null;
+}
+function tourLayout(scroll){
+  const t=tour;if(!t)return;
+  const vw=t.root.clientWidth||document.documentElement.clientWidth,vh=t.root.clientHeight||document.documentElement.clientHeight;
+  const dock=matchMedia("(max-width:720px)").matches,c=t.card;
+  c.classList.toggle("dock",dock);
+  let r=tourRect(t.i);
+  const nav=$("nav"),navTop=nav&&nav.getBoundingClientRect().height?nav.getBoundingClientRect().top:vh-16;
+  if(dock){c.style.left="";c.style.top="auto";c.style.bottom=Math.max(8,vh-navTop+8)+"px";}
+  const ch=c.offsetHeight;
+  const hdr=document.querySelector("body > header"),first=tourTargets(t.i).find(Boolean);
+  if(scroll&&r&&!(hdr&&first&&hdr.contains(first))){
+    const top=(hdr?hdr.getBoundingClientRect().bottom:0)+18,bot=(dock?navTop-8-ch-12:vh-12)-8;
+    let d=0;
+    if(r.bottom-r.top>bot-top||r.top<top)d=r.top-top;
+    else if(r.bottom>bot)d=r.bottom-bot;
+    if(Math.abs(d)>1){scrollBy({top:d,behavior:"instant"});r=tourRect(t.i);}
+  }
+  const s=t.spot.style;
+  if(!r){s.display="none";}
+  else{
+    s.display="";s.left=(r.left-8)+"px";s.top=(r.top-8)+"px";
+    s.width=(r.right-r.left+16)+"px";s.height=(r.bottom-r.top+16)+"px";
+  }
+  if(dock)return;
+  c.style.bottom="auto";
+  if(!r){c.style.left=Math.max(12,(vw-330)/2)+"px";c.style.top=Math.max(12,(vh-ch)/2)+"px";return;}
+  const right=vw-(r.right+8)-16,left=r.left-8-16;
+  let x=right>=330||(left<330&&right>=left)?r.right+8+16:r.left-8-16-330;
+  x=Math.min(Math.max(12,x),Math.max(12,vw-330-12));
+  const y=Math.min(Math.max(12,r.top),Math.max(12,vh-ch-12));
+  c.style.left=x+"px";c.style.top=y+"px";
+}
+function tourEnd(write){
+  const t=tour;if(!t)return;
+  tour=null;
+  cancelAnimationFrame(t.raf);
+  tourRestoreTab(t);
+  if(t.openedPop)$("setPop").classList.remove("on");
+  document.removeEventListener("keydown",t.onKey,true);
+  document.removeEventListener("focusin",t.onFocus,true);
+  removeEventListener("resize",t.onLayout);removeEventListener("scroll",t.onLayout);
+  removeEventListener("hashchange",t.onHash);
+  t.root.remove();
+  if(write){try{localStorage.setItem(TOUR_KEY,"done");}catch{}}
+  try{if(t.prevFocus&&t.prevFocus.isConnected&&t.prevFocus.focus)t.prevFocus.focus();}catch{}
+}
+$("tourBtn").addEventListener("click",()=>{
+  $("setPop").classList.remove("on");
+  tourStart();
+});
+$("setBtn").addEventListener("click",()=>{$("tourBtn").hidden=!!tokenPage;});
 
 (async function(){
   applyTheme();
@@ -11275,6 +11598,7 @@ $("copyAddrBtn").onclick=(e)=>{
   setView(tokenPage?"token":(parseHash().view||"swap"),false);
   if(!tokenPage)updateSwapViewForChain();
   if(activeChain==="solana")document.documentElement.removeAttribute("data-bootchain");   // سولانا چیده شد
+  if(!tokenPage)setTimeout(tourMaybe,800);   // [first-visit tour]
   /* ⚠️ ترتیب اینجا سرعتِ دیده‌شدن را تعیین می‌کند. خواندنِ خودِ توکن به
      دروازه‌های صرافی ربطی ندارد، پس همان اول شروع می‌شود و موازی با
      verifyDexes پیش می‌رود؛ نام و لوگو و اعداد بازار چند ثانیه زودتر

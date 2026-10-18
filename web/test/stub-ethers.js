@@ -56,6 +56,7 @@
     // PancakeSwap V3 — نسل اول روتر، ولی از نظر استخر مثل بقیه‌ی V3
     "pcs-500|weth-usdc": 2_200_000, "pcs-2500|weth-usdc": 300_000,
     "pcs-100|weth-usdc": 0,         "pcs-10000|weth-usdc": 0,
+    "uv2|weth-usdc": 4_000_000,
   };
   // کلیدهای جفت‌ها را به همان شکلی که pairKey می‌سازد (مرتب‌شده) نرمال می‌کنیم
   for (const k of Object.keys(DEPTH)) {
@@ -66,7 +67,7 @@
 
   const FEE = { "uni-100":1n, "uni-500":5n, "uni-3000":30n, "uni-10000":100n,
                 "pcs-100":1n, "pcs-500":5n, "pcs-2500":25n, "pcs-10000":100n,
-                "aero-vol":30n, "aero-stb":5n, "cl-100":5n, "cl1-100":5n };  // در ده‌هزارم
+                "aero-vol":30n, "aero-stb":5n, "uv2":30n, "cl-100":5n, "cl1-100":5n };  // در ده‌هزارم
 
   const QUOTER = "0x3d4e44Eb1374240CE5F1B871ab261CD16335B76a".toLowerCase();
   const PCS_Q  = "0xB048Bbc1Ee6b733FFfCFb9e9cEF7375518e25997".toLowerCase();
@@ -80,6 +81,10 @@
   // یا tickSpacing.
   const V3_QUOTERS = { [QUOTER]: "uni", [PCS_Q]: "pcs", [CL_Q]: "cl", [CL_Q1]: "cl1" };
   const AERO_R = "0xcF77a3Ba9A5CA399B7c97c74d54e5b1Beb874E43".toLowerCase();
+  // Uniswap V2 (kind V2، getAmountsOut با مسیر address[]). مثل زنجیره‌ی واقعی
+  // کد دارد ولی executor هنوز لیست‌سفیدش نکرده: allowedRouter پیش‌فرضِ این
+  // یکی false است و فقط با window.__STUB_ROUTER_ALLOWED__ روشن می‌شود.
+  const UNIV2_R = "0x4752ba5DBc23f44D87826276BF6Fd6b1C372aD24".toLowerCase();
   const MC3    = "0xcA11bde05977b3631167028862bE2a173976CA11".toLowerCase();
   // باید با CHAIN.executor در index.html یکی باشد، وگرنه allowedRouter و feeBps
   // در استاب هرگز match نمی‌شوند و دروازه‌ی ۳ بی‌صدا از تست بیرون می‌ماند.
@@ -144,6 +149,7 @@
     "0x1b81D678ffb9C0263b24A97847620C99d213eB14",   // PancakeSwap V3 router (نسل ۰۱)
     "0x698Cb2b6dd822994581fEa6eA4Fc755d1363A92F",   // Aerodrome Slipstream router
     "0xBE6D8f0d05cC4be24d5167a3eF062215bE6D18a5",   // Aerodrome Slipstream v1 router (old factory)
+    "0x4752ba5DBc23f44D87826276BF6Fd6b1C372aD24",   // Uniswap V2 router (روی زنجیره کد دارد؛ لیست‌سفید نیست — پایین)
   ].map(a => a.toLowerCase());
   // کوترها کد جدا دارند: دروازه‌ی جدید سلکتور کوتر را در بایت‌کد می‌گردد،
   // پس اگر کد کوتر همان کد روتر باشد تست چیزی را ثابت نمی‌کند.
@@ -269,6 +275,12 @@
           if (o === null) return [false, "0x"];
           return [true, pack([[amt, o]])];
         }
+        if (t === UNIV2_R && c.name === "getAmountsOut") {
+          const amt = c.args[0], path = c.args[1];
+          const o = amm("uv2", path[0], path[1], amt);
+          if (o === null) return [false, "0x"];
+          return [true, pack([[amt, o]])];
+        }
         if (c.name === "balanceOf") {
           const d = DEC[t] || 18;
           /* موجودی هم مثل allowance قابل تنظیم شد. تا قبل از این ثابت ۲۵۰۰
@@ -306,7 +318,7 @@
         if (t === EXEC && c.name === "allowedRouter") {
           const r = String(c.args[0]).toLowerCase();
           const ov = (window.__STUB_ROUTER_ALLOWED__ || {})[r];
-          return [true, pack([ov === undefined ? true : ov])];
+          return [true, pack([ov === undefined ? r !== UNIV2_R : ov])];
         }
       } catch (e) { /* fallthrough */ }
       return [false, "0x"];
