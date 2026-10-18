@@ -3978,10 +3978,10 @@ function ev(name,detail,chain){
 }
 
 const TFS={
-  "1H":{tf:"minute",agg:1,limit:60,fmt:{hour:"2-digit",minute:"2-digit"}},
-  "1D":{tf:"minute",agg:15,limit:96,fmt:{hour:"2-digit",minute:"2-digit"}},
-  "1W":{tf:"hour",agg:1,limit:168,fmt:{weekday:"short",hour:"2-digit"}},
-  "1M":{tf:"hour",agg:4,limit:180,fmt:{month:"short",day:"numeric"}},
+  "1H":{tf:"minute",agg:1,key:"1H",limit:60,fmt:{hour:"2-digit",minute:"2-digit"}},
+  "1D":{tf:"minute",agg:15,key:"1D",limit:96,fmt:{hour:"2-digit",minute:"2-digit"}},
+  "1W":{tf:"hour",agg:1,key:"1W",limit:168,fmt:{weekday:"short",hour:"2-digit"}},
+  "1M":{tf:"hour",agg:4,key:"1M",limit:180,fmt:{month:"short",day:"numeric"}},
 };
 const poolCache={};
 
@@ -4305,17 +4305,33 @@ function priceToken(t){
   if(!t||!t.native)return t;
   return WETH_TOKEN()||t;
 }
+/* ۱۸ اکتبر: پشتیبانِ نمودار — وقتی GeckoTerminal شکست می‌خورد، k-lineِ CoinMarketCap از Worker.
+   مسیرِ موفقِ GT هیچ درخواستِ /cmc/ نمی‌زند. */
+async function cmcSeries(chain,address,cfg){
+  const r=await withTimeout(fetch("/cmc/kline?chain="+encodeURIComponent(chain)+"&address="+encodeURIComponent(address)+"&tf="+encodeURIComponent(cfg.key),
+    {headers:{accept:"application/json"}}),9000);
+  if(!r.ok)throw new Error("cmc "+r.status);
+  const j=await r.json();
+  const out=((j&&j.candles)||[]).map(r=>({t:Number(r[0]),c:Number(r[1])}))
+    .filter(p=>isFinite(p.t)&&isFinite(p.c)&&p.c>0).sort((a,b)=>a.t-b.t);
+  if(!out.length)throw new Error("empty");
+  return out;
+}
 async function usdSeries(token,cfg){
   token=priceToken(token);
   if(token.stable)return null;                       // استیبل ≈ ۱ دلار
-  const pool=await topPoolFor(token);
-  if(!pool)throw new Error("no pool");
-  const j=await gtJson(`${GT}/networks/${CHAIN.gtNetwork}/pools/${pool}/ohlcv/${cfg.tf}`+
-    `?aggregate=${cfg.agg}&limit=${cfg.limit}&currency=usd`);
-  const raw=(((j||{}).data||{}).attributes||{}).ohlcv_list||[];
-  if(!raw.length)throw new Error("empty");
-  return raw.map(r=>({t:Number(r[0]),c:Number(r[4])}))
-            .filter(p=>isFinite(p.c)&&p.c>0).sort((a,b)=>a.t-b.t);
+  try{
+    const pool=await topPoolFor(token);
+    if(!pool)throw new Error("no pool");
+    const j=await gtJson(`${GT}/networks/${CHAIN.gtNetwork}/pools/${pool}/ohlcv/${cfg.tf}`+
+      `?aggregate=${cfg.agg}&limit=${cfg.limit}&currency=usd`);
+    const raw=(((j||{}).data||{}).attributes||{}).ohlcv_list||[];
+    if(!raw.length)throw new Error("empty");
+    return raw.map(r=>({t:Number(r[0]),c:Number(r[4])}))
+              .filter(p=>isFinite(p.c)&&p.c>0).sort((a,b)=>a.t-b.t);
+  }catch(e){
+    try{return await cmcSeries("base",token.address,cfg);}catch{throw e;}   // پیامِ خطای اصلیِ GT می‌ماند
+  }
 }
 /** سری نرخ جفت‌ارز: قیمت دلاری خروجی تقسیم بر قیمت دلاری ورودی. */
 async function pairSeries(tIn,tOut,cfg){
@@ -4501,14 +4517,18 @@ async function topPoolForSolana(mint){
   return id;
 }
 async function solOhlcvSeries(mint,cfg){
-  const pool=await topPoolForSolana(mint);
-  if(!pool)throw new Error("no pool");
-  const j=await gtJson(`${GT}/networks/solana/pools/${pool}/ohlcv/${cfg.tf}`+
-    `?aggregate=${cfg.agg}&limit=${cfg.limit}&currency=usd&token=${solPoolTokenSide.get(mint)||"base"}`);
-  const raw=(((j||{}).data||{}).attributes||{}).ohlcv_list||[];
-  if(!raw.length)throw new Error("empty");
-  return raw.map(r=>({t:Number(r[0]),c:Number(r[4])}))
-            .filter(p=>isFinite(p.c)&&p.c>0).sort((a,b)=>a.t-b.t);
+  try{
+    const pool=await topPoolForSolana(mint);
+    if(!pool)throw new Error("no pool");
+    const j=await gtJson(`${GT}/networks/solana/pools/${pool}/ohlcv/${cfg.tf}`+
+      `?aggregate=${cfg.agg}&limit=${cfg.limit}&currency=usd&token=${solPoolTokenSide.get(mint)||"base"}`);
+    const raw=(((j||{}).data||{}).attributes||{}).ohlcv_list||[];
+    if(!raw.length)throw new Error("empty");
+    return raw.map(r=>({t:Number(r[0]),c:Number(r[4])}))
+              .filter(p=>isFinite(p.c)&&p.c>0).sort((a,b)=>a.t-b.t);
+  }catch(e){
+    try{return await cmcSeries("solana",mint,cfg);}catch{throw e;}   // پیامِ خطای اصلیِ GT می‌ماند
+  }
 }
 let solChartSeq=0,solChartTries=0,solChartRetry=null,solChartKey="",solTimeframe="1D";
 function solChartEls(){
@@ -5644,6 +5664,21 @@ let solPopularCache=null,solPopularLoading=null;
 /* ۱۳ اکتبر: شکست چسبنده نیست — زمانِ شکست نگه داشته می‌شود و بازشدنِ بعدیِ گزینشگر پس از ۳۰ ثانیه دوباره می‌پرسد
    (پاسخِ واقعاً خالی شکست نیست و کش می‌ماند). */
 const SOL_RETRY_MS=30000;
+/* ۱۸ اکتبر: Jupiter فقط پشتیبانِ GeckoTerminal است (IPِ بعضی کاربران در GT بسته است)؛ هرگز جای آن نمی‌نشیند.
+   قوانینِ پارس عیناً از web/pairs.html: آرایه‌ای از شیء، it.id = mint، it.icon = لوگو، فقط https و ≤۵۱۲ نویسه. */
+const SOL_JUP_SEARCH="https://lite-api.jup.ag/tokens/v2/search?query=";
+const SOL_JUP_TOP="https://lite-api.jup.ag/tokens/v2/toporganicscore/24h?limit=20";
+async function solJupJson(url){
+  const r=await withTimeout(fetch(url,{headers:{accept:"application/json"}}),8000);
+  if(!r.ok)throw new Error("jup "+r.status);
+  const j=await r.json();
+  if(!Array.isArray(j))throw new Error("jup shape");
+  return j;
+}
+function solJupIcon(u){
+  if(typeof u!=="string"||u.indexOf("https://")!==0||u.length>512)return null;
+  try{new URL(u);return u;}catch{return null;}
+}
 let solPopularFailedAt=0;
 async function solLoadPopular(){
   if(solPopularCache&&solPopularFailedAt&&Date.now()-solPopularFailedAt>=SOL_RETRY_MS&&!solPopularLoading){
@@ -5684,8 +5719,28 @@ async function solLoadPopular(){
           out.push({symbol:sym,name:nm||sym,mint});
           if(out.length>=8)break;
         }
+        if(!out.length)throw new Error("no usable GT rows");
         solPopularCache=out;solPopularFailedAt=0;
-      }catch{solPopularCache=[];solPopularFailedAt=Date.now();}
+      }catch{
+        // GT شکست خورد یا ردیفِ قابل‌استفاده نداد → Jupiter (پشتیبان)؛ او هم شکست خورد = رفتارِ امروز
+        try{
+          const arr=await solJupJson(SOL_JUP_TOP);
+          const skip=new Set([SOL_MINT_ADDR,SOL_APP_TOKENS.USDC,SOL_APP_TOKENS.USDT]);
+          const seen=new Set();
+          const out=[];
+          for(const it of arr){
+            const id=it&&it.id;
+            if(typeof id!=="string"||!SOL_MINT_RE.test(id)||skip.has(id)||seen.has(id))continue;
+            seen.add(id);
+            const sym=(typeof it.symbol==="string"&&it.symbol)?it.symbol:shortAddr(id);
+            out.push({symbol:sym,name:it.name||sym,mint:id});
+            const ic=solJupIcon(it.icon);
+            if(ic)solLogoCache[id]=ic;
+            if(out.length>=8)break;
+          }
+          solPopularCache=out;solPopularFailedAt=0;
+        }catch{solPopularCache=[];solPopularFailedAt=Date.now();}
+      }
       finally{solPopularLoading=null;}
     })();
   }
@@ -5934,10 +5989,29 @@ async function solPrefetchLogos(){
   if(!need.length)return;
   const failed=new Set();
   const metaMap=await fetchSolMetaMulti(need,10,1,failed);
+  const jupNeed=[];
   for(const m of need){
-    if(failed.has(m)){solLogoFailAt[m]=Date.now();continue;}
+    if(failed.has(m)){jupNeed.push(m);continue;}
     delete solLogoFailAt[m];
-    solLogoCache[m]=(metaMap[m]&&okLogo(metaMap[m].image_url))?metaMap[m].image_url:null;
+    if(metaMap[m]&&okLogo(metaMap[m].image_url))solLogoCache[m]=metaMap[m].image_url;
+    else jupNeed.push(m);          // GT جواب داد ولی لوگوی قابل‌استفاده نداشت
+  }
+  // ۱۸ اکتبر: پشتیبانِ Jupiter برای مینت‌هایی که GT لوگو نداد (حداکثر ۲۵ در هر تماس)
+  for(let i=0;i<jupNeed.length;i+=25){
+    const chunk=jupNeed.slice(i,i+25);
+    let arr=null;
+    try{arr=await solJupJson(SOL_JUP_SEARCH+chunk.join(","));}catch{arr=null;}
+    const icons={};
+    if(arr)for(const it of arr){
+      const ic=it&&typeof it.id==="string"?solJupIcon(it.icon):null;
+      if(ic)icons[it.id]=ic;
+    }
+    for(const m of chunk){
+      if(icons[m]){solLogoCache[m]=icons[m];delete solLogoFailAt[m];}
+      else if(arr){solLogoCache[m]=null;delete solLogoFailAt[m];}      // Jupiter جواب داد بدونِ آیکن: مثلِ امروز
+      else if(failed.has(m))solLogoFailAt[m]=Date.now();                // هر دو شکست: قاعده‌ی امروز، کش نمی‌شود
+      else{delete solLogoFailAt[m];solLogoCache[m]=null;}               // GT بی‌لوگو + Jupiter شکست: مثلِ امروز null
+    }
   }
 }
 function solRenderTokenPicker(q){

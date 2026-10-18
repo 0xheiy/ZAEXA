@@ -3486,11 +3486,115 @@ async function reportRunRoute(request, env, ctx) {
   });
 }
 
+/* ۱۸ اکتبر: /cmc/kline — پشتیبانِ نمودار وقتی GeckoTerminal برای IPِ کاربر بسته است.
+   چرا از Worker: k-line کوین‌مارکت‌کپ هدرِ CORS برای zaexa.com نمی‌فرستد.
+   🔴 کلید فقط در هدرِ درخواستِ بالادست می‌رود — هرگز در URL، پاسخ یا لاگ.
+   ⚠️ زمان‌ها در پاسخِ واقعی میلی‌ثانیه‌اند (مستندات می‌گوید ثانیه)؛ هر دو را می‌پذیریم.
+   فقط پاسخِ موفق کش می‌شود؛ «خالی» و خطا هرگز. */
+const CMC_KLINE_KEYED = "https://pro-api.coinmarketcap.com/v1/k-line/candles";
+const CMC_KLINE_FREE = "https://pro-api.coinmarketcap.com/public-api/v1/k-line/candles";
+const CMC_KLINE_TIMEOUT_MS = 6000;
+// tf -> [interval, limit, cacheSeconds]
+const CMC_KLINE_TF = {
+  "1H": ["1min", 60, 60],
+  "1D": ["15min", 96, 300],
+  "1W": ["1h", 168, 900],
+  "1M": ["4h", 180, 1800],
+};
+async function cmcKlineCall(url, headers) {
+  const ac = new AbortController();
+  const timer = setTimeout(() => ac.abort(), CMC_KLINE_TIMEOUT_MS);
+  try {
+    const res = await fetch(url, { headers, signal: ac.signal });
+    if (!res.ok) return null;
+    const body = await res.json();
+    if (!body || String(body.status && body.status.error_code) !== "0") return null;
+    return body;
+  } catch (e) {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+function cmcKlineNormalise(body) {
+  const rows = body && body.data;
+  if (!Array.isArray(rows)) return [];
+  const byT = new Map();
+  for (const row of rows) {
+    if (!Array.isArray(row)) continue;
+    const c = Number(row[3]);
+    let t = Number(row[5]);
+    if (!isFinite(c) || !(c > 0) || !isFinite(t)) continue;
+    if (t > 1e12) t = Math.floor(t / 1000);
+    if (!(t > 0)) continue;
+    if (!byT.has(t)) byT.set(t, c);
+  }
+  return [...byT.entries()].sort((a, b) => a[0] - b[0]).map(([t, c]) => [t, c]);
+}
+async function cmcKlineRoute(request, url, ctx, env) {
+  if (!rateOk(request, "cmc", RL_LIMIT, RL_WINDOW_MS))
+    return fail(429, "too many requests", { "retry-after": "60" });
+  if (request.method !== "GET") return fail(405, "only GET");
+
+  const chain = url.searchParams.get("chain") || "";
+  let addr = url.searchParams.get("address") || "";
+  const tf = url.searchParams.get("tf") || "";
+  const cfg = Object.prototype.hasOwnProperty.call(CMC_KLINE_TF, tf) ? CMC_KLINE_TF[tf] : null;
+  if (chain === "base" && EVM_ADDR.test(addr)) addr = addr.toLowerCase();
+  else if (chain === "solana" && SOL_MINT.test(addr)) { /* بزرگ‌وکوچکی مهم است */ }
+  else return fail(400, "bad request");
+  if (!cfg) return fail(400, "bad request");
+  const [interval, limit, ttl] = cfg;
+
+  const store = cacheStore();
+  const cacheKey = new Request("https://cmc-kline.zaexa.internal/" + chain + "/" + addr + "/" + tf);
+  if (store) {
+    const hit = await store.match(cacheKey);
+    if (hit) {
+      const h = new Headers(hit.headers);
+      h.set("x-zaexa-src", "cache");
+      return new Response(hit.body, { status: 200, headers: h });
+    }
+  }
+
+  const q = "?platform=" + chain + "&address=" + encodeURIComponent(addr) +
+    "&interval=" + interval + "&limit=" + limit + "&unit=usd";
+  let body = null, src = "";
+  const key = cmcKey(env);
+  if (key) {
+    body = await cmcKlineCall(CMC_KLINE_KEYED + q, { accept: "application/json", "X-CMC_PRO_API_KEY": key });
+    if (body) src = "cmc-key";
+  }
+  if (!body) {
+    body = await cmcKlineCall(CMC_KLINE_FREE + q, { accept: "application/json" });
+    if (body) src = "cmc-free";
+  }
+  if (!body) return fail(502, "upstream");
+
+  const candles = cmcKlineNormalise(body);
+  if (!candles.length) return fail(404, "empty");
+
+  const headers = {
+    ...CORS,
+    "content-type": "application/json; charset=utf-8",
+    "cache-control": "public, max-age=" + ttl,
+    "x-zaexa-src": src,
+  };
+  const payload = JSON.stringify({ candles });
+  if (store) {
+    const put = store.put(cacheKey, new Response(payload, { status: 200, headers }));
+    if (ctx && typeof ctx.waitUntil === "function") ctx.waitUntil(put);
+    else await put;
+  }
+  return new Response(payload, { status: 200, headers });
+}
+
 export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
     if (url.pathname === "/gt" || url.pathname.startsWith("/gt/"))
       return proxyGt(request, url, ctx, env);
+    if (url.pathname === "/cmc/kline") return cmcKlineRoute(request, url, ctx, env);
     if (url.pathname === "/ev") return collectEv(request, url, env);
     /* تصویر کارت نیست، بایندینگ ASSETS هم نیست — مثل /gt و /ev همیشه باید
        به کد برسد، نه به فایل‌های ثابت. */

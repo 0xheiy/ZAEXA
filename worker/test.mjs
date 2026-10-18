@@ -15196,6 +15196,115 @@ function stripAllowedWording(t) {
     console.log("[gt relay] relay first (one call, header, path+query, miss-relay, zero CoinGecko); 404 final; 429 falls to keyed without the flag; 403/5xx/throw fall through and set a 60 s flag that skips the relay; expiry retries; non-https/missing key/url ignored; key and host never in response; /vd/src relay:{s}|unset never touching the flag; DexScreener via relay first then direct");
   }
 
+  // ---------- [cmc kline] ----------
+  {
+    const FX = JSON.parse(fs.readFileSync(new URL("../web/test/fixtures/cmc_kline.json", import.meta.url), "utf8"));
+    const CK = "SECRET-CMC-KEY-FOR-KLINE";
+    const SOLK = "5ZoUg31NuEfDLDJfTh8hJGiavENmE2deDUBT4hhcpump";
+    const KEYED = "https://pro-api.coinmarketcap.com/v1/k-line/candles";
+    const FREE = "https://pro-api.coinmarketcap.com/public-api/v1/k-line/candles";
+    const envC = { ASSETS, CMC_KEY: CK };
+    const envN = { ASSETS };
+    const isKeyed = (u) => u.startsWith(KEYED + "?"), isFree = (u) => u.startsWith(FREE + "?");
+    const isCmc = (u) => u.startsWith("https://pro-api.coinmarketcap.com/");
+    const jb = (o, st = 200) => new Response(JSON.stringify(o), { status: st, headers: { "content-type": "application/json" } });
+    // کش جعلی: فقط پاسخ‌های ذخیره‌شده؛ تست نباید به caches واقعی وابسته باشد
+    const shelf = new Map();
+    const puts = [];
+    const KL = (q, e) => call("/cmc/kline?" + q, ipH(), e);
+    const savedCaches = globalThis.caches;
+    globalThis.caches = { default: {
+      match: async (r) => { const v = shelf.get(r.url); return v ? v.clone() : undefined; },
+      put: async (r, v) => { puts.push(r.url); shelf.set(r.url, v); },
+    } };
+    try {
+      const ADDR = USDC.toUpperCase().replace("0X", "0x");
+      // الف) کلیددار: ثانیه، مرتب، منبع، کلید فقط در هدر
+      await withFetch((u) => jb(FX.sol_token_15min_ok), async () => {
+        const res = await KL("chain=solana&address=" + SOLK + "&tf=1D", envC);
+        const raw = await res.text(), b = JSON.parse(raw);
+        ok(res.status === 200 && log.length === 1 && isKeyed(log[0].u), "[cmc kline] keyed success makes exactly one keyed call, got " + JSON.stringify(log.map((l) => l.u)));
+        ok(log[0].u === KEYED + "?platform=solana&address=" + SOLK + "&interval=15min&limit=96&unit=usd", "[cmc kline] keyed URL shape, got " + log[0].u);
+        ok(log[0].h["X-CMC_PRO_API_KEY"] === CK && !log[0].u.includes(CK), "[cmc kline] key rides in the header only");
+        ok(JSON.stringify(b) === JSON.stringify({ candles: [[1792274400, 102.703019512675719853397873218364455563], [1792275300, 102.792226869967067082210196063796730457]] }),
+           "[cmc kline] candles are [seconds, close] sorted, got " + raw);
+        ok(res.headers.get("x-zaexa-src") === "cmc-key" && res.headers.get("cache-control") === "public, max-age=300", "[cmc kline] src cmc-key and 300 s cache, got " + res.headers.get("x-zaexa-src") + " " + res.headers.get("cache-control"));
+        ok(!raw.includes(CK) && !JSON.stringify([...res.headers.entries()]).includes(CK) && !raw.includes("coinmarketcap"), "[cmc kline] key and URL never in the response");
+      });
+      // ب) دومین درخواستِ یکسان از کش — صفر تماس بالادست
+      await withFetch(() => jb(FX.busy_500), async () => {
+        const res = await KL("chain=solana&address=" + SOLK + "&tf=1D", envC);
+        const b = await res.json();
+        ok(res.status === 200 && log.length === 0 && res.headers.get("x-zaexa-src") === "cache" && b.candles.length === 2,
+           "[cmc kline] identical request is a cache hit with zero upstream calls, got " + res.status + "/" + log.length + "/" + res.headers.get("x-zaexa-src"));
+      });
+      // پ) error_code 500 در بدنه → تماس بی‌کلید → cmc-free (آدرس Base حروف‌کوچک می‌شود)
+      shelf.clear();
+      await withFetch((u) => (isKeyed(u) ? jb(FX.busy_500) : jb(FX.sol_token_15min_ok)), async () => {
+        const res = await KL("chain=base&address=" + ADDR + "&tf=1H", envC);
+        ok(res.status === 200 && log.length === 2 && isKeyed(log[0].u) && isFree(log[1].u), "[cmc kline] keyed body error_code 500 -> one keyless call, got " + JSON.stringify(log.map((l) => l.u)));
+        ok(log[1].u === FREE + "?platform=base&address=" + USDC + "&interval=1min&limit=60&unit=usd" && !("X-CMC_PRO_API_KEY" in log[1].h) && !log[1].u.includes(CK),
+           "[cmc kline] keyless call: lower-cased address, same query, no key, got " + log[1].u);
+        ok(res.headers.get("x-zaexa-src") === "cmc-free" && res.headers.get("cache-control") === "public, max-age=60", "[cmc kline] src cmc-free, 60 s cache");
+      });
+      // ت) HTTP غیر ۲۰۰ / پرتاب هم به بی‌کلید می‌رود
+      for (const kind of ["status", "throw"]) {
+        shelf.clear();
+        await withFetch((u) => { if (isKeyed(u)) { if (kind === "throw") throw new TypeError("down"); return new Response("x", { status: 503 }); } return jb(FX.sol_token_15min_ok); }, async () => {
+          const res = await KL("chain=solana&address=" + SOLK + "&tf=1W", envC);
+          ok(res.status === 200 && res.headers.get("x-zaexa-src") === "cmc-free" && log.length === 2, "[cmc kline] keyed " + kind + " falls to keyless");
+        });
+      }
+      // ث) هر دو شکست → ۵۰۲، کش نمی‌شود
+      shelf.clear(); puts.length = 0;
+      await withFetch(() => jb(FX.busy_500), async () => {
+        const res = await KL("chain=solana&address=" + SOLK + "&tf=1M", envC);
+        const b = await res.json();
+        ok(res.status === 502 && b.error === "upstream" && log.length === 2 && puts.length === 0, "[cmc kline] both upstreams failed -> 502 upstream and nothing cached, got " + res.status + "/" + log.length + "/" + puts.length);
+      });
+      // ج) خالی → ۴۰۴ و کش نمی‌شود (درخواست بعدی دوباره بالادست را می‌زند)
+      shelf.clear(); puts.length = 0;
+      await withFetch(() => jb(FX.empty_ok), async () => {
+        const res = await KL("chain=solana&address=" + SOLK + "&tf=1D", envC);
+        const b = await res.json();
+        ok(res.status === 404 && b.error === "empty" && puts.length === 0 && shelf.size === 0, "[cmc kline] empty -> 404 empty and not cached, got " + res.status + "/" + puts.length);
+        await KL("chain=solana&address=" + SOLK + "&tf=1D", envC);
+        ok(log.length === 2, "[cmc kline] an empty result is asked again, not served from cache, got " + log.length);
+      });
+      // چ) ورودی بد → ۴۰۰ بدونِ هیچ تماس
+      await withFetch(() => jb(FX.sol_token_15min_ok), async () => {
+        for (const q of ["chain=eth&address=" + USDC + "&tf=1D", "chain=base&address=0x123&tf=1D", "chain=base&address=" + SOLK + "&tf=1D",
+                         "chain=solana&address=" + USDC + "&tf=1D", "chain=solana&address=" + SOLK.toLowerCase() + "&tf=1D",
+                         "chain=base&address=" + USDC + "&tf=1Y", "chain=base&address=" + USDC + "&tf=1d", "chain=base&address=" + USDC, "chain=solana&tf=1D"]) {
+          const res = await KL(q, envC);
+          const b = await res.json();
+          ok(res.status === 400 && b.error === "bad request", "[cmc kline] bad input -> 400, got " + res.status + " for " + q);
+        }
+        ok(log.length === 0, "[cmc kline] bad input makes zero upstream calls, got " + log.length);
+        const res405 = await call("/cmc/kline?chain=base&address=" + USDC + "&tf=1D", { method: "POST", headers: { "cf-connecting-ip": "198.51.100.250" } }, envC);
+        ok(res405.status === 405 && log.length === 0, "[cmc kline] POST -> 405 with zero calls, got " + res405.status);
+      });
+      // ح) CMC_KEY ندارد → مستقیم بی‌کلید
+      shelf.clear();
+      await withFetch(() => jb(FX.sol_token_15min_ok), async () => {
+        const res = await KL("chain=solana&address=" + SOLK + "&tf=1D", envN);
+        ok(res.status === 200 && log.length === 1 && isFree(log[0].u) && res.headers.get("x-zaexa-src") === "cmc-free", "[cmc kline] no CMC_KEY -> straight to keyless, got " + JSON.stringify(log.map((l) => l.u)));
+        ok(log.every((l) => isCmc(l.u)), "[cmc kline] only CoinMarketCap is called");
+      });
+      // خ) میلی‌ثانیه/ثانیه، تکراری، ردیف خراب
+      shelf.clear();
+      const mixed = { data: [[1, 1, 1, 5, 1, 1792275300000, 1], [1, 1, 1, 4, 1, 1792274400, 1], [1, 1, 1, 9, 1, 1792274400000, 1],
+        [1, 1, 1, 0, 1, 1792276200000, 1], [1, 1, 1, "x", 1, 1792276300000, 1], "bad", [1, 1, 1, 3, 1, "nope", 1]], status: { error_code: "0" } };
+      await withFetch(() => jb(mixed), async () => {
+        const b = await (await KL("chain=solana&address=" + SOLK + "&tf=1D", envN)).json();
+        ok(JSON.stringify(b.candles) === JSON.stringify([[1792274400, 4], [1792275300, 5]]), "[cmc kline] ms->s, sorted, deduped, non-positive/NaN rows dropped, got " + JSON.stringify(b.candles));
+      });
+    } finally {
+      if (savedCaches === undefined) delete globalThis.caches; else globalThis.caches = savedCaches;
+    }
+    console.log("[cmc kline] GET /cmc/kline: keyed success (one call, key in the header only, seconds, sorted, cmc-key); body error_code 500 / non-200 / throw -> one keyless call (cmc-free); both fail -> 502; empty -> 404 and never cached; bad chain/address/tf -> 400 with zero upstream calls; POST 405; identical request served from cache with zero upstream calls; no CMC_KEY -> straight to keyless");
+  }
+
   // ---------- [pass pacing] ----------
   {
     const { _paceHooks, _paceBegin, _paceEnd, _paceActive, _relayDownUntil } = idx;

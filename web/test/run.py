@@ -41,6 +41,26 @@ Browser.new_page = _new_page_with_gt_flag
 
 # Select an installed Chromium explicitly when testing on Windows or CI.
 from playwright.async_api import BrowserType
+from playwright.async_api import Page as _PwPage
+
+# ۱۸ اکتبر: وقتی GeckoTerminal در یک کاوشگر عمداً خالی/خراب است، نمودار حالا به /cmc/kline می‌افتد.
+# سرورهای ثابتِ کاوشگرها آن مسیر را ۴۰۴ می‌دهند و کنسول «Failed to load resource» ثبت می‌کند. این
+# مجوزِ مرکزی (قبل از هر goto، پس پایین‌تر از routeهای خودِ کاوشگر ثبت می‌شود و برنده است) آن مسیر
+# را صریحاً «بدون کندل» جواب می‌دهد؛ هیچ ادعای دیگری سست نمی‌شود. کاوشگرهای [chart cmc fallback]
+# خودشان آن مسیر را استاب می‌کنند و با _zx_cmc_own از این مجوز بیرون می‌مانند.
+_pw_goto = _PwPage.goto
+
+
+async def _goto_allow_cmc(self, *a, **k):
+    if not getattr(self, "_zx_cmc_own", False) and not getattr(self, "_zx_cmc_done", False):
+        self._zx_cmc_done = True
+        await self.route("**/cmc/kline**", lambda r: r.fulfill(
+            status=200, content_type="application/json", body='{"candles":[]}'))
+    return await _pw_goto(self, *a, **k)
+
+
+_PwPage.goto = _goto_allow_cmc
+
 _original_launch = BrowserType.launch
 async def _launch_selected_browser(self, *args, **kwargs):
     if self.name == "chromium" and os.environ.get("ZAEXA_CHROMIUM_PATH"):
@@ -6798,7 +6818,9 @@ async def check_sol_boot_gt(p, errors):
     GT_PERSIST_OFF["on"] = False          # فقط همین کاوشگر لایه‌ی ماندگار را می‌خواهد
     b = await p.chromium.launch()
     log = []                      # (via, url) به ترتیب؛ via: direct|proxy
-    hook = {"gt": None, "proxy": None, "on_req": None}
+    hook = {"gt": None, "proxy": None, "on_req": None, "jup": None, "cmc": None}
+    jup_log, cmc_log, extra_log = [], [], []     # Jupiter / مسیر /cmc/kline / هر میزبانِ دیگر (آبورت می‌شود)
+    JUP_IMG_HOSTS = ("https://raw.githubusercontent.com/", "https://token-metadata.bridge.xyz/", "https://s3-symbol-logo.tradingview.com/")
 
     def gt_path(u):
         return u.split("/api/v2", 1)[1] if "/api/v2" in u else u.split("/gt", 1)[1]
@@ -6818,11 +6840,29 @@ async def check_sol_boot_gt(p, errors):
                                                headers={"x-zaexa-proxy": "probe"}, body=r[1])
                 return await route.fulfill(status=200, content_type="application/json",
                                            headers={"x-zaexa-proxy": "probe"}, body='{"data":[]}')
+            if "/cmc/kline" in u:
+                cmc_log.append(u)
+                if hook["cmc"]:
+                    r = hook["cmc"](u)
+                    if r == "abort":
+                        return await route.abort()
+                    return await route.fulfill(status=r[0], content_type="application/json", body=r[1])
+                return await route.continue_()
             if u.endswith("/ev"):
                 return await route.fulfill(status=204, body="")
             if "/vd/" in u or "/sol/" in u:
                 return await route.fulfill(status=200, content_type="application/json", body="{}")
             return await route.continue_()
+        if u.startswith("https://lite-api.jup.ag/"):
+            jup_log.append(u)
+            if hook["jup"]:
+                r = hook["jup"](u)
+                if r != "abort":
+                    return await route.fulfill(status=r[0], content_type="application/json", headers=CORS, body=r[1])
+            return await route.abort()
+        if u.startswith(JUP_IMG_HOSTS):
+            extra_log.append(u)
+            return await route.fulfill(status=200, content_type="image/png", body=PNG1)
         if u.startswith(GTD):
             log.append(("direct", u))
             if hook["on_req"]:
@@ -6835,14 +6875,19 @@ async def check_sol_boot_gt(p, errors):
             return await route.fulfill(status=200, content_type="application/json", headers=CORS, body='{"data":[]}')
         if u.startswith("https://assets.example.invalid/"):
             return await route.fulfill(status=200, content_type="image/png", body=PNG1)
+        extra_log.append(u)
         return await route.abort()
 
     def reset_hooks():
-        hook.update(gt=None, proxy=None, on_req=None)
+        hook.update(gt=None, proxy=None, on_req=None, jup=None, cmc=None)
         log.clear()
+        jup_log.clear()
+        cmc_log.clear()
+        extra_log.clear()
 
     async def open_page(ctx, hash_, init=None, wait=1800):
         pg = await ctx.new_page()
+        pg._zx_cmc_own = True            # این تابع /cmc/kline را خودش در stub جواب می‌دهد
         pg.on("pageerror", lambda e: errors.append("PAGEERROR %s" % e))
         await pg.route("**/*", stub)
         if init:
@@ -7097,6 +7142,174 @@ async def check_sol_boot_gt(p, errors):
         assert pops["n"] == 1, "[sol popular retry] before 30 s the failure must not be retried (%d calls)" % pops["n"]
         await ctx.close()
         print("[sol popular retry] a failed GT pools call leaves the picker with SOL/USDC/USDT; reopening before 30 s asks nothing; after 30 s (404) or once the 60 s breaker of a transport error is over (abort) it asks again and 'Popular on Solana' appears; the success stays cached")
+
+        # ---------------- [sol picker jupiter] ----------------
+        JF = _j.load(open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "fixtures", "jup_tokens.json"), encoding="utf-8"))["toporganicscore_24h_limit5"]
+        JBY = {it["id"]: it for it in JF}
+        CASH = [it for it in JF if it["symbol"] == "CASH"][0]["id"]
+        SPCX = [it for it in JF if it["symbol"] == "SPCX"][0]["id"]
+        SOLM, USDCM, USDTM = [it["id"] for it in JF[:3]]
+
+        def jup_serve(u, table=JBY):
+            if "/toporganicscore/" in u:
+                return (200, _j.dumps(list(table.values())))
+            ids = u.split("query=", 1)[1].split(",")
+            return (200, _j.dumps([table[i] for i in ids if i in table]))
+
+        def gt_429(u):
+            return (429, "{}")
+
+        async def row_imgs(page):
+            return await page.evaluate("""() => Object.fromEntries([...document.querySelectorAll('#solTokList .trow')].map(r =>
+                [r.dataset.mint, [...r.querySelectorAll('img')].map(i => i.getAttribute('src'))]))""")
+
+        async def heads(page):
+            return await page.evaluate("() => [...document.querySelectorAll('#solTokList .ttl')].filter(e => e.textContent.trim() === 'Popular on Solana').length")
+
+        # (a) GT pools + multi 429, Jupiter OK
+        reset_hooks()
+        hook["gt"] = gt_429
+        hook["proxy"] = gt_429
+        hook["jup"] = jup_serve
+        ctx = await b.new_context()
+        pg = await open_page(ctx, "#swap?chain=solana", None, wait=1500)
+        await pg.evaluate("() => solOpenTokenPicker()")
+        await pg.wait_for_timeout(1500)
+        imgs = await row_imgs(pg)
+        assert await picker_rows(pg) == ["SOL", "USDC", "USDT", "CASH", "SPCX"], \
+            "[sol picker jupiter] (a) Jupiter top must supply the Popular rows (SOL/USDC/USDT skipped): %s" % await picker_rows(pg)
+        assert await heads(pg) == 1, "[sol picker jupiter] (a) exactly one 'Popular on Solana' heading"
+        for m in (SOLM, USDCM, USDTM, CASH, SPCX):
+            assert imgs.get(m) == [JBY[m]["icon"]], "[sol picker jupiter] (a) %s must show an <img> with the Jupiter icon: %s" % (m, imgs.get(m))
+        assert any("toporganicscore/24h?limit=20" in u for u in jup_log) and any("/tokens/v2/search?query=" in u for u in jup_log), \
+            "[sol picker jupiter] (a) both Jupiter calls expected: %s" % jup_log
+        await ctx.close()
+
+        # (b) GT OK -> zero Jupiter requests
+        reset_hooks()
+        LOGO_OK = "https://assets.example.invalid/ok.png"
+
+        def gt_ok(u):
+            if u.endswith("/networks/solana/pools?page=1"):
+                return (200, POP)
+            if "/networks/solana/tokens/multi/" in u:
+                addrs = u.split("multi/", 1)[1].split("?", 1)[0].split(",")
+                return (200, _j.dumps({"data": [{"attributes": {"address": a, "image_url": LOGO_OK}} for a in addrs]}))
+            return (200, '{"data":[]}')
+        hook["gt"] = gt_ok
+        hook["jup"] = jup_serve
+        ctx = await b.new_context()
+        pg = await open_page(ctx, "#swap?chain=solana", None, wait=1500)
+        await pg.evaluate("() => solOpenTokenPicker()")
+        await pg.wait_for_timeout(1200)
+        imgs = await row_imgs(pg)
+        assert await picker_rows(pg) == ["SOL", "USDC", "USDT", "JUP", "BONK"] and imgs.get(JUP) == [LOGO_OK], \
+            "[sol picker jupiter] (b) healthy GT must supply rows and logos: %s %s" % (await picker_rows(pg), imgs)
+        assert not jup_log, "[sol picker jupiter] (b) a healthy GT must send zero requests to lite-api.jup.ag: %s" % jup_log
+        await ctx.close()
+
+        # (c) GT and Jupiter both fail
+        reset_hooks()
+        hook["gt"] = gt_429
+        hook["proxy"] = gt_429
+        hook["jup"] = lambda u: "abort"
+        ctx = await b.new_context()
+        pg = await open_page(ctx, "#swap?chain=solana", None, wait=1500)
+        await pg.evaluate("() => solOpenTokenPicker()")
+        await pg.wait_for_timeout(1200)
+        imgs = await row_imgs(pg)
+        tops = lambda: len([u for u in jup_log if "/toporganicscore/" in u])
+        assert await picker_rows(pg) == ["SOL", "USDC", "USDT"] and await heads(pg) == 0, \
+            "[sol picker jupiter] (c) both failing must leave no Popular section: %s" % await picker_rows(pg)
+        assert all(v == [] for v in imgs.values()) and await pg.evaluate("() => document.querySelectorAll('#solTokList .av').length") == 3, \
+            "[sol picker jupiter] (c) letter avatars only: %s" % imgs
+        assert tops() == 1, "[sol picker jupiter] (c) one Jupiter top call so far: %d" % tops()
+        await pg.evaluate("() => { solCloseTokenPicker(); const o = Date.now.bind(Date); Date.now = () => o() + 31000; }")
+        await pg.evaluate("() => solOpenTokenPicker()")
+        await pg.wait_for_timeout(1000)
+        assert tops() == 2 and await picker_rows(pg) == ["SOL", "USDC", "USDT"], \
+            "[sol picker jupiter] (c) after 30 s the failed popular load must be retried: tops=%d rows=%s" % (tops(), await picker_rows(pg))
+        await ctx.close()
+
+        # (d) http:// and >512-char icons are never painted or cached
+        BAD_HTTP = "http://insecure.example.invalid/a.png"
+        BAD_LONG = "https://longicon.example.invalid/" + "a" * 600 + ".png"
+        bad = {SOLM: dict(JBY[SOLM], icon=BAD_HTTP), USDCM: dict(JBY[USDCM], icon=BAD_LONG),
+               CASH: dict(JBY[CASH], icon=BAD_HTTP), SPCX: dict(JBY[SPCX], icon=BAD_LONG), USDTM: JBY[USDTM]}
+        reset_hooks()
+        hook["gt"] = gt_429
+        hook["proxy"] = gt_429
+        hook["jup"] = lambda u: jup_serve(u, bad)
+        ctx = await b.new_context()
+        pg = await open_page(ctx, "#swap?chain=solana", None, wait=1500)
+        await pg.evaluate("() => solOpenTokenPicker()")
+        await pg.wait_for_timeout(1500)
+        imgs = await row_imgs(pg)
+        cached = await pg.evaluate("(ms) => ms.map(m => [m, solLogoCache[m] === undefined ? 'undef' : solLogoCache[m]])", [SOLM, USDCM, CASH, SPCX])
+        assert imgs.get(SOLM) == [] and imgs.get(USDCM) == [] and imgs.get(CASH) == [] and imgs.get(SPCX) == [] and imgs.get(USDTM) == [JBY[USDTM]["icon"]], \
+            "[sol picker jupiter] (d) only the https icon within 512 chars may be painted: %s" % imgs
+        assert all(v is None for _, v in cached), "[sol picker jupiter] (d) a rejected icon must end as null in the cache: %s" % cached
+        assert not any("insecure.example.invalid" in u or "longicon.example.invalid" in u for u in extra_log), \
+            "[sol picker jupiter] (d) a rejected icon must never be requested: %s" % extra_log
+        await ctx.close()
+        print("[sol picker jupiter] GT pools+multi 429 with Jupiter up: SOL/USDC/USDT get <img> logos from the Jupiter icons and one 'Popular on Solana' heading lists CASH and SPCX; healthy GT sends zero requests to lite-api.jup.ag; both failing leaves no Popular section, letter avatars, and the 30 s retry still happens; an http:// or over-512-char icon is never painted, cached or requested")
+
+        # ---------------- [chart cmc fallback] ----------------
+        CK = _j.load(open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "fixtures", "cmc_kline.json"), encoding="utf-8"))["sol_token_15min_ok"]["data"]
+        CANDLES = [[int(r[5]) // 1000, float(r[3])] for r in CK]          # شکلِ پاسخِ Worker: [ثانیه، close]
+        CMC_BODY = _j.dumps({"candles": CANDLES})
+        WETH = "0x4200000000000000000000000000000000000006"
+        CPOOL = "cmcprobepool1"
+        CERR = "Price history is unavailable right now. Quotes and routing below are live and unaffected."
+
+        sol_asked = []
+
+        def chart_gt(ohlcv_ok, mint=None):
+            def f(u):
+                if "/ohlcv/" in u:
+                    if not ohlcv_ok:
+                        return (429, "{}")
+                    return (200, _j.dumps({"data": {"attributes": {"ohlcv_list": [[1690000000, 1, 1.1, 0.9, 1.0, 1000], [1690000900, 1, 1.2, 0.95, 1.05, 1200], [1690001800, 1, 1.3, 1.0, 1.2, 1500]]}}}))
+                if "/pools" in u and "/tokens/" in u and "multi" not in u:
+                    if mint:
+                        tm = u.split("/tokens/", 1)[1].split("/", 1)[0]
+                        sol_asked.append(tm)
+                        return (200, _j.dumps({"data": [{"id": "solana_" + CPOOL, "attributes": {"address": CPOOL, "reserve_in_usd": "10"},
+                                                         "relationships": {"base_token": {"data": {"id": "solana_" + tm}}, "quote_token": {"data": {"id": "solana_x"}}}}]}))
+                    return (200, _j.dumps({"data": [{"id": "base_" + CPOOL}]}))
+                return (200, '{"data":[]}')
+            return f
+
+        async def plot_state(page, plot, msg):
+            return await page.evaluate("""([p, m]) => ({paths: document.querySelectorAll('#' + p + ' svg path').length,
+                msg: (() => { const e = document.getElementById(m); return e && getComputedStyle(e).display !== 'none' ? e.textContent : ''; })()})""", [plot, msg])
+
+        async def chart_run(chain, ohlcv_ok, cmc, wait):
+            reset_hooks()
+            hook["gt"] = chart_gt(ohlcv_ok, BONK if chain == "solana" else None)
+            hook["proxy"] = (lambda u: (429, "{}")) if not ohlcv_ok else None
+            hook["cmc"] = cmc
+            ctx = await b.new_context()
+            pg = await open_page(ctx, "#swap" + ("?chain=solana" if chain == "solana" else ""), None, wait=1500)
+            if chain == "solana":
+                await pg.evaluate("(m) => solSelectToken(m)", BONK)
+            await pg.wait_for_timeout(wait)
+            st = await plot_state(pg, "solPlot" if chain == "solana" else "plot", "solChartMsg" if chain == "solana" else "chartMsg")
+            await ctx.close()
+            return st
+
+        for chain in ("base", "solana"):
+            sol_asked.clear()
+            st = await chart_run(chain, False, lambda u: (200, CMC_BODY), 2500)
+            assert st["paths"] >= 2 and st["msg"] == "", "[chart cmc fallback] (%s) GT ohlcv 429 + CMC up must draw the chart: %s" % (chain, st)
+            addr = WETH if chain == "base" else (sol_asked[0] if sol_asked else "?")
+            assert any(("chain=%s&address=%s&tf=1D" % (chain, addr)) in u for u in cmc_log), \
+                "[chart cmc fallback] (%s) the fallback must ask /cmc/kline for the token on the 1D range: %s" % (chain, cmc_log)
+            st = await chart_run(chain, True, lambda u: (200, CMC_BODY), 2500)
+            assert st["paths"] >= 2 and not cmc_log, "[chart cmc fallback] (%s) a healthy GT must make zero /cmc/kline requests: %s %s" % (chain, st, cmc_log)
+            st = await chart_run(chain, False, lambda u: (502, '{"error":"upstream"}'), 9000)
+            assert st["paths"] == 0 and st["msg"] == CERR, "[chart cmc fallback] (%s) both failing must show today's error message: %s" % (chain, st)
+        print("[chart cmc fallback] Base pair and Solana token charts with GT ohlcv 429 and a stubbed /cmc/kline draw a path with no error message and ask for the right chain, address and 1D range; healthy GT makes zero /cmc/kline requests; both sources failing shows the unchanged 'Price history is unavailable right now' message")
 
         # ---------------- [sol stock logos persist] ----------------
         def stk_gt(u):
