@@ -4073,13 +4073,13 @@ async def check_first_visit_tour(p, errors):
     b = await p.chromium.launch()
     errs, ev_seen = [], []
     TITLES = ["Swap on Base and Solana", "Every token gets an exit check", "Your wallet, your keys",
-              "Approvals: exact by default", "Use your own RPC", "Your portfolio"]
+              "Your portfolio", "Approvals: exact by default", "Use your own RPC"]
     BODIES = ["Pick what you pay and what you receive. We check every pool and split your order when that pays you more.",
               "Before you buy, we simulate selling it back. “No sell quote” means no venue we cover would buy it back — treat that as a warning, not a bug.",
               "Zaexa never holds your funds. Every swap is one transaction you sign in your own wallet.",
+              "After you connect, Portfolio is the first item in your wallet menu — balances and recent swaps in one place.",
               "By default you approve only the amount of each swap. Turning this on approves an unlimited amount so later swaps skip that step — only do it if you trust the contract.",
-              "Paste your own https RPC address here if public nodes are slow. We check that it answers as Base before saving it.",
-              "After you connect, Portfolio is the first item in your wallet menu — balances and recent swaps in one place."]
+              "Paste your own https RPC address here if public nodes are slow. We check that it answers as Base before saving it."]
 
     async def open_app(path="/app", vw=1440, vh=900, scheme="light", init=None, wait_tour=True):
         pg = await b.new_page(viewport={"width": vw, "height": vh}, color_scheme=scheme)
@@ -4129,9 +4129,9 @@ async def check_first_visit_tour(p, errors):
         if (i === 0) els = [sol ? q('#solSwap') : q('#baseHeroRow .swapCard')];
         else if (i === 1) els = [sol ? q('#appSolSafetyCard') : q('#baseHeroRow .swapSafetyCard')];
         else if (i === 2) els = [sol ? q('#solSwapBtn') : q('#actBtn')];
-        else if (i === 3) els = [q('#unlimApprove').closest('.optrow')];
-        else if (i === 4) els = [[...document.querySelectorAll('#setPop h4')].find(h => /custom rpc/i.test(h.textContent)), q('#rpcSave').parentElement];
-        else els = [q('#connectBtn')];
+        else if (i === 3) els = [q('#connectBtn')];
+        else if (i === 4) els = [q('#unlimApprove').closest('.optrow')];
+        else els = [[...document.querySelectorAll('#setPop h4')].find(h => /custom rpc/i.test(h.textContent)), q('#rpcSave').parentElement];
         let L = 1e9, T = 1e9, R = -1e9, B = -1e9;
         for (const e of els) { const r = e.getBoundingClientRect(); L = Math.min(L, r.left); T = Math.min(T, r.top); R = Math.max(R, r.right); B = Math.max(B, r.bottom); }
         return {left: L, top: T, right: R, bottom: B};
@@ -4190,7 +4190,7 @@ async def check_first_visit_tour(p, errors):
             assert st["title"] == TITLES[i] and st["body"] == BODIES[i], "[first-visit tour] %s text: %r" % (what, st["title"])
             assert st["dots"] == [k == i for k in range(6)], "[first-visit tour] %s dots: %s" % (what, st["dots"])
             assert st["btns"] == (["Skip", "Next"] if i == 0 else (["Back", "Skip", "Done"] if i == 5 else ["Back", "Skip", "Next"])), "[first-visit tour] %s buttons: %s" % (what, st["btns"])
-            assert st["popOn"] == (i in (3, 4)), "[first-visit tour] %s: #setPop open=%s but it must be open only on steps 4 and 5" % (what, st["popOn"])
+            assert st["popOn"] == (i in (4, 5)), "[first-visit tour] %s: #setPop open=%s but it must be open only on steps 5 and 6" % (what, st["popOn"])
             t = await pg.evaluate(TARGET, i)
             near(st["spot"], t, what)
             c = st["card"]
@@ -4202,7 +4202,7 @@ async def check_first_visit_tour(p, errors):
             else:
                 assert abs(c["left"] - 16) < 1 and abs(st["vw"] - c["right"] - 16) < 1, "[first-visit tour] %s: docked card must keep 16px gutters %s" % (what, c)
                 assert c["bottom"] <= st["navTop"] + 0.5, "[first-visit tour] %s: docked card sits on the bottom bar (%s vs %s)" % (what, c["bottom"], st["navTop"])
-                assert t["top"] >= (0 if i == 5 else st["hdrBottom"] - 1) and t["top"] < c["top"] - 16, "[first-visit tour] %s: the target must be scrolled into view above the card %s %s" % (what, t, c)
+                assert t["top"] >= (0 if i == 3 else st["hdrBottom"] - 1) and t["top"] < c["top"] - 16, "[first-visit tour] %s: the target must be scrolled into view above the card %s %s" % (what, t, c)
                 if t["bottom"] - t["top"] <= c["top"] - st["hdrBottom"] - 30:
                     assert t["bottom"] <= c["top"] + 1, "[first-visit tour] %s: target hidden under the docked card %s %s" % (what, t, c)
             if vw <= 940 and i == 1:
@@ -4230,15 +4230,14 @@ async def check_first_visit_tour(p, errors):
         assert contrast(col["title"], col["card"]) >= 7 and contrast(col["body"], col["card"]) >= 4.5, "[first-visit tour] %s: title/body not legible on the card %s" % (tag, col)
         assert "rgba(10, 14, 30, 0.62) 0px 0px 0px 9999px" in col["shadow"] and ("2px" in col["outline"] and "solid" in col["outline"] and "197, 108, 245" in col["outline"] or "var(--g2)" in col["outline"]), "[first-visit tour] %s: spotlight style %s | %s" % (tag, col["shadow"], col["outline"])
         await walk(pg, vw, scheme, tag, shot_steps)
-        # Back از قدمِ ۶ تا ۴ و دوباره جلو
-        await pg.click("#zxTour .tBack")
-        await pg.click("#zxTour .tBack")
-        st = await pg.evaluate(STEP)
-        assert st["count"].endswith("4 OF 6") and st["popOn"], "[first-visit tour] %s: Back twice from step 6 must land on step 4 with Settings open (%s)" % (tag, st["count"])
+        # Back از قدمِ ۶ تا ۴ و دوباره جلو (۱۹ اکتبر: پورتفولیو قدمِ ۴، تنظیمات ۵ و ۶)
         await pg.click("#zxTour .tBack")
         st = await pg.evaluate(STEP)
-        assert st["count"].endswith("3 OF 6") and not st["popOn"], "[first-visit tour] %s: Back to step 3 must close Settings" % tag
-        for _ in range(3):
+        assert st["count"].endswith("5 OF 6") and st["popOn"], "[first-visit tour] %s: Back from step 6 must land on step 5 with Settings open (%s)" % (tag, st["count"])
+        await pg.click("#zxTour .tBack")
+        st = await pg.evaluate(STEP)
+        assert st["count"].endswith("4 OF 6") and not st["popOn"], "[first-visit tour] %s: Back to step 4 must close Settings" % tag
+        for _ in range(2):
             await pg.click("#zxTour .tNext")
         st = await pg.evaluate(STEP)
         assert st["count"].endswith("6 OF 6") and st["btns"] == ["Back", "Skip", "Done"], "[first-visit tour] %s: step 6 ends with Done" % tag
@@ -4249,7 +4248,7 @@ async def check_first_visit_tour(p, errors):
         await pg.reload()
         await absent(pg, "a reload after Done (%s)" % tag)
         await pg.close()
-    print("[first-visit tour] first visit shows step 1; Next walks 1 to 6 with the spotlight within 12px of each target (swap card, exit-check card, main Connect button, unlimited-approval row, Custom RPC block, header wallet chip) at 1440 and 390, light and dark; Settings open on steps 4 and 5 only; Back works; Done writes 'done' and a reload shows nothing; shots in %s" % shots)
+    print("[first-visit tour] first visit shows step 1; Next walks 1 to 6 with the spotlight within 12px of each target (swap card, exit-check card, main Connect button, header wallet chip, unlimited-approval row, Custom RPC block) at 1440 and 390, light and dark; Settings open on steps 5 and 6 only; Back works; Done writes 'done' and a reload shows nothing; shots in %s" % shots)
 
     # ---- 2) تبِ موبایل: قدمِ ۲ انتخاب، بعد برمی‌گرداند — از تبِ غیرپیش‌فرض ----
     pg = await open_app("/app", 390, 844, "light", init="try{localStorage.setItem('zaexa.mtab.v1','pools')}catch(e){}")
@@ -4272,7 +4271,7 @@ async def check_first_visit_tour(p, errors):
 
     # ---- 3) Skip / Esc روی قدم‌های با تنظیماتِ باز ----
     pg = await open_app("/app", 1440, 900, "light")
-    for _ in range(3):
+    for _ in range(4):
         await pg.click("#zxTour .tNext")
     assert (await pg.evaluate(STEP))["popOn"]
     await pg.click("#zxTour .tSkip")
@@ -4280,7 +4279,7 @@ async def check_first_visit_tour(p, errors):
     await pg.reload(); await absent(pg, "a reload after Skip")
     await pg.close()
     pg = await open_app("/app", 1440, 900, "light")
-    for _ in range(4):
+    for _ in range(5):
         await pg.click("#zxTour .tNext")
     assert (await pg.evaluate(STEP))["popOn"]
     await pg.keyboard.press("Escape")
@@ -4292,7 +4291,7 @@ async def check_first_visit_tour(p, errors):
 
     # ---- 4) فوکوس و کلیکِ بیرون از کارت ----
     pg = await open_app("/app", 1440, 900, "light")
-    for _ in range(3):
+    for _ in range(4):
         await pg.click("#zxTour .tNext")
     for k in range(9):
         await pg.keyboard.press("Tab")
@@ -4303,7 +4302,7 @@ async def check_first_visit_tour(p, errors):
     await pg.mouse.click(120, 520)
     await pg.mouse.click(700, 300)
     st = await pg.evaluate(STEP)
-    assert st["count"].endswith("4 OF 6") and st["popOn"], "[first-visit tour] a click outside the card must do nothing (step %s, Settings open=%s)" % (st["count"], st["popOn"])
+    assert st["count"].endswith("5 OF 6") and st["popOn"], "[first-visit tour] a click outside the card must do nothing (step %s, Settings open=%s)" % (st["count"], st["popOn"])
     assert await pg.evaluate("document.querySelectorAll('.ov.on').length") == 0, "[first-visit tour] a click outside the card must not open anything"
     await pg.keyboard.press("Escape")
     await pg.close()

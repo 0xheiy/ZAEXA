@@ -11269,9 +11269,9 @@ const TOUR_STEPS=[
   ["Swap on Base and Solana","Pick what you pay and what you receive. We check every pool and split your order when that pays you more."],
   ["Every token gets an exit check","Before you buy, we simulate selling it back. “No sell quote” means no venue we cover would buy it back — treat that as a warning, not a bug."],
   ["Your wallet, your keys","Zaexa never holds your funds. Every swap is one transaction you sign in your own wallet."],
+  ["Your portfolio","After you connect, Portfolio is the first item in your wallet menu — balances and recent swaps in one place."],
   ["Approvals: exact by default","By default you approve only the amount of each swap. Turning this on approves an unlimited amount so later swaps skip that step — only do it if you trust the contract."],
-  ["Use your own RPC","Paste your own https RPC address here if public nodes are slow. We check that it answers as Base before saving it."],
-  ["Your portfolio","After you connect, Portfolio is the first item in your wallet menu — balances and recent swaps in one place."]
+  ["Use your own RPC","Paste your own https RPC address here if public nodes are slow. We check that it answers as Base before saving it."]
 ];
 let tour=null;
 function tourTargets(i){
@@ -11280,12 +11280,13 @@ function tourTargets(i){
     case 0:return [sol?$("solSwap"):document.querySelector("#baseHeroRow .swapCard")];
     case 1:return [sol?$("appSolSafetyCard"):document.querySelector("#baseHeroRow .swapSafetyCard")];
     case 2:return [sol?$("solSwapBtn"):$("actBtn")];
-    case 3:return [$("unlimApprove").closest(".optrow")];
-    case 4:{
+    // ۱۹ اکتبر — مالک: پورتفولیو جلوتر (کمتر کسی تا آخر می‌ماند)، نکته‌های فنی آخر
+    case 3:return [$("connectBtn")];
+    case 4:return [$("unlimApprove").closest(".optrow")];
+    default:{
       const h=[...document.querySelectorAll("#setPop h4")].find(x=>/custom rpc/i.test(x.textContent));
       return [h,$("rpcCustom").parentElement,$("rpcSave").parentElement];
     }
-    default:return [$("connectBtn")];
   }
 }
 function tourRect(i){
@@ -11363,8 +11364,8 @@ function tourFocus(force){
 function tourGo(i){
   const t=tour;if(!t||i<0||i>=TOUR_STEPS.length)return;
   t.i=i;
-  // تنظیمات: قدم‌های ۴ و ۵ بازش می‌کنند؛ اگر خودِ تور بازش کرده باشد، بیرون از آن دو قدم می‌بندد
-  const pop=$("setPop"),wantPop=i===3||i===4;
+  // تنظیمات: قدم‌های ۵ و ۶ بازش می‌کنند؛ اگر خودِ تور بازش کرده باشد، بیرون از آن دو قدم می‌بندد
+  const pop=$("setPop"),wantPop=i===4||i===5;
   if(wantPop&&!pop.classList.contains("on")){pop.classList.add("on");t.openedPop=true;}
   else if(!wantPop&&t.openedPop){pop.classList.remove("on");t.openedPop=false;}
   // موبایل/تبلت: قدمِ ۲ تبِ Exit check را انتخاب می‌کند و با رفتن به قدمِ دیگر تبِ قبلی برمی‌گردد
