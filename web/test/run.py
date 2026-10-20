@@ -8264,7 +8264,7 @@ async def check_sol_boot_gt(p, errors):
 
 async def check_uniswap_v4(pg):
     """[uniswap v4 venue] — Uniswap V4 via UniswapV4Adapter (KIND_ADAPTER = 5).
-    Gate: CHAIN.v4Adapter null -> never quoted/routed; set but not in executor.allowedAdapter
+    Gate: CHAIN.v4Adapter null -> never quoted/routed (ships set to the deployed adapter); set but not in executor.allowedAdapter
     -> "not allow-listed", never routed; set + allow-listed -> keys from /v4/keys quote and route."""
     idx_src = open(os.path.join(HERE, "..", "index.html"), encoding="utf-8").read()
     st = await pg.evaluate("""() => { const d = DEXES.find(x => x.id === "uniswap-v4");
@@ -8274,7 +8274,7 @@ async def check_uniswap_v4(pg):
                 gt: GT_DEX_TO_DEX["uniswap-v4-base"]}; }""")
     row = st["row"]
     assert row and row["name"] == "Uniswap V4" and row["kind"] == 5 == st["k5"] and not row["core"], st
-    assert st["adapter"] is None, "CHAIN.v4Adapter must ship unset: %r" % st["adapter"]
+    assert st["adapter"] == "0x6Cc6E5c74663cc52B46f711ADdB29E6bC5Cf5992", "CHAIN.v4Adapter must be the deployed adapter: %r" % st["adapter"]
     assert st["q"] == "0x0d5e0F971ED27FBfF6c2837bf31316121532048D" and row["quoter"] == st["q"], st
     assert st["pm"] == "0x498581fF718922c3f8e6A244956aF099B2652b2b", st
     assert st["gt"] == "uniswap-v4", "GT id uniswap-v4-base must map to uniswap-v4"
@@ -8304,13 +8304,13 @@ async def check_uniswap_v4(pg):
                     directV4: direct.filter(d => d.venue.dex.id === "uniswap-v4").length,
                     steps, adapter: ADAPTER, hook: HOOK};
         };
-        const out = {};
+        const ORIG = CHAIN.v4Adapter, out = {};
         out.nul = await run(null, true, [good]);
         out.noAllow = await run(ADAPTER, false, [good]);
         out.ok = await run(ADAPTER, true, [good, wrong]);
         out.wrongOnly = await run(ADAPTER, true, [wrong]);
         out.revert = await run(ADAPTER, true, [good], true);
-        CHAIN.v4Adapter = null; delete window.__STUB_ADAPTER_ALLOWED__; delete window.__STUB_V4_KEYS__;
+        CHAIN.v4Adapter = ORIG; delete window.__STUB_ADAPTER_ALLOWED__; delete window.__STUB_V4_KEYS__;
         delete window.__STUB_V4_QUOTER_REVERT__; v4Venues.clear(); v4KeyCache.clear();
         await verifyDexes();
         return out;

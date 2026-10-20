@@ -2456,11 +2456,11 @@ const CHAIN={
   id:8453,hexId:"0x2105",name:"Base",explorer:"https://basescan.org",gtNetwork:"base",
   multicall3:"0xcA11bde05977b3631167028862bE2a173976CA11",
   executor:"0x15e511Bf2Ea1a0F50F25E973d57Dce0D01946b6d",
-  /* Uniswap v4 (KIND_ADAPTER). v4Adapter عمداً null است: آداپتر هنوز دیپلوی نشده.
-     بعد از contracts/script/deploy_v4_adapter.sh و allow_adapter.sh همین‌جا پر شود؛
-     تا آن موقع ردیفِ «Uniswap V4» هرگز کوت یا مسیریابی نمی‌شود.
+  /* Uniswap v4 (KIND_ADAPTER). آداپتر ۲۰ اکتبر ۲۰۲۶ دیپلوی شد و immutableهایش
+     (executor / poolManager / weth) روی زنجیره تطبیق داده شد. تا وقتی executor.allowedAdapter
+     برایش true نشود (allow_adapter.sh)، ردیفِ «Uniswap V4» هرگز کوت یا مسیریابی نمی‌شود.
      v4Quoter و v4PoolManager آدرس‌های EIP-55اند (با ethers.getAddress محاسبه شد). */
-  v4Adapter:null,
+  v4Adapter:"0x6Cc6E5c74663cc52B46f711ADdB29E6bC5Cf5992",
   v4Quoter:"0x0d5e0F971ED27FBfF6c2837bf31316121532048D",
   v4PoolManager:"0x498581fF718922c3f8e6A244956aF099B2652b2b",
   /* اندازه‌گیریِ ۲ سپتامبر ۲۰۲۶، از مرورگر واقعیِ owner روی خودِ مبدأ
