@@ -86,7 +86,7 @@ test('disconnect while fetching balances leaves balances cleared', async () => {
 test('late token metadata cannot replace a newer token selection', async () => {
   const old = deferred();
   const c = context(['solAppLoadToken'], {
-    SOL_MINT_RE: /./, SOL_APP_TOKEN_LIST: [], solPresetLogo: () => null, solCloseTokenPicker() {},
+    SOL_MINT_RE: /./, SOL_APP_TOKEN_LIST: [], solPresetLogo: () => null, solNormalizeLegs: async () => false, solCloseTokenPicker() {},
     solSwapReset(mint) { c.solMintCur = mint; ++c.solTokenSeq; },
     renderSolExit() {}, solPaintSellPill() {}, renderSolStats() {}, solLoadChart() {},
     fetchSolMeta: mint => mint === 'mintA' ? old.promise : Promise.resolve({ symbol: 'B', decimals: 6 }),
@@ -227,7 +227,7 @@ test('resetting token does not unlock a wallet request already in progress', () 
 test('token page with missing metadata still initializes the wallet', async () => {
   let initialized = false;
   const c = context(['openSolanaTokenPage'], {
-    SOL_APP_TOKEN_LIST: [], solPresetLogo: () => null, shortAddr: s => s, solTokenUrl: s => s,
+    SOL_APP_TOKEN_LIST: [], solPresetLogo: () => null, solNormalizeLegs: async () => false, shortAddr: s => s, solTokenUrl: s => s,
     paintSolAvatar() {}, paintReportNetwork() {}, paintWallet() {}, renderRoundTrip() {}, ev() {}, renderSolStats() {},
     renderSolExit() {}, solPaintSellPill() {}, solTryAutoRestoreName() {},
     solWalletStandardInit() { initialized = true; },
@@ -264,7 +264,7 @@ test('ExactOut budget uses the maximum input threshold',()=>{
   assert.equal(c.solRequiredInput(),1.1);
 });
 test('selecting a pay token on a reversed pair retains direction',async()=>{
-  const c=context(['solSelectToken'],{solPickerLeg:'token',solSide:'sell',solCloseTokenPicker(){},solOnSideChange(){},solAppLoadToken:async()=>{c.solSide='buy';}});
+  const c=context(['solSelectToken'],{solPickerLeg:'token',solSide:'sell',solCloseTokenPicker(){},solOnSideChange(){},solAppLoadToken:async()=>{c.solSide='buy';},solNormalizeLegs:async()=>false});
   await c.solSelectToken('anotherMint');assert.equal(c.solSide,'sell');
 });
 test('Solana sharing preserves both mints and ExactOut mode',()=>{
@@ -273,4 +273,20 @@ test('Solana sharing preserves both mints and ExactOut mode',()=>{
   const params=new URLSearchParams(c.solShareUrl().split('?')[1]);
   assert.equal(params.get('chain'),'solana');assert.equal(params.get('in'),'USDCmint');
   assert.equal(params.get('out'),'CaseSensitiveMint');assert.equal(params.get('mode'),'exactOut');assert.equal(params.get('amt'),'1.25');
+});
+
+// ۲۰ اکتبر — بررسی‌ها (Exit check، امتیازِ ریسک، برچسبِ You receive) مالِ توکنِ دریافتی است، مگر دریافتی SOL/USDC/USDT باشد
+test('checks target is the received token unless it is a base asset', ()=>{
+  const SOLM='So11111111111111111111111111111111111111112',USDC='USDCmint',T='TRUMPmint',P='PUMPmint';
+  const base=new Set([SOLM,USDC]);
+  const c=context(['solChecksTarget'],{SOL_BASE_LEG:base,solSide:'sell',solMintCur:SOLM,solRefMint:T});
+  assert.equal(c.solChecksTarget(),T);                       // پرداختِ SOL، دریافتِ TRUMP (TRUMP در سمتِ مرجع) → TRUMP
+  c.solSide='buy';c.solMintCur=T;c.solRefMint=SOLM;
+  assert.equal(c.solChecksTarget(),T);                       // همان جفت، نقش‌های درست → بدونِ تغییر
+  c.solSide='sell';
+  assert.equal(c.solChecksTarget(),T);                       // فروشِ TRUMP به SOL → خودِ TRUMP
+  c.solSide='sell';c.solMintCur=P;c.solRefMint=T;
+  assert.equal(c.solChecksTarget(),T);                       // PUMP → TRUMP: دریافتی
+  c.solSide='buy';c.solMintCur=USDC;c.solRefMint=SOLM;
+  assert.equal(c.solChecksTarget(),USDC);                    // هر دو پایه → دست نمی‌خورد
 });

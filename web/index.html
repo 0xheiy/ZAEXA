@@ -5864,6 +5864,27 @@ async function solSelectToken(mint){
   }else if(mint===solRefMint){solSide=solSide==="buy"?"sell":"buy";solOnSideChange();}
   else{const side=solSide;await solAppLoadToken(mint);solSide=side;solOnSideChange();}
   solCloseTokenPicker();
+  await solNormalizeLegs();
+}
+/* ۲۰ اکتبر — کارتِ Exit check، امتیازِ ریسک و برچسبِ کنارِ «You receive» همه مالِ «توکن» (solMintCur) اند.
+   وقتی کاربر توکنِ واقعی را در سمتِ «مرجع» می‌نشاند (SOL→TRUMP با SOL به‌عنوانِ توکن، یا PUMP→ORCA)،
+   همه‌ی این‌ها برای چیزِ غلط بود: TRUMP «Not checked» و کارت برای SOL. اینجا نقش‌ها را جابه‌جا می‌کنیم
+   تا توکن همیشه همان دریافتی باشد — مگر دریافتی SOL/USDC/USDT باشد، که آن‌وقت توکنِ پرداختی است.
+   جای دو پایه روی صفحه عوض نمی‌شود (side هم برعکس می‌شود). روی صفحه‌ی توکن و Flow هرگز. */
+const SOL_BASE_LEG=new Set([SOL_MINT_ADDR,SOL_APP_TOKENS.USDC,SOL_APP_TOKENS.USDT]);
+function solChecksTarget(){
+  const recv=solSide==="buy"?solMintCur:solRefMint,paid=solSide==="buy"?solRefMint:solMintCur;
+  return !SOL_BASE_LEG.has(recv)?recv:!SOL_BASE_LEG.has(paid)?paid:solMintCur;
+}
+async function solNormalizeLegs(){
+  if(tokenPage||view!=="swap"||!solMintCur||!solRefMint)return false;
+  const want=solChecksTarget();
+  if(want===solMintCur)return false;
+  const oldTok=solMintCur,side=solSide==="buy"?"sell":"buy";
+  await solAppLoadToken(want);                 // want همان مرجع است → solAppLoadToken مرجع را اول SOL می‌کند
+  if(oldTok!==SOL_MINT_ADDR&&solRefMint!==oldTok)await solSetReference(oldTok);
+  solSide=side;solOnSideChange();
+  return true;
 }
 function solAmountRaw(text,decimals){
   if(!Number.isInteger(decimals)||decimals<0||decimals>30||!/^\d*\.?\d+$/.test(text))return null;
@@ -5956,6 +5977,48 @@ function solOpenTokenPicker(){
   $("solTokOv").classList.add("on");
   setTimeout(()=>$("solTokSearch").focus(),30);
   solLoadPopular();
+  // ۲۰ اکتبر: موجودیِ کیف‌پول کنارِ هر توکن، و توکن‌های دارای موجودی بالای فهرست به ترتیبِ ارزشِ دلاری
+  if(solAccount)solLoadPickerBalances().then(()=>{if($("solTokOv").classList.contains("on"))solRenderTokenPicker($("solTokSearch").value);});
+}
+/* موجودیِ گزینشگر: همان خواندنِ Portfolio (getBalance + getTokenAccountsByOwner برای هر دو برنامه،
+   solCollectHoldings)، فقط برای مینت‌هایی که در فهرست/Popular هستند — توکنِ ناخواسته‌ی ایردراپ‌شده بالا نمی‌آید.
+   قیمت فقط برای مرتب‌سازی، از usdPriceِ همان جست‌وجوی Jupiter که پشتیبانِ لوگوست (≤۲۵ در هر تماس).
+   کش ۳۰ ثانیه، به‌ازای هر آدرس؛ بعد از هر سواپ solRefreshBalances آن را پاک می‌کند. شکست = بدونِ موجودی، مثلِ امروز. */
+var solPickBal=null,solPickBalLoading=null;   // var: solRefreshBalances پیش از این خط هم صدا زده می‌شود
+async function solLoadPickerBalances(){
+  const acc=solAccount;if(!acc)return;
+  if(solPickBal&&solPickBal.addr===acc.address&&Date.now()-solPickBal.at<30000)return;
+  if(solPickBalLoading)return solPickBalLoading;
+  solPickBalLoading=(async()=>{
+    try{
+      const results=await Promise.allSettled([
+        solRpcCall("getBalance",[acc.address,{commitment:"confirmed"}]),
+        ...SOL_TOKEN_PROGRAMS.map(programId=>solRpcCall("getTokenAccountsByOwner",[acc.address,{programId},{encoding:"jsonParsed"}])),
+      ]);
+      const h=solCollectHoldings(results);
+      const listed=new Set([...SOL_APP_TOKEN_LIST.map(t=>t.mint),...((solPopularCache||[]).map(t=>t.mint))]);
+      const map={};
+      for(const r of h.rows){
+        if(!listed.has(r.mint)||(r.mint===SOL_MINT_ADDR&&!r.native))continue;   // SOL = بومی، نه wSOL
+        map[r.mint]={raw:r.raw,decimals:r.decimals,usd:null};
+      }
+      const ms=Object.keys(map);
+      for(let i=0;i<ms.length;i+=25){
+        try{
+          const arr=await solJupJson(SOL_JUP_SEARCH+ms.slice(i,i+25).join(","));
+          for(const it of arr){
+            const m=it&&typeof it.id==="string"?map[it.id]:null,px=Number(it&&it.usdPrice);
+            if(m&&Number.isFinite(px)&&px>0)m.usd=Number(solFormatUnits(m.raw,m.decimals))*px;
+          }
+        }catch{}
+      }
+      if(solAccount===acc)solPickBal={addr:acc.address,at:Date.now(),map};
+    }catch{}finally{solPickBalLoading=null;}
+  })();
+  return solPickBalLoading;
+}
+function solPickBalOf(mint){
+  return solPickBal&&solAccount&&solPickBal.addr===solAccount.address?solPickBal.map[mint]||null:null;
 }
 function solCloseTokenPicker(){$("solTokOv").classList.remove("on");}
 /* ---- E — «Popular on Solana»، زنده از GET /gt/networks/solana/pools ----
@@ -6328,9 +6391,14 @@ function solRenderTokenPicker(q){
   const ql=query.toLowerCase();
   let rows=SOL_APP_TOKEN_LIST.filter(t=>!ql||t.symbol.toLowerCase().includes(ql)||
     t.name.toLowerCase().includes(ql)||t.mint.toLowerCase().includes(ql));
+  // دارای موجودی اول: قیمت‌دار به ترتیبِ ارزشِ دلاری، بعد بی‌قیمت‌ها؛ بقیه به همان ترتیبِ فهرست (sort پایدار است)
+  const rank=t=>{const b=solPickBalOf(t.mint);return !b?[2,0]:b.usd==null?[1,0]:[0,-b.usd];};
+  rows=rows.slice().sort((x,y)=>{const a=rank(x),b=rank(y);return a[0]-b[0]||a[1]-b[1];});
+  const balTxt=m=>{const b=solPickBalOf(m);return b?esc(solFmtAmount(b.raw.toString(),b.decimals)):"";};
   let html=rows.map((t,i)=>`<button class="trow" data-mint="${esc(t.mint)}">
       <span class="av" data-picktok="${i}">${esc(t.symbol.slice(0,3).toUpperCase())}</span>
       <span><span class="s">${esc(t.symbol)}</span><br><span class="a mono">${shortAddr(t.mint)}</span></span>
+      <span class="b mono">${balTxt(t.mint)}</span>
     </button>`).join("");
   if(!rows.length&&SOL_MINT_RE.test(query)){
     html=`<button class="trow" data-mint="${esc(query)}">
@@ -6349,6 +6417,7 @@ function solRenderTokenPicker(q){
       popularRows.map((t,i)=>`<button class="trow" data-mint="${esc(t.mint)}">
           <span class="av" data-picktokpop="${i}">${esc(t.symbol.slice(0,3).toUpperCase())}</span>
           <span><span class="s">${esc(t.symbol)}</span><br><span class="a mono">${shortAddr(t.mint)}</span></span>
+          <span class="b mono">${balTxt(t.mint)}</span>
         </button>`).join("");
   }
   list.innerHTML=html;
@@ -8564,6 +8633,16 @@ function renderTokenList(q){
   let toks=allTokens();
   if(query)toks=toks.filter(t=>t.symbol.toLowerCase().includes(query)||
     (t.name||"").toLowerCase().includes(query)||t.address.toLowerCase().includes(query));
+  /* ۲۰ اکتبر: دارای موجودی اول — قیمت‌دار به ترتیبِ ارزشِ دلاری (قیمت از کشِ همان loadMetas، و
+     استیبل = ۱ دلار؛ هیچ درخواستِ تازه‌ای نمی‌زنیم)، بعد بی‌قیمت‌ها؛ بقیه به همان ترتیبِ فهرست (sort پایدار). */
+  const usdOf=t=>{
+    const b=balances[balKey(t)];if(b===undefined||b<=0n)return undefined;
+    const m=metaCache[(t.native?WETH_ADDR:t.address).toLowerCase()];
+    const px=t.stable?1:Number(m&&m.price_usd);
+    return Number.isFinite(px)&&px>0?Number(E.formatUnits(b,t.decimals))*px:null;
+  };
+  const rank=t=>{const u=usdOf(t);return u===undefined?[2,0]:u===null?[1,0]:[0,-u];};
+  toks=toks.slice().sort((x,y)=>{const a=rank(x),b=rank(y);return a[0]-b[0]||a[1]-b[1];});
   let html=toks.map(t=>{
     const b=balances[balKey(t)];
     return `<button class="trow" data-i="${allTokens().indexOf(t)}">
@@ -8576,7 +8655,11 @@ function renderTokenList(q){
   }else if(!toks.length)html='<div class="empty">Nothing found. Paste a contract address to import it.</div>';
   list.innerHTML=html;
   list.querySelectorAll(".trow").forEach(el=>el.onclick=()=>pickToken(allTokens()[+el.dataset.i]));
+  const hadPrices=toks.filter(t=>usdOf(t)!==undefined).map(t=>usdOf(t)===null?0:1).join("");
   loadMetas(toks.filter(t=>!t.native).map(t=>t.address)).finally(()=>{
+    // قیمت‌ها تازه رسیدند و ترتیبِ دارایی‌ها عوض می‌شود → یک بار دوباره بچین (فقط اگر هنوز باز است و جست‌وجو همان است)
+    const now=toks.filter(t=>usdOf(t)!==undefined).map(t=>usdOf(t)===null?0:1).join("");
+    if(now!==hadPrices&&$("tokOv").classList.contains("on")&&($("tokSearch").value||"").trim().toLowerCase()===query)return renderTokenList(q);
     list.querySelectorAll(".av[data-tok]").forEach(el=>paintAvatar(el,allTokens()[+el.dataset.tok]));
   });
 }
@@ -9421,6 +9504,7 @@ async function solRpcCall(method,params){
   return j.result;
 }
 async function solRefreshBalances(){
+  solPickBal=null;   // ۲۰ اکتبر: موجودیِ گزینشگر بعد از هر سواپ/تغییرِ کیف‌پول تازه خوانده شود
   const seq=++solBalanceSeq;
   const account=solAccount,mint=solMintCur,ref=solRefMint;
   const key=account?account.address+":"+mint+":"+ref:null;
@@ -11430,9 +11514,10 @@ $("copyAddrBtn").onclick=(e)=>{
   };
   /* ---- سواپِ زنده‌ی سولانا — عناصر همیشه در DOM هستند (روی Base مخفی)،
      پس صدازدنِ wire() یک‌بار برای همیشه کافی است. ---- */
-  $("solFlipBtn").onclick=()=>{
+  $("solFlipBtn").onclick=async()=>{
     solSide=solSide==="buy"?"sell":"buy";
     solOnSideChange();
+    await solNormalizeLegs();   // ۲۰ اکتبر: بعد از جابه‌جایی هم بررسی‌ها مالِ توکنِ دریافتی بماند
   };
   $("solTokClose").onclick=solCloseTokenPicker;
   $("solTokOv").onclick=e=>{if(e.target===$("solTokOv"))solCloseTokenPicker();};
