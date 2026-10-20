@@ -57,6 +57,7 @@
     "pcs-500|weth-usdc": 2_200_000, "pcs-2500|weth-usdc": 300_000,
     "pcs-100|weth-usdc": 0,         "pcs-10000|weth-usdc": 0,
     "uv2|weth-usdc": 4_000_000,
+    "v4-500|weth-usdc": 30_000_000,   // Uniswap V4 (فقط وقتی CHAIN.v4Adapter پر و لیست‌سفید باشد دیده می‌شود)
   };
   // کلیدهای جفت‌ها را به همان شکلی که pairKey می‌سازد (مرتب‌شده) نرمال می‌کنیم
   for (const k of Object.keys(DEPTH)) {
@@ -67,7 +68,7 @@
 
   const FEE = { "uni-100":1n, "uni-500":5n, "uni-3000":30n, "uni-10000":100n,
                 "pcs-100":1n, "pcs-500":5n, "pcs-2500":25n, "pcs-10000":100n,
-                "aero-vol":30n, "aero-stb":5n, "uv2":30n, "cl-100":5n, "cl1-100":5n };  // در ده‌هزارم
+                "aero-vol":30n, "aero-stb":5n, "uv2":30n, "cl-100":5n, "cl1-100":5n, "v4-500":5n };  // در ده‌هزارم
 
   const QUOTER = "0x3d4e44Eb1374240CE5F1B871ab261CD16335B76a".toLowerCase();
   const PCS_Q  = "0xB048Bbc1Ee6b733FFfCFb9e9cEF7375518e25997".toLowerCase();
@@ -85,6 +86,9 @@
   // کد دارد ولی executor هنوز لیست‌سفیدش نکرده: allowedRouter پیش‌فرضِ این
   // یکی false است و فقط با window.__STUB_ROUTER_ALLOWED__ روشن می‌شود.
   const UNIV2_R = "0x4752ba5DBc23f44D87826276BF6Fd6b1C372aD24".toLowerCase();
+  // Uniswap V4: کوترِ واقعیِ Base و یک آدرسِ آداپترِ آزمایشی (در پروداکشن null است).
+  const V4_Q   = "0x0d5e0F971ED27FBfF6c2837bf31316121532048D".toLowerCase();
+  const V4_ADAPTER = "0xA4a4A4a4A4a4A4a4A4a4A4a4A4a4A4a4A4a4A4a4".toLowerCase();
   const MC3    = "0xcA11bde05977b3631167028862bE2a173976CA11".toLowerCase();
   // باید با CHAIN.executor در index.html یکی باشد، وگرنه allowedRouter و feeBps
   // در استاب هرگز match نمی‌شوند و دروازه‌ی ۳ بی‌صدا از تست بیرون می‌ماند.
@@ -176,6 +180,10 @@
     "quoteExactInputSingle((address,address,uint256,uint24,uint160))",
     "quoteExactInputSingle((address,address,uint256,int24,uint160))",
   ];
+  const V4_QUOTE_SIG = "quoteExactInputSingle(((address,address,uint24,int24,address),bool,uint128,bytes))";
+  const V4_SWAP_SIG  = "swap(address,address,uint256,uint24,int24,bool,address,address)";
+  const V4_QUOTER_CODE  = "0x60806040" + fakeId(V4_QUOTE_SIG).slice(2, 10);
+  const V4_ADAPTER_CODE = "0x60806040" + fakeId(V4_SWAP_SIG).slice(2, 10);
   const QUOTER_CODE = "0x60806040" + QUOTER_SIGS.map(s => fakeId(s).slice(2, 10)).join("beef");
   // آدرس‌هایی که روی زنجیره‌ی واقعی هم قرارداد ندارند. بدون این‌ها استاب
   // *هر* آدرسی را یک ERC-20 سالم نشان می‌داد و مسیر «توکن قابل تأیید نیست»
@@ -222,6 +230,8 @@
     stubAlive(this.url);
     const a = String(addr || "").toLowerCase();
     if (NOCODE.includes(a)) return "0x";
+    if (a === V4_Q) return V4_QUOTER_CODE;
+    if (a === V4_ADAPTER) return V4_ADAPTER_CODE;
     if (GOOD_ROUTERS.includes(a)) return ROUTER_CODE;
     if (GOOD_QUOTERS.includes(a)) return QUOTER_CODE;
     if (CANDIDATE_ROUTERS.includes(a)) return "0x";     // هنوز تأیید نشده
@@ -267,6 +277,18 @@
           const o = amm(venueKeyV3(V3_QUOTERS[t], Number(fee)), tin, tout, amt);
           if (o === null) return [false, "0x"];
           return [true, pack([o, 0n, 0, 0n])];
+        }
+        if (t === V4_Q && c.name === "quoteExactInputSingle") {
+          // args[0] = [[c0, c1, fee, tickSpacing, hooks], zeroForOne, amount, hookData]
+          (window.__STUB_V4_QUOTES__ = window.__STUB_V4_QUOTES__ || []).push(ser(c.args[0]));
+          if (window.__STUB_V4_QUOTER_REVERT__) return [false, "0x"];
+          const [key, z4o, amt4] = c.args[0];
+          const Z = "0x0000000000000000000000000000000000000000";
+          const m = x => (x.toLowerCase() === Z ? T.WETH : x);
+          const [tin4, tout4] = z4o ? [m(key[0]), m(key[1])] : [m(key[1]), m(key[0])];
+          const o = amm(venueKeyV3("v4", Number(key[2])), tin4, tout4, amt4);
+          if (o === null) return [false, "0x"];
+          return [true, pack([o, 0n])];
         }
         if (t === AERO_R && c.name === "getAmountsOut") {
           const amt = c.args[0], routes = c.args[1];
@@ -315,6 +337,10 @@
         // به‌ازای هر روتر — window.__STUB_ROUTER_ALLOWED__ = {"<router>": false}
         // — تا دروازه‌ی ۳ (allowListGate) بدون لیست‌سفید شدن یک روتر خاص
         // آزموده شود.
+        if (t === EXEC && c.name === "allowedAdapter") {
+          const r = String(c.args[0]).toLowerCase();
+          return [true, pack([!!(window.__STUB_ADAPTER_ALLOWED__ || {})[r]])];
+        }
         if (t === EXEC && c.name === "allowedRouter") {
           const r = String(c.args[0]).toLowerCase();
           const ov = (window.__STUB_ROUTER_ALLOWED__ || {})[r];
@@ -347,6 +373,12 @@
   const realFetch = window.fetch && window.fetch.bind(window);
   window.fetch = async function (url, opts) {
     const u = String(url);
+    if (/\/v4\/keys\/0x[0-9a-fA-F]{40}$/.test(u)) {
+      (window.__STUB_V4_FETCHES__ = window.__STUB_V4_FETCHES__ || []).push(u);
+      const who = u.split("/v4/keys/")[1].toLowerCase();
+      const keys = (window.__STUB_V4_KEYS__ || {})[who] || [];
+      return { ok: true, status: 200, json: async () => ({ keys, indexed: true }) };
+    }
     if (!u.includes("api.geckoterminal.com")) {
       if (realFetch) return realFetch(url, opts);
       throw new Error("offline");

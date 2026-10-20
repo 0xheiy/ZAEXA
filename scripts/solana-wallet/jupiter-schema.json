@@ -1,0 +1,487 @@
+{
+  "source": "https://github.com/jup-ag/jupiter-cpi/blob/main/idl.json",
+  "sourceSha256": "764ea6d71b77458fd33aeb308d6e6bb19e660fc5320c5359f3b9cac96eba5c50",
+  "instructions": [
+    {
+      "name": "route",
+      "discriminator": [
+        229,
+        23,
+        203,
+        151,
+        122,
+        227,
+        173,
+        42
+      ],
+      "args": [
+        {
+          "name": "routePlan",
+          "type": {
+            "vec": {
+              "defined": "RoutePlanStep"
+            }
+          }
+        },
+        {
+          "name": "inAmount",
+          "type": "u64"
+        },
+        {
+          "name": "quotedOutAmount",
+          "type": "u64"
+        },
+        {
+          "name": "slippageBps",
+          "type": "u16"
+        },
+        {
+          "name": "platformFeeBps",
+          "type": "u8"
+        }
+      ],
+      "accounts": [
+        "tokenProgram",
+        "userTransferAuthority",
+        "userSourceTokenAccount",
+        "userDestinationTokenAccount",
+        "destinationTokenAccount",
+        "destinationMint",
+        "platformFeeAccount",
+        "eventAuthority",
+        "program"
+      ]
+    },
+    {
+      "name": "sharedAccountsRoute",
+      "discriminator": [
+        193,
+        32,
+        155,
+        51,
+        65,
+        214,
+        156,
+        129
+      ],
+      "args": [
+        {
+          "name": "id",
+          "type": "u8"
+        },
+        {
+          "name": "routePlan",
+          "type": {
+            "vec": {
+              "defined": "RoutePlanStep"
+            }
+          }
+        },
+        {
+          "name": "inAmount",
+          "type": "u64"
+        },
+        {
+          "name": "quotedOutAmount",
+          "type": "u64"
+        },
+        {
+          "name": "slippageBps",
+          "type": "u16"
+        },
+        {
+          "name": "platformFeeBps",
+          "type": "u8"
+        }
+      ],
+      "accounts": [
+        "tokenProgram",
+        "programAuthority",
+        "userTransferAuthority",
+        "sourceTokenAccount",
+        "programSourceTokenAccount",
+        "programDestinationTokenAccount",
+        "destinationTokenAccount",
+        "sourceMint",
+        "destinationMint",
+        "platformFeeAccount",
+        "token2022Program",
+        "eventAuthority",
+        "program"
+      ]
+    },
+    {
+      "name": "sharedAccountsExactOutRoute",
+      "discriminator": [
+        176,
+        209,
+        105,
+        168,
+        154,
+        125,
+        69,
+        62
+      ],
+      "args": [
+        {
+          "name": "id",
+          "type": "u8"
+        },
+        {
+          "name": "routePlan",
+          "type": {
+            "vec": {
+              "defined": "RoutePlanStep"
+            }
+          }
+        },
+        {
+          "name": "outAmount",
+          "type": "u64"
+        },
+        {
+          "name": "quotedInAmount",
+          "type": "u64"
+        },
+        {
+          "name": "slippageBps",
+          "type": "u16"
+        },
+        {
+          "name": "platformFeeBps",
+          "type": "u8"
+        }
+      ],
+      "accounts": [
+        "tokenProgram",
+        "programAuthority",
+        "userTransferAuthority",
+        "sourceTokenAccount",
+        "programSourceTokenAccount",
+        "programDestinationTokenAccount",
+        "destinationTokenAccount",
+        "sourceMint",
+        "destinationMint",
+        "platformFeeAccount",
+        "token2022Program",
+        "eventAuthority",
+        "program"
+      ]
+    }
+  ],
+  "types": [
+    {
+      "name": "AddLiquidity",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "tokenAmountIn",
+            "type": "u64"
+          },
+          {
+            "name": "minLpAmountOut",
+            "type": "u64"
+          },
+          {
+            "name": "tokenAmountPreSwap",
+            "type": {
+              "option": "u64"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "RemoveLiquidity",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "lpAmountIn",
+            "type": "u64"
+          },
+          {
+            "name": "minAmountOut",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "AmountWithSlippage",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "amount",
+            "type": "u64"
+          },
+          {
+            "name": "slippageBps",
+            "type": "u16"
+          }
+        ]
+      }
+    },
+    {
+      "name": "RoutePlanStep",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "swap",
+            "type": {
+              "defined": "Swap"
+            }
+          },
+          {
+            "name": "percent",
+            "type": "u8"
+          },
+          {
+            "name": "inputIndex",
+            "type": "u8"
+          },
+          {
+            "name": "outputIndex",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Side",
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "Bid"
+          },
+          {
+            "name": "Ask"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Swap",
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "Saber"
+          },
+          {
+            "name": "SaberAddDecimalsDeposit"
+          },
+          {
+            "name": "SaberAddDecimalsWithdraw"
+          },
+          {
+            "name": "TokenSwap"
+          },
+          {
+            "name": "Sencha"
+          },
+          {
+            "name": "Step"
+          },
+          {
+            "name": "Cropper"
+          },
+          {
+            "name": "Raydium"
+          },
+          {
+            "name": "Crema",
+            "fields": [
+              {
+                "name": "aToB",
+                "type": "bool"
+              }
+            ]
+          },
+          {
+            "name": "Lifinity"
+          },
+          {
+            "name": "Mercurial"
+          },
+          {
+            "name": "Cykura"
+          },
+          {
+            "name": "Serum",
+            "fields": [
+              {
+                "name": "side",
+                "type": {
+                  "defined": "Side"
+                }
+              }
+            ]
+          },
+          {
+            "name": "MarinadeDeposit"
+          },
+          {
+            "name": "MarinadeUnstake"
+          },
+          {
+            "name": "Aldrin",
+            "fields": [
+              {
+                "name": "side",
+                "type": {
+                  "defined": "Side"
+                }
+              }
+            ]
+          },
+          {
+            "name": "AldrinV2",
+            "fields": [
+              {
+                "name": "side",
+                "type": {
+                  "defined": "Side"
+                }
+              }
+            ]
+          },
+          {
+            "name": "Whirlpool",
+            "fields": [
+              {
+                "name": "aToB",
+                "type": "bool"
+              }
+            ]
+          },
+          {
+            "name": "Invariant",
+            "fields": [
+              {
+                "name": "xToY",
+                "type": "bool"
+              }
+            ]
+          },
+          {
+            "name": "Meteora"
+          },
+          {
+            "name": "GooseFX"
+          },
+          {
+            "name": "DeltaFi",
+            "fields": [
+              {
+                "name": "stable",
+                "type": "bool"
+              }
+            ]
+          },
+          {
+            "name": "Balansol"
+          },
+          {
+            "name": "MarcoPolo",
+            "fields": [
+              {
+                "name": "xToY",
+                "type": "bool"
+              }
+            ]
+          },
+          {
+            "name": "Dradex",
+            "fields": [
+              {
+                "name": "side",
+                "type": {
+                  "defined": "Side"
+                }
+              }
+            ]
+          },
+          {
+            "name": "LifinityV2"
+          },
+          {
+            "name": "RaydiumClmm"
+          },
+          {
+            "name": "Openbook",
+            "fields": [
+              {
+                "name": "side",
+                "type": {
+                  "defined": "Side"
+                }
+              }
+            ]
+          },
+          {
+            "name": "Phoenix",
+            "fields": [
+              {
+                "name": "side",
+                "type": {
+                  "defined": "Side"
+                }
+              }
+            ]
+          },
+          {
+            "name": "Symmetry",
+            "fields": [
+              {
+                "name": "fromTokenId",
+                "type": "u64"
+              },
+              {
+                "name": "toTokenId",
+                "type": "u64"
+              }
+            ]
+          },
+          {
+            "name": "TokenSwapV2"
+          },
+          {
+            "name": "HeliumTreasuryManagementRedeemV0"
+          },
+          {
+            "name": "StakeDexStakeWrappedSol"
+          },
+          {
+            "name": "StakeDexSwapViaStake",
+            "fields": [
+              {
+                "name": "bridgeStakeSeed",
+                "type": "u32"
+              }
+            ]
+          },
+          {
+            "name": "GooseFXV2"
+          },
+          {
+            "name": "Perps"
+          },
+          {
+            "name": "PerpsAddLiquidity"
+          },
+          {
+            "name": "PerpsRemoveLiquidity"
+          },
+          {
+            "name": "MeteoraDlmm"
+          }
+        ]
+      }
+    }
+  ]
+}

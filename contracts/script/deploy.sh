@@ -95,7 +95,7 @@ read_uint() {
 # --- دروازه‌ی ۱: تست‌های آفلاین ---
 echo
 echo "[۱/۵] اجرای تست‌های آفلاین ..."
-if ! forge test --no-match-path 'test/SwapExecutor.fork.t.sol' > /tmp/zaexa-test.log 2>&1; then
+if ! forge test --no-match-path 'test/*.fork.t.sol' > /tmp/zaexa-test.log 2>&1; then
   echo "  تست‌ها قرمزند. دیپلوی متوقف شد."
   tail -30 /tmp/zaexa-test.log
   exit 1

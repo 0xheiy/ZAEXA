@@ -11,6 +11,7 @@ const JUP = 'JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN';
 function context(names, extras = {}) {
   const elements = new Map();
   const ctx = vm.createContext({
+    solFailedBuild:null,solLoadIntent:async()=>({validateQuote(){}}),
     console, URLSearchParams, Uint8Array, Date, Math, BigInt, Number, String, Array, isFinite,
     setTimeout: () => 1, clearTimeout: () => {},
     $: id => {

@@ -65,6 +65,13 @@ async def _goto_allow_cmc(self, *a, **k):
         self._zx_cmc_done = True
         await self.route("**/cmc/kline**", lambda r: r.fulfill(
             status=200, content_type="application/json", body='{"candles":[]}'))
+    if not getattr(self, "_zx_real_intent", False) and not getattr(self, "_zx_intent_stubbed", False):
+        # ZX-01: the flow probes use fake transactions, so they get a STUB validator bundle by default and keep
+        # testing the UI flow. Only [sol intent real] sets _zx_real_intent and is served the REAL built bundle.
+        self._zx_intent_stubbed = True
+        await self.route("**/solana-intent.bundle.*.js", lambda r: r.fulfill(
+            status=200, content_type="application/javascript",
+            body="window.SolIntent={__stub:true,validateQuote:function(q){return q},validateTransaction:async function(){return true},assertSameMessage:function(){}};"))
     return await _pw_goto(self, *a, **k)
 
 
@@ -3996,7 +4003,14 @@ async def check_mobile_compact(p, errors):
     css_blk = rep_src[css_start:rep_src.index("`;\n", css_start)]
     assert "fMore" in css_blk and css_blk in landing_src, "the footer-collapse CSS in worker/report_page.js is not byte-identical to the one in web/landing.html"
     land_new = landing_src
+    # پدرِ landing هم مثل index.html نزدیک‌ترین نیاکانی است که هنوز فوتر چندستونی (fMore) را ندارد؛
+    # «HEAD» ثابت با اولین کامیتِ بعد از آن فوتر می‌افتاد.
     lg = git("show", rev + ":web/landing.html")
+    for cand_ in ["HEAD~%d" % k for k in range(1, 13)]:
+        if lg.returncode == 0 and "fMore" not in lg.stdout:
+            break
+        rev = cand_
+        lg = git("show", rev + ":web/landing.html")
     assert lg.returncode == 0 and "fMore" not in lg.stdout, "cannot read the parent commit's web/landing.html (git %s)" % rev
     land_old = lg.stdout
     LFREEZE = "*,*::before,*::after{animation:none!important;transition:none!important}"
@@ -4018,8 +4032,10 @@ async def check_mobile_compact(p, errors):
     print("[mobile compact] landing.html: footer byte-identical at 1440 (light/dark), collapsed + opens at 390; report_page.js footer HTML and CSS identical to landing.html (source of the GENERATED block)")
 
     # ================== ت) [desktop unchanged] ==================
-    if not base_ok:
-        raise AssertionError("[desktop unchanged] could not read the parent commit's web/index.html (git %s) — baseline missing" % rev)
+    # ۲۰ اکتبر: خطِ پایه دیگر کامیتِ پدر نیست (با هر کامیتِ تازه کهنه می‌شد و روی main هم می‌افتاد).
+    # همان صفحه دو بار رندر می‌شود: یک بار عادی، یک بار با نوارِ تب و data-mtab حذف‌شده — باید یکی باشند.
+    NEUTRAL = ("document.querySelectorAll('.mTabs').forEach(e=>e.remove());"
+               "document.querySelectorAll('[data-mtab]').forEach(e=>e.removeAttribute('data-mtab'));")
     FREEZE = ("document.addEventListener('DOMContentLoaded',()=>{const s=document.createElement('style');"
               "s.textContent='*,*::before,*::after{animation:none!important;transition:none!important;caret-color:transparent!important}';"
               "document.head.appendChild(s)});")
@@ -4027,17 +4043,19 @@ async def check_mobile_compact(p, errors):
     for path, scheme in (("/app#swap", "light"), ("/app#swap", "dark"), ("/app#swap?chain=solana", "light")):
         for vw in (1440, 1000):
             shot = []
-            for origin in (origin_old, origin_new):
-                pg = await open_app(origin, path, vw=vw, vh=900, scheme=scheme, init=FREEZE, wait=1800)
-                await pg.evaluate("window.scrollTo(0,0)")
-                shot.append(await pg.screenshot(full_page=True))
-                await pg.close()
+            pg = await open_app(origin_new, path, vw=vw, vh=900, scheme=scheme, init=FREEZE, wait=1800)
+            await pg.evaluate("window.scrollTo(0,0)")
+            shot.append(await pg.screenshot(full_page=True))
+            await pg.evaluate(NEUTRAL)
+            await pg.wait_for_timeout(150)
+            shot.append(await pg.screenshot(full_page=True))
+            await pg.close()
             compared.append((path, scheme, vw, len(shot[1])))
             assert shot[0] == shot[1], \
-                ("[desktop unchanged] %s %s at %dpx differs from the parent commit's render (%d vs %d bytes)"
+                ("[desktop unchanged] %s %s at %dpx: the mobile tab strip / data-mtab changes the desktop render (%d vs %d bytes)"
                  % (path, scheme, vw, len(shot[0]), len(shot[1])))
-    print("[desktop unchanged] /app swap at 1440 and 1000, Base light/dark and Solana, animations off: %d screenshots byte-identical to the parent commit (%s)"
-          % (len(compared), rev))
+    print("[desktop unchanged] /app swap at 1440 and 1000, Base light/dark and Solana, animations off: %d renders byte-identical with and without the mobile tab strip"
+          % len(compared))
     srv_new.shutdown()
     if srv_old:
         srv_old.shutdown()
@@ -8244,6 +8262,86 @@ async def check_sol_boot_gt(p, errors):
         await b.close()
 
 
+async def check_uniswap_v4(pg):
+    """[uniswap v4 venue] — Uniswap V4 via UniswapV4Adapter (KIND_ADAPTER = 5).
+    Gate: CHAIN.v4Adapter null -> never quoted/routed; set but not in executor.allowedAdapter
+    -> "not allow-listed", never routed; set + allow-listed -> keys from /v4/keys quote and route."""
+    idx_src = open(os.path.join(HERE, "..", "index.html"), encoding="utf-8").read()
+    st = await pg.evaluate("""() => { const d = DEXES.find(x => x.id === "uniswap-v4");
+        return {row: d ? {name: d.name, cls: d.cls, kind: d.kind, core: !!d.core, quoter: d.quoter} : null,
+                clsUsers: DEXES.filter(x => d && x.cls === d.cls).map(x => x.id),
+                k5: KIND.V4, adapter: CHAIN.v4Adapter, q: CHAIN.v4Quoter, pm: CHAIN.v4PoolManager,
+                gt: GT_DEX_TO_DEX["uniswap-v4-base"]}; }""")
+    row = st["row"]
+    assert row and row["name"] == "Uniswap V4" and row["kind"] == 5 == st["k5"] and not row["core"], st
+    assert st["adapter"] is None, "CHAIN.v4Adapter must ship unset: %r" % st["adapter"]
+    assert st["q"] == "0x0d5e0F971ED27FBfF6c2837bf31316121532048D" and row["quoter"] == st["q"], st
+    assert st["pm"] == "0x498581fF718922c3f8e6A244956aF099B2652b2b", st
+    assert st["gt"] == "uniswap-v4", "GT id uniswap-v4-base must map to uniswap-v4"
+    assert st["clsUsers"] == ["uniswap-v4"], "dex colour class shared: %s" % st["clsUsers"]
+    assert re.search(r"\.vdot\.%s\{background:#[0-9a-fA-F]{6}\}" % row["cls"], idx_src), "missing .vdot colour rule"
+    r = await pg.evaluate("""async () => {
+        const USDC = tokenBySymbol("USDC").address, WETH = tokenBySymbol("WETH"), U = tokenBySymbol("USDC");
+        const Z = "0x0000000000000000000000000000000000000000", HOOK = "0x1111111111111111111111111111111111111111";
+        const ADAPTER = "0xA4a4A4a4A4a4A4a4A4a4A4a4A4a4A4a4A4a4A4a4";
+        const good = {currency0: Z, currency1: USDC, fee: 500, tickSpacing: 10, hooks: HOOK};
+        const wrong = {currency0: Z, currency1: "0x940181a94A35A4569E4529A3CDfB74e38FD98631", fee: 3000, tickSpacing: 60, hooks: Z};
+        const run = async (adapter, allowed, keys, revert) => {
+            CHAIN.v4Adapter = adapter;
+            window.__STUB_ADAPTER_ALLOWED__ = allowed ? {[ADAPTER.toLowerCase()]: true} : {};
+            window.__STUB_V4_KEYS__ = {[USDC.toLowerCase()]: keys};
+            window.__STUB_V4_QUOTER_REVERT__ = !!revert;
+            v4Venues.clear(); v4KeyCache.clear(); window.__STUB_V4_QUOTES__ = []; window.__STUB_V4_FETCHES__ = [];
+            await verifyDexes();
+            const stats = newStats(), amt = 10n ** 18n;
+            const {routes, direct} = await findRoutes(WETH, U, amt, stats);
+            const plan = await findBestSplit(routes, amt, stats);
+            const steps = buildParts(plan).flatMap(p => p[0]).filter(s => s[0] === 5);
+            return {st: Object.assign({}, dexStatus["uniswap-v4"]), cov: document.getElementById("coverage").innerText,
+                    enabled: enabledDexes().map(d => d.id).includes("uniswap-v4"),
+                    quotes: window.__STUB_V4_QUOTES__.length, fetches: window.__STUB_V4_FETCHES__.length,
+                    routeV4: routes.some(x => x.hops.some(h => h.venue.dex.id === "uniswap-v4")),
+                    directV4: direct.filter(d => d.venue.dex.id === "uniswap-v4").length,
+                    steps, adapter: ADAPTER, hook: HOOK};
+        };
+        const out = {};
+        out.nul = await run(null, true, [good]);
+        out.noAllow = await run(ADAPTER, false, [good]);
+        out.ok = await run(ADAPTER, true, [good, wrong]);
+        out.wrongOnly = await run(ADAPTER, true, [wrong]);
+        out.revert = await run(ADAPTER, true, [good], true);
+        CHAIN.v4Adapter = null; delete window.__STUB_ADAPTER_ALLOWED__; delete window.__STUB_V4_KEYS__;
+        delete window.__STUB_V4_QUOTER_REVERT__; v4Venues.clear(); v4KeyCache.clear();
+        await verifyDexes();
+        return out;
+    }""")
+    n, na, ok, wo, rv = r["nul"], r["noAllow"], r["ok"], r["wrongOnly"], r["revert"]
+    print("[uniswap v4 venue] adapter null -> %r, quotes=%d fetches=%d | not allow-listed -> %r | "
+          "allow-listed -> quotes=%d steps=%s | wrong key ignored (quotes=%d) | quoter revert -> no quote"
+          % (n["st"]["reason"], n["quotes"], n["fetches"], na["st"]["reason"], ok["quotes"],
+             [(s[0], s[4], s[5], s[7]) for s in ok["steps"]], wo["quotes"]))
+    assert n["st"]["ok"] is False and n["st"]["reason"] == "adapter not deployed yet", n["st"]
+    assert "Uniswap V4" in n["cov"] and "adapter not deployed yet" in n["cov"], n["cov"]
+    assert not n["enabled"] and n["quotes"] == 0 and n["fetches"] == 0 and n["directV4"] == 0 and not n["routeV4"] \
+        and not n["steps"], "with the adapter unset v4 must never be quoted, fetched or routed: %s" % n
+    assert na["st"]["ok"] is False and na["st"]["reason"] == "not allow-listed on the executor contract yet", na["st"]
+    assert "Uniswap V4" in na["cov"] and "not allow-listed" in na["cov"], na["cov"]
+    assert not na["enabled"] and na["quotes"] == 0 and not na["routeV4"] and not na["steps"], \
+        "a not-allow-listed adapter must never be quoted or routed: %s" % na
+    assert ok["st"]["ok"] is True and ok["enabled"] and ok["fetches"] >= 1, ok
+    assert ok["quotes"] >= 1 and ok["routeV4"] and ok["directV4"] >= 1, "the native-ETH/USDC key must quote and route: %s" % ok
+    assert ok["steps"], "the encoded plan must contain a kind-5 step: %s" % ok
+    for s in ok["steps"]:
+        assert s[0] == 5 and s[1] == ok["adapter"], "step must be kind 5 with router = adapter: %s" % s
+        assert s[6] == ok["hook"], "poolFactory must carry the key's hooks: %s" % s
+        assert s[5] is True, "stable must be true when the pool's WETH side is native (address(0)): %s" % s
+        assert s[4] == 500 and s[7] == 10, "fee/tickSpacing must come from the key: %s" % s
+    assert wo["quotes"] == 0 and not wo["routeV4"] and not wo["steps"], \
+        "a key whose currencies do not match the pair must be ignored: %s" % wo
+    assert rv["quotes"] >= 1 and not rv["routeV4"] and rv["directV4"] >= 1 and not rv["steps"], \
+        "a reverting v4 quoter must give no quote and no route: %s" % rv
+
+
 async def main():
     errors = []
     # خطاهایی که یک کاوشگر *عمداً* تولید می‌کند. اجازه‌ی عبور می‌گیرند ولی
@@ -9857,6 +9955,12 @@ async def main():
         assert dexes_m, "web/index.html no longer declares DEXES"
         dex_ids = set(re.findall(r'\{id:"([^"]+)"', dexes_m.group(1)))
         print("[static guard] GT_DEX_TO_DEX pairs=%d dex_ids=%s" % (len(gd_pairs), sorted(dex_ids)))
+        # uniswap-v4-base: مسیرِ حکمِ Worker (VD_VENUES) برای v4 ایندکسِ کلیدِ خودش را دارد
+        # (V4_GT_DEX_ID در v4index.js) و در GT_DEX_TO_VENUE نیست؛ ردیفِ v4 این صفحه از
+        # آداپتر می‌آید. پس فقط همین یک نگاشت از برابریِ جدولِ Worker معاف است.
+        wk_v4 = open(os.path.join(HERE, "..", "..", "worker", "v4index.js"), encoding="utf-8").read()
+        assert re.search(r'V4_GT_DEX_ID = "uniswap-v4-base"', wk_v4), "worker's v4 GT dex id changed"
+        gd_pairs = [(k, v) for k, v in gd_pairs if not (k == "uniswap-v4-base" and v == "uniswap-v4")]
         for k, v in gd_pairs:
             assert gv_pairs.get(k) == v, \
                 "GT_DEX_TO_DEX[%r]=%r does not match worker's GT_DEX_TO_VENUE[%r]=%r" \
@@ -10775,7 +10879,7 @@ async def main():
         dep_routers = re.findall(r"0x[0-9a-fA-F]{40}", dep_block)
         assert UV2_ROUTER in dep_routers, \
             "deploy.sh does not allow-list the Uniswap V2 router (byte for byte): %s" % dep_routers
-        app_all = await pg.evaluate("() => DEXES.map(d => d.router)")
+        app_all = await pg.evaluate("() => DEXES.filter(d => d.kind !== KIND.V4).map(d => d.router)")
         assert sorted(dep_routers) == sorted(app_all), \
             "deploy.sh ROUTERS and the app's DEXES routers differ: %s vs %s" % (dep_routers, app_all)
 
@@ -10820,6 +10924,8 @@ async def main():
             "once allow-listed, Uniswap V2 must appear as a route: %s" % ua["routeIds"]
         assert ur["st"]["ok"] is False and "uniswap-v2" not in ur["directIds"], \
             "removing the allow-list entry must take the venue out of routing again"
+
+        await check_uniswap_v4(pg)
 
         # ---- 2c-bis. token logos load, initials survive failure ----
         await pg.wait_for_timeout(800)
@@ -13656,6 +13762,7 @@ async def main():
             "inputMint": "So11111111111111111111111111111111111111112",
             "outputMint": SWAP_MINT, "inAmount": "1000000000", "outAmount": "5000000000",
             "otherAmountThreshold": "4950000000", "priceImpactPct": "0.0123",
+            "swapMode": "ExactIn", "slippageBps": 50,
             "routePlan": [{"swapInfo": {"label": "Whirlpool"}}, {"swapInfo": {"label": "Whirlpool"}},
                           {"swapInfo": {"label": "Meteora DLMM"}}],
         }
@@ -13800,14 +13907,17 @@ async def main():
         async def open_sol_swap_page(verdict_body, quote_status=200, quote_body=None,
                                       swap_status=200, swap_body=None, inject_wallet=True,
                                       collect_errors=None, balance_lamports=2_000_000_000,
-                                      sim_result="skip", token_accounts=None, rpc_log=None,
+                                      sim_result="ok", token_accounts=None, rpc_log=None,
                                       wallet_init=None, swap_log=None, swap_bodies=None,
                                       send_error=None, ls_wallet_name=None, ls_off=False,
                                       sol_mint_image_url=None, quote_reason=None, send_error_times=None,
                                       send_params_log=None, quote_log=None, direct_quote_body=None,
                                       sim_rpc_fail=False, status_value=None, epoch_height=None,
-                                      status_params_log=None, swap_error=None, clock=False):
+                                      status_params_log=None, swap_error=None, clock=False,
+                                      real_intent=False, page_mint=None, rpc_hook=None):
             spg = await b.new_page(viewport={"width": 1240, "height": 1000})
+            if real_intent:
+                spg._zx_real_intent = True
             if clock:
                 # ۱۱ اکتبر — ساعتِ جعلی که طبیعی می‌گذرد؛ کاوشگرهای نگهبانِ کیف‌پول و پول‌کردن با run_for جلو می‌روند
                 await spg.clock.install()
@@ -13884,6 +13994,12 @@ async def main():
                 method = payload.get("method")
                 if rpc_log is not None:
                     rpc_log.append(method)
+                if rpc_hook is not None:
+                    hooked = rpc_hook(method, payload.get("params"))
+                    if hooked is not None:
+                        await route.fulfill(status=200, content_type="application/json",
+                                             body=_json.dumps({"result": hooked}))
+                        return
                 # B — round 3: یک sendTransactionِ شکست‌خورده با شکلِ بسته‌ی
                 # دقیقِ worker/index.js (error + detail.err/logs)، برای سنجیدنِ
                 # نگاشتِ سمتِ کلاینت جدا از خودِ Worker.
@@ -13934,7 +14050,7 @@ async def main():
                 # فراخوانِ بعدِ این تابع بتواند routeای اضافه کند.
                 await spg.route(sol_mint_image_url, lambda route: route.fulfill(
                     status=200, content_type="image/png", body=tiny_png_bytes()))
-            await spg.goto("http://127.0.0.1:%d/t/%s" % (port, SWAP_MINT))
+            await spg.goto("http://127.0.0.1:%d/t/%s" % (port, page_mint or SWAP_MINT))
             await spg.wait_for_timeout(1200)
             await spg.click("#tk-trade")
             await spg.wait_for_timeout(150)
@@ -13947,6 +14063,91 @@ async def main():
             await spg.click("#solWalList .walRow")
             await spg.wait_for_timeout(300)
             return wal_text
+
+        # [sol intent real] ZX-01 با یک سواپ واقعیِ مین‌نت (Phantom، ۱۹ اکتبر، SOL->USDC، Swap variant 181 که در schema
+        # پین‌شده نیست): باندلِ *واقعی* سرو می‌شود، پیام‌ِ Jupiter بدونِ دستورهای Lighthouse به‌عنوان swapTransaction
+        # برمی‌گردد و RPC از روی snapshot جواب می‌دهد. کیف‌پول باید صدا زده شود. نسخه‌ی دست‌کاری‌شده (مقصد عوض شده)
+        # هرگز نباید کیف‌پول را صدا بزند و رابط باید بگوید چیزی ارسال نشد.
+        import base64 as _b64, binascii as _binascii
+        _rs = _json.load(open(os.path.join(HERE, "fixtures", "sol_real_swap_stripped.json")))
+        _B58 = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
+        def _b58dec(t):
+            n = 0
+            for ch in t:
+                n = n * 58 + _B58.index(ch)
+            raw = n.to_bytes((n.bit_length() + 7) // 8, "big")
+            return bytes(len(t) - len(t.lstrip("1"))) + raw
+        _rs_pub = list(_b58dec(_rs["wallet"]))
+        assert len(_rs_pub) == 32, "fixture signer must decode to 32 bytes"
+        _RS_WALLET_INIT = ("""
+(function(){
+  const PUB = new Uint8Array(%s);
+  window.__solCalls = [];
+  const fakeWallet = {
+    name: "Fake Wallet", icon: "", chains: ["solana:mainnet"],
+    features: {
+      "standard:connect": { connect: async () => ({accounts: [{address: %s, publicKey: PUB}]}) },
+      "standard:disconnect": { disconnect: async () => {} },
+      "solana:signAndSendTransaction": { signAndSendTransaction: async (input) => {
+        window.__solCalls.push(Array.from(input.transaction));
+        return [{signature: new Uint8Array(64).fill(7)}];
+      } }
+    }
+  };
+  window.addEventListener("wallet-standard:app-ready", (e) => { try { e.detail.register(fakeWallet); } catch(_){} });
+})();
+""" % (_rs_pub, _json.dumps(_rs["wallet"])))
+        def _rs_rpc(method, params):
+            if method == "getAccountInfo":
+                if params[0] == _rs["alt"]:
+                    return {"value": {"owner": "AddressLookupTab1e1111111111111111111111111", "data": [_rs["altB64"], "base64"]}}
+                if params[0] in _rs["mints"]:
+                    return {"value": {"owner": _rs["mints"][params[0]], "data": {"parsed": {"type": "mint"}, "program": "spl-token", "space": 82}}}
+                return {"value": None}
+            if method == "getMultipleAccounts":
+                rows = []
+                for k in params[0]:
+                    o = _rs["token_accounts"].get(k)
+                    if not o:
+                        rows.append(None)
+                        continue
+                    bb = bytearray(165)
+                    bb[32:64] = bytes.fromhex(o[1])
+                    rows.append({"owner": o[0], "data": [_b64.b64encode(bytes(bb)).decode(), "base64"]})
+                return {"value": rows}
+            return None
+        _RS_USDC = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"
+        _rs_quote = dict(_rs["quote"], routePlan=[{"swapInfo": {"label": "Jupiter"}, "percent": 100}])
+        for _rs_tamper in (False, True):
+            _rs_rpc_log, _rs_swaps, _rs_errs = [], [], []
+            _rs_tx = _rs["swapTransactionTampered"] if _rs_tamper else _rs["swapTransaction"]
+            rspg = await open_sol_swap_page({"v": "sell", "ms": 100}, wallet_init=_RS_WALLET_INIT, real_intent=True,
+                                             page_mint=_RS_USDC, quote_body=_rs_quote, rpc_hook=_rs_rpc,
+                                             swap_body={"swapTransaction": _rs_tx, "lastValidBlockHeight": 123},
+                                             rpc_log=_rs_rpc_log, swap_log=_rs_swaps, collect_errors=_rs_errs)
+            await sol_connect(rspg)
+            await rspg.fill("#solAmt", "0.000674388")
+            await rspg.wait_for_timeout(1200)
+            assert await rspg.evaluate("typeof window.SolIntent.validateTransaction") == "function" and \
+                not await rspg.evaluate("!!window.SolIntent.__stub"), \
+                "[sol intent real] the REAL intent bundle must be loaded, not the stub"
+            await rspg.click("#solSwapBtn")
+            await rspg.wait_for_timeout(1500)
+            _rs_calls = await rspg.evaluate("window.__solCalls.length")
+            _rs_notice = await rspg.inner_text("#solNotices")
+            _rs_sent = list(await rspg.evaluate("window.__solCalls[0] || []"))
+            await rspg.close()
+            print("[sol intent real] tamper=%s -> walletCalls=%d builds=%d multiRpc=%d notice=%r"
+                  % (_rs_tamper, _rs_calls, len(_rs_swaps), _rs_rpc_log.count("getMultipleAccounts"), _rs_notice[:90]))
+            if not _rs_tamper:
+                assert _rs_calls == 1, "[sol intent real] the genuine real swap must reach the wallet exactly once, got %d (notice %r)" % (_rs_calls, _rs_notice)
+                assert _rs_sent == list(_b64.b64decode(_rs["swapTransaction"])), "[sol intent real] the wallet must receive exactly the validated bytes"
+                assert "getMultipleAccounts" in _rs_rpc_log, "[sol intent real] the writable-account ownership check must have run"
+                assert len(_rs_swaps) == 1, "[sol intent real] exactly one build"
+            else:
+                assert _rs_calls == 0, "[sol intent real] a tampered destination must NEVER reach the wallet, got %d" % _rs_calls
+                assert "Nothing was sent" in _rs_notice, "[sol intent real] the UI must say nothing was sent: %r" % _rs_notice
+                assert "sendTransaction" not in _rs_rpc_log, "[sol intent real] nothing may be broadcast"
 
         # الف) کشف و اتصال
         apg = await open_sol_swap_page({"v": "sell", "ms": 100})
@@ -15914,11 +16115,12 @@ async def main():
         assert b2_wallet_calls == 1, "a clean pre-simulation must let the wallet be called exactly once"
         assert b2_sim_calls == 1, "the pre-simulation must be called exactly once, got %d" % b2_sim_calls
 
-        # C) signAndSendTransaction با یک خطای غیرِرد ("Expected String") ->
-        # fallback به signTransaction+sendTransaction، دقیقاً یک‌بار هرکدام؛
-        # یک رد صریح هرگز به fallback نمی‌رود.
+        # C) (ZX-02، ۱۹ اکتبر) signAndSendTransaction با یک خطای غیرِرد ("Expected String") ->
+        # دیگر fallbackِ خودکار نداریم: نه ساختِ دوم، نه signTransaction، نه sendTransaction؛ فقط
+        # پیامِ «ممکن است ارسال شده باشد». یک رد صریح هم هرگز به signTransaction نمی‌رود.
         c1_log = []
-        c1pg = await open_sol_swap_page({"v": "sell", "ms": 100}, wallet_init=SOL_FALLBACK_WALLET_INIT, rpc_log=c1_log)
+        c1_swaps = []
+        c1pg = await open_sol_swap_page({"v": "sell", "ms": 100}, wallet_init=SOL_FALLBACK_WALLET_INIT, rpc_log=c1_log, swap_log=c1_swaps)
         await sol_connect(c1pg)
         await c1pg.fill("#solAmt", "1")
         await c1pg.wait_for_timeout(900)
@@ -15931,10 +16133,12 @@ async def main():
         await c1pg.close()
         print("[sol fixes][C] Expected String -> sendCalls=%d signCalls=%d sendTxRpc=%d notice=%r"
               % (c1_send, c1_sign, c1_sendtx_rpc, c1_notice[:70]))
-        assert c1_send == 1 and c1_sign == 1, \
-            "a non-rejection signAndSendTransaction error must fall back to signTransaction exactly once"
-        assert c1_sendtx_rpc == 1, "the fallback path must submit via /sol/rpc sendTransaction exactly once"
-        assert "Swap failed" not in c1_notice, "the fallback succeeding must not still show a failure notice: %r" % c1_notice
+        assert c1_send == 1 and c1_sign == 0, \
+            "a non-rejection signAndSendTransaction error must never fall back to signTransaction (ZX-02)"
+        assert len(c1_swaps) == 1, "ZX-02: no replacement transaction may be built, got %d builds" % len(c1_swaps)
+        assert c1_sendtx_rpc == 0, "ZX-02: the app must not broadcast anything itself after an ambiguous send"
+        assert "may have sent" in c1_notice and "nothing was automatically retried" in c1_notice, \
+            "the ambiguous failure must tell the user to check the wallet activity: %r" % c1_notice
 
         c2pg = await open_sol_swap_page({"v": "sell", "ms": 100}, wallet_init=SOL_FALLBACK_WALLET_INIT)
         await sol_connect(c2pg)
@@ -16135,9 +16339,8 @@ async def main():
         # priority fee + fee row (D), exact-out (E), balance refresh/click-MAX
         # (F), logos (G), Base-size copy-check (H) ----
 
-        # A) fallback زدن باید ساختِ *دوم*ی بسازد، نه اول را دوباره بفرستد —
-        # سنجیده با شمارشِ تماس‌های POST /sol/swap (باید دقیقاً ۲ تا شود:
-        # یکی پیشِ signAndSendTransaction، یکی پیشِ signTransactionِ fallback).
+        # A) (ZX-02، ۱۹ اکتبر) پیش‌تر fallback ساختِ دوم می‌ساخت (۲ تماس POST /sol/swap)؛ حالا
+        # خطای مبهمِ signAndSendTransaction هیچ ساخت/امضا/ارسالِ جایگزینی ندارد: دقیقاً ۱ ساخت.
         ra_swap_log = []
         rapg = await open_sol_swap_page({"v": "sell", "ms": 100}, wallet_init=SOL_FALLBACK_WALLET_INIT,
                                          swap_log=ra_swap_log)
@@ -16151,10 +16354,10 @@ async def main():
         await rapg.close()
         print("[sol round3][A] fallback -> /sol/swap calls=%d sendCalls=%d signCalls=%d"
               % (len(ra_swap_log), ra_send, ra_sign))
-        assert len(ra_swap_log) == 2, \
-            "A: the fallback must build a fresh transaction right before each wallet call, expected 2 " \
-            "POST /sol/swap calls (primary + fallback), got %d" % len(ra_swap_log)
-        assert ra_send == 1 and ra_sign == 1, "A: exactly one call to each wallet method was expected"
+        assert len(ra_swap_log) == 1, \
+            "A (ZX-02): an ambiguous send failure must not build a replacement, expected 1 " \
+            "POST /sol/swap call, got %d" % len(ra_swap_log)
+        assert ra_send == 1 and ra_sign == 0, "A (ZX-02): one signAndSend call and no signTransaction call were expected"
 
         # A) مسیرِ موفق (بدونِ fallback) باید فقط یک ساختِ تازه انجام بدهد —
         # نه اینکه هر مسیر همیشه دوبار بسازد.
@@ -16214,6 +16417,7 @@ async def main():
                           send_error_times=1,
                           direct_quote_body={"inputMint": "So11111111111111111111111111111111111111112", "outputMint": SWAP_MINT,
                                              "inAmount": "1000000000", "outAmount": "4900000000", "otherAmountThreshold": "4850000000",
+                                             "swapMode": "ExactIn", "slippageBps": 50,
                                              "priceImpactPct": "0.0123", "routePlan": []})
         await r6.evaluate("() => { window.__notes = []; new MutationObserver(() => window.__notes.push(document.getElementById('solNotices').innerText)).observe(document.getElementById('solNotices'), {childList: true, subtree: true, characterData: true}); }")
         await r6.click("#solSwapBtn")

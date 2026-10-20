@@ -3,6 +3,7 @@
 .env
 *.key
 **/deployment.txt
+**/deployment-v4-adapter.txt
 
 # --- خروجی‌های ساخت و کش ---
 contracts/out/

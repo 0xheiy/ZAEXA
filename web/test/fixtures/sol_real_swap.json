@@ -1,0 +1,49 @@
+{
+ "note": "Real mainnet swap signed by the owner's Phantom on 2026-10-19 via the live zaexa.com (pre-validator) flow: 0.000674388 SOL -> USDC, Jupiter v6 'route' with Swap enum variant 181 (0xb5), slippage 50 bps, signer 6qV98qreDeA7oHgZnbxpJXjrC5hnUBWwsQuqzBAGiGPr. The signed bytes contain 2 extra instructions from Lighthouse (L2TExMFKdjpN9kozasaurPirfHy9P8sbXoAN1qA3S95) that Phantom appended; the Jupiter-built message is the same minus those two. RPC snapshot: ALT 2Lvj7QkiAWMHziSQbP4yZcoYJPLTESKUWdscnpbj7Ham resolves to loadedAddresses below at the message's writable/readonly indexes; token-account owners (bytes 32..64, hex) from getMultipleAccounts.",
+ "tx_b64": "AaYUciy2BJe3WLB+FacOxmloP5oOlJk4F8Hu9s6JeKdy5Y5pTWkEu/uI3tGuzfB8DkQ+Q6ub1UVxtKRVsEy9AAuAAQAIC1a2Ibs+k0W/SA8xW8W1d1hXAVjJWvbcyIID3KbPzVpBB6uhwO0NW+fDvR+KVEALejOR2VU/sul/bvxLlv9a1cCb1eKedt8aR8UzHnz2wA3/vEaKsiBJfCklPOcUuzoI3QAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAwZGb+UhFzL/7K26csOb57yM5bvF9xJrLEObOkAAAAAEedVb8jHAbu50xW7OaBUH/bGy3qP0jlECsc2iVrwTjwTfrXli/7Hdkl0Kn7Xm0AzmGVuouzqR/QfvmGDF6Xu4Bt324ddloZPZy+FGzut5rBy0he1fWzeROoz1hX7/AKkPEKX8/LTWyNCbacBLGdjEl1K6WNZNDyOYMiBPaqffXIyXJY9OJInxuz0QKRSODYMLWhOZ2v8QhASOe9jb6fhZtD/6J/XX9kp0wJsfKVh53ksJqzbfyd1RSzIap7OM5eg+wIrFoWwKR0OWdlXyavtFs095j7363I2tmI1wqgFeCwkEAAUCJF0BAAQACQORoAIAAAAAAAkGAAEADgMHAQEDAgABDAIAAABUSgoAAAAAAAcBAQERBRkHAAECBREFCgUQAAsNDA4RAQIHAwAICBIPJOUXy5d6460qAQAAALUBZAABVEoKAAAAAAAsEwEAAAAAADIAAAcDAQAAAQkGAQAQBgQCAwAAAQAAAAAAAAAAAAYBAjEKBAMDAcEaXyZ/KLxCgy2+VLZfGSKkidxDMY9vjJDwJUNzVqFbAAYRAAAAAAAAAAUIARP2eHSgLfDYc9RFsZ3gHFWXI0g1IoC70DnrAmB8wlf2A9XXmQUT0NapmA==",
+ "wallet": "6qV98qreDeA7oHgZnbxpJXjrC5hnUBWwsQuqzBAGiGPr",
+ "alt": "2Lvj7QkiAWMHziSQbP4yZcoYJPLTESKUWdscnpbj7Ham",
+ "loaded": {
+  "writable": [
+   "7yD7gfXv49SFxhx9uTc11dEd7Nj98rGWeYMdZJgheZbG",
+   "FzvRbXDdrsYVMa9KohXyQytWNAZAo4PsF8yujDH7KCfG",
+   "HgFLBWQugxt6qbPaWiwXjrqauXdQmcpMV6H6t8ttD8s1"
+  ],
+  "readonly": [
+   "So11111111111111111111111111111111111111112",
+   "Sysvar1nstructions1111111111111111111111111",
+   "3TK9D8aoBFYjYZtKCjciPrVrRStsnvo7KmpcJqDavpaU",
+   "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+   "J1to1yufRnoWn81KYg1XkTWzmKjnYSnmE2VY8DGUJ9Qv"
+  ]
+ },
+ "token_accounts": {
+  "BVKMYz2dYs6tEgQKB6SFs6hGY6tQRX7MavrTkLHPHoUg": [
+   "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+   "56b621bb3e9345bf480f315bc5b57758570158c95af6dcc88203dca6cfcd5a41"
+  ],
+  "7yD7gfXv49SFxhx9uTc11dEd7Nj98rGWeYMdZJgheZbG": [
+   "3TK9D8aoBFYjYZtKCjciPrVrRStsnvo7KmpcJqDavpaU",
+   "3edbde17e15a5fe76c620b1fa01c1624e42afaf3fb6f78ff6e5cd933ea853138"
+  ],
+  "FzvRbXDdrsYVMa9KohXyQytWNAZAo4PsF8yujDH7KCfG": [
+   "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+   "678c5879f3dec987699ad49858ad3766bddb1bd599085122a51cd4472efca42b"
+  ],
+  "HgFLBWQugxt6qbPaWiwXjrqauXdQmcpMV6H6t8ttD8s1": [
+   "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+   "678c5879f3dec987699ad49858ad3766bddb1bd599085122a51cd4472efca42b"
+  ],
+  "WweU2485V1u4EHsGAapQJgrbfzKjdJfEdVx95QzHJT9": null
+ },
+ "route_args": {
+  "inAmount": "674388",
+  "quotedOutAmount": "70444",
+  "slippageBps": 50,
+  "platformFeeBps": 0
+ },
+ "mints": {
+  "So11111111111111111111111111111111111111112": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+  "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+ }
+}

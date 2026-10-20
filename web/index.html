@@ -881,7 +881,7 @@ section.card.isDone #actBtn,section.card.isDone #solStatusSlot,section.card.isDo
 .vdot.u{background:#f06ec0}.vdot.a{background:#4fc3f7}
 .vdot.b{background:#f59e0b}.vdot.s{background:#60a5fa}
 .vdot.n{background:#34d399}.vdot.p{background:#a78bfa}
-.vdot.c{background:#2dd4bf}.vdot.v{background:#ff4d94}
+.vdot.c{background:#2dd4bf}.vdot.v{background:#ff4d94}.vdot.w{background:#fb7185}
 .vname{font-size:14px;font-weight:560;min-width:0}
 .vtag{font-size:10.5px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;
   color:var(--pos);background:var(--pglow);border-radius:999px;padding:3px 8px;margin-left:7px}
@@ -2456,6 +2456,13 @@ const CHAIN={
   id:8453,hexId:"0x2105",name:"Base",explorer:"https://basescan.org",gtNetwork:"base",
   multicall3:"0xcA11bde05977b3631167028862bE2a173976CA11",
   executor:"0x15e511Bf2Ea1a0F50F25E973d57Dce0D01946b6d",
+  /* Uniswap v4 (KIND_ADAPTER). v4Adapter عمداً null است: آداپتر هنوز دیپلوی نشده.
+     بعد از contracts/script/deploy_v4_adapter.sh و allow_adapter.sh همین‌جا پر شود؛
+     تا آن موقع ردیفِ «Uniswap V4» هرگز کوت یا مسیریابی نمی‌شود.
+     v4Quoter و v4PoolManager آدرس‌های EIP-55اند (با ethers.getAddress محاسبه شد). */
+  v4Adapter:null,
+  v4Quoter:"0x0d5e0F971ED27FBfF6c2837bf31316121532048D",
+  v4PoolManager:"0x498581fF718922c3f8e6A244956aF099B2652b2b",
   /* اندازه‌گیریِ ۲ سپتامبر ۲۰۲۶، از مرورگر واقعیِ owner روی خودِ مبدأ
      zaexa.com — نه با curl. CORS به مبدأ *درخواست‌دهنده* بستگی دارد؛
      اندپوینتی که با curl جواب می‌دهد می‌تواند دقیقاً همین‌جا، از این
@@ -2483,7 +2490,7 @@ const CHAIN={
 const DEFAULT_RPCS=CHAIN.rpcs.slice();
 let customRpc=false;
 // KIND_V3 = SwapRouter02 (ساختار هفت‌فیلدی، بدون deadline)
-const KIND={V2:0,V3:1,SOLIDLY:2,V3_LEGACY:3,SLIPSTREAM:4};
+const KIND={V2:0,V3:1,SOLIDLY:2,V3_LEGACY:3,SLIPSTREAM:4,V4:5};   // V4 = KIND_ADAPTER در SwapExecutor
 
 /*
  * ⚠️ درباره‌ی افزودن صرافی جدید — بخوان قبل از دست زدن به این آرایه.
@@ -2571,10 +2578,18 @@ const DEXES=[
    router:"0xBE6D8f0d05cC4be24d5167a3eF062215bE6D18a5",
    factory:"0x5e7BB104d84c7CB9B682AaC2F3d509f5F406809A",
    quoter:"0x254cF9E1E6e233aa1AC962CB9B05b2cfeAaE15b0",tickSpacings:[1,50,100,200,2000]},
+  // Uniswap v4 از طریق UniswapV4Adapter (kind 5). ۶۸ از ۱۱۲ جفتِ تازه‌ی ۱۷ اکتبر
+  // (GT id «uniswap-v4-base») روی v4 بودند. router/factory ندارد: آداپتر از
+  // CHAIN.v4Adapter می‌آید و استخرها از /v4/keys/<token>. کاندید است، نه core.
+  // quoter عمداً ارجاع است نه آدرسِ لیترال، تا چکِ برابری با verify_dexes.sh فقط
+  // کوترهای V3/CL را بسنجد.
+  {id:"uniswap-v4",name:"Uniswap V4",cls:"w",kind:KIND.V4,quoter:CHAIN.v4Quoter},
 ];
 
 /** امضای تابعی که *واقعاً* صدا می‌زنیم — پایه‌ی دروازه‌ی ۲. */
 function swapSigOf(d){
+  // آداپتر: IZaexaAdapter.swap — سلکتورش باید در بایت‌کدِ CHAIN.v4Adapter باشد
+  if(d.kind===KIND.V4)return "swap(address,address,uint256,uint24,int24,bool,address,address)";
   if(d.kind===KIND.V3)return "exactInputSingle((address,address,uint24,address,uint256,uint256,uint160))";
   if(d.kind===KIND.V3_LEGACY)return "exactInputSingle((address,address,uint24,address,uint256,uint256,uint256,uint160))";
   // ⚠️ همان شکل هشت‌فیلدیِ بالا (V3_LEGACY) ولی سلکتورش فرق دارد چون نوع
@@ -2682,10 +2697,14 @@ const ABI={
   clFactory:["function getPool(address,address,int24) view returns (address)"],
   solFactory:["function getPool(address,address,bool) view returns (address)"],
   executor:["function executeSwap(address tokenIn,address tokenOut,uint256 totalAmountIn,uint256 minAmountOut,((uint8 kind,address router,address tokenIn,address tokenOut,uint24 feeTier,bool stable,address poolFactory,int24 tickSpacing)[] steps,uint256 amountIn)[] parts,uint256 deadline) returns (uint256)",
-    "function allowedRouter(address) view returns (bool)","function feeBps() view returns (uint256)"],
+    "function allowedRouter(address) view returns (bool)","function allowedAdapter(address) view returns (bool)","function feeBps() view returns (uint256)"],
+  /* IV4Quoter @ Uniswap/v4-periphery 9969eec44cfdf07e24b41de47f40276a58401976 (src/interfaces/IV4Quoter.sol):
+     quoteExactInputSingle(QuoteExactSingleParams{PoolKey poolKey,bool zeroForOne,uint128 exactAmount,bytes hookData}) returns (uint256 amountOut,uint256 gasEstimate);
+     PoolKey = (currency0,currency1,fee,tickSpacing,hooks). */
+  v4quoter:["function quoteExactInputSingle(((address currency0,address currency1,uint24 fee,int24 tickSpacing,address hooks) poolKey,bool zeroForOne,uint128 exactAmount,bytes hookData) params) returns (uint256 amountOut,uint256 gasEstimate)"],
 };
 
-let E,iMulti,iQuoter,iQuoterCL,iV2,iSol,iErc,iOwn,iV3F,iClF,iSolF,iV2F,iExec;
+let E,iV4Q,iMulti,iQuoter,iQuoterCL,iV2,iSol,iErc,iOwn,iV3F,iClF,iSolF,iV2F,iExec;
 let readProvider=null,rpcIndex=0,liveSrc=null;
 /* اندپوینت‌های عمومیِ «مرده برای همین نشست» — پایین‌تر، کنار rpcSend،
    توضیح کامل قاعده‌ی مقایسه‌ای هست. */
@@ -3035,6 +3054,21 @@ async function checkDex(d){
   const set=(ok,reason,unreachable)=>{
     dexStatus[d.id]={ok,reason,unreachable:!!unreachable};};
   try{
+    if(d.kind===KIND.V4){
+      /* آداپتر هنوز دیپلوی نشده → هرگز کوت/مسیریابی نمی‌شود (قفلِ ایمن). */
+      if(!CHAIN.v4Adapter)return set(false,"adapter not deployed yet");
+      const ac=await getCode(E.getAddress(CHAIN.v4Adapter));
+      if(!ac||ac.length<=2)return set(false,"no contract at the adapter address");
+      const asel=E.id(swapSigOf(d)).slice(2,10).toLowerCase();
+      if(!ac.toLowerCase().includes(asel))
+        return set(false,"adapter does not expose the swap function we call — interface mismatch");
+      const vq=await getCode(E.getAddress(d.quoter));
+      if(!vq||vq.length<=2)return set(false,"no contract at the quoter address");
+      const vsel=E.id(V4_QUOTE_SIG).slice(2,10).toLowerCase();
+      if(!vq.toLowerCase().includes(vsel))
+        return set(false,"quoter does not expose the function we call — wrong quoter generation");
+      return set(true,"verified");
+    }
     const code=await getCode(E.getAddress(d.router));
     if(!code||code.length<=2)return set(false,"no contract at the router address");
     const sel=E.id(swapSigOf(d)).slice(2,10).toLowerCase();
@@ -3066,10 +3100,13 @@ async function allowListGate(){
   try{
     const ds=DEXES.filter(d=>dexStatus[d.id]&&dexStatus[d.id].ok);
     if(!ds.length)return;
+    /* آداپتر لیست‌سفیدِ جدا دارد (allowedAdapter)؛ مسیر روتر دست‌نخورده است. */
+    const fnOf=d=>d.kind===KIND.V4?"allowedAdapter":"allowedRouter";
+    const addrOf=d=>d.kind===KIND.V4?CHAIN.v4Adapter:d.router;
     const res=await multicall(ds.map(d=>({target:CHAIN.executor,
-      data:iExec.encodeFunctionData("allowedRouter",[E.getAddress(d.router)])})));
+      data:iExec.encodeFunctionData(fnOf(d),[E.getAddress(addrOf(d))])})));
     ds.forEach((d,i)=>{
-      if(res[i].ok&&!iExec.decodeFunctionResult("allowedRouter",res[i].data)[0])
+      if(res[i].ok&&!iExec.decodeFunctionResult(fnOf(d),res[i].data)[0])
         dexStatus[d.id]={ok:false,unreachable:false,
           reason:"not allow-listed on the executor contract yet"};
     });
@@ -3120,17 +3157,80 @@ function allVenues(){
     if(isV3(d))d.feeTiers.forEach(t=>o.push({dex:d,feeTier:t,stable:null,tickSpacing:null}));
     else if(d.kind===KIND.SLIPSTREAM)d.tickSpacings.forEach(t=>o.push({dex:d,feeTier:null,stable:null,tickSpacing:t}));
     else if(d.kind===KIND.SOLIDLY)d.stableModes.forEach(s=>o.push({dex:d,feeTier:null,stable:s,tickSpacing:null}));
+    else if(d.kind===KIND.V4){if(CHAIN.v4Adapter)v4Venues.forEach(v=>o.push(v));}
     else o.push({dex:d,feeTier:null,stable:null,tickSpacing:null});
   }
   return o;
 }
 function venueLabel(v){
+  if(v.dex.kind===KIND.V4)return `${v.dex.name} ${(v.feeTier/10000).toFixed(2)}% tick ${v.tickSpacing}`;
   if(isV3(v.dex))return `${v.dex.name} ${(v.feeTier/10000).toFixed(2)}%`;
   if(v.dex.kind===KIND.SLIPSTREAM)return `${v.dex.name} tick ${v.tickSpacing}`;
   if(v.dex.kind===KIND.SOLIDLY)return `${v.dex.name} ${v.stable?"stable":"volatile"}`;
   return v.dex.name;
 }
+/* ---------------------------------------------------------------------
+   Uniswap v4: استخرها از /v4/keys/<token> می‌آیند (ایندکسِ PoolKey در Worker).
+   کلید فقط وقتی به جفت می‌خورد که دو ارزش دقیقاً همان دو توکنِ جفت باشند،
+   با address(0) ≙ WETH. stable = «سمتِ WETH این استخر ETH بومی است».
+   --------------------------------------------------------------------- */
+const V4_QUOTE_SIG="quoteExactInputSingle(((address,address,uint24,int24,address),bool,uint128,bytes))";
+const V4_KEYS_TTL=300000,V4_MAX_KEYS=8,U128=(1n<<128n)-1n;
+const v4KeyCache=new Map(),v4Venues=new Map();
+const v4Origin=()=>/^https?:$/.test(location.protocol)?location.origin:"https://zaexa.com";
+const v4Low=a=>String(a).toLowerCase();
+const v4Cur=a=>{a=v4Low(a);return a===ZERO?v4Low(WETH_ADDR):a;};
+function v4Matches(v,a,b){
+  const x=v4Cur(v.key.currency0),y=v4Cur(v.key.currency1),p=v4Low(a),q=v4Low(b);
+  return(x===p&&y===q)||(x===q&&y===p);
+}
+function v4KeyOk(k){
+  const A=/^0x[0-9a-fA-F]{40}$/;
+  return !!k&&A.test(k.currency0)&&A.test(k.currency1)&&A.test(k.hooks)&&
+    Number.isInteger(k.fee)&&k.fee>=0&&k.fee<(1<<24)&&
+    Number.isInteger(k.tickSpacing)&&k.tickSpacing>0&&k.tickSpacing<32768&&
+    v4Low(k.currency0)<v4Low(k.currency1);
+}
+function v4AddKey(d,k){
+  const id=[k.currency0,k.currency1,k.fee,k.tickSpacing,k.hooks].map(v4Low).join("|");
+  if(v4Venues.has(id))return;
+  const key={currency0:k.currency0,currency1:k.currency1,fee:k.fee,tickSpacing:k.tickSpacing,hooks:k.hooks};
+  v4Venues.set(id,{dex:d,v4:true,key,feeTier:key.fee,tickSpacing:key.tickSpacing,hooks:key.hooks,
+    stable:v4Low(key.currency0)===ZERO||v4Low(key.currency1)===ZERO});
+}
+async function discoverV4(tokens){
+  const d=DEXES.find(x=>x.kind===KIND.V4);
+  if(!d||!CHAIN.v4Adapter||!enabledDexes().includes(d))return;
+  const seen=new Set();
+  await Promise.all(tokens.map(async t=>{
+    if(!t||isNative(t))return;
+    const a=v4Low(t.address);
+    if(a===v4Low(WETH_ADDR)||seen.has(a))return;
+    seen.add(a);
+    const hit=v4KeyCache.get(a);
+    if(hit&&Date.now()-hit<V4_KEYS_TTL)return;
+    try{
+      const r=await fetch(`${v4Origin()}/v4/keys/${t.address}`,
+        {signal:typeof AbortSignal!=="undefined"&&AbortSignal.timeout?AbortSignal.timeout(6000):undefined});
+      if(!r.ok)return;
+      const j=await r.json();
+      if(!j||!Array.isArray(j.keys))return;
+      j.keys.slice(0,V4_MAX_KEYS).filter(v4KeyOk).forEach(k=>v4AddKey(d,k));
+      v4KeyCache.set(a,Date.now());
+    }catch{/* بی‌صدا: v4 فقط یک مسیرِ اضافه است */}
+  }));
+}
+const venueRouter=v=>v.dex.kind===KIND.V4?CHAIN.v4Adapter:v.dex.router;
+const venueFactory=v=>v.dex.kind===KIND.V4?v.hooks:v.dex.factory;
 function encodeQuote(v,a,b,amt){
+  if(v.dex.kind===KIND.V4){
+    const k=v.key,inL=v4Low(a);
+    // سمتِ WETH در استخرِ بومی address(0) است
+    const cin=(inL===v4Low(WETH_ADDR)&&(v4Low(k.currency0)===ZERO||v4Low(k.currency1)===ZERO))?ZERO:inL;
+    return{target:v.dex.quoter,
+      data:iV4Q.encodeFunctionData("quoteExactInputSingle",[[[k.currency0,k.currency1,k.fee,k.tickSpacing,k.hooks],cin===v4Low(k.currency0),amt,"0x"]]),
+      dec:d=>iV4Q.decodeFunctionResult("quoteExactInputSingle",d)[0]};
+  }
   const x=E.getAddress(a),y=E.getAddress(b);
   if(isCL(v.dex)){
     const key=isV3(v.dex)?v.feeTier:v.tickSpacing,iface=quoterIfaceOf(v.dex);
@@ -3161,6 +3261,14 @@ function unreliable(s){return s.attempted>0&&s.rpcFailed/s.attempted>0.25;}
 
 async function quoteMany(specs,stats){
   if(!specs.length)return[];
+  /* v4: جفتی که به کلید نمی‌خورد (یا مبلغ بیش از uint128) اصلاً پرسیده نمی‌شود. */
+  const skip=s=>s.venue.v4&&(!v4Matches(s.venue,s.tokenIn,s.tokenOut)||s.amountIn>U128);
+  if(specs.some(skip)){
+    const live=[],idx=[],res=specs.map(()=>({out:null,status:"nopool"}));
+    specs.forEach((s,i)=>{if(!skip(s)){live.push(s);idx.push(i);}});
+    (await quoteMany(live,stats)).forEach((q,k)=>{res[idx[k]]=q;});
+    return res;
+  }
   stats.attempted+=specs.length;
   // اندازه‌گیری روی سایت زنده: برای cbETH→wstETH دسته‌ی ~۶۹تایی revert می‌کرد و
   // نیمه‌کردنِ پشت‌سرهم یک دور را ۱٫۰۵ تا ۱٫۳۵ ثانیه می‌کرد؛ همان مشخصات در تکه‌های
@@ -3304,6 +3412,7 @@ async function counterMids(tIn,tOut){
   return out;
 }
 async function findRoutes(tIn,tOut,amountIn,stats){
+  await discoverV4([tIn,tOut]);
   const venues=allVenues(),routes=[];
   const hubMids=[CHAIN.wrapped,CHAIN.reference].map(tokenBySymbol).filter(m=>m&&
     m.address.toLowerCase()!==tIn.address.toLowerCase()&&
@@ -3322,6 +3431,7 @@ async function findRoutes(tIn,tOut,amountIn,stats){
   const direct=[];
   specs.forEach((s,i)=>{
     if(s.tag!=="d")return;
+    if(s.venue.v4&&!v4Matches(s.venue,tIn.address,tOut.address))return;
     direct.push({venue:s.venue,out:r1[i].out,status:r1[i].status});
     if(r1[i].out&&r1[i].out>0n)routes.push({hops:[{venue:s.venue,tokenIn:tIn,tokenOut:tOut,amountIn,amountOut:r1[i].out}],
       amountIn,amountOut:r1[i].out});
@@ -3393,9 +3503,9 @@ async function priceImpact(tIn,tOut,amountIn,plan,stats){
    مسیرها همچنان با WETH ساخته می‌شوند. */
 const asArg=t=>isNative(t)?ZERO:t.address;
 function buildParts(plan){
-  return plan.parts.map(p=>[p.route.hops.map(h=>[h.venue.dex.kind,E.getAddress(h.venue.dex.router),
+  return plan.parts.map(p=>[p.route.hops.map(h=>[h.venue.dex.kind,E.getAddress(venueRouter(h.venue)),
     E.getAddress(h.tokenIn.address),E.getAddress(h.tokenOut.address),
-    h.venue.feeTier||0,!!h.venue.stable,E.getAddress(h.venue.dex.factory),
+    h.venue.feeTier||0,!!h.venue.stable,E.getAddress(venueFactory(h.venue)),
     h.venue.tickSpacing||0]),p.amountIn]);
 }
 function minOutOf(plan){
@@ -4941,7 +5051,7 @@ async function measureLiquidity(token){
    حالا به aerodrome-cl-v1 می‌رود و aerodrome-slipstream-3 (کارخانه‌ی جدید)
    به aerodrome-cl. هر id دیگری (uniswap-v4-base، aerodrome-slipstream-2،
    …) یعنی «اینجا سنجیده نشده» و باید به نامعلوم بیفتد، نه به اتهام. */
-const GT_DEX_TO_DEX=Object.freeze({"uniswap-v3-base":"uniswap-v3","pancakeswap-v3-base":"pancake-v3","aerodrome-slipstream":"aerodrome-cl-v1","aerodrome-slipstream-3":"aerodrome-cl","aerodrome-base":"aerodrome","baseswap":"baseswap","sushiswap-v2-base":"sushiswap","alien-base":"alienbase","uniswap-v2-base":"uniswap-v2"});
+const GT_DEX_TO_DEX=Object.freeze({"uniswap-v3-base":"uniswap-v3","pancakeswap-v3-base":"pancake-v3","aerodrome-slipstream":"aerodrome-cl-v1","aerodrome-slipstream-3":"aerodrome-cl","aerodrome-base":"aerodrome","baseswap":"baseswap","sushiswap-v2-base":"sushiswap","alien-base":"alienbase","uniswap-v2-base":"uniswap-v2","uniswap-v4-base":"uniswap-v4"});
 /* شاهدِ پوشش برای measureLiquidity: آیا *همه‌ی* استخرهای این توکن روی
    GeckoTerminal در همان جفت‌هایی هستند که measureLiquidity می‌سنجد؟
    true فقط وقتی که مطمئن باشیم؛ در هر ابهامی null برمی‌گردد، هرگز false
@@ -4971,7 +5081,7 @@ async function liqCoverage(token){
     else if(q===our)counterpart=b;
     else return null;
     const mapped=GT_DEX_TO_DEX[dex];
-    const isKnownDex=DEXES.some(d=>d.id===mapped);
+    const isKnownDex=DEXES.some(d=>d.id===mapped&&d.kind!==KIND.V4);   // measureLiquidity لیکوئیدیتیِ v4 را نمی‌سنجد
     const isKnownPair=counterpart===usdcAddr||counterpart===wethAddr;
     if(!(isKnownDex&&isKnownPair))allMeasured=false;
   }
@@ -7875,11 +7985,13 @@ async function refreshAllowance(){
 }
 async function preflight(plan,amountIn){
   const problems=[],parts=buildParts(plan);
-  const routers=[...new Set(parts.flatMap(p=>p[0].map(s=>s[1])))];
+  const routers=[...new Set(parts.flatMap(p=>p[0].filter(s=>s[0]!==KIND.V4).map(s=>s[1])))];
+  const adapters=[...new Set(parts.flatMap(p=>p[0].filter(s=>s[0]===KIND.V4).map(s=>s[1])))];
   const calls=[{target:CHAIN.executor,data:iExec.encodeFunctionData("feeBps",[])},
     ...routers.map(r=>({target:CHAIN.executor,data:iExec.encodeFunctionData("allowedRouter",[r])})),
     {target:routable(tokenIn).address,data:iErc.encodeFunctionData("balanceOf",[account])},
-    {target:routable(tokenIn).address,data:iErc.encodeFunctionData("allowance",[account,CHAIN.executor])}];
+    {target:routable(tokenIn).address,data:iErc.encodeFunctionData("allowance",[account,CHAIN.executor])},
+    ...adapters.map(r=>({target:CHAIN.executor,data:iExec.encodeFunctionData("allowedAdapter",[r])}))];
   let res;
   try{res=await multicall(calls);}catch{return["Could not reach the network to run safety checks. Nothing was sent."];}
   if(res[0].ok)feeBps=Number(iExec.decodeFunctionResult("feeBps",res[0].data)[0]);
@@ -7888,6 +8000,11 @@ async function preflight(plan,amountIn){
     if(!x.ok)problems.push(`Could not verify router ${shortAddr(r)} is allow-listed.`);
     else if(!iExec.decodeFunctionResult("allowedRouter",x.data)[0])
       problems.push(`Router ${shortAddr(r)} is not allow-listed on the executor.`);});
+  adapters.forEach((r,i)=>{
+    const x=res[3+routers.length+i];
+    if(!x||!x.ok)problems.push(`Could not verify adapter ${shortAddr(r)} is allow-listed.`);
+    else if(!iExec.decodeFunctionResult("allowedAdapter",x.data)[0])
+      problems.push(`Adapter ${shortAddr(r)} is not allow-listed on the executor.`);});
   const bi=res[1+routers.length],ai=res[2+routers.length];
   if(isNative(tokenIn)){
     // برای ETH بومی موجودی ERC20 معنا ندارد
@@ -8314,7 +8431,7 @@ function showError(title,err,extra){
       bestRoute:currentPlan?currentPlan.parts.map(p=>({
         share:String((p.amountIn*100n)/currentPlan.totalIn)+"%",
         venues:p.route.hops.map(h=>venueLabel(h.venue)),
-        routers:p.route.hops.map(h=>h.venue.dex.router)})):null,
+        routers:p.route.hops.map(h=>venueRouter(h.venue))})):null,
       expectedOut:currentPlan?String(currentPlan.totalOut):null},extra||{})},null,1);
   setNotice(note("err",`<b>${esc(title)}.</b> ${esc((extra&&extra.explain)||friendly(err))}
     <details><summary>Technical details</summary><pre>${esc(raw)}</pre>
@@ -9420,6 +9537,7 @@ function solInvalidateQuote(){
   ++solQuoteSeq;
   clearTimeout(solQuoteTimer);solQuoteTimer=null;
   solQuote=null;solQuoteAt=0;solNetFeeLamports=null;
+  solImpactArmedKey=null;solSimArmedKey=null;solSimFailedKey=null;solFailedBuild=null;
   $("solDirectF").textContent="—";
   solRenderReadout();solPaintFeeRows();solUpdateSwapBtn();
 }
@@ -9451,6 +9569,8 @@ async function solSolveForOutput(seq,target,inputMint,outputMint){
       const r=await withTimeout(fetch(location.origin+"/sol/quote?"+p.toString(),{headers:{accept:"application/json"}}),9000);
       const j=await r.json().catch(()=>null);
       if(!r.ok||!j||j.error)return null;
+      const guard=await solLoadIntent();
+      guard.validateQuote(j,{inputMint:inMint,outputMint:outMint,amount:amt,exactOut:false,slippageBps});
       return j;
     }catch{return null;}
   };
@@ -9550,6 +9670,9 @@ async function solFetchQuote(isRetry){
       solUpdateSwapBtn();
       return;
     }
+    const guard=await solLoadIntent();
+    guard.validateQuote(j,{inputMint,outputMint,amount:amountRaw,exactOut,slippageBps});
+    if(seq!==solQuoteSeq)return;
     solQuote=j;
     solQuoteAt=Date.now();
     ev("quote:ok", "", "solana");solCompareDirect(j,seq);
@@ -9901,8 +10024,9 @@ function solUpdateSwapBtn(){
 }
 // ۴ اکتبر — شکستِ شبیه‌سازی: بعد از ناموفق‌بودن، یک کلیکِ تأیید (به‌ازای همان کوت) لازم است
 function solNeedsSimArm(){
-  const k=solImpactKey(solQuote);
-  return k!=null&&solSimFailedKey===k&&solSimArmedKey!==k;
+  return !!solFailedBuild && solFailedBuild.context===solSwapContext() &&
+    solFailedBuild.quoteKey===solImpactKey(solQuote) && solSimFailedKey===solFailedBuild.key &&
+    solSimArmedKey!==solSimFailedKey && Date.now()-solFailedBuild.at<20000;
 }
 /* ۴ اکتبر — price impact ≥ ۱۵٪: Base گیتی ندارد (فقط اعلان)، برای سولانا یک کلیکِ اضافه
    می‌خواهد؛ بلوک نیست. مسلح‌شدن به‌ازای هر کوت (جفت+مقدار+حالت)، نه یک‌بار برای همیشه. */
@@ -9911,7 +10035,17 @@ function solQuoteImpactPct(q){
   const raw=q&&q.priceImpactPct;
   return (raw==null||raw==="")?NaN:Number(raw)*100;
 }
-function solImpactKey(q){return q?[q.inputMint,q.outputMint,q.inAmount,q.swapMode||"ExactIn"].join("|"):null;}
+let solIntentLoader=null,solFailedBuild=null;
+function solLoadIntent(){
+  if(window.SolIntent)return Promise.resolve(window.SolIntent);
+  if(!solIntentLoader)solIntentLoader=new Promise((resolve,reject)=>{
+    const script=document.createElement("script");script.src="/solana-intent.bundle.41053ea6.js";
+    script.onload=()=>window.SolIntent?resolve(window.SolIntent):reject(new Error("Transaction validator unavailable"));
+    script.onerror=()=>reject(new Error("Transaction validator unavailable"));document.head.appendChild(script);
+  }).catch(e=>{solIntentLoader=null;throw e;});
+  return solIntentLoader;
+}
+function solImpactKey(q){return q?JSON.stringify(q):null;}
 function solNeedsImpactArm(){
   const im=solQuoteImpactPct(solQuote);
   return isFinite(im)&&im>=SOL_IMPACT_ARM_PCT&&solImpactArmedKey!==solImpactKey(solQuote);
@@ -10110,10 +10244,11 @@ async function solSendSignedWithRetry(btn,context,signer,signedBytes,label,attem
     if(attempt)attempt.lastValid=fresh.lastValid;     // C3 — از این به بعد بایتِ امضاشده همین ساخت است
     if(btn)btn.textContent=label||"Confirm in wallet…";
     const res=await solWatchWallet(signer.signTransaction({account:solAccount,transaction:fresh.txBytes,chain:"solana:mainnet"}),
-      v=>solLateWalletResult("sign",v,context,fresh.lastValid));
+      v=>solLateWalletResult("sign",v,context,fresh.lastValid,fresh.txBytes));
     const row=res&&res[0];
     if(!row||!row.signedTransaction)throw new Error("wallet returned no signed transaction");
     const bytes2=row.signedTransaction;
+    window.SolIntent.assertSameMessage(fresh.txBytes,bytes2);
     if(btn)btn.textContent="Sending…";
     solAssertSwapContext(context);
     await solSendAndHandle(solBytesToB64(bytes2));
@@ -10162,14 +10297,14 @@ function solLateSame(context){
 }
 function solFinishSubmitted(sigB58,lastValid){
   ev("swap:sent","","solana");
-  solSimArmedKey=null;solSimFailedKey=null;
+  solSimArmedKey=null;solSimFailedKey=null;solImpactArmedKey=null;solFailedBuild=null;
   const doneInfo=solSnapshotDone(),sentAt=Date.now();
   solSetNotice(note("ok","<b>Submitted.</b> "+
     `<a href="https://solscan.io/tx/${esc(sigB58)}" target="_blank" rel="noopener">View on Solscan</a>`));
   $("solAmt").value="";$("solOutRead").value="";solMode="exactIn";solQuote=null;solRenderReadout();
   solPollStatus(sigB58,doneInfo,sentAt,solIntentSeq,lastValid);
 }
-async function solLateWalletResult(kind,value,context,lastValid){
+async function solLateWalletResult(kind,value,context,lastValid,unsigned){
   const row=value&&value[0];
   const link=sig=>`<a href="https://solscan.io/tx/${esc(sig)}" target="_blank" rel="noopener">View on Solscan</a>`;
   if(kind==="send"){
@@ -10188,6 +10323,8 @@ async function solLateWalletResult(kind,value,context,lastValid){
     return;
   }
   try{
+    if(!unsigned)throw new Error("Missing reviewed transaction. Nothing was sent.");
+    window.SolIntent.assertSameMessage(unsigned,bytes);
     await solSendAndHandle(solBytesToB64(bytes));
   }catch(e){
     solSetNotice(note("err","<b>"+esc((e&&e.message)||"Swap failed.")+"</b>"));
@@ -10225,6 +10362,13 @@ function solAssertSwapContext(context){
 }
 async function solBuildFreshTx(btn,context=solSwapContext()){
   solAssertSwapContext(context);
+  if(solFailedBuild && solSimArmedKey===solFailedBuild.key &&
+    solFailedBuild.context===context && solFailedBuild.quoteKey===solImpactKey(solQuote) &&
+    Date.now()-solFailedBuild.at<20000){
+    const built=solFailedBuild.built;
+    solFailedBuild=null;solSimArmedKey=null;solSimFailedKey=null;
+    return built;
+  }
   if(!solQuote||Date.now()-solQuoteAt>20000){
     if(btn)btn.textContent="Refreshing quote…";
     await solFetchQuote();
@@ -10237,10 +10381,13 @@ async function solBuildFreshTx(btn,context=solSwapContext()){
     }
   }
   solAssertSwapContext(context);
+  const quote=solQuote,quoteKey=solImpactKey(quote);
+  const guard=await solLoadIntent();
+  solAssertSwapContext(context);
   if(btn)btn.textContent="Building transaction…";
   const r=await withTimeout(fetch(location.origin+"/sol/swap",{
     method:"POST",headers:{"content-type":"application/json"},
-    body:JSON.stringify({quoteResponse:solQuote,userPublicKey:solAccount.address}),
+    body:JSON.stringify({quoteResponse:quote,userPublicKey:solAccount.address}),
   }),15000);
   const j=await r.json().catch(()=>null);
   solAssertSwapContext(context);
@@ -10265,11 +10412,20 @@ async function solBuildFreshTx(btn,context=solSwapContext()){
     throw Object.assign(new Error(msg),{uiHandled:true,uiMessage:msg});
   }
 
-  // ۴ اکتبر — شکستِ شبیه‌سازی دیگر بلوک نیست: کاربر با یک تأییدِ صریح (به‌ازای همین کوت)
-  // می‌تواند ادامه بدهد. اگر مسلح است، شبیه‌سازیِ خودمان را اصلاً نمی‌زنیم.
-  const simKey=solImpactKey(solQuote);
-  const simArmed=simKey!=null&&solSimArmedKey===simKey;
-  if(!simArmed){
+  // Intent validation is mandatory even when a failed simulation is overridden.
+  try{await guard.validateTransaction(txBytes,quote,solAccount.address,solRpcCall);}
+  catch(e){
+    if(e&&e.uiHandled)throw e;
+    const msg=((e&&e.message)||"Refused: the transaction could not be checked.")+" Nothing was sent.";
+    throw Object.assign(new Error(msg),{uiHandled:true,uiMessage:msg});
+  }
+  solAssertSwapContext(context);
+  if(quoteKey!==solImpactKey(solQuote))throw new Error("The quote changed. Review it and try again.");
+  const lastValid=Number.isSafeInteger(j.lastValidBlockHeight)&&j.lastValidBlockHeight>0?j.lastValidBlockHeight:null;
+  if(lastValid===null)throw new Error("Missing transaction expiry. Nothing was sent.");
+  const built={txBytes,swapTxB64:j.swapTransaction,lastValid};
+  const simKey=quoteKey+"|"+j.swapTransaction;
+  { // Every newly built message must be simulated. Overrides reuse cached bytes.
     // پیش‌شبیه‌سازیِ خودمان، پیش از رفتنِ سراغِ کیف‌پول، روی همان بایت‌هایی که کیف‌پول امضا می‌کند.
     // شکلِ توصیه‌شده‌ی فانتوم (sigVerify:false). شکستِ خودِ تماسِ RPC هرگز
     // به‌معنیِ «تراکنش رد می‌شود» نیست — فقط یعنی نمی‌دانیم.
@@ -10283,6 +10439,7 @@ async function solBuildFreshTx(btn,context=solSwapContext()){
     if(!simRpcFailed){
       // شبیه‌سازیِ ما روی بایت‌های دقیقِ امضا حرفِ آخر است؛ اگر پاس شد، simulationErrorِ جوپیتر نادیده می‌ماند
       const err=simRes&&Object.prototype.hasOwnProperty.call(simRes,"value")?simRes.value.err:undefined;
+      if(err===undefined)throw new Error("Could not verify transaction simulation. Try again.");
       if(err){
         const info=solClassifySimFail(err,simRes.value&&simRes.value.logs);
         fail={msg:solSimFailMessage(info.reason,info.reason==="insufficient-sol"?solSimKeepSol():null),
@@ -10295,6 +10452,7 @@ async function solBuildFreshTx(btn,context=solSwapContext()){
       const jr=/SLIPPAGE/i.test(jc)?"slippage":"other";
       fail={msg:solSimFailMessage(jr),code:jr==="other"&&/^[A-Z0-9_]{1,40}$/.test(jc)?jc:""};
     }
+    if(simRpcFailed&&!fail)throw new Error("Could not verify transaction simulation. Try again.");
     if(fail){
       if(fail.noSol){
         // ۵ اکتبر — SOL کافی نیست: بلوکِ ساده، هرگز «Swap anyway» (کیف‌پول هم همین را رد می‌کند)
@@ -10304,15 +10462,15 @@ async function solBuildFreshTx(btn,context=solSwapContext()){
       }
       ev("swap:sim-fail","","solana");
       solSimFailedKey=simKey;
+      solFailedBuild={key:simKey,context,quoteKey,built,at:Date.now()};
       throw Object.assign(new Error(fail.msg),{uiHandled:true,uiMessage:fail.msg,uiCode:fail.code,simFail:true});
     }
-    if(solSimFailedKey===simKey)solSimFailedKey=null;   // این بار پاس شد (یا RPC ساکت بود و جوپیتر هم خطایی نداد)
+    if(solSimFailedKey===simKey){solSimFailedKey=null;solFailedBuild=null;}
   }
 
   solAssertSwapContext(context);
-  // C3 — lastValidBlockHeightِ همین پاسخ، برای بایت‌هایی که دقیقاً امضا می‌شوند
-  const lastValid=Number.isFinite(Number(j.lastValidBlockHeight))&&j.lastValidBlockHeight!=null?Number(j.lastValidBlockHeight):null;
-  return {txBytes,swapTxB64:j.swapTransaction,lastValid};
+  // Expiry belongs to the exact validated message.
+  return built;
 }
 async function solDoSwap(){
   if(solSwapBusy||!solAccount||!solQuote)return;
@@ -10338,6 +10496,9 @@ async function solDoSwap(){
     btn.textContent="Confirm in wallet…";
     const f=solWalletApi.features;
     let sigB58=null;
+    // signAndSend stays the first choice: Phantom appends Lighthouse guard instructions to what it signs, so
+    // a byte-exact "signed == reviewed" check would reject every Phantom swap. The unsigned message is validated
+    // in solBuildFreshTx before the wallet is asked; an ambiguous failure never builds, signs or sends a replacement.
     if(f["solana:signAndSendTransaction"]){
       try{
         const res=await solWatchWallet(f["solana:signAndSendTransaction"].signAndSendTransaction(
@@ -10347,38 +10508,19 @@ async function solDoSwap(){
         if(!row||!row.signature)throw new Error("wallet returned no signature");
         sigB58=solBs58Encode(row.signature);
       }catch(e){
-        if(e&&e.walletHung)throw e;                 // C2 — بی‌پاسخ ≠ خطا؛ هرگز به fallback نمی‌رود
-        // C — یک رد صریحِ کاربر هرگز به fallback نمی‌رود؛ فقط یک خطای
-        // غیرِرد (مثلِ "Expected String" که فانتوم زده) و فقط اگر کیف‌پول
-        // امضای جدا هم دارد.
-        if(isUserRejection(e)||!f["solana:signTransaction"])throw e;
-        // A — ساختِ دوم، بلافاصله پیش از fallback؛ هرگز بایت‌های ساختِ اول
-        // (که ممکن است حینِ چند پاپ‌آپ blockhashش منقضی شده باشد).
-        solAssertSwapContext(context);
-        btn.textContent="Retrying with your wallet's signing method…";
-        const built2=await solBuildFreshTx(btn,context);
-        attempt.lastValid=built2.lastValid;
-        const res2=await solWatchWallet(f["solana:signTransaction"].signTransaction(
-          {account:solAccount,transaction:built2.txBytes,chain:"solana:mainnet"}),
-          v=>solLateWalletResult("sign",v,context,built2.lastValid));
-        const row2=res2&&res2[0];
-        if(!row2||!row2.signedTransaction){
-          const err2=new Error("Swap failed in your wallet: "+((e&&e.message)||"unknown error"));
-          err2.walletDetails=(e&&(e.name||e.code))||null;
-          throw err2;
-        }
-        const signedBytes2=row2.signedTransaction;
-        btn.textContent="Sending…";
-        solAssertSwapContext(context);
-        sigB58=await solSendSignedWithRetry(btn,context,f["solana:signTransaction"],signedBytes2,"Confirm in wallet…",attempt);
+        if(isUserRejection(e)||e?.walletHung)throw e;
+        // A send failure can occur after broadcast. Never sign a replacement.
+        const msg="Your wallet may have sent this swap. Check your wallet activity before trying again; nothing was automatically retried.";
+        throw Object.assign(new Error(msg),{uiHandled:true,uiMessage:msg});
       }
     }else if(f["solana:signTransaction"]){
       const res=await solWatchWallet(f["solana:signTransaction"].signTransaction(
         {account:solAccount,transaction:built.txBytes,chain:"solana:mainnet"}),
-        v=>solLateWalletResult("sign",v,context,built.lastValid));
+        v=>solLateWalletResult("sign",v,context,built.lastValid,built.txBytes));
       const row=res&&res[0];
       if(!row||!row.signedTransaction)throw new Error("wallet returned no signed transaction");
       const signedBytes=row.signedTransaction;
+      window.SolIntent.assertSameMessage(built.txBytes,signedBytes);
       btn.textContent="Sending…";
       solAssertSwapContext(context);
       // اولین امضا بلافاصله بعدِ بایتِ compact-u16 است (داخلِ solSendSignedWithRetry)
@@ -11477,7 +11619,7 @@ $("setBtn").addEventListener("click",()=>{$("tourBtn").hidden=!!tokenPage;});
     try{E=await loadEthers();}
     catch{document.documentElement.removeAttribute("data-bootchain");setNotice(note("err","<b>Could not load ethers.</b> Check your connection or ad-blocker and reload."));return;}
     iMulti=new E.Interface(ABI.multicall3);iQuoter=new E.Interface(ABI.quoterV2);
-    iQuoterCL=new E.Interface(ABI.quoterCL);
+    iQuoterCL=new E.Interface(ABI.quoterCL);iV4Q=new E.Interface(ABI.v4quoter);
     iV2=new E.Interface(ABI.v2);iSol=new E.Interface(ABI.solidly);
     iErc=new E.Interface(ABI.erc20);iOwn=new E.Interface(ABI.ownable);
     iV3F=new E.Interface(ABI.v3factory);iClF=new E.Interface(ABI.clFactory);

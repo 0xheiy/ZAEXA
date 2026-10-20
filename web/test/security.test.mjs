@@ -31,6 +31,47 @@ for(const changed of [false,true])test(changed?'Base amount change during simula
   const pending=c.doSwap();await began;if(changed){el('amtIn').value='1';c.currentPlan=null;c.quoteSeq++;}
   release();await pending;assert.equal(sends,changed?0:1);if(changed)assert.match(error.message,/changed/i);else assert.equal(error,undefined);
 });
+test('changed output, threshold, route or impact invalidates risk acknowledgement',()=>{
+  const q={inputMint:'a',outputMint:'b',inAmount:'100',outAmount:'1000',otherAmountThreshold:'990',swapMode:'ExactIn',priceImpactPct:'0.15',routePlan:[{venue:'a'}]};
+  const c=load(['solImpactKey','solNeedsImpactArm'],{solQuote:q,SOL_IMPACT_ARM_PCT:15,solQuoteImpactPct:q=>Number(q.priceImpactPct)*100});
+  c.solImpactArmedKey=c.solImpactKey(q);assert.equal(c.solNeedsImpactArm(),false);
+  for(const change of [{outAmount:'100'},{otherAmountThreshold:'1'},{priceImpactPct:'0.9'},{routePlan:[{venue:'b'}]}]){
+    c.solQuote={...q,...change};assert.equal(c.solNeedsImpactArm(),true);
+  }
+});
+for(const signOnly of [false,true])test(signOnly?'signTransaction-only wallet signs, message is compared, and verified bytes are broadcast':'ambiguous sign-and-send failure never builds or signs a replacement (even if signTransaction exists)',async()=>{
+  const elements=new Map(),el=id=>{if(!elements.has(id))elements.set(id,{value:'1',textContent:'',disabled:false});return elements.get(id);};
+  let builds=0,signs=0,sends=0,finishes=0,compared=0;const notices=[];
+  const c=load(['solDoSwap'],{
+    solSwapBusy:false,solAccount:{address:'wallet'},solQuote:{},solNeedsArm:()=>false,solNeedsImpactArm:()=>false,solNeedsSimArm:()=>false,
+    solBudgetCheck:()=>({ok:true}),solRequiredInput:()=>1,solSpendableTop:()=>10,solSwapContext:()=> 'ctx',solAssertSwapContext(){},
+    solSide:'buy',solRefSymbol:'SOL',solTokenSymbol:'USDC',solIntentSeq:0,solInputMint:()=> 'USDC',SOL_MINT_ADDR:'SOL',$:el,ev(){},
+    solBuildFreshTx:async()=>{builds++;return {txBytes:new Uint8Array([1]),lastValid:100};},
+    window:{SolIntent:{assertSameMessage(){compared++;}}},solSendSignedWithRetry:async()=>{sends++;return 'sig';},
+    solWatchWallet:p=>p,solLateWalletResult(){},solFinishSubmitted:()=>{finishes++;},solBs58Encode:()=> 'sig',
+    solWalletApi:{features:signOnly?{'solana:signTransaction':{signTransaction:async({transaction})=>{signs++;return [{signedTransaction:transaction}];}}}:
+      {'solana:signAndSendTransaction':{signAndSendTransaction:async()=>{throw new Error('connection lost after broadcast');}},
+       'solana:signTransaction':{signTransaction:async({transaction})=>{signs++;return [{signedTransaction:transaction}];}}}},
+    isUserRejection:()=>false,solSetNotice:n=>notices.push(n),note:(_kind,h)=>h,esc:String,solUpdateSwapBtn(){},solRefreshBalances(){},
+  });
+  await c.solDoSwap();assert.equal(builds,1);assert.equal(signs,signOnly?1:0);assert.equal(sends,signOnly?1:0);assert.equal(compared,signOnly?1:0);
+  assert.equal(finishes,signOnly?1:0);if(!signOnly)assert.ok(notices.some(n=>n.includes('may have sent')));
+});
+test('wallet with signAndSend succeeds without any signed-message comparison (Phantom adds Lighthouse)',async()=>{
+  const elements=new Map(),el=id=>{if(!elements.has(id))elements.set(id,{value:'1',textContent:'',disabled:false});return elements.get(id);};
+  let signs=0,compared=0,finishes=0;
+  const c=load(['solDoSwap'],{
+    solSwapBusy:false,solAccount:{address:'wallet'},solQuote:{},solNeedsArm:()=>false,solNeedsImpactArm:()=>false,solNeedsSimArm:()=>false,
+    solBudgetCheck:()=>({ok:true}),solRequiredInput:()=>1,solSpendableTop:()=>10,solSwapContext:()=> 'ctx',solAssertSwapContext(){},
+    solSide:'buy',solRefSymbol:'SOL',solTokenSymbol:'USDC',solIntentSeq:0,solInputMint:()=> 'USDC',SOL_MINT_ADDR:'SOL',$:el,ev(){},
+    solBuildFreshTx:async()=>({txBytes:new Uint8Array([1]),lastValid:100}),window:{SolIntent:{assertSameMessage(){compared++;}}},
+    solWatchWallet:p=>p,solLateWalletResult(){},solFinishSubmitted:()=>{finishes++;},solBs58Encode:()=> 'sig',
+    solWalletApi:{features:{'solana:signAndSendTransaction':{signAndSendTransaction:async()=>[{signature:new Uint8Array([9])}]},
+      'solana:signTransaction':{signTransaction:async()=>{signs++;return [];}}}},
+    isUserRejection:()=>false,solSetNotice(){},note:(_k,h)=>h,esc:String,solUpdateSwapBtn(){},solRefreshBalances(){},
+  });
+  await c.solDoSwap();assert.equal(signs,0);assert.equal(compared,0);assert.equal(finishes,1);
+});
 test('RPC saving queries the endpoint chain ID and rejects wrong/offline nodes',async()=>{
   for(const reply of ['0x1',new Error('offline'),'0x2105']){
     let requests=0,saved=0;

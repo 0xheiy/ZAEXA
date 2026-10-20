@@ -1808,11 +1808,12 @@ async function solSwapRoute(request, url, env) {
 // بی‌خطرِ خواندنی، رد می‌شود؛ افزودنِ متدِ تازه یعنی این فهرست دستی عوض شود.
 const SOL_RPC_METHODS_ALLOWED = new Set([
   "getBalance", "getTokenAccountsByOwner", "getSignatureStatuses", "sendTransaction",
-  "simulateTransaction", "getAccountInfo", "getTokenLargestAccounts", "getEpochInfo",
+  "simulateTransaction", "getAccountInfo", "getTokenLargestAccounts", "getEpochInfo", "getMultipleAccounts",
 ]);
 
 function solRpcParamsOk(method, params) {
-  if(method==="getAccountInfo")return Array.isArray(params)&&params.length===2&&isSolMintStr(params[0])&&params[1]?.encoding==="jsonParsed"&&Object.keys(params[1]).length===1;
+  if(method==="getMultipleAccounts")return Array.isArray(params)&&params.length===2&&Array.isArray(params[0])&&params[0].length>0&&params[0].length<=32&&params[0].every(isSolMintStr)&&params[1]?.encoding==="base64"&&Object.keys(params[1]).length===1;
+  if(method==="getAccountInfo")return Array.isArray(params)&&params.length===2&&isSolMintStr(params[0])&&["jsonParsed","base64"].includes(params[1]?.encoding)&&Object.keys(params[1]).length===1;
   if(method==="getTokenLargestAccounts")return Array.isArray(params)&&params.length===1&&isSolMintStr(params[0]);
   if(method==="getEpochInfo")return Array.isArray(params)&&params.length===0;
   if (method === "getBalance") {
@@ -3589,9 +3590,49 @@ async function cmcKlineRoute(request, url, ctx, env) {
   return new Response(payload, { status: 200, headers });
 }
 
+
+/* =====================================================================
+   GET /v4/keys/<آدرسِ توکنِ Base> — PoolKeyهای ایندکسِ v4 برای مسیریابیِ اپ
+   =====================================================================
+   عمومی، فقط GET، زیرِ همان سطل‌پترنِ rateOk. کلیدها همان‌هایی‌اند که
+   readV4Entry ذخیره کرده (currency0/1، fee، tickSpacing، hooks)؛ poolId و
+   هر فیلدِ دیگرِ ذخیره‌شده عمداً بیرون نمی‌رود. اگر توکن هنوز ورودی ندارد،
+   همان runV4Index‌ای که مسیرِ حکم صدا می‌زند یک بار اجرا می‌شود. هرگز بیش از ۸
+   کلید؛ هیچ URL یا کلیدِ بالادستی در بدنه نیست. */
+const V4_KEYS_MAX = 8;
+function v4KeysShape(keys) {
+  const out = [];
+  for (const k of Array.isArray(keys) ? keys : []) {
+    if (!k || !EVM_ADDR.test(String(k.currency0)) || !EVM_ADDR.test(String(k.currency1))
+      || !EVM_ADDR.test(String(k.hooks)) || !Number.isInteger(k.fee) || !Number.isInteger(k.tickSpacing)) continue;
+    out.push({ currency0: k.currency0, currency1: k.currency1, fee: k.fee, tickSpacing: k.tickSpacing, hooks: k.hooks });
+    if (out.length >= V4_KEYS_MAX) break;
+  }
+  return out;
+}
+async function v4KeysRoute(request, url, env) {
+  if (!rateOk(request, "v4k", RL_LIMIT, RL_WINDOW_MS))
+    return fail(429, "too many requests", { "retry-after": "60" });
+  if (request.method === "OPTIONS") return new Response(null, { status: 204, headers: CORS });
+  if (request.method !== "GET") return fail(405, "only GET");
+  const addr = url.pathname.slice("/v4/keys/".length);
+  if (!EVM_ADDR.test(addr)) return fail(400, "bad address");
+  let entry = await readV4Entry(addr, env);
+  if (!entry.found && env && env.ZX_KV) {
+    try { await runV4Index(addr, env); entry = await readV4Entry(addr, env); } catch (e) { /* ادامه با خالی */ }
+  }
+  const keys = v4KeysShape(entry.keys);
+  return new Response(JSON.stringify({ keys, indexed: entry.found === true }), {
+    status: 200,
+    headers: { ...CORS, "content-type": "application/json; charset=utf-8",
+      "cache-control": entry.found ? "public, max-age=300" : "no-store" },
+  });
+}
+
 export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
+    if (url.pathname.startsWith("/v4/keys/")) return v4KeysRoute(request, url, env);
     if (url.pathname === "/gt" || url.pathname.startsWith("/gt/"))
       return proxyGt(request, url, ctx, env);
     if (url.pathname === "/cmc/kline") return cmcKlineRoute(request, url, ctx, env);

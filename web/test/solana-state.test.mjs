@@ -8,6 +8,7 @@ const html = readFileSync(new URL('../index.html', import.meta.url), 'utf8');
 function context(names, extras = {}) {
   const elements = new Map();
   const ctx = vm.createContext({
+    solFailedBuild:null,solLoadIntent:async()=>({validateQuote(){},async validateTransaction(){}}),
     console, URLSearchParams, Uint8Array, Date, Math, BigInt,
     setTimeout: () => 1, clearTimeout: () => {},
     $: id => {
@@ -110,7 +111,7 @@ test('changing amount during transaction build prevents wallet handoff', async (
   c.$('solAmt').value = '1';
   const pending = c.solBuildFreshTx(null);
   c.$('solAmt').value = '2';
-  build.resolve({ ok: true, json: async () => ({ swapTransaction: 'test' }) });
+  build.resolve({ ok: true, json: async () => ({ swapTransaction: 'test',lastValidBlockHeight:100 }) });
   await assert.rejects(pending, /changed/i);
 });
 
@@ -132,7 +133,7 @@ test('an old quote arriving within the debounce window stays discarded', async (
 test('unchanged swap still builds successfully', async () => {
   const c = context(['solBuildFreshTx', 'solSwapContext', 'solAssertSwapContext'], {
     location: { origin: 'https://example.test' },
-    fetch: async () => ({ ok: true, json: async () => ({ swapTransaction: 'test' }) }),
+    fetch: async () => ({ ok: true, json: async () => ({ swapTransaction: 'test',lastValidBlockHeight:100 }) }),
     withTimeout: p => p, solB64ToBytes: () => new Uint8Array(32),
     solParseFeePayer: () => new Uint8Array(32), solBytesEq: () => true,
     solRpcCall: async () => ({ value: { err: null } }),
@@ -140,13 +141,38 @@ test('unchanged swap still builds successfully', async () => {
   c.$('solAmt').value = '1';
   assert.equal((await c.solBuildFreshTx(null)).swapTxB64, 'test');
 });
+test('simulation override reuses only the exact failed message and current quote',async()=>{
+  let builds=0;
+  const c=context(['solBuildFreshTx','solSwapContext','solAssertSwapContext'],{
+    location:{origin:'https://example.test'},withTimeout:p=>p,
+    fetch:async()=>{builds++;return {ok:true,json:async()=>({swapTransaction:'same-message',lastValidBlockHeight:100})};},
+    solB64ToBytes:()=>new Uint8Array([1,2,3]),solParseFeePayer:()=>new Uint8Array(32),solBytesEq:()=>true,
+    solRpcCall:async()=>({value:{err:'Failure'}}),solClassifySimFail:()=>({reason:'other',code:'Failure'}),solSimFailMessage:()=> 'Simulation failed',
+  });
+  await assert.rejects(c.solBuildFreshTx(null),e=>e.simFail===true);
+  const reviewed=c.solFailedBuild.built;c.solSimArmedKey=c.solSimFailedKey;
+  assert.equal(await c.solBuildFreshTx(null),reviewed);assert.equal(builds,1);
+  assert.equal(c.solFailedBuild,null);assert.equal(c.solSimArmedKey,null);
+});
+test('changed quote cannot reuse a failed-message override',async()=>{
+  let builds=0;
+  const c=context(['solBuildFreshTx','solSwapContext','solAssertSwapContext'],{
+    location:{origin:'https://example.test'},withTimeout:p=>p,
+    fetch:async()=>{builds++;return {ok:true,json:async()=>({swapTransaction:'new-message',lastValidBlockHeight:100})};},
+    solB64ToBytes:()=>new Uint8Array([1,2,3]),solParseFeePayer:()=>new Uint8Array(32),solBytesEq:()=>true,
+    solRpcCall:async()=>({value:{err:'Failure'}}),solClassifySimFail:()=>({reason:'other',code:'Failure'}),solSimFailMessage:()=> 'Simulation failed',
+  });
+  await assert.rejects(c.solBuildFreshTx(null),e=>e.simFail===true);
+  c.solSimArmedKey=c.solSimFailedKey;c.solQuote={...c.solQuote,outAmount:'changed'};
+  await assert.rejects(c.solBuildFreshTx(null),e=>e.simFail===true);assert.equal(builds,2);
+});
 
 test('changing wallet during simulation cancels the prepared transaction', async () => {
   const simulation = deferred();
   const started = deferred();
   const c = context(['solBuildFreshTx', 'solSwapContext', 'solAssertSwapContext'], {
     location: { origin: 'https://example.test' },
-    fetch: async () => ({ ok: true, json: async () => ({ swapTransaction: 'test' }) }),
+    fetch: async () => ({ ok: true, json: async () => ({ swapTransaction: 'test',lastValidBlockHeight:100 }) }),
     withTimeout: p => p, solB64ToBytes: () => new Uint8Array(32),
     solParseFeePayer: () => new Uint8Array(32), solBytesEq: () => true,
     solRpcCall: () => { started.resolve(); return simulation.promise; },

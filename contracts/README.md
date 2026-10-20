@@ -113,6 +113,26 @@ ignored — and fall back to public endpoints.
   function — as `_validatePlan` and `_runParts` already do. Do not enable
   `via_ir`.
 
+## Uniswap v4 adapter
+
+`src/UniswapV4Adapter.sol` routes Uniswap v4 pools through the existing executor
+(`KIND_ADAPTER = 5`), so the live executor is not redeployed. It only becomes
+usable after the owner allow-lists it (`script/deploy_v4_adapter.sh`, then
+`script/allow_adapter.sh <adapter>`). The adapter's PoolManager is Base
+`0x498581fF718922c3f8e6A244956aF099B2652b2b`.
+
+SwapStep fields are reused as the v4 PoolKey: `feeTier` = fee, `tickSpacing` =
+tickSpacing, `poolFactory` = hooks (zero = hookless), `stable` = "the WETH side
+of this pool is native ETH". Currencies are sorted by address after mapping
+WETH to `address(0)` when `stable` is true.
+
+Exact-input only. The input delta must equal exactly the amount traded and the
+output must be positive, otherwise it reverts; the adapter must end with no
+tokenIn and unchanged WETH/ETH balances. Only the executor can call `swap`;
+only the PoolManager can call the callback, and only during our own swap.
+`script/fork_test.sh` also runs `test/UniswapV4Adapter.fork.t.sol`
+(native ETH/USDC pool, keys 500/10 and 3000/60, skipped if not initialised).
+
 ## Status
 
 Deployed, verified, and in use. Fee is currently 0 bps. Not audited.

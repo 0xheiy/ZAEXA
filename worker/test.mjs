@@ -4417,6 +4417,37 @@ const REPORT_LOCS_EXPECTED = expectedReportLocs();
     + "exactly (3 -> 3) while any value above REPORT_MAX_TOKENS_PER_RUN is clamped down to it");
 }
 
+/* ---- [v4 keys] GET /v4/keys/<token> ---- */
+{
+  const T = "0x1111111111111111111111111111111111111111";
+  const mk = (n) => ({ poolId: "0x" + String(n).padStart(64, "0"), currency0: "0x0000000000000000000000000000000000000000",
+    currency1: T, fee: 3000 + n, tickSpacing: 60, hooks: "0x0000000000000000000000000000000000000000" });
+  const store = new Map();
+  store.set("v4key:base:" + T, JSON.stringify({ keys: Array.from({ length: 11 }, (_, i) => mk(i + 1)), complete: true }));
+  const kv = { get: async (k) => store.has(k) ? store.get(k) : null, put: async (k, v) => { store.set(k, v); } };
+  const e = { ASSETS, ZX_KV: kv, GT_SECRET_LEAK: "sekret-key-123" };
+  const r = await call("/v4/keys/" + T, { method: "GET" }, e);
+  const b = await r.json();
+  ok(r.status === 200 && b.indexed === true, "[v4 keys] stored token must be 200 indexed:true, got " + r.status);
+  ok(b.keys.length === 8, "[v4 keys] never more than 8 keys, got " + b.keys.length);
+  ok(JSON.stringify(Object.keys(b.keys[0])) === JSON.stringify(["currency0", "currency1", "fee", "tickSpacing", "hooks"]),
+     "[v4 keys] key shape must be exactly currency0,currency1,fee,tickSpacing,hooks (no poolId)");
+  ok((r.headers.get("cache-control") || "") === "public, max-age=300", "[v4 keys] success must be public max-age=300");
+  ok(!JSON.stringify(b).includes("http") && !JSON.stringify(b).includes("sekret"), "[v4 keys] body must carry no URL or key");
+  const rb = await call("/v4/keys/0x12", { method: "GET" }, e);
+  ok(rb.status === 400, "[v4 keys] bad address must be 400, got " + rb.status);
+  const rp = await call("/v4/keys/" + T, { method: "POST" }, e);
+  ok(rp.status === 405, "[v4 keys] POST must be 405, got " + rp.status);
+  const U = "0x2222222222222222222222222222222222222222";
+  const ru = await call("/v4/keys/" + U, { method: "GET" }, e);
+  const bu = await ru.json();
+  ok(ru.status === 200 && Array.isArray(bu.keys) && bu.keys.length === 0 && bu.indexed === false && ru.headers.get("cache-control") === "no-store",
+     "[v4 keys] unindexed token with a failing index must be keys:[] indexed:false no-store, got " + JSON.stringify(bu));
+  let last; for (let i = 0; i < 130; i++) last = await call("/v4/keys/" + T, { method: "GET" }, e);
+  ok(last.status === 429, "[v4 keys] must be rate limited by rateOk, got " + last.status);
+  console.log("[v4 keys] GET /v4/keys/<token> returns at most 8 PoolKeys (currency0/1, fee, tickSpacing, hooks) from the v4 index, indexes once when absent, 400 bad address, GET only, rate limited, public max-age=300 on success, no URL or key in the body");
+}
+
 /* ---- ۲۳. /report/<...>.json و /pairs.json — از رویِ worker.fetch ---- */
 {
   const envNoKv = { ASSETS };
@@ -14237,6 +14268,12 @@ function stripAllowedWording(t) {
     const badRpc = [
       [{ method: "getAccountInfo", params: [PUBKEY] }, "bad-params"],
       [{ method: "getBalance", params: ["short"] }, "bad-params"],
+      [{ method: "getAccountInfo", params: [PUBKEY, { encoding: "base58" }] }, "bad-params"],
+      [{ method: "getAccountInfo", params: [PUBKEY, { encoding: "base64", commitment: "confirmed" }] }, "bad-params"],
+      [{ method: "getMultipleAccounts", params: [[PUBKEY], { encoding: "jsonParsed" }] }, "bad-params"],
+      [{ method: "getMultipleAccounts", params: [[], { encoding: "base64" }] }, "bad-params"],
+      [{ method: "getMultipleAccounts", params: [Array(33).fill(PUBKEY), { encoding: "base64" }] }, "bad-params"],
+      [{ method: "getMultipleAccounts", params: [["short"], { encoding: "base64" }] }, "bad-params"],
       [{ method: "getTokenAccountsByOwner", params: [PUBKEY, { mint: MINT_A }, { encoding: "base64" }] }, "bad-params"],
       [{ method: "getTokenAccountsByOwner", params: [PUBKEY, { programId: PUBKEY }, { encoding: "jsonParsed" }] }, "bad-params"],
       [{ method: "getTokenAccountsByOwner", params: [PUBKEY, { mint: MINT_A, programId: "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA" }, { encoding: "jsonParsed" }] }, "bad-params"],
@@ -14262,6 +14299,14 @@ function stripAllowedWording(t) {
         method: "getTokenAccountsByOwner", params: [PUBKEY, { programId }, { encoding: "jsonParsed" }]
       }) }, { ASSETS });
       ok(programRes.status === 200, "[sol portfolio] known token program must be allowed: " + programId);
+    }
+    for (const payload of [
+      { method: "getAccountInfo", params: [PUBKEY, { encoding: "base64" }] },
+      { method: "getAccountInfo", params: [PUBKEY, { encoding: "jsonParsed" }] },
+      { method: "getMultipleAccounts", params: [Array(32).fill(PUBKEY), { encoding: "base64" }] },
+    ]) {
+      const r = await call("/sol/rpc", { method: "POST", body: JSON.stringify(payload) }, { ASSETS });
+      ok(r.status === 200, "[sol intent rpc] allowed read must pass: " + JSON.stringify(payload).slice(0, 80));
     }
     const okRes = await call("/sol/rpc", { method: "POST",
       body: JSON.stringify({ method: "getBalance", params: [PUBKEY, { commitment: "confirmed" }] }) },

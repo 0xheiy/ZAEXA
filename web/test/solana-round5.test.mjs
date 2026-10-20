@@ -9,6 +9,8 @@ const SOL = 'So11111111111111111111111111111111111111112';
 const USDC = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
 function load(names, extras = {}) {
   const ctx = vm.createContext({
+    solFailedBuild:null,solLoadIntent:async()=>({validateQuote(){}}),
+    solWatchWallet:p=>p,solLateWalletResult(){},window:{SolIntent:{assertSameMessage(){}}},
     console, Math, Number, String, Array, Object, JSON, Date, Promise, isFinite, Error, RegExp,
     SOL_MINT_ADDR: SOL, SOL_PRIO_FEE_RESERVE: 0.0002, solNetFeeLamports: null,
     solSide: 'sell', solOutAtaExists: null, solRefAtaExists: null,
@@ -237,15 +239,17 @@ test('other send errors are never retried', async () => {
 // ---- ۴ اکتبر: شکستِ شبیه‌سازی با تأییدِ کاربر ----
 test('[sim override] simulation arm is per quote key: failed key needs one confirmation, a new quote disarms', () => {
   const q = (amt) => ({ inputMint: SOL, outputMint: USDC, inAmount: amt, swapMode: 'ExactIn' });
-  const c = load(['solNeedsSimArm', 'solImpactKey'], { solQuote: q('100'), solSimFailedKey: null, solSimArmedKey: null });
+  const c = load(['solNeedsSimArm', 'solImpactKey'], { solQuote: q('100'), solSimFailedKey: null, solSimArmedKey: null,solSwapContext:()=> 'ctx' });
   assert.equal(c.solNeedsSimArm(), false);                       // هنوز شکستی ندیده‌ایم
-  c.solSimFailedKey = c.solImpactKey(c.solQuote);
+  c.solSimFailedKey = c.solImpactKey(c.solQuote)+"|transaction";
+  c.solFailedBuild={key:c.solSimFailedKey,quoteKey:c.solImpactKey(c.solQuote),context:"ctx",at:Date.now()};
   assert.equal(c.solNeedsSimArm(), true);
   c.solSimArmedKey = c.solSimFailedKey;
   assert.equal(c.solNeedsSimArm(), false);                       // تأیید شد
   c.solQuote = q('200');
   assert.equal(c.solNeedsSimArm(), false);                       // کوتِ تازه: شکستِ قبلی مالِ این نیست
-  c.solSimFailedKey = c.solImpactKey(c.solQuote);
+  c.solSimFailedKey = c.solImpactKey(c.solQuote)+"|transaction";
+  c.solFailedBuild={key:c.solSimFailedKey,quoteKey:c.solImpactKey(c.solQuote),context:"ctx",at:Date.now()};
   assert.equal(c.solNeedsSimArm(), true);                        // و شکستِ تازه تأییدِ تازه می‌خواهد
   c.solQuote = null;
   assert.equal(c.solNeedsSimArm(), false);
