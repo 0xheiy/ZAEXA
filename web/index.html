@@ -2662,6 +2662,27 @@ const BASE_TOKENS=[
   {symbol:"MORPHO",name:"Morpho",address:"0xBAa5CC21fd487B8Fcc2F632f3F4E8D37262a0842",decimals:18},
   {symbol:"DEGEN",name:"Degen",address:"0x4ed4E862860beD51a9570b96d89aF5E1B0Efefed",decimals:18},
 
+  /* ۲۰ اکتبر ۲۰۲۶ — چهارده توکنِ زیر هم فقط در *فهرست انتخاب* هستند، نه مرجع.
+     نشانی از فهرستِ رسمیِ CoinGecko (platforms.base)؛ نماد و اعشار از خودِ
+     قرارداد روی Base خوانده شد؛ معیارِ ورود: نقدینگیِ ≥ ۲۵۰ هزار دلار روی Base
+     (DexScreener). کنار رفتند: ENA، sUSDe، CRV، ETHFI، PENDLE، rETH، EIGEN،
+     KAITO، ZORA (زیرِ آستانه).
+     ⚠️ USDe عمداً stable ندارد — همان قاعده‌ی EURC: پرچم مستقیم در قیمت می‌نشیند. */
+  {symbol:"LINK",name:"Chainlink",address:"0x88Fb150BDc53A65fe94Dea0c9BA0a6dAf8C6e196",decimals:18},
+  {symbol:"WBTC",name:"Wrapped BTC",address:"0x0555E30da8f98308EdB960aa94C0Db47230d2B9c",decimals:8},
+  {symbol:"LBTC",name:"Lombard Staked BTC",address:"0xecAc9C5F704e954931349Da37F60E39f515c11c1",decimals:8},
+  {symbol:"tBTC",name:"tBTC v2",address:"0x236aa50979D5f3De3Bd1Eeb40E81137F22ab794b",decimals:18},
+  {symbol:"weETH",name:"Wrapped eETH",address:"0x04C0599Ae5A44757c0af6F9eC3b93da8976c150A",decimals:18},
+  {symbol:"USDe",name:"Ethena USDe",address:"0x5d3a1Ff2b6BAb83b63cd9AD0787074081a52ef34",decimals:18},
+  {symbol:"AAVE",name:"Aave",address:"0x63706e401c06ac8513145b7687A14804d17f814b",decimals:18},
+  {symbol:"ZRO",name:"LayerZero",address:"0x6985884C4392D348587B19cb9eAAf157F13271cd",decimals:18},
+  {symbol:"VVV",name:"Venice Token",address:"0xacfE6019Ed1A7Dc6f7B508C02d1b04ec88cC21bf",decimals:18},
+  {symbol:"WELL",name:"Moonwell",address:"0xA88594D404727625A9437C3f886C7643872296AE",decimals:18},
+  {symbol:"SPX",name:"SPX6900",address:"0x50dA645f148798F68EF2d7dB7C1CB22A6819bb2C",decimals:8},
+  {symbol:"BRETT",name:"Brett",address:"0x532f27101965dd16442E59d40670FaF5eBB142E4",decimals:18},
+  {symbol:"TOSHI",name:"Toshi",address:"0xAC1Bd2486aAf3B5C0fc3Fd868558b082a531B2B4",decimals:18},
+  {symbol:"AIXBT",name:"aixbt by Virtuals",address:"0x4F9Fd6Be4a90f2620860d680c0d4d5Fb53d1A825",decimals:18},
+
   /* ده توکنِ زیر هم فقط در *فهرست انتخاب* هستند، نه توکن مرجع: سهام توکنیزه‌ی
      Coinbase روی Base (B20). نماد، نام و اعشار هر کدام ۷ اکتبر ۲۰۲۶ از خود
      قراردادها خوانده شد؛ همه ۸ اعشار و ERC-20 ساده بدون کارمزد انتقال‌اند و
@@ -5887,12 +5908,40 @@ function solPaintFeeRows(){
   const wsolRow=$("solWsolRow");
   if(wsolRow)wsolRow.hidden=!(parts.wsol===1&&!!solMintCur);
 }
-/* ---- انتخابِ توکن — همان چیدمانِ #tokOv (h3+جست‌وجو+فهرست)، سه توکنِ
+/* ---- انتخابِ توکن — همان چیدمانِ #tokOv (h3+جست‌وجو+فهرست)، توکن‌های
    شناخته‌شده + هر mint دلخواه. ---- */
 const SOL_APP_TOKEN_LIST=[
   {symbol:"SOL",name:"Solana",mint:SOL_MINT_ADDR},
   {symbol:"USDC",name:"USD Coin",mint:SOL_APP_TOKENS.USDC},
   {symbol:"USDT",name:"Tether USD",mint:SOL_APP_TOKENS.USDT},
+  /* ۲۰ اکتبر ۲۰۲۶: mint از فهرستِ رسمیِ CoinGecko (platforms.solana)، معیار
+     نقدینگیِ ≥ ۲۵۰ هزار دلار روی سولانا (DexScreener). bnSOL زیرِ آستانه کنار رفت.
+     WBTC = نسخه‌ی رسمیِ WBTC روی سولانا؛ نسخه‌ی Portal (3NZ9…) هم‌نماد است و
+     برای جلوگیری از اشتباه عمداً در فهرست نیست — با چسباندنِ mint کار می‌کند.
+     اعشار در فهرست نیست: از خودِ mint خوانده می‌شود. */
+  {symbol:"JUP",name:"Jupiter",mint:"JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN"},
+  {symbol:"PUMP",name:"Pump.fun",mint:"pumpCmXqMfrsAkQ5r49WcJnRayYRqmXz6ae8H7H9Dfn"},
+  {symbol:"RAY",name:"Raydium",mint:"4k3Dyjzvzp8eMZWUXbBCjEvwSkkk59S5iCNLY3QrkX6R"},
+  {symbol:"ORCA",name:"Orca",mint:"orcaEKTdK7LKz57vaAYr9QeNsVEPfiu6QeMU1kektZE"},
+  {symbol:"JTO",name:"Jito",mint:"jtojtomepa8beP8AuQc6eXt5FriJwfFMwQx2v2f9mCL"},
+  {symbol:"PYTH",name:"Pyth Network",mint:"HZ1JovNiVvGrGNiiYvEozEVgZ58xaU3RKwX8eACQBCt3"},
+  {symbol:"RENDER",name:"Render",mint:"rndrizKT3MK1iimdxRdWabcF7Zg7AR5T4nud4EkHBof"},
+  {symbol:"GRASS",name:"Grass",mint:"Grass7B4RdKfBCjTKgSqnXkqjwiGvQyFbuSCUJr3XXjs"},
+  {symbol:"BONK",name:"Bonk",mint:"DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263"},
+  {symbol:"WIF",name:"dogwifhat",mint:"EKpQGSJtjMFqKZ9KQanSqYXRcF8fBopzLHYxdM65zcjm"},
+  {symbol:"POPCAT",name:"Popcat",mint:"7GCihgDB8fe6KNjn2MYtkzZcRjQy3t9GHdC8uHYmW2hr"},
+  {symbol:"PENGU",name:"Pudgy Penguins",mint:"2zMMhcVQEXDtdE6vsFS7S7D5oUodfJHE8vd1gnBouauv"},
+  {symbol:"TRUMP",name:"Official Trump",mint:"6p6xgHyF7AeE6TZkSmFsko444wqoP15icUSqi2jfGiPN"},
+  {symbol:"WLFI",name:"World Liberty Financial",mint:"WLFinEv6ypjkczcS83FZqFpgFZYwQXutRbxGe7oC16g"},
+  {symbol:"JitoSOL",name:"Jito Staked SOL",mint:"J1toso1uCk3RLmjorhTtrVwY9HJ7X8V9yYac6Y7kGCPn"},
+  {symbol:"JupSOL",name:"Jupiter Staked SOL",mint:"jupSoLaHXQiZZTSfEWMTRRgpnyFm8f6sZdosWBjx93v"},
+  {symbol:"JLP",name:"Jupiter Perps LP",mint:"27G8MtK7VtTcCHkpASjSDdkWWYfoqT6ggEuKidVJidD4"},
+  {symbol:"cbBTC",name:"Coinbase BTC",mint:"cbbtcf3aa214zXHbiAZQwf4122FBYbraNdFqgw4iMij"},
+  {symbol:"WBTC",name:"Wrapped BTC",mint:"5XZw2LKTyrfvfiskJ78AMpackRjPcyCif1WhUsPDuVqQ"},
+  {symbol:"PYUSD",name:"PayPal USD",mint:"2b1kV6DkPAnxd5ixfnxCpjxmKwqjjaYmCZfHsFu24GXo"},
+  {symbol:"USDG",name:"Global Dollar",mint:"2u1tszSeqZ3qBWF3uNGPFc8TzMk2tdiwknnRMWGWjGWH"},
+  {symbol:"USD1",name:"USD1",mint:"USD1ttGY1N17NEEHLmELoaybftRBUSErhqYiQzvEmuB"},
+  {symbol:"USDS",name:"USDS",mint:"USDSwr9ApdHk5bvJKMjzff41FfuX8bSxdKcR81vTwcA"},
 ];
 function solOpenTokenPicker(){
   if(view==="flow")solPickerLeg="token";
@@ -5947,7 +5996,7 @@ async function solLoadPopular(){
       try{
         const j=await gtJson(GT+"/networks/solana/pools?page=1");
         const rows=(j&&j.data)||[];
-        const skip=new Set([SOL_MINT_ADDR,SOL_APP_TOKENS.USDC,SOL_APP_TOKENS.USDT]);
+        const skip=new Set(SOL_APP_TOKEN_LIST.map(t=>t.mint));
         const seen=new Set();
         const out=[];
         for(const row of rows){
@@ -5973,7 +6022,7 @@ async function solLoadPopular(){
         // GT شکست خورد یا ردیفِ قابل‌استفاده نداد → Jupiter (پشتیبان)؛ او هم شکست خورد = رفتارِ امروز
         try{
           const arr=await solJupJson(SOL_JUP_TOP);
-          const skip=new Set([SOL_MINT_ADDR,SOL_APP_TOKENS.USDC,SOL_APP_TOKENS.USDT]);
+          const skip=new Set(SOL_APP_TOKEN_LIST.map(t=>t.mint));
           const seen=new Set();
           const out=[];
           for(const it of arr){

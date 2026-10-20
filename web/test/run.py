@@ -87,6 +87,14 @@ BrowserType.launch = _launch_selected_browser
 HERE = os.path.dirname(os.path.abspath(__file__))
 
 
+def sol_preset_symbols():
+    """نمادهای SOL_APP_TOKEN_LIST به ترتیب، از خودِ index.html — کاوشگرهای گزینشگرِ
+    سولانا به‌جای فهرستِ سه‌تاییِ هاردکد این را می‌سنجند (۲۰ اکتبر: فهرست بزرگ شد)."""
+    src = open(os.path.join(HERE, "..", "index.html"), encoding="utf-8").read()
+    block = re.search(r"const SOL_APP_TOKEN_LIST=\[(.*?)\n\];", src, re.S).group(1)
+    return re.findall(r'\{symbol:"([^"]+)",name:"[^"]*",mint:', block)
+
+
 def app_telegram_link():
     """مقدارِ LINKS.telegram از خودِ web/index.html — تنها منبعِ لینکِ تلگرام.
     لندینگ و pairs آن را دستی دارند و نگهبان‌ها می‌سنجند با این یکی برابر باشد."""
@@ -7682,8 +7690,12 @@ async def check_sol_boot_gt(p, errors):
     GTD = "https://api.geckoterminal.com/"
     CORS = {"access-control-allow-origin": "*"}
     PNG1 = tiny_png_bytes()
-    JUP = "JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN"
-    BONK = "DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263"
+    # ۲۰ اکتبر: JUP و BONK حالا در فهرستِ ثابتِ گزینشگرند و بخشِ Popular آن‌ها را
+    # کنار می‌گذارد؛ پس فیکسچرِ Popular دو mintِ ساختگیِ خارج از فهرست می‌گیرد
+    # (نام‌ها همان JUP/BONK می‌مانند تا بقیه‌ی ادعاها دست نخورد).
+    JUP = "PopA1111111111111111111111111111111111111111"
+    BONK = "PopB1111111111111111111111111111111111111111"
+    PRE = sol_preset_symbols()
     AAPL = "XsbEhLAtcf6HdfpFZ5xEMdqW8nfAvcsP5bdudRLJzJp"
     AAPL_LOGO = "https://assets.example.invalid/aapl.png"
     GT_ROUTE_DEFAULT["on"] = False
@@ -7979,13 +7991,13 @@ async def check_sol_boot_gt(p, errors):
             pg = await open_page(ctx, "#swap?chain=solana", None, wait=1500)
             await pg.evaluate("() => solOpenTokenPicker()")
             await pg.wait_for_timeout(700)
-            assert pops["n"] == 1 and await picker_rows(pg) == ["SOL", "USDC", "USDT"], \
+            assert pops["n"] == 1 and await picker_rows(pg) == PRE, \
                 "[sol popular retry] (%s) the failed first call must leave only the 3 defaults: %s calls=%d" % (mode, await picker_rows(pg), pops["n"])
             await pg.evaluate("() => { solCloseTokenPicker(); const o = Date.now.bind(Date); Date.now = () => o() + 31000; }")
             await pg.evaluate("() => solOpenTokenPicker()")
             await pg.wait_for_timeout(700)
             if mode == "404":
-                assert pops["n"] == 2 and await picker_rows(pg) == ["SOL", "USDC", "USDT", "JUP", "BONK"], \
+                assert pops["n"] == 2 and await picker_rows(pg) == PRE + ["JUP", "BONK"], \
                     "[sol popular retry] (404) 31 s later the picker must retry once and show the popular tokens: %s calls=%d" % (await picker_rows(pg), pops["n"])
             else:
                 # شکستِ انتقالی قطع‌کننده‌ی ۶۰ ثانیه‌ای را روشن کرده: تا پایانش به شبکه نمی‌رود، بعدش می‌رود
@@ -7993,7 +8005,7 @@ async def check_sol_boot_gt(p, errors):
                 await pg.evaluate("() => { solCloseTokenPicker(); const o = Date.now; Date.now = () => o() + 31000; }")
                 await pg.evaluate("() => solOpenTokenPicker()")
                 await pg.wait_for_timeout(700)
-                assert pops["n"] == 2 and await picker_rows(pg) == ["SOL", "USDC", "USDT", "JUP", "BONK"], \
+                assert pops["n"] == 2 and await picker_rows(pg) == PRE + ["JUP", "BONK"], \
                     "[sol popular retry] (abort) once the breaker is over the picker must retry and show popular tokens: %s calls=%d" % (await picker_rows(pg), pops["n"])
             # بازشدنِ بعدی دوباره نمی‌پرسد (موفقیت کش می‌شود)
             await pg.evaluate("() => { solCloseTokenPicker(); solOpenTokenPicker(); }")
@@ -8048,7 +8060,7 @@ async def check_sol_boot_gt(p, errors):
         await pg.evaluate("() => solOpenTokenPicker()")
         await pg.wait_for_timeout(1500)
         imgs = await row_imgs(pg)
-        assert await picker_rows(pg) == ["SOL", "USDC", "USDT", "CASH", "SPCX"], \
+        assert await picker_rows(pg) == PRE + ["CASH", "SPCX"], \
             "[sol picker jupiter] (a) Jupiter top must supply the Popular rows (SOL/USDC/USDT skipped): %s" % await picker_rows(pg)
         assert await heads(pg) == 1, "[sol picker jupiter] (a) exactly one 'Popular on Solana' heading"
         for m in (SOLM, USDCM, USDTM, CASH, SPCX):
@@ -8073,9 +8085,9 @@ async def check_sol_boot_gt(p, errors):
         ctx = await b.new_context()
         pg = await open_page(ctx, "#swap?chain=solana", None, wait=1500)
         await pg.evaluate("() => solOpenTokenPicker()")
-        await pg.wait_for_timeout(1200)
+        await pg.wait_for_timeout(3000)  # ۲۰ اکتبر: ۲۶ پیش‌فرض + Popular = چهار تکه‌ی GT با فاصله‌ی GT_GAP
         imgs = await row_imgs(pg)
-        assert await picker_rows(pg) == ["SOL", "USDC", "USDT", "JUP", "BONK"] and imgs.get(JUP) == [LOGO_OK], \
+        assert await picker_rows(pg) == PRE + ["JUP", "BONK"] and imgs.get(JUP) == [LOGO_OK], \
             "[sol picker jupiter] (b) healthy GT must supply rows and logos: %s %s" % (await picker_rows(pg), imgs)
         assert not jup_log, "[sol picker jupiter] (b) a healthy GT must send zero requests to lite-api.jup.ag: %s" % jup_log
         await ctx.close()
@@ -8091,15 +8103,15 @@ async def check_sol_boot_gt(p, errors):
         await pg.wait_for_timeout(1200)
         imgs = await row_imgs(pg)
         tops = lambda: len([u for u in jup_log if "/toporganicscore/" in u])
-        assert await picker_rows(pg) == ["SOL", "USDC", "USDT"] and await heads(pg) == 0, \
+        assert await picker_rows(pg) == PRE and await heads(pg) == 0, \
             "[sol picker jupiter] (c) both failing must leave no Popular section: %s" % await picker_rows(pg)
-        assert all(v == [] for v in imgs.values()) and await pg.evaluate("() => document.querySelectorAll('#solTokList .av').length") == 3, \
+        assert all(v == [] for v in imgs.values()) and await pg.evaluate("() => document.querySelectorAll('#solTokList .av').length") == len(PRE), \
             "[sol picker jupiter] (c) letter avatars only: %s" % imgs
         assert tops() == 1, "[sol picker jupiter] (c) one Jupiter top call so far: %d" % tops()
         await pg.evaluate("() => { solCloseTokenPicker(); const o = Date.now.bind(Date); Date.now = () => o() + 31000; }")
         await pg.evaluate("() => solOpenTokenPicker()")
         await pg.wait_for_timeout(1000)
-        assert tops() == 2 and await picker_rows(pg) == ["SOL", "USDC", "USDT"], \
+        assert tops() == 2 and await picker_rows(pg) == PRE, \
             "[sol picker jupiter] (c) after 30 s the failed popular load must be retried: tops=%d rows=%s" % (tops(), await picker_rows(pg))
         await ctx.close()
 
@@ -13889,7 +13901,7 @@ async def main():
         # E — یک ردیفِ واقع‌شکلِ GET /gt/networks/solana/pools?page=1 (فقط
         # فیلدهایی که solLoadPopular واقعاً می‌خواند)، برای «Popular on
         # Solana». SOL/USDC/USDT باید حذف شوند (از قبل ردیفِ خودشان هستند).
-        POPULAR_MINT = "DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263"
+        POPULAR_MINT = "PopB1111111111111111111111111111111111111111"  # ۲۰ اکتبر: BONK حالا پیش‌فرض است؛ mintِ ساختگیِ خارج از فهرست
         def gt_pools_fixture():
             def row(mint, name, image=None):
                 return {
@@ -16171,11 +16183,12 @@ async def main():
             "#solTokList .ttl", "els => els.map(e => e.textContent.trim())")
         await epg.close()
         print("[sol fixes][E] token list=%s heading=%s" % (e_syms, e_heading))
-        assert e_syms[:3] == ["SOL", "USDC", "USDT"], "the built-in presets must be exactly SOL, USDC then USDT: %s" % e_syms
-        assert "JUP" not in e_syms, "the unverified JUP preset must be gone: %s" % e_syms
+        e_pre = sol_preset_symbols()
+        assert e_pre[:3] == ["SOL", "USDC", "USDT"] and len(e_pre) == len(set(e_pre)), "presets must start SOL, USDC, USDT with no duplicates: %s" % e_pre
+        assert e_syms[:len(e_pre)] == e_pre, "the built-in presets must come first, in list order: %s" % e_syms
         assert e_heading == ["Popular on Solana"], "expected a single 'Popular on Solana' heading: %s" % e_heading
-        assert e_syms[3:] == ["Bonk"], \
-            "the popular section must dedupe by mint and skip SOL/USDC/USDT, got %s" % e_syms[3:]
+        assert e_syms[len(e_pre):] == ["Bonk"], \
+            "the popular section must dedupe by mint and skip every preset, got %s" % e_syms[len(e_pre):]
 
         # F) دکمه‌های سریع ۵۰٪/MAX و × روی «You pay»
         f1pg = await open_sol_swap_page({"v": "sell", "ms": 100}, balance_lamports=2_000_000_000)
