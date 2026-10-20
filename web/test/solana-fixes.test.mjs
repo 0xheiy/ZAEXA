@@ -142,7 +142,7 @@ test('missing price impact shows a dash with no colour', () => {
 function loader(metaFor, decimalsFor) {
   const repaints = [];
   const c = context(['solAppLoadToken'], {
-    SOL_APP_TOKEN_LIST: [], solPresetLogo: () => null, solNormalizeLegs: async () => false, solCloseTokenPicker() {}, solSwapReset(m) { c.solMintCur = m; c.solTokenDecimals = null; ++c.solTokenSeq; },
+    SOL_APP_TOKEN_LIST: [], solPresetLogo: () => null, solKnownToken: () => null, solJupMeta: async () => null, solNormalizeLegs: async () => false, solCloseTokenPicker() {}, solSwapReset(m) { c.solMintCur = m; c.solTokenDecimals = null; ++c.solTokenSeq; },
     renderSolExit() {}, solPaintSellPill() {}, renderSolStats() {}, solLoadChart() {}, solLoadDetails() {},
     fetchSolMeta: async m => metaFor(m), fetchVdVerdict: async () => ({ v: 'sell' }), solReadMintDecimals: m => decimalsFor(m),
     solRenderReadout() { repaints.push(c.solTokenDecimals); },

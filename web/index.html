@@ -5707,7 +5707,7 @@ async function solAppLoadToken(mint){
   solSwapReset(mint);
   const tokenSeq=solTokenSeq;
   // نماد و لوگوی پیش‌فرض‌ها (USDC/USDT/JUP) از همین فهرست — کارت پیش از جوابِ GT هم «؟ —» نشان ندهد.
-  const preset=SOL_APP_TOKEN_LIST.find(t=>t.mint===mint);
+  const preset=solKnownToken(mint);
   if(preset){solTokenSymbol=preset.symbol;}
   $("appSolExitSym").textContent=preset?preset.symbol:"";
   $("appSolExitAddr").textContent=mint;
@@ -5727,7 +5727,15 @@ async function solAppLoadToken(mint){
     });
   }
   solTokenSymbol=(meta&&meta.symbol)||(preset&&preset.symbol)||"Unknown";
-  solTokenLogoUrl=(meta&&meta.image_url)||solPresetLogo(mint)||null;
+  solTokenLogoUrl=(meta&&meta.image_url)||(preset&&preset.logo)||null;
+  if(!(meta&&meta.symbol&&meta.image_url)&&!(preset&&preset.logo)){
+    solJupMeta(mint).then(j=>{
+      if(!j||tokenSeq!==solTokenSeq||mint!==solMintCur)return;
+      if(solTokenSymbol==="Unknown"&&j.symbol){solTokenSymbol=j.symbol;$("appSolExitSym").textContent=j.symbol;if($("solPairName"))$("solPairName").textContent=j.symbol+" / USD";}
+      if(!solTokenLogoUrl&&j.logo)solTokenLogoUrl=j.logo;
+      solPaintLegs();paintSolAvatar({symbol:solTokenSymbol,image_url:solTokenLogoUrl});
+    });
+  }
   $("appSolExitSym").textContent=solTokenSymbol;
   renderSolExit(verdict.v,verdict.why,"appSolExitBox",verdict.basis,verdict.ret,verdict.cause);
   solPaintSellPill(verdict.v,verdict.basis,verdict.ret,verdict.cause);
@@ -5843,8 +5851,8 @@ async function solSetReference(mint){
     if(seq!==solRefSeq)return;
     solRefDecimals=decimals;
     // ۲۰ اکتبر: GT که جواب نداد، «Unknown» نشان می‌دادیم حتی برای توکنِ فهرستِ خودمان (ORCA در فیلمِ حسام).
-    const preset=SOL_APP_TOKEN_LIST.find(t=>t.mint===mint);
-    solRefSymbol=meta?.symbol||preset?.symbol||"Unknown";solRefLogo=meta?.image_url||solPresetLogo(mint)||solLogoCache[mint]||null;
+    const preset=solKnownToken(mint);
+    solRefSymbol=meta?.symbol||preset?.symbol||"Unknown";solRefLogo=meta?.image_url||preset?.logo||solLogoCache[mint]||null;
   }
   solPaintLegs();if(solAccount)solRefreshBalances();solScheduleQuote();
 }
@@ -6124,6 +6132,28 @@ let solLogoCache={};
 function solPresetLogo(mint){
   const t=(typeof SOL_APP_TOKEN_LIST!=="undefined")&&SOL_APP_TOKEN_LIST.find(x=>x.mint===mint);
   return t&&t.logo&&okLogo(t.logo)?t.logo:null;
+}
+/* ۲۰ اکتبر — نام و لوگوی توکن‌هایی که خودمان می‌شناسیم وقتی GT جواب نمی‌دهد: پیش‌فرض‌های گزینشگر و سهام‌های
+   xStocks (STK_SOL). پیش‌تر سهم‌های سولانا با Trade «Unknown» و بی‌لوگو باز می‌شدند (فیلمِ حسام).
+   لوگوی سهم: همان که نمای Stocks گرفته یا بازدیدِ قبلی نگه داشته (بی‌شبکه). */
+function solKnownToken(mint){
+  const p=SOL_APP_TOKEN_LIST.find(t=>t.mint===mint);
+  if(p)return {symbol:p.symbol,name:p.name,logo:solPresetLogo(mint)};
+  let st=null;try{st=STK_SOL.find(x=>x.mint===mint)||null;}catch{}
+  if(!st)return null;
+  let lg=null;try{lg=(stkData.logo&&stkData.logo[st.sym])||null;}catch{}
+  if(!lg){const kept=lsGet(LS_LOGO,mint,ttlLogo,okLogo);if(kept)lg=kept;}
+  return {symbol:st.sym,name:st.name,logo:lg&&okLogo(lg)?lg:null};
+}
+/* GT نام/لوگو نداد و ما هم نمی‌شناسیم → یک جست‌وجوی Jupiter (همان پشتیبانِ لوگوی گزینشگر). */
+async function solJupMeta(mint){
+  try{
+    const arr=await solJupJson(SOL_JUP_SEARCH+mint);
+    const it=arr.find(x=>x&&x.id===mint);
+    if(!it)return null;
+    const sym=typeof it.symbol==="string"&&it.symbol.length<=24?it.symbol:null;
+    return {symbol:sym,logo:solJupIcon(it.icon)};
+  }catch{return null;}
 }
 const solLogoFailAt={};
 // size/conc پیش‌فرض (۱۰ و ۱) رفتارِ قدیمی را نگه می‌دارد؛ پرتفوی ۳۰ تایی و حداکثر ۳ درخواستِ هم‌زمان می‌خواهد
@@ -8877,7 +8907,7 @@ function paintSolAvatar(meta){
   el.innerHTML="";
   const sym=meta&&meta.symbol;
   paintFallbackAvatar(el,solMintCur,sym);
-  const url=(meta&&meta.image_url)||solPresetLogo(solMintCur);
+  const url=(meta&&meta.image_url)||solKnownToken(solMintCur)?.logo;
   if(!url||!okLogo(url))return;
   const img=new Image();
   img.alt="";img.loading="lazy";
@@ -9035,8 +9065,8 @@ async function openSolanaTokenPage(mint){
 
   const [meta,verdict]=await Promise.all([fetchSolMeta(mint),fetchVdVerdict(mint)]);
   if(tokenSeq!==solTokenSeq||mint!==solMintCur)return;
-  const preset=SOL_APP_TOKEN_LIST.find(t=>t.mint===mint);
-  $("tk-sym").textContent=(meta&&meta.symbol)||"Unknown token";
+  const preset=solKnownToken(mint);
+  $("tk-sym").textContent=(meta&&meta.symbol)||(preset&&preset.symbol)||"Unknown token";
   $("tk-name").textContent=(meta&&meta.name)||"";
   const px=meta&&meta.price_usd!=null?Number(meta.price_usd):NaN;
   $("tk-px").textContent=(isFinite(px)&&px>0)
@@ -9050,7 +9080,7 @@ async function openSolanaTokenPage(mint){
   solVerdictV=verdict.v;solVerdictWhy=verdict.why;
   if(meta&&Number.isInteger(meta.decimals))solTokenDecimals=meta.decimals;
   solTokenSymbol=(meta&&meta.symbol)||(preset&&preset.symbol)||"Unknown";
-  solTokenLogoUrl=(meta&&meta.image_url)||solPresetLogo(mint)||null;
+  solTokenLogoUrl=(meta&&meta.image_url)||(preset&&preset.logo)||null;
   solPaintLegs();
   solSwapApplyGate();
   solWalletStandardInit();
@@ -11198,24 +11228,41 @@ function stocksStart(){
   stkChainPaint();stkPaintLogos();stkPaint();stocksTick();
 }
 function stocksStop(){stkActive=false;++stkRun;++stkSeq;clearTimeout(stkTimer);stkTimer=0;}
-// «Trade»: همان کاری که انتخابگرِ توکن می‌کند — USDC → سهم، مبلغ خالی، فوکوس روی «You pay».
+/* «Trade»: همان کاری که انتخابگرِ توکن می‌کند — پرداخت → سهم، مبلغ خالی، فوکوس روی «You pay».
+   ۲۰ اکتبر (تصمیمِ حسام، «حالتِ هوشمند»): استخرهای سهام همه X/USDC هستند، پس USDC یک مرحله و ارزان‌ترین است؛
+   ولی اگر کیف‌پول USDC ندارد، ارزِ بومی (ETH/SOL) پیش‌فرض می‌شود تا کاربر دستی عوض نکند. کیف‌پول وصل نیست یا
+   موجودی خوانده نشد = USDC (همان رفتارِ قبل؛ «نمی‌دانم» یعنی پیش‌فرضِ ارزان‌تر). */
+async function solHasUsdc(){
+  if(!solAccount)return null;
+  const cached=solPickBalOf(SOL_APP_TOKENS.USDC);
+  if(cached)return cached.raw>0n;
+  if(solPickBal&&solPickBal.addr===solAccount.address&&Date.now()-solPickBal.at<30000)return false;
+  try{
+    const r=await solRpcCall("getTokenAccountsByOwner",[solAccount.address,{mint:SOL_APP_TOKENS.USDC},{encoding:"jsonParsed"}]);
+    if(!Array.isArray(r?.value))return null;
+    return r.value.some(a=>/^[1-9]\d*$/.test(a?.account?.data?.parsed?.info?.tokenAmount?.amount||""));
+  }catch{return null;}
+}
 async function stocksTrade(sym){
   if(activeChain==="solana"){
     const e=STK_SOL.find(x=>x.sym===sym);
     if(!e)return;
-    // همان مسیرِ solApplyShare: توکن، سپس مرجعِ USDC، سپس سمتِ buy (solOnSideChange مبلغ را پاک می‌کند)
+    // همان مسیرِ solApplyShare: توکن، سپس مرجع، سپس سمتِ buy (solOnSideChange مبلغ را پاک می‌کند)
     solAppDefaulted=true;
     setView("swap");
+    const usdcP=solHasUsdc();
     await solAppLoadToken(e.mint);
-    await solSetReference(SOL_APP_TOKENS.USDC);
+    const ref=(await usdcP)===false?SOL_MINT_ADDR:SOL_APP_TOKENS.USDC;
+    if(solRefMint!==ref)await solSetReference(ref);
     solSide="buy";solOnSideChange();
     $("solAmt").focus();
     return;
   }
-  const t=BASE_TOKENS.find(x=>x.symbol===sym),usdc=tokenBySymbol("USDC");
+  const t=BASE_TOKENS.find(x=>x.symbol===sym),usdc=tokenBySymbol("USDC"),eth=BASE_TOKENS.find(x=>x.native);
   if(!E||!t||!usdc)return;
   hideSwapDone();
-  tokenIn=usdc;tokenOut=t;mode="exactIn";
+  const ub=account?balances[balKey(usdc)]:undefined;
+  tokenIn=(ub!==undefined&&ub<=0n&&eth)?eth:usdc;tokenOut=t;mode="exactIn";
   $("amtIn").value="";$("amtOut").value="";
   setView("swap");
   paintToken("in",tokenIn);paintToken("out",tokenOut);paintBalances();

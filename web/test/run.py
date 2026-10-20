@@ -6387,6 +6387,17 @@ async def check_stocks(p, errors):
         focus: document.activeElement && document.activeElement.id, chain: activeChain, hash: location.hash})""")
     assert st["swap"] and not st["stocks"] and st["out"] == "TSLAc" and st["inn"] == "USDC" and st["amt"] == "" and st["amtOut"] == "" \
         and st["focus"] == "amtIn" and st["chain"] == "base", "[stocks trade] Trade must open the swap USDC -> TSLAc with an empty, focused amount: %s" % st
+    # ۲۰ اکتبر — حالتِ هوشمند: کیف‌پولِ بی‌USDC → ETH؛ با USDC → USDC (کیف‌پولِ وصل‌نشده بالاتر سنجیده شد: USDC)
+    smart = []
+    for usdc_bal in ("0n", "5000000n"):
+        await pg.evaluate("(b) => { account = '0x' + '1'.repeat(40); balances[balKey(tokenBySymbol('USDC'))] = BigInt(b.replace('n','')); setView('stocks'); }", usdc_bal)
+        await pg.wait_for_timeout(200)
+        await pg.click('#view-stocks tr[data-sym="TSLAc"] .trade')
+        await pg.wait_for_timeout(400)
+        smart.append(await pg.evaluate("() => [document.getElementById('tokInSym').textContent, document.getElementById('tokOutSym').textContent]"))
+    await pg.evaluate("() => { account = null; }")
+    assert smart == [["ETH", "TSLAc"], ["USDC", "TSLAc"]], "[stocks trade smart] no USDC must pay with ETH, holding USDC must pay with USDC: %s" % smart
+    print("[stocks trade smart] a connected wallet with zero USDC opens ETH -> TSLAc; holding USDC (or no wallet / unknown balance) opens USDC -> TSLAc")
     # از سولانا: جدول همان‌جا نمایش داده می‌شود و Trade کارتِ سولانا را باز می‌کند ([stocks sol trade] جزئیاتش را می‌سنجد)
     await pg.evaluate("() => setChain('solana')")
     await pg.wait_for_timeout(300)
