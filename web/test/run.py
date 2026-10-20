@@ -65,6 +65,10 @@ async def _goto_allow_cmc(self, *a, **k):
         self._zx_cmc_done = True
         await self.route("**/cmc/kline**", lambda r: r.fulfill(
             status=200, content_type="application/json", body='{"candles":[]}'))
+        # ۲۰ اکتبر: لوگوهای ثابتِ فهرست روی coin-images.coingecko.com — کانتینر شبکه ندارد و هر کاوشگری
+        # که آن را استاب نکرده بود «Failed to load resource» می‌گرفت. یک PNGِ کوچک، همان‌طور که کاوشگرها خودشان می‌دهند.
+        await self.route("https://coin-images.coingecko.com/**", lambda r: r.fulfill(
+            status=200, content_type="image/png", body=tiny_png_bytes()))
     if not getattr(self, "_zx_real_intent", False) and not getattr(self, "_zx_intent_stubbed", False):
         # ZX-01: the flow probes use fake transactions, so they get a STUB validator bundle by default and keep
         # testing the UI flow. Only [sol intent real] sets _zx_real_intent and is served the REAL built bundle.
@@ -7704,7 +7708,8 @@ async def check_sol_boot_gt(p, errors):
     log = []                      # (via, url) به ترتیب؛ via: direct|proxy
     hook = {"gt": None, "proxy": None, "on_req": None, "jup": None, "cmc": None}
     jup_log, cmc_log, extra_log = [], [], []     # Jupiter / مسیر /cmc/kline / هر میزبانِ دیگر (آبورت می‌شود)
-    JUP_IMG_HOSTS = ("https://raw.githubusercontent.com/", "https://token-metadata.bridge.xyz/", "https://s3-symbol-logo.tradingview.com/")
+    JUP_IMG_HOSTS = ("https://raw.githubusercontent.com/", "https://token-metadata.bridge.xyz/", "https://s3-symbol-logo.tradingview.com/",
+                     "https://coin-images.coingecko.com/")   # ۲۰ اکتبر: لوگوی ثابتِ پیش‌فرض‌ها روی همین CDN است
 
     def gt_path(u):
         return u.split("/api/v2", 1)[1] if "/api/v2" in u else u.split("/gt", 1)[1]
@@ -8063,10 +8068,15 @@ async def check_sol_boot_gt(p, errors):
         assert await picker_rows(pg) == PRE + ["CASH", "SPCX"], \
             "[sol picker jupiter] (a) Jupiter top must supply the Popular rows (SOL/USDC/USDT skipped): %s" % await picker_rows(pg)
         assert await heads(pg) == 1, "[sol picker jupiter] (a) exactly one 'Popular on Solana' heading"
-        for m in (SOLM, USDCM, USDTM, CASH, SPCX):
+        PRE_LOGO = await pg.evaluate("() => Object.fromEntries(SOL_APP_TOKEN_LIST.map(t => [t.mint, t.logo]))")
+        # ۲۰ اکتبر: پیش‌فرض‌ها لوگوی ثابتِ خودشان را دارند (بی‌شبکه)؛ فقط ردیف‌های Popular از Jupiter می‌آیند
+        for m in (SOLM, USDCM, USDTM):
+            assert imgs.get(m) == [PRE_LOGO[m]], "[sol picker jupiter] (a) preset %s must show its static logo: %s" % (m, imgs.get(m))
+        for m in (CASH, SPCX):
             assert imgs.get(m) == [JBY[m]["icon"]], "[sol picker jupiter] (a) %s must show an <img> with the Jupiter icon: %s" % (m, imgs.get(m))
-        assert any("toporganicscore/24h?limit=20" in u for u in jup_log) and any("/tokens/v2/search?query=" in u for u in jup_log), \
-            "[sol picker jupiter] (a) both Jupiter calls expected: %s" % jup_log
+        # ۲۰ اکتبر: پیش‌فرض‌ها لوگوی ثابت دارند و آیکنِ Popular از همان تماسِ top می‌آید، پس جست‌وجوی لوگو لازم نیست
+        assert any("toporganicscore/24h?limit=20" in u for u in jup_log) and not any("/tokens/v2/search?query=" in u for u in jup_log), \
+            "[sol picker jupiter] (a) exactly the top call, no logo search: %s" % jup_log
         await ctx.close()
 
         # (b) GT OK -> zero Jupiter requests
@@ -8105,8 +8115,9 @@ async def check_sol_boot_gt(p, errors):
         tops = lambda: len([u for u in jup_log if "/toporganicscore/" in u])
         assert await picker_rows(pg) == PRE and await heads(pg) == 0, \
             "[sol picker jupiter] (c) both failing must leave no Popular section: %s" % await picker_rows(pg)
-        assert all(v == [] for v in imgs.values()) and await pg.evaluate("() => document.querySelectorAll('#solTokList .av').length") == len(PRE), \
-            "[sol picker jupiter] (c) letter avatars only: %s" % imgs
+        PRE_LOGO = await pg.evaluate("() => Object.fromEntries(SOL_APP_TOKEN_LIST.map(t => [t.mint, t.logo]))")
+        assert all(v == [PRE_LOGO[m]] for m, v in imgs.items()) and await pg.evaluate("() => document.querySelectorAll('#solTokList .av').length") == len(PRE), \
+            "[sol picker jupiter] (c) with both sources down the presets still show their static logos, nothing else: %s" % imgs
         assert tops() == 1, "[sol picker jupiter] (c) one Jupiter top call so far: %d" % tops()
         await pg.evaluate("() => { solCloseTokenPicker(); const o = Date.now.bind(Date); Date.now = () => o() + 31000; }")
         await pg.evaluate("() => solOpenTokenPicker()")
@@ -8130,9 +8141,12 @@ async def check_sol_boot_gt(p, errors):
         await pg.wait_for_timeout(1500)
         imgs = await row_imgs(pg)
         cached = await pg.evaluate("(ms) => ms.map(m => [m, solLogoCache[m] === undefined ? 'undef' : solLogoCache[m]])", [SOLM, USDCM, CASH, SPCX])
-        assert imgs.get(SOLM) == [] and imgs.get(USDCM) == [] and imgs.get(CASH) == [] and imgs.get(SPCX) == [] and imgs.get(USDTM) == [JBY[USDTM]["icon"]], \
-            "[sol picker jupiter] (d) only the https icon within 512 chars may be painted: %s" % imgs
-        assert all(v is None for _, v in cached), "[sol picker jupiter] (d) a rejected icon must end as null in the cache: %s" % cached
+        PRE_LOGO = await pg.evaluate("() => Object.fromEntries(SOL_APP_TOKEN_LIST.map(t => [t.mint, t.logo]))")
+        # ۲۰ اکتبر: پیش‌فرض‌ها (SOL/USDC/USDT) لوگوی ثابت دارند و هرگز سراغِ آیکنِ Jupiter نمی‌روند؛ قاعده‌ی رد روی Popular سنجیده می‌شود
+        assert imgs.get(SOLM) == [PRE_LOGO[SOLM]] and imgs.get(USDCM) == [PRE_LOGO[USDCM]] and imgs.get(USDTM) == [PRE_LOGO[USDTM]] \
+            and imgs.get(CASH) == [] and imgs.get(SPCX) == [], \
+            "[sol picker jupiter] (d) presets keep their static logo; a bad Popular icon is never painted: %s" % imgs
+        assert all(v is None for m, v in cached if m in (CASH, SPCX)), "[sol picker jupiter] (d) a rejected icon must end as null in the cache: %s" % cached
         assert not any("insecure.example.invalid" in u or "longicon.example.invalid" in u for u in extra_log), \
             "[sol picker jupiter] (d) a rejected icon must never be requested: %s" % extra_log
         await ctx.close()
@@ -10949,7 +10963,19 @@ async def main():
         # ---- 2a-pre. the token list itself ----
         toks = await pg.evaluate(
             "() => BASE_TOKENS.map(t => ({s: t.symbol, d: t.decimals,"
-            " a: t.address, st: !!t.stable, n: t.native}))")
+            " a: t.address, st: !!t.stable, n: t.native, lg: t.logo || null}))")
+        # ۲۰ اکتبر: لوگوی ثابتِ فهرست — فقط https روی CDNِ CoinGecko، و tokenLogo بی‌شبکه همان را برمی‌گرداند
+        for t in toks:
+            if t["lg"] is not None:
+                assert re.match(r"^https://coin-images\.coingecko\.com/coins/images/\d+/small/[^\s\"'<>]+$", t["lg"]), \
+                    "%s has a malformed static logo: %s" % (t["s"], t["lg"])
+        lg_n = sum(1 for t in toks if t["lg"])
+        assert lg_n >= 14, "the 14 tokens added on 20 Oct must carry a static logo, got %d" % lg_n
+        lg_ok = await pg.evaluate("async () => { const t = BASE_TOKENS.find(x => x.symbol === 'LINK'); return (await tokenLogo(t)) === t.logo; }")
+        assert lg_ok, "tokenLogo must return a list token's static logo without asking the network"
+        sol_lg = await pg.evaluate("() => SOL_APP_TOKEN_LIST.filter(t => !(typeof t.logo === 'string' && /^https:\\/\\/coin-images\\.coingecko\\.com\\//.test(t.logo))).map(t => t.symbol)")
+        assert sol_lg == [], "every Solana picker preset must carry a static CoinGecko logo: missing %s" % sol_lg
+        print("[static logos] %d Base list tokens and every Solana preset carry a fixed https CoinGecko-CDN logo; tokenLogo returns it with no network call" % lg_n)
         print("[token list] %s" % ", ".join(f"{t['s']}/{t['d']}" for t in toks))
         seen = {}
         for t in toks:

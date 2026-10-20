@@ -1753,8 +1753,16 @@ async function solSwapRoute(request, url, env) {
   // ۲۸ سپتامبر — round 3، مورد D: veryHigh/1,000,000 لَمپورت (~۰٫۰۰۱ SOL)
   // روی یک سواپِ چندسنتی مسخره بود. سقفِ تازه medium/200,000 (~۰٫۰۰۰۲ SOL)،
   // و کاربر نمی‌تواند این را در بدنه دور بزند — همیشه همین‌جا تحمیل می‌شود.
+  /* ۲۰ اکتبر — useSharedAccounts: true. بی‌آن، جوپیتر برای بعضی مسیرهای چندمرحله‌ای (مثلاً
+     USDC→USD1→SOL→JUP از Manifest) دستورِ route را با حساب‌های واسطه‌ی *خودِ کاربر* می‌سازد:
+     ATA برای مینت‌های واسطه + بستنِ wSOL. اعتبارسنجِ intent.js این را عمداً رد می‌کند
+     («Refused: … unsupported instruction»)، پس سواپِ سالم بی‌صدا بسته می‌شد. با حساب‌های
+     مشترک، واسطه‌ها مالِ برنامه‌ی جوپیتر می‌مانند و اعتبارسنج دست نمی‌خورد (روی همان کوتِ
+     شکست‌خورده سنجیده شد: VALID). اگر جوپیتر این مسیر را با حساب‌های مشترک نسازد (۴xx غیرِ ۴۲۹)،
+     یک‌بار بی‌این فیلد دوباره می‌سازیم — همان رفتارِ قبل. */
   const payload = {
     quoteResponse, userPublicKey,
+    useSharedAccounts: true,
     dynamicComputeUnitLimit: true,
     wrapAndUnwrapSol: true,
     prioritizationFeeLamports: {
@@ -1772,6 +1780,11 @@ async function solSwapRoute(request, url, env) {
   if (r.status === 429) {
     await new Promise((resolve) => setTimeout(resolve, 1100));
     r = await jupProxyFetch(env, "/swap/v1/swap", swapInit, SOL_JUP_TIMEOUT_MS);
+  }
+  if (r.status >= 400 && r.status < 500 && r.status !== 429) {
+    const { useSharedAccounts, ...dynamic } = payload;
+    r = await jupProxyFetch(env, "/swap/v1/swap",
+      { ...swapInit, body: JSON.stringify(dynamic) }, SOL_JUP_TIMEOUT_MS);
   }
   if (!r.ok || !r.json || typeof r.json.swapTransaction !== "string")
     return solDone(502, { error: "jup:swap:" + r.status });

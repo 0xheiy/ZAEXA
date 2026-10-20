@@ -86,7 +86,7 @@ test('disconnect while fetching balances leaves balances cleared', async () => {
 test('late token metadata cannot replace a newer token selection', async () => {
   const old = deferred();
   const c = context(['solAppLoadToken'], {
-    SOL_MINT_RE: /./, SOL_APP_TOKEN_LIST: [], solCloseTokenPicker() {},
+    SOL_MINT_RE: /./, SOL_APP_TOKEN_LIST: [], solPresetLogo: () => null, solCloseTokenPicker() {},
     solSwapReset(mint) { c.solMintCur = mint; ++c.solTokenSeq; },
     renderSolExit() {}, solPaintSellPill() {}, renderSolStats() {}, solLoadChart() {},
     fetchSolMeta: mint => mint === 'mintA' ? old.promise : Promise.resolve({ symbol: 'B', decimals: 6 }),
@@ -227,7 +227,7 @@ test('resetting token does not unlock a wallet request already in progress', () 
 test('token page with missing metadata still initializes the wallet', async () => {
   let initialized = false;
   const c = context(['openSolanaTokenPage'], {
-    SOL_APP_TOKEN_LIST: [], shortAddr: s => s, solTokenUrl: s => s,
+    SOL_APP_TOKEN_LIST: [], solPresetLogo: () => null, shortAddr: s => s, solTokenUrl: s => s,
     paintSolAvatar() {}, paintReportNetwork() {}, paintWallet() {}, renderRoundTrip() {}, ev() {}, renderSolStats() {},
     renderSolExit() {}, solPaintSellPill() {}, solTryAutoRestoreName() {},
     solWalletStandardInit() { initialized = true; },

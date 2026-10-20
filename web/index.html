@@ -2667,21 +2667,24 @@ const BASE_TOKENS=[
      قرارداد روی Base خوانده شد؛ معیارِ ورود: نقدینگیِ ≥ ۲۵۰ هزار دلار روی Base
      (DexScreener). کنار رفتند: ENA، sUSDe، CRV، ETHFI، PENDLE، rETH، EIGEN،
      KAITO، ZORA (زیرِ آستانه).
-     ⚠️ USDe عمداً stable ندارد — همان قاعده‌ی EURC: پرچم مستقیم در قیمت می‌نشیند. */
-  {symbol:"LINK",name:"Chainlink",address:"0x88Fb150BDc53A65fe94Dea0c9BA0a6dAf8C6e196",decimals:18},
-  {symbol:"WBTC",name:"Wrapped BTC",address:"0x0555E30da8f98308EdB960aa94C0Db47230d2B9c",decimals:8},
-  {symbol:"LBTC",name:"Lombard Staked BTC",address:"0xecAc9C5F704e954931349Da37F60E39f515c11c1",decimals:8},
-  {symbol:"tBTC",name:"tBTC v2",address:"0x236aa50979D5f3De3Bd1Eeb40E81137F22ab794b",decimals:18},
-  {symbol:"weETH",name:"Wrapped eETH",address:"0x04C0599Ae5A44757c0af6F9eC3b93da8976c150A",decimals:18},
-  {symbol:"USDe",name:"Ethena USDe",address:"0x5d3a1Ff2b6BAb83b63cd9AD0787074081a52ef34",decimals:18},
-  {symbol:"AAVE",name:"Aave",address:"0x63706e401c06ac8513145b7687A14804d17f814b",decimals:18},
-  {symbol:"ZRO",name:"LayerZero",address:"0x6985884C4392D348587B19cb9eAAf157F13271cd",decimals:18},
-  {symbol:"VVV",name:"Venice Token",address:"0xacfE6019Ed1A7Dc6f7B508C02d1b04ec88cC21bf",decimals:18},
-  {symbol:"WELL",name:"Moonwell",address:"0xA88594D404727625A9437C3f886C7643872296AE",decimals:18},
-  {symbol:"SPX",name:"SPX6900",address:"0x50dA645f148798F68EF2d7dB7C1CB22A6819bb2C",decimals:8},
-  {symbol:"BRETT",name:"Brett",address:"0x532f27101965dd16442E59d40670FaF5eBB142E4",decimals:18},
-  {symbol:"TOSHI",name:"Toshi",address:"0xAC1Bd2486aAf3B5C0fc3Fd868558b082a531B2B4",decimals:18},
-  {symbol:"AIXBT",name:"aixbt by Virtuals",address:"0x4F9Fd6Be4a90f2620860d680c0d4d5Fb53d1A825",decimals:18},
+     ⚠️ USDe عمداً stable ندارد — همان قاعده‌ی EURC: پرچم مستقیم در قیمت می‌نشیند.
+     logo: نشانیِ ثابتِ تصویر روی CDNِ CoinGecko (همان CDNی که image_urlِ GT به آن
+     اشاره می‌کند) — ۲۰ اکتبر: وقتی GT از IPِ کاربر بسته است و کلیدِ CG سقف خورده،
+     توکنِ تازه هیچ لوگویی نمی‌گرفت. منبعِ تازه‌ی API نیست؛ دادهٔ خودِ فهرست است. */
+  {symbol:"LINK",name:"Chainlink",address:"0x88Fb150BDc53A65fe94Dea0c9BA0a6dAf8C6e196",decimals:18,logo:"https://coin-images.coingecko.com/coins/images/877/small/Chainlink_Logo_500.png"},
+  {symbol:"WBTC",name:"Wrapped BTC",address:"0x0555E30da8f98308EdB960aa94C0Db47230d2B9c",decimals:8,logo:"https://coin-images.coingecko.com/coins/images/7598/small/WBTCLOGO.png"},
+  {symbol:"LBTC",name:"Lombard Staked BTC",address:"0xecAc9C5F704e954931349Da37F60E39f515c11c1",decimals:8,logo:"https://coin-images.coingecko.com/coins/images/39969/small/lbtc-token-circle-200.png"},
+  {symbol:"tBTC",name:"tBTC v2",address:"0x236aa50979D5f3De3Bd1Eeb40E81137F22ab794b",decimals:18,logo:"https://coin-images.coingecko.com/coins/images/11224/small/0x18084fba666a33d37592fa2633fd49a74dd93a88.png"},
+  {symbol:"weETH",name:"Wrapped eETH",address:"0x04C0599Ae5A44757c0af6F9eC3b93da8976c150A",decimals:18,logo:"https://coin-images.coingecko.com/coins/images/33033/small/weETH.png"},
+  {symbol:"USDe",name:"Ethena USDe",address:"0x5d3a1Ff2b6BAb83b63cd9AD0787074081a52ef34",decimals:18,logo:"https://coin-images.coingecko.com/coins/images/33613/small/usde.png"},
+  {symbol:"AAVE",name:"Aave",address:"0x63706e401c06ac8513145b7687A14804d17f814b",decimals:18,logo:"https://coin-images.coingecko.com/coins/images/12645/small/aave-token-round.png"},
+  {symbol:"ZRO",name:"LayerZero",address:"0x6985884C4392D348587B19cb9eAAf157F13271cd",decimals:18,logo:"https://coin-images.coingecko.com/coins/images/28206/small/ftxG9_TJ_400x400.jpeg"},
+  {symbol:"VVV",name:"Venice Token",address:"0xacfE6019Ed1A7Dc6f7B508C02d1b04ec88cC21bf",decimals:18,logo:"https://coin-images.coingecko.com/coins/images/54023/small/VVV_Token_Transparent.png"},
+  {symbol:"WELL",name:"Moonwell",address:"0xA88594D404727625A9437C3f886C7643872296AE",decimals:18,logo:"https://coin-images.coingecko.com/coins/images/26133/small/WELL.png"},
+  {symbol:"SPX",name:"SPX6900",address:"0x50dA645f148798F68EF2d7dB7C1CB22A6819bb2C",decimals:8,logo:"https://coin-images.coingecko.com/coins/images/31401/small/centeredcoin_%281%29.png"},
+  {symbol:"BRETT",name:"Brett",address:"0x532f27101965dd16442E59d40670FaF5eBB142E4",decimals:18,logo:"https://coin-images.coingecko.com/coins/images/35529/small/1000050750.png"},
+  {symbol:"TOSHI",name:"Toshi",address:"0xAC1Bd2486aAf3B5C0fc3Fd868558b082a531B2B4",decimals:18,logo:"https://coin-images.coingecko.com/coins/images/31126/small/Toshi_Logo_-_Circular.png"},
+  {symbol:"AIXBT",name:"aixbt by Virtuals",address:"0x4F9Fd6Be4a90f2620860d680c0d4d5Fb53d1A825",decimals:18,logo:"https://coin-images.coingecko.com/coins/images/51784/small/3.png"},
 
   /* ده توکنِ زیر هم فقط در *فهرست انتخاب* هستند، نه توکن مرجع: سهام توکنیزه‌ی
      Coinbase روی Base (B20). نماد، نام و اعشار هر کدام ۷ اکتبر ۲۰۲۶ از خود
@@ -5161,6 +5164,7 @@ const ETH_ICON="data:image/svg+xml;utf8,"+encodeURIComponent(
 
 async function tokenLogo(t){
   if(t.native)return ETH_ICON;
+  if(t.logo&&okLogo(t.logo))return t.logo;   // ۲۰ اکتبر: لوگوی ثابتِ فهرست، بی‌شبکه
   /* «قبلاً پرسیدیم و توکن لوگو نداشت» یک پاسخ است، نه شکست — به‌شکل رشته‌ی
      خالی ذخیره می‌شود تا هر بازدید دوباره پرسیده نشود. شکست هرگز ذخیره
      نمی‌شود؛ آن همان «نمی‌دانم = نه» است. */
@@ -5723,7 +5727,7 @@ async function solAppLoadToken(mint){
     });
   }
   solTokenSymbol=(meta&&meta.symbol)||(preset&&preset.symbol)||"Unknown";
-  solTokenLogoUrl=(meta&&meta.image_url)||null;
+  solTokenLogoUrl=(meta&&meta.image_url)||solPresetLogo(mint)||null;
   $("appSolExitSym").textContent=solTokenSymbol;
   renderSolExit(verdict.v,verdict.why,"appSolExitBox",verdict.basis,verdict.ret,verdict.cause);
   solPaintSellPill(verdict.v,verdict.basis,verdict.ret,verdict.cause);
@@ -5838,7 +5842,9 @@ async function solSetReference(mint){
     const decimals=Number.isInteger(meta?.decimals)?meta.decimals:await solReadMintDecimals(mint);
     if(seq!==solRefSeq)return;
     solRefDecimals=decimals;
-    solRefSymbol=meta?.symbol||"Unknown";solRefLogo=meta?.image_url||null;
+    // ۲۰ اکتبر: GT که جواب نداد، «Unknown» نشان می‌دادیم حتی برای توکنِ فهرستِ خودمان (ORCA در فیلمِ حسام).
+    const preset=SOL_APP_TOKEN_LIST.find(t=>t.mint===mint);
+    solRefSymbol=meta?.symbol||preset?.symbol||"Unknown";solRefLogo=meta?.image_url||solPresetLogo(mint)||solLogoCache[mint]||null;
   }
   solPaintLegs();if(solAccount)solRefreshBalances();solScheduleQuote();
 }
@@ -5911,37 +5917,37 @@ function solPaintFeeRows(){
 /* ---- انتخابِ توکن — همان چیدمانِ #tokOv (h3+جست‌وجو+فهرست)، توکن‌های
    شناخته‌شده + هر mint دلخواه. ---- */
 const SOL_APP_TOKEN_LIST=[
-  {symbol:"SOL",name:"Solana",mint:SOL_MINT_ADDR},
-  {symbol:"USDC",name:"USD Coin",mint:SOL_APP_TOKENS.USDC},
-  {symbol:"USDT",name:"Tether USD",mint:SOL_APP_TOKENS.USDT},
+  {symbol:"SOL",name:"Solana",mint:SOL_MINT_ADDR,logo:"https://coin-images.coingecko.com/coins/images/4128/small/solana.png"},
+  {symbol:"USDC",name:"USD Coin",mint:SOL_APP_TOKENS.USDC,logo:"https://coin-images.coingecko.com/coins/images/6319/small/USDC.png"},
+  {symbol:"USDT",name:"Tether USD",mint:SOL_APP_TOKENS.USDT,logo:"https://coin-images.coingecko.com/coins/images/325/small/Tether.png"},
   /* ۲۰ اکتبر ۲۰۲۶: mint از فهرستِ رسمیِ CoinGecko (platforms.solana)، معیار
      نقدینگیِ ≥ ۲۵۰ هزار دلار روی سولانا (DexScreener). bnSOL زیرِ آستانه کنار رفت.
      WBTC = نسخه‌ی رسمیِ WBTC روی سولانا؛ نسخه‌ی Portal (3NZ9…) هم‌نماد است و
      برای جلوگیری از اشتباه عمداً در فهرست نیست — با چسباندنِ mint کار می‌کند.
      اعشار در فهرست نیست: از خودِ mint خوانده می‌شود. */
-  {symbol:"JUP",name:"Jupiter",mint:"JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN"},
-  {symbol:"PUMP",name:"Pump.fun",mint:"pumpCmXqMfrsAkQ5r49WcJnRayYRqmXz6ae8H7H9Dfn"},
-  {symbol:"RAY",name:"Raydium",mint:"4k3Dyjzvzp8eMZWUXbBCjEvwSkkk59S5iCNLY3QrkX6R"},
-  {symbol:"ORCA",name:"Orca",mint:"orcaEKTdK7LKz57vaAYr9QeNsVEPfiu6QeMU1kektZE"},
-  {symbol:"JTO",name:"Jito",mint:"jtojtomepa8beP8AuQc6eXt5FriJwfFMwQx2v2f9mCL"},
-  {symbol:"PYTH",name:"Pyth Network",mint:"HZ1JovNiVvGrGNiiYvEozEVgZ58xaU3RKwX8eACQBCt3"},
-  {symbol:"RENDER",name:"Render",mint:"rndrizKT3MK1iimdxRdWabcF7Zg7AR5T4nud4EkHBof"},
-  {symbol:"GRASS",name:"Grass",mint:"Grass7B4RdKfBCjTKgSqnXkqjwiGvQyFbuSCUJr3XXjs"},
-  {symbol:"BONK",name:"Bonk",mint:"DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263"},
-  {symbol:"WIF",name:"dogwifhat",mint:"EKpQGSJtjMFqKZ9KQanSqYXRcF8fBopzLHYxdM65zcjm"},
-  {symbol:"POPCAT",name:"Popcat",mint:"7GCihgDB8fe6KNjn2MYtkzZcRjQy3t9GHdC8uHYmW2hr"},
-  {symbol:"PENGU",name:"Pudgy Penguins",mint:"2zMMhcVQEXDtdE6vsFS7S7D5oUodfJHE8vd1gnBouauv"},
-  {symbol:"TRUMP",name:"Official Trump",mint:"6p6xgHyF7AeE6TZkSmFsko444wqoP15icUSqi2jfGiPN"},
-  {symbol:"WLFI",name:"World Liberty Financial",mint:"WLFinEv6ypjkczcS83FZqFpgFZYwQXutRbxGe7oC16g"},
-  {symbol:"JitoSOL",name:"Jito Staked SOL",mint:"J1toso1uCk3RLmjorhTtrVwY9HJ7X8V9yYac6Y7kGCPn"},
-  {symbol:"JupSOL",name:"Jupiter Staked SOL",mint:"jupSoLaHXQiZZTSfEWMTRRgpnyFm8f6sZdosWBjx93v"},
-  {symbol:"JLP",name:"Jupiter Perps LP",mint:"27G8MtK7VtTcCHkpASjSDdkWWYfoqT6ggEuKidVJidD4"},
-  {symbol:"cbBTC",name:"Coinbase BTC",mint:"cbbtcf3aa214zXHbiAZQwf4122FBYbraNdFqgw4iMij"},
-  {symbol:"WBTC",name:"Wrapped BTC",mint:"5XZw2LKTyrfvfiskJ78AMpackRjPcyCif1WhUsPDuVqQ"},
-  {symbol:"PYUSD",name:"PayPal USD",mint:"2b1kV6DkPAnxd5ixfnxCpjxmKwqjjaYmCZfHsFu24GXo"},
-  {symbol:"USDG",name:"Global Dollar",mint:"2u1tszSeqZ3qBWF3uNGPFc8TzMk2tdiwknnRMWGWjGWH"},
-  {symbol:"USD1",name:"USD1",mint:"USD1ttGY1N17NEEHLmELoaybftRBUSErhqYiQzvEmuB"},
-  {symbol:"USDS",name:"USDS",mint:"USDSwr9ApdHk5bvJKMjzff41FfuX8bSxdKcR81vTwcA"},
+  {symbol:"JUP",name:"Jupiter",mint:"JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN",logo:"https://coin-images.coingecko.com/coins/images/34188/small/jup.png"},
+  {symbol:"PUMP",name:"Pump.fun",mint:"pumpCmXqMfrsAkQ5r49WcJnRayYRqmXz6ae8H7H9Dfn",logo:"https://coin-images.coingecko.com/coins/images/67164/small/pump.jpg"},
+  {symbol:"RAY",name:"Raydium",mint:"4k3Dyjzvzp8eMZWUXbBCjEvwSkkk59S5iCNLY3QrkX6R",logo:"https://coin-images.coingecko.com/coins/images/13928/small/PSigc4ie_400x400.jpg"},
+  {symbol:"ORCA",name:"Orca",mint:"orcaEKTdK7LKz57vaAYr9QeNsVEPfiu6QeMU1kektZE",logo:"https://coin-images.coingecko.com/coins/images/17547/small/Orca_Logo.png"},
+  {symbol:"JTO",name:"Jito",mint:"jtojtomepa8beP8AuQc6eXt5FriJwfFMwQx2v2f9mCL",logo:"https://coin-images.coingecko.com/coins/images/33228/small/jto.png"},
+  {symbol:"PYTH",name:"Pyth Network",mint:"HZ1JovNiVvGrGNiiYvEozEVgZ58xaU3RKwX8eACQBCt3",logo:"https://coin-images.coingecko.com/coins/images/31924/small/pyth.png"},
+  {symbol:"RENDER",name:"Render",mint:"rndrizKT3MK1iimdxRdWabcF7Zg7AR5T4nud4EkHBof",logo:"https://coin-images.coingecko.com/coins/images/11636/small/rndr.png"},
+  {symbol:"GRASS",name:"Grass",mint:"Grass7B4RdKfBCjTKgSqnXkqjwiGvQyFbuSCUJr3XXjs",logo:"https://coin-images.coingecko.com/coins/images/40094/small/Grass.jpg"},
+  {symbol:"BONK",name:"Bonk",mint:"DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263",logo:"https://coin-images.coingecko.com/coins/images/28600/small/bonk.jpg"},
+  {symbol:"WIF",name:"dogwifhat",mint:"EKpQGSJtjMFqKZ9KQanSqYXRcF8fBopzLHYxdM65zcjm",logo:"https://coin-images.coingecko.com/coins/images/33566/small/dogwifhat.jpg"},
+  {symbol:"POPCAT",name:"Popcat",mint:"7GCihgDB8fe6KNjn2MYtkzZcRjQy3t9GHdC8uHYmW2hr",logo:"https://coin-images.coingecko.com/coins/images/33760/small/image.jpg"},
+  {symbol:"PENGU",name:"Pudgy Penguins",mint:"2zMMhcVQEXDtdE6vsFS7S7D5oUodfJHE8vd1gnBouauv",logo:"https://coin-images.coingecko.com/coins/images/52622/small/PUDGY_PENGUINS_PENGU_PFP.png"},
+  {symbol:"TRUMP",name:"Official Trump",mint:"6p6xgHyF7AeE6TZkSmFsko444wqoP15icUSqi2jfGiPN",logo:"https://coin-images.coingecko.com/coins/images/53746/small/trump.png"},
+  {symbol:"WLFI",name:"World Liberty Financial",mint:"WLFinEv6ypjkczcS83FZqFpgFZYwQXutRbxGe7oC16g",logo:"https://coin-images.coingecko.com/coins/images/50767/small/wlfi.png"},
+  {symbol:"JitoSOL",name:"Jito Staked SOL",mint:"J1toso1uCk3RLmjorhTtrVwY9HJ7X8V9yYac6Y7kGCPn",logo:"https://coin-images.coingecko.com/coins/images/28046/small/JitoSOL_Token_Logo_Green.png"},
+  {symbol:"JupSOL",name:"Jupiter Staked SOL",mint:"jupSoLaHXQiZZTSfEWMTRRgpnyFm8f6sZdosWBjx93v",logo:"https://coin-images.coingecko.com/coins/images/37482/small/jupsol.png"},
+  {symbol:"JLP",name:"Jupiter Perps LP",mint:"27G8MtK7VtTcCHkpASjSDdkWWYfoqT6ggEuKidVJidD4",logo:"https://coin-images.coingecko.com/coins/images/33094/small/jlp.png"},
+  {symbol:"cbBTC",name:"Coinbase BTC",mint:"cbbtcf3aa214zXHbiAZQwf4122FBYbraNdFqgw4iMij",logo:"https://coin-images.coingecko.com/coins/images/40143/small/cbbtc.webp"},
+  {symbol:"WBTC",name:"Wrapped BTC",mint:"5XZw2LKTyrfvfiskJ78AMpackRjPcyCif1WhUsPDuVqQ",logo:"https://coin-images.coingecko.com/coins/images/7598/small/WBTCLOGO.png"},
+  {symbol:"PYUSD",name:"PayPal USD",mint:"2b1kV6DkPAnxd5ixfnxCpjxmKwqjjaYmCZfHsFu24GXo",logo:"https://coin-images.coingecko.com/coins/images/31212/small/PYUSD_Token_Logo_2x.png"},
+  {symbol:"USDG",name:"Global Dollar",mint:"2u1tszSeqZ3qBWF3uNGPFc8TzMk2tdiwknnRMWGWjGWH",logo:"https://coin-images.coingecko.com/coins/images/51281/small/GDN_USDG_Token_200x200.png"},
+  {symbol:"USD1",name:"USD1",mint:"USD1ttGY1N17NEEHLmELoaybftRBUSErhqYiQzvEmuB",logo:"https://coin-images.coingecko.com/coins/images/54977/small/USD1_1000x1000_transparent.png"},
+  {symbol:"USDS",name:"USDS",mint:"USDSwr9ApdHk5bvJKMjzff41FfuX8bSxdKcR81vTwcA",logo:"https://coin-images.coingecko.com/coins/images/39926/small/usds.webp"},
 ];
 function solOpenTokenPicker(){
   if(view==="flow")solPickerLeg="token";
@@ -6051,6 +6057,11 @@ async function solLoadPopular(){
    ماند) — حداکثر ۱۰ mint در هر تماس؛ کِشِ سراسری یعنی گزینشگرِ بعدی رایگان
    است. شکستِ یک تکه فقط همان تکه را بی‌لوگو می‌گذارد، نه کلِ تابع را. */
 let solLogoCache={};
+/* ۲۰ اکتبر: لوگوی ثابتِ پیش‌فرض‌های گزینشگر — بی‌شبکه و پیش از GT/Jupiter. */
+function solPresetLogo(mint){
+  const t=(typeof SOL_APP_TOKEN_LIST!=="undefined")&&SOL_APP_TOKEN_LIST.find(x=>x.mint===mint);
+  return t&&t.logo&&okLogo(t.logo)?t.logo:null;
+}
 const solLogoFailAt={};
 // size/conc پیش‌فرض (۱۰ و ۱) رفتارِ قدیمی را نگه می‌دارد؛ پرتفوی ۳۰ تایی و حداکثر ۳ درخواستِ هم‌زمان می‌خواهد
 async function fetchSolMetaMulti(mints,size=10,conc=1,failed=null){
@@ -6281,6 +6292,7 @@ function solRouteToken(mint,fallback){
 async function solPrefetchLogos(){
   // ۱۳ اکتبر: مینتی که تکه‌اش شکست خورد «بی‌لوگو» ثبت نمی‌شود؛ پس از ۳۰ ثانیه دوباره پرسیده می‌شود
   const now=Date.now();
+  for(const t of SOL_APP_TOKEN_LIST){const u=solPresetLogo(t.mint);if(u&&!solLogoCache[t.mint])solLogoCache[t.mint]=u;}
   const need=[...SOL_APP_TOKEN_LIST.map(t=>t.mint),...((solPopularCache||[]).map(t=>t.mint))]
     .filter(m=>!(m in solLogoCache)&&!(solLogoFailAt[m]&&now-solLogoFailAt[m]<SOL_RETRY_MS));
   if(!need.length)return;
@@ -8782,7 +8794,7 @@ function paintSolAvatar(meta){
   el.innerHTML="";
   const sym=meta&&meta.symbol;
   paintFallbackAvatar(el,solMintCur,sym);
-  const url=meta&&meta.image_url;
+  const url=(meta&&meta.image_url)||solPresetLogo(solMintCur);
   if(!url||!okLogo(url))return;
   const img=new Image();
   img.alt="";img.loading="lazy";
@@ -8955,7 +8967,7 @@ async function openSolanaTokenPage(mint){
   solVerdictV=verdict.v;solVerdictWhy=verdict.why;
   if(meta&&Number.isInteger(meta.decimals))solTokenDecimals=meta.decimals;
   solTokenSymbol=(meta&&meta.symbol)||(preset&&preset.symbol)||"Unknown";
-  solTokenLogoUrl=(meta&&meta.image_url)||null;
+  solTokenLogoUrl=(meta&&meta.image_url)||solPresetLogo(mint)||null;
   solPaintLegs();
   solSwapApplyGate();
   solWalletStandardInit();
@@ -9524,7 +9536,15 @@ function setSolPayFraction(num,den){
     if(solBalSol==null)return;
     raw=BigInt(Math.round(solBalSol*1e9))-BigInt(Math.round(solReserveSol()*1e9));
   }else raw=solAmountRaw(v.toFixed(d),d);
-  if(raw==null||raw<=0n){$("solAmt").value="";solOnAmtInput();return;}
+  if(raw==null||raw<=0n){
+    $("solAmt").value="";solOnAmtInput();
+    // ۲۰ اکتبر: SOLِ ورودی کمتر از رزروِ کارمزد/رنت بود و دکمه بی‌صدا صفر می‌نوشت — حالا دلیل را می‌گوییم.
+    if(solInputMint()===SOL_MINT_ADDR&&solBalSol!=null){
+      solFracShort="Not enough SOL — you need about "+solReserveSol().toFixed(5)+" SOL for network fees and account rent.";
+      solUpdateSwapBtn();
+    }
+    return;
+  }
   const out=raw*BigInt(num)/BigInt(den);
   let t=out.toString().padStart(d+1,"0");
   if(d>0)t=t.slice(0,t.length-d)+"."+t.slice(t.length-d);
@@ -9533,8 +9553,9 @@ function setSolPayFraction(num,den){
   solOnAmtInput();
 }
 // F — همان amtClear بالا، برای solAmt: × فقط وقتی فیلد مقدار دارد.
+var solFracShort=null;   // var نه let: solUpdateSwapBtn ممکن است پیش از این خط در بوت صدا زده شود
 function solOnAmtInput(){
-  solMode="exactIn";
+  solMode="exactIn";solFracShort=null;
   const clr=$("solAmtClear");
   if(clr)clr.hidden=!$("solAmt").value;
   solScheduleQuote();
@@ -10056,7 +10077,7 @@ function solUpdateSwapBtn(){
   }
   if(!solAccount){btn.disabled=solConnectionBusy;btn.textContent=solConnectionBusy?"Approve in wallet…":"Connect wallet";return;}
 
-  if(!solQuote){btn.disabled=true;btn.textContent="Enter an amount";return;}
+  if(!solQuote){btn.disabled=true;btn.textContent=(solFracShort&&!$("solAmt").value)?solFracShort:"Enter an amount";return;}
   // A — بودجه‌ی SOL، پیش از هرچیزِ دیگر: کیف‌پول اصلاً صدا زده نمی‌شود اگر
   // این کاربر آشکارا کارمزد/رنتِ همین معامله را ندارد.
   const spend=solRequiredInput();

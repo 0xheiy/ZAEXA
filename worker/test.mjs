@@ -14257,6 +14257,29 @@ function stripAllowedWording(t) {
     body = await res.json();
     ok(res.status === 502 && body.error === "jup:swap:500" && seen.n === 1,
       "[sol swap 429 retry] a 500 must never be retried (one upstream call, jup:swap:500), got " + res.status + " " + JSON.stringify(body) + " calls=" + seen.n);
+    // ۲۰ اکتبر — useSharedAccounts: همیشه true در اولین تماس؛ ۴۰۰ ← ۲۰۰: یک تماسِ دوم بی‌این فیلد (بقیه‌ی بدنه یکسان)
+    seen = mk([200]);
+    res = await call("/sol/swap", { method: "POST", body: JSON.stringify(payload) }, { ASSETS, JUP_KEY: "k" });
+    ok(res.status === 200 && seen.n === 1 && JSON.parse(seen.bodies[0]).useSharedAccounts === true,
+      "[sol swap shared] the first build must ask for useSharedAccounts:true, calls=" + seen.n + " body=" + seen.bodies[0]);
+    seen = mk([400, 200]);
+    res = await call("/sol/swap", { method: "POST", body: JSON.stringify(payload) }, { ASSETS, JUP_KEY: "k" });
+    body = await res.json();
+    {
+      const b0 = JSON.parse(seen.bodies[0] || "{}"), b1 = JSON.parse(seen.bodies[1] || "{}");
+      const rest0 = { ...b0 }; delete rest0.useSharedAccounts;
+      ok(res.status === 200 && body.swapTransaction === "AQID" && seen.n === 2 && b0.useSharedAccounts === true &&
+         !("useSharedAccounts" in b1) && JSON.stringify(rest0) === JSON.stringify(b1),
+        "[sol swap shared] a 4xx with shared accounts must rebuild once without the field and otherwise the same body, got "
+        + res.status + " calls=" + seen.n + " bodies=" + JSON.stringify(seen.bodies));
+    }
+    // ۴۰۰ ← ۴۰۰: دقیقاً دو تماس و همان jup:swap:400
+    seen = mk([400]);
+    res = await call("/sol/swap", { method: "POST", body: JSON.stringify(payload) }, { ASSETS, JUP_KEY: "k" });
+    body = await res.json();
+    ok(res.status === 502 && body.error === "jup:swap:400" && seen.n === 2,
+      "[sol swap shared] 400 then 400 must be exactly two upstream calls and jup:swap:400, got " + res.status + " " + JSON.stringify(body) + " calls=" + seen.n);
+    console.log("[sol swap shared] /sol/swap asks Jupiter for shared accounts (intermediates stay with Jupiter, so intent.js accepts multi-hop routes); a 4xx rebuilds once without the field, a 500 still never retries");
     globalThis.fetch = savedFetch;
     console.log("[sol swap 429 retry] /sol/swap: 429 then 200 = one retry (same payload, >= 1 s apart) and success; 429 then 429 = exactly two upstream calls and jup:swap:429; 500 = one call, no retry");
   }
