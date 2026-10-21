@@ -10986,6 +10986,8 @@ async def main():
         assert lg_ok, "tokenLogo must return a list token's static logo without asking the network"
         sol_lg = await pg.evaluate("() => SOL_APP_TOKEN_LIST.filter(t => !(typeof t.logo === 'string' && /^https:\\/\\/coin-images\\.coingecko\\.com\\//.test(t.logo))).map(t => t.symbol)")
         assert sol_lg == [], "every Solana picker preset must carry a static CoinGecko logo: missing %s" % sol_lg
+        ts_disp = await pg.evaluate("() => { const e = document.getElementById('solTokStats'); const h = e.hidden; e.hidden = true; const d = getComputedStyle(e).display; e.hidden = h; return d; }")
+        assert ts_disp == "none", "[static logos] a hidden #solTokStats must not display (stale stats of the previous token): %s" % ts_disp
         print("[static logos] %d Base list tokens and every Solana preset carry a fixed https CoinGecko-CDN logo; tokenLogo returns it with no network call" % lg_n)
         print("[token list] %s" % ", ".join(f"{t['s']}/{t['d']}" for t in toks))
         seen = {}

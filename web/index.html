@@ -1195,6 +1195,7 @@ footer .fine{max-width:78ch;margin:46px 0 0;font-size:11.5px;color:var(--tx3);li
 .clr:hover{color:var(--tx);background:var(--line)}
 .clr[hidden]{display:none}
 /* آمار توکن خروجی */
+.tstats[hidden]{display:none}   /* ۲۰ اکتبر: display:grid بر hidden می‌برد — آمارِ توکنِ قبلی زیرِ توکنِ تازه می‌ماند */
 .tstats{display:grid;grid-template-columns:repeat(4,1fr);gap:1px;background:var(--line);
   border-top:1px solid var(--line);margin-top:14px}
 .tstat{background:var(--card);padding:11px 14px}
@@ -5734,6 +5735,7 @@ async function solAppLoadToken(mint){
       if(solTokenSymbol==="Unknown"&&j.symbol){solTokenSymbol=j.symbol;$("appSolExitSym").textContent=j.symbol;if($("solPairName"))$("solPairName").textContent=j.symbol+" / USD";}
       if(!solTokenLogoUrl&&j.logo)solTokenLogoUrl=j.logo;
       solPaintLegs();paintSolAvatar({symbol:solTokenSymbol,image_url:solTokenLogoUrl});
+      if(!meta&&j.stats)renderSolStats(j.stats,"solTokStats");   // ۲۰ اکتبر: آمارِ بازار از Jupiter وقتی GT نیست
     });
   }
   $("appSolExitSym").textContent=solTokenSymbol;
@@ -6152,7 +6154,11 @@ async function solJupMeta(mint){
     const it=arr.find(x=>x&&x.id===mint);
     if(!it)return null;
     const sym=typeof it.symbol==="string"&&it.symbol.length<=24?it.symbol:null;
-    return {symbol:sym,logo:solJupIcon(it.icon)};
+    const n=v=>Number.isFinite(Number(v))&&Number(v)>=0?Number(v):null;
+    const s24=it.stats24h||{},vol=n(s24.buyVolume)!=null&&n(s24.sellVolume)!=null?n(s24.buyVolume)+n(s24.sellVolume):null;
+    // همان شکلِ attributesِ GT تا renderSolStats بی‌تغییر کار کند (فقط وقتی GT جواب نداد)
+    const stats={market_cap_usd:n(it.mcap),fdv_usd:n(it.fdv),volume_usd:{h24:vol},total_reserve_in_usd:n(it.liquidity)};
+    return {symbol:sym,logo:solJupIcon(it.icon),stats};
   }catch{return null;}
 }
 const solLogoFailAt={};
@@ -10483,7 +10489,8 @@ function solFinishSubmitted(sigB58,lastValid){
   ev("swap:sent","","solana");
   solSimArmedKey=null;solSimFailedKey=null;solImpactArmedKey=null;solFailedBuild=null;
   const doneInfo=solSnapshotDone(),sentAt=Date.now();
-  solSetNotice(note("ok","<b>Submitted.</b> "+
+  // ۲۰ اکتبر: «Submitted.» با «انجام شد» اشتباه گرفته می‌شد — روشن می‌گوییم هنوز منتظرِ تأییدِ شبکه‌ایم
+  solSetNotice(note("ok","<b>Submitted.</b> Waiting for network confirmation (up to 3 minutes) — stay on this page. "+
     `<a href="https://solscan.io/tx/${esc(sigB58)}" target="_blank" rel="noopener">View on Solscan</a>`));
   $("solAmt").value="";$("solOutRead").value="";solMode="exactIn";solQuote=null;solRenderReadout();
   solPollStatus(sigB58,doneInfo,sentAt,solIntentSeq,lastValid);
