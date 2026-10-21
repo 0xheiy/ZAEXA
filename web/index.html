@@ -987,6 +987,85 @@ section.card.isDone #actBtn,section.card.isDone #solStatusSlot,section.card.isDo
   font-size:11.5px;font-weight:620;letter-spacing:.02em}
 .flowkv{display:flex;justify-content:space-between;padding:4px 20px;font-size:13px}
 .flowkv .k{color:var(--tx3)}
+
+/* ۲۱ اکتبر — تابلوی «Where money is flowing»، کارت «Early buyers» و چیپِ صادرکننده. همه‌ی رنگ‌ها از متغیرهای موجود؛ بدون glow. */
+.fbHead{display:flex;flex-wrap:wrap;align-items:flex-start;justify-content:space-between;gap:10px 14px;padding:16px 20px 8px}
+.fbTtl{font-size:15.5px;font-weight:660}
+.fbSub{font-size:12.5px;color:var(--tx3);margin-top:2px}
+.fbCtl{display:flex;flex-wrap:wrap;align-items:center;gap:8px}
+.fbCtl .tfs{margin-left:0;padding:3px}
+.fbTog{display:inline-flex;align-items:center;gap:8px;min-height:32px;padding:4px 12px;border-radius:999px;background:var(--card2);color:var(--tx2);font-size:12.5px;text-align:left}
+.fbTog i{width:14px;height:14px;border-radius:5px;border:1.5px solid var(--tx3);flex-shrink:0;box-sizing:border-box}
+.fbTog[aria-pressed="true"]{color:var(--tx);font-weight:620}
+.fbTog[aria-pressed="true"] i{background:var(--acc);border-color:var(--acc)}
+.fbTbl{width:100%;border-collapse:collapse;font-size:13px}
+.fbTbl th{font-size:11.5px;font-weight:600;color:var(--tx3);text-align:right;padding:8px;border-bottom:1px solid var(--line);white-space:nowrap}
+.fbTbl td{padding:9px 8px;text-align:right;border-top:1px solid var(--line);vertical-align:middle}
+.fbTbl tbody tr:first-child td{border-top:0}
+.fbTbl th:first-child,.fbTbl td:first-child{text-align:left;padding-left:20px}
+.fbTbl th:last-child,.fbTbl td:last-child{padding-right:20px}
+.fbRow{cursor:pointer}
+.fbRow:hover td{background:var(--card2)}
+.fbRow:focus-visible{outline:2px solid var(--acc);outline-offset:-2px}
+.fbTok{display:flex;align-items:center;gap:10px;min-width:0}
+.fbAv{width:28px;height:28px;border-radius:50%;display:grid;place-items:center;flex-shrink:0}
+.fbTkTx{display:flex;flex-direction:column;min-width:0;line-height:1.25}
+.fbTkTx b{font-weight:660;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:14ch}
+.fbAge{font-size:11.5px;color:var(--tx3)}
+.fbSh{white-space:nowrap}
+.fbBar{display:inline-flex;width:56px;height:4px;border-radius:2px;overflow:hidden;vertical-align:middle;margin-right:8px;background:var(--line)}
+.fbBar i{display:block;height:100%}
+.fbBar .p{background:var(--pos)}
+.fbBar .n{background:var(--neg)}
+.fbChip{display:inline-block;padding:3px 9px;border-radius:999px;font-size:11.5px;font-weight:600;white-space:nowrap;background:var(--card2);color:var(--tx2)}
+.fbChip.p{color:var(--pos);background:color-mix(in srgb,var(--pos) 14%,transparent)}
+.fbChip.n{color:var(--neg);background:color-mix(in srgb,var(--neg) 14%,transparent)}
+.fbMsg{padding:30px 20px;text-align:center;color:var(--tx3);font-size:13px;line-height:1.6}
+.fbMsg .chip{margin-top:14px}
+.fbSkA{width:28px;height:28px;border-radius:50%;flex-shrink:0}
+.fbSkB{height:12px;flex:1}
+.fbSkC{height:12px;width:22%}
+.fbBackRow{display:block;padding:10px 20px 0}
+.fbBackRow[hidden],#flowEarly[hidden]{display:none}
+.fbBack{font-size:12.5px;color:var(--tx3);padding:4px 0}
+.fbBack:hover{color:var(--tx)}
+#view-flow.fbOn #flowTokBtn,#view-flow.fbOn #flowTfs{display:none}
+#view-flow.fbOn > p{display:none}   /* یادداشتِ «استخرِ همین توکن» مالِ جریانِ یک توکن است، نه تابلو */
+.ebCard{border-top:1px solid var(--line)}
+.ebIn{padding:14px 20px 6px}
+.ebTtl{font-size:14px;font-weight:660}
+.ebLine{font-size:12.5px;color:var(--tx2);margin:2px 0 10px}
+.ebBar{display:flex;gap:2px;height:10px;border-radius:5px;overflow:hidden;background:var(--line)}
+.ebBar i{display:block;height:100%}
+.ebBar .n{background:var(--neg)}
+.ebBar .w{background:var(--warn)}
+.ebBar .p{background:var(--pos)}
+.ebLeg{margin:8px 0 2px;font-size:12px;color:var(--tx2);line-height:1.6}
+.ebKey i{display:inline-block;width:8px;height:8px;border-radius:3px;margin-right:5px}
+.ebKey .n{background:var(--neg)}
+.ebKey .w{background:var(--warn)}
+.ebKey .p{background:var(--pos)}
+.ebPct{font-size:13px;margin-top:6px}
+.ebUnk{font-size:12.8px;line-height:1.6;color:var(--tx2)}
+.ebSkB{height:10px;border-radius:5px}
+.issChip{display:inline-block;padding:4px 11px;border-radius:999px;font-size:13px;font-weight:640;color:var(--acc);background:color-mix(in srgb,var(--acc) 14%,transparent)}
+.issNote{margin-top:6px;line-height:1.5;max-width:60ch}
+@media(max-width:480px){
+  .fbTbl .fbBS,.fbTbl .fbVol{display:none}
+  .fbHead{padding:14px 14px 6px}
+  .fbTbl th,.fbTbl td{padding:9px 5px}
+  .fbTbl th:first-child,.fbTbl td:first-child{padding-left:14px}
+  .fbTbl th:last-child,.fbTbl td:last-child{padding-right:14px}
+  .fbTbl{table-layout:fixed}
+  .fbTbl th{white-space:normal;line-height:1.25;vertical-align:bottom}
+  .fbTbl th:nth-child(2){width:46px}
+  .fbTbl th:nth-child(4){width:56px}
+  .fbTbl th:nth-child(6){width:88px}
+  .fbChip{white-space:normal;text-align:center;line-height:1.25;font-size:11px;padding:3px 7px;border-radius:10px;max-width:100%}
+  .fbBar{display:flex;width:100%;margin:0 0 3px}
+  .fbBackRow{padding-left:14px;padding-right:14px}
+  .ebIn{padding-left:14px;padding-right:14px}
+}
 .trade{display:flex;align-items:center;gap:10px;padding:8px 20px;font-size:12.5px;border-top:1px solid var(--line)}
 .trade .amt2{font-weight:620}
 .trade .ago{margin-left:auto;color:var(--tx3);font-size:11.5px}
@@ -2016,12 +2095,14 @@ try{(function(){
         <button data-w="h6">6H</button>
         <button data-w="h24">24H</button>
       </div></header>
+    <div class="fbBackRow" id="flowBackRow" hidden><button class="fbBack" id="flowBack" type="button">← Back to all tokens</button></div>
     <div id="flowBody"><div class="empty intro">
       <span class="eTtl">Pick a token to see who is buying</span>
       <p>Swap events are read from the deepest pool on Base — what was bought,
          what was sold, and the largest recent buyers.</p>
       <button class="chip solid" data-act="pickFlowToken">Choose a token</button>
     </div></div>
+    <div id="flowEarly" hidden></div>
   </section>
   <p style="padding:0 6px;color:var(--tx3);font-size:12px;margin:0">
     Read live from the deepest pool for this token, in your browser — no server, nothing stored.
@@ -4981,6 +5062,22 @@ function verdictOf(rep){
   if(h>=1||s>=15)return{txt:"Acceptable with care",tone:"warn"};
   return{txt:"No obvious red flags",tone:"pos"};
 }
+/* ۲۱ اکتبر — توکن‌های سهامِ فهرست‌شده (STK روی Base، STK_SOL روی سولانا) را صادرکننده می‌تواند فریز کند و پس بگیرد؛
+   این در طراحیِ آن‌هاست، نه نشانه‌ی کلاهبرداری. فقط «نمایش» عوض می‌شود: riskScore و یافته‌ها دست‌نخورده‌اند.
+   STK آدرسِ توکن ندارد (فقط pool/feed)، پس آدرس از BASE_TOKENS و با نماد پیدا می‌شود. mintِ سولانا عیناً (بدون lowercase). */
+const STOCK_VERDICT={txt:"Issuer-controlled · regulated",tone:"info"};
+const STOCK_NOTE="The issuer can freeze accounts and recover tokens. This is expected for regulated stock tokens and is shown below for transparency.";
+function isStockRep(rep){
+  try{
+    if(!rep)return false;
+    if(rep.solana)return typeof rep.mint==="string"&&STK_SOL.some(s=>s.mint===rep.mint);
+    if(rep.native||typeof rep.address!=="string")return false;
+    const a=rep.address.toLowerCase();
+    return STK.some(s=>BASE_TOKENS.some(t=>t.symbol===s.sym&&t.address.toLowerCase()===a));
+  }catch{return false;}
+}
+const stockHead=(unknown,cls)=>`<div class="${cls}"><div><span class="issChip">${esc(STOCK_VERDICT.txt)}</span>
+      <div class="rs issNote">${esc(STOCK_NOTE)}</div>${unknown?`<div class="rs">${unknown} not checked</div>`:""}</div></div>`;
 // ⚠️ دو زیرسیستم، دو منبع شواهد، هیچ‌کس آن‌ها را آشتی نمی‌دهد: checkTradability
 //    فقط کوت می‌گیرد، runExitCheck واقعاً خرید+فروش را در یک تراکنش شبیه‌سازی
 //    می‌کند روی زنجیره‌ی زنده. یک شبیه‌سازی که واقعاً اجرا شده بر یک کوت برتری
@@ -5699,6 +5796,7 @@ function toggleSrcMenu(e){
    می‌کند، فقط مقصدِ رندرش عوض می‌شود (appSolExitBox به‌جای tk-exitBox). */
 async function solAppLoadToken(mint){
   mint=(mint||"").trim();
+  if(flowPicking){flowBoard=false;flowPicking=false;}
   if(!SOL_MINT_RE.test(mint)){
     solSetNotice(note("err","<b>Enter a valid Solana token address.</b>"));
     return;
@@ -7137,7 +7235,7 @@ async function renderSolFlow(){
     // ۵ اکتبر — تا وقتی توکنِ پیش‌فرض (USDC) هنوز در حال بارگذاری است معرفیِ «Choose a token» نباید
     // لحظه‌ای پدیدار شود؛ معرفی فقط اگر بارگذاریِ پیش‌فرض شکست خورده باشد.
     if(!tokenPage&&solAppDefaultState!=="failed"){body.innerHTML=SPIN;return;}
-    body.innerHTML='<div class="empty intro"><span class="eTtl">Choose a Solana token</span><p>See recent buys, sells and the largest observed trades.</p><button class="chip solid" data-act="pickFlowToken">Choose a token</button></div>';return;
+    return fbRender();   // پیش‌تر معرفیِ «Choose a Solana token»؛ حالا همان تابلو
   }
   /* ⚠️ عوض‌کردنِ فقط پنجره نباید دوباره استخر/معاملات را بگیرد: آخرین
      {mint,pool,trades,fetchedAt} ۶۰ ثانیه نگه داشته می‌شود و رندر از روی آن
@@ -7228,6 +7326,7 @@ async function renderSolFlow(){
     }
     h+=`<div class="fnote">Volume, buys and sells are GeckoTerminal's totals for this pool over the selected window. Largest buys come from its recent-trade sample. Addresses are the reported transaction senders, which can include routers. This is <b>flow, not a forecast</b>.</div>`;
     body.innerHTML=h;
+    ebStartSol(mint,cache);   // همان معاملاتِ همین رندر؛ درخواستِ دوم نیست
   }catch{
     if(!current())return;
     body.innerHTML='<div class="empty">Solana trade history could not be loaded. Activity is unknown, not zero. Quotes and swaps are unaffected.</div>';
@@ -7241,7 +7340,7 @@ function solRunView(name,render){
 function refreshSolanaViews(){
   if(activeChain!=="solana")return;
   if(view==="folio"&&!solViewJobs.folio)renderFolio();
-  if(view==="flow"&&!solViewJobs.flow){paintFlowToken();renderFlow();}
+  if(view==="flow"&&!solViewJobs.flow&&!fbOn){paintFlowToken();renderFlow();}   // تابلو تازه‌سازیِ ۶۰ثانیه‌ی خودش را دارد
 }
 
 async function renderFolio(){
@@ -7368,10 +7467,13 @@ const WINDOWS={m5:{label:"5 minutes",blocks:150},m15:{label:"15 minutes",blocks:
   h24:{label:"24 hours",blocks:43200}};
 
 async function renderFlow(){
-  if(activeChain==="solana")return solRunView("flow",renderSolFlow);
+  if(flowBoard)return fbRender();
+  flowChrome(false);
+  if(activeChain==="solana"){ebOff();return solRunView("flow",renderSolFlow);}
   const seq=++flowSeq,body=$("flowBody");
   const t=routable(tokenOut);
-  if(!t){body.innerHTML=EMPTY_FLOW;return;}
+  if(!t){ebOff();return fbRender();}   // پیش‌تر EMPTY_FLOW؛ حالا همان تابلو
+  ebStartBase(t);
   body.innerHTML='<div class="empty"><span class="spin"></span>Reading swaps from the chain…</div>';
   try{
     const pool=await deepestV3Pool(t);
@@ -7491,6 +7593,348 @@ async function renderFlow(){
   }
 }
 
+/* =====================================================================
+   ۲۱ اکتبر — تابلوی «Where money is flowing» (حالت پیش‌فرضِ نمای Flow) و کارت «Early buyers»
+   ---------------------------------------------------------------------
+   • فهرست از همان /pairs.json (۳۰ ردیفِ تازه‌ترین استخر)، سپس یک tokens/multi و یک pools/multi.
+   • «نامعلوم هرگز نه نیست»: شکستِ هر مرحله یک حالتِ صریحِ نامعلوم می‌دهد، نه ۰ و نه جدولِ خالی.
+   • flowBoard فقط پرچمِ خودِ نمای Flow است؛ tokenOut و فرمِ سواپ را عوض نمی‌کند.
+   ===================================================================== */
+const FB_LS="zaexa.flowboard.v1",FB_ROWS=15,FB_FETCH=30,FB_REFRESH=60000,FB_FRESH=20000,EB_TTL=60000,EB_MAX=20;
+let flowBoard=true,flowPicking=false,fbOn=false,fbData=null,fbShown=[],fbLast="",fbErr="",fbOpening=false,ebSeq=0,ebCache=null;
+const fbPref=(()=>{
+  const o={only:true,w:"h1"};
+  try{const j=JSON.parse(localStorage.getItem(FB_LS)||"null");
+    if(j&&typeof j==="object"){if(typeof j.only==="boolean")o.only=j.only;if(j.w==="h1"||j.w==="h6")o.w=j.w;}}catch{}
+  return o;
+})();
+function fbSavePref(){try{localStorage.setItem(FB_LS,JSON.stringify({only:fbPref.only,w:fbPref.w}));}catch{}}
+// عددِ نامعتبر/غایب null می‌شود («—»)، هرگز ۰؛ رشته‌ی خالی هم عدد نیست (همان سبکِ renderSolFlow).
+const fbNum=v=>{if(v==null||typeof v==="boolean"||(typeof v==="string"&&v.trim()===""))return null;const n=Number(v);return Number.isFinite(n)?n:null;};
+const fbCnt=v=>{const n=fbNum(v);return n!==null&&n>=0?n:null;};
+const fbN=v=>v===null?"—":Math.round(v).toLocaleString("en-US");
+const fbUsd=v=>v===null?"—":v===0?"$0":fmtBig(v);
+function flowChrome(on){
+  fbOn=on;
+  if(!on)fbLast="";   // بدنه دیگر تابلو نیست؛ رندرِ بعدیِ تابلو نباید با «بدون تغییر» رد شود
+  const v=$("view-flow"),r=$("flowBackRow");
+  if(v)v.classList.toggle("fbOn",on);
+  if(r)r.hidden=on;
+  if(on)ebOff();
+}
+function fbAge(created,now){const h=(now-created)/36e5;return h<1?"<1h":h<24?Math.floor(h)+"h":Math.floor(h/24)+"d";}
+function fbChecked(iso,now){
+  const t=typeof iso==="string"?Date.parse(iso):NaN;
+  if(!Number.isFinite(t))return "Check time unknown";
+  const m=Math.max(0,Math.floor((now-t)/60000));
+  return "Checked "+(m<60?m+"m":m<1440?Math.floor(m/60)+"h":Math.floor(m/1440)+"d")+" ago";
+}
+function fbAvatar(el,addr,symbol,url){
+  paintFallbackAvatar(el,addr,symbol);
+  if(typeof url!=="string"||url===""||!okLogo(url))return;
+  const img=new Image();
+  img.alt="";img.loading="lazy";
+  img.onload=()=>{img.classList.add("on");};
+  img.onerror=()=>{img.remove();};
+  img.src=url;
+  el.appendChild(img);
+}
+async function fbLoad(chain){
+  const out={chain,t:Date.now(),pairsOk:false,gtOk:true,items:[]};
+  let j=null;
+  if(/^https?:$/.test(location.protocol)){
+    try{const r=await fetch("/pairs.json?chain="+chain,{cache:"default"});j=r.ok?await r.json():null;}catch{j=null;}
+  }
+  if(!j||j.store!==true||!Array.isArray(j.rows))return out;
+  out.pairsOk=true;
+  const sol=chain==="solana",net=sol?"solana":CHAIN.gtNetwork;
+  const addrRe=sol?SOL_MINT_RE:/^0x[0-9a-fA-F]{40}$/;
+  const key=a=>sol?a:a.toLowerCase();
+  const seen=new Set(),rows=[];
+  for(const row of j.rows){
+    if(!row||typeof row!=="object"||(row.chain!=null&&row.chain!==chain))continue;
+    if(typeof row.address!=="string"||!addrRe.test(row.address)||seen.has(key(row.address)))continue;
+    const created=typeof row.poolCreatedAt==="string"?Date.parse(row.poolCreatedAt):NaN;
+    if(!Number.isFinite(created))continue;
+    seen.add(key(row.address));
+    rows.push({addr:row.address,symbol:liveStripName(row,chain),v:row.v==="sell"||row.v==="nosell"?row.v:null,
+      checkedAt:row.checkedAt,created,img:null,pool:null,act:null});
+  }
+  rows.sort((a,b)=>b.created-a.created);
+  out.items=rows.slice(0,FB_FETCH);
+  if(!out.items.length)return out;
+  const byAddr=new Map(out.items.map(it=>[key(it.addr),it]));
+  const poolsOf=new Map();
+  try{
+    const tj=await gtJson(`${GT}/networks/${net}/tokens/multi/${out.items.map(i=>i.addr).join(",")}?include=top_pools`);
+    if(!tj||!Array.isArray(tj.data))throw new Error("tokens/multi unavailable");
+    for(const row of tj.data){
+      const a=row&&row.attributes||{};
+      const it=typeof a.address==="string"?byAddr.get(key(a.address)):null;
+      if(!it)continue;
+      if(typeof a.image_url==="string"&&okLogo(a.image_url)&&a.image_url!=="")it.img=a.image_url;
+      const tp=row.relationships&&row.relationships.top_pools&&row.relationships.top_pools.data;
+      const id=tp&&tp[0]&&tp[0].id;
+      if(typeof id==="string"&&id.startsWith(net+"_")){it.pool=key(id.slice(net.length+1));poolsOf.set(it.pool,true);}
+    }
+  }catch{out.gtOk=false;return out;}
+  if(poolsOf.size){
+    try{
+      const pj=await gtJson(`${GT}/networks/${net}/pools/multi/${[...poolsOf.keys()].join(",")}`);
+      if(!pj||!Array.isArray(pj.data))throw new Error("pools/multi unavailable");
+      const byPool=new Map();
+      for(const row of pj.data){
+        const a=row&&row.attributes||{};
+        const id=typeof row.id==="string"&&row.id.startsWith(net+"_")?row.id.slice(net.length+1):a.address;
+        if(typeof id==="string")byPool.set(key(id),a);
+      }
+      for(const it of out.items){
+        const a=it.pool?byPool.get(it.pool):null;
+        if(!a)continue;
+        it.act={};
+        for(const w of ["h1","h6"]){
+          const tx=a.transactions&&a.transactions[w];
+          it.act[w]={buyers:fbCnt(tx&&tx.buyers),sellers:fbCnt(tx&&tx.sellers),buys:fbCnt(tx&&tx.buys),sells:fbCnt(tx&&tx.sells),
+            vol:fbCnt(a.volume_usd&&a.volume_usd[w])};
+        }
+      }
+    }catch{out.gtOk=false;}
+  }
+  return out;
+}
+function fbRows(d,w){
+  let list=d.items.map(it=>{
+    const a=it.act&&it.act[w]||null;
+    const net=a&&a.buyers!==null&&a.sellers!==null?a.buyers-a.sellers:null;
+    const tot=a&&a.buys!==null&&a.sells!==null?a.buys+a.sells:null;
+    return {it,a,net,share:tot>0?a.buys/tot:null,vol:a?a.vol:null};
+  });
+  if(fbPref.only)list=list.filter(r=>r.it.v==="sell");
+  // کلیدِ نامعلوم همیشه آخر؛ اول خریدارِ خالص، بعد حجم، بعد تازه‌تر
+  const cmp=(x,y,k)=>{
+    if((x[k]===null)!==(y[k]===null))return x[k]===null?1:-1;
+    return x[k]===null||x[k]===y[k]?0:y[k]-x[k];
+  };
+  list.sort((x,y)=>cmp(x,y,"net")||cmp(x,y,"vol")||y.it.created-x.it.created);
+  return list.slice(0,FB_ROWS);
+}
+function fbHead(d){
+  const w=fbPref.w,name=(d?d.chain:activeChain)==="solana"?"Solana":"Base";
+  return `<div class="fbHead"><div><div class="fbTtl">Where money is flowing</div>
+    <div class="fbSub">New ${name} pairs · ${w==="h1"?"last hour":"last 6 hours"} · by unique wallets</div></div>
+    <div class="fbCtl"><div class="tfs" role="group" aria-label="Time window">${["h1","h6"].map(k=>`<button type="button" data-fbw="${k}" class="${w===k?"on":""}">${k==="h1"?"1h":"6h"}</button>`).join("")}</div>
+    <button type="button" class="fbTog" data-fbtog aria-pressed="${fbPref.only?"true":"false"}"><i></i>Only tokens with a sell route</button></div></div>`;
+}
+function fbSkeleton(){
+  const row=`<div class="skRow"><span class="sk fbSkA"></span><span class="sk fbSkB"></span><span class="sk fbSkC"></span></div>`;
+  $("flowBody").innerHTML=fbHead(fbData)+`<div aria-busy="true">${row.repeat(6)}</div>`;
+  fbLast="";
+}
+function fbPaint(){
+  const body=$("flowBody"),d=fbData;
+  if(!d||!fbOn)return;
+  const w=fbPref.w,now=Date.now();
+  let h=fbHead(d)+(fbErr?note("err",esc(fbErr)):"");
+  fbShown=[];
+  if(!d.pairsOk){
+    h+=`<div class="fbMsg">New pairs could not be loaded. Activity is unknown, not zero.</div>`;
+  }else if(!d.items.length){
+    h+=`<div class="fbMsg">No new pairs are in the list right now. That describes our list, not the whole chain.</div>`;
+  }else{
+    const rows=fbRows(d,w);
+    if(!rows.length){
+      h+=`<div class="fbMsg">No new pair has a quoted sell route in this list right now.<br><button type="button" class="chip" data-fbshowall>Show all</button></div>`;
+    }else{
+      fbShown=rows;
+      h+=`<table class="fbTbl"><thead><tr><th>Token</th><th>Net buyers</th><th class="fbBS">Buyers / Sellers</th><th>Buy share</th><th class="fbVol">Volume</th><th>Exit</th></tr></thead><tbody>`;
+      rows.forEach((r,i)=>{
+        const a=r.a,it=r.it;
+        const net=r.net===null?`<span style="color:var(--tx2)">—</span>`
+          :`<span style="color:var(${r.net>0?"--pos":r.net<0?"--neg":"--tx2"})">${r.net>0?"+":""}${r.net}</span>`;
+        const bs=a&&a.buyers!==null&&a.sellers!==null?`${fbN(a.buyers)} / ${fbN(a.sellers)}`:"— / —";
+        const pct=r.share===null?null:r.share*100;
+        const share=pct===null?"—":`<span class="fbBar"><i class="p" style="width:${pct.toFixed(1)}%"></i><i class="n" style="width:${(100-pct).toFixed(1)}%"></i></span><span class="mono" style="color:var(--tx2)">${pct.toFixed(0)}%</span>`;
+        const cls=it.v==="sell"?"p":it.v==="nosell"?"n":"";
+        const lbl=it.v==="sell"?"Sell route quoted":it.v==="nosell"?"No sell route":"Unknown";
+        h+=`<tr class="fbRow" tabindex="0" role="link" data-i="${i}" data-addr="${esc(it.addr)}">
+          <td><div class="fbTok"><span class="av fbAv" data-i="${i}"></span><span class="fbTkTx"><b>${esc(it.symbol)}</b><span class="fbAge">${esc(fbAge(it.created,now))}</span></span></div></td>
+          <td class="mono">${net}</td>
+          <td class="fbBS mono" style="color:var(--tx2)">${bs}</td>
+          <td class="fbSh">${share}</td>
+          <td class="fbVol mono">${fbUsd(r.vol)}</td>
+          <td><span class="fbChip ${cls}" title="${esc(fbChecked(it.checkedAt,now))}">${lbl}</span></td></tr>`;
+      });
+      h+=`</tbody></table>`;
+      if(!d.gtOk||!d.items.some(it=>it.act))h+=`<div class="fnote">Market activity is unavailable right now — unknown, not zero.</div>`;
+    }
+    h+=`<div class="fnote">Counts are GeckoTerminal's pool totals for the window. Net buyers = unique buyers − unique sellers. Not a recommendation.</div>`;
+  }
+  if(h===fbLast&&body.firstChild)return;     // بدون تغییر: بازنقاشی نکن تا لوگوها سوسو نزنند
+  fbLast=h;
+  body.innerHTML=h;
+  body.querySelectorAll(".fbAv").forEach(el=>{const r=fbShown[+el.dataset.i];if(r)fbAvatar(el,r.it.addr,r.it.symbol,r.it.img);});
+}
+async function fbRender(refresh){
+  const seq=++flowSeq,chain=activeChain;
+  flowChrome(true);
+  const cur=()=>seq===flowSeq&&fbOn&&activeChain===chain;
+  const have=!!fbData&&fbData.chain===chain;
+  if(have){
+    fbPaint();
+    if(!refresh&&Date.now()-fbData.t<FB_FRESH)return;
+  }else{fbData=null;fbSkeleton();}
+  let d;
+  try{d=await fbLoad(chain);}catch{d={chain,t:Date.now(),pairsOk:false,gtOk:false,items:[]};}
+  if(!cur())return;
+  fbData=d;
+  fbPaint();
+}
+async function fbOpen(addr){
+  if(fbOpening)return;
+  fbOpening=true;fbErr="";
+  try{
+    if(activeChain==="solana"){
+      if(!SOL_MINT_RE.test(addr))throw new Error("bad address");
+      flowBoard=false;
+      const task=solAppLoadToken(addr);
+      paintFlowToken();renderFlow();
+      await task;
+      return;
+    }
+    const find=()=>allTokens().find(x=>x.address.toLowerCase()===addr.toLowerCase());
+    let t=find();
+    if(!t){try{await importToken(addr);}catch{}t=find();}
+    if(!t)throw new Error("not importable");
+    pickerTarget="out";flowBoard=false;
+    pickToken(t);
+  }catch{
+    flowBoard=true;
+    fbErr="Could not open this token. It may not be a standard token, or the network did not answer. Try again.";
+    if(view==="flow")renderFlow();
+  }finally{fbOpening=false;}
+}
+function fbClick(e){
+  const t=e.target;
+  const wb=t.closest&&t.closest("[data-fbw]");
+  if(wb){fbPref.w=wb.dataset.fbw==="h6"?"h6":"h1";fbSavePref();fbErr="";fbData?fbPaint():fbSkeleton();return;}
+  if(t.closest&&t.closest("[data-fbtog]")){fbPref.only=!fbPref.only;fbSavePref();fbErr="";fbData?fbPaint():fbSkeleton();return;}
+  if(t.closest&&t.closest("[data-fbshowall]")){fbPref.only=false;fbSavePref();fbData?fbPaint():fbSkeleton();return;}
+  const row=t.closest&&t.closest(".fbRow");
+  if(row)fbOpen(row.dataset.addr);
+}
+$("flowBody").addEventListener("keydown",e=>{
+  if(e.key!=="Enter"&&e.key!==" ")return;
+  const row=e.target.closest&&e.target.closest(".fbRow");
+  if(row){e.preventDefault();fbOpen(row.dataset.addr);}
+});
+$("flowBody").addEventListener("click",e=>{if(!e.target.closest('[data-act="pickFlowToken"]'))fbClick(e);});
+$("flowBack").onclick=()=>{flowBoard=true;fbErr="";renderFlow();};
+// تازه‌سازیِ ۶۰ثانیه‌ای فقط وقتی تابلو دیده می‌شود و تب پنهان نیست؛ با برگشتنِ تب فوراً.
+setInterval(()=>{if(view==="flow"&&fbOn&&!document.hidden)fbRender(true);},FB_REFRESH);
+document.addEventListener("visibilitychange",()=>{if(!document.hidden&&view==="flow"&&fbOn)fbRender(true);});
+
+/* ---------- Early buyers ---------- */
+function ebOff(){ebSeq++;const b=$("flowEarly");if(b){b.hidden=true;b.innerHTML="";}}
+function ebShow(html){const b=$("flowEarly");if(!b)return;b.innerHTML=html;b.hidden=false;}
+const EB_MSG={many:"Early buyers: unknown — this pool has too many trades to see its first buyers. Unknown, not zero.",
+  na:"Early buyers: unknown — trade history is unavailable. Unknown, not zero."};
+const ebUnkHtml=k=>`<div class="ebCard"><div class="ebIn"><div class="ebUnk">${esc(EB_MSG[k])}</div></div></div>`;
+const ebLoadHtml=()=>`<div class="ebCard"><div class="ebIn"><div class="ebTtl">Early buyers</div><div class="sk ebSkB"></div></div></div>`;
+// تحلیلِ خالص: طرفِ هر معامله از روی آدرسِ توکن (to = خرید، from = فروش) تعیین می‌شود، نه از kind؛
+// پس هر دو حالتِ «توکن پایه» و «توکن مقابل» یکسان درست‌اند.
+function ebAnalyze(trades,createdIso,baseId,quoteId,tokenId,lower){
+  const NA={st:"na"},norm=s=>lower?s.toLowerCase():s;
+  if(typeof tokenId!=="string"||tokenId.indexOf("_")<0)return NA;
+  const inPool=[baseId,quoteId].some(x=>typeof x==="string"&&norm(x)===norm(tokenId));
+  const tok=norm(tokenId.slice(tokenId.indexOf("_")+1));
+  const c=typeof createdIso==="string"?Date.parse(createdIso):NaN;
+  if(!inPool||!Array.isArray(trades)||!Number.isFinite(c))return NA;
+  if(trades.length>=300)return {st:"many"};
+  const rows=[];
+  for(let i=0;i<trades.length;i++){
+    const a=trades[i]&&trades[i].attributes;
+    if(!a)return NA;
+    const ts=Date.parse(a.block_timestamp);
+    const from=typeof a.from_token_address==="string"?norm(a.from_token_address):null;
+    const to=typeof a.to_token_address==="string"?norm(a.to_token_address):null;
+    const who=typeof a.tx_from_address==="string"&&a.tx_from_address?norm(a.tx_from_address):null;
+    const isBuy=to===tok&&from!==tok,isSell=from===tok&&to!==tok;
+    const amt=fbCnt(isBuy?a.to_token_amount:a.from_token_amount);
+    if(!Number.isFinite(ts)||!who||(!isBuy&&!isSell)||amt===null)return NA;
+    rows.push({ts,i,who,buy:isBuy,amt});
+  }
+  if(!rows.length)return NA;
+  rows.sort((x,y)=>x.ts-y.ts||y.i-x.i);          // فهرستِ GT تازه‌ترین‌اول است؛ هم‌زمان‌ها را معکوس کن
+  const gap=rows[0].ts-c;
+  if(gap>15*60000)return {st:"many"};
+  if(gap<-60000)return NA;
+  const early=[],bought=new Map(),sold=new Map();
+  for(const r of rows){
+    if(r.buy){
+      bought.set(r.who,(bought.get(r.who)||0)+r.amt);
+      if(early.length<EB_MAX&&!early.includes(r.who))early.push(r.who);
+    }else sold.set(r.who,(sold.get(r.who)||0)+r.amt);
+  }
+  if(!early.length)return NA;
+  let all=0,part=0,hold=0,sb=0,ss=0;
+  for(const w of early){
+    const b=bought.get(w),s=sold.get(w)||0;
+    if(!(b>0))return NA;
+    sb+=b;ss+=s;
+    if(s>=0.95*b)all++;else if(s>0.05*b)part++;else hold++;
+  }
+  return {st:"ok",n:early.length,all,part,hold,pct:Math.min(100,ss/sb*100)};
+}
+function ebHtml(r,symbol){
+  if(r.st!=="ok")return ebUnkHtml(r.st);
+  const seg=(k,v)=>v>0?`<i class="${k}" style="width:${(v/r.n*100).toFixed(2)}%"></i>`:"";
+  return `<div class="ebCard"><div class="ebIn"><div class="ebTtl">Early buyers</div>
+    <div class="ebLine">First ${r.n===1?"buyer":r.n+" buyers"} of ${esc(symbol)}</div>
+    <div class="ebBar">${seg("n",r.all)}${seg("w",r.part)}${seg("p",r.hold)}</div>
+    <div class="ebLeg"><span class="ebKey"><i class="n"></i>Sold all ${r.all}</span> · <span class="ebKey"><i class="w"></i>Sold part ${r.part}</span> · <span class="ebKey"><i class="p"></i>Still holding ${r.hold}</span></div>
+    <div class="ebPct mono">${r.pct.toFixed(0)}% of their tokens sold</div></div>
+    <div class="fnote">Only sells through this pool are counted; tokens moved to another wallet look like holding.</div></div>`;
+}
+function ebStartBase(t){
+  const key="base|"+t.address.toLowerCase(),mine=++ebSeq;
+  if(ebCache&&ebCache.key===key&&Date.now()-ebCache.t<EB_TTL){ebShow(ebCache.html);return;}
+  ebShow(ebLoadHtml());
+  ebFetchBase(t).then(res=>{
+    if(mine!==ebSeq)return;
+    if(res.keep)ebCache={key,t:Date.now(),html:res.html};
+    ebShow(res.html);
+  });
+}
+async function ebFetchBase(t){
+  const net=CHAIN.gtNetwork,fail={html:ebUnkHtml("na"),keep:false};
+  try{
+    const j=await gtJson(`${GT}/networks/${net}/tokens/${t.address}?include=top_pools`);
+    const tp=j&&j.data&&j.data.relationships&&j.data.relationships.top_pools&&j.data.relationships.top_pools.data;
+    const id=tp&&tp[0]&&tp[0].id;
+    if(typeof id!=="string"||!id.startsWith(net+"_"))return fail;
+    const pool=id.slice(net.length+1);
+    if(!/^0x[0-9a-fA-F]{40}$/.test(pool))return fail;
+    const [pj,tj]=await Promise.all([gtJson(`${GT}/networks/${net}/pools/${pool}`),gtJson(`${GT}/networks/${net}/pools/${pool}/trades`)]);
+    const pd=pj&&pj.data;
+    const r=ebAnalyze(tj&&tj.data,pd&&pd.attributes&&pd.attributes.pool_created_at,
+      pd&&pd.relationships&&pd.relationships.base_token&&pd.relationships.base_token.data&&pd.relationships.base_token.data.id,
+      pd&&pd.relationships&&pd.relationships.quote_token&&pd.relationships.quote_token.data&&pd.relationships.quote_token.data.id,
+      net+"_"+t.address,true);
+    return {html:ebHtml(r,t.symbol),keep:r.st!=="na"};
+  }catch{return fail;}
+}
+function ebStartSol(mint,cache){
+  const mine=++ebSeq,pool=cache&&cache.pool,rel=pool&&pool.relationships||{};
+  let html;
+  try{
+    const r=ebAnalyze(cache.trades,pool&&pool.attributes&&pool.attributes.pool_created_at,
+      rel.base_token&&rel.base_token.data&&rel.base_token.data.id,rel.quote_token&&rel.quote_token.data&&rel.quote_token.data.id,
+      "solana_"+mint,false);
+    html=ebHtml(r,mint===SOL_MINT_ADDR?"SOL":(solTokenSymbol||"this token"));
+  }catch{html=ebUnkHtml("na");}
+  if(mine===ebSeq)ebShow(html);
+}
+
 /* ---------- safety panel ---------- */
 async function runScan(token){
   const seq=++scanSeq;
@@ -7514,8 +7958,8 @@ let safetyShownExit="";
 function renderSafety(rep){
   rep=reconcileExit(rep);
   safetyShownExit=rep._exitState||"";
-  const col=`var(--${rep.verdict.tone})`,C=2*Math.PI*25;
-  let h=`<div class="rhead"><div class="ring"><svg width="60" height="60">
+  const col=`var(--${rep.verdict.tone})`,C=2*Math.PI*25,stock=isStockRep(rep);
+  let h=stock?stockHead(rep.unknown,"rhead"):`<div class="rhead"><div class="ring"><svg width="60" height="60">
       <circle cx="30" cy="30" r="25" fill="none" stroke="var(--raise)" stroke-width="6"/>
       <circle id="sf-arc" cx="30" cy="30" r="25" fill="none" stroke="${col}" stroke-width="6"
         stroke-dasharray="${C}" stroke-dashoffset="${C}" stroke-linecap="round"/>
@@ -7532,7 +7976,7 @@ function renderSafety(rep){
   if(rep.address)mtabSet("base:"+rep.address.toLowerCase(),"safe",mtabSafeSig(rep));
   else if(tokenOut)mtabSet("base:"+balKey(tokenOut),"safe",mtabSafeSig(rep));
   panel("safetyBody").innerHTML=h;
-  animateScore(rep.score,C,"sf-arc","sf-score");
+  if(!stock)animateScore(rep.score,C,"sf-arc","sf-score");
 }
 
 /* همان گزارش، چیدمان دیگر: چیزی که باید نگرانش باشی از چیزی که سنجیده شده
@@ -7559,7 +8003,7 @@ function animateScore(score,C,arcId,numId){
 
 function renderSafetyReport(rep,boxId="tk-safetyBody",prefix="tk",compact=false){
   const box=$(boxId);if(!box)return;
-  const col=`var(--${rep.verdict.tone})`,C=2*Math.PI*25;
+  const col=`var(--${rep.verdict.tone})`,C=2*Math.PI*25,stock=isStockRep(rep);
   const bad=rep.findings.filter(f=>f.level!=="ok"&&(!rep.solana||f.level!=="info"));
   const unknown=rep.solana?rep.findings.filter(f=>f.level==="info"):[];
   const good=rep.findings.filter(f=>f.level==="ok");
@@ -7580,7 +8024,7 @@ function renderSafetyReport(rep,boxId="tk-safetyBody",prefix="tk",compact=false)
      سنجیده شد، نه اینکه از قبل آنجا بوده باشد. `dashoffset` روی خودِ
      محیط دایره شروع می‌شود، یعنی خالی. */
   box.innerHTML=`
-    <div class="${compact?"rhead":"scoreTop"}">
+    ${stock?stockHead(rep.unknown,compact?"rhead":"scoreTop"):`<div class="${compact?"rhead":"scoreTop"}">
       <div class="ring"><svg width="60" height="60">
         <circle cx="30" cy="30" r="25" fill="none" stroke="var(--raise)" stroke-width="6"/>
         <circle id="${prefix}-arc" cx="30" cy="30" r="25" fill="none" stroke="${col}" stroke-width="6"
@@ -7589,13 +8033,13 @@ function renderSafetyReport(rep,boxId="tk-safetyBody",prefix="tk",compact=false)
         <b class="mono" id="${prefix}-score" style="color:${col}">${rep.score==null?"—":0}</b></div>
       <div><div class="rv" style="color:${col}">${esc(rep.verdict.txt)}</div>
         <div class="rs">${rep.score==null?"Risk unavailable":"Risk "+rep.score+" out of 100 · lower is safer"}${rep.unknown?" · "+rep.unknown+" not checked":""}</div></div>
-    </div>
+    </div>`}
     ${compact?[...bad,...unknown,...good].map(f=>row(f)).join(""):`    ${bad.length?`<div class="chkGroup"><span class="eyebrow">${bad.length} to look at</span>
       ${bad.map((f,i)=>row(f,i+1)).join("")}</div>`:""}
     ${unknown.length?`<div class="chkGroup"><span class="eyebrow">${unknown.length} not checked</span>${unknown.map((f,i)=>row(f,i+1)).join("")}</div>`:""}
     ${good.length?`<div class="chkGroup"><span class="eyebrow">${good.length} checked and clear</span>
       ${good.map((f,i)=>row(f,i+1)).join("")}</div>`:""}`}`;
-  if(rep.score!=null)animateScore(rep.score,C,prefix+"-arc",prefix+"-score");
+  if(rep.score!=null&&!stock)animateScore(rep.score,C,prefix+"-arc",prefix+"-score");
 }
 
 /* =====================================================================
@@ -8717,6 +9161,8 @@ async function importToken(addr){
 }
 function pickToken(t){
   if(!t)return;
+  if(flowPicking&&pickerTarget==="out")flowBoard=false;   // انتخاب از دکمه‌ی توکنِ Flow = خروج از تابلو
+  flowPicking=false;
   hideSwapDone();
   if(pickerTarget==="in"){
     if(tokenOut&&t.address.toLowerCase()===tokenOut.address.toLowerCase())tokenOut=tokenIn;
@@ -9965,6 +10411,7 @@ async function solLoadDetails(){
     const largest=results[1].status==="fulfilled"?results[1].value?.value:null;
     const epoch=results[2].status==="fulfilled"?results[2].value?.epoch:null;
     const rep=solSafetyReport(info,account.owner,largest,epoch);
+    rep.mint=mint;   // برای تشخیصِ توکنِ سهام (مقایسه‌ی عینِ mint)
     renderSafetyReport(rep,"solSafety","sol-risk",!tokenPage);
     mtabSet("sol:"+mint,"safe",mtabSafeSig(rep));
     safety.insertAdjacentHTML("beforeend",'<p class="fnote">Token-control risk is a heuristic score from the checks shown, not a probability of loss or an audit. Unknown checks are listed separately. Largest accounts may include pools and custody accounts. This does not guarantee that selling is possible.</p>');
@@ -11294,7 +11741,7 @@ function setView(v,push){
      می‌کند، پس دیگر hash نباید دوباره نوشته شود. */
   const leaving=tokenPage&&v!=="token";
   if(leaving){leaveTokenPage(v);push=false;}
-  view=v;
+  view=v;flowPicking=false;
   placeNetworkControl();paintSrc();
   // ۳ اکتبر — از این لحظه رنگِ واقعیِ دکمه‌ی اصلی (فعال/غیرفعال) نشان داده می‌شود؛ پیش از آن
   // «Connect wallet» گرادیانی کشیده می‌شد تا رفرش یک فریمِ خاکستری نشان ندهد.
@@ -11420,7 +11867,7 @@ function wire(){
      این دو ظرف با innerHTML بازنویسی می‌شود و یک onclick مستقیم بعد از
      اولین رندر از بین می‌رفت. شنونده روی خودِ ظرف است که هرگز عوض نمی‌شود. */
   $("folioBody").onclick=e=>{if(e.target.closest('[data-act="connect"]')){if(activeChain==="solana")solOpenWalletPicker();else connect();}};
-  $("flowBody").onclick=e=>{if(e.target.closest('[data-act="pickFlowToken"]')){if(activeChain==="solana")solOpenTokenPicker();else openPicker("out");}};
+  $("flowBody").onclick=e=>{if(e.target.closest('[data-act="pickFlowToken"]')){flowPicking=true;if(activeChain==="solana")solOpenTokenPicker();else openPicker("out");}};
   // innerHTML #swapDone با هر نتیجه بازنویسی می‌شود، پس شنونده روی خودِ
   // ظرف است که هرگز عوض نمی‌شود — همان الگوی بالا.
   $("swapDone").onclick=e=>{if(e.target.closest("#swapAgain")){hideSwapDone();$("amtIn").focus();}};
@@ -11474,7 +11921,7 @@ function wire(){
     if(hc==="solana"&&(hp.has("in")||hp.has("out")||hp.has("amt")))applyShareParams();
     else if(hc==="solana"||hc==="base")setChain(hc);
   });
-  $("flowTokBtn").onclick=()=>{if(activeChain==="solana")solOpenTokenPicker();else openPicker("out");};
+  $("flowTokBtn").onclick=()=>{flowPicking=true;if(activeChain==="solana")solOpenTokenPicker();else openPicker("out");};
   setInterval(()=>{if(!document.hidden){refreshSolanaViews();refreshMarketWatch();}},30000);
   /* ⚠️ این ناحیه یک بار با copy-paste خراب شده بود: تکه‌ای از خود wire()
      داخل هندلرهای کلیک تکرار شده بود. جاوااسکریپت پارسش می‌کرد و ظاهر

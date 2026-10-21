@@ -76,10 +76,35 @@ async def _goto_allow_cmc(self, *a, **k):
         await self.route("**/solana-intent.bundle.*.js", lambda r: r.fulfill(
             status=200, content_type="application/javascript",
             body="window.SolIntent={__stub:true,validateQuote:function(q){return q},validateTransaction:async function(){return true},assertSameMessage:function(){}};"))
-    return await _pw_goto(self, *a, **k)
+    resp = await _pw_goto(self, *a, **k)
+    await _flow_board_off(self)
+    return resp
+
+
+# ۲۱ اکتبر: حالتِ پیش‌فرضِ نمای Flow حالا تابلوی «Where money is flowing» است (پرچمِ flowBoard)، اما کاوشگرهای قدیمی
+# جریانِ یک توکن را می‌سنجند. پس هر صفحه‌ای که این فایل می‌گشاید بلافاصله پرچم را خاموش می‌کند و همان رفتارِ قبلی را
+# می‌بیند. کاوشگرهای تابلو با page._zx_board = True (پیش از goto) از این خاموشی بیرون می‌مانند.
+async def _flow_board_off(page):
+    if getattr(page, "_zx_board", False):
+        return
+    try:
+        await page.evaluate("""() => { try { if (typeof flowBoard !== 'undefined' && flowBoard) {
+            flowBoard = false; if (typeof view !== 'undefined' && view === 'flow') renderFlow(); } } catch (e) {} }""")
+    except Exception:
+        pass
 
 
 _PwPage.goto = _goto_allow_cmc
+_pw_reload = _PwPage.reload
+
+
+async def _reload_flow_board_off(self, *a, **k):
+    resp = await _pw_reload(self, *a, **k)
+    await _flow_board_off(self)
+    return resp
+
+
+_PwPage.reload = _reload_flow_board_off
 
 _original_launch = BrowserType.launch
 async def _launch_selected_browser(self, *args, **kwargs):
@@ -4018,7 +4043,7 @@ async def check_mobile_compact(p, errors):
     # پدرِ landing هم مثل index.html نزدیک‌ترین نیاکانی است که هنوز فوتر چندستونی (fMore) را ندارد؛
     # «HEAD» ثابت با اولین کامیتِ بعد از آن فوتر می‌افتاد.
     lg = git("show", rev + ":web/landing.html")
-    for cand_ in ["HEAD~%d" % k for k in range(1, 13)]:
+    for cand_ in ["HEAD~%d" % k for k in range(1, 61)]:   # ۲۱ اکتبر: ۱۲ دیگر کافی نبود؛ دو کامیتِ مستندات فاصله را از ۱۲ گذراند
         if lg.returncode == 0 and "fMore" not in lg.stdout:
             break
         rev = cand_
@@ -8379,6 +8404,783 @@ async def check_uniswap_v4(pg):
         "a reverting v4 quoter must give no quote and no route: %s" % rv
 
 
+# =====================================================================
+# ۲۱ اکتبر — تابلوی «Where money is flowing»، کارت «Early buyers» و حکمِ صادرکننده برای توکن‌های سهام.
+# هر کاوشگر یک تابع جداست تا با ZX_ONLY=<نام تابع> تنها همان اجرا شود (برای شکستنِ عمدیِ نگهبان‌ها).
+# فیکسچرها شکلِ واقعیِ GeckoTerminal را دارند: حجم/ذخیره/مقدار توکن *رشته*، شمارِ معاملات *عدد*.
+# =====================================================================
+import functools as _fbft, http.server as _fbhttp, threading as _fbth, json as _fbj
+from datetime import datetime as _fbdt, timedelta as _fbtd, timezone as _fbtz
+
+FB_BAD_RE = re.compile(r"NaN|undefined|\$0\.00|Infinity|\[object")
+FB_PNG = base64.b64decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==")
+FB_SOL_USDC = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"
+FB_SOL_WSOL = "So11111111111111111111111111111111111111112"
+
+
+def fb_iso(sec_ago):
+    t = _fbdt.now(_fbtz.utc) - _fbtd(seconds=sec_ago)
+    return t.strftime("%Y-%m-%dT%H:%M:%S.") + "%03dZ" % (t.microsecond // 1000)
+
+
+def fb_serve():
+    class Quiet(_fbhttp.SimpleHTTPRequestHandler):
+        def log_message(self, *a):
+            pass
+
+        def translate_path(self, path):
+            clean = path.split("?")[0]
+            if clean in ("/app", "/app/"):
+                return os.path.join(HERE, "harness.html")
+            if clean == "/stub-ethers.js":
+                return os.path.join(HERE, "stub-ethers.js")
+            return super().translate_path(path)
+    srv = _fbhttp.ThreadingHTTPServer(("127.0.0.1", 0), _fbft.partial(Quiet, directory=os.path.join(HERE, "..")))
+    _fbth.Thread(target=srv.serve_forever, daemon=True).start()
+    return srv, "http://127.0.0.1:%d" % srv.server_address[1]
+
+
+def fb_b58(i, n=44):
+    A = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
+    s = ""
+    x = i + 1
+    while x:
+        x, r = divmod(x, 58)
+        s = A[r] + s
+    return (s + "z" * n)[:n] if len(s) < n else s
+
+
+def fb_evm(i):
+    return "0x" + "%040x" % i
+
+
+class FbEnv:
+    """صفحه‌ی اپ روی سرور محلی؛ pairs.json و GT از فیکسچر. calls = (مسیرِ GT) به ترتیب."""
+
+    def __init__(self, b, origin, errs):
+        self.b, self.origin, self.errs = b, origin, errs
+        self.pairs = {"status": 200, "body": {"store": True, "rows": []}, "delay": 0}
+        self.gt = lambda path: None            # path -> (status, obj) | None (= {"data": []})
+        self.rpc = None
+        self.calls, self.pairs_calls = [], []
+
+    async def open(self, hash_="#flow", vw=1280, vh=900, scheme="dark", board=True, init=None, path="/app"):
+        ctx = await self.b.new_context(viewport={"width": vw, "height": vh}, color_scheme=scheme)
+        pg = await ctx.new_page()
+        pg._zx_board = board
+        pg.on("pageerror", lambda e: self.errs.append("PAGEERROR %s" % e))
+        pg.on("console", lambda m: self.errs.append("CONSOLE %s" % m.text) if m.type == "error" and
+              "Failed to load resource" not in m.text else None)
+        for sc in (init or []):
+            await pg.add_init_script(sc)
+
+        async def ok(route, body, status=200):
+            await route.fulfill(status=status, content_type="application/json",
+                                headers={"access-control-allow-origin": "*", "x-zaexa-proxy": "t"}, body=body)
+
+        async def handler(route):
+            u = route.request.url
+            clean = u.split("?")[0]
+            if u.startswith(self.origin):
+                rest = clean[len(self.origin):]
+                if rest == "/pairs.json":
+                    self.pairs_calls.append(u)
+                    if self.pairs["delay"]:
+                        await asyncio.sleep(self.pairs["delay"])
+                    return await ok(route, _fbj.dumps(self.pairs["body"]), self.pairs["status"])
+                if rest == "/ev":
+                    return await route.fulfill(status=204, body="")
+                if rest.startswith("/vd/"):
+                    return await ok(route, '{"v":"sell","ms":100}')
+                if rest.startswith("/sol/"):
+                    if rest.endswith("/rpc") and self.rpc:
+                        pl = _fbj.loads(route.request.post_data or "{}")
+                        return await ok(route, _fbj.dumps({"result": self.rpc(pl.get("method"), pl.get("params"))}))
+                    return await ok(route, '{"result":null}')
+                if rest.startswith("/gt/"):
+                    gp = u.split("/gt/", 1)[1]
+                else:
+                    return await route.continue_()
+            elif u.startswith("https://api.geckoterminal.com/api/v2/"):
+                gp = u.split("/api/v2/", 1)[1]
+            elif u.startswith("https://assets.geckoterminal.com/"):
+                return await route.fulfill(status=200, content_type="image/png", body=FB_PNG)
+            else:
+                return await route.abort()
+            self.calls.append(gp)
+            r = self.gt(gp.split("?")[0])
+            if r is None:
+                return await ok(route, '{"data":[]}')
+            return await ok(route, _fbj.dumps(r[1]), r[0])
+
+        await pg.route("**/*", handler)
+        await pg.goto(self.origin + path + hash_)
+        return pg
+
+
+# ---------- فیکسچرهای تابلو ----------
+def fb_tok(addr, sym, pool, net="base", img=None):
+    return {"id": "%s_%s" % (net, addr), "type": "token",
+            "attributes": {"address": addr, "symbol": sym, "image_url": img or "missing.png"},
+            "relationships": {"top_pools": {"data": [{"id": "%s_%s" % (net, pool), "type": "pool"}]}}}
+
+
+def fb_pool(pool, h1, h6, net="base"):
+    def w(t):
+        return {"buys": t[2], "sells": t[3], "buyers": t[0], "sellers": t[1]}
+    return {"id": "%s_%s" % (net, pool), "type": "pool", "attributes": {
+        "address": pool, "reserve_in_usd": "250000.5",
+        "volume_usd": {"h1": h1[4], "h6": h6[4]},
+        "transactions": {"h1": w(h1), "h6": w(h6)}}}
+
+
+# (buyers, sellers, buys, sells, volume-string)
+FB_ROWS = [
+    # sym, v, created sec ago, h1, h6
+    ("ALPHA", "sell", 30 * 60, (48, 14, 90, 27, "12400"), (120, 70, 300, 200, "98000")),
+    ("BETA", "sell", 2 * 3600 + 1200, (30, 36, 40, 60, "850.2"), (80, 20, 200, 50, "5000")),
+    ("GAMMA", "sell", 3 * 86400 + 4 * 3600, (10, 10, 12, 12, "0"), (15, 40, 20, 70, "120")),
+    ("DELTA", "nosell", 40 * 60, (99, 1, 150, 2, "250000"), (200, 10, 500, 30, "900000")),
+    ("EPS", None, 50 * 60, (55, 5, 70, 9, "3100000"), (150, 100, 400, 300, "7000000")),
+    ("ZETA", "sell", 5 * 3600, None, None),          # استخرش در pools/multi نیست
+]
+
+
+def fb_fixture(net="base", rows=None, hostile_eps=True):
+    rows = rows or FB_ROWS
+    mk = (lambda i: fb_evm(0xA00 + i)) if net == "base" else (lambda i: fb_b58(0xA00 + i))
+    pools = lambda i: (fb_evm(0xB00 + i) if net == "base" else fb_b58(0xB00 + i))
+    prow, toks, pls = [], [], []
+    for i, (sym, v, ago, h1, h6) in enumerate(rows):
+        a = mk(i)
+        shown = "<img src=x onerror=1>" if (hostile_eps and sym == "EPS") else sym
+        prow.append({"chain": net, "address": a, "symbol": shown, "name": "N" + sym, "v": v,
+                     "checkKind": "roundtrip", "checkedAt": fb_iso(300 + i * 60), "poolCreatedAt": fb_iso(ago),
+                     "dex": "uniswap-v3"})
+        img = {"ALPHA": "https://assets.geckoterminal.com/alpha.png", "BETA": "http://evil.example/x.png"}.get(sym)
+        toks.append(fb_tok(a, sym, pools(i), net, img))
+        if h1:
+            pls.append(fb_pool(pools(i), h1, h6, net))
+    return prow, toks, pls, mk, pools
+
+
+def fb_gt_for(toks, pls, net="base", pools_status=200, tokens_status=200):
+    def gt(path):
+        if "/tokens/multi/" in path:
+            want = path.split("/tokens/multi/")[1].split(",")
+            return (tokens_status, {"data": [t for t in toks if t["attributes"]["address"] in want]})
+        if "/pools/multi/" in path:
+            want = path.split("/pools/multi/")[1].split(",")
+            return (pools_status, {"data": [p for p in pls if p["attributes"]["address"] in want]})
+        return None
+    return gt
+
+
+FB_TBL_JS = """() => [...document.querySelectorAll('#flowBody .fbRow')].map(r => {
+    const c = r.children, cs = x => getComputedStyle(x).color;
+    return {sym: r.querySelector('.fbTkTx b').textContent, age: r.querySelector('.fbAge').textContent,
+            net: c[1].textContent.trim(), netColor: cs(c[1].firstElementChild || c[1]),
+            bs: c[2].textContent.trim(), share: c[3].textContent.trim(), bar: !!c[3].querySelector('.fbBar'),
+            vol: c[4].textContent.trim(), chip: c[5].textContent.trim(), title: c[5].firstElementChild.title,
+            chipCls: c[5].firstElementChild.className, img: !!r.querySelector('.fbAv img')};
+})"""
+
+
+async def fb_wait_rows(pg, n=None, timeout=20000):
+    await pg.wait_for_function(
+        "(n) => { const r = document.querySelectorAll('#flowBody .fbRow'); return n === null ? r.length > 0 : r.length === n; }",
+        arg=n, timeout=timeout)
+
+
+async def fb_color(pg, var):
+    return await pg.evaluate("""(v) => { const t = document.createElement('i'); t.style.color = 'var(' + v + ')';
+        document.body.appendChild(t); const c = getComputedStyle(t).color; t.remove(); return c; }""", var)
+
+
+async def check_flow_board(p, errors):
+    srv, origin = fb_serve()
+    b = await p.chromium.launch()
+    errs = []
+    try:
+        env = FbEnv(b, origin, errs)
+        prow, toks, pls, mk, pools = fb_fixture()
+        env.pairs["body"] = {"store": True, "rows": prow}
+        env.gt = fb_gt_for(toks, pls)
+
+        # ---- loading: 6 skeleton rows while pairs.json is slow ----
+        env.pairs["delay"] = 1.5
+        pg = await env.open()
+        await pg.wait_for_selector("#flowBody .skRow", timeout=8000)
+        sk = await pg.evaluate("() => document.querySelectorAll('#flowBody .skRow').length")
+        assert sk == 6, "[flow board] loading state must show 6 skeleton rows, got %d" % sk
+        await pg.context.close()
+        env.pairs["delay"] = 0
+
+        # ---- default: toggle ON, 1h ----
+        env.calls.clear(); env.pairs_calls.clear()
+        pg = await env.open()
+        await fb_wait_rows(pg)
+        head = await pg.evaluate("() => [document.querySelector('.fbTtl').textContent, document.querySelector('.fbSub').textContent, document.querySelector('.fbTog').getAttribute('aria-pressed'), document.querySelector('.fbTog').textContent, [...document.querySelectorAll('[data-fbw]')].map(x => x.textContent + (x.classList.contains('on') ? '*' : ''))]")
+        assert head == ["Where money is flowing", "New Base pairs · last hour · by unique wallets", "true", "Only tokens with a sell route", ["1h*", "6h"]], "[flow board] header: %s" % head
+        tms = [c for c in env.calls if "/tokens/multi/" in c and "include=top_pools" in c]
+        assert len(tms) == 1 and len([c for c in env.calls if "/pools/multi/" in c]) == 1, \
+            "[flow board] exactly one tokens/multi and one pools/multi for the board: %s" % env.calls
+        assert tms[0].endswith("?include=top_pools"), "[flow board] tokens/multi must ask include=top_pools: %s" % tms[0]
+        rows = await pg.evaluate(FB_TBL_JS)
+        want_syms = ["ALPHA", "GAMMA", "BETA", "ZETA"]
+        assert [r["sym"] for r in rows] == want_syms, "[flow board] toggle ON, 1h: net buyers desc, unknown last, only sell rows: %s" % [r["sym"] for r in rows]
+        by = {r["sym"]: r for r in rows}
+        assert (by["ALPHA"]["net"], by["ALPHA"]["bs"], by["ALPHA"]["share"], by["ALPHA"]["vol"], by["ALPHA"]["age"]) == ("+34", "48 / 14", "77%", "$12.4K", "<1h"), by["ALPHA"]
+        assert (by["BETA"]["net"], by["BETA"]["bs"], by["BETA"]["share"], by["BETA"]["vol"], by["BETA"]["age"]) == ("-6", "30 / 36", "40%", "$850", "2h"), by["BETA"]
+        assert (by["GAMMA"]["net"], by["GAMMA"]["bs"], by["GAMMA"]["share"], by["GAMMA"]["vol"], by["GAMMA"]["age"]) == ("0", "10 / 10", "50%", "$0", "3d"), by["GAMMA"]
+        z = by["ZETA"]
+        assert (z["net"], z["bs"], z["share"], z["vol"], z["bar"]) == ("—", "— / —", "—", "—", False), "[flow board] a row without activity shows dashes, never 0: %s" % z
+        pos, neg, tx2 = await fb_color(pg, "--pos"), await fb_color(pg, "--neg"), await fb_color(pg, "--tx2")
+        assert (by["ALPHA"]["netColor"], by["BETA"]["netColor"], by["GAMMA"]["netColor"]) == (pos, neg, tx2), "[flow board] net colours --pos/--neg/--tx2: %s" % [r["netColor"] for r in rows]
+        assert all(r["chip"] == "Sell route quoted" and r["chipCls"].endswith(" p") for r in rows), "[flow board] toggle ON: only sell chips: %s" % [r["chip"] for r in rows]
+        assert re.match(r"^Checked \d+m ago$", by["ALPHA"]["title"]), "[flow board] chip title: %r" % by["ALPHA"]["title"]
+        assert by["ALPHA"]["img"] and not by["BETA"]["img"], "[flow board] only the https image_url becomes a logo (BETA has an http one): %s" % [(r["sym"], r["img"]) for r in rows]
+        geo = await pg.evaluate("() => { const a = document.querySelector('.fbAv').getBoundingClientRect(); const bar = document.querySelector('.fbBar').getBoundingClientRect(); return [a.width, a.height, bar.height]; }")
+        assert geo == [28, 28, 4], "[flow board] avatar 28px, bar 4px: %s" % geo
+        txt = await pg.inner_text("#flowBody")
+        assert not FB_BAD_RE.search(txt), "[flow board] bad text in the board: %r" % FB_BAD_RE.search(txt).group(0)
+        assert "Counts are GeckoTerminal's pool totals for the window. Net buyers = unique buyers − unique sellers. Not a recommendation." in txt, "[flow board] footer note"
+        assert await pg.evaluate("() => document.getElementById('flowTfs').offsetParent === null && document.getElementById('flowBackRow').hidden"), \
+            "[flow board] the 5-window switch is hidden and there is no Back link on the board"
+
+        # ---- toggle OFF: everything, with Unknown / No sell route chips ----
+        await pg.click(".fbTog")
+        await pg.wait_for_function("() => document.querySelectorAll('#flowBody .fbRow').length === 6")
+        rows = await pg.evaluate(FB_TBL_JS)
+        by = {r["sym"]: r for r in rows}
+        assert [r["sym"] for r in rows] == ["DELTA", "0x0000…0a04", "ALPHA", "GAMMA", "BETA", "ZETA"], "[flow board] toggle OFF order (the hostile symbol falls back to the short address): %s" % [r["sym"] for r in rows]
+        assert [r["net"] for r in rows] == ["+98", "+50", "+34", "0", "-6", "—"], "[flow board] toggle OFF: sorted by net buyers, unknown last: %s" % [r["net"] for r in rows]
+        assert by["DELTA"]["chip"] == "No sell route" and by["DELTA"]["chipCls"].endswith(" n"), by["DELTA"]
+        unk = [r for r in rows if r["chip"] == "Unknown"]
+        assert len(unk) == 1 and not unk[0]["chipCls"].endswith(" p") and not unk[0]["chipCls"].endswith(" n"), "[flow board] v=null -> neutral Unknown chip: %s" % unk
+        assert await pg.evaluate("() => !document.querySelector('#flowBody img[src=\"x\"]') && document.querySelectorAll('#flowBody table img').length <= 1"), "[flow board] hostile symbol must not create an element"
+        stored = await pg.evaluate("() => localStorage.getItem('zaexa.flowboard.v1')")
+        assert _fbj.loads(stored) == {"only": False, "w": "h1"}, "[flow board] the toggle is remembered: %r" % stored
+
+        # ---- 6h changes the numbers ----
+        await pg.click('[data-fbw="h6"]')
+        await pg.wait_for_function("() => document.querySelector('.fbSub').textContent.includes('last 6 hours')")
+        rows6 = await pg.evaluate(FB_TBL_JS)
+        by6 = {r["sym"]: r for r in rows6}
+        assert [r["net"] for r in rows6] == ["+190", "+60", "+50", "+50", "-25", "—"], "[flow board] 6h net buyers (a tie falls to volume): %s" % [r["net"] for r in rows6]
+        assert [r["sym"] for r in rows6][2:4] == ["0x0000…0a04", "ALPHA"], "[flow board] net-buyer tie -> larger volume first: %s" % [r["sym"] for r in rows6]
+        assert (by6["ALPHA"]["net"], by6["ALPHA"]["bs"], by6["ALPHA"]["share"], by6["ALPHA"]["vol"]) == ("+50", "120 / 70", "60%", "$98.0K"), "[flow board] 6h numbers: %s" % by6["ALPHA"]
+        assert by6["ALPHA"]["net"] != by["ALPHA"]["net"], "[flow board] the 6h window must change the numbers"
+        sub = await pg.inner_text(".fbSub")
+        assert sub == "New Base pairs · last 6 hours · by unique wallets", sub
+        assert not FB_BAD_RE.search(await pg.inner_text("#flowBody")), "[flow board] 6h: bad text"
+        assert _fbj.loads(await pg.evaluate("() => localStorage.getItem('zaexa.flowboard.v1')")) == {"only": False, "w": "h6"}
+        # ---- window and toggle survive a reload ----
+        await pg.reload()
+        await fb_wait_rows(pg, 6)
+        st = await pg.evaluate("() => [document.querySelector('.fbTog').getAttribute('aria-pressed'), document.querySelector('[data-fbw].on').textContent]")
+        assert st == ["false", "6h"], "[flow board] reload restores toggle and window: %s" % st
+        # ---- toggle ON with zero sell rows: explicit message + Show all ----
+        none_rows = [r for r in prow if r["v"] != "sell"]
+        env.pairs["body"] = {"store": True, "rows": none_rows}
+        await pg.evaluate("() => localStorage.setItem('zaexa.flowboard.v1', JSON.stringify({only: true, w: 'h1'}))")
+        await pg.reload()
+        await pg.wait_for_selector("[data-fbshowall]", timeout=20000)
+        msg = await pg.inner_text("#flowBody .fbMsg")
+        assert "No new pair has a quoted sell route in this list right now." in msg, "[flow board] zero sell rows: %r" % msg
+        await pg.click("[data-fbshowall]")
+        await fb_wait_rows(pg, len(none_rows))
+        assert await pg.evaluate("() => document.querySelector('.fbTog').getAttribute('aria-pressed')") == "false"
+        # یادداشتِ «استخرِ همین توکن» زیرِ تابلو نباید دیده شود
+        assert await pg.evaluate("() => { const n=document.querySelector('#view-flow > p'); return !n || getComputedStyle(n).display==='none'; }"), "[flow board] per-token note visible under the board"
+        await pg.context.close()
+        print("[flow board] Base board: 6 skeleton rows while loading, one tokens/multi (include=top_pools) + one pools/multi, toggle ON shows only sell rows sorted by net buyers (+34, 0, -6, then the row without activity as dashes), toggle OFF adds No sell route / Unknown chips, 6h changes every number, exact header/footer/cells/colours, https-only logos, no NaN/undefined/$0.00, choices survive a reload, zero sell rows -> message + Show all")
+    finally:
+        await b.close()
+        srv.shutdown()
+
+
+async def check_flow_board_gt_down(p, errors):
+    srv, origin = fb_serve()
+    b = await p.chromium.launch()
+    errs = []
+    try:
+        env = FbEnv(b, origin, errs)
+        prow, toks, pls, mk, pools = fb_fixture()
+        env.pairs["body"] = {"store": True, "rows": prow}
+        # pools/multi 500: ردیف‌ها و چیپِ Exit می‌مانند، عددها «—»
+        env.gt = fb_gt_for(toks, pls, pools_status=500)
+        pg = await env.open()
+        await fb_wait_rows(pg, 4, timeout=30000)
+        await pg.wait_for_selector("#flowBody .fnote", timeout=5000)
+        rows = await pg.evaluate(FB_TBL_JS)
+        assert [r["sym"] for r in rows].count("ALPHA") == 1, "[flow board gt down] tokens still listed: %s" % [r["sym"] for r in rows]
+        assert all(r["net"] == "—" and r["bs"] == "— / —" and r["share"] == "—" and r["vol"] == "—" for r in rows), "[flow board gt down] every number must be a dash: %s" % rows
+        assert all(r["chip"] == "Sell route quoted" for r in rows), "[flow board gt down] Exit chips stay"
+        txt = await pg.inner_text("#flowBody")
+        assert "Market activity is unavailable right now — unknown, not zero." in txt, "[flow board gt down] note: %r" % txt[-200:]
+        assert not FB_BAD_RE.search(txt) and "$0" not in txt, "[flow board gt down] bad text %r" % FB_BAD_RE.search(txt)
+        assert await pg.evaluate("() => document.querySelector('.fbAv img') !== null"), "[flow board gt down] logos from tokens/multi still show"
+        await pg.context.close()
+        # tokens/multi 500
+        env.gt = fb_gt_for(toks, pls, tokens_status=500)
+        pg = await env.open()
+        await fb_wait_rows(pg, 4, timeout=30000)
+        rows = await pg.evaluate(FB_TBL_JS)
+        assert all(r["net"] == "—" for r in rows) and "unavailable right now" in await pg.inner_text("#flowBody"), "[flow board gt down] tokens/multi down: %s" % rows
+        await pg.context.close()
+        # شمارهای خراب/غایب در پاسخِ *موفق*: همه «—»، هرگز ۰
+        one = [("QQQ", "sell", 600, None, None)]
+        prow1, toks1, _p, mk1, pools1 = fb_fixture(rows=one)
+        bad_pool = {"id": "base_" + pools1(0), "type": "pool", "attributes": {"address": pools1(0), "volume_usd": {"h1": "", "h6": "abc"},
+                    "transactions": {"h1": {"buys": "x", "sells": None, "buyers": None, "sellers": ""}}}}
+        env.pairs["body"] = {"store": True, "rows": prow1}
+        env.gt = fb_gt_for(toks1, [bad_pool])
+        pg = await env.open()
+        await fb_wait_rows(pg, 1)
+        r1 = (await pg.evaluate(FB_TBL_JS))[0]
+        assert (r1["net"], r1["bs"], r1["share"], r1["vol"]) == ("—", "— / —", "—", "—"), "[flow board gt down] invalid or missing numbers render a dash, never 0: %s" % r1
+        assert not FB_BAD_RE.search(await pg.inner_text("#flowBody")), "[flow board gt down] bad text in a row with invalid numbers"
+        await pg.context.close()
+        env.pairs["body"] = {"store": True, "rows": prow}
+        # pairs.json 500
+        env.pairs["status"] = 500
+        env.gt = fb_gt_for(toks, pls)
+        pg = await env.open()
+        await pg.wait_for_selector("#flowBody .fbMsg", timeout=15000)
+        msg = await pg.inner_text("#flowBody .fbMsg")
+        assert msg == "New pairs could not be loaded. Activity is unknown, not zero.", "[flow board gt down] pairs.json 500: %r" % msg
+        assert await pg.evaluate("() => document.querySelectorAll('#flowBody .fbRow').length") == 0
+        await pg.context.close()
+        # pairs.json is garbage (200 but wrong shape)
+        env.pairs.update(status=200, body={"rows": "nope"})
+        pg = await env.open()
+        await pg.wait_for_selector("#flowBody .fbMsg", timeout=15000)
+        assert (await pg.inner_text("#flowBody .fbMsg")).startswith("New pairs could not be loaded."), "[flow board gt down] bad shape"
+        await pg.context.close()
+        print("[flow board gt down] pools/multi 500 or tokens/multi 500: tokens and Exit chips stay, every number is a dash, the unavailable note shows, no 0/NaN; pairs.json 500 or a wrong shape: 'New pairs could not be loaded. Activity is unknown, not zero.' and no table")
+    finally:
+        await b.close()
+        srv.shutdown()
+
+
+async def check_flow_board_click(p, errors):
+    srv, origin = fb_serve()
+    b = await p.chromium.launch()
+    errs = []
+    AERO = "0x940181a94A35A4569E4529A3CDfB74e38FD98631"
+    try:
+        env = FbEnv(b, origin, errs)
+        rows_ = [("AERO", "sell", 600, (20, 5, 30, 8, "5000"), (40, 9, 60, 14, "9000")),
+                 ("NEWT", "sell", 1200, (12, 2, 15, 3, "800"), (22, 4, 30, 5, "1500"))]
+        prow, toks, pls, mk, pools = fb_fixture(rows=rows_)
+        prow[0]["address"] = AERO
+        toks[0]["attributes"]["address"] = AERO
+        toks[0]["id"] = "base_" + AERO
+        env.pairs["body"] = {"store": True, "rows": prow}
+        env.gt = fb_gt_for(toks, pls)
+        pg = await env.open()
+        await fb_wait_rows(pg, 2)
+        before = await pg.evaluate("() => ({out: tokenOut.symbol, inn: tokenIn.symbol})")
+        await pg.click('.fbRow[data-addr="%s"]' % AERO)
+        await pg.wait_for_function("() => !document.getElementById('flowBackRow').hidden", timeout=20000)
+        st = await pg.evaluate("() => ({out: tokenOut.symbol, sym: document.getElementById('flowTokSym').textContent, board: !!document.querySelector('.fbTtl'), tfs: document.getElementById('flowTfs').offsetParent !== null, back: document.getElementById('flowBack').textContent})")
+        assert st["out"] == "AERO" and st["sym"] == "AERO" and not st["board"] and st["tfs"] and st["back"] == "← Back to all tokens", "[flow board click] row click opens the per-token flow: %s" % st
+        await pg.click("#flowBack")
+        await pg.wait_for_selector("#flowBody .fbRow", timeout=20000)
+        st = await pg.evaluate("() => ({out: tokenOut.symbol, back: document.getElementById('flowBackRow').hidden, tfs: document.getElementById('flowTfs').offsetParent === null})")
+        assert st == {"out": "AERO", "back": True, "tfs": True}, "[flow board click] Back returns to the board and leaves the swap token alone: %s" % st
+        # فشارِ دوباره روی ردیفِ دیگر: وارد کردنِ توکنِ ناشناس یا خطای صریح، نه بی‌صدا
+        await pg.click('.fbRow[data-addr="%s"]' % prow[1]["address"])
+        await pg.wait_for_function("() => !document.getElementById('flowBackRow').hidden || document.querySelector('#flowBody .note.err')", timeout=20000)
+        after = await pg.evaluate("() => ({back: !document.getElementById('flowBackRow').hidden, err: (document.querySelector('#flowBody .note.err') || {}).textContent || '', out: tokenOut.symbol})")
+        assert after["back"] or after["err"].startswith("Could not open this token"), "[flow board click] an unopenable token must show an error: %s" % after
+        await pg.context.close()
+        # گزارشِ خطا: توکنی که import نمی‌شود (RPC نمی‌داند) خطای صریح می‌دهد و تابلو می‌ماند
+        pg = await env.open(init=["window.__fbBreak = true;"])
+        await fb_wait_rows(pg, 2)
+        await pg.evaluate("() => { window.importToken = async function () {}; }")
+        # importToken تابعِ اعلانی است؛ با جایگزینی، ردیفِ ناشناس باید خطا بدهد
+        await pg.click('.fbRow[data-addr="%s"]' % prow[1]["address"])
+        await pg.wait_for_selector("#flowBody .note.err", timeout=10000)
+        err = await pg.inner_text("#flowBody .note.err")
+        assert err.startswith("Could not open this token"), "[flow board click] %r" % err
+        assert await pg.evaluate("() => document.querySelectorAll('#flowBody .fbRow').length") == 2, "[flow board click] the board stays after a failed open"
+        await pg.context.close()
+
+        # سولانا
+        srows = [("AAA", "sell", 600, (20, 5, 30, 8, "5000"), (40, 9, 60, 14, "9000")),
+                 ("BBB", "sell", 1200, (12, 2, 15, 3, "800"), (22, 4, 30, 5, "1500"))]
+        prow, toks, pls, mk, pools = fb_fixture(net="solana", rows=srows)
+        env.pairs["body"] = {"store": True, "rows": prow}
+        env.gt = fb_gt_for(toks, pls)
+        pg = await env.open(hash_="#flow?chain=solana")
+        await fb_wait_rows(pg, 2)
+        sub = await pg.inner_text(".fbSub")
+        assert sub == "New Solana pairs · last hour · by unique wallets", "[flow board click] Solana subtitle: %r" % sub
+        assert any("networks/solana/tokens/multi/" in c for c in env.calls) and any("networks/solana/pools/multi/" in c for c in env.calls)
+        target = prow[0]["address"]
+        await pg.click('.fbRow[data-addr="%s"]' % target)
+        await pg.wait_for_function("(m) => solMintCur === m && !document.getElementById('flowBackRow').hidden", arg=target, timeout=20000)
+        await pg.click("#flowBack")
+        await pg.wait_for_selector("#flowBody .fbRow", timeout=15000)
+        assert await pg.evaluate("(m) => solMintCur === m", target), "[flow board click] Solana: Back leaves the selected token alone"
+        await pg.context.close()
+        print("[flow board click] Base row click opens that token's flow (swap token follows, 5-window switch back, Back link), 'Back to all tokens' returns to the board without touching the token, an unopenable token shows 'Could not open this token' and keeps the board; Solana: subtitle, tokens/multi + pools/multi on solana, row click selects the mint, Back returns")
+    finally:
+        await b.close()
+        srv.shutdown()
+
+
+async def check_flow_board_mobile(p, errors):
+    srv, origin = fb_serve()
+    b = await p.chromium.launch()
+    errs = []
+    try:
+        env = FbEnv(b, origin, errs)
+        prow, toks, pls, mk, pools = fb_fixture()
+        env.pairs["body"] = {"store": True, "rows": prow}
+        env.gt = fb_gt_for(toks, pls)
+        for chain in ("base", "solana"):
+            if chain == "solana":
+                prow, toks, pls, mk, pools = fb_fixture(net="solana")
+                env.pairs["body"] = {"store": True, "rows": prow}
+                env.gt = fb_gt_for(toks, pls)
+            pg = await env.open(vw=390, vh=844, hash_="#flow" + ("?chain=solana" if chain == "solana" else ""))
+            await fb_wait_rows(pg)
+            await pg.click(".fbTog")
+            await fb_wait_rows(pg, 6)
+            m = await pg.evaluate("""() => { const se = document.scrollingElement;
+                const vis = s => [...document.querySelectorAll(s)].map(e => getComputedStyle(e).display !== 'none');
+                const card = document.querySelector('#view-flow > .card').getBoundingClientRect();
+                const t = document.querySelector('.fbTbl').getBoundingClientRect();
+                return {sw: se.scrollWidth, iw: innerWidth, bs: vis('.fbBS'), vol: vis('.fbVol'), tbl: [t.left, t.right], card: [card.left, card.right],
+                        chips: [...document.querySelectorAll('.fbChip')].map(c => c.getBoundingClientRect().right).reduce((a, b) => Math.max(a, b), 0)}; }""")
+            assert m["sw"] <= 390, "[flow board mobile] %s: page scrolls horizontally at 390: %s" % (chain, m)
+            assert not any(m["bs"]) and not any(m["vol"]), "[flow board mobile] %s: Buyers / Sellers and Volume columns must be hidden: %s" % (chain, m)
+            assert m["tbl"][0] >= m["card"][0] - 0.5 and m["tbl"][1] <= m["card"][1] + 0.5 and m["chips"] <= m["card"][1] + 0.5, "[flow board mobile] %s: table inside the card: %s" % (chain, m)
+            await pg.context.close()
+        # جریانِ یک توکن + کارت Early buyers هم در ۳۹۰ سر نرود
+        env.gt = eb_gt(eb_trades_ok(), quote=False)
+        pg = await env.open(vw=390, vh=844, board=False)
+        await pg.wait_for_selector("#flowEarly .ebBar", timeout=20000)
+        sw = await pg.evaluate("() => document.scrollingElement.scrollWidth")
+        assert sw <= 390, "[flow board mobile] the per-token flow with the Early buyers card scrolls horizontally: %d" % sw
+        await pg.context.close()
+        print("[flow board mobile] at 390px (Base and Solana) the board and the per-token flow with the Early buyers card never scroll horizontally, Buyers / Sellers and Volume are hidden, the table stays inside the card")
+    finally:
+        await b.close()
+        srv.shutdown()
+
+
+# ---------- Early buyers ----------
+EB_TOK = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913"   # USDC: توکنِ پیش‌فرضِ خروجی روی Base
+EB_OTHER = "0xcbB7C0000aB88B473b1f5aFd9ef808440eed33Bf"
+EB_POOL = "0x1111111111111111111111111111111111111111"
+EB_SEQ = ([(i, "buy", 100) for i in range(25)] + [(6, "buy", 100), (0, "sell", 100), (1, "sell", 96), (2, "sell", 50),
+          (3, "sell", 5), (4, "sell", 5.5), (5, "sell", 95), (6, "sell", 150), (7, "sell", 10), (8, "sell", 4),
+          (20, "sell", 100), (10, "sell", 30), (10, "sell", 30), (11, "sell", 49), (11, "sell", 51)])
+# دستی: ۲۰ خریدارِ اول = W0..W19؛ Sold all = W0,W1,W5,W11 (۴)؛ Sold part = W2,W4,W6,W7,W10 (۵)؛ Still holding = ۱۱
+# خریدِ ۲۰ نفر = ۱۹×۱۰۰ + W6 (۲۰۰) = ۲۱۰۰؛ فروش = ۱۰۰+۹۶+۵۰+۵+۵٫۵+۹۵+۱۵۰+۱۰+۴+۶۰+۱۰۰ = ۶۷۵٫۵ → ۳۲٪ (W20 در شمار نیست)
+EB_EXPECT = {"all": 4, "part": 5, "hold": 11, "pct": "32%"}
+
+
+def eb_wallet(i, solana=False, upper=False):
+    if solana:
+        w = fb_b58(0x300 + i)
+        return w
+    h = "%040x" % (0x300 + i)
+    return "0x" + (h.upper() if upper else h)
+
+
+def eb_trades_ok(seq=None, solana=False, tok=None, other=None, quote=False, start_after=10, step=10, case_twin=False):
+    """seq = [(کیف، buy|sell، مقدار)]؛ خروجی = (created_ago_sec, trades تازه‌ترین‌اول)."""
+    seq = seq or EB_SEQ
+    tok = tok or (FB_SOL_USDC if solana else EB_TOK)
+    other = other or (FB_SOL_WSOL if solana else EB_OTHER)
+    created_ago = 3 * 3600
+    out = []
+    for n, (w, side, amt) in enumerate(seq):
+        buy = side == "buy"
+        who = eb_wallet(w, solana, upper=(not solana and not buy and w in (0, 1)))
+        if case_twin and solana and w == 24:
+            who = eb_wallet(0, True).lower()
+        base_kind = side if not quote else ("sell" if buy else "buy")
+        out.append({"id": "t%d" % n, "type": "trade", "attributes": {
+            "block_timestamp": fb_iso(created_ago - start_after - n * step),
+            "kind": base_kind, "tx_from_address": who, "tx_hash": "h%d" % n,
+            "from_token_address": other if buy else tok, "to_token_address": tok if buy else other,
+            "from_token_amount": ("%g" % (amt * 0.01)) if buy else ("%g" % amt),
+            "to_token_amount": ("%g" % amt) if buy else ("%g" % (amt * 0.01))}})
+    out.reverse()
+    return created_ago, out, quote
+
+
+def eb_gt(spec, quote=False, created_override=None, trades_status=200, tok=None, solana=False, in_pool=True, pool=None):
+    created_ago, trades, q = spec
+    tok = tok or (FB_SOL_USDC if solana else EB_TOK)
+    other = FB_SOL_WSOL if solana else EB_OTHER
+    net = "solana" if solana else "base"
+    pool = pool or (fb_b58(0x500) if solana else EB_POOL)
+    base_id, quote_id = ("%s_%s" % (net, other), "%s_%s" % (net, tok)) if q else ("%s_%s" % (net, tok), "%s_%s" % (net, other))
+    if not in_pool:
+        base_id, quote_id = "%s_%s" % (net, other), "%s_%s" % (net, fb_evm(0x999) if not solana else fb_b58(0x999))
+    pool_obj = {"id": "%s_%s" % (net, pool), "type": "pool", "attributes": {
+        "address": pool, "name": "T / O", "reserve_in_usd": "250000.5", "pool_created_at": fb_iso(
+            created_override if created_override is not None else created_ago),
+        "volume_usd": {"h1": "1000", "h6": "5000", "h24": "9000000"},
+        "transactions": {"h1": {"buys": 10, "sells": 5, "buyers": 7, "sellers": 4}, "h6": {"buys": 10, "sells": 5, "buyers": 7, "sellers": 4},
+                         "h24": {"buys": 10, "sells": 5, "buyers": 7, "sellers": 4}}},
+        "relationships": {"base_token": {"data": {"id": base_id, "type": "token"}}, "quote_token": {"data": {"id": quote_id, "type": "token"}}}}
+
+    def gt(path):
+        if solana:
+            if path.endswith("/tokens/%s/pools" % tok):
+                return (200, {"data": [pool_obj]})
+            if path.endswith("/pools/%s/trades" % pool):
+                return (trades_status, {"data": trades})
+            if "/tokens/" in path and "/multi/" not in path:
+                return (200, {"data": {"attributes": {"name": "USD Coin", "symbol": "USDC", "decimals": 6, "price_usd": "1"}}})
+            return None
+        if "/tokens/%s" % tok in path and "/multi/" not in path and not path.endswith("/pools"):
+            return (200, {"data": {"id": "base_" + tok, "attributes": {"address": tok, "symbol": "USDC"},
+                                   "relationships": {"top_pools": {"data": [{"id": "base_" + pool, "type": "pool"}]}}}})
+        if path.endswith("/pools/%s" % pool):
+            return (200, {"data": pool_obj})
+        if path.endswith("/pools/%s/trades" % pool):
+            return (trades_status, {"data": trades})
+        return None
+    return gt
+
+
+EB_TEXT_JS = "() => { const e = document.getElementById('flowEarly'); return e.hidden ? null : e.innerText.replace(/\\s+/g, ' ').trim(); }"
+
+
+async def eb_card(pg, timeout=20000):
+    await pg.wait_for_function("() => { const e = document.getElementById('flowEarly'); return !e.hidden && e.textContent.trim() !== '' && !e.querySelector('.sk'); }", timeout=timeout)
+    return await pg.evaluate(EB_TEXT_JS)
+
+
+async def check_early_buyers(p, errors):
+    srv, origin = fb_serve()
+    b = await p.chromium.launch()
+    errs = []
+    MANY = "Early buyers: unknown — this pool has too many trades to see its first buyers. Unknown, not zero."
+    NA = "Early buyers: unknown — trade history is unavailable. Unknown, not zero."
+    OK = ("Early buyers First 20 buyers of USDC Sold all 4 · Sold part 5 · Still holding 11 32% of their tokens sold "
+          "Only sells through this pool are counted; tokens moved to another wallet look like holding.")
+    try:
+        env = FbEnv(b, origin, errs)
+
+        async def run(spec, **kw):
+            env.calls.clear()
+            env.gt = eb_gt(spec, **kw)
+            pg = await env.open(board=False)
+            assert await pg.evaluate("() => tokenOut.address") == EB_TOK, "[early buyers] fixture assumes the default flow token is USDC"
+            return pg, await eb_card(pg)
+
+        # 1) ۴۰ معامله از لحظه‌ی ساخت: اعدادِ دستی
+        pg, t = await run(eb_trades_ok())
+        assert t == OK, "[early buyers] 40 trades from creation: %r" % t
+        segs = await pg.evaluate("() => { const b = document.querySelector('#flowEarly .ebBar'); return {h: b.getBoundingClientRect().height, w: [...b.children].map(i => i.className + ':' + Math.round(i.getBoundingClientRect().width / b.getBoundingClientRect().width * 100)), n: getComputedStyle(b.querySelector('.n')).backgroundColor, wr: getComputedStyle(b.querySelector('.w')).backgroundColor, p: getComputedStyle(b.querySelector('.p')).backgroundColor}; }")
+        assert segs["h"] == 10 and segs["w"] == ["n:20", "w:25", "p:55"], "[early buyers] 10px stacked bar neg/warn/pos with 4/5/11 of 20: %s" % segs
+        assert (segs["n"], segs["wr"], segs["p"]) == (await fb_color(pg, "--neg"), await fb_color(pg, "--warn"), await fb_color(pg, "--pos")), "[early buyers] bar colours"
+        assert await pg.evaluate("() => document.querySelectorAll('#flowBody .flowkv').length > 0 || document.querySelector('#flowBody').textContent.trim().length > 0"), "[early buyers] the per-token flow is still there"
+        trades_calls = [c for c in env.calls if c.endswith("/trades")]
+        assert len(trades_calls) == 1, "[early buyers] one trades request: %s" % env.calls
+        assert not FB_BAD_RE.search(t), "[early buyers] bad text"
+        await pg.context.close()
+        # 2) توکن «مقابل» (quote): kind وارونه، نتیجه همان
+        pg, t = await run(eb_trades_ok(quote=True), quote=True)
+        assert t == OK, "[early buyers] token as quote token: %r" % t
+        await pg.context.close()
+        # 3) ۳۰۰ معامله، قدیمی‌ترین دو ساعت بعد از ساخت، توکن در استخر نیست، معاملات 500، بدون خریدار، کمتر از ۲۰
+        spec = eb_trades_ok()
+        big = (spec[0], (spec[1] * 8)[:300], False)
+        assert len(big[1]) == 300
+        pg, t = await run(big)
+        assert t == MANY, "[early buyers] 300 trades -> unknown (too many): %r" % t
+        await pg.context.close()
+        pg, t = await run((4 * 3600, spec[1], False), created_override=5 * 3600)
+        assert t == MANY, "[early buyers] oldest trade 2h after creation -> unknown (too many): %r" % t
+        await pg.context.close()
+        pg, t = await run(spec, in_pool=False)
+        assert t == NA, "[early buyers] token neither base nor quote -> unknown: %r" % t
+        await pg.context.close()
+        pg, t = await run(spec, trades_status=500)
+        assert t == NA, "[early buyers] trades 500 -> unknown (unavailable): %r" % t
+        assert await pg.evaluate("() => document.getElementById('flowBody').textContent.trim().length > 0 && !!document.getElementById('flowTokSym')"), "[early buyers] a failed fetch never breaks the rest of the flow"
+        await pg.context.close()
+        only_sells = eb_trades_ok(seq=[(1, "sell", 5), (2, "sell", 6)])
+        pg, t = await run(only_sells)
+        assert t == NA, "[early buyers] zero buyers -> unknown: %r" % t
+        await pg.context.close()
+        seven = eb_trades_ok(seq=[(i, "buy", 10) for i in range(7)] + [(0, "sell", 10), (1, "sell", 1)])
+        pg, t = await run(seven)
+        assert t.startswith("Early buyers First 7 buyers of USDC Sold all 1 · Sold part 1 · Still holding 5 ") and "16% of their tokens sold" in t, "[early buyers] fewer than 20 buyers uses however many: %r" % t
+        await pg.context.close()
+        # 4) سولانا: همان معاملاتِ renderSolFlow (درخواستِ trades فقط یکی)، آدرسِ کیف عیناً (بدون lowercase)
+        sol_spec = eb_trades_ok(solana=True, case_twin=True)
+        env.calls.clear()
+        env.gt = eb_gt(sol_spec, solana=True)
+        pg = await env.open(hash_="#flow?chain=solana", board=False)
+        t = await eb_card(pg)
+        assert t == OK, "[early buyers] Solana: %r" % t
+        assert len([c for c in env.calls if c.endswith("/trades")]) == 1, "[early buyers] Solana reuses the trades renderSolFlow fetched: %s" % env.calls
+        # تغییرِ پنجره دوباره نمی‌پرسد
+        await pg.click('#flowTfs [data-w="h6"]')
+        await pg.wait_for_timeout(500)
+        assert len([c for c in env.calls if c.endswith("/trades")]) == 1 and await pg.evaluate("() => !document.getElementById('flowEarly').hidden"), "[early buyers] window change keeps the card, no new request"
+        await pg.context.close()
+        print("[early buyers] 40 trades from creation: 20 first buyers -> Sold all 4 · Sold part 5 · Still holding 11, 32% of tokens sold (hand-computed, the 21st buyer's sell and a second buy counted correctly, upper-case Base wallets merged), 10px neg/warn/pos bar; token as quote token gives the same numbers; 300 trades / oldest 2h after creation -> 'too many trades'; token not in pool / trades 500 / zero buyers -> 'trade history is unavailable'; 7 buyers -> 'First 7 buyers'; Solana reuses the existing trades request and keeps wallet case")
+    finally:
+        await b.close()
+        srv.shutdown()
+
+
+# ---------- حکمِ صادرکننده برای سهام ----------
+SI_NOTE = "The issuer can freeze accounts and recover tokens. This is expected for regulated stock tokens and is shown below for transparency."
+SI_CHIP = "Issuer-controlled · regulated"
+
+
+async def check_stock_issuer(p, errors):
+    srv, origin = fb_serve()
+    b = await p.chromium.launch()
+    errs = []
+    src = open(os.path.join(HERE, "..", "index.html"), encoding="utf-8").read()
+    prog = re.search(r'const SOL_TOKEN_PROGRAMS=\[\s*"([^"]+)"', src)
+    assert prog, "[stocks issuer verdict] SOL_TOKEN_PROGRAMS not found"
+    try:
+        env = FbEnv(b, origin, errs)
+        # --- Base: همان rep که scanToken می‌سازد، با آدرسِ سهام / آدرسِ عادی ---
+        pg = await env.open(hash_="#swap", board=False)
+        res = await pg.evaluate("""() => {
+            const mk = (addr) => { const rep = {address: addr, symbol: 'X', findings: [
+                {level: 'high', title: 'Owner can mint', detail: 'd1'}, {level: 'medium', title: 'Proxy', detail: 'd2'},
+                {level: 'ok', title: 'Sellable', detail: 'd3'}, {level: 'info', title: 'Tradability unknown', detail: 'd4'}],
+                owner: null, native: false, isProxy: false, liqUsd: 20000, canBuy: null, canSell: null, unknown: 1};
+              rep.score = riskScore(rep); rep.verdict = verdictOf(rep); return rep; };
+            const out = {};
+            for (const [k, a] of [['tsla', BASE_TOKENS.find(t => t.symbol === 'TSLAc').address], ['tslaLow', BASE_TOKENS.find(t => t.symbol === 'TSLAc').address.toLowerCase()],
+                                  ['aero', BASE_TOKENS.find(t => t.symbol === 'AERO').address]]) {
+              const rep = mk(a), score0 = rep.score, verdict0 = JSON.stringify(rep.verdict);
+              renderSafety(rep);
+              const bx = document.getElementById('safetyBody');
+              out[k] = {text: bx.textContent.replace(/\\s+/g, ' ').trim(), chip: (bx.querySelector('.issChip') || {}).textContent || null, ring: !!bx.querySelector('.ring'),
+                        chk: bx.querySelectorAll('.chk').length, titles: [...bx.querySelectorAll('.chk b')].map(e => e.textContent),
+                        rv: (bx.querySelector('.rv') || {}).textContent || null, score: rep.score === score0 && JSON.stringify(rep.verdict) === verdict0, scoreVal: score0, verdict: rep.verdict.txt};
+              const cs = bx.querySelector('.issChip') && getComputedStyle(bx.querySelector('.issChip'));
+              out[k].css = cs ? [cs.color, cs.backgroundColor] : null;
+            }
+            // دومین چیدمانِ گزارش (صفحه‌ی توکن / فشرده)
+            const rep2 = mk(BASE_TOKENS.find(t => t.symbol === 'MSTRc').address);
+            for (const compact of [true, false]) {
+              renderSafetyReport(rep2, 'solSafety', 'zz', compact);
+              const bx = document.getElementById('solSafety');
+              out['rep' + compact] = {chip: (bx.querySelector('.issChip') || {}).textContent || null, ring: !!bx.querySelector('.ring'), text: bx.textContent.replace(/\\s+/g, ' ').trim(),
+                                      titles: [...bx.querySelectorAll('b')].map(e => e.textContent).filter(t => ['Owner can mint', 'Proxy', 'Sellable', 'Tradability unknown'].includes(t))};
+            }
+            return out;
+        }""")
+        for k in ("tsla", "tslaLow"):
+            r = res[k]
+            assert r["chip"] == SI_CHIP and not r["ring"] and SI_NOTE in r["text"] and "Risk " not in r["text"] and "/100" not in r["text"], "[stocks issuer verdict] Base %s: %s" % (k, r)
+            assert r["titles"] == ["Owner can mint", "Proxy", "Tradability unknown", "Sellable"] and r["chk"] == res["aero"]["chk"], "[stocks issuer verdict] Base %s: every finding stays: %s" % (k, r)
+            assert r["score"], "[stocks issuer verdict] riskScore and rep.verdict are not modified"
+        ar = res["aero"]
+        assert ar["chip"] is None and ar["ring"] and ar["rv"] == ar["verdict"] and "Risk %d/100 · lower is safer" % ar["scoreVal"] in ar["text"] and SI_NOTE not in ar["text"], "[stocks issuer verdict] a normal token keeps the old verdict and score: %s" % ar
+        for compact in ("reptrue", "repfalse"):
+            r = res[compact]
+            assert r["chip"] == SI_CHIP and not r["ring"] and SI_NOTE in r["text"] and "Risk " not in r["text"] and sorted(r["titles"]) == ["Owner can mint", "Proxy", "Sellable", "Tradability unknown"], "[stocks issuer verdict] report layout %s: %s" % (compact, r)
+        css = res["tsla"]["css"]
+        want = await pg.evaluate("""() => { const t = document.createElement('i'); t.style.color = 'var(--acc)'; t.style.background = 'color-mix(in srgb, var(--acc) 14%, transparent)'; document.body.appendChild(t);
+            const c = getComputedStyle(t); const r = [c.color, c.backgroundColor]; t.remove(); return r; }""")
+        assert css == want, "[stocks issuer verdict] chip is --acc text on a 14%% --acc tint: %s vs %s" % (css, want)
+        # --- تشخیص: Base بی‌حساس به حروف، سولانا عیناً ---
+        iso = await pg.evaluate("""() => { const m = STK_SOL[0].mint, a = BASE_TOKENS.find(t => t.symbol === 'AAPLc').address;
+            return [isStockRep({solana: true, mint: m}), isStockRep({solana: true, mint: m.toLowerCase()}), isStockRep({solana: true, mint: m.toUpperCase()}),
+                    isStockRep({address: a}), isStockRep({address: a.toLowerCase()}), isStockRep({address: a.toUpperCase().replace('0X', '0x')}), isStockRep({address: BASE_TOKENS[0].address, native: true}), isStockRep(null)]; }""")
+        assert iso == [True, False, False, True, True, True, False, False], "[stocks issuer verdict] detection (Solana mint exact, Base case-insensitive): %s" % iso
+        await pg.context.close()
+
+        # --- Solana: مسیر کاملِ solLoadDetails با RPC جعلی ---
+        stock_mint = re.search(r'\{sym:"TSLAx",name:"Tesla",mint:"([^"]+)"', src).group(1)
+
+        def rpc(method, params):
+            if method == "getAccountInfo":
+                return {"value": {"owner": prog.group(1), "data": {"parsed": {"type": "mint", "info": {
+                    "mintAuthority": None, "freezeAuthority": fb_b58(0x777), "supply": "1000000", "decimals": 6}}}}}
+            if method == "getTokenLargestAccounts":
+                return {"value": [{"amount": "100000", "address": fb_b58(0x778)}]}
+            if method == "getEpochInfo":
+                return {"epoch": 700}
+            return None
+        env.rpc = rpc
+        env.gt = lambda path: ((200, {"data": {"attributes": {"name": "Tesla xStock", "symbol": "TSLAx", "decimals": 6, "price_usd": "250"}}}) if "/tokens/" in path and "/multi/" not in path and not path.endswith("/pools") else None)
+        pg = await env.open(hash_="#swap?chain=solana", board=False)
+        await pg.wait_for_function("() => document.getElementById('solSafety').textContent.includes('Freeze authority')", timeout=20000)
+        usdc = await pg.evaluate("() => ({text: document.getElementById('solSafety').textContent.replace(/\\s+/g, ' '), chip: !!document.querySelector('#solSafety .issChip'), rv: (document.querySelector('#solSafety .rv') || {}).textContent})")
+        assert not usdc["chip"] and usdc["rv"] in ("High risk", "Caution", "Acceptable with care", "No obvious red flags", "Checks incomplete", "Risk not assessed") and "out of 100" in usdc["text"], "[stocks issuer verdict] normal Solana token keeps the old verdict: %s" % usdc
+        await pg.evaluate("(m) => solAppLoadToken(m)", stock_mint)
+        await pg.wait_for_function("() => !!document.querySelector('#solSafety .issChip')", timeout=20000)
+        sk = await pg.evaluate("() => ({text: document.getElementById('solSafety').textContent.replace(/\\s+/g, ' '), ring: !!document.querySelector('#solSafety .ring'), b: [...document.querySelectorAll('#solSafety b')].map(e => e.textContent)})")
+        assert SI_CHIP in sk["text"] and SI_NOTE in sk["text"] and not sk["ring"] and "Risk " not in sk["text"] and "out of 100" not in sk["text"], "[stocks issuer verdict] Solana stock: %s" % sk
+        for title in ("Mint authority", "Freeze authority", "Transfer fee", "Largest 20 token accounts"):
+            assert title in sk["b"], "[stocks issuer verdict] Solana finding %r must stay in the list: %s" % (title, sk["b"])
+        await pg.context.close()
+        print("[stocks issuer verdict] Base STK token (checksummed or lower-case address) and Solana STK_SOL mint (exact match; lower/upper-case rejected) show the 'Issuer-controlled · regulated' chip (--acc on a 14% tint) with the exact note, no ring and no score, every finding still listed in both report layouts, riskScore/verdict untouched; a normal Base and Solana token keeps its old verdict and 'Risk N/100'")
+    finally:
+        await b.close()
+        srv.shutdown()
+
+
+async def check_flow_screens(p, errors):
+    """فقط با ZX_ONLY=check_flow_screens و ZX_SHOTS=<پوشه>: عکسِ تابلو، کارت Early buyers و کارتِ ایمنیِ سهام (تیره، ۱۲۸۰ و ۳۹۰)."""
+    out = os.environ.get("ZX_SHOTS")
+    if not out:
+        return
+    os.makedirs(out, exist_ok=True)
+    srv, origin = fb_serve()
+    b = await p.chromium.launch()
+    try:
+        env = FbEnv(b, origin, [])
+        prow, toks, pls, mk, pools = fb_fixture()
+        env.pairs["body"] = {"store": True, "rows": prow}
+        for vw, vh, tag in ((1280, 900, "desktop"), (390, 844, "mobile")):
+            env.gt = fb_gt_for(toks, pls)
+            pg = await env.open(vw=vw, vh=vh)
+            await fb_wait_rows(pg)
+            await pg.click(".fbTog")
+            await fb_wait_rows(pg, 6)
+            await pg.add_style_tag(content="#nav{display:none!important}" if tag == "mobile" else "i{}")
+            await pg.wait_for_timeout(500)
+            await pg.screenshot(path=os.path.join(out, "board-%s.png" % tag), full_page=True)
+            await pg.context.close()
+            env.gt = eb_gt(eb_trades_ok(), quote=False)
+            pg = await env.open(vw=vw, vh=vh, board=False)
+            await eb_card(pg)
+            await pg.add_style_tag(content="#nav{display:none!important}" if tag == "mobile" else "i{}")
+            await pg.wait_for_timeout(1500)
+            await pg.screenshot(path=os.path.join(out, "early-%s.png" % tag), full_page=True)
+            await pg.context.close()
+            pg = await env.open(vw=vw, vh=vh, hash_="#swap", board=False)
+            await pg.evaluate("""() => { const rep = {address: BASE_TOKENS.find(t => t.symbol === 'TSLAc').address, symbol: 'TSLAc', findings: [
+                {level: 'high', title: 'Owner can mint', detail: 'The owner can create new tokens at will.'}, {level: 'medium', title: 'Upgradeable proxy', detail: 'The contract logic can be replaced.'},
+                {level: 'ok', title: 'Sellable', detail: 'A sell quote was returned.'}, {level: 'info', title: 'Tradability unknown', detail: 'Not checked.'}],
+                owner: null, native: false, isProxy: true, liqUsd: 20000, canBuy: null, canSell: null, unknown: 1};
+              rep.score = riskScore(rep); rep.verdict = verdictOf(rep); renderSafety(rep); }""")
+            await pg.add_style_tag(content="#nav{display:none!important}" if tag == "mobile" else "i{}")
+            await pg.evaluate("() => mtabSelect('exit', false)")
+            await pg.wait_for_timeout(300)
+            box = await pg.evaluate("""() => { const r = document.querySelector('#safetyBody').closest('section').getBoundingClientRect();
+                return {x: r.left + scrollX, y: r.top + scrollY, width: r.width, height: r.height}; }""")
+            await pg.screenshot(path=os.path.join(out, "stock-safety-%s.png" % tag), full_page=True, clip=box)
+            await pg.context.close()
+    finally:
+        await b.close()
+        srv.shutdown()
+
+
 async def main():
     errors = []
     # خطاهایی که یک کاوشگر *عمداً* تولید می‌کند. اجازه‌ی عبور می‌گیرند ولی
@@ -8442,6 +9244,12 @@ async def main():
         await check_report_chain(p, errors)
         await check_gt_direct_first(p, errors)
         await check_sol_boot_gt(p, errors)
+        await check_flow_board(p, errors)
+        await check_flow_board_gt_down(p, errors)
+        await check_flow_board_click(p, errors)
+        await check_flow_board_mobile(p, errors)
+        await check_early_buyers(p, errors)
+        await check_stock_issuer(p, errors)
         b = await p.chromium.launch()
         pg = await b.new_page(viewport={"width": 1240, "height": 1000}, color_scheme="dark")
         pg.on("console", on_console)
@@ -19458,4 +20266,22 @@ async def main():
         sys.exit(1)
     print("   none")
 
-asyncio.run(main())
+
+
+async def only(names):
+    """ZX_ONLY=check_a,check_b — فقط همین کاوشگرها (برای شکستنِ عمدیِ نگهبان‌ها)؛ بدونِ آن، کلِ مجموعه."""
+    errors = []
+    async with async_playwright() as p:
+        for n in names:
+            await globals()[n](p, errors)
+    print("\n--- console errors ---")
+    if errors:
+        for e in errors: print("  ", e)
+        sys.exit(1)
+    print("   none")
+
+
+if os.environ.get("ZX_ONLY"):
+    asyncio.run(only(os.environ["ZX_ONLY"].split(",")))
+else:
+    asyncio.run(main())
