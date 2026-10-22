@@ -52,7 +52,55 @@ npx netlify deploy --prod --dir .
 # or pin index.html to IPFS
 ```
 
-## Tests
+## Watchlist and shareable reports
+
+The app's **Watch** buttons save Base and Solana tokens to a browser-only
+watchlist (`zaexa.watchlist.v1`, up to 30 tokens). It needs no wallet or account.
+The list persists across reloads and updates between tabs on the same origin.
+Opening it or selecting **Refresh prices** reads batched market data through
+the existing price cache. Missing prices stay unavailable. Opening a saved token
+loads its token page and its current exit check. There is no background polling,
+cross-device sync, or Telegram alert subscription in this version.
+
+The Exit Report provides **Get report card** and **Copy summary**. The preview
+exports a 1200×630 PNG locally and offers native image sharing where supported.
+Counts come from the same guarded rows as the report, including unknown results
+and failed Solana checks. The image and text distinguish Base sell quotes from
+Solana round-trip simulations, include the latest available check time in UTC,
+and link to the dated report. Empty reports have no sharing controls.
+
+Report images reuse the official SVG symbol and outlined wordmark already in
+the public report shell, with its existing Manrope font. The custom logotype is
+rendered from those SVG paths, never typeset as text. Export waits for the
+artwork and font to load. It requires no additional artwork, font files or
+asset build step.
+
+The report-sharing script is inlined by the Worker from `worker/report_share.js`;
+no new Cloudflare bindings, scheduled tasks or static asset copy rules are needed.
+Existing counters and the Telegram bot are unchanged.
+
+Additional offline checks, run from the repository root:
+
+```bash
+node --test worker/report_share.test.mjs
+# Requires the Node Playwright package and its Chromium browser:
+node web/test/watchlist-report-browser.mjs
+```
+
+For a shared Playwright installation, set `PLAYWRIGHT_MODULE` to its package
+directory. Optional `PLAYWRIGHT_CHROMIUM_EXECUTABLE` selects the browser, and
+`ZAEXA_TEST_OUTPUT` selects the preview output directory. Preview report figures
+are test fixtures, not live statistics.
+
+## Existing UI suite
+
+The landing page links directly to the Exit Report and introduces the local
+watchlist. Ambient radial glows and the full-page grain layer have been removed
+to eliminate circular gradient bands. The animated orbit paths, brand gradients
+and button gradients remain.
+The cyan and orchid orbit strokes are stronger in both landing animations.
+The hero's drifting dots now use a shared viewport-sized background canvas across
+the landing page, pause in hidden tabs, and stay static under reduced motion.
 
 The suite runs with no network at all. `stub-ethers.js` plays both the library
 and the Base chain, with a constant-product AMM and deliberately lopsided pools

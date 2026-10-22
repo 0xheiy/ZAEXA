@@ -1701,6 +1701,25 @@ footer .fine{max-width:78ch;margin:46px 0 0;font-size:11.5px;color:var(--tx3);li
    html ننشسته، در هدر نامرئی است — جایش هم نگه داشته نمی‌شود. */
 html:not(.netPlaced) .hdrRight>#srcMenu{display:none}
 html:not(.ctaReady) #actBtn:disabled,html:not(.ctaReady) #solSwapBtn:disabled{background:var(--grad);color:var(--on-acc)}
+.savedWatch{margin:0;overflow:hidden;grid-column:1/-1;min-width:0}
+@media(max-width:940px){.row.hero>.savedWatch{order:2}}
+.savedWatch>summary{list-style:none;display:flex;align-items:center;gap:10px;padding:16px 20px;cursor:pointer;font-size:13px;font-weight:650;min-height:52px}
+.savedWatch>summary::-webkit-details-marker{display:none}
+.savedWatch>summary::after{content:'⌄';margin-left:auto;color:var(--tx2)}
+.savedWatch[open]>summary::after{transform:rotate(180deg)}
+.savedStar{color:var(--acc);font-size:22px;line-height:1}.savedCount{font-size:11px;background:var(--raise);color:var(--tx2);border-radius:20px;padding:2px 8px}
+.savedInside{padding:0 20px 16px;border-top:1px solid var(--line)}
+.savedToolbar{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 0}
+.savedToolbar p,.savedEmpty,.savedStatus{color:var(--tx2);font-size:12px;line-height:1.6;margin:0}
+.savedToolbar .chip{flex-shrink:0;min-height:36px;color:var(--tx);background:var(--card2);border:1px solid var(--line2)}.savedStatus{padding-top:10px}.savedStatus:empty{display:none}
+.savedRow{display:flex;align-items:center;gap:12px;border-top:1px solid var(--line);min-height:66px;padding:10px 0}
+.savedLink{display:flex;align-items:center;gap:10px;min-width:0;flex:1;color:var(--tx);text-decoration:none}.savedBadge{font-size:10px;padding:4px 7px;border:1px solid var(--line);border-radius:6px;color:var(--tx2)}
+.savedIdentity{min-width:0}.savedIdentity b{display:block;max-width:35ch;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13px}.savedIdentity small{display:block;font-size:11px;color:var(--tx2)}
+.savedPrice{text-align:right;flex-shrink:0;font-size:13px;font-variant-numeric:tabular-nums}.savedPrice small{display:block;font-size:10px;color:var(--tx2);margin-top:3px}
+.savedRemove{width:36px;height:36px;border-radius:9px;color:var(--tx2);background:var(--raise);border:1px solid var(--line);flex-shrink:0;cursor:pointer;font-size:18px}
+.savedToggle[aria-pressed=true]{color:var(--acc)}.savedToggle:disabled{opacity:.5;cursor:default}
+.savedWatch summary:focus-visible,.savedWatch a:focus-visible,.savedWatch button:focus-visible,.savedToggle:focus-visible{outline:2px solid var(--acc);outline-offset:3px}
+@media(max-width:600px){.savedInside{padding-inline:14px}.savedWatch>summary{padding-inline:14px}.savedToolbar{align-items:flex-start}.savedToolbar p{max-width:25ch}.savedIdentity b{max-width:16ch}.savedRow{gap:8px}.savedLink{gap:7px}.savedBadge{font-size:9px}.savedPrice{font-size:12px}.savedToggle{white-space:nowrap}#baseSubRow section>header,#appSolSafetyCard>header{flex-wrap:wrap;row-gap:10px}}
 </style>
 </head>
 <body>
@@ -1913,6 +1932,14 @@ try{(function(){
 
 <main>
 <div id="solConnectionNotices"></div>
+<details class="card savedWatch" id="savedWatch">
+  <summary><span class="savedStar" aria-hidden="true">☆</span><span>Your watchlist</span><span class="savedCount" id="savedCount">0</span></summary>
+  <div class="savedInside">
+    <div class="savedToolbar"><p>Saved in this browser. No background alerts.</p><button type="button" class="chip" id="savedRefresh">Refresh prices</button></div>
+    <div id="savedList"><p class="savedEmpty">Keep tokens here with the ☆ Watch button beside a token’s exit check.</p></div>
+    <p id="savedStatus" class="savedStatus" role="status" aria-live="polite"></p>
+  </div>
+</details>
 <div class="view on" id="view-swap">
   <div class="row hero" id="baseHeroRow">
     <!-- chart -->
@@ -2005,6 +2032,7 @@ try{(function(){
 
     <section class="card">
       <header><span class="ttl">Exit check &amp; token safety</span><span class="grow"></span>
+        <button class="exitShare savedToggle" id="baseWatch" type="button" aria-pressed="false" disabled>☆ Watch</button>
         <button class="exitShare" id="checkShare" type="button"
           title="Copy a link that opens this token's page — no wallet needed"
         ><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M20 9H11a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h9a2 2 0 0 0 2-2v-9a2 2 0 0 0-2-2Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>Copy this check</button>
@@ -2049,6 +2077,7 @@ try{(function(){
     <div id="appSolPoolsSlot" style="display:contents"></div>
       <section class="card" id="appSolSafetyCard">
         <header><span class="ttl">Exit check &amp; token safety</span><span class="grow"></span>
+          <button class="exitShare savedToggle" id="solWatch" type="button" aria-pressed="false" disabled>☆ Watch</button>
           <button class="exitShare" id="appSolCheckShare" type="button"
             title="Copy a link that opens this token's page — no wallet needed"
           ><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M20 9H11a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h9a2 2 0 0 0 2-2v-9a2 2 0 0 0-2-2Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>Copy this check</button>
@@ -2184,6 +2213,7 @@ try{(function(){
     </div>
     <button class="tkTrade" id="tk-trade">Trade</button>
     <button class="tkCopy" id="tk-copy" title="Copy a link to this page">Copy link</button>
+    <button class="tkCopy savedToggle" id="tokenWatch" type="button" aria-pressed="false" disabled>☆ Watch</button>
   </section>
 
   <!-- امضای صفحه: خودِ رفت‌وبرگشت. تنها ادعایی که فقط ما داریم — «فروش را
@@ -5588,6 +5618,7 @@ mtabInit();
 let solAppDefaultFailedAt=0;
 let solAppDefaulted=false,solAppDefaultState="idle";   // idle|loading|done|failed
 function updateSwapViewForChain(){
+  savedWatchSelection();
   placeNetworkControl();
   if(!tokenPage){
     $("appSolSubRow").hidden=activeChain!=="solana";
@@ -6002,6 +6033,7 @@ function solAmountRaw(text,decimals){
 }
 
 function solPaintLegs(){
+  savedWatchSelection();
   const buy=solSide==="buy";                 // buy: SOL بالا (می‌پردازی) — sell: توکن بالا
   $("solTopLabel").textContent="You pay";
   $("solBotLabel").textContent="You receive";
@@ -6697,7 +6729,144 @@ function paintSrc(){
   $("srcTx").textContent=liveSrc==="wallet"?"Base · via wallet"
     :(customRpc?"Base · custom RPC":"Base");
 }
+/* Browser-only watchlist. Only public token identifiers and labels are stored.
+   Chain + address is the identity; Base is case-insensitive, Solana is not. */
+const SAVED_WATCH_KEY="zaexa.watchlist.v1",SAVED_WATCH_MAX=30;
+let savedWatchRows=[],savedWatchReady=false,savedWatchSeq=0;
+const savedWatchPrices=new Map();
+function savedWatchClean(row){
+  if(!row||typeof row!=="object"||!['base','solana'].includes(row.chain)||typeof row.address!=="string")return null;
+  let address=row.address;
+  if(row.chain==='base'){
+    if(!/^0x[0-9a-fA-F]{40}$/.test(address)||/^0x0{40}$/i.test(address))return null;
+    address=address.toLowerCase();
+  }else if(!SOL_MINT_RE.test(address))return null;
+  const label=v=>typeof v==='string'?v.replace(/[\u0000-\u001f\u007f\u202a-\u202e\u2066-\u2069]/g,'').trim().slice(0,80):'';
+  return {chain:row.chain,address,symbol:label(row.symbol),name:label(row.name)};
+}
+function savedWatchKey(row){return row.chain+':'+row.address;}
+function savedWatchRead(){
+  const raw=localStorage.getItem(SAVED_WATCH_KEY);
+  if(!raw)return [];
+  if(raw.length>50000)throw new Error('Invalid watchlist');
+  const parsed=JSON.parse(raw);
+  if(!Array.isArray(parsed))throw new Error('Invalid watchlist');
+  const seen=new Set(),rows=[];
+  for(const r of parsed.slice(0,300)){
+    const row=savedWatchClean(r);if(!row)continue;
+    const key=savedWatchKey(row);if(seen.has(key))continue;
+    seen.add(key);rows.push(row);if(rows.length===SAVED_WATCH_MAX)break;
+  }
+  return rows;
+}
+function savedWatchCurrent(chain){
+  if(chain==='solana')return savedWatchClean({chain,address:solMintCur,symbol:solTokenSymbol});
+  if(!tokenOut||tokenOut.native)return null;
+  return savedWatchClean({chain:'base',address:tokenOut.address,symbol:tokenOut.symbol,name:tokenOut.name});
+}
+function savedWatchPlace(){
+  if(!savedWatchReady)return;
+  const panel=$('savedWatch');
+  // Keep the mobile trade button in its existing position: the saved list
+  // follows the swap card there, and spans the desktop workspace above it.
+  const hero=!tokenPage&&view==='swap'?$(activeChain==='solana'?'appSolHero':'baseHeroRow'):null;
+  if(hero){if(panel.parentElement!==hero)hero.prepend(panel);}
+  else if(panel.parentElement!==document.querySelector('main'))$('solConnectionNotices').after(panel);
+}
+function savedWatchSelection(){
+  if(!savedWatchReady)return;
+  savedWatchPlace();
+  for(const [id,chain] of [['baseWatch','base'],['solWatch','solana'],['tokenWatch',activeChain]]){
+    const b=$(id);if(!b)continue;
+    const row=savedWatchCurrent(chain),on=!!row&&savedWatchRows.some(r=>savedWatchKey(r)===savedWatchKey(row));
+    b.disabled=!row;b.setAttribute('aria-pressed',String(on));b.textContent=on?'★ Watching':'☆ Watch';
+    b.title=row?(on?'Remove '+(row.symbol||'token')+' from watchlist':'Save '+(row.symbol||'token')+' to watchlist'):'Select a token first';
+  }
+}
+function savedWatchStatus(text){$('savedStatus').textContent=text;}
+function savedWatchCommit(rows,message){
+  try{localStorage.setItem(SAVED_WATCH_KEY,JSON.stringify(rows));}
+  catch{savedWatchStatus('Could not save in this browser. Check your storage settings and try again.');$('savedWatch').open=true;return false;}
+  savedWatchRows=rows;++savedWatchSeq;savedWatchRender();savedWatchStatus(message);return true;
+}
+function savedWatchToggle(chain){
+  const row=savedWatchCurrent(chain);if(!row)return;
+  // Merge the latest persisted list before editing, including edits in another tab.
+  try{savedWatchRows=savedWatchRead();}catch{}
+  const key=savedWatchKey(row),on=savedWatchRows.some(r=>savedWatchKey(r)===key);
+  if(!on&&savedWatchRows.length>=SAVED_WATCH_MAX){$('savedWatch').open=true;savedWatchStatus('Your watchlist is full (30 tokens). Remove a token to add another.');return;}
+  const next=on?savedWatchRows.filter(r=>savedWatchKey(r)!==key):[...savedWatchRows,row];
+  if(savedWatchCommit(next,on?'Token removed.':'Token saved in this browser.')){
+    $('savedWatch').open=true;savedWatchRefresh();
+  }
+}
+function savedWatchRender(){
+  $('savedCount').textContent=String(savedWatchRows.length);
+  $('savedRefresh').disabled=savedWatchRows.length===0;
+  const box=$('savedList');box.replaceChildren();
+  if(!savedWatchRows.length){const p=document.createElement('p');p.className='savedEmpty';p.textContent='Keep tokens here with the ☆ Watch button beside a token’s exit check.';box.append(p);}
+  const el=(tag,cls,text)=>{const n=document.createElement(tag);n.className=cls;if(text!=null)n.textContent=text;return n;};
+  for(const row of savedWatchRows){
+    const key=savedWatchKey(row),wrap=el('div','savedRow'),a=el('a','savedLink');
+    a.href='/t/'+encodeURIComponent(row.address);a.title=row.name||row.symbol||row.address;
+    a.append(el('span','savedBadge',row.chain==='base'?'Base':'Solana'));
+    const identity=el('span','savedIdentity');identity.append(el('b','',row.symbol||shortAddr(row.address)),el('small','mono',shortAddr(row.address)));a.append(identity);
+    const quote=savedWatchPrices.get(key),price=el('span','savedPrice',quote?watchPrice(quote.price):'—');
+    price.append(el('small','',quote?'Updated '+new Date(quote.at).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'}):'Price unavailable'));
+    const remove=el('button','savedRemove','×');remove.type='button';remove.setAttribute('aria-label','Remove '+(row.symbol||shortAddr(row.address))+' from watchlist');
+    remove.onclick=()=>{
+      try{savedWatchRows=savedWatchRead();}catch{}
+      if(savedWatchCommit(savedWatchRows.filter(r=>savedWatchKey(r)!==key),'Token removed.')){
+        const next=box.querySelector('.savedRemove');if(next)next.focus();else $('savedWatch').querySelector('summary').focus();
+      }
+    };
+    wrap.append(a,price,remove);box.append(wrap);
+  }
+  savedWatchSelection();
+}
+async function savedWatchRefresh(){
+  if(!savedWatchReady||!$('savedWatch').open||!savedWatchRows.length)return;
+  const seq=++savedWatchSeq,rows=savedWatchRows.slice();
+  $('savedRefresh').disabled=true;savedWatchStatus('Updating prices…');
+  const results=await Promise.all(['base','solana'].map(async chain=>{
+    const selected=rows.filter(r=>r.chain===chain);if(!selected.length)return {ok:true,prices:[]};
+    try{
+      const requestUrl=GT+'/networks/'+(chain==='base'?CHAIN.gtNetwork:'solana')+'/tokens/multi/'+selected.map(r=>r.address).join(',');
+      const j=await gtJson(requestUrl),sampledAt=gtCache.get(requestUrl)?.t||Date.now();
+      if(!Array.isArray(j?.data))return {ok:false,prices:[]};
+      const prices=[];
+      for(const item of j.data){
+        const a=item?.attributes;if(!a||typeof a.address!=='string')continue;
+        const address=chain==='base'?a.address.toLowerCase():a.address;
+        const row=selected.find(r=>r.address===address);
+        const numeric=typeof a.price_usd==='number'||(typeof a.price_usd==='string'&&a.price_usd.trim()!=='');
+        const price=numeric?Number(a.price_usd):NaN;
+        if(row&&Number.isFinite(price)&&price>0)prices.push([savedWatchKey(row),{price,at:sampledAt}]);
+      }
+      return {ok:true,prices};
+    }catch{return {ok:false,prices:[]};}
+  }));
+  if(seq!==savedWatchSeq)return;
+  savedWatchPrices.clear();for(const result of results)for(const [key,value] of result.prices)savedWatchPrices.set(key,value);
+  savedWatchRender();
+  savedWatchStatus(results.every(r=>r.ok)?'Prices refreshed where available. Open a token for a fresh exit check.':'Some prices could not be loaded. Try refreshing again.');
+}
+function initSavedWatch(){
+  if(savedWatchReady)return;
+  savedWatchReady=true;
+  try{savedWatchRows=savedWatchRead();}catch{savedWatchStatus('Your saved list could not be read. New saves will replace it.');}
+  for(const [id,chain] of [['baseWatch','base'],['solWatch','solana'],['tokenWatch',null]])$(id).onclick=()=>savedWatchToggle(chain||activeChain);
+  $('savedRefresh').onclick=savedWatchRefresh;
+  $('savedWatch').ontoggle=()=>{if($('savedWatch').open)savedWatchRefresh();};
+  addEventListener('storage',e=>{
+    if(e.key!==SAVED_WATCH_KEY&&e.key!==null)return;
+    try{savedWatchRows=savedWatchRead();++savedWatchSeq;savedWatchPrices.clear();savedWatchRender();savedWatchStatus('Watchlist updated from another tab.');if($('savedWatch').open)savedWatchRefresh();}
+    catch{savedWatchStatus('Could not read the watchlist update.');}
+  });
+  savedWatchRender();
+}
 function paintToken(side,t){
+  savedWatchSelection();
   paintAvatar($(side==="in"?"tokInAv":"tokOutAv"),t);
   $(side==="in"?"tokInSym":"tokOutSym").textContent=t?t.symbol:"—";
 }
@@ -9355,6 +9524,7 @@ async function fetchVdVerdict(mint){
 /* هویت + عکسِ آواتار، از رویِ داده‌ی خامِ GeckoTerminal — نه paintAvatar
    (آن یکی یک شیءِ توکنِ Base با tokenLogo خودش می‌خواهد). */
 function paintSolAvatar(meta){
+  savedWatchSelection();
   const el=$("tk-av");if(!el)return;
   el.innerHTML="";
   const sym=meta&&meta.symbol;
@@ -11742,6 +11912,7 @@ function setView(v,push){
   const leaving=tokenPage&&v!=="token";
   if(leaving){leaveTokenPage(v);push=false;}
   view=v;flowPicking=false;
+  savedWatchPlace();
   placeNetworkControl();paintSrc();
   // ۳ اکتبر — از این لحظه رنگِ واقعیِ دکمه‌ی اصلی (فعال/غیرفعال) نشان داده می‌شود؛ پیش از آن
   // «Connect wallet» گرادیانی کشیده می‌شد تا رفرش یک فریمِ خاکستری نشان ندهد.
@@ -11815,6 +11986,7 @@ function applyTheme(){document.documentElement.setAttribute("data-theme",theme);
   if(chartData&&panel("plot").querySelector("svg"))drawChart(chartData);}
 
 function wire(){
+  initSavedWatch();
   /* وردمارک دیگر یک اسپنِ متنی نیست، آرت‌ورکِ SVG است — با
      textContent عوض نمی‌شود، و لازم هم نیست: متنش ثابت است. */
   document.title=BRAND;
