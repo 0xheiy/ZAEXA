@@ -1,7 +1,7 @@
 {
   "type": "module",
   "scripts": {
-    "test:security": "node --test web/test/security.test.mjs worker/security.test.mjs worker/runtime-security.test.mjs worker/solana-parity.test.mjs worker/tg_test.mjs scripts/solana-wallet/intent.test.mjs",
+    "test:security": "node --test web/test/security.test.mjs worker/security.test.mjs worker/runtime-security.test.mjs worker/solana-parity.test.mjs worker/tg_test.mjs worker/report_share.test.mjs scripts/solana-wallet/intent.test.mjs",
     "test:worker": "node worker/test.mjs"
   },
   "devDependencies": {

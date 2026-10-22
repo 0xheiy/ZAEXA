@@ -1,4 +1,5 @@
 import { sellReturnMedian } from "./report.js";
+import { reportShareData, REPORT_SHARE_CSS, REPORT_SHARE_HTML, REPORT_SHARE_JS } from "./report_share.js";
 /* worker/report_page.js — صفحه‌ی HTMLِ «Exit Report» (GET /report و /report/<تاریخ>).
    قالب و فونت‌ها از web/landing.html آمده‌اند (بلوکِ GENERATED پایین، با اسکریپتِ
    یک‌باره ساخته شده — دست‌نویس نیست)؛ web/ فایلِ تازه نمی‌گیرد چون خطِ Build در
@@ -1428,10 +1429,10 @@ function pageShell({ title, description, canonical, noindex, main, island }) {
     '<meta name="twitter:title" content="' + esc(title) + '">\n' +
     '<meta name="twitter:description" content="' + esc(description) + '">\n' +
     "<script>" + THEME_BOOT_JS + "</script>\n" +
-    "<style>\n" + FONT_RULE_MANROPE + "\n" + FONT_RULE_PLAYFAIR + "\n" + LANDING_CSS + "\n" + HEADER_CSS + PAGE_CSS + "</style>\n" +
+    "<style>\n" + FONT_RULE_MANROPE + "\n" + FONT_RULE_PLAYFAIR + "\n" + LANDING_CSS + "\n" + HEADER_CSS + PAGE_CSS + REPORT_SHARE_CSS + "</style>\n" +
     "</head>\n<body>\n" + LANDING_SVG_DEFS + "\n" + HEADER_HTML + "\n" + WALLET_PICKER_HTML + "\n" + main + "\n" + LANDING_FOOTER_HTML + "\n" +
     (island || "") + "<script>" + SHELL_JS + "</script>\n" +
-    (island ? "<script>" + CLIENT_JS + "</script>\n" : "") +
+    (island ? "<script>" + CLIENT_JS + "</script>\n<script>" + REPORT_SHARE_JS + "</script>\n" : "") +
     SOL_BUNDLE_LOADER + "</body>\n</html>\n";
 }
 
@@ -1532,10 +1533,10 @@ export function renderReportPage(opts) {
     '<div class="toprow"><h1 id="h1">Exit Report, <em>' + esc(shortDate(date)) + "</em></h1>" +
     '<div class="daynav">' + dnb(canPrev, prev, "&#8592;", "Previous day") +
     picker +
-    dnb(canNext, next, "&#8594;", "Next day") + '</div></div><p class="lede" id="lede">' + esc(lede) + "</p></section>" +
+    dnb(canNext, next, "&#8594;", "Next day") + '</div></div><p class="lede" id="lede">' + esc(lede) + "</p>" + (hasData ? REPORT_SHARE_HTML : "") + "</section>" +
     tiles + chart + table + method + "</main>";
 
-  const data = { date, solana: showSol, rows: rows.map(islandRow), days: history.filter((h) => h.date >= firstDate) };
+  const data = { date, solana: showSol, rows: rows.map(islandRow), days: history.filter((h) => h.date >= firstDate), share: reportShareData(date, st, rows, showSol) };
   const island = '<script type="application/json" id="reportData">' + jsonForScript(data) + "</script>\n";
   return pageShell({
     title, description, canonical: REPORT_SITE_ORIGIN + "/report/" + date,

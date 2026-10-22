@@ -835,7 +835,7 @@ def check_g1ui_token():
         "dark theme: --g1ui must stay exactly \"var(--g1)\" (the logo's own cyan, untouched by "
         "the light-theme work), found %r" % raw_dark_g1ui)
 
-    for sel in (".hero-visual:before", ".visual-core", ".proof-avatar.c"):
+    for sel in (".visual-core", ".proof-avatar.c"):
         bodies = rule_bodies(landing_src, sel)
         assert bodies, "could not find a CSS rule for %s in web/landing.html any more" % sel
         joined = " ".join(bodies)
@@ -862,7 +862,6 @@ def check_no_cyan_in_swapped_selectors():
         (landing_src, "web/landing.html", ".button-primary"),
         (landing_src, "web/landing.html", ".hero h1 em"),
         (landing_src, "web/landing.html", ".proof-avatar.c"),
-        (landing_src, "web/landing.html", ".hero-visual:before"),
         (landing_src, "web/landing.html", ".visual-core"),
         (index_src, "web/index.html", ".cta"),
         (index_src, "web/index.html", ".tkTrade"),
@@ -2246,56 +2245,6 @@ async def check_light_scrollbar(p, errors):
     await b.close()
     print("[light scrollbar] light theme: color-scheme light and scrollbar track rgb(244, 245, 247) on app/pairs/landing; dark stays dark (%s)" % ", ".join(rows))
 
-def check_landing_dither():
-    """[landing dither] دانه‌ی دیترینگ ضدِ پله روی کلِ لندینگ — بررسیِ ایستا روی منبع.
-    ۱۳ اکتبر: روکش‌های تک‌عنصری کافی نبود (blur دانه را محو می‌کرد و لبه‌ی روکشِ hero حلقه می‌ساخت)؛
-    حالا یک لایه‌ی ثابتِ تمام‌صفحه با body:after. هیچ عنصرِ دیگری نباید var(--dither) داشته باشد."""
-    src = open(os.path.join(HERE, "..", "landing.html"), encoding="utf-8").read()
-    m = re.search(r':root\{--dither:url\("data:image/png;base64,([A-Za-z0-9+/=]+)"\)\}', src)
-    assert m, "[landing dither] --dither is not defined on :root of web/landing.html"
-    png = base64.b64decode(m.group(1))
-    assert png[:8] == b"\x89PNG\r\n\x1a\n", "[landing dither] --dither is not a PNG"
-    w, h = struct.unpack(">II", png[16:24])
-    assert (w, h) == (128, 128), "[landing dither] grain must be 128x128, got %dx%d" % (w, h)
-    assert len(png) <= 8192, "[landing dither] grain PNG is %d bytes (limit 8192)" % len(png)
-    # آلفای هر پیکسل باید دقیقاً ۳ باشد: ۴ در حالتِ شب دیده می‌شد و ۲ پله را نمی‌شکست
-    import zlib
-    pos, idat = 8, b""
-    while pos < len(png):
-        ln = struct.unpack(">I", png[pos:pos + 4])[0]; typ = png[pos + 4:pos + 8]
-        if typ == b"IDAT": idat += png[pos + 8:pos + 8 + ln]
-        pos += 12 + ln
-    color_type = png[25]
-    assert color_type == 6, "[landing dither] grain must be RGBA (colour type 6), got %d" % color_type
-    raw = zlib.decompress(idat)
-    stride = 1 + 4 * w
-    prev, rows = bytearray(4 * w), []
-    for i in range(h):
-        f, line = raw[i * stride], bytearray(raw[i * stride + 1:(i + 1) * stride])
-        for x in range(len(line)):
-            a = line[x - 4] if x >= 4 else 0
-            b = prev[x]
-            c = prev[x - 4] if x >= 4 else 0
-            if f == 1: line[x] = (line[x] + a) & 255
-            elif f == 2: line[x] = (line[x] + b) & 255
-            elif f == 3: line[x] = (line[x] + (a + b) // 2) & 255
-            elif f == 4:
-                pa, pb, pc = abs(b - c), abs(a - c), abs(a + b - 2 * c)
-                line[x] = (line[x] + (a if pa <= pb and pa <= pc else b if pb <= pc else c)) & 255
-        rows.append(line); prev = line
-    alphas = set(r[3 + 4 * x] for r in rows for x in range(w))
-    assert alphas == {3}, "[landing dither] grain alpha must be exactly 3/255, got %r" % sorted(alphas)
-    rule = re.search(r'body:after\{([^}]*)\}', src)
-    assert rule, "[landing dither] no full-page body:after overlay"
-    body = rule.group(1)
-    for need in ("position:fixed", "inset:0", "pointer-events:none", "background:var(--dither) repeat"):
-        assert need in body, "[landing dither] body:after overlay lacks %r: %r" % (need, body)
-    z = re.search(r'z-index:(\d+)', body)
-    assert z and int(z.group(1)) >= 2147483000, "[landing dither] overlay must sit above every layer: %r" % body
-    users = len(re.findall(r'var\(--dither\)', src))
-    assert users == 1, "[landing dither] var(--dither) must be used only by the page overlay, found %d uses" % users
-    print("[landing dither] --dither is a 128x128 RGBA PNG of %d bytes, alpha 3/255; one fixed full-page body:after overlay, no per-element grain" % len(png))
-
 async def check_setbtn_pressed(p, errors):
     """[settings pressed] ۶ اکتبر — دکمه‌ی تنظیمات با کلیک (active) و با منوی باز باید گود شود؛
     قبلاً .chip:not(.solid):not(#themeBtn) سایه‌ی برآمده را نگه می‌داشت."""
@@ -2991,38 +2940,34 @@ async def check_canvas_labels(p, errors):
 
 
 async def check_hero_core(p, errors):
-    """پروبِ [hero core]: نشانِ لوگو دقیقاً وسطِ هسته است، برچسبِ ZAEXA بزرگ‌تر
-    شده ولی داخلِ دایره‌ی درونی می‌ماند، اندازه‌ی هسته عوض نشده، و رنگ‌های
-    hero/شفافیتِ مدارها در هر دو تم همان‌اند که مالک خواسته (۶ اکتبر)."""
+    """Keep the official mark centered, its SVG wordmark clear of the frame,
+    and the badge size and orbit palette stable in both themes."""
     path = os.path.join(HERE, "..", "landing.html")
     b = await p.chromium.launch()
-    cases = ((1440, 900, 145, 10.0), (390, 844, 96, 8.5))
-    for (vw, vh, core_size, small_px) in cases:
+    cases = ((1440, 900, 145, 40), (390, 844, 96, 29))
+    for (vw, vh, core_size, word_width) in cases:
         for theme in ("light", "dark"):
             ctx = await b.new_context(reduced_motion="reduce", viewport={"width": vw, "height": vh})
             pg = await ctx.new_page()
             pg.on("console", lambda m: errors.append(m.text) if m.type == "error" else None)
             await pg.goto("file://" + path)
             await pg.evaluate("t => { document.documentElement.dataset.theme = t; }", theme)
-            # انیمیشنِ breathe مقیاس می‌دهد؛ برای اندازه‌گیریِ هندسه خاموش می‌شود
+            # Freeze decorative arcs while measuring the unchanged badge geometry.
             await pg.add_style_tag(content="*{animation:none!important;transition:none!important}")
             await pg.wait_for_timeout(400)
             m = await pg.evaluate("""() => {
               const core = document.querySelector('.visual-core');
               const mark = core.querySelector('.core-mark');
-              const small = core.querySelector('small');
+              const word = core.querySelector('.core-word');
               const r = e => { const b = e.getBoundingClientRect(); return {x:b.x,y:b.y,w:b.width,h:b.height}; };
               const cs = getComputedStyle(core);
               const rs = getComputedStyle(document.documentElement);
-              // small تمام‌عرض است (left/right:0)؛ جعبه‌ی خودِ متن با Range سنجیده می‌شود
-              const rg = document.createRange(); rg.selectNodeContents(small);
-              const tb = rg.getBoundingClientRect();
-              return {core:r(core), mark:r(mark), small:{x:tb.x,y:tb.y,w:tb.width,h:tb.height}, fs:getComputedStyle(small).fontSize,
+              return {core:r(core), mark:r(mark), word:r(word), wordHref:word.querySelector('use').getAttribute('href'),
                       bw:parseFloat(cs.borderTopWidth), viz:{...window.__zaexaViz},
                       cv1:rs.getPropertyValue('--viz1').trim(), cv2:rs.getPropertyValue('--viz2').trim()};
             }""")
             await ctx.close()
-            c, mk, sm = m["core"], m["mark"], m["small"]
+            c, mk, sm = m["core"], m["mark"], m["word"]
             ccx, ccy = c["x"] + c["w"] / 2, c["y"] + c["h"] / 2
             dx = (mk["x"] + mk["w"] / 2) - ccx
             dy = (mk["y"] + mk["h"] / 2) - ccy
@@ -3030,8 +2975,9 @@ async def check_hero_core(p, errors):
                 "[hero core] mark is off-centre in the core at %dpx %s: dx=%.2f dy=%.2f" % (vw, theme, dx, dy))
             assert abs(c["w"] - core_size) < 0.01 and abs(c["h"] - core_size) < 0.01, (
                 "[hero core] core size changed at %dpx %s: %.2fx%.2f, expected %d" % (vw, theme, c["w"], c["h"], core_size))
-            assert m["fs"] == "%gpx" % small_px, (
-                "[hero core] ZAEXA label font-size at %dpx %s is %s, expected %gpx" % (vw, theme, m["fs"], small_px))
+            assert m["wordHref"] == "#zxWord", "[hero core] use the official wordmark artwork"
+            assert abs(sm["w"] - word_width) < 0.01, (
+                "[hero core] wordmark width at %dpx %s is %.2f, expected %gpx" % (vw, theme, sm["w"], word_width))
             inner = c["w"] / 2 - m["bw"]
             worst = 0.0
             for px in (sm["x"], sm["x"] + sm["w"]):
@@ -3045,15 +2991,15 @@ async def check_hero_core(p, errors):
                 "[hero core] gap between mark bottom and label top is %.1fpx (<4) at %dpx %s" % (gap, vw, theme))
             v = m["viz"]
             if theme == "light":
-                ok = (v["v1"].lower() == "#3f7cf2" and v["v2"].lower() == "#7a5af0" and abs(v["oa"] - 0.4) < 1e-9)
-                assert ok, "[hero core] light live palette is %r, expected #3F7CF2/#7A5AF0/oa 0.4 at %dpx" % (v, vw)
+                ok = (v["v1"].lower() == "#3f7cf2" and v["v2"].lower() == "#7a5af0" and abs(v["oa"] - 0.65) < 1e-9)
+                assert ok, "[hero core] light live palette is %r, expected #3F7CF2/#7A5AF0/oa 0.65 at %dpx" % (v, vw)
             else:
                 ok = (v["v1"].lower() == m["cv1"].lower() and v["v2"].lower() == m["cv2"].lower()
-                      and abs(v["oa"] - 0.18) < 1e-9)
-                assert ok, "[hero core] dark live palette is %r, expected viz1/viz2 (%s/%s) and oa 0.18 at %dpx" % (
+                      and abs(v["oa"] - 0.52) < 1e-9)
+                assert ok, "[hero core] dark live palette is %r, expected viz1/viz2 (%s/%s) and oa 0.52 at %dpx" % (
                     v, m["cv1"], m["cv2"], vw)
-            print("[hero core] %dpx %s: mark offset dx=%.2f dy=%.2f, core %dpx, label %s corners<=%.1f of inner r=%.1f gap=%.1fpx, "
-                  "palette %s/%s oa=%g" % (vw, theme, dx, dy, core_size, m["fs"], worst, inner, gap, v["v1"], v["v2"], v["oa"]))
+            print("[hero core] %dpx %s: mark offset dx=%.2f dy=%.2f, core %dpx, wordmark %.1fpx corners<=%.1f of inner r=%.1f gap=%.1fpx, "
+                  "palette %s/%s oa=%g" % (vw, theme, dx, dy, core_size, sm["w"], worst, inner, gap, v["v1"], v["v2"], v["oa"]))
     await b.close()
 
 
@@ -3251,28 +3197,27 @@ async def check_nav_chevron_mobile(p, errors):
     print("[nav chevron mobile] no chevron; Markets is built and sized like Stocks on the phone bar of app and pairs (%d phone combos); desktop label sits right of the icon" % n)
 
 
-async def check_landing_glow_lvh(p, errors):
-    """[landing glow lvh] — ۷ اکتبر: روی گوشی با جمع‌شدنِ نوارِ آدرس، لایه‌ی fixed با inset:0
-    ارتفاعِ کوچک را نگه می‌داشت و نواری پایین بدونِ درخشش می‌ماند (پس‌زمینه‌ی «دو‌فاز»)."""
-    path = os.path.join(HERE, "..", "landing.html")
+async def check_landing_no_ambient_glow(p, errors):
+    """Ambient radial halos are removed; orbit rendering has its own checks."""
     b = await p.chromium.launch()
-    pg = await b.new_page(viewport={"width": 390, "height": 844})
-    await pg.goto("file://" + path)
-    await pg.wait_for_timeout(300)
-    # bottom در getComputedStyle مقدارِ «استفاده‌شده» (px) برمی‌گرداند و با height=100lvh در مرورگرِ بدونِ نوارِ آدرس
-    # هم‌اندازه‌ی ویوپورت می‌شود (۰px)؛ پس قاعده‌ی نوشته‌شده را از خودِ CSSOM می‌خوانیم تا auto بودنش دیده شود.
-    m = await pg.evaluate("""() => { const cs = getComputedStyle(document.querySelector('.page-glow'));
-        let decl = null;
-        for (const sh of document.styleSheets) for (const r of sh.cssRules)
-            if (r.selectorText === '.page-glow') decl = r.style.bottom;
-        return {bottom: decl, used: cs.bottom, height: parseFloat(cs.height), ih: window.innerHeight}; }""")
-    await b.close()
-    src = open(path, encoding="utf-8").read()
-    assert m["bottom"] == "auto" and m["bottom"] != "0px", (
-        "[landing glow lvh] .page-glow declares bottom=%r (inset:0 / bottom:0 keeps the small viewport height); expected auto" % m["bottom"])
-    assert abs(m["height"] - m["ih"]) <= 0.5, "[landing glow lvh] glow height %s != innerHeight %s" % (m["height"], m["ih"])
-    assert "100lvh" in src, "[landing glow lvh] landing.html does not contain 100lvh"
-    print("[landing glow lvh] declared bottom=%s height=%s innerHeight=%s, 100lvh present" % (m["bottom"], m["height"], m["ih"]))
+    try:
+        pg = await b.new_page(viewport={"width":390,"height":844})
+        await pg.goto("file://" + os.path.join(HERE, "..", "landing.html"))
+        for theme in ("light", "dark"):
+            await pg.evaluate("theme => document.documentElement.dataset.theme=theme", theme)
+            state = await pg.evaluate("""() => ({
+                layers: document.querySelectorAll('.page-glow,.glow-blob').length,
+                hero: getComputedStyle(document.querySelector('.hero-visual'),'::before').content,
+                trust: getComputedStyle(document.querySelector('.trust-art')).backgroundImage,
+                overlay: getComputedStyle(document.body,'::after').content
+            })""")
+            assert state["layers"] == 0, state
+            assert state["hero"] in ("none", "normal"), state
+            assert state["trust"] == "none", state
+            assert state["overlay"] in ("none", "normal"), state
+    finally:
+        await b.close()
+    print("[landing background] no ambient radial halos or grain overlay in either theme")
 
 
 async def check_landing_menu(p, errors):
@@ -4050,7 +3995,8 @@ async def check_mobile_compact(p, errors):
         lg = git("show", rev + ":web/landing.html")
     assert lg.returncode == 0 and "fMore" not in lg.stdout, "cannot read the parent commit's web/landing.html (git %s)" % rev
     land_old = lg.stdout
-    LFREEZE = "*,*::before,*::after{animation:none!important;transition:none!important}"
+    # Footer parity excludes intentionally changed decorative page backgrounds.
+    LFREEZE = "*,*::before,*::after{animation:none!important;transition:none!important}#landingParticles,.page-glow,body::after{display:none!important}"
     async def land_page(html, vw, scheme):
         lp = await b.new_page(viewport={"width": vw, "height": 900}, color_scheme=scheme)
         await lp.route("**/*", lambda r: r.abort())
@@ -9214,7 +9160,6 @@ async def main():
         await check_theme_migration(p, errors)
         await check_theme_button(p, errors)
         await check_light_scrollbar(p, errors)
-        check_landing_dither()
         await check_setbtn_pressed(p, errors)
         await check_landing_mobile(p, errors)
         await check_canvas_palette_live(p, errors)
@@ -9228,7 +9173,7 @@ async def main():
         await check_canvas_resize(p, errors)
         await check_logo_hit_area(p, errors)
         await check_nav_chevron_mobile(p, errors)
-        await check_landing_glow_lvh(p, errors)
+        await check_landing_no_ambient_glow(p, errors)
         await check_landing_menu(p, errors)
         await check_hero_desktop_mode(p, errors)
         await check_logo_parity(p, errors)
