@@ -1,4 +1,4 @@
-import asyncio, base64, glob, os, re, struct, sys, zlib
+import asyncio, base64, glob, math, os, re, struct, sys, zlib
 from urllib.parse import urlparse
 from playwright.async_api import async_playwright, Browser
 
@@ -2245,6 +2245,7 @@ async def check_light_scrollbar(p, errors):
     await b.close()
     print("[light scrollbar] light theme: color-scheme light and scrollbar track rgb(244, 245, 247) on app/pairs/landing; dark stays dark (%s)" % ", ".join(rows))
 
+# [landing dither] (دانه‌ی دیترینگِ پس‌زمینه) در ۲۴ اکتبر به تصمیمِ مالک حذف شد؛ نگهبانش عمداً بازنمی‌گردد.
 async def check_setbtn_pressed(p, errors):
     """[settings pressed] ۶ اکتبر — دکمه‌ی تنظیمات با کلیک (active) و با منوی باز باید گود شود؛
     قبلاً .chip:not(.solid):not(#themeBtn) سایه‌ی برآمده را نگه می‌داشت."""
@@ -2910,6 +2911,10 @@ async def check_canvas_labels(p, errors):
         """)
         await pg.close()
         labels = info["labels"]
+        if width <= 480:
+            # ۲۴ اکتبر: روی گوشی برچسب‌ها پنهان‌اند و فقط گره‌ها می‌مانند
+            assert labels == [], "labels must be hidden at %dpx, got %r" % (width, labels)
+            continue
         assert labels, "window.__zaexaCanvasLabels is empty at %dpx" % width
         cw, ch = info["w"], info["h"]
         for i, box in enumerate(labels):
@@ -2939,68 +2944,201 @@ async def check_canvas_labels(p, errors):
     await b.close()
 
 
-async def check_hero_core(p, errors):
-    """Keep the official mark centered, its SVG wordmark clear of the frame,
-    and the badge size and orbit palette stable in both themes."""
+_HUB_NAMES = ["Uniswap", "Aerodrome", "PancakeSwap", "SushiSwap", "BaseSwap"]
+_HUB_PAIRS = [(0, 2), (1, 3), (2, 4), (3, 0), (4, 1)]
+
+
+async def check_hero_hub(p, errors):
+    """[hero hub] — مرکزِ هیرو: فقط نشانِ رسمی روی var(--bg)، بدونِ هیچ حلقه/گرادیان؛
+    پنج گرهِ DEX رویِ مدارها با برچسبِ بی‌هم‌پوشانی (در گوشی پنهان)، و نقطه‌ی مسیرِ
+    A→مرکز→B با ترتیبِ ثابتِ جفت‌ها. در reduced-motion هیچ‌چیز حرکت نمی‌کند."""
     path = os.path.join(HERE, "..", "landing.html")
     b = await p.chromium.launch()
-    cases = ((1440, 900, 145, 40), (390, 844, 96, 29))
-    for (vw, vh, core_size, word_width) in cases:
-        for theme in ("light", "dark"):
-            ctx = await b.new_context(reduced_motion="reduce", viewport={"width": vw, "height": vh})
+    # رنگ‌های tokenِ تم را از خودِ مرورگر به rgb تبدیل می‌کنیم (نه حدس)
+    JS_COL = """v => { const d = document.createElement('div'); d.style.color = 'var(' + v + ')';
+        document.body.appendChild(d); const c = getComputedStyle(d).color; d.remove(); return c; }"""
+    JS_STATE = """() => {
+      const r = e => { const k = e.getBoundingClientRect(); return {x:k.x,y:k.y,w:k.width,h:k.height}; };
+      const hv = document.querySelector('.hero-visual'), cv = document.getElementById('routeCanvas');
+      const core = document.querySelector('.visual-core'), mark = core.querySelector('.core-mark');
+      const word = core.querySelector('.core-word');
+      const R = window.__zaexaCanvasRoutePts || {};
+      const cr = cv.getBoundingClientRect();
+      const nodes = [...document.querySelectorAll('.hero-visual .hub-node')].map(g => {
+        const c = g.querySelector('circle'), t = g.querySelector('text'), pl = g.querySelector('.hub-pill'), cs = getComputedStyle(c), ts = getComputedStyle(t);
+        return {circle:r(c), label:r(pl), text:t.textContent, textBox:r(t), pillFill:getComputedStyle(pl).fill, on:g.classList.contains('on'),
+                stroke:cs.stroke, fill:cs.fill, sw:cs.strokeWidth, fs:ts.fontSize, tfill:ts.fill, tdisp:ts.display, vis:ts.visibility};
+      });
+      const dot = document.getElementById('hubDot'), route = document.getElementById('hubRoute');
+      const kids = [core, ...core.querySelectorAll('*')].map(e => {
+        const s = getComputedStyle(e), bw = ['Top','Right','Bottom','Left'].map(k => parseFloat(s['border'+k+'Width'])*(s['border'+k+'Style']!=='none'?1:0));
+        const bef = getComputedStyle(e, '::before'), aft = getComputedStyle(e, '::after');
+        return {tag:e.tagName+'.'+(e.getAttribute('class')||''), bgi:s.backgroundImage, bw:Math.max(...bw), br:s.borderRadius,
+                bs:s.boxShadow, filter:s.filter, stroke:s.stroke, bef:bef.content, aft:aft.content};
+      });
+      return {mark:r(mark), word:r(word), core:r(core), canvas:{x:cr.x,y:cr.y}, R:R, nodes:nodes, kids:kids,
+              readouts:[...document.querySelectorAll('.hero-visual .visual-readout')].map(r),
+              hv:r(hv), dot:r(dot), dotOp:getComputedStyle(dot).opacity, dotDisp:getComputedStyle(dot).display,
+              dotFill:getComputedStyle(dot).fill, dotStroke:getComputedStyle(dot).stroke,
+              route:route ? {op:+getComputedStyle(route).opacity, disp:getComputedStyle(route).display, sw:getComputedStyle(route).strokeWidth, stroke:getComputedStyle(route).stroke} : null,
+              markOp:getComputedStyle(mark).opacity, viz:{...window.__zaexaViz},
+              rings:document.querySelectorAll('.hero-visual .core-dial,.hero-visual .core-rim,.hero-visual .core-inner,.hero-visual .core-satellite,.hero-visual linearGradient,#coreRim').length,
+              bg:getComputedStyle(document.body).backgroundColor, coreBg:getComputedStyle(core).backgroundColor,
+              cv1:getComputedStyle(document.documentElement).getPropertyValue('--viz1').trim(),
+              cv2:getComputedStyle(document.documentElement).getPropertyValue('--viz2').trim()};
+    }"""
+    def hit(a, c):
+        return a["x"] < c["x"] + c["w"] and a["x"] + a["w"] > c["x"] and a["y"] < c["y"] + c["h"] and a["y"] + a["h"] > c["y"]
+    summary = []
+    for (vw, vh, core_size, word_w) in ((1440, 900, 145, 40), (1280, 800, 145, 40), (1024, 768, 145, 40),
+                                        (768, 1024, 145, 40), (390, 844, 96, 29)):
+        for theme in (("light", "dark") if vw in (1440, 390) else ("light",)):
+            tag = "%dpx %s" % (vw, theme)
+            ctx = await b.new_context(reduced_motion="no-preference", viewport={"width": vw, "height": vh})
             pg = await ctx.new_page()
             pg.on("console", lambda m: errors.append(m.text) if m.type == "error" else None)
             await pg.goto("file://" + path)
             await pg.evaluate("t => { document.documentElement.dataset.theme = t; }", theme)
-            # Freeze decorative arcs while measuring the unchanged badge geometry.
-            await pg.add_style_tag(content="*{animation:none!important;transition:none!important}")
-            await pg.wait_for_timeout(400)
-            m = await pg.evaluate("""() => {
-              const core = document.querySelector('.visual-core');
-              const mark = core.querySelector('.core-mark');
-              const word = core.querySelector('.core-word');
-              const r = e => { const b = e.getBoundingClientRect(); return {x:b.x,y:b.y,w:b.width,h:b.height}; };
-              const cs = getComputedStyle(core);
-              const rs = getComputedStyle(document.documentElement);
-              return {core:r(core), mark:r(mark), word:r(word), wordHref:word.querySelector('use').getAttribute('href'),
-                      bw:parseFloat(cs.borderTopWidth), viz:{...window.__zaexaViz},
-                      cv1:rs.getPropertyValue('--viz1').trim(), cv2:rs.getPropertyValue('--viz2').trim()};
-            }""")
+            await pg.wait_for_timeout(700)
+            cols = {k: await pg.evaluate(JS_COL, k) for k in ("--card", "--line2", "--tx2", "--tx3", "--hero1", "--bg")}
+            worst_dx = 0.0
+            # چند نمونه در طولِ ~۳ ثانیه: برچسب‌ها پویا جا می‌گیرند و مدارها می‌چرخند
+            for sample in range(8):
+                m = await pg.evaluate(JS_STATE)
+                R = m["R"]
+                assert R.get("cx") is not None, "[hero hub] window.__zaexaCanvasRoutePts is missing at %s" % tag
+                mk = m["mark"]
+                dx = mk["x"] + mk["w"] / 2 - (m["canvas"]["x"] + R["cx"])
+                dy = mk["y"] + mk["h"] / 2 - (m["canvas"]["y"] + R["cy"])
+                worst_dx = max(worst_dx, abs(dx), abs(dy))
+                assert abs(dx) <= 1 and abs(dy) <= 1, (
+                    "[hero hub] mark centre is off the orbits' centre at %s: dx=%.2f dy=%.2f" % (tag, dx, dy))
+                if sample == 0:
+                    c, sm = m["core"], m["word"]
+                    assert m["rings"] == 0, "[hero hub] an old ring/gradient element is back in the hero centre at %s" % tag
+                    assert m["coreBg"] == m["bg"], (
+                        "[hero hub] hero centre is not plain var(--bg) at %s: %s vs page %s" % (tag, m["coreBg"], m["bg"]))
+                    for k in m["kids"]:
+                        assert k["bgi"] == "none", "[hero hub] %s inside the hero centre has background-image %s at %s" % (k["tag"], k["bgi"], tag)
+                        assert k["bw"] == 0, "[hero hub] %s inside the hero centre has a visible border at %s" % (k["tag"], tag)
+                        assert "50%" not in k["br"], "[hero hub] %s inside the hero centre has border-radius %s (ring) at %s" % (k["tag"], k["br"], tag)
+                        assert k["bs"] == "none" and k["filter"] == "none", (
+                            "[hero hub] %s inside the hero centre has shadow/filter (glow) at %s" % (k["tag"], tag))
+                        assert "url(" not in k["stroke"], "[hero hub] %s strokes with a gradient/url at %s" % (k["tag"], tag)
+                        assert k["bef"] in ("none", "normal") and k["aft"] in ("none", "normal"), (
+                            "[hero hub] %s inside the hero centre has a pseudo-element at %s" % (k["tag"], tag))
+                    assert abs(c["w"] - core_size) < 0.01 and abs(c["h"] - core_size) < 0.01, (
+                        "[hero hub] hero centre size changed at %s: %.2fx%.2f, expected %d" % (tag, c["w"], c["h"], core_size))
+                    assert abs(sm["w"] - word_w) < 0.01, "[hero hub] ZAEXA label width at %s is %.2f, expected %g" % (tag, sm["w"], word_w)
+                    gap = sm["y"] - (mk["y"] + mk["h"])
+                    assert gap >= 4, "[hero hub] gap between mark and ZAEXA label is %.1fpx (<4) at %s" % (gap, tag)
+                    assert m["route"] is not None, "[hero hub] the route line #hubRoute is missing at %s" % tag
+                    assert m["route"]["sw"] == "1.5px" and m["route"]["stroke"] == cols["--hero1"], "[hero hub] route line style is %r at %s" % (m["route"], tag)
+                    assert m["dotFill"] == cols["--hero1"] and m["dotStroke"] == cols["--bg"], "[hero hub] dot fill/ring is %s/%s at %s" % (m["dotFill"], m["dotStroke"], tag)
+                    v = m["viz"]
+                    if theme == "light":
+                        assert v["v1"].lower() == "#3f7cf2" and v["v2"].lower() == "#7a5af0" and abs(v["oa"] - 0.65) < 1e-9, (
+                            "[hero hub] light live palette is %r at %s" % (v, tag))
+                    else:
+                        assert v["v1"].lower() == m["cv1"].lower() and v["v2"].lower() == m["cv2"].lower() and abs(v["oa"] - 0.52) < 1e-9, (
+                            "[hero hub] dark live palette is %r at %s" % (v, tag))
+                nodes = m["nodes"]
+                assert len(nodes) == 5, "[hero hub] expected exactly 5 DEX nodes, found %d at %s" % (len(nodes), tag)
+                assert [n["text"] for n in nodes] == _HUB_NAMES, "[hero hub] node labels are %r at %s" % ([n["text"] for n in nodes], tag)
+                for i, n in enumerate(nodes):
+                    cr_ = n["circle"]
+                    assert abs(cr_["w"] - 9) < 0.01 and abs(cr_["h"] - 9) < 0.01, "[hero hub] node %d is %.2fx%.2f, expected 9px at %s" % (i, cr_["w"], cr_["h"], tag)
+                    assert n["fill"] == cols["--card"] and n["sw"] == "1.5px", "[hero hub] node %d fill/stroke-width is %s/%s at %s" % (i, n["fill"], n["sw"], tag)
+                    assert n["stroke"] == (cols["--hero1"] if n["on"] else cols["--line2"]), (
+                        "[hero hub] node %d stroke is %s (active=%s) at %s" % (i, n["stroke"], n["on"], tag))
+                    assert n["fs"] == "11px" and n["tfill"] == (cols["--tx2"] if n["on"] else cols["--tx3"]), (
+                        "[hero hub] label %d is %s %s (active=%s; idle var(--tx3), active var(--tx2)) at %s" % (i, n["fs"], n["tfill"], n["on"], tag))
+                    if vw > 480 and n["vis"] != "hidden":
+                        assert n["pillFill"] == cols["--bg"], "[hero hub] label %d has no var(--bg) background pill (fill %s) at %s" % (i, n["pillFill"], tag)
+                        tb_, pl_ = n["textBox"], n["label"]
+                        assert pl_["x"] <= tb_["x"] + 0.5 and pl_["x"] + pl_["w"] >= tb_["x"] + tb_["w"] - 0.5 and pl_["y"] <= tb_["y"] + 0.5 and pl_["y"] + pl_["h"] >= tb_["y"] + tb_["h"] - 0.5, (
+                            "[hero hub] label %d text is not inside its background pill at %s" % (i, tag))
+                    # گره دقیقاً رویِ بیضیِ مدارِ خودش (قابِ چرخان) و نزدیکِ موقعیتِ اعلام‌شده
+                    pt, orb = R["pts"][i], R["orbits"][n_orbit(R, i)]
+                    ex, ey = pt["x"] - R["cx"], pt["y"] - R["cy"]
+                    cs_, sn_ = math.cos(orb["rot"]), math.sin(orb["rot"])
+                    u, w_ = ex * cs_ + ey * sn_, -ex * sn_ + ey * cs_
+                    val = (u / orb["rx"]) ** 2 + (w_ / orb["ry"]) ** 2
+                    assert 0.99 <= val <= 1.01, "[hero hub] node %d is off its orbit ellipse (term %.4f) at %s" % (i, val, tag)
+                    gx = cr_["x"] + cr_["w"] / 2 - (m["canvas"]["x"] + pt["x"])
+                    gy = cr_["y"] + cr_["h"] / 2 - (m["canvas"]["y"] + pt["y"])
+                    assert abs(gx) <= 1.5 and abs(gy) <= 1.5, "[hero hub] node %d DOM position differs from its orbit position by %.1f,%.1f at %s" % (i, gx, gy, tag)
+                    assert cr_["x"] >= m["hv"]["x"] and cr_["x"] + 9 <= m["hv"]["x"] + m["hv"]["w"], "[hero hub] node %d leaves the hero at %s" % (i, tag)
+                if vw > 480:
+                    # برچسبی که جای آزاد ندارد (گره زیرِ readout) پنهان می‌شود؛ حداقل ۳ برچسب باید دیده شوند
+                    labs = [n["label"] if n["vis"] != "hidden" else {"x": -9e9, "y": -9e9, "w": 0, "h": 0} for n in nodes]
+                    assert sum(1 for n in nodes if n["vis"] != "hidden") >= 3, "[hero hub] fewer than 3 labels visible at %s" % tag
+                    for i in range(5):
+                        if nodes[i]["vis"] == "hidden": continue
+                        assert labs[i]["w"] > 0, "[hero hub] label %d has no box at %s" % (i, tag)
+                        assert labs[i]["x"] >= m["hv"]["x"] and labs[i]["x"] + labs[i]["w"] <= m["hv"]["x"] + m["hv"]["w"], "[hero hub] label %d leaves the hero at %s" % (i, tag)
+                        for j in range(i + 1, 5):
+                            assert not hit(labs[i], labs[j]), "[hero hub] labels %d and %d overlap at %s" % (i, j, tag)
+                        for k, ro in enumerate(m["readouts"]):
+                            assert not hit(labs[i], ro), "[hero hub] label %d overlaps readout %d at %s" % (i, k, tag)
+                        assert not hit(labs[i], m["mark"]) and not hit(labs[i], m["word"]), "[hero hub] label %d overlaps the mark at %s" % (i, tag)
+                else:
+                    for i, n in enumerate(nodes):
+                        assert n["tdisp"] == "none" or n["label"]["w"] == 0, "[hero hub] label %d is visible at %s (hidden below 480px)" % (i, tag)
+                await pg.wait_for_timeout(400)
+            if vw == 1440 and theme == "light":
+                # ترتیبِ جفت‌ها + حرکتِ نقطه، در یک پنجره‌ی ~۱۰ ثانیه‌ای
+                seq, dots, routes = [], [], []
+                for _ in range(100):
+                    st = await pg.evaluate("""() => ({on:[...document.querySelectorAll('.hub-node')].map((g,i)=>g.classList.contains('on')?i:-1).filter(i=>i>=0),
+                        dot:(()=>{const k=document.getElementById('hubDot').getBoundingClientRect();return [k.x,k.y,+getComputedStyle(document.getElementById('hubDot')).opacity,k.width]})(),
+                        route:+getComputedStyle(document.getElementById('hubRoute')).opacity})""")
+                    if len(st["on"]) == 2:
+                        pr = tuple(sorted(st["on"]))
+                        if not seq or seq[-1] != pr: seq.append(pr)
+                    if st["dot"][2] > 0:
+                        dots.append(st["dot"][:2])
+                        assert abs(st["dot"][3] - 7) < 0.1, "[hero hub] the dot is %.2fpx wide, expected 7px" % st["dot"][3]
+                    routes.append(st["route"])
+                    await pg.wait_for_timeout(100)
+                want_sorted = [tuple(sorted(q)) for q in _HUB_PAIRS]
+                assert len(seq) >= 3, "[hero hub] saw only %d active pair(s) in 10s: %r" % (len(seq), seq)
+                k0 = want_sorted.index(seq[0]) if seq[0] in want_sorted else None
+                assert k0 is not None, "[hero hub] unknown active pair %r" % (seq[0],)
+                for j, pr in enumerate(seq):
+                    assert pr == want_sorted[(k0 + j) % 5], (
+                        "[hero hub] active pairs went %r; expected the fixed order %r (0,2)(1,3)(2,4)(3,0)(4,1)" % (seq, _HUB_PAIRS))
+                assert max(routes) >= 0.5 and min(routes) == 0, "[hero hub] route line opacity over a cycle is %.2f..%.2f; expected up to ~0.55 mid-cycle and 0 between cycles" % (min(routes), max(routes))
+                span = max(max(d[0] for d in dots) - min(d[0] for d in dots), max(d[1] for d in dots) - min(d[1] for d in dots)) if dots else 0
+                assert span > 20, "[hero hub] with normal motion the dot never moved (span %.1fpx)" % span
+                summary.append("pairs %s, dot span %.0fpx" % ("->".join("%d%d" % q for q in seq), span))
             await ctx.close()
-            c, mk, sm = m["core"], m["mark"], m["word"]
-            ccx, ccy = c["x"] + c["w"] / 2, c["y"] + c["h"] / 2
-            dx = (mk["x"] + mk["w"] / 2) - ccx
-            dy = (mk["y"] + mk["h"] / 2) - ccy
-            assert abs(dx) <= 0.75 and abs(dy) <= 0.75, (
-                "[hero core] mark is off-centre in the core at %dpx %s: dx=%.2f dy=%.2f" % (vw, theme, dx, dy))
-            assert abs(c["w"] - core_size) < 0.01 and abs(c["h"] - core_size) < 0.01, (
-                "[hero core] core size changed at %dpx %s: %.2fx%.2f, expected %d" % (vw, theme, c["w"], c["h"], core_size))
-            assert m["wordHref"] == "#zxWord", "[hero core] use the official wordmark artwork"
-            assert abs(sm["w"] - word_width) < 0.01, (
-                "[hero core] wordmark width at %dpx %s is %.2f, expected %gpx" % (vw, theme, sm["w"], word_width))
-            inner = c["w"] / 2 - m["bw"]
-            worst = 0.0
-            for px in (sm["x"], sm["x"] + sm["w"]):
-                for py in (sm["y"], sm["y"] + sm["h"]):
-                    worst = max(worst, ((px - ccx) ** 2 + (py - ccy) ** 2) ** 0.5)
-            assert worst < inner, (
-                "[hero core] ZAEXA label corner reaches %.1fpx from the centre but the inner radius is %.1fpx at %dpx %s"
-                % (worst, inner, vw, theme))
-            gap = sm["y"] - (mk["y"] + mk["h"])
-            assert gap >= 4, (
-                "[hero core] gap between mark bottom and label top is %.1fpx (<4) at %dpx %s" % (gap, vw, theme))
-            v = m["viz"]
-            if theme == "light":
-                ok = (v["v1"].lower() == "#3f7cf2" and v["v2"].lower() == "#7a5af0" and abs(v["oa"] - 0.65) < 1e-9)
-                assert ok, "[hero core] light live palette is %r, expected #3F7CF2/#7A5AF0/oa 0.65 at %dpx" % (v, vw)
-            else:
-                ok = (v["v1"].lower() == m["cv1"].lower() and v["v2"].lower() == m["cv2"].lower()
-                      and abs(v["oa"] - 0.52) < 1e-9)
-                assert ok, "[hero core] dark live palette is %r, expected viz1/viz2 (%s/%s) and oa 0.52 at %dpx" % (
-                    v, m["cv1"], m["cv2"], vw)
-            print("[hero core] %dpx %s: mark offset dx=%.2f dy=%.2f, core %dpx, wordmark %.1fpx corners<=%.1f of inner r=%.1f gap=%.1fpx, "
-                  "palette %s/%s oa=%g" % (vw, theme, dx, dy, core_size, sm["w"], worst, inner, gap, v["v1"], v["v2"], v["oa"]))
+            summary.append("%s mark off by <=%.2fpx" % (tag, worst_dx))
+    # reduced-motion: نه نقطه، نه پالس، گره‌ها ثابت
+    for (vw, vh) in ((1440, 900), (390, 844)):
+        ctx = await b.new_context(reduced_motion="reduce", viewport={"width": vw, "height": vh})
+        pg = await ctx.new_page()
+        pg.on("console", lambda m: errors.append(m.text) if m.type == "error" else None)
+        await pg.goto("file://" + path)
+        await pg.wait_for_timeout(600)
+        a = await pg.evaluate(JS_STATE)
+        await pg.wait_for_timeout(700)
+        c2 = await pg.evaluate(JS_STATE)
+        await ctx.close()
+        assert a["dot"] == c2["dot"], "[hero hub] reduced motion: the dot moved %r -> %r at %dpx" % (a["dot"], c2["dot"], vw)
+        assert a["dotDisp"] == "none" or a["dotOp"] == "0", "[hero hub] reduced motion: the dot is visible at %dpx" % vw
+        assert [n["circle"] for n in a["nodes"]] == [n["circle"] for n in c2["nodes"]], "[hero hub] reduced motion: nodes moved at %dpx" % vw
+        assert not any(n["on"] for n in a["nodes"] + c2["nodes"]), "[hero hub] reduced motion: a node is marked active at %dpx" % vw
+        assert a["route"] is not None and (a["route"]["disp"] == "none" or a["route"]["op"] == 0) and (c2["route"]["disp"] == "none" or c2["route"]["op"] == 0), (
+            "[hero hub] reduced motion: the route line is visible at %dpx: %r" % (vw, a["route"]))
+        assert a["markOp"] == "1" and c2["markOp"] == "1", "[hero hub] reduced motion: the mark pulsed at %dpx" % vw
     await b.close()
+    print("[hero hub] 1440/1280/1024/768/390 (light, +dark at 1440 and 390): %s; 5 nodes on orbits, labels clear at 1440 / hidden at 390; "
+          "no ring/gradient/glow in the centre; reduced motion keeps dot and nodes still" % "; ".join(summary))
+
+
+def n_orbit(R, i):
+    return R["pts"][i]["o"]
 
 
 async def check_canvas_route_on_ellipse(p, errors):
@@ -3022,21 +3160,21 @@ async def check_canvas_route_on_ellipse(p, errors):
     for i in range(100):  # ~10s / 100ms
         info = await pg.evaluate("() => window.__zaexaCanvasRoutePts || null")
         if info and info.get("pts"):
-            # ۲۳ سپتامبر: مالک مسیرها را حذف کرد و فقط نقطه‌ها ماندند. پس در هر
-            # فریم فقط ۷ گره‌ی venue + IN + OUT = ۹ نقطه مجاز است؛ هر کمان،
-            # ذره یا ردی که برگردد تعداد را بالا می‌برد و این‌جا قرمز می‌شود.
-            assert len(info["pts"]) == 9, (
-                "sample %d carries %d drawn points in phase %r; only the 9 nodes (7 venues + IN + "
-                "OUT) may be drawn — the owner removed every route, particle and trail"
+            # ۲۴ اکتبر: مرکزِ هیرو فقط پنج گرهِ DEX است و هر گره رویِ بیضیِ مدارِ خودش (قابِ چرخان)؛
+            # هر کمان، ذره یا ردی که برگردد تعداد را بالا می‌برد و این‌جا قرمز می‌شود.
+            assert len(info["pts"]) == 5, (
+                "sample %d carries %d drawn points in phase %r; only the 5 DEX nodes may be drawn"
                 % (i, len(info["pts"]), await pg.evaluate("() => window.__zaexaCanvasPhase")))
-            cx, cy, rx, ry, core_r = info["cx"], info["cy"], info["rx"], info["ry"], info["coreR"]
+            cx, cy, core_r = info["cx"], info["cy"], info["coreR"]
             for j, pt in enumerate(info["pts"]):
                 dx, dy = pt["x"] - cx, pt["y"] - cy
-                val = (dx / rx) ** 2 + (dy / ry) ** 2
-                assert 0.96 <= val <= 1.04, (
-                    "sample %d point %d %r is off the venue ellipse (x^2+y^2 term = %.4f, "
-                    "want 0.96..1.04) — cx=%.1f cy=%.1f rx=%.1f ry=%.1f"
-                    % (i, j, pt, val, cx, cy, rx, ry))
+                orb = info["orbits"][pt["o"]]
+                u = dx * math.cos(orb["rot"]) + dy * math.sin(orb["rot"])
+                v = -dx * math.sin(orb["rot"]) + dy * math.cos(orb["rot"])
+                val = (u / orb["rx"]) ** 2 + (v / orb["ry"]) ** 2
+                assert 0.99 <= val <= 1.01, (
+                    "sample %d point %d %r is off its orbit ellipse (term = %.4f, want 0.99..1.01) — "
+                    "cx=%.1f cy=%.1f orbit %r" % (i, j, pt, val, cx, cy, orb))
                 dist = (dx * dx + dy * dy) ** 0.5
                 assert dist >= core_r + 4, (
                     "sample %d point %d %r is only %.1fpx from the centre, inside coreR+4 "
@@ -3049,8 +3187,8 @@ async def check_canvas_route_on_ellipse(p, errors):
         "window.__zaexaCanvasRoutePts never carried any points over ~10s of sampling — "
         "the canvas script must expose the sampled points of every route/lane/particle/trail "
         "it draws")
-    print("[canvas on ellipse] %d points checked over ~10s, all on the venue ellipse and clear "
-          "of the core ring" % total)
+    print("[canvas on ellipse] %d node positions checked over ~10s, all on their orbit ellipses and clear "
+          "of the centre mark" % total)
 
 
 async def check_trust_glyph_in_circle(p, errors):
@@ -3985,15 +4123,11 @@ async def check_mobile_compact(p, errors):
     css_blk = rep_src[css_start:rep_src.index("`;\n", css_start)]
     assert "fMore" in css_blk and css_blk in landing_src, "the footer-collapse CSS in worker/report_page.js is not byte-identical to the one in web/landing.html"
     land_new = landing_src
-    # پدرِ landing هم مثل index.html نزدیک‌ترین نیاکانی است که هنوز فوتر چندستونی (fMore) را ندارد؛
-    # «HEAD» ثابت با اولین کامیتِ بعد از آن فوتر می‌افتاد.
-    lg = git("show", rev + ":web/landing.html")
-    for cand_ in ["HEAD~%d" % k for k in range(1, 61)]:   # ۲۱ اکتبر: ۱۲ دیگر کافی نبود؛ دو کامیتِ مستندات فاصله را از ۱۲ گذراند
-        if lg.returncode == 0 and "fMore" not in lg.stdout:
-            break
-        rev = cand_
-        lg = git("show", rev + ":web/landing.html")
-    assert lg.returncode == 0 and "fMore" not in lg.stdout, "cannot read the parent commit's web/landing.html (git %s)" % rev
+    # ۲۴ اکتبر: فوترِ landing را مالک در 1916a01 پذیرفت؛ پایه دیگر «نزدیک‌ترین نیاکان بدونِ fMore» نیست و روی
+    # همان کامیتِ ثابت قفل است (مثلِ [report body unchanged] که 6944652 را قفل می‌کند).
+    LANDING_FOOTER_BASE = "1916a01"
+    lg = git("show", LANDING_FOOTER_BASE + ":web/landing.html")
+    assert lg.returncode == 0, "cannot read %s:web/landing.html (a shallow clone needs: git fetch --deepen=20): %s" % (LANDING_FOOTER_BASE, lg.stderr[-200:])
     land_old = lg.stdout
     # Footer parity excludes intentionally changed decorative page backgrounds.
     LFREEZE = "*,*::before,*::after{animation:none!important;transition:none!important}#landingParticles,.page-glow,body::after{display:none!important}"
@@ -4008,7 +4142,7 @@ async def check_mobile_compact(p, errors):
             lp = await land_page(html, 1440, scheme)
             shots_l.append(await lp.locator("footer").screenshot())
             await lp.close()
-        assert shots_l[0] == shots_l[1], "landing footer at 1440 (%s) differs from the parent commit's render" % scheme
+        assert shots_l[0] == shots_l[1], "landing footer at 1440 (%s) differs from the accepted render in %s" % (scheme, LANDING_FOOTER_BASE)
     lp = await land_page(land_new, 390, "light")
     await foot_collapsed_and_opens(lp, "landing")
     await lp.close()
@@ -5217,6 +5351,9 @@ async def check_report_page(p, errors):
         # ۱۱ اکتبر: html{scrollbar-gutter:stable} عمداً به صفحه‌ی تازه اضافه شد (هدر بین صفحه‌ها نپرد)؛ برای اینکه این کاوشگر همچنان فقط «بدنه تغییر نکرده» را بسنجد، شیار در هر دو طرف خنثی می‌شود
         await pg.add_style_tag(content="*,*::before,*::after{animation:none!important;transition:none!important}html{scrollbar-gutter:auto!important}")
         await pg.wait_for_timeout(500)
+        # ۲۴ اکتبر: دکمه‌های اشتراکِ گزارش (worker/report_share.js) عمداً به بدنه اضافه شدند؛ فقط همان بلوک کنار می‌رود
+        # و بقیه‌ی بدنه باید همچنان عیناً همان پیش از هدر باشد.
+        await pg.evaluate("() => document.querySelectorAll('#reportShareActions, #reportCopyStatus, #reportShareDialog').forEach(e => e.remove())")
         res = await pg.evaluate(BODYJS)
         await pg.close()
         return res
@@ -8523,12 +8660,13 @@ def fb_gt_for(toks, pls, net="base", pools_status=200, tokens_status=200):
 
 
 FB_TBL_JS = """() => [...document.querySelectorAll('#flowBody .fbRow')].map(r => {
+    // ستون ۰ = ستاره
     const c = r.children, cs = x => getComputedStyle(x).color;
     return {sym: r.querySelector('.fbTkTx b').textContent, age: r.querySelector('.fbAge').textContent,
-            net: c[1].textContent.trim(), netColor: cs(c[1].firstElementChild || c[1]),
-            bs: c[2].textContent.trim(), share: c[3].textContent.trim(), bar: !!c[3].querySelector('.fbBar'),
-            vol: c[4].textContent.trim(), chip: c[5].textContent.trim(), title: c[5].firstElementChild.title,
-            chipCls: c[5].firstElementChild.className, img: !!r.querySelector('.fbAv img')};
+            net: c[2].textContent.trim(), netColor: cs(c[2].firstElementChild || c[2]),
+            bs: c[3].textContent.trim(), share: c[4].textContent.trim(), bar: !!c[4].querySelector('.fbBar'),
+            vol: c[5].textContent.trim(), chip: c[6].textContent.trim(), title: c[6].firstElementChild.title,
+            chipCls: c[6].firstElementChild.className, img: !!r.querySelector('.fbAv img')};
 })"""
 
 
@@ -9160,6 +9298,7 @@ async def main():
         await check_theme_migration(p, errors)
         await check_theme_button(p, errors)
         await check_light_scrollbar(p, errors)
+        # [landing dither] به تصمیمِ مالک در ۲۴ اکتبر حذف شد (دانه‌ی پس‌زمینه برنگشت)؛ برنگردانید.
         await check_setbtn_pressed(p, errors)
         await check_landing_mobile(p, errors)
         await check_canvas_palette_live(p, errors)
@@ -9167,7 +9306,7 @@ async def main():
         await check_canvas_cost(p, errors)
         await check_canvas_reduced_motion(p, errors)
         await check_canvas_labels(p, errors)
-        await check_hero_core(p, errors)
+        await check_hero_hub(p, errors)
         await check_canvas_route_on_ellipse(p, errors)
         await check_trust_glyph_in_circle(p, errors)
         await check_canvas_resize(p, errors)
@@ -9193,6 +9332,12 @@ async def main():
         await check_flow_board_gt_down(p, errors)
         await check_flow_board_click(p, errors)
         await check_flow_board_mobile(p, errors)
+        await check_exit_header_icons(p, errors)
+        await check_watch_panel_views(p, errors)
+        await check_strip_watch_merge(p, errors)
+        await check_watch_exit_chips(p, errors)
+        await check_board_star(p, errors)
+        await check_pairs_star(p, errors)
         await check_early_buyers(p, errors)
         await check_stock_issuer(p, errors)
         b = await p.chromium.launch()
@@ -17044,6 +17189,7 @@ async def main():
         await h1.click('#solTokList .trow[data-mint="%s"]' % CS_MINT_USDC)
         await h1.wait_for_timeout(800)
         await h1.click("#appSolCheckShare")
+        await h1.click('#shareMenu [data-act="link"]')   # ۲۴ اکتبر: دکمه‌ی اشتراک حالا منو باز می‌کند؛ «Copy link» همان کپیِ قبلی است
         await h1.wait_for_timeout(200)
         h_copied = await h1.evaluate("window.__copied")
         await h1.close()
@@ -20143,6 +20289,7 @@ async def main():
         assert await p1.is_visible("#checkShare"), "#checkShare is not visible on the swap page"
         before1 = len(seen1)
         await p1.click("#checkShare")
+        await p1.click('#shareMenu [data-act="link"]')   # ۲۴ اکتبر: دکمه‌ی اشتراک حالا منو باز می‌کند؛ «Copy link» همان کپیِ قبلی است
         await p1.wait_for_timeout(500)
         names1 = share_names(seen1[before1:])
         await p1.close()
@@ -20155,6 +20302,7 @@ async def main():
         assert await p2.is_visible("#tk-copy"), "#tk-copy is not visible on the token page"
         before2 = len(seen2)
         await p2.click("#tk-copy")
+        await p2.click('#shareMenu [data-act="link"]')   # ۲۴ اکتبر: دکمه‌ی اشتراک حالا منو باز می‌کند؛ «Copy link» همان کپیِ قبلی است
         await p2.wait_for_timeout(500)
         names2 = share_names(seen2[before2:])
         await p2.close()
@@ -20166,12 +20314,14 @@ async def main():
         p3, seen3 = await swap_share_page(False)
         before3 = len(seen3)
         await p3.click("#checkShare")
+        await p3.click('#shareMenu [data-act="link"]')   # ۲۴ اکتبر: دکمه‌ی اشتراک حالا منو باز می‌کند؛ «Copy link» همان کپیِ قبلی است
         await p3.wait_for_timeout(400)
         names3 = share_names(seen3[before3:])
         await p3.close()
         p3b, seen3b = await token_share_page(False)
         before3b = len(seen3b)
         await p3b.click("#tk-copy")
+        await p3b.click('#shareMenu [data-act="link"]')   # ۲۴ اکتبر: دکمه‌ی اشتراک حالا منو باز می‌کند؛ «Copy link» همان کپیِ قبلی است
         await p3b.wait_for_timeout(400)
         names3b = share_names(seen3b[before3b:])
         await p3b.close()
@@ -20188,12 +20338,14 @@ async def main():
         p5, seen5 = await swap_share_page(True, gpc=True)
         before5 = len(seen5)
         await p5.click("#checkShare")
+        await p5.click('#shareMenu [data-act="link"]')   # ۲۴ اکتبر: دکمه‌ی اشتراک حالا منو باز می‌کند؛ «Copy link» همان کپیِ قبلی است
         await p5.wait_for_timeout(400)
         names5 = share_names(seen5[before5:])
         await p5.close()
         p5b, seen5b = await token_share_page(True, gpc=True)
         before5b = len(seen5b)
         await p5b.click("#tk-copy")
+        await p5b.click('#shareMenu [data-act="link"]')   # ۲۴ اکتبر: دکمه‌ی اشتراک حالا منو باز می‌کند؛ «Copy link» همان کپیِ قبلی است
         await p5b.wait_for_timeout(400)
         names5b = share_names(seen5b[before5b:])
         await p5b.close()
@@ -20211,6 +20363,531 @@ async def main():
         sys.exit(1)
     print("   none")
 
+
+
+# ====================================================================================
+# ۲۴ اکتبر — ستاره/دیده‌بانی در همه‌جا: هدر آیکنیِ Exit check، منوی اشتراک، جایگاه پنل،
+# ادغام نوار Market watch، چیپِ وضعیتِ خروج، ستاره در تابلوی Flow و در New pairs.
+# ====================================================================================
+import urllib.parse as _weq
+
+WE_SHOTS = os.environ.get("ZX_WATCH_SHOTS", "/tmp/claude-0/-home-claude/a5e4655c-d218-5df6-a69c-ab944b617993/scratchpad/app")
+WE_KEY = "zaexa.watchlist.v1"
+
+
+def we_serve():
+    """مثل fb_serve ولی /pairs را هم به pairs.html می‌دهد."""
+    class Quiet(_fbhttp.SimpleHTTPRequestHandler):
+        def log_message(self, *a):
+            pass
+
+        def translate_path(self, path):
+            clean = path.split("?")[0]
+            if clean in ("/app", "/app/"):
+                return os.path.join(HERE, "harness.html")
+            if clean in ("/pairs", "/pairs/"):
+                return os.path.join(HERE, "..", "pairs.html")
+            if clean.startswith("/t/"):
+                return os.path.join(HERE, "harness.html")
+            if clean == "/stub-ethers.js":
+                return os.path.join(HERE, "stub-ethers.js")
+            return super().translate_path(path)
+    srv = _fbhttp.ThreadingHTTPServer(("127.0.0.1", 0), _fbft.partial(Quiet, directory=os.path.join(HERE, "..")))
+    _fbth.Thread(target=srv.serve_forever, daemon=True).start()
+    return srv, "http://127.0.0.1:%d" % srv.server_address[1]
+
+
+def we_seed(rows, marker="we.seeded"):
+    """init script: فهرست دیده‌بانی را فقط یک بار در هر تب می‌نویسد."""
+    return ("try{if(!sessionStorage.getItem(%r)){localStorage.setItem(%r,%s);sessionStorage.setItem(%r,'1')}}catch(e){}"
+            % (marker, WE_KEY, _fbj.dumps(_fbj.dumps(rows)), marker))
+
+
+CLIP_INIT = ("Object.defineProperty(navigator,'clipboard',{value:{writeText:(t)=>{window.__copied=t;return Promise.resolve();}},configurable:true});")
+
+
+async def we_shot(pg, name):
+    os.makedirs(WE_SHOTS, exist_ok=True)
+    await pg.screenshot(path=os.path.join(WE_SHOTS, name))
+
+
+async def check_exit_header_icons(p, errors):
+    """[exit header icons] هدر کارت Exit check: عنوان کوتاه نمی‌شود، دو دکمه‌ی گرد ۳۲px، منوی اشتراک."""
+    srv, origin = we_serve()
+    b = await p.chromium.launch()
+    errs = []
+    try:
+        env = FbEnv(b, origin, errs)
+        for vw, scheme, shot in ((1280, "light", "exit-header-1280-light.png"), (390, "dark", "exit-header-390-dark.png")):
+            pg = await env.open("#swap", vw=vw, vh=900, scheme=scheme, board=False, init=[CLIP_INIT])
+            await pg.wait_for_selector("#checkShare", state="attached")
+            await pg.wait_for_timeout(900)
+            await pg.evaluate("""() => { const x = {state: 'verified', lossPct: 1.5, recovered: null, reason: null};
+                rememberExit(x); renderExit(x); mtabSelect('exit', false); }""")
+            await pg.wait_for_timeout(300)
+            info = await pg.evaluate("""() => { const h = document.querySelector('#checkShare').closest('header');
+                const t = h.querySelector('.exitHdTtl'); const bs = [...h.querySelectorAll('.iconBtn')];
+                return {title: t.textContent, trunc: t.scrollWidth > t.clientWidth, n: bs.length, ids: bs.map(x => x.id),
+                    sizes: bs.map(x => [Math.round(x.getBoundingClientRect().width), Math.round(x.getBoundingClientRect().height)]),
+                    radius: bs.map(x => getComputedStyle(x).borderRadius), oldPills: h.querySelectorAll('.exitShare').length,
+                    watchLabel: bs[0].getAttribute('aria-label'), pressed: bs[0].getAttribute('aria-pressed'), glyph: bs[0].textContent,
+                    shareLabel: bs[1].getAttribute('aria-label'), sym: tokenOut.symbol, hdr: h.textContent.replace(/\\s+/g, ' ').trim()}; }""")
+            tag = "[exit header icons] %dpx" % vw
+            assert info["title"] == "Exit check" and not info["trunc"], "%s: title must read 'Exit check' and never be truncated: %s" % (tag, info)
+            assert info["n"] == 2 and info["ids"] == ["baseWatch", "checkShare"] and info["oldPills"] == 0, "%s: two icon buttons, no text pills: %s" % (tag, info)
+            assert all(s == [32, 32] for s in info["sizes"]) and all(r.endswith("px") or r == "50%" for r in info["radius"]), "%s: 32px round buttons: %s" % (tag, info)
+            assert info["watchLabel"] == "Watch " + info["sym"] and info["pressed"] == "false" and info["glyph"] == "☆", "%s: star button: %s" % (tag, info)
+            assert info["shareLabel"] == "Share this check", "%s: share label: %s" % (tag, info)
+            assert "Copy this check" not in info["hdr"] and "Watch" not in info["hdr"], "%s: old text pills must be gone: %s" % (tag, info["hdr"])
+            hs = await pg.evaluate("() => [document.documentElement.scrollWidth, innerWidth]")
+            assert hs[0] <= hs[1], "%s: no horizontal page scroll: %s" % (tag, hs)
+            if vw == 1280:
+                # --- منو با ماوس ---
+                await pg.click("#checkShare")
+                m = await pg.evaluate("""() => { const m = document.getElementById('shareMenu'); const r = m.getBoundingClientRect(), b = document.getElementById('checkShare').getBoundingClientRect();
+                    return {role: m.getAttribute('role'), hidden: m.hidden, items: [...m.querySelectorAll('[role=menuitem]')].map(x => x.textContent), exp: document.getElementById('checkShare').getAttribute('aria-expanded'),
+                            below: (r.top >= b.bottom || r.bottom <= b.top) && r.top >= 0 && r.bottom <= innerHeight, focus: document.activeElement.textContent, right: r.right <= innerWidth}; }""")
+                assert m["role"] == "menu" and not m["hidden"] and m["items"] == ["Copy link", "Copy summary", "Share on Telegram"] and m["exp"] == "true" and m["below"] and m["right"], "%s: menu: %s" % (tag, m)
+                assert m["focus"] == "Copy link", "%s: first item focused: %s" % (tag, m)
+                await we_shot(pg, shot)
+                await pg.keyboard.press("Escape")
+                st = await pg.evaluate("() => [document.getElementById('shareMenu').hidden, document.activeElement.id, document.getElementById('checkShare').getAttribute('aria-expanded')]")
+                assert st == [True, "checkShare", "false"], "%s: Escape closes and returns focus to the button: %s" % (tag, st)
+                await pg.click("#checkShare")
+                await pg.mouse.click(5, 450)
+                assert await pg.evaluate("() => document.getElementById('shareMenu').hidden"), "%s: outside click closes the menu" % tag
+                # --- منو با صفحه‌کلید ---
+                await pg.focus("#checkShare")
+                await pg.keyboard.press("Enter")
+                assert await pg.evaluate("() => !document.getElementById('shareMenu').hidden"), "%s: Enter opens" % tag
+                await pg.keyboard.press("ArrowDown")
+                assert await pg.evaluate("() => document.activeElement.textContent") == "Copy summary", "%s: ArrowDown moves" % tag
+                await pg.keyboard.press("ArrowDown")
+                assert await pg.evaluate("() => document.activeElement.textContent") == "Share on Telegram", "%s: ArrowDown moves to Telegram" % tag
+                await pg.keyboard.press("ArrowUp")
+                await pg.keyboard.press("ArrowUp")
+                assert await pg.evaluate("() => document.activeElement.textContent") == "Copy link", "%s: ArrowUp moves back" % tag
+                await pg.keyboard.press("Enter")
+                await pg.wait_for_timeout(200)
+                link = await pg.evaluate("() => tokenPageUrl()")
+                copied = await pg.evaluate("() => window.__copied")
+                assert copied == link and "/t/" in link, "%s: Copy link copies the same link as before (tokenPageUrl): %r vs %r" % (tag, copied, link)
+                st = await pg.evaluate("() => [document.getElementById('shareMenu').hidden, document.activeElement.id]")
+                assert st == [True, "checkShare"], "%s: selecting closes the menu, focus back on the button: %s" % (tag, st)
+                # --- Copy summary ---
+                await pg.click("#checkShare")
+                await pg.click('#shareMenu [data-act="summary"]')
+                await pg.wait_for_timeout(200)
+                summary = await pg.evaluate("() => window.__copied")
+                sym = info["sym"]
+                want = "%s on Base — Round trip costs 1.50%% · checked just now · %s" % (sym, link)
+                assert summary == want, "%s: Copy summary text: %r != %r" % (tag, summary, want)
+                # --- Telegram ---
+                await pg.click("#checkShare")
+                tg = await pg.evaluate("""() => { const a = document.querySelector('#shareMenu [data-act=tg]'); return [a.tagName, a.getAttribute('href'), a.target, a.rel]; }""")
+                text = "%s on Base — Round trip costs 1.50%% · checked just now" % sym
+                enc = lambda x: _weq.quote(x, safe="-_.!~*'()")
+                assert tg == ["A", "https://t.me/share/url?url=%s&text=%s" % (enc(link), enc(text)), "_blank", "noopener"], "%s: Telegram anchor: %s" % (tag, tg)
+                await pg.keyboard.press("Escape")
+            else:
+                await we_shot(pg, shot)
+            await pg.context.close()
+        # --- Solana ---
+        pg = await env.open("#swap?chain=solana", vw=1280, vh=900, scheme="light", board=False, init=[CLIP_INIT])
+        await pg.wait_for_selector("#appSolCheckShare", state="attached")
+        await pg.wait_for_timeout(900)
+        await pg.evaluate("""(m) => { solMintCur = m; document.getElementById('appSolExitSym').textContent = 'USDC'; renderSolExit('sell', null, 'appSolExitBox'); }""", FB_SOL_USDC)
+        sinfo = await pg.evaluate("""() => { const t = document.querySelector('#appSolSafetyCard .exitHdTtl'); return [t.textContent, t.scrollWidth > t.clientWidth,
+            document.querySelectorAll('#appSolSafetyCard>header .iconBtn').length, document.querySelectorAll('#appSolSafetyCard>header .exitShare').length]; }""")
+        assert sinfo == ["Exit check", False, 2, 0], "[exit header icons] Solana header: %s" % sinfo
+        await pg.click("#appSolCheckShare")
+        await pg.click('#shareMenu [data-act="summary"]')
+        await pg.wait_for_timeout(200)
+        got = await pg.evaluate("() => window.__copied")
+        want = "USDC on Solana — Sell route quoted · checked just now · %s/t/%s?check=1" % (origin, FB_SOL_USDC)
+        assert got == want, "[exit header icons] Solana summary: %r != %r" % (got, want)
+        await pg.context.close()
+        assert not errs, "[exit header icons] console errors: %s" % errs
+        print("[exit header icons] 1280 light + 390 dark: title 'Exit check' never truncated (scrollWidth<=clientWidth), two 32px round icon buttons (star + share) and no text pills, no horizontal scroll; the share menu opens by mouse and keyboard (Enter, arrows), closes on Escape / outside click / selection with focus back on the button; Copy link copies the same link as before, Copy summary and the Telegram href have the exact text and encoding; Solana header and summary too")
+    finally:
+        await b.close()
+        srv.shutdown()
+
+
+async def check_watch_panel_views(p, errors):
+    """[watch panel views] #savedWatch دیده می‌شود فقط در نمای swap؛ سوییچ Flow/New pairs جابه‌جا نمی‌شود."""
+    srv, origin = we_serve()
+    b = await p.chromium.launch()
+    errs = []
+    try:
+        env = FbEnv(b, origin, errs)
+        rows = [{"chain": "base", "address": fb_evm(0xC01), "symbol": "WAA", "name": "W"}]
+        pg = await env.open("#swap", vw=1440, vh=900, scheme="light", board=True, init=[we_seed(rows)])
+        await pg.wait_for_selector("#savedWatch", state="attached")
+        await pg.wait_for_timeout(900)
+        vis = lambda: pg.evaluate("() => { const e = document.getElementById('savedWatch'); return !e.hidden && [e.querySelector(':scope > summary'), ...document.querySelectorAll('.marketWatch .watchToggle')].some(x => x && x.getBoundingClientRect().height > 0); }")
+        assert await vis(), "[watch panel views] the panel must show in the swap view"
+        res = {}
+        for name, h in (("flow", "#flow"), ("folio", "#folio"), ("stocks", "#stocks")):
+            await pg.evaluate("(h) => { location.hash = h; }", h)
+            await pg.wait_for_timeout(600)
+            res[name] = await vis()
+        await pg.evaluate("() => { location.hash = '#flow'; }")
+        await pg.wait_for_timeout(900)
+        flow_top = await pg.evaluate("() => Math.round(document.querySelector('.mktSwitch').getBoundingClientRect().top * 10) / 10")
+        assert not any(res.values()), "[watch panel views] the panel must be hidden outside the swap view: %s" % res
+        await pg.evaluate("() => { location.hash = '#swap'; }")
+        await pg.wait_for_timeout(600)
+        assert await vis(), "[watch panel views] back in swap the panel returns"
+        await pg.context.close()
+        # صفحه‌ی توکن
+        pg = await env.open("", vw=1440, vh=900, scheme="light", board=False, path="/t/" + fb_evm(0xA00), init=[we_seed(rows)])
+        await pg.wait_for_timeout(1500)
+        tv = await pg.evaluate("() => { const e = document.getElementById('savedWatch'); return !e.hidden && e.getBoundingClientRect().height > 0; }")
+        assert not tv, "[watch panel views] the panel must be hidden on the token page"
+        await pg.context.close()
+        # سوییچ: همان top در /app#flow و /pairs
+        ctx = await b.new_context(viewport={"width": 1440, "height": 900}, color_scheme="light")
+        pp = await ctx.new_page()
+
+        async def h(route):
+            u = route.request.url
+            if u.startswith(origin):
+                rest = u.split("?")[0][len(origin):]
+                if rest == "/pairs.json":
+                    return await route.fulfill(status=200, content_type="application/json", body=_fbj.dumps({"store": True, "rows": []}))
+                return await route.continue_()
+            return await route.abort()
+        await pp.route("**/*", h)
+        await pp.add_init_script(we_seed(rows))
+        await pp.goto(origin + "/pairs")
+        await pp.wait_for_selector(".mktSwitch")
+        await pp.wait_for_timeout(500)
+        pairs_top = await pp.evaluate("() => Math.round(document.querySelector('.mktSwitch').getBoundingClientRect().top * 10) / 10")
+        await ctx.close()
+        assert abs(flow_top - pairs_top) <= 1, "[watch panel views] the Flow/New pairs switch jumps between /app#flow (%s) and /pairs (%s)" % (flow_top, pairs_top)
+        # گوشی: خالی = جا نمی‌گیرد
+        pg = await env.open("#swap", vw=390, vh=844, scheme="light", board=False)
+        await pg.wait_for_timeout(900)
+        d = await pg.evaluate("() => getComputedStyle(document.getElementById('savedWatch')).display")
+        assert d == "none", "[watch panel views] an empty watchlist takes no space on phones: %s" % d
+        await pg.context.close()
+        assert not errs, "[watch panel views] console errors: %s" % errs
+        print("[watch panel views] #savedWatch is visible in the swap view only (hidden in flow, folio, stocks and the token page); the Flow/New pairs switch has the same top on /app#flow (%s) and /pairs (%s); an empty list still takes no space at 390" % (flow_top, pairs_top))
+    finally:
+        await b.close()
+        srv.shutdown()
+
+
+async def check_strip_watch_merge(p, errors):
+    """[strip watch merge] نوار Market watch: اول توکن‌های دیده‌بانیِ همین زنجیره، بعد پیش‌فرض‌ها، بی‌تکرار."""
+    srv, origin = we_serve()
+    b = await p.chromium.launch()
+    errs = []
+    try:
+        env = FbEnv(b, origin, errs)
+        w1, w2 = fb_evm(0xC01), fb_evm(0xC02)
+        sol_w = fb_b58(0xC03)
+
+        def gt(path):
+            if "/tokens/multi/" in path:
+                want = path.split("/tokens/multi/")[1].lower().split(",")
+                if w2 in want:
+                    return (200, {"data": [{"id": "base_" + w2, "type": "token", "attributes": {"address": w2, "symbol": "WBB", "price_usd": "1.5"}}]})
+            return None
+        env.gt = gt
+        STRIP_JS = """() => { const w = document.querySelector('.marketWatch[data-chain="%s"]');
+            return {head: (w.querySelector('.watchHeading button span') || w.querySelector('.watchHeading')).textContent, names: [...w.querySelectorAll('.watchPair')].map(x => x.querySelector('.watchName').firstChild.textContent),
+                    price: [...w.querySelectorAll('.watchPrice')].map(x => x.textContent), chg: [...w.querySelectorAll('.watchChange')].map(x => x.textContent), text: w.textContent}; }"""
+        # بدون دیده‌بانی: پیش‌فرض‌ها و عنوان قدیمی
+        pg = await env.open("#swap", vw=1280, vh=900, scheme="light", board=False)
+        await pg.wait_for_timeout(1500)
+        base_def = await pg.evaluate(STRIP_JS % "base")
+        assert base_def["head"] == "Market watch · 24h" and len(base_def["names"]) == 3, "[strip watch merge] defaults: %s" % base_def
+        aero = await pg.evaluate("() => BASE_TOKENS.find(t => t.symbol === 'AERO').address")
+        await pg.context.close()
+        # با دیده‌بانی: W1 (بدون داده)، W2 (با قیمت)، AERO با حروف بزرگ (تکراریِ پیش‌فرض)، یک توکن سولانا
+        rows = [{"chain": "base", "address": w1, "symbol": "WAA", "name": "A"}, {"chain": "base", "address": w2, "symbol": "WBB", "name": "B"},
+                {"chain": "base", "address": "0x" + aero[2:].upper(), "symbol": "AERO", "name": "Aero"},
+                {"chain": "solana", "address": sol_w, "symbol": "SOLW", "name": "S"}]
+        pg = await env.open("#swap", vw=1280, vh=900, scheme="light", board=False, init=[we_seed(rows)])
+        await pg.wait_for_selector(".marketWatch[data-chain=base] .watchPair")
+        await pg.wait_for_timeout(2800)
+        m = await pg.evaluate(STRIP_JS % "base")
+        assert m["head"] == "Your watchlist", "[strip watch merge] heading: %s" % m
+        assert m["names"] == ["WAA", "WBB", "AERO"], "[strip watch merge] watched tokens fill the slots first (list order), 3 slots: %s" % m
+        assert len(set(m["names"])) == len(m["names"]), "[strip watch merge] no duplicates: %s" % m
+        assert m["price"][0] == "—" and m["chg"][0] == "—", "[strip watch merge] a watched token without data shows dashes: %s" % m
+        assert m["price"][1] == "$1.5", "[strip watch merge] a watched token gets its price from the same tokens/multi path: %s" % m
+        assert not re.search(r"NaN|\$0\.00|undefined", m["text"]), "[strip watch merge] bad text in the strip: %r" % m["text"]
+        COUNT_JS = """() => [...document.querySelectorAll('body *')].filter(e => e.children.length === 0 && e.textContent.trim() === 'Your watchlist' && e.getClientRects().length > 0 && getComputedStyle(e).visibility !== 'hidden').length"""
+        assert await pg.evaluate(COUNT_JS) == 1, "[strip watch merge] 1280: exactly one visible 'Your watchlist' (the strip heading), not a second bar"
+        tg = await pg.evaluate("""() => { const b = document.querySelector('.marketWatch[data-chain=base] .watchToggle'); const d = document.getElementById('savedWatch');
+            return [b.getAttribute('aria-expanded'), b.getAttribute('aria-controls'), d.open, d.getClientRects().length, b.querySelector('.savedCount').textContent]; }""")
+        assert tg == ["false", "savedWatch", False, 0, "4"], "[strip watch merge] closed panel: %s" % tg
+        await we_shot(pg, "strip-watch-1280-light.png")
+        await pg.click(".marketWatch[data-chain=base] .watchToggle")
+        await pg.wait_for_timeout(500)
+        tg = await pg.evaluate("""() => { const b = document.querySelector('.marketWatch[data-chain=base] .watchToggle'); const d = document.getElementById('savedWatch');
+            return [b.getAttribute('aria-expanded'), d.open, d.getClientRects().length > 0, document.querySelector('.marketWatch[data-chain=base]').nextElementSibling === d, document.querySelectorAll('#savedList .savedRow').length]; }""")
+        assert tg == ["true", True, True, True, 4], "[strip watch merge] the heading opens the panel directly under the strip: %s" % tg
+        assert await pg.evaluate(COUNT_JS) == 1, "[strip watch merge] 1280 open: still exactly one visible 'Your watchlist'"
+        await we_shot(pg, "strip-watch-open-1280-light.png")
+        await pg.click(".marketWatch[data-chain=base] .watchToggle")
+        assert await pg.evaluate("() => [document.querySelector('.watchToggle').getAttribute('aria-expanded'), document.getElementById('savedWatch').open]") == ["false", False], "[strip watch merge] second click closes"
+        # حذف W1 → فهرست دوباره پر می‌شود (ETH به اسلات برمی‌گردد) و نوار درجا به‌روز می‌شود
+        await pg.evaluate("""() => { const k = 'zaexa.watchlist.v1'; const r = JSON.parse(localStorage.getItem(k)).filter(x => x.symbol !== 'WAA');
+            localStorage.setItem(k, JSON.stringify(r)); savedWatchRows = savedWatchRead(); savedWatchRender(); }""")
+        await pg.wait_for_timeout(600)
+        m2 = await pg.evaluate(STRIP_JS % "base")
+        assert m2["names"][:2] == ["WBB", "AERO"] and len(m2["names"]) == 3 and len(set(m2["names"])) == 3 and m2["head"] == "Your watchlist", "[strip watch merge] after removing a token the defaults refill: %s" % m2
+        await pg.context.close()
+        # فقط یک دیده‌بانی که با یک پیش‌فرض یکی است (AERO با حروف بزرگ): پیش‌فرض‌ها بقیه را پر می‌کنند، بدون تکرار
+        pg = await env.open("#swap", vw=1280, vh=900, scheme="light", board=False, init=[we_seed([rows[2]], "we.seed2")])
+        await pg.wait_for_selector(".marketWatch[data-chain=base] .watchPair")
+        await pg.wait_for_timeout(1200)
+        m3 = await pg.evaluate(STRIP_JS % "base")
+        assert m3["head"] == "Your watchlist" and m3["names"][0] == "AERO" and len(m3["names"]) == 3 and len(set(m3["names"])) == 3, "[strip watch merge] a watched default token must not appear twice: %s" % m3
+        await pg.context.close()
+        # گوشی: نوار پنهان است و پنل خلاصه‌ی خودش را دارد؛ باز هم فقط یک «Your watchlist»
+        pg = await env.open("#swap", vw=390, vh=844, scheme="light", board=False, init=[we_seed(rows, "we.seed3")])
+        await pg.wait_for_selector("#savedWatch", state="attached")
+        await pg.wait_for_timeout(1200)
+        assert await pg.evaluate(COUNT_JS) == 1, "[strip watch merge] 390: exactly one visible 'Your watchlist' (the panel summary)"
+        sm = await pg.evaluate("() => [getComputedStyle(document.querySelector('.marketWatch')).display, getComputedStyle(document.querySelector('#savedWatch > summary')).display]")
+        assert sm[0] == "none" and sm[1] != "none", "[strip watch merge] 390: strip hidden, summary shown: %s" % sm
+        await pg.context.close()
+        # سولانا: فهرستِ جدا
+        pg = await env.open("#swap?chain=solana", vw=1280, vh=900, scheme="light", board=False, init=[we_seed(rows)])
+        await pg.wait_for_selector(".marketWatch[data-chain=solana] .watchPair")
+        await pg.wait_for_timeout(1500)
+        s = await pg.evaluate(STRIP_JS % "solana")
+        assert s["head"] == "Your watchlist" and s["names"][0] == "SOLW" and len(s["names"]) == 3 and "WAA" not in s["names"] and len(set(s["names"])) == 3, "[strip watch merge] Solana list is separate: %s" % s
+        assert s["price"][0] == "—", "[strip watch merge] Solana watched token without data shows a dash: %s" % s
+        assert not re.search(r"NaN|\$0\.00|undefined", s["text"]), "[strip watch merge] bad text in the Solana strip: %r" % s["text"]
+        await pg.context.close()
+        assert not errs, "[strip watch merge] console errors: %s" % errs
+        print("[strip watch merge] watched Base tokens take the first Market watch slots in list order, defaults fill the rest (3 slots, no duplicates even for an upper-case default address), heading 'Your watchlist' (old heading without watched tokens), price from the same multi-token path and dashes when there is no data (no NaN/$0.00), the strip refills in place when the list changes, Solana list is separate")
+    finally:
+        await b.close()
+        srv.shutdown()
+
+
+async def check_watch_exit_chips(p, errors):
+    """[watch exit chips] چیپِ وضعیتِ خروج در پنل: نتیجه‌ی نشست، بعد pairs.json، هرگز کهنه‌تر از ۶ ساعت."""
+    srv, origin = we_serve()
+    b = await p.chromium.launch()
+    errs = []
+    try:
+        env = FbEnv(b, origin, errs)
+        a = [fb_evm(0xD00 + i) for i in range(8)]
+        sol1, sol2, sol3 = fb_b58(0xD10), fb_b58(0xD11), fb_b58(0xD12)
+        rows = [{"chain": "base", "address": a[0], "symbol": "SESS"}, {"chain": "base", "address": a[1], "symbol": "PSELL"},
+                {"chain": "base", "address": a[2], "symbol": "PNO"}, {"chain": "base", "address": a[3], "symbol": "OLD7"},
+                {"chain": "base", "address": a[4], "symbol": "NONE"}, {"chain": "base", "address": a[5], "symbol": "PUNK"},
+                {"chain": "base", "address": a[6], "symbol": "STALES"}, {"chain": "base", "address": a[7], "symbol": "SESSNO"},
+                {"chain": "solana", "address": sol1, "symbol": "SOLNO"}, {"chain": "solana", "address": sol2, "symbol": "SOLOK"},
+                {"chain": "solana", "address": sol3, "symbol": "SOLOLD"}]
+
+        def pr(chain, addr, v, sec):
+            return {"chain": chain, "address": addr, "symbol": "X", "name": "X", "v": v, "checkKind": "roundtrip",
+                    "checkedAt": fb_iso(sec), "poolCreatedAt": fb_iso(3600), "dex": "uniswap-v3"}
+        env.pairs["body"] = {"store": True, "rows": [
+            pr("base", a[1], "sell", 30 * 60), pr("base", a[2], "nosell", 2 * 3600), pr("base", a[3], "sell", 7 * 3600),
+            pr("base", a[5], None, 10 * 60), pr("base", a[6], "sell", 10 * 60),
+            pr("solana", sol1, "nosell", 10 * 60), pr("solana", sol2, "sell", 20 * 60), pr("solana", sol3, "sell", 7 * 3600)]}
+        pg = await env.open("#swap", vw=1280, vh=900, scheme="light", board=False, init=[we_seed(rows)])
+        await pg.wait_for_selector("#savedWatch", state="attached")
+        await pg.wait_for_timeout(2500)
+        await pg.evaluate("""([a0, a6, a7]) => { exitCache[a0] = {state: 'verified', lossPct: 1, at: Date.now() - 5 * 60000};
+            exitCache[a6] = {state: 'verified', lossPct: 1, at: Date.now() - 7 * 3600000};
+            exitCache[a7] = {state: 'noexit', lossPct: null, at: Date.now() - 12 * 60000}; savedWatchRender(); }""", [a[0], a[6], a[7]])
+        env.pairs_calls.clear()
+        await pg.click(".marketWatch[data-chain=base] .watchToggle")
+        await pg.wait_for_function("() => document.querySelectorAll('#savedList .savedChip').length === 11 && /Sell route quoted/.test(document.querySelector('#savedList .savedRow:nth-child(2) .savedChip').textContent)", timeout=15000)
+        chips = await pg.evaluate("() => Object.fromEntries([...document.querySelectorAll('#savedList .savedRow')].map(r => [r.querySelector('.savedIdentity b').textContent, r.querySelector('.savedChip').textContent]))")
+        want = {"SESS": r"^Sell route quoted · 5m ago$", "PSELL": r"^Sell route quoted · 30m ago$", "PNO": r"^No sell route · 2h ago$",
+                "OLD7": r"^Not checked yet$", "NONE": r"^Not checked yet$", "PUNK": r"^Unknown · 10m ago$",
+                "STALES": r"^Sell route quoted · 10m ago$", "SESSNO": r"^No sell route · 12m ago$",
+                "SOLNO": r"^Unknown · 10m ago$", "SOLOK": r"^Sell route quoted · 20m ago$", "SOLOLD": r"^Not checked yet$"}
+        for k, rx in want.items():
+            assert re.match(rx, chips[k]), "[watch exit chips] %s: %r does not match %s (all: %s)" % (k, chips[k], rx, chips)
+        calls = sorted(c.split("chain=")[1] for c in env.pairs_calls if "/pairs.json" in c)
+        assert calls == ["base", "solana"], "[watch exit chips] /pairs.json once per chain per panel open: %s" % env.pairs_calls
+        await pg.click(".marketWatch[data-chain=base] .watchToggle")
+        await pg.click(".marketWatch[data-chain=base] .watchToggle")
+        await pg.wait_for_timeout(800)
+        calls2 = [c for c in env.pairs_calls if "/pairs.json" in c]
+        assert len(calls2) == 2, "[watch exit chips] the answer is cached for 60s: %s" % env.pairs_calls
+        cls = await pg.evaluate("() => Object.fromEntries([...document.querySelectorAll('#savedList .savedRow')].map(r => [r.querySelector('.savedIdentity b').textContent, r.querySelector('.savedChip').className]))")
+        assert cls["OLD7"] == "savedChip " and cls["PNO"].endswith(" n") and cls["PSELL"].endswith(" p"), "[watch exit chips] chip tones: %s" % cls
+        link = await pg.evaluate("() => document.querySelector('#savedList .savedRow:nth-child(5) a').getAttribute('href')")
+        assert link == "/t/" + a[4], "[watch exit chips] a not-checked row still opens its token: %s" % link
+        await we_shot(pg, "watch-panel-1280-light.png")
+        await pg.context.close()
+        assert not errs, "[watch exit chips] console errors: %s" % errs
+        print("[watch exit chips] session result first (Sell route quoted / No sell route · Nm ago), then /pairs.json (one fetch per chain per panel open, 60s cache), a verdict older than 6h shows 'Not checked yet' (also a stale session result falls back to the fresh pairs row), no row = 'Not checked yet' and still opens its token, Solana never shows 'No sell route' (nosell -> Unknown)")
+    finally:
+        await b.close()
+        srv.shutdown()
+
+
+async def check_board_star(p, errors):
+    """[board star] ستاره‌ی ردیف‌های تابلوی Flow: بدون باز کردن ردیف، هم‌گام با فهرست."""
+    srv, origin = we_serve()
+    b = await p.chromium.launch()
+    errs = []
+    try:
+        env = FbEnv(b, origin, errs)
+        prow, toks, pls, mk, pools = fb_fixture()
+        env.pairs["body"] = {"store": True, "rows": prow}
+        env.gt = fb_gt_for(toks, pls)
+        pg = await env.open("#flow", vw=1280, vh=900, scheme="dark", board=True)
+        await fb_wait_rows(pg)
+        info = await pg.evaluate("""() => { const t = document.querySelector('.fbTbl'); const th = t.querySelector('thead th'); const b = document.querySelector('.fbRow .fbStar');
+            return {firstTh: th.textContent.trim(), isFirst: b.closest('td') === b.closest('tr').firstElementChild, w: Math.round(b.getBoundingClientRect().width), h: Math.round(b.getBoundingClientRect().height),
+                    pressed: b.getAttribute('aria-pressed'), label: b.getAttribute('aria-label'), sym: b.closest('tr').querySelector('.fbTkTx b').textContent}; }""")
+        assert info["firstTh"] == "" and info["isFirst"] and info["w"] == 28 and info["h"] == 28 and info["pressed"] == "false" and info["label"] == "Watch " + info["sym"], "[board star] star cell: %s" % info
+        addr0 = await pg.evaluate("() => document.querySelector('.fbRow').dataset.addr")
+        await pg.click(".fbRow .fbStar")
+        await pg.wait_for_timeout(300)
+        st = await pg.evaluate("""() => ({pressed: (document.querySelector('.fbRow .fbStar') || document.body).getAttribute('aria-pressed'), rows: document.querySelectorAll('.fbRow').length, board: flowBoard, hash: location.hash, view: view,
+            stored: JSON.parse(localStorage.getItem('zaexa.watchlist.v1') || '[]')})""")
+        assert st["pressed"] == "true" and st["board"] is True and st["view"] == "flow" and st["hash"] == "#flow", "[board star] clicking the star must not open the row: %s" % st
+        assert [(x["chain"], x["address"]) for x in st["stored"]] == [("base", addr0.lower())], "[board star] stored: %s" % st["stored"]
+        # صفحه‌کلید: Enter روی ستاره فقط تاگل می‌کند
+        await pg.focus(".fbRow .fbStar")
+        await pg.keyboard.press("Enter")
+        await pg.wait_for_timeout(300)
+        st = await pg.evaluate("() => [document.querySelector('.fbRow .fbStar').getAttribute('aria-pressed'), flowBoard, JSON.parse(localStorage.getItem('zaexa.watchlist.v1') || '[]').length]")
+        assert st == ["false", True, 0], "[board star] Enter on the star toggles it off without opening the row: %s" % st
+        # همگام با تبِ دیگر
+        pg2 = await pg.context.new_page()
+        await pg2.goto(origin + "/stub-ethers.js")
+        await pg2.evaluate("([k, a]) => localStorage.setItem(k, JSON.stringify([{chain: 'base', address: a, symbol: 'ALPHA', name: ''}]))", [WE_KEY, addr0.lower()])
+        await pg.wait_for_function("() => document.querySelector('.fbRow .fbStar').getAttribute('aria-pressed') === 'true'", timeout=5000)
+        await pg2.evaluate("(k) => localStorage.setItem(k, '[]')", WE_KEY)
+        await pg.wait_for_function("() => document.querySelector('.fbRow .fbStar').getAttribute('aria-pressed') === 'false'", timeout=5000)
+        await pg2.close()
+        await pg.click(".fbRow .fbStar")
+        await pg.wait_for_timeout(300)
+        await we_shot(pg, "board-star-1280-dark.png")
+        # فهرست پر: پیام و بدون افزودن
+        full = [{"chain": "base", "address": fb_evm(0xE00 + i), "symbol": "F%d" % i, "name": ""} for i in range(30)]
+        await pg.evaluate("(r) => { localStorage.setItem('zaexa.watchlist.v1', JSON.stringify(r)); }", full)
+        await pg.click(".fbRow:nth-child(2) .fbStar")
+        await pg.wait_for_timeout(300)
+        msg = await pg.inner_text("#flowBody")
+        n = await pg.evaluate("() => JSON.parse(localStorage.getItem('zaexa.watchlist.v1')).length")
+        assert "Your watchlist is full (30 tokens). Remove a token to add another." in msg and n == 30, "[board star] full list: %s" % n
+        # خودِ ردیف هنوز باز می‌شود (کلیک روی بخش دیگر ردیف)
+        await pg.click(".fbRow .fbTkTx b")
+        await pg.wait_for_function("() => flowBoard === false", timeout=8000)
+        await pg.context.close()
+        # گوشی
+        pg = await env.open("#flow", vw=390, vh=844, scheme="light", board=True)
+        await fb_wait_rows(pg)
+        ov = await pg.evaluate("() => { const r = document.querySelector('.fbStar').getBoundingClientRect(); return [document.documentElement.scrollWidth, innerWidth, r.left >= 0 && r.right <= innerWidth]; }")
+        assert ov[0] <= ov[1] and ov[2], "[board star] 390px: star visible, no horizontal overflow: %s" % ov
+        await pg.context.close()
+        assert not errs, "[board star] console errors: %s" % errs
+        print("[board star] 28px star as the first cell of every board row (empty header cell), click and Enter toggle the watchlist without opening the row, aria-pressed follows the list including writes from another tab, a full list shows the 30-token message, the row itself still opens; 390px has no overflow")
+    finally:
+        await b.close()
+        srv.shutdown()
+
+
+async def check_pairs_star(p, errors):
+    """[pairs star] ستاره‌ی جدول New pairs: همان کلید و اعتبارسنجیِ اپ، ادغام با تبِ دیگر."""
+    srv, origin = we_serve()
+    b = await p.chromium.launch()
+    errs = []
+    try:
+        sol_mixed = "Ab" + "c" * 30 + "dEfGhJk"           # حروف بزرگ و کوچک؛ lowercase شدنش خراب می‌کند
+        base_a, base_b = fb_evm(0xF01), "0x" + "AbCdEf" * 6 + "1234"
+        assert re.match(r"^[1-9A-HJ-NP-Za-km-z]{32,44}$", sol_mixed), sol_mixed
+
+        def prow(chain, addr, sym):
+            return {"chain": chain, "address": addr, "symbol": sym, "name": sym + " token", "v": "sell", "checkKind": "roundtrip", "checkedAt": fb_iso(600),
+                    "poolCreatedAt": fb_iso(3600), "dex": "uniswap-v3", "priceUsd": 1.5, "reserveUsd": 12000, "vol24hUsd": 5000}
+
+        async def open_pairs(vw, rows, chain="base", init=None, scheme="light"):
+            ctx = await b.new_context(viewport={"width": vw, "height": 900}, color_scheme=scheme)
+            pg = await ctx.new_page()
+            pg.on("pageerror", lambda e: errs.append("PAGEERROR %s" % e))
+            pg.on("console", lambda m: errs.append("CONSOLE %s" % m.text) if m.type == "error" and "Failed to load resource" not in m.text else None)
+
+            async def h(route):
+                u = route.request.url
+                if u.startswith(origin):
+                    rest = u.split("?")[0][len(origin):]
+                    if rest == "/pairs.json":
+                        return await route.fulfill(status=200, content_type="application/json", body=_fbj.dumps({"store": True, "rows": rows}))
+                    return await route.continue_()
+                return await route.abort()
+            await pg.route("**/*", h)
+            for sc in (init or []):
+                await pg.add_init_script(sc)
+            await pg.goto(origin + "/pairs" + ("?chain=solana" if chain == "solana" else ""))
+            await pg.wait_for_selector("#rowsBody .star-btn", state="attached", timeout=15000)
+            return ctx, pg
+        stored = lambda pg: pg.evaluate("() => JSON.parse(localStorage.getItem('zaexa.watchlist.v1') || 'null')")
+        rows_b = [prow("base", base_a, "AAA"), prow("base", base_b, "BBB")]
+        ctx, pg = await open_pairs(1280, rows_b)
+        first = await pg.evaluate("() => { const tr = document.querySelector('#rowsBody tr'); const b = tr.querySelector('.star-btn'); return [b.closest('td') === tr.firstElementChild, Math.round(b.getBoundingClientRect().width), b.getAttribute('aria-pressed'), b.getAttribute('aria-label'), document.querySelector('.pairs-table thead th').textContent.trim()]; }")
+        assert first == [True, 28, "false", "Watch AAA", "Watch"], "[pairs star] first column star: %s" % first
+        await pg.click("#rowsBody tr:nth-child(1) .star-btn")
+        s = await stored(pg)
+        assert s == [{"chain": "base", "address": base_a, "symbol": "AAA", "name": ""}], "[pairs star] stored after the first click: %s" % s
+        assert await pg.evaluate("() => location.pathname") == "/pairs", "[pairs star] the click must not navigate"
+        assert await pg.get_attribute("#rowsBody tr:nth-child(1) .star-btn", "aria-pressed") == "true"
+        await pg.click("#rowsBody tr:nth-child(2) .star-btn")
+        s = await stored(pg)
+        assert [x["address"] for x in s] == [base_a, base_b.lower()], "[pairs star] Base addresses are stored lower-case, in order: %s" % s
+        await pg.click("#rowsBody tr:nth-child(1) .star-btn")
+        s = await stored(pg)
+        assert [x["address"] for x in s] == [base_b.lower()], "[pairs star] second click removes: %s" % s
+        # ادغام با تبِ دیگر: تب دیگر X را بعد از بارگذاری اضافه کرد، کلیک ما نباید آن را پاک کند
+        pg2 = await ctx.new_page()
+        await pg2.goto(origin + "/stub-ethers.js")
+        xrow = {"chain": "base", "address": fb_evm(0xF77), "symbol": "XOTH", "name": ""}
+        await pg2.evaluate("([k, r]) => localStorage.setItem(k, JSON.stringify(JSON.parse(localStorage.getItem(k) || '[]').concat([r])))", [WE_KEY, xrow])
+        await pg2.close()
+        await pg.click("#rowsBody tr:nth-child(1) .star-btn")
+        s = await stored(pg)
+        assert [x["address"] for x in s] == [base_b.lower(), xrow["address"], base_a], "[pairs star] merge with the other tab's write: %s" % s
+        await ctx.close()
+        # ورودی‌های نامعتبر حذف می‌شوند، Solana دقیق می‌ماند
+        junk = [{"chain": "base", "address": "0x123"}, {"chain": "eth", "address": base_a}, None, "str", {"chain": "base", "address": "0x" + "0" * 40},
+                {"chain": "solana", "address": "0xdead"}, {"chain": "solana", "address": "short"}, {"chain": "base", "address": base_a, "symbol": "KEEP‮\u0007x"}]
+        rows_s = [prow("solana", sol_mixed, "SOLM")]
+        ctx, pg = await open_pairs(1280, rows_s, chain="solana", init=[we_seed(junk, "j1")])
+        await pg.click("#rowsBody tr:nth-child(1) .star-btn")
+        s = await stored(pg)
+        assert s == [{"chain": "base", "address": base_a, "symbol": "KEEPx", "name": ""}, {"chain": "solana", "address": sol_mixed, "symbol": "SOLM", "name": ""}], "[pairs star] invalid stored entries are dropped, labels cleaned, the Solana mint is kept exact: %s" % s
+        await ctx.close()
+        # پر بودن
+        full = [{"chain": "base", "address": fb_evm(0xE00 + i), "symbol": "F%d" % i, "name": ""} for i in range(30)]
+        ctx, pg = await open_pairs(1280, rows_b, init=[we_seed(full, "j2")])
+        await pg.click("#rowsBody tr:nth-child(1) .star-btn")
+        note = await pg.inner_text("#watchNote")
+        s = await stored(pg)
+        assert note == "Your watchlist is full (30 tokens). Remove a token to add another." and len(s) == 30 and await pg.get_attribute("#rowsBody tr:nth-child(1) .star-btn", "aria-pressed") == "false", "[pairs star] full list: %r %d" % (note, len(s))
+        await ctx.close()
+        # گوشی: ستاره در کارت دیده می‌شود، بدون سرریز
+        ctx, pg = await open_pairs(390, rows_b)
+        await pg.wait_for_selector("#rowsCards .star-btn", state="visible")
+        geo = await pg.evaluate("() => { const b = document.querySelector('#rowsCards .star-btn').getBoundingClientRect(); return [document.documentElement.scrollWidth, innerWidth, b.left >= 0 && b.right <= innerWidth && b.width === 28]; }")
+        assert geo[0] <= geo[1] and geo[2], "[pairs star] 390px: the star stays visible and the page does not overflow horizontally: %s" % geo
+        await pg.click("#rowsCards li:nth-child(1) .star-btn")
+        assert (await stored(pg))[0]["address"] == base_a and await pg.evaluate("() => location.pathname") == "/pairs", "[pairs star] 390px card star toggles without navigating"
+        await we_shot(pg, "pairs-star-390-light.png")
+        await ctx.close()
+        assert not errs, "[pairs star] console errors: %s" % errs
+        print("[pairs star] star as the first column of New pairs (and in the phone cards, no overflow at 390): toggles zaexa.watchlist.v1 with the app's validation (Base lower-cased, Solana mint exact, junk entries dropped, labels cleaned), merges with another tab's write before saving, shows the 30-token message when full and never navigates")
+    finally:
+        await b.close()
+        srv.shutdown()
 
 
 async def only(names):

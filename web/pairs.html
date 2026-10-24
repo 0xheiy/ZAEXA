@@ -285,6 +285,8 @@ header>.navPad{grid-column:1;grid-row:1;width:0;min-width:0}
 @media(max-width:720px){.navPad{display:none}}
 
 .pairs-main{width:min(1240px,calc(100% - 48px));margin:32px auto 80px}
+/* ۲۴ اکتبر: سوییچ Flow/New pairs روی /app#flow و /pairs هم‌تراز بماند (دسکتاپ) */
+@media(min-width:961px){.pairs-main{margin-top:36px}}
 @media(max-width:760px){.pairs-main{width:min(1240px,calc(100% - 28px))}}
 h1{font-size:28px;letter-spacing:-.03em;margin:0 0 10px;line-height:1.1}
 @media(max-width:760px){h1{font-size:24px}}
@@ -360,6 +362,18 @@ h1{font-size:28px;letter-spacing:-.03em;margin:0 0 10px;line-height:1.1}
 .copy-btn{display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;
   border-radius:999px;border:1px solid var(--line2);color:var(--tx2);font-size:11px;white-space:nowrap}
 .copy-btn:hover{border-color:var(--acc);color:var(--acc)}
+/* ۲۴ اکتبر: ستاره‌ی دیده‌بانی — همان قدِ ۲۸pxِ دکمه‌ی کپی؛ بالاتر از row-link/card-link */
+.col-star{position:relative;z-index:2;width:28px;padding-right:0!important}
+.pairs-table th.col-star{padding-right:0}
+.star-btn{display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;border-radius:999px;
+  border:1px solid var(--line2);color:var(--tx2);font-size:15px;line-height:1;cursor:pointer;background:none;flex:0 0 28px}
+.star-btn:hover{border-color:var(--acc);color:var(--acc)}
+.star-btn[aria-pressed="true"]{color:var(--acc);border-color:var(--acc)}
+.star-btn:focus-visible{outline:2px solid var(--acc);outline-offset:2px}
+/* روی کارت ستاره در گوشه‌ی پایینِ راستِ card-main می‌نشیند تا ردیفِ اول (نماد/نشان/سن) جا را از دست ندهد */
+.card-main{position:relative}
+.card-main .star-btn{position:absolute;right:0;bottom:-3px;z-index:2}
+.card-main .card-row2{padding-right:34px}
 .copy-btn.copied{width:auto;padding:0 10px;color:var(--pos);border-color:var(--pos)}
 
 /* جای لوگوی توکن — همیشه ۲۴×۲۴ رزرو می‌شود تا ردیف‌ها هم‌تراز بمانند.
@@ -796,11 +810,13 @@ Solana</button><script>if(window.__zxPairsCopy){window.__zxPairsCopy.tabs();wind
     </div>
 
     <p id="noMatch" class="state-box" role="status" hidden>No pairs match your search.</p>
+    <p id="watchNote" class="state-box" role="status" hidden></p>
     <div class="pairsTableScroll" role="region" aria-label="New pairs table" tabindex="0">
     <table class="pairs-table">
       <caption class="visually-hidden">The newest pairs found</caption>
       <thead>
         <tr>
+          <th scope="col" class="col-star"><span class="visually-hidden">Watch</span></th>
           <th scope="col">Token</th>
           <th scope="col">Verdict</th>
           <th scope="col">Price</th>
@@ -1043,6 +1059,88 @@ Solana</button><script>if(window.__zxPairsCopy){window.__zxPairsCopy.tabs();wind
       '" aria-label="Copy address" title="Copy address">' + COPY_SVG + '</button>';
   }
 
+  /* ۲۴ اکتبر — دیده‌بانی: همان کلید و همان قواعدِ اعتبارسنجیِ savedWatchClean در web/index.html
+     (Base بدون حساسیت به حروف، Solana دقیق، سقف ۳۰). پیش از هر نوشتن، فهرستِ ذخیره‌شده دوباره
+     خوانده می‌شود تا تغییرِ تبِ دیگر گم نشود. */
+  var WATCH_KEY = 'zaexa.watchlist.v1', WATCH_MAX = 30;
+  var WATCH_SOL_RE = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
+  function watchClean(row){
+    if (!row || typeof row !== 'object' || ['base', 'solana'].indexOf(row.chain) < 0 || typeof row.address !== 'string') return null;
+    var address = row.address;
+    if (row.chain === 'base') {
+      if (!/^0x[0-9a-fA-F]{40}$/.test(address) || /^0x0{40}$/i.test(address)) return null;
+      address = address.toLowerCase();
+    } else if (!WATCH_SOL_RE.test(address)) return null;
+    var label = function(v){ return typeof v === 'string' ? v.replace(/[\u0000-\u001f\u007f\u202a-\u202e\u2066-\u2069]/g, '').trim().slice(0, 80) : ''; };
+    return { chain: row.chain, address: address, symbol: label(row.symbol), name: label(row.name) };
+  }
+  function watchKeyOf(row){ return row.chain + ':' + row.address; }
+  function watchRead(){
+    var raw = localStorage.getItem(WATCH_KEY);
+    if (!raw) return [];
+    if (raw.length > 50000) throw new Error('Invalid watchlist');
+    var parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) throw new Error('Invalid watchlist');
+    var seen = {}, rows = [], src = parsed.slice(0, 300);
+    for (var i = 0; i < src.length; i++) {
+      var row = watchClean(src[i]); if (!row) continue;
+      var key = watchKeyOf(row); if (seen[key]) continue;
+      seen[key] = true; rows.push(row);
+      if (rows.length === WATCH_MAX) break;
+    }
+    return rows;
+  }
+  function watchSafeRead(){ try { return watchRead(); } catch (e) { return []; } }
+  function watchRowChain(row){ return (row && row.chain === 'solana') ? 'solana' : (row && row.chain === 'base') ? 'base' : currentChain; }
+  function watchIsOn(rows, chain, addr){
+    var probe = watchClean({ chain: chain, address: addr });
+    if (!probe) return false;
+    var k = watchKeyOf(probe);
+    return rows.some(function(r){ return watchKeyOf(r) === k; });
+  }
+  function starBtnHtml(row, on){
+    var sym = (row && row.symbol) || 'token';
+    var label = (on ? 'Stop watching ' : 'Watch ') + sym;
+    return '<button type="button" class="star-btn" data-star-addr="' + esc((row && row.address) || '') +
+      '" data-star-chain="' + watchRowChain(row) + '" data-star-sym="' + esc((row && row.symbol) || '') +
+      '" aria-pressed="' + (on ? 'true' : 'false') + '" aria-label="' + esc(label) + '" title="' + esc(label) + '">' +
+      (on ? '\u2605' : '\u2606') + '</button>';
+  }
+  var watchRowsNow = [];
+  function watchSyncStars(){
+    watchRowsNow = watchSafeRead();
+    Array.prototype.forEach.call(document.querySelectorAll('.star-btn'), function(b){
+      var on = watchIsOn(watchRowsNow, b.getAttribute('data-star-chain'), b.getAttribute('data-star-addr'));
+      var sym = b.getAttribute('data-star-sym') || 'token';
+      b.setAttribute('aria-pressed', on ? 'true' : 'false');
+      b.textContent = on ? '\u2605' : '\u2606';
+      var label = (on ? 'Stop watching ' : 'Watch ') + sym;
+      b.setAttribute('aria-label', label); b.setAttribute('title', label);
+    });
+  }
+  function watchNote(text){
+    var n = document.getElementById('watchNote'); if (!n) return;
+    n.textContent = text || ''; n.hidden = !text;
+  }
+  function handleStarClick(e){
+    var btn = e.target && e.target.closest ? e.target.closest('.star-btn') : null;
+    if (!btn) return;
+    e.stopPropagation(); e.preventDefault();
+    var row = watchClean({ chain: btn.getAttribute('data-star-chain'), address: btn.getAttribute('data-star-addr'), symbol: btn.getAttribute('data-star-sym') });
+    if (!row) return;
+    var rows = watchSafeRead();            // آخرین فهرستِ ذخیره‌شده (ممکن است تبِ دیگر عوض کرده باشد)
+    var key = watchKeyOf(row), on = rows.some(function(r){ return watchKeyOf(r) === key; });
+    if (!on && rows.length >= WATCH_MAX) {
+      watchNote('Your watchlist is full (30 tokens). Remove a token to add another.');
+      watchSyncStars(); return;
+    }
+    var next = on ? rows.filter(function(r){ return watchKeyOf(r) !== key; }) : rows.concat([row]);
+    try { localStorage.setItem(WATCH_KEY, JSON.stringify(next)); }
+    catch (err) { watchNote('Could not save in this browser. Check your storage settings and try again.'); return; }
+    watchNote('');
+    watchSyncStars();
+  }
+
   function rowMarkup(row, forCard){
     var v = verdictFor(row && row.v);
     var addr = (row && row.address) || '';
@@ -1068,6 +1166,7 @@ Solana</button><script>if(window.__zxPairsCopy){window.__zxPairsCopy.tabs();wind
     var rowAriaLabel = esc(((row && row.symbol) || 'Unknown token') + ', ' + v.label + ', price ' + priceStr);
     var noteHtml = noteFor(row) || '';
     var isBase = (row && row.chain) === 'base';
+    var starOn = watchIsOn(watchRowsNow, watchRowChain(row), addr);
     var actionsHtml = tradeBtnHtml(addr) + copyBtnHtml(addr);
 
     if (forCard) {
@@ -1081,11 +1180,13 @@ Solana</button><script>if(window.__zxPairsCopy){window.__zxPairsCopy.tabs();wind
             '</div>' +
             noteHtml +
             '<div class="card-row2">' + esc(priceStr) + ' &middot; ' + esc(liqStr) + ' &middot; ' + esc(volStr) + '</div>' +
+            starBtnHtml(row, starOn) +
           '</div>' +
           '<div class="card-actions">' + actionsHtml + '</div>' +
         '</div>';
     }
-    return '<td class="col-token">' +
+    return '<td class="col-star">' + starBtnHtml(row, starOn) + '</td>' +
+      '<td class="col-token">' +
         '<a class="row-link" href="' + href + '" aria-label="' + rowAriaLabel + '"></a>' +
         '<div class="token-cell">' + tokLogoSpan(addr, rawSymForLogo) +
           '<span class="token-sym">' + symStr + '</span>' +
@@ -1103,6 +1204,7 @@ Solana</button><script>if(window.__zxPairsCopy){window.__zxPairsCopy.tabs();wind
   }
 
   function renderRows(rows){
+    watchRowsNow = watchSafeRead();
     bodyEl.innerHTML = '';
     cardsEl.innerHTML = '';
     rows.forEach(function(row){
@@ -1373,6 +1475,8 @@ Solana</button><script>if(window.__zxPairsCopy){window.__zxPairsCopy.tabs();wind
     } catch (e2) {}
   }
   resultsEl && resultsEl.addEventListener('click', handleCopyClick);
+  resultsEl && resultsEl.addEventListener('click', handleStarClick);
+  window.addEventListener('storage', function(e){ if (e.key === WATCH_KEY || e.key === null) { watchNote(''); watchSyncStars(); } });
 
   // --- جست‌وجو — روی همان آرایه‌ی کاملِ آخرین بارگذاریِ موفق فیلتر می‌کند،
   // نه روی سرور. علامت/نام/آدرس، بدونِ حساسیت به بزرگی‌کوچکیِ حروف. ---

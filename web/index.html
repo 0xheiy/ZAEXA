@@ -933,6 +933,20 @@ section.card.isDone #actBtn,section.card.isDone #solStatusSlot,section.card.isDo
    بدونِ این، «Copy this check» دو خط می‌شد و همراهش دکمه بلندتر. عنوان
    حالا جمع می‌شود (ellipsis) و اندازه‌ی دکمه ثابت می‌ماند، دقیقاً هم‌قدِ Base. */
 .card>header>.ttl:first-child{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+/* ۲۴ اکتبر: هدرِ Exit check فقط عنوان + نماد + دو دکمه‌ی گرد ۳۲px؛ عنوان هرگز کوتاه نمی‌شود */
+.card>header>.ttl.exitHdTtl{overflow:visible;text-overflow:clip;flex-shrink:0}
+.iconBtn{width:32px;height:32px;border-radius:50%;padding:0;border:0;display:inline-grid;place-items:center;flex-shrink:0;
+  background:var(--card);box-shadow:var(--shs);color:var(--tx2);cursor:pointer;font-size:17px;line-height:1;transition:.16s}
+.iconBtn:hover{color:var(--tx)}
+.iconBtn svg{width:16px;height:16px;display:block}
+.iconBtn[aria-pressed=true],.iconBtn[aria-expanded=true]{color:var(--acc)}
+[data-theme="dark"] .iconBtn{background:#08070d}
+.iconBtn:focus-visible{outline:2px solid var(--acc);outline-offset:3px}
+.shareMenu{position:fixed;z-index:60;min-width:190px;padding:6px;border-radius:14px;background:var(--card);box-shadow:var(--sh);border:1px solid var(--line);display:flex;flex-direction:column}
+.shareMenu[hidden]{display:none}
+.shareMenu>*{display:block;text-align:left;padding:10px 12px;border-radius:9px;font-size:13.5px;color:var(--tx);background:none;border:0;cursor:pointer;text-decoration:none;font-family:inherit}
+.shareMenu>*:hover,.shareMenu>*:focus-visible{background:var(--raise);outline:none}
+.tkSymRow{display:flex;align-items:center;gap:10px;min-width:0}
 
 /* ---------------- safety ---------------- */
 .rhead{display:flex;align-items:center;gap:16px;padding:18px 20px}
@@ -1004,6 +1018,10 @@ section.card.isDone #actBtn,section.card.isDone #solStatusSlot,section.card.isDo
 .fbTbl tbody tr:first-child td{border-top:0}
 .fbTbl th:first-child,.fbTbl td:first-child{text-align:left;padding-left:20px}
 .fbTbl th:last-child,.fbTbl td:last-child{padding-right:20px}
+.fbStarTd{width:28px;padding-right:0!important}
+.fbTbl th:nth-child(2),.fbTbl td:nth-child(2){text-align:left;padding-left:8px}
+.fbStar{width:28px;height:28px;font-size:15px}
+.fbTbl th.fbStarTh{padding:0}
 .fbRow{cursor:pointer}
 .fbRow:hover td{background:var(--card2)}
 .fbRow:focus-visible{outline:2px solid var(--acc);outline-offset:-2px}
@@ -1702,7 +1720,24 @@ footer .fine{max-width:78ch;margin:46px 0 0;font-size:11.5px;color:var(--tx3);li
 html:not(.netPlaced) .hdrRight>#srcMenu{display:none}
 html:not(.ctaReady) #actBtn:disabled,html:not(.ctaReady) #solSwapBtn:disabled{background:var(--grad);color:var(--on-acc)}
 .savedWatch{margin:0;overflow:hidden;grid-column:1/-1;min-width:0}
+.savedWatch[hidden]{display:none}
+/* ۲۴ اکتبر: روی دسکتاپ/تبلت (همان شرطِ دیده‌شدنِ نوار) خلاصه‌ی پنل نمی‌آید؛ سرتیترِ نوار آن را باز و بسته می‌کند */
+@media(min-width:721px){
+  .savedWatch.savedWatch>summary{display:none}
+  .savedWatch:not([open]){display:none}
+  .savedInside{border-top:0;padding-top:4px}
+}
+.watchToggle{display:inline-flex;align-items:center;gap:8px;padding:4px 8px;border-radius:999px;background:none;border:0;cursor:pointer;color:var(--tx);font:inherit;font-size:12px;font-weight:650;text-align:left}
+.watchToggle:hover{background:var(--raise)}
+.watchToggle:focus-visible{outline:2px solid var(--acc);outline-offset:2px}
+.watchChev{font-style:normal;color:var(--tx2);font-size:14px;line-height:1}
+.watchToggle[aria-expanded=true] .watchChev{transform:rotate(180deg)}
+.savedChip{display:inline-block;margin-top:3px;font-size:10.5px;font-weight:620;border-radius:999px;padding:2px 8px;color:var(--tx2);background:var(--raise);white-space:nowrap}
+.savedChip.p{color:var(--pos);background:var(--pglow)}
+.savedChip.n{color:var(--neg);background:color-mix(in srgb,var(--neg) 14%,transparent)}
+.savedChip.u{color:var(--warn);background:color-mix(in srgb,var(--warn) 14%,transparent)}
 @media(max-width:940px){.row.hero>.savedWatch{order:2}}
+@media(max-width:940px){.savedWatch.isEmpty{display:none}}
 .savedWatch>summary{list-style:none;display:flex;align-items:center;gap:10px;padding:16px 20px;cursor:pointer;font-size:13px;font-weight:650;min-height:52px}
 .savedWatch>summary::-webkit-details-marker{display:none}
 .savedWatch>summary::after{content:'⌄';margin-left:auto;color:var(--tx2)}
@@ -1936,7 +1971,7 @@ try{(function(){
   <summary><span class="savedStar" aria-hidden="true">☆</span><span>Your watchlist</span><span class="savedCount" id="savedCount">0</span></summary>
   <div class="savedInside">
     <div class="savedToolbar"><p>Saved in this browser. No background alerts.</p><button type="button" class="chip" id="savedRefresh">Refresh prices</button></div>
-    <div id="savedList"><p class="savedEmpty">Keep tokens here with the ☆ Watch button beside a token’s exit check.</p></div>
+    <div id="savedList"><p class="savedEmpty">Keep tokens here with the ☆ star beside a token’s exit check.</p></div>
     <p id="savedStatus" class="savedStatus" role="status" aria-live="polite"></p>
   </div>
 </details>
@@ -2031,12 +2066,9 @@ try{(function(){
     </section>
 
     <section class="card">
-      <header><span class="ttl">Exit check &amp; token safety</span><span class="grow"></span>
-        <button class="exitShare savedToggle" id="baseWatch" type="button" aria-pressed="false" disabled>☆ Watch</button>
-        <button class="exitShare" id="checkShare" type="button"
-          title="Copy a link that opens this token's page — no wallet needed"
-        ><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M20 9H11a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h9a2 2 0 0 0 2-2v-9a2 2 0 0 0-2-2Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>Copy this check</button>
-        <span class="ttl mono" id="safetySym"></span></header>
+      <header><span class="ttl exitHdTtl">Exit check</span><span class="ttl mono" id="safetySym"></span><span class="grow"></span>
+        <button class="iconBtn savedToggle" id="baseWatch" type="button" aria-pressed="false" aria-label="Watch token" title="Select a token first" disabled>☆</button>
+        <button class="iconBtn" id="checkShare" type="button" aria-haspopup="menu" aria-expanded="false" aria-label="Share this check" title="Share this check"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="M8.6 13.5l6.8 4M15.4 6.5l-6.8 4"/></svg></button></header>
       <div id="exitBox"></div>
       <div id="safetyBody"><div class="empty">Pick a token to scan its contract.</div></div>
     </section>
@@ -2076,12 +2108,9 @@ try{(function(){
   <div class="row sub" id="appSolSubRow" hidden>
     <div id="appSolPoolsSlot" style="display:contents"></div>
       <section class="card" id="appSolSafetyCard">
-        <header><span class="ttl">Exit check &amp; token safety</span><span class="grow"></span>
-          <button class="exitShare savedToggle" id="solWatch" type="button" aria-pressed="false" disabled>☆ Watch</button>
-          <button class="exitShare" id="appSolCheckShare" type="button"
-            title="Copy a link that opens this token's page — no wallet needed"
-          ><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M20 9H11a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h9a2 2 0 0 0 2-2v-9a2 2 0 0 0-2-2Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>Copy this check</button>
-          <span class="ttl mono" id="appSolExitSym"></span></header>
+        <header><span class="ttl exitHdTtl">Exit check</span><span class="ttl mono" id="appSolExitSym"></span><span class="grow"></span>
+          <button class="iconBtn savedToggle" id="solWatch" type="button" aria-pressed="false" aria-label="Watch token" title="Select a token first" disabled>☆</button>
+          <button class="iconBtn" id="appSolCheckShare" type="button" aria-haspopup="menu" aria-expanded="false" aria-label="Share this check" title="Share this check"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="M8.6 13.5l6.8 4M15.4 6.5l-6.8 4"/></svg></button></header>
         <div class="mono" id="appSolExitAddr" style="padding:12px 20px 0;color:var(--tx3);font-size:11.5px;word-break:break-all"></div>
         <div id="appSolExitBox"></div>
         <div id="appSolSafetyBody"></div>
@@ -2194,7 +2223,8 @@ try{(function(){
   <section class="card tkBar">
     <span class="av tkAv" id="tk-av">?</span>
     <div class="tkId">
-      <div class="tkSym" id="tk-sym">—</div>
+      <div class="tkSymRow"><div class="tkSym" id="tk-sym">—</div>
+        <button class="iconBtn savedToggle" id="tokenWatch" type="button" aria-pressed="false" aria-label="Watch token" title="Select a token first" disabled>☆</button></div>
       <!-- وسط کارت با *واقعیت* پر می‌شود، نه با فضای خالی: نام، شبکه و آدرس
            قرارداد. نسخه‌ی قبل همه‌چیز را به دو لبه هل می‌داد و وسطش حفره بود. -->
       <div class="tkMeta">
@@ -2212,8 +2242,7 @@ try{(function(){
       <div class="tkPxSub">price now</div>
     </div>
     <button class="tkTrade" id="tk-trade">Trade</button>
-    <button class="tkCopy" id="tk-copy" title="Copy a link to this page">Copy link</button>
-    <button class="tkCopy savedToggle" id="tokenWatch" type="button" aria-pressed="false" disabled>☆ Watch</button>
+    <button class="iconBtn" id="tk-copy" type="button" aria-haspopup="menu" aria-expanded="false" aria-label="Share this check" title="Share this check"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="M8.6 13.5l6.8 4M15.4 6.5l-6.8 4"/></svg></button>
   </section>
 
   <!-- امضای صفحه: خودِ رفت‌وبرگشت. تنها ادعایی که فقط ما داریم — «فروش را
@@ -3821,6 +3850,8 @@ async function preconditionGap(amountIn){
    و چون داده کهنه می‌شود، سنش همیشه همراهش می‌رود: بعد از ده دقیقه رنگ
    خاموش می‌شود تا یک نتیجه‌ی قدیمی به‌جای وضعیت فعلی جا نزند. */
 const exitCache={};
+// حکمِ سولانا در همین نشست (mint دقیق، بدون lowercase) — برای چیپِ فهرستِ دیده‌بانی و خلاصه‌ی اشتراک
+const solExitSeen={};
 function rememberExit2(x){rememberExit(x);return x;}
 function rememberExit(x){
   if(!x||!x.state||!tokenOut)return;
@@ -3892,14 +3923,14 @@ function exitBadge(t){
 let checkLink=false,checkScrolled=false;
 /* clipboard API فقط در secure context هست. اگر نبود، وانمود نمی‌کنیم که
    کپی شد — لینک را نشان می‌دهیم تا کاربر خودش بردارد. */
-async function copyLink(url,btn){
+async function copyLink(url,btn,what){
   const old=btn?btn.innerHTML:null;
   let ok=false;
   try{if(navigator.clipboard&&window.isSecureContext){await navigator.clipboard.writeText(url);ok=true;}}
   catch{ok=false;}
   if(ok&&btn){btn.textContent="Copied \u2713";setTimeout(()=>{btn.innerHTML=old;},1400);}
   else if(!ok){
-    setNotice(note("warn","<b>Could not reach the clipboard.</b> Copy this link manually:<br>"+
+    setNotice(note("warn","<b>Could not reach the clipboard.</b> Copy this "+(what||"link")+" manually:<br>"+
       '<span class="mono" style="word-break:break-all">'+esc(url)+"</span>"));
   }
   return ok;
@@ -3913,8 +3944,96 @@ async function copyLink(url,btn){
    می‌ماند — روی یک نوار، که همان چیزی است که هیچ تجمیع‌کننده‌ی دیگری
    نشان نمی‌دهد. داده دقیقاً همان داده‌ی renderExit است.
    ===================================================================== */
+
+/* ۲۴ اکتبر — منوی اشتراکِ کارتِ Exit check (Base، Solana و صفحه‌ی توکن). یک منوی شناور برای همه؛
+   Escape / کلیک بیرون / انتخاب آن را می‌بندد و فوکوس به دکمه برمی‌گردد. */
+function shareCtx(btn){
+  const id=btn.id,tp=id==="tk-copy",sol=id==="appSolCheckShare"||(tp&&activeChain==="solana");
+  let link,sym,boxId;
+  if(tp){link=location.href;sym=($("tk-sym").textContent||"").trim();boxId="tk-exitBox";}
+  else if(sol){if(!solMintCur)return null;link=location.origin+"/t/"+solMintCur+"?check=1";sym=($("appSolExitSym").textContent||"").trim();boxId="appSolExitBox";}
+  else{
+    link=tokenPageUrl();
+    if(!link){setNotice(note("warn","<b>Native ETH has no token page.</b> Pick an ERC-20 to share a check."));return null;}
+    sym=($("safetySym").textContent||"").trim()||(tokenOut?tokenOut.symbol:"");boxId="exitBox";
+  }
+  const box=$(boxId);
+  let verdict=box?((box.querySelector(".exitTtl,.tripPct")||{}).textContent||"").trim():"";
+  let at=box?Number(box.dataset.at):NaN;
+  if(!tp&&!sol&&tokenOut&&exitCache[balKey(tokenOut)])at=exitCache[balKey(tokenOut)].at;
+  if(sol&&solMintCur&&solExitSeen[solMintCur]){
+    const c=solExitSeen[solMintCur];at=c.at;
+    if(!verdict)verdict=c.v==="sell"?"Sell route quoted":c.v==="nosell"?"No sell route":"Unknown";
+  }
+  if(!verdict)verdict="Exit not checked yet";
+  const age=Number.isFinite(at)&&at>0?agoText(at):"—";
+  const text=(sym||"Token")+" on "+(sol?"Solana":"Base")+" — "+verdict+" · checked "+age;
+  return {link,text,summary:text+" · "+link};
+}
+let shareMenuBtn=null;
+function shareMenuEl(){
+  let m=$("shareMenu");if(m)return m;
+  m=document.createElement("div");m.id="shareMenu";m.className="shareMenu";m.setAttribute("role","menu");m.hidden=true;
+  m.innerHTML='<button type="button" role="menuitem" data-act="link">Copy link</button>'+
+    '<button type="button" role="menuitem" data-act="summary">Copy summary</button>'+
+    '<a role="menuitem" data-act="tg" target="_blank" rel="noopener" href="https://t.me/share/url">Share on Telegram</a>';
+  document.body.appendChild(m);
+  m.addEventListener("click",async e=>{
+    const it=e.target.closest("[data-act]");if(!it||!shareMenuBtn)return;
+    const btn=shareMenuBtn,act=it.dataset.act,c=shareCtx(btn);
+    if(act!=="tg")e.preventDefault();
+    shareMenuClose(true);
+    if(!c)return;
+    if(act==="link"){if(await copyLink(c.link,null)){ev("share:copy");shareDone(btn);}}
+    else if(act==="summary"){if(await copyLink(c.summary,null,"summary"))shareDone(btn);}
+  });
+  m.addEventListener("keydown",e=>{
+    const items=[...m.querySelectorAll("[role=menuitem]")],i=items.indexOf(document.activeElement);
+    if(e.key==="ArrowDown"){e.preventDefault();items[(i+1)%items.length].focus();}
+    else if(e.key==="ArrowUp"){e.preventDefault();items[(i-1+items.length)%items.length].focus();}
+    else if(e.key==="Home"){e.preventDefault();items[0].focus();}
+    else if(e.key==="End"){e.preventDefault();items[items.length-1].focus();}
+    else if(e.key==="Escape"){e.preventDefault();shareMenuClose(true);}
+    else if(e.key==="Tab"){shareMenuClose(false);}
+  });
+  document.addEventListener("click",e=>{if(!m.hidden&&!m.contains(e.target)&&!(shareMenuBtn&&shareMenuBtn.contains(e.target)))shareMenuClose(false);});
+  addEventListener("resize",shareMenuPlace);
+  addEventListener("scroll",shareMenuPlace,true);
+  return m;
+}
+function shareDone(btn){
+  const old=btn.innerHTML;btn.innerHTML='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>';
+  btn.title="Copied";setTimeout(()=>{btn.innerHTML=old;btn.title="Share this check";},1400);
+}
+function shareMenuClose(focusBack){
+  const m=$("shareMenu");if(!m||m.hidden)return;
+  m.hidden=true;
+  if(shareMenuBtn){shareMenuBtn.setAttribute("aria-expanded","false");if(focusBack)shareMenuBtn.focus();}
+  shareMenuBtn=null;
+}
+// منوی شناور زیرِ دکمه می‌نشیند و با اسکرول/تغییر اندازه همان‌جا می‌ماند
+function shareMenuPlace(){
+  const m=$("shareMenu");if(!m||m.hidden||!shareMenuBtn)return;
+  const r=shareMenuBtn.getBoundingClientRect(),w=m.offsetWidth,h=m.offsetHeight;
+  // جا نبود؟ بالای دکمه باز می‌شود
+  const top=r.bottom+6+h>innerHeight-8&&r.top-6-h>=8?r.top-6-h:Math.min(r.bottom+6,Math.max(8,innerHeight-h-8));
+  m.style.top=Math.round(top)+"px";
+  m.style.left=Math.max(8,Math.min(Math.round(r.right-w),innerWidth-w-8))+"px";
+}
+function shareMenuToggle(btn){
+  const m=shareMenuEl();
+  if(!m.hidden&&shareMenuBtn===btn){shareMenuClose(true);return;}
+  shareMenuClose(false);
+  const c=shareCtx(btn);if(!c)return;
+  const tg=m.querySelector("[data-act=tg]");
+  tg.href="https://t.me/share/url?url="+encodeURIComponent(c.link)+"&text="+encodeURIComponent(c.text);
+  shareMenuBtn=btn;btn.setAttribute("aria-expanded","true");
+  m.hidden=false;shareMenuPlace();
+  m.querySelector("[role=menuitem]").focus({preventScroll:true});
+}
 function renderRoundTrip(box,x){
   if(!x){
+    box.dataset.at="";
     box.innerHTML=`<div class="tripHead">
         <span class="sk" style="width:84px;height:23px"></span>
         <span class="tripWord">Checking whether this can be bought and sold straight back…</span></div>
@@ -3923,6 +4042,7 @@ function renderRoundTrip(box,x){
         <span class="sk" style="width:118px;height:11px"></span></div>`;
     return;
   }
+  box.dataset.at=String(Date.now());
   if(x.state==="serverSell"){
     // ret فقط یک عدد است (اعتبارسنجیِ بازه یک‌بار، در fetchVdVerdict، انجام
     // شده) — اینجا نه آستانه‌ای هست نه تغییر رنگی، فقط همان جمله به‌علاوه‌ی
@@ -6327,10 +6447,29 @@ const MARKET_WATCH_SOL=[
   {symbol:"JUP",mint:"JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN"},
   {symbol:"BONK",mint:"DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263"},
 ];
-const marketWatchCache=new Map(),marketWatchInflight=new Map();
+const marketWatchCache=new Map(),marketWatchInflight=new Map();   // cache: {t,rows,keys}
 let marketWatchSeq=0,marketPairSeq=0;
+const marketWatchDefaults=chain=>chain==="solana"?MARKET_WATCH_SOL:BASE_TOKENS.filter(t=>["ETH","AERO","cbBTC"].includes(t.symbol));
+/* ۲۴ اکتبر: اسلات‌ها اول با توکن‌های دیده‌بانیِ همین زنجیره (به ترتیبِ فهرست) پر می‌شوند، بعد پیش‌فرض‌ها؛
+   تعدادِ اسلات همان تعدادِ پیش‌فرض‌هاست و تکراری نمی‌آید (Base بدون حساسیت به حروف، Solana دقیق). */
 function marketWatchTokens(chain){
-  return chain==="solana"?MARKET_WATCH_SOL:BASE_TOKENS.filter(t=>["ETH","AERO","cbBTC"].includes(t.symbol));
+  const defaults=marketWatchDefaults(chain),n=defaults.length,out=[],seen=new Set();
+  try{
+    for(const r of savedWatchRows){
+      if(out.length>=n)break;
+      if(r.chain!==chain)continue;
+      const t=chain==="solana"?{symbol:r.symbol||shortAddr(r.address),mint:r.address,watched:true}
+        :{symbol:r.symbol||shortAddr(r.address),name:r.name,address:r.address,watched:true};
+      const k=watchAddr(chain,t);if(seen.has(k))continue;
+      seen.add(k);out.push(t);
+    }
+  }catch{}
+  for(const t of defaults){
+    if(out.length>=n)break;
+    const k=watchAddr(chain,t);if(seen.has(k))continue;
+    seen.add(k);out.push(t);
+  }
+  return out;
 }
 function initMarketWatch(){
   for(const [chain,id] of [["base","baseHeroRow"],["solana","appSolHero"]]){
@@ -6338,6 +6477,7 @@ function initMarketWatch(){
     box.setAttribute("aria-label",chain==="base"?"Base market watch":"Solana market watch");
     box.innerHTML='<span class="watchHeading">Market watch · 24h</span><div class="watchItems"></div>';
     $(id).prepend(box);paintMarketWatch(chain);
+    try{savedWatchPlace();}catch{}
   }
 }
 function watchPrice(value){return value==null?"—":"$"+Number(value).toLocaleString("en-US",{maximumSignificantDigits:value<1?4:6});}
@@ -6403,22 +6543,54 @@ function paintWatchAvatar(el,t,logo){
 }
 /* ۱۱ اکتبر: نوار یک بار ساخته می‌شود و با هر به‌روزرسانی فقط متن/کلاس/اسپارک عوض می‌شود — دکمه‌ها و
    آواتارها هرگز از نو ساخته نمی‌شوند (قبلاً هر به‌روزرسانی innerHTML می‌ریخت و لوگوها حرف↔لوگو می‌پریدند). */
+// سرتیتر: متنِ ساده وقتی فهرست کاملاً خالی است؛ وگرنه دکمه‌ای که پنلِ دیده‌بانی را زیرِ نوار باز می‌کند
+function paintWatchHeading(wrap,watchedHere){
+  const head=wrap.querySelector(".watchHeading"),total=savedWatchRows.length;
+  const label=watchedHere?"Your watchlist":"Market watch · 24h"+(total?" · Watchlist "+total:"");
+  const mode=(total?"b":"t")+"|"+label+"|"+total+"|"+watchedHere;
+  if(head.dataset.m!==mode){
+    head.dataset.m=mode;
+    if(!total)head.textContent=label;
+    else{
+      const b=document.createElement("button");b.type="button";b.className="watchToggle";b.setAttribute("aria-controls","savedWatch");
+      const t=document.createElement("span");t.textContent=label;b.append(t);
+      if(watchedHere){const c=document.createElement("span");c.className="savedCount";c.textContent=String(total);b.append(c);}
+      const v=document.createElement("i");v.className="watchChev";v.setAttribute("aria-hidden","true");v.textContent="⌄";b.append(v);
+      b.onclick=()=>{const d=$("savedWatch");d.open=!d.open;marketWatchSyncToggle();};
+      head.replaceChildren(b);
+    }
+  }
+  marketWatchSyncToggle();
+}
+function marketWatchSyncToggle(){
+  const d=$("savedWatch");if(!d)return;
+  document.querySelectorAll(".watchToggle").forEach(b=>b.setAttribute("aria-expanded",String(d.open)));
+}
 function paintMarketWatch(chain){
-  const box=document.querySelector(`.marketWatch[data-chain="${chain}"] .watchItems`);if(!box)return;
-  const data=marketWatchCache.get(chain)?.rows||[];
-  const tokens=marketWatchTokens(chain);
-  if(box.querySelectorAll(":scope > .watchPair").length!==tokens.length){
+  const wrap=document.querySelector(`.marketWatch[data-chain="${chain}"]`),box=wrap&&wrap.querySelector(".watchItems");if(!box)return;
+  const cached=marketWatchCache.get(chain),data=cached?.rows||[],dkeys=cached?.keys||[];
+  const tokens=marketWatchTokens(chain),keys=tokens.map(t=>watchAddr(chain,t));
+  paintWatchHeading(wrap,tokens.some(t=>t.watched));
+  const cur=[...box.querySelectorAll(":scope > .watchPair")];
+  if(cur.length!==tokens.length||cur.some((el,i)=>el.dataset.k!==keys[i])){
     box.innerHTML=tokens.map((t,i)=>
-      `<button class="watchPair" type="button" data-watch="${i}" aria-label="Trade ${esc(t.symbol)} / USDC" title="Select ${esc(t.symbol)} / USDC · prices in USD · chart from a sampled pool">
+      `<button class="watchPair" type="button" data-watch="${i}" data-k="${esc(keys[i])}" aria-label="Trade ${esc(t.symbol)} / USDC" title="Select ${esc(t.symbol)} / USDC · prices in USD · chart from a sampled pool">
       <span class="av"></span><span class="watchInfo"><span class="watchName">${esc(t.symbol)}<span> / USDC</span></span>
       <span class="watchNumbers"><span class="watchPrice mono"></span><span class="watchChange mono"></span></span></span>
       <span class="watchSpark"></span></button>`).join("");
     box.querySelectorAll(".watchPair").forEach((el,i)=>{
-      el.onclick=()=>chooseMarketPair(chain,marketWatchTokens(chain)[i]).catch(()=>{});
+      el.onclick=async()=>{
+        let t=marketWatchTokens(chain)[i];if(!t)return;
+        if(t.watched&&chain==="base"){   // توکنِ دیده‌بانی فقط آدرس دارد؛ شیءِ کامل را حل می‌کنیم
+          try{t=await resolveTokenRef(t.address);}catch{t=null;}
+          if(!t)return;
+        }
+        chooseMarketPair(chain,t).catch(()=>{});
+      };
     });
   }
   box.querySelectorAll(":scope > .watchPair").forEach((el,i)=>{
-    const t=tokens[i],row=data[i]||{},change=row.change,cls=change==null?"":change>=0?"up":"down";
+    const t=tokens[i],di=dkeys.indexOf(keys[i]),row=di>=0?(data[di]||{}):{},change=row.change,cls=change==null?"":change>=0?"up":"down";
     const price=el.querySelector(".watchPrice"),chg=el.querySelector(".watchChange"),sp=el.querySelector(".watchSpark");
     const pt=watchPrice(row.price);if(price.textContent!==pt)price.textContent=pt;
     const ct=change==null?"—":(change>=0?"▲ ":"▼ ")+Math.abs(change).toFixed(2)+"%";
@@ -6458,7 +6630,8 @@ async function loadMarketWatch(chain){
     const rows=tokens.map((t,i)=>{const a=metas[chain==="base"?addresses[i].toLowerCase():addresses[i]]||{};
       const price=a.price_usd==null?NaN:Number(a.price_usd);
       return {price:Number.isFinite(price)&&price>0?price:null,logo:okLogo(a.image_url)?a.image_url:null,series:[],change:null};});
-    marketWatchCache.set(chain,{t:Date.now(),rows});
+    const loadedKeys=addresses.map(a=>chain==="base"?String(a).toLowerCase():a);
+    marketWatchCache.set(chain,{t:Date.now(),rows,keys:loadedKeys});
     tokens.forEach((t,i)=>{if(rows[i].logo&&!t.native&&t.mint!==SOL_MINT_ADDR)watchLogoSet(chain,t,rows[i].logo);});   // آیکونِ ETH/SOL ثابت و درون‌فایل است، کش نمی‌خواهد   // لوگوی تازه جایگزینِ کش می‌شود
     if(activeChain===chain)paintMarketWatch(chain);
     await Promise.all(tokens.map(async(t,i)=>{
@@ -6470,13 +6643,17 @@ async function loadMarketWatch(chain){
       }catch{}
       if(activeChain===chain)paintMarketWatch(chain);
     }));
+    // فهرستِ دیده‌بانی وسطِ بارگیری عوض شده؟ یک بار دیگر برای ترکیبِ تازه
+    const nowKeys=marketWatchTokens(chain).map(t=>watchAddr(chain,t));
+    if(nowKeys.join()!==loadedKeys.join())setTimeout(()=>{if(activeChain===chain&&view==="swap"&&!tokenPage)loadMarketWatch(chain).catch(()=>{});},0);
   })().finally(()=>marketWatchInflight.delete(chain));
   marketWatchInflight.set(chain,task);return task;
 }
 function refreshMarketWatch(){
   if(tokenPage||view!=="swap"||document.hidden)return;
   const chain=activeChain,seq=++marketWatchSeq;paintMarketWatch(chain);
-  if(Date.now()-(marketWatchCache.get(chain)?.t||0)<60000)return;
+  const mc=marketWatchCache.get(chain),mkeys=marketWatchTokens(chain).map(t=>watchAddr(chain,t));
+  if(Date.now()-(mc?.t||0)<60000&&mkeys.every(k=>(mc.keys||[]).includes(k)))return;
   setTimeout(()=>{if(seq===marketWatchSeq&&activeChain===chain&&view==="swap"&&!tokenPage)loadMarketWatch(chain);},1200);
 }
 async function chooseMarketPair(chain,t){
@@ -6769,9 +6946,17 @@ function savedWatchPlace(){
   const panel=$('savedWatch');
   // Keep the mobile trade button in its existing position: the saved list
   // follows the swap card there, and spans the desktop workspace above it.
-  const hero=!tokenPage&&view==='swap'?$(activeChain==='solana'?'appSolHero':'baseHeroRow'):null;
-  if(hero){if(panel.parentElement!==hero)hero.prepend(panel);}
+  const show=!tokenPage&&view==='swap';
+  const hero=show?$(activeChain==='solana'?'appSolHero':'baseHeroRow'):null;
+  if(hero){
+    // زیرِ نوارِ Market watch (اگر هست) تا سرتیترِ نوار و پنل یک تکه دیده شوند
+    const strip=hero.querySelector(':scope > .marketWatch');
+    if(strip){if(strip.nextElementSibling!==panel)strip.after(panel);}
+    else if(panel.parentElement!==hero)hero.prepend(panel);
+  }
   else if(panel.parentElement!==document.querySelector('main'))$('solConnectionNotices').after(panel);
+  // ۲۴ اکتبر: فقط در نمای swap دیده می‌شود؛ در Flow/Folio/Stocks/صفحه‌ی توکن پنهان (جابه‌جاییِ سوییچ Flow/New pairs)
+  panel.hidden=!show;
 }
 function savedWatchSelection(){
   if(!savedWatchReady)return;
@@ -6779,11 +6964,12 @@ function savedWatchSelection(){
   for(const [id,chain] of [['baseWatch','base'],['solWatch','solana'],['tokenWatch',activeChain]]){
     const b=$(id);if(!b)continue;
     const row=savedWatchCurrent(chain),on=!!row&&savedWatchRows.some(r=>savedWatchKey(r)===savedWatchKey(row));
-    b.disabled=!row;b.setAttribute('aria-pressed',String(on));b.textContent=on?'★ Watching':'☆ Watch';
-    b.title=row?(on?'Remove '+(row.symbol||'token')+' from watchlist':'Save '+(row.symbol||'token')+' to watchlist'):'Select a token first';
+    b.disabled=!row;b.setAttribute('aria-pressed',String(on));b.textContent=on?'★':'☆';
+    const lab=(on?'Stop watching ':'Watch ')+(row&&row.symbol?row.symbol:'token');
+    b.setAttribute('aria-label',lab);b.title=row?lab:'Select a token first';
   }
 }
-function savedWatchStatus(text){$('savedStatus').textContent=text;}
+function savedWatchStatus(text){$('savedStatus').textContent=text;if(text)$('savedWatch').classList.remove('isEmpty');}
 function savedWatchCommit(rows,message){
   try{localStorage.setItem(SAVED_WATCH_KEY,JSON.stringify(rows));}
   catch{savedWatchStatus('Could not save in this browser. Check your storage settings and try again.');$('savedWatch').open=true;return false;}
@@ -6791,26 +6977,35 @@ function savedWatchCommit(rows,message){
 }
 function savedWatchToggle(chain){
   const row=savedWatchCurrent(chain);if(!row)return;
+  savedWatchToggleRow(row,false);
+}
+// برمی‌گرداند false فقط وقتی فهرست پر است؛ quiet=true یعنی پنل را باز نکن (ستاره‌ی تابلو)
+function savedWatchToggleRow(row,quiet){
+  if(!row)return true;
   // Merge the latest persisted list before editing, including edits in another tab.
   try{savedWatchRows=savedWatchRead();}catch{}
   const key=savedWatchKey(row),on=savedWatchRows.some(r=>savedWatchKey(r)===key);
-  if(!on&&savedWatchRows.length>=SAVED_WATCH_MAX){$('savedWatch').open=true;savedWatchStatus('Your watchlist is full (30 tokens). Remove a token to add another.');return;}
+  if(!on&&savedWatchRows.length>=SAVED_WATCH_MAX){if(!quiet)$('savedWatch').open=true;savedWatchStatus('Your watchlist is full (30 tokens). Remove a token to add another.');return false;}
   const next=on?savedWatchRows.filter(r=>savedWatchKey(r)!==key):[...savedWatchRows,row];
-  if(savedWatchCommit(next,on?'Token removed.':'Token saved in this browser.')){
+  if(savedWatchCommit(next,on?'Token removed.':'Token saved in this browser.')&&!quiet){
     $('savedWatch').open=true;savedWatchRefresh();
   }
+  return true;
 }
 function savedWatchRender(){
+  // ۲۴ اکتبر: فهرستِ خالی روی گوشی جا نمی‌گیرد (سقفِ ۱۶۰۰ِ [mobile compact])؛ با اولین ستاره برمی‌گردد
+  $('savedWatch').classList.toggle('isEmpty',savedWatchRows.length===0&&!$('savedStatus').textContent);
   $('savedCount').textContent=String(savedWatchRows.length);
   $('savedRefresh').disabled=savedWatchRows.length===0;
   const box=$('savedList');box.replaceChildren();
-  if(!savedWatchRows.length){const p=document.createElement('p');p.className='savedEmpty';p.textContent='Keep tokens here with the ☆ Watch button beside a token’s exit check.';box.append(p);}
+  if(!savedWatchRows.length){const p=document.createElement('p');p.className='savedEmpty';p.textContent='Keep tokens here with the ☆ star beside a token’s exit check.';box.append(p);}
   const el=(tag,cls,text)=>{const n=document.createElement(tag);n.className=cls;if(text!=null)n.textContent=text;return n;};
   for(const row of savedWatchRows){
     const key=savedWatchKey(row),wrap=el('div','savedRow'),a=el('a','savedLink');
     a.href='/t/'+encodeURIComponent(row.address);a.title=row.name||row.symbol||row.address;
     a.append(el('span','savedBadge',row.chain==='base'?'Base':'Solana'));
-    const identity=el('span','savedIdentity');identity.append(el('b','',row.symbol||shortAddr(row.address)),el('small','mono',shortAddr(row.address)));a.append(identity);
+    const identity=el('span','savedIdentity');identity.append(el('b','',row.symbol||shortAddr(row.address)),el('small','mono',shortAddr(row.address)));
+    const xs=savedWatchExit(row);identity.append(el('span','savedChip '+xs.cls,xs.text));a.append(identity);
     const quote=savedWatchPrices.get(key),price=el('span','savedPrice',quote?watchPrice(quote.price):'—');
     price.append(el('small','',quote?'Updated '+new Date(quote.at).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'}):'Price unavailable'));
     const remove=el('button','savedRemove','×');remove.type='button';remove.setAttribute('aria-label','Remove '+(row.symbol||shortAddr(row.address))+' from watchlist');
@@ -6823,9 +7018,72 @@ function savedWatchRender(){
     wrap.append(a,price,remove);box.append(wrap);
   }
   savedWatchSelection();
+  // نوارِ Market watch از همین فهرست پر می‌شود
+  try{if(typeof fbStarSync==='function')fbStarSync();}catch{}
+  try{if(typeof initMarketWatch==='function'&&document.querySelector('.marketWatch')){paintMarketWatch('base');paintMarketWatch('solana');if(view==='swap'&&!tokenPage)refreshMarketWatch();}}catch{}
+}
+/* ۲۴ اکتبر: چیپِ وضعیتِ خروج برای هر ردیف. اول نتیجه‌ی همین نشست (exitCache / solExitSeen)، بعد /pairs.json
+   (هم‌مبدأ، یک بار در هر بازشدنِ پنل، کش ۶۰ ثانیه)، وگرنه «Not checked yet». هرگز حکمِ کهنه‌تر از ۶ ساعت. */
+const SAVED_EXIT_MAX_AGE=6*3600000,SAVED_PAIRS_TTL=60000;
+const savedWatchPairs=new Map();
+function savedWatchAgo(at,now){const m=Math.max(0,Math.floor((now-at)/60000));return m<60?m+'m ago':Math.floor(m/60)+'h ago';}
+function savedWatchExit(row){
+  const now=Date.now(),fresh=at=>Number.isFinite(at)&&now-at<=SAVED_EXIT_MAX_AGE&&at-now<=300000;
+  const mk=(v,at)=>{
+    const t=v==='sell'?'Sell route quoted':v==='nosell'?'No sell route':'Unknown';
+    return {cls:v==='sell'?'p':v==='nosell'?'n':'u',text:t+' · '+savedWatchAgo(at,now)};
+  };
+  let s=null;
+  if(row.chain==='base'){
+    const c=exitCache[row.address];
+    if(c&&c.state){
+      const v=(c.state==='verified'&&tripCost(c.lossPct).state==='implausible')?null
+        :(c.state==='verified'||c.state==='estimated')?'sell':(c.state==='blocked'||c.state==='noexit')?'nosell':null;
+      s={v,at:c.at};
+    }
+  }else{
+    const c=solExitSeen[row.address];
+    if(c)s={v:c.v==='sell'?'sell':null,at:c.at};
+  }
+  if(s&&fresh(s.at))return mk(s.v,s.at);
+  const pj=savedWatchPairs.get(row.chain),pr=pj&&pj.rows&&pj.rows.get(row.address);
+  if(pr){
+    const at=typeof pr.checkedAt==='string'?Date.parse(pr.checkedAt):NaN;
+    if(fresh(at)){
+      const v=pr.v==='sell'?'sell':(pr.v==='nosell'&&row.chain==='base')?'nosell':null;
+      return mk(v,at);
+    }
+  }
+  return {cls:'',text:'Not checked yet'};
+}
+async function savedWatchPairsLoad(){
+  if(!/^https?:$/.test(location.protocol))return;
+  const chains=[...new Set(savedWatchRows.map(r=>r.chain))];
+  let changed=false;
+  await Promise.all(chains.map(async chain=>{
+    const hit=savedWatchPairs.get(chain);
+    if(hit&&(hit.task||Date.now()-hit.t<SAVED_PAIRS_TTL))return;
+    const entry={t:Date.now(),rows:hit?hit.rows:null,task:null};savedWatchPairs.set(chain,entry);
+    entry.task=(async()=>{
+      let j=null;
+      try{const r=await fetch('/pairs.json?chain='+chain,{cache:'default'});j=r.ok?await r.json():null;}catch{j=null;}
+      if(j&&j.store===true&&Array.isArray(j.rows)){
+        const m=new Map();
+        for(const r of j.rows){
+          if(!r||typeof r!=='object'||(r.chain!=null&&r.chain!==chain)||typeof r.address!=='string')continue;
+          m.set(chain==='base'?r.address.toLowerCase():r.address,{v:r.v,checkedAt:r.checkedAt});
+        }
+        entry.rows=m;
+      }
+      entry.t=Date.now();entry.task=null;changed=true;
+    })();
+    await entry.task;
+  }));
+  if(changed)savedWatchRender();
 }
 async function savedWatchRefresh(){
   if(!savedWatchReady||!$('savedWatch').open||!savedWatchRows.length)return;
+  savedWatchPairsLoad().catch(()=>{});
   const seq=++savedWatchSeq,rows=savedWatchRows.slice();
   $('savedRefresh').disabled=true;savedWatchStatus('Updating prices…');
   const results=await Promise.all(['base','solana'].map(async chain=>{
@@ -6857,7 +7115,7 @@ function initSavedWatch(){
   try{savedWatchRows=savedWatchRead();}catch{savedWatchStatus('Your saved list could not be read. New saves will replace it.');}
   for(const [id,chain] of [['baseWatch','base'],['solWatch','solana'],['tokenWatch',null]])$(id).onclick=()=>savedWatchToggle(chain||activeChain);
   $('savedRefresh').onclick=savedWatchRefresh;
-  $('savedWatch').ontoggle=()=>{if($('savedWatch').open)savedWatchRefresh();};
+  $('savedWatch').ontoggle=()=>{marketWatchSyncToggle();if($('savedWatch').open)savedWatchRefresh();};
   addEventListener('storage',e=>{
     if(e.key!==SAVED_WATCH_KEY&&e.key!==null)return;
     try{savedWatchRows=savedWatchRead();++savedWatchSeq;savedWatchPrices.clear();savedWatchRender();savedWatchStatus('Watchlist updated from another tab.');if($('savedWatch').open)savedWatchRefresh();}
@@ -7894,6 +8152,19 @@ function fbHead(d){
     <div class="fbCtl"><div class="tfs" role="group" aria-label="Time window">${["h1","h6"].map(k=>`<button type="button" data-fbw="${k}" class="${w===k?"on":""}">${k==="h1"?"1h":"6h"}</button>`).join("")}</div>
     <button type="button" class="fbTog" data-fbtog aria-pressed="${fbPref.only?"true":"false"}"><i></i>Only tokens with a sell route</button></div></div>`;
 }
+function fbStarOn(addr){
+  const chain=fbData?fbData.chain:activeChain,k=chain==="solana"?addr:addr.toLowerCase();
+  return savedWatchRows.some(r=>r.chain===chain&&r.address===k);
+}
+// وضعیتِ ستاره‌ها بعد از هر تغییرِ فهرست (همین تب یا تبِ دیگر)، بدون بازنقاشیِ ردیف‌ها
+function fbStarSync(){
+  document.querySelectorAll("#flowBody .fbStar").forEach(b=>{
+    const r=fbShown[+b.dataset.fbstar];if(!r)return;
+    const on=fbStarOn(r.it.addr),sym=r.it.symbol;
+    b.setAttribute("aria-pressed",String(on));b.textContent=on?"★":"☆";
+    b.setAttribute("aria-label",(on?"Stop watching ":"Watch ")+sym);b.title=(on?"Stop watching ":"Watch ")+sym;
+  });
+}
 function fbSkeleton(){
   const row=`<div class="skRow"><span class="sk fbSkA"></span><span class="sk fbSkB"></span><span class="sk fbSkC"></span></div>`;
   $("flowBody").innerHTML=fbHead(fbData)+`<div aria-busy="true">${row.repeat(6)}</div>`;
@@ -7915,7 +8186,7 @@ function fbPaint(){
       h+=`<div class="fbMsg">No new pair has a quoted sell route in this list right now.<br><button type="button" class="chip" data-fbshowall>Show all</button></div>`;
     }else{
       fbShown=rows;
-      h+=`<table class="fbTbl"><thead><tr><th>Token</th><th>Net buyers</th><th class="fbBS">Buyers / Sellers</th><th>Buy share</th><th class="fbVol">Volume</th><th>Exit</th></tr></thead><tbody>`;
+      h+=`<table class="fbTbl"><thead><tr><th class="fbStarTh"></th><th>Token</th><th>Net buyers</th><th class="fbBS">Buyers / Sellers</th><th>Buy share</th><th class="fbVol">Volume</th><th>Exit</th></tr></thead><tbody>`;
       rows.forEach((r,i)=>{
         const a=r.a,it=r.it;
         const net=r.net===null?`<span style="color:var(--tx2)">—</span>`
@@ -7925,7 +8196,9 @@ function fbPaint(){
         const share=pct===null?"—":`<span class="fbBar"><i class="p" style="width:${pct.toFixed(1)}%"></i><i class="n" style="width:${(100-pct).toFixed(1)}%"></i></span><span class="mono" style="color:var(--tx2)">${pct.toFixed(0)}%</span>`;
         const cls=it.v==="sell"?"p":it.v==="nosell"?"n":"";
         const lbl=it.v==="sell"?"Sell route quoted":it.v==="nosell"?"No sell route":"Unknown";
+        const sw=fbStarOn(it.addr);
         h+=`<tr class="fbRow" tabindex="0" role="link" data-i="${i}" data-addr="${esc(it.addr)}">
+          <td class="fbStarTd"><button type="button" class="iconBtn fbStar savedToggle" data-fbstar="${i}" aria-pressed="${sw?"true":"false"}" aria-label="${sw?"Stop watching ":"Watch "}${esc(it.symbol)}" title="${sw?"Stop watching ":"Watch "}${esc(it.symbol)}">${sw?"★":"☆"}</button></td>
           <td><div class="fbTok"><span class="av fbAv" data-i="${i}"></span><span class="fbTkTx"><b>${esc(it.symbol)}</b><span class="fbAge">${esc(fbAge(it.created,now))}</span></span></div></td>
           <td class="mono">${net}</td>
           <td class="fbBS mono" style="color:var(--tx2)">${bs}</td>
@@ -7941,6 +8214,14 @@ function fbPaint(){
   if(h===fbLast&&body.firstChild)return;     // بدون تغییر: بازنقاشی نکن تا لوگوها سوسو نزنند
   fbLast=h;
   body.innerHTML=h;
+  body.querySelectorAll(".fbStar").forEach(b=>b.addEventListener("click",e=>{
+    e.stopPropagation();           // ستاره ردیف را باز نمی‌کند
+    const r=fbShown[+b.dataset.fbstar];if(!r)return;
+    fbErr="";
+    const full=!savedWatchToggleRow(savedWatchClean({chain:fbData?fbData.chain:activeChain,address:r.it.addr,symbol:/…/.test(r.it.symbol)?"":r.it.symbol}),true);
+    fbStarSync();
+    if(full){fbErr="Your watchlist is full (30 tokens). Remove a token to add another.";fbLast="";fbPaint();}
+  }));
   body.querySelectorAll(".fbAv").forEach(el=>{const r=fbShown[+el.dataset.i];if(r)fbAvatar(el,r.it.addr,r.it.symbol,r.it.img);});
 }
 async function fbRender(refresh){
@@ -7993,6 +8274,7 @@ function fbClick(e){
 }
 $("flowBody").addEventListener("keydown",e=>{
   if(e.key!=="Enter"&&e.key!==" ")return;
+  if(e.target.closest&&e.target.closest(".fbStar"))return;
   const row=e.target.closest&&e.target.closest(".fbRow");
   if(row){e.preventDefault();fbOpen(row.dataset.addr);}
 });
@@ -9575,6 +9857,8 @@ const SOL_UNCONF_TITLE="Sell-back failed in our simulation — unconfirmed";
 const SOL_UNCONF_NOTE="Our simulated sell of this token failed. That can be a temporary routing problem, so we do not call it a honeypot yet. Treat it as high risk.";
 function renderSolExit(v,why,targetId,basis,ret,cause){
   const box=$(targetId||"tk-exitBox");if(!box)return;
+  if(solMintCur&&!(v===null&&!why))solExitSeen[solMintCur]={v:v==="sell"||v==="nosell"?v:null,at:Date.now()};
+  box.dataset.at=(v===null&&!why)?"":String(Date.now());
   if(targetId==="appSolExitBox"&&solMintCur){
     mtabSet("sol:"+solMintCur,"exit",
       v==="nosell"||(v===null&&why===SOL_UNCONF)?"bad":v==="sell"?"ok":(v===null&&!why)?null:"unk");
@@ -12161,19 +12445,7 @@ $("copyAddrBtn").onclick=(e)=>{
   $("rpcClear").onclick=clearCustomRpc;
   /* بیرون از کارت نتیجه و بی‌ربط به اینکه مبلغی وارد شده یا نه: لینک به
      *توکن* اشاره می‌کند، نه به یک کوت مشخص، پس دلیلی ندارد منتظر عدد بماند. */
-  if($("checkShare"))$("checkShare").onclick=async()=>{
-    const u=tokenPageUrl();
-    if(!u){setNotice(note("warn","<b>Native ETH has no token page.</b> Pick an ERC-20 to share a check."));return;}
-    if(await copyLink(u,$("checkShare")))ev("share:copy");
-  };
-  if($("appSolCheckShare"))$("appSolCheckShare").onclick=async()=>{
-    if(!solMintCur)return;
-    const u=location.origin+"/t/"+solMintCur+"?check=1";
-    if(await copyLink(u,$("appSolCheckShare")))ev("share:copy");
-  };
-  if($("tk-copy"))$("tk-copy").onclick=async()=>{
-    if(await copyLink(location.href,$("tk-copy")))ev("share:copy");
-  };
+  for(const id of ["checkShare","appSolCheckShare","tk-copy"])if($(id))$(id).onclick=()=>shareMenuToggle($(id));
   if($("tk-trade"))$("tk-trade").onclick=()=>{
     /* از صفحه‌ی توکن به فرم سواپ، بدون بارگذاری دوباره. پنل‌ها باید یک بار
        در مقصد تازه رندر شوند، وگرنه کاربر یک کارت خالی می‌بیند.
