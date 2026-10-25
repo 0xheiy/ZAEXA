@@ -813,7 +813,7 @@ svg.diag{display:block;width:100%;height:auto}
   function rebuildViz(){readViz()}
   rebuildViz();
   window.__zaexaViz=viz; /* فقط برای سنجش خودکار: پالتِ زنده‌ای که اسکریپت خواند */
-  new MutationObserver(function(){ rebuildViz(); }).observe(root,{attributes:true,attributeFilter:['data-theme']});
+  new MutationObserver(function(){ rebuildViz(); if(typeof redrawNow==='function') redrawNow(); }).observe(root,{attributes:true,attributeFilter:['data-theme']});
   /* رفعِ نقصِ ۱: نسخه‌ی اصلی prefers-reduced-motion را نادیده می‌گرفت. اینجا
      یک‌بار می‌خوانیم و اگر کاربر حرکتِ کم‌تر خواسته، فقط یک قابِ ایستا
      می‌کشیم و هرگز requestAnimationFrame صدا زده نمی‌شود. */
@@ -829,23 +829,26 @@ svg.diag{display:block;width:100%;height:auto}
   const LOOP=9000, T1=2400, T2=5000, T3=7200, T4=9000;
   function clamp01(u){return u<0?0:u>1?1:u}
 
-  /* سه بیضیِ کج و چرخانِ مدار — هندسه‌ی یگانه برای کشیدنِ مدارها و جاگذاریِ گره‌ها. */
-  function orbitSet(){
-    const narrow=w<600, R0x=w*(narrow?.46:.37), R0y=h*(narrow?.30:.31);
-    /* ۲۵ اکتبر: مدارها در چرخش هم را قطع نمی‌کنند — قطرِ بلندِ هر مدارِ درونی ۹۳٪ِ قطرِ کوتاهِ مدارِ بیرونی‌اش است،
-       پس هر زاویه‌ای که بچرخند، درونی کاملاً داخلِ بیرونی می‌ماند. کشیدگیِ دو مدارِ درونی کف ۰٫۸ دارد تا گرد بمانند. */
-    const wide=R0x>=R0y, e=Math.max(.8,Math.min(R0x,R0y)/Math.max(R0x,R0y)), out=[{rx:R0x,ry:R0y,i:0}];
-    for(let i=1;i<3;i++){const L=Math.min(out[i-1].rx,out[i-1].ry)*.93;out.push(wide?{rx:L,ry:L*e,i:i}:{rx:L*e,ry:L,i:i})}
+  /* سه مدار مثلِ حلقه‌های «Trust layer»: دایره‌ای که با rotate(θ)·skewX(σ) می‌چرخد و میانِ دایره و بیضی تغییر شکل می‌دهد.
+     θ و σ فقط تابعِ ساعتِ یکنواخت‌اند (هرگز ریست نمی‌شوند). */
+  const ORB_P=[16000,11000,20000], ORB_DIR=[1,-1,1], ORB_TH0=[0,2.1,4.2];
+  const ORB_Q=[9000,7000,11000], ORB_PHI=[0,2,4], ORB_SMAX=16*Math.PI/180, ORB_K=.72;
+  function orbitSet(ms){
+    const t=(ms==null?clock:ms), narrow=w<600, R0x=w*(narrow?.46:.37), R0y=h*(narrow?.30:.31), r0=Math.min(R0x,R0y);
+    /* ۲۵ اکتبر: شعاع‌ها ۰٫۷۲ برابرِ هم‌اند؛ قطرِ بلندِ درونی (≈۱٫۱۵۴r) همیشه کوتاه‌تر از قطرِ کوتاهِ بیرونی (≈۰٫۸۶۷r) است → هرگز قطع نمی‌کنند */
+    const out=[];
+    for(let i=0;i<3;i++){
+      const r=r0*Math.pow(ORB_K,i), th=ORB_TH0[i]+ORB_DIR[i]*2*Math.PI*t/ORB_P[i], sk=ORB_SMAX*Math.sin(2*Math.PI*t/ORB_Q[i]+ORB_PHI[i]), tn=Math.tan(sk), q=Math.sqrt(tn*tn+4);
+      out.push({i:i,r:r,theta:th,skew:sk,long:r*(q+Math.abs(tn))/2,short:r*(q-Math.abs(tn))/2});
+    }
     return out;
   }
-  /* هر مدار با نرخِ و جهتِ خودش می‌چرخد (rad/ms)؛ مدارِ میانی خلافِ جهت */
-  const ORBIT_W=[.00006,-.000042,.000028];
-  window.__zaexaOrbitSet=function(){return orbitSet()};
-  window.__zaexaOrbitW=ORBIT_W;
-  function orbitRot(i,clock){return clock*ORBIT_W[i]+i*.9}
+  window.__zaexaOrbitSet=function(ms){return orbitSet(ms)};
+  /* ساعتِ یکنواختِ صفحه (ms)؛ فقط برای سنجش */
+  window.__zaexaClock=function(){return clock};
   /* سه رنگِ متفاوت: بیرونی --hero1، میانی --hero-mid (=g1ui)، درونی --hero2 */
   function orbitStroke(i){return hexToRgba(i===2?viz.v2:(i===1?viz.vm:viz.v1),viz.oa)}
-  function drawOrbits(cx,cy,orbs,clock){ctx.save();ctx.translate(cx,cy);orbs.forEach(function(o){ctx.beginPath();ctx.ellipse(0,0,o.rx,o.ry,orbitRot(o.i,clock),0,Math.PI*2);ctx.strokeStyle=orbitStroke(o.i);ctx.lineWidth=1.35;ctx.stroke()});ctx.restore()}
+  function drawOrbits(cx,cy,orbs){orbs.forEach(function(o){ctx.save();ctx.translate(cx,cy);ctx.rotate(o.theta);ctx.transform(1,0,Math.tan(o.skew),1,0,0);ctx.beginPath();ctx.arc(0,0,o.r,0,Math.PI*2);ctx.restore();ctx.strokeStyle=orbitStroke(o.i);ctx.lineWidth=1.35;ctx.stroke()})}
 
   /* کادرهای DOMِ روی canvas، نسبت به خودِ canvas — روی resize دوباره خوانده می‌شود. */
   let avoidRects=[], coreBox=null;
@@ -859,17 +862,16 @@ svg.diag{display:block;width:100%;height:auto}
   const hubNodes=hubSvg?[].slice.call(hubSvg.querySelectorAll('.hub-node')):[];
   const hubDot=document.getElementById('hubDot'), hubRoute=document.getElementById('hubRoute'), hubRoute2=document.getElementById('hubRoute2');
   const markEl=document.querySelector('.visual-core .core-mark');
-  const HUB_SPEC=[[0,310],[0,36],[0,100],[0,185],[0,250]]; /* [مدار, زاویه‌ی پارامتری به درجه] — همه رویِ بیضیِ بیرونی */
+  const HUB_SPEC=[[0,300],[0,40],[1,120],[1,210],[2,260]]; /* [مدار, زاویه‌ی پارامتری روی دایره‌ی مدار، درجه] — گره سوارِ مدارش است */
   const HUB_PAIRS=[[0,2],[1,3],[2,4],[3,0],[4,1]];
-  const HUB_CYCLE=2400, HUB_LEG=900, HUB_PULSE=200, HUB_ACTIVE=HUB_LEG*2+HUB_PULSE, HUB_FADE=300, HUB_LEAD=.12, HUB_LINE_A=.55;
+  const HUB_RAMP=120, HUB_CYCLE=2400, HUB_LEG=900, HUB_PULSE=200, HUB_ACTIVE=HUB_LEG*2+HUB_PULSE, HUB_FADE=300, HUB_LEAD=.12, HUB_LINE_A=.55;
   const NODE_R=4.5, LABEL_GAP=9;
-  let lastRt=null;
   let labelSize={w:[],h:12,asc:9}, labelPick=[], activeKey='', markDim=false;
   function easeIO(u){return u<.5?2*u*u:1-Math.pow(-2*u+2,2)/2}
-  /* گره‌ها ثابت‌اند: رویِ بیضیِ بدونِ چرخشِ مدارِ بیرونی (مثلِ هیروی پیش از Codex) */
+  /* گره سوارِ مدار: نقطه‌ی دایره زیرِ همان rotate·skewِ مدار */
   function nodePt(o,deg,cx,cy){
-    const t=deg*Math.PI/180;
-    return {x:cx+o.rx*Math.cos(t), y:cy+o.ry*Math.sin(t)};
+    const t=deg*Math.PI/180, x=o.r*Math.cos(t), y=o.r*Math.sin(t), xs=x+Math.tan(o.skew)*y, c=Math.cos(o.theta), n=Math.sin(o.theta);
+    return {x:cx+xs*c-y*n, y:cy+xs*n+y*c};
   }
   /* اندازه‌ی برچسب‌ها فقط روی resize/فونت خوانده می‌شود، نه هر فریم. */
   function hubMeasure(){
@@ -880,7 +882,7 @@ svg.diag{display:block;width:100%;height:auto}
     if(!hubNodes.length) return;
     const cx=w*.5, cy=h*.5;
     const labelsOn=!matchMedia('(max-width:480px)').matches && labelSize.w.length===hubNodes.length;
-    const pts=HUB_SPEC.map(function(s){return nodePt(orbs[0],s[1],cx,cy)});
+    const pts=HUB_SPEC.map(function(s){return nodePt(orbs[s[0]],s[1],cx,cy)});
     const placed=[], boxes=[];
     pts.forEach(function(pt,i){
       const g=hubNodes[i], text=g.querySelector('text'), pill=g.querySelector('.hub-pill');
@@ -914,32 +916,32 @@ svg.diag{display:block;width:100%;height:auto}
       placed.push(c);boxes.push(c);
     });
     window.__zaexaCanvasLabels=boxes;
-    window.__zaexaCanvasRoutePts={pts:pts.map(function(q,i){return {x:q.x,y:q.y,o:HUB_SPEC[i][0]}}),cx:cx,cy:cy,rx:orbs[0].rx,ry:orbs[0].ry,coreR:coreR,
-      orbits:orbs.map(function(o){return {rx:o.rx,ry:o.ry,rot:orbitRot(o.i,clock),stroke:orbitStroke(o.i)}})};
+    window.__zaexaCanvasRoutePts={pts:pts.map(function(q,i){return {x:q.x,y:q.y,o:HUB_SPEC[i][0],a:HUB_SPEC[i][1]}}),cx:cx,cy:cy,coreR:coreR,clock:clock,
+      orbits:orbs.map(function(o){return {r:o.r,theta:o.theta,skew:o.skew,long:o.long,short:o.short,stroke:orbitStroke(o.i)}})};
     /* حرکت: فقط وقتی animate باشد. در reduced-motion نه نقطه است نه پالس. */
-    let key='', dotOn=false, dx=0, dy=0, dim=false, routeOp=0, rt=null;
+    let key='', dotOp=0, dx=0, dy=0, dim=false, routeOp=0, rt=null;
     if(animate){
       const ci=Math.floor(clock/HUB_CYCLE), lt=clock-ci*HUB_CYCLE, pr=HUB_PAIRS[ci%HUB_PAIRS.length];
-      if(lt<HUB_ACTIVE){
+      if(lt<HUB_ACTIVE+HUB_FADE){
         key=pr.join(',');
         const A=pts[pr[0]], B=pts[pr[1]];
-        /* هر پا از گره تا لبه‌ی نشان کشیده می‌شود (نه تا مرکز) */
+        /* هر پا از گره تا لبه‌ی نشان کشیده می‌شود (نه تا مرکز)؛ هر فریم از موقعیتِ زنده‌ی گره‌ها */
         const la=Math.hypot(A.x-cx,A.y-cy), lb=Math.hypot(B.x-cx,B.y-cy);
         const ea=edgeDist((A.x-cx)/la,(A.y-cy)/la), eb=edgeDist((B.x-cx)/lb,(B.y-cy)/lb);
         const Pa={x:cx+(A.x-cx)/la*ea,y:cy+(A.y-cy)/la*ea}, Pb={x:cx+(B.x-cx)/lb*eb,y:cy+(B.y-cy)/lb*eb};
         rt={d1:'M'+A.x.toFixed(1)+' '+A.y.toFixed(1)+'L'+Pa.x.toFixed(1)+' '+Pa.y.toFixed(1),l1:Math.max(0,la-ea),f1:1,
-            d2:'M'+Pb.x.toFixed(1)+' '+Pb.y.toFixed(1)+'L'+B.x.toFixed(1)+' '+B.y.toFixed(1),l2:Math.max(0,lb-eb),f2:0};
-        routeOp=HUB_LINE_A;
+            d2:'M'+Pb.x.toFixed(1)+' '+Pb.y.toFixed(1)+'L'+B.x.toFixed(1)+' '+B.y.toFixed(1),l2:Math.max(0,lb-eb),f2:1};
+        /* شیب‌های ورود/خروج: بدونِ پرش در آغاز و پایانِ چرخه */
+        if(lt<HUB_ACTIVE) routeOp=HUB_LINE_A*Math.min(1,lt/HUB_RAMP);
+        else routeOp=HUB_LINE_A*(1-(lt-HUB_ACTIVE)/HUB_FADE);
         /* خط کمی جلوتر از نقطه کشیده می‌شود (lead) */
-        if(lt<HUB_LEG) rt.f1=Math.min(1,easeIO(lt/HUB_LEG)+HUB_LEAD);
-        else if(lt>=HUB_LEG+HUB_PULSE) rt.f2=Math.min(1,easeIO((lt-HUB_LEG-HUB_PULSE)/HUB_LEG)+HUB_LEAD);
-        if(lt<HUB_LEG){const u=easeIO(lt/HUB_LEG);dx=A.x+(Pa.x-A.x)*u;dy=A.y+(Pa.y-A.y)*u;dotOn=true}
+        if(lt<HUB_LEG){rt.f2=0;rt.f1=Math.min(1,easeIO(lt/HUB_LEG)+HUB_LEAD)}
+        else if(lt<HUB_LEG+HUB_PULSE) rt.f2=0;
+        else if(lt<HUB_ACTIVE) rt.f2=Math.min(1,easeIO((lt-HUB_LEG-HUB_PULSE)/HUB_LEG)+HUB_LEAD);
+        if(lt<HUB_LEG){const u=easeIO(lt/HUB_LEG);dx=A.x+(Pa.x-A.x)*u;dy=A.y+(Pa.y-A.y)*u;dotOp=Math.min(1,lt/HUB_RAMP)*Math.min(1,(HUB_LEG-lt)/HUB_RAMP)}
         else if(lt<HUB_LEG+HUB_PULSE){const u=(lt-HUB_LEG)/HUB_PULSE;dim=true;markDim=true;if(markEl)markEl.style.opacity=String(1-.25*Math.sin(u*Math.PI))}
-        else{const u=easeIO((lt-HUB_LEG-HUB_PULSE)/HUB_LEG);dx=Pb.x+(B.x-Pb.x)*u;dy=Pb.y+(B.y-Pb.y)*u;dotOn=true}
-        lastRt=rt;
+        else if(lt<HUB_ACTIVE){const l2=lt-HUB_LEG-HUB_PULSE,u=easeIO(l2/HUB_LEG);dx=Pb.x+(B.x-Pb.x)*u;dy=Pb.y+(B.y-Pb.y)*u;dotOp=Math.min(1,l2/HUB_RAMP)*Math.min(1,(HUB_LEG-l2)/HUB_RAMP)}
       }
-      if(!key&&lt<HUB_ACTIVE+HUB_FADE&&lastRt){ /* محو شدنِ ۳۰۰ms پس از پایان */
-        routeOp=HUB_LINE_A*(1-(lt-HUB_ACTIVE)/HUB_FADE);rt={d1:lastRt.d1,l1:lastRt.l1,f1:1,d2:lastRt.d2,l2:lastRt.l2,f2:1}}
       window.__zaexaHub={cycle:ci,pair:key?pr.slice():null,t:lt};
     }
     if(!dim&&markDim){markDim=false;if(markEl)markEl.style.opacity=''}
@@ -953,7 +955,7 @@ svg.diag{display:block;width:100%;height:auto}
         [[hubRoute,rt.d1,rt.l1,rt.f1],[hubRoute2,rt.d2,rt.l2,rt.f2]].forEach(function(q){const e=q[0],L=q[2];e.setAttribute('d',q[1]);e.dataset.len=L.toFixed(1);e.style.strokeDasharray=L.toFixed(1)+' '+(L+2).toFixed(1);e.style.strokeDashoffset=(L-L*q[3]).toFixed(1);e.style.opacity=routeOp.toFixed(3)})}
       else{hubRoute.style.opacity='0';hubRoute2.style.opacity='0'}
     }
-    if(hubDot){hubDot.style.opacity=dotOn?'1':'0';if(dotOn){hubDot.setAttribute('cx',dx.toFixed(2));hubDot.setAttribute('cy',dy.toFixed(2))}}
+    if(hubDot){hubDot.style.opacity=dotOp>0?dotOp.toFixed(3):'0';if(dotOp>0){hubDot.setAttribute('cx',dx.toFixed(2));hubDot.setAttribute('cy',dy.toFixed(2))}}
   }
 
   const readoutTop=document.querySelector('.readout-top');
@@ -967,9 +969,9 @@ svg.diag{display:block;width:100%;height:auto}
 
   /* یک فریم: مدارها + هاب. clock برای چرخشِ مدارها و زمانِ نقطه؛ lt فقط فازِ readout. */
   function draw(lt,clock,animate){
-    const orbs=orbitSet();
+    const orbs=orbitSet(clock);
     ctx.clearRect(0,0,w,h);
-    drawOrbits(w*.5,h*.5,orbs,clock);
+    drawOrbits(w*.5,h*.5,orbs);
     const phase = lt<T1?'quote':(lt<T2?'split':(lt<T3?'simulate':'settle'));
     hubUpdate(clock,animate,orbs);
     window.__zaexaCanvasPhase=phase;
@@ -977,6 +979,7 @@ svg.diag{display:block;width:100%;height:auto}
     maybeExitPulse(lt);
   }
 
+  function redrawNow(){ if(w>0&&!reduceMotion) draw(clock%LOOP,clock,true); else if(w>0) renderStatic() }
   const costs=[];
   let clock=0, lastTs=null;
   function frame(ts){
@@ -995,12 +998,12 @@ svg.diag{display:block;width:100%;height:auto}
   /* قابِ ایستا: فازِ split در نیمه‌راه (تقسیمِ کامل)، بی ذره‌ی متحرک، و
      هرگز requestAnimationFrame صدا زده نمی‌شود. */
   const staticLt=T1+(T2-T1)*.5;
-  function renderStatic(){const perfStart=performance.now();draw(staticLt,staticLt,false);window.__zaexaCanvasCost=performance.now()-perfStart}
+  function renderStatic(){const perfStart=performance.now();clock=staticLt;draw(staticLt,staticLt,false);window.__zaexaCanvasCost=performance.now()-perfStart}
   /* ⚠️ خودِ observe() یک بارِ اولیه‌ی resize را ناهمگام صف می‌کند که
      canvas.width را دوباره ست می‌کند و هر چیزِ کشیده‌شده را پاک می‌کند —
      برای قابِ ایستا باید بعد از *هر* resize (شاملِ همان بارِ اول) دوباره
      رسم کنیم، نه فقط یک‌بار پیش از آن. */
-  function resize(){const r=canvas.getBoundingClientRect();dpr=Math.min(2,devicePixelRatio||1);w=r.width;h=r.height;canvas.width=w*dpr;canvas.height=h*dpr;ctx.setTransform(dpr,0,0,dpr,0,0);measureCoreR();measureAvoid();hubMeasure();if(reduceMotion) renderStatic()}
+  function resize(){const r=canvas.getBoundingClientRect();dpr=Math.min(2,devicePixelRatio||1);w=r.width;h=r.height;canvas.width=w*dpr;canvas.height=h*dpr;ctx.setTransform(dpr,0,0,dpr,0,0);measureCoreR();measureAvoid();hubMeasure();if(reduceMotion) renderStatic(); else if(w>0) draw(clock%LOOP,clock,true)} /* بعد از resize بومِ پاک‌شده همان لحظه با ساعتِ فعلی دوباره کشیده می‌شود، نه پرش */
   new ResizeObserver(resize).observe(canvas); resize();
   /* فونتِ برچسب‌ها دیرتر می‌رسد؛ اندازه‌ها بعدش دوباره خوانده می‌شود. */
   if(document.fonts&&document.fonts.ready) document.fonts.ready.then(function(){hubMeasure();if(reduceMotion) renderStatic()});
