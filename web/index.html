@@ -432,7 +432,7 @@ if(/^\/t\/[^/]+\/?$/.test(location.pathname)){
 *{box-sizing:border-box}
 html,body{margin:0;padding:0}
 /* ۱۱ اکتبر: شیارِ اسکرول‌بار همیشه رزرو است تا هدر بین صفحه‌های دارای/بدون اسکرول ~۱۰px نپرد */
-html{scrollbar-gutter:stable}
+html{scrollbar-gutter:stable;-webkit-tap-highlight-color:transparent}
 body{
   background:var(--bg);color:var(--tx);
   font:15px/1.55 ui-sans-serif,-apple-system,"Segoe UI",Inter,Roboto,sans-serif;
@@ -1734,14 +1734,13 @@ html:not(.netPlaced) .hdrRight>#srcMenu{display:none}
 html:not(.ctaReady) #actBtn:disabled,html:not(.ctaReady) #solSwapBtn:disabled{background:var(--grad);color:var(--on-acc)}
 .savedWatch{margin:0;overflow:hidden;grid-column:1/-1;min-width:0}
 .savedWatch[hidden]{display:none}
-/* ۲۵ اکتبر: از ۹۴۱px به بالا دیده‌بانی در ریل (≥۱۷۸۰) یا پاپ‌اوورِ هدر است؛ پنلِ قدیمی فقط تا ۹۴۰ می‌ماند */
-@media(min-width:941px){.savedWatch.savedWatch{display:none}}
+/* ۲۵ اکتبر: دیده‌بانی در ریل (≥۱۷۸۰) یا پاپ‌اوورِ هدر است (روی گوشی شیت)؛ پنلِ قدیمی در هیچ پهنایی دیده نمی‌شود */
+.savedWatch.savedWatch{display:none}
 .savedChip{display:inline-block;margin-top:3px;font-size:10.5px;font-weight:620;border-radius:999px;padding:2px 8px;color:var(--tx2);background:var(--raise);white-space:nowrap}
 .savedChip.p{color:var(--pos);background:var(--pglow)}
 .savedChip.n{color:var(--neg);background:color-mix(in srgb,var(--neg) 14%,transparent)}
 .savedChip.u{color:var(--warn);background:color-mix(in srgb,var(--warn) 14%,transparent)}
 @media(max-width:940px){.row.hero>.savedWatch{order:2}}
-@media(max-width:940px){.savedWatch.isEmpty{display:none}}
 .savedWatch>summary{list-style:none;display:flex;align-items:center;gap:10px;padding:16px 20px;cursor:pointer;font-size:13px;font-weight:650;min-height:52px}
 .savedWatch>summary::-webkit-details-marker{display:none}
 .savedWatch>summary::after{content:'⌄';margin-left:auto;color:var(--tx2)}
@@ -1772,6 +1771,9 @@ html:not(.ctaReady) #actBtn:disabled,html:not(.ctaReady) #solSwapBtn:disabled{ba
 .wlHead .savedCount{flex:none}
 .wlHead .iconBtn{margin-left:auto;width:30px;height:30px}
 .wlHead .iconBtn:disabled{opacity:.45;cursor:default}
+.wlHead .wlClose{display:none;margin-left:0;font-size:14px;line-height:1}
+/* گوشی (≤۹۴۰): همان پاپ‌اوور به شکل شیتِ fixed زیرِ هدر؛ اسکرولِ بدنه قفل نمی‌شود */
+@media(max-width:940px){.watchPop{position:fixed;left:12px;right:12px;top:var(--wlTop,64px);width:auto;max-width:none}.wlHead .wlClose{display:inline-grid}}
 .wlList{overflow-y:auto;min-height:0;padding:0 14px 6px;overscroll-behavior:contain}
 .wlEmpty{margin:0;padding:6px 0 14px;font-size:12.5px;line-height:1.6;color:var(--tx3)}
 .wlStatus{margin:0;padding:0 14px 12px;font-size:11.5px;line-height:1.5;color:var(--tx3);flex:none}
@@ -1790,14 +1792,8 @@ html:not(.ctaReady) #actBtn:disabled,html:not(.ctaReady) #solSwapBtn:disabled{ba
 .wlRm{position:absolute;right:0;top:11px;width:24px;height:24px;border-radius:50%;color:var(--tx2);background:none;border:0;cursor:pointer;font-size:12px;line-height:1}
 .wlRm:hover{color:var(--tx);background:var(--raise)}
 .watchRail a:focus-visible,.watchRail button:focus-visible,.watchPop a:focus-visible,.watchPop button:focus-visible,#watchBtn:focus-visible{outline:2px solid var(--acc);outline-offset:2px}
-/* ۲۵ اکتبر — جابه‌جاییِ سواپ و نمودار (فقط دسکتاپ) */
-@media(min-width:941px){
-  html.swapLeft .row.hero{grid-template-columns:396px 1fr}
-  html.swapLeft .row.hero>.swapMarketCol{order:2}
-  html.swapLeft .row.hero>.swapActionsCol{order:1}
-}
-#swapNetworkBar .swapSideBtn{width:32px;height:32px;font-size:15px}
-@media(max-width:940px){#swapNetworkBar .swapSideBtn{display:none}}
+/* ۲۵ اکتبر — دکمه‌ی جابه‌جاییِ ریلِ دیده‌بانی (چپ/راستِ محتوا)، فقط در ریل */
+.wlHead .wlMove{width:28px;height:28px;margin-left:0;font-size:14px;line-height:1}
 </style>
 </head>
 <body>
@@ -2049,7 +2045,7 @@ try{(function(){
 
     <!-- swap -->
     <section class="card swapCard">
-      <div id="baseSwapNetworkSlot"><div id="swapNetworkBar"><span class="ttl">Swap</span><span class="grow"></span><button class="iconBtn swapSideBtn" id="swapSideBtn" type="button" aria-label="Move swap to the left" title="Move swap to the left">⇄</button></div></div>
+      <div id="baseSwapNetworkSlot"><div id="swapNetworkBar"><span class="ttl">Swap</span><span class="grow"></span></div></div>
       <div class="leg">
         <div class="legTop"><span>You pay</span><b id="balIn"></b></div>
         <div class="legRow">
@@ -6980,10 +6976,10 @@ function savedWatchSelection(){
     b.setAttribute('aria-label',lab);b.title=row?lab:'Select a token first';
   }
 }
-function savedWatchStatus(text){$('savedStatus').textContent=text;watchStatusText=text||'';document.querySelectorAll('.wlStatus').forEach(n=>{n.textContent=watchStatusText;});if(text)$('savedWatch').classList.remove('isEmpty');}
+function savedWatchStatus(text){$('savedStatus').textContent=text;watchStatusText=text||'';document.querySelectorAll('.wlStatus').forEach(n=>{n.textContent=watchStatusText;});}
 function savedWatchCommit(rows,message){
   try{localStorage.setItem(SAVED_WATCH_KEY,JSON.stringify(rows));}
-  catch{savedWatchStatus('Could not save in this browser. Check your storage settings and try again.');$('savedWatch').open=true;return false;}
+  catch{savedWatchStatus('Could not save in this browser. Check your storage settings and try again.');watchPopOpen();return false;}
   savedWatchRows=rows;++savedWatchSeq;savedWatchRender();savedWatchStatus(message);return true;
 }
 function savedWatchToggle(chain){
@@ -6996,7 +6992,7 @@ function savedWatchToggleRow(row,quiet){
   // Merge the latest persisted list before editing, including edits in another tab.
   try{savedWatchRows=savedWatchRead();}catch{}
   const key=savedWatchKey(row),on=savedWatchRows.some(r=>savedWatchKey(r)===key);
-  if(!on&&savedWatchRows.length>=SAVED_WATCH_MAX){if(!quiet)$('savedWatch').open=true;savedWatchStatus('Your watchlist is full (30 tokens). Remove a token to add another.');return false;}
+  if(!on&&savedWatchRows.length>=SAVED_WATCH_MAX){if(!quiet)watchPopOpen();savedWatchStatus('Your watchlist is full (30 tokens). Remove a token to add another.');return false;}
   const next=on?savedWatchRows.filter(r=>savedWatchKey(r)!==key):[...savedWatchRows,row];
   if(savedWatchCommit(next,on?'Token removed.':'Token saved in this browser.')&&!quiet){
     $('savedWatch').open=true;savedWatchRefresh();
@@ -7004,8 +7000,6 @@ function savedWatchToggleRow(row,quiet){
   return true;
 }
 function savedWatchRender(){
-  // ۲۴ اکتبر: فهرستِ خالی روی گوشی جا نمی‌گیرد (سقفِ ۱۶۰۰ِ [mobile compact])؛ با اولین ستاره برمی‌گردد
-  $('savedWatch').classList.toggle('isEmpty',savedWatchRows.length===0&&!$('savedStatus').textContent);
   $('savedCount').textContent=String(savedWatchRows.length);
   $('savedRefresh').disabled=savedWatchRows.length===0;
   const box=$('savedList');box.replaceChildren();
@@ -7128,16 +7122,27 @@ async function savedWatchRefresh(){
 }
 
 /* ۲۵ اکتبر — سطوحِ دیده‌بانی. یک سازنده‌ی مشترک، دو نمایش: ریلِ ثابت (≥۱۷۸۰px) و پاپ‌اوورِ هدر (۹۴۱ تا ۱۷۷۹).
-   زیر ۹۴۱ همان #savedWatch است. فقط در نمای swap و صفحه‌ی توکن. هیچ عنصرِ دیگری جابه‌جا نمی‌شود (ریل fixed، پاپ‌اوور absolute). */
-const WATCH_RAIL_MQ=matchMedia("(min-width:1780px)"),WATCH_DESK_MQ=matchMedia("(min-width:941px)");
+   زیر ۹۴۱ پاپ‌اوور شیتِ fixed است (زیرِ هدر، ۱۲px از دو لبه). فقط در نمای swap و صفحه‌ی توکن. هیچ عنصرِ دیگری جابه‌جا نمی‌شود (ریل fixed، پاپ‌اوور absolute). */
+const WATCH_RAIL_MQ=matchMedia("(min-width:1780px)");
 let watchStatusText="";
+// ۲۵ اکتبر: ریل چپِ محتوا یا راستِ آن — zaexa.layout.v1 {rail:"left"|"right"}؛ کلیدِ قدیمیِ swap نادیده گرفته می‌شود
+const WATCH_LK="zaexa.layout.v1";
+let watchRailSide="right";
+try{const j=JSON.parse(localStorage.getItem(WATCH_LK)||"null");if(j&&typeof j==="object"&&j.rail==="left")watchRailSide="left";}catch{}
+const watchMoveLabel=()=>watchRailSide==="left"?"Move watchlist to the right":"Move watchlist to the left";
 function watchDeskView(){return tokenPage||view==="token"||view==="swap";}
 function watchSurfaceOpen(){const r=$("watchRail"),p=$("watchPop");return !!(r&&!r.hidden)||!!(p&&!p.hidden);}
 function watchRailPlace(){
   const r=$("watchRail");if(!r||r.hidden)return;
   const m=document.querySelector("main"),h=document.querySelector("header");if(!m||!h)return;
-  const mr=m.getBoundingClientRect(),pr=parseFloat(getComputedStyle(m).paddingRight)||0,top=Math.round(h.offsetHeight+16);
-  r.style.left=Math.round(mr.right-pr+24)+"px";r.style.top=top+"px";r.style.maxHeight="calc(100vh - "+top+"px - 16px)";
+  const mr=m.getBoundingClientRect(),cs=getComputedStyle(m),pr=parseFloat(cs.paddingRight)||0,pl=parseFloat(cs.paddingLeft)||0,top=Math.round(h.offsetHeight+16);
+  r.style.left=Math.round(watchRailSide==="left"?Math.max(8,mr.left+pl-24-r.offsetWidth):mr.right-pr+24)+"px";r.style.top=top+"px";r.style.maxHeight="calc(100vh - "+top+"px - 16px)";
+}
+// روی گوشی پاپ‌اوور شیتِ fixed است؛ بالایش = پایینِ هدر + ۸
+function watchPopPlace(){const p=$("watchPop"),h=document.querySelector("header");if(p&&h)p.style.setProperty("--wlTop",Math.round(h.getBoundingClientRect().bottom+8)+"px");}
+function watchPopOpen(){
+  const w=$("watchWrap"),p=$("watchPop");if(!w||w.hidden||!p||!p.hidden)return;
+  watchPopPlace();p.hidden=false;$("watchBtn").setAttribute("aria-expanded","true");
 }
 function watchPopClose(focusBack){
   const p=$("watchPop"),b=$("watchBtn");if(!p||p.hidden)return;
@@ -7145,7 +7150,7 @@ function watchPopClose(focusBack){
 }
 function watchSurfaceSync(){
   const rail=$("watchRail"),wrap=$("watchWrap");if(!rail||!wrap)return;
-  const desk=WATCH_DESK_MQ.matches&&watchDeskView(),railOn=desk&&WATCH_RAIL_MQ.matches,btnOn=desk&&!WATCH_RAIL_MQ.matches,was=!rail.hidden;
+  const desk=watchDeskView(),railOn=desk&&WATCH_RAIL_MQ.matches,btnOn=desk&&!WATCH_RAIL_MQ.matches,was=!rail.hidden;
   rail.hidden=!railOn;wrap.hidden=!btnOn;
   if(!btnOn)watchPopClose(false);
   if(railOn){watchRailPlace();if(!was)savedWatchRefresh();}
@@ -7158,6 +7163,21 @@ function watchPanelFill(root){
   rf.innerHTML='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 11a8 8 0 0 0-14.9-3M4 4v4h4"/><path d="M4 13a8 8 0 0 0 14.9 3M20 20v-4h-4"/></svg>';
   rf.onclick=()=>{savedWatchRefresh();};
   head.append(el("h2","wlTtl","Your watchlist"),el("span","savedCount",String(n)),rf);
+  if(root.id==="watchPop"){
+    const cl=el("button","iconBtn wlClose","✕");cl.type="button";cl.setAttribute("aria-label","Close watchlist");cl.title="Close watchlist";
+    cl.onclick=()=>{watchPopClose(true);};
+    head.append(cl);
+  }
+  if(root.id==="watchRail"){
+    const mv=el("button","iconBtn wlMove","⇄");mv.type="button";mv.setAttribute("aria-label",watchMoveLabel());mv.title=watchMoveLabel();
+    mv.onclick=()=>{
+      watchRailSide=watchRailSide==="left"?"right":"left";
+      mv.setAttribute("aria-label",watchMoveLabel());mv.title=watchMoveLabel();
+      try{localStorage.setItem(WATCH_LK,JSON.stringify({rail:watchRailSide}));}catch{}
+      watchRailPlace();
+    };
+    head.append(mv);
+  }
   const list=el("div","wlList");
   if(!n)list.append(el("p","wlEmpty","Star a token to keep it here."));
   for(const row of savedWatchRows){
@@ -7193,28 +7213,14 @@ function watchSurfacesRender(){
 function initWatchSurfaces(){
   $("watchBtn").onclick=()=>{
     const p=$("watchPop");
-    if(p.hidden){p.hidden=false;$("watchBtn").setAttribute("aria-expanded","true");savedWatchRefresh();}
+    if(p.hidden){watchPopOpen();savedWatchRefresh();}
     else watchPopClose(false);
   };
   // ✕ ردیف را از DOM برمی‌دارد؛ contains(target) پاپ‌اوور را غلط می‌بست، پس composedPath
   document.addEventListener("click",e=>{const p=$("watchPop");if(!p||p.hidden)return;if(!e.composedPath().includes($("watchWrap")))watchPopClose(false);});
   document.addEventListener("keydown",e=>{if(e.key==="Escape"&&!$("watchPop").hidden){e.preventDefault();watchPopClose(true);}});
-  addEventListener("resize",()=>{try{watchSurfaceSync();}catch{}});
-  for(const mq of [WATCH_RAIL_MQ,WATCH_DESK_MQ])mq.addEventListener("change",()=>{try{watchSurfaceSync();}catch{}});
-  // ۲۵ اکتبر: دکمه‌ی جابه‌جاییِ سواپ/نمودار (دسکتاپ) — zaexa.layout.v1 {swap:"left"|"right"}
-  const LK="zaexa.layout.v1";
-  let left=false;
-  try{const j=JSON.parse(localStorage.getItem(LK)||"null");left=!!j&&typeof j==="object"&&j.swap==="left";}catch{}
-  const apply=()=>{
-    document.documentElement.classList.toggle("swapLeft",left);
-    const b=$("swapSideBtn"),t=left?"Move swap to the right":"Move swap to the left";
-    if(b){b.setAttribute("aria-label",t);b.title=t;}
-  };
-  apply();
-  $("swapSideBtn").onclick=()=>{
-    left=!left;apply();
-    try{localStorage.setItem(LK,JSON.stringify({swap:left?"left":"right"}));}catch{}
-  };
+  addEventListener("resize",()=>{try{watchSurfaceSync();watchPopPlace();}catch{}});
+  for(const mq of [WATCH_RAIL_MQ])mq.addEventListener("change",()=>{try{watchSurfaceSync();}catch{}});
 }
 function initSavedWatch(){
   if(savedWatchReady)return;

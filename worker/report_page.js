@@ -274,6 +274,8 @@ const PAGE_CSS = String.raw`
 :root{--s-sell:#3b82f6;--s-nosell:#d97706;--s-none:#a9b0bc;--sans:Manrope,ui-sans-serif,-apple-system,"Segoe UI",Roboto,sans-serif;--serif:'Playfair Display',Georgia,serif;--mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
 :root[data-theme=dark]{--s-sell:#3b93e8;--s-nosell:#e0931a;--s-none:#5b5670}
 html{scroll-behavior:auto}
+/* ۲۵ اکتبر: مربعِ هایلایتِ لمس پشتِ دکمه‌های گرد نیفتد */
+html{-webkit-tap-highlight-color:transparent}
 /* ۱۱ اکتبر: شیارِ اسکرول‌بار همیشه رزرو است تا هدر بین صفحه‌ها نپرد */
 html{scrollbar-gutter:stable}
 body{overflow-x:hidden;overflow-x:clip}

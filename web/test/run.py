@@ -3118,7 +3118,7 @@ async def check_hero_hub(p, errors):
                 summary.append("pairs %s, dot span %.0fpx" % ("->".join("%d%d" % q for q in seq), span))
             await ctx.close()
             summary.append("%s mark off by <=%.2fpx" % (tag, worst_dx))
-    # (a) هر مدار سرعت/جهتِ خودش را دارد: دو نمونه به فاصله‌ی ۱ ثانیه
+    # (a) هر سه مدار هم‌سرعت و هم‌جهت‌اند: همان .00006 rad/ms کامیتِ 1916a01 (دو نمونه به فاصله‌ی ۱ ثانیه)
     pg = await b.new_page(viewport={"width": 1440, "height": 900})
     pg.on("console", lambda m: errors.append(m.text) if m.type == "error" else None)
     await pg.goto("file://" + path)
@@ -3126,16 +3126,32 @@ async def check_hero_hub(p, errors):
     rots0 = await pg.evaluate("() => window.__zaexaCanvasRoutePts.orbits.map(o => o.rot)")
     await pg.wait_for_timeout(1000)
     rots1 = await pg.evaluate("() => window.__zaexaCanvasRoutePts.orbits.map(o => o.rot)")
+    ow = await pg.evaluate("() => window.__zaexaOrbitW")
     await pg.close()
     dl = [r1 - r0 for r0, r1 in zip(rots0, rots1)]
-    assert len(dl) == 3 and all(abs(d) > 1e-4 for d in dl), "[hero hub] orbits are not rotating: %r" % dl
-    for i in range(3):
-        for j in range(i + 1, 3):
-            big = max(abs(dl[i]), abs(dl[j]))
-            assert abs(dl[i] - dl[j]) > 0.2 * big, (
-                "[hero hub] orbits %d and %d rotate in lockstep (deltas %.4f / %.4f rad per ~1s)" % (i, j, dl[i], dl[j]))
-    # مدارِ ۰ همان سرعتِ .00006 rad/ms در 1916a01 (≈۰٫۰۶ rad در ثانیه)
-    assert 0.04 <= dl[0] <= 0.08, "[hero hub] orbit 0 speed is %.4f rad/s, expected ~0.06 (1916a01)" % dl[0]
+    assert ow == [0.00006, 0.00006, 0.00006], "[hero hub] every orbit must turn at 1916a01's .00006 rad/ms in the same direction: %r" % ow
+    assert len(dl) == 3 and all(0.04 <= d <= 0.08 for d in dl), "[hero hub] orbit speeds are %r rad/s, expected all ~0.06 and the same direction (1916a01)" % dl
+    assert max(dl) - min(dl) < 0.01, "[hero hub] orbits do not turn at one rate: %r" % dl
+    # کوچک‌ترین مدار (نزدیکِ لوگو) رنگِ --hero2 دارد و دو مدارِ بیرونی --hero1؛ در هر دو تم و بعد از تعویضِ زنده
+    pg = await b.new_page(viewport={"width": 1440, "height": 900}, reduced_motion="no-preference")
+    pg.on("console", lambda m: errors.append(m.text) if m.type == "error" else None)
+    await pg.goto("file://" + path)
+    await pg.evaluate("() => { document.documentElement.dataset.theme = 'light'; }")
+    await pg.wait_for_timeout(700)
+    for step in range(3):
+        if step:
+            await pg.click("#themeToggle")
+            await pg.wait_for_timeout(700)
+        oc = await pg.evaluate("""() => { const parse = c => c.match(/[\\d.]+/g).map(Number);
+            const col = v => { const d = document.createElement('div'); d.style.color = 'var(' + v + ')'; document.body.appendChild(d); const c = getComputedStyle(d).color; d.remove(); return parse(c).slice(0, 3); };
+            const O = window.__zaexaCanvasRoutePts.orbits;
+            return {theme: document.documentElement.dataset.theme || 'light', h1: col('--hero1'), h2: col('--hero2'), rx: O.map(o => o.rx), st: O.map(o => parse(o.stroke)), oa: window.__zaexaViz.oa}; }""")
+        inner = min(range(3), key=lambda k: oc["rx"][k])
+        outer = [k for k in range(3) if k != inner]
+        assert oc["st"][inner][:3] == oc["h2"] and all(oc["st"][k][:3] == oc["h1"] for k in outer) and oc["h1"] != oc["h2"], \
+            "[hero hub] the inner orbit must stroke with --hero2 and the two outer ones with --hero1 (%s): %r" % (oc["theme"], oc)
+        assert all(abs(oc["st"][k][3] - oc["oa"]) < 0.005 for k in range(3)) and oc["oa"] > 0, "[hero hub] orbit alpha differs from the live orbit opacity (%s): %r" % (oc["theme"], oc["st"])
+    await pg.close()
     # (b) عرضِ لوگوتایپ ۰٫۹ عرضِ نشان در ۱۴۴۰ و ۳۹۰ و (c) بدونِ مربعِ پشتِ نشان بعد از هر تعویضِ تم
     # (d) هیچ عنصر/rect پشتِ نشان پر یا پس‌زمینه‌ی غیرشفاف ندارد
     import io
@@ -3176,9 +3192,16 @@ async def check_hero_hub(p, errors):
             }""")
             assert not behind["out"], "[hero hub] something non-transparent sits behind the mark at %dpx %s: %r" % (vw, theme, behind["out"])
             # نشان و لوگوتایپ را نامرئی می‌کنیم تا جوهرِ خودِ نشان در گوشه‌ها پیکسلِ بدلی نسازد؛ مربعِ پشتش می‌ماند
-            await pg.evaluate("() => document.querySelectorAll('.visual-core svg').forEach(e => e.style.visibility = 'hidden')")
+            # ۲۵ اکتبر: مدارها و خطِ مسیرِ متحرک هم پنهان می‌شوند (زیرِ بارِ سوییتِ کامل گاهی از گوشه رد می‌شدند و پیکسلِ فیروزه‌ای
+            # را «مربع» می‌خواندیم)؛ خودِ مرکز و نیاکانش دیده می‌مانند، پس هر پس‌زمینه‌ی واقعی پشتِ نشان هنوز گرفته می‌شود.
+            HIDE = """(on) => { const sel = '.visual-core svg, #landingParticles';
+              for (const e of document.querySelectorAll(sel)) e.style.visibility = on ? 'hidden' : '';
+              for (const e of document.querySelectorAll('.hero-visual *')) {
+                if (e.closest('.visual-core') || e.querySelector('.visual-core')) continue;
+                e.style.visibility = on ? 'hidden' : ''; } }"""
+            await pg.evaluate(HIDE, True)
             png = await pg.screenshot()
-            await pg.evaluate("() => document.querySelectorAll('.visual-core svg').forEach(e => e.style.visibility = '')")
+            await pg.evaluate(HIDE, False)
             im = Image.open(io.BytesIO(png)).convert("RGB")
             bgc = [int(v) for v in re.findall(r"\d+", behind["bg"])[:3]]
             x, y, bw, bh = behind["box"]
@@ -9572,8 +9595,9 @@ async def main():
         await check_strip_watch_merge(p, errors)
         await check_watch_rail(p, errors)
         await check_watch_popover(p, errors)
+        await check_watch_sheet_mobile(p, errors)
         await check_watch_single_label(p, errors)
-        await check_layout_swap_side(p, errors)
+        await check_no_tap_squares(p, errors)
         await check_watch_exit_chips(p, errors)
         await check_board_star(p, errors)
         await check_pairs_star(p, errors)
@@ -20755,7 +20779,7 @@ async def check_exit_header_icons(p, errors):
 
 
 async def check_watch_panel_views(p, errors):
-    """[watch panel views] ۲۵ اکتبر: روی دسکتاپ دکمه‌ی ★ی هدر (پاپ‌اوور) فقط در نمای swap و صفحه‌ی توکن دیده می‌شود، نه Flow/Folio/Stocks؛ #savedWatch فقط تا ۹۴۰px؛ سوییچ Flow/New pairs جابه‌جا نمی‌شود."""
+    """[watch panel views] ۲۵ اکتبر: روی دسکتاپ دکمه‌ی ★ی هدر (پاپ‌اوور) فقط در نمای swap و صفحه‌ی توکن دیده می‌شود، نه Flow/Folio/Stocks؛ #savedWatch در هیچ پهنایی دیده نمی‌شود (روی گوشی هم دکمه‌ی ★ هست)؛ سوییچ Flow/New pairs جابه‌جا نمی‌شود."""
     srv, origin = we_serve()
     b = await p.chromium.launch()
     errs = []
@@ -20767,7 +20791,7 @@ async def check_watch_panel_views(p, errors):
         await pg.wait_for_timeout(900)
         vis = lambda: pg.evaluate("() => { const w = document.getElementById('watchWrap'), b = document.getElementById('watchBtn'); return !w.hidden && b.getBoundingClientRect().height > 0; }")
         assert await vis(), "[watch panel views] the watchlist button must show in the swap view"
-        assert await pg.evaluate("() => getComputedStyle(document.getElementById('savedWatch')).display") == "none", "[watch panel views] the old in-page panel is for <=940px only"
+        assert await pg.evaluate("() => getComputedStyle(document.getElementById('savedWatch')).display") == "none", "[watch panel views] the old in-page panel is never shown"
         res = {}
         for name, h in (("flow", "#flow"), ("folio", "#folio"), ("stocks", "#stocks")):
             await pg.evaluate("(h) => { location.hash = h; }", h)
@@ -20807,14 +20831,17 @@ async def check_watch_panel_views(p, errors):
         pairs_top = await pp.evaluate("() => Math.round(document.querySelector('.mktSwitch').getBoundingClientRect().top * 10) / 10")
         await ctx.close()
         assert abs(flow_top - pairs_top) <= 1, "[watch panel views] the Flow/New pairs switch jumps between /app#flow (%s) and /pairs (%s)" % (flow_top, pairs_top)
-        # گوشی: خالی = جا نمی‌گیرد
+        # گوشی: پنلِ درون‌صفحه همیشه پنهان؛ دکمه‌ی ★ در swap هست و در Flow نیست
         pg = await env.open("#swap", vw=390, vh=844, scheme="light", board=False)
         await pg.wait_for_timeout(900)
         d = await pg.evaluate("() => getComputedStyle(document.getElementById('savedWatch')).display")
-        assert d == "none", "[watch panel views] an empty watchlist takes no space on phones: %s" % d
+        assert d == "none" and await vis(), "[watch panel views] on phones the in-page panel is hidden and the star button shows: %s" % d
+        await pg.evaluate("() => { location.hash = '#flow'; }")
+        await pg.wait_for_timeout(600)
+        assert not await vis(), "[watch panel views] on phones the star button is hidden outside the swap view"
         await pg.context.close()
         assert not errs, "[watch panel views] console errors: %s" % errs
-        print("[watch panel views] at 1440 the watchlist button is visible in the swap view and on the token page only (hidden in flow, folio, stocks), #savedWatch is display:none from 941px up; the Flow/New pairs switch has the same top on /app#flow (%s) and /pairs (%s); an empty list still takes no space at 390" % (flow_top, pairs_top))
+        print("[watch panel views] at 1440 the watchlist button is visible in the swap view and on the token page only (hidden in flow, folio, stocks), #savedWatch is display:none at every width; the Flow/New pairs switch has the same top on /app#flow (%s) and /pairs (%s); at 390 the panel is hidden and the star button shows in swap only" % (flow_top, pairs_top))
     finally:
         await b.close()
         srv.shutdown()
@@ -20848,14 +20875,16 @@ async def check_strip_watch_merge(p, errors):
         await pg.wait_for_timeout(400)
         assert (await pg.evaluate(STRIP_JS % "base"))["names"] == ["ETH", "AERO", "cbBTC"], "[strip watch merge] the strip does not follow list changes"
         await pg.context.close()
-        # گوشی: نوار پنهان، پنل با خلاصه‌ی خودش؛ فقط یک «Your watchlist»
+        # گوشی: نوار پنهان، پنلِ درون‌صفحه پنهان؛ «Your watchlist» فقط با شیتِ باز
         pg = await env.open("#swap", vw=390, vh=844, scheme="light", board=False, init=[we_seed(rows, "we.seed3")])
         await pg.wait_for_selector("#savedWatch", state="attached")
         await pg.wait_for_timeout(1200)
         COUNT_JS = """() => [...document.querySelectorAll('body *')].filter(e => e.children.length === 0 && e.textContent.trim() === 'Your watchlist' && e.getClientRects().length > 0 && getComputedStyle(e).visibility !== 'hidden').length"""
-        assert await pg.evaluate(COUNT_JS) == 1, "[strip watch merge] 390: exactly one visible 'Your watchlist' (the panel summary)"
-        sm = await pg.evaluate("() => [getComputedStyle(document.querySelector('.marketWatch')).display, getComputedStyle(document.querySelector('#savedWatch > summary')).display]")
-        assert sm[0] == "none" and sm[1] != "none", "[strip watch merge] 390: strip hidden, summary shown: %s" % sm
+        assert await pg.evaluate(COUNT_JS) == 0, "[strip watch merge] 390: no visible 'Your watchlist' while the sheet is closed"
+        sm = await pg.evaluate("() => [getComputedStyle(document.querySelector('.marketWatch')).display, getComputedStyle(document.getElementById('savedWatch')).display]")
+        assert sm[0] == "none" and sm[1] == "none", "[strip watch merge] 390: strip and in-page panel hidden: %s" % sm
+        await pg.click("#watchBtn")
+        assert await pg.evaluate(COUNT_JS) == 1, "[strip watch merge] 390: exactly one visible 'Your watchlist' (the open sheet)"
         await pg.context.close()
         # سولانا: باز هم فقط پیش‌فرض‌ها
         pg = await env.open("#swap?chain=solana", vw=1280, vh=900, scheme="light", board=False, init=[we_seed(rows)])
@@ -20865,12 +20894,13 @@ async def check_strip_watch_merge(p, errors):
         assert s_["head"] == "Market watch · 24h" and s_["names"] == ["SOL", "JUP", "BONK"] and "SOLW" not in s_["text"], "[strip watch merge] Solana strip is defaults only: %s" % s_
         await pg.context.close()
         assert not errs, "[strip watch merge] console errors: %s" % errs
-        print("[strip watch merge] the Market watch strip shows only the default tokens (ETH, AERO, cbBTC / SOL, JUP, BONK) even with watched tokens saved, its heading is the static text 'Market watch · 24h' with no toggle button, list changes do not touch it; at 390 the strip is hidden and the panel summary is the single 'Your watchlist'")
+        print("[strip watch merge] the Market watch strip shows only the default tokens (ETH, AERO, cbBTC / SOL, JUP, BONK) even with watched tokens saved, its heading is the static text 'Market watch · 24h' with no toggle button, list changes do not touch it; at 390 the strip and the in-page panel are hidden and the open sheet is the single 'Your watchlist'")
     finally:
         await b.close()
         srv.shutdown()
 
 
+SHOTS3 = os.environ.get("ZX_SHOTS3", "/tmp/claude-0/-home-claude/a5e4655c-d218-5df6-a69c-ab944b617993/scratchpad/c3")
 SHOTS2 = os.environ.get("ZX_SHOTS2", "/tmp/claude-0/-home-claude/a5e4655c-d218-5df6-a69c-ab944b617993/scratchpad/app2")
 WL_COUNT_JS = """() => [...document.querySelectorAll('body *')].filter(e => e.children.length === 0 && e.textContent.trim() === 'Your watchlist' && e.getClientRects().length > 0 && getComputedStyle(e).visibility !== 'hidden').length"""
 WL_MAIN_RECTS_JS = """() => { const m = document.querySelector('main'); const q = s => document.querySelector(s);
@@ -20939,6 +20969,71 @@ async def check_watch_rail(p, errors):
             return {railLeft: r.left, mainRight: mx, sw: document.documentElement.scrollWidth, iw: innerWidth}; }""")
         assert ov["mainRight"] <= ov["railLeft"] + 0.5 and ov["sw"] <= ov["iw"], "[watch rail] the rail overlaps the main content or the page scrolls sideways: %s" % ov
         await pg.screenshot(path=os.path.join(SHOTS2, "rail-1920-light.png"))
+        # ۲۵ اکتبر: دکمه‌ی گردِ ⇄ در سرِ ریل ریل را چپِ محتوا (لبه‌ی راستِ ریل = لبه‌ی چپِ محتوا - ۲۴) یا راستِ آن می‌گذارد
+        GEO = """() => { const r = document.getElementById('watchRail').getBoundingClientRect(), h = document.getElementById('baseHeroRow').getBoundingClientRect(), m = document.getElementById('watchRail').querySelector('.wlMove');
+            const mb = m.getBoundingClientRect(), cs = getComputedStyle(m);
+            const mx = [...document.querySelectorAll('main *')].filter(e => e.getClientRects().length && !e.closest('#watchRail')).map(e => e.getBoundingClientRect());
+            return {l: r.left, r: r.right, w: r.width, heroL: h.left, heroR: h.right, minL: Math.min(...mx.map(x => x.left)), maxR: Math.max(...mx.map(x => x.right)), sw: document.documentElement.scrollWidth, iw: innerWidth,
+                    aria: m.getAttribute('aria-label'), txt: m.textContent, bw: mb.width, bh: mb.height, rad: cs.borderRadius, inHead: !!m.closest('.wlHead'), pop: document.querySelectorAll('#watchPop .wlMove').length,
+                    st: localStorage.getItem('zaexa.layout.v1')}; }"""
+        gR = await pg.evaluate(GEO)
+        assert gR["aria"] == "Move watchlist to the left" and gR["txt"] == "⇄" and gR["inHead"] and abs(gR["bw"] - 28) <= 0.5 and abs(gR["bh"] - 28) <= 0.5 and gR["rad"] in ("50%", "14px") and gR["pop"] == 0, "[watch rail] the 28px round ⇄ button in the rail header (not in the popover): %s" % gR
+        assert gR["st"] is None, "[watch rail] nothing is stored before the first click: %s" % gR["st"]
+        rectsR = await pg.evaluate("() => { const grab = %s; return grab(); }" % WL_MAIN_RECTS_JS)
+        await pg.click("#watchRail .wlMove")
+        await pg.wait_for_timeout(400)
+        gL = await pg.evaluate(GEO)
+        assert gL["aria"] == "Move watchlist to the right" and gL["st"] == '{"rail":"left"}', "[watch rail] the label flips and the choice is stored: %s" % gL
+        assert abs(gL["r"] - (gL["heroL"] - 24)) <= 1 and abs(gL["w"] - 300) <= 0.5, "[watch rail] left side: the rail's right edge = main content left edge - 24: %s" % gL
+        assert gL["r"] <= gL["minL"] + 0.5 and gL["l"] >= 0 and gL["sw"] <= gL["iw"], "[watch rail] left side: the rail overlaps the main content or leaves the screen: %s" % gL
+        rectsL = await pg.evaluate("() => { const grab = %s; return grab(); }" % WL_MAIN_RECTS_JS)
+        assert rectsL == rectsR and len(rectsL["main"]) > 100, "[watch rail] main content and header rects must be identical with the rail on the left, on the right and hidden"
+        await pg.evaluate("() => { document.getElementById('watchRail').hidden = true; }")
+        rectsH = await pg.evaluate("() => { const grab = %s; return grab(); }" % WL_MAIN_RECTS_JS)
+        await pg.evaluate("() => { document.getElementById('watchRail').hidden = false; }")
+        assert rectsH == rectsR, "[watch rail] rects differ with the rail hidden"
+        await pg.screenshot(path=os.path.join(SHOTS3, "rail-left-1920-light.png"))
+        await pg.reload()
+        await pg.wait_for_selector("#watchRail .wlRow", timeout=8000)
+        await pg.wait_for_timeout(1500)
+        gP = await pg.evaluate(GEO)
+        assert abs(gP["r"] - (gP["heroL"] - 24)) <= 1 and gP["aria"] == "Move watchlist to the right", "[watch rail] the left side survives a reload: %s" % gP
+        await pg.click("#watchRail .wlMove")
+        await pg.wait_for_timeout(300)
+        gB = await pg.evaluate(GEO)
+        assert abs(gB["l"] - (gB["heroR"] + 24)) <= 1 and gB["st"] == '{"rail":"right"}', "[watch rail] a second click goes back to the right and stores it: %s" % gB
+        await pg.context.close()
+        # کلیدِ قدیمیِ swap و مقدارِ خراب نادیده گرفته می‌شود؛ با localStorage بسته هم برای همین نشست کار می‌کند
+        for init in ("""try{localStorage.setItem('zaexa.layout.v1','{"swap":"left"}')}catch(e){}""", "try{localStorage.setItem('zaexa.layout.v1','garbage{')}catch(e){}"):
+            pg = await env.open("#swap", vw=1920, vh=1000, scheme="light", board=False, init=[we_seed(rows), init])
+            await pg.wait_for_selector("#watchRail .wlRow", timeout=8000)
+            await pg.wait_for_timeout(1200)
+            g = await pg.evaluate(GEO)
+            assert abs(g["l"] - (g["heroR"] + 24)) <= 1 and g["aria"] == "Move watchlist to the left", "[watch rail] an old 'swap' key or garbage falls back to the right side: %s" % g
+            await pg.context.close()
+        pg = await env.open("#swap", vw=1920, vh=1000, scheme="light", board=False, init=[we_seed(rows), "Storage.prototype.setItem=function(){throw new Error('blocked')};"])
+        await pg.wait_for_selector("#watchRail .wlRow", timeout=8000)
+        await pg.wait_for_timeout(1000)
+        await pg.click("#watchRail .wlMove")
+        await pg.wait_for_timeout(300)
+        g = await pg.evaluate(GEO)
+        assert abs(g["r"] - (g["heroL"] - 24)) <= 1, "[watch rail] with storage blocked the move button still works for the session: %s" % g
+        await pg.context.close()
+        # ۱۷۸۰px: کمترین عرضِ ریل؛ سمتِ چپ هنوز در صفحه جا دارد و روی محتوا نمی‌افتد
+        pg = await env.open("#swap", vw=1780, vh=1000, scheme="light", board=False, init=[we_seed(rows), """try{localStorage.setItem('zaexa.layout.v1','{"rail":"left"}')}catch(e){}"""])
+        await pg.wait_for_selector("#watchRail .wlRow", timeout=8000)
+        await pg.wait_for_timeout(1200)
+        g = await pg.evaluate(GEO)
+        assert g["l"] >= 0 and g["r"] <= g["minL"] + 0.5 and abs(g["r"] - (g["heroL"] - 24)) <= 1 and g["sw"] <= g["iw"], "[watch rail] 1780px, left side: %s" % g
+        await pg.context.close()
+        pg = await env.open("#swap", vw=1920, vh=1000, scheme="dark", board=False, init=[we_seed(rows)])
+        await pg.wait_for_selector("#watchRail .wlRow", timeout=8000)
+        await pg.wait_for_timeout(1800)
+        await pg.screenshot(path=os.path.join(SHOTS3, "rail-right-1920-dark.png"))
+        await pg.context.close()
+        pg = await env.open("#swap", vw=1920, vh=1000, scheme="light", board=False, init=[we_seed(rows)])
+        await pg.wait_for_selector("#watchRail .wlRow", timeout=8000)
+        await pg.wait_for_timeout(1800)
         # حذف با ✕ و ماندگاری
         await pg.click('#watchRail .wlRm[aria-label="Remove WA"]')
         await pg.wait_for_timeout(300)
@@ -20973,7 +21068,7 @@ async def check_watch_rail(p, errors):
         assert mh["bottom"] <= mh["ih"] - 15 and abs(mh["h"] - (mh["ih"] - mh["hdb"] - 32)) <= 1.5 and mh["scroll"] and mh["ov"] == "auto", "[watch rail] max-height = viewport - header - 32 with an internal scroll: %s" % mh
         await pg.context.close()
         assert not errs, "[watch rail] console errors: %s" % errs
-        print("[watch rail] at 1920: position:fixed, 300px, left = content right + 24, top = header bottom + 16, same rect after a 600px scroll, no overlap and every main/header rect identical with the rail on and off; header, count, Refresh prices, rows (logo, symbol, chain chip, price, 24h change, exit chip, Remove <SYM>), empty text, swap/token views only, 30 tokens scroll inside max-height")
+        print("[watch rail] both sides via the rail header's 28px round ⇄ button (right = content right + 24, left = content left - 24 incl. 1780px; stored as zaexa.layout.v1 {rail}, survives reload, old swap key/garbage/blocked storage harmless, main rects identical left/right/hidden); at 1920: position:fixed, 300px, left = content right + 24, top = header bottom + 16, same rect after a 600px scroll, no overlap and every main/header rect identical with the rail on and off; header, count, Refresh prices, rows (logo, symbol, chain chip, price, 24h change, exit chip, Remove <SYM>), empty text, swap/token views only, 30 tokens scroll inside max-height")
     finally:
         await b.close()
         srv.shutdown()
@@ -21044,24 +21139,131 @@ async def check_watch_popover(p, errors):
         mh = await pg.evaluate("() => { const p = document.getElementById('watchPop'), l = p.querySelector('.wlList'); return [p.getBoundingClientRect().height, innerHeight, l.scrollHeight > l.clientHeight + 5]; }")
         assert mh[0] <= mh[1] * 0.7 + 1 and mh[2], "[watch popover] 30 tokens: max-height 70vh with an internal scroll: %s" % mh
         await pg.context.close()
-        # فقط swap و صفحه‌ی توکن؛ گوشی: دکمه نیست
+        # فقط swap و صفحه‌ی توکن؛ ۹۴۰ و پایین‌تر: دکمه هست (شیت) ولی ریل نیست
         pg = await env.open("#flow", vw=1440, vh=900, scheme="light", board=False, init=[we_seed(rows, "we.seedf")])
         await pg.wait_for_timeout(900)
         assert await pg.evaluate("() => document.getElementById('watchWrap').getClientRects().length") == 0, "[watch popover] no button in the Flow view"
         await pg.context.close()
         pg = await env.open("#swap", vw=940, vh=800, scheme="light", board=False, init=[we_seed(rows, "we.seedp")])
         await pg.wait_for_timeout(900)
-        assert await pg.evaluate("() => [document.getElementById('watchWrap').getClientRects().length, document.getElementById('watchRail').getClientRects().length]") == [0, 0], "[watch popover] at 940 there is no button and no rail"
+        ra = await pg.evaluate("() => [document.getElementById('watchWrap').getClientRects().length > 0, document.getElementById('watchRail').getClientRects().length]")
+        assert ra == [True, 0], "[watch popover] at 940 the star button shows (sheet) and there is no rail: %s" % ra
         await pg.context.close()
         assert not errs, "[watch popover] console errors: %s" % errs
-        print("[watch popover] 1440, 1280 and 941: a 38px chip-round star button with a count badge sits in the header immediately left of settings, adding it moves no header item and nothing in main; the popover is absolute, 320px, right-aligned under the button, <=70vh with an inner scroll, opens/closes by click, Escape (focus back) and outside click, opening moves nothing; removing a token keeps it open; no button in Flow or at 940")
+        print("[watch popover] 1440, 1280 and 941: a 38px chip-round star button with a count badge sits in the header immediately left of settings, adding it moves no header item and nothing in main; the popover is absolute, 320px, right-aligned under the button, <=70vh with an inner scroll, opens/closes by click, Escape (focus back) and outside click, opening moves nothing; removing a token keeps it open; no button in Flow, no rail at 940 (the sheet button shows there; see [watch sheet mobile])")
+    finally:
+        await b.close()
+        srv.shutdown()
+
+
+async def check_watch_sheet_mobile(p, errors):
+    """[watch sheet mobile] ۲۵ اکتبر: تا ۹۴۰px پنلِ #savedWatch همیشه پنهان است؛ دکمه‌ی ★ در هدر جا می‌شود و پاپ‌اوور شیتِ fixed زیرِ هدر است؛ هیچ چیز جابه‌جا نمی‌شود."""
+    srv, origin = we_serve()
+    b = await p.chromium.launch()
+    errs = []
+    try:
+        env = FbEnv(b, origin, errs)
+        env.gt = wl_gt
+        rows = wl_rows(5)
+        SWAP_TOP = "() => Math.round(document.getElementById('actBtn').closest('.card').getBoundingClientRect().top * 10) / 10"
+        tops = {}
+        for vw in (360, 390, 430):
+            tag = "[watch sheet mobile] %dpx" % vw
+            pg = await env.open("#swap", vw=vw, vh=844, scheme="light", board=False, init=[we_seed(rows, "ws.%d" % vw)])
+            await pg.wait_for_selector("#watchBtn", state="visible", timeout=8000)
+            await pg.wait_for_timeout(1500)
+            g = await pg.evaluate("""() => { const b = document.getElementById('watchBtn'), r = b.getBoundingClientRect(), s = document.getElementById('setBtn').getBoundingClientRect(), h = document.querySelector('header'),
+                logo = document.querySelector('.logo').getBoundingClientRect(), t = document.getElementById('themeBtn').getBoundingClientRect(), c = document.getElementById('connectBtn').getBoundingClientRect();
+                const items = [...document.querySelectorAll('header .hdrRight button, header .hdrRight a')].filter(e => e.getClientRects().length && !e.closest('.pop,.watchPop')).map(e => e.getBoundingClientRect());
+                return {h: r.height, setH: s.height, w: r.width, right: r.right, left: r.left, setLeft: s.left, cy: r.top + r.height / 2, setCy: s.top + s.height / 2, hdrSW: h.scrollWidth, hdrCW: h.clientWidth,
+                        docSW: document.documentElement.scrollWidth, iw: innerWidth, logoR: logo.right, ys: items.map(x => Math.round(x.top + x.height / 2)), hb: h.getBoundingClientRect().bottom, hh: h.getBoundingClientRect().height,
+                        panel: getComputedStyle(document.getElementById('savedWatch')).display, badge: document.getElementById('watchBadge').textContent, label: document.getElementById('watchBtn').getAttribute('aria-label')}; }""")
+            assert g["h"] > 0 and abs(g["h"] - g["setH"]) <= 0.5 and abs(g["cy"] - g["setCy"]) <= 0.5, "%s: the star button is as tall as the other round chips and on the same line: %s" % (tag, g)
+            assert 0 <= g["setLeft"] - g["right"] <= 12 and g["left"] >= g["logoR"], "%s: immediately left of settings, right of the logo: %s" % (tag, g)
+            assert g["hdrSW"] <= g["hdrCW"] and g["docSW"] <= g["iw"], "%s: header and page must not overflow sideways: %s" % (tag, g)
+            assert max(g["ys"]) - min(g["ys"]) <= 1 and g["hh"] < 80, "%s: header items stay on one line: %s" % (tag, g)
+            assert g["panel"] == "none" and g["badge"] == "5" and g["label"] == "Watchlist (5)", "%s: the old in-page panel is hidden, badge and label: %s" % (tag, g)
+            assert await pg.evaluate(WL_COUNT_JS) == 0, "%s: closed -> no visible 'Your watchlist' label" % tag
+            tops[vw] = await pg.evaluate(SWAP_TOP)
+            before = await pg.evaluate(WL_MAIN_RECTS_JS)
+            await pg.click("#watchBtn")
+            await pg.wait_for_timeout(700)
+            sh = await pg.evaluate("""() => { const p = document.getElementById('watchPop'), cs = getComputedStyle(p), r = p.getBoundingClientRect(), h = document.querySelector('header').getBoundingClientRect(), x = p.querySelector('.wlClose');
+                const xr = x ? x.getBoundingClientRect() : null, l = p.querySelector('.wlList');
+                return {pos: cs.position, left: r.left, right: document.documentElement.getBoundingClientRect().right - r.right, top: r.top, hb: h.bottom, hgt: r.height, ih: innerHeight, maxH: cs.maxHeight, n: p.querySelectorAll('.wlRow').length, title: p.querySelector('.wlTtl').textContent,
+                        x: !!x, xl: x && x.getAttribute('aria-label'), xw: xr && xr.width, xIn: xr && xr.right <= r.right + 0.5 && xr.left >= r.left, rf: p.querySelector('.wlRefresh').getAttribute('aria-label'), rad: cs.borderRadius, bg: cs.backgroundColor,
+                        exp: document.getElementById('watchBtn').getAttribute('aria-expanded'), exits: p.querySelectorAll('.savedChip').length, rm: p.querySelectorAll('.wlRm').length,
+                        bodyOv: getComputedStyle(document.body).overflow + '/' + getComputedStyle(document.documentElement).overflow, cardBg: getComputedStyle(document.querySelector('#view-swap .card')).backgroundColor}; }""")
+            assert sh["pos"] == "fixed" and abs(sh["left"] - 12) <= 0.5 and abs(sh["right"] - 12) <= 0.5 and abs(sh["top"] - (sh["hb"] + 8)) <= 1, "%s: sheet geometry fixed, 12px sides, top = header bottom + 8: %s" % (tag, sh)
+            assert sh["hgt"] <= sh["ih"] * 0.7 + 1 and sh["n"] == 5 and sh["title"] == "Your watchlist" and sh["rf"] == "Refresh prices" and sh["exp"] == "true" and sh["exits"] == 5 and sh["rm"] == 5, "%s: sheet content: %s" % (tag, sh)
+            assert sh["x"] and sh["xl"] == "Close watchlist" and sh["xIn"] and sh["xw"] >= 28 and sh["bg"] == sh["cardBg"], "%s: close button in the sheet header, card background: %s" % (tag, sh)
+            assert "hidden" not in sh["bodyOv"], "%s: body scroll is not locked: %s" % (tag, sh["bodyOv"])
+            assert await pg.evaluate(WL_COUNT_JS) == 1, "%s: exactly one visible 'Your watchlist' while open" % tag
+            await pg.evaluate("() => window.scrollTo(0, 150)")
+            await pg.wait_for_timeout(200)
+            assert await pg.evaluate("() => scrollY") > 50, "%s: the page still scrolls while the sheet is open" % tag
+            await pg.evaluate("() => window.scrollTo(0, 0)")
+            await pg.wait_for_timeout(200)
+            after = await pg.evaluate(WL_MAIN_RECTS_JS)
+            assert after["main"] == before["main"] and after["header"] == before["header"], "%s: opening the sheet must not move anything" % tag
+            if vw == 390:
+                await we_shot(pg, "watch-sheet-390-light.png")
+            # بستن: ✕، Escape، لمسِ بیرون
+            await pg.click("#watchPop .wlClose")
+            st = await pg.evaluate("() => [document.getElementById('watchPop').hidden, document.activeElement.id, document.getElementById('watchBtn').getAttribute('aria-expanded')]")
+            assert st == [True, "watchBtn", "false"], "%s: the close button closes and returns focus: %s" % (tag, st)
+            await pg.click("#watchBtn")
+            await pg.keyboard.press("Escape")
+            assert await pg.evaluate("() => document.getElementById('watchPop').hidden"), "%s: Escape closes" % tag
+            await pg.click("#watchBtn")
+            await pg.mouse.click(vw // 2, 780)
+            assert await pg.evaluate("() => document.getElementById('watchPop').hidden"), "%s: a tap outside closes" % tag
+            await pg.click("#watchBtn")
+            await pg.click('#watchPop .wlRm[aria-label="Remove WA"]')
+            await pg.wait_for_timeout(300)
+            st = await pg.evaluate("() => [document.getElementById('watchPop').hidden, document.querySelectorAll('#watchPop .wlRow').length, document.getElementById('watchBadge').textContent]")
+            assert st == [False, 4, "4"], "%s: removing a row keeps the sheet open: %s" % (tag, st)
+            await pg.context.close()
+        # جای کارتِ سواپ با ۰ و ۲۰ توکن یکی است
+        for n in (0, 20):
+            pg = await env.open("#swap", vw=390, vh=844, scheme="light", board=False, init=[we_seed(wl_rows(n), "wt.%d" % n)] if n else None)
+            await pg.wait_for_selector("#watchBtn", state="visible", timeout=8000)
+            await pg.wait_for_timeout(1500)
+            tops["n%d" % n] = await pg.evaluate(SWAP_TOP)
+            await pg.context.close()
+        assert tops["n0"] == tops["n20"] == tops[390], "[watch sheet mobile] the swap card top is identical with 0 and 20 watched tokens: %s" % tops
+        # فهرست بلند: سقفِ ۷۰vh و اسکرولِ داخلی
+        pg = await env.open("#swap", vw=390, vh=700, scheme="light", board=False, init=[we_seed(wl_rows(30), "wl.30")])
+        await pg.wait_for_selector("#watchBtn", state="visible", timeout=8000)
+        await pg.click("#watchBtn")
+        await pg.wait_for_timeout(500)
+        mh = await pg.evaluate("() => { const p = document.getElementById('watchPop'), l = p.querySelector('.wlList'); return [p.getBoundingClientRect().height, innerHeight, l.scrollHeight > l.clientHeight + 5, getComputedStyle(l).overflowY]; }")
+        assert mh[0] <= mh[1] * 0.7 + 1 and mh[2] and mh[3] == "auto", "[watch sheet mobile] 30 tokens: max-height 70vh with an internal scroll: %s" % mh
+        await pg.keyboard.press("Escape")
+        # پیامِ پُربودن: شیت را باز می‌کند
+        await pg.evaluate("() => { savedWatchToggleRow(savedWatchClean({chain: 'base', address: '0x' + 'ab'.repeat(20), symbol: 'NEWX'}), false); }")
+        await pg.wait_for_timeout(300)
+        full = await pg.evaluate("() => [document.getElementById('watchPop').hidden, document.querySelector('#watchPop .wlStatus').textContent]")
+        assert full[0] is False and full[1].startswith("Your watchlist is full"), "[watch sheet mobile] the full-list message opens the sheet: %s" % full
+        await pg.context.close()
+        # خطای ذخیره‌سازی: شیت را باز می‌کند
+        pg = await env.open("#swap", vw=390, vh=844, scheme="light", board=False, init=[we_seed(rows, "wb.1")])
+        await pg.wait_for_selector("#watchBtn", state="visible", timeout=8000)
+        await pg.wait_for_timeout(1200)
+        await pg.evaluate("() => { Storage.prototype.setItem = function () { throw new Error('blocked'); }; savedWatchToggleRow(savedWatchClean({chain: 'base', address: '0x' + 'cd'.repeat(20), symbol: 'NEWY'}), false); }")
+        await pg.wait_for_timeout(300)
+        er = await pg.evaluate("() => [document.getElementById('watchPop').hidden, document.querySelector('#watchPop .wlStatus').textContent]")
+        assert er[0] is False and er[1].startswith("Could not save"), "[watch sheet mobile] the storage-error message opens the sheet: %s" % er
+        await pg.context.close()
+        assert not errs, "[watch sheet mobile] console errors: %s" % errs
+        print("[watch sheet mobile] at 360, 390 and 430 the in-page #savedWatch panel is hidden and the header star (same height and line as settings, no header/page overflow) opens a fixed sheet (12px sides, top = header bottom + 8, <=70vh with internal scroll, card style, 'Close watchlist' button) that closes with the button, Escape and an outside tap, leaves body scroll alone and moves nothing; full-list and storage-error messages open it; swap card top identical with 0 and 20 tokens (%s)" % tops)
     finally:
         await b.close()
         srv.shutdown()
 
 
 async def check_watch_single_label(p, errors):
-    """[watch single label] ۲۵ اکتبر: در هر پهنایی فقط یک عنصرِ دیدنیِ «Your watchlist» (ریل، پاپ‌اوورِ باز، یا خلاصه‌ی پنل)."""
+    """[watch single label] ۲۵ اکتبر: در هر پهنایی فقط یک عنصرِ دیدنیِ «Your watchlist» (ریل یا پاپ‌اوور/شیتِ باز)."""
     srv, origin = we_serve()
     b = await p.chromium.launch()
     errs = []
@@ -21092,108 +21294,70 @@ async def check_watch_single_label(p, errors):
         await pg.wait_for_timeout(700)
         c2 = await pg.evaluate(WL_COUNT_JS)
         await pg.context.close()
-        assert c1 == 1 and st == [True, True] and c2 == 1, "[watch single label] resizing 1440 (popover open) -> 1920 -> 390: %s %s %s" % (c1, st, c2)
+        assert c1 == 1 and st == [True, True] and c2 == 0, "[watch single label] resizing 1440 (popover open) -> 1920 (rail only) -> 390 (closed sheet, no label): %s %s %s" % (c1, st, c2)
         assert not errs, "[watch single label] console errors: %s" % errs
-        print("[watch single label] exactly one visible 'Your watchlist' at 1920, 1780, 1779 (popover open), 1440, 1280, 941, 940 and 390 (panel summary), and after resizing 1440 -> 1920 -> 390: %s" % res)
+        print("[watch single label] exactly one visible 'Your watchlist' at 1920, 1780, 1779 (popover open), 1440, 1280, 941, 940 and 390 (open popover/sheet), and after resizing 1440 -> 1920 -> 390: %s" % res)
     finally:
         await b.close()
         srv.shutdown()
 
 
-async def check_layout_swap_side(p, errors):
-    """[layout swap side] ۲۵ اکتبر: دکمه‌ی گردِ ⇄ در هدرِ کارت سواپ (فقط >۹۴۰px) ستونِ سواپ را چپ/راست می‌برد، بدونِ تغییرِ اندازه‌ی کارت‌ها؛ ذخیره در zaexa.layout.v1."""
+async def check_no_tap_squares(p, errors):
+    """[no tap squares] ۲۵ اکتبر: روی گوشی هنگام لمسِ دکمه‌های گرد مربعِ هایلایت نیفتد: -webkit-tap-highlight-color روی html شفاف است،
+    پشتِ هر دکمه‌ی گرد (پدر و ::before/::after) پس‌زمینه‌ی مربعی نیست، و حلقه‌ی فوکوس روی خودِ دکمه است (با شعاعِ آن)، نه روی پدر."""
+    import subprocess as _sp, tempfile as _tf
     srv, origin = we_serve()
     b = await p.chromium.launch()
     errs = []
+    ROUND_JS = """async () => {
+        const clear = c => !c || c === 'transparent' || /rgba\\(\\s*\\d+,\\s*\\d+,\\s*\\d+,\\s*0\\s*\\)/.test(c);
+        const out = [], bodyBg = getComputedStyle(document.body).backgroundColor;
+        const els = [...document.querySelectorAll('button,a,summary,[role=button],[role=switch]')].filter(el => { const r = el.getBoundingClientRect(); return r.width && r.height && r.width <= 60 && r.height <= 60; });
+        for (const el of els) {
+            const r = el.getBoundingClientRect(), cs = getComputedStyle(el), br = cs.borderRadius;
+            if (!(br === '50%' || parseFloat(br) >= Math.min(r.width, r.height) / 2 - 0.5)) continue;
+            const par = el.parentElement, pcs = getComputedStyle(par);
+            const pseudo = ['::before', '::after'].map(q => { const x = getComputedStyle(el, q); return x.content !== 'none' && !clear(x.backgroundColor) && parseFloat(x.borderRadius || 0) < r.width / 2 - 0.5 ? q + ' ' + x.backgroundColor : ''; }).filter(Boolean);
+            const parBad = !clear(pcs.backgroundColor) && pcs.backgroundColor !== bodyBg && !(parseFloat(pcs.borderRadius) > 0) && !par.closest('.card,section,header,footer,.watchRail,.watchPop');
+            el.focus({focusVisible: true});
+            const ring = [];
+            for (let a = el.parentElement, n = 0; a && n < 3; a = a.parentElement, n++) { const x = getComputedStyle(a); if (x.outlineStyle !== 'none' && parseFloat(x.outlineWidth) > 0) ring.push(a.tagName + '.' + a.className); }
+            el.blur();
+            out.push({id: el.id, cls: String(el.className && el.className.baseVal !== undefined ? el.className.baseVal : el.className), tap: cs.webkitTapHighlightColor, pseudo, parBad: parBad ? pcs.backgroundColor : '', ring});
+        }
+        return {html: getComputedStyle(document.documentElement).webkitTapHighlightColor, n: out.length, bad: out.filter(o => o.pseudo.length || o.parBad || o.ring.length || !clear(o.tap)), ids: out.map(o => o.id || o.cls)};
+    }"""
     try:
         env = FbEnv(b, origin, errs)
-        GEOM_JS = """(sel) => { const hero = document.querySelector(sel); const chart = hero.querySelector('.swapChartCard'), swap = hero.querySelector('.swapCard');
-            const r = e => { const x = e.getBoundingClientRect(); return {l: x.left, t: x.top, w: x.width, h: x.height}; };
-            return {chart: r(chart), swap: r(swap), cls: document.documentElement.classList.contains('swapLeft')}; }"""
-        FIT_JS = """async (sel) => {
-            const hero = document.querySelector(sel), swap = hero.querySelector('.swapCard'), chart = hero.querySelector('.swapChartCard');
-            const H = e => Math.round(e.getBoundingClientRect().height), wait = ms => new Promise(r => setTimeout(r, ms));
-            const idle = H(swap); setNotice('<div class="note ok">Swap complete. <a href="#">View on BaseScan</a></div>'); await wait(150);
-            const withNote = H(swap); setNotice(''); await wait(150);
-            const back = H(swap);
-            const act = hero.querySelector('#actBtn'), btnTop0 = act ? Math.round(act.getBoundingClientRect().top) : null;
-            const keep = swap.style.minHeight; swap.style.minHeight = (H(swap) + 140) + 'px'; await wait(120);
-            const taller = H(chart); swap.style.minHeight = keep; await wait(120); const normal = H(chart);
-            return {idle, withNote, back, taller, normal, plot: H(hero.querySelector('.plot')), dead: act ? Math.round(swap.getBoundingClientRect().bottom - act.getBoundingClientRect().bottom) : null, btnTop0}; }"""
-        async def open_(chain, vw=1440, scheme="light", init=None):
-            pg = await env.open("#swap" + ("?chain=solana" if chain == "solana" else ""), vw=vw, vh=900, scheme=scheme, board=False, init=init or [])
-            await pg.wait_for_selector("#swapSideBtn", state="attached")
-            await pg.wait_for_timeout(1500)
-            return pg
-        sizes = {}
-        for chain, hero in (("base", "#baseHeroRow"), ("solana", "#appSolHero")):
-            pg = await open_(chain)
-            tag = "[layout swap side] %s" % chain
-            btn = await pg.evaluate("""() => { const b = document.getElementById('swapSideBtn'), r = b.getBoundingClientRect(), m = document.getElementById('srcMenu').getBoundingClientRect(), cs = getComputedStyle(b);
-                return {w: r.width, h: r.height, rad: cs.borderRadius, txt: b.textContent, aria: b.getAttribute('aria-label'), right: r.right, menuLeft: m.left, inBar: !!b.closest('#swapNetworkBar'), disp: cs.display}; }""")
-            assert abs(btn["w"] - 32) <= 0.5 and abs(btn["h"] - 32) <= 0.5 and btn["rad"] in ("50%", "16px") and btn["txt"] == "⇄" and btn["aria"] == "Move swap to the left" and btn["inBar"], "%s: a 32px round ⇄ button in the swap header: %s" % (tag, btn)
-            assert btn["right"] <= btn["menuLeft"] + 0.5, "%s: the button sits left of the network selector: %s" % (tag, btn)
-            g0 = await pg.evaluate(GEOM_JS, hero)
-            assert not g0["cls"] and g0["chart"]["l"] < g0["swap"]["l"], "%s: default is swap on the right: %s" % (tag, g0)
-            fit0 = await pg.evaluate(FIT_JS, hero) if chain == "base" else None
-            await pg.click("#swapSideBtn")
-            await pg.wait_for_timeout(400)
-            g1 = await pg.evaluate(GEOM_JS, hero)
-            assert g1["cls"] and g1["swap"]["l"] < g1["chart"]["l"], "%s: after the click the swap card is on the left: %s" % (tag, g1)
-            for k in ("chart", "swap"):
-                for d in ("w", "h"):
-                    assert abs(g0[k][d] - g1[k][d]) <= 1, "%s: the %s card %s must not change with the side: %s vs %s" % (tag, k, d, g0[k], g1[k])
-            assert abs(g1["swap"]["t"] - g0["swap"]["t"]) <= 1 and abs(g1["chart"]["t"] - g0["chart"]["t"]) <= 1, "%s: tops unchanged: %s %s" % (tag, g0, g1)
-            assert await pg.evaluate("() => document.getElementById('swapSideBtn').getAttribute('aria-label')") == "Move swap to the right", "%s: the label flips" % tag
-            sizes[chain] = (round(g1["chart"]["w"]), round(g1["chart"]["h"]), round(g1["swap"]["w"]), round(g1["swap"]["h"]))
-            if chain == "base":
-                # [card fit] / [chart steady] / [cta] — همان ادعاها در هر دو ترتیب
-                fit1 = await pg.evaluate(FIT_JS, hero)
-                for nm, f in (("right", fit0), ("left", fit1)):
-                    assert f["idle"] == f["withNote"] == f["back"], "%s [card fit] %s: the swap card height changes with a notice: %s" % (tag, nm, f)
-                    assert f["dead"] is not None and f["dead"] <= 84 and f["plot"] >= 300, "%s [card fit] %s: dead space under the button / plot collapsed: %s" % (tag, nm, f)
-                    assert f["taller"] == f["normal"], "%s [chart steady] %s: a taller neighbour dragged the chart: %s" % (tag, nm, f)
-                    assert f["btnTop0"] is not None, "%s [cta] %s: action button present" % (tag, nm)
-                assert fit0["btnTop0"] == fit1["btnTop0"] and fit0["plot"] == fit1["plot"], "%s [cta]: the action button / plot did not move with the side: %s vs %s" % (tag, fit0, fit1)
-                await pg.screenshot(path=os.path.join(SHOTS2, "swap-left-1440-light.png"))
-            st = await pg.evaluate("() => localStorage.getItem('zaexa.layout.v1')")
-            assert st == '{"swap":"left"}', "%s: stored choice: %r" % (tag, st)
-            await pg.reload()
-            await pg.wait_for_selector("#swapSideBtn", state="attached")
-            await pg.wait_for_timeout(1200)
-            g2 = await pg.evaluate(GEOM_JS, hero)
-            assert g2["cls"] and g2["swap"]["l"] < g2["chart"]["l"], "%s: the choice survives a reload: %s" % (tag, g2)
-            await pg.click("#swapSideBtn")
-            await pg.wait_for_timeout(300)
-            g3 = await pg.evaluate(GEOM_JS, hero)
-            assert not g3["cls"] and g3["chart"]["l"] < g3["swap"]["l"] and await pg.evaluate("() => localStorage.getItem('zaexa.layout.v1')") == '{"swap":"right"}', "%s: second click goes back and stores right: %s" % (tag, g3)
-            await pg.context.close()
-        # گوشی و ≤۹۴۰: دکمه نیست، ترتیب موبایل بدونِ تغییر
-        for vw in (940, 390):
-            tops = []
-            for stored in (None, '{"swap":"left"}'):
-                init = ["try{localStorage.setItem('zaexa.layout.v1',%s)}catch(e){}" % _fbj.dumps(stored)] if stored else []
-                pg = await open_("base", vw=vw, init=init)
-                m = await pg.evaluate("""() => { const hero = document.querySelector('#baseHeroRow'), c = hero.querySelector('.swapChartCard').getBoundingClientRect(), s = hero.querySelector('.swapCard').getBoundingClientRect();
-                    return {btn: getComputedStyle(document.getElementById('swapSideBtn')).display, rects: [c.left, c.top, c.width, c.height, s.left, s.top, s.width, s.height].map(x => Math.round(x * 10) / 10), cls: document.documentElement.classList.contains('swapLeft')}; }""")
-                assert m["btn"] == "none", "[layout swap side] %dpx: the button is hidden: %s" % (vw, m)
-                tops.append(m["rects"])
+        env.gt = wl_gt
+        rows = wl_rows(4)
+        tmp = _tf.mkdtemp(prefix="nts_")
+        rp = os.path.join(tmp, "report.html")
+        gen = ('import fs from "node:fs"; import { renderReportPage } from "./report_page.js";'
+               'const rows=[{chain:"base",address:"0x"+"1".repeat(40),symbol:"AAA",v:"sell",ret:99,checkedAt:"2026-10-24T10:00:00Z"}];'
+               'fs.writeFileSync(process.argv[1], renderReportPage({date:"2026-10-24",today:"2026-10-24",firstDate:"2026-09-08",rows,history:[]}));')
+        r = _sp.run(["node", "--input-type=module", "-e", gen, rp], cwd=os.path.join(HERE, "..", "..", "worker"), capture_output=True, text=True)
+        assert r.returncode == 0, "[no tap squares] could not render the report page: %s" % r.stderr[-300:]
+        res = {}
+        for name in ("landing", "pairs", "app", "report"):
+            for scheme in ("light", "dark"):
+                if name == "app":
+                    pg = await env.open("#swap", vw=390, vh=844, scheme=scheme, board=False, init=[we_seed(rows)])
+                    await pg.wait_for_timeout(1800)
+                else:
+                    ctx = await b.new_context(viewport={"width": 390, "height": 844}, color_scheme=scheme, has_touch=True, is_mobile=True)
+                    pg = await ctx.new_page()
+                    await pg.route("**/*", lambda rt: rt.continue_() if rt.request.url.startswith((origin, "file:")) else rt.abort())
+                    await pg.goto({"landing": origin + "/landing.html", "pairs": origin + "/pairs", "report": "file://" + rp}[name])
+                    await pg.wait_for_timeout(1200)
+                await pg.keyboard.press("Tab")
+                m = await pg.evaluate(ROUND_JS)
+                tag = "[no tap squares] %s %s" % (name, scheme)
+                assert m["html"] == "rgba(0, 0, 0, 0)", "%s: html -webkit-tap-highlight-color is %s, expected transparent" % (tag, m["html"])
+                assert m["n"] >= 1 and not m["bad"], "%s: a round button has a square behind it or a square focus ring: %s" % (tag, m["bad"])
+                res[name + "/" + scheme] = m["n"]
                 await pg.context.close()
-            assert tops[0] == tops[1], "[layout swap side] %dpx: the saved 'left' choice must not change the mobile layout: %s vs %s" % (vw, tops[0], tops[1])
-        pg = await open_("base", vw=941)
-        assert await pg.evaluate("() => getComputedStyle(document.getElementById('swapSideBtn')).display") != "none", "[layout swap side] 941px shows the button"
-        await pg.context.close()
-        # ذخیره‌ی خراب / localStorage خراب
-        pg = await open_("base", init=["try{localStorage.setItem('zaexa.layout.v1','garbage{')}catch(e){}"])
-        assert not (await pg.evaluate(GEOM_JS, "#baseHeroRow"))["cls"], "[layout swap side] a corrupt stored value falls back to right"
-        await pg.context.close()
-        pg = await open_("base", init=["Storage.prototype.setItem=function(){throw new Error('blocked')};"])
-        await pg.click("#swapSideBtn")
-        await pg.wait_for_timeout(300)
-        assert (await pg.evaluate(GEOM_JS, "#baseHeroRow"))["cls"], "[layout swap side] with storage blocked the toggle still works for the session"
-        await pg.context.close()
-        assert not errs, "[layout swap side] console errors: %s" % errs
-        print("[layout swap side] Base and Solana at 1440: the round 32px ⇄ button left of the network selector moves the swap column left/right with chart and swap card width/height unchanged (within 1px; %s), [card fit] / [chart steady] / [cta] relations hold in both orders, the choice is stored as zaexa.layout.v1 and survives a reload, corrupt or blocked storage is harmless; hidden at 940 and 390 where the mobile layout is identical with or without a saved 'left'" % sizes)
+        print("[no tap squares] at 390 on landing, pairs, the app (swap view with a watchlist) and the report page, light and dark: html -webkit-tap-highlight-color is transparent, and for every round button (<=60px; counts %s) the parent and ::before/::after have no square background and no ancestor carries a focus outline" % res)
     finally:
         await b.close()
         srv.shutdown()
