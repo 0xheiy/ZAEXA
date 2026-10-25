@@ -3173,6 +3173,12 @@ async def check_hero_hub(p, errors):
         dims = await pg.evaluate("""() => { const m = document.querySelector('.visual-core .core-mark').getBoundingClientRect(),
             w = document.querySelector('.visual-core .core-word').getBoundingClientRect(); return [m.width, w.width]; }""")
         assert 0.88 <= dims[1] / dims[0] <= 0.92, "[hero hub] wordmark/mark width %.3f at %dpx" % (dims[1] / dims[0], vw)
+        # ۲۵ اکتبر: مدارها در هیچ زاویه‌ای هم را قطع نکنند — قطرِ بلندِ درونی کمتر از قطرِ کوتاهِ بیرونی
+        orbs = await pg.evaluate("() => window.__zaexaOrbitSet ? window.__zaexaOrbitSet() : null")
+        assert orbs and len(orbs) == 3, "[hero hub] orbit geometry hook missing at %dpx" % vw
+        for k in (1, 2):
+            inner_long, outer_short = max(orbs[k]["rx"], orbs[k]["ry"]), min(orbs[k - 1]["rx"], orbs[k - 1]["ry"])
+            assert inner_long <= outer_short - 2, "[hero hub] orbit %d can cross orbit %d while rotating at %dpx: %r" % (k, k - 1, vw, orbs)
         for step in range(2):
             await pg.click("#themeToggle")
             await pg.wait_for_timeout(700)

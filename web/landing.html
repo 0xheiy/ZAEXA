@@ -832,10 +832,15 @@ svg.diag{display:block;width:100%;height:auto}
   /* سه بیضیِ کج و چرخانِ مدار — هندسه‌ی یگانه برای کشیدنِ مدارها و جاگذاریِ گره‌ها. */
   function orbitSet(){
     const narrow=w<600, R0x=w*(narrow?.46:.37), R0y=h*(narrow?.30:.31);
-    return [0,1,2].map(function(i){return {rx:R0x*(1-i*.11),ry:R0y*(1-i*.14),i:i}});
+    /* ۲۵ اکتبر: مدارها در چرخش هم را قطع نمی‌کنند — قطرِ بلندِ هر مدارِ درونی ۹۳٪ِ قطرِ کوتاهِ مدارِ بیرونی‌اش است،
+       پس هر زاویه‌ای که بچرخند، درونی کاملاً داخلِ بیرونی می‌ماند. کشیدگیِ دو مدارِ درونی کف ۰٫۸ دارد تا گرد بمانند. */
+    const wide=R0x>=R0y, e=Math.max(.8,Math.min(R0x,R0y)/Math.max(R0x,R0y)), out=[{rx:R0x,ry:R0y,i:0}];
+    for(let i=1;i<3;i++){const L=Math.min(out[i-1].rx,out[i-1].ry)*.93;out.push(wide?{rx:L,ry:L*e,i:i}:{rx:L*e,ry:L,i:i})}
+    return out;
   }
   /* هر مدار با نرخِ و جهتِ خودش می‌چرخد (rad/ms)؛ مدارِ میانی خلافِ جهت */
   const ORBIT_W=[.00006,-.000042,.000028];
+  window.__zaexaOrbitSet=function(){return orbitSet()};
   window.__zaexaOrbitW=ORBIT_W;
   function orbitRot(i,clock){return clock*ORBIT_W[i]+i*.9}
   /* سه رنگِ متفاوت: بیرونی --hero1، میانی --hero-mid (=g1ui)، درونی --hero2 */
