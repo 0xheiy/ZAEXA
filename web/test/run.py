@@ -2889,80 +2889,6 @@ async def check_canvas_reduced_motion(p, errors):
           "non-transparent pixels")
 
 
-async def check_canvas_labels(p, errors):
-    """پروبِ [canvas labels]: در ۱۴۴۰/۱۰۲۴/۷۶۸/۳۷۵ هیچ دو جعبه‌ی برچسبی
-    هم‌پوشانی ندارند و همه داخلِ خودِ canvas می‌مانند."""
-    path = os.path.join(HERE, "..", "landing.html")
-    b = await p.chromium.launch()
-    # ۲۳ سپتامبر: گوشیِ واقعیِ مالک ~۳۹۳px بود و برچسب‌ها زیرِ کادرها می‌رفتند؛
-    # عرض‌های رایجِ گوشی هم سنجیده می‌شوند.
-    for width in (1440, 1024, 768, 430, 412, 393, 375, 360):
-        pg = await b.new_page(viewport={"width": width, "height": 900})
-        pg.on("console", lambda m: errors.append(m.text) if m.type == "error" else None)
-        await pg.goto("file://" + path)
-        await pg.wait_for_timeout(300)
-        info = await pg.evaluate("""
-          () => {
-            const c = document.getElementById('routeCanvas');
-            const r = c.getBoundingClientRect();
-            return {labels: window.__zaexaCanvasLabels || [], w: r.width, h: r.height,
-                    avoid: window.__zaexaCanvasAvoid || null};
-          }
-        """)
-        await pg.close()
-        labels = info["labels"]
-        if width <= 480:
-            # ۲۴ اکتبر: روی گوشی برچسب‌ها پنهان‌اند و فقط گره‌ها می‌مانند
-            assert labels == [], "labels must be hidden at %dpx, got %r" % (width, labels)
-            continue
-        assert labels, "window.__zaexaCanvasLabels is empty at %dpx" % width
-        cw, ch = info["w"], info["h"]
-        for i, box in enumerate(labels):
-            assert box["x"] >= -0.5 and box["y"] >= -0.5 and box["x"] + box["w"] <= cw + 0.5 \
-                and box["y"] + box["h"] <= ch + 0.5, (
-                "label box %d %r falls outside the %dpx canvas (%.1fx%.1f) at %dpx width"
-                % (i, box, width, cw, ch, width))
-        for i in range(len(labels)):
-            for j in range(i + 1, len(labels)):
-                a, bx = labels[i], labels[j]
-                overlap = (a["x"] < bx["x"] + bx["w"] and a["x"] + a["w"] > bx["x"]
-                           and a["y"] < bx["y"] + bx["h"] and a["y"] + a["h"] > bx["y"])
-                assert not overlap, (
-                    "label boxes %d %r and %d %r overlap at %dpx width" % (i, a, j, bx, width))
-        # کادرهای readoutِ DOM روی canvas: هیچ برچسبی نباید زیرشان برود
-        # (۲۳ سپتامبر: «ALIENBASE» زیرِ کادرِ ROUTE ENGINE بریده می‌شد).
-        avoid = info["avoid"]
-        assert avoid, "window.__zaexaCanvasAvoid is missing at %dpx" % width
-        for i, a in enumerate(labels):
-            for r in avoid:
-                hit = (a["x"] < r["x"] + r["w"] and a["x"] + a["w"] > r["x"]
-                       and a["y"] < r["y"] + r["h"] and a["y"] + a["h"] > r["y"])
-                assert not hit, (
-                    "label box %d %r sits under a readout box %r at %dpx width" % (i, a, r, width))
-        print("[canvas labels] %dpx: %d label boxes, none overlapping, all inside the canvas, "
-              "clear of %d readout boxes" % (width, len(labels), len(avoid)))
-    await b.close()
-
-
-_HUB_NAMES = ["Uniswap", "Aerodrome", "PancakeSwap", "SushiSwap", "BaseSwap"]
-_HUB_PAIRS = [(0, 2), (1, 3), (2, 4), (3, 0), (4, 1)]
-# ۲۵ اکتبر: [مدار، زاویه‌ی پارامتری] هر گره؛ گره سوارِ مدارش است
-_HUB_RIDE = [(0, 300), (0, 40), (1, 120), (1, 210), (2, 260)]
-
-
-def _ride_err(R, pt):
-    """فاصله‌ی (px، در فضای دایره‌ی بدونِ کجی) گره تا نقطه‌ی مورد انتظارش روی دایره‌ی مدار: وارونِ rotate(θ)·skewX(σ)."""
-    import math
-    o = R["orbits"][pt["o"]]
-    dx, dy = pt["x"] - R["cx"], pt["y"] - R["cy"]
-    c, s_ = math.cos(-o["theta"]), math.sin(-o["theta"])
-    x1, y1 = dx * c - dy * s_, dx * s_ + dy * c
-    x0, y0 = x1 - math.tan(o["skew"]) * y1, y1
-    a = math.radians(pt["a"])
-    return math.hypot(x0 - o["r"] * math.cos(a), y0 - o["r"] * math.sin(a)), abs(math.hypot(x0, y0) - o["r"])
-
-
-
 async def check_trust_rings_seamless(p, errors):
     """[trust rings seamless] حلقه‌های بخشِ Trust در پایانِ هر دور دقیقاً به شکلِ شروع برمی‌گردند (۲۵ اکتبر: حلقه‌ی کوچک سرِ هر دور می‌پرید)."""
     b = await p.chromium.launch()
@@ -3001,46 +2927,30 @@ async def check_trust_rings_seamless(p, errors):
     print("[trust rings seamless] both Trust rings end each loop in exactly the shape they start with (no restart jump): %s" % ", ".join(r["pe"] + "=" + r["name"] for r in res))
 
 async def check_hero_hub(p, errors):
-    """[hero hub] — مرکزِ هیرو: فقط نشانِ رسمی روی var(--bg)، بدونِ هیچ حلقه/گرادیان؛
-    پنج گرهِ DEX رویِ مدارها با برچسبِ بی‌هم‌پوشانی (در گوشی پنهان)، و نقطه‌ی مسیرِ
-    A→مرکز→B با ترتیبِ ثابتِ جفت‌ها. در reduced-motion هیچ‌چیز حرکت نمی‌کند."""
+    """[hero hub] — مرکزِ هیرو: فقط نشانِ رسمی روی var(--bg)، بدونِ هیچ حلقه/گرادیان؛ سه مدارِ بی‌برخورد با سه رنگ؛
+    هیچ گره/برچسب/مسیر/پالسی در هیرو نمانده. در reduced-motion هیچ‌چیز حرکت نمی‌کند."""
     path = os.path.join(HERE, "..", "landing.html")
     b = await p.chromium.launch()
-    # رنگ‌های tokenِ تم را از خودِ مرورگر به rgb تبدیل می‌کنیم (نه حدس)
-    JS_COL = """v => { const d = document.createElement('div'); d.style.color = 'var(' + v + ')';
-        document.body.appendChild(d); const c = getComputedStyle(d).color; d.remove(); return c; }"""
     JS_STATE = """() => {
       const r = e => { const k = e.getBoundingClientRect(); return {x:k.x,y:k.y,w:k.width,h:k.height}; };
       const hv = document.querySelector('.hero-visual'), cv = document.getElementById('routeCanvas');
       const core = document.querySelector('.visual-core'), mark = core.querySelector('.core-mark');
       const word = core.querySelector('.core-word');
-      const R = window.__zaexaCanvasRoutePts || {};
+      const R = window.__zaexaOrbitState || {};
       const cr = cv.getBoundingClientRect();
-      const nodes = [...document.querySelectorAll('.hero-visual .hub-node')].map(g => {
-        const c = g.querySelector('circle'), t = g.querySelector('text'), pl = g.querySelector('.hub-pill'), cs = getComputedStyle(c), ts = getComputedStyle(t);
-        return {circle:r(c), label:r(pl), text:t.textContent, textBox:r(t), pillFill:getComputedStyle(pl).fill, on:g.classList.contains('on'),
-                stroke:cs.stroke, fill:cs.fill, sw:cs.strokeWidth, fs:ts.fontSize, tfill:ts.fill, tdisp:ts.display, vis:ts.visibility};
-      });
-      const dot = document.getElementById('hubDot'), route = document.getElementById('hubRoute');
       const kids = [core, ...core.querySelectorAll('*')].map(e => {
         const s = getComputedStyle(e), bw = ['Top','Right','Bottom','Left'].map(k => parseFloat(s['border'+k+'Width'])*(s['border'+k+'Style']!=='none'?1:0));
         const bef = getComputedStyle(e, '::before'), aft = getComputedStyle(e, '::after');
         return {tag:e.tagName+'.'+(e.getAttribute('class')||''), bgi:s.backgroundImage, bw:Math.max(...bw), br:s.borderRadius,
                 bs:s.boxShadow, filter:s.filter, stroke:s.stroke, bef:bef.content, aft:aft.content};
       });
-      return {mark:r(mark), word:r(word), core:r(core), canvas:{x:cr.x,y:cr.y}, R:R, nodes:nodes, kids:kids,
-              readouts:[...document.querySelectorAll('.hero-visual .visual-readout')].map(r),
-              hv:r(hv), dot:r(dot), dotOp:getComputedStyle(dot).opacity, dotDisp:getComputedStyle(dot).display,
-              dotFill:getComputedStyle(dot).fill, dotStroke:getComputedStyle(dot).stroke,
-              route:route ? {op:+getComputedStyle(route).opacity, disp:getComputedStyle(route).display, sw:getComputedStyle(route).strokeWidth, stroke:getComputedStyle(route).stroke} : null,
-              markOp:getComputedStyle(mark).opacity, viz:{...window.__zaexaViz},
+      return {mark:r(mark), word:r(word), core:r(core), canvas:{x:cr.x,y:cr.y}, R:R, kids:kids,
+                    viz:{...window.__zaexaViz},
               rings:document.querySelectorAll('.hero-visual .core-dial,.hero-visual .core-rim,.hero-visual .core-inner,.hero-visual .core-satellite,.hero-visual linearGradient,#coreRim').length,
               bg:getComputedStyle(document.body).backgroundColor, coreBg:getComputedStyle(core).backgroundColor,
               cv1:getComputedStyle(document.documentElement).getPropertyValue('--viz1').trim(),
               cv2:getComputedStyle(document.documentElement).getPropertyValue('--viz2').trim()};
     }"""
-    def hit(a, c):
-        return a["x"] < c["x"] + c["w"] and a["x"] + a["w"] > c["x"] and a["y"] < c["y"] + c["h"] and a["y"] + a["h"] > c["y"]
     summary = []
     for (vw, vh, core_size, word_w) in ((1440, 900, 145, 57.6), (1280, 800, 145, 57.6), (1024, 768, 145, 57.6),
                                         (768, 1024, 145, 57.6), (390, 844, 96, 37.8)):
@@ -3052,13 +2962,12 @@ async def check_hero_hub(p, errors):
             await pg.goto("file://" + path)
             await pg.evaluate("t => { document.documentElement.dataset.theme = t; }", theme)
             await pg.wait_for_timeout(700)
-            cols = {k: await pg.evaluate(JS_COL, k) for k in ("--card", "--line2", "--tx2", "--tx3", "--hero1", "--bg")}
             worst_dx = 0.0
-            # چند نمونه در طولِ ~۳ ثانیه: برچسب‌ها پویا جا می‌گیرند و مدارها می‌چرخند
+            # چند نمونه در طولِ ~۳ ثانیه: مدارها می‌چرخند و مرکز ثابت می‌ماند
             for sample in range(8):
                 m = await pg.evaluate(JS_STATE)
                 R = m["R"]
-                assert R.get("cx") is not None, "[hero hub] window.__zaexaCanvasRoutePts is missing at %s" % tag
+                assert R.get("cx") is not None, "[hero hub] window.__zaexaOrbitState is missing at %s" % tag
                 mk = m["mark"]
                 dx = mk["x"] + mk["w"] / 2 - (m["canvas"]["x"] + R["cx"])
                 dy = mk["y"] + mk["h"] / 2 - (m["canvas"]["y"] + R["cy"])
@@ -3088,9 +2997,6 @@ async def check_hero_hub(p, errors):
                     ratio = sm["w"] / mk["w"]
                     assert 0.88 <= ratio <= 0.92, "[hero hub] ZAEXA width / mark width is %.3f, expected 0.88..0.92 at %s" % (ratio, tag)
                     assert abs((sm["x"] + sm["w"] / 2) - (mk["x"] + mk["w"] / 2)) <= 0.6, "[hero hub] ZAEXA label is not centred under the mark at %s" % tag
-                    assert m["route"] is not None, "[hero hub] the route line #hubRoute is missing at %s" % tag
-                    assert m["route"]["sw"] == "1.5px" and m["route"]["stroke"] == cols["--hero1"], "[hero hub] route line style is %r at %s" % (m["route"], tag)
-                    assert m["dotFill"] == cols["--hero1"] and m["dotStroke"] == cols["--bg"], "[hero hub] dot fill/ring is %s/%s at %s" % (m["dotFill"], m["dotStroke"], tag)
                     v = m["viz"]
                     if theme == "light":
                         assert v["v1"].lower() == "#3f7cf2" and v["v2"].lower() == "#7a5af0" and abs(v["oa"] - 0.65) < 1e-9, (
@@ -3098,96 +3004,26 @@ async def check_hero_hub(p, errors):
                     else:
                         assert v["v1"].lower() == m["cv1"].lower() and v["v2"].lower() == m["cv2"].lower() and abs(v["oa"] - 0.52) < 1e-9, (
                             "[hero hub] dark live palette is %r at %s" % (v, tag))
-                nodes = m["nodes"]
-                assert len(nodes) == 5, "[hero hub] expected exactly 5 DEX nodes, found %d at %s" % (len(nodes), tag)
-                assert [n["text"] for n in nodes] == _HUB_NAMES, "[hero hub] node labels are %r at %s" % ([n["text"] for n in nodes], tag)
-                for i, n in enumerate(nodes):
-                    cr_ = n["circle"]
-                    assert abs(cr_["w"] - 9) < 0.01 and abs(cr_["h"] - 9) < 0.01, "[hero hub] node %d is %.2fx%.2f, expected 9px at %s" % (i, cr_["w"], cr_["h"], tag)
-                    assert n["fill"] == cols["--card"] and n["sw"] == "1.5px", "[hero hub] node %d fill/stroke-width is %s/%s at %s" % (i, n["fill"], n["sw"], tag)
-                    assert n["stroke"] == (cols["--hero1"] if n["on"] else cols["--line2"]), (
-                        "[hero hub] node %d stroke is %s (active=%s) at %s" % (i, n["stroke"], n["on"], tag))
-                    assert n["fs"] == "11px" and n["tfill"] == (cols["--tx2"] if n["on"] else cols["--tx3"]), (
-                        "[hero hub] label %d is %s %s (active=%s; idle var(--tx3), active var(--tx2)) at %s" % (i, n["fs"], n["tfill"], n["on"], tag))
-                    if vw > 480 and n["vis"] != "hidden":
-                        assert n["pillFill"] == cols["--bg"], "[hero hub] label %d has no var(--bg) background pill (fill %s) at %s" % (i, n["pillFill"], tag)
-                        tb_, pl_ = n["textBox"], n["label"]
-                        assert pl_["x"] <= tb_["x"] + 0.5 and pl_["x"] + pl_["w"] >= tb_["x"] + tb_["w"] - 0.5 and pl_["y"] <= tb_["y"] + 0.5 and pl_["y"] + pl_["h"] >= tb_["y"] + tb_["h"] - 0.5, (
-                            "[hero hub] label %d text is not inside its background pill at %s" % (i, tag))
-                    # ۲۵ اکتبر: گره سوارِ مدارش است — نقطه‌ی ثابتِ دایره زیرِ rotate·skewِ همان لحظه
-                    pt = R["pts"][i]
-                    assert (pt["o"], pt["a"]) == _HUB_RIDE[i], "[hero hub] node %d rides orbit/angle %r, expected %r at %s" % (i, (pt["o"], pt["a"]), _HUB_RIDE[i], tag)
-                    perr, rerr = _ride_err(R, pt)
-                    assert perr <= 1.0 and rerr <= 1.0, "[hero hub] node %d is off its moving orbit line (pos err %.2f, radius err %.2f) at %s" % (i, perr, rerr, tag)
-                    gx = cr_["x"] + cr_["w"] / 2 - (m["canvas"]["x"] + pt["x"])
-                    gy = cr_["y"] + cr_["h"] / 2 - (m["canvas"]["y"] + pt["y"])
-                    assert abs(gx) <= 1.5 and abs(gy) <= 1.5, "[hero hub] node %d DOM position differs from its orbit position by %.1f,%.1f at %s" % (i, gx, gy, tag)
-                    assert cr_["x"] >= m["hv"]["x"] and cr_["x"] + 9 <= m["hv"]["x"] + m["hv"]["w"], "[hero hub] node %d leaves the hero at %s" % (i, tag)
-                if vw > 480:
-                    # برچسبی که جای آزاد ندارد (گره زیرِ readout) پنهان می‌شود؛ حداقل ۳ برچسب باید دیده شوند
-                    labs = [n["label"] if n["vis"] != "hidden" else {"x": -9e9, "y": -9e9, "w": 0, "h": 0} for n in nodes]
-                    assert sum(1 for n in nodes if n["vis"] != "hidden") >= 3, "[hero hub] fewer than 3 labels visible at %s" % tag
-                    for i in range(5):
-                        if nodes[i]["vis"] == "hidden": continue
-                        assert labs[i]["w"] > 0, "[hero hub] label %d has no box at %s" % (i, tag)
-                        assert labs[i]["x"] >= m["hv"]["x"] and labs[i]["x"] + labs[i]["w"] <= m["hv"]["x"] + m["hv"]["w"], "[hero hub] label %d leaves the hero at %s" % (i, tag)
-                        for j in range(i + 1, 5):
-                            assert not hit(labs[i], labs[j]), "[hero hub] labels %d and %d overlap at %s" % (i, j, tag)
-                        for k, ro in enumerate(m["readouts"]):
-                            assert not hit(labs[i], ro), "[hero hub] label %d overlaps readout %d at %s" % (i, k, tag)
-                        assert not hit(labs[i], m["mark"]) and not hit(labs[i], m["word"]), "[hero hub] label %d overlaps the mark at %s" % (i, tag)
-                else:
-                    for i, n in enumerate(nodes):
-                        assert n["tdisp"] == "none" or n["label"]["w"] == 0, "[hero hub] label %d is visible at %s (hidden below 480px)" % (i, tag)
                 await pg.wait_for_timeout(400)
-            if vw == 1440 and theme == "light":
-                # ترتیبِ جفت‌ها + حرکتِ نقطه، در یک پنجره‌ی ~۱۰ ثانیه‌ای
-                seq, dots, routes = [], [], []
-                for _ in range(100):
-                    st = await pg.evaluate("""() => ({on:[...document.querySelectorAll('.hub-node')].map((g,i)=>g.classList.contains('on')?i:-1).filter(i=>i>=0),
-                        dot:(()=>{const k=document.getElementById('hubDot').getBoundingClientRect();return [k.x,k.y,+getComputedStyle(document.getElementById('hubDot')).opacity,k.width]})(),
-                        route:+getComputedStyle(document.getElementById('hubRoute')).opacity})""")
-                    if len(st["on"]) == 2:
-                        pr = tuple(sorted(st["on"]))
-                        if not seq or seq[-1] != pr: seq.append(pr)
-                    if st["dot"][2] > 0:
-                        dots.append(st["dot"][:2])
-                        assert abs(st["dot"][3] - 7) < 0.1, "[hero hub] the dot is %.2fpx wide, expected 7px" % st["dot"][3]
-                    routes.append(st["route"])
-                    await pg.wait_for_timeout(100)
-                want_sorted = [tuple(sorted(q)) for q in _HUB_PAIRS]
-                assert len(seq) >= 3, "[hero hub] saw only %d active pair(s) in 10s: %r" % (len(seq), seq)
-                k0 = want_sorted.index(seq[0]) if seq[0] in want_sorted else None
-                assert k0 is not None, "[hero hub] unknown active pair %r" % (seq[0],)
-                for j, pr in enumerate(seq):
-                    assert pr == want_sorted[(k0 + j) % 5], (
-                        "[hero hub] active pairs went %r; expected the fixed order %r (0,2)(1,3)(2,4)(3,0)(4,1)" % (seq, _HUB_PAIRS))
-                assert max(routes) >= 0.5 and min(routes) == 0, "[hero hub] route line opacity over a cycle is %.2f..%.2f; expected up to ~0.55 mid-cycle and 0 between cycles" % (min(routes), max(routes))
-                span = max(max(d[0] for d in dots) - min(d[0] for d in dots), max(d[1] for d in dots) - min(d[1] for d in dots)) if dots else 0
-                assert span > 20, "[hero hub] with normal motion the dot never moved (span %.1fpx)" % span
-                summary.append("pairs %s, dot span %.0fpx" % ("->".join("%d%d" % q for q in seq), span))
             await ctx.close()
             summary.append("%s mark off by <=%.2fpx" % (tag, worst_dx))
-    # (a) ۲۵ اکتبر: هر مدار دوره‌ی خودش را دارد (۱۶، ۱۱، ۲۰ ثانیه؛ میانی خلافِ جهت)، کجیِ سینوسی با سقفِ ۱۶ درجه، و گره‌ها می‌چرخند
+    # (a) ۲۵ اکتبر: هر مدار دوره‌ی خودش را دارد (۲۴، ۱۷، ۳۰ ثانیه؛ میانی خلافِ جهت)، کجیِ سینوسی با سقفِ ۱۶ درجه، دورهٔ کجی ۱۳/۱۰/۱۶
     pg = await b.new_page(viewport={"width": 1440, "height": 900})
     pg.on("console", lambda m: errors.append(m.text) if m.type == "error" else None)
     await pg.goto("file://" + path)
     await pg.wait_for_timeout(600)
     import math
-    JS_NODES = "() => [...document.querySelectorAll('.hub-node circle')].map(c => { const k = c.getBoundingClientRect(); return [k.x + k.width / 2, k.y + k.height / 2]; })"
-    nodes0 = await pg.evaluate(JS_NODES)
-    await pg.wait_for_timeout(1500)
-    nodes1 = await pg.evaluate(JS_NODES)
     o0 = await pg.evaluate("() => window.__zaexaOrbitSet(1000)")
     o1 = await pg.evaluate("() => window.__zaexaOrbitSet(2000)")
+    # دورهٔ کجی: σ(t+Q)=σ(t) و نیمهٔ دوره قرینه نیست؛ مقدارِ دقیقِ سینوسی را با فرمول می‌سنجیم
+    skq = await pg.evaluate("() => [0, 1, 2].map(k => [window.__zaexaOrbitSet(3000)[k].skew, window.__zaexaOrbitSet(3000 + [13000, 10000, 16000][k])[k].skew])")
     sk = await pg.evaluate("() => { let m = 0; for (let t = 0; t < 120000; t += 100) for (const o of window.__zaexaOrbitSet(t)) m = Math.max(m, Math.abs(o.skew)); return m; }")
     await pg.close()
     dth = [o1[k]["theta"] - o0[k]["theta"] for k in range(3)]
-    want = [2 * math.pi / 16, -2 * math.pi / 11, 2 * math.pi / 20]
-    assert all(abs(d - w_) < 1e-6 for d, w_ in zip(dth, want)), "[hero hub] orbit turn rates %r rad/s, expected 2*pi/[16,-11,20] = %r" % (dth, want)
+    want = [2 * math.pi / 24, -2 * math.pi / 17, 2 * math.pi / 30]
+    assert all(abs(d - w_) < 1e-6 for d, w_ in zip(dth, want)), "[hero hub] orbit turn rates %r rad/s, expected 2*pi/[24,-17,30] = %r" % (dth, want)
     assert abs(sk - math.radians(16)) < 0.002, "[hero hub] peak skew is %.2f deg, expected 16" % math.degrees(sk)
-    moved = [math.hypot(q0[0] - q1[0], q0[1] - q1[1]) for q0, q1 in zip(nodes0, nodes1)]
-    assert all(m_ > 3 for m_ in moved), "[hero hub] DEX nodes must ride their moving orbits; they moved only %r px in 1.5s" % moved
+    assert all(abs(a_ - b_) < 1e-9 for a_, b_ in skq), "[hero hub] skew periods are not [13,10,16]s: %r" % skq
     pg = await b.new_page(viewport={"width": 1440, "height": 900}, reduced_motion="no-preference")
     pg.on("console", lambda m: errors.append(m.text) if m.type == "error" else None)
     await pg.goto("file://" + path)
@@ -3199,7 +3035,7 @@ async def check_hero_hub(p, errors):
             await pg.wait_for_timeout(700)
         oc = await pg.evaluate("""() => { const parse = c => c.match(/[\\d.]+/g).map(Number);
             const col = v => { const d = document.createElement('div'); d.style.color = 'var(' + v + ')'; document.body.appendChild(d); const c = getComputedStyle(d).color; d.remove(); return parse(c).slice(0, 3); };
-            const O = window.__zaexaCanvasRoutePts.orbits;
+            const O = window.__zaexaOrbitState.orbits;
             return {theme: document.documentElement.dataset.theme || 'light', h1: col('--hero1'), h2: col('--hero2'), hm: col('--hero-mid'), rx: O.map(o => o.r), st: O.map(o => parse(o.stroke)), oa: window.__zaexaViz.oa}; }""")
         order = sorted(range(3), key=lambda k: -oc["rx"][k])  # بیرونی، میانی، درونی
         want = [oc["h1"], oc["hm"], oc["h2"]]
@@ -3273,7 +3109,7 @@ async def check_hero_hub(p, errors):
                     "[hero hub] a square shows behind the mark after toggling to %s at %dpx: pixel (%d,%d)=%r, page bg %r"
                     % (theme, vw, px, py, got, bgc))
         await ctx.close()
-    # reduced-motion: نه نقطه، نه پالس، گره‌ها ثابت
+    # reduced-motion: مدارها ثابت
     for (vw, vh) in ((1440, 900), (390, 844)):
         ctx = await b.new_context(reduced_motion="reduce", viewport={"width": vw, "height": vh})
         pg = await ctx.new_page()
@@ -3284,28 +3120,27 @@ async def check_hero_hub(p, errors):
         await pg.wait_for_timeout(700)
         c2 = await pg.evaluate(JS_STATE)
         await ctx.close()
-        assert a["dot"] == c2["dot"], "[hero hub] reduced motion: the dot moved %r -> %r at %dpx" % (a["dot"], c2["dot"], vw)
-        assert a["dotDisp"] == "none" or a["dotOp"] == "0", "[hero hub] reduced motion: the dot is visible at %dpx" % vw
-        assert [n["circle"] for n in a["nodes"]] == [n["circle"] for n in c2["nodes"]], "[hero hub] reduced motion: nodes moved at %dpx" % vw
-        assert not any(n["on"] for n in a["nodes"] + c2["nodes"]), "[hero hub] reduced motion: a node is marked active at %dpx" % vw
-        assert a["route"] is not None and (a["route"]["disp"] == "none" or a["route"]["op"] == 0) and (c2["route"]["disp"] == "none" or c2["route"]["op"] == 0), (
-            "[hero hub] reduced motion: the route line is visible at %dpx: %r" % (vw, a["route"]))
-        assert a["markOp"] == "1" and c2["markOp"] == "1", "[hero hub] reduced motion: the mark pulsed at %dpx" % vw
-        assert a["R"]["orbits"] == c2["R"]["orbits"] and a["R"]["pts"] == c2["R"]["pts"], "[hero hub] reduced motion: the orbits moved at %dpx" % vw
+        assert a["R"]["orbits"] == c2["R"]["orbits"], "[hero hub] reduced motion: the orbits moved at %dpx" % vw
+    # گره/برچسب/مسیر/نقطه/پالسِ مرکز دیگر نیستند: نه عنصر، نه قلاب، نه نشانی در منبع
+    pg = await b.new_page(viewport={"width": 1440, "height": 900})
+    await pg.goto("file://" + path)
+    await pg.wait_for_timeout(600)
+    gone = await pg.evaluate("""() => ({els: document.querySelectorAll('#heroHub,.hub,.hub-node,.hub-label,.hub-pill,#hubDot,#hubRoute,#hubRoute2,.hero-visual svg:not(.core-mark):not(.core-word)').length,
+        hooks: ['__zaexaCanvasRoutePts', '__zaexaCanvasLabels', '__zaexaCanvasAvoid', '__zaexaHub'].filter(k => k in window)})""")
+    await pg.close()
+    assert gone["els"] == 0 and not gone["hooks"], "[hero hub] removed node/label/route parts are back: %r" % gone
+    src = open(path, encoding="utf-8").read()
+    back = [k for k in ("hub-node", "hubDot", "hubRoute", "heroHub", "HUB_", "nodePt", "labelPick", "markDim", "edgeDist", "DEX nodes") if k in src]
+    assert not back, "[hero hub] dead hub code is back in landing.html: %r" % back
     await b.close()
-    print("[hero hub] 1440/1280/1024/768/390 (light, +dark at 1440 and 390): %s; 5 nodes on orbits, labels clear at 1440 / hidden at 390; "
-          "no ring/gradient/glow in the centre; reduced motion keeps dot and nodes still" % "; ".join(summary))
-
-
-def n_orbit(R, i):
-    return R["pts"][i]["o"]
+    print("[hero hub] 1440/1280/1024/768/390 (light, +dark at 1440 and 390): %s; orbits P=24/17/30s Q=13/10/16s, no crossing in 60 samples, "
+          "three colours; no node/label/route elements, hooks or code left; no ring/gradient/glow in the centre; reduced motion keeps orbits still" % "; ".join(summary))
 
 
 async def check_hero_continuity(p, errors):
     """[hero continuity] — ۲۵ اکتبر: مالک «پرش به آغاز» دید. ساعتِ هیرو یکنواخت است (جمعِ Δهای ≤۵۰ms) و با ورودِ دوباره‌ی
-    IntersectionObserver، پنهان/نمایانِ تب، resize و تعویضِ تم صفر نمی‌شود؛ ۲۵ ثانیه فریم‌به‌فریم θ و σ و گره‌ها ثبت می‌شود:
-    هیچ تغییرِ فریم‌به‌فریم بیش از ۳ برابرِ مقدارِ مورد انتظار نیست، گره‌ها بیش از ۶px نمی‌پرند، و محوِ نقطه/خطِ مسیر
-    در آغاز و پایانِ هر چرخه شیب‌دار است (بدونِ جهش در شفافیت)."""
+    IntersectionObserver، پنهان/نمایانِ تب، resize و تعویضِ تم صفر نمی‌شود؛ ۲۵ ثانیه فریم‌به‌فریم θ و σ ثبت می‌شود:
+    هیچ تغییرِ فریم‌به‌فریم بیش از ۳ برابرِ مقدارِ مورد انتظار نیست."""
     import math
     path = os.path.join(HERE, "..", "landing.html")
     b = await p.chromium.launch()
@@ -3316,13 +3151,11 @@ async def check_hero_continuity(p, errors):
     await pg.wait_for_timeout(500)
     await pg.evaluate("""() => {
       window.__rec = []; let last = -1;
-      const dot = document.getElementById('hubDot'), rt = document.getElementById('hubRoute');
       (function f() {
-        const R = window.__zaexaCanvasRoutePts;
+        const R = window.__zaexaOrbitState;
         if (R && R.clock !== last) {
           last = R.clock;
-          window.__rec.push({c: R.clock, th: R.orbits.map(o => o.theta), sk: R.orbits.map(o => o.skew), pts: R.pts.map(q => [q.x, q.y]),
-            dot: [+dot.style.opacity || 0, +dot.getAttribute('cx') || 0, +dot.getAttribute('cy') || 0], route: +rt.style.opacity || 0});
+          window.__rec.push({c: R.clock, th: R.orbits.map(o => o.theta), sk: R.orbits.map(o => o.skew)});
         }
         requestAnimationFrame(f);
       })();
@@ -3348,9 +3181,9 @@ async def check_hero_continuity(p, errors):
     await b.close()
     assert len(rec) > 150, "[hero continuity] only %d frames recorded in 25s" % len(rec)
     assert c_after > c_before + 5000, "[hero continuity] the hero clock was reset or stalled: %.0f -> %.0f ms" % (c_before, c_after)
-    P, Q = [16000, 11000, 20000], [9000, 7000, 11000]
+    P, Q = [24000, 17000, 30000], [13000, 10000, 16000]
     smax = math.radians(16)
-    worst = {"th": 0.0, "sk": 0.0, "px": 0.0, "dot": 0.0, "route": 0.0}
+    worst = {"th": 0.0, "sk": 0.0}
     for a, c in zip(rec, rec[1:]):
         dt = c["c"] - a["c"]
         assert 0 < dt <= 50.001, "[hero continuity] clock step %.2f ms (clock %.0f -> %.0f): must be monotonic and clamped to 50ms" % (dt, a["c"], c["c"])
@@ -3361,71 +3194,9 @@ async def check_hero_continuity(p, errors):
             assert dth <= 3 * exp_th + 1e-9, "[hero continuity] orbit %d theta jumped %.5f rad in one frame (expected %.5f) at clock %.0f" % (k, dth, exp_th, c["c"])
             assert dsk <= 3 * exp_sk + 1e-9, "[hero continuity] orbit %d skew jumped %.5f rad in one frame (expected <= %.5f) at clock %.0f" % (k, dsk, exp_sk, c["c"])
             worst["th"] = max(worst["th"], dth / exp_th); worst["sk"] = max(worst["sk"], dsk / exp_sk)
-        for k in range(5):
-            d = math.hypot(c["pts"][k][0] - a["pts"][k][0], c["pts"][k][1] - a["pts"][k][1])
-            worst["px"] = max(worst["px"], d)
-            assert d <= 6, "[hero continuity] node %d jumped %.1f px in one frame at clock %.0f" % (k, d, c["c"])
-        # شفافیتِ نقطه و خط با شیب بالا می‌رود و پایین می‌آید، نه پرش (فریمِ ≤۵۰ms)
-        d_dot, d_route = abs(c["dot"][0] - a["dot"][0]), abs(c["route"] - a["route"])
-        worst["dot"] = max(worst["dot"], d_dot); worst["route"] = max(worst["route"], d_route)
-        assert d_dot <= 0.5, "[hero continuity] route dot opacity snapped %.2f in one frame at clock %.0f (needs a ramp)" % (d_dot, c["c"])
-        assert d_route <= 0.33, "[hero continuity] route line opacity snapped %.2f in one frame at clock %.0f (needs a ramp)" % (d_route, c["c"])
-        # نقطه‌ای که در دو فریمِ پیاپی دیده می‌شود نباید بپرد (A<->B)
-        if a["dot"][0] > 0.05 and c["dot"][0] > 0.05:
-            dd = math.hypot(c["dot"][1] - a["dot"][1], c["dot"][2] - a["dot"][2])
-            assert dd <= 60, "[hero continuity] the visible route dot jumped %.0f px in one frame at clock %.0f" % (dd, c["c"])
     print("[hero continuity] %d frames over 25s with tab hide/show, scroll out/in, theme toggle and resize: clock %.0f -> %.0f ms never reset, "
-          "worst per-frame theta/skew change %.2fx/%.2fx of expected (limit 3x), nodes <= %.1f px per frame (limit 6), dot/route opacity steps <= %.2f/%.2f"
-          % (len(rec), c_before, c_after, worst["th"], worst["sk"], worst["px"], worst["dot"], worst["route"]))
-
-
-async def check_canvas_route_on_ellipse(p, errors):
-    """پروبِ [canvas on ellipse]: صاحبِ‌کار گفت مسیرها در فازهای split و
-    simulate از داخلِ حلقه‌های سیگنال رد می‌شوند و بی‌نظم به نظر می‌رسند.
-    قاعده‌ی تازه این است که هر مسیر/کمان/ذره/دنباله‌ای که کشیده می‌شود
-    دقیقاً رویِ بیضیِ venue بنشیند. در ۱۴۴۰x۹۰۰، هر ۱۰۰ میلی‌ثانیه برای
-    ۱۰ ثانیه window.__zaexaCanvasRoutePts را می‌خوانیم و هر نقطه را با
-    معادله‌ی بیضی می‌سنجیم (۰.۹۶ تا ۱.۰۴، برای رواداریِ اعشاری) و مطمئن
-    می‌شویم هیچ نقطه‌ای به فاصله‌ی کمتر از coreR+4 از مرکز نیفتاده باشد."""
-    path = os.path.join(HERE, "..", "landing.html")
-    b = await p.chromium.launch()
-    pg = await b.new_page(viewport={"width": 1440, "height": 900})
-    pg.on("console", lambda m: errors.append(m.text) if m.type == "error" else None)
-    await pg.goto("file://" + path)
-    await pg.wait_for_timeout(300)
-
-    total = 0
-    for i in range(100):  # ~10s / 100ms
-        info = await pg.evaluate("() => window.__zaexaCanvasRoutePts || null")
-        if info and info.get("pts"):
-            # ۲۴ اکتبر: مرکزِ هیرو فقط پنج گرهِ DEX است و هر گره رویِ بیضیِ مدارِ خودش (قابِ چرخان)؛
-            # هر کمان، ذره یا ردی که برگردد تعداد را بالا می‌برد و این‌جا قرمز می‌شود.
-            assert len(info["pts"]) == 5, (
-                "sample %d carries %d drawn points in phase %r; only the 5 DEX nodes may be drawn"
-                % (i, len(info["pts"]), await pg.evaluate("() => window.__zaexaCanvasPhase")))
-            cx, cy, core_r = info["cx"], info["cy"], info["coreR"]
-            for j, pt in enumerate(info["pts"]):
-                dx, dy = pt["x"] - cx, pt["y"] - cy
-                # ۲۵ اکتبر: گره‌ها سوارِ مدارشان‌اند — روی دایره‌ی چرخان/کجِ همان مدار، ≤ ۱px
-                assert (pt["o"], pt["a"]) == _HUB_RIDE[j], "sample %d point %d rides %r, expected %r" % (i, j, (pt["o"], pt["a"]), _HUB_RIDE[j])
-                perr, rerr = _ride_err(info, pt)
-                assert perr <= 1.0 and rerr <= 1.0, (
-                    "sample %d point %d %r is off its moving orbit line (pos err %.2f, radius err %.2f px, want <= 1) — orbits %r"
-                    % (i, j, pt, perr, rerr, info["orbits"]))
-                dist = (dx * dx + dy * dy) ** 0.5
-                assert dist >= core_r + 4, (
-                    "sample %d point %d %r is only %.1fpx from the centre, inside coreR+4 "
-                    "(coreR=%.1f) — a route must never cross over the core ring/logo"
-                    % (i, j, pt, dist, core_r))
-                total += 1
-        await pg.wait_for_timeout(100)
-    await b.close()
-    assert total > 0, (
-        "window.__zaexaCanvasRoutePts never carried any points over ~10s of sampling — "
-        "the canvas script must expose the sampled points of every route/lane/particle/trail "
-        "it draws")
-    print("[canvas on ellipse] %d node positions checked over ~10s, all on their moving (rotating, skewing) orbit circles within 1px and clear "
-          "of the centre mark" % total)
+          "worst per-frame theta/skew change %.2fx/%.2fx of expected (limit 3x)"
+          % (len(rec), c_before, c_after, worst["th"], worst["sk"]))
 
 
 async def check_trust_glyph_in_circle(p, errors):
@@ -3458,7 +3229,7 @@ async def check_canvas_resize(p, errors):
     """[canvas resize] — ۲۳ سپتامبر: کوچک و دوباره بزرگ‌کردنِ پنجره بوم را از قابش
     بلندتر می‌کرد (ارتفاع از نسبتِ width/height‌ِ خودِ بوم می‌آمد) و مرکزِ رسم از
     لوگوی وسط جدا می‌افتاد. بعد از هر تغییرِ اندازه، بوم باید دقیقاً هم‌اندازه‌ی
-    .hero-visual باشد و مرکزِ رسم (window.__zaexaCanvasRoutePts) روی مرکزِ .visual-core."""
+    .hero-visual باشد و مرکزِ رسم (window.__zaexaOrbitState) روی مرکزِ .visual-core."""
     path = os.path.join(HERE, "..", "landing.html")
     b = await p.chromium.launch()
     pg = await b.new_page(viewport={"width": 1900, "height": 1000})
@@ -3475,7 +3246,7 @@ async def check_canvas_resize(p, errors):
             await pg.wait_for_function("""() => {
                 const c = document.getElementById('routeCanvas').getBoundingClientRect();
                 const k = document.querySelector('.visual-core').getBoundingClientRect();
-                const R = window.__zaexaCanvasRoutePts || {};
+                const R = window.__zaexaOrbitState || {};
                 return R.cx != null && Math.abs(R.cx - (k.x + k.width / 2 - c.x)) <= 2
                     && Math.abs(R.cy - (k.y + k.height / 2 - c.y)) <= 2;
             }""", timeout=3000)
@@ -3485,7 +3256,7 @@ async def check_canvas_resize(p, errors):
             const c = document.getElementById('routeCanvas').getBoundingClientRect();
             const v = document.querySelector('.hero-visual').getBoundingClientRect();
             const k = document.querySelector('.visual-core').getBoundingClientRect();
-            const R = window.__zaexaCanvasRoutePts || {};
+            const R = window.__zaexaOrbitState || {};
             return {c: [c.width, c.height], v: [v.width, v.height],
                     core: [k.x + k.width / 2 - c.x, k.y + k.height / 2 - c.y], draw: [R.cx, R.cy]};
         }""")
@@ -9701,10 +9472,8 @@ async def main():
         await check_canvas_phases(p, errors)
         await check_canvas_cost(p, errors)
         await check_canvas_reduced_motion(p, errors)
-        await check_canvas_labels(p, errors)
         await check_hero_hub(p, errors)
         await check_trust_rings_seamless(p, errors)
-        await check_canvas_route_on_ellipse(p, errors)
         await check_hero_continuity(p, errors)
         await check_trust_glyph_in_circle(p, errors)
         await check_canvas_resize(p, errors)

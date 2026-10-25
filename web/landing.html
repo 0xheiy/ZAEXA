@@ -73,18 +73,7 @@ body{isolation:isolate}
 .visual-core{--mw:64px;--gap:6px;position:absolute;z-index:2;width:145px;height:145px;display:grid;place-items:center;align-content:center;background:none;border:0;color:var(--g1ui)}
 .visual-core .core-mark{position:relative;width:var(--mw);height:auto;display:block}
 .visual-core .core-word{position:absolute;left:50%;top:calc(50% + var(--mw)*.34899 + var(--gap));transform:translateX(-50%);width:calc(var(--mw)*.9);height:auto;display:block;color:var(--tx2)}
-/* هاب: گره‌های DEX رویِ مدارها؛ بدونِ حلقه/گرادیان/درخشش. موقعیت‌ها را اسکریپت می‌نویسد. */
-.hub{position:absolute;inset:0;width:100%;height:100%;z-index:2;pointer-events:none}
-.hub-node circle{fill:var(--card);stroke:var(--line2);stroke-width:1.5}
-.hub-node.on circle{stroke:var(--hero1)}
-.hub-label{fill:var(--tx3);font-size:11px;font-family:inherit}
-.hub-node.on .hub-label{fill:var(--tx2)}
-.hub-pill{fill:var(--bg)}
-/* مسیر: خطِ نازکِ hero1 که جلوتر از نقطه کشیده می‌شود؛ نقطه با حلقه‌ی bg (stroke، بدونِ glow). */
-#hubRoute,#hubRoute2{fill:none;stroke:var(--hero1);stroke-width:1.5;opacity:0}
-#hubDot{fill:var(--hero1);stroke:var(--bg);stroke-width:4;paint-order:stroke;opacity:0}
-@media(max-width:480px){.hub-label,.hub-pill{display:none}}
-@media(prefers-reduced-motion:reduce){#hubDot,#hubRoute,#hubRoute2{display:none}}
+
 .visual-readout{position:absolute;z-index:3;background:color-mix(in srgb,var(--card),transparent 5%);border:1px solid var(--line2);box-shadow:var(--sh);backdrop-filter:blur(12px);padding:13px 15px;font:10px ui-monospace,monospace}.visual-readout i{display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--pos);margin-right:8px;box-shadow:0 0 10px var(--pos)}.readout-top{right:6%;top:17%;color:var(--tx2)}.visual-readout small{font-size:8px;color:var(--tx3);letter-spacing:.08em}.visual-readout strong{font-size:20px;color:var(--acc)}.visual-readout span{color:var(--tx3);font-size:9px}.readout-right{right:5%;bottom:18%;display:grid;gap:4px}.readout-right strong{color:var(--pos);font-size:12px}.readout-right .step{color:var(--tx3);transition:color .3s}.readout-right .step.on{color:var(--tx)}.readout-top.pulse{animation:exitPulse .6s ease}@keyframes exitPulse{0%{transform:scale(1)}50%{transform:scale(1.06);box-shadow:0 0 18px var(--pos)}100%{transform:scale(1)}}.hero-scroll{position:absolute;bottom:38px;left:0;display:flex;align-items:center;gap:14px;color:var(--tx3);font:9px ui-monospace,monospace;letter-spacing:.12em}.hero-scroll i{width:55px;height:1px;background:var(--acc)}.features{display:grid;grid-template-columns:.75fr 1.55fr;gap:100px;padding-top:150px;padding-bottom:150px}.section-intro h2,.capability h2{font-size:clamp(34px,3.5vw,56px);line-height:.88;letter-spacing:-.09em;margin:25px 0}.section-intro h2 em,.capability h2 em{color:var(--g2)}.section-intro>p:last-child{max-width:210px;color:var(--tx2);font-size:14px}.feature-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:14px}.feature-card{min-height:445px;padding:23px;border:1px solid var(--line);display:flex;flex-direction:column;position:relative;background:transparent;transition:transform .35s var(--ease),background .3s,box-shadow .3s}.feature-card:hover{transform:translateY(-9px);background:var(--card);box-shadow:var(--sh)}.feature-highlight{background:linear-gradient(150deg,color-mix(in srgb,var(--acc),transparent 93%),transparent 58%)}.card-top{display:flex;justify-content:space-between;color:var(--tx3);font:9px ui-monospace,monospace;letter-spacing:.1em}.feature-icon{font-size:30px;color:var(--acc);margin:55px 0 23px}.feature-card h3{font-size:25px;line-height:1.14;letter-spacing:-.06em;margin-bottom:12px}.feature-card p{color:var(--tx2);font-size:12px;line-height:1.65}.feature-grid .feature-card ul{list-style:none;padding:0;margin:10px 0 0;color:var(--tx3);font:10px ui-monospace,monospace;line-height:2}.feature-grid .feature-card li:before{content:"+";color:var(--pos);margin-right:7px}.trust{display:grid;grid-template-columns:1fr 1.1fr;align-items:center;gap:100px;padding-top:90px;padding-bottom:140px;border-top:1px solid var(--line)}.trust-art{aspect-ratio:1;max-width:520px;position:relative;border-radius:50%;background:none}.trust-art:before,.trust-art:after{content:"";position:absolute;inset:10%;border:1.25px solid color-mix(in srgb,var(--hero1),transparent 12%);border-radius:50%;transform:rotate(35deg) skew(-10deg);animation:spin 16s linear infinite}.trust-art:after{inset:23%;border-color:color-mix(in srgb,var(--g2),transparent 15%);transform:rotate(-30deg) skew(14deg);animation-name:spinB;animation-duration:11s;animation-direction:reverse}.trust-orbit{position:absolute;inset:0;border:1px dashed color-mix(in srgb,var(--hero1),transparent 55%);border-radius:50%;transform:rotate(68deg) skew(-16deg)}.orbit-2{inset:17%;border-color:color-mix(in srgb,var(--hero2),transparent 55%);transform:rotate(-55deg) skew(10deg)}.trust-signal{position:absolute;inset:40%;border-radius:50%;display:grid;place-items:center;background:var(--card);border:8px solid color-mix(in srgb,var(--g2),transparent 62%);box-shadow:0 0 0 1px var(--g2),var(--sh);font:italic 75px 'Playfair Display',Georgia,serif;color:var(--g2);animation:breathe 4s ease-in-out infinite}.trust-copy h2{font-size:clamp(34px,3.4vw,54px);line-height:.88;letter-spacing:-.09em;margin:25px 0}.trust-copy h2 em{color:var(--acc)}.trust-copy>p:not(.eyebrow){max-width:510px;color:var(--tx2);font-size:15px;line-height:1.75}.states{border-top:1px solid var(--line);margin-top:35px}.states div{display:grid;grid-template-columns:28px 110px 1fr;align-items:center;min-height:42px;border-bottom:1px solid var(--line);font:10px ui-monospace,monospace}.state{width:17px;height:17px;border-radius:50%;display:grid;place-items:center}.verified{background:var(--pos);color:#fff}.estimated{border:1px solid var(--g2);color:var(--g2)}.unknown{border:1px solid var(--tx3);color:var(--tx3)}.states span{justify-self:end;color:var(--tx3)}.capability{display:grid;grid-template-columns:.8fr 1.2fr;gap:120px;padding-top:30px;padding-bottom:150px}.capability h2{font-size:clamp(32px,3.3vw,52px)}.capability-body>.large-copy{color:var(--tx2);font-size:19px;line-height:1.65;max-width:570px}.closing{text-align:center;border-top:1px solid var(--line);padding-top:100px;padding-bottom:130px}.closing h2{font-size:clamp(38px,4vw,64px);line-height:1.04;letter-spacing:-.075em;margin:24px 0 40px}.closing h2 em{color:var(--g2)}.landing-footer{width:100%;padding:44px clamp(20px,3.4vw,56px) 30px;border-top:1px solid var(--line);font-size:12px;color:var(--tx3)}.footGrid{display:grid;grid-template-columns:minmax(200px,1.3fr) repeat(3,minmax(120px,1fr));gap:30px 28px}.footBrand .brand{margin-bottom:2px}.footBrand .footTag{margin:12px 0 16px;font-size:12px;line-height:1.55;max-width:32ch;color:var(--tx3)}.social{display:flex;align-items:center;gap:10px;flex-wrap:wrap}.social a{width:34px;height:34px;border-radius:11px;display:grid;place-items:center;background:var(--card);border:1px solid var(--line);color:var(--tx2);transition:.16s}.social a svg{width:16px;height:16px}.social a:hover{color:var(--acc);transform:translateY(-1px);box-shadow:var(--sh)}.footCol{display:flex;flex-direction:column;gap:10px;min-width:0}.footCol h4{margin:0 0 2px;font-size:12.5px;font-weight:660;letter-spacing:.15px;color:var(--tx2)}.footCol .feedback{width:fit-content;padding:8px 14px;border-radius:999px;background:var(--card);border:1px solid var(--line);font-size:12.5px;color:var(--tx2);transition:.16s}.footCol .feedback:hover{color:var(--acc);box-shadow:var(--sh)}.footCol a,.footCol .footRow{display:block;font-size:12.5px;color:var(--tx3);transition:.16s}.footCol .footLbl{display:block;font-size:11px;color:var(--tx3);opacity:.8}.footCol .footRow a{display:inline;padding:0}.mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}.footCol a:hover{color:var(--acc)}.footBottom{display:flex;justify-content:space-between;gap:16px;flex-wrap:wrap;margin-top:30px;padding-top:16px;border-top:1px solid var(--line);font-size:11px;color:var(--tx3)}
 .hero-live{margin-top:30px}@media(prefers-reduced-motion:no-preference){.feature-grid>.feature-card.rise{animation:cardRise .62s var(--ease) both}.feature-grid>.feature-card.rise:nth-child(2){animation-delay:.11s}.feature-grid>.feature-card.rise:nth-child(3){animation-delay:.22s}}@keyframes cardRise{from{opacity:0;transform:translateY(26px)}to{opacity:1;transform:none}}.mobile-menu{display:none}@media(max-width:900px){.mobile-menu{display:block;position:absolute;left:0;right:0;top:100%;z-index:40;background:var(--card);border-bottom:1px solid var(--line);box-shadow:var(--sh);padding:0 18px;overflow:hidden;max-height:0;transition:max-height .28s var(--ease)}.mobile-menu[data-open="1"]{max-height:480px}.mobile-menu nav{display:flex;flex-direction:column;gap:2px;padding:10px 0 16px}.mobile-menu a{padding:13px 2px;font-size:14px;color:var(--tx2);border-bottom:1px solid var(--line)}.mobile-menu .button{margin-top:14px;justify-content:center}.mobile-menu a.button-primary{color:var(--on-acc);border-bottom:0}}:focus-visible{outline:2px solid var(--acc);outline-offset:3px;border-radius:4px}@keyframes spin{to{transform:rotate(395deg) skew(-10deg)}}@keyframes spinB{0%{transform:rotate(-30deg) skew(14deg)}50%{transform:rotate(150deg) skew(-10deg)}100%{transform:rotate(330deg) skew(14deg)}}@media(max-width:900px){.section-pad{width:calc(100% - 36px)}.landing-header{padding:14px 26px}.desktop-nav{display:none}.landing-header{height:69px;display:flex;justify-content:space-between}@media(max-width:720px){.landing-header{height:59px;padding:14px 14px 6px}}.header-cta{display:none}.menu-toggle{display:block;font-size:20px}.hero{grid-template-columns:1fr;padding-top:75px;min-height:auto}.hero h1{font-size:clamp(38px,10vw,58px)}.hero-visual{height:100vw;min-height:400px;max-height:620px}.hero-scroll{display:none}.features,.trust,.capability,.exitcheck{grid-template-columns:1fr;gap:50px;padding-top:90px;padding-bottom:90px}.feature-grid{grid-template-columns:1fr}.feature-card{min-height:330px}.trust-art{max-width:430px;margin:auto}.footGrid{grid-template-columns:1fr 1fr;gap:26px}.footBottom{flex-direction:column;gap:10px}.footBrand .footTag{max-width:none}}
 @media(prefers-reduced-motion:reduce){*,*:before,*:after{animation-duration:.01ms!important;animation-iteration-count:1!important;scroll-behavior:auto!important}}
@@ -453,15 +442,6 @@ svg.diag{display:block;width:100%;height:auto}
       <svg class="core-mark" viewBox="0 0 1000 697.98"><use href="#zxMark"/></svg>
       <svg class="core-word" viewBox="0 0 2581.74 300"><use href="#zxWord"/></svg>
     </div>
-    <svg class="hub" id="heroHub" aria-hidden="true">
-      <path id="hubRoute" d="M0 0"/><path id="hubRoute2" d="M0 0"/>
-      <g class="hub-node"><rect class="hub-pill" rx="6" ry="6"/><circle r="4.5"/><text class="hub-label">Uniswap</text></g>
-      <g class="hub-node"><rect class="hub-pill" rx="6" ry="6"/><circle r="4.5"/><text class="hub-label">Aerodrome</text></g>
-      <g class="hub-node"><rect class="hub-pill" rx="6" ry="6"/><circle r="4.5"/><text class="hub-label">PancakeSwap</text></g>
-      <g class="hub-node"><rect class="hub-pill" rx="6" ry="6"/><circle r="4.5"/><text class="hub-label">SushiSwap</text></g>
-      <g class="hub-node"><rect class="hub-pill" rx="6" ry="6"/><circle r="4.5"/><text class="hub-label">BaseSwap</text></g>
-      <circle id="hubDot" r="3.5"/>
-    </svg>
   </div>
   <div class="hero-scroll"><span>SCROLL TO EXPLORE</span><i></i></div>
 </section>
@@ -789,17 +769,6 @@ svg.diag{display:block;width:100%;height:auto}
      همین‌جا و پیش از خودِ اسکریپتِ canvas تعریف شده‌اند، نه داخلِ آن. */
   var VIZ_FALLBACK={v1:'#22EFF6',v2:'#C56CF5',vl:'#667496'};
   const canvas=document.getElementById('routeCanvas'); if(!canvas) return; const ctx=canvas.getContext('2d'); let w=0,h=0,dpr=1,raf=0;
-  /* شعاعِ هسته هرگز حدس زده نمی‌شود: همان مستطیلِ واقعیِ DOMِ .visual-core
-     را می‌خوانیم (نسبت به خودِ canvas)، فقط داخلِ resize — نه هر فریم. */
-  const coreEl=document.querySelector('.visual-core');
-  let coreR=72;
-  function measureCoreR(){ if(!coreEl) return; const cr=coreEl.getBoundingClientRect(); coreR=cr.width/2;
-    /* کادرِ نشان+لوگوتایپ نسبت به مرکزِ نشان؛ خطِ مسیر همین‌جا تمام می‌شود، نه زیرِ نشان */
-    const m=coreEl.querySelector('.core-mark'), wd=coreEl.querySelector('.core-word');
-    if(m&&wd){const a=m.getBoundingClientRect(), b=wd.getBoundingClientRect(), mx=a.left+a.width/2, my=a.top+a.height/2, P=3;
-      markEdge={l:-(Math.max(a.width,b.width)/2+P), r:Math.max(a.width,b.width)/2+P, t:-(a.height/2+P), b:b.bottom-my+P}} }
-  let markEdge={l:-35,r:35,t:-25,b:45};
-  function edgeDist(ux,uy){let t=1e9;if(ux>1e-6)t=Math.min(t,markEdge.r/ux);else if(ux<-1e-6)t=Math.min(t,markEdge.l/ux);if(uy>1e-6)t=Math.min(t,markEdge.b/uy);else if(uy<-1e-6)t=Math.min(t,markEdge.t/uy);return t}
   /* رفعِ کنتراست: canvas را CSS رنگ نمی‌کند، پس رنگ‌ها را از توکن‌های تمِ
      فعال می‌خوانیم (نه رنگ‌های ثابتِ فیروزه‌ای/بنفش) و با MutationObserver
      تغییرِ data-theme را بدون ریلود دنبال می‌کنیم. هرگز داخلِ فریمِ انیمیشن
@@ -831,8 +800,8 @@ svg.diag{display:block;width:100%;height:auto}
 
   /* سه مدار مثلِ حلقه‌های «Trust layer»: دایره‌ای که با rotate(θ)·skewX(σ) می‌چرخد و میانِ دایره و بیضی تغییر شکل می‌دهد.
      θ و σ فقط تابعِ ساعتِ یکنواخت‌اند (هرگز ریست نمی‌شوند). */
-  const ORB_P=[16000,11000,20000], ORB_DIR=[1,-1,1], ORB_TH0=[0,2.1,4.2];
-  const ORB_Q=[9000,7000,11000], ORB_PHI=[0,2,4], ORB_SMAX=16*Math.PI/180, ORB_K=.72;
+  const ORB_P=[24000,17000,30000], ORB_DIR=[1,-1,1], ORB_TH0=[0,2.1,4.2];
+  const ORB_Q=[13000,10000,16000], ORB_PHI=[0,2,4], ORB_SMAX=16*Math.PI/180, ORB_K=.72;
   function orbitSet(ms){
     const t=(ms==null?clock:ms), narrow=w<600, R0x=w*(narrow?.46:.37), R0y=h*(narrow?.30:.31), r0=Math.min(R0x,R0y);
     /* ۲۵ اکتبر: شعاع‌ها ۰٫۷۲ برابرِ هم‌اند؛ قطرِ بلندِ درونی (≈۱٫۱۵۴r) همیشه کوتاه‌تر از قطرِ کوتاهِ بیرونی (≈۰٫۸۶۷r) است → هرگز قطع نمی‌کنند */
@@ -850,114 +819,6 @@ svg.diag{display:block;width:100%;height:auto}
   function orbitStroke(i){return hexToRgba(i===2?viz.v2:(i===1?viz.vm:viz.v1),viz.oa)}
   function drawOrbits(cx,cy,orbs){orbs.forEach(function(o){ctx.save();ctx.translate(cx,cy);ctx.rotate(o.theta);ctx.transform(1,0,Math.tan(o.skew),1,0,0);ctx.beginPath();ctx.arc(0,0,o.r,0,Math.PI*2);ctx.restore();ctx.strokeStyle=orbitStroke(o.i);ctx.lineWidth=1.35;ctx.stroke()})}
 
-  /* کادرهای DOMِ روی canvas، نسبت به خودِ canvas — روی resize دوباره خوانده می‌شود. */
-  let avoidRects=[], coreBox=null;
-  function measureAvoid(){const cr=canvas.getBoundingClientRect();avoidRects=[].slice.call(document.querySelectorAll('.hero-visual .visual-readout')).map(function(el){const r=el.getBoundingClientRect();return {x:r.left-cr.left-4,y:r.top-cr.top-4,w:r.width+8,h:r.height+8}});window.__zaexaCanvasAvoid=avoidRects;
-    if(coreEl){const k=coreEl.getBoundingClientRect();coreBox={x:k.left-cr.left-6,y:k.top-cr.top-6,w:k.width+12,h:k.height+12}}}
-  function hit(a,b,m){return a.x<b.x+b.w+m&&a.x+a.w+m>b.x&&a.y<b.y+b.h+m&&a.y+a.h+m>b.y}
-
-  /* هاب: پنج گرهِ DEX رویِ همان بیضی‌های مدار (هر گره پارامتر t روی یک مدار)،
-     برچسبِ بیرونِ گره، و مسیرِ زنده‌ی نقطه A → مرکز → B. ترتیبِ جفت‌ها ثابت است. */
-  const hubSvg=document.getElementById('heroHub');
-  const hubNodes=hubSvg?[].slice.call(hubSvg.querySelectorAll('.hub-node')):[];
-  const hubDot=document.getElementById('hubDot'), hubRoute=document.getElementById('hubRoute'), hubRoute2=document.getElementById('hubRoute2');
-  const markEl=document.querySelector('.visual-core .core-mark');
-  const HUB_SPEC=[[0,300],[0,40],[1,120],[1,210],[2,260]]; /* [مدار, زاویه‌ی پارامتری روی دایره‌ی مدار، درجه] — گره سوارِ مدارش است */
-  const HUB_PAIRS=[[0,2],[1,3],[2,4],[3,0],[4,1]];
-  const HUB_RAMP=120, HUB_CYCLE=2400, HUB_LEG=900, HUB_PULSE=200, HUB_ACTIVE=HUB_LEG*2+HUB_PULSE, HUB_FADE=300, HUB_LEAD=.12, HUB_LINE_A=.55;
-  const NODE_R=4.5, LABEL_GAP=9;
-  let labelSize={w:[],h:12,asc:9}, labelPick=[], activeKey='', markDim=false;
-  function easeIO(u){return u<.5?2*u*u:1-Math.pow(-2*u+2,2)/2}
-  /* گره سوارِ مدار: نقطه‌ی دایره زیرِ همان rotate·skewِ مدار */
-  function nodePt(o,deg,cx,cy){
-    const t=deg*Math.PI/180, x=o.r*Math.cos(t), y=o.r*Math.sin(t), xs=x+Math.tan(o.skew)*y, c=Math.cos(o.theta), n=Math.sin(o.theta);
-    return {x:cx+xs*c-y*n, y:cy+xs*n+y*c};
-  }
-  /* اندازه‌ی برچسب‌ها فقط روی resize/فونت خوانده می‌شود، نه هر فریم. */
-  function hubMeasure(){
-    if(!hubNodes.length) return;
-    hubNodes.forEach(function(g,i){const t=g.querySelector('text');t.setAttribute('x','0');t.setAttribute('y','0');const bb=t.getBBox();labelSize.w[i]=bb.width;labelSize.h=bb.height;labelSize.asc=-bb.y});
-  }
-  function hubUpdate(clock,animate,orbs){
-    if(!hubNodes.length) return;
-    const cx=w*.5, cy=h*.5;
-    const labelsOn=!matchMedia('(max-width:480px)').matches && labelSize.w.length===hubNodes.length;
-    const pts=HUB_SPEC.map(function(s){return nodePt(orbs[s[0]],s[1],cx,cy)});
-    const placed=[], boxes=[];
-    pts.forEach(function(pt,i){
-      const g=hubNodes[i], text=g.querySelector('text'), pill=g.querySelector('.hub-pill');
-      g.setAttribute('transform','translate('+pt.x.toFixed(2)+','+pt.y.toFixed(2)+')');
-      if(!labelsOn) return;
-      const PX=6, PY=2, tw=labelSize.w[i]+PX*2, th=labelSize.h+PY*2, sx=pt.x>=cx?1:-1;
-      const right={x:pt.x+LABEL_GAP,y:pt.y-th/2}, left={x:pt.x-LABEL_GAP-tw,y:pt.y-th/2};
-      const out=sx>0?right:left, inn=sx>0?left:right;
-      const cands=[out,inn,
-        {x:pt.x-tw/2,y:pt.y-LABEL_GAP-th},{x:pt.x-tw/2,y:pt.y+LABEL_GAP},
-        {x:out.x,y:pt.y-th-3},{x:out.x,y:pt.y+3},{x:inn.x,y:pt.y-th-3},{x:inn.x,y:pt.y+3}
-      ].map(function(c){return {x:c.x,y:c.y,w:tw,h:th}});
-      function free(c){
-        if(c.x<2||c.y<2||c.x+c.w>w-2||c.y+c.h>h-2) return false;
-        for(let k=0;k<avoidRects.length;k++) if(hit(c,avoidRects[k],0)) return false;
-        if(coreBox&&hit(c,coreBox,0)) return false;
-        for(let k=0;k<placed.length;k++) if(hit(c,placed[k],2)) return false;
-        for(let k=0;k<pts.length;k++) if(hit(c,{x:pts[k].x-NODE_R,y:pts[k].y-NODE_R,w:NODE_R*2,h:NODE_R*2},2)) return false;
-        return true;
-      }
-      let pick=-1;
-      if(labelPick[i]!=null&&free(cands[labelPick[i]])) pick=labelPick[i];
-      for(let k=0;pick<0&&k<cands.length;k++) if(free(cands[k])) pick=k;
-      /* جای آزاد نبود (مثلاً گره زیرِ کادرِ readout است): برچسب پنهان می‌شود، نه هم‌پوشان. */
-      text.style.visibility=pill.style.visibility=pick<0?'hidden':'';
-      if(pick<0) return;
-      labelPick[i]=pick;
-      const c=cands[pick];
-      text.setAttribute('x',(c.x-pt.x+PX).toFixed(2));text.setAttribute('y',(c.y-pt.y+PY+labelSize.asc).toFixed(2));
-      pill.setAttribute('x',(c.x-pt.x).toFixed(2));pill.setAttribute('y',(c.y-pt.y).toFixed(2));pill.setAttribute('width',tw.toFixed(2));pill.setAttribute('height',th.toFixed(2));
-      placed.push(c);boxes.push(c);
-    });
-    window.__zaexaCanvasLabels=boxes;
-    window.__zaexaCanvasRoutePts={pts:pts.map(function(q,i){return {x:q.x,y:q.y,o:HUB_SPEC[i][0],a:HUB_SPEC[i][1]}}),cx:cx,cy:cy,coreR:coreR,clock:clock,
-      orbits:orbs.map(function(o){return {r:o.r,theta:o.theta,skew:o.skew,long:o.long,short:o.short,stroke:orbitStroke(o.i)}})};
-    /* حرکت: فقط وقتی animate باشد. در reduced-motion نه نقطه است نه پالس. */
-    let key='', dotOp=0, dx=0, dy=0, dim=false, routeOp=0, rt=null;
-    if(animate){
-      const ci=Math.floor(clock/HUB_CYCLE), lt=clock-ci*HUB_CYCLE, pr=HUB_PAIRS[ci%HUB_PAIRS.length];
-      if(lt<HUB_ACTIVE+HUB_FADE){
-        key=pr.join(',');
-        const A=pts[pr[0]], B=pts[pr[1]];
-        /* هر پا از گره تا لبه‌ی نشان کشیده می‌شود (نه تا مرکز)؛ هر فریم از موقعیتِ زنده‌ی گره‌ها */
-        const la=Math.hypot(A.x-cx,A.y-cy), lb=Math.hypot(B.x-cx,B.y-cy);
-        const ea=edgeDist((A.x-cx)/la,(A.y-cy)/la), eb=edgeDist((B.x-cx)/lb,(B.y-cy)/lb);
-        const Pa={x:cx+(A.x-cx)/la*ea,y:cy+(A.y-cy)/la*ea}, Pb={x:cx+(B.x-cx)/lb*eb,y:cy+(B.y-cy)/lb*eb};
-        rt={d1:'M'+A.x.toFixed(1)+' '+A.y.toFixed(1)+'L'+Pa.x.toFixed(1)+' '+Pa.y.toFixed(1),l1:Math.max(0,la-ea),f1:1,
-            d2:'M'+Pb.x.toFixed(1)+' '+Pb.y.toFixed(1)+'L'+B.x.toFixed(1)+' '+B.y.toFixed(1),l2:Math.max(0,lb-eb),f2:1};
-        /* شیب‌های ورود/خروج: بدونِ پرش در آغاز و پایانِ چرخه */
-        if(lt<HUB_ACTIVE) routeOp=HUB_LINE_A*Math.min(1,lt/HUB_RAMP);
-        else routeOp=HUB_LINE_A*(1-(lt-HUB_ACTIVE)/HUB_FADE);
-        /* خط کمی جلوتر از نقطه کشیده می‌شود (lead) */
-        if(lt<HUB_LEG){rt.f2=0;rt.f1=Math.min(1,easeIO(lt/HUB_LEG)+HUB_LEAD)}
-        else if(lt<HUB_LEG+HUB_PULSE) rt.f2=0;
-        else if(lt<HUB_ACTIVE) rt.f2=Math.min(1,easeIO((lt-HUB_LEG-HUB_PULSE)/HUB_LEG)+HUB_LEAD);
-        if(lt<HUB_LEG){const u=easeIO(lt/HUB_LEG);dx=A.x+(Pa.x-A.x)*u;dy=A.y+(Pa.y-A.y)*u;dotOp=Math.min(1,lt/HUB_RAMP)*Math.min(1,(HUB_LEG-lt)/HUB_RAMP)}
-        else if(lt<HUB_LEG+HUB_PULSE){const u=(lt-HUB_LEG)/HUB_PULSE;dim=true;markDim=true;if(markEl)markEl.style.opacity=String(1-.25*Math.sin(u*Math.PI))}
-        else if(lt<HUB_ACTIVE){const l2=lt-HUB_LEG-HUB_PULSE,u=easeIO(l2/HUB_LEG);dx=Pb.x+(B.x-Pb.x)*u;dy=Pb.y+(B.y-Pb.y)*u;dotOp=Math.min(1,l2/HUB_RAMP)*Math.min(1,(HUB_LEG-l2)/HUB_RAMP)}
-      }
-      window.__zaexaHub={cycle:ci,pair:key?pr.slice():null,t:lt};
-    }
-    if(!dim&&markDim){markDim=false;if(markEl)markEl.style.opacity=''}
-    if(key!==activeKey){
-      activeKey=key;
-      const on=key?key.split(',').map(Number):[];
-      hubNodes.forEach(function(g,i){g.classList.toggle('on',on.indexOf(i)>=0)});
-    }
-    if(hubRoute&&hubRoute2){
-      if(routeOp>0&&rt){
-        [[hubRoute,rt.d1,rt.l1,rt.f1],[hubRoute2,rt.d2,rt.l2,rt.f2]].forEach(function(q){const e=q[0],L=q[2];e.setAttribute('d',q[1]);e.dataset.len=L.toFixed(1);e.style.strokeDasharray=L.toFixed(1)+' '+(L+2).toFixed(1);e.style.strokeDashoffset=(L-L*q[3]).toFixed(1);e.style.opacity=routeOp.toFixed(3)})}
-      else{hubRoute.style.opacity='0';hubRoute2.style.opacity='0'}
-    }
-    if(hubDot){hubDot.style.opacity=dotOp>0?dotOp.toFixed(3):'0';if(dotOp>0){hubDot.setAttribute('cx',dx.toFixed(2));hubDot.setAttribute('cy',dy.toFixed(2))}}
-  }
-
   const readoutTop=document.querySelector('.readout-top');
   const stepEls={quote:document.querySelector('.readout-right .step[data-step="quote"]'),simulate:document.querySelector('.readout-right .step[data-step="simulate"]'),settle:document.querySelector('.readout-right .step[data-step="settle"]')};
   function syncReadout(step){for(const k in stepEls){const el=stepEls[k];if(el)el.classList.toggle('on',k===step)}}
@@ -967,19 +828,20 @@ svg.diag{display:block;width:100%;height:auto}
     if(!pulseFired&&lt>=T3){pulseFired=true;if(readoutTop){readoutTop.classList.add('pulse');setTimeout(function(){readoutTop.classList.remove('pulse')},600)}}
   }
 
-  /* یک فریم: مدارها + هاب. clock برای چرخشِ مدارها و زمانِ نقطه؛ lt فقط فازِ readout. */
-  function draw(lt,clock,animate){
+  /* یک فریم: مدارها. clock برای چرخشِ مدارها؛ lt فقط فازِ readout. */
+  function draw(lt,clock){
     const orbs=orbitSet(clock);
     ctx.clearRect(0,0,w,h);
     drawOrbits(w*.5,h*.5,orbs);
     const phase = lt<T1?'quote':(lt<T2?'split':(lt<T3?'simulate':'settle'));
-    hubUpdate(clock,animate,orbs);
+    /* فقط برای سنجش: مرکز و هندسهٔ زندهٔ مدارها */
+    window.__zaexaOrbitState={cx:w*.5,cy:h*.5,clock:clock,orbits:orbs.map(function(o){return {r:o.r,theta:o.theta,skew:o.skew,long:o.long,short:o.short,stroke:orbitStroke(o.i)}})};
     window.__zaexaCanvasPhase=phase;
     syncReadout(phase==='settle'?'settle':(phase==='simulate'?'simulate':'quote'));
     maybeExitPulse(lt);
   }
 
-  function redrawNow(){ if(w>0&&!reduceMotion) draw(clock%LOOP,clock,true); else if(w>0) renderStatic() }
+  function redrawNow(){ if(w>0&&!reduceMotion) draw(clock%LOOP,clock); else if(w>0) renderStatic() }
   const costs=[];
   let clock=0, lastTs=null;
   function frame(ts){
@@ -989,7 +851,7 @@ svg.diag{display:block;width:100%;height:auto}
     lastTs=ts;
     clock+=dt;
 
-    draw(clock%LOOP,clock,true);
+    draw(clock%LOOP,clock);
     const dur=performance.now()-perfStart;
     costs.push(dur); if(costs.length>60) costs.shift();
     window.__zaexaCanvasCost=costs.reduce(function(a,b){return a+b},0)/costs.length;
@@ -998,15 +860,13 @@ svg.diag{display:block;width:100%;height:auto}
   /* قابِ ایستا: فازِ split در نیمه‌راه (تقسیمِ کامل)، بی ذره‌ی متحرک، و
      هرگز requestAnimationFrame صدا زده نمی‌شود. */
   const staticLt=T1+(T2-T1)*.5;
-  function renderStatic(){const perfStart=performance.now();clock=staticLt;draw(staticLt,staticLt,false);window.__zaexaCanvasCost=performance.now()-perfStart}
+  function renderStatic(){const perfStart=performance.now();clock=staticLt;draw(staticLt,staticLt);window.__zaexaCanvasCost=performance.now()-perfStart}
   /* ⚠️ خودِ observe() یک بارِ اولیه‌ی resize را ناهمگام صف می‌کند که
      canvas.width را دوباره ست می‌کند و هر چیزِ کشیده‌شده را پاک می‌کند —
      برای قابِ ایستا باید بعد از *هر* resize (شاملِ همان بارِ اول) دوباره
      رسم کنیم، نه فقط یک‌بار پیش از آن. */
-  function resize(){const r=canvas.getBoundingClientRect();dpr=Math.min(2,devicePixelRatio||1);w=r.width;h=r.height;canvas.width=w*dpr;canvas.height=h*dpr;ctx.setTransform(dpr,0,0,dpr,0,0);measureCoreR();measureAvoid();hubMeasure();if(reduceMotion) renderStatic(); else if(w>0) draw(clock%LOOP,clock,true)} /* بعد از resize بومِ پاک‌شده همان لحظه با ساعتِ فعلی دوباره کشیده می‌شود، نه پرش */
+  function resize(){const r=canvas.getBoundingClientRect();dpr=Math.min(2,devicePixelRatio||1);w=r.width;h=r.height;canvas.width=w*dpr;canvas.height=h*dpr;ctx.setTransform(dpr,0,0,dpr,0,0);if(reduceMotion) renderStatic(); else if(w>0) draw(clock%LOOP,clock)} /* بعد از resize بومِ پاک‌شده همان لحظه با ساعتِ فعلی دوباره کشیده می‌شود، نه پرش */
   new ResizeObserver(resize).observe(canvas); resize();
-  /* فونتِ برچسب‌ها دیرتر می‌رسد؛ اندازه‌ها بعدش دوباره خوانده می‌شود. */
-  if(document.fonts&&document.fonts.ready) document.fonts.ready.then(function(){hubMeasure();if(reduceMotion) renderStatic()});
   if(reduceMotion){
     renderStatic();
   } else {
