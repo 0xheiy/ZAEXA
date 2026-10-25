@@ -1003,23 +1003,31 @@ section.card.isDone #actBtn,section.card.isDone #solStatusSlot,section.card.isDo
 .flowkv .k{color:var(--tx3)}
 
 /* ۲۱ اکتبر — تابلوی «Where money is flowing»، کارت «Early buyers» و چیپِ صادرکننده. همه‌ی رنگ‌ها از متغیرهای موجود؛ بدون glow. */
-.fbHead{display:flex;flex-wrap:wrap;align-items:flex-start;justify-content:space-between;gap:10px 14px;padding:16px 20px 8px}
+.fbHead{display:flex;flex-wrap:wrap;align-items:flex-start;justify-content:space-between;gap:12px 16px;padding:18px 20px 6px}
+.fbHead[hidden]{display:none}
 .fbTtl{font-size:15.5px;font-weight:660}
-.fbSub{font-size:12.5px;color:var(--tx3);margin-top:2px}
+.fbSub{font-size:12.5px;color:var(--tx3);margin-top:3px}
 .fbCtl{display:flex;flex-wrap:wrap;align-items:center;gap:8px}
 .fbCtl .tfs{margin-left:0;padding:3px}
-.fbTog{display:inline-flex;align-items:center;gap:8px;min-height:32px;padding:4px 12px;border-radius:999px;background:var(--card2);color:var(--tx2);font-size:12.5px;text-align:left}
-.fbTog i{width:14px;height:14px;border-radius:5px;border:1.5px solid var(--tx3);flex-shrink:0;box-sizing:border-box}
-.fbTog[aria-pressed="true"]{color:var(--tx);font-weight:620}
-.fbTog[aria-pressed="true"] i{background:var(--acc);border-color:var(--acc)}
-.fbTbl{width:100%;border-collapse:collapse;font-size:13px}
-.fbTbl th{font-size:11.5px;font-weight:600;color:var(--tx3);text-align:right;padding:8px;border-bottom:1px solid var(--line);white-space:nowrap}
-.fbTbl td{padding:9px 8px;text-align:right;border-top:1px solid var(--line);vertical-align:middle}
+.fbCtl .tfs button{height:28px;padding:0 14px}
+#fbNetSlot{flex:none;display:flex}
+#fbNetSlot .chip{height:34px;box-sizing:border-box}
+.fbTog{display:inline-flex;align-items:center;gap:9px;height:34px;box-sizing:border-box;padding:0 14px 0 10px;border-radius:999px;background:var(--card2);color:var(--tx2);font-size:12.5px;text-align:left;white-space:nowrap}
+.fbSw{width:28px;height:16px;border-radius:9px;background:var(--line2);position:relative;flex:none;transition:background .16s}
+.fbSw::after{content:"";position:absolute;top:2px;left:2px;width:12px;height:12px;border-radius:50%;background:var(--tx3);transition:transform .16s,background .16s}
+.fbTog[aria-checked="true"]{color:var(--tx);font-weight:620}
+.fbTog[aria-checked="true"] .fbSw{background:var(--acc)}
+.fbTog[aria-checked="true"] .fbSw::after{transform:translateX(12px);background:var(--on-acc)}
+.fbTog:focus-visible{outline:2px solid var(--acc);outline-offset:2px}
+.fbTbl{width:100%;border-collapse:collapse;font-size:13.5px;margin-top:8px}
+.fbTbl th{font-size:11.5px;font-weight:600;color:var(--tx3);text-align:left;padding:8px 12px;letter-spacing:.02em;border-bottom:1px solid var(--line);white-space:nowrap}
+.fbTbl td{padding:0 12px;height:52px;box-sizing:border-box;text-align:left;border-top:1px solid var(--line);vertical-align:middle}
 .fbTbl tbody tr:first-child td{border-top:0}
-.fbTbl th:first-child,.fbTbl td:first-child{text-align:left;padding-left:20px}
+.fbTbl th:first-child,.fbTbl td:first-child{padding-left:20px}
 .fbTbl th:last-child,.fbTbl td:last-child{padding-right:20px}
+.fbTbl .fbNet,.fbTbl .fbVol{text-align:right}
 .fbStarTd{width:28px;padding-right:0!important}
-.fbTbl th:nth-child(2),.fbTbl td:nth-child(2){text-align:left;padding-left:8px}
+.fbTbl th:nth-child(2),.fbTbl td:nth-child(2){padding-left:8px}
 .fbStar{width:28px;height:28px;font-size:15px}
 .fbTbl th.fbStarTh{padding:0}
 .fbRow{cursor:pointer}
@@ -1027,11 +1035,11 @@ section.card.isDone #actBtn,section.card.isDone #solStatusSlot,section.card.isDo
 .fbRow:focus-visible{outline:2px solid var(--acc);outline-offset:-2px}
 .fbTok{display:flex;align-items:center;gap:10px;min-width:0}
 .fbAv{width:28px;height:28px;border-radius:50%;display:grid;place-items:center;flex-shrink:0}
-.fbTkTx{display:flex;flex-direction:column;min-width:0;line-height:1.25}
+.fbTkTx{display:flex;flex-direction:column;min-width:0;line-height:1.2}
 .fbTkTx b{font-weight:660;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:14ch}
 .fbAge{font-size:11.5px;color:var(--tx3)}
 .fbSh{white-space:nowrap}
-.fbBar{display:inline-flex;width:56px;height:4px;border-radius:2px;overflow:hidden;vertical-align:middle;margin-right:8px;background:var(--line)}
+.fbBar{display:inline-flex;width:140px;height:4px;border-radius:2px;overflow:hidden;vertical-align:middle;margin-right:12px;background:var(--line)}
 .fbBar i{display:block;height:100%}
 .fbBar .p{background:var(--pos)}
 .fbBar .n{background:var(--neg)}
@@ -1047,7 +1055,7 @@ section.card.isDone #actBtn,section.card.isDone #solStatusSlot,section.card.isDo
 .fbBackRow[hidden],#flowEarly[hidden]{display:none}
 .fbBack{font-size:12.5px;color:var(--tx3);padding:4px 0}
 .fbBack:hover{color:var(--tx)}
-#view-flow.fbOn #flowTokBtn,#view-flow.fbOn #flowTfs{display:none}
+#view-flow.fbOn #flowTokBtn,#view-flow.fbOn #flowTfs,#view-flow.fbOn>.card>header{display:none}
 #view-flow.fbOn > p{display:none}   /* یادداشتِ «استخرِ همین توکن» مالِ جریانِ یک توکن است، نه تابلو */
 .ebCard{border-top:1px solid var(--line)}
 .ebIn{padding:14px 20px 6px}
@@ -1070,17 +1078,22 @@ section.card.isDone #actBtn,section.card.isDone #solStatusSlot,section.card.isDo
 .issNote{margin-top:6px;line-height:1.5;max-width:60ch}
 @media(max-width:480px){
   .fbTbl .fbBS,.fbTbl .fbVol{display:none}
-  .fbHead{padding:14px 14px 6px}
-  .fbTbl th,.fbTbl td{padding:9px 5px}
+  .fbHead{padding:16px 14px 6px}
+  .fbTbl th,.fbTbl td{padding-left:5px;padding-right:5px}
   .fbTbl th:first-child,.fbTbl td:first-child{padding-left:14px}
   .fbTbl th:last-child,.fbTbl td:last-child{padding-right:14px}
   .fbTbl{table-layout:fixed}
   .fbTbl th{white-space:normal;line-height:1.25;vertical-align:bottom}
-  .fbTbl th:nth-child(2){width:46px}
-  .fbTbl th:nth-child(4){width:56px}
-  .fbTbl th:nth-child(6){width:88px}
+  .fbTbl th:nth-child(2){width:auto}
+  .fbTbl th:first-child,.fbTbl td:first-child{padding-left:6px;padding-right:0}
+  .fbTbl th:nth-child(1){width:34px}
+  .fbTbl th:nth-child(2),.fbTbl td:nth-child(2){padding-left:4px}
+  .fbTbl th:nth-child(3){width:54px}
+  .fbTbl th:nth-child(5){width:72px}
+  .fbTbl th:nth-child(7){width:84px}
+  .fbTok{gap:8px}
   .fbChip{white-space:normal;text-align:center;line-height:1.25;font-size:11px;padding:3px 7px;border-radius:10px;max-width:100%}
-  .fbBar{display:flex;width:100%;margin:0 0 3px}
+  .fbBar{width:28px;margin-right:6px}
   .fbBackRow{padding-left:14px;padding-right:14px}
   .ebIn{padding-left:14px;padding-right:14px}
 }
@@ -1677,7 +1690,7 @@ footer .fine{max-width:78ch;margin:46px 0 0;font-size:11.5px;color:var(--tx3);li
 .mktSwitch{display:inline-flex;align-self:flex-start;max-width:100%;box-sizing:border-box;padding:4px;gap:4px;border-radius:999px;background:var(--card);box-shadow:4px 4px 9px var(--soft-lo),-3px -3px 8px var(--soft-hi),inset 0 1px 1px var(--soft-hi);margin-bottom:18px}
 .mktSwitch a{padding:8px 18px;border-radius:999px;font-size:14px;font-weight:560;color:var(--tx2);text-decoration:none;white-space:nowrap;transition:.16s}
 .mktSwitch a:hover{color:var(--tx)}
-.mktSwitch a.on{background:var(--grad);color:#fff}
+.mktSwitch a.on{background:var(--grad);color:var(--on-acc)}
 .mktSwitch a:focus-visible{outline:2px solid var(--acc);outline-offset:2px}
 .chip:not(.solid):not(#themeBtn),.tokbtn,.tfs button.on{box-shadow:2px 2px 5px var(--soft-lo),-2px -2px 5px var(--soft-hi)}
 .cta:not(:disabled),.chip.solid,.button.primary,.header-cta{box-shadow:inset 0 1px 1px rgba(255,255,255,.4),inset 0 -2px 2px rgba(20,30,55,.16),0 3px 6px var(--soft-lo)}
@@ -1721,17 +1734,8 @@ html:not(.netPlaced) .hdrRight>#srcMenu{display:none}
 html:not(.ctaReady) #actBtn:disabled,html:not(.ctaReady) #solSwapBtn:disabled{background:var(--grad);color:var(--on-acc)}
 .savedWatch{margin:0;overflow:hidden;grid-column:1/-1;min-width:0}
 .savedWatch[hidden]{display:none}
-/* ۲۴ اکتبر: روی دسکتاپ/تبلت (همان شرطِ دیده‌شدنِ نوار) خلاصه‌ی پنل نمی‌آید؛ سرتیترِ نوار آن را باز و بسته می‌کند */
-@media(min-width:721px){
-  .savedWatch.savedWatch>summary{display:none}
-  .savedWatch:not([open]){display:none}
-  .savedInside{border-top:0;padding-top:4px}
-}
-.watchToggle{display:inline-flex;align-items:center;gap:8px;padding:4px 8px;border-radius:999px;background:none;border:0;cursor:pointer;color:var(--tx);font:inherit;font-size:12px;font-weight:650;text-align:left}
-.watchToggle:hover{background:var(--raise)}
-.watchToggle:focus-visible{outline:2px solid var(--acc);outline-offset:2px}
-.watchChev{font-style:normal;color:var(--tx2);font-size:14px;line-height:1}
-.watchToggle[aria-expanded=true] .watchChev{transform:rotate(180deg)}
+/* ۲۵ اکتبر: از ۹۴۱px به بالا دیده‌بانی در ریل (≥۱۷۸۰) یا پاپ‌اوورِ هدر است؛ پنلِ قدیمی فقط تا ۹۴۰ می‌ماند */
+@media(min-width:941px){.savedWatch.savedWatch{display:none}}
 .savedChip{display:inline-block;margin-top:3px;font-size:10.5px;font-weight:620;border-radius:999px;padding:2px 8px;color:var(--tx2);background:var(--raise);white-space:nowrap}
 .savedChip.p{color:var(--pos);background:var(--pglow)}
 .savedChip.n{color:var(--neg);background:color-mix(in srgb,var(--neg) 14%,transparent)}
@@ -1755,6 +1759,45 @@ html:not(.ctaReady) #actBtn:disabled,html:not(.ctaReady) #solSwapBtn:disabled{ba
 .savedToggle[aria-pressed=true]{color:var(--acc)}.savedToggle:disabled{opacity:.5;cursor:default}
 .savedWatch summary:focus-visible,.savedWatch a:focus-visible,.savedWatch button:focus-visible,.savedToggle:focus-visible{outline:2px solid var(--acc);outline-offset:3px}
 @media(max-width:600px){.savedInside{padding-inline:14px}.savedWatch>summary{padding-inline:14px}.savedToolbar{align-items:flex-start}.savedToolbar p{max-width:25ch}.savedIdentity b{max-width:16ch}.savedRow{gap:8px}.savedLink{gap:7px}.savedBadge{font-size:9px}.savedPrice{font-size:12px}.savedToggle{white-space:nowrap}#baseSubRow section>header,#appSolSafetyCard>header{flex-wrap:wrap;row-gap:10px}}
+
+/* ۲۵ اکتبر — دیده‌بانی: ریل ثابت در حاشیه‌ی راست (≥۱۷۸۰px)، پاپ‌اوور زیرِ ستاره‌ی هدر (۹۴۱ تا ۱۷۷۹)، پنلِ قدیمی تا ۹۴۰. بدون glow. */
+.watchRail[hidden],.watchWrap[hidden],.watchPop[hidden],.watchBadge[hidden]{display:none}
+.watchRail{position:fixed;z-index:20;width:300px;box-sizing:border-box;display:flex;flex-direction:column;left:0;top:80px}
+.watchBtn,#watchBtn{position:relative}
+#watchBtn .watchStar{color:var(--acc);font-size:17px;line-height:1}
+.watchBadge{position:absolute;top:-3px;right:-3px;min-width:17px;height:17px;padding:0 4px;box-sizing:border-box;border-radius:9px;background:var(--acc);color:var(--on-acc);font-size:10px;font-weight:700;line-height:17px;text-align:center}
+.watchPop{position:absolute;right:0;top:calc(100% + 8px);width:320px;max-width:calc(100vw - 24px);max-height:70vh;box-sizing:border-box;z-index:50;display:flex;flex-direction:column;cursor:auto;white-space:normal}
+.wlHead{display:flex;align-items:center;gap:8px;padding:14px 14px 10px;flex:none}
+.wlTtl{margin:0;font-size:14px;font-weight:660;color:var(--tx)}
+.wlHead .savedCount{flex:none}
+.wlHead .iconBtn{margin-left:auto;width:30px;height:30px}
+.wlHead .iconBtn:disabled{opacity:.45;cursor:default}
+.wlList{overflow-y:auto;min-height:0;padding:0 14px 6px;overscroll-behavior:contain}
+.wlEmpty{margin:0;padding:6px 0 14px;font-size:12.5px;line-height:1.6;color:var(--tx3)}
+.wlStatus{margin:0;padding:0 14px 12px;font-size:11.5px;line-height:1.5;color:var(--tx3);flex:none}
+.wlStatus:empty{display:none}
+.wlRow{position:relative;border-top:1px solid var(--line)}
+.wlLink{display:grid;grid-template-columns:28px minmax(0,1fr) auto;gap:4px 10px;align-items:center;padding:10px 30px 10px 0;color:var(--tx);text-decoration:none;min-width:0}
+.wlLink:hover .wlSym{text-decoration:underline}
+.wlAv{width:28px;height:28px;border-radius:50%;display:grid;place-items:center;flex-shrink:0;grid-row:1}
+.wlId{display:flex;align-items:center;gap:6px;min-width:0}
+.wlSym{font-size:13px;font-weight:660;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+.wlChain{flex:none;font-size:9.5px;padding:2px 6px;border:1px solid var(--line);border-radius:6px;color:var(--tx2)}
+.wlNum{display:flex;flex-direction:column;align-items:flex-end;gap:1px;font-size:12.5px;font-variant-numeric:tabular-nums}
+.wlChg{font-size:11px;color:var(--tx3)}
+.wlChg.up{color:var(--pos)}.wlChg.down{color:var(--neg)}
+.wlLink .savedChip{grid-column:2/-1;justify-self:start;margin-top:0;max-width:100%;overflow:hidden;text-overflow:ellipsis}
+.wlRm{position:absolute;right:0;top:11px;width:24px;height:24px;border-radius:50%;color:var(--tx2);background:none;border:0;cursor:pointer;font-size:12px;line-height:1}
+.wlRm:hover{color:var(--tx);background:var(--raise)}
+.watchRail a:focus-visible,.watchRail button:focus-visible,.watchPop a:focus-visible,.watchPop button:focus-visible,#watchBtn:focus-visible{outline:2px solid var(--acc);outline-offset:2px}
+/* ۲۵ اکتبر — جابه‌جاییِ سواپ و نمودار (فقط دسکتاپ) */
+@media(min-width:941px){
+  html.swapLeft .row.hero{grid-template-columns:396px 1fr}
+  html.swapLeft .row.hero>.swapMarketCol{order:2}
+  html.swapLeft .row.hero>.swapActionsCol{order:1}
+}
+#swapNetworkBar .swapSideBtn{width:32px;height:32px;font-size:15px}
+@media(max-width:940px){#swapNetworkBar .swapSideBtn{display:none}}
 </style>
 </head>
 <body>
@@ -1844,6 +1887,10 @@ html:not(.ctaReady) #actBtn:disabled,html:not(.ctaReady) #solSwapBtn:disabled{ba
 
       </button>
     </div>
+  </div>
+  <div class="rel watchWrap" id="watchWrap" hidden>
+    <button class="chip round" id="watchBtn" type="button" aria-haspopup="dialog" aria-expanded="false" aria-controls="watchPop" aria-label="Watchlist" title="Watchlist"><span class="watchStar" aria-hidden="true">★</span><b class="watchBadge" id="watchBadge" hidden>0</b></button>
+    <div class="card watchPop" id="watchPop" role="dialog" aria-label="Watchlist" hidden></div>
   </div>
   <div class="rel">
     <button class="chip round" id="setBtn" aria-label="Settings" title="Settings"><svg class="gearIcon" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg></button>
@@ -1965,6 +2012,7 @@ try{(function(){
 })();
 </script>
 
+<aside class="card watchRail" id="watchRail" aria-label="Watchlist" hidden></aside>
 <main>
 <div id="solConnectionNotices"></div>
 <details class="card savedWatch" id="savedWatch">
@@ -2001,7 +2049,7 @@ try{(function(){
 
     <!-- swap -->
     <section class="card swapCard">
-      <div id="baseSwapNetworkSlot"><div id="swapNetworkBar"><span class="ttl">Swap</span><span class="grow"></span></div></div>
+      <div id="baseSwapNetworkSlot"><div id="swapNetworkBar"><span class="ttl">Swap</span><span class="grow"></span><button class="iconBtn swapSideBtn" id="swapSideBtn" type="button" aria-label="Move swap to the left" title="Move swap to the left">⇄</button></div></div>
       <div class="leg">
         <div class="legTop"><span>You pay</span><b id="balIn"></b></div>
         <div class="legRow">
@@ -2153,6 +2201,12 @@ try{(function(){
         <button data-w="h6">6H</button>
         <button data-w="h24">24H</button>
       </div></header>
+    <div class="fbHead" id="fbHead" hidden>
+      <div class="fbHL"><div class="fbTtl">Where money is flowing</div><div class="fbSub" id="fbSub"></div></div>
+      <div class="fbCtl"><div id="fbNetSlot"></div>
+        <div class="tfs" role="group" aria-label="Time window"><button type="button" data-fbw="h1">1h</button><button type="button" data-fbw="h6">6h</button></div>
+        <button type="button" class="fbTog" role="switch" data-fbtog aria-checked="true"><span class="fbSw" aria-hidden="true"></span>Only tokens with a sell route</button></div>
+    </div>
     <div class="fbBackRow" id="flowBackRow" hidden><button class="fbBack" id="flowBack" type="button">← Back to all tokens</button></div>
     <div id="flowBody"><div class="empty intro">
       <span class="eTtl">Pick a token to see who is buying</span>
@@ -5618,7 +5672,7 @@ function placeNetworkControl(){
     destination=bar;
   }else if(tokenPage||view==="token")destination=$("networkControlParking");
   else if(view==="folio")destination=$("folioNetworkSlot");
-  else if(view==="flow")destination=$("flowNetworkSlot");
+  else if(view==="flow")destination=$(fbOn&&$("fbNetSlot")?"fbNetSlot":"flowNetworkSlot");
   else if(view==="stocks")destination=$("stocksNetworkSlot");
   else destination=$("headerNetworkAnchor").parentElement;
   if(menu.parentElement!==destination){
@@ -5649,7 +5703,7 @@ function prepareSwapColumns(){
     pools.classList.add("swapPoolsCard");
     safety.classList.add("swapSafetyCard");
     const market=document.createElement("div"),actions=document.createElement("div");
-    market.className=actions.className="swapColumn";
+    market.className="swapColumn swapMarketCol";actions.className="swapColumn swapActionsCol";
     market.append(chart,pools);actions.append(trade,safety);hero.append(market,actions);
     hero.append(mtabBuild());
   }
@@ -6450,34 +6504,14 @@ const MARKET_WATCH_SOL=[
 const marketWatchCache=new Map(),marketWatchInflight=new Map();   // cache: {t,rows,keys}
 let marketWatchSeq=0,marketPairSeq=0;
 const marketWatchDefaults=chain=>chain==="solana"?MARKET_WATCH_SOL:BASE_TOKENS.filter(t=>["ETH","AERO","cbBTC"].includes(t.symbol));
-/* ۲۴ اکتبر: اسلات‌ها اول با توکن‌های دیده‌بانیِ همین زنجیره (به ترتیبِ فهرست) پر می‌شوند، بعد پیش‌فرض‌ها؛
-   تعدادِ اسلات همان تعدادِ پیش‌فرض‌هاست و تکراری نمی‌آید (Base بدون حساسیت به حروف، Solana دقیق). */
-function marketWatchTokens(chain){
-  const defaults=marketWatchDefaults(chain),n=defaults.length,out=[],seen=new Set();
-  try{
-    for(const r of savedWatchRows){
-      if(out.length>=n)break;
-      if(r.chain!==chain)continue;
-      const t=chain==="solana"?{symbol:r.symbol||shortAddr(r.address),mint:r.address,watched:true}
-        :{symbol:r.symbol||shortAddr(r.address),name:r.name,address:r.address,watched:true};
-      const k=watchAddr(chain,t);if(seen.has(k))continue;
-      seen.add(k);out.push(t);
-    }
-  }catch{}
-  for(const t of defaults){
-    if(out.length>=n)break;
-    const k=watchAddr(chain,t);if(seen.has(k))continue;
-    seen.add(k);out.push(t);
-  }
-  return out;
-}
+// ۲۵ اکتبر: نوار فقط توکن‌های پیش‌فرض را نشان می‌دهد؛ دیده‌بانی در ریل/پاپ‌اوورِ خودش است
+function marketWatchTokens(chain){return marketWatchDefaults(chain);}
 function initMarketWatch(){
   for(const [chain,id] of [["base","baseHeroRow"],["solana","appSolHero"]]){
     const box=document.createElement("section");box.className="marketWatch";box.dataset.chain=chain;
     box.setAttribute("aria-label",chain==="base"?"Base market watch":"Solana market watch");
     box.innerHTML='<span class="watchHeading">Market watch · 24h</span><div class="watchItems"></div>';
     $(id).prepend(box);paintMarketWatch(chain);
-    try{savedWatchPlace();}catch{}
   }
 }
 function watchPrice(value){return value==null?"—":"$"+Number(value).toLocaleString("en-US",{maximumSignificantDigits:value<1?4:6});}
@@ -6543,34 +6577,10 @@ function paintWatchAvatar(el,t,logo){
 }
 /* ۱۱ اکتبر: نوار یک بار ساخته می‌شود و با هر به‌روزرسانی فقط متن/کلاس/اسپارک عوض می‌شود — دکمه‌ها و
    آواتارها هرگز از نو ساخته نمی‌شوند (قبلاً هر به‌روزرسانی innerHTML می‌ریخت و لوگوها حرف↔لوگو می‌پریدند). */
-// سرتیتر: متنِ ساده وقتی فهرست کاملاً خالی است؛ وگرنه دکمه‌ای که پنلِ دیده‌بانی را زیرِ نوار باز می‌کند
-function paintWatchHeading(wrap,watchedHere){
-  const head=wrap.querySelector(".watchHeading"),total=savedWatchRows.length;
-  const label=watchedHere?"Your watchlist":"Market watch · 24h"+(total?" · Watchlist "+total:"");
-  const mode=(total?"b":"t")+"|"+label+"|"+total+"|"+watchedHere;
-  if(head.dataset.m!==mode){
-    head.dataset.m=mode;
-    if(!total)head.textContent=label;
-    else{
-      const b=document.createElement("button");b.type="button";b.className="watchToggle";b.setAttribute("aria-controls","savedWatch");
-      const t=document.createElement("span");t.textContent=label;b.append(t);
-      if(watchedHere){const c=document.createElement("span");c.className="savedCount";c.textContent=String(total);b.append(c);}
-      const v=document.createElement("i");v.className="watchChev";v.setAttribute("aria-hidden","true");v.textContent="⌄";b.append(v);
-      b.onclick=()=>{const d=$("savedWatch");d.open=!d.open;marketWatchSyncToggle();};
-      head.replaceChildren(b);
-    }
-  }
-  marketWatchSyncToggle();
-}
-function marketWatchSyncToggle(){
-  const d=$("savedWatch");if(!d)return;
-  document.querySelectorAll(".watchToggle").forEach(b=>b.setAttribute("aria-expanded",String(d.open)));
-}
 function paintMarketWatch(chain){
   const wrap=document.querySelector(`.marketWatch[data-chain="${chain}"]`),box=wrap&&wrap.querySelector(".watchItems");if(!box)return;
   const cached=marketWatchCache.get(chain),data=cached?.rows||[],dkeys=cached?.keys||[];
   const tokens=marketWatchTokens(chain),keys=tokens.map(t=>watchAddr(chain,t));
-  paintWatchHeading(wrap,tokens.some(t=>t.watched));
   const cur=[...box.querySelectorAll(":scope > .watchPair")];
   if(cur.length!==tokens.length||cur.some((el,i)=>el.dataset.k!==keys[i])){
     box.innerHTML=tokens.map((t,i)=>
@@ -6957,6 +6967,7 @@ function savedWatchPlace(){
   else if(panel.parentElement!==document.querySelector('main'))$('solConnectionNotices').after(panel);
   // ۲۴ اکتبر: فقط در نمای swap دیده می‌شود؛ در Flow/Folio/Stocks/صفحه‌ی توکن پنهان (جابه‌جاییِ سوییچ Flow/New pairs)
   panel.hidden=!show;
+  try{watchSurfaceSync();}catch{}
 }
 function savedWatchSelection(){
   if(!savedWatchReady)return;
@@ -6969,7 +6980,7 @@ function savedWatchSelection(){
     b.setAttribute('aria-label',lab);b.title=row?lab:'Select a token first';
   }
 }
-function savedWatchStatus(text){$('savedStatus').textContent=text;if(text)$('savedWatch').classList.remove('isEmpty');}
+function savedWatchStatus(text){$('savedStatus').textContent=text;watchStatusText=text||'';document.querySelectorAll('.wlStatus').forEach(n=>{n.textContent=watchStatusText;});if(text)$('savedWatch').classList.remove('isEmpty');}
 function savedWatchCommit(rows,message){
   try{localStorage.setItem(SAVED_WATCH_KEY,JSON.stringify(rows));}
   catch{savedWatchStatus('Could not save in this browser. Check your storage settings and try again.');$('savedWatch').open=true;return false;}
@@ -7019,6 +7030,7 @@ function savedWatchRender(){
   }
   savedWatchSelection();
   // نوارِ Market watch از همین فهرست پر می‌شود
+  try{watchSurfacesRender();}catch{}
   try{if(typeof fbStarSync==='function')fbStarSync();}catch{}
   try{if(typeof initMarketWatch==='function'&&document.querySelector('.marketWatch')){paintMarketWatch('base');paintMarketWatch('solana');if(view==='swap'&&!tokenPage)refreshMarketWatch();}}catch{}
 }
@@ -7082,24 +7094,29 @@ async function savedWatchPairsLoad(){
   if(changed)savedWatchRender();
 }
 async function savedWatchRefresh(){
-  if(!savedWatchReady||!$('savedWatch').open||!savedWatchRows.length)return;
+  if(!savedWatchReady||!(($('savedWatch').open)||watchSurfaceOpen())||!savedWatchRows.length)return;
   savedWatchPairsLoad().catch(()=>{});
   const seq=++savedWatchSeq,rows=savedWatchRows.slice();
-  $('savedRefresh').disabled=true;savedWatchStatus('Updating prices…');
+  $('savedRefresh').disabled=true;document.querySelectorAll('.wlRefresh').forEach(b=>{b.disabled=true;});savedWatchStatus('Updating prices…');
   const results=await Promise.all(['base','solana'].map(async chain=>{
     const selected=rows.filter(r=>r.chain===chain);if(!selected.length)return {ok:true,prices:[]};
     try{
-      const requestUrl=GT+'/networks/'+(chain==='base'?CHAIN.gtNetwork:'solana')+'/tokens/multi/'+selected.map(r=>r.address).join(',');
+      const requestUrl=GT+'/networks/'+(chain==='base'?CHAIN.gtNetwork:'solana')+'/tokens/multi/'+selected.map(r=>r.address).join(',')+'?include=top_pools';
       const j=await gtJson(requestUrl),sampledAt=gtCache.get(requestUrl)?.t||Date.now();
       if(!Array.isArray(j?.data))return {ok:false,prices:[]};
-      const prices=[];
+      const prices=[],poolOf=new Map();
+      if(Array.isArray(j.included))for(const x of j.included)if(x&&typeof x.id==='string')poolOf.set(x.id,x);
       for(const item of j.data){
         const a=item?.attributes;if(!a||typeof a.address!=='string')continue;
         const address=chain==='base'?a.address.toLowerCase():a.address;
         const row=selected.find(r=>r.address===address);
         const numeric=typeof a.price_usd==='number'||(typeof a.price_usd==='string'&&a.price_usd.trim()!=='');
         const price=numeric?Number(a.price_usd):NaN;
-        if(row&&Number.isFinite(price)&&price>0)prices.push([savedWatchKey(row),{price,at:sampledAt}]);
+        // تغییر ۲۴ساعته از استخرِ برتر؛ نبودنش null می‌ماند و «—» دیده می‌شود، نه ۰
+        const tp=item.relationships&&item.relationships.top_pools&&item.relationships.top_pools.data,pool=tp&&tp[0]?poolOf.get(tp[0].id):null;
+        const cv=pool&&pool.attributes&&pool.attributes.price_change_percentage?pool.attributes.price_change_percentage.h24:null;
+        const chg=(typeof cv==='number'||(typeof cv==='string'&&cv.trim()!==''))&&Number.isFinite(Number(cv))?Number(cv):null;
+        if(row&&Number.isFinite(price)&&price>0)prices.push([savedWatchKey(row),{price,at:sampledAt,chg}]);
       }
       return {ok:true,prices};
     }catch{return {ok:false,prices:[]};}
@@ -7109,18 +7126,109 @@ async function savedWatchRefresh(){
   savedWatchRender();
   savedWatchStatus(results.every(r=>r.ok)?'Prices refreshed where available. Open a token for a fresh exit check.':'Some prices could not be loaded. Try refreshing again.');
 }
+
+/* ۲۵ اکتبر — سطوحِ دیده‌بانی. یک سازنده‌ی مشترک، دو نمایش: ریلِ ثابت (≥۱۷۸۰px) و پاپ‌اوورِ هدر (۹۴۱ تا ۱۷۷۹).
+   زیر ۹۴۱ همان #savedWatch است. فقط در نمای swap و صفحه‌ی توکن. هیچ عنصرِ دیگری جابه‌جا نمی‌شود (ریل fixed، پاپ‌اوور absolute). */
+const WATCH_RAIL_MQ=matchMedia("(min-width:1780px)"),WATCH_DESK_MQ=matchMedia("(min-width:941px)");
+let watchStatusText="";
+function watchDeskView(){return tokenPage||view==="token"||view==="swap";}
+function watchSurfaceOpen(){const r=$("watchRail"),p=$("watchPop");return !!(r&&!r.hidden)||!!(p&&!p.hidden);}
+function watchRailPlace(){
+  const r=$("watchRail");if(!r||r.hidden)return;
+  const m=document.querySelector("main"),h=document.querySelector("header");if(!m||!h)return;
+  const mr=m.getBoundingClientRect(),pr=parseFloat(getComputedStyle(m).paddingRight)||0,top=Math.round(h.offsetHeight+16);
+  r.style.left=Math.round(mr.right-pr+24)+"px";r.style.top=top+"px";r.style.maxHeight="calc(100vh - "+top+"px - 16px)";
+}
+function watchPopClose(focusBack){
+  const p=$("watchPop"),b=$("watchBtn");if(!p||p.hidden)return;
+  p.hidden=true;b.setAttribute("aria-expanded","false");if(focusBack)b.focus();
+}
+function watchSurfaceSync(){
+  const rail=$("watchRail"),wrap=$("watchWrap");if(!rail||!wrap)return;
+  const desk=WATCH_DESK_MQ.matches&&watchDeskView(),railOn=desk&&WATCH_RAIL_MQ.matches,btnOn=desk&&!WATCH_RAIL_MQ.matches,was=!rail.hidden;
+  rail.hidden=!railOn;wrap.hidden=!btnOn;
+  if(!btnOn)watchPopClose(false);
+  if(railOn){watchRailPlace();if(!was)savedWatchRefresh();}
+}
+function watchPanelFill(root){
+  const el=(tag,cls,text)=>{const n=document.createElement(tag);if(cls)n.className=cls;if(text!=null)n.textContent=text;return n;};
+  root.replaceChildren();
+  const n=savedWatchRows.length,head=el("div","wlHead");
+  const rf=el("button","iconBtn wlRefresh");rf.type="button";rf.setAttribute("aria-label","Refresh prices");rf.title="Refresh prices";rf.disabled=n===0;
+  rf.innerHTML='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 11a8 8 0 0 0-14.9-3M4 4v4h4"/><path d="M4 13a8 8 0 0 0 14.9 3M20 20v-4h-4"/></svg>';
+  rf.onclick=()=>{savedWatchRefresh();};
+  head.append(el("h2","wlTtl","Your watchlist"),el("span","savedCount",String(n)),rf);
+  const list=el("div","wlList");
+  if(!n)list.append(el("p","wlEmpty","Star a token to keep it here."));
+  for(const row of savedWatchRows){
+    const key=savedWatchKey(row),sym=row.symbol||shortAddr(row.address),wrap=el("div","wlRow"),a=el("a","wlLink");
+    a.href="/t/"+encodeURIComponent(row.address);a.title=row.name||row.symbol||row.address;
+    const av=el("span","av wlAv");
+    const tk=row.chain==="solana"?{mint:row.address,symbol:row.symbol}:{address:row.address,symbol:row.symbol};
+    try{paintWatchAvatar(av,tk,watchLogoGet(row.chain,tk));}catch{}
+    const id=el("span","wlId");id.append(el("b","wlSym",sym),el("span","wlChain",row.chain==="base"?"Base":"Solana"));
+    const q=savedWatchPrices.get(key),num=el("span","wlNum"),px=el("span","wlPx mono",q?watchPrice(q.price):"—");
+    const cg=q&&q.chg!=null&&Number.isFinite(q.chg)?q.chg:null;
+    num.append(px,el("span","wlChg mono"+(cg===null?"":cg>=0?" up":" down"),cg===null?"—":(cg>=0?"▲ ":"▼ ")+Math.abs(cg).toFixed(2)+"%"));
+    const xs=savedWatchExit(row);
+    a.append(av,id,num,el("span","savedChip wlExit "+xs.cls,xs.text));
+    const rm=el("button","wlRm","✕");rm.type="button";rm.setAttribute("aria-label","Remove "+sym);rm.title="Remove "+sym;
+    rm.onclick=()=>{
+      try{savedWatchRows=savedWatchRead();}catch{}
+      if(savedWatchCommit(savedWatchRows.filter(r=>savedWatchKey(r)!==key),"Token removed.")){
+        const nx=root.querySelector(".wlRm");if(nx)nx.focus();else{const b=root.querySelector(".wlRefresh");if(b&&!b.disabled)b.focus();}
+      }
+    };
+    wrap.append(a,rm);list.append(wrap);
+  }
+  const st=el("p","wlStatus",watchStatusText);st.setAttribute("role","status");st.setAttribute("aria-live","polite");
+  root.append(head,list,st);
+}
+function watchSurfacesRender(){
+  const b=$("watchBadge");if(b){b.textContent=String(savedWatchRows.length);b.hidden=savedWatchRows.length===0;}
+  const bt=$("watchBtn");if(bt){const l="Watchlist"+(savedWatchRows.length?" ("+savedWatchRows.length+")":"");bt.setAttribute("aria-label",l);bt.title=l;}
+  for(const id of ["watchRail","watchPop"]){const r=$(id);if(r)watchPanelFill(r);}
+  watchRailPlace();
+}
+function initWatchSurfaces(){
+  $("watchBtn").onclick=()=>{
+    const p=$("watchPop");
+    if(p.hidden){p.hidden=false;$("watchBtn").setAttribute("aria-expanded","true");savedWatchRefresh();}
+    else watchPopClose(false);
+  };
+  // ✕ ردیف را از DOM برمی‌دارد؛ contains(target) پاپ‌اوور را غلط می‌بست، پس composedPath
+  document.addEventListener("click",e=>{const p=$("watchPop");if(!p||p.hidden)return;if(!e.composedPath().includes($("watchWrap")))watchPopClose(false);});
+  document.addEventListener("keydown",e=>{if(e.key==="Escape"&&!$("watchPop").hidden){e.preventDefault();watchPopClose(true);}});
+  addEventListener("resize",()=>{try{watchSurfaceSync();}catch{}});
+  for(const mq of [WATCH_RAIL_MQ,WATCH_DESK_MQ])mq.addEventListener("change",()=>{try{watchSurfaceSync();}catch{}});
+  // ۲۵ اکتبر: دکمه‌ی جابه‌جاییِ سواپ/نمودار (دسکتاپ) — zaexa.layout.v1 {swap:"left"|"right"}
+  const LK="zaexa.layout.v1";
+  let left=false;
+  try{const j=JSON.parse(localStorage.getItem(LK)||"null");left=!!j&&typeof j==="object"&&j.swap==="left";}catch{}
+  const apply=()=>{
+    document.documentElement.classList.toggle("swapLeft",left);
+    const b=$("swapSideBtn"),t=left?"Move swap to the right":"Move swap to the left";
+    if(b){b.setAttribute("aria-label",t);b.title=t;}
+  };
+  apply();
+  $("swapSideBtn").onclick=()=>{
+    left=!left;apply();
+    try{localStorage.setItem(LK,JSON.stringify({swap:left?"left":"right"}));}catch{}
+  };
+}
 function initSavedWatch(){
   if(savedWatchReady)return;
   savedWatchReady=true;
   try{savedWatchRows=savedWatchRead();}catch{savedWatchStatus('Your saved list could not be read. New saves will replace it.');}
   for(const [id,chain] of [['baseWatch','base'],['solWatch','solana'],['tokenWatch',null]])$(id).onclick=()=>savedWatchToggle(chain||activeChain);
   $('savedRefresh').onclick=savedWatchRefresh;
-  $('savedWatch').ontoggle=()=>{marketWatchSyncToggle();if($('savedWatch').open)savedWatchRefresh();};
+  $('savedWatch').ontoggle=()=>{if($('savedWatch').open)savedWatchRefresh();};
   addEventListener('storage',e=>{
     if(e.key!==SAVED_WATCH_KEY&&e.key!==null)return;
     try{savedWatchRows=savedWatchRead();++savedWatchSeq;savedWatchPrices.clear();savedWatchRender();savedWatchStatus('Watchlist updated from another tab.');if($('savedWatch').open)savedWatchRefresh();}
     catch{savedWatchStatus('Could not read the watchlist update.');}
   });
+  initWatchSurfaces();
   savedWatchRender();
 }
 function paintToken(side,t){
@@ -8047,6 +8155,8 @@ function flowChrome(on){
   const v=$("view-flow"),r=$("flowBackRow");
   if(v)v.classList.toggle("fbOn",on);
   if(r)r.hidden=on;
+  const hd=$("fbHead");if(hd)hd.hidden=!on;
+  if(view==="flow")placeNetworkControl();
   if(on)ebOff();
 }
 function fbAge(created,now){const h=(now-created)/36e5;return h<1?"<1h":h<24?Math.floor(h)+"h":Math.floor(h/24)+"d";}
@@ -8145,12 +8255,13 @@ function fbRows(d,w){
   list.sort((x,y)=>cmp(x,y,"net")||cmp(x,y,"vol")||y.it.created-x.it.created);
   return list.slice(0,FB_ROWS);
 }
+// سرِ تابلو یک بار در HTML است (انتخابگرِ شبکه داخلش می‌نشیند و با بازنقاشیِ جدول از بین نمی‌رود)؛ فقط متن و حالت‌ها هماهنگ می‌شود
 function fbHead(d){
   const w=fbPref.w,name=(d?d.chain:activeChain)==="solana"?"Solana":"Base";
-  return `<div class="fbHead"><div><div class="fbTtl">Where money is flowing</div>
-    <div class="fbSub">New ${name} pairs · ${w==="h1"?"last hour":"last 6 hours"} · by unique wallets</div></div>
-    <div class="fbCtl"><div class="tfs" role="group" aria-label="Time window">${["h1","h6"].map(k=>`<button type="button" data-fbw="${k}" class="${w===k?"on":""}">${k==="h1"?"1h":"6h"}</button>`).join("")}</div>
-    <button type="button" class="fbTog" data-fbtog aria-pressed="${fbPref.only?"true":"false"}"><i></i>Only tokens with a sell route</button></div></div>`;
+  const sub=$("fbSub");if(sub)sub.textContent=`New ${name} pairs · ${w==="h1"?"last hour":"last 6 hours"} · by unique wallets`;
+  document.querySelectorAll("#fbHead [data-fbw]").forEach(b=>b.classList.toggle("on",b.dataset.fbw===w));
+  const t=document.querySelector("#fbHead [data-fbtog]");if(t)t.setAttribute("aria-checked",fbPref.only?"true":"false");
+  return "";
 }
 function fbStarOn(addr){
   const chain=fbData?fbData.chain:activeChain,k=chain==="solana"?addr:addr.toLowerCase();
@@ -8186,7 +8297,7 @@ function fbPaint(){
       h+=`<div class="fbMsg">No new pair has a quoted sell route in this list right now.<br><button type="button" class="chip" data-fbshowall>Show all</button></div>`;
     }else{
       fbShown=rows;
-      h+=`<table class="fbTbl"><thead><tr><th class="fbStarTh"></th><th>Token</th><th>Net buyers</th><th class="fbBS">Buyers / Sellers</th><th>Buy share</th><th class="fbVol">Volume</th><th>Exit</th></tr></thead><tbody>`;
+      h+=`<table class="fbTbl"><thead><tr><th class="fbStarTh"></th><th>Token</th><th class="fbNet">Net buyers</th><th class="fbBS">Buyers / Sellers</th><th>Buy share</th><th class="fbVol">Volume ${w==="h1"?"1h":"6h"}</th><th>Exit</th></tr></thead><tbody>`;
       rows.forEach((r,i)=>{
         const a=r.a,it=r.it;
         const net=r.net===null?`<span style="color:var(--tx2)">—</span>`
@@ -8200,7 +8311,7 @@ function fbPaint(){
         h+=`<tr class="fbRow" tabindex="0" role="link" data-i="${i}" data-addr="${esc(it.addr)}">
           <td class="fbStarTd"><button type="button" class="iconBtn fbStar savedToggle" data-fbstar="${i}" aria-pressed="${sw?"true":"false"}" aria-label="${sw?"Stop watching ":"Watch "}${esc(it.symbol)}" title="${sw?"Stop watching ":"Watch "}${esc(it.symbol)}">${sw?"★":"☆"}</button></td>
           <td><div class="fbTok"><span class="av fbAv" data-i="${i}"></span><span class="fbTkTx"><b>${esc(it.symbol)}</b><span class="fbAge">${esc(fbAge(it.created,now))}</span></span></div></td>
-          <td class="mono">${net}</td>
+          <td class="mono fbNet" style="font-weight:620">${net}</td>
           <td class="fbBS mono" style="color:var(--tx2)">${bs}</td>
           <td class="fbSh">${share}</td>
           <td class="fbVol mono">${fbUsd(r.vol)}</td>
@@ -8279,6 +8390,7 @@ $("flowBody").addEventListener("keydown",e=>{
   if(row){e.preventDefault();fbOpen(row.dataset.addr);}
 });
 $("flowBody").addEventListener("click",e=>{if(!e.target.closest('[data-act="pickFlowToken"]'))fbClick(e);});
+$("fbHead").addEventListener("click",fbClick);
 $("flowBack").onclick=()=>{flowBoard=true;fbErr="";renderFlow();};
 // تازه‌سازیِ ۶۰ثانیه‌ای فقط وقتی تابلو دیده می‌شود و تب پنهان نیست؛ با برگشتنِ تب فوراً.
 setInterval(()=>{if(view==="flow"&&fbOn&&!document.hidden)fbRender(true);},FB_REFRESH);

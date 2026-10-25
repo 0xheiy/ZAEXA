@@ -25,7 +25,7 @@ export const REPORT_SHARE_CSS = String.raw`
 .reportShareActions[hidden]{display:none}
 .reportShareActions button,.shareActions button{font:600 13px var(--sans);cursor:pointer;min-height:42px;padding:10px 16px;border-radius:12px;border:1px solid var(--line2);color:var(--tx);background:var(--card)}
 .reportShareActions button{border-radius:999px}
-.reportShareActions button:first-child,.shareActions .shareSave{background:var(--grad);color:var(--on-acc);border-color:transparent;font-weight:620}
+.reportShareActions button:first-child,.shareActions .shareSave{background:var(--grad);background-origin:border-box;color:var(--on-acc);border-color:transparent;font-weight:620}
 .reportShareActions button:first-child:active,.shareActions .shareSave:active{transform:translateY(1px);box-shadow:inset 0 2px 4px rgba(20,30,55,.22)}
 .reportShareActions button:disabled{opacity:.45;cursor:default}
 .reportShareDialog{color:var(--tx);background:var(--card);border:1px solid var(--line2);border-radius:22px;padding:24px;width:min(900px,calc(100% - 24px));max-height:calc(100dvh - 32px);overflow:auto;box-shadow:0 28px 100px #0005}
