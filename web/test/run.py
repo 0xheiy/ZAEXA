@@ -2962,6 +2962,44 @@ def _ride_err(R, pt):
     return math.hypot(x0 - o["r"] * math.cos(a), y0 - o["r"] * math.sin(a)), abs(math.hypot(x0, y0) - o["r"])
 
 
+
+async def check_trust_rings_seamless(p, errors):
+    """[trust rings seamless] حلقه‌های بخشِ Trust در پایانِ هر دور دقیقاً به شکلِ شروع برمی‌گردند (۲۵ اکتبر: حلقه‌ی کوچک سرِ هر دور می‌پرید)."""
+    b = await p.chromium.launch()
+    pg = await b.new_page(viewport={"width": 1440, "height": 900})
+    await pg.goto("file://" + os.path.abspath(os.path.join(HERE, "..", "landing.html")))
+    res = await pg.evaluate("""() => {
+      const out = [];
+      for (const pe of ['::before', '::after']) {
+        const cs = getComputedStyle(document.querySelector('.trust-art'), pe);
+        const name = cs.animationName;
+        let kf = null;
+        for (const sh of document.styleSheets) { let rules; try { rules = sh.cssRules; } catch (e) { continue; }
+          for (const r of rules) if (r.type === CSSRule.KEYFRAMES_RULE && r.name === name) kf = r; }
+        if (!kf) { out.push({pe, name, err: 'no keyframes'}); continue; }
+        const frames = [...kf.cssRules];
+        const first = frames.find(f => f.keyText === '0%' || f.keyText === 'from');
+        const last = frames.find(f => f.keyText === '100%' || f.keyText === 'to');
+        // شروعِ اعلام‌شده (نه مقدارِ لحظه‌ایِ وسطِ انیمیشن): آخرین قاعده‌ی همان شبه‌عنصر که transform دارد
+        let declared = '';
+        for (const sh of document.styleSheets) { let rules; try { rules = sh.cssRules; } catch (e) { continue; }
+          for (const r of rules) if (r.selectorText && r.style && r.style.transform &&
+            r.selectorText.split(',').some(x => x.trim() === '.trust-art:' + pe.slice(2) || x.trim() === '.trust-art' + pe)) declared = r.style.transform; }
+        const start = (first ? first.style.transform : '') || declared;
+        const end = last.style.transform;
+        const toM = t => { const d = document.createElement('div'); d.style.transform = t; document.body.appendChild(d);
+          const m = new DOMMatrix(getComputedStyle(d).transform); d.remove(); return [m.a, m.b, m.c, m.d]; };
+        out.push({pe, name, start: toM(start), end: toM(end)});
+      }
+      return out;
+    }""")
+    await b.close()
+    for r in res:
+        assert "err" not in r, "[trust rings seamless] %s: %s" % (r["pe"], r)
+        assert all(abs(u - v) < 1e-3 for u, v in zip(r["start"], r["end"])), \
+            "[trust rings seamless] %s (%s) ends in a different shape than it starts -> visible restart: %r" % (r["pe"], r["name"], r)
+    print("[trust rings seamless] both Trust rings end each loop in exactly the shape they start with (no restart jump): %s" % ", ".join(r["pe"] + "=" + r["name"] for r in res))
+
 async def check_hero_hub(p, errors):
     """[hero hub] — مرکزِ هیرو: فقط نشانِ رسمی روی var(--bg)، بدونِ هیچ حلقه/گرادیان؛
     پنج گرهِ DEX رویِ مدارها با برچسبِ بی‌هم‌پوشانی (در گوشی پنهان)، و نقطه‌ی مسیرِ
@@ -9665,6 +9703,7 @@ async def main():
         await check_canvas_reduced_motion(p, errors)
         await check_canvas_labels(p, errors)
         await check_hero_hub(p, errors)
+        await check_trust_rings_seamless(p, errors)
         await check_canvas_route_on_ellipse(p, errors)
         await check_hero_continuity(p, errors)
         await check_trust_glyph_in_circle(p, errors)
