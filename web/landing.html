@@ -61,8 +61,8 @@
       گارد حتی زیررشته‌ی نامِ آن سکشن را در کلِ فایل رد می‌کند.
    ============================================================ */
 /* Zaexa landing — EDITABLE DESIGN TOKENS */
-:root{--bg:#f4f5f7;--card:#fff;--card2:#f4f5f8;--raise:#eceef2;--line:#e8eaee;--line2:#d6dae1;--tx:#14161a;--tx2:#5b6270;--tx3:#8b93a1;--g1:#22EFF6;--g2:#C56CF5;--acc:#5b53e8;--acc-b:#8b5cf6;--on-acc:#fff;--pos:#0d9d6e;--sh:0 18px 44px rgba(20,22,26,.08);--ease:cubic-bezier(.23,1,.32,1);--glowop:.14;--viz1:#43B5F7;--viz2:#7396F8;--vizline:#6b7280;--cta-shadow:0 12px 26px rgba(67,181,247,.30);/* هرو۱ از حرفِ n در «can» گرفته شده (گرادیانِ head-bg، t تقریباً .335) *//* رنگ‌های hero در تمِ روشن عمیق‌تر شد چون پریوینکلِ کم‌رنگ روی زمینهٔ روشن گم می‌شد (درخواست مالک، ۶ اکتبر)؛ تمِ تیره بدون تغییر */--hero1:#3F7CF2;--hero2:#7A5AF0;--hero-orbit-a:.65}
-:root[data-theme=dark]{color-scheme:dark;scrollbar-color:var(--line2) transparent;--bg:#0a0810;--card:#131020;--card2:#191527;--raise:#241e38;--line:#221d33;--line2:#302842;--tx:#f0eef7;--tx2:#a49fb8;--tx3:#736d8a;--acc:#4fc3f7;--acc-b:#C56CF5;--on-acc:#05121a;--pos:#21d3a0;--sh:0 18px 44px rgba(0,0,0,.42);--glowop:.26;--viz1:#22EFF6;--viz2:#C56CF5;--vizline:#667496;--cta-shadow:0 12px 26px rgba(34,211,238,.18);--hero-orbit-a:.52;--hero1:var(--viz1);--hero2:var(--viz2)}
+:root{--bg:#f4f5f7;--card:#fff;--card2:#f4f5f8;--raise:#eceef2;--line:#e8eaee;--line2:#d6dae1;--tx:#14161a;--tx2:#5b6270;--tx3:#8b93a1;--g1:#22EFF6;--g2:#C56CF5;--acc:#5b53e8;--acc-b:#8b5cf6;--on-acc:#fff;--pos:#0d9d6e;--sh:0 18px 44px rgba(20,22,26,.08);--ease:cubic-bezier(.23,1,.32,1);--glowop:.14;--viz1:#43B5F7;--viz2:#7396F8;--vizline:#6b7280;--cta-shadow:0 12px 26px rgba(67,181,247,.30);/* هرو۱ از حرفِ n در «can» گرفته شده (گرادیانِ head-bg، t تقریباً .335) *//* رنگ‌های hero در تمِ روشن عمیق‌تر شد چون پریوینکلِ کم‌رنگ روی زمینهٔ روشن گم می‌شد (درخواست مالک، ۶ اکتبر)؛ تمِ تیره بدون تغییر */--hero1:#3F7CF2;--hero2:#7A5AF0;--hero-orbit-a:.65;--hero-mid:var(--g1ui)}
+:root[data-theme=dark]{color-scheme:dark;scrollbar-color:var(--line2) transparent;--bg:#0a0810;--card:#131020;--card2:#191527;--raise:#241e38;--line:#221d33;--line2:#302842;--tx:#f0eef7;--tx2:#a49fb8;--tx3:#736d8a;--acc:#4fc3f7;--acc-b:#C56CF5;--on-acc:#05121a;--pos:#21d3a0;--sh:0 18px 44px rgba(0,0,0,.42);--glowop:.26;--viz1:#22EFF6;--viz2:#C56CF5;--vizline:#667496;--cta-shadow:0 12px 26px rgba(34,211,238,.18);--hero-orbit-a:.52;--hero-mid:#4C9BFF;--hero1:var(--viz1);--hero2:var(--viz2)}
 /* اسکرول‌بارِ تمِ روشن هم‌رنگِ پس‌زمینه */
 :root:not([data-theme=dark]){color-scheme:light;scrollbar-color:var(--line2) var(--bg)}
 /* Dust stays behind the page and never catches clicks or grows with document height. */
@@ -805,11 +805,11 @@ svg.diag{display:block;width:100%;height:auto}
      تغییرِ data-theme را بدون ریلود دنبال می‌کنیم. هرگز داخلِ فریمِ انیمیشن
      getComputedStyle را صدا نمی‌زنیم — فقط یک‌بار در آغاز و هر بار که تم عوض شود. */
   function hexToRgba(hex,a){var h=(hex||'').replace('#','');if(h.length===3){h=h.split('').map(function(c){return c+c}).join('')}var r=parseInt(h.substr(0,2),16),g=parseInt(h.substr(2,2),16),b=parseInt(h.substr(4,2),16);return 'rgba('+r+','+g+','+b+','+a+')'}
-  var viz={v1:VIZ_FALLBACK.v1,v2:VIZ_FALLBACK.v2,vl:VIZ_FALLBACK.vl,oa:.52};
+  var viz={v1:VIZ_FALLBACK.v1,v2:VIZ_FALLBACK.v2,vm:'#43B5F7',vl:VIZ_FALLBACK.vl,oa:.52};
   /* رنگِ زنده‌ی canvas از --hero1/--hero2 خوانده می‌شود (نه --viz1/--viz2
      مستقیم) چون در تمِ روشن این دو دیگر یکی نیستند: hero1/hero2 رنگِ
      حرفِ n در «can» است، و در تمِ تیره به همان viz1/viz2 قبلی اشاره می‌کنند. */
-  function readViz(){var cs=getComputedStyle(root);var v1=cs.getPropertyValue('--hero1').trim(),v2=cs.getPropertyValue('--hero2').trim(),vl=cs.getPropertyValue('--vizline').trim();viz.v1=v1||VIZ_FALLBACK.v1;viz.v2=v2||VIZ_FALLBACK.v2;viz.vl=vl||VIZ_FALLBACK.vl;var oa=parseFloat(cs.getPropertyValue('--hero-orbit-a'));viz.oa=isFinite(oa)?oa:.52}
+  function readViz(){var cs=getComputedStyle(root);var v1=cs.getPropertyValue('--hero1').trim(),v2=cs.getPropertyValue('--hero2').trim(),vl=cs.getPropertyValue('--vizline').trim();viz.v1=v1||VIZ_FALLBACK.v1;viz.v2=v2||VIZ_FALLBACK.v2;viz.vm=cs.getPropertyValue('--hero-mid').trim()||'#43B5F7';viz.vl=vl||VIZ_FALLBACK.vl;var oa=parseFloat(cs.getPropertyValue('--hero-orbit-a'));viz.oa=isFinite(oa)?oa:.52}
   function rebuildViz(){readViz()}
   rebuildViz();
   window.__zaexaViz=viz; /* فقط برای سنجش خودکار: پالتِ زنده‌ای که اسکریپت خواند */
@@ -834,12 +834,12 @@ svg.diag{display:block;width:100%;height:auto}
     const narrow=w<600, R0x=w*(narrow?.46:.37), R0y=h*(narrow?.30:.31);
     return [0,1,2].map(function(i){return {rx:R0x*(1-i*.11),ry:R0y*(1-i*.14),i:i}});
   }
-  /* هر سه مدار هم‌سرعت و هم‌جهت‌اند (.00006 rad/ms و فازِ i*.9 مثلِ 1916a01) */
-  const ORBIT_W=[.00006,.00006,.00006];
+  /* هر مدار با نرخِ و جهتِ خودش می‌چرخد (rad/ms)؛ مدارِ میانی خلافِ جهت */
+  const ORBIT_W=[.00006,-.000042,.000028];
   window.__zaexaOrbitW=ORBIT_W;
   function orbitRot(i,clock){return clock*ORBIT_W[i]+i*.9}
-  /* کوچک‌ترین مدار (نزدیکِ لوگو، i=2) با --hero2؛ دو مدارِ بیرونی با --hero1 */
-  function orbitStroke(i){return hexToRgba(i===2?viz.v2:viz.v1,viz.oa)}
+  /* سه رنگِ متفاوت: بیرونی --hero1، میانی --hero-mid (=g1ui)، درونی --hero2 */
+  function orbitStroke(i){return hexToRgba(i===2?viz.v2:(i===1?viz.vm:viz.v1),viz.oa)}
   function drawOrbits(cx,cy,orbs,clock){ctx.save();ctx.translate(cx,cy);orbs.forEach(function(o){ctx.beginPath();ctx.ellipse(0,0,o.rx,o.ry,orbitRot(o.i,clock),0,Math.PI*2);ctx.strokeStyle=orbitStroke(o.i);ctx.lineWidth=1.35;ctx.stroke()});ctx.restore()}
 
   /* کادرهای DOMِ روی canvas، نسبت به خودِ canvas — روی resize دوباره خوانده می‌شود. */
@@ -854,16 +854,17 @@ svg.diag{display:block;width:100%;height:auto}
   const hubNodes=hubSvg?[].slice.call(hubSvg.querySelectorAll('.hub-node')):[];
   const hubDot=document.getElementById('hubDot'), hubRoute=document.getElementById('hubRoute'), hubRoute2=document.getElementById('hubRoute2');
   const markEl=document.querySelector('.visual-core .core-mark');
-  const HUB_SPEC=[[0,310],[0,36],[2,13],[0,185],[1,202]]; /* [مدار, زاویه‌ی پارامتری به درجه] */
+  const HUB_SPEC=[[0,310],[0,36],[0,100],[0,185],[0,250]]; /* [مدار, زاویه‌ی پارامتری به درجه] — همه رویِ بیضیِ بیرونی */
   const HUB_PAIRS=[[0,2],[1,3],[2,4],[3,0],[4,1]];
   const HUB_CYCLE=2400, HUB_LEG=900, HUB_PULSE=200, HUB_ACTIVE=HUB_LEG*2+HUB_PULSE, HUB_FADE=300, HUB_LEAD=.12, HUB_LINE_A=.55;
   const NODE_R=4.5, LABEL_GAP=9;
   let lastRt=null;
   let labelSize={w:[],h:12,asc:9}, labelPick=[], activeKey='', markDim=false;
   function easeIO(u){return u<.5?2*u*u:1-Math.pow(-2*u+2,2)/2}
-  function nodePt(o,deg,clock,cx,cy){
-    const t=deg*Math.PI/180, r=orbitRot(o.i,clock), c=Math.cos(r), s=Math.sin(r), a=o.rx*Math.cos(t), b=o.ry*Math.sin(t);
-    return {x:cx+a*c-b*s, y:cy+a*s+b*c};
+  /* گره‌ها ثابت‌اند: رویِ بیضیِ بدونِ چرخشِ مدارِ بیرونی (مثلِ هیروی پیش از Codex) */
+  function nodePt(o,deg,cx,cy){
+    const t=deg*Math.PI/180;
+    return {x:cx+o.rx*Math.cos(t), y:cy+o.ry*Math.sin(t)};
   }
   /* اندازه‌ی برچسب‌ها فقط روی resize/فونت خوانده می‌شود، نه هر فریم. */
   function hubMeasure(){
@@ -874,7 +875,7 @@ svg.diag{display:block;width:100%;height:auto}
     if(!hubNodes.length) return;
     const cx=w*.5, cy=h*.5;
     const labelsOn=!matchMedia('(max-width:480px)').matches && labelSize.w.length===hubNodes.length;
-    const pts=HUB_SPEC.map(function(s){return nodePt(orbs[s[0]],s[1],clock,cx,cy)});
+    const pts=HUB_SPEC.map(function(s){return nodePt(orbs[0],s[1],cx,cy)});
     const placed=[], boxes=[];
     pts.forEach(function(pt,i){
       const g=hubNodes[i], text=g.querySelector('text'), pill=g.querySelector('.hub-pill');

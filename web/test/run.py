@@ -3062,10 +3062,11 @@ async def check_hero_hub(p, errors):
                         tb_, pl_ = n["textBox"], n["label"]
                         assert pl_["x"] <= tb_["x"] + 0.5 and pl_["x"] + pl_["w"] >= tb_["x"] + tb_["w"] - 0.5 and pl_["y"] <= tb_["y"] + 0.5 and pl_["y"] + pl_["h"] >= tb_["y"] + tb_["h"] - 0.5, (
                             "[hero hub] label %d text is not inside its background pill at %s" % (i, tag))
-                    # گره دقیقاً رویِ بیضیِ مدارِ خودش (قابِ چرخان) و نزدیکِ موقعیتِ اعلام‌شده
+                    # گره ثابت است و رویِ بیضیِ «بدونِ چرخش»ِ مدارِ بیرونی (rot=0) می‌نشیند
                     pt, orb = R["pts"][i], R["orbits"][n_orbit(R, i)]
+                    assert n_orbit(R, i) == 0, "[hero hub] node %d is not on the outer orbit at %s" % (i, tag)
                     ex, ey = pt["x"] - R["cx"], pt["y"] - R["cy"]
-                    cs_, sn_ = math.cos(orb["rot"]), math.sin(orb["rot"])
+                    cs_, sn_ = 1.0, 0.0
                     u, w_ = ex * cs_ + ey * sn_, -ex * sn_ + ey * cs_
                     val = (u / orb["rx"]) ** 2 + (w_ / orb["ry"]) ** 2
                     assert 0.99 <= val <= 1.01, "[hero hub] node %d is off its orbit ellipse (term %.4f) at %s" % (i, val, tag)
@@ -3118,21 +3119,26 @@ async def check_hero_hub(p, errors):
                 summary.append("pairs %s, dot span %.0fpx" % ("->".join("%d%d" % q for q in seq), span))
             await ctx.close()
             summary.append("%s mark off by <=%.2fpx" % (tag, worst_dx))
-    # (a) هر سه مدار هم‌سرعت و هم‌جهت‌اند: همان .00006 rad/ms کامیتِ 1916a01 (دو نمونه به فاصله‌ی ۱ ثانیه)
+    # (a) هر مدار نرخِ و جهتِ خودش را دارد؛ گره‌ها ثابت‌اند؛ سه رنگِ متفاوت در هر دو تم
     pg = await b.new_page(viewport={"width": 1440, "height": 900})
     pg.on("console", lambda m: errors.append(m.text) if m.type == "error" else None)
     await pg.goto("file://" + path)
     await pg.wait_for_timeout(600)
+    JS_NODES = "() => [...document.querySelectorAll('.hub-node circle')].map(c => { const k = c.getBoundingClientRect(); return [k.x + k.width / 2, k.y + k.height / 2]; })"
     rots0 = await pg.evaluate("() => window.__zaexaCanvasRoutePts.orbits.map(o => o.rot)")
+    nodes0 = await pg.evaluate(JS_NODES)
     await pg.wait_for_timeout(1000)
     rots1 = await pg.evaluate("() => window.__zaexaCanvasRoutePts.orbits.map(o => o.rot)")
+    await pg.wait_for_timeout(1000)
+    nodes1 = await pg.evaluate(JS_NODES)
     ow = await pg.evaluate("() => window.__zaexaOrbitW")
     await pg.close()
     dl = [r1 - r0 for r0, r1 in zip(rots0, rots1)]
-    assert ow == [0.00006, 0.00006, 0.00006], "[hero hub] every orbit must turn at 1916a01's .00006 rad/ms in the same direction: %r" % ow
-    assert len(dl) == 3 and all(0.04 <= d <= 0.08 for d in dl), "[hero hub] orbit speeds are %r rad/s, expected all ~0.06 and the same direction (1916a01)" % dl
-    assert max(dl) - min(dl) < 0.01, "[hero hub] orbits do not turn at one rate: %r" % dl
-    # کوچک‌ترین مدار (نزدیکِ لوگو) رنگِ --hero2 دارد و دو مدارِ بیرونی --hero1؛ در هر دو تم و بعد از تعویضِ زنده
+    assert ow == [0.00006, -0.000042, 0.000028], "[hero hub] orbit rates must be [.00006, -.000042, .000028] rad/ms (middle opposite): %r" % ow
+    assert len(dl) == 3 and all(abs(d - w_ * 1000) < 0.012 for d, w_ in zip(dl, ow)), "[hero hub] measured orbit speeds %r rad/s do not match %r" % (dl, ow)
+    assert dl[0] > 0 > dl[1] and dl[2] > 0 and len({round(abs(d), 3) for d in dl}) == 3, "[hero hub] orbits must have pairwise different rates and the middle one the opposite direction: %r" % dl
+    for i, (q0, q1) in enumerate(zip(nodes0, nodes1)):
+        assert abs(q0[0] - q1[0]) <= 0.5 and abs(q0[1] - q1[1]) <= 0.5, "[hero hub] DEX node %d moved over 2s: %r -> %r (nodes must stay fixed)" % (i, q0, q1)
     pg = await b.new_page(viewport={"width": 1440, "height": 900}, reduced_motion="no-preference")
     pg.on("console", lambda m: errors.append(m.text) if m.type == "error" else None)
     await pg.goto("file://" + path)
@@ -3145,11 +3151,12 @@ async def check_hero_hub(p, errors):
         oc = await pg.evaluate("""() => { const parse = c => c.match(/[\\d.]+/g).map(Number);
             const col = v => { const d = document.createElement('div'); d.style.color = 'var(' + v + ')'; document.body.appendChild(d); const c = getComputedStyle(d).color; d.remove(); return parse(c).slice(0, 3); };
             const O = window.__zaexaCanvasRoutePts.orbits;
-            return {theme: document.documentElement.dataset.theme || 'light', h1: col('--hero1'), h2: col('--hero2'), rx: O.map(o => o.rx), st: O.map(o => parse(o.stroke)), oa: window.__zaexaViz.oa}; }""")
-        inner = min(range(3), key=lambda k: oc["rx"][k])
-        outer = [k for k in range(3) if k != inner]
-        assert oc["st"][inner][:3] == oc["h2"] and all(oc["st"][k][:3] == oc["h1"] for k in outer) and oc["h1"] != oc["h2"], \
-            "[hero hub] the inner orbit must stroke with --hero2 and the two outer ones with --hero1 (%s): %r" % (oc["theme"], oc)
+            return {theme: document.documentElement.dataset.theme || 'light', h1: col('--hero1'), h2: col('--hero2'), hm: col('--hero-mid'), rx: O.map(o => o.rx), st: O.map(o => parse(o.stroke)), oa: window.__zaexaViz.oa}; }""")
+        order = sorted(range(3), key=lambda k: -oc["rx"][k])  # بیرونی، میانی، درونی
+        want = [oc["h1"], oc["hm"], oc["h2"]]
+        assert all(oc["st"][order[j]][:3] == want[j] for j in range(3)), \
+            "[hero hub] outer/middle/inner orbits must stroke with --hero1/--hero-mid/--hero2 (%s): %r" % (oc["theme"], oc)
+        assert len({tuple(w_) for w_ in want}) == 3, "[hero hub] the three orbit colours must all differ (%s): %r" % (oc["theme"], want)
         assert all(abs(oc["st"][k][3] - oc["oa"]) < 0.005 for k in range(3)) and oc["oa"] > 0, "[hero hub] orbit alpha differs from the live orbit opacity (%s): %r" % (oc["theme"], oc["st"])
     await pg.close()
     # (b) عرضِ لوگوتایپ ۰٫۹ عرضِ نشان در ۱۴۴۰ و ۳۹۰ و (c) بدونِ مربعِ پشتِ نشان بعد از هر تعویضِ تم
@@ -3266,8 +3273,9 @@ async def check_canvas_route_on_ellipse(p, errors):
             for j, pt in enumerate(info["pts"]):
                 dx, dy = pt["x"] - cx, pt["y"] - cy
                 orb = info["orbits"][pt["o"]]
-                u = dx * math.cos(orb["rot"]) + dy * math.sin(orb["rot"])
-                v = -dx * math.sin(orb["rot"]) + dy * math.cos(orb["rot"])
+                # گره‌ها ثابت‌اند و رویِ بیضیِ بدونِ چرخشِ مدارِ بیرونی؛ پس rot=0
+                assert pt["o"] == 0, "sample %d point %d is not on the outer orbit" % (i, j)
+                u, v = dx, dy
                 val = (u / orb["rx"]) ** 2 + (v / orb["ry"]) ** 2
                 assert 0.99 <= val <= 1.01, (
                     "sample %d point %d %r is off its orbit ellipse (term = %.4f, want 0.99..1.01) — "
@@ -6559,7 +6567,7 @@ async def check_stocks(p, errors):
     # ---- [stocks edges] قاعده‌ی مالک: ۲۰px از چپ برای عنوان/توضیح/ستونِ اول، ۲۰px از راست برای Trade ----
     EDGE_JS = """() => { const card = document.querySelector('#view-stocks .card'), c = card.getBoundingClientRect();
         const L = s => document.querySelector(s).getBoundingClientRect().left - c.left;
-        return {ttl: L('#view-stocks .ttl'), lede: L('#view-stocks .lede'), tk: L('#view-stocks tr[data-sym] .tk'),
+        return {ttl: L('#view-stocks .ttl'), lede: L('#view-stocks #stkLede'), tk: L('#view-stocks tr[data-sym] .stkStar'),
                 trades: [...document.querySelectorAll('#view-stocks .trade')].map(t => c.right - t.getBoundingClientRect().right),
                 sw: document.documentElement.scrollWidth, iw: innerWidth}; }"""
     for vw, vh in ((1280, 800), (390, 844)):
@@ -9601,6 +9609,10 @@ async def main():
         await check_watch_exit_chips(p, errors)
         await check_board_star(p, errors)
         await check_pairs_star(p, errors)
+        await check_swap_star(p, errors)
+        await check_header_star_parity(p, errors)
+        await check_markets_pages_parity(p, errors)
+        await check_stocks_star(p, errors)
         await check_early_buyers(p, errors)
         await check_stock_issuer(p, errors)
         b = await p.chromium.launch()
@@ -20941,7 +20953,7 @@ async def check_watch_rail(p, errors):
         info = await pg.evaluate("""() => { const r = document.getElementById('watchRail'), cs = getComputedStyle(r), rr = r.getBoundingClientRect();
             const hero = document.getElementById('baseHeroRow').getBoundingClientRect(), hd = document.querySelector('header').getBoundingClientRect();
             const row = r.querySelector('.wlRow');
-            return {pos: cs.position, w: rr.width, left: rr.left, top: rr.top, heroRight: hero.right, hdBottom: hd.bottom, maxH: cs.maxHeight, bg: cs.backgroundColor, rad: cs.borderRadius,
+            return {pos: cs.position, w: rr.width, left: rr.left, top: rr.top, heroRight: hero.right, stripTop: document.querySelector('#baseHeroRow > .marketWatch').getBoundingClientRect().top, hdBottom: hd.bottom, maxH: cs.maxHeight, bg: cs.backgroundColor, rad: cs.borderRadius,
                     title: r.querySelector('.wlTtl').textContent, count: r.querySelector('.savedCount').textContent, rf: r.querySelector('.wlRefresh').getAttribute('aria-label'),
                     n: r.querySelectorAll('.wlRow').length, sym: row.querySelector('.wlSym').textContent, chain: row.querySelector('.wlChain').textContent,
                     px: row.querySelector('.wlPx').textContent, chg: row.querySelector('.wlChg').textContent, exit: row.querySelector('.savedChip').textContent,
@@ -20949,7 +20961,7 @@ async def check_watch_rail(p, errors):
                     btnShown: document.getElementById('watchWrap').getClientRects().length, panelShown: document.getElementById('savedWatch').getClientRects().length}; }""")
         assert info["pos"] == "fixed" and abs(info["w"] - 300) <= 0.5, "[watch rail] fixed, 300px wide: %s" % info
         assert abs(info["left"] - (info["heroRight"] + 24)) <= 1, "[watch rail] left edge = main content right edge + 24: %s" % info
-        assert abs(info["top"] - (info["hdBottom"] + 16)) <= 1, "[watch rail] top = header bottom + 16: %s" % info
+        assert abs(info["top"] - info["stripTop"]) <= 1, "[watch rail] top = top of the first content card (Market watch strip): %s" % info
         assert info["title"] == "Your watchlist" and info["count"] == "4" and info["rf"] == "Refresh prices" and info["n"] == 4, "[watch rail] header and rows: %s" % info
         assert info["sym"] == "WA" and info["chain"] == "Base" and info["px"] == "$1.5" and info["chg"] == "▲ 4.50%" and "Not checked yet" in info["exit"], "[watch rail] row content (symbol, chain chip, price, 24h change, exit chip): %s" % info
         assert info["href"] == "/t/" + rows[0]["address"] and info["rm"] == "Remove WA" and info["av"], "[watch rail] row link, remove label, logo helper avatar: %s" % info
@@ -20973,12 +20985,13 @@ async def check_watch_rail(p, errors):
         GEO = """() => { const r = document.getElementById('watchRail').getBoundingClientRect(), h = document.getElementById('baseHeroRow').getBoundingClientRect(), m = document.getElementById('watchRail').querySelector('.wlMove');
             const mb = m.getBoundingClientRect(), cs = getComputedStyle(m);
             const mx = [...document.querySelectorAll('main *')].filter(e => e.getClientRects().length && !e.closest('#watchRail')).map(e => e.getBoundingClientRect());
-            return {l: r.left, r: r.right, w: r.width, heroL: h.left, heroR: h.right, minL: Math.min(...mx.map(x => x.left)), maxR: Math.max(...mx.map(x => x.right)), sw: document.documentElement.scrollWidth, iw: innerWidth,
+            return {l: r.left, t: r.top, stripTop: document.querySelector('#baseHeroRow > .marketWatch').getBoundingClientRect().top, r: r.right, w: r.width, heroL: h.left, heroR: h.right, minL: Math.min(...mx.map(x => x.left)), maxR: Math.max(...mx.map(x => x.right)), sw: document.documentElement.scrollWidth, iw: innerWidth,
                     aria: m.getAttribute('aria-label'), txt: m.textContent, bw: mb.width, bh: mb.height, rad: cs.borderRadius, inHead: !!m.closest('.wlHead'), pop: document.querySelectorAll('#watchPop .wlMove').length,
                     st: localStorage.getItem('zaexa.layout.v1')}; }"""
         gR = await pg.evaluate(GEO)
         assert gR["aria"] == "Move watchlist to the left" and gR["txt"] == "⇄" and gR["inHead"] and abs(gR["bw"] - 28) <= 0.5 and abs(gR["bh"] - 28) <= 0.5 and gR["rad"] in ("50%", "14px") and gR["pop"] == 0, "[watch rail] the 28px round ⇄ button in the rail header (not in the popover): %s" % gR
         assert gR["st"] is None, "[watch rail] nothing is stored before the first click: %s" % gR["st"]
+        assert abs(gR["t"] - gR["stripTop"]) <= 1, "[watch rail] right side: top = top of the Market watch strip: %s" % gR
         rectsR = await pg.evaluate("() => { const grab = %s; return grab(); }" % WL_MAIN_RECTS_JS)
         await pg.click("#watchRail .wlMove")
         await pg.wait_for_timeout(400)
@@ -20986,6 +20999,7 @@ async def check_watch_rail(p, errors):
         assert gL["aria"] == "Move watchlist to the right" and gL["st"] == '{"rail":"left"}', "[watch rail] the label flips and the choice is stored: %s" % gL
         assert abs(gL["r"] - (gL["heroL"] - 24)) <= 1 and abs(gL["w"] - 300) <= 0.5, "[watch rail] left side: the rail's right edge = main content left edge - 24: %s" % gL
         assert gL["r"] <= gL["minL"] + 0.5 and gL["l"] >= 0 and gL["sw"] <= gL["iw"], "[watch rail] left side: the rail overlaps the main content or leaves the screen: %s" % gL
+        assert abs(gL["t"] - gL["stripTop"]) <= 1, "[watch rail] left side: top = top of the Market watch strip: %s" % gL
         rectsL = await pg.evaluate("() => { const grab = %s; return grab(); }" % WL_MAIN_RECTS_JS)
         assert rectsL == rectsR and len(rectsL["main"]) > 100, "[watch rail] main content and header rects must be identical with the rail on the left, on the right and hidden"
         await pg.evaluate("() => { document.getElementById('watchRail').hidden = true; }")
@@ -21064,11 +21078,11 @@ async def check_watch_rail(p, errors):
         await pg.wait_for_selector("#watchRail .wlRow", timeout=8000)
         await pg.wait_for_timeout(800)
         mh = await pg.evaluate("""() => { const r = document.getElementById('watchRail'), l = r.querySelector('.wlList'), rr = r.getBoundingClientRect(), hd = document.querySelector('header').getBoundingClientRect();
-            return {h: rr.height, bottom: rr.bottom, ih: innerHeight, hdb: hd.bottom, scroll: l.scrollHeight > l.clientHeight + 5, ov: getComputedStyle(l).overflowY}; }""")
-        assert mh["bottom"] <= mh["ih"] - 15 and abs(mh["h"] - (mh["ih"] - mh["hdb"] - 32)) <= 1.5 and mh["scroll"] and mh["ov"] == "auto", "[watch rail] max-height = viewport - header - 32 with an internal scroll: %s" % mh
+            return {h: rr.height, bottom: rr.bottom, ih: innerHeight, hdb: rr.top, scroll: l.scrollHeight > l.clientHeight + 5, ov: getComputedStyle(l).overflowY}; }""")
+        assert mh["bottom"] <= mh["ih"] - 15 and abs(mh["h"] - (mh["ih"] - mh["hdb"] - 16)) <= 1.5 and mh["scroll"] and mh["ov"] == "auto", "[watch rail] max-height = viewport - rail top - 16 with an internal scroll: %s" % mh
         await pg.context.close()
         assert not errs, "[watch rail] console errors: %s" % errs
-        print("[watch rail] both sides via the rail header's 28px round ⇄ button (right = content right + 24, left = content left - 24 incl. 1780px; stored as zaexa.layout.v1 {rail}, survives reload, old swap key/garbage/blocked storage harmless, main rects identical left/right/hidden); at 1920: position:fixed, 300px, left = content right + 24, top = header bottom + 16, same rect after a 600px scroll, no overlap and every main/header rect identical with the rail on and off; header, count, Refresh prices, rows (logo, symbol, chain chip, price, 24h change, exit chip, Remove <SYM>), empty text, swap/token views only, 30 tokens scroll inside max-height")
+        print("[watch rail] both sides via the rail header's 28px round ⇄ button (right = content right + 24, left = content left - 24 incl. 1780px; stored as zaexa.layout.v1 {rail}, survives reload, old swap key/garbage/blocked storage harmless, main rects identical left/right/hidden); at 1920: position:fixed, 300px, left = content right + 24, top = the Market watch strip's top (both sides), same rect after a 600px scroll, no overlap and every main/header rect identical with the rail on and off; header, count, Refresh prices, rows (logo, symbol, chain chip, price, 24h change, exit chip, Remove <SYM>), empty text, swap/token views only, 30 tokens scroll inside max-height")
     finally:
         await b.close()
         srv.shutdown()
@@ -21108,7 +21122,10 @@ async def check_watch_popover(p, errors):
             po = await pg.evaluate("""() => { const p = document.getElementById('watchPop'), cs = getComputedStyle(p), r = p.getBoundingClientRect(), w = document.getElementById('watchWrap').getBoundingClientRect(), b = document.getElementById('watchBtn').getBoundingClientRect();
                 return {pos: cs.position, w: r.width, h: r.height, right: r.right, wrapRight: w.right, top: r.top, btnBottom: b.bottom, ih: innerHeight, n: p.querySelectorAll('.wlRow').length,
                         exp: document.getElementById('watchBtn').getAttribute('aria-expanded'), title: p.querySelector('.wlTtl').textContent, rf: p.querySelector('.wlRefresh').getAttribute('aria-label'), left: r.left}; }""")
-            assert po["pos"] == "absolute" and abs(po["w"] - 320) <= 1 and po["h"] <= po["ih"] * 0.7 + 1 and abs(po["right"] - po["wrapRight"]) <= 1 and po["top"] >= po["btnBottom"], "%s: absolute, 320px, <=70vh, right-aligned under the button: %s" % (tag, po)
+            assert po["pos"] == "fixed" and po["h"] <= po["ih"] * 0.7 + 1, "%s: fixed and <=70vh: %s" % (tag, po)
+            ge = await pg.evaluate("""() => { const p = document.getElementById('watchPop').getBoundingClientRect(), c = document.getElementById('actBtn').closest('.card').getBoundingClientRect(), h = document.querySelector('header').getBoundingClientRect();
+                return {pl: p.left, pr: p.right, pt: p.top, cl: c.left, cr: c.right, hb: h.bottom}; }""")
+            assert abs(ge["pl"] - ge["cl"]) <= 1 and abs(ge["pr"] - ge["cr"]) <= 1 and abs(ge["pt"] - (ge["hb"] + 8)) <= 1, "%s: left/right edges = the swap card's, top = header bottom + 8: %s" % (tag, ge)
             assert po["exp"] == "true" and po["n"] == 4 and po["title"] == "Your watchlist" and po["rf"] == "Refresh prices" and po["left"] >= 0, "%s: opened content: %s" % (tag, po)
             assert await pg.evaluate(WL_COUNT_JS) == 1, "%s: exactly one visible 'Your watchlist' when open" % tag
             after = await pg.evaluate(WL_MAIN_RECTS_JS)
@@ -21150,7 +21167,7 @@ async def check_watch_popover(p, errors):
         assert ra == [True, 0], "[watch popover] at 940 the star button shows (sheet) and there is no rail: %s" % ra
         await pg.context.close()
         assert not errs, "[watch popover] console errors: %s" % errs
-        print("[watch popover] 1440, 1280 and 941: a 38px chip-round star button with a count badge sits in the header immediately left of settings, adding it moves no header item and nothing in main; the popover is absolute, 320px, right-aligned under the button, <=70vh with an inner scroll, opens/closes by click, Escape (focus back) and outside click, opening moves nothing; removing a token keeps it open; no button in Flow, no rail at 940 (the sheet button shows there; see [watch sheet mobile])")
+        print("[watch popover] 1440, 1280 and 941: a 38px chip-round star button with a count badge sits in the header immediately left of settings, adding it moves no header item and nothing in main; the popover is fixed with its left/right edges equal to the swap card's and top = header bottom + 8, <=70vh with an inner scroll, opens/closes by click, Escape (focus back) and outside click, opening moves nothing; removing a token keeps it open; no button in Flow, no rail at 940 (the sheet button shows there; see [watch sheet mobile])")
     finally:
         await b.close()
         srv.shutdown()
@@ -21194,7 +21211,10 @@ async def check_watch_sheet_mobile(p, errors):
                         x: !!x, xl: x && x.getAttribute('aria-label'), xw: xr && xr.width, xIn: xr && xr.right <= r.right + 0.5 && xr.left >= r.left, rf: p.querySelector('.wlRefresh').getAttribute('aria-label'), rad: cs.borderRadius, bg: cs.backgroundColor,
                         exp: document.getElementById('watchBtn').getAttribute('aria-expanded'), exits: p.querySelectorAll('.savedChip').length, rm: p.querySelectorAll('.wlRm').length,
                         bodyOv: getComputedStyle(document.body).overflow + '/' + getComputedStyle(document.documentElement).overflow, cardBg: getComputedStyle(document.querySelector('#view-swap .card')).backgroundColor}; }""")
-            assert sh["pos"] == "fixed" and abs(sh["left"] - 12) <= 0.5 and abs(sh["right"] - 12) <= 0.5 and abs(sh["top"] - (sh["hb"] + 8)) <= 1, "%s: sheet geometry fixed, 12px sides, top = header bottom + 8: %s" % (tag, sh)
+            assert sh["pos"] == "fixed" and abs(sh["top"] - (sh["hb"] + 8)) <= 1, "%s: sheet geometry fixed, top = header bottom + 8: %s" % (tag, sh)
+            ge = await pg.evaluate("""() => { const p = document.getElementById('watchPop').getBoundingClientRect(), c = document.getElementById('actBtn').closest('.card').getBoundingClientRect();
+                return {pl: p.left, pr: p.right, cl: c.left, cr: c.right}; }""")
+            assert abs(ge["pl"] - ge["cl"]) <= 1 and abs(ge["pr"] - ge["cr"]) <= 1, "%s: the sheet's left/right edges equal the swap card's: %s" % (tag, ge)
             assert sh["hgt"] <= sh["ih"] * 0.7 + 1 and sh["n"] == 5 and sh["title"] == "Your watchlist" and sh["rf"] == "Refresh prices" and sh["exp"] == "true" and sh["exits"] == 5 and sh["rm"] == 5, "%s: sheet content: %s" % (tag, sh)
             assert sh["x"] and sh["xl"] == "Close watchlist" and sh["xIn"] and sh["xw"] >= 28 and sh["bg"] == sh["cardBg"], "%s: close button in the sheet header, card background: %s" % (tag, sh)
             assert "hidden" not in sh["bodyOv"], "%s: body scroll is not locked: %s" % (tag, sh["bodyOv"])
@@ -21256,7 +21276,7 @@ async def check_watch_sheet_mobile(p, errors):
         assert er[0] is False and er[1].startswith("Could not save"), "[watch sheet mobile] the storage-error message opens the sheet: %s" % er
         await pg.context.close()
         assert not errs, "[watch sheet mobile] console errors: %s" % errs
-        print("[watch sheet mobile] at 360, 390 and 430 the in-page #savedWatch panel is hidden and the header star (same height and line as settings, no header/page overflow) opens a fixed sheet (12px sides, top = header bottom + 8, <=70vh with internal scroll, card style, 'Close watchlist' button) that closes with the button, Escape and an outside tap, leaves body scroll alone and moves nothing; full-list and storage-error messages open it; swap card top identical with 0 and 20 tokens (%s)" % tops)
+        print("[watch sheet mobile] at 360, 390 and 430 the in-page #savedWatch panel is hidden and the header star (same height and line as settings, no header/page overflow) opens a fixed sheet (left/right = the swap card's edges, top = header bottom + 8, <=70vh with internal scroll, card style, 'Close watchlist' button) that closes with the button, Escape and an outside tap, leaves body scroll alone and moves nothing; full-list and storage-error messages open it; swap card top identical with 0 and 20 tokens (%s)" % tops)
     finally:
         await b.close()
         srv.shutdown()
@@ -21578,6 +21598,228 @@ async def check_pairs_star(p, errors):
     finally:
         await b.close()
         srv.shutdown()
+
+
+async def check_swap_star(p, errors):
+    """[swap star] ۲۵ اکتبر: دکمه‌ی ستاره‌ی گرد ۳۲px در هدرِ کارتِ سواپ، چپِ انتخابگرِ شبکه، برای توکنِ «You receive»
+    (Base: tokenOut مگر native؛ Solana: mintِ دریافتی مگر SOL) — همان ظاهر و aria ستاره‌ی کارتِ Exit؛ بدونِ توکن غیرفعال با title."""
+    srv, origin = we_serve()
+    b = await p.chromium.launch()
+    errs = []
+    stored = lambda pg: pg.evaluate("() => JSON.parse(localStorage.getItem('%s') || '[]')" % WE_KEY)
+    try:
+        env = FbEnv(b, origin, errs)
+        pg = await env.open("#swap", vw=1440, vh=900, scheme="light", board=False)
+        await pg.wait_for_selector("#swapWatch", state="visible")
+        await pg.wait_for_timeout(900)
+        info = await pg.evaluate("""() => { const s = document.getElementById('swapWatch'), m = document.getElementById('srcMenu'), e = document.getElementById('baseWatch');
+            const r = s.getBoundingClientRect(), mr = m.getBoundingClientRect(), cs = getComputedStyle(s), ce = getComputedStyle(e);
+            return {w: r.width, h: r.height, rad: cs.borderRadius, left: r.right <= mr.left + 0.5, sameRow: Math.abs((r.top + r.bottom) / 2 - (mr.top + mr.bottom) / 2) <= 2,
+                inBar: !!s.closest('#swapNetworkBar'), cls: s.className, pressed: s.getAttribute('aria-pressed'), glyph: s.textContent, label: s.getAttribute('aria-label'),
+                sym: tokenOut.symbol, addr: tokenOut.address, dis: s.disabled,
+                look: [cs.backgroundColor, cs.boxShadow, cs.color, cs.borderTopWidth].join('|'), lookE: [ce.backgroundColor, ce.boxShadow, ce.color, ce.borderTopWidth].join('|')}; }""")
+        assert info["inBar"] and info["left"] and info["sameRow"], "[swap star] must sit in the swap header, left of the network selector: %s" % info
+        assert abs(info["w"] - 32) < .5 and abs(info["h"] - 32) < .5 and info["rad"] in ("50%", "16px"), "[swap star] must be a 32px round button: %s" % info
+        assert info["look"] == info["lookE"] and "savedToggle" in info["cls"] and "iconBtn" in info["cls"], "[swap star] same look as the exit-card star: %s" % info
+        assert not info["dis"] and info["pressed"] == "false" and info["glyph"] == "☆" and info["label"] == "Watch " + info["sym"], "[swap star] initial state: %s" % info
+        await we_shot(pg, "swap-star-1440-light.png")
+        await pg.click("#swapWatch")
+        s = await stored(pg)
+        assert [r["address"] for r in s] == [info["addr"].lower()] and s[0]["chain"] == "base", "[swap star] click must save the received token: %s" % s
+        st = await pg.evaluate("() => [swapWatch.getAttribute('aria-pressed'), swapWatch.textContent, swapWatch.getAttribute('aria-label'), baseWatch.getAttribute('aria-pressed')]")
+        assert st == ["true", "★", "Stop watching " + info["sym"], "true"], "[swap star] pressed state (and the exit-card star stays in sync): %s" % st
+        await pg.click("#swapWatch")
+        assert await stored(pg) == [], "[swap star] second click must remove the token"
+        await pg.evaluate("() => { tokenOut = BASE_TOKENS.find(t => t.native); savedWatchSelection(); }")
+        st = await pg.evaluate("() => [swapWatch.disabled, swapWatch.title]")
+        assert st == [True, "Select a token first"], "[swap star] native received token must disable the star: %s" % st
+        await pg.context.close()
+        # --- Solana ---
+        pg = await env.open("#swap?chain=solana", vw=1440, vh=900, scheme="light", board=False)
+        await pg.wait_for_selector("#swapWatch", state="visible")
+        await pg.wait_for_timeout(900)
+        await pg.evaluate("""([m, w]) => { solMintCur = m; solTokenSymbol = 'USDC'; solRefMint = w; solRefSymbol = 'SOL'; solSide = 'buy'; savedWatchSelection(); }""", [FB_SOL_USDC, FB_SOL_WSOL])
+        assert await pg.evaluate("() => !!document.querySelector('#solSwapNetworkSlot #swapWatch')"), "[swap star] Solana: the star lives in the Solana swap header"
+        await pg.click("#swapWatch")
+        s = await stored(pg)
+        assert s and s[0]["chain"] == "solana" and s[0]["address"] == FB_SOL_USDC, "[swap star] Solana buy: the received mint (exact) must be saved: %s" % s
+        assert await pg.get_attribute("#swapWatch", "aria-pressed") == "true", "[swap star] Solana pressed"
+        await pg.evaluate("() => { solSide = 'sell'; savedWatchSelection(); }")
+        st = await pg.evaluate("() => [swapWatch.disabled, swapWatch.title, swapWatch.getAttribute('aria-pressed')]")
+        assert st == [True, "Select a token first", "false"], "[swap star] Solana sell into SOL has no watchable received token: %s" % st
+        await pg.evaluate("([m]) => { solRefMint = m; solRefSymbol = 'USDC'; solMintCur = SOL_MINT_ADDR; solTokenSymbol = 'SOL'; savedWatchSelection(); }", [FB_SOL_USDC])
+        assert await pg.get_attribute("#swapWatch", "aria-pressed") == "true", "[swap star] Solana sell: the received mint is the reference token"
+        await pg.context.close()
+        assert not errs, "[swap star] console errors: %s" % errs
+        print("[swap star] 32px round star in the Base and Solana swap header left of the network selector, same look/aria as the exit-card star, toggles the received token (Base tokenOut non-native; Solana received mint exact, SOL disabled with 'Select a token first')")
+    finally:
+        await b.close()
+        srv.shutdown()
+
+
+async def check_header_star_parity(p, errors):
+    """[header star parity] ۲۵ اکتبر: ★ی هدر دقیقاً همان ظاهرِ #setBtn را دارد (زمینه/لبه/سایه/رنگ)، در هر دو تم، ۳۹۰ و ۱۴۴۰؛
+    و تا وقتی پاپ‌اور/شیت باز است همان حالتِ فشرده‌ی #setBtn را نشان می‌دهد."""
+    srv, origin = we_serve()
+    b = await p.chromium.launch()
+    errs = []
+    LOOK = """(id) => { const e = document.getElementById(id), c = getComputedStyle(e);
+        return [c.backgroundColor, c.boxShadow, c.borderTopWidth + ' ' + c.borderTopStyle + ' ' + c.borderTopColor, c.color, c.borderRadius, c.width, c.height].join(' | '); }"""
+    try:
+        env = FbEnv(b, origin, errs)
+        for vw, vh in ((390, 844), (1440, 900)):
+            for scheme in ("light", "dark"):
+                tag = "[header star parity] %dpx %s" % (vw, scheme)
+                pg = await env.open("#swap", vw=vw, vh=vh, scheme=scheme, board=False)
+                await pg.wait_for_selector("#watchBtn", state="visible")
+                await pg.wait_for_timeout(700)
+                await pg.mouse.move(2, vh - 2)
+                closed_w, closed_s = await pg.evaluate(LOOK, "watchBtn"), await pg.evaluate(LOOK, "setBtn")
+                assert closed_w == closed_s, "%s: closed ★ must look exactly like #setBtn:\n  star %s\n  gear %s" % (tag, closed_w, closed_s)
+                await pg.click("#setBtn")
+                await pg.mouse.move(2, vh - 2)
+                await pg.wait_for_timeout(450)  # transition .16s
+                open_s = await pg.evaluate(LOOK, "setBtn")
+                await pg.click("#setBtn")
+                await pg.mouse.move(2, vh - 2)
+                await pg.click("#watchBtn")
+                await pg.mouse.move(2, vh - 2)
+                await pg.wait_for_timeout(450)
+                assert await pg.get_attribute("#watchBtn", "aria-expanded") == "true", "%s: the watchlist did not open" % tag
+                open_w = await pg.evaluate(LOOK, "watchBtn")
+                assert open_w == open_s, "%s: ★ must stay pressed like #setBtn while the popover/sheet is open:\n  star %s\n  gear %s" % (tag, open_w, open_s)
+                assert open_w != closed_w, "%s: the pressed look must differ from the closed look" % tag
+                if vw == 390 and scheme == "light":
+                    # تنظیمات هم باز و دیده شود (عکس)
+                    await pg.screenshot(path=os.path.join(WE_SHOTS, "header-390-light-open.png"))
+                await pg.context.close()
+        assert not errs, "[header star parity] console errors: %s" % errs
+        print("[header star parity] 390 and 1440, light and dark: the header star has the same background, border, shadow and colour as #setBtn when closed, and the same pressed look while the popover/sheet is open")
+    finally:
+        await b.close()
+        srv.shutdown()
+
+
+async def check_markets_pages_parity(p, errors):
+    """[markets pages parity] ۲۵ اکتبر: سوییچ Flow/New pairs و کارتِ محتوا روی /app#flow (تابلو) و /pairs در ۱۴۴۰، ۱۲۸۰ و ۳۹۰ یک مستطیلِ
+    یکسان دارند (چپ/راست/بالا ±۱px)؛ کارتِ New pairs همان شعاع/زمینه/سایه و همان فاصله‌ی ۲۰px محتوا را دارد. ستاره‌ی جدول بی‌قاب و مثلِ ستاره‌ی تابلو."""
+    srv, origin = we_serve()
+    b = await p.chromium.launch()
+    errs = []
+    RECT = """(sel) => { const e = document.querySelector(sel); if (!e) return null; const r = e.getBoundingClientRect(), c = getComputedStyle(e);
+        return {l: r.left, r: r.right, t: r.top + scrollY, w: r.width, rad: c.borderRadius, bg: c.backgroundColor, sh: c.boxShadow}; }"""
+    try:
+        env = FbEnv(b, origin, errs)
+        prow, toks, pls, mk, pools = fb_fixture()
+        env.pairs["body"] = {"store": True, "rows": prow}
+        env.gt = fb_gt_for(toks, pls)
+        for vw, vh in ((1440, 900), (1280, 900), (390, 844)):
+            for scheme in ("dark", "light"):
+                tag = "[markets pages parity] %dpx %s" % (vw, scheme)
+                pg = await env.open(vw=vw, vh=vh, scheme=scheme)
+                await fb_wait_rows(pg)
+                await pg.wait_for_timeout(400)
+                a_sw = await pg.evaluate(RECT, "#view-flow .mktSwitch")
+                a_card = await pg.evaluate(RECT, "#view-flow > .card")
+                a_in = await pg.evaluate("() => document.querySelector('#view-flow .fbTtl').getBoundingClientRect().left")
+                a_star = await pg.evaluate("""() => { const e = document.querySelector('#flowBody .fbStar'), c = getComputedStyle(e); return [c.borderTopWidth, c.boxShadow, c.backgroundColor, c.color, c.width].join('|'); }""")
+                await pg.context.close()
+                ctx = await b.new_context(viewport={"width": vw, "height": vh}, color_scheme=scheme)
+                pp = await ctx.new_page()
+                pp.on("pageerror", lambda e: errs.append("PAGEERROR %s" % e))
+
+                async def h(route):
+                    u = route.request.url
+                    if u.startswith(origin):
+                        rest = u.split("?")[0][len(origin):]
+                        if rest == "/pairs.json":
+                            return await route.fulfill(status=200, content_type="application/json", body=_fbj.dumps({"store": True, "rows": prow}))
+                        return await route.continue_()
+                    if u.startswith("https://api.geckoterminal.com/api/v2/"):
+                        return await route.fulfill(status=200, content_type="application/json", body='{"data":[]}')
+                    return await route.abort()
+                await pp.route("**/*", h)
+                await pp.goto(origin + "/pairs")
+                await pp.wait_for_selector("#rowsBody tr, #rowsCards li", state="attached", timeout=8000)
+                await pp.wait_for_timeout(500)
+                p_sw = await pp.evaluate(RECT, ".mktSwitch")
+                p_card = await pp.evaluate(RECT, "#pairsBoard")
+                assert p_card, "%s: the New pairs content must sit in #pairsBoard" % tag
+                p_in = await pp.evaluate("() => document.querySelector('#pairsBoard > h1').getBoundingClientRect().left")
+                p_star = await pp.evaluate("""() => { const e = document.querySelector(vwStar), c = getComputedStyle(e); return [c.borderTopWidth, c.boxShadow, c.backgroundColor, c.color, c.width].join('|'); }""".replace("vwStar", "'#rowsBody .star-btn'" if vw > 760 else "'#rowsCards .star-btn'"))
+                if vw == 1440 and scheme == "dark":
+                    await pp.screenshot(path=os.path.join(WE_SHOTS, "pairs-1440-dark.png"))
+                await ctx.close()
+                for k in ("l", "r", "t"):
+                    assert abs(a_sw[k] - p_sw[k]) <= 1, "%s: the Flow/New pairs switch moves (%s): app %s vs pairs %s" % (tag, k, a_sw, p_sw)
+                    assert abs(a_card[k] - p_card[k]) <= 1, "%s: the content card moves (%s): app board %s vs pairs card %s" % (tag, k, a_card, p_card)
+                assert a_card["rad"] == p_card["rad"] and a_card["bg"] == p_card["bg"] and a_card["sh"] == p_card["sh"], "%s: radius/background/shadow differ: %s vs %s" % (tag, a_card, p_card)
+                assert abs((a_in - a_card["l"]) - (p_in - p_card["l"])) <= 1, "%s: content inset differs (board %.1f vs pairs %.1f)" % (tag, a_in - a_card["l"], p_in - p_card["l"])
+                # ستاره‌ی جدول: بی‌قاب و همان سایه/زمینه/رنگ ستاره‌ی تابلو
+                aw, ash, abg, ac, aw_ = a_star.split("|")
+                pw, psh, pbg, pc, pw_ = p_star.split("|")
+                assert pw == "0px" and psh == ash and pbg == abg and pc == ac and pw_ == aw_, "%s: pairs star must be borderless like the board star: pairs %s vs board %s" % (tag, p_star, a_star)
+        assert not errs, "[markets pages parity] console errors: %s" % errs
+        print("[markets pages parity] 1440, 1280 and 390 (dark and light): the Flow/New pairs switch and the content card have the same left/right/top (+-1px) on /app#flow and /pairs, same radius/background/shadow and 20px content inset; the /pairs star has border-width 0 and the board star's shadow, background, colour and size")
+    finally:
+        await b.close()
+        srv.shutdown()
+
+
+async def check_stocks_star(p, errors):
+    """[stocks star] ۲۵ اکتبر: ستونِ اولِ جدولِ US stocks (Base و Solana) یک ستاره‌ی دیده‌بانی است، ۲۰px از لبه‌ی چپ؛ آدرسِ Base از BASE_TOKENS
+    (حروف کوچک) و mintِ Solana دقیقاً همان؛ کلیک ردیف/Trade را فعال نمی‌کند، aria-pressed دارد و با رویدادِ storage هم‌گام می‌شود."""
+    b = await p.chromium.launch()
+    errs = []
+    WK = "zaexa.watchlist.v1"
+    try:
+        for chain in ("base", "solana"):
+            tag = "[stocks star] " + chain
+            if chain == "base":
+                pg = await stk_open(b, 1440, 900, "light", errs)
+                await stk_wait_loaded(pg)
+                sym, n = "TSLAc", 12
+            else:
+                pg = await stk_open(b, 1280, 800, "light", errs, init_extra=stk_sol_init(sol=True))
+                await stk_sol_wait(pg)
+                sym, n = "AAPLx", 19
+            g = await pg.evaluate("""(sym) => { const c = document.querySelector('#view-stocks .card').getBoundingClientRect(), rows = [...document.querySelectorAll('#view-stocks tr[data-sym]')];
+                const b = document.querySelector('#view-stocks tr[data-sym="' + sym + '"] td:first-child .stkStar'), tk = document.querySelector('#view-stocks tr[data-sym="' + sym + '"] .tk');
+                const r = b && b.getBoundingClientRect();
+                return {n: rows.length, firstCells: rows.filter(tr => tr.querySelector('td:first-child .stkStar')).length, left: r && r.left - c.left, w: r && r.width, h: r && r.height, tkLeft: tk.getBoundingClientRect().left - c.left,
+                        pressed: b && b.getAttribute('aria-pressed'), label: b && b.getAttribute('aria-label'), glyph: b && b.textContent, cls: b && b.className, border: b && getComputedStyle(b).borderTopWidth,
+                        sw: document.documentElement.scrollWidth, iw: innerWidth}; }""", sym)
+            assert g["n"] == n and g["firstCells"] == n, "%s: every row needs the star as its first cell: %s" % (tag, g)
+            assert abs(g["left"] - 20) <= 0.5 and abs(g["w"] - 28) <= 0.5 and g["tkLeft"] > g["left"] + g["w"], "%s: the star is the first column, 20px from the card's left edge: %s" % (tag, g)
+            assert g["pressed"] == "false" and g["label"] == "Watch " + sym and g["glyph"] == "☆" and "savedToggle" in g["cls"] and g["border"] == "0px" and g["sw"] <= g["iw"], "%s: initial state: %s" % (tag, g)
+            sel = '#view-stocks tr[data-sym="%s"] .stkStar' % sym
+            await pg.click(sel)
+            st = await pg.evaluate("() => JSON.parse(localStorage.getItem('%s') || '[]')" % WK)
+            if chain == "base":
+                addr = await pg.evaluate("() => BASE_TOKENS.find(t => t.symbol === 'TSLAc').address.toLowerCase()")
+                assert len(st) == 1 and st[0]["chain"] == "base" and st[0]["address"] == addr and st[0]["symbol"] == sym, "%s: stored row: %s" % (tag, st)
+            else:
+                mint = "XsbEhLAtcf6HdfpFZ5xEMdqW8nfAvcsP5bdudRLJzJp"
+                assert len(st) == 1 and st[0]["chain"] == "solana" and st[0]["address"] == mint and st[0]["symbol"] == sym, "%s: stored row (mint must be exact): %s" % (tag, st)
+            a = await pg.evaluate("(s) => [document.querySelector(s).getAttribute('aria-pressed'), document.querySelector(s).textContent, document.querySelector(s).getAttribute('aria-label'), view, document.getElementById('amtIn') ? document.getElementById('amtIn').matches(':focus') : null]", sel)
+            assert a[:3] == ["true", "★", "Stop watching " + sym] and a[3] == "stocks" and a[4] is not True, "%s: after click (the row/Trade must not fire): %s" % (tag, a)
+            if chain == "base":
+                await pg.evaluate("() => window.scrollTo(0, 0)")
+                await pg.wait_for_timeout(200)
+                await pg.screenshot(path=os.path.join(WE_SHOTS, "stocks-1440-light.png"))
+            # هم‌گامی با تبِ دیگر: ذخیره‌ساز را مستقیم پاک کن و رویدادِ storage بفرست
+            await pg.evaluate("() => { localStorage.setItem('%s', '[]'); dispatchEvent(new StorageEvent('storage', {key: '%s'})); }" % (WK, WK))
+            await pg.wait_for_timeout(200)
+            assert await pg.get_attribute(sel, "aria-pressed") == "false", "%s: the star must follow a storage event" % tag
+            await pg.click(sel)
+            await pg.click(sel)
+            assert await pg.evaluate("() => JSON.parse(localStorage.getItem('%s') || '[]').length" % WK) == 0, "%s: a second click removes the token" % tag
+            await pg.context.close()
+        bad = [e for e in errs if "Failed to load resource" not in e]  # لوگوهای بیرونی در سندباکس
+        assert not bad, "[stocks star] console errors: %s" % bad
+        print("[stocks star] US stocks (Base TSLAc and Solana AAPLx): the first column is a 28px borderless watch star 20px from the card's left edge, Base address from BASE_TOKENS (lower-case) and Solana mint exact, aria-pressed/label follow, the click opens neither the row nor Trade, and a storage event re-syncs it")
+    finally:
+        await b.close()
 
 
 async def only(names):

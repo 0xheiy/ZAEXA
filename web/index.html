@@ -1640,6 +1640,11 @@ footer .fine{max-width:78ch;margin:46px 0 0;font-size:11.5px;color:var(--tx3);li
 #view-stocks th:last-child,#view-stocks td:last-child{padding-right:20px;width:1%}
 #view-stocks td{padding:11px 10px;border-bottom:1px solid var(--line);text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
 #view-stocks tr:last-child td{border-bottom:0}
+/* ۲۵ اکتبر: ستونِ ستاره اولین ستون است (۲۰px از لبه‌ی چپ)؛ ستونِ سهم بعد از آن */
+#view-stocks .stkStarTd,#view-stocks .stkStarTh{width:28px;padding-right:0}
+#view-stocks th:nth-child(2),#view-stocks td:nth-child(2){text-align:left;padding-left:8px}
+#view-stocks .stkStar{width:28px;height:28px;font-size:15px}
+#view-stocks #stkMsg{margin:0 20px 10px;color:var(--warn)}
 #view-stocks .tk{display:flex;align-items:center;gap:11px}
 #view-stocks .tk .av{display:grid;place-items:center;width:30px;height:30px;border-radius:50%;background:var(--grad);color:var(--on-acc);font-size:10px;font-weight:700}
 #view-stocks .tk .nm{display:flex;flex-direction:column;align-items:flex-start;min-width:0}
@@ -1678,7 +1683,7 @@ footer .fine{max-width:78ch;margin:46px 0 0;font-size:11.5px;color:var(--tx3);li
 [data-theme="dark"] #themeBtn .themeMoon,[data-theme="dark"] #themeToggle .moon{opacity:1;transform:none}
 #themeBtn:focus-visible,#themeToggle:focus-visible{outline:2px solid var(--acc);outline-offset:3px}
 /* ۵ اکتبر — حسام: در تمِ تیره نوارِ تب‌ها و دکمه‌ی تنظیمات طوسی‌تر از سوییچِ تم بودند؛ هر سه یک رنگ (#08070d). */
-[data-theme="dark"] .nav,[data-theme="dark"] .nav button.on,[data-theme="dark"] .nav a.on,[data-theme="dark"] #setBtn,[data-theme="dark"] #setBtn:active,[data-theme="dark"] #setBtn[aria-expanded="true"],[data-theme="dark"] #setBtn:has(+ #setPop.on){background:#08070d}
+[data-theme="dark"] .nav,[data-theme="dark"] .nav button.on,[data-theme="dark"] .nav a.on,[data-theme="dark"] #setBtn,[data-theme="dark"] #setBtn:active,[data-theme="dark"] #setBtn[aria-expanded="true"],[data-theme="dark"] #setBtn:has(+ #setPop.on),[data-theme="dark"] #watchBtn,[data-theme="dark"] #watchBtn:active,[data-theme="dark"] #watchBtn[aria-expanded="true"]{background:#08070d}
 #themeToggle>span{padding:0}#themeToggle svg{width:16px;height:16px}
 .nav{background:var(--bg);box-shadow:4px 4px 9px var(--soft-lo),-3px -3px 8px var(--soft-hi),inset 0 1px 1px var(--soft-hi)}
 .nav button.on,.nav a.on{background:var(--bg);color:var(--acc);box-shadow:inset 2px 2px 5px var(--soft-lo),inset -2px -2px 5px var(--soft-hi)}
@@ -1763,9 +1768,12 @@ html:not(.ctaReady) #actBtn:disabled,html:not(.ctaReady) #solSwapBtn:disabled{ba
 .watchRail[hidden],.watchWrap[hidden],.watchPop[hidden],.watchBadge[hidden]{display:none}
 .watchRail{position:fixed;z-index:20;width:300px;box-sizing:border-box;display:flex;flex-direction:column;left:0;top:80px}
 .watchBtn,#watchBtn{position:relative}
-#watchBtn .watchStar{color:var(--acc);font-size:17px;line-height:1}
+/* ★ هدر دقیقاً مثلِ #setBtn: همان زمینه/لبه/سایه/رنگ، و تا وقتی پاپ‌اور/شیت باز است همان فرورفتگی */
+#watchBtn{display:inline-grid;place-items:center;padding:0;background:var(--bg);border:1px solid var(--line)}
+#watchBtn.chip.round:active,#watchBtn.chip.round[aria-expanded="true"]{transform:none;color:var(--acc);box-shadow:inset 2px 2px 5px var(--soft-lo),inset -2px -2px 5px var(--soft-hi)}
+#watchBtn .watchStar{color:inherit;font-size:17px;line-height:1}
 .watchBadge{position:absolute;top:-3px;right:-3px;min-width:17px;height:17px;padding:0 4px;box-sizing:border-box;border-radius:9px;background:var(--acc);color:var(--on-acc);font-size:10px;font-weight:700;line-height:17px;text-align:center}
-.watchPop{position:absolute;right:0;top:calc(100% + 8px);width:320px;max-width:calc(100vw - 24px);max-height:70vh;box-sizing:border-box;z-index:50;display:flex;flex-direction:column;cursor:auto;white-space:normal}
+.watchPop{position:fixed;left:var(--wlLeft,12px);top:var(--wlTop,64px);width:var(--wlW,calc(100vw - 24px));max-width:none;max-height:70vh;box-sizing:border-box;z-index:50;display:flex;flex-direction:column;cursor:auto;white-space:normal}
 .wlHead{display:flex;align-items:center;gap:8px;padding:14px 14px 10px;flex:none}
 .wlTtl{margin:0;font-size:14px;font-weight:660;color:var(--tx)}
 .wlHead .savedCount{flex:none}
@@ -1773,7 +1781,7 @@ html:not(.ctaReady) #actBtn:disabled,html:not(.ctaReady) #solSwapBtn:disabled{ba
 .wlHead .iconBtn:disabled{opacity:.45;cursor:default}
 .wlHead .wlClose{display:none;margin-left:0;font-size:14px;line-height:1}
 /* گوشی (≤۹۴۰): همان پاپ‌اوور به شکل شیتِ fixed زیرِ هدر؛ اسکرولِ بدنه قفل نمی‌شود */
-@media(max-width:940px){.watchPop{position:fixed;left:12px;right:12px;top:var(--wlTop,64px);width:auto;max-width:none}.wlHead .wlClose{display:inline-grid}}
+@media(max-width:940px){.wlHead .wlClose{display:inline-grid}}
 .wlList{overflow-y:auto;min-height:0;padding:0 14px 6px;overscroll-behavior:contain}
 .wlEmpty{margin:0;padding:6px 0 14px;font-size:12.5px;line-height:1.6;color:var(--tx3)}
 .wlStatus{margin:0;padding:0 14px 12px;font-size:11.5px;line-height:1.5;color:var(--tx3);flex:none}
@@ -2045,7 +2053,7 @@ try{(function(){
 
     <!-- swap -->
     <section class="card swapCard">
-      <div id="baseSwapNetworkSlot"><div id="swapNetworkBar"><span class="ttl">Swap</span><span class="grow"></span></div></div>
+      <div id="baseSwapNetworkSlot"><div id="swapNetworkBar"><span class="ttl">Swap</span><span class="grow"></span><button class="iconBtn savedToggle" id="swapWatch" type="button" aria-pressed="false" aria-label="Watch token" title="Select a token first" disabled>☆</button></div></div>
       <div class="leg">
         <div class="legTop"><span>You pay</span><b id="balIn"></b></div>
         <div class="legRow">
@@ -2231,9 +2239,10 @@ try{(function(){
       <span class="grow"></span>
       <span class="mkt" id="stkMkt"><i></i><span id="stkMktTxt"></span></span>
     </header>
+    <p class="lede" id="stkMsg" role="status" hidden></p>
     <p class="lede" id="stkLede">Tokenized shares issued by Coinbase, each backed 1:1 by a real share. Trade them on-chain any time against USDC; where shown, the reference price comes from Chainlink and moves only while the US market is open.</p>
     <table id="stkTable">
-      <thead><tr><th>Stock</th><th>Price</th><th class="colRef">Reference</th><th class="colVol">Volume 24h</th><th></th></tr></thead>
+      <thead><tr><th class="stkStarTh"></th><th>Stock</th><th>Price</th><th class="colRef">Reference</th><th class="colVol">Volume 24h</th><th></th></tr></thead>
       <tbody></tbody>
     </table>
   </section>
@@ -6947,6 +6956,15 @@ function savedWatchCurrent(chain){
   if(!tokenOut||tokenOut.native)return null;
   return savedWatchClean({chain:'base',address:tokenOut.address,symbol:tokenOut.symbol,name:tokenOut.name});
 }
+// کارتِ سواپ: توکنِ «You receive». Base: tokenOut مگر native؛ Solana: mintِ دریافتی مگر SOL
+function savedWatchReceived(chain){
+  if(chain==='solana'){
+    const buy=solSide==='buy',mint=buy?solMintCur:solRefMint;
+    if(!mint||mint===SOL_MINT_ADDR)return null;
+    return savedWatchClean({chain,address:mint,symbol:buy?solTokenSymbol:solRefSymbol});
+  }
+  return savedWatchCurrent('base');
+}
 function savedWatchPlace(){
   if(!savedWatchReady)return;
   const panel=$('savedWatch');
@@ -6968,9 +6986,9 @@ function savedWatchPlace(){
 function savedWatchSelection(){
   if(!savedWatchReady)return;
   savedWatchPlace();
-  for(const [id,chain] of [['baseWatch','base'],['solWatch','solana'],['tokenWatch',activeChain]]){
+  for(const [id,chain] of [['baseWatch','base'],['solWatch','solana'],['tokenWatch',activeChain],['swapWatch',activeChain]]){
     const b=$(id);if(!b)continue;
-    const row=savedWatchCurrent(chain),on=!!row&&savedWatchRows.some(r=>savedWatchKey(r)===savedWatchKey(row));
+    const row=id==='swapWatch'?savedWatchReceived(chain):savedWatchCurrent(chain),on=!!row&&savedWatchRows.some(r=>savedWatchKey(r)===savedWatchKey(row));
     b.disabled=!row;b.setAttribute('aria-pressed',String(on));b.textContent=on?'★':'☆';
     const lab=(on?'Stop watching ':'Watch ')+(row&&row.symbol?row.symbol:'token');
     b.setAttribute('aria-label',lab);b.title=row?lab:'Select a token first';
@@ -7026,6 +7044,7 @@ function savedWatchRender(){
   // نوارِ Market watch از همین فهرست پر می‌شود
   try{watchSurfacesRender();}catch{}
   try{if(typeof fbStarSync==='function')fbStarSync();}catch{}
+  try{if(typeof stkStarSync==='function')stkStarSync();}catch{}
   try{if(typeof initMarketWatch==='function'&&document.querySelector('.marketWatch')){paintMarketWatch('base');paintMarketWatch('solana');if(view==='swap'&&!tokenPage)refreshMarketWatch();}}catch{}
 }
 /* ۲۴ اکتبر: چیپِ وضعیتِ خروج برای هر ردیف. اول نتیجه‌ی همین نشست (exitCache / solExitSeen)، بعد /pairs.json
@@ -7135,11 +7154,25 @@ function watchSurfaceOpen(){const r=$("watchRail"),p=$("watchPop");return !!(r&&
 function watchRailPlace(){
   const r=$("watchRail");if(!r||r.hidden)return;
   const m=document.querySelector("main"),h=document.querySelector("header");if(!m||!h)return;
-  const mr=m.getBoundingClientRect(),cs=getComputedStyle(m),pr=parseFloat(cs.paddingRight)||0,pl=parseFloat(cs.paddingLeft)||0,top=Math.round(h.offsetHeight+16);
+  const mr=m.getBoundingClientRect(),cs=getComputedStyle(m),pr=parseFloat(cs.paddingRight)||0,pl=parseFloat(cs.paddingLeft)||0;
+  // بالای ریل = بالای اولین کارتِ محتوا (نوار Market watch)؛ اگر کارتی دیده نشد، زیرِ هدر
+  const tops=[...document.querySelectorAll("main .card,main .marketWatch")].filter(e=>e.getClientRects().length>0&&!e.closest("#watchRail,#watchPop,#savedWatch")).map(e=>e.getBoundingClientRect().top+scrollY);
+  const top=Math.max(0,Math.round(tops.length?Math.min(...tops):h.offsetHeight+16));
   r.style.left=Math.round(watchRailSide==="left"?Math.max(8,mr.left+pl-24-r.offsetWidth):mr.right-pr+24)+"px";r.style.top=top+"px";r.style.maxHeight="calc(100vh - "+top+"px - 16px)";
 }
 // روی گوشی پاپ‌اوور شیتِ fixed است؛ بالایش = پایینِ هدر + ۸
-function watchPopPlace(){const p=$("watchPop"),h=document.querySelector("header");if(p&&h)p.style.setProperty("--wlTop",Math.round(h.getBoundingClientRect().bottom+8)+"px");}
+// پاپ‌اوور/شیت همیشه fixed است: بالا = پایینِ هدر + ۸؛ چپ/راست = لبه‌های کارتِ سواپ (اگر نبود، اجتماعِ کارت‌های محتوا)
+function watchPopPlace(){
+  const p=$("watchPop"),h=document.querySelector("header");if(!p||!h)return;
+  p.style.setProperty("--wlTop",Math.round(h.getBoundingClientRect().bottom+8)+"px");
+  const vis=e=>e.getClientRects().length>0&&!e.closest("#watchPop,#watchRail,#savedWatch");
+  const cards=[...document.querySelectorAll("main .card")].filter(vis);
+  const ref=cards.filter(e=>e.classList.contains("swapCard"));
+  const rs=(ref.length?ref:cards).map(e=>e.getBoundingClientRect());
+  if(!rs.length){p.style.removeProperty("--wlLeft");p.style.removeProperty("--wlW");return;}
+  const l=Math.min(...rs.map(r=>r.left)),r=Math.max(...rs.map(r=>r.right));
+  p.style.setProperty("--wlLeft",l+"px");p.style.setProperty("--wlW",(r-l)+"px");
+}
 function watchPopOpen(){
   const w=$("watchWrap"),p=$("watchPop");if(!w||w.hidden||!p||!p.hidden)return;
   watchPopPlace();p.hidden=false;$("watchBtn").setAttribute("aria-expanded","true");
@@ -7220,6 +7253,7 @@ function initWatchSurfaces(){
   document.addEventListener("click",e=>{const p=$("watchPop");if(!p||p.hidden)return;if(!e.composedPath().includes($("watchWrap")))watchPopClose(false);});
   document.addEventListener("keydown",e=>{if(e.key==="Escape"&&!$("watchPop").hidden){e.preventDefault();watchPopClose(true);}});
   addEventListener("resize",()=>{try{watchSurfaceSync();watchPopPlace();}catch{}});
+  try{const mn=document.querySelector("main");if(mn&&window.ResizeObserver)new ResizeObserver(()=>{try{watchRailPlace();}catch{}}).observe(mn);}catch{}
   for(const mq of [WATCH_RAIL_MQ])mq.addEventListener("change",()=>{try{watchSurfaceSync();}catch{}});
 }
 function initSavedWatch(){
@@ -7227,6 +7261,7 @@ function initSavedWatch(){
   savedWatchReady=true;
   try{savedWatchRows=savedWatchRead();}catch{savedWatchStatus('Your saved list could not be read. New saves will replace it.');}
   for(const [id,chain] of [['baseWatch','base'],['solWatch','solana'],['tokenWatch',null]])$(id).onclick=()=>savedWatchToggle(chain||activeChain);
+  $('swapWatch').onclick=()=>{const row=savedWatchReceived(activeChain);if(row)savedWatchToggleRow(row,false);};
   $('savedRefresh').onclick=savedWatchRefresh;
   $('savedWatch').ontoggle=()=>{if($('savedWatch').open)savedWatchRefresh();};
   addEventListener('storage',e=>{
@@ -12238,6 +12273,7 @@ function stkChainPaint(){
   const mk=(tag,cls,txt)=>{const e=document.createElement(tag);if(cls)e.className=cls;if(txt!=null)e.textContent=txt;return e;};
   for(const s of stkList()){
     const tr=mk("tr");tr.dataset.sym=s.sym;
+    const td0=mk("td","stkStarTd"),st=mk("button","iconBtn savedToggle stkStar","☆");st.type="button";st.dataset.stkstar=s.sym;st.setAttribute("aria-pressed","false");td0.append(st);
     const td1=mk("td"),tk=mk("div","tk"),nm=mk("span","nm");
     nm.append(mk("b",null,s.sym),mk("small",null,s.name));
     tk.append(mk("span","av",s.sym.slice(0,-1).slice(0,4)),nm);td1.append(tk);
@@ -12245,8 +12281,9 @@ function stkChainPaint(){
     const td3=mk("td","colRef");td3.append(mk("span","v","—"),mk("small","gap"));
     const td4=mk("td","colVol","—");
     const td5=mk("td"),bt=mk("button","trade","Trade");bt.type="button";bt.dataset.sym=s.sym;td5.append(bt);
-    tr.append(td1,td2,td3,td4,td5);tb.append(tr);
+    tr.append(td0,td1,td2,td3,td4,td5);tb.append(tr);
   }
+  stkStarSync();
 }
 function stocksStart(){
   if(stkActive)return;stkActive=true;
@@ -12297,7 +12334,29 @@ async function stocksTrade(sym){
   refreshAllowance().then(scheduleQuote);
   $("amtIn").focus();
 }
+// ستاره‌ی سهام: Base از آدرسِ BASE_TOKENS، Solana از mintِ دقیق؛ ردیف را باز نمی‌کند
+function stkWatchRow(sym){
+  const s=stkList().find(x=>x.sym===sym);if(!s)return null;
+  if(activeChain==="solana")return savedWatchClean({chain:"solana",address:s.mint,symbol:s.sym,name:s.name});
+  const t=BASE_TOKENS.find(x=>x.symbol===sym);
+  return t&&!t.native?savedWatchClean({chain:"base",address:t.address,symbol:s.sym,name:s.name}):null;
+}
+function stkStarSync(){
+  document.querySelectorAll("#stkTable .stkStar").forEach(b=>{
+    const row=stkWatchRow(b.dataset.stkstar),on=!!row&&savedWatchRows.some(r=>savedWatchKey(r)===savedWatchKey(row));
+    b.disabled=!row;b.setAttribute("aria-pressed",String(on));b.textContent=on?"★":"☆";
+    const lab=(on?"Stop watching ":"Watch ")+b.dataset.stkstar;b.setAttribute("aria-label",lab);b.title=row?lab:"Select a token first";
+  });
+}
 $("stkTable").addEventListener("click",e=>{
+  const sb=e.target.closest&&e.target.closest(".stkStar");
+  if(sb){
+    e.stopPropagation();
+    const row=stkWatchRow(sb.dataset.stkstar);if(!row)return;
+    const ok=savedWatchToggleRow(row,true);
+    const m=$("stkMsg");m.textContent=ok?"":"Your watchlist is full (30 tokens). Remove a token to add another.";m.hidden=ok;
+    stkStarSync();return;
+  }
   const b=e.target.closest&&e.target.closest(".trade");
   if(b)stocksTrade(b.dataset.sym);
 });

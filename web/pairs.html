@@ -75,8 +75,8 @@
 /* توکن‌های طراحی — عیناً از web/landing.html (هر دو بلاکِ :root، همان
    کلیدها و همان مقادیر) تا این صفحه از همان سیستمِ رنگ/سایه/انحنا استفاده
    کند و تمِ ذخیره‌شده‌ی کاربر بین دو صفحه یکسان به‌نظر برسد. */
-:root{--bg:#f4f5f7;--card:#fff;--card2:#f4f5f8;--raise:#eceef2;--line:#e8eaee;--line2:#d6dae1;--tx:#14161a;--tx2:#5b6270;--tx3:#8b93a1;--g1:#22EFF6;--g2:#C56CF5;--acc:#5b53e8;--acc-b:#8b5cf6;--on-acc:#fff;--pos:#0d9d6e;--sh:0 18px 44px rgba(20,22,26,.08);--ease:cubic-bezier(.23,1,.32,1);--glowop:.14;--glow:rgba(91,83,232,.12)}
-:root[data-theme=dark]{--bg:#0a0810;--card:#131020;--card2:#191527;--raise:#241e38;--line:#221d33;--line2:#302842;--tx:#f0eef7;--tx2:#a49fb8;--tx3:#736d8a;color-scheme:dark;scrollbar-color:var(--line2) transparent;--acc:#4fc3f7;--acc-b:#C56CF5;--on-acc:#05121a;--pos:#21d3a0;--sh:0 18px 44px rgba(0,0,0,.42);--glowop:.26;--glow:rgba(79,195,247,.16)}
+:root{--bg:#f4f5f7;--card:#fff;--card2:#f4f5f8;--raise:#eceef2;--line:#e8eaee;--line2:#d6dae1;--tx:#14161a;--tx2:#5b6270;--tx3:#8b93a1;--g1:#22EFF6;--g2:#C56CF5;--acc:#5b53e8;--acc-b:#8b5cf6;--on-acc:#fff;--pos:#0d9d6e;--sh:0 18px 44px rgba(20,22,26,.08);--shs:0 1px 2px rgba(20,22,26,.05);--ease:cubic-bezier(.23,1,.32,1);--glowop:.14;--glow:rgba(91,83,232,.12)}
+:root[data-theme=dark]{--bg:#0a0810;--card:#131020;--card2:#191527;--raise:#241e38;--line:#221d33;--line2:#302842;--tx:#f0eef7;--tx2:#a49fb8;--tx3:#736d8a;color-scheme:dark;scrollbar-color:var(--line2) transparent;--acc:#4fc3f7;--acc-b:#C56CF5;--on-acc:#05121a;--pos:#21d3a0;--sh:0 18px 44px rgba(0,0,0,.42);--glowop:.26;--glow:rgba(79,195,247,.16);--shs:0 1px 2px rgba(0,0,0,.34)}
 /* اسکرول‌بارِ تمِ روشن هم‌رنگِ پس‌زمینه */
 :root:not([data-theme=dark]){color-scheme:light;scrollbar-color:var(--line2) var(--bg)}
 :root{--gradwarm:linear-gradient(90deg,#F5A623,#F2704B 55%,#EF4E5F);--wash1:rgba(34,239,246,.10);--wash2:rgba(197,108,245,.09);--grad:linear-gradient(135deg,var(--g1),var(--g2));--pglow:color-mix(in srgb,var(--pos),transparent 87%);--warn:#b5780c;--neg:#dc4c4c}
@@ -284,10 +284,14 @@ header>.navPad{grid-column:1;grid-row:1;width:0;min-width:0}
 }
 @media(max-width:720px){.navPad{display:none}}
 
-.pairs-main{width:min(1240px,calc(100% - 48px));margin:32px auto 80px}
+.pairs-main{width:min(1100px,calc(100% - 40px));margin:36px auto 80px;display:flex;flex-direction:column;gap:18px}
 /* ۲۴ اکتبر: سوییچ Flow/New pairs روی /app#flow و /pairs هم‌تراز بماند (دسکتاپ) */
 @media(min-width:961px){.pairs-main{margin-top:36px}}
-@media(max-width:760px){.pairs-main{width:min(1240px,calc(100% - 28px))}}
+/* ۲۵ اکتبر: محتوای New pairs در کارتی عیناً مثلِ کارتِ تابلوی Flow (همان عرض/گوشه/پس‌زمینه/سایه) تا با سوییچ چیزی نپرد */
+.pairsBoard{box-sizing:border-box;background:var(--card);border-radius:22px;box-shadow:0 1px 2px rgba(20,22,26,.05),0 14px 34px rgba(20,22,26,.06);overflow:hidden;padding:18px 20px 20px;min-width:0}
+[data-theme="dark"] .pairsBoard{box-shadow:0 1px 2px rgba(0,0,0,.34),0 18px 44px rgba(0,0,0,.48)}
+.pairsBoard>h1{margin-top:0}
+@media(max-width:480px){.pairsBoard{padding:16px 14px 16px}}
 h1{font-size:28px;letter-spacing:-.03em;margin:0 0 10px;line-height:1.1}
 @media(max-width:760px){h1{font-size:24px}}
 .sub{color:var(--tx2);font-size:14px;line-height:1.5;max-width:680px;margin:0 0 6px}
@@ -365,10 +369,12 @@ h1{font-size:28px;letter-spacing:-.03em;margin:0 0 10px;line-height:1.1}
 /* ۲۴ اکتبر: ستاره‌ی دیده‌بانی — همان قدِ ۲۸pxِ دکمه‌ی کپی؛ بالاتر از row-link/card-link */
 .col-star{position:relative;z-index:2;width:28px;padding-right:0!important}
 .pairs-table th.col-star{padding-right:0}
-.star-btn{display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;border-radius:999px;
-  border:1px solid var(--line2);color:var(--tx2);font-size:15px;line-height:1;cursor:pointer;background:none;flex:0 0 28px}
-.star-btn:hover{border-color:var(--acc);color:var(--acc)}
-.star-btn[aria-pressed="true"]{color:var(--acc);border-color:var(--acc)}
+/* ۲۵ اکتبر: بی‌قاب، عیناً مثلِ ستاره‌ی تابلوی Flow (.iconBtn.fbStar در اپ): بدونِ border، پس‌زمینه‌ی کارت، سایه‌ی --shs */
+.star-btn{display:inline-grid;place-items:center;width:28px;height:28px;border-radius:50%;padding:0;
+  border:0;background:var(--card);box-shadow:var(--shs);color:var(--tx2);font-size:15px;line-height:1;cursor:pointer;flex:0 0 28px;transition:.16s}
+[data-theme="dark"] .star-btn{background:#08070d}
+.star-btn:hover{color:var(--tx)}
+.star-btn[aria-pressed="true"]{color:var(--acc)}
 .star-btn:focus-visible{outline:2px solid var(--acc);outline-offset:2px}
 /* روی کارت ستاره در گوشه‌ی پایینِ راستِ card-main می‌نشیند تا ردیفِ اول (نماد/نشان/سن) جا را از دست ندهد */
 .card-main{position:relative}
@@ -519,6 +525,8 @@ a.walletAction{text-decoration:none}
 .mktSwitch a:hover{color:var(--tx)}
 .mktSwitch a.on{background:var(--grad);color:var(--on-acc)}
 .mktSwitch a:focus-visible{outline:2px solid var(--acc);outline-offset:2px}
+/* فونتِ اپ (نه Manrope) تا مستطیلِ سوییچ روی /app#flow و /pairs یکی باشد */
+.mktSwitch,.mktSwitch a{font-family:ui-sans-serif,-apple-system,"Segoe UI",Inter,Roboto,sans-serif}
 .chip:not(.solid):not(#themeBtn),.tokbtn,.tfs button.on{box-shadow:2px 2px 5px var(--soft-lo),-2px -2px 5px var(--soft-hi)}
 .cta:not(:disabled),.chip.solid,.tkTrade,.button.primary,.header-cta{box-shadow:inset 0 1px 1px rgba(255,255,255,.4),inset 0 -2px 2px rgba(20,30,55,.16),0 3px 6px var(--soft-lo)}
 .cta:active:not(:disabled),.chip.solid:active,.tkTrade:active,.button.primary:active,.header-cta:active{transform:translateY(1px);box-shadow:inset 0 2px 4px rgba(20,30,55,.22)}
@@ -741,6 +749,7 @@ try{(function(){
 
 <main class="pairs-main">
   <nav class="mktSwitch" aria-label="Markets"><a href="/app#flow" data-mkt="flow">Flow</a><a href="/pairs" data-mkt="pairs" class="on" aria-current="page">New pairs</a></nav>
+  <section class="pairsBoard" id="pairsBoard">
   <h1>New pairs</h1>
   <p class="sub">The newest Base pools we found, each run through the same exit check as the app. Updated hourly.</p>
 <script>if(window.__zxPairsCopy)window.__zxPairsCopy.copy();</script>
@@ -835,6 +844,7 @@ Solana</button><script>if(window.__zxPairsCopy){window.__zxPairsCopy.tabs();wind
   </div>
 
   <noscript><p class="noscript-note">This page needs JavaScript to load the list.</p></noscript>
+  </section>
 </main>
 
 <!-- فوتر — عیناً همان مارک‌آپِ footer در web/index.html (~۱۵۰۲-۱۵۴۰): چهار
