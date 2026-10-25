@@ -61,8 +61,8 @@
       گارد حتی زیررشته‌ی نامِ آن سکشن را در کلِ فایل رد می‌کند.
    ============================================================ */
 /* Zaexa landing — EDITABLE DESIGN TOKENS */
-:root{--bg:#f4f5f7;--card:#fff;--card2:#f4f5f8;--raise:#eceef2;--line:#e8eaee;--line2:#d6dae1;--tx:#14161a;--tx2:#5b6270;--tx3:#8b93a1;--g1:#22EFF6;--g2:#C56CF5;--acc:#5b53e8;--acc-b:#8b5cf6;--on-acc:#fff;--pos:#0d9d6e;--sh:0 18px 44px rgba(20,22,26,.08);--ease:cubic-bezier(.23,1,.32,1);--glowop:.14;--viz1:#43B5F7;--viz2:#7396F8;--vizline:#6b7280;--cta-shadow:0 12px 26px rgba(67,181,247,.30);/* هرو۱ از حرفِ n در «can» گرفته شده (گرادیانِ head-bg، t تقریباً .335) *//* رنگ‌های hero در تمِ روشن عمیق‌تر شد چون پریوینکلِ کم‌رنگ روی زمینهٔ روشن گم می‌شد (درخواست مالک، ۶ اکتبر)؛ تمِ تیره بدون تغییر */--hero1:#3F7CF2;--hero2:#7A5AF0;--hero-orbit-a:.65;--hero-mid:var(--g1ui)}
-:root[data-theme=dark]{color-scheme:dark;scrollbar-color:var(--line2) transparent;--bg:#0a0810;--card:#131020;--card2:#191527;--raise:#241e38;--line:#221d33;--line2:#302842;--tx:#f0eef7;--tx2:#a49fb8;--tx3:#736d8a;--acc:#4fc3f7;--acc-b:#C56CF5;--on-acc:#05121a;--pos:#21d3a0;--sh:0 18px 44px rgba(0,0,0,.42);--glowop:.26;--viz1:#22EFF6;--viz2:#C56CF5;--vizline:#667496;--cta-shadow:0 12px 26px rgba(34,211,238,.18);--hero-orbit-a:.52;--hero-mid:#4C9BFF;--hero1:var(--viz1);--hero2:var(--viz2)}
+:root{--bg:#f4f5f7;--card:#fff;--card2:#f4f5f8;--raise:#eceef2;--line:#e8eaee;--line2:#d6dae1;--tx:#14161a;--tx2:#5b6270;--tx3:#8b93a1;--g1:#22EFF6;--g2:#C56CF5;--acc:#5b53e8;--acc-b:#8b5cf6;--on-acc:#fff;--pos:#0d9d6e;--sh:0 18px 44px rgba(20,22,26,.08);--ease:cubic-bezier(.23,1,.32,1);--glowop:.14;--viz1:#43B5F7;--viz2:#7396F8;--vizline:#6b7280;--cta-shadow:0 12px 26px rgba(67,181,247,.30);/* هرو۱ از حرفِ n در «can» گرفته شده (گرادیانِ head-bg، t تقریباً .335) *//* رنگ‌های hero در تمِ روشن عمیق‌تر شد چون پریوینکلِ کم‌رنگ روی زمینهٔ روشن گم می‌شد (درخواست مالک، ۶ اکتبر)؛ تمِ تیره بدون تغییر */--hero1:#3F7CF2;--hero2:#7A5AF0;--hero-orbit-a:.4}
+:root[data-theme=dark]{color-scheme:dark;scrollbar-color:var(--line2) transparent;--bg:#0a0810;--card:#131020;--card2:#191527;--raise:#241e38;--line:#221d33;--line2:#302842;--tx:#f0eef7;--tx2:#a49fb8;--tx3:#736d8a;--acc:#4fc3f7;--acc-b:#C56CF5;--on-acc:#05121a;--pos:#21d3a0;--sh:0 18px 44px rgba(0,0,0,.42);--glowop:.26;--viz1:#22EFF6;--viz2:#C56CF5;--vizline:#667496;--cta-shadow:0 12px 26px rgba(34,211,238,.18);--hero-orbit-a:.18;--hero1:var(--viz1);--hero2:var(--viz2)}
 /* اسکرول‌بارِ تمِ روشن هم‌رنگِ پس‌زمینه */
 :root:not([data-theme=dark]){color-scheme:light;scrollbar-color:var(--line2) var(--bg)}
 /* Dust stays behind the page and never catches clicks or grows with document height. */
@@ -769,20 +769,31 @@ svg.diag{display:block;width:100%;height:auto}
      همین‌جا و پیش از خودِ اسکریپتِ canvas تعریف شده‌اند، نه داخلِ آن. */
   var VIZ_FALLBACK={v1:'#22EFF6',v2:'#C56CF5',vl:'#667496'};
   const canvas=document.getElementById('routeCanvas'); if(!canvas) return; const ctx=canvas.getContext('2d'); let w=0,h=0,dpr=1,raf=0;
+  /* شعاعِ هسته هرگز حدس زده نمی‌شود: همان مستطیلِ واقعیِ DOMِ .visual-core
+     را می‌خوانیم (نسبت به خودِ canvas)، فقط داخلِ resize — نه هر فریم. */
+  const coreEl=document.querySelector('.visual-core');
+  let coreR=72;
+  function measureCoreR(){ if(!coreEl) return; const cr=coreEl.getBoundingClientRect(); coreR=cr.width/2; }
   /* رفعِ کنتراست: canvas را CSS رنگ نمی‌کند، پس رنگ‌ها را از توکن‌های تمِ
      فعال می‌خوانیم (نه رنگ‌های ثابتِ فیروزه‌ای/بنفش) و با MutationObserver
      تغییرِ data-theme را بدون ریلود دنبال می‌کنیم. هرگز داخلِ فریمِ انیمیشن
      getComputedStyle را صدا نمی‌زنیم — فقط یک‌بار در آغاز و هر بار که تم عوض شود. */
   function hexToRgba(hex,a){var h=(hex||'').replace('#','');if(h.length===3){h=h.split('').map(function(c){return c+c}).join('')}var r=parseInt(h.substr(0,2),16),g=parseInt(h.substr(2,2),16),b=parseInt(h.substr(4,2),16);return 'rgba('+r+','+g+','+b+','+a+')'}
-  var viz={v1:VIZ_FALLBACK.v1,v2:VIZ_FALLBACK.v2,vm:'#43B5F7',vl:VIZ_FALLBACK.vl,oa:.52};
+  var viz={v1:VIZ_FALLBACK.v1,v2:VIZ_FALLBACK.v2,vl:VIZ_FALLBACK.vl,oa:.18};
   /* رنگِ زنده‌ی canvas از --hero1/--hero2 خوانده می‌شود (نه --viz1/--viz2
      مستقیم) چون در تمِ روشن این دو دیگر یکی نیستند: hero1/hero2 رنگِ
      حرفِ n در «can» است، و در تمِ تیره به همان viz1/viz2 قبلی اشاره می‌کنند. */
-  function readViz(){var cs=getComputedStyle(root);var v1=cs.getPropertyValue('--hero1').trim(),v2=cs.getPropertyValue('--hero2').trim(),vl=cs.getPropertyValue('--vizline').trim();viz.v1=v1||VIZ_FALLBACK.v1;viz.v2=v2||VIZ_FALLBACK.v2;viz.vm=cs.getPropertyValue('--hero-mid').trim()||'#43B5F7';viz.vl=vl||VIZ_FALLBACK.vl;var oa=parseFloat(cs.getPropertyValue('--hero-orbit-a'));viz.oa=isFinite(oa)?oa:.52}
-  function rebuildViz(){readViz()}
+  function readViz(){var cs=getComputedStyle(root);var v1=cs.getPropertyValue('--hero1').trim(),v2=cs.getPropertyValue('--hero2').trim(),vl=cs.getPropertyValue('--vizline').trim();viz.v1=v1||VIZ_FALLBACK.v1;viz.v2=v2||VIZ_FALLBACK.v2;viz.vl=vl||VIZ_FALLBACK.vl;var oa=parseFloat(cs.getPropertyValue('--hero-orbit-a'));viz.oa=isFinite(oa)?oa:.18}
+  /* اسپرایتِ درخشش: به‌جای shadowBlur در هر فریم (که کند است)، یک canvas
+     آفلاینِ کوچک با گرادیانِ شعاعی برای هر رنگ می‌سازیم و همان را
+     drawImage می‌کنیم. با عوض‌شدنِ تم دوباره ساخته می‌شود. */
+  var spriteV1=null, spriteV2=null;
+  function buildSprite(hex){var s=document.createElement('canvas');s.width=96;s.height=96;var sc=s.getContext('2d');var g=sc.createRadialGradient(48,48,0,48,48,48);g.addColorStop(0,hexToRgba(hex,.95));g.addColorStop(.5,hexToRgba(hex,.35));g.addColorStop(1,hexToRgba(hex,0));sc.fillStyle=g;sc.beginPath();sc.arc(48,48,48,0,Math.PI*2);sc.fill();return s}
+  function rebuildViz(){readViz();spriteV1=buildSprite(viz.v1);spriteV2=buildSprite(viz.v2)}
   rebuildViz();
   window.__zaexaViz=viz; /* فقط برای سنجش خودکار: پالتِ زنده‌ای که اسکریپت خواند */
-  new MutationObserver(function(){ rebuildViz(); if(typeof redrawNow==='function') redrawNow(); }).observe(root,{attributes:true,attributeFilter:['data-theme']});
+  new MutationObserver(function(){ rebuildViz(); }).observe(root,{attributes:true,attributeFilter:['data-theme']});
+  function glow(x,y,radius,sprite,alpha){if(alpha<=0||radius<=0||!sprite)return;var d=radius*2;ctx.save();ctx.globalAlpha=alpha;ctx.drawImage(sprite,x-radius,y-radius,d,d);ctx.restore()}
   /* رفعِ نقصِ ۱: نسخه‌ی اصلی prefers-reduced-motion را نادیده می‌گرفت. اینجا
      یک‌بار می‌خوانیم و اگر کاربر حرکتِ کم‌تر خواسته، فقط یک قابِ ایستا
      می‌کشیم و هرگز requestAnimationFrame صدا زده نمی‌شود. */
@@ -793,31 +804,81 @@ svg.diag{display:block;width:100%;height:auto}
   let inView=true, tabVisible=!document.hidden;
   function isRunning(){return inView&&tabVisible&&!reduceMotion}
 
-  /* چرخه‌ی ۹ثانیه‌ایِ فازها فقط readoutها را می‌راند (quote → split → simulate →
-     settle)؛ دیگر چیزی در مرکز نمی‌کشد. lt از زمانِ حلقه مشتق می‌شود. */
+  /* داستانِ چهارفازیِ ۹ثانیه‌ای، حلقه‌ای: quote → split → simulate → settle.
+     هر مقدار مستقیماً از خودِ زمانِ حلقه (lt) مشتق می‌شود، نه از یک وضعیتِ
+     ذخیره‌شده — یعنی هیچ حالتِ جداگانه‌ای نمی‌تواند از تصویر عقب بیفتد. */
   const LOOP=9000, T1=2400, T2=5000, T3=7200, T4=9000;
   function clamp01(u){return u<0?0:u>1?1:u}
+  function fillRingR(){return Math.max(coreR+10,Math.min(w,h)*.12)}
+  let wedgeCanvas=null,wedgeG=null; /* بومِ کوچکِ گوه‌ی رادار */
 
-  /* سه مدار مثلِ حلقه‌های «Trust layer»: دایره‌ای که با rotate(θ)·skewX(σ) می‌چرخد و میانِ دایره و بیضی تغییر شکل می‌دهد.
-     θ و σ فقط تابعِ ساعتِ یکنواخت‌اند (هرگز ریست نمی‌شوند). */
-  const ORB_P=[24000,17000,30000], ORB_DIR=[1,-1,1], ORB_TH0=[0,2.1,4.2];
-  const ORB_Q=[13000,10000,16000], ORB_PHI=[0,2,4], ORB_SMAX=16*Math.PI/180, ORB_K=.72;
-  function orbitSet(ms){
-    const t=(ms==null?clock:ms), narrow=w<600, R0x=w*(narrow?.46:.37), R0y=h*(narrow?.30:.31), r0=Math.min(R0x,R0y);
-    /* ۲۵ اکتبر: شعاع‌ها ۰٫۷۲ برابرِ هم‌اند؛ قطرِ بلندِ درونی (≈۱٫۱۵۴r) همیشه کوتاه‌تر از قطرِ کوتاهِ بیرونی (≈۰٫۸۶۷r) است → هرگز قطع نمی‌کنند */
-    const out=[];
-    for(let i=0;i<3;i++){
-      const r=r0*Math.pow(ORB_K,i), th=ORB_TH0[i]+ORB_DIR[i]*2*Math.PI*t/ORB_P[i], sk=ORB_SMAX*Math.sin(2*Math.PI*t/ORB_Q[i]+ORB_PHI[i]), tn=Math.tan(sk), q=Math.sqrt(tn*tn+4);
-      out.push({i:i,r:r,theta:th,skew:sk,long:r*(q+Math.abs(tn))/2,short:r*(q-Math.abs(tn))/2});
+  /* venueها همان DEXهایی‌اند که web/index.html واقعاً روتشان می‌کند
+     (آرایه‌ی DEXES آن‌جا) — هیچ صرافیِ تازه‌ای اختراع نشده. عددِ bar ثابت
+     و برای نمایش است (بدون رقم/درصد روی صفحه)؛ فقط ترتیبِ نسبی‌اش مهم
+     است چون دو تای برتر برنده‌ی فازِ split می‌شوند. */
+  const venues=[
+    {id:'uniswap-v3',label:'UNI V3',bar:23,k:'v1'},
+    {id:'aerodrome',label:'AERO',bar:27,k:'v2'},
+    {id:'baseswap',label:'BASESWAP',bar:15,k:'v1'},
+    {id:'sushiswap',label:'SUSHI',bar:18,k:'v2'},
+    {id:'alienbase',label:'ALIENBASE',bar:12,k:'v1'},
+    {id:'pancake-v3',label:'PCS V3',bar:20,k:'v2'},
+    {id:'aerodrome-cl',label:'AERO CL',bar:17,k:'v1'},
+  ];
+  /* زاویه‌ها (درجه) رویِ همان بیضیِ venue: ۴تا رویِ کمانِ بالا، ۳تا رویِ
+     کمانِ پایین، هرگز داخلِ ±۲۲° از IN(۱۸۰°) یا OUT(۰°/۳۶۰°) — با فاصله‌ی
+     مساوی داخلِ همان بازه (تقسیمِ بازه به n+1 قسمتِ مساوی). */
+  const UPPER_DEG=[229.2,256.4,283.6,310.8], LOWER_DEG=[56,90,124];
+  const VENUE_DEG=UPPER_DEG.concat(LOWER_DEG);
+  const UPPER_IDX=[0,1,2,3], LOWER_IDX=[4,5,6];
+  const thickIdx=UPPER_IDX.reduce(function(best,i){return venues[i].bar>venues[best].bar?i:best});
+  const thinIdx=LOWER_IDX.reduce(function(best,i){return venues[i].bar>venues[best].bar?i:best});
+  function ellipsePt(cx,cy,rx,ry,angRad){return {x:cx+rx*Math.cos(angRad),y:cy+ry*Math.sin(angRad)}}
+
+  /* نقاطِ پس‌زمینه برای پارالاکس: سه بازه‌ی عمق با سرعتِ متفاوت (px/s) */
+  const BAND_SPEED=[4,8,14], BAND_ALPHA=[.15,.25,.4];
+  let bgDots=[];
+  function initDots(){bgDots=[];for(let i=0;i<70;i++){bgDots.push({x:Math.random(),y:Math.random(),ang:Math.random()*Math.PI*2,band:i%3})}}
+  initDots();
+  function updateDots(dt){for(const d of bgDots){const sp=BAND_SPEED[d.band]*dt/1000;d.x=(((d.x+Math.cos(d.ang)*sp/Math.max(w,1))%1)+1)%1;d.y=(((d.y+Math.sin(d.ang)*sp/Math.max(h,1))%1)+1)%1}}
+  function drawDots(){for(const d of bgDots){ctx.beginPath();ctx.fillStyle=hexToRgba(viz.vl,BAND_ALPHA[d.band]);ctx.arc(d.x*w,d.y*h,1.1,0,Math.PI*2);ctx.fill()}}
+  /* بیضیِ venue: خطِ پایه‌ی کم‌رنگ، ثابت، همیشه کشیده می‌شود. مسیرها/ذره‌ها
+     همیشه رویِ همینِ بیضی می‌نشینند — هیچ‌چیز از داخلِ آن رد نمی‌شود. */
+  /* حلقه‌های سیگنال — عیناً نسخه‌ی قبلی به خواستِ مالک (۲۳ سپتامبر): سه بیضیِ کج
+     که آرام دورِ هسته می‌چرخند. هم‌مرکز و ثابت‌کردنشان رد شد. */
+  function drawOrbits(cx,cy,rx,ry,clock){ctx.save();ctx.translate(cx,cy);for(let i=0;i<3;i++){ctx.beginPath();ctx.ellipse(0,0,rx*(1-i*.11),ry*(1-i*.14),clock*.00006+i*.9,0,Math.PI*2);ctx.strokeStyle=i%2?hexToRgba(viz.v2,viz.oa):hexToRgba(viz.v1,viz.oa);ctx.lineWidth=1;ctx.stroke()}ctx.restore()}
+
+  /* برچسب‌ها: بیرونِ گره، در جهتِ دور از هسته، و همیشه داخلِ خودِ canvas
+     (کلمپ‌شده) — تا در ۱۴۴۰/۱۰۲۴/۷۶۸/۳۷۵ نه هم‌پوشانی کنند نه لب‌پَر شوند. */
+  const LABEL_FONT='10px ui-monospace,SFMono-Regular,Menlo,monospace';
+  function placeLabel(x,y,dirx,diry,text,placed){
+    ctx.font=LABEL_FONT;
+    const tw=ctx.measureText(text).width, th=10, gap=8, step=th+4;
+    function boxFor(dx){
+      const ax=x+dx*gap, ay=y+diry*gap;
+      const bx=dx>=0?ax:ax-tw;
+      const by=diry<-.3?ay-th:(diry>.3?ay:ay-th/2);
+      return {x:bx,y:by};
     }
-    return out;
+    function clampBox(c){return {x:Math.min(Math.max(c.x,2),Math.max(2,w-2-tw)),y:Math.min(Math.max(c.y,2),Math.max(2,h-2-th)),w:tw,h:th}}
+    function hitsPlaced(bx){for(let i=0;placed&&i<placed.length;i++){const q=placed[i];if(bx.x<q.x+q.w+2&&bx.x+bx.w+2>q.x&&bx.y<q.y+q.h+2&&bx.y+bx.h+2>q.y)return true}return false}
+    /* نامزدها به ترتیب: سمتِ خودش، سمتِ دیگرِ گره، کمی بالا/پایینِ هر دو، و درست
+       چپِ هر کادرِ readout. اولین جایی که نه زیرِ کادرهای DOM است نه روی برچسبِ
+       دیگر — «ALIENBASE» زیرِ کادرِ ROUTE ENGINE بریده می‌شد. */
+    const base=boxFor(dirx>=0?1:-1), flip=boxFor(dirx>=0?-1:1);
+    const cands=[base,flip,{x:base.x,y:base.y-step},{x:base.x,y:base.y+step},{x:flip.x,y:flip.y-step},{x:flip.x,y:flip.y+step}];
+    for(let i=0;i<avoidRects.length;i++){const r=avoidRects[i];cands.push({x:r.x-tw-2,y:base.y},{x:base.x,y:r.y+r.h+2},{x:base.x,y:r.y-th-2})}
+    let pick=null, firstFree=null;
+    for(let i=0;i<cands.length&&!pick;i++){const c=clampBox(cands[i]);if(hitsPlaced(c))continue;if(!firstFree)firstFree=c;if(!hitsAvoid(c))pick=c}
+    const box=pick||firstFree||clampBox(base);
+    return {ax:box.x,ay:box.y,align:'left',baseline:'top',box:box};
   }
-  window.__zaexaOrbitSet=function(ms){return orbitSet(ms)};
-  /* ساعتِ یکنواختِ صفحه (ms)؛ فقط برای سنجش */
-  window.__zaexaClock=function(){return clock};
-  /* سه رنگِ متفاوت: بیرونی --hero1، میانی --hero-mid (=g1ui)، درونی --hero2 */
-  function orbitStroke(i){return hexToRgba(i===2?viz.v2:(i===1?viz.vm:viz.v1),viz.oa)}
-  function drawOrbits(cx,cy,orbs){orbs.forEach(function(o){ctx.save();ctx.translate(cx,cy);ctx.rotate(o.theta);ctx.transform(1,0,Math.tan(o.skew),1,0,0);ctx.beginPath();ctx.arc(0,0,o.r,0,Math.PI*2);ctx.restore();ctx.strokeStyle=orbitStroke(o.i);ctx.lineWidth=1.35;ctx.stroke()})}
+
+  /* کادرهای DOMِ روی canvas، نسبت به خودِ canvas — روی resize دوباره خوانده می‌شود. */
+  let avoidRects=[];
+  function measureAvoid(){const cr=canvas.getBoundingClientRect();avoidRects=[].slice.call(document.querySelectorAll('.hero-visual .visual-readout')).map(function(el){const r=el.getBoundingClientRect();return {x:r.left-cr.left-4,y:r.top-cr.top-4,w:r.width+8,h:r.height+8}});window.__zaexaCanvasAvoid=avoidRects}
+  function hitsAvoid(b){for(let i=0;i<avoidRects.length;i++){const a=avoidRects[i];if(b.x<a.x+a.w&&b.x+b.w>a.x&&b.y<a.y+a.h&&b.y+b.h>a.y)return true}return false}
+
 
   const readoutTop=document.querySelector('.readout-top');
   const stepEls={quote:document.querySelector('.readout-right .step[data-step="quote"]'),simulate:document.querySelector('.readout-right .step[data-step="simulate"]'),settle:document.querySelector('.readout-right .step[data-step="settle"]')};
@@ -828,20 +889,161 @@ svg.diag{display:block;width:100%;height:auto}
     if(!pulseFired&&lt>=T3){pulseFired=true;if(readoutTop){readoutTop.classList.add('pulse');setTimeout(function(){readoutTop.classList.remove('pulse')},600)}}
   }
 
-  /* یک فریم: مدارها. clock برای چرخشِ مدارها؛ lt فقط فازِ readout. */
-  function draw(lt,clock){
-    const orbs=orbitSet(clock);
+  /* یک فریم را برای زمانِ حلقه‌ی lt می‌کشد. clockForOrbits جدا داده می‌شود
+     چون در قابِ ایستای reduced-motion هم باید عددی ثابت (نه صفر) باشد.
+     animateParticles=false یعنی ذره‌ها ثابت بمانند (قابِ ایستا). */
+  function draw(lt,clockForOrbits,animateParticles){
+    /* روی بومِ باریک (گوشی) بیضی‌ها کشیده‌تر و بزرگ‌تر می‌شوند تا کجی و چرخشِ
+       مدارها دیده شود، نه چند دایره‌ی تقریباً هم‌مرکز. دسکتاپ دست‌نخورده. */
+    const narrow=w<600;
+    const cx=w*.5, cy=h*.5, rx=w*(narrow?.40:.34), ry=h*(narrow?.34:.30);
+    /* قاعده: هر مسیر/ذره دقیقاً رویِ همینِ بیضی می‌نشیند — IN رویِ ۱۸۰°،
+       OUT رویِ ۰°/۳۶۰°. زاویه‌ها بر حسبِ همان قراردادِ canvas (۰=راست،
+       افزایش=ساعتگرد چون y رو به پایین است). */
+    const inN=ellipsePt(cx,cy,rx,ry,Math.PI), outN=ellipsePt(cx,cy,rx,ry,0);
     ctx.clearRect(0,0,w,h);
-    drawOrbits(w*.5,h*.5,orbs);
+    drawDots();
+    drawOrbits(cx,cy,w*(narrow?.46:.37),h*(narrow?.30:.31),clockForOrbits);
+    /* هالهٔ نرمِ زیرِ هستهٔ برند — هیچ چیزِ غیرِشفافی زیرِ visual-core کشیده نمی‌شود */
+    glow(cx,cy,Math.min(w,h)*.14,spriteV1,.5);
+
     const phase = lt<T1?'quote':(lt<T2?'split':(lt<T3?'simulate':'settle'));
-    /* فقط برای سنجش: مرکز و هندسهٔ زندهٔ مدارها */
-    window.__zaexaOrbitState={cx:w*.5,cy:h*.5,clock:clock,orbits:orbs.map(function(o){return {r:o.r,theta:o.theta,skew:o.skew,long:o.long,short:o.short,stroke:orbitStroke(o.i)}})};
+    const venuePts=venues.map(function(v,i){const angle=VENUE_DEG[i]*Math.PI/180;const p=ellipsePt(cx,cy,rx,ry,angle);p.angle=angle;return p});
+    /* جمع‌آوریِ هر نقطه‌ای که این فریم رویِ خودِ بیضی کشیده شده — کاوشگرِ
+       [canvas on ellipse] همین را می‌سنجد. */
+    const routePts=[];
+
+    /* فازِ ۱ — QUOTE: گوه‌ی راداری از حلقه‌ی هسته تا بیضیِ venue (هرگز رویِ
+       لوگو رد نمی‌شود)، با گرادیانِ مخروطی (اگر پشتیبانی نشود، رد می‌شویم) */
+    if(phase==='quote'){
+      /* ۲۳ سپتامبر، به خواستِ مالک: لبه‌ی بیرونیِ گوه دیگر یک مرزِ تیز روی
+         بیضی نیست — گوه پیش از رسیدن به بیضی کاملاً محو می‌شود. */
+      const sweepAngle=-Math.PI/2+(lt/T1)*Math.PI*2;
+      const half=(40*Math.PI/180)/2, a0=sweepAngle-half, a1=sweepAngle+half;
+      /* گوه روی یک بومِ کوچک (یک‌چهارمِ اندازه) کشیده می‌شود: گرادیانِ مخروطی
+         برای نرمیِ زاویه‌ای، سپس destination-in با گرادیانِ شعاعیِ بیضی‌شکل
+         تا پیش از رسیدن به بیضی به صفر برسد. بعد با بزرگ‌نماییِ نرم روی
+         بومِ اصلی می‌نشیند. لایه‌لایه‌کردن و برش‌زدن باند و درز می‌ساخت، و
+         بومِ تمام‌اندازه هزینه را از ۴ms بالا می‌برد. */
+      const S=.25, sw=Math.max(1,Math.round(w*S)), sh=Math.max(1,Math.round(h*S));
+      if(!wedgeCanvas){wedgeCanvas=document.createElement('canvas');wedgeG=wedgeCanvas.getContext('2d')}
+      if(wedgeCanvas.width!==sw||wedgeCanvas.height!==sh){wedgeCanvas.width=sw;wedgeCanvas.height=sh}
+      const g2=wedgeG;
+      g2.setTransform(1,0,0,1,0,0);g2.globalCompositeOperation='source-over';g2.clearRect(0,0,sw,sh);
+      g2.setTransform(S,0,0,S,0,0);
+      /* پرتو تا کمی بیرون از گره‌ها (۱٫۱۸ برابرِ بیضی) می‌رود و از ۰٫۶ به بعد محو
+         می‌شود — روی خودِ گره‌ها هنوز حدودِ یک‌سومِ شدت را دارد تا به آن‌ها برسد. */
+      const RE=1.18;
+      const i0=ellipsePt(cx,cy,coreR,coreR,a0), o0=ellipsePt(cx,cy,rx*RE,ry*RE,a0), i1=ellipsePt(cx,cy,coreR,coreR,a1);
+      g2.beginPath();
+      g2.moveTo(i0.x,i0.y);g2.lineTo(o0.x,o0.y);g2.ellipse(cx,cy,rx*RE,ry*RE,0,a0,a1);g2.lineTo(i1.x,i1.y);g2.arc(cx,cy,coreR,a1,a0,true);g2.closePath();
+      if(typeof g2.createConicGradient==='function'){
+        const g=g2.createConicGradient(a0,cx,cy);
+        const frac=(half*2)/(Math.PI*2);
+        g.addColorStop(0,hexToRgba(viz.v1,0));
+        g.addColorStop(Math.max(.001,frac*.5),hexToRgba(viz.v1,.22));
+        g.addColorStop(Math.min(.999,frac),hexToRgba(viz.v1,0));
+        g.addColorStop(1,hexToRgba(viz.v1,0));
+        g2.fillStyle=g;
+      } else {
+        g2.fillStyle=hexToRgba(viz.v1,.1);
+      }
+      g2.fill();
+      g2.globalCompositeOperation='destination-in';
+      g2.translate(cx,cy);g2.scale(1,ry/rx);
+      const fade=g2.createRadialGradient(0,0,0,0,0,rx*RE);
+      fade.addColorStop(0,hexToRgba(viz.v1,1));
+      fade.addColorStop(.6/RE,hexToRgba(viz.v1,1));
+      fade.addColorStop(.97,hexToRgba(viz.v1,0));
+      fade.addColorStop(1,hexToRgba(viz.v1,0));
+      g2.fillStyle=fade;
+      g2.fillRect(-rx*1.5,-rx*1.5,rx*3,rx*3);
+      g2.globalCompositeOperation='source-over';
+      ctx.save();ctx.imageSmoothingEnabled=true;ctx.imageSmoothingQuality='high';
+      ctx.drawImage(wedgeCanvas,0,0,sw,sh,0,0,w,h);
+      ctx.restore();
+    }
+    /* فازِ ۳ — SIMULATE: همان حلقه‌ی کوچکِ نسخه‌ی اول که دورِ لوگو خودش را پر
+       می‌کند (از بالا، ساعتگرد)، به خواستِ مالک برگشت. شعاعش همان
+       min(w,h)*.12 است، ولی هرگز داخلِ حلقه‌ی هسته نمی‌رود. */
+    if(phase==='simulate'){
+      const p3=animateParticles?clamp01((lt-T2)/(T3-T2)):.5;
+      ctx.beginPath();ctx.arc(cx,cy,fillRingR(),-Math.PI/2,-Math.PI/2+p3*Math.PI*2);ctx.strokeStyle=hexToRgba(viz.v2,.85);ctx.lineWidth=2;ctx.stroke();
+    }
+
+    /* ۲۳ سپتامبر، به خواستِ مالک: مسیرها (کمان‌ها، ذره‌ها، ردِ شبیه‌سازی و
+       خطِ بیضیِ زیرِ گره‌ها) حذف شدند؛ گره‌ها، برچسب‌ها، بارهای کوت، گوه‌ی
+       رادار، درخششِ حلقه‌ی هسته و ضربه‌موج می‌مانند. فاز‌ها و همگامیِ
+       readout دست‌نخورده‌اند. */
+    /* فازِ ۴ — SETTLE: محوِ کمان‌ها + یک ضربه‌موجِ بیضی‌شکل (هم‌نسبتِ بیضیِ
+       venue) که از شعاعِ حلقه‌ی هسته شروع و دقیقاً همان‌جا که به بیضیِ
+       venue می‌رسد متوقف می‌شود — هرگز از آن فراتر نمی‌رود. */
+    if(phase==='settle'){
+      const p4=clamp01((lt-T3)/(T4-T3));
+      const shockRx=coreR+(rx-coreR)*p4, shockRy=coreR+(ry-coreR)*p4, shockA=.35*(1-p4);
+      ctx.beginPath();ctx.ellipse(cx,cy,shockRx,shockRy,0,0,Math.PI*2);ctx.strokeStyle=hexToRgba(viz.v1,shockA);ctx.lineWidth=1.4;ctx.stroke();
+    }
+
+    /* تأییدِ خروج: بلافاصله بعدِ اتمامِ simulate، همان حلقه‌ی هسته
+       (شعاعش از خودِ DOM اندازه‌گیری شده، نه حدسی) یک‌بار می‌درخشد —
+       بدونِ کمانِ اضافه و بدونِ علامتِ تیک. */
+    if(lt>=T3&&lt<T3+600){
+      /* حلقه‌ی پرشده ۶۰۰ میلی‌ثانیه کامل می‌ماند و محو می‌شود (بدونِ تیک). */
+      const cp=(lt-T3)/600;
+      ctx.beginPath();ctx.arc(cx,cy,fillRingR(),0,Math.PI*2);ctx.strokeStyle=hexToRgba(viz.v2,.85*(1-cp));ctx.lineWidth=2;ctx.stroke();
+    }
+
+    /* گره‌های venue: نقطه، بارِ کوچکِ کوت، ریپلِ سوییپ، برچسب — همه رویِ
+       خودِ بیضی */
+    const labels=[];
+    venuePts.forEach(function(vp,i){
+      const v=venues[i];
+      const isWinner=(i===thickIdx||i===thinIdx);
+      const dim=(phase==='split'&&!isWinner)?.35:1;
+      const sweepAt=(((vp.angle+Math.PI/2)+Math.PI*2)%(Math.PI*2))/(Math.PI*2)*T1;
+      const sinceSweep=lt-sweepAt;
+      const rippleOn=phase==='quote'&&sinceSweep>=0&&sinceSweep<500;
+      const rp=rippleOn?sinceSweep/500:0;
+      const bump=rippleOn?Math.sin(rp*Math.PI)*2:0;
+      const r=3+bump;
+      const col=v.k==='v1'?viz.v1:viz.v2, spr=v.k==='v1'?spriteV1:spriteV2;
+      glow(vp.x,vp.y,r+3,spr,.55*dim);
+      ctx.beginPath();ctx.fillStyle=hexToRgba(col,dim);ctx.arc(vp.x,vp.y,r,0,Math.PI*2);ctx.fill();
+      if(lt<T2){
+        const barP=clamp01((lt-sweepAt)/300);
+        if(barP>0){
+          const blen=v.bar*barP;
+          const bx=vp.x, by=vp.y-9;
+          ctx.strokeStyle=hexToRgba(col,.8*dim);ctx.lineWidth=2;
+          ctx.beginPath();ctx.moveTo(bx,by);ctx.lineTo(bx+blen,by);ctx.stroke();
+        }
+      }
+      if(rippleOn){
+        const ringR=4+10*rp, ringA=.6*(1-rp);
+        ctx.beginPath();ctx.arc(vp.x,vp.y,ringR,0,Math.PI*2);ctx.strokeStyle=hexToRgba(col,ringA);ctx.lineWidth=1.4;ctx.stroke();
+      }
+      const lf=placeLabel(vp.x,vp.y,Math.cos(vp.angle),Math.sin(vp.angle),v.label,labels);
+      ctx.fillStyle=hexToRgba(viz.vl,.9);ctx.textAlign=lf.align;ctx.textBaseline=lf.baseline;ctx.fillText(v.label,lf.ax,lf.ay);
+      labels.push(lf.box);
+      routePts.push(vp);
+    });
+
+    /* گره‌های IN/OUT */
+    [{p:inN,label:'IN',dir:-1},{p:outN,label:'OUT',dir:1}].forEach(function(o){
+      ctx.beginPath();ctx.fillStyle=hexToRgba(viz.vl,.9);ctx.arc(o.p.x,o.p.y,2.6,0,Math.PI*2);ctx.fill();
+      const lf=placeLabel(o.p.x,o.p.y,o.dir,0,o.label,labels);
+      ctx.fillStyle=hexToRgba(viz.vl,.9);ctx.textAlign=lf.align;ctx.textBaseline=lf.baseline;ctx.fillText(o.label,lf.ax,lf.ay);
+      labels.push(lf.box);
+      routePts.push(o.p);
+    });
+
+    window.__zaexaCanvasLabels=labels;
     window.__zaexaCanvasPhase=phase;
+    window.__zaexaCanvasRoutePts={pts:routePts,cx:cx,cy:cy,rx:rx,ry:ry,coreR:coreR};
     syncReadout(phase==='settle'?'settle':(phase==='simulate'?'simulate':'quote'));
     maybeExitPulse(lt);
   }
 
-  function redrawNow(){ if(w>0&&!reduceMotion) draw(clock%LOOP,clock); else if(w>0) renderStatic() }
   const costs=[];
   let clock=0, lastTs=null;
   function frame(ts){
@@ -850,8 +1052,8 @@ svg.diag{display:block;width:100%;height:auto}
     let dt=ts-lastTs; if(dt>50)dt=50; if(dt<0)dt=0;
     lastTs=ts;
     clock+=dt;
-
-    draw(clock%LOOP,clock);
+    updateDots(dt);
+    draw(clock%LOOP,clock,true);
     const dur=performance.now()-perfStart;
     costs.push(dur); if(costs.length>60) costs.shift();
     window.__zaexaCanvasCost=costs.reduce(function(a,b){return a+b},0)/costs.length;
@@ -860,12 +1062,12 @@ svg.diag{display:block;width:100%;height:auto}
   /* قابِ ایستا: فازِ split در نیمه‌راه (تقسیمِ کامل)، بی ذره‌ی متحرک، و
      هرگز requestAnimationFrame صدا زده نمی‌شود. */
   const staticLt=T1+(T2-T1)*.5;
-  function renderStatic(){const perfStart=performance.now();clock=staticLt;draw(staticLt,staticLt);window.__zaexaCanvasCost=performance.now()-perfStart}
+  function renderStatic(){const perfStart=performance.now();draw(staticLt,staticLt,false);window.__zaexaCanvasCost=performance.now()-perfStart}
   /* ⚠️ خودِ observe() یک بارِ اولیه‌ی resize را ناهمگام صف می‌کند که
      canvas.width را دوباره ست می‌کند و هر چیزِ کشیده‌شده را پاک می‌کند —
      برای قابِ ایستا باید بعد از *هر* resize (شاملِ همان بارِ اول) دوباره
      رسم کنیم، نه فقط یک‌بار پیش از آن. */
-  function resize(){const r=canvas.getBoundingClientRect();dpr=Math.min(2,devicePixelRatio||1);w=r.width;h=r.height;canvas.width=w*dpr;canvas.height=h*dpr;ctx.setTransform(dpr,0,0,dpr,0,0);if(reduceMotion) renderStatic(); else if(w>0) draw(clock%LOOP,clock)} /* بعد از resize بومِ پاک‌شده همان لحظه با ساعتِ فعلی دوباره کشیده می‌شود، نه پرش */
+  function resize(){const r=canvas.getBoundingClientRect();dpr=Math.min(2,devicePixelRatio||1);w=r.width;h=r.height;canvas.width=w*dpr;canvas.height=h*dpr;ctx.setTransform(dpr,0,0,dpr,0,0);measureCoreR();measureAvoid();if(reduceMotion) renderStatic()}
   new ResizeObserver(resize).observe(canvas); resize();
   if(reduceMotion){
     renderStatic();

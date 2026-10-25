@@ -2926,277 +2926,235 @@ async def check_trust_rings_seamless(p, errors):
             "[trust rings seamless] %s (%s) ends in a different shape than it starts -> visible restart: %r" % (r["pe"], r["name"], r)
     print("[trust rings seamless] both Trust rings end each loop in exactly the shape they start with (no restart jump): %s" % ", ".join(r["pe"] + "=" + r["name"] for r in res))
 
-async def check_hero_hub(p, errors):
-    """[hero hub] — مرکزِ هیرو: فقط نشانِ رسمی روی var(--bg)، بدونِ هیچ حلقه/گرادیان؛ سه مدارِ بی‌برخورد با سه رنگ؛
-    هیچ گره/برچسب/مسیر/پالسی در هیرو نمانده. در reduced-motion هیچ‌چیز حرکت نمی‌کند."""
+async def check_canvas_labels(p, errors):
+    """پروبِ [canvas labels]: در ۱۴۴۰/۱۰۲۴/۷۶۸/۳۷۵ هیچ دو جعبه‌ی برچسبی
+    هم‌پوشانی ندارند و همه داخلِ خودِ canvas می‌مانند."""
     path = os.path.join(HERE, "..", "landing.html")
     b = await p.chromium.launch()
-    JS_STATE = """() => {
-      const r = e => { const k = e.getBoundingClientRect(); return {x:k.x,y:k.y,w:k.width,h:k.height}; };
-      const hv = document.querySelector('.hero-visual'), cv = document.getElementById('routeCanvas');
-      const core = document.querySelector('.visual-core'), mark = core.querySelector('.core-mark');
-      const word = core.querySelector('.core-word');
-      const R = window.__zaexaOrbitState || {};
-      const cr = cv.getBoundingClientRect();
-      const kids = [core, ...core.querySelectorAll('*')].map(e => {
-        const s = getComputedStyle(e), bw = ['Top','Right','Bottom','Left'].map(k => parseFloat(s['border'+k+'Width'])*(s['border'+k+'Style']!=='none'?1:0));
-        const bef = getComputedStyle(e, '::before'), aft = getComputedStyle(e, '::after');
-        return {tag:e.tagName+'.'+(e.getAttribute('class')||''), bgi:s.backgroundImage, bw:Math.max(...bw), br:s.borderRadius,
-                bs:s.boxShadow, filter:s.filter, stroke:s.stroke, bef:bef.content, aft:aft.content};
-      });
-      return {mark:r(mark), word:r(word), core:r(core), canvas:{x:cr.x,y:cr.y}, R:R, kids:kids,
-                    viz:{...window.__zaexaViz},
-              rings:document.querySelectorAll('.hero-visual .core-dial,.hero-visual .core-rim,.hero-visual .core-inner,.hero-visual .core-satellite,.hero-visual linearGradient,#coreRim').length,
-              bg:getComputedStyle(document.body).backgroundColor, coreBg:getComputedStyle(core).backgroundColor,
-              cv1:getComputedStyle(document.documentElement).getPropertyValue('--viz1').trim(),
-              cv2:getComputedStyle(document.documentElement).getPropertyValue('--viz2').trim()};
-    }"""
-    summary = []
-    for (vw, vh, core_size, word_w) in ((1440, 900, 145, 57.6), (1280, 800, 145, 57.6), (1024, 768, 145, 57.6),
-                                        (768, 1024, 145, 57.6), (390, 844, 96, 37.8)):
-        for theme in (("light", "dark") if vw in (1440, 390) else ("light",)):
-            tag = "%dpx %s" % (vw, theme)
+    # ۲۳ سپتامبر: گوشیِ واقعیِ مالک ~۳۹۳px بود و برچسب‌ها زیرِ کادرها می‌رفتند؛
+    # عرض‌های رایجِ گوشی هم سنجیده می‌شوند.
+    for width in (1440, 1024, 768, 430, 412, 393, 375, 360):
+        pg = await b.new_page(viewport={"width": width, "height": 900})
+        pg.on("console", lambda m: errors.append(m.text) if m.type == "error" else None)
+        await pg.goto("file://" + path)
+        await pg.wait_for_timeout(300)
+        info = await pg.evaluate("""
+          () => {
+            const c = document.getElementById('routeCanvas');
+            const r = c.getBoundingClientRect();
+            return {labels: window.__zaexaCanvasLabels || [], w: r.width, h: r.height,
+                    avoid: window.__zaexaCanvasAvoid || null};
+          }
+        """)
+        await pg.close()
+        labels = info["labels"]
+        assert labels, "window.__zaexaCanvasLabels is empty at %dpx" % width
+        cw, ch = info["w"], info["h"]
+        for i, box in enumerate(labels):
+            assert box["x"] >= -0.5 and box["y"] >= -0.5 and box["x"] + box["w"] <= cw + 0.5 \
+                and box["y"] + box["h"] <= ch + 0.5, (
+                "label box %d %r falls outside the %dpx canvas (%.1fx%.1f) at %dpx width"
+                % (i, box, width, cw, ch, width))
+        for i in range(len(labels)):
+            for j in range(i + 1, len(labels)):
+                a, bx = labels[i], labels[j]
+                overlap = (a["x"] < bx["x"] + bx["w"] and a["x"] + a["w"] > bx["x"]
+                           and a["y"] < bx["y"] + bx["h"] and a["y"] + a["h"] > bx["y"])
+                assert not overlap, (
+                    "label boxes %d %r and %d %r overlap at %dpx width" % (i, a, j, bx, width))
+        # کادرهای readoutِ DOM روی canvas: هیچ برچسبی نباید زیرشان برود
+        # (۲۳ سپتامبر: «ALIENBASE» زیرِ کادرِ ROUTE ENGINE بریده می‌شد).
+        avoid = info["avoid"]
+        assert avoid, "window.__zaexaCanvasAvoid is missing at %dpx" % width
+        for i, a in enumerate(labels):
+            for r in avoid:
+                hit = (a["x"] < r["x"] + r["w"] and a["x"] + a["w"] > r["x"]
+                       and a["y"] < r["y"] + r["h"] and a["y"] + a["h"] > r["y"])
+                assert not hit, (
+                    "label box %d %r sits under a readout box %r at %dpx width" % (i, a, r, width))
+        print("[canvas labels] %dpx: %d label boxes, none overlapping, all inside the canvas, "
+              "clear of %d readout boxes" % (width, len(labels), len(avoid)))
+    await b.close()
+
+
+
+
+async def check_hero_core(p, errors):
+    """پروبِ [hero core]: نشانِ لوگو دقیقاً وسطِ هسته است، لوگوتایپِ ZAEXA زیرِ نشان و وسط‌چین،
+    اندازه‌ی هسته عوض نشده، و رنگ‌های hero/شفافیتِ مدارها در هر دو تم همان‌اند که مالک خواسته.
+    ۲۵ اکتبر: حلقه حذف شد؛ سنجه‌های فونتِ small و شعاعِ درونیِ حلقه منسوخ و برداشته شدند."""
+    path = os.path.join(HERE, "..", "landing.html")
+    b = await p.chromium.launch()
+    cases = ((1440, 900, 145), (390, 844, 96))
+    for (vw, vh, core_size) in cases:
+        for theme in ("light", "dark"):
+            ctx = await b.new_context(reduced_motion="reduce", viewport={"width": vw, "height": vh})
+            pg = await ctx.new_page()
+            pg.on("console", lambda m: errors.append(m.text) if m.type == "error" else None)
+            await pg.goto("file://" + path)
+            await pg.evaluate("t => { document.documentElement.dataset.theme = t; }", theme)
+            # انیمیشنِ breathe مقیاس می‌دهد؛ برای اندازه‌گیریِ هندسه خاموش می‌شود
+            await pg.add_style_tag(content="*{animation:none!important;transition:none!important}")
+            await pg.wait_for_timeout(400)
+            m = await pg.evaluate("""() => {
+              const core = document.querySelector('.visual-core');
+              const mark = core.querySelector('.core-mark');
+              const small = core.querySelector('.core-word');
+              const r = e => { const b = e.getBoundingClientRect(); return {x:b.x,y:b.y,w:b.width,h:b.height}; };
+              const cs = getComputedStyle(core);
+              const rs = getComputedStyle(document.documentElement);
+              return {core:r(core), mark:r(mark), small:r(small), viz:{...window.__zaexaViz},
+                      cv1:rs.getPropertyValue('--viz1').trim(), cv2:rs.getPropertyValue('--viz2').trim()};
+            }""")
+            await ctx.close()
+            c, mk, sm = m["core"], m["mark"], m["small"]
+            ccx, ccy = c["x"] + c["w"] / 2, c["y"] + c["h"] / 2
+            dx = (mk["x"] + mk["w"] / 2) - ccx
+            dy = (mk["y"] + mk["h"] / 2) - ccy
+            assert abs(dx) <= 0.75 and abs(dy) <= 0.75, (
+                "[hero core] mark is off-centre in the core at %dpx %s: dx=%.2f dy=%.2f" % (vw, theme, dx, dy))
+            assert abs(c["w"] - core_size) < 0.01 and abs(c["h"] - core_size) < 0.01, (
+                "[hero core] core size changed at %dpx %s: %.2fx%.2f, expected %d" % (vw, theme, c["w"], c["h"], core_size))
+            sw = (sm["x"] + sm["w"] / 2) - ccx
+            assert abs(sw) <= 0.75, "[hero core] ZAEXA wordmark is not centred under the mark at %dpx %s: dx=%.2f" % (vw, theme, sw)
+            gap = sm["y"] - (mk["y"] + mk["h"])
+            assert gap >= 4, (
+                "[hero core] gap between mark bottom and label top is %.1fpx (<4) at %dpx %s" % (gap, vw, theme))
+            v = m["viz"]
+            if theme == "light":
+                ok = (v["v1"].lower() == "#3f7cf2" and v["v2"].lower() == "#7a5af0" and abs(v["oa"] - 0.4) < 1e-9)
+                assert ok, "[hero core] light live palette is %r, expected #3F7CF2/#7A5AF0/oa 0.4 at %dpx" % (v, vw)
+            else:
+                ok = (v["v1"].lower() == m["cv1"].lower() and v["v2"].lower() == m["cv2"].lower()
+                      and abs(v["oa"] - 0.18) < 1e-9)
+                assert ok, "[hero core] dark live palette is %r, expected viz1/viz2 (%s/%s) and oa 0.18 at %dpx" % (
+                    v, m["cv1"], m["cv2"], vw)
+            print("[hero core] %dpx %s: mark offset dx=%.2f dy=%.2f, core %dpx, wordmark centred, gap=%.1fpx, "
+                  "palette %s/%s oa=%g" % (vw, theme, dx, dy, core_size, gap, v["v1"], v["v2"], v["oa"]))
+    await b.close()
+
+
+
+
+async def check_canvas_route_on_ellipse(p, errors):
+    """پروبِ [canvas on ellipse]: صاحبِ‌کار گفت مسیرها در فازهای split و
+    simulate از داخلِ حلقه‌های سیگنال رد می‌شوند و بی‌نظم به نظر می‌رسند.
+    قاعده‌ی تازه این است که هر مسیر/کمان/ذره/دنباله‌ای که کشیده می‌شود
+    دقیقاً رویِ بیضیِ venue بنشیند. در ۱۴۴۰x۹۰۰، هر ۱۰۰ میلی‌ثانیه برای
+    ۱۰ ثانیه window.__zaexaCanvasRoutePts را می‌خوانیم و هر نقطه را با
+    معادله‌ی بیضی می‌سنجیم (۰.۹۶ تا ۱.۰۴، برای رواداریِ اعشاری) و مطمئن
+    می‌شویم هیچ نقطه‌ای به فاصله‌ی کمتر از coreR+4 از مرکز نیفتاده باشد."""
+    path = os.path.join(HERE, "..", "landing.html")
+    b = await p.chromium.launch()
+    pg = await b.new_page(viewport={"width": 1440, "height": 900})
+    pg.on("console", lambda m: errors.append(m.text) if m.type == "error" else None)
+    await pg.goto("file://" + path)
+    await pg.wait_for_timeout(300)
+
+    total = 0
+    for i in range(100):  # ~10s / 100ms
+        info = await pg.evaluate("() => window.__zaexaCanvasRoutePts || null")
+        if info and info.get("pts"):
+            # ۲۳ سپتامبر: مالک مسیرها را حذف کرد و فقط نقطه‌ها ماندند. پس در هر
+            # فریم فقط ۷ گره‌ی venue + IN + OUT = ۹ نقطه مجاز است؛ هر کمان،
+            # ذره یا ردی که برگردد تعداد را بالا می‌برد و این‌جا قرمز می‌شود.
+            assert len(info["pts"]) == 9, (
+                "sample %d carries %d drawn points in phase %r; only the 9 nodes (7 venues + IN + "
+                "OUT) may be drawn — the owner removed every route, particle and trail"
+                % (i, len(info["pts"]), await pg.evaluate("() => window.__zaexaCanvasPhase")))
+            cx, cy, rx, ry, core_r = info["cx"], info["cy"], info["rx"], info["ry"], info["coreR"]
+            for j, pt in enumerate(info["pts"]):
+                dx, dy = pt["x"] - cx, pt["y"] - cy
+                val = (dx / rx) ** 2 + (dy / ry) ** 2
+                assert 0.96 <= val <= 1.04, (
+                    "sample %d point %d %r is off the venue ellipse (x^2+y^2 term = %.4f, "
+                    "want 0.96..1.04) — cx=%.1f cy=%.1f rx=%.1f ry=%.1f"
+                    % (i, j, pt, val, cx, cy, rx, ry))
+                dist = (dx * dx + dy * dy) ** 0.5
+                assert dist >= core_r + 4, (
+                    "sample %d point %d %r is only %.1fpx from the centre, inside coreR+4 "
+                    "(coreR=%.1f) — a route must never cross over the core/logo"
+                    % (i, j, pt, dist, core_r))
+                total += 1
+        await pg.wait_for_timeout(100)
+    await b.close()
+    assert total > 0, (
+        "window.__zaexaCanvasRoutePts never carried any points over ~10s of sampling — "
+        "the canvas script must expose the sampled points of every route/lane/particle/trail "
+        "it draws")
+    print("[canvas on ellipse] %d points checked over ~10s, all on the venue ellipse and clear "
+          "of the core" % total)
+
+
+
+
+async def check_hero_no_ring(p, errors):
+    """[hero no ring] — ۲۵ اکتبر: مرکزِ هیرو فقط نشان + لوگوتایپ روی پس‌زمینهٔ صفحه است؛ نه عنصرِ حلقه،
+    نه گرادیانِ stroke، نه پس‌زمینه/سایه/کادرِ دایره‌ای. پس از تعویضِ زندهٔ تم چهار پیکسلِ درونِ گوشه‌های
+    جعبهٔ نشان با پس‌زمینهٔ صفحه برابر است (لایه‌های متحرکِ canvas پنهان می‌شوند)."""
+    import io
+    from PIL import Image
+    path = os.path.join(HERE, "..", "landing.html")
+    b = await p.chromium.launch()
+    n = 0
+    for (vw, vh) in ((1440, 900), (390, 844)):
+        for theme in ("light", "dark"):
             ctx = await b.new_context(reduced_motion="no-preference", viewport={"width": vw, "height": vh})
             pg = await ctx.new_page()
             pg.on("console", lambda m: errors.append(m.text) if m.type == "error" else None)
             await pg.goto("file://" + path)
             await pg.evaluate("t => { document.documentElement.dataset.theme = t; }", theme)
-            await pg.wait_for_timeout(700)
-            worst_dx = 0.0
-            # چند نمونه در طولِ ~۳ ثانیه: مدارها می‌چرخند و مرکز ثابت می‌ماند
-            for sample in range(8):
-                m = await pg.evaluate(JS_STATE)
-                R = m["R"]
-                assert R.get("cx") is not None, "[hero hub] window.__zaexaOrbitState is missing at %s" % tag
-                mk = m["mark"]
-                dx = mk["x"] + mk["w"] / 2 - (m["canvas"]["x"] + R["cx"])
-                dy = mk["y"] + mk["h"] / 2 - (m["canvas"]["y"] + R["cy"])
-                worst_dx = max(worst_dx, abs(dx), abs(dy))
-                assert abs(dx) <= 1 and abs(dy) <= 1, (
-                    "[hero hub] mark centre is off the orbits' centre at %s: dx=%.2f dy=%.2f" % (tag, dx, dy))
-                if sample == 0:
-                    c, sm = m["core"], m["word"]
-                    assert m["rings"] == 0, "[hero hub] an old ring/gradient element is back in the hero centre at %s" % tag
-                    assert m["coreBg"] in ("rgba(0, 0, 0, 0)", "transparent"), (
-                        "[hero hub] hero centre has a backing colour %s (must be transparent) at %s" % (m["coreBg"], tag))
-                    for k in m["kids"]:
-                        assert k["bgi"] == "none", "[hero hub] %s inside the hero centre has background-image %s at %s" % (k["tag"], k["bgi"], tag)
-                        assert k["bw"] == 0, "[hero hub] %s inside the hero centre has a visible border at %s" % (k["tag"], tag)
-                        assert "50%" not in k["br"], "[hero hub] %s inside the hero centre has border-radius %s (ring) at %s" % (k["tag"], k["br"], tag)
-                        assert k["bs"] == "none" and k["filter"] == "none", (
-                            "[hero hub] %s inside the hero centre has shadow/filter (glow) at %s" % (k["tag"], tag))
-                        assert "url(" not in k["stroke"], "[hero hub] %s strokes with a gradient/url at %s" % (k["tag"], tag)
-                        assert k["bef"] in ("none", "normal") and k["aft"] in ("none", "normal"), (
-                            "[hero hub] %s inside the hero centre has a pseudo-element at %s" % (k["tag"], tag))
-                    assert abs(c["w"] - core_size) < 0.01 and abs(c["h"] - core_size) < 0.01, (
-                        "[hero hub] hero centre size changed at %s: %.2fx%.2f, expected %d" % (tag, c["w"], c["h"], core_size))
-                    assert abs(sm["w"] - word_w) < 0.01, "[hero hub] ZAEXA label width at %s is %.2f, expected %g" % (tag, sm["w"], word_w)
-                    gap = sm["y"] - (mk["y"] + mk["h"])
-                    want_gap = 6 if vw > 480 else 4
-                    assert abs(gap - want_gap) <= 0.5, "[hero hub] gap between mark and ZAEXA label is %.2fpx, expected %d at %s" % (gap, want_gap, tag)
-                    ratio = sm["w"] / mk["w"]
-                    assert 0.88 <= ratio <= 0.92, "[hero hub] ZAEXA width / mark width is %.3f, expected 0.88..0.92 at %s" % (ratio, tag)
-                    assert abs((sm["x"] + sm["w"] / 2) - (mk["x"] + mk["w"] / 2)) <= 0.6, "[hero hub] ZAEXA label is not centred under the mark at %s" % tag
-                    v = m["viz"]
-                    if theme == "light":
-                        assert v["v1"].lower() == "#3f7cf2" and v["v2"].lower() == "#7a5af0" and abs(v["oa"] - 0.65) < 1e-9, (
-                            "[hero hub] light live palette is %r at %s" % (v, tag))
-                    else:
-                        assert v["v1"].lower() == m["cv1"].lower() and v["v2"].lower() == m["cv2"].lower() and abs(v["oa"] - 0.52) < 1e-9, (
-                            "[hero hub] dark live palette is %r at %s" % (v, tag))
-                await pg.wait_for_timeout(400)
-            await ctx.close()
-            summary.append("%s mark off by <=%.2fpx" % (tag, worst_dx))
-    # (a) ۲۵ اکتبر: هر مدار دوره‌ی خودش را دارد (۲۴، ۱۷، ۳۰ ثانیه؛ میانی خلافِ جهت)، کجیِ سینوسی با سقفِ ۱۶ درجه، دورهٔ کجی ۱۳/۱۰/۱۶
-    pg = await b.new_page(viewport={"width": 1440, "height": 900})
-    pg.on("console", lambda m: errors.append(m.text) if m.type == "error" else None)
-    await pg.goto("file://" + path)
-    await pg.wait_for_timeout(600)
-    import math
-    o0 = await pg.evaluate("() => window.__zaexaOrbitSet(1000)")
-    o1 = await pg.evaluate("() => window.__zaexaOrbitSet(2000)")
-    # دورهٔ کجی: σ(t+Q)=σ(t) و نیمهٔ دوره قرینه نیست؛ مقدارِ دقیقِ سینوسی را با فرمول می‌سنجیم
-    skq = await pg.evaluate("() => [0, 1, 2].map(k => [window.__zaexaOrbitSet(3000)[k].skew, window.__zaexaOrbitSet(3000 + [13000, 10000, 16000][k])[k].skew])")
-    sk = await pg.evaluate("() => { let m = 0; for (let t = 0; t < 120000; t += 100) for (const o of window.__zaexaOrbitSet(t)) m = Math.max(m, Math.abs(o.skew)); return m; }")
-    await pg.close()
-    dth = [o1[k]["theta"] - o0[k]["theta"] for k in range(3)]
-    want = [2 * math.pi / 24, -2 * math.pi / 17, 2 * math.pi / 30]
-    assert all(abs(d - w_) < 1e-6 for d, w_ in zip(dth, want)), "[hero hub] orbit turn rates %r rad/s, expected 2*pi/[24,-17,30] = %r" % (dth, want)
-    assert abs(sk - math.radians(16)) < 0.002, "[hero hub] peak skew is %.2f deg, expected 16" % math.degrees(sk)
-    assert all(abs(a_ - b_) < 1e-9 for a_, b_ in skq), "[hero hub] skew periods are not [13,10,16]s: %r" % skq
-    pg = await b.new_page(viewport={"width": 1440, "height": 900}, reduced_motion="no-preference")
-    pg.on("console", lambda m: errors.append(m.text) if m.type == "error" else None)
-    await pg.goto("file://" + path)
-    await pg.evaluate("() => { document.documentElement.dataset.theme = 'light'; }")
-    await pg.wait_for_timeout(700)
-    for step in range(3):
-        if step:
+            await pg.wait_for_timeout(500)
+            m = await pg.evaluate("""() => {
+              const core = document.querySelector('.visual-core');
+              const clear = c => !c || c === 'transparent' || /rgba\\(\\s*\\d+,\\s*\\d+,\\s*\\d+,\\s*0\\s*\\)/.test(c);
+              const kids = [core, ...core.querySelectorAll('*')].map(e => {
+                const s = getComputedStyle(e), bef = getComputedStyle(e, '::before'), aft = getComputedStyle(e, '::after');
+                const bw = Math.max(...['Top','Right','Bottom','Left'].map(k => s['border'+k+'Style'] !== 'none' ? parseFloat(s['border'+k+'Width']) : 0));
+                return {tag: e.tagName + '.' + (e.getAttribute('class') || ''), bgc: clear(s.backgroundColor), bgi: s.backgroundImage, bw: bw,
+                        br: s.borderRadius, bs: s.boxShadow, filter: s.filter, stroke: s.stroke,
+                        pseudo: (bef.content !== 'none' && bef.content !== 'normal') || (aft.content !== 'none' && aft.content !== 'normal')};
+              });
+              return {kids: kids, grads: core.querySelectorAll('linearGradient,radialGradient,circle,ellipse').length,
+                      rings: core.querySelectorAll('.core-dial,.core-rim,.core-inner,.core-satellite,#coreRim').length};
+            }""")
+            assert m["grads"] == 0 and m["rings"] == 0, "[hero no ring] a ring/gradient/circle element is in the hero centre at %dpx %s: %r" % (vw, theme, m)
+            for k in m["kids"]:
+                t = "%s at %dpx %s" % (k["tag"], vw, theme)
+                assert k["bgc"] and k["bgi"] == "none", "[hero no ring] %s has a backing fill/gradient: %r" % (t, k)
+                assert k["bw"] == 0, "[hero no ring] %s has a border (%spx)" % (t, k["bw"])
+                assert "50%" not in k["br"], "[hero no ring] %s is rounded into a circle (%s)" % (t, k["br"])
+                assert k["bs"] == "none" and k["filter"] == "none", "[hero no ring] %s has shadow/filter: %r" % (t, k)
+                assert "url(" not in k["stroke"], "[hero no ring] %s strokes with a gradient/url" % t
+                assert not k["pseudo"], "[hero no ring] %s has a pseudo-element" % t
             await pg.click("#themeToggle")
             await pg.wait_for_timeout(700)
-        oc = await pg.evaluate("""() => { const parse = c => c.match(/[\\d.]+/g).map(Number);
-            const col = v => { const d = document.createElement('div'); d.style.color = 'var(' + v + ')'; document.body.appendChild(d); const c = getComputedStyle(d).color; d.remove(); return parse(c).slice(0, 3); };
-            const O = window.__zaexaOrbitState.orbits;
-            return {theme: document.documentElement.dataset.theme || 'light', h1: col('--hero1'), h2: col('--hero2'), hm: col('--hero-mid'), rx: O.map(o => o.r), st: O.map(o => parse(o.stroke)), oa: window.__zaexaViz.oa}; }""")
-        order = sorted(range(3), key=lambda k: -oc["rx"][k])  # بیرونی، میانی، درونی
-        want = [oc["h1"], oc["hm"], oc["h2"]]
-        assert all(oc["st"][order[j]][:3] == want[j] for j in range(3)), \
-            "[hero hub] outer/middle/inner orbits must stroke with --hero1/--hero-mid/--hero2 (%s): %r" % (oc["theme"], oc)
-        assert len({tuple(w_) for w_ in want}) == 3, "[hero hub] the three orbit colours must all differ (%s): %r" % (oc["theme"], want)
-        assert all(abs(oc["st"][k][3] - oc["oa"]) < 0.005 for k in range(3)) and oc["oa"] > 0, "[hero hub] orbit alpha differs from the live orbit opacity (%s): %r" % (oc["theme"], oc["st"])
-    await pg.close()
-    # (b) عرضِ لوگوتایپ ۰٫۹ عرضِ نشان در ۱۴۴۰ و ۳۹۰ و (c) بدونِ مربعِ پشتِ نشان بعد از هر تعویضِ تم
-    # (d) هیچ عنصر/rect پشتِ نشان پر یا پس‌زمینه‌ی غیرشفاف ندارد
-    import io
-    from PIL import Image
-    for vw, vh in ((1440, 900), (390, 844)):
-        ctx = await b.new_context(reduced_motion="no-preference", viewport={"width": vw, "height": vh})
-        pg = await ctx.new_page()
-        pg.on("console", lambda m: errors.append(m.text) if m.type == "error" else None)
-        await pg.goto("file://" + path)
-        await pg.evaluate("() => { document.documentElement.dataset.theme = 'light'; }")
-        await pg.wait_for_timeout(700)
-        dims = await pg.evaluate("""() => { const m = document.querySelector('.visual-core .core-mark').getBoundingClientRect(),
-            w = document.querySelector('.visual-core .core-word').getBoundingClientRect(); return [m.width, w.width]; }""")
-        assert 0.88 <= dims[1] / dims[0] <= 0.92, "[hero hub] wordmark/mark width %.3f at %dpx" % (dims[1] / dims[0], vw)
-        # ۲۵ اکتبر: مدارها در هیچ لحظه‌ای هم را قطع نکنند — ۶۰ نمونه در ۳۰ ثانیه؛ قطرِ بلندِ درونی ≤ قطرِ کوتاهِ بیرونی − ۲
-        samples = await pg.evaluate("() => Array.from({length: 60}, (_, k) => window.__zaexaOrbitSet ? window.__zaexaOrbitSet(k * 500) : null)")
-        assert all(s_ and len(s_) == 3 for s_ in samples), "[hero hub] orbit geometry hook missing at %dpx" % vw
-        for ti, orbs in enumerate(samples):
-            for k in (1, 2):
-                assert orbs[k]["long"] <= orbs[k - 1]["short"] - 2, "[hero hub] orbit %d can cross orbit %d at t=%.1fs at %dpx: %r" % (k, k - 1, ti * .5, vw, orbs)
-        for step in range(2):
-            await pg.click("#themeToggle")
-            await pg.wait_for_timeout(700)
-            theme = await pg.evaluate("() => document.documentElement.dataset.theme || 'light'")
             await pg.evaluate("() => document.querySelector('.visual-core').scrollIntoView({block: 'center'})")
             await pg.wait_for_timeout(300)
-            behind = await pg.evaluate("""() => {
-              const mk = document.querySelector('.visual-core .core-mark').getBoundingClientRect();
-              const cx = mk.x + mk.width / 2, cy = mk.y + mk.height / 2, out = [];
-              const clear = c => !c || c === 'transparent' || /rgba\(\s*\d+,\s*\d+,\s*\d+,\s*0\s*\)/.test(c);
-              for (const el of document.elementsFromPoint(cx, cy)) {
-                if (el === document.body || el === document.documentElement || el.id === 'landingParticles' || el.classList.contains('hero-visual') ) continue;
-                if (el.closest('.hero-visual') === null) continue;
-                const s = getComputedStyle(el);
-                if (el.tagName === 'use' || el.closest('.core-mark')) { continue; }
-                if (!clear(s.backgroundColor) || s.backgroundImage !== 'none')
-                  out.push(el.tagName + '.' + el.className + ' bg=' + s.backgroundColor);
-                if (el.tagName.toLowerCase() === 'rect' && s.fill !== 'none' && !clear(s.fill)) out.push('rect fill ' + s.fill);
-              }
-              for (const r of document.querySelectorAll('.visual-core rect, .visual-core img, .visual-core canvas'))
-                out.push('backing node ' + r.tagName);
-              const bg = getComputedStyle(document.body).backgroundColor;
-              return {out, bg, box: [mk.x, mk.y, mk.width, mk.height]};
-            }""")
-            assert not behind["out"], "[hero hub] something non-transparent sits behind the mark at %dpx %s: %r" % (vw, theme, behind["out"])
-            # نشان و لوگوتایپ را نامرئی می‌کنیم تا جوهرِ خودِ نشان در گوشه‌ها پیکسلِ بدلی نسازد؛ مربعِ پشتش می‌ماند
-            # ۲۵ اکتبر: مدارها و خطِ مسیرِ متحرک هم پنهان می‌شوند (زیرِ بارِ سوییتِ کامل گاهی از گوشه رد می‌شدند و پیکسلِ فیروزه‌ای
-            # را «مربع» می‌خواندیم)؛ خودِ مرکز و نیاکانش دیده می‌مانند، پس هر پس‌زمینه‌ی واقعی پشتِ نشان هنوز گرفته می‌شود.
             HIDE = """(on) => { const sel = '.visual-core svg, #landingParticles';
               for (const e of document.querySelectorAll(sel)) e.style.visibility = on ? 'hidden' : '';
               for (const e of document.querySelectorAll('.hero-visual *')) {
                 if (e.closest('.visual-core') || e.querySelector('.visual-core')) continue;
                 e.style.visibility = on ? 'hidden' : ''; } }"""
             await pg.evaluate(HIDE, True)
+            info = await pg.evaluate("""() => { const mk = document.querySelector('.visual-core .core-mark').getBoundingClientRect();
+              return {bg: getComputedStyle(document.body).backgroundColor, box: [mk.x, mk.y, mk.width, mk.height],
+                      t: document.documentElement.dataset.theme || 'light'}; }""")
             png = await pg.screenshot()
-            await pg.evaluate(HIDE, False)
+            await ctx.close()
             im = Image.open(io.BytesIO(png)).convert("RGB")
-            bgc = [int(v) for v in re.findall(r"\d+", behind["bg"])[:3]]
-            x, y, bw, bh = behind["box"]
-            for (px, py) in ((x + 2, y + 2), (x + bw - 3, y + 2), (x + 2, y + bh - 3), (x + bw - 3, y + bh - 3)):
+            bgc = [int(v) for v in re.findall(r"\d+", info["bg"])[:3]]
+            x, y, bw_, bh_ = info["box"]
+            for (px, py) in ((x + 2, y + 2), (x + bw_ - 3, y + 2), (x + 2, y + bh_ - 3), (x + bw_ - 3, y + bh_ - 3)):
                 got = im.getpixel((int(px), int(py)))
-                assert all(abs(got[k] - bgc[k]) <= 3 for k in range(3)), (
-                    "[hero hub] a square shows behind the mark after toggling to %s at %dpx: pixel (%d,%d)=%r, page bg %r"
-                    % (theme, vw, px, py, got, bgc))
-        await ctx.close()
-    # reduced-motion: مدارها ثابت
-    for (vw, vh) in ((1440, 900), (390, 844)):
-        ctx = await b.new_context(reduced_motion="reduce", viewport={"width": vw, "height": vh})
-        pg = await ctx.new_page()
-        pg.on("console", lambda m: errors.append(m.text) if m.type == "error" else None)
-        await pg.goto("file://" + path)
-        await pg.wait_for_timeout(600)
-        a = await pg.evaluate(JS_STATE)
-        await pg.wait_for_timeout(700)
-        c2 = await pg.evaluate(JS_STATE)
-        await ctx.close()
-        assert a["R"]["orbits"] == c2["R"]["orbits"], "[hero hub] reduced motion: the orbits moved at %dpx" % vw
-    # گره/برچسب/مسیر/نقطه/پالسِ مرکز دیگر نیستند: نه عنصر، نه قلاب، نه نشانی در منبع
-    pg = await b.new_page(viewport={"width": 1440, "height": 900})
-    await pg.goto("file://" + path)
-    await pg.wait_for_timeout(600)
-    gone = await pg.evaluate("""() => ({els: document.querySelectorAll('#heroHub,.hub,.hub-node,.hub-label,.hub-pill,#hubDot,#hubRoute,#hubRoute2,.hero-visual svg:not(.core-mark):not(.core-word)').length,
-        hooks: ['__zaexaCanvasRoutePts', '__zaexaCanvasLabels', '__zaexaCanvasAvoid', '__zaexaHub'].filter(k => k in window)})""")
-    await pg.close()
-    assert gone["els"] == 0 and not gone["hooks"], "[hero hub] removed node/label/route parts are back: %r" % gone
-    src = open(path, encoding="utf-8").read()
-    back = [k for k in ("hub-node", "hubDot", "hubRoute", "heroHub", "HUB_", "nodePt", "labelPick", "markDim", "edgeDist", "DEX nodes") if k in src]
-    assert not back, "[hero hub] dead hub code is back in landing.html: %r" % back
+                assert all(abs(got[q] - bgc[q]) <= 3 for q in range(3)), (
+                    "[hero no ring] a ring/square shows around the mark after toggling to %s at %dpx: pixel (%d,%d)=%r, page bg %r"
+                    % (info["t"], vw, px, py, got, bgc))
+            n += 1
     await b.close()
-    print("[hero hub] 1440/1280/1024/768/390 (light, +dark at 1440 and 390): %s; orbits P=24/17/30s Q=13/10/16s, no crossing in 60 samples, "
-          "three colours; no node/label/route elements, hooks or code left; no ring/gradient/glow in the centre; reduced motion keeps orbits still" % "; ".join(summary))
+    print("[hero no ring] %d cases (1440/390 x light/dark, each then live-toggled): no ring element, fill, border, shadow or "
+          "gradient stroke in the centre, mark-box corner pixels equal page bg" % n)
 
-
-async def check_hero_continuity(p, errors):
-    """[hero continuity] — ۲۵ اکتبر: مالک «پرش به آغاز» دید. ساعتِ هیرو یکنواخت است (جمعِ Δهای ≤۵۰ms) و با ورودِ دوباره‌ی
-    IntersectionObserver، پنهان/نمایانِ تب، resize و تعویضِ تم صفر نمی‌شود؛ ۲۵ ثانیه فریم‌به‌فریم θ و σ ثبت می‌شود:
-    هیچ تغییرِ فریم‌به‌فریم بیش از ۳ برابرِ مقدارِ مورد انتظار نیست."""
-    import math
-    path = os.path.join(HERE, "..", "landing.html")
-    b = await p.chromium.launch()
-    ctx = await b.new_context(reduced_motion="no-preference", viewport={"width": 1440, "height": 900})
-    pg = await ctx.new_page()
-    pg.on("console", lambda m: errors.append(m.text) if m.type == "error" else None)
-    await pg.goto("file://" + path)
-    await pg.wait_for_timeout(500)
-    await pg.evaluate("""() => {
-      window.__rec = []; let last = -1;
-      (function f() {
-        const R = window.__zaexaOrbitState;
-        if (R && R.clock !== last) {
-          last = R.clock;
-          window.__rec.push({c: R.clock, th: R.orbits.map(o => o.theta), sk: R.orbits.map(o => o.skew)});
-        }
-        requestAnimationFrame(f);
-      })();
-      window.__hide = v => { Object.defineProperty(document, 'hidden', {configurable: true, get: () => v}); document.dispatchEvent(new Event('visibilitychange')); };
-    }""")
-    await pg.wait_for_timeout(5000)
-    c_before = await pg.evaluate("() => window.__zaexaClock()")
-    await pg.evaluate("() => window.__hide(true)")
-    await pg.wait_for_timeout(1500)
-    await pg.evaluate("() => window.__hide(false)")
-    await pg.wait_for_timeout(3500)
-    await pg.evaluate("() => window.scrollTo(0, 3000)")
-    await pg.wait_for_timeout(2000)
-    await pg.evaluate("() => window.scrollTo(0, 0)")
-    await pg.wait_for_timeout(3500)
-    await pg.click("#themeToggle")
-    await pg.wait_for_timeout(3000)
-    await pg.set_viewport_size({"width": 1439, "height": 900})
-    await pg.wait_for_timeout(5500)
-    rec = await pg.evaluate("() => window.__rec")
-    c_after = await pg.evaluate("() => window.__zaexaClock()")
-    await ctx.close()
-    await b.close()
-    assert len(rec) > 150, "[hero continuity] only %d frames recorded in 25s" % len(rec)
-    assert c_after > c_before + 5000, "[hero continuity] the hero clock was reset or stalled: %.0f -> %.0f ms" % (c_before, c_after)
-    P, Q = [24000, 17000, 30000], [13000, 10000, 16000]
-    smax = math.radians(16)
-    worst = {"th": 0.0, "sk": 0.0}
-    for a, c in zip(rec, rec[1:]):
-        dt = c["c"] - a["c"]
-        assert 0 < dt <= 50.001, "[hero continuity] clock step %.2f ms (clock %.0f -> %.0f): must be monotonic and clamped to 50ms" % (dt, a["c"], c["c"])
-        for k in range(3):
-            exp_th = 2 * math.pi * dt / P[k]
-            exp_sk = smax * 2 * math.pi * dt / Q[k]
-            dth, dsk = abs(c["th"][k] - a["th"][k]), abs(c["sk"][k] - a["sk"][k])
-            assert dth <= 3 * exp_th + 1e-9, "[hero continuity] orbit %d theta jumped %.5f rad in one frame (expected %.5f) at clock %.0f" % (k, dth, exp_th, c["c"])
-            assert dsk <= 3 * exp_sk + 1e-9, "[hero continuity] orbit %d skew jumped %.5f rad in one frame (expected <= %.5f) at clock %.0f" % (k, dsk, exp_sk, c["c"])
-            worst["th"] = max(worst["th"], dth / exp_th); worst["sk"] = max(worst["sk"], dsk / exp_sk)
-    print("[hero continuity] %d frames over 25s with tab hide/show, scroll out/in, theme toggle and resize: clock %.0f -> %.0f ms never reset, "
-          "worst per-frame theta/skew change %.2fx/%.2fx of expected (limit 3x)"
-          % (len(rec), c_before, c_after, worst["th"], worst["sk"]))
 
 
 async def check_trust_glyph_in_circle(p, errors):
@@ -3229,7 +3187,7 @@ async def check_canvas_resize(p, errors):
     """[canvas resize] — ۲۳ سپتامبر: کوچک و دوباره بزرگ‌کردنِ پنجره بوم را از قابش
     بلندتر می‌کرد (ارتفاع از نسبتِ width/height‌ِ خودِ بوم می‌آمد) و مرکزِ رسم از
     لوگوی وسط جدا می‌افتاد. بعد از هر تغییرِ اندازه، بوم باید دقیقاً هم‌اندازه‌ی
-    .hero-visual باشد و مرکزِ رسم (window.__zaexaOrbitState) روی مرکزِ .visual-core."""
+    .hero-visual باشد و مرکزِ رسم (window.__zaexaCanvasRoutePts) روی مرکزِ .visual-core."""
     path = os.path.join(HERE, "..", "landing.html")
     b = await p.chromium.launch()
     pg = await b.new_page(viewport={"width": 1900, "height": 1000})
@@ -3246,7 +3204,7 @@ async def check_canvas_resize(p, errors):
             await pg.wait_for_function("""() => {
                 const c = document.getElementById('routeCanvas').getBoundingClientRect();
                 const k = document.querySelector('.visual-core').getBoundingClientRect();
-                const R = window.__zaexaOrbitState || {};
+                const R = window.__zaexaCanvasRoutePts || {};
                 return R.cx != null && Math.abs(R.cx - (k.x + k.width / 2 - c.x)) <= 2
                     && Math.abs(R.cy - (k.y + k.height / 2 - c.y)) <= 2;
             }""", timeout=3000)
@@ -3256,7 +3214,7 @@ async def check_canvas_resize(p, errors):
             const c = document.getElementById('routeCanvas').getBoundingClientRect();
             const v = document.querySelector('.hero-visual').getBoundingClientRect();
             const k = document.querySelector('.visual-core').getBoundingClientRect();
-            const R = window.__zaexaOrbitState || {};
+            const R = window.__zaexaCanvasRoutePts || {};
             return {c: [c.width, c.height], v: [v.width, v.height],
                     core: [k.x + k.width / 2 - c.x, k.y + k.height / 2 - c.y], draw: [R.cx, R.cy]};
         }""")
@@ -9472,9 +9430,11 @@ async def main():
         await check_canvas_phases(p, errors)
         await check_canvas_cost(p, errors)
         await check_canvas_reduced_motion(p, errors)
-        await check_hero_hub(p, errors)
+        await check_canvas_labels(p, errors)
+        await check_hero_core(p, errors)
+        await check_canvas_route_on_ellipse(p, errors)
+        await check_hero_no_ring(p, errors)
         await check_trust_rings_seamless(p, errors)
-        await check_hero_continuity(p, errors)
         await check_trust_glyph_in_circle(p, errors)
         await check_canvas_resize(p, errors)
         await check_logo_hit_area(p, errors)
