@@ -166,6 +166,7 @@ function statsOf(rows) {
     med,
     causeEmpty: nos.filter((r) => r.cause === "empty-pool").length,
     causeRevert: nos.filter((r) => r.cause === "sell-reverts").length,
+    causeOneWay: nos.filter((r) => r.cause === "one-way-pool").length,
     s: sol.length,
     sSell: sol.filter((r) => r.v === "sell").length,
     sNa: sol.filter((r) => r.v !== "sell" && r.v !== "nosell").length,
@@ -434,7 +435,7 @@ const CLIENT_JS = String.raw`
       td=el('td');
       if(r.v==='sell') td.appendChild(pill('ok','✓ '+(base?'Sell route quoted':'Passed buy and sell')));
       else if(r.v==='nosell'){
-        var cw=r.cause==='empty-pool'?' · pool is empty':r.cause==='sell-reverts'?' · the sell reverts':'';
+        var cw=r.cause==='empty-pool'?' · pool is empty':r.cause==='sell-reverts'?' · the sell reverts':r.cause==='one-way-pool'?' · one-way pool':'';
         td.appendChild(pill('no','⚠ No sell route'+cw));
       } else { td.appendChild(pill('na','? Could not be checked')); td.appendChild(el('span','why muted',r.why||'The check did not finish.')); }
       tr.appendChild(td);
@@ -1490,6 +1491,7 @@ export function renderReportPage(opts) {
   const causeParts = [];
   if (st.causeEmpty) causeParts.push("Empty pool: " + st.causeEmpty);
   if (st.causeRevert) causeParts.push("Sell reverts: " + st.causeRevert);
+  if (st.causeOneWay) causeParts.push("One-way pool: " + st.causeOneWay);
 
   const tiles = hasData
     ? '<section class="chain"><div class="chainhd"><h2>Base</h2><span>We ask the DEXes for a sell quote on $100 of the token.</span></div><div class="tiles">' +

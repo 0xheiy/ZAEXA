@@ -160,7 +160,7 @@ import { ogTags, ogTitle, pickTokenMeta, pickDsMeta, pickCmcMeta } from "./og.js
 import { ogImageResponse } from "./og-image.js";
 import { tokenCardPng, renderable, logoFromJpeg } from "./og-token.js";
 import { logoResponse } from "./logo-image.js";
-import { fetchVerdict, fetchCounterSell, poolDirectedProof, VD_VENUES, VD_RPCS, VD_V4_STAGE_COUNTERS,
+import { fetchVerdict, fetchCounterSell, poolDirectedProof, v4OneWayProof, oneWayCounterFor, VD_VENUES, VD_RPCS, VD_V4_STAGE_COUNTERS,
   WETH_ADDR, USDC_ADDR, sellAmountFrom } from "./verdict.js";
 import { EVM_ADDR, SOL_MINT, chainOf, gtNetworkOf } from "./chains.js";
 import { tgRoute } from "./tg.js";
@@ -1322,13 +1322,13 @@ export const COUNTER_PROOF_PASS_MAX_USED = 44; // ۵۰ منهای ۲ تماسِ 
    true می‌شود؛ used<=COUNTER_PROOF_PASS_MAX_USED یعنی دو زیر‌درخواستِ اضافه
    هنوز جا دارد. بدونِ meterHooks (مثلِ /vd) هرگز محدود نمی‌کند — هرگز پرتاب
    نمی‌کند. */
-function passBudgetHasRoom(meterHooks) {
+function passBudgetHasRoom(meterHooks, maxUsed) {
   if (!meterHooks) return true;
   if (typeof meterHooks.capHit === "function") {
     try { if (meterHooks.capHit()) return false; } catch (e) { return false; } // رصدگر هرگز نباید حکم را بشکند
   }
   if (typeof meterHooks.used === "function") {
-    try { if (!(meterHooks.used() <= COUNTER_PROOF_PASS_MAX_USED)) return false; } catch (e) { return false; }
+    try { if (!(meterHooks.used() <= (typeof maxUsed === "number" ? maxUsed : COUNTER_PROOF_PASS_MAX_USED))) return false; } catch (e) { return false; }
   }
   return true;
 }
@@ -1361,6 +1361,32 @@ export async function withCounterProof(result, addr, meta, deadlineAt, env, cove
     return { v: "sell", why: null, ret: typeof proof.ret === "number" ? proof.ret : undefined, via: "counter" };
   }
   return result; // هر شکستی، دقیقاً همان {v:null, why:"sells:elsewhere"} امروز
+}
+
+/* ۲۶ اکتبر — one-way-pool: فقط وقتی حکم وگرنه v4:unproven می‌شد. تا سه
+   ساب‌ریکوئست (کاناری/قیمت، خرید، فروش) — پس سقفِ بودجه‌ی گذر یکی کمتر از
+   COUNTER_PROOF_PASS_MAX_USED است. هر شکستی → false (رفتارِ امروز). */
+export const ONE_WAY_PASS_MAX_USED = COUNTER_PROOF_PASS_MAX_USED - 1;
+export async function v4OneWayCheck(addr, meta, env, deadlineAt, meterHooks) {
+  try {
+    if (deadlineAt != null && deadlineAt - Date.now() < 1200) return false;
+    if (!passBudgetHasRoom(meterHooks, ONE_WAY_PASS_MAX_USED)) return false;
+    const entry = await readV4Entry(addr, env);
+    if (entry.complete !== true || !Array.isArray(entry.keys)) return false; // همان شرطِ v4PoolsEmpty
+    // فقط وقتی توکن دقیقاً یک استخرِ v4 دارد: با چند استخر، یک‌طرفه‌بودنِ یکی چیزی درباره‌ی بقیه نمی‌گوید.
+    if (entry.keys.length !== 1) return false;
+    const key = entry.keys.find((k) => oneWayCounterFor(k, addr) != null);
+    if (!key) return false;
+    const hasStage = meterHooks && typeof meterHooks.stage === "function";
+    if (hasStage) { try { meterHooks.stage("counter"); } catch (e) { /* فقط رصد */ } }
+    try {
+      return await v4OneWayProof(addr, key, { deadlineAt, fetchImpl: fetch, rpcs: baseRpcsFor(env) });
+    } finally {
+      if (hasStage) { try { meterHooks.stage("base-token"); } catch (e) { /* فقط رصد */ } }
+    }
+  } catch (e) {
+    return false;
+  }
 }
 
 async function ogFetchVerdictDetail(addr, meta, deadlineAt, env, ctx, metaWhy, meterHooks) {
@@ -1491,7 +1517,12 @@ async function ogFetchVerdictDetail(addr, meta, deadlineAt, env, ctx, metaWhy, m
      شاخه نمی‌رسد و همیشه نامعلوم می‌ماند — یک چکِ ناکام هرگز اتهام نیست. */
   if (covered.covered === false && covered.v4Listed === true && cacheOut.v4Keyed === true) {
     const empty = await v4PoolsEmpty(addr, env, deadlineAt);
-    return withCounterProof(finalizeBaseNosell(empty, covered, true, poolCause), addr, meta, deadlineAt, env, covered, meterHooks);
+    let fin = finalizeBaseNosell(empty, covered, true, poolCause);
+    // فقط جایی که وگرنه v4:unproven بود (vetoها و empty-pool جلوتر برنده‌اند)
+    if (fin.why === "v4:unproven" && await v4OneWayCheck(addr, meta, env, deadlineAt, meterHooks)) {
+      fin = finalizeBaseNosell(empty, covered, true, poolCause, true);
+    }
+    return withCounterProof(fin, addr, meta, deadlineAt, env, covered, meterHooks);
   }
   return { v: null, why: covered.why || "cover:shape" };
 }
@@ -1518,7 +1549,7 @@ export const SELLERS_H1_VETO = 3;
    برنده می‌شود، درست مثلِ شاهدِ خالیِ v4. "sell-reverts" فقط در انتها، به‌جایِ
    causeِ undefinedِ همیشگی می‌نشیند — هرگز رویِ sells:elsewhere یا
    sells:recent برنده نمی‌شود. */
-export function finalizeBaseNosell(empty, covered, v4Only, poolCause) {
+export function finalizeBaseNosell(empty, covered, v4Only, poolCause, oneWay) {
   /* ۰. (۲۴ سپتامبر، SN80) استخرِ زنده با ضدجفتی که نمی‌پرسیم و دست‌کم SELLERS_H1_VETO
      فروشنده در ۲۴ ساعت → نامعلوم، حتی پیش از «استخرِ خالی»: خالی‌بودنِ استخرهای
      اتر/USDC یعنی از راهِ ما نمی‌شود، نه اینکه هیچ راهی نیست. */
@@ -1527,6 +1558,9 @@ export function finalizeBaseNosell(empty, covered, v4Only, poolCause) {
   if (empty === true || poolCause === "empty-pool") return { v: "nosell", why: null, cause: "empty-pool" };
   const sellers = covered && covered.sellersH1;
   if (typeof sellers === "number" && sellers >= SELLERS_H1_VETO) return { v: null, why: "sells:recent" };
+  // ۲۶ اکتبر — خرید پر می‌شود و فروشِ همان مقدار NotEnoughLiquidity (v4OneWayProof)؛
+  // بعد از sells:recent، پیش از v4:unproven، و فقط برای حکمِ v4-only.
+  if (v4Only && oneWay === true) return { v: "nosell", why: null, cause: "one-way-pool" };
   if (v4Only) return { v: null, why: "v4:unproven" };
   return { v: "nosell", why: null, cause: poolCause === "sell-reverts" ? "sell-reverts" : undefined };
 }

@@ -1415,3 +1415,98 @@ export async function poolDirectedProof(tokenAddr, pools, opts) {
     return { v: "nosell", cause: undefined }; // این تابع هم هرگز نباید پرتاب کند
   }
 }
+
+/* ---------------------------------------------------------------------
+   v4OneWayProof — علتِ «one-way-pool»، فقط رویِ nosellِ v4-onlyِ Base
+   =========================================================================
+   ۲۶ اکتبر — اندازه‌گیریِ زنده (XDP، DERO): خریدِ ~$100 از کلیدِ واقعیِ v4 پر
+   می‌شود، ولی فروشِ دقیقاً همان مقدار روی همان کلید با
+   UnexpectedRevertBytes(NotEnoughLiquidity(poolId)) برمی‌گردد — استخر خالی
+   نیست، فقط یک‌طرفه است. چهار شرطِ با هم (تصمیمِ مالک):
+     ۱. کلید واقعی و ایندکس‌شده است (poolId دارد) — کالر complete را می‌سنجد.
+     ۲. کوتِ خریدِ ~$100 روی همین کلید خروجیِ > ۰ می‌دهد.
+     ۳. کوتِ فروشِ دقیقاً همان خروجی ریوِرت می‌کند و v4NoLiquidityProof
+        (همان قاعده‌ی empty-pool: پوشش + چهار بایتِ درونی + شناسه‌ی یکسان)
+        آن را می‌پذیرد — هرگز از متن؛ خطای هوک (۰x90bfb865) اثبات نیست.
+     ۴. کاناریِ زنده در هر دو batch.
+   قیمتِ اتر از کاناریِ همان batch می‌آید (canaryUsdPerEth) — منبعِ تازه‌ای
+   نیست. هر شکستی (مهلت، RPC، مقدار، صفر، شکلِ بد) → false، یعنی رفتارِ امروز
+   (v4:unproven). هرگز پرتاب نمی‌کند و هرگز چیزی جز true/false برنمی‌گرداند. */
+const V4_ONE_WAY_COUNTERS = new Set(
+  Object.values(VD_V4_STAGE_COUNTERS).flat().map((a) => String(a).toLowerCase()));
+
+export function oneWayCounterFor(key, tokenAddr) {
+  if (!key || typeof key.poolId !== "string" || !/^0x[0-9a-fA-F]{64}$/.test(key.poolId)) return null;
+  const counter = keyUsableFor(key, tokenAddr);
+  if (typeof counter !== "string" || !V4_ONE_WAY_COUNTERS.has(counter.toLowerCase())) return null;
+  return counter;
+}
+
+export async function v4OneWayProof(tokenAddr, key, opts) {
+  try {
+    const o = opts || {};
+    const counter = oneWayCounterFor(key, tokenAddr);
+    if (counter == null) return false;
+    const usdcSide = counter.toLowerCase() === USDC_ADDR.toLowerCase();
+
+    const fetchImpl = o.fetchImpl || fetch;
+    const now = o.now || Date.now;
+    const deadlineAt = o.deadlineAt;
+    const rpcs = o.rpcs || VD_RPCS;
+    const timeoutMs = o.timeoutMs || 900;
+    const collect = Array.isArray(o.collect) ? o.collect : null;
+    const deadlineHit = () => deadlineAt != null && (now() >= deadlineAt || deadlineAt - now() < 400);
+    const canary = canaryCall();
+    const alive = (b) => !!b && !!b.canary && !b.canary.error && typeof b.canary.result === "string" &&
+      (() => { const v = decodeQuote("CL_UINT24", b.canary.result); return v != null && v > 0n; })();
+    const row = (data) => ({ id: "uniswap-v4", key: "oneway", to: V4_ROW.to, data, poolId: key.poolId });
+
+    let rpc = null;
+    let buyIn = null;
+    if (usdcSide) {
+      buyIn = BigInt(VD_NOTIONAL_USD) * 1000000n; // USDC، ۶ رقم
+    } else {
+      // اتر/WETH: قیمت فقط از کاناریِ یک batchِ جدا؛ همان اندپوینت برای دو تماسِ بعدی
+      for (const url of rpcs.slice(0, VD_MAX_ENDPOINTS)) {
+        if (deadlineHit()) return false;
+        const b0 = await callBatch(fetchImpl, url, canary, [], timeoutMs, collect, "oneway-price");
+        if (b0 == null || !alive(b0)) continue;
+        const price = canaryUsdPerEth(b0);
+        if (price == null) return false;
+        const cents = BigInt(Math.round(price * 100));
+        if (cents <= 0n) return false;
+        buyIn = (BigInt(VD_NOTIONAL_USD) * 10n ** 18n * 100n) / cents;
+        rpc = url;
+        break;
+      }
+      if (buyIn == null || rpc == null) return false;
+    }
+    if (buyIn <= 0n) return false;
+
+    const buyData = encodeV4QuoteExactInputSingleKey(key, counter, buyIn);
+    if (buyData == null) return false;
+
+    // خرید
+    let bought = null;
+    for (const url of (rpc ? [rpc] : rpcs.slice(0, VD_MAX_ENDPOINTS))) {
+      if (deadlineHit()) return false;
+      const b1 = await callBatch(fetchImpl, url, canary, [row(buyData)], timeoutMs, collect, "oneway-buy");
+      if (b1 == null || !alive(b1)) continue;
+      rpc = url;
+      const it = b1.items[0];
+      bought = it && !it.error && typeof it.result === "string" ? decodeQuote("V4_SINGLE", it.result) : null;
+      break;
+    }
+    if (rpc == null || bought == null || bought <= 0n) return false;
+
+    // فروشِ دقیقاً همان مقدار، همان کلید
+    const sellData = encodeV4QuoteExactInputSingleKey(key, tokenAddr, bought);
+    if (sellData == null) return false;
+    if (deadlineHit()) return false;
+    const b2 = await callBatch(fetchImpl, rpc, canary, [row(sellData)], timeoutMs, collect, "oneway-sell");
+    if (b2 == null || !alive(b2)) return false;
+    return v4NoLiquidityProof(b2.items[0]) === true;
+  } catch (e) {
+    return false;
+  }
+}

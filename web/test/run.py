@@ -8810,7 +8810,7 @@ async def check_flow_board(p, errors):
         assert len(unk) == 1 and not unk[0]["chipCls"].endswith(" p") and not unk[0]["chipCls"].endswith(" n"), "[flow board] v=null -> neutral Unknown chip: %s" % unk
         assert await pg.evaluate("() => !document.querySelector('#flowBody img[src=\"x\"]') && document.querySelectorAll('#flowBody table img').length <= 1"), "[flow board] hostile symbol must not create an element"
         stored = await pg.evaluate("() => localStorage.getItem('zaexa.flowboard.v1')")
-        assert _fbj.loads(stored) == {"only": False, "w": "h1"}, "[flow board] the toggle is remembered: %r" % stored
+        assert _fbj.loads(stored) == {"only": False, "w": "h1", "set": "new"}, "[flow board] the toggle is remembered: %r" % stored
 
         # ---- 6h changes the numbers ----
         await pg.click('[data-fbw="h6"]')
@@ -8824,7 +8824,7 @@ async def check_flow_board(p, errors):
         sub = await pg.inner_text(".fbSub")
         assert sub == "New Base pairs · last 6 hours · by unique wallets", sub
         assert not FB_BAD_RE.search(await pg.inner_text("#flowBody")), "[flow board] 6h: bad text"
-        assert _fbj.loads(await pg.evaluate("() => localStorage.getItem('zaexa.flowboard.v1')")) == {"only": False, "w": "h6"}
+        assert _fbj.loads(await pg.evaluate("() => localStorage.getItem('zaexa.flowboard.v1')")) == {"only": False, "w": "h6", "set": "new"}
         # ---- window and toggle survive a reload ----
         await pg.reload()
         await fb_wait_rows(pg, 6)
@@ -9408,6 +9408,272 @@ async def check_stock_issuer(p, errors):
         srv.shutdown()
 
 
+# =====================================================================
+# ۲۶ اکتبر — تابلوی جریان: سوییچِ مجموعه‌ی توکن «New tokens | Established».
+# Established = توکن‌های شناخته‌شده‌ی خودِ اپ (بدونِ استیبل و سهام)، بدونِ /pairs.json، همان مسیرِ tokens/multi + pools/multi.
+# =====================================================================
+FB_EST_JS = """() => [...document.querySelectorAll('#flowBody .fbRow')].map(r => {
+    const c = r.children;
+    return {sym: r.querySelector('.fbTkTx b').textContent, age: !!r.querySelector('.fbAge'), tx: r.querySelector('.fbTkTx').textContent,
+            net: c[2].textContent.trim(), chip: c[6].textContent.trim(), chipCls: c[6].firstElementChild.className, addr: r.dataset.addr};
+})"""
+
+
+def fb_est_gt(net, log, status=200):
+    """GT برای Established: برای هر آدرسِ خواسته‌شده یک توکن با استخرِ خودش؛ هر آدرس را ثبت می‌کند."""
+    pool_of = {}
+
+    def pool(a):
+        if a not in pool_of:
+            n = 0xC00 + len(pool_of)
+            pool_of[a] = fb_evm(n) if net == "base" else fb_b58(n)
+        return pool_of[a]
+
+    def gt(path):
+        if "/tokens/multi/" in path:
+            want = path.split("/tokens/multi/")[1].split(",")
+            log["tokens"].append(want)
+            return (status, {"data": [fb_tok(a, "T%d" % i, pool(a), net) for i, a in enumerate(want)]})
+        if "/pools/multi/" in path:
+            want = path.split("/pools/multi/")[1].split(",")
+            log["pools"].append(want)
+            inv = {v: k for k, v in pool_of.items()}
+            out = []
+            for i, pl in enumerate(want):
+                if pl in inv:
+                    out.append(fb_pool(pl, (80 - i, 10, 70, 20, "1000"), (130 - i, 30, 150, 60, "9000"), net))   # اولین توکنِ فهرست بیشترین خریدارِ خالص را دارد
+            return (200, {"data": out})
+        return None
+    return gt
+
+
+def fb_est_requested(env):
+    toks = [c for c in env.calls if "/tokens/multi/" in c and "include=top_pools" in c]   # tokens/multi ی بی‌include مالِ بقیه‌ی اپ است
+    pools = [c for c in env.calls if "/pools/multi/" in c]
+    tok_addrs = [a for c in toks for a in c.split("/tokens/multi/")[1].split("?")[0].split(",")]
+    return toks, pools, tok_addrs
+
+
+async def check_flow_established(p, errors):
+    """[flow established] سوییچِ New tokens | Established روی تابلوی جریان."""
+    srv, origin = fb_serve()
+    b = await p.chromium.launch()
+    errs = []
+    try:
+        env = FbEnv(b, origin, errs)
+        prow, toks, pls, mk, pools = fb_fixture()
+        env.pairs["body"] = {"store": True, "rows": prow}
+        env.gt = fb_gt_for(toks, pls)
+
+        # ---- پیش‌فرض: New tokens، مسیرِ جفت‌های تازه بدونِ تغییر ----
+        env.calls.clear(); env.pairs_calls.clear()
+        pg = await env.open()
+        await fb_wait_rows(pg)
+        st = await pg.evaluate("""() => [document.querySelector('#fbHead [aria-label="Token set"]') !== null,
+            [...document.querySelectorAll('#fbHead [data-fbset]')].map(x => x.textContent + (x.classList.contains('on') ? '*' : '')),
+            document.querySelector('.fbSub').textContent, document.querySelector('.fbTog').offsetParent !== null,
+            [...document.querySelectorAll('#fbHead .fbCtl > *')].map(x => x.id || x.getAttribute('aria-label') || x.className)]""")
+        assert st[0] and st[1] == ["New tokens*", "Established"] and st[2] == "New Base pairs · last hour · by unique wallets" and st[3], \
+            "[flow established] default is New tokens with the old subtitle and the sell-route switch: %s" % st
+        assert st[4][:3] == ["fbNetSlot", "Token set", "Time window"], "[flow established] the set group sits after the network slot and before 1h|6h: %s" % st[4]
+        assert len(env.pairs_calls) == 1 and len(fb_est_requested(env)[0]) == 1 and len(fb_est_requested(env)[1]) == 1, \
+            "[flow established] the New path still does one pairs.json + one tokens/multi + one pools/multi: %s %s" % (env.pairs_calls, env.calls)
+        # سوییچِ sell-route را خاموش می‌کنیم تا «مقدارِ ذخیره‌شده دست‌نخورده می‌ماند» سنجیده شود
+        await pg.click(".fbTog")
+        await fb_wait_rows(pg, 6)
+        exp = await pg.evaluate("""() => { const stk = new Set(STK.map(s => s.sym));
+            return {bad: BASE_TOKENS.filter(t => t.native || t.stable || stk.has(t.symbol) || ['EURC', 'USDe'].includes(t.symbol)).map(t => t.address.toLowerCase()),
+                    ok: BASE_TOKENS.filter(t => !t.native && !t.stable && !stk.has(t.symbol) && !['EURC', 'USDe'].includes(t.symbol)).map(t => t.address.toLowerCase()),
+                    weth: WETH_ADDR.toLowerCase(), stables: BASE_TOKENS.filter(t => t.stable).length, stocks: STK.length}; }""")
+        assert exp["stables"] >= 3 and exp["stocks"] == 12 and len(exp["ok"]) > 10, "[flow established] the page's lists look different from what the probe expects: %s" % exp
+
+        # ---- Established: صفر pairs.json، tokens/multi ≤۳۰ آدرس، بدونِ استیبل/سهام ----
+        log = {"tokens": [], "pools": []}
+        env.gt = fb_est_gt("base", log)
+        env.calls.clear(); env.pairs_calls.clear()
+        await pg.click('[data-fbset="est"]')
+        await pg.wait_for_function("() => document.querySelector('.fbSub').textContent.startsWith('Established Base tokens')", timeout=20000)
+        await fb_wait_rows(pg, min(15, len(exp["ok"])))
+        tcalls, pcalls, addrs = fb_est_requested(env)
+        assert not env.pairs_calls, "[flow established] Established must not fetch /pairs.json: %s" % env.pairs_calls
+        assert len(tcalls) >= 1 and all(len(c.split("/tokens/multi/")[1].split("?")[0].split(",")) <= 30 for c in tcalls) \
+            and all(c.endswith("?include=top_pools") for c in tcalls), "[flow established] tokens/multi: <=30 addresses, include=top_pools: %s" % tcalls
+        assert all(len(c.split("/pools/multi/")[1].split(",")) <= 30 for c in pcalls) and len(pcalls) >= 1, "[flow established] pools/multi <=30 pools each: %s" % pcalls
+        low = [a.lower() for a in addrs]
+        assert sorted(low) == sorted(exp["ok"]), "[flow established] requested = BASE_TOKENS without ETH-native, stablecoins and stocks: extra %s missing %s" % (set(low) - set(exp["ok"]), set(exp["ok"]) - set(low))
+        assert not (set(low) & set(exp["bad"])) and exp["weth"] in low and not any(a.lower() == "native" for a in addrs), "[flow established] no stable/stock/native address; WETH instead of ETH"
+        assert len(low) == len(set(low)), "[flow established] each address once"
+        n_calls = len(env.calls)
+        rows = await pg.evaluate(FB_EST_JS)
+        syms = [r["sym"] for r in rows]
+        assert len(rows) == min(15, len(exp["ok"])), "[flow established] row count (the board cap of 15 applies): %d" % len(rows)
+        assert all(not re.match(r"^T\d+$", r["sym"]) and not r["age"] for r in rows) and all(r["tx"] == r["sym"] for r in rows), \
+            "[flow established] rows show the symbol and no age line: %s" % rows[:3]
+        txt = await pg.inner_text("#flowBody")
+        assert not FB_BAD_RE.search(txt), "[flow established] bad text: %r" % FB_BAD_RE.search(txt).group(0)
+        assert all(r["chip"] == "Not checked yet" and not r["chipCls"].endswith((" p", " n")) for r in rows), "[flow established] Exit chip is 'Not checked yet' without a session result: %s" % rows[:3]
+        assert all(r["net"] != "—" for r in rows), "[flow established] numbers from the stubbed GT: %s" % rows[:3]
+        nets = [int(r["net"].replace("+", "")) for r in rows]
+        assert nets == sorted(nets, reverse=True) and rows[0]["sym"] == "WETH", "[flow established] sorted by net buyers (WETH has the most in the stub): %s %s" % (nets, syms[:3])
+        ui = await pg.evaluate("""() => ({tog: document.querySelector('.fbTog').getClientRects().length, togHidden: document.querySelector('.fbTog').hidden,
+            on: [...document.querySelectorAll('#fbHead [data-fbset]')].map(x => x.textContent + (x.classList.contains('on') ? '*' : '')),
+            ls: JSON.parse(localStorage.getItem('zaexa.flowboard.v1'))})""")
+        assert ui["tog"] == 0 and ui["togHidden"] and ui["on"] == ["New tokens", "Established*"], "[flow established] the sell-route switch is hidden in Established: %s" % ui
+        assert ui["ls"] == {"only": False, "w": "h1", "set": "est"}, "[flow established] stored preference keeps `only` and adds set: %s" % ui["ls"]
+        # چیپِ Exit: نتیجه‌ی همین نشست (WETH) دیده می‌شود، بقیه «Not checked yet»
+        await pg.evaluate("() => { exitCache[WETH_ADDR.toLowerCase()] = {state: 'verified', lossPct: 1, at: Date.now()}; fbLast = ''; fbPaint(); }")
+        chips = await pg.evaluate("() => [...document.querySelectorAll('#flowBody .fbRow')].map(r => [r.dataset.addr.toLowerCase(), r.children[6].textContent.trim()])")
+        wchip = [c for a, c in chips if a == exp["weth"]]
+        assert wchip and wchip[0].startswith("Sell route quoted") and sum(1 for a, c in chips if c == "Not checked yet") == len(chips) - 1, "[flow established] a session result shows on its own row only: %s" % chips
+        # ستاره و کلیکِ ردیف مثلِ تابلوی قبلی
+        await pg.click('.fbRow[data-addr="%s"] .fbStar' % await pg.evaluate("() => document.querySelector('#flowBody .fbRow').dataset.addr"))
+        assert await pg.evaluate("() => document.querySelector('#flowBody .fbStar').getAttribute('aria-pressed')") == "true", "[flow established] the star works"
+        await pg.evaluate("() => { savedWatchRows.length = 0; fbStarSync(); }")
+        waddr = await pg.evaluate("() => WETH_ADDR")
+        await pg.click('.fbRow[data-addr="%s"] td:nth-child(2)' % waddr)
+        await pg.wait_for_function("() => !document.getElementById('flowBackRow').hidden", timeout=20000)
+        assert await pg.evaluate("() => tokenOut.symbol") == "WETH", "[flow established] row click opens the token"
+        await pg.click("#flowBack")
+        await pg.wait_for_selector("#flowBody .fbRow", timeout=15000)
+        assert not env.pairs_calls and await pg.evaluate("() => document.querySelector('.fbSub').textContent.startsWith('Established')"), "[flow established] Back returns to Established without /pairs.json"
+        assert len(fb_est_requested(env)[0]) + len(fb_est_requested(env)[1]) == len(tcalls) + len(pcalls), "[flow established] star, click and Back made no extra board calls: %s" % env.calls
+
+        # ---- برگشت به New و دوباره Established: بدونِ دریافتِ دوباره (کشِ ≤۶۰ث)، سوییچ برمی‌گردد ----
+        env.calls.clear(); env.pairs_calls.clear()
+        await pg.click('[data-fbset="new"]')
+        await fb_wait_rows(pg, 6)
+        back = await pg.evaluate("""() => ({sub: document.querySelector('.fbSub').textContent, tog: document.querySelector('.fbTog').offsetParent !== null,
+            checked: document.querySelector('.fbTog').getAttribute('aria-checked'), ages: document.querySelectorAll('#flowBody .fbAge').length})""")
+        assert back["sub"] == "New Base pairs · last hour · by unique wallets" and back["tog"] and back["checked"] == "false" and back["ages"] == 6, "[flow established] back to New: switch returns with its saved value, rows and ages: %s" % back
+        await pg.click('[data-fbset="est"]')
+        await pg.wait_for_function("() => document.querySelector('.fbSub').textContent.startsWith('Established')")
+        await pg.wait_for_timeout(600)
+        assert not fb_est_requested(env)[0] and not fb_est_requested(env)[1] and not env.pairs_calls, "[flow established] switching sets inside the cache window makes no request: %s %s" % (env.calls, env.pairs_calls)
+        # ---- بارگذاری دوباره: مجموعه ماندگار است ----
+        env.calls.clear(); env.pairs_calls.clear()
+        await pg.reload()
+        await fb_wait_rows(pg, min(15, len(exp["ok"])))
+        st2 = await pg.evaluate("() => [document.querySelector('.fbSub').textContent, document.querySelector('[data-fbset].on').textContent, document.querySelector('.fbTog').hidden]")
+        assert st2 == ["Established Base tokens · last hour · by unique wallets", "Established", True] and not env.pairs_calls, "[flow established] the set survives a reload with no /pairs.json: %s" % st2
+        env.calls.clear()
+        await pg.click('[data-fbset="new"]')
+        await fb_wait_rows(pg, 6)
+        assert len(env.pairs_calls) == 1, "[flow established] switching to New after a reload fetches pairs.json once: %s" % env.pairs_calls
+        assert len(fb_est_requested(env)[0]) == 1 and len(fb_est_requested(env)[1]) == 1, "[flow established] New: one tokens/multi + one pools/multi: %s" % env.calls
+        # ذخیره‌ی نامعتبر خوانده نمی‌شود
+        await pg.evaluate("() => localStorage.setItem('zaexa.flowboard.v1', JSON.stringify({only: true, w: 'h1', set: 'weird'}))")
+        await pg.reload()
+        await fb_wait_rows(pg)
+        assert await pg.evaluate("() => document.querySelector('[data-fbset].on').textContent") == "New tokens", "[flow established] an unknown stored set falls back to New tokens"
+        # تکه‌تکه شدن: بیش از ۳۰ آدرس → چند تماس، هرکدام ≤۳۰
+        await pg.evaluate("""() => { for (let i = 0; i < 40; i++) BASE_TOKENS.push({symbol: 'X' + i, name: 'x', address: '0x' + (0xd000 + i).toString(16).padStart(40, '0'), decimals: 18}); }""")
+        env.calls.clear()
+        res = await pg.evaluate("async () => { const d = await fbLoadEst('base'); return [d.items.length, d.gtOk]; }")
+        t2, p2, a2 = fb_est_requested(env)
+        assert res[0] == len(exp["ok"]) + 40 and len(t2) == -(-res[0] // 30) and all(len(c.split("/tokens/multi/")[1].split("?")[0].split(",")) <= 30 for c in t2) and len(a2) == res[0], "[flow established] >30 tokens are chunked into calls of <=30: %s %s" % (res, [len(c) for c in t2])
+        assert all(len(c.split("/pools/multi/")[1].split(",")) <= 30 for c in p2) and len(p2) >= 2, "[flow established] pools/multi chunked: %d calls" % len(p2)
+        await pg.context.close()
+
+        # ---- GT خراب: ردیف‌ها می‌مانند، عددها «—»، هرگز ۰ یا جدولِ خالی ----
+        for st_name, mode in (("tokens/multi 500", "tokens"), ("pools/multi 500", "pools")):
+            log = {"tokens": [], "pools": []}
+            base_gt = fb_est_gt("base", log)
+            env.gt = (lambda path, m=mode, g=base_gt: (500, {}) if ("/%s/multi/" % m) in path else g(path))
+            pg = await env.open(init=["localStorage.setItem('zaexa.flowboard.v1', JSON.stringify({only: true, w: 'h1', set: 'est'}))"])
+            await fb_wait_rows(pg, min(15, len(exp["ok"])), timeout=30000)
+            await pg.wait_for_selector("#flowBody .fnote", timeout=5000)
+            rows = await pg.evaluate(FB_EST_JS)
+            t = await pg.inner_text("#flowBody")
+            assert all(r["net"] == "—" for r in rows) and "unavailable right now" in t and not FB_BAD_RE.search(t) and "$0" not in t, "[flow established] %s: unknown, not zero: %s" % (st_name, rows[:2])
+            await pg.context.close()
+
+        # ---- سولانا: mintها عیناً (حروفِ بزرگ/کوچک حفظ) ----
+        log = {"tokens": [], "pools": []}
+        env.gt = fb_est_gt("solana", log)
+        env.calls.clear(); env.pairs_calls.clear()
+        pg = await env.open(hash_="#flow?chain=solana", init=["localStorage.setItem('zaexa.flowboard.v1', JSON.stringify({only: true, w: 'h1', set: 'est'}))"])
+        await pg.wait_for_function("() => document.querySelector('.fbSub').textContent === 'Established Solana tokens · last hour · by unique wallets'", timeout=20000)
+        await fb_wait_rows(pg)
+        sx = await pg.evaluate("""() => { const stk = new Set(STK_SOL.map(s => s.mint)), bad = new Set([SOL_APP_TOKENS.USDC, SOL_APP_TOKENS.USDT]);
+            const stableSym = ['USDC', 'USDT', 'PYUSD', 'USDG', 'USD1', 'USDS'];
+            return {ok: SOL_APP_TOKEN_LIST.filter(t => !stk.has(t.mint) && !bad.has(t.mint) && !stableSym.includes(t.symbol)).map(t => t.mint),
+                    bad: [...stk, ...bad, ...SOL_APP_TOKEN_LIST.filter(t => stableSym.includes(t.symbol)).map(t => t.mint)], wsol: SOL_MINT_ADDR}; }""")
+        tcalls, pcalls, addrs = fb_est_requested(env)
+        assert not env.pairs_calls, "[flow established] Solana: no /pairs.json"
+        assert all("networks/solana/" in c for c in tcalls + pcalls) and all(len(c.split("/tokens/multi/")[1].split("?")[0].split(",")) <= 30 for c in tcalls), "[flow established] Solana calls: %s" % tcalls
+        assert sorted(addrs) == sorted(sx["ok"]) and sx["wsol"] in addrs and not (set(addrs) & set(sx["bad"])), "[flow established] Solana requests are exactly the list minus stables and xStocks, mints verbatim: %s" % addrs
+        assert any(a != a.lower() for a in addrs) and not any(a in ("NATIVE",) for a in addrs), "[flow established] Solana mints keep their case"
+        await pg.evaluate("() => { solExitSeen[SOL_MINT_ADDR] = {v: 'sell', at: Date.now()}; fbLast = ''; fbPaint(); }")
+        rows = await pg.evaluate(FB_EST_JS)
+        assert rows and all(not r["age"] for r in rows) and all(r["addr"] in sx["ok"] for r in rows), "[flow established] Solana rows: %s" % rows[:2]
+        ws = [r for r in rows if r["addr"] == sx["wsol"]]
+        assert not ws or ws[0]["chip"].startswith("Sell route quoted"), "[flow established] Solana session verdict on the SOL row: %s" % ws
+        await pg.context.close()
+
+        # ---- ۳۹۰: بدونِ اسکرولِ افقی، کنترل‌ها بدونِ هم‌پوشانی ----
+        env.gt = fb_est_gt("base", {"tokens": [], "pools": []})
+        pg = await env.open(vw=390, vh=844, init=["localStorage.setItem('zaexa.flowboard.v1', JSON.stringify({only: true, w: 'h1', set: 'est'}))"])
+        await fb_wait_rows(pg)
+        await pg.wait_for_timeout(300)
+        m = await pg.evaluate("""() => { const card = document.querySelector('#view-flow > .card').getBoundingClientRect();
+            const kids = [...document.querySelectorAll('#fbHead .fbCtl > *')].filter(e => e.getClientRects().length).map(e => e.getBoundingClientRect());
+            let overlap = false;
+            for (let i = 0; i < kids.length; i++) for (let j = i + 1; j < kids.length; j++) {
+              const a = kids[i], c = kids[j];
+              if (a.left < c.right - 0.5 && c.left < a.right - 0.5 && a.top < c.bottom - 0.5 && c.top < a.bottom - 0.5) overlap = true; }
+            return {sw: document.scrollingElement.scrollWidth, inCard: kids.every(k => k.left >= card.left - 0.5 && k.right <= card.right + 0.5), overlap, n: kids.length,
+                    lines: new Set(kids.map(k => Math.round(k.top))).size, tbl: document.querySelector('.fbTbl').getBoundingClientRect().right <= card.right + 0.5}; }""")
+        assert m["sw"] <= 390 and m["inCard"] and not m["overlap"] and m["n"] == 3 and m["tbl"], "[flow established] 390: controls wrap cleanly, no sideways scroll: %s" % m
+        # چیپ‌های Exit در ۳۹۰ بیش از دو خط نمی‌شوند؛ «Not checked» (بدونِ yet) و بعد از نتیجه‌ی نشست فقط برچسب
+        await pg.evaluate("() => { exitCache[WETH_ADDR.toLowerCase()] = {state: 'verified', lossPct: 1, at: Date.now()}; fbLast = ''; fbPaint(); }")
+        ch = await pg.evaluate("""() => [...document.querySelectorAll('#flowBody .fbChip')].map(c => ({t: c.innerText.replace(/\\s+/g, ' ').trim(), lines: Math.round(c.getBoundingClientRect().height / parseFloat(getComputedStyle(c).lineHeight))}))""")
+        assert ch and all(c["lines"] <= 2 for c in ch) and {c["t"] for c in ch} == {"Not checked", "Sell route quoted"}, "[flow established] 390: exit chips stay within 2 lines ('Not checked' / 'Sell route quoted'): %s" % ch[:3]
+        await pg.context.close()
+        # همان بررسی برای چیپ‌های تابلوی جفت‌های تازه (متنشان عوض نشده)
+        env.gt = fb_gt_for(toks, pls)
+        pg = await env.open(vw=390, vh=844)
+        await fb_wait_rows(pg)
+        await pg.click(".fbTog")
+        await fb_wait_rows(pg, 6)
+        nc = await pg.evaluate("""() => [...document.querySelectorAll('#flowBody .fbChip')].map(c => [c.innerText.trim(), Math.round(c.getBoundingClientRect().height / parseFloat(getComputedStyle(c).lineHeight))])""")
+        assert nc and all(l <= 2 for _, l in nc) and {t for t, _ in nc} == {"Sell route quoted", "No sell route", "Unknown"}, "[flow established] 390: new-pairs chips unchanged and within 2 lines: %s" % nc
+        await pg.context.close()
+        assert not errs, "[flow established] console errors: %s" % errs
+        print("[flow established] default New tokens (old subtitle, one pairs.json + tokens/multi + pools/multi); Established: zero pairs.json, tokens/multi and pools/multi <=30 each (chunked above 30), no stable/stock/native address, WETH instead of ETH, symbols without an age line, 'Not checked yet' or the session verdict, sell-route switch hidden and its saved value kept; set persists, unknown stored value -> New; switching inside 60 s makes no request; GT failures -> dashes; Solana mints verbatim; 390 wraps with no overflow")
+    finally:
+        await b.close()
+        srv.shutdown()
+
+
+async def check_flow_established_shots(p, errors):
+    """فقط با ZX_ONLY=check_flow_established_shots و ZX_SHOTS=<پوشه>: عکسِ Established روی سولانا (۱۲۸۰ تیره/روشن، ۳۹۰ تیره)."""
+    out = os.environ.get("ZX_SHOTS")
+    if not out:
+        return
+    os.makedirs(out, exist_ok=True)
+    srv, origin = fb_serve()
+    b = await p.chromium.launch()
+    try:
+        env = FbEnv(b, origin, [])
+        env.gt = fb_est_gt("solana", {"tokens": [], "pools": []})
+        init = ["localStorage.setItem('zaexa.flowboard.v1', JSON.stringify({only: true, w: 'h6', set: 'est'}))"]
+        for vw, vh, scheme, name in ((1280, 900, "dark", "est_1280_dark"), (1280, 900, "light", "est_1280_light"), (390, 844, "dark", "est_390_dark")):
+            pg = await env.open(vw=vw, vh=vh, scheme=scheme, hash_="#flow?chain=solana", init=init)
+            await fb_wait_rows(pg)
+            await pg.wait_for_timeout(800)
+            # لوگوها در هارنس یک پیکسل‌ِ ثابت‌اند؛ برای عکس، حروفِ جایگزین دیده می‌شوند
+            await pg.evaluate("() => document.querySelectorAll('.fbAv img').forEach(i => i.remove())")
+            if vw < 500:
+                await pg.add_style_tag(content="#nav{display:none!important}")
+            await pg.evaluate("() => window.scrollTo(0, 0)")
+            box = await pg.evaluate("() => { const r = document.querySelector('#view-flow > .card').getBoundingClientRect(); return {x: r.left + scrollX, y: r.top + scrollY, width: r.width, height: r.height}; }")
+            await pg.screenshot(path=os.path.join(out, name + ".png"), full_page=True, clip=box)
+            await pg.context.close()
+    finally:
+        await b.close()
+        srv.shutdown()
+
+
 async def check_flow_screens(p, errors):
     """فقط با ZX_ONLY=check_flow_screens و ZX_SHOTS=<پوشه>: عکسِ تابلو، کارت Early buyers و کارتِ ایمنیِ سهام (تیره، ۱۲۸۰ و ۳۹۰)."""
     out = os.environ.get("ZX_SHOTS")
@@ -9527,6 +9793,7 @@ async def main():
         await check_flow_board_mobile(p, errors)
         await check_flow_board_width(p, errors)
         await check_flow_board_parity(p, errors)
+        await check_flow_established(p, errors)
         await check_exit_header_icons(p, errors)
         await check_watch_panel_views(p, errors)
         await check_strip_watch_merge(p, errors)

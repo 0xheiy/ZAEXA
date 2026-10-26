@@ -153,7 +153,11 @@ function whyForRow(chain, verdict, why) {
 // ۲۷ سپتامبر — "sell-reverts" اضافه شد: poolDirectedProof (worker/verdict.js)
 // وقتی استخرِ واقعیِ توکن پرشده است ولی کوت‌گرفتن از کلیدِ واقعیِ خودش هم
 // ریوِرت می‌کند، دقیقاً همین علت را می‌دهد — هانی‌پاتِ کلاسیک، این‌بار با شاهد.
-export const REPORT_CAUSES = Object.freeze(["empty-pool", "sell-reverts"]);
+// ۲۶ اکتبر — "one-way-pool": خریدِ ~$100 پر می‌شود و فروشِ همان مقدار روی همان
+// کلیدِ v4 NotEnoughLiquidity می‌دهد (v4OneWayProof در worker/verdict.js).
+export const REPORT_CAUSES = Object.freeze(["empty-pool", "sell-reverts", "one-way-pool"]);
+// علت‌هایی که یک ردیفِ v4 با آن‌ها «اثبات‌شده» است — sell-reverts عمداً نیست.
+const V4_PROVEN_CAUSES = Object.freeze(["empty-pool", "one-way-pool"]);
 
 /* یک cause ساختگی/دست‌ساز هرگز نباید در انبار بنشیند — فقط وقتی verdict
    واقعاً "nosell" است و خودِ رشته عضوِ همین واژه‌نامه‌ی بسته است، وگرنه
@@ -194,12 +198,12 @@ export function publishGuardRow(row, chainDefault) {
   const v4 = typeof row.dex === "string" && row.dex.startsWith("uniswap-v4");
   if (v4) {
     let out = row;
-    if (row.v === "nosell" && row.cause !== "empty-pool") {
+    if (row.v === "nosell" && !V4_PROVEN_CAUSES.includes(row.cause)) {
       out = { ...out, v: null, why: "v4:unproven" };
       delete out.cause;
       delete out.ret;
     }
-    if (row.recheck === "nosell" && row.recheckCause !== "empty-pool") {
+    if (row.recheck === "nosell" && !V4_PROVEN_CAUSES.includes(row.recheckCause)) {
       out = { ...out };
       delete out.recheck; delete out.recheckAt; delete out.recheckCause;
     }
@@ -1413,7 +1417,8 @@ export function reportText(doc, opts) {
         // همان خطِ امروز می‌مانند.
         lines.push(reportTextSymbolLabel(r) + " — no sell route quoted" +
           (r.cause === "empty-pool" ? " · pool is empty" :
-            r.cause === "sell-reverts" ? " · sells revert on a funded pool" : ""));
+            r.cause === "sell-reverts" ? " · sells revert on a funded pool" :
+              r.cause === "one-way-pool" ? " · one-way pool: a $100 buy fills, selling it back does not" : ""));
         lines.push("zaexa.com/t/" + r.address);
       });
       if (flagged > REPORT_TEXT_MAX_LISTED) {

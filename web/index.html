@@ -1018,6 +1018,7 @@ section.card.isDone #actBtn,section.card.isDone #solStatusSlot,section.card.isDo
 .fbTog[aria-checked="true"]{color:var(--tx);font-weight:620}
 .fbTog[aria-checked="true"] .fbSw{background:var(--acc)}
 .fbTog[aria-checked="true"] .fbSw::after{transform:translateX(12px);background:var(--on-acc)}
+.fbTog[hidden]{display:none}
 .fbTog:focus-visible{outline:2px solid var(--acc);outline-offset:2px}
 .fbTbl{width:100%;border-collapse:collapse;font-size:13.5px;margin-top:8px}
 .fbTbl th{font-size:11.5px;font-weight:600;color:var(--tx3);text-align:left;padding:8px 12px;letter-spacing:.02em;border-bottom:1px solid var(--line);white-space:nowrap}
@@ -1078,6 +1079,7 @@ section.card.isDone #actBtn,section.card.isDone #solStatusSlot,section.card.isDo
 .issNote{margin-top:6px;line-height:1.5;max-width:60ch}
 @media(max-width:480px){
   .fbTbl .fbBS,.fbTbl .fbVol{display:none}
+  .fbChip .fbOpt{display:none}
   .fbHead{padding:16px 14px 6px}
   .fbTbl th,.fbTbl td{padding-left:5px;padding-right:5px}
   .fbTbl th:first-child,.fbTbl td:first-child{padding-left:14px}
@@ -2208,6 +2210,7 @@ try{(function(){
     <div class="fbHead" id="fbHead" hidden>
       <div class="fbHL"><div class="fbTtl">Where money is flowing</div><div class="fbSub" id="fbSub"></div></div>
       <div class="fbCtl"><div id="fbNetSlot"></div>
+        <div class="tfs" role="group" aria-label="Token set"><button type="button" data-fbset="new">New tokens</button><button type="button" data-fbset="est">Established</button></div>
         <div class="tfs" role="group" aria-label="Time window"><button type="button" data-fbw="h1">1h</button><button type="button" data-fbw="h6">6h</button></div>
         <button type="button" class="fbTog" role="switch" data-fbtog aria-checked="true"><span class="fbSw" aria-hidden="true"></span>Only tokens with a sell route</button></div>
     </div>
@@ -8179,12 +8182,12 @@ async function renderFlow(){
 const FB_LS="zaexa.flowboard.v1",FB_ROWS=15,FB_FETCH=30,FB_REFRESH=60000,FB_FRESH=20000,EB_TTL=60000,EB_MAX=20;
 let flowBoard=true,flowPicking=false,fbOn=false,fbData=null,fbShown=[],fbLast="",fbErr="",fbOpening=false,ebSeq=0,ebCache=null;
 const fbPref=(()=>{
-  const o={only:true,w:"h1"};
+  const o={only:true,w:"h1",set:"new"};
   try{const j=JSON.parse(localStorage.getItem(FB_LS)||"null");
-    if(j&&typeof j==="object"){if(typeof j.only==="boolean")o.only=j.only;if(j.w==="h1"||j.w==="h6")o.w=j.w;}}catch{}
+    if(j&&typeof j==="object"){if(typeof j.only==="boolean")o.only=j.only;if(j.w==="h1"||j.w==="h6")o.w=j.w;if(j.set==="new"||j.set==="est")o.set=j.set;}}catch{}
   return o;
 })();
-function fbSavePref(){try{localStorage.setItem(FB_LS,JSON.stringify({only:fbPref.only,w:fbPref.w}));}catch{}}
+function fbSavePref(){try{localStorage.setItem(FB_LS,JSON.stringify({only:fbPref.only,w:fbPref.w,set:fbPref.set}));}catch{}}
 // عددِ نامعتبر/غایب null می‌شود («—»)، هرگز ۰؛ رشته‌ی خالی هم عدد نیست (همان سبکِ renderSolFlow).
 const fbNum=v=>{if(v==null||typeof v==="boolean"||(typeof v==="string"&&v.trim()===""))return null;const n=Number(v);return Number.isFinite(n)?n:null;};
 const fbCnt=v=>{const n=fbNum(v);return n!==null&&n>=0?n:null;};
@@ -8287,7 +8290,7 @@ function fbRows(d,w){
     const tot=a&&a.buys!==null&&a.sells!==null?a.buys+a.sells:null;
     return {it,a,net,share:tot>0?a.buys/tot:null,vol:a?a.vol:null};
   });
-  if(fbPref.only)list=list.filter(r=>r.it.v==="sell");
+  if(fbPref.only&&d.set!=="est")list=list.filter(r=>r.it.v==="sell");   // در حالت Established سوییچ پنهان است
   // کلیدِ نامعلوم همیشه آخر؛ اول خریدارِ خالص، بعد حجم، بعد تازه‌تر
   const cmp=(x,y,k)=>{
     if((x[k]===null)!==(y[k]===null))return x[k]===null?1:-1;
@@ -8299,9 +8302,11 @@ function fbRows(d,w){
 // سرِ تابلو یک بار در HTML است (انتخابگرِ شبکه داخلش می‌نشیند و با بازنقاشیِ جدول از بین نمی‌رود)؛ فقط متن و حالت‌ها هماهنگ می‌شود
 function fbHead(d){
   const w=fbPref.w,name=(d?d.chain:activeChain)==="solana"?"Solana":"Base";
-  const sub=$("fbSub");if(sub)sub.textContent=`New ${name} pairs · ${w==="h1"?"last hour":"last 6 hours"} · by unique wallets`;
+  const est=fbPref.set==="est";
+  const sub=$("fbSub");if(sub)sub.textContent=`${est?"Established "+name+" tokens":"New "+name+" pairs"} · ${w==="h1"?"last hour":"last 6 hours"} · by unique wallets`;
+  document.querySelectorAll("#fbHead [data-fbset]").forEach(b=>b.classList.toggle("on",b.dataset.fbset===fbPref.set));
   document.querySelectorAll("#fbHead [data-fbw]").forEach(b=>b.classList.toggle("on",b.dataset.fbw===w));
-  const t=document.querySelector("#fbHead [data-fbtog]");if(t)t.setAttribute("aria-checked",fbPref.only?"true":"false");
+  const t=document.querySelector("#fbHead [data-fbtog]");if(t){t.setAttribute("aria-checked",fbPref.only?"true":"false");t.hidden=est;}   // مقدارِ ذخیره‌شده‌ی سوییچ دست‌نخورده می‌ماند
   return "";
 }
 function fbStarOn(addr){
@@ -8325,13 +8330,13 @@ function fbSkeleton(){
 function fbPaint(){
   const body=$("flowBody"),d=fbData;
   if(!d||!fbOn)return;
-  const w=fbPref.w,now=Date.now();
+  const w=fbPref.w,now=Date.now(),est=d.set==="est";
   let h=fbHead(d)+(fbErr?note("err",esc(fbErr)):"");
   fbShown=[];
   if(!d.pairsOk){
-    h+=`<div class="fbMsg">New pairs could not be loaded. Activity is unknown, not zero.</div>`;
+    h+=`<div class="fbMsg">${est?"Established tokens":"New pairs"} could not be loaded. Activity is unknown, not zero.</div>`;
   }else if(!d.items.length){
-    h+=`<div class="fbMsg">No new pairs are in the list right now. That describes our list, not the whole chain.</div>`;
+    h+=`<div class="fbMsg">${est?"No established tokens are listed for this chain right now.":"No new pairs are in the list right now. That describes our list, not the whole chain."}</div>`;
   }else{
     const rows=fbRows(d,w);
     if(!rows.length){
@@ -8346,17 +8351,24 @@ function fbPaint(){
         const bs=a&&a.buyers!==null&&a.sellers!==null?`${fbN(a.buyers)} / ${fbN(a.sellers)}`:"— / —";
         const pct=r.share===null?null:r.share*100;
         const share=pct===null?"—":`<span class="fbBar"><i class="p" style="width:${pct.toFixed(1)}%"></i><i class="n" style="width:${(100-pct).toFixed(1)}%"></i></span><span class="mono" style="color:var(--tx2)">${pct.toFixed(0)}%</span>`;
-        const cls=it.v==="sell"?"p":it.v==="nosell"?"n":"";
-        const lbl=it.v==="sell"?"Sell route quoted":it.v==="nosell"?"No sell route":"Unknown";
+        let cls=it.v==="sell"?"p":it.v==="nosell"?"n":"";
+        let lbl=it.v==="sell"?"Sell route quoted":it.v==="nosell"?"No sell route":"Unknown",ttl=esc(fbChecked(it.checkedAt,now)),lblHtml=null;
+        if(est){   // فقط نتیجه‌ی همین نشست؛ وگرنه «Not checked yet» — هرگز حکمِ ساختگی
+          const x=savedWatchExit({chain:d.chain,address:d.chain==="solana"?it.addr:it.addr.toLowerCase()});
+          cls=x.cls==="u"?"":x.cls;lbl=x.text;ttl="";
+          // ≤480px: «yet» و «· 5m ago» پنهان می‌شوند تا چیپ از دو خط بیشتر نشود (متنِ دسکتاپ همان است)
+          const m=/^(Not checked)( yet)$|^(.+?)( · .+)$/.exec(lbl);
+          if(m)lblHtml=m[1]?`${esc(m[1])}<span class="fbOpt">${esc(m[2])}</span>`:`${esc(m[3])}<span class="fbOpt">${esc(m[4])}</span>`;
+        }
         const sw=fbStarOn(it.addr);
         h+=`<tr class="fbRow" tabindex="0" role="link" data-i="${i}" data-addr="${esc(it.addr)}">
           <td class="fbStarTd"><button type="button" class="iconBtn fbStar savedToggle" data-fbstar="${i}" aria-pressed="${sw?"true":"false"}" aria-label="${sw?"Stop watching ":"Watch "}${esc(it.symbol)}" title="${sw?"Stop watching ":"Watch "}${esc(it.symbol)}">${sw?"★":"☆"}</button></td>
-          <td><div class="fbTok"><span class="av fbAv" data-i="${i}"></span><span class="fbTkTx"><b>${esc(it.symbol)}</b><span class="fbAge">${esc(fbAge(it.created,now))}</span></span></div></td>
+          <td><div class="fbTok"><span class="av fbAv" data-i="${i}"></span><span class="fbTkTx"><b>${esc(it.symbol)}</b>${est?"":`<span class="fbAge">${esc(fbAge(it.created,now))}</span>`}</span></div></td>
           <td class="mono fbNet" style="font-weight:620">${net}</td>
           <td class="fbBS mono" style="color:var(--tx2)">${bs}</td>
           <td class="fbSh">${share}</td>
           <td class="fbVol mono">${fbUsd(r.vol)}</td>
-          <td><span class="fbChip ${cls}" title="${esc(fbChecked(it.checkedAt,now))}">${lbl}</span></td></tr>`;
+          <td><span class="fbChip ${cls}" title="${ttl}">${lblHtml!==null?lblHtml:esc(lbl)}</span></td></tr>`;
       });
       h+=`</tbody></table>`;
       if(!d.gtOk||!d.items.some(it=>it.act))h+=`<div class="fnote">Market activity is unavailable right now — unknown, not zero.</div>`;
@@ -8377,19 +8389,92 @@ function fbPaint(){
   body.querySelectorAll(".fbAv").forEach(el=>{const r=fbShown[+el.dataset.i];if(r)fbAvatar(el,r.it.addr,r.it.symbol,r.it.img);});
 }
 async function fbRender(refresh){
-  const seq=++flowSeq,chain=activeChain;
+  const seq=++flowSeq,chain=activeChain,set=fbPref.set;
   flowChrome(true);
-  const cur=()=>seq===flowSeq&&fbOn&&activeChain===chain;
-  const have=!!fbData&&fbData.chain===chain;
+  const cur=()=>seq===flowSeq&&fbOn&&activeChain===chain&&fbPref.set===set;
+  const have=!!fbData&&fbData.chain===chain&&fbData.set===set;
   if(have){
     fbPaint();
     if(!refresh&&Date.now()-fbData.t<FB_FRESH)return;
   }else{fbData=null;fbSkeleton();}
   let d;
-  try{d=await fbLoad(chain);}catch{d={chain,t:Date.now(),pairsOk:false,gtOk:false,items:[]};}
+  try{d=await(set==="est"?fbLoadEst(chain):fbLoad(chain));}catch{d={chain,t:Date.now(),pairsOk:false,gtOk:false,items:[]};}
   if(!cur())return;
+  d.set=set;
   fbData=d;
   fbPaint();
+}
+/* ۲۶ اکتبر — مجموعه‌ی «Established»: توکن‌های شناخته‌شده‌ی همین زنجیره از فهرستِ خودِ اپ، بدون /pairs.json.
+   بدونِ استیبل‌کوین (پرچم stable + یورو/USDe/PYUSD/… که پرچم ندارند) و بدونِ سهام (STK / STK_SOL).
+   ETH بومی حذف می‌شود چون GT برای آدرسِ صفر استخر ندارد؛ WETH همان دارایی است. mintِ سولانا عیناً (بدون lowercase). */
+const FB_EST_STABLE_SYM=new Set(["EURC","USDe","USDC","USDT","PYUSD","USDG","USD1","USDS"]);
+function fbEstList(chain){
+  if(chain==="solana"){
+    const stk=new Set(STK_SOL.map(s=>s.mint)),stab=new Set([SOL_APP_TOKENS.USDC,SOL_APP_TOKENS.USDT]);
+    return SOL_APP_TOKEN_LIST.filter(t=>!stk.has(t.mint)&&!stab.has(t.mint)&&!FB_EST_STABLE_SYM.has(t.symbol)&&SOL_MINT_RE.test(t.mint))
+      .map(t=>({addr:t.mint,symbol:t.symbol,logo:t.logo}));
+  }
+  const stk=new Set(STK.map(s=>s.sym));
+  return BASE_TOKENS.filter(t=>!t.native&&!t.stable&&!stk.has(t.symbol)&&!FB_EST_STABLE_SYM.has(t.symbol)&&/^0x[0-9a-fA-F]{40}$/.test(t.address))
+    .map(t=>({addr:t.address,symbol:t.symbol,logo:t.logo}));
+}
+async function fbLoadEst(chain){
+  const out={chain,t:Date.now(),pairsOk:true,gtOk:true,items:[]};
+  const sol=chain==="solana",net=sol?"solana":CHAIN.gtNetwork,key=a=>sol?a:a.toLowerCase();
+  out.items=fbEstList(chain).map(e=>({addr:e.addr,symbol:e.symbol,v:null,checkedAt:null,created:0,
+    img:typeof e.logo==="string"&&e.logo!==""&&okLogo(e.logo)?e.logo:null,pool:null,act:null}));
+  if(!out.items.length)return out;
+  const byAddr=new Map(out.items.map(it=>[key(it.addr),it]));
+  const poolsOf=new Map(),chunks=(arr)=>{const r=[];for(let i=0;i<arr.length;i+=FB_FETCH)r.push(arr.slice(i,i+FB_FETCH));return r;};
+  try{
+    for(const part of chunks(out.items.map(i=>key(i.addr)))){
+      const tj=await gtJson(`${GT}/networks/${net}/tokens/multi/${part.join(",")}?include=top_pools`);
+      if(!tj||!Array.isArray(tj.data))throw new Error("tokens/multi unavailable");
+      for(const row of tj.data){
+        const a=row&&row.attributes||{};
+        const it=typeof a.address==="string"?byAddr.get(key(a.address)):null;
+        if(!it)continue;
+        if(typeof a.image_url==="string"&&okLogo(a.image_url)&&a.image_url!=="")it.img=a.image_url;
+        const tp=row.relationships&&row.relationships.top_pools&&row.relationships.top_pools.data;
+        const id=tp&&tp[0]&&tp[0].id;
+        if(typeof id==="string"&&id.startsWith(net+"_")){it.pool=key(id.slice(net.length+1));poolsOf.set(it.pool,true);}
+      }
+    }
+  }catch{out.gtOk=false;return out;}
+  const byPool=new Map();
+  for(const part of chunks([...poolsOf.keys()])){
+    try{
+      const pj=await gtJson(`${GT}/networks/${net}/pools/multi/${part.join(",")}`);
+      if(!pj||!Array.isArray(pj.data))throw new Error("pools/multi unavailable");
+      for(const row of pj.data){
+        const a=row&&row.attributes||{};
+        const id=typeof row.id==="string"&&row.id.startsWith(net+"_")?row.id.slice(net.length+1):a.address;
+        if(typeof id==="string")byPool.set(key(id),a);
+      }
+    }catch{out.gtOk=false;}
+  }
+  for(const it of out.items){
+    const a=it.pool?byPool.get(it.pool):null;
+    if(!a)continue;
+    it.act={};
+    for(const w of ["h1","h6"]){
+      const tx=a.transactions&&a.transactions[w];
+      it.act[w]={buyers:fbCnt(tx&&tx.buyers),sellers:fbCnt(tx&&tx.sellers),buys:fbCnt(tx&&tx.buys),sells:fbCnt(tx&&tx.sells),
+        vol:fbCnt(a.volume_usd&&a.volume_usd[w])};
+    }
+  }
+  return out;
+}
+// تعویضِ مجموعه: داده‌ی مجموعه‌ی قبلی کنار گذاشته می‌شود (≤۶۰ث) تا برگشت دوباره از GT نخواهد؛ فقط یک fbRender
+const fbStash={};
+function fbSwitchSet(s){
+  if(s===fbPref.set)return;
+  if(fbData&&fbData.set)fbStash[fbData.chain+":"+fbData.set]=fbData;
+  fbPref.set=s;fbSavePref();fbErr="";
+  const hit=fbStash[activeChain+":"+s];
+  fbData=hit&&Date.now()-hit.t<FB_REFRESH?hit:null;
+  fbData?fbPaint():fbSkeleton();
+  fbRender(false);
 }
 async function fbOpen(addr){
   if(fbOpening)return;
@@ -8417,6 +8502,8 @@ async function fbOpen(addr){
 }
 function fbClick(e){
   const t=e.target;
+  const sb=t.closest&&t.closest("[data-fbset]");
+  if(sb){fbSwitchSet(sb.dataset.fbset==="est"?"est":"new");return;}
   const wb=t.closest&&t.closest("[data-fbw]");
   if(wb){fbPref.w=wb.dataset.fbw==="h6"?"h6":"h1";fbSavePref();fbErr="";fbData?fbPaint():fbSkeleton();return;}
   if(t.closest&&t.closest("[data-fbtog]")){fbPref.only=!fbPref.only;fbSavePref();fbErr="";fbData?fbPaint():fbSkeleton();return;}

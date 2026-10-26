@@ -147,6 +147,7 @@ function classify(chain, r) {
   if (v === "nosell" && chain === "base") {
     if (cause === "empty-pool") return { outcome: "nosell", body: "⚠ No sell route quoted · pool is empty" };
     if (cause === "sell-reverts") return { outcome: "nosell", body: "⚠ No sell route quoted · the sell reverts" };
+    if (cause === "one-way-pool") return { outcome: "nosell", body: "⚠ No sell route quoted · one-way pool\nA $100 buy fills, but selling the same amount back does not: the pool's other side is too thin." };
     why = "cause:unproven";
   } else if (v === "nosell" && chain === "solana") {
     why = "sol:unconfirmed"; // سولانا هرگز nosell منتشر نمی‌کند

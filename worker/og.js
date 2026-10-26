@@ -178,7 +178,8 @@ export function ogDescription(meta, verdict, chain, cause) {
   // سولانا: nosell هرگز در کارت نمی‌آید (تصمیمِ مالک ۴ اکتبر) — حتی اگر کالری بدهدش
   if (verdict === "nosell" && chain !== "Solana") {
     // ۲۶ اکتبر: علتِ اثبات‌شده، با همان واژه‌های کارت و ربات
-    const why = cause === "empty-pool" ? " The pool is empty." : cause === "sell-reverts" ? " The sell reverts." : "";
+    const why = cause === "empty-pool" ? " The pool is empty." : cause === "sell-reverts" ? " The sell reverts."
+      : cause === "one-way-pool" ? " A $100 buy fills, but selling it back does not." : "";
     return "No sell route quoted — you may not be able to exit." + why + " " + base;
   }
   if (verdict === "sell") return "A sell route was quoted. " + base;
@@ -218,7 +219,7 @@ export function ogTags(meta, addr, origin, verdict, chain, cause) {
     const ch = chain || "Base";
     // علت فقط وقتی هست وارد هش می‌شود — هشِ کارت‌های بی‌علت عیناً همان قبلی می‌ماند
     const parts = [meta.symbol, meta.name || "", meta.liquidity || "", meta.vol24 || "", verdict || "", ch];
-    if (verdict === "nosell" && ch !== "Solana" && (cause === "empty-pool" || cause === "sell-reverts")) parts.push(cause);
+    if (verdict === "nosell" && ch !== "Solana" && (cause === "empty-pool" || cause === "sell-reverts" || cause === "one-way-pool")) parts.push(cause);
     const h = fnv1aHex(parts.join("|"));
     img = origin + "/og/t/" + addr + ".png?v=" + OG_TOKEN_IMAGE_V + "&h=" + h;
     alt = meta.symbol + " on " + ch + " — Zaexa";

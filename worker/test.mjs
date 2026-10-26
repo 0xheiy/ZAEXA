@@ -7197,8 +7197,8 @@ console.log("[v4 pool selection] v4PoolsFromGt now ranks by sellers24 (numeric o
     "causeForRow must drop any string not in REPORT_CAUSES, even on a nosell row");
   ok(causeForRow("nosell", undefined) === undefined && causeForRow("nosell", null) === undefined,
     "causeForRow must give undefined (not null) for an absent cause");
-  ok(JSON.stringify(REPORT_CAUSES) === JSON.stringify(["empty-pool", "sell-reverts"]) && Object.isFrozen(REPORT_CAUSES),
-    "REPORT_CAUSES must be the frozen closed vocabulary [\"empty-pool\",\"sell-reverts\"], got " + JSON.stringify(REPORT_CAUSES));
+  ok(JSON.stringify(REPORT_CAUSES) === JSON.stringify(["empty-pool", "sell-reverts", "one-way-pool"]) && Object.isFrozen(REPORT_CAUSES),
+    "REPORT_CAUSES must be the frozen closed vocabulary [\"empty-pool\",\"sell-reverts\",\"one-way-pool\"], got " + JSON.stringify(REPORT_CAUSES));
 
   const T9 = "2026-09-20T00:00:00.000Z";
   function rowArgs(extra) {
@@ -15730,6 +15730,204 @@ function stripAllowedWording(t) {
   ok(h(t0) && h(t1) && h(t0) !== h(t1), "[og cause] the card URL hash must change when the cause appears (bot caches break)");
   ok(h(t0) === h(ogTags(meta, "0x" + "a".repeat(40), "https://zaexa.com", "nosell", "Base", "bogus")), "[og cause] an unknown cause must not change the hash");
   console.log("[og cause] nosell card and description name the proven cause (empty pool / sell reverts) on Base only; unknown cause = old text and old hash; the hash changes when a cause appears");
+}
+
+/* ---- ۲۶ اکتبر [v4 one-way pool] — خرید پر می‌شود، فروشِ همان مقدار NotEnoughLiquidity ---- */
+{
+  const vdw = await import("./verdict.js");
+  const { v4OneWayCheck, ONE_WAY_PASS_MAX_USED, COUNTER_PROOF_PASS_MAX_USED } = await import("./index.js");
+  const { ogVerdictLabel, renderable } = await import("./og-token.js");
+  const { ogDescription, ogTags } = await import("./og.js");
+  const { verdictText } = await import("./tg.js");
+  const { renderReportPage } = await import("./report_page.js");
+  const W = (n) => BigInt(n).toString(16).padStart(64, "0");
+  const A = (a) => String(a).toLowerCase().replace(/^0x/, "").padStart(64, "0");
+  const XDP = "0x2f9a0a7a8bf45be129665edc1e72726d98e70b4a";
+  const NATIVE = vdw.NATIVE_ADDR;
+  const mkKey = (c0, c1, fee, ts, hooks) => {
+    const poolId = ethers.keccak256("0x" + A(c0) + A(c1) + W(fee) + W(ts) + A(hooks));
+    return { currency0: c0, currency1: c1, fee, tickSpacing: ts, hooks, poolId };
+  };
+  const KEY = mkKey(NATIVE, XDP, 75, 1, NATIVE);
+  const OTHER_ID = "0x" + "9".repeat(64);
+  const wrapped = (inner) => {
+    const body = inner.slice(2);
+    const padded = body + "0".repeat((64 - (body.length % 64)) % 64);
+    return vdw.VD_REVERT_WRAPPER + W(0x20) + W(body.length / 2) + padded;
+  };
+  const nelInner = (id) => vdw.VD_NO_LIQUIDITY_SELECTOR + id.slice(2);
+  const BOUGHT = 78110n * 10n ** 18n;
+  const jr = (body) => new Response(JSON.stringify(body), { status: 200, headers: { "content-type": "application/json" } });
+  // قیمتِ اتر ۲۰۰۰ از کاناری؛ خرید = zeroForOne روی کلیدِ بومی
+  function mock(o) {
+    const calls = { batches: 0, buys: [], sells: [] };
+    const fn = async (url, init) => {
+      calls.batches++;
+      const reqs = JSON.parse(init.body);
+      return jr(reqs.map((r) => {
+        if (r.id === 0) return { id: 0, result: "0x" + W(20000000) + W(0) + W(0) + W(0) };
+        const d = r.params[0].data.slice(10);
+        const word = (i) => d.slice(i * 64, i * 64 + 64);
+        const zfo = BigInt("0x" + word(6)) === 1n, amt = BigInt("0x" + word(7));
+        if (zfo) {
+          calls.buys.push(amt);
+          if (o.buy === "revert") return { id: r.id, error: { code: 3, data: "0x" } };
+          return { id: r.id, result: "0x" + W(o.buy === "zero" ? 0 : BOUGHT) + W(100000) };
+        }
+        calls.sells.push(amt);
+        return { id: r.id, error: { code: 3, data: o.sell } };
+      }));
+    };
+    return { fn, calls };
+  }
+  const run = (o, key = KEY) => {
+    const m = mock(o);
+    return vdw.v4OneWayProof(XDP, key, { fetchImpl: m.fn, rpcs: ["https://rpc-a.example"] }).then((r) => ({ r, calls: m.calls }));
+  };
+
+  // 1. اثبات: همان بایت‌های واقعی، با اندازه‌ی دقیقِ خرید و فروش
+  const good = await run({ sell: wrapped(nelInner(KEY.poolId)) });
+  ok(good.r === true, "[v4 one-way pool] a filled $100 buy and a sell of the same amount reverting with NotEnoughLiquidity(own poolId) must prove it, got " + good.r);
+  ok(good.calls.buys.length === 1 && good.calls.buys[0] === 50000000000000000n,
+    "[v4 one-way pool] the buy must be $100 of native ETH at the canary price (0.05 ETH at $2000), got " + good.calls.buys);
+  ok(good.calls.sells.length === 1 && good.calls.sells[0] === BOUGHT,
+    "[v4 one-way pool] the sell must be exactly what the buy returned, got " + good.calls.sells);
+  ok(good.calls.batches === 3, "[v4 one-way pool] a native/WETH key costs exactly 3 batches (price, buy, sell), got " + good.calls.batches);
+  // poolId روزمره: keccak محاسبه‌شده همان فرمتِ ۳۲ بایتی است
+  ok(/^0x[0-9a-f]{64}$/.test(KEY.poolId), "[v4 one-way pool] sanity: fixture poolId is 32 bytes");
+
+  // 2. هر چیزِ دیگر = false
+  const hook = await run({ sell: wrapped("0x90bfb865" + "0".repeat(64)) });
+  ok(hook.r === false, "[v4 one-way pool] a hook WrappedError (0x90bfb865) inside the wrapper must prove nothing");
+  const mism = await run({ sell: wrapped(nelInner(OTHER_ID)) });
+  ok(mism.r === false, "[v4 one-way pool] NotEnoughLiquidity for another poolId must prove nothing");
+  const bare = await run({ sell: nelInner(KEY.poolId) });
+  ok(bare.r === false, "[v4 one-way pool] an unwrapped NotEnoughLiquidity (no 0x6190b2b0 wrapper) must prove nothing");
+  const notInit = await run({ sell: wrapped("0x486aa307" + KEY.poolId.slice(2)) });
+  ok(notInit.r === false, "[v4 one-way pool] PoolNotInitialized must prove nothing");
+  const buyRev = await run({ buy: "revert", sell: wrapped(nelInner(KEY.poolId)) });
+  ok(buyRev.r === false && buyRev.calls.sells.length === 0, "[v4 one-way pool] a reverting buy must prove nothing and never send the sell");
+  const buyZero = await run({ buy: "zero", sell: wrapped(nelInner(KEY.poolId)) });
+  ok(buyZero.r === false && buyZero.calls.sells.length === 0, "[v4 one-way pool] a zero-output buy must prove nothing and never send the sell");
+  const noId = await run({ sell: wrapped(nelInner(KEY.poolId)) }, { ...KEY, poolId: undefined });
+  ok(noId.r === false && noId.calls.batches === 0, "[v4 one-way pool] a key without poolId (a guess) must prove nothing and cost no call");
+  const junkCounter = await run({ sell: wrapped(nelInner(KEY.poolId)) }, mkKey("0x1111111111111111111111111111111111111111", XDP, 75, 1, NATIVE));
+  ok(junkCounter.r === false && junkCounter.calls.batches === 0, "[v4 one-way pool] a counter that is not native/WETH/USDC must prove nothing");
+  // کاناریِ مرده
+  const deadFn = async (url, init) => jr(JSON.parse(init.body).map((r) => r.id === 0 ? { id: 0, error: { code: 3 } } : { id: r.id, error: { code: 3, data: wrapped(nelInner(KEY.poolId)) } }));
+  ok(await vdw.v4OneWayProof(XDP, KEY, { fetchImpl: deadFn, rpcs: ["https://rpc-a.example"] }) === false,
+    "[v4 one-way pool] a dead canary must prove nothing");
+  ok(await vdw.v4OneWayProof(XDP, KEY, { fetchImpl: async () => { throw new Error("x"); }, rpcs: ["https://rpc-a.example"] }) === false,
+    "[v4 one-way pool] a thrown fetch must prove nothing and never throw");
+  ok(await vdw.v4OneWayProof(XDP, KEY, { fetchImpl: mock({ sell: wrapped(nelInner(KEY.poolId)) }).fn, rpcs: ["https://rpc-a.example"], deadlineAt: Date.now() + 100 }) === false,
+    "[v4 one-way pool] a short deadline must skip to false");
+  // سمتِ USDC: بدونِ batchِ قیمت، دو تماس
+  const USDC_KEY = mkKey(XDP < vdw.USDC_ADDR.toLowerCase() ? XDP : vdw.USDC_ADDR.toLowerCase(), XDP < vdw.USDC_ADDR.toLowerCase() ? vdw.USDC_ADDR.toLowerCase() : XDP, 500, 10, NATIVE);
+  {
+    const calls = []; let bought = 0n;
+    const fn = async (url, init) => jr(JSON.parse(init.body).map((r) => {
+      if (r.id === 0) return { id: 0, result: "0x" + W(20000000) + W(0) + W(0) + W(0) };
+      const d = r.params[0].data.slice(10), amt = BigInt("0x" + d.slice(7 * 64, 8 * 64));
+      const buyIsC0 = USDC_KEY.currency0 === vdw.USDC_ADDR.toLowerCase();
+      const zfo = BigInt("0x" + d.slice(6 * 64, 7 * 64)) === 1n;
+      calls.push({ zfo, amt });
+      if (zfo === buyIsC0) return { id: r.id, result: "0x" + W(12345678) + W(1) };
+      return { id: r.id, error: { code: 3, data: wrapped(nelInner(USDC_KEY.poolId)) } };
+    }));
+    const okU = await vdw.v4OneWayProof(XDP, USDC_KEY, { fetchImpl: fn, rpcs: ["https://rpc-a.example"] });
+    ok(okU === true && calls.length === 2 && calls[0].amt === 100000000n && calls[1].amt === 12345678n,
+      "[v4 one-way pool] a USDC-side key buys 100 USDC then sells exactly the output, 2 calls, got " + JSON.stringify(calls.map((c) => String(c.amt))));
+  }
+
+  // 3. finalizeBaseNosell — ترتیبِ اولویت
+  const cov = (extra) => Object.assign({ sellersH1: 0 }, extra);
+  const f1 = finalizeBaseNosell(false, cov(), true, undefined, true);
+  ok(f1.v === "nosell" && f1.cause === "one-way-pool" && f1.why === null, "[v4 one-way pool] v4-only + proof -> nosell/one-way-pool, got " + JSON.stringify(f1));
+  const f2 = finalizeBaseNosell(false, cov(), true, undefined, false);
+  ok(f2.v === null && f2.why === "v4:unproven", "[v4 one-way pool] no proof -> v4:unproven as today");
+  const f3 = finalizeBaseNosell(false, cov({ sellersH1: SELLERS_H1_VETO }), true, undefined, true);
+  ok(f3.v === null && f3.why === "sells:recent", "[v4 one-way pool] sells:recent veto still wins, got " + JSON.stringify(f3));
+  const f4 = finalizeBaseNosell(false, cov({ sellersElsewhere24: 9 }), true, undefined, true);
+  ok(f4.v === null && f4.why === "sells:elsewhere", "[v4 one-way pool] sells:elsewhere veto still wins");
+  const f5 = finalizeBaseNosell(true, cov(), true, undefined, true);
+  ok(f5.v === "nosell" && f5.cause === "empty-pool", "[v4 one-way pool] empty-pool still wins");
+  const f6 = finalizeBaseNosell(false, cov(), false, undefined, true);
+  ok(f6.v === "nosell" && f6.cause === undefined, "[v4 one-way pool] a non-v4 row never gets one-way-pool");
+  const f7 = finalizeBaseNosell(false, cov(), true, undefined, "yes");
+  ok(f7.why === "v4:unproven", "[v4 one-way pool] only a strict true counts as proof");
+
+  // 4. v4OneWayCheck — ایندکسِ کامل لازم است، ولتِ بودجه، و Solana هرگز
+  const kvOf = (entry) => ({ get: async () => (entry == null ? null : JSON.stringify(entry)), put: async () => {} });
+  const realFetch = globalThis.fetch;
+  try {
+    const m = mock({ sell: wrapped(nelInner(KEY.poolId)) });
+    globalThis.fetch = m.fn;
+    const env = (entry) => ({ ZX_KV: kvOf(entry) });
+    ok(await v4OneWayCheck(XDP, {}, env({ keys: [KEY], complete: true }), undefined, undefined) === true,
+      "[v4 one-way pool] a complete index with the real key proves via the check");
+    ok(await v4OneWayCheck(XDP, {}, env({ keys: [KEY, { ...KEY, fee: 3000, tickSpacing: 60, poolId: "0x" + "ab".repeat(32) }], complete: true }), undefined, undefined) === false,
+      "[v4 one-way pool] a token with two v4 pools is never judged from one of them");
+    const before = m.calls.batches;
+    ok(await v4OneWayCheck(XDP, {}, env({ keys: [KEY], complete: false }), undefined, undefined) === false &&
+       await v4OneWayCheck(XDP, {}, env({ keys: [KEY] }), undefined, undefined) === false &&
+       await v4OneWayCheck(XDP, {}, env(null), undefined, undefined) === false &&
+       await v4OneWayCheck(XDP, {}, { }, undefined, undefined) === false,
+      "[v4 one-way pool] an incomplete/legacy/missing index must prove nothing (same rule as v4PoolsEmpty)");
+    ok(m.calls.batches === before, "[v4 one-way pool] ... and must cost zero RPC calls");
+    ok(await v4OneWayCheck(XDP, {}, env({ keys: [KEY], complete: true }), Date.now() + 500, undefined) === false,
+      "[v4 one-way pool] a tight deadline skips the check");
+    ok(await v4OneWayCheck(XDP, {}, env({ keys: [KEY], complete: true }), undefined,
+      { used: () => ONE_WAY_PASS_MAX_USED + 1, capHit: () => false }) === false &&
+       ONE_WAY_PASS_MAX_USED === COUNTER_PROOF_PASS_MAX_USED - 1,
+      "[v4 one-way pool] a pass budget with no room for three more subrequests skips the check");
+    ok(await v4OneWayCheck(XDP, {}, env({ keys: [KEY], complete: true }), undefined,
+      { used: () => 0, capHit: () => true }) === false, "[v4 one-way pool] capHit skips the check");
+    const withNoPool = await v4OneWayCheck(XDP, {}, env({ keys: [{ ...KEY, poolId: undefined }], complete: true }), undefined, undefined);
+    ok(withNoPool === false, "[v4 one-way pool] indexed keys without poolId prove nothing");
+  } finally { globalThis.fetch = realFetch; }
+
+  // 5. گاردِ انتشار
+  const v4row = { chain: "base", dex: "uniswap-v4-base", v: "nosell", cause: "one-way-pool", ret: undefined };
+  const g1 = publishGuardRow(v4row, "base");
+  ok(g1.v === "nosell" && g1.cause === "one-way-pool", "[v4 one-way pool] publishGuardRow keeps one-way-pool on a v4 row, got " + JSON.stringify(g1));
+  const g2 = publishGuardRow({ chain: "base", dex: "uniswap-v4-base", v: "nosell" }, "base");
+  ok(g2.v === null && g2.why === "v4:unproven", "[v4 one-way pool] a v4 nosell without cause is still downgraded");
+  const g3 = publishGuardRow({ chain: "base", dex: "uniswap-v4-base", v: "nosell", cause: "sell-reverts" }, "base");
+  ok(g3.v === null && g3.why === "v4:unproven", "[v4 one-way pool] sell-reverts is still not proof on a v4 row");
+  const g4 = publishGuardRow({ ...v4row, v: "sell", recheck: "nosell", recheckCause: "one-way-pool" }, "base");
+  ok(g4.recheck === "nosell" && g4.recheckCause === "one-way-pool", "[v4 one-way pool] recheckCause one-way-pool survives on a v4 row");
+  const g5 = publishGuardRow({ chain: "solana", dex: "raydium", v: "nosell", cause: "one-way-pool" }, "solana");
+  ok(g5.v === null && g5.why === "sol:unconfirmed" && !("cause" in g5), "[v4 one-way pool] Solana never keeps a nosell, one-way-pool included");
+  ok(causeForRow("nosell", "one-way-pool") === "one-way-pool" && causeForRow("sell", "one-way-pool") === undefined,
+    "[v4 one-way pool] causeForRow accepts it on nosell only");
+
+  // 6. متن‌ها
+  const doc = { date: "2026-10-26", generatedAt: "2026-10-26T00:00:00.000Z", chains: ["base"], checked: 1, rows: [
+    reportRow({ chain: "base", address: XDP, symbol: "XDP", name: "XDP", verdict: "nosell", checkedAt: "2026-10-26T00:00:00.000Z",
+      poolCreatedAt: null, priceUsd: 1, reserveUsd: 1, vol24hUsd: 1, fdvUsd: 1, dex: "uniswap-v4-base", why: null, cause: "one-way-pool" })] };
+  ok(doc.rows[0] && doc.rows[0].cause === "one-way-pool", "[v4 one-way pool] reportRow carries the cause");
+  ok(reportText(doc).includes("$XDP — no sell route quoted · one-way pool"), "[v4 one-way pool] the .txt names the cause, got " + reportText(doc));
+  ok(ogVerdictLabel("nosell", "one-way-pool") === "No sell route quoted: one-way pool" && renderable(ogVerdictLabel("nosell", "one-way-pool")),
+    "[v4 one-way pool] the OG label is set and uses only atlas glyphs");
+  ok(/buy fills, but selling it back does not/.test(ogDescription({ symbol: "X", name: "X" }, "nosell", "Base", "one-way-pool")) &&
+     !/buy fills/.test(ogDescription({ symbol: "X", name: "X" }, "nosell", "Solana", "one-way-pool")),
+    "[v4 one-way pool] preview description carries it on Base only");
+  const hh = (c) => (/h=([0-9a-f]{8})/.exec(ogTags({ symbol: "ZXT", name: "Zx" }, XDP, "https://zaexa.com", "nosell", "Base", c)) || [])[1];
+  ok(hh("one-way-pool") && hh("one-way-pool") !== hh(undefined) && hh("one-way-pool") !== hh("empty-pool"),
+    "[v4 one-way pool] the OG card hash includes the cause");
+  const tgBody = verdictText("base", { v: "nosell", cause: "one-way-pool", symbol: "XDP" }, XDP);
+  ok(tgBody.includes("one-way pool") && tgBody.includes("selling the same amount back does not"), "[v4 one-way pool] the bot names it, got " + tgBody);
+  const tgSol = verdictText("solana", { v: "nosell", cause: "one-way-pool" }, "So11111111111111111111111111111111111111112");
+  ok(!tgSol.includes("one-way"), "[v4 one-way pool] the bot never shows it for Solana");
+  const html = renderReportPage({ date: "2026-10-26", today: "2026-10-26", firstDate: "2026-10-01", rows: doc.rows, history: [] });
+  ok(typeof html === "string" && html.includes("One-way pool: 1"), "[v4 one-way pool] the report page tile counts it");
+
+  // 7. سیم‌کشی در ogFetchVerdictDetail: فقط شاخه‌ی v4-only، و فقط وقتی وگرنه v4:unproven بود
+  const src = fs.readFileSync(fileURLToPath(new URL("./index.js", import.meta.url)), "utf8");
+  ok(/finalizeBaseNosell\(empty, covered, true, poolCause\);\s*\/\/[^\n]*\n\s*if \(fin\.why === "v4:unproven" && await v4OneWayCheck\(/.test(src) &&
+     (src.match(/await v4OneWayCheck\(/g) || []).length === 1,
+    "[v4 one-way pool] v4OneWayCheck is wired at exactly one call site, the v4-only branch, guarded by v4:unproven");
+  console.log("[v4 one-way pool] v4OneWayProof proves only a real indexed key whose ~$100 buy fills and whose same-amount sell reverts with NotEnoughLiquidity for its own poolId (bytes, behind the 0x6190b2b0 wrapper, live canary); hook errors, other poolIds, PoolNotInitialized, reverting/zero buys, bare errors, dead canary, throws and tight deadlines all give false; finalizeBaseNosell puts it after sells:elsewhere/empty-pool/sells:recent and before v4:unproven, v4-only; the check needs a complete index and budget room; publishGuardRow keeps it on v4 rows (and recheckCause), Solana never; .txt, report tile, OG label/description/hash and the bot all carry it");
 }
 
 console.log(fails === 0
