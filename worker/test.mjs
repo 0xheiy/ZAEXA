@@ -15930,6 +15930,82 @@ function stripAllowedWording(t) {
   console.log("[v4 one-way pool] v4OneWayProof proves only a real indexed key whose ~$100 buy fills and whose same-amount sell reverts with NotEnoughLiquidity for its own poolId (bytes, behind the 0x6190b2b0 wrapper, live canary); hook errors, other poolIds, PoolNotInitialized, reverting/zero buys, bare errors, dead canary, throws and tight deadlines all give false; finalizeBaseNosell puts it after sells:elsewhere/empty-pool/sells:recent and before v4:unproven, v4-only; the check needs a complete index and budget room; publishGuardRow keeps it on v4 rows (and recheckCause), Solana never; .txt, report tile, OG label/description/hash and the bot all carry it");
 }
 
+/* [base rpc] Public read tunnel: closed allowlist, bounded bodies, no credentials. */
+{
+  const before = fails;
+  const secret = "BASE-SECRET-DO-NOT-ECHO";
+  const endpoint = "https://base.publicnode.com/rpc/" + secret;
+  const calls = [];
+  let mode = "ok";
+  const oldFetch = globalThis.fetch;
+  globalThis.fetch = async (u, init) => {
+    calls.push({ url: String(u), body: JSON.parse(init.body), headers: init.headers, redirect: init.redirect });
+    if (mode === "throw") throw new Error(endpoint);
+    if (mode === "http") return new Response(endpoint, { status: 403, headers: { location: endpoint } });
+    if (mode === "error") return json({ error: { code: -32000, message: endpoint, data: secret } });
+    if (mode === "leak") return json({ result: secret });
+    return json({ jsonrpc: "2.0", id: 999, result: "0x2105", debug: endpoint });
+  };
+  const { rlHits, RL_LIMIT } = await import("./index.js");
+  const request = async (payload, opts = {}) => {
+    const res = await call("/base/rpc", {
+      method: opts.method || "POST",
+      headers: { origin: ORIGIN, "content-type": "application/json", "cf-connecting-ip": "base-rpc-test", ...opts.headers },
+      ...(!["GET", "OPTIONS"].includes(opts.method) ? { body: typeof payload === "string" ? payload : JSON.stringify(payload) } : {}),
+    }, { ASSETS, ...(opts.missing ? {} : { BASE_RPC: endpoint }) });
+    const text = await res.text();
+    ok(!(text + JSON.stringify([...res.headers])).includes(secret), "[base rpc] credentials never appear in body/headers");
+    ok(res.headers.get("access-control-allow-origin") === ORIGIN, "[base rpc] CORS allows only zaexa.com");
+    return { res, body: text ? JSON.parse(text) : null };
+  };
+  const payload = { jsonrpc: "2.0", id: 17, method: "eth_chainId", params: [] };
+  try {
+    rlHits.clear();
+    for (const method of ["eth_call", "eth_chainId", "eth_blockNumber", "eth_getBalance", "eth_getCode",
+      "eth_estimateGas", "eth_gasPrice", "eth_maxPriorityFeePerGas", "eth_getTransactionReceipt",
+      "eth_getTransactionCount", "eth_feeHistory", "eth_getBlockByNumber"]) {
+      const { res, body } = await request({ ...payload, method });
+      ok(res.status === 200 && body.jsonrpc === "2.0" && body.id === 17 && body.result === "0x2105", "[base rpc] proxies " + method + " with caller id");
+      const last = calls.at(-1);
+      ok(last.url === endpoint && last.body.method === method && last.body.id === 17 && last.redirect === "manual", "[base rpc] uses configured upstream without redirects");
+    }
+    const n = calls.length;
+    for (const method of ["eth_sendRawTransaction", "eth_getLogs", "eth_getStorageAt", "debug_traceCall", "constructor"]) {
+      const { res, body } = await request({ ...payload, method });
+      ok(res.status === 400 && body.error.code === -32601, "[base rpc] rejects " + method);
+    }
+    for (const bad of [[payload], "null", "{", { ...payload, params: {} }]) {
+      ok((await request(bad)).res.status === 400, "[base rpc] rejects batches/malformed params/JSON");
+    }
+    ok((await request("x".repeat(4097))).res.status === 413, "[base rpc] caps streamed body without Content-Length");
+    ok((await request(payload, { headers: { "content-length": "4097" } })).res.status === 413, "[base rpc] caps declared body");
+    ok((await request(payload, { method: "GET" })).res.status === 405, "[base rpc] rejects GET");
+    ok((await request(payload, { headers: { origin: "https://other.invalid" } })).res.status === 403, "[base rpc] rejects other origins");
+    const preflight = (await request(payload, { method: "OPTIONS" })).res;
+    ok(preflight.status === 204 && preflight.headers.get("access-control-allow-headers") === "content-type", "[base rpc] preflight allows JSON POST");
+    ok(calls.length === n, "[base rpc] rejected requests never reach upstream");
+    const missing = await request(payload, { missing: true });
+    ok(missing.res.status === 503 && missing.body.error && missing.body.jsonrpc === "2.0", "[base rpc] missing BASE_RPC is JSON-RPC 503");
+    for (mode of ["throw", "http", "error", "leak"]) {
+      const r = await request(payload);
+      ok(r.body.error && r.res.status === (mode === "error" ? 200 : 502), "[base rpc] sanitizes upstream " + mode);
+    }
+    mode = "ok";
+    rlHits.clear();
+    const slowBody = new ReadableStream({ start() {}, cancel() {} });
+    const slow = await worker.fetch(new Request(ORIGIN + "/base/rpc", {
+      method: "POST", body: slowBody, duplex: "half", headers: { origin: ORIGIN },
+    }), { BASE_RPC: endpoint }, {});
+    ok(slow.status === 400, "[base rpc] unfinished streamed body expires after five seconds");
+    rlHits.clear();
+    for (let i = 0; i < RL_LIMIT; i++) await request(payload, { method: "OPTIONS" });
+    const limited = (await request(payload)).res;
+    ok(limited.status === 429 && limited.headers.get("retry-after") === "60", "[base rpc] per-IP rate limit");
+    ok((await request(payload, { headers: { "cf-connecting-ip": "base-rpc-other" } })).res.status === 200, "[base rpc] other IP has independent quota");
+  } finally { globalThis.fetch = oldFetch; rlHits.clear(); }
+  console.log("[base rpc] " + (fails === before ? "PASS" : "FAIL") + " — allowlist, batches, body cap/deadline, CORS, rate limit, missing secret and credential sanitization");
+}
+
 console.log(fails === 0
   ? "[gt proxy] worker ok — " + REAL.length + " real paths proxied, " + BAD.length +
     " refused without touching the network, 429 passes through with CORS\n" +

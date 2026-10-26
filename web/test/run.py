@@ -9750,6 +9750,8 @@ async def main():
             errors.append(m.text)
 
     async with async_playwright() as p:
+        await check_sol_picker_balance(p, errors)
+        await check_base_rpc_fallback(p, errors)
         await check_real_page_from_disk(p)
         await check_theme_migration(p, errors)
         await check_theme_button(p, errors)
@@ -22016,6 +22018,221 @@ async def check_stocks_star(p, errors):
         print("[stocks star] US stocks (Base TSLAc and Solana AAPLx): the first column is a 28px borderless watch star 20px from the card's left edge, Base address from BASE_TOKENS (lower-case) and Solana mint exact, aria-pressed/label follow, the click opens neither the row nor Trade, and a storage event re-syncs it")
     finally:
         await b.close()
+
+
+async def check_sol_picker_balance(p, errors):
+    """[sol picker balance] Listed holdings rank by USD; unsolicited mints never enter the picker."""
+    import json
+    from urllib.parse import parse_qs
+    b = await p.chromium.launch()
+    srv, origin = fb_serve()
+    account_pk = list(range(1, 33))
+    account_addr = b58encode(bytes(account_pk))
+    usdc = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"
+    jup = "JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN"
+    bonk = "DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263"
+    unknown = fb_b58(0xA1D0)
+    prices = {usdc: 1, jup: 0.5, bonk: 0.00002, unknown: 1000000}
+    holdings = [(usdc, 50, 6), (jup, 1000, 6), (bonk, 1000000, 5), (unknown, 999999999, 6)]
+    wallet = r"""
+(() => {
+  const account = {address: __ADDR__, publicKey: new Uint8Array(__PK__)};
+  window.__pickerConnects = 0;
+  window.SolConfirm = {confirmConnection: async () => {}};
+  const wallet = {name:'Fake Wallet', icon:'', chains:['solana:mainnet'], features:{
+    'standard:connect':{connect:async () => {window.__pickerConnects++;return {accounts:[account]};}},
+    'standard:disconnect':{disconnect:async () => {}},
+    'standard:events':{on:() => () => {}},
+    'solana:signAndSendTransaction':{signAndSendTransaction:async () => {throw new Error('probe must never sign');}}
+  }};
+  window.addEventListener('wallet-standard:app-ready', e => e.detail.register(wallet));
+})();
+""".replace("__ADDR__", json.dumps(account_addr)).replace("__PK__", json.dumps(account_pk))
+    try:
+        ctx = await b.new_context(viewport={"width": 1280, "height": 900})
+        pg = await ctx.new_page()
+        pg.on("pageerror", lambda e: errors.append("[sol picker balance] %s" % e))
+        await pg.add_init_script(wallet)
+        rpc_calls, price_queries = [], []
+
+        async def handler(route):
+            u = route.request.url
+            path = urlparse(u).path
+            if u.startswith(origin) and path == "/sol/rpc":
+                pl = json.loads(route.request.post_data or "{}")
+                method, params = pl.get("method"), pl.get("params", [])
+                rpc_calls.append((method, params))
+                if method == "getBalance":
+                    result = {"value": 0}
+                elif method == "getTokenAccountsByOwner":
+                    filt = params[1]
+                    # One SPL program owns the holdings; the Token-2022 program is empty.
+                    selected = holdings if filt.get("programId") == "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA" else []
+                    if "mint" in filt:
+                        selected = [h for h in holdings if h[0] == filt["mint"]]
+                    result = {"value": [{"pubkey": fb_b58(100 + i), "account": {"data": {"parsed": {"info": {
+                        "mint": mint, "tokenAmount": {"amount": str(amount * 10 ** decimals), "decimals": decimals}
+                    }}}}} for i, (mint, amount, decimals) in enumerate(selected)]}
+                else:
+                    result = None
+                return await route.fulfill(content_type="application/json", body=json.dumps({"result": result}))
+            if u.startswith("https://lite-api.jup.ag/tokens/v2/search?"):
+                mints = parse_qs(urlparse(u).query).get("query", [""])[0].split(",")
+                price_queries.append(mints)
+                return await route.fulfill(content_type="application/json", body=json.dumps(
+                    [{"id": mint, "usdPrice": prices[mint]} for mint in mints if mint in prices]))
+            if u.startswith(origin):
+                if path == "/ev":
+                    return await route.fulfill(status=204, body="")
+                if path.startswith("/gt/"):
+                    return await route.fulfill(content_type="application/json", body='{"data":[]}')
+                if path.startswith("/vd/"):
+                    return await route.fulfill(content_type="application/json", body='{"v":"sell","ms":100}')
+                if path.startswith("/sol/"):
+                    return await route.fulfill(content_type="application/json", body='{"result":null}')
+                return await route.continue_()
+            return await route.abort()
+
+        await pg.route("**/*", handler)
+        await pg.goto(origin + "/app#swap?chain=solana")
+        await pg.click("#connectBtn")
+        await pg.click('#solWalList .walRow[data-i]')
+        await pg.wait_for_function("() => solAccount !== null")
+        await pg.click("#solBotBtn")
+        await pg.wait_for_function("() => document.querySelectorAll('#solTokList .trow .b').length > 0 && [...document.querySelectorAll('#solTokList .trow .b')].filter(e => e.textContent.trim()).length === 3")
+        rows = await pg.eval_on_selector_all("#solTokList .trow", "els => els.map(e => ({mint:e.dataset.mint, symbol:e.querySelector('.s').textContent, balance:e.querySelector('.b')?.textContent.trim()}))")
+        assert [r["mint"] for r in rows[:3]] == [jup, usdc, bonk], "[sol picker balance] expected JUP ($500), USDC ($50), BONK ($20) on top: %s" % rows[:5]
+        assert [r["symbol"] for r in rows[:3]] == ["JUP", "USDC", "BONK"], "[sol picker balance] held row labels"
+        assert [r["balance"].replace(",", "") for r in rows[:3]] == ["1000", "50", "1000000"], "[sol picker balance] each held row must show its actual balance: %s" % rows[:3]
+        assert all(r["mint"] != unknown for r in rows), "[sol picker balance] unknown airdrop must not be promoted or added"
+        assert not await pg.evaluate("m => !!solPickBal.map[m]", unknown), "[sol picker balance] unknown mint excluded from picker cache"
+        assert all(unknown not in query and len(query) <= 25 for query in price_queries), "[sol picker balance] only listed/Popular mints priced, at most 25 per batch"
+        assert any(set([jup, usdc, bonk]).issubset(query) for query in price_queries), "[sol picker balance] prices must come from Jupiter search"
+        programs = {params[1].get("programId") for method, params in rpc_calls if method == "getTokenAccountsByOwner" and "programId" in params[1]}
+        assert programs == {"TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA", "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb"}, "[sol picker balance] both token programs read"
+        assert await pg.evaluate("() => window.__pickerConnects") == 1, "[sol picker balance] standard stub wallet connected"
+        print("[sol picker balance] PASS — JUP 1,000 ($500), USDC 50 ($50), BONK 1,000,000 ($20), in that order with balances; unknown airdrop excluded from picker and price requests")
+        await pg.unroute_all(behavior="wait")
+        await ctx.close()
+    finally:
+        await b.close()
+        srv.shutdown()
+
+
+async def check_base_rpc_fallback(p, errors):
+    """[base rpc fallback] Real browser fetch failures, with the existing offline AMM fixture."""
+    import json
+    b = await p.chromium.launch()
+    srv, origin = fb_serve()
+    # Keep the existing ABI/AMM double, but send its provider reads over actual browser fetch.
+    # Route responses are computed by the unmodified double, not by the fallback under test.
+    wire = r"""
+(() => {
+  const Original = window.ethers.JsonRpcProvider;
+  const nativeFetch = window.__baseNativeFetch;
+  window.ethers.Interface.prototype.encodeFunctionResult = function(name, args) {
+    const text = JSON.stringify({ret:args}, (k,v) => typeof v === 'bigint' ? {__b:v.toString()} : v);
+    return '0x' + Array.from(new TextEncoder().encode(text)).map(b => b.toString(16).padStart(2,'0')).join('');
+  };
+  const fixture = new Original('fixture');
+  const names = {eth_call:'call', eth_getCode:'getCode', eth_getBalance:'getBalance',
+    eth_getStorageAt:'getStorage', eth_blockNumber:'getBlockNumber'};
+  window.__baseFixture = async ({method, params}) => {
+    const v = method === 'eth_chainId' ? '0x2105' : await fixture[names[method]](...params);
+    return typeof v === 'bigint' ? '0x' + v.toString(16) : v;
+  };
+  class WireProvider extends Original {
+    async send(method, params) {
+      const r = await nativeFetch(this.url, {method:'POST', headers:{'content-type':'application/json'},
+        body:JSON.stringify({jsonrpc:'2.0', id:1, method, params})});
+      if(!r.ok) throw new Error('RPC transport failed');
+      const j = await r.json(); if(j.error) throw new Error('RPC error'); return j.result;
+    }
+    call(tx) {return this.send('eth_call', [tx]);}
+    getCode(a) {return this.send('eth_getCode', [a]);}
+    async getBalance(a) {return BigInt(await this.send('eth_getBalance', [a]));}
+    getStorage(a,s) {return this.send('eth_getStorageAt', [a,s]);}
+    async getBlockNumber() {return Number(await this.send('eth_blockNumber', []));}
+  }
+  window.ethers.JsonRpcProvider = WireProvider;
+})();
+"""
+    try:
+        for public_ok in (False, True):
+            ctx = await b.new_context()
+            pg = await ctx.new_page()
+            pg.on("pageerror", lambda e: errors.append("[base rpc fallback] %s" % e))
+            await pg.add_init_script("window.__baseNativeFetch = window.fetch.bind(window);")
+            stub = open(os.path.join(HERE, "stub-ethers.js"), encoding="utf-8").read()
+            await pg.route("**/stub-ethers.js", lambda r: r.fulfill(content_type="application/javascript", body=stub + wire))
+            calls, recovery_calls, proxy_sizes = [], [], []
+            recovery_target = "0x" + "ef" * 20
+            parallel_calls = {"0x" + part * 20: [] for part in ("f1", "f2", "f3")}
+
+            async def rpc_route(route):
+                host = urlparse(route.request.url).hostname
+                is_proxy = route.request.url == origin + "/base/rpc"
+                payload = json.loads(route.request.post_data or "{}")
+                calls.append((route.request.url, payload.get("method")))
+                if is_proxy:
+                    size = len((route.request.post_data or "").encode("utf-8"))
+                    proxy_sizes.append(size)
+                    if size > 4096:
+                        return await route.fulfill(status=413, content_type="application/json", body='{"jsonrpc":"2.0","id":1,"error":{"code":-32600,"message":"body-too-large"}}')
+                if payload.get("method") == "eth_getCode" and payload.get("params", [None])[0] == recovery_target:
+                    recovery_calls.append(route.request.url)
+                if payload.get("method") == "eth_getCode" and payload.get("params", [None])[0] in parallel_calls:
+                    parallel_calls[payload["params"][0]].append(route.request.url)
+                if not is_proxy and not (public_ok and host == "base.publicnode.com"):
+                    return await route.abort("connectionreset")
+                result = await pg.evaluate("pl => window.__baseFixture(pl)", payload)
+                await route.fulfill(content_type="application/json", headers={"access-control-allow-origin": "*"},
+                                    body=json.dumps({"jsonrpc": "2.0", "id": payload["id"], "result": result}))
+
+            await pg.route(re.compile(r"https://(?:base\.publicnode\.com|base\.meowrpc\.com|base\.drpc\.org|base\.gateway\.tenderly\.co|mainnet\.base\.org)(?:/.*)?$"), rpc_route)
+            await pg.route("**/base/rpc", rpc_route)
+            await pg.route("**/ev", lambda r: r.fulfill(status=204, body=""))
+            await pg.goto(origin + "/app#swap")
+            await pg.fill("#amtIn", "1000")
+            await pg.wait_for_function("() => Number(document.getElementById('amtOut').value.replace(/,/g,'')) > 0", timeout=30000)
+            state = await pg.evaluate("() => ({rpcs: CHAIN.rpcs, proxy: BASE_RPC_PROXY, saved: localStorage.getItem(LS_RPC_LAST)})")
+            proxy_calls = [c for c in calls if c[0] == origin + "/base/rpc"]
+            assert state["rpcs"][-1] == state["proxy"] == origin + "/base/rpc", "[base rpc fallback] proxy must be last"
+            if public_ok:
+                assert not proxy_calls, "[base rpc fallback] working publicnode must cause ZERO proxy requests: %s" % calls
+                pinned = await pg.evaluate("""async () => {
+                    const rotate=rotateRpc,tried=[];rotateRpc=()=>{};
+                    try { await rpcSend(p=>{tried.push(p.zaexaBaseProxy===true);throw new Error('fetch failed');}); }
+                    catch(e) {return {down:!!e.rpcDown,tried};}
+                    finally {rotateRpc=rotate;}
+                    return {down:false,tried};
+                }""")
+                assert pinned == {"down": True, "tried": [False]}, "[base rpc fallback] disabled rotation must preserve unknown and never skip ahead to proxy: %s" % pinned
+            else:
+                assert proxy_calls and any(m == "eth_call" for _, m in proxy_calls), "[base rpc fallback] quote must use proxy reads"
+                assert proxy_sizes and max(proxy_sizes) <= 4096, "[base rpc fallback] every proxy request must respect the Worker's 4 KiB cap"
+                first_proxy = next(i for i, c in enumerate(calls) if c[0] == origin + "/base/rpc")
+                assert {urlparse(u).hostname for u, _ in calls[:first_proxy]} == {urlparse(u).hostname for u in state["rpcs"][:-1]}, "[base rpc fallback] all public hosts must fail first"
+                assert state["saved"] != state["proxy"], "[base rpc fallback] never remember proxy as first choice"
+                await pg.evaluate("addresses => Promise.all(addresses.map(address => getCode(address)))", list(parallel_calls))
+                for address, attempted in parallel_calls.items():
+                    assert attempted[-1] == origin + "/base/rpc" and {urlparse(u).hostname for u in attempted[:-1]} == {urlparse(u).hostname for u in state["rpcs"][:-1]}, "[base rpc fallback] concurrent read must try every public endpoint before proxy: %s %s" % (address, attempted)
+                # A later successful public read must recover without going back through the proxy.
+                public_ok = True
+                await pg.evaluate("address => getCode(address)", recovery_target)
+                assert recovery_calls and origin + "/base/rpc" not in recovery_calls, "[base rpc fallback] retry public endpoints on every call: %s" % recovery_calls
+                await pg.evaluate("() => { localStorage.setItem(LS_RPC_LAST, BASE_RPC_PROXY); restoreLastRpc(); }")
+                assert await pg.evaluate("() => CHAIN.rpcs[0] !== BASE_RPC_PROXY"), "[base rpc fallback] stored proxy must never lead"
+            await pg.unroute_all(behavior="wait")
+            await ctx.close()
+        disk = await b.new_page()
+        await disk.goto(URL)
+        assert await disk.evaluate("() => BASE_RPC_PROXY === null && CHAIN.rpcs.every(u => !u.endsWith('/base/rpc'))"), "[base rpc fallback] disabled on file://"
+        await disk.close()
+        print("[base rpc fallback] PASS — quote loads within the 4 KiB proxy body cap after all public hosts reset; publicnode success makes ZERO proxy requests; concurrent reads, public retry, stored winner and file:// guards pass")
+    finally:
+        await b.close()
+        srv.shutdown()
 
 
 async def only(names):

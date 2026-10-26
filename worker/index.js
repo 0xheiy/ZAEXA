@@ -1853,6 +1853,63 @@ async function solSwapRoute(request, url, env) {
 
 // فهرستِ بسته‌ی متدهای مجاز روی /sol/rpc — هرچیزِ دیگر، حتی یک متدِ
 // بی‌خطرِ خواندنی، رد می‌شود؛ افزودنِ متدِ تازه یعنی این فهرست دستی عوض شود.
+const BASE_RPC_METHODS_ALLOWED = new Set([
+  "eth_call", "eth_chainId", "eth_blockNumber", "eth_getBalance", "eth_getCode",
+  "eth_estimateGas", "eth_gasPrice", "eth_maxPriorityFeePerGas",
+  "eth_getTransactionReceipt", "eth_getTransactionCount", "eth_feeHistory", "eth_getBlockByNumber",
+]);
+const BASE_RPC_CORS = {
+  "access-control-allow-origin": "https://zaexa.com",
+  "access-control-allow-methods": "POST,OPTIONS",
+  "access-control-allow-headers": "content-type",
+  "access-control-max-age": "86400",
+};
+
+// Public reads only. Never forward upstream headers, error text or credential URLs.
+async function baseRpcRoute(request, env) {
+  let id = null;
+  const done = (status, body, headers = {}) => new Response(JSON.stringify({ jsonrpc: "2.0", id, ...body }), {
+    status, headers: { ...BASE_RPC_CORS, "content-type": "application/json; charset=utf-8", "cache-control": "no-store", ...headers },
+  });
+  const fail = (status, code, message, headers) => done(status, { error: { code, message } }, headers);
+  if (!rateOk(request, "baser", RL_LIMIT, RL_WINDOW_MS))
+    return fail(429, -32005, "Too many requests", { "retry-after": "60" });
+  const origin = request.headers.get("origin");
+  if (origin && origin !== "https://zaexa.com") return fail(403, -32600, "Origin not allowed");
+  if (request.method === "OPTIONS") return new Response(null, { status: 204, headers: BASE_RPC_CORS });
+  if (request.method !== "POST") return fail(405, -32600, "Only POST");
+  const parsed = await readJsonBody(request, SOL_RPC_BODY_MAX);
+  if (parsed.error) return fail(parsed.error === "body-too-large" ? 413 : 400, -32600, parsed.error);
+  const body = parsed.body;
+  if (typeof body.id === "string" || (typeof body.id === "number" && Number.isFinite(body.id))) id = body.id;
+  if (typeof body.method !== "string" || !BASE_RPC_METHODS_ALLOWED.has(body.method))
+    return fail(400, -32601, "Method not allowed");
+  if (!Array.isArray(body.params)) return fail(400, -32602, "Invalid params");
+  if (!env.BASE_RPC) return fail(503, -32000, "Base RPC unavailable");
+  const ac = new AbortController();
+  const timer = setTimeout(() => ac.abort(), SOL_RPC_TIMEOUT_MS);
+  try {
+    const res = await fetch(env.BASE_RPC, {
+      method: "POST", headers: { "content-type": "application/json" }, redirect: "manual",
+      body: JSON.stringify({ jsonrpc: "2.0", id, method: body.method, params: body.params }), signal: ac.signal,
+    });
+    if (!res.ok) return fail(502, -32000, "Base RPC unavailable");
+    const json = await res.json();
+    if (!json || typeof json !== "object" || Array.isArray(json)) return fail(502, -32000, "Invalid RPC response");
+    if (json.error) {
+      const code = Number.isInteger(json.error.code) ? json.error.code : -32000;
+      return done(200, { error: { code, message: "Base RPC request failed" } });
+    }
+    if (!Object.prototype.hasOwnProperty.call(json, "result")) return fail(502, -32000, "Invalid RPC response");
+    const endpoint = new URL(env.BASE_RPC);
+    const secrets = [env.BASE_RPC, ...endpoint.pathname.split("/").filter(p => p.length >= 8), ...endpoint.searchParams.values()];
+    const resultText = JSON.stringify(json.result);
+    if (secrets.some(s => s && resultText.includes(s))) return fail(502, -32000, "Invalid RPC response");
+    return done(200, { result: json.result });
+  } catch { return fail(502, -32000, "Base RPC unavailable"); }
+  finally { clearTimeout(timer); }
+}
+
 const SOL_RPC_METHODS_ALLOWED = new Set([
   "getBalance", "getTokenAccountsByOwner", "getSignatureStatuses", "sendTransaction",
   "simulateTransaction", "getAccountInfo", "getTokenLargestAccounts", "getEpochInfo", "getMultipleAccounts",
@@ -3700,6 +3757,7 @@ export default {
     if (url.pathname === "/sol/quote") return solQuoteRoute(request, url, env);
     if (url.pathname === "/sol/swap") return solSwapRoute(request, url, env);
     if (url.pathname === "/sol/rpc") return solRpcRoute(request, url, env);
+    if (url.pathname === "/base/rpc") return baseRpcRoute(request, env);
     /* گزارشِ روزانه و نمای «تازه‌ها». نه فایل‌اند، نه بایندینگ ASSETS، پس
        باید مثلِ /gt و /ev و /vd همیشه به کد برسند — همان دلیلی که پایین‌تر
        برای robots.txt/sitemap.xml هم تکرار شده: خط Build در پنل فقط

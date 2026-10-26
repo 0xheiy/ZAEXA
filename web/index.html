@@ -2687,10 +2687,13 @@ const CHAIN={
      نمی‌گوید. اگر روزی دوباره سنجیده شد، باید از مرورگر و روی مبدأ
      واقعی سایت باشد. */
   rpcs:["https://base.publicnode.com","https://base.meowrpc.com","https://base.drpc.org",
-        "https://base.gateway.tenderly.co","https://mainnet.base.org"],
+        "https://base.gateway.tenderly.co","https://mainnet.base.org",
+        ...(/^https?:$/.test(location.protocol)?[location.origin+"/base/rpc"]:[])],
   wrapped:"WETH",reference:"USDC",
 };
-const DEFAULT_RPCS=CHAIN.rpcs.slice();
+const BASE_RPC_PROXY=/^https?:$/.test(location.protocol)?location.origin+"/base/rpc":null;
+const BASE_RPC_BODY_MAX=4096;
+const DEFAULT_RPCS=CHAIN.rpcs.filter(u=>u!==BASE_RPC_PROXY);
 let customRpc=false;
 // KIND_V3 = SwapRouter02 (ساختار هفت‌فیلدی، بدون deadline)
 const KIND={V2:0,V3:1,SOLIDLY:2,V3_LEGACY:3,SLIPSTREAM:4,V4:5};   // V4 = KIND_ADAPTER در SwapExecutor
@@ -2996,7 +2999,10 @@ const DEAD="0x000000000000000000000000000000000000dEaD";
 /* =====================================================================
    RPC — اول کیف پول (بدون CORS، بدون فیلتر، بدون rate limit)، بعد عمومی
    ===================================================================== */
-function makeProvider(u){return new E.JsonRpcProvider(u,CHAIN.id,{staticNetwork:true,batchMaxCount:1});}
+function makeProvider(u){
+  const p=new E.JsonRpcProvider(u,CHAIN.id,{staticNetwork:true,batchMaxCount:1});
+  p.zaexaBaseProxy=!!BASE_RPC_PROXY&&u===BASE_RPC_PROXY;return p;
+}
 function rotateRpc(){rpcIndex=(rpcIndex+1)%CHAIN.rpcs.length;readProvider=makeProvider(CHAIN.rpcs[rpcIndex]);}
 function withTimeout(p,ms){return Promise.race([p,new Promise((_,r)=>setTimeout(()=>r(new Error("timeout")),ms))]);}
 /* آیا خطا از *انتقال* آمده، نه از زنجیره؟
@@ -3051,7 +3057,7 @@ function rpcState(kind,text){
   el.style.color=kind==="err"?"var(--neg)":kind==="ok"?"var(--pos)":"var(--tx3)";
 }
 function useRpc(url){
-  CHAIN.rpcs=url?[url,...DEFAULT_RPCS]:DEFAULT_RPCS.slice();
+  CHAIN.rpcs=[...(url?[url,...DEFAULT_RPCS]:DEFAULT_RPCS),...(BASE_RPC_PROXY?[BASE_RPC_PROXY]:[])];
   customRpc=!!url;
   rpcIndex=0;readProvider=makeProvider(CHAIN.rpcs[0]);
   paintSrc();
@@ -3109,7 +3115,7 @@ function restoreLastRpc(){
   if(customRpc)return;
   let last=null;
   try{last=localStorage.getItem(LS_RPC_LAST);}catch{}
-  if(!last||!DEFAULT_RPCS.includes(last))return;
+  if(!last||last===BASE_RPC_PROXY||!DEFAULT_RPCS.includes(last))return;
   const i=CHAIN.rpcs.indexOf(last);
   if(i>0)CHAIN.rpcs=[CHAIN.rpcs[i],...CHAIN.rpcs.slice(0,i),...CHAIN.rpcs.slice(i+1)];
   rpcIndex=0;readProvider=makeProvider(CHAIN.rpcs[0]);
@@ -3161,13 +3167,16 @@ async function rpcSend(fn){
     try{const v=await withTimeout(fn(walletProvider),9000);liveSrc="wallet";paintSrc();return v;}
     catch(e){if(isRevert(e))throw e;}
   }
-  let last;
+  let last,rotationStopped=false;
   const failedThisRound=[];               // فقط شکست‌های همین یک تلاش
-  for(let k=0;k<CHAIN.rpcs.length;k++){
-    const url=CHAIN.rpcs[rpcIndex];
-    if(deadRpc.has(url)){rotateRpc();continue;}   // قبلاً اثبات شد مرده — رد شو، امتحان نکن
+  // Concurrent reads must each try their own complete public list before the proxy.
+  const candidates=[...CHAIN.rpcs.slice(rpcIndex),...CHAIN.rpcs.slice(0,rpcIndex)].filter(u=>u!==BASE_RPC_PROXY);
+  for(const url of candidates){
+    if(deadRpc.has(url))continue;   // قبلاً اثبات شد مرده — رد شو، امتحان نکن
+    const provider=url===CHAIN.rpcs[rpcIndex]?readProvider:makeProvider(url);
     try{
-      const v=await withTimeout(fn(readProvider),7000);
+      const v=await withTimeout(fn(provider),7000);
+      rpcIndex=CHAIN.rpcs.indexOf(url);readProvider=provider;
       liveSrc=url;paintSrc();
       // قاعده‌ی مقایسه‌ای بالا: این یکی جواب داد، پس بقیه‌ی شکست‌خورده‌های
       // همین تلاش («رو در رو با یک زنده») حالا مرده علامت می‌خورند —
@@ -3182,8 +3191,19 @@ async function rpcSend(fn){
     }catch(e){
       if(isRevert(e))throw e;
       last=e;failedThisRound.push(url);
+      const before=readProvider;
       rotateRpc();
+      if(readProvider===before){rotationStopped=true;break;} // Honor a pinned provider when rotation is disabled.
     }
+  }
+  // The proxy is tried afresh only after public endpoints; never remember it as a winner.
+  if(BASE_RPC_PROXY&&!rotationStopped){
+    const proxy=makeProvider(BASE_RPC_PROXY);
+    try{
+      const v=await withTimeout(fn(proxy),7000);
+      liveSrc=BASE_RPC_PROXY;paintSrc();return v;
+    }catch(e){if(isRevert(e))throw e;last=e;}
+    finally{proxy.destroy();}
   }
   liveSrc=null;paintSrc();
   const err=new Error("all RPC endpoints failed");err.rpcDown=true;err.cause=last;throw err;
@@ -3251,8 +3271,25 @@ const blockNumber=()=>rpcSend(p=>p.getBlockNumber());
 
 async function multicall(calls){
   if(!calls.length)return[];
-  const data=iMulti.encodeFunctionData("aggregate3",[calls.map(c=>[c.target,true,c.data])]);
-  const raw=await chainCall({to:CHAIN.multicall3,data});
+  const encode=cs=>iMulti.encodeFunctionData("aggregate3",[cs.map(c=>[c.target,true,c.data])]);
+  const data=encode(calls);
+  const fits=d=>JSON.stringify({jsonrpc:"2.0",id:Number.MAX_SAFE_INTEGER,method:"eth_call",
+    params:[{to:CHAIN.multicall3,data:d},"latest"]}).length<=BASE_RPC_BODY_MAX;
+  const raw=await rpcSend(async p=>{
+    if(!p.zaexaBaseProxy||fits(data))return p.call({to:CHAIN.multicall3,data});
+    // Keep the Worker's body cap: split only this fallback's aggregate3 call.
+    const groups=[];let group=[];
+    for(const c of calls){
+      if(group.length&&!fits(encode([...group,c]))){groups.push(group);group=[];}
+      group.push(c);
+    }
+    if(group.length)groups.push(group);
+    const parts=await Promise.all(groups.map(async cs=>{
+      const r=await p.call({to:CHAIN.multicall3,data:encode(cs)});
+      return Array.from(iMulti.decodeFunctionResult("aggregate3",r)[0]);
+    }));
+    return iMulti.encodeFunctionResult("aggregate3",[parts.flat()]);
+  });
   return iMulti.decodeFunctionResult("aggregate3",raw)[0].map(r=>({ok:r[0],data:r[1]}));
 }
 
