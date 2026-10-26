@@ -242,7 +242,14 @@ function put32(buf, o, v) {
 }
 const TYPE = (s) => [s.charCodeAt(0), s.charCodeAt(1), s.charCodeAt(2), s.charCodeAt(3)];
 
-export async function tokenCardPng({ symbol, name, liquidity, vol24, verdict, chain, logo }) {
+/* ۲۶ اکتبر: علتِ اثبات‌شده‌ی nosell همان واژه‌های ربات تلگرام (worker/tg.js) — فقط دو علتِ بسته؛ هر چیزِ دیگر = متنِ قدیم */
+export function ogVerdictLabel(verdict, cause) {
+  if (verdict === "sell") return "A sell route was quoted";
+  if (cause === "empty-pool") return "No sell route quoted: pool is empty";
+  if (cause === "sell-reverts") return "No sell route quoted: the sell reverts";
+  return "No sell route quoted";
+}
+export async function tokenCardPng({ symbol, name, liquidity, vol24, verdict, chain, logo, cause }) {
   const [bandSrc, atlas] = init();
   const ch = chain === "Solana" ? "Solana" : "Base";
   const band = bandSrc.slice(); // کپیِ تازه برای هر درخواست
@@ -270,7 +277,7 @@ export async function tokenCardPng({ symbol, name, liquidity, vol24, verdict, ch
   // ردیف ۳ — فقط sell / nosell؛ nosellِ سولانا هرگز
   if (verdict === "sell" || (verdict === "nosell" && ch !== "Solana")) {
     const sell = verdict === "sell";
-    const msg = sell ? "A sell route was quoted" : "No sell route quoted";
+    const msg = ogVerdictLabel(verdict, ch === "Solana" ? undefined : cause);
     const col = sell ? POS : NEG;
     const x1 = Math.round(88 + width("B24", msg) + 64);
     drawPill(band, 88, 430, x1, 472, col);

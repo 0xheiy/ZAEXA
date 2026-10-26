@@ -2043,10 +2043,12 @@ function injectOg(res, url, addr, metaPromise, vdPromise, chain) {
     })
     .on("head", {
       async element(el) {
-        const [meta, verdict] = await Promise.all([metaPromise, vdPromise]);
+        const [meta, vd] = await Promise.all([metaPromise, vdPromise]);
+        const verdict = vd && typeof vd === "object" ? vd.v : null;
+        const cause = verdict === "nosell" ? vd.cause : undefined;
         // برچسبِ زنجیره از همان chainOf(addr) که کالر پاس داده — نه حدسی
         // که اینجا دوباره زده شود.
-        el.append(ogTags(meta, addr, url.origin, verdict, chain), { html: true });
+        el.append(ogTags(meta, addr, url.origin, verdict, chain, cause), { html: true });
       },
     })
     .transform(res);
@@ -2139,13 +2141,14 @@ async function ogTokenRoute(request, url, env, ctx, addr) {
     const { meta } = await ogFetchMetaDetail(addr, env);
     if (!meta || !meta.symbol || !renderable(meta.symbol)) return ogGenericFallback(request, url);
     const chain = chainKey === "solana" ? "Solana" : "Base";
-    const [verdict, lg] = await Promise.all([
-      ogFetchVerdict(addr, meta, deadlineAt, env, ctx).catch(() => null),
+    const [vd, lg] = await Promise.all([
+      ogFetchVerdictDetail(addr, meta, deadlineAt, env, ctx).catch(() => null),
       ogFetchLogo(meta.imageUrl).catch(() => ({ logo: null, why: "fetch" })),
     ]);
+    const verdict = vd && typeof vd === "object" ? vd.v : null;
     const png = await tokenCardPng({
       symbol: meta.symbol, name: meta.name, liquidity: meta.liquidity, vol24: meta.vol24,
-      verdict, chain, logo: lg.logo,
+      verdict, chain, logo: lg.logo, cause: verdict === "nosell" ? vd.cause : undefined,
     });
     const res = new Response(request.method === "HEAD" ? null : png, {
       status: 200,
@@ -3763,7 +3766,7 @@ export default {
          هم در injectOg پایین await می‌شوند.
          روی سقف نرخ metaPromise اصلاً null است، پس اینجا هم هیچ verdict‌ای
          ساخته نمی‌شود — دقیقاً همان استدلالِ metaPromise بالا. */
-      const vdPromise = metaPromise ? metaPromise.then((m) => ogFetchVerdict(addr, m, deadlineAt, env, ctx)) : null;
+      const vdPromise = metaPromise ? metaPromise.then((m) => ogFetchVerdictDetail(addr, m, deadlineAt, env, ctx)) : null;
       /* ⚠️ «/app» نه «/». از روزی که صفحه‌ی معرفی روی ریشه نشست، «/» دیگر
          اپ نیست. اگر این خط روی «/» بماند، هر لینکِ /t/<آدرس> صفحه‌ی
          معرفی را باز می‌کند و اپ هرگز بالا نمی‌آید — و چون ۲۰۰ برمی‌گردد،

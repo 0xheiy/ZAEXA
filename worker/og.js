@@ -170,13 +170,17 @@ export function ogTitle(meta) {
    سولانا تا امروز اصلاً وجود نداشت (/t/<mint سولانا> ۴۰۴ می‌گرفت)، پس هر
    کارتی که واقعاً ساخته شده همیشه Base بوده — این پیش‌فرض همان را عوض
    نمی‌کند، فقط اسمش را صریح می‌کند. */
-export function ogDescription(meta, verdict, chain) {
+export function ogDescription(meta, verdict, chain, cause) {
   const bits = [chain || "Base"];
   if (meta && meta.liquidity) bits.push("Liquidity " + meta.liquidity);
   if (meta && meta.vol24) bits.push("Vol 24h " + meta.vol24);
   const base = bits.join(" · ") + ". " + PITCH;
   // سولانا: nosell هرگز در کارت نمی‌آید (تصمیمِ مالک ۴ اکتبر) — حتی اگر کالری بدهدش
-  if (verdict === "nosell" && chain !== "Solana") return "No sell route quoted — you may not be able to exit. " + base;
+  if (verdict === "nosell" && chain !== "Solana") {
+    // ۲۶ اکتبر: علتِ اثبات‌شده، با همان واژه‌های کارت و ربات
+    const why = cause === "empty-pool" ? " The pool is empty." : cause === "sell-reverts" ? " The sell reverts." : "";
+    return "No sell route quoted — you may not be able to exit." + why + " " + base;
+  }
   if (verdict === "sell") return "A sell route was quoted. " + base;
   // هر چیزِ دیگری — از جمله نبودِ همین آرگومان — یعنی «نمی‌دانم»، و
   // «نمی‌دانم» نباید مثلِ «نه» رفتار کند: بدون جمله‌ی verdict، رشته‌ی قدیمی
@@ -204,15 +208,18 @@ function fnv1aHex(str) {
   return h.toString(16).padStart(8, "0");
 }
 
-export function ogTags(meta, addr, origin, verdict, chain) {
+export function ogTags(meta, addr, origin, verdict, chain, cause) {
   const title = ogTitle(meta);
-  const desc = ogDescription(meta, verdict, chain);
+  const desc = ogDescription(meta, verdict, chain, cause);
   let img = origin + OG_IMAGE_PATH + "?v=" + OG_IMAGE_V;
   let alt = "Zaexa";
   // نمادِ قابل‌رندر → کارتِ مخصوصِ توکن؛ وگرنه دقیقاً همان تگ‌های قدیمیِ عمومی
   if (meta && meta.symbol && renderable(meta.symbol)) {
     const ch = chain || "Base";
-    const h = fnv1aHex([meta.symbol, meta.name || "", meta.liquidity || "", meta.vol24 || "", verdict || "", ch].join("|"));
+    // علت فقط وقتی هست وارد هش می‌شود — هشِ کارت‌های بی‌علت عیناً همان قبلی می‌ماند
+    const parts = [meta.symbol, meta.name || "", meta.liquidity || "", meta.vol24 || "", verdict || "", ch];
+    if (verdict === "nosell" && ch !== "Solana" && (cause === "empty-pool" || cause === "sell-reverts")) parts.push(cause);
+    const h = fnv1aHex(parts.join("|"));
     img = origin + "/og/t/" + addr + ".png?v=" + OG_TOKEN_IMAGE_V + "&h=" + h;
     alt = meta.symbol + " on " + ch + " — Zaexa";
   }

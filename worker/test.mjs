@@ -15712,6 +15712,26 @@ function stripAllowedWording(t) {
   }
 }
 
+/* ---- ۲۶ اکتبر [og cause] — علتِ اثبات‌شده‌ی nosell روی کارت و توضیحِ پیش‌نمایش ---- */
+{
+  const { ogVerdictLabel } = await import("./og-token.js");
+  const { ogDescription, ogTags } = await import("./og.js");
+  ok(ogVerdictLabel("nosell", "empty-pool") === "No sell route quoted: pool is empty", "[og cause] empty-pool label");
+  ok(ogVerdictLabel("nosell", "sell-reverts") === "No sell route quoted: the sell reverts", "[og cause] sell-reverts label");
+  ok(ogVerdictLabel("nosell", undefined) === "No sell route quoted" && ogVerdictLabel("nosell", "x<y") === "No sell route quoted", "[og cause] unknown cause must fall back to the old text");
+  ok(ogVerdictLabel("sell", "empty-pool") === "A sell route was quoted", "[og cause] a cause never changes a sell label");
+  const meta = { symbol: "ZXT", name: "Zx", liquidity: "$0", vol24: "$1K" };
+  ok(/The pool is empty\./.test(ogDescription(meta, "nosell", "Base", "empty-pool")), "[og cause] description carries the cause on Base");
+  ok(!/pool is empty/i.test(ogDescription(meta, "nosell", "Solana", "empty-pool")), "[og cause] Solana never shows a nosell cause");
+  ok(ogDescription(meta, "nosell", "Base") === ogDescription(meta, "nosell", "Base", undefined), "[og cause] no cause = old description");
+  const t0 = ogTags(meta, "0x" + "a".repeat(40), "https://zaexa.com", "nosell", "Base");
+  const t1 = ogTags(meta, "0x" + "a".repeat(40), "https://zaexa.com", "nosell", "Base", "empty-pool");
+  const h = s => (s.match(/&amp;h=([0-9a-f]{8})|&h=([0-9a-f]{8})/) || []).slice(1).find(Boolean);
+  ok(h(t0) && h(t1) && h(t0) !== h(t1), "[og cause] the card URL hash must change when the cause appears (bot caches break)");
+  ok(h(t0) === h(ogTags(meta, "0x" + "a".repeat(40), "https://zaexa.com", "nosell", "Base", "bogus")), "[og cause] an unknown cause must not change the hash");
+  console.log("[og cause] nosell card and description name the proven cause (empty pool / sell reverts) on Base only; unknown cause = old text and old hash; the hash changes when a cause appears");
+}
+
 console.log(fails === 0
   ? "[gt proxy] worker ok — " + REAL.length + " real paths proxied, " + BAD.length +
     " refused without touching the network, 429 passes through with CORS\n" +
