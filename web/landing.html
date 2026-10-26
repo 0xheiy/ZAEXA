@@ -846,7 +846,13 @@ svg.diag{display:block;width:100%;height:auto}
      همیشه رویِ همینِ بیضی می‌نشینند — هیچ‌چیز از داخلِ آن رد نمی‌شود. */
   /* حلقه‌های سیگنال — عیناً نسخه‌ی قبلی به خواستِ مالک (۲۳ سپتامبر): سه بیضیِ کج
      که آرام دورِ هسته می‌چرخند. هم‌مرکز و ثابت‌کردنشان رد شد. */
-  function drawOrbits(cx,cy,rx,ry,clock){ctx.save();ctx.translate(cx,cy);for(let i=0;i<3;i++){ctx.beginPath();ctx.ellipse(0,0,rx*(1-i*.11),ry*(1-i*.14),clock*.00006+i*.9,0,Math.PI*2);ctx.strokeStyle=i%2?hexToRgba(viz.v2,viz.oa):hexToRgba(viz.v1,viz.oa);ctx.lineWidth=1;ctx.stroke()}ctx.restore()}
+  /* نرخِ چرخشِ هر مدار (rad/ms): بیرونی/میانی/درونی؛ میانی خلافِ جهت و کمی تندتر. هیچ‌کدام تندتر از ۰٫۰۰۰۰۸۵ نیست. */
+  const ORBIT_W=[.00006,-.000085,.00004];
+  window.__zaexaOrbitW=ORBIT_W;
+  let orbitsLive=[];
+  /* نقطه‌ی پارامتر t رویِ بیضیِ چرخیده‌ی مدار o — همان تبدیلِ خطِ کشیده‌شده */
+  function orbitPt(o,t,cx,cy){const c=Math.cos(o.rot),s=Math.sin(o.rot),ex=o.rx*Math.cos(t),ey=o.ry*Math.sin(t);return {x:cx+ex*c-ey*s,y:cy+ex*s+ey*c}}
+  function drawOrbits(cx,cy,rx,ry,clock){orbitsLive=[];ctx.save();ctx.translate(cx,cy);for(let i=0;i<3;i++){const orx=rx*(1-i*.11),ory=ry*(1-i*.14),rot=clock*ORBIT_W[i]+i*.9;orbitsLive.push({rx:orx,ry:ory,rot:rot});ctx.beginPath();ctx.ellipse(0,0,orx,ory,rot,0,Math.PI*2);ctx.strokeStyle=i%2?hexToRgba(viz.v2,viz.oa):hexToRgba(viz.v1,viz.oa);ctx.lineWidth=1;ctx.stroke()}ctx.restore()}
 
   /* برچسب‌ها: بیرونِ گره، در جهتِ دور از هسته، و همیشه داخلِ خودِ canvas
      (کلمپ‌شده) — تا در ۱۴۴۰/۱۰۲۴/۷۶۸/۳۷۵ نه هم‌پوشانی کنند نه لب‌پَر شوند. */
@@ -870,7 +876,8 @@ svg.diag{display:block;width:100%;height:auto}
     for(let i=0;i<avoidRects.length;i++){const r=avoidRects[i];cands.push({x:r.x-tw-2,y:base.y},{x:base.x,y:r.y+r.h+2},{x:base.x,y:r.y-th-2})}
     let pick=null, firstFree=null;
     for(let i=0;i<cands.length&&!pick;i++){const c=clampBox(cands[i]);if(hitsPlaced(c))continue;if(!firstFree)firstFree=c;if(!hitsAvoid(c))pick=c}
-    const box=pick||firstFree||clampBox(base);
+    if(!pick) return null; /* جایِ بدونِ هم‌پوشانی نیست: برچسب پنهان می‌شود */
+    const box=pick;
     return {ax:box.x,ay:box.y,align:'left',baseline:'top',box:box};
   }
 
@@ -900,15 +907,24 @@ svg.diag{display:block;width:100%;height:auto}
     /* قاعده: هر مسیر/ذره دقیقاً رویِ همینِ بیضی می‌نشیند — IN رویِ ۱۸۰°،
        OUT رویِ ۰°/۳۶۰°. زاویه‌ها بر حسبِ همان قراردادِ canvas (۰=راست،
        افزایش=ساعتگرد چون y رو به پایین است). */
-    const inN=ellipsePt(cx,cy,rx,ry,Math.PI), outN=ellipsePt(cx,cy,rx,ry,0);
-    ctx.clearRect(0,0,w,h);
+        ctx.clearRect(0,0,w,h);
     drawDots();
     drawOrbits(cx,cy,w*(narrow?.46:.37),h*(narrow?.30:.31),clockForOrbits);
+    /* IN/OUT هم رویِ مدارند (بیرونی، میانی) و با آن‌ها می‌چرخند */
+    const inN=orbitPt(orbitsLive[0],Math.PI,cx,cy), outN=orbitPt(orbitsLive[1],0,cx,cy);
+    inN.o=0;outN.o=1;
     /* هالهٔ نرمِ زیرِ هستهٔ برند — هیچ چیزِ غیرِشفافی زیرِ visual-core کشیده نمی‌شود */
-    glow(cx,cy,Math.min(w,h)*.14,spriteV1,.5);
+    /* هاله: گرادیانِ شعاعیِ مستقیم (نه اسپرایت)، آلفا تا صفر در شعاعِ رسم‌شده؛ بدونِ clip */
+    const haloR=Math.min(w,h)*.14, haloA=.28;
+    window.__zaexaHalo={r:haloR,a:haloA};
+    const hg=ctx.createRadialGradient(cx,cy,0,cx,cy,haloR);
+    hg.addColorStop(0,hexToRgba(viz.v1,haloA));hg.addColorStop(.45,hexToRgba(viz.v1,haloA*.45));hg.addColorStop(.75,hexToRgba(viz.v1,haloA*.12));hg.addColorStop(1,hexToRgba(viz.v1,0));
+    ctx.fillStyle=hg;ctx.fillRect(cx-haloR,cy-haloR,haloR*2,haloR*2);
 
     const phase = lt<T1?'quote':(lt<T2?'split':(lt<T3?'simulate':'settle'));
-    const venuePts=venues.map(function(v,i){const angle=VENUE_DEG[i]*Math.PI/180;const p=ellipsePt(cx,cy,rx,ry,angle);p.angle=angle;return p});
+    /* هر venue رویِ یکی از سه مدار (بیرونی، میانی، درونی به‌نوبت) با پارامترِ زاویه‌ی قبلی؛
+       angle = زاویه‌ی زنده‌ی نقطه نسبت به مرکز (برای سوییپ و جهتِ برچسب) */
+    const venuePts=venues.map(function(v,i){const o=i%3,t=VENUE_DEG[i]*Math.PI/180;const p=orbitPt(orbitsLive[o],t,cx,cy);p.o=o;p.t=t;p.angle=Math.atan2(p.y-cy,p.x-cx);return p});
     /* جمع‌آوریِ هر نقطه‌ای که این فریم رویِ خودِ بیضی کشیده شده — کاوشگرِ
        [canvas on ellipse] همین را می‌سنجد. */
     const routePts=[];
@@ -1023,8 +1039,8 @@ svg.diag{display:block;width:100%;height:auto}
         ctx.beginPath();ctx.arc(vp.x,vp.y,ringR,0,Math.PI*2);ctx.strokeStyle=hexToRgba(col,ringA);ctx.lineWidth=1.4;ctx.stroke();
       }
       const lf=placeLabel(vp.x,vp.y,Math.cos(vp.angle),Math.sin(vp.angle),v.label,labels);
-      ctx.fillStyle=hexToRgba(viz.vl,.9);ctx.textAlign=lf.align;ctx.textBaseline=lf.baseline;ctx.fillText(v.label,lf.ax,lf.ay);
-      labels.push(lf.box);
+      if(lf){ctx.fillStyle=hexToRgba(viz.vl,.9);ctx.textAlign=lf.align;ctx.textBaseline=lf.baseline;ctx.fillText(v.label,lf.ax,lf.ay);
+      labels.push(lf.box)}
       routePts.push(vp);
     });
 
@@ -1032,14 +1048,14 @@ svg.diag{display:block;width:100%;height:auto}
     [{p:inN,label:'IN',dir:-1},{p:outN,label:'OUT',dir:1}].forEach(function(o){
       ctx.beginPath();ctx.fillStyle=hexToRgba(viz.vl,.9);ctx.arc(o.p.x,o.p.y,2.6,0,Math.PI*2);ctx.fill();
       const lf=placeLabel(o.p.x,o.p.y,o.dir,0,o.label,labels);
-      ctx.fillStyle=hexToRgba(viz.vl,.9);ctx.textAlign=lf.align;ctx.textBaseline=lf.baseline;ctx.fillText(o.label,lf.ax,lf.ay);
-      labels.push(lf.box);
+      if(lf){ctx.fillStyle=hexToRgba(viz.vl,.9);ctx.textAlign=lf.align;ctx.textBaseline=lf.baseline;ctx.fillText(o.label,lf.ax,lf.ay);
+      labels.push(lf.box)}
       routePts.push(o.p);
     });
 
     window.__zaexaCanvasLabels=labels;
     window.__zaexaCanvasPhase=phase;
-    window.__zaexaCanvasRoutePts={pts:routePts,cx:cx,cy:cy,rx:rx,ry:ry,coreR:coreR};
+    window.__zaexaCanvasRoutePts={pts:routePts,cx:cx,cy:cy,rx:rx,ry:ry,coreR:coreR,orbits:orbitsLive.slice()};
     syncReadout(phase==='settle'?'settle':(phase==='simulate'?'simulate':'quote'));
     maybeExitPulse(lt);
   }

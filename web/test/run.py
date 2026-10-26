@@ -2938,40 +2938,44 @@ async def check_canvas_labels(p, errors):
         pg.on("console", lambda m: errors.append(m.text) if m.type == "error" else None)
         await pg.goto("file://" + path)
         await pg.wait_for_timeout(300)
-        info = await pg.evaluate("""
-          () => {
-            const c = document.getElementById('routeCanvas');
-            const r = c.getBoundingClientRect();
-            return {labels: window.__zaexaCanvasLabels || [], w: r.width, h: r.height,
-                    avoid: window.__zaexaCanvasAvoid || null};
-          }
-        """)
+        infos = []
+        for _t in range(6):  # ۲۶ اکتبر: برچسب‌ها با مدارها می‌چرخند؛ چند زمان نمونه می‌گیریم
+            infos.append(await pg.evaluate("""
+              () => {
+                const c = document.getElementById('routeCanvas');
+                const r = c.getBoundingClientRect();
+                return {labels: window.__zaexaCanvasLabels || [], w: r.width, h: r.height,
+                        avoid: window.__zaexaCanvasAvoid || null};
+              }
+            """))
+            await pg.wait_for_timeout(1500)
         await pg.close()
-        labels = info["labels"]
-        assert labels, "window.__zaexaCanvasLabels is empty at %dpx" % width
-        cw, ch = info["w"], info["h"]
-        for i, box in enumerate(labels):
-            assert box["x"] >= -0.5 and box["y"] >= -0.5 and box["x"] + box["w"] <= cw + 0.5 \
-                and box["y"] + box["h"] <= ch + 0.5, (
-                "label box %d %r falls outside the %dpx canvas (%.1fx%.1f) at %dpx width"
-                % (i, box, width, cw, ch, width))
-        for i in range(len(labels)):
-            for j in range(i + 1, len(labels)):
-                a, bx = labels[i], labels[j]
-                overlap = (a["x"] < bx["x"] + bx["w"] and a["x"] + a["w"] > bx["x"]
-                           and a["y"] < bx["y"] + bx["h"] and a["y"] + a["h"] > bx["y"])
-                assert not overlap, (
-                    "label boxes %d %r and %d %r overlap at %dpx width" % (i, a, j, bx, width))
-        # کادرهای readoutِ DOM روی canvas: هیچ برچسبی نباید زیرشان برود
-        # (۲۳ سپتامبر: «ALIENBASE» زیرِ کادرِ ROUTE ENGINE بریده می‌شد).
-        avoid = info["avoid"]
-        assert avoid, "window.__zaexaCanvasAvoid is missing at %dpx" % width
-        for i, a in enumerate(labels):
-            for r in avoid:
-                hit = (a["x"] < r["x"] + r["w"] and a["x"] + a["w"] > r["x"]
-                       and a["y"] < r["y"] + r["h"] and a["y"] + a["h"] > r["y"])
-                assert not hit, (
-                    "label box %d %r sits under a readout box %r at %dpx width" % (i, a, r, width))
+        for info in infos:
+            labels = info["labels"]
+            assert labels, "window.__zaexaCanvasLabels is empty at %dpx" % width
+            cw, ch = info["w"], info["h"]
+            for i, box in enumerate(labels):
+                assert box["x"] >= -0.5 and box["y"] >= -0.5 and box["x"] + box["w"] <= cw + 0.5 \
+                    and box["y"] + box["h"] <= ch + 0.5, (
+                    "label box %d %r falls outside the %dpx canvas (%.1fx%.1f) at %dpx width"
+                    % (i, box, width, cw, ch, width))
+            for i in range(len(labels)):
+                for j in range(i + 1, len(labels)):
+                    a, bx = labels[i], labels[j]
+                    overlap = (a["x"] < bx["x"] + bx["w"] and a["x"] + a["w"] > bx["x"]
+                               and a["y"] < bx["y"] + bx["h"] and a["y"] + a["h"] > bx["y"])
+                    assert not overlap, (
+                        "label boxes %d %r and %d %r overlap at %dpx width" % (i, a, j, bx, width))
+            # کادرهای readoutِ DOM روی canvas: هیچ برچسبی نباید زیرشان برود
+            # (۲۳ سپتامبر: «ALIENBASE» زیرِ کادرِ ROUTE ENGINE بریده می‌شد).
+            avoid = info["avoid"]
+            assert avoid, "window.__zaexaCanvasAvoid is missing at %dpx" % width
+            for i, a in enumerate(labels):
+                for r in avoid:
+                    hit = (a["x"] < r["x"] + r["w"] and a["x"] + a["w"] > r["x"]
+                           and a["y"] < r["y"] + r["h"] and a["y"] + a["h"] > r["y"])
+                    assert not hit, (
+                        "label box %d %r sits under a readout box %r at %dpx width" % (i, a, r, width))
         print("[canvas labels] %dpx: %d label boxes, none overlapping, all inside the canvas, "
               "clear of %d readout boxes" % (width, len(labels), len(avoid)))
     await b.close()
@@ -3037,53 +3041,114 @@ async def check_hero_core(p, errors):
 
 
 async def check_canvas_route_on_ellipse(p, errors):
-    """پروبِ [canvas on ellipse]: صاحبِ‌کار گفت مسیرها در فازهای split و
-    simulate از داخلِ حلقه‌های سیگنال رد می‌شوند و بی‌نظم به نظر می‌رسند.
-    قاعده‌ی تازه این است که هر مسیر/کمان/ذره/دنباله‌ای که کشیده می‌شود
-    دقیقاً رویِ بیضیِ venue بنشیند. در ۱۴۴۰x۹۰۰، هر ۱۰۰ میلی‌ثانیه برای
-    ۱۰ ثانیه window.__zaexaCanvasRoutePts را می‌خوانیم و هر نقطه را با
-    معادله‌ی بیضی می‌سنجیم (۰.۹۶ تا ۱.۰۴، برای رواداریِ اعشاری) و مطمئن
-    می‌شویم هیچ نقطه‌ای به فاصله‌ی کمتر از coreR+4 از مرکز نیفتاده باشد."""
+    """پروبِ [canvas on ellipse]: ۲۶ اکتبر — venueها (و IN/OUT) رویِ خطِ یکی از سه مدارِ
+    چرخیده‌اند و با آن می‌چرخند. در ۱۴۴۰x۹۰۰، هر ۱۰۰ms برای ~۱۰ثانیه هر نقطه را در قابِ همان
+    مدار (rx, ry, rot که خودِ drawOrbits کشیده) می‌سنجیم: خطا < ۱px و فاصله از مرکز ≥ coreR+4.
+    نرخِ چرخشِ مدارها هم از تغییرِ rot در طولِ نمونه‌ها و window.__zaexaOrbitW سنجیده می‌شود:
+    سه نرخِ دوبه‌دو متفاوت، میانی خلافِ جهت، هیچ‌کدام تندتر از ۰٫۰۰۰۰۸۵."""
+    import math
     path = os.path.join(HERE, "..", "landing.html")
     b = await p.chromium.launch()
     pg = await b.new_page(viewport={"width": 1440, "height": 900})
     pg.on("console", lambda m: errors.append(m.text) if m.type == "error" else None)
     await pg.goto("file://" + path)
     await pg.wait_for_timeout(300)
+    W = await pg.evaluate("() => window.__zaexaOrbitW || null")
+    assert W and len(W) == 3, "window.__zaexaOrbitW must expose the three orbit rates, got %r" % (W,)
+    assert len({round(x, 9) for x in W}) == 3, "orbit rates must be pairwise different: %r" % (W,)
+    assert W[1] * W[0] < 0 and W[1] * W[2] < 0, "the middle orbit must turn the opposite way: %r" % (W,)
+    assert all(abs(x) <= 0.000085 + 1e-12 for x in W), "no orbit may turn faster than 0.000085 rad/ms: %r" % (W,)
 
     total = 0
+    rots = []
     for i in range(100):  # ~10s / 100ms
         info = await pg.evaluate("() => window.__zaexaCanvasRoutePts || null")
-        if info and info.get("pts"):
-            # ۲۳ سپتامبر: مالک مسیرها را حذف کرد و فقط نقطه‌ها ماندند. پس در هر
-            # فریم فقط ۷ گره‌ی venue + IN + OUT = ۹ نقطه مجاز است؛ هر کمان،
-            # ذره یا ردی که برگردد تعداد را بالا می‌برد و این‌جا قرمز می‌شود.
+        if info and info.get("pts") and info.get("orbits"):
             assert len(info["pts"]) == 9, (
-                "sample %d carries %d drawn points in phase %r; only the 9 nodes (7 venues + IN + "
-                "OUT) may be drawn — the owner removed every route, particle and trail"
-                % (i, len(info["pts"]), await pg.evaluate("() => window.__zaexaCanvasPhase")))
-            cx, cy, rx, ry, core_r = info["cx"], info["cy"], info["rx"], info["ry"], info["coreR"]
+                "sample %d carries %d drawn points; only the 9 nodes (7 venues + IN + OUT) may be drawn" % (i, len(info["pts"])))
+            cx, cy, core_r, orb = info["cx"], info["cy"], info["coreR"], info["orbits"]
+            rots.append([o["rot"] for o in orb])
             for j, pt in enumerate(info["pts"]):
+                o = orb[pt["o"]]
                 dx, dy = pt["x"] - cx, pt["y"] - cy
-                val = (dx / rx) ** 2 + (dy / ry) ** 2
-                assert 0.96 <= val <= 1.04, (
-                    "sample %d point %d %r is off the venue ellipse (x^2+y^2 term = %.4f, "
-                    "want 0.96..1.04) — cx=%.1f cy=%.1f rx=%.1f ry=%.1f"
-                    % (i, j, pt, val, cx, cy, rx, ry))
+                c, sn = math.cos(o["rot"]), math.sin(o["rot"])
+                ux, uy = dx * c + dy * sn, -dx * sn + dy * c
+                f = ((ux / o["rx"]) ** 2 + (uy / o["ry"]) ** 2) ** 0.5
+                err = abs(f - 1) * min(o["rx"], o["ry"])
+                assert err < 1, (
+                    "sample %d point %d %r is %.2fpx off orbit %d's rotated ellipse (rx=%.1f ry=%.1f rot=%.4f)"
+                    % (i, j, pt, err, pt["o"], o["rx"], o["ry"], o["rot"]))
                 dist = (dx * dx + dy * dy) ** 0.5
                 assert dist >= core_r + 4, (
-                    "sample %d point %d %r is only %.1fpx from the centre, inside coreR+4 "
-                    "(coreR=%.1f) — a route must never cross over the core/logo"
-                    % (i, j, pt, dist, core_r))
+                    "sample %d point %d %r is only %.1fpx from the centre (coreR=%.1f)" % (i, j, pt, dist, core_r))
                 total += 1
         await pg.wait_for_timeout(100)
     await b.close()
-    assert total > 0, (
-        "window.__zaexaCanvasRoutePts never carried any points over ~10s of sampling — "
-        "the canvas script must expose the sampled points of every route/lane/particle/trail "
-        "it draws")
-    print("[canvas on ellipse] %d points checked over ~10s, all on the venue ellipse and clear "
-          "of the core" % total)
+    assert total > 0, "window.__zaexaCanvasRoutePts never carried any points over ~10s of sampling"
+    d = [rots[-1][k] - rots[0][k] for k in range(3)]
+    for k in (1, 2):
+        assert abs(d[0]) > 0.05 and abs(d[k] / d[0] - W[k] / W[0]) < 0.06 * abs(W[k] / W[0]), (
+            "drawn orbit rotation deltas %r do not follow the exposed rates %r" % (d, W))
+    print("[canvas on ellipse] %d points checked over ~10s, all within 1px of their orbit's rotated ellipse "
+          "and clear of the core; rates %r (pairwise different, middle opposite, none > .000085)" % (total, W))
+
+
+
+
+async def check_hero_halo_fade(p, errors):
+    """[hero halo fade] — ۲۶ اکتبر: هالهٔ پشتِ نشان لبهٔ دیدنی نداشت باید محو شود. در ۱۴۴۰، تیره و روشن،
+    پیکسل‌ها را (میانهٔ ۵ پرتو رو به بالا، هر ۲px) از کنارِ نشان تا شعاعِ هاله می‌خوانیم: فاصله از رنگِ صفحه
+    یکنوا کم می‌شود (±۲)، فرقِ دو نمونهٔ مجاور ≤ ۴ در هر کانال، و تا شعاعِ هاله به پس‌زمینه می‌رسد."""
+    import io, math
+    from PIL import Image
+    path = os.path.join(HERE, "..", "landing.html")
+    b = await p.chromium.launch()
+    n = 0
+    for theme in ("dark", "light"):
+        ctx = await b.new_context(reduced_motion="reduce", viewport={"width": 1440, "height": 900})
+        pg = await ctx.new_page()
+        pg.on("console", lambda m: errors.append(m.text) if m.type == "error" else None)
+        await pg.goto("file://" + path)
+        await pg.evaluate("t => { document.documentElement.dataset.theme = t; }", theme)
+        await pg.add_style_tag(content="*{animation:none!important;transition:none!important}#landingParticles{visibility:hidden}")
+        await pg.set_viewport_size({"width": 1441, "height": 900})  # قابِ ایستا دوباره کشیده شود
+        await pg.wait_for_timeout(300)
+        await pg.set_viewport_size({"width": 1440, "height": 900})
+        await pg.wait_for_timeout(500)
+        await pg.evaluate("() => document.querySelector('.visual-core').scrollIntoView({block: 'center'})")
+        await pg.wait_for_timeout(300)
+        info = await pg.evaluate("""() => { const k = document.querySelector('.visual-core').getBoundingClientRect();
+            return {cx: k.x + k.width / 2, cy: k.y + k.height / 2, halo: window.__zaexaHalo || null,
+                    bg: getComputedStyle(document.body).backgroundColor}; }""")
+        png = await pg.screenshot()
+        await ctx.close()
+        assert info["halo"], "[hero halo fade] window.__zaexaHalo is missing"
+        R = info["halo"]["r"]
+        im = Image.open(io.BytesIO(png)).convert("RGB")
+        bgc = [int(v) for v in re.findall(r"\d+", info["bg"])[:3]]
+        rs = list(range(38, int(R) + 3, 2))
+        rows = []
+        for r in rs:
+            px = []
+            for deg in (-115, -102, -90, -78, -65):
+                a = math.radians(deg)
+                px.append(im.getpixel((int(round(info["cx"] + r * math.cos(a))), int(round(info["cy"] + r * math.sin(a))))))
+            rows.append([sorted(q[c] for q in px)[2] for c in range(3)])
+        dist = [sum(abs(v[c] - bgc[c]) for c in range(3)) / 3 for v in rows]
+        for i in range(1, len(rows)):
+            assert dist[i] <= dist[i - 1] + 2, (
+                "[hero halo fade] %s: halo gets brighter going outward at r=%d (%.1f -> %.1f)" % (theme, rs[i], dist[i - 1], dist[i]))
+            step = max(abs(rows[i][c] - rows[i - 1][c]) for c in range(3))
+            assert step <= 4, (
+                "[hero halo fade] %s: visible edge at r=%d, step %d per channel (%r -> %r)" % (theme, rs[i], step, rows[i - 1], rows[i]))
+        edge = [d for r, d in zip(rs, dist) if r >= R - 2]
+        assert edge and max(edge) <= 2, (
+            "[hero halo fade] %s: halo is still %.1f off the page bg at its radius %.0f" % (theme, max(edge or [99]), R))
+        assert dist[0] >= 4, "[hero halo fade] %s: halo is invisible (%.1f at r=%d)" % (theme, dist[0], rs[0])
+        n += 1
+    await b.close()
+    print("[hero halo fade] %d themes at 1440: halo falls off monotonically, max adjacent step <= 4/channel, "
+          "reaches page bg by its radius" % n)
 
 
 
@@ -9433,6 +9498,7 @@ async def main():
         await check_canvas_labels(p, errors)
         await check_hero_core(p, errors)
         await check_canvas_route_on_ellipse(p, errors)
+        await check_hero_halo_fade(p, errors)
         await check_hero_no_ring(p, errors)
         await check_trust_rings_seamless(p, errors)
         await check_trust_glyph_in_circle(p, errors)
