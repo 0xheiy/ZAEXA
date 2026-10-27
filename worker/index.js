@@ -170,6 +170,7 @@ import {
   REPORT_METER_STAGES, REPORT_PASS_BASE_CAP, REPORT_PAIRS_CAP, PASS_LOG_KEY,
 } from "./report.js";
 import { renderReportPage, renderReportNotFound, dayCounts, addDays, isRealDate, REPORT_HISTORY_DAYS } from "./report_page.js";
+import { renderApiPage } from "./api_page.js";
 import {
   fetchVerdictSol, VD_SOL_RPCS, VD_SOL_JUP_BASE, VD_SOL_PAYER,
   VD_SOL_RPC_METHODS, VD_SOL_RPC_PROBE_PARAMS, probeRpcMethod,
@@ -2284,6 +2285,29 @@ async function ogTokenRoute(request, url, env, ctx, addr) {
    را می‌گیرد که chains.js همه‌جای دیگر هم می‌گیرد. */
 const VD_ADDR_RE = EVM_ADDR; // برای هرکسی که هنوز این نام را ایمپورت می‌کند
 
+/* ۲۷ اکتبر — شمارنده‌ی استفاده‌ی بیرونی از /vd. «بیرونی» = درخواستی که از خودِ سایت
+   نیامده. خودِ سایت سه نشانه دارد: Origin برابرِ https://zaexa.com، Referer با همان مبدأ،
+   یا Sec-Fetch-Site: same-origin. ⚠️ سومی لازم است: سایت Referrer-Policy: no-referrer دارد و
+   یک GETِ هم‌مبدأ Origin ندارد، پس fetchِ خودِ اپ (fetchVdVerdict) بدونِ آن بیرونی شمرده می‌شد.
+   فقط { blobs:["vd:ext", chain] } نوشته می‌شود — نه IP، نه UA، نه آدرس، نه Referer، نه کشور.
+   هرگز پرتاب نمی‌کند و هیچ await/شبکه‌ای ندارد. روی /ev نیست (مسیرِ سرورساید)، پس فهرست‌های /ev دست نمی‌خورند. */
+const VD_SITE_ORIGIN = "https://zaexa.com";
+function vdIsInternal(request) {
+  const h = request.headers;
+  if (h.get("origin") === VD_SITE_ORIGIN) return true;
+  const ref = h.get("referer");
+  if (ref) { try { if (new URL(ref).origin === VD_SITE_ORIGIN) return true; } catch (e) { /* Referer خراب = بیرونی */ } }
+  return h.get("sec-fetch-site") === "same-origin";
+}
+function countVdExternal(request, env, chain) {
+  try {
+    const ds = env && env.ZX_EV;
+    if (!ds || typeof ds.writeDataPoint !== "function") return;
+    if (vdIsInternal(request)) return;
+    ds.writeDataPoint({ blobs: ["vd:ext", chain], doubles: [1], indexes: ["vd:ext"] });
+  } catch (e) { /* شمارنده نباید جواب را بشکند */ }
+}
+
 function vdDone(status, body, extraHeaders) {
   return new Response(JSON.stringify(body), {
     status,
@@ -2674,6 +2698,7 @@ async function diagVerdict(request, url, env, ctx) {
   const addr = url.pathname.slice("/vd/".length);
   const chain = chainOf(addr);
   if (chain === null) return vdDone(400, { error: "bad address" });
+  countVdExternal(request, env, chain); // فقط آدرسِ معتبرِ GETِ غیرِ تشخیصی که به بررسی می‌رسد
 
   const t0 = Date.now();
   if (chain === "solana") {
@@ -2799,7 +2824,7 @@ function robotsResponse() {
   });
 }
 
-/* sitemap.xml — سه صفحه‌ی همیشگی («/»، «/app» و «/pairs» — تا ۲۱ سپتامبر
+/* sitemap.xml — چهار صفحه‌ی همیشگی («/»، «/app»، «/pairs» و «/api» (۲۷ اکتبر) — تا ۲۱ سپتامبر
    ۲۰۲۶ هیچ‌جای سایت به /pairs لینک نداشت و اینجا هم نبود، پس هیچ‌کس پیدایش
    نمی‌کرد) به‌علاوه‌ی صفحه‌های
    `/t/<آدرس>` — همان دنباله‌ی بلندِ جست‌وجو («فلان توکن هانی‌پات است؟»،
@@ -2905,7 +2930,7 @@ function renderSitemapXml(origin, paths, lastmod) {
    درخواستِ بعدی دوباره تلاش کند — نه یک روز کامل بدونِ صفحه‌های توکن. */
 async function sitemapResponse(url, env, ctx) {
   const origin = url.origin;
-  const staticPaths = ["/", "/app", "/pairs"];
+  const staticPaths = ["/", "/app", "/pairs", "/api"];
   const lastmod = new Date().toISOString().slice(0, 10);
 
   const store = cacheStore();
@@ -3111,6 +3136,17 @@ function reportHtmlDone(status, html, extraHeaders, method) {
       { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" },
       REPORT_PAGE_SEC_HEADERS, extraHeaders),
   });
+}
+
+/* GET /api و /api/ (و HEAD) — راهنمای عمومیِ /vd؛ worker/api_page.js. همان سطلِ «report»
+   و همان سرصفحه‌های امنیتیِ صفحه‌ی گزارش؛ سقفِ نرخِ نمایش‌داده‌شده از همین RL_LIMIT/RL_WINDOW_MS. */
+function apiPageRoute(request) {
+  if (!rateOk(request, "report", RL_LIMIT, RL_WINDOW_MS))
+    return reportHtmlDone(429, "too many requests\n", { "content-type": "text/plain; charset=utf-8", "retry-after": "60" }, "GET");
+  if (request.method !== "GET" && request.method !== "HEAD")
+    return reportHtmlDone(405, "only GET or HEAD\n", { "content-type": "text/plain; charset=utf-8", allow: "GET, HEAD" }, "GET");
+  return reportHtmlDone(200, renderApiPage({ limit: RL_LIMIT, windowMs: RL_WINDOW_MS }),
+    { "cache-control": "public, max-age=3600" }, request.method);
 }
 
 /* GET /report و GET /report/<YYYY-MM-DD> (بدونِ پسوند) — صفحه‌ی HTML.
@@ -3763,6 +3799,7 @@ export default {
        برای robots.txt/sitemap.xml هم تکرار شده: خط Build در پنل فقط
        html/js/_headers را کپی می‌کند، پس یک مسیرِ تازه باید از همین‌جا سرو
        شود، نه از `_site`، وگرنه بی‌صدا ۴۰۴ می‌گرفت. */
+    if (url.pathname === "/api" || url.pathname === "/api/") return apiPageRoute(request);
     /* پیش از reportRoute: وگرنه «run» یک تاریخِ بدشکل حساب می‌شد و ۴۰۰
        می‌گرفت، نه اجرا. */
     if (url.pathname === "/report/run") return reportRunRoute(request, env, ctx);

@@ -224,6 +224,97 @@ ok(res.status === 200, "index.html must still be served");
   delete globalThis.caches;
 }
 
+/* ---- [api page] GET /api — راهنمای عمومیِ /vd، و [vd external counter] ---- */
+{
+  const rp = await import("./report_page.js");
+  const ap = await import("./api_page.js");
+  const LIM = 120; // باید با RL_LIMIT برابر باشد؛ پایین با رفتارِ واقعیِ محدودکننده سنجیده می‌شود
+  const r = await call("/api");
+  const html = await r.text();
+  ok(r.status === 200 && /^text\/html; charset=utf-8$/.test(r.headers.get("content-type") || ""), "[api page] /api is 200 text/html");
+  ok(r.headers.get("cache-control") === "public, max-age=3600", "[api page] cache-control is public, max-age=3600");
+  ok(r.headers.get("access-control-allow-origin") === null, "[api page] no CORS header on the page");
+  ok((await (await call("/api/")).text()) === html, "[api page] /api/ serves the same page");
+  const rh = await call("/api", { method: "HEAD" });
+  ok(rh.status === 200 && (await rh.text()) === "" && /text\/html/.test(rh.headers.get("content-type") || ""), "[api page] HEAD is 200 with no body");
+  const r405 = await call("/api", { method: "POST" });
+  ok(r405.status === 405 && r405.headers.get("allow") === "GET, HEAD", "[api page] POST is 405 with Allow");
+  ok(html.includes("https://zaexa.com/vd/" + ap.API_BASE_EXAMPLE) && html.includes("https://zaexa.com/vd/" + ap.API_SOL_EXAMPLE), "[api page] both examples are present");
+  const webIndex = fs.readFileSync(new URL("../web/index.html", import.meta.url), "utf8");
+  ok(webIndex.includes('mint:"' + ap.API_SOL_EXAMPLE + '"'), "[api page] the Solana example mint is the one in the app's Solana list");
+  ok(html.includes("Exit check by Zaexa") && html.includes("https://zaexa.com/t/&lt;address&gt;"), "[api page] the attribution request is present");
+  ok(html.includes("A check of the exit, not a price call."), "[api page] the standing line is present");
+  ok(html.includes('href="https://t.me/zaexadex"') && html.includes('href="https://x.com/zaexadex"'), "[api page] Telegram and X links are present");
+  ok(webIndex.includes('telegram:"https://t.me/zaexadex"') && webIndex.includes('x:"https://x.com/zaexadex"'), "[api page] the links equal LINKS in the app");
+  ok(html.includes("<strong>" + LIM + " requests per minute per IP.</strong>"), "[api page] the limit text is 120 per minute");
+  {
+    const IP = "203.0.113.213"; let first429 = 0;
+    for (let i = 1; i <= LIM + 2; i++) { const x = await call("/vd/not-an-address", { headers: { "cf-connecting-ip": IP } }); if (x.status === 429) { first429 = i; break; } }
+    ok(first429 === LIM + 1, "[api page] /vd really limits at " + LIM + " per IP per minute (first 429 on request " + first429 + ")");
+  }
+  const escH = (s) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+  for (const ch of ["base", "solana"]) {
+    const rows = rp.whyTable(ch);
+    ok(rows.length >= 10, "[api page] why table for " + ch + " has rows");
+    for (const row of rows)
+      ok(html.includes("<td><code>" + escH(row.code) + "</code></td><td>" + escH(row.text) + "</td>"), "[api page] why row " + ch + " " + row.code + " is rendered with the report page's text");
+  }
+  ok(rp.whyTable("base").some((x) => x.code === "rpc-down" && x.text === rp.plainWhy("base", "rpc-down")) &&
+     rp.whyTable("solana").some((x) => x.code === "sol:unconfirmed" && x.text === rp.plainWhy("solana", "sol:unconfirmed")), "[api page] table texts equal plainWhy");
+  // مطمئن می‌شویم از منبع ساخته می‌شود نه کپی: متنِ منبع را در یک نسخه‌ی موقت عوض کن
+  {
+    const srcTxt = fs.readFileSync(new URL("./report_page.js", import.meta.url), "utf8");
+    const mutated = srcTxt.replace('"The network nodes did not answer."', '"MUTATED-WHY-TEXT."');
+    ok(mutated !== srcTxt, "[api page] mutation target exists");
+    const tmp = new URL("./_mut_report_page.mjs", import.meta.url);
+    fs.writeFileSync(tmp, mutated);
+    try {
+      const m = await import(tmp.href);
+      ok(m.whyTable("base").some((x) => x.text === "MUTATED-WHY-TEXT.") && !m.whyTable("base").some((x) => x.text === "The network nodes did not answer."), "[api page] a changed why text flows into whyTable");
+    } finally { fs.unlinkSync(tmp); }
+  }
+  const { REPORT_CAUSES: RC } = await import("./report.js");
+  ok(JSON.stringify(Object.keys(ap.API_CAUSE_NOTES)) === JSON.stringify(RC), "[api page] a note exists for exactly every REPORT_CAUSES member");
+  for (const c of RC) ok(html.includes("<code>" + c + "</code>"), "[api page] cause " + c + " is listed");
+  ok(!/<link[^>]*stylesheet|<script[^>]*src="http/.test(html), "[api page] no external assets");
+  ok(r.headers.get("content-security-policy") === (await call("/report/2026-09-14", {}, { ASSETS })).headers.get("content-security-policy"), "[api page] same CSP as the report page");
+  console.log("[api page] GET /api and /api/ (HEAD, 405) serve the guide: both examples, why table generated from report_page.js (mutation flows through), causes from REPORT_CAUSES, limit 120/min proven against the live limiter, Telegram/X equal LINKS, no CORS");
+}
+{
+  const ADDR_B = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913";
+  const ADDR_S = "JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN";
+  let n = 0;
+  const run = async (addr, headers, e) => {
+    reply = new Response("nope", { status: 500 });
+    return await call("/vd/" + addr, { headers: { "cf-connecting-ip": "198.51.100." + (++n), ...headers } }, e);
+  };
+  const pts = []; const evE = { ASSETS, ZX_EV: { writeDataPoint: (p) => pts.push(p) } };
+  const x = await run(ADDR_B, {}, evE);
+  ok(x.status === 200 && pts.length === 1 && JSON.stringify(pts[0].blobs) === '["vd:ext","base"]', "[vd external counter] an outside Base request writes exactly one point with exactly [vd:ext, base]: " + JSON.stringify(pts));
+  ok(pts.length === 1 && !JSON.stringify(pts[0]).match(/198\.51|curl|zaexa|0x8335/i), "[vd external counter] nothing identifying in the point");
+  pts.length = 0;
+  await run(ADDR_S, { "user-agent": "bot/1", referer: "https://evil.example/x" }, evE);
+  ok(pts.length === 1 && JSON.stringify(pts[0].blobs) === '["vd:ext","solana"]', "[vd external counter] an outside Solana request (foreign Referer) writes [vd:ext, solana]");
+  pts.length = 0;
+  await run(ADDR_B, { origin: "https://evil.example" }, evE);
+  ok(pts.length === 1, "[vd external counter] a foreign Origin counts as outside");
+  pts.length = 0;
+  await run(ADDR_B, { origin: "https://zaexa.com" }, evE);
+  await run(ADDR_B, { referer: "https://zaexa.com/app" }, evE);
+  await run(ADDR_B, { "sec-fetch-site": "same-origin" }, evE);
+  ok(pts.length === 0, "[vd external counter] site-origin requests (Origin, Referer, Sec-Fetch-Site same-origin) write nothing");
+  await call("/vd/not-an-address", {}, evE); await call("/vd/" + ADDR_B, { method: "POST" }, evE);
+  ok(pts.length === 0, "[vd external counter] bad address and non-GET write nothing");
+  const base = JSON.parse(await (await run(ADDR_B, {}, { ASSETS })).text());
+  for (const [label, e2] of [["no binding", { ASSETS }], ["throwing binding", { ASSETS, ZX_EV: { writeDataPoint() { throw new Error("boom"); } } }], ["binding without writeDataPoint", { ASSETS, ZX_EV: {} }]]) {
+    const y = await run(ADDR_B, {}, e2);
+    const t = JSON.parse(await y.text());
+    ok(y.status === 200 && t.v === base.v && Object.keys(t).join() === Object.keys(base).join(), "[vd external counter] " + label + ": response unchanged");
+  }
+  ok((await run(ADDR_B, {}, evE)).headers.get("access-control-allow-origin") === null, "[vd external counter] /vd still has no CORS header");
+  console.log("[vd external counter] outside /vd requests write one point [vd:ext, chain] and nothing else; Origin/Referer/Sec-Fetch-Site of the site write none; missing or throwing binding leaves the response unchanged");
+}
+
 /* ---- ۹. /ev — شمارش رویداد ----
    دو چیز اینجا سنجیده می‌شود و هر دو مهم‌اند:
    الف) فقط شکل مورد انتظار پذیرفته می‌شود — وگرنه یک اندپوینت عمومی هر رشته‌ای
@@ -3895,12 +3986,12 @@ const REPORT_LOCS_EXPECTED = expectedReportLocs();
      "sitemap must carry exactly one <urlset>: " + xml.slice(0, 120));
 
   const locs = Array.from(xml.matchAll(/<loc>([^<]+)<\/loc>/g)).map((m) => m[1]);
-  ok(locs[0] === ORIGIN + "/" && locs[1] === ORIGIN + "/app" && locs[2] === ORIGIN + "/pairs",
-     "the three static pages must come first, got: " + JSON.stringify(locs.slice(0, 3)));
-  ok(JSON.stringify(locs.slice(3, 3 + REPORT_LOCS_EXPECTED.length)) === JSON.stringify(REPORT_LOCS_EXPECTED),
+  ok(locs[0] === ORIGIN + "/" && locs[1] === ORIGIN + "/app" && locs[2] === ORIGIN + "/pairs" && locs[3] === ORIGIN + "/api",
+     "the four static pages must come first, got: " + JSON.stringify(locs.slice(0, 4)));
+  ok(JSON.stringify(locs.slice(4, 4 + REPORT_LOCS_EXPECTED.length)) === JSON.stringify(REPORT_LOCS_EXPECTED),
      "the report pages (/report plus the last 30 days) must follow the static pages, got: " +
-     JSON.stringify(locs.slice(3, 3 + REPORT_LOCS_EXPECTED.length)));
-  const tokenLocs = locs.slice(3 + REPORT_LOCS_EXPECTED.length);
+     JSON.stringify(locs.slice(4, 4 + REPORT_LOCS_EXPECTED.length)));
+  const tokenLocs = locs.slice(4 + REPORT_LOCS_EXPECTED.length);
   ok(tokenLocs.length === SITEMAP_TOKEN_CAP,
      "token URLs must be capped at " + SITEMAP_TOKEN_CAP + ", got " + tokenLocs.length);
   const TOKEN_LOC_RE = new RegExp("^" + ORIGIN + "/t/0x[0-9a-fA-F]{40}$");
@@ -3955,8 +4046,8 @@ const REPORT_LOCS_EXPECTED = expectedReportLocs();
     const body1 = await r1.text();
     ok(r1.status === 200, "sitemap must stay 200 when " + label + " (got " + r1.status + ")");
     const ls1 = Array.from(body1.matchAll(/<loc>([^<]+)<\/loc>/g)).map((m) => m[1]);
-    ok(JSON.stringify(ls1) === JSON.stringify([ORIGIN + "/", ORIGIN + "/app", ORIGIN + "/pairs"].concat(REPORT_LOCS_EXPECTED)),
-       "when " + label + ", sitemap must carry exactly the three static URLs plus the report pages, got: " + JSON.stringify(ls1));
+    ok(JSON.stringify(ls1) === JSON.stringify([ORIGIN + "/", ORIGIN + "/app", ORIGIN + "/pairs", ORIGIN + "/api"].concat(REPORT_LOCS_EXPECTED)),
+       "when " + label + ", sitemap must carry exactly the four static URLs plus the report pages, got: " + JSON.stringify(ls1));
     ok(r1.headers.get("cache-control") === "public, max-age=300",
        "a failed sitemap build must be cached briefly at the edge (not 86400), got: " +
        r1.headers.get("cache-control"));
@@ -14863,7 +14954,7 @@ function stripAllowedWording(t) {
     ok(locs.includes(ORIGIN + "/report") && locs.includes(ORIGIN + "/report/" + TODAY) && !locs.some((l) => l.startsWith(ORIGIN + "/report/") && l.slice(-10) < REPORT_TEXT_FIRST_DATE),
        "[report page sitemap] /report and /report/<today> are listed, none before the first report date");
     ok(locs.filter((l) => l.includes("/report/")).length === REPORT_LOCS_EXPECTED.length - 1, "[report page sitemap] one entry per day, at most 30");
-    ok(locs.slice(0, 3).join() === [ORIGIN + "/", ORIGIN + "/app", ORIGIN + "/pairs"].join(), "[report page sitemap] the three static pages stay first");
+    ok(locs.slice(0, 4).join() === [ORIGIN + "/", ORIGIN + "/app", ORIGIN + "/pairs", ORIGIN + "/api"].join(), "[report page sitemap] the four static pages stay first");
     console.log("[report page sitemap] /report plus /report/<date> for the last 30 days (not before " + REPORT_TEXT_FIRST_DATE + ") join the static paths");
   }
 

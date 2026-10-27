@@ -1312,6 +1312,8 @@ def check_one_executor_address():
         return os.path.relpath(path, root).replace(os.sep, "/")
 
     md_root = glob.glob(os.path.join(root, "*.md"))
+    # ۲۷ اکتبر — یادداشت‌های قدیمیِ ریشه به docs/ رفتند؛ نگهبان همان‌جا را هم می‌پاید
+    md_root += glob.glob(os.path.join(root, "docs", "**", "*.md"), recursive=True)
     md_contracts = glob.glob(os.path.join(root, "contracts", "**", "*.md"), recursive=True)
     # اسکریپت‌ها همچنان با نام صریح انتخاب می‌شوند (فقط contracts/script/*.sh)،
     # چون کامنت زیرش هنوز درست است: هر اسکریپتی که آدرس چاپ می‌کند باید زیر
@@ -4007,14 +4009,17 @@ async def check_mobile_compact(p, errors):
         lab = await pg.evaluate("""() => {
             const p = document.createElement('span'); p.style.color = 'var(--tx2)'; document.body.appendChild(p);
             const tx2 = getComputedStyle(p).color; p.remove();
+            // ۲۷ اکتبر — متنِ تبِ فعال دقیقاً هم‌رنگِ .chip.solid (در هر تم)، نه سفیدِ ثابت
+            const q = document.createElement('button'); q.className = 'chip solid'; document.body.appendChild(q);
+            const solid = getComputedStyle(q).color; q.remove();
             const strip = [...document.querySelectorAll('.mTabs')].find(e => e.getBoundingClientRect().height > 0);
-            return {tx2, tabs: [...strip.querySelectorAll('[role=tab]')].map(t => {
+            return {tx2, solid, tabs: [...strip.querySelectorAll('[role=tab]')].map(t => {
                 const cs = getComputedStyle(t);
                 return {sel: t.getAttribute('aria-selected') === 'true', color: cs.color, opacity: cs.opacity};
             })};
         }""")
         for i, t in enumerate(lab["tabs"]):
-            want_c = "rgb(255, 255, 255)" if t["sel"] else lab["tx2"]
+            want_c = lab["solid"] if t["sel"] else lab["tx2"]
             assert t["color"] == want_c and t["opacity"] == "1", \
                 "%s: tab %d label is %s at opacity %s, want %s at 1 (selected=%s)" % (name, i, t["color"], t["opacity"], want_c, t["sel"])
         await pg.screenshot(path=os.path.join(shots, "%s-390-top.png" % name), full_page=True)
@@ -4153,7 +4158,10 @@ async def check_mobile_compact(p, errors):
     css_start = rep_src.index("@media(max-width:720px){.footGrid{grid-template-columns:1fr}}\n")
     css_blk = rep_src[css_start:rep_src.index("`;\n", css_start)]
     assert "fMore" in css_blk and css_blk in landing_src, "the footer-collapse CSS in worker/report_page.js is not byte-identical to the one in web/landing.html"
-    land_new = landing_src
+    # ۲۷ اکتبر: لینکِ «API» (ستونِ About) عمداً به فوترِ landing اضافه شد؛ برای مقایسه‌ی بایتیِ ۱۴۴۰px با 1916a01 فقط همین یک خط کنار می‌رود.
+    API_FOOT_LINE = '      <a href="/api">API</a>\n'
+    assert landing_src.count(API_FOOT_LINE) == 1, "web/landing.html's footer must carry exactly one API link"
+    land_new = landing_src.replace(API_FOOT_LINE, "")
     # ۲۴ اکتبر: فوترِ landing را مالک در 1916a01 پذیرفت؛ پایه دیگر «نزدیک‌ترین نیاکان بدونِ fMore» نیست و روی
     # همان کامیتِ ثابت قفل است (مثلِ [report body unchanged] که 6944652 را قفل می‌کند).
     LANDING_FOOTER_BASE = "1916a01"
@@ -4174,7 +4182,7 @@ async def check_mobile_compact(p, errors):
             shots_l.append(await lp.locator("footer").screenshot())
             await lp.close()
         assert shots_l[0] == shots_l[1], "landing footer at 1440 (%s) differs from the accepted render in %s" % (scheme, LANDING_FOOTER_BASE)
-    lp = await land_page(land_new, 390, "light")
+    lp = await land_page(landing_src, 390, "light")
     await foot_collapsed_and_opens(lp, "landing")
     await lp.close()
     print("[mobile compact] landing.html: footer byte-identical at 1440 (light/dark), collapsed + opens at 390; report_page.js footer HTML and CSS identical to landing.html (source of the GENERATED block)")
@@ -4330,6 +4338,9 @@ async def check_first_visit_tour(p, errors):
                      next: getComputedStyle(c.querySelector('.tNext')).color, nextBg: getComputedStyle(c.querySelector('.tNext')).backgroundImage,
                      outline: getComputedStyle(document.querySelector('#zxTour .tSpot')).outline,
                      shadow: getComputedStyle(document.querySelector('#zxTour .tSpot')).boxShadow};
+        // ۲۷ اکتبر — Next هم‌رنگِ متنِ .chip.solid در همان تم، نه سفیدِ ثابت
+        const q = document.createElement('button'); q.className = 'chip solid'; document.body.appendChild(q);
+        out.solid = getComputedStyle(q).color; q.remove();
         pr.remove(); return out;
     }"""
 
@@ -4392,7 +4403,7 @@ async def check_first_visit_tour(p, errors):
         col = await pg.evaluate(COLORS)
         assert col["title"] == col["tx"], "[first-visit tour] %s: the title must use var(--tx) (%s vs %s)" % (tag, col["title"], col["tx"])
         assert col["body"] == col["tx2"], "[first-visit tour] %s: the body must use var(--tx2)" % tag
-        assert col["next"] == "rgb(255, 255, 255)" and "gradient" in col["nextBg"], "[first-visit tour] %s: Next must be white on var(--grad): %s %s" % (tag, col["next"], col["nextBg"])
+        assert col["next"] == col["solid"] and "gradient" in col["nextBg"], "[first-visit tour] %s: Next must use the .chip.solid text colour (%s) on var(--grad): %s %s" % (tag, col["solid"], col["next"], col["nextBg"])
         assert contrast(col["title"], col["card"]) >= 7 and contrast(col["body"], col["card"]) >= 4.5, "[first-visit tour] %s: title/body not legible on the card %s" % (tag, col)
         assert "rgba(10, 14, 30, 0.62) 0px 0px 0px 9999px" in col["shadow"] and ("2px" in col["outline"] and "solid" in col["outline"] and "197, 108, 245" in col["outline"] or "var(--g2)" in col["outline"]), "[first-visit tour] %s: spotlight style %s | %s" % (tag, col["shadow"], col["outline"])
         await walk(pg, vw, scheme, tag, shot_steps)
@@ -9312,6 +9323,179 @@ async def check_early_buyers(p, errors):
         srv.shutdown()
 
 
+# ---------- Large trades ----------
+LG_Q = "trade_volume_in_usd_greater_than=1000"
+LG_HEAD = "Large trades Trades of $1,000 or more on the top pool"
+# (کیف، طرف، دلار، ثانیه‌ی پیش)؛ kind عمداً وارونه ساخته می‌شود
+LG_SEQ = [(1, "buy", 2500, 120), (4, "sell", 5000, 200), (2, "buy", 1500, 300), (5, "sell", 1200, 500), (3, "buy", 12000, 600),
+          (1, "buy", 1000, 900), (2, "buy", 3400, 1200), (4, "sell", 2000, 1500), (6, "buy", 1800, 2000), (7, "buy", 2200, 2500),
+          (8, "sell", 7000, 3000), (9, "sell", 1100, 3500), (4, "sell", 1300, 4000), (11, "x", 99999, 50)]
+
+
+def lg_data(seq=None, solana=False, tok=None, extra=None):
+    tok = tok or (FB_SOL_USDC if solana else EB_TOK)
+    other = FB_SOL_WSOL if solana else EB_OTHER
+    out = []
+    for n, (w, side, usd, ago) in enumerate(seq if seq is not None else LG_SEQ):
+        buy = side == "buy"
+        if side == "x":
+            frm, to = other, (fb_b58(0x777) if solana else fb_evm(0x777))
+        else:
+            frm, to = (other, tok) if buy else (tok, other)
+            if not solana:
+                up = lambda a: a.upper().replace("0X", "0x")
+                frm, to = (up(frm), up(to)) if n % 2 else (frm.lower(), to.lower())
+        out.append({"id": "l%d" % n, "type": "trade", "attributes": {
+            "block_timestamp": fb_iso(ago), "kind": "sell" if buy else "buy", "tx_hash": "0xh%d" % n,
+            "tx_from_address": eb_wallet(w, solana), "from_token_address": frm, "to_token_address": to,
+            "volume_in_usd": "%.4f" % usd, "from_token_amount": "12.5", "to_token_amount": "3.25"}})
+    out.extend(extra or [])
+    return out
+
+
+def lg_gt(env, large, solana=False, status=200, tok=None, plain=None):
+    base = eb_gt(plain or eb_trades_ok(solana=solana), solana=solana, tok=tok)
+
+    def gt(path):
+        if LG_Q in env.calls[-1] and path.endswith("/trades"):
+            return (status, {"data": large})
+        return base(path)
+    return gt
+
+
+async def lg_text(pg, timeout=20000):
+    await pg.wait_for_function("() => { const e = document.getElementById('flowLarge'); return !e.hidden && e.textContent.trim() !== '' && !e.querySelector('.sk'); }", timeout=timeout)
+    return await pg.evaluate("() => document.getElementById('flowLarge').innerText.replace(/\\s+/g, ' ').trim()")
+
+
+def lg_calls(env):
+    return [c for c in env.calls if LG_Q in c]
+
+
+# ماکِ fetch در stub-ethers مسیر مستقیمِ GT را همیشه ۲۰۰ می‌کند؛ برای شبیه‌سازیِ ۴۲۹ مسیر مستقیم هم باید ۴۲۹ بدهد
+LG_429_JS = """(() => { let inner = window.fetch; Object.defineProperty(window, 'fetch', { configurable: true,
+  get() { return (u, o) => String(u).includes('api.geckoterminal.com') && String(u).includes('%s') ? Promise.resolve(new Response('{}', {status: 429})) : inner(u, o); },
+  set(f) { inner = f; } }); })();""" % LG_Q
+LG_NETCOLOR = "() => getComputedStyle(document.querySelector('#flowLarge .lgSum > b.mono')).color"
+
+
+async def check_flow_large_trades(p, errors):
+    srv, origin = fb_serve()
+    b = await p.chromium.launch()
+    errs = []
+    shots = os.environ.get("ZX_SHOTS")
+    try:
+        env = FbEnv(b, origin, errs)
+        oldest = _fbdt.now(_fbtz.utc) - _fbtd(seconds=4000)
+        want_win = "Last 14 trades since %s UTC" % oldest.strftime("%H:%M")
+        # 1) Base: ترکیبِ خرید/فروش، kind وارونه، حروفِ مختلطِ آدرس
+        env.calls.clear()
+        env.gt = lg_gt(env, lg_data())
+        pg = await env.open(board=False)
+        t = await lg_text(pg)
+        assert t.startswith(LG_HEAD + " Big buyers 5 · Big sellers 4 Net +$6.8K Last 14 trades since "), "[large trades] summary (5 distinct buyers, 4 sellers, net 24400-17600): %r" % t
+        assert want_win in t, "[large trades] window line from the oldest trade (%s): %r" % (want_win, t)
+        rows = await pg.evaluate("""() => [...document.querySelectorAll('#flowLarge .lgList .trade')].map(r => ({pill: r.querySelector('.vtag').textContent, cls: r.querySelector('.vtag').className,
+            amt: r.querySelector('.amt2').textContent, a: r.querySelector('a').textContent, href: r.querySelector('a').href, ago: r.querySelector('.ago').textContent}))""")
+        assert [r["pill"] for r in rows] == ["Buy", "Sell", "Buy", "Sell", "Buy", "Buy", "Buy", "Sell", "Buy", "Buy"], "[large trades] 10 most recent, side from addresses (kind contradicts): %s" % rows
+        assert [r["amt"] for r in rows] == ["$2.5K", "$5.0K", "$1.5K", "$1.2K", "$12.0K", "$1.0K", "$3.4K", "$2.0K", "$1.8K", "$2.2K"], "[large trades] amounts: %s" % rows
+        w1 = eb_wallet(1)
+        assert rows[0]["href"] == "https://basescan.org/address/" + w1 and rows[0]["a"] == w1[:6] + "…" + w1[-4:] and re.fullmatch(r"\d+m ago", rows[0]["ago"]), "[large trades] wallet link/short/age: %s" % rows[0]
+        assert "s" in rows[1]["cls"].split() and "s" not in rows[0]["cls"].split(), "[large trades] sell pill style"
+        assert await pg.evaluate(LG_NETCOLOR) == await fb_color(pg, "--pos"), "[large trades] positive net is --pos"
+        assert await pg.evaluate("() => getComputedStyle(document.querySelector('#flowLarge .vtag.s')).color") == await fb_color(pg, "--neg"), "[large trades] sell pill is --neg"
+        assert not re.search(r"smart money|whale|profit", t, re.I) and not FB_BAD_RE.search(t), "[large trades] bad wording: %r" % t
+        assert len(lg_calls(env)) == 1, "[large trades] exactly one large-trades request: %s" % env.calls
+        assert await pg.evaluate("() => document.getElementById('flowEarly').compareDocumentPosition(document.getElementById('flowLarge')) & Node.DOCUMENT_POSITION_FOLLOWING"), "[large trades] below Early buyers"
+        # باز کردنِ دوباره‌ی همان توکن در ۶۰ ثانیه: صفر درخواستِ تازه
+        for _ in range(2):
+            await pg.evaluate("() => { ebOff(); flowBoard = false; return renderFlow(); }")
+            await lg_text(pg)
+        assert len(lg_calls(env)) == 1, "[large trades] reopening within 60s makes no new request: %s" % lg_calls(env)
+        await pg.context.close()
+        # 2) فروشنده‌ی خالص: Net قرمز با −؛ و صفرِ واقعی
+        env.calls.clear()
+        env.gt = lg_gt(env, lg_data([(1, "buy", 1000, 100), (2, "sell", 4000, 200)]))
+        pg = await env.open(board=False)
+        t = await lg_text(pg)
+        assert "Big buyers 1 · Big sellers 1 Net −$3.0K" in t, "[large trades] net negative: %r" % t
+        assert await pg.evaluate(LG_NETCOLOR) == await fb_color(pg, "--neg"), "[large trades] negative net is --neg"
+        await pg.context.close()
+        env.gt = lg_gt(env, lg_data([(1, "buy", 2000, 100), (2, "sell", 2000, 200)]))
+        pg = await env.open(board=False)
+        t = await lg_text(pg)
+        assert "Net $0 " in t, "[large trades] truly zero net -> $0: %r" % t
+        await pg.context.close()
+        # 3) 429 -> نمی‌توانیم بخوانیم؛ هیچ عددی، هیچ جدولِ خالی
+        env.gt = lg_gt(env, [], status=429)
+        pg = await env.open(board=False, init=[LG_429_JS])
+        t = await lg_text(pg)
+        assert t == LG_HEAD + " Large trades could not be loaded right now.", "[large trades] 429 -> could not be loaded: %r" % t
+        assert "$0" not in t and await pg.evaluate("() => !document.querySelector('#flowLarge .lgList, #flowLarge .trade, #flowLarge .lgSum')"), "[large trades] 429 shows no numbers/table"
+        await pg.context.close()
+        # 4) پاسخِ موفقِ خالی
+        env.gt = lg_gt(env, [])
+        pg = await env.open(board=False)
+        t = await lg_text(pg)
+        assert t == LG_HEAD + " No trades of $1,000 or more in the latest data.", "[large trades] empty -> no trades: %r" % t
+        await pg.context.close()
+        # 5) ۳۰۰ ردیف: فیدِ بریده‌شده
+        env.gt = lg_gt(env, lg_data([(1 + i % 7, "buy" if i % 3 else "sell", 1500, 60 + i * 10) for i in range(300)]))
+        pg = await env.open(board=False)
+        t = await lg_text(pg)
+        assert "Latest 300 trades" in t and "Last 300" not in t, "[large trades] 300 rows -> latest 300 trades: %r" % t
+        await pg.context.close()
+        # 6) Solana: mint عیناً؛ mint با حروف کوچک نادیده؛ کیفِ هم‌نام با حروفِ متفاوت = کیفِ دیگر
+        w0 = eb_wallet(0, True)
+        sol_extra = [{"id": "z", "type": "trade", "attributes": {
+            "block_timestamp": fb_iso(40), "kind": "buy", "tx_hash": "h", "tx_from_address": eb_wallet(30, True),
+            "from_token_address": FB_SOL_WSOL, "to_token_address": FB_SOL_USDC.lower(), "volume_in_usd": "9999"}}]
+        sd = lg_data([(0, "buy", 2000, 100), (1, "sell", 3000, 200), (2, "buy", 1500, 300)], solana=True, extra=sol_extra)
+        sd.append({"id": "tw", "type": "trade", "attributes": dict(sd[0]["attributes"], tx_from_address=w0.lower(), block_timestamp=fb_iso(400))})
+        env.calls.clear()
+        env.gt = lg_gt(env, [], solana=True, plain=(3 * 3600, sd, False))   # سولانا: همان نمونه‌ی trades ساده؛ درخواستِ فیلترشده‌ای نیست
+        pg = await env.open(hash_="#flow?chain=solana", board=False)
+        t = await lg_text(pg)
+        assert "Big buyers 3 · Big sellers 1 Net +$2.5K" in t, "[large trades] Solana: exact-mint match, wallet case kept, lower-cased mint ignored: %r" % t
+        hrefs = await pg.evaluate("() => [...document.querySelectorAll('#flowLarge .lgList a')].map(a => a.href)")
+        assert hrefs[0] == "https://solscan.io/account/" + w0 and ("https://solscan.io/account/" + w0.lower()) in hrefs and len(hrefs) == 4, "[large trades] Solscan links: %s" % hrefs
+        assert len(lg_calls(env)) == 0 and len([c for c in env.calls if c.endswith("/trades")]) == 1, "[large trades] Solana reuses the one plain trades request, no second one: %s" % env.calls
+        await pg.click('#flowTfs [data-w="h6"]')
+        await pg.wait_for_timeout(500)
+        assert len(lg_calls(env)) == 0 and len([c for c in env.calls if c.endswith("/trades")]) == 1 and await pg.evaluate("() => !document.getElementById('flowLarge').hidden"), "[large trades] Solana window change: card stays, no new request"
+        await pg.context.close()
+        # 7) تابلو: کارت نیست
+        env.gt = lg_gt(env, lg_data())
+        env.pairs["body"] = {"store": True, "rows": []}
+        pg = await env.open(board=True)
+        await pg.wait_for_timeout(800)
+        assert await pg.evaluate("() => document.getElementById('flowLarge').hidden"), "[large trades] not on the board"
+        await pg.context.close()
+        # 8) طرح‌بندی: دو تم، ۱۲۸۰ و ۳۹۰
+        for scheme in ("dark", "light"):
+            for vw, vh in ((1280, 900), (390, 844)):
+                env.gt = lg_gt(env, lg_data())
+                pg = await env.open(vw=vw, vh=vh, scheme=scheme, board=False)
+                await lg_text(pg)
+                m = await pg.evaluate("""() => { const c = document.querySelector('#flowLarge .ebCard').getBoundingClientRect(), e = document.querySelector('#flowEarly .ebCard').getBoundingClientRect();
+                    return {sw: document.documentElement.scrollWidth, iw: innerWidth, l: c.left, r: c.right, el: e.left, er: e.right}; }""")
+                assert m["sw"] <= m["iw"] and m["l"] >= 0 and m["r"] <= m["iw"] and abs(m["l"] - m["el"]) < 1 and abs(m["r"] - m["er"]) < 1, "[large trades] %s %d: width: %s" % (scheme, vw, m)
+                if shots and (scheme, vw) in (("dark", 1280), ("light", 1280), ("dark", 390)):
+                    os.makedirs(shots, exist_ok=True)
+                    await pg.add_style_tag(content="#nav{display:none!important}" if vw < 500 else "i{}")
+                    await pg.wait_for_timeout(1200)
+                    box = await pg.evaluate("""() => { const a = document.getElementById('flowEarly').getBoundingClientRect(), z = document.getElementById('flowLarge').getBoundingClientRect();
+                        return {x: Math.max(0, a.left + scrollX - 8), y: a.top + scrollY - 8, width: Math.min(innerWidth, a.width + 16), height: z.bottom - a.top + 16}; }""")
+                    await pg.screenshot(path=os.path.join(shots, "large_%d_%s.png" % (vw, scheme)), full_page=True, clip=box)
+                await pg.context.close()
+        bad = [e for e in errs if "Failed to load resource" not in e]
+        assert not bad, "[large trades] console errors: %s" % bad
+        print("[large trades] Base: 14 rows (one off-pair ignored, kind contradicts addresses, mixed-case addresses) -> Big buyers 5 · Big sellers 4, Net +$6.8K (green), window line from the oldest trade, 10 newest rows with Buy/Sell pills, USD, BaseScan links and age; negative net red with a minus, truly zero -> $0; 429 -> 'could not be loaded' with no numbers/table; empty -> 'No trades of $1,000 or more'; 300 rows -> 'Latest 300 trades'; reopening within 60s and Solana window change make no new request; Solana mint exact, wallet case kept, Solscan links; not on the board; both themes at 1280 and 390 px: no horizontal scroll and the card is as wide as Early buyers")
+    finally:
+        await b.close()
+        srv.shutdown()
+
+
 # ---------- حکمِ صادرکننده برای سهام ----------
 SI_NOTE = "The issuer can freeze accounts and recover tokens. This is expected for regulated stock tokens and is shown below for transparency."
 SI_CHIP = "Issuer-controlled · regulated"
@@ -9783,6 +9967,7 @@ async def main():
         await check_mobile_compact(p, errors)
         await check_first_visit_tour(p, errors)
         await check_report_page(p, errors)
+        await check_api_page(p, errors)
         await check_report_picker(p, errors)
         await check_stocks(p, errors)
         await check_stocks_sol(p, errors)
@@ -9813,6 +9998,7 @@ async def main():
         await check_markets_pages_parity(p, errors)
         await check_stocks_star(p, errors)
         await check_early_buyers(p, errors)
+        await check_flow_large_trades(p, errors)
         await check_stock_issuer(p, errors)
         b = await p.chromium.launch()
         pg = await b.new_page(viewport={"width": 1240, "height": 1000}, color_scheme="dark")
@@ -22379,6 +22565,64 @@ async def check_base_picker_onchain_sort(p, errors):
     finally:
         await b.close()
         srv.shutdown()
+
+
+async def check_api_page(p, errors):
+    """[api page] ۲۷ اکتبر: لینکِ «API» در فوترِ هر چهار صفحه، و /api (HTMLِ واقعیِ Worker) روی ۳۹۰px بدونِ اسکرولِ افقی در هر دو تم."""
+    import subprocess, tempfile, re as _re
+    worker_dir = os.path.join(HERE, "..", "..", "worker")
+    out = os.path.join(tempfile.mkdtemp(prefix="api_page_"), "api.html")
+    gen = ('import fs from "node:fs"; import { renderApiPage } from "./api_page.js"; import { renderReportPage } from "./report_page.js"; '
+           'fs.writeFileSync(process.argv[1], renderApiPage({ limit: 120, windowMs: 60000 })); '
+           'fs.writeFileSync(process.argv[1] + ".report", renderReportPage({ date: "2026-10-04", today: "2026-10-04", firstDate: "2026-09-08", rows: [], history: [] }));')
+    r = subprocess.run(["node", "--input-type=module", "-e", gen, out], capture_output=True, text=True, cwd=worker_dir)
+    assert r.returncode == 0, "[api page] could not render: %s" % r.stderr[-300:]
+    page_html = open(out, encoding="utf-8").read()
+    report_html = open(out + ".report", encoding="utf-8").read()
+    LINK = '<a href="/api">API</a>'
+    sources = {
+        "web/index.html": open(os.path.join(HERE, "..", "index.html"), encoding="utf-8").read(),
+        "web/pairs.html": open(os.path.join(HERE, "..", "pairs.html"), encoding="utf-8").read(),
+        "web/landing.html": open(os.path.join(HERE, "..", "landing.html"), encoding="utf-8").read(),
+        "/report (worker/report_page.js)": report_html,
+        "/api": page_html,
+    }
+    for label, src in sources.items():
+        m = _re.search(r"<footer.*?</footer>", src, _re.S)
+        assert m, "[api page] %s has no footer" % label
+        assert m.group(0).count(LINK) == 1, "[api page] %s: the footer must carry exactly one API link to /api" % label
+        about = _re.search(r"<h4>About</h4>(.*?)</div>", m.group(0), _re.S)
+        assert about and LINK in about.group(1), "[api page] %s: the API link belongs in the About column" % label
+    csp = _re.search(r"Content-Security-Policy: (.*)", open(os.path.join(HERE, "..", "_headers"), encoding="utf-8").read()).group(1).strip()
+    b = await p.chromium.launch()
+    try:
+        for scheme in ("light", "dark"):
+            for vw in (390, 1280):
+                pg = await b.new_page(viewport={"width": vw, "height": 844}, color_scheme=scheme)
+                errs = []
+                pg.on("pageerror", lambda e: errs.append(str(e)))
+                pg.on("console", lambda m: errs.append(m.text) if m.type == "error" else None)
+                await pg.add_init_script("localStorage.setItem('zaexa.theme.v1', %s)" % __import__("json").dumps(scheme))
+                async def fulfil(route):
+                    if route.request.url == "https://zaexa.test/api":
+                        await route.fulfill(status=200, body=page_html, headers={"content-type": "text/html; charset=utf-8", "content-security-policy": csp})
+                    else:
+                        await route.abort()
+                await pg.route("**/*", fulfil)
+                await pg.goto("https://zaexa.test/api")
+                await pg.wait_for_timeout(500)
+                res = await pg.evaluate("""() => ({ sw: document.documentElement.scrollWidth, iw: innerWidth, bsw: document.body.scrollWidth,
+                    theme: document.documentElement.dataset.theme, link: !!document.querySelector('footer a[href="/api"]'),
+                    h1: document.querySelector('h1') && document.querySelector('h1').textContent, active: document.querySelectorAll('.nav a.on').length })""")
+                tag = "[api page] %dpx %s" % (vw, scheme)
+                assert res["sw"] <= res["iw"] and res["bsw"] <= res["iw"], "%s: horizontal scroll: %s" % (tag, res)
+                assert res["theme"] == scheme and res["link"] and res["h1"].startswith("Exit check"), "%s: %s" % (tag, res)
+                assert res["active"] == 0, "%s: no header tab may be marked active on /api: %s" % (tag, res)
+                assert not errs, "%s: console errors: %s" % (tag, errs)
+                await pg.close()
+    finally:
+        await b.close()
+    print("[api page] footer API link (About column) on app, /pairs, landing, /report and /api; /api renders without horizontal scroll at 390 and 1280, light and dark, no console errors, CSP from web/_headers")
 
 
 async def only(names):

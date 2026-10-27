@@ -1053,7 +1053,7 @@ section.card.isDone #actBtn,section.card.isDone #solStatusSlot,section.card.isDo
 .fbSkB{height:12px;flex:1}
 .fbSkC{height:12px;width:22%}
 .fbBackRow{display:block;padding:10px 20px 0}
-.fbBackRow[hidden],#flowEarly[hidden]{display:none}
+.fbBackRow[hidden],#flowEarly[hidden],#flowLarge[hidden]{display:none}
 .fbBack{font-size:12.5px;color:var(--tx3);padding:4px 0}
 .fbBack:hover{color:var(--tx)}
 #view-flow.fbOn #flowTokBtn,#view-flow.fbOn #flowTfs,#view-flow.fbOn>.card>header{display:none}
@@ -1075,6 +1075,13 @@ section.card.isDone #actBtn,section.card.isDone #solStatusSlot,section.card.isDo
 .ebPct{font-size:13px;margin-top:6px}
 .ebUnk{font-size:12.8px;line-height:1.6;color:var(--tx2)}
 .ebSkB{height:10px;border-radius:5px}
+/* کارت Large trades: همان ظاهرِ ebCard؛ فقط خلاصه و ردیف‌های معامله */
+.lgSum{display:flex;flex-wrap:wrap;gap:4px 14px;font-size:13px;margin:8px 0 2px}
+.lgWin{font-size:12px;color:var(--tx3);margin:4px 0 10px}
+.lgList .trade{flex-wrap:wrap;row-gap:4px}
+.lgList .vtag{margin-left:0}
+.lgList .vtag.s{color:var(--neg);background:color-mix(in srgb,var(--neg) 14%,transparent)}
+.lgList a.mono{font-size:11.5px;color:var(--tx3)}
 .issChip{display:inline-block;padding:4px 11px;border-radius:999px;font-size:13px;font-weight:640;color:var(--acc);background:color-mix(in srgb,var(--acc) 14%,transparent)}
 .issNote{margin-top:6px;line-height:1.5;max-width:60ch}
 @media(max-width:480px){
@@ -1098,6 +1105,7 @@ section.card.isDone #actBtn,section.card.isDone #solStatusSlot,section.card.isDo
   .fbBar{width:28px;margin-right:6px}
   .fbBackRow{padding-left:14px;padding-right:14px}
   .ebIn{padding-left:14px;padding-right:14px}
+  .lgList .trade{padding-left:14px;padding-right:14px}
 }
 .trade{display:flex;align-items:center;gap:10px;padding:8px 20px;font-size:12.5px;border-top:1px solid var(--line)}
 .trade .amt2{font-weight:620}
@@ -1521,7 +1529,7 @@ footer .fine{max-width:78ch;margin:46px 0 0;font-size:11.5px;color:var(--tx3);li
 @media(max-width:940px){
   .mTabs{display:flex;order:2;box-sizing:border-box;width:100%;padding:4px;gap:4px;border-radius:999px;background:var(--card);box-shadow:4px 4px 9px var(--soft-lo),-3px -3px 8px var(--soft-hi),inset 0 1px 1px var(--soft-hi)}
   .mTabs [role=tab]{position:relative;flex:1;padding:8px 6px;border-radius:999px;font-size:13px;font-weight:560;color:var(--tx2);white-space:nowrap;transition:.16s}
-  .mTabs [role=tab][aria-selected=true]{background:var(--grad);color:#fff}
+  .mTabs [role=tab][aria-selected=true]{background:var(--grad);color:var(--on-acc)}
   .mTabs [role=tab]:focus-visible{outline:2px solid var(--acc);outline-offset:2px}
   .mTabs [role=tab].warn::after,.mTabs [role=tab].ok::after{content:"";display:inline-block;width:7px;height:7px;margin-left:6px;border-radius:50%;vertical-align:middle;box-shadow:0 0 0 1.5px var(--card)}
   .mTabs [role=tab].warn::after{background:var(--neg)}
@@ -1559,8 +1567,8 @@ footer .fine{max-width:78ch;margin:46px 0 0;font-size:11.5px;color:var(--tx3);li
 #zxTour .tBtns button{padding:8px 12px;border-radius:999px;font-size:13px;font-weight:600;color:var(--tx2)}
 #zxTour .tBtns button[hidden]{display:none}
 #zxTour .tBtns button:hover{color:var(--tx)}
-#zxTour .tBtns .tNext{padding:8px 18px;background:var(--grad);color:#fff;font-weight:640}
-#zxTour .tBtns .tNext:hover{color:#fff;filter:brightness(1.05)}
+#zxTour .tBtns .tNext{padding:8px 18px;background:var(--grad);color:var(--on-acc);font-weight:640}
+#zxTour .tBtns .tNext:hover{color:var(--on-acc);filter:brightness(1.05)}
 #zxTour button:focus-visible{outline:2px solid var(--acc);outline-offset:2px}
 
 /* نوارِ «فعالیتِ زنده» زیرِ کارتِ سواپ — فقط نمای swap؛ داده از همان /pairs.json.
@@ -2222,6 +2230,7 @@ try{(function(){
       <button class="chip solid" data-act="pickFlowToken">Choose a token</button>
     </div></div>
     <div id="flowEarly" hidden></div>
+    <div id="flowLarge" hidden></div>
   </section>
   <p style="padding:0 6px;color:var(--tx3);font-size:12px;margin:0">
     Read live from the deepest pool for this token, in your browser — no server, nothing stored.
@@ -2485,7 +2494,7 @@ try{(function(){
 
       <details class="faqItem">
         <summary><span class="faqQ"></span>What do you collect about me?</summary>
-        <div class="faqA"><p>Anonymous counts, and only a few things: which view was opened, a few funnel steps, a four-character code identifying which JS bug fired (nothing else about it — no message, no file, no stack), whether the screen is mobile or desktop, the selected network (Base or Solana), and a country code. Never your wallet address, the amount, the token, your IP, user agent, referrer or cookies — and no session or visitor identifier of any kind, so the counts can never be assembled back into a person. If your browser sends Global Privacy Control, nothing is recorded at all.</p></div>
+        <div class="faqA"><p>Anonymous counts, and only a few things: which view was opened, a few funnel steps, a four-character code identifying which JS bug fired (nothing else about it — no message, no file, no stack), whether the screen is mobile or desktop, the selected network (Base or Solana), and a country code. Never your wallet address, the amount, the token, your IP, user agent, referrer or cookies — and no session or visitor identifier of any kind, so the counts can never be assembled back into a person. If your browser sends Global Privacy Control, nothing is recorded at all. Separately, each call to our public check API (<a href="/api">zaexa.com/api</a>) from outside this site adds one to a plain counter with only the network name, so we can tell whether anyone uses it.</p></div>
       </details>
 
       <details class="faqItem">
@@ -2533,6 +2542,7 @@ try{(function(){
         <a id="ctrLink" target="_blank" rel="noopener" class="mono"></a>
       </span>
       <a href="https://github.com/0xheiy/ZAEXA" target="_blank" rel="noopener">Source on GitHub</a>
+      <a href="/api">API</a>
     </div>
     <div class="footCol">
       <h4>Support</h4>
@@ -7943,6 +7953,7 @@ async function renderSolFlow(){
     h+=`<div class="fnote">Volume, buys and sells are GeckoTerminal's totals for this pool over the selected window. Largest buys come from its recent-trade sample. Addresses are the reported transaction senders, which can include routers. This is <b>flow, not a forecast</b>.</div>`;
     body.innerHTML=h;
     ebStartSol(mint,cache);   // همان معاملاتِ همین رندر؛ درخواستِ دوم نیست
+    lgStartSol(mint,cache);
   }catch{
     if(!current())return;
     body.innerHTML='<div class="empty">Solana trade history could not be loaded. Activity is unknown, not zero. Quotes and swaps are unaffected.</div>';
@@ -8090,6 +8101,7 @@ async function renderFlow(){
   const t=routable(tokenOut);
   if(!t){ebOff();return fbRender();}   // پیش‌تر EMPTY_FLOW؛ حالا همان تابلو
   ebStartBase(t);
+  lgStartBase(t);
   body.innerHTML='<div class="empty"><span class="spin"></span>Reading swaps from the chain…</div>';
   try{
     const pool=await deepestV3Pool(t);
@@ -8562,7 +8574,7 @@ setInterval(()=>{if(view==="flow"&&fbOn&&!document.hidden)fbRender(true);},FB_RE
 document.addEventListener("visibilitychange",()=>{if(!document.hidden&&view==="flow"&&fbOn)fbRender(true);});
 
 /* ---------- Early buyers ---------- */
-function ebOff(){ebSeq++;const b=$("flowEarly");if(b){b.hidden=true;b.innerHTML="";}}
+function ebOff(){ebSeq++;lgOff();const b=$("flowEarly");if(b){b.hidden=true;b.innerHTML="";}}
 function ebShow(html){const b=$("flowEarly");if(!b)return;b.innerHTML=html;b.hidden=false;}
 const EB_MSG={many:"Early buyers: unknown — this pool has too many trades to see its first buyers. Unknown, not zero.",
   na:"Early buyers: unknown — trade history is unavailable. Unknown, not zero."};
@@ -8661,6 +8673,101 @@ function ebStartSol(mint,cache){
     html=ebHtml(r,mint===SOL_MINT_ADDR?"SOL":(solTokenSymbol||"this token"));
   }catch{html=ebUnkHtml("na");}
   if(mine===ebSeq)ebShow(html);
+}
+
+/* ---------- Large trades ----------
+   فقط «چه کسی پولِ بزرگ جابه‌جا می‌کند»؛ GT قیمتِ خرید ندارد پس نه سود می‌گوییم نه هوشمندی.
+   یک درخواست برای هر استخر، ۶۰ثانیه در حافظه؛ بازرندر دوباره نمی‌پرسد. */
+const LG_TTL=60000,LG_BAD=30000,LG_MIN=1000,LG_ROWS=10,lgCache=new Map();
+let lgSeq=0;
+function lgOff(){lgSeq++;const b=$("flowLarge");if(b){b.hidden=true;b.innerHTML="";b.dataset.k="";}}
+function lgShow(html){const b=$("flowLarge");if(!b)return;b.innerHTML=html;b.hidden=false;}
+const lgHead=`<div class="ebTtl">Large trades</div><div class="ebLine">Trades of $1,000 or more on the top pool</div>`;
+const lgMsgHtml=m=>`<div class="ebCard"><div class="ebIn">${lgHead}<div class="ebUnk">${esc(m)}</div></div></div>`;
+const lgLoadHtml=()=>`<div class="ebCard"><div class="ebIn">${lgHead}<div class="sk ebSkB"></div></div></div>`;
+// تحلیلِ خالص: طرف از آدرسِ توکن (نه kind)؛ Base بی‌حساس به حروف، Solana عیناً.
+function lgAnalyze(data,tokenAddr,lower){
+  const norm=x=>lower?x.toLowerCase():x,tok=norm(tokenAddr),rows=[];
+  for(let i=0;i<data.length;i++){
+    const a=data[i]&&data[i].attributes;if(!a)continue;
+    const usd=Number(a.volume_in_usd),ts=Date.parse(a.block_timestamp);
+    const who=typeof a.tx_from_address==="string"&&a.tx_from_address?norm(a.tx_from_address):null;
+    const to=typeof a.to_token_address==="string"?norm(a.to_token_address):null;
+    const from=typeof a.from_token_address==="string"?norm(a.from_token_address):null;
+    if(!Number.isFinite(usd)||usd<LG_MIN||!Number.isFinite(ts)||!who)continue;
+    const buy=to===tok&&from!==tok,sell=from===tok&&to!==tok;
+    if(!buy&&!sell)continue;
+    rows.push({usd,ts,who,buy,i});
+  }
+  rows.sort((x,y)=>y.ts-x.ts||x.i-y.i);
+  const B=new Set(),S=new Set();let sb=0,ss=0,oldest=Infinity;
+  for(const r of rows){(r.buy?B:S).add(r.who);if(r.buy)sb+=r.usd;else ss+=r.usd;}
+  for(const d of data){const ts=Date.parse(d&&d.attributes&&d.attributes.block_timestamp);if(ts<oldest)oldest=ts;}   // پنجره از کلِ نمونه
+  return {rows,buyers:B.size,sellers:S.size,net:sb-ss,oldest,total:data.length};
+}
+function lgHtml(r,solana){
+  if(!r.rows.length)return lgMsgHtml("No trades of $1,000 or more in the latest data.");
+  const hh=new Date(r.oldest),t=String(hh.getUTCHours()).padStart(2,"0")+":"+String(hh.getUTCMinutes()).padStart(2,"0");
+  const win=r.total>=300?`Latest 300 trades (the feed is capped) since ${t} UTC`:`Last ${r.total} trades since ${t} UTC`;
+  const ab=Math.abs(r.net),netTxt=r.net===0?"$0":ab<1?"<$1":fmtBig(ab);
+  const net=r.net===0?`<b class="mono">Net ${netTxt}</b>`:
+    `<b class="mono" style="color:var(--${r.net>0?"pos":"neg"})">Net ${r.net>0?"+":"−"}${netTxt}</b>`;
+  const link=w=>{
+    const ok=solana?/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(w):/^0x[0-9a-fA-F]{40}$/.test(w);
+    const sh=shortAddr(w);
+    return ok?`<a class="mono" target="_blank" rel="noopener" href="${solana?"https://solscan.io/account/":CHAIN.explorer+"/address/"}${w}">${sh}</a>`:`<span class="mono" style="font-size:11.5px;color:var(--tx3)">${esc(sh)}</span>`;
+  };
+  const list=r.rows.slice(0,LG_ROWS).map(x=>`<div class="trade"><span class="vtag${x.buy?"":" s"}">${x.buy?"Buy":"Sell"}</span>
+    <span class="amt2 mono">${fmtBig(x.usd)}</span>${link(x.who)}<span class="ago">${agoText(x.ts)}</span></div>`).join("");
+  return `<div class="ebCard"><div class="ebIn">${lgHead}
+    <div class="lgSum"><span>Big buyers <b class="mono">${r.buyers}</b> · Big sellers <b class="mono">${r.sellers}</b></span>${net}</div>
+    <div class="lgWin">${esc(win)}</div></div><div class="lgList">${list}</div>
+    <div class="fnote">Flow, not skill: no entry price is known, so nothing here says whether a wallet made or lost money. Addresses are the reported transaction senders, which can include routers.</div></div>`;
+}
+function lgFetch(net,pool){
+  const key=net+"|"+pool,e=lgCache.get(key);
+  if(e&&Date.now()-e.t<(e.bad?LG_BAD:LG_TTL))return e.p;
+  const ne={t:Date.now(),bad:false,p:null};
+  ne.p=gtJson(`${GT}/networks/${net}/pools/${pool}/trades?trade_volume_in_usd_greater_than=${LG_MIN}`).then(j=>{
+    if(!j||!Array.isArray(j.data))throw new Error("lg: bad shape");return j.data;});
+  ne.p.catch(()=>{ne.bad=true;});
+  lgCache.set(key,ne);
+  return ne.p;
+}
+async function lgRun(net,tokenAddr,lower,getPool){
+  const mine=++lgSeq,box=$("flowLarge"),k=net+"|"+tokenAddr;
+  if(box&&(box.hidden||box.dataset.k!==k))lgShow(lgLoadHtml());   // همان توکن: کارتِ قبلی می‌ماند، سوسو نمی‌زند
+  if(box)box.dataset.k=k;
+  let html;
+  try{
+    const pool=await getPool();
+    const data=await lgFetch(net,pool);
+    html=lgHtml(lgAnalyze(data,tokenAddr,lower),!lower);
+  }catch{html=lgMsgHtml("Large trades could not be loaded right now.");}
+  if(mine===lgSeq)lgShow(html);
+}
+// Solana: همان نمونه‌ی معاملاتِ renderSolFlow (کشِ ۶۰ثانیه‌ای) را می‌شمارد؛ درخواستِ دوم نیست.
+function lgStartSol(mint,cache){
+  lgSeq++;
+  const box=$("flowLarge");if(box)box.dataset.k="solana|"+mint;
+  let html;
+  try{
+    if(!cache||!Array.isArray(cache.trades))throw new Error("lg: no sample");
+    html=lgHtml(lgAnalyze(cache.trades,mint,false),true);
+  }catch{html=lgMsgHtml("Large trades could not be loaded right now.");}
+  lgShow(html);
+}
+function lgStartBase(t){
+  const net=CHAIN.gtNetwork;
+  return lgRun(net,t.address,true,async()=>{
+    const j=await gtJson(`${GT}/networks/${net}/tokens/${t.address}?include=top_pools`);   // همان آدرسِ Early buyers؛ کش/هم‌زمان
+    const tp=j&&j.data&&j.data.relationships&&j.data.relationships.top_pools&&j.data.relationships.top_pools.data;
+    const id=tp&&tp[0]&&tp[0].id;
+    if(typeof id!=="string"||!id.startsWith(net+"_"))throw new Error("lg: no pool");
+    const pool=id.slice(net.length+1);
+    if(!/^0x[0-9a-fA-F]{40}$/.test(pool))throw new Error("lg: bad pool");
+    return pool;
+  });
 }
 
 /* ---------- safety panel ---------- */

@@ -142,6 +142,16 @@ FROM $DATASET
 WHERE timestamp > NOW() - INTERVAL '$DAYS' DAY AND blob1 = 'wallet:on'
 GROUP BY kind ORDER BY connects DESC"
 
+# External use of the public API (GET /vd/<address>): requests that did not come
+# from zaexa.com itself. The Worker writes one point per such request with only
+# blob1='vd:ext' and blob2=<chain> - no IP, user-agent, address, referer or country.
+# Counts, never callers. Site-origin requests are not written at all.
+q "External /vd calls per day, by chain" "
+SELECT toStartOfDay(timestamp) AS day, blob2 AS chain, SUM(_sample_interval) AS calls
+FROM $DATASET
+WHERE timestamp > NOW() - INTERVAL '$DAYS' DAY AND blob1 = 'vd:ext'
+GROUP BY day, chain ORDER BY day, chain"
+
 echo
 echo "Note: visitors with Global Privacy Control enabled are not counted, so"
 echo "every number here is a floor, not an exact total."
