@@ -9750,6 +9750,7 @@ async def main():
             errors.append(m.text)
 
     async with async_playwright() as p:
+        await check_base_picker_onchain_sort(p, errors)
         await check_sol_picker_balance(p, errors)
         await check_base_rpc_fallback(p, errors)
         await check_real_page_from_disk(p)
@@ -22230,6 +22231,151 @@ async def check_base_rpc_fallback(p, errors):
         assert await disk.evaluate("() => BASE_RPC_PROXY === null && CHAIN.rpcs.every(u => !u.endsWith('/base/rpc'))"), "[base rpc fallback] disabled on file://"
         await disk.close()
         print("[base rpc fallback] PASS — quote loads within the 4 KiB proxy body cap after all public hosts reset; publicnode success makes ZERO proxy requests; concurrent reads, public retry, stored winner and file:// guards pass")
+    finally:
+        await b.close()
+        srv.shutdown()
+
+
+async def check_base_picker_onchain_sort(p, errors):
+    """[base picker onchain sort] Real picker, one logical quote batch, same RPC transport as swaps."""
+    import json, subprocess
+    b = await p.chromium.launch()
+    srv, origin = fb_serve()
+    baseline = subprocess.check_output(["git", "show", "aa8c727:web/index.html"], cwd=os.path.join(HERE, "..", "..")).decode("utf-8")
+    baseline = re.sub(r'const ETHERS_SRC="[^"]*";', 'const ETHERS_SRC="./stub-ethers.js";', baseline, count=1)
+    baseline = re.sub(r'const ETHERS_SRI="[^"]*";', 'const ETHERS_SRI="";', baseline, count=1)
+    unknown = "0x" + "ee" * 20
+    weth = "0x4200000000000000000000000000000000000006"
+    aero = "0x940181a94A35A4569E4529A3CDfB74e38FD98631".lower()
+    usdc = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913".lower()
+    fixture = r"""
+(() => {
+  const Original = ethers.JsonRpcProvider, nativeFetch=window.__pickerNativeFetch, oldFetch=window.fetch;
+  const holdings={__WETH__:'2000000000000000000',__AERO__:'1000000000000000000000',__USDC__:'50000000',__UNKNOWN__:'7000000000000000000'};
+  const ser=x=>JSON.stringify(x,(k,v)=>typeof v==='bigint'?{__b:v.toString()}:v);
+  const de=s=>JSON.parse(s,(k,v)=>v&&v.__b!==undefined?BigInt(v.__b):v);
+  const pack=ret=>'0x'+Array.from(new TextEncoder().encode(ser({ret}))).map(b=>b.toString(16).padStart(2,'0')).join('');
+  const unpack=h=>de(new TextDecoder().decode(new Uint8Array((h.slice(2).match(/../g)||[]).map(x=>parseInt(x,16)))));
+  window.__pickerDecode=unpack;
+  ethers.Interface.prototype.encodeFunctionResult=function(name,args){return pack(args);};
+  const originalCall=Original.prototype.call;
+  Original.prototype.call=async function(tx){
+    const output=await originalCall.call(this,tx),outer=unpack(tx.data);
+    if(outer.name!=='aggregate3')return output;
+    const rows=unpack(output).ret[0];
+    outer.args[0].forEach(([target,allowed,data],i)=>{
+      if(unpack(data).name==='balanceOf')rows[i]=[true,pack([BigInt(holdings[target.toLowerCase()]||'0')])];
+    });
+    return pack([rows]);
+  };
+  Original.prototype.getBalance=async()=>0n;
+  const provider=new Original('fixture');
+  const names={eth_call:'call',eth_getCode:'getCode',eth_getBalance:'getBalance',eth_getStorageAt:'getStorage',eth_blockNumber:'getBlockNumber'};
+  window.__pickerRpc=async({method,params})=>{
+    const value=method==='eth_chainId'?'0x2105':await provider[names[method]](...params);
+    return typeof value==='bigint'?'0x'+value.toString(16):value;
+  };
+  class WireProvider extends Original {
+    async send(method,params){const r=await nativeFetch(this.url,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({jsonrpc:'2.0',id:1,method,params})});if(!r.ok)throw new Error('fetch failed');const j=await r.json();if(j.error)throw new Error('RPC error');return j.result;}
+    call(tx){return this.send('eth_call',[tx]);}
+    getCode(a){return this.send('eth_getCode',[a]);}
+    async getBalance(a){return BigInt(await this.send('eth_getBalance',[a]));}
+    getStorage(a,s){return this.send('eth_getStorageAt',[a,s]);}
+    async getBlockNumber(){return Number(await this.send('eth_blockNumber',[]));}
+  }
+  ethers.JsonRpcProvider=WireProvider;
+  window.fetch=(u,o)=>String(u).includes('/gt/')||String(u).startsWith('https://api.geckoterminal.com/')?nativeFetch(u,o):oldFetch(u,o);
+})();
+""".replace("__WETH__", json.dumps(weth)).replace("__AERO__", json.dumps(aero)).replace("__USDC__", json.dumps(usdc)).replace("__UNKNOWN__", json.dumps(unknown))
+    rows_js = "() => JSON.stringify([...document.querySelectorAll('#tokList .trow')].map(e => allTokens()[Number(e.dataset.i)].address.toLowerCase()))"
+    try:
+        async def page(proxy_only=False, cached=False, original=False):
+            pg = await b.new_page(viewport={"width": 1280, "height": 900})
+            pg.on("pageerror", lambda e: errors.append("[base picker onchain sort] cached=%s original=%s proxy=%s %s" % (cached, original, proxy_only, e)))
+            await pg.add_init_script("window.__pickerNativeFetch=window.fetch.bind(window)")
+            stub = open(os.path.join(HERE, "stub-ethers.js"), encoding="utf-8").read()
+            await pg.route("**/stub-ethers.js", lambda r: r.fulfill(content_type="application/javascript", body=stub + fixture))
+            if original:
+                await pg.route("**/baseline-app", lambda r: r.fulfill(content_type="text/html", body=baseline))
+            requests = []
+
+            async def rpc(route):
+                payload = json.loads(route.request.post_data or "{}")
+                is_proxy = route.request.url == origin + "/base/rpc"
+                requests.append({"proxy": is_proxy, "method": payload.get("method"), "bytes": len((route.request.post_data or "").encode())})
+                if not is_proxy and (proxy_only or urlparse(route.request.url).hostname != "base.publicnode.com"):
+                    return await route.abort("connectionreset")
+                if is_proxy and requests[-1]["bytes"] > 4096:
+                    return await route.fulfill(status=413, content_type="application/json", body='{"error":{"code":-32600}}')
+                result = await pg.evaluate("p => window.__pickerRpc(p)", payload)
+                return await route.fulfill(content_type="application/json", headers={"access-control-allow-origin": "*"}, body=json.dumps({"jsonrpc": "2.0", "id": 1, "result": result}))
+
+            await pg.route(re.compile(r"https://(?:base\.publicnode\.com|base\.meowrpc\.com|base\.drpc\.org|base\.gateway\.tenderly\.co|mainnet\.base\.org)(?:/.*)?$"), rpc)
+            await pg.route("**/base/rpc", rpc)
+            await pg.route("**/gt/**", lambda r: r.fulfill(status=200 if cached else 429, content_type="application/json", body='{"data":[]}' if cached else '{"error":"GT unavailable in probe"}'))
+            await pg.route("https://api.geckoterminal.com/**", lambda r: r.fulfill(status=200 if cached else 429, content_type="application/json", headers={"access-control-allow-origin": "*"}, body='{"data":[]}' if cached else '{"error":"GT unavailable in probe"}'))
+            await pg.route("**/ev", lambda r: r.fulfill(status=204, body=""))
+            await pg.goto(origin + ("/baseline-app" if original else "/app") + "#swap")
+            await pg.wait_for_function("() => typeof E !== 'undefined' && E && typeof iMulti !== 'undefined' && iMulti")
+            await pg.evaluate("() => ensureBaseDexes()")
+            await pg.evaluate("""async ([unknown,cached,weth,aero,usdc]) => {
+                customTokens.push({symbol:'UNKNOWN',name:'Unknown route',address:unknown,decimals:18,imported:true});
+                account='0x'+'12'.repeat(20);walletChainId=CHAIN.id;walletIsRemote=true;
+                await refreshBalances();
+                for(const key of Object.keys(metaCache))delete metaCache[key];
+                if(cached)for(const [address,price]of [[weth,3000],[aero,0.9],[usdc,1],[unknown,10]])metaCache[address]={address,price_usd:String(price)};
+                window.__pickerBatches=[];const real=multicall;
+                multicall=async calls=>{const decoded=calls.map(c=>window.__pickerDecode(c.data)),inputs=[];
+                    for(const c of decoded){
+                        if(c.name==='quoteExactInputSingle'){const a=c.args[0];inputs.push(typeof a[0]==='string'?a[0]:a[1]?a[0][0]:a[0][1]);}
+                        if(c.name==='getAmountsOut'){const a=c.args[1][0];inputs.push(typeof a==='string'?a:a[0]);}
+                    }
+                    const addresses=[...new Set(inputs.filter(x=>typeof x==='string').map(x=>x.toLowerCase()))];
+                    if(addresses.includes(unknown))window.__pickerBatches.push({calls:decoded.length,inputs:addresses});
+                    return real(calls);};
+            }""", [unknown, cached, weth, aero, usdc])
+            return pg, requests
+
+        for proxy_only in (False, True):
+            pg, requests = await page(proxy_only=proxy_only)
+            await pg.click("#tokInBtn")
+            await pg.wait_for_function("() => window.__pickerBatches.length > 0 && basePickerPriceLoads.size === 0", timeout=20000)
+            order = json.loads(await pg.evaluate(rows_js))
+            assert order[:4] == [weth, aero, usdc, unknown], "[base picker onchain sort] GT down: expected WETH, AERO, USDC, unknown: %s" % order[:6]
+            assert await pg.evaluate("() => window.__pickerBatches.length") == 1, "[base picker onchain sort] exactly one logical Multicall3 quote batch per open"
+            assert set(await pg.evaluate("() => window.__pickerBatches[0].inputs")) == {weth, aero, unknown}, "[base picker onchain sort] the one picker batch must include every missing-price held token, excluding stablecoins"
+            assert await pg.evaluate("() => basePickerUsdOf(tokenBySymbol('UNKNOWN')) === null"), "[base picker onchain sort] failed quote must be unknown, never $0"
+            assert await pg.evaluate("() => [...document.querySelectorAll('#tokList .b')].every(e => !e.textContent.includes('$'))"), "[base picker onchain sort] prices must not become labels"
+            assert await pg.evaluate("() => !metaCache[WETH_ADDR.toLowerCase()]?.price_usd"), "[base picker onchain sort] fallback prices must not populate GT metadata"
+            await pg.click("#tokClose")
+            await pg.click("#tokInBtn")
+            await pg.wait_for_timeout(150)
+            assert await pg.evaluate("() => window.__pickerBatches.length") == 1, "[base picker onchain sort] second open within 60 seconds must make zero quote calls"
+            assert json.loads(await pg.evaluate(rows_js))[:4] == order[:4], "[base picker onchain sort] cached order must stay stable"
+            await pg.click("#tokClose")
+            await pg.evaluate("() => { window.__pickerNow=Date.now;Date.now=()=>window.__pickerNow()+61000; }")
+            await pg.click("#tokInBtn")
+            await pg.wait_for_function("() => window.__pickerBatches.length === 2 && basePickerPriceLoads.size === 0", timeout=20000)
+            await pg.evaluate("() => {Date.now=window.__pickerNow;}")
+            assert all(r["bytes"] <= 4096 for r in requests if r["proxy"]), "[base picker onchain sort] proxy transport cap"
+            if proxy_only:
+                assert any(r["proxy"] and r["method"] == "eth_call" for r in requests), "[base picker onchain sort] public failures must use /base/rpc"
+            else:
+                assert not any(r["proxy"] for r in requests), "[base picker onchain sort] publicnode success must not use proxy"
+            print("[base picker onchain sort] GT down, proxyOnly=%s: WETH > AERO > USDC > unknown; one logical batch; second open zero; TTL expiry refreshes; unknown stays null" % proxy_only)
+            await pg.unroute_all(behavior="wait")
+            await pg.context.close()
+        orders=[]
+        for original in (True, False):
+            pg, requests = await page(cached=True, original=original)
+            await pg.click("#tokInBtn")
+            await pg.wait_for_timeout(150)
+            orders.append(await pg.evaluate(rows_js))
+            assert await pg.evaluate("() => window.__pickerBatches.length") == 0, "[base picker onchain sort] cached GT prices must cause zero quote batches"
+            await pg.unroute_all(behavior="wait")
+            await pg.context.close()
+        assert orders[0] == orders[1], "[base picker onchain sort] GT-cached ordering must be byte-identical to aa8c727"
+        print("[base picker onchain sort] PASS — GT cached: byte-identical ordering to aa8c727 and zero quote batches; public and Worker fallback paths pass")
     finally:
         await b.close()
         srv.shutdown()

@@ -9833,9 +9833,77 @@ function refreshButton(){
 }
 
 /* ---------- token picker ---------- */
-function openPicker(side){pickerTarget=side;$("tokSearch").value="";renderTokenList("");
-  $("tokOv").classList.add("on");setTimeout(()=>$("tokSearch").focus(),30);}
-function closePicker(){$("tokOv").classList.remove("on");}
+const BASE_PICKER_PRICE_TTL=60000;
+const basePickerPrices=new Map(),basePickerPriceLoads=new Map();
+let basePickerOpenSeq=0;
+const basePickerPriceKey=t=>routable(t).address.toLowerCase()+":"+t.decimals;
+function basePickerGtPrice(t){
+  const m=metaCache[(t.native?WETH_ADDR:t.address).toLowerCase()];
+  const px=t.stable?1:Number(m&&m.price_usd);
+  return Number.isFinite(px)&&px>0?px:null;
+}
+function basePickerUsdOf(t){
+  const b=balances[balKey(t)];if(b===undefined||b<=0n)return undefined;
+  const px=basePickerGtPrice(t);
+  if(px!==null)return Number(E.formatUnits(b,t.decimals))*px;
+  const hit=basePickerPrices.get(basePickerPriceKey(t));
+  return hit&&Date.now()-hit.at<BASE_PICKER_PRICE_TTL&&hit.price!==null
+    ?Number(E.formatUnits(b,t.decimals))*hit.price:null;
+}
+async function baseLoadPickerPrices(){
+  if(!account||activeChain!=="base")return false;
+  const now=Date.now(),seen=new Set();
+  const missing=allTokens().filter(t=>{
+    const b=balances[balKey(t)];if(b===undefined||b<=0n||basePickerGtPrice(t)!==null)return false;
+    const key=basePickerPriceKey(t),hit=basePickerPrices.get(key);
+    if(seen.has(key)||(hit&&now-hit.at<BASE_PICKER_PRICE_TTL))return false;
+    seen.add(key);return true;
+  });
+  if(!missing.length)return false;
+  const loadKey=missing.map(basePickerPriceKey).sort().join(",");
+  if(basePickerPriceLoads.has(loadKey))return basePickerPriceLoads.get(loadKey);
+  const work=(async()=>{
+    const prices=new Map(missing.map(t=>[basePickerPriceKey(t),null]));
+    try{
+      await ensureBaseDexes();
+      const usdc=tokenBySymbol("USDC"),specs=[];
+      for(const t of missing){
+        if(!Number.isInteger(t.decimals)||t.decimals<0||t.decimals>255)continue;
+        const amount=10n**BigInt(Math.max(0,t.decimals-3)),token=routable(t);
+        if(amount>=(1n<<256n))continue;
+        for(const venue of allVenues()){
+          if(venue.v4&&(!v4Matches(venue,token.address,usdc.address)||amount>U128))continue;
+          try{specs.push({key:basePickerPriceKey(t),units:Number(E.formatUnits(amount,t.decimals)),
+            ...encodeQuote(venue,token.address,usdc.address,amount)});}catch{}
+        }
+      }
+      // One logical quote batch; multicall keeps the Worker's existing 4 KiB transport cap.
+      if(specs.length){
+        const rows=await multicall(specs.map(s=>({target:s.target,data:s.data})));
+        rows.forEach((r,i)=>{
+          if(!r.ok||!r.data||r.data==="0x")return;
+          try{
+            const out=specs[i].dec(r.data);if(out<=0n)return;
+            const px=Number(E.formatUnits(out,usdc.decimals))/specs[i].units;
+            if(Number.isFinite(px)&&px>0&&(prices.get(specs[i].key)===null||px>prices.get(specs[i].key)))prices.set(specs[i].key,px);
+          }catch{}
+        });
+      }
+    }catch{/* Unknown stays null, including transport failures and failed quote batches. */}
+    const at=Date.now();for(const [key,price]of prices)basePickerPrices.set(key,{at,price});
+    return true;
+  })();
+  basePickerPriceLoads.set(loadKey,work);
+  try{return await work;}finally{basePickerPriceLoads.delete(loadKey);}
+}
+function openPicker(side){
+  const seq=++basePickerOpenSeq,owner=account;pickerTarget=side;$("tokSearch").value="";renderTokenList("");
+  $("tokOv").classList.add("on");setTimeout(()=>$("tokSearch").focus(),30);
+  baseLoadPickerPrices().then(changed=>{
+    if(changed&&seq===basePickerOpenSeq&&account===owner&&$("tokOv").classList.contains("on"))renderTokenList($("tokSearch").value);
+  });
+}
+function closePicker(){++basePickerOpenSeq;$("tokOv").classList.remove("on");}
 function renderTokenList(q){
   const list=$("tokList"),query=(q||"").trim().toLowerCase();
   let toks=allTokens();
@@ -9843,12 +9911,7 @@ function renderTokenList(q){
     (t.name||"").toLowerCase().includes(query)||t.address.toLowerCase().includes(query));
   /* ۲۰ اکتبر: دارای موجودی اول — قیمت‌دار به ترتیبِ ارزشِ دلاری (قیمت از کشِ همان loadMetas، و
      استیبل = ۱ دلار؛ هیچ درخواستِ تازه‌ای نمی‌زنیم)، بعد بی‌قیمت‌ها؛ بقیه به همان ترتیبِ فهرست (sort پایدار). */
-  const usdOf=t=>{
-    const b=balances[balKey(t)];if(b===undefined||b<=0n)return undefined;
-    const m=metaCache[(t.native?WETH_ADDR:t.address).toLowerCase()];
-    const px=t.stable?1:Number(m&&m.price_usd);
-    return Number.isFinite(px)&&px>0?Number(E.formatUnits(b,t.decimals))*px:null;
-  };
+  const usdOf=basePickerUsdOf;
   const rank=t=>{const u=usdOf(t);return u===undefined?[2,0]:u===null?[1,0]:[0,-u];};
   toks=toks.slice().sort((x,y)=>{const a=rank(x),b=rank(y);return a[0]-b[0]||a[1]-b[1];});
   let html=toks.map(t=>{
@@ -9863,13 +9926,15 @@ function renderTokenList(q){
   }else if(!toks.length)html='<div class="empty">Nothing found. Paste a contract address to import it.</div>';
   list.innerHTML=html;
   list.querySelectorAll(".trow").forEach(el=>el.onclick=()=>pickToken(allTokens()[+el.dataset.i]));
-  const hadPrices=toks.filter(t=>usdOf(t)!==undefined).map(t=>usdOf(t)===null?0:1).join("");
+  const gtPriceState=()=>toks.filter(t=>{const b=balances[balKey(t)];return b!==undefined&&b>0n;})
+    .map(t=>basePickerGtPrice(t)===null?0:1).join("");
+  const hadPrices=gtPriceState();
   loadMetas(toks.filter(t=>!t.native).map(t=>t.address)).finally(()=>{
     // قیمت‌ها تازه رسیدند و ترتیبِ دارایی‌ها عوض می‌شود → یک بار دوباره بچین (فقط اگر هنوز باز است و جست‌وجو همان است)
-    const now=toks.filter(t=>usdOf(t)!==undefined).map(t=>usdOf(t)===null?0:1).join("");
+    const now=gtPriceState();
     if(now!==hadPrices&&$("tokOv").classList.contains("on")&&($("tokSearch").value||"").trim().toLowerCase()===query)return renderTokenList(q);
     list.querySelectorAll(".av[data-tok]").forEach(el=>paintAvatar(el,allTokens()[+el.dataset.tok]));
-  });
+  }).catch(()=>{});
 }
 async function importToken(addr){
   let a;try{a=E.getAddress(addr);}catch{return;}
