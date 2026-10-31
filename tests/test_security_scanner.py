@@ -12,7 +12,7 @@ class Report:
         self.findings.append(SimpleNamespace(level=level, title=title, detail=detail))
 
 def functions():
-    source = Path(__file__).resolve().parents[1] / "scanner.py"
+    source = Path(__file__).resolve().parents[1] / "legacy" / "scanner.py"
     tree = ast.parse(source.read_text(encoding="utf-8"))
     tree.body = [node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name in
                  {"check_proxy", "adjust_severity_by_ownership"}]

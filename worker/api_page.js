@@ -116,7 +116,7 @@ export function renderApiPage(opts) {
     "<p>No sell route on Base. Zaexa publishes a no-sell only with a proven cause, and <code>cause</code> says which:</p>" +
     kvTable(causes, ["cause", "meaning"]) +
     '<pre style="margin-top:10px"><span class="dim">{"v":"nosell","ms":1530,"cause":"empty-pool"}</span></pre>' +
-    "<p>A <code>nosell</code> without a <code>cause</code> is unproven. Zaexa does not publish it, and you should not either.</p>" +
+    "<p><code>/vd</code> never returns a <code>nosell</code> without a proven <code>cause</code>. Where the cause cannot be proven, you get <code>{\"v\":null,\"why\":\"cause:unproven\"}</code> instead, which is not a verdict on the token.</p>" +
     '<h3><span class="kv u">v: null</span> + <code>why</code></h3>' +
     "<p>The check could not be done. That is not a verdict on the token. <code>why</code> says what went wrong; the same sentences appear on the <a class=\"go\" href=\"/report\">Exit Report</a>. An unknown code means: " + esc(WHY_FALLBACK_TEXT) + "</p>" +
     '<pre><span class="dim">{"v":null,"ms":9100,"why":"rpc-down"}</span></pre>' +

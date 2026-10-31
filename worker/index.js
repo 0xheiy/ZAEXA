@@ -2762,7 +2762,13 @@ async function diagVerdict(request, url, env, ctx) {
   // ret هم دقیقاً همین قاعده را دارد، ولی برعکس: فقط کنارِ v==="sell" —
   // چقدر از صد دلارِ فرضی برگشت، نه اینکه فروش رخ داد یا نه؛ nosell/null
   // هرگز ret نمی‌گیرد.
-  const { v, why, cause, ret, via } = await tokenVerdict(addr, env, ctx, t0 + OG_BUDGET_MS);
+  /* گاردِ انتشار — همان publishGuardRow‌ی گزارش و /pairs.json و بات: /vd هرگز
+     nosellِ بدونِ cause اثبات‌شده نمی‌دهد (→ null با cause:unproven). dex اینجا
+     در دسترس نیست (tokenVerdict فقط حکم برمی‌گرداند)، پس شاخه‌ی v4 گارد
+     عمل نمی‌کند؛ v4-onlyِ اثبات‌نشده را خودِ finalizeBaseNosell قبلاً می‌گیرد. */
+  const raw = await tokenVerdict(addr, env, ctx, t0 + OG_BUDGET_MS);
+  const { v, why, cause, ret, via } = publishGuardRow(
+    { v: raw.v, why: raw.why, cause: raw.cause, ret: raw.ret, via: raw.via }, "base");
   return vdDone(200, {
     v, ms: Date.now() - t0,
     why: v === null ? why : undefined,

@@ -93,6 +93,14 @@ async function call(path, init, e) {
   return await worker.fetch(new Request(ORIGIN + path, init), e || env, {});
 }
 
+/* حکمِ خامِ Base بدونِ گاردِ انتشار — همان tokenVerdictی که /vd صدا می‌زند.
+   /vd از ۳۱ اکتبر از publishGuardRow رد می‌شود، پس منطقِ خام باید از اینجا سنجیده شود. */
+async function rawVd(addr, e) {
+  const m = await import("./index.js");
+  if (!keepCgFlag) { m._cgKeyDownUntil(0); m._relayDownUntil(0); }
+  return await m.tokenVerdict(addr, e || env, {}, Date.now() + m.OG_BUDGET_MS);
+}
+
 /* ---- ۱. مسیرهای واقعی سایت پراکسی می‌شوند و درست بازنویسی می‌شوند ---- */
 const REAL = [
   ["/gt/networks/base/tokens/0xabc", "https://api.geckoterminal.com/api/v2/networks/base/tokens/0xabc"],
@@ -244,6 +252,7 @@ ok(res.status === 200, "index.html must still be served");
   ok(webIndex.includes('mint:"' + ap.API_SOL_EXAMPLE + '"'), "[api page] the Solana example mint is the one in the app's Solana list");
   ok(html.includes("Exit check by Zaexa") && html.includes("https://zaexa.com/t/&lt;address&gt;"), "[api page] the attribution request is present");
   ok(html.includes("A check of the exit, not a price call."), "[api page] the standing line is present");
+  ok(html.includes("never returns a <code>nosell</code> without a proven <code>cause</code>") && !html.includes("Zaexa does not publish it"), "[api page] states that /vd never returns a nosell without a proven cause");
   ok(html.includes('href="https://t.me/zaexadex"') && html.includes('href="https://x.com/zaexadex"'), "[api page] Telegram and X links are present");
   ok(webIndex.includes('telegram:"https://t.me/zaexadex"') && webIndex.includes('x:"https://x.com/zaexadex"'), "[api page] the links equal LINKS in the app");
   ok(html.includes("<strong>" + LIM + " requests per minute per IP.</strong>"), "[api page] the limit text is 120 per minute");
@@ -5641,10 +5650,14 @@ const REPORT_LOCS_EXPECTED = expectedReportLocs();
   // پوشش‌داده‌شده، پس nosellِ خام باید سرِ جایش بماند.
   const ADDR_V3 = "0x" + "a".repeat(40);
   globalThis.fetch = allRevertFetch(["uniswap-v3-base"]);
+  const rawV3 = await rawVd(ADDR_V3);
+  ok(rawV3.v === "nosell" && rawV3.cause === undefined, "the exact same all-revert probe outcome, but with the token's real pool "
+    + "on a covered dex (uniswap-v3-base), must RAW-verdict nosell (no cause) — got " + JSON.stringify(rawV3));
   const resV3 = await call("/vd/" + ADDR_V3, { headers: { "cf-connecting-ip": "203.0.113.202" } });
   const bodyV3 = await resV3.json();
-  ok(bodyV3.v === "nosell", "the exact same all-revert probe outcome, but with the token's real pool "
-    + "on a covered dex (uniswap-v3-base), must answer nosell — got " + JSON.stringify(bodyV3));
+  ok(bodyV3.v === null && bodyV3.why === "cause:unproven" && !("cause" in bodyV3),
+    "[vd publish guard] that cause-less raw nosell is published on /vd as v:null why:cause:unproven — got "
+    + JSON.stringify(bodyV3));
 
   // (۸) یک verdictِ sell هرگز نباید اندپوینتِ pools را صدا بزند — مثبت
   // هرگز از رویِ این حفاظ رد نمی‌شود.
@@ -7148,6 +7161,33 @@ console.log("[v4 pool selection] v4PoolsFromGt now ranks by sellers24 (numeric o
     "against the intercepted JSON-RPC request to go to V4_STATE_VIEW with V4_GET_LIQUIDITY_SEL+poolId " +
     "as calldata");
 
+  /* [vd publish guard] — /vd همان publishGuardRow‌ی گزارش را اعمال می‌کند:
+     nosellِ بدونِ cause → null/cause:unproven؛ با cause عضوِ واژه‌نامه سر جایش؛
+     ?probe=1 خام می‌ماند؛ سولانا بدونِ تغییر (کنترلش کنارِ تستِ JUP_KEY است). */
+  {
+    const ADDRG = "0x" + "5e".repeat(20);
+    // بدونِ cause: یک کلیدِ پرنقدینگی
+    globalThis.fetch = makeFetch9({ [PID1]: 777n, [PID2]: 0n });
+    const envG = { ASSETS, ZX_KV: kvWith([{ poolId: PID1 }, { poolId: PID2 }]) };
+    const rawG = await rawVd(ADDRG, envG);
+    const pubG = await (await call("/vd/" + ADDRG, { headers: { "cf-connecting-ip": "203.0.113.230" } }, envG)).json();
+    ok(rawG.v === "nosell" && rawG.cause === undefined, "[vd publish guard] the scenario is a raw cause-less nosell, got " + JSON.stringify(rawG));
+    ok(pubG.v === null && pubG.why === "cause:unproven" && !("cause" in pubG) && !("ret" in pubG) && !("via" in pubG),
+      "[vd publish guard] a cause-less Base nosell on /vd must be {v:null,why:cause:unproven}, got " + JSON.stringify(pubG));
+    // ?probe=1 خام و دست‌نخورده
+    const probeG = await (await call("/vd/" + ADDRG + "?probe=1", { headers: { "cf-connecting-ip": "203.0.113.231" } }, envG)).json();
+    ok(probeG.v === "nosell" && !("cause" in probeG) && Array.isArray(probeG.venues),
+      "[vd publish guard] ?probe=1 must stay raw (v:nosell, venues present), got " + JSON.stringify(probeG).slice(0, 200));
+    // با cause=empty-pool: همان nosell با همان cause
+    const ADDRE = "0x" + "5f".repeat(20);
+    globalThis.fetch = makeFetch9({ [PID1]: 0n, [PID2]: 0n });
+    const pubE = await (await call("/vd/" + ADDRE, { headers: { "cf-connecting-ip": "203.0.113.232" } },
+      { ASSETS, ZX_KV: kvWith([{ poolId: PID1 }, { poolId: PID2 }]) })).json();
+    ok(pubE.v === "nosell" && pubE.cause === "empty-pool" && !("why" in pubE),
+      "[vd publish guard] a nosell with cause empty-pool must stay nosell with that cause, got " + JSON.stringify(pubE));
+  }
+  console.log("[vd publish guard] GET /vd/<Base> passes the verdict through publishGuardRow: a cause-less nosell is {v:null,why:cause:unproven}, a nosell with cause empty-pool is unchanged, ?probe=1 stays raw, Solana nosell stays null/sol:unconfirmed (asserted next to the JUP_KEY sim-fail test); the raw verdict logic is asserted on tokenVerdict in the sections that used to read it off /vd");
+
   // (۲) یک کلیدِ پرنقدینگی کافی است — هیچ cause‌ای در پاسخ نباشد.
   {
     const ADDR = "0x" + "52".repeat(20);
@@ -7155,9 +7195,12 @@ console.log("[v4 pool selection] v4PoolsFromGt now ranks by sellers24 (numeric o
     const res = await call("/vd/" + ADDR, { headers: { "cf-connecting-ip": "203.0.113.222" } },
       { ASSETS, ZX_KV: kvWith([{ poolId: PID1 }, { poolId: PID2 }]) });
     const body = await res.json();
-    ok(body.v === "nosell", "sanity: this scenario must still verdict nosell, got " + JSON.stringify(body));
-    ok(!("cause" in body), "one non-zero v4 key must leave the /vd response with no \"cause\" key at all, got " +
-      JSON.stringify(body));
+    const raw = await rawVd(ADDR, { ASSETS, ZX_KV: kvWith([{ poolId: PID1 }, { poolId: PID2 }]) });
+    ok(raw.v === "nosell", "sanity: this scenario must still RAW-verdict nosell, got " + JSON.stringify(raw));
+    ok(raw.cause === undefined, "one non-zero v4 key must leave the raw verdict with no cause, got " +
+      JSON.stringify(raw));
+    ok(body.v === null && body.why === "cause:unproven" && !("cause" in body),
+      "[vd publish guard] that cause-less nosell is published as v:null cause:unproven, got " + JSON.stringify(body));
   }
   console.log("[v4 empty-pool cause] one real v4 key reading non-zero liquidity leaves /vd with no " +
     "\"cause\" key at all — liquidity present is never reported as the empty-pool story");
@@ -7170,8 +7213,11 @@ console.log("[v4 pool selection] v4PoolsFromGt now ranks by sellers24 (numeric o
     const res500 = await call("/vd/" + ADDR, { headers: { "cf-connecting-ip": "203.0.113.223" } },
       { ASSETS, ZX_KV: kvWith([{ poolId: PID1 }]) });
     const body500 = await res500.json();
-    ok(body500.v === "nosell" && !("cause" in body500),
-      "a 500 answering the eth_call itself must leave /vd with no cause key, got " + JSON.stringify(body500));
+    const raw500 = await rawVd(ADDR, { ASSETS, ZX_KV: kvWith([{ poolId: PID1 }]) });
+    ok(raw500.v === "nosell" && raw500.cause === undefined,
+      "a 500 answering the eth_call itself must leave the raw verdict nosell with no cause, got " + JSON.stringify(raw500));
+    ok(body500.v === null && body500.why === "cause:unproven" && !("cause" in body500),
+      "[vd publish guard] the same case is published as v:null cause:unproven, got " + JSON.stringify(body500));
 
     const ADDR2 = "0x" + "54".repeat(20);
     globalThis.fetch = async (url, init) => {
@@ -7188,8 +7234,11 @@ console.log("[v4 pool selection] v4PoolsFromGt now ranks by sellers24 (numeric o
     const resBad = await call("/vd/" + ADDR2, { headers: { "cf-connecting-ip": "203.0.113.224" } },
       { ASSETS, ZX_KV: kvWith([{ poolId: PID1 }]) });
     const bodyBad = await resBad.json();
-    ok(bodyBad.v === "nosell" && !("cause" in bodyBad),
-      "a non-0x-hex eth_call result must leave /vd with no cause key, got " + JSON.stringify(bodyBad));
+    const rawBad = await rawVd(ADDR2, { ASSETS, ZX_KV: kvWith([{ poolId: PID1 }]) });
+    ok(rawBad.v === "nosell" && rawBad.cause === undefined,
+      "a non-0x-hex eth_call result must leave the raw verdict nosell with no cause, got " + JSON.stringify(rawBad));
+    ok(bodyBad.v === null && bodyBad.why === "cause:unproven" && !("cause" in bodyBad),
+      "[vd publish guard] the same case is published as v:null cause:unproven, got " + JSON.stringify(bodyBad));
 
     // هیچ کلیدِ واقعی‌ای ذخیره نشده — v4PoolsEmpty حتی نباید یک eth_call هم بزند.
     const ADDR3 = "0x" + "5c".repeat(20);
@@ -7198,8 +7247,11 @@ console.log("[v4 pool selection] v4PoolsFromGt now ranks by sellers24 (numeric o
     const resEmpty = await call("/vd/" + ADDR3, { headers: { "cf-connecting-ip": "203.0.113.227" } },
       { ASSETS, ZX_KV: kvWith([]) });
     const bodyEmpty = await resEmpty.json();
-    ok(bodyEmpty.v === "nosell" && !("cause" in bodyEmpty),
-      "an empty stored v4 key list must leave /vd with no cause key, got " + JSON.stringify(bodyEmpty));
+    const rawEmpty = await rawVd(ADDR3, { ASSETS, ZX_KV: kvWith([]) });
+    ok(rawEmpty.v === "nosell" && rawEmpty.cause === undefined,
+      "an empty stored v4 key list must leave the raw verdict nosell with no cause, got " + JSON.stringify(rawEmpty));
+    ok(bodyEmpty.v === null && bodyEmpty.why === "cause:unproven" && !("cause" in bodyEmpty),
+      "[vd publish guard] the same case is published as v:null cause:unproven, got " + JSON.stringify(bodyEmpty));
     ok(ethCallsEmpty.length === 0,
       "an empty stored v4 key list must never even attempt an eth_call, got " + ethCallsEmpty.length);
 
@@ -7805,15 +7857,20 @@ console.log("[report cause] causeForRow enforces the closed REPORT_CAUSES vocabu
     async function askQ(addr, dexId, ipTail) {
       const savedFetch = globalThis.fetch;
       globalThis.fetch = dispatchQ(dexId);
+      const raw = await rawVd(addr, envQ);
       const res = await call("/vd/" + addr, { headers: { "cf-connecting-ip": "203.0.113." + ipTail } }, envQ);
       const body = await res.json();
       globalThis.fetch = savedFetch;
+      body.raw = raw;
       return body;
     }
 
     const covered = await askQ("0x" + "a".repeat(40), "uniswap-v3-base", 201);
-    ok(covered.v === "nosell" && !("why" in covered),
-       "the live shape on a COVERED dex must reach nosell end to end, with no why key, got " +
+    ok(covered.raw.v === "nosell" && covered.raw.why === null,
+       "the live shape on a COVERED dex must RAW-reach nosell end to end, with no why, got " +
+       JSON.stringify(covered.raw));
+    ok(covered.v === null && covered.why === "cause:unproven",
+       "[vd publish guard] that cause-less covered-dex nosell is published as v:null cause:unproven, got " +
        JSON.stringify(covered));
 
     const uncovered = await askQ("0x" + "b".repeat(40), "uniswap-v4-base", 202);
@@ -7865,12 +7922,16 @@ console.log("[report cause] causeForRow enforces the closed REPORT_CAUSES vocabu
         return { id: r.id, error: { code: 3 } };
       })), { status: 200, headers: { "content-type": "application/json" } });
     };
+    const rawP = await rawVd(ADDR_P, envP);
     const resP = await call("/vd/" + ADDR_P, { headers: { "cf-connecting-ip": "203.0.113.203" } }, envP);
     const bodyP = await resP.json();
     globalThis.fetch = savedFetch;
-    ok(bodyP.v === "nosell" && !("why" in bodyP),
-       "a v4-only token whose own indexed pool cannot fill any size must now reach nosell end to end — " +
-       "the chain-verified pool is its own coverage evidence, got " + JSON.stringify(bodyP));
+    ok(rawP.v === "nosell" && rawP.why === null,
+       "a v4-only token whose own indexed pool cannot fill any size must now RAW-reach nosell end to end — " +
+       "the chain-verified pool is its own coverage evidence, got " + JSON.stringify(rawP));
+    ok(bodyP.v === null && bodyP.why === "cause:unproven",
+       "[vd publish guard] that cause-less nosell is published as v:null cause:unproven (no dex on /vd, so the v4 branch of the guard cannot fire), got " +
+       JSON.stringify(bodyP));
   }
 
   /* ک) 🔴 حکم نباید بینِ دو درخواست عوض شود — شاهدِ نسخه ۴ باید با خودِ حکم
@@ -7945,10 +8006,12 @@ console.log("[report cause] causeForRow enforces the closed REPORT_CAUSES vocabu
       })), { status: 200, headers: { "content-type": "application/json" } });
     };
 
-    const first = await (await call("/vd/" + ADDR_K,
-      { headers: { "cf-connecting-ip": "203.0.113.204" } }, envK)).json();
+    // خامِ بدونِ گارد: دو بار پشت‌سرهم، دقیقاً همان سناریوی کش
+    const first = await rawVd(ADDR_K, envK);
     const batchesAfterFirst = rpcBatches;
-    const second = await (await call("/vd/" + ADDR_K,
+    const second = await rawVd(ADDR_K, envK);
+    // و آنچه /vd از همین کشِ گرم منتشر می‌کند (بدونِ cause → null)
+    const pubK = await (await call("/vd/" + ADDR_K,
       { headers: { "cf-connecting-ip": "203.0.113.205" } }, envK)).json();
     globalThis.fetch = savedFetch;
     if (savedCaches === undefined) delete globalThis.caches; else globalThis.caches = savedCaches;
@@ -7958,6 +8021,9 @@ console.log("[report cause] causeForRow enforces the closed REPORT_CAUSES vocabu
        "the SAME token one request later must still give nosell — the v4 evidence has to be cached " +
        "alongside the verdict, or the coverage gate silently downgrades a cache hit, got " +
        JSON.stringify(second));
+    ok(pubK.v === null && pubK.why === "cause:unproven",
+       "[vd publish guard] /vd publishes that cached cause-less nosell as v:null cause:unproven, got " +
+       JSON.stringify(pubK));
     ok(rpcBatches === batchesAfterFirst,
        "sanity: the second request must really be served from the verdict cache (no new venue-probe " +
        "RPC batch) — cause's own explanatory eth_call is a different, always-on-negative call and is " +
@@ -8868,10 +8934,11 @@ console.log("[report cause] causeForRow enforces the closed REPORT_CAUSES vocabu
   async function probeRet(addr, dispatch, ipTail) {
     const savedFetch = globalThis.fetch;
     globalThis.fetch = dispatch;
+    const raw = await rawVd(addr);
     const res = await call("/vd/" + addr, { headers: { "cf-connecting-ip": "203.0.113." + ipTail } });
     const body = await res.json();
     globalThis.fetch = savedFetch;
-    return { res, body };
+    return { res, body, raw };
   }
 
   // sell — کلیدها دقیقاً ms,ret,v
@@ -8893,7 +8960,7 @@ console.log("[report cause] causeForRow enforces the closed REPORT_CAUSES vocabu
   // nosell — بدونِ کلیدِ ret. گاردِ پوشش هم باید عبور کند، وگرنه به نامعلوم
   // تنزل می‌کند — پس اندپوینتِ "/pools" هم یک دکسِ پوشش‌داده‌شده می‌دهد.
   {
-    const { body } = await probeRet("0x" + "d".repeat(40), async (url, init) => {
+    const { body, raw: rawRet } = await probeRet("0x" + "d".repeat(40), async (url, init) => {
       const u = String(url);
       if (u.endsWith("/pools")) {
         return jsonRes({ data: [{ relationships: { dex: { data: { id: "uniswap-v3-base" } } } }] });
@@ -8902,7 +8969,10 @@ console.log("[report cause] causeForRow enforces the closed REPORT_CAUSES vocabu
       const reqs = JSON.parse(init.body);
       return jsonRes(reqs.map((r) => (r.id === 0 ? { id: 0, result: mkStatic4(120000000) } : cleanNosellRow(r))));
     }, 241);
-    ok(body.v === "nosell", "sanity: this scenario must verdict nosell, got " + JSON.stringify(body));
+    // سناریو خامِ nosellِ بدونِ cause است؛ /vd آن را null منتشر می‌کند و ret هرگز ندارد
+    ok(rawRet.v === "nosell", "sanity: this scenario must RAW-verdict nosell, got " + JSON.stringify(rawRet));
+    ok(body.v === null && body.why === "cause:unproven",
+       "[vd publish guard] this cause-less nosell is published as v:null cause:unproven, got " + JSON.stringify(body));
     ok(!("ret" in body), "a nosell /vd response must carry no ret key at all, got " + JSON.stringify(body));
   }
 
