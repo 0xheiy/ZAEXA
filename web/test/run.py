@@ -9994,6 +9994,7 @@ async def main():
         await check_board_star(p, errors)
         await check_pairs_star(p, errors)
         await check_swap_star(p, errors)
+        await check_swap_star_raised(p, errors)
         await check_header_star_parity(p, errors)
         await check_markets_pages_parity(p, errors)
         await check_stocks_star(p, errors)
@@ -21987,7 +21988,7 @@ async def check_pairs_star(p, errors):
 
 async def check_swap_star(p, errors):
     """[swap star] ۲۵ اکتبر: دکمه‌ی ستاره‌ی گرد ۳۲px در هدرِ کارتِ سواپ، چپِ انتخابگرِ شبکه، برای توکنِ «You receive»
-    (Base: tokenOut مگر native؛ Solana: mintِ دریافتی مگر SOL) — همان ظاهر و aria ستاره‌ی کارتِ Exit؛ بدونِ توکن غیرفعال با title."""
+    (Base: tokenOut مگر native؛ Solana: mintِ دریافتی مگر SOL) — همان آیکون و aria ستاره‌ی کارتِ Exit؛ سطحِ برآمده در [swap star raised]؛ بدونِ توکن غیرفعال با title."""
     srv, origin = we_serve()
     b = await p.chromium.launch()
     errs = []
@@ -22005,7 +22006,7 @@ async def check_swap_star(p, errors):
                 look: [cs.backgroundColor, cs.boxShadow, cs.color, cs.borderTopWidth].join('|'), lookE: [ce.backgroundColor, ce.boxShadow, ce.color, ce.borderTopWidth].join('|')}; }""")
         assert info["inBar"] and info["left"] and info["sameRow"], "[swap star] must sit in the swap header, left of the network selector: %s" % info
         assert abs(info["w"] - 32) < .5 and abs(info["h"] - 32) < .5 and info["rad"] in ("50%", "16px"), "[swap star] must be a 32px round button: %s" % info
-        assert info["look"] == info["lookE"] and "savedToggle" in info["cls"] and "iconBtn" in info["cls"], "[swap star] same look as the exit-card star: %s" % info
+        assert info["look"].split('|')[2:] == info["lookE"].split('|')[2:] and "savedToggle" in info["cls"] and "iconBtn" in info["cls"], "[swap star] keep the exit-card star's colour/border; raised surface covered separately: %s" % info
         assert not info["dis"] and info["pressed"] == "false" and info["glyph"] == "☆" and info["label"] == "Watch " + info["sym"], "[swap star] initial state: %s" % info
         await we_shot(pg, "swap-star-1440-light.png")
         await pg.click("#swapWatch")
@@ -22036,7 +22037,7 @@ async def check_swap_star(p, errors):
         assert await pg.get_attribute("#swapWatch", "aria-pressed") == "true", "[swap star] Solana sell: the received mint is the reference token"
         await pg.context.close()
         assert not errs, "[swap star] console errors: %s" % errs
-        print("[swap star] 32px round star in the Base and Solana swap header left of the network selector, same look/aria as the exit-card star, toggles the received token (Base tokenOut non-native; Solana received mint exact, SOL disabled with 'Select a token first')")
+        print("[swap star] 32px round star in the Base and Solana swap header left of the network selector, same icon/aria and colour/border as the exit-card star, raised surface tested separately; toggles the received token (Base tokenOut non-native; Solana received mint exact, SOL disabled with 'Select a token first')")
     finally:
         await b.close()
         srv.shutdown()
@@ -22623,6 +22624,68 @@ async def check_api_page(p, errors):
     finally:
         await b.close()
     print("[api page] footer API link (About column) on app, /pairs, landing, /report and /api; /api renders without horizontal scroll at 390 and 1280, light and dark, no console errors, CSP from web/_headers")
+
+
+async def check_swap_star_raised(p, errors):
+    """[swap star raised] Only the swap star adopts the network chip's surface; keep Exit check controls unchanged."""
+    import subprocess
+    srv, origin = we_serve()
+    b = await p.chromium.launch()
+    errs = []
+    root = os.path.abspath(os.path.join(HERE, "..", ".."))
+    baseline = subprocess.check_output(["git", "-C", root, "show", "b1ac626b1dbca29c3adc57f196fc6b0da31aa751:web/index.html"]).decode("utf-8")
+    baseline = re.sub(r'const ETHERS_SRC="[^"]*";', 'const ETHERS_SRC="./stub-ethers.js";', baseline, count=1)
+    baseline = re.sub(r'const ETHERS_SRI="[^"]*";', 'const ETHERS_SRI="";', baseline, count=1)
+    look = """id => {const e=document.getElementById(id),c=getComputedStyle(e),r=e.getBoundingClientRect();
+        return {bg:c.backgroundColor,shadow:c.boxShadow,color:c.color,border:c.borderTopWidth,
+            w:r.width,h:r.height,radius:c.borderRadius,glyph:e.textContent,pressed:e.getAttribute('aria-pressed')};} """
+    try:
+        env = FbEnv(b, origin, errs)
+        for width, height in ((1280, 900), (390, 844)):
+            for theme in ("dark", "light"):
+                tag = "[swap star raised] %d %s" % (width, theme)
+                pg = await env.open("#swap", vw=width, vh=height, scheme=theme, board=False)
+                await pg.wait_for_selector("#swapWatch:enabled")
+                await pg.wait_for_timeout(900)
+                await pg.mouse.move(0, 0)
+                star, chip = await pg.evaluate(look, "swapWatch"), await pg.evaluate(look, "srcChip")
+                assert (star["bg"], star["shadow"]) == (chip["bg"], chip["shadow"]), "%s: raised background/shadow must match srcChip: %s %s" % (tag, star, chip)
+                assert star["w"] == star["h"] == 32 and star["radius"] in ("50%", "16px") and star["glyph"] == "☆", "%s: keep round geometry and icon" % tag
+                exits = {id: await pg.evaluate(look, id) for id in ("baseWatch", "checkShare")}
+                rect = await pg.locator("#swapWatch").bounding_box()
+                await pg.mouse.move(rect["x"] + rect["width"] / 2, rect["y"] + rect["height"] / 2)
+                await pg.mouse.down(); await pg.wait_for_timeout(250)
+                held = await pg.evaluate(look, "swapWatch")
+                await pg.mouse.up(); await pg.mouse.move(0, 0); await pg.wait_for_timeout(250)
+                saved = await pg.evaluate(look, "swapWatch")
+                assert saved["pressed"] == "true" and saved["glyph"] == "★", "%s: saving must retain its filled state" % tag
+                assert (saved["bg"], saved["shadow"]) == (chip["bg"], chip["shadow"]), "%s: saved state stays raised at rest" % tag
+                rows = await pg.evaluate("() => JSON.parse(localStorage.getItem('zaexa.watchlist.v1') || '[]')")
+                assert len(rows) == 1 and rows[0]["address"] == await pg.evaluate("() => tokenOut.address.toLowerCase()"), "%s: persist received token" % tag
+                rect = await pg.locator("#setBtn").bounding_box()
+                await pg.mouse.move(rect["x"] + rect["width"] / 2, rect["y"] + rect["height"] / 2)
+                await pg.mouse.down(); await pg.wait_for_timeout(250)
+                pressed_chip = await pg.evaluate(look, "setBtn")
+                assert "inset" in held["shadow"] and held["shadow"] == pressed_chip["shadow"], "%s: held star must match the chip.round inset shadow" % tag
+                assert held["bg"] == chip["bg"], "%s: pressing preserves the network-chip background" % tag
+                await pg.mouse.up(); await pg.keyboard.press("Escape")
+                await pg.click("#swapWatch"); await pg.mouse.move(0, 0); await pg.wait_for_timeout(250)
+                assert await pg.evaluate("() => JSON.parse(localStorage.getItem('zaexa.watchlist.v1') || '[]').length") == 0, "%s: second click removes saved token" % tag
+                await pg.route(origin + "/app", lambda r: r.fulfill(status=200, content_type="text/html", body=baseline))
+                await pg.reload(); await pg.wait_for_selector("#swapWatch:enabled"); await pg.wait_for_timeout(900)
+                await pg.mouse.move(0, 0)
+                for id, original in exits.items():
+                    assert await pg.evaluate(look, id) == original, "%s: %s must be byte-identical in computed look/geometry to b1ac626" % (tag, id)
+                before = await pg.evaluate(look, "swapWatch")
+                assert before["w"] == star["w"] and before["h"] == star["h"] and before["radius"] == star["radius"] and before["glyph"] == star["glyph"], "%s: baseline swap star geometry/icon unchanged" % tag
+                assert (before["bg"], before["shadow"]) != (star["bg"], star["shadow"]), "%s: positive control must detect the old flat style" % tag
+                await pg.unroute_all(behavior="wait"); await pg.context.close()
+                print(tag + ": rest/saved = srcChip; held = chip.round inset; 32px, persistence, toggle and untouched Exit check controls PASS")
+        assert not errs, "[swap star raised] console errors: %s" % errs
+        print("[swap star raised] PASS — 1280/390, both themes; old flat style detected; Exit check star/share unchanged")
+    finally:
+        await b.close()
+        srv.shutdown()
 
 
 async def only(names):

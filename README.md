@@ -61,6 +61,12 @@ behave like "no."*
 - **Reverse quoting** — type what you want to receive, get the input required.
 - **Shareable quote links** — the whole state lives in the URL hash.
 
+## Public API
+
+`GET https://zaexa.com/vd/<address>` returns Zaexa's sellability verdict for a Base token address or Solana mint.
+See the [full API guide](https://zaexa.com/api) for examples, answer meanings and limits; the rate limit is **120 requests per minute per IP**.
+Please credit [Exit check by Zaexa](https://zaexa.com/t/%3Caddress%3E) when displaying a result, replacing `<address>` with the token address.
+
 ## Architecture
 
 **Swap execution has no backend.** Routing, quoting, simulation and signing all

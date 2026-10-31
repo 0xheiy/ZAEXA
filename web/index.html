@@ -1708,6 +1708,9 @@ footer .fine{max-width:78ch;margin:46px 0 0;font-size:11.5px;color:var(--tx3);li
 .mktSwitch a.on{background:var(--grad);color:var(--on-acc)}
 .mktSwitch a:focus-visible{outline:2px solid var(--acc);outline-offset:2px}
 .chip:not(.solid):not(#themeBtn),.tokbtn,.tfs button.on{box-shadow:2px 2px 5px var(--soft-lo),-2px -2px 5px var(--soft-hi)}
+/* Swap-only watch star: the network chip's raised surface, with the shared chip inset while held down. */
+#swapWatch{background:var(--card);box-shadow:2px 2px 5px var(--soft-lo),-2px -2px 5px var(--soft-hi)}
+#swapWatch:active:not(:disabled){transform:none;box-shadow:inset 2px 2px 5px var(--soft-lo),inset -2px -2px 5px var(--soft-hi)}
 .cta:not(:disabled),.chip.solid,.button.primary,.header-cta{box-shadow:inset 0 1px 1px rgba(255,255,255,.4),inset 0 -2px 2px rgba(20,30,55,.16),0 3px 6px var(--soft-lo)}
 .cta:active:not(:disabled),.chip.solid:active,.button.primary:active,.header-cta:active{transform:translateY(1px);box-shadow:inset 0 2px 4px rgba(20,30,55,.22)}
 
