@@ -9064,7 +9064,7 @@ async def check_flow_board_parity(p, errors):
             const bar = row.querySelector('.fbBar'), star = row.querySelector('.fbStar');
             return {hdShown: hd.getClientRects().length > 0, eyebrow: visText, headTop: r(head).top, ttlTop: r(ttl).top, inHead: head.contains(menu) && head.contains(tfs) && head.contains(tog) && net.contains(menu),
                     rowOf: [r(menu).top, r(tfs).top, r(tog).top].map(x => Math.round(x)), ctlTop: r(q('.fbCtl')).top, subBottom: r(q('.fbSub')).bottom,
-                    order: [r(net).right, r(tfs).left, r(tfs).right, r(tog).left], menuH: r(chip).height, tfsH: r(tfs).height, togH: r(tog).height,
+                    order: [r(tog).right, r(tfs).left, r(menu).left, r(ttl).left], menuH: r(chip).height, tfsH: r(tfs).height, togH: r(tog).height,
                     role: tog.getAttribute('role'), checked: tog.getAttribute('aria-checked'), pressed: tog.getAttribute('aria-pressed'), swSize: [r(tog.querySelector('.fbSw')).width, r(tog.querySelector('.fbSw')).height],
                     swOn: cs(tog.querySelector('.fbSw')).backgroundColor, acc: (() => { const p2 = document.createElement('i'); p2.style.cssText = 'color:var(--acc);position:absolute'; document.body.appendChild(p2); const c = cs(p2).color; p2.remove(); return c; })(),
                     rowH: rows.map(x => r(x).height), av: [r(row.querySelector('.fbAv')).width, r(row.querySelector('.fbAv')).height], ageColor: cs(row.querySelector('.fbAge')).color, tx3,
@@ -9072,8 +9072,9 @@ async def check_flow_board_parity(p, errors):
                     starW: [r(star).width, r(star).height], starTd: row.firstElementChild === star.closest('td'), firstTh: th[0].textContent.trim(), thW: r(th[0]).width,
                     foot: q('.fnote').textContent, fnoteColor: cs(q('.fnote')).color, sw: document.documentElement.scrollWidth, iw: innerWidth}; }""")
         assert not m["hdShown"] and m["eyebrow"] == 0, "[flow board preview parity] no separate 'Money flow' eyebrow row above the board: %s" % {k: m[k] for k in ("hdShown", "eyebrow")}
-        assert m["inHead"] and abs(m["rowOf"][0] - m["rowOf"][1]) <= 4 and abs(m["rowOf"][1] - m["rowOf"][2]) <= 4 and m["ctlTop"] < m["subBottom"], "[flow board preview parity] network selector, 1h|6h and the switch are in the title row: %s" % m
-        assert m["order"][0] <= m["order"][1] + 0.5 and m["order"][2] <= m["order"][3] + 0.5, "[flow board preview parity] order: network selector, then 1h|6h, then the toggle: %s" % m["order"]
+        # ۱ نوامبر (طرحِ حسام): کلید و دو گروه در ردیفِ عنوان سمتِ راست؛ شبکه زیرِ زیرعنوان سمتِ چپ (مثلِ /pairs)
+        assert m["inHead"] and abs(m["rowOf"][1] - m["rowOf"][2]) <= 4 and m["rowOf"][0] >= m["subBottom"] - 0.5 and m["ctlTop"] < m["subBottom"], "[flow board preview parity] switch and groups in the title row, network selector under the subtitle: %s" % m
+        assert m["order"][0] <= m["order"][1] + 0.5 and abs(m["order"][2] - m["order"][3]) <= 1, "[flow board preview parity] order: switch, then the groups; the network selector lines up with the title: %s" % m["order"]
         assert abs(m["menuH"] - m["tfsH"]) <= 1 and abs(m["togH"] - m["tfsH"]) <= 1, "[flow board preview parity] the network selector and the toggle are as tall as the segmented control: %s" % {k: m[k] for k in ("menuH", "tfsH", "togH")}
         assert m["role"] == "switch" and m["checked"] == "true" and m["pressed"] is None and m["swSize"] == [28, 16], "[flow board preview parity] the toggle is a role=switch pill with a 28x16 track: %s" % {k: m[k] for k in ("role", "checked", "pressed", "swSize")}
         assert m["swOn"] == m["acc"], "[flow board preview parity] the track is --acc when on: %s vs %s" % (m["swOn"], m["acc"])
@@ -9665,7 +9666,7 @@ async def check_flow_established(p, errors):
             [...document.querySelectorAll('#fbHead .fbCtl > *')].map(x => x.id || x.getAttribute('aria-label') || x.className)]""")
         assert st[0] and st[1] == ["New tokens*", "Established"] and st[2] == "New Base pairs · last hour · by unique wallets" and st[3], \
             "[flow established] default is New tokens with the old subtitle and the sell-route switch: %s" % st
-        assert st[4][:3] == ["fbNetSlot", "Token set", "Time window"], "[flow established] the set group sits after the network slot and before 1h|6h: %s" % st[4]
+        assert st[4] == ["fbTog", "Token set", "Time window"], "[flow established] right row: switch, set group, 1h|6h: %s" % st[4]
         assert len(env.pairs_calls) == 1 and len(fb_est_requested(env)[0]) == 1 and len(fb_est_requested(env)[1]) == 1, \
             "[flow established] the New path still does one pairs.json + one tokens/multi + one pools/multi: %s %s" % (env.pairs_calls, env.calls)
         # سوییچِ sell-route را خاموش می‌کنیم تا «مقدارِ ذخیره‌شده دست‌نخورده می‌ماند» سنجیده شود
@@ -9806,7 +9807,7 @@ async def check_flow_established(p, errors):
         await fb_wait_rows(pg)
         await pg.wait_for_timeout(300)
         m = await pg.evaluate("""() => { const card = document.querySelector('#view-flow > .card').getBoundingClientRect();
-            const kids = [...document.querySelectorAll('#fbHead .fbCtl > *')].filter(e => e.getClientRects().length).map(e => e.getBoundingClientRect());
+            const kids = [...document.querySelectorAll('#fbHead .fbCtl > *, #fbNetSlot')].filter(e => e.getClientRects().length).map(e => e.getBoundingClientRect());
             let overlap = false;
             for (let i = 0; i < kids.length; i++) for (let j = i + 1; j < kids.length; j++) {
               const a = kids[i], c = kids[j];
