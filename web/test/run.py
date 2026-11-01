@@ -4162,6 +4162,9 @@ async def check_mobile_compact(p, errors):
     API_FOOT_LINE = '      <a href="/api">API</a>\n'
     assert landing_src.count(API_FOOT_LINE) == 1, "web/landing.html's footer must carry exactly one API link"
     land_new = landing_src.replace(API_FOOT_LINE, "")
+    STOCKS_FOOT_LINE = '      <a href="/app#stocks">Stocks</a>\n'
+    assert land_new.count(STOCKS_FOOT_LINE) == 1, "landing footer must carry exactly one Stocks link"
+    land_new = land_new.replace(STOCKS_FOOT_LINE, "", 1)  # Only the newly requested footer link differs from the frozen footer.
     # ۲۴ اکتبر: فوترِ landing را مالک در 1916a01 پذیرفت؛ پایه دیگر «نزدیک‌ترین نیاکان بدونِ fMore» نیست و روی
     # همان کامیتِ ثابت قفل است (مثلِ [report body unchanged] که 6944652 را قفل می‌کند).
     LANDING_FOOTER_BASE = "1916a01"
@@ -5417,8 +5420,10 @@ async def check_report_page(p, errors):
             out.push([e.tagName + '.' + (e.getAttribute('class') || '') + '#' + e.id, [r.left - mr.left, r.top - mr.top, r.width, r.height].map(x => Math.round(x * 10) / 10),
                       cs.color, cs.backgroundColor, cs.borderTopColor, cs.borderTopWidth, cs.boxShadow, cs.fontSize, cs.fontWeight, cs.fill, cs.stroke, cs.display, cs.opacity]); }
         const f = document.querySelector('footer'), fr = f.getBoundingClientRect(), fc = getComputedStyle(f);
+        const stock = f.querySelector('a[href="/app#stocks"]'), stockH = stock ? stock.getBoundingClientRect().height : 0;
+        const stockRowDelta = stockH ? stockH + parseFloat(getComputedStyle(stock.parentElement).rowGap) : 0;
         return { els: out, foot: [fr.height, fc.color, fc.backgroundColor, fc.borderTopColor], bodyBg: getComputedStyle(document.body).backgroundColor,
-                 sw: document.documentElement.scrollWidth, iw: innerWidth }; }"""
+                 stockRowDelta, sw: document.documentElement.scrollWidth, iw: innerWidth }; }"""
     async def render_body(path, vw, vh, scheme):
         pg = await b.new_page(viewport={"width": vw, "height": vh}, color_scheme=scheme)
         await pg.add_init_script("localStorage.setItem(%s, %s);" % (_j.dumps(theme_key), _j.dumps(scheme)))
@@ -5446,7 +5451,7 @@ async def check_report_page(p, errors):
                 assert x[2:] == y[2:], "%s: %s computed colours/style differ: main %s vs branch %s" % (tag, x[0], x[2:], y[2:])
             # ۱۸ اکتبر [mobile compact]: فقط ارتفاعِ فوتر روی ۳۹۰px عمداً کوتاه‌تر شد (ستون‌های لینک در <details class="fMore">
             # جمع شدند)؛ رنگ‌ها و بدنه عیناً همان‌اند و روی ۱۴۴۰ ارتفاع هم همان است.
-            foot_h_ok = (n_["foot"][0] < o_["foot"][0] - 100) if vw == 390 else abs(o_["foot"][0] - n_["foot"][0]) <= 1
+            foot_h_ok = (n_["foot"][0] < o_["foot"][0] - 100) if vw == 390 else n_["stockRowDelta"] > 0 and abs(o_["foot"][0] + n_["stockRowDelta"] - n_["foot"][0]) <= 1
             assert o_["foot"][1:] == n_["foot"][1:] and foot_h_ok and o_["bodyBg"] == n_["bodyBg"], "%s: footer/body differ: %s vs %s" % (tag, o_["foot"], n_["foot"])
             assert n_["sw"] <= n_["iw"], "%s: the branch page scrolls horizontally: %s" % (tag, n_)
             n_checked += len(n_["els"])
@@ -8998,7 +9003,7 @@ FB_BASE_TOKEN_CARD_W = 1100
 
 
 async def check_flow_board_width(p, errors):
-    """[flow board width] ۲۵ اکتبر: روی دسکتاپ کارتِ تابلو هم‌پهنای کارتِ Stocks (ستونِ محتوای اپ) است؛ کارتِ جریانِ یک توکن عوض نشده."""
+    """[flow board width] The board alone widens to min(1320px, viewport content - 40px); Stocks and per-token Flow stay unchanged."""
     srv, origin = fb_serve()
     b = await p.chromium.launch()
     errs = []
@@ -9012,6 +9017,7 @@ async def check_flow_board_width(p, errors):
             pg = await env.open("#flow", vw=vw, vh=900, scheme="dark", board=True)
             await fb_wait_rows(pg)
             board = await pg.evaluate("() => document.querySelector('#view-flow > .card').getBoundingClientRect().width")
+            expected_board = await pg.evaluate("() => Math.min(1320, document.body.clientWidth - 40)")
             tbl = await pg.evaluate("() => { const t = document.querySelector('.fbTbl').getBoundingClientRect(), c = document.querySelector('#view-flow > .card').getBoundingClientRect(); return [t.left - c.left, c.right - t.right]; }")
             await pg.context.close()
             pg = await env.open("#stocks", vw=vw, vh=900, scheme="dark", board=False)
@@ -9024,11 +9030,11 @@ async def check_flow_board_width(p, errors):
             token = await pg.evaluate("() => document.querySelector('#view-flow > .card').getBoundingClientRect().width")
             await pg.context.close()
             res[vw] = (round(board, 1), round(stocks, 1), round(token, 1))
-            assert abs(board - stocks) <= 1, "[flow board width] %d: the board card (%s) must be as wide as the Stocks card (%s)" % (vw, board, stocks)
+            assert abs(board - expected_board) <= .5 and abs(stocks - FB_BASE_TOKEN_CARD_W) <= .5, "[flow board width] %d: board must be %s; Stocks must stay %s: %s %s" % (vw, expected_board, FB_BASE_TOKEN_CARD_W, board, stocks)
             assert board >= 1000 and abs(tbl[0]) <= 1 and abs(tbl[1]) <= 1, "[flow board width] %d: the table fills the card: %s %s" % (vw, board, tbl)
             assert abs(token - FB_BASE_TOKEN_CARD_W) <= 1, "[flow board width] %d: the per-token flow card changed: %s vs the base %s" % (vw, token, FB_BASE_TOKEN_CARD_W)
         assert not errs, "[flow board width] console errors: %s" % errs
-        print("[flow board width] board card = Stocks card within 1px at 1440 and 1280 (board, stocks, per-token: %s); the per-token flow card is still %dpx" % (res, FB_BASE_TOKEN_CARD_W))
+        print("[flow board width] board = min(1320px, content viewport - 40px) at 1440/1280; Stocks and per-token Flow remain %dpx: %s" % (FB_BASE_TOKEN_CARD_W, res))
     finally:
         await b.close()
         srv.shutdown()
@@ -9699,10 +9705,10 @@ async def check_flow_established(p, errors):
         assert all(r["net"] != "—" for r in rows), "[flow established] numbers from the stubbed GT: %s" % rows[:3]
         nets = [int(r["net"].replace("+", "")) for r in rows]
         assert nets == sorted(nets, reverse=True) and rows[0]["sym"] == "WETH", "[flow established] sorted by net buyers (WETH has the most in the stub): %s %s" % (nets, syms[:3])
-        ui = await pg.evaluate("""() => ({tog: document.querySelector('.fbTog').getClientRects().length, togHidden: document.querySelector('.fbTog').hidden,
+        ui = await pg.evaluate("""() => ({tog: document.querySelector('.fbTog').checkVisibility({visibilityProperty:true}), togHidden: document.querySelector('.fbTog').inert && document.querySelector('.fbTog').getAttribute('aria-hidden') === 'true' && document.querySelector('.fbTog').tabIndex === -1,
             on: [...document.querySelectorAll('#fbHead [data-fbset]')].map(x => x.textContent + (x.classList.contains('on') ? '*' : '')),
             ls: JSON.parse(localStorage.getItem('zaexa.flowboard.v1'))})""")
-        assert ui["tog"] == 0 and ui["togHidden"] and ui["on"] == ["New tokens", "Established*"], "[flow established] the sell-route switch is hidden in Established: %s" % ui
+        assert not ui["tog"] and ui["togHidden"] and ui["on"] == ["New tokens", "Established*"], "[flow established] the sell-route switch is invisible, inert and excluded from tab order in Established: %s" % ui
         assert ui["ls"] == {"only": False, "w": "h1", "set": "est"}, "[flow established] stored preference keeps `only` and adds set: %s" % ui["ls"]
         # چیپِ Exit: نتیجه‌ی همین نشست (WETH) دیده می‌شود، بقیه «Not checked yet»
         await pg.evaluate("() => { exitCache[WETH_ADDR.toLowerCase()] = {state: 'verified', lossPct: 1, at: Date.now()}; fbLast = ''; fbPaint(); }")
@@ -9737,7 +9743,7 @@ async def check_flow_established(p, errors):
         env.calls.clear(); env.pairs_calls.clear()
         await pg.reload()
         await fb_wait_rows(pg, min(15, len(exp["ok"])))
-        st2 = await pg.evaluate("() => [document.querySelector('.fbSub').textContent, document.querySelector('[data-fbset].on').textContent, document.querySelector('.fbTog').hidden]")
+        st2 = await pg.evaluate("() => [document.querySelector('.fbSub').textContent, document.querySelector('[data-fbset].on').textContent, getComputedStyle(document.querySelector('.fbTog')).visibility === 'hidden']")
         assert st2 == ["Established Base tokens · last hour · by unique wallets", "Established", True] and not env.pairs_calls, "[flow established] the set survives a reload with no /pairs.json: %s" % st2
         env.calls.clear()
         await pg.click('[data-fbset="new"]')
@@ -9807,7 +9813,7 @@ async def check_flow_established(p, errors):
               if (a.left < c.right - 0.5 && c.left < a.right - 0.5 && a.top < c.bottom - 0.5 && c.top < a.bottom - 0.5) overlap = true; }
             return {sw: document.scrollingElement.scrollWidth, inCard: kids.every(k => k.left >= card.left - 0.5 && k.right <= card.right + 0.5), overlap, n: kids.length,
                     lines: new Set(kids.map(k => Math.round(k.top))).size, tbl: document.querySelector('.fbTbl').getBoundingClientRect().right <= card.right + 0.5}; }""")
-        assert m["sw"] <= 390 and m["inCard"] and not m["overlap"] and m["n"] == 3 and m["tbl"], "[flow established] 390: controls wrap cleanly, no sideways scroll: %s" % m
+        assert m["sw"] <= 390 and m["inCard"] and not m["overlap"] and m["n"] == 4 and m["tbl"], "[flow established] 390: three visible controls plus the reserved switch wrap without overlap or page scroll: %s" % m
         # چیپ‌های Exit در ۳۹۰ بیش از دو خط نمی‌شوند؛ «Not checked» (بدونِ yet) و بعد از نتیجه‌ی نشست فقط برچسب
         await pg.evaluate("() => { exitCache[WETH_ADDR.toLowerCase()] = {state: 'verified', lossPct: 1, at: Date.now()}; fbLast = ''; fbPaint(); }")
         ch = await pg.evaluate("""() => [...document.querySelectorAll('#flowBody .fbChip')].map(c => ({t: c.innerText.replace(/\\s+/g, ' ').trim(), lines: Math.round(c.getBoundingClientRect().height / parseFloat(getComputedStyle(c).lineHeight))}))""")
@@ -9982,6 +9988,7 @@ async def main():
         await check_flow_board_width(p, errors)
         await check_flow_board_parity(p, errors)
         await check_flow_established(p, errors)
+        await check_flow_header_stable(p, errors)
         await check_exit_header_icons(p, errors)
         await check_watch_panel_views(p, errors)
         await check_strip_watch_merge(p, errors)
@@ -9997,6 +10004,7 @@ async def main():
         await check_swap_star_raised(p, errors)
         await check_header_star_parity(p, errors)
         await check_markets_pages_parity(p, errors)
+        await check_markets_no_clip(p, errors)
         await check_stocks_star(p, errors)
         await check_early_buyers(p, errors)
         await check_flow_large_trades(p, errors)
@@ -20784,7 +20792,7 @@ async def main():
         assert foot_info["cols"] == 3, (
             "web/pairs.html's .footGrid must have exactly 3 .footCol, found %s" % foot_info["cols"])
         assert foot_info["hasBrand"], "web/pairs.html's .footGrid is missing its .footBrand child"
-        assert foot_info["tradeHrefs"] == ["/app#swap", "/app#folio", "/app#flow", "/pairs"], (
+        assert foot_info["tradeHrefs"] == ["/app#swap", "/app#folio", "/app#flow", "/app#stocks", "/pairs"], (
             "the Trade footer column's hrefs are wrong: %s" % foot_info["tradeHrefs"])
         assert foot_info["baseScanHref"] == (
             "https://basescan.org/address/%s#code" % LIVE_EXECUTOR), (
@@ -22594,6 +22602,18 @@ async def check_api_page(p, errors):
         assert m.group(0).count(LINK) == 1, "[api page] %s: the footer must carry exactly one API link to /api" % label
         about = _re.search(r"<h4>About</h4>(.*?)</div>", m.group(0), _re.S)
         assert about and LINK in about.group(1), "[api page] %s: the API link belongs in the About column" % label
+        trade = _re.search(r"<h4>Trade</h4>(.*?)</div>", m.group(0), _re.S)
+        assert trade, "[footer stocks] %s: Trade column missing" % label
+        links = _re.findall(r'<a href="([^"]+)">([^<]+)</a>', trade.group(1))
+        prefix = "" if label == "web/index.html" else "/app"
+        expected = [(prefix + "#swap", "Swap"), (prefix + "#folio", "Portfolio"), (prefix + "#flow", "Flow"), (prefix + "#stocks", "Stocks"), ("/pairs", "New pairs")]
+        if label.startswith("/report") or label == "/api":
+            expected[0] = ("/app", "Swap")
+            expected.append(("/report", "Exit Report"))
+        elif label == "web/landing.html":
+            expected[0] = ("/app", "Swap")
+        assert links == expected, "[footer stocks] %s: require only Stocks after Flow, all other links unchanged: %s" % (label, links)
+    print("[footer stocks] PASS — all five rendered footers have exactly one Stocks link after Flow; app hash and other-page /app hash targets; no extra links")
     csp = _re.search(r"Content-Security-Policy: (.*)", open(os.path.join(HERE, "..", "_headers"), encoding="utf-8").read()).group(1).strip()
     b = await p.chromium.launch()
     try:
@@ -22686,6 +22706,111 @@ async def check_swap_star_raised(p, errors):
     finally:
         await b.close()
         srv.shutdown()
+
+
+def c4_markets_fixture(net="base"):
+    rows, tokens, pools, *_ = fb_fixture(net=net, hostile_eps=False)
+    for i, (row, token) in enumerate(zip(rows, tokens)):
+        row.update(symbol=row["symbol"] + "TOKEN", name="Wrapped liquidity governance token " + row["symbol"],
+                   priceUsd=0.001234, reserveUsd=1234567.89, vol24hUsd=9876543.21, dex="aerodrome-slipstream" if i % 2 else "uniswap-v3")
+        token["attributes"].update(symbol=row["symbol"], name=row["name"])
+    return rows, tokens, pools
+
+
+async def check_flow_header_stable(p, errors):
+    """[flow header stable] Preserve all three control rectangles and exclude the reserved switch from interaction."""
+    srv, origin = we_serve()
+    b = await p.chromium.launch()
+    errs = []
+    rects = """() => ['#fbNetSlot .chip', '#fbHead [aria-label="Token set"]', '#fbHead [aria-label="Time window"]'].map(s => {
+        const r=document.querySelector(s).getBoundingClientRect();return [r.x,r.y,r.width,r.height];})"""
+    toggle = """() => {const t=document.querySelector('[data-fbtog]'),r=t.getBoundingClientRect();
+        return {visible:t.checkVisibility({visibilityProperty:true}),inert:t.inert,aria:t.getAttribute('aria-hidden'),tab:t.tabIndex,
+            reserved:r.width>0&&r.height>0,only:fbPref.only,stored:JSON.parse(localStorage.getItem('zaexa.flowboard.v1'))};} """
+    try:
+        for width in (1920, 1366, 390):
+            for theme in ("dark", "light"):
+                for chain in ("base", "solana"):
+                    env = FbEnv(b, origin, errs)
+                    env.pairs["body"] = {"store": True, "rows": c4_markets_fixture(chain)[0]}
+                    env.gt = fb_est_gt(chain, {"tokens": [], "pools": []})
+                    pg = await env.open("#flow" + ("?chain=solana" if chain == "solana" else ""), vw=width, vh=1000, scheme=theme,
+                        init=["localStorage.setItem('zaexa.flowboard.v1',JSON.stringify({only:false,w:'h6',set:'new'}))"])
+                    await fb_wait_rows(pg); await pg.wait_for_timeout(250)
+                    before = await pg.evaluate(rects)
+                    await pg.click('[data-fbset="est"]'); await fb_wait_rows(pg); await pg.wait_for_timeout(250)
+                    after = await pg.evaluate(rects)
+                    tag = "[flow header stable] %d/%s/%s" % (width, theme, chain)
+                    assert all(abs(x-y) <= .5 for a,z in zip(before,after) for x,y in zip(a,z)), "%s: controls moved: %s -> %s" % (tag, before, after)
+                    st = await pg.evaluate(toggle)
+                    assert not st["visible"] and st["inert"] and st["aria"] == "true" and st["tab"] == -1 and st["reserved"], "%s: reserved switch must be inaccessible: %s" % (tag,st)
+                    assert st["only"] is False and st["stored"] == {"only":False,"w":"h6","set":"est"}, "%s: preference mutated: %s" % (tag,st)
+                    await pg.evaluate("() => document.querySelector('[data-fbtog]').focus()")
+                    assert not await pg.evaluate("() => document.activeElement.matches('[data-fbtog]')"), tag + ": hidden switch accepted focus"
+                    await pg.focus('[data-fbw="h6"]')
+                    for _ in range(6):
+                        await pg.keyboard.press("Tab")
+                        assert not await pg.evaluate("() => document.activeElement.matches('[data-fbtog]')"), tag + ": hidden switch in tab order"
+                    await pg.click('[data-fbset="new"]'); await fb_wait_rows(pg); await pg.wait_for_timeout(200)
+                    restored = await pg.evaluate(rects)
+                    assert all(abs(x-y) <= .5 for a,z in zip(before,restored) for x,y in zip(a,z)), "%s: return to New moved controls" % tag
+                    st = await pg.evaluate(toggle)
+                    assert st["visible"] and not st["inert"] and st["aria"] == "false" and st["tab"] == 0 and st["only"] is False, "%s: New did not restore the unchanged preference: %s" % (tag,st)
+                    assert await pg.evaluate("document.documentElement.scrollWidth <= innerWidth"), tag + ": page overflow"
+                    await pg.unroute_all(behavior="wait"); await pg.context.close()
+                    print(tag + ": three control rectangles stable; reserved switch invisible/inert/unfocusable; preference preserved")
+        assert not errs, "[flow header stable] console errors: %s" % errs
+        print("[flow header stable] PASS — 1920/1366/390, both chains/themes, New/Established/New")
+    finally:
+        await b.close(); srv.shutdown()
+
+
+async def check_markets_no_clip(p, errors):
+    """[markets no clip] Bound the last column and actions by the visible card, with only internal scrolling below desktop."""
+    srv, origin = we_serve()
+    b = await p.chromium.launch()
+    errs = []
+    measure = """kind => {
+        const c=document.querySelector(kind==='pairs'?'#pairsBoard':'#view-flow>.card'),r=c.getBoundingClientRect(),
+            t=c.querySelector('table'),w=kind==='pairs'?c.querySelector('.pairsTableScroll'):document.querySelector('#flowBody'),wr=w.getBoundingClientRect();
+        const visible=e=>e.getBoundingClientRect().width>0;
+        return {card:[r.left,r.right,r.width],viewport:document.body.clientWidth,
+            sw:document.documentElement.scrollWidth,iw:innerWidth,wrapRight:wr.right,client:w.clientWidth,scroll:w.scrollWidth,
+            shareFits:[...t.querySelectorAll('.fbSh')].every(e=>e.scrollWidth<=e.clientWidth+1),
+            last:[...t.querySelectorAll('tr')].map(row=>row.lastElementChild).filter(visible).map(e=>e.getBoundingClientRect().right),
+            actions:[...t.querySelectorAll('tr td:last-child button,tr td:last-child a')].filter(visible).map(e=>e.getBoundingClientRect().right)};
+    }"""
+    try:
+        for width in (1121,1366,1632,1920,1024,820,720,390):
+            for theme in ("dark","light"):
+                widths = []
+                for kind in ("pairs","flow"):
+                    env = FbEnv(b,origin,errs)
+                    rows,tokens,pools = c4_markets_fixture()
+                    env.pairs["body"] = {"store":True,"rows":rows};env.gt = fb_gt_for(tokens,pools)
+                    pg = await env.open("#flow" if kind == "flow" else "",vw=width,vh=1000,scheme=theme,path="/app" if kind=="flow" else "/pairs",
+                        init=["localStorage.setItem('zaexa.flowboard.v1',JSON.stringify({only:false,w:'h1',set:'new'}))"])
+                    await pg.wait_for_selector('#flowBody .fbRow' if kind=='flow' else '#rowsBody tr',state="attached")
+                    await pg.wait_for_timeout(250)
+                    m = await pg.evaluate(measure,kind);tag = "[markets no clip] %s/%d/%s" % (kind,width,theme)
+                    assert m["sw"] <= m["iw"], "%s: page scrolls: %s" % (tag,m)
+                    widths.append(m["card"][2])
+                    if width>=1121:
+                        assert len(m["last"])>=5 and all(right<=m["card"][1]+.01 and right<=m["wrapRight"]+.01 for right in m["last"]+m["actions"]), "%s: last column/action clipped: %s" % (tag,m)
+                        assert m["scroll"]<=m["client"]+1, "%s: desktop columns require internal scrolling: %s" % (tag,m)
+                        assert m["shareFits"], "%s: buy-share contents spill into the next column: %s" % (tag,m)
+                        assert abs(m["card"][2]-min(1320,m["viewport"]-40))<=.5, "%s: wrong board width: %s" % (tag,m)
+                    if kind=='pairs' and 760<width<1121:
+                        assert m["scroll"]>m["client"] and await pg.locator('.pairsTableScroll').evaluate("e=>getComputedStyle(e).overflowX")=='auto', "%s: narrow table must scroll inside its region" % tag
+                        await pg.locator('.pairsTableScroll').evaluate("e=>e.scrollLeft=e.scrollWidth")
+                        assert await pg.locator('.pairsTableScroll').evaluate("e=>e.scrollLeft>0"), tag+": internal scrolling does not work"
+                    await pg.unroute_all(behavior="wait");await pg.context.close()
+                assert abs(widths[0]-widths[1])<=.5, "[markets no clip] %d/%s: boards differ: %s" % (width,theme,widths)
+                print("[markets no clip] %d/%s: equal board widths; last cells/actions visible on desktop; no page overflow" % (width,theme))
+        assert not errs, "[markets no clip] console errors: %s" % errs
+        print("[markets no clip] PASS — 1121/1366/1632/1920 plus 1024/820/720/390, both themes")
+    finally:
+        await b.close();srv.shutdown()
 
 
 async def only(names):

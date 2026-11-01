@@ -284,7 +284,7 @@ header>.navPad{grid-column:1;grid-row:1;width:0;min-width:0}
 }
 @media(max-width:720px){.navPad{display:none}}
 
-.pairs-main{width:min(1100px,calc(100% - 40px));margin:36px auto 80px;display:flex;flex-direction:column;gap:18px}
+.pairs-main{width:min(1320px,calc(100% - 40px));margin:36px auto 80px;display:flex;flex-direction:column;gap:18px}
 /* ۲۴ اکتبر: سوییچ Flow/New pairs روی /app#flow و /pairs هم‌تراز بماند (دسکتاپ) */
 @media(min-width:961px){.pairs-main{margin-top:36px}}
 /* ۲۵ اکتبر: محتوای New pairs در کارتی عیناً مثلِ کارتِ تابلوی Flow (همان عرض/گوشه/پس‌زمینه/سایه) تا با سوییچ چیزی نپرد */
@@ -485,6 +485,22 @@ footer .fine{max-width:78ch;margin:46px 0 0;font-size:11.5px;color:var(--tx3);li
 .chain-tabs svg{object-fit:contain;flex:none}
 
 .pairsTableScroll{position:relative;max-width:100%;overflow-x:auto}
+@media(min-width:761px){
+  .pairs-table{table-layout:fixed;min-width:1020px} /* Reserve 40px for watch and 128px for actions. */
+  .pairs-table th:nth-child(1){width:40px}
+  .pairs-table th:nth-child(2){width:24%}
+  .pairs-table th:nth-child(3){width:13%}
+  .pairs-table th:nth-child(4){width:8.5%}
+  .pairs-table th:nth-child(5),.pairs-table th:nth-child(6){width:6.5%}
+  .pairs-table th:nth-child(7),.pairs-table th:nth-child(9){width:6%}
+  .pairs-table th:nth-child(8){width:13%}
+  .pairs-table th:last-child{width:128px}
+  .pairs-table .num-cell{padding-left:6px;padding-right:6px}
+  .pairs-table .checked-cell,.pairs-table th:nth-child(n+3):nth-child(-n+9){padding-left:8px;padding-right:8px}
+  .pairs-table td:nth-child(8){overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .token-sym{flex:0 0 auto;min-width:0;max-width:calc(100% - 40px);overflow:hidden;text-overflow:ellipsis}
+  .token-name{flex:1;min-width:0}
+}
 @media(max-width:760px){.pairsTableScroll{display:none}}
 
 /* Soft sculpted controls shared across light and dark surfaces. */
@@ -873,6 +889,7 @@ Solana</button><script>if(window.__zxPairsCopy){window.__zxPairsCopy.tabs();wind
       <a href="/app#swap">Swap</a>
       <a href="/app#folio">Portfolio</a>
       <a href="/app#flow">Flow</a>
+      <a href="/app#stocks">Stocks</a>
       <a href="/pairs">New pairs</a>
     </div>
     <div class="footCol">
@@ -1209,7 +1226,7 @@ Solana</button><script>if(window.__zxPairsCopy){window.__zxPairsCopy.tabs();wind
       '<td class="num-cell">' + esc(liqStr) + '</td>' +
       '<td class="num-cell">' + esc(volStr) + '</td>' +
       '<td class="checked-cell"><time datetime="' + esc(poolAgeIso) + '" title="' + esc(poolAgeIso) + '">' + poolAge.text + '</time></td>' +
-      '<td>' + dexStr + '</td>' +
+      '<td title="' + dexStr + '">' + dexStr + '</td>' +
       '<td class="checked-cell"><time datetime="' + checkedAttr + '" title="' + checkedAttr + '">' + age.text + '</time></td>' +
       '<td class="col-actions">' + actionsHtml + '</td>';
   }

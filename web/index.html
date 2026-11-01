@@ -660,6 +660,7 @@ html[data-boot-view="stocks"] .nav button[data-view="stocks"]{background:var(--b
 /* ---------------- layout ---------------- */
 main{max-width:1140px;margin:0 auto;padding:8px 20px 56px;display:flex;flex-direction:column;gap:18px;
   flex:1 0 auto;width:100%}
+main:has(>#view-flow.on.fbOn){max-width:1360px}
 .row{display:grid;gap:18px}
 .row.sub{align-items:start}   /* کارت خالی نباید کشیده شود */
 /* هیچ‌کدام از دو کارت کشیده نمی‌شود — هرکدام قد خودش را دارد.
@@ -1007,9 +1008,14 @@ section.card.isDone #actBtn,section.card.isDone #solStatusSlot,section.card.isDo
 .fbHead[hidden]{display:none}
 .fbTtl{font-size:15.5px;font-weight:660}
 .fbSub{font-size:12.5px;color:var(--tx3);margin-top:3px}
+@media(max-width:720px){.fbSub{min-height:3lh}}
 .fbCtl{display:flex;flex-wrap:wrap;align-items:center;gap:8px}
 .fbCtl .tfs{margin-left:0;padding:3px}
 .fbCtl .tfs button{height:28px;padding:0 14px}
+/* ۱ نوامبر — تبِ فعال ضخیم است و پهنای متن را عوض می‌کرد (۰٫۸px در ۱۹۲۰): همان روحِ نوارِ بالا (#nav [data-t])؛
+   جای نسخه‌ی ضخیم از قبل گرفته می‌شود تا جابه‌جاییِ New tokens|Established هیچ دکمه‌ای را تکان ندهد. */
+#fbHead .tfs button[data-t]{display:inline-flex;flex-direction:column;justify-content:center;align-items:center}
+#fbHead .tfs button[data-t]::after{content:attr(data-t);content:attr(data-t) / "";font-weight:620;height:0;visibility:hidden;overflow:hidden;pointer-events:none;user-select:none}
 #fbNetSlot{flex:none;display:flex}
 #fbNetSlot .chip{height:34px;box-sizing:border-box}
 .fbTog{display:inline-flex;align-items:center;gap:9px;height:34px;box-sizing:border-box;padding:0 14px 0 10px;border-radius:999px;background:var(--card2);color:var(--tx2);font-size:12.5px;text-align:left;white-space:nowrap}
@@ -1058,6 +1064,16 @@ section.card.isDone #actBtn,section.card.isDone #solStatusSlot,section.card.isDo
 .fbBack:hover{color:var(--tx)}
 #view-flow.fbOn #flowTokBtn,#view-flow.fbOn #flowTfs,#view-flow.fbOn>.card>header{display:none}
 #view-flow.fbOn > p{display:none}   /* یادداشتِ «استخرِ همین توکن» مالِ جریانِ یک توکن است، نه تابلو */
+#view-flow.fbOn #flowBody{max-width:100%;overflow-x:auto}
+@media(min-width:1121px){
+  .fbTbl{table-layout:fixed}
+  .fbTbl th:nth-child(1){width:48px}
+  .fbTbl th:nth-child(2){width:22%}
+  .fbTbl th:nth-child(3){width:9%}
+  .fbTbl th:nth-child(4){width:13%}
+  .fbTbl th:nth-child(5){width:24%}
+  .fbTbl th:nth-child(6){width:11%}
+}
 .ebCard{border-top:1px solid var(--line)}
 .ebIn{padding:14px 20px 6px}
 .ebTtl{font-size:14px;font-weight:660}
@@ -2221,8 +2237,8 @@ try{(function(){
     <div class="fbHead" id="fbHead" hidden>
       <div class="fbHL"><div class="fbTtl">Where money is flowing</div><div class="fbSub" id="fbSub"></div></div>
       <div class="fbCtl"><div id="fbNetSlot"></div>
-        <div class="tfs" role="group" aria-label="Token set"><button type="button" data-fbset="new">New tokens</button><button type="button" data-fbset="est">Established</button></div>
-        <div class="tfs" role="group" aria-label="Time window"><button type="button" data-fbw="h1">1h</button><button type="button" data-fbw="h6">6h</button></div>
+        <div class="tfs" role="group" aria-label="Token set"><button type="button" data-fbset="new" data-t="New tokens">New tokens</button><button type="button" data-fbset="est" data-t="Established">Established</button></div>
+        <div class="tfs" role="group" aria-label="Time window"><button type="button" data-fbw="h1" data-t="1h">1h</button><button type="button" data-fbw="h6" data-t="6h">6h</button></div>
         <button type="button" class="fbTog" role="switch" data-fbtog aria-checked="true"><span class="fbSw" aria-hidden="true"></span>Only tokens with a sell route</button></div>
     </div>
     <div class="fbBackRow" id="flowBackRow" hidden><button class="fbBack" id="flowBack" type="button">← Back to all tokens</button></div>
@@ -2535,6 +2551,7 @@ try{(function(){
       <a href="#swap">Swap</a>
       <a href="#folio">Portfolio</a>
       <a href="#flow">Flow</a>
+      <a href="#stocks">Stocks</a>
       <a href="/pairs">New pairs</a>
     </div>
     <div class="footCol">
@@ -8358,7 +8375,10 @@ function fbHead(d){
   const sub=$("fbSub");if(sub)sub.textContent=`${est?"Established "+name+" tokens":"New "+name+" pairs"} · ${w==="h1"?"last hour":"last 6 hours"} · by unique wallets`;
   document.querySelectorAll("#fbHead [data-fbset]").forEach(b=>b.classList.toggle("on",b.dataset.fbset===fbPref.set));
   document.querySelectorAll("#fbHead [data-fbw]").forEach(b=>b.classList.toggle("on",b.dataset.fbw===w));
-  const t=document.querySelector("#fbHead [data-fbtog]");if(t){t.setAttribute("aria-checked",fbPref.only?"true":"false");t.hidden=est;}   // مقدارِ ذخیره‌شده‌ی سوییچ دست‌نخورده می‌ماند
+  const t=document.querySelector("#fbHead [data-fbtog]");if(t){
+    t.setAttribute("aria-checked",fbPref.only?"true":"false");
+    t.style.visibility=est?"hidden":"";t.setAttribute("aria-hidden",String(est));t.inert=est;t.tabIndex=est?-1:0;
+  }   // Reserve the switch's space without changing its stored preference.
   return "";
 }
 function fbStarOn(addr){
