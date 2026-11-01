@@ -601,6 +601,8 @@ export const REPORT_CAP_PROBE = Object.freeze(["ok", "cap", "timeout", "threw"])
    برای دو eth_callِ اثباتِ counter-sell وقتی حکم به sells:elsewhere رسیده. */
 export const REPORT_METER_STAGES = Object.freeze([
   "pools", "base-token", "follow", "recheck", "sol-pools", "sol-token", "probe", "kv-write", "counter",
+  // ۱ نوامبر — بررسیِ استخرِ یک‌طرفه (v4OneWayCheck)، جدا از counter-sell تا در /vd/passes قاطی نشوند.
+  "oneway",
 ]);
 
 /* probeFetch یک تزریق است (کالر در worker/index.js یک fetch با HEAD/AbortController

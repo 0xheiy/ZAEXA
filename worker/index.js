@@ -1368,24 +1368,44 @@ export async function withCounterProof(result, addr, meta, deadlineAt, env, cove
    ساب‌ریکوئست (کاناری/قیمت، خرید، فروش) — پس سقفِ بودجه‌ی گذر یکی کمتر از
    COUNTER_PROOF_PASS_MAX_USED است. هر شکستی → false (رفتارِ امروز). */
 export const ONE_WAY_PASS_MAX_USED = COUNTER_PROOF_PASS_MAX_USED - 1;
+/* ۱ نوامبر — ناظرِ نتیجه: هر بار یک برچسبِ کوتاه و ثابت (هرگز آدرس) به
+   meterHooks.oneWay می‌رود تا در /vd/passes (sub.oneWay) شمرده شود. فقط رصد؛
+   روی خودِ حکم هیچ اثری ندارد. */
+function noteOneWay(meterHooks, label) {
+  if (meterHooks && typeof meterHooks.oneWay === "function") {
+    try { meterHooks.oneWay(label); } catch (e) { /* فقط رصد */ }
+  }
+}
+// آخرین آیتمِ غیرِکاناریِ collect → «oneway-sell:revert:3» و مانندِ آن؛ هر دو جزء از فهرستِ بسته‌اند.
+function oneWayFailLabel(collect) {
+  for (let i = collect.length - 1; i >= 0; i--) {
+    const c = collect[i];
+    if (c && c.venue !== "canary" && typeof c.stage === "string" && typeof c.out === "string") return c.stage + ":" + c.out;
+  }
+  return "no-call";
+}
 export async function v4OneWayCheck(addr, meta, env, deadlineAt, meterHooks) {
   try {
-    if (deadlineAt != null && deadlineAt - Date.now() < 1200) return false;
-    if (!passBudgetHasRoom(meterHooks, ONE_WAY_PASS_MAX_USED)) return false;
+    if (deadlineAt != null && deadlineAt - Date.now() < 1200) { noteOneWay(meterHooks, "skip:deadline"); return false; }
+    if (!passBudgetHasRoom(meterHooks, ONE_WAY_PASS_MAX_USED)) { noteOneWay(meterHooks, "skip:budget"); return false; }
     const entry = await readV4Entry(addr, env);
-    if (entry.complete !== true || !Array.isArray(entry.keys)) return false; // همان شرطِ v4PoolsEmpty
+    if (entry.complete !== true || !Array.isArray(entry.keys)) { noteOneWay(meterHooks, "skip:index"); return false; } // همان شرطِ v4PoolsEmpty
     // فقط وقتی توکن دقیقاً یک استخرِ v4 دارد: با چند استخر، یک‌طرفه‌بودنِ یکی چیزی درباره‌ی بقیه نمی‌گوید.
-    if (entry.keys.length !== 1) return false;
+    if (entry.keys.length !== 1) { noteOneWay(meterHooks, "skip:keys"); return false; }
     const key = entry.keys.find((k) => oneWayCounterFor(k, addr) != null);
-    if (!key) return false;
+    if (!key) { noteOneWay(meterHooks, "skip:counter"); return false; }
     const hasStage = meterHooks && typeof meterHooks.stage === "function";
-    if (hasStage) { try { meterHooks.stage("counter"); } catch (e) { /* فقط رصد */ } }
+    if (hasStage) { try { meterHooks.stage("oneway"); } catch (e) { /* فقط رصد */ } }
+    const collect = [];
     try {
-      return await v4OneWayProof(addr, key, { deadlineAt, fetchImpl: fetch, rpcs: baseRpcsFor(env) });
+      const ok = await v4OneWayProof(addr, key, { deadlineAt, fetchImpl: fetch, rpcs: baseRpcsFor(env), collect });
+      noteOneWay(meterHooks, ok === true ? "proved" : oneWayFailLabel(collect));
+      return ok;
     } finally {
       if (hasStage) { try { meterHooks.stage("base-token"); } catch (e) { /* فقط رصد */ } }
     }
   } catch (e) {
+    noteOneWay(meterHooks, "throw");
     return false;
   }
 }
@@ -1507,7 +1527,18 @@ async function ogFetchVerdictDetail(addr, meta, deadlineAt, env, ctx, metaWhy, m
   if (cacheOut.v4Proof === true) {
     const empty = await v4PoolsEmpty(addr, env, deadlineAt);
     // شاهدِ واقعی از خودِ استخر: «هیچ اندازه‌ای پر نمی‌شود»
-    return withCounterProof(finalizeBaseNosell(empty, covered, false, poolCause), addr, meta, deadlineAt, env, covered, meterHooks);
+    let fin = finalizeBaseNosell(empty, covered, false, poolCause);
+    /* ۱ نوامبر — سنجشِ زنده (BTG، MECHAHITLER): استخرِ یک‌طرفه دقیقاً از همین شاخه
+       می‌گذرد (فروش روی کلیدِ واقعی NotEnoughLiquidity ⇒ v4Proof)، نه از شاخه‌ی
+       پوششِ v4 پایین — پس v4OneWayCheck هرگز صدا زده نمی‌شد و گاردِ انتشار nosellِ
+       بی‌علت را v4:unproven می‌کرد. فقط وقتی پوشش قطعاً false است (چکِ ناکام هرگز
+       اتهام نیست) و حکم وگرنه nosellِ بی‌علت می‌ماند؛ vetoها و empty-pool و
+       sell-reverts جلوتر برنده‌اند. */
+    if (fin.v === "nosell" && fin.cause === undefined && covered.covered === false
+        && await v4OneWayCheck(addr, meta, env, deadlineAt, meterHooks)) {
+      fin = finalizeBaseNosell(empty, covered, true, poolCause, true);
+    }
+    return withCounterProof(fin, addr, meta, deadlineAt, env, covered, meterHooks);
   }
   /* 🔴 استثنای پوششِ v4 (۲۹ شهریور): بالادست برای همین توکن یک استخرِ
      uniswap-v4-base *دید* (v4Listed) و ما دست‌کم یک کلیدِ واقعیِ ایندکس‌شده
@@ -3314,6 +3345,8 @@ function makeSubMeter() {
   let kvN = 0;
   let fetchN = 0;
   const baseTokens = [];
+  // ۱ نوامبر — نتیجه‌ی v4OneWayCheck به ازای برچسب (فهرستِ کوتاه و ثابت، هرگز آدرس)؛ حداکثر ۱۶ کلید.
+  const oneWay = {};
   const solTokens = [];
   let tokenBase = null;
 
@@ -3375,6 +3408,11 @@ function makeSubMeter() {
       // یک رشته‌ی دلخواهِ کاربر، پس ریسکِ نشتِ داده‌ای ندارد).
       stage_ = typeof name === "string" && name ? name : "?";
     },
+    oneWay(label) {
+      if (typeof label !== "string" || !/^[a-z0-9:-]{1,40}$/.test(label)) return;
+      if (!Object.prototype.hasOwnProperty.call(oneWay, label) && Object.keys(oneWay).length >= 16) return;
+      oneWay[label] = (oneWay[label] || 0) + 1;
+    },
     tokenStart() { tokenBase = total; },
     tokenEnd() {
       const delta = total - (tokenBase === null ? total : tokenBase);
@@ -3413,6 +3451,7 @@ function makeSubMeter() {
         kv: kvN,
         baseTokens: baseTokens.slice(),
         solTokens: solTokens.slice(),
+        oneWay: { ...oneWay },
       };
     },
   };
@@ -3546,7 +3585,8 @@ async function scheduledReportPassBody(env, ctx, opts, meter) {
           } catch (e) { /* ایندکس هرگز نباید گذرِ گزارش را بشکند */ }
         }
         return ogFetchVerdictDetail(addr, meta, Date.now() + OG_BUDGET_MS, env, ctx, metaWhy,
-          { stage: (name) => meter.stage(name), capHit: () => meter.isCapHit(), used: () => meter.total });
+          { stage: (name) => meter.stage(name), capHit: () => meter.isCapHit(), used: () => meter.total,
+            oneWay: (label) => meter.oneWay(label) });
       },
       now: () => Date.now(),
       sleep: (ms) => new Promise((r) => setTimeout(r, ms)),

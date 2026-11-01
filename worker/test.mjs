@@ -11440,9 +11440,9 @@ function stripAllowedWording(t) {
   // که همیشه بوده باید دیده شود — نه ۹تا؛ پوششِ خودِ "counter" در بخشِ
   // [counter sell] پایین‌تر است.
   ok(JSON.stringify(Object.keys(sub.byStage).sort()) ===
-     JSON.stringify(REPORT_METER_STAGES.filter((s) => s !== "counter").sort()),
+     JSON.stringify(REPORT_METER_STAGES.filter((s) => s !== "counter" && s !== "oneway").sort()),
      "this fixture must exercise every runReportPass-owned stage in the closed REPORT_METER_STAGES "
-     + "vocabulary at least once (all but \"counter\", which only worker/index.js's withCounterProof "
+     + "vocabulary at least once (all but \"counter\"/\"oneway\", which only worker/index.js sets "
      + "ever sets), got " + JSON.stringify(Object.keys(sub.byStage).sort()));
 
   // ت) هیچ مسیر/کوئری/رشته‌ی شبیه‌کلید هرگز در سندِ ذخیره‌شده نمی‌نشیند —
@@ -16045,6 +16045,23 @@ function stripAllowedWording(t) {
       { used: () => 0, capHit: () => true }) === false, "[v4 one-way pool] capHit skips the check");
     const withNoPool = await v4OneWayCheck(XDP, {}, env({ keys: [{ ...KEY, poolId: undefined }], complete: true }), undefined, undefined);
     ok(withNoPool === false, "[v4 one-way pool] indexed keys without poolId prove nothing");
+    // ۱ نوامبر — ناظرِ نتیجه: یک برچسب در هر فراخوانی، فقط از فهرستِ بسته، هرگز آدرس.
+    const seen = [];
+    const hooks = (used) => ({ used: () => used, capHit: () => false, stage: () => {}, oneWay: (l) => seen.push(l) });
+    await v4OneWayCheck(XDP, {}, env({ keys: [KEY], complete: true }), undefined, hooks(0));
+    await v4OneWayCheck(XDP, {}, env({ keys: [KEY], complete: true }), undefined, hooks(ONE_WAY_PASS_MAX_USED + 1));
+    await v4OneWayCheck(XDP, {}, env({ keys: [KEY], complete: false }), undefined, hooks(0));
+    await v4OneWayCheck(XDP, {}, env({ keys: [KEY, { ...KEY, fee: 3000, tickSpacing: 60, poolId: "0x" + "ab".repeat(32) }], complete: true }), undefined, hooks(0));
+    await v4OneWayCheck(XDP, {}, env({ keys: [KEY], complete: true }), Date.now() + 500, hooks(0));
+    globalThis.fetch = mock({}).fn; // فروشِ همان مقدار کوت می‌گیرد → اثبات نیست
+    await v4OneWayCheck(XDP, {}, env({ keys: [KEY], complete: true }), undefined, hooks(0));
+    ok(JSON.stringify(seen.slice(0, 5)) === JSON.stringify(["proved", "skip:budget", "skip:index", "skip:keys", "skip:deadline"]) &&
+       /^oneway-sell:/.test(seen[5] || "") && seen.every((l) => /^[a-z0-9:-]{1,40}$/.test(l) && !/0x/.test(l)),
+      "[v4 one-way pool] the observer labels every outcome (proved / skip:* / last stage:out), never an address, got " + JSON.stringify(seen));
+    const hooksThrow = { used: () => 0, capHit: () => false, stage: () => {}, oneWay: () => { throw new Error("x"); } };
+    globalThis.fetch = m.fn;
+    ok(await v4OneWayCheck(XDP, {}, env({ keys: [KEY], complete: true }), undefined, hooksThrow) === true,
+      "[v4 one-way pool] a throwing observer never changes the verdict");
   } finally { globalThis.fetch = realFetch; }
 
   // 5. گاردِ انتشار
@@ -16086,8 +16103,12 @@ function stripAllowedWording(t) {
   // 7. سیم‌کشی در ogFetchVerdictDetail: فقط شاخه‌ی v4-only، و فقط وقتی وگرنه v4:unproven بود
   const src = fs.readFileSync(fileURLToPath(new URL("./index.js", import.meta.url)), "utf8");
   ok(/finalizeBaseNosell\(empty, covered, true, poolCause\);\s*\/\/[^\n]*\n\s*if \(fin\.why === "v4:unproven" && await v4OneWayCheck\(/.test(src) &&
-     (src.match(/await v4OneWayCheck\(/g) || []).length === 1,
-    "[v4 one-way pool] v4OneWayCheck is wired at exactly one call site, the v4-only branch, guarded by v4:unproven");
+     (src.match(/await v4OneWayCheck\(/g) || []).length === 2,
+    "[v4 one-way pool] v4OneWayCheck is wired in the v4-only coverage branch, guarded by v4:unproven");
+  // ۱ نوامبر — دومین و آخرین جا: شاخه‌ی v4Proof (فروش روی کلیدِ واقعی NotEnoughLiquidity)،
+  // فقط برای nosellِ بی‌علت و فقط وقتی پوشش قطعاً false است؛ نتیجه از خودِ finalizeBaseNosell.
+  ok(/if \(cacheOut\.v4Proof === true\) \{[\s\S]{0,200}let fin = finalizeBaseNosell\(empty, covered, false, poolCause\);[\s\S]{0,900}if \(fin\.v === "nosell" && fin\.cause === undefined && covered\.covered === false\s*&& await v4OneWayCheck\(addr, meta, env, deadlineAt, meterHooks\)\) \{\s*fin = finalizeBaseNosell\(empty, covered, true, poolCause, true\);\s*\}\s*return withCounterProof\(fin,/.test(src),
+    "[v4 one-way pool] the v4Proof branch runs the check only for a cause-less nosell with coverage strictly false, and takes the verdict from finalizeBaseNosell");
   console.log("[v4 one-way pool] v4OneWayProof proves only a real indexed key whose ~$100 buy fills and whose same-amount sell reverts with NotEnoughLiquidity for its own poolId (bytes, behind the 0x6190b2b0 wrapper, live canary); hook errors, other poolIds, PoolNotInitialized, reverting/zero buys, bare errors, dead canary, throws and tight deadlines all give false; finalizeBaseNosell puts it after sells:elsewhere/empty-pool/sells:recent and before v4:unproven, v4-only; the check needs a complete index and budget room; publishGuardRow keeps it on v4 rows (and recheckCause), Solana never; .txt, report tile, OG label/description/hash and the bot all carry it");
 }
 
