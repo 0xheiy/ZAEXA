@@ -22729,7 +22729,7 @@ async def check_flow_header_stable(p, errors):
         return {visible:t.checkVisibility({visibilityProperty:true}),inert:t.inert,aria:t.getAttribute('aria-hidden'),tab:t.tabIndex,
             reserved:r.width>0&&r.height>0,only:fbPref.only,stored:JSON.parse(localStorage.getItem('zaexa.flowboard.v1'))};} """
     try:
-        for width in (1920, 1366, 390):
+        for width in (1920, 1366, 1121, 960, 929, 390):  # ۱ نوامبر — ۹۲۹ همان عرضی است که روی سایتِ زنده پرید
             for theme in ("dark", "light"):
                 for chain in ("base", "solana"):
                     env = FbEnv(b, origin, errs)

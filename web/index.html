@@ -1013,6 +1013,11 @@ section.card.isDone #actBtn,section.card.isDone #solStatusSlot,section.card.isDo
    در یک خط سمتِ راست. کلید اولِ خط است تا پنهان‌شدنش در Established (جایش نگه داشته می‌شود) فقط فضای خالیِ سمتِ چپ بماند. */
 .fbCtl{display:flex;flex-wrap:wrap;align-items:center;justify-content:flex-end;gap:8px}
 #fbNetSlot{margin-top:12px}
+/* ۱ نوامبر — در ~۹۰۰ تا ۱۱۰۰px زیرعنوانِ بلندترِ Established ستونِ چپ را پهن می‌کرد و کلِ خطِ راست به ردیفِ بعد می‌پرید.
+   ستونِ چپ از صفر رشد می‌کند (هرگز خطِ راست را هل نمی‌دهد) و در همین بازه جای دو خطِ زیرعنوان از قبل گرفته می‌شود. */
+.fbHL{flex:1 1 0;min-width:0}
+.fbCtl{flex:0 1 auto}
+@media(min-width:721px) and (max-width:1180px){.fbSub{min-height:2lh}}
 .fbCtl .tfs{margin-left:0;padding:3px}
 .fbCtl .tfs button{height:28px;padding:0 14px}
 /* ۱ نوامبر — تبِ فعال ضخیم است و پهنای متن را عوض می‌کرد (۰٫۸px در ۱۹۲۰): همان روحِ نوارِ بالا (#nav [data-t])؛
