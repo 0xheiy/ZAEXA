@@ -115,6 +115,29 @@ if(/^\/t\/[^/]+\/?$/.test(location.pathname)){
 })();
 </script>
 <script>
+/* ZX-BOOT-WATCHDOG — ۳ نوامبر: سندِ اپ (~۸۹۰KB) گاهی وسطِ دانلود می‌ایستد (روی شبکه‌ی ایرانِ حسام دیده شد:
+   readyState تا ابد "loading" و اسکریپتِ اصلی نمی‌رسد، پس دکمه‌های Swap/Markets/Stocks کار نمی‌کنند؛ همان صفحه
+   با یک بارگذاریِ تازه در کسری از ثانیه کامل می‌آید). اگر سند ۸ ثانیه هیچ رشدی نکند، صفحه دوباره بار می‌شود —
+   حداکثر دو بار در هر نشست (zaexa.bootretry در sessionStorage)، و با رسیدنِ DOMContentLoaded شمارنده پاک می‌شود.
+   دانلودِ کند ولی در حالِ پیشرفت هرگز بار نمی‌شود، چون فقط «بی‌رشدی» شمرده می‌شود. */
+(function(){
+  var K="zaexa.bootretry",STALL_MS=8000,TICK_MS=2000,MAX=2,last=-1,still=0;
+  function size(){try{return document.documentElement.innerHTML.length}catch(e){return -1}}
+  function tick(){
+    if(document.readyState!=="loading")return;
+    var n=size();
+    if(n===last){still+=TICK_MS;
+      if(still>=STALL_MS){var c=0;try{c=+(sessionStorage.getItem(K)||0)}catch(e){}
+        if(c<MAX){try{sessionStorage.setItem(K,String(c+1))}catch(e){return}location.reload();return}
+        return}
+    }else{still=0;last=n}
+    setTimeout(tick,TICK_MS);
+  }
+  setTimeout(tick,TICK_MS);
+  document.addEventListener("DOMContentLoaded",function(){try{sessionStorage.removeItem(K)}catch(e){}});
+})();
+</script>
+<script>
 /* =====================================================================
    گیرنده‌ی خطای سراسری
    =====================================================================

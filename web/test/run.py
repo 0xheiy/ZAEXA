@@ -10003,6 +10003,7 @@ async def main():
         await check_pairs_star(p, errors)
         await check_swap_star(p, errors)
         await check_swap_star_raised(p, errors)
+        await check_boot_watchdog(p, errors)
         await check_header_star_parity(p, errors)
         await check_markets_pages_parity(p, errors)
         await check_markets_no_clip(p, errors)
@@ -22645,6 +22646,55 @@ async def check_api_page(p, errors):
     finally:
         await b.close()
     print("[api page] footer API link (About column) on app, /pairs, landing, /report and /api; /api renders without horizontal scroll at 390 and 1280, light and dark, no console errors, CSP from web/_headers")
+
+
+async def check_boot_watchdog(p, errors):
+    """[boot watchdog] ۳ نوامبر — سندِ اپ که وسطِ دانلود بایستد (readyState تا ابد loading) با ZX-BOOT-WATCHDOG
+    حداکثر دو بار دوباره بار می‌شود؛ صفحه‌ی سالم هرگز. ایستادن با یک اسکریپتِ parser-blocking که هرگز جواب نمی‌دهد ساخته می‌شود."""
+    src = open(os.path.join(HERE, "..", "index.html"), encoding="utf-8").read()
+    i = src.index("ZX-BOOT-WATCHDOG")
+    a = src.rindex("<script>", 0, i)
+    b = src.index("</script>", i) + len("</script>")
+    wd = src[a:b]
+    assert src.index("ZX-BOOT-WATCHDOG") < src.index("</head>"), "[boot watchdog] must live in <head>, before the app script"
+    assert "MAX=2" in wd and "STALL_MS=8000" in wd and "DOMContentLoaded" in wd, "[boot watchdog] cap 2, 8s stall, cleared on DOMContentLoaded"
+    b_ = await p.chromium.launch()
+    try:
+        for kind in ("stall", "ok"):
+            ctx = await b_.new_context()
+            loads = {"n": 0}
+            body = "<!doctype html><html><head>" + wd + ("<script src='/hang.js'></script>" if kind == "stall" else "") + "</head><body>x</body></html>"
+
+            def make_page_route(body, loads):
+                async def page_route(route):
+                    loads["n"] += 1
+                    await route.fulfill(status=200, content_type="text/html", body=body)
+                return page_route
+            page_route = make_page_route(body, loads)
+
+            async def hang_route(route):
+                await asyncio.sleep(90)
+                try:
+                    await route.fulfill(status=200, content_type="text/javascript", body="")
+                except Exception:
+                    pass
+            await ctx.route("https://wd.test/app", page_route)
+            await ctx.route("https://wd.test/hang.js", hang_route)
+            pg = await ctx.new_page()
+            try:
+                await pg.goto("https://wd.test/app", wait_until="commit")
+            except Exception:
+                pass
+            await pg.wait_for_timeout(36000 if kind == "stall" else 12000)
+            key = await pg.evaluate("() => sessionStorage.getItem('zaexa.bootretry')")
+            if kind == "stall":
+                assert loads["n"] == 3 and key == "2", "[boot watchdog] a stalled document is reloaded exactly twice, then left alone: loads=%s key=%s" % (loads["n"], key)
+            else:
+                assert loads["n"] == 1 and key is None, "[boot watchdog] a healthy page is never reloaded and the counter is cleared: loads=%s key=%s" % (loads["n"], key)
+            await ctx.close()
+    finally:
+        await b_.close()
+    print("[boot watchdog] PASS — stalled document reloaded twice then left alone; healthy page untouched")
 
 
 async def check_swap_star_raised(p, errors):
