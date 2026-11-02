@@ -22648,7 +22648,7 @@ async def check_api_page(p, errors):
 
 
 async def check_swap_star_raised(p, errors):
-    """[swap star raised] Only the swap star adopts the network chip's surface; keep Exit check controls unchanged."""
+    """[swap star raised] The swap star — and, since 2 Nov (owner), the Exit check star/share — adopt the network chip's surface."""
     import subprocess
     srv, origin = we_serve()
     b = await p.chromium.launch()
@@ -22673,6 +22673,8 @@ async def check_swap_star_raised(p, errors):
                 assert (star["bg"], star["shadow"]) == (chip["bg"], chip["shadow"]), "%s: raised background/shadow must match srcChip: %s %s" % (tag, star, chip)
                 assert star["w"] == star["h"] == 32 and star["radius"] in ("50%", "16px") and star["glyph"] == "☆", "%s: keep round geometry and icon" % tag
                 exits = {id: await pg.evaluate(look, id) for id in ("baseWatch", "checkShare")}
+                for id, e in exits.items():
+                    assert (e["bg"], e["shadow"]) == (chip["bg"], chip["shadow"]), "%s: %s must be raised like srcChip (owner, 2 Nov): %s %s" % (tag, id, e, chip)
                 rect = await pg.locator("#swapWatch").bounding_box()
                 await pg.mouse.move(rect["x"] + rect["width"] / 2, rect["y"] + rect["height"] / 2)
                 await pg.mouse.down(); await pg.wait_for_timeout(250)
@@ -22695,15 +22697,17 @@ async def check_swap_star_raised(p, errors):
                 await pg.route(origin + "/app", lambda r: r.fulfill(status=200, content_type="text/html", body=baseline))
                 await pg.reload(); await pg.wait_for_selector("#swapWatch:enabled"); await pg.wait_for_timeout(900)
                 await pg.mouse.move(0, 0)
-                for id, original in exits.items():
-                    assert await pg.evaluate(look, id) == original, "%s: %s must be byte-identical in computed look/geometry to b1ac626" % (tag, id)
+                for id, now in exits.items():
+                    old = await pg.evaluate(look, id)
+                    assert (old["w"], old["h"], old["radius"], old["glyph"], old["color"], old["border"]) == (now["w"], now["h"], now["radius"], now["glyph"], now["color"], now["border"]), "%s: %s keeps geometry, icon, colour and border of b1ac626" % (tag, id)
+                    assert (old["bg"], old["shadow"]) != (now["bg"], now["shadow"]), "%s: positive control must detect %s's old flat style" % (tag, id)
                 before = await pg.evaluate(look, "swapWatch")
                 assert before["w"] == star["w"] and before["h"] == star["h"] and before["radius"] == star["radius"] and before["glyph"] == star["glyph"], "%s: baseline swap star geometry/icon unchanged" % tag
                 assert (before["bg"], before["shadow"]) != (star["bg"], star["shadow"]), "%s: positive control must detect the old flat style" % tag
                 await pg.unroute_all(behavior="wait"); await pg.context.close()
                 print(tag + ": rest/saved = srcChip; held = chip.round inset; 32px, persistence, toggle and untouched Exit check controls PASS")
         assert not errs, "[swap star raised] console errors: %s" % errs
-        print("[swap star raised] PASS — 1280/390, both themes; old flat style detected; Exit check star/share unchanged")
+        print("[swap star raised] PASS — 1280/390, both themes; old flat style detected; Exit check star/share raised too")
     finally:
         await b.close()
         srv.shutdown()
