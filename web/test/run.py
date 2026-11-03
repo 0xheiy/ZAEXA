@@ -10004,6 +10004,7 @@ async def main():
         await check_swap_star(p, errors)
         await check_swap_star_raised(p, errors)
         await check_boot_watchdog(p, errors)
+        await check_chunked_build(p, errors)
         await check_header_star_parity(p, errors)
         await check_markets_pages_parity(p, errors)
         await check_markets_no_clip(p, errors)
@@ -22646,6 +22647,96 @@ async def check_api_page(p, errors):
     finally:
         await b.close()
     print("[api page] footer API link (About column) on app, /pairs, landing, /report and /api; /api renders without horizontal scroll at 390 and 1280, light and dark, no console errors, CSP from web/_headers")
+
+
+async def check_chunked_build(p, errors):
+    """[chunked build] ۳ نوامبر — scripts/build_site.mjs اسکریپتِ اصلیِ اپ را در _site به تکه‌های هش‌دار و کوچک
+    می‌برد (شبکه‌ی ایران پاسخِ ۸۹۰KB را در مرورگر کوتاه می‌کند)؛ بارگذار تکه‌ی ایستاده یا کوتاه‌شده را دوباره
+    می‌گیرد و اپ بالا می‌آید. منبع همان web/index.html می‌ماند."""
+    import subprocess, tempfile, shutil, http.server, threading, functools, json
+    root = os.path.abspath(os.path.join(HERE, "..", ".."))
+    out = tempfile.mkdtemp(prefix="zxsite_")
+    try:
+        # ۱. ساختِ واقعی از روی مخزن
+        subprocess.check_call(["node", os.path.join(root, "scripts", "build_site.mjs"), "--src", os.path.join(root, "web"), "--out", out], stdout=subprocess.DEVNULL)
+        names = sorted(os.listdir(out))
+        chunks = sorted([n for n in names if re.fullmatch(r"app\.[0-9a-f]{10}\.\d+\.js", n)], key=lambda n: int(n.split(".")[2]))
+        assert {"app.html", "index.html", "pairs.html", "_headers"} <= set(names) and len(chunks) >= 3, "[chunked build] _site layout: %s" % names
+        assert not any(n.startswith(("harness", "stub-ethers")) or n == "run.py" for n in names), "[chunked build] test files must never reach _site: %s" % names
+        assert open(os.path.join(out, "index.html"), encoding="utf-8").read() == open(os.path.join(root, "web", "landing.html"), encoding="utf-8").read(), "[chunked build] / is the landing page"
+        src = open(os.path.join(root, "web", "index.html"), encoding="utf-8").read()
+        app = open(os.path.join(out, "app.html"), encoding="utf-8").read()
+        mark = "از پایتون ترجمه شده"
+        a = src.rindex("<script>", 0, src.index(mark)); b = src.index("</script>", a)
+        body = src[a + len("<script>"):b]
+        joined = "".join(open(os.path.join(out, c), encoding="utf-8").read() for c in chunks)
+        assert joined == body, "[chunked build] the chunks must join back to the exact main script"
+        assert mark not in app and "ZX-CHUNK-LOADER" in app and "ZX-BOOT-WATCHDOG" in app and app.rstrip().endswith("<script>window.__zxEnd=1</script>\n</body>\n</html>"), "[chunked build] app.html: loader in, main script out, watchdog and end marker kept"
+        lo = app.index("ZX-CHUNK-LOADER"); ls_ = app.rindex("<script>", 0, lo); le = app.index("</script>", lo)
+        assert "</script>" not in app[ls_ + 8:le] and all(("/" + c) in app[ls_:le] for c in chunks), "[chunked build] loader lists every chunk, absolute path, no early </script>"
+        sizes = json.loads(subprocess.check_output(["node", "-e", "const fs=require('fs'),z=require('zlib');const d=process.argv[1];console.log(JSON.stringify(Object.fromEntries(fs.readdirSync(d).filter(f=>/^app/.test(f)).map(f=>[f,z.brotliCompressSync(fs.readFileSync(d+'/'+f)).length]))))", out]))
+        assert sizes["app.html"] <= 60000 and all(sizes[c] <= 45000 for c in chunks), "[chunked build] every response stays small (brotli bytes): %s" % sizes
+        # ۲. رفتار در مرورگر: ساخت از هارنس (ethers قلابی)؛ تکه‌ی ۱ اولین بار می‌ایستد، تکه‌ی ۲ اولین بار کوتاه می‌آید
+        out2 = tempfile.mkdtemp(prefix="zxsite2_")
+        try:
+            subprocess.check_call(["node", os.path.join(root, "scripts", "build_site.mjs"), "--src", os.path.join(root, "web"), "--out", out2, "--index", build_harness()], stdout=subprocess.DEVNULL)
+            shutil.copy(os.path.join(HERE, "stub-ethers.js"), os.path.join(out2, "stub-ethers.js"))
+
+            class H(http.server.SimpleHTTPRequestHandler):
+                def log_message(self, *a):
+                    pass
+
+                def translate_path(self, path):
+                    if path.split("?")[0] in ("/app", "/app/"):
+                        return os.path.join(out2, "app.html")
+                    return super().translate_path(path)
+            srv = http.server.ThreadingHTTPServer(("127.0.0.1", 0), functools.partial(H, directory=out2))
+            threading.Thread(target=srv.serve_forever, daemon=True).start()
+            origin = "http://127.0.0.1:%d" % srv.server_port
+            b_ = await p.chromium.launch()
+            try:
+                ctx = await b_.new_context()
+                seen = {}
+
+                async def r(route):
+                    u = route.request.url.split("/")[-1]
+                    n = seen.get(u, 0) + 1
+                    seen[u] = n
+                    if u.endswith(".1.js") and n == 1:
+                        await asyncio.sleep(30)
+                        try:
+                            await route.abort()
+                        except Exception:
+                            pass
+                        return
+                    if u.endswith(".2.js") and n == 1:
+                        resp = await route.fetch()
+                        await route.fulfill(response=resp, body=(await resp.text())[:1000])
+                        return
+                    await route.continue_()
+                await ctx.route("**/app.*.js", r)
+                pg = await ctx.new_page()
+                perrs = []
+                pg.on("pageerror", lambda e: perrs.append(str(e)[:160]))
+                await pg.goto(origin + "/app#swap", wait_until="domcontentloaded")
+                await pg.wait_for_function("window.__zxApp === 1", timeout=30000)
+                await pg.wait_for_timeout(1200)
+                await pg.evaluate("() => [...document.querySelectorAll('#nav a,#nav button')].find(a => a.textContent.trim() === 'Stocks').click()")
+                await pg.wait_for_timeout(800)
+                st = await pg.evaluate("() => [location.hash, !!document.getElementById('view-stocks').getClientRects().length, typeof CHAIN, window.__zxEnd]")
+                assert st == ["#stocks", True, "object", 1], "[chunked build] app boots after a stalled and a truncated chunk, and the header works: %s %s" % (st, seen)
+                idx = {int(k.split(".")[2]): v for k, v in seen.items()}
+                assert idx.get(1) == 2 and idx.get(2) == 2 and all(v == 1 for i, v in idx.items() if i not in (1, 2)) and len(idx) == len(chunks), "[chunked build] only the bad chunks are fetched again: %s" % seen
+                assert not perrs, "[chunked build] page errors: %s" % perrs
+                await ctx.close()
+            finally:
+                await b_.close()
+                srv.shutdown()
+        finally:
+            shutil.rmtree(out2, ignore_errors=True)
+    finally:
+        shutil.rmtree(out, ignore_errors=True)
+    print("[chunked build] PASS — _site: app.html + %d hashed chunks (brotli %s); stalled/truncated chunks refetched, app boots, header works" % (len(chunks), sizes))
 
 
 async def check_boot_watchdog(p, errors):

@@ -20,3 +20,6 @@ contracts/lib/
 .freebuff/
 .freebuff/
 drafts/
+
+# --- خروجیِ scripts/build_site.mjs (ساختِ کلادفلر) ---
+_site/

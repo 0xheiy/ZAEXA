@@ -4,8 +4,12 @@
 # ساخته شده باشد، نه تاریخچه دارد نه قابل بازتولید است. اگر روزی حساب عوض
 # شود یا کسی چیزی را در پنل دست بزند، هیچ‌جا معلوم نیست قبلاً چه بود.
 #
-# در پنل، Build command باید این باشد:
-#   mkdir -p _site && cp web/index.html _site/app.html && cp web/landing.html _site/index.html && cp web/_headers web/*.js _site/
+# در پنل، Build command باید این باشد (از ۳ نوامبر ۲۰۲۶):
+#   node scripts/build_site.mjs
+# همان کپی‌های قبلی را می‌کند (index.html→app.html، landing.html→index.html، هر web/*.html دیگر، _headers،
+# web/*.js) و اسکریپتِ اصلیِ اپ را در _site به تکه‌های هش‌دارِ کوچک می‌بُرد — شبکه‌ی ایران پاسخِ ۸۹۰KB را در
+# مرورگر کوتاه می‌کرد. صفحه‌ی html تازه در web/ دیگر قدمِ پنلی نمی‌خواهد. نگهبان: [chunked build] در run.py.
+# خطِ قبلی (برای برگشت): mkdir -p _site && cp web/index.html _site/app.html && cp web/landing.html _site/index.html && cp web/pairs.html _site/ && cp web/_headers web/*.js _site/
 #
 # ⚠️ نام فایل در مخزن با آدرسِ سرو‌شده یکی نیست، و این عمدی است:
 #   web/index.html   → سرو می‌شود روی /app   (اپ)
