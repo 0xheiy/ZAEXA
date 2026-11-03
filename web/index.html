@@ -115,26 +115,44 @@ if(/^\/t\/[^/]+\/?$/.test(location.pathname)){
 })();
 </script>
 <script>
-/* ZX-BOOT-WATCHDOG — ۳ نوامبر: سندِ اپ (~۸۹۰KB) گاهی وسطِ دانلود می‌ایستد (روی شبکه‌ی ایرانِ حسام دیده شد:
-   readyState تا ابد "loading" و اسکریپتِ اصلی نمی‌رسد، پس دکمه‌های Swap/Markets/Stocks کار نمی‌کنند؛ همان صفحه
-   با یک بارگذاریِ تازه در کسری از ثانیه کامل می‌آید). اگر سند ۸ ثانیه هیچ رشدی نکند، صفحه دوباره بار می‌شود —
-   حداکثر دو بار در هر نشست (zaexa.bootretry در sessionStorage)، و با رسیدنِ DOMContentLoaded شمارنده پاک می‌شود.
-   دانلودِ کند ولی در حالِ پیشرفت هرگز بار نمی‌شود، چون فقط «بی‌رشدی» شمرده می‌شود. */
+/* ZX-BOOT-WATCHDOG — ۳ نوامبر: روی شبکه‌ی ایرانِ حسام سندِ اپ (~۸۹۰KB) گاهی وسطِ راه می‌ایستد یا بی‌خطا کوتاه
+   تمام می‌شود (سنجشِ زنده: ۲۴۰KB از ۸۹۰KB و بعد «پایان»)، پس اسکریپتِ اصلی هرگز اجرا نمی‌شود و دکمه‌های
+   Swap/Markets/Stocks کار نمی‌کنند. نشانه‌ی سلامت: window.__zxEnd که آخرین اسکریپتِ سند می‌گذارد.
+   اگر سند ۸ ثانیه رشد نکند یا بی آن نشانه تمام شود: همان نشانی با fetch دوباره گرفته می‌شود (تا ۴ تلاش، هر کدام
+   حداکثر ۲۵ ثانیه، فقط متنِ کامل — با نشانه و </html> در انتها) و با document.write جایگزین می‌شود؛ اگر هر ۴ تلاش
+   شکست خورد یک reload. حداکثر دو بار بازیابی در هر نشست (zaexa.bootretry در sessionStorage)؛ سندِ سالم شمارنده
+   را پاک می‌کند. دانلودِ کند ولی در حالِ پیشرفت دست نمی‌خورد، چون فقط «بی‌رشدی» یا «پایانِ بی‌نشانه» شمرده می‌شود. */
 (function(){
-  var K="zaexa.bootretry",STALL_MS=8000,TICK_MS=2000,MAX=2,last=-1,still=0;
+  var K="zaexa.bootretry",STALL_MS=8000,TICK_MS=2000,MAX=2,TRIES=4,last=-1,still=0,busy=false;
+  function ok(){return window.__zxEnd===1}
   function size(){try{return document.documentElement.innerHTML.length}catch(e){return -1}}
+  function recover(){
+    if(busy||ok())return;busy=true;
+    var c=0;try{c=+(sessionStorage.getItem(K)||0)}catch(e){return}
+    if(c>=MAX)return;
+    try{sessionStorage.setItem(K,String(c+1))}catch(e){return}
+    var n=0;
+    (function attempt(){
+      n++;var ac=window.AbortController?new AbortController():null;
+      var t=setTimeout(function(){if(ac)ac.abort()},25000);
+      fetch(location.pathname+location.search,{cache:"no-store",credentials:"same-origin",signal:ac?ac.signal:undefined})
+        .then(function(r){if(!r.ok)throw 0;return r.text()})
+        .then(function(h){clearTimeout(t);
+          if(h.indexOf("<script>window.__zxEnd"+"=1<\/script>")<0||!/<\/html>\s*$/.test(h))throw 0;
+          document.open();document.write(h);document.close();})
+        .catch(function(){clearTimeout(t);if(n<TRIES)setTimeout(attempt,1000);else location.reload();});
+    })();
+  }
   function tick(){
-    if(document.readyState!=="loading")return;
-    var n=size();
-    if(n===last){still+=TICK_MS;
-      if(still>=STALL_MS){var c=0;try{c=+(sessionStorage.getItem(K)||0)}catch(e){}
-        if(c<MAX){try{sessionStorage.setItem(K,String(c+1))}catch(e){return}location.reload();return}
-        return}
-    }else{still=0;last=n}
+    if(ok())return;
+    if(document.readyState!=="loading"){recover();return}
+    var s=size();
+    if(s===last){still+=TICK_MS;if(still>=STALL_MS){recover();return}}else{still=0;last=s}
     setTimeout(tick,TICK_MS);
   }
   setTimeout(tick,TICK_MS);
-  document.addEventListener("DOMContentLoaded",function(){try{sessionStorage.removeItem(K)}catch(e){}});
+  window.addEventListener("load",function(){if(!ok())recover()});
+  document.addEventListener("DOMContentLoaded",function(){if(ok()){try{sessionStorage.removeItem(K)}catch(e){}}});
 })();
 </script>
 <script>
@@ -13388,5 +13406,6 @@ $("setBtn").addEventListener("click",()=>{$("tourBtn").hidden=!!tokenPage;});
   refreshButton();
 })();
 </script>
+<script>window.__zxEnd=1</script>
 </body>
 </html>

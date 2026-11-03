@@ -22649,52 +22649,71 @@ async def check_api_page(p, errors):
 
 
 async def check_boot_watchdog(p, errors):
-    """[boot watchdog] ۳ نوامبر — سندِ اپ که وسطِ دانلود بایستد (readyState تا ابد loading) با ZX-BOOT-WATCHDOG
-    حداکثر دو بار دوباره بار می‌شود؛ صفحه‌ی سالم هرگز. ایستادن با یک اسکریپتِ parser-blocking که هرگز جواب نمی‌دهد ساخته می‌شود."""
+    """[boot watchdog] ۳ نوامبر — سندِ اپ که وسطِ راه بایستد یا بی‌خطا کوتاه تمام شود (window.__zxEnd نرسد) با
+    ZX-BOOT-WATCHDOG از راهِ fetch + document.write بازیابی می‌شود؛ صفحه‌ی سالم هرگز؛ شبکه‌ی همیشه‌خراب
+    حلقه‌ی بی‌پایان نمی‌سازد (سقفِ ۲ بازیابی × ۴ تلاش)."""
     src = open(os.path.join(HERE, "..", "index.html"), encoding="utf-8").read()
     i = src.index("ZX-BOOT-WATCHDOG")
     a = src.rindex("<script>", 0, i)
     b = src.index("</script>", i) + len("</script>")
     wd = src[a:b]
-    assert src.index("ZX-BOOT-WATCHDOG") < src.index("</head>"), "[boot watchdog] must live in <head>, before the app script"
-    assert "MAX=2" in wd and "STALL_MS=8000" in wd and "DOMContentLoaded" in wd, "[boot watchdog] cap 2, 8s stall, cleared on DOMContentLoaded"
+    end = "<script>window.__zxEnd=1</script>"
+    assert i < src.index("</head>"), "[boot watchdog] must live in <head>, before the app script"
+    assert src.count(end) == 1 and src.rstrip().endswith(end + "\n</body>\n</html>"), "[boot watchdog] the health marker is the document's last script"
+    assert end not in wd, "[boot watchdog] the watchdog must not contain the marker literally (a truncated page would look healthy)"
+    assert wd.count("</script>") == 1, "[boot watchdog] no literal </script> inside the watchdog (it would end the script early)"
+    assert "MAX=2" in wd and "TRIES=4" in wd and "STALL_MS=8000" in wd, "[boot watchdog] caps: 2 recoveries, 4 tries, 8s stall"
+    full = "<!doctype html><html><head>" + wd + "</head><body>x<script>window.__zxApp=(window.__zxApp||0)+1</script>" + end + "\n</body>\n</html>\n"
+    cut = full[:full.index("<script>window.__zxApp")]          # بی‌خطا کوتاه تمام می‌شود
+    stall = "<!doctype html><html><head>" + wd + "<script src='/hang.js'></script></head><body>x</body></html>"
     b_ = await p.chromium.launch()
     try:
-        for kind in ("stall", "ok"):
+        cases = (("cut", [cut], 12000, 2, 1), ("stall", [stall], 16000, 2, 1), ("ok", [], 12000, 1, 1), ("never", None, 40000, 11, 0))
+        for kind, firsts, wait, want_n, want_app in cases:
             ctx = await b_.new_context()
-            loads = {"n": 0}
-            body = "<!doctype html><html><head>" + wd + ("<script src='/hang.js'></script>" if kind == "stall" else "") + "</head><body>x</body></html>"
+            seen = {"n": 0}
 
-            def make_page_route(body, loads):
-                async def page_route(route):
-                    loads["n"] += 1
+            def make_route(firsts, seen, kind):
+                async def r(route):
+                    seen["n"] += 1
+                    k = seen["n"]
+                    if kind == "never":
+                        body = cut
+                    elif firsts and k <= len(firsts):
+                        body = firsts[k - 1]
+                    else:
+                        body = full
                     await route.fulfill(status=200, content_type="text/html", body=body)
-                return page_route
-            page_route = make_page_route(body, loads)
+                return r
 
-            async def hang_route(route):
+            async def hang(route):
                 await asyncio.sleep(90)
                 try:
                     await route.fulfill(status=200, content_type="text/javascript", body="")
                 except Exception:
                     pass
-            await ctx.route("https://wd.test/app", page_route)
-            await ctx.route("https://wd.test/hang.js", hang_route)
+            await ctx.route("https://wd.test/app*", make_route(firsts, seen, kind))
+            await ctx.route("https://wd.test/hang.js", hang)
             pg = await ctx.new_page()
             try:
-                await pg.goto("https://wd.test/app", wait_until="commit")
+                await pg.goto("https://wd.test/app?x=1", wait_until="commit")
             except Exception:
                 pass
-            await pg.wait_for_timeout(36000 if kind == "stall" else 12000)
-            key = await pg.evaluate("() => sessionStorage.getItem('zaexa.bootretry')")
-            if kind == "stall":
-                assert loads["n"] == 3 and key == "2", "[boot watchdog] a stalled document is reloaded exactly twice, then left alone: loads=%s key=%s" % (loads["n"], key)
+            await pg.wait_for_timeout(wait)
+            n1 = seen["n"]
+            await pg.wait_for_timeout(4000)
+            st = await pg.evaluate("() => [window.__zxApp || 0, window.__zxEnd || 0, sessionStorage.getItem('zaexa.bootretry')]")
+            tag = "[boot watchdog] %s" % kind
+            assert seen["n"] == n1 == want_n, "%s: requests %s (then %s), want %s" % (tag, n1, seen["n"], want_n)
+            assert st[0] == want_app, "%s: app script ran %s times, want %s: %s" % (tag, st[0], want_app, st)
+            if want_app:
+                assert st[1] == 1 and st[2] is None, "%s: healthy marker present and retry counter cleared: %s" % (tag, st)
             else:
-                assert loads["n"] == 1 and key is None, "[boot watchdog] a healthy page is never reloaded and the counter is cleared: loads=%s key=%s" % (loads["n"], key)
+                assert st[2] == "2", "%s: gives up after 2 recoveries (no endless loop): %s" % (tag, st)
             await ctx.close()
     finally:
         await b_.close()
-    print("[boot watchdog] PASS — stalled document reloaded twice then left alone; healthy page untouched")
+    print("[boot watchdog] PASS — truncated and stalled documents recovered by fetch+write; healthy page untouched; permanent failure stops after 2x4 tries")
 
 
 async def check_swap_star_raised(p, errors):
