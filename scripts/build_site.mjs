@@ -26,14 +26,36 @@ const INDEX = opt("--index", path.join(SRC, "index.html"));
 export const CHUNK_CHARS = 110000;          // ~25–30KB brotli each
 const MAIN_MARK = "از پایتون ترجمه شده";       // a line in the header comment of the main app script
 
-export function splitApp(html, chunkChars = CHUNK_CHARS) {
+/* ۳ نوامبر — شبکه‌ی حسام هر اتصال به IPهای کلادفلرِ این زون را بعد از حدودِ ۱۲۰KB (فشرده) می‌خواباند (سنجیده با
+   curl روی یک اتصالِ مشترک: دو پاسخ، بعد صفر بایت). پس بایت مهم است: کامنت‌های اسکریپتِ اصلی (بیشترش فارسی) با
+   terser فقط حذف می‌شوند — بدونِ compress و mangle، یعنی کد دست نمی‌خورد — و کامنت‌های CSS/HTML بیرون از
+   اسکریپت‌ها هم. اگر terser نصب نبود، ساخت بی‌کوچک‌سازی ادامه می‌دهد (فقط هشدار). */
+export async function stripJsComments(code) {
+  let terser;
+  try { terser = await import("terser"); } catch (e) { console.warn("build_site: terser not installed — app script not minified"); return code; }
+  const r = await terser.minify(code, { compress: false, mangle: false, format: { comments: false } });
+  if (!r || typeof r.code !== "string" || !r.code) throw new Error("terser returned no code");
+  return r.code;
+}
+
+export function stripMarkupComments(html) {
+  // فقط بیرون از <script>: کامنتِ HTML، و کامنتِ CSS داخلِ <style>
+  return html.split(/(<script[\s\S]*?<\/script>)/).map((part, i) => {
+    if (i % 2 === 1) return part;
+    return part
+      .replace(/<!--[\s\S]*?-->/g, "")
+      .replace(/(<style[^>]*>)([\s\S]*?)(<\/style>)/g, (m, a, css, b) => a + css.replace(/\/\*[\s\S]*?\*\//g, "") + b);
+  }).join("");
+}
+
+export function splitApp(html, chunkChars = CHUNK_CHARS, transformBody = (b) => b) {
   const at = html.indexOf(MAIN_MARK);
   if (at < 0) throw new Error("main app script marker not found");
   const open = html.lastIndexOf("<script>", at);
   const close = html.indexOf("</script>", at);
   if (open < 0 || close < 0) throw new Error("main app script tags not found");
-  const body = html.slice(open + "<script>".length, close);
   if (html.indexOf(MAIN_MARK, close) >= 0) throw new Error("main app script marker appears twice");
+  const body = transformBody(html.slice(open + "<script>".length, close));
   const hash = crypto.createHash("sha256").update(body).digest("hex").slice(0, 10);
   const chunks = [];
   // Cut only after a newline: never inside a surrogate pair or a multi-byte character.
@@ -45,7 +67,7 @@ export function splitApp(html, chunkChars = CHUNK_CHARS) {
   }
   const names = chunks.map((_, i) => `app.${hash}.${i}.js`);
   const loader = loaderScript(names.map((n) => "/" + n), chunks.map((c) => c.length));
-  const out = html.slice(0, open) + loader + html.slice(close + "</script>".length);
+  const out = stripMarkupComments(html.slice(0, open)) + loader + stripMarkupComments(html.slice(close + "</script>".length));
   return { html: out, chunks, names, body, hash };
 }
 
@@ -77,10 +99,13 @@ function loaderScript(paths, lens) {
 
 function copy(from, to) { fs.copyFileSync(from, to); }
 
-export function build() {
+export async function build() {
   fs.rmSync(OUT, { recursive: true, force: true });
   fs.mkdirSync(OUT, { recursive: true });
-  const app = splitApp(fs.readFileSync(INDEX, "utf8"));
+  const src = fs.readFileSync(INDEX, "utf8");
+  const at = src.indexOf(MAIN_MARK), o = src.lastIndexOf("<script>", at), c = src.indexOf("</script>", at);
+  const small = await stripJsComments(src.slice(o + "<script>".length, c));
+  const app = splitApp(src, CHUNK_CHARS, () => small);
   fs.writeFileSync(path.join(OUT, "app.html"), app.html);
   app.chunks.forEach((c, i) => fs.writeFileSync(path.join(OUT, app.names[i]), c));
   copy(path.join(SRC, "landing.html"), path.join(OUT, "index.html"));
@@ -94,6 +119,6 @@ export function build() {
 }
 
 if (import.meta.url === `file://${process.argv[1]}` || process.argv[1]?.endsWith("build_site.mjs")) {
-  const app = build();
+  const app = await build();
   console.log(`_site built: app.html ${Buffer.byteLength(app.html)}B + ${app.chunks.length} chunks (${app.hash})`);
 }

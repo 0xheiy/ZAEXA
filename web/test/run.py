@@ -22670,7 +22670,15 @@ async def check_chunked_build(p, errors):
         a = src.rindex("<script>", 0, src.index(mark)); b = src.index("</script>", a)
         body = src[a + len("<script>"):b]
         joined = "".join(open(os.path.join(out, c), encoding="utf-8").read() for c in chunks)
-        assert joined == body, "[chunked build] the chunks must join back to the exact main script"
+        # ۳ نوامبر — تکه‌ها نسخه‌ی بی‌کامنتِ همان اسکریپت‌اند (terser بدونِ compress/mangle): جاوااسکریپتِ معتبر،
+        # کوتاه‌تر، با همان شناسه‌ها؛ درستیِ رفتار را بخشِ مرورگرِ همین کاوشگر می‌سنجد.
+        jf = os.path.join(out, "..", os.path.basename(out) + "_joined.js")
+        open(jf, "w", encoding="utf-8").write(joined)
+        try:
+            subprocess.check_call(["node", "--check", jf])
+        finally:
+            os.remove(jf)
+        assert len(joined) < len(body) * 0.8 and all(k in joined for k in ("const CHAIN", "function fbPaint", "ETHERS_SRC", "BASE_TOKENS")), "[chunked build] chunks are the comment-free main script (%d of %d chars)" % (len(joined), len(body))
         assert mark not in app and "ZX-CHUNK-LOADER" in app and "ZX-BOOT-WATCHDOG" in app and app.rstrip().endswith("<script>window.__zxEnd=1</script>\n</body>\n</html>"), "[chunked build] app.html: loader in, main script out, watchdog and end marker kept"
         lo = app.index("ZX-CHUNK-LOADER"); ls_ = app.rindex("<script>", 0, lo); le = app.index("</script>", lo)
         assert "</script>" not in app[ls_ + 8:le] and all(("/" + c) in app[ls_:le] for c in chunks), "[chunked build] loader lists every chunk, absolute path, no early </script>"

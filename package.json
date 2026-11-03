@@ -5,7 +5,8 @@
     "test:worker": "node worker/test.mjs"
   },
   "devDependencies": {
-    "miniflare": "4.20260730.0"
+    "miniflare": "4.20260730.0",
+    "terser": "5.36.0"
   },
   "overrides": {
     "undici": "7.29.1",
