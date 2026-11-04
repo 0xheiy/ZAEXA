@@ -14621,7 +14621,7 @@ async def main():
                 walletIsRemote = true;
                 walletEip1193 = { request: async ({method, params}) => { remoteReq.push({method, params}); throw new Error("probe: stop before sending"); } };
                 btn().click(); await wait();
-                out.remote = remoteReq.length ? {method: remoteReq[0].method, gas: remoteReq[0].params[0].gas} : null;
+                out.remote = remoteReq.length ? {method: remoteReq[0].method, gas: remoteReq[0].params[0].gas, sfx: String(remoteReq[0].params[0].data).endsWith(BASE_BUILDER_SUFFIX.slice(2))} : null;
             } finally {
                 E.Contract = realContract; console.error = realErr;
                 walletIsRemote = false; baseSimArmedKey = null; baseSimFailedKey = null;
@@ -14643,6 +14643,34 @@ async def main():
             "sim override: the armed send must say so: %r" % simo_base["noticeAtSend"]
         assert simo_base["remote"] and simo_base["remote"]["method"] == "eth_sendTransaction" and simo_base["remote"]["gas"] == "0x16e360", \
             "sim override: the remote-wallet payload must carry gas 0x16e360: %s" % simo_base["remote"]
+        assert simo_base["remote"]["sfx"], \
+            "builder code: the remote-wallet executeSwap data must end with the ERC-8021 suffix: %s" % simo_base["remote"]
+
+        # ---- [builder code] ERC-8021 روی Base: پسوند درست، فقط روی estimateGas/sendTransaction ----
+        bc = await pg.evaluate(r"""async () => {
+            const h = BASE_BUILDER_SUFFIX.slice(2), b = [];
+            for (let i = 0; i < h.length; i += 2) b.push(parseInt(h.slice(i, i + 2), 16));
+            const marker = b.slice(-16).map(x => x.toString(16).padStart(2, "0")).join("");
+            const schema = b[b.length - 17], len = b[b.length - 18];
+            const code = String.fromCharCode(...b.slice(0, b.length - 18));
+            const seen = [];
+            const fake = {provider: null, getAddress: async () => "0x1",
+                call: async tx => { seen.push(["call", tx.data]); return "0x"; },
+                estimateGas: async tx => { seen.push(["est", tx.data]); return 1n; },
+                sendTransaction: async tx => { seen.push(["send", tx.data]); return {hash: "0x"}; }};
+            const r = builderRunner(fake);
+            await r.call({data: "0xabcd"}); await r.estimateGas({data: "0xabcd"}); await r.sendTransaction({data: "0xabcd"});
+            return {marker, schema, len, code, codeLen: b.length - 18,
+                    twice: withBuilderCode(withBuilderCode("0xabcd")) === "0xabcd" + h,
+                    seen: seen.map(([k, d]) => [k, d.endsWith(h)])};
+        }""")
+        print("[builder code] code=%r len=%s schema=%s marker=%s seen=%s"
+              % (bc["code"], bc["len"], bc["schema"], bc["marker"], bc["seen"]))
+        assert bc["marker"] == "8021" * 8 and bc["schema"] == 0 and bc["len"] == bc["codeLen"] == 11 \
+            and bc["code"] == "bc_r52gopww", "builder code: the suffix is not ERC-8021 schema 0 for bc_r52gopww: %s" % bc
+        assert bc["twice"], "builder code: the suffix must be appended exactly once"
+        assert bc["seen"] == [["call", False], ["est", True], ["send", True]], \
+            "builder code: simulations must stay plain; gas estimate and send must carry the suffix: %s" % bc["seen"]
 
         # عکسِ هشدارِ Base (روشن، ۱۴۴۰ و ۳۹۰) — حالتِ شکست + دکمهٔ «Swap anyway»
         await pg.evaluate(r"""async () => {

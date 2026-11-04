@@ -2770,6 +2770,31 @@ const CHAIN={
         ...(/^https?:$/.test(location.protocol)?[location.origin+"/base/rpc"]:[])],
   wrapped:"WETH",reference:"USDC",
 };
+/* ERC-8021 (Builder Code از Base Dashboard: bc_r52gopww). به ته calldataی هر
+   executeSwap روی Base چسبانده می‌شود؛ قرارداد بایت‌های اضافه را نادیده می‌گیرد.
+   ⚠️ این مقدار با ox@0.11.1 ساخته شد: Attribution.toDataSuffix({codes:["bc_r52gopww"]})
+   و با Attribution.fromData برگشت داده شد (codes=["bc_r52gopww"], schema 0).
+   ترتیب: بایت‌های کد ← طول (0x0b) ← schema (00) ← ۱۶ بایت 8021. دستی جابه‌جایش نکن؛
+   کاوشگرِ [builder code] در web/test/run.py این رشته را طبق ERC-8021 باز می‌کند. */
+const BASE_BUILDER_SUFFIX="0x62635f723532676f7077770b0080218021802180218021802180218021";
+function withBuilderCode(data){
+  const d=String(data||"0x"), sfx=BASE_BUILDER_SUFFIX.slice(2);
+  return d.toLowerCase().endsWith(sfx)?d:d+sfx;
+}
+/* runner برای Contractِ executor: فقط estimateGas و sendTransaction پسوند می‌گیرند،
+   پس تخمین گس روی همان data نهایی است. call (شبیه‌سازی staticCall) دست‌نخورده است.
+   به signer تنبل ارجاع می‌دهد تا با signer واقعیِ ethers و هر دوبلِ تستی کار کند. */
+function builderRunner(sg){
+  const tag=tx=>({...tx,data:withBuilderCode(tx&&tx.data)});
+  return{
+    get provider(){return sg&&sg.provider;},
+    getAddress:(...a)=>sg.getAddress(...a),
+    call:tx=>sg.call(tx),
+    resolveName:n=>sg.resolveName?sg.resolveName(n):Promise.resolve(null),
+    estimateGas:tx=>sg.estimateGas(tag(tx)),
+    sendTransaction:tx=>sg.sendTransaction(tag(tx))
+  };
+}
 const BASE_RPC_PROXY=/^https?:$/.test(location.protocol)?location.origin+"/base/rpc":null;
 const BASE_RPC_BODY_MAX=4096;
 const DEFAULT_RPCS=CHAIN.rpcs.filter(u=>u!==BASE_RPC_PROXY);
@@ -9728,7 +9753,7 @@ async function doSwap(){
       setBusy(false);refreshButton();ev("swap:blocked","","base");return;}
 
     const deadline=BigInt(Math.floor(Date.now()/1000)+Math.max(1,deadlineMin)*60);
-    const exec=new E.Contract(CHAIN.executor,ABI.executor,signer);
+    const exec=new E.Contract(CHAIN.executor,ABI.executor,builderRunner(signer));
     setBusy(true,"Simulating…");
     const cands=[{label:"best",plan:fresh,parts:buildParts(fresh),minOut:minOutOf(fresh)}];
     (fresh.allRoutes||[]).slice(0,4).forEach(r=>{
@@ -9819,8 +9844,8 @@ async function doSwap(){
        مسیر افزونه دست‌نخورده می‌ماند — آنجا کار می‌کند. */
     const send=walletIsRemote
       ? (async()=>{
-          const data=iExec.encodeFunctionData("executeSwap",
-            [asArg(tokenIn),asArg(tokenOut),amountIn,chosen.minOut,chosen.parts,deadline]);
+          const data=withBuilderCode(iExec.encodeFunctionData("executeSwap",
+            [asArg(tokenIn),asArg(tokenOut),amountIn,chosen.minOut,chosen.parts,deadline]));
           const p={from:account,to:E.getAddress(CHAIN.executor),data};
           if(isNative(tokenIn))p.value="0x"+amountIn.toString(16);
           if(sentAnyway)p.gas="0x"+(1500000).toString(16);
