@@ -107,6 +107,9 @@ const REAL = [
   ["/gt/networks/base/tokens/0xabc/pools?page=1", "https://api.geckoterminal.com/api/v2/networks/base/tokens/0xabc/pools?page=1"],
   ["/gt/networks/base/tokens/multi/0xa,0xb,0xc", "https://api.geckoterminal.com/api/v2/networks/base/tokens/multi/0xa,0xb,0xc"],
   ["/gt/networks/base/pools/0xpool/ohlcv/hour?aggregate=4&limit=180&currency=usd", "https://api.geckoterminal.com/api/v2/networks/base/pools/0xpool/ohlcv/hour?aggregate=4&limit=180&currency=usd"],
+  // ۴ نوامبر — تابلوی Established و کارتِ Large trades همین دو را می‌فرستند
+  ["/gt/networks/base/tokens/multi/0xa,0xb?include=top_pools", "https://api.geckoterminal.com/api/v2/networks/base/tokens/multi/0xa,0xb?include=top_pools"],
+  ["/gt/networks/base/pools/0xpool/trades?trade_volume_in_usd_greater_than=1000", "https://api.geckoterminal.com/api/v2/networks/base/pools/0xpool/trades?trade_volume_in_usd_greater_than=1000"],
 ];
 for (const [path, want] of REAL) {
   reply = json({ data: [] });
@@ -153,6 +156,8 @@ const BAD = [
   "/gt/networks/base/tokens/0xabc?callback=alert(1)",  // پارامتر ناشناخته
   "/gt/networks/base/tokens/0xabc?page=99999",   // پارامتر آشنا، مقدار خارج از شکل
   "/gt/networks/base/tokens/0xabc?currency=USD'",// نقل‌قول در مقدار
+  "/gt/networks/base/tokens/multi/0xa?include=dex,network",   // include فقط top_pools
+  "/gt/networks/base/pools/0xp/trades?trade_volume_in_usd_greater_than=1e9",
 ];
 for (const path of BAD) {
   reply = json({ data: [] });

@@ -197,6 +197,12 @@ const QUERY_OK = {
   currency: /^[a-z]{1,8}$/,
   before_timestamp: /^[0-9]{1,12}$/,
   token: /^[A-Za-z0-9]{1,10}$/,
+  /* ۴ نوامبر — این دو را خودِ سایت می‌فرستد ولی در فهرست نبودند، پس هر وقت مرورگر «اول پراکسی» بود
+     (IPِ ایران/وی‌پی‌ان، یا ۴۲۹ِ مستقیم) تابلوی Established روی Base خالی می‌ماند (tokens/multi?include=top_pools → ۴۰۰)
+     و کارتِ Large trades «could not be loaded» می‌داد (trades?trade_volume_in_usd_greater_than=1000 → ۴۰۰).
+     فقط همان مقدارهایی که سایت می‌فرستد. */
+  include: /^top_pools$/,
+  trade_volume_in_usd_greater_than: /^[0-9]{1,7}$/,
 };
 
 /* همان عمرهایی که gtTtl در index.html دارد — استخر برتر زود عوض نمی‌شود،
