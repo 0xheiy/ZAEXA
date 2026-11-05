@@ -885,17 +885,29 @@ main:has(>#view-flow.on.fbOn){max-width:1360px}
 
 /* ---------------- نتیجه‌ی سواپِ تأییدشده ---------------- */
 .swapDone{margin:6px 14px 14px;text-align:center}
-.swapDone .ok{width:44px;height:44px;border-radius:50%;margin:6px auto 0;display:grid;place-items:center;
-  background:color-mix(in srgb,var(--pos) 16%,transparent)}
-.swapDone h3{margin:12px 0 4px;font-size:18px;font-weight:700;color:var(--tx)}
-.swapDone .amt2{font-size:15px;color:var(--tx)}
-.swapDone .gain{font-size:12.5px;color:var(--pos);margin-top:4px}
-.swapDone .acts{display:flex;gap:10px;margin-top:16px}
+/* ۵ نوامبر: کارتِ نتیجه — قهرمان (دایره‌ی گرادیانِ CTA)، دو پایه شبیهِ جعبه‌های ورودی، بعد دکمه‌ها */
+.swapDone .sdIcon{width:64px;height:64px;border-radius:50%;margin:0 auto;display:grid;place-items:center;background:var(--grad)}
+.swapDone h3{margin:14px 0 2px;font-size:20px;font-weight:700;color:var(--tx)}
+.swapDone .sdSub{font-size:12.5px;color:var(--tx3)}
+.swapDone .sdLegs{margin:20px 0 0;display:flex;flex-direction:column;gap:6px;align-items:stretch}
+/* همان بُعدِ .leg؛ لبه‌ی افقی را خودِ .swapDone می‌دهد */
+.swapDone .sdLeg{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;column-gap:10px;background:var(--card2);border-radius:16px;padding:15px 16px;text-align:left}
+.swapDone .sdLbl{grid-column:1/-1;font-size:12.5px;color:var(--tx3);margin-bottom:6px}
+.swapDone .sdAmt{font-size:22px;color:var(--tx);min-width:0;overflow-wrap:anywhere}
+.swapDone .sdChip{pointer-events:none}
+.swapDone .sdArrow{width:28px;height:28px;margin:-14px auto;position:relative;z-index:1;display:grid;place-items:center;background:var(--card);box-shadow:var(--sh);border-radius:50%;color:var(--tx2);font-size:15px;line-height:1}
+.swapDone .gain{font-size:12.5px;color:var(--pos);margin-top:12px}
+.swapDone .sdRate{font-size:12px;color:var(--tx3);margin-top:10px;overflow-wrap:anywhere}
+.swapDone .sdRate+.sdRate{margin-top:4px}
+.swapDone .acts{display:flex;gap:10px;margin-top:18px}
 .swapDone .acts .cta{flex:1;margin:0}
 .swapDone .acts a{text-decoration:none;display:inline-flex;align-items:center;justify-content:center}
-.swapDone .txl{font-size:11.5px;color:var(--tx3);margin-top:10px}
-section.card.isDone{display:flex;flex-direction:column}
-section.card.isDone #swapDone,section.card.isDone #solSwapDone{flex:1 1 auto;display:flex;flex-direction:column;justify-content:center}
+.swapDone .txl{font-size:11.5px;color:var(--tx3);margin-top:12px}
+/* نتیجه: همه‌چیزِ کارت جز ردیفِ عنوان (جایگاهِ شبکه) و بلوکِ نتیجه پنهان است؛ !important چون بعضی از آن‌ها display را درون‌خطی می‌نویسند */
+section.card.isDone{display:flex;flex-direction:column;position:relative}
+section.card.isDone>*:not(#baseSwapNetworkSlot):not(#solSwapNetworkSlot):not(.swapDone):not(.sdBurst){display:none!important}
+section.card.isDone #swapDone,section.card.isDone #solSwapDone{flex:1 1 auto;display:flex;flex-direction:column;justify-content:center;padding:6px 4px 2px}
+.sdBurst{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;z-index:50}
 section.card.isDone .facts,section.card.isDone #statusSlot,section.card.isDone #revNote,
 section.card.isDone #actBtn,section.card.isDone #solStatusSlot,section.card.isDone #solSwapBtn,section.card.isDone #solImpactWarn{display:none}
 /* ≥۵۰٪ price impact روی سولانا — یک خطِ هشدار زیرِ facts، نه بلوک */
@@ -910,6 +922,21 @@ section.card.isDone #actBtn,section.card.isDone #solStatusSlot,section.card.isDo
   @keyframes pillIn{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:translateY(0)}}
   .swapDone{animation:doneIn .22s ease both}
   @keyframes doneIn{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}
+  .sdIcon{animation:sdPop 520ms ease-out both}
+  .sdIcon path{stroke-dasharray:var(--len);animation:sdDraw 380ms ease-out 200ms both}
+  .swapDone h3,.swapDone .sdSub{animation:sdSettle 300ms cubic-bezier(.34,1.56,.64,1) 300ms both}
+  .sdLegs .sdLeg:nth-child(1){animation:sdUp 320ms ease-out 420ms both}
+  .sdArrow{animation:sdArr 200ms cubic-bezier(.34,1.56,.64,1) 500ms both}
+  .sdLegs .sdLeg:nth-child(3){animation:sdUp 320ms ease-out 560ms both}
+  #sdRecv{animation:sdFlash 600ms linear 1160ms forwards}
+  .swapDone .gain,.swapDone .sdRate,.swapDone .acts,.swapDone .txl{animation:sdFade 300ms ease-out 900ms both}
+  @keyframes sdPop{0%{transform:scale(.4);opacity:0}60%{transform:scale(1.12);opacity:1}100%{transform:scale(1);opacity:1}}
+  @keyframes sdDraw{from{stroke-dashoffset:var(--len)}to{stroke-dashoffset:0}}
+  @keyframes sdSettle{from{transform:translateY(10px);opacity:0}to{transform:none;opacity:1}}
+  @keyframes sdUp{from{transform:translateY(12px);opacity:0}to{transform:none;opacity:1}}
+  @keyframes sdArr{from{transform:scale(.5);opacity:0}to{transform:scale(1);opacity:1}}
+  @keyframes sdFade{from{opacity:0}to{opacity:1}}
+  @keyframes sdFlash{from{color:var(--pos)}to{color:var(--tx)}}
 }
 
 /* ---------------- venues ---------------- */
@@ -2598,10 +2625,15 @@ try{(function(){
     <div class="footCol">
       <h4>Trade</h4>
       <a href="#swap">Swap</a>
-      <a href="#folio">Portfolio</a>
       <a href="#flow">Flow</a>
-      <a href="#stocks">Stocks</a>
       <a href="/pairs">New pairs</a>
+      <a href="#stocks">Stocks</a>
+    </div>
+    <div class="footCol">
+      <h4>Tools</h4>
+      <a href="/report">Exit Report</a>
+      <a href="#folio">Portfolio</a>
+      <a href="/api">API</a>
     </div>
     <div class="footCol">
       <h4>About</h4>
@@ -2611,10 +2643,6 @@ try{(function(){
         <a id="ctrLink" target="_blank" rel="noopener" class="mono"></a>
       </span>
       <a href="https://github.com/0xheiy/ZAEXA" target="_blank" rel="noopener">Source on GitHub</a>
-      <a href="/api">API</a>
-    </div>
-    <div class="footCol">
-      <h4>Support</h4>
       <button id="feedbackBtn" class="feedback">Report a problem</button>
       <a href="https://www.geckoterminal.com" target="_blank" rel="noopener">Price history by GeckoTerminal</a>
     </div>
@@ -9880,8 +9908,10 @@ async function doSwap(){
       /* برای بلوکِ نتیجه لازم است — قبل از اینکه خطوطِ زیر فیلدها را پاک
          کنند و نقشه را null، از همان نقشه‌ای که واقعاً امضا شد (chosen.plan)
          می‌خوانیم، نه currentPlan که تا اینجا ممکن است چیزِ دیگری باشد. */
-      const paidTxt=fmt(chosen.plan.totalIn,tokenIn.decimals)+" "+tokenIn.symbol;
-      const gotTxt="≈ "+fmt(chosen.plan.totalOut*BigInt(10000-feeBps)/10000n,tokenOut.decimals)+" "+tokenOut.symbol;
+      const gotRaw=chosen.plan.totalOut*BigInt(10000-feeBps)/10000n;
+      const paidAmt=fmt(chosen.plan.totalIn,tokenIn.decimals),gotAmt=fmt(gotRaw,tokenOut.decimals);
+      const paidN=Number(E.formatUnits(chosen.plan.totalIn,tokenIn.decimals)),gotN=Number(E.formatUnits(gotRaw,tokenOut.decimals));
+      const route=[...new Set(chosen.plan.parts.flatMap(p=>p.route.hops.map(h=>h.venue.dex.name)))].join(" + ");
       const vsTxt=$("kVs")?$("kVs").textContent:"";
       const vs=vsTxt&&vsTxt.startsWith("+")?vsTxt:null;
       const secs=(Date.now()-t0)/1000;
@@ -9889,7 +9919,7 @@ async function doSwap(){
       baseSimArmedKey=null;baseSimFailedKey=null;
       $("amtIn").value="";$("amtOut").value="";currentPlan=null;
       $("routeWrap").style.display="none";await refreshBalances();ev("swap:done","","base");
-      showSwapDone({paidTxt,gotTxt,vs,url,hash:tx.hash,secs});
+      showSwapDone({paidAmt,paidSym:tokenIn.symbol,paidTok:tokenIn,paidN,gotAmt,gotSym:tokenOut.symbol,gotTok:tokenOut,gotN,route,vs,url,hash:tx.hash,secs});
     }else{setNotice(note("err",`<b>Reverted.</b> <a href="${url}" target="_blank" rel="noopener">View on BaseScan</a>`));ev("swap:revert","","base");}
   }catch(e){
     // لغو در والت خطا نیست — یک جمله‌ی روشن، نه جعبه‌ی «Technical details»
@@ -9900,19 +9930,114 @@ async function doSwap(){
 }
 /* بلوکِ نتیجه بعد از یک سواپِ تأییدشده. کوتِ نمایش‌داده‌شده عمداً با «≈»
    علامت‌گذاری شده — همان کوت است، نه رسیدِ پارس‌شده. */
-/* مارک‌آپِ مشترکِ بلوکِ نتیجه — Base و سولانا دقیقاً یک قالب و یک مجموعه کلاس. */
-function swapDoneHtml({paidTxt,gotTxt,gainLine,url,linkLabel,txShort,secs,againId}){
-  return `<div class="ok"><svg viewBox="0 0 24 24" width="22" height="22" fill="none"
-      stroke="var(--pos)" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+/* مارک‌آپِ مشترکِ بلوکِ نتیجه — Base و سولانا دقیقاً یک قالب و یک مجموعه کلاس.
+   مبلغ‌ها و نمادها از همان paidTxt/gotTxtِ قبلی می‌آیند، فقط جدا؛ «≈»ی مبلغِ دریافتی
+   همچنان همین‌جا اضافه می‌شود. paidN/gotN فقط برای خطِ نرخ‌اند. */
+function sdRateTxt(paidN,gotN,paidSym,gotSym){
+  if(!(paidN>0)||!(gotN>0)||!isFinite(paidN)||!isFinite(gotN))return "";
+  // جهتی که عددش ≥۱ است خواناتر است: «۱ ETH ≈ 2,409 USDC»، نه «۱ USDC ≈ 0.000415 ETH»
+  const x=paidN/gotN;
+  return x>=1?`1 ${gotSym} ≈ ${fmtOutField(x)} ${paidSym}`:`1 ${paidSym} ≈ ${fmtOutField(gotN/paidN)} ${gotSym}`;
+}
+function swapDoneHtml({paidAmt,paidSym,gotAmt,gotSym,paidN,gotN,route,chain,gainLine,url,linkLabel,txShort,secs,againId}){
+  const chip=(id,sym)=>`<span class="tokbtn sdChip"><span class="av" id="${id}">?</span><span>${esc(sym)}</span></span>`;
+  const rate=sdRateTxt(paidN,gotN,paidSym,gotSym);
+  return `<div class="sdHero"><div class="sdIcon"><svg viewBox="0 0 24 24" width="28" height="28" fill="none"
+      stroke="#fff" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round">
       <path d="M5 12.5l4.5 4.5L19 7"/></svg></div>
     <h3>Swap complete</h3>
-    <div class="amt2 mono">${esc(paidTxt)} → ${esc(gotTxt)}</div>
+    <div class="sdSub">Confirmed in ${esc(secs.toFixed(1))}s · ${esc(chain)}</div></div>
+    <div class="sdLegs">
+      <div class="sdLeg"><span class="sdLbl">You paid</span><span class="sdAmt mono" id="sdPaid">${esc(paidAmt)}</span>${chip("sdPaidAv",paidSym)}</div>
+      <div class="sdArrow" aria-hidden="true">↓</div>
+      <div class="sdLeg"><span class="sdLbl">You received</span><span class="sdAmt mono" id="sdRecv">≈ ${esc(gotAmt)}</span>${chip("sdGotAv",gotSym)}</div>
+    </div>
     ${gainLine?`<div class="gain">${esc(gainLine)}</div>`:""}
+    ${rate?`<div class="sdRate">${esc(rate)}</div>`:""}
+    ${route?`<div class="sdRate">via ${esc(route)}</div>`:""}
     <div class="acts">
       <button class="cta" id="${againId}" type="button">Swap again</button>
       <a class="exitShare" href="${esc(url)}" target="_blank" rel="noopener">${esc(linkLabel)}</a>
     </div>
-    <div class="txl">Tx ${esc(txShort)} · confirmed in ${esc(secs.toFixed(1))}s</div>`;
+    <div class="txl">Tx ${esc(txShort)}</div>`;
+}
+/* لوگوی چیپ‌ها از همان کمکی‌هایی که چیپ‌های pay/receive می‌گیرند؛ نشدن = آواتارِ حروفِ پیش‌فرض.
+   tok در Base همان شیِ توکن است؛ در سولانا {sol:true,mint,symbol,logo}. */
+function sdPaintChip(id,tok){
+  if(!tok)return;
+  if(!tok.sol){paintAvatar($(id),tok);return;}
+  if(tok.mint===SOL_MINT_ADDR)solPaintSolChip(id);
+  else solPaintAvatarInto(id,tok.symbol,tok.logo,tok.mint);
+}
+function sdRm(card){
+  if(card)card.querySelectorAll("canvas.sdBurst").forEach(c=>c.remove());
+}
+/* شمارشِ مبلغِ دریافتی + انفجارِ برند. هر بلوکِ نتیجه یک‌بار؛ با reduced-motion هیچ‌کدام. */
+function sdAnimate(elId,gotAmt){
+  const el=$(elId);if(!el)return;
+  const path=el.querySelector(".sdIcon path");
+  if(path&&path.getTotalLength)path.style.setProperty("--len",path.getTotalLength());
+  if(matchMedia("(prefers-reduced-motion: reduce)").matches)return;
+  const card=el.closest("section.card"),rv=el.querySelector("#sdRecv"),icon=el.querySelector(".sdIcon");
+  if(!card||!icon)return;
+  sdRm(card);
+  // شمارش فقط وقتی مبلغ عددِ ساده است؛ رشته‌ی نهایی عیناً همان gotAmt می‌ماند
+  const fin=Number(String(gotAmt).replace(/,/g,"")),dm=/\.(\d+)$/.exec(String(gotAmt)),dp=dm?dm[1].length:0;
+  const counts=rv&&isFinite(fin)&&fin>0;
+  const setN=v=>{rv.textContent="≈ "+v.toLocaleString("en-US",{minimumFractionDigits:dp,maximumFractionDigits:dp});};
+  if(counts)setN(0);
+  const cv=document.createElement("canvas");cv.className="sdBurst";cv.setAttribute("aria-hidden","true");
+  const R=card.getBoundingClientRect(),dpr=window.devicePixelRatio||1;
+  cv.width=Math.round(R.width*dpr);cv.height=Math.round(R.height*dpr);
+  card.appendChild(cv);
+  const ctx=cv.getContext("2d");
+  const ic=icon.getBoundingClientRect(),cx=ic.left-R.left+ic.width/2,cy=ic.top-R.top+ic.height/2;
+  const cs=getComputedStyle(document.documentElement);
+  const cols=[cs.getPropertyValue("--g1").trim()||"#22EFF6",cs.getPropertyValue("--g2").trim()||"#C56CF5"];
+  let seed=12345;
+  const rnd=()=>{seed|=0;seed=seed+0x6D2B79F5|0;let t=Math.imul(seed^seed>>>15,1|seed);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296;};
+  // سرعتِ اولیه ۰٫۶ برابرِ نسخه‌ی تأییدشده تا ذرات تا ۶۰۰ms نزدیکِ آیکون بمانند و روی عنوان و «You paid» نیایند
+  const SP=0.42,UP=0.12,G=0.00015;
+  const parts=[];
+  const emit=(n,t0,k)=>{for(let i=0;i<n;i++){
+    const a=rnd()*Math.PI*2,sp=(0.35+rnd()*0.4)*SP*k,r=rnd();
+    parts.push({t0,type:r<.5?0:r<.75?1:2,vx:Math.cos(a)*sp,vy:Math.sin(a)*sp-UP*(0.5+rnd()*0.5)*k,
+      rot:rnd()*6.28,vr:(rnd()*2-1)*0.01,life:650+rnd()*200,col:cols[Math.floor(rnd()*cols.length)]});}};
+  emit(46,200,1);emit(18,420,.6);
+  const draw=ms=>{
+    ctx.setTransform(1,0,0,1,0,0);ctx.clearRect(0,0,cv.width,cv.height);
+    ctx.setTransform(dpr,0,0,dpr,0,0);
+    for(const p of parts){
+      const age=ms-p.t0;if(age<0||age>p.life)continue;
+      let x=cx,y=cy,vx=p.vx,vy=p.vy;
+      for(let t=0;t<age;t+=16){const dt=Math.min(16,age-t);x+=vx*dt;y+=vy*dt;vy+=G*dt;const d=Math.pow(0.985,dt/16);vx*=d;vy*=d;}
+      const f=age/p.life,al=f>.65?1-(f-.65)/.35:1,sc=1-0.2*f;
+      ctx.save();ctx.translate(x,y);ctx.globalAlpha=al;ctx.strokeStyle=ctx.fillStyle=p.col;
+      ctx.lineCap="round";ctx.lineJoin="round";ctx.scale(sc,sc);
+      if(p.type===0){ctx.rotate(p.rot+p.vr*age);ctx.lineWidth=2.2;ctx.beginPath();ctx.moveTo(-4.5,-2.5);ctx.lineTo(0,2.5);ctx.lineTo(4.5,-2.5);ctx.stroke();}
+      else if(p.type===1){ctx.lineWidth=1.6;ctx.beginPath();ctx.arc(0,0,3,0,6.283);ctx.stroke();}
+      else{ctx.beginPath();ctx.arc(0,0,2,0,6.283);ctx.fill();}
+      ctx.restore();
+    }
+  };
+  const t0=performance.now();
+  (function frame(){
+    // کارت بسته شد/بلوک عوض شد یا کاربر Swap again زد → فوراً پاک
+    if(!cv.isConnected||el.hidden||!rv||!rv.isConnected){cv.remove();return;}
+    const ms=performance.now()-t0;
+    if(counts){
+      const p=Math.min(1,Math.max(0,(ms-560)/600));
+      if(p>=1)rv.textContent="≈ "+gotAmt;else setN(fin*(1-Math.pow(1-p,3)));
+    }
+    if(ms>=1800){cv.remove();return;}
+    draw(ms);
+    requestAnimationFrame(frame);
+  })();
+}
+function showSwapDoneCard(elId,a,paidTok,gotTok){
+  showDoneBlock(elId,swapDoneHtml(a));
+  sdPaintChip("sdPaidAv",paidTok);sdPaintChip("sdGotAv",gotTok);
+  sdAnimate(elId,a.gotAmt);
 }
 function showDoneBlock(elId,html){
   const el=$(elId);
@@ -9934,13 +10059,14 @@ function hideDoneBlock(elId){
   if(!el||el.hidden)return;
   el.hidden=true;
   const card=el.closest("section.card");
+  sdRm(card);
   if(card){card.classList.remove("isDone");card.style.minHeight="";}
 }
 /* بلوکِ نتیجه بعد از یک سواپِ تأییدشده. کوتِ نمایش‌داده‌شده عمداً با «≈»
    علامت‌گذاری شده — همان کوت است، نه رسیدِ پارس‌شده. */
-function showSwapDone({paidTxt,gotTxt,vs,url,hash,secs}){
-  showDoneBlock("swapDone",swapDoneHtml({paidTxt,gotTxt,gainLine:vs?vs+" vs Uniswap direct":"",url,
-    linkLabel:"View on BaseScan",txShort:shortAddr(hash),secs,againId:"swapAgain"}));
+function showSwapDone({paidAmt,paidSym,paidTok,paidN,gotAmt,gotSym,gotTok,gotN,route,vs,url,hash,secs}){
+  showSwapDoneCard("swapDone",{paidAmt,paidSym,gotAmt,gotSym,paidN,gotN,route,chain:"Base",gainLine:vs?vs+" vs Uniswap direct":"",url,
+    linkLabel:"View on BaseScan",txShort:shortAddr(hash),secs,againId:"swapAgain"},paidTok,gotTok);
   paintSellPill("hidden");
 }
 function hideSwapDone(){hideDoneBlock("swapDone");}
@@ -11715,13 +11841,19 @@ function solSnapshotDone(){
   const q=solQuote,decIn=solInputDecimals(),decOut=solOutputDecimals();
   if(!q||decIn==null||decOut==null||q.inAmount==null||q.outAmount==null)return null;
   const gain=solDirectGainPct(q,solDirectQuote);
-  return {paidTxt:solFmtAmount(q.inAmount,decIn)+" "+(solInputSymbol()||"—"),
-    gotTxt:"≈ "+solFmtAmount(q.outAmount,decOut)+" "+(solOutputSymbol()||"—"),
+  const inMint=solInputMint(),outMint=solOutputMint();
+  const tokOf=(mint,sym)=>({sol:true,mint,symbol:sym,logo:mint===solRefMint?solRefLogo:mint===solMintCur?solTokenLogoUrl:solLogoCache[mint]});
+  const route=solRouteLabel(q);
+  return {paidAmt:solFmtAmount(q.inAmount,decIn),paidSym:solInputSymbol()||"—",paidTok:tokOf(inMint,solInputSymbol()||"—"),
+    paidN:Number(solFormatUnits(q.inAmount,decIn)),
+    gotAmt:solFmtAmount(q.outAmount,decOut),gotSym:solOutputSymbol()||"—",gotTok:tokOf(outMint,solOutputSymbol()||"—"),
+    gotN:Number(solFormatUnits(q.outAmount,decOut)),route:route==="—"?"":route,
     vs:gain==null?null:"+"+gain.toFixed(2)+"% vs best single pool"};
 }
 function showSolSwapDone(info,sig,secs){
-  showDoneBlock("solSwapDone",swapDoneHtml({paidTxt:info.paidTxt,gotTxt:info.gotTxt,gainLine:info.vs,
-    url:"https://solscan.io/tx/"+sig,linkLabel:"View on Solscan",txShort:shortAddr(sig),secs,againId:"solSwapAgain"}));
+  showSwapDoneCard("solSwapDone",{paidAmt:info.paidAmt,paidSym:info.paidSym,gotAmt:info.gotAmt,gotSym:info.gotSym,
+    paidN:info.paidN,gotN:info.gotN,route:info.route,chain:"Solana",gainLine:info.vs,
+    url:"https://solscan.io/tx/"+sig,linkLabel:"View on Solscan",txShort:shortAddr(sig),secs,againId:"solSwapAgain"},info.paidTok,info.gotTok);
 }
 /* «Swap again»: کارت خالی، همان جفت، موجودی‌ها تازه */
 function solSwapAgain(){

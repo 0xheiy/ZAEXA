@@ -1670,6 +1670,8 @@ def check_pairs_page():
     # فقط همین یک شکلِ دقیق (href + «/report» بدونِ زیرمسیر/کوئری) کنار گذاشته می‌شود؛
     # fetch("/report")، "/report/…" و هر نقل‌قولِ دیگرِ آن همچنان گیر می‌افتند.
     scan_src = src.replace('<a class="navLink" href="/report" title="Exit Report">', '<a class="navLink" title="Exit Report">')
+    # ۵ نوامبر: لینکِ Exit Report در ستونِ Tools فوتر هم همان <a href="/report">ِ ساده است (نه ترافیکِ بک‌اند).
+    scan_src = scan_src.replace('<a href="/report">Exit Report</a>', '<a>Exit Report</a>')
     other_backend = [
         m[1] for m in re.findall(r'(["\'])(/(?:gt|vd|ev|report)(?:[/?][^"\']*)?)\1', scan_src)
         if not m[1].startswith(GT_LOGO_PREFIXES)
@@ -4153,18 +4155,15 @@ async def check_mobile_compact(p, errors):
     rf = subprocess.run(["node", "--input-type=module", "-e", gen2], cwd=worker_dir, capture_output=True, text=True)
     assert rf.returncode == 0, rf.stderr[-300:]
     lf = re.search(r"<footer.*?</footer>", landing_src, re.S).group(0)
-    rf_norm = "\n".join(l for l in rf.stdout.split("\n") if '<a href="/report">Exit Report</a>' not in l)
-    assert rf_norm == lf, "worker/report_page.js's footer HTML no longer matches web/landing.html's footer (apart from the Exit Report link)"
+    # ۵ نوامبر: لینکِ Exit Report حالا در ستونِ Tools همه‌ی فوترهاست؛ دیگر چیزی برای کنار گذاشتن نیست و دو فوتر بایت‌به‌بایت یکی‌اند.
+    assert rf.stdout == lf, "worker/report_page.js's footer HTML no longer matches web/landing.html's footer"
     css_start = rep_src.index("@media(max-width:720px){.footGrid{grid-template-columns:1fr}}\n")
     css_blk = rep_src[css_start:rep_src.index("`;\n", css_start)]
     assert "fMore" in css_blk and css_blk in landing_src, "the footer-collapse CSS in worker/report_page.js is not byte-identical to the one in web/landing.html"
-    # ۲۷ اکتبر: لینکِ «API» (ستونِ About) عمداً به فوترِ landing اضافه شد؛ برای مقایسه‌ی بایتیِ ۱۴۴۰px با 1916a01 فقط همین یک خط کنار می‌رود.
-    API_FOOT_LINE = '      <a href="/api">API</a>\n'
-    assert landing_src.count(API_FOOT_LINE) == 1, "web/landing.html's footer must carry exactly one API link"
-    land_new = landing_src.replace(API_FOOT_LINE, "")
-    STOCKS_FOOT_LINE = '      <a href="/app#stocks">Stocks</a>\n'
-    assert land_new.count(STOCKS_FOOT_LINE) == 1, "landing footer must carry exactly one Stocks link"
-    land_new = land_new.replace(STOCKS_FOOT_LINE, "", 1)  # Only the newly requested footer link differs from the frozen footer.
+    # ۵ نوامبر (تغییرِ عمدیِ مالک): ستون‌ها Trade · Tools · About شدند، پس رندرِ کلِ فوتر دیگر با 1916a01 یکی نیست
+    # (لینک‌های API/Stocks هم پیش‌تر کنار گذاشته می‌شدند). آنچه تغییر نکرده هنوز پیکسل‌به‌پیکسل قفل است:
+    # نشان و برچسب و آیکون‌ها، متنِ fine و نوارِ پایین. ستون‌ها را کاوشگرِ [footer columns] می‌سنجد.
+    land_new = landing_src
     # ۲۴ اکتبر: فوترِ landing را مالک در 1916a01 پذیرفت؛ پایه دیگر «نزدیک‌ترین نیاکان بدونِ fMore» نیست و روی
     # همان کامیتِ ثابت قفل است (مثلِ [report body unchanged] که 6944652 را قفل می‌کند).
     LANDING_FOOTER_BASE = "1916a01"
@@ -4182,13 +4181,19 @@ async def check_mobile_compact(p, errors):
         shots_l = []
         for html in (land_old, land_new):
             lp = await land_page(html, 1440, scheme)
-            shots_l.append(await lp.locator("footer").screenshot())
+            one = []
+            for sel_l in ("footer .footBrand .brand", "footer .footBrand .footTag", "footer .footBrand .social"):
+                one.append(await lp.locator(sel_l).screenshot())
+            # fine و footBottom به‌خاطرِ بلندترِ شدنِ ستونِ About با نیم‌پیکسل جابه‌جا می‌شوند (پیکسلشان دیگر قابلِ‌مقایسه نیست) → متن و استایلِ محاسبه‌شده
+            for sel_l in ("footer .fine", "footer .footBottom"):
+                one.append(await lp.locator(sel_l).evaluate("""e => { const c = getComputedStyle(e); return e.outerHTML + '|' + ['fontSize','fontWeight','lineHeight','color','marginTop','marginBottom','paddingTop','borderTopWidth','borderTopColor','display','maxWidth'].map(k => c[k]).join('|'); }"""))
+            shots_l.append(one)
             await lp.close()
-        assert shots_l[0] == shots_l[1], "landing footer at 1440 (%s) differs from the accepted render in %s" % (scheme, LANDING_FOOTER_BASE)
+        assert shots_l[0] == shots_l[1], "landing footer brand/fine/bottom at 1440 (%s) differs from the accepted render in %s (differing parts: %s)" % (scheme, LANDING_FOOTER_BASE, [i for i, (x, y) in enumerate(zip(*shots_l)) if x != y])
     lp = await land_page(landing_src, 390, "light")
     await foot_collapsed_and_opens(lp, "landing")
     await lp.close()
-    print("[mobile compact] landing.html: footer byte-identical at 1440 (light/dark), collapsed + opens at 390; report_page.js footer HTML and CSS identical to landing.html (source of the GENERATED block)")
+    print("[mobile compact] landing.html: footer brand/fine/bottom identical to 1916a01 at 1440 (light/dark), collapsed + opens at 390; report_page.js footer HTML and CSS identical to landing.html (source of the GENERATED block)")
 
     # ================== ت) [desktop unchanged] ==================
     # ۲۰ اکتبر: خطِ پایه دیگر کامیتِ پدر نیست (با هر کامیتِ تازه کهنه می‌شد و روی main هم می‌افتاد).
@@ -5423,7 +5428,8 @@ async def check_report_page(p, errors):
         const stock = f.querySelector('a[href="/app#stocks"]'), stockH = stock ? stock.getBoundingClientRect().height : 0;
         const stockRowDelta = stockH ? stockH + parseFloat(getComputedStyle(stock.parentElement).rowGap) : 0;
         return { els: out, foot: [fr.height, fc.color, fc.backgroundColor, fc.borderTopColor], bodyBg: getComputedStyle(document.body).backgroundColor,
-                 stockRowDelta, sw: document.documentElement.scrollWidth, iw: innerWidth }; }"""
+                 stockRowDelta, colMax: Math.max(...[...f.querySelectorAll('.footCol')].map(c => c.getBoundingClientRect().height)),
+                 sw: document.documentElement.scrollWidth, iw: innerWidth }; }"""
     async def render_body(path, vw, vh, scheme):
         pg = await b.new_page(viewport={"width": vw, "height": vh}, color_scheme=scheme)
         await pg.add_init_script("localStorage.setItem(%s, %s);" % (_j.dumps(theme_key), _j.dumps(scheme)))
@@ -5451,7 +5457,8 @@ async def check_report_page(p, errors):
                 assert x[2:] == y[2:], "%s: %s computed colours/style differ: main %s vs branch %s" % (tag, x[0], x[2:], y[2:])
             # ۱۸ اکتبر [mobile compact]: فقط ارتفاعِ فوتر روی ۳۹۰px عمداً کوتاه‌تر شد (ستون‌های لینک در <details class="fMore">
             # جمع شدند)؛ رنگ‌ها و بدنه عیناً همان‌اند و روی ۱۴۴۰ ارتفاع هم همان است.
-            foot_h_ok = (n_["foot"][0] < o_["foot"][0] - 100) if vw == 390 else n_["stockRowDelta"] > 0 and abs(o_["foot"][0] + n_["stockRowDelta"] - n_["foot"][0]) <= 1
+            # ۵ نوامبر (تغییرِ عمدیِ مالک): ستون‌ها Trade · Tools · About شدند؛ روی ۱۴۴۰ ارتفاعِ فوتر به اندازه‌ی تغییرِ بلندترین ستون عوض می‌شود.
+            foot_h_ok = (n_["foot"][0] < o_["foot"][0] - 100) if vw == 390 else abs(o_["foot"][0] + (n_["colMax"] - o_["colMax"]) - n_["foot"][0]) <= 1
             assert o_["foot"][1:] == n_["foot"][1:] and foot_h_ok and o_["bodyBg"] == n_["bodyBg"], "%s: footer/body differ: %s vs %s" % (tag, o_["foot"], n_["foot"])
             assert n_["sw"] <= n_["iw"], "%s: the branch page scrolls horizontally: %s" % (tag, n_)
             n_checked += len(n_["els"])
@@ -10003,6 +10010,9 @@ async def main():
         await check_pairs_star(p, errors)
         await check_swap_star(p, errors)
         await check_swap_star_raised(p, errors)
+        await check_landing_nav_order(p, errors)
+        await check_footer_columns(p, errors)
+        await check_swap_done_card(p, errors)
         await check_boot_watchdog(p, errors)
         await check_chunked_build(p, errors)
         await check_header_star_parity(p, errors)
@@ -10498,7 +10508,7 @@ async def main():
         # ---- [swap done] بلوکِ نتیجه بعد از یک سواپِ تأییدشده ----
         swap_done_1 = await pg.evaluate("""() => {
             const cardBefore = Math.round(document.querySelector("section.card.swapCard").getBoundingClientRect().height);
-            showSwapDone({paidTxt: "1 ETH", gotTxt: "≈ 2,500 USDC", vs: "+1.20%",
+            showSwapDone({paidAmt: "1", paidSym: "ETH", paidTok: tokenIn, paidN: 1, gotAmt: "2,500", gotSym: "USDC", gotTok: tokenOut, gotN: 2500, vs: "+1.20%",
                           url: "https://basescan.org/tx/0xabc",
                           hash: "0x" + "ab".repeat(32), secs: 4.2});
             const block = document.getElementById("swapDone");
@@ -10520,7 +10530,7 @@ async def main():
                     minH: card.style.minHeight};
         }""")
         after_second = await pg.evaluate("""() => {
-            showSwapDone({paidTxt: "1 ETH", gotTxt: "≈ 2,500 USDC", vs: null,
+            showSwapDone({paidAmt: "1", paidSym: "ETH", paidTok: tokenIn, paidN: 1, gotAmt: "2,500", gotSym: "USDC", gotTok: tokenOut, gotN: 2500, vs: null,
                           url: "https://basescan.org/tx/0xdef",
                           hash: "0x" + "cd".repeat(32), secs: 3.1});
             scheduleQuote();
@@ -16067,12 +16077,14 @@ async def main():
             return out;
         }""")
         print("[footer] columns=%r" % cols)
-        for name in ["Trade", "About", "Support"]:
+        # ۵ نوامبر (تغییرِ عمدی): ستون‌ها Trade · Tools · About شدند؛ «Support» رفت و دکمه‌ی Report a problem زیرِ About است.
+        for name in ["Trade", "Tools", "About"]:
             assert name in cols, "the footer is missing the %r column heading" % name
+        assert "Support" not in cols, "the Support footer column was folded into About on 5 Nov: %r" % cols
         assert cols["Trade"]["links"] >= 2, "Trade column has too few links: %r" % cols["Trade"]
-        assert cols["About"]["links"] >= 2, "About column has too few links: %r" % cols["About"]
-        assert cols["Support"]["links"] + cols["Support"]["buttons"] >= 2, (
-            "Support column has too few links/actions: %r" % cols["Support"])
+        assert cols["Tools"]["links"] >= 2, "Tools column has too few links: %r" % cols["Tools"]
+        assert cols["About"]["links"] + cols["About"]["buttons"] >= 2, (
+            "About column has too few links/actions: %r" % cols["About"])
 
         # ۲. هیچ لینکی به ناکجا نمی‌رود
         hrefs = await footpg.eval_on_selector_all(
@@ -18073,6 +18085,7 @@ async def main():
         await r6.evaluate("() => { window.__notes = []; new MutationObserver(() => window.__notes.push(document.getElementById('solNotices').innerText)).observe(document.getElementById('solNotices'), {childList: true, subtree: true, characterData: true}); }")
         await r6.click("#solSwapBtn")
         await r6.wait_for_timeout(3600)
+        await r6.wait_for_timeout(2000)   # ۵ نوامبر: مبلغِ دریافتی در کارتِ v3 تا ~۱٫۲ ثانیه می‌شمارد؛ متنِ نهایی را بخوان
         r6_sign = await r6.evaluate("window.__solSignCalls.length")
         r6_notes = " | ".join(await r6.evaluate("window.__notes"))
         r6_done = await r6.evaluate("""() => { const d = document.getElementById('solSwapDone');
@@ -18090,8 +18103,10 @@ async def main():
         # 4) کارتِ تکمیل
         assert r6_done["hidden"] is False and r6_done["isDone"] is True, "4: the Solana swap-complete card must show on confirmation: %s" % r6_done
         t = r6_done["text"]
-        assert "Swap complete" in t and "1 SOL → ≈ 5,000 TSWP" in t and "+2.04% vs best single pool" in t, "4: summary lines wrong: %r" % t
-        assert "Swap again" in t and "View on Solscan" in t and re.search(r"Tx \w{4,}…\w{4} · confirmed in \d+\.\ds", t), "4: buttons/tx line wrong: %r" % t
+        # ۵ نوامبر: کارتِ v3 — دو پایه‌ی «You paid / You received» به‌جای «۱ SOL → ≈ ۵٬۰۰۰ TSWP»
+        assert "Swap complete" in t and "Confirmed in" in t and "Solana" in t and "You paid" in t and "1" in t and "SOL" in t \
+            and "You received" in t and "≈ 5,000" in t and "TSWP" in t and "+2.04% vs best single pool" in t, "4: summary lines wrong: %r" % t
+        assert "Swap again" in t and "View on Solscan" in t and re.search(r"Tx \w{4,}…\w{4}", t) and re.search(r"Confirmed in \d+\.\ds · Solana", t), "4: buttons/tx line wrong: %r" % t
         assert r6_done["href"].startswith("https://solscan.io/tx/"), "4: Solscan link wrong: %r" % r6_done["href"]
         assert r6_done["againRadius"] == "999px" and r6_done["linkRadius"] == "999px", "5: both result buttons must be full pills: %s" % r6_done
         assert r6_done["btnHidden"] == "none" and r6_done["factsHidden"] == "none", "4: the done state must hide the CTA and facts like Base"
@@ -20823,7 +20838,8 @@ async def main():
         assert foot_info["cols"] == 3, (
             "web/pairs.html's .footGrid must have exactly 3 .footCol, found %s" % foot_info["cols"])
         assert foot_info["hasBrand"], "web/pairs.html's .footGrid is missing its .footBrand child"
-        assert foot_info["tradeHrefs"] == ["/app#swap", "/app#folio", "/app#flow", "/app#stocks", "/pairs"], (
+        # ۵ نوامبر: Portfolio به ستونِ Tools رفت و ترتیبِ Trade شد Swap · Flow · New pairs · Stocks
+        assert foot_info["tradeHrefs"] == ["/app#swap", "/app#flow", "/pairs", "/app#stocks"], (
             "the Trade footer column's hrefs are wrong: %s" % foot_info["tradeHrefs"])
         assert foot_info["baseScanHref"] == (
             "https://basescan.org/address/%s#code" % LIVE_EXECUTOR), (
@@ -22631,17 +22647,16 @@ async def check_api_page(p, errors):
         m = _re.search(r"<footer.*?</footer>", src, _re.S)
         assert m, "[api page] %s has no footer" % label
         assert m.group(0).count(LINK) == 1, "[api page] %s: the footer must carry exactly one API link to /api" % label
-        about = _re.search(r"<h4>About</h4>(.*?)</div>", m.group(0), _re.S)
-        assert about and LINK in about.group(1), "[api page] %s: the API link belongs in the About column" % label
+        # ۵ نوامبر (تغییرِ عمدی): API از About به ستونِ Tools رفت.
+        about = _re.search(r"<h4>Tools</h4>(.*?)</div>", m.group(0), _re.S)
+        assert about and LINK in about.group(1), "[api page] %s: the API link belongs in the Tools column" % label
         trade = _re.search(r"<h4>Trade</h4>(.*?)</div>", m.group(0), _re.S)
         assert trade, "[footer stocks] %s: Trade column missing" % label
         links = _re.findall(r'<a href="([^"]+)">([^<]+)</a>', trade.group(1))
         prefix = "" if label == "web/index.html" else "/app"
-        expected = [(prefix + "#swap", "Swap"), (prefix + "#folio", "Portfolio"), (prefix + "#flow", "Flow"), (prefix + "#stocks", "Stocks"), ("/pairs", "New pairs")]
-        if label.startswith("/report") or label == "/api":
-            expected[0] = ("/app", "Swap")
-            expected.append(("/report", "Exit Report"))
-        elif label == "web/landing.html":
+        # ۵ نوامبر: Trade = Swap · Flow · New pairs · Stocks (Portfolio و Exit Report به Tools رفتند)
+        expected = [(prefix + "#swap", "Swap"), (prefix + "#flow", "Flow"), ("/pairs", "New pairs"), (prefix + "#stocks", "Stocks")]
+        if label.startswith("/report") or label == "/api" or label == "web/landing.html":
             expected[0] = ("/app", "Swap")
         assert links == expected, "[footer stocks] %s: require only Stocks after Flow, all other links unchanged: %s" % (label, links)
     print("[footer stocks] PASS — all five rendered footers have exactly one Stocks link after Flow; app hash and other-page /app hash targets; no extra links")
@@ -23012,6 +23027,223 @@ async def check_markets_no_clip(p, errors):
         print("[markets no clip] PASS — 1121/1366/1632/1920 plus 1024/820/720/390, both themes")
     finally:
         await b.close();srv.shutdown()
+
+
+# =====================================================================
+# ۵ نوامبر — سه تغییرِ تأییدشده‌ی رابط: ترتیبِ هدرِ landing، سه ستونِ فوتر، کارتِ نتیجه‌ی سواپ (v3).
+# =====================================================================
+LANDING_NAV_ANCHORS = ["#features", "#exit-check", "#how", "#faq", "#closing"]
+LANDING_NAV_TEXTS = ["Capabilities", "Exit test", "How it works", "FAQ", "Why Zaexa"]
+
+
+async def check_landing_nav_order(p, errors):
+    """[landing nav order] ترتیبِ نوارِ بالای landing به ترتیبِ صفحه، Exit Report کنارِ CTA، منوی موبایل، و اسکراوِل‌اسپای."""
+    path = os.path.join(HERE, "..", "landing.html")
+    b = await p.chromium.launch()
+    try:
+        pg = await b.new_page(viewport={"width": 1440, "height": 900})
+        pg.on("pageerror", lambda e: errors.append("PAGEERROR %s" % e))
+        await pg.goto("file://" + path)
+        await pg.add_style_tag(content="html{scroll-behavior:auto!important}")
+        await pg.wait_for_timeout(500)
+        d = await pg.evaluate("""() => {
+            const links = [...document.querySelectorAll('.desktop-nav a')];
+            const tops = links.map(a => document.getElementById(a.getAttribute('href').slice(1)).getBoundingClientRect().top + scrollY);
+            const acts = [...document.querySelector('.header-actions').children].map(e => e.className);
+            const hl = document.querySelector('.header-link'), cta = document.querySelector('.header-cta');
+            const mm = [...document.querySelectorAll('#mobileMenu nav a')].map(a => [a.getAttribute('href'), a.textContent.trim()]);
+            return {hrefs: links.map(a => a.getAttribute('href')), texts: links.map(a => a.textContent), dt: links.map(a => a.dataset.t),
+                    tops, acts, hlHref: hl && hl.getAttribute('href'), hlText: hl && hl.textContent,
+                    hlH: hl.getBoundingClientRect().height, ctaH: cta.getBoundingClientRect().height,
+                    hlFont: getComputedStyle(hl).fontSize + getComputedStyle(hl).fontFamily,
+                    navFont: getComputedStyle(links[0]).fontSize + getComputedStyle(links[0]).fontFamily,
+                    hlBorder: getComputedStyle(hl).borderLeftWidth, mm};
+        }""")
+        assert d["hrefs"] == LANDING_NAV_ANCHORS, "[landing nav order] desktop nav hrefs: %s" % d["hrefs"]
+        assert d["texts"] == LANDING_NAV_TEXTS and d["dt"] == LANDING_NAV_TEXTS, "[landing nav order] texts/data-t: %s %s" % (d["texts"], d["dt"])
+        assert all(a < b2 for a, b2 in zip(d["tops"], d["tops"][1:])), "[landing nav order] anchors are not in document order: %s" % d["tops"]
+        assert d["acts"].index("header-link") < d["acts"].index("header-cta"), "[landing nav order] .header-link must come before .header-cta: %s" % d["acts"]
+        assert d["hlHref"] == "/report" and d["hlText"] == "Exit Report", d
+        assert abs(d["hlH"] - d["ctaH"]) <= 0.5, "[landing nav order] .header-link height %s != .header-cta %s" % (d["hlH"], d["ctaH"])
+        assert d["hlFont"] == d["navFont"] and d["hlBorder"] == "1px", "[landing nav order] header-link font/divider: %s" % d
+        assert [m[0] for m in d["mm"]] == LANDING_NAV_ANCHORS + ["/report", "/app"], "[landing nav order] mobile menu order: %s" % d["mm"]
+        assert [m[1] for m in d["mm"]][:6] == LANDING_NAV_TEXTS + ["Exit Report"], "[landing nav order] mobile menu labels: %s" % d["mm"]
+        # اسکراوِل‌اسپا: روی هیرو هیچ‌کدام؛ روی هر بخش لینکِ همان
+        on_js = "[...document.querySelectorAll('.desktop-nav a.on')].map(a => a.getAttribute('href'))"
+        await pg.wait_for_timeout(200)
+        assert await pg.evaluate(on_js) == [], "[landing nav order] a link is active on the hero: %s" % await pg.evaluate(on_js)
+        for anchor in LANDING_NAV_ANCHORS:
+            await pg.evaluate("a => { const e = document.querySelector(a); scrollTo(0, e.getBoundingClientRect().top + scrollY - 80); }", anchor)
+            await pg.wait_for_timeout(300)
+            got = await pg.evaluate(on_js)
+            assert got == [anchor], "[landing nav order] scrolled to %s but the active links are %s" % (anchor, got)
+            top = await pg.evaluate("a => document.querySelector(a).getBoundingClientRect().top", anchor)
+            assert 70 <= top <= 90, "[landing nav order] %s heading would sit under the fixed header (top=%s)" % (anchor, top)
+        # بولد‌شدن نباید لینک‌ها را تکان بدهد
+        rect_js = "() => [...document.querySelectorAll('.desktop-nav a')].map(a => { const r = a.getBoundingClientRect(); return [r.x, r.y, r.width, r.height]; })"
+        await pg.evaluate("scrollTo(0, 0)"); await pg.wait_for_timeout(300)
+        base = await pg.evaluate(rect_js)
+        for i in range(len(LANDING_NAV_ANCHORS)):
+            await pg.evaluate("i => document.querySelectorAll('.desktop-nav a')[i].classList.add('on')", i)
+            now = await pg.evaluate(rect_js)
+            await pg.evaluate("i => document.querySelectorAll('.desktop-nav a')[i].classList.remove('on')", i)
+            assert all(abs(x - y) <= 0.5 for r1, r2 in zip(base, now) for x, y in zip(r1, r2)), "[landing nav order] link %d moved when it became .on: %s -> %s" % (i, base, now)
+        # زیرِ نقطه‌ی شکستِ نوار، لینکِ هدر پنهان است و منو آن را دارد
+        await pg.set_viewport_size({"width": 800, "height": 900}); await pg.wait_for_timeout(200)
+        hid = await pg.evaluate("() => [getComputedStyle(document.querySelector('.desktop-nav')).display, getComputedStyle(document.querySelector('.header-link')).display]")
+        assert hid == ["none", "none"], "[landing nav order] at 800px the nav and .header-link must both be hidden: %s" % hid
+        print("[landing nav order] nav = Capabilities, Exit test, How it works, FAQ, Why Zaexa in page order; Exit Report beside the CTA (same height/font, 1px divider, hidden with the nav); mobile menu has the 5 + Exit Report + Open the app; scrollspy marks the section in view (none on the hero), no layout shift when .on toggles")
+    finally:
+        await b.close()
+
+
+FOOTER_COLS = [("Trade", ["Swap", "Flow", "New pairs", "Stocks"]),
+               ("Tools", ["Exit Report", "Portfolio", "API"]),
+               ("About", ["How it works & FAQ", "Contract on BaseScan 0x15e5…6b6d", "Source on GitHub", "Report a problem", "Price history by GeckoTerminal"])]
+FOOT_JS = """() => {
+    const f = document.querySelector('footer'); const cols = [...f.querySelectorAll('.footCol')];
+    return cols.map(c => [c.querySelector('h4').textContent.trim(),
+        [...c.children].filter(e => e.tagName !== 'H4').map(e => e.textContent.replace(/\\s+/g, ' ').trim()),
+        [...c.querySelectorAll('a,button')].map(e => e.getAttribute('href')),
+        [...c.children].filter(e => e.tagName !== 'H4').map(e => e.className)]);
+}"""
+
+
+async def check_footer_columns(p, errors):
+    """[footer columns] Trade · Tools · About با همان فهرستِ لینک‌ها در landing، اپ، pairs و فوترِ گزارش؛ و گزارش بایت‌به‌بایت landing است."""
+    import subprocess
+    srv, origin = we_serve()
+    b = await p.chromium.launch()
+    errs = []
+    try:
+        landing_src = open(os.path.join(HERE, "..", "landing.html"), encoding="utf-8").read()
+        worker_dir = os.path.join(HERE, "..", "..", "worker")
+        gen = subprocess.run(["node", "--input-type=module", "-e", 'import { LANDING_FOOTER_HTML as f } from "./report_page.js"; process.stdout.write(f);'],
+                             cwd=worker_dir, capture_output=True, text=True)
+        assert gen.returncode == 0, gen.stderr[-300:]
+        lf = re.search(r"<footer.*?</footer>", landing_src, re.S).group(0)
+        assert gen.stdout == lf, "[footer columns] worker/report_page.js's footer HTML is not byte-identical to web/landing.html's"
+        env = FbEnv(b, origin, errs)
+        results = {}
+        pg = await b.new_page(viewport={"width": 1440, "height": 900})
+        await pg.goto("file://" + os.path.join(HERE, "..", "landing.html")); results["landing"] = await pg.evaluate(FOOT_JS); await pg.close()
+        pg = await b.new_page(viewport={"width": 1440, "height": 900})
+        await pg.route("**/*", lambda r: r.abort()); await pg.set_content(gen.stdout); results["report"] = await pg.evaluate(FOOT_JS); await pg.close()
+        pg = await env.open("#swap", board=False); await pg.wait_for_selector("#swapWatch:enabled"); await pg.wait_for_timeout(500)
+        results["app"] = await pg.evaluate(FOOT_JS); await pg.context.close()
+        pg = await env.open("", path="/pairs", board=False); await pg.wait_for_timeout(500)
+        results["pairs"] = await pg.evaluate(FOOT_JS); await pg.context.close()
+        want_hrefs = {
+            "landing": [["/app", "/app#flow", "/pairs", "/app#stocks"], ["/report", "/app#folio", "/api"], ["/app#faq", None, "https://github.com/0xheiy/ZAEXA", "/app", "https://www.geckoterminal.com"]],
+            "report": [["/app", "/app#flow", "/pairs", "/app#stocks"], ["/report", "/app#folio", "/api"], ["/app#faq", None, "https://github.com/0xheiy/ZAEXA", "/app", "https://www.geckoterminal.com"]],
+            "app": [["#swap", "#flow", "/pairs", "#stocks"], ["/report", "#folio", "/api"], ["#faq", None, "https://github.com/0xheiy/ZAEXA", None, "https://www.geckoterminal.com"]],
+            "pairs": [["/app#swap", "/app#flow", "/pairs", "/app#stocks"], ["/report", "/app#folio", "/api"], ["/app#faq", None, "https://github.com/0xheiy/ZAEXA", "mailto:zaexadex@gmail.com", "https://www.geckoterminal.com"]],
+        }
+        for name, cols in results.items():
+            assert [c[0] for c in cols] == [c[0] for c in FOOTER_COLS], "[footer columns] %s headings: %s" % (name, [c[0] for c in cols])
+            for (h, items), c in zip(FOOTER_COLS, cols):
+                texts = [t if "BaseScan" not in t else "Contract on BaseScan 0x15e5…6b6d" for t in c[1]]
+                if name == "app":   # ctrLink را JS با آدرسِ زنده پر می‌کند
+                    texts = [t if "BaseScan" not in t else "Contract on BaseScan 0x15e5…6b6d" for t in texts]
+                assert texts == items or (name == "app" and [re.sub(r"0x[0-9a-fA-F]{4}…[0-9a-fA-F]{4}", "0x15e5…6b6d", t) for t in texts] == items), "[footer columns] %s %s links: %s" % (name, h, c[1])
+            got_hrefs = [[(None if (h or "").startswith("https://basescan") else "mailto:zaexadex@gmail.com" if (h or "").startswith("mailto:zaexadex@gmail.com") else h) for h in c[2]] for c in cols]
+            assert got_hrefs == want_hrefs[name], "[footer columns] %s hrefs: %s" % (name, got_hrefs)
+        # ساختارِ کلاس‌ها هم در هر چهار صفحه یکی است (feedback همان pill است)
+        classes = {n: [c[3] for c in cols] for n, cols in results.items()}
+        assert all(v == classes["landing"] for v in classes.values()), "[footer columns] child class structure differs: %s" % classes
+        assert not errs, "[footer columns] page errors: %s" % errs
+        print("[footer columns] landing, app, /pairs and the report footer all read Trade (Swap, Flow, New pairs, Stocks) · Tools (Exit Report, Portfolio, API) · About (How it works & FAQ, Contract on BaseScan, Source on GitHub, Report a problem, Price history by GeckoTerminal); report footer is byte-identical to landing's")
+    finally:
+        await b.close(); srv.shutdown()
+
+
+SD_CALL = """() => { showSwapDone({paidAmt: '1', paidSym: tokenIn.symbol, paidTok: tokenIn, paidN: 1, gotAmt: '2,500', gotSym: tokenOut.symbol, gotTok: tokenOut, gotN: 2500,
+    route: 'Aerodrome Slipstream', vs: '+1.20%', url: 'https://basescan.org/tx/0xabc', hash: '0x' + 'ab'.repeat(32), secs: 4.2}); }"""
+SD_STATE = """() => { const d = document.getElementById('swapDone'), card = d.closest('section.card'), cr = card.getBoundingClientRect(), dr = d.getBoundingClientRect();
+    const vis = id => { const e = document.getElementById(id); return !!e && e.offsetParent !== null && getComputedStyle(e).display !== 'none'; };
+    const recv = document.getElementById('sdRecv');
+    return {isDone: card.classList.contains('isDone'), hidden: d.hidden, amtIn: vis('amtIn'), amtOut: vis('amtOut'), act: vis('actBtn'), facts: vis('kRate'), title: vis('swapNetworkBar'),
+        fill: dr.height / cr.height, canv: card.querySelectorAll('canvas.sdBurst').length, recv: recv ? recv.textContent : null,
+        recvColor: recv ? getComputedStyle(recv).color : null, tx: getComputedStyle(document.documentElement).getPropertyValue('--tx'),
+        text: d.innerText, over: d.scrollWidth - d.clientWidth, cardR: cr.right, maxR: Math.max(...[...d.querySelectorAll('*')].map(e => e.getBoundingClientRect().right)),
+        iw: innerWidth, sw: document.documentElement.scrollWidth, minH: card.style.minHeight}; }"""
+
+
+async def check_swap_done_card(p, errors):
+    """[swap done card] کارتِ نتیجه‌ی v3 برای Base (جریانِ stub) و Solana (قالبِ مشترک): جایگزینیِ کارت، لگ‌ها، شمارش، انفجارِ برند، Swap again، reduced-motion، ۳۹۰px."""
+    srv, origin = we_serve()
+    b = await p.chromium.launch()
+    errs = []
+    try:
+        env = FbEnv(b, origin, errs)
+        for width, height, theme in ((1280, 900, "light"), (390, 844, "dark")):
+            tag = "[swap done card] %d %s" % (width, theme)
+            pg = await env.open("#swap", vw=width, vh=height, scheme=theme, board=False)
+            await pg.wait_for_selector("#swapWatch:enabled"); await pg.wait_for_timeout(700)
+            before = await pg.evaluate("() => Math.round(document.querySelector('section.card.swapCard').getBoundingClientRect().height)")
+            await pg.evaluate("document.querySelector('section.card.swapCard').scrollIntoView({block:'center'})")
+            await pg.evaluate(SD_CALL); await pg.wait_for_timeout(300)
+            s1 = await pg.evaluate(SD_STATE)
+            assert s1["isDone"] and not s1["hidden"], "%s: done block not shown: %s" % (tag, s1)
+            assert not s1["amtIn"] and not s1["amtOut"] and not s1["act"] and not s1["facts"], "%s: the pay/receive boxes, CTA and facts must be hidden: %s" % (tag, s1)
+            assert s1["title"], "%s: the card's title row must stay visible" % tag
+            assert s1["fill"] >= 0.7, "%s: the done block must fill the card (%.2f)" % (tag, s1["fill"])
+            assert s1["canv"] == 1, "%s: the brand burst canvas must exist during the animation: %s" % (tag, s1["canv"])
+            assert s1["recv"] != "≈ 2,500", "%s: the received amount should be counting up at 300ms, got %r" % (tag, s1["recv"])
+            for needle in ("Swap complete", "Confirmed in 4.2s · Base", "You paid", "You received", "+1.20% vs Uniswap direct", "via Aerodrome Slipstream", "Swap again", "View on BaseScan", "Tx 0xabab"):
+                assert needle in s1["text"], "%s: %r missing from %r" % (tag, needle, s1["text"])
+            legs = await pg.evaluate("() => [...document.querySelectorAll('#swapDone .sdLeg')].map(l => [l.querySelector('.sdAmt').textContent, l.querySelector('.sdChip > span:last-child').textContent.trim(), l.querySelector('.sdChip .av').textContent.length > 0, tokenIn.symbol, tokenOut.symbol])")
+            assert legs[0][0] == "1" and legs[1][0].startswith("≈ "), "%s: leg amounts %s (the received amount keeps its ≈)" % (tag, legs)
+            assert legs[0][1] == legs[0][3] and legs[1][1] == legs[1][4] and legs[0][2] and legs[1][2], "%s: chips must carry the real symbols and an avatar: %s" % (tag, legs)
+            assert "1 " in await pg.inner_text("#swapDone .sdRate"), "%s: rate line" % tag
+            await pg.wait_for_timeout(1000)   # ~1.3s: فلش روی مبلغ هنوز در جریان است
+            mid = await pg.evaluate(SD_STATE)
+            assert mid["recvColor"] != await pg.evaluate("() => getComputedStyle(document.querySelector('#swapDone h3')).color"), "%s: the received amount should be mid-flash (var(--pos) -> var(--tx)) at ~1.3s: %s" % (tag, mid["recvColor"])
+            await pg.wait_for_timeout(1000)
+            s2 = await pg.evaluate(SD_STATE)
+            assert s2["recv"] == "≈ 2,500", "%s: the final received text after 2s: %r" % (tag, s2["recv"])
+            assert s2["canv"] == 0, "%s: the canvas must be gone after 2s" % tag
+            assert s2["over"] <= 0 and s2["maxR"] <= s2["cardR"] + 0.5 and s2["sw"] <= s2["iw"], "%s: layout overflow: %s" % (tag, s2)
+            if width >= 1000:   # مثلِ [swap done]: روی دسکتاپ کارت با آمدنِ نتیجه کوچک و بزرگ نمی‌شود
+                after_h = await pg.evaluate("() => Math.round(document.querySelector('section.card.swapCard').getBoundingClientRect().height)")
+                assert abs(after_h - before) <= 1, "%s: the card height changed when the result showed: %s -> %s" % (tag, before, after_h)
+            assert abs(s2["minH"] and int(s2["minH"].replace("px", "")) - before) <= 1, "%s: the height lock must be kept (%s vs %s)" % (tag, s2["minH"], before)
+            await pg.click("#swapAgain"); await pg.wait_for_timeout(200)
+            s3 = await pg.evaluate(SD_STATE)
+            assert s3["hidden"] and not s3["isDone"] and s3["amtIn"] and s3["amtOut"] and s3["act"] and s3["minH"] == "", "%s: Swap again must restore the normal card: %s" % (tag, s3)
+            # Swap again وسطِ انیمیشن: بوم فوراً می‌رود
+            await pg.evaluate(SD_CALL); await pg.wait_for_timeout(250)
+            assert (await pg.evaluate(SD_STATE))["canv"] == 1
+            await pg.click("#swapAgain")
+            assert (await pg.evaluate(SD_STATE))["canv"] == 0, "%s: Swap again must remove the canvas immediately" % tag
+            # مبلغِ خیلی بلند هم از کارت بیرون نمی‌زند
+            await pg.evaluate("""() => showSwapDone({paidAmt: '123,456,789.123456', paidSym: 'LONGSYMBOLXYZ', paidTok: tokenIn, paidN: 1, gotAmt: '98,765,432,100.12', gotSym: 'ANOTHERLONG', gotTok: tokenOut, gotN: 2,
+                route: 'Uniswap v3 + Aerodrome Slipstream + PancakeSwap v3', vs: null, url: 'https://basescan.org/tx/0xabc', hash: '0x' + 'ab'.repeat(32), secs: 4.2})""")
+            await pg.wait_for_timeout(2300)
+            s4 = await pg.evaluate(SD_STATE)
+            assert s4["over"] <= 0 and s4["maxR"] <= s4["cardR"] + 0.5 and s4["sw"] <= s4["iw"], "%s: long amounts overflow: %s" % (tag, s4)
+            await pg.context.close()
+        # reduced motion: هیچ بومی، مبلغِ نهایی فوراً
+        pg = await env.open("#swap", board=False); await pg.emulate_media(reduced_motion="reduce")
+        await pg.wait_for_selector("#swapWatch:enabled"); await pg.wait_for_timeout(700)
+        await pg.evaluate(SD_CALL)
+        for ms in (0, 150, 500, 1100):
+            st = await pg.evaluate(SD_STATE)
+            assert st["canv"] == 0, "[swap done card] reduced motion: a canvas exists at +%dms" % ms
+            assert st["recv"] == "≈ 2,500", "[swap done card] reduced motion: the final amount must show immediately, got %r" % st["recv"]
+            await pg.wait_for_timeout(300 if ms < 500 else 500)
+        await pg.context.close()
+        # Solana: همان قالب با داده‌ی سولانا
+        pg = await env.open("#swap", board=False); await pg.wait_for_selector("#swapWatch:enabled")
+        html = await pg.evaluate("""() => { const d = document.createElement('div'); d.innerHTML = swapDoneHtml({paidAmt: '1', paidSym: 'SOL', gotAmt: '5,000', gotSym: 'TSWP', paidN: 1, gotN: 5000, route: 'Raydium → Orca',
+            chain: 'Solana', gainLine: '+2.04% vs best single pool', url: 'https://solscan.io/tx/abc', linkLabel: 'View on Solscan', txShort: 'abcd…wxyz', secs: 3.2, againId: 'solSwapAgain'}); return d.innerText; }""")
+        for needle in ("Confirmed in 3.2s · Solana", "You paid", "1", "SOL", "You received", "≈ 5,000", "TSWP", "1 SOL ≈ 5,000 TSWP", "via Raydium → Orca", "+2.04% vs best single pool", "View on Solscan", "Tx abcd…wxyz"):
+            assert needle in html, "[swap done card] Solana template: %r missing from %r" % (needle, html)
+        await pg.context.close()
+        assert not errs, "[swap done card] page errors: %s" % errs
+        print("[swap done card] Base: the pay/receive boxes, CTA and facts hide, the done block fills the card, legs carry the right symbols/amounts, the received amount counts up and ends on the exact string, flashes, the burst canvas exists then is gone by 2s, Swap again restores the card (and kills the canvas at once); no overflow at 390 or with long amounts; reduced motion: no canvas and the final value immediately; Solana template renders the same card")
+    finally:
+        await b.close(); srv.shutdown()
 
 
 async def only(names):

@@ -22,7 +22,7 @@ for(const changed of [false,true])test(changed?'Base amount change during simula
     currentPlan:plan,quoteSeq:0,busy:false,mode:'exactIn',activeChain:'base',slippageBps:50,deadlineMin:3,
     tokenIn:{address:'input',symbol:'IN',decimals:0},tokenOut:{address:'output',symbol:'OUT',decimals:0},
     account:'wallet',signer:{},walletEip1193:{},CHAIN:{executor:'executor',explorer:'https://invalid.test'},ABI:{executor:[]},E:{Contract:function(){return {executeSwap};}},
-    walletIsRemote:false,feeBps:0,baseSimArmedKey:null,baseSimFailedKey:null,
+    walletIsRemote:false,feeBps:0,builderRunner:s=>s,withBuilderCode:d=>d,baseSimArmedKey:null,baseSimFailedKey:null,
     parsedAmountIn:()=>BigInt(el('amtIn').value),$:el,ev(){},setBusy(){},runQuote:async()=>{},preflight:async()=>[],
     buildParts:()=>[],minOutOf:()=>995n,baseSimKey:()=> 'quote',venueLabel:()=> 'venue',isNative:()=>false,asArg:t=>t.address,
     balances:{},balKey:t=>t.address,fmt:String,esc:String,note:(_kind,h)=>h,setNotice(){},sendOrLoseTrack:async p=>p,
