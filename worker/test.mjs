@@ -15539,6 +15539,110 @@ function stripAllowedWording(t) {
     console.log("[cmc kline] GET /cmc/kline: keyed success (one call, key in the header only, seconds, sorted, cmc-key); body error_code 500 / non-200 / throw -> one keyless call (cmc-free); both fail -> 502; empty -> 404 and never cached; bad chain/address/tf -> 400 with zero upstream calls; POST 405; identical request served from cache with zero upstream calls; no CMC_KEY -> straight to keyless");
   }
 
+  // ---------- [cg mcap] ----------
+  {
+    const CK = "SECRET-CG-KEY-FOR-MCAP";
+    const MK = "https://api.coingecko.com/api/v3/coins/markets";
+    const envC = { ASSETS, CG_KEY: CK };
+    const envN = { ASSETS };
+    const jb = (o, st = 200) => new Response(JSON.stringify(o), { status: st, headers: { "content-type": "application/json" } });
+    const row = (id, mc, fdv) => [{ id, symbol: "x", market_cap: mc, fully_diluted_valuation: fdv }];
+    const shelf = new Map(), puts = [];
+    const CGM = (id, e, init) => call("/cg/mcap/" + id, init || ipH(), e);
+    const savedCaches = globalThis.caches;
+    globalThis.caches = { default: {
+      match: async (r) => { const v = shelf.get(r.url); return v ? v.clone() : undefined; },
+      put: async (r, v) => { puts.push({ u: r.url, cc: v.headers.get("cache-control") }); shelf.set(r.url, v); },
+    } };
+    try {
+      // الف) موفق: یک تماس، URL بدون کلید، کلید فقط در هدر، شکل پاسخ، هدر کش
+      await withFetch(() => jb(row("usd-coin", 70700000000, 70800000000)), async () => {
+        const res = await CGM("usd-coin", envC);
+        const raw = await res.text(), b = JSON.parse(raw);
+        ok(res.status === 200 && log.length === 1, "[cg mcap] success makes exactly one upstream call, got " + log.length);
+        ok(log[0].u === MK + "?vs_currency=usd&ids=usd-coin", "[cg mcap] upstream URL shape, got " + log[0].u);
+        ok(!log[0].u.includes(CK) && log[0].h["x-cg-demo-api-key"] === CK, "[cg mcap] key only in the header, never in the URL");
+        ok(Object.keys(b).join() === "id,mc,fdv,at" && b.id === "usd-coin" && b.mc === 70700000000 && b.fdv === 70800000000 && !isNaN(Date.parse(b.at)),
+           "[cg mcap] response shape {id,mc,fdv,at}, got " + raw);
+        ok(res.headers.get("cache-control") === "public, max-age=3600", "[cg mcap] browser cache 3600, got " + res.headers.get("cache-control"));
+        ok(res.headers.get("access-control-allow-origin") === "*", "[cg mcap] same CORS policy as /gt");
+        ok(!raw.includes(CK) && !JSON.stringify([...res.headers.entries()]).includes(CK), "[cg mcap] key never in the response");
+        ok(puts.length === 1 && puts[0].cc === "public, max-age=43200", "[cg mcap] stored for 12 h, got " + JSON.stringify(puts));
+      });
+      // ب) از کش: صفر تماس بالادست
+      await withFetch(() => jb(row("usd-coin", 1, 1)), async () => {
+        const res = await CGM("usd-coin", envC);
+        const b = await res.json();
+        ok(res.status === 200 && b.mc === 70700000000 && log.length === 0, "[cg mcap] cache hit makes zero upstream calls, got " + log.length);
+        ok(res.headers.get("cache-control") === "public, max-age=3600", "[cg mcap] cache hit still tells the browser 3600");
+      });
+      // پ) شکست: 502، nulls، کش نمی‌شود، تماس بعدی دوباره می‌پرسد
+      shelf.clear(); puts.length = 0;
+      for (const [name, h] of [["500", () => jb({ error: "x" }, 500)], ["throw", () => { throw new TypeError("net"); }],
+                               ["empty", () => jb([])], ["null fields", () => jb(row("bad-coin", null, null))]]) {
+        await withFetch(h, async () => {
+          _cgKeyDownUntil(0);
+          const res = await CGM("bad-coin", envC);
+          const b = await res.json();
+          ok(res.status === 502 && b.id === "bad-coin" && b.mc === null && b.fdv === null, "[cg mcap] failure (" + name + ") -> 502 with nulls, got " + res.status + " " + JSON.stringify(b));
+          ok(res.headers.get("cache-control") === "no-store", "[cg mcap] failure (" + name + ") is no-store");
+        });
+        ok(puts.length === 0 && shelf.size === 0, "[cg mcap] failure (" + name + ") is never cached");
+      }
+      await withFetch(() => jb(row("bad-coin", 5, 6)), async () => {
+        _cgKeyDownUntil(0);
+        const res = await CGM("bad-coin", envC);
+        ok(res.status === 200 && log.length >= 1, "[cg mcap] after a failure the next call asks upstream again, got " + res.status + "/" + log.length);
+      });
+      // ت) کلید خراب (۴۲۹) → یک تماس بی‌کلید
+      shelf.clear(); puts.length = 0; _cgKeyDownUntil(0);
+      await withFetch((u, o) => (o.headers && o.headers["x-cg-demo-api-key"] ? jb({ status: { error_code: 10006 } }, 429) : jb(row("pepe", 10, 12))), async () => {
+        const res = await CGM("pepe", envC);
+        const b = await res.json();
+        ok(res.status === 200 && b.mc === 10 && log.length === 2 && !log[1].h["x-cg-demo-api-key"], "[cg mcap] 429 on the key falls to one keyless call, got " + log.length);
+      });
+      _cgKeyDownUntil(0);
+      // ث) بی‌کلید: مستقیم بی‌کلید
+      shelf.clear();
+      await withFetch(() => jb(row("pepe", 10, 12)), async () => {
+        const res = await CGM("pepe", envN);
+        ok(res.status === 200 && log.length === 1 && !log[0].h["x-cg-demo-api-key"], "[cg mcap] no CG_KEY -> one keyless call");
+      });
+      // ج) id بد → ۴۰۰ بدون تماس
+      shelf.clear();
+      await withFetch(() => jb(row("a".repeat(80), 1, 1)), async () => {
+        for (const id of ["", "UPPER", "-lead", "a_b", "a.b", "a%2fb", "a/b", "a b", "x".repeat(81), "..%2f"]) {
+          const res = await CGM(id, envC);
+          ok(res.status === 400, "[cg mcap] bad id '" + id + "' -> 400, got " + res.status);
+        }
+        ok(log.length === 0, "[cg mcap] bad id makes zero upstream calls, got " + log.length);
+        const okId = await CGM("a".repeat(80), envC);
+        ok(okId.status === 200, "[cg mcap] an 80 char id is accepted, got " + okId.status);
+      });
+      // چ) حد نرخ: سطل «cg» جدا، بعد از RL_LIMIT → ۴۲۹ با CORS، بدون تماس
+      shelf.clear();
+      await withFetch(() => jb(row("pepe", 10, 12)), async () => {
+        const same = { headers: { "cf-connecting-ip": "203.0.113.77" } };
+        let last = null;
+        for (let i = 0; i < idx.RL_LIMIT + 1; i++) last = await CGM("pepe", envC, same);
+        ok(last.status === 429 && last.headers.get("retry-after") === "60" && last.headers.get("access-control-allow-origin") === "*",
+           "[cg mcap] rate limit applies after RL_LIMIT requests, got " + last.status);
+        const gtRes = await call("/gt/" + REST, same, envK);
+        ok(gtRes.status !== 429, "[cg mcap] the cg bucket is separate from the gt bucket");
+      });
+      // ح) متد
+      await withFetch(() => jb(row("pepe", 10, 12)), async () => {
+        const r1 = await call("/cg/mcap/pepe", { method: "POST", headers: { "cf-connecting-ip": "198.51.100.249" } }, envC);
+        ok(r1.status === 405 && log.length === 0, "[cg mcap] POST -> 405 with zero calls, got " + r1.status);
+        const r2 = await call("/cg/mcap/pepe", { method: "OPTIONS", headers: { "cf-connecting-ip": "198.51.100.248" } }, envC);
+        ok(r2.status === 204 && r2.headers.get("access-control-allow-origin") === "*", "[cg mcap] OPTIONS -> 204 with CORS");
+      });
+    } finally {
+      if (savedCaches === undefined) delete globalThis.caches; else globalThis.caches = savedCaches;
+    }
+    console.log("[cg mcap] GET /cg/mcap/<id>: bad id -> 400 with zero calls; key only in the x-cg-demo-api-key header; {id,mc,fdv,at} with max-age 3600 and CORS; stored 12 h; cache hit makes zero upstream calls; 5xx/throw/empty/null -> 502 nulls, no-store and never cached; 429 key falls to keyless; own rate-limit bucket; POST 405, OPTIONS 204");
+  }
+
   // ---------- [pass pacing] ----------
   {
     const { _paceHooks, _paceBegin, _paceEnd, _paceActive, _relayDownUntil } = idx;

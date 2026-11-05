@@ -4760,6 +4760,7 @@ function gtCacheSet(url,entry){
   }
 }
 function gtTtl(u){
+  if(u.startsWith("/cg/mcap/"))return 3600000;   // مارکت‌کپ جهانی: کند عوض می‌شود (Worker ۱۲ ساعت کش می‌کند)
   if(/\/pools(\?|$)/.test(u))return 600000;   // استخر برتر زود عوض نمی‌شود
   if(/\/ohlcv\//.test(u))return 45000;
   return 60000;
@@ -5753,6 +5754,13 @@ function tokenMeta(addr){
    • market_cap_usd برای خیلی از توکن‌های تازه null است. آن وقت «—» نشان
      می‌دهیم، نه اینکه بی‌صدا FDV را جایش بگذاریم — آن دو یکی نیستند و
      قاطی‌کردنشان دقیقاً همان جایی است که کاربر گمراه می‌شود.
+   • ⚠️ دامنه‌ی دو عدد در GeckoTerminal یکی نیست (۵ نوامبر): برای توکن‌های
+     چندزنجیره‌ای market_cap_usd مارکت‌کپ *جهانی* کوین‌گکو است ولی fdv_usd
+     قیمت × عرضه‌ی *فقط روی Base* (USDC: ۷۰.۷B در برابر ۴.۳B). پس وقتی
+     coingecko_coin_id هست هر دو عدد از /cg/mcap/<id> (CoinGecko، هم‌دامنه)
+     می‌آید؛ تا آن برسد یا اگر شکست بخورد، مارکت‌کپِ GT می‌ماند و FDV «—»
+     می‌شود — FDVِ Base-only هرگز کنار مارکت‌کپِ جهانی نمی‌نشیند. بدون id
+     همان رفتار قبلی.
    • مارکت‌کپ یعنی قیمت×عرضه‌ی در گردش، FDV یعنی قیمت×عرضه‌ی کل. عرضه‌ی
      در گردش هرگز نمی‌تواند از عرضه‌ی کل بیشتر باشد، پس مارکت‌کپ > FDV
      از نظر ریاضی محال است. اگر منبع چنین جفتی داد، عدد درست نیست — و
@@ -6986,6 +6994,44 @@ function solPaintAvatarIntoEl(el,symbol,logoUrl,mint){
   el.appendChild(img);
 }
 
+/* ۵ نوامبر — مارکت‌کپ/FDV هم‌دامنه از Worker (/cg/mcap). حافظه‌ی نشست + انبار ماندگار
+   (gtcGet/gtcPut با TTL یک‌ساعته). شکست هرگز کش نمی‌شود. null = نشد. */
+const CG_ID_RE=/^[a-z0-9][a-z0-9-]{0,79}$/;
+const cgMcapMem=new Map();
+function cgIdOf(a){return a&&a.coingecko_coin_id?String(a.coingecko_coin_id):"";}
+function cgMcapOf(id){
+  if(!CG_ID_RE.test(id))return Promise.resolve(null);
+  const hit=cgMcapMem.get(id);
+  if(hit)return hit;
+  const key="/cg/mcap/"+id,kept=gtcGet(key);
+  if(kept&&kept.v&&typeof kept.v==="object"){const p=Promise.resolve(kept.v);cgMcapMem.set(id,p);return p;}
+  const pos=v=>(typeof v==="number"&&isFinite(v)&&v>0)?v:null;
+  const p=(async()=>{
+    try{
+      const r=await withTimeout(fetch(key,{headers:{accept:"application/json"}}),9000);
+      if(!r.ok)return null;
+      const j=await r.json();
+      const v={mc:pos(j&&j.mc),fdv:pos(j&&j.fdv)};
+      if(v.mc==null&&v.fdv==null)return null;
+      gtcPut(key,{t:Date.now(),v});
+      return v;
+    }catch{return null;}
+  })();
+  cgMcapMem.set(id,p);
+  p.then(v=>{if(!v&&cgMcapMem.get(id)===p)cgMcapMem.delete(id);});   // شکست کش نمی‌شود
+  return p;
+}
+/* cg: undefined = هنوز نرسیده، null = شکست، {mc,fdv} = جواب. با id، FDVِ GT هرگز استفاده نمی‌شود. */
+function mcFdvOf(a,cg){
+  const num=v=>(v==null||v==="")?null:Number(v);
+  let mc=num(a.market_cap_usd),fdv=num(a.fdv_usd);
+  if(cgIdOf(a)){
+    fdv=null;
+    if(cg){if(cg.mc!=null)mc=cg.mc;fdv=cg.fdv;}
+  }
+  const impossiblePair=mc!=null&&fdv!=null&&isFinite(mc)&&isFinite(fdv)&&mc>0&&fdv>0&&mc>fdv*1.01;
+  return {mc,fdv,impossiblePair};
+}
 let statsSeq=0;
 async function renderTokenStats(t){
   const box=panel("tokStats");if(!box)return;
@@ -6996,26 +7042,33 @@ async function renderTokenStats(t){
   if(seq!==statsSeq)return;
   if(!a){box.hidden=true;return;}
   const num=v=>(v==null||v==="")?null:Number(v);
-  const mc=num(a.market_cap_usd),fdv=num(a.fdv_usd);
-  // مارکت‌کپ > FDV محال است (بالا توضیح داده شد). ۱٪ رواداری برای گرد کردن
-  // و اینکه دو عدد در دو لحظه‌ی کمی متفاوت نمونه‌برداری شده‌اند — نمونه‌ی
-  // واقعی ۱۷ برابر بود، نه ۱٪، پس این رواداری چیزی واقعی را پنهان نمی‌کند.
-  const impossiblePair=mc!=null&&fdv!=null&&isFinite(mc)&&isFinite(fdv)&&mc>0&&fdv>0&&mc>fdv*1.01;
-  const rows=[
-    ["Market cap",impossiblePair?"—":fmtBig(mc)],
-    ["FDV",impossiblePair?"—":fmtBig(fdv)],
-    ["Volume 24h",fmtBig(num(a.volume_usd&&a.volume_usd.h24))],
-    ["Liquidity",fmtBig(num(a.total_reserve_in_usd))],
-  ];
-  // اگر همه‌شان نامعلوم‌اند، یک ردیف پر از «—» فقط سروصداست
-  if(rows.every(r=>r[1]==="—")){box.hidden=true;return;}
-  box.innerHTML=rows.map(([k,v])=>
-    `<div class="${tokenPage?"tkStat":"tstat"}"><div class="k">${esc(k)}</div>`+
-    `<div class="v">${esc(v)}</div></div>`).join("")+
-    (impossiblePair?'<div class="statNote">Market cap and FDV are hidden. The price source '+
-      'reported a market cap larger than the fully diluted value, which is impossible — '+
-      'one of the two is wrong and we cannot tell which.</div>':"");
-  box.hidden=false;
+  const paint=cg=>{
+    // مارکت‌کپ > FDV محال است (بالا توضیح داده شد). ۱٪ رواداری برای گرد کردن
+    // و اینکه دو عدد در دو لحظه‌ی کمی متفاوت نمونه‌برداری شده‌اند — نمونه‌ی
+    // واقعی ۱۷ برابر بود، نه ۱٪، پس این رواداری چیزی واقعی را پنهان نمی‌کند.
+    const {mc,fdv,impossiblePair}=mcFdvOf(a,cg);
+    const rows=[
+      ["Market cap",impossiblePair?"—":fmtBig(mc)],
+      ["FDV",impossiblePair?"—":fmtBig(fdv)],
+      ["Volume 24h",fmtBig(num(a.volume_usd&&a.volume_usd.h24))],
+      ["Liquidity",fmtBig(num(a.total_reserve_in_usd))],
+    ];
+    // اگر همه‌شان نامعلوم‌اند، یک ردیف پر از «—» فقط سروصداست
+    if(rows.every(r=>r[1]==="—")){box.hidden=true;return;}
+    box.innerHTML=rows.map(([k,v])=>
+      `<div class="${tokenPage?"tkStat":"tstat"}"><div class="k">${esc(k)}</div>`+
+      `<div class="v">${esc(v)}</div></div>`).join("")+
+      (impossiblePair?'<div class="statNote">Market cap and FDV are hidden. The price source '+
+        'reported a market cap larger than the fully diluted value, which is impossible — '+
+        'one of the two is wrong and we cannot tell which.</div>':"");
+    box.hidden=false;
+  };
+  paint(undefined);
+  const id=cgIdOf(a);
+  if(!id)return;
+  const cg=await cgMcapOf(id);
+  if(seq!==statsSeq)return;   // توکن عوض شده: جوابِ کهنه نمی‌نشیند
+  paint(cg);
 }
 async function priceUsdOf(t){
   const a=await tokenMeta(t.native?WETH_ADDR:t.address);
@@ -10511,26 +10564,37 @@ function paintSolAvatar(meta){
 /* چهار عددِ بازار — دقیقاً همان قاعده‌ی renderTokenStats (مارکت‌کپ > FDV
    محال است، آن جفت پنهان می‌شود؛ همه‌چیز «—» یعنی جعبه‌ای نشان نده)، ولی
    از رویِ attributes خامی که خودمان گرفته‌ایم، نه از tokenMeta/BASE_TOKENS. */
+const solStatsSeq=new Map();
 function renderSolStats(a,targetId){
   const box=$(targetId||"tk-tokStats");if(!box)return;
+  const sk=targetId||"tk-tokStats",seq=(solStatsSeq.get(sk)||0)+1;
+  solStatsSeq.set(sk,seq);
   if(!a){box.hidden=true;return;}
   const rowClass=(targetId==="solTokStats")?"tstat":"tkStat"; // همان قاعده‌ی renderTokenStats
   const num=v=>(v==null||v==="")?null:Number(v);
-  const mc=num(a.market_cap_usd),fdv=num(a.fdv_usd);
-  const impossiblePair=mc!=null&&fdv!=null&&isFinite(mc)&&isFinite(fdv)&&mc>0&&fdv>0&&mc>fdv*1.01;
-  const rows=[
-    ["Market cap",impossiblePair?"—":fmtBig(mc)],
-    ["FDV",impossiblePair?"—":fmtBig(fdv)],
-    ["Volume 24h",fmtBig(num(a.volume_usd&&a.volume_usd.h24))],
-    ["Liquidity",fmtBig(num(a.total_reserve_in_usd))],
-  ];
-  if(rows.every(r=>r[1]==="—")){box.hidden=true;return;}
-  box.innerHTML=rows.map(([k,v])=>
-    `<div class="${rowClass}"><div class="k">${esc(k)}</div><div class="v">${esc(v)}</div></div>`).join("")+
-    (impossiblePair?'<div class="statNote">Market cap and FDV are hidden. The price source '+
-      'reported a market cap larger than the fully diluted value, which is impossible — '+
-      'one of the two is wrong and we cannot tell which.</div>':"");
-  box.hidden=false;
+  const paint=cg=>{
+    const {mc,fdv,impossiblePair}=mcFdvOf(a,cg);
+    const rows=[
+      ["Market cap",impossiblePair?"—":fmtBig(mc)],
+      ["FDV",impossiblePair?"—":fmtBig(fdv)],
+      ["Volume 24h",fmtBig(num(a.volume_usd&&a.volume_usd.h24))],
+      ["Liquidity",fmtBig(num(a.total_reserve_in_usd))],
+    ];
+    if(rows.every(r=>r[1]==="—")){box.hidden=true;return;}
+    box.innerHTML=rows.map(([k,v])=>
+      `<div class="${rowClass}"><div class="k">${esc(k)}</div><div class="v">${esc(v)}</div></div>`).join("")+
+      (impossiblePair?'<div class="statNote">Market cap and FDV are hidden. The price source '+
+        'reported a market cap larger than the fully diluted value, which is impossible — '+
+        'one of the two is wrong and we cannot tell which.</div>':"");
+    box.hidden=false;
+  };
+  paint(undefined);
+  const id=cgIdOf(a);
+  if(!id)return;
+  cgMcapOf(id).then(cg=>{
+    if(solStatsSeq.get(sk)!==seq)return;   // رندرِ تازه‌تر نشسته: جوابِ کهنه نادیده
+    paint(cg);
+  });
 }
 
 /* دقیقاً سه جمله — کلمه‌به‌کلمه، از صاحب سایت. حالتِ نامعلوم هرگز سبز

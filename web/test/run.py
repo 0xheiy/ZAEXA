@@ -10013,6 +10013,7 @@ async def main():
         await check_landing_nav_order(p, errors)
         await check_footer_columns(p, errors)
         await check_swap_done_card(p, errors)
+        await check_mcap_scope(p, errors)
         await check_boot_watchdog(p, errors)
         await check_chunked_build(p, errors)
         await check_header_star_parity(p, errors)
@@ -23385,6 +23386,156 @@ async def check_token_page_seo(p, errors):
         await b.close()
         for sv, _ in servers.values():
             sv.shutdown()
+
+
+async def check_mcap_scope(p, errors):
+    """[mcap scope] ۵ نوامبر: GT برای توکن‌های چندزنجیره‌ای market_cap_usd را جهانی می‌دهد ولی fdv_usd را فقط روی Base.
+    با coingecko_coin_id هر دو عدد از /cg/mcap/<id> می‌آید (هم‌دامنه)؛ شکست = مارکت‌کپِ GT و FDV «—»؛ بدون id همان رفتار قبل؛
+    جوابِ کهنه بعد از عوضِ توکن نمی‌نشیند. هر دو جا: renderTokenStats (Base) و renderSolStats. لایه‌ی fetch در صفحه جعل می‌شود
+    (جوابِ /cg/mcap دستی تحویل داده می‌شود تا ترتیب کنترل شود)؛ GT مثلِ پروبِ [stats] از metaCache/attributes خام می‌گذرد."""
+    import functools, http.server, json as _j, tempfile, threading
+
+    src = open(os.path.join(HERE, "..", "index.html"), encoding="utf-8").read()
+    src = re.sub(r'const ETHERS_SRC="[^"]*";', 'const ETHERS_SRC="./stub-ethers.js";', src, count=1)
+    src = re.sub(r'const ETHERS_SRI="[^"]*";', 'const ETHERS_SRI="";', src, count=1)
+    tmp = tempfile.mkdtemp(prefix="mcap_")
+    open(os.path.join(tmp, "app.html"), "w", encoding="utf-8").write(src)
+
+    class Quiet(http.server.SimpleHTTPRequestHandler):
+        def log_message(self, *a):
+            pass
+
+        def translate_path(self, path):
+            clean = path.split("?")[0]
+            if clean in ("/app", "/app/"):
+                return os.path.join(tmp, "app.html")
+            if clean == "/stub-ethers.js":
+                return os.path.join(HERE, "stub-ethers.js")
+            return super().translate_path(path)
+    srv = http.server.ThreadingHTTPServer(("127.0.0.1", 0), functools.partial(Quiet, directory=os.path.join(HERE, "..")))
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    origin = "http://127.0.0.1:%d" % srv.server_address[1]
+
+    STUB = """
+    window.__cgCalls = []; window.__cgPend = {};
+    const nf = window.fetch.bind(window);
+    window.fetch = (u, o) => {
+      const s = String(u);
+      if (s.startsWith('/cg/mcap/')) {
+        const id = s.slice(9); window.__cgCalls.push(id);
+        return new Promise(res => { window.__cgPend[id] = (st, body) => res(new Response(JSON.stringify(body), {status: st, headers: {'content-type': 'application/json'}})); });
+      }
+      return nf(u, o);
+    };"""
+    HELP = """() => {
+      window.__draw = (kind, a) => {
+        if (kind === 'base') { const key = (tokenOut.native ? WETH_ADDR : tokenOut.address).toLowerCase(); metaCache[key] = a; return renderTokenStats(tokenOut); }
+        return renderSolStats(a, 'solTokStats');
+      };
+      window.__rows = kind => {
+        const box = document.getElementById(kind === 'base' ? 'tokStats' : 'solTokStats'); const o = {};
+        for (const d of box.children) { const k = d.querySelector && d.querySelector('.k'); if (k) o[k.textContent] = d.querySelector('.v').textContent; }
+        o.note = !!box.querySelector('.statNote'); o.hidden = box.hidden; return o;
+      };
+    }"""
+    VOL = {"volume_usd": {"h24": "1000000"}, "total_reserve_in_usd": "500000"}
+    b = await p.chromium.launch()
+    try:
+        pg = await b.new_page(viewport={"width": 1240, "height": 900})
+        pg.on("pageerror", lambda e: errors.append("[mcap scope] %s" % e))
+        await pg.add_init_script(STUB)
+        await pg.route("**/*", lambda r: r.continue_() if r.request.url.startswith(origin) else r.abort())
+        await pg.route("**/gt/**", lambda r: r.fulfill(status=200, content_type="application/json", body='{"data":[]}'))
+        await pg.route("**/ev", lambda r: r.fulfill(status=204, body=""))
+        await pg.route("**/vd/**", lambda r: r.fulfill(status=200, content_type="application/json", body='{"v":"sell","ms":100}'))
+        await pg.route("**/pairs.json**", lambda r: r.fulfill(status=200, content_type="application/json", body='{"rows":[],"store":false}'))
+        await pg.goto(origin + "/app#swap")
+        await pg.wait_for_function("() => typeof tokenOut !== 'undefined' && tokenOut && typeof renderSolStats === 'function'", timeout=20000)
+        await pg.wait_for_timeout(1500)
+        await pg.evaluate(HELP)
+
+        async def settle(kind, prom):
+            # Base: promise خودِ render؛ Solana: .then داخلی، پس یک مکثِ کوتاه
+            if kind == "base":
+                await pg.evaluate("() => window.__pend")
+            await pg.wait_for_timeout(120)
+
+        async def cg_wait(id_):
+            await pg.wait_for_function("id => window.__cgCalls.includes(id)", arg=id_, timeout=5000)
+
+        async def answer(id_, st, body):
+            await pg.evaluate("([i, s, b]) => window.__cgPend[i](s, b)", [id_, st, body])
+
+        for kind in ("base", "sol"):
+            tag = "[mcap scope] %s" % kind
+            # الف) USDC-مانند: id هست؛ رندر اول بدون انتظار برای CG (مارکت‌کپِ GT، FDV «—»، هیچ FDVِ Base-only)
+            uid = "usd-coin-" + kind
+            USDC = dict(VOL, coingecko_coin_id=uid, market_cap_usd="70700000000", fdv_usd="4300000000")
+            await pg.evaluate("([k, a]) => { window.__pend = window.__draw(k, a); }", [kind, USDC])
+            await cg_wait(uid)
+            r1 = await pg.evaluate("k => window.__rows(k)", kind)
+            assert r1["Market cap"] == "$70.70B" and r1["FDV"] == "—" and not r1["note"] and not r1["hidden"], \
+                "%s: before CG answers show GT's market cap and FDV —, never the Base-only FDV: %s" % (tag, r1)
+            assert r1["Volume 24h"] == "$1.00M", "%s: first paint must not wait for CG: %s" % (tag, r1)
+            await answer(uid, 200, {"id": uid, "mc": 70700000000, "fdv": 70800000000, "at": "2026-11-05T00:00:00Z"})
+            await settle(kind, None)
+            r2 = await pg.evaluate("k => window.__rows(k)", kind)
+            assert r2["Market cap"] == "$70.70B" and r2["FDV"] == "$70.80B" and not r2["note"] and not r2["hidden"], \
+                "%s: CG pair is shown as-is, nothing hidden: %s" % (tag, r2)
+            # ب) CG شکست خورد: مارکت‌کپ GT می‌ماند، FDV «—»
+            fail_a = dict(USDC, coingecko_coin_id="cg-fails-" + kind)
+            await pg.evaluate("([k, a]) => { window.__pend = window.__draw(k, a); }", [kind, fail_a])
+            await cg_wait("cg-fails-" + kind)
+            await answer("cg-fails-" + kind, 502, {"id": "cg-fails-" + kind, "mc": None, "fdv": None})
+            await settle(kind, None)
+            r3 = await pg.evaluate("k => window.__rows(k)", kind)
+            assert r3["Market cap"] == "$70.70B" and r3["FDV"] == "—" and not r3["note"], \
+                "%s: CG failure -> GT market cap, FDV —: %s" % (tag, r3)
+            # پ) بدون id: رفتار قبلی، هیچ تماس /cg/mcap
+            n0 = await pg.evaluate("() => window.__cgCalls.length")
+            imp = dict(VOL, market_cap_usd="72860000000", fdv_usd="4260000000")
+            await pg.evaluate("([k, a]) => { window.__pend = window.__draw(k, a); }", [kind, imp])
+            await settle(kind, None)
+            r4 = await pg.evaluate("k => window.__rows(k)", kind)
+            assert r4["Market cap"] == "—" and r4["FDV"] == "—" and r4["note"], \
+                "%s: no cg id + impossible pair -> both hidden with the note: %s" % (tag, r4)
+            ok_ = dict(VOL, market_cap_usd="34670000", fdv_usd="212500000")
+            await pg.evaluate("([k, a]) => { window.__pend = window.__draw(k, a); }", [kind, ok_])
+            await settle(kind, None)
+            r5 = await pg.evaluate("k => window.__rows(k)", kind)
+            assert r5["Market cap"] == "$34.67M" and r5["FDV"] == "$212.50M" and not r5["note"], \
+                "%s: no cg id keeps GT's own pair: %s" % (tag, r5)
+            assert await pg.evaluate("() => window.__cgCalls.length") == n0, "%s: no cg id must make no /cg/mcap call" % tag
+            # ت) CG خودش جفتِ محال بدهد (mc > fdv): قاعده روی همین جفت اجرا می‌شود
+            bad = dict(USDC, coingecko_coin_id="cg-bad-pair-" + kind)
+            await pg.evaluate("([k, a]) => { window.__pend = window.__draw(k, a); }", [kind, bad])
+            await cg_wait("cg-bad-pair-" + kind)
+            await answer("cg-bad-pair-" + kind, 200, {"id": "cg-bad-pair-" + kind, "mc": 900, "fdv": 100, "at": "x"})
+            await settle(kind, None)
+            r6 = await pg.evaluate("k => window.__rows(k)", kind)
+            assert r6["Market cap"] == "—" and r6["FDV"] == "—" and r6["note"], \
+                "%s: the impossible-pair rule runs on the CG pair too: %s" % (tag, r6)
+            # ث) جوابِ کهنه: توکنِ A کند، توکنِ B زودتر؛ بعد A می‌رسد و نباید روی B بنشیند
+            sa = dict(VOL, coingecko_coin_id="stale-a-%s" % kind, market_cap_usd="1000000", fdv_usd="1000000")
+            sb = dict(VOL, coingecko_coin_id="stale-b-%s" % kind, market_cap_usd="2000000", fdv_usd="2000000")
+            await pg.evaluate("([k, a]) => { window.__pend = window.__draw(k, a); window.__pendA = window.__pend; }", [kind, sa])
+            await cg_wait("stale-a-" + kind)
+            await pg.evaluate("([k, a]) => { window.__pend = window.__draw(k, a); }", [kind, sb])
+            await cg_wait("stale-b-" + kind)
+            await answer("stale-b-" + kind, 200, {"id": "b", "mc": 2000000, "fdv": 3000000, "at": "x"})
+            await settle(kind, None)
+            await answer("stale-a-" + kind, 200, {"id": "a", "mc": 9000000000, "fdv": 9500000000, "at": "x"})
+            await pg.evaluate("() => window.__pendA")
+            await pg.wait_for_timeout(150)
+            r7 = await pg.evaluate("k => window.__rows(k)", kind)
+            assert r7["Market cap"] == "$2.00M" and r7["FDV"] == "$3.00M", \
+                "%s: a stale CG answer for the previous token must be ignored: %s" % (tag, r7)
+            print("[mcap scope] %s: USDC-like attrs + CG pair -> both shown, nothing hidden; first paint = GT market cap + FDV —; CG failure -> mc shown, FDV —; no cg id -> old rule (impossible pair hidden, normal pair kept, zero /cg calls); rule runs on the CG pair; stale answer ignored" % kind)
+        assert not errors, "[mcap scope] page errors: %s" % errors
+        print("[mcap scope] PASS — renderTokenStats (Base swap + token page share it) and renderSolStats")
+    finally:
+        await b.close()
+        srv.shutdown()
 
 
 async def only(names):

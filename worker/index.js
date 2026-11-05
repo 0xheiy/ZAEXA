@@ -3825,6 +3825,90 @@ async function cmcKlineRoute(request, url, ctx, env) {
 }
 
 
+/* ۵ نوامبر: /cg/mcap/<coingecko_id> — مارکت‌کپ و FDV هم‌دامنه از CoinGecko.
+   چرا: در GeckoTerminal برای توکن‌های چندزنجیره‌ای market_cap_usd مارکت‌کپ
+   *جهانی* کوین‌گکو است ولی fdv_usd قیمت × عرضه‌ی *فقط روی Base* (USDC: ۷۰.۷B در
+   برابر ۴.۳B). هر دو عدد از /coins/markets می‌آیند و هم‌دامنه‌اند.
+   🔴 کلید فقط در هدر (x-cg-demo-api-key، همان میزبان و هدرِ gtUpstream — کد فقط
+   کلیدِ Demo را می‌شناسد)، هرگز در URL. بدون کلید یا با کلیدِ افتاده → بی‌کلید.
+   فقط پاسخِ موفق ۱۲ ساعت کش می‌شود؛ خطا و «ردیفِ خالی» هرگز. */
+const CG_MARKETS_URL = "https://api.coingecko.com/api/v3/coins/markets";
+const CG_MCAP_ID = /^[a-z0-9][a-z0-9-]{0,79}$/;
+const CG_MCAP_TIMEOUT_MS = 6000;
+const CG_MCAP_MAX_BYTES = 65536;
+const CG_MCAP_STORE_S = 12 * 3600;
+const CG_MCAP_BROWSER_S = 3600;
+async function cgMcapCall(url, headers) {
+  const ac = new AbortController();
+  const timer = setTimeout(() => ac.abort(), CG_MCAP_TIMEOUT_MS);
+  try {
+    const res = await fetch(url, { headers, signal: ac.signal });
+    if (!res.ok) return { status: res.status, body: null };
+    const chunks = [];
+    let n = 0;
+    const rd = res.body.getReader();
+    for (;;) {
+      const { done, value } = await rd.read();
+      if (done) break;
+      n += value.length;
+      if (n > CG_MCAP_MAX_BYTES) { try { rd.cancel(); } catch (e) { /* مهم نیست */ } return { status: res.status, body: null }; }
+      chunks.push(value);
+    }
+    const buf = new Uint8Array(n);
+    let o = 0;
+    for (const c of chunks) { buf.set(c, o); o += c.length; }
+    return { status: res.status, body: JSON.parse(new TextDecoder().decode(buf)) };
+  } catch (e) {
+    return { status: 0, body: null };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+const cgNum = (v) => (typeof v === "number" && Number.isFinite(v) && v > 0 ? v : null);
+async function cgMcapRoute(request, url, ctx, env) {
+  if (!rateOk(request, "cg", RL_LIMIT, RL_WINDOW_MS))
+    return fail(429, "too many requests", { "retry-after": "60" });
+  if (request.method === "OPTIONS") return new Response(null, { status: 204, headers: CORS });
+  if (request.method !== "GET" && request.method !== "HEAD") return fail(405, "only GET");
+  const id = url.pathname.slice("/cg/mcap/".length);
+  if (!CG_MCAP_ID.test(id)) return fail(400, "bad id");
+
+  const store = cacheStore();
+  const cacheKey = new Request("https://cg-mcap.zaexa.internal/" + id, { method: "GET" });
+  const out = (obj, status, cc) => new Response(JSON.stringify(obj), { status, headers: {
+    ...CORS, "content-type": "application/json; charset=utf-8", "cache-control": cc } });
+  if (store) {
+    try {
+      const hit = await store.match(cacheKey);
+      if (hit) return out(await hit.json(), 200, "public, max-age=" + CG_MCAP_BROWSER_S);
+    } catch (e) { /* کش خراب = بی‌کش */ }
+  }
+
+  const q = "?vs_currency=usd&ids=" + id;
+  const key = (env && typeof env.CG_KEY === "string" && env.CG_KEY) || "";
+  let r = null;
+  if (key && cgKeyDownUntil <= Date.now()) {
+    r = await cgMcapCall(CG_MARKETS_URL + q, { accept: "application/json", "x-cg-demo-api-key": key });
+    if (r.status === 429 || r.status === 401 || r.status === 403) { cgKeyDownUntil = Date.now() + CG_KEY_DOWN_MS; r = null; }
+  }
+  if (!r || !r.body) {
+    if (!r || r.status === 0 || r.status === 429 || r.status === 401 || r.status === 403 || r.status >= 500 || !key)
+      r = await cgMcapCall(CG_MARKETS_URL + q, { accept: "application/json" });
+  }
+  const row = r && Array.isArray(r.body) ? r.body.find((x) => x && x.id === id) : null;
+  const mc = row ? cgNum(row.market_cap) : null;
+  const fdv = row ? cgNum(row.fully_diluted_valuation) : null;
+  if (mc === null && fdv === null) return out({ id, mc: null, fdv: null }, 502, "no-store");
+
+  const payload = { id, mc, fdv, at: new Date().toISOString() };
+  if (store) {
+    const put = store.put(cacheKey, out(payload, 200, "public, max-age=" + CG_MCAP_STORE_S));
+    if (ctx && typeof ctx.waitUntil === "function") ctx.waitUntil(put);
+    else await put;
+  }
+  return out(payload, 200, "public, max-age=" + CG_MCAP_BROWSER_S);
+}
+
 /* =====================================================================
    GET /v4/keys/<آدرسِ توکنِ Base> — PoolKeyهای ایندکسِ v4 برای مسیریابیِ اپ
    =====================================================================
@@ -3870,6 +3954,7 @@ export default {
     if (url.pathname === "/gt" || url.pathname.startsWith("/gt/"))
       return proxyGt(request, url, ctx, env);
     if (url.pathname === "/cmc/kline") return cmcKlineRoute(request, url, ctx, env);
+    if (url.pathname.startsWith("/cg/mcap/")) return cgMcapRoute(request, url, ctx, env);
     if (url.pathname === "/ev") return collectEv(request, url, env);
     /* تصویر کارت نیست، بایندینگ ASSETS هم نیست — مثل /gt و /ev همیشه باید
        به کد برسد، نه به فایل‌های ثابت. */
