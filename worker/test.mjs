@@ -16112,6 +16112,85 @@ function stripAllowedWording(t) {
   console.log("[v4 one-way pool] v4OneWayProof proves only a real indexed key whose ~$100 buy fills and whose same-amount sell reverts with NotEnoughLiquidity for its own poolId (bytes, behind the 0x6190b2b0 wrapper, live canary); hook errors, other poolIds, PoolNotInitialized, reverting/zero buys, bare errors, dead canary, throws and tight deadlines all give false; finalizeBaseNosell puts it after sells:elsewhere/empty-pool/sells:recent and before v4:unproven, v4-only; the check needs a complete index and budget room; publishGuardRow keeps it on v4 rows (and recheckCause), Solana never; .txt, report tile, OG label/description/hash and the bot all carry it");
 }
 
+/* [token seo] متنِ واقعیِ صفحه‌ی /t/ (worker/tokseo.js): یکتا برای هر توکن، گریزخورده،
+   verdict از publishGuardRow، noindex فقط با شاهدِ مثبت. خودِ تزریقِ HTMLRewriter روی
+   workerd در worker/og_live_test.mjs سنجیده می‌شود. */
+{
+  const { tokenSeo, tokenNoindex } = await import("./tokseo.js");
+  const { pickTokenMeta } = await import("./og.js");
+  const { REPORT_MIN_RESERVE_USD } = await import("./report.js");
+  const A1 = "0x" + "a".repeat(40);
+  const gt = (sym, name, reserve, vol) => pickTokenMeta({ data: { attributes: {
+    symbol: sym, name, total_reserve_in_usd: reserve, volume_usd: { h24: vol }, decimals: 18, price_usd: "1" } } });
+  const m1 = gt("AAA", "Alpha Coin", "22500", "3100"), m2 = gt("BBB", "Beta Coin", "90000", "12000");
+  const SELL = { v: "sell" };
+
+  // ۱. دو توکن → h1 و پاراگرافِ متفاوت؛ h1 همان نماد است
+  const s1 = tokenSeo(m1, SELL, "Base", A1), s2 = tokenSeo(m2, SELL, "Base", A1);
+  ok(s1.sym === "AAA" && s2.sym === "BBB" && s1.sym !== s2.sym, "[token seo] h1 text must be the symbol");
+  const about = (h) => (/<p class="tkAbout">(.*)<\/p>/.exec(h) || [])[1];
+  ok(about(s1.facts) && about(s1.facts) !== about(s2.facts), "[token seo] two tokens must get different .tkAbout");
+  ok(about(s1.facts) === "Alpha Coin (AAA) is a token on Base. Zaexa&#39;s last exit check quoted a sell route. Its pools held about $22.5K with $3.1K traded in the last 24 hours. A quote is not a guarantee.",
+     "[token seo] sell sentence, got " + about(s1.facts));
+  ok(s1.facts.includes('<span class="fbChip p">Exit check: Sell route quoted</span>') &&
+     s1.facts.includes("Pool $22.5K") && s1.facts.includes("Vol 24h $3.1K"), "[token seo] sell chips");
+  ok(!/Checked |Uniswap|Aerodrome/.test(s1.facts), "[token seo] no invented time or DEX chip");
+
+  // ۲. گریز در همه‌جا
+  const evil = gt('<script>alert(1)</script>"&\'', '"><img src=x onerror=1>&\'', "22500", "3100");
+  const se = tokenSeo(evil, SELL, "Base", A1);
+  ok(!/<script|<img/i.test(se.facts), "[token seo] facts contain an unescaped tag: " + se.facts);
+  ok(se.facts.includes("&lt;script&gt;") && se.facts.includes("&quot;") && se.facts.includes("&amp;") && se.facts.includes("&#39;"),
+     "[token seo] facts must escape < > \" & '");
+  // نمادِ h1 خام برمی‌گردد (setInnerContent با html:false خودش گریز می‌دهد) — پس تزریقِ خام به HTML ممنوع است
+  ok(typeof se.sym === "string" && !/&lt;/.test(se.sym), "[token seo] sym stays plain text for html:false");
+
+  // ۳. nosell بی‌علت → «Not confirmed»؛ سولانا هرگز nosell؛ empty-pool اثبات‌شده
+  const nc = tokenSeo(m1, { v: "nosell" }, "Base", A1);
+  ok(/Exit check: Not confirmed/.test(nc.facts) && !/No sell route/.test(nc.facts) && !/found no sell/.test(nc.facts) &&
+     /could not confirm a sell route \(this is not a verdict that you cannot sell\)/.test(nc.facts) && !/guarantee/.test(nc.facts),
+     "[token seo] a cause-less nosell must read Not confirmed: " + nc.facts);
+  const sol = tokenSeo(m1, { v: "nosell", cause: "empty-pool" }, "Solana", "So1" + "1".repeat(40));
+  ok(/Not confirmed/.test(sol.facts) && !/No sell route|found no sell/.test(sol.facts) && sol.noindex === false,
+     "[token seo] Solana must never show nosell nor noindex on it: " + sol.facts);
+  const ep = tokenSeo(m1, { v: "nosell", cause: "empty-pool" }, "Base", A1);
+  ok(/No sell route quoted · pool is empty/.test(ep.facts) && /found no sell route: pool is empty\./.test(ep.facts) &&
+     !/guarantee/.test(ep.facts) && ep.noindex === true, "[token seo] empty-pool shows pool is empty and noindex: " + ep.facts);
+  const sr = tokenSeo(m1, { v: "nosell", cause: "sell-reverts" }, "Base", A1);
+  ok(/· the sell reverts/.test(sr.facts) && sr.noindex === false, "[token seo] sell-reverts is shown, no noindex");
+  ok(/Not confirmed/.test(tokenSeo(m1, { v: "nosell", cause: "one-way-pool" }, "Base", A1).facts),
+     "[token seo] the retired one-way cause is unproven");
+  ok(/Not confirmed/.test(tokenSeo(m1, { v: null, why: "rpc:0" }, "Base", A1).facts) &&
+     /Not confirmed/.test(tokenSeo(m1, null, "Base", A1).facts), "[token seo] unknown/null verdict reads Not confirmed");
+
+  // ۴. noindex فقط با شاهدِ مثبت
+  const low = gt("LOW", "Low", String(REPORT_MIN_RESERVE_USD - 1), "5");
+  ok(tokenSeo(low, SELL, "Base", A1).noindex === true, "[token seo] reserve below the report minimum -> noindex");
+  ok(tokenSeo(gt("OK", "Ok", String(REPORT_MIN_RESERVE_USD), "5"), SELL, "Base", A1).noindex === false, "[token seo] reserve at the minimum is indexable");
+  const unk = gt("UNK", "Unk", null, null);
+  const tu = tokenSeo(unk, null, "Base", A1);
+  ok(tu.noindex === false && !/Pool \$/.test(tu.facts), "[token seo] unknown reserve -> no noindex, no pool chip");
+  ok(tokenNoindex(null, null, "Base") === false && tokenSeo(null, null, "Base", A1).facts === null && tokenSeo(null, null, "Base", A1).noindex === false,
+     "[token seo] meta missing (upstream failed) -> no facts, no noindex");
+  const ds = { name: "D", symbol: "DDD", liquidity: null, vol24: null, decimals: null, priceUsd: null, imageUrl: null, src: "ds" };
+  ok(tokenSeo(ds, null, "Base", A1).noindex === false, "[token seo] DexScreener meta carries no reserve -> no noindex");
+  ok(gt("Z", "Z", "", null).liquidityUsd === null && gt("Z", "Z", "0", null).liquidityUsd === 0, "[token seo] empty reserve is unknown, \"0\" is a known zero");
+
+  // ۵. جمله‌ها بدونِ ویرگول/واژه‌ی آویزان
+  for (const [m, v] of [[gt("S", "S", null, null), SELL], [gt("S", "Sx", "9000", null), SELL], [gt("S", "Sx", null, "7"), null], [gt(null, "OnlyName", "9000", "7"), { v: "nosell", cause: "empty-pool" }]]) {
+    const t = about(tokenSeo(m, v, "Base", A1).facts);
+    ok(!/ ,|,\.|\.\.|:\.| {2}|\(\)|undefined|null/.test(t) && /\.$/.test(t), "[token seo] dangling punctuation or word: " + t);
+  }
+
+  // ۶. هیچ تماسِ شبکه
+  const savedF = globalThis.fetch; let calls = 0;
+  globalThis.fetch = () => { calls++; throw new Error("no"); };
+  tokenSeo(m1, SELL, "Base", A1); tokenNoindex(m1, SELL, "Base");
+  globalThis.fetch = savedF;
+  ok(calls === 0, "[token seo] building the page text must not fetch anything");
+  console.log("[token seo] per-token h1/paragraph, escaping, publishGuardRow'd verdict (cause-less nosell and any Solana nosell read Not confirmed), noindex only on a known reserve below the minimum or a proven empty pool, no fetch");
+}
+
 /* [base rpc] Public read tunnel: closed allowlist, bounded bodies, no credentials. */
 {
   const before = fails;

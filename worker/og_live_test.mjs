@@ -14,6 +14,7 @@
 
 import { fileURLToPath } from "node:url";
 import path from "node:path";
+import fs from "node:fs";
 import { OG_IMAGE_V } from "./og.js";
 import { OG_BUDGET_MS } from "./index.js";
 
@@ -41,7 +42,7 @@ const PAGE =
 let upstreamHits = [];
 let upstreamReply = null;
 
-function mf() {
+function mf(page = PAGE) {
   return new Miniflare({
     modules: true,
     /* یک ورودیِ نازک که فقط `default` را بیرون می‌دهد.
@@ -56,10 +57,12 @@ function mf() {
        بدون این قاعده آن را CommonJS فرض می‌کند. */
     modulesRules: [{ type: "ESModule", include: ["**/*.js"] }],
     compatibilityDate: "2026-08-10",
+    // request-context.js به AsyncLocalStorage نیاز دارد (همان پرچمِ runtime-security.test.mjs)
+    compatibilityFlags: ["nodejs_als"],
     bindings: { CG_KEY: "CG-secret-do-not-leak-me" },
     serviceBindings: {
       ASSETS: () =>
-        new Response(PAGE, {
+        new Response(page, {
           status: 200,
           headers: { "content-type": "text/html; charset=utf-8" },
         }),
@@ -308,6 +311,111 @@ for (const [mode, label] of [["error", "a 500 from upstream"], ["slow", "an upst
      OG_BUDGET_MS + "ms budget");
   console.log("[og live] /vd: RPC genuinely unreachable -> 200 with v:null, " + ms + "ms " +
     "(budget " + OG_BUDGET_MS + "ms)");
+}
+
+/* ---- ۸. متنِ واقعیِ توکن داخلِ UI مرئی (worker/tokseo.js) ----
+   الف) خطِ لولهٔ کاملِ Worker روی index.html واقعی: h1، نام، tk-facts، بدونِ تماسِ تازه؛
+   ب) همان injectOg با verdictِ کنترل‌شده (sell / nosellِ بی‌علت / empty-pool / سولانا). */
+{
+  const REAL = fs.readFileSync(path.join(here, "..", "web", "index.html"), "utf8");
+  const tag = (html, id) => (new RegExp("<[a-z0-9]+ [^>]*id=\"" + id + "\"[^>]*>").exec(html) || [""])[0];
+  const inner = (html, re) => (re.exec(html) || [])[1];
+  const h1Of = (html) => inner(html, /<h1 class="tkSym" id="tk-sym">([^<]*)<\/h1>/);
+  const aboutOf = (html) => inner(html, /<p class="tkAbout">([^<]*)<\/p>/);
+  const factsOf = (html) => (/<div class="tkChips">.*?<\/p>/.exec(html) || [""])[0];
+  const robots = (html) => /<meta name="robots" content="noindex,follow">/.test(html);
+  const attrs = (reserve, sym, name) => ({ data: { attributes: { name, symbol: sym, total_reserve_in_usd: reserve, volume_usd: { h24: "3120000" } } } });
+
+  // الف-۱) سالم، بدونِ قیمت (verdict اصلاً تلاش نمی‌شود): دقیقاً یک تماسِ GT، h1 = نماد، facts دیده می‌شود
+  upstreamHits = []; upstreamReply = attrs("12400000", "USDC", "USD Coin");
+  let m = mf(REAL);
+  let html = await (await m.dispatchFetch("https://zaexa.com/t/" + ADDR)).text();
+  await m.dispose();
+  ok(h1Of(html) === "USDC", "[token seo live] h1 must be the symbol, got " + h1Of(html));
+  ok((html.match(/<h1[ >]/g) || []).length === 1, "[token seo live] #tk-sym must be the only h1 in the page");
+  ok(!/hidden/.test(tag(html, "tk-facts")) && tag(html, "tk-facts").includes('data-addr="' + ADDR + '"'),
+     "[token seo live] tk-facts must be visible and stamped with the address: " + tag(html, "tk-facts"));
+  ok(/<span id="tk-name">USD Coin<\/span>/.test(html), "[token seo live] #tk-name must carry the token name");
+  ok(/Zaexa&#39;s last exit check could not confirm a sell route/.test(aboutOf(html) || ""), "[token seo live] about: " + aboutOf(html));
+  ok(html.includes("Pool $12.40M") && html.includes("Vol 24h $3.12M"), "[token seo live] pool and volume chips");
+  ok(!robots(html), "[token seo live] a healthy token must not be noindex");
+  ok(upstreamHits.length === 1 && /onchain\/networks\/base\/tokens\//.test(upstreamHits[0]),
+     "[token seo live] the page must cost exactly the one meta call it cost before: " + JSON.stringify(upstreamHits));
+
+  // الف-۲) با قیمت: verdict تلاش می‌شود (RPC در دسترس نیست) → «Not confirmed»، هنوز بدونِ noindex
+  upstreamHits = []; upstreamReply = { data: { attributes: { ...attrs("12400000", "USDC", "USD Coin").data.attributes, decimals: 6, price_usd: 1 } } };
+  m = mf(REAL);
+  html = await (await m.dispatchFetch("https://zaexa.com/t/" + ADDR)).text();
+  await m.dispose();
+  ok(/Exit check: Not confirmed/.test(html) && !robots(html), "[token seo live] unreachable RPC: Not confirmed, not noindex");
+  ok(upstreamHits.every((u) => /coingecko|publicnode|meowrpc|drpc|tenderly|base\.org|onfinality|dexscreener/.test(u)),
+     "[token seo live] unexpected upstream host: " + JSON.stringify(upstreamHits));
+
+  // الف-۳) ذخیره زیرِ حداقل → noindex؛ ذخیره‌ی نامعلوم → نه
+  upstreamHits = []; upstreamReply = attrs("1200", "LOW", "Low Coin");
+  m = mf(REAL);
+  html = await (await m.dispatchFetch("https://zaexa.com/t/" + ADDR)).text();
+  await m.dispose();
+  ok(robots(html), "[token seo live] reserve below the report minimum must be noindex");
+  upstreamHits = []; upstreamReply = attrs(null, "UNK", "Unknown Reserve");
+  m = mf(REAL);
+  html = await (await m.dispatchFetch("https://zaexa.com/t/" + ADDR)).text();
+  await m.dispose();
+  ok(!robots(html) && h1Of(html) === "UNK", "[token seo live] an unknown reserve must not be noindex");
+
+  // الف-۴) بالادست خراب → صفحه بدونِ تغییر: h1 «—»، facts مخفی، بدونِ noindex
+  upstreamHits = []; upstreamReply = "error";
+  m = mf(REAL);
+  html = await (await m.dispatchFetch("https://zaexa.com/t/" + ADDR)).text();
+  await m.dispose();
+  ok(h1Of(html) === "\u2014" && /hidden/.test(tag(html, "tk-facts")) && !/tkAbout/.test(html.replace(/\.tkAbout\{[^}]*\}/, "")) && !robots(html),
+     "[token seo live] upstream failure must leave the page as is, never noindex: " + tag(html, "tk-facts"));
+
+  // ب) injectOg با verdictِ کنترل‌شده
+  const HARNESS =
+    'import { injectOg } from "./index.js";' +
+    "export default { async fetch(req, env) {" +
+    "  const u = new URL(req.url); const c = JSON.parse(u.searchParams.get('c'));" +
+    "  const page = await env.ASSETS.fetch(req);" +
+    "  return injectOg(page, u, c.addr, Promise.resolve(c.meta), Promise.resolve(c.vd), c.chain);" +
+    "} };";
+  const hm = new Miniflare({
+    modules: true, script: HARNESS, scriptPath: path.join(here, "__tokseo_harness.js"), modulesRoot: here,
+    modulesRules: [{ type: "ESModule", include: ["**/*.js"] }],
+    compatibilityDate: "2026-08-10", compatibilityFlags: ["nodejs_als"],
+    serviceBindings: { ASSETS: () => new Response(REAL, { status: 200, headers: { "content-type": "text/html; charset=utf-8" } }) },
+  });
+  const run = async (meta, vd, chain, addr) => {
+    const c = encodeURIComponent(JSON.stringify({ meta, vd, chain, addr: addr || ADDR }));
+    return await (await hm.dispatchFetch("https://zaexa.com/t/" + (addr || ADDR) + "?c=" + c)).text();
+  };
+  const M = (sym, name, liqUsd, liq) => ({ name, symbol: sym, liquidity: liq, vol24: "$3.1K", liquidityUsd: liqUsd, decimals: 18, priceUsd: 1, imageUrl: null });
+  const a1 = await run(M("AAA", "Alpha Coin", 22500, "$22.5K"), { v: "sell" }, "Base");
+  const a2 = await run(M("BBB", "Beta Coin", 90000, "$90.0K"), { v: "sell" }, "Base");
+  ok(h1Of(a1) === "AAA" && h1Of(a2) === "BBB" && aboutOf(a1) && aboutOf(a1) !== aboutOf(a2),
+     "[token seo live] two tokens must differ in h1 and .tkAbout");
+  ok(/class="fbChip p">Exit check: Sell route quoted</.test(a1) && /A quote is not a guarantee\./.test(a1), "[token seo live] sell chip and sentence");
+  ok(/<title>AAA \u00b7 Alpha Coin \u2014 Zaexa<\/title>/.test(a1), "[token seo live] title is already per-token (ogTags/ogTitle), left alone");
+
+  const EVIL = '<script>alert(1)</script>"&\'';
+  const ev = await run(M(EVIL, EVIL, 22500, "$22.5K"), { v: "sell" }, "Base");
+  ok(!ev.includes("<script>alert(1)") && !ev.includes('</script>"&'), "[token seo live] a hostile symbol/name broke out somewhere");
+  ok(h1Of(ev) && h1Of(ev).includes("&lt;script&gt;alert(1)&lt;/script&gt;\"&amp;") && /<title>[^<]*&lt;script&gt;/.test(ev) &&
+     /<span id="tk-name">[^<]*&lt;script&gt;/.test(ev) && /Exit check:/.test(ev) && /&lt;script&gt;[^<]*is a token on Base/.test(aboutOf(ev) || ""),
+     "[token seo live] the hostile symbol must be escaped in h1, name, title and paragraph: " + h1Of(ev));
+
+  const nc = await run(M("NCS", "Nocause", 22500, "$22.5K"), { v: "nosell" }, "Base");
+  ok(/Exit check: Not confirmed/.test(factsOf(nc)) && !/No sell route|found no sell/.test(factsOf(nc)) && !robots(nc), "[token seo live] a cause-less nosell is Not confirmed");
+  const SOLM = "So11111111111111111111111111111111111111112";
+  const sl = await run(M("SOLX", "Solx", 22500, "$22.5K"), { v: "nosell", cause: "empty-pool" }, "Solana", SOLM);
+  ok(/Exit check: Not confirmed/.test(factsOf(sl)) && !/No sell route|found no sell/.test(factsOf(sl)) && !robots(sl) && /is a token on Solana/.test(sl),
+     "[token seo live] a Solana nosell must never be shown");
+  const ep = await run(M("EMP", "Empty", 22500, "$22.5K"), { v: "nosell", cause: "empty-pool" }, "Base");
+  ok(/pool is empty/.test(factsOf(ep)) && robots(ep), "[token seo live] empty-pool: pool is empty + noindex");
+  const nm = await run(null, null, "Base");
+  ok(h1Of(nm) === "\u2014" && /hidden/.test(tag(nm, "tk-facts")) && !robots(nm), "[token seo live] no meta: page unchanged, no noindex");
+  await hm.dispose();
+  console.log("[token seo live] real rewriter on the real index.html: h1 = symbol, only h1, facts visible and escaped, nosell guard, noindex only on positive evidence, no extra upstream call");
 }
 
 console.log(fails === 0

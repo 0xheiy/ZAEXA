@@ -1016,6 +1016,7 @@ section.card.isDone #actBtn,section.card.isDone #solStatusSlot,section.card.isDo
 .shareMenu>*{display:block;text-align:left;padding:10px 12px;border-radius:9px;font-size:13.5px;color:var(--tx);background:none;border:0;cursor:pointer;text-decoration:none;font-family:inherit}
 .shareMenu>*:hover,.shareMenu>*:focus-visible{background:var(--raise);outline:none}
 .tkSymRow{display:flex;align-items:center;gap:10px;min-width:0}
+.tkSymRow h1.tkSym{margin:0}
 
 /* ---------------- safety ---------------- */
 .rhead{display:flex;align-items:center;gap:16px;padding:18px 20px}
@@ -1416,7 +1417,13 @@ footer .fine{max-width:78ch;margin:46px 0 0;font-size:11.5px;color:var(--tx3);li
    «اگر بخرم، می‌توانم بیرون بیایم؟» — پس رفت‌وبرگشت بزرگ‌ترین چیز روی
    صفحه است و بقیه دورش ساکت می‌مانند. گرادیان برند فقط روی دکمه‌ی معامله
    می‌آید؛ رنگ‌های معنایی (سبز/کهربایی/قرمز) کار قضاوت را می‌کنند. */
-.tkBar{display:flex;align-items:center;gap:18px;padding:28px 24px}
+.tkBar{display:flex;align-items:center;gap:18px;padding:28px 24px;flex-wrap:wrap}
+/* متنِ واقعیِ هر توکن را Worker سمتِ سرور اینجا می‌نشاند (گوگل بدونِ JS هم ببیند)؛
+   مخفی نیست، فقط تا وقتی سرور پرش نکرده hidden است */
+.tkFacts{flex:0 0 100%;margin-top:12px}
+.tkFacts[hidden]{display:none}
+.tkChips{display:flex;flex-wrap:wrap;gap:8px}
+.tkAbout{margin:10px 0 0;font-size:13px;line-height:1.5;color:var(--tx2)}
 .tkAv{width:56px;height:56px;border-radius:50%;display:grid;place-items:center;
   background:var(--raise);font-size:15px;font-weight:600;color:var(--tx2);
   box-shadow:0 0 0 1px var(--line)}
@@ -2389,7 +2396,7 @@ try{(function(){
   <section class="card tkBar">
     <span class="av tkAv" id="tk-av">?</span>
     <div class="tkId">
-      <div class="tkSymRow"><div class="tkSym" id="tk-sym">—</div>
+      <div class="tkSymRow"><h1 class="tkSym" id="tk-sym">—</h1>
         <button class="iconBtn savedToggle" id="tokenWatch" type="button" aria-pressed="false" aria-label="Watch token" title="Select a token first" disabled>☆</button></div>
       <!-- وسط کارت با *واقعیت* پر می‌شود، نه با فضای خالی: نام، شبکه و آدرس
            قرارداد. نسخه‌ی قبل همه‌چیز را به دو لبه هل می‌داد و وسطش حفره بود. -->
@@ -2409,6 +2416,7 @@ try{(function(){
     </div>
     <button class="tkTrade" id="tk-trade">Trade</button>
     <button class="iconBtn" id="tk-copy" type="button" aria-haspopup="menu" aria-expanded="false" aria-label="Share this check" title="Share this check"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="M8.6 13.5l6.8 4M15.4 6.5l-6.8 4"/></svg></button>
+    <div class="tkFacts" id="tk-facts" hidden></div>
   </section>
 
   <!-- امضای صفحه: خودِ رفت‌وبرگشت. تنها ادعایی که فقط ما داریم — «فروش را
@@ -2544,7 +2552,7 @@ try{(function(){
 <div class="view" id="view-faq">
   <section class="card faqCard">
     <div class="faqWrap">
-      <h1 class="faqH">How ZAEXA works</h1>
+      <h2 class="faqH">How ZAEXA works</h2>
       <p class="faqSub">Straight answers, including the ones that are not flattering.</p>
 
       <details class="faqItem" open>
@@ -10381,7 +10389,14 @@ function paintReportNetwork(chain){
   copy.querySelectorAll('[id]').forEach(el=>{const old=el.id;el.id+='Report';copy.querySelectorAll('*').forEach(x=>{for(const a of [...x.attributes])if(a.value.includes('url(#'+old+')'))x.setAttribute(a.name,a.value.replaceAll('url(#'+old+')','url(#'+old+'Report)'));});});
   badge.replaceChildren(copy,name);
 }
+/* متنِ سمتِ سرور فقط برای همان آدرسی درست است که Worker پر کرده؛ توکنِ دیگر → پاک */
+function tkFactsSync(addr){
+  const f=$("tk-facts");if(!f||f.hidden)return;
+  const a=f.dataset.addr||"",x=String(addr);
+  if(/^0x/i.test(x)?a.toLowerCase()!==x.toLowerCase():a!==x){f.hidden=true;f.textContent="";}
+}
 async function openTokenPage(addr){
+  tkFactsSync(addr);
   paintReportNetwork("base");
   activeChain="base";paintSrc();paintSrc2();paintWallet();
   const t=await resolveTokenRef(addr);
@@ -10604,6 +10619,7 @@ function renderSolExit(v,why,targetId,basis,ret,cause){
 /* مقصدِ تنها راه‌اندازی‌کننده: هرچه لازم است پیش از خودِ داده نشان داده
    شود (بنر، حذفِ بخش‌های مخصوصِ Base) اینجاست، نه در بولوت. */
 async function openSolanaTokenPage(mint){
+  tkFactsSync(mint);
   $("tk-grid").appendChild($("solSafety"));
   $("view-token").appendChild($("solPools"));
   paintReportNetwork("solana");

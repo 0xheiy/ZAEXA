@@ -23246,6 +23246,147 @@ async def check_swap_done_card(p, errors):
         await b.close(); srv.shutdown()
 
 
+async def check_token_page_seo(p, errors):
+    """[token seo] صفحه‌ی /t/<آدرس> برای گوگل: h1 یکتا (خودِ #tk-sym)، FAQ یک h2، چیدمانِ نوارِ توکن بدونِ تغییر
+    وقتی tk-facts مخفی است، و متنِ سمتِ سرور (که Worker در #tk-facts می‌نشاند) سرریز نمی‌کند و کلاینت پاکش نمی‌کند.
+    خطِ پایه: index.html از نزدیک‌ترین کامیتِ پدر که هنوز tk-facts ندارد. خودِ rewriter روی workerd در
+    worker/og_live_test.mjs سنجیده می‌شود؛ اینجا خروجی‌اش با جایگزینیِ رشته‌ای شبیه‌سازی می‌شود."""
+    import functools, http.server, json as _j, subprocess, tempfile, threading
+
+    root = os.path.abspath(os.path.join(HERE, "..", ".."))
+
+    def git(*a):
+        return subprocess.run(["git", "-C", root] + list(a), capture_output=True, text=True)
+    old_src = None
+    for cand in ("HEAD", "HEAD~1", "HEAD~2", "HEAD~3", "HEAD~4"):
+        o_ = git("show", cand + ":web/index.html")
+        if o_.returncode == 0 and 'id="tk-facts"' not in o_.stdout:
+            old_src = o_.stdout
+            break
+    assert old_src, "[token seo] no parent commit without #tk-facts found — is the history unshallowed?"
+
+    def harness(src):
+        src = re.sub(r'const ETHERS_SRC="[^"]*";', 'const ETHERS_SRC="./stub-ethers.js";', src, count=1)
+        return re.sub(r'const ETHERS_SRI="[^"]*";', 'const ETHERS_SRI="";', src, count=1)
+
+    new_src = open(os.path.join(HERE, "..", "index.html"), encoding="utf-8").read()
+    ADDR = "0x" + "a" * 40
+    OTHER = "0x" + "b" * 40
+    FACTS = ('<div class="tkChips"><span class="fbChip n">Exit check: No sell route quoted \u00b7 the sell reverts</span>'
+             '<span class="fbChip">Pool $22.5K</span><span class="fbChip">Vol 24h $3.1K</span></div>'
+             '<p class="tkAbout">Alpha Coin (AAA) is a token on Base. Zaexa&#39;s last exit check found no sell route: the sell reverts. '
+             'Its pools held about $22.5K with $3.1K traded in the last 24 hours.</p>')
+    tag_h = '<div class="tkFacts" id="tk-facts" hidden></div>'
+    assert tag_h in new_src, "[token seo] the empty #tk-facts placeholder is gone from web/index.html"
+
+    def filled(src, addr):
+        return src.replace(tag_h, '<div class="tkFacts" id="tk-facts" data-addr="%s">%s</div>' % (addr, FACTS), 1)
+
+    docs = {"old": harness(old_src), "new": harness(new_src), "fill": harness(filled(new_src, ADDR)),
+            "stale": harness(filled(new_src, OTHER))}
+    tmp = tempfile.mkdtemp(prefix="tkseo_")
+    for k, v in docs.items():
+        open(os.path.join(tmp, k + ".html"), "w", encoding="utf-8").write(v)
+
+    # هر نسخه سرورِ خودش را دارد: کلاینت مسیر را از location.pathname می‌خواند (باید «/t/<آدرس>» باشد)
+    def make_server(name):
+        class Quiet(http.server.SimpleHTTPRequestHandler):
+            def log_message(self, *a):
+                pass
+
+            def translate_path(self, path):
+                clean = path.split("?")[0]
+                if clean in ("/app", "/app/") or re.match(r"^/t/0x[0-9a-fA-F]{40}/?$", clean):
+                    return os.path.join(tmp, name + ".html")
+                if clean == "/stub-ethers.js":
+                    return os.path.join(HERE, "stub-ethers.js")
+                return super().translate_path(path)
+        srv = http.server.ThreadingHTTPServer(("127.0.0.1", 0), functools.partial(Quiet, directory=os.path.join(HERE, "..")))
+        threading.Thread(target=srv.serve_forever, daemon=True).start()
+        return srv, "http://127.0.0.1:%d" % srv.server_address[1]
+    servers = {k: make_server(k) for k in docs}
+    origins = {k: v[1] for k, v in servers.items()}
+    b = await p.chromium.launch()
+
+    async def open_page(variant, path, vw, vh=900):
+        origin = origins[variant]
+        pg = await b.new_page(viewport={"width": vw, "height": vh})
+        await pg.route("**/*", lambda r: r.continue_() if r.request.url.startswith(origin)
+                       else r.abort())
+        await pg.route("**/gt/**", lambda r: r.fulfill(status=200, content_type="application/json", body='{"data":[]}'))
+        await pg.route("**/ev", lambda r: r.fulfill(status=204, body=""))
+        await pg.route("**/vd/**", lambda r: r.fulfill(status=200, content_type="application/json", body='{"v":"sell","ms":100}'))
+        await pg.route("**/pairs.json**", lambda r: r.fulfill(status=200, content_type="application/json", body='{"rows":[],"store":false}'))
+        await pg.goto(origin + path)
+        await pg.wait_for_timeout(2500)
+        return pg
+
+    RECTS = """() => {
+        const ids = ['section.tkBar', '#tk-av', '.tkId', '.tkSymRow', '#tk-sym', '#tokenWatch', '.tkMeta', '#tk-name',
+                     '#tk-chip', '#tk-addr', '.tkPx', '#tk-trade', '#tk-copy'];
+        const o = {};
+        for (const s of ids) { const e = document.querySelector(s); if (!e) { o[s] = null; continue; }
+            const r = e.getBoundingClientRect();
+            o[s] = [r.x, r.y, r.width, r.height].map(v => Math.round(v * 2) / 2); }
+        return o;
+    }"""
+    FONT = """() => { const c = getComputedStyle(document.getElementById('tk-sym'));
+        return [c.fontSize, c.fontWeight, c.lineHeight, c.letterSpacing, c.fontFamily, c.color, c.margin, c.display].join('|'); }"""
+    try:
+        for vw in (1440, 1121, 900, 700, 390):
+            po = await open_page("old", "/t/" + ADDR, vw)
+            pn = await open_page("new", "/t/" + ADDR, vw)
+            ro, rn = await po.evaluate(RECTS), await pn.evaluate(RECTS)
+            fo, fn = await po.evaluate(FONT), await pn.evaluate(FONT)
+            hid = await pn.evaluate("() => document.getElementById('tk-facts').hidden")
+            visible = await pn.evaluate("() => getComputedStyle(document.getElementById('tk-facts')).display")
+            h1s = await pn.evaluate("() => [...document.querySelectorAll('h1')].map(h => h.id)")
+            await po.close(); await pn.close()
+            assert hid and visible == "none", "[token seo] #tk-facts must stay hidden (display:none) when the server did not fill it: %s/%s" % (hid, visible)
+            assert ro == rn, "[token seo] %dpx: tkBar layout changed with tkFacts hidden:\n old %s\n new %s" % (vw, ro, rn)
+            assert fo == fn and fn.startswith("28px|640|30.8px|"), "[token seo] %dpx: #tk-sym computed font changed (div->h1):\n old %s\n new %s" % (vw, fo, fn)
+            assert h1s == ["tk-sym"], "[token seo] the token page must have exactly one h1, the symbol: %r" % h1s
+
+        # FAQ: h2، و ظاهرِ computed همان h1 قدیم
+        FAQ = """() => { const e = document.querySelector('.faqH'); const c = getComputedStyle(e);
+            return [e.tagName, c.fontSize, c.fontWeight, c.lineHeight, c.letterSpacing, c.fontFamily, c.color, c.margin, c.display].join('|'); }"""
+        for vw in (1440, 390):
+            po = await open_page("old", "/app#faq", vw); pn = await open_page("new", "/app#faq", vw)
+            fo, fn = (await po.evaluate(FAQ)).split("|", 1), (await pn.evaluate(FAQ)).split("|", 1)
+            await po.close(); await pn.close()
+            assert fo[0] == "H1" and fn[0] == "H2", "[token seo] FAQ heading tag: old %s new %s (want H1 -> H2)" % (fo[0], fn[0])
+            assert fo[1] == fn[1], "[token seo] %dpx: FAQ heading computed style changed:\n old %s\n new %s" % (vw, fo[1], fn[1])
+
+        # متنِ پرشده‌ی سرور: سرریز نمی‌کند و کلاینت پاکش نمی‌کند؛ توکنِ دیگر → کلاینت پاک می‌کند
+        for vw in (1440, 1121, 390):
+            pf = await open_page("fill", "/t/" + ADDR, vw)
+            st = await pf.evaluate("""(F) => { const f = document.getElementById('tk-facts'), bar = document.querySelector('section.tkBar');
+                const fr = f.getBoundingClientRect(), br = bar.getBoundingClientRect();
+                const chips = [...f.querySelectorAll('.fbChip')].map(c => c.getBoundingClientRect());
+                const ref = document.createElement('div'); ref.innerHTML = F;
+                return {hidden: f.hidden, html: f.innerHTML === ref.innerHTML ? 'same' : f.innerHTML, w: fr.width, inside: fr.left >= br.left - 0.5 && fr.right <= br.right + 0.5,
+                  chipsInside: chips.every(r => r.right <= br.right + 0.5 && r.left >= br.left - 0.5),
+                  oneLine: chips.every(r => r.height <= 28),
+                  docW: document.documentElement.scrollWidth, vw: innerWidth, about: f.querySelector('.tkAbout') ? getComputedStyle(f.querySelector('.tkAbout')).fontSize : null,
+                  below: fr.top >= document.querySelector('.tkId').getBoundingClientRect().bottom - 0.5, h1s: document.querySelectorAll('h1').length}; }""", FACTS)
+            await pf.close()
+            assert not st["hidden"] and st["html"] == "same", "[token seo] %dpx: the client wiped or changed the server-filled facts: %r" % (vw, st["html"][:80])
+            assert st["oneLine"], "[token seo] %dpx: a chip was squeezed onto two lines instead of wrapping to the next row: %s" % (vw, st)
+            assert st["inside"] and st["chipsInside"], "[token seo] %dpx: facts overflow the tkBar card: %s" % (vw, st)
+            assert st["docW"] <= st["vw"], "[token seo] %dpx: horizontal overflow %d > %d with facts filled" % (vw, st["docW"], st["vw"])
+            assert st["about"] == "13px" and st["below"] and st["h1s"] == 1, "[token seo] %dpx: facts style/position: %s" % (vw, st)
+        ps = await open_page("stale", "/t/" + ADDR, 1440)
+        sh = await ps.evaluate("() => { const f = document.getElementById('tk-facts'); return [f.hidden, f.innerHTML]; }")
+        await ps.close()
+        assert sh[0] is True and sh[1] == "", "[token seo] facts stamped for another address must be cleared by the client, got %r" % (sh,)
+        print("[token seo] /t/ has one h1 (#tk-sym, computed font unchanged), FAQ heading is an h2 with the same computed style; "
+              "tkBar rects identical to the parent commit at 1440/1121/900/700/390 with tkFacts hidden; server-filled facts stay (no overflow at 390), another token's facts are cleared")
+    finally:
+        await b.close()
+        for sv, _ in servers.values():
+            sv.shutdown()
+
+
 async def only(names):
     """ZX_ONLY=check_a,check_b — فقط همین کاوشگرها (برای شکستنِ عمدیِ نگهبان‌ها)؛ بدونِ آن، کلِ مجموعه."""
     errors = []

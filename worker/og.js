@@ -82,10 +82,14 @@ export function pickTokenMeta(body) {
     typeof iu === "string" && iu.startsWith("https://") && iu.length <= 512 && !iu.includes("missing.png")
       ? iu
       : null;
+  // ذخیره‌ی عددی (فقط برای noindex در worker/tokseo.js): null/خالی = نامعلوم، نه ۰
+  const rv = a.total_reserve_in_usd;
+  const rn = rv == null || (typeof rv === "string" && !rv.trim()) ? NaN : Number(rv);
   return {
     name: ogClean(a.name, 48),
     symbol: ogClean(a.symbol, 16),
     liquidity: ogBig(a.total_reserve_in_usd),
+    liquidityUsd: Number.isFinite(rn) && rn >= 0 ? rn : null,
     vol24: ogBig(a.volume_usd && a.volume_usd.h24),
     decimals,
     priceUsd,

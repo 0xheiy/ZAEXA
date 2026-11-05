@@ -157,6 +157,7 @@ async function gtUpstream(rest, env, opts) {
 }
 
 import { ogTags, ogTitle, pickTokenMeta, pickDsMeta, pickCmcMeta } from "./og.js";
+import { tokenSeo } from "./tokseo.js";
 import { ogImageResponse } from "./og-image.js";
 import { tokenCardPng, renderable, logoFromJpeg } from "./og-token.js";
 import { logoResponse } from "./logo-image.js";
@@ -2163,6 +2164,13 @@ function injectOg(res, url, addr, metaPromise, vdPromise, chain) {
   if (!res || res.status !== 200) return res;
   const ct = res.headers.get("content-type") || "";
   if (!/text\/html/i.test(ct)) return res;
+  // هر خطا → صفحه‌ی بدونِ متنِ سئو، نه صفحه‌ی شکسته؛ نتیجه یک بار حساب می‌شود
+  let memo = null;
+  const seoOf = (meta, vd) => {
+    if (memo) return memo;
+    try { memo = tokenSeo(meta, vd, chain, addr); } catch (e) { memo = { sym: null, name: null, facts: null, noindex: false }; }
+    return memo;
+  };
   return new HTMLRewriter()
     .on("meta[data-og]", { element(el) { el.remove(); } })
     .on("link[data-og]", { element(el) { el.remove(); } })
@@ -2183,6 +2191,32 @@ function injectOg(res, url, addr, metaPromise, vdPromise, chain) {
         // برچسبِ زنجیره از همان chainOf(addr) که کالر پاس داده — نه حدسی
         // که اینجا دوباره زده شود.
         el.append(ogTags(meta, addr, url.origin, verdict, chain, cause), { html: true });
+        if (seoOf(meta, vd).noindex) el.append('<meta name="robots" content="noindex,follow">', { html: true });
+      },
+    })
+    // متنِ واقعیِ توکن داخلِ UI مرئی (worker/tokseo.js) — همان meta/verdictِ بالا، بدونِ تماسِ تازه
+    .on("h1#tk-sym", {
+      async element(el) {
+        const [meta, vd] = await Promise.all([metaPromise, vdPromise]);
+        const s = seoOf(meta, vd);
+        if (s.sym) el.setInnerContent(s.sym, { html: false });
+      },
+    })
+    .on("#tk-name", {
+      async element(el) {
+        const [meta, vd] = await Promise.all([metaPromise, vdPromise]);
+        const s = seoOf(meta, vd);
+        if (s.name) el.setInnerContent(s.name, { html: false });
+      },
+    })
+    .on("#tk-facts", {
+      async element(el) {
+        const [meta, vd] = await Promise.all([metaPromise, vdPromise]);
+        const s = seoOf(meta, vd);
+        if (!s.facts) return;
+        el.removeAttribute("hidden");
+        el.setAttribute("data-addr", addr);
+        el.setInnerContent(s.facts, { html: true });
       },
     })
     .transform(res);
@@ -3983,7 +4017,7 @@ export default {
 };
 
 // برای تست‌ها — در زمان اجرا روی Worker استفاده نمی‌شود.
-export { PATH_OK, QUERY_OK, ttlFor, EV_OK, EV_DETAIL_OK, EV_SURFACE_OK, EV_MAX_BODY, pairsRowsFor };
+export { injectOg, PATH_OK, QUERY_OK, ttlFor, EV_OK, EV_DETAIL_OK, EV_SURFACE_OK, EV_MAX_BODY, pairsRowsFor };
 export { rateOk, rlHits, RL_LIMIT, RL_WINDOW_MS };
 export { OG_NETWORK, OG_TIMEOUT_MS, ogFetchMeta, ogFetchVerdict, ogFetchMetaMany };
 export { baseVenueCovered, baseVenueCoveredDetail, ogFetchVerdictDetail };
