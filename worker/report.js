@@ -155,9 +155,13 @@ function whyForRow(chain, verdict, why) {
 // ریوِرت می‌کند، دقیقاً همین علت را می‌دهد — هانی‌پاتِ کلاسیک، این‌بار با شاهد.
 // ۲۶ اکتبر — "one-way-pool": خریدِ ~$100 پر می‌شود و فروشِ همان مقدار روی همان
 // کلیدِ v4 NotEnoughLiquidity می‌دهد (v4OneWayProof در worker/verdict.js).
-export const REPORT_CAUSES = Object.freeze(["empty-pool", "sell-reverts", "one-way-pool"]);
+// ۵ نوامبر — "one-way-pool" حذف شد: خرید و فروش دو کوتِ جدا روی وضعِ *پیش از*
+// خرید بودند، پس استخرِ تازه‌ی تک‌سمتی (کلانکر) همیشه «یک‌طرفه» دیده می‌شد
+// (XTO ۴ نوامبر: یک‌طرفه خورد، چهار کیف‌پول همان دقایق فروختند). ردیف‌های
+// ذخیره‌شده با این علت حالا در گاردِ انتشار v4:unproven می‌شوند.
+export const REPORT_CAUSES = Object.freeze(["empty-pool", "sell-reverts"]);
 // علت‌هایی که یک ردیفِ v4 با آن‌ها «اثبات‌شده» است — sell-reverts عمداً نیست.
-const V4_PROVEN_CAUSES = Object.freeze(["empty-pool", "one-way-pool"]);
+const V4_PROVEN_CAUSES = Object.freeze(["empty-pool"]);
 
 /* یک cause ساختگی/دست‌ساز هرگز نباید در انبار بنشیند — فقط وقتی verdict
    واقعاً "nosell" است و خودِ رشته عضوِ همین واژه‌نامه‌ی بسته است، وگرنه
@@ -1420,7 +1424,7 @@ export function reportText(doc, opts) {
         lines.push(reportTextSymbolLabel(r) + " — no sell route quoted" +
           (r.cause === "empty-pool" ? " · pool is empty" :
             r.cause === "sell-reverts" ? " · sells revert on a funded pool" :
-              r.cause === "one-way-pool" ? " · one-way pool: a $100 buy fills, selling it back does not" : ""));
+              ""));
         lines.push("zaexa.com/t/" + r.address);
       });
       if (flagged > REPORT_TEXT_MAX_LISTED) {

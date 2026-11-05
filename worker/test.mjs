@@ -7345,8 +7345,8 @@ console.log("[v4 pool selection] v4PoolsFromGt now ranks by sellers24 (numeric o
     "causeForRow must drop any string not in REPORT_CAUSES, even on a nosell row");
   ok(causeForRow("nosell", undefined) === undefined && causeForRow("nosell", null) === undefined,
     "causeForRow must give undefined (not null) for an absent cause");
-  ok(JSON.stringify(REPORT_CAUSES) === JSON.stringify(["empty-pool", "sell-reverts", "one-way-pool"]) && Object.isFrozen(REPORT_CAUSES),
-    "REPORT_CAUSES must be the frozen closed vocabulary [\"empty-pool\",\"sell-reverts\",\"one-way-pool\"], got " + JSON.stringify(REPORT_CAUSES));
+  ok(JSON.stringify(REPORT_CAUSES) === JSON.stringify(["empty-pool", "sell-reverts"]) && Object.isFrozen(REPORT_CAUSES),
+    "REPORT_CAUSES must be the frozen closed vocabulary [\"empty-pool\",\"sell-reverts\"] (one-way-pool removed 5 Nov), got " + JSON.stringify(REPORT_CAUSES));
 
   const T9 = "2026-09-20T00:00:00.000Z";
   function rowArgs(extra) {
@@ -16069,51 +16069,46 @@ function stripAllowedWording(t) {
       "[v4 one-way pool] a throwing observer never changes the verdict");
   } finally { globalThis.fetch = realFetch; }
 
-  // 5. گاردِ انتشار
+  // 5. ۵ نوامبر — one-way-pool دیگر اثبات نیست: خرید و فروش دو کوتِ جدا روی وضعِ
+  // پیش از خرید بودند (XTO، ۴ نوامبر). ردیفِ ذخیره‌شده با این علت v4:unproven منتشر می‌شود.
   const v4row = { chain: "base", dex: "uniswap-v4-base", v: "nosell", cause: "one-way-pool", ret: undefined };
   const g1 = publishGuardRow(v4row, "base");
-  ok(g1.v === "nosell" && g1.cause === "one-way-pool", "[v4 one-way pool] publishGuardRow keeps one-way-pool on a v4 row, got " + JSON.stringify(g1));
+  ok(g1.v === null && g1.why === "v4:unproven" && !("cause" in g1),
+    "[one-way retired] a stored v4 nosell with cause one-way-pool is published as v4:unproven, got " + JSON.stringify(g1));
   const g2 = publishGuardRow({ chain: "base", dex: "uniswap-v4-base", v: "nosell" }, "base");
-  ok(g2.v === null && g2.why === "v4:unproven", "[v4 one-way pool] a v4 nosell without cause is still downgraded");
+  ok(g2.v === null && g2.why === "v4:unproven", "[one-way retired] a v4 nosell without cause is still downgraded");
   const g3 = publishGuardRow({ chain: "base", dex: "uniswap-v4-base", v: "nosell", cause: "sell-reverts" }, "base");
-  ok(g3.v === null && g3.why === "v4:unproven", "[v4 one-way pool] sell-reverts is still not proof on a v4 row");
+  ok(g3.v === null && g3.why === "v4:unproven", "[one-way retired] sell-reverts is still not proof on a v4 row");
+  const g3b = publishGuardRow({ chain: "base", dex: "uniswap-v4-base", v: "nosell", cause: "empty-pool" }, "base");
+  ok(g3b.v === "nosell" && g3b.cause === "empty-pool", "[one-way retired] empty-pool is still proof on a v4 row");
   const g4 = publishGuardRow({ ...v4row, v: "sell", recheck: "nosell", recheckCause: "one-way-pool" }, "base");
-  ok(g4.recheck === "nosell" && g4.recheckCause === "one-way-pool", "[v4 one-way pool] recheckCause one-way-pool survives on a v4 row");
+  ok(!("recheck" in g4) && !("recheckCause" in g4), "[one-way retired] a one-way-pool recheck is dropped on a v4 row, got " + JSON.stringify(g4));
+  const g6 = publishGuardRow({ chain: "base", dex: "aerodrome-base", v: "nosell", cause: "one-way-pool" }, "base");
+  ok(g6.v === null && !("cause" in g6), "[one-way retired] a non-v4 row with one-way-pool is not published as nosell either, got " + JSON.stringify(g6));
   const g5 = publishGuardRow({ chain: "solana", dex: "raydium", v: "nosell", cause: "one-way-pool" }, "solana");
-  ok(g5.v === null && g5.why === "sol:unconfirmed" && !("cause" in g5), "[v4 one-way pool] Solana never keeps a nosell, one-way-pool included");
-  ok(causeForRow("nosell", "one-way-pool") === "one-way-pool" && causeForRow("sell", "one-way-pool") === undefined,
-    "[v4 one-way pool] causeForRow accepts it on nosell only");
+  ok(g5.v === null && g5.why === "sol:unconfirmed" && !("cause" in g5), "[one-way retired] Solana never keeps a nosell");
+  ok(causeForRow("nosell", "one-way-pool") === undefined, "[one-way retired] causeForRow no longer accepts one-way-pool");
 
-  // 6. متن‌ها
+  // 6. متن‌ها — هیچ سطحی دیگر «one-way» نمی‌گوید
   const doc = { date: "2026-10-26", generatedAt: "2026-10-26T00:00:00.000Z", chains: ["base"], checked: 1, rows: [
     reportRow({ chain: "base", address: XDP, symbol: "XDP", name: "XDP", verdict: "nosell", checkedAt: "2026-10-26T00:00:00.000Z",
       poolCreatedAt: null, priceUsd: 1, reserveUsd: 1, vol24hUsd: 1, fdvUsd: 1, dex: "uniswap-v4-base", why: null, cause: "one-way-pool" })] };
-  ok(doc.rows[0] && doc.rows[0].cause === "one-way-pool", "[v4 one-way pool] reportRow carries the cause");
-  ok(reportText(doc).includes("$XDP — no sell route quoted · one-way pool"), "[v4 one-way pool] the .txt names the cause, got " + reportText(doc));
-  ok(ogVerdictLabel("nosell", "one-way-pool") === "No sell route quoted: one-way pool" && renderable(ogVerdictLabel("nosell", "one-way-pool")),
-    "[v4 one-way pool] the OG label is set and uses only atlas glyphs");
-  ok(/buy fills, but selling it back does not/.test(ogDescription({ symbol: "X", name: "X" }, "nosell", "Base", "one-way-pool")) &&
-     !/buy fills/.test(ogDescription({ symbol: "X", name: "X" }, "nosell", "Solana", "one-way-pool")),
-    "[v4 one-way pool] preview description carries it on Base only");
+  ok(doc.rows[0] && !("cause" in doc.rows[0] && doc.rows[0].cause !== undefined), "[one-way retired] reportRow drops the cause, got " + JSON.stringify(doc.rows[0]));
+  ok(!/one-way/i.test(reportText(doc)), "[one-way retired] the .txt never says one-way, got " + reportText(doc));
+  ok(ogVerdictLabel("nosell", "one-way-pool") === "No sell route quoted", "[one-way retired] the OG label falls back to the plain text");
+  ok(!/buy fills/.test(ogDescription({ symbol: "X", name: "X" }, "nosell", "Base", "one-way-pool")), "[one-way retired] preview description has no one-way sentence");
   const hh = (c) => (/h=([0-9a-f]{8})/.exec(ogTags({ symbol: "ZXT", name: "Zx" }, XDP, "https://zaexa.com", "nosell", "Base", c)) || [])[1];
-  ok(hh("one-way-pool") && hh("one-way-pool") !== hh(undefined) && hh("one-way-pool") !== hh("empty-pool"),
-    "[v4 one-way pool] the OG card hash includes the cause");
+  ok(hh("one-way-pool") === hh(undefined), "[one-way retired] the OG card hash ignores one-way-pool");
   const tgBody = verdictText("base", { v: "nosell", cause: "one-way-pool", symbol: "XDP" }, XDP);
-  ok(tgBody.includes("one-way pool") && tgBody.includes("selling the same amount back does not"), "[v4 one-way pool] the bot names it, got " + tgBody);
-  const tgSol = verdictText("solana", { v: "nosell", cause: "one-way-pool" }, "So11111111111111111111111111111111111111112");
-  ok(!tgSol.includes("one-way"), "[v4 one-way pool] the bot never shows it for Solana");
-  const html = renderReportPage({ date: "2026-10-26", today: "2026-10-26", firstDate: "2026-10-01", rows: doc.rows, history: [] });
-  ok(typeof html === "string" && html.includes("One-way pool: 1"), "[v4 one-way pool] the report page tile counts it");
+  ok(!/one-way/i.test(tgBody) && /Could not be checked/.test(tgBody), "[one-way retired] the bot shows it as not checked, got " + tgBody);
+  const html = renderReportPage({ date: "2026-10-26", today: "2026-10-26", firstDate: "2026-10-01", rows: [publishGuardRow(v4row, "base")], history: [] });
+  ok(typeof html === "string" && !/One-way pool/.test(html), "[one-way retired] the report page has no one-way tile");
 
-  // 7. سیم‌کشی در ogFetchVerdictDetail: فقط شاخه‌ی v4-only، و فقط وقتی وگرنه v4:unproven بود
+  // 7. سیم‌کشی: هر دو صدا زدن پشتِ V4_ONE_WAY_ENABLED که false است
   const src = fs.readFileSync(fileURLToPath(new URL("./index.js", import.meta.url)), "utf8");
-  ok(/finalizeBaseNosell\(empty, covered, true, poolCause\);\s*\/\/[^\n]*\n\s*if \(fin\.why === "v4:unproven" && await v4OneWayCheck\(/.test(src) &&
-     (src.match(/await v4OneWayCheck\(/g) || []).length === 2,
-    "[v4 one-way pool] v4OneWayCheck is wired in the v4-only coverage branch, guarded by v4:unproven");
-  // ۱ نوامبر — دومین و آخرین جا: شاخه‌ی v4Proof (فروش روی کلیدِ واقعی NotEnoughLiquidity)،
-  // فقط برای nosellِ بی‌علت و فقط وقتی پوشش قطعاً false است؛ نتیجه از خودِ finalizeBaseNosell.
-  ok(/if \(cacheOut\.v4Proof === true\) \{[\s\S]{0,200}let fin = finalizeBaseNosell\(empty, covered, false, poolCause\);[\s\S]{0,900}if \(fin\.v === "nosell" && fin\.cause === undefined && covered\.covered === false\s*&& await v4OneWayCheck\(addr, meta, env, deadlineAt, meterHooks\)\) \{\s*fin = finalizeBaseNosell\(empty, covered, true, poolCause, true\);\s*\}\s*return withCounterProof\(fin,/.test(src),
-    "[v4 one-way pool] the v4Proof branch runs the check only for a cause-less nosell with coverage strictly false, and takes the verdict from finalizeBaseNosell");
+  ok(/export const V4_ONE_WAY_ENABLED = false;/.test(src) && (src.match(/await v4OneWayCheck\(/g) || []).length === 2 &&
+     (src.match(/if \(V4_ONE_WAY_ENABLED && [^\n]*/g) || []).length === 2,
+    "[one-way retired] both v4OneWayCheck call sites are gated by V4_ONE_WAY_ENABLED = false");
   console.log("[v4 one-way pool] v4OneWayProof proves only a real indexed key whose ~$100 buy fills and whose same-amount sell reverts with NotEnoughLiquidity for its own poolId (bytes, behind the 0x6190b2b0 wrapper, live canary); hook errors, other poolIds, PoolNotInitialized, reverting/zero buys, bare errors, dead canary, throws and tight deadlines all give false; finalizeBaseNosell puts it after sells:elsewhere/empty-pool/sells:recent and before v4:unproven, v4-only; the check needs a complete index and budget room; publishGuardRow keeps it on v4 rows (and recheckCause), Solana never; .txt, report tile, OG label/description/hash and the bot all carry it");
 }
 

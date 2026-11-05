@@ -1390,6 +1390,11 @@ function oneWayFailLabel(collect) {
   }
   return "no-call";
 }
+/* ۵ نوامبر — خاموش. v4OneWayProof خرید و فروش را دو کوتِ جدا روی وضعِ فعلیِ
+   استخر می‌گیرد؛ اترِ خریدار پیش از فروش وارد استخر نمی‌شود، پس هر استخرِ تازه‌ی
+   تک‌سمتی (کلانکر v4) «یک‌طرفه» دیده می‌شد در حالی که خریدار می‌توانست بفروشد
+   (XTO، ۴ نوامبر). روشن شدن فقط با شبیه‌سازیِ پشت‌سرهمِ خرید ← فروش در یک تماس. */
+export const V4_ONE_WAY_ENABLED = false;
 export async function v4OneWayCheck(addr, meta, env, deadlineAt, meterHooks) {
   try {
     if (deadlineAt != null && deadlineAt - Date.now() < 1200) { noteOneWay(meterHooks, "skip:deadline"); return false; }
@@ -1540,7 +1545,7 @@ async function ogFetchVerdictDetail(addr, meta, deadlineAt, env, ctx, metaWhy, m
        بی‌علت را v4:unproven می‌کرد. فقط وقتی پوشش قطعاً false است (چکِ ناکام هرگز
        اتهام نیست) و حکم وگرنه nosellِ بی‌علت می‌ماند؛ vetoها و empty-pool و
        sell-reverts جلوتر برنده‌اند. */
-    if (fin.v === "nosell" && fin.cause === undefined && covered.covered === false
+    if (V4_ONE_WAY_ENABLED && fin.v === "nosell" && fin.cause === undefined && covered.covered === false
         && await v4OneWayCheck(addr, meta, env, deadlineAt, meterHooks)) {
       fin = finalizeBaseNosell(empty, covered, true, poolCause, true);
     }
@@ -1557,7 +1562,7 @@ async function ogFetchVerdictDetail(addr, meta, deadlineAt, env, ctx, metaWhy, m
     const empty = await v4PoolsEmpty(addr, env, deadlineAt);
     let fin = finalizeBaseNosell(empty, covered, true, poolCause);
     // فقط جایی که وگرنه v4:unproven بود (vetoها و empty-pool جلوتر برنده‌اند)
-    if (fin.why === "v4:unproven" && await v4OneWayCheck(addr, meta, env, deadlineAt, meterHooks)) {
+    if (V4_ONE_WAY_ENABLED && fin.why === "v4:unproven" && await v4OneWayCheck(addr, meta, env, deadlineAt, meterHooks)) {
       fin = finalizeBaseNosell(empty, covered, true, poolCause, true);
     }
     return withCounterProof(fin, addr, meta, deadlineAt, env, covered, meterHooks);

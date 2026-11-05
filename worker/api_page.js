@@ -23,7 +23,6 @@ export const API_X = "https://x.com/zaexadex";
 export const API_CAUSE_NOTES = Object.freeze({
   "empty-pool": "The pool holds nothing, so there is nothing to sell into.",
   "sell-reverts": "The pool holds funds, but a sell quote on it reverts.",
-  "one-way-pool": "A $100 buy fills on a Uniswap v4 pool, but selling the same amount back does not.",
 });
 
 function esc(s) {
