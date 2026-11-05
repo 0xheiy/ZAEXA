@@ -30,6 +30,14 @@ export function guardedKind(vd, chainLabel) {
   return { kind: null };
 }
 
+/* ۵ نوامبر — همان گارد برای کارتِ OG (meta description و تصویر): nosellِ بی‌علتِ
+   اثبات‌شده و هر nosellِ سولانا «نامعلوم» (null) می‌شود، نه «No sell route».
+   نمونه: XTO کارتش «you may not be able to exit» می‌گفت و صفحه «Not confirmed». */
+export function ogGuarded(vd, chainLabel) {
+  const k = guardedKind(vd, chainLabel);
+  return k.kind === "nosell" ? { verdict: "nosell", cause: k.cause } : { verdict: k.kind, cause: undefined };
+}
+
 export function tokenNoindex(meta, vd, chainLabel) {
   const liq = meta && meta.liquidityUsd;
   if (typeof liq === "number" && Number.isFinite(liq) && liq < REPORT_MIN_RESERVE_USD) return true;

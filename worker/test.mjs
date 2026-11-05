@@ -16116,7 +16116,25 @@ function stripAllowedWording(t) {
    verdict از publishGuardRow، noindex فقط با شاهدِ مثبت. خودِ تزریقِ HTMLRewriter روی
    workerd در worker/og_live_test.mjs سنجیده می‌شود. */
 {
-  const { tokenSeo, tokenNoindex } = await import("./tokseo.js");
+  const { tokenSeo, tokenNoindex, ogGuarded } = await import("./tokseo.js");
+  // ۵ نوامبر — کارتِ OG همان گارد را می‌گیرد (XTO: کارت «may not be able to exit»، صفحه «Not confirmed»)
+  {
+    const { ogDescription } = await import("./og.js");
+    const g0 = ogGuarded({ v: "nosell" }, "Base");
+    ok(g0.verdict === null && g0.cause === undefined, "[og guard] cause-less Base nosell -> null for the OG card, got " + JSON.stringify(g0));
+    ok(!/No sell route|may not be able to exit/.test(ogDescription({ symbol: "XTO", name: "XTO" }, g0.verdict, "Base", g0.cause)),
+      "[og guard] the description of a cause-less nosell never says No sell route");
+    const g1 = ogGuarded({ v: "nosell", cause: "empty-pool" }, "Base");
+    ok(g1.verdict === "nosell" && g1.cause === "empty-pool", "[og guard] a proven empty-pool stays nosell");
+    const g2 = ogGuarded({ v: "nosell", cause: "empty-pool" }, "Solana");
+    ok(g2.verdict === null, "[og guard] Solana never gets a nosell card");
+    const g3 = ogGuarded({ v: "nosell", cause: "one-way-pool" }, "Base");
+    ok(g3.verdict === null, "[og guard] the retired one-way cause is unproven on the card");
+    ok(ogGuarded({ v: "sell" }, "Base").verdict === "sell" && ogGuarded(null, "Base").verdict === null, "[og guard] sell stays sell, missing stays null");
+    const src = fs.readFileSync(fileURLToPath(new URL("./index.js", import.meta.url)), "utf8");
+    ok((src.match(/= ogGuarded\(vd, chain\)/g) || []).length === 2 && !/cause: verdict === "nosell" \? vd\.cause/.test(src),
+      "[og guard] both OG sites (meta tags and the PNG card) take the verdict through ogGuarded");
+  }
   const { pickTokenMeta } = await import("./og.js");
   const { REPORT_MIN_RESERVE_USD } = await import("./report.js");
   const A1 = "0x" + "a".repeat(40);

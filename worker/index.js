@@ -157,7 +157,7 @@ async function gtUpstream(rest, env, opts) {
 }
 
 import { ogTags, ogTitle, pickTokenMeta, pickDsMeta, pickCmcMeta } from "./og.js";
-import { tokenSeo } from "./tokseo.js";
+import { tokenSeo, ogGuarded } from "./tokseo.js";
 import { ogImageResponse } from "./og-image.js";
 import { tokenCardPng, renderable, logoFromJpeg } from "./og-token.js";
 import { logoResponse } from "./logo-image.js";
@@ -2186,8 +2186,8 @@ function injectOg(res, url, addr, metaPromise, vdPromise, chain) {
     .on("head", {
       async element(el) {
         const [meta, vd] = await Promise.all([metaPromise, vdPromise]);
-        const verdict = vd && typeof vd === "object" ? vd.v : null;
-        const cause = verdict === "nosell" ? vd.cause : undefined;
+        // حکم از همان گاردِ صفحه (ogGuarded) — کارت و صفحه یک حرف بزنند
+        const { verdict, cause } = ogGuarded(vd, chain);
         // برچسبِ زنجیره از همان chainOf(addr) که کالر پاس داده — نه حدسی
         // که اینجا دوباره زده شود.
         el.append(ogTags(meta, addr, url.origin, verdict, chain, cause), { html: true });
@@ -2313,10 +2313,10 @@ async function ogTokenRoute(request, url, env, ctx, addr) {
       ogFetchVerdictDetail(addr, meta, deadlineAt, env, ctx).catch(() => null),
       ogFetchLogo(meta.imageUrl).catch(() => ({ logo: null, why: "fetch" })),
     ]);
-    const verdict = vd && typeof vd === "object" ? vd.v : null;
+    const { verdict, cause: gCause } = ogGuarded(vd, chain);   // همان گاردِ صفحه
     const png = await tokenCardPng({
       symbol: meta.symbol, name: meta.name, liquidity: meta.liquidity, vol24: meta.vol24,
-      verdict, chain, logo: lg.logo, cause: verdict === "nosell" ? vd.cause : undefined,
+      verdict, chain, logo: lg.logo, cause: gCause,
     });
     const res = new Response(request.method === "HEAD" ? null : png, {
       status: 200,
