@@ -10011,6 +10011,7 @@ async def main():
         await check_swap_star(p, errors)
         await check_swap_star_raised(p, errors)
         await check_landing_nav_order(p, errors)
+        await check_landing_card_corners(p, errors)
         await check_footer_columns(p, errors)
         await check_swap_done_card(p, errors)
         await check_mcap_scope(p, errors)
@@ -23035,6 +23036,28 @@ async def check_markets_no_clip(p, errors):
 # =====================================================================
 LANDING_NAV_ANCHORS = ["#features", "#exit-check", "#how", "#faq", "#closing"]
 LANDING_NAV_TEXTS = ["Capabilities", "Exit test", "How it works", "FAQ", "Why Zaexa"]
+
+
+async def check_landing_card_corners(p, errors):
+    """[landing card corners] ۶ نوامبر — کارت‌های روش و مقایسه (.feature-card) همان گوشه‌ی کارت‌های .return-tool را دارند."""
+    path = os.path.join(HERE, "..", "landing.html")
+    b = await p.chromium.launch()
+    try:
+        pg = await b.new_page(viewport={"width": 1440, "height": 900})
+        pg.on("pageerror", lambda e: errors.append("PAGEERROR %s" % e))
+        await pg.goto("file://" + path)
+        d = await pg.evaluate("""() => {
+            const r = e => getComputedStyle(e).borderTopLeftRadius + '/' + getComputedStyle(e).borderBottomRightRadius;
+            return {ref: [...document.querySelectorAll('.return-tool')].map(r),
+                    method: [...document.querySelectorAll('.feature-grid>.feature-card')].map(r),
+                    contrast: [...document.querySelectorAll('.contrast-grid .feature-card')].map(r)};
+        }""")
+        print("[landing card corners] ref=%s method=%s contrast=%s" % (d["ref"], d["method"], d["contrast"]))
+        assert len(d["ref"]) >= 2 and len(set(d["ref"])) == 1 and d["ref"][0] != "0px/0px", "[landing card corners] reference cards lost their radius: %s" % d["ref"]
+        assert len(d["method"]) == 3 and set(d["method"]) == set(d["ref"][:1]), "[landing card corners] method cards must match the return-tool radius: %s" % d
+        assert len(d["contrast"]) == 2 and set(d["contrast"]) == set(d["ref"][:1]), "[landing card corners] contrast cards must match the return-tool radius: %s" % d
+    finally:
+        await b.close()
 
 
 async def check_landing_nav_order(p, errors):
