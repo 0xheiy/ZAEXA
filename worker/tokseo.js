@@ -65,7 +65,10 @@ export function tokenSeo(meta, vd, chainLabel, addr) {
     pred = "could not confirm a sell route (this is not a verdict that you cannot sell)";
   }
 
-  const pool = meta.liquidity || null, vol = meta.vol24 || null;
+  /* استخرِ خالیِ اثبات‌شده: عددِ ذخیره/حجمِ GT شاهدِ نقدینگی نیست و کنارِ
+     «pool is empty» متناقض دیده می‌شود (JFF، ۵ نوامبر) → هیچ مبلغی نمی‌آید. */
+  const emptyPool = k.kind === "nosell" && k.cause === "empty-pool";
+  const pool = emptyPool ? null : (meta.liquidity || null), vol = emptyPool ? null : (meta.vol24 || null);
   let money = "";
   if (pool && vol) money = " Its pools held about " + pool + " with " + vol + " traded in the last 24 hours.";
   else if (pool) money = " Its pools held about " + pool + ".";

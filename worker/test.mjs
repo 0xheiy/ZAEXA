@@ -16156,6 +16156,8 @@ function stripAllowedWording(t) {
   const ep = tokenSeo(m1, { v: "nosell", cause: "empty-pool" }, "Base", A1);
   ok(/No sell route quoted · pool is empty/.test(ep.facts) && /found no sell route: pool is empty\./.test(ep.facts) &&
      !/guarantee/.test(ep.facts) && ep.noindex === true, "[token seo] empty-pool shows pool is empty and noindex: " + ep.facts);
+  ok(!/Pool \$|Vol 24h|held about|traded in the last/.test(ep.facts) && /Pool \$/.test(tokenSeo(m1, { v: "nosell", cause: "sell-reverts" }, "Base", A1).facts),
+     "[token seo] empty-pool shows no GT reserve/volume (not a liquidity witness), other verdicts still do: " + ep.facts);
   const sr = tokenSeo(m1, { v: "nosell", cause: "sell-reverts" }, "Base", A1);
   ok(/· the sell reverts/.test(sr.facts) && sr.noindex === false, "[token seo] sell-reverts is shown, no noindex");
   ok(/Not confirmed/.test(tokenSeo(m1, { v: "nosell", cause: "one-way-pool" }, "Base", A1).facts),
