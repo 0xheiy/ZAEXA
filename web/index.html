@@ -1203,6 +1203,42 @@ section.card.isDone #actBtn,section.card.isDone #solStatusSlot,section.card.isDo
 .trade{display:flex;align-items:center;gap:10px;padding:8px 20px;font-size:12.5px;border-top:1px solid var(--line)}
 .trade .amt2{font-weight:620}
 .trade .ago{margin-left:auto;color:var(--tx3);font-size:11.5px}
+/* ۶ نوامبر — P&L تقریبیِ هر کیف در کارت Large trades (فقط Base): خلاصه‌ی سه‌تایی، کلید Latest|Top P&L، ردیفِ بازشو.
+   ⚠️ بعد از بلوکِ ۴۸۰px بالا آمده تا padding ردیف را آن بلوک پس نزند. */
+.lgStats{display:grid;grid-template-columns:repeat(3,1fr);gap:1px;background:var(--line);border:1px solid var(--line);border-radius:12px;overflow:hidden;margin:12px 0 8px}
+.lgStats .tstat{padding:8px 12px;min-width:0}
+.lgStats .tstat .k{font-size:10px}
+.lgStats .tstat .v{font-size:13px;overflow-wrap:anywhere}
+.lgPnlNote{font-size:12px;color:var(--tx3);margin:0 0 4px}
+.lgBarTop{display:flex;align-items:center;justify-content:flex-end;gap:10px;padding:6px 20px 8px}
+.lgBarTop .lgLbl{font-size:11px;color:var(--tx3);text-transform:uppercase;letter-spacing:.05em}
+.lgSort button{height:26px!important;padding:0 12px!important;font-size:12px!important}
+.lgPos{color:var(--pos)}.lgNeg{color:var(--neg)}
+.lgList .lgRow .lgT{cursor:pointer;flex-wrap:nowrap;white-space:nowrap}
+.lgList .lgRow .lgT .ago{margin-left:0;min-width:46px;text-align:right}
+.lgPv{margin-left:auto;display:flex;flex-direction:column;align-items:flex-end;gap:3px;width:96px;flex:none}
+.lgPt{font-weight:600;font-size:12.5px;font-variant-numeric:tabular-nums}
+.lgPt.lgUnk{color:var(--tx3);font-weight:400}
+.lgBar{display:block;width:90px;height:4px;border-radius:999px;background:transparent;text-align:right;direction:rtl}
+.lgBar i{display:block;height:4px;border-radius:999px;margin-left:auto}
+.lgPsk{display:block;width:70px;height:12px;border-radius:5px}
+.lgChev{flex:none;color:var(--tx3);transition:transform .16s}
+.lgRow.open .lgChev{transform:rotate(180deg)}
+.lgDet{background:var(--card2);border-radius:10px;padding:10px 12px;margin:0 20px 10px}
+.lgGrid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px 14px}
+.lgGrid>div{min-width:0}
+.lgGrid .k{font-size:10px;letter-spacing:.05em;text-transform:uppercase;color:var(--tx3);font-weight:640}
+.lgGrid .v{font-size:12.5px;font-weight:600;margin-top:3px;overflow-wrap:anywhere}
+.lgDn{margin-top:8px;font-size:11.5px;color:var(--tx3)}
+@media(max-width:720px){
+  .lgList .lgRow .lgT{padding-left:12px;padding-right:12px;gap:6px}
+  .lgBarTop{padding:6px 14px 8px}
+  .lgStats{grid-template-columns:1fr 1fr}.lgStats .tstat:last-child{grid-column:1/-1}
+  .lgPv{width:84px}.lgBar{width:80px}
+  .lgDet{margin:0 12px 10px}.lgGrid{grid-template-columns:1fr 1fr}
+  .lgList .lgRow .lgT .ago{min-width:0;font-size:11px}
+  .lgList .lgRow .lgT a.mono{font-size:11px}
+}
 
 /* ---------------- notices / misc ---------------- */
 /* اعلان‌ها حالا زیر دکمه‌اند، پس فاصله باید پایین بیفتد نه بالا —
@@ -4760,6 +4796,7 @@ function gtCacheSet(url,entry){
   }
 }
 function gtTtl(u){
+  if(u.startsWith("/pnl/"))return 600000;   // P&L کیف: Worker هم ۱۰ دقیقه کش می‌کند
   if(u.startsWith("/cg/mcap/"))return 3600000;   // مارکت‌کپ جهانی: کند عوض می‌شود (Worker ۱۲ ساعت کش می‌کند)
   if(/\/pools(\?|$)/.test(u))return 600000;   // استخر برتر زود عوض نمی‌شود
   if(/\/ohlcv\//.test(u))return 45000;
@@ -8414,12 +8451,12 @@ async function renderFlow(){
 const FB_LS="zaexa.flowboard.v1",FB_ROWS=15,FB_FETCH=30,FB_REFRESH=60000,FB_FRESH=20000,EB_TTL=60000,EB_MAX=20;
 let flowBoard=true,flowPicking=false,fbOn=false,fbData=null,fbShown=[],fbLast="",fbErr="",fbOpening=false,ebSeq=0,ebCache=null;
 const fbPref=(()=>{
-  const o={only:true,w:"h1",set:"new"};
+  const o={only:true,w:"h1",set:"new",lg:"latest"};
   try{const j=JSON.parse(localStorage.getItem(FB_LS)||"null");
-    if(j&&typeof j==="object"){if(typeof j.only==="boolean")o.only=j.only;if(j.w==="h1"||j.w==="h6")o.w=j.w;if(j.set==="new"||j.set==="est")o.set=j.set;}}catch{}
+    if(j&&typeof j==="object"){if(typeof j.only==="boolean")o.only=j.only;if(j.w==="h1"||j.w==="h6")o.w=j.w;if(j.set==="new"||j.set==="est")o.set=j.set;if(j.lg==="top")o.lg="top";}}catch{}
   return o;
 })();
-function fbSavePref(){try{localStorage.setItem(FB_LS,JSON.stringify({only:fbPref.only,w:fbPref.w,set:fbPref.set}));}catch{}}
+function fbSavePref(){try{const o={only:fbPref.only,w:fbPref.w,set:fbPref.set};if(fbPref.lg==="top")o.lg="top";localStorage.setItem(FB_LS,JSON.stringify(o));}catch{}}   // lg فقط وقتی پیش‌فرض نیست نوشته می‌شود
 // عددِ نامعتبر/غایب null می‌شود («—»)، هرگز ۰؛ رشته‌ی خالی هم عدد نیست (همان سبکِ renderSolFlow).
 const fbNum=v=>{if(v==null||typeof v==="boolean"||(typeof v==="string"&&v.trim()===""))return null;const n=Number(v);return Number.isFinite(n)?n:null;};
 const fbCnt=v=>{const n=fbNum(v);return n!==null&&n>=0?n:null;};
@@ -8891,7 +8928,78 @@ function lgAnalyze(data,tokenAddr,lower){
   for(const d of data){const ts=Date.parse(d&&d.attributes&&d.attributes.block_timestamp);if(ts<oldest)oldest=ts;}   // پنجره از کلِ نمونه
   return {rows,buyers:B.size,sellers:S.size,net:sb-ss,oldest,total:data.length};
 }
-function lgHtml(r,solana){
+const LG_FOOT="Flow, not skill. P&L is approximate, from each wallet's own transfers; addresses are the reported transaction senders, which can include routers.";
+const LG_TIP="Approximate profit or loss on this token for this wallet, from its on-chain transfers: paid vs received in ETH, WETH or USDC (valued at today's ETH price), plus tokens still held at today's price. Transfers between the wallet's own addresses and airdrops can distort it.";
+const LG_CHEV='<svg class="lgChev" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>';
+const lgOkAddr=w=>/^0x[0-9a-fA-F]{40}$/.test(w);
+// مبلغ/توکنِ P&L: null = «—»، هرگز ۰
+const lgUsd=v=>v==null||!isFinite(v)?"—":Math.abs(v)<0.5?"$0":fmtBig(Math.abs(v));
+const lgSgn=v=>lgUsd(Math.abs(v))==="$0"?"$0":(v<0?"−":"+")+lgUsd(v);
+function lgTok(n){
+  if(n==null||!isFinite(n))return "—";
+  const a=Math.abs(n);
+  if(a>=1e12)return (n/1e12).toFixed(2)+"T";
+  if(a>=1e9)return (n/1e9).toFixed(2)+"B";
+  if(a>=1e6)return (n/1e6).toFixed(2)+"M";
+  if(a>=1e3)return (n/1e3).toFixed(1)+"K";
+  return String(Number(n.toPrecision(4)));
+}
+const lgPnlOf=st=>w=>{const v=st.res.get(w);return v&&typeof v==="object"&&v.pnl!=null?v.pnl:null;};
+function lgStatsInner(st){
+  const known=[];
+  for(const w of st.wallets){const v=lgPnlOf(st)(w);if(v!=null)known.push([w,v]);}
+  const dash='<span class="mono">—</span>';
+  const tile=(k,v)=>`<div class="tstat"><div class="k">${k}</div><div class="v">${v}</div></div>`;
+  if(!known.length)return tile("Wallets in profit",dash)+tile("Wallets at a loss",dash)+tile("Top wallet",dash);
+  const pos=known.filter(x=>x[1]>0),neg=known.filter(x=>x[1]<0);
+  const sum=a=>a.reduce((t,x)=>t+x[1],0);
+  const top=known.reduce((b,x)=>x[1]>b[1]?x:b);
+  return tile("Wallets in profit",`<span class="mono lgPos">${pos.length}${pos.length?" · ≈ "+lgSgn(sum(pos)):""}</span>`)
+    +tile("Wallets at a loss",`<span class="mono lgNeg">${neg.length}${neg.length?" · ≈ "+lgSgn(sum(neg)):""}</span>`)
+    +tile("Top wallet",`<span class="mono">${esc(shortAddr(top[0]))} · ≈ ${lgSgn(top[1])}</span>`);
+}
+function lgCellHtml(st,w,max){
+  const v=st.res.get(w);
+  if(v==="L")return '<span class="lgPv" aria-busy="true" aria-label="Loading P&amp;L"><span class="sk lgPsk"></span></span>';
+  const n=v&&typeof v==="object"?v.pnl:null;
+  if(n==null)return '<span class="lgPv"><span class="lgPt lgUnk">P&amp;L unknown</span></span>';
+  const cls=n<0?"lgNeg":n>0?"lgPos":"";
+  const bar=n===0||!(max>0)?"":`<span class="lgBar"><i class="${cls}" style="width:${Math.max(3,Math.round(Math.abs(n)/max*100))}%;background:color-mix(in srgb,var(--${n<0?"neg":"pos"}) 70%,transparent)"></i></span>`;
+  return `<span class="lgPv"><span class="lgPt ${cls}" title="${esc(LG_TIP)}">≈ ${lgSgn(n)}</span>${bar}</span>`;
+}
+function lgPanelHtml(st,w){
+  const v=st.res.get(w),sym=esc(st.sym||"tokens");
+  if(v==="L")return '<div class="lgDet"><div class="lgDn">Loading this wallet\'s transfers…</div></div>';
+  if(!v||typeof v!=="object")return '<div class="lgDet"><div class="lgDn">This wallet\'s transfers could not be read right now.</div></div>';
+  if(!v.transfers)return '<div class="lgDet"><div class="lgDn">No transfers of this token were found for this wallet.</div></div>';
+  const pn=v.pnl;
+  const note=[`From ${v.transfers} transfers${v.sinceBlock!=null?" since block "+v.sinceBlock:""} · paid and received in ETH, WETH and USDC, valued at today's ETH price`];
+  if(v.unmatched>0)note.push(`${v.unmatched} transfers without a payment counted at zero cost`);
+  if(v.noInternal)note.push("ETH received from contracts may be missing");
+  if(v.partial)note.push("history truncated");
+  return `<div class="lgDet"><div class="lgGrid">
+    <div><div class="k">Bought</div><div class="v mono">${lgUsd(v.bought)} · ${lgTok(v.boughtTok)} ${sym}</div></div>
+    <div><div class="k">Sold</div><div class="v mono">${lgUsd(v.sold)} · ${lgTok(v.soldTok)} ${sym}</div></div>
+    <div><div class="k">Still holding</div><div class="v mono">${lgTok(v.holdTok)} ${sym} ≈ ${lgUsd(v.holdUsd)}</div></div>
+    <div><div class="k">Approx. P&amp;L</div><div class="v mono${pn==null?"":pn<0?" lgNeg":pn>0?" lgPos":""}">${pn==null?"—":"≈ "+lgSgn(pn)}</div></div></div>
+    <div class="lgDn">${esc(note.join(" · "))}</div></div>`;
+}
+function lgRowsHtml(st){
+  const get=lgPnlOf(st);
+  let rows=st.rows.slice();
+  const max=Math.max(0,...st.wallets.map(w=>{const n=get(w);return n==null?0:Math.abs(n);}));
+  if(fbPref.lg==="top"){
+    const key=x=>{const v=st.res.get(x.who);return v==="L"?-2e18:get(x.who)==null?-1e18:get(x.who);};
+    rows=rows.map((x,n)=>[x,n]).sort((a,b)=>key(b[0])-key(a[0])||a[1]-b[1]).map(a=>a[0]);   // پایدار: برابرها به ترتیبِ زمان
+  }
+  return rows.map(x=>{
+    const open=st.open.has(x.i);
+    const link=`<a class="mono" target="_blank" rel="noopener" href="${CHAIN.explorer}/address/${x.who}">${shortAddr(x.who)}</a>`;
+    return `<div class="lgRow${open?" open":""}"><div class="trade lgT" role="button" tabindex="0" aria-expanded="${open}" data-i="${x.i}"><span class="vtag${x.buy?"":" s"}">${x.buy?"Buy":"Sell"}</span>
+      <span class="amt2 mono">${fmtBig(x.usd)}</span>${lgOkAddr(x.who)?link:`<span class="mono" style="font-size:11.5px;color:var(--tx3)">${esc(shortAddr(x.who))}</span>`}${lgCellHtml(st,x.who,max)}<span class="ago">${agoText(x.ts)}</span>${LG_CHEV}</div>${open?lgPanelHtml(st,x.who):""}</div>`;
+  }).join("");
+}
+function lgHtml(r,solana,st){
   if(!r.rows.length)return lgMsgHtml("No trades of $1,000 or more in the latest data.");
   const hh=new Date(r.oldest),t=String(hh.getUTCHours()).padStart(2,"0")+":"+String(hh.getUTCMinutes()).padStart(2,"0");
   const win=r.total>=300?`Latest 300 trades (the feed is capped) since ${t} UTC`:`Last ${r.total} trades since ${t} UTC`;
@@ -8903,10 +9011,22 @@ function lgHtml(r,solana){
     const sh=shortAddr(w);
     return ok?`<a class="mono" target="_blank" rel="noopener" href="${solana?"https://solscan.io/account/":CHAIN.explorer+"/address/"}${w}">${sh}</a>`:`<span class="mono" style="font-size:11.5px;color:var(--tx3)">${esc(sh)}</span>`;
   };
+  const sum=`<div class="lgSum"><span>Big buyers <b class="mono">${r.buyers}</b> · Big sellers <b class="mono">${r.sellers}</b></span>${net}</div>`;
+  if(!solana&&st){
+    const on=b=>fbPref.lg===b?" on":"";
+    return `<div class="ebCard"><div class="ebIn">${lgHead}
+    ${sum}
+    <div class="lgStats">${lgStatsInner(st)}</div>
+    <div class="lgPnlNote">P&amp;L per wallet is approximate · up to 10 wallets</div>
+    <div class="lgWin">${esc(win)}</div></div>
+    <div class="lgBarTop"><span class="lgLbl">Sort</span><div class="fbCtl"><div class="tfs lgSort" role="group" aria-label="Sort wallets"><button type="button" data-lgsort="latest" class="${on("latest").trim()}" aria-pressed="${fbPref.lg==="latest"}">Latest</button><button type="button" data-lgsort="top" class="${on("top").trim()}" aria-pressed="${fbPref.lg==="top"}">Top P&amp;L</button></div></div></div>
+    <div class="lgList">${lgRowsHtml(st)}</div>
+    <div class="fnote">${esc(LG_FOOT)}</div></div>`;
+  }
   const list=r.rows.slice(0,LG_ROWS).map(x=>`<div class="trade"><span class="vtag${x.buy?"":" s"}">${x.buy?"Buy":"Sell"}</span>
     <span class="amt2 mono">${fmtBig(x.usd)}</span>${link(x.who)}<span class="ago">${agoText(x.ts)}</span></div>`).join("");
   return `<div class="ebCard"><div class="ebIn">${lgHead}
-    <div class="lgSum"><span>Big buyers <b class="mono">${r.buyers}</b> · Big sellers <b class="mono">${r.sellers}</b></span>${net}</div>
+    ${sum}
     <div class="lgWin">${esc(win)}</div></div><div class="lgList">${list}</div>
     <div class="fnote">Flow, not skill: no entry price is known, so nothing here says whether a wallet made or lost money. Addresses are the reported transaction senders, which can include routers.</div></div>`;
 }
@@ -8920,17 +9040,96 @@ function lgFetch(net,pool){
   lgCache.set(key,ne);
   return ne.p;
 }
-async function lgRun(net,tokenAddr,lower,getPool){
+/* P&L هر کیف: Worker /pnl/<توکن>/<کیف>. حافظه‌ی نشست (۱۰ دقیقه) + gtcGet/gtcPut؛ کلیدِ ذخیره بدونِ p
+   (holding و pnl سمتِ کلاینت از قیمتِ همین لحظه ساخته می‌شود). شکست هرگز کش نمی‌شود. */
+const lgPnlMem=new Map(),LG_PNL_CONC=3,LG_PNL_TTL=600000;
+let lgSt=null;
+function lgPnlNorm(j,px){
+  if(!j||typeof j!=="object")return null;
+  const num=v=>(typeof v==="number"&&isFinite(v))?v:null;
+  const o={transfers:num(j.transfers),bought:num(j.boughtUsd),boughtTok:num(j.boughtTok),sold:num(j.soldUsd),soldTok:num(j.soldTok),
+    holdTok:num(j.holdingTok),sinceBlock:num(j.sinceBlock),unmatched:(num(j.unmatchedIn)||0)+(num(j.unmatchedOut)||0),
+    partial:j.partial===true,noInternal:j.noInternal===true};
+  if(o.transfers==null)return null;
+  o.holdUsd=o.holdTok!=null&&px>0?o.holdTok*px:null;
+  o.pnl=o.bought!=null&&o.sold!=null&&o.holdUsd!=null?o.sold+o.holdUsd-o.bought:null;
+  return o;
+}
+function lgPnlRaw(token,wallet,px){
+  const key="/pnl/"+token+"/"+wallet,hit=lgPnlMem.get(key);
+  if(hit&&Date.now()-hit.t<LG_PNL_TTL)return hit.p;
+  const kept=gtcGet(key);
+  if(kept&&kept.v&&typeof kept.v==="object"){const p=Promise.resolve(kept.v);lgPnlMem.set(key,{t:kept.t,p});return p;}
+  const ent={t:Date.now(),p:null};
+  ent.p=(async()=>{
+    try{
+      const r=await withTimeout(fetch(key+"?p="+encodeURIComponent(String(Number(px.toPrecision(6)))),{headers:{accept:"application/json"}}),12000);
+      if(!r.ok)return null;
+      const j=await r.json();
+      if(!lgPnlNorm(j,px))return null;
+      gtcPut(key,{t:Date.now(),v:j});
+      return j;
+    }catch{return null;}
+  })();
+  lgPnlMem.set(key,ent);
+  ent.p.then(v=>{if(!v&&lgPnlMem.get(key)===ent)lgPnlMem.delete(key);});   // شکست کش نمی‌شود
+  return ent.p;
+}
+function lgQuoteTok(a){
+  const l=String(a).toLowerCase();
+  return ["WETH","USDC"].some(sy=>{const t=tokenBySymbol(sy);return t&&t.address.toLowerCase()===l;});
+}
+function lgState(k,r,px,sym,mine,token){
+  if(!r.rows.length)return null;
+  const rows=r.rows.slice(0,LG_ROWS),wallets=[...new Set(rows.map(x=>x.who))];
+  const canPnl=px>0&&!lgQuoteTok(token);   // WETH/USDC خودشان «پول»اند: P&L بی‌معنی
+  token=String(token).toLowerCase();   // کلیدِ کش و URL همیشه lower-case
+  const st={k,mine,token,sym,px,rows,wallets,res:new Map(),open:lgSt&&lgSt.k===k?lgSt.open:new Set()};
+  for(const w of wallets){
+    if(!canPnl||!lgOkAddr(w)){st.res.set(w,null);continue;}
+    const kept=gtcGet("/pnl/"+token+"/"+w);
+    st.res.set(w,kept&&kept.v?lgPnlNorm(kept.v,px):"L");
+  }
+  lgSt=st;
+  return st;
+}
+function lgRepaint(){
+  const st=lgSt,box=$("flowLarge");
+  if(!st||!box||box.hidden||box.dataset.k!==st.k||st.mine!==lgSeq)return;
+  const s=box.querySelector(".lgStats"),l=box.querySelector(".lgList");if(!s||!l)return;
+  const fa=document.activeElement,fi=fa&&fa.classList&&fa.classList.contains("lgT")&&box.contains(fa)?fa.dataset.i:null;
+  s.innerHTML=lgStatsInner(st);l.innerHTML=lgRowsHtml(st);
+  box.querySelectorAll("[data-lgsort]").forEach(b=>{const on=b.dataset.lgsort===fbPref.lg;b.classList.toggle("on",on);b.setAttribute("aria-pressed",String(on));});
+  if(fi!=null){const n=l.querySelector('.lgT[data-i="'+fi+'"]');if(n)n.focus();}
+}
+// بعد از رندرِ کارت: حداکثر ۳ درخواستِ هم‌زمان؛ جوابِ دیررسیده‌ی توکنِ قبلی (lgSeq) دور ریخته می‌شود
+function lgPnlGo(st){
+  const todo=st.wallets.filter(w=>st.res.get(w)==="L");
+  let n=0;
+  const worker=async()=>{
+    while(n<todo.length){
+      const w=todo[n++];
+      let v=null;
+      try{const raw=await lgPnlRaw(st.token,w,st.px);v=lgPnlNorm(raw,st.px);}catch{v=null;}
+      if(st.mine!==lgSeq)return;
+      st.res.set(w,v);lgRepaint();
+    }
+  };
+  for(let i=0;i<Math.min(LG_PNL_CONC,todo.length);i++)worker();
+}
+async function lgRun(net,tokenAddr,lower,getPool,sym){
   const mine=++lgSeq,box=$("flowLarge"),k=net+"|"+tokenAddr;
   if(box&&(box.hidden||box.dataset.k!==k))lgShow(lgLoadHtml());   // همان توکن: کارتِ قبلی می‌ماند، سوسو نمی‌زند
   if(box)box.dataset.k=k;
-  let html;
+  let html,st=null;
   try{
-    const pool=await getPool();
-    const data=await lgFetch(net,pool);
-    html=lgHtml(lgAnalyze(data,tokenAddr,lower),!lower);
+    const g=await getPool();
+    const data=await lgFetch(net,g.pool);
+    const r=lgAnalyze(data,tokenAddr,lower);
+    st=lower?lgState(k,r,g.px,sym,mine,tokenAddr):null;
+    html=lgHtml(r,!lower,st);
   }catch{html=lgMsgHtml("Large trades could not be loaded right now.");}
-  if(mine===lgSeq)lgShow(html);
+  if(mine===lgSeq){lgShow(html);if(st)lgPnlGo(st);}
 }
 // Solana: همان نمونه‌ی معاملاتِ renderSolFlow (کشِ ۶۰ثانیه‌ای) را می‌شمارد؛ درخواستِ دوم نیست.
 function lgStartSol(mint,cache){
@@ -8947,14 +9146,37 @@ function lgStartBase(t){
   const net=CHAIN.gtNetwork;
   return lgRun(net,t.address,true,async()=>{
     const j=await gtJson(`${GT}/networks/${net}/tokens/${t.address}?include=top_pools`);   // همان آدرسِ Early buyers؛ کش/هم‌زمان
+    const pv=j&&j.data&&j.data.attributes&&j.data.attributes.price_usd,px=pv==null||pv===""?NaN:Number(pv);   // قیمتِ همین پاسخ؛ نبودنش = P&L نامعلوم
     const tp=j&&j.data&&j.data.relationships&&j.data.relationships.top_pools&&j.data.relationships.top_pools.data;
     const id=tp&&tp[0]&&tp[0].id;
     if(typeof id!=="string"||!id.startsWith(net+"_"))throw new Error("lg: no pool");
     const pool=id.slice(net.length+1);
     if(!/^0x[0-9a-fA-F]{40}$/.test(pool))throw new Error("lg: bad pool");
-    return pool;
-  });
+    return {pool,px:Number.isFinite(px)&&px>0&&px<=1e9?px:null};
+  },t.symbol);
 }
+
+/* کلیکِ ردیف (باز/بسته) و کلیدِ Latest|Top P&L — یک شنونده‌ی تفویضی؛ پیوندِ آدرس ردیف را باز نمی‌کند. */
+(function(){
+  const box=$("flowLarge");if(!box)return;
+  const flip=row=>{
+    const st=lgSt,i=Number(row.dataset.i);if(!st||!Number.isFinite(i))return;
+    if(st.open.has(i))st.open.delete(i);else st.open.add(i);
+    lgRepaint();
+  };
+  box.addEventListener("click",e=>{
+    const sb=e.target.closest&&e.target.closest("[data-lgsort]");
+    if(sb){fbPref.lg=sb.dataset.lgsort==="top"?"top":"latest";fbSavePref();lgRepaint();return;}
+    if(e.target.closest&&e.target.closest("a"))return;
+    const row=e.target.closest&&e.target.closest(".lgT");
+    if(row)flip(row);
+  });
+  box.addEventListener("keydown",e=>{
+    if(e.key!=="Enter"&&e.key!==" ")return;
+    const row=e.target.classList&&e.target.classList.contains("lgT")?e.target:null;
+    if(row){e.preventDefault();flip(row);}
+  });
+})();
 
 /* ---------- safety panel ---------- */
 async function runScan(token){

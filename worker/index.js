@@ -162,7 +162,7 @@ import { ogImageResponse } from "./og-image.js";
 import { tokenCardPng, renderable, logoFromJpeg } from "./og-token.js";
 import { logoResponse } from "./logo-image.js";
 import { fetchVerdict, fetchCounterSell, poolDirectedProof, v4OneWayProof, oneWayCounterFor, VD_VENUES, VD_RPCS, VD_V4_STAGE_COUNTERS,
-  WETH_ADDR, USDC_ADDR, sellAmountFrom } from "./verdict.js";
+  WETH_ADDR, USDC_ADDR, sellAmountFrom, canaryCall, canaryUsdPerEth } from "./verdict.js";
 import { EVM_ADDR, SOL_MINT, chainOf, gtNetworkOf } from "./chains.js";
 import { tgRoute } from "./tg.js";
 import {
@@ -3911,6 +3911,239 @@ async function cgMcapRoute(request, url, ctx, env) {
   return out(payload, 200, "public, max-age=" + CG_MCAP_BROWSER_S);
 }
 
+/* ۶ نوامبر: /pnl/<توکن>/<کیف> — سود/زیانِ تقریبیِ یک کیف روی یک توکنِ Base، فقط از
+   انتقال‌های خودِ کیف (Alchemy alchemy_getAssetTransfers روی env.BASE_RPC).
+   خرید = توکنی که آمد با پولی که در همان tx از کیف رفت (ETH/WETH/USDC)؛ فروش برعکس.
+   🔴 URLِ BASE_RPC کلید را در خودش دارد: هرگز در پاسخ، لاگ یا خطا نمی‌آید.
+   🔴 مقدارِ نامعلوم null می‌ماند، هرگز صفر یا حدس. شکست هرگز کش نمی‌شود؛ پاسخِ ناقص
+   (قیمتِ اتر نیامد ولی لازم بود) هم کش نمی‌شود. قیمتِ توکن را کلاینت با ?p می‌دهد،
+   پس کش فقط بخشِ مستقل از p را نگه می‌دارد و holding/pnl هر بار از p ساخته می‌شود. */
+const PNL_ADDR = /^0x[0-9a-fA-F]{40}$/;
+const PNL_TIMEOUT_MS = 8000;
+const PNL_MAX_BYTES = 2 * 1024 * 1024;
+const PNL_STORE_S = 600;
+const PNL_BROWSER_S = 300;
+const PNL_P_MAX = 1e9;
+const PNL_LC = (a) => String(a).toLowerCase();
+
+// یک JSON-RPC POST با سقفِ حجمِ بدنه و مهلت؛ فقط { status, body } برمی‌گردد، هرگز URL.
+async function pnlRpc(rpcUrl, method, params) {
+  const ac = new AbortController();
+  const timer = setTimeout(() => ac.abort(), PNL_TIMEOUT_MS);
+  try {
+    const res = await fetch(rpcUrl, {
+      method: "POST", headers: { "content-type": "application/json" }, redirect: "manual",
+      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }), signal: ac.signal,
+    });
+    if (!res || !res.body) return { status: res ? res.status : 0, body: null };
+    const chunks = [];
+    let n = 0;
+    const rd = res.body.getReader();
+    for (;;) {
+      const { done, value } = await rd.read();
+      if (done) break;
+      n += value.length;
+      if (n > PNL_MAX_BYTES) { try { rd.cancel(); } catch (e) { /* مهم نیست */ } return { status: res.status, body: null }; }
+      chunks.push(value);
+    }
+    const buf = new Uint8Array(n);
+    let o = 0;
+    for (const c of chunks) { buf.set(c, o); o += c.length; }
+    let body = null;
+    try { body = JSON.parse(new TextDecoder().decode(buf)); } catch (e) { /* بدنه‌ی نامعتبر */ }
+    return { status: res.status, body };
+  } catch (e) {
+    return { status: 0, body: null };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+// یک پرس‌وجوی alchemy_getAssetTransfers. خروجی: { transfers, more } یا { err: "category"|"upstream" }
+async function pnlTransfers(rpcUrl, filter) {
+  const r = await pnlRpc(rpcUrl, "alchemy_getAssetTransfers", [{
+    fromBlock: "0x0", order: "asc", withMetadata: false, excludeZeroValue: true, maxCount: "0x3e8", ...filter }]);
+  const j = r.body;
+  if (j && typeof j === "object" && j.error) {
+    // تنها جایی که به متن نگاه می‌کنیم: رد شدنِ دسته‌ی internal برای Base (کدِ عددیِ پایدار ندارد)
+    const msg = typeof j.error.message === "string" ? j.error.message : "";
+    return { err: /categor|internal/i.test(msg) ? "category" : "upstream" };
+  }
+  if (r.status !== 200 || !j || !j.result || !Array.isArray(j.result.transfers)) return { err: "upstream" };
+  return { transfers: j.result.transfers, more: typeof j.result.pageKey === "string" && j.result.pageKey !== "" };
+}
+
+// مقدارِ اعشاری: value الکمی، وگرنه rawContract.value با decimals؛ نامعلوم → null
+function pnlAmt(t, fallbackDec) {
+  if (typeof t.value === "number" && Number.isFinite(t.value) && t.value >= 0) return t.value;
+  const rc = t.rawContract;
+  if (rc && typeof rc.value === "string" && /^0x[0-9a-fA-F]+$/.test(rc.value)) {
+    const dec = typeof rc.decimal === "string" && /^0x[0-9a-fA-F]+$/.test(rc.decimal) ? parseInt(rc.decimal, 16) : fallbackDec;
+    if (Number.isInteger(dec) && dec >= 0 && dec <= 36) {
+      const v = Number(BigInt(rc.value)) / 10 ** dec;
+      if (Number.isFinite(v)) return v;
+    }
+  }
+  return null;
+}
+
+// پای «پول» یک انتقال: ETH (بومی یا WETH) یا USDC؛ هر چیزِ دیگر null
+function pnlQuoteLeg(t) {
+  const rc = t.rawContract || {};
+  const addr = typeof rc.address === "string" ? PNL_LC(rc.address) : null;
+  if (t.category === "erc20") {
+    if (addr === PNL_LC(WETH_ADDR)) { const a = pnlAmt(t, 18); return a == null ? null : { k: "eth", a }; }
+    if (addr === PNL_LC(USDC_ADDR)) { const a = pnlAmt(t, 6); return a == null ? null : { k: "usd", a }; }
+    return null;
+  }
+  if ((t.category === "external" || t.category === "internal") && t.asset === "ETH" && !addr) {
+    const a = pnlAmt(t, 18); return a == null ? null : { k: "eth", a };
+  }
+  return null;
+}
+
+// قیمتِ ETH/USD از همان کاناریِ verdict (canaryUsdPerEth)، با eth_call روی BASE_RPC و بعد VD_RPCS
+async function pnlEthUsd(env) {
+  const c = canaryCall();
+  for (const rpcUrl of baseRpcsFor(env).slice(0, 3)) {
+    const r = await pnlRpc(rpcUrl, "eth_call", [{ to: c.to, data: c.data }, "latest"]);
+    const res = r.status === 200 && r.body && typeof r.body.result === "string" ? r.body.result : null;
+    const p = res ? canaryUsdPerEth({ canary: { result: res } }) : null;
+    if (p != null) return p;
+  }
+  return null;
+}
+
+const pnlR2 = (v) => Math.round(v * 100) / 100;
+const pnlR6 = (v) => Math.round(v * 1e6) / 1e6;
+
+// join بر اساس hash — خالص، برای تست
+function pnlJoin(tokIn, tokOut, qIn, qOut, ethUsd) {
+  const inM = new Map(), outM = new Map(); // hash → مجموعِ توکن
+  const add = (m, t) => { const a = pnlAmt(t, null); if (a == null) return 0; const h = String(t.hash).toLowerCase(); m.set(h, (m.get(h) || 0) + a); return 1; };
+  let transfers = 0;
+  for (const t of tokIn) transfers += add(inM, t);
+  for (const t of tokOut) transfers += add(outM, t);
+  const legs = (list) => {
+    const m = new Map();
+    for (const t of list) {
+      const q = pnlQuoteLeg(t); if (!q) continue;
+      const h = String(t.hash).toLowerCase();
+      const e = m.get(h) || { eth: 0, usd: 0 };
+      e[q.k] += q.a; m.set(h, e);
+    }
+    return m;
+  };
+  const paid = legs(qOut), got = legs(qIn); // پولی که رفت / آمد
+  let boughtTok = 0, soldTok = 0, unIn = 0, unOut = 0, unInTok = 0, unOutTok = 0;
+  let boughtUsd = 0, soldUsd = 0;
+  const side = (m, legM, other) => {
+    let tok = 0, usd = 0, unTok = 0, un = 0, needNull = false;
+    for (const [h, amt] of m) {
+      const q = legM.get(h);
+      // توکن هم آمده هم رفته در یک tx: پای پول مبهم است → بی‌پرداخت
+      if (other.has(h) || !q || (q.eth <= 0 && q.usd <= 0)) { un++; unTok += amt; continue; }
+      tok += amt; usd += q.usd;
+      if (q.eth > 0) { if (ethUsd == null) needNull = true; else usd += q.eth * ethUsd; }
+    }
+    return { tok, usd: needNull ? null : usd, unTok, un };
+  };
+  const b = side(inM, paid, outM), s = side(outM, got, inM);
+  boughtTok = b.tok; soldTok = s.tok; unIn = b.un; unOut = s.un; unInTok = b.unTok; unOutTok = s.unTok;
+  boughtUsd = b.usd; soldUsd = s.usd;
+  const holdingTok = Math.max(0, boughtTok + unInTok - soldTok - unOutTok);
+  return {
+    boughtUsd: boughtUsd == null ? null : pnlR2(boughtUsd), boughtTok: pnlR6(boughtTok),
+    soldUsd: soldUsd == null ? null : pnlR2(soldUsd), soldTok: pnlR6(soldTok),
+    holdingTok: pnlR6(holdingTok), transfers, unmatchedIn: unIn, unmatchedOut: unOut,
+  };
+}
+
+async function pnlRoute(request, url, ctx, env) {
+  if (!rateOk(request, "pnl", RL_LIMIT, RL_WINDOW_MS))
+    return fail(429, "too many requests", { "retry-after": "60" });
+  if (request.method === "OPTIONS") return new Response(null, { status: 204, headers: CORS });
+  if (request.method !== "GET" && request.method !== "HEAD") return fail(405, "only GET");
+  const parts = url.pathname.slice("/pnl/".length).split("/");
+  if (parts.length !== 2 || !PNL_ADDR.test(parts[0]) || !PNL_ADDR.test(parts[1])) return fail(400, "bad address");
+  const token = parts[0].toLowerCase(), wallet = parts[1].toLowerCase();
+  let p = null;
+  if (url.searchParams.has("p")) {
+    const raw = url.searchParams.get("p");
+    const n = /^[0-9]*\.?[0-9]+(?:[eE]-?[0-9]+)?$/.test(raw) ? Number(raw) : NaN;
+    if (!Number.isFinite(n) || n <= 0 || n > PNL_P_MAX) return fail(400, "bad price");
+    p = n;
+  }
+  const out = (core, status, cc) => {
+    const holdingUsd = p != null && core.holdingTok != null ? pnlR2(core.holdingTok * p) : null;
+    const pnlUsd = holdingUsd != null && core.soldUsd != null && core.boughtUsd != null
+      ? pnlR2(core.soldUsd + holdingUsd - core.boughtUsd) : null;
+    const body = {
+      wallet: core.wallet, token: core.token, boughtUsd: core.boughtUsd, boughtTok: core.boughtTok,
+      soldUsd: core.soldUsd, soldTok: core.soldTok, holdingTok: core.holdingTok, holdingUsd, pnlUsd,
+      transfers: core.transfers, sinceBlock: core.sinceBlock, unmatchedIn: core.unmatchedIn,
+      unmatchedOut: core.unmatchedOut, partial: core.partial, noInternal: core.noInternal, ethUsd: core.ethUsd,
+    };
+    return new Response(JSON.stringify(body), { status, headers: {
+      ...CORS, "content-type": "application/json; charset=utf-8", "cache-control": cc } });
+  };
+
+  const store = cacheStore();
+  const cacheKey = new Request("https://pnl.zaexa.internal/" + token + "/" + wallet, { method: "GET" });
+  if (store) {
+    try {
+      const hit = await store.match(cacheKey);
+      if (hit) return out(await hit.json(), 200, "public, max-age=" + PNL_BROWSER_S);
+    } catch (e) { /* کش خراب = بی‌کش */ }
+  }
+
+  const rpcUrl = env && typeof env.BASE_RPC === "string" ? env.BASE_RPC : "";
+  if (!rpcUrl) return fail(503, "unavailable");
+
+  // الف/ب) توکنِ آمده و رفته
+  const [a, b] = await Promise.all([
+    pnlTransfers(rpcUrl, { toAddress: wallet, contractAddresses: [token], category: ["erc20"] }),
+    pnlTransfers(rpcUrl, { fromAddress: wallet, contractAddresses: [token], category: ["erc20"] }),
+  ]);
+  if (a.err || b.err) return fail(502, "upstream");
+  const core0 = { wallet, token, partial: a.more || b.more, noInternal: false, ethUsd: null };
+  if (a.transfers.length + b.transfers.length === 0) {
+    const core = { ...core0, boughtUsd: null, boughtTok: null, soldUsd: null, soldTok: null, holdingTok: null,
+      transfers: 0, sinceBlock: null, unmatchedIn: 0, unmatchedOut: 0 };
+    if (store) {
+      const put = store.put(cacheKey, new Response(JSON.stringify(core), { status: 200, headers: { "cache-control": "public, max-age=" + PNL_STORE_S } }));
+      if (ctx && typeof ctx.waitUntil === "function") ctx.waitUntil(put); else await put;
+    }
+    return out(core, 200, "public, max-age=" + PNL_BROWSER_S);
+  }
+  const blocks = [...a.transfers, ...b.transfers].map((t) => parseInt(t && t.blockNum, 16)).filter((n) => Number.isFinite(n));
+  const since = blocks.length ? Math.min(...blocks) : null;
+  // پای پول از اولین بلاکِ توکن به بعد (پیش از آن به هیچ خریدی ربط ندارد؛ سقفِ ۱۰۰۰ را کمتر پر می‌کند)
+  const fromBlock = since != null ? "0x" + since.toString(16) : "0x0";
+
+  // پ/ت) پولِ آمده و رفته؛ internal برای Base رد شد → بدونِ آن
+  const cats = ["external", "internal", "erc20"];
+  let noInternal = false;
+  const quote = async (dir) => {
+    let r = await pnlTransfers(rpcUrl, { fromBlock, [dir]: wallet, category: cats });
+    if (r.err === "category") { noInternal = true; r = await pnlTransfers(rpcUrl, { fromBlock, [dir]: wallet, category: ["external", "erc20"] }); }
+    return r;
+  };
+  const [c, d, ethUsd] = await Promise.all([quote("toAddress"), quote("fromAddress"), pnlEthUsd(env)]);
+  if (c.err || d.err) return fail(502, "upstream");
+  const j = pnlJoin(a.transfers, b.transfers, c.transfers, d.transfers, ethUsd);
+  const core = { ...core0, ...j, sinceBlock: since, noInternal, ethUsd: ethUsd == null ? null : pnlR2(ethUsd),
+    partial: a.more || b.more || c.more || d.more };
+  // ناقص (قیمتِ اتر لازم بود و نیامد) = شکستِ جزئی: بدونِ کش
+  const incomplete = core.boughtUsd == null || core.soldUsd == null;
+  if (incomplete) return out(core, 200, "no-store");
+  if (store) {
+    const put = store.put(cacheKey, new Response(JSON.stringify(core), { status: 200, headers: { "cache-control": "public, max-age=" + PNL_STORE_S } }));
+    if (ctx && typeof ctx.waitUntil === "function") ctx.waitUntil(put); else await put;
+  }
+  return out(core, 200, "public, max-age=" + PNL_BROWSER_S);
+}
+
 /* =====================================================================
    GET /v4/keys/<آدرسِ توکنِ Base> — PoolKeyهای ایندکسِ v4 برای مسیریابیِ اپ
    =====================================================================
@@ -3957,6 +4190,7 @@ export default {
       return proxyGt(request, url, ctx, env);
     if (url.pathname === "/cmc/kline") return cmcKlineRoute(request, url, ctx, env);
     if (url.pathname.startsWith("/cg/mcap/")) return cgMcapRoute(request, url, ctx, env);
+    if (url.pathname.startsWith("/pnl/")) return pnlRoute(request, url, ctx, env);
     if (url.pathname === "/ev") return collectEv(request, url, env);
     /* تصویر کارت نیست، بایندینگ ASSETS هم نیست — مثل /gt و /ev همیشه باید
        به کد برسد، نه به فایل‌های ثابت. */
@@ -4125,3 +4359,4 @@ export { reportRoute, pairsRoute, scheduledReportPass, reportRunRoute, REPORT_RU
 export { makeSubMeter, meterKv, REPORT_SUBREQ_BUDGET, reportBudgetLeft };
 export { readV4Keys, readV4Entry, rpcCallBase, fetchV4Pools, storeV4Result, v4StoreTtl, runV4Index };
 export { V4_LOG_TIMEOUT_MS };
+export { pnlJoin };

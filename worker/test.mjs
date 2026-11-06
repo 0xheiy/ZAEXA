@@ -15643,6 +15643,183 @@ function stripAllowedWording(t) {
     console.log("[cg mcap] GET /cg/mcap/<id>: bad id -> 400 with zero calls; key only in the x-cg-demo-api-key header; {id,mc,fdv,at} with max-age 3600 and CORS; stored 12 h; cache hit makes zero upstream calls; 5xx/throw/empty/null -> 502 nulls, no-store and never cached; 429 key falls to keyless; own rate-limit bucket; POST 405, OPTIONS 204");
   }
 
+  // ---------- [pnl] ----------
+  {
+    const RPC = "https://base-mainnet.g.alchemy.com/v2/SECRET-ALCHEMY-KEY-PNL-1234";
+    const KEYPART = "SECRET-ALCHEMY-KEY-PNL-1234";
+    const envP = { ASSETS, BASE_RPC: RPC };
+    const T = "0x" + "a".repeat(40), W = "0x" + "1".repeat(40);
+    const WETH = "0x4200000000000000000000000000000000000006", USDCa = "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913";
+    const jb = (o, st = 200) => new Response(JSON.stringify(o), { status: st, headers: { "content-type": "application/json" } });
+    const word = (n) => n.toString(16).padStart(64, "0");
+    const CANARY = "0x" + word(30000000n) + word(0n) + word(0n) + word(0n); // ۰٫۰۱ WETH → ۳۰ USDC = ۳۰۰۰ دلار
+    const tr = (hash, cat, asset, val, addr, block, extra) => ({ blockNum: block || "0x64", hash, category: cat, asset, value: val,
+      rawContract: { address: addr, value: null, decimal: null }, ...(extra || {}) });
+    // دو خرید (اتر، یو‌اس‌دی‌سی)، یک فروش (WETH)، یک ایردراپ
+    const TOK_IN = [tr("0xh1", "erc20", "TKN", 1000, T, "0x64"), tr("0xh2", "erc20", "TKN", 400, T, "0x65"), tr("0xh9", "erc20", "TKN", 100, T, "0x66")];
+    const TOK_OUT = [tr("0xh3", "erc20", "TKN", 600, T, "0x67")];
+    const Q_OUT = [tr("0xh1", "external", "ETH", 0.5, null, "0x64"),
+      { blockNum: "0x65", hash: "0xh2", category: "erc20", asset: "USDC", value: null, rawContract: { address: USDCa, value: "0xBEBC200", decimal: "0x6" } },
+      tr("0xh1", "erc20", "SPAM", 77777, "0x" + "c".repeat(40), "0x64"), tr("0xhx", "external", "ETH", 9, null, "0x70")];
+    const Q_IN = [tr("0xh3", "erc20", "WETH", 0.3, WETH, "0x67"), tr("0xhy", "erc20", "USDC", 5000, USDCa, "0x71")];
+    let calls = [];
+    const mk = (o) => {
+      const opt = Object.assign({ tokIn: TOK_IN, tokOut: TOK_OUT, qIn: Q_IN, qOut: Q_OUT, pageKey: false, noInternalErr: false, down: false, canary: true }, o || {});
+      return async (u, init) => {
+        const body = JSON.parse(init.body);
+        calls.push({ u, m: body.method, p: body.params && body.params[0] });
+        if (opt.down) return jb({ error: "x" }, 500);
+        if (body.method === "eth_call") return opt.canary ? jb({ jsonrpc: "2.0", id: 1, result: CANARY }) : jb({ jsonrpc: "2.0", id: 1, error: { code: -32000 } }, 200);
+        const f = body.params[0], isTok = !!f.contractAddresses, to = !!f.toAddress;
+        if (!isTok && opt.noInternalErr && f.category.includes("internal"))
+          return jb({ jsonrpc: "2.0", id: 1, error: { code: -32602, message: "Invalid category: internal is not supported on this network" } }, 400);
+        const list = isTok ? (to ? opt.tokIn : opt.tokOut) : (to ? opt.qIn : opt.qOut);
+        return jb({ jsonrpc: "2.0", id: 1, result: { transfers: list, ...(opt.pageKey && isTok && to ? { pageKey: "pk" } : {}) } });
+      };
+    };
+    const shelf = new Map(), puts = [];
+    const PN = (t, w, q, e, init) => call("/pnl/" + t + "/" + w + (q || ""), init || ipH(), e || envP);
+    const savedCaches = globalThis.caches;
+    globalThis.caches = { default: {
+      match: async (r) => { const v = shelf.get(r.url); return v ? v.clone() : undefined; },
+      put: async (r, v) => { puts.push({ u: r.url, cc: v.headers.get("cache-control") }); shelf.set(r.url, v); },
+    } };
+    const wf = async (handler, fn) => {
+      const saved = globalThis.fetch, savedKeep = keepCgFlag;
+      calls = []; keepCgFlag = true;
+      globalThis.fetch = (u, o) => handler(String(u), o || {});
+      try { return await fn(); } finally { globalThis.fetch = saved; keepCgFlag = savedKeep; }
+    };
+    try {
+      // الف) اعتبارسنجی: ۴۰۰ و صفر تماس
+      await wf(mk(), async () => {
+        for (const path of [["0xabc", W], [T, "0xabc"], [T, "0x" + "g".repeat(40)], ["a".repeat(40), W], [T, W + "00"], [T, W, "/extra"]]) {
+          const res = await call("/pnl/" + path.join("/"), ipH(), envP);
+          ok(res.status === 400, "[pnl] bad address '" + path.join("/") + "' -> 400, got " + res.status);
+        }
+        for (const q of ["?p=-1", "?p=abc", "?p=0", "?p=1e12", "?p=", "?p=Infinity"]) {
+          const res = await PN(T, W, q);
+          ok(res.status === 400, "[pnl] bad price '" + q + "' -> 400, got " + res.status);
+        }
+        ok(calls.length === 0, "[pnl] validation failures make zero upstream calls, got " + calls.length);
+      });
+      // ب) join: ارقامِ دقیق، شکلِ تماس‌ها، هدرها
+      shelf.clear(); puts.length = 0;
+      await wf(mk(), async () => {
+        const res = await PN(T.toUpperCase().replace("0X", "0x"), W, "?p=2");
+        const raw = await res.text(), b = JSON.parse(raw);
+        ok(res.status === 200, "[pnl] success is 200, got " + res.status);
+        ok(calls.length === 5, "[pnl] 4 getAssetTransfers + 1 eth_call, got " + calls.length);
+        ok(calls.filter((c) => c.m === "alchemy_getAssetTransfers").length === 4 && calls.every((c) => c.u === RPC), "[pnl] every call goes to BASE_RPC only");
+        const shape = (c) => JSON.stringify([c.p.maxCount, c.p.withMetadata, c.p.excludeZeroValue, c.p.order]);
+        const gat = calls.filter((c) => c.m === "alchemy_getAssetTransfers");
+        ok(gat.every((c) => shape(c) === '["0x3e8",false,true,"asc"]'), "[pnl] every query: maxCount 0x3e8, no metadata, no zero values, asc");
+        const a = gat.find((c) => c.p.toAddress === W && c.p.contractAddresses), bb = gat.find((c) => c.p.fromAddress === W && c.p.contractAddresses);
+        ok(a && JSON.stringify(a.p.contractAddresses) === JSON.stringify([T]) && JSON.stringify(a.p.category) === '["erc20"]' && a.p.fromBlock === "0x0", "[pnl] token-in query shape (lower-cased token, erc20, from 0x0), got " + JSON.stringify(a));
+        ok(bb && JSON.stringify(bb.p.category) === '["erc20"]', "[pnl] token-out query shape");
+        const c = gat.find((x) => x.p.toAddress === W && !x.p.contractAddresses), d = gat.find((x) => x.p.fromAddress === W && !x.p.contractAddresses);
+        ok(c && d && JSON.stringify(c.p.category) === '["external","internal","erc20"]' && c.p.fromBlock === "0x64", "[pnl] quote queries: external+internal+erc20, no contract filter, from the first token block");
+        const want = { wallet: W, token: T, boughtUsd: 1700, boughtTok: 1400, soldUsd: 900, soldTok: 600, holdingTok: 900, holdingUsd: 1800, pnlUsd: 1000,
+          transfers: 4, sinceBlock: 100, unmatchedIn: 1, unmatchedOut: 0, partial: false, noInternal: false, ethUsd: 3000 };
+        ok(JSON.stringify(b) === JSON.stringify(want), "[pnl] exact join numbers (2 buys paid in ETH and USDC, 1 sell for WETH, 1 airdrop), got " + raw);
+        ok(res.headers.get("cache-control") === "public, max-age=300" && res.headers.get("access-control-allow-origin") === "*", "[pnl] cache-control 300 and CORS");
+        ok(puts.length === 1 && puts[0].u === "https://pnl.zaexa.internal/" + T + "/" + W && puts[0].cc === "public, max-age=600", "[pnl] stored 10 min under the internal host, got " + JSON.stringify(puts));
+        ok(!raw.includes(KEYPART) && !JSON.stringify([...res.headers.entries()]).includes(KEYPART), "[pnl] the BASE_RPC secret never appears in a response");
+        ok(!/smart money/i.test(raw.replace(/\s/g, " ")) && !raw.includes(["smart", "money"].join(" ")), "[pnl] no forbidden wording in the response");
+      });
+      // پ) کش موفق: صفر تماس، با p دیگر holding/pnl از نو
+      await wf(mk(), async () => {
+        const res = await PN(T, W, "?p=3");
+        const b = await res.json();
+        ok(calls.length === 0 && res.status === 200, "[pnl] cache hit makes zero upstream calls, got " + calls.length);
+        ok(b.holdingUsd === 2700 && b.pnlUsd === 1900 && b.boughtUsd === 1700, "[pnl] cache hit recomputes holding and pnl from the new p, got " + JSON.stringify(b));
+        const r0 = await (await PN(T, W)).json();
+        ok(r0.holdingUsd === null && r0.pnlUsd === null && r0.holdingTok === 900 && r0.boughtUsd === 1700, "[pnl] no p -> holdingUsd and pnlUsd null, tokens kept, got " + JSON.stringify(r0));
+      });
+      // ت) شکست هرگز کش نمی‌شود
+      shelf.clear(); puts.length = 0;
+      await wf(mk({ down: true }), async () => {
+        const res = await PN(T, W, "?p=2");
+        const raw = await res.text();
+        ok(res.status === 502 && res.headers.get("cache-control") === "no-store", "[pnl] upstream 500 -> 502 no-store, got " + res.status);
+        ok(!raw.includes(KEYPART) && !JSON.stringify([...res.headers.entries()]).includes(KEYPART), "[pnl] the secret is not in the failure response either");
+      });
+      ok(puts.length === 0 && shelf.size === 0, "[pnl] a failure is never cached");
+      await wf(() => { throw new TypeError("net " + RPC); }, async () => {
+        const res = await PN(T, W, "?p=2");
+        const raw = await res.text();
+        ok(res.status === 502 && !raw.includes(KEYPART) && puts.length === 0, "[pnl] a thrown fetch -> 502, no secret, no cache");
+      });
+      await wf(mk(), async () => {
+        const res = await PN(T, W, "?p=2");
+        ok(res.status === 200 && calls.length === 5, "[pnl] after a failure the next call asks upstream again, got " + res.status + "/" + calls.length);
+      });
+      // ث) قیمتِ اتر نیامد ولی لازم بود: null، بدونِ کش
+      shelf.clear(); puts.length = 0;
+      await wf(mk({ canary: false }), async () => {
+        const res = await PN(T, W, "?p=2");
+        const b = await res.json();
+        ok(res.status === 200 && b.boughtUsd === null && b.soldUsd === null && b.pnlUsd === null && b.ethUsd === null && b.holdingTok === 900, "[pnl] no ETH price -> USD sides null (never invented), got " + JSON.stringify(b));
+      });
+      ok(puts.length === 0, "[pnl] an incomplete answer is not cached");
+      // ج) internal رد شد → بدونِ آن، noInternal
+      shelf.clear(); puts.length = 0;
+      await wf(mk({ noInternalErr: true }), async () => {
+        const res = await PN(T, W, "?p=2");
+        const b = await res.json();
+        ok(b.noInternal === true && b.pnlUsd === 1000, "[pnl] internal rejected -> retry without it, noInternal true, same numbers, got " + JSON.stringify(b));
+        const retried = calls.filter((x) => x.p && x.p.category && !x.p.contractAddresses && !x.p.category.includes("internal"));
+        ok(retried.length === 2 && retried.every((x) => JSON.stringify(x.p.category) === '["external","erc20"]'), "[pnl] both quote queries retried as external+erc20, got " + retried.length);
+      });
+      // چ) pageKey → partial
+      shelf.clear(); puts.length = 0;
+      await wf(mk({ pageKey: true }), async () => {
+        const b = await (await PN(T, W, "?p=2")).json();
+        ok(b.partial === true && b.noInternal === false, "[pnl] a pageKey -> partial true, got " + JSON.stringify(b));
+      });
+      // ح) هیچ انتقالِ توکنی: ۲۰۰ با transfers 0 و pnl null، فقط دو تماس
+      shelf.clear(); puts.length = 0;
+      await wf(mk({ tokIn: [], tokOut: [] }), async () => {
+        const res = await PN(T, W, "?p=2");
+        const b = await res.json();
+        ok(res.status === 200 && b.transfers === 0 && b.pnlUsd === null && b.holdingUsd === null && b.sinceBlock === null && calls.length === 2,
+          "[pnl] no token transfers -> 200, transfers 0, pnl null, 2 calls only, got " + JSON.stringify(b) + "/" + calls.length);
+      });
+      // خ) فروشِ بی‌پرداخت (به جای دیگر فرستاده شد): unmatchedOut، توکن بدونِ دریافتی خارج می‌شود
+      shelf.clear(); puts.length = 0;
+      await wf(mk({ tokOut: [tr("0xh3", "erc20", "TKN", 600, T, "0x67"), tr("0xh8", "erc20", "TKN", 100, T, "0x68")] }), async () => {
+        const b = await (await PN(T, W, "?p=2")).json();
+        ok(b.unmatchedOut === 1 && b.soldTok === 600 && b.holdingTok === 800 && b.pnlUsd === 800, "[pnl] token out with no payment -> unmatchedOut, zero proceeds, leaves the position, got " + JSON.stringify(b));
+      });
+      // د) نبودنِ BASE_RPC: ۵۰۳ بدونِ تماس
+      shelf.clear();
+      await wf(mk(), async () => {
+        const res = await PN(T, W, "?p=2", { ASSETS });
+        ok(res.status === 503 && calls.length === 0, "[pnl] no BASE_RPC -> 503 with zero calls, got " + res.status);
+      });
+      // ذ) حد نرخ: سطلِ pnl جدا
+      shelf.clear();
+      await wf(mk(), async () => {
+        const same = { headers: { "cf-connecting-ip": "203.0.113.91" } };
+        let last = null;
+        for (let i = 0; i < idx.RL_LIMIT + 1; i++) last = await PN(T, W, "?p=2", envP, same);
+        ok(last.status === 429 && last.headers.get("retry-after") === "60" && last.headers.get("access-control-allow-origin") === "*", "[pnl] rate limit after RL_LIMIT requests, got " + last.status);
+        const other = await call("/cg/mcap/pepe", same, envP);
+        ok(other.status !== 429, "[pnl] the pnl bucket is separate from the cg bucket");
+      });
+      // ر) متد
+      await wf(mk(), async () => {
+        const r1 = await call("/pnl/" + T + "/" + W, { method: "POST", headers: { "cf-connecting-ip": "198.51.100.241" } }, envP);
+        ok(r1.status === 405 && calls.length === 0, "[pnl] POST -> 405 with zero calls");
+        const r2 = await call("/pnl/" + T + "/" + W, { method: "OPTIONS", headers: { "cf-connecting-ip": "198.51.100.242" } }, envP);
+        ok(r2.status === 204 && r2.headers.get("access-control-allow-origin") === "*", "[pnl] OPTIONS -> 204 with CORS");
+      });
+    } finally {
+      if (savedCaches === undefined) delete globalThis.caches; else globalThis.caches = savedCaches;
+    }
+    console.log("[pnl] GET /pnl/<token>/<wallet>: bad address/price -> 400 with zero calls; 4 getAssetTransfers (token in/out, quote in/out) + one eth_call for ETH/USD, only to BASE_RPC; join by tx hash with exact numbers (ETH and USDC buys, WETH sell, airdrop -> unmatchedIn); unpaid token out -> unmatchedOut; internal rejected -> retry without it and noInternal; pageKey -> partial; no p -> holdingUsd/pnlUsd null; no ETH price -> USD null and not cached; no transfers -> 200 transfers 0; success cached 10 min and recomputed per p; failures never cached; the secret never in a response; own rate-limit bucket; POST 405, OPTIONS 204");
+  }
+
   // ---------- [pass pacing] ----------
   {
     const { _paceHooks, _paceBegin, _paceEnd, _paceActive, _relayDownUntil } = idx;

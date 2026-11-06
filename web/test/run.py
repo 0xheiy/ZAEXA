@@ -8635,6 +8635,10 @@ class FbEnv:
         self.gt = lambda path: None            # path -> (status, obj) | None (= {"data": []})
         self.rpc = None
         self.calls, self.pairs_calls = [], []
+        # ۶ نوامبر: /pnl/<توکن>/<کیف> — pnl(token, wallet, query) -> (status, obj)؛ None = مثلِ قبل (به سرورِ ایستا می‌رود)
+        self.pnl, self.pnl_calls, self.pnl_gate, self.pnl_hold, self.pnl_hold_w = None, [], asyncio.Event(), asyncio.Event(), None
+        self.pnl_gate.set(); self.pnl_hold.set()
+        self.pnl_inflight = self.pnl_max = 0
 
     async def open(self, hash_="#flow", vw=1280, vh=900, scheme="dark", board=True, init=None, path="/app"):
         ctx = await self.b.new_context(viewport={"width": vw, "height": vh}, color_scheme=scheme)
@@ -8664,6 +8668,20 @@ class FbEnv:
                     return await route.fulfill(status=204, body="")
                 if rest.startswith("/vd/"):
                     return await ok(route, '{"v":"sell","ms":100}')
+                if rest.startswith("/pnl/") and self.pnl is not None:
+                    tk, wl = rest[len("/pnl/"):].split("/")
+                    self.pnl_calls.append(u)
+                    self.pnl_inflight += 1
+                    self.pnl_max = max(self.pnl_max, self.pnl_inflight)
+                    try:
+                        await self.pnl_gate.wait()
+                        if wl == self.pnl_hold_w:
+                            await self.pnl_hold.wait()
+                        await asyncio.sleep(0.08)
+                    finally:
+                        self.pnl_inflight -= 1
+                    st, obj = self.pnl(tk, wl, u.split("?", 1)[1] if "?" in u else "")
+                    return await ok(route, _fbj.dumps(obj), st)
                 if rest.startswith("/sol/"):
                     if rest.endswith("/rpc") and self.rpc:
                         pl = _fbj.loads(route.request.post_data or "{}")
@@ -9407,7 +9425,8 @@ async def check_flow_large_trades(p, errors):
         env.gt = lg_gt(env, lg_data())
         pg = await env.open(board=False)
         t = await lg_text(pg)
-        assert t.startswith(LG_HEAD + " Big buyers 5 · Big sellers 4 Net +$6.8K Last 14 trades since "), "[large trades] summary (5 distinct buyers, 4 sellers, net 24400-17600): %r" % t
+        # ۶ نوامبر: بین خلاصه و خطِ پنجره حالا سه کاشیِ P&L و یادداشتشان می‌نشیند؛ پنجره پایین‌تر با want_win سنجیده می‌شود
+        assert t.startswith(LG_HEAD + " Big buyers 5 · Big sellers 4 Net +$6.8K "), "[large trades] summary (5 distinct buyers, 4 sellers, net 24400-17600): %r" % t
         assert want_win in t, "[large trades] window line from the oldest trade (%s): %r" % (want_win, t)
         rows = await pg.evaluate("""() => [...document.querySelectorAll('#flowLarge .lgList .trade')].map(r => ({pill: r.querySelector('.vtag').textContent, cls: r.querySelector('.vtag').className,
             amt: r.querySelector('.amt2').textContent, a: r.querySelector('a').textContent, href: r.querySelector('a').href, ago: r.querySelector('.ago').textContent}))""")
@@ -9418,7 +9437,8 @@ async def check_flow_large_trades(p, errors):
         assert "s" in rows[1]["cls"].split() and "s" not in rows[0]["cls"].split(), "[large trades] sell pill style"
         assert await pg.evaluate(LG_NETCOLOR) == await fb_color(pg, "--pos"), "[large trades] positive net is --pos"
         assert await pg.evaluate("() => getComputedStyle(document.querySelector('#flowLarge .vtag.s')).color") == await fb_color(pg, "--neg"), "[large trades] sell pill is --neg"
-        assert not re.search(r"smart money|whale|profit", t, re.I) and not FB_BAD_RE.search(t), "[large trades] bad wording: %r" % t
+        # ۶ نوامبر: تنها عبارتِ مجازِ «Wallets in profit» (برچسبِ کاشیِ P&L) کنار گذاشته می‌شود؛ بقیه‌ی «profit» و «smart money|whale» همچنان ممنوع
+        assert not re.search(r"smart money|whale|profit", re.sub(r"wallets in profit", "", t, flags=re.I), re.I) and not FB_BAD_RE.search(t), "[large trades] bad wording: %r" % t
         assert len(lg_calls(env)) == 1, "[large trades] exactly one large-trades request: %s" % env.calls
         assert await pg.evaluate("() => document.getElementById('flowEarly').compareDocumentPosition(document.getElementById('flowLarge')) & Node.DOCUMENT_POSITION_FOLLOWING"), "[large trades] below Early buyers"
         # باز کردنِ دوباره‌ی همان توکن در ۶۰ ثانیه: صفر درخواستِ تازه
@@ -9513,6 +9533,243 @@ async def check_flow_large_trades(p, errors):
 # ---------- حکمِ صادرکننده برای سهام ----------
 SI_NOTE = "The issuer can freeze accounts and recover tokens. This is expected for regulated stock tokens and is shown below for transparency."
 SI_CHIP = "Issuer-controlled · regulated"
+
+
+# ---------- ۶ نوامبر: P&L هر کیف در کارت Large trades (فقط Base) ----------
+PN_A = "0x940181a94A35A4569E4529A3CDfB74e38FD98631"   # AERO
+PN_B = "0x50c5725949A6F0c72E6C4a641F24049A917DB0Cb"   # DAI
+PN_POOL_B = "0x" + "2" * 40
+PN_FOOT = "Flow, not skill. P&L is approximate, from each wallet's own transfers; addresses are the reported transaction senders, which can include routers."
+PN_SEQ = [(1, "buy", 2500, 120), (2, "sell", 2400, 200), (3, "buy", 1800, 300), (1, "buy", 9100, 400), (4, "sell", 1300, 500),
+          (5, "buy", 3300, 600), (6, "buy", 1500, 700), (7, "buy", 4100, 800), (8, "sell", 1100, 900), (9, "buy", 2050, 1000)]
+PN_P = {1: 1200, 2: -340, 3: 18400, 4: 300, 5: -2100, 6: 640, 9: 560}
+PN_PX = 2.0
+PN_ROWS_JS = """() => [...document.querySelectorAll('#flowLarge .lgRow')].map(r => { const t = r.querySelector('.lgT'), pt = r.querySelector('.lgPt'), bar = r.querySelector('.lgBar i');
+    return {i: t.dataset.i, a: t.querySelector('a').textContent, pnl: pt ? pt.textContent.trim() : null, sk: !!r.querySelector('.lgPsk'), bar: bar ? bar.style.width : null,
+            open: t.getAttribute('aria-expanded'), panel: r.querySelector('.lgDet') ? r.querySelector('.lgDet').innerText.replace(/\\s+/g, ' ').trim() : null, cls: pt ? pt.className : ''}; })"""
+PN_TILES_JS = "() => [...document.querySelectorAll('#flowLarge .lgStats .tstat')].map(t => [t.querySelector('.k').textContent.trim(), t.querySelector('.v').textContent.trim()])"
+
+
+def pn_core(w, tk, pnl, transfers=14, **kw):
+    bought, hold = 3000, 200
+    d = {"wallet": w, "token": tk, "boughtUsd": bought, "boughtTok": 1200000, "soldUsd": pnl + bought - hold * PN_PX, "soldTok": 1199800,
+         "holdingTok": hold, "holdingUsd": hold * PN_PX, "pnlUsd": pnl, "transfers": transfers, "sinceBlock": 1234567, "unmatchedIn": 0,
+         "unmatchedOut": 0, "partial": False, "noInternal": False, "ethUsd": 3000}
+    d.update(kw)
+    return d
+
+
+def pn_server(env, table):
+    """table[کیف] = pnl | 'fail' | 'empty'؛ پاسخِ Worker با ?p=2."""
+    def f(tk, wl, q):
+        assert re.fullmatch(r"p=2(\.0)?", q), "[pnl card] the client must pass ?p=<price>: %r" % q
+        n = int(wl, 16) - 0x300
+        v = table.get(n)
+        if v == "fail" or v is None:
+            return (500, {"error": "upstream"})
+        if v == "empty":
+            return (200, pn_core(wl, tk, 0, transfers=0, boughtUsd=None, boughtTok=None, soldUsd=None, soldTok=None, holdingTok=None, holdingUsd=None, pnlUsd=None, sinceBlock=None))
+        extra = {"unmatchedIn": 2, "partial": True} if n == 3 else {}
+        return (200, pn_core(wl, tk, v, **extra))
+    return f
+
+
+def pn_gt(env, large_a, large_b=None, price="2"):
+    ga = lg_gt(env, large_a, tok=PN_A)
+    gb = eb_gt(eb_trades_ok(), tok=PN_B, pool=PN_POOL_B)
+
+    def gt(path):
+        if PN_B in path or PN_POOL_B in path:
+            if LG_Q in env.calls[-1] and path.endswith("/pools/%s/trades" % PN_POOL_B):
+                return (200, {"data": large_b or []})
+            r = gb(path)
+        else:
+            r = ga(path)
+        if r and "/tokens/" in path and "/multi/" not in path and not path.endswith("/pools") and isinstance(r[1].get("data"), dict):
+            r[1]["data"]["attributes"]["price_usd"] = price
+        return r
+    return gt
+
+
+def pn_num(txt):
+    m = re.fullmatch(r"≈ ([+−])\$([\d.]+)(K?)", txt)
+    assert m, "[pnl card] unparsable P&L text %r" % txt
+    v = float(m.group(2)) * (1000 if m.group(3) else 1)
+    return -v if m.group(1) == "−" else v
+
+
+async def check_pnl_card(p, errors):
+    srv, origin = fb_serve()
+    b = await p.chromium.launch()
+    errs = []
+    shots = os.environ.get("ZX_SHOTS")
+    PAIR = ["localStorage.setItem('zaexa.pair', JSON.stringify({in: 'USDC', out: 'AERO'}))"]
+    W = lambda n: eb_wallet(n)
+    SH = lambda n: W(n)[:6] + "…" + W(n)[-4:]
+    GT_PERSIST_OFF["on"] = False   # کشِ ماندگار روشن (فقط برای همین کاوشگر؛ در finally برمی‌گردد)
+    try:
+        env = FbEnv(b, origin, errs)
+        env.gt = pn_gt(env, lg_data(PN_SEQ, tok=PN_A))
+        env.pnl = pn_server(env, {**PN_P, 7: "fail", 8: "empty"})
+        # 1) بارگذاری: کارت پیش از جوابِ P&L دیده می‌شود، کاشی‌ها «—»، همه اسکلت، حداکثر ۳ درخواستِ هم‌زمان
+        env.pnl_gate.clear(); env.pnl_hold.clear(); env.pnl_hold_w = W(9)
+        pg = await env.open(board=False, init=PAIR)
+        await pg.wait_for_selector("#flowLarge .lgRow", timeout=20000)
+        await pg.wait_for_timeout(600)
+        tiles = await pg.evaluate(PN_TILES_JS)
+        assert [t[0] for t in tiles] == ["Wallets in profit", "Wallets at a loss", "Top wallet"] and all(t[1] == "—" for t in tiles), "[pnl card] tiles are — until a result is in: %s" % tiles
+        assert await pg.evaluate("() => document.querySelectorAll('#flowLarge .lgPsk').length") == 10, "[pnl card] all 10 rows show a loading skeleton"
+        assert env.pnl_inflight == 3 and len(env.pnl_calls) == 3, "[pnl card] at most 3 concurrent requests: inflight %d calls %d" % (env.pnl_inflight, len(env.pnl_calls))
+        env.pnl_gate.set()
+        await pg.wait_for_function("() => document.querySelectorAll('#flowLarge .lgPsk').length === 1", timeout=20000)   # فقط w9 (نگه‌داشته)
+        assert env.pnl_max == 3, "[pnl card] concurrency capped at 3, saw %d" % env.pnl_max
+        assert len(env.pnl_calls) == 9 and len(set(env.pnl_calls)) == 9, "[pnl card] one request per DISTINCT wallet (9 of 10 rows): %s" % env.pnl_calls
+        assert all(c.endswith("?p=2") and "/pnl/" + PN_A.lower() + "/" in c for c in env.pnl_calls), "[pnl card] URL shape (lower-cased token, ?p=2): %s" % env.pnl_calls[:2]
+        rows = await pg.evaluate(PN_ROWS_JS)
+        assert [r["a"] for r in rows] == [SH(n) for n in (1, 2, 3, 1, 4, 5, 6, 7, 8, 9)], "[pnl card] latest order: %s" % [r["a"] for r in rows]
+        want = {1: "≈ +$1.2K", 2: "≈ −$340", 3: "≈ +$18.4K", 4: "≈ +$300", 5: "≈ −$2.1K", 6: "≈ +$640"}
+        order = (1, 2, 3, 1, 4, 5, 6, 7, 8, 9)
+        for n, r in zip(order, rows):
+            if n in want:
+                assert r["pnl"] == want[n] and not r["sk"], "[pnl card] row w%d: %s" % (n, r)
+        wbar = {1: "7%", 2: "3%", 3: "100%", 4: "3%", 5: "11%", 6: "3%"}
+        for n, r in zip(order, rows):
+            if n in wbar:
+                assert r["bar"] == wbar[n], "[pnl card] proportional bar w%d (relative to the max |P&L|): %s" % (n, r)
+        for n, r in zip(order, rows):   # نامعلوم: متن، بدونِ نوار، رنگِ tx3
+            if n in (7, 8):
+                assert r["pnl"] == "P&L unknown" and r["bar"] is None and not r["sk"], "[pnl card] unknown -> no bar: %s" % r
+        assert await pg.evaluate("() => getComputedStyle(document.querySelector('#flowLarge .lgUnk')).color") == await fb_color(pg, "--tx3"), "[pnl card] unknown is --tx3"
+        assert await pg.evaluate("() => getComputedStyle(document.querySelectorAll('#flowLarge .lgPt.lgNeg')[0]).color") == await fb_color(pg, "--neg") \
+            and await pg.evaluate("() => getComputedStyle(document.querySelectorAll('#flowLarge .lgPt.lgPos')[0]).color") == await fb_color(pg, "--pos"), "[pnl card] pos/neg colours"
+        tiles = await pg.evaluate(PN_TILES_JS)
+        assert tiles == [["Wallets in profit", "4 · ≈ +$20.5K"], ["Wallets at a loss", "2 · ≈ −$2.4K"], ["Top wallet", SH(3) + " · ≈ +$18.4K"]], "[pnl card] tiles from the results in: %s" % tiles
+        # 2) خلاصه با ردیف‌ها یکی است (شمارِ کیف‌های متمایز، نه ردیف)
+        seen = {}
+        for n, r in zip(order, rows):
+            if r["pnl"] and r["pnl"] != "P&L unknown":
+                seen[n] = pn_num(r["pnl"])
+        pos = [v for v in seen.values() if v > 0]; neg = [v for v in seen.values() if v < 0]
+        assert tiles[0][1].startswith("%d · " % len(pos)) and tiles[1][1].startswith("%d · " % len(neg)), "[pnl card] tile counts = rows (distinct wallets): %s vs %s" % (tiles, seen)
+        assert abs(sum(pos) - 20540) < 60 and abs(sum(neg) + 2440) < 60, "[pnl card] tile sums = rows: %s" % seen
+        # 3) w9 جواب می‌دهد: اسکلت می‌رود، کاشی‌ها از نو از همان نتایج
+        env.pnl_hold.set()
+        await pg.wait_for_function("() => document.querySelectorAll('#flowLarge .lgPsk').length === 0", timeout=20000)
+        tiles = await pg.evaluate(PN_TILES_JS)
+        assert tiles[0][1] == "5 · ≈ +$21.1K" and tiles[1][1] == "2 · ≈ −$2.4K", "[pnl card] tiles follow late results: %s" % tiles
+        # 4) باز/بسته: لمسِ ردیف، پیوند نه، صفحه‌کلید
+        sel = lambda n: '#flowLarge .lgRow:nth-child(%d)' % (order.index(n) + 1)
+        await pg.click(sel(3) + " .amt2")
+        r3 = (await pg.evaluate(PN_ROWS_JS))[2]
+        assert r3["open"] == "true", "[pnl card] click opens the panel: %s" % r3
+        wantp = ("bought $3.0k · 1.20m aero sold $21.0k · 1.20m aero still holding 200 aero ≈ $400 approx. p&l ≈ +$18.4k "
+                 "from 14 transfers since block 1234567 · paid and received in eth, weth and usdc, valued at today's eth price "
+                 "· 2 transfers without a payment counted at zero cost · history truncated")
+        assert r3["panel"].lower() == wantp, "[pnl card] panel text: %r" % r3["panel"]
+        await pg.click(sel(3) + " .amt2")
+        r3 = (await pg.evaluate(PN_ROWS_JS))[2]
+        assert r3["open"] == "false" and r3["panel"] is None, "[pnl card] second click closes: %s" % r3
+        await pg.evaluate("""() => { const a = document.querySelector('#flowLarge .lgRow:nth-child(1) a'); a.addEventListener('click', e => e.preventDefault()); a.click(); }""")
+        assert (await pg.evaluate(PN_ROWS_JS))[0]["open"] == "false", "[pnl card] the address link does not toggle the row"
+        await pg.focus(sel(1) + " .lgT"); await pg.keyboard.press("Enter")
+        r1 = (await pg.evaluate(PN_ROWS_JS))[0]
+        assert r1["open"] == "true" and await pg.evaluate("() => document.activeElement.dataset.i") == r1["i"], "[pnl card] Enter opens and focus stays: %s" % r1
+        await pg.keyboard.press("Enter")
+        await pg.click(sel(8) + " .amt2"); await pg.click(sel(7) + " .amt2")
+        rs = await pg.evaluate(PN_ROWS_JS)
+        assert "no transfers of this token were found" in rs[8]["panel"].lower() and "could not be read" in rs[7]["panel"].lower(), "[pnl card] panels of unknown wallets: %s %s" % (rs[7]["panel"], rs[8]["panel"])
+        await pg.click(sel(8) + " .amt2"); await pg.click(sel(7) + " .amt2")
+        # 5) Latest | Top P&L: ترتیب، ماندگاری در zaexa.flowboard.v1، بعد از رفرش
+        top = [3, 1, 1, 6, 9, 4, 2, 5, 7, 8]
+        await pg.click('#flowLarge [data-lgsort="top"]')
+        assert [r["a"] for r in await pg.evaluate(PN_ROWS_JS)] == [SH(n) for n in top], "[pnl card] Top P&L order (unknown last)"
+        stored = await pg.evaluate("() => localStorage.getItem('zaexa.flowboard.v1')")
+        assert stored and _fbj.loads(stored).get("lg") == "top", "[pnl card] choice persisted in zaexa.flowboard.v1: %r" % stored
+        before = len(env.pnl_calls)
+        await pg.reload(); await pg.wait_for_selector("#flowLarge .lgRow", timeout=20000)
+        await pg.wait_for_function("() => document.querySelectorAll('#flowLarge .lgPsk').length === 0", timeout=20000)
+        assert await pg.evaluate("() => document.querySelector('#flowLarge [data-lgsort=\"top\"]').classList.contains('on')"), "[pnl card] Top P&L restored after reload"
+        assert [r["a"] for r in await pg.evaluate(PN_ROWS_JS)] == [SH(n) for n in top], "[pnl card] order restored after reload"
+        new = env.pnl_calls[before:]
+        assert len(new) == 1 and new[0].split("/pnl/")[1].split("/")[1].split("?")[0] == W(7), "[pnl card] after a reload only the failed wallet is asked again (successes cached, failures never): %s" % new
+        await pg.click('#flowLarge [data-lgsort="latest"]')
+        assert [r["a"] for r in await pg.evaluate(PN_ROWS_JS)] == [SH(n) for n in order], "[pnl card] Latest order back"
+        assert "lg" not in _fbj.loads(await pg.evaluate("() => localStorage.getItem('zaexa.flowboard.v1')")), "[pnl card] default is not stored"
+        foot = await pg.evaluate("() => document.querySelector('#flowLarge .fnote').textContent")
+        assert foot == PN_FOOT, "[pnl card] footnote text exact: %r" % foot
+        txt = await pg.evaluate("() => document.getElementById('flowLarge').innerText")
+        assert "smart" + " money" not in txt.lower() and not FB_BAD_RE.search(txt), "[pnl card] wording: %r" % txt
+        assert "Approximate profit or loss on this token for this wallet" in await pg.evaluate("() => document.querySelector('#flowLarge .lgPt').title"), "[pnl card] tooltip"
+        await pg.context.close()
+        # 6) توکن عوض می‌شود: جوابِ دیررسیده دور ریخته می‌شود (بقیه‌ی صفِ توکنِ قبلی هرگز پرسیده نمی‌شود)
+        env.pnl_calls.clear(); env.pnl_gate.clear(); env.pnl_hold_w = None
+        large_b = lg_data([(21, "buy", 3000, 100), (22, "sell", 2000, 200)], tok=PN_B)
+        env.gt = pn_gt(env, lg_data(PN_SEQ, tok=PN_A), large_b)
+        env.pnl = pn_server(env, {**PN_P, 7: "fail", 8: "empty", 21: 500, 22: -100})
+        pg = await env.open(board=False, init=PAIR)
+        await pg.wait_for_selector("#flowLarge .lgRow", timeout=20000)
+        await pg.wait_for_timeout(500)
+        assert env.pnl_inflight == 3, "[pnl card] stale: 3 requests of the first token are in flight"
+        await pg.evaluate("() => { tokenOut = BASE_TOKENS.find(t => t.symbol === 'DAI'); flowBoard = false; renderFlow(); }")
+        await pg.wait_for_function("(a) => { const r = document.querySelector('#flowLarge .lgRow a'); return r && r.textContent === a; }", arg=SH(21), timeout=20000)
+        env.pnl_gate.set()
+        await pg.wait_for_function("() => document.querySelectorAll('#flowLarge .lgPsk').length === 0", timeout=20000)
+        await pg.wait_for_timeout(700)
+        old = [c for c in env.pnl_calls if "/pnl/" + PN_A.lower() in c]
+        assert len(old) == 3, "[pnl card] after the switch the old token's queue is dropped (only the 3 in flight were sent): %d" % len(old)
+        tiles = await pg.evaluate(PN_TILES_JS)
+        assert tiles[0][1] == "1 · ≈ +$500" and tiles[1][1] == "1 · ≈ −$100" and tiles[2][1] == SH(21) + " · ≈ +$500", "[pnl card] only the new token's wallets count: %s" % tiles
+        assert [r["a"] for r in await pg.evaluate(PN_ROWS_JS)] == [SH(21), SH(22)], "[pnl card] rows are the new token's"
+        await pg.context.close()
+        # 7) طرح‌بندی: ۱۴۴۰ روشن و ۳۹۰ (هر دو تم)؛ کاشی‌ها ۲+۱، پنل ۲×۲، بی‌سرریز
+        env.pnl_gate.set()
+        env.gt = pn_gt(env, lg_data(PN_SEQ, tok=PN_A))
+        env.pnl = pn_server(env, {**PN_P, 7: "fail", 8: "empty"})
+        for scheme in ("light", "dark"):
+            for vw, vh in ((1440, 1000), (390, 900)):
+                pg = await env.open(vw=vw, vh=vh, scheme=scheme, board=False, init=PAIR)
+                await pg.wait_for_selector("#flowLarge .lgRow", timeout=20000)
+                await pg.wait_for_function("() => document.querySelectorAll('#flowLarge .lgPsk').length === 0", timeout=20000)
+                await pg.click('#flowLarge .lgRow:nth-child(3) .amt2')
+                m = await pg.evaluate("""() => { const q = s => [...document.querySelectorAll(s)];
+                    const t = q('#flowLarge .lgStats .tstat').map(e => { const r = e.getBoundingClientRect(); return [Math.round(r.left), Math.round(r.top), Math.round(r.width)]; });
+                    const g = getComputedStyle(document.querySelector('#flowLarge .lgGrid')).gridTemplateColumns.split(' ').length;
+                    const rowsOver = q('#flowLarge .lgT').filter(r => r.scrollWidth > r.clientWidth + 1).length;
+                    const c = document.querySelector('#flowLarge .ebCard').getBoundingClientRect();
+                    return {sw: document.documentElement.scrollWidth, iw: innerWidth, t, g, rowsOver, l: c.left, r: c.right,
+                            det: q('#flowLarge .lgDet *').filter(e => e.getBoundingClientRect().right > c.right + 1).length}; }""")
+                assert m["sw"] <= m["iw"] and m["rowsOver"] == 0 and m["l"] >= 0 and m["r"] <= m["iw"] and m["det"] == 0, "[pnl card] %s %d: overflow: %s" % (scheme, vw, m)
+                if vw == 390:
+                    assert m["g"] == 2 and m["t"][0][1] == m["t"][1][1] < m["t"][2][1] and m["t"][2][2] > m["t"][0][2], "[pnl card] 390: tiles wrap 2+1 and the panel grid is 2x2: %s" % m
+                else:
+                    assert m["g"] == 4 and m["t"][0][1] == m["t"][1][1] == m["t"][2][1], "[pnl card] 1440: three tiles in a row, 4-column panel: %s" % m
+                if shots and (scheme, vw) in (("light", 1440), ("light", 390), ("dark", 1440)):
+                    os.makedirs(shots, exist_ok=True)
+                    await pg.add_style_tag(content="#nav{display:none!important}")
+                    await pg.evaluate("() => document.querySelectorAll('body *').forEach(e => { if (getComputedStyle(e).position === 'fixed') e.style.display = 'none'; })")
+                    await pg.evaluate("() => document.getElementById('flowLarge').scrollIntoView()")
+                    await pg.wait_for_timeout(400)
+                    await pg.locator('#flowLarge').screenshot(path=os.path.join(shots, "pnl_%d_%s.png" % (vw, scheme)))
+                await pg.context.close()
+        # 8) Solana: کارت دست‌نخورده (بدونِ کاشی، کلید، P&L و درخواستِ /pnl/؛ همان پانویسِ قبلی)
+        w0 = eb_wallet(0, True)
+        sd = lg_data([(0, "buy", 2000, 100), (1, "sell", 3000, 200)], solana=True)
+        env.pnl_calls.clear()
+        env.gt = lg_gt(env, [], solana=True, plain=(3 * 3600, sd, False))
+        pg = await env.open(hash_="#flow?chain=solana", board=False)
+        t = await lg_text(pg)
+        assert await pg.evaluate("() => !document.querySelector('#flowLarge .lgStats, #flowLarge .lgSort, #flowLarge .lgRow, #flowLarge .lgPt')"), "[pnl card] Solana card has no P&L parts"
+        old_foot = "Flow, not skill: no entry price is known, so nothing here says whether a wallet made or lost money. Addresses are the reported transaction senders, which can include routers."
+        assert await pg.evaluate("() => document.querySelector('#flowLarge .fnote').textContent") == old_foot, "[pnl card] Solana footnote is the old one, exactly"
+        assert "Big buyers 1 · Big sellers 1" in t and not env.pnl_calls, "[pnl card] Solana card unchanged: %r" % t
+        await pg.context.close()
+        bad = [e for e in errs if "Failed to load resource" not in e]
+        assert not bad, "[pnl card] console errors: %s" % bad
+        print("[pnl card] Base Large trades: card first, tiles — and skeletons until results, 3 concurrent requests for the 9 distinct wallets (?p=price, lower-cased token); P&L text/colour/proportional bars; unknown (failed or no transfers) -> 'P&L unknown', no bar; tiles equal the rows; late results update tiles; row panel (click/Enter, link does not toggle, exact note with zero-cost and truncated parts); Latest|Top P&L reorders, persists in zaexa.flowboard.v1 and survives reload, successes cached and failures re-asked; stale token queue dropped; exact footnote and tooltip; 1440/390 light+dark no overflow, tiles 2+1 and 2x2 panel at 390; Solana unchanged with zero /pnl/ requests")
+    finally:
+        GT_PERSIST_OFF["on"] = True
+        await b.close()
+        srv.shutdown()
 
 
 async def check_stock_issuer(p, errors):
@@ -10023,6 +10280,7 @@ async def main():
         await check_stocks_star(p, errors)
         await check_early_buyers(p, errors)
         await check_flow_large_trades(p, errors)
+        await check_pnl_card(p, errors)
         await check_stock_issuer(p, errors)
         b = await p.chromium.launch()
         pg = await b.new_page(viewport={"width": 1240, "height": 1000}, color_scheme="dark")
