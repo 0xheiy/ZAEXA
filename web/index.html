@@ -8989,7 +8989,7 @@ function lgPanelHtml(st,x){
   if(!v.transfers)return '<div class="lgDet"><div class="lgDn">No transfers of this token were found for this wallet.</div></div>';
   const pn=v.pnl;
   const note=[`From ${v.transfers} transfers${v.sinceBlock!=null?" since block "+v.sinceBlock:""} · paid and received in ETH, WETH and USDC, valued at today's ETH price`];
-  if(v.unmatched>0)note.push(`${v.unmatched} transfers without a payment counted at zero cost`);
+  if(v.unmatched>0)note.push(`${v.unmatched} transfers without a visible payment (paid from a bot balance or another wallet), so P&L is unknown`);
   if(v.noInternal)note.push("ETH received from contracts may be missing");
   if(v.partial)note.push("history truncated");
   if(v.fromReceipt)note.push(`token ${x.buy?"receiver":"sender"} resolved from the transaction receipt`);
@@ -9072,7 +9072,8 @@ function lgPnlNorm(j,px){
     partial:j.partial===true,noInternal:j.noInternal===true};
   if(o.transfers==null)return null;
   o.holdUsd=o.holdTok!=null&&px>0?o.holdTok*px:null;
-  o.pnl=o.bought!=null&&o.sold!=null&&o.holdUsd!=null?o.sold+o.holdUsd-o.bought:null;
+  // ورود/خروجِ بی‌پرداخت یا تاریخچه‌ی بریده = هزینه نامعلوم → سود نامعلوم (هرگز صفر فرض نشود)
+  o.pnl=o.unmatched===0&&!o.partial&&o.bought!=null&&o.sold!=null&&o.holdUsd!=null?o.sold+o.holdUsd-o.bought:null;
   return o;
 }
 // پاسخِ مسیرِ tx -> نتیجه‌ی ردیف؛ null = خطا/ناخوانا

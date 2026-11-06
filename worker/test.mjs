@@ -20,6 +20,7 @@ const worker = { ...rawWorker, fetch(request, env, ctx) {
   return rawWorker.fetch(request, env, ctx);
 } };
 import { REPORT_RUN_MAX_TOKENS } from "./index.js";
+import { pnlJoin, pnlBody } from "./index.js";
 import { createHash } from "node:crypto";
 import { OG_PNG_ETAG } from "./og-image.js";
 import fs from "node:fs";
@@ -15719,9 +15720,9 @@ function stripAllowedWording(t) {
         ok(bb && JSON.stringify(bb.p.category) === '["erc20"]', "[pnl] token-out query shape");
         const c = gat.find((x) => x.p.toAddress === W && !x.p.contractAddresses), d = gat.find((x) => x.p.fromAddress === W && !x.p.contractAddresses);
         ok(c && d && JSON.stringify(c.p.category) === '["external","internal","erc20"]' && c.p.fromBlock === "0x64", "[pnl] quote queries: external+internal+erc20, no contract filter, from the first token block");
-        const want = { wallet: W, token: T, boughtUsd: 1700, boughtTok: 1400, soldUsd: 900, soldTok: 600, holdingTok: 900, holdingUsd: 1800, pnlUsd: 1000,
+        const want = { wallet: W, token: T, boughtUsd: 1700, boughtTok: 1400, soldUsd: 900, soldTok: 600, holdingTok: 900, holdingUsd: 1800, pnlUsd: null,
           transfers: 4, sinceBlock: 100, unmatchedIn: 1, unmatchedOut: 0, partial: false, noInternal: false, ethUsd: 3000 };
-        ok(JSON.stringify(b) === JSON.stringify(want), "[pnl] exact join numbers (2 buys paid in ETH and USDC, 1 sell for WETH, 1 airdrop), got " + raw);
+        ok(JSON.stringify(b) === JSON.stringify(want), "[pnl] exact join numbers (2 buys paid in ETH and USDC, 1 sell for WETH, 1 airdrop -> pnl unknown, never zero cost), got " + raw);
         ok(res.headers.get("cache-control") === "public, max-age=300" && res.headers.get("access-control-allow-origin") === "*", "[pnl] cache-control 300 and CORS");
         ok(puts.length === 1 && puts[0].u === "https://pnl.zaexa.internal/" + T + "/" + W && puts[0].cc === "public, max-age=600", "[pnl] stored 10 min under the internal host, got " + JSON.stringify(puts));
         ok(!raw.includes(KEYPART) && !JSON.stringify([...res.headers.entries()]).includes(KEYPART), "[pnl] the BASE_RPC secret never appears in a response");
@@ -15732,7 +15733,7 @@ function stripAllowedWording(t) {
         const res = await PN(T, W, "?p=3");
         const b = await res.json();
         ok(calls.length === 0 && res.status === 200, "[pnl] cache hit makes zero upstream calls, got " + calls.length);
-        ok(b.holdingUsd === 2700 && b.pnlUsd === 1900 && b.boughtUsd === 1700, "[pnl] cache hit recomputes holding and pnl from the new p, got " + JSON.stringify(b));
+        ok(b.holdingUsd === 2700 && b.pnlUsd === null && b.boughtUsd === 1700, "[pnl] cache hit recomputes holding and pnl from the new p, got " + JSON.stringify(b));
         const r0 = await (await PN(T, W)).json();
         ok(r0.holdingUsd === null && r0.pnlUsd === null && r0.holdingTok === 900 && r0.boughtUsd === 1700, "[pnl] no p -> holdingUsd and pnlUsd null, tokens kept, got " + JSON.stringify(r0));
       });
@@ -15767,7 +15768,7 @@ function stripAllowedWording(t) {
       await wf(mk({ noInternalErr: true }), async () => {
         const res = await PN(T, W, "?p=2");
         const b = await res.json();
-        ok(b.noInternal === true && b.pnlUsd === 1000, "[pnl] internal rejected -> retry without it, noInternal true, same numbers, got " + JSON.stringify(b));
+        ok(b.noInternal === true && b.pnlUsd === null && b.holdingUsd === 1800, "[pnl] internal rejected -> retry without it, noInternal true, same numbers, got " + JSON.stringify(b));
         const retried = calls.filter((x) => x.p && x.p.category && !x.p.contractAddresses && !x.p.category.includes("internal"));
         ok(retried.length === 2 && retried.every((x) => JSON.stringify(x.p.category) === '["external","erc20"]'), "[pnl] both quote queries retried as external+erc20, got " + retried.length);
       });
@@ -15789,7 +15790,7 @@ function stripAllowedWording(t) {
       shelf.clear(); puts.length = 0;
       await wf(mk({ tokOut: [tr("0xh3", "erc20", "TKN", 600, T, "0x67"), tr("0xh8", "erc20", "TKN", 100, T, "0x68")] }), async () => {
         const b = await (await PN(T, W, "?p=2")).json();
-        ok(b.unmatchedOut === 1 && b.soldTok === 600 && b.holdingTok === 800 && b.pnlUsd === 800, "[pnl] token out with no payment -> unmatchedOut, zero proceeds, leaves the position, got " + JSON.stringify(b));
+        ok(b.unmatchedOut === 1 && b.soldTok === 600 && b.holdingTok === 800 && b.pnlUsd === null, "[pnl] token out with no payment -> unmatchedOut, zero proceeds, leaves the position, got " + JSON.stringify(b));
       });
       // د) نبودنِ BASE_RPC: ۵۰۳ بدونِ تماس
       shelf.clear();
@@ -16874,4 +16875,26 @@ console.log(fails === 0
     + "/sol/rpc sendTransaction accepts preflightCommitment \"confirmed\" or no key and rejects every other value"
 
   : "[gt proxy] " + fails + " FAILURES");
+// ۶ نوامبر — سودِ تقریبی فقط وقتی همه‌ی پاهای توکن پرداختِ دیده‌شده دارند
+{
+  const W = "0x1111111111111111111111111111111111111111", T = "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+  const WETH = "0x4200000000000000000000000000000000000006";
+  const tIn = [{ hash: "0xA", category: "erc20", value: 1000, rawContract: { address: T } }];
+  const tOut = [{ hash: "0xB", category: "erc20", value: 400, rawContract: { address: T } }];
+  const qOut = [{ hash: "0xA", category: "external", asset: "ETH", value: 0.5, rawContract: {} }];
+  const qIn = [{ hash: "0xB", category: "erc20", value: 0.3, rawContract: { address: WETH } }];
+  const j = pnlJoin(tIn, tOut, qIn, qOut, 2000);
+  const b = pnlBody({ wallet: W, token: T, ...j, partial: false, noInternal: false }, 2);
+  ok(j.unmatchedIn === 0 && j.unmatchedOut === 0 && b.boughtUsd === 1000 && b.soldUsd === 600 && b.holdingUsd === 1200 && b.pnlUsd === 800,
+    "[pnl complete] fully paid buys and sells -> numeric P&L (1000 paid, 600 back, 600 tok held at $2 = +800), got " + JSON.stringify(b));
+  // خریدِ ربات: توکن آمد، پولی از همین کیف‌پول نرفت (Surplus، ۶ نوامبر) → نامعلوم، هرگز «+ارزشِ کلِ موجودی»
+  const jBot = pnlJoin(tIn, [], [], [], 2000);
+  const bBot = pnlBody({ wallet: W, token: T, ...jBot, partial: false, noInternal: false }, 2);
+  ok(jBot.unmatchedIn === 1 && bBot.pnlUsd === null && bBot.holdingUsd === 2000,
+    "[pnl complete] a buy with no visible payment (bot-funded) -> pnl null, never counted at zero cost, got " + JSON.stringify(bBot));
+  const bPart = pnlBody({ wallet: W, token: T, ...j, partial: true, noInternal: false }, 2);
+  ok(bPart.pnlUsd === null, "[pnl complete] truncated history -> pnl null");
+  console.log("[pnl complete] P&L only when every token leg has a visible payment; bot-funded/gift/truncated -> unknown");
+}
+
 process.exit(fails === 0 ? 0 : 1);

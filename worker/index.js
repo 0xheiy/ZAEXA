@@ -4068,9 +4068,13 @@ function pnlParseP(url) {
 }
 
 // بدنه‌ی پاسخ از core (مستقل از p) و p؛ holding و pnl هر بار از p ساخته می‌شود
-function pnlBody(core, p) {
+export function pnlBody(core, p) {
   const holdingUsd = p != null && core.holdingTok != null ? pnlR2(core.holdingTok * p) : null;
-  const pnlUsd = holdingUsd != null && core.soldUsd != null && core.boughtUsd != null
+  /* ۶ نوامبر — هر ورود/خروجِ توکن بی پرداختِ دیده‌شده (ربات‌هایی که از موجودیِ ازپیش‌واریزشده
+     می‌پردازند، کیف‌پولِ دیگر، هدیه) هزینه/درآمد را نامعلوم می‌کند؛ صفر شمردنش سودِ جعلی می‌ساخت
+     (Surplus: خریدِ ۱٬۷۸۱ دلاری «+۲٬۳۳۸» نشان داد). تاریخچه‌ی بریده هم همین‌طور. */
+  const complete = !(core.unmatchedIn > 0) && !(core.unmatchedOut > 0) && core.partial !== true;
+  const pnlUsd = complete && holdingUsd != null && core.soldUsd != null && core.boughtUsd != null
     ? pnlR2(core.soldUsd + holdingUsd - core.boughtUsd) : null;
   return {
     wallet: core.wallet, token: core.token, boughtUsd: core.boughtUsd, boughtTok: core.boughtTok,

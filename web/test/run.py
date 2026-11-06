@@ -9678,7 +9678,7 @@ def pn_server(env, table, *datas, over=None):
             return (500, {"error": "upstream"})
         if v == "empty":
             return (200, {**pn_core(wl, tk, 0, transfers=0, boughtUsd=None, boughtTok=None, soldUsd=None, soldTok=None, holdingTok=None, holdingUsd=None, pnlUsd=None, sinceBlock=None), **base, "holder": wl})
-        extra = {"unmatchedIn": 2, "partial": True} if h == 3 else {}
+        extra = {"unmatchedIn": 2, "partial": True} if h == 9 else {}   # ۶ نوامبر: بی‌پرداخت → نامعلوم (w9، آخرین جواب)
         return (200, {**pn_core(wl, tk, v, **extra), **base, "holder": wl})
     return f
 
@@ -9770,7 +9770,10 @@ async def check_pnl_card(p, errors):
         env.pnl_hold.set()
         await pg.wait_for_function("() => document.querySelectorAll('#flowLarge .lgPsk').length === 0", timeout=20000)
         tiles = await pg.evaluate(PN_TILES_JS)
-        assert tiles[0][1] == "5 · ≈ +$21.1K" and tiles[1][1] == "2 · ≈ −$2.4K", "[pnl card] tiles follow late results: %s" % tiles
+        # w9 بی‌پرداخت و بریده است → «P&L unknown»، در کاشی‌ها شمرده نمی‌شود (هرگز سود با هزینه‌ی صفر)
+        assert tiles[0][1] == "4 · ≈ +$20.5K" and tiles[1][1] == "2 · ≈ −$2.4K", "[pnl card] tiles follow late results (w9 unknown, not counted): %s" % tiles
+        r9 = (await pg.evaluate(PN_ROWS_JS))[order.index(9)]
+        assert r9["pnl"] == "P&L unknown" and r9["bar"] is None, "[pnl card] unpaid transfers -> P&L unknown, never zero cost: %s" % r9
         # 4) باز/بسته: لمسِ ردیف، پیوند نه، صفحه‌کلید
         sel = lambda n: '#flowLarge .lgRow:nth-child(%d)' % (order.index(n) + 1)
         await pg.click(sel(3) + " .amt2")
@@ -9778,7 +9781,7 @@ async def check_pnl_card(p, errors):
         assert r3["open"] == "true", "[pnl card] click opens the panel: %s" % r3
         wantp = ("bought $3.0k · 1.20m aero sold $21.0k · 1.20m aero still holding 200 aero ≈ $400 approx. p&l ≈ +$18.4k "
                  "from 14 transfers since block 1234567 · paid and received in eth, weth and usdc, valued at today's eth price "
-                 "· 2 transfers without a payment counted at zero cost · history truncated · token receiver resolved from the transaction receipt")
+                 "· token receiver resolved from the transaction receipt")
         assert r3["panel"].lower() == wantp, "[pnl card] panel text: %r" % r3["panel"]
         await pg.click(sel(3) + " .amt2")
         r3 = (await pg.evaluate(PN_ROWS_JS))[2]
@@ -9794,7 +9797,7 @@ async def check_pnl_card(p, errors):
         assert "no transfers of this token were found" in rs[8]["panel"].lower() and "could not be read" in rs[7]["panel"].lower(), "[pnl card] panels of unknown wallets: %s %s" % (rs[7]["panel"], rs[8]["panel"])
         await pg.click(sel(8) + " .amt2"); await pg.click(sel(7) + " .amt2")
         # 5) Latest | Top P&L: ترتیب، ماندگاری در zaexa.flowboard.v1، بعد از رفرش
-        top = [3, 1, 1, 6, 9, 4, 2, 5, 7, 8]
+        top = [3, 1, 1, 6, 4, 2, 5, 7, 8, 9]   # w9 بی‌پرداخت → نامعلوم، ته فهرست
         await pg.click('#flowLarge [data-lgsort="top"]')
         assert [r["a"] for r in await pg.evaluate(PN_ROWS_JS)] == [SH(n) for n in top], "[pnl card] Top P&L order (unknown last)"
         stored = await pg.evaluate("() => localStorage.getItem('zaexa.flowboard.v1')")
