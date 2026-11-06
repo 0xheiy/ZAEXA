@@ -8920,7 +8920,8 @@ function lgAnalyze(data,tokenAddr,lower){
     if(!Number.isFinite(usd)||usd<LG_MIN||!Number.isFinite(ts)||!who)continue;
     const buy=to===tok&&from!==tok,sell=from===tok&&to!==tok;
     if(!buy&&!sell)continue;
-    rows.push({usd,ts,who,buy,i});
+    const hash=typeof a.tx_hash==="string"&&/^0x[0-9a-fA-F]{64}$/.test(a.tx_hash)?a.tx_hash.toLowerCase():null;
+    rows.push({usd,ts,who,buy,i,hash});
   }
   rows.sort((x,y)=>y.ts-x.ts||x.i-y.i);
   const B=new Set(),S=new Set();let sb=0,ss=0,oldest=Infinity;
@@ -8928,7 +8929,8 @@ function lgAnalyze(data,tokenAddr,lower){
   for(const d of data){const ts=Date.parse(d&&d.attributes&&d.attributes.block_timestamp);if(ts<oldest)oldest=ts;}   // پنجره از کلِ نمونه
   return {rows,buyers:B.size,sellers:S.size,net:sb-ss,oldest,total:data.length};
 }
-const LG_FOOT="Flow, not skill. P&L is approximate, from each wallet's own transfers; addresses are the reported transaction senders, which can include routers.";
+const LG_FOOT="Flow, not skill. P&L is approximate, from each wallet's own transfers; the wallet shown is the token receiver (buys) or sender (sells) read from the transaction receipt, or the transaction signer when the token moved through a contract.";
+const LG_VIA_TIP="The token moved through a contract (router, aggregator or smart wallet), so no per-wallet P&L is shown.";
 const LG_TIP="Approximate profit or loss on this token for this wallet, from its on-chain transfers: paid vs received in ETH, WETH or USDC (valued at today's ETH price), plus tokens still held at today's price. Transfers between the wallet's own addresses and airdrops can distort it.";
 const LG_CHEV='<svg class="lgChev" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>';
 const lgOkAddr=w=>/^0x[0-9a-fA-F]{40}$/.test(w);
@@ -8944,10 +8946,20 @@ function lgTok(n){
   if(a>=1e3)return (n/1e3).toFixed(1)+"K";
   return String(Number(n.toPrecision(4)));
 }
-const lgPnlOf=st=>w=>{const v=st.res.get(w);return v&&typeof v==="object"&&v.pnl!=null?v.pnl:null;};
+/* ۶ نوامبر: امضاکننده‌ی tx (tx_from_address) اغلب ربات/رلیر است؛ دارنده‌ی واقعی را Worker از رسید می‌خواند.
+   نتیجه‌ی هر ردیف (st.res، کلید = هش|طرف): "L" | null | {kind:"eoa",holder,signer,pnl,...} | {kind:"contract",...} | {kind:"none"}.
+   خلاصه و نوارها بر اساسِ دارنده‌ی متمایز شمرده می‌شوند، نه ردیف. */
+const lgKey=x=>x.hash?x.hash+"|"+(x.buy?"buy":"sell"):null;
+const lgRes=(st,x)=>{const k=lgKey(x);return k?st.res.get(k):null;};
+const lgPnlOf=st=>x=>{const v=lgRes(st,x);return v&&typeof v==="object"&&v.kind==="eoa"&&v.pnl!=null?v.pnl:null;};
+// دارنده‌های متمایزِ EOA با P&L معلوم: Map(holder -> pnl)
+function lgHolders(st){
+  const m=new Map();
+  for(const x of st.rows){const v=lgRes(st,x);if(v&&typeof v==="object"&&v.kind==="eoa"&&v.pnl!=null&&!m.has(v.holder))m.set(v.holder,v.pnl);}
+  return m;
+}
 function lgStatsInner(st){
-  const known=[];
-  for(const w of st.wallets){const v=lgPnlOf(st)(w);if(v!=null)known.push([w,v]);}
+  const known=[...lgHolders(st)];
   const dash='<span class="mono">—</span>';
   const tile=(k,v)=>`<div class="tstat"><div class="k">${k}</div><div class="v">${v}</div></div>`;
   if(!known.length)return tile("Wallets in profit",dash)+tile("Wallets at a loss",dash)+tile("Top wallet",dash);
@@ -8958,25 +8970,29 @@ function lgStatsInner(st){
     +tile("Wallets at a loss",`<span class="mono lgNeg">${neg.length}${neg.length?" · ≈ "+lgSgn(sum(neg)):""}</span>`)
     +tile("Top wallet",`<span class="mono">${esc(shortAddr(top[0]))} · ≈ ${lgSgn(top[1])}</span>`);
 }
-function lgCellHtml(st,w,max){
-  const v=st.res.get(w);
+function lgCellHtml(st,x,max){
+  const v=lgRes(st,x);
   if(v==="L")return '<span class="lgPv" aria-busy="true" aria-label="Loading P&amp;L"><span class="sk lgPsk"></span></span>';
-  const n=v&&typeof v==="object"?v.pnl:null;
+  if(v&&typeof v==="object"&&v.kind==="contract")return `<span class="lgPv"><span class="lgPt lgUnk lgVia" title="${esc(LG_VIA_TIP)}">Via contract</span></span>`;
+  const n=v&&typeof v==="object"&&v.kind==="eoa"?v.pnl:null;
   if(n==null)return '<span class="lgPv"><span class="lgPt lgUnk">P&amp;L unknown</span></span>';
   const cls=n<0?"lgNeg":n>0?"lgPos":"";
   const bar=n===0||!(max>0)?"":`<span class="lgBar"><i class="${cls}" style="width:${Math.max(3,Math.round(Math.abs(n)/max*100))}%;background:color-mix(in srgb,var(--${n<0?"neg":"pos"}) 70%,transparent)"></i></span>`;
   return `<span class="lgPv"><span class="lgPt ${cls}" title="${esc(LG_TIP)}">≈ ${lgSgn(n)}</span>${bar}</span>`;
 }
-function lgPanelHtml(st,w){
-  const v=st.res.get(w),sym=esc(st.sym||"tokens");
+function lgPanelHtml(st,x){
+  const v=lgRes(st,x),sym=esc(st.sym||"tokens");
   if(v==="L")return '<div class="lgDet"><div class="lgDn">Loading this wallet\'s transfers…</div></div>';
   if(!v||typeof v!=="object")return '<div class="lgDet"><div class="lgDn">This wallet\'s transfers could not be read right now.</div></div>';
+  if(v.kind==="contract")return `<div class="lgDet"><div class="lgDn">${esc(LG_VIA_TIP)}</div></div>`;
+  if(v.kind==="none")return '<div class="lgDet"><div class="lgDn">No transfer of this token was found in this transaction.</div></div>';
   if(!v.transfers)return '<div class="lgDet"><div class="lgDn">No transfers of this token were found for this wallet.</div></div>';
   const pn=v.pnl;
   const note=[`From ${v.transfers} transfers${v.sinceBlock!=null?" since block "+v.sinceBlock:""} · paid and received in ETH, WETH and USDC, valued at today's ETH price`];
   if(v.unmatched>0)note.push(`${v.unmatched} transfers without a payment counted at zero cost`);
   if(v.noInternal)note.push("ETH received from contracts may be missing");
   if(v.partial)note.push("history truncated");
+  if(v.fromReceipt)note.push(`token ${x.buy?"receiver":"sender"} resolved from the transaction receipt`);
   return `<div class="lgDet"><div class="lgGrid">
     <div><div class="k">Bought</div><div class="v mono">${lgUsd(v.bought)} · ${lgTok(v.boughtTok)} ${sym}</div></div>
     <div><div class="k">Sold</div><div class="v mono">${lgUsd(v.sold)} · ${lgTok(v.soldTok)} ${sym}</div></div>
@@ -8987,16 +9003,19 @@ function lgPanelHtml(st,w){
 function lgRowsHtml(st){
   const get=lgPnlOf(st);
   let rows=st.rows.slice();
-  const max=Math.max(0,...st.wallets.map(w=>{const n=get(w);return n==null?0:Math.abs(n);}));
+  const max=Math.max(0,...[...lgHolders(st).values()].map(n=>Math.abs(n)));
   if(fbPref.lg==="top"){
-    const key=x=>{const v=st.res.get(x.who);return v==="L"?-2e18:get(x.who)==null?-1e18:get(x.who);};
+    const key=x=>{const v=lgRes(st,x);return v==="L"?-2e18:get(x)==null?-1e18:get(x);};
     rows=rows.map((x,n)=>[x,n]).sort((a,b)=>key(b[0])-key(a[0])||a[1]-b[1]).map(a=>a[0]);   // پایدار: برابرها به ترتیبِ زمان
   }
   return rows.map(x=>{
-    const open=st.open.has(x.i);
-    const link=`<a class="mono" target="_blank" rel="noopener" href="${CHAIN.explorer}/address/${x.who}">${shortAddr(x.who)}</a>`;
+    const open=st.open.has(x.i),v=lgRes(st,x);
+    const eoa=v&&typeof v==="object"&&v.kind==="eoa";
+    const w=eoa?v.holder:x.who;   // دارنده‌ی حل‌شده؛ وگرنه امضاکننده مثل قبل
+    const ttl=eoa?` title="${esc((x.buy?"Token receiver":"Token sender")+" · tx signed by "+(v.signer||x.who))}"`:"";
+    const link=`<a class="mono" target="_blank" rel="noopener"${ttl} href="${CHAIN.explorer}/address/${w}">${shortAddr(w)}</a>`;
     return `<div class="lgRow${open?" open":""}"><div class="trade lgT" role="button" tabindex="0" aria-expanded="${open}" data-i="${x.i}"><span class="vtag${x.buy?"":" s"}">${x.buy?"Buy":"Sell"}</span>
-      <span class="amt2 mono">${fmtBig(x.usd)}</span>${lgOkAddr(x.who)?link:`<span class="mono" style="font-size:11.5px;color:var(--tx3)">${esc(shortAddr(x.who))}</span>`}${lgCellHtml(st,x.who,max)}<span class="ago">${agoText(x.ts)}</span>${LG_CHEV}</div>${open?lgPanelHtml(st,x.who):""}</div>`;
+      <span class="amt2 mono">${fmtBig(x.usd)}</span>${lgOkAddr(w)?link:`<span class="mono" style="font-size:11.5px;color:var(--tx3)">${esc(shortAddr(w))}</span>`}${lgCellHtml(st,x,max)}<span class="ago">${agoText(x.ts)}</span>${LG_CHEV}</div>${open?lgPanelHtml(st,x):""}</div>`;
   }).join("");
 }
 function lgHtml(r,solana,st){
@@ -9040,8 +9059,9 @@ function lgFetch(net,pool){
   lgCache.set(key,ne);
   return ne.p;
 }
-/* P&L هر کیف: Worker /pnl/<توکن>/<کیف>. حافظه‌ی نشست (۱۰ دقیقه) + gtcGet/gtcPut؛ کلیدِ ذخیره بدونِ p
-   (holding و pnl سمتِ کلاینت از قیمتِ همین لحظه ساخته می‌شود). شکست هرگز کش نمی‌شود. */
+/* P&L هر ردیف: Worker /pnl/<توکن>/tx/<هش>?side=… (دارنده از رسید؛ سپس همان P&L کیف). حافظه‌ی نشست (۱۰ دقیقه)
+   + gtcGet/gtcPut؛ کلیدِ ذخیره بدونِ p (holding و pnl سمتِ کلاینت از قیمتِ همین لحظه ساخته می‌شود).
+   شکست هرگز کش نمی‌شود. */
 const lgPnlMem=new Map(),LG_PNL_CONC=3,LG_PNL_TTL=600000;
 let lgSt=null;
 function lgPnlNorm(j,px){
@@ -9055,18 +9075,32 @@ function lgPnlNorm(j,px){
   o.pnl=o.bought!=null&&o.sold!=null&&o.holdUsd!=null?o.sold+o.holdUsd-o.bought:null;
   return o;
 }
-function lgPnlRaw(token,wallet,px){
-  const key="/pnl/"+token+"/"+wallet,hit=lgPnlMem.get(key);
+// پاسخِ مسیرِ tx -> نتیجه‌ی ردیف؛ null = خطا/ناخوانا
+function lgTxNorm(j,px){
+  if(!j||typeof j!=="object")return null;
+  const addr=a=>typeof a==="string"&&lgOkAddr(a)?a.toLowerCase():null;
+  const holder=addr(j.holder),signer=addr(j.signer);
+  if(j.holder==null&&j.reason==="no-transfer")return {kind:"none",signer};
+  if(!holder)return null;
+  if(j.reason==="contract")return {kind:"contract",holder,signer};
+  const o=lgPnlNorm(j,px);
+  if(!o)return null;
+  o.kind="eoa";o.holder=holder;o.signer=signer;o.fromReceipt=j.resolvedFrom==="receipt";
+  return o;
+}
+const lgCkey=(token,x)=>"/pnl/"+token+"/tx/"+x.hash+"?side="+(x.buy?"buy":"sell");
+function lgPnlRaw(token,x,px){
+  const key=lgCkey(token,x),hit=lgPnlMem.get(key);
   if(hit&&Date.now()-hit.t<LG_PNL_TTL)return hit.p;
   const kept=gtcGet(key);
   if(kept&&kept.v&&typeof kept.v==="object"){const p=Promise.resolve(kept.v);lgPnlMem.set(key,{t:kept.t,p});return p;}
   const ent={t:Date.now(),p:null};
   ent.p=(async()=>{
     try{
-      const r=await withTimeout(fetch(key+"?p="+encodeURIComponent(String(Number(px.toPrecision(6)))),{headers:{accept:"application/json"}}),12000);
+      const r=await withTimeout(fetch(key+"&p="+encodeURIComponent(String(Number(px.toPrecision(6)))),{headers:{accept:"application/json"}}),12000);
       if(!r.ok)return null;
       const j=await r.json();
-      if(!lgPnlNorm(j,px))return null;
+      if(!lgTxNorm(j,px))return null;
       gtcPut(key,{t:Date.now(),v:j});
       return j;
     }catch{return null;}
@@ -9081,14 +9115,18 @@ function lgQuoteTok(a){
 }
 function lgState(k,r,px,sym,mine,token){
   if(!r.rows.length)return null;
-  const rows=r.rows.slice(0,LG_ROWS),wallets=[...new Set(rows.map(x=>x.who))];
+  const rows=r.rows.slice(0,LG_ROWS);
   const canPnl=px>0&&!lgQuoteTok(token);   // WETH/USDC خودشان «پول»اند: P&L بی‌معنی
   token=String(token).toLowerCase();   // کلیدِ کش و URL همیشه lower-case
-  const st={k,mine,token,sym,px,rows,wallets,res:new Map(),open:lgSt&&lgSt.k===k?lgSt.open:new Set()};
-  for(const w of wallets){
-    if(!canPnl||!lgOkAddr(w)){st.res.set(w,null);continue;}
-    const kept=gtcGet("/pnl/"+token+"/"+w);
-    st.res.set(w,kept&&kept.v?lgPnlNorm(kept.v,px):"L");
+  const st={k,mine,token,sym,px,rows,res:new Map(),todo:[],open:lgSt&&lgSt.k===k?lgSt.open:new Set()};
+  for(const x of rows){
+    const key=lgKey(x);
+    if(!key||st.res.has(key))continue;   // هش نامعتبر = نامعلوم؛ ردیف‌های هم‌تراکنش یک نتیجه می‌گیرند
+    if(!canPnl){st.res.set(key,null);continue;}
+    const kept=gtcGet(lgCkey(token,x));
+    const v=kept&&kept.v?lgTxNorm(kept.v,px):"L";
+    st.res.set(key,v);
+    if(v==="L")st.todo.push(x);
   }
   lgSt=st;
   return st;
@@ -9104,15 +9142,15 @@ function lgRepaint(){
 }
 // بعد از رندرِ کارت: حداکثر ۳ درخواستِ هم‌زمان؛ جوابِ دیررسیده‌ی توکنِ قبلی (lgSeq) دور ریخته می‌شود
 function lgPnlGo(st){
-  const todo=st.wallets.filter(w=>st.res.get(w)==="L");
+  const todo=st.todo;
   let n=0;
   const worker=async()=>{
     while(n<todo.length){
-      const w=todo[n++];
+      const x=todo[n++];
       let v=null;
-      try{const raw=await lgPnlRaw(st.token,w,st.px);v=lgPnlNorm(raw,st.px);}catch{v=null;}
+      try{const raw=await lgPnlRaw(st.token,x,st.px);v=lgTxNorm(raw,st.px);}catch{v=null;}
       if(st.mine!==lgSeq)return;
-      st.res.set(w,v);lgRepaint();
+      st.res.set(lgKey(x),v);lgRepaint();
     }
   };
   for(let i=0;i<Math.min(LG_PNL_CONC,todo.length);i++)worker();

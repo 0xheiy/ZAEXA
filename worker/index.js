@@ -4059,53 +4059,52 @@ function pnlJoin(tokIn, tokOut, qIn, qOut, ethUsd) {
   };
 }
 
-async function pnlRoute(request, url, ctx, env) {
-  if (!rateOk(request, "pnl", RL_LIMIT, RL_WINDOW_MS))
-    return fail(429, "too many requests", { "retry-after": "60" });
-  if (request.method === "OPTIONS") return new Response(null, { status: 204, headers: CORS });
-  if (request.method !== "GET" && request.method !== "HEAD") return fail(405, "only GET");
-  const parts = url.pathname.slice("/pnl/".length).split("/");
-  if (parts.length !== 2 || !PNL_ADDR.test(parts[0]) || !PNL_ADDR.test(parts[1])) return fail(400, "bad address");
-  const token = parts[0].toLowerCase(), wallet = parts[1].toLowerCase();
-  let p = null;
-  if (url.searchParams.has("p")) {
-    const raw = url.searchParams.get("p");
-    const n = /^[0-9]*\.?[0-9]+(?:[eE]-?[0-9]+)?$/.test(raw) ? Number(raw) : NaN;
-    if (!Number.isFinite(n) || n <= 0 || n > PNL_P_MAX) return fail(400, "bad price");
-    p = n;
-  }
-  const out = (core, status, cc) => {
-    const holdingUsd = p != null && core.holdingTok != null ? pnlR2(core.holdingTok * p) : null;
-    const pnlUsd = holdingUsd != null && core.soldUsd != null && core.boughtUsd != null
-      ? pnlR2(core.soldUsd + holdingUsd - core.boughtUsd) : null;
-    const body = {
-      wallet: core.wallet, token: core.token, boughtUsd: core.boughtUsd, boughtTok: core.boughtTok,
-      soldUsd: core.soldUsd, soldTok: core.soldTok, holdingTok: core.holdingTok, holdingUsd, pnlUsd,
-      transfers: core.transfers, sinceBlock: core.sinceBlock, unmatchedIn: core.unmatchedIn,
-      unmatchedOut: core.unmatchedOut, partial: core.partial, noInternal: core.noInternal, ethUsd: core.ethUsd,
-    };
-    return new Response(JSON.stringify(body), { status, headers: {
-      ...CORS, "content-type": "application/json; charset=utf-8", "cache-control": cc } });
-  };
+// قیمتِ ?p: undefined = نبود، null = نامعتبر، عدد = معتبر
+function pnlParseP(url) {
+  if (!url.searchParams.has("p")) return undefined;
+  const raw = url.searchParams.get("p");
+  const n = /^[0-9]*\.?[0-9]+(?:[eE]-?[0-9]+)?$/.test(raw) ? Number(raw) : NaN;
+  return !Number.isFinite(n) || n <= 0 || n > PNL_P_MAX ? null : n;
+}
 
+// بدنه‌ی پاسخ از core (مستقل از p) و p؛ holding و pnl هر بار از p ساخته می‌شود
+function pnlBody(core, p) {
+  const holdingUsd = p != null && core.holdingTok != null ? pnlR2(core.holdingTok * p) : null;
+  const pnlUsd = holdingUsd != null && core.soldUsd != null && core.boughtUsd != null
+    ? pnlR2(core.soldUsd + holdingUsd - core.boughtUsd) : null;
+  return {
+    wallet: core.wallet, token: core.token, boughtUsd: core.boughtUsd, boughtTok: core.boughtTok,
+    soldUsd: core.soldUsd, soldTok: core.soldTok, holdingTok: core.holdingTok, holdingUsd, pnlUsd,
+    transfers: core.transfers, sinceBlock: core.sinceBlock, unmatchedIn: core.unmatchedIn,
+    unmatchedOut: core.unmatchedOut, partial: core.partial, noInternal: core.noInternal, ethUsd: core.ethUsd,
+  };
+}
+
+function pnlJson(body, status, cc) {
+  return new Response(JSON.stringify(body), { status, headers: {
+    ...CORS, "content-type": "application/json; charset=utf-8", "cache-control": cc } });
+}
+
+// محاسبه‌ی P&L یک کیفِ مشخص (مشترکِ دو مسیر). خروجی: { core, cc } یا { fail: Response }
+async function pnlWalletCore(token, wallet, ctx, env) {
   const store = cacheStore();
   const cacheKey = new Request("https://pnl.zaexa.internal/" + token + "/" + wallet, { method: "GET" });
   if (store) {
     try {
       const hit = await store.match(cacheKey);
-      if (hit) return out(await hit.json(), 200, "public, max-age=" + PNL_BROWSER_S);
+      if (hit) return { core: await hit.json(), cc: "public, max-age=" + PNL_BROWSER_S };
     } catch (e) { /* کش خراب = بی‌کش */ }
   }
 
   const rpcUrl = env && typeof env.BASE_RPC === "string" ? env.BASE_RPC : "";
-  if (!rpcUrl) return fail(503, "unavailable");
+  if (!rpcUrl) return { fail: fail(503, "unavailable") };
 
   // الف/ب) توکنِ آمده و رفته
   const [a, b] = await Promise.all([
     pnlTransfers(rpcUrl, { toAddress: wallet, contractAddresses: [token], category: ["erc20"] }),
     pnlTransfers(rpcUrl, { fromAddress: wallet, contractAddresses: [token], category: ["erc20"] }),
   ]);
-  if (a.err || b.err) return fail(502, "upstream");
+  if (a.err || b.err) return { fail: fail(502, "upstream") };
   const core0 = { wallet, token, partial: a.more || b.more, noInternal: false, ethUsd: null };
   if (a.transfers.length + b.transfers.length === 0) {
     const core = { ...core0, boughtUsd: null, boughtTok: null, soldUsd: null, soldTok: null, holdingTok: null,
@@ -4114,7 +4113,7 @@ async function pnlRoute(request, url, ctx, env) {
       const put = store.put(cacheKey, new Response(JSON.stringify(core), { status: 200, headers: { "cache-control": "public, max-age=" + PNL_STORE_S } }));
       if (ctx && typeof ctx.waitUntil === "function") ctx.waitUntil(put); else await put;
     }
-    return out(core, 200, "public, max-age=" + PNL_BROWSER_S);
+    return { core, cc: "public, max-age=" + PNL_BROWSER_S };
   }
   const blocks = [...a.transfers, ...b.transfers].map((t) => parseInt(t && t.blockNum, 16)).filter((n) => Number.isFinite(n));
   const since = blocks.length ? Math.min(...blocks) : null;
@@ -4130,18 +4129,119 @@ async function pnlRoute(request, url, ctx, env) {
     return r;
   };
   const [c, d, ethUsd] = await Promise.all([quote("toAddress"), quote("fromAddress"), pnlEthUsd(env)]);
-  if (c.err || d.err) return fail(502, "upstream");
+  if (c.err || d.err) return { fail: fail(502, "upstream") };
   const j = pnlJoin(a.transfers, b.transfers, c.transfers, d.transfers, ethUsd);
   const core = { ...core0, ...j, sinceBlock: since, noInternal, ethUsd: ethUsd == null ? null : pnlR2(ethUsd),
     partial: a.more || b.more || c.more || d.more };
   // ناقص (قیمتِ اتر لازم بود و نیامد) = شکستِ جزئی: بدونِ کش
   const incomplete = core.boughtUsd == null || core.soldUsd == null;
-  if (incomplete) return out(core, 200, "no-store");
+  if (incomplete) return { core, cc: "no-store" };
   if (store) {
     const put = store.put(cacheKey, new Response(JSON.stringify(core), { status: 200, headers: { "cache-control": "public, max-age=" + PNL_STORE_S } }));
     if (ctx && typeof ctx.waitUntil === "function") ctx.waitUntil(put); else await put;
   }
-  return out(core, 200, "public, max-age=" + PNL_BROWSER_S);
+  return { core, cc: "public, max-age=" + PNL_BROWSER_S };
+}
+
+/* ۶ نوامبر: /pnl/<توکن>/tx/<هش>?side=buy|sell&p= — دارنده‌ی واقعیِ توکن از روی رسیدِ تراکنش.
+   tx_from_address امضاکننده است (ربات/رلیر/سالور)، نه گیرنده‌ی توکن. از لاگ‌های Transfer خودِ توکن،
+   خالصِ تغییرِ هر آدرس را می‌گیریم: خرید = بیشترین مثبت، فروش = بیشترین منفی. کانتراکت (روتر/
+   اگرگیتور/کیف هوشمند) هرگز P&L نمی‌گیرد؛ EOA و EOAی دلگیتِ EIP-7702 (۰xef0100 + ۲۰ بایت) آری.
+   🔴 رسید تغییرناپذیر است: نتیجه‌ی تعیینِ دارنده ۷ روز کش می‌شود؛ شکست/نبودِ رسید هرگز. */
+const PNL_TX = /^0x[0-9a-fA-F]{64}$/;
+const PNL_TRANSFER_TOPIC = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef";
+const PNL_HOLDER_STORE_S = 7 * 24 * 3600;
+const PNL_ZERO = "0x" + "0".repeat(40);
+
+function pnlHolderFromLogs(logs, token, side) {
+  const net = new Map();
+  for (const l of Array.isArray(logs) ? logs : []) {
+    if (!l || l.removed === true || PNL_LC(l.address) !== token) continue;
+    const t = l.topics;
+    if (!Array.isArray(t) || t.length !== 3 || PNL_LC(t[0]) !== PNL_TRANSFER_TOPIC) continue;   // ERC-721 چهار topic دارد
+    if (typeof l.data !== "string" || !/^0x[0-9a-fA-F]{64}$/.test(l.data)) continue;
+    const from = "0x" + PNL_LC(t[1]).slice(26), to = "0x" + PNL_LC(t[2]).slice(26);
+    if (!PNL_ADDR.test(from) || !PNL_ADDR.test(to)) continue;
+    const v = BigInt(l.data);
+    net.set(from, (net.get(from) || 0n) - v);
+    net.set(to, (net.get(to) || 0n) + v);
+  }
+  let best = null, bestV = 0n;
+  for (const [addr, v] of net) {
+    if (addr === PNL_ZERO) continue;   // mint/burn دارنده نیست
+    if (side === "buy" ? v > bestV : v < bestV) { best = addr; bestV = v; }
+  }
+  return best;
+}
+
+function pnlIsEoaCode(code) {
+  const c = PNL_LC(code);
+  return c === "0x" || (c.startsWith("0xef0100") && c.length === 2 + 23 * 2);
+}
+
+async function pnlTxRoute(token, txHash, side, p, ctx, env) {
+  const store = cacheStore();
+  const hKey = new Request("https://pnl.zaexa.internal/h/" + token + "/" + txHash + "/" + side, { method: "GET" });
+  let h = null;
+  if (store) {
+    try {
+      const hit = await store.match(hKey);
+      if (hit) h = await hit.json();
+    } catch (e) { /* کش خراب = بی‌کش */ }
+  }
+  if (!h) {
+    const rpcUrl = env && typeof env.BASE_RPC === "string" ? env.BASE_RPC : "";
+    if (!rpcUrl) return fail(503, "unavailable");
+    const rc = await pnlRpc(rpcUrl, "eth_getTransactionReceipt", [txHash]);
+    if (rc.status !== 200 || !rc.body || rc.body.error) return fail(502, "upstream");
+    const rec = rc.body.result;
+    if (!rec || typeof rec !== "object") return fail(502, "upstream");   // pending/pruned: بدونِ کش
+    const signer = PNL_ADDR.test(String(rec.from)) ? PNL_LC(rec.from) : null;
+    const holder = pnlHolderFromLogs(rec.logs, token, side);
+    if (!holder) h = { holder: null, signer, eoa: false, reason: "no-transfer" };
+    else {
+      const gc = await pnlRpc(rpcUrl, "eth_getCode", [holder, "latest"]);
+      const code = gc.body && gc.body.result;
+      if (gc.status !== 200 || !gc.body || gc.body.error || typeof code !== "string" || !/^0x[0-9a-fA-F]*$/.test(code))
+        return fail(502, "upstream");
+      const eoa = pnlIsEoaCode(code);
+      h = { holder, signer, eoa, reason: eoa ? null : "contract" };
+    }
+    if (store) {
+      const put = store.put(hKey, new Response(JSON.stringify(h), { status: 200, headers: { "cache-control": "public, max-age=" + PNL_HOLDER_STORE_S } }));
+      if (ctx && typeof ctx.waitUntil === "function") ctx.waitUntil(put); else await put;
+    }
+  }
+  const base = { token, holder: h.holder, signer: h.signer, resolvedFrom: "receipt" };
+  if (!h.eoa) return pnlJson({ ...base, reason: h.reason }, 200, "public, max-age=" + PNL_BROWSER_S);
+  const r = await pnlWalletCore(token, h.holder, ctx, env);
+  if (r.fail) return r.fail;
+  return pnlJson({ ...pnlBody(r.core, p), ...base }, 200, r.cc);
+}
+
+async function pnlRoute(request, url, ctx, env) {
+  if (!rateOk(request, "pnl", RL_LIMIT, RL_WINDOW_MS))
+    return fail(429, "too many requests", { "retry-after": "60" });
+  if (request.method === "OPTIONS") return new Response(null, { status: 204, headers: CORS });
+  if (request.method !== "GET" && request.method !== "HEAD") return fail(405, "only GET");
+  const parts = url.pathname.slice("/pnl/".length).split("/");
+  const isTx = parts.length === 3 && parts[1] === "tx";
+  if (!isTx && parts.length !== 2) return fail(400, "bad address");
+  if (!PNL_ADDR.test(parts[0])) return fail(400, "bad address");
+  const token = parts[0].toLowerCase();
+  const p = pnlParseP(url);
+  if (isTx) {
+    const side = url.searchParams.get("side");
+    if (!PNL_TX.test(parts[2])) return fail(400, "bad tx");
+    if (side !== "buy" && side !== "sell") return fail(400, "bad side");
+    if (p === null) return fail(400, "bad price");
+    return pnlTxRoute(token, parts[2].toLowerCase(), side, p, ctx, env);
+  }
+  if (!PNL_ADDR.test(parts[1])) return fail(400, "bad address");
+  if (p === null) return fail(400, "bad price");
+  const r = await pnlWalletCore(token, parts[1].toLowerCase(), ctx, env);
+  if (r.fail) return r.fail;
+  return pnlJson(pnlBody(r.core, p), 200, r.cc);
 }
 
 /* =====================================================================

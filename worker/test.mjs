@@ -15814,10 +15814,207 @@ function stripAllowedWording(t) {
         const r2 = await call("/pnl/" + T + "/" + W, { method: "OPTIONS", headers: { "cf-connecting-ip": "198.51.100.242" } }, envP);
         ok(r2.status === 204 && r2.headers.get("access-control-allow-origin") === "*", "[pnl] OPTIONS -> 204 with CORS");
       });
+      // ---------- [pnl holder] /pnl/<token>/tx/<hash>?side=: دارنده‌ی واقعی از رسید ----------
+      const TT = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef";
+      const A = (c) => "0x" + c.repeat(40);
+      const SIGNER = A("3"), R1 = A("4"), R2 = A("5"), HOLDER = A("6"), POOL = A("7"), FEE = A("8"), SELLER = A("9"), CONTRACT = A("d"), DELEG = A("e");
+      const H = (c) => "0x" + c.repeat(64);
+      const topic = (a) => "0x" + "0".repeat(24) + a.slice(2);
+      const lg = (addr, from, to, v, extra) => ({ address: addr, topics: [TT, topic(from), topic(to)], data: "0x" + word(BigInt(v)), ...(extra || {}) });
+      const OTHER_TOK = A("b");
+      const noise = [lg(OTHER_TOK, POOL, FEE, 999999), { address: T, topics: [TT, topic(POOL), topic(FEE), "0x" + word(1n)], data: "0x" + word(777777n) },
+        { address: T, topics: ["0x8c5be1e5ebec7d5bd14f71427d1e84f3dd0314c0f7b2291e5b200ac8c7c3b925", topic(POOL), topic(FEE)], data: "0x" + word(5555n) }];
+      const RECS = {
+        // خرید چندجهشی: استخر → R1 → R2 → (دارنده ۹۹۰ + کارمزد ۱۰)؛ R1 و R2 خالصِ صفر
+        [H("1")]: { from: SIGNER, logs: [lg(T, POOL, R1, 1000), ...noise, lg(T, R1, R2, 1000), lg(T, R2, HOLDER, 990), lg(T, R2, FEE, 10)] },
+        // فروشِ چندجهشی: فروشنده → R1 → R2 → استخر
+        [H("2")]: { from: SIGNER, logs: [lg(T, SELLER, R1, 700), lg(T, R1, R2, 700), ...noise, lg(T, R2, POOL, 700)] },
+        // همه خالصِ صفر
+        [H("3")]: { from: SIGNER, logs: [lg(T, HOLDER, R1, 50), lg(T, R1, HOLDER, 50)] },
+        // دارنده کانتراکت
+        [H("4")]: { from: SIGNER, logs: [lg(T, POOL, CONTRACT, 300)] },
+        // EOAی دلگیت‌شده (۷۷۰۲)
+        [H("5")]: { from: SIGNER, logs: [lg(T, POOL, DELEG, 300)] },
+        // برن به آدرسِ صفر دارنده نیست
+        [H("6")]: { from: SIGNER, logs: [lg(T, HOLDER, "0x" + "0".repeat(40), 80)] },
+        [H("7")]: { from: SIGNER, logs: [lg(T, POOL, HOLDER, 300)] },
+      };
+      const CODES = { [HOLDER]: "0x", [SELLER]: "0x", [POOL]: "0x6080", [CONTRACT]: "0x6080604052", [DELEG]: "0xef0100" + "ab".repeat(20) };
+      const mkTx = (o) => {
+        const opt = Object.assign({ recs: RECS, codes: CODES }, o || {});
+        const base = mk(opt.pnl);
+        return async (u, init) => {
+          const body = JSON.parse(init.body);
+          if (body.method === "eth_getTransactionReceipt") {
+            calls.push({ u, m: body.method, p: body.params[0] });
+            const r = opt.recs[body.params[0]];
+            if (r === "http500") return jb({ error: "x" }, 500);
+            if (r === "throw") throw new Error("boom " + KEYPART);
+            return jb({ jsonrpc: "2.0", id: 1, result: r ? { status: "0x1", ...r } : null });
+          }
+          if (body.method === "eth_getCode") {
+            calls.push({ u, m: body.method, p: body.params[0], all: body.params });
+            const c = opt.codes[body.params[0]];
+            if (c === "err") return jb({ jsonrpc: "2.0", id: 1, error: { code: -32000 } });
+            return jb({ jsonrpc: "2.0", id: 1, result: c === undefined ? "0x" : c });
+          }
+          return base(u, init);
+        };
+      };
+      const TX = (t, h, q, e, init) => call("/pnl/" + t + "/tx/" + h + (q === undefined ? "?side=buy&p=2" : q), init || ipH(), e || envP);
+      const cnt = (m) => calls.filter((c) => c.m === m).length;
+      // خرید چندجهشی: آخرین گیرنده؛ شمارِ تماس‌ها؛ فیلدها
+      shelf.clear(); puts.length = 0;
+      let oldBody = null;
+      await wf(mk(), async () => { oldBody = await (await PN(T, W, "?p=2")).json(); });
+      shelf.clear(); puts.length = 0;
+      await wf(mkTx(), async () => {
+        const res = await TX(T, H("1"));
+        const raw = await res.text(), b = JSON.parse(raw);
+        ok(res.status === 200 && b.holder === HOLDER, "[pnl holder] buy through 3 hops -> the final receiver, got " + res.status + " " + b.holder);
+        ok(b.signer === SIGNER && b.resolvedFrom === "receipt" && b.token === T, "[pnl holder] signer (receipt.from) and resolvedFrom:receipt are returned, got " + raw.slice(0, 200));
+        ok(cnt("eth_getTransactionReceipt") === 1 && cnt("eth_getCode") === 1 && cnt("alchemy_getAssetTransfers") === 4 && cnt("eth_call") === 1 && calls.length === 7,
+          "[pnl holder] cold EOA = 1 receipt + 1 getCode + 4 transfers + 1 eth_call, got " + calls.map((c) => c.m).join());
+        const gc = calls.find((c) => c.m === "eth_getCode");
+        ok(JSON.stringify(gc.all) === JSON.stringify([HOLDER, "latest"]), "[pnl holder] getCode asks the holder at latest, got " + JSON.stringify(gc.all));
+        const gat = calls.filter((c) => c.m === "alchemy_getAssetTransfers");
+        ok(gat.every((c) => c.p.toAddress === HOLDER || c.p.fromAddress === HOLDER) && !gat.some((c) => c.p.toAddress === SIGNER || c.p.fromAddress === SIGNER),
+          "[pnl holder] the per-wallet P&L runs for the holder, never the signer");
+        ok(b.pnlUsd === oldBody.pnlUsd && b.boughtUsd === oldBody.boughtUsd && b.holdingUsd === oldBody.holdingUsd && b.wallet === HOLDER,
+          "[pnl holder] the P&L fields equal the old per-wallet computation, got " + raw.slice(0, 260));
+        ok(calls.every((c) => c.u === RPC) && !raw.includes(KEYPART), "[pnl holder] only BASE_RPC is called and the secret never appears");
+        const hp = puts.find((x) => x.u === "https://pnl.zaexa.internal/h/" + T + "/" + H("1") + "/buy");
+        ok(hp && hp.cc === "public, max-age=604800", "[pnl holder] holder resolution stored 7 days, got " + JSON.stringify(puts));
+        ok(puts.some((x) => x.u === "https://pnl.zaexa.internal/" + T + "/" + HOLDER && x.cc === "public, max-age=600"), "[pnl holder] the P&L part keeps its 10-minute entry keyed by token+holder");
+      });
+      // کش: همان tx دوباره = صفر تماس؛ p تازه از کش دوباره ساخته می‌شود
+      await wf(mkTx(), async () => {
+        const res = await TX(T, H("1"), "?side=buy&p=3");
+        const b = await res.json();
+        ok(res.status === 200 && calls.length === 0 && b.holder === HOLDER, "[pnl holder] holder cache hit + P&L cache hit make zero upstream calls, got " + calls.length);
+        ok(b.holdingUsd === 2700 && b.resolvedFrom === "receipt", "[pnl holder] cached answer rebuilt from the new p, got " + JSON.stringify(b));
+      });
+      // دومین tx همان دارنده: رسید + getCode می‌پرسد، ولی P&L از کش
+      await wf(mkTx(), async () => {
+        const res = await TX(T, H("7"));
+        const b = await res.json();
+        ok(res.status === 200 && b.holder === HOLDER && cnt("eth_getTransactionReceipt") === 1 && cnt("alchemy_getAssetTransfers") === 0 && calls.length === 2,
+          "[pnl holder] a second tx of the same holder reuses its cached P&L, got " + calls.map((c) => c.m).join());
+      });
+      // فروش: فرستنده‌ی اصلی؛ واسطه‌های خالصِ صفر کنار می‌روند
+      shelf.clear(); puts.length = 0;
+      await wf(mkTx(), async () => {
+        const res = await TX(T, H("2"), "?side=sell&p=2");
+        const b = await res.json();
+        ok(res.status === 200 && b.holder === SELLER && b.signer === SIGNER, "[pnl holder] sell through hops -> the original sender, got " + b.holder);
+        ok(cnt("eth_getCode") === 1 && calls.find((c) => c.m === "eth_getCode").p === SELLER, "[pnl holder] net-zero hops are never asked about (one getCode, for the seller)");
+        const b2 = await (await TX(T, H("2"), "?side=buy&p=2")).json();
+        ok(b2.holder === POOL && b2.reason === "contract", "[pnl holder] the same receipt as a buy picks the largest positive (the pool, a contract), got " + JSON.stringify(b2));
+      });
+      // همه خالصِ صفر / برنِ صفر: بی‌دارنده و فقط یک تماس
+      shelf.clear(); puts.length = 0;
+      await wf(mkTx(), async () => {
+        const res = await TX(T, H("3"));
+        const b = await res.json();
+        ok(res.status === 200 && b.holder === null && b.reason === "no-transfer" && b.pnlUsd === undefined, "[pnl holder] all-net-zero -> holder null, reason no-transfer, got " + JSON.stringify(b));
+        ok(calls.length === 1 && calls[0].m === "eth_getTransactionReceipt", "[pnl holder] no holder -> only the receipt call, got " + calls.map((c) => c.m).join());
+        const r6 = await (await TX(T, H("6"), "?side=sell&p=2")).json();
+        ok(r6.holder === HOLDER, "[pnl holder] a sell to the zero address still picks the sender");
+        calls.length = 0;
+        const z = await (await TX(T, H("6"), "?side=buy&p=2")).json();
+        ok(z.holder === null && z.reason === "no-transfer" && calls.length === 1, "[pnl holder] the zero address is never the holder of a buy, got " + JSON.stringify(z));
+      });
+      // کانتراکت: reason contract، P&L هرگز؛ نتیجه کش می‌شود
+      shelf.clear(); puts.length = 0;
+      await wf(mkTx(), async () => {
+        const res = await TX(T, H("4"));
+        const raw = await res.text(), b = JSON.parse(raw);
+        ok(res.status === 200 && b.holder === CONTRACT && b.reason === "contract" && b.signer === SIGNER && b.resolvedFrom === "receipt", "[pnl holder] contract holder -> reason contract, got " + raw);
+        ok(calls.length === 2 && cnt("alchemy_getAssetTransfers") === 0 && cnt("eth_call") === 0, "[pnl holder] a contract makes no P&L call at all (fetch count 2), got " + calls.map((c) => c.m).join());
+        ok(b.pnlUsd === undefined && b.boughtUsd === undefined && b.transfers === undefined, "[pnl holder] a contract response carries no P&L fields, got " + raw);
+        calls.length = 0;
+        const again = await (await TX(T, H("4"))).json();
+        ok(again.reason === "contract" && calls.length === 0, "[pnl holder] the contract verdict is cached (zero calls the second time), got " + calls.length);
+      });
+      // EIP-7702: دقیقاً ۲۳ بایت و پیشوند → EOA؛ طولِ دیگر → کانتراکت
+      shelf.clear(); puts.length = 0;
+      await wf(mkTx(), async () => {
+        const b = await (await TX(T, H("5"))).json();
+        ok(b.holder === DELEG && b.reason === undefined && b.pnlUsd === oldBody.pnlUsd && cnt("alchemy_getAssetTransfers") === 4, "[pnl holder] a 7702-delegated EOA is treated as an EOA and gets P&L, got " + JSON.stringify(b));
+      });
+      shelf.clear(); puts.length = 0;
+      for (const bad of ["0xef0100" + "ab".repeat(19), "0xef0100" + "ab".repeat(21), "0xef0200" + "ab".repeat(20)]) {
+        await wf(mkTx({ codes: { ...CODES, [DELEG]: bad } }), async () => {
+          const b = await (await TX(T, H("5"))).json();
+          ok(b.reason === "contract" && cnt("alchemy_getAssetTransfers") === 0, "[pnl holder] code " + bad.slice(0, 12) + "… (" + (bad.length - 2) / 2 + " bytes) is not a 7702 delegation -> contract");
+        });
+        shelf.clear();
+      }
+      // شکست: ۵۰۲، بدونِ کش، بار بعد دوباره می‌پرسد
+      shelf.clear(); puts.length = 0;
+      for (const [label, o] of [["receipt missing (pending/pruned)", { recs: {} }], ["receipt HTTP 500", { recs: { [H("1")]: "http500" } }],
+        ["receipt fetch throws", { recs: { [H("1")]: "throw" } }], ["getCode error", { codes: { ...CODES, [HOLDER]: "err" } }]]) {
+        await wf(mkTx(o), async () => {
+          const res = await TX(T, H("1"));
+          const raw = await res.text();
+          ok(res.status === 502 && !raw.includes(KEYPART) && !JSON.stringify([...res.headers.entries()]).includes(KEYPART), "[pnl holder] " + label + " -> 502 without the secret, got " + res.status);
+        });
+        ok(puts.length === 0 && shelf.size === 0, "[pnl holder] " + label + " is never cached");
+      }
+      await wf(mkTx(), async () => {
+        const res = await TX(T, H("1"));
+        ok(res.status === 200 && cnt("eth_getTransactionReceipt") === 1, "[pnl holder] after failures the next call asks the receipt again and succeeds");
+      });
+      // P&L بالادستی خراب می‌شود (holder حل شده): ۵۰۲ و holder کش‌شده می‌ماند
+      shelf.clear(); puts.length = 0;
+      await wf(mkTx({ pnl: { down: true } }), async () => {
+        const res = await TX(T, H("1"));
+        ok(res.status === 502 && !puts.some((x) => x.u.includes("/" + HOLDER) && !x.u.includes("/h/")), "[pnl holder] a failing P&L -> 502 and no P&L entry stored, got " + res.status);
+      });
+      // اعتبارسنجی: ۴۰۰ و صفر تماس
+      shelf.clear(); puts.length = 0;
+      await wf(mkTx(), async () => {
+        const bads = [
+          [T, H("1"), "?side=hold&p=2"], [T, H("1"), "?p=2"], [T, H("1"), "?side=&p=2"], [T, H("1"), "?side=BUY&p=2"],
+          [T, H("1"), "?side=buy&p=-1"], [T, H("1"), "?side=buy&p=abc"], [T, "0x" + "1".repeat(63), "?side=buy"], [T, "0x" + "g".repeat(64), "?side=buy"],
+          [T, "1".repeat(64), "?side=buy"], [T, H("1") + "0", "?side=buy"], ["0xabc", H("1"), "?side=buy"],
+        ];
+        for (const [t, h, q] of bads) {
+          const res = await TX(t, h, q);
+          ok(res.status === 400, "[pnl holder] '" + t.slice(0, 6) + " " + h.slice(0, 8) + " " + q + "' -> 400, got " + res.status);
+        }
+        for (const path of ["/pnl/" + T + "/tx", "/pnl/" + T + "/foo/" + H("1") + "?side=buy", "/pnl/" + T + "/tx/" + H("1") + "/x?side=buy"]) {
+          const res = await call(path, ipH(), envP);
+          ok(res.status === 400, "[pnl holder] malformed path " + path.slice(0, 20) + "… -> 400, got " + res.status);
+        }
+        ok(calls.length === 0, "[pnl holder] validation failures make zero upstream calls, got " + calls.length);
+        const none = await TX(T, H("1"), "?side=buy&p=2", { ASSETS });
+        ok(none.status === 503, "[pnl holder] no BASE_RPC -> 503, got " + none.status);
+        ok(calls.length === 0, "[pnl holder] no BASE_RPC -> zero calls");
+      });
+      // همان سطلِ نرخِ pnl
+      shelf.clear();
+      await wf(mkTx(), async () => {
+        const same = { headers: { "cf-connecting-ip": "203.0.113.97" } };
+        let last = null;
+        for (let i = 0; i < idx.RL_LIMIT; i++) last = await TX(T, H("1"), "?side=zzz", envP, same);
+        ok(last.status === 400, "[pnl holder] requests below the limit reach validation");
+        const mixed = await PN(T, W, "?p=2", envP, same);
+        ok(mixed.status === 429 && mixed.headers.get("retry-after") === "60", "[pnl holder] tx requests spend the same 'pnl' bucket as the wallet route, got " + mixed.status);
+      });
+      // مسیرِ قدیمی دست‌نخورده
+      shelf.clear(); puts.length = 0;
+      await wf(mk(), async () => {
+        const res = await PN(T, W, "?p=2");
+        const b = await res.json();
+        ok(res.status === 200 && b.holder === undefined && b.signer === undefined && b.resolvedFrom === undefined && b.wallet === W && calls.length === 5 && cnt("eth_getTransactionReceipt") === 0,
+          "[pnl holder] the old /pnl/<token>/<wallet> route is unchanged (no holder fields, 5 calls), got " + JSON.stringify(b).slice(0, 120));
+      });
     } finally {
       if (savedCaches === undefined) delete globalThis.caches; else globalThis.caches = savedCaches;
     }
     console.log("[pnl] GET /pnl/<token>/<wallet>: bad address/price -> 400 with zero calls; 4 getAssetTransfers (token in/out, quote in/out) + one eth_call for ETH/USD, only to BASE_RPC; join by tx hash with exact numbers (ETH and USDC buys, WETH sell, airdrop -> unmatchedIn); unpaid token out -> unmatchedOut; internal rejected -> retry without it and noInternal; pageKey -> partial; no p -> holdingUsd/pnlUsd null; no ETH price -> USD null and not cached; no transfers -> 200 transfers 0; success cached 10 min and recomputed per p; failures never cached; the secret never in a response; own rate-limit bucket; POST 405, OPTIONS 204");
+    console.log("[pnl holder] GET /pnl/<token>/tx/<hash>?side=: holder from the receipt's token Transfer logs (buy = largest net inflow, sell = largest net outflow, net-zero hops and the zero address excluded, other tokens/ERC-721/Approval logs ignored); EOA or 7702-delegated (exactly 0xef0100 + 20 bytes) gets the existing per-wallet P&L, a contract gets reason contract with no P&L call (2 fetches), no transfer -> holder null; holder resolution cached 7 days, P&L keeps its 10-minute entry; pending/pruned receipt, HTTP errors, throws and getCode errors -> 502, never cached; validation -> 400 with zero calls; same rate-limit bucket; the old wallet route unchanged");
   }
 
   // ---------- [pass pacing] ----------

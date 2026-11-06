@@ -8669,7 +8669,8 @@ class FbEnv:
                 if rest.startswith("/vd/"):
                     return await ok(route, '{"v":"sell","ms":100}')
                 if rest.startswith("/pnl/") and self.pnl is not None:
-                    tk, wl = rest[len("/pnl/"):].split("/")
+                    tk, _tx, wl = rest[len("/pnl/"):].split("?")[0].split("/")   # /pnl/<توکن>/tx/<هش>
+                    assert _tx == "tx", "[pnl card] the client must ask the tx route: %r" % rest
                     self.pnl_calls.append(u)
                     self.pnl_inflight += 1
                     self.pnl_max = max(self.pnl_max, self.pnl_inflight)
@@ -9364,6 +9365,13 @@ LG_SEQ = [(1, "buy", 2500, 120), (4, "sell", 5000, 200), (2, "buy", 1500, 300), 
           (8, "sell", 7000, 3000), (9, "sell", 1100, 3500), (4, "sell", 1300, 4000), (11, "x", 99999, 50)]
 
 
+def lg_tx(n, tok, solana=False):
+    """هشِ tx مثلِ GT: ۶۴ هگز (Base)؛ وابسته به توکن تا دو توکن هشِ یکسان نداشته باشند. Solana مثل قبل."""
+    if solana:
+        return "0xh%d" % n
+    return "0x%032x" % n + (tok or EB_TOK).lower()[2:34].ljust(32, "0")
+
+
 def lg_data(seq=None, solana=False, tok=None, extra=None):
     tok = tok or (FB_SOL_USDC if solana else EB_TOK)
     other = FB_SOL_WSOL if solana else EB_OTHER
@@ -9378,7 +9386,7 @@ def lg_data(seq=None, solana=False, tok=None, extra=None):
                 up = lambda a: a.upper().replace("0X", "0x")
                 frm, to = (up(frm), up(to)) if n % 2 else (frm.lower(), to.lower())
         out.append({"id": "l%d" % n, "type": "trade", "attributes": {
-            "block_timestamp": fb_iso(ago), "kind": "sell" if buy else "buy", "tx_hash": "0xh%d" % n,
+            "block_timestamp": fb_iso(ago), "kind": "sell" if buy else "buy", "tx_hash": lg_tx(n, tok, solana),
             "tx_from_address": eb_wallet(w, solana), "from_token_address": frm, "to_token_address": to,
             "volume_in_usd": "%.4f" % usd, "from_token_amount": "12.5", "to_token_amount": "3.25"}})
     out.extend(extra or [])
@@ -9530,6 +9538,85 @@ async def check_flow_large_trades(p, errors):
         srv.shutdown()
 
 
+# ---------- ۶ نوامبر: دارنده‌ی واقعی از رسید (ستون کیف، «Via contract»، یکتاسازی، عنوان‌ها) ----------
+PH_SEQ = [(1, "buy", 2500, 120), (2, "buy", 2400, 200), (1, "sell", 1800, 300), (3, "buy", 1500, 400),
+          (4, "sell", 1300, 500), (5, "buy", 3300, 600), (6, "sell", 1100, 700), (7, "buy", 4100, 800)]
+PH_TABLE = {11: 700, 12: -400, 13: 50, 7: "fail"}
+
+
+async def check_pnl_holder(p, errors):
+    srv, origin = fb_serve()
+    b = await p.chromium.launch()
+    errs = []
+    PAIR = ["localStorage.setItem('zaexa.pair', JSON.stringify({in: 'USDC', out: 'AERO'}))"]
+    W = lambda n: eb_wallet(n)
+    SH = lambda n: W(n)[:6] + "…" + W(n)[-4:]
+    GT_PERSIST_OFF["on"] = False
+    try:
+        env = FbEnv(b, origin, errs)
+        PD = lg_data(PH_SEQ, tok=PN_A)
+        TX = lambda n: PD[n]["attributes"]["tx_hash"]
+        over = {TX(0): ("eoa", 11), TX(1): ("eoa", 11), TX(2): ("eoa", 11), TX(3): ("eoa", 12), TX(4): ("contract", 14),
+                TX(5): ("none",), TX(6): ("eoa", 13), TX(7): ("fail",)}
+        env.gt = pn_gt(env, PD)
+        env.pnl = pn_server(env, PH_TABLE, PD, over=over)
+        pg = await env.open(board=False, init=PAIR)
+        await pg.wait_for_selector("#flowLarge .lgRow", timeout=20000)
+        await pg.wait_for_function("() => document.querySelectorAll('#flowLarge .lgPsk').length === 0", timeout=20000)
+        await pg.wait_for_timeout(300)
+        calls = list(env.pnl_calls)
+        assert len(calls) == 8 and len(set(calls)) == 8 and all("/tx/" in c for c in calls), "[pnl holder] one request per tx (8 rows): %s" % calls
+        rows = await pg.evaluate("""() => [...document.querySelectorAll('#flowLarge .lgRow')].map(r => { const a = r.querySelector('.lgT a'), pt = r.querySelector('.lgPt'), bar = r.querySelector('.lgBar i');
+            return {a: a ? a.textContent : null, href: a ? a.href : null, title: a ? a.title : null, pnl: pt.textContent.trim(), ptTitle: pt.title, cls: pt.className, bar: bar ? bar.style.width : null}; })""")
+        # 1) ستون کیف: دارنده برای EOA (یک دارنده در سه ردیف)، امضاکننده برای کانتراکت/بی‌انتقال/خطا
+        want_a = [SH(11), SH(11), SH(11), SH(12), SH(4), SH(5), SH(13), SH(7)]
+        assert [r["a"] for r in rows] == want_a, "[pnl holder] wallet column shows the resolved holder for an EOA, the signer otherwise: %s" % [r["a"] for r in rows]
+        assert rows[0]["href"].lower().endswith("/address/" + W(11)) and rows[4]["href"].lower().endswith("/address/" + W(4)), "[pnl holder] links go to the shown address: %s %s" % (rows[0]["href"], rows[4]["href"])
+        # 2) عنوان‌ها
+        assert rows[0]["title"] == "Token receiver · tx signed by " + W(1), "[pnl holder] buy title: %r" % rows[0]["title"]
+        assert rows[1]["title"] == "Token receiver · tx signed by " + W(2), "[pnl holder] buy title (second signer): %r" % rows[1]["title"]
+        assert rows[2]["title"] == "Token sender · tx signed by " + W(1), "[pnl holder] sell title: %r" % rows[2]["title"]
+        assert rows[6]["title"] == "Token sender · tx signed by " + W(6), "[pnl holder] sell title (single): %r" % rows[6]["title"]
+        assert all(rows[i]["title"] == "" for i in (4, 5, 7)), "[pnl holder] no receiver/sender title when the signer is shown: %s" % [rows[i]["title"] for i in (4, 5, 7)]
+        # 3) P&L: همان P&L روی هر ردیفِ همان دارنده؛ Via contract؛ نامعلوم
+        assert [r["pnl"] for r in rows] == ["≈ +$700", "≈ +$700", "≈ +$700", "≈ −$400", "Via contract", "P&L unknown", "≈ +$50", "P&L unknown"], "[pnl holder] P&L slots: %s" % [r["pnl"] for r in rows]
+        assert rows[4]["ptTitle"] == "The token moved through a contract (router, aggregator or smart wallet), so no per-wallet P&L is shown.", "[pnl holder] Via contract title: %r" % rows[4]["ptTitle"]
+        assert rows[4]["bar"] is None and rows[5]["bar"] is None, "[pnl holder] no bar for contract/unknown"
+        tx3 = await fb_color(pg, "--tx3")
+        assert await pg.evaluate("() => getComputedStyle(document.querySelector('#flowLarge .lgVia')).color") == tx3, "[pnl holder] Via contract is --tx3"
+        assert [r["bar"] for r in rows] == ["100%", "100%", "100%", "57%", None, None, "7%", None], "[pnl holder] bars are relative to the best distinct holder: %s" % [r["bar"] for r in rows]
+        # 4) خلاصه: دارنده‌ی متمایز یک بار
+        tiles = await pg.evaluate(PN_TILES_JS)
+        assert tiles == [["Wallets in profit", "2 · ≈ +$750"], ["Wallets at a loss", "1 · ≈ −$400"], ["Top wallet", SH(11) + " · ≈ +$700"]], "[pnl holder] tiles count distinct holders (3 rows of one holder = 1): %s" % tiles
+        # 5) پنل‌ها
+        await pg.click('#flowLarge .lgRow:nth-child(1) .amt2'); await pg.click('#flowLarge .lgRow:nth-child(3) .amt2')
+        await pg.click('#flowLarge .lgRow:nth-child(5) .amt2'); await pg.click('#flowLarge .lgRow:nth-child(6) .amt2')
+        pn = await pg.evaluate("() => [...document.querySelectorAll('#flowLarge .lgRow')].map(r => r.querySelector('.lgDet') ? r.querySelector('.lgDet').innerText.replace(/\\s+/g, ' ').trim() : null)")
+        assert pn[0].endswith("· token receiver resolved from the transaction receipt") and pn[2].endswith("· token sender resolved from the transaction receipt"), "[pnl holder] muted line: %r / %r" % (pn[0], pn[2])
+        assert pn[4] == "The token moved through a contract (router, aggregator or smart wallet), so no per-wallet P&L is shown." and pn[5] == "No transfer of this token was found in this transaction.", "[pnl holder] contract / no-transfer panels: %r / %r" % (pn[4], pn[5])
+        # 6) مرتب‌سازی Top P&L بر اساس P&L دارنده؛ ناشناخته‌ها آخر
+        await pg.click('#flowLarge [data-lgsort="top"]')
+        got = [r["a"] for r in await pg.evaluate("() => [...document.querySelectorAll('#flowLarge .lgRow')].map(r => ({a: r.querySelector('.lgT a').textContent}))")]
+        assert got == [SH(11)] * 3 + [SH(13), SH(12), SH(4), SH(5), SH(7)], "[pnl holder] Top P&L order: %s" % got
+        await pg.click('#flowLarge [data-lgsort="latest"]')
+        # 7) بارگذاری دوباره: همه از کش جز ردیفِ خراب
+        before = len(env.pnl_calls)
+        await pg.reload(); await pg.wait_for_selector("#flowLarge .lgRow", timeout=20000)
+        await pg.wait_for_function("() => document.querySelectorAll('#flowLarge .lgPsk').length === 0", timeout=20000)
+        new = env.pnl_calls[before:]
+        assert len(new) == 1 and new[0].split("/tx/")[1].split("?")[0] == TX(7), "[pnl holder] after a reload only the failed tx is asked again (contract and no-transfer answers are cached): %s" % new
+        txt = await pg.evaluate("() => document.getElementById('flowLarge').innerText")
+        assert "smart" + " money" not in txt.lower() and not FB_BAD_RE.search(txt), "[pnl holder] wording: %r" % txt
+        await pg.context.close()
+        bad = [e for e in errs if "Failed to load resource" not in e]
+        assert not bad, "[pnl holder] console errors: %s" % bad
+        print("[pnl holder] Large trades Base: one /pnl/<token>/tx/<hash>?side= request per transaction; the wallet column shows the token receiver (buy) or sender (sell) for an EOA with title 'Token receiver|sender · tx signed by <signer>' and links to the holder; a contract holder keeps the signer and shows 'Via contract' in --tx3 with the contract tooltip; no-transfer and error stay 'P&L unknown'; the same holder on 3 rows counts once in the tiles and bars (best distinct holder = Top wallet) and shows its P&L on each row; panels carry 'token receiver|sender resolved from the transaction receipt', contract and no-transfer panels; Top P&L sorts by holder; a reload re-asks only the failed tx")
+    finally:
+        GT_PERSIST_OFF["on"] = True
+        await b.close()
+        srv.shutdown()
+
+
 # ---------- حکمِ صادرکننده برای سهام ----------
 SI_NOTE = "The issuer can freeze accounts and recover tokens. This is expected for regulated stock tokens and is shown below for transparency."
 SI_CHIP = "Issuer-controlled · regulated"
@@ -9539,7 +9626,7 @@ SI_CHIP = "Issuer-controlled · regulated"
 PN_A = "0x940181a94A35A4569E4529A3CDfB74e38FD98631"   # AERO
 PN_B = "0x50c5725949A6F0c72E6C4a641F24049A917DB0Cb"   # DAI
 PN_POOL_B = "0x" + "2" * 40
-PN_FOOT = "Flow, not skill. P&L is approximate, from each wallet's own transfers; addresses are the reported transaction senders, which can include routers."
+PN_FOOT = "Flow, not skill. P&L is approximate, from each wallet's own transfers; the wallet shown is the token receiver (buys) or sender (sells) read from the transaction receipt, or the transaction signer when the token moved through a contract."
 PN_SEQ = [(1, "buy", 2500, 120), (2, "sell", 2400, 200), (3, "buy", 1800, 300), (1, "buy", 9100, 400), (4, "sell", 1300, 500),
           (5, "buy", 3300, 600), (6, "buy", 1500, 700), (7, "buy", 4100, 800), (8, "sell", 1100, 900), (9, "buy", 2050, 1000)]
 PN_P = {1: 1200, 2: -340, 3: 18400, 4: 300, 5: -2100, 6: 640, 9: 560}
@@ -9559,19 +9646,44 @@ def pn_core(w, tk, pnl, transfers=14, **kw):
     return d
 
 
-def pn_server(env, table):
-    """table[کیف] = pnl | 'fail' | 'empty'؛ پاسخِ Worker با ?p=2."""
-    def f(tk, wl, q):
-        assert re.fullmatch(r"p=2(\.0)?", q), "[pnl card] the client must pass ?p=<price>: %r" % q
-        n = int(wl, 16) - 0x300
-        v = table.get(n)
+def pn_server(env, table, *datas, over=None):
+    """table[کیفِ دارنده] = pnl | 'fail' | 'empty'. پاسخِ Worker برای /pnl/<توکن>/tx/<هش>?side=&p=2.
+    datas = دادهٔ lg_data (هش ← امضاکننده و طرف). بدونِ over دارنده همان امضاکننده است.
+    over[هش] = ('eoa', n) | ('contract', n) | ('none',) | ('fail',)"""
+    over = over or {}
+    sig = {}
+    for d in datas:
+        for t in d:
+            at = t["attributes"]
+            sig[at["tx_hash"]] = (int(at["tx_from_address"], 16) - 0x300, at["kind"])
+
+    def f(tk, tx, q):
+        m = re.fullmatch(r"side=(buy|sell)&p=2(\.0)?", q)
+        assert m, "[pnl card] the client must pass ?side=<buy|sell>&p=<price>: %r" % q
+        assert tx in sig, "[pnl card] unknown tx asked: %s" % tx
+        n, kind = sig[tx]
+        assert m.group(1) == ("buy" if kind == "sell" else "sell"), "[pnl card] side=%s does not match the trade (GT kind is inverted in the fixture): %s" % (m.group(1), kind)
+        o = over.get(tx)
+        base = {"token": tk, "signer": W_(n), "resolvedFrom": "receipt"}
+        if o and o[0] == "fail":
+            return (500, {"error": "upstream"})
+        if o and o[0] == "contract":
+            return (200, {**base, "holder": W_(o[1]), "reason": "contract"})
+        if o and o[0] == "none":
+            return (200, {**base, "holder": None, "reason": "no-transfer"})
+        h = o[1] if o else n
+        wl = W_(h)
+        v = table.get(h)
         if v == "fail" or v is None:
             return (500, {"error": "upstream"})
         if v == "empty":
-            return (200, pn_core(wl, tk, 0, transfers=0, boughtUsd=None, boughtTok=None, soldUsd=None, soldTok=None, holdingTok=None, holdingUsd=None, pnlUsd=None, sinceBlock=None))
-        extra = {"unmatchedIn": 2, "partial": True} if n == 3 else {}
-        return (200, pn_core(wl, tk, v, **extra))
+            return (200, {**pn_core(wl, tk, 0, transfers=0, boughtUsd=None, boughtTok=None, soldUsd=None, soldTok=None, holdingTok=None, holdingUsd=None, pnlUsd=None, sinceBlock=None), **base, "holder": wl})
+        extra = {"unmatchedIn": 2, "partial": True} if h == 3 else {}
+        return (200, {**pn_core(wl, tk, v, **extra), **base, "holder": wl})
     return f
+
+
+W_ = lambda n: eb_wallet(n)
 
 
 def pn_gt(env, large_a, large_b=None, price="2"):
@@ -9609,10 +9721,12 @@ async def check_pnl_card(p, errors):
     GT_PERSIST_OFF["on"] = False   # کشِ ماندگار روشن (فقط برای همین کاوشگر؛ در finally برمی‌گردد)
     try:
         env = FbEnv(b, origin, errs)
-        env.gt = pn_gt(env, lg_data(PN_SEQ, tok=PN_A))
-        env.pnl = pn_server(env, {**PN_P, 7: "fail", 8: "empty"})
+        PD = lg_data(PN_SEQ, tok=PN_A)
+        TXH = lambda n: PD[n]["attributes"]["tx_hash"]   # هشِ ردیفِ n
+        env.gt = pn_gt(env, PD)
+        env.pnl = pn_server(env, {**PN_P, 7: "fail", 8: "empty"}, PD)
         # 1) بارگذاری: کارت پیش از جوابِ P&L دیده می‌شود، کاشی‌ها «—»، همه اسکلت، حداکثر ۳ درخواستِ هم‌زمان
-        env.pnl_gate.clear(); env.pnl_hold.clear(); env.pnl_hold_w = W(9)
+        env.pnl_gate.clear(); env.pnl_hold.clear(); env.pnl_hold_w = TXH(9)
         pg = await env.open(board=False, init=PAIR)
         await pg.wait_for_selector("#flowLarge .lgRow", timeout=20000)
         await pg.wait_for_timeout(600)
@@ -9623,8 +9737,8 @@ async def check_pnl_card(p, errors):
         env.pnl_gate.set()
         await pg.wait_for_function("() => document.querySelectorAll('#flowLarge .lgPsk').length === 1", timeout=20000)   # فقط w9 (نگه‌داشته)
         assert env.pnl_max == 3, "[pnl card] concurrency capped at 3, saw %d" % env.pnl_max
-        assert len(env.pnl_calls) == 9 and len(set(env.pnl_calls)) == 9, "[pnl card] one request per DISTINCT wallet (9 of 10 rows): %s" % env.pnl_calls
-        assert all(c.endswith("?p=2") and "/pnl/" + PN_A.lower() + "/" in c for c in env.pnl_calls), "[pnl card] URL shape (lower-cased token, ?p=2): %s" % env.pnl_calls[:2]
+        assert len(env.pnl_calls) == 10 and len(set(env.pnl_calls)) == 10, "[pnl card] one request per TRANSACTION (10 rows, 10 distinct tx): %s" % env.pnl_calls
+        assert all(re.search(r"/pnl/%s/tx/0x[0-9a-f]{64}\?side=(buy|sell)&p=2$" % PN_A.lower(), c) for c in env.pnl_calls), "[pnl card] URL shape (lower-cased token, /tx/<hash>?side=&p=2): %s" % env.pnl_calls[:2]
         rows = await pg.evaluate(PN_ROWS_JS)
         assert [r["a"] for r in rows] == [SH(n) for n in (1, 2, 3, 1, 4, 5, 6, 7, 8, 9)], "[pnl card] latest order: %s" % [r["a"] for r in rows]
         want = {1: "≈ +$1.2K", 2: "≈ −$340", 3: "≈ +$18.4K", 4: "≈ +$300", 5: "≈ −$2.1K", 6: "≈ +$640"}
@@ -9664,7 +9778,7 @@ async def check_pnl_card(p, errors):
         assert r3["open"] == "true", "[pnl card] click opens the panel: %s" % r3
         wantp = ("bought $3.0k · 1.20m aero sold $21.0k · 1.20m aero still holding 200 aero ≈ $400 approx. p&l ≈ +$18.4k "
                  "from 14 transfers since block 1234567 · paid and received in eth, weth and usdc, valued at today's eth price "
-                 "· 2 transfers without a payment counted at zero cost · history truncated")
+                 "· 2 transfers without a payment counted at zero cost · history truncated · token receiver resolved from the transaction receipt")
         assert r3["panel"].lower() == wantp, "[pnl card] panel text: %r" % r3["panel"]
         await pg.click(sel(3) + " .amt2")
         r3 = (await pg.evaluate(PN_ROWS_JS))[2]
@@ -9691,7 +9805,7 @@ async def check_pnl_card(p, errors):
         assert await pg.evaluate("() => document.querySelector('#flowLarge [data-lgsort=\"top\"]').classList.contains('on')"), "[pnl card] Top P&L restored after reload"
         assert [r["a"] for r in await pg.evaluate(PN_ROWS_JS)] == [SH(n) for n in top], "[pnl card] order restored after reload"
         new = env.pnl_calls[before:]
-        assert len(new) == 1 and new[0].split("/pnl/")[1].split("/")[1].split("?")[0] == W(7), "[pnl card] after a reload only the failed wallet is asked again (successes cached, failures never): %s" % new
+        assert len(new) == 1 and new[0].split("/tx/")[1].split("?")[0] == TXH(7), "[pnl card] after a reload only the failed row's tx is asked again (successes cached, failures never): %s" % new
         await pg.click('#flowLarge [data-lgsort="latest"]')
         assert [r["a"] for r in await pg.evaluate(PN_ROWS_JS)] == [SH(n) for n in order], "[pnl card] Latest order back"
         assert "lg" not in _fbj.loads(await pg.evaluate("() => localStorage.getItem('zaexa.flowboard.v1')")), "[pnl card] default is not stored"
@@ -9704,8 +9818,8 @@ async def check_pnl_card(p, errors):
         # 6) توکن عوض می‌شود: جوابِ دیررسیده دور ریخته می‌شود (بقیه‌ی صفِ توکنِ قبلی هرگز پرسیده نمی‌شود)
         env.pnl_calls.clear(); env.pnl_gate.clear(); env.pnl_hold_w = None
         large_b = lg_data([(21, "buy", 3000, 100), (22, "sell", 2000, 200)], tok=PN_B)
-        env.gt = pn_gt(env, lg_data(PN_SEQ, tok=PN_A), large_b)
-        env.pnl = pn_server(env, {**PN_P, 7: "fail", 8: "empty", 21: 500, 22: -100})
+        env.gt = pn_gt(env, PD, large_b)
+        env.pnl = pn_server(env, {**PN_P, 7: "fail", 8: "empty", 21: 500, 22: -100}, PD, large_b)
         pg = await env.open(board=False, init=PAIR)
         await pg.wait_for_selector("#flowLarge .lgRow", timeout=20000)
         await pg.wait_for_timeout(500)
@@ -9723,8 +9837,8 @@ async def check_pnl_card(p, errors):
         await pg.context.close()
         # 7) طرح‌بندی: ۱۴۴۰ روشن و ۳۹۰ (هر دو تم)؛ کاشی‌ها ۲+۱، پنل ۲×۲، بی‌سرریز
         env.pnl_gate.set()
-        env.gt = pn_gt(env, lg_data(PN_SEQ, tok=PN_A))
-        env.pnl = pn_server(env, {**PN_P, 7: "fail", 8: "empty"})
+        env.gt = pn_gt(env, PD)
+        env.pnl = pn_server(env, {**PN_P, 7: "fail", 8: "empty"}, PD)
         for scheme in ("light", "dark"):
             for vw, vh in ((1440, 1000), (390, 900)):
                 pg = await env.open(vw=vw, vh=vh, scheme=scheme, board=False, init=PAIR)
@@ -9765,7 +9879,7 @@ async def check_pnl_card(p, errors):
         await pg.context.close()
         bad = [e for e in errs if "Failed to load resource" not in e]
         assert not bad, "[pnl card] console errors: %s" % bad
-        print("[pnl card] Base Large trades: card first, tiles — and skeletons until results, 3 concurrent requests for the 9 distinct wallets (?p=price, lower-cased token); P&L text/colour/proportional bars; unknown (failed or no transfers) -> 'P&L unknown', no bar; tiles equal the rows; late results update tiles; row panel (click/Enter, link does not toggle, exact note with zero-cost and truncated parts); Latest|Top P&L reorders, persists in zaexa.flowboard.v1 and survives reload, successes cached and failures re-asked; stale token queue dropped; exact footnote and tooltip; 1440/390 light+dark no overflow, tiles 2+1 and 2x2 panel at 390; Solana unchanged with zero /pnl/ requests")
+        print("[pnl card] Base Large trades: card first, tiles — and skeletons until results, 3 concurrent requests, one per transaction (/tx/<hash>?side=&p=price, lower-cased token); P&L text/colour/proportional bars; unknown (failed or no transfers) -> 'P&L unknown', no bar; tiles equal the rows; late results update tiles; row panel (click/Enter, link does not toggle, exact note with zero-cost and truncated parts); Latest|Top P&L reorders, persists in zaexa.flowboard.v1 and survives reload, successes cached and failures re-asked; stale token queue dropped; exact footnote and tooltip; 1440/390 light+dark no overflow, tiles 2+1 and 2x2 panel at 390; Solana unchanged with zero /pnl/ requests")
     finally:
         GT_PERSIST_OFF["on"] = True
         await b.close()
@@ -10281,6 +10395,7 @@ async def main():
         await check_early_buyers(p, errors)
         await check_flow_large_trades(p, errors)
         await check_pnl_card(p, errors)
+        await check_pnl_holder(p, errors)
         await check_stock_issuer(p, errors)
         b = await p.chromium.launch()
         pg = await b.new_page(viewport={"width": 1240, "height": 1000}, color_scheme="dark")
