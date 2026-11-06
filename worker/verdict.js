@@ -28,6 +28,8 @@
 // fetchی ندارد، پس این ایمپورت هیچ چیزی را از «خالص‌بودنِ» این ماژول کم
 // نمی‌کند.
 import { keyUsableFor } from "./v4index.js";
+// بایت‌کدِ runtime همان V4RoundTrip.sol (تولیدشده؛ contracts/script/build_roundtrip.sh) — فقط در stateOverride می‌نشیند
+import { V4RT_ADDRESS, V4RT_CODE } from "./v4_roundtrip_code.js";
 
 // quoteExactInputSingle((address tokenIn,address tokenOut,uint256 amountIn,uint24 fee,uint160 sqrtPriceLimitX96))
 export const SEL_CL_UINT24 = "0xc6a5026a";
@@ -877,7 +879,7 @@ async function callBatch(fetchImpl, rpcUrl, canary, probeItems, timeoutMs, colle
   const requests = [
     { jsonrpc: "2.0", id: 0, method: "eth_call", params: [{ to: canary.to, data: canary.data }, "latest"] },
     ...probeItems.map((p, i) => ({
-      jsonrpc: "2.0", id: i + 1, method: "eth_call", params: [{ to: p.to, data: p.data }, "latest"],
+      jsonrpc: "2.0", id: i + 1, method: "eth_call", params: p.override ? [{ to: p.to, data: p.data }, "latest", p.override] : [{ to: p.to, data: p.data }, "latest"],
     })),
   ];
 
@@ -952,7 +954,8 @@ async function callBatch(fetchImpl, rpcUrl, canary, probeItems, timeoutMs, colle
   if (collect) {
     collect.push({ venue: "canary", key: null, out: classifyProbeOut("CL_UINT24", pickedCanary), stage });
     for (let i = 0; i < probeItems.length; i++) {
-      collect.push({ venue: probeItems[i].id, key: probeItems[i].key, out: classifyProbeOut(pickedItems[i].kind, pickedItems[i]), stage });
+      collect.push({ venue: probeItems[i].id, key: probeItems[i].key,
+        out: typeof probeItems[i].classify === "function" ? probeItems[i].classify(pickedItems[i]) : classifyProbeOut(pickedItems[i].kind, pickedItems[i]), stage });
     }
   }
 
@@ -1419,19 +1422,24 @@ export async function poolDirectedProof(tokenAddr, pools, opts) {
 /* ---------------------------------------------------------------------
    v4OneWayProof — علتِ «one-way-pool»، فقط رویِ nosellِ v4-onlyِ Base
    =========================================================================
-   ۲۶ اکتبر — اندازه‌گیریِ زنده (XDP، DERO): خریدِ ~$100 از کلیدِ واقعیِ v4 پر
-   می‌شود، ولی فروشِ دقیقاً همان مقدار روی همان کلید با
-   UnexpectedRevertBytes(NotEnoughLiquidity(poolId)) برمی‌گردد — استخر خالی
-   نیست، فقط یک‌طرفه است. چهار شرطِ با هم (تصمیمِ مالک):
-     ۱. کلید واقعی و ایندکس‌شده است (poolId دارد) — کالر complete را می‌سنجد.
-     ۲. کوتِ خریدِ ~$100 روی همین کلید خروجیِ > ۰ می‌دهد.
-     ۳. کوتِ فروشِ دقیقاً همان خروجی ریوِرت می‌کند و v4NoLiquidityProof
-        (همان قاعده‌ی empty-pool: پوشش + چهار بایتِ درونی + شناسه‌ی یکسان)
-        آن را می‌پذیرد — هرگز از متن؛ خطای هوک (۰x90bfb865) اثبات نیست.
-     ۴. کاناریِ زنده در هر دو batch.
-   قیمتِ اتر از کاناریِ همان batch می‌آید (canaryUsdPerEth) — منبعِ تازه‌ای
-   نیست. هر شکستی (مهلت، RPC، مقدار، صفر، شکلِ بد) → false، یعنی رفتارِ امروز
-   (v4:unproven). هرگز پرتاب نمی‌کند و هرگز چیزی جز true/false برنمی‌گرداند. */
+   ۶ نوامبر — بازنویسی. نسخه‌ی ۲۶ اکتبر خرید و فروش را دو کوتِ جدا (V4Quoter) روی
+   وضعِ *پیش از* خرید می‌گرفت؛ اترِ خریدار هنوز در استخر نبود، پس هر استخرِ تازه‌ی
+   تک‌سمتی (کلانکر v4) «یک‌طرفه» دیده می‌شد در حالی که خریدار می‌توانست بفروشد
+   (XTO، ۴ نوامبر). حالا خرید ← فروشِ پشت‌سرهم در *یک* eth_call انجام می‌شود:
+   contracts/src/V4RoundTrip.sol با stateOverride (کد + موجودیِ اتر) روی یک
+   آدرسِ بی‌کد می‌نشیند و داخلِ unlockِ PoolManager اول می‌خرد، بعد دقیقاً
+   همان مقدارِ رسیده را می‌فروشد.
+   چهار شرطِ با هم (تصمیمِ مالک؛ پیش‌شرط‌های ۱ و ۴ و vetoها در کالر):
+     ۱. کلید واقعی و ایندکس‌شده است (poolId دارد) — کالر complete و «یک کلید» را می‌سنجد.
+     ۲. نتیجه SellFailed(bytes) است — یعنی پای خرید پر شده بود، ساختارِ قرارداد
+        SellFailed را فقط پس از موفقیتِ خرید می‌اندازد.
+     ۳. bytes داخلی دقیقاً NotEnoughLiquidity(poolId) با شناسه‌ی *همین* کلید است
+        (۳۶ بایت، از رویِ چهار بایت، هرگز متن). خطای هوک و هر چیزِ دیگر اثبات نیست.
+     ۴. کاناریِ زنده در همان batch.
+   BuyFailed، ریوِرتِ دیگر، خطای RPC، مهلت، داده‌ی عجیب → false (v4:unproven)،
+   هرگز یک منفی. سمتِ USDC در v1 پشتیبانی نمی‌شود (false، بدونِ تماس).
+   قیمتِ اتر از کاناریِ یک batchِ جدا می‌آید (canaryUsdPerEth)؛ همان اندپوینت
+   برای تماسِ round trip. هرگز پرتاب نمی‌کند و جز true/false چیزی برنمی‌گرداند. */
 const V4_ONE_WAY_COUNTERS = new Set(
   Object.values(VD_V4_STAGE_COUNTERS).flat().map((a) => String(a).toLowerCase()));
 
@@ -1442,12 +1450,64 @@ export function oneWayCounterFor(key, tokenAddr) {
   return counter;
 }
 
+// roundTrip((address,address,uint24,int24,address),bool,uint256) و دو خطای پوشاننده — با cast sig تأیید شده؛ worker/test.mjs با ethers.id بازمحاسبه می‌کند
+export const SEL_V4_ROUNDTRIP = "0xe31b3cb1";
+export const VD_RT_BUY_FAILED = "0xbd608e71";  // BuyFailed(bytes)
+export const VD_RT_SELL_FAILED = "0x3c42935a"; // SellFailed(bytes)
+// حاشیه‌ی موجودیِ اترِ آدرسِ override: خودِ خرید ethIn می‌خواهد؛ این فقط جای نفس است
+const V4_RT_BALANCE_MARGIN = 10n ** 16n;
+
+export function encodeV4RoundTrip(key, quoteIsCurrency0, ethIn) {
+  if (!key || BigInt(ethIn) <= 0n) return null;
+  return "0x" + SEL_V4_ROUNDTRIP.slice(2) +
+    wordAddr(key.currency0) + wordAddr(key.currency1) + wordUint(key.fee) +
+    wordUint(key.tickSpacing) + wordAddr(key.hooks) +
+    wordBool(quoteIsCurrency0) + wordUint(ethIn);
+}
+
+/* نتیجه‌ی یک آیتمِ round trip، از یک واژه‌نامه‌ی بسته:
+     "filled"       هر دو پا پر شد (result = دو کلمه، هر دو > ۰)
+     "sell-nel"     SellFailed(NotEnoughLiquidity(poolId همین کلید)) — تنها حالتِ اثبات
+     "sell-other"   SellFailed با هر دلیلِ دیگر
+     "buy-failed"   BuyFailed(هر چیز)
+     "no-answer" / "revert" / "odd"  هر چیزِ دیگر */
+export function v4RoundTripOutcome(item, poolId) {
+  try {
+    if (!item) return "odd";
+    if (item.error) {
+      const e = item.error;
+      if (e.code === -1) return "no-answer";
+      const d = typeof e.data === "string" ? e.data.toLowerCase() : null;
+      if (!d || !/^0x([0-9a-f]{2})*$/.test(d) || d.length < 10) return "revert";
+      const sel = d.slice(0, 10);
+      if (sel !== VD_RT_SELL_FAILED && sel !== VD_RT_BUY_FAILED) return "revert";
+      const body = d.slice(10);
+      if (body.length < 128) return "odd";
+      if (BigInt("0x" + body.slice(0, 64)) !== 32n) return "odd"; // آفستِ bytes
+      const len = BigInt("0x" + body.slice(64, 128));
+      if (len > 4096n) return "odd";
+      const inner = body.slice(128, 128 + Number(len) * 2);
+      if (inner.length !== Number(len) * 2) return "odd";
+      if (sel === VD_RT_BUY_FAILED) return "buy-failed";
+      const id = typeof poolId === "string" ? poolId.toLowerCase() : "";
+      if (len === 36n && inner === VD_NO_LIQUIDITY_SELECTOR.slice(2) + id.slice(2) && /^0x[0-9a-f]{64}$/.test(id)) return "sell-nel";
+      return "sell-other";
+    }
+    const r = typeof item.result === "string" ? item.result.toLowerCase() : null;
+    if (!r || !/^0x[0-9a-f]{128}$/.test(r)) return "odd";
+    return BigInt("0x" + r.slice(2, 66)) > 0n && BigInt("0x" + r.slice(66)) > 0n ? "filled" : "odd";
+  } catch (e) {
+    return "odd";
+  }
+}
+
 export async function v4OneWayProof(tokenAddr, key, opts) {
   try {
     const o = opts || {};
     const counter = oneWayCounterFor(key, tokenAddr);
     if (counter == null) return false;
-    const usdcSide = counter.toLowerCase() === USDC_ADDR.toLowerCase();
+    if (counter.toLowerCase() === USDC_ADDR.toLowerCase()) return false; // v1: USDC پشتیبانی نمی‌شود (V4RoundTrip.sol)
+    const quoteIsCurrency0 = counter.toLowerCase() === String(key.currency0).toLowerCase();
 
     const fetchImpl = o.fetchImpl || fetch;
     const now = o.now || Date.now;
@@ -1459,53 +1519,35 @@ export async function v4OneWayProof(tokenAddr, key, opts) {
     const canary = canaryCall();
     const alive = (b) => !!b && !!b.canary && !b.canary.error && typeof b.canary.result === "string" &&
       (() => { const v = decodeQuote("CL_UINT24", b.canary.result); return v != null && v > 0n; })();
-    const row = (data) => ({ id: "uniswap-v4", key: "oneway", to: V4_ROW.to, data, poolId: key.poolId });
 
+    // قیمتِ اتر فقط از کاناریِ یک batchِ جدا؛ همان اندپوینت برای تماسِ round trip
     let rpc = null;
-    let buyIn = null;
-    if (usdcSide) {
-      buyIn = BigInt(VD_NOTIONAL_USD) * 1000000n; // USDC، ۶ رقم
-    } else {
-      // اتر/WETH: قیمت فقط از کاناریِ یک batchِ جدا؛ همان اندپوینت برای دو تماسِ بعدی
-      for (const url of rpcs.slice(0, VD_MAX_ENDPOINTS)) {
-        if (deadlineHit()) return false;
-        const b0 = await callBatch(fetchImpl, url, canary, [], timeoutMs, collect, "oneway-price");
-        if (b0 == null || !alive(b0)) continue;
-        const price = canaryUsdPerEth(b0);
-        if (price == null) return false;
-        const cents = BigInt(Math.round(price * 100));
-        if (cents <= 0n) return false;
-        buyIn = (BigInt(VD_NOTIONAL_USD) * 10n ** 18n * 100n) / cents;
-        rpc = url;
-        break;
-      }
-      if (buyIn == null || rpc == null) return false;
-    }
-    if (buyIn <= 0n) return false;
-
-    const buyData = encodeV4QuoteExactInputSingleKey(key, counter, buyIn);
-    if (buyData == null) return false;
-
-    // خرید
-    let bought = null;
-    for (const url of (rpc ? [rpc] : rpcs.slice(0, VD_MAX_ENDPOINTS))) {
+    let ethIn = null;
+    for (const url of rpcs.slice(0, VD_MAX_ENDPOINTS)) {
       if (deadlineHit()) return false;
-      const b1 = await callBatch(fetchImpl, url, canary, [row(buyData)], timeoutMs, collect, "oneway-buy");
-      if (b1 == null || !alive(b1)) continue;
+      const b0 = await callBatch(fetchImpl, url, canary, [], timeoutMs, collect, "oneway-price");
+      if (b0 == null || !alive(b0)) continue;
+      const price = canaryUsdPerEth(b0);
+      if (price == null) return false;
+      const cents = BigInt(Math.round(price * 100));
+      if (cents <= 0n) return false;
+      ethIn = (BigInt(VD_NOTIONAL_USD) * 10n ** 18n * 100n) / cents;
       rpc = url;
-      const it = b1.items[0];
-      bought = it && !it.error && typeof it.result === "string" ? decodeQuote("V4_SINGLE", it.result) : null;
       break;
     }
-    if (rpc == null || bought == null || bought <= 0n) return false;
+    if (ethIn == null || rpc == null || ethIn <= 0n) return false;
 
-    // فروشِ دقیقاً همان مقدار، همان کلید
-    const sellData = encodeV4QuoteExactInputSingleKey(key, tokenAddr, bought);
-    if (sellData == null) return false;
+    const data = encodeV4RoundTrip(key, quoteIsCurrency0, ethIn);
+    if (data == null) return false;
+    const row = {
+      id: "v4-roundtrip", key: "oneway", to: V4RT_ADDRESS, data, poolId: key.poolId,
+      override: { [V4RT_ADDRESS]: { code: V4RT_CODE, balance: "0x" + (ethIn + V4_RT_BALANCE_MARGIN).toString(16) } },
+      classify: (it) => { const r = v4RoundTripOutcome(it, key.poolId); return r === "revert" && it && it.error && Number.isInteger(it.error.code) ? "revert:" + it.error.code : "rt-" + r; },
+    };
     if (deadlineHit()) return false;
-    const b2 = await callBatch(fetchImpl, rpc, canary, [row(sellData)], timeoutMs, collect, "oneway-sell");
-    if (b2 == null || !alive(b2)) return false;
-    return v4NoLiquidityProof(b2.items[0]) === true;
+    const b = await callBatch(fetchImpl, rpc, canary, [row], timeoutMs, collect, "oneway-trip");
+    if (b == null || !alive(b)) return false;
+    return v4RoundTripOutcome(b.items[0], key.poolId) === "sell-nel";
   } catch (e) {
     return false;
   }

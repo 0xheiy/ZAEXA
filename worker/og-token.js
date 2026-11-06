@@ -247,6 +247,7 @@ export function ogVerdictLabel(verdict, cause) {
   if (verdict === "sell") return "A sell route was quoted";
   if (cause === "empty-pool") return "No sell route quoted: pool is empty";
   if (cause === "sell-reverts") return "No sell route quoted: the sell reverts";
+  if (cause === "one-way-pool") return "No sell route quoted: one-way pool";
   return "No sell route quoted";
 }
 export async function tokenCardPng({ symbol, name, liquidity, vol24, verdict, chain, logo, cause }) {

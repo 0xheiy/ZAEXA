@@ -79,7 +79,7 @@ fi
 
 # --- ۳) تست‌ها ---
 echo
-echo "اجرای تست‌های fork مقابل نود محلی (SwapExecutor + آداپتور Uniswap v4) ..."
+echo "اجرای تست‌های fork مقابل نود محلی (SwapExecutor + آداپتور Uniswap v4 + V4RoundTrip) ..."
 echo "---------------------------------------------------------------"
 BASE_RPC_URL="$LOCAL" FORK_BLOCK="$BLOCK" \
   forge test --match-path 'test/*.fork.t.sol' -vv

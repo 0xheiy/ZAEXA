@@ -1371,9 +1371,9 @@ export async function withCounterProof(result, addr, meta, deadlineAt, env, cove
   return result; // هر شکستی، دقیقاً همان {v:null, why:"sells:elsewhere"} امروز
 }
 
-/* ۲۶ اکتبر — one-way-pool: فقط وقتی حکم وگرنه v4:unproven می‌شد. تا سه
-   ساب‌ریکوئست (کاناری/قیمت، خرید، فروش) — پس سقفِ بودجه‌ی گذر یکی کمتر از
-   COUNTER_PROOF_PASS_MAX_USED است. هر شکستی → false (رفتارِ امروز). */
+/* ۲۶ اکتبر — one-way-pool: فقط وقتی حکم وگرنه v4:unproven می‌شد. ۶ نوامبر: دو
+   ساب‌ریکوئست (batchِ قیمت، batchِ round trip)؛ سقفِ بودجه‌ی گذر عمداً همان
+   قدیمیِ سه‌تایی ماند (یکی کمتر از COUNTER_PROOF_PASS_MAX_USED). هر شکستی → false. */
 export const ONE_WAY_PASS_MAX_USED = COUNTER_PROOF_PASS_MAX_USED - 1;
 /* ۱ نوامبر — ناظرِ نتیجه: هر بار یک برچسبِ کوتاه و ثابت (هرگز آدرس) به
    meterHooks.oneWay می‌رود تا در /vd/passes (sub.oneWay) شمرده شود. فقط رصد؛
@@ -1391,11 +1391,11 @@ function oneWayFailLabel(collect) {
   }
   return "no-call";
 }
-/* ۵ نوامبر — خاموش. v4OneWayProof خرید و فروش را دو کوتِ جدا روی وضعِ فعلیِ
-   استخر می‌گیرد؛ اترِ خریدار پیش از فروش وارد استخر نمی‌شود، پس هر استخرِ تازه‌ی
-   تک‌سمتی (کلانکر v4) «یک‌طرفه» دیده می‌شد در حالی که خریدار می‌توانست بفروشد
-   (XTO، ۴ نوامبر). روشن شدن فقط با شبیه‌سازیِ پشت‌سرهمِ خرید ← فروش در یک تماس. */
-export const V4_ONE_WAY_ENABLED = false;
+/* ۵ نوامبر خاموش شد، ۶ نوامبر دوباره روشن: نسخه‌ی قبلی خرید و فروش را دو کوتِ جدا
+   روی وضعِ فعلیِ استخر می‌گرفت و هر استخرِ تازه‌ی تک‌سمتی (کلانکر v4) «یک‌طرفه»
+   دیده می‌شد (XTO، ۴ نوامبر). حالا v4OneWayProof خرید ← فروش را پشت‌سرهم در یک
+   eth_call (V4RoundTrip با stateOverride) می‌سنجد، پس اترِ خریدار در استخر هست. */
+export const V4_ONE_WAY_ENABLED = true;
 export async function v4OneWayCheck(addr, meta, env, deadlineAt, meterHooks) {
   try {
     if (deadlineAt != null && deadlineAt - Date.now() < 1200) { noteOneWay(meterHooks, "skip:deadline"); return false; }
@@ -1406,6 +1406,8 @@ export async function v4OneWayCheck(addr, meta, env, deadlineAt, meterHooks) {
     if (entry.keys.length !== 1) { noteOneWay(meterHooks, "skip:keys"); return false; }
     const key = entry.keys.find((k) => oneWayCounterFor(k, addr) != null);
     if (!key) { noteOneWay(meterHooks, "skip:counter"); return false; }
+    // ۶ نوامبر — سمتِ USDC در V4RoundTrip پشتیبانی نمی‌شود (بدونِ تماس)
+    if (String(oneWayCounterFor(key, addr)).toLowerCase() === USDC_ADDR.toLowerCase()) { noteOneWay(meterHooks, "skip:usdc"); return false; }
     const hasStage = meterHooks && typeof meterHooks.stage === "function";
     if (hasStage) { try { meterHooks.stage("oneway"); } catch (e) { /* فقط رصد */ } }
     const collect = [];

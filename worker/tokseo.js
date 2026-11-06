@@ -24,7 +24,7 @@ export function guardedKind(vd, chainLabel) {
   if (!vd || typeof vd !== "object") return { kind: null };
   const g = publishGuardRow({ v: vd.v, why: vd.why, cause: vd.cause }, chain);
   if (g.v === "sell") return { kind: "sell" };
-  if (g.v === "nosell" && chain !== "solana" && (g.cause === "empty-pool" || g.cause === "sell-reverts")) {
+  if (g.v === "nosell" && chain !== "solana" && (g.cause === "empty-pool" || g.cause === "sell-reverts" || g.cause === "one-way-pool")) {
     return { kind: "nosell", cause: g.cause };
   }
   return { kind: null };
@@ -65,7 +65,7 @@ export function tokenSeo(meta, vd, chainLabel, addr) {
   if (k.kind === "sell") {
     chip = "Sell route quoted"; cls += " p"; pred = "quoted a sell route"; tail = " A quote is not a guarantee.";
   } else if (k.kind === "nosell") {
-    const why = k.cause === "empty-pool" ? "pool is empty" : "the sell reverts";
+    const why = k.cause === "empty-pool" ? "pool is empty" : k.cause === "one-way-pool" ? "one-way pool" : "the sell reverts";
     chip = "No sell route quoted · " + why; cls += " n";
     pred = "found no sell route: " + why;
   } else {
