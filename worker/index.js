@@ -3927,13 +3927,27 @@ const PNL_P_MAX = 1e9;
 const PNL_LC = (a) => String(a).toLowerCase();
 
 // یک JSON-RPC POST با سقفِ حجمِ بدنه و مهلت؛ فقط { status, body } برمی‌گردد، هرگز URL.
-async function pnlRpc(rpcUrl, method, params) {
+function pnlRpc(rpcUrl, method, params) {
+  return pnlPost(rpcUrl, { jsonrpc: "2.0", id: 1, method, params });
+}
+// دسته: calls = [[method, params], …] → آرایه‌ی result به همان ترتیب (null برای هر خطا/نبود)، یا null اگر کلِ دسته شکست
+async function pnlRpcBatch(rpcUrl, calls) {
+  if (!calls.length) return [];
+  const r = await pnlPost(rpcUrl, calls.map(([method, params], i) => ({ jsonrpc: "2.0", id: i + 1, method, params })));
+  if (r.status !== 200 || !Array.isArray(r.body)) return null;
+  const out = calls.map(() => null);
+  for (const x of r.body) {
+    if (x && Number.isInteger(x.id) && x.id >= 1 && x.id <= calls.length && !x.error && x.result != null) out[x.id - 1] = x.result;
+  }
+  return out;
+}
+async function pnlPost(rpcUrl, payload) {
   const ac = new AbortController();
   const timer = setTimeout(() => ac.abort(), PNL_TIMEOUT_MS);
   try {
     const res = await fetch(rpcUrl, {
       method: "POST", headers: { "content-type": "application/json" }, redirect: "manual",
-      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }), signal: ac.signal,
+      body: JSON.stringify(payload), signal: ac.signal,
     });
     if (!res || !res.body) return { status: res ? res.status : 0, body: null };
     const chunks = [];
@@ -4017,8 +4031,87 @@ async function pnlEthUsd(env) {
 const pnlR2 = (v) => Math.round(v * 100) / 100;
 const pnlR6 = (v) => Math.round(v * 1e6) / 1e6;
 
+/* ۶ نوامبر — مبلغِ یک خرید/فروشِ «بی‌پرداخت» از رسیدِ خودِ tx: پولِ آن به کیفِ دیگری رفته یا از
+   موجودیِ ربات آمده (ری‌بوت: ۸۰٫۵ هزار توکن در استخرِ v4 فروخته شد، ۰٫۶۲۶ ETH به آدرسِ دیگری رفت و
+   موجودیِ امضاکننده فقط به‌اندازه‌ی کارمزد کم شد). مبلغ = آنچه استخر رد و بدل کرد:
+   - استخرِ عادی (v2/v3/آئرودروم): آدرسی که توکن را داد (خرید) یا گرفت (فروش) و همان‌جا WETH/USDC
+     در جهتِ درست جابه‌جا شد؛
+   - PoolManagerِ v4: رویدادِ Swap با کلیدِ استخر (currency0/1 از PositionManager.poolKeys)؛ مقادیر
+     از دیدِ فراخوان‌اند (منفی = پرداخت به استخر) — روی زنجیره سنجیده شد.
+   🔴 هر ابهام → null (بی‌پرداخت می‌ماند): مسیرِ چندمرحله‌ای از جفتِ غیرِ پول، شناسه‌ی v4 بی‌کلید که
+   توکن از PoolManager رد شده، فرستنده‌ی توکن بی‌پولِ دیده‌شده در خرید. اگر چند کیف در یک tx خریدند/
+   فروختند، سهمِ این کیف (اگر ≥۸۰٪ نبود — باقی را مالیاتِ توکن فرض می‌کنیم) نسبتاً حساب می‌شود.
+   keyOf: Map(poolId → { c0, c1 }) با آدرس‌های lowercase. خروجی { eth, usd } یا null. */
+export const PNL_V4_SWAP_TOPIC = "0x40e9cecb9f5f1f1c5b9c97dec2917b7ee92e57ba5563708daca94dd84ad7112f";
+export const PNL_V4_POSM = "0x7c5f5a4bbd8fd63184577525326123b519429bdc";   // PositionManagerِ v4 روی Base (اسنادِ یونی‌سواپ)، poolKeys(bytes25) = 0x86b6be7d
+const PNL_I128 = (w) => { let b = BigInt("0x" + w); if (b >= 1n << 255n) b -= 1n << 256n; return b; };
+export function pnlV4SwapIds(logs) {
+  const ids = new Set();
+  for (const l of Array.isArray(logs) ? logs : []) {
+    if (l && l.removed !== true && PNL_LC(l.address) === PNL_LC(V4_POOL_MANAGER) && Array.isArray(l.topics)
+      && PNL_LC(l.topics[0]) === PNL_V4_SWAP_TOPIC && /^0x[0-9a-fA-F]{64}$/.test(String(l.topics[1]))) ids.add(PNL_LC(l.topics[1]));
+  }
+  return [...ids];
+}
+export function pnlSwapQuote(logs, token, holder, keyOf) {
+  const T = PNL_LC(token), H = PNL_LC(holder), PM = PNL_LC(V4_POOL_MANAGER), W = PNL_LC(WETH_ADDR), U = PNL_LC(USDC_ADDR);
+  const nets = { [T]: new Map(), [W]: new Map(), [U]: new Map() };
+  let tViaPm = false;
+  const swaps = [];
+  for (const l of Array.isArray(logs) ? logs : []) {
+    if (!l || l.removed === true || !Array.isArray(l.topics)) continue;
+    const a = PNL_LC(l.address), t = l.topics;
+    if (a === PM && PNL_LC(t[0]) === PNL_V4_SWAP_TOPIC) {
+      if (typeof l.data !== "string" || !/^0x[0-9a-fA-F]{128,}$/.test(l.data) || !/^0x[0-9a-fA-F]{64}$/.test(String(t[1]))) return null;
+      swaps.push({ id: PNL_LC(t[1]), a0: PNL_I128(l.data.slice(2, 66)), a1: PNL_I128(l.data.slice(66, 130)) });
+      continue;
+    }
+    const m = nets[a];
+    if (!m || t.length !== 3 || PNL_LC(t[0]) !== PNL_TRANSFER_TOPIC) continue;
+    if (typeof l.data !== "string" || !/^0x[0-9a-fA-F]{64}$/.test(l.data)) continue;
+    const from = "0x" + PNL_LC(t[1]).slice(26), to = "0x" + PNL_LC(t[2]).slice(26), v = BigInt(l.data);
+    if (a === T && (from === PM || to === PM)) tViaPm = true;
+    m.set(from, (m.get(from) || 0n) - v);
+    m.set(to, (m.get(to) || 0n) + v);
+  }
+  const nT = nets[T], dH = nT.get(H) || 0n;
+  if (dH === 0n) return null;
+  const buy = dH > 0n, sgn = buy ? 1n : -1n;
+  let eth = 0n, usd = 0n, found = false;
+  // استخرهای عادی: طرفِ مقابلِ توکن (جز کیف، PoolManager و صفر)
+  const pools = new Set();
+  for (const [addr, v] of nT) {
+    if (addr === H || addr === PM || addr === PNL_ZERO || v === 0n || (v > 0n) === buy) continue;
+    const qw = sgn * (nets[W].get(addr) || 0n), qu = sgn * (nets[U].get(addr) || 0n);   // پولی که به استخر رفت (خرید) / از آن آمد (فروش)
+    if (qw > 0n || qu > 0n) { pools.add(addr); if (qw > 0n) eth += qw; if (qu > 0n) usd += qu; found = true; }
+    else if (buy) return null;   // توکن از جایی بی‌پولِ دیده‌شده آمد (جفتِ غیرِ پول، مسیرِ چندمرحله‌ای) → مبهم
+  }
+  // v4
+  for (const s of swaps) {
+    const k = keyOf && keyOf.get(s.id);
+    if (!k) { if (tViaPm) return null; continue; }
+    let aT, aO, other;
+    if (k.c0 === T) { aT = s.a0; aO = s.a1; other = k.c1; } else if (k.c1 === T) { aT = s.a1; aO = s.a0; other = k.c0; } else continue;
+    if (buy ? !(aT > 0n && aO < 0n) : !(aT < 0n && aO > 0n)) continue;
+    const q = aO < 0n ? -aO : aO;
+    if (other === PNL_ZERO || other === W) eth += q; else if (other === U) usd += q; else return null;
+    found = true;
+  }
+  if (!found) return null;
+  // سهمِ این کیف از گیرندگان (خرید) / فرستندگانِ (فروش) توکن
+  let others = 0n;
+  for (const [addr, v] of nT) {
+    if (addr === H || addr === PM || addr === PNL_ZERO || pools.has(addr) || v === 0n || (v > 0n) !== buy) continue;
+    others += v > 0n ? v : -v;
+  }
+  const aH = dH > 0n ? dH : -dH;
+  let ratio = Number((aH * 1000000n) / (aH + others)) / 1e6;
+  if (ratio >= 0.8) ratio = 1;
+  return { eth: (Number(eth) / 1e18) * ratio, usd: (Number(usd) / 1e6) * ratio };   // wei و واحدِ ۶ رقمیِ USDC
+}
+
 // join بر اساس hash — خالص، برای تست
-function pnlJoin(tokIn, tokOut, qIn, qOut, ethUsd) {
+function pnlJoin(tokIn, tokOut, qIn, qOut, ethUsd, swapLegs) {
   const inM = new Map(), outM = new Map(); // hash → مجموعِ توکن
   const add = (m, t) => { const a = pnlAmt(t, null); if (a == null) return 0; const h = String(t.hash).toLowerCase(); m.set(h, (m.get(h) || 0) + a); return 1; };
   let transfers = 0;
@@ -4035,14 +4128,21 @@ function pnlJoin(tokIn, tokOut, qIn, qOut, ethUsd) {
     return m;
   };
   const paid = legs(qOut), got = legs(qIn); // پولی که رفت / آمد
-  let boughtTok = 0, soldTok = 0, unIn = 0, unOut = 0, unInTok = 0, unOutTok = 0;
+  let boughtTok = 0, soldTok = 0, unIn = 0, unOut = 0, unInTok = 0, unOutTok = 0, fromSwap = 0;
+  const unpaid = [];
   let boughtUsd = 0, soldUsd = 0;
   const side = (m, legM, other) => {
     let tok = 0, usd = 0, unTok = 0, un = 0, needNull = false;
     for (const [h, amt] of m) {
-      const q = legM.get(h);
+      let q = legM.get(h);
       // توکن هم آمده هم رفته در یک tx: پای پول مبهم است → بی‌پرداخت
-      if (other.has(h) || !q || (q.eth <= 0 && q.usd <= 0)) { un++; unTok += amt; continue; }
+      if (other.has(h)) { un++; unTok += amt; continue; }
+      if (!q || (q.eth <= 0 && q.usd <= 0)) {
+        // پولِ این tx از/به کیفِ دیگری بوده؛ مبلغ از رویدادِ معامله‌ی خودِ tx (pnlSwapQuote)، وگرنه بی‌پرداخت
+        const sw = swapLegs && swapLegs.get(h);
+        if (!sw) { un++; unTok += amt; unpaid.push(h); continue; }
+        q = sw; fromSwap++;
+      }
       tok += amt; usd += q.usd;
       if (q.eth > 0) { if (ethUsd == null) needNull = true; else usd += q.eth * ethUsd; }
     }
@@ -4056,7 +4156,7 @@ function pnlJoin(tokIn, tokOut, qIn, qOut, ethUsd) {
     boughtUsd: boughtUsd == null ? null : pnlR2(boughtUsd), boughtTok: pnlR6(boughtTok),
     soldUsd: soldUsd == null ? null : pnlR2(soldUsd), soldTok: pnlR6(soldTok),
     holdingTok: pnlR6(holdingTok), transfers, unmatchedIn: unIn, unmatchedOut: unOut,
-    movedOutTok: pnlR6(unOutTok),
+    movedOutTok: pnlR6(unOutTok), fromSwap, unpaid,
   };
 }
 
@@ -4089,12 +4189,42 @@ export function pnlBody(core, p) {
     movedOutTok: core.movedOutTok ?? null,
     transfers: core.transfers, sinceBlock: core.sinceBlock, unmatchedIn: core.unmatchedIn,
     unmatchedOut: core.unmatchedOut, partial: core.partial, noInternal: core.noInternal, ethUsd: core.ethUsd,
+    fromSwap: core.fromSwap ?? 0,
   };
 }
 
 function pnlJson(body, status, cc) {
   return new Response(JSON.stringify(body), { status, headers: {
     ...CORS, "content-type": "application/json; charset=utf-8", "cache-control": cc } });
+}
+
+const PNL_SWAP_MAX = 20, PNL_SWAP_IDS_MAX = 8;
+// رسیدهای tx‌های بی‌پرداخت (یک دسته) + کلیدِ استخرهای v4 (یک دسته) → Map(hash → { eth, usd }). شکستِ شبکه → null
+async function pnlSwapLegs(rpcUrl, hashes, token, wallet) {
+  const rcs = await pnlRpcBatch(rpcUrl, hashes.map((h) => ["eth_getTransactionReceipt", [h]]));
+  if (rcs == null) return null;
+  const ids = new Set();
+  for (const rc of rcs) for (const id of pnlV4SwapIds(rc && rc.logs)) ids.add(id);
+  const keyOf = new Map();
+  const idl = [...ids].slice(0, PNL_SWAP_IDS_MAX);   // بیشتر از سقف: بقیه بی‌کلید → tx‌شان مبهم و نامعلوم
+  if (idl.length) {
+    const ks = await pnlRpcBatch(rpcUrl, idl.map((id) => ["eth_call", [{ to: PNL_V4_POSM, data: "0x86b6be7d" + id.slice(2, 52).padEnd(64, "0") }, "latest"]]));
+    if (ks == null) return null;
+    idl.forEach((id, i) => {
+      const r = ks[i];
+      if (typeof r !== "string" || !/^0x[0-9a-fA-F]{320}$/.test(r)) return;
+      const c0 = "0x" + PNL_LC(r.slice(26, 66)), c1 = "0x" + PNL_LC(r.slice(90, 130));
+      if (c1 !== PNL_ZERO) keyOf.set(id, { c0, c1 });   // استخرِ ناشناخته کلیدِ تماماً صفر می‌دهد
+    });
+  }
+  const out = new Map();
+  hashes.forEach((h, i) => {
+    const rc = rcs[i];
+    if (!rc || rc.status !== "0x1") return;
+    const q = pnlSwapQuote(rc.logs, token, wallet, keyOf);
+    if (q && (q.eth > 0 || q.usd > 0)) out.set(h, q);
+  });
+  return out;
 }
 
 // محاسبه‌ی P&L یک کیفِ مشخص (مشترکِ دو مسیر). خروجی: { core, cc } یا { fail: Response }
@@ -4142,11 +4272,19 @@ async function pnlWalletCore(token, wallet, ctx, env) {
   };
   const [c, d, ethUsd] = await Promise.all([quote("toAddress"), quote("fromAddress"), pnlEthUsd(env)]);
   if (c.err || d.err) return { fail: fail(502, "upstream") };
-  const j = pnlJoin(a.transfers, b.transfers, c.transfers, d.transfers, ethUsd);
-  const core = { ...core0, ...j, sinceBlock: since, noInternal, ethUsd: ethUsd == null ? null : pnlR2(ethUsd),
+  let j = pnlJoin(a.transfers, b.transfers, c.transfers, d.transfers, ethUsd);
+  // ۶ نوامبر — tx‌های بی‌پرداخت (حداکثر PNL_SWAP_MAX): مبلغ از رویدادِ معامله‌ی خودِ tx؛ بیشتر از سقف → دست‌نخورده (نامعلوم)
+  let swapFail = false;
+  if (j.unpaid.length > 0 && j.unpaid.length <= PNL_SWAP_MAX) {
+    const legs = await pnlSwapLegs(rpcUrl, j.unpaid, token, wallet);
+    if (legs == null) swapFail = true;
+    else if (legs.size) j = pnlJoin(a.transfers, b.transfers, c.transfers, d.transfers, ethUsd, legs);
+  }
+  const { unpaid: _unpaid, ...jc } = j;
+  const core = { ...core0, ...jc, sinceBlock: since, noInternal, ethUsd: ethUsd == null ? null : pnlR2(ethUsd),
     partial: a.more || b.more || c.more || d.more };
-  // ناقص (قیمتِ اتر لازم بود و نیامد) = شکستِ جزئی: بدونِ کش
-  const incomplete = core.boughtUsd == null || core.soldUsd == null;
+  // ناقص (قیمتِ اتر لازم بود و نیامد، یا خواندنِ رسیدها شکست) = شکستِ جزئی: بدونِ کش
+  const incomplete = core.boughtUsd == null || core.soldUsd == null || swapFail;
   if (incomplete) return { core, cc: "no-store" };
   if (store) {
     const put = store.put(cacheKey, new Response(JSON.stringify(core), { status: 200, headers: { "cache-control": "public, max-age=" + PNL_STORE_S } }));

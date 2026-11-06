@@ -8996,6 +8996,7 @@ function lgPanelHtml(st,x){
   const rz=pn==null?v.realized:null;
   if(rz!=null)note.push(`${v.unOut} transfers out without a visible payment (${lgTok(v.movedTok)} ${st.sym||"tokens"} moved to another wallet or paid out elsewhere) · realized on the sold part at the average buy cost, not the full P&L`);
   else if(v.unmatched>0)note.push(`${v.unmatched} transfers without a visible payment (paid from a bot balance or another wallet), so P&L is unknown`);
+  if(v.fromSwap>0)note.push(`${v.fromSwap} ${v.fromSwap===1?"trade":"trades"} valued from the swap itself (the money came from or went to another address, assumed to be the same owner)`);
   if(v.noInternal)note.push("ETH received from contracts may be missing");
   if(v.partial)note.push("history truncated");
   if(v.fromReceipt)note.push(`token ${x.buy?"receiver":"sender"} resolved from the transaction receipt`);
@@ -9078,7 +9079,7 @@ function lgPnlNorm(j,px){
   const num=v=>(typeof v==="number"&&isFinite(v))?v:null;
   const o={transfers:num(j.transfers),bought:num(j.boughtUsd),boughtTok:num(j.boughtTok),sold:num(j.soldUsd),soldTok:num(j.soldTok),
     holdTok:num(j.holdingTok),sinceBlock:num(j.sinceBlock),unIn:num(j.unmatchedIn)||0,unOut:num(j.unmatchedOut)||0,
-    movedTok:num(j.movedOutTok),partial:j.partial===true,noInternal:j.noInternal===true};
+    movedTok:num(j.movedOutTok),fromSwap:num(j.fromSwap)||0,partial:j.partial===true,noInternal:j.noInternal===true};
   o.unmatched=o.unIn+o.unOut;
   if(o.transfers==null)return null;
   o.holdUsd=o.holdTok!=null&&px>0?o.holdTok*px:null;

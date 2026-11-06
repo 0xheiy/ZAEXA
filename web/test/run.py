@@ -9681,8 +9681,8 @@ def pn_server(env, table, *datas, over=None):
         if isinstance(v, tuple) and v[0] == "rz":   # خروجِ بی‌پرداخت: تحقق‌یافته = sold − soldTok×(bought/boughtTok)
             r = v[1]
             return (200, {**pn_core(wl, tk, 0, boughtUsd=3000, boughtTok=1000000, soldUsd=1800 + r, soldTok=600000, holdingTok=100000,
-                                    holdingUsd=100000 * PN_PX, pnlUsd=None, realizedUsd=r, unmatchedOut=3, movedOutTok=300000), **base, "holder": wl})
-        extra = {"unmatchedIn": 2, "partial": True} if h == 9 else {}   # ۶ نوامبر: بی‌پرداخت → نامعلوم (w9، آخرین جواب)
+                                    holdingUsd=100000 * PN_PX, pnlUsd=None, realizedUsd=r, unmatchedOut=3, movedOutTok=300000, fromSwap=1), **base, "holder": wl})
+        extra = {"unmatchedIn": 2, "partial": True} if h == 9 else {"fromSwap": 2} if h == 3 else {}   # w3: دو معامله از رسیدِ خودِ tx   # ۶ نوامبر: بی‌پرداخت → نامعلوم (w9، آخرین جواب)
         return (200, {**pn_core(wl, tk, v, **extra), **base, "holder": wl})
     return f
 
@@ -9785,6 +9785,7 @@ async def check_pnl_card(p, errors):
         assert r3["open"] == "true", "[pnl card] click opens the panel: %s" % r3
         wantp = ("bought $3.0k · 1.20m aero sold $21.0k · 1.20m aero still holding 200 aero ≈ $400 approx. p&l ≈ +$18.4k "
                  "from 14 transfers since block 1234567 · paid and received in eth, weth and usdc, valued at today's eth price "
+                 "· 2 trades valued from the swap itself (the money came from or went to another address, assumed to be the same owner) "
                  "· token receiver resolved from the transaction receipt")
         assert r3["panel"].lower() == wantp, "[pnl card] panel text: %r" % r3["panel"]
         await pg.click(sel(3) + " .amt2")
@@ -9861,7 +9862,7 @@ async def check_pnl_card(p, errors):
                         "[pnl realized] row: realized value, 'realized' label, no bar, own tooltip: %s %s" % (r3, rz)
                     assert "REALIZED (SOLD PART) ≈ +$4.2K" in r3["panel"] and "3 transfers out without a visible payment (300.0K " in r3["panel"] \
                         and "realized on the sold part at the average buy cost, not the full P&L" in r3["panel"] and "APPROX. P&L" not in r3["panel"].upper() \
-                        and "STILL HOLDING 100.0K" in r3["panel"], "[pnl realized] panel: %s" % r3["panel"]
+                        and "STILL HOLDING 100.0K" in r3["panel"] and "· 1 trade valued from the swap itself (" in r3["panel"], "[pnl realized] panel: %s" % r3["panel"]
                     tiles = await pg.evaluate(PN_TILES_JS)
                     assert tiles[0][1] == "3 · ≈ +$2.1K" and tiles[2][1] == SH(1) + " · ≈ +$1.2K", "[pnl realized] realized is not full P&L: not counted in the tiles: %s" % tiles
                     await pg.click('#flowLarge .lgRow:nth-child(3) .amt2')

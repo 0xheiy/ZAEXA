@@ -20,7 +20,7 @@ const worker = { ...rawWorker, fetch(request, env, ctx) {
   return rawWorker.fetch(request, env, ctx);
 } };
 import { REPORT_RUN_MAX_TOKENS } from "./index.js";
-import { pnlJoin, pnlBody } from "./index.js";
+import { pnlJoin, pnlBody, pnlSwapQuote, pnlV4SwapIds, PNL_V4_SWAP_TOPIC } from "./index.js";
 import { createHash } from "node:crypto";
 import { OG_PNG_ETAG } from "./og-image.js";
 import fs from "node:fs";
@@ -15657,6 +15657,7 @@ function stripAllowedWording(t) {
     const tr = (hash, cat, asset, val, addr, block, extra) => ({ blockNum: block || "0x64", hash, category: cat, asset, value: val,
       rawContract: { address: addr, value: null, decimal: null }, ...(extra || {}) });
     // دو خرید (اتر، یو‌اس‌دی‌سی)، یک فروش (WETH)، یک ایردراپ
+    const TRANSFER_T = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef";
     const TOK_IN = [tr("0xh1", "erc20", "TKN", 1000, T, "0x64"), tr("0xh2", "erc20", "TKN", 400, T, "0x65"), tr("0xh9", "erc20", "TKN", 100, T, "0x66")];
     const TOK_OUT = [tr("0xh3", "erc20", "TKN", 600, T, "0x67")];
     const Q_OUT = [tr("0xh1", "external", "ETH", 0.5, null, "0x64"),
@@ -15668,6 +15669,13 @@ function stripAllowedWording(t) {
       const opt = Object.assign({ tokIn: TOK_IN, tokOut: TOK_OUT, qIn: Q_IN, qOut: Q_OUT, pageKey: false, noInternalErr: false, down: false, canary: true }, o || {});
       return async (u, init) => {
         const body = JSON.parse(init.body);
+        // ۶ نوامبر: دسته‌ی رسیدِ tx‌های بی‌پرداخت (pnlSwapLegs). رسیدِ ایردراپ: انتقالِ توکن بی‌هیچ استخر → بی‌پرداخت می‌ماند
+        if (Array.isArray(body)) {
+          calls.push({ u, m: "batch:" + body.map((x) => x.method).join("+"), p: body.map((x) => x.params[0]) });
+          if (opt.down || opt.batchDown) return jb({ error: "x" }, 500);
+          return jb(body.map((x) => ({ jsonrpc: "2.0", id: x.id, result: (opt.recs || {})[x.params[0]]
+            || { status: "0x1", logs: [{ address: T, topics: [TRANSFER_T, "0x" + "0".repeat(24) + "d".repeat(40), "0x" + "0".repeat(24) + W.slice(2)], data: "0x" + (100n * 10n ** 18n).toString(16).padStart(64, "0") }] } })));
+        }
         calls.push({ u, m: body.method, p: body.params && body.params[0] });
         if (opt.down) return jb({ error: "x" }, 500);
         if (body.method === "eth_call") return opt.canary ? jb({ jsonrpc: "2.0", id: 1, result: CANARY }) : jb({ jsonrpc: "2.0", id: 1, error: { code: -32000 } }, 200);
@@ -15710,7 +15718,8 @@ function stripAllowedWording(t) {
         const res = await PN(T.toUpperCase().replace("0X", "0x"), W, "?p=2");
         const raw = await res.text(), b = JSON.parse(raw);
         ok(res.status === 200, "[pnl] success is 200, got " + res.status);
-        ok(calls.length === 5, "[pnl] 4 getAssetTransfers + 1 eth_call, got " + calls.length);
+        ok(calls.length === 6 && calls[5].m === "batch:eth_getTransactionReceipt" && JSON.stringify(calls[5].p) === '["0xh9"]',
+          "[pnl] 4 getAssetTransfers + 1 eth_call + 1 receipt batch for the one unpaid tx (the airdrop), got " + calls.map((c) => c.m).join());
         ok(calls.filter((c) => c.m === "alchemy_getAssetTransfers").length === 4 && calls.every((c) => c.u === RPC), "[pnl] every call goes to BASE_RPC only");
         const shape = (c) => JSON.stringify([c.p.maxCount, c.p.withMetadata, c.p.excludeZeroValue, c.p.order]);
         const gat = calls.filter((c) => c.m === "alchemy_getAssetTransfers");
@@ -15721,7 +15730,7 @@ function stripAllowedWording(t) {
         const c = gat.find((x) => x.p.toAddress === W && !x.p.contractAddresses), d = gat.find((x) => x.p.fromAddress === W && !x.p.contractAddresses);
         ok(c && d && JSON.stringify(c.p.category) === '["external","internal","erc20"]' && c.p.fromBlock === "0x64", "[pnl] quote queries: external+internal+erc20, no contract filter, from the first token block");
         const want = { wallet: W, token: T, boughtUsd: 1700, boughtTok: 1400, soldUsd: 900, soldTok: 600, holdingTok: 900, holdingUsd: 1800, pnlUsd: null, realizedUsd: null, movedOutTok: 0,
-          transfers: 4, sinceBlock: 100, unmatchedIn: 1, unmatchedOut: 0, partial: false, noInternal: false, ethUsd: 3000 };
+          transfers: 4, sinceBlock: 100, unmatchedIn: 1, unmatchedOut: 0, partial: false, noInternal: false, ethUsd: 3000, fromSwap: 0 };
         ok(JSON.stringify(b) === JSON.stringify(want), "[pnl] exact join numbers (2 buys paid in ETH and USDC, 1 sell for WETH, 1 airdrop -> pnl unknown, never zero cost), got " + raw);
         ok(res.headers.get("cache-control") === "public, max-age=300" && res.headers.get("access-control-allow-origin") === "*", "[pnl] cache-control 300 and CORS");
         ok(puts.length === 1 && puts[0].u === "https://pnl.zaexa.internal/" + T + "/" + W && puts[0].cc === "public, max-age=600", "[pnl] stored 10 min under the internal host, got " + JSON.stringify(puts));
@@ -15753,7 +15762,7 @@ function stripAllowedWording(t) {
       });
       await wf(mk(), async () => {
         const res = await PN(T, W, "?p=2");
-        ok(res.status === 200 && calls.length === 5, "[pnl] after a failure the next call asks upstream again, got " + res.status + "/" + calls.length);
+        ok(res.status === 200 && calls.length === 6, "[pnl] after a failure the next call asks upstream again, got " + res.status + "/" + calls.length);
       });
       // ث) قیمتِ اتر نیامد ولی لازم بود: null، بدونِ کش
       shelf.clear(); puts.length = 0;
@@ -15763,6 +15772,37 @@ function stripAllowedWording(t) {
         ok(res.status === 200 && b.boughtUsd === null && b.soldUsd === null && b.pnlUsd === null && b.ethUsd === null && b.holdingTok === 900, "[pnl] no ETH price -> USD sides null (never invented), got " + JSON.stringify(b));
       });
       ok(puts.length === 0, "[pnl] an incomplete answer is not cached");
+      // ۶ نوامبر — خریدِ بی‌پرداخت (0xh9) که در رسیدش یک استخرِ عادی ۱۰۰ توکن داد و ۰٫۰۵ WETH گرفت → هزینه از خودِ معامله
+      {
+        const P = "0x" + "e".repeat(40), w32 = (n) => "0x" + n.toString(16).padStart(64, "0"), tp = (a) => "0x" + "0".repeat(24) + a.slice(2).toLowerCase();
+        const swapRc = { status: "0x1", logs: [
+          { address: WETH, topics: [TRANSFER_T, tp("0x" + "f".repeat(40)), tp(P)], data: w32(5n * 10n ** 16n) },
+          { address: T, topics: [TRANSFER_T, tp(P), tp(W)], data: w32(100n * 10n ** 18n) }] };
+        shelf.clear(); puts.length = 0;
+        await wf(mk({ recs: { "0xh9": swapRc } }), async () => {
+          const res = await PN(T, W, "?p=2");
+          const b = await res.json();
+          ok(res.status === 200 && b.fromSwap === 1 && b.unmatchedIn === 0 && b.boughtUsd === 1850 && b.boughtTok === 1500 && b.pnlUsd === 850,
+            "[pnl swap] an unpaid buy valued from its own swap (0.05 WETH into the pool = $150): bought 1850, pnl 900+1800-1850 = +850, fromSwap 1, got " + JSON.stringify(b));
+          ok(res.headers.get("cache-control") === "public, max-age=300" && puts.length === 1, "[pnl swap] a resolved answer is cached like any other");
+        });
+        // دسته‌ی رسید شکست → همان نامعلومِ قبلی، بدونِ کش
+        shelf.clear(); puts.length = 0;
+        await wf(mk({ batchDown: true }), async () => {
+          const res = await PN(T, W, "?p=2");
+          const b = await res.json();
+          ok(res.status === 200 && b.pnlUsd === null && b.unmatchedIn === 1 && b.fromSwap === 0 && res.headers.get("cache-control") === "no-store",
+            "[pnl swap] receipt batch failed -> still unknown (never a guess) and not cached, got " + res.headers.get("cache-control") + " " + JSON.stringify(b));
+        });
+        ok(puts.length === 0, "[pnl swap] a failed receipt batch is not cached");
+        // بیش از ۲۰ tx بی‌پرداخت (ربات) → هیچ رسیدی خوانده نمی‌شود، نامعلوم
+        shelf.clear(); puts.length = 0;
+        const many = Array.from({ length: 21 }, (_, i) => tr("0xa" + i, "erc20", "TKN", 1, T, "0x6" + (i % 9)));
+        await wf(mk({ tokIn: [...TOK_IN, ...many] }), async () => {
+          const b = await (await PN(T, W, "?p=2")).json();
+          ok(b.pnlUsd === null && b.unmatchedIn === 22 && !calls.some((c) => c.m.startsWith("batch:")), "[pnl swap] more than 20 unpaid tx -> no receipt calls, stays unknown, got " + b.unmatchedIn + " " + calls.map((c) => c.m).join());
+        });
+      }
       // ج) internal رد شد → بدونِ آن، noInternal
       shelf.clear(); puts.length = 0;
       await wf(mk({ noInternalErr: true }), async () => {
@@ -15874,8 +15914,8 @@ function stripAllowedWording(t) {
         const raw = await res.text(), b = JSON.parse(raw);
         ok(res.status === 200 && b.holder === HOLDER, "[pnl holder] buy through 3 hops -> the final receiver, got " + res.status + " " + b.holder);
         ok(b.signer === SIGNER && b.resolvedFrom === "receipt" && b.token === T, "[pnl holder] signer (receipt.from) and resolvedFrom:receipt are returned, got " + raw.slice(0, 200));
-        ok(cnt("eth_getTransactionReceipt") === 1 && cnt("eth_getCode") === 1 && cnt("alchemy_getAssetTransfers") === 4 && cnt("eth_call") === 1 && calls.length === 7,
-          "[pnl holder] cold EOA = 1 receipt + 1 getCode + 4 transfers + 1 eth_call, got " + calls.map((c) => c.m).join());
+        ok(cnt("eth_getTransactionReceipt") === 1 && cnt("eth_getCode") === 1 && cnt("alchemy_getAssetTransfers") === 4 && cnt("eth_call") === 1 && cnt("batch:eth_getTransactionReceipt") === 1 && calls.length === 8,
+          "[pnl holder] cold EOA = 1 receipt + 1 getCode + 4 transfers + 1 eth_call + 1 unpaid-receipt batch, got " + calls.map((c) => c.m).join());
         const gc = calls.find((c) => c.m === "eth_getCode");
         ok(JSON.stringify(gc.all) === JSON.stringify([HOLDER, "latest"]), "[pnl holder] getCode asks the holder at latest, got " + JSON.stringify(gc.all));
         const gat = calls.filter((c) => c.m === "alchemy_getAssetTransfers");
@@ -16008,8 +16048,8 @@ function stripAllowedWording(t) {
       await wf(mk(), async () => {
         const res = await PN(T, W, "?p=2");
         const b = await res.json();
-        ok(res.status === 200 && b.holder === undefined && b.signer === undefined && b.resolvedFrom === undefined && b.wallet === W && calls.length === 5 && cnt("eth_getTransactionReceipt") === 0,
-          "[pnl holder] the old /pnl/<token>/<wallet> route is unchanged (no holder fields, 5 calls), got " + JSON.stringify(b).slice(0, 120));
+        ok(res.status === 200 && b.holder === undefined && b.signer === undefined && b.resolvedFrom === undefined && b.wallet === W && calls.length === 6 && cnt("eth_getTransactionReceipt") === 0,
+          "[pnl holder] the old /pnl/<token>/<wallet> route is unchanged (no holder fields, 6 calls), got " + JSON.stringify(b).slice(0, 120));
       });
     } finally {
       if (savedCaches === undefined) delete globalThis.caches; else globalThis.caches = savedCaches;
@@ -16907,6 +16947,63 @@ console.log(fails === 0
   ok(pnlBody({ wallet: W, token: T, ...jMv, partial: true, noInternal: false }, 2).realizedUsd === null, "[pnl realized] truncated history -> realized null");
   const jMvOnly = pnlJoin(tIn, [{ hash: "0xC", category: "erc20", value: 100, rawContract: { address: T } }], [], qOut, 2000);
   ok(pnlBody({ wallet: W, token: T, ...jMvOnly, partial: false, noInternal: false }, 2).realizedUsd === null, "[pnl realized] nothing sold -> realized null (never a fake 0)");
+  // ۶ نوامبر — مبلغ از رسیدِ خودِ tx (رسیدهای واقعیِ Base، مقایسه با مبلغِ گِکوترمینال)
+  {
+    const PM = "0x498581ff718922c3f8e6a244956af099b2652b2b", SW = PNL_V4_SWAP_TOPIC, TR = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef";
+    const WE = "0x4200000000000000000000000000000000000006", ZE = "0x" + "0".repeat(40);
+    const pad = (a) => "0x" + "0".repeat(24) + a.slice(2).toLowerCase();
+    const w32 = (n) => "0x" + (n < 0n ? (1n << 256n) + n : n).toString(16).padStart(64, "0");
+    const REB = "0xe125872d91a5a67704fa782aa74014adff7cae7e", DEN = "0x0bddfa9a0a1eb326593262c7af47ee091db9cb70", VVV = "0xacfe6019ed1a7dc6f7b508c02d1b04ec88cc21bf";
+    const idR = "0x67b6beb0ece9fc712d922780b41021c4d9ed79b5f460299ca9897dcad68e7cc9", idD = "0x54f779582d20d14d2a5ce8c2cef3f5d74ce5e50180327e6e45a0fd032677b488";
+    const keyOf = new Map([[idR, { c0: ZE, c1: REB }], [idD, { c0: ZE, c1: DEN }]]);
+    const UR = "0x6ff5693b99212da76ad316178a184ab56d299b43", B1 = "0x83b1710721850777ccb6a0a5e0111fd5ad1bc219", S1 = "0xc171338cf9c94932feb29e02e3cefc6978dfe879";
+    // ری‌بوت، خرید در v4 (tx 0x8a742a5e…؛ گِکوترمینال 0.207995659053343 ETH)
+    const rebBuy = [{ address: PM, topics: [SW, idR, pad(UR)], data: "0xfffffffffffffffffffffffffffffffffffffffffffffffffd1d0d0cd34d5da500000000000000000000000000000000000000000000059b3607395ea903d5af0000000000000000000000000000000000000164597af98f6440a4f2920057930000000000000000000000000000000000000000000006a1633e782d236f0979000000000000000000000000000000000000000000000000000000000001cb140000000000000000000000000000000000000000000000000000000000000001" },
+      { address: REB, topics: [TR, pad(PM), pad(B1)], data: "0x00000000000000000000000000000000000000000000059b3607395ea903d5af" }];
+    // دنیم، فروش در v4 (tx 0x06e798fe…؛ 0.180262365878305 ETH)
+    const denSell = [{ address: PM, topics: [SW, idD, pad(UR)], data: "0x00000000000000000000000000000000000000000000000002806baaac8c425bfffffffffffffffffffffffffffffffffffffffffffffb1afad2607001650c850000000000000000000000000000000000000166735b966879f0905a8a3a8d600000000000000000000000000000000000000000000006b28872d14f35e485b0000000000000000000000000000000000000000000000000000000000001cb890000000000000000000000000000000000000000000000000000000000000001" },
+      { address: DEN, topics: [TR, pad(S1), pad(PM)], data: "0x0000000000000000000000000000000000000000000004e5052d9f8ffe9af37b" }];
+    // VVV، خرید در استخرِ آئرودروم (tx 0x5434321e…؛ 2.57573919205853 WETH، که ۰٫۳٪ آن کارمزد از استخر بیرون رفت)
+    const VP = "0x01784ef301d79e4b2df3a21ad9a536d4cf09a5ce", R7 = "0x7c4c7ac39f3db79b10400b17a2f67dd6a4e9fec3";
+    const vvvBuy = [{ address: WE, topics: [TR, pad(R7), pad(VP)], data: "0x00000000000000000000000000000000000000000000000023bedd25f8b349fc" },
+      { address: VVV, topics: [TR, pad(VP), pad(R7)], data: "0x00000000000000000000000000000000000000000000000edd4cdadd59e429ad" },
+      { address: WE, topics: [TR, pad(VP), pad("0xa283db1adeda9692653ec9c2db135cbf6c2ede62")], data: "0x000000000000000000000000000000000000000000000000001b73dd0abae7e6" }];
+    const near = (a, b, tol) => Math.abs(a - b) <= tol;
+    const q1 = pnlSwapQuote(rebBuy, REB, B1, keyOf), q2 = pnlSwapQuote(denSell, DEN, S1, keyOf), q3 = pnlSwapQuote(vvvBuy, VVV, R7, keyOf);
+    ok(q1 && near(q1.eth, 0.207995659053343, 1e-12) && q1.usd === 0, "[pnl swap] v4 buy (real receipt): ETH paid = GeckoTerminal's 0.207995659053343, got " + JSON.stringify(q1));
+    ok(q2 && near(q2.eth, 0.180262365878305, 1e-12), "[pnl swap] v4 sell (real receipt): ETH received = 0.180262365878305, got " + JSON.stringify(q2));
+    ok(q3 && near(q3.eth, 2.568, 0.001) && q3.eth < 2.5757, "[pnl swap] classic pool buy: net WETH into the pool (2.568; the 0.3% fee left the pool), got " + JSON.stringify(q3));
+    ok(JSON.stringify(pnlV4SwapIds(rebBuy)) === JSON.stringify([idR]), "[pnl swap] v4 Swap ids are read from PoolManager logs");
+    ok(pnlSwapQuote(rebBuy, REB, B1, new Map()) === null, "[pnl swap] v4 swap with no pool key while the token went through PoolManager -> null");
+    ok(pnlSwapQuote(rebBuy, REB, "0x" + "9".repeat(40), keyOf) === null, "[pnl swap] the wallet's token did not move in this tx -> null");
+    // جفتِ غیرِ پول: توکن از استخری آمد که هیچ WETH/USDC نگرفت → مبهم
+    const X = "0x" + "7".repeat(40);
+    ok(pnlSwapQuote([{ address: REB, topics: [TR, pad(X), pad(B1)], data: w32(10n ** 20n) }], REB, B1, keyOf) === null, "[pnl swap] tokens from a pool that took no WETH/USDC (multi-hop through another token) -> null");
+    // کلیدِ v4 با جفتِ غیرِ پول → null
+    ok(pnlSwapQuote(rebBuy, REB, B1, new Map([[idR, { c0: X, c1: REB }]])) === null, "[pnl swap] v4 pair against a non-quote currency -> null");
+    // جهتِ برعکس: این کیف فروخت ولی رویدادِ Swap خرید است → هیچ پایی → null
+    const flip = [rebBuy[0], { address: REB, topics: [TR, pad(B1), pad(PM)], data: rebBuy[1].data }];
+    ok(pnlSwapQuote(flip, REB, B1, keyOf) === null, "[pnl swap] a swap in the opposite direction is never counted -> null");
+    // دسته‌ی ربات: استخر ۱۰۰ توکن داد، این کیف ۵۰ و دو کیفِ دیگر ۲۵ و ۲۵ → نصفِ پول
+    const P = "0x" + "e".repeat(40), O1 = "0x" + "3".repeat(40), O2 = "0x" + "4".repeat(40);
+    const bundle = [{ address: WE, topics: [TR, pad(X), pad(P)], data: w32(10n ** 18n) },
+      { address: REB, topics: [TR, pad(P), pad(B1)], data: w32(50n) }, { address: REB, topics: [TR, pad(P), pad(O1)], data: w32(25n) }, { address: REB, topics: [TR, pad(P), pad(O2)], data: w32(25n) }];
+    const qb = pnlSwapQuote(bundle, REB, B1, keyOf);
+    ok(qb && near(qb.eth, 0.5, 1e-9), "[pnl swap] several wallets bought in one tx -> this wallet's share (50%), got " + JSON.stringify(qb));
+    // مالیاتِ ۵٪ روی خرید: ۹۵ به کیف، ۵ به کیفِ مالیات → کلِ پول (سهم ≥۸۰٪)
+    const tax = [bundle[0], { address: REB, topics: [TR, pad(P), pad(B1)], data: w32(95n) }, { address: REB, topics: [TR, pad(P), pad(O1)], data: w32(5n) }];
+    ok(near(pnlSwapQuote(tax, REB, B1, keyOf).eth, 1, 1e-9), "[pnl swap] a 5% token tax is not mistaken for another buyer (share ≥80% -> full cost)");
+    // پرداختِ USDC
+    const US = "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913";
+    const usdBuy = [{ address: US, topics: [TR, pad(X), pad(P)], data: w32(1500n * 10n ** 6n) }, { address: REB, topics: [TR, pad(P), pad(B1)], data: w32(10n ** 18n) }];
+    const qu = pnlSwapQuote(usdBuy, REB, B1, keyOf);
+    ok(qu && qu.eth === 0 && near(qu.usd, 1500, 1e-9), "[pnl swap] USDC into the pool -> usd 1500, got " + JSON.stringify(qu));
+    // پیوند با pnlJoin: خریدِ بی‌پرداخت با پای استخر پرداخت‌شده حساب می‌شود
+    const jS = pnlJoin(tIn, tOut, qIn, [], 2000, new Map([["0xa", { eth: 0.5, usd: 0 }]]));
+    ok(jS.unmatchedIn === 0 && jS.fromSwap === 1 && jS.boughtUsd === 1000 && jS.unpaid.length === 0, "[pnl swap] pnlJoin uses the swap leg for a tx with no visible payment, got " + JSON.stringify(jS));
+    ok(JSON.stringify(pnlJoin(tIn, tOut, qIn, [], 2000).unpaid) === '["0xa"]', "[pnl swap] pnlJoin lists the unpaid tx hashes");
+    console.log("[pnl swap] unpaid buys/sells valued from the tx's own swap: v4 Swap (pool key from PositionManager) or WETH/USDC into/out of the classic pool; ambiguous routes, missing keys, non-quote pairs or opposite-direction swaps -> null; bundles pro-rated, a ≤20% token tax is not a co-buyer; >20 unpaid tx, a failed receipt batch -> unknown and not cached");
+  }
   console.log("[pnl complete] P&L only when every token leg has a visible payment; bot-funded/gift/truncated -> unknown");
   console.log("[pnl realized] tokens moved out unpaid -> realized P&L on the sold part only; unpaid buys, truncated history or no sales -> null");
 }
