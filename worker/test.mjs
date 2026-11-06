@@ -15720,7 +15720,7 @@ function stripAllowedWording(t) {
         ok(bb && JSON.stringify(bb.p.category) === '["erc20"]', "[pnl] token-out query shape");
         const c = gat.find((x) => x.p.toAddress === W && !x.p.contractAddresses), d = gat.find((x) => x.p.fromAddress === W && !x.p.contractAddresses);
         ok(c && d && JSON.stringify(c.p.category) === '["external","internal","erc20"]' && c.p.fromBlock === "0x64", "[pnl] quote queries: external+internal+erc20, no contract filter, from the first token block");
-        const want = { wallet: W, token: T, boughtUsd: 1700, boughtTok: 1400, soldUsd: 900, soldTok: 600, holdingTok: 900, holdingUsd: 1800, pnlUsd: null,
+        const want = { wallet: W, token: T, boughtUsd: 1700, boughtTok: 1400, soldUsd: 900, soldTok: 600, holdingTok: 900, holdingUsd: 1800, pnlUsd: null, realizedUsd: null, movedOutTok: 0,
           transfers: 4, sinceBlock: 100, unmatchedIn: 1, unmatchedOut: 0, partial: false, noInternal: false, ethUsd: 3000 };
         ok(JSON.stringify(b) === JSON.stringify(want), "[pnl] exact join numbers (2 buys paid in ETH and USDC, 1 sell for WETH, 1 airdrop -> pnl unknown, never zero cost), got " + raw);
         ok(res.headers.get("cache-control") === "public, max-age=300" && res.headers.get("access-control-allow-origin") === "*", "[pnl] cache-control 300 and CORS");
@@ -16894,7 +16894,21 @@ console.log(fails === 0
     "[pnl complete] a buy with no visible payment (bot-funded) -> pnl null, never counted at zero cost, got " + JSON.stringify(bBot));
   const bPart = pnlBody({ wallet: W, token: T, ...j, partial: true, noInternal: false }, 2);
   ok(bPart.pnlUsd === null, "[pnl complete] truncated history -> pnl null");
+  // خروجِ بی‌پرداخت (کیف‌پولِ دیگر): سودِ کل نامعلوم، ولی تحقق‌یافته روی بخشِ فروخته = 600 − 400×(1000/1000) = +200
+  const tMove = [...tOut, { hash: "0xC", category: "erc20", value: 100, rawContract: { address: T } }];
+  const jMv = pnlJoin(tIn, tMove, qIn, qOut, 2000);
+  const bMv = pnlBody({ wallet: W, token: T, ...jMv, partial: false, noInternal: false }, 2);
+  ok(jMv.unmatchedOut === 1 && jMv.movedOutTok === 100 && bMv.pnlUsd === null && bMv.realizedUsd === 200 && bMv.movedOutTok === 100 && bMv.holdingTok === 500,
+    "[pnl realized] tokens moved out without payment -> pnl null, realized on the sold part at average cost (+200), holding excludes moved tokens, got " + JSON.stringify(bMv));
+  ok(b.realizedUsd === null, "[pnl realized] full P&L known -> no realized field value");
+  ok(bBot.realizedUsd === null, "[pnl realized] unpaid buy -> average cost unknown -> realized null");
+  const jMvBot = pnlJoin(tIn, tMove, qIn, [], 2000);
+  ok(pnlBody({ wallet: W, token: T, ...jMvBot, partial: false, noInternal: false }, 2).realizedUsd === null, "[pnl realized] unpaid buy + moved out -> realized null");
+  ok(pnlBody({ wallet: W, token: T, ...jMv, partial: true, noInternal: false }, 2).realizedUsd === null, "[pnl realized] truncated history -> realized null");
+  const jMvOnly = pnlJoin(tIn, [{ hash: "0xC", category: "erc20", value: 100, rawContract: { address: T } }], [], qOut, 2000);
+  ok(pnlBody({ wallet: W, token: T, ...jMvOnly, partial: false, noInternal: false }, 2).realizedUsd === null, "[pnl realized] nothing sold -> realized null (never a fake 0)");
   console.log("[pnl complete] P&L only when every token leg has a visible payment; bot-funded/gift/truncated -> unknown");
+  console.log("[pnl realized] tokens moved out unpaid -> realized P&L on the sold part only; unpaid buys, truncated history or no sales -> null");
 }
 
 process.exit(fails === 0 ? 0 : 1);

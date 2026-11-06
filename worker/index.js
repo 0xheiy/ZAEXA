@@ -4056,6 +4056,7 @@ function pnlJoin(tokIn, tokOut, qIn, qOut, ethUsd) {
     boughtUsd: boughtUsd == null ? null : pnlR2(boughtUsd), boughtTok: pnlR6(boughtTok),
     soldUsd: soldUsd == null ? null : pnlR2(soldUsd), soldTok: pnlR6(soldTok),
     holdingTok: pnlR6(holdingTok), transfers, unmatchedIn: unIn, unmatchedOut: unOut,
+    movedOutTok: pnlR6(unOutTok),
   };
 }
 
@@ -4076,9 +4077,16 @@ export function pnlBody(core, p) {
   const complete = !(core.unmatchedIn > 0) && !(core.unmatchedOut > 0) && core.partial !== true;
   const pnlUsd = complete && holdingUsd != null && core.soldUsd != null && core.boughtUsd != null
     ? pnlR2(core.soldUsd + holdingUsd - core.boughtUsd) : null;
+  /* ۶ نوامبر — سودِ تحقق‌یافته روی بخشِ فروخته‌شده: وقتی همه‌ی ورودی‌ها پرداختِ دیده‌شده دارند (میانگینِ
+     هزینه معلوم) و تاریخچه کامل است، ولی بخشی از توکن بی‌پرداخت بیرون رفته (کیف‌پولِ دیگر). سودِ کل نیست. */
+  const realizedOk = pnlUsd == null && core.unmatchedOut > 0 && !(core.unmatchedIn > 0) && core.partial !== true
+    && core.boughtTok > 0 && core.soldTok > 0 && core.soldTok <= core.boughtTok * (1 + 1e-9)
+    && core.boughtUsd != null && core.soldUsd != null;
+  const realizedUsd = realizedOk ? pnlR2(core.soldUsd - core.soldTok * (core.boughtUsd / core.boughtTok)) : null;
   return {
     wallet: core.wallet, token: core.token, boughtUsd: core.boughtUsd, boughtTok: core.boughtTok,
-    soldUsd: core.soldUsd, soldTok: core.soldTok, holdingTok: core.holdingTok, holdingUsd, pnlUsd,
+    soldUsd: core.soldUsd, soldTok: core.soldTok, holdingTok: core.holdingTok, holdingUsd, pnlUsd, realizedUsd,
+    movedOutTok: core.movedOutTok ?? null,
     transfers: core.transfers, sinceBlock: core.sinceBlock, unmatchedIn: core.unmatchedIn,
     unmatchedOut: core.unmatchedOut, partial: core.partial, noInternal: core.noInternal, ethUsd: core.ethUsd,
   };

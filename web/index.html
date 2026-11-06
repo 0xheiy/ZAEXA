@@ -1219,6 +1219,7 @@ section.card.isDone #actBtn,section.card.isDone #solStatusSlot,section.card.isDo
 .lgPv{margin-left:auto;display:flex;flex-direction:column;align-items:flex-end;gap:3px;width:96px;flex:none}
 .lgPt{font-weight:600;font-size:12.5px;font-variant-numeric:tabular-nums}
 .lgPt.lgUnk{color:var(--tx3);font-weight:400}
+.lgRz{font-size:10px;letter-spacing:.04em;text-transform:uppercase;color:var(--tx3)}
 .lgBar{display:block;width:90px;height:4px;border-radius:999px;background:transparent;text-align:right;direction:rtl}
 .lgBar i{display:block;height:4px;border-radius:999px;margin-left:auto}
 .lgPsk{display:block;width:70px;height:12px;border-radius:5px}
@@ -8931,6 +8932,7 @@ function lgAnalyze(data,tokenAddr,lower){
 }
 const LG_FOOT="Flow, not skill. P&L is approximate, from each wallet's own transfers; the wallet shown is the token receiver (buys) or sender (sells) read from the transaction receipt, or the transaction signer when the token moved through a contract.";
 const LG_VIA_TIP="The token moved through a contract (router, aggregator or smart wallet), so no per-wallet P&L is shown.";
+const LG_RZ_TIP="Realized profit or loss on the part this wallet sold, at its average buy cost. Some tokens left the wallet without a visible payment (moved to another wallet or paid out elsewhere), so the full P&L is not shown.";
 const LG_TIP="Approximate profit or loss on this token for this wallet, from its on-chain transfers: paid vs received in ETH, WETH or USDC (valued at today's ETH price), plus tokens still held at today's price. Transfers between the wallet's own addresses and airdrops can distort it.";
 const LG_CHEV='<svg class="lgChev" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>';
 const lgOkAddr=w=>/^0x[0-9a-fA-F]{40}$/.test(w);
@@ -8975,6 +8977,8 @@ function lgCellHtml(st,x,max){
   if(v==="L")return '<span class="lgPv" aria-busy="true" aria-label="Loading P&amp;L"><span class="sk lgPsk"></span></span>';
   if(v&&typeof v==="object"&&v.kind==="contract")return `<span class="lgPv"><span class="lgPt lgUnk lgVia" title="${esc(LG_VIA_TIP)}">Via contract</span></span>`;
   const n=v&&typeof v==="object"&&v.kind==="eoa"?v.pnl:null;
+  const rz=v&&typeof v==="object"&&v.kind==="eoa"?v.realized:null;
+  if(n==null&&rz!=null)return `<span class="lgPv"><span class="lgPt ${rz<0?"lgNeg":rz>0?"lgPos":""}" title="${esc(LG_RZ_TIP)}">≈ ${lgSgn(rz)}</span><span class="lgRz">realized</span></span>`;
   if(n==null)return '<span class="lgPv"><span class="lgPt lgUnk">P&amp;L unknown</span></span>';
   const cls=n<0?"lgNeg":n>0?"lgPos":"";
   const bar=n===0||!(max>0)?"":`<span class="lgBar"><i class="${cls}" style="width:${Math.max(3,Math.round(Math.abs(n)/max*100))}%;background:color-mix(in srgb,var(--${n<0?"neg":"pos"}) 70%,transparent)"></i></span>`;
@@ -8989,7 +8993,9 @@ function lgPanelHtml(st,x){
   if(!v.transfers)return '<div class="lgDet"><div class="lgDn">No transfers of this token were found for this wallet.</div></div>';
   const pn=v.pnl;
   const note=[`From ${v.transfers} transfers${v.sinceBlock!=null?" since block "+v.sinceBlock:""} · paid and received in ETH, WETH and USDC, valued at today's ETH price`];
-  if(v.unmatched>0)note.push(`${v.unmatched} transfers without a visible payment (paid from a bot balance or another wallet), so P&L is unknown`);
+  const rz=pn==null?v.realized:null;
+  if(rz!=null)note.push(`${v.unOut} transfers out without a visible payment (${lgTok(v.movedTok)} ${st.sym||"tokens"} moved to another wallet or paid out elsewhere) · realized on the sold part at the average buy cost, not the full P&L`);
+  else if(v.unmatched>0)note.push(`${v.unmatched} transfers without a visible payment (paid from a bot balance or another wallet), so P&L is unknown`);
   if(v.noInternal)note.push("ETH received from contracts may be missing");
   if(v.partial)note.push("history truncated");
   if(v.fromReceipt)note.push(`token ${x.buy?"receiver":"sender"} resolved from the transaction receipt`);
@@ -8997,7 +9003,8 @@ function lgPanelHtml(st,x){
     <div><div class="k">Bought</div><div class="v mono">${lgUsd(v.bought)} · ${lgTok(v.boughtTok)} ${sym}</div></div>
     <div><div class="k">Sold</div><div class="v mono">${lgUsd(v.sold)} · ${lgTok(v.soldTok)} ${sym}</div></div>
     <div><div class="k">Still holding</div><div class="v mono">${lgTok(v.holdTok)} ${sym} ≈ ${lgUsd(v.holdUsd)}</div></div>
-    <div><div class="k">Approx. P&amp;L</div><div class="v mono${pn==null?"":pn<0?" lgNeg":pn>0?" lgPos":""}">${pn==null?"—":"≈ "+lgSgn(pn)}</div></div></div>
+    ${rz!=null?`<div><div class="k">Realized (sold part)</div><div class="v mono${rz<0?" lgNeg":rz>0?" lgPos":""}">≈ ${lgSgn(rz)}</div></div>`
+      :`<div><div class="k">Approx. P&amp;L</div><div class="v mono${pn==null?"":pn<0?" lgNeg":pn>0?" lgPos":""}">${pn==null?"—":"≈ "+lgSgn(pn)}</div></div>`}</div>
     <div class="lgDn">${esc(note.join(" · "))}</div></div>`;
 }
 function lgRowsHtml(st){
@@ -9005,8 +9012,10 @@ function lgRowsHtml(st){
   let rows=st.rows.slice();
   const max=Math.max(0,...[...lgHolders(st).values()].map(n=>Math.abs(n)));
   if(fbPref.lg==="top"){
-    const key=x=>{const v=lgRes(st,x);return v==="L"?-2e18:get(x)==null?-1e18:get(x);};
-    rows=rows.map((x,n)=>[x,n]).sort((a,b)=>key(b[0])-key(a[0])||a[1]-b[1]).map(a=>a[0]);   // پایدار: برابرها به ترتیبِ زمان
+    // ردیف‌ها: سودِ کل (بزرگ به کوچک) ← سودِ تحقق‌یافته‌ی بخشِ فروخته ← نامعلوم ← در حالِ بارگذاری
+    const tier=x=>{const v=lgRes(st,x);if(v==="L")return 0;if(get(x)!=null)return 3;return v&&typeof v==="object"&&v.kind==="eoa"&&v.realized!=null?2:1;};
+    const val=x=>{const g=get(x);if(g!=null)return g;const v=lgRes(st,x);return v&&typeof v==="object"&&v.realized!=null?v.realized:0;};
+    rows=rows.map((x,n)=>[x,n,tier(x),val(x)]).sort((a,b)=>b[2]-a[2]||b[3]-a[3]||a[1]-b[1]).map(a=>a[0]);   // پایدار: برابرها به ترتیبِ زمان
   }
   return rows.map(x=>{
     const open=st.open.has(x.i),v=lgRes(st,x);
@@ -9068,12 +9077,16 @@ function lgPnlNorm(j,px){
   if(!j||typeof j!=="object")return null;
   const num=v=>(typeof v==="number"&&isFinite(v))?v:null;
   const o={transfers:num(j.transfers),bought:num(j.boughtUsd),boughtTok:num(j.boughtTok),sold:num(j.soldUsd),soldTok:num(j.soldTok),
-    holdTok:num(j.holdingTok),sinceBlock:num(j.sinceBlock),unmatched:(num(j.unmatchedIn)||0)+(num(j.unmatchedOut)||0),
-    partial:j.partial===true,noInternal:j.noInternal===true};
+    holdTok:num(j.holdingTok),sinceBlock:num(j.sinceBlock),unIn:num(j.unmatchedIn)||0,unOut:num(j.unmatchedOut)||0,
+    movedTok:num(j.movedOutTok),partial:j.partial===true,noInternal:j.noInternal===true};
+  o.unmatched=o.unIn+o.unOut;
   if(o.transfers==null)return null;
   o.holdUsd=o.holdTok!=null&&px>0?o.holdTok*px:null;
   // ورود/خروجِ بی‌پرداخت یا تاریخچه‌ی بریده = هزینه نامعلوم → سود نامعلوم (هرگز صفر فرض نشود)
   o.pnl=o.unmatched===0&&!o.partial&&o.bought!=null&&o.sold!=null&&o.holdUsd!=null?o.sold+o.holdUsd-o.bought:null;
+  // فقط خروجِ بی‌پرداخت (ورودی‌ها همه پرداخت‌شده، تاریخچه کامل): سودِ تحقق‌یافته‌ی بخشِ فروخته به میانگینِ هزینه
+  o.realized=o.pnl==null&&o.unOut>0&&o.unIn===0&&!o.partial&&o.boughtTok>0&&o.soldTok>0&&o.soldTok<=o.boughtTok*(1+1e-9)
+    &&o.bought!=null&&o.sold!=null?o.sold-o.soldTok*(o.bought/o.boughtTok):null;
   return o;
 }
 // پاسخِ مسیرِ tx -> نتیجه‌ی ردیف؛ null = خطا/ناخوانا

@@ -9678,6 +9678,10 @@ def pn_server(env, table, *datas, over=None):
             return (500, {"error": "upstream"})
         if v == "empty":
             return (200, {**pn_core(wl, tk, 0, transfers=0, boughtUsd=None, boughtTok=None, soldUsd=None, soldTok=None, holdingTok=None, holdingUsd=None, pnlUsd=None, sinceBlock=None), **base, "holder": wl})
+        if isinstance(v, tuple) and v[0] == "rz":   # خروجِ بی‌پرداخت: تحقق‌یافته = sold − soldTok×(bought/boughtTok)
+            r = v[1]
+            return (200, {**pn_core(wl, tk, 0, boughtUsd=3000, boughtTok=1000000, soldUsd=1800 + r, soldTok=600000, holdingTok=100000,
+                                    holdingUsd=100000 * PN_PX, pnlUsd=None, realizedUsd=r, unmatchedOut=3, movedOutTok=300000), **base, "holder": wl})
         extra = {"unmatchedIn": 2, "partial": True} if h == 9 else {}   # ۶ نوامبر: بی‌پرداخت → نامعلوم (w9، آخرین جواب)
         return (200, {**pn_core(wl, tk, v, **extra), **base, "holder": wl})
     return f
@@ -9841,13 +9845,31 @@ async def check_pnl_card(p, errors):
         # 7) طرح‌بندی: ۱۴۴۰ روشن و ۳۹۰ (هر دو تم)؛ کاشی‌ها ۲+۱، پنل ۲×۲، بی‌سرریز
         env.pnl_gate.set()
         env.gt = pn_gt(env, PD)
-        env.pnl = pn_server(env, {**PN_P, 7: "fail", 8: "empty"}, PD)
+        env.pnl = pn_server(env, {**PN_P, 3: ("rz", 4200), 7: "fail", 8: "empty"}, PD)   # ۶ نوامبر: w3 = تحقق‌یافته‌ی بخشِ فروخته
+        first = True
         for scheme in ("light", "dark"):
             for vw, vh in ((1440, 1000), (390, 900)):
                 pg = await env.open(vw=vw, vh=vh, scheme=scheme, board=False, init=PAIR)
                 await pg.wait_for_selector("#flowLarge .lgRow", timeout=20000)
                 await pg.wait_for_function("() => document.querySelectorAll('#flowLarge .lgPsk').length === 0", timeout=20000)
                 await pg.click('#flowLarge .lgRow:nth-child(3) .amt2')
+                if first:
+                    first = False
+                    r3 = (await pg.evaluate(PN_ROWS_JS))[2]
+                    rz = await pg.evaluate("() => { const r = document.querySelectorAll('#flowLarge .lgRow')[2]; const z = r.querySelector('.lgRz'); return [z ? z.textContent : null, r.querySelector('.lgPt').title]; }")
+                    assert r3["pnl"] == "≈ +$4.2K" and "lgPos" in r3["cls"] and r3["bar"] is None and rz[0] == "realized" and rz[1].startswith("Realized profit or loss on the part this wallet sold"), \
+                        "[pnl realized] row: realized value, 'realized' label, no bar, own tooltip: %s %s" % (r3, rz)
+                    assert "REALIZED (SOLD PART) ≈ +$4.2K" in r3["panel"] and "3 transfers out without a visible payment (300.0K " in r3["panel"] \
+                        and "realized on the sold part at the average buy cost, not the full P&L" in r3["panel"] and "APPROX. P&L" not in r3["panel"].upper() \
+                        and "STILL HOLDING 100.0K" in r3["panel"], "[pnl realized] panel: %s" % r3["panel"]
+                    tiles = await pg.evaluate(PN_TILES_JS)
+                    assert tiles[0][1] == "3 · ≈ +$2.1K" and tiles[2][1] == SH(1) + " · ≈ +$1.2K", "[pnl realized] realized is not full P&L: not counted in the tiles: %s" % tiles
+                    await pg.click('#flowLarge .lgRow:nth-child(3) .amt2')
+                    await pg.click('#flowLarge [data-lgsort="top"]')
+                    tops = [r["a"] for r in await pg.evaluate(PN_ROWS_JS)]
+                    assert tops == [SH(n) for n in (1, 1, 6, 4, 2, 5, 3, 7, 8, 9)], "[pnl realized] Top P&L: full P&L first, then realized, then unknown: %s" % tops
+                    await pg.click('#flowLarge [data-lgsort="latest"]')
+                    await pg.click('#flowLarge .lgRow:nth-child(3) .amt2')
                 m = await pg.evaluate("""() => { const q = s => [...document.querySelectorAll(s)];
                     const t = q('#flowLarge .lgStats .tstat').map(e => { const r = e.getBoundingClientRect(); return [Math.round(r.left), Math.round(r.top), Math.round(r.width)]; });
                     const g = getComputedStyle(document.querySelector('#flowLarge .lgGrid')).gridTemplateColumns.split(' ').length;
