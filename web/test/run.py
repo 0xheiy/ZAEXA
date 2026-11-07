@@ -23206,8 +23206,8 @@ async def check_vendor_parts(p, errors):
     try:
         subprocess.check_call(["node", os.path.join(root, "scripts", "build_site.mjs"), "--src", os.path.join(root, "web"), "--out", out], stdout=subprocess.DEVNULL)
         app = open(os.path.join(out, "app.html"), encoding="utf-8").read()
-        m = re.search(r"<script>window\.__zxParts=(\{.*?\})</script>\n<script>\n/\* ZX-CHUNK-LOADER", app)
-        assert m, "[vendor parts] app.html carries window.__zxParts right before the chunk loader"
+        m = re.search(r"<script>window\.__zxParts=(\{.*?\})</script>\n<script>\n/\* ZX-STALL-NOTICE.*?</script>\n<script>\n/\* ZX-CHUNK-LOADER", app, re.S)
+        assert m, "[vendor parts] app.html carries window.__zxParts, then the stall notice, right before the chunk loader"
         spec = json.loads(m.group(1))
         src = open(os.path.join(root, "web", "index.html"), encoding="utf-8").read()
         assert set(spec) == {"ethers", "walletconnect"}, "[vendor parts] both big vendors are split: %s" % list(spec)
@@ -23272,6 +23272,46 @@ async def check_vendor_parts(p, errors):
             wc = await pg.evaluate("async () => { const P = await loadWalletConnect(); return [typeof P, P === window.WCProvider]; }")
             assert wc == ["object", True] or wc == ["function", True], "[vendor parts] loadWalletConnect resolves from the parts: %s" % wc
             assert sum(1 for k in seen if k.startswith("walletconnect.")) == len(spec["walletconnect"]["p"]), "[vendor parts] every WalletConnect part fetched once"
+            await pg.wait_for_function("performance.now() > 16500", timeout=20000)
+            assert await pg.evaluate("() => !document.getElementById('zxStall')"), "[stall notice] a healthy page never shows the stall card"
+            await ctx.close()
+            # ۱ب. ZX-STALL-NOTICE: تکه‌های اپ تا ۱۶ث نمی‌رسند → کارتِ پیام (نه زودتر از ۱۵ث)؛ اپ که رسید خودش می‌رود
+            ctx = await b_.new_context()
+            release = asyncio.Event()
+
+            async def held(route):
+                await release.wait()
+                try:
+                    await route.continue_()
+                except Exception:
+                    pass
+            await ctx.route(re.compile(r"^https?://(?!127\.0\.0\.1)"), lambda route: route.abort())
+            await ctx.route("**/app.*.js", held)
+            pg = await ctx.new_page()
+            await pg.goto(origin + "/app#swap", wait_until="domcontentloaded")
+            await pg.wait_for_timeout(13000)
+            assert await pg.evaluate("() => !document.getElementById('zxStall')"), "[stall notice] never before 15 s"
+            await pg.wait_for_selector("#zxStall", timeout=8000)
+            card = await pg.evaluate("() => { const b = document.getElementById('zxStall'); return [b.getAttribute('role'), b.innerText, [...b.querySelectorAll('button')].map(x => x.textContent)]; }")
+            assert card[0] == "alert" and card[1].startswith("Your connection to Zaexa is being slowed down\n") \
+                and "Nothing has been sent and your funds are untouched." in card[1] and "Trying again on another network or connection usually fixes it." in card[1] and "VPN" not in card[1] \
+                and card[2] == ["Reload", "Keep waiting"], "[stall notice] card text and buttons: %s" % card
+            release.set()
+            await pg.wait_for_function("window.__zxApp === 1 && !document.getElementById('zxStall')", timeout=40000)
+            await ctx.close()
+            # ۱ج. «Keep waiting» کارت را می‌بندد و دیگر برنمی‌گردد
+            ctx = await b_.new_context()
+            await ctx.route(re.compile(r"^https?://(?!127\.0\.0\.1)"), lambda route: route.abort())
+
+            async def never(route):
+                await asyncio.sleep(40)
+            await ctx.route("**/app.*.js", never)
+            pg = await ctx.new_page()
+            await pg.goto(origin + "/app#swap", wait_until="domcontentloaded")
+            await pg.wait_for_selector("#zxStall", timeout=22000)
+            await pg.click("#zxStall button:nth-of-type(2)")
+            await pg.wait_for_timeout(2500)
+            assert await pg.evaluate("() => !document.getElementById('zxStall')"), "[stall notice] Keep waiting dismisses it for good"
             await ctx.close()
             # ۲. تکه‌ی دستکاری‌شده‌ی هم‌طول → هش نمی‌خورد → اجرا نمی‌شود، پیامِ «Could not load ethers»
             ctx = await b_.new_context()
@@ -23292,7 +23332,7 @@ async def check_vendor_parts(p, errors):
             srv.shutdown()
     finally:
         shutil.rmtree(out, ignore_errors=True)
-    print("[vendor parts] PASS — ethers %d parts, walletconnect %d parts; stalled/truncated parts refetched, sha384 checked before running, tampered part refused, WalletConnect only on demand" % (len(spec["ethers"]["p"]), len(spec["walletconnect"]["p"])))
+    print("[vendor parts] PASS — ethers %d parts, walletconnect %d parts; stalled/truncated parts refetched, sha384 checked before running, tampered part refused, WalletConnect only on demand; stall card after 15 s, gone when the app arrives, dismissable, never on a healthy page" % (len(spec["ethers"]["p"]), len(spec["walletconnect"]["p"])))
 
 
 async def check_boot_watchdog(p, errors):

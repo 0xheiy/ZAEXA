@@ -2786,7 +2786,7 @@ const LINKS={
    دو هرگز از هم دور نیفتند. */
 const ETHERS_SRC="./ethers.umd.min.fd66c046.js";
 const ETHERS_SRI="sha384-6Zl0Pc8zjSz8KvmNeXRvUQgY4ryFb+BwDvKCmLYcBME0joAaru491tQgi9B7zsMM";
-/* ۷ نوامبر — روی اینترنتِ ایران (بی‌وی‌پی‌ان، پنجره‌ی خصوصی) اپ با نمادهای «—» و «Loading price history…» ماند و
+/* ۷ نوامبر — روی اینترنتِ ایران (پنجره‌ی خصوصی) اپ با نمادهای «—» و «Loading price history…» ماند و
    برگه هرگز بارش تمام نشد: ethers (~۱۳۲–۱۵۸KB فشرده) درست روی مرزِ ~۱۲۰KB است که شبکه‌ی حسام اتصال را بعدش
    می‌خواباند، و یک <script src> که وسطِ راه می‌ایستد نه onload می‌دهد نه onerror — بی‌مهلت و بی‌تلاشِ دوباره.
    در نسخه‌ی منتشرشده scripts/build_site.mjs فایل را به تکه‌های کوچک می‌شکند و window.__zxParts را می‌نویسد؛
@@ -2810,6 +2810,7 @@ function zxLoadParts(spec){return new Promise((res,rej)=>{
   pump();});}
 function zxPartsFor(name){const p=window.__zxParts;return p&&p[name]&&/^https?:$/.test(location.protocol)&&window.crypto&&crypto.subtle?p[name]:null;}
 function loadEthers(){
+  window.__zxEthersPending=1;   // ZX-STALL-NOTICE در نسخه‌ی منتشرشده: ethers در راه است و هنوز نرسیده
   const sp=zxPartsFor("ethers");
   if(sp&&sp.sri===ETHERS_SRI)return zxLoadParts(sp).then(()=>{if(!window.ethers)throw new Error("ethers ran but did not register");return window.ethers;});
   return new Promise((res,rej)=>{
