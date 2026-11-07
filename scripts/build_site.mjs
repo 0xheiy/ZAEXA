@@ -97,6 +97,38 @@ function loaderScript(paths, lens) {
 "</script>";
 }
 
+/* ۷ نوامبر — همان مشکل برای وندورهای بزرگ: روی اینترنتِ ایران ethers (~۱۳۲–۱۵۸KB فشرده) وسطِ راه ایستاد و اپ با
+   «—» و «Loading price history…» ماند؛ walletconnect (~۳۸۰KB فشرده) سه برابرِ مرز است. فایلِ اصلی دست نمی‌خورد
+   (سوییت و صفحه‌های دیگر همان را می‌خوانند)؛ فقط در _site تکه‌های <نام>.p<i>.js کنارش نوشته می‌شود و app.html
+   window.__zxParts را می‌گیرد: { ethers|walletconnect: { p: مسیرها, l: طولِ هر تکه (کاراکتر), sri: sha384ِ کلِ فایل } }.
+   zxLoadParts در index.html هر تکه را با مهلت و تلاشِ دوباره می‌گیرد و sri را پیش از اجرا می‌سنجد. sriِ ethers
+   باید دقیقاً ETHERS_SRIِ منبع باشد، وگرنه ساخت می‌شکند (هرگز فایلی بی‌تطبیق منتشر نشود). */
+export const VENDOR_CHARS = 110000;
+export function vendorParts(src, srcDir) {
+  const out = {}, files = [];
+  const eth = /const ETHERS_SRC="\.\/([^"\/]+)";/.exec(src), sri = /const ETHERS_SRI="([^"]*)";/.exec(src);
+  const wc = /s\.src="\.\/(walletconnect\.bundle\.[0-9a-f]+\.js)"/.exec(src);
+  const one = (key, file, want) => {
+    const fp = path.join(srcDir, file);
+    if (!fs.existsSync(fp)) return;                      // هارنسِ سوییت: ethers قلابی، بی تکه
+    const buf = fs.readFileSync(fp), text = buf.toString("utf8");
+    const got = "sha384-" + crypto.createHash("sha384").update(buf).digest("base64");
+    if (want != null && got !== want) throw new Error(`build_site: ${file} does not match ETHERS_SRI (${got})`);
+    const stem = file.replace(/\.js$/, ""), p = [], l = [];
+    for (let i = 0, n = 0; i < text.length; i += VENDOR_CHARS, n++) {
+      const part = text.slice(i, i + VENDOR_CHARS);
+      const c = part.charCodeAt(part.length - 1);
+      if (c >= 0xd800 && c <= 0xdbff) throw new Error(`build_site: ${file} would be cut inside a surrogate pair`);
+      const name = `${stem}.p${n}.js`;
+      files.push([name, part]); p.push("/" + name); l.push(part.length);
+    }
+    out[key] = { p, l, sri: got };
+  };
+  if (eth && sri && sri[1]) one("ethers", eth[1], sri[1]);
+  if (wc) one("walletconnect", wc[1], null);
+  return { parts: out, files };
+}
+
 function copy(from, to) { fs.copyFileSync(from, to); }
 
 export async function build() {
@@ -106,6 +138,14 @@ export async function build() {
   const at = src.indexOf(MAIN_MARK), o = src.lastIndexOf("<script>", at), c = src.indexOf("</script>", at);
   const small = await stripJsComments(src.slice(o + "<script>".length, c));
   const app = splitApp(src, CHUNK_CHARS, () => small);
+  const vend = vendorParts(src, SRC);
+  if (Object.keys(vend.parts).length) {
+    const LOADER = "<script>\n/* ZX-CHUNK-LOADER";
+    if (app.html.split(LOADER).length !== 2) throw new Error("build_site: chunk loader not found once in app.html");
+    app.html = app.html.replace(LOADER, "<script>window.__zxParts=" + JSON.stringify(vend.parts) + "</script>\n" + LOADER);
+  }
+  vend.files.forEach(([n, c]) => fs.writeFileSync(path.join(OUT, n), c));
+  app.vendor = vend;
   fs.writeFileSync(path.join(OUT, "app.html"), app.html);
   app.chunks.forEach((c, i) => fs.writeFileSync(path.join(OUT, app.names[i]), c));
   copy(path.join(SRC, "landing.html"), path.join(OUT, "index.html"));
@@ -120,5 +160,5 @@ export async function build() {
 
 if (import.meta.url === `file://${process.argv[1]}` || process.argv[1]?.endsWith("build_site.mjs")) {
   const app = await build();
-  console.log(`_site built: app.html ${Buffer.byteLength(app.html)}B + ${app.chunks.length} chunks (${app.hash})`);
+  console.log(`_site built: app.html ${Buffer.byteLength(app.html)}B + ${app.chunks.length} chunks (${app.hash}) + vendor parts ${Object.entries(app.vendor.parts).map(([k, v]) => k + "×" + v.p.length).join(", ") || "none"}`);
 }

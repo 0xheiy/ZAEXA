@@ -1220,6 +1220,7 @@ section.card.isDone #actBtn,section.card.isDone #solStatusSlot,section.card.isDo
 .lgPt{font-weight:600;font-size:12.5px;font-variant-numeric:tabular-nums}
 .lgPt.lgUnk{color:var(--tx3);font-weight:400}
 .lgRz{font-size:10px;letter-spacing:.04em;text-transform:uppercase;color:var(--tx3)}
+.lgSplit{font-size:11px;color:var(--tx3);margin-top:2px;font-variant-numeric:tabular-nums}
 .lgBar{display:block;width:90px;height:4px;border-radius:999px;background:transparent;text-align:right;direction:rtl}
 .lgBar i{display:block;height:4px;border-radius:999px;margin-left:auto}
 .lgPsk{display:block;width:70px;height:12px;border-radius:5px}
@@ -2785,7 +2786,33 @@ const LINKS={
    دو هرگز از هم دور نیفتند. */
 const ETHERS_SRC="./ethers.umd.min.fd66c046.js";
 const ETHERS_SRI="sha384-6Zl0Pc8zjSz8KvmNeXRvUQgY4ryFb+BwDvKCmLYcBME0joAaru491tQgi9B7zsMM";
-function loadEthers(){return new Promise((res,rej)=>{
+/* ۷ نوامبر — روی اینترنتِ ایران (بی‌وی‌پی‌ان، پنجره‌ی خصوصی) اپ با نمادهای «—» و «Loading price history…» ماند و
+   برگه هرگز بارش تمام نشد: ethers (~۱۳۲–۱۵۸KB فشرده) درست روی مرزِ ~۱۲۰KB است که شبکه‌ی حسام اتصال را بعدش
+   می‌خواباند، و یک <script src> که وسطِ راه می‌ایستد نه onload می‌دهد نه onerror — بی‌مهلت و بی‌تلاشِ دوباره.
+   در نسخه‌ی منتشرشده scripts/build_site.mjs فایل را به تکه‌های کوچک می‌شکند و window.__zxParts را می‌نویسد؛
+   zxLoadParts هر تکه را با مهلت و تلاشِ دوباره می‌گیرد (مثلِ ZX-CHUNK-LOADER)، طولِ هر تکه و sha384ِ کل را
+   *پیش از اجرا* می‌سنجد (همان ETHERS_SRI — تضمینِ زنجیره‌ی تأمین ضعیف نمی‌شود) و متن را درون‌خطی اجرا می‌کند
+   (CSP: 'unsafe-inline' از قبل لازم بود). بی __zxParts (سوییت، file://، توسعه) همان مسیرِ قدیمی. */
+function zxLoadParts(spec){return new Promise((res,rej)=>{
+  const P=spec.p,L=spec.l,parts=new Array(P.length),TIMEOUT=8000,TRIES=6,CONC=2;let got=0,next=0,dead=false;
+  const fail=e=>{if(dead)return;dead=true;rej(e);};
+  const get=(i,k)=>{const ac=new AbortController(),t=setTimeout(()=>ac.abort(),TIMEOUT);
+    fetch(P[i],{credentials:"same-origin",signal:ac.signal})
+      .then(r=>{if(!r.ok)throw 0;return r.text();})
+      .then(x=>{clearTimeout(t);if(x.length!==L[i])throw 0;parts[i]=x;got++;if(got===P.length)done();else pump();})
+      .catch(()=>{clearTimeout(t);if(dead)return;if(k+1<TRIES)setTimeout(()=>get(i,k+1),400*(k+1));else fail(new Error("could not load "+P[i]));});};
+  const pump=()=>{while(next<P.length&&next-got<CONC)get(next++,0);};
+  const done=async()=>{const code=parts.join("");let ok=false;
+    try{const d=new Uint8Array(await crypto.subtle.digest("SHA-384",new TextEncoder().encode(code)));
+      let b="";for(const x of d)b+=String.fromCharCode(x);ok="sha384-"+btoa(b)===spec.sri;}catch{}
+    if(!ok)return fail(new Error("integrity check failed for "+P[0]));
+    const s=document.createElement("script");s.textContent=code;document.head.appendChild(s);res();};
+  pump();});}
+function zxPartsFor(name){const p=window.__zxParts;return p&&p[name]&&/^https?:$/.test(location.protocol)&&window.crypto&&crypto.subtle?p[name]:null;}
+function loadEthers(){
+  const sp=zxPartsFor("ethers");
+  if(sp&&sp.sri===ETHERS_SRI)return zxLoadParts(sp).then(()=>{if(!window.ethers)throw new Error("ethers ran but did not register");return window.ethers;});
+  return new Promise((res,rej)=>{
   const s=document.createElement("script");
   s.src=ETHERS_SRC;
   /* هش فقط وقتی اعمال می‌شود که خالی نباشد. تنها جایی که خالی است، هارنس
@@ -9005,7 +9032,7 @@ function lgPanelHtml(st,x){
     <div><div class="k">Sold</div><div class="v mono">${lgUsd(v.sold)} · ${lgTok(v.soldTok)} ${sym}</div></div>
     <div><div class="k">Still holding</div><div class="v mono">${lgTok(v.holdTok)} ${sym} ≈ ${lgUsd(v.holdUsd)}</div></div>
     ${rz!=null?`<div><div class="k">Realized (sold part)</div><div class="v mono${rz<0?" lgNeg":rz>0?" lgPos":""}">≈ ${lgSgn(rz)}</div></div>`
-      :`<div><div class="k">Approx. P&amp;L</div><div class="v mono${pn==null?"":pn<0?" lgNeg":pn>0?" lgPos":""}">${pn==null?"—":"≈ "+lgSgn(pn)}</div></div>`}</div>
+      :`<div><div class="k">Approx. P&amp;L</div><div class="v mono${pn==null?"":pn<0?" lgNeg":pn>0?" lgPos":""}">${pn==null?"—":"≈ "+lgSgn(pn)}</div>${pn!=null&&v.rzPart!=null?`<div class="lgSplit" title="Realized: what the sold part made at the average buy cost. On holding: the tokens still held at today's price minus their average buy cost — changes with the price.">realized ${lgSgn(v.rzPart)} · on holding ${lgSgn(v.urPart)}</div>`:""}</div>`}</div>
     <div class="lgDn">${esc(note.join(" · "))}</div></div>`;
 }
 function lgRowsHtml(st){
@@ -9085,6 +9112,10 @@ function lgPnlNorm(j,px){
   o.holdUsd=o.holdTok!=null&&px>0?o.holdTok*px:null;
   // ورود/خروجِ بی‌پرداخت یا تاریخچه‌ی بریده = هزینه نامعلوم → سود نامعلوم (هرگز صفر فرض نشود)
   o.pnl=o.unmatched===0&&!o.partial&&o.bought!=null&&o.sold!=null&&o.holdUsd!=null?o.sold+o.holdUsd-o.bought:null;
+  // ۷ نوامبر — سودِ کل = تحقق‌یافته (فروخته به میانگینِ هزینه) + روی موجودی (قیمتِ امروز − میانگینِ هزینه)؛ فقط وقتی فروخته + مانده = خریده (±۱٪)
+  o.rzPart=o.urPart=null;
+  if(o.pnl!=null&&o.boughtTok>0&&o.soldTok!=null&&o.holdTok!=null&&Math.abs(o.soldTok+o.holdTok-o.boughtTok)<=o.boughtTok*.01){
+    const avg=o.bought/o.boughtTok;o.rzPart=o.sold-o.soldTok*avg;o.urPart=o.pnl-o.rzPart;}
   // فقط خروجِ بی‌پرداخت (ورودی‌ها همه پرداخت‌شده، تاریخچه کامل): سودِ تحقق‌یافته‌ی بخشِ فروخته به میانگینِ هزینه
   o.realized=o.pnl==null&&o.unOut>0&&o.unIn===0&&!o.partial&&o.boughtTok>0&&o.soldTok>0&&o.soldTok<=o.boughtTok*(1+1e-9)
     &&o.bought!=null&&o.sold!=null?o.sold-o.soldTok*(o.bought/o.boughtTok):null;
@@ -9429,7 +9460,9 @@ let wcProvider=null,wcLoading=null;
 function loadWalletConnect(){
   if(window.WCProvider)return Promise.resolve(window.WCProvider);
   if(wcLoading)return wcLoading;
-  wcLoading=new Promise((res,rej)=>{
+  const sp=zxPartsFor("walletconnect");
+  if(sp)wcLoading=zxLoadParts(sp).then(()=>{if(!window.WCProvider)throw new Error("WalletConnect loaded but did not register.");return window.WCProvider;});
+  else wcLoading=new Promise((res,rej)=>{
     const s=document.createElement("script");
     s.src="./walletconnect.bundle.9d119cbe.js";      // محلی — عمداً بدون CDN
     s.onload=()=>window.WCProvider?res(window.WCProvider)

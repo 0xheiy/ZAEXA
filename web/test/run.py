@@ -9783,7 +9783,10 @@ async def check_pnl_card(p, errors):
         await pg.click(sel(3) + " .amt2")
         r3 = (await pg.evaluate(PN_ROWS_JS))[2]
         assert r3["open"] == "true", "[pnl card] click opens the panel: %s" % r3
-        wantp = ("bought $3.0k · 1.20m aero sold $21.0k · 1.20m aero still holding 200 aero ≈ $400 approx. p&l ≈ +$18.4k "
+        if shots:
+            os.makedirs(shots, exist_ok=True)
+            await pg.locator(sel(3)).screenshot(path=os.path.join(shots, "pnl_split_open.png"))
+        wantp = ("bought $3.0k · 1.20m aero sold $21.0k · 1.20m aero still holding 200 aero ≈ $400 approx. p&l ≈ +$18.4k realized +$18.0k · on holding +$400 "
                  "from 14 transfers since block 1234567 · paid and received in eth, weth and usdc, valued at today's eth price "
                  "· 2 trades valued from the swap itself (the money came from or went to another address, assumed to be the same owner) "
                  "· token receiver resolved from the transaction receipt")
@@ -10414,6 +10417,7 @@ async def main():
         await check_mcap_scope(p, errors)
         await check_boot_watchdog(p, errors)
         await check_chunked_build(p, errors)
+        await check_vendor_parts(p, errors)
         await check_header_star_parity(p, errors)
         await check_markets_pages_parity(p, errors)
         await check_markets_no_clip(p, errors)
@@ -23189,6 +23193,106 @@ async def check_chunked_build(p, errors):
     finally:
         shutil.rmtree(out, ignore_errors=True)
     print("[chunked build] PASS — _site: app.html + %d hashed chunks (brotli %s); stalled/truncated chunks refetched, app boots, header works" % (len(chunks), sizes))
+
+
+async def check_vendor_parts(p, errors):
+    """[vendor parts] ۷ نوامبر — روی اینترنتِ ایران ethers وسطِ راه ایستاد و اپ با «—» ماند. build_site.mjs در _site
+    ethers و walletconnect را به تکه‌های کوچک (<name>.p<i>.js) می‌شکند و window.__zxParts را در app.html می‌گذارد؛
+    zxLoadParts تکه‌ی ایستاده/کوتاه را دوباره می‌گیرد، sha384ِ کل (برای ethers همان ETHERS_SRI) را پیش از اجرا
+    می‌سنجد و تکه‌ی دستکاری‌شده‌ی هم‌طول را اجرا نمی‌کند. فایل‌های اصلی دست نمی‌خورند."""
+    import subprocess, tempfile, shutil, http.server, threading, functools, json, base64, hashlib
+    root = os.path.abspath(os.path.join(HERE, "..", ".."))
+    out = tempfile.mkdtemp(prefix="zxvend_")
+    try:
+        subprocess.check_call(["node", os.path.join(root, "scripts", "build_site.mjs"), "--src", os.path.join(root, "web"), "--out", out], stdout=subprocess.DEVNULL)
+        app = open(os.path.join(out, "app.html"), encoding="utf-8").read()
+        m = re.search(r"<script>window\.__zxParts=(\{.*?\})</script>\n<script>\n/\* ZX-CHUNK-LOADER", app)
+        assert m, "[vendor parts] app.html carries window.__zxParts right before the chunk loader"
+        spec = json.loads(m.group(1))
+        src = open(os.path.join(root, "web", "index.html"), encoding="utf-8").read()
+        assert set(spec) == {"ethers", "walletconnect"}, "[vendor parts] both big vendors are split: %s" % list(spec)
+        eth_src = re.search(r'const ETHERS_SRC="\./([^"]+)";', src).group(1)
+        eth_sri = re.search(r'const ETHERS_SRI="([^"]+)";', src).group(1)
+        assert spec["ethers"]["sri"] == eth_sri, "[vendor parts] the ethers parts carry the pinned ETHERS_SRI"
+        import brotli
+        for key, fname in (("ethers", eth_src), ("walletconnect", re.search(r's\.src="\./(walletconnect\.bundle\.[0-9a-f]+\.js)"', src).group(1))):
+            orig = open(os.path.join(root, "web", fname), "rb").read()
+            assert open(os.path.join(out, fname), "rb").read() == orig, "[vendor parts] %s itself is still published unchanged" % fname
+            joined = "".join(open(os.path.join(out, x.lstrip("/")), encoding="utf-8").read() for x in spec[key]["p"])
+            assert joined.encode("utf-8") == orig and [len(open(os.path.join(out, x.lstrip("/")), encoding="utf-8").read()) for x in spec[key]["p"]] == spec[key]["l"], "[vendor parts] %s parts join back to the file, lengths listed" % key
+            assert spec[key]["sri"] == "sha384-" + base64.b64encode(hashlib.sha384(orig).digest()).decode(), "[vendor parts] %s sri is the file's sha384" % key
+            big = max(len(brotli.compress(open(os.path.join(out, x.lstrip("/")), "rb").read(), quality=4)) for x in spec[key]["p"])
+            assert big <= 50000, "[vendor parts] every %s part stays far under the ~120KB cut (brotli q4 %d)" % (key, big)
+
+        class H(http.server.SimpleHTTPRequestHandler):
+            def log_message(self, *a):
+                pass
+
+            def translate_path(self, path):
+                if path.split("?")[0] in ("/app", "/app/"):
+                    return os.path.join(out, "app.html")
+                return super().translate_path(path)
+        srv = http.server.ThreadingHTTPServer(("127.0.0.1", 0), functools.partial(H, directory=out))
+        threading.Thread(target=srv.serve_forever, daemon=True).start()
+        origin = "http://127.0.0.1:%d" % srv.server_port
+        b_ = await p.chromium.launch()
+        try:
+            # ۱. تکه‌ی ۱ اولین بار می‌ایستد، تکه‌ی ۳ اولین بار کوتاه می‌آید → دوباره گرفته می‌شوند و ethers واقعی اجرا می‌شود
+            ctx = await b_.new_context()
+            seen = {}
+
+            async def r(route):
+                u = route.request.url.split("/")[-1]
+                n = seen.get(u, 0) + 1
+                seen[u] = n
+                if u.startswith("ethers.") and u.endswith(".p1.js") and n == 1:
+                    await asyncio.sleep(20)
+                    try:
+                        await route.abort()
+                    except Exception:
+                        pass
+                    return
+                if u.startswith("ethers.") and u.endswith(".p3.js") and n == 1:
+                    resp = await route.fetch()
+                    await route.fulfill(response=resp, body=(await resp.text())[:5000])
+                    return
+                await route.continue_()
+            await ctx.route("**/*.p*.js", r)
+            await ctx.route(re.compile(r"^https?://(?!127\.0\.0\.1)"), lambda route: route.abort())
+            pg = await ctx.new_page()
+            await pg.goto(origin + "/app#swap", wait_until="domcontentloaded")
+            await pg.wait_for_function("typeof window.ethers === 'object' && typeof window.ethers.Interface === 'function'", timeout=40000)
+            eseen = {k: v for k, v in seen.items() if k.startswith("ethers.")}
+            assert eseen.get(eth_src.replace(".js", ".p1.js")) == 2 and eseen.get(eth_src.replace(".js", ".p3.js")) == 2 \
+                and len(eseen) == len(spec["ethers"]["p"]) and all(v == 1 for k, v in eseen.items() if not k.endswith((".p1.js", ".p3.js"))), \
+                "[vendor parts] only the stalled and the truncated ethers parts are fetched again: %s" % eseen
+            plain = await pg.evaluate("() => [...document.scripts].some(s => /ethers\\.umd\\.min\\.[0-9a-f]+\\.js$/.test(s.src))")
+            assert not plain, "[vendor parts] the whole ethers file is never requested when parts exist"
+            assert not any(k.startswith("walletconnect.") for k in seen), "[vendor parts] WalletConnect parts are not loaded until asked for"
+            wc = await pg.evaluate("async () => { const P = await loadWalletConnect(); return [typeof P, P === window.WCProvider]; }")
+            assert wc == ["object", True] or wc == ["function", True], "[vendor parts] loadWalletConnect resolves from the parts: %s" % wc
+            assert sum(1 for k in seen if k.startswith("walletconnect.")) == len(spec["walletconnect"]["p"]), "[vendor parts] every WalletConnect part fetched once"
+            await ctx.close()
+            # ۲. تکه‌ی دستکاری‌شده‌ی هم‌طول → هش نمی‌خورد → اجرا نمی‌شود، پیامِ «Could not load ethers»
+            ctx = await b_.new_context()
+
+            async def bad(route):
+                resp = await route.fetch()
+                t = await resp.text()
+                await route.fulfill(response=resp, body=t[:100] + ("X" if t[100] != "X" else "Y") + t[101:])
+            await ctx.route("**/ethers.*.p2.js", bad)
+            await ctx.route(re.compile(r"^https?://(?!127\.0\.0\.1)"), lambda route: route.abort())
+            pg = await ctx.new_page()
+            await pg.goto(origin + "/app#swap", wait_until="domcontentloaded")
+            await pg.wait_for_function("document.body && /Could not load ethers/.test(document.body.innerText)", timeout=30000)
+            assert await pg.evaluate("() => typeof window.ethers") == "undefined", "[vendor parts] a tampered part of the same length never runs"
+            await ctx.close()
+        finally:
+            await b_.close()
+            srv.shutdown()
+    finally:
+        shutil.rmtree(out, ignore_errors=True)
+    print("[vendor parts] PASS — ethers %d parts, walletconnect %d parts; stalled/truncated parts refetched, sha384 checked before running, tampered part refused, WalletConnect only on demand" % (len(spec["ethers"]["p"]), len(spec["walletconnect"]["p"])))
 
 
 async def check_boot_watchdog(p, errors):
