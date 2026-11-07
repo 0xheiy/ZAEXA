@@ -14768,7 +14768,8 @@ async def main():
         print("[flow tf] buttons=%s" % flow_tf["labels"])
         assert flow_tf["labels"] == [["m5", "5M"], ["m15", "15M"], ["h1", "1H"], ["h6", "6H"], ["h24", "24H"]], \
             "[flow tf] the Money Flow buttons must be 5M, 15M, 1H, 6H, 24H: %s" % flow_tf["labels"]
-        for tf_id, tf_blocks in (("m5", 150), ("m15", 450), ("h1", 1800), ("h6", 10800), ("h24", 43200)):
+        # ۷ نوامبر: Base بلاکِ ۲۰۰ms — ۱۸۰۰۰ بلوک = ۱ ساعت
+        for tf_id, tf_blocks in (("m5", 1500), ("m15", 4500), ("h1", 18000), ("h6", 108000), ("h24", 432000)):
             tf_run = flow_tf["runs"][tf_id]
             print("[flow tf %s] span=%d requests=%d maxChunk=%d on=%s" % (tf_id, tf_run["span"], tf_run["n"], tf_run["maxChunk"], tf_run["on"]))
             assert tf_run["span"] == tf_blocks, "[flow tf] %s must read exactly %d blocks, read %d" % (tf_id, tf_blocks, tf_run["span"])
@@ -14776,8 +14777,8 @@ async def main():
             assert tf_run["maxChunk"] <= 1500, "[flow tf] %s: a chunk exceeds the 1500-block cap" % tf_id
             assert "Net" in tf_run["text"], "[flow tf] %s did not render: %r" % (tf_id, tf_run["text"][:120])
             assert "We could only read" not in tf_run["text"], "[flow tf] %s: a fully answered window must not claim partial coverage" % tf_id
-        assert flow_tf["runs"]["h24"]["n"] >= 28, "[flow tf] 24H must be chunked into ~29 requests: %d" % flow_tf["runs"]["h24"]["n"]
-        assert flow_tf["runs"]["m5"]["n"] == 1 and flow_tf["runs"]["m15"]["n"] == 1, "[flow tf] short windows are a single request"
+        assert flow_tf["runs"]["h24"]["n"] >= 287, "[flow tf] 24H must be chunked into ~289 requests: %d" % flow_tf["runs"]["h24"]["n"]
+        assert flow_tf["runs"]["m5"]["n"] == 1 and flow_tf["runs"]["m15"]["n"] == 3, "[flow tf] 5M is a single request, 15M three (4500 blocks at 200ms): %s" % [flow_tf["runs"]["m5"]["n"], flow_tf["runs"]["m15"]["n"]]
         assert re.search(r"We could only read [\d.]+ of 24 hours", flow_tf["h24partial"]), \
             "[flow tf] 24H with failing chunks must say 'We could only read X of 24 hours', not show a silent partial: %r" % flow_tf["h24partial"][-300:]
         print("[flow tf] 24H with failing chunks says: %r" % re.search(r"We could only read [\d.]+ of 24 hours", flow_tf["h24partial"]).group(0))

@@ -5923,8 +5923,10 @@ function v4BuildLog({ poolId, currency0, currency1, feeWord, tickWord, hooksWord
 /* --- ۲۷.۳ estimateBlock --- */
 {
   const anchor = { number: 1000000, timestampMs: 1700000000000 };
-  ok(v4.estimateBlock(anchor.timestampMs - 200000, anchor) === anchor.number - 100,
-    "estimateBlock arithmetic (200s back == 100 blocks back) mismatch");
+  ok(v4.V4_BLOCK_MS === 200 && v4.estimateBlock(anchor.timestampMs - 200000, anchor) === anchor.number - 1000,
+    "estimateBlock arithmetic (200s back == 1000 blocks back at Base's 200ms fallback) mismatch");
+  ok(v4.estimateBlock(anchor.timestampMs - 200000, { ...anchor, msPerBlock: 2000 }) === anchor.number - 100,
+    "estimateBlock uses the measured anchor.msPerBlock when present (2000ms → 100 blocks)");
   ok(v4.estimateBlock(anchor.timestampMs - 10_000_000_000, anchor) === 0,
     "estimateBlock must clamp at 0, never go negative");
   ok(v4.estimateBlock(anchor.timestampMs + 10_000_000_000, anchor) === anchor.number,
@@ -5983,12 +5985,52 @@ function v4BuildLog({ poolId, currency0, currency1, feeWord, tickWord, hooksWord
     "an empty pools array must give no rows and both flags false");
 }
 
+/* --- ۷ نوامبر: measureBlockMs — نرخِ بلاک از خودِ زنجیره (Base از ۵ نوامبر ۲۰۰ms) --- */
+{
+  const anchor = { number: 54_000_000, timestampMs: 1_794_000_000_000 };
+  const blk = (n, tsS) => ({ ok: true, result: { number: "0x" + n.toString(16), timestamp: "0x" + tsS.toString(16) } });
+  let calls = [];
+  const rpc = (ts) => async (m, p) => { calls.push([m, p]); return blk(anchor.number - v4.V4_RATE_SPAN, ts); };
+  v4._resetV4RateCache();
+  const ms = await v4.measureBlockMs(anchor, rpc(anchor.timestampMs / 1000 - v4.V4_RATE_SPAN * 2), 1000);
+  ok(ms === 2000 && calls.length === 1 && calls[0][0] === "eth_getBlockByNumber" && calls[0][1][0] === "0x" + (anchor.number - v4.V4_RATE_SPAN).toString(16),
+    "[v4 block rate] measured from the anchor and the block V4_RATE_SPAN back (2s here), one call, got " + ms + " " + JSON.stringify(calls));
+  calls = [];
+  ok(await v4.measureBlockMs(anchor, rpc(0), 1000 + 60000) === 2000 && calls.length === 0, "[v4 block rate] cached for 10 minutes — no second call");
+  v4._resetV4RateCache();
+  ok(await v4.measureBlockMs(anchor, rpc(anchor.timestampMs / 1000 - v4.V4_RATE_SPAN * 0.2), 5) === 200, "[v4 block rate] Base today: 200ms");
+  v4._resetV4RateCache();
+  ok(await v4.measureBlockMs(anchor, rpc(anchor.timestampMs / 1000), 5) === null, "[v4 block rate] a zero/insane rate is refused (fallback to V4_BLOCK_MS)");
+  v4._resetV4RateCache();
+  ok(await v4.measureBlockMs(anchor, async () => ({ ok: false }), 5) === null, "[v4 block rate] a failed call -> null, never a guess");
+  v4._resetV4RateCache();
+  ok(await v4.measureBlockMs(anchor, async () => blk(anchor.number - 5, 1), 5) === null, "[v4 block rate] a different block number than asked -> null");
+  // indexV4Keys: پنجره‌ی getLogs حالا با نرخِ سنجیده ساخته می‌شود
+  v4._resetV4RateCache();
+  const created = anchor.timestampMs - 3600_000; // یک ساعت پیش
+  const poolId = "0x" + "ab".repeat(32), T = "0x" + "12".repeat(20);
+  const pools = [{ attributes: { address: poolId, pool_created_at: new Date(created).toISOString() },
+    relationships: { dex: { data: { id: "uniswap-v4-base" } }, base_token: { data: { id: "base_" + T } }, quote_token: { data: { id: "base_0x4200000000000000000000000000000000000006" } } } }];
+  const seenLogs = [];
+  const rpc2 = async (m, p) => {
+    if (m === "eth_getBlockByNumber" && p[0] === "latest") return blk(anchor.number, anchor.timestampMs / 1000);
+    if (m === "eth_getBlockByNumber") return blk(anchor.number - v4.V4_RATE_SPAN, anchor.timestampMs / 1000 - v4.V4_RATE_SPAN * 0.2);
+    seenLogs.push(p[0]); return { ok: true, result: [] };
+  };
+  await v4.indexV4Keys({ tokenAddr: T, pools, rpcCall: rpc2, now: 5 });
+  const est = anchor.number - 3600_000 / 200;
+  ok(seenLogs.length >= 1 && parseInt(seenLogs[0].fromBlock, 16) === est - v4.V4_WINDOW_BACK && parseInt(seenLogs[0].toBlock, 16) === est + v4.V4_WINDOW_FWD,
+    "[v4 block rate] indexV4Keys centres the Initialize window on the measured-rate estimate (1h = 18000 blocks at 200ms), got " + JSON.stringify(seenLogs[0]));
+  v4._resetV4RateCache();
+  console.log("[v4 block rate] Base moved to 200ms blocks (~5 Nov): rate measured from the anchor and the block 18000 back (one call, cached 10 min), insane/failed -> 200ms fallback; the Initialize window follows it");
+}
+
 /* --- ۲۷.۵ windowFor --- */
 {
   // انکری با فاصله‌ی زیاد از تخمین تا خودِ عدد ۱۰۰۰۰۰۰، تا هیچ‌کدام از دو
   // چپ‌چین اینجا خودش را نشان ندهد — چپ‌چین‌ها زیرِ همین بخش جداگانه سنجیده می‌شوند.
   const anchor = { number: 10000000, timestampMs: 1700000000000 };
-  const est = anchor.number - 100000; // ۲۰۰۰۰۰ ثانیه پیش‌تر
+  const est = anchor.number - 200000000 / v4.V4_BLOCK_MS; // ۲۰۰۰۰۰ ثانیه پیش‌تر
   const w1 = v4.windowFor(anchor.timestampMs - 200000000, anchor);
   ok(w1 && w1[0] === est - v4.V4_WINDOW_BACK && w1[1] === est + v4.V4_WINDOW_FWD,
     "windowFor arithmetic mismatch, got " + JSON.stringify(w1));
@@ -6650,7 +6692,7 @@ console.log("[v4 verdict wiring] VD_V4_STAGE_COUNTERS frozen with exactly the WE
     "base.drpc.org must stay out of V4_LOG_RPCS — it refused a 500-block range while its error text " +
     "claimed a 10000-block limit; re-measure before putting it back, got " + JSON.stringify(v4.V4_LOG_RPCS));
 
-  const anchor = { number: 1_000_000, timestampMs: 1_700_000_000_000 };
+  const anchor = { number: 10_000_000, timestampMs: 1_700_000_000_000 };
   const est = v4.estimateBlock(anchor.timestampMs - 200_000_000, anchor);
   const c0 = v4.windowFor(anchor.timestampMs - 200_000_000, anchor, 0);
   const c1 = v4.windowFor(anchor.timestampMs - 200_000_000, anchor, 1);

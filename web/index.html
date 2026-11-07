@@ -8335,12 +8335,14 @@ async function deepestV3Pool(token){
    کوت می‌گیرد، و اگر کیف پول وصل باشد از اتصال خودِ کاربر. هیچ سرویس
    سومی در مسیر نیست.
    ===================================================================== */
-/* بازه‌ها به بلوک‌اند؛ Base بلوکِ ۲ ثانیه‌ای دارد (۱۸۰۰ بلوک = ۱ ساعت). خواندنِ
-   ۲۴ ساعته حدود ۳۰ تکه‌ی getLogs است و تکه‌ی ناموفق همان یادداشتِ پوششِ
+/* بازه‌ها به بلوک‌اند. 🔴 ۷ نوامبر: Base از ~۵ نوامبر بلاکِ ۲۰۰ میلی‌ثانیه‌ای دارد (سنجیده روی زنجیره؛ پیش‌تر ۲ث)
+   — ۱۸۰۰ بلوک دیگر ۶ دقیقه بود نه ۱ ساعت، و برچسبِ «1 hour» عددِ ۶ دقیقه را نشان می‌داد. حالا ۱۸۰۰۰ بلوک = ۱ ساعت؛
+   خواندنِ ۲۴ ساعته حدودِ ۲۹۰ تکه‌ی getLogs است و تکه‌ی ناموفق همان یادداشتِ پوششِ
    «We could only read X of Y hours» را می‌دهد، نه رقمِ نصفه‌ی بی‌صدا. */
-const WINDOWS={m5:{label:"5 minutes",blocks:150},m15:{label:"15 minutes",blocks:450},
-  h1:{label:"1 hour",blocks:1800},h6:{label:"6 hours",blocks:10800},
-  h24:{label:"24 hours",blocks:43200}};
+const BASE_BLOCKS_PER_HOUR=18000;
+const WINDOWS={m5:{label:"5 minutes",blocks:BASE_BLOCKS_PER_HOUR/12},m15:{label:"15 minutes",blocks:BASE_BLOCKS_PER_HOUR/4},
+  h1:{label:"1 hour",blocks:BASE_BLOCKS_PER_HOUR},h6:{label:"6 hours",blocks:BASE_BLOCKS_PER_HOUR*6},
+  h24:{label:"24 hours",blocks:BASE_BLOCKS_PER_HOUR*24}};
 
 async function renderFlow(){
   if(flowBoard)return fbRender();
@@ -8378,8 +8380,8 @@ async function renderFlow(){
     // وقتی که مجموع صفر می‌شود. یک پنجره‌ی ۶ ساعته‌ی نصفه‌خوانده‌شده باید
     // بگوید «نصفه»، نه اینکه رقمِ نصفه را رقمِ کامل جا بزند.
     const cov=logs.partial?logs.coverage:null;
-    const covHours=cov?Math.round((cov.coveredBlocks/1800)*10)/10:null;
-    const winHours=cov?Math.round((cov.totalBlocks/1800)*10)/10:null;
+    const covHours=cov?Math.round((cov.coveredBlocks/BASE_BLOCKS_PER_HOUR)*10)/10:null;
+    const winHours=cov?Math.round((cov.totalBlocks/BASE_BLOCKS_PER_HOUR)*10)/10:null;
     const covNote=cov?` We could only read ${covHours} of ${winHours} hours of this window —
         the rest did not answer. These numbers cover the part we read, not the whole window.`:"";
 

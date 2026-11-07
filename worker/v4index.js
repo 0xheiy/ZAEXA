@@ -35,7 +35,16 @@ export const V4_INITIALIZE_TOPIC =
 
 export const V4_GT_DEX_ID = "uniswap-v4-base";
 
-export const V4_BLOCK_MS = 2000; // Base هر ۲ ثانیه یک بلاک می‌سازد، بدونِ اسلاتِ جامانده
+/* 🔴 ۷ نوامبر — Base حدودِ ۵ نوامبر ۱۸:۰۰ UTC از بلاکِ ۲ ثانیه‌ای به ۲۰۰ میلی‌ثانیه‌ای رفت (سنجیده: بلاک‌های
+   ۱۰۰۰، ۱۰٬۰۰۰، ۱۰۰٬۰۰۰ و ۳۵۰٬۰۰۰ تا عقب همه دقیقاً ۰٫۲ث؛ میانگینِ ۳ میلیون بلاک تا ۱۸ سپتامبر ۱٫۴۴ث).
+   تخمین با ۲۰۰۰ تا ۳۱۰ هزار بلاک پرت بود، پنجره‌ی getLogs هرگز Initialize را نمی‌دید، ایندکس «no-log» ذخیره
+   می‌کرد و همه‌ی توکن‌های فقط-v4 «cover:false» (نامعلوم) می‌شدند: v4:unproven روزانه ۱۰–۱۸ → ۰، cover:false
+   ۲۴ → ۴۱. حالا نرخ از خودِ زنجیره سنجیده می‌شود (measureBlockMs: انکر و بلاکِ V4_RATE_SPAN عقب‌تر) و این
+   ثابت فقط پشتیبان است اگر آن تماس شکست بخورد. */
+export const V4_BLOCK_MS = 200;
+export const V4_RATE_SPAN = 18000; // ~۱ ساعت با ۲۰۰ms — نرخِ *اخیر*، همان جایی که توکن‌های تازه ساخته می‌شوند
+export const V4_RATE_TTL_MS = 10 * 60 * 1000;
+let v4RateCache = null; // { ms, at } — در همین isolate؛ هر گذرِ ساعتی حداکثر یک تماسِ اضافه
 /* 🔴 اندازه‌گیریِ ۱۴ سپتامبر، از ماشینِ حسام، با کنترلِ مثبت روی هر اندپوینت
    (eth_blockNumber اول، بعد همان eth_getLogs با سه بازه‌ی مختلف):
 
@@ -163,7 +172,8 @@ export function estimateBlock(tsMs, anchor) {
   if (!Number.isFinite(tsMs)) return null;
   if (!anchor || !Number.isFinite(anchor.number) || !Number.isFinite(anchor.timestampMs)) return null;
 
-  const raw = anchor.number - Math.round((anchor.timestampMs - tsMs) / V4_BLOCK_MS);
+  const per = Number.isFinite(anchor.msPerBlock) && anchor.msPerBlock > 0 ? anchor.msPerBlock : V4_BLOCK_MS;
+  const raw = anchor.number - Math.round((anchor.timestampMs - tsMs) / per);
   if (!Number.isFinite(raw)) return null;
   return Math.max(0, Math.min(anchor.number, raw));
 }
@@ -452,13 +462,29 @@ function parseAnchor(res) {
   return { number, timestampMs: timestampS * 1000 };
 }
 
+/* measureBlockMs — میلی‌ثانیه‌ی هر بلاک از انکر و بلاکِ V4_RATE_SPAN عقب‌تر. خارج از ۵۰ms..۵s یا شکست → null
+   (کالر به V4_BLOCK_MS برمی‌گردد). کش ۱۰ دقیقه در همین isolate؛ now تزریق‌پذیر برای آزمون. */
+export async function measureBlockMs(anchor, rpcCall, nowMs) {
+  const t = Number.isFinite(nowMs) ? nowMs : Date.now();
+  if (v4RateCache && t - v4RateCache.at < V4_RATE_TTL_MS) return v4RateCache.ms;
+  if (!anchor || !Number.isFinite(anchor.number) || anchor.number <= V4_RATE_SPAN) return null;
+  let ref = null;
+  try { ref = parseAnchor(await rpcCall("eth_getBlockByNumber", ["0x" + (anchor.number - V4_RATE_SPAN).toString(16), false])); } catch (e) { ref = null; }
+  if (!ref || ref.number !== anchor.number - V4_RATE_SPAN) return null;
+  const ms = (anchor.timestampMs - ref.timestampMs) / V4_RATE_SPAN;
+  if (!Number.isFinite(ms) || ms < 50 || ms > 5000) return null;
+  v4RateCache = { ms, at: t };
+  return ms;
+}
+export function _resetV4RateCache() { v4RateCache = null; }
+
 /* rpcCall(method, params) → { ok, result } — تزریق‌شده؛ failover بینِ
    V4_LOG_RPCS کارِ کالر است (worker/index.js)، نه این ماژول — این ماژول
    هیچ fetchی ندارد.
    pools همان آرایه‌ی خامِ data از /networks/base/tokens/<addr>/pools است. */
 export async function indexV4Keys({ tokenAddr, pools, rpcCall, now, collect, counters }) {
   try {
-    void now; // برای تزریق‌پذیریِ یک‌دست با بقیه‌ی ماژول‌ها نگه داشته شده؛ امروز مصرفی ندارد
+    // now: برای measureBlockMs (کشِ نرخ) — آزمون تزریق می‌کند
 
     const { rows, sawV4, sawId, sawCounter, listed } = v4PoolsFromGt(pools, tokenAddr, counters);
     if (rows.length === 0) {
@@ -476,6 +502,8 @@ export async function indexV4Keys({ tokenAddr, pools, rpcCall, now, collect, cou
     const anchorRes = await rpcCall("eth_getBlockByNumber", ["latest", false]);
     const anchor = parseAnchor(anchorRes);
     if (!anchor) return { keys: [], reason: "no-anchor", complete: false };
+    const msPerBlock = await measureBlockMs(anchor, rpcCall, now);
+    if (msPerBlock != null) anchor.msPerBlock = msPerBlock;
 
     let answered = 0; // چند eth_getLogs با آرایه‌ی خوش‌شکل جواب داد
     let failed = 0;   // چند تا شکست خورد (پرتاب/غیرِ۲۰۰/بدنه‌ی بد/آرایه نبود)
