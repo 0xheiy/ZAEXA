@@ -95,6 +95,9 @@ const WHY_SOL = {
   "payer-balance": "The balance of the test wallet could not be confirmed.",
   "payer-holds": "The test wallet already held this token, so the test proved nothing.",
   "no-route": "Jupiter found no route for this token.",
+  "not-tradable": "Jupiter does not trade this token.",
+  "no-route-sell": "Jupiter quoted a buy but found no route to sell this token.",
+  "not-tradable-sell": "Jupiter quoted a buy but would not trade a sell of this token.",
   "too-big": "The simulated trade was too large to fit in one transaction.",
   "deadline": "The check ran out of time.",
   "internal": "The check hit an unexpected problem.",
@@ -116,11 +119,12 @@ export function plainWhy(chain, why) {
   }
   if (chain === "solana") {
     if (Object.prototype.hasOwnProperty.call(WHY_SOL, why)) return WHY_SOL[why];
-    let m = /^jup:(quote|swap-instructions)(?::(\d{1,3}))?$/.exec(why);
+    let m = /^jup:(quote|quote-sell|swap-instructions)(?::(\d{1,3}))?$/.exec(why);
     if (m) {
       const n = m[2] === undefined ? -1 : +m[2];
       if (n === 0) return "The quote service did not answer in time; it will be tried again.";
       if (HTTP_BUSY(n)) return "The quote service was busy; it will be tried again.";
+      if (m[1] === "quote-sell") return "Jupiter would not quote a sell of this token.";
       return m[1] === "quote"
         ? "Jupiter would not quote a trade for this token."
         : "Jupiter would not build a trade for this token.";
@@ -144,7 +148,8 @@ const WHY_FAMILY_SAMPLES = {
   ],
   solana: [
     ["jup:quote:0", "jup:quote:0"], ["jup:quote:<status>  (429 or 5xx)", "jup:quote:429"],
-    ["jup:quote  (any other)", "jup:quote:401"], ["jup:swap-instructions  (any other)", "jup:swap-instructions:400"],
+    ["jup:quote  (any other)", "jup:quote:401"], ["jup:quote-sell  (any other)", "jup:quote-sell:400"],
+    ["jup:swap-instructions  (any other)", "jup:swap-instructions:400"],
     ["rpc:<method>[:<status>]", "rpc:getBalance:500"],
   ],
 };

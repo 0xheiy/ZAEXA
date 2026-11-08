@@ -317,24 +317,35 @@ const PLACEHOLDER_BLOCKHASH = "1".repeat(32);
        بدنه خطا داشت — هرگز از رویِ متنِ error.message. هر بررسیِ شکل *بعد از*
        ok:true (فیلدی که انتظارش می‌رفت نبود) زیرِ "internal" می‌رود، نه
        "rpc:…" — چون آن دیگر شکستِ خودِ تماس نیست.
-     • "jup:<endpoint>:<status>" همان قاعده برای jupCall است، دو سطل:
-       "jup:quote:<status>" برای هر دو quote (خرید و فروش، هر دو روی همان
-       مسیرِ /swap/v1/quote)، و "jup:swap-instructions:<status>" برای هر دو
-       swap-instructions (خرید و فروش، هر دو روی /swap/v1/swap-instructions).
+     • "jup:<endpoint>:<status>" همان قاعده برای jupCall است، سه سطل:
+       "jup:quote:<status>" برای quoteِ *خرید* (SOL→mint)، "jup:quote-sell:<status>"
+       برای quoteِ *فروش* (mint→SOL؛ فقط بعد از موفقیتِ quoteِ خرید صدا زده
+       می‌شود) — هر دو روی همان مسیرِ /swap/v1/quote ولی جدا شمرده می‌شوند تا
+       الگوی «خرید جواب می‌دهد، فروش نه» دیده شود — و "jup:swap-instructions:<status>"
+       برای هر دو swap-instructions (روی /swap/v1/swap-instructions).
        بخشِ عددی همیشه کدِ HTTPِ همان تماس است (۰ برای پرتابِ شبکه‌ای/تایم‌اوت)
        — جوپیتر کدِ خطای سطحِ JSON-RPC ندارد، پس اینجا فقط یک عدد در کار است،
        نه دوتا مثلِ rpc. برای دو swap-instructions که مفهومِ route اصلاً
        ندارند، یک بدنه‌ی ok:true ولی بدونِ json هم زیرِ همان
        "jup:swap-instructions:200" می‌ماند چون سطلِ اختصاصیِ دیگری برایشان
-       نیست (برخلافِ quote که "no-route" دارد).
+       نیست (برخلافِ quote که کدِ بی‌مسیر دارد).
+     • ۸ نوامبر — کدِ errorCodeِ جوپیتر (فقط وقتی HTTP برابرِ ۴۰۰ و فیلدِ رشته‌ایِ
+       errorCode است، هرگز متنِ آزادِ error) در jupQuoteFailWhy به این واژه‌ها می‌رود:
+       NO_ROUTES_FOUND / COULD_NOT_FIND_ANY_ROUTE → "no-route" (خرید) یا
+       "no-route-sell" (فروش)؛ TOKEN_NOT_TRADABLE → "not-tradable" (خرید) یا
+       "not-tradable-sell" (فروش). هر ۴۰۰ یا غیرِ۲۰۰ِ دیگر همان "jup:quote:<n>"
+       (خرید) / "jup:quote-sell:<n>" (فروش) می‌ماند. فقط تشخیص است: v در همه‌ی
+       این حالت‌ها null می‌ماند.
      • ⚠️ هر دو خانواده («rpc:…»، «jup:…») همیشه دقیقاً سه بخشِ جداشده با «:»
        دارند: خودِ پیشوند، نامِ متد/اندپوینت، و یک عددِ صحیح در آخر — هرگز متنِ
        آزاد. VD_SOL_WHY پایین‌تر فقط *پیشوندِ دوبخشی* را نگه می‌دارد (مثلاً
        "rpc:getMultipleAccounts")؛ عضویت در فهرستِ منجمد یعنی این پیشوند
        یکی از آن‌هاست و بخشِ آخر با Number.isInteger معتبر است — دقیقاً همان
        چیزی که worker/test.mjs با isFrozenWhy می‌سنجد.
-     • "no-route" فقط برای دو quote (خرید/فروش): تماس موفق بود (ok:true)
-       ولی outAmount در کار نبود.
+     • "no-route" برای quoteِ خرید و "no-route-sell" برای quoteِ فروش: تماس
+       موفق بود (ok:true) ولی outAmount در کار نبود (یا ۴۰۰ با errorCodeِ
+       بی‌مسیر). "not-tradable" / "not-tradable-sell" فقط از errorCode می‌آید.
+       "no-route" و "jup:quote" در گزارش‌های قدیمیِ KV هنوز می‌مانند.
      • "payer-balance" همان‌طور که خودِ تعریف می‌گوید: یا فی‌پیر کمتر از
        ۱ SOL دارد، یا خودِ getBalance شکلی داد که خواندنش ممکن نبود.
      • "payer-holds" دیگر از یک lookup (getTokenAccountsByOwner) نمی‌آید —
@@ -357,11 +368,15 @@ export const VD_SOL_WHY = Object.freeze([
   "payer-balance",
   "payer-holds",
   "no-route",
+  "not-tradable",
+  "no-route-sell",
+  "not-tradable-sell",
   "too-big",
   "rpc:getBalance",
   "rpc:getMultipleAccounts",
   "rpc:simulateTransaction",
   "jup:quote",
+  "jup:quote-sell",
   "jup:swap-instructions",
   "deadline",
   "internal",
@@ -745,6 +760,20 @@ async function jupCall(fetchImpl, jupBase, path, opts, timeoutMs, jupKey) {
   return { ok: !!res.ok, status: res.status, json };
 }
 
+/* دلیلِ شکستِ quote جوپیتر، جدا برای خرید و فروش. فقط از رویِ کدِ HTTP و فیلدِ
+   رشته‌ایِ errorCode در JSONِ پارس‌شده (هم‌قاعده با solQuoteFailReason در index.js)؛
+   هرگز از متنِ آزادِ error. فقط تشخیصِ why است و v همیشه null می‌ماند.
+   side: "buy" یا "sell". */
+function jupQuoteFailWhy(res, side) {
+  const sell = side === "sell";
+  if (res.status === 400) {
+    const code = res.json && typeof res.json === "object" && typeof res.json.errorCode === "string" ? res.json.errorCode : "";
+    if (code === "NO_ROUTES_FOUND" || code === "COULD_NOT_FIND_ANY_ROUTE") return sell ? "no-route-sell" : "no-route";
+    if (code === "TOKEN_NOT_TRADABLE") return sell ? "not-tradable-sell" : "not-tradable";
+  }
+  return (sell ? "jup:quote-sell:" : "jup:quote:") + res.status;
+}
+
 /* ---------------------------------------------------------------------
    fetchVerdictSol — ارکستراسیون؛ هشت گام. گام‌های ۱ تا ۷ دقیقاً همان
    ترتیبِ اسپایک‌اند (رفت‌وبرگشت را شبیه‌سازی کن)؛ گامِ ۸ چیزی است که اسپایک
@@ -817,7 +846,7 @@ export async function fetchVerdictSol(mint, opts) {
       query: { inputMint: SOL_MINT_ADDR, outputMint: mint, amount: String(amountLamports),
                slippageBps: "500", onlyDirectRoutes: "true" },
     }, timeoutMs, jupKey);
-    if (!quoteBuyRes.ok) return unknown("jup:quote:" + quoteBuyRes.status);
+    if (!quoteBuyRes.ok) return unknown(jupQuoteFailWhy(quoteBuyRes, "buy"));
     if (!quoteBuyRes.json || !quoteBuyRes.json.outAmount) return unknown("no-route"); // بی‌مسیر → نامعلوم، نه nosell
     const quoteBuy = quoteBuyRes.json;
 
@@ -833,8 +862,8 @@ export async function fetchVerdictSol(mint, opts) {
     const quoteSellRes = await jupCall(fetchImpl, jupBase, "/swap/v1/quote", {
       query: { inputMint: mint, outputMint: SOL_MINT_ADDR, amount: String(sellAmount), slippageBps: "500" },
     }, timeoutMs, jupKey);
-    if (!quoteSellRes.ok) return unknown("jup:quote:" + quoteSellRes.status);
-    if (!quoteSellRes.json || !quoteSellRes.json.outAmount) return unknown("no-route");
+    if (!quoteSellRes.ok) return unknown(jupQuoteFailWhy(quoteSellRes, "sell"));
+    if (!quoteSellRes.json || !quoteSellRes.json.outAmount) return unknown("no-route-sell"); // quote خرید جواب داد ولی فروش مسیر ندارد
     const quoteSell = quoteSellRes.json;
 
     // ۴. دستورالعمل‌های swap برای هر دو leg.

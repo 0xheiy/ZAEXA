@@ -2476,7 +2476,8 @@ function isSolidlyReqId(id) { return PROBE_KIND_BY_ID.get(id) === "SOLIDLY"; }
   // شمارنده لازم است تا این دو از هم جدا بمانند).
   function makeFetch({ legs, lamports = 2_000_000_000, simErr = "SUCCESS", controlErr = "INSTR",
                        buyQuoteOk = true, buyQuoteEmpty = false, rpcStatus = {}, controlSimStatus = null,
-                       altData = null, fallbackQuoteOk = true } = {}) {
+                       altData = null, fallbackQuoteOk = true,
+                       buyQuoteOverride = null, sellQuoteOverride = null } = {}) {
     const calls = [];
     let simCalls = 0;
     let sellQuoteCalls = 0;
@@ -2485,6 +2486,9 @@ function isSolidlyReqId(id) { return PROBE_KIND_BY_ID.get(id) === "SOLIDLY"; }
       if (u.startsWith(JUP + "/swap/v1/quote")) {
         const isBuy = u.includes("onlyDirectRoutes=true");
         calls.push(isBuy ? "quote:buy" : "quote:sell");
+        // بازنویسیِ صریحِ پاسخِ quote (وضعیت + بدنه) برای تست‌های errorCodeِ جوپیتر
+        if (isBuy && buyQuoteOverride) return jsonRes(buyQuoteOverride.body, buyQuoteOverride.status);
+        if (!isBuy && sellQuoteOverride && sellQuoteCalls === 0) { sellQuoteCalls++; return jsonRes(sellQuoteOverride.body, sellQuoteOverride.status); }
         if (isBuy) {
           if (!buyQuoteOk) return jsonRes({ error: "no route" }, 404); // غیرِ ۲۰۰ → "jup"
           if (buyQuoteEmpty) return jsonRes({ routePlan: [] }); // ۲۰۰ ولی بدونِ outAmount → "no-route"
@@ -2711,6 +2715,41 @@ function isSolidlyReqId(id) { return PROBE_KIND_BY_ID.get(id) === "SOLIDLY"; }
       "a 200 quote response with no outAmount must give null/\"no-route\" " +
       "(got " + JSON.stringify(res) + ")");
     ok(!calls.includes("swap-ix:buy"), "swap-instructions must not be requested after a route-less quote");
+  }
+
+  // ه۳) ۸ نوامبر — تفکیکِ why برای شکستِ quoteِ خرید و فروش و errorCodeِ جوپیتر.
+  // v همیشه null می‌ماند؛ فقط why دقیق‌تر می‌شود. errorCode فقط از فیلدِ JSON،
+  // هرگز از متنِ آزادِ error.
+  {
+    const R = (status, body) => ({ status, body });
+    const cases = [
+      ["buy NO_ROUTES_FOUND", { buyQuoteOverride: R(400, { error: "No routes found", errorCode: "NO_ROUTES_FOUND" }) }, "no-route"],
+      ["buy COULD_NOT_FIND_ANY_ROUTE", { buyQuoteOverride: R(400, { errorCode: "COULD_NOT_FIND_ANY_ROUTE" }) }, "no-route"],
+      ["buy TOKEN_NOT_TRADABLE", { buyQuoteOverride: R(400, { errorCode: "TOKEN_NOT_TRADABLE" }) }, "not-tradable"],
+      ["buy other errorCode", { buyQuoteOverride: R(400, { errorCode: "SOMETHING_ELSE" }) }, "jup:quote:400"],
+      ["buy free-text only (errorCode missing)", { buyQuoteOverride: R(400, { error: "No routes found" }) }, "jup:quote:400"],
+      ["sell NO_ROUTES_FOUND", { sellQuoteOverride: R(400, { error: "No routes found", errorCode: "NO_ROUTES_FOUND" }) }, "no-route-sell"],
+      ["sell COULD_NOT_FIND_ANY_ROUTE", { sellQuoteOverride: R(400, { errorCode: "COULD_NOT_FIND_ANY_ROUTE" }) }, "no-route-sell"],
+      ["sell TOKEN_NOT_TRADABLE", { sellQuoteOverride: R(400, { errorCode: "TOKEN_NOT_TRADABLE" }) }, "not-tradable-sell"],
+      ["sell other errorCode", { sellQuoteOverride: R(400, { errorCode: "SOMETHING_ELSE" }) }, "jup:quote-sell:400"],
+      ["sell free-text only (errorCode missing)", { sellQuoteOverride: R(400, { error: "No routes found" }) }, "jup:quote-sell:400"],
+      ["sell errorCode on non-400 stays generic", { sellQuoteOverride: R(500, { errorCode: "NO_ROUTES_FOUND" }) }, "jup:quote-sell:500"],
+      ["sell 500", { sellQuoteOverride: R(500, { error: "boom" }) }, "jup:quote-sell:500"],
+      ["sell 200 without outAmount", { sellQuoteOverride: R(200, { routePlan: [] }) }, "no-route-sell"],
+    ];
+    for (const [name, extra, want] of cases) {
+      const legs = makeLegs();
+      const { fetchImpl, calls } = makeFetch(Object.assign({ legs }, extra));
+      const res = await vs.fetchVerdictSol(MINT, opts({ fetchImpl }));
+      ok(res && res.v === null && res.why === want && isFrozenWhy(res.why),
+        "[jup quote why] " + name + " must give null/\"" + want + "\" (got " + JSON.stringify(res) + ")");
+      ok(!calls.includes("swap-ix:buy") && !calls.includes("swap-ix:sell"),
+        "[jup quote why] " + name + ": swap-instructions must never be requested, calls: " + calls.join(","));
+      ok(name.startsWith("buy") ? !calls.includes("quote:sell") : calls.includes("quote:sell"),
+        "[jup quote why] " + name + ": the sell quote is requested only after a good buy quote, calls: " + calls.join(","));
+    }
+    ok(["not-tradable", "no-route-sell", "not-tradable-sell", "jup:quote-sell", "no-route", "jup:quote"].every((w) => vs.VD_SOL_WHY.includes(w)),
+      "[jup quote why] VD_SOL_WHY keeps every old entry and has the new buy/sell words");
   }
 
   // و) تراکنشِ بزرگ‌تر از ۱۲۳۲ بایت → null/"too-big"، هرگز حتی به
@@ -14868,6 +14907,20 @@ function stripAllowedWording(t) {
        rp.plainWhy("solana", "jup:quote:429") === "The quote service was busy; it will be tried again." &&
        rp.plainWhy("solana", "jup:swap-instructions:503") === "The quote service was busy; it will be tried again.",
        "[report page why] jup 4xx and 429/5xx families map to the two required sentences");
+    ok(rp.plainWhy("solana", "not-tradable") === "Jupiter does not trade this token." &&
+       rp.plainWhy("solana", "no-route-sell") === "Jupiter quoted a buy but found no route to sell this token." &&
+       rp.plainWhy("solana", "not-tradable-sell") === "Jupiter quoted a buy but would not trade a sell of this token." &&
+       rp.plainWhy("solana", "jup:quote-sell:400") === "Jupiter would not quote a sell of this token." &&
+       rp.plainWhy("solana", "jup:quote-sell:429") === "The quote service was busy; it will be tried again." &&
+       rp.plainWhy("solana", "jup:quote-sell:503") === "The quote service was busy; it will be tried again." &&
+       rp.plainWhy("solana", "jup:quote-sell:0") === "The quote service did not answer in time; it will be tried again.",
+       "[report page why] the new Solana buy/sell why codes map to their exact sentences");
+    {
+      const tbl = rp.whyTable("solana");
+      for (const c of ["not-tradable", "no-route-sell", "not-tradable-sell", "jup:quote-sell  (any other)"])
+        ok(tbl.some((x) => x.code === c && x.text === rp.plainWhy("solana", c.startsWith("jup:") ? "jup:quote-sell:400" : c)),
+          "[report page why] the /api why table for solana has the row " + c);
+    }
     for (const [chain, code] of [["base", "totally-new"], ["solana", "totally-new"], ["base", null], ["solana", undefined], ["base", 42], ["base", "meta:12345"], ["other", "internal"], ["base", "no-route"], ["solana", "no-quote"]]) {
       ok(rp.plainWhy(chain, code) === FALLBACK, "[report page why] unknown " + chain + "/" + String(code) + " -> the fallback sentence");
     }
