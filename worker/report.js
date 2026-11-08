@@ -161,6 +161,17 @@ function whyForRow(chain, verdict, why) {
 export const REPORT_CAUSES = Object.freeze(["empty-pool", "sell-reverts", "one-way-pool"]);
 // علت‌هایی که یک ردیفِ v4 با آن‌ها «اثبات‌شده» است — sell-reverts عمداً نیست.
 const V4_PROVEN_CAUSES = Object.freeze(["empty-pool", "one-way-pool"]);
+/* ۸ نوامبر — "one-way-pool"ِ ۲۶ اکتبر تا ۵ نوامبر با روشِ غلطِ دو کوتِ جدا ساخته شد
+   (شاهد XTO) و هنوز در گزارش‌های ۱ تا ۵ نوامبر ۶۴ ردیف داشت. فقط ردیفی که با
+   رفت‌وبرگشتِ V4RoundTrip (d794602، ۶ نوامبر) سنجیده شده اثبات است: ردیفِ ذخیره‌شده‌ای
+   که زمانش پیش از این مرز است اثبات‌نشده نشان داده می‌شود. زمانِ نخواندنی یا نبودِ زمان
+   (حکمِ زنده‌ی /vd که همیشه روشِ تازه است) دست نمی‌خورد. */
+export const ONE_WAY_RT_SINCE = Date.parse("2026-11-06T00:00:00Z");
+function staleOneWay(cause, atIso) {
+  if (cause !== "one-way-pool" || typeof atIso !== "string") return false;
+  const t = Date.parse(atIso);
+  return Number.isFinite(t) && t < ONE_WAY_RT_SINCE;
+}
 
 /* یک cause ساختگی/دست‌ساز هرگز نباید در انبار بنشیند — فقط وقتی verdict
    واقعاً "nosell" است و خودِ رشته عضوِ همین واژه‌نامه‌ی بسته است، وگرنه
@@ -201,12 +212,12 @@ export function publishGuardRow(row, chainDefault) {
   const v4 = typeof row.dex === "string" && row.dex.startsWith("uniswap-v4");
   if (v4) {
     let out = row;
-    if (row.v === "nosell" && !V4_PROVEN_CAUSES.includes(row.cause)) {
+    if (row.v === "nosell" && (!V4_PROVEN_CAUSES.includes(row.cause) || staleOneWay(row.cause, row.checkedAt))) {
       out = { ...out, v: null, why: "v4:unproven" };
       delete out.cause;
       delete out.ret;
     }
-    if (row.recheck === "nosell" && !V4_PROVEN_CAUSES.includes(row.recheckCause)) {
+    if (row.recheck === "nosell" && (!V4_PROVEN_CAUSES.includes(row.recheckCause) || staleOneWay(row.recheckCause, row.recheckAt))) {
       out = { ...out };
       delete out.recheck; delete out.recheckAt; delete out.recheckCause;
     }
@@ -217,12 +228,12 @@ export function publishGuardRow(row, chainDefault) {
      که causeاش عضوِ REPORT_CAUSES نیست (empty-pool/sell-reverts) اثبات‌نشده
      است — دقیقاً همان جایی که PAID/YAP/UCHI بی‌دلیل منتشر شده بودند. */
   let out = row;
-  if (row.v === "nosell" && !REPORT_CAUSES.includes(row.cause)) {
+  if (row.v === "nosell" && (!REPORT_CAUSES.includes(row.cause) || staleOneWay(row.cause, row.checkedAt))) {
     out = { ...out, v: null, why: "cause:unproven" };
     delete out.cause;
     delete out.ret;
   }
-  if (row.recheck === "nosell" && !REPORT_CAUSES.includes(row.recheckCause)) {
+  if (row.recheck === "nosell" && (!REPORT_CAUSES.includes(row.recheckCause) || staleOneWay(row.recheckCause, row.recheckAt))) {
     out = { ...out };
     delete out.recheck; delete out.recheckAt; delete out.recheckCause;
   }

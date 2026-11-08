@@ -16743,6 +16743,26 @@ function stripAllowedWording(t) {
   ok(g3b.v === "nosell" && g3b.cause === "empty-pool", "[one-way round trip] empty-pool is still proof on a v4 row");
   const g5 = publishGuardRow({ chain: "solana", dex: "raydium", v: "nosell", cause: "one-way-pool" }, "solana");
   ok(g5.v === null && g5.why === "sol:unconfirmed" && !("cause" in g5), "[one-way round trip] Solana never keeps a nosell, one-way-pool included");
+  // ۸ نوامبر — one-way-poolِ قدیمی (دو کوتِ جدا، پیش از ۶ نوامبر) دیگر اثبات نیست؛ تازه و بی‌زمان می‌ماند
+  {
+    const oldRow = { ...v4row, checkedAt: "2026-11-04T01:17:00.000Z" };
+    const go = publishGuardRow(oldRow, "base");
+    ok(go.v === null && go.why === "v4:unproven" && !("cause" in go), "[one-way stale] a v4 one-way-pool row checked before 6 Nov shows as v4:unproven, got " + JSON.stringify(go));
+    const gn = publishGuardRow({ ...v4row, checkedAt: "2026-11-06T00:00:00.000Z" }, "base");
+    ok(gn.v === "nosell" && gn.cause === "one-way-pool", "[one-way stale] a row checked from 6 Nov (round trip) keeps one-way-pool, got " + JSON.stringify(gn));
+    const gb = publishGuardRow({ ...v4row, checkedAt: "not a date" }, "base");
+    ok(gb.v === "nosell" && gb.cause === "one-way-pool", "[one-way stale] an unreadable time is left alone, got " + JSON.stringify(gb));
+    const ge = publishGuardRow({ ...v4row, cause: "empty-pool", checkedAt: "2026-11-04T01:17:00.000Z" }, "base");
+    ok(ge.v === "nosell" && ge.cause === "empty-pool", "[one-way stale] an old empty-pool row is untouched");
+    const gr = publishGuardRow({ ...v4row, v: "sell", recheck: "nosell", recheckCause: "one-way-pool", recheckAt: "2026-11-03T05:17:00.000Z" }, "base");
+    ok(!("recheck" in gr) && !("recheckCause" in gr) && gr.v === "sell", "[one-way stale] an old recheck one-way-pool is dropped, got " + JSON.stringify(gr));
+    const grn = publishGuardRow({ ...v4row, v: "sell", recheck: "nosell", recheckCause: "one-way-pool", recheckAt: "2026-11-07T05:17:00.000Z" }, "base");
+    ok(grn.recheck === "nosell" && grn.recheckCause === "one-way-pool", "[one-way stale] a new recheck one-way-pool survives");
+    const gg = publishGuardRow({ chain: "base", dex: "aerodrome-base", v: "nosell", cause: "one-way-pool", checkedAt: "2026-11-02T01:17:00.000Z" }, "base");
+    ok(gg.v === null && gg.why === "cause:unproven", "[one-way stale] the generic Base branch applies the same cutoff, got " + JSON.stringify(gg));
+    ok(Object.isFrozen(oldRow) === false && oldRow.cause === "one-way-pool", "[one-way stale] the stored row itself is never mutated");
+    console.log("[one-way stale] one-way-pool rows checked before 2026-11-06 (old two-quote method) are published as v4:unproven / cause:unproven, rechecks dropped; round-trip rows, untimed live verdicts and other causes untouched");
+  }
   ok(causeForRow("nosell", "one-way-pool") === "one-way-pool" && causeForRow("sell", "one-way-pool") === undefined,
     "[one-way round trip] causeForRow accepts it on nosell only");
 
