@@ -176,7 +176,7 @@ import {
   fetchVerdictSol, VD_SOL_RPCS, VD_SOL_JUP_BASE, VD_SOL_PAYER,
   VD_SOL_RPC_METHODS, VD_SOL_RPC_PROBE_PARAMS, probeRpcMethod,
 } from "./verdict_sol.js";
-import { indexV4Keys, v4KvKey, V4_LOG_RPCS, V4_LOG_RPC_CANDIDATES, V4_KEY_TTL_S, V4_MISS_TTL_S,
+import { indexV4Keys, v4KvKey, V4_REASONS, V4_LOG_RPCS, V4_LOG_RPC_CANDIDATES, V4_KEY_TTL_S, V4_MISS_TTL_S,
   V4_POOL_MANAGER, V4_INITIALIZE_TOPIC } from "./v4index.js";
 
 /* پراکسی باز نیست. فقط شکل مسیرهایی که خودِ سایت می‌زند اجازه دارد:
@@ -1382,6 +1382,14 @@ function noteOneWay(meterHooks, label) {
   if (meterHooks && typeof meterHooks.oneWay === "function") {
     try { meterHooks.oneWay(label); } catch (e) { /* فقط رصد */ }
   }
+}
+/* ۸ نوامبر — ناظرِ ایندکسِ v4 داخلِ گذرِ ساعتی: فقط برچسبِ بسته (found:keys،
+   found:empty، یکی از V4_REASONS یا other، threw:cap، threw:other، slow)، هرگز
+   آدرس. فقط رصد؛ نه پرتاب می‌کند نه جریان را عوض. */
+function noteV4Idx(meter, label) {
+  try {
+    if (meter && typeof meter.v4idx === "function") meter.v4idx(label);
+  } catch (e) { /* فقط رصد */ }
 }
 // آخرین آیتمِ غیرِکاناریِ collect → «oneway-sell:revert:3» و مانندِ آن؛ هر دو جزء از فهرستِ بسته‌اند.
 function oneWayFailLabel(collect) {
@@ -3394,6 +3402,8 @@ function makeSubMeter() {
   const baseTokens = [];
   // ۱ نوامبر — نتیجه‌ی v4OneWayCheck به ازای برچسب (فهرستِ کوتاه و ثابت، هرگز آدرس)؛ حداکثر ۱۶ کلید.
   const oneWay = {};
+  // ۸ نوامبر — نتیجه‌ی ایندکسِ کلیدِ v4 داخلِ گذر به ازای برچسب (بسته، هرگز آدرس)؛ حداکثر ۱۶ کلید.
+  const v4idx = {};
   const solTokens = [];
   let tokenBase = null;
 
@@ -3460,6 +3470,11 @@ function makeSubMeter() {
       if (!Object.prototype.hasOwnProperty.call(oneWay, label) && Object.keys(oneWay).length >= 16) return;
       oneWay[label] = (oneWay[label] || 0) + 1;
     },
+    v4idx(label) {
+      if (typeof label !== "string" || !/^[a-z0-9:-]{1,40}$/.test(label)) return;
+      if (!Object.prototype.hasOwnProperty.call(v4idx, label) && Object.keys(v4idx).length >= 16) return;
+      v4idx[label] = (v4idx[label] || 0) + 1;
+    },
     tokenStart() { tokenBase = total; },
     tokenEnd() {
       const delta = total - (tokenBase === null ? total : tokenBase);
@@ -3499,6 +3514,7 @@ function makeSubMeter() {
         baseTokens: baseTokens.slice(),
         solTokens: solTokens.slice(),
         oneWay: { ...oneWay },
+        v4idx: { ...v4idx },
       };
     },
   };
@@ -3626,10 +3642,27 @@ async function scheduledReportPassBody(env, ctx, opts, meter) {
          اجرا می‌شود — تنها برای توکنی که دکسش v4 است و هنوز ورودی ندارد. */
       verdictOf: async (addr, meta, metaWhy, dex) => {
         if (env.ZX_KV && typeof dex === "string" && dex.startsWith("uniswap-v4")) {
+          let idxT0 = 0;
           try {
             const entry = await readV4Entry(addr, env);
-            if (!entry.found) await runV4Index(addr, env);
-          } catch (e) { /* ایندکس هرگز نباید گذرِ گزارش را بشکند */ }
+            if (entry.found) {
+              noteV4Idx(meter, Array.isArray(entry.keys) && entry.keys.length >= 1 ? "found:keys" : "found:empty");
+            } else {
+              idxT0 = Date.now();
+              const idxRes = await runV4Index(addr, env);
+              const idxMs = Date.now() - idxT0;
+              idxT0 = 0;
+              const why = idxRes && idxRes.reason;
+              noteV4Idx(meter, typeof why === "string" && V4_REASONS.includes(why) ? why : "other");
+              if (idxMs > 5000) noteV4Idx(meter, "slow");
+            }
+          } catch (e) {
+            /* ایندکس هرگز نباید گذرِ گزارش را بشکند */
+            let capped = false;
+            try { capped = meter.isCapHit() === true; } catch (e2) { /* فقط رصد */ }
+            noteV4Idx(meter, capped ? "threw:cap" : "threw:other");
+            try { if (idxT0 && Date.now() - idxT0 > 5000) noteV4Idx(meter, "slow"); } catch (e3) { /* فقط رصد */ }
+          }
         }
         return ogFetchVerdictDetail(addr, meta, Date.now() + OG_BUDGET_MS, env, ctx, metaWhy,
           { stage: (name) => meter.stage(name), capHit: () => meter.isCapHit(), used: () => meter.total,

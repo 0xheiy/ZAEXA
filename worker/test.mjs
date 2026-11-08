@@ -17103,4 +17103,175 @@ console.log(fails === 0
   console.log("[pnl realized] tokens moved out unpaid -> realized P&L on the sold part only; unpaid buys, truncated history or no sales -> null");
 }
 
+/* ---- ۸ نوامبر [v4 index meter] — شمارنده‌ی نتیجه‌ی ایندکسِ کلیدِ v4 داخلِ گذر (sub.v4idx) ----
+   فقط رصد: چرا در گذرِ ساعتی «cover:false» می‌شود. برچسب‌ها یک مجموعه‌ی بسته‌اند
+   (found:keys/found:empty، V4_REASONS یا other، threw:cap/threw:other، slow)، هرگز آدرس.
+   حکم و ردیفِ سند نباید با این شمارنده هیچ فرقی کند. */
+{
+  // الف) واحد: makeSubMeter.v4idx
+  {
+    const m = makeSubMeter();
+    m.v4idx("ok"); m.v4idx("ok"); m.v4idx("no-pools");
+    ok(JSON.stringify(m.snapshot().v4idx) === JSON.stringify({ ok: 2, "no-pools": 1 }),
+       "[v4 index meter] v4idx must count labels, got " + JSON.stringify(m.snapshot().v4idx));
+    ok(JSON.stringify(makeSubMeter().snapshot().v4idx) === "{}", "[v4 index meter] a fresh meter starts with v4idx {}");
+    const m2 = makeSubMeter();
+    for (let i = 0; i < 40; i++) m2.v4idx("l" + i);
+    const s2 = m2.snapshot().v4idx;
+    ok(Object.keys(s2).length === 16, "[v4 index meter] at most 16 distinct labels, got " + Object.keys(s2).length);
+    m2.v4idx("l0"); m2.v4idx("l0");
+    ok(m2.snapshot().v4idx.l0 === 3, "[v4 index meter] an already-known label still counts after the cap, got " + m2.snapshot().v4idx.l0);
+    ok(!("l39" in m2.snapshot().v4idx), "[v4 index meter] a 17th distinct label is dropped");
+    const m3 = makeSubMeter();
+    m3.v4idx("ok");
+    const copy = m3.snapshot().v4idx;
+    copy.ok = 99; copy.evil = 1;
+    ok(JSON.stringify(m3.snapshot().v4idx) === '{"ok":1}', "[v4 index meter] mutating a snapshot copy must not change the meter");
+    m3.v4idx(0x1234); m3.v4idx("0x" + "ab".repeat(20)); m3.v4idx("");
+    ok(JSON.stringify(m3.snapshot().v4idx) === '{"ok":1}', "[v4 index meter] non-string / non-label input is ignored");
+  }
+
+  // ب) سرتاسری از scheduledReportPass
+  const POOL_ID_M = "0x" + "7c".repeat(32);
+  const kvOf = (init) => {
+    const store = new Map(init || []);
+    return { store, get: async (k) => (store.has(k) ? store.get(k) : null), put: async (k, v) => { store.set(k, v); } };
+  };
+  async function v4MeterPass({ addr, dex, kvInit, poolsHandler, throwAfterIndex, slowAfterIndex }) {
+    const logM = v4BuildLog({
+      poolId: POOL_ID_M, currency0: vd.NATIVE_ADDR, currency1: addr,
+      feeWord: v4wNum(0), tickWord: v4wNum(1), hooksWord: v4wAddrWord(vd.NATIVE_ADDR),
+    });
+    const mk4 = (n) => "0x" + v4wNum(n) + v4wNum(0) + v4wNum(0) + v4wNum(0);
+    const row = {
+      attributes: { base_token_price_usd: "1", reserve_in_usd: "9000", pool_created_at: "2026-09-19T00:00:00Z",
+        volume_usd: { h24: "0" }, fdv_usd: "0" },
+      relationships: { base_token: { data: { id: "base_" + addr } }, dex: { data: { id: dex } } },
+    };
+    const kv = kvOf(kvInit);
+    const calls = { logs: 0, pools: 0 };
+    const saved = globalThis.fetch;
+    globalThis.fetch = async (url, init) => {
+      const u = String(url);
+      if (u.includes("/networks/base/new_pools")) {
+        return json({ data: [row] });
+      }
+      if (u.includes("/networks/solana/new_pools")) return json({ data: [] });
+      if (u.endsWith("/pools")) { calls.pools++; return poolsHandler(); }
+      if (u.includes("/tokens/multi/")) {
+        return new Response("nope", { status: 500 });
+      }
+      if (u.includes("/tokens/")) {
+        return json({ data: { attributes: { name: "V4 Meter Token", symbol: "V4M", total_reserve_in_usd: "1000",
+          decimals: 18, price_usd: "1" } } });
+      }
+      if (u.includes("/networks?page=1")) return new Response("", { status: 200 });
+      const parsed = JSON.parse(init.body);
+      if (!Array.isArray(parsed)) {
+        if (parsed.method === "eth_getBlockByNumber") {
+          return json({ jsonrpc: "2.0", id: parsed.id, result: { number: "0x4C4B40", timestamp: "0x68b6a1a0" } });
+        }
+        if (parsed.method === "eth_getLogs") { calls.logs++; return json({ jsonrpc: "2.0", id: parsed.id, result: [logM] }); }
+        return json({ jsonrpc: "2.0", id: parsed.id, result: "0x" + "0".repeat(64) });
+      }
+      return json(parsed.map((r) => (r.id === 0
+        ? { id: 0, result: mk4(5) }
+        : (isSolidlyReqId(r.id) ? { id: r.id, error: { code: 3 } } : { id: r.id, result: "0x" }))));
+    };
+    /* هیچ مسیرِ عادیِ runV4Index پرتاب نمی‌کند (indexV4Keys/fetchBaseTokenPoolsRaw/storeV4Result
+       همه می‌گیرند)؛ پس پرتابِ واقعی را فقط با Date.now می‌سازیم: دومین فراخوانیِ Date.now که
+       مستقیماً از خودِ بستنیِ verdictOf می‌آید (بعد از برگشتنِ runV4Index، برای سنجشِ slow) پرتاب می‌کند. */
+    const savedNow = Date.now;
+    let directCalls = 0;
+    if (throwAfterIndex || slowAfterIndex) {
+      Date.now = function () {
+        const fr = (new Error().stack || "").split("\n")[2] || "";
+        if (/\bverdictOf\b/.test(fr) && ++directCalls === 2) {
+          if (slowAfterIndex) return savedNow.call(Date) + 6000; // ایندکس «کند» به نظر برسد
+          throw new Error("boom-now");
+        }
+        return savedNow.call(Date);
+      };
+    }
+    try { await scheduledReportPass({ ZX_KV: kv }, {}); } finally { globalThis.fetch = saved; Date.now = savedNow; }
+    const ring = JSON.parse(kv.store.get(PASS_LOG_KEY));
+    const doc = JSON.parse(kv.store.get(reportKey(utcDateOf(Date.now()))));
+    return { kv, calls, rec: ring[0], rows: doc.rows, raw: JSON.stringify(ring[0]) };
+  }
+  const goodPools = () => json({ data: [{
+    relationships: { dex: { data: { id: "uniswap-v4-base" } } },
+    attributes: { address: POOL_ID_M, pool_created_at: "2026-09-19T00:00:00Z" },
+  }] });
+  const rowSig = (rows) => JSON.stringify(rows.map((r) => ({ address: r.address, v: r.v, why: r.why })));
+  const tag = (n) => "0x" + n.repeat(20);
+
+  // ok
+  const A = tag("a1");
+  const rOk = await v4MeterPass({ addr: A, dex: "uniswap-v4-base", poolsHandler: goodPools });
+  ok(JSON.stringify(rOk.rec.sub.v4idx) === '{"ok":1}', "[v4 index meter] index succeeds -> ok, got " + JSON.stringify(rOk.rec.sub.v4idx));
+  ok(rOk.calls.logs >= 1, "[v4 index meter] sanity: the index really ran (eth_getLogs), got " + rOk.calls.logs);
+  const storedKey = rOk.kv.store.get(v4.v4KvKey("base", A));
+  ok(typeof storedKey === "string" && JSON.parse(storedKey).keys.length >= 1, "[v4 index meter] sanity: the index stored a key");
+
+  // no-pools
+  const B = tag("b2");
+  const rNp = await v4MeterPass({ addr: B, dex: "uniswap-v4-base", poolsHandler: () => new Response("x", { status: 500 }) });
+  ok(JSON.stringify(rNp.rec.sub.v4idx) === '{"no-pools":1}', "[v4 index meter] GT pools fetch fails -> no-pools, got " + JSON.stringify(rNp.rec.sub.v4idx));
+
+  // found:keys — ایندکس نباید دوباره اجرا شود
+  const rFk = await v4MeterPass({ addr: A, dex: "uniswap-v4-base", poolsHandler: goodPools,
+    kvInit: [[v4.v4KvKey("base", A), storedKey]] });
+  ok(JSON.stringify(rFk.rec.sub.v4idx) === '{"found:keys":1}', "[v4 index meter] stored with keys -> found:keys, got " + JSON.stringify(rFk.rec.sub.v4idx));
+  ok(rFk.calls.logs === 0, "[v4 index meter] found:keys must NOT run the index again (eth_getLogs calls), got " + rFk.calls.logs);
+
+  // found:empty
+  const C = tag("c3");
+  const rFe = await v4MeterPass({ addr: C, dex: "uniswap-v4-base", poolsHandler: goodPools,
+    kvInit: [[v4.v4KvKey("base", C), JSON.stringify({ keys: [], reason: "no-v4-pool", complete: false })]] });
+  ok(JSON.stringify(rFe.rec.sub.v4idx) === '{"found:empty":1}', "[v4 index meter] stored empty -> found:empty, got " + JSON.stringify(rFe.rec.sub.v4idx));
+  ok(rFe.calls.logs === 0, "[v4 index meter] found:empty must NOT run the index again, got " + rFe.calls.logs);
+
+  // threw:other — پرتابِ واقعی پس از اجرای ایندکس (Date.now، توضیح در v4MeterPass)
+  const D = tag("d4");
+  const rTo = await v4MeterPass({ addr: D, dex: "uniswap-v4-base", poolsHandler: goodPools, throwAfterIndex: true });
+  ok(JSON.stringify(rTo.rec.sub.v4idx) === '{"threw:other":1}', "[v4 index meter] a throwing index step -> threw:other, got " + JSON.stringify(rTo.rec.sub.v4idx));
+
+  // threw:cap — همان پرتاب، ولی پیش‌تر در همین گذر ضربه‌ی سقفِ ساب‌ریکوئست ثبت شده (fetchِ pools داخلِ ایندکس سقف را می‌زند و گرفته می‌شود)
+  const E = tag("e5");
+  const rTc = await v4MeterPass({ addr: E, dex: "uniswap-v4-base", poolsHandler: () => { throw new Error("Too many subrequests by single Worker invocation."); },
+    throwAfterIndex: true });
+  ok(JSON.stringify(rTc.rec.sub.v4idx) === '{"threw:cap":1}', "[v4 index meter] a throw after the cap was hit -> threw:cap, got " + JSON.stringify(rTc.rec.sub.v4idx));
+
+  // slow — ایندکس موفق ولی بیش از ۵۰۰۰ms؛ دو برچسب (نتیجه + slow)
+  const G = tag("a7");
+  const rSl = await v4MeterPass({ addr: G, dex: "uniswap-v4-base", poolsHandler: goodPools, slowAfterIndex: true });
+  ok(JSON.stringify(rSl.rec.sub.v4idx) === '{"ok":1,"slow":1}', "[v4 index meter] a >5000ms index adds slow next to its outcome, got " + JSON.stringify(rSl.rec.sub.v4idx));
+  ok(JSON.stringify(rOk.rec.sub.v4idx) === '{"ok":1}', "[v4 index meter] a fast index never records slow");
+
+  // dexِ غیرِ v4 چیزی نمی‌شمارد
+  const rNon = await v4MeterPass({ addr: tag("f6"), dex: "uniswap-v3-base", poolsHandler: goodPools });
+  ok(JSON.stringify(rNon.rec.sub.v4idx) === "{}", "[v4 index meter] a non-v4 dex records nothing, got " + JSON.stringify(rNon.rec.sub.v4idx));
+
+  // هیچ آدرس/میزبان/متنی در رکورد نیست
+  for (const [name, r, addr] of [["ok", rOk, A], ["no-pools", rNp, B], ["found:keys", rFk, A], ["found:empty", rFe, C],
+    ["threw:other", rTo, D], ["threw:cap", rTc, E]]) {
+    ok(!r.raw.toLowerCase().includes(addr.toLowerCase().slice(2)), "[v4 index meter] " + name + ": the address must never appear in the passlog record");
+    ok(!/0x[0-9a-f]{40}/i.test(JSON.stringify(r.rec.sub.v4idx)) && !/boom|subrequests|https?:|\.com|\.org|\.io/i.test(JSON.stringify(r.rec.sub.v4idx)),
+       "[v4 index meter] " + name + ": v4idx holds labels only, got " + JSON.stringify(r.rec.sub.v4idx));
+  }
+
+  // ردیف‌ها بایت‌به‌بایت همان که پیش از شمارنده بود (مقدارها روی HEAD ۲۴cb41a، بدونِ شمارنده، اندازه‌گیری شده)
+  const sig = (addr, v, why) => JSON.stringify([{ address: addr, v, why }]);
+  ok(rowSig(rOk.rows) === sig(A, "nosell", null), "[v4 index meter] ok-scenario rows must equal the pre-counter rows, got " + rowSig(rOk.rows));
+  ok(rowSig(rNp.rows) === sig(B, null, "cover:500"), "[v4 index meter] no-pools rows unchanged, got " + rowSig(rNp.rows));
+  ok(rowSig(rFk.rows) === sig(A, "nosell", null), "[v4 index meter] found:keys rows unchanged, got " + rowSig(rFk.rows));
+  ok(rowSig(rFe.rows) === sig(C, null, "cover:false"), "[v4 index meter] found:empty rows unchanged, got " + rowSig(rFe.rows));
+  ok(rowSig(rTo.rows) === sig(D, "nosell", null), "[v4 index meter] throw rows unchanged, got " + rowSig(rTo.rows));
+  ok(rowSig(rTc.rows) === "[]", "[v4 index meter] cap-throw rows unchanged, got " + rowSig(rTc.rows));
+  ok(rowSig(rNon.rows) === sig(tag("f6"), null, "cover:false"), "[v4 index meter] non-v4 rows unchanged, got " + rowSig(rNon.rows));
+
+  console.log("[v4 index meter] sub.v4idx ok — closed labels (found:keys/found:empty/V4_REASONS/threw:cap/threw:other), "
+    + "cap 16, independent snapshot, non-v4 records nothing, found:* never re-runs the index, no address in the record, rows unchanged");
+}
+
 process.exit(fails === 0 ? 0 : 1);
