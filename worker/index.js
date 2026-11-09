@@ -168,7 +168,7 @@ import { tgRoute } from "./tg.js";
 import {
   REPORT_DATE_RE, PAIRS_KEY_BASE, reportKey, utcDateOf, emptyReportDoc, runReportPass, publishGuardRow,
   reportText, REPORT_TEXT_FIRST_DATE, followForRow, recheckForRow, causeForRow, readPassLog,
-  REPORT_METER_STAGES, REPORT_PASS_BASE_CAP, REPORT_PAIRS_CAP, PASS_LOG_KEY,
+  REPORT_METER_STAGES, REPORT_PASS_BASE_CAP, REPORT_PAIRS_CAP, PASS_LOG_KEY, REPORT_MIN_RESERVE_USD,
 } from "./report.js";
 import { renderReportPage, renderReportNotFound, dayCounts, addDays, isRealDate, REPORT_HISTORY_DAYS } from "./report_page.js";
 import { renderApiPage } from "./api_page.js";
@@ -2896,12 +2896,17 @@ async function diagVerdict(request, url, env, ctx) {
      در تناقض بود. تصمیمِ صاحب سایت، ۷ سپتامبر ۲۰۲۶.
    ⚠️ خواندن برای جواب‌دادن با برداشتن برای آموزش یکی نیست؛ این خط همان
    مرز است و نگهبانش در worker/test.mjs پینش می‌کند. */
+export const ROBOTS_DISALLOW = Object.freeze([
+  "/gt/", "/cg/", "/cmc/", "/vd/", "/sol/", "/base/", "/v4/", "/pnl/", "/ev", "/report/run",
+]);
 export const ROBOTS_TXT = [
   "# Zaexa — a DEX aggregator with an exit check. Read us; that is the point.",
   "",
   "User-agent: *",
   "Content-Signal: search=yes,ai-input=yes,ai-train=no",
   "Allow: /",
+  // ۹ نوامبر — مسیرهای داده/API صفحه نیستند و گوگل رویشان 4xx گرفت. /api (راهنما) باز می‌ماند.
+  ...ROBOTS_DISALLOW.map((p) => "Disallow: " + p),
   "",
   "Sitemap: https://zaexa.com/sitemap.xml",
   "",
@@ -2974,6 +2979,9 @@ function sitemapTokenFromPool(row, network="base") {
     // NaN می‌دهد یا ۰، پس یک شرط برای همه کافی است.
     const reserve = Number(row && row.attributes && row.attributes.reserve_in_usd);
     if (!Number.isFinite(reserve) || reserve <= 0) return null;
+    /* ۹ نوامبر — صفحه‌ی توکنی که noindex است (tokenNoindex: ذخیره زیرِ حداقلِ
+       گزارش) نباید در sitemap باشد؛ گوگل این تناقض را برای ۳۳ صفحه گزارش داد. */
+    if (reserve < REPORT_MIN_RESERVE_USD) return null;
 
     return addr;
   } catch (e) {

@@ -3912,8 +3912,17 @@ function isSolidlyReqId(id) { return PROBE_KIND_BY_ID.get(id) === "SOLIDLY"; }
   ok(/^\s*Allow:\s*\/\s*$/m.test(body),
      "robots.txt must allow the whole site — the whole point of owning this file is that "
      + "Cloudflare's managed default disallowed every AI crawler");
-  ok(!/Disallow:\s*\//.test(body),
-     "robots.txt must not disallow anything: " + JSON.stringify(body));
+  /* ۹ نوامبر — فقط مسیرهای داده/API بسته‌اند؛ صفحه‌ها (/، /app، /t/، /pairs، /report، /api) باز */
+  {
+    const dis = [...body.matchAll(/^Disallow:\s*(\S+)\s*$/gm)].map((m) => m[1]);
+    for (const p of ["/gt/", "/cg/", "/vd/", "/sol/", "/ev"]) ok(dis.includes(p), "robots.txt must disallow " + p + ", got " + JSON.stringify(dis));
+    const blocked = (path) => dis.some((d) => path.startsWith(d));
+    for (const p of ["/", "/app", "/api", "/pairs", "/report", "/report/2026-11-08", "/t/0x" + "a".repeat(40), "/og/t/0x" + "a".repeat(40) + ".png", "/og.png", "/logo.png", "/sitemap.xml"])
+      ok(!blocked(p), "robots.txt must keep " + p + " crawlable, blocked by " + JSON.stringify(dis));
+    for (const p of ["/gt/networks/base/tokens/multi/0x1", "/cg/mcap/x", "/vd/0x1", "/sol/quote", "/ev", "/cmc/kline", "/pnl/0x1/0x2", "/v4/keys/0x1", "/base/rpc"])
+      ok(blocked(p), "robots.txt must block " + p);
+    console.log("[robots api] data/API paths (/gt/ /cg/ /cmc/ /vd/ /sol/ /base/ /v4/ /pnl/ /ev /report/run) are disallowed; every page, /api, token pages, OG images and the sitemap stay crawlable");
+  }
   for (const bot of ["ClaudeBot", "GPTBot", "CCBot", "Google-Extended"]) {
     ok(!new RegExp("User-agent:\\s*" + bot, "i").test(body),
        "robots.txt must not single out " + bot + " — a named group here would re-create the "
@@ -3999,23 +4008,23 @@ const REPORT_LOCS_EXPECTED = expectedReportLocs();
   /* 🔴 اولین ردیف، عمداً: اگر آدرسِ صفر رد نشود، هم در سایت‌مپ ظاهر می‌شود و
      هم *اولین* آدرسِ فهرست می‌شود، پس ادعای ترتیب هم پایین‌تر می‌شکند. یک
      سایت‌مپِ واقعی یک بار همین را لیست کرد. */
-  page1Rows.push(poolRow(mkAddr(0), "1000"));
-  for (let i = 1; i <= 15; i++) page1Rows.push(poolRow(mkAddr(i), "1000"));
+  page1Rows.push(poolRow(mkAddr(0), "10000"));
+  for (let i = 1; i <= 15; i++) page1Rows.push(poolRow(mkAddr(i), "10000"));
   page1Rows.push(poolRow(mkAddr(9001), "0"));            // رزرو صفر
   page1Rows.push(poolRow(mkAddr(9002), null));           // رزرو غایب
   page1Rows.push(poolRow(mkAddr(9003), ""));              // رزرو خالی
   page1Rows.push(poolRow(mkAddr(9004), "not-a-number"));  // رزرو غیرِ عددی
-  page1Rows.push({ attributes: { reserve_in_usd: "500" },
+  page1Rows.push({ attributes: { reserve_in_usd: "9000" },
     relationships: { base_token: { data: { id: "base_" + SOL_LOOKALIKE } } } }); // زنجیره‌ی غیرِ Base
 
   const page2Rows = [];
-  for (let i = 16; i <= 35; i++) page2Rows.push(poolRow(mkAddr(i), "500"));
+  for (let i = 16; i <= 35; i++) page2Rows.push(poolRow(mkAddr(i), "9000"));
 
   const page3Rows = [];
-  for (let i = 36; i <= 52; i++) page3Rows.push(poolRow(mkAddr(i), "250"));
-  page3Rows.push(poolRow(mkAddr(1), "999"));   // تکراریِ صفحه‌ی ۱
-  page3Rows.push(poolRow(mkAddr(16), "999"));  // تکراریِ صفحه‌ی ۲
-  page3Rows.push(poolRow(mkAddr(36), "999"));  // تکراریِ همین صفحه
+  for (let i = 36; i <= 52; i++) page3Rows.push(poolRow(mkAddr(i), "8000"));
+  page3Rows.push(poolRow(mkAddr(1), "9990"));   // تکراریِ صفحه‌ی ۱
+  page3Rows.push(poolRow(mkAddr(16), "9990"));  // تکراریِ صفحه‌ی ۲
+  page3Rows.push(poolRow(mkAddr(36), "9990"));  // تکراریِ همین صفحه
 
   let smCalls = 0;
   globalThis.caches = freshCacheStore();
@@ -4140,7 +4149,7 @@ const REPORT_LOCS_EXPECTED = expectedReportLocs();
       calls++;
       if (String(u).includes("/networks/base/")) return new Response("boom", { status: 500 });
       if (pageOf(u) === 1) return pageResponse([{
-        attributes: { reserve_in_usd: "1000" },
+        attributes: { reserve_in_usd: "10000" },
         relationships: { base_token: { data: { id: "solana_" + SOL_TOK } } },
       }]);
       return pageResponse([]);

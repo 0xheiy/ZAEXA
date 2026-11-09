@@ -17,8 +17,14 @@ test('zero liquidity evidence requires all returned matching pools to be explici
  await mocked(async()=>Response.json({data:[pool('solana',MINT,'0'),pool('solana',MINT,'1')]}),async()=>assert.equal(await solPoolsEmpty(MINT,{}),false));
 });
 test('sitemap contains both networks and survives one network outage',async()=>{
- await mocked(async url=>Response.json({data:[pool(String(url).includes('/solana/')?'solana':'base',String(url).includes('/solana/')?MINT:BASE,'10')]}),async()=>assert.deepEqual(await buildSitemapTokens({}),[BASE,MINT]));
- await mocked(async url=>String(url).includes('/base/')?new Response('',{status:503}):Response.json({data:[pool('solana',MINT,'10')]}),async()=>assert.deepEqual(await buildSitemapTokens({}),[MINT]));
+ await mocked(async url=>Response.json({data:[pool(String(url).includes('/solana/')?'solana':'base',String(url).includes('/solana/')?MINT:BASE,'10000')]}),async()=>assert.deepEqual(await buildSitemapTokens({}),[BASE,MINT]));
+ await mocked(async url=>String(url).includes('/base/')?new Response('',{status:503}):Response.json({data:[pool('solana',MINT,'10000')]}),async()=>assert.deepEqual(await buildSitemapTokens({}),[MINT]));
+});
+// ۹ نوامبر — صفحه‌ی noindex (ذخیره زیرِ حداقلِ گزارش) هرگز در sitemap نیست؛ مرز دقیقاً همان REPORT_MIN_RESERVE_USD
+test('sitemap leaves out tokens whose page is noindex (reserve under the report minimum)',async()=>{
+ const B2='0x2222222222222222222222222222222222222222';
+ await mocked(async url=>String(url).includes('/solana/')?Response.json({data:[pool('solana',MINT,'4999.99')]}):Response.json({data:[pool('base',BASE,'4999'),pool('base',B2,'5000')]}),
+  async()=>assert.deepEqual(await buildSitemapTokens({}),[B2]));
 });
 test('hourly Solana targets retain age/cap boundaries and negative-publication policy',()=>{
  const now=Date.parse('2026-10-01T12:00:00Z');
