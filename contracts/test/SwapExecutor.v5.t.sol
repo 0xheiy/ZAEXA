@@ -53,7 +53,7 @@ contract SwapExecutorV5Test is Test {
         MockWETH weth = new MockWETH();
 
         vm.prank(owner);
-        exec = new SwapExecutor(owner, feeTo, 0, address(weth));
+        exec = new SwapExecutor(owner, feeTo, 0, address(weth), new address[](0));
 
         vm.startPrank(owner);
         exec.setRouterAllowed(address(v3), true);
@@ -238,7 +238,7 @@ contract SwapExecutorV5Test is Test {
                                   0, 0, false, address(0)), amt);
 
         vm.expectEmit(true, true, true, true, address(exec));
-        emit SwapExecutor.Swapped(user, address(tokenA), address(tokenB), amt, 200 ether, 0);
+        emit SwapExecutor.Swapped(user, address(tokenA), address(tokenB), amt, 200 ether, 0, address(tokenA));
 
         vm.prank(user);
         uint256 out = exec.executeSwap(address(tokenA), address(tokenB), amt, 0,

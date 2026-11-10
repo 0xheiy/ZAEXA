@@ -22,10 +22,35 @@ pragma solidity ^0.8.24;
  *      - reentrancy guard
  *      - deadline, so a stale transaction cannot execute later
  *      - hard fee ceiling the owner cannot raise past
- *      - the contract holds no user funds between transactions
+ *      - the contract holds no user funds between transactions - and, as of v6,
+ *        that is enforced rather than assumed: whatever input or intermediate
+ *        token a router leaves unspent is refunded to the caller in the same call
+ *
+ * v6 CHANGES (v5 is live at 0x15e511Bf2Ea1a0F50F25E973d57Dce0D01946b6d):
+ *      - the fee is charged in a token from an owner-managed allowlist whenever
+ *        the route touches one: on the input if it is listed (buys, as v5),
+ *        otherwise at each leg's first listed hop, in flight (sells); a route
+ *        that touches no listed token pays on the input as in v5. Full rule and
+ *        its two revert cases: the comment in executeSwap.
+ *      - a failing fee transfer no longer blocks the swap (FeeSkipped); the fee
+ *        is measured by balance delta, gas-capped, and copies no return data
+ *      - unspent input / intermediate tokens are refunded (Refunded), after the
+ *        output has been delivered
+ *
+ * ACCEPTED LIMITS of the fee rule - stated so nobody mistakes them for bugs
+ * already fixed:
+ *      - a caller who injects value from outside the executor's accounting (a
+ *        pool they control and price, a tiny fee-token input a manipulated pool
+ *        inflates) can still route around the fee. Not closable on-chain without
+ *        prices; equally true of v5; and such a caller could call the routers
+ *        directly instead.
+ *      - an input-side fee is taken on the whole input before the route runs, so
+ *        a partial fill (say 60%) pays the fee on 100%; the unspent input is
+ *        refunded fee-free. A fee taken in flight is charged only on what reached
+ *        the fee point.
  *
  * WHAT THE OWNER KEY CAN STILL DO - stated because the list above reads like a
- * complete account of the trust model, and without these four it is not:
+ * complete account of the trust model, and without these five it is not:
  *
  *      - `_ensureApproval` grants a whitelisted router `type(uint256).max` on a
  *        token. The bound is real - the contract holds nothing between calls and
@@ -46,6 +71,9 @@ pragma solidity ^0.8.24;
  *        caller's `minAmountOut`. The compensating fact: an adapter never
  *        receives an allowance, so unlike a router its reach ends when the call
  *        ends - it can only take what was physically handed to it.
+ *      - `setFeeToken` (v6) is likewise a single-EOA call. It decides on which
+ *        side of a swap the fee is taken, never how much: the amount stays bound
+ *        by `feeBps` <= MAX_FEE_BPS, and WETH cannot be removed from the list.
  *
  * NOTE: this contract has not been formally audited. Independent review and
  *    thorough testing are required before using it with meaningful size.
@@ -197,6 +225,30 @@ contract SwapExecutor {
         uint256 amountIn;
     }
 
+    /* Per-call state, in memory. One struct instead of a dozen locals: executeSwap
+       already sits at the EVM's 16-slot stack limit (see the note in executeSwap),
+       and every v6 feature needed state that has to survive across the pull, the
+       route, delivery and the refund. */
+    struct Ctx {
+        address inTok;          // tokenIn, with native mapped to WETH
+        address outTok;         // tokenOut, with native mapped to WETH
+        bool inFlight;          // fee taken at each leg's first fee-token hop (see executeSwap)
+        uint256[] feePoint;     // per part: 0 = on the leg's input, j+1 = on step j's output
+        address[] toks;         // tokens this call may leave behind: input + intermediates
+        uint256[] bals;         // the contract's balance of each, before any asset moved
+        bool[] preFee;          // token sits before its leg's fee point (never fee-charged)
+        address feeTok;         // token the fee was charged in ...
+        bool feeMixed;          // ... unless legs charged it in different tokens
+        uint256 fee;            // total that actually left the contract as fee
+    }
+
+    /* Gas forwarded to the fee transfer. A plain ERC-20 transfer is ~30k gas cold
+       (WETH ~30k, USDC through its proxy ~40k); 150k leaves room for tokens with
+       tax or reflection logic on transfer while bounding what a gas-burning token
+       can take from the swap. A transfer that runs out of it fails like any other
+       failure: the fee is skipped, the swap continues. */
+    uint256 constant FEE_TRANSFER_GAS = 150_000;
+
     /// The chain's wrapped native token (WETH on Base). Immutable.
     address public immutable WETH;
     /// In tokenIn/tokenOut, address(0) means "native ETH"
@@ -208,18 +260,41 @@ contract SwapExecutor {
     uint256 public feeBps;                       // current fee
     mapping(address => bool) public allowedRouter;   // router whitelist
     mapping(address => bool) public allowedAdapter;  // adapter whitelist - separate from allowedRouter
+    /* Fee-token allowlist. Decides in which token, and at which point of each
+       leg, the fee is taken - see the fee rule in `executeSwap`. Owner-managed and seeded from the constructor so that
+       no stablecoin address is ever hardcoded here: the same bytecode must be
+       deployable on any chain, and a token list is configuration, not code.
+       WETH is always on it (native ETH is routed as WETH) and cannot be removed. */
+    mapping(address => bool) public feeToken;
 
     bool private _locked;
 
-    /// @param fee the fee taken - always denominated in tokenIn, never tokenOut
+    /// @param amountIn input actually consumed (fee included, refunded input excluded)
+    /// @param amountOut what reached the user's wallet, net of any fee
+    /// @param fee      total that left the contract as fee (0 if none or skipped);
+    ///                 0 when feeToken is address(0) - see FeeTaken for the breakdown
+    /// @param feeToken the ERC-20 the fee was charged in. Since v6 this is no longer
+    ///                 always tokenIn - see the fee rule in executeSwap. Native ETH is
+    ///                 reported as WETH, because WETH is what feeRecipient receives.
+    ///                 address(0) means the legs of a split order charged it in
+    ///                 different tokens; the FeeTaken events then carry the amounts.
     event Swapped(
         address indexed user,
         address indexed tokenIn,
         address indexed tokenOut,
         uint256 amountIn,
         uint256 amountOut,
-        uint256 fee
+        uint256 fee,
+        address feeToken
     );
+    event FeeTokenSet(address indexed token, bool allowed);
+    /// The fee transfer failed (recipient blacklisted, token paused, ...) and was skipped;
+    /// the amount stayed with the user's swap instead.
+    event FeeSkipped(address indexed token, address indexed recipient, uint256 amount);
+    /// One fee transfer: `amount` is what left the contract (measured, not trusted).
+    event FeeTaken(address indexed token, address indexed recipient, uint256 amount);
+    /// Unspent input or intermediate token returned to the caller (msg.sender).
+    event Refunded(address indexed token, uint256 amount);
     event RouterAllowed(address indexed router, bool allowed);
     event AdapterAllowed(address indexed adapter, bool allowed);
     event FeeChanged(uint256 oldBps, uint256 newBps);
@@ -245,14 +320,33 @@ contract SwapExecutor {
         _locked = false;
     }
 
-    constructor(address _owner, address _feeRecipient, uint256 _feeBps, address _weth) {
+    constructor(
+        address _owner,
+        address _feeRecipient,
+        uint256 _feeBps,
+        address _weth,
+        address[] memory _feeTokens
+    ) {
         require(_owner != address(0), "zero owner");
         require(_weth != address(0), "zero weth");
         require(_feeBps <= MAX_FEE_BPS, "fee too high");
         WETH = _weth;
         owner = _owner;
         feeRecipient = _feeRecipient == address(0) ? _owner : _feeRecipient;
+        // A fee "sent" to ourselves never leaves the balance: the delta would read 0
+        // and every fee would be reported as skipped while the amount sat here,
+        // indistinguishable from rescuable dust. Same check in setFeeRecipient.
+        require(feeRecipient != address(this), "fee recipient is self");
         feeBps = _feeBps;
+        // Emitted for WETH and the seed list too, so the allowlist can be rebuilt
+        // from logs alone - same reasoning as the Rescued events below.
+        feeToken[_weth] = true;
+        emit FeeTokenSet(_weth, true);
+        for (uint256 i = 0; i < _feeTokens.length; i++) {
+            require(_feeTokens[i] != address(0), "zero token");
+            feeToken[_feeTokens[i]] = true;
+            emit FeeTokenSet(_feeTokens[i], true);
+        }
     }
 
     /// Only WETH may send ETH here, during withdraw. Nobody else.
@@ -284,66 +378,79 @@ contract SwapExecutor {
         // Routing always works in the wrapped token; native is only a wrapper.
         // NOTE: tokenIn == tokenOut is deliberately allowed (a loop route). The
         //    interface's "exit simulation" relies on it, as does two-pool arbitrage.
-        address inTok  = tokenIn  == NATIVE ? WETH : tokenIn;
-        address outTok = tokenOut == NATIVE ? WETH : tokenOut;
+        Ctx memory c;
+        c.inTok  = tokenIn  == NATIVE ? WETH : tokenIn;
+        c.outTok = tokenOut == NATIVE ? WETH : tokenOut;
 
         // Validation and execution are deliberately separate functions.
         //    With everything in one function, the loop counters and temporaries pushed
         //    it past the EVM's 16-slot stack limit ("stack too deep").
-        _validatePlan(parts, inTok, outTok, totalAmountIn);
+        _validatePlan(parts, c.inTok, c.outTok, totalAmountIn);
 
-        uint256 fee;
-        uint256 swapAmount;
-        {
-            uint256 received;
-            if (tokenIn == NATIVE) {
-                // ETH arrived with the transaction - wrap it, then proceed as ERC-20
-                require(msg.value == totalAmountIn, "value != amountIn");
-                IWETH(WETH).deposit{value: msg.value}();
-                received = msg.value;
-            } else {
-                require(msg.value == 0, "unexpected value");
-                // Measure what actually arrived, so fee-on-transfer tokens work too
-                uint256 balBefore = IERC20(inTok).balanceOf(address(this));
-                _safeTransferFrom(inTok, msg.sender, address(this), totalAmountIn);
-                received = IERC20(inTok).balanceOf(address(this)) - balBefore;
-            }
-            require(received > 0, "nothing received");
+        /* --- the fee rule (v6) ---
+           The fee is 1% (at most) of the order, taken in a token we are willing to
+           hold. v5 always took it from the input, so that it would not be
+           denominated in a token that could be worthless tomorrow - right for a
+           BUY, but for a SELL (unknown token -> ETH/stablecoin) it put the fee in
+           the unknown token. The allowlist now decides, per leg of the route:
 
-            // --- the fee is taken from the *input* token ---
-            // Why input and not output? Users usually start from a token that is worth
-            //    something and move toward an unknown one. A fee taken in the output
-            //    token could be worthless, or unsellable, tomorrow.
-            if (feeBps > 0 && feeRecipient != address(0)) {
-                fee = (received * feeBps) / 10_000;
-                if (fee > 0) {
-                    _safeTransfer(inTok, feeRecipient, fee);
-                }
-            }
-            swapAmount = received - fee;
+             1. input is a fee token                 -> fee from the input, up front
+                                                        (buys; exactly as v5)
+             2. else, in each leg, at the FIRST hop  -> fee from that hop's output,
+                whose output is a fee token             in flight, before the next hop
+                                                        (sells; and token->USDC->token)
+                a leg of such an order that never   -> fee from that leg's input share
+                touches a fee token
+             3. no leg touches a fee token at all    -> fee from the input, up front
+                                                        (v5 token->token fallback)
+
+           Why "first fee-token hop" and not "output, plus whatever comes back":
+           the fee is charged once, on the full value of the leg, at the first
+           point that value is in a vetted token. Anything refunded after that
+           point was already charged, so an honest partial fill pays exactly once;
+           and nothing can leave fee-free by being stranded on purpose. An
+           audit of the first v6 draft showed the hole this closes: unknown ->
+           USDC -> junk, with a dust pool on the last hop, returned almost all the
+           USDC as an "unspent intermediate" while the fee landed in the unknown
+           input (or, for a sell to WETH, on a dust-sized output).
+
+           Two shapes could still let value out before a leg's fee point; both
+           revert instead of paying it out:
+             - an intermediate refunded from before the fee point (unknown -> X ->
+               USDC, the X->USDC hop under-spends): swapped, never charged, not a
+               vetted token -> "leftover before fee point", at refund time;
+             - the OUTPUT token produced before the fee point (A->B, B->USDC
+               through a dust pool, USDC->B): the early B is not in the refund list,
+               so it would be delivered as output uncharged -> "output before fee
+               point", in _prepare, before any asset moves (audit round 2).
+           Unspent INPUT is always refunded freely - it was never swapped.
+           Accepted limits of this rule (value injected from outside; input-side
+           fee on a partial fill) are listed in the header. */
+        _prepare(c, parts);
+
+        uint256 received = _pullInput(tokenIn, c.inTok, totalAmountIn);
+        uint256 swapAmount = received;
+        if (!c.inFlight) {
+            // `_takeFee` returns what actually left the contract, measured by
+            // balance, so swapAmount can never exceed what is really held.
+            swapAmount -= _takeFee(c, c.inTok, received);
             require(swapAmount > 0, "amount too small after fee");
         }
 
-        {
-            uint256 outBefore = IERC20(outTok).balanceOf(address(this));
-            // On a loop route (same token in and out) the amount about to be spent is
-            //    already part of the balance. Without subtracting it up front, the final
-            //    difference underflows and the transaction panics.
-            if (inTok == outTok) {
-                outBefore -= swapAmount;
-            }
+        amountOut = _routeAndMeasure(parts, swapAmount, totalAmountIn, c);
 
-            _runParts(parts, swapAmount, totalAmountIn);
-
-            // Output is measured from the *actual* balance, not the router's return value
-            amountOut = IERC20(outTok).balanceOf(address(this)) - outBefore;
-        }
         /* Slippage protection must be measured on what reaches the *user's wallet*,
            not on what reached the contract. For a fee-on-transfer output token these
            are not the same: the contract receives X, the user receives X minus the
            transfer fee. The check used to run against X, so minAmountOut could hold
            while the user got less than they were promised - meaning the very guard
            that exists for this silently stopped working.
+
+           Since v6 the same holds for our own fee when it is taken on the output
+           side: it leaves the contract during the route, so `amountOut` is already
+           net of it, and the user-side measurement is net of both the protocol fee
+           and any transfer tax. minAmountOut therefore means "what lands in my
+           wallet", whichever side the fee was taken on.
 
            Native ETH has no transfer fee, so there the number is unchanged.
 
@@ -363,27 +470,277 @@ contract SwapExecutor {
            `minAmountOut == 0` - meaning they asked for no guarantee at all -
            passes through instead of reverting.
            The ERC-20 branch has the same shape via a recipient hook. */
-        uint256 delivered;
+        uint256 delivered = _deliver(tokenOut, c.outTok, amountOut);
+        require(delivered >= minAmountOut, "slippage: output below minimum");
+
+        /* Refunds come LAST, after the output and its check. Settlement order is
+           part of the contract: the user's wallet is measured for minAmountOut
+           before any refund transfer can call into a token hook, and a refund
+           hook observes a swap that has already delivered. The refund returns
+           the input-token part, so the event reports input actually consumed;
+           clamped, because a plan may route back through the input token mid-path
+           (A->B->A->C) and the refund can then exceed what arrived - still the
+           caller's, but "consumed" is zero, not an underflow panic. */
+        uint256 inRefund = _refundLeftovers(c);
+
+        // What was *actually delivered* is logged, not what the caller asked for.
+        // For fee-on-transfer tokens these differ, and v1 logged the larger number.
+        emit Swapped(msg.sender, tokenIn, tokenOut,
+                     inRefund >= received ? 0 : received - inRefund,
+                     delivered,
+                     c.feeMixed ? 0 : c.fee,
+                     c.feeMixed ? address(0) : c.feeTok);
+        amountOut = delivered;
+    }
+
+    /// Runs the route and returns the output that reached the contract, net of any
+    /// fee taken in flight. Split out of executeSwap for stack depth.
+    function _routeAndMeasure(
+        RoutePart[] calldata parts,
+        uint256 swapAmount,
+        uint256 totalAmountIn,
+        Ctx memory c
+    ) internal returns (uint256 amountOut) {
+        uint256 outBefore = IERC20(c.outTok).balanceOf(address(this));
+        // On a loop route (same token in and out) the amount about to be spent is
+        //    already part of the balance. Without subtracting it up front, the final
+        //    difference underflows and the transaction panics.
+        if (c.inTok == c.outTok) {
+            outBefore -= swapAmount;
+        }
+
+        _runParts(parts, swapAmount, totalAmountIn, c);
+
+        // Output is measured from the *actual* balance, not the router's return value
+        amountOut = IERC20(c.outTok).balanceOf(address(this)) - outBefore;
+    }
+
+    /// Takes the input from the caller and returns what actually arrived.
+    function _pullInput(address tokenIn, address inTok, uint256 totalAmountIn)
+        internal returns (uint256 received)
+    {
+        if (tokenIn == NATIVE) {
+            // ETH arrived with the transaction - wrap it, then proceed as ERC-20
+            require(msg.value == totalAmountIn, "value != amountIn");
+            IWETH(WETH).deposit{value: msg.value}();
+            received = msg.value;
+        } else {
+            require(msg.value == 0, "unexpected value");
+            // Measure what actually arrived, so fee-on-transfer tokens work too
+            uint256 balBefore = IERC20(inTok).balanceOf(address(this));
+            _safeTransferFrom(inTok, msg.sender, address(this), totalAmountIn);
+            received = IERC20(inTok).balanceOf(address(this)) - balBefore;
+        }
+        require(received > 0, "nothing received");
+    }
+
+    /// Sends `amount` of the output to the caller and returns what actually arrived
+    /// (clamped at zero - see the comment in executeSwap for why the clamp matters).
+    function _deliver(address tokenOut, address outTok, uint256 amount)
+        internal returns (uint256 delivered)
+    {
         if (tokenOut == NATIVE) {
             // Unwrap and send real ETH - no second transaction
-            IWETH(WETH).withdraw(amountOut);
+            IWETH(WETH).withdraw(amount);
             uint256 ethBefore = msg.sender.balance;
-            (bool sent, ) = msg.sender.call{value: amountOut}("");
+            (bool sent, ) = msg.sender.call{value: amount}("");
             require(sent, "eth transfer failed");
             uint256 ethAfter = msg.sender.balance;
             delivered = ethAfter > ethBefore ? ethAfter - ethBefore : 0;
         } else {
             uint256 userBefore = IERC20(outTok).balanceOf(msg.sender);
-            _safeTransfer(outTok, msg.sender, amountOut);
+            _safeTransfer(outTok, msg.sender, amount);
             uint256 userAfter = IERC20(outTok).balanceOf(msg.sender);
             delivered = userAfter > userBefore ? userAfter - userBefore : 0;
         }
-        require(delivered >= minAmountOut, "slippage: output below minimum");
+    }
 
-        // What was *actually delivered* is logged, not what the caller asked for.
-        // For fee-on-transfer tokens these differ, and v1 logged the larger number.
-        emit Swapped(msg.sender, tokenIn, tokenOut, swapAmount + fee, delivered, fee);
-        amountOut = delivered;
+    /**
+     * Takes the protocol fee on `amount` of `token`; returns what actually LEFT the
+     * contract.
+     *
+     * The fee must never be able to block a swap. With the reverting `_safeTransfer`,
+     * a fee recipient that a token has blacklisted (USDC and USDT both keep such lists),
+     * or a token that pauses transfers to one address, would turn every swap through
+     * that token into a revert - a denial of service on the user that is entirely
+     * about *our* cut. So this one transfer is a raw call whose outcome is ignored:
+     *
+     *   - what counts is the contract's balance delta around the call, not the
+     *     call's success flag or return value. A token that moves the funds but
+     *     returns false would otherwise leave the caller believing it still holds
+     *     the fee - and route, or count as loop-route output, money it no longer has.
+     *     Nothing moved (revert, false, out of gas) -> fee skipped, FeeSkipped.
+     *   - gas is capped at FEE_TRANSFER_GAS, so a token that burns gas on this one
+     *     transfer cannot starve the rest of the swap.
+     *   - no return data is copied (output size 0 in the call): a token returning a
+     *     megabyte would otherwise make *us* pay the memory expansion. Since the
+     *     return value is not consulted, there is nothing to copy.
+     *
+     * More leaving than was asked (a token that taxes the sender on top) is allowed
+     * up to, but not including, the in-flight amount; the full delta is what is
+     * deducted, so accounting always matches the balance. Anything beyond that is a
+     * broken token and reverts.
+     *
+     * The token is recorded in `c` even when no fee is charged, so the Swapped event
+     * can name the token the fee side resolved to.
+     */
+    function _takeFee(Ctx memory c, address token, uint256 amount) internal returns (uint256 moved) {
+        if (c.feeTok == address(0)) c.feeTok = token;
+        else if (c.feeTok != token) c.feeMixed = true;
+
+        address to = feeRecipient;
+        if (feeBps == 0 || to == address(0)) return 0;
+        uint256 fee = (amount * feeBps) / 10_000;
+        if (fee == 0) return 0;
+
+        uint256 balBefore = IERC20(token).balanceOf(address(this));
+        bytes memory data = abi.encodeWithSelector(IERC20.transfer.selector, to, fee);
+        assembly {
+            pop(call(FEE_TRANSFER_GAS, token, 0, add(data, 0x20), mload(data), 0, 0))
+        }
+        uint256 balAfter = IERC20(token).balanceOf(address(this));
+        moved = balBefore > balAfter ? balBefore - balAfter : 0;
+        require(moved < amount, "fee overdrawn");
+
+        if (moved == 0) {
+            emit FeeSkipped(token, to, fee);
+        } else {
+            c.fee += moved;
+            emit FeeTaken(token, to, moved);
+        }
+    }
+
+    /**
+     * Before any asset moves: decides the fee mode and fee point of every leg (see
+     * the rule in executeSwap), lists the tokens this call could leave behind - the
+     * input token and every intermediate - and records the contract's balance of each.
+     *
+     * The output token is excluded from the list on purpose: its growth is the swap's
+     * output and is measured and delivered separately. That also covers the loop route
+     * (inTok == outTok): there the input token IS the output token, so an unspent
+     * input simply stays in the balance and is delivered as output - it reaches the
+     * user either way, it is just counted against minAmountOut rather than refunded.
+     * An intermediate that happens to equal outTok (A->C->B->C) is excluded for the
+     * same reason.
+     *
+     * Bounds: _validatePlan has already capped parts at 5 and steps at 3, so the list
+     * holds at most 1 + 5 x 3 = 16 entries; were that ever exceeded, the indexed write
+     * reverts with a bounds-check panic before any asset moves. The quadratic
+     * de-duplication is over at most 16 entries.
+     */
+    function _prepare(Ctx memory c, RoutePart[] calldata parts) internal view {
+        c.feePoint = new uint256[](parts.length);
+        if (!feeToken[c.inTok]) {
+            for (uint256 i = 0; i < parts.length; i++) {
+                SwapStep[] calldata st = parts[i].steps;
+                for (uint256 j = 0; j < st.length; j++) {
+                    if (feeToken[st[j].tokenOut]) {
+                        c.feePoint[i] = j + 1;
+                        c.inFlight = true;
+                        break;
+                    }
+                }
+            }
+        }
+
+        address[] memory toks = new address[](16);
+        bool[] memory pre = new bool[](16);
+        uint256 n = 0;
+        if (c.inTok != c.outTok) {
+            toks[n++] = c.inTok;        // unspent input: never swapped, never "pre-fee"
+        }
+        for (uint256 i = 0; i < parts.length; i++) {
+            SwapStep[] calldata st = parts[i].steps;
+            uint256 fp = c.feePoint[i];
+            for (uint256 j = 0; j < st.length; j++) {
+                address t = st[j].tokenOut;
+                // Step j's output sits at position j + 1; the fee is taken at position
+                // fp (fp == 0: on the input, or up-front mode - nothing is "before").
+                bool isPre = j + 1 < fp;  // swapped before this leg's fee was taken
+                if (t == c.outTok) {
+                    /* The output token is not in the refund list (its growth IS the
+                       output), so output-token value produced before the fee point would
+                       be delivered uncharged: A->B (full), B->USDC through a dust pool
+                       (the fee point, on a few units), USDC->B - the unspent B from hop 1
+                       goes out as "output". Audit round 2. Reverting here, before any
+                       asset moves, is the only place it can be told apart from real
+                       output. The leg's final step is never caught (fp <= its position),
+                       nor is a loop route, whose output token is the input at position 0. */
+                    require(!isPre, "output before fee point");
+                    continue;
+                }
+                uint256 k = 0;
+                while (k < n && toks[k] != t) k++;
+                if (k == n) toks[n++] = t;
+                if (isPre) pre[k] = true;
+            }
+        }
+        // shrink both arrays in place to the entries actually used
+        assembly {
+            mstore(toks, n)
+            mstore(pre, n)
+        }
+        uint256[] memory bals = new uint256[](n);
+        for (uint256 k = 0; k < n; k++) {
+            bals[k] = IERC20(toks[k]).balanceOf(address(this));
+        }
+        c.toks = toks;
+        c.bals = bals;
+        c.preFee = pre;
+    }
+
+    /**
+     * Refunds to the caller whatever the route left of the input and intermediate
+     * tokens, measured as growth over the snapshot taken in _prepare.
+     *
+     * Why this exists: nothing used to check that a router consumed its whole
+     * input. A pool that runs out of liquidity mid-swap or a price limit leaves the
+     * rest here - and with no refund it stayed, the user's money sitting in a
+     * contract that promises it holds nothing. Multi-hop parts have the same hole
+     * one level down: a hop that under-spends strands the intermediate token.
+     *
+     * Adapters are a different case and are NOT covered by this refund. An adapter
+     * is handed the in-flight amount outright, so anything it does not send back
+     * stays in the adapter, where this contract cannot see it. UniswapV4Adapter
+     * cannot keep leftovers at all: it reverts unless the pool consumed exactly the
+     * amount it received and it ends holding no tokenIn ("v4: input mismatch",
+     * "v4: tokenIn left"). Any other adapter must honour the IZaexaAdapter contract
+     * above; the order-level minAmountOut is the backstop.
+     *
+     * Only growth is paid out, never the absolute balance, so pre-existing balances
+     * are untouched. A shrink - possible only if a whitelisted router pulled more
+     * than it was told - is not "refundable" and is ignored here; minAmountOut is
+     * the backstop for that, as everywhere else.
+     *
+     * A leftover of a token that sits before its leg's fee point reverts - see the
+     * fee rule in executeSwap for why paying it out would let value leave uncharged.
+     *
+     * The refund uses the reverting `_safeTransfer`, unlike the fee: this is the
+     * user's own money, and failing closed is preferable to silently keeping it.
+     *
+     * Native ETH input: the unspent part is refunded as WETH, not unwrapped. WETH
+     * is 1:1 ETH and an ERC-20 transfer cannot be refused by the recipient, while
+     * an ETH send can - a contract caller without a payable receive would turn a
+     * partial fill into a revert of the whole swap. It also adds no new external
+     * call to the caller's code in the middle of settlement.
+     *
+     * Returns the amount refunded of the input token, so the Swapped event can
+     * report the input actually consumed. Matched by address, not by position: on
+     * a loop route the input token is not in the list at all.
+     */
+    function _refundLeftovers(Ctx memory c) internal returns (uint256 inRefund) {
+        address[] memory toks = c.toks;
+        uint256[] memory bals = c.bals;
+        for (uint256 k = 0; k < toks.length; k++) {
+            uint256 nowBal = IERC20(toks[k]).balanceOf(address(this));
+            if (nowBal > bals[k]) {
+                require(!c.preFee[k], "leftover before fee point");
+                uint256 extra = nowBal - bals[k];
+                _safeTransfer(toks[k], msg.sender, extra);
+                emit Refunded(toks[k], extra);
+                if (toks[k] == c.inTok) inRefund = extra;
+            }
+        }
     }
 
     /// Full validation of the plan - before any asset moves
@@ -427,10 +784,13 @@ contract SwapExecutor {
 
     /// Runs the legs of the order. Each leg's share is computed against the net
     /// amount, so both the protocol fee and fee-on-transfer tokens are accounted for.
+    /// In in-flight fee mode (see executeSwap) each leg also pays its fee here, at its
+    /// fee point, out of the amount in flight.
     function _runParts(
         RoutePart[] calldata parts,
         uint256 swapAmount,
-        uint256 totalAmountIn
+        uint256 totalAmountIn,
+        Ctx memory c
     ) internal {
         uint256 spent = 0;
         for (uint256 i = 0; i < parts.length; i++) {
@@ -450,9 +810,18 @@ contract SwapExecutor {
             // v1 called `continue` here: that leg's share was never spent, yet we had
             // already taken the user's money and it was stuck. Silence is the worst option.
             require(amt > 0, "part rounds to zero");
+
+            // type(uint256).max = "no fee in this leg" (up-front mode: already taken)
+            uint256 fp = c.inFlight ? c.feePoint[i] : type(uint256).max;
+            if (fp == 0) {
+                amt -= _takeFee(c, c.inTok, amt);
+            }
             for (uint256 j = 0; j < p.steps.length; j++) {
                 amt = _swap(p.steps[j], amt);
                 require(amt > 0, "zero step output");
+                if (j + 1 == fp) {
+                    amt -= _takeFee(c, p.steps[j].tokenOut, amt);
+                }
             }
         }
     }
@@ -629,8 +998,23 @@ contract SwapExecutor {
         feeBps = newBps;
     }
 
+    /**
+     * Adds or removes a fee token (see the fee rule in executeSwap).
+     * WETH cannot be removed: native ETH is routed as WETH. Without it on the list,
+     * every sell into ETH would lose its fee point and fall back to the v5 input
+     * fee - in the unknown token being sold - which is exactly the exposure the fee
+     * rule exists to avoid; one owner call would do that silently.
+     */
+    function setFeeToken(address token, bool allowed) external onlyOwner {
+        require(token != address(0), "zero token");
+        require(allowed || token != WETH, "weth is always a fee token");
+        feeToken[token] = allowed;
+        emit FeeTokenSet(token, allowed);
+    }
+
     function setFeeRecipient(address to) external onlyOwner {
         require(to != address(0), "zero recipient");
+        require(to != address(this), "fee recipient is self");
         emit FeeRecipientChanged(feeRecipient, to);
         feeRecipient = to;
     }

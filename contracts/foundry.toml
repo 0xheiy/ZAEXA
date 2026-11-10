@@ -4,3 +4,23 @@ out = "out"
 libs = ["lib"]
 
 # See more config options https://github.com/foundry-rs/foundry/blob/master/crates/config/README.md#all-options
+
+# SwapExecutor v6 is deployed with this profile: FOUNDRY_PROFILE=executor.
+# Without the optimizer its runtime is 29,816 bytes, over the 24,576-byte EIP-170
+# limit (v5 fit with 196 bytes to spare, unoptimized); with this profile it is
+# 16,561 bytes (8,015 of margin) - same numbers as contracts/README.md. The default profile is
+# left untouched so that every other contract and script builds byte-for-byte
+# as before. deploy.sh uses this profile for its test gate, the size check,
+# forge create and the verify command alike.
+#
+# Compiler pinned explicitly so the deployed bytecode and the BaseScan verification
+# are reproducible. The repo does not record which solc v5 was verified with (the
+# default profile pins none), so this follows the repo's only pinned build,
+# script/build_roundtrip.sh: solc 0.8.33, evm cancun. cancun rather than solc
+# 0.8.33's own default (osaka) on purpose: osaka lets the compiler emit opcodes
+# newer than cancun, and cancun is the EVM Base is known to run.
+[profile.executor]
+solc_version = "0.8.33"
+evm_version = "cancun"
+optimizer = true
+optimizer_runs = 200

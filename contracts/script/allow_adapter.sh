@@ -27,7 +27,7 @@ if [[ ! "$ADAPTER" =~ ^0x[0-9a-fA-F]{40}$ ]]; then
   exit 1
 fi
 
-EXECUTOR="0x15e511Bf2Ea1a0F50F25E973d57Dce0D01946b6d"
+EXECUTOR="0x5f3FCcfF3339DAa9eA7D2EBC3f77017D65467132"
 
 # ⚠️ این آدرس باید با CHAIN.executor در web/index.html یکی باشد، وگرنه
 #    داریم قراردادِ اشتباهی را لیست‌سفید می‌کنیم.

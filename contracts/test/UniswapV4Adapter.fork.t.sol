@@ -58,7 +58,7 @@ contract UniswapV4AdapterForkTest is Test {
         else vm.createSelectFork(url);
         active = true;
 
-        exec = new SwapExecutor(address(this), address(this), 0, WETH);
+        exec = new SwapExecutor(address(this), address(this), 0, WETH, new address[](0));
         adapter = new UniswapV4Adapter(POOL_MANAGER, WETH, address(exec));
         exec.setAdapterAllowed(address(adapter), true);
     }

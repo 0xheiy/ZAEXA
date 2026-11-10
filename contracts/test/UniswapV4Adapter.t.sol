@@ -295,7 +295,7 @@ contract UniswapV4AdapterTest is Test {
 
     function _e2eSetup() internal returns (SwapExecutor exec, UniswapV4Adapter ad, address user) {
         user = address(0xB0B);
-        exec = new SwapExecutor(address(this), address(0xFEE), 0, address(weth));
+        exec = new SwapExecutor(address(this), address(0xFEE), 0, address(weth), new address[](0));
         ad = new UniswapV4Adapter(address(pm), address(weth), address(exec));
         exec.setAdapterAllowed(address(ad), true);
         tokenA.mint(user, 100 ether);

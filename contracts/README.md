@@ -4,7 +4,7 @@
 already planned: one or more parts, each a chain of swap steps across whitelisted
 routers, all inside a single transaction.
 
-Live contract: [`0x15e511Bf2Ea1a0F50F25E973d57Dce0D01946b6d`](https://basescan.org/address/0x15e511bf2ea1a0f50f25e973d57dce0d01946b6d#code)
+Live contract: [`0x5f3FCcfF3339DAa9eA7D2EBC3f77017D65467132`](https://basescan.org/address/0x5f3fccff3339daa9ea7d2ebc3f77017d65467132#code)
 — deployed on Base, source verified on BaseScan and Sourcify.
 
 The address above is a copy of `CHAIN.executor` in `web/index.html`, which is the
@@ -13,8 +13,76 @@ document here presents a retired deployment as the live one — both happened, a
 that is why the check exists. Retired addresses are listed in the root README.
 
 ```
-constructor(address owner, address feeRecipient, uint256 feeBps, address weth)
+constructor(address owner, address feeRecipient, uint256 feeBps, address weth,
+            address[] feeTokens)   // v6
 ```
+
+### v6 (live at the address above since 10 Nov 2026; v5 is retired)
+
+`executeSwap` keeps its signature, so the
+web client's calls are unchanged — but it is **not** only an address swap:
+the constructor gained `feeTokens`, the `Swapped` event gained a trailing
+`feeToken` field (so its signature and **topic0 changed** — any log filter or
+indexer keyed on the v5 `Swapped` must be updated), and there are new events
+`FeeTokenSet`, `FeeTaken`, `FeeSkipped`, `Refunded`. Quotes for a swap whose
+fee is taken mid-route or on the output must subtract the fee once it is above
+0 bps.
+
+- **Fee-token allowlist.** `feeToken(address)` is owner-managed
+  (`setFeeToken`, event `FeeTokenSet`), seeded from the constructor's
+  `feeTokens`. WETH is always on it and cannot be removed; no stablecoin
+  address is hardcoded. `feeRecipient` can never be the contract itself.
+- **Fee rule.** Charged once per leg, at the first point the leg's value is
+  in a fee token: on the input, up front, when the input is one (buys, as v5);
+  otherwise on the output of the leg's first fee-token hop, in flight (sells,
+  and unknown → USDC → token); a leg that never touches a fee token pays from
+  its input share; when no leg touches one, the input pays up front (v5
+  fallback). `minAmountOut` is checked against what reaches the user, net of
+  the fee and any transfer tax. Refunds after a leg's fee point are not charged
+  again. Two shapes revert instead of leaving value uncharged: an intermediate
+  left over before its leg's fee point (`leftover before fee point`), and the
+  output token produced before the leg's fee point (`output before fee point`).
+  One `FeeTaken` per fee transfer; `Swapped.fee`/`feeToken` are the total and
+  its token, or `0`/`address(0)` when legs paid in different tokens.
+- **A failing fee transfer never blocks a swap.** The amount taken is the
+  contract's balance delta around the transfer — its return value is ignored —
+  with gas capped at 150k and no return data copied. Nothing moved (revert,
+  `false`, out of gas) → `FeeSkipped`, the user keeps it.
+- **Unspent input and intermediate tokens are refunded** to the caller
+  (`Refunded`) after the output has been delivered and checked, measured as
+  balance growth over a snapshot taken at the start of the call, so balances
+  the contract already held are never paid out. Native-ETH input is refunded as
+  WETH. On a loop route the input is the output token, so unspent input is
+  delivered as output rather than refunded. A refund that cannot be delivered
+  reverts the swap.
+
+**Accepted limits** (documented, not fixed):
+
+- *Value injected from outside.* A caller who brings their own value into the
+  route — a pool they control and price, or a tiny fee-token input that a
+  manipulated pool inflates — can still steer around the fee. That cannot be
+  closed on-chain without prices, it was equally true of v5, and such a caller
+  could skip the executor and call the routers directly anyway. The fee rule
+  above closes the bypasses that use only the executor's own accounting.
+- *Input-side fee on a partial fill.* When the fee is taken on the input up
+  front, it is charged on the whole input before the route runs: a 60% fill
+  pays the fee on 100%. The unspent 40% is refunded fee-free. (A fee taken in
+  flight is charged only on what actually reached the fee point.)
+
+`./script/deploy.sh` reads the list from `FEE_TOKENS` (comma-separated, no
+default), checks every entry has code, and prints each `symbol()` before
+asking for confirmation.
+
+**v6 must be built with `FOUNDRY_PROFILE=executor`** (solc 0.8.33, evm
+cancun, optimizer 200 runs — pinned in `foundry.toml`). Unoptimized, its runtime
+is 29,816 bytes, over the 24,576-byte EIP-170 limit (v5 fit with 196 bytes to
+spare). Under the executor profile: **16,561 bytes runtime, 8,015 bytes of
+margin**. The default profile is unchanged. `deploy.sh` and `fork_test.sh`
+export the profile, so the test gate, fork tests, `forge create` and the
+printed verify command all use the same bytecode; `deploy.sh` also gates on
+SwapExecutor's own runtime size. Verifying with any other settings will not
+match.
+Tests: `test/SwapExecutor.v6.t.sol`.
 
 ## Design decisions
 
@@ -27,9 +95,11 @@ Test: `testCannotStealApprovedFunds`
 **Router allow-list**, enforced on chain, owner-managed.
 Test: `testRejectsUnknownRouter`
 
-**Fee is taken from the input token.** If a user swaps into a scam token, our
-fee is still denominated in something real.
-Test: `testFeeNotExposedToRiskyOutputToken`
+**Fee is taken in the token that is worth something.** If a user swaps into a
+scam token, our fee is still denominated in something real. Up to v5 that meant
+"always the input"; v6 picks the side from the fee-token allowlist (see above),
+so a sell into a stablecoin pays its fee in the stablecoin, not the scam token.
+Tests: `testFeeNotExposedToRiskyOutputToken`, `testSellTakesFeeFromOutput`
 
 **1% hard fee cap.** A `constant`, not a stored value. The owner cannot raise it.
 
@@ -37,7 +107,8 @@ Test: `testFeeNotExposedToRiskyOutputToken`
 contract and pointing the front end at it — visibly, not silently.
 
 **Holds nothing between transactions.** Every path ends with the contract's
-balance of both tokens at zero. Anything sent in by accident — including ETH
+balance of both tokens at zero — since v6 that includes partial fills, whose
+unspent input and intermediate tokens are refunded. Anything sent in by accident — including ETH
 forced in via `selfdestruct` — can be recovered with `rescue` / `rescueETH`.
 
 **Every hop is measured, not trusted.** `_swap` reads the contract's balance
@@ -87,8 +158,10 @@ forge install foundry-rs/forge-std
 forge test
 ```
 
-57 tests: 33 unit, 11 covering the v2 changes, 5 selector (offline,
-milliseconds), and 8 fork against live Base.
+164 offline tests across 9 suites (v6 adds 45 in `SwapExecutor.v6.t.sol`,
+one of them a fuzzed balance invariant); run them under both profiles,
+plus 13 fork tests against live Base (`*.fork.t.sol`, run only via
+`fork_test.sh`).
 
 ```bash
 ./script/fork_test.sh      # local anvil on a pinned block, then the fork tests

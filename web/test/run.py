@@ -1251,6 +1251,7 @@ RETIRED_EXECUTORS = [
     "0xE980825d4B3911e35Be5804349be26eBBe93BcC6",   # v2
     "0xb6AE1C7157f877854C498C44ab5ea3d6742416DC",   # v3 — underflow on a sweeping recipient, see finding 04
     "0x76082b0fbd0a29C236dD2ae2B2F47BFD96d7F455",   # v4 — no Slipstream branch; KIND_MAX was 3
+    "0x15e511Bf2Ea1a0F50F25E973d57Dce0D01946b6d",   # v5 — fee always from input, unspent input stranded on partial fill
 ]
 
 def check_one_executor_address():
@@ -8508,7 +8509,7 @@ async def check_uniswap_v4(pg):
                 gt: GT_DEX_TO_DEX["uniswap-v4-base"]}; }""")
     row = st["row"]
     assert row and row["name"] == "Uniswap V4" and row["kind"] == 5 == st["k5"] and not row["core"], st
-    assert st["adapter"] == "0x6Cc6E5c74663cc52B46f711ADdB29E6bC5Cf5992", "CHAIN.v4Adapter must be the deployed adapter: %r" % st["adapter"]
+    assert st["adapter"] == "0x0e41fBeAE7Ce030691068654449A2EF6958788F9", "CHAIN.v4Adapter must be the deployed adapter: %r" % st["adapter"]
     assert st["q"] == "0x0d5e0F971ED27FBfF6c2837bf31316121532048D" and row["quoter"] == st["q"], st
     assert st["pm"] == "0x498581fF718922c3f8e6A244956aF099B2652b2b", st
     assert st["gt"] == "uniswap-v4", "GT id uniswap-v4-base must map to uniswap-v4"
@@ -20927,7 +20928,7 @@ async def main():
         # ---- [pairs shell] هدرِ pairs.html باید همان پوسته‌ی اپ باشد —
         # نشانِ برند در همان اندازه/جا، بدونِ خطِ زیرِ هدر، چیپِ شبکه به‌جایِ
         # دکمه‌ی مستقلِ ماه، آیتمِ Theme بالای بازشوی کیف‌پول. ----
-        LIVE_EXECUTOR = "0x15e511Bf2Ea1a0F50F25E973d57Dce0D01946b6d"
+        LIVE_EXECUTOR = "0x5f3FCcfF3339DAa9eA7D2EBC3f77017D65467132"
 
         # ۱‌الف) grid-template-columns/padding — از رویِ خودِ متنِ CSS، نه
         # پیکسلِ محاسبه‌شده: index.html فونتِ سیستم دارد (Inter/Segoe UI) و
@@ -23703,7 +23704,7 @@ async def check_landing_nav_order(p, errors):
 
 FOOTER_COLS = [("Trade", ["Swap", "Flow", "New pairs", "Stocks"]),
                ("Tools", ["Exit Report", "Portfolio", "API"]),
-               ("About", ["How it works & FAQ", "Contract on BaseScan 0x15e5…6b6d", "Source on GitHub", "Report a problem", "Price history by GeckoTerminal"])]
+               ("About", ["How it works & FAQ", "Contract on BaseScan 0x5f3F…7132", "Source on GitHub", "Report a problem", "Price history by GeckoTerminal"])]
 FOOT_JS = """() => {
     const f = document.querySelector('footer'); const cols = [...f.querySelectorAll('.footCol')];
     return cols.map(c => [c.querySelector('h4').textContent.trim(),
@@ -23746,10 +23747,10 @@ async def check_footer_columns(p, errors):
         for name, cols in results.items():
             assert [c[0] for c in cols] == [c[0] for c in FOOTER_COLS], "[footer columns] %s headings: %s" % (name, [c[0] for c in cols])
             for (h, items), c in zip(FOOTER_COLS, cols):
-                texts = [t if "BaseScan" not in t else "Contract on BaseScan 0x15e5…6b6d" for t in c[1]]
+                texts = [t if "BaseScan" not in t else "Contract on BaseScan 0x5f3F…7132" for t in c[1]]
                 if name == "app":   # ctrLink را JS با آدرسِ زنده پر می‌کند
-                    texts = [t if "BaseScan" not in t else "Contract on BaseScan 0x15e5…6b6d" for t in texts]
-                assert texts == items or (name == "app" and [re.sub(r"0x[0-9a-fA-F]{4}…[0-9a-fA-F]{4}", "0x15e5…6b6d", t) for t in texts] == items), "[footer columns] %s %s links: %s" % (name, h, c[1])
+                    texts = [t if "BaseScan" not in t else "Contract on BaseScan 0x5f3F…7132" for t in texts]
+                assert texts == items or (name == "app" and [re.sub(r"0x[0-9a-fA-F]{4}…[0-9a-fA-F]{4}", "0x5f3F…7132", t) for t in texts] == items), "[footer columns] %s %s links: %s" % (name, h, c[1])
             got_hrefs = [[(None if (h or "").startswith("https://basescan") else "mailto:zaexadex@gmail.com" if (h or "").startswith("mailto:zaexadex@gmail.com") else h) for h in c[2]] for c in cols]
             assert got_hrefs == want_hrefs[name], "[footer columns] %s hrefs: %s" % (name, got_hrefs)
         # ساختارِ کلاس‌ها هم در هر چهار صفحه یکی است (feedback همان pill است)

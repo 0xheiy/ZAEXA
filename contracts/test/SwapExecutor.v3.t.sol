@@ -30,7 +30,7 @@ contract SwapExecutorV3Test is Test {
         feeOut   = new MockFeeToken(500);              // 5% transfer fee
         router   = new MockV2Router();
 
-        exec = new SwapExecutor(owner, feeSink, 0, address(weth));
+        exec = new SwapExecutor(owner, feeSink, 0, address(weth), new address[](0));
 
         address[] memory rs = new address[](1);
         rs[0] = address(router);

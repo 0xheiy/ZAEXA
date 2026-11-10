@@ -17,6 +17,13 @@
 set -uo pipefail
 cd "$(dirname "$0")/.." || exit 1
 
+# --- پروفایل کامپایل (v6) ---
+# بدون optimizer کدِ v6 حدود ۲۹٫۸ کیلوبایت است و از سقفِ ۲۴٬۵۷۶ بایتیِ
+# EIP-170 رد می‌شود؛ v5 فقط ۱۹۶ بایت جا داشت. پروفایلِ executor در
+# foundry.toml همان optimizer=200 است. برای تست، دیپلوی و تأییدِ سورس
+# *همه* باید همین پروفایل باشد — تأیید با تنظیماتِ دیگر روی BaseScan رد می‌شود.
+export FOUNDRY_PROFILE=executor
+
 
 # --- RPC اختصاصی ---
 # اگر فایل contracts/.rpc وجود داشته باشد، خط اولش به‌عنوان RPC اصلی استفاده
@@ -42,6 +49,25 @@ OWNER="${OWNER:-0x8A0Dcb583C8CAdc481E34487c34f1B856fe97e23}"
 FEE_RECIPIENT="${FEE_RECIPIENT:-$OWNER}"
 FEE_BPS="${FEE_BPS:-0}"
 WETH_ADDR="${WETH_ADDR:-0x4200000000000000000000000000000000000006}"
+
+# --- فهرست توکن‌های کارمزد (v6) ---
+# کارمزد از سمتی گرفته می‌شود که توکنش در این فهرست باشد (اول ورودی، بعد خروجی).
+# WETH را خودِ قرارداد همیشه اضافه می‌کند؛ اینجا لازم نیست.
+# عمداً هیچ پیش‌فرضی ندارد و هیچ آدرسی در اسکریپت نوشته نشده: آدرس استیبل‌کوین
+# پیکربندی است، نه کد — و آدرسِ غلط اینجا یعنی کارمزد در توکنِ اشتباه.
+# مثال (جداشده با کاما، بدون فاصله):
+#   FEE_TOKENS=0xAAAA...,0xBBBB... ./script/deploy.sh
+FEE_TOKENS="${FEE_TOKENS:-}"
+FEE_TOKENS_ARR=""
+if [ -n "$FEE_TOKENS" ]; then
+  IFS=',' read -r -a _FT <<< "$FEE_TOKENS"
+  for t in "${_FT[@]}"; do
+    t=$(printf '%s' "$t" | tr -d '[:space:]')
+    [[ "$t" =~ ^0x[0-9a-fA-F]{40}$ ]] || { echo "آدرس نامعتبر در FEE_TOKENS:"; echo "  $t"; exit 1; }
+    FEE_TOKENS_ARR="${FEE_TOKENS_ARR:+$FEE_TOKENS_ARR,}$t"
+  done
+fi
+FEE_TOKENS_ARG="[$FEE_TOKENS_ARR]"
 
 # روترهایی که verify_dexes.sh تأییدشان کرده (کد دارند و سلکتور درست است).
 # ششمی PancakeSwap V3 است — نسل اول SwapRouter، با kind=3 در رابط.
@@ -103,6 +129,43 @@ fi
 grep -E "tests passed|Suite result" /tmp/zaexa-test.log | tail -3
 echo "  سبز."
 
+# --- دروازه‌ی اندازه: کدِ بزرگ‌تر از EIP-170 روی زنجیره دیپلوی نمی‌شود ---
+# فقط خودِ SwapExecutor سنجیده می‌شود، نه ماک‌ها و قراردادهای تست — اندازه‌ی
+# آن‌ها برای این دیپلوی بی‌معنی است و نباید دیپلوی را متوقف یا تأیید کند.
+EXEC_HEX=$(forge inspect src/SwapExecutor.sol:SwapExecutor deployedBytecode 2>/dev/null | tr -d '[:space:]')
+if ! [[ "$EXEC_HEX" =~ ^0x[0-9a-fA-F]+$ ]]; then
+  echo "  نتوانستم بایت‌کد SwapExecutor را بخوانم. دیپلوی متوقف شد."
+  exit 1
+fi
+EXEC_SIZE=$(( (${#EXEC_HEX} - 2) / 2 ))
+if [ "$EXEC_SIZE" -gt 24576 ]; then
+  echo "  اندازه‌ی SwapExecutor ($EXEC_SIZE بایت) از سقف EIP-170 (24576) بیشتر است. دیپلوی متوقف شد."
+  exit 1
+fi
+echo "  اندازه‌ی SwapExecutor: $EXEC_SIZE بایت (سقف 24576)"
+
+# --- توکن‌های کارمزد روی زنجیره ---
+# هر آدرس باید کد داشته باشد؛ آدرسِ بی‌کد (اشتباه تایپی، یا آدرسِ زنجیره‌ی دیگر)
+# یعنی کارمزدِ آن سمت هرگز گرفته نمی‌شود. symbol هم چاپ می‌شود تا با چشم ببینی
+# همان توکنی است که فکر می‌کنی. جوابِ خالیِ شبکه هم «بی‌کد» حساب می‌شود و
+# دیپلوی می‌ایستد — نامعلوم را صفر یا سالم فرض نمی‌کنیم.
+FEE_TOKENS_SHOW=""
+if [ -n "$FEE_TOKENS_ARR" ]; then
+  echo
+  echo "  بررسی توکن‌های کارمزد روی زنجیره ..."
+  for t in $(printf '%s' "$FEE_TOKENS_ARR" | tr ',' ' '); do
+    TCODE=$(cast code "$t" --rpc-url "$RPC" 2>/dev/null)
+    if [ -z "$TCODE" ] || [ "$TCODE" = "0x" ]; then
+      echo "  در این آدرس کدی نیست (یا شبکه جواب نداد). دیپلوی متوقف شد:"
+      echo "    $t"
+      exit 1
+    fi
+    TSYM=$(cast call "$t" "symbol()(string)" --rpc-url "$RPC" 2>/dev/null)
+    [ -n "$TSYM" ] || TSYM="(symbol نامعلوم)"
+    FEE_TOKENS_SHOW="${FEE_TOKENS_SHOW}        $t  $TSYM"$'\n'
+  done
+fi
+
 # --- تأیید ---
 echo
 echo "[۲/۵] پارامترهای دیپلوی:"
@@ -110,7 +173,14 @@ echo "      شبکه          : Base  (RPC: $(mask_rpc "$RPC"))"
 echo "      owner         : $OWNER"
 echo "      feeRecipient  : $FEE_RECIPIENT"
 echo "      کارمزد        : $FEE_BPS bps"
-echo "      WETH          : $WETH_ADDR"
+echo "      WETH          : $WETH_ADDR  (همیشه توکن کارمزد)"
+# فهرست کامل چاپ می‌شود، نه فقط شمارش — آدرس را باید با چشم دید
+echo "      توکن‌های کارمزد :"
+if [ -z "$FEE_TOKENS_ARR" ]; then
+  echo "        (خالی — فقط WETH. برای فروش به استیبل‌کوین کارمزد از ورودی گرفته می‌شود)"
+else
+  printf '%s' "$FEE_TOKENS_SHOW"
+fi
 # شمارش واقعی، نه عدد هاردکدشده — عدد ثابت بعد از اضافه شدن پنکیک دروغ شد
 ROUTER_COUNT=$(printf '%s' "$ROUTERS" | tr ',' '\n' | grep -c '^0x')
 echo "      روترها        : $ROUTER_COUNT عدد (لیست سفید بعد از دیپلوی)"
@@ -153,7 +223,7 @@ EXPECTED=$(cast compute-address "$DEPLOYER" --nonce "$NONCE" --rpc-url "$RPC" 2>
 # ⚠️ --constructor-args باید آخرین آرگومان باشد، وگرنه بقیه را می‌بلعد
 forge create src/SwapExecutor.sol:SwapExecutor \
   --rpc-url "$RPC" --private-key "$PRIVATE_KEY" --broadcast \
-  --constructor-args "$OWNER" "$FEE_RECIPIENT" "$FEE_BPS" "$WETH_ADDR" \
+  --constructor-args "$OWNER" "$FEE_RECIPIENT" "$FEE_BPS" "$WETH_ADDR" "$FEE_TOKENS_ARG" \
   > /tmp/zaexa-deploy.log 2>&1
 DEPLOY_STATUS=$?
 
@@ -192,6 +262,7 @@ fi
   echo "address     : $NEW"
   echo "owner       : $OWNER"
   echo "feeBps      : $FEE_BPS"
+  echo "feeTokens   : WETH + $FEE_TOKENS_ARG"
   echo "explorer    : https://basescan.org/address/$NEW"
 } > deployment.txt
 
@@ -234,9 +305,9 @@ if [ -z "${ETHERSCAN_API_KEY:-}" ]; then
   echo "       همچنان سورس نشان نمی‌دهد. کلید رایگان: etherscan.io/myapikey"
   echo "       export ETHERSCAN_API_KEY='...'"
 fi
-echo "   forge verify-contract $NEW src/SwapExecutor.sol:SwapExecutor \\"
+echo "   FOUNDRY_PROFILE=executor forge verify-contract $NEW src/SwapExecutor.sol:SwapExecutor \\"
 echo "     --chain base --watch --etherscan-api-key \"\$ETHERSCAN_API_KEY\" \\"
-echo "     --constructor-args \$(cast abi-encode 'c(address,address,uint256,address)' $OWNER $FEE_RECIPIENT $FEE_BPS $WETH_ADDR)"
+echo "     --constructor-args \$(cast abi-encode 'c(address,address,uint256,address,address[])' $OWNER $FEE_RECIPIENT $FEE_BPS $WETH_ADDR '$FEE_TOKENS_ARG')"
 echo "   بعدش با چشم خودت ببین، به پیام forge بسنده نکن:"
 echo "   curl -s 'https://api.etherscan.io/v2/api?chainid=8453&module=contract&action=getsourcecode&address=$NEW&apikey='\"\$ETHERSCAN_API_KEY\" | head -c 120"
 echo

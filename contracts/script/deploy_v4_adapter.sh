@@ -38,7 +38,7 @@ RPC_CANDIDATES=(
 mask_rpc() { printf '%s' "$1" | sed -E 's#^(https?://[^/]+).*#\1/…#'; }
 
 # اجراکننده‌ی زنده (v5) — باید با CHAIN.executor در web/index.html یکی باشد
-EXECUTOR="${EXECUTOR:-0x15e511Bf2Ea1a0F50F25E973d57Dce0D01946b6d}"
+EXECUTOR="${EXECUTOR:-0x5f3FCcfF3339DAa9eA7D2EBC3f77017D65467132}"
 # Uniswap v4 PoolManager روی Base (docs.uniswap.org/contracts/v4/deployments)
 POOL_MANAGER="${POOL_MANAGER:-0x498581fF718922c3f8e6A244956aF099B2652b2b}"
 WETH_ADDR="${WETH_ADDR:-0x4200000000000000000000000000000000000006}"

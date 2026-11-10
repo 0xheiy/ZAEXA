@@ -80,7 +80,7 @@ contract ForkTest is Test {
         else vm.createSelectFork(url);
         active = true;
 
-        exec = new SwapExecutor(address(this), address(this), 0, WETH);
+        exec = new SwapExecutor(address(this), address(this), 0, WETH, new address[](0));
         address[] memory routers = new address[](4);
         routers[0] = UNI_V3_ROUTER;
         routers[1] = AERO_ROUTER;

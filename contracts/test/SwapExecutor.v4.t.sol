@@ -39,7 +39,7 @@ contract SwapExecutorV4Test is Test {
         router     = new MockV2Router();
         hookRouter = new MockHookRouter();
 
-        exec = new SwapExecutor(owner, feeSink, 0, address(weth));
+        exec = new SwapExecutor(owner, feeSink, 0, address(weth), new address[](0));
 
         address[] memory rs = new address[](2);
         rs[0] = address(router);

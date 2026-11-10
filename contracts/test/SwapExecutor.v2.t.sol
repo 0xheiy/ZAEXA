@@ -34,7 +34,7 @@ contract V2Test is Test {
         v2     = new MockV2Router();
         legacy = new MockV3LegacyRouter();
 
-        exec = new SwapExecutor(owner, owner, 0, address(weth));
+        exec = new SwapExecutor(owner, owner, 0, address(weth), new address[](0));
         address[] memory rs = new address[](2);
         rs[0] = address(v2);
         rs[1] = address(legacy);
@@ -244,14 +244,17 @@ contract V2Test is Test {
        8) Events. No test had ever checked their contents - and that is exactly why
           v1 logged the *declared* amount rather than the amount received.
        ------------------------------------------------------------------ */
+    // v6: the event gained a trailing `feeToken` field (the fee is no longer always
+    // in tokenIn). Neither token here is an allowlisted fee token, so the fee side
+    // falls back to the input - tokenA.
     event Swapped(
         address indexed user, address indexed tokenIn, address indexed tokenOut,
-        uint256 amountIn, uint256 amountOut, uint256 fee
+        uint256 amountIn, uint256 amountOut, uint256 fee, address feeToken
     );
 
     function testSwappedEventReportsWhatReallyHappened() public {
         vm.expectEmit(true, true, true, true);
-        emit Swapped(user, address(tokenA), address(tokenB), 10 ether, 20 ether, 0);
+        emit Swapped(user, address(tokenA), address(tokenB), 10 ether, 20 ether, 0, address(tokenA));
 
         vm.prank(user);
         exec.executeSwap(address(tokenA), address(tokenB), 10 ether, 1,

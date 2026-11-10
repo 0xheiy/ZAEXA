@@ -44,7 +44,7 @@ contract SwapExecutorTest is Test {
         vm.deal(address(weth), 500 ether);   // so that withdraw can send ETH
 
         vm.prank(owner);
-        exec = new SwapExecutor(owner, feeTo, 0, address(weth));
+        exec = new SwapExecutor(owner, feeTo, 0, address(weth), new address[](0));
 
         vm.startPrank(owner);
         exec.setRouterAllowed(address(v2), true);
@@ -182,7 +182,7 @@ contract SwapExecutorTest is Test {
 
     function testCannotDeployWithExcessiveFee() public {
         vm.expectRevert(bytes("fee too high"));
-        new SwapExecutor(owner, feeTo, 101, address(weth));
+        new SwapExecutor(owner, feeTo, 101, address(weth), new address[](0));
     }
 
     // ===================================================================

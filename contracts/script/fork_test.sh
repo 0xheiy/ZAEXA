@@ -19,6 +19,11 @@
 set -uo pipefail
 cd "$(dirname "$0")/.." || exit 1
 
+# تست‌های fork باید روی همان بایت‌کدی اجرا شوند که دیپلوی می‌شود: پروفایل
+# executor در foundry.toml (solc و evm پین‌شده، optimizer 200). deploy.sh هم
+# همین را export می‌کند — اگر این دو جدا شوند، fork چیزی غیر از دیپلوی را می‌سنجد.
+export FOUNDRY_PROFILE=executor
+
 
 # --- RPC اختصاصی ---
 # اگر فایل contracts/.rpc وجود داشته باشد، خط اولش به‌عنوان RPC اصلی استفاده
