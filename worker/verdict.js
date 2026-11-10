@@ -1316,23 +1316,24 @@ export async function poolDirectedProof(tokenAddr, pools, opts) {
     const metaById = new Map();
     for (let i = 0; i < metaItems.length; i++) metaById.set(metaItems[i].id, batchMeta.items[i]);
 
-    // ۳. کدام استخرها واقعاً قابلِ‌استفاده‌اند — موجودی و (برای CL) کلید هر
-    // دو باید با موفقیت رمزگشایی شده باشند.
+    // ۳. موجودی و (برای CL) کلیدِ هر استخرِ انتخاب‌شده باید با موفقیت رمزگشایی
+    // شود. 🔴 «نخواندیم» هرگز «خاک» نیست: یک استخرِ ناخوانا کنار گذاشته نمی‌شود
+    // (وگرنه بقیه‌ی استخرهای خاک می‌شدند empty-pool) — کلِ اثبات بی‌علت می‌ماند.
     const usable = [];
     for (const p of picked) {
       const balEntry = metaById.get("bal:" + p.addr);
       const balVal = balEntry && !balEntry.error && typeof balEntry.result === "string"
         ? decodeStatic1(balEntry.result) : null;
-      if (balVal == null) continue;
+      if (balVal == null) return causeless;
 
       let realKey = null;
       if (p.kind === "CL_UINT24" || p.kind === "CL_INT24") {
         const keyEntry = metaById.get((p.kind === "CL_UINT24" ? "fee:" : "tick:") + p.addr);
         const keyVal = keyEntry && !keyEntry.error && typeof keyEntry.result === "string"
           ? decodeStatic1(keyEntry.result) : null;
-        if (keyVal == null) continue;
+        if (keyVal == null) return causeless;
         realKey = Number(keyVal);
-        if (!Number.isInteger(realKey) || realKey < 0) continue;
+        if (!Number.isInteger(realKey) || realKey < 0) return causeless;
       }
       usable.push({ ...p, balance: balVal, realKey });
     }
@@ -1392,27 +1393,55 @@ export async function poolDirectedProof(tokenAddr, pools, opts) {
     if (anyPositive) return { v: "sell", ret: bestRet == null ? undefined : bestRet, via: "pool-key" };
 
     // ۶. بدونِ هیچ مثبتی: آیا همه‌ی استخرهای قابلِ‌استفاده «خاک»‌اند، یا
-    // دست‌کم یکی‌شان پرشده است (و رویِ کلیدِ واقعیِ خودش رد شده)؟
+    // دست‌کم یکی‌شان پرشده است و *خودِ کوتِ همان استخر* واقعاً ریوِرت کرده؟
     const ethUsd = canaryUsdPerEth(batchMeta) || canaryUsdPerEth(batchQuote);
     let allDust = true;
-    let anyFunded = false;
+    let fundedReverted = false;
     for (const p of usable) {
       const dust = p.counterIsWeth
         ? p.balance < VD_POOL_PROOF_DUST_WETH_WEI
         : p.balance < VD_POOL_PROOF_DUST_USDC_UNITS;
       if (!dust) allDust = false;
 
+      let funded = false;
       if (p.counterIsWeth) {
         if (ethUsd != null && ethUsd > 0) {
           const fundedWei = BigInt(Math.floor((VD_POOL_PROOF_FUNDED_USD / ethUsd) * 1e18));
-          if (p.balance >= fundedWei) anyFunded = true;
+          funded = p.balance >= fundedWei;
         }
-      } else if (p.balance >= VD_POOL_PROOF_FUNDED_USDC_UNITS) {
-        anyFunded = true;
+      } else {
+        funded = p.balance >= VD_POOL_PROOF_FUNDED_USDC_UNITS;
+      }
+      // 🔴 «sell-reverts» فقط با ریوِرتِ واقعیِ همین استخر در همین مرحله، با
+      // همان طبقه‌بندیِ verdictFrom (PROVEN_NEGATIVE_CODES). خطای دیگرِ RPC،
+      // آیتمِ گم‌شده، رمزگشاییِ ناموفق، یا استخری که این‌جا کوت نشد (V2 / کلیدِ
+      // واقعی از قبل ایستا) = نمی‌دانیم، نه ریوِرت.
+      if (funded && p.kind !== "V2" && !p.staticKeys.includes(p.realKey)) {
+        const item = quoteById.get(p.addr);
+        if (item && item.error && PROVEN_NEGATIVE_CODES.has(item.error.code)) fundedReverted = true;
       }
     }
-    if (allDust) return { v: "nosell", cause: "empty-pool" };
-    if (anyFunded) return { v: "nosell", cause: "sell-reverts" };
+    if (allDust) {
+      /* 🔴 «خالی» فقط وقتی ادعای «همه‌ی استخرهای توکن» است: هر استخرِ دیگرِ
+         فهرستِ GT (غیر از چهار استخرِ سنجیده) که ممکن است زنده باشد — رویِ
+         دکسِ خارج از dexToVenue (مثلاً uniswap-v4-base پیش از ایندکسِ کلید)،
+         یا ذخیره‌ی ≥ حد، یا ذخیره‌ی نامعلوم — ادعا را باطل می‌کند. */
+      const checked = new Set(picked.map((p) => p.addr.toLowerCase()));
+      const minReserve = Number.isFinite(o.minReserveUsd) ? o.minReserveUsd : 0; // نداشتن حد = سخت‌گیرانه‌ترین
+      for (const pool of pools) {
+        const a = pool && pool.attributes && pool.attributes.address;
+        if (typeof a === "string" && checked.has(a.toLowerCase())) continue;
+        const dexId = pool && pool.relationships && pool.relationships.dex &&
+          pool.relationships.dex.data && pool.relationships.dex.data.id;
+        if (typeof dexId !== "string" || typeof dexToVenue[dexId] !== "string") return causeless;
+        const rv = pool && pool.attributes ? pool.attributes.reserve_in_usd : undefined;
+        const reserve = typeof rv === "number" ? rv
+          : typeof rv === "string" && rv.trim() !== "" ? Number(rv) : NaN;
+        if (!Number.isFinite(reserve) || reserve >= minReserve) return causeless;
+      }
+      return { v: "nosell", cause: "empty-pool" };
+    }
+    if (fundedReverted) return { v: "nosell", cause: "sell-reverts" };
     return causeless;
   } catch (e) {
     return { v: "nosell", cause: undefined }; // این تابع هم هرگز نباید پرتاب کند

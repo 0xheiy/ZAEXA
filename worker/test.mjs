@@ -13859,10 +13859,13 @@ function stripAllowedWording(t) {
         if (sel === SEL_BAL_PP) {
           const holder = "0x" + data.slice(-40);
           const p = byAddr.get(holder.toLowerCase());
+          if (p && p.balanceBehavior === "error") return { id: r.id, error: { code: -32603 } };
+          if (p && p.balanceBehavior === "garbage") return { id: r.id, result: "0xzz" };
           return p ? { id: r.id, result: mk1PP(p.balance) } : { id: r.id, error: { code: 3 } };
         }
         if (sel === SEL_FEE_PP || sel === SEL_TICK_PP) {
           const p = byAddr.get(toL);
+          if (p && p.keyBehavior === "error") return { id: r.id, error: { code: -32603 } };
           return (p && p.key != null) ? { id: r.id, result: mk1PP(p.key) } : { id: r.id, error: { code: 3 } };
         }
         if (sel === vd.SEL_CL_UINT24 || sel === vd.SEL_CL_INT24) {
@@ -13870,10 +13873,16 @@ function stripAllowedWording(t) {
           const cand = cfg.find((p) => p.quoterTo && p.quoterTo.toLowerCase() === toL && p.key === feeOrTick);
           if (cand && cand.quoteBehavior === "positive") return { id: r.id, result: mk4PP(cand.quoteAmount || 500000000000000000n) };
           if (cand && cand.quoteBehavior === "zero") return { id: r.id, result: mk4PP(0) };
+          // ریوِرتِ واقعیِ اجرا (کدِ ۳، همان PROVEN_NEGATIVE_CODES) — نه "0x"ی بی‌نام
+          if (cand && cand.quoteBehavior === "revert") return { id: r.id, error: { code: 3 } };
+          if (cand && cand.quoteBehavior === "err32005") return { id: r.id, error: { code: -32005 } };
+          if (cand && cand.quoteBehavior === "err32603") return { id: r.id, error: { code: -32603 } };
+          if (cand && cand.quoteBehavior === "missing") return null; // آیتم اصلاً برنگردد
+          if (cand && cand.quoteBehavior === "garbage") return { id: r.id, result: "0xzz" };
           return { id: r.id, result: "0x" }; // کلیدهای ایستا و هرچیزِ نامرتبط: ریوِرتِ تمیز
         }
         return { id: r.id, result: "0x" };
-      }));
+      }).filter(Boolean));
     };
   }
 
@@ -14003,6 +14012,86 @@ function stripAllowedWording(t) {
       "[pool proof] no poolCause must stay byte-identical to today's causeless nosell, got " + JSON.stringify(r4));
   }
 
+
+  // [pool proof unknown] — «نمی‌دانیم» هرگز «نه» نیست (۱۰ نوامبر): ناخوانا،
+  // ریوِرت‌نشده، یا نادیده‌ماندن استخرِ دیگر هیچ‌کدام علت نمی‌سازد.
+  {
+    const TOK = "0x" + "a1".repeat(20);
+    const FUNDED = "0x" + "b1".repeat(20), DUST = "0x" + "b2".repeat(20);
+    const PU = (extra) => ({ dexToVenue: GT_DEX_TO_VENUE, meta, minReserveUsd: 5000,
+      rpcs: ["https://rpc-pu.example"], ...extra });
+    const two = () => [
+      gtPoolPP("uniswap-v3-base", TOK, vd.WETH_ADDR, FUNDED, "10"),
+      gtPoolPP("uniswap-v3-base", TOK, vd.WETH_ADDR, DUST, "5"),
+    ];
+    const cfgOf = (fundedOver) => [
+      { poolAddr: FUNDED, key: 777, balance: 1000000000000000000n, quoterTo: uniV3Row.to, quoteBehavior: "revert", ...fundedOver },
+      { poolAddr: DUST, key: 3000, balance: 2n, quoterTo: uniV3Row.to, quoteBehavior: "revert" },
+    ];
+    const run = (pools, cfg, extra) => vd.poolDirectedProof(TOK, pools, PU({ fetchImpl: makeDispatchPP(cfg), ...extra }));
+    const causeless = (r) => r && r.v === "nosell" && r.cause === undefined;
+
+    // شاهدِ کنترل: همین چیدمان با ریوِرتِ واقعیِ کدِ ۳ → sell-reverts
+    const ctl = await run(two(), cfgOf({}));
+    ok(ctl.v === "nosell" && ctl.cause === "sell-reverts",
+      "[pool proof unknown] positive control: funded pool whose own real-key quote reverts (code 3) -> sell-reverts, got " + JSON.stringify(ctl));
+
+    // ۱) خواندنِ موجودی/کلیدِ استخرِ پرشده ناکام → causeless، هرگز empty-pool
+    const rBalErr = await run(two(), cfgOf({ balanceBehavior: "error" }));
+    ok(causeless(rBalErr), "[pool proof unknown] funded pool balance read = JSON-RPC error -> causeless (never empty-pool), got " + JSON.stringify(rBalErr));
+    const rBalBad = await run(two(), cfgOf({ balanceBehavior: "garbage" }));
+    ok(causeless(rBalBad), "[pool proof unknown] funded pool balance undecodable -> causeless, got " + JSON.stringify(rBalBad));
+    const rKeyErr = await run(two(), cfgOf({ keyBehavior: "error" }));
+    ok(causeless(rKeyErr), "[pool proof unknown] funded pool CL key unreadable -> causeless, got " + JSON.stringify(rKeyErr));
+    // دو استخرِ خاک که یکی‌شان ناخواناست هم نباید empty-pool شود
+    const dustCfg = cfgOf({ balance: 2n, key: 3000, balanceBehavior: "error" });
+    const rDustBad = await run(two(), dustCfg);
+    ok(causeless(rDustBad), "[pool proof unknown] one unreadable pool among dust pools -> causeless, got " + JSON.stringify(rDustBad));
+
+    // ۲) استخرِ پرشده، ولی کوتش ریوِرتِ واقعی نیست → causeless، هرگز sell-reverts
+    for (const [beh, label] of [["err32005", "-32005"], ["err32603", "-32603"], ["missing", "missing item"], ["garbage", "undecodable"]]) {
+      const r = await run(two(), cfgOf({ quoteBehavior: beh }));
+      ok(causeless(r), "[pool proof unknown] funded pool quote = " + label + " -> causeless (never sell-reverts), got " + JSON.stringify(r));
+    }
+    // کوتِ "0x"/صفر هم ریوِرت نیست
+    const rZero = await run(two(), cfgOf({ quoteBehavior: "zero" }));
+    ok(causeless(rZero), "[pool proof unknown] funded pool quote = zero -> causeless, got " + JSON.stringify(rZero));
+    // استخرِ پرشده‌ای که در این مرحله کوت نشد: کلیدِ واقعی در staticKeys
+    const rStatic = await run(two(), cfgOf({ key: 3000 }));
+    ok(causeless(rStatic), "[pool proof unknown] funded pool whose real key is a static key (not quoted here) -> causeless, got " + JSON.stringify(rStatic));
+    // استخرِ پرشده‌ی V2 (کوت نمی‌شود)
+    const V2P = "0x" + "b3".repeat(20);
+    const v2pools = [gtPoolPP("uniswap-v2-base", TOK, vd.WETH_ADDR, V2P, "10"), gtPoolPP("uniswap-v3-base", TOK, vd.WETH_ADDR, DUST, "5")];
+    const rV2 = await run(v2pools, [{ poolAddr: V2P, balance: 1000000000000000000n }, cfgOf({})[1]]);
+    ok(causeless(rV2), "[pool proof unknown] funded V2 pool (never quoted in this step) -> causeless, got " + JSON.stringify(rV2));
+
+    // ۳) خاکِ همه‌ی استخرهای سنجیده، ولی GT استخرِ دیگری هم دارد
+    const dustOnly = () => [gtPoolPP("uniswap-v3-base", TOK, vd.WETH_ADDR, DUST, "5")];
+    const dustCfgOnly = [{ poolAddr: DUST, key: 3000, balance: 2n, quoterTo: uniV3Row.to, quoteBehavior: "revert" }];
+    const rClean = await run(dustOnly(), dustCfgOnly);
+    ok(rClean.v === "nosell" && rClean.cause === "empty-pool",
+      "[pool proof unknown] positive control: all dust and no other pool -> empty-pool, got " + JSON.stringify(rClean));
+    const OTH = "0x" + "c1".repeat(20);
+    const withOther = (pool) => [...dustOnly(), pool];
+    const rV4 = await run(withOther(gtPoolPP("uniswap-v4-base", TOK, vd.WETH_ADDR, OTH, "206000")), dustCfgOnly);
+    ok(causeless(rV4), "[pool proof unknown] dust v3 + live uniswap-v4-base pool -> causeless, got " + JSON.stringify(rV4));
+    const rV4Small = await run(withOther(gtPoolPP("uniswap-v4-base", TOK, vd.WETH_ADDR, OTH, "12")), dustCfgOnly);
+    ok(causeless(rV4Small), "[pool proof unknown] any pool on a dex outside GT_DEX_TO_VENUE -> causeless, got " + JSON.stringify(rV4Small));
+    const rOtherCounter = await run(withOther(gtPoolPP("uniswap-v3-base", TOK, "0x" + "d1".repeat(20), OTH, "9000")), dustCfgOnly);
+    ok(causeless(rOtherCounter), "[pool proof unknown] covered dex, other counter, reserve>=5000 -> causeless, got " + JSON.stringify(rOtherCounter));
+    for (const bad of [undefined, null, "", "abc"]) {
+      const o = gtPoolPP("uniswap-v3-base", TOK, "0x" + "d1".repeat(20), OTH, bad);
+      const r = await run(withOther(o), dustCfgOnly);
+      ok(causeless(r), "[pool proof unknown] other pool with unparseable reserve " + JSON.stringify(bad) + " -> causeless, got " + JSON.stringify(r));
+    }
+    const rSmallOther = await run(withOther(gtPoolPP("uniswap-v3-base", TOK, "0x" + "d1".repeat(20), OTH, "4999")), dustCfgOnly);
+    ok(rSmallOther.v === "nosell" && rSmallOther.cause === "empty-pool",
+      "[pool proof unknown] other covered-dex pool below 5000 does not block empty-pool, got " + JSON.stringify(rSmallOther));
+    // بدونِ minReserveUsd تزریق‌شده: هر استخرِ دیگر زنده فرض می‌شود
+    const rNoMin = await run(withOther(gtPoolPP("uniswap-v3-base", TOK, "0x" + "d1".repeat(20), OTH, "1")), dustCfgOnly, { minReserveUsd: undefined });
+    ok(causeless(rNoMin), "[pool proof unknown] without an injected minReserveUsd another pool counts as possibly live, got " + JSON.stringify(rNoMin));
+  }
+
   console.log("[pool proof] poolDirectedProof (worker/verdict.js) covered: a real fee/tickSpacing not in the "
     + "static VD_VENUES keys (PAID-like fee 100, YAP-like fee 300) is read from the pool itself and quoted, "
     + "turning a causeless nosell into sell/via:pool-key; a 2-wei counter balance at a static key (UCHI-like) "
@@ -14097,6 +14186,54 @@ function stripAllowedWording(t) {
     + "(passBudgetHasRoom, also used by withCounterProof) makes the pool proof skip both its subrequests "
     + "entirely when the hourly pass has used more than COUNTER_PROOF_PASS_MAX_USED, leaving the row exactly "
     + "today's causeless nosell");
+}
+
+/* ---- ۴۳پ. [pool proof unknown] end to end — استخرِ خاکِ v3 + استخرِ زنده‌ی v4 ---- */
+{
+  const { UPSTREAM_KEYED: UK_PU, UPSTREAM_FREE: UF_PU } = await import("./index.js");
+  const wPU = (n) => BigInt(n).toString(16).padStart(64, "0");
+  const mk1PU = (n) => "0x" + wPU(n);
+  const mk4PU = (n) => "0x" + wPU(n) + wPU(0) + wPU(0) + wPU(0);
+  const jsonPU = (b) => new Response(JSON.stringify(b), { status: 200, headers: { "content-type": "application/json" } });
+  const SPK = "0x" + "16".repeat(20);
+  const V3POOL = "0x" + "51".repeat(20), V4POOL = "0x" + "52".repeat(20);
+  const gtMetaPU = () => new Response(JSON.stringify({ data: { attributes: {
+    name: "SPIKE-like", symbol: "SPK", total_reserve_in_usd: "206000", decimals: 18, price_usd: "0.0001" } } }),
+    { status: 200, headers: { "content-type": "application/json" } });
+  const gtPoolsPU = () => new Response(JSON.stringify({ data: [
+    { relationships: { dex: { data: { id: "uniswap-v3-base" } }, base_token: { data: { id: "base_" + SPK } },
+        quote_token: { data: { id: "base_" + vd.WETH_ADDR } } },
+      attributes: { address: V3POOL, reserve_in_usd: "10", transactions: { h1: { sellers: 0 }, h24: { sellers: 0 } } } },
+    { relationships: { dex: { data: { id: "uniswap-v4-base" } }, base_token: { data: { id: "base_" + SPK } },
+        quote_token: { data: { id: "base_" + vd.WETH_ADDR } } },
+      attributes: { address: V4POOL, reserve_in_usd: "206000", transactions: { h1: { sellers: 296 }, h24: { sellers: 296 } } } },
+  ] }), { status: 200, headers: { "content-type": "application/json" } });
+  function dispatchPU(url, init) {
+    const u = String(url);
+    if (u.endsWith("/pools")) return gtPoolsPU();
+    if (u.startsWith(UK_PU) || u.startsWith(UF_PU)) return gtMetaPU();
+    const reqs = JSON.parse(init.body);
+    return jsonPU(reqs.map((r) => {
+      if (r.id === 0) return { id: 0, result: mk4PU(30000000) };
+      const sel = String(r.params[0].data).slice(0, 10).toLowerCase();
+      if (sel === "0x70a08231") return { id: r.id, result: mk1PU(2n) };   // v3: 2 wei WETH
+      if (sel === "0xddca3f43") return { id: r.id, result: mk1PU(3000) }; // کلیدِ ایستا
+      return { id: r.id, result: "0x" };
+    }));
+  }
+  const saved = globalThis.fetch;
+  globalThis.fetch = dispatchPU;
+  const res = await (await call("/vd/" + SPK, { headers: { "cf-connecting-ip": "198.51.100.77" } },
+    { ASSETS, CG_KEY: "SECRET-CG-KEY-PU" })).json();
+  globalThis.fetch = saved;
+  ok(res.v !== "nosell" && res.cause !== "empty-pool",
+    "[pool proof unknown] end to end: dust v3 + live v4 pool with 296 sellers must not publish nosell/empty-pool, got " + JSON.stringify(res));
+  ok(res.v === null && res.why === "sells:recent",
+    "[pool proof unknown] end to end: the sells:recent veto applies, got " + JSON.stringify(res));
+  console.log("[pool proof unknown] poolDirectedProof never turns 'unknown' into 'no': an unreadable pool balance/key, a funded pool "
+    + "whose own real-key quote is not a genuine revert (-32005/-32603/missing/undecodable/zero/not quoted here), and an "
+    + "uncovered or possibly-live other pool in the GT list all give causeless; end to end a dust v3 pool plus a live v4 pool "
+    + "with 296 sellers resolves to sells:recent instead of nosell/empty-pool");
 }
 
 /* ---- ۴۴. گاردِ انتشار — علتِ اثبات‌نشده و سولانای تأییدنشده — [publish guard base] ---- */
@@ -14561,6 +14698,28 @@ function stripAllowedWording(t) {
       [{ method: "getSignatureStatuses", params: [["short"]] }, "bad-params"],
       [{ method: "sendTransaction", params: ["AQID", { encoding: "base64", skipPreflight: true, maxRetries: 1 }] }, "bad-params"],
       [{ method: "sendTransaction", params: ["AQID", { encoding: "base64", skipPreflight: false, maxRetries: 9 }] }, "bad-params"],
+      // ۱۰ نوامبر — simulateTransaction با accounts: فقط {encoding:"base64",addresses:[≤۴ کلیدِ ۳۲بایتی]}
+      ...[
+        { encoding: "base64", addresses: [PUBKEY], commitment: "confirmed" },   // کلیدِ اضافه در accounts
+        { encoding: "base64", addresses: [PUBKEY, PUBKEY, PUBKEY, PUBKEY, PUBKEY] }, // ۵ آدرس
+        { encoding: "base64", addresses: [] },
+        { encoding: "base64", addresses: ["0OIl" + PUBKEY.slice(4)] },           // نویسه‌ی غیر base58
+        { encoding: "base64", addresses: ["short"] },
+        { encoding: "base64", addresses: ["1".repeat(44)] },                     // base58 معتبر ولی ۴۴ بایت
+        { encoding: "base64", addresses: ["z".repeat(44)] },                     // بیش از ۳۲ بایت
+        { encoding: "base64", addresses: [PUBKEY.slice(0, 31)] },                // کمتر از ۳۲ بایت
+        { encoding: "jsonParsed", addresses: [PUBKEY] },
+        { encoding: "base58", addresses: [PUBKEY] },
+        { addresses: [PUBKEY] },
+        { encoding: "base64", addresses: PUBKEY },
+        [PUBKEY],
+        null,
+      ].map((accounts) => [{ method: "simulateTransaction", params: ["AQID",
+        { encoding: "base64", sigVerify: false, replaceRecentBlockhash: true, commitment: "processed", accounts }] }, "bad-params"]),
+      [{ method: "simulateTransaction", params: ["AQID", { encoding: "base64", sigVerify: false, replaceRecentBlockhash: true, commitment: "processed",
+        accounts: { encoding: "base64", addresses: [PUBKEY] }, minContextSlot: 1 }] }, "bad-params"],              // کلیدِ تازه‌ی سطحِ بالا
+      [{ method: "simulateTransaction", params: ["AQID", { encoding: "base64", sigVerify: false, replaceRecentBlockhash: true,
+        accounts: { encoding: "base64", addresses: [PUBKEY] } }] }, "bad-params"],                                   // commitment جا افتاده
     ];
     for (const [payload, code] of badRpc) {
       const res = await call("/sol/rpc", { method: "POST", body: JSON.stringify(payload) });
@@ -14584,6 +14743,11 @@ function stripAllowedWording(t) {
       { method: "getAccountInfo", params: [PUBKEY, { encoding: "base64" }] },
       { method: "getAccountInfo", params: [PUBKEY, { encoding: "jsonParsed" }] },
       { method: "getMultipleAccounts", params: [Array(32).fill(PUBKEY), { encoding: "base64" }] },
+      ...[1, 2, 3, 4].map((n) => ({ method: "simulateTransaction", params: ["AQID",
+        { encoding: "base64", sigVerify: false, replaceRecentBlockhash: true, commitment: "processed",
+          accounts: { encoding: "base64", addresses: Array(n).fill(PUBKEY) } }] })),
+      { method: "simulateTransaction", params: ["AQID",
+        { encoding: "base64", sigVerify: false, replaceRecentBlockhash: true, commitment: "processed" }] },
     ]) {
       const r = await call("/sol/rpc", { method: "POST", body: JSON.stringify(payload) }, { ASSETS });
       ok(r.status === 200, "[sol intent rpc] allowed read must pass: " + JSON.stringify(payload).slice(0, 80));

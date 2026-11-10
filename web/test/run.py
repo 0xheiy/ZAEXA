@@ -75,7 +75,7 @@ async def _goto_allow_cmc(self, *a, **k):
         self._zx_intent_stubbed = True
         await self.route("**/solana-intent.bundle.*.js", lambda r: r.fulfill(
             status=200, content_type="application/javascript",
-            body="window.SolIntent={__stub:true,validateQuote:function(q){return q},validateTransaction:async function(){return true},assertSameMessage:function(){}};"))
+            body="window.SolIntent={__stub:true,validateQuote:function(q){return q},validateTransaction:async function(){return true},inspectTransaction:async function(){return {routeUnverified:false,targets:{wallet:'W',input:'I',output:'O'}}},balanceAddresses:function(t){return [t.wallet,t.input,t.output]},checkSimulatedBalances:function(){return true},assertSameMessage:function(){}};"))
     resp = await _pw_goto(self, *a, **k)
     await _flow_board_off(self)
     return resp
@@ -16083,6 +16083,8 @@ async def main():
                     if status_params_log is not None:
                         status_params_log.append(payload.get("params"))
                     result = {"value": status_value if status_value is not None else [{"confirmationStatus": "confirmed", "err": None}]}
+                elif method == "getMultipleAccounts":
+                    result = {"value": [None] * len(payload.get("params")[0])}
                 elif method == "getEpochInfo":
                     result = {"blockHeight": epoch_height, "epoch": 1} if epoch_height is not None else None
                 elif method == "simulateTransaction":
@@ -16094,7 +16096,9 @@ async def main():
                     if sim_result == "skip":
                         result = None
                     elif sim_result == "ok":
-                        result = {"value": {"err": None}}
+                        # ۱۰ نوامبر — شبیه‌سازی حالا حسابِ کاربر را هم می‌خواهد؛ استابِ بدون حساب = یک ردیفِ null به‌ازای هر آدرس
+                        _addrs = ((payload.get("params") or [None, {}])[1] or {}).get("accounts", {}).get("addresses", [])
+                        result = {"value": {"err": None, "accounts": [None] * len(_addrs)}}
                     elif sim_result == "fail":
                         result = {"value": {"err": {"InstructionError": [1, {"Custom": 6001}]}}}
                     else:
@@ -16162,6 +16166,7 @@ async def main():
   window.addEventListener("wallet-standard:app-ready", (e) => { try { e.detail.register(fakeWallet); } catch(_){} });
 })();
 """ % (_rs_pub, _json.dumps(_rs["wallet"])))
+        _rs_mode = {"drain": False}
         def _rs_rpc(method, params):
             if method == "getAccountInfo":
                 if params[0] == _rs["alt"]:
@@ -16169,6 +16174,27 @@ async def main():
                 if params[0] in _rs["mints"]:
                     return {"value": {"owner": _rs["mints"][params[0]], "data": {"parsed": {"type": "mint"}, "program": "spl-token", "space": 82}}}
                 return {"value": None}
+            # ۱۰ نوامبر — بررسیِ مستقلِ موجودی: حالتِ پیش (getMultipleAccounts روی [کیف‌پول، wSOL ATA، USDC ATA]) و
+            # خروجیِ همان شبیه‌سازی. حالتِ drain = شبیه‌سازی سه برابرِ inAmount برمی‌دارد (حمله‌ی مسیرِ تأییدنشده).
+            _rs_prog, _rs_usdc = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA", "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"
+            def _rs_tok(mint, amount):
+                bb = bytearray(165)
+                bb[0:32] = _b58dec(mint)
+                bb[32:64] = bytes(_rs_pub)
+                bb[64:72] = int(amount).to_bytes(8, "little")
+                bb[108] = 1
+                return {"lamports": 2039280, "owner": _rs_prog, "data": [_b64.b64encode(bytes(bb)).decode(), "base64"]}
+            def _rs_sys(l):
+                return {"lamports": int(l), "owner": "11111111111111111111111111111111", "data": ["", "base64"]}
+            _rs_in = int(_rs["quote"]["inAmount"])
+            _rs_pre_w = 5_000_000_000
+            if method == "getMultipleAccounts" and params[0][0] == _rs["wallet"]:
+                return {"value": [_rs_sys(_rs_pre_w), None, _rs_tok(_rs_usdc, 0)]}
+            if method == "simulateTransaction":
+                assert len(params[1]["accounts"]["addresses"]) == 3, "[sol intent real] the simulation must ask for the three balance accounts"
+                spent = _rs_in * (3 if _rs_mode["drain"] else 1)
+                return {"value": {"err": None, "accounts": [_rs_sys(_rs_pre_w - spent - 5000), None,
+                                                            _rs_tok(_rs_usdc, int(_rs["quote"]["otherAmountThreshold"]))]}}
             if method == "getMultipleAccounts":
                 rows = []
                 for k in params[0]:
@@ -16183,7 +16209,8 @@ async def main():
             return None
         _RS_USDC = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"
         _rs_quote = dict(_rs["quote"], routePlan=[{"swapInfo": {"label": "Jupiter"}, "percent": 100}])
-        for _rs_tamper in (False, True):
+        for _rs_tamper, _rs_drain in ((False, False), (True, False), (False, True)):
+            _rs_mode["drain"] = _rs_drain
             _rs_rpc_log, _rs_swaps, _rs_errs = [], [], []
             _rs_tx = _rs["swapTransactionTampered"] if _rs_tamper else _rs["swapTransaction"]
             rspg = await open_sol_swap_page({"v": "sell", "ms": 100}, wallet_init=_RS_WALLET_INIT, real_intent=True,
@@ -16200,15 +16227,24 @@ async def main():
             await rspg.wait_for_timeout(1500)
             _rs_calls = await rspg.evaluate("window.__solCalls.length")
             _rs_notice = await rspg.inner_text("#solNotices")
+            _rs_btn_text = await rspg.inner_text("#solSwapBtn")
             _rs_sent = list(await rspg.evaluate("window.__solCalls[0] || []"))
             await rspg.close()
             print("[sol intent real] tamper=%s -> walletCalls=%d builds=%d multiRpc=%d notice=%r"
                   % (_rs_tamper, _rs_calls, len(_rs_swaps), _rs_rpc_log.count("getMultipleAccounts"), _rs_notice[:90]))
-            if not _rs_tamper:
+            if not _rs_tamper and not _rs_drain:
                 assert _rs_calls == 1, "[sol intent real] the genuine real swap must reach the wallet exactly once, got %d (notice %r)" % (_rs_calls, _rs_notice)
                 assert _rs_sent == list(_b64.b64decode(_rs["swapTransaction"])), "[sol intent real] the wallet must receive exactly the validated bytes"
                 assert "getMultipleAccounts" in _rs_rpc_log, "[sol intent real] the writable-account ownership check must have run"
                 assert len(_rs_swaps) == 1, "[sol intent real] exactly one build"
+            elif _rs_drain:
+                # ۱۰ نوامبر — شبیه‌سازی بیش از inAmount برمی‌دارد: بلوکِ سخت، هرگز «Swap anyway»، چیزی ارسال نمی‌شود
+                assert _rs_calls == 0, "[sol intent real] a simulated drain beyond inAmount must NEVER reach the wallet, got %d" % _rs_calls
+                assert "simulated balance change" in _rs_notice and "Nothing was sent" in _rs_notice, \
+                    "[sol intent real] the drain refusal must say so: %r" % _rs_notice
+                assert "Swap anyway" not in _rs_notice and _rs_btn_text.strip() != "Swap anyway", \
+                    "[sol intent real] a balance-check refusal must not be overridable: %r / %r" % (_rs_notice, _rs_btn_text)
+                assert "sendTransaction" not in _rs_rpc_log, "[sol intent real] nothing may be broadcast"
             else:
                 assert _rs_calls == 0, "[sol intent real] a tampered destination must NEVER reach the wallet, got %d" % _rs_calls
                 assert "Nothing was sent" in _rs_notice, "[sol intent real] the UI must say nothing was sent: %r" % _rs_notice

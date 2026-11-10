@@ -40,6 +40,12 @@ export function validateQuote(q, { inputMint, outputMint, amount, exactOut, slip
 // When every Swap variant is known the routePlan is fully decoded too (offset must
 // land exactly on the trailer); with an unknown variant only that structural
 // decode is skipped - every amount/slippage/fee/account check still applies.
+// BUT an unknown variant means the bytes Anchor reads on chain (right after the
+// route) are NOT proven to be the bytes we read from the end: a hostile response can
+// put real amounts after the route and append a quote-matching 19-byte trailer.
+// So such a result is reported as routeUnverified, and the decoded amounts are never
+// trusted alone: the page's simulated balance check (checkSimulatedBalances) is the
+// authority on what the transaction really does to the wallet.
 const TRAILER = 8 + 8 + 2 + 1;
 function decodeRoute(data) {
   const instruction=schema.instructions.find(i=>i.discriminator.every((v,n)=>data[n]===v));
@@ -79,7 +85,10 @@ function decodeRoute(data) {
 const ata=(wallet,mint,program)=>PublicKey.findProgramAddressSync(
   [new PublicKey(wallet).toBytes(),new PublicKey(program).toBytes(),new PublicKey(mint).toBytes()],new PublicKey(ATA))[0].toBase58();
 
-export async function validateTransaction(bytes, quote, wallet, rpc) {
+// Returns {routeUnverified, targets}: routeUnverified is true when the routePlan holds a
+// Swap variant unknown to the pinned schema (see decodeRoute); targets are the wallet
+// accounts the balance check (checkSimulatedBalances) must read before/after simulation.
+export async function inspectTransaction(bytes, quote, wallet, rpc) {
   if(!(bytes instanceof Uint8Array)||bytes.length>1232)fail();
   const bound=quote.swapMode==='ExactOut'?
     (BigInt(quote.inAmount)*(10000n+BigInt(quote.slippageBps))+9999n)/10000n:
@@ -105,7 +114,7 @@ export async function validateTransaction(bytes, quote, wallet, rpc) {
   const source=ata(wallet,quote.inputMint,programs[0]),destination=ata(wallet,quote.outputMint,programs[1]);
   const wrapped=ata(wallet,SOL,TOKEN),exactOut=quote.swapMode==='ExactOut';
   const maxIn=BigInt(exactOut?quote.otherAmountThreshold:quote.inAmount);
-  let swaps=0,transfer=0n,units=1400000n,price=0n;
+  let swaps=0,transfer=0n,units=1400000n,price=0n,routeUnverified=false;
   const seen=new Set();
   for(const ix of m.compiledInstructions){
     const program=keys.get(ix.programIdIndex).toBase58(),accounts=ix.accountKeyIndexes.map(i=>keys.get(i).toBase58()),data=ix.data;
@@ -113,6 +122,7 @@ export async function validateTransaction(bytes, quote, wallet, rpc) {
     if(program===JUP){
       if(++swaps!==1)fail();
       const decoded=decodeRoute(data),a=decoded.args;
+      routeUnverified=!decoded.routePlanKnown;
       // A split cannot spend the same input allocation more than once. Reject
       // cycles and over-allocation even if the outer inAmount looks correct.
       const available=new Set([0n]),shares=new Map();
@@ -157,10 +167,14 @@ export async function validateTransaction(bytes, quote, wallet, rpc) {
   if(swaps!==1||units<1n||units>1400000n||(units*price+999999n)/1000000n>200000n)fail();
   // Jupiter's remaining accounts must not expose unrelated writable token
   // balances owned by this wallet to a routed CPI.
+  // The wrapped-SOL ATA is only exempt when SOL is one of the two legs; otherwise it
+  // must not be writable at all (a routed CPI has no business touching it).
+  const solLeg=[quote.inputMint,quote.outputMint].includes(SOL);
   const remaining=[];
   for(let i=0;i<keys.length;i++){
     const address=keys.get(i).toBase58();
-    if(m.isAccountWritable(i)&&![wallet,source,destination,wrapped,JUP].includes(address))remaining.push(address);
+    if(!solLeg&&address===wrapped&&m.isAccountWritable(i))fail();
+    if(m.isAccountWritable(i)&&![wallet,source,destination,JUP,...(solLeg?[wrapped]:[])].includes(address))remaining.push(address);
   }
   for(let i=0;i<remaining.length;i+=32){
     const addresses=remaining.slice(i,i+32);
@@ -173,7 +187,90 @@ export async function validateTransaction(bytes, quote, wallet, rpc) {
       if(raw.length>=165&&new PublicKey(raw.slice(32,64)).toBase58()===wallet)fail();
     }
   }
+  return {routeUnverified,targets:{wallet,input:source,output:destination,inputMint:quote.inputMint,outputMint:quote.outputMint,inputProgram:programs[0],outputProgram:programs[1]}};
+}
+
+export async function validateTransaction(bytes, quote, wallet, rpc) {
+  await inspectTransaction(bytes, quote, wallet, rpc);
   return true;
+}
+
+// ---- Independent balance check (authority over what the swap really does) ----
+// The instruction decoder above can be fooled (unknown Swap variant, see decodeRoute), so
+// before signing the page simulates the exact bytes and compares the wallet's accounts
+// before and after. This function is the pure comparison; every doubt refuses.
+
+// Addresses to read before and to return from simulateTransaction (at most 3 unique).
+export function balanceAddresses(targets){
+  return [...new Set([targets.wallet,targets.input,targets.output])];
+}
+
+// Native SOL allowance (lamports) on top of the quoted amount, for legs that touch SOL:
+//  - network fee: 1 signature x 5000 lamports
+//  - priority fee: validateTransaction caps units x price at 200,000 lamports
+//  - rent of accounts the tx creates (non-wSOL ATAs): computed from the simulated size
+//    as (128 + size) x 6960 (3480 lamports/byte-year x 2 years); any excess over that
+//    rent counts as a loss. The wSOL ATA needs no allowance: its lamports (rent included)
+//    are counted in the SOL holdings, so create/close just moves lamports inside them.
+export const NATIVE_FEE_ALLOWANCE=5000n+200000n;
+const RENT_PER_BYTE=6960n,ACCOUNT_OVERHEAD=128n;
+const refuse=()=>fail();
+function lamportsOf(v){
+  if(!v||typeof v!=='object'||!Number.isSafeInteger(v.lamports)||v.lamports<0)refuse();
+  return BigInt(v.lamports);
+}
+function tokenAccount(v,{program,mint,wallet}){
+  if(v===null)return null;
+  if(!v||typeof v!=='object'||v.owner!==program||!Array.isArray(v.data)||v.data[1]!=='base64'||typeof v.data[0]!=='string')refuse();
+  let raw;
+  try{raw=Uint8Array.from(atob(v.data[0]),c=>c.charCodeAt(0));}catch{refuse();}
+  if(raw.length<165||raw[108]!==1)refuse();
+  if(new PublicKey(raw.slice(0,32)).toBase58()!==mint||new PublicKey(raw.slice(32,64)).toBase58()!==wallet)refuse();
+  let amount=0n;for(let i=7;i>=0;i--)amount=(amount<<8n)|BigInt(raw[64+i]);
+  return {lamports:lamportsOf(v),amount,size:BigInt(raw.length)};
+}
+// pre/post: account infos (RPC "base64" shape, or null when absent) in balanceAddresses() order;
+// simErr: the simulation's err (must be exactly null).
+export function checkSimulatedBalances({quote,targets,pre,post,simErr}){
+  try{
+    if(simErr!==null||!quote||!targets)refuse();
+    const n=balanceAddresses(targets).length;
+    if(!Array.isArray(pre)||!Array.isArray(post)||pre.length!==n||post.length!==n)refuse();
+    const at=(list,address)=>list[balanceAddresses(targets).indexOf(address)];
+    const exactOut=quote.swapMode==='ExactOut';
+    const solIn=targets.inputMint===SOL,solOut=targets.outputMint===SOL;
+    if(!uint(quote.inAmount)||!uint(quote.outAmount)||!uint(quote.otherAmountThreshold))refuse();
+    const maxIn=BigInt(exactOut?quote.otherAmountThreshold:quote.inAmount);
+    const minOut=BigInt(exactOut?quote.outAmount:quote.otherAmountThreshold);
+    const w=targets.wallet;
+    const side=(list,kind)=>tokenAccount(at(list,targets[kind]),{program:targets[kind+'Program'],mint:targets[kind+'Mint'],wallet:w});
+    for(const list of [pre,post]){const v=at(list,w);if(!v||v.owner!==SYSTEM)refuse();}
+    const wallet0=lamportsOf(at(pre,w)),wallet1=lamportsOf(at(post,w));
+    const in0=side(pre,'input'),in1=side(post,'input'),out0=side(pre,'output'),out1=side(post,'output');
+    // An absent account is 0 only where that is natural: a not-yet-created output ATA before,
+    // the wSOL ATA on either side (created / closed by the tx). Anything else is unexpected.
+    if(!solIn&&(!in0||!in1))refuse();
+    if(!solOut&&!out1)refuse();
+    // Native SOL holdings = wallet lamports + the wSOL ATA lamports (rent included).
+    const wsol=(a,b)=>solIn?a:solOut?b:null;
+    const held=(walletLamports,sol)=>walletLamports+(sol?sol.lamports:0n);
+    const native0=held(wallet0,wsol(in0,out0)),native1=held(wallet1,wsol(in1,out1));
+    let rent=0n;
+    for(const [before,after,isSol] of [[in0,in1,solIn],[out0,out1,solOut]])
+      if(!isSol&&!before&&after)rent+=(ACCOUNT_OVERHEAD+after.size)*RENT_PER_BYTE;
+    const allowance=NATIVE_FEE_ALLOWANCE+rent;
+    const nativeDrop=native0-native1;
+    // Input side
+    if(solIn){if(nativeDrop>maxIn+allowance)refuse();}
+    else{if(in0.amount-in1.amount>maxIn)refuse();if(!solOut&&nativeDrop>allowance)refuse();}
+    // Output side
+    if(solOut){if(-nativeDrop+allowance<minOut)refuse();}
+    else if(out1.amount-(out0?out0.amount:0n)<minOut)refuse();
+    return true;
+  }catch(e){
+    if(e&&/^Refused/.test(e.message))throw e;
+    fail();
+  }
 }
 
 export function assertSameMessage(unsigned,signed){

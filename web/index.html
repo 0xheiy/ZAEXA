@@ -12193,7 +12193,7 @@ let solIntentLoader=null,solFailedBuild=null;
 function solLoadIntent(){
   if(window.SolIntent)return Promise.resolve(window.SolIntent);
   if(!solIntentLoader)solIntentLoader=new Promise((resolve,reject)=>{
-    const script=document.createElement("script");script.src="/solana-intent.bundle.41053ea6.js";
+    const script=document.createElement("script");script.src="/solana-intent.bundle.753f6de0.js";
     script.onload=()=>window.SolIntent?resolve(window.SolIntent):reject(new Error("Transaction validator unavailable"));
     script.onerror=()=>reject(new Error("Transaction validator unavailable"));document.head.appendChild(script);
   }).catch(e=>{solIntentLoader=null;throw e;});
@@ -12574,7 +12574,8 @@ async function solBuildFreshTx(btn,context=solSwapContext()){
   }
 
   // Intent validation is mandatory even when a failed simulation is overridden.
-  try{await guard.validateTransaction(txBytes,quote,solAccount.address,solRpcCall);}
+  let inspected;
+  try{inspected=await guard.inspectTransaction(txBytes,quote,solAccount.address,solRpcCall);}
   catch(e){
     if(e&&e.uiHandled)throw e;
     const msg=((e&&e.message)||"Refused: the transaction could not be checked.")+" Nothing was sent.";
@@ -12591,10 +12592,19 @@ async function solBuildFreshTx(btn,context=solSwapContext()){
     // شکلِ توصیه‌شده‌ی فانتوم (sigVerify:false). شکستِ خودِ تماسِ RPC هرگز
     // به‌معنیِ «تراکنش رد می‌شود» نیست — فقط یعنی نمی‌دانیم.
     if(btn)btn.textContent="Checking the transaction…";
+    // ۱۰ نوامبر — بررسیِ مستقلِ موجودی: حالتِ حساب‌های ورودی/خروجیِ کاربر پیش از شبیه‌سازی (پیش) و
+    // خروجیِ همان شبیه‌سازی (پس). رمزگشاییِ دستورها ممکن است فریب بخورد (route-unverified)؛ این مقایسه فریب نمی‌خورد.
+    let balAddrs=null,balPre=null;
+    try{
+      balAddrs=guard.balanceAddresses(inspected.targets);
+      const pr=await solRpcCall("getMultipleAccounts",[balAddrs,{encoding:"base64"}]);
+      balPre=pr&&pr.value;
+    }catch{balPre=null;}
     let simRes=null,simRpcFailed=false;
     try{
-      simRes=await solRpcCall("simulateTransaction",
-        [j.swapTransaction,{encoding:"base64",sigVerify:false,replaceRecentBlockhash:true,commitment:"processed"}]);
+      const simCfg={encoding:"base64",sigVerify:false,replaceRecentBlockhash:true,commitment:"processed"};
+      if(balAddrs)simCfg.accounts={encoding:"base64",addresses:balAddrs};
+      simRes=await solRpcCall("simulateTransaction",[j.swapTransaction,simCfg]);
     }catch{simRpcFailed=true;}
     let fail=null;
     if(!simRpcFailed){
@@ -12621,10 +12631,28 @@ async function solBuildFreshTx(btn,context=solSwapContext()){
         solSimFailedKey=null;
         throw Object.assign(new Error(fail.msg),{uiHandled:true,uiMessage:fail.msg,uiCode:fail.code});
       }
+      if(inspected.routeUnverified){
+        // ۱۰ نوامبر — مسیرِ تأییدنشده (Swap ناشناس): رمزگشا تنها نمی‌تواند ضامن باشد و بررسیِ موجودی فقط روی شبیه‌سازیِ
+        // موفق کار می‌کند؛ پس شکستِ شبیه‌سازی بلوکِ سخت است. هرگز «Swap anyway»، هیچ ساختِ کش‌شده‌ای برای override نمی‌ماند.
+        ev("swap:sim-fail","","solana");
+        solSimFailedKey=null;solFailedBuild=null;
+        const msg=fail.msg+" This route cannot be fully verified, so it cannot be sent anyway. Nothing was sent.";
+        throw Object.assign(new Error(msg),{uiHandled:true,uiMessage:msg,uiCode:fail.code});
+      }
       ev("swap:sim-fail","","solana");
       solSimFailedKey=simKey;
       solFailedBuild={key:simKey,context,quoteKey,built,at:Date.now()};
       throw Object.assign(new Error(fail.msg),{uiHandled:true,uiMessage:fail.msg,uiCode:fail.code,simFail:true});
+    }
+    // شبیه‌سازی پاس شد: مقایسه‌ی پیش/پس با کوت. شکستِ این مقایسه (یا ناخوانا بودنِ حالت) هرگز
+    // «Swap anyway» ندارد و هیچ‌وقت به کیف‌پول نمی‌رسد.
+    try{
+      guard.checkSimulatedBalances({quote,targets:inspected.targets,pre:balPre,
+        post:simRes.value.accounts,simErr:simRes.value.err});
+    }catch{
+      solSimFailedKey=null;solFailedBuild=null;
+      const msg="Refused: the simulated balance change does not match the quote you reviewed, or could not be checked. Nothing was sent.";
+      throw Object.assign(new Error(msg),{uiHandled:true,uiMessage:msg});
     }
     if(solSimFailedKey===simKey){solSimFailedKey=null;solFailedBuild=null;}
   }

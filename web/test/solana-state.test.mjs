@@ -8,7 +8,7 @@ const html = readFileSync(new URL('../index.html', import.meta.url), 'utf8');
 function context(names, extras = {}) {
   const elements = new Map();
   const ctx = vm.createContext({
-    solFailedBuild:null,solLoadIntent:async()=>({validateQuote(){},async validateTransaction(){}}),
+    solFailedBuild:null,solLoadIntent:async()=>({validateQuote(){},async validateTransaction(){},async inspectTransaction(){return {routeUnverified:false,targets:{wallet:'W',input:'I',output:'O'}};},balanceAddresses:t=>[t.wallet,t.input,t.output],checkSimulatedBalances(){return true;}}),
     console, URLSearchParams, Uint8Array, Date, Math, BigInt,
     setTimeout: () => 1, clearTimeout: () => {},
     $: id => {
@@ -165,6 +165,31 @@ test('changed quote cannot reuse a failed-message override',async()=>{
   await assert.rejects(c.solBuildFreshTx(null),e=>e.simFail===true);
   c.solSimArmedKey=c.solSimFailedKey;c.solQuote={...c.solQuote,outAmount:'changed'};
   await assert.rejects(c.solBuildFreshTx(null),e=>e.simFail===true);assert.equal(builds,2);
+});
+
+test('simulation revert: unverified route is a hard stop, known route keeps the override',async()=>{
+  for(const unverified of [true,false]){
+    let builds=0;
+    const guard={validateQuote(){},async inspectTransaction(){return {routeUnverified:unverified,targets:{wallet:'W',input:'I',output:'O'}};},balanceAddresses:t=>[t.wallet,t.input,t.output],checkSimulatedBalances(){return true;}};
+    const c=context(['solBuildFreshTx','solSwapContext','solAssertSwapContext'],{
+      solLoadIntent:async()=>guard,
+      location:{origin:'https://example.test'},withTimeout:p=>p,
+      fetch:async()=>{builds++;return {ok:true,json:async()=>({swapTransaction:'same-message',lastValidBlockHeight:100})};},
+      solB64ToBytes:()=>new Uint8Array([1,2,3]),solParseFeePayer:()=>new Uint8Array(32),solBytesEq:()=>true,
+      solRpcCall:async(m)=>m==='simulateTransaction'?{value:{err:'Failure'}}:{value:[]},solClassifySimFail:()=>({reason:'other',code:'Failure'}),solSimFailMessage:()=> 'Simulation failed',
+    });
+    if(unverified){
+      await assert.rejects(c.solBuildFreshTx(null),e=>e.uiHandled===true&&!e.simFail&&/cannot be sent anyway/.test(e.uiMessage));
+      assert.equal(c.solSimFailedKey,null);assert.equal(c.solFailedBuild,null);
+      // حتی با کلیدِ مسلح‌شده هم ساختِ قبلی دوباره به‌کار نمی‌رود
+      c.solSimArmedKey='anything';
+      await assert.rejects(c.solBuildFreshTx(null),e=>!e.simFail);assert.equal(builds,2);
+    }else{
+      await assert.rejects(c.solBuildFreshTx(null),e=>e.simFail===true);
+      const reviewed=c.solFailedBuild.built;c.solSimArmedKey=c.solSimFailedKey;
+      assert.equal(await c.solBuildFreshTx(null),reviewed);assert.equal(builds,1);
+    }
+  }
 });
 
 test('changing wallet during simulation cancels the prepared transaction', async () => {

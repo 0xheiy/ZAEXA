@@ -1555,6 +1555,7 @@ async function ogFetchVerdictDetail(addr, meta, deadlineAt, env, ctx, metaWhy, m
     if (passBudgetHasRoom(meterHooks)) {
       poolProof = await poolDirectedProof(addr, covered.pools, {
         meta, deadlineAt, fetchImpl: fetch, rpcs: baseRpcsFor(env), dexToVenue: GT_DEX_TO_VENUE,
+        minReserveUsd: REPORT_MIN_RESERVE_USD,
       });
     }
   }
@@ -2005,6 +2006,18 @@ const SOL_RPC_METHODS_ALLOWED = new Set([
   "simulateTransaction", "getAccountInfo", "getTokenLargestAccounts", "getEpochInfo", "getMultipleAccounts",
 ]);
 
+// کلیدِ عمومیِ سولانا: base58 که دقیقاً ۳۲ بایت دیکد شود (نه فقط طولِ رشته)
+function isSolKey32(s) {
+  if (typeof s !== "string" || s.length < 32 || s.length > 44) return false;
+  const A = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
+  let n = 0n, zeros = 0;
+  for (const c of s) { const i = A.indexOf(c); if (i < 0) return false; n = n * 58n + BigInt(i); }
+  for (const c of s) { if (c === "1") zeros++; else break; }
+  let len = 0;
+  for (let x = n; x > 0n; x >>= 8n) len++;
+  return zeros + len === 32;
+}
+
 function solRpcParamsOk(method, params) {
   if(method==="getMultipleAccounts")return Array.isArray(params)&&params.length===2&&Array.isArray(params[0])&&params[0].length>0&&params[0].length<=32&&params[0].every(isSolMintStr)&&params[1]?.encoding==="base64"&&Object.keys(params[1]).length===1;
   if(method==="getAccountInfo")return Array.isArray(params)&&params.length===2&&isSolMintStr(params[0])&&["jsonParsed","base64"].includes(params[1]?.encoding)&&Object.keys(params[1]).length===1;
@@ -2053,11 +2066,22 @@ function solRpcParamsOk(method, params) {
     const [tx, opts] = params;
     if (typeof tx !== "string" || tx.length < 1 || tx.length > 1700) return false;
     if (!/^[A-Za-z0-9+/]+=*$/.test(tx)) return false;
-    if (!opts || typeof opts !== "object" || Object.keys(opts).length !== 4) return false;
+    if (!opts || typeof opts !== "object") return false;
+    // ۱۰ نوامبر — اختیاری: accounts:{encoding:"base64",addresses:[≤۴ کلیدِ ۳۲بایتی]} تا حالتِ بعد از شبیه‌سازیِ
+    // حساب‌های خودِ کاربر را برای بررسیِ موجودی بخوانیم؛ هیچ کلیدِ تازه‌ی دیگری مجاز نیست.
+    const hasAcc = Object.prototype.hasOwnProperty.call(opts, "accounts");
+    if (Object.keys(opts).length !== (hasAcc ? 5 : 4)) return false;
     if (opts.encoding !== "base64") return false;
     if (opts.sigVerify !== false) return false;
     if (opts.replaceRecentBlockhash !== true) return false;
     if (opts.commitment !== "processed") return false;
+    if (hasAcc) {
+      const a = opts.accounts;
+      if (!a || typeof a !== "object" || Array.isArray(a) || Object.keys(a).length !== 2) return false;
+      if (a.encoding !== "base64") return false;
+      if (!Array.isArray(a.addresses) || a.addresses.length < 1 || a.addresses.length > 4) return false;
+      if (!a.addresses.every(isSolKey32)) return false;
+    }
     return true;
   }
   return false;

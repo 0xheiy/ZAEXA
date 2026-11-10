@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { PublicKey, Keypair, TransactionMessage, VersionedTransaction, TransactionInstruction, SystemProgram, ComputeBudgetProgram, AddressLookupTableAccount } from '@solana/web3.js';
-import { validateTransaction, validateQuote, assertSameMessage } from './intent.js';
+import { validateTransaction, validateQuote, assertSameMessage, inspectTransaction, checkSimulatedBalances, balanceAddresses, NATIVE_FEE_ALLOWANCE } from './intent.js';
 import schema from './jupiter-schema.json' with { type:'json' };
 import * as real from './real-swap.mjs';
 import { MessageV0 } from '@solana/web3.js';
@@ -143,5 +143,166 @@ test('route allocations cannot exceed the reviewed input or cycle through it',as
   });
   test('real swap: unchanged bytes still pass after the tamper helpers rebuild them (control)',async()=>{
     assert.equal(await check(rebuild(()=>null)),true);
+  });
+}
+
+// --- Independent balance check (checkSimulatedBalances) + route-unverified marking + wSOL ATA exemption ---
+{
+  const OTHER='JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN',SYS='11111111111111111111111111111111',TOKEN_S=TOKEN.toBase58();
+  const sys=l=>({lamports:l,owner:SYS,data:['','base64']});
+  // حساب توکن: mint(0..32) owner(32..64) amount(64) state(108)=1
+  const tok=(mint,amount,{owner=wallet.publicKey,lamports=2039280,program=TOKEN_S,state=1,size=165}={})=>{
+    const raw=Buffer.alloc(size);raw.set(new PublicKey(mint).toBytes(),0);raw.set(owner.toBytes(),32);raw.writeBigUInt64LE(BigInt(amount),64);raw[108]=state;
+    return {lamports,owner:program,data:[raw.toString('base64'),'base64']};
+  };
+  const W=wallet.publicKey.toBase58();
+  const targetsFor=(i,o)=>({wallet:W,input:associated(i).toBase58(),output:associated(o).toBase58(),inputMint:i,outputMint:o,inputProgram:TOKEN_S,outputProgram:TOKEN_S});
+  const exin={inputMint:USDC,outputMint:OTHER,inAmount:'1000000',outAmount:'6000000',otherAmountThreshold:'5970000',swapMode:'ExactIn',slippageBps:50};
+  const exout={...exin,swapMode:'ExactOut',otherAmountThreshold:'1005000'};
+  const tt=targetsFor(USDC,OTHER);
+  const run=(q,t,pre,post,simErr=null)=>checkSimulatedBalances({quote:q,targets:t,pre,post,simErr});
+  const ok=(...a)=>assert.equal(run(...a),true);
+  const no=(...a)=>assert.throws(()=>run(...a),/Refused/);
+  // [wallet, input, output]
+  const tokPre=[sys(5e9),tok(USDC,5e6),tok(OTHER,100)],tokPost=(spent,got)=>[sys(5e9-5000),tok(USDC,5e6-spent),tok(OTHER,100+got)];
+
+  test('native allowance is exactly 5000 (fee) + 200000 (priority cap) lamports',()=>{assert.equal(NATIVE_FEE_ALLOWANCE,205000n);});
+  test('balance check: honest ExactIn and ExactOut token swaps pass, the edges are exact',()=>{
+    ok(exin,tt,tokPre,tokPost(1000000,5970000));
+    ok(exin,tt,tokPre,tokPost(999999,7000000));
+    ok(exout,tt,tokPre,tokPost(1005000,6000000));
+    ok(exout,tt,tokPre,tokPost(900000,6500000));
+    // خروجی ساخته‌نشده (ATA خروجی هنوز نیست) = صفر پیش از swap؛ کرایه‌ی ساخت در سقفِ مجاز
+    ok(exin,tt,[sys(5e9),tok(USDC,5e6),null],[sys(5e9-5000-2039280),tok(USDC,4e6),tok(OTHER,5970000)]);
+  });
+  test('balance check: input drop above inAmount / threshold is refused (ExactIn and ExactOut)',()=>{
+    no(exin,tt,tokPre,tokPost(1000001,6000000));
+    no(exout,tt,tokPre,tokPost(1005001,6000000));
+  });
+  test('balance check: lamports leaking from a non-SOL swap beyond fee+rent are refused',()=>{
+    const post=tokPost(1000000,5970000);
+    post[0]=sys(5e9-Number(NATIVE_FEE_ALLOWANCE));ok(exin,tt,tokPre,post);
+    post[0]=sys(5e9-Number(NATIVE_FEE_ALLOWANCE)-1);no(exin,tt,tokPre,post);
+  });
+  test('balance check: output below otherAmountThreshold / outAmount is refused',()=>{
+    no(exin,tt,tokPre,tokPost(1000000,5969999));
+    no(exout,tt,tokPre,tokPost(1000000,5999999));
+    no(exin,tt,tokPre,tokPost(1000000,0));
+    no(exin,tt,tokPre,tokPost(0,0));
+  });
+  test('balance check: unreadable / unexpected state refuses (fail closed)',()=>{
+    const good=tokPost(1000000,5970000);
+    ok(exin,tt,tokPre,good);
+    no(exin,tt,null,good);no(exin,tt,tokPre,null);no(exin,tt,undefined,undefined);no(exin,tt,{},{});
+    no(exin,tt,tokPre.slice(0,2),good);no(exin,tt,tokPre,good.slice(0,2));no(exin,tt,tokPre,[...good,null]);
+    no(exin,tt,tokPre,good,{InstructionError:[1,{Custom:6001}]});assert.throws(()=>checkSimulatedBalances({quote:exin,targets:tt,pre:tokPre,post:good}),/Refused/);no(exin,tt,tokPre,good,'Failure');
+    // حساب جاافتاده
+    for(const i of [0,1,2]){const a=[...good];a[i]=null;no(exin,tt,tokPre,a);}
+    for(const i of [0,1]){const a=[...tokPre];a[i]=null;no(exin,tt,a,good);}
+    // شکلِ غیرمنتظره
+    const bad=[
+      tok(USDC,1,{program:'Tokenz'+'QdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb'}),            // برنامه‌ی دیگر
+      tok(OTHER,5e6),                                                                   // mint اشتباه
+      tok(USDC,5e6,{owner:Keypair.generate().publicKey}),                               // مالکِ دیگر
+      tok(USDC,5e6,{state:2}),                                                          // فریز
+      tok(USDC,5e6,{size:100}),                                                         // کوتاه
+      {...tok(USDC,5e6),data:['!!!','base64']},{...tok(USDC,5e6),data:['AAAA','base58']},{...tok(USDC,5e6),data:'x'},
+      {...tok(USDC,5e6),lamports:'1'},{...tok(USDC,5e6),lamports:-1},{...tok(USDC,5e6),lamports:2**60},
+      'x',42,
+    ];
+    for(const [n,b] of bad.entries()){try{no(exin,tt,[sys(5e9),b,tok(OTHER,100)],good);no(exin,tt,tokPre,[good[0],good[1],b]);no(exin,tt,tokPre,[good[0],b,good[2]]);}catch(e){e.message+=' (bad #'+n+')';throw e;}}
+    no(exin,tt,[{...sys(5e9),owner:TOKEN_S},tokPre[1],tokPre[2]],good);
+    no(exin,tt,tokPre,[{...sys(5e9-5000),owner:TOKEN_S},good[1],good[2]]);
+    no(exin,tt,tokPre,[{lamports:1.5,owner:SYS,data:['','base64']},good[1],good[2]]);
+    no(null,tt,tokPre,good);no(exin,null,tokPre,good);no({...exin,inAmount:'0'},tt,tokPre,good);
+  });
+
+  const t1=targetsFor(SOL,USDC),t2=targetsFor(USDC,SOL);
+  const wsol=associated(SOL).toBase58();
+  test('balance check: native SOL in - wSOL ATA create/close and output ATA rent stay inside the documented allowance',()=>{
+    const q={...exin,inputMint:SOL,outputMint:USDC,inAmount:'1000000000',outAmount:'150000000',otherAmountThreshold:'149250000'};
+    // [wallet, wSOL ATA (=input), USDC ATA (=output)]
+    const base=5_000_000_000;
+    const rentTok=(128+165)*6960; // 2,039,280
+    // wSOL ATA ساخته و در پایان بسته شد → فقط کیف‌پول می‌ماند
+    ok(q,t1,[sys(base),null,tok(USDC,10)],[sys(base-1e9-5000),null,tok(USDC,10+149250000)]);
+    // ATA خروجی ساخته شد: کرایه‌اش مجاز
+    ok(q,t1,[sys(base),null,null],[sys(base-1e9-Number(NATIVE_FEE_ALLOWANCE)-rentTok),null,tok(USDC,149250000)]);
+    // یک لامپورت بیشتر
+    no(q,t1,[sys(base),null,null],[sys(base-1e9-Number(NATIVE_FEE_ALLOWANCE)-rentTok-1),null,tok(USDC,149250000)]);
+    // ATA خروجی وجود داشت: کرایه مجاز نیست، فقط کارمزد
+    ok(q,t1,[sys(base),null,tok(USDC,0)],[sys(base-1e9-Number(NATIVE_FEE_ALLOWANCE)),null,tok(USDC,149250000)]);
+    no(q,t1,[sys(base),null,tok(USDC,0)],[sys(base-1e9-Number(NATIVE_FEE_ALLOWANCE)-1),null,tok(USDC,149250000)]);
+    // wSOL ATA ساخته شد و کرایه‌اش در آن ماند (لامپورتِ خودِ کاربر): شمرده می‌شود، نه ضرر
+    ok(q,t1,[sys(base),null,tok(USDC,0)],[sys(base-1e9-5000-2039280),tok(SOL,0,{lamports:2039280,}),tok(USDC,149250000)]);
+    // ATA از قبل پر بود و باقی‌مانده‌اش ماند
+    ok(q,t1,[sys(base),tok(SOL,0,{lamports:2039280+1e8}),tok(USDC,0)],[sys(base-1e9+1e8-5000),tok(SOL,0,{lamports:2039280+1e8}),tok(USDC,149250000)].map((x,i)=>i===0?sys(base-9e8-5000):x));
+    // ExactOut: سقفِ ورودی = otherAmountThreshold
+    const qo={...q,swapMode:'ExactOut',inAmount:'1000000000',outAmount:'150000000',otherAmountThreshold:'1005000000'};
+    ok(qo,t1,[sys(base),null,tok(USDC,0)],[sys(base-1005000000-Number(NATIVE_FEE_ALLOWANCE)),null,tok(USDC,150000000)]);
+    no(qo,t1,[sys(base),null,tok(USDC,0)],[sys(base-1005000000-Number(NATIVE_FEE_ALLOWANCE)-1),null,tok(USDC,150000000)]);
+    no(qo,t1,[sys(base),null,tok(USDC,0)],[sys(base-1005000000-5000),null,tok(USDC,149999999)]);
+    // خروجی کم
+    no(q,t1,[sys(base),null,tok(USDC,0)],[sys(base-1e9-5000),null,tok(USDC,149249999)]);
+  });
+  test('balance check: native SOL out - proceeds are measured on wallet + wSOL ATA, allowance is fee only',()=>{
+    const q={...exin,inputMint:USDC,outputMint:SOL,inAmount:'150000000',outAmount:'1000000000',otherAmountThreshold:'995000000'};
+    const base=5_000_000_000;
+    // [wallet, USDC ATA (=input), wSOL ATA (=output)]
+    ok(q,t2,[sys(base),tok(USDC,150000000),null],[sys(base+995000000-5000),tok(USDC,0),null]);
+    // دقیقاً روی مرز: خروجی + ۲۰۵۰۰۰ - کارمزد
+    ok(q,t2,[sys(base),tok(USDC,150000000),null],[sys(base+995000000-Number(NATIVE_FEE_ALLOWANCE)),tok(USDC,0),null]);
+    no(q,t2,[sys(base),tok(USDC,150000000),null],[sys(base+995000000-Number(NATIVE_FEE_ALLOWANCE)-1),tok(USDC,0),null]);
+    // خروجی در wSOL ATA ماند (بسته نشد): شمرده می‌شود
+    ok(q,t2,[sys(base),tok(USDC,150000000),null],[sys(base-5000-2039280),tok(USDC,0),tok(SOL,995000000,{lamports:995000000+2039280})]);
+    no(q,t2,[sys(base),tok(USDC,150000000),null],[sys(base-5000-2039280),tok(USDC,0),tok(SOL,994000000,{lamports:994000000+2039280})]);
+    // ورودیِ توکن بیش از inAmount
+    ok(q,t2,[sys(base),tok(USDC,200000000),null],[sys(base+995000000-5000),tok(USDC,50000000),null]);
+    no(q,t2,[sys(base),tok(USDC,200000000),null],[sys(base+995000000-5000),tok(USDC,49999999),null]);
+  });
+  test('balance check: the output ATA is only a free pass when it is the SOL leg',()=>{
+    // خروجیِ توکنی نباید بعد از swap ناپدید شود
+    const good=tokPost(1000000,5970000);
+    no(exin,tt,tokPre,[good[0],good[1],null]);
+    no(exin,tt,tokPre,[good[0],null,good[2]]);
+  });
+
+  test('auditor attack: real fixture + unknown Swap variant + real amounts after the route and a quote-matching trailer at the end',async()=>{
+    const m=real.message,ixs=m.compiledInstructions.map(i=>({programIdIndex:i.programIdIndex,accountKeyIndexes:[...i.accountKeyIndexes],data:Uint8Array.from(i.data)}));
+    const j=ixs.find(i=>m.staticAccountKeys[i.programIdIndex].toBase58()===JUP.toBase58());
+    const honest=j.data,head=honest.slice(0,honest.length-19);
+    const evil=Buffer.alloc(19);evil.writeBigUInt64LE(2n**63n,0);evil.writeBigUInt64LE(1n,8);evil.writeUInt16LE(10000,16);evil[18]=0;
+    j.data=Uint8Array.from(Buffer.concat([head,evil,honest.slice(honest.length-19)]));
+    const bytes=new VersionedTransaction(new MessageV0({header:m.header,staticAccountKeys:m.staticAccountKeys,recentBlockhash:m.recentBlockhash,compiledInstructions:ixs,addressTableLookups:m.addressTableLookups})).serialize();
+    const info=await inspectTransaction(bytes,real.quote,real.wallet,real.rpc);
+    // رمزگشا فریب می‌خورد (و باید اعلام کند که مسیر تأییدنشده است)...
+    assert.equal(info.routeUnverified,true);
+    // ...ولی مقایسه‌ی موجودی که واقعاً شبیه‌سازی شد او را می‌گیرد
+    const inAmount=BigInt(real.quote.inAmount),out=BigInt(real.quote.otherAmountThreshold),base=500_000_000_000n;
+    const w=info.targets.wallet;
+    const pre=[sys(Number(base)),null,tok(USDC,0,{owner:new PublicKey(w)})];
+    const stolen=inAmount*3n;
+    const post=[sys(Number(base-stolen-5000n)),null,tok(USDC,out,{owner:new PublicKey(w)})];
+    assert.throws(()=>checkSimulatedBalances({quote:real.quote,targets:info.targets,pre,post,simErr:null}),/Refused/);
+    // همان تراکنش وقتی واقعاً فقط inAmount خرج کند پاس است (کنترل)
+    const fine=[sys(Number(base-inAmount-5000n)),null,tok(USDC,out,{owner:new PublicKey(w)})];
+    assert.equal(checkSimulatedBalances({quote:real.quote,targets:info.targets,pre,post:fine,simErr:null}),true);
+    assert.deepEqual(balanceAddresses(info.targets),[w,info.targets.input,info.targets.output]);
+  });
+  test('known Swap variants are not marked route-unverified; the real fixture (variant 181) is',async()=>{
+    const known=await inspectTransaction(transaction([route()]),quote,W,rpc);
+    assert.equal(known.routeUnverified,false);
+    assert.equal((await inspectTransaction(real.strippedBytes,real.quote,real.wallet,real.rpc)).routeUnverified,true);
+  });
+  test('wSOL ATA may be writable only when SOL is one of the legs',async()=>{
+    const q2={...quote,outputMint:OTHER};
+    // rpc که getMultipleAccounts را درست جواب می‌دهد (همه null)، تا فقط خودِ قاعده‌ی wSOL تعیین‌کننده باشد
+    const rpc=async(method,params)=>method==='getMultipleAccounts'?{value:params[0].map(()=>null)}:{value:{owner:TOKEN.toBase58(),data:{parsed:{type:'mint'}}}};
+    const withWsol=(ix,writable)=>{ix.keys.push({pubkey:associated(SOL),isSigner:false,isWritable:writable});return ix;};
+    // بدونِ ساق SOL: writable رد؛ فقط‌خواندنی مجاز (کنترل)
+    await assert.rejects(validateTransaction(transaction([withWsol(route({output:OTHER}),true)]),q2,W,rpc),/Refused/);
+    await validateTransaction(transaction([withWsol(route({output:OTHER}),false)]),q2,W,rpc);
+    // با ساق SOL: همان حسابِ writable مجاز
+    await validateTransaction(transaction([withWsol(route(),true)]),quote,W,rpc);
   });
 }
