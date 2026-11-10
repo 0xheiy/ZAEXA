@@ -17166,7 +17166,7 @@ console.log(fails === 0
     const store = new Map(init || []);
     return { store, get: async (k) => (store.has(k) ? store.get(k) : null), put: async (k, v) => { store.set(k, v); } };
   };
-  async function v4MeterPass({ addr, dex, kvInit, poolsHandler, throwAfterIndex, slowAfterIndex }) {
+  async function v4MeterPass({ addr, dex, kvInit, poolsHandler, throwAfterIndex, slowAfterIndex, posmKey }) {
     const logM = v4BuildLog({
       poolId: POOL_ID_M, currency0: vd.NATIVE_ADDR, currency1: addr,
       feeWord: v4wNum(0), tickWord: v4wNum(1), hooksWord: v4wAddrWord(vd.NATIVE_ADDR),
@@ -17199,6 +17199,10 @@ console.log(fails === 0
       if (!Array.isArray(parsed)) {
         if (parsed.method === "eth_getBlockByNumber") {
           return json({ jsonrpc: "2.0", id: parsed.id, result: { number: "0x4C4B40", timestamp: "0x68b6a1a0" } });
+        }
+        if (parsed.method === "eth_getLogs" && posmKey) { calls.logs++; return new Response("down", { status: 500 }); } // ۹ نوامبر: لاگ خوانده نمی‌شود → پشتیبانِ posm
+        if (parsed.method === "eth_call" && posmKey && parsed.params && parsed.params[0] && parsed.params[0].to === "0x7c5f5a4bbd8fd63184577525326123b519429bdc") {
+          return json({ jsonrpc: "2.0", id: parsed.id, result: posmKey(addr) });
         }
         if (parsed.method === "eth_getLogs") { calls.logs++; return json({ jsonrpc: "2.0", id: parsed.id, result: [logM] }); }
         return json({ jsonrpc: "2.0", id: parsed.id, result: "0x" + "0".repeat(64) });
@@ -17299,8 +17303,266 @@ console.log(fails === 0
   ok(rowSig(rTc.rows) === "[]", "[v4 index meter] cap-throw rows unchanged, got " + rowSig(rTc.rows));
   ok(rowSig(rNon.rows) === sig(tag("f6"), null, "cover:false"), "[v4 index meter] non-v4 rows unchanged, got " + rowSig(rNon.rows));
 
+  // ۹ نوامبر: ایندکس از راه PositionManager حل شد → هم ok هم posm
+  const P = tag("e7");
+  const rPm = await v4MeterPass({ addr: P, dex: "uniswap-v4-base", poolsHandler: goodPools,
+    posmKey: (a) => "0x" + v4wAddrWord(vd.NATIVE_ADDR) + v4wAddrWord(a) + v4wNum(500) + v4wNum(10) + v4wAddrWord(vd.NATIVE_ADDR) });
+  ok(JSON.stringify(rPm.rec.sub.v4idx) === '{"ok":1,"posm":1}',
+    "[v4 index meter] an index resolved via PositionManager records both ok and posm, got " + JSON.stringify(rPm.rec.sub.v4idx));
+  const pmStored = rPm.kv.store.get(v4.v4KvKey("base", P));
+  ok(typeof pmStored === "string" && JSON.parse(pmStored).keys.length === 1 && JSON.parse(pmStored).reason === "ok",
+    "[v4 index meter] the posm-resolved key was stored, got " + pmStored);
+  ok(!rPm.raw.toLowerCase().includes(P.toLowerCase().slice(2)), "[v4 index meter] posm: the address must never appear in the passlog record");
+  ok(JSON.stringify(rOk.rec.sub.v4idx) === '{"ok":1}', "[v4 index meter] a log-resolved index never records posm");
+
   console.log("[v4 index meter] sub.v4idx ok — closed labels (found:keys/found:empty/V4_REASONS/threw:cap/threw:other), "
     + "cap 16, independent snapshot, non-v4 records nothing, found:* never re-runs the index, no address in the record, rows unchanged");
+}
+
+/* ---- ۹ نوامبر [v4 rpc split + posm] — لاگ فقط tenderly، بلاک‌خوانی BASE_RPC اول، پشتیبانِ PositionManager ----
+   اندازه‌گیریِ زنده از داخلِ کلادفلر: فقط tenderly لاگ می‌دهد؛ publicnode تایم‌اوت، base.org ۴۲۹، Alchemy ۴۰۰.
+   همه‌ی فراخوانی‌ها با fetchِ ساختگی؛ هیچ RPC واقعی‌ای نیست. */
+{
+  const savedFetch = globalThis.fetch;
+  const SECRET = "SECRETKEY123";
+  const BASE_RPC_URL = "https://base-mainnet.g.alchemy.com/v2/" + SECRET + "?k=" + SECRET;
+  const H_ALCH = "base-mainnet.g.alchemy.com", H_TEN = "base.gateway.tenderly.co";
+  const H_PUB = "base.publicnode.com", H_ORG = "mainnet.base.org";
+  const POSM = "0x7c5f5a4bbd8fd63184577525326123b519429bdc";
+  const ZERO20 = "0x" + "0".repeat(40);
+  let seq = 0;
+  const newAddr = () => "0x" + (0x7000 + (++seq)).toString(16).padStart(4, "0").repeat(10);
+  const poolIdOf = (n) => "0x" + n.toString(16).padStart(2, "0").repeat(32);
+  const kvMk = () => { const kv = { store: new Map(), puts: [],
+    get: async (k) => (kv.store.has(k) ? kv.store.get(k) : null),
+    put: async (k, v, o) => { kv.store.set(k, v); kv.puts.push({ k, v, o }); } }; return kv; };
+  const J = (b, st) => new Response(JSON.stringify(b), { status: st || 200 });
+  const ANCHOR = { number: "0xf4240", timestamp: "0x64fc0d80" };
+  const posmWord = (c0, c1, fee, ts, hooks) =>
+    "0x" + v4wAddrWord(c0) + v4wAddrWord(c1) + v4wNum(fee) + (ts < 0 ? v4wNegWord(-ts) : v4wNum(ts)) + v4wAddrWord(hooks);
+
+  /* h: { block(host), logs(host,n), call(host,data,to) } → هر کدام Response یا throw. calls = لاگِ همه‌ی تماس‌ها */
+  function install(addr, poolIds, h) {
+    const calls = [];
+    globalThis.fetch = async (u, o) => {
+      const url = String(u);
+      if (url.includes("/tokens/" + addr + "/pools")) {
+        return J({ data: poolIds.map((id) => ({ relationships: { dex: { data: { id: "uniswap-v4-base" } } },
+          attributes: { address: id, pool_created_at: "2026-09-07T15:31:23Z" } })) });
+      }
+      const host = new URL(url).hostname;
+      const req = JSON.parse(o && o.body ? o.body : "{}");
+      const c = { host, method: req.method, params: req.params, t: Date.now() };
+      calls.push(c);
+      if (req.method === "eth_getBlockByNumber") return h.block(host, c);
+      if (req.method === "eth_getLogs") return h.logs(host, c);
+      if (req.method === "eth_call") return h.call(host, c);
+      throw new Error("unexpected rpc method " + req.method);
+    };
+    return calls;
+  }
+  const okBlock = () => J({ jsonrpc: "2.0", id: 1, result: ANCHOR });
+  const err500 = () => new Response("x", { status: 500 });
+  const goodLogFor = (addr, id) => v4BuildLog({ poolId: id, currency0: ZERO20, currency1: addr,
+    feeWord: v4wNum(500), tickWord: v4wNum(10), hooksWord: v4wAddrWord(ZERO20) });
+  const callsOf = (calls, m) => calls.filter((c) => c.method === m);
+
+  // --- ۱) بلاک‌خوانی: BASE_RPC اول (فقط hostname در خروجی)، بدونِ آن tenderly اول ---
+  {
+    const addr = newAddr(); const kv = kvMk();
+    v4._resetV4RateCache();
+    const calls = install(addr, [POOL_ID_A], { block: () => okBlock(), logs: (host) => J({ jsonrpc: "2.0", id: 1, result: [goodLogFor(addr, POOL_ID_A)] }), call: () => err500() });
+    const diag = { rpc: [], windows: [] };
+    const r = await runV4Index(addr, { ZX_KV: kv, BASE_RPC: BASE_RPC_URL }, diag);
+    const blockHosts = callsOf(calls, "eth_getBlockByNumber").map((c) => c.host);
+    ok(r.reason === "ok" && blockHosts.length >= 1 && blockHosts.every((x) => x === H_ALCH),
+      "[v4 rpc split] with BASE_RPC set, block lookups go to BASE_RPC first (and stop there when it answers), got " + JSON.stringify(blockHosts));
+    const firstBlockNote = diag.rpc.find((x) => x.m === "eth_getBlockByNumber");
+    ok(firstBlockNote && firstBlockNote.h === H_ALCH, "[v4 rpc split] the collect observer must show the BASE_RPC hostname first for the anchor, got " + JSON.stringify(diag.rpc));
+    ok(!JSON.stringify(diag).includes(SECRET) && !JSON.stringify(r).includes(SECRET) && !JSON.stringify(diag).includes("/v2/"),
+      "[v4 rpc split] BASE_RPC's path/query must never appear in diagnostics or the result");
+    ok(JSON.stringify([...kv.store.values()]).includes(SECRET) === false, "[v4 rpc split] BASE_RPC must never be stored");
+
+    // BASE_RPC و tenderly هر دو شکست → ترتیبِ BASE_RPC، tenderly، publicnode
+    const addr2 = newAddr(); v4._resetV4RateCache();
+    const calls2 = install(addr2, [POOL_ID_A], { block: (host) => (host === H_PUB ? okBlock() : err500()), logs: () => J({ jsonrpc: "2.0", id: 1, result: [goodLogFor(addr2, POOL_ID_A)] }), call: () => err500() });
+    const diag2 = { rpc: [], windows: [] };
+    await runV4Index(addr2, { ZX_KV: kvMk(), BASE_RPC: BASE_RPC_URL }, diag2);
+    const order2 = diag2.rpc.filter((x) => x.m === "eth_getBlockByNumber").slice(0, 3).map((x) => x.h);
+    ok(JSON.stringify(order2) === JSON.stringify([H_ALCH, H_TEN, H_PUB]),
+      "[v4 rpc split] block lookup order must be BASE_RPC, tenderly, publicnode, got " + JSON.stringify(order2));
+    ok(!callsOf(calls2, "eth_getBlockByNumber").some((c) => c.host === H_ORG), "[v4 rpc split] mainnet.base.org is not in the block list");
+
+    // بدونِ BASE_RPC: tenderly اول
+    const addr3 = newAddr(); v4._resetV4RateCache();
+    const calls3 = install(addr3, [POOL_ID_A], { block: (host) => (host === H_PUB ? okBlock() : err500()), logs: () => J({ jsonrpc: "2.0", id: 1, result: [goodLogFor(addr3, POOL_ID_A)] }), call: () => err500() });
+    const diag3 = { rpc: [], windows: [] };
+    await runV4Index(addr3, { ZX_KV: kvMk() }, diag3);
+    const order3 = diag3.rpc.filter((x) => x.m === "eth_getBlockByNumber").slice(0, 2).map((x) => x.h);
+    ok(JSON.stringify(order3) === JSON.stringify([H_TEN, H_PUB]) && !callsOf(calls3, "eth_getBlockByNumber").some((c) => c.host === H_ALCH),
+      "[v4 rpc split] without BASE_RPC the block order is tenderly then publicnode, got " + JSON.stringify(order3));
+
+    // سرتاسری از مسیرِ /vd/v4?debug=1: هیچ رازی در بدنه نیست
+    const addr4 = newAddr(); v4._resetV4RateCache();
+    install(addr4, [POOL_ID_A], { block: () => okBlock(), logs: () => err500(), call: () => err500() });
+    const res4 = await call("/vd/v4/" + addr4 + "?debug=1", undefined, { ASSETS, ZX_KV: kvMk(), BASE_RPC: BASE_RPC_URL });
+    const txt4 = await res4.text();
+    ok(!txt4.includes(SECRET) && !txt4.includes("/v2/") && JSON.parse(txt4).rpc.length > 0,
+      "[v4 rpc split] /vd/v4?debug=1 must not leak BASE_RPC's path/query, got " + txt4.slice(0, 300));
+  }
+
+  // --- ۲) eth_getLogs فقط tenderly؛ ۴۲۹ → یک تلاشِ دوباره ---
+  {
+    const addr = newAddr(); v4._resetV4RateCache();
+    let n = 0;
+    const calls = install(addr, [POOL_ID_A], { block: () => okBlock(),
+      logs: () => (++n === 1 ? new Response("rate", { status: 429 }) : J({ jsonrpc: "2.0", id: 1, result: [goodLogFor(addr, POOL_ID_A)] })),
+      call: () => err500() });
+    const t0 = Date.now();
+    const r = await runV4Index(addr, { ZX_KV: kvMk(), BASE_RPC: BASE_RPC_URL }, { rpc: [], windows: [] });
+    const lg = callsOf(calls, "eth_getLogs");
+    ok(r.reason === "ok" && lg.length === 2 && lg.every((c) => c.host === H_TEN),
+      "[v4 rpc split] a 429 then 200 from tenderly -> exactly one retry on tenderly and success, got " + JSON.stringify(lg.map((c) => c.host)) + " / " + r.reason);
+    ok(lg[1].t - lg[0].t >= 700, "[v4 rpc split] the retry waits ~800ms, got " + (lg[1].t - lg[0].t));
+
+    const addr2 = newAddr(); v4._resetV4RateCache();
+    const calls2 = install(addr2, [POOL_ID_A], { block: () => okBlock(), logs: () => new Response("rate", { status: 429 }), call: () => err500() });
+    const r2 = await runV4Index(addr2, { ZX_KV: kvMk() }, { rpc: [], windows: [] });
+    const lg2 = callsOf(calls2, "eth_getLogs");
+    ok(r2.reason === "rpc-down" && lg2.length === 2 && lg2.every((c) => c.host === H_TEN),
+      "[v4 rpc split] 429 twice -> exactly two tenderly getLogs calls and none to publicnode/base.org, got " + JSON.stringify(lg2.map((c) => c.host)));
+
+    // هر 403/500 هم فقط tenderly را می‌زند
+    const addr3 = newAddr(); v4._resetV4RateCache();
+    const calls3 = install(addr3, [POOL_ID_A], { block: () => okBlock(), logs: () => new Response("no", { status: 403 }), call: () => err500() });
+    await runV4Index(addr3, { ZX_KV: kvMk() }, { rpc: [], windows: [] });
+    ok(callsOf(calls3, "eth_getLogs").length === 1 && callsOf(calls3, "eth_getLogs")[0].host === H_TEN,
+      "[v4 rpc split] a 403 from tenderly must not fall over to publicnode/base.org for eth_getLogs");
+
+    // کلِ تماس هرگز از timeout بیشتر نمی‌شود
+    const calls4 = [];
+    globalThis.fetch = async () => { calls4.push(Date.now()); return new Response("rate", { status: 429 }); };
+    let tt = Date.now();
+    const o4 = await rpcCallBase("eth_getLogs", [{}], 1500, [], v4.V4_LOGS_ONLY_RPCS, 800);
+    const el4 = Date.now() - tt;
+    ok(o4.ok === false && calls4.length === 2 && el4 <= 1500 + 100, "[v4 rpc split] 429 twice: two calls, total time within the timeout, got " + calls4.length + " calls / " + el4 + "ms");
+    calls4.length = 0; tt = Date.now();
+    await rpcCallBase("eth_getLogs", [{}], 700, [], v4.V4_LOGS_ONLY_RPCS, 800);
+    ok(calls4.length === 1 && Date.now() - tt <= 700, "[v4 rpc split] when the timeout leaves no room for 800ms + a retry there is no retry, got " + calls4.length);
+    // اولین تلاش کند (تایم‌اوتِ باقی‌مانده کوچک) → تلاشِ دوم هم از سقف بیرون نمی‌زند
+    calls4.length = 0;
+    globalThis.fetch = async () => { calls4.push(Date.now()); await new Promise((r) => setTimeout(r, 600)); return new Response("rate", { status: 429 }); };
+    tt = Date.now();
+    await rpcCallBase("eth_getLogs", [{}], 1500, [], v4.V4_LOGS_ONLY_RPCS, 800);
+    ok(Date.now() - tt <= 1500 + 100, "[v4 rpc split] a slow 429 never pushes the total past the timeout, got " + (Date.now() - tt));
+  }
+
+  // --- ۳) پشتیبانِ PositionManager ---
+  {
+    const mkCall = (resultFor) => (host, c) => {
+      const p = c.params[0];
+      return resultFor(p, host);
+    };
+    const T_ONE = (addr) => posmWord(ZERO20, addr, 500, 10, ZERO20);
+    async function posmRun({ logsDown, anchorDown, result, pools, env, status }) {
+      const addr = newAddr(); const kv = kvMk(); v4._resetV4RateCache();
+      const ids = pools || [POOL_ID_A];
+      const calls = install(addr, ids, {
+        block: () => (anchorDown ? err500() : okBlock()),
+        logs: () => (logsDown ? err500() : J({ jsonrpc: "2.0", id: 1, result: [] })),
+        call: mkCall((p) => {
+          if (status) return new Response("x", { status });
+          const r = typeof result === "function" ? result(addr, p) : result;
+          return J({ jsonrpc: "2.0", id: 1, result: r });
+        }),
+      });
+      const diag = { rpc: [], windows: [] };
+      const r = await runV4Index(addr, Object.assign({ ZX_KV: kv }, env || {}), diag);
+      return { addr, kv, calls, r, diag };
+    }
+
+    // موفق: rpc-down + کلیدِ معتبر
+    const a = await posmRun({ logsDown: true, result: (addr) => T_ONE(addr), env: { BASE_RPC: BASE_RPC_URL } });
+    ok(a.r.reason === "ok" && a.r.via === "posm" && a.r.stored === true && a.r.keys.length === 1,
+      "[v4 posm] logs rpc-down + valid posm key -> ok via posm and stored, got " + JSON.stringify(a.r));
+    const k0 = a.r.keys[0];
+    ok(k0.poolId === POOL_ID_A && k0.currency0 === ZERO20 && k0.currency1 === a.addr && k0.fee === 500 && k0.tickSpacing === 10 && k0.hooks === ZERO20,
+      "[v4 posm] the key has the mergeV4Keys/storeV4Result shape, got " + JSON.stringify(k0));
+    ok(a.kv.puts.length === 1 && a.kv.puts[0].o.expirationTtl === v4.V4_KEY_TTL_S && JSON.parse(a.kv.puts[0].v).reason === "ok" &&
+       JSON.parse(a.kv.puts[0].v).complete === true,
+      "[v4 posm] stored with V4_KEY_TTL_S, complete true when every selected row resolved, got " + JSON.stringify(a.kv.puts));
+    const ec = callsOf(a.calls, "eth_call");
+    const wantData = "0x86b6be7d" + "11".repeat(25) + "00".repeat(7);
+    ok(ec.length === 1 && ec[0].params[0].to === POSM && ec[0].params[0].data === wantData && ec[0].params[1] === "latest" && ec[0].host === H_ALCH,
+      "[v4 posm] eth_call goes to the PositionManager with selector + bytes25 left-aligned, BASE_RPC first, got " + JSON.stringify(ec.map((c) => [c.host, c.params])));
+    ok(!JSON.stringify(a.r).includes(SECRET) && !JSON.stringify(a.diag).includes(SECRET), "[v4 posm] no BASE_RPC secret in the output");
+
+    // no-anchor + کلیدِ معتبر → ok via posm
+    const b = await posmRun({ anchorDown: true, result: (addr) => T_ONE(addr) });
+    ok(b.r.reason === "ok" && b.r.via === "posm" && b.r.stored === true, "[v4 posm] no-anchor + valid posm key -> ok via posm, got " + JSON.stringify(b.r));
+    ok(callsOf(b.calls, "eth_getLogs").length === 0, "[v4 posm] no-anchor never reaches eth_getLogs");
+
+    // ردها: همه باید دلیلِ اصلی را نگه دارند و چیزی ذخیره نکنند
+    const OTHER0 = "0x" + "aa".repeat(20), OTHER1 = "0x" + "bb".repeat(20);
+    const bad = {
+      "all-zero key": () => "0x" + "0".repeat(320),
+      "key of another token": () => posmWord(OTHER0, OTHER1, 500, 10, ZERO20),
+      "tickSpacing 0": (addr) => posmWord(ZERO20, addr, 500, 0, ZERO20),
+      "currency0 > currency1": (addr) => posmWord(addr, ZERO20, 500, 10, ZERO20),
+      "equal currencies": (addr) => posmWord(addr, addr, 500, 10, ZERO20),
+      "fee >= 2^24": (addr) => posmWord(ZERO20, addr, 2 ** 24, 10, ZERO20),
+      "tickSpacing out of int24": (addr) => posmWord(ZERO20, addr, 500, 2 ** 23, ZERO20),
+      "dirty upper address bytes": (addr) => "0x" + "f".repeat(24) + "0".repeat(40) + v4wAddrWord(addr) + v4wNum(500) + v4wNum(10) + v4wAddrWord(ZERO20),
+      "short data": (addr) => posmWord(ZERO20, addr, 500, 10, ZERO20).slice(0, 2 + 64 * 4),
+      "too long data": (addr) => posmWord(ZERO20, addr, 500, 10, ZERO20) + "0".repeat(64),
+      "garbage": () => "0xzz",
+      "empty 0x": () => "0x",
+      "non-string": () => 12345,
+    };
+    for (const [name, fn] of Object.entries(bad)) {
+      const x = await posmRun({ logsDown: true, result: fn });
+      ok(x.r.reason === "rpc-down" && x.r.via === undefined && x.r.stored === false && x.kv.puts.length === 0 && x.r.keys.length === 0,
+        "[v4 posm] " + name + " -> stays rpc-down, nothing stored, got " + JSON.stringify(x.r));
+      const y = await posmRun({ anchorDown: true, result: fn });
+      ok(y.r.reason === "no-anchor" && y.r.via === undefined && y.kv.puts.length === 0,
+        "[v4 posm] " + name + " (no-anchor) -> stays no-anchor, nothing stored, got " + JSON.stringify(y.r));
+    }
+    const s500 = await posmRun({ logsDown: true, status: 500 });
+    ok(s500.r.reason === "rpc-down" && s500.kv.puts.length === 0, "[v4 posm] an RPC 500 on the fallback itself leaves rpc-down, got " + JSON.stringify(s500.r));
+    ok(callsOf(s500.calls, "eth_call").length >= 1, "[v4 posm] sanity: the fallback really tried eth_call");
+
+    // negative tickSpacing (int24 مجاز، غیرصفر) پذیرفته می‌شود؛ هوکِ غیرصفر هم
+    const neg = await posmRun({ logsDown: true, result: (addr) => posmWord(ZERO20, addr, 0x800000, -60, "0x" + "cc".repeat(20)) });
+    ok(neg.r.reason === "ok" && neg.r.keys[0].tickSpacing === -60 && neg.r.keys[0].fee === 0x800000 && neg.r.keys[0].hooks === "0x" + "cc".repeat(20),
+      "[v4 posm] a signed non-zero int24 tickSpacing, dynamic-fee flag and real hooks decode strictly, got " + JSON.stringify(neg.r));
+
+    // دو ردیف، یکی حل‌نشده → ok ولی complete=false
+    const two = await posmRun({ logsDown: true, pools: [POOL_ID_A, POOL_ID_B],
+      result: (addr, p) => (p.data.includes("11".repeat(25)) ? T_ONE(addr) : "0x" + "0".repeat(320)) });
+    ok(two.r.reason === "ok" && two.r.via === "posm" && two.r.keys.length === 1 && two.r.complete === false &&
+       JSON.parse(two.kv.puts[0].v).complete === false,
+      "[v4 posm] one of two rows unresolved -> ok via posm but complete false, got " + JSON.stringify(two.r));
+    const both = await posmRun({ logsDown: true, pools: [POOL_ID_A, POOL_ID_B], result: (addr) => T_ONE(addr) });
+    ok(both.r.keys.length === 2 && both.r.complete === true, "[v4 posm] every selected row resolved -> complete true, got " + JSON.stringify(both.r));
+
+    // لاگ‌ها جواب بدهند → پشتیبان اصلاً صدا زده نمی‌شود
+    const lg = await posmRun({ result: (addr) => T_ONE(addr) });
+    ok(lg.r.reason === "no-log" && lg.r.via === undefined && callsOf(lg.calls, "eth_call").length === 0,
+      "[v4 posm] when getLogs answered (even empty) the fallback is never used, got " + JSON.stringify(lg.r));
+
+    // /vd/v4?debug=1 via را نشان می‌دهد؛ بدونِ via شکلِ ساده عوض نمی‌شود
+    const addrD = newAddr(); v4._resetV4RateCache();
+    install(addrD, [POOL_ID_A], { block: () => okBlock(), logs: () => err500(), call: () => J({ jsonrpc: "2.0", id: 1, result: T_ONE(addrD) }) });
+    const rd = await call("/vd/v4/" + addrD + "?debug=1", undefined, { ASSETS, ZX_KV: kvMk() });
+    const bd = await rd.json();
+    ok(bd.reason === "ok" && bd.via === "posm", "[v4 posm] /vd/v4?debug=1 shows via, got " + JSON.stringify(bd).slice(0, 300));
+  }
+
+  globalThis.fetch = savedFetch;
+  console.log("[v4 rpc split] block lookups try BASE_RPC first (hostname only, never its path/query), then tenderly, then publicnode; " +
+    "eth_getLogs only ever goes to tenderly with one ~800ms retry on 429 inside the caller's timeout; [v4 posm] when logs " +
+    "cannot be read, PositionManager.poolKeys(bytes25) resolves keys strictly (exact calldata, 5 words, no zero/foreign/misordered/" +
+    "tickSpacing-0 keys) and any failure keeps the original reason with nothing stored");
 }
 
 process.exit(fails === 0 ? 0 : 1);

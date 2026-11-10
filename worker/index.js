@@ -176,7 +176,7 @@ import {
   fetchVerdictSol, VD_SOL_RPCS, VD_SOL_JUP_BASE, VD_SOL_PAYER,
   VD_SOL_RPC_METHODS, VD_SOL_RPC_PROBE_PARAMS, probeRpcMethod,
 } from "./verdict_sol.js";
-import { indexV4Keys, v4KvKey, V4_REASONS, V4_LOG_RPCS, V4_LOG_RPC_CANDIDATES, V4_KEY_TTL_S, V4_MISS_TTL_S,
+import { indexV4Keys, v4KvKey, V4_REASONS, V4_LOG_RPCS, V4_LOG_RPC_CANDIDATES, V4_LOGS_ONLY_RPCS, V4_BLOCK_RPCS, V4_KEY_TTL_S, V4_MISS_TTL_S,
   V4_POOL_MANAGER, V4_INITIALIZE_TOPIC } from "./v4index.js";
 
 /* پراکسی باز نیست. فقط شکل مسیرهایی که خودِ سایت می‌زند اجازه دارد:
@@ -1064,6 +1064,14 @@ export function baseRpcsFor(env) {
    (که برای پروبِ سولانا به‌کار می‌رود)؛ eth_getLogs هم یک تماسِ تکی است،
    پس همان مرتبه از تایم‌اوت منطقی است. */
 const V4_LOG_TIMEOUT_MS = 1500;
+const V4_429_RETRY_MS = 800; // تأخیرِ تلاشِ دوباره‌ی eth_getLogs بعد از ۴۲۹ (کلِ تماس همچنان زیرِ V4_LOG_TIMEOUT_MS)
+
+/* فهرستِ بلاک‌خوانی: BASE_RPC (اگر تنظیم شده) اول، بعد V4_BLOCK_RPCS؛ بدونِ تکرار.
+   🔴 URLِ BASE_RPC هرگز بیرون نمی‌رود (rpcCallBase فقط hostname ثبت می‌کند). */
+function v4BlockRpcsFor(env) {
+  const baseRpc = (env && typeof env.BASE_RPC === "string" && env.BASE_RPC) || "";
+  return baseRpc ? [baseRpc, ...V4_BLOCK_RPCS.filter((u) => u !== baseRpc)] : V4_BLOCK_RPCS;
+}
 
 /* یک JSON-RPC POSTِ تکی، با failover بینِ V4_LOG_RPCS — همان شکلِ
    {ok, result} که indexV4Keys از تابعِ تزریق‌شده‌ی rpcCall می‌خواهد.
@@ -1072,7 +1080,7 @@ const V4_LOG_TIMEOUT_MS = 1500;
    می‌خواهد و نمی‌داند پشتش چند اندپوینت است.
    🔴 هرگز URLِ هیچ اندپوینتی را لاگ یا برنگردان — همان قاعده‌ی بالای
    baseRpcsFor، بدونِ هیچ استثنایی برای این تابع. */
-async function rpcCallBase(method, params, timeoutMs, collect) {
+async function rpcCallBase(method, params, timeoutMs, collect, rpcs, retry429Ms) {
   /* collect یک مشاهده‌گرِ محض است (همان الگوی opts.collect در
      worker/verdict.js): وقتی آرایه نباشد، این تابع بایت‌به‌بایت همان چیزی
      است که بود. هرگز هیچ تصمیمی از رویش گرفته نمی‌شود.
@@ -1089,23 +1097,44 @@ async function rpcCallBase(method, params, timeoutMs, collect) {
     log_.push({ h, m: method, stage, status, code });
   }
 
-  for (const rpcUrl of V4_LOG_RPCS) {
-    const ac = new AbortController();
-    const timer = setTimeout(() => ac.abort(), timeoutMs);
+  /* rpcs: فهرستِ اندپوینت (پیش‌فرض V4_LOG_RPCS — همان رفتارِ قبلی).
+     retry429Ms > 0: روی ۴۲۹ یک بار بعد از این تأخیر دوباره همان اندپوینت؛ کلِ
+     تماس هرگز از timeoutMs بیشتر نمی‌شود (تلاشِ دوم فقط با زمانِ باقی‌مانده). */
+  const list = Array.isArray(rpcs) && rpcs.length > 0 ? rpcs : V4_LOG_RPCS;
+  const t0 = Date.now();
+  for (const rpcUrl of list) {
+    let retried = false;
     let res;
-    try {
-      res = await fetch(rpcUrl, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
-        signal: ac.signal,
-      });
-    } catch (e) {
+    for (;;) {
+      let tmo = timeoutMs;
+      if (retried) tmo = timeoutMs - (Date.now() - t0);
+      if (retried && tmo < 100) { note(rpcUrl, "throw", 0, null); res = null; break; }
+      const ac = new AbortController();
+      const timer = setTimeout(() => ac.abort(), tmo);
+      try {
+        res = await fetch(rpcUrl, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
+          signal: ac.signal,
+        });
+      } catch (e) {
+        clearTimeout(timer);
+        note(rpcUrl, "throw", 0, null);
+        res = null;
+        break;
+      }
       clearTimeout(timer);
-      note(rpcUrl, "throw", 0, null);
-      continue; // پرتابِ شبکه‌ای/تایم‌اوت → این اندپوینت نامعلوم، بعدی را امتحان کن
+      if (res && res.status === 429 && retry429Ms > 0 && !retried) {
+        note(rpcUrl, "status", 429, null);
+        if (timeoutMs - (Date.now() - t0) - retry429Ms < 100) { res = null; break; } // جا برای تلاشِ دوم نیست
+        await new Promise((r) => setTimeout(r, retry429Ms));
+        retried = true;
+        continue;
+      }
+      break;
     }
-    clearTimeout(timer);
+    if (res === null) continue; // پرتابِ شبکه‌ای/تایم‌اوت (یا ۴۲۹ بدون جا برای تلاشِ دوم) → بعدی
     if (!res || res.status !== 200) {
       note(rpcUrl, "status", res ? res.status : 0, null);
       continue; // غیرِ ۲۰۰ → این اندپوینت نامعلوم
@@ -1292,16 +1321,23 @@ async function runV4Index(addr, env, diag) {
        «کجا ایستاد» را کور می‌کند که این اندپوینت برای دیدنش ساخته شده. */
     result = { keys: [], reason: "no-pools", complete: false };
   } else {
-    const rpcCall = (method, params) => rpcCallBase(method, params, V4_LOG_TIMEOUT_MS, rpcLog);
+    /* ۹ نوامبر: eth_getLogs فقط به tenderly (۴۲۹ → یک تلاشِ دوباره بعد از ~۸۰۰ms)،
+       بقیه‌ی متدها (انکر، نرخ، eth_call) روی BASE_RPC اول، بعد tenderly، بعد publicnode. */
+    const blockRpcs = v4BlockRpcsFor(env);
+    const rpcCall = (method, params) => (method === "eth_getLogs"
+      ? rpcCallBase(method, params, V4_LOG_TIMEOUT_MS, rpcLog, V4_LOGS_ONLY_RPCS, V4_429_RETRY_MS)
+      : rpcCallBase(method, params, V4_LOG_TIMEOUT_MS, rpcLog, blockRpcs));
     result = await indexV4Keys({
-      tokenAddr: addr, pools, rpcCall, now: Date.now, collect: winLog, counters: V4_ALL_COUNTERS,
+      tokenAddr: addr, pools, rpcCall, ethCall: rpcCall, now: Date.now, collect: winLog, counters: V4_ALL_COUNTERS,
     });
   }
   const stored = await storeV4Result(addr, env, result);
-  return {
+  const out = {
     reason: result.reason, keys: Array.isArray(result.keys) ? result.keys : [], stored,
     complete: result.complete === true,
   };
+  if (result.via === "posm") out.via = "posm";
+  return out;
 }
 
 /* آیا هنوز جایی این توکن قیمت فروش می‌دهد؟ — سمت سرور، فقط برای همین یک
@@ -2504,6 +2540,7 @@ async function diagVerdictV4(url, env) {
     addr, reason: result.reason, keys: result.keys, stored: result.stored,
     complete: result.complete, store: true, ms: Date.now() - t0,
   };
+  if (result.via) body.via = result.via;
   if (debug) { body.rpc = diag.rpc; body.windows = diag.windows; }
   return vdDone(200, body);
 }
@@ -3662,6 +3699,7 @@ async function scheduledReportPassBody(env, ctx, opts, meter) {
               idxT0 = 0;
               const why = idxRes && idxRes.reason;
               noteV4Idx(meter, typeof why === "string" && V4_REASONS.includes(why) ? why : "other");
+              if (idxRes && idxRes.via === "posm") noteV4Idx(meter, "posm");
               if (idxMs > 5000) noteV4Idx(meter, "slow");
             }
           } catch (e) {

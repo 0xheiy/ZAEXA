@@ -133,6 +133,20 @@ export const V4_LOG_RPC_CANDIDATES = [
   "https://rpc.ankr.com/base",
 ];
 
+/* ۹ نوامبر — اندازه‌گیریِ زنده از داخلِ کلادفلر (GET /vd/logrpc): فقط tenderly
+   eth_getLogs را جواب می‌دهد (publicnode تایم‌اوت، base.org ۴۲۹، Alchemy ۴۰۰ سقفِ
+   بازه). پس لاگ‌ها فقط به tenderly می‌روند و بلاک‌خوانی (انکر، نرخ، eth_call) جدا
+   است: BASE_RPC اگر بود اول، بعد tenderly، بعد publicnode. V4_LOG_RPCS دست‌نخورده
+   می‌ماند (پیش‌فرضِ rpcCallBase و پایه‌ی /vd/logrpc). */
+export const V4_LOGS_ONLY_RPCS = ["https://base.gateway.tenderly.co"];
+export const V4_BLOCK_RPCS = ["https://base.gateway.tenderly.co", "https://base.publicnode.com"];
+
+/* PositionManagerِ v4 روی Base و poolKeys(bytes25) — پشتیبان وقتی لاگ‌ها خوانده
+   نمی‌شوند. ⚠️ فقط استخرهایی که PositionManager دیده کلید دارند؛ بقیه صفرِ کامل
+   برمی‌گردانند و «حل‌نشده» می‌مانند. */
+export const V4_POSITION_MANAGER = "0x7c5f5a4bbd8fd63184577525326123b519429bdc";
+export const V4_POOLKEYS_SELECTOR = "0x86b6be7d";
+
 /* واژه‌نامه‌ی بسته‌ی دلیل — ساختاری، هرگز متنِ پیام. جدا نگه‌داشتنِ
    rpc-down از no-log دقیقاً همان قاعده‌ای است که کلِ این پروژه رویش
    ساخته شده: no-log یعنی یک اندپوینت با یک آرایه‌ی خالیِ خوش‌شکل جواب داد —
@@ -478,15 +492,75 @@ export async function measureBlockMs(anchor, rpcCall, nowMs) {
 }
 export function _resetV4RateCache() { v4RateCache = null; }
 
+/* poolKeys(bytes25): ۲۵ بایتِ اولِ poolId، چپ‌چین و با صفر تا ۳۲ بایت پر می‌شود. */
+export function poolKeysCalldata(poolId) {
+  if (typeof poolId !== "string" || !/^0x[0-9a-fA-F]{64}$/.test(poolId)) return null;
+  return V4_POOLKEYS_SELECTOR + poolId.slice(2, 52).toLowerCase().padEnd(64, "0");
+}
+
+/* خروجیِ poolKeys: دقیقاً ۵ کلمه (currency0, currency1, fee, tickSpacing, hooks).
+   سخت‌گیرانه؛ هر چیزِ مشکوک → null، هرگز حدس. شکلِ کلید همان decodeInitializeLog است. */
+export function decodePoolKeysResult(data, poolId, tokenAddr) {
+  try {
+    if (typeof poolId !== "string" || !/^0x[0-9a-fA-F]{64}$/.test(poolId)) return null;
+    if (typeof tokenAddr !== "string") return null;
+    if (typeof data !== "string" || data.slice(0, 2).toLowerCase() !== "0x") return null;
+    const body = data.slice(2);
+    if (body.length !== 320 || !/^[0-9a-fA-F]{320}$/.test(body)) return null;
+    const currency0 = addrFromHex64(body.slice(0, 64));
+    const currency1 = addrFromHex64(body.slice(64, 128));
+    if (!currency0 || !currency1) return null;
+    const feeBig = BigInt("0x" + body.slice(128, 192));
+    if (feeBig >= (1n << 24n)) return null;
+    const ts = decodeSignedWord(body.slice(192, 256));
+    if (ts < -(1n << 23n) || ts >= (1n << 23n) || ts === 0n) return null;
+    const hooks = addrFromHex64(body.slice(256, 320));
+    if (!hooks) return null;
+    const ZERO = "0x" + "0".repeat(40);
+    if (currency0 === ZERO && currency1 === ZERO) return null; // استخرِ ناشناخته: کلیدِ تماماً صفر
+    if (!(currency0 < currency1)) return null; // ترتیبِ عددی (هگزِ هم‌طول، حروف کوچک)
+    const key = { poolId: poolId.toLowerCase(), currency0, currency1, fee: Number(feeBig), tickSpacing: Number(ts), hooks };
+    if (!keyUsableFor(key, tokenAddr)) return null; // کلیدِ توکنِ دیگر
+    return key;
+  } catch (e) {
+    return null;
+  }
+}
+
 /* rpcCall(method, params) → { ok, result } — تزریق‌شده؛ failover بینِ
    V4_LOG_RPCS کارِ کالر است (worker/index.js)، نه این ماژول — این ماژول
    هیچ fetchی ندارد.
    pools همان آرایه‌ی خامِ data از /networks/base/tokens/<addr>/pools است. */
-export async function indexV4Keys({ tokenAddr, pools, rpcCall, now, collect, counters }) {
+export async function indexV4Keys({ tokenAddr, pools, rpcCall, now, collect, counters, ethCall }) {
   try {
     // now: برای measureBlockMs (کشِ نرخ) — آزمون تزریق می‌کند
 
     const { rows, sawV4, sawId, sawCounter, listed } = v4PoolsFromGt(pools, tokenAddr, counters);
+
+    /* پشتیبان: وقتی لاگ‌ها خوانده نشدند (rpc-down/no-anchor)، کلیدِ هر ردیف را از
+       PositionManager.poolKeys می‌خوانیم. فقط کلیدِ کاملاً معتبرِ همین توکن پذیرفته
+       می‌شود؛ شکستِ خودِ این تماس هرگز «نه» نیست — دلیلِ اصلی می‌ماند. */
+    async function posmFallback(reason) {
+      const orig = { keys: [], reason, complete: false };
+      // ethCall اختیاری و تزریقی؛ نبودنش = بدونِ پشتیبان (رفتارِ قدیمی، بایت‌به‌بایت)
+      if (typeof ethCall !== "function") return orig;
+      try {
+        const got = await Promise.all(rows.map(async (row) => {
+          try {
+            const data = poolKeysCalldata(row.poolId);
+            if (!data) return null;
+            const res = await ethCall("eth_call", [{ to: V4_POSITION_MANAGER, data }, "latest"]);
+            if (!res || res.ok !== true) return null;
+            return decodePoolKeysResult(res.result, row.poolId, tokenAddr);
+          } catch (e) { return null; }
+        }));
+        const keys = got.filter(Boolean);
+        if (keys.length === 0) return orig;
+        const complete = Array.isArray(pools) && pools.length < V4_GT_PAGE_SIZE &&
+          rows.length === listed && keys.length === rows.length;
+        return { keys: mergeV4Keys([], keys), reason: "ok", complete, via: "posm" };
+      } catch (e) { return orig; }
+    }
     if (rows.length === 0) {
       if (!sawV4) return { keys: [], reason: "no-v4-pool", complete: false };
       if (!sawId) return { keys: [], reason: "no-pool-id", complete: false };
@@ -501,7 +575,7 @@ export async function indexV4Keys({ tokenAddr, pools, rpcCall, now, collect, cou
     // جدا از هم‌اند و گفتنِ کدام‌یک شکست خورد کلِ نکته‌ی این واژه‌نامه است.
     const anchorRes = await rpcCall("eth_getBlockByNumber", ["latest", false]);
     const anchor = parseAnchor(anchorRes);
-    if (!anchor) return { keys: [], reason: "no-anchor", complete: false };
+    if (!anchor) return await posmFallback("no-anchor");
     const msPerBlock = await measureBlockMs(anchor, rpcCall, now);
     if (msPerBlock != null) anchor.msPerBlock = msPerBlock;
 
@@ -549,7 +623,7 @@ export async function indexV4Keys({ tokenAddr, pools, rpcCall, now, collect, cou
     // 🔴 گاردِ اصلی: صفر پاسخِ خوش‌شکل یعنی نامعلوم (rpc-down)، نه میس. فقط
     // وقتی دست‌کم یک اندپوینت واقعاً جواب داد و هیچ کلیدی از آن درنیامد
     // no-log معنا دارد — یک منفیِ اثبات‌شده، نه یک حدس از رویِ سکوت.
-    if (answered === 0) return { keys: [], reason: "rpc-down", complete: false };
+    if (answered === 0) return await posmFallback("rpc-down");
     if (found.length === 0) return { keys: [], reason: "no-log", complete: false };
 
     /* 🔴 complete — تنها چیزی که به «هر کلیدِ ایندکس‌شده صفر بود» اجازه
