@@ -18,7 +18,7 @@ import {
 import {
   b64, crcUpdate, adler32, adlerCombine, put32, TYPE, SIG, BAND_BYTES, ATLAS_BYTES, TOP_BYTES, CHAR_IDX,
 } from "./og-token.js";
-import { exitMoney, exitPct, shortAddr, utcClock, EXIT_GAP_MED, EXIT_GAP_BIG } from "./exit.js";
+import { exitMoney, exitPct, shortAddr, utcClock, EXIT_GAP_MED, EXIT_GAP_BIG, EXIT_LOST_NONE, exitLostSome } from "./exit.js";
 
 const ROW = OG_W * 3 + 1;
 const Y0 = BAND_Y0;                       // ۲۹۶
@@ -114,12 +114,12 @@ const LEFT = 88, MAXW = 690, RIGHT = 1112;
 export function exitCardLines(s) {
   const unk = s.unknownCount > 0 || s.partial === true;
   const lp = s.lostPct == null ? null : Math.max(0, s.lostPct);
-  const lost = lp == null ? "" : lp < 0.05 ? "Almost nothing would be lost on exit" : exitPct(lp) + " would be lost on exit";
+  const lost = lp == null ? "" : lp < EXIT_LOST_NONE ? "Almost nothing would be lost on exit" : exitPct(lp) + " would be lost on exit";
   const lostCol = lp == null ? GRAY : lp < EXIT_GAP_MED ? GREEN : lp < EXIT_GAP_BIG ? AMBER : RED;
   const excl = s.unknownCount > 0
     ? "Excludes " + s.unknownCount + (s.partial ? "+" : "") + " token" + (s.unknownCount === 1 && !s.partial ? "" : "s") + " without a quote"
     : s.partial ? "Excludes some tokens without a quote" : "";
-  return { paper: exitMoney(unk ? s.quotedPaper : s.paper), exit: exitMoney(s.exit), lost, lostCol, excl, time: utcClock(s.at) };
+  return { strike: exitLostSome(lp), paper: exitMoney(unk ? s.quotedPaper : s.paper), exit: exitMoney(s.exit), lost, lostCol, excl, time: utcClock(s.at) };
 }
 
 /* ورودی: { addr, summary } یا { generic:true }. خروجی: Uint8Array PNG. */
@@ -142,7 +142,7 @@ export async function exitCardPng({ addr, summary, generic }) {
     const pStr = okChars("B31", L.paper) ? L.paper : "";
     text(band, "B31", pStr, px0, 356, DIM);
     const pw = wid("B31", pStr);
-    rect(band, px0 - 4, 345, px0 + pw + 4, 348, RED, 235);
+    if (L.strike) rect(band, px0 - 4, 345, px0 + pw + 4, 348, RED, 235);
     text(band, "R28", "If you sold now", LEFT, 394, GRAY);
     const big = L.exit;
     if (wid("B72", big) <= MAXW) text(band, "B72", big, LEFT - 3, 464, null, true);

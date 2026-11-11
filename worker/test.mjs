@@ -18117,6 +18117,7 @@ console.log(fails === 0
       ok(X.EXIT_MIN_RESERVE_USD === REPORT_MIN_RESERVE_USD, "[exit og] the server threshold is the report threshold itself (one source), got " + X.EXIT_MIN_RESERVE_USD);
       ok(num(/const EXIT_MIN_VALUE_USD=(\d+);/) === X.EXIT_MIN_VALUE_USD, "[exit og] EXIT_MIN_VALUE_USD must match the client");
       ok(num(/const EXIT_CONC=\d+,EXIT_BATCH=(\d+);/) === X.EXIT_BATCH, "[exit og] EXIT_BATCH must match the client");
+      ok(num(/const EXIT_LOST_NONE=([0-9.]+);/) === X.EXIT_LOST_NONE && X.EXIT_LOST_NONE === 0.05, "[exit og] EXIT_LOST_NONE (percent, 0.05) must match the client, got " + X.EXIT_LOST_NONE);
       ok(num(/const EXIT_GAP_MED=(\d+),/) === X.EXIT_GAP_MED && num(/EXIT_GAP_BIG=(\d+);/) === X.EXIT_GAP_BIG, "[exit og] the 5% / 20% colour thresholds must match the client");
       const ex = /executor:"(0x[0-9a-fA-F]{40})"/.exec(app), mc = /multicall3:"(0x[0-9a-fA-F]{40})"/.exec(app);
       ok(ex && ex[1] === X.EXIT_EXECUTOR, "[exit og] the executor address (fee source) must match CHAIN.executor in web/index.html, got " + (ex && ex[1]));
@@ -18330,6 +18331,20 @@ console.log(fails === 0
       ok(L({ lostPct: null }).lost === "", "[exit og] no lostPct -> no loss line (unknown is not 0%)");
       ok(L({ lostPct: 4.99 }).lostCol.join() === "33,211,160" && L({ lostPct: 5 }).lostCol.join() === "245,166,35" && L({ lostPct: 19.9 }).lostCol.join() === "245,166,35" && L({ lostPct: 20 }).lostCol.join() === "242,84,91",
         "[exit og] colour bands: <5 green, <20 amber, else red");
+      // خطِ قرمزِ رویِ «On paper»: فقط وقتی چیزی از دست می‌رود؛ همان آستانه‌ای که متنِ «Almost nothing» را می‌سازد (واحد: درصد)
+      for (const [lp, want] of [[0, false], [0.01, false], [0.049, false], [0.05, true], [0.06, true], [3, true], [20, true], [null, false], [-1, false]])
+        ok(L({ lostPct: lp }).strike === want && (L({ lostPct: lp }).lost.startsWith("Almost nothing") === !want || lp == null), "[exit og] strike only above the 'Almost nothing' threshold, lostPct " + lp + " -> " + L({ lostPct: lp }).strike);
+      {
+        const red = async (lp) => {
+          const p = await OGX.exitCardPng({ addr: W, summary: { paper: 6423, exit: lp ? 6000 : 6423, lostPct: lp, quotedPaper: 6423, unknownCount: 0, counted: 3, at, partial: false } });
+          const raw = pngInfo(p).raw; let n = 0;
+          for (let y = 345; y <= 348; y++) for (let x = 200; x < 420; x++) { const o = y * 3601 + 1 + x * 3; if (raw[o] > 170 && raw[o + 1] < 130 && raw[o + 2] < 130) n++; }
+          return n;
+        };
+        const r0 = await red(0), r1 = await red(0.049), r2 = await red(7);
+        ok(r0 === 0 && r1 === 0, "[exit og] card with ~0% loss has no red strike-through pixels, got " + r0 + "/" + r1);
+        ok(r2 > 100, "[exit og] card with a real loss draws the red strike-through, got " + r2 + " red pixels");
+      }
       const u = L({ unknownCount: 3, quotedPaper: 4400, paper: 15000 });
       ok(u.paper === "$4,400" && u.excl === "Excludes 3 tokens without a quote", "[exit og] with unknown tokens the struck figure is quotedPaper (comparable pair) and the line says 'Excludes 3 tokens without a quote', got " + JSON.stringify(u));
       ok(L({ unknownCount: 1 }).excl === "Excludes 1 token without a quote", "[exit og] singular 'token'");
@@ -18439,7 +18454,7 @@ console.log(fails === 0
       ok(lastP.status === 200 && !/\$/.test(tag(lh, "og:title")) && w8.kinds.filter((k) => k === "holdings").length <= 120, "[exit og] over the rate limit the page still renders (200) without numbers and without more upstream work");
       // در Workers واقعی (HTMLRewriter) همان توابع: برای لایه‌ی خالصِ تگ‌ها یک بررسیِ مستقیم
       const f = X.exitOgFields(W, origin, { paper: 100, exit: 80, lostPct: 20, quotedPaper: 100, unknownCount: 0, counted: 1, at: Date.UTC(2026, 10, 11, 9, 41), partial: false }, 600000 * 7 + 5);
-      ok(f.title === "Exit value of 0xabab…abab: $80.00 if sold now" && f.image === origin + "/og/exit/" + W + ".png?v=1&r=7", "[exit og] pure tag fields: complete summary has no 'at least'; the bucket is floor(now/10min), got " + f.title + " " + f.image);
+      ok(f.title === "Exit value of 0xabab…abab: $80.00 if sold now" && f.image === origin + "/og/exit/" + W + ".png?v=" + X.OG_EXIT_IMAGE_V + "&r=7" && X.OG_EXIT_IMAGE_V === "2", "[exit og] pure tag fields: complete summary has no 'at least'; the bucket is floor(now/10min), got " + f.title + " " + f.image);
       ok(X.exitOgTags(f).includes('content="' + f.image.replace(/&/g, "&amp;") + '"') && !X.exitOgTags({ ...f, title: 'a"b<c' }).includes('a"b<c'), "[exit og] tag values are HTML-escaped");
     }
 

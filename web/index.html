@@ -8417,6 +8417,7 @@ async function renderFolio(){
 const EXIT_MIN_RESERVE_USD=5000;     // آینه‌ی REPORT_MIN_RESERVE_USD در worker/report.js — نگهبان [exit] در run.py یکی‌بودنشان را می‌سنجد
 const EXIT_MIN_VALUE_USD=1;
 const EXIT_CONC=3,EXIT_BATCH=25;
+const EXIT_LOST_NONE=0.05;   // درصد؛ زیرش «تقریباً هیچ» و بدون خطِ قرمزِ رویِ On paper
 const EXIT_GAP_MED=5,EXIT_GAP_BIG=20;   // درصدِ شکاف: زیر ۵ کوچک، تا ۲۰ متوسط، بالاتر بزرگ
 const EXIT_ADDR_RE=/^0x[0-9a-fA-F]{40}$/;
 const EXIT_PATH_RE=/^\/exit(\/[^/]*)?\/?$/;
@@ -8429,7 +8430,7 @@ function exitMoney(n){
   if(n==null||!isFinite(n))return null;
   return "$"+n.toLocaleString("en-US",n>=1e6?{maximumFractionDigits:0}:{minimumFractionDigits:2,maximumFractionDigits:2});
 }
-function exitPct(p){return p==null||!isFinite(p)?null:(Math.abs(p)<0.05?"0":p.toFixed(1))+"%";}
+function exitPct(p){return p==null||!isFinite(p)?null:(Math.abs(p)<EXIT_LOST_NONE?"0":p.toFixed(1))+"%";}
 function exitGapCls(pct){return pct<EXIT_GAP_MED?"gS":pct<EXIT_GAP_BIG?"gM":"gL";}
 function exitValidate(a){
   if(!a)return "Enter a wallet address to check.";
@@ -8743,7 +8744,8 @@ function exitDrawCard(cv,d){
   const ps=money(d.paper);
   c.fillStyle="#736d8a";c.font="600 56px "+font;c.fillText(ps,64,280);
   const pw=c.measureText(ps).width;
-  c.strokeStyle="#f2545b";c.lineWidth=5;c.beginPath();c.moveTo(56,260);c.lineTo(72+pw,246);c.stroke();
+  const lp0=d.lost==null?null:Math.max(0,d.lost);
+  if(lp0!=null&&!(lp0<EXIT_LOST_NONE)){c.strokeStyle="#f2545b";c.lineWidth=5;c.beginPath();c.moveTo(56,260);c.lineTo(72+pw,246);c.stroke();}
   c.fillStyle="#a49fb8";c.font="500 32px "+font;c.fillText("If you sold now",64,352);
   const es=money(d.exit);
   c.font="800 150px "+font;
@@ -8753,7 +8755,7 @@ function exitDrawCard(cv,d){
   const lp=d.lost==null?null:Math.max(0,d.lost);
   c.fillStyle=lp==null?"#a49fb8":lp<EXIT_GAP_MED?"#21d3a0":lp<EXIT_GAP_BIG?"#f5a623":"#f2545b";
   c.font="650 40px "+font;
-  c.fillText(lp==null?"":(lp<0.05?"Almost nothing would be lost on exit":exitPct(lp)+" would be lost on exit"),64,548);
+  c.fillText(lp==null?"":(lp<EXIT_LOST_NONE?"Almost nothing would be lost on exit":exitPct(lp)+" would be lost on exit"),64,548);
   c.fillStyle="#736d8a";c.font="500 26px "+font;
   if(d.unknown>0)c.fillText("Excludes "+d.unknown+" token"+(d.unknown===1?"":"s")+" without a quote",64,592);
   c.textAlign="right";c.fillStyle="#a49fb8";c.font="600 30px "+font;c.fillText("zaexa.com/exit",W-64,592);

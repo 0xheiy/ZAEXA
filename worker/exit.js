@@ -44,7 +44,7 @@ export const EXIT_MC_CHUNK = 60;
 export const EXIT_TTL_S = 600;
 export const EXIT_BUCKET_MS = EXIT_TTL_S * 1000;
 // نسخه‌ی تصویرِ /og/exit — اگر چیدمان عوض شد جلو ببر
-export const OG_EXIT_IMAGE_V = "1";
+export const OG_EXIT_IMAGE_V = "2";
 
 export const EXIT_ADDR_RE = /^0x[0-9a-fA-F]{40}$/;
 
@@ -67,8 +67,14 @@ export function exitMoney(n) {
   const d = n < 100 ? 2 : 0;
   return "$" + n.toLocaleString("en-US", { minimumFractionDigits: d, maximumFractionDigits: d });
 }
+// آستانهٔ «تقریباً هیچ»: واحدش درصد است (۰٫۰۵ یعنی ۰٫۰۵٪ نه ۵٪)؛ متن و خطِ رویِ «On paper» هر دو از همین یک عدد می‌آیند
+export const EXIT_LOST_NONE = 0.05;
+// خطِ قرمز فقط وقتی که واقعاً چیزی از دست می‌رود؛ lostPct نامعلوم (null) هم خط نمی‌خورد
+export function exitLostSome(lp) {
+  return lp != null && isFinite(lp) && !(Math.max(0, lp) < EXIT_LOST_NONE);
+}
 export function exitPct(p) {
-  return p == null || !isFinite(p) ? null : (Math.abs(p) < 0.05 ? "0" : p.toFixed(1)) + "%";
+  return p == null || !isFinite(p) ? null : (Math.abs(p) < EXIT_LOST_NONE ? "0" : p.toFixed(1)) + "%";
 }
 export function shortAddr(a) { return a.slice(0, 6) + "…" + a.slice(-4); }
 export function utcClock(ms) {
@@ -259,7 +265,7 @@ export function exitOgFields(wallet, origin, s, now) {
   const base = unk ? s.quotedPaper : s.paper;
   const lp = s.lostPct == null ? null : s.lostPct;
   const bits = ["On paper " + exitMoney(base) + "."];
-  if (lp != null) bits.push((lp < 0.05 ? "Almost nothing" : exitPct(lp)) + " would be lost on exit.");
+  if (lp != null) bits.push((lp < EXIT_LOST_NONE ? "Almost nothing" : exitPct(lp)) + " would be lost on exit.");
   bits.push("Floor from live quotes at " + utcClock(s.at) + ".");
   if (s.unknownCount > 0) bits.push("Excludes " + s.unknownCount + (s.partial ? "+" : "") + " token" + (s.unknownCount === 1 && !s.partial ? "" : "s") + " without a quote.");
   else if (s.partial) bits.push("Excludes some tokens without a quote.");

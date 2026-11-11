@@ -24688,6 +24688,11 @@ async def check_exit_layout(p, errors):
                 assert ("%.1f%% would be lost on exit" % lost) in ct, "[exit layout] the loss line: %s" % ct
                 assert any(x.startswith("Excludes 1 token") for x in ct), "[exit layout] the card says one token had no quote: %s" % ct
                 assert await pg.evaluate("() => window.__strokes") >= 1, "[exit layout] the paper value is struck through (a stroke was drawn)"
+                # خطِ قرمزِ On paper فقط وقتی چیزی از دست می‌رود (همان آستانه‌ی «Almost nothing»، واحد: درصد)
+                st = await pg.evaluate("""() => { const run = lost => { const cv = document.createElement('canvas'); const b = window.__strokes; exitDrawCard(cv, {addr: '0x' + 'ab'.repeat(20), paper: 6423, exit: 6423, lost, unknown: 0}); return window.__strokes - b; };
+                    return {zero: run(0), tiny: run(0.049), edge: run(0.05), some: run(7), unk: run(null)}; }""")
+                assert st["zero"] == 0 and st["tiny"] == 0 and st["unk"] == 0, "[exit layout] no strike-through when nothing (or unknown) is lost: %s" % st
+                assert st["edge"] >= 1 and st["some"] >= 1, "[exit layout] strike-through drawn once the loss is above the 'Almost nothing' threshold: %s" % st
                 assert not BANNED.search(" ".join(ct)), "[exit layout] banned word on the card: %s" % ct
                 el = await pg.query_selector("#exitSharePanel")
                 await el.screenshot(path=os.path.join(shots, "exit_share_card_preview.png"))
