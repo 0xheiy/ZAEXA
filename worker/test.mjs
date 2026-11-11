@@ -17897,4 +17897,560 @@ console.log(fails === 0
   }
 }
 
+/* ---- [exit og] ۱۱ نوامبر — کارتِ پیش‌نمایشِ Exit value: exitSummary، /og/exit/<آدرس>.png، تگ‌های /exit/<آدرس> ---- */
+{
+  const IDX = await import("./index.js");
+  const X = await import("./exit.js");
+  const OGX = await import("./og-exit.js");
+  const VDX = await import("./verdict.js");
+  const zlibX = await import("node:zlib");
+
+  const RPC = "https://base-mainnet.g.alchemy.com/v2/SECRET-EXIT-OG-KEY-5521";
+  const KEYPART = "SECRET-EXIT-OG-KEY-5521";
+  const GT_BASE = "https://api.geckoterminal.com/api/v2/networks/base/tokens/multi/";
+  const WL = VDX.WETH_ADDR.toLowerCase();
+  const W = "0x" + "ab".repeat(20);
+  const tk = (n) => "0x" + n.toString(16).padStart(40, "0");
+  const hx = (n) => "0x" + BigInt(n).toString(16);
+  const jb = (o, st = 200) => new Response(JSON.stringify(o), { status: st, headers: { "content-type": "application/json" } });
+  const E18 = 10n ** 18n;
+
+  // ---- جهانِ ساختگی: همه‌چیز از روی شکلِ واقعیِ GT (رشته برای قیمت و ذخیره) و Multicall3 با ethers ----
+  const MC = new ethers.Interface(["function aggregate3((address target,bool allowFailure,bytes callData)[] calls) payable returns ((bool success, bytes returnData)[] returnData)"]);
+  const coder = ethers.AbiCoder.defaultAbiCoder();
+  const TA = tk(0xa1), TB = tk(0xb2), TC = tk(0xc3), TD = tk(0xd4), TE = tk(0xe5), TF = tk(0xf6);
+  const UNI3 = VDX.VD_VENUES.find((v) => v.id === "uniswap-v3").to.toLowerCase();
+  const PAN3 = VDX.VD_VENUES.find((v) => v.id === "pancake-v3").to.toLowerCase();
+  const UNIV2 = VDX.VD_VENUES.find((v) => v.id === "uniswap-v2").to.toLowerCase();
+  const TOKENS = {
+    [TA]: { sym: "AAA", dec: 18, price: "2.0", reserve: "50000.5", bal: 100n * E18 },
+    [TB]: { sym: "SPAM", dec: 18, price: "1.0", reserve: "1200", bal: 1000n * E18 },          // استخرِ ریز → thin
+    [TC]: { sym: "DUST", dec: 18, price: "0.001", reserve: "80000", bal: 100n * E18 },        // ۰٫۱ دلار → dust
+    [TD]: { sym: "NOQ", dec: 18, price: "1.0", reserve: "90000", bal: 100n * E18 },           // شمرده می‌شود، هیچ کوتی نمی‌گیرد
+    [TE]: { sym: "NOPRICE", dec: 18, price: null, reserve: null, bal: 5n * E18 },             // GT نمی‌شناسد
+    [TF]: { sym: "FFF", dec: 6, price: "10", reserve: "70000", bal: 50000000n },
+    [WL]: { sym: "WETH", dec: 18, price: "3000", reserve: "9000000", bal: 0n },
+  };
+  // کوتِ فروش به WETH: توکن → { to(کوتر) → خروجی }
+  const QUOTES = {
+    [TA]: { [UNI3]: 60000000000000000n, [PAN3]: 50000000000000000n },     // بهترین ۰٫۰۶ WETH (uniswap-v3)
+    [TF]: { [UNIV2]: 100000000000000000n },                               // v2: ۰٫۱ WETH
+  };
+  const FEE_BPS = 30n;
+  const ETH_WEI = 1n * E18;
+  // مقدارهای مورد انتظار — با حسابِ مستقل از exit.js
+  const ETHP = 3000;
+  const EXP = {
+    paper: ETHP + 200 + 500 + 100,                                         // ETH + AAA + FFF + NOQ
+    quotedPaper: ETHP + 200 + 500,
+    exit: ETHP + 0.06 * 3000 * 0.997 + 0.1 * 3000 * 0.997,                 // کارمزد ۰٫۳٪ روی خروجیِ WETH
+    unknown: 1,
+    counted: 3,                                                            // AAA, FFF, NOQ (ETH شمرده نمی‌شود)
+  };
+  EXP.lost = (1 - EXP.exit / EXP.quotedPaper) * 100;
+
+  function mkWorld(o) {
+    const opt = Object.assign({ eth: ETH_WEI, tokens: [TA, TB, TC, TD, TE, TF], quotes: QUOTES, fee: FEE_BPS, holdingsDown: false,
+      gtDown: false, quoteDown: false, feeFail: false, quoteStatus: 200, perEndpointDown: [], more: false, unreadEntries: 0, quoteErrIds: [] }, o || {});
+    const w = { calls: [], kinds: [], opt, quotedTokens: new Set() };
+    w.handler = async (u, init) => {
+      init = init || {};
+      if (u.startsWith(GT_BASE)) {
+        w.kinds.push("gt"); w.calls.push(u);
+        if (opt.gtDown) return jb({ error: "x" }, 500);
+        const list = decodeURIComponent(u.slice(GT_BASE.length).split("?")[0]).split(",");
+        const data = [], included = [];
+        for (const a of list) {
+          const t = TOKENS[a.toLowerCase()];
+          if (!t || t.price == null) continue;
+          data.push({ id: "base_" + a, type: "token",
+            attributes: { address: a, symbol: t.sym, name: t.sym + " token", decimals: t.dec, price_usd: t.price },
+            relationships: { top_pools: { data: [{ id: "base_pool" + a, type: "pool" }] } } });
+          included.push({ id: "base_pool" + a, type: "pool", attributes: { address: "0xpool" + a, reserve_in_usd: t.reserve } });
+        }
+        return jb({ data, included });
+      }
+      const body = init.body ? JSON.parse(init.body) : null;
+      if (u.startsWith("https://") && Array.isArray(body)) {
+        const first = body[0] && body[0].method;
+        if (first === "alchemy_getTokenBalances" || first === "eth_getBalance") {
+          w.kinds.push("holdings"); w.calls.push(u);
+          if (u !== RPC) return jb({ error: "wrong endpoint" }, 500);
+          if (opt.holdingsDown) return jb({ error: "x" }, 500);
+          const tb = opt.tokens.map((a) => ({ contractAddress: a, tokenBalance: hx(TOKENS[a].bal) }));
+          for (let i = 0; i < opt.unreadEntries; i++) tb.push({ contractAddress: tk(0x900 + i), tokenBalance: null, error: "execution reverted" });
+          return jb(body.map((x) => x.method === "alchemy_getTokenBalances"
+            ? { jsonrpc: "2.0", id: x.id, result: { address: x.params[0], tokenBalances: tb, ...(opt.more ? { pageKey: "next" } : {}) } }
+            : { jsonrpc: "2.0", id: x.id, result: hx(opt.eth) }));
+        }
+        if (first === "eth_call") {
+          w.kinds.push("quote"); w.calls.push(u);
+          const host = u === RPC ? "alchemy" : new URL(u).hostname;
+          if (opt.quoteDown || opt.perEndpointDown.includes(host)) return jb({ error: "x" }, opt.quoteStatus === 200 ? 500 : opt.quoteStatus);
+          return jb(body.map((x) => {
+            if (opt.quoteErrIds.includes(x.id)) return { jsonrpc: "2.0", id: x.id, error: { code: -32000, message: "boom" } };
+            const [calls] = MC.decodeFunctionData("aggregate3", x.params[0].data);
+            if (x.params[0].to.toLowerCase() !== X.MULTICALL3.toLowerCase()) return { jsonrpc: "2.0", id: x.id, error: { code: -32000, message: "not multicall" } };
+            const res = calls.map((c) => {
+              const to = c.target.toLowerCase(), data = c.callData;
+              if (to === X.EXIT_EXECUTOR.toLowerCase() && data === X.SEL_FEE_BPS)
+                return opt.feeFail ? [false, "0x"] : [true, coder.encode(["uint256"], [opt.fee])];
+              const sel = data.slice(0, 10);
+              let token = null, kind = null;
+              if (sel === VDX.SEL_CL_UINT24 || sel === VDX.SEL_CL_INT24) { token = "0x" + data.slice(10 + 24, 10 + 64); kind = "cl"; }
+              else if (sel === VDX.SEL_V2 || sel === VDX.SEL_SOLIDLY) { token = "0x" + data.slice(10 + 192 + 24, 10 + 256); kind = "v2"; }
+              if (token) w.quotedTokens.add(token.toLowerCase());
+              const out = token && opt.quotes[token.toLowerCase()] && opt.quotes[token.toLowerCase()][to];
+              if (out == null) return [false, "0x"];                                    // ریورت = کوتی نیست
+              return kind === "cl"
+                ? [true, coder.encode(["uint256", "uint160", "uint32", "uint256"], [out, 0, 0, 0])]
+                : [true, coder.encode(["uint256[]"], [[1n, out]])];
+            });
+            return { jsonrpc: "2.0", id: x.id, result: MC.encodeFunctionResult("aggregate3", [res]) };
+          }));
+        }
+      }
+      w.kinds.push("other"); w.calls.push(u);
+      return jb({ error: "unexpected" }, 500);
+    };
+    return w;
+  }
+  let kvOps = [], evPoints = [];
+  const KVX = { get: async (...a) => { kvOps.push(["get", a[0]]); return null; }, put: async (...a) => { kvOps.push(["put", a[0]]); },
+    delete: async (...a) => { kvOps.push(["del", a[0]]); }, list: async (...a) => { kvOps.push(["list"]); return { keys: [] }; } };
+  const EVX = { writeDataPoint: (d) => { evPoints.push(d); } };
+  const SPAGE = '<!DOCTYPE html><html><head><meta charset="utf-8"><title>Zaexa</title>'
+    + '<meta data-og property="og:title" content="OLD-SITE-TITLE"><meta data-og name="twitter:image" content="https://zaexa.com/og.png?v=5">'
+    + '<meta data-og name="description" content="OLD-SITE-DESC"></head><body><svg><title>Zaexa</title></svg>app</body></html>';
+  const ASSETSX = { fetch: async () => new Response(SPAGE, { status: 200, headers: { "content-type": "text/html; charset=utf-8" } }) };
+  const envX = { ASSETS: ASSETSX, BASE_RPC: RPC, ZX_KV: KVX, ZX_EV: EVX };
+
+  // کشِ ساختگیِ Cache API
+  const shelf = new Map(), puts = [];
+  const savedCaches = globalThis.caches;
+  const resetCache = () => { shelf.clear(); puts.length = 0; };
+  globalThis.caches = { default: {
+    match: async (r) => { const v = shelf.get(r.url); return v ? v.clone() : undefined; },
+    put: async (r, v) => { puts.push({ u: r.url, cc: v.headers.get("cache-control") }); shelf.set(r.url, v.clone ? v.clone() : v); },
+  } };
+
+  // HTMLRewriterِ ساختگی برای node (موتورِ واقعی را og_live_test.mjs روی workerd می‌سنجد)؛ همان سه کنشِ handlerها: remove / setInnerContent / append
+  class FakeRewriter {
+    constructor() { this.h = []; }
+    on(sel, handlers) { this.h.push([sel, handlers]); return this; }
+    transform(res) {
+      const self = this;
+      const run = (async () => {
+        let html = await res.text();
+        for (const [sel, hd] of self.h) {
+          if (sel === "meta[data-og]" || sel === "link[data-og]") {
+            const re = sel.startsWith("meta") ? /<meta data-og[^>]*>/g : /<link data-og[^>]*>/g;
+            let out = "", last = 0;
+            for (const m of html.matchAll(re)) {
+              let rm = false;
+              await hd.element({ remove() { rm = true; } });
+              out += html.slice(last, m.index) + (rm ? "" : m[0]); last = m.index + m[0].length;
+            }
+            html = out + html.slice(last);
+          } else if (sel === "head > title") {
+            const hi = html.indexOf("</head>");
+            const m = /<title>([\s\S]*?)<\/title>/.exec(html.slice(0, hi));
+            if (m) {
+              let inner = m[1];
+              await hd.element({ setInnerContent(t, o) { inner = o && o.html ? t : String(t).replace(/&/g, "&amp;").replace(/</g, "&lt;"); } });
+              html = html.slice(0, m.index) + "<title>" + inner + "</title>" + html.slice(m.index + m[0].length);
+            }
+          } else if (sel === "head") {
+            let add = "";
+            await hd.element({ append(c) { add += c; } });
+            html = html.replace("</head>", add + "</head>");
+          } else throw new Error("FakeRewriter: unsupported selector " + sel);
+        }
+        return html;
+      })();
+      return new Response(new ReadableStream({ async start(c) { c.enqueue(new TextEncoder().encode(await run)); c.close(); } }),
+        { status: res.status, headers: res.headers });
+    }
+  }
+  const savedHR = globalThis.HTMLRewriter;
+  globalThis.HTMLRewriter = FakeRewriter;
+
+  let ipN = 0;
+  const hdr = (ua) => ({ headers: Object.assign({ "cf-connecting-ip": "198.51.100." + (++ipN % 250 + 1) }, ua ? { "user-agent": ua } : {}) });
+  const BOT = "TelegramBot (like TwitterBot)";
+  // اجرای یک درخواستِ Worker با جهانِ w
+  const RUN = async (w, path, init, e) => {
+    const saved = globalThis.fetch, savedKeep = keepCgFlag;
+    kvOps = []; evPoints = []; keepCgFlag = true;
+    globalThis.fetch = (u, o) => w.handler(String(u), o || {});
+    try { return await call(path, init || hdr(), e || envX); } finally { globalThis.fetch = saved; keepCgFlag = savedKeep; }
+  };
+  const COMPUTE = async (w, opts, addr) => {
+    const saved = globalThis.fetch;
+    globalThis.fetch = (u, o) => w.handler(String(u), o || {});
+    try { return await IDX.exitSummaryCompute(addr || W, envX, opts); } finally { globalThis.fetch = saved; }
+  };
+  const near = (a, b, tol) => typeof a === "number" && Math.abs(a - b) <= (tol == null ? 0.01 : tol);
+  const pngInfo = (u8) => {
+    const buf = Buffer.from(u8);
+    if (buf.slice(0, 8).toString("hex") !== "89504e470d0a1a0a") return null;
+    let o = 8, w = 0, h = 0; const idat = [];
+    while (o < buf.length) {
+      const len = buf.readUInt32BE(o), type = buf.slice(o + 4, o + 8).toString("latin1");
+      const crcGot = buf.readUInt32BE(o + 8 + len);
+      if (zlibX.crc32 && zlibX.crc32(buf.slice(o + 4, o + 8 + len)) !== crcGot) return { crcBad: type };
+      if (type === "IHDR") { w = buf.readUInt32BE(o + 8); h = buf.readUInt32BE(o + 12); }
+      if (type === "IDAT") idat.push(buf.slice(o + 8, o + 8 + len));
+      o += 12 + len;
+    }
+    let raw = null;
+    try { raw = zlibX.inflateSync(Buffer.concat(idat)); } catch (e) { raw = null; }
+    return { w, h, rawLen: raw ? raw.length : -1, raw };
+  };
+
+  try {
+    // ===== الف) ثابت‌ها: سرور و کلاینت یک عدد =====
+    {
+      const app = fs.readFileSync(new URL("../web/index.html", import.meta.url), "utf8");
+      const num = (re) => { const m = re.exec(app); return m ? Number(m[1]) : NaN; };
+      ok(num(/const EXIT_MIN_RESERVE_USD=(\d+);/) === X.EXIT_MIN_RESERVE_USD, "[exit og] EXIT_MIN_RESERVE_USD: web/index.html and worker/exit.js must agree");
+      ok(X.EXIT_MIN_RESERVE_USD === REPORT_MIN_RESERVE_USD, "[exit og] the server threshold is the report threshold itself (one source), got " + X.EXIT_MIN_RESERVE_USD);
+      ok(num(/const EXIT_MIN_VALUE_USD=(\d+);/) === X.EXIT_MIN_VALUE_USD, "[exit og] EXIT_MIN_VALUE_USD must match the client");
+      ok(num(/const EXIT_CONC=\d+,EXIT_BATCH=(\d+);/) === X.EXIT_BATCH, "[exit og] EXIT_BATCH must match the client");
+      ok(num(/const EXIT_GAP_MED=(\d+),/) === X.EXIT_GAP_MED && num(/EXIT_GAP_BIG=(\d+);/) === X.EXIT_GAP_BIG, "[exit og] the 5% / 20% colour thresholds must match the client");
+      const ex = /executor:"(0x[0-9a-fA-F]{40})"/.exec(app), mc = /multicall3:"(0x[0-9a-fA-F]{40})"/.exec(app);
+      ok(ex && ex[1] === X.EXIT_EXECUTOR, "[exit og] the executor address (fee source) must match CHAIN.executor in web/index.html, got " + (ex && ex[1]));
+      ok(mc && mc[1] === X.MULTICALL3, "[exit og] the Multicall3 address must match CHAIN.multicall3 in web/index.html");
+      const sol = fs.readFileSync(new URL("../contracts/src/SwapExecutor.sol", import.meta.url), "utf8");
+      const mf = /MAX_FEE_BPS\s*=\s*(\d+);/.exec(sol);
+      ok(mf && Number(mf[1]) === X.EXIT_FEE_BPS_MAX, "[exit og] the unreadable-fee fallback is the contract's MAX_FEE_BPS, got " + (mf && mf[1]));
+      ok(ethers.id("feeBps()").slice(0, 10) === X.SEL_FEE_BPS, "[exit og] feeBps() selector recomputed with ethers");
+      ok(MC.getFunction("aggregate3").selector === X.SEL_AGGREGATE3, "[exit og] aggregate3 selector recomputed with ethers");
+    }
+
+    // ===== ب) Multicall3: رمزگذاریِ دستی بایت‌به‌بایت با ethers؛ رمزگشایی از خروجیِ ethers =====
+    {
+      const calls = [
+        { to: UNI3, data: "0x" + "12".repeat(164) },
+        { to: X.EXIT_EXECUTOR, data: X.SEL_FEE_BPS },
+        { to: PAN3, data: "0x" + "ab".repeat(33) },       // طولِ غیرِ مضربِ ۳۲: پدینگ باید درست باشد
+      ];
+      const mine = X.encodeAggregate3(calls);
+      const gold = MC.encodeFunctionData("aggregate3", [calls.map((c) => [c.to, true, c.data])]);
+      ok(mine === gold, "[exit og] aggregate3 calldata must equal ethers' encoding byte for byte");
+      const res = [[true, "0x" + "00".repeat(31) + "1e"], [false, "0x"], [true, "0x" + "cd".repeat(5)]];
+      const dec = X.decodeAggregate3(MC.encodeFunctionResult("aggregate3", [res]), 3);
+      ok(dec && dec.length === 3 && dec[0].ok === true && dec[0].data === res[0][1] && dec[1].ok === false && dec[1].data === "0x" && dec[2].data === res[2][1],
+        "[exit og] aggregate3 result decoded exactly, got " + JSON.stringify(dec));
+      ok(X.decodeAggregate3(MC.encodeFunctionResult("aggregate3", [res]), 2) === null, "[exit og] a result with the wrong number of entries is rejected (null), not trimmed");
+      const good = MC.encodeFunctionResult("aggregate3", [res]);
+      for (const bad of ["0x", "0x1234", good.slice(0, good.length - 64), "zz", null, good + "00"]) {
+        let r; try { r = X.decodeAggregate3(bad, 3); } catch (e) { r = "THREW"; }
+        ok(r === null || (bad === good + "00" && Array.isArray(r)), "[exit og] a malformed aggregate3 result is null and never throws: " + String(bad).slice(0, 20) + " -> " + JSON.stringify(r));
+      }
+      ok(X.feeBpsFrom(null) === 100 && X.feeBpsFrom([{ ok: false, data: "0x" }]) === 100 && X.feeBpsFrom([{ ok: true, data: coder.encode(["uint256"], [101])}]) === 100
+        && X.feeBpsFrom([{ ok: true, data: coder.encode(["uint256"], [30])}]) === 30 && X.feeBpsFrom([{ ok: true, data: coder.encode(["uint256"], [0])}]) === 0,
+        "[exit og] an unreadable or out-of-range fee falls back to the contract ceiling (100), never 0; a real 0 stays 0");
+    }
+
+    // ===== پ) قواعدِ شمارش + یک کوتِ دسته‌ای + شمارشِ ساب‌ریکوئست =====
+    {
+      resetCache();
+      const w = mkWorld();
+      const r = await COMPUTE(w);
+      const s = r.s;
+      ok(s && near(s.paper, EXP.paper) && near(s.exit, EXP.exit) && near(s.quotedPaper, EXP.quotedPaper) && near(s.lostPct, EXP.lost, 0.001),
+        "[exit og] full summary paper/exit/quotedPaper/lostPct, got " + JSON.stringify(s) + " want " + JSON.stringify(EXP));
+      ok(s && s.unknownCount === EXP.unknown && s.counted === EXP.counted && s.partial === false && Number.isFinite(s.at), "[exit og] unknownCount 1 (NOQ), counted 3 (ETH not counted), not partial, got " + JSON.stringify(s));
+      ok(s && s.paper > s.quotedPaper, "[exit og] paper includes the unquoted token, quotedPaper does not (same basis as the client share card)");
+      // قواعد: استخرِ ریز و dust هرگز نه در کاغذی نه در خروجی؛ توکنِ بی‌قیمت هم نه
+      ok(s && s.paper < EXP.paper + 999 && !near(s.paper, EXP.paper + 1000), "[exit og] the tiny-pool spam token (paper $1000) is not counted");
+      ok(s && !near(s.paper, EXP.paper + 0.1), "[exit og] the dust token (< $1) is not counted");
+      // ساب‌ریکوئست: هلدینگ ۱ + قیمت ۱ + کوت ۱
+      ok(w.calls.length === 3 && w.kinds.join() === "holdings,gt,quote" && r.fetches === 3, "[exit og] typical summary = 3 subrequests (holdings, one price batch, one Multicall3 quote), got " + w.kinds.join() + " / " + r.fetches);
+      globalThis.__exitOgTypicalSubreqs = w.calls.length;
+      // کوت: بهترین روی چند صرافی؛ همه‌ی توکن‌ها در یک درخواستِ HTTP
+      const qUrl = w.calls[2];
+      ok(qUrl === RPC, "[exit og] the quote goes to BASE_RPC first");
+      // کوتِ ناموفق = Unknown، نه صفر
+      const wq = mkWorld({ quoteDown: true });
+      const rq = await COMPUTE(wq);
+      ok(rq.s && rq.s.unknownCount === 3 && near(rq.s.exit, ETHP) && near(rq.s.quotedPaper, ETHP) && rq.s.lostPct === 0,
+        "[exit og] every quote endpoint down -> the 3 counted tokens are Unknown (excluded from exit, never $0 rows); ETH still counts, got " + JSON.stringify(rq.s));
+      ok(wq.kinds.filter((k) => k === "quote").length === VDX.VD_MAX_ENDPOINTS, "[exit og] a dead quote endpoint falls through to the next (up to " + VDX.VD_MAX_ENDPOINTS + "), got " + wq.kinds.join());
+      // بدونِ ETH و بدونِ کوت: چیزی برای نشان‌دادن نیست → null
+      const wn = mkWorld({ eth: 0n, quoteDown: true });
+      const rn = await COMPUTE(wn);
+      ok(rn.s === null, "[exit og] nothing could be priced -> null (generic card), never a $0 summary, got " + JSON.stringify(rn.s));
+      // اندپوینتِ اول مرده، دوم زنده → همان نتیجه‌ی کامل
+      const w2 = mkWorld({ perEndpointDown: ["alchemy"] });
+      const r2 = await COMPUTE(w2);
+      ok(r2.s && near(r2.s.exit, EXP.exit), "[exit og] the quote falls back to the next endpoint and still gives the full result, got " + JSON.stringify(r2.s));
+      // یک تکه‌ی خراب فقط توکن‌های خودش را Unknown می‌کند: id 1 = تکه‌ی اول
+      const w3 = mkWorld({ quoteErrIds: [1], perEndpointDown: [] });
+      const r3 = await COMPUTE(w3);
+      ok(r3.s && r3.s.unknownCount >= 1 && r3.s.exit >= ETHP && r3.s.exit < EXP.exit - 1,
+        "[exit og] a failed multicall chunk makes its own tokens Unknown (and the retry on other endpoints also fails here), never zero; got " + JSON.stringify(r3.s));
+      // کارمزدِ ناخواندنی = سقف (۱٪)، نه صفر
+      const wf = mkWorld({ feeFail: true });
+      const rf = await COMPUTE(wf);
+      const expF = ETHP + 0.06 * 3000 * 0.99 + 0.1 * 3000 * 0.99;
+      ok(rf.s && near(rf.s.exit, expF), "[exit og] an unreadable executor fee uses the 1% ceiling (a floor), not 0%; got " + (rf.s && rf.s.exit) + " want " + expF);
+      // lostPct فقط روی توکن‌هایی که هر دو عدد را دارند: با NOQ در مخرج درصد ~۱۸٪ می‌شد
+      ok(rq.s.lostPct === 0 && Math.abs(EXP.lost - (1 - EXP.exit / EXP.paper) * 100) > 2 && near(s.lostPct, EXP.lost, 0.001), "[exit og] lostPct is over tokens with both numbers only (quotedPaper basis), never over the unquoted ones");
+      // هلدینگ ناقص: unread و more
+      const wu = mkWorld({ unreadEntries: 2, more: true });
+      const ru = await COMPUTE(wu);
+      ok(ru.s && ru.s.unknownCount === EXP.unknown + 2 && ru.s.partial === true, "[exit og] unreadable holdings count as unknown tokens and a truncated list marks the summary partial, got " + JSON.stringify(ru.s));
+      // کیفِ بدونِ هیچ توکن: فقط ETH
+      const we = mkWorld({ tokens: [] });
+      const re = await COMPUTE(we);
+      ok(re.s && near(re.s.exit, ETHP) && re.s.counted === 0 && re.s.unknownCount === 0 && we.kinds.join() === "holdings,gt", "[exit og] an ETH-only wallet needs no quote request, got " + we.kinds.join() + " " + JSON.stringify(re.s));
+      // BASE_RPC نبود / هلدینگ پایین: null، بدونِ هیچ fetch اضافه
+      const wh = mkWorld({ holdingsDown: true });
+      const rh = await COMPUTE(wh);
+      ok(rh.s === null && wh.kinds.join() === "holdings", "[exit og] holdings failure -> null after exactly one subrequest, got " + wh.kinds.join());
+      const saved = globalThis.fetch; let nCalls = 0; globalThis.fetch = async () => { nCalls++; return jb({}); };
+      const rNo = await IDX.exitSummaryCompute(W, { ASSETS: ASSETSX }, {}); globalThis.fetch = saved;
+      ok(rNo.s === null && nCalls === 0, "[exit og] no BASE_RPC -> null with no upstream call");
+    }
+
+    // ===== ت) زیربودجه: تمام‌شدن = Unknown، نه صفر =====
+    {
+      const w = mkWorld();
+      const r = await COMPUTE(w, { budget: 2 });                   // هلدینگ + قیمت؛ کوت جا ندارد
+      ok(r.blown === true && w.calls.length === 2 && w.kinds.join() === "holdings,gt", "[exit og] budget 2: holdings + prices, the quote is refused (no 3rd fetch), got " + w.kinds.join());
+      ok(r.s && r.s.unknownCount === 3 && near(r.s.exit, ETHP) && near(r.s.quotedPaper, ETHP) && r.s.lostPct === 0 && r.fetches === 2,
+        "[exit og] budget hit -> the remaining tokens are Unknown (3), the total is ETH only, no token turns into $0, got " + JSON.stringify(r.s));
+      const w1 = mkWorld();
+      const r1 = await COMPUTE(w1, { budget: 1 });                 // فقط هلدینگ؛ قیمتی نیست
+      ok(w1.calls.length === 1 && r1.s === null && r1.blown === true, "[exit og] budget 1: holdings only; nothing priced -> null, got " + JSON.stringify(r1.s));
+      const w0 = mkWorld();
+      const r0 = await COMPUTE(w0, { budget: 0 });
+      ok(w0.calls.length === 0 && r0.s === null, "[exit og] budget 0: no fetch at all, null, got " + w0.calls.length);
+      // قیمت چند دسته: ۶۰ توکن → ۳ دسته‌ی ۲۵ (۶۱ آدرس با WETH)
+      const many = {}; const list = [];
+      for (let i = 0; i < 60; i++) { const a = tk(0x2000 + i); TOKENS[a] = { sym: "M" + i, dec: 18, price: "1.0", reserve: "90000", bal: 5n * E18 }; list.push(a); }
+      const wm = mkWorld({ tokens: list });
+      const rm = await COMPUTE(wm, { budget: 3 });                 // هلدینگ + دو دسته‌ی قیمت؛ دسته‌ی سوم و کوت جا ندارند
+      ok(wm.calls.length === 3 && wm.kinds.join() === "holdings,gt,gt", "[exit og] 60 tokens need 3 price batches (25 each); budget 3 stops after the second batch, got " + wm.kinds.join());
+      ok(rm.s && near(rm.s.exit, ETHP) && rm.s.unknownCount === 49 && near(rm.s.quotedPaper, ETHP), "[exit og] WETH is priced in the first batch; 49 priced-but-unquoted tokens are Unknown and the 11 never priced are not counted; nothing becomes $0, got " + JSON.stringify(rm.s));
+      const wm2 = mkWorld({ tokens: list });
+      const rm2 = await COMPUTE(wm2);
+      ok(wm2.kinds.join() === "holdings,gt,gt,gt,quote" && rm2.fetches === 5, "[exit og] 60 tokens with a full budget: holdings + 3 price batches + 1 quote = 5, got " + wm2.kinds.join());
+      ok(rm2.s && rm2.s.unknownCount === 60 && wm2.quotedTokens.size === X.EXIT_QUOTE_MAX_TOKENS, "[exit og] at most EXIT_QUOTE_MAX_TOKENS (" + X.EXIT_QUOTE_MAX_TOKENS + ") tokens are sent for a quote; the other 30 and the 30 without a quote are Unknown (60), got unknown=" + (rm2.s && rm2.s.unknownCount) + " quoted=" + wm2.quotedTokens.size);
+      list.forEach((a) => delete TOKENS[a]);
+    }
+
+    // ===== ث) /og/exit/<آدرس>.png =====
+    {
+      resetCache();
+      // آدرسِ نامعتبر → ۴۰۰، بدونِ هیچ تماس
+      for (const bad of ["0x123", "zzz", "0x" + "g".repeat(40), W.slice(2), W + "0"]) {
+        const w = mkWorld();
+        const res = await RUN(w, "/og/exit/" + bad + ".png?v=1&r=1", hdr());
+        ok(res.status === 400 && w.calls.length === 0, "[exit og] /og/exit/" + bad.slice(0, 12) + " -> 400 with no upstream call, got " + res.status + "/" + w.calls.length);
+        ok(res.headers.get("content-type") !== "image/png", "[exit og] an invalid address never gets a card");
+      }
+      { const w = mkWorld(); const res = await RUN(w, "/og/exit/" + W + ".png", { method: "POST", headers: { "cf-connecting-ip": "198.18.1.1" } });
+        ok(res.status === 405 && w.calls.length === 0, "[exit og] POST -> 405"); }
+
+      // موفق: PNG معتبر ۱۲۰۰×۶۳۰ که دقیقاً همان کارتِ summary است
+      const w = mkWorld();
+      const res = await RUN(w, "/og/exit/" + W + ".png?v=1&r=7", hdr());
+      const body = new Uint8Array(await res.arrayBuffer());
+      const info = pngInfo(body);
+      ok(res.status === 200 && res.headers.get("content-type") === "image/png", "[exit og] card is 200 image/png, got " + res.status);
+      ok(info && !info.crcBad && info.w === 1200 && info.h === 630 && info.rawLen === 630 * (1200 * 3 + 1), "[exit og] valid PNG: every chunk CRC, 1200x630, inflates to exactly 630 raw scanlines (zlib adler included), got " + JSON.stringify(info && { w: info.w, h: info.h, rawLen: info.rawLen, crcBad: info.crcBad }));
+      const wantCard = await OGX.exitCardPng({ addr: W, summary: (await IDX.exitSummaryCompute(W, envX, {}).catch(() => ({}))).s || null });
+      ok(res.headers.get("cache-control") === "public, max-age=600" && res.headers.get("access-control-allow-origin") === "*", "[exit og] numbers card: 10 minutes + CORS like the token card, got " + res.headers.get("cache-control"));
+      ok(puts.some((p) => p.u === "https://zaexa.com/og/exit/" + W + ".png?v=1&r=7" && p.cc === "public, max-age=600"), "[exit og] the PNG is cached 10 minutes in the Cache API under its own URL");
+      ok(puts.some((p) => p.u === "https://exit.zaexa.internal/s/" + W && p.cc === "public, max-age=600"), "[exit og] the summary is cached 10 minutes per address in the Cache API, got " + JSON.stringify(puts.map((p) => p.u + " " + p.cc)));
+      ok(kvOps.length === 0 && evPoints.length === 0, "[exit og] no KV operation and no /ev data point (the address never reaches either), got " + JSON.stringify(kvOps) + JSON.stringify(evPoints));
+      ok(!JSON.stringify(puts).includes(KEYPART) && !JSON.stringify([...res.headers]).includes(KEYPART), "[exit og] the BASE_RPC secret appears nowhere in cache keys or headers");
+      const generic = await OGX.exitCardPng({ generic: true });
+      ok(Buffer.compare(Buffer.from(body), Buffer.from(generic)) !== 0, "[exit og] the numbers card is not the generic card");
+      const nCalls0 = w.calls.length;
+
+      // کش: همان آدرس، همان URL → صفر محاسبه؛ سطلِ تازه (r) → کارتِ تازه ولی خلاصه از کش (صفر تماس)
+      const resHit = await RUN(w, "/og/exit/" + W + ".png?v=1&r=7", hdr());
+      ok(resHit.status === 200 && w.calls.length === nCalls0, "[exit og] same URL again -> PNG cache hit, zero upstream calls, got " + (w.calls.length - nCalls0));
+      const resB = await RUN(w, "/og/exit/" + W + ".png?v=1&r=8", hdr());
+      const bodyB = new Uint8Array(await resB.arrayBuffer());
+      ok(resB.status === 200 && w.calls.length === nCalls0 && pngInfo(bodyB).rawLen === info.rawLen && Buffer.compare(Buffer.from(bodyB), Buffer.from(body)) === 0,
+        "[exit og] a new ?r= bucket re-renders from the cached summary with zero upstream calls (same numbers, same bytes)");
+      // HEAD
+      const resH = await RUN(w, "/og/exit/" + W + ".png?v=1&r=7", { method: "HEAD", headers: hdr().headers });
+      ok(resH.status === 200 && (await resH.arrayBuffer()).byteLength === 0, "[exit og] HEAD is 200 with no body");
+      // هم‌زمانی: دو درخواستِ هم‌زمان برای کیفِ تازه → یک محاسبه
+      resetCache();
+      const wc = mkWorld();
+      const [a1, a2] = await Promise.all([RUN(wc, "/og/exit/" + W + ".png?v=1&r=1", hdr()), RUN(wc, "/og/exit/" + W + ".png?v=1&r=2", hdr())]);
+      ok(a1.status === 200 && a2.status === 200 && wc.kinds.filter((k) => k === "holdings").length === 1 && wc.calls.length === 3,
+        "[exit og] two simultaneous requests share one computation (1 holdings call, 3 subrequests in total), got " + wc.kinds.join());
+      ok(exitInflightSize() === 0, "[exit og] the in-flight map is empty again after completion (no leak)");
+    }
+    function exitInflightSize() { return IDX.exitInflight.size; }
+
+    // ===== ج) شکست → کارتِ عمومی، هرگز «$0»؛ هرگز در کش =====
+    {
+      const genericBytes = Buffer.from(await OGX.exitCardPng({ generic: true }));
+      for (const [label, world] of [["holdings down", mkWorld({ holdingsDown: true })], ["nothing priceable", mkWorld({ eth: 0n, tokens: [], quoteDown: true })],
+        ["prices down + budget", mkWorld({ gtDown: true, quoteDown: true })]]) {
+        resetCache();
+        const res = await RUN(world, "/og/exit/" + W + ".png?v=1&r=3", hdr());
+        const body = Buffer.from(await res.arrayBuffer());
+        ok(res.status === 200 && res.headers.get("content-type") === "image/png" && Buffer.compare(body, genericBytes) === 0,
+          "[exit og] " + label + " -> the generic 'Exit value' card, byte-identical, never a $0 card; got " + res.status);
+        ok(res.headers.get("cache-control") === "public, max-age=60" && puts.length === 0, "[exit og] " + label + " -> generic card cached 60s at most and never stored in the Cache API, got " + res.headers.get("cache-control") + " puts=" + puts.length);
+      }
+      // بعد از شکست دوباره می‌پرسد
+      resetCache();
+      const wOk = mkWorld();
+      const res = await RUN(wOk, "/og/exit/" + W + ".png?v=1&r=4", hdr());
+      ok(Buffer.compare(Buffer.from(await res.arrayBuffer()), genericBytes) !== 0 && wOk.calls.length === 3, "[exit og] after a failure the next request computes again");
+      // محدودکننده‌ی نرخ: روی سقف، کارتِ عمومی و صفر تماس
+      resetCache();
+      const ipOne = { headers: { "cf-connecting-ip": "198.18.9.9" } };
+      let last = null; const wr = mkWorld();
+      for (let i = 0; i < 130; i++) { last = await RUN(wr, "/og/exit/" + tk(0x7000 + i) + ".png?v=1&r=1", ipOne); }
+      const lastBody = Buffer.from(await last.arrayBuffer());
+      ok(last.status === 200 && Buffer.compare(lastBody, genericBytes) === 0, "[exit og] over the rate limit the card degrades to the generic one (200), never 429/500");
+      ok(wr.kinds.filter((k) => k === "holdings").length <= 120, "[exit og] over the rate limit no more upstream work is done, got " + wr.kinds.filter((k) => k === "holdings").length + " holdings calls for 130 requests");
+    }
+
+    // ===== چ) محتوای کارت: همان متنِ کارتِ کلاینت =====
+    {
+      const at = Date.UTC(2026, 10, 11, 9, 41);
+      const L = (o) => OGX.exitCardLines(Object.assign({ paper: 12345.67, exit: 9876.54, lostPct: 20, quotedPaper: 12345.67, unknownCount: 0, counted: 3, at, partial: false }, o));
+      ok(L().paper === "$12,346" && L().exit === "$9,877" && L().lost === "20.0% would be lost on exit" && L().time === "09:41 UTC" && L().excl === "",
+        "[exit og] big numbers have no decimals, 20.0% text, UTC time, no excludes line; got " + JSON.stringify(L()));
+      ok(L({ exit: 42.5, paper: 50 }).exit === "$42.50" && L({ exit: 100.4 }).exit === "$100", "[exit og] numbers under $100 keep two decimals, from $100 up none (client card format)");
+      ok(L({ lostPct: 0.01 }).lost === "Almost nothing would be lost on exit" && L({ lostPct: 0 }).lost === "Almost nothing would be lost on exit", "[exit og] a loss under 0.05% reads 'Almost nothing would be lost on exit' (client rule)");
+      ok(L({ lostPct: null }).lost === "", "[exit og] no lostPct -> no loss line (unknown is not 0%)");
+      ok(L({ lostPct: 4.99 }).lostCol.join() === "33,211,160" && L({ lostPct: 5 }).lostCol.join() === "245,166,35" && L({ lostPct: 19.9 }).lostCol.join() === "245,166,35" && L({ lostPct: 20 }).lostCol.join() === "242,84,91",
+        "[exit og] colour bands: <5 green, <20 amber, else red");
+      const u = L({ unknownCount: 3, quotedPaper: 4400, paper: 15000 });
+      ok(u.paper === "$4,400" && u.excl === "Excludes 3 tokens without a quote", "[exit og] with unknown tokens the struck figure is quotedPaper (comparable pair) and the line says 'Excludes 3 tokens without a quote', got " + JSON.stringify(u));
+      ok(L({ unknownCount: 1 }).excl === "Excludes 1 token without a quote", "[exit og] singular 'token'");
+      ok(L({ partial: true, unknownCount: 0 }).excl === "Excludes some tokens without a quote" && L({ partial: true, unknownCount: 2 }).excl === "Excludes 2+ tokens without a quote", "[exit og] a truncated holdings list is never presented as complete");
+      // برچسب‌ها: واژه‌های ممنوع هرگز در متنِ کاربر
+      const texts = JSON.stringify([L(), u, X.exitOgFields(W, "https://zaexa.com", { paper: 1, exit: 1, lostPct: 1, quotedPaper: 1, unknownCount: 2, counted: 1, at, partial: false }, at), X.exitOgFields(null, "https://zaexa.com", null, at), X.exitOgFields(W, "https://zaexa.com", null, at)]).toLowerCase();
+      for (const bad of ["safe", "honeypot", "round trip", "vpn", "filter", "iran"]) ok(!new RegExp("\\b" + bad).test(texts), "[exit og] banned word '" + bad + "' in user-facing text");
+      // رندر: ورودی‌های مختلف بایتِ متفاوت می‌دهند و هیچ‌کدام پرتاب نمی‌کنند؛ عدد بلند به B56 می‌افتد
+      const outs = [];
+      for (const s of [{ paper: 1, exit: 5000, lostPct: 2, quotedPaper: 1, unknownCount: 0, counted: 1, at, partial: false },
+        { paper: 1, exit: 5000, lostPct: 2, quotedPaper: 1, unknownCount: 2, counted: 1, at, partial: false },
+        { paper: 1, exit: 5000, lostPct: null, quotedPaper: 1, unknownCount: 0, counted: 1, at, partial: false },
+        { paper: 1, exit: 123456789012.34, lostPct: 2, quotedPaper: 1, unknownCount: 0, counted: 1, at, partial: false },
+        { paper: 1, exit: 0.07, lostPct: 2, quotedPaper: 1, unknownCount: 0, counted: 1, at, partial: false }]) {
+        const p = await OGX.exitCardPng({ addr: W, summary: s });
+        const i = pngInfo(p);
+        ok(i && !i.crcBad && i.rawLen === 630 * 3601, "[exit og] every variant renders a valid PNG");
+        outs.push(Buffer.from(p).toString("base64"));
+      }
+      ok(new Set(outs).size === outs.length, "[exit og] different numbers/lines produce different cards");
+      // CPU: میانه‌ی رندر
+      const sm = { paper: 12345.67, exit: 9876.54, lostPct: 20, quotedPaper: 12345.67, unknownCount: 2, counted: 5, at, partial: false };
+      /* ⚠️ زمانِ مطلق در node زیرِ بارِ run.py (مرورگر هم‌زمان) بی‌ثبات است؛ پس اندازه‌گیری *نسبی* به کارتِ توکن، در یک لحظه و به‌صورت
+         متناوب، با سقفِ مطلقِ سخاوتمندانه. کارتِ توکن امروز ~۳٫۳ms، این کارت ~۴٫۶ms (نسبت ~۱٫۴). */
+      const { tokenCardPng: tokPng } = await import("./og-token.js");
+      for (let i = 0; i < 8; i++) { await OGX.exitCardPng({ addr: W, summary: sm }); await tokPng({ symbol: "PEPE", name: "Pepe", liquidity: "$1.2M", vol24: "$300K", verdict: "sell", chain: "Base", logo: null }); }
+      const te = [], tt = [];
+      for (let i = 0; i < 21; i++) {
+        let t0 = performance.now(); await OGX.exitCardPng({ addr: W, summary: sm }); te.push(performance.now() - t0);
+        t0 = performance.now(); await tokPng({ symbol: "PEPE", name: "Pepe", liquidity: "$1.2M", vol24: "$300K", verdict: "sell", chain: "Base", logo: null }); tt.push(performance.now() - t0);
+      }
+      te.sort((a, b) => a - b); tt.sort((a, b) => a - b);
+      ok(te[10] < 3 * tt[10] + 1 && te[10] < 60, "[exit og cpu] the exit card must cost about what the token card costs (median " + te[10].toFixed(2) + "ms vs " + tt[10].toFixed(2) + "ms; limit 3x)");
+      // نمونه‌ها برای چشم
+      if (process.env.EXIT_OG_SAMPLES) {
+        fs.mkdirSync(process.env.EXIT_OG_SAMPLES, { recursive: true });
+        fs.writeFileSync(process.env.EXIT_OG_SAMPLES + "/exit_sample.png", await OGX.exitCardPng({ addr: W, summary: { paper: 12345.67, exit: 9876.54, lostPct: 20, quotedPaper: 12345.67, unknownCount: 0, counted: 5, at, partial: false } }));
+        fs.writeFileSync(process.env.EXIT_OG_SAMPLES + "/exit_sample_unknown.png", await OGX.exitCardPng({ addr: W, summary: sm }));
+        fs.writeFileSync(process.env.EXIT_OG_SAMPLES + "/exit_generic.png", await OGX.exitCardPng({ generic: true }));
+      }
+    }
+
+    // ===== ح) تگ‌های /exit/<آدرس> =====
+    {
+      resetCache();
+      const origin = "https://zaexa.com";
+      const tag = (html, k) => { const m = new RegExp('<meta (?:property|name)="' + k.replace(/[:]/g, "\\:") + '" content="([^"]*)">').exec(html); return m ? m[1].replace(/&amp;/g, "&").replace(/&quot;/g, '"') : null; };
+      const bucketNow = () => Math.floor(Date.now() / 600000);
+      // ربات + کشِ خالی → محاسبه و تگ‌های دارایِ عدد
+      const w = mkWorld();
+      const res = await RUN(w, "/exit/" + W.toUpperCase().replace("0X", "0x"), hdr(BOT));
+      const html = await res.text();
+      const want = EXP.exit.toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: 0 });
+      ok(res.status === 200 && (res.headers.get("x-robots-tag") || "").includes("noindex"), "[exit og] /exit/<addr> keeps its noindex header with the og tags, got " + res.headers.get("x-robots-tag"));
+      ok(tag(html, "og:title") === "Exit value of 0xabab…abab: at least $" + want + " if sold now", "[exit og] og:title names the short address and the exit value ('at least' because a token had no quote), got " + tag(html, "og:title"));
+      const img = tag(html, "og:image");
+      ok(img === origin + "/og/exit/" + W + ".png?v=" + X.OG_EXIT_IMAGE_V + "&r=" + bucketNow(), "[exit og] og:image is the per-wallet card with ?v= and the 10-minute ?r= bucket, got " + img);
+      ok(tag(html, "twitter:image") === img && tag(html, "twitter:card") === "summary_large_image", "[exit og] twitter:image equals og:image and the card is summary_large_image");
+      const desc = tag(html, "og:description");
+      ok(/On paper \$3,700\./.test(desc) && /would be lost on exit\./.test(desc) && /Floor from live quotes at \d\d:\d\d UTC\./.test(desc) && /Excludes 1 token without a quote\./.test(desc), "[exit og] og:description carries the comparable pair, loss, floor time and the excluded token, got " + desc);
+      ok(tag(html, "twitter:title") === tag(html, "og:title") && tag(html, "twitter:description") === desc && tag(html, "description") === desc, "[exit og] twitter title/description and meta description match og");
+      ok(tag(html, "og:url") === origin + "/exit/" + W && /<link rel="canonical" href="https:\/\/zaexa\.com\/exit\/0xabab/.test(html), "[exit og] og:url and canonical point at the wallet page (lower-cased)");
+      ok(!html.includes("OLD-SITE-TITLE") && !html.includes("OLD-SITE-DESC") && (html.match(/property="og:title"/g) || []).length === 1, "[exit og] the generic data-og tags are removed first, exactly one og:title remains");
+      ok(/<head>[\s\S]*<title>Exit value of 0xabab…abab: at least \$/.test(html) && html.includes("<svg><title>Zaexa</title></svg>"), "[exit og] only the head <title> changes; the wordmark's SVG <title> is untouched");
+      ok(kvOps.length === 0 && evPoints.length === 0, "[exit og] page path touches neither KV nor /ev");
+      const callsAfterBot = w.calls.length;
+      ok(callsAfterBot === 3, "[exit og] bot page request = 3 subrequests, got " + callsAfterBot);
+      // انسان بعد از ربات: از کش، صفر تماس، همان عدد
+      const res2 = await RUN(w, "/exit/" + W, hdr("Mozilla/5.0 (X11; Linux x86_64) Firefox/130.0"));
+      const html2 = await res2.text();
+      ok(w.calls.length === callsAfterBot && tag(html2, "og:title") === tag(html, "og:title"), "[exit og] a human after the bot gets the cached numbers with zero recomputation");
+      // انسان با کشِ خالی: هیچ محاسبه‌ای؛ تگ‌های بی‌عدد ولی تصویر همچنان به کارتِ کیف می‌رود
+      resetCache();
+      const w3 = mkWorld();
+      const res3 = await RUN(w3, "/exit/" + W, hdr("Mozilla/5.0 (X11; Linux x86_64) Firefox/130.0"));
+      const html3 = await res3.text();
+      ok(w3.calls.length === 0, "[exit og] a human with a cold cache triggers no server computation, got " + w3.calls.length);
+      ok(tag(html3, "og:title") === "Exit value of 0xabab…abab — Zaexa" && !/\$/.test(tag(html3, "og:title")) && tag(html3, "og:image") === img, "[exit og] cold human page: no number in the title (unknown is not 0), image still points at the wallet card, got " + tag(html3, "og:title"));
+      // ربات و شکست → تگ‌های بی‌عدد، هرگز «$0»
+      resetCache();
+      const w4 = mkWorld({ holdingsDown: true });
+      const res4 = await RUN(w4, "/exit/" + W, hdr(BOT));
+      const html4 = await res4.text();
+      ok(res4.status === 200 && !/\$/.test(tag(html4, "og:title") + tag(html4, "og:description")) && tag(html4, "og:image") === img, "[exit og] bot + failed computation -> no dollar figure at all in the tags, got " + tag(html4, "og:title"));
+      // /exit بدونِ آدرس: کارتِ عمومی + عنوانِ Exit value؛ هیچ تماسِ بالادست
+      const w5 = mkWorld();
+      const res5 = await RUN(w5, "/exit", hdr(BOT));
+      const html5 = await res5.text();
+      ok(w5.calls.length === 0 && /^Exit value/.test(tag(html5, "og:title") || "") && tag(html5, "og:image") === origin + "/og.png?v=5" && !res5.headers.get("x-robots-tag"),
+        "[exit og] /exit keeps the generic site card with an Exit value title, no upstream call, still indexable; got " + tag(html5, "og:title") + " " + tag(html5, "og:image"));
+      ok(tag(html5, "og:url") === origin + "/exit" && /Base wallet/.test(tag(html5, "og:description") || ""), "[exit og] /exit og:url and description");
+      // آدرسِ نامعتبر: همان کارتِ عمومیِ سایت (دست‌نخورده) و noindex
+      const w6 = mkWorld();
+      const res6 = await RUN(w6, "/exit/not-an-address", hdr(BOT));
+      const html6 = await res6.text();
+      ok(html6.includes("OLD-SITE-TITLE") && w6.calls.length === 0 && (res6.headers.get("x-robots-tag") || "").includes("noindex"), "[exit og] /exit/<garbage> is left untouched (site card), no upstream call, noindex kept");
+      // HEAD: بدونِ محاسبه، noindex می‌ماند
+      const w7 = mkWorld();
+      const res7 = await RUN(w7, "/exit/" + W, { method: "HEAD", headers: hdr(BOT).headers });
+      ok(res7.status === 200 && (res7.headers.get("x-robots-tag") || "").includes("noindex") && w7.calls.length === 0, "[exit og] HEAD keeps noindex and computes nothing");
+      // نرخ: ربات روی سقفِ نرخ → صفحه همچنان ۲۰۰ و بی‌عدد
+      resetCache();
+      const ipBot = { headers: { "cf-connecting-ip": "198.18.77.77", "user-agent": BOT } };
+      let lastP = null; const w8 = mkWorld();
+      for (let i = 0; i < 130; i++) lastP = await RUN(w8, "/exit/" + tk(0x8000 + i), ipBot);
+      const lh = await lastP.text();
+      ok(lastP.status === 200 && !/\$/.test(tag(lh, "og:title")) && w8.kinds.filter((k) => k === "holdings").length <= 120, "[exit og] over the rate limit the page still renders (200) without numbers and without more upstream work");
+      // در Workers واقعی (HTMLRewriter) همان توابع: برای لایه‌ی خالصِ تگ‌ها یک بررسیِ مستقیم
+      const f = X.exitOgFields(W, origin, { paper: 100, exit: 80, lostPct: 20, quotedPaper: 100, unknownCount: 0, counted: 1, at: Date.UTC(2026, 10, 11, 9, 41), partial: false }, 600000 * 7 + 5);
+      ok(f.title === "Exit value of 0xabab…abab: $80.00 if sold now" && f.image === origin + "/og/exit/" + W + ".png?v=1&r=7", "[exit og] pure tag fields: complete summary has no 'at least'; the bucket is floor(now/10min), got " + f.title + " " + f.image);
+      ok(X.exitOgTags(f).includes('content="' + f.image.replace(/&/g, "&amp;") + '"') && !X.exitOgTags({ ...f, title: 'a"b<c' }).includes('a"b<c'), "[exit og] tag values are HTML-escaped");
+    }
+
+    // ===== خ) هیچ آدرسی در KV/لاگ/ev: کلِ بخش =====
+    ok(kvOps.length === 0 && evPoints.length === 0, "[exit og] (end) no KV or /ev operation during the whole section");
+    console.log("[exit og] typical exitSummary = " + globalThis.__exitOgTypicalSubreqs + " subrequests (1 holdings + 1 price batch + 1 Multicall3 quote)");
+  } finally {
+    globalThis.caches = savedCaches;
+    if (savedHR === undefined) delete globalThis.HTMLRewriter; else globalThis.HTMLRewriter = savedHR;
+  }
+  console.log("[exit og] server summary uses the client's counting rules (reserve ≥ report minimum, value ≥ $1, ETH always, unknown never zero, lostPct over tokens with both numbers) with constants checked against web/index.html; one Multicall3 quote request (+fee) with an explicit subrequest budget; /og/exit/<address>.png is a valid 1200x630 card from the token-card renderer (generic card, never $0, on any failure; 400 on a bad address); /exit/<address> gets og/twitter tags with the wallet card (?v= and a 10-minute ?r= bucket), the noindex header stays, only preview bots trigger the computation; 10-minute Cache API per address, no KV/ev writes, shared in-flight work");
+}
+
 process.exit(fails === 0 ? 0 : 1);

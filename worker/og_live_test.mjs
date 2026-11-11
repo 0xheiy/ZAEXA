@@ -418,6 +418,72 @@ for (const [mode, label] of [["error", "a 500 from upstream"], ["slow", "an upst
   console.log("[token seo live] real rewriter on the real index.html: h1 = symbol, only h1, facts visible and escaped, nosell guard, noindex only on positive evidence, no extra upstream call");
 }
 
+
+/* ---- ۹. Exit value: تگ‌های /exit/<آدرس> و /og/exit/<آدرس>.png روی workerd (HTMLRewriter و Cache API واقعی) ----
+   جهانِ ساختگی فقط یک کیفِ «فقط ETH» است (هلدینگ + یک دسته‌ی قیمت؛ کوت لازم نیست)، تا بدونِ شبکه‌ی واقعی
+   همه‌ی مسیرِ سرور — محاسبه، کش، رندرِ PNG، تزریقِ تگ — روی موتورِ واقعی اجرا شود. */
+{
+  const REAL = fs.readFileSync(path.join(here, "..", "web", "index.html"), "utf8");
+  const WALLET = "0x" + "ab".repeat(20);
+  const RPC = "https://exit-live-rpc.example/SECRETKEY-EXITLIVE";
+  const WETH = "0x4200000000000000000000000000000000000006";
+  let hits = [];
+  const m = new Miniflare({
+    modules: true,
+    script: 'import w from "./index.js"; export default w;',
+    scriptPath: path.join(here, "__og_live_entry.js"),
+    modulesRoot: here,
+    modulesRules: [{ type: "ESModule", include: ["**/*.js"] }],
+    compatibilityDate: "2026-08-10",
+    compatibilityFlags: ["nodejs_als"],
+    bindings: { BASE_RPC: RPC },
+    serviceBindings: { ASSETS: () => new Response(REAL, { status: 200, headers: { "content-type": "text/html; charset=utf-8" } }) },
+    outboundService: async (req) => {
+      hits.push(req.url);
+      const j = (o, st = 200) => new Response(JSON.stringify(o), { status: st, headers: { "content-type": "application/json" } });
+      if (req.url === RPC) {
+        const body = await req.json();
+        return j(body.map((x) => x.method === "alchemy_getTokenBalances"
+          ? { jsonrpc: "2.0", id: x.id, result: { address: x.params[0], tokenBalances: [] } }
+          : { jsonrpc: "2.0", id: x.id, result: "0xde0b6b3a7640000" }));   // ۱ ETH
+      }
+      if (/\/tokens\/multi\//.test(req.url)) {
+        return j({ data: [{ id: "base_" + WETH, type: "token", attributes: { address: WETH, symbol: "WETH", decimals: 18, price_usd: "3000" },
+          relationships: { top_pools: { data: [{ id: "base_pool1", type: "pool" }] } } }],
+          included: [{ id: "base_pool1", type: "pool", attributes: { reserve_in_usd: "9000000" } }] });
+      }
+      return j({ error: "unreachable in this sandbox" }, 500);
+    },
+  });
+  const BOT = { headers: { "user-agent": "TelegramBot (like TwitterBot)" } };
+  const tag = (html, k) => { const mm = new RegExp('<meta (?:property|name)="' + k + '" content="([^"]*)">').exec(html); return mm ? mm[1].replace(/&amp;/g, "&") : null; };
+  const res = await m.dispatchFetch("https://zaexa.com/exit/" + WALLET, BOT);
+  const html = await res.text();
+  const bucket = Math.floor(Date.now() / 600000);
+  ok(res.status === 200 && (res.headers.get("x-robots-tag") || "").includes("noindex"), "[exit og live] /exit/<addr> is 200 and noindex");
+  ok(tag(html, "og:title") === "Exit value of 0xabab…abab: $3,000 if sold now", "[exit og live] og:title from the wallet's real numbers, got " + tag(html, "og:title"));
+  const want = "https://zaexa.com/og/exit/" + WALLET + ".png?v=1&r=" + bucket;
+  ok(tag(html, "og:image") === want && tag(html, "twitter:image") === want && tag(html, "twitter:card") === "summary_large_image", "[exit og live] og:image / twitter:image / card, got " + tag(html, "og:image"));
+  ok((html.match(/property="og:title"/g) || []).length === 1 && !html.includes('content="Zaexa — DEX aggregator on Base"'), "[exit og live] the real page's static data-og tags are gone, one og:title");
+  ok(/<head>[\s\S]*?<title>Exit value of 0xabab…abab/.test(html) && /<svg class="wordmark"[^>]*><title>Zaexa<\/title>/.test(html), "[exit og live] only the head title changed (the wordmark's SVG title is intact)");
+  ok(hits.filter((u) => u === RPC).length === 1 && hits.length === 2, "[exit og live] one summary computation = 2 subrequests for an ETH-only wallet (holdings + price), got " + hits.length);
+  ok(!html.includes("SECRETKEY-EXITLIVE"), "[exit og live] the BASE_RPC secret is not in the page");
+  const before = hits.length;
+  const img = await m.dispatchFetch(want);
+  const bytes = new Uint8Array(await img.arrayBuffer());
+  ok(img.status === 200 && img.headers.get("content-type") === "image/png" && bytes.length > 1000000 && bytes[0] === 0x89 && bytes[1] === 0x50, "[exit og live] the card renders on workerd (" + bytes.length + " bytes)");
+  ok(hits.length === before, "[exit og live] the card reuses the summary cached by the page request (real Cache API): zero new subrequests, got " + (hits.length - before));
+  const human = await m.dispatchFetch("https://zaexa.com/exit/" + WALLET, { headers: { "user-agent": "Mozilla/5.0 Firefox/130" } });
+  ok(tag(await human.text(), "og:title") === "Exit value of 0xabab…abab: $3,000 if sold now" && hits.length === before, "[exit og live] a human visit afterwards sees the cached numbers with no recomputation");
+  const bad = await m.dispatchFetch("https://zaexa.com/og/exit/0x123.png");
+  ok(bad.status === 400, "[exit og live] a bad address is 400 on workerd, got " + bad.status);
+  const g = await m.dispatchFetch("https://zaexa.com/exit", BOT);
+  const gh = await g.text();
+  ok(/^Exit value/.test(tag(gh, "og:title") || "") && tag(gh, "og:image") === "https://zaexa.com/og.png?v=5" && !g.headers.get("x-robots-tag"), "[exit og live] /exit keeps the generic card with an Exit value title and stays indexable");
+  await m.dispose();
+  console.log("[exit og live] workerd: /exit/<addr> tags from the wallet's numbers (real HTMLRewriter), card PNG, summary reused through the real Cache API, 400 on a bad address, /exit generic");
+}
+
 console.log(fails === 0
   ? "[og live] ok — injection, escaping, fallback, image and home page all verified on workerd"
   : "[og live] " + fails + " FAILURES");

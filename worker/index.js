@@ -162,7 +162,13 @@ import { ogImageResponse } from "./og-image.js";
 import { tokenCardPng, renderable, logoFromJpeg } from "./og-token.js";
 import { logoResponse } from "./logo-image.js";
 import { fetchVerdict, fetchCounterSell, poolDirectedProof, v4OneWayProof, oneWayCounterFor, VD_VENUES, VD_RPCS, VD_V4_STAGE_COUNTERS,
-  WETH_ADDR, USDC_ADDR, sellAmountFrom, canaryCall, canaryUsdPerEth } from "./verdict.js";
+  WETH_ADDR, USDC_ADDR, sellAmountFrom, canaryCall, canaryUsdPerEth, VD_MAX_ENDPOINTS } from "./verdict.js";
+import {
+  EXIT_BATCH, EXIT_EXECUTOR, MULTICALL3, SEL_FEE_BPS, EXIT_SUBREQ_BUDGET, EXIT_QUOTE_MAX_TOKENS, EXIT_MC_CHUNK, EXIT_TTL_S,
+  EXIT_ADDR_RE, unitsToNumber, exitParsePrices, exitMakeRow, exitSummaryFrom, exitSummaryValid, encodeAggregate3, decodeAggregate3,
+  exitProbesFor, bestWethOut, feeBpsFrom, exitOgFields, exitOgTags, EXIT_BOT_UA,
+} from "./exit.js";
+import { exitCardPng } from "./og-exit.js";
 import { EVM_ADDR, SOL_MINT, chainOf, gtNetworkOf } from "./chains.js";
 import { tgRoute } from "./tg.js";
 import {
@@ -4526,6 +4532,37 @@ function exitDec(hex) {
   if (typeof hex !== "string" || !/^0x[0-9a-fA-F]+$/.test(hex) || hex.length > 2 + 64) return null;
   try { return BigInt(hex).toString(); } catch (e) { return null; }
 }
+/* هسته‌ی خواندنِ فهرستِ دارایی — هم مسیرِ /exit/holdings و هم خلاصه‌ی سمتِ سرور (exitSummary) از همین یک تابع می‌گذرند.
+   null = بالادست جواب کاملی نداد (نامعلوم، نه «خالی»). بدونِ کش: کش کارِ مسیرِ بیرونی است. */
+async function exitHoldingsCore(wallet, rpcUrl) {
+  const r = await pnlRpcBatch(rpcUrl, [
+    ["alchemy_getTokenBalances", [wallet, "erc20", { maxCount: EXIT_HOLD_MAX }]],
+    ["eth_getBalance", [wallet, "latest"]],
+  ]);
+  // هر دو باید جواب داده باشند: نیمه‌جواب «نمی‌دانم» است، نه «ندارد»
+  if (!r || !r[0] || !r[1]) return null;
+  const eth = exitDec(r[1]);
+  const list = r[0] && Array.isArray(r[0].tokenBalances) ? r[0].tokenBalances : null;
+  if (eth == null || !list) return null;
+  const tokens = [], seen = new Set();
+  let more = typeof r[0].pageKey === "string" && r[0].pageKey !== "", unread = 0;
+  for (const t of list) {
+    const a = t && typeof t.contractAddress === "string" ? t.contractAddress : "";
+    if (!EVM_ADDR.test(a)) { unread++; continue; }
+    if (t.error || t.tokenBalance == null) { unread++; continue; }   // خواندنی نیست = نامعلوم؛ شمرده می‌شود، صفر نمی‌شود
+    const bal = exitDec(t.tokenBalance);
+    if (bal == null) { unread++; continue; }
+    if (bal === "0") continue;                                        // صفرِ واقعی
+    const k = a.toLowerCase();
+    if (seen.has(k)) continue;
+    seen.add(k);
+    if (tokens.length >= EXIT_HOLD_MAX) { more = true; continue; }
+    tokens.push({ address: k, balance: bal });
+  }
+  const body = { eth, tokens, more };
+  if (unread > 0) body.unread = unread;
+  return body;
+}
 async function exitHoldingsRoute(request, url, ctx, env) {
   if (!rateOk(request, "exit", RL_LIMIT, RL_WINDOW_MS))
     return fail(429, "too many requests", { "retry-after": "60" });
@@ -4547,32 +4584,8 @@ async function exitHoldingsRoute(request, url, ctx, env) {
   }
   const rpcUrl = env && typeof env.BASE_RPC === "string" ? env.BASE_RPC : "";
   if (!rpcUrl) return exitUpstream();
-  const r = await pnlRpcBatch(rpcUrl, [
-    ["alchemy_getTokenBalances", [wallet, "erc20", { maxCount: EXIT_HOLD_MAX }]],
-    ["eth_getBalance", [wallet, "latest"]],
-  ]);
-  // هر دو باید جواب داده باشند: نیمه‌جواب «نمی‌دانم» است، نه «ندارد»
-  if (!r || !r[0] || !r[1]) return exitUpstream();
-  const eth = exitDec(r[1]);
-  const list = r[0] && Array.isArray(r[0].tokenBalances) ? r[0].tokenBalances : null;
-  if (eth == null || !list) return exitUpstream();
-  const tokens = [], seen = new Set();
-  let more = typeof r[0].pageKey === "string" && r[0].pageKey !== "", unread = 0;
-  for (const t of list) {
-    const a = t && typeof t.contractAddress === "string" ? t.contractAddress : "";
-    if (!EVM_ADDR.test(a)) { unread++; continue; }
-    if (t.error || t.tokenBalance == null) { unread++; continue; }   // خواندنی نیست = نامعلوم؛ شمرده می‌شود، صفر نمی‌شود
-    const bal = exitDec(t.tokenBalance);
-    if (bal == null) { unread++; continue; }
-    if (bal === "0") continue;                                        // صفرِ واقعی
-    const k = a.toLowerCase();
-    if (seen.has(k)) continue;
-    seen.add(k);
-    if (tokens.length >= EXIT_HOLD_MAX) { more = true; continue; }
-    tokens.push({ address: k, balance: bal });
-  }
-  const body = { eth, tokens, more };
-  if (unread > 0) body.unread = unread;
+  const body = await exitHoldingsCore(wallet, rpcUrl);
+  if (!body) return exitUpstream();
   if (store) {
     const put = store.put(cacheKey, new Response(JSON.stringify(body), { status: 200,
       headers: { "cache-control": "public, max-age=" + EXIT_HOLD_TTL_S } }));
@@ -4580,13 +4593,260 @@ async function exitHoldingsRoute(request, url, ctx, env) {
   }
   return exitJson(body, 200, "public, max-age=" + EXIT_HOLD_TTL_S);
 }
-async function exitPageRoute(request, url, env) {
+/* =====================================================================
+   ۱۱ نوامبر — کارتِ پیش‌نمایشِ Exit value: exitSummary، /og/exit/<آدرس>.png، تگ‌های /exit/<آدرس>
+   =====================================================================
+   وقتی کسی لینکِ /exit/<آدرس> را در ایکس/تلگرام می‌گذارد، ربات جاوااسکریپت اجرا نمی‌کند؛ پس عددهای *آن کیف* باید سمتِ سرور
+   حساب شوند — با همان قواعدِ صفحه (worker/exit.js؛ ثابت‌ها یک منبع و با web/index.html تست می‌شوند).
+   • هلدینگ: همان exitHoldingsCore که /exit/holdings دارد. قیمت و ذخیره‌ی استخرِ برتر: همان gtUpstream، دسته‌های ۲۵تایی.
+   • کوت: یک درخواستِ JSON-RPCِ واحد به BASE_RPC (بعد VD_RPCS) که چند eth_callِ Multicall3.aggregate3 دارد — فروشِ *کلِ*
+     موجودی → WETH روی همه‌ی صرافی‌هایی که verdict.js بلد است (همان encoderها)؛ بهترینِ مثبت. کارمزدِ اجراکننده در همان
+     درخواست خوانده می‌شود. توکنِ فقط-v4 یا بی‌کوت = Unknown (نه صفر). USDC فقط مقصدِ دوم در کلاینت است؛ اینجا نیست
+     (کفِ محافظه‌کارانه — «Floor»).
+   • 🔴 بودجه: کلِ محاسبه زیرِ یک متر (makeSubMeter) با سقفِ صریحِ EXIT_SUBREQ_BUDGET اجرا می‌شود؛ fetchِ بعد از سقف
+     پرتاب می‌شود و هرچه کوت/قیمت نگرفته Unknown می‌ماند — هرگز صفر. (همان AsyncLocalStorage‌ی گذرِ ساعتی؛ Cache API
+     داخلِ محاسبه خاموش است و کش فقط روی لایه‌ی بیرونی است.)
+   • کش: خلاصه ۱۰ دقیقه، فقط Cache API (کلیدِ ساختگیِ exit.zaexa.internal/s/<کیف>). 🔴 آدرسِ کیف هرگز در KV، لاگ یا /ev
+     نمی‌نشیند؛ تنها جاهایش کلیدِ Cache API و یک Mapِ درون‌حافظه‌ی همان isolate (ادغامِ دو درخواستِ هم‌زمان) است.
+   • تلگرام صفحه را بر اساسِ آدرسِ *صفحه* کش می‌کند (نه تصویر) — پس عددِ داخلِ تصویر فقط برای اولین بار/لینکِ تازه تازه
+     است؛ ?r=<سطلِ ۱۰دقیقه‌ای> روی آدرسِ تصویر کلیدِ کشِ لبه و ربات‌های بی‌کشِ صفحه را می‌چرخاند (قراردادِ ?r= در zaexa_og). */
+const EXIT_PRICE_TIMEOUT_MS = 4000;
+const EXIT_PAGE_WAIT_MS = 3500;      // صفحه‌ی /exit/<آدرس> برای رباتِ پیش‌نمایش تا این‌قدر منتظرِ عدد می‌ماند
+const EXIT_IMG_WAIT_MS = 8000;       // تصویر تا این‌قدر؛ بعد کارتِ عمومی (محاسبه در پس‌زمینه ادامه می‌دهد و کش را پر می‌کند)
+const exitInflight = new Map();      // کیف → Promise (فقط حافظه‌ی همین isolate)
+
+async function exitPricesServer(addrs, env, st) {
+  const info = new Map(), failed = new Set();
+  const list = [...new Set(addrs.map((a) => a.toLowerCase()))];
+  for (let i = 0; i < list.length; i += EXIT_BATCH) {
+    const batch = list.slice(i, i + EXIT_BATCH);
+    if (st.blown) { batch.forEach((a) => failed.add(a)); continue; }      // بودجه تمام: نپرس، Unknown بماند
+    const ac = new AbortController();
+    const timer = setTimeout(() => ac.abort(), EXIT_PRICE_TIMEOUT_MS);
+    try {
+      const { res } = await gtUpstream("networks/base/tokens/multi/" + batch.join(",") + "?include=top_pools", env, { signal: ac.signal });
+      if (!res || !res.ok) throw new Error("status");
+      exitParsePrices(await res.json(), info);
+    } catch (e) { batch.forEach((a) => failed.add(a)); }
+    finally { clearTimeout(timer); }
+  }
+  return { info, failed };
+}
+
+/* یک درخواستِ JSON-RPC با چند aggregate3: [feeBps] + تکه‌های توکن (مرزِ تکه روی توکن).
+   خروجی: Map(آدرسِ توکن → بهترین خروجیِ WETH (BigInt) یا null) + feeBps. توکنی که تکه‌اش هیچ‌جا جواب نگرفت اصلاً در Map نیست
+   (کالر آن را Unknown می‌گذارد). */
+async function exitQuoteServer(tokenRows, env, st) {
+  const chunks = [];
+  let cur = null;
+  for (const r of tokenRows) {
+    const probes = exitProbesFor(r.addr, r.bal);
+    if (!cur || cur.calls.length + probes.length > EXIT_MC_CHUNK) { cur = { calls: [], items: [] }; chunks.push(cur); }
+    cur.items.push({ r, probes, at: cur.calls.length });
+    for (const p of probes) cur.calls.push({ to: p.to, data: p.data });
+  }
+  const mkReq = (id, calls) => ({ jsonrpc: "2.0", id, method: "eth_call",
+    params: [{ to: MULTICALL3, data: encodeAggregate3(calls) }, "latest"] });
+  const feeCalls = [{ to: EXIT_EXECUTOR, data: SEL_FEE_BPS }];
+  let feeRes = null;
+  const out = new Map();
+  const pending = new Set(chunks.map((_, i) => i));
+  for (const rpc of baseRpcsFor(env).slice(0, VD_MAX_ENDPOINTS)) {
+    if (!pending.size || st.blown) break;
+    const reqs = [];
+    if (feeRes == null) reqs.push(mkReq(0, feeCalls));
+    for (const ci of pending) reqs.push(mkReq(ci + 1, chunks[ci].calls));
+    const r = await pnlPost(rpc, reqs);
+    if (r.status !== 200 || !Array.isArray(r.body)) continue;
+    for (const x of r.body) {
+      if (!x || !Number.isInteger(x.id) || x.error || typeof x.result !== "string") continue;
+      if (x.id === 0) { const d = decodeAggregate3(x.result, 1); if (d) feeRes = d; continue; }
+      const ci = x.id - 1;
+      if (!pending.has(ci)) continue;
+      const ch = chunks[ci];
+      const d = decodeAggregate3(x.result, ch.calls.length);
+      if (!d) continue;                                                    // تکه‌ی خراب: همین توکن‌ها برای اندپوینتِ بعدی می‌مانند
+      for (const it of ch.items) out.set(it.r.addr, bestWethOut(it.probes, d.slice(it.at, it.at + it.probes.length)));
+      pending.delete(ci);
+    }
+  }
+  return { out, feeBps: feeBpsFrom(feeRes) };
+}
+
+async function exitSummaryInner(wallet, env, st) {
+  const rpcUrl = env && typeof env.BASE_RPC === "string" ? env.BASE_RPC : "";
+  if (!rpcUrl) return { s: null, why: "rpc" };
+  const h = await exitHoldingsCore(wallet, rpcUrl);
+  if (!h) return { s: null, why: "holdings" };
+  const wl = WETH_ADDR.toLowerCase();
+  const { info, failed } = await exitPricesServer([wl].concat(h.tokens.map((t) => t.address)), env, st);   // WETH اول: قیمتِ ETH در دسته‌ی اولِ قیمت می‌آید
+  const wm = info.get(wl);
+  const ethUsd = wm && wm.price != null && wm.price > 0 ? wm.price : null;
+  const rows = [];
+  const ethBal = BigInt(h.eth);
+  if (ethBal > 0n) {
+    const eth = { native: true, addr: "native", bal: ethBal, dec: 18, price: null, paper: null, exit: null, quote: "done", state: "counted", why: "" };
+    eth.amt = unitsToNumber(ethBal, 18);
+    if (ethUsd != null) { eth.paper = eth.amt * ethUsd; eth.exit = eth.paper; eth.price = ethUsd; }   // ETH: کاغذی = خروج
+    rows.push(eth);
+  }
+  for (const t of h.tokens) rows.push(exitMakeRow(t, info, failed));
+  const todo = rows.filter((r) => r.state === "counted" && r.quote === "pending");
+  const toQuote = [];
+  for (const r of todo) {
+    if (r.addr === wl) {                                    // WETH → ETH: باز کردنِ ۱ به ۱، بدونِ استخر
+      r.exit = ethUsd == null ? null : r.amt * ethUsd;
+      r.quote = r.exit == null ? "unknown" : "ok";
+    } else if (ethUsd == null || toQuote.length >= EXIT_QUOTE_MAX_TOKENS) {
+      r.quote = "unknown";                                  // بدونِ قیمتِ ETH یا بیش از سقف: Unknown، هرگز صفر
+    } else toQuote.push(r);
+  }
+  if (toQuote.length) {
+    const { out, feeBps } = await exitQuoteServer(toQuote, env, st);
+    for (const r of toQuote) {
+      const best = out.get(r.addr);
+      let usd = null;
+      if (best != null) {
+        const net = (best * BigInt(10000 - feeBps)) / 10000n;
+        usd = unitsToNumber(net, 18) * ethUsd;
+      }
+      r.exit = usd != null && Number.isFinite(usd) && usd >= 0 ? usd : null;    // 🔴 null = Unknown؛ هرگز ۰
+      r.quote = r.exit == null ? "unknown" : "ok";
+    }
+  }
+  return { s: exitSummaryFrom(rows, h, Date.now()), why: "done" };
+}
+
+/* محاسبه‌ی بی‌کش. opts.budget فقط برای تست. خروجی { s, why, fetches } — هرگز پرتاب نمی‌کند. */
+async function exitSummaryCompute(wallet, env, opts) {
+  const budget = opts && Number.isInteger(opts.budget) ? opts.budget : EXIT_SUBREQ_BUDGET;
+  const meter = makeSubMeter();
+  const st = { blown: false };
+  const guarded = Object.create(meter);
+  guarded.fetch = (input, init) => {
+    if (meter.fetches >= budget) { st.blown = true; return Promise.reject(new Error("exit-budget")); }
+    return meter.fetch(input, init);
+  };
+  try {
+    const r = await reportContext.run({ meter: guarded, pace: null, poolsMemo: new Map() }, () => exitSummaryInner(wallet, env, st));
+    return { ...r, fetches: meter.fetches, blown: st.blown };
+  } catch (e) {
+    return { s: null, why: "error", fetches: meter.fetches, blown: st.blown };
+  }
+}
+
+/* کش ۱۰دقیقه‌ای + ادغامِ هم‌زمان. o.compute=false: فقط کش. o.waitMs: بیشینه‌ی انتظار (محاسبه در پس‌زمینه ادامه می‌دهد). */
+async function exitSummaryCached(wallet, env, ctx, o) {
+  const store = cacheStore();
+  const key = new Request("https://exit.zaexa.internal/s/" + wallet, { method: "GET" });
+  if (store) {
+    try {
+      const hit = await store.match(key);
+      if (hit) { const j = await hit.json(); if (exitSummaryValid(j)) return j; }
+    } catch (e) { /* کش خراب = بی‌کش */ }
+  }
+  if (!o || !o.compute) return null;
+  let p = exitInflight.get(wallet);
+  if (!p) {
+    p = (async () => {
+      try {
+        const r = await exitSummaryCompute(wallet, env, o);
+        if (r.s && store) {
+          const put = Promise.resolve(store.put(key, new Response(JSON.stringify(r.s), { status: 200,
+            headers: { "cache-control": "public, max-age=" + EXIT_TTL_S } }))).catch(() => {});
+          await put;
+        }
+        return r.s;
+      } catch (e) { return null; }
+      finally { exitInflight.delete(wallet); }
+    })();
+    exitInflight.set(wallet, p);
+    if (ctx && typeof ctx.waitUntil === "function") ctx.waitUntil(p);
+  }
+  if (!o.waitMs) return p;
+  let t;
+  try { return await Promise.race([p, new Promise((r) => { t = setTimeout(() => r(null), o.waitMs); })]); }
+  finally { clearTimeout(t); }
+}
+
+const OG_EXIT_RE = /^\/og\/exit\/([^/.]+)\.png$/;
+async function ogExitRoute(request, url, env, ctx, raw) {
+  if (request.method !== "GET" && request.method !== "HEAD") return new Response(null, { status: 405 });
+  if (!EXIT_ADDR_RE.test(raw))
+    return new Response("bad address", { status: 400, headers: { "content-type": "text/plain; charset=utf-8", "cache-control": "no-store" } });
+  try {
+    const wallet = raw.toLowerCase();
+    const store = cacheStore();
+    const cacheKey = new Request(url.toString(), { method: "GET" });
+    if (store) {
+      try {
+        const hit = await store.match(cacheKey);
+        if (hit) return request.method === "HEAD" ? new Response(null, { status: hit.status, headers: hit.headers }) : hit;
+      } catch (e) { /* کش خراب = بی‌کش */ }
+    }
+    const compute = rateOk(request, "exog", RL_LIMIT, RL_WINDOW_MS);
+    let s = null;
+    try { s = await exitSummaryCached(wallet, env, ctx, { compute, waitMs: EXIT_IMG_WAIT_MS }); } catch (e) { s = null; }
+    const png = await exitCardPng(s ? { addr: wallet, summary: s } : { generic: true });
+    const res = new Response(request.method === "HEAD" ? null : png, {
+      status: 200,
+      headers: {
+        "content-type": "image/png",
+        "content-length": String(png.length),
+        // عددِ واقعی ۱۰ دقیقه؛ کارتِ «نمی‌دانم» فقط ۶۰ ثانیه و هرگز در کش نمی‌نشیند
+        "cache-control": s ? "public, max-age=" + EXIT_TTL_S : "public, max-age=60",
+        "access-control-allow-origin": "*",
+        "x-robots-tag": "noindex",
+      },
+    });
+    if (s && store && request.method === "GET") {
+      let put = null;
+      try { put = Promise.resolve(store.put(cacheKey, res.clone())).catch(() => {}); } catch (e) { /* کش خراب = بی‌کش */ }
+      if (put && ctx && typeof ctx.waitUntil === "function") ctx.waitUntil(put); else if (put) await put;
+    }
+    return res;
+  } catch (e) {
+    return ogGenericFallback(request, url);
+  }
+}
+
+// تگ‌های پیش‌نمایش داخلِ همان HTMLِ اپ. wallet=null → کارتِ عمومیِ سایت با عنوانِ Exit value.
+function injectExitOg(res, url, wallet, sumPromise) {
+  if (typeof HTMLRewriter === "undefined") return res;   // بیرون از Workers (تست node)
+  if (!res || res.status !== 200) return res;
+  if (!/text\/html/i.test(res.headers.get("content-type") || "")) return res;
+  let memo = null;
+  const fields = () => memo || (memo = Promise.resolve(sumPromise).then((s) => exitOgFields(wallet, url.origin, s, Date.now())));
+  return new HTMLRewriter()
+    .on("meta[data-og]", { element(el) { el.remove(); } })
+    .on("link[data-og]", { element(el) { el.remove(); } })
+    // «head > title»، نه هر <title>: wordmarkِ SVG هم یک <title>Zaexa</title> دارد
+    .on("head > title", { async element(el) { el.setInnerContent((await fields()).title, { html: false }); } })
+    .on("head", { async element(el) { el.append(exitOgTags(await fields()), { html: true }); } })
+    .transform(res);
+}
+
+async function exitPageRoute(request, url, env, ctx) {
   const m = EXIT_PAGE.exec(url.pathname.replace(/(.)\/$/, "$1"));
+  const raw = m && m[1] ? m[1] : null;
+  const valid = raw !== null && EXIT_ADDR_RE.test(raw);
+  const wallet = valid ? raw.toLowerCase() : null;
+  /* عدد فقط برای رباتِ پیش‌نمایش محاسبه می‌شود (انسان منتظرِ ۳ ثانیه‌ی سرور نمی‌ماند؛ خودِ صفحه همان را در مرورگر می‌سازد).
+     کش اگر باشد برای همه می‌آید. شروعِ محاسبه *پیش از* await روی ASSETS تا موازی بروند. */
+  let sum = null;
+  if (valid && request.method === "GET") {
+    const bot = EXIT_BOT_UA.test(request.headers.get("user-agent") || "");
+    const compute = bot && rateOk(request, "exog", RL_LIMIT, RL_WINDOW_MS);
+    sum = exitSummaryCached(wallet, env, ctx, { compute, waitMs: EXIT_PAGE_WAIT_MS }).catch(() => null);
+  }
   const res = await env.ASSETS.fetch(new Request(new URL("/app", url), request));
   const headers = new Headers(res.headers);
   // صفحه‌ی یک کیف خصوصیِ همان کیف است، نه محتوایی برای گوگل؛ خودِ /exit باز می‌ماند
   if (m && m[1]) headers.set("x-robots-tag", "noindex");
-  return new Response(res.body, { status: res.status, headers });
+  const out = new Response(res.body, { status: res.status, headers });
+  if (request.method !== "GET") return out;
+  if (m && m[1] && !valid) return out;                    // /exit/<چیزِ نامعتبر>: همان کارتِ عمومیِ سایت
+  return injectExitOg(out, url, wallet, sum);
 }
 
 /* =====================================================================
@@ -4676,6 +4936,9 @@ export default {
     // کارتِ مخصوصِ توکن — آدرس همان شکل‌هایی که /t/ می‌پذیرد
     const ogTok = /^\/og\/t\/([^/.]+)\.png$/.exec(url.pathname);
     if (ogTok) return ogTokenRoute(request, url, env, ctx, ogTok[1]);
+    // کارتِ Exit value — آدرسِ نامعتبر ۴۰۰ می‌گیرد (نه کارتِ عمومی)
+    const ogEx = OG_EXIT_RE.exec(url.pathname);
+    if (ogEx) return ogExitRoute(request, url, env, ctx, ogEx[1]);
     /* لوگوی مربعی برای فرم‌های فهرست‌شدن — همان دلیلِ og.png: داخلِ کد، نه _site. */
     if (url.pathname === "/logo.png") return logoResponse(request);
     if(/^\/t\/[^/]+\/?$/.test(url.pathname)&&!chainOf(url.pathname.split("/")[2])){
@@ -4699,7 +4962,7 @@ export default {
        الگو عیناً همان الگوی /t/<آدرس> پایین‌تر است: یک Request تازه با
        pathname واقعیِ فایل ساخته می‌شود و به env.ASSETS داده می‌شود. */
     /* /exit و /exit/<آدرس> — همان سندِ اپ (/app)، نمای «exit». هرگز یک فایلِ html تازه. */
-    if (EXIT_PAGE.test(url.pathname.replace(/(.)\/$/, "$1")) && env && env.ASSETS) return exitPageRoute(request, url, env);
+    if (EXIT_PAGE.test(url.pathname.replace(/(.)\/$/, "$1")) && env && env.ASSETS) return exitPageRoute(request, url, env, ctx);
     if (url.pathname === "/pairs" && env && env.ASSETS)
       return env.ASSETS.fetch(new Request(new URL("/pairs.html", url), request));
     /* /t/<آدرس> یک صفحه‌ی واقعی است، نه یک هش. بایندینگ [assets] برای مسیری
@@ -4808,3 +5071,4 @@ export { makeSubMeter, meterKv, REPORT_SUBREQ_BUDGET, reportBudgetLeft };
 export { readV4Keys, readV4Entry, rpcCallBase, fetchV4Pools, storeV4Result, v4StoreTtl, runV4Index };
 export { V4_LOG_TIMEOUT_MS };
 export { pnlJoin };
+export { exitSummaryCompute, exitSummaryCached, exitInflight, injectExitOg };

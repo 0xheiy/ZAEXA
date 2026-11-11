@@ -359,3 +359,7 @@ try {
   tokenCardPng({ symbol: "WARM", name: "Warm Up", liquidity: "$1.0K", vol24: "$1.0K", verdict: "sell", chain: "Solana", logo: null })
     .catch(() => {});
 } catch (e) { /* مهم نیست */ }
+
+/* ۱۱ نوامبر — کارت Exit value (worker/og-exit.js) همین ابزارهای بایتی و همان TOP/BAND/اطلس را دوباره به‌کار می‌برد؛
+   فقط export شد، هیچ رفتاری عوض نشد. */
+export { b64, crcUpdate, adler32, adlerCombine, put32, TYPE, SIG, BAND_BYTES, ATLAS_BYTES, TOP_BYTES, width, fit, CHAR_IDX };

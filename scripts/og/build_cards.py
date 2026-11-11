@@ -344,3 +344,77 @@ with open(OUT_DATA, "w") as fh:
     fh.write("".join(out))
 print("og-token-data.js: %d bytes; TOP base/solana %d/%d, BAND %d, BOTTOM %d, atlas %d" % (
     os.path.getsize(OUT_DATA), len(top_d["Base"]), len(top_d["Solana"]), len(band_raw), len(bot_d), len(atlas_raw)))
+
+# =====================================================================
+# خروجی ۳ — داده‌ی کارت Exit value: worker/og-exit-data.js
+# =====================================================================
+# کارتِ /og/exit/<آدرس>.png همان TOP.Base و BAND کارتِ توکن را دوباره به‌کار می‌برد (ردیف‌های ۰ تا ۴۷۹ — نشان و پیل «Base»
+# بدون تکرارِ ۱٫۸MB داده)، و فقط این‌ها تازه‌اند:
+#   BAND2  = ردیف‌های [480, 600) با متنِ ثابتِ «zaexa.com» برداشته‌شده (جایش را خودِ رندر می‌نویسد: «zaexa.com/exit»)
+#   BOTTOM = ردیف‌های [600, 630) — دیفلیتِ نهایی (Z_FINISH)
+#   اطلس‌های B72 (رقم‌ها و «$ , .») و R20 (اندازه‌ای که اطلسِ کارتِ توکن ندارد)
+# ⚠️ BAND/TOP کارتِ توکن عیناً دست‌نخورده می‌ماند؛ این بخش فقط یک فایلِ تازه می‌نویسد.
+EXIT_Y0, EXIT_Y1 = BAND_Y1, 600  # [480, 600)
+OUT_EXIT = os.path.join(ROOT, "worker", "og-exit-data.js")
+
+
+def exit_bg():
+    f = fore.copy()
+    f[296:357, 80:801] = 0
+    f[357:453, 80:701] = 0
+    f[552:584, 80:215] = 0  # «zaexa.com»ی پخته‌شده در منبع (x 89–203، y 559–580)؛ منحنی زیرِ y=584 است و می‌ماند
+    return bg_array(f)
+
+
+ebg = exit_bg()
+band2_raw = scan(ebg[EXIT_Y0:EXIT_Y1])
+bottom2_raw = scan(ebg[EXIT_Y1:])
+assert len(band2_raw) == (EXIT_Y1 - EXIT_Y0) * 3601
+bottom2_d = deflate_part(bottom2_raw, True)
+bottom2_adler = zlib.adler32(bottom2_raw) & 0xFFFFFFFF
+bottom2_state = crc_state(bottom2_d, zlib.crc32(b"IDAT"))
+
+# اطلس‌های کارتِ Exit: عددِ بزرگ (فقط رقم و «$ , .») و خطِ ریزِ R20 (همه‌ی نویسه‌ها)
+EXIT_NUM = "$0123456789,."
+EXIT_ATLASES = [("B72", B, 72, EXIT_NUM), ("R20", R, 20, "".join(CHARS))]
+eblob = bytearray()
+eatl = {}
+for key, path, px, chars in EXIT_ATLASES:
+    font = ImageFont.truetype(path, px)
+    rows = []
+    for ch in chars:
+        adv = round(font.getlength(ch), 4)
+        x0, y0, x1, y1 = font.getbbox(ch, anchor="ls")
+        wd, ht = x1 - x0, y1 - y0
+        off = len(eblob)
+        if wd > 0 and ht > 0:
+            im = Image.new("L", (wd, ht), 0)
+            ImageDraw.Draw(im).text((-x0, -y0), ch, font=font, fill=255, anchor="ls")
+            eblob += im.tobytes()
+        else:
+            wd = ht = 0
+        rows.append([adv, x0, y0, wd, ht, off])
+    eatl[key] = {"chars": chars, "rows": rows}
+
+HEAD_EXIT = """/* =====================================================================
+   داده‌ی رندرِ کارت Exit value — ساخته‌ی ماشین، دست نزن
+   =====================================================================
+   تولید: `python3 scripts/og/build_cards.py` (خروجی ۳). خواننده: worker/og-exit.js.
+   TOP و ردیف‌های ۲۹۶–۴۷۹ را از worker/og-token-data.js می‌گیرد؛ این فایل فقط
+   ردیف‌های ۴۸۰–۵۹۹ (خام)، ۶۰۰–۶۲۹ (دیفلیت) و اطلسِ عددِ بزرگ (Bold ۷۲px، فقط «$0123456789,.») و R20 (Liberation Sans، SIL OFL 1.1) را دارد.
+   ===================================================================== */
+
+"""
+eout = [HEAD_EXIT]
+eout.append("export const EXIT_Y0 = %d;\nexport const EXIT_Y1 = %d;\n" % (EXIT_Y0, EXIT_Y1))
+eout.append(chunks_js("BAND2_B64", band2_raw))
+eout.append("export const BAND2_RAW = BAND2_B64;\n")
+eout.append(chunks_js("BOTTOM2_B64", bottom2_d))
+eout.append("export const BOTTOM2_Z = BOTTOM2_B64;\n")
+eout.append("export const BOTTOM2_ADLER = %d;\nexport const BOTTOM2_LEN = %d;\nexport const BOTTOM2_CRC_STATE = %d;\n" % (bottom2_adler, len(bottom2_raw), bottom2_state))
+eout.append(chunks_js("EXIT_ATLAS_B64", bytes(eblob)))
+eout.append("export const EXIT_ATLAS_RAW = EXIT_ATLAS_B64;\n")
+eout.append("export const EXIT_ATLASES = %s;\n" % json.dumps(eatl, separators=(",", ":"), ensure_ascii=True))
+with open(OUT_EXIT, "w") as fh:
+    fh.write("".join(eout))
+print("og-exit-data.js: %d bytes; band2 %d, bottom2 %d, atlas %d" % (os.path.getsize(OUT_EXIT), len(band2_raw), len(bottom2_d), len(eblob)))
