@@ -19,7 +19,8 @@
    می‌کند، نه ۴۰۴. بدونِ این، باندل‌های نسبی روی صفحه‌ی سولانا هم دقیقاً
    همان ۴۰۴ می‌گرفتند و همان «Could not load ethers» بالا می‌آمد — یک
    regexِ خودکفا، بدونِ وابستگی به چیزی پایین‌تر در همین فایل. */
-if(/^\/t\/[^/]+\/?$/.test(location.pathname)){
+if(/^\/t\/[^/]+\/?$/.test(location.pathname)||/^\/exit\/[^/]+\/?$/.test(location.pathname)){
+  /* ۱۱ نوامبر — /exit/<آدرس> هم یک سطح عمیق‌تر از ریشه است (همان سندِ /app، نمای exit) و به همان <base> نیاز دارد */
   var b=document.createElement("base");b.href="/";document.head.appendChild(b);
   /* ⚠️ عوارضِ همان <base>: یک لینکِ هش-تنها هم نسبی است، پس #swap دیگر «همین
      صفحه، بخشِ swap» معنا نمی‌دهد — به «/» به‌علاوه‌ی هش حل می‌شود، یعنی
@@ -82,6 +83,8 @@ if(/^\/t\/[^/]+\/?$/.test(location.pathname)){
 (function(){
   try{
     if(/^\/t\/[^/]+\/?$/.test(location.pathname))return;
+    /* ۱۱ نوامبر — /exit و /exit/<آدرس> همان سندِ اپ‌اند و نمای exit را باز می‌کنند؛ بی‌این، یک فریم Swap دیده می‌شد */
+    if(/^\/exit(\/[^/]*)?\/?$/.test(location.pathname)){document.documentElement.setAttribute("data-boot-view","exit");return;}
     var r=location.hash.slice(1);
     try{r=decodeURIComponent(r);}catch(e){}
     var i=r.indexOf("?"),n=(i<0?r:r.slice(0,i)).trim();
@@ -99,7 +102,7 @@ if(/^\/t\/[^/]+\/?$/.test(location.pathname)){
    بوتِ Base هرگز attribute نمی‌گیرد. */
 (function(){
   try{
-    if(/^\/t\/[^/]+\/?$/.test(location.pathname))return;
+    if(/^\/t\/[^/]+\/?$/.test(location.pathname)||/^\/exit(\/[^/]*)?\/?$/.test(location.pathname))return;
     var r=location.hash.slice(1);
     try{r=decodeURIComponent(r);}catch(e){}
     var i=r.indexOf("?"),c=null;
@@ -684,6 +687,78 @@ html[data-boot-view="flow"] .nav #navMarkets{
   background:var(--card);color:var(--tx);font-weight:620;box-shadow:var(--shs)}
 /* ۷ اکتبر — همین فلاشِ بوت برای تبِ Stocks: با /app#stocks دکمه‌اش از فریمِ اول «روشن» است. */
 html[data-boot-view="stocks"] .nav button[data-view="stocks"]{background:var(--bg);color:var(--acc);box-shadow:inset 2px 2px 5px var(--soft-lo),inset -2px -2px 5px var(--soft-hi)}
+
+/* ۱۱ نوامبر — Exit value (/exit): «اگر همه‌ی این کیف را همین حالا بفروشم چند دلار می‌گیرم؟» */
+html[data-boot-view="exit"] #view-exit{display:flex;flex-direction:column;gap:18px}
+.exSwitch{display:inline-flex;gap:4px;padding:4px;margin:12px 20px 0;max-width:calc(100% - 40px);box-sizing:border-box;border-radius:999px;background:var(--bg);box-shadow:inset 2px 2px 5px var(--soft-lo),inset -2px -2px 5px var(--soft-hi)}
+.exSwitch[hidden]{display:none}
+.exSwitch button{border:0;background:none;color:var(--tx2);font:inherit;font-size:13.5px;font-weight:560;padding:7px 16px;border-radius:999px;cursor:pointer;white-space:nowrap}
+.exSwitch button:hover{color:var(--tx)}
+.exSwitch button.on{background:var(--grad);color:var(--on-acc)}
+.exSwitch button:focus-visible{outline:2px solid var(--acc);outline-offset:2px}
+#view-exit .lede{margin:10px 20px 0;color:var(--tx2);font-size:13.5px;line-height:1.55;max-width:70ch}
+.exForm{margin:14px 20px 0}
+.exField{display:flex;gap:10px;align-items:stretch}
+.exField input{flex:1 1 auto;min-width:0;height:42px;box-sizing:border-box;padding:0 14px;border-radius:12px;border:1px solid var(--line2);background:var(--card2);color:var(--tx);font:inherit;font-size:14px}
+.exField input:focus-visible{outline:2px solid var(--acc);outline-offset:1px}
+.exField input[aria-invalid="true"]{border-color:var(--neg)}
+.exField .chip{height:42px;flex:none}
+.exField .chip:disabled{opacity:.6;cursor:default;transform:none}
+.exErr{margin-top:8px;color:var(--neg);font-size:12.8px;line-height:1.5}
+.exErr[hidden]{display:none}
+#exitBody{padding-bottom:18px}
+#exitBody .empty{padding:28px 20px}
+.exTiles{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin:18px 20px 0}
+.exTile{background:var(--card2);border-radius:16px;padding:14px 16px;min-width:0}
+.exTile .k{font-size:11.5px;font-weight:640;letter-spacing:.05em;text-transform:uppercase;color:var(--tx3)}
+.exTile .v{font-size:24px;font-weight:680;margin-top:6px;font-variant-numeric:tabular-nums;overflow-wrap:anywhere;color:var(--tx)}
+.exTile .v.unk{color:var(--tx3)}
+.exTile .s{font-size:12px;color:var(--tx3);margin-top:6px;line-height:1.45}
+.exTile.lost .v{color:var(--tx)}
+.exTile.lost.gM .v{color:var(--warn)}
+.exTile.lost.gL .v{color:var(--neg)}
+.exTile.lost.gS .v{color:var(--pos)}
+.exTotals{margin:12px 20px 0;color:var(--tx2);font-size:13px;line-height:1.55}
+.exNote{margin:8px 20px 0;color:var(--warn);font-size:12.8px;line-height:1.55}
+.exTbl{width:calc(100% - 40px);margin:14px 20px 0;border-collapse:collapse;font-size:13.5px}
+.exTbl th{font-size:11.5px;font-weight:600;color:var(--tx3);text-align:right;padding:8px 8px;border-bottom:1px solid var(--line);letter-spacing:.02em;white-space:nowrap}
+.exTbl th:first-child,.exTbl td:first-child{text-align:left;padding-left:0}
+.exTbl th:last-child,.exTbl td:last-child{padding-right:0;width:1%}
+.exTbl td{padding:11px 8px;border-bottom:1px solid var(--line);text-align:right;font-variant-numeric:tabular-nums;vertical-align:middle}
+.exTbl tr:last-child td{border-bottom:0}
+.exTbl .sym{display:block;font-weight:650;color:var(--tx);max-width:14ch;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.exTbl .bal{display:block;font-size:12px;color:var(--tx3);max-width:18ch;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.exTbl .sub{display:block;font-size:12px;color:var(--tx3)}
+.exUnk{color:var(--tx3);font-style:italic}
+.exWait{color:var(--tx3)}
+.gS{color:var(--pos)}.gM{color:var(--warn)}.gL{color:var(--neg)}
+.exBtn{display:inline-block;padding:6px 14px;border:0;border-radius:999px;font:inherit;font-size:13px;font-weight:650;color:var(--on-acc);background:var(--grad);cursor:pointer}
+.exSmall{margin:16px 20px 0;border-top:1px solid var(--line)}
+.exSmall summary{cursor:pointer;padding:12px 0;font-size:13.5px;font-weight:600;color:var(--tx2)}
+.exSmall .why0{font-size:12.5px;color:var(--tx3);margin:0 0 6px}
+.exSmall ul{list-style:none;margin:0;padding:0}
+.exSmall li{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:2px 12px;padding:8px 0;border-top:1px solid var(--line);font-size:13px}
+.exSmall li .sym{font-weight:650;color:var(--tx);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.exSmall li .why{color:var(--tx3);text-align:right;font-size:12.5px}
+.exSmall li .bal{color:var(--tx3);font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.exShareBar{margin:16px 20px 0;display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+.exShareBar .chip{height:38px}
+.exSharePanel{margin:14px 20px 0}
+.exSharePanel canvas{display:block;width:100%;max-width:600px;height:auto;aspect-ratio:1200/630;border-radius:14px;background:#0a0810;box-shadow:var(--shs)}
+.exSharePanel .row{display:flex;gap:10px;flex-wrap:wrap;margin-top:12px}
+#view-exit>.note{margin:0;padding:0 6px;border-radius:0;font-size:12px;color:var(--tx3);line-height:1.55}
+@media(max-width:720px){.exTiles{grid-template-columns:1fr}.exField{flex-wrap:wrap}.exField input{flex-basis:100%}.exField .chip{width:100%;justify-content:center}}
+@media(max-width:560px){
+  .exTbl,.exTbl tbody,.exTbl tr,.exTbl td{display:block}
+  .exTbl thead{display:none}
+  .exTbl tr{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:2px 8px;padding:12px 0;border-bottom:1px solid var(--line)}
+  .exTbl tr:last-child{border-bottom:0}
+  .exTbl td{padding:0;border:0;text-align:left;min-width:0}
+  .exTbl td.cTok{grid-column:1 / 3}
+  .exTbl td.cAct{grid-column:3;grid-row:1;text-align:right;width:auto}
+  .exTbl td[data-l]::before{content:attr(data-l);display:block;font-size:11px;color:var(--tx3);margin-bottom:1px}
+  .exTbl .sym,.exTbl .bal{max-width:100%}
+}
 .chip{
   display:inline-flex;align-items:center;gap:7px;height:38px;padding:0 15px;
   border-radius:999px;background:var(--card);box-shadow:var(--shs);
@@ -2325,6 +2400,11 @@ try{(function(){
   <section class="card">
     <header><span class="ttl">Your portfolio</span><span class="grow"></span>
       <span class="ttl mono" id="folioTotal"></span><div id="folioNetworkSlot"></div></header>
+    <!-- ۱۱ نوامبر — همان کلیدِ دوحالته‌ی نمای exit؛ «Exit value» همان نما را (با آدرسِ خودش) برای کیفِ وصل‌شده باز می‌کند -->
+    <div class="exSwitch" id="folioExitSwitch" role="group" aria-label="Portfolio views">
+      <button type="button" class="on" data-exsw="folio" aria-pressed="true">Holdings</button>
+      <button type="button" data-exsw="exit" aria-pressed="false">Exit value</button>
+    </div>
     <div id="folioBody"><div class="empty intro">
       <span class="eTtl">Connect a wallet to see what you hold</span>
       <!-- عمداً چیزی را که پانویسِ زیر کارت می‌گوید تکرار نمی‌کند: آنجا
@@ -2338,6 +2418,33 @@ try{(function(){
     Balances are read straight from the chain and refresh on their own. Prices come from
     GeckoTerminal — a token with no price feed is listed but left out of the percentages.
   </p>
+</div>
+
+
+<!-- =====================================================================
+     نمای Exit value — /exit و /exit/<آدرس> (۱۱ نوامبر ۲۰۲۶، فقط Base)
+     «اگر همه‌ی این کیف را همین حالا بفروشم چند دلار می‌گیرم؟»
+     همان سندِ اپ است (نه یک html تازه). تب‌اش داخلِ نمای Portfolio است.
+     ===================================================================== -->
+<div class="view" id="view-exit">
+  <section class="card" id="exitCard">
+    <header><span class="ttl">Exit value</span><span class="grow"></span></header>
+    <div class="exSwitch" id="exitSwitch" role="group" aria-label="Portfolio views">
+      <button type="button" data-exsw="folio" aria-pressed="false">Holdings</button>
+      <button type="button" class="on" data-exsw="exit" aria-pressed="true">Exit value</button>
+    </div>
+    <p class="lede">If you sold everything in a wallet right now, how many dollars would you actually get? Paper value uses market prices; exit value uses live quotes for selling the full balance. Base only.</p>
+    <form class="exForm" id="exitForm" novalidate>
+      <div class="exField">
+        <input id="exitAddr" type="text" inputmode="text" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="Wallet address (0x…)" aria-label="Wallet address" aria-describedby="exitErr">
+        <button class="chip solid" id="exitGo" type="submit">Check</button>
+      </div>
+      <div class="exErr" id="exitErr" role="alert" hidden></div>
+    </form>
+    <div id="exitBody" aria-live="polite"></div>
+    <div id="exitShare"></div>
+  </section>
+  <p class="note" id="exitNote">Exit value is a floor from live quotes. No quote means unknown, not zero.</p>
 </div>
 
 <div class="view" id="view-flow">
@@ -4641,6 +4748,8 @@ const EV_NAMES=[
      رویش باز شده — با اجازه‌ی صریح صاحب سایت. */
   "err:js","err:promise","err:res",
   "share:copy",
+  /* ۱۱ نوامبر — Exit value: فقط نام. هیچ آدرس و هیچ مقداری با این دو نمی‌رود. */
+  "exit:check","exit:share",
 ];
 /* Global Privacy Control یک «نه»ی صریح از خودِ کاربر است، نه یک حدس. مخاطب
    این سایت به حریم خصوصی حساس است و شمارش ارزش نادیده‌گرفتنش را ندارد.
@@ -5929,7 +6038,7 @@ function placeNetworkControl(){
     const slot=$(activeChain==="solana"?"solSwapNetworkSlot":"baseSwapNetworkSlot");
     if(bar.parentElement!==slot)slot.appendChild(bar);
     destination=bar;
-  }else if(tokenPage||view==="token")destination=$("networkControlParking");
+  }else if(tokenPage||view==="token"||view==="exit")destination=$("networkControlParking");   // exit: فقط Base، انتخابگر شبکه جایی ندارد
   else if(view==="folio")destination=$("folioNetworkSlot");
   else if(view==="flow")destination=$(fbOn&&$("fbNetSlot")?"fbNetSlot":"flowNetworkSlot");
   else if(view==="stocks")destination=$("stocksNetworkSlot");
@@ -8220,6 +8329,7 @@ function refreshSolanaViews(){
 }
 
 async function renderFolio(){
+  {const sw=$("folioExitSwitch");if(sw)sw.hidden=activeChain==="solana";}   // Exit value فقط Base
   if(activeChain==="solana")return solRunView("folio",renderSolFolio);
   const seq=++folioSeq;
   const body=$("folioBody");
@@ -8288,6 +8398,418 @@ async function renderFolio(){
   body.innerHTML=(total>0?bar:"")+list+
     (unpriced.length?`<div class="fnote">
       Tokens without a price feed are listed but left out of the percentages.</div>`:"");
+}
+
+/* =====================================================================
+   Exit value — «اگر همه‌ی این کیف را همین حالا بفروشم چند دلار می‌گیرم؟» (۱۱ نوامبر ۲۰۲۶، فقط Base)
+   ---------------------------------------------------------------------
+   فهرستِ دارایی از Worker می‌آید (GET /exit/holdings/<کیف>: ETH + ERC-20ِ غیرصفر)؛ قیمتِ کاغذی از GeckoTerminal
+   (tokens/multi?include=top_pools، دسته‌های ۲۵تایی، همان مسیرِ gtJson)؛ ارزشِ خروج از همان موتورِ مسیریابیِ سواپ
+   (findRoutes → quoteMany → Multicall3) برای فروشِ *کلِ* موجودی به WETH (یا USDC اگر بهتر بود).
+   قواعد:
+   • یک توکن فقط وقتی در مجموع می‌آید که (الف) قیمتش از استخری باشد با ذخیره‌ی ≥ EXIT_MIN_RESERVE_USD (همان عددِ گزارشِ
+     روزانه) و (ب) موجودی × قیمت ≥ ۱ دلار. بقیه در گروهِ جمع‌شده‌ی «small or unpriced» فهرست می‌شوند و در جمع نیستند.
+   • ETH همیشه می‌آید (کاغذی = خروج = موجودی × قیمتِ ETH).
+   • 🔴 «نمی‌دانم» هرگز صفر نیست: کوتِ ناموفق/خالی = «Unknown»، از جمعِ خروج بیرون، و در سطرِ جمع‌ها شمرده می‌شود.
+   • «Lost on exit» فقط روی توکن‌هایی است که *هر دو* عدد را دارند.
+   • بارِ RPC کراندار: حداکثر EXIT_CONC توکن هم‌زمان؛ هر توکن همان دسته‌بندیِ quoteBatch را می‌گیرد.
+   • رویدادها فقط نام‌اند: exit:check و exit:share — بدونِ آدرس و بدونِ هیچ مقدار. */
+const EXIT_MIN_RESERVE_USD=5000;     // آینه‌ی REPORT_MIN_RESERVE_USD در worker/report.js — نگهبان [exit] در run.py یکی‌بودنشان را می‌سنجد
+const EXIT_MIN_VALUE_USD=1;
+const EXIT_CONC=3,EXIT_BATCH=25;
+const EXIT_GAP_MED=5,EXIT_GAP_BIG=20;   // درصدِ شکاف: زیر ۵ کوچک، تا ۲۰ متوسط، بالاتر بزرگ
+const EXIT_ADDR_RE=/^0x[0-9a-fA-F]{40}$/;
+const EXIT_PATH_RE=/^\/exit(\/[^/]*)?\/?$/;
+const exitBootPath=EXIT_PATH_RE.test(location.pathname);
+let exvSeq=0,exitState=null,exitTouched=false,exitSkippedBoot=false;
+const exitPath=()=>EXIT_PATH_RE.test(location.pathname);
+const exitUrl=a=>"/exit"+(EXIT_ADDR_RE.test(a||"")?"/"+a:"");
+const exitNum=v=>{if(v==null||(typeof v==="string"&&v.trim()===""))return null;const n=Number(v);return Number.isFinite(n)?n:null;};
+function exitMoney(n){
+  if(n==null||!isFinite(n))return null;
+  return "$"+n.toLocaleString("en-US",n>=1e6?{maximumFractionDigits:0}:{minimumFractionDigits:2,maximumFractionDigits:2});
+}
+function exitPct(p){return p==null||!isFinite(p)?null:(Math.abs(p)<0.05?"0":p.toFixed(1))+"%";}
+function exitGapCls(pct){return pct<EXIT_GAP_MED?"gS":pct<EXIT_GAP_BIG?"gM":"gL";}
+function exitValidate(a){
+  if(!a)return "Enter a wallet address to check.";
+  if(!EXIT_ADDR_RE.test(a))return "That is not a valid address. Use 0x followed by 40 characters (0-9, a-f).";
+  return "";
+}
+function exitShowErr(msg){
+  const e=$("exitErr"),i=$("exitAddr");
+  e.textContent=msg||"";e.hidden=!msg;
+  if(msg)i.setAttribute("aria-invalid","true");else i.removeAttribute("aria-invalid");
+}
+// آدرسِ نمایش‌داده‌شده در نوارِ آدرس: نمای exit آدرسِ خودش را دارد
+function exitSetUrl(addr){
+  try{history.replaceState(null,"",exitUrl(addr));renderedPath=location.pathname;}catch{}
+}
+async function exitFetchHoldings(addr){
+  const r=await withTimeout(fetch(`${v4Origin()}/exit/holdings/${addr.toLowerCase()}`,{headers:{accept:"application/json"}}),20000);
+  if(!r.ok)throw new Error("holdings "+r.status);
+  const j=await r.json();
+  const big=/^[0-9]{1,78}$/;
+  if(!j||typeof j!=="object"||typeof j.eth!=="string"||!big.test(j.eth)||!Array.isArray(j.tokens))throw new Error("holdings shape");
+  const tokens=[];
+  for(const t of j.tokens){
+    if(!t||typeof t.address!=="string"||!EXIT_ADDR_RE.test(t.address)||typeof t.balance!=="string"||!big.test(t.balance))throw new Error("holdings shape");
+    const bal=BigInt(t.balance);
+    if(bal>0n)tokens.push({address:t.address.toLowerCase(),bal});
+  }
+  return {eth:BigInt(j.eth),tokens,more:j.more===true,unread:Number.isInteger(j.unread)&&j.unread>0?j.unread:0};
+}
+// قیمت، دسیمال و ذخیره‌ی استخرِ برتر — دسته‌ای. info: addr→{…}، failed: آدرس‌هایی که *نتوانستیم بپرسیم* (نامعلوم، نه «بی‌قیمت»)
+async function exitLoadPrices(addrs){
+  const info=new Map(),failed=new Set();
+  const list=[...new Set(addrs.map(a=>a.toLowerCase()))];
+  for(let i=0;i<list.length;i+=EXIT_BATCH){
+    const batch=list.slice(i,i+EXIT_BATCH);
+    try{
+      const j=await gtJson(`${GT}/networks/${CHAIN.gtNetwork}/tokens/multi/${batch.join(",")}?include=top_pools`);
+      if(!j||!Array.isArray(j.data))throw new Error("shape");
+      const pools=new Map();
+      for(const x of (Array.isArray(j.included)?j.included:[]))if(x&&typeof x.id==="string")pools.set(x.id,x);
+      for(const d of j.data){
+        const a=d&&d.attributes;
+        if(!a||typeof a.address!=="string")continue;
+        const tp=d.relationships&&d.relationships.top_pools&&d.relationships.top_pools.data;
+        const pool=Array.isArray(tp)&&tp[0]&&typeof tp[0].id==="string"?pools.get(tp[0].id):null;
+        info.set(a.address.toLowerCase(),{
+          price:exitNum(a.price_usd),
+          dec:Number.isInteger(a.decimals)&&a.decimals>=0&&a.decimals<=36?a.decimals:null,
+          sym:typeof a.symbol==="string"?a.symbol.slice(0,14):"",
+          name:typeof a.name==="string"?a.name.slice(0,40):"",
+          reserve:pool&&pool.attributes?exitNum(pool.attributes.reserve_in_usd):null});
+      }
+    }catch{batch.forEach(a=>failed.add(a));}
+  }
+  return {info,failed};
+}
+// یک موجودی را به سطرِ مدل تبدیل می‌کند: counted (در جمع) یا small (گروهِ جمع‌شده) با دلیل
+function exitMakeRow(t,info,failed){
+  const base={addr:t.address,bal:t.bal,sym:"",name:"",dec:null,price:null,reserve:null,paper:null,exit:null,quote:"none",state:"small",why:"noprice"};
+  const m=info.get(t.address);
+  if(!m){base.why=failed.has(t.address)?"unread":"noprice";return base;}
+  Object.assign(base,{sym:m.sym,name:m.name,dec:m.dec,price:m.price,reserve:m.reserve});
+  if(m.dec==null||m.price==null||!(m.price>0)){base.why="noprice";return base;}
+  const amt=Number(E.formatUnits(t.bal,m.dec)),paper=amt*m.price;
+  base.amt=amt;
+  if(!Number.isFinite(paper)){base.why="noprice";return base;}
+  base.paper=paper;
+  if(m.reserve==null||m.reserve<EXIT_MIN_RESERVE_USD){base.why="thin";return base;}
+  if(paper<EXIT_MIN_VALUE_USD){base.why="dust";return base;}
+  base.state="counted";base.why="";base.quote="pending";
+  return base;
+}
+/* ارزشِ خروجِ یک توکن به دلار: کوتِ بهترین مسیرِ فروشِ کلِ موجودی به WETH و به USDC (موتورِ سواپ)، بعد از کارمزد؛
+   WETH را به دلار با همان قیمتِ ETHِ کاغذی می‌بریم تا هر دو عدد از یک لحظه باشند. هیچ مسیری = null (Unknown). */
+async function exitQuoteOne(row,ethUsd){
+  const a=row.addr,weth=WETH_TOKEN(),usdc=tokenBySymbol("USDC");
+  if(!weth||!usdc)return null;
+  const amt=Number(E.formatUnits(row.bal,row.dec));
+  if(a===weth.address.toLowerCase())return ethUsd==null?null:amt*ethUsd;     // WETH → ETH: باز کردنِ ۱ به ۱، بدونِ استخر
+  let t;
+  try{t={address:E.getAddress(a),symbol:row.sym||"?",decimals:row.dec,name:row.name||row.sym||""};}catch{return null;}
+  const targets=a===usdc.address.toLowerCase()?[weth]:[weth,usdc];
+  const outs=[];
+  for(const tgt of targets){
+    try{
+      const {routes}=await findRoutes(t,tgt,row.bal,newStats());
+      if(!routes.length)continue;
+      const net=(routes[0].amountOut*BigInt(10000-(feeBps||0)))/10000n;
+      const usd=tgt===weth?(ethUsd==null?null:Number(E.formatUnits(net,18))*ethUsd):Number(E.formatUnits(net,tgt.decimals));
+      if(usd!=null&&Number.isFinite(usd)&&usd>=0)outs.push(usd);
+    }catch{/* این هدف جواب نداد؛ هدفِ دیگر ممکن است */}
+  }
+  return outs.length?Math.max(...outs):null;
+}
+async function exitPool(items,n,fn){
+  let i=0;
+  const run=async()=>{while(i<items.length){const k=i++;await fn(items[k],k);}};
+  await Promise.all(Array.from({length:Math.min(n,items.length)},run));
+}
+function exitTotals(rows){
+  const counted=rows.filter(r=>r.state==="counted");
+  const both=counted.filter(r=>r.paper!=null&&r.exit!=null);
+  const paper=counted.reduce((s,r)=>s+(r.paper||0),0);
+  const exit=counted.reduce((s,r)=>s+(r.exit||0),0);
+  const paperBoth=both.reduce((s,r)=>s+r.paper,0);
+  const pending=counted.filter(r=>r.quote==="pending").length;
+  const unknown=counted.filter(r=>!r.native&&r.quote!=="pending"&&r.exit==null).length;   // ETHِ بی‌قیمت جدا یادداشت می‌شود
+  const known=counted.some(r=>r.exit!=null),paperKnown=counted.some(r=>r.paper!=null);   // هیچ قیمتی = «نامعلوم»، نه ۰
+  const lost=known&&paperBoth>0?(1-exit/paperBoth)*100:null;
+  return {counted:counted.filter(r=>!r.native).length,paperKnown,paper,exit,paperBoth,pending,unknown,known,lost,
+    small:rows.filter(r=>r.state==="small")};
+}
+const exitWhy={noprice:"No price",unread:"Price unavailable",
+  thin:"Price comes from a pool under "+("$"+EXIT_MIN_RESERVE_USD.toLocaleString("en-US")),dust:"Worth under $1"};
+function exitRowHtml(r,mine){
+  const unk='<span class="exUnk" title="No quote came back, so this is unknown, not zero.">Unknown</span>';
+  const sym=esc(r.sym||(r.native?"ETH":shortAddr(r.addr)));
+  const bal=r.native?fmt(r.bal,18,6):fmt(r.bal,r.dec,6);
+  let exitC,gapC;
+  if(r.quote==="pending"){exitC='<span class="exWait">Quoting…</span>';gapC='<span class="exWait">…</span>';}
+  else if(r.exit==null){exitC=unk;gapC='<span class="exUnk">—</span>';}
+  else if(r.paper==null){exitC=exitMoney(r.exit);gapC='<span class="exUnk">—</span>';}
+  else{
+    const gap=r.paper-r.exit,pct=r.paper>0?gap/r.paper*100:0,none=gap<0.005;
+    exitC=exitMoney(r.exit);
+    gapC=`<span class="${exitGapCls(none?0:pct)}">${none?"0%":"−"+esc(exitPct(pct))}<span class="sub">${none?"":"−"+esc(exitMoney(gap))}</span></span>`;
+  }
+  const paperC=r.paper==null?unk:exitMoney(r.paper);
+  const act=mine&&!r.native?`<button type="button" class="exBtn" data-exit-sell="${esc(r.addr)}" aria-label="Exit ${sym}">Exit</button>`:"";
+  return `<tr data-addr="${esc(r.addr)}" data-paper="${r.paper==null?"":r.paper.toFixed(2)}" data-exit="${r.exit==null?"":r.exit.toFixed(2)}">`+
+    `<td class="cTok"><span class="sym">${sym}</span><span class="bal">${esc(bal)}</span></td>`+
+    `<td data-l="Paper">${paperC}</td><td data-l="Exit now">${exitC}</td><td data-l="Gap">${gapC}</td><td class="cAct">${act}</td></tr>`;
+}
+function exitRender(){
+  const st=exitState,body=$("exitBody");
+  if(!st)return;
+  const keepOpen=!!(body.querySelector("#exitSmall")&&body.querySelector("#exitSmall").open);
+  const mine=!!account&&st.addr.toLowerCase()===account.toLowerCase();
+  const T=exitTotals(st.rows);
+  const waiting=T.pending>0;
+  let h="";
+  const tile=(cls,k,v,vcls,sub,title,val)=>`<div class="exTile ${cls}"${title?` title="${esc(title)}"`:""}><div class="k">${k}</div>`+
+    `<div class="v ${vcls}"${val==null?"":` data-val="${val}"`}>${v}</div><div class="s">${sub}</div></div>`;
+  const dash='<span class="exUnk">Unknown</span>';
+  const lostExplain="What selling everything right now would cost you because the pools are thin.";
+  h+='<div class="exTiles">';
+  const noQ=!waiting&&T.unknown>0,unquotedUsd=Math.max(0,T.paper-T.paperBoth);   // کاغذیِ توکن‌هایی که کوت ندارند
+  h+=tile("paper","Paper value",T.paperKnown?exitMoney(T.paper):dash,T.paperKnown?"":"unk",noQ?`${exitMoney(unquotedUsd)} of this has no live quote`:"Balance × market price",null,T.paperKnown?T.paper.toFixed(2):null);
+  h+=tile("exnow","Exit value now",waiting?'<span class="exWait">Quoting…</span>':(T.known?exitMoney(T.exit):dash),waiting||T.known?"":"unk",
+    "A floor from live quotes: selling the full balance of each token",null,waiting||!T.known?null:T.exit.toFixed(2));
+  h+=tile("lost "+(T.lost==null?"":exitGapCls(Math.max(0,T.lost))),"Lost on exit",waiting?'<span class="exWait">…</span>':(T.lost==null?dash:exitPct(Math.max(0,T.lost))),
+    waiting||T.lost!=null?"":"unk",noQ&&T.lost!=null?`On the ${exitMoney(T.paperBoth)} that could be quoted.`:lostExplain,lostExplain,waiting||T.lost==null?null:T.lost.toFixed(2));
+  h+="</div>";
+  const bits=[];
+  bits.push(`${T.counted} token${T.counted===1?"":"s"} counted${st.rows.some(r=>r.native)?" plus ETH":""}`);
+  if(!waiting&&T.unknown>0)bits.push(`${T.unknown} token${T.unknown===1?"":"s"} could not be quoted`);
+  h+=`<p class="exTotals" id="exitTotals">${bits.join(" · ")}</p>`;
+  if(st.rows.some(r=>r.native&&r.paper==null))h+='<p class="exNote">ETH could not be priced right now, so it is not in the totals. That is unknown, not zero.</p>';
+  if(!waiting&&T.unknown>0)h+='<p class="exNote">Tokens without a quote are left out of the exit value and the percentage. Their paper value is still in Paper value.</p>';
+  if(st.more)h+='<p class="exNote">This wallet holds more tokens than we read (the first 100). The totals cover only the tokens listed here.</p>';
+  if(st.unread>0)h+=`<p class="exNote">${st.unread} token${st.unread===1?"":"s"} could not be read from the chain and ${st.unread===1?"is":"are"} not counted.</p>`;
+  const failedN=st.rows.filter(r=>r.why==="unread").length;
+  if(failedN>0)h+=`<p class="exNote">Prices could not be read for ${failedN} token${failedN===1?"":"s"}. They are listed as unpriced, not as zero.</p>`;
+  const counted=st.rows.filter(r=>r.state==="counted"||r.native).sort((a,b)=>(b.paper==null?-1:b.paper)-(a.paper==null?-1:a.paper));
+  if(counted.length){
+    h+='<table class="exTbl" id="exitTbl"><thead><tr><th>Token</th><th>Paper</th><th>Exit now</th><th>Gap</th><th></th></tr></thead><tbody>'+
+      counted.map(r=>exitRowHtml(r,mine)).join("")+"</tbody></table>";
+  }
+  const small=st.rows.filter(r=>r.state==="small"&&!r.native);
+  if(small.length){
+    h+=`<details class="exSmall" id="exitSmall"${keepOpen?" open":""}><summary>${small.length} small or unpriced token${small.length===1?"":"s"}</summary>`+
+      '<p class="why0">Listed for completeness. Not counted in any total.</p><ul>'+
+      small.map(r=>`<li data-addr="${esc(r.addr)}"><span class="sym">${esc(r.sym||shortAddr(r.addr))}</span>`+
+        `<span class="why">${esc(exitWhy[r.why]||"")}${r.why==="dust"&&r.paper!=null?" · "+esc(exitMoney(r.paper)):""}</span>`+
+        `<span class="bal">${r.dec==null?"":esc(fmt(r.bal,r.dec,6))}</span></li>`).join("")+"</ul></details>";
+  }
+  body.innerHTML=h;
+  exitPaintShare();
+}
+function exitStatus(msg){$("exitBody").innerHTML='<div class="empty"><span class="spin"></span>'+esc(msg)+"</div>";}
+function exitFail(msg){$("exitBody").innerHTML='<div class="empty">'+esc(msg)+"</div>";}
+async function exitRun(raw){
+  const addr=String(raw||"").trim();
+  const bad=exitValidate(addr);
+  exitShowErr(bad);
+  if(bad)return;
+  const seq=++exvSeq;
+  exitTouched=true;
+  exitSetUrl(addr);
+  exitState=null;exitPaintShare();
+  $("exitAddr").value=addr;
+  $("exitGo").disabled=true;$("exitBody").setAttribute("aria-busy","true");
+  try{
+    exitStatus("Reading holdings…");
+    if(!E)throw new Error("not ready");
+    await ensureBaseDexes();
+    let h;
+    try{h=await exitFetchHoldings(addr);}
+    catch{
+      if(seq!==exvSeq)return;
+      exitFail("We could not read this wallet's holdings. That is unknown, not zero. Try again in a moment.");return;
+    }
+    if(seq!==exvSeq)return;
+    const rows=[];
+    const weth=WETH_TOKEN();
+    if(h.eth>0n)rows.push({native:true,addr:"native",sym:"ETH",name:"Ether",dec:18,bal:h.eth,price:null,paper:null,exit:null,quote:"pending",state:"counted",why:""});
+    if(!h.tokens.length&&h.eth===0n){
+      exitState={addr,rows:[],more:h.more,unread:h.unread};
+      exitFail(h.more||h.unread?"No ETH and no readable tokens were found.":"This wallet holds no ETH and no tokens on Base.");
+      ev("exit:check");return;
+    }
+    if(h.tokens.length)exitStatus(`Pricing ${h.tokens.length} token${h.tokens.length===1?"":"s"}…`);
+    const {info,failed}=await exitLoadPrices(h.tokens.map(t=>t.address).concat([weth.address]));
+    if(seq!==exvSeq)return;
+    const wm=info.get(weth.address.toLowerCase());
+    const ethUsd=wm&&wm.price!=null&&wm.price>0?wm.price:null;
+    const eth=rows.find(r=>r.native);
+    if(eth){
+      eth.amt=Number(E.formatUnits(eth.bal,18));
+      if(ethUsd!=null){eth.paper=eth.amt*ethUsd;eth.exit=eth.paper;eth.price=ethUsd;}   // ETH: کاغذی = خروج
+      eth.quote="done";
+    }
+    for(const t of h.tokens)rows.push(exitMakeRow(t,info,failed));
+    exitState={addr,rows,more:h.more,unread:h.unread};
+    exitRender();
+    const todo=rows.filter(r=>r.state==="counted"&&r.quote==="pending");
+    await exitPool(todo,EXIT_CONC,async r=>{
+      let usd=null;
+      try{usd=await exitQuoteOne(r,ethUsd);}catch{usd=null;}
+      if(seq!==exvSeq)return;
+      r.exit=usd==null||!Number.isFinite(usd)?null:usd;      // 🔴 null = Unknown؛ هرگز ۰
+      r.quote=r.exit==null?"unknown":"ok";
+      exitRender();
+    });
+    if(seq!==exvSeq)return;
+    exitRender();
+    ev("exit:check");
+  }catch(e){
+    if(seq!==exvSeq)return;
+    console.error("exit",e);
+    exitFail("The check could not finish. Nothing was sold or sent. Try again in a moment.");
+  }finally{
+    if(seq===exvSeq){$("exitGo").disabled=false;$("exitBody").removeAttribute("aria-busy");}
+  }
+}
+/* خروج از نمایِ exit: آدرس را به مسیرِ اپ برمی‌گرداند (مثلِ leaveTokenPage) و اگر بوت از بارِ نمودار و اسکنِ سواپ گذشته بود جبران می‌کند */
+function exitLeave(v){
+  exvSeq++;   // کوت‌های در راه نتیجه‌شان را جایی نمی‌نویسند
+  try{history.pushState(null,"","/app#"+v);renderedPath=location.pathname;}catch{}
+  if(exitSkippedBoot){exitSkippedBoot=false;loadChart();runScan(tokenOut);scheduleQuote();}
+}
+function exitEnterUrl(replace){
+  const a=EXIT_ADDR_RE.test($("exitAddr").value.trim())?$("exitAddr").value.trim():(account||"");
+  try{history[replace?"replaceState":"pushState"](null,"",exitUrl(a));renderedPath=location.pathname;}catch{}
+}
+// آدرسِ خالیِ دست‌نخورده با حسابِ وصل‌شده پر می‌شود؛ دکمه‌های Exit با حسابِ فعلی دوباره سنجیده می‌شوند
+function exitSyncAccount(){
+  const i=$("exitAddr");
+  if(!i)return;
+  if(account&&!i.value.trim()&&!exitTouched)i.value=account;
+  if(exitState)exitRender();
+}
+// کلیدِ «Exit value» داخلِ Portfolio: همان نما، برای کیفِ وصل‌شده، با آدرسِ خودش
+function exitOpenFromFolio(){
+  $("exitAddr").value=account||"";exitTouched=false;exitShowErr("");
+  setView("exit");
+  if(account)exitRun(account);
+}
+function exitBootStart(seg){
+  let a="";
+  try{a=decodeURIComponent(seg||"").replace(/^\//,"");}catch{a=String(seg||"").replace(/^\//,"");}
+  $("exitAddr").value=a;
+  if(a.trim())exitRun(a);
+  else if(account)$("exitAddr").value=account;
+}
+// دکمه‌ی Exit: سواپ را برای فروشِ کلِ موجودیِ همین توکن به ETH باز می‌کند (فقط برای کیفِ وصل‌شده)
+async function exitSell(addr){
+  const r=exitState&&exitState.rows.find(x=>x.addr===addr);
+  if(!r||r.native||r.dec==null||!account||exitState.addr.toLowerCase()!==account.toLowerCase())return;
+  const amt=E.formatUnits(r.bal,r.dec);
+  hideSwapDone();
+  setView("swap",false);
+  try{history.replaceState(null,"","/app#swap?in="+r.addr+"&out=ETH&amt="+encodeURIComponent(amt));renderedPath=location.pathname;}catch{}
+  await applyShareParams();
+  refreshAllowance().then(scheduleQuote);
+}
+/* کارتِ اشتراک: ۱۲۰۰×۶۳۰ روی canvas، همان سبکِ تیره‌ی سایت. هیچ تصویرِ سمتِ سرور نیست. فقط عددهای *قابلِ مقایسه* (توکن‌هایی
+   که هر دو عدد را دارند) — و اگر توکنی کوت نداشت، یک خطِ صادقانه می‌گوید. */
+function exitCardData(){
+  const st=exitState;if(!st)return null;
+  const T=exitTotals(st.rows);
+  if(T.pending>0||!T.known)return null;
+  return {addr:st.addr,paper:T.paperBoth,exit:T.exit,lost:T.lost,unknown:T.unknown};
+}
+function exitDrawCard(cv,d){
+  const W=1200,H=630,c=cv.getContext("2d");
+  cv.width=W;cv.height=H;
+  const font=getComputedStyle(document.body).fontFamily||"system-ui,sans-serif";
+  const mono='ui-monospace,SFMono-Regular,Menlo,Consolas,monospace';
+  const bg=c.createLinearGradient(0,0,W,H);bg.addColorStop(0,"#0a0810");bg.addColorStop(1,"#171229");
+  c.fillStyle=bg;c.fillRect(0,0,W,H);
+  const bar=c.createLinearGradient(0,0,W,0);
+  ["#22EFF6","#43B5F7","#7396F8","#9C82F9","#C56CF5"].forEach((col,i,a)=>bar.addColorStop(i/(a.length-1),col));
+  c.fillStyle=bar;c.fillRect(0,0,W,8);
+  c.textBaseline="alphabetic";
+  c.fillStyle="#f0eef7";c.font="700 46px "+font;c.textAlign="left";c.fillText("Zaexa",64,104);
+  c.fillStyle="#a49fb8";c.font="500 28px "+mono;c.textAlign="right";c.fillText(shortAddr(d.addr),W-64,102);
+  const money=n=>"$"+n.toLocaleString("en-US",{minimumFractionDigits:n<100?2:0,maximumFractionDigits:n<100?2:0});
+  c.textAlign="left";
+  c.fillStyle="#a49fb8";c.font="500 32px "+font;c.fillText("On paper",64,214);
+  const ps=money(d.paper);
+  c.fillStyle="#736d8a";c.font="600 56px "+font;c.fillText(ps,64,280);
+  const pw=c.measureText(ps).width;
+  c.strokeStyle="#f2545b";c.lineWidth=5;c.beginPath();c.moveTo(56,260);c.lineTo(72+pw,246);c.stroke();
+  c.fillStyle="#a49fb8";c.font="500 32px "+font;c.fillText("If you sold now",64,352);
+  const es=money(d.exit);
+  c.font="800 150px "+font;
+  const g=c.createLinearGradient(64,0,64+Math.max(300,c.measureText(es).width),0);
+  g.addColorStop(0,"#22EFF6");g.addColorStop(.5,"#7396F8");g.addColorStop(1,"#C56CF5");
+  c.fillStyle=g;c.fillText(es,60,484);
+  const lp=d.lost==null?null:Math.max(0,d.lost);
+  c.fillStyle=lp==null?"#a49fb8":lp<EXIT_GAP_MED?"#21d3a0":lp<EXIT_GAP_BIG?"#f5a623":"#f2545b";
+  c.font="650 40px "+font;
+  c.fillText(lp==null?"":(lp<0.05?"Almost nothing would be lost on exit":exitPct(lp)+" would be lost on exit"),64,548);
+  c.fillStyle="#736d8a";c.font="500 26px "+font;
+  if(d.unknown>0)c.fillText("Excludes "+d.unknown+" token"+(d.unknown===1?"":"s")+" without a quote",64,592);
+  c.textAlign="right";c.fillStyle="#a49fb8";c.font="600 30px "+font;c.fillText("zaexa.com/exit",W-64,592);
+}
+function exitPaintShare(){
+  const box=$("exitShare");
+  if(!box)return;
+  const d=exitCardData(),open=!!box.querySelector("canvas");
+  if(!d){box.innerHTML="";return;}
+  if(!box.querySelector("#exitShareBtn")){
+    box.innerHTML='<div class="exShareBar"><button type="button" class="chip" id="exitShareBtn">Share card</button></div><div class="exSharePanel" id="exitSharePanel" hidden></div>';
+  }
+  if(open||!$("exitSharePanel").hidden)exitShowCard();
+}
+function exitShowCard(){
+  const d=exitCardData(),p=$("exitSharePanel");
+  if(!d||!p)return;
+  p.hidden=false;
+  if(!p.querySelector("canvas"))p.innerHTML='<canvas id="exitCard1200" width="1200" height="630" role="img" aria-label="Share card: what this wallet would get if it sold everything now"></canvas>'+
+    '<div class="row"><button type="button" class="chip solid" id="exitDl">Download PNG</button><button type="button" class="chip" id="exitCopy">Copy link</button></div>';
+  exitDrawCard(p.querySelector("canvas"),d);
+}
+function exitDownload(){
+  const cv=document.getElementById("exitCard1200");
+  if(!cv)return;
+  cv.toBlob(b=>{
+    if(!b)return;
+    const u=URL.createObjectURL(b),a=document.createElement("a");
+    a.href=u;a.download="zaexa-exit-value.png";document.body.appendChild(a);a.click();a.remove();
+    setTimeout(()=>URL.revokeObjectURL(u),4000);
+    ev("exit:share");
+  },"image/png");
+}
+async function exitCopyLink(btn){
+  if(!exitState)return;
+  const ok=await copyLink(location.origin+"/exit/"+exitState.addr,btn,"link");
+  if(ok)ev("exit:share");
+}
+function exitWire(){
+  $("exitForm").addEventListener("submit",e=>{e.preventDefault();exitRun($("exitAddr").value);});
+  $("exitAddr").addEventListener("input",()=>{exitTouched=true;if($("exitErr").hidden===false)exitShowErr("");});
+  $("exitBody").addEventListener("click",e=>{
+    const b=e.target.closest&&e.target.closest("[data-exit-sell]");
+    if(b)exitSell(b.dataset.exitSell);
+  });
+  $("exitShare").addEventListener("click",e=>{
+    const t=e.target.closest&&e.target.closest("button");
+    if(!t)return;
+    if(t.id==="exitShareBtn")exitShowCard();
+    else if(t.id==="exitDl")exitDownload();
+    else if(t.id==="exitCopy")exitCopyLink(t);
+  });
+  document.querySelectorAll("[data-exsw]").forEach(b=>b.addEventListener("click",()=>{
+    if(b.dataset.exsw==="exit"){if(view!=="exit")exitOpenFromFolio();}
+    else setView("folio");
+  }));
 }
 
 /* =====================================================================
@@ -10507,6 +11029,7 @@ function paintAmtClear(){
   savePair();     // همان قلاب: بعد از هر تغییر وضعیت، انتخاب کاربر را نگه دار
 }
 function refreshButton(){
+  if(view==="exit")exitSyncAccount();   // حسابِ وصل‌شده عوض شد: آدرسِ خالی پر شود و دکمه‌های Exit دوباره سنجیده شوند
   paintAmtClear();
   if(busy)return;
   const b=$("actBtn");b.onclick=null;
@@ -13311,11 +13834,15 @@ function mktGet(){try{return localStorage.getItem(MKT_KEY)==="flow"?"flow":"pair
 function mktSet(v){try{localStorage.setItem(MKT_KEY,v);}catch(e){}}
 function setView(v,push){
   if(v&&v.indexOf("?")>=0)v=v.slice(0,v.indexOf("?"));
-  if(!["swap","folio","flow","token","faq","stocks"].includes(v))v="swap";
+  if(!["swap","folio","flow","token","faq","stocks","exit"].includes(v))v="swap";
   /* اگر از صفحه‌ی توکن بیرون می‌رویم، آدرس را خودِ leaveTokenPage عوض
      می‌کند، پس دیگر hash نباید دوباره نوشته شود. */
   const leaving=tokenPage&&v!=="token";
   if(leaving){leaveTokenPage(v);push=false;}
+  /* ۱۱ نوامبر — نمای exit آدرسِ خودش را دارد (/exit، /exit/<آدرس>): ورود از جایی که مسیرش /exit نیست آن را می‌نویسد
+     (کلیک = pushState؛ بوت یا hash = replaceState تا دکمه‌ی back تله نشود)، و خروج از آن مسیر را به /app#<نما> برمی‌گرداند. */
+  if(v==="exit"&&!exitPath()&&!tokenPage){exitEnterUrl(push===false);push=false;}
+  else if(v!=="exit"&&exitPath()&&!leaving){exitLeave(v);push=false;}
   view=v;flowPicking=false;
   savedWatchPlace();
   placeNetworkControl();paintSrc();
@@ -13339,7 +13866,8 @@ function setView(v,push){
   // سه نما در یک صفحه‌اند و با hash عوض می‌شوند، پس آمار معمولیِ «بازدید
   // صفحه» آن‌ها را از هم تفکیک نمی‌کند. اینجا تنها نقطه‌ی ورود هر سه است.
   // نامِ رویدادِ تازه نمی‌سازیم (قاعده‌ی مالک: هیچ نامِ /ev جدیدی)، پس نمای Stocks شمرده نمی‌شود.
-  if(v!=="stocks")ev("view:"+v);
+  if(v!=="stocks"&&v!=="exit")ev("view:"+v);
+  if(v==="exit")exitSyncAccount();
   scrollTo({top:0,behavior:"instant"});
 }
 /* ⚠️ عوض‌کردنِ بازه‌ی زمانی هم renderFlow و paintFlowToken را صدا می‌زند؛ بازنقاشیِ
@@ -13391,6 +13919,7 @@ function applyTheme(){document.documentElement.setAttribute("data-theme",theme);
   if(chartData&&panel("plot").querySelector("svg"))drawChart(chartData);}
 
 function wire(){
+  exitWire();
   initSavedWatch();
   /* وردمارک دیگر یک اسپنِ متنی نیست، آرت‌ورکِ SVG است — با
      textContent عوض نمی‌شود، و لازم هم نیست: متنش ثابت است. */
@@ -13880,7 +14409,8 @@ $("setBtn").addEventListener("click",()=>{$("tourBtn").hidden=!!tokenPage;});
     // ۱۳ اکتبر: روی بوتِ سولانا هیچ درخواستِ Base (لوگوی USDC، استخر و نمودار) نمی‌رود؛ با سوییچ به Base همان لحظه نقاشی می‌شود
     if(activeChain!=="solana")paintToken("in",tokenIn),paintToken("out",tokenOut);
     readFee();
-    if(activeChain!=="solana")loadChart();else baseBootPaintPending=true;
+    if(exitBootPath&&activeChain!=="solana")exitSkippedBoot=true;     // /exit: نمودار و اسکنِ سواپ بارگذاری نمی‌شود (GT را برای قیمت‌ها آزاد می‌گذارد)؛ exitLeave جبران می‌کند
+    else if(activeChain!=="solana")loadChart();else baseBootPaintPending=true;
     /* ۱۱ اکتبر: بازیابیِ بی‌صدای Base *همین‌جا* شروع می‌شود، نه آخرِ راه‌اندازی، و منتظر هیچ‌چیز نمی‌ماند
        (نه دروازه‌ها، نه applyShareParams، نه runScan). وابستگی‌های connectWithProvider — E، iErc، iExec،
        iMulti، readProvider، tokenIn و allTokens — همه تا این خط ساخته شده‌اند؛ دروازه‌ها فقط به
@@ -13957,12 +14487,13 @@ $("setBtn").addEventListener("click",()=>{$("tourBtn").hidden=!!tokenPage;});
     return;
   }
   const onToken=/^\/t\/(0x[0-9a-fA-F]{40})\/?$/.exec(location.pathname);
-  if(onToken){activeChain="base";paintSrc();paintSrc2();}
+  const onExit=exitBootPath?EXIT_PATH_RE.exec(location.pathname):null;
+  if(onToken||onExit){activeChain="base";paintSrc();paintSrc2();}
   tokenPage=!!onToken;
-  setView(tokenPage?"token":(parseHash().view||"swap"),false);
-  if(!tokenPage)updateSwapViewForChain();
+  setView(tokenPage?"token":(onExit?"exit":(parseHash().view||"swap")),false);
+  if(!tokenPage&&!onExit)updateSwapViewForChain();
   if(activeChain==="solana")document.documentElement.removeAttribute("data-bootchain");   // سولانا چیده شد
-  if(!tokenPage)setTimeout(tourMaybe,800);   // [first-visit tour]
+  if(!tokenPage&&!onExit)setTimeout(tourMaybe,800);   // [first-visit tour]
   /* ⚠️ ترتیب اینجا سرعتِ دیده‌شدن را تعیین می‌کند. خواندنِ خودِ توکن به
      دروازه‌های صرافی ربطی ندارد، پس همان اول شروع می‌شود و موازی با
      verifyDexes پیش می‌رود؛ نام و لوگو و اعداد بازار چند ثانیه زودتر
@@ -13971,6 +14502,13 @@ $("setBtn").addEventListener("click",()=>{$("tourBtn").hidden=!!tokenPage;});
   const early=tokenPage?openTokenPage(onToken[1]):null;
   if(!tokenPage&&parseHash().params.get("chain")==="solana"){await applyShareParams();return;}
   await ensureBaseDexes();      // قبل از هر کوتی، بدان کدام صرافی قابل اتکاست
+  if(onExit){                   // ۱۱ نوامبر: /exit/<آدرس> بی‌درنگ شروع می‌کند؛ بقیه‌ی بوتِ سواپ لازم نیست
+    if(baseBootPaintPending){baseBootPaintPending=false;paintToken("in",tokenIn);paintToken("out",tokenOut);exitSkippedBoot=true;}   // بوتِ ذخیره‌شده‌ی سولانا: نقاشیِ Base که جا ماند، موقعِ خروج
+    exitBootStart(onExit[1]);
+    if(baseRestoreDone)await baseRestoreDone;
+    refreshButton();
+    return;
+  }
   if(early){await early;runTokenQuote();}
   // لینک اشتراکی *بعد* از دروازه‌ها اعمال می‌شود: تا ندانیم کدام صرافی
   // قابل اتکاست، کوت گرفتن برای توکن ناشناس معنا ندارد.

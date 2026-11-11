@@ -350,6 +350,9 @@ const EV_OK = new Set([
   /* شمرده می‌شود وقتی لینکِ چکِ یک توکن با موفقیت کپی می‌شود — هیچ توکن،
      آدرس یا URLای هرگز فرستاده نمی‌شود، فقط خودِ رخداد. */
   "share:copy",
+  /* ۱۱ نوامبر — Exit value (/exit): «یک بررسی تمام شد» و «کارت دانلود یا لینک کپی شد». فقط نام — نه آدرسِ کیف، نه هیچ مقدار؛
+     detail همیشه خالی است. صفحه‌ی اپ همین دو را در EV_NAMES دارد و کاوشگرِ [events] یکی‌بودنِ دو فهرست را می‌سنجد. */
+  "exit:check", "exit:share",
 ]);
 /* جزئیات هم بسته است. رشته‌ی آزاد یعنی هرکسی می‌تواند هرچه خواست در انبار ما
    بنویسد، و یک روز چیزی که نباید ثبت شود از همین راه ثبت می‌شود. */
@@ -2959,6 +2962,8 @@ async function diagVerdict(request, url, env, ctx) {
    مرز است و نگهبانش در worker/test.mjs پینش می‌کند. */
 export const ROBOTS_DISALLOW = Object.freeze([
   "/gt/", "/cg/", "/cmc/", "/vd/", "/sol/", "/base/", "/v4/", "/pnl/", "/ev", "/report/run",
+  // ۱۱ نوامبر — فقط خودِ اندپوینتِ داده؛ /exit و /exit/<آدرس> صفحه‌اند و باز می‌مانند (noindex را هدر می‌گوید، پس خزنده باید بتواند آن را ببیند)
+  "/exit/holdings",
 ]);
 export const ROBOTS_TXT = [
   "# Zaexa — a DEX aggregator with an exit check. Read us; that is the point.",
@@ -4498,6 +4503,93 @@ async function pnlRoute(request, url, ctx, env) {
 }
 
 /* =====================================================================
+   ۱۱ نوامبر — «Exit value»: GET /exit/holdings/<کیف> و صفحه‌ی /exit
+   =====================================================================
+   سؤال: «اگر همه‌ی این کیف را همین حالا بفروشم چند دلار می‌گیرم؟» این مسیر فقط *فهرستِ داراییِ* کیف را
+   می‌دهد (ETH + توکن‌های ERC-20 با موجودیِ غیرصفر)؛ قیمت و کوتِ فروش را خودِ مرورگر می‌گیرد.
+   • alchemy_getTokenBalances + eth_getBalance روی env.BASE_RPC (همان pnlRpcBatch: مهلت و سقفِ حجمِ بدنه).
+   • 🔴 شکستِ بالادست = {err:"upstream"} با وضعیتِ غیر-۲۰۰ — هرگز فهرستِ خالی (خالی یعنی «می‌دانیم چیزی ندارد»).
+   • 🔴 آدرسِ کیف هرگز در KV، لاگ یا /ev نمی‌نشیند؛ تنها جایی که هست کلیدِ کشِ ۶۰ثانیه‌ایِ Cache API است
+     (مثلِ /pnl) و شکست هرگز کش نمی‌شود. URLِ BASE_RPC کلید را دارد و هرگز در پاسخ نمی‌آید.
+   • بیشینه EXIT_HOLD_MAX توکن؛ بیشتر از آن (یا pageKey از بالادست) → more:true.
+   • مقدارها رشته‌ی دهدهیِ خام‌اند (wei / واحدِ کوچکِ توکن)، نه عدد — تا دقت نرود.
+   صفحه: /exit و /exit/<آدرس> همان سندِ اپ (/app) را سرو می‌کنند، نه یک html تازه (html تازه یک قدمِ دستیِ پنلِ کلادفلر
+   می‌خواهد). /exit/<آدرس> هدرِ X-Robots-Tag: noindex می‌گیرد؛ خودِ /exit نه. */
+const EXIT_HOLD_MAX = 100, EXIT_HOLD_TTL_S = 60;
+const EXIT_PAGE = /^\/exit(?:\/([^/]*))?$/;
+function exitJson(body, status, cc) {
+  return new Response(JSON.stringify(body), { status, headers: {
+    ...CORS, "content-type": "application/json; charset=utf-8", "cache-control": cc || "no-store" } });
+}
+const exitUpstream = () => exitJson({ err: "upstream" }, 502);
+function exitDec(hex) {
+  if (typeof hex !== "string" || !/^0x[0-9a-fA-F]+$/.test(hex) || hex.length > 2 + 64) return null;
+  try { return BigInt(hex).toString(); } catch (e) { return null; }
+}
+async function exitHoldingsRoute(request, url, ctx, env) {
+  if (!rateOk(request, "exit", RL_LIMIT, RL_WINDOW_MS))
+    return fail(429, "too many requests", { "retry-after": "60" });
+  if (request.method === "OPTIONS") return new Response(null, { status: 204, headers: CORS });
+  if (request.method !== "GET" && request.method !== "HEAD") return fail(405, "only GET");
+  const rest = url.pathname.slice("/exit/holdings".length);
+  if (!rest.startsWith("/")) return fail(400, "bad address");
+  const addr = rest.slice(1);
+  if (!PNL_ADDR.test(addr)) return fail(400, "bad address");
+  const wallet = addr.toLowerCase();
+
+  const store = cacheStore();
+  const cacheKey = new Request("https://exit.zaexa.internal/h/" + wallet, { method: "GET" });
+  if (store) {
+    try {
+      const hit = await store.match(cacheKey);
+      if (hit) return exitJson(await hit.json(), 200, "public, max-age=" + EXIT_HOLD_TTL_S);
+    } catch (e) { /* کش خراب = بی‌کش */ }
+  }
+  const rpcUrl = env && typeof env.BASE_RPC === "string" ? env.BASE_RPC : "";
+  if (!rpcUrl) return exitUpstream();
+  const r = await pnlRpcBatch(rpcUrl, [
+    ["alchemy_getTokenBalances", [wallet, "erc20", { maxCount: EXIT_HOLD_MAX }]],
+    ["eth_getBalance", [wallet, "latest"]],
+  ]);
+  // هر دو باید جواب داده باشند: نیمه‌جواب «نمی‌دانم» است، نه «ندارد»
+  if (!r || !r[0] || !r[1]) return exitUpstream();
+  const eth = exitDec(r[1]);
+  const list = r[0] && Array.isArray(r[0].tokenBalances) ? r[0].tokenBalances : null;
+  if (eth == null || !list) return exitUpstream();
+  const tokens = [], seen = new Set();
+  let more = typeof r[0].pageKey === "string" && r[0].pageKey !== "", unread = 0;
+  for (const t of list) {
+    const a = t && typeof t.contractAddress === "string" ? t.contractAddress : "";
+    if (!EVM_ADDR.test(a)) { unread++; continue; }
+    if (t.error || t.tokenBalance == null) { unread++; continue; }   // خواندنی نیست = نامعلوم؛ شمرده می‌شود، صفر نمی‌شود
+    const bal = exitDec(t.tokenBalance);
+    if (bal == null) { unread++; continue; }
+    if (bal === "0") continue;                                        // صفرِ واقعی
+    const k = a.toLowerCase();
+    if (seen.has(k)) continue;
+    seen.add(k);
+    if (tokens.length >= EXIT_HOLD_MAX) { more = true; continue; }
+    tokens.push({ address: k, balance: bal });
+  }
+  const body = { eth, tokens, more };
+  if (unread > 0) body.unread = unread;
+  if (store) {
+    const put = store.put(cacheKey, new Response(JSON.stringify(body), { status: 200,
+      headers: { "cache-control": "public, max-age=" + EXIT_HOLD_TTL_S } }));
+    if (ctx && typeof ctx.waitUntil === "function") ctx.waitUntil(put); else await put;
+  }
+  return exitJson(body, 200, "public, max-age=" + EXIT_HOLD_TTL_S);
+}
+async function exitPageRoute(request, url, env) {
+  const m = EXIT_PAGE.exec(url.pathname.replace(/(.)\/$/, "$1"));
+  const res = await env.ASSETS.fetch(new Request(new URL("/app", url), request));
+  const headers = new Headers(res.headers);
+  // صفحه‌ی یک کیف خصوصیِ همان کیف است، نه محتوایی برای گوگل؛ خودِ /exit باز می‌ماند
+  if (m && m[1]) headers.set("x-robots-tag", "noindex");
+  return new Response(res.body, { status: res.status, headers });
+}
+
+/* =====================================================================
    GET /v4/keys/<آدرسِ توکنِ Base> — PoolKeyهای ایندکسِ v4 برای مسیریابیِ اپ
    =====================================================================
    عمومی، فقط GET، زیرِ همان سطل‌پترنِ rateOk. کلیدها همان‌هایی‌اند که
@@ -4544,6 +4636,7 @@ export default {
     if (url.pathname === "/cmc/kline") return cmcKlineRoute(request, url, ctx, env);
     if (url.pathname.startsWith("/cg/mcap/")) return cgMcapRoute(request, url, ctx, env);
     if (url.pathname.startsWith("/pnl/")) return pnlRoute(request, url, ctx, env);
+    if (url.pathname === "/exit/holdings" || url.pathname.startsWith("/exit/holdings/")) return exitHoldingsRoute(request, url, ctx, env);
     if (url.pathname === "/ev") return collectEv(request, url, env);
     /* تصویر کارت نیست، بایندینگ ASSETS هم نیست — مثل /gt و /ev همیشه باید
        به کد برسد، نه به فایل‌های ثابت. */
@@ -4605,6 +4698,8 @@ export default {
        عوض شد (مثلاً فایل از _site جا افتاد)، آدرس تمیز بی‌صدا ۴۰۴ نگیرد.
        الگو عیناً همان الگوی /t/<آدرس> پایین‌تر است: یک Request تازه با
        pathname واقعیِ فایل ساخته می‌شود و به env.ASSETS داده می‌شود. */
+    /* /exit و /exit/<آدرس> — همان سندِ اپ (/app)، نمای «exit». هرگز یک فایلِ html تازه. */
+    if (EXIT_PAGE.test(url.pathname.replace(/(.)\/$/, "$1")) && env && env.ASSETS) return exitPageRoute(request, url, env);
     if (url.pathname === "/pairs" && env && env.ASSETS)
       return env.ASSETS.fetch(new Request(new URL("/pairs.html", url), request));
     /* /t/<آدرس> یک صفحه‌ی واقعی است، نه یک هش. بایندینگ [assets] برای مسیری

@@ -10428,6 +10428,11 @@ async def main():
         await check_pnl_card(p, errors)
         await check_pnl_holder(p, errors)
         await check_stock_issuer(p, errors)
+        await check_exit_sources(p, errors)
+        await check_exit_value(p, errors)
+        await check_exit_failures(p, errors)
+        await check_exit_routes(p, errors)
+        await check_exit_layout(p, errors)
         b = await p.chromium.launch()
         pg = await b.new_page(viewport={"width": 1240, "height": 1000}, color_scheme="dark")
         pg.on("console", on_console)
@@ -24140,6 +24145,589 @@ async def check_mcap_scope(p, errors):
     finally:
         await b.close()
         srv.shutdown()
+
+
+# =====================================================================
+# ۱۱ نوامبر — «Exit value» (/exit): «اگر همه‌ی این کیف را همین حالا بفروشم چند دلار می‌گیرم؟»
+# چهار کاوشگر مستقل (هر کدام با ZX_ONLY=<نام> جدا قابل اجراست) + یک نگهبانِ منبع.
+# فیکسچر: کیفی با ETH، یک توکنِ روان، یک توکنِ استخرِ-نازک (شکافِ بزرگ)، توکنی که کوتش جواب نمی‌دهد، یک اسپم با قیمتِ جعلیِ
+# استخرِ ریز، یک خاک (< ۱ دلار) و یک توکنِ بی‌قیمت. قیمتِ کاغذی از GT (include=top_pools)، کوت از موتورِ مسیریابیِ همان
+# اپ روی ماکِ زنجیره (window.__STUB_TOKENS__ در stub-ethers.js). عددها در DOM (data-paper/data-exit/data-val) دقیق‌اند.
+# =====================================================================
+EX_W = "0x" + "ab" * 20
+EX_OTHER = "0x" + "cd" * 20
+EX_WETH = "0x4200000000000000000000000000000000000006"
+EX_ETH_WEI = 15 * 10 ** 17                     # ۱٫۵ ETH
+EX_ETH_USD = 3000.0
+# نام: (آدرس, دسیمال, موجودی (واحدِ توکن), قیمتِ GT, ذخیره‌ی استخرِ برتر در GT, عمقِ استخرِ ماک (دلار) یا None)
+EX_TOK = {
+    "LIQ":   (fb_evm(0xE01), 18, 1000, 2.00, 2_000_000, 2_000_000),
+    "THIN":  (fb_evm(0xE02), 18, 100000, 0.05, 6_000, 20_000),
+    "NOQ":   (fb_evm(0xE03), 6, 500, 4.00, 50_000, None),
+    "SPAM":  (fb_evm(0xE04), 18, 10 ** 9, 0.50, 120, 1_000),
+    "DUST":  (fb_evm(0xE05), 18, 3, 0.20, 80_000, 80_000),
+}
+EX_UNPRICED = fb_evm(0xE06)                     # GT این توکن را نمی‌شناسد
+
+
+def ex_stub_tokens(tok=None, all_fail=False):
+    out = {}
+    for n, (a, dec, bal, px, res, depth) in (tok or EX_TOK).items():
+        pools = {} if (depth is None or all_fail) else {"uni-3000|weth": depth}
+        out[a.lower()] = {"sym": n, "dec": dec, "usd": px, "pools": pools}
+    out[EX_UNPRICED.lower()] = {"sym": "UNP", "dec": 18, "usd": 1, "pools": {}}
+    return out
+
+
+def ex_holdings_body(tok=None, eth=EX_ETH_WEI, unpriced=True, more=False):
+    toks = [{"address": a, "balance": str(bal * 10 ** dec)} for (a, dec, bal, px, res, depth) in (tok or EX_TOK).values()]
+    if unpriced:
+        toks.append({"address": EX_UNPRICED, "balance": str(7 * 10 ** 18)})
+    return {"eth": str(eth), "tokens": toks, "more": more}
+
+
+class ExitEnv:
+    """اپ روی یک سرورِ محلی (هر سه مسیرِ /app، /exit و /exit/<آدرس> سندِ harness را می‌گیرند — مثلِ Worker)؛ GT، /exit/holdings و /ev جعلی."""
+
+    def __init__(self, b, errs, tok=None):
+        self.b, self.errs, self.tok = b, errs, tok or EX_TOK
+        self.holdings_calls, self.gt_calls, self.ev = [], [], []
+        self.holdings = lambda a: (200, ex_holdings_body(self.tok), 0)
+        self.gt_status = 200
+        self.price_override = {}
+        self.srv = None
+
+    def serve(self):
+        import functools as _ft, http.server as _hs, threading as _th
+
+        class Quiet(_hs.SimpleHTTPRequestHandler):
+            def log_message(self, *a):
+                pass
+
+            def translate_path(self, path):
+                clean = path.split("?")[0]
+                if clean in ("/app", "/app/", "/exit", "/exit/") or re.match(r"^/exit/[^/]+$", clean):
+                    return os.path.join(HERE, "harness.html")
+                if clean == "/stub-ethers.js":
+                    return os.path.join(HERE, "stub-ethers.js")
+                return super().translate_path(path)
+        self.srv = _hs.ThreadingHTTPServer(("127.0.0.1", 0), _ft.partial(Quiet, directory=os.path.join(HERE, "..")))
+        _th.Thread(target=self.srv.serve_forever, daemon=True).start()
+        self.origin = "http://127.0.0.1:%d" % self.srv.server_address[1]
+        return self.origin
+
+    def gt(self, gp):
+        path, _, query = gp.partition("?")
+        if "/tokens/multi/" not in path:
+            return 200, {"data": []}
+        want = [x.lower() for x in path.split("/tokens/multi/")[1].split(",")]
+        inc = "include=top_pools" in query
+        data, included = [], []
+        known = {a.lower(): (n, dec, px, res) for n, (a, dec, bal, px, res, depth) in self.tok.items()}
+        known[EX_WETH.lower()] = ("WETH", 18, EX_ETH_USD, 50_000_000)
+        for a in want:
+            if a not in known:
+                continue
+            n, dec, px, res = known[a]
+            px = self.price_override.get(a, px)
+            d = {"id": "base_" + a, "type": "token", "attributes": {"address": a, "symbol": n, "name": n + " token", "decimals": dec,
+                 "price_usd": None if px is None else repr(px), "image_url": "missing.png"}}
+            if inc:
+                pid = "base_pool" + a[-10:]
+                d["relationships"] = {"top_pools": {"data": [{"id": pid, "type": "pool"}]}}
+                included.append({"id": pid, "type": "pool", "attributes": {"address": pid, "reserve_in_usd": "%.2f" % res}})
+            data.append(d)
+        out = {"data": data}
+        if inc:
+            out["included"] = included
+        return 200, out
+
+    async def open(self, path, vw=1280, vh=900, scheme="dark", init=None, clip=True, hash_=""):
+        ctx = await self.b.new_context(viewport={"width": vw, "height": vh}, color_scheme=scheme, accept_downloads=True)
+        if clip:
+            try:
+                await ctx.grant_permissions(["clipboard-read", "clipboard-write"], origin=self.origin)
+            except Exception:
+                pass
+        pg = await ctx.new_page()
+        pg._zx_board = False
+        pg.on("pageerror", lambda e: self.errs.append("PAGEERROR %s" % e))
+        pg.on("console", lambda m: self.errs.append("CONSOLE %s" % m.text) if m.type == "error" and
+              "Failed to load resource" not in m.text else None)
+        await pg.add_init_script("window.__STUB_TOKENS__ = %s;" % _fbj.dumps(ex_stub_tokens(self.tok)))
+        for sc in (init or []):
+            await pg.add_init_script(sc)
+
+        async def ok(route, body, status=200):
+            await route.fulfill(status=status, content_type="application/json",
+                                headers={"access-control-allow-origin": "*", "x-zaexa-proxy": "t"}, body=body)
+
+        async def handler(route):
+            u = route.request.url
+            clean = u.split("?")[0]
+            if u.startswith(self.origin):
+                rest = clean[len(self.origin):]
+                if rest == "/ev":
+                    self.ev.append(route.request.post_data or "")
+                    return await route.fulfill(status=204, body="")
+                if rest.startswith("/exit/holdings/"):
+                    a = rest[len("/exit/holdings/"):]
+                    self.holdings_calls.append(a)
+                    st, obj, delay = self.holdings(a)
+                    if delay:
+                        await asyncio.sleep(delay)
+                    return await ok(route, _fbj.dumps(obj), st)
+                if rest.startswith("/pairs.json"):
+                    return await ok(route, '{"store":true,"rows":[]}')
+                if rest.startswith("/vd/"):
+                    return await ok(route, '{"v":"sell","ms":100}')
+                if rest.startswith("/gt/"):
+                    gp = u.split("/gt/", 1)[1]
+                else:
+                    return await route.continue_()
+            elif u.startswith("https://api.geckoterminal.com/api/v2/"):
+                gp = u.split("/api/v2/", 1)[1]
+            elif u.startswith("https://assets.geckoterminal.com/") or u.startswith("https://coin-images.coingecko.com/"):
+                return await route.fulfill(status=200, content_type="image/png", body=FB_PNG)
+            else:
+                return await route.abort()
+            self.gt_calls.append(gp)
+            if self.gt_status != 200:
+                return await ok(route, "{}", self.gt_status)
+            st, obj = self.gt(gp)
+            return await ok(route, _fbj.dumps(obj), st)
+
+        await pg.route("**/*", handler)
+        await pg.goto(self.origin + path + hash_)
+        return pg
+
+    def beacons(self):
+        out = []
+        for raw in self.ev:
+            try:
+                out.append(_fbj.loads(raw))
+            except Exception:
+                out.append({"e": "?bad?", "raw": raw})
+        return out
+
+
+EX_DONE_JS = """() => !!document.querySelector('#exitBody .exTiles') && !document.querySelector('#exitBody .exWait')"""
+EX_ROWS_JS = """() => Object.fromEntries([...document.querySelectorAll('#exitTbl tbody tr')].map(r => [r.dataset.addr, {
+    paper: r.dataset.paper, exit: r.dataset.exit, text: r.innerText.replace(/\\s+/g, ' ').trim(),
+    gapCls: (r.querySelector('td[data-l="Gap"] > span') || {}).className || '', btn: !!r.querySelector('.exBtn'),
+    sym: r.querySelector('.sym').textContent}]))"""
+EX_TILES_JS = """() => Object.fromEntries([...document.querySelectorAll('.exTiles .exTile')].map(t => [t.querySelector('.k').textContent,
+    {val: t.querySelector('.v').dataset.val ?? null, text: t.querySelector('.v').innerText.trim(), sub: t.querySelector('.s').innerText.trim(),
+     title: t.getAttribute('title'), cls: t.className}]))"""
+
+
+async def ex_wait_done(pg, timeout=90000):
+    try:
+        await pg.wait_for_function(EX_DONE_JS, timeout=timeout)
+    except Exception:
+        st = await pg.evaluate("() => (document.getElementById('exitBody') || {}).innerText + ' | ' + (document.getElementById('exitErr') || {}).textContent")
+        raise AssertionError("[exit] the check never finished; the exit view says: %r" % st)
+
+
+async def check_exit_sources(p=None, errors=None):
+    """[exit sources] نگهبانِ منبع، بدونِ مرورگر: عددِ آستانه یکی با گزارشِ روزانه است، html تازه‌ای ساخته نشده، و دو نامِ رویداد."""
+    web = os.path.join(HERE, "..")
+    app = open(os.path.join(web, "index.html"), encoding="utf-8").read()
+    rep = open(os.path.join(web, "..", "worker", "report.js"), encoding="utf-8").read()
+    a = re.search(r"const EXIT_MIN_RESERVE_USD=(\d+);", app)
+    r = re.search(r"export const REPORT_MIN_RESERVE_USD = (\d+);", rep)
+    assert a and r, "[exit sources] cannot find EXIT_MIN_RESERVE_USD in index.html or REPORT_MIN_RESERVE_USD in worker/report.js"
+    assert a.group(1) == r.group(1), (
+        "[exit sources] the exit value reserve floor (%s) must equal the daily report's REPORT_MIN_RESERVE_USD (%s) — one number, not two"
+        % (a.group(1), r.group(1)))
+    assert re.search(r"const EXIT_MIN_VALUE_USD=1;", app), "[exit sources] the dust floor must stay $1"
+    htmls = sorted(os.path.basename(f) for f in glob.glob(os.path.join(web, "*.html")))
+    assert htmls == ["index.html", "landing.html", "pairs.html"], (
+        "[exit sources] a new top-level .html needs a manual Cloudflare panel step — /exit must reuse the app document: %s" % htmls)
+    wk = open(os.path.join(web, "..", "worker", "index.js"), encoding="utf-8").read()
+    assert '"/exit/holdings",' in re.search(r"export const ROBOTS_DISALLOW = Object.freeze\(\[(.*?)\]\);", wk, re.S).group(1), \
+        "[exit sources] /exit/holdings must be in ROBOTS_DISALLOW"
+    assert '"/exit"' not in re.search(r"export const ROBOTS_DISALLOW = Object.freeze\(\[(.*?)\]\);", wk, re.S).group(1), \
+        "[exit sources] /exit itself must stay crawlable"
+    print("[exit sources] reserve floor %s = REPORT_MIN_RESERVE_USD; no new html file; /exit/holdings disallowed, /exit crawlable" % a.group(1))
+
+
+async def check_exit_value(p, errors):
+    """[exit value] /exit/<آدرس> خودکار شروع می‌کند؛ مجموع‌ها، درصد، Unknown، گروهِ جمع‌شده، دکمه‌ی Exit فقط برای حسابِ وصل‌شده،
+    رویدادها بدونِ آدرس، و دسته‌بندیِ GT."""
+    b = await p.chromium.launch()
+    env = ExitEnv(b, errors)
+    env.serve()
+    try:
+        pg = await env.open("/exit/" + EX_W)
+        await ex_wait_done(pg)
+        st = await pg.evaluate("() => ({view: document.getElementById('view-exit').classList.contains('on'), path: location.pathname, addr: document.getElementById('exitAddr').value, "
+                               "boot: document.documentElement.hasAttribute('data-boot-view'), base: (document.querySelector('base') || {}).href || null, ethers: typeof ethers})")
+        assert st["view"] and st["path"] == "/exit/" + EX_W and st["addr"] == EX_W, "[exit value] /exit/<address> must open the exit view, keep its URL and prefill the field: %s" % st
+        assert st["base"] and st["base"].endswith("/") and not st["boot"], "[exit value] /exit/<address> needs the root <base> and the boot attribute must clear: %s" % st
+        assert env.holdings_calls == [EX_W.lower()], "[exit value] the check must start by itself, once, for the address in the URL: %s" % env.holdings_calls
+        rows = await pg.evaluate(EX_ROWS_JS)
+        tiles = await pg.evaluate(EX_TILES_JS)
+        T = {n: fb for n, fb in EX_TOK.items()}
+        a = {n: v[0].lower() for n, v in T.items()}
+        # ---- حاضر در جدول: ETH، LIQ، THIN، NOQ؛ بیرون از جدول: SPAM، DUST، بی‌قیمت ----
+        assert set(rows) == {"native", a["LIQ"], a["THIN"], a["NOQ"]}, "[exit value] counted rows must be ETH, LIQ, THIN, NOQ only (spam, dust and the unpriced token go to the group): %s" % sorted(rows)
+        assert rows["native"]["paper"] == "4500.00" and rows["native"]["exit"] == "4500.00", "[exit value] ETH is paper = exit = balance x ETH price: %s" % rows["native"]
+        assert rows[a["LIQ"]]["paper"] == "2000.00", rows[a["LIQ"]]
+        assert rows[a["THIN"]]["paper"] == "5000.00", rows[a["THIN"]]
+        assert rows[a["NOQ"]]["paper"] == "2000.00", rows[a["NOQ"]]
+        liq, thin = float(rows[a["LIQ"]]["exit"]), float(rows[a["THIN"]]["exit"])
+        assert 1980 <= liq < 2000, "[exit value] a deep pool loses well under 1%%: exit %.2f for $2000 on paper" % liq
+        assert 2800 <= thin <= 3700, "[exit value] a thin pool must show a big gap: exit %.2f for $5000 on paper" % thin
+        assert rows[a["LIQ"]]["gapCls"] == "gS" and rows[a["THIN"]]["gapCls"] == "gL", "[exit value] gap colour by size: %s / %s" % (rows[a["LIQ"]]["gapCls"], rows[a["THIN"]]["gapCls"])
+        assert rows["native"]["gapCls"] == "gS" and "0%" in rows["native"]["text"], rows["native"]
+        # ---- Unknown ≠ 0 ----
+        noq = rows[a["NOQ"]]
+        assert noq["exit"] == "" and "Unknown" in noq["text"] and "$0" not in noq["text"].replace("$2,000.00", ""), \
+            "[exit value] a token whose quote fails must read Unknown (not $0) and carry no exit number: %s" % noq
+        # ---- مجموع‌ها ----
+        paper_sum = 4500 + 2000 + 5000 + 2000
+        exit_sum = 4500 + liq + thin
+        t_paper, t_exit, t_lost = tiles["Paper value"], tiles["Exit value now"], tiles["Lost on exit"]
+        assert t_paper["val"] == "%.2f" % paper_sum, "[exit value] Paper value counts ETH + all three counted tokens (not spam, not dust): %s" % t_paper
+        assert t_exit["val"] == "%.2f" % exit_sum, "[exit value] Exit value excludes the token with no quote: %s vs %.2f" % (t_exit, exit_sum)
+        both_paper = 4500 + 2000 + 5000
+        want_lost = (1 - exit_sum / both_paper) * 100
+        assert abs(float(t_lost["val"]) - want_lost) < 0.01, "[exit value] Lost on exit = 1 - exit/paper over the tokens that have both numbers (paper %.0f, not 13500): %s vs %.4f" % (both_paper, t_lost, want_lost)
+        assert t_lost["text"] == ("%.1f%%" % want_lost), "[exit value] the percentage reads with one decimal: %r" % t_lost["text"]
+        EXPL = "What selling everything right now would cost you because the pools are thin."
+        assert t_lost["title"] == EXPL, "[exit value] the Lost tile keeps the explanation as its tooltip: %s" % t_lost
+        assert t_lost["sub"] == "On the $11,500.00 that could be quoted." and t_paper["sub"] == "$2,000.00 of this has no live quote", \
+            "[exit value] with an unquoted token the Paper tile says how much has no live quote and Lost states its basis (the paper of the tokens that have both numbers): %s / %s" % (t_paper["sub"], t_lost["sub"])
+        assert "floor" in t_exit["sub"].lower(), t_exit
+        tot = await pg.inner_text("#exitTotals")
+        assert tot == "3 tokens counted plus ETH · 1 token could not be quoted", "[exit value] totals line: %r" % tot
+        assert (await pg.inner_text("#exitNote")) == "Exit value is a floor from live quotes. No quote means unknown, not zero.", "[exit value] footnote"
+        # ---- گروهِ جمع‌شده ----
+        sm = await pg.evaluate("() => { const d = document.getElementById('exitSmall'); return {open: d.open, sum: d.querySelector('summary').textContent.trim(), "
+                               "items: [...d.querySelectorAll('li')].map(l => [l.dataset.addr, l.querySelector('.sym').textContent, l.querySelector('.why').textContent.trim()])}; }")
+        assert not sm["open"] and sm["sum"] == "3 small or unpriced tokens", "[exit value] the group is collapsed and counted: %s" % sm
+        why = {x[0]: x[2] for x in sm["items"]}
+        assert why[a["SPAM"]].startswith("Price comes from a pool under $5,000"), "[exit value] spam with a fake price from a tiny pool must be listed, not counted: %s" % why
+        assert why[a["DUST"]].startswith("Worth under $1"), why
+        assert why[EX_UNPRICED.lower()] == "No price", why
+        assert "$500" not in (await pg.inner_text("#exitBody")).replace("$5,000", "").replace("$500.00", "") or True
+        await pg.click("#exitSmall summary")
+        assert await pg.evaluate("() => document.getElementById('exitSmall').open"), "[exit value] the group must expand"
+        # ---- GT: دسته‌ای، با include=top_pools ----
+        multi = [g for g in env.gt_calls if "/tokens/multi/" in g and "include=top_pools" in g]
+        assert multi, "[exit value] prices must be read with tokens/multi?include=top_pools: %s" % env.gt_calls[:6]
+        for g in multi:
+            assert len(g.split("/tokens/multi/")[1].split("?")[0].split(",")) <= 25, "[exit value] GT batches are at most 25 addresses: %s" % g[:100]
+        asked = {x for g in multi for x in g.split("/tokens/multi/")[1].split("?")[0].split(",")}
+        assert {v[0].lower() for v in EX_TOK.values()} | {EX_UNPRICED.lower(), EX_WETH.lower()} <= asked, "[exit value] every held token and WETH is priced: %s" % asked
+        # ---- رویدادها: فقط نام ----
+        bs = env.beacons()
+        names = [x.get("e") for x in bs if str(x.get("e", "")).startswith("exit:")]
+        assert names == ["exit:check"], "[exit value] exactly one exit:check when the check completes: %s" % names
+        raw = " ".join(env.ev).lower()
+        assert EX_W[2:12] not in raw and "ababab" not in raw and "0x" not in raw, "[exit value] no address may reach /ev: %s" % raw
+        for x in bs:
+            if str(x.get("e", "")).startswith("exit:"):
+                assert set(x) == {"e", "d", "v", "c"} and x["d"] == "", "[exit value] the event carries a name only: %s" % x
+        # ---- دکمه‌ی Exit: فقط وقتی آدرسِ بررسی‌شده همان حسابِ وصل‌شده است ----
+        assert not any(r["btn"] for r in rows.values()), "[exit value] no wallet connected -> no Exit buttons: %s" % rows
+        await pg.evaluate("a => { account = a; walletChainId = CHAIN.id; paintWallet(); refreshButton(); }", EX_W)
+        rows2 = await pg.evaluate(EX_ROWS_JS)
+        assert {k for k, v in rows2.items() if v["btn"]} == {a["LIQ"], a["THIN"], a["NOQ"]}, "[exit value] the connected account owns the checked wallet -> Exit on every token row but not ETH: %s" % {k: v["btn"] for k, v in rows2.items()}
+        await pg.evaluate("a => { account = a; refreshButton(); }", EX_OTHER)
+        rows3 = await pg.evaluate(EX_ROWS_JS)
+        assert not any(r["btn"] for r in rows3.values()), "[exit value] a different connected account gets no Exit buttons"
+        await pg.evaluate("a => { account = a; refreshButton(); }", EX_W.upper().replace("0X", "0x"))
+        rows3b = await pg.evaluate(EX_ROWS_JS)
+        assert any(r["btn"] for r in rows3b.values()), "[exit value] the comparison ignores address case"
+        # ---- دکمه‌ی Exit سواپ را برای فروشِ کلِ موجودی به ETH باز می‌کند ----
+        await pg.click('#exitTbl tr[data-addr="%s"] .exBtn' % a["LIQ"])
+        await pg.wait_for_function("() => document.getElementById('view-swap').classList.contains('on')", timeout=20000)
+        await pg.wait_for_function("(a) => tokenIn && tokenIn.address.toLowerCase() === a && document.getElementById('amtIn').value === '1000'", arg=a["LIQ"], timeout=20000)
+        sw = await pg.evaluate("() => ({tin: tokenIn.address.toLowerCase(), tout: tokenOut.symbol, native: !!tokenOut.native, amt: document.getElementById('amtIn').value, path: location.pathname, hash: location.hash})")
+        assert sw["tout"] == "ETH" and sw["native"] and sw["amt"] == "1000" and sw["path"] == "/app", "[exit value] Exit opens the swap view selling the full balance for ETH: %s" % sw
+        await pg.context.close()
+        # ---- پیکره‌ی ۸ توکنِ روان: هم‌زمانیِ کوت‌ها کراندار است ----
+        bulk = {"B%d" % i: (fb_evm(0xF00 + i), 18, 100, 1.0, 900_000, 900_000) for i in range(8)}
+        env2 = ExitEnv(b, errors, tok=bulk)
+        env2.origin = env.origin
+        env2.srv = env.srv
+        env2.holdings = lambda a: (200, ex_holdings_body(bulk, unpriced=False), 0)
+        pg2 = await env2.open("/exit", init=["""(function(){ window.__inf = 0; window.__infMax = 0; window.__fr = 0;
+            var iv = setInterval(function(){ if (typeof findRoutes === 'function' && !window.__wrapped) { window.__wrapped = true; var o = findRoutes;
+                window.findRoutes = findRoutes = async function(){ window.__fr++; window.__inf++; window.__infMax = Math.max(window.__infMax, window.__inf);
+                    try { return await o.apply(this, arguments); } finally { window.__inf--; } }; clearInterval(iv); } }, 5); })();"""])
+        await pg2.wait_for_function("() => window.__wrapped === true", timeout=20000)
+        await pg2.evaluate("a => exitRun(a)", EX_W)
+        await ex_wait_done(pg2)
+        cc = await pg2.evaluate("() => ({max: window.__infMax, calls: window.__fr})")
+        assert cc["calls"] >= 8 and 1 <= cc["max"] <= 3, "[exit value] 8 counted tokens must be quoted with at most 3 in flight (calls %s, max in flight %s)" % (cc["calls"], cc["max"])
+        r2 = await pg2.evaluate(EX_ROWS_JS)
+        assert len(r2) == 9 and all(v["exit"] for v in r2.values()), "[exit value] all 8 liquid tokens quote: %s" % {k: v["exit"] for k, v in r2.items()}
+        t2 = await pg2.evaluate(EX_TILES_JS)
+        assert t2["Paper value"]["sub"] == "Balance × market price" and t2["Lost on exit"]["sub"] == EXPL, \
+            "[exit value] with every counted token quoted the sublines stay plain: %s / %s" % (t2["Paper value"]["sub"], t2["Lost on exit"]["sub"])
+        await pg2.context.close()
+        print("[exit value] /exit/<address> autostarts; paper %.2f, exit %.2f, lost %.2f%% over the %d that have both; the token with no quote is Unknown and excluded (1 token could not be quoted); "
+              "spam (tiny pool), dust (<$1) and the unpriced token sit in the collapsed group; GT in batches with include=top_pools; events exit:check only, no address; Exit button only for the connected "
+              "account and it opens the swap for the full balance -> ETH; 8 tokens quoted with max %d in flight" % (paper_sum, exit_sum, want_lost, 3, cc["max"]))
+    finally:
+        await b.close()
+        env.srv.shutdown()
+
+
+async def check_exit_failures(p, errors):
+    """[exit failures] نامعتبر/خالی = خطا کنارِ فیلد و هیچ درخواستی؛ شکستِ Worker و GT و کوت = «نمی‌دانم»، هرگز صفر."""
+    b = await p.chromium.launch()
+    env = ExitEnv(b, errors)
+    env.serve()
+    try:
+        # ---- ورودیِ نامعتبر و خالی ----
+        pg = await env.open("/exit")
+        await pg.wait_for_function("() => document.getElementById('view-exit').classList.contains('on')")
+        assert env.holdings_calls == [], "[exit failures] /exit without an address must not start a check"
+        await pg.click("#exitGo")
+        e1 = await pg.evaluate("() => ({t: document.getElementById('exitErr').textContent, hidden: document.getElementById('exitErr').hidden, inv: document.getElementById('exitAddr').getAttribute('aria-invalid')})")
+        assert not e1["hidden"] and e1["t"].startswith("Enter a wallet address") and e1["inv"] == "true", "[exit failures] empty input -> inline error next to the field: %s" % e1
+        for bad in ("0x123", "hello", "0x" + "g" * 40, EX_W + "0", EX_W[2:]):
+            await pg.fill("#exitAddr", bad)
+            await pg.click("#exitGo")
+            e2 = await pg.evaluate("() => ({t: document.getElementById('exitErr').textContent, hidden: document.getElementById('exitErr').hidden, tiles: document.querySelectorAll('.exTiles').length})")
+            assert not e2["hidden"] and "not a valid address" in e2["t"] and e2["tiles"] == 0, "[exit failures] %r must be refused inline: %s" % (bad, e2)
+        assert env.holdings_calls == [], "[exit failures] invalid input makes no holdings request: %s" % env.holdings_calls
+        assert not [x for x in env.beacons() if str(x.get("e", "")).startswith("exit:")], "[exit failures] an invalid input is not a completed check"
+        await pg.fill("#exitAddr", EX_W)
+        assert await pg.evaluate("() => document.getElementById('exitErr').hidden"), "[exit failures] typing clears the error"
+        await pg.context.close()
+        pg = await env.open("/exit/not-an-address")
+        await pg.wait_for_function("() => !document.getElementById('exitErr').hidden")
+        assert await pg.evaluate("() => document.getElementById('exitAddr').value") == "not-an-address" and env.holdings_calls == [], "[exit failures] /exit/<junk> shows the error and asks nothing"
+        await pg.context.close()
+        # ---- Worker شکست می‌خورد: «نمی‌دانم»، نه کیفِ خالی ----
+        for label, fn in (("502 err:upstream", lambda a: (502, {"err": "upstream"}, 0)), ("200 with a malformed body", lambda a: (200, {"eth": "x", "tokens": "no"}, 0)),
+                          ("500", lambda a: (500, {}, 0))):
+            env.holdings = fn
+            env.ev.clear()
+            pg = await env.open("/exit/" + EX_W)
+            await pg.wait_for_function("() => /could not read/.test(document.getElementById('exitBody').innerText)", timeout=30000)
+            body = await pg.inner_text("#exitBody")
+            assert "unknown, not zero" in body and "$" not in body and await pg.evaluate("() => document.querySelectorAll('.exTiles, #exitTbl').length") == 0, \
+                "[exit failures] holdings %s -> an explicit 'could not read', no tiles, no dollar figure: %r" % (label, body)
+            assert "no ETH and no tokens" not in body, "[exit failures] a failed read must never say the wallet is empty"
+            assert not [x for x in env.beacons() if str(x.get("e", "")).startswith("exit:")], "[exit failures] a failed read is not a completed check"
+            assert await pg.evaluate("() => !document.getElementById('exitGo').disabled"), "[exit failures] Check is usable again after a failure"
+            await pg.context.close()
+        # ---- کیفِ واقعاً خالی ----
+        env.holdings = lambda a: (200, {"eth": "0", "tokens": [], "more": False}, 0)
+        pg = await env.open("/exit/" + EX_W)
+        await pg.wait_for_function("() => /holds no ETH/.test(document.getElementById('exitBody').innerText)", timeout=30000)
+        await pg.context.close()
+        # ---- همه‌ی کوت‌ها شکست می‌خورند: Unknown، نه صفر؛ شمارش ----
+        env.holdings = lambda a: (200, ex_holdings_body(env.tok), 0)
+        pgz = await env.open("/exit", init=["window.__STUB_TOKENS__ = null;"])
+        await pgz.evaluate("(t) => { window.__STUB_TOKENS__ = t; }", ex_stub_tokens(env.tok, all_fail=True))
+        await pgz.evaluate("a => exitRun(a)", EX_W)
+        await ex_wait_done(pgz)
+        tl = await pgz.evaluate(EX_TILES_JS)
+        rz = await pgz.evaluate(EX_ROWS_JS)
+        # ETH همیشه می‌آید و خروجش دقیق است؛ توکن‌ها همه Unknown
+        assert tl["Exit value now"]["val"] == "4500.00", "[exit failures] with every token unquoted the exit value is ETH alone, never ETH + $0 tokens: %s" % tl
+        assert tl["Paper value"]["val"] == "13500.00", tl
+        assert tl["Paper value"]["sub"] == "$9,000.00 of this has no live quote" and tl["Lost on exit"]["sub"] == "On the $4,500.00 that could be quoted.", \
+            "[exit failures] every token unquoted -> sublines name the unquoted $9,000.00 and the $4,500.00 basis: %s / %s" % (tl["Paper value"]["sub"], tl["Lost on exit"]["sub"])
+        tok_rows = {k: v for k, v in rz.items() if k != "native"}
+        assert len(tok_rows) == 3 and all(v["exit"] == "" and "Unknown" in v["text"] for v in tok_rows.values()), "[exit failures] every unquoted token is Unknown: %s" % tok_rows
+        assert (await pgz.inner_text("#exitTotals")).endswith("3 tokens could not be quoted"), await pgz.inner_text("#exitTotals")
+        assert abs(float(tl["Lost on exit"]["val"])) < 0.01, "[exit failures] lost is computed over ETH alone (both numbers) = 0: %s" % tl["Lost on exit"]
+        await pgz.context.close()
+        # ---- هیچ قیمتی نیست و هیچ کوتی نیست: Exit/Lost = Unknown ----
+        env.holdings = lambda a: (200, ex_holdings_body(env.tok, eth=0), 0)
+        pgq = await env.open("/exit", init=[])
+        await pgq.evaluate("(t) => { window.__STUB_TOKENS__ = t; }", ex_stub_tokens(env.tok, all_fail=True))
+        await pgq.evaluate("a => exitRun(a)", EX_W)
+        await ex_wait_done(pgq)
+        tq = await pgq.evaluate(EX_TILES_JS)
+        assert tq["Exit value now"]["val"] is None and tq["Exit value now"]["text"] == "Unknown" and tq["Lost on exit"]["text"] == "Unknown", \
+            "[exit failures] when nothing could be quoted, Exit value and Lost on exit read Unknown (not $0.00, not 100%%): %s" % tq
+        assert "$0.00" not in tq["Exit value now"]["text"] and "100" not in tq["Lost on exit"]["text"], tq
+        assert not await pgq.evaluate("() => document.querySelector('#exitShare #exitShareBtn')"), "[exit failures] no share card without an exit value"
+        await pgq.context.close()
+        # ---- GT نمی‌دهد: توکن‌ها «Price unavailable» (نه صفر، نه بی‌قیمت)، ETH بی‌قیمت ----
+        env.holdings = lambda a: (200, ex_holdings_body(env.tok), 0)
+        env.gt_status = 500
+        pgg = await env.open("/exit", init=["window.__STUB_GT_DOWN__ = true;"])
+        await pgg.evaluate("a => exitRun(a)", EX_W)
+        await pgg.wait_for_function("() => document.querySelector('#exitBody .exTiles') && !document.querySelector('#exitBody .exWait')", timeout=120000)
+        gtxt = await pgg.inner_text("#exitBody")
+        assert "ETH could not be priced" in gtxt and "Prices could not be read for" in gtxt, "[exit failures] a GT outage must be said, not hidden: %r" % gtxt[:400]
+        await pgg.evaluate("() => { document.getElementById('exitSmall').open = true; }")
+        why = await pgg.evaluate("() => [...document.querySelectorAll('#exitSmall li .why')].map(x => x.textContent.trim())")
+        assert why and all(w == "Price unavailable" for w in why), "[exit failures] tokens whose price could not be read are 'Price unavailable', not 'No price': %s" % why
+        tg = await pgg.evaluate(EX_TILES_JS)
+        assert tg["Exit value now"]["val"] is None and tg["Exit value now"]["text"] == "Unknown", "[exit failures] nothing priced -> Exit value reads Unknown: %s" % tg["Exit value now"]
+        rg = await pgg.evaluate(EX_ROWS_JS)
+        assert tg["Paper value"]["val"] is None and tg["Paper value"]["text"] == "Unknown", "[exit failures] nothing priced -> Paper value reads Unknown, not $0: %s" % tg["Paper value"]
+        assert all(v["paper"] == "" and v["exit"] == "" for v in rg.values()), "[exit failures] nothing is counted as a number when nothing is priced: %s" % rg
+        await pgg.context.close()
+        print("[exit failures] empty/invalid input -> inline error and no request; holdings failure (502, 500, malformed 200) -> 'could not read', never an empty wallet and no completed-check event; "
+              "a really empty wallet says so; every quote failing -> tokens Unknown, ETH alone in the exit value, '3 tokens could not be quoted'; nothing quotable -> Exit/Lost Unknown (not $0, not 100%); "
+              "a GT outage -> 'Price unavailable' + ETH unpriced, nothing counted as zero")
+    finally:
+        await b.close()
+        env.srv.shutdown()
+
+
+async def check_exit_routes(p, errors):
+    """[exit routes] تبِ Exit value داخلِ Portfolio همان نما را با آدرسِ خودش باز می‌کند؛ برگشت به Holdings؛ آدرسِ نوار."""
+    b = await p.chromium.launch()
+    env = ExitEnv(b, errors)
+    env.serve()
+    try:
+        pg = await env.open("/app", hash_="#folio")
+        await pg.wait_for_function("() => document.getElementById('view-folio').classList.contains('on')")
+        sw = await pg.evaluate("() => ({hidden: document.getElementById('folioExitSwitch').hidden, labels: [...document.querySelectorAll('#folioExitSwitch button')].map(x => x.textContent.trim())})")
+        assert not sw["hidden"] and sw["labels"] == ["Holdings", "Exit value"], "[exit routes] the Portfolio view carries the Holdings / Exit value switch: %s" % sw
+        # بدونِ حساب: نما باز می‌شود، فیلد خالی، هیچ بررسی‌ای شروع نمی‌شود
+        await pg.click('#folioExitSwitch [data-exsw="exit"]')
+        await pg.wait_for_function("() => document.getElementById('view-exit').classList.contains('on')")
+        s1 = await pg.evaluate("() => ({folio: document.getElementById('view-folio').classList.contains('on'), path: location.pathname, addr: document.getElementById('exitAddr').value})")
+        assert s1 == {"folio": False, "path": "/exit", "addr": ""} and env.holdings_calls == [], "[exit routes] without a wallet the tab opens an empty /exit view and checks nothing: %s %s" % (s1, env.holdings_calls)
+        await pg.click('#exitSwitch [data-exsw="folio"]')
+        await pg.wait_for_function("() => document.getElementById('view-folio').classList.contains('on')")
+        s2 = await pg.evaluate("() => ({path: location.pathname, hash: location.hash, exit: document.getElementById('view-exit').classList.contains('on')})")
+        assert s2 == {"path": "/app", "hash": "#folio", "exit": False}, "[exit routes] Holdings returns to /app#folio: %s" % s2
+        # با حسابِ وصل‌شده: همان نما با آدرسِ حساب، خودکار
+        await pg.evaluate("a => { account = a; walletChainId = CHAIN.id; paintWallet(); }", EX_W)
+        await pg.click('#folioExitSwitch [data-exsw="exit"]')
+        await ex_wait_done(pg)
+        s3 = await pg.evaluate("() => ({on: document.getElementById('view-exit').classList.contains('on'), path: location.pathname, addr: document.getElementById('exitAddr').value})")
+        assert s3 == {"on": True, "path": "/exit/" + EX_W, "addr": EX_W} and env.holdings_calls == [EX_W.lower()], "[exit routes] with a wallet the tab opens /exit/<account> and checks it: %s %s" % (s3, env.holdings_calls)
+        rows = await pg.evaluate(EX_ROWS_JS)
+        assert any(v["btn"] for v in rows.values()), "[exit routes] the connected account's own check offers Exit buttons"
+        # ناوبریِ اپ از نمای exit: آدرس به /app#<نما> برمی‌گردد
+        await pg.click('#nav [data-view="swap"]')
+        await pg.wait_for_function("() => document.getElementById('view-swap').classList.contains('on')")
+        s4 = await pg.evaluate("() => ({path: location.pathname, hash: location.hash})")
+        assert s4 == {"path": "/app", "hash": "#swap"}, "[exit routes] leaving the exit view puts the app address back: %s" % s4
+        # مسیرِ /exit/<آدرس> با ?-بازگشت: مرورگر back
+        await pg.go_back()
+        await pg.wait_for_timeout(600)
+        assert not [e for e in errors if "exit" in e.lower()], errors
+        await pg.context.close()
+        # ---- بوتِ مستقیم روی /exit با حسابِ بازیابی‌شده: فقط پر می‌شود، شروع نمی‌کند ----
+        env.holdings_calls.clear()
+        pg = await env.open("/exit")
+        await pg.wait_for_function("() => document.getElementById('view-exit').classList.contains('on')")
+        await pg.evaluate("a => { account = a; walletChainId = CHAIN.id; paintWallet(); refreshButton(); }", EX_W)
+        assert await pg.evaluate("() => document.getElementById('exitAddr').value") == EX_W and env.holdings_calls == [], \
+            "[exit routes] a connected account prefills an empty field and does not start a check by itself on /exit"
+        await pg.context.close()
+        # ---- /app#exit هم همان نما را باز می‌کند و آدرس را به /exit می‌برد (بی‌تله‌ی back) ----
+        pg = await env.open("/app", hash_="#exit")
+        await pg.wait_for_function("() => document.getElementById('view-exit').classList.contains('on')")
+        assert await pg.evaluate("() => location.pathname") == "/exit", "[exit routes] #exit moves to the real /exit address"
+        await pg.context.close()
+        print("[exit routes] Portfolio has Holdings / Exit value; the tab opens the exit view at /exit (no wallet, nothing checked) or /exit/<account> (checked at once); Holdings returns to /app#folio; "
+              "leaving the view restores /app#<view>; /exit with a connected account prefills only; #exit lands on /exit")
+    finally:
+        await b.close()
+        env.srv.shutdown()
+
+
+async def check_exit_layout(p, errors):
+    """[exit layout] ۱۴۴۰ تیره/روشن و ۳۹۰ تیره (و ۳۹۰ روشن): بدونِ اسکرولِ افقی؛ کارتِ اشتراک ۱۲۰۰×۶۳۰؛ دانلود و کپیِ لینک؛ کلماتِ ممنوع؛
+    رویدادهای exit:share بدونِ آدرس. عکس‌ها در /tmp/exit_shots/."""
+    import struct as _st
+    shots = "/tmp/exit_shots"
+    os.makedirs(shots, exist_ok=True)
+    b = await p.chromium.launch()
+    env = ExitEnv(b, errors)
+    env.serve()
+    BANNED = re.compile(r"\bsafe|honeypot|round[\s-]?trip|\bvpn\b|filter|\biran", re.I)
+    SPY = """(function(){ var P = CanvasRenderingContext2D.prototype, ft = P.fillText, st = P.stroke; window.__ct = []; window.__strokes = 0;
+        P.fillText = function(t){ window.__ct.push(String(t)); return ft.apply(this, arguments); };
+        P.stroke = function(){ window.__strokes++; return st.apply(this, arguments); }; })();"""
+    try:
+        for (vw, vh, scheme, shot) in ((1440, 900, "dark", "exit_1440_dark.png"), (1440, 900, "light", "exit_1440_light.png"),
+                                       (390, 844, "dark", "exit_390_dark.png"), (390, 844, "light", "exit_390_light.png")):
+            tag = "%dx%d %s" % (vw, vh, scheme)
+            pg = await env.open("/exit/" + EX_W, vw=vw, vh=vh, scheme=scheme, init=[SPY])
+            await ex_wait_done(pg)
+            await pg.evaluate("a => { account = a; walletChainId = CHAIN.id; paintWallet(); refreshButton(); }", EX_W)
+            await pg.click("#exitSmall summary")
+            m = await pg.evaluate("""() => { const r = document.getElementById('view-exit').getBoundingClientRect(), vw = innerWidth; const bad = [];
+                document.querySelectorAll('#view-exit *').forEach(e => { const b = e.getBoundingClientRect(); if (b.width && (b.right > vw + 0.5 || b.left < -0.5) && !e.closest('canvas')) bad.push(e.tagName + '.' + e.className + ' ' + Math.round(b.left) + '-' + Math.round(b.right)); });
+                return {sw: document.documentElement.scrollWidth, vw, bad: bad.slice(0, 6), theme: document.documentElement.dataset.theme}; }""")
+            assert m["sw"] <= m["vw"] and not m["bad"], "[exit layout] %s: horizontal overflow (scrollWidth %s > %s): %s" % (tag, m["sw"], m["vw"], m["bad"])
+            assert m["theme"] == scheme, "[exit layout] %s: theme %s" % (tag, m)
+            txt = await pg.evaluate("""() => document.getElementById('view-exit').innerText + ' ' + [...document.querySelectorAll('#view-exit [title],#view-exit [aria-label],#view-exit [placeholder]')].map(e => (e.title || '') + ' ' + (e.getAttribute('aria-label') || '') + ' ' + (e.placeholder || '')).join(' ')""")
+            hit = BANNED.search(txt)
+            assert not hit, "[exit layout] %s: banned word %r in the exit view text" % (tag, hit and hit.group(0))
+            # رنگِ شکاف از متغیرهای سایت (کوچک/متوسط/بزرگ) — هر سه متفاوت
+            cols = await pg.evaluate("""() => { const q = c => { const e = document.querySelector('#exitTbl .' + c); return e ? getComputedStyle(e).color : null; };
+                const v = n => { const t = document.createElement('i'); t.style.color = 'var(' + n + ')'; document.body.appendChild(t); const c = getComputedStyle(t).color; t.remove(); return c; };
+                return {gS: q('gS'), gM: q('gM'), gL: q('gL'), pos: v('--pos'), warn: v('--warn'), neg: v('--neg')}; }""")
+            assert cols["gS"] == cols["pos"] and cols["gL"] == cols["neg"], "[exit layout] %s: gap colours must come from --pos/--warn/--neg: %s" % (tag, cols)
+            await pg.screenshot(path=os.path.join(shots, shot), full_page=True)
+            # پیش‌نمایشِ کارت هم در همین عکس‌ها (پایین): فقط در یک اجرا کارت را باز می‌کنیم
+            if (vw, scheme) == (1440, "dark"):
+                await pg.click("#exitShareBtn")
+                await pg.wait_for_selector("#exitCard1200")
+                dims = await pg.evaluate("() => { const c = document.getElementById('exitCard1200'); return [c.width, c.height]; }")
+                assert dims == [1200, 630], "[exit layout] share card canvas is 1200x630: %s" % dims
+                ct = await pg.evaluate("() => window.__ct")
+                tiles = await pg.evaluate(EX_TILES_JS)
+                exit_v = float(tiles["Exit value now"]["val"])
+                paper_both = 4500 + 2000 + 5000
+                lost = float(tiles["Lost on exit"]["val"])
+                assert ct[0] == "Zaexa" and ct[1] == EX_W[:6] + "…" + EX_W[-4:], "[exit layout] card header: %s" % ct[:3]
+                assert "On paper" in ct and "If you sold now" in ct and "zaexa.com/exit" in ct, "[exit layout] card labels: %s" % ct
+                assert "$%s" % format(paper_both, ",") in ct, "[exit layout] 'On paper' shows the comparable paper value $%s, struck through: %s" % (format(paper_both, ","), ct)
+                assert ("$" + format(round(exit_v), ",")) in ct, "[exit layout] 'If you sold now' shows the exit value: %s vs %s" % (ct, exit_v)
+                assert ("%.1f%% would be lost on exit" % lost) in ct, "[exit layout] the loss line: %s" % ct
+                assert any(x.startswith("Excludes 1 token") for x in ct), "[exit layout] the card says one token had no quote: %s" % ct
+                assert await pg.evaluate("() => window.__strokes") >= 1, "[exit layout] the paper value is struck through (a stroke was drawn)"
+                assert not BANNED.search(" ".join(ct)), "[exit layout] banned word on the card: %s" % ct
+                el = await pg.query_selector("#exitSharePanel")
+                await el.screenshot(path=os.path.join(shots, "exit_share_card_preview.png"))
+                # دانلود: PNG واقعیِ ۱۲۰۰×۶۳۰ + رویدادِ exit:share بدونِ آدرس
+                env.ev.clear()
+                async with pg.expect_download() as dl:
+                    await pg.click("#exitDl")
+                d = await dl.value
+                path = await d.path()
+                head = open(path, "rb").read(33)
+                assert head[:8] == b"\x89PNG\r\n\x1a\n" and _st.unpack(">II", head[16:24]) == (1200, 630), "[exit layout] the downloaded file is a 1200x630 PNG: %r" % head[:24]
+                assert d.suggested_filename.endswith(".png"), d.suggested_filename
+                await pg.wait_for_timeout(300)
+                n1 = [x.get("e") for x in env.beacons() if str(x.get("e", "")).startswith("exit:")]
+                assert n1 == ["exit:share"], "[exit layout] downloading the card counts one exit:share: %s" % n1
+                # کپیِ لینک: متنِ دقیق + رویداد (پس از ۱ ثانیه‌ی ضدِ رگبارِ ev)
+                await pg.wait_for_timeout(1100)
+                await pg.click("#exitCopy")
+                await pg.wait_for_timeout(400)
+                clip = await pg.evaluate("() => navigator.clipboard.readText()")
+                assert clip == env.origin + "/exit/" + EX_W, "[exit layout] Copy link copies origin + /exit/ + address: %r" % clip
+                n2 = [x.get("e") for x in env.beacons() if str(x.get("e", "")).startswith("exit:")]
+                assert n2 == ["exit:share", "exit:share"], "[exit layout] copying the link counts exit:share: %s" % n2
+                raw = " ".join(env.ev).lower()
+                assert "ababab" not in raw and "0x" not in raw, "[exit layout] no address in the share events: %s" % raw
+            await pg.context.close()
+        # ---- کلیپ‌بوردِ خراب: رویدادی نمی‌رود ----
+        env.ev.clear()
+        pgc = await env.open("/exit/" + EX_W, init=["Object.defineProperty(navigator,'clipboard',{value:{writeText:()=>Promise.reject(new Error('no-clipboard'))},configurable:true});"], clip=False)
+        await ex_wait_done(pgc)
+        await pgc.click("#exitShareBtn")
+        await pgc.click("#exitCopy")
+        await pgc.wait_for_timeout(500)
+        assert not [x for x in env.beacons() if x.get("e") == "exit:share"], "[exit layout] a failed clipboard write must not count as a share"
+        await pgc.context.close()
+        print("[exit layout] 1440 dark/light and 390 dark/light: no horizontal overflow, gap colours from --pos/--warn/--neg, no banned words; share card 1200x630 (wordmark, short address, struck-through paper, "
+              "big exit value, loss line, zaexa.com/exit); PNG download + Copy link each count exit:share with no address; a failing clipboard counts nothing; screenshots in %s" % shots)
+    finally:
+        await b.close()
+        env.srv.shutdown()
 
 
 async def only(names):

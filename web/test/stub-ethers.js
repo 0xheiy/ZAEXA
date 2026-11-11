@@ -94,17 +94,29 @@
   // در استاب هرگز match نمی‌شوند و دروازه‌ی ۳ بی‌صدا از تست بیرون می‌ماند.
   const EXEC   = "0x5f3FCcfF3339DAa9eA7D2EBC3f77017D65467132".toLowerCase();
 
-  const symOf = a => Object.keys(T).find(k => T[k].toLowerCase() === a.toLowerCase()) || "???";
+  /* ۱۱ نوامبر — توکن‌های دلخواهِ تست (Exit value): window.__STUB_TOKENS__ = { "<آدرسِ lower>": { sym, dec, usd, pools: { "uni-3000|weth": عمقِ دلاری, … } } }.
+     کلیدِ pools همان «<venueKey>|<نمادِ طرفِ مقابل>» است (طرفِ مقابل weth یا usdc). توکنِ بی‌pool همان «مسیری نیست» است.
+     ⚠️ فقط وقتی window.__STUB_TOKENS__ پر باشد اثر دارد؛ همه‌ی کاوشگرهای قدیمی بدونِ آن دقیقاً مثلِ قبل‌اند. */
+  const custom = a => (window.__STUB_TOKENS__ || {})[String(a).toLowerCase()];
+  const symOf = a => (custom(a) ? "@" + String(a).toLowerCase() : null) || Object.keys(T).find(k => T[k].toLowerCase() === a.toLowerCase()) || "???";
+  const decOf = a => custom(a) ? custom(a).dec : DEC[String(a).toLowerCase()];
+  const usdOf = a => custom(a) ? custom(a).usd : USD[String(a).toLowerCase()];
   const pairKey = (a, b) => [symOf(a).toLowerCase(), symOf(b).toLowerCase()].sort().join("-");
 
   function venueKeyV3(prefix, fee) { return prefix + "-" + fee; }
   function venueKeySolidly(stable) { return stable ? "aero-stb" : "aero-vol"; }
 
   function reserves(vk, a, b) {
-    const depth = DEPTH[vk + "|" + pairKey(a, b)];
+    let depth = DEPTH[vk + "|" + pairKey(a, b)];
+    if (!depth) {
+      // توکنِ دلخواه: عمقِ استخرش با طرفِ مقابل (weth/usdc)
+      const ca = custom(a), cb = custom(b);
+      const side = (c, other) => c && c.pools && c.pools[vk + "|" + symOf(other).toLowerCase()];
+      depth = side(ca, b) || side(cb, a) || 0;
+    }
     if (!depth) return null;
     const mk = (addr) => {
-      const d = DEC[addr.toLowerCase()], p = USD[addr.toLowerCase()];
+      const d = decOf(addr), p = usdOf(addr);
       return BigInt(Math.floor((depth / 2 / p) * 1e6)) * 10n ** BigInt(d) / 1000000n;
     };
     return { rIn: mk(a), rOut: mk(b) };
@@ -304,7 +316,7 @@
           return [true, pack([[amt, o]])];
         }
         if (c.name === "balanceOf") {
-          const d = DEC[t] || 18;
+          const d = decOf(t) || 18;
           /* موجودی هم مثل allowance قابل تنظیم شد. تا قبل از این ثابت ۲۵۰۰
              بود، و هر تستی که می‌خواست مسیر «موجودی هست ولی allowance بین
              پای شبیه‌سازی و کل سفارش است» را بسنجد، اول به سنگِ موجودی
@@ -329,9 +341,9 @@
           const key = target + "|" + JSON.stringify(c.args);
           return [true, pack(["0x" + fakeId(key).slice(2, 42)])];
         }
-        if (c.name === "symbol")   return [true, pack([symOf(target)])];
+        if (c.name === "symbol")   return [true, pack([custom(target) ? custom(target).sym : symOf(target)])];
         if (c.name === "name")     return [true, pack(["Test Token"])];
-        if (c.name === "decimals") return [true, pack([DEC[t] || 18])];
+        if (c.name === "decimals") return [true, pack([decOf(t) || 18])];
         if (t === EXEC && c.name === "feeBps") return [true, pack([0n])];
         // پیش‌فرض true برای همه (وضعیت زنده‌ی امروز)، ولی قابل بازنویسی
         // به‌ازای هر روتر — window.__STUB_ROUTER_ALLOWED__ = {"<router>": false}
@@ -383,6 +395,7 @@
       if (realFetch) return realFetch(url, opts);
       throw new Error("offline");
     }
+    if (window.__STUB_GT_DOWN__) throw new Error("gt down");   // آزمونِ قطعیِ GT (Exit value): مسیر مستقیم هم نمی‌دهد
     const ok = body => ({ ok: true, status: 200, json: async () => body });
 
     // اطلاعات توکن (برای لوگو) — یک PNG یک‌پیکسلی به‌صورت data URI

@@ -397,6 +397,13 @@ ok(res.status === 200, "index.html must still be served");
   await evCall(JSON.stringify({ e: "load", d: "", v: "desktop", country: "US" }), { cf: {} });
   ok(points[0].blobs[3] === "??", "a country in the request body must be ignored");
 
+  /* Exit value: دو نامِ تازه با d خالی ثبت می‌شوند */
+  for (const nm of ["exit:check", "exit:share"]) {
+    const rr = await evCall(JSON.stringify({ e: nm, d: "", v: "mobile" }), { cf: { country: "DE" } });
+    ok(rr.status === 204 && points.length === 1 && points[0].blobs[0] === nm && points[0].blobs[1] === "",
+      "[exit] " + nm + " must be accepted with an empty detail, got " + rr.status + " " + JSON.stringify(points[0] && points[0].blobs));
+  }
+
   /* ج) هرچه شکل مورد انتظار را ندارد رد می‌شود و *نوشته نمی‌شود* */
   const REFUSE = [
     [405, GOOD, { method: "GET" }],
@@ -411,6 +418,8 @@ ok(res.status === 200, "index.html must still be served");
     [400, JSON.stringify({ e: "", d: "", v: "desktop" }), {}],
     [400, JSON.stringify({ d: "", v: "desktop" }), {}],
     [400, JSON.stringify({ e: "load", d: "0xdeadbeef", v: "desktop" }), {}],
+    [400, JSON.stringify({ e: "exit:check", d: "0x" + "ab".repeat(20), v: "desktop" }), {}],   // Exit value: آدرس هرگز در رویداد
+    [400, JSON.stringify({ e: "exit:share", d: "ababababab", v: "desktop" }), {}],
     [400, JSON.stringify({ e: "load", d: "", v: "tv" }), {}],
     [400, JSON.stringify({ e: "load", d: "", v: "" }), {}],
     [400, JSON.stringify({ e: ["load"], d: "", v: "desktop" }), {}],
@@ -3917,9 +3926,9 @@ function isSolidlyReqId(id) { return PROBE_KIND_BY_ID.get(id) === "SOLIDLY"; }
     const dis = [...body.matchAll(/^Disallow:\s*(\S+)\s*$/gm)].map((m) => m[1]);
     for (const p of ["/gt/", "/cg/", "/vd/", "/sol/", "/ev"]) ok(dis.includes(p), "robots.txt must disallow " + p + ", got " + JSON.stringify(dis));
     const blocked = (path) => dis.some((d) => path.startsWith(d));
-    for (const p of ["/", "/app", "/api", "/pairs", "/report", "/report/2026-11-08", "/t/0x" + "a".repeat(40), "/og/t/0x" + "a".repeat(40) + ".png", "/og.png", "/logo.png", "/sitemap.xml"])
+    for (const p of ["/", "/app", "/api", "/pairs", "/report", "/report/2026-11-08", "/t/0x" + "a".repeat(40), "/og/t/0x" + "a".repeat(40) + ".png", "/og.png", "/logo.png", "/sitemap.xml", "/exit", "/exit/0x" + "a".repeat(40)])
       ok(!blocked(p), "robots.txt must keep " + p + " crawlable, blocked by " + JSON.stringify(dis));
-    for (const p of ["/gt/networks/base/tokens/multi/0x1", "/cg/mcap/x", "/vd/0x1", "/sol/quote", "/ev", "/cmc/kline", "/pnl/0x1/0x2", "/v4/keys/0x1", "/base/rpc"])
+    for (const p of ["/gt/networks/base/tokens/multi/0x1", "/cg/mcap/x", "/vd/0x1", "/sol/quote", "/ev", "/cmc/kline", "/pnl/0x1/0x2", "/v4/keys/0x1", "/base/rpc", "/exit/holdings/0x" + "a".repeat(40)])
       ok(blocked(p), "robots.txt must block " + p);
     console.log("[robots api] data/API paths (/gt/ /cg/ /cmc/ /vd/ /sol/ /base/ /v4/ /pnl/ /ev /report/run) are disallowed; every page, /api, token pages, OG images and the sitemap stay crawlable");
   }
@@ -17727,6 +17736,165 @@ console.log(fails === 0
     "eth_getLogs only ever goes to tenderly with one ~800ms retry on 429 inside the caller's timeout; [v4 posm] when logs " +
     "cannot be read, PositionManager.poolKeys(bytes25) resolves keys strictly (exact calldata, 5 words, no zero/foreign/misordered/" +
     "tickSpacing-0 keys) and any failure keeps the original reason with nothing stored");
+}
+
+
+/* ---- [exit] ۱۱ نوامبر — «Exit value»: GET /exit/holdings/<کیف> و صفحه‌ی /exit ---- */
+{
+  const RPC = "https://base-mainnet.g.alchemy.com/v2/SECRET-ALCHEMY-KEY-EXIT-9876";
+  const KEYPART = "SECRET-ALCHEMY-KEY-EXIT-9876";
+  const W = "0x" + "1".repeat(40), W_UP = "0x" + "AbCdEf".repeat(6) + "1234";
+  const tk = (n) => "0x" + n.toString(16).padStart(40, "0");
+  const hx = (n) => "0x" + BigInt(n).toString(16);
+  const jb = (o, st = 200) => new Response(JSON.stringify(o), { status: st, headers: { "content-type": "application/json" } });
+  let kvOps = [], seenCalls = [];
+  const KV = { get: async (...a) => { kvOps.push(["get", a[0]]); return null; }, put: async (...a) => { kvOps.push(["put", a[0]]); },
+    delete: async (...a) => { kvOps.push(["del", a[0]]); }, list: async (...a) => { kvOps.push(["list"]); return { keys: [] }; } };
+  const envE = { ASSETS, BASE_RPC: RPC, ZX_KV: KV };
+  // نتیجه‌ی بالادست: tb = آرایه‌ی tokenBalances، eth = هگزِ موجودی؛ down/ethDown/rpcErr برای شکست‌ها
+  const mkUp = (o) => {
+    const opt = Object.assign({ tb: [], eth: "0xde0b6b3a7640000", pageKey: null, down: false, ethErr: false, tbErr: false, throwIt: false }, o || {});
+    return async (u, init) => {
+      const body = JSON.parse(init.body);
+      seenCalls.push({ u, body });
+      if (opt.throwIt) throw new Error("network down");
+      if (opt.down) return jb({ error: "x" }, 500);
+      return jb(body.map((x) => x.method === "alchemy_getTokenBalances"
+        ? (opt.tbErr ? { jsonrpc: "2.0", id: x.id, error: { code: -32000, message: "boom" } }
+          : { jsonrpc: "2.0", id: x.id, result: { address: x.params[0], tokenBalances: opt.tb, ...(opt.pageKey ? { pageKey: opt.pageKey } : {}) } })
+        : (opt.ethErr ? { jsonrpc: "2.0", id: x.id, error: { code: -32000, message: "boom" } }
+          : { jsonrpc: "2.0", id: x.id, result: opt.eth })));
+    };
+  };
+  const shelf = new Map(), puts = [];
+  const savedCaches = globalThis.caches;
+  globalThis.caches = { default: {
+    match: async (r) => { const v = shelf.get(r.url); return v ? v.clone() : undefined; },
+    put: async (r, v) => { puts.push({ u: r.url, cc: v.headers.get("cache-control") }); shelf.set(r.url, v); },
+  } };
+  let ipX = 0;
+  const ipE = () => ({ headers: { "cf-connecting-ip": "203.0.113." + (++ipX % 250 + 1) } });
+  const EX = async (path, handler, e, init) => {
+    const saved = globalThis.fetch, savedKeep = keepCgFlag;
+    seenCalls = []; kvOps = []; keepCgFlag = true;
+    globalThis.fetch = (u, o) => handler(String(u), o || {});
+    try { return await call(path, init || ipE(), e || envE); } finally { globalThis.fetch = saved; keepCgFlag = savedKeep; }
+  };
+  try {
+    // الف) اعتبارسنجی: ۴۰۰ و صفر تماس بالادست
+    for (const bad of ["", "/", "/0x123", "/" + W.slice(0, -1), "/" + W + "0", "/0x" + "g".repeat(40), "/" + W + "/extra", "/" + W.slice(2)]) {
+      const res = await EX("/exit/holdings" + bad, mkUp());
+      ok(res.status === 400, "[exit] bad address '" + bad + "' -> 400, got " + res.status);
+      ok(seenCalls.length === 0, "[exit] a rejected address makes zero upstream calls");
+    }
+    // ب) فقط GET؛ OPTIONS بدون بالادست
+    { const res = await EX("/exit/holdings/" + W, mkUp(), envE, { method: "POST", headers: { "cf-connecting-ip": "203.0.113.200" } });
+      ok(res.status === 405 && seenCalls.length === 0, "[exit] POST -> 405 with no upstream call, got " + res.status); }
+
+    // پ) موفق: صفرها و خطادارها فیلتر؛ مقدارها رشته‌ی دهدهی؛ ETH از eth_getBalance
+    const TB = [
+      { contractAddress: tk(0xa1), tokenBalance: hx(1500000000000000000n) },
+      { contractAddress: tk(0xa2), tokenBalance: "0x0000000000000000000000000000000000000000000000000000000000000000" },   // صفرِ واقعی
+      { contractAddress: tk(0xa3), tokenBalance: hx(42) },
+      { contractAddress: tk(0xa4), tokenBalance: null, error: "execution reverted" },                                      // نخواندنی
+      { contractAddress: tk(0xa1), tokenBalance: hx(7) },                                                                  // تکراری
+      { contractAddress: "0xnot-an-address", tokenBalance: hx(5) },
+    ];
+    { const res = await EX("/exit/holdings/" + W_UP, mkUp({ tb: TB }));
+      const raw = await res.text(), b = JSON.parse(raw);
+      ok(res.status === 200, "[exit] success is 200, got " + res.status);
+      ok(JSON.stringify(b.tokens) === JSON.stringify([{ address: tk(0xa1), balance: "1500000000000000000" }, { address: tk(0xa3), balance: "42" }]),
+        "[exit] zero balances, unreadable entries, duplicates and junk addresses are not listed; the rest are lower-cased raw decimal strings, got " + raw);
+      ok(b.eth === "1000000000000000000" && b.more === false, "[exit] eth is wei as a decimal string and more:false, got " + raw);
+      ok(b.unread === 2, "[exit] two unreadable entries are counted (not zero, not listed), got " + raw);
+      ok(seenCalls.length === 1 && Array.isArray(seenCalls[0].body) && seenCalls[0].u === RPC, "[exit] one batch to BASE_RPC only, got " + seenCalls.length);
+      const m = seenCalls[0].body.map((x) => x.method).join();
+      ok(m === "alchemy_getTokenBalances,eth_getBalance", "[exit] getTokenBalances + eth_getBalance, got " + m);
+      const gt = seenCalls[0].body[0].params;
+      ok(gt[0] === W_UP.toLowerCase() && gt[1] === "erc20" && gt[2].maxCount === 100, "[exit] erc20, maxCount 100, lower-cased wallet, got " + JSON.stringify(gt));
+      ok(res.headers.get("cache-control") === "public, max-age=60" && res.headers.get("access-control-allow-origin") === "*", "[exit] 60s cache + CORS");
+      ok(!raw.includes(KEYPART) && !JSON.stringify([...res.headers.entries()]).includes(KEYPART), "[exit] the BASE_RPC secret never appears in a response");
+      ok(puts.length === 1 && puts[0].u === "https://exit.zaexa.internal/h/" + W_UP.toLowerCase() && puts[0].cc === "public, max-age=60", "[exit] cached 60s per address in the Cache API, got " + JSON.stringify(puts));
+      ok(kvOps.length === 0, "[exit] no KV operation at all (the address must never reach KV), got " + JSON.stringify(kvOps));
+    }
+    // ت) کش: دومی صفر تماس
+    { const res = await EX("/exit/holdings/" + W_UP, mkUp({ tb: [] }));
+      ok(res.status === 200 && seenCalls.length === 0, "[exit] a cache hit makes zero upstream calls, got " + seenCalls.length);
+      ok(kvOps.length === 0, "[exit] cache hit touches no KV"); }
+
+    // ث) ETH صفر و بدون توکن = جوابِ واقعی «چیزی ندارد»، نه خطا
+    shelf.clear(); puts.length = 0;
+    { const res = await EX("/exit/holdings/" + W, mkUp({ tb: [], eth: "0x0" }));
+      const b = await res.json();
+      ok(res.status === 200 && b.eth === "0" && Array.isArray(b.tokens) && b.tokens.length === 0 && b.more === false, "[exit] a genuinely empty wallet is 200 with eth 0 and no tokens, got " + JSON.stringify(b)); }
+
+    // ج) سقف: ۱۵۰ ردیف → ۱۰۰ توکن و more:true
+    shelf.clear(); puts.length = 0;
+    { const many = []; for (let i = 1; i <= 150; i++) many.push({ contractAddress: tk(0x1000 + i), tokenBalance: hx(i) });
+      const res = await EX("/exit/holdings/" + W, mkUp({ tb: many }));
+      const b = await res.json();
+      ok(b.tokens.length === 100 && b.more === true, "[exit] 150 tokens -> capped at 100 with more:true, got " + b.tokens.length + "/" + b.more);
+      ok(b.tokens[0].address === tk(0x1001) && b.tokens[99].address === tk(0x1000 + 100), "[exit] the cap keeps the first 100 in upstream order"); }
+    // چ) pageKey از بالادست → more:true
+    shelf.clear(); puts.length = 0;
+    { const res = await EX("/exit/holdings/" + W, mkUp({ tb: [{ contractAddress: tk(0xb1), tokenBalance: hx(9) }], pageKey: "next" }));
+      const b = await res.json();
+      ok(b.tokens.length === 1 && b.more === true, "[exit] an upstream pageKey -> more:true, got " + JSON.stringify(b)); }
+
+    // ح) شکستِ بالادست: err:upstream با وضعیتِ غیر-۲۰۰، هرگز فهرستِ خالی؛ کش نمی‌شود؛ راز درز نمی‌کند
+    for (const [label, o] of [["HTTP 500", { down: true }], ["fetch throws", { throwIt: true }], ["token call errors", { tbErr: true }], ["eth call errors", { ethErr: true }],
+      ["bad eth value", { eth: "zzz" }]]) {
+      shelf.clear(); puts.length = 0;
+      const res = await EX("/exit/holdings/" + W, mkUp(o));
+      const raw = await res.text(); let b = null; try { b = JSON.parse(raw); } catch (e) { /* */ }
+      ok(res.status !== 200 && res.status >= 500, "[exit] upstream " + label + " -> a 5xx status, got " + res.status);
+      ok(b && b.err === "upstream" && !("tokens" in b) && !("eth" in b), "[exit] upstream " + label + " -> {err:'upstream'} and never an empty list, got " + raw);
+      ok(res.headers.get("cache-control") === "no-store" && puts.length === 0, "[exit] a failure is never cached (" + label + ")");
+      ok(!raw.includes(KEYPART) && !JSON.stringify([...res.headers.entries()]).includes(KEYPART), "[exit] the secret is not in the failure response (" + label + ")");
+      ok(kvOps.length === 0, "[exit] failure path touches no KV (" + label + ")");
+    }
+    { const res = await EX("/exit/holdings/" + W, mkUp(), { ASSETS, ZX_KV: KV });   // BASE_RPC نیست
+      const b = await res.json();
+      ok(res.status === 503 || res.status === 502, "[exit] no BASE_RPC -> non-200, got " + res.status);
+      ok(b.err === "upstream", "[exit] no BASE_RPC -> err:upstream, got " + JSON.stringify(b)); }
+    // خ) بعد از شکست دوباره از بالادست می‌پرسد
+    { const res = await EX("/exit/holdings/" + W, mkUp({ tb: [{ contractAddress: tk(0xc1), tokenBalance: hx(1) }] }));
+      ok(res.status === 200 && seenCalls.length === 1, "[exit] after a failure the next call asks upstream again"); }
+
+    // د) محدودکننده‌ی نرخ: بعد از RL_LIMIT درخواست از یک IP، ۴۲۹ (بسته‌ی جدا از بقیه)
+    { const ipOne = { headers: { "cf-connecting-ip": "198.18.7.7" } };
+      let last = null;
+      for (let i = 0; i < 121; i++) last = await EX("/exit/holdings/xyz", mkUp(), envE, ipOne);
+      ok(last.status === 429 && last.headers.get("retry-after") === "60", "[exit] the shared rate limiter applies (429 + retry-after on request 121), got " + last.status); }
+
+    // ذ) صفحه‌ها: /exit و /exit/<آدرس> همان سندِ /app؛ فقط /exit/<آدرس> noindex؛ هرگز فایلِ html تازه
+    { const asked = [];
+      const A2 = { fetch: async (rq) => { asked.push(new URL(rq.url).pathname); return new Response("<html>the app</html>", { status: 200, headers: { "content-type": "text/html" } }); } };
+      const e2 = { ASSETS: A2 };
+      const r1 = await call("/exit", ipE(), e2);
+      ok(r1.status === 200 && (await r1.text()).includes("the app") && asked[0] === "/app", "[exit] /exit serves the app document (/app), got " + asked.join());
+      ok(!r1.headers.get("x-robots-tag"), "[exit] /exit itself stays indexable (no X-Robots-Tag)");
+      const r1b = await call("/exit/", ipE(), e2);
+      ok(r1b.status === 200 && !r1b.headers.get("x-robots-tag"), "[exit] /exit/ behaves like /exit");
+      asked.length = 0;
+      const r2 = await call("/exit/" + W, ipE(), e2);
+      ok(r2.status === 200 && asked[0] === "/app", "[exit] /exit/<address> serves the app document, got " + asked.join());
+      ok((r2.headers.get("x-robots-tag") || "").includes("noindex"), "[exit] /exit/<address> is noindex, got " + r2.headers.get("x-robots-tag"));
+      const r3 = await call("/exit/not-an-address", ipE(), e2);
+      ok(r3.status === 200 && (r3.headers.get("x-robots-tag") || "").includes("noindex"), "[exit] any /exit/<something> is noindex too");
+      const r4 = await call("/exit/" + W + "/more", ipE(), e2);
+      ok(r4.status === 200 && asked.at(-1) === "/exit/" + W + "/more" && !r4.headers.get("x-robots-tag"), "[exit] deeper paths are not claimed by the exit page route");
+      const rm = await call("/exit/" + W, { method: "HEAD", headers: ipE().headers }, e2);
+      ok(rm.status === 200 && (rm.headers.get("x-robots-tag") || "").includes("noindex"), "[exit] HEAD keeps the noindex header"); }
+    // ر) robots: داده بسته، صفحه باز
+    { const r = await call("/robots.txt"); const body = await r.text();
+      const dis = [...body.matchAll(/^Disallow:\s*(\S+)\s*$/gm)].map((m) => m[1]);
+      ok(dis.includes("/exit/holdings"), "[exit] robots.txt disallows /exit/holdings, got " + JSON.stringify(dis));
+      ok(!dis.some((d) => "/exit".startsWith(d) || "/exit/0x".startsWith(d)) && !dis.includes("/exit"), "[exit] /exit and /exit/<address> stay crawlable (noindex is set by header, the crawler has to see it)"); }
+    console.log("[exit] holdings: bad address 400 with no upstream call; getTokenBalances+eth_getBalance in one batch to BASE_RPC; zero/unreadable/duplicate entries filtered (unread counted); cap 100 -> more:true (also on pageKey); every upstream failure -> 5xx {err:'upstream'} never an empty list, never cached, no secret; 60s Cache API per address, no KV operation, rate limited; /exit serves /app and stays indexable, /exit/<address> is noindex, /exit/holdings is disallowed in robots");
+  } finally {
+    globalThis.caches = savedCaches;
+  }
 }
 
 process.exit(fails === 0 ? 0 : 1);
