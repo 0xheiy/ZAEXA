@@ -170,7 +170,7 @@ import {
 } from "./exit.js";
 import { exitCardPng } from "./og-exit.js";
 import { EVM_ADDR, SOL_MINT, chainOf, gtNetworkOf } from "./chains.js";
-import { tgRoute } from "./tg.js";
+import { tgRoute, TG_EXIT_WAIT_MS } from "./tg.js";
 import {
   REPORT_DATE_RE, PAIRS_KEY_BASE, reportKey, utcDateOf, emptyReportDoc, runReportPass, publishGuardRow,
   reportText, REPORT_TEXT_FIRST_DATE, followForRow, recheckForRow, causeForRow, readPassLog,
@@ -4904,7 +4904,11 @@ export default {
       return diagVerdict(request, url, env, ctx);
     /* وب‌هوکِ بات تلگرام — هیچ درخواستِ خروجی ندارد؛ جواب در بدنه‌ی پاسخ است. */
     if (url.pathname === "/tg" || url.pathname.startsWith("/tg/"))
-      return tgRoute(request, url, env, { verdict: (a) => tokenVerdict(a, env, ctx, Date.now() + OG_BUDGET_MS, { withSymbol: true }) });
+      return tgRoute(request, url, env, {
+        verdict: (a) => tokenVerdict(a, env, ctx, Date.now() + OG_BUDGET_MS, { withSymbol: true }),
+        /* /exit <کیف> — همان خلاصه‌ی ۱۰دقیقه‌ایِ کارتِ پیش‌نمایش (یک کش، یک محاسبه برای هر دو). null = نمی‌دانیم، هرگز صفر. */
+        exit: (w) => exitSummaryCached(w, env, ctx, { compute: true, waitMs: TG_EXIT_WAIT_MS }),
+      });
     /* سوآپِ زنده‌ی سولانا — هر سه پیش از /vd بررسی نمی‌شوند چون پیشوندشان
        فرق دارد؛ ترتیب اینجا اهمیتی ندارد، فقط برای هم‌جواری با بقیه‌ی
        مسیرهای تازه نگه داشته شده. */

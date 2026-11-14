@@ -6,8 +6,10 @@ import {
   tgRoute, tgSecrets, extractAddresses, verdictText, tgRateReset,
   TG_CHAT_LIMIT, TG_GLOBAL_LIMIT, TG_WINDOW_MS,
   LAST_LINE, START_TEXT, headerLine, REPORT_URL, NOT_ADDRESS, ONE_ADDRESS, CHAT_LIMIT, GLOBAL_LIMIT, HELP_TEXT,
+  exitText, walletHint, EXIT_LAST_LINE, EXIT_USAGE, EXIT_UNKNOWN, EXIT_PAGE_URL, WALLET_HINT, TG_EXIT_GLOBAL_LIMIT, TG_EXIT_WAIT_MS,
 } from "./tg.js";
 import { plainWhy } from "./report_page.js";
+import { exitCardLines } from "./og-exit.js";
 
 let fails = 0;
 function ok(cond, what) {
@@ -111,9 +113,10 @@ function req(body, { method = "POST", header = H, raw = false } = {}) {
     body: method === "GET" ? undefined : (raw ? body : JSON.stringify(body)) });
 }
 function mkEnv(extra = {}) { return { ASSETS, TG_BOT_TOKEN: TOKEN, TG_BOT_USERNAME: USER, ...extra }; }
-function run(body, { env = mkEnv(), now = 1_000_000, requestOpts, verdictReply } = {}) {
+function run(body, { env = mkEnv(), now = 1_000_000, requestOpts, verdictReply, exit } = {}) {
   let calls = 0;
   const deps = { now, verdict: async () => { calls++; return verdictReply || { v: "sell", ret: 99 }; } };
+  if (exit) deps.exit = exit;   // فقط بخشِ /exit آن را می‌دهد؛ بقیه‌ی بخش‌ها بدونِ آن اجرا می‌شوند
   return tgRoute(req(body, requestOpts), new URL("https://zaexa.com/tg/" + P), env, deps).then(async (r) => {
     const text = await r.text();
     let json = null;
@@ -342,6 +345,160 @@ done("ux");
 }
 done("privacy");
 
+/* ---- 8. /exit <کیف> — ارزشِ خروج با خلاصه‌ی سمتِ سرور (۱۱ نوامبر) ---- */
+{
+  tgRateReset();
+  const WAL = "0x8A0Dcb583C8CAdc481E34487c34f1B856fe97e23";
+  const HEAD = "Exit value of 0x8A0D…7e23 · Base\n";
+  const at = Date.UTC(2026, 10, 11, 9, 41);
+  const S = (o) => Object.assign({ paper: 12345.67, exit: 9876.54, lostPct: 20, quotedPaper: 12345.67, unknownCount: 0, counted: 3, at, partial: false }, o);
+  const mkExit = (ret) => { const seen = []; const f = async (w) => { seen.push(w); if (ret instanceof Error) throw ret; return ret; }; f.seen = seen; return f; };
+
+  // --- متن ---
+  let s = exitText(WAL, S());
+  ok(s === HEAD + "If sold now: $9,877\nOn paper: $12,346\n20.0% would be lost on exit.\nQuoted at 09:41 UTC.\n\n" + EXIT_LAST_LINE, "exit text, complete summary: " + JSON.stringify(s));
+  s = exitText(WAL, S({ unknownCount: 3, quotedPaper: 4400, paper: 15000, exit: 4000, lostPct: 9.0909 }));
+  ok(s === HEAD + "If sold now: at least $4,000\nOn paper: $4,400\n9.1% would be lost on exit.\nExcludes 3 tokens without a quote.\nQuoted at 09:41 UTC.\n\n" + EXIT_LAST_LINE,
+    "exit text with unquoted tokens says 'at least', uses the comparable paper figure and names the excluded tokens: " + JSON.stringify(s));
+  s = exitText(WAL, S({ partial: true }));
+  ok(s.includes("If sold now: at least $9,877\n") && s.includes("\nExcludes some tokens without a quote.\n"), "a truncated holdings list is 'at least' and never presented as complete");
+  s = exitText(WAL, S({ lostPct: 0.01 }));
+  ok(s.includes("\nAlmost nothing would be lost on exit.\n"), "a loss under the threshold reads 'Almost nothing'");
+  s = exitText(WAL, S({ lostPct: null }));
+  ok(!/lost on exit/.test(s) && s.includes("If sold now: $9,877\nOn paper: $12,346\nQuoted at"), "no lostPct -> no loss line (unknown is not 0%)");
+  s = exitText(WAL, S({ exit: 42.5, paper: 50, quotedPaper: 50 }));
+  ok(s.includes("If sold now: $42.50\nOn paper: $50.00\n"), "numbers under $100 keep two decimals (card format)");
+  // هر خط از همان exitCardLines است که کارتِ /og/exit را می‌سازد (یک منبع برای جمله‌ها)
+  for (const o of [{}, { unknownCount: 1 }, { unknownCount: 2, partial: true }, { partial: true }, { lostPct: 0 }, { lostPct: null }, { lostPct: 55.55 },
+    { exit: 0.07, paper: 0.09, quotedPaper: 0.09 }, { unknownCount: 4, quotedPaper: 800, paper: 9000, exit: 640 }]) {
+    const sm = S(o), L = exitCardLines(sm), t = exitText(WAL, sm), unk = sm.unknownCount > 0 || sm.partial;
+    ok(t.startsWith(HEAD + "If sold now: " + (unk ? "at least " : "") + L.exit + "\nOn paper: " + L.paper + "\n"), "card parity, first two lines " + JSON.stringify(o));
+    ok(L.lost ? t.includes("\n" + L.lost + ".\n") : !/lost on exit/.test(t), "card parity, loss line " + JSON.stringify(o));
+    ok(L.excl ? t.includes("\n" + L.excl + ".\n") : !/Excludes/.test(t), "card parity, excludes line " + JSON.stringify(o));
+    ok(t.endsWith("\nQuoted at " + L.time + ".\n\n" + EXIT_LAST_LINE), "card parity, time and last line " + JSON.stringify(o));
+  }
+  // «نمی‌دانیم» هرگز رقم نمی‌شود
+  for (const bad of [null, undefined, {}, "x", 0, S({ exit: NaN }), S({ exit: -1 }), S({ paper: Infinity }), S({ unknownCount: 1.5 }), S({ at: null })]) {
+    const t = exitText(WAL, bad), rest = t.slice(HEAD.length);
+    ok(t === HEAD + EXIT_UNKNOWN && !rest.includes("$") && !/\d/.test(rest), "absent or invalid summary -> the unknown text with no figure: " + JSON.stringify(bad));
+  }
+  for (const t of [exitText(WAL, S()), exitText(WAL, S({ unknownCount: 2, partial: true })), exitText(WAL, null), EXIT_USAGE, EXIT_UNKNOWN, EXIT_LAST_LINE, WALLET_HINT])
+    ok(!/safe|risk|honeypot|round trip|vpn|filter|iran|stuck|guarantee/i.test(t), "banned word in exit text: " + t.slice(0, 40));
+  ok(/\/exit <address>/.test(HELP_TEXT) && HELP_TEXT.endsWith(LAST_LINE) && START_TEXT.endsWith(HELP_TEXT), "help names /exit and still ends with the last line");
+
+  // --- مسیر ---
+  let ex = mkExit(S());
+  let r = await runCount(upd(msg("/exit " + WAL)), { exit: ex });
+  ok(r.json && r.json.method === "sendMessage" && r.json.text === exitText(WAL, S()), "private /exit replies with the exit text");
+  ok(ex.seen.length === 1 && ex.seen[0] === WAL.toLowerCase(), "the summary is asked once, with the lower-cased wallet (the cache key spelling), got " + JSON.stringify(ex.seen));
+  ok(r.n === 0, "/exit never runs the token verdict");
+  const kb = r.json && r.json.reply_markup && r.json.reply_markup.inline_keyboard;
+  ok(kb && kb.length === 1 && kb[0].length === 1 && kb[0][0].text === "Open on Zaexa" && kb[0][0].url === "https://zaexa.com/exit/" + WAL && EXIT_PAGE_URL === "https://zaexa.com/exit/",
+    "one button to the wallet's exit page, address as typed");
+  ok(r.json.chat_id === 555 && r.json.reply_parameters.message_id === 7 && r.json.link_preview_options.is_disabled && !("parse_mode" in r.json), "exit reply shape");
+  const g = (text) => runCount(upd(msg(text, { type: "supergroup", chat: -100 })), { exit: ex });
+  ex = mkExit(S());
+  r = await g("/exit " + WAL);
+  ok(r.json && r.json.text.startsWith(HEAD) && ex.seen.length === 1, "group /exit replies");
+  r = await g("/exit@OtherBot " + WAL);
+  ok(r.text === "" && ex.seen.length === 1, "group /exit@OtherBot ignored");
+  r = await g("/exit@zaexatestbot " + WAL);
+  ok(r.json && ex.seen.length === 2, "group /exit@zaexatestbot replies");
+  ex = mkExit(S());
+  for (const [text, want, label] of [["/exit", EXIT_USAGE, "no address"], ["/exit hello", EXIT_USAGE, "text without an address"], ["/exit " + MINT, EXIT_USAGE, "a Solana address"],
+    ["/exit " + WAL + " " + OTHER, ONE_ADDRESS, "two addresses"]]) {
+    r = await runCount(upd(msg(text)), { exit: ex });
+    ok(r.json && r.json.text === want && !r.json.reply_markup && ex.seen.length === 0 && r.n === 0, "/exit with " + label + " -> fixed text, no summary, no verdict");
+  }
+  tgRateReset();
+  for (const [label, dep] of [["null", mkExit(null)], ["a throw", mkExit(new Error("boom"))], ["a wrong shape", mkExit({ exit: 5 })], ["a negative exit", mkExit(S({ exit: -3 }))]]) {
+    r = await runCount(upd(msg("/exit " + WAL)), { exit: dep });
+    ok(r.json && r.json.text === HEAD + EXIT_UNKNOWN && !r.json.text.includes("$") && dep.seen.length === 1, "/exit when the summary is " + label + " -> the unknown text, never a figure");
+    ok(r.json && r.json.reply_markup.inline_keyboard[0][0].url === "https://zaexa.com/exit/" + WAL, "the unknown reply still links to the page (" + label + ")");
+  }
+  r = await runCount(upd(msg("/exit " + WAL)));
+  ok(r.json && r.json.text === HEAD + EXIT_UNKNOWN, "no exit dependency -> the unknown text");
+
+  // --- سقف‌ها ---
+  tgRateReset();
+  {
+    const T = 9_000_000;
+    let exCalls = 0, vdCalls = 0;
+    const go = async (text, chat, now) => {
+      const deps = { now, verdict: async () => { vdCalls++; return { v: "sell" }; }, exit: async () => { exCalls++; return S(); } };
+      const rr = await tgRoute(req(upd(msg(text, { chat }))), new URL("https://zaexa.com/tg/" + P), mkEnv(), deps);
+      return (await rr.json()).text;
+    };
+    for (let i = 0; i < TG_EXIT_GLOBAL_LIMIT; i++) ok((await go("/exit " + WAL, 2000 + i, T)).startsWith(HEAD + "If sold now"), "exit global #" + (i + 1));
+    ok((await go("/exit " + WAL, 2999, T)) === GLOBAL_LIMIT && exCalls === TG_EXIT_GLOBAL_LIMIT, "one /exit over its own cap -> GLOBAL_LIMIT and no summary asked (" + exCalls + ")");
+    ok((await go("/check " + USDC, 3000, T)).includes("\n✓ Sell route quoted") && vdCalls === 1, "the tighter /exit cap does not block token checks");
+    ok((await go("/exit " + WAL, 3001, T + TG_WINDOW_MS + 1)).startsWith(HEAD + "If sold now"), "/exit ok again after the window");
+    ok(TG_EXIT_GLOBAL_LIMIT === 10 && TG_EXIT_GLOBAL_LIMIT < TG_GLOBAL_LIMIT && TG_EXIT_WAIT_MS === 8000, "the /exit cap is tighter than the shared cap; the wait is 8s");
+    // سقفِ هر چت مشترک است: بررسیِ توکن و /exit از یک سطل می‌خورند
+    tgRateReset(); exCalls = 0; vdCalls = 0;
+    for (let i = 0; i < TG_CHAT_LIMIT; i++) await go(i % 2 ? "/exit " + WAL : "/check " + USDC, 42, T);
+    const over1 = await go("/exit " + WAL, 42, T), over2 = await go("/check " + USDC, 42, T);
+    ok(over1 === CHAT_LIMIT && over2 === CHAT_LIMIT && exCalls + vdCalls === TG_CHAT_LIMIT, "one chat bucket for both commands (" + exCalls + "+" + vdCalls + ")");
+    // سقفِ سراسریِ مشترک هم /exit را می‌گیرد
+    tgRateReset(); exCalls = 0;
+    for (let i = 0; i < TG_GLOBAL_LIMIT; i++) await go("/check " + USDC, 6000 + i, T);
+    ok((await go("/exit " + WAL, 7000, T)) === GLOBAL_LIMIT && exCalls === 0, "the shared global cap also stops /exit");
+    tgRateReset();
+  }
+
+  // --- شمارنده و حریم ---
+  {
+    fetchCalls.length = 0;
+    const points = [];
+    const kv = new Proxy({}, { get() { throw new Error("ZX_KV touched"); }, has() { throw new Error("ZX_KV touched"); } });
+    const env = mkEnv({ ZX_KV: kv, ZX_EV: { writeDataPoint: (p) => points.push(p) } });
+    const bodies = [];
+    const send = async (text, dep) => { const rr = await run(upd(msg(text, { chat: 424242 })), { env, exit: dep }); bodies.push(rr.text); return rr; };
+    await send("/exit " + WAL, mkExit(S()));
+    ok(points.length === 1 && JSON.stringify(points[0].blobs) === JSON.stringify(["exit:check", "", "bot", "??", "base"])
+      && JSON.stringify(points[0].doubles) === "[1]" && JSON.stringify(points[0].indexes) === '["exit:check"]',
+      "a /exit reply with numbers writes exactly one point under the existing exit:check name, surface 'bot': " + JSON.stringify(points));
+    await send("/exit " + WAL, mkExit(null));
+    await send("/exit " + WAL, mkExit(new Error("x")));
+    await send("/exit", mkExit(S()));
+    await send("/exit " + MINT, mkExit(S()));
+    ok(points.length === 1, "unknown, usage and wrong-chain /exit replies write no point (got " + points.length + ")");
+    const flat = JSON.stringify(points).toLowerCase();
+    ok(!flat.includes(WAL.toLowerCase()) && !flat.includes("8a0d") && !flat.includes("7e23") && !flat.includes("424242"), "no wallet address and no chat id in the data point");
+    ok(bodies.length === 5 && bodies[0].includes("If sold now"), "the five replies were produced");
+    for (const b of bodies) ok(!b.includes(TOKEN) && !b.includes("TESTTOKEN") && !b.includes(H) && !b.includes(P), "exit body leaks secret");
+    const envBoom = mkEnv({ ZX_EV: { writeDataPoint() { throw new Error("boom"); } } });
+    const rb = await run(upd(msg("/exit " + WAL, { chat: 424243 })), { env: envBoom, exit: mkExit(S()) });
+    ok(rb.json && rb.json.text === exitText(WAL, S()), "a throwing counter does not break the /exit reply");
+    ok(fetchCalls.length === 0, "the bot module itself makes no outbound call for /exit (" + fetchCalls.length + ")");
+    tgRateReset();
+  }
+
+  // --- راهنمای «شاید کیف باشد» زیرِ بررسیِ توکن ---
+  {
+    ok(walletHint("base", { v: null, why: "meta:404" }) === true, "hint: a Base address the data service does not know as a token");
+    for (const [chain, rr, label] of [["base", { v: null, why: "meta:429" }, "a busy service"], ["base", { v: null, why: "meta:500" }, "a service error"],
+      ["base", { v: null, why: "meta:timeout" }, "a timeout"], ["base", { v: null, why: "rpc-down" }, "an RPC failure"], ["base", { v: "sell", why: "meta:404" }, "a sell verdict"],
+      ["base", { v: "nosell", why: "meta:404" }, "a nosell verdict"], ["solana", { v: null, why: "meta:404" }, "Solana"], ["base", null, "no result"], ["base", { v: null }, "no reason"],
+      [null, { v: null, why: "meta:404" }, "no chain"]])
+      ok(walletHint(chain, rr) === false, "no wallet hint for " + label);
+    let h = await runCount(upd(msg(WAL)), { verdictReply: { v: null, why: "meta:404" } });
+    ok(h.json && h.json.text === "0x8A0D…7e23 · Base\n? Could not be checked\n" + plainWhy("base", "meta:404") + "\n\n" + WALLET_HINT + "\n\n" + LAST_LINE,
+      "an address the data service does not know as a token gets the wallet hint before the last line: " + JSON.stringify(h.json && h.json.text));
+    ok(h.json && h.json.reply_markup.inline_keyboard[0][0].url === "https://zaexa.com/t/" + WAL, "the hinted reply keeps the token buttons");
+    h = await runCount(upd(msg(WAL)), { verdictReply: { v: null, why: "meta:429" } });
+    ok(h.json && !h.json.text.includes(WALLET_HINT) && h.json.text.endsWith(plainWhy("base", "meta:429") + "\n\n" + LAST_LINE), "a busy data service gets no wallet hint");
+    h = await runCount(upd(msg(MINT)), { verdictReply: { v: null, why: "meta:404" } });
+    ok(h.json && !h.json.text.includes(WALLET_HINT), "Solana never gets the wallet hint");
+    h = await runCount(upd(msg(USDC)), { verdictReply: { v: "sell", ret: 99, symbol: "USDC" } });
+    ok(h.json && h.json.text === "USDC · Base\n✓ Sell route quoted. A $100 sell quote returned 99%.\n\n" + LAST_LINE, "a normal verdict reply is unchanged");
+    ok(/\/exit/.test(WALLET_HINT) && verdictText("base", { v: "sell" }, undefined, "") === "✓ Sell route quoted.\n\n" + LAST_LINE, "verdictText without extra is the old text");
+    tgRateReset();
+  }
+}
+done("exit");
+
 console.log("[tg positive control] live USDC check is manual after deploy (not run here)");
+console.log("[tg exit positive control] live /exit check is manual after deploy (not run here)");
 
 if (fails) { console.log(fails + " failure(s)"); process.exit(1); }

@@ -3,14 +3,23 @@
    • هیچ درخواستِ خروجی نمی‌زند؛ جواب در بدنه‌ی خودِ پاسخِ وب‌هوک است.
    • توکنِ بات هرگز در URL، هدر، بدنه، لاگ یا پیامِ خطا نمی‌آید.
    • هیچ شناسه‌ای ذخیره نمی‌شود: نه چت، نه کاربر، نه متن، نه آدرس.
-   • این ماژول index.js را import نمی‌کند (چرخه می‌سازد). */
+   • این ماژول index.js را import نمی‌کند (چرخه می‌سازد).
+   • ۱۱ نوامبر — /exit <کیف>: ارزشِ خروجِ یک کیفِ Base با همان خلاصه‌ی سمتِ سرورِ کارتِ پیش‌نمایش (deps.exit).
+     آدرسِ کیف فقط به deps.exit می‌رود؛ خلاصه ۱۰ دقیقه در همان Cache API کارتِ /og/exit می‌نشیند (worker/index.js) —
+     نه KV، نه لاگ، نه شمارنده. null از deps.exit یعنی «نمی‌دانیم»، هرگز «صفر دلار». */
 
 import { chainOf } from "./chains.js";
 import { plainWhy } from "./report_page.js";
+import { exitSummaryValid, shortAddr } from "./exit.js";
+import { exitCardLines } from "./og-exit.js";
 
 export const TG_CHAT_LIMIT = 10;
 export const TG_GLOBAL_LIMIT = 30;
 export const TG_WINDOW_MS = 60000;
+/* /exit گران‌تر از بررسیِ توکن است (هلدینگ + تا ۵ دسته‌ی قیمت + کوت)، پس علاوه بر دو سقفِ بالا سقفِ سراسریِ خودش را دارد. */
+export const TG_EXIT_GLOBAL_LIMIT = 10;
+/* بیشینه‌ی انتظارِ جوابِ /exit؛ بعد از آن «نمی‌دانیم» — محاسبه در پس‌زمینه ادامه می‌دهد و کش را پر می‌کند (مثلِ کارتِ /og/exit). */
+export const TG_EXIT_WAIT_MS = 8000;
 const TG_MAX_BODY = 65536;
 
 export const LAST_LINE = "A check of the exit, not a price call.";
@@ -23,12 +32,27 @@ export const HELP_TEXT =
   "Base: 0x followed by 40 hex characters.\n" +
   "Solana: the token's mint address.\n" +
   "In a group: /check <address>, or mention me with the address.\n\n" +
-  "Example:\n/check 0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913\n\n" + LAST_LINE;
+  "Example:\n/check 0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913\n\n" +
+  "For a wallet: /exit <address> shows what a Base wallet would fetch if everything in it were sold now.\n\n" + LAST_LINE;
 // فقط برای /start — یک خط معرفی پیش از همان راهنما
 export const START_TEXT =
   "Zaexa is a DEX aggregator on Base and Solana. This bot runs the same exit check " +
   "as zaexa.com: before you buy a token, see whether there is a route to sell it back.\n\n" + HELP_TEXT;
 export const REPORT_URL = "https://zaexa.com/report";
+
+/* ---- /exit <کیف> ---- */
+export const EXIT_PAGE_URL = "https://zaexa.com/exit/";
+export const EXIT_LAST_LINE = "A floor from live quotes, not a price call.";
+export const EXIT_USAGE =
+  "Send /exit followed by a Base wallet address: 0x and 40 hex characters.\n" +
+  "Solana wallets are not covered.";
+// «نمی‌دانیم» — هم کیفی که چیزی برای شمردن ندارد، هم داده‌ای که نرسید. هیچ رقمِ دلاری در این متن نیست.
+export const EXIT_UNKNOWN =
+  "? Could not be worked out right now\n" +
+  "The wallet may hold nothing that can be priced, or the data did not arrive in time. That is unknown, not zero.\n" +
+  "Try again in a minute, or open the page for the full list.";
+// زیرِ جوابِ بررسیِ توکن، فقط وقتی سرویسِ داده آن آدرس را اصلاً توکن نمی‌شناسد (meta:404) — شاید کیف باشد
+export const WALLET_HINT = "Is this a wallet? Send /exit and the address to see what it would fetch if sold now.";
 
 /* ---------- رمزها ---------- */
 
@@ -75,10 +99,12 @@ function fnv1a(str) {
 
 const chatHits = new Map();
 let globalHit = { n: 0, reset: 0 };
+let exitHit = { n: 0, reset: 0 };
 
 export function tgRateReset() {
   chatHits.clear();
   globalHit = { n: 0, reset: 0 };
+  exitHit = { n: 0, reset: 0 };
 }
 
 function chatOk(chatId, now) {
@@ -101,6 +127,13 @@ function globalOk(now) {
   if (now >= globalHit.reset) globalHit = { n: 0, reset: now + TG_WINDOW_MS };
   globalHit.n++;
   return globalHit.n <= TG_GLOBAL_LIMIT;
+}
+
+// سقفِ سراسریِ جدا برای /exit — فقط بعد از گذشتن از دو سقفِ بالا شمرده می‌شود
+function exitOk(now) {
+  if (now >= exitHit.reset) exitHit = { n: 0, reset: now + TG_WINDOW_MS };
+  exitHit.n++;
+  return exitHit.n <= TG_EXIT_GLOBAL_LIMIT;
 }
 
 /* ---------- استخراجِ آدرس ---------- */
@@ -167,9 +200,30 @@ export function headerLine(chain, symbol, addr) {
   return label + " · " + (CHAIN_NAME[chain] || "?");
 }
 
-export function verdictText(chain, r, addr) {
+// extra (اختیاری): یک بندِ راهنما پیش از خطِ آخر — فقط WALLET_HINT از آن استفاده می‌کند
+export function verdictText(chain, r, addr, extra) {
   const head = addr ? headerLine(chain, r && r.symbol, addr) + "\n" : "";
-  return head + classify(chain, r).body + "\n\n" + LAST_LINE;
+  return head + classify(chain, r).body + (extra ? "\n\n" + extra : "") + "\n\n" + LAST_LINE;
+}
+
+/* آدرسی که بررسیِ توکن برایش «meta:404» می‌دهد (سرویسِ داده چنین توکنی نمی‌شناسد) شاید کیف باشد.
+   فقط یک راهنماییِ شرطی است، نه حکم؛ هر علتِ دیگری (شلوغی، تایم‌اوت، RPC) راهنما نمی‌گیرد. */
+export function walletHint(chain, r) {
+  return chain === "base" && !!r && typeof r === "object" && r.v == null && r.why === "meta:404";
+}
+
+/* متنِ جوابِ /exit — خط‌ها عیناً از exitCardLines (همان منبعِ کارتِ /og/exit؛ هم‌پایه‌ی کارتِ صفحه):
+   وقتی توکنِ بی‌کوت هست «at least» و «On paper» همان quotedPaper است. خلاصه‌ی نامعتبر/null = EXIT_UNKNOWN، هرگز «$0». */
+export function exitText(wallet, s) {
+  const head = "Exit value of " + shortAddr(String(wallet)) + " · Base\n";
+  if (!exitSummaryValid(s)) return head + EXIT_UNKNOWN;
+  const L = exitCardLines(s);
+  const unk = s.unknownCount > 0 || s.partial === true;
+  const lines = ["If sold now: " + (unk ? "at least " : "") + L.exit, "On paper: " + L.paper];
+  if (L.lost) lines.push(L.lost + ".");
+  if (L.excl) lines.push(L.excl + ".");
+  lines.push("Quoted at " + L.time + ".");
+  return head + lines.join("\n") + "\n\n" + EXIT_LAST_LINE;
 }
 
 /* ---------- مسیر ---------- */
@@ -218,6 +272,7 @@ function plan(message, username) {
     }
     if (name === "start" || name === "help") return { help: true, start: name === "start" };
     if (name === "check") return { extract: arg };
+    if (name === "exit") return { exit: true, extract: arg };
     return priv ? { extract: text } : null;
   }
   if (priv) return { extract: text };
@@ -240,6 +295,20 @@ function count(env, outcome, chain) {
       blobs: ["tg:check", outcome, "bot", "??", chain],
       doubles: [1],
       indexes: ["tg:check"],
+    });
+  } catch (e) { /* شمارنده نباید جواب را بشکند */ }
+}
+
+/* شمارشِ یک جوابِ /exit که عدد داشت — همان نامِ موجودِ صفحه (exit:check، detail خالی) با سطحِ «bot»ِ همین ربات.
+   نامِ تازه، مقدارِ تازه یا آدرس ندارد؛ جوابِ «نمی‌دانیم» شمرده نمی‌شود (صفحه هم خواندنِ ناموفق را نمی‌شمارد). */
+function countExit(env) {
+  const ds = env && env.ZX_EV;
+  if (!ds || typeof ds.writeDataPoint !== "function") return;
+  try {
+    ds.writeDataPoint({
+      blobs: ["exit:check", "", "bot", "??", "base"],
+      doubles: [1],
+      indexes: ["exit:check"],
     });
   } catch (e) { /* شمارنده نباید جواب را بشکند */ }
 }
@@ -277,6 +346,22 @@ export async function tgRoute(request, url, env, deps) {
     if (p.help) return jsonReply(replyObj(message, p.start ? START_TEXT : HELP_TEXT));
 
     const addrs = extractAddresses(p.extract);
+    if (p.exit) {
+      if (addrs.length > 1) return jsonReply(replyObj(message, ONE_ADDRESS));
+      const wallet = addrs.length === 1 && chainOf(addrs[0]) === "base" ? addrs[0] : null;
+      if (!wallet) return jsonReply(replyObj(message, EXIT_USAGE));
+      const nowX = deps && typeof deps.now === "number" ? deps.now : Date.now();
+      if (!chatOk(chat.id, nowX)) return jsonReply(replyObj(message, CHAT_LIMIT));
+      if (!globalOk(nowX) || !exitOk(nowX)) return jsonReply(replyObj(message, GLOBAL_LIMIT));
+      let s = null;
+      // کلیدِ کشِ خلاصه حروفِ کوچک است (همان قاعده‌ی /og/exit)؛ پرتاب یا نبودِ deps.exit = «نمی‌دانیم»
+      try { s = deps && typeof deps.exit === "function" ? await deps.exit(wallet.toLowerCase()) : null; } catch (e) { s = null; }
+      if (!exitSummaryValid(s)) s = null;
+      if (s) countExit(env);
+      const o = replyObj(message, exitText(wallet, s));
+      o.reply_markup = { inline_keyboard: [[{ text: "Open on Zaexa", url: EXIT_PAGE_URL + wallet }]] };
+      return jsonReply(o);
+    }
     if (addrs.length === 0) return jsonReply(replyObj(message, NOT_ADDRESS));
     if (addrs.length > 1) return jsonReply(replyObj(message, ONE_ADDRESS));
     const addr = addrs[0];
@@ -291,7 +376,7 @@ export async function tgRoute(request, url, env, deps) {
     try { r = await deps.verdict(addr); } catch (e) { r = { v: null, why: "internal" }; }
     const { outcome } = classify(chain, r);
     count(env, outcome, chain);
-    return jsonReply(replyObj(message, verdictText(chain, r, addr), addr));
+    return jsonReply(replyObj(message, verdictText(chain, r, addr, walletHint(chain, r) ? WALLET_HINT : ""), addr));
   } catch (e) {
     return empty(200);
   }

@@ -18461,6 +18461,42 @@ console.log(fails === 0
     // ===== خ) هیچ آدرسی در KV/لاگ/ev: کلِ بخش =====
     ok(kvOps.length === 0 && evPoints.length === 0, "[exit og] (end) no KV or /ev operation during the whole section");
     console.log("[exit og] typical exitSummary = " + globalThis.__exitOgTypicalSubreqs + " subrequests (1 holdings + 1 price batch + 1 Multicall3 quote)");
+
+    // ===== د) رباتِ تلگرام (۱۴ نوامبر): /exit از راهِ خودِ Worker همان خلاصه‌ی کارت را می‌گیرد =====
+    {
+      const TGX = await import("./tg.js");
+      const TGT = "123456:EXIT_E2E_TOKEN";
+      const { path: TP, header: TH } = await TGX.tgSecrets(TGT);
+      const envT = { ...envX, TG_BOT_TOKEN: TGT, TG_BOT_USERNAME: "ZaexaTestBot" };
+      let uid = 0;
+      const POST = (text, ip) => ({ method: "POST", headers: { "x-telegram-bot-api-secret-token": TH, "content-type": "application/json", "cf-connecting-ip": ip },
+        body: JSON.stringify({ update_id: ++uid, message: { message_id: 7, chat: { id: 555, type: "private" }, from: { id: 99, is_bot: false }, date: 1, text } }) });
+      const noTime = (t) => String(t).replace(/\nQuoted at \d\d:\d\d UTC\./, "");
+      TGX.tgRateReset();
+      resetCache();
+      const want = await COMPUTE(mkWorld(), {});
+      const wT = mkWorld();
+      const resT = await RUN(wT, "/tg/" + TP, POST("/exit " + W, "198.18.90.1"), envT);
+      const jT = await resT.json();
+      ok(resT.status === 200 && want.s && jT.method === "sendMessage" && noTime(jT.text) === noTime(TGX.exitText(W, want.s)) && /\nQuoted at \d\d:\d\d UTC\./.test(jT.text),
+        "[exit tg] /exit through the Worker replies with the same summary the card computes: " + JSON.stringify(jT.text));
+      ok(wT.kinds.filter((k) => k === "holdings").length === 1 && puts.some((p) => p.u === "https://exit.zaexa.internal/s/" + W),
+        "[exit tg] one holdings call, and the summary lands in the same cache key the card uses, got " + wT.kinds.join());
+      ok(evPoints.length === 1 && evPoints[0].blobs[0] === "exit:check" && evPoints[0].blobs[2] === "bot" && !JSON.stringify(evPoints).toLowerCase().includes(W.slice(2, 10)) && kvOps.length === 0,
+        "[exit tg] one exit:check point with surface 'bot', no address in it, no KV, got " + JSON.stringify(evPoints));
+      // دومین /exit برای همان کیف از کش می‌آید — هیچ تماسِ بالادستی
+      const wT2 = mkWorld();
+      const jT2 = await (await RUN(wT2, "/tg/" + TP, POST("/exit " + W, "198.18.90.2"), envT)).json();
+      ok(wT2.calls.length === 0 && noTime(jT2.text) === noTime(jT.text), "[exit tg] a second /exit within 10 minutes is served from the cache, got " + wT2.calls.length + " upstream calls");
+      // هلدینگِ قطع → «نمی‌دانیم»، بی‌رقم، بی‌شمارنده
+      const W_DOWN = "0x" + "cd".repeat(20);
+      const wD = mkWorld({ holdingsDown: true });
+      const jD = await (await RUN(wD, "/tg/" + TP, POST("/exit " + W_DOWN, "198.18.90.3"), envT)).json();
+      const restD = jD.text.slice(jD.text.indexOf("\n") + 1);
+      ok(restD === TGX.EXIT_UNKNOWN && !restD.includes("$") && evPoints.length === 0, "[exit tg] holdings down -> the unknown text, no figure, no counter, got " + JSON.stringify(jD.text));
+      TGX.tgRateReset();
+      console.log("[exit tg] bot /exit wired to exitSummaryCached (same cache and budget as /og/exit); unknown never shows a figure");
+    }
   } finally {
     globalThis.caches = savedCaches;
     if (savedHR === undefined) delete globalThis.HTMLRewriter; else globalThis.HTMLRewriter = savedHR;
