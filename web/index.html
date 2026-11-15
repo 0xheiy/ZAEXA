@@ -8590,7 +8590,7 @@ function exitRender(){
   h+=`<p class="exTotals" id="exitTotals">${bits.join(" · ")}</p>`;
   if(st.rows.some(r=>r.native&&r.paper==null))h+='<p class="exNote">ETH could not be priced right now, so it is not in the totals. That is unknown, not zero.</p>';
   if(!waiting&&T.unknown>0)h+='<p class="exNote">Tokens without a quote are left out of the exit value and the percentage. Their paper value is still in Paper value.</p>';
-  if(st.more)h+='<p class="exNote">This wallet holds more tokens than we read (the first 100). The totals cover only the tokens listed here.</p>';
+  if(st.more)h+='<p class="exNote">This wallet holds more tokens than we could read. The totals cover only the tokens listed here, most valuable first.</p>';
   if(st.unread>0)h+=`<p class="exNote">${st.unread} token${st.unread===1?"":"s"} could not be read from the chain and ${st.unread===1?"is":"are"} not counted.</p>`;
   const failedN=st.rows.filter(r=>r.why==="unread").length;
   if(failedN>0)h+=`<p class="exNote">Prices could not be read for ${failedN} token${failedN===1?"":"s"}. They are listed as unpriced, not as zero.</p>`;

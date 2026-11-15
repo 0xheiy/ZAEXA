@@ -36,7 +36,7 @@ export const SEL_AGGREGATE3 = "0x82ad56cb";    // aggregate3((address,bool,bytes
 
 // ---- بودجه‌ی خودِ خلاصه ----
 // ساب‌ریکوئستِ صریحِ یک محاسبه (سقفِ پلتفرم ~۵۰). معمولی: هلدینگ ۱ + قیمت ⌈n/25⌉ + کوت ۱ = ۳ تا ۶.
-export const EXIT_SUBREQ_BUDGET = 16;
+export const EXIT_SUBREQ_BUDGET = 24;   // ۱۵ نوامبر: ۱۶ → ۲۴ — هلدینگ حالا تا ۵ صفحه‌ی Portfolio (و در شکست تا ۵ صفحه‌ی RPC) می‌گیرد
 // بیش از این تعداد توکنِ شمرده‌شده کوت نمی‌گیرد → Unknown (نه صفر)
 export const EXIT_QUOTE_MAX_TOKENS = 30;
 // تعدادِ زیرتماسِ هر aggregate3 (مرزِ تکه‌ها روی توکن است، پس یک تکه‌ی خراب فقط توکن‌های خودش را Unknown می‌کند)
@@ -267,8 +267,8 @@ export function exitOgFields(wallet, origin, s, now) {
   const bits = ["On paper " + exitMoney(base) + "."];
   if (lp != null) bits.push((lp < EXIT_LOST_NONE ? "Almost nothing" : exitPct(lp)) + " would be lost on exit.");
   bits.push("Floor from live quotes at " + utcClock(s.at) + ".");
-  if (s.unknownCount > 0) bits.push("Excludes " + s.unknownCount + (s.partial ? "+" : "") + " token" + (s.unknownCount === 1 && !s.partial ? "" : "s") + " without a quote.");
-  else if (s.partial) bits.push("Excludes some tokens without a quote.");
+  if (s.partial) bits.push("Not every token in this wallet was read.");   // ۱۵ نوامبر: مقدم بر «Excludes N» (مثلِ exitCardLines)
+  else if (s.unknownCount > 0) bits.push("Excludes " + s.unknownCount + " token" + (s.unknownCount === 1 ? "" : "s") + " without a quote.");
   return {
     title: "Exit value of " + sa + ": " + (unk ? "at least " : "") + exitMoney(s.exit) + " if sold now",
     description: bits.join(" "),

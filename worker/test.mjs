@@ -17752,13 +17752,27 @@ console.log(fails === 0
     delete: async (...a) => { kvOps.push(["del", a[0]]); }, list: async (...a) => { kvOps.push(["list"]); return { keys: [] }; } };
   const envE = { ASSETS, BASE_RPC: RPC, ZX_KV: KV };
   // نتیجه‌ی بالادست: tb = آرایه‌ی tokenBalances، eth = هگزِ موجودی؛ down/ethDown/rpcErr برای شکست‌ها
+  /* ۱۵ نوامبر — Portfolio APIِ آلچمی (POST api.g.alchemy.com/data/v1/<key>/assets/tokens/by-address). شکلِ پاسخ از اسنادِ آلچمی:
+     data.tokens[] = { address, network, tokenAddress, tokenBalance (هگز), tokenMetadata:{decimals,…}, tokenPrices:[{currency,value,lastUpdatedAt}] }،
+     data.pageKey، error.partialErrors. pf: "down" (پیش‌فرض → راهِ RPC) | آرایه‌ی صفحه‌ها (هر صفحه {tokens, pageKey?}) | "shape" | "partial". */
+  const PF = "https://api.g.alchemy.com/data/v1/SECRET-ALCHEMY-KEY-EXIT-9876/assets/tokens/by-address";
+  const pfTok = (addr, bal, usd, dec = 18) => ({ address: "wallet", network: "base-mainnet", tokenAddress: addr, tokenBalance: hx(bal),
+    tokenMetadata: { decimals: dec, logo: null, name: "T", symbol: "T" }, tokenPrices: usd == null ? [] : [{ currency: "usd", value: String(usd), lastUpdatedAt: "2026-11-15T00:00:00Z" }] });
   const mkUp = (o) => {
-    const opt = Object.assign({ tb: [], eth: "0xde0b6b3a7640000", pageKey: null, down: false, ethErr: false, tbErr: false, throwIt: false }, o || {});
+    const opt = Object.assign({ tb: [], eth: "0xde0b6b3a7640000", pageKey: null, down: false, ethErr: false, tbErr: false, throwIt: false, pf: "down" }, o || {});
+    let pfPage = 0;
     return async (u, init) => {
       const body = JSON.parse(init.body);
       seenCalls.push({ u, body });
       if (opt.throwIt) throw new Error("network down");
       if (opt.down) return jb({ error: "x" }, 500);
+      if (u.startsWith("https://api.g.alchemy.com/")) {
+        if (opt.pf === "down") return jb({ error: { message: "x" } }, 500);
+        if (opt.pf === "shape") return jb({ data: { nope: 1 } });
+        if (opt.pf === "partial") return jb({ data: { tokens: [] }, error: { partialErrors: [{ network: "base-mainnet" }] } });
+        const pg = opt.pf[Math.min(pfPage++, opt.pf.length - 1)];
+        return jb({ data: { tokens: pg.tokens, ...(pg.pageKey ? { pageKey: pg.pageKey } : {}) } });
+      }
       return jb(body.map((x) => x.method === "alchemy_getTokenBalances"
         ? (opt.tbErr ? { jsonrpc: "2.0", id: x.id, error: { code: -32000, message: "boom" } }
           : { jsonrpc: "2.0", id: x.id, result: { address: x.params[0], tokenBalances: opt.tb, ...(opt.pageKey ? { pageKey: opt.pageKey } : {}) } })
@@ -17807,11 +17821,16 @@ console.log(fails === 0
         "[exit] zero balances, unreadable entries, duplicates and junk addresses are not listed; the rest are lower-cased raw decimal strings, got " + raw);
       ok(b.eth === "1000000000000000000" && b.more === false, "[exit] eth is wei as a decimal string and more:false, got " + raw);
       ok(b.unread === 2, "[exit] two unreadable entries are counted (not zero, not listed), got " + raw);
-      ok(seenCalls.length === 1 && Array.isArray(seenCalls[0].body) && seenCalls[0].u === RPC, "[exit] one batch to BASE_RPC only, got " + seenCalls.length);
-      const m = seenCalls[0].body.map((x) => x.method).join();
+      const pfC = seenCalls.filter((c) => c.u.startsWith("https://api.g.alchemy.com/")), rpcC = seenCalls.filter((c) => c.u === RPC);
+      ok(seenCalls.length === 2 && pfC.length === 1 && rpcC.length === 1 && Array.isArray(rpcC[0].body), "[exit] portfolio down -> 1 portfolio call + the old single batch to BASE_RPC, got " + seenCalls.map((c) => c.u.slice(8, 30)).join());
+      ok(pfC[0].u === PF && pfC[0].body.addresses[0].address === W_UP.toLowerCase() && JSON.stringify(pfC[0].body.addresses[0].networks) === '["base-mainnet"]'
+        && pfC[0].body.withPrices === true && pfC[0].body.withMetadata === true && pfC[0].body.includeErc20Tokens === true && pfC[0].body.includeNativeTokens === true,
+        "[exit] the portfolio request: key from BASE_RPC, lower-cased wallet, base-mainnet only, prices + metadata, ERC-20 + native, got " + JSON.stringify(pfC[0].body));
+      const m = rpcC[0].body.map((x) => x.method).join();
       ok(m === "alchemy_getTokenBalances,eth_getBalance", "[exit] getTokenBalances + eth_getBalance, got " + m);
-      const gt = seenCalls[0].body[0].params;
-      ok(gt[0] === W_UP.toLowerCase() && gt[1] === "erc20" && gt[2].maxCount === 100, "[exit] erc20, maxCount 100, lower-cased wallet, got " + JSON.stringify(gt));
+      const gt = rpcC[0].body[0].params;
+      ok(gt[0] === W_UP.toLowerCase() && gt[1] === "erc20" && gt[2].maxCount === 100 && !("pageKey" in gt[2]), "[exit] erc20, maxCount 100, lower-cased wallet, first page has no pageKey, got " + JSON.stringify(gt));
+      ok(b.src === "rpc" && b.pf === "pf:http", "[exit] the fallback is named: src rpc, pf pf:http, got " + raw);
       ok(res.headers.get("cache-control") === "public, max-age=60" && res.headers.get("access-control-allow-origin") === "*", "[exit] 60s cache + CORS");
       ok(!raw.includes(KEYPART) && !JSON.stringify([...res.headers.entries()]).includes(KEYPART), "[exit] the BASE_RPC secret never appears in a response");
       ok(puts.length === 1 && puts[0].u === "https://exit.zaexa.internal/h/" + W_UP.toLowerCase() && puts[0].cc === "public, max-age=60", "[exit] cached 60s per address in the Cache API, got " + JSON.stringify(puts));
@@ -17839,7 +17858,55 @@ console.log(fails === 0
     shelf.clear(); puts.length = 0;
     { const res = await EX("/exit/holdings/" + W, mkUp({ tb: [{ contractAddress: tk(0xb1), tokenBalance: hx(9) }], pageKey: "next" }));
       const b = await res.json();
-      ok(b.tokens.length === 1 && b.more === true, "[exit] an upstream pageKey -> more:true, got " + JSON.stringify(b)); }
+      ok(b.tokens.length === 1 && b.more === true, "[exit] an upstream pageKey that never ends -> more:true, got " + JSON.stringify(b));
+      const pages = seenCalls.filter((c) => c.u === RPC && c.body[0].method === "alchemy_getTokenBalances");
+      ok(pages.length === 5 && pages.slice(1).every((c) => c.body[0].params[2].pageKey === "next" && c.body.length === 1), "[exit] the RPC path follows pageKey for at most 5 pages (eth only in the first), got " + pages.length); }
+    // چ۲) صفحه‌ی دوم با پایان: توکنِ صفحه‌ی دوم هم می‌آید (باگِ ۱۵ نوامبر: فقط صفحه‌ی اول خوانده می‌شد)
+    shelf.clear(); puts.length = 0;
+    { let n = 0;
+      const up = mkUp();
+      const h = async (u, init) => {
+        const body = JSON.parse(init.body);
+        if (u === RPC && body[0] && body[0].method === "alchemy_getTokenBalances") {
+          seenCalls.push({ u, body }); n++;
+          const first = !body[0].params[2].pageKey;
+          const out = [{ jsonrpc: "2.0", id: body[0].id, result: { address: W, tokenBalances: [{ contractAddress: tk(first ? 0xd1 : 0xd2), tokenBalance: hx(5) }], ...(first ? { pageKey: "p2" } : {}) } }];
+          if (body[1]) out.push({ jsonrpc: "2.0", id: body[1].id, result: "0x1" });
+          return jb(out);
+        }
+        return up(u, init);
+      };
+      const b = await (await EX("/exit/holdings/" + W, h)).json();
+      ok(n === 2 && b.tokens.map((t) => t.address).join() === [tk(0xd1), tk(0xd2)].join() && b.more === false, "[exit] RPC page 2 is read and the list is complete, got " + JSON.stringify(b)); }
+
+    // چ۳) Portfolio موفق: ترتیب = ارزشِ تخمینی نزولی؛ بی‌قیمت‌ها بعد؛ ETHِ بومی از اینجا نمی‌آید؛ صفحه‌ها دنبال می‌شوند
+    shelf.clear(); puts.length = 0;
+    { const spam = []; for (let i = 1; i <= 120; i++) spam.push(pfTok(tk(i), 10n ** 21n, null));    // ۱۲۰ اسپمِ بی‌قیمت با آدرس‌های کوچک
+      const CB = tk(0x2ae3), ZR = tk(0x1111), JS = tk(0xbeef);
+      const pf = [{ tokens: spam.slice(0, 60).concat([pfTok(ZR, 6n * 10n ** 24n, 0.0044), { ...pfTok(null, 7n * 10n ** 18n, 1800), tokenAddress: null }]), pageKey: "k2" },
+        { tokens: spam.slice(60).concat([pfTok(CB, 64n * 10n ** 18n, 2100), pfTok(JS, 45n * 10n ** 24n, 0.0007), pfTok(tk(0xcafe), 0n, 5)]) }];
+      const res = await EX("/exit/holdings/" + W, mkUp({ pf }));
+      const raw = await res.text(), b = JSON.parse(raw);
+      ok(b.src === "pf" && !("pf" in b) && b.eth === (7n * 10n ** 18n).toString(), "[exit] portfolio success -> src pf, no failure reason, ETH from the native entry, got " + raw.slice(0, 120));
+      ok(seenCalls.length === 2 && seenCalls.every((c) => c.u.startsWith("https://api.g.alchemy.com/")), "[exit] portfolio success needs no BASE_RPC call at all, got " + seenCalls.length);
+      ok(b.tokens.slice(0, 3).map((t) => t.address).join() === [CB, JS, ZR].join(), "[exit] the most valuable tokens come first (cbETH, jesse, ZORA) even behind 120 spam tokens, got " + b.tokens.slice(0, 4).map((t) => t.address).join());
+      ok(b.tokens.length === 100 && b.more === true, "[exit] 123 non-zero tokens -> the 100 most valuable, more:true, got " + b.tokens.length + "/" + b.more);
+      ok(b.tokens[3].address === tk(1) && !b.tokens.some((t) => t.address === tk(0xcafe)), "[exit] unpriced tokens follow in address order; zero balances are dropped");
+      ok(b.tokens[0].balance === (64n * 10n ** 18n).toString(), "[exit] balances stay raw decimal strings");
+      const pfC = seenCalls.filter((c) => c.u.startsWith("https://api.g.alchemy.com/"));
+      ok(pfC.length === 2 && pfC[1].body.pageKey === "k2" && !("pageKey" in pfC[0].body), "[exit] the portfolio pageKey is followed, got " + pfC.length);
+      ok(!seenCalls.some((c) => c.u === RPC), "[exit] no BASE_RPC call when the portfolio answered");
+      ok(!raw.includes(KEYPART), "[exit] the key (now also in the portfolio URL) never appears in a response"); }
+    // چ۴) هر شکستِ Portfolio یک علتِ بسته دارد و به RPC برمی‌گردد
+    for (const [o, why, env2] of [[{ pf: "shape" }, "pf:shape"], [{ pf: "partial" }, "pf:http"], [{ pf: [{ tokens: [pfTok(tk(5), 1n, 1)], pageKey: "again" }] }, "pf:pages"],
+      [{ pf: [{ tokens: [] }] }, "pf:shape"], [{ pf: [{ tokens: [{ ...pfTok(null, 0n, 1800), tokenAddress: null }] }] }, null], [{ pf: [{ tokens: [{ ...pfTok(null, 0n, 1800), tokenAddress: "0x" + "0".repeat(40) }] }] }, null], [{}, "pf:nokey", { ...envE, BASE_RPC: "https://base.example/rpc" }]]) {
+      shelf.clear(); puts.length = 0;
+      const b = await (await EX("/exit/holdings/" + W, mkUp(Object.assign({ tb: [{ contractAddress: tk(0xe1), tokenBalance: hx(3) }] }, o)), env2)).json();
+      if (why) ok(b.src === "rpc" && b.pf === why && b.tokens.length === 1 && b.tokens[0].address === tk(0xe1), "[exit] portfolio " + why + " -> the RPC list, reason named, got " + JSON.stringify(b));
+      else ok(b.src === "pf" && b.tokens.length === 0 && b.more === false && b.eth === "0", "[exit] a portfolio answer with only a zero native entry is a real empty wallet, got " + JSON.stringify(b));
+      ok(why !== "pf:nokey" || !seenCalls.some((c) => c.u.startsWith("https://api.g.alchemy.com/")), "[exit] no key in BASE_RPC -> the portfolio is never called");
+      ok(!why || (await import("./index.js")).EXIT_PF_WHY.includes(why), "[exit] the reason is in the closed EXIT_PF_WHY list: " + why);
+    }
 
     // ح) شکستِ بالادست: err:upstream با وضعیتِ غیر-۲۰۰، هرگز فهرستِ خالی؛ کش نمی‌شود؛ راز درز نمی‌کند
     for (const [label, o] of [["HTTP 500", { down: true }], ["fetch throws", { throwIt: true }], ["token call errors", { tbErr: true }], ["eth call errors", { ethErr: true }],
@@ -17859,7 +17926,7 @@ console.log(fails === 0
       ok(b.err === "upstream", "[exit] no BASE_RPC -> err:upstream, got " + JSON.stringify(b)); }
     // خ) بعد از شکست دوباره از بالادست می‌پرسد
     { const res = await EX("/exit/holdings/" + W, mkUp({ tb: [{ contractAddress: tk(0xc1), tokenBalance: hx(1) }] }));
-      ok(res.status === 200 && seenCalls.length === 1, "[exit] after a failure the next call asks upstream again"); }
+      ok(res.status === 200 && seenCalls.length === 2, "[exit] after a failure the next call asks upstream again (portfolio + one batch), got " + seenCalls.length); }
 
     // د) محدودکننده‌ی نرخ: بعد از RL_LIMIT درخواست از یک IP، ۴۲۹ (بسته‌ی جدا از بقیه)
     { const ipOne = { headers: { "cf-connecting-ip": "198.18.7.7" } };
@@ -17971,14 +18038,30 @@ console.log(fails === 0
         return jb({ data, included });
       }
       const body = init.body ? JSON.parse(init.body) : null;
+      // ۱۵ نوامبر — Portfolio APIِ آلچمی (راهِ اولِ هلدینگ؛ شکلِ پاسخ از اسنادِ آلچمی). pfDown → راهِ قدیمیِ RPC
+      if (u.startsWith("https://api.g.alchemy.com/data/v1/")) {
+        w.kinds.push("holdings"); w.calls.push(u);
+        if (opt.holdingsDown || opt.pfDown) return jb({ error: { message: "x" } }, 500);
+        const toks = [{ address: body.addresses[0].address, network: "base-mainnet", tokenAddress: null, tokenBalance: hx(opt.eth), tokenMetadata: { decimals: 18 }, tokenPrices: [] }];
+        for (const a of opt.tokens) {
+          const t = TOKENS[a];
+          toks.push({ address: body.addresses[0].address, network: "base-mainnet", tokenAddress: a, tokenBalance: hx(t.bal), tokenMetadata: { decimals: t.dec },
+            tokenPrices: t.price == null ? [] : [{ currency: "usd", value: String(t.price), lastUpdatedAt: "2026-11-15T00:00:00Z" }] });
+        }
+        for (let i = 0; i < opt.unreadEntries; i++) toks.push({ network: "base-mainnet", tokenAddress: tk(0x900 + i), tokenBalance: null, error: "metadata" });
+        // more: صفحه‌های بعدی خالی ولی باز pageKey دارند (فهرستی بلندتر از سقفِ صفحه‌ها) — هرگز تکرارِ همان صفحه
+        if (body.pageKey) return jb({ data: { tokens: [], pageKey: "next" } });
+        return jb({ data: { tokens: toks, ...(opt.more ? { pageKey: "next" } : {}) } });
+      }
       if (u.startsWith("https://") && Array.isArray(body)) {
         const first = body[0] && body[0].method;
         if (first === "alchemy_getTokenBalances" || first === "eth_getBalance") {
           w.kinds.push("holdings"); w.calls.push(u);
           if (u !== RPC) return jb({ error: "wrong endpoint" }, 500);
           if (opt.holdingsDown) return jb({ error: "x" }, 500);
-          const tb = opt.tokens.map((a) => ({ contractAddress: a, tokenBalance: hx(TOKENS[a].bal) }));
-          for (let i = 0; i < opt.unreadEntries; i++) tb.push({ contractAddress: tk(0x900 + i), tokenBalance: null, error: "execution reverted" });
+          const later = body[0].method === "alchemy_getTokenBalances" && body[0].params[2] && body[0].params[2].pageKey;
+          const tb = later ? [] : opt.tokens.map((a) => ({ contractAddress: a, tokenBalance: hx(TOKENS[a].bal) }));
+          for (let i = 0; i < (later ? 0 : opt.unreadEntries); i++) tb.push({ contractAddress: tk(0x900 + i), tokenBalance: null, error: "execution reverted" });
           return jb(body.map((x) => x.method === "alchemy_getTokenBalances"
             ? { jsonrpc: "2.0", id: x.id, result: { address: x.params[0], tokenBalances: tb, ...(opt.more ? { pageKey: "next" } : {}) } }
             : { jsonrpc: "2.0", id: x.id, result: hx(opt.eth) }));
@@ -18210,7 +18293,7 @@ console.log(fails === 0
       // BASE_RPC نبود / هلدینگ پایین: null، بدونِ هیچ fetch اضافه
       const wh = mkWorld({ holdingsDown: true });
       const rh = await COMPUTE(wh);
-      ok(rh.s === null && wh.kinds.join() === "holdings", "[exit og] holdings failure -> null after exactly one subrequest, got " + wh.kinds.join());
+      ok(rh.s === null && wh.kinds.join() === "holdings,holdings", "[exit og] holdings failure -> null after the portfolio and the RPC fallback (two subrequests), got " + wh.kinds.join());
       const saved = globalThis.fetch; let nCalls = 0; globalThis.fetch = async () => { nCalls++; return jb({}); };
       const rNo = await IDX.exitSummaryCompute(W, { ASSETS: ASSETSX }, {}); globalThis.fetch = saved;
       ok(rNo.s === null && nCalls === 0, "[exit og] no BASE_RPC -> null with no upstream call");
@@ -18348,7 +18431,7 @@ console.log(fails === 0
       const u = L({ unknownCount: 3, quotedPaper: 4400, paper: 15000 });
       ok(u.paper === "$4,400" && u.excl === "Excludes 3 tokens without a quote", "[exit og] with unknown tokens the struck figure is quotedPaper (comparable pair) and the line says 'Excludes 3 tokens without a quote', got " + JSON.stringify(u));
       ok(L({ unknownCount: 1 }).excl === "Excludes 1 token without a quote", "[exit og] singular 'token'");
-      ok(L({ partial: true, unknownCount: 0 }).excl === "Excludes some tokens without a quote" && L({ partial: true, unknownCount: 2 }).excl === "Excludes 2+ tokens without a quote", "[exit og] a truncated holdings list is never presented as complete");
+      ok(L({ partial: true, unknownCount: 0 }).excl === "Not every token in this wallet was read" && L({ partial: true, unknownCount: 2 }).excl === "Not every token in this wallet was read", "[exit og] a truncated holdings list is never presented as complete");
       // برچسب‌ها: واژه‌های ممنوع هرگز در متنِ کاربر
       const texts = JSON.stringify([L(), u, X.exitOgFields(W, "https://zaexa.com", { paper: 1, exit: 1, lostPct: 1, quotedPaper: 1, unknownCount: 2, counted: 1, at, partial: false }, at), X.exitOgFields(null, "https://zaexa.com", null, at), X.exitOgFields(W, "https://zaexa.com", null, at)]).toLowerCase();
       for (const bad of ["safe", "honeypot", "round trip", "vpn", "filter", "iran"]) ok(!new RegExp("\\b" + bad).test(texts), "[exit og] banned word '" + bad + "' in user-facing text");

@@ -116,9 +116,9 @@ export function exitCardLines(s) {
   const lp = s.lostPct == null ? null : Math.max(0, s.lostPct);
   const lost = lp == null ? "" : lp < EXIT_LOST_NONE ? "Almost nothing would be lost on exit" : exitPct(lp) + " would be lost on exit";
   const lostCol = lp == null ? GRAY : lp < EXIT_GAP_MED ? GREEN : lp < EXIT_GAP_BIG ? AMBER : RED;
-  const excl = s.unknownCount > 0
-    ? "Excludes " + s.unknownCount + (s.partial ? "+" : "") + " token" + (s.unknownCount === 1 && !s.partial ? "" : "s") + " without a quote"
-    : s.partial ? "Excludes some tokens without a quote" : "";
+  // ۱۵ نوامبر: کیفِ نیمه‌خوانده همیشه همین جمله را می‌گیرد (پیش از «Excludes N»): «Excludes 1+ tokens» عددِ کاغذیِ ناقص را کامل جلوه می‌داد
+  const excl = s.partial ? "Not every token in this wallet was read"
+    : s.unknownCount > 0 ? "Excludes " + s.unknownCount + " token" + (s.unknownCount === 1 ? "" : "s") + " without a quote" : "";
   return { strike: exitLostSome(lp), paper: exitMoney(unk ? s.quotedPaper : s.paper), exit: exitMoney(s.exit), lost, lostCol, excl, time: utcClock(s.at) };
 }
 

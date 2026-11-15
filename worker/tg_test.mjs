@@ -361,7 +361,9 @@ done("privacy");
   ok(s === HEAD + "If sold now: at least $4,000\nOn paper: $4,400\n9.1% would be lost on exit.\nExcludes 3 tokens without a quote.\nQuoted at 09:41 UTC.\n\n" + EXIT_LAST_LINE,
     "exit text with unquoted tokens says 'at least', uses the comparable paper figure and names the excluded tokens: " + JSON.stringify(s));
   s = exitText(WAL, S({ partial: true }));
-  ok(s.includes("If sold now: at least $9,877\n") && s.includes("\nExcludes some tokens without a quote.\n"), "a truncated holdings list is 'at least' and never presented as complete");
+  ok(s.includes("If sold now: at least $9,877\n") && s.includes("\nNot every token in this wallet was read.\n"), "a truncated holdings list is 'at least' and says plainly the wallet was not read in full");
+  s = exitText(WAL, S({ partial: true, unknownCount: 1 }));
+  ok(s.includes("\nNot every token in this wallet was read.\n") && !s.includes("Excludes"), "partial wins over 'Excludes N' (the 15 Nov '1+ tokens' wording hid a truncated list)");
   s = exitText(WAL, S({ lostPct: 0.01 }));
   ok(s.includes("\nAlmost nothing would be lost on exit.\n"), "a loss under the threshold reads 'Almost nothing'");
   s = exitText(WAL, S({ lostPct: null }));

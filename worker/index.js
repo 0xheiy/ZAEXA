@@ -4055,9 +4055,9 @@ async function pnlRpcBatch(rpcUrl, calls) {
   }
   return out;
 }
-async function pnlPost(rpcUrl, payload) {
+async function pnlPost(rpcUrl, payload, timeoutMs) {
   const ac = new AbortController();
-  const timer = setTimeout(() => ac.abort(), PNL_TIMEOUT_MS);
+  const timer = setTimeout(() => ac.abort(), timeoutMs || PNL_TIMEOUT_MS);
   try {
     const res = await fetch(rpcUrl, {
       method: "POST", headers: { "content-type": "application/json" }, redirect: "manual",
@@ -4532,34 +4532,116 @@ function exitDec(hex) {
   if (typeof hex !== "string" || !/^0x[0-9a-fA-F]+$/.test(hex) || hex.length > 2 + 64) return null;
   try { return BigInt(hex).toString(); } catch (e) { return null; }
 }
+/* ۱۵ نوامبر — فهرستِ بریده: alchemy_getTokenBalances هر صفحه حداکثر ۱۰۰ توکن و به ترتیبِ آدرسِ قرارداد می‌دهد؛ در کیفی پر از
+   اسپمِ هوایی (آدرس‌هایی که با صفرهای زیاد شروع می‌شوند) صفحه‌ی اول فقط اسپم بود و cbETH/ZORA اصلاً به فهرست نرسیدند
+   (jesse.base.eth: ۹۷ توکن تا 0x011d…، more:true؛ ربات ۱۳٬۹۸۰$ گفت، دارایی ~۲۵۷ هزار$).
+   حالا: (۱) اول Portfolio APIِ آلچمی (همان کلیدِ BASE_RPC) با قیمت — فقط برای *رتبه‌بندی*؛ عددِ شمرده‌شده مثلِ قبل از
+   GT (استخرِ ≥ حداقلِ ذخیره) و کوتِ فروش می‌آید. (۲) شکستِ آن → همه‌ی صفحه‌های alchemy_getTokenBalances تا سقف.
+   هر دو راه به همان شکلِ خروجی می‌رسند؛ ترتیبِ tokens = اهمیت (ارزشِ تخمینیِ آلچمی، نزولی) تا سقفِ ۱۰۰تاییِ بعدی و بودجه‌ی
+   قیمت اول سرِ توکن‌های باارزش برود. src: "pf" | "rpc"؛ وقتی rpc، pf = علتِ شکست از واژگانِ بسته‌ی EXIT_PF_WHY. */
+const EXIT_PF_PAGES = 5, EXIT_RPC_PAGES = 5, EXIT_PF_TIMEOUT_MS = 5000;
+export const EXIT_PF_WHY = Object.freeze(["pf:nokey", "pf:http", "pf:shape", "pf:pages"]);
+// کلیدِ آلچمی فقط از شکلِ استانداردِ URLِ BASE_RPC؛ هر شکلِ دیگر = بی‌کلید (هرگز حدس نزن)
+function exitAlchemyKey(rpcUrl) {
+  const m = /^https:\/\/base-mainnet\.g\.alchemy\.com\/v2\/([A-Za-z0-9_-]{8,})$/.exec(String(rpcUrl || ""));
+  return m ? m[1] : null;
+}
+function exitPfUsd(t, bal) {
+  const pr = Array.isArray(t.tokenPrices) ? t.tokenPrices.find((x) => x && x.currency === "usd") : null;
+  const px = pr ? Number(pr.value) : NaN;
+  const dec = t.tokenMetadata && Number.isInteger(t.tokenMetadata.decimals) ? t.tokenMetadata.decimals : null;
+  if (!(px > 0) || !Number.isFinite(px) || dec == null || dec < 0 || dec > 36) return null;
+  const v = Number(bal) / Math.pow(10, dec) * px;
+  return Number.isFinite(v) && v >= 0 ? v : null;
+}
+/* فهرستِ کامل از Portfolio API. خروجی: { ok:true, list:[{address,balance,usd}], unread } یا { ok:false, why } */
+async function exitPortfolio(wallet, rpcUrl) {
+  const key = exitAlchemyKey(rpcUrl);
+  if (!key) return { ok: false, why: "pf:nokey" };
+  const url = "https://api.g.alchemy.com/data/v1/" + key + "/assets/tokens/by-address";
+  const list = [], seen = new Set();
+  let pageKey = null, unread = 0, eth = null;
+  for (let page = 0; page < EXIT_PF_PAGES; page++) {
+    const body = { addresses: [{ address: wallet, networks: ["base-mainnet"] }], withMetadata: true, withPrices: true,
+      includeNativeTokens: true, includeErc20Tokens: true };
+    if (pageKey) body.pageKey = pageKey;
+    const r = await pnlPost(url, body, EXIT_PF_TIMEOUT_MS);
+    if (r.status !== 200 || !r.body || typeof r.body !== "object") return { ok: false, why: "pf:http" };
+    const d = r.body.data;
+    if (!d || !Array.isArray(d.tokens)) return { ok: false, why: "pf:shape" };
+    // شبکه‌ای که کامل شکست خورد (partialErrors) = نامعلوم، نه «خالی»
+    if (r.body.error && Array.isArray(r.body.error.partialErrors) && r.body.error.partialErrors.length) return { ok: false, why: "pf:http" };
+    for (const t of d.tokens) {
+      if (!t || t.network !== "base-mainnet") continue;
+      // ETHِ بومی: در اسنادِ آلچمی tokenAddress = null؛ آدرسِ صفر هم همان معنا را دارد (هرگز یک «توکن» شمرده نشود)
+      if (t.tokenAddress == null || /^0x0{40}$/i.test(String(t.tokenAddress))) { const e = exitDec(t.tokenBalance); if (e != null) eth = e; continue; }
+      const a = typeof t.tokenAddress === "string" ? t.tokenAddress : "";
+      if (!EVM_ADDR.test(a)) { unread++; continue; }
+      const bal = exitDec(t.tokenBalance);
+      if (bal == null) { unread++; continue; }
+      if (bal === "0") continue;
+      const k = a.toLowerCase();
+      if (seen.has(k)) continue;
+      seen.add(k);
+      list.push({ address: k, balance: bal, usd: exitPfUsd(t, bal) });
+    }
+    pageKey = typeof d.pageKey === "string" && d.pageKey !== "" ? d.pageKey : null;
+    if (!pageKey) return eth == null ? { ok: false, why: "pf:shape" } : { ok: true, eth, list, unread };   // بی‌ETH = نامعلوم، نه صفر
+  }
+  return { ok: false, why: "pf:pages" };   // صفحه‌ها تمام نشد — rpc جایگزین؛ اگر آن هم بریده شد، more:true
+}
+/* پشتیبان: همه‌ی صفحه‌های alchemy_getTokenBalances تا EXIT_RPC_PAGES؛ صفحه‌ی اول در همان دسته‌ی eth_getBalance (شکلِ قبلی).
+   خروجی: { eth, list, unread, more } یا null (نامعلوم) */
+async function exitRpcPages(wallet, rpcUrl) {
+  const list = [], seen = new Set();
+  let pageKey = null, unread = 0, eth = null;
+  for (let page = 0; page < EXIT_RPC_PAGES; page++) {
+    const opt = { maxCount: EXIT_HOLD_MAX };
+    if (pageKey) opt.pageKey = pageKey;
+    const calls = [["alchemy_getTokenBalances", [wallet, "erc20", opt]]];
+    if (page === 0) calls.push(["eth_getBalance", [wallet, "latest"]]);
+    const r = await pnlRpcBatch(rpcUrl, calls);
+    const res = r && r[0];
+    if (page === 0) {
+      // هر دو باید جواب داده باشند: نیمه‌جواب «نمی‌دانم» است، نه «ندارد»
+      eth = r && r[1] ? exitDec(r[1]) : null;
+      if (eth == null || !res || !Array.isArray(res.tokenBalances)) return null;
+    } else if (!res || !Array.isArray(res.tokenBalances)) return { eth, list, unread, more: true };
+    for (const t of res.tokenBalances) {
+      const a = t && typeof t.contractAddress === "string" ? t.contractAddress : "";
+      if (!EVM_ADDR.test(a)) { unread++; continue; }
+      if (t.error || t.tokenBalance == null) { unread++; continue; }   // خواندنی نیست = نامعلوم؛ شمرده می‌شود، صفر نمی‌شود
+      const bal = exitDec(t.tokenBalance);
+      if (bal == null) { unread++; continue; }
+      if (bal === "0") continue;                                        // صفرِ واقعی
+      const k = a.toLowerCase();
+      if (seen.has(k)) continue;
+      seen.add(k);
+      list.push({ address: k, balance: bal, usd: null });
+    }
+    pageKey = typeof res.pageKey === "string" && res.pageKey !== "" ? res.pageKey : null;
+    if (!pageKey) return { eth, list, unread, more: false };
+  }
+  return { eth, list, unread, more: true };
+}
 /* هسته‌ی خواندنِ فهرستِ دارایی — هم مسیرِ /exit/holdings و هم خلاصه‌ی سمتِ سرور (exitSummary) از همین یک تابع می‌گذرند.
    null = بالادست جواب کاملی نداد (نامعلوم، نه «خالی»). بدونِ کش: کش کارِ مسیرِ بیرونی است. */
 async function exitHoldingsCore(wallet, rpcUrl) {
-  const r = await pnlRpcBatch(rpcUrl, [
-    ["alchemy_getTokenBalances", [wallet, "erc20", { maxCount: EXIT_HOLD_MAX }]],
-    ["eth_getBalance", [wallet, "latest"]],
-  ]);
-  // هر دو باید جواب داده باشند: نیمه‌جواب «نمی‌دانم» است، نه «ندارد»
-  if (!r || !r[0] || !r[1]) return null;
-  const eth = exitDec(r[1]);
-  const list = r[0] && Array.isArray(r[0].tokenBalances) ? r[0].tokenBalances : null;
-  if (eth == null || !list) return null;
-  const tokens = [], seen = new Set();
-  let more = typeof r[0].pageKey === "string" && r[0].pageKey !== "", unread = 0;
-  for (const t of list) {
-    const a = t && typeof t.contractAddress === "string" ? t.contractAddress : "";
-    if (!EVM_ADDR.test(a)) { unread++; continue; }
-    if (t.error || t.tokenBalance == null) { unread++; continue; }   // خواندنی نیست = نامعلوم؛ شمرده می‌شود، صفر نمی‌شود
-    const bal = exitDec(t.tokenBalance);
-    if (bal == null) { unread++; continue; }
-    if (bal === "0") continue;                                        // صفرِ واقعی
-    const k = a.toLowerCase();
-    if (seen.has(k)) continue;
-    seen.add(k);
-    if (tokens.length >= EXIT_HOLD_MAX) { more = true; continue; }
-    tokens.push({ address: k, balance: bal });
+  const pf = await exitPortfolio(wallet, rpcUrl);
+  let src = "pf", eth, list, unread, more = false, why = null;
+  if (pf.ok) { eth = pf.eth; list = pf.list; unread = pf.unread; }
+  else {
+    why = pf.why;
+    const rp = await exitRpcPages(wallet, rpcUrl);
+    if (!rp) return null;
+    src = "rpc"; eth = rp.eth; list = rp.list; unread = rp.unread; more = rp.more;
   }
-  const body = { eth, tokens, more };
+  // ترتیب = اهمیت: ارزشِ تخمینیِ آلچمی نزولی؛ بی‌قیمت‌ها بعد (به ترتیبِ آدرس، پایدار). سقف بعد از مرتب‌سازی.
+  list.sort((x, y) => (y.usd == null ? -1 : y.usd) - (x.usd == null ? -1 : x.usd) || (x.address < y.address ? -1 : x.address > y.address ? 1 : 0));
+  if (list.length > EXIT_HOLD_MAX) more = true;
+  const tokens = list.slice(0, EXIT_HOLD_MAX).map((t) => ({ address: t.address, balance: t.balance }));
+  const body = { eth, tokens, more, src };
+  if (why) body.pf = why;
   if (unread > 0) body.unread = unread;
   return body;
 }
