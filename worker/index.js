@@ -4532,6 +4532,116 @@ function exitDec(hex) {
   if (typeof hex !== "string" || !/^0x[0-9a-fA-F]+$/.test(hex) || hex.length > 2 + 64) return null;
   try { return BigInt(hex).toString(); } catch (e) { return null; }
 }
+/* ۱۵ نوامبر (۲) — کیف‌های پر از اسپم: jesse.base.eth ده‌ها هزار توکنِ هوایی دارد؛ پنج صفحه‌ی Portfolio و پنج صفحه‌ی RPC
+   (هر دو به ترتیبِ آدرس) فقط آدرس‌های 0x00…–0x01… را پوشاندند (زنده: src rpc، pf:pages). خواندنِ کامل در هیچ بودجه‌ای شدنی نیست.
+   پس وقتی فهرست کامل نشد، موجودیِ «توکن‌های شناخته‌شده» مستقیم پرسیده می‌شود: هزار توکنِ بزرگِ Base در کوین‌گکو بر اساسِ ارزشِ بازار
+   (ثبت در کوین‌گکو خودش صافیِ ضدِ اسپم است). فهرست روزی یک بار در KV ساخته می‌شود (coins/markets دسته‌ی base-ecosystem برای
+   ترتیب + coins/list?include_platform=true برای آدرسِ Base)؛ تازه‌سازی تنبل است — اولین درخواست بعد از کهنگی در پس‌زمینه، با قفلِ KV.
+   موجودیِ هزار آدرس = یک دسته‌ی JSON-RPC (۱۰ تکه‌ی ۱۰۰تایی) = یک زیردرخواست. این فقط *فهرستِ نامزد* است؛ شمارش مثلِ قبل از GT و کوت. */
+const EXIT_KNOWN_KEY = "exit:known:v1", EXIT_KNOWN_LOCK = "exit:known:lock";
+const EXIT_KNOWN_MAX = 1000, EXIT_KNOWN_CHUNK = 100, EXIT_KNOWN_PAGES = 4;
+const EXIT_KNOWN_FRESH_MS = 24 * 3600 * 1000, EXIT_KNOWN_MEM_MS = 10 * 60 * 1000, EXIT_KNOWN_LOCK_S = 6 * 3600;   // قفلِ بلند: تازه‌سازیِ نیمه‌کاره (قطع به‌خاطرِ سقفِ CPU) سهمیه‌ی ماهانه‌ی کلیدِ کوین‌گکو را نخورد
+const EXIT_KNOWN_LIST_MAX_BYTES = 24 * 1024 * 1024, EXIT_KNOWN_TIMEOUT_MS = 20000;
+export const EXIT_KNOWN_WHY = Object.freeze(["cg:markets", "cg:list", "cg:empty"]);
+let exitKnownMem = null;   // { at, addrs, rank: Map } — کشِ ایزوله
+export function _exitKnownReset() { exitKnownMem = null; }
+async function cgGetJson(url, env, maxBytes) {
+  const key = env && typeof env.CG_KEY === "string" && env.CG_KEY ? env.CG_KEY : "";
+  const ac = new AbortController();
+  const timer = setTimeout(() => ac.abort(), EXIT_KNOWN_TIMEOUT_MS);
+  try {
+    const res = await fetch(url, { headers: key ? { accept: "application/json", "x-cg-demo-api-key": key } : { accept: "application/json" }, signal: ac.signal });
+    if (!res.ok || !res.body) return null;
+    const chunks = []; let n = 0;
+    const rd = res.body.getReader();
+    for (;;) {
+      const { done, value } = await rd.read();
+      if (done) break;
+      n += value.length;
+      if (n > maxBytes) { try { rd.cancel(); } catch (e) { /* مهم نیست */ } return null; }
+      chunks.push(value);
+    }
+    const buf = new Uint8Array(n); let o = 0;
+    for (const c of chunks) { buf.set(c, o); o += c.length; }
+    return JSON.parse(new TextDecoder().decode(buf));
+  } catch (e) { return null; } finally { clearTimeout(timer); }
+}
+/* ساختِ فهرست. خروجی: { addrs } یا { why } (واژگانِ بسته‌ی EXIT_KNOWN_WHY). هرگز فهرستِ خالی را «ساخته شد» نمی‌نامد. */
+export async function exitKnownBuild(env) {
+  const ids = [];
+  for (let page = 1; page <= EXIT_KNOWN_PAGES; page++) {
+    const m = await cgGetJson(CG_MARKETS_URL + "?vs_currency=usd&category=base-ecosystem&order=market_cap_desc&per_page=250&page=" + page, env, 4 * 1024 * 1024);
+    if (!Array.isArray(m)) { if (page === 1) return { why: "cg:markets" }; break; }
+    for (const c of m) if (c && typeof c.id === "string") ids.push(c.id);
+    if (m.length < 250) break;
+  }
+  if (!ids.length) return { why: "cg:empty" };
+  const list = await cgGetJson("https://api.coingecko.com/api/v3/coins/list?include_platform=true", env, EXIT_KNOWN_LIST_MAX_BYTES);
+  if (!Array.isArray(list)) return { why: "cg:list" };
+  const base = new Map();
+  for (const c of list) {
+    const a = c && c.platforms && typeof c.platforms.base === "string" ? c.platforms.base.trim() : "";
+    if (c && typeof c.id === "string" && EVM_ADDR.test(a)) base.set(c.id, a.toLowerCase());
+  }
+  const addrs = [], seen = new Set();
+  for (const id of ids) {
+    const a = base.get(id);
+    if (a && !seen.has(a)) { seen.add(a); addrs.push(a); if (addrs.length >= EXIT_KNOWN_MAX) break; }
+  }
+  return addrs.length ? { addrs } : { why: "cg:empty" };
+}
+export async function exitKnownRefresh(env) {
+  const kv = env && env.ZX_KV;
+  if (!kv) return;
+  try {
+    if (await kv.get(EXIT_KNOWN_LOCK)) return;
+    await kv.put(EXIT_KNOWN_LOCK, "1", { expirationTtl: EXIT_KNOWN_LOCK_S });
+    const r = await exitKnownBuild(env);
+    if (r.addrs) {
+      await kv.put(EXIT_KNOWN_KEY, JSON.stringify({ at: Date.now(), addrs: r.addrs }));
+      exitKnownMem = null;
+    } else {
+      // شکست فهرستِ قبلی را پاک نمی‌کند؛ فقط علت ثبت می‌شود (برای /exit/known)
+      const old = await kv.get(EXIT_KNOWN_KEY, "json");
+      await kv.put(EXIT_KNOWN_KEY, JSON.stringify(Object.assign({}, old && Array.isArray(old.addrs) ? old : { addrs: [] }, { lastFail: r.why, lastFailAt: Date.now() })));
+    }
+  } catch (e) { /* تازه‌سازی نباید چیزی را بشکند */ }
+}
+/* فهرستِ فعلی (از کشِ ایزوله یا KV). کهنه/خالی + ctx → تازه‌سازی در پس‌زمینه. خروجی: { addrs, rank } (شاید خالی) */
+async function exitKnownGet(env, ctx) {
+  const now = Date.now();
+  if (exitKnownMem && now - exitKnownMem.memAt < EXIT_KNOWN_MEM_MS) return exitKnownMem;
+  const kv = env && env.ZX_KV;
+  let v = null;
+  try { v = kv ? await kv.get(EXIT_KNOWN_KEY, "json") : null; } catch (e) { v = null; }
+  const addrs = v && Array.isArray(v.addrs) ? v.addrs.filter((a) => typeof a === "string" && EVM_ADDR.test(a)).slice(0, EXIT_KNOWN_MAX) : [];
+  const fresh = v && typeof v.at === "number" && now - v.at < EXIT_KNOWN_FRESH_MS && addrs.length > 0;
+  if (!fresh && kv && ctx && typeof ctx.waitUntil === "function") ctx.waitUntil(exitKnownRefresh(env));
+  const rank = new Map(addrs.map((a, i) => [a, i]));
+  exitKnownMem = { memAt: now, addrs, rank };
+  return exitKnownMem;
+}
+/* موجودیِ فهرستِ شناخته‌شده در یک دسته‌ی JSON-RPC. خروجی: { list:[{address,balance}], ok } — ok:false یعنی جواب نیامد (نامعلوم) */
+async function exitKnownBalances(wallet, rpcUrl, addrs) {
+  if (!addrs.length) return { list: [], ok: true };
+  const calls = [];
+  for (let i = 0; i < addrs.length; i += EXIT_KNOWN_CHUNK) calls.push(["alchemy_getTokenBalances", [wallet, addrs.slice(i, i + EXIT_KNOWN_CHUNK)]]);
+  const r = await pnlRpcBatch(rpcUrl, calls);
+  if (!r) return { list: [], ok: false };
+  const list = [];
+  let ok = true;
+  for (const res of r) {
+    if (!res || !Array.isArray(res.tokenBalances)) { ok = false; continue; }
+    for (const t of res.tokenBalances) {
+      const a = t && typeof t.contractAddress === "string" ? t.contractAddress : "";
+      if (!EVM_ADDR.test(a) || t.error || t.tokenBalance == null) continue;
+      const bal = exitDec(t.tokenBalance);
+      if (bal != null && bal !== "0") list.push({ address: a.toLowerCase(), balance: bal });
+    }
+  }
+  return { list, ok };
+}
+
 /* ۱۵ نوامبر — فهرستِ بریده: alchemy_getTokenBalances هر صفحه حداکثر ۱۰۰ توکن و به ترتیبِ آدرسِ قرارداد می‌دهد؛ در کیفی پر از
    اسپمِ هوایی (آدرس‌هایی که با صفرهای زیاد شروع می‌شوند) صفحه‌ی اول فقط اسپم بود و cbETH/ZORA اصلاً به فهرست نرسیدند
    (jesse.base.eth: ۹۷ توکن تا 0x011d…، more:true؛ ربات ۱۳٬۹۸۰$ گفت، دارایی ~۲۵۷ هزار$).
@@ -4588,7 +4698,7 @@ async function exitPortfolio(wallet, rpcUrl) {
     pageKey = typeof d.pageKey === "string" && d.pageKey !== "" ? d.pageKey : null;
     if (!pageKey) return eth == null ? { ok: false, why: "pf:shape" } : { ok: true, eth, list, unread };   // بی‌ETH = نامعلوم، نه صفر
   }
-  return { ok: false, why: "pf:pages" };   // صفحه‌ها تمام نشد — rpc جایگزین؛ اگر آن هم بریده شد، more:true
+  return { ok: false, why: "pf:pages", list, unread, eth };   // فهرستِ نیمه‌کاره (با قیمت) نگه داشته می‌شود   // صفحه‌ها تمام نشد — rpc جایگزین؛ اگر آن هم بریده شد، more:true
 }
 /* پشتیبان: همه‌ی صفحه‌های alchemy_getTokenBalances تا EXIT_RPC_PAGES؛ صفحه‌ی اول در همان دسته‌ی eth_getBalance (شکلِ قبلی).
    خروجی: { eth, list, unread, more } یا null (نامعلوم) */
@@ -4626,22 +4736,42 @@ async function exitRpcPages(wallet, rpcUrl) {
 }
 /* هسته‌ی خواندنِ فهرستِ دارایی — هم مسیرِ /exit/holdings و هم خلاصه‌ی سمتِ سرور (exitSummary) از همین یک تابع می‌گذرند.
    null = بالادست جواب کاملی نداد (نامعلوم، نه «خالی»). بدونِ کش: کش کارِ مسیرِ بیرونی است. */
-async function exitHoldingsCore(wallet, rpcUrl) {
+async function exitHoldingsCore(wallet, rpcUrl, env, ctx) {
   const pf = await exitPortfolio(wallet, rpcUrl);
   let src = "pf", eth, list, unread, more = false, why = null;
   if (pf.ok) { eth = pf.eth; list = pf.list; unread = pf.unread; }
-  else {
+  else if (pf.why === "pf:pages" && pf.eth != null) {
+    // صفحه‌های بیشتری هست: RPC هم به ترتیبِ آدرس است و کمکی نمی‌کند — مستقیم سراغِ فهرستِ شناخته‌شده
+    why = pf.why; eth = pf.eth; list = pf.list; unread = pf.unread; more = true;
+  } else {
     why = pf.why;
     const rp = await exitRpcPages(wallet, rpcUrl);
     if (!rp) return null;
     src = "rpc"; eth = rp.eth; list = rp.list; unread = rp.unread; more = rp.more;
   }
+  // فهرستِ ناقص → موجودیِ توکن‌های شناخته‌شده؛ خودِ کیف همچنان «کامل خوانده نشد» می‌ماند (more:true)
+  let kn = null, known = null;
+  if (more) {
+    known = await exitKnownGet(env, ctx);
+    if (known.addrs.length) {
+      const kb = await exitKnownBalances(wallet, rpcUrl, known.addrs);
+      const have = new Set(list.map((t) => t.address));
+      let added = 0;
+      for (const t of kb.list) if (!have.has(t.address)) { have.add(t.address); list.push({ address: t.address, balance: t.balance, usd: null }); added++; }
+      kn = kb.ok ? "known:" + added : "known:down";
+    } else kn = "known:none";
+  }
+  const rank = known ? known.rank : null;
   // ترتیب = اهمیت: ارزشِ تخمینیِ آلچمی نزولی؛ بی‌قیمت‌ها بعد (به ترتیبِ آدرس، پایدار). سقف بعد از مرتب‌سازی.
-  list.sort((x, y) => (y.usd == null ? -1 : y.usd) - (x.usd == null ? -1 : x.usd) || (x.address < y.address ? -1 : x.address > y.address ? 1 : 0));
+  // بعد از قیمت‌دارها، توکن‌های فهرستِ شناخته‌شده به ترتیبِ ارزشِ بازار، بعد بقیه به ترتیبِ آدرس
+  const rk = (t) => (rank && rank.has(t.address) ? rank.get(t.address) : Infinity);
+  list.sort((x, y) => (y.usd == null ? -1 : y.usd) - (x.usd == null ? -1 : x.usd) || (rk(x) === rk(y) ? 0 : rk(x) < rk(y) ? -1 : 1)
+    || (x.address < y.address ? -1 : x.address > y.address ? 1 : 0));
   if (list.length > EXIT_HOLD_MAX) more = true;
   const tokens = list.slice(0, EXIT_HOLD_MAX).map((t) => ({ address: t.address, balance: t.balance }));
   const body = { eth, tokens, more, src };
   if (why) body.pf = why;
+  if (kn) body.kn = kn;
   if (unread > 0) body.unread = unread;
   return body;
 }
@@ -4666,7 +4796,7 @@ async function exitHoldingsRoute(request, url, ctx, env) {
   }
   const rpcUrl = env && typeof env.BASE_RPC === "string" ? env.BASE_RPC : "";
   if (!rpcUrl) return exitUpstream();
-  const body = await exitHoldingsCore(wallet, rpcUrl);
+  const body = await exitHoldingsCore(wallet, rpcUrl, env, ctx);
   if (!body) return exitUpstream();
   if (store) {
     const put = store.put(cacheKey, new Response(JSON.stringify(body), { status: 200,
@@ -4758,7 +4888,8 @@ async function exitQuoteServer(tokenRows, env, st) {
 async function exitSummaryInner(wallet, env, st) {
   const rpcUrl = env && typeof env.BASE_RPC === "string" ? env.BASE_RPC : "";
   if (!rpcUrl) return { s: null, why: "rpc" };
-  const h = await exitHoldingsCore(wallet, rpcUrl);
+  // بی‌ctx: تازه‌سازیِ فهرستِ شناخته‌شده از داخلِ بودجه‌ی خلاصه راه نمی‌افتد (کارِ مسیرِ /exit/holdings است)؛ فقط خواندنِ KV
+  const h = await exitHoldingsCore(wallet, rpcUrl, env, null);
   if (!h) return { s: null, why: "holdings" };
   const wl = WETH_ADDR.toLowerCase();
   const { info, failed } = await exitPricesServer([wl].concat(h.tokens.map((t) => t.address)), env, st);   // WETH اول: قیمتِ ETH در دسته‌ی اولِ قیمت می‌آید

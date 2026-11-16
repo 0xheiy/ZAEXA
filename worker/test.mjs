@@ -17907,6 +17907,117 @@ console.log(fails === 0
       ok(why !== "pf:nokey" || !seenCalls.some((c) => c.u.startsWith("https://api.g.alchemy.com/")), "[exit] no key in BASE_RPC -> the portfolio is never called");
       ok(!why || (await import("./index.js")).EXIT_PF_WHY.includes(why), "[exit] the reason is in the closed EXIT_PF_WHY list: " + why);
     }
+    // چ۵) کیفِ پر از اسپم (۱۵ نوامبر، jesse.base.eth): صفحه‌ها تمام نمی‌شوند → موجودیِ فهرستِ شناخته‌شده‌ی KV در یک دسته
+    { const M = await import("./index.js");
+      const CB = tk(0x2ae3), ZR = tk(0x1111), JS = tk(0x50f8), NOT = tk(0x7777);
+      const mkKv = (val, ops) => ({ get: async (k, t) => { ops.push(["get", k]); const v = val.get(k); return v == null ? null : t === "json" ? JSON.parse(v) : v; },
+        put: async (k, v, o) => { ops.push(["put", k, o]); val.set(k, v); }, delete: async () => {}, list: async () => ({ keys: [] }) });
+      const store = new Map([["exit:known:v1", JSON.stringify({ at: Date.now(), addrs: [CB, JS, ZR, NOT] })]]), ops = [];
+      const envK = { ...envE, ZX_KV: mkKv(store, ops) };
+      const spamPage = (from) => { const t = []; for (let i = from; i < from + 50; i++) t.push(pfTok(tk(i), 10n ** 21n, null)); return t; };
+      let knownBody = null;
+      const mkSpam = (o) => { const up = mkUp(o || {}); return async (u, init) => {
+        const body = JSON.parse(init.body);
+        if (u === RPC && Array.isArray(body) && body[0] && body[0].method === "alchemy_getTokenBalances" && Array.isArray(body[0].params[1])) {
+          seenCalls.push({ u, body }); knownBody = body;
+          if (o && o.knownDown) return jb({ error: "x" }, 500);
+          const bal = { [CB]: hx(64n * 10n ** 18n), [ZR]: hx(6n * 10n ** 24n), [JS]: hx(45n * 10n ** 24n), [NOT]: "0x0" };
+          return jb(body.map((x) => ({ jsonrpc: "2.0", id: x.id, result: { address: x.params[0], tokenBalances: x.params[1].map((a) => ({ contractAddress: a, tokenBalance: bal[a] || "0x0" })) } })));
+        }
+        return up(u, init);
+      }; };
+      const pfEndless = [{ tokens: spamPage(1).concat([{ ...pfTok(null, 7n * 10n ** 18n, 1800), tokenAddress: null }]), pageKey: "a" }, { tokens: spamPage(60), pageKey: "b" }];
+      shelf.clear(); puts.length = 0; M._exitKnownReset();
+      let b = await (await EX("/exit/holdings/" + W, mkSpam({ pf: pfEndless }), envK)).json();
+      ok(b.src === "pf" && b.pf === "pf:pages" && b.more === true && b.kn === "known:3" && b.eth === (7n * 10n ** 18n).toString(),
+        "[exit known] endless portfolio pages -> the known list is checked, 3 found, the wallet stays 'not read in full', got " + JSON.stringify({ ...b, tokens: b.tokens.length }));
+      ok(b.tokens.slice(0, 3).map((t) => t.address).join() === [CB, JS, ZR].join(), "[exit known] known tokens come before the spam, in market-cap order, got " + b.tokens.slice(0, 4).map((t) => t.address).join());
+      ok(!b.tokens.some((t) => t.address === NOT), "[exit known] a known token with zero balance is not listed");
+      const kc = seenCalls.filter((c) => c.u === RPC);
+      ok(kc.length === 1 && knownBody.length === 1 && knownBody[0].params[1].length === 4 && knownBody[0].params[0] === W.toLowerCase(),
+        "[exit known] one batch request for the known list, no RPC paging after portfolio pages ran out, got " + kc.length + " RPC calls");
+      ok(seenCalls.filter((c) => c.u.startsWith("https://api.g.alchemy.com/")).length === 5, "[exit known] the portfolio stops at 5 pages");
+      ok(!ops.some((o) => o[0] === "put"), "[exit known] a fresh list is not rebuilt");
+      // هزار آدرس → ۱۰ تکه‌ی ۱۰۰تایی در همان یک درخواست
+      const many = []; for (let i = 0; i < 1000; i++) many.push(tk(0x10000 + i));
+      store.set("exit:known:v1", JSON.stringify({ at: Date.now(), addrs: many.concat([CB]) })); shelf.clear(); M._exitKnownReset();
+      b = await (await EX("/exit/holdings/" + W, mkSpam({ pf: pfEndless }), envK)).json();
+      ok(knownBody.length === 10 && knownBody.every((x) => x.params[1].length === 100) && b.kn === "known:0", "[exit known] 1000 addresses -> 10 chunks of 100 in one request; the 1001st is cut, got " + knownBody.length + " / " + b.kn);
+      // فهرستِ شناخته‌شده‌ی قطع → known:down، خودِ هلدینگ همچنان جواب می‌دهد
+      store.set("exit:known:v1", JSON.stringify({ at: Date.now(), addrs: [CB] })); shelf.clear(); M._exitKnownReset();
+      b = await (await EX("/exit/holdings/" + W, mkSpam({ pf: pfEndless, knownDown: true }), envK)).json();
+      ok(b.kn === "known:down" && b.more === true && b.tokens.length === 100, "[exit known] the known batch down -> known:down, the rest still answers, got " + b.kn);
+      // KV خالی → known:none؛ فهرستِ کامل (pf موفق) → هیچ خواندنی از KV
+      store.delete("exit:known:v1"); shelf.clear(); M._exitKnownReset();
+      b = await (await EX("/exit/holdings/" + W, mkSpam({ pf: pfEndless }), envK)).json();
+      ok(b.kn === "known:none" && b.more === true, "[exit known] no list yet -> known:none, got " + b.kn);
+      ops.length = 0; shelf.clear(); M._exitKnownReset();
+      b = await (await EX("/exit/holdings/" + W, mkSpam({ pf: [{ tokens: [{ ...pfTok(null, 1n, 1800), tokenAddress: null }, pfTok(CB, 1n, 2000)] }] }), envK)).json();
+      ok(!("kn" in b) && !ops.length && b.more === false, "[exit known] a complete wallet never touches the known list, got " + JSON.stringify(b));
+      // RPC بریده (pf شکسته) هم فهرست را می‌پرسد
+      store.set("exit:known:v1", JSON.stringify({ at: Date.now(), addrs: [CB] })); shelf.clear(); M._exitKnownReset();
+      b = await (await EX("/exit/holdings/" + W, mkSpam({ pf: "down", tb: [{ contractAddress: tk(3), tokenBalance: hx(1) }], pageKey: "next" }), envK)).json();
+      ok(b.src === "rpc" && b.kn === "known:1" && b.tokens[0].address === CB, "[exit known] a truncated RPC list also checks the known list, got " + JSON.stringify(b).slice(0, 160));
+
+      // --- ساختِ فهرست از کوین‌گکو ---
+      const cgWorld = (o) => async (u, init) => {
+        seenCalls.push({ u, init });
+        if (u.startsWith("https://api.coingecko.com/api/v3/coins/markets")) {
+          if (o.marketsDown) return jb({ error: "x" }, 500);
+          const page = Number(new URL(u).searchParams.get("page"));
+          return jb((o.markets[page - 1] || []).map((id) => ({ id, symbol: id, market_cap: 1 })));
+        }
+        if (u.startsWith("https://api.coingecko.com/api/v3/coins/list")) {
+          if (o.listDown) return jb({ error: "x" }, 500);
+          return jb(o.list);
+        }
+        return jb({ error: "unexpected " + u }, 500);
+      };
+      const saved = globalThis.fetch;
+      const build = async (o, env2) => { seenCalls = []; globalThis.fetch = (u, i) => cgWorld(o)(String(u), i || {}); try { return await M.exitKnownBuild(env2 || { CG_KEY: "SECRET-CG-DEMO-KEY" }); } finally { globalThis.fetch = saved; } };
+      const list = [{ id: "cbeth", platforms: { base: CB.toUpperCase().replace("0X", "0x") } }, { id: "zora", platforms: { base: " " + ZR + " " } }, { id: "jesse", platforms: { base: JS } },
+        { id: "eth-only", platforms: { ethereum: tk(9) } }, { id: "bad", platforms: { base: "0x123" } }, { id: "dup", platforms: { base: CB } }];
+      let r = await build({ markets: [["jesse", "eth-only", "cbeth", "bad", "zora", "dup", "missing"]], list });
+      ok(JSON.stringify(r.addrs) === JSON.stringify([JS, CB, ZR]), "[exit known] the list follows market-cap order, keeps Base addresses only, lower-cased, trimmed, deduped, got " + JSON.stringify(r));
+      const mk = seenCalls.find((c) => c.u.includes("/coins/markets"));
+      ok(mk && /category=base-ecosystem/.test(mk.u) && /order=market_cap_desc/.test(mk.u) && /per_page=250/.test(mk.u) && mk.init.headers["x-cg-demo-api-key"] === "SECRET-CG-DEMO-KEY" && !mk.u.includes("SECRET"),
+        "[exit known] markets: Base ecosystem by market cap, 250 a page, key only in the header");
+      ok(seenCalls.some((c) => c.u === "https://api.coingecko.com/api/v3/coins/list?include_platform=true"), "[exit known] one coins/list call with platforms");
+      const p250 = []; for (let i = 0; i < 250; i++) p250.push("c" + i);
+      const bigList = p250.map((id, i) => ({ id, platforms: { base: tk(0x20000 + i) } }));
+      r = await build({ markets: [p250, p250.map((x) => x + "b"), p250.map((x) => x + "c"), p250.map((x) => x + "d"), ["never"]], list: bigList.concat(bigList.map((c) => ({ id: c.id + "b", platforms: { base: c.platforms.base.replace("0x000", "0x001") } }))) });
+      ok(seenCalls.filter((c) => c.u.includes("/coins/markets")).length === 4, "[exit known] at most 4 market pages");
+      r = await build({ markets: [["a"]], list }); ok(r.why === "cg:empty", "[exit known] ids without a Base address -> cg:empty, got " + JSON.stringify(r));
+      r = await build({ marketsDown: true, list }); ok(r.why === "cg:markets", "[exit known] markets down -> cg:markets");
+      r = await build({ markets: [["cbeth"]], listDown: true }); ok(r.why === "cg:list", "[exit known] list down -> cg:list");
+      ok(JSON.stringify(M.EXIT_KNOWN_WHY) === JSON.stringify(["cg:markets", "cg:list", "cg:empty"]), "[exit known] reasons are a closed list");
+      // تازه‌سازی: موفق → KV با زمان؛ شکست → فهرستِ قبلی می‌ماند؛ قفل → هیچ تماسی
+      const st2 = new Map(), ops2 = [];
+      const envR = { CG_KEY: "k", ZX_KV: mkKv(st2, ops2) };
+      seenCalls = []; globalThis.fetch = (u, i) => cgWorld({ markets: [["cbeth", "zora"]], list })(String(u), i || {});
+      try { await M.exitKnownRefresh(envR); } finally { globalThis.fetch = saved; }
+      const v1 = JSON.parse(st2.get("exit:known:v1"));
+      ok(JSON.stringify(v1.addrs) === JSON.stringify([CB, ZR]) && typeof v1.at === "number" && ops2.some((o) => o[0] === "put" && o[1] === "exit:known:lock" && o[2] && o[2].expirationTtl === 6 * 3600),
+        "[exit known] a refresh writes the ordered list with a timestamp under a 6-hour lock, got " + st2.get("exit:known:v1"));
+      st2.delete("exit:known:lock");
+      seenCalls = []; globalThis.fetch = (u, i) => cgWorld({ marketsDown: true, list })(String(u), i || {});
+      try { await M.exitKnownRefresh(envR); } finally { globalThis.fetch = saved; }
+      const v2 = JSON.parse(st2.get("exit:known:v1"));
+      ok(JSON.stringify(v2.addrs) === JSON.stringify([CB, ZR]) && v2.at === v1.at && v2.lastFail === "cg:markets", "[exit known] a failed refresh keeps the old list and records the reason, got " + st2.get("exit:known:v1"));
+      seenCalls = []; globalThis.fetch = (u, i) => cgWorld({ markets: [["cbeth"]], list })(String(u), i || {});
+      try { await M.exitKnownRefresh(envR); } finally { globalThis.fetch = saved; }
+      ok(seenCalls.length === 0, "[exit known] while the lock is held no refresh runs, got " + seenCalls.length);
+      // کهنه + ctx → تازه‌سازی در پس‌زمینه (waitUntil)
+      const st3 = new Map([["exit:known:v1", JSON.stringify({ at: Date.now() - 25 * 3600 * 1000, addrs: [CB] })]]), waits = [];
+      M._exitKnownReset(); shelf.clear();
+      { const savedF = globalThis.fetch; seenCalls = []; kvOps = [];
+        globalThis.fetch = (u, o) => { u = String(u); return u.startsWith("https://api.coingecko.com/") ? cgWorld({ markets: [["zora"]], list })(u, o || {}) : mkSpam({ pf: pfEndless })(u, o || {}); };
+        try { const res = await worker.fetch(new Request(ORIGIN + "/exit/holdings/" + W, ipE()), { ...envE, ZX_KV: mkKv(st3, []) }, { waitUntil: (p) => waits.push(p) }); b = await res.json(); await Promise.all(waits); }
+        finally { globalThis.fetch = savedF; } }
+      ok(b.kn === "known:1" && waits.length >= 1 && JSON.parse(st3.get("exit:known:v1")).addrs.join() === ZR, "[exit known] a list older than 24h is still used now and rebuilt in the background, got " + b.kn + " / " + st3.get("exit:known:v1"));
+      M._exitKnownReset();
+      console.log("[exit known] spam-heavy wallets: CoinGecko Base top-1000 list (KV, daily, lazy) checked in one batch when holdings are incomplete");
+    }
 
     // ح) شکستِ بالادست: err:upstream با وضعیتِ غیر-۲۰۰، هرگز فهرستِ خالی؛ کش نمی‌شود؛ راز درز نمی‌کند
     for (const [label, o] of [["HTTP 500", { down: true }], ["fetch throws", { throwIt: true }], ["token call errors", { tbErr: true }], ["eth call errors", { ethErr: true }],
