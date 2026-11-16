@@ -3949,7 +3949,7 @@ async def check_mobile_compact(p, errors):
         assert f0["brand"] and f0["fine"] and f0["bottom"] and f0["copyright"], "%s: brand, legal line and copyright must stay visible: %s" % (label, f0)
         await pg.click("footer details.fMore > summary"); await pg.wait_for_timeout(250)
         f1 = await pg.evaluate(FOOT)
-        assert f1["open"] is True and f1["colsVisible"] == 3 and f1["linksVisible"] >= 6, "%s: tapping the row did not open the link columns: %s" % (label, f1)
+        assert f1["open"] is True and f1["colsVisible"] == 4 and f1["linksVisible"] >= 6, "%s: tapping the row did not open the link columns: %s" % (label, f1)
         assert not f1["overflowX"], "%s: opened footer overflows horizontally" % label
         return f0, f1
 
@@ -4141,8 +4141,8 @@ async def check_mobile_compact(p, errors):
             st1440 = await dpg.evaluate("[...document.querySelectorAll('.mTabs')].map(e => getComputedStyle(e).display)")
             assert st1440 and all(d == "none" for d in st1440), "the tab strip must stay hidden at 1440, got display=%s" % st1440
         await dpg.close()
-        assert fd["hasDetails"] and not fd["summaryVisible"] and fd["colsVisible"] == 3 and fd["lefts"] == 3, \
-            "%s: at 1440 the footer must show its three columns with no summary row: %s" % (label, fd)
+        assert fd["hasDetails"] and not fd["summaryVisible"] and fd["colsVisible"] == 4 and fd["lefts"] == 4, \
+            "%s: at 1440 the footer must show its four columns with no summary row: %s" % (label, fd)
     print("[mobile compact] footer: collapsed + opens on tap at 390 (app, pairs, report); three columns and no summary row at 1440")
 
     # ================== پ-۲) landing.html و تکرارِ فوتر در report_page.js ==================
@@ -4183,8 +4183,14 @@ async def check_mobile_compact(p, errors):
         for html in (land_old, land_new):
             lp = await land_page(html, 1440, scheme)
             one = []
-            for sel_l in ("footer .footBrand .brand", "footer .footBrand .footTag", "footer .footBrand .social"):
+            for sel_l in ("footer .footBrand .brand", "footer .footBrand .footTag"):
                 one.append(await lp.locator(sel_l).screenshot())
+            # ۱۵ نوامبر (چهار ستون، تغییرِ عمدیِ حسام): ستونِ نشان باریک‌تر شد و .social (بلوکِ تمام‌عرضِ ستون) عکسِ پهنای دیگری می‌دهد؛
+            # قفل روی خودِ آیکون‌هاست — هر سه جدا، پیکسل‌به‌پیکسل، به‌علاوه‌ی تعدادشان.
+            soc = lp.locator("footer .footBrand .social a")
+            one.append(await soc.count())
+            for k in range(await soc.count()):
+                one.append(await soc.nth(k).screenshot())
             # fine و footBottom به‌خاطرِ بلندترِ شدنِ ستونِ About با نیم‌پیکسل جابه‌جا می‌شوند (پیکسلشان دیگر قابلِ‌مقایسه نیست) → متن و استایلِ محاسبه‌شده
             for sel_l in ("footer .fine", "footer .footBottom"):
                 one.append(await lp.locator(sel_l).evaluate("""e => { const c = getComputedStyle(e); return e.outerHTML + '|' + ['fontSize','fontWeight','lineHeight','color','marginTop','marginBottom','paddingTop','borderTopWidth','borderTopColor','display','maxWidth'].map(k => c[k]).join('|'); }"""))
@@ -4910,8 +4916,8 @@ async def check_report_page(p, errors):
     d = await pg.evaluate(HDRDOM_JS)
     assert d["nav"] == "flex" and d["pos"] != "fixed", "[report header desktop] at 1440 the tab bar sits in the header, not fixed: %s" % d
     assert d["hdPos"] == "sticky" and d["hdZ"] == "30" and "site-header" in d["hdCls"], "[report header desktop] the header must be sticky with z-index 30: %s" % d
-    assert d["labels"] == ["Swap", "Markets", "Stocks", "Exit Report"], "[report header desktop] tab order must be Swap, Markets, Stocks, Exit Report: %s" % d["labels"]
-    assert d["titles"] == ["Swap", "Markets", "Stocks", "Exit Report"], "[report header desktop] tab titles: %s" % d["titles"]
+    assert d["labels"] == ["Swap", "Markets", "Stocks", "Exit value", "Exit Report"], "[report header desktop] tab order must be Swap, Markets, Stocks, Exit Report: %s" % d["labels"]
+    assert d["titles"] == ["Swap", "Markets", "Stocks", "Exit value", "Exit Report"], "[report header desktop] tab titles: %s" % d["titles"]
     assert d["on"] == [["Exit Report", "page", "/report"]], "[report header desktop] only Exit Report is active (aria-current=page): %s" % d["on"]
     assert d["stocks"] == "A", "[report header desktop] Stocks is a real link to /app#stocks (no Soon span): %s" % d["stocks"]
     assert d["menu"] == 0, "[report header desktop] Markets is a plain tab now: no #navMenu, .navChev or .navMenuWrap in the DOM (%s found)" % d["menu"]
@@ -5140,7 +5146,7 @@ async def check_report_page(p, errors):
         for vw in (360, 390, 1440):
             m = await tabs(path, vw)
             # ۷ اکتبر (تغییر عمدی): «Stocks · Soon» برداشته شد و تبِ واقعیِ Stocks پیش از Exit Report نشست — Swap · Markets · Stocks · Exit Report؛ Exit Report هنوز لینکِ /report است.
-            assert m["n"] == 4 and m["order"] == ["Swap", "Markets", "Stocks", "Exit Report"], "[report page tabs] %s at %d must have the 4 items Swap, Markets, Stocks, Exit Report: %s" % (path, vw, m)
+            assert m["n"] == 5 and m["order"] == ["Swap", "Markets", "Stocks", "Exit value", "Exit Report"], "[report page tabs] %s at %d must have the 4 items Swap, Markets, Stocks, Exit Report: %s" % (path, vw, m)
             assert m["last"] == "/report", "[report page tabs] Exit Report must link to /report: %s" % m
             assert m["lastText"] == "Exit Report", "[report page tabs] label: %r" % m["lastText"]
             assert m["left"] >= 0 and m["right"] <= m["iw"] + 0.5, "[report page tabs] %s at %d tabs leave the viewport: %s" % (path, vw, m)
@@ -5169,7 +5175,7 @@ async def check_report_page(p, errors):
             tag = "[report header] %dx%d %s" % (vw, vh, scheme)
             assert m["disp"] != "none" and m["pos"] == "fixed", "%s: the tab bar must be visible and position:fixed: %s" % (tag, m)
             assert vh - 20 <= m["bottom"] <= vh, "%s: the bar's bottom must sit within 20px of the viewport bottom: %s" % (tag, m)
-            assert m["labels"] == ["Swap", "Markets", "Stocks", "Exit Report"], "%s: the 4 items must read Swap, Markets, Stocks, Exit Report: %s" % (tag, m["labels"])
+            assert m["labels"] == ["Swap", "Markets", "Stocks", "Exit value", "Exit Report"], "%s: the 4 items must read Swap, Markets, Stocks, Exit Report: %s" % (tag, m["labels"])
             assert m["rep"] == [True, "page"], "%s: Exit Report must carry class on and aria-current=page: %s" % (tag, m["rep"])
             assert not m["gone"], "%s: no hamburger, mobile menu, landing header or Soon span may remain in the DOM: %s" % (tag, m["gone"])
             assert (m["hdZ"], m["navZ"], m["popZ"]) == ("30", "60", "50"), "%s: z-index header/phone bar/popover must be 30/60/50: %s" % (tag, m)
@@ -5243,7 +5249,7 @@ async def check_report_page(p, errors):
             await pp.close()
             tag = "[report header parity] %dx%d %s" % (vw, vh, scheme)
             assert a["sig"] == q["sig"], "%s: header element set (tag#id.classes) differs: /report %s vs /pairs %s" % (tag, a["sig"], q["sig"])
-            assert a["order"] == ["Swap", "Markets", "Stocks", "Exit Report"], "%s: /report tab order: %s" % (tag, a["order"])
+            assert a["order"] == ["Swap", "Markets", "Stocks", "Exit value", "Exit Report"], "%s: /report tab order: %s" % (tag, a["order"])
             assert a["setPop"] == q["setPop"] and a["walletPop"] == q["walletPop"], "%s: popover control ids differ: %s %s vs %s %s" % (tag, a["setPop"], a["walletPop"], q["setPop"], q["walletPop"])
             assert a["menu"] == 0 and q["menu"] == 0, "%s: Markets is a plain tab: no #navMenu/.navChev/.navMenuWrap on /report (%s) or /pairs (%s)" % (tag, a["menu"], q["menu"])
             assert abs(a["hdH"] - q["hdH"]) <= 1 and a["hd"] == q["hd"], "%s: header height/position/padding/background differ: %s %s vs %s %s" % (tag, a["hdH"], a["hd"], q["hdH"], q["hd"])
@@ -6434,7 +6440,7 @@ async def check_stocks(p, errors):
                 await pg.wait_for_timeout(500)
             m = await pg.evaluate(NAV_JS)
             ctxn = "[stocks nav] %s@%d" % (page_name, vw)
-            assert m["order"] == ["Swap", "Markets", "Stocks", "Exit Report"], "%s: tab order is %s" % (ctxn, m["order"])
+            assert m["order"] == ["Swap", "Markets", "Stocks", "Exit value", "Exit Report"], "%s: tab order is %s" % (ctxn, m["order"])
             assert m["soon"] == 0 and not m["soonClass"], "%s: an element still says Soon: %s" % (ctxn, m)
             if page_name == "app":
                 assert m["stocksTag"] == "BUTTON" and m["dv"] == "stocks", "%s: Stocks must be a <button data-view=stocks>: %s" % (ctxn, m)
@@ -13761,7 +13767,7 @@ async def main():
             })""")
             print("[pairs nav] mobile %spx: items=%s scrollWidth=%s innerWidth=%s widths=%s"
                   % (w, mobinfo["count"], mobinfo["scrollW"], mobinfo["innerW"], mobinfo["widths"]))
-            assert mobinfo["count"] == 4, (
+            assert mobinfo["count"] == 5, (   # ۱۵ نوامبر: تبِ Exit value
                 "expected 4 items in the bottom nav at %spx, found %s" % (w, mobinfo["count"]))
             # هر چهار آیتم باید flex:1 مشترک داشته باشند — یعنی پهنای تقریباً
             # برابر، نه اینکه یکی به‌اندازه‌ی محتوایش جمع شود و بقیه بی‌قاعده جمع/باز شوند.
@@ -13836,7 +13842,7 @@ async def main():
             nm.on("pageerror", lambda e, _l=nm_errs: _l.append(str(e)))
             await nm.goto(URL)
             await nm.wait_for_timeout(800)
-            assert await nm.evaluate(NM_ORDER_JS) == ["Swap", "Markets", "Stocks", "Exit Report"], \
+            assert await nm.evaluate(NM_ORDER_JS) == ["Swap", "Markets", "Stocks", "Exit value", "Exit Report"], \
                 "%s: bar order is %s" % (nm_ctx, await nm.evaluate(NM_ORDER_JS))
             assert await nm.locator('#nav [data-view="folio"]').count() == 0, "%s: Portfolio must not be a tab any more" % nm_ctx
             st0 = await nm.evaluate(NM_STATE_JS)
@@ -13867,7 +13873,7 @@ async def main():
             await nm.route("**/*", lambda r: r.continue_() if r.request.url.startswith("file:") else r.abort())
             await nm.goto("file://" + os.path.join(HERE, "..", "pairs.html"), wait_until="domcontentloaded")
             await nm.wait_for_timeout(800)
-            assert await nm.evaluate(NM_ORDER_JS) == ["Swap", "Markets", "Stocks", "Exit Report"], "%s: bar order is %s" % (nm_ctx, await nm.evaluate(NM_ORDER_JS))
+            assert await nm.evaluate(NM_ORDER_JS) == ["Swap", "Markets", "Stocks", "Exit value", "Exit Report"], "%s: bar order is %s" % (nm_ctx, await nm.evaluate(NM_ORDER_JS))
             st = await nm.evaluate(NM_STATE_JS)
             assert st["on"] and "inset" in st["btnShadow"] and st["menu"] == 0 and st["haspopup"] is None and st["expanded"] is None, "%s: Markets must be a selected plain tab on /pairs: %s" % (nm_ctx, st)
             stk = await nm.evaluate(NM_STOCKS_JS)
@@ -16525,14 +16531,15 @@ async def main():
             return out;
         }""")
         print("[footer] columns=%r" % cols)
-        # ۵ نوامبر (تغییرِ عمدی): ستون‌ها Trade · Tools · About شدند؛ «Support» رفت و دکمه‌ی Report a problem زیرِ About است.
-        for name in ["Trade", "Tools", "About"]:
+        # ۱۵ نوامبر (تغییرِ عمدیِ حسام): چهار ستون Trade · Tools · Resources · Support؛ دکمه‌ی Report a problem زیرِ Support است.
+        for name in ["Trade", "Tools", "Resources", "Support"]:
             assert name in cols, "the footer is missing the %r column heading" % name
-        assert "Support" not in cols, "the Support footer column was folded into About on 5 Nov: %r" % cols
+        assert "About" not in cols, "the About footer column became Resources on 15 Nov: %r" % cols
         assert cols["Trade"]["links"] >= 2, "Trade column has too few links: %r" % cols["Trade"]
         assert cols["Tools"]["links"] >= 2, "Tools column has too few links: %r" % cols["Tools"]
-        assert cols["About"]["links"] + cols["About"]["buttons"] >= 2, (
-            "About column has too few links/actions: %r" % cols["About"])
+        assert cols["Resources"]["links"] >= 2, "Resources column has too few links: %r" % cols["Resources"]
+        assert cols["Support"]["links"] + cols["Support"]["buttons"] >= 2, (
+            "Support column has too few links/actions: %r" % cols["Support"])
 
         # ۲. هیچ لینکی به ناکجا نمی‌رود
         hrefs = await footpg.eval_on_selector_all(
@@ -17796,8 +17803,9 @@ async def main():
                  hinfo["navCenter"], hinfo["hdrCenter"], hinfo["hasCta"], hinfo["hasFavicon"], herrs))
         # ۱۸ اکتبر (تغییر عمدی): Flow و New pairs از منو رفتند و Markets دکمه‌ی ساده است، پس <a>های هدر سه‌تاست
         # (Swap، Stocks، Exit Report) و هیچ <a href="/pairs"> در نوار نیست؛ «روشن‌بودنِ» Markets جای aria-current را می‌گیرد.
-        assert hinfo["count"] == 3, "expected 3 nav links in pairs.html's header (Swap, Stocks, Exit Report), found %s" % hinfo["count"]
-        assert hinfo["hrefs"] == ["/app#swap", "/app#stocks", "/report"], (
+        # ۱۵ نوامبر: لینکِ /exit (Exit value) بعد از Stocks
+        assert hinfo["count"] == 4, "expected 4 nav links in pairs.html's header (Swap, Stocks, Exit value, Exit Report), found %s" % hinfo["count"]
+        assert hinfo["hrefs"] == ["/app#swap", "/app#stocks", "/exit", "/report"], (
             "pairs.html's header nav hrefs are wrong: %s" % hinfo["hrefs"])
         assert hinfo["lastCurrent"] is False, "no a[href=\"/pairs\"] may remain in the header nav"
         assert hinfo["lastOn"], "the Markets tab must carry the .on look on /pairs"
@@ -17832,7 +17840,7 @@ async def main():
                 };
             }""")
             print("[pairs header] mobile %spx: %s" % (w, mob))
-            assert mob["count"] == 4, "expected 4 nav items at %spx, found %s" % (w, mob["count"])
+            assert mob["count"] == 5, "expected 5 nav items at %spx, found %s" % (w, mob["count"])
             assert mob["position"] == "fixed", "pairs.html's nav is not fixed at %spx" % w
             assert max(mob["widths"]) - min(mob["widths"]) <= 4, (
                 "pairs.html's 4 bottom-nav items are not equal width at %spx: %s" % (w, mob["widths"]))
@@ -17842,7 +17850,7 @@ async def main():
         await hpg2.close()
         assert not herrs2, "web/pairs.html threw while resizing the header: %s" % herrs2
 
-        print("[pairs header] 3 nav links (Swap/Stocks/Exit Report) plus the Markets button, with the right hrefs, no /pairs link in the bar, "
+        print("[pairs header] 4 nav links (Swap/Stocks/Exit value/Exit Report) plus the Markets button, with the right hrefs, no /pairs link in the bar, "
               "Markets carries the .on look, centred at 1240px, labels hidden at "
               "800px, fixed 4-equal-width bottom bar at 390/360px with no horizontal scroll, no "
               ".header-cta, favicon present")
@@ -21283,8 +21291,8 @@ async def main():
               "bottomSpans=%s errors=%s" % (foot_info["cols"], foot_info["hasBrand"],
               foot_info["tradeHrefs"], foot_info["baseScanHref"], foot_info["hasTelegram"],
               foot_info["bottomSpans"], perrs3))
-        assert foot_info["cols"] == 3, (
-            "web/pairs.html's .footGrid must have exactly 3 .footCol, found %s" % foot_info["cols"])
+        assert foot_info["cols"] == 4, (   # ۱۵ نوامبر: چهار ستون
+            "web/pairs.html's .footGrid must have exactly 4 .footCol, found %s" % foot_info["cols"])
         assert foot_info["hasBrand"], "web/pairs.html's .footGrid is missing its .footBrand child"
         # ۵ نوامبر: Portfolio به ستونِ Tools رفت و ترتیبِ Trade شد Swap · Flow · New pairs · Stocks
         assert foot_info["tradeHrefs"] == ["/app#swap", "/app#flow", "/pairs", "/app#stocks"], (
@@ -22125,7 +22133,10 @@ async def check_watch_sheet_mobile(p, errors):
             await pg.keyboard.press("Escape")
             assert await pg.evaluate("() => document.getElementById('watchPop').hidden"), "%s: Escape closes" % tag
             await pg.click("#watchBtn")
-            await pg.mouse.click(vw // 2, 780)
+            # ۱۵ نوامبر: با ۵ تب، وسطِ نوارِ پایین خودِ تبِ Exit value است — «بیرون» یعنی بالای نوار و زیرِ برگه
+            out_y = await pg.evaluate("() => Math.round(document.getElementById('nav').getBoundingClientRect().top - 24)")
+            assert out_y > (await pg.evaluate("() => document.getElementById('watchPop').getBoundingClientRect().bottom")), "%s: no empty spot between the sheet and the bottom bar" % tag
+            await pg.mouse.click(vw // 2, out_y)
             assert await pg.evaluate("() => document.getElementById('watchPop').hidden"), "%s: a tap outside closes" % tag
             await pg.click("#watchBtn")
             await pg.click('#watchPop .wlRm[aria-label="Remove WA"]')
@@ -23707,9 +23718,11 @@ async def check_landing_nav_order(p, errors):
         await b.close()
 
 
+# ۱۵ نوامبر (حسام): چهار ستون — Exit value در Tools؛ About → Resources؛ ستونِ تازه‌ی Support
 FOOTER_COLS = [("Trade", ["Swap", "Flow", "New pairs", "Stocks"]),
-               ("Tools", ["Exit Report", "Portfolio", "API"]),
-               ("About", ["How it works & FAQ", "Contract on BaseScan 0x5f3F…7132", "Source on GitHub", "Report a problem", "Price history by GeckoTerminal"])]
+               ("Tools", ["Exit value", "Exit Report", "Portfolio", "API"]),
+               ("Resources", ["How it works & FAQ", "Contract on BaseScan 0x5f3F…7132", "Source on GitHub", "Price history by GeckoTerminal"]),
+               ("Support", ["Telegram channel", "X (Twitter)", "Report a problem"])]
 FOOT_JS = """() => {
     const f = document.querySelector('footer'); const cols = [...f.querySelectorAll('.footCol')];
     return cols.map(c => [c.querySelector('h4').textContent.trim(),
@@ -23744,10 +23757,10 @@ async def check_footer_columns(p, errors):
         pg = await env.open("", path="/pairs", board=False); await pg.wait_for_timeout(500)
         results["pairs"] = await pg.evaluate(FOOT_JS); await pg.context.close()
         want_hrefs = {
-            "landing": [["/app", "/app#flow", "/pairs", "/app#stocks"], ["/report", "/app#folio", "/api"], ["/app#faq", None, "https://github.com/0xheiy/ZAEXA", "/app", "https://www.geckoterminal.com"]],
-            "report": [["/app", "/app#flow", "/pairs", "/app#stocks"], ["/report", "/app#folio", "/api"], ["/app#faq", None, "https://github.com/0xheiy/ZAEXA", "/app", "https://www.geckoterminal.com"]],
-            "app": [["#swap", "#flow", "/pairs", "#stocks"], ["/report", "#folio", "/api"], ["#faq", None, "https://github.com/0xheiy/ZAEXA", None, "https://www.geckoterminal.com"]],
-            "pairs": [["/app#swap", "/app#flow", "/pairs", "/app#stocks"], ["/report", "/app#folio", "/api"], ["/app#faq", None, "https://github.com/0xheiy/ZAEXA", "mailto:zaexadex@gmail.com", "https://www.geckoterminal.com"]],
+            "landing": [["/app", "/app#flow", "/pairs", "/app#stocks"], ["/exit", "/report", "/app#folio", "/api"], ["/app#faq", None, "https://github.com/0xheiy/ZAEXA", "https://www.geckoterminal.com"], ["https://t.me/zaexadex", "https://x.com/zaexadex", "/app"]],
+            "report": [["/app", "/app#flow", "/pairs", "/app#stocks"], ["/exit", "/report", "/app#folio", "/api"], ["/app#faq", None, "https://github.com/0xheiy/ZAEXA", "https://www.geckoterminal.com"], ["https://t.me/zaexadex", "https://x.com/zaexadex", "/app"]],
+            "app": [["#swap", "#flow", "/pairs", "#stocks"], ["/exit", "/report", "#folio", "/api"], ["#faq", None, "https://github.com/0xheiy/ZAEXA", "https://www.geckoterminal.com"], ["https://t.me/zaexadex", "https://x.com/zaexadex", None]],
+            "pairs": [["/app#swap", "/app#flow", "/pairs", "/app#stocks"], ["/exit", "/report", "/app#folio", "/api"], ["/app#faq", None, "https://github.com/0xheiy/ZAEXA", "https://www.geckoterminal.com"], ["https://t.me/zaexadex", "https://x.com/zaexadex", "mailto:zaexadex@gmail.com"]],
         }
         for name, cols in results.items():
             assert [c[0] for c in cols] == [c[0] for c in FOOTER_COLS], "[footer columns] %s headings: %s" % (name, [c[0] for c in cols])
@@ -23762,7 +23775,7 @@ async def check_footer_columns(p, errors):
         classes = {n: [c[3] for c in cols] for n, cols in results.items()}
         assert all(v == classes["landing"] for v in classes.values()), "[footer columns] child class structure differs: %s" % classes
         assert not errs, "[footer columns] page errors: %s" % errs
-        print("[footer columns] landing, app, /pairs and the report footer all read Trade (Swap, Flow, New pairs, Stocks) · Tools (Exit Report, Portfolio, API) · About (How it works & FAQ, Contract on BaseScan, Source on GitHub, Report a problem, Price history by GeckoTerminal); report footer is byte-identical to landing's")
+        print("[footer columns] landing, app, /pairs and the report footer all read Trade (Swap, Flow, New pairs, Stocks) · Tools (Exit value, Exit Report, Portfolio, API) · Resources (How it works & FAQ, Contract on BaseScan, Source on GitHub, Price history by GeckoTerminal) · Support (Telegram channel, X, Report a problem); report footer is byte-identical to landing's")
     finally:
         await b.close(); srv.shutdown()
 
@@ -24579,30 +24592,34 @@ async def check_exit_failures(p, errors):
 
 
 async def check_exit_routes(p, errors):
-    """[exit routes] تبِ Exit value داخلِ Portfolio همان نما را با آدرسِ خودش باز می‌کند؛ برگشت به Holdings؛ آدرسِ نوار."""
+    """[exit routes] ۱۵ نوامبر: Exit value تبِ خودش در نوار را دارد (دیگر داخلِ Portfolio نیست)؛ آدرسِ نوار؛ با حساب فقط پر می‌شود و با Check اجرا."""
     b = await p.chromium.launch()
     env = ExitEnv(b, errors)
     env.serve()
     try:
         pg = await env.open("/app", hash_="#folio")
         await pg.wait_for_function("() => document.getElementById('view-folio').classList.contains('on')")
-        sw = await pg.evaluate("() => ({hidden: document.getElementById('folioExitSwitch').hidden, labels: [...document.querySelectorAll('#folioExitSwitch button')].map(x => x.textContent.trim())})")
-        assert not sw["hidden"] and sw["labels"] == ["Holdings", "Exit value"], "[exit routes] the Portfolio view carries the Holdings / Exit value switch: %s" % sw
+        sw = await pg.evaluate("() => ({switches: document.querySelectorAll('#folioExitSwitch,#exitSwitch,[data-exsw]').length, tab: !!document.querySelector('#nav > button[data-view=\"exit\"]'), tabText: (document.querySelector('#nav > button[data-view=\"exit\"] span') || {}).textContent})")
+        assert sw == {"switches": 0, "tab": True, "tabText": "Exit value"}, "[exit routes] Portfolio has no Holdings / Exit value switch any more and the nav has the Exit value tab: %s" % sw
         # بدونِ حساب: نما باز می‌شود، فیلد خالی، هیچ بررسی‌ای شروع نمی‌شود
-        await pg.click('#folioExitSwitch [data-exsw="exit"]')
+        await pg.click('#nav > button[data-view="exit"]')
         await pg.wait_for_function("() => document.getElementById('view-exit').classList.contains('on')")
-        s1 = await pg.evaluate("() => ({folio: document.getElementById('view-folio').classList.contains('on'), path: location.pathname, addr: document.getElementById('exitAddr').value})")
-        assert s1 == {"folio": False, "path": "/exit", "addr": ""} and env.holdings_calls == [], "[exit routes] without a wallet the tab opens an empty /exit view and checks nothing: %s %s" % (s1, env.holdings_calls)
-        await pg.click('#exitSwitch [data-exsw="folio"]')
-        await pg.wait_for_function("() => document.getElementById('view-folio').classList.contains('on')")
+        s1 = await pg.evaluate("() => ({folio: document.getElementById('view-folio').classList.contains('on'), path: location.pathname, addr: document.getElementById('exitAddr').value, on: document.querySelector('#nav > button[data-view=\"exit\"]').classList.contains('on')})")
+        assert s1 == {"folio": False, "path": "/exit", "addr": "", "on": True} and env.holdings_calls == [], "[exit routes] without a wallet the tab opens an empty /exit view, is marked selected and checks nothing: %s %s" % (s1, env.holdings_calls)
+        await pg.click('#nav > button[data-view="swap"]')
+        await pg.wait_for_function("() => document.getElementById('view-swap').classList.contains('on')")
         s2 = await pg.evaluate("() => ({path: location.pathname, hash: location.hash, exit: document.getElementById('view-exit').classList.contains('on')})")
-        assert s2 == {"path": "/app", "hash": "#folio", "exit": False}, "[exit routes] Holdings returns to /app#folio: %s" % s2
-        # با حسابِ وصل‌شده: همان نما با آدرسِ حساب، خودکار
+        assert s2 == {"path": "/app", "hash": "#swap", "exit": False}, "[exit routes] leaving through the nav returns to /app#swap: %s" % s2
+        # با حسابِ وصل‌شده: تب آدرسِ حساب را پر می‌کند ولی خودش بررسی را شروع نمی‌کند؛ Check اجرا می‌کند
         await pg.evaluate("a => { account = a; walletChainId = CHAIN.id; paintWallet(); }", EX_W)
-        await pg.click('#folioExitSwitch [data-exsw="exit"]')
+        await pg.click('#nav > button[data-view="exit"]')
+        await pg.wait_for_function("() => document.getElementById('view-exit').classList.contains('on')")
+        await pg.wait_for_timeout(300)
+        s3 = await pg.evaluate("() => ({path: location.pathname, addr: document.getElementById('exitAddr').value})")
+        assert s3 == {"path": "/exit/" + EX_W, "addr": EX_W} and env.holdings_calls == [], "[exit routes] with a wallet the tab opens /exit/<account>, fills it and starts nothing: %s %s" % (s3, env.holdings_calls)
+        await pg.click('#exitGo')
         await ex_wait_done(pg)
-        s3 = await pg.evaluate("() => ({on: document.getElementById('view-exit').classList.contains('on'), path: location.pathname, addr: document.getElementById('exitAddr').value})")
-        assert s3 == {"on": True, "path": "/exit/" + EX_W, "addr": EX_W} and env.holdings_calls == [EX_W.lower()], "[exit routes] with a wallet the tab opens /exit/<account> and checks it: %s %s" % (s3, env.holdings_calls)
+        assert env.holdings_calls == [EX_W.lower()], "[exit routes] Check runs the connected account: %s" % env.holdings_calls
         rows = await pg.evaluate(EX_ROWS_JS)
         assert any(v["btn"] for v in rows.values()), "[exit routes] the connected account's own check offers Exit buttons"
         # ناوبریِ اپ از نمای exit: آدرس به /app#<نما> برمی‌گردد
@@ -24628,7 +24645,7 @@ async def check_exit_routes(p, errors):
         await pg.wait_for_function("() => document.getElementById('view-exit').classList.contains('on')")
         assert await pg.evaluate("() => location.pathname") == "/exit", "[exit routes] #exit moves to the real /exit address"
         await pg.context.close()
-        print("[exit routes] Portfolio has Holdings / Exit value; the tab opens the exit view at /exit (no wallet, nothing checked) or /exit/<account> (checked at once); Holdings returns to /app#folio; "
+        print("[exit routes] no switch in Portfolio; the Exit value nav tab opens /exit (no wallet, nothing checked) or /exit/<account> (prefilled, runs only on Check); "
               "leaving the view restores /app#<view>; /exit with a connected account prefills only; #exit lands on /exit")
     finally:
         await b.close()
