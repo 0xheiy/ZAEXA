@@ -8408,10 +8408,15 @@ async function renderFolio(){
    • 🔴 «نمی‌دانم» هرگز صفر نیست: کوتِ ناموفق/خالی = «Unknown»، از جمعِ خروج بیرون، و در سطرِ جمع‌ها شمرده می‌شود.
    • «Lost on exit» فقط روی توکن‌هایی است که *هر دو* عدد را دارند.
    • بارِ RPC کراندار: حداکثر EXIT_CONC توکن هم‌زمان؛ هر توکن همان دسته‌بندیِ quoteBatch را می‌گیرد.
+   • ۱۶ نوامبر — دو مرحله (زنده: کیفِ jesse.base.eth با ۱۰۴ توکن ~۳٫۵ دقیقه طول کشید): (۱) گذرِ سریع — فقط فروشِ مستقیمِ کلِ موجودی
+     به WETH در همه‌ی صرافی‌های بی‌کلید (یکی دو Multicall برای هر توکن، EXIT_FAST_CONC هم‌زمان، باارزش‌ها اول)؛ (۲) جست‌وجوی کاملِ
+     مسیر (exitQuoteOne) فقط برای ردیفی که گذرِ سریع برایش چیزی نداد یا شکافش با کاغذی ≥ EXIT_GAP_BIG است. عدد = بیشینه‌ی هر دو،
+     پس هیچ ردیفی از روشِ قبلی بدتر نمی‌شود. ردیفِ بی‌کوتِ گذرِ اول تا پایانِ گذرِ دوم «pending» می‌ماند (هرگز ۰).
    • رویدادها فقط نام‌اند: exit:check و exit:share — بدونِ آدرس و بدونِ هیچ مقدار. */
 const EXIT_MIN_RESERVE_USD=5000;     // آینه‌ی REPORT_MIN_RESERVE_USD در worker/report.js — نگهبان [exit] در run.py یکی‌بودنشان را می‌سنجد
 const EXIT_MIN_VALUE_USD=1;
 const EXIT_CONC=3,EXIT_BATCH=25;
+const EXIT_FAST_CONC=6;   // گذرِ سریعِ ۱۶ نوامبر
 const EXIT_LOST_NONE=0.05;   // درصد؛ زیرش «تقریباً هیچ» و بدون خطِ قرمزِ رویِ On paper
 const EXIT_GAP_MED=5,EXIT_GAP_BIG=20;   // درصدِ شکاف: زیر ۵ کوچک، تا ۲۰ متوسط، بالاتر بزرگ
 const EXIT_ADDR_RE=/^0x[0-9a-fA-F]{40}$/;
@@ -8519,6 +8524,22 @@ async function exitQuoteOne(row,ethUsd){
     }catch{/* این هدف جواب نداد؛ هدفِ دیگر ممکن است */}
   }
   return outs.length?Math.max(...outs):null;
+}
+/* گذرِ سریع: فروشِ مستقیمِ کلِ موجودی به WETH در همه‌ی صرافی‌های بی‌کلید (v4 کشف می‌خواهد و به گذرِ دوم می‌ماند). null = چیزی نیامد. */
+async function exitQuoteFast(row,ethUsd){
+  const a=row.addr,weth=WETH_TOKEN();
+  if(!weth||ethUsd==null)return null;
+  if(a===weth.address.toLowerCase())return Number(E.formatUnits(row.bal,row.dec))*ethUsd;
+  let addr;
+  try{addr=E.getAddress(a);}catch{return null;}
+  const specs=allVenues().filter(v=>!v.v4).map(v=>({venue:v,tokenIn:addr,tokenOut:weth.address,amountIn:row.bal}));
+  if(!specs.length)return null;
+  let best=0n;
+  for(const q of await quoteMany(specs,newStats()))if(q.out&&q.out>best)best=q.out;
+  if(best<=0n)return null;
+  const net=(best*BigInt(10000-(feeBps||0)))/10000n;
+  const usd=Number(E.formatUnits(net,18))*ethUsd;
+  return Number.isFinite(usd)&&usd>=0?usd:null;
 }
 async function exitPool(items,n,fn){
   let i=0;
@@ -8651,12 +8672,23 @@ async function exitRun(raw){
     for(const t of h.tokens)rows.push(exitMakeRow(t,info,failed));
     exitState={addr,rows,more:h.more,unread:h.unread};
     exitRender();
-    const todo=rows.filter(r=>r.state==="counted"&&r.quote==="pending");
-    await exitPool(todo,EXIT_CONC,async r=>{
+    const todo=rows.filter(r=>r.state==="counted"&&r.quote==="pending").sort((x,y)=>(y.paper||0)-(x.paper||0));
+    // گذرِ ۱ (سریع): عددِ بیشترِ ردیف‌ها همین‌جا؛ بی‌کوت‌ها pending می‌مانند
+    await exitPool(todo,EXIT_FAST_CONC,async r=>{
+      let usd=null;
+      try{usd=await exitQuoteFast(r,ethUsd);}catch{usd=null;}
+      if(seq!==exvSeq)return;
+      if(usd!=null&&Number.isFinite(usd)){r.exit=usd;r.quote="ok";exitRender();}
+    });
+    if(seq!==exvSeq)return;
+    // گذرِ ۲ (دقیق): بی‌کوت‌ها و شکاف‌های بزرگ؛ عدد = بیشینه‌ی دو گذر
+    const deep=todo.filter(r=>r.exit==null||(r.paper>0&&(1-r.exit/r.paper)*100>=EXIT_GAP_BIG));
+    await exitPool(deep,EXIT_CONC,async r=>{
       let usd=null;
       try{usd=await exitQuoteOne(r,ethUsd);}catch{usd=null;}
       if(seq!==exvSeq)return;
-      r.exit=usd==null||!Number.isFinite(usd)?null:usd;      // 🔴 null = Unknown؛ هرگز ۰
+      const full=usd==null||!Number.isFinite(usd)?null:usd;
+      r.exit=r.exit==null?full:(full==null?r.exit:Math.max(r.exit,full));   // 🔴 null = Unknown؛ هرگز ۰
       r.quote=r.exit==null?"unknown":"ok";
       exitRender();
     });

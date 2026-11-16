@@ -24372,8 +24372,13 @@ async def check_exit_value(p, errors):
     env = ExitEnv(b, errors)
     env.serve()
     try:
-        pg = await env.open("/exit/" + EX_W)
+        # ۱۶ نوامبر — جاسوسِ گذرِ دوم: findRoutes فقط برای ردیفِ بی‌کوتِ گذرِ سریع یا با شکافِ بزرگ
+        pg = await env.open("/exit/" + EX_W, init=["""(function(){ window.__deep = [];
+            var iv = setInterval(function(){ if (typeof findRoutes === 'function' && !window.__dw) { window.__dw = true; var o = findRoutes;
+                window.findRoutes = findRoutes = async function(t){ try { window.__deep.push(String(t.address).toLowerCase()); } catch (e) {} return o.apply(this, arguments); };
+                clearInterval(iv); } }, 5); })();"""])
         await ex_wait_done(pg)
+        deep = await pg.evaluate("() => [...new Set(window.__deep)].sort()")
         st = await pg.evaluate("() => ({view: document.getElementById('view-exit').classList.contains('on'), path: location.pathname, addr: document.getElementById('exitAddr').value, "
                                "boot: document.documentElement.hasAttribute('data-boot-view'), base: (document.querySelector('base') || {}).href || null, ethers: typeof ethers})")
         assert st["view"] and st["path"] == "/exit/" + EX_W and st["addr"] == EX_W, "[exit value] /exit/<address> must open the exit view, keep its URL and prefill the field: %s" % st
@@ -24392,6 +24397,7 @@ async def check_exit_value(p, errors):
         liq, thin = float(rows[a["LIQ"]]["exit"]), float(rows[a["THIN"]]["exit"])
         assert 1980 <= liq < 2000, "[exit value] a deep pool loses well under 1%%: exit %.2f for $2000 on paper" % liq
         assert 2800 <= thin <= 3700, "[exit value] a thin pool must show a big gap: exit %.2f for $5000 on paper" % thin
+        assert deep == sorted([a["THIN"], a["NOQ"]]), "[exit value] the full route search runs only for the unquoted token and the big-gap one, never for the liquid one: %s" % deep
         assert rows[a["LIQ"]]["gapCls"] == "gS" and rows[a["THIN"]]["gapCls"] == "gL", "[exit value] gap colour by size: %s / %s" % (rows[a["LIQ"]]["gapCls"], rows[a["THIN"]]["gapCls"])
         assert rows["native"]["gapCls"] == "gS" and "0%" in rows["native"]["text"], rows["native"]
         # ---- Unknown ≠ 0 ----
@@ -24467,15 +24473,18 @@ async def check_exit_value(p, errors):
         env2.origin = env.origin
         env2.srv = env.srv
         env2.holdings = lambda a: (200, ex_holdings_body(bulk, unpriced=False), 0)
-        pg2 = await env2.open("/exit", init=["""(function(){ window.__inf = 0; window.__infMax = 0; window.__fr = 0;
-            var iv = setInterval(function(){ if (typeof findRoutes === 'function' && !window.__wrapped) { window.__wrapped = true; var o = findRoutes;
+        # ۱۶ نوامبر — دو گذر: گذرِ سریع (exitQuoteFast، حداکثر ۶ هم‌زمان) همه را می‌پوشاند؛ جست‌وجوی کامل (findRoutes) برای توکنِ روان اجرا نمی‌شود
+        pg2 = await env2.open("/exit", init=["""(function(){ window.__inf = 0; window.__infMax = 0; window.__fr = 0; window.__ff = 0; window.__finf = 0; window.__finfMax = 0;
+            var iv = setInterval(function(){ if (typeof findRoutes === 'function' && typeof exitQuoteFast === 'function' && !window.__wrapped) { window.__wrapped = true; var o = findRoutes, f = exitQuoteFast;
                 window.findRoutes = findRoutes = async function(){ window.__fr++; window.__inf++; window.__infMax = Math.max(window.__infMax, window.__inf);
-                    try { return await o.apply(this, arguments); } finally { window.__inf--; } }; clearInterval(iv); } }, 5); })();"""])
+                    try { return await o.apply(this, arguments); } finally { window.__inf--; } };
+                window.exitQuoteFast = exitQuoteFast = async function(){ window.__ff++; window.__finf++; window.__finfMax = Math.max(window.__finfMax, window.__finf);
+                    try { return await f.apply(this, arguments); } finally { window.__finf--; } }; clearInterval(iv); } }, 5); })();"""])
         await pg2.wait_for_function("() => window.__wrapped === true", timeout=20000)
         await pg2.evaluate("a => exitRun(a)", EX_W)
         await ex_wait_done(pg2)
-        cc = await pg2.evaluate("() => ({max: window.__infMax, calls: window.__fr})")
-        assert cc["calls"] >= 8 and 1 <= cc["max"] <= 3, "[exit value] 8 counted tokens must be quoted with at most 3 in flight (calls %s, max in flight %s)" % (cc["calls"], cc["max"])
+        cc = await pg2.evaluate("() => ({fast: window.__ff, fastMax: window.__finfMax, deep: window.__fr})")
+        assert cc["fast"] == 8 and 2 <= cc["fastMax"] <= 6 and cc["deep"] == 0, "[exit value] 8 liquid tokens: one fast pass each, at most 6 in flight, no full route search (%s)" % cc
         r2 = await pg2.evaluate(EX_ROWS_JS)
         assert len(r2) == 9 and all(v["exit"] for v in r2.values()), "[exit value] all 8 liquid tokens quote: %s" % {k: v["exit"] for k, v in r2.items()}
         t2 = await pg2.evaluate(EX_TILES_JS)
@@ -24484,7 +24493,7 @@ async def check_exit_value(p, errors):
         await pg2.context.close()
         print("[exit value] /exit/<address> autostarts; paper %.2f, exit %.2f, lost %.2f%% over the %d that have both; the token with no quote is Unknown and excluded (1 token could not be quoted); "
               "spam (tiny pool), dust (<$1) and the unpriced token sit in the collapsed group; GT in batches with include=top_pools; events exit:check only, no address; Exit button only for the connected "
-              "account and it opens the swap for the full balance -> ETH; 8 tokens quoted with max %d in flight" % (paper_sum, exit_sum, want_lost, 3, cc["max"]))
+              "account and it opens the swap for the full balance -> ETH; 8 liquid tokens: fast pass only, max %d in flight" % (paper_sum, exit_sum, want_lost, 3, cc["fastMax"]))
     finally:
         await b.close()
         env.srv.shutdown()
