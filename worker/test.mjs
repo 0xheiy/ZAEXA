@@ -18015,6 +18015,32 @@ console.log(fails === 0
         try { const res = await worker.fetch(new Request(ORIGIN + "/exit/holdings/" + W, ipE()), { ...envE, ZX_KV: mkKv(st3, []) }, { waitUntil: (p) => waits.push(p) }); b = await res.json(); await Promise.all(waits); }
         finally { globalThis.fetch = savedF; } }
       ok(b.kn === "known:1" && waits.length >= 1 && JSON.parse(st3.get("exit:known:v1")).addrs.join() === ZR, "[exit known] a list older than 24h is still used now and rebuilt in the background, got " + b.kn + " / " + st3.get("exit:known:v1"));
+      // ۱۶ نوامبر (زنده): اسپمِ قیمت‌دار جلوی شناخته‌شده‌ها نمی‌نشیند؛ شناخته‌شده‌های بیش از ۱۰۰ تا ۲۰۰ همه می‌آیند
+      { const many2 = []; for (let i = 0; i < 150; i++) many2.push(tk(0x30000 + i));
+        const store2 = new Map([["exit:known:v1", JSON.stringify({ at: Date.now(), addrs: many2.concat([tk(0x99999)]) })]]);
+        const pricedSpam = []; for (let i = 1; i <= 60; i++) pricedSpam.push(pfTok(tk(i), 10n ** 30n, 1));      // اسپم با قیمتِ ساختگیِ آلچمی
+        const pf2 = [{ tokens: pricedSpam.concat([{ ...pfTok(null, 1n, 1800), tokenAddress: null }]), pageKey: "z" }];
+        const h2 = async (u, init) => {
+          const body = JSON.parse(init.body);
+          if (u === RPC && Array.isArray(body) && body[0] && Array.isArray(body[0].params[1]))
+            return jb(body.map((x) => ({ jsonrpc: "2.0", id: x.id, result: { address: x.params[0], tokenBalances: x.params[1].map((a) => ({ contractAddress: a, tokenBalance: hx(7) })) } })));
+          return mkUp({ pf: pf2 })(u, init);
+        };
+        shelf.clear(); M._exitKnownReset();
+        const b2 = await (await EX("/exit/holdings/" + W, h2, { ...envE, ZX_KV: mkKv(store2, []) })).json();
+        ok(b2.kn === "known:151" && b2.tokens.length === 200 && b2.more === true, "[exit known] 151 known tokens held -> the list grows to the 200 cap, got " + b2.kn + " / " + b2.tokens.length);
+        ok(b2.tokens.slice(0, 151).every((t, i) => t.address === (i < 150 ? many2[i] : tk(0x99999))), "[exit known] every known token comes first, in market-cap order, ahead of spam with a fake Alchemy price");
+        ok(b2.tokens[151].address === tk(1), "[exit known] priced unknown tokens follow the known ones");
+        store2.set("exit:known:v1", JSON.stringify({ at: Date.now(), addrs: many2.slice(0, 20) })); shelf.clear(); M._exitKnownReset();
+        const b3 = await (await EX("/exit/holdings/" + W, h2, { ...envE, ZX_KV: mkKv(store2, []) })).json();
+        ok(b3.tokens.length === 80 && b3.tokens.slice(0, 20).every((t, i) => t.address === many2[i]), "[exit known] with fewer than 100 known tokens: 20 known first, then the 60 priced ones (80 in all), got " + b3.tokens.length);
+        const sp = []; for (let i = 1; i <= 120; i++) sp.push(pfTok(tk(i), 10n ** 30n, 1));
+        const h3 = async (u, init) => { const body = JSON.parse(init.body);
+          if (u === RPC && Array.isArray(body) && body[0] && Array.isArray(body[0].params[1])) return h2(u, init);
+          return mkUp({ pf: [{ tokens: sp.concat([{ ...pfTok(null, 1n, 1800), tokenAddress: null }]), pageKey: "z" }] })(u, init); };
+        shelf.clear(); M._exitKnownReset();
+        const b4 = await (await EX("/exit/holdings/" + W, h3, { ...envE, ZX_KV: mkKv(store2, []) })).json();
+        ok(b4.tokens.length === 100 && b4.more === true && b4.tokens.slice(0, 20).every((t, i) => t.address === many2[i]), "[exit known] 20 known + 120 priced -> the cap stays 100, known first, got " + b4.tokens.length); }
       M._exitKnownReset();
       console.log("[exit known] spam-heavy wallets: CoinGecko Base top-1000 list (KV, daily, lazy) checked in one batch when holdings are incomplete");
     }

@@ -4539,6 +4539,7 @@ function exitDec(hex) {
    ترتیب + coins/list?include_platform=true برای آدرسِ Base)؛ تازه‌سازی تنبل است — اولین درخواست بعد از کهنگی در پس‌زمینه، با قفلِ KV.
    موجودیِ هزار آدرس = یک دسته‌ی JSON-RPC (۱۰ تکه‌ی ۱۰۰تایی) = یک زیردرخواست. این فقط *فهرستِ نامزد* است؛ شمارش مثلِ قبل از GT و کوت. */
 const EXIT_KNOWN_KEY = "exit:known:v1", EXIT_KNOWN_LOCK = "exit:known:lock";
+const EXIT_HOLD_KNOWN_MAX = 200;
 const EXIT_KNOWN_MAX = 1000, EXIT_KNOWN_CHUNK = 100, EXIT_KNOWN_PAGES = 4;
 const EXIT_KNOWN_FRESH_MS = 24 * 3600 * 1000, EXIT_KNOWN_MEM_MS = 10 * 60 * 1000, EXIT_KNOWN_LOCK_S = 6 * 3600;   // قفلِ بلند: تازه‌سازیِ نیمه‌کاره (قطع به‌خاطرِ سقفِ CPU) سهمیه‌ی ماهانه‌ی کلیدِ کوین‌گکو را نخورد
 const EXIT_KNOWN_LIST_MAX_BYTES = 24 * 1024 * 1024, EXIT_KNOWN_TIMEOUT_MS = 20000;
@@ -4763,12 +4764,17 @@ async function exitHoldingsCore(wallet, rpcUrl, env, ctx) {
   }
   const rank = known ? known.rank : null;
   // ترتیب = اهمیت: ارزشِ تخمینیِ آلچمی نزولی؛ بی‌قیمت‌ها بعد (به ترتیبِ آدرس، پایدار). سقف بعد از مرتب‌سازی.
-  // بعد از قیمت‌دارها، توکن‌های فهرستِ شناخته‌شده به ترتیبِ ارزشِ بازار، بعد بقیه به ترتیبِ آدرس
+  /* ۱۶ نوامبر (زنده، jesse.base.eth): اسپم‌هایی که از آلچمی قیمتِ ساختگی دارند جلوی توکن‌های شناخته‌شده نشستند و سقفِ ۱۰۰ تایی
+     JESSE (~۳۲ هزار$) را بیرون انداخت. ترتیب حالا: (۱) شناخته‌شده‌ها به ترتیبِ ارزشِ بازار، (۲) بقیه با قیمتِ آلچمی نزولی، (۳) بی‌قیمت‌ها به ترتیبِ آدرس.
+     بی‌فهرستِ شناخته‌شده (کیفِ کامل‌خوانده) همه‌ی rkها بی‌نهایت است و ترتیب همان «قیمتِ آلچمی نزولی» قبلی است. */
   const rk = (t) => (rank && rank.has(t.address) ? rank.get(t.address) : Infinity);
-  list.sort((x, y) => (y.usd == null ? -1 : y.usd) - (x.usd == null ? -1 : x.usd) || (rk(x) === rk(y) ? 0 : rk(x) < rk(y) ? -1 : 1)
+  list.sort((x, y) => (rk(x) === rk(y) ? 0 : rk(x) < rk(y) ? -1 : 1) || (y.usd == null ? -1 : y.usd) - (x.usd == null ? -1 : x.usd)
     || (x.address < y.address ? -1 : x.address > y.address ? 1 : 0));
-  if (list.length > EXIT_HOLD_MAX) more = true;
-  const tokens = list.slice(0, EXIT_HOLD_MAX).map((t) => ({ address: t.address, balance: t.balance }));
+  // سقف: ۱۰۰؛ وقتی شناخته‌شده‌های پیداشده بیشترند، همه‌شان تا EXIT_HOLD_KNOWN_MAX (بودجه‌ی قیمت: ۸ دسته‌ی ۲۵تایی)
+  const knownHeld = rank ? list.filter((t) => rank.has(t.address)).length : 0;
+  const cap = knownHeld > EXIT_HOLD_MAX ? EXIT_HOLD_KNOWN_MAX : EXIT_HOLD_MAX;   // جا برای قیمت‌دارهای ناشناس هم بماند
+  if (list.length > cap) more = true;
+  const tokens = list.slice(0, cap).map((t) => ({ address: t.address, balance: t.balance }));
   const body = { eth, tokens, more, src };
   if (why) body.pf = why;
   if (kn) body.kn = kn;
