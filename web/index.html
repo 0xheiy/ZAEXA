@@ -2423,10 +2423,10 @@ try{(function(){
 <div class="view" id="view-exit">
   <section class="card" id="exitCard">
     <header><span class="ttl">Exit value</span><span class="grow"></span></header>
-    <p class="lede">If you sold everything in a wallet right now, how many dollars would you actually get? Paper value uses market prices; exit value uses live quotes for selling the full balance. Base only.</p>
+    <p class="lede">If you sold everything in a wallet right now, how many dollars would you actually get? Paper value uses market prices; exit value uses live quotes for selling the full balance. Base and Solana.</p>
     <form class="exForm" id="exitForm" novalidate>
       <div class="exField">
-        <input id="exitAddr" type="text" inputmode="text" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="Wallet address (0x…)" aria-label="Wallet address" aria-describedby="exitErr">
+        <input id="exitAddr" type="text" inputmode="text" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="Base or Solana wallet address" aria-label="Wallet address" aria-describedby="exitErr">
         <button class="chip solid" id="exitGo" type="submit">Check</button>
       </div>
       <div class="exErr" id="exitErr" role="alert" hidden></div>
@@ -8420,6 +8420,21 @@ const EXIT_FAST_CONC=6;   // گذرِ سریعِ ۱۶ نوامبر
 const EXIT_LOST_NONE=0.05;   // درصد؛ زیرش «تقریباً هیچ» و بدون خطِ قرمزِ رویِ On paper
 const EXIT_GAP_MED=5,EXIT_GAP_BIG=20;   // درصدِ شکاف: زیر ۵ کوچک، تا ۲۰ متوسط، بالاتر بزرگ
 const EXIT_ADDR_RE=/^0x[0-9a-fA-F]{40}$/;
+/* ۱۷ نوامبر — سولانا: آدرسِ base58 (۳۲ تا ۴۴ نویسه). 🔴 mintها و کیف‌ها حساس به بزرگی/کوچکی‌اند — در این مسیر هیچ آدرسی lowercase نمی‌شود.
+   کوتِ فروش از ژوپیتر (/sol/quote، سقفِ نرخِ ۱۲۰ در دقیقه برای هر IP) → حداکثر EXIT_SOL_MAX_QUOTES توکنِ باارزش، EXIT_SOL_CONC هم‌زمان؛
+   بقیه‌ی شمرده‌ها «Unknown» (هرگز ۰). کارمزدِ پلتفرم روی سولانا صفر است. */
+const EXIT_SOL_RE=/^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
+const EXIT_SOL_MAX_QUOTES=40,EXIT_SOL_CONC=2;
+/* الگوی base58 کافی نیست: کلیدِ عمومیِ سولانا دقیقاً ۳۲ بایت است؛ رشته را decode می‌کنیم و طولش را می‌شماریم ('1'های اول = بایتِ صفر). */
+function exitSolKeyOk(a){
+  if(!EXIT_SOL_RE.test(a))return false;
+  const A="123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
+  let n=0n;for(const c of a)n=n*58n+BigInt(A.indexOf(c));
+  let len=0;while(n>0n){n>>=8n;len++;}
+  let z=0;while(a[z]==="1")z++;
+  return len+z===32;
+}
+function exitChainOf(a){return EXIT_ADDR_RE.test(a)?"base":exitSolKeyOk(a)?"solana":null;}
 const EXIT_PATH_RE=/^\/exit(\/[^/]*)?\/?$/;
 const exitBootPath=EXIT_PATH_RE.test(location.pathname);
 let exvSeq=0,exitState=null,exitTouched=false,exitSkippedBoot=false;
@@ -8434,7 +8449,7 @@ function exitPct(p){return p==null||!isFinite(p)?null:(Math.abs(p)<EXIT_LOST_NON
 function exitGapCls(pct){return pct<EXIT_GAP_MED?"gS":pct<EXIT_GAP_BIG?"gM":"gL";}
 function exitValidate(a){
   if(!a)return "Enter a wallet address to check.";
-  if(!EXIT_ADDR_RE.test(a))return "That is not a valid address. Use 0x followed by 40 characters (0-9, a-f).";
+  if(!exitChainOf(a))return "That is not a valid address. Use a Base address (0x followed by 40 characters) or a Solana address.";
   return "";
 }
 function exitShowErr(msg){
@@ -8447,27 +8462,31 @@ function exitSetUrl(addr){
   try{history.replaceState(null,"",exitUrl(addr));renderedPath=location.pathname;}catch{}
 }
 async function exitFetchHoldings(addr){
-  const r=await withTimeout(fetch(`${v4Origin()}/exit/holdings/${addr.toLowerCase()}`,{headers:{accept:"application/json"}}),20000);
+  const sol=exitChainOf(addr)==="solana";
+  const r=await withTimeout(fetch(sol?`${v4Origin()}/exit/holdings/sol/${addr}`:`${v4Origin()}/exit/holdings/${addr.toLowerCase()}`,{headers:{accept:"application/json"}}),20000);
   if(!r.ok)throw new Error("holdings "+r.status);
   const j=await r.json();
   const big=/^[0-9]{1,78}$/;
   if(!j||typeof j!=="object"||typeof j.eth!=="string"||!big.test(j.eth)||!Array.isArray(j.tokens))throw new Error("holdings shape");
   const tokens=[];
   for(const t of j.tokens){
-    if(!t||typeof t.address!=="string"||!EXIT_ADDR_RE.test(t.address)||typeof t.balance!=="string"||!big.test(t.balance))throw new Error("holdings shape");
+    if(!t||typeof t.address!=="string"||!(sol?EXIT_SOL_RE:EXIT_ADDR_RE).test(t.address)||typeof t.balance!=="string"||!big.test(t.balance))throw new Error("holdings shape");
     const bal=BigInt(t.balance);
-    if(bal>0n)tokens.push({address:t.address.toLowerCase(),bal});
+    if(bal>0n)tokens.push({address:sol?t.address:t.address.toLowerCase(),bal});
   }
   return {eth:BigInt(j.eth),tokens,more:j.more===true,unread:Number.isInteger(j.unread)&&j.unread>0?j.unread:0};
 }
 // قیمت، دسیمال و ذخیره‌ی استخرِ برتر — دسته‌ای. info: addr→{…}، failed: آدرس‌هایی که *نتوانستیم بپرسیم* (نامعلوم، نه «بی‌قیمت»)
-async function exitLoadPrices(addrs){
+async function exitLoadPrices(addrs,net,exact){
+  // exact (سولانا): کلیدها همان‌طور که هستند؛ Base: lowercase
+  const key=a=>exact?a:a.toLowerCase();
+  net=net||CHAIN.gtNetwork;
   const info=new Map(),failed=new Set();
-  const list=[...new Set(addrs.map(a=>a.toLowerCase()))];
+  const list=[...new Set(addrs.map(key))];
   for(let i=0;i<list.length;i+=EXIT_BATCH){
     const batch=list.slice(i,i+EXIT_BATCH);
     try{
-      const j=await gtJson(`${GT}/networks/${CHAIN.gtNetwork}/tokens/multi/${batch.join(",")}?include=top_pools`);
+      const j=await gtJson(`${GT}/networks/${net}/tokens/multi/${batch.join(",")}?include=top_pools`);
       if(!j||!Array.isArray(j.data))throw new Error("shape");
       const pools=new Map();
       for(const x of (Array.isArray(j.included)?j.included:[]))if(x&&typeof x.id==="string")pools.set(x.id,x);
@@ -8476,7 +8495,7 @@ async function exitLoadPrices(addrs){
         if(!a||typeof a.address!=="string")continue;
         const tp=d.relationships&&d.relationships.top_pools&&d.relationships.top_pools.data;
         const pool=Array.isArray(tp)&&tp[0]&&typeof tp[0].id==="string"?pools.get(tp[0].id):null;
-        info.set(a.address.toLowerCase(),{
+        info.set(key(a.address),{
           price:exitNum(a.price_usd),
           dec:Number.isInteger(a.decimals)&&a.decimals>=0&&a.decimals<=36?a.decimals:null,
           sym:typeof a.symbol==="string"?a.symbol.slice(0,14):"",
@@ -8541,6 +8560,29 @@ async function exitQuoteFast(row,ethUsd){
   const usd=Number(E.formatUnits(net,18))*ethUsd;
   return Number.isFinite(usd)&&usd>=0?usd:null;
 }
+/* ارزشِ خروجِ یک توکنِ سولانا: کوتِ ژوپیتر برای فروشِ کلِ موجودی به SOL و به USDC، بیشینه. ۴۲۹ یک بار با ۱۱۰۰ms. null = Unknown. */
+async function exitQuoteSol(row,solUsd){
+  const a=row.addr,usdc=SOL_APP_TOKENS.USDC;
+  const amt=Number(E.formatUnits(row.bal,row.dec));
+  if(a===SOL_MINT_ADDR)return solUsd==null?null:amt*solUsd;
+  const ask=async(out)=>{
+    const p=new URLSearchParams({inputMint:a,outputMint:out,amount:row.bal.toString(),slippageBps:"100"});
+    for(let k=0;k<2;k++){
+      let r;
+      try{r=await withTimeout(fetch(location.origin+"/sol/quote?"+p.toString(),{headers:{accept:"application/json"}}),9000);}catch{return null;}
+      if(r.status===429&&k===0){await new Promise(z=>setTimeout(z,1100));continue;}
+      const j=await r.json().catch(()=>null);
+      if(!r.ok||!j||j.error||!/^\d{1,40}$/.test(String(j.outAmount)))return null;
+      return BigInt(j.outAmount);
+    }
+    return null;
+  };
+  const outs=[];
+  if(solUsd!=null){const o=await ask(SOL_MINT_ADDR);if(o&&o>0n)outs.push(Number(E.formatUnits(o,9))*solUsd);}
+  if(a!==usdc){const o=await ask(usdc);if(o&&o>0n)outs.push(Number(E.formatUnits(o,6)));}
+  const ok=outs.filter(v=>Number.isFinite(v)&&v>=0);
+  return ok.length?Math.max(...ok):null;
+}
 async function exitPool(items,n,fn){
   let i=0;
   const run=async()=>{while(i<items.length){const k=i++;await fn(items[k],k);}};
@@ -8564,7 +8606,7 @@ const exitWhy={noprice:"No price",unread:"Price unavailable",
 function exitRowHtml(r,mine){
   const unk='<span class="exUnk" title="No quote came back, so this is unknown, not zero.">Unknown</span>';
   const sym=esc(r.sym||(r.native?"ETH":shortAddr(r.addr)));
-  const bal=r.native?fmt(r.bal,18,6):fmt(r.bal,r.dec,6);
+  const bal=fmt(r.bal,r.native?(r.dec||18):r.dec,6);
   let exitC,gapC;
   if(r.quote==="pending"){exitC='<span class="exWait">Quoting…</span>';gapC='<span class="exWait">…</span>';}
   else if(r.exit==null){exitC=unk;gapC='<span class="exUnk">—</span>';}
@@ -8601,7 +8643,7 @@ function exitRender(){
     waiting||T.lost!=null?"":"unk",noQ&&T.lost!=null?`On the ${exitMoney(T.paperBoth)} that could be quoted.`:lostExplain,lostExplain,waiting||T.lost==null?null:T.lost.toFixed(2));
   h+="</div>";
   const bits=[];
-  bits.push(`${T.counted} token${T.counted===1?"":"s"} counted${st.rows.some(r=>r.native)?" plus ETH":""}`);
+  bits.push(`${T.counted} token${T.counted===1?"":"s"} counted${st.rows.some(r=>r.native)?" plus "+esc(st.rows.find(r=>r.native).sym):""}`);
   if(!waiting&&T.unknown>0)bits.push(`${T.unknown} token${T.unknown===1?"":"s"} could not be quoted`);
   h+=`<p class="exTotals" id="exitTotals">${bits.join(" · ")}</p>`;
   if(st.rows.some(r=>r.native&&r.paper==null))h+='<p class="exNote">ETH could not be priced right now, so it is not in the totals. That is unknown, not zero.</p>';
@@ -8642,7 +8684,8 @@ async function exitRun(raw){
   try{
     exitStatus("Reading holdings…");
     if(!E)throw new Error("not ready");
-    await ensureBaseDexes();
+    const sol=exitChainOf(addr)==="solana";
+    if(!sol)await ensureBaseDexes();
     let h;
     try{h=await exitFetchHoldings(addr);}
     catch{
@@ -8651,21 +8694,23 @@ async function exitRun(raw){
     }
     if(seq!==exvSeq)return;
     const rows=[];
-    const weth=WETH_TOKEN();
-    if(h.eth>0n)rows.push({native:true,addr:"native",sym:"ETH",name:"Ether",dec:18,bal:h.eth,price:null,paper:null,exit:null,quote:"pending",state:"counted",why:""});
+    // سکه‌ی بومی: ETH روی Base، SOL روی سولانا (h.eth = لمپورت). قیمتش از توکنِ بسته‌بندی‌شده (WETH / wSOL)
+    const nat=sol?{sym:"SOL",name:"Solana",dec:9,wrapped:SOL_MINT_ADDR,net:"solana",chainName:"Solana"}
+      :{sym:"ETH",name:"Ether",dec:18,wrapped:WETH_TOKEN().address.toLowerCase(),net:CHAIN.gtNetwork,chainName:"Base"};
+    if(h.eth>0n)rows.push({native:true,addr:"native",sym:nat.sym,name:nat.name,dec:nat.dec,bal:h.eth,price:null,paper:null,exit:null,quote:"pending",state:"counted",why:""});
     if(!h.tokens.length&&h.eth===0n){
       exitState={addr,rows:[],more:h.more,unread:h.unread};
-      exitFail(h.more||h.unread?"No ETH and no readable tokens were found.":"This wallet holds no ETH and no tokens on Base.");
+      exitFail(h.more||h.unread?`No ${nat.sym} and no readable tokens were found.`:`This wallet holds no ${nat.sym} and no tokens on ${nat.chainName}.`);
       ev("exit:check");return;
     }
     if(h.tokens.length)exitStatus(`Pricing ${h.tokens.length} token${h.tokens.length===1?"":"s"}…`);
-    const {info,failed}=await exitLoadPrices(h.tokens.map(t=>t.address).concat([weth.address]));
+    const {info,failed}=await exitLoadPrices(h.tokens.map(t=>t.address).concat([nat.wrapped]),nat.net,sol);
     if(seq!==exvSeq)return;
-    const wm=info.get(weth.address.toLowerCase());
+    const wm=info.get(nat.wrapped);
     const ethUsd=wm&&wm.price!=null&&wm.price>0?wm.price:null;
     const eth=rows.find(r=>r.native);
     if(eth){
-      eth.amt=Number(E.formatUnits(eth.bal,18));
+      eth.amt=Number(E.formatUnits(eth.bal,nat.dec));
       if(ethUsd!=null){eth.paper=eth.amt*ethUsd;eth.exit=eth.paper;eth.price=ethUsd;}   // ETH: کاغذی = خروج
       eth.quote="done";
     }
@@ -8673,6 +8718,22 @@ async function exitRun(raw){
     exitState={addr,rows,more:h.more,unread:h.unread};
     exitRender();
     const todo=rows.filter(r=>r.state==="counted"&&r.quote==="pending").sort((x,y)=>(y.paper||0)-(x.paper||0));
+    if(sol){
+      // سولانا: فقط ژوپیتر، حداکثر EXIT_SOL_MAX_QUOTES توکنِ باارزش؛ بقیه Unknown (هرگز ۰)
+      todo.slice(EXIT_SOL_MAX_QUOTES).forEach(r=>{r.quote="unknown";r.exit=null;});
+      await exitPool(todo.slice(0,EXIT_SOL_MAX_QUOTES),EXIT_SOL_CONC,async r=>{
+        let usd=null;
+        try{usd=await exitQuoteSol(r,ethUsd);}catch{usd=null;}
+        if(seq!==exvSeq)return;
+        r.exit=usd==null||!Number.isFinite(usd)?null:usd;
+        r.quote=r.exit==null?"unknown":"ok";
+        exitRender();
+      });
+      if(seq!==exvSeq)return;
+      exitRender();
+      ev("exit:check");
+      return;
+    }
     // گذرِ ۱ (سریع): عددِ بیشترِ ردیف‌ها همین‌جا؛ بی‌کوت‌ها pending می‌مانند
     await exitPool(todo,EXIT_FAST_CONC,async r=>{
       let usd=null;

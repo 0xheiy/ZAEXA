@@ -10438,6 +10438,7 @@ async def main():
         await check_exit_value(p, errors)
         await check_exit_failures(p, errors)
         await check_exit_routes(p, errors)
+        await check_exit_solana(p, errors)
         await check_exit_layout(p, errors)
         b = await p.chromium.launch()
         pg = await b.new_page(viewport={"width": 1240, "height": 1000}, color_scheme="dark")
@@ -24209,6 +24210,10 @@ class ExitEnv:
         self.gt_status = 200
         self.price_override = {}
         self.srv = None
+        # ۱۷ نوامبر — سولانا: mint → (sym, dec, px, reserve) با کلیدِ دقیق (حساس به حروف)؛ ژوپیترِ جعلی
+        self.sol_gt = {}
+        self.sol_quote = None
+        self.sol_quote_calls, self.sol_inflight, self.sol_inflight_max = [], 0, 0
 
     def serve(self):
         import functools as _ft, http.server as _hs, threading as _th
@@ -24233,6 +24238,18 @@ class ExitEnv:
         path, _, query = gp.partition("?")
         if "/tokens/multi/" not in path:
             return 200, {"data": []}
+        if path.startswith("networks/solana/"):
+            want = path.split("/tokens/multi/")[1].split(",")
+            data, included = [], []
+            for a in want:
+                if a not in self.sol_gt:
+                    continue
+                n, dec, px, res = self.sol_gt[a]
+                pid = "solana_pool" + a[-10:]
+                data.append({"id": "solana_" + a, "type": "token", "attributes": {"address": a, "symbol": n, "name": n, "decimals": dec,
+                    "price_usd": None if px is None else repr(px)}, "relationships": {"top_pools": {"data": [{"id": pid, "type": "pool"}]}}})
+                included.append({"id": pid, "type": "pool", "attributes": {"reserve_in_usd": "%.2f" % res}})
+            return 200, {"data": data, "included": included}
         want = [x.lower() for x in path.split("/tokens/multi/")[1].split(",")]
         inc = "include=top_pools" in query
         data, included = [], []
@@ -24289,6 +24306,18 @@ class ExitEnv:
                     st, obj, delay = self.holdings(a)
                     if delay:
                         await asyncio.sleep(delay)
+                    return await ok(route, _fbj.dumps(obj), st)
+                if rest == "/sol/quote" and self.sol_quote:
+                    from urllib.parse import urlparse as _up, parse_qs as _pq
+                    q = {k: v[0] for k, v in _pq(_up(u).query).items()}
+                    self.sol_quote_calls.append(q)
+                    self.sol_inflight += 1
+                    self.sol_inflight_max = max(self.sol_inflight_max, self.sol_inflight)
+                    try:
+                        await asyncio.sleep(0.05)
+                        st, obj = self.sol_quote(q)
+                    finally:
+                        self.sol_inflight -= 1
                     return await ok(route, _fbj.dumps(obj), st)
                 if rest.startswith("/pairs.json"):
                     return await ok(route, '{"store":true,"rows":[]}')
@@ -24598,6 +24627,85 @@ async def check_exit_failures(p, errors):
     finally:
         await b.close()
         env.srv.shutdown()
+
+
+EX_SOL_OWNER = "7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU"
+EX_WSOL = "So11111111111111111111111111111111111111112"
+EX_SUSDC = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"
+
+
+async def check_exit_solana(p, errors):
+    """[exit sol] ۱۷ نوامبر: Exit value روی سولانا — هلدینگ از /exit/holdings/sol/<کیف>، قیمت از GT شبکه‌ی solana، کوت از ژوپیتر؛ هیچ آدرسی lowercase نمی‌شود."""
+    b = await p.chromium.launch()
+    env = ExitEnv(b, errors)
+    env.serve()
+    LIQ, NOQ, SPAM = "LiQmintAbCdEfGhJkLmNpQrStUvWxYz123456789aB", "NoQmintAbCdEfGhJkLmNpQrStUvWxYz123456789aB", "SpAmmintAbCdEfGhJkLmNpQrStUvWxYz12345678aB"
+    try:
+        env.holdings = lambda a: (200, {"eth": "2000000000", "more": False, "chain": "solana", "tokens": [
+            {"address": LIQ, "balance": "1000000000"}, {"address": NOQ, "balance": "500000000"}, {"address": SPAM, "balance": "5000000000"}]}, 0)
+        env.sol_gt = {EX_WSOL: ("SOL", 9, 150.0, 90_000_000), LIQ: ("LIQ", 6, 1.0, 900_000), NOQ: ("NOQ", 6, 2.0, 900_000), SPAM: ("SPAM", 6, 1.0, 1000)}
+        first429 = {"n": 0}
+
+        def q(qs):
+            if qs["inputMint"] == LIQ and qs["outputMint"] == EX_WSOL:
+                first429["n"] += 1
+                if first429["n"] == 1:
+                    return 429, {"error": "too many requests"}
+                return 200, {"outAmount": str(6_500_000_000), "inputMint": LIQ, "outputMint": EX_WSOL}
+            if qs["inputMint"] == LIQ and qs["outputMint"] == EX_SUSDC:
+                return 200, {"outAmount": str(980_000_000)}
+            return 502, {"error": "jup:quote:400", "reason": "no-route"}
+        env.sol_quote = q
+        pg = await env.open("/exit/" + EX_SOL_OWNER)
+        await ex_wait_done(pg)
+        assert env.holdings_calls == ["sol/" + EX_SOL_OWNER], "[exit sol] holdings are read from /exit/holdings/sol/<owner> with the case kept: %s" % env.holdings_calls
+        sg = [g for g in env.gt_calls if g.startswith("networks/solana/tokens/multi/")]
+        assert sg and all(x in sg[0] for x in (LIQ, NOQ, SPAM, EX_WSOL)), "[exit sol] prices come from GeckoTerminal's solana network with exact-case mints: %s" % env.gt_calls
+        assert not any(g.startswith("networks/base/") and "include=top_pools" in g for g in env.gt_calls), "[exit sol] no Base exit price lookups for a Solana wallet: %s" % env.gt_calls
+        rows = await pg.evaluate(EX_ROWS_JS)
+        assert set(rows) == {"native", LIQ, NOQ}, "[exit sol] counted rows: SOL, LIQ and NOQ (the thin-pool token goes to the group): %s" % sorted(rows)
+        assert rows["native"]["paper"] == "300.00" and rows["native"]["exit"] == "300.00", "[exit sol] SOL: paper = exit = balance x SOL price: %s" % rows["native"]
+        assert rows[LIQ]["paper"] == "1000.00" and rows[LIQ]["exit"] == "980.00", "[exit sol] the best of the SOL ($975) and USDC ($980) quotes: %s" % rows[LIQ]
+        assert rows[NOQ]["exit"] == "", "[exit sol] no Jupiter route -> Unknown, never zero: %s" % rows[NOQ]
+        assert first429["n"] == 2, "[exit sol] a 429 is retried once: %s" % first429
+        assert all(c["amount"] in ("1000000000", "500000000") and c["slippageBps"] == "100" for c in env.sol_quote_calls), "[exit sol] the full raw balance is quoted: %s" % env.sol_quote_calls
+        assert env.sol_inflight_max <= 2, "[exit sol] at most 2 Jupiter quotes in flight: %s" % env.sol_inflight_max
+        meta = await pg.evaluate("() => ({btns: document.querySelectorAll('#exitTbl .exBtn').length, sym: document.querySelector('#exitTbl tr[data-addr=\"native\"] .sym').textContent, txt: document.getElementById('view-exit').innerText})")
+        assert meta["btns"] == 0 and meta["sym"] == "SOL" and "plus SOL" in meta["txt"] and "plus ETH" not in meta["txt"], "[exit sol] SOL row, 'plus SOL', and no Exit buttons for a Solana wallet: %s" % {k: meta[k] for k in ("btns", "sym")}
+        await pg.context.close()
+        # سقفِ ۴۰ کوت: ۴۵ توکنِ شمرده → ۴۰ پرسیده، ۵تای کم‌ارزش Unknown
+        many = {}
+        toks = []
+        for i in range(45):
+            m = ("Mny%02d" % i).replace("0", "z") + "AbCdEfGhJkLmNpQrStUvWxYz12345678"
+            many[m] = ("M%d" % i, 6, 1.0 + i, 900_000)
+            toks.append({"address": m, "balance": "10000000"})
+        env2 = ExitEnv(b, errors)
+        env2.origin, env2.srv = env.origin, env.srv
+        env2.holdings = lambda a: (200, {"eth": "0", "more": False, "chain": "solana", "tokens": toks}, 0)
+        env2.sol_gt = dict(many, **{EX_WSOL: ("SOL", 9, 150.0, 90_000_000)})
+        env2.sol_quote = lambda qs: (200, {"outAmount": "1000000"}) if qs["outputMint"] == EX_SUSDC else (502, {"error": "x"})
+        pg2 = await env2.open("/exit/" + EX_SOL_OWNER)
+        await ex_wait_done(pg2)
+        asked = sorted({c["inputMint"] for c in env2.sol_quote_calls})
+        r2 = await pg2.evaluate(EX_ROWS_JS)
+        unk = sorted(k for k, v in r2.items() if v["exit"] == "")
+        cheapest = sorted(many, key=lambda m: many[m][2])[:5]
+        assert env2.sol_inflight_max == 2, "[exit sol] 40 quotes run 2 at a time (never more, and not one by one): %s" % env2.sol_inflight_max
+        assert len(asked) == 40 and unk == sorted(cheapest), "[exit sol] 45 counted tokens -> the 40 most valuable are quoted, the 5 cheapest stay Unknown: asked %d, unknown %s" % (len(asked), unk)
+        await pg2.context.close()
+        # اعتبارسنجی
+        pg3 = await env.open("/exit")
+        await pg3.fill("#exitAddr", "0OIl-not-an-address")
+        await pg3.click("#exitGo")
+        err = await pg3.evaluate("() => document.getElementById('exitErr').textContent")
+        assert "Base address" in err and "Solana address" in err, "[exit sol] the error names both address kinds: %r" % err
+        await pg3.context.close()
+        print("[exit sol] a Solana wallet: holdings from /exit/holdings/sol/<owner> (case kept), prices from GeckoTerminal solana, best of Jupiter SOL/USDC quotes, "
+              "429 retried once, at most 2 in flight, 40 most valuable quoted (rest Unknown), no route = Unknown, SOL row, no Exit buttons")
+    finally:
+        env.srv.shutdown()
+        await b.close()
 
 
 async def check_exit_routes(p, errors):

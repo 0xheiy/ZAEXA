@@ -4781,6 +4781,45 @@ async function exitHoldingsCore(wallet, rpcUrl, env, ctx) {
   if (unread > 0) body.unread = unread;
   return body;
 }
+/* ۱۷ نوامبر — Exit value روی سولانا: GET /exit/holdings/sol/<کیف> — همان شکلِ پاسخِ Base ({eth, tokens, more, unread})
+   تا صفحه کمترین تغییر را بخواهد: eth = لمپورت‌های SOL، tokens = mint‌ها (🔴 base58، حساس به بزرگی/کوچکی — هرگز lowercase).
+   منبع: getBalance + getTokenAccountsByOwner (jsonParsed) روی هر دو برنامه‌ی توکن (SPL و Token-2022) از SOL_RPC و سپس
+   فهرستِ عمومیِ VD_SOL_RPCS (solRpcsFor). موجودیِ چند حسابِ یک mint جمع می‌شود. سقفِ ۲۰۰ mint؛ بیشتر → more:true.
+   هر شکستِ هر سه خواندن = null (نامعلوم، نه «خالی»). آدرس هرگز در KV/لاگ/ev نمی‌رود؛ کشِ ۶۰ثانیه‌ای مثلِ Base. */
+const SOL_TOKEN_PROGRAMS = Object.freeze(["TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA", "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb"]);
+const EXIT_SOL_HOLD_MAX = 200, EXIT_SOL_TIMEOUT_MS = 8000;
+async function exitSolRpc(rpcs, method, params) {
+  for (const u of rpcs) {
+    const r = await pnlPost(u, { jsonrpc: "2.0", id: 1, method, params }, EXIT_SOL_TIMEOUT_MS);
+    if (r.status === 200 && r.body && typeof r.body === "object" && "result" in r.body && !r.body.error) return r.body.result;
+  }
+  return undefined;   // هیچ RPCای جواب نداد
+}
+export async function exitSolHoldingsCore(owner, env) {
+  const rpcs = solRpcsFor(env);
+  const [bal, ...progs] = await Promise.all([exitSolRpc(rpcs, "getBalance", [owner, { commitment: "confirmed" }])]
+    .concat(SOL_TOKEN_PROGRAMS.map((pid) => exitSolRpc(rpcs, "getTokenAccountsByOwner", [owner, { programId: pid }, { encoding: "jsonParsed", commitment: "confirmed" }]))));
+  const lamports = bal && typeof bal === "object" ? bal.value : undefined;
+  if (!Number.isSafeInteger(lamports) || lamports < 0) return null;
+  const sums = new Map();
+  let unread = 0;
+  for (const res of progs) {
+    if (!res || typeof res !== "object" || !Array.isArray(res.value)) return null;
+    for (const acc of res.value) {
+      const info = acc && acc.account && acc.account.data && acc.account.data.parsed && acc.account.data.parsed.info;
+      const mint = info && typeof info.mint === "string" ? info.mint : "";
+      const amt = info && info.tokenAmount && typeof info.tokenAmount.amount === "string" ? info.tokenAmount.amount : "";
+      if (!isSolMintStr(mint) || !/^[0-9]{1,30}$/.test(amt)) { unread++; continue; }
+      if (amt === "0" || /^0+$/.test(amt)) continue;
+      sums.set(mint, (sums.get(mint) || 0n) + BigInt(amt));
+    }
+  }
+  const tokens = [...sums].map(([address, b]) => ({ address, balance: b.toString() }));
+  const body = { eth: String(lamports), tokens: tokens.slice(0, EXIT_SOL_HOLD_MAX), more: tokens.length > EXIT_SOL_HOLD_MAX, chain: "solana" };
+  if (unread > 0) body.unread = unread;
+  return body;
+}
+
 async function exitHoldingsRoute(request, url, ctx, env) {
   if (!rateOk(request, "exit", RL_LIMIT, RL_WINDOW_MS))
     return fail(429, "too many requests", { "retry-after": "60" });
@@ -4788,6 +4827,23 @@ async function exitHoldingsRoute(request, url, ctx, env) {
   if (request.method !== "GET" && request.method !== "HEAD") return fail(405, "only GET");
   const rest = url.pathname.slice("/exit/holdings".length);
   if (!rest.startsWith("/")) return fail(400, "bad address");
+  if (rest.startsWith("/sol/")) {
+    const owner = rest.slice("/sol/".length);
+    if (!isSolMintStr(owner)) return fail(400, "bad address");
+    const storeS = cacheStore();
+    const keyS = new Request("https://exit.zaexa.internal/hs/" + owner, { method: "GET" });   // base58 همان‌طور که هست
+    if (storeS) {
+      try { const hit = await storeS.match(keyS); if (hit) return exitJson(await hit.json(), 200, "public, max-age=" + EXIT_HOLD_TTL_S); }
+      catch (e) { /* کش خراب = بی‌کش */ }
+    }
+    const bodyS = await exitSolHoldingsCore(owner, env);
+    if (!bodyS) return exitUpstream();
+    if (storeS) {
+      const put = storeS.put(keyS, new Response(JSON.stringify(bodyS), { status: 200, headers: { "cache-control": "public, max-age=" + EXIT_HOLD_TTL_S } }));
+      if (ctx && typeof ctx.waitUntil === "function") ctx.waitUntil(put); else await put;
+    }
+    return exitJson(bodyS, 200, "public, max-age=" + EXIT_HOLD_TTL_S);
+  }
   const addr = rest.slice(1);
   if (!PNL_ADDR.test(addr)) return fail(400, "bad address");
   const wallet = addr.toLowerCase();

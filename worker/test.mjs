@@ -18041,6 +18041,58 @@ console.log(fails === 0
         shelf.clear(); M._exitKnownReset();
         const b4 = await (await EX("/exit/holdings/" + W, h3, { ...envE, ZX_KV: mkKv(store2, []) })).json();
         ok(b4.tokens.length === 100 && b4.more === true && b4.tokens.slice(0, 20).every((t, i) => t.address === many2[i]), "[exit known] 20 known + 120 priced -> the cap stays 100, known first, got " + b4.tokens.length); }
+      // ===== ۱۷ نوامبر — Exit value روی سولانا: GET /exit/holdings/sol/<کیف> =====
+      { const OWN = "7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU";      // base58 با حروفِ بزرگ و کوچک
+        const MA = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v", MB = "DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263", MC = "2b1kV6DkPAnxd5ixfnxCpjxmKwqjjaYmCZfHsFu24GXo";
+        const SOLK = "https://solana-mainnet.g.alchemy.com/v2/SECRET-SOL-KEY-4321";
+        const envS = { ...envE, SOL_RPC: SOLK };
+        const acc = (mint, amount, dec = 6) => ({ pubkey: "x", account: { data: { parsed: { info: { mint, owner: OWN, tokenAmount: { amount, decimals: dec } }, type: "account" }, program: "spl-token" } } });
+        const mkSol = (o) => { const calls = []; const h = async (u, init) => {
+          const body = JSON.parse(init.body); calls.push({ u, m: body.method, p: body.params });
+          if (o.down || (o.downFor && o.downFor(body))) return jb({ error: "x" }, 500);
+          if (body.method === "getBalance") return jb({ jsonrpc: "2.0", id: body.id, result: { context: { slot: 1 }, value: o.lamports } });
+          if (body.method === "getTokenAccountsByOwner") {
+            const v = body.params[1].programId === "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA" ? o.spl : o.t22;
+            return jb({ jsonrpc: "2.0", id: body.id, result: { context: { slot: 1 }, value: v } });
+          }
+          return jb({ error: "unexpected" }, 500);
+        }; h.calls = calls; return h; };
+        shelf.clear();
+        let hS = mkSol({ lamports: 2500000000, spl: [acc(MA, "1500000"), acc(MA, "500000"), acc(MB, "0", 5), { account: { data: { parsed: { info: { mint: "bad!", tokenAmount: { amount: "1" } } } } } }], t22: [acc(MC, "42", 9)] });
+        let res = await EX("/exit/holdings/sol/" + OWN, hS, envS), raw = await res.text(), bS = JSON.parse(raw);
+        ok(res.status === 200 && bS.eth === "2500000000" && bS.chain === "solana" && bS.more === false && bS.unread === 1,
+          "[exit sol] SOL in lamports, chain solana, one unreadable entry counted, got " + raw.slice(0, 200));
+        ok(JSON.stringify(bS.tokens) === JSON.stringify([{ address: MA, balance: "2000000" }, { address: MC, balance: "42" }]),
+          "[exit sol] two accounts of one mint are summed, a zero balance is dropped, Token-2022 is read, mint case is kept, got " + JSON.stringify(bS.tokens));
+        ok(hS.calls.length === 3 && hS.calls.every((c) => c.u === SOLK) && hS.calls.filter((c) => c.m === "getTokenAccountsByOwner").map((c) => c.p[1].programId).sort().join() === "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA,TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb"
+          && hS.calls.every((c) => c.p[0] === OWN) && hS.calls.filter((c) => c.m === "getTokenAccountsByOwner").every((c) => c.p[2].encoding === "jsonParsed"),
+          "[exit sol] three reads to SOL_RPC: balance + both token programs (jsonParsed), owner as typed");
+        ok(!raw.includes("SECRET"), "[exit sol] the RPC key never appears in a response");
+        // کش: دومی بی‌تماس؛ کلیدِ کش حساس به حروف
+        const hS2 = mkSol({ lamports: 1, spl: [], t22: [] });
+        await EX("/exit/holdings/sol/" + OWN, hS2, envS);
+        ok(hS2.calls.length === 0 && puts.some((p) => p.u === "https://exit.zaexa.internal/hs/" + OWN), "[exit sol] a second read within the minute is served from the cache (key keeps the case)");
+        // شکستِ هر خواندن = نامعلوم (۵۰۲)، نه کیفِ خالی
+        for (const [label, o] of [["all down", { down: true }], ["token-2022 down", { lamports: 1, spl: [], t22: [], downFor: (b) => b.method === "getTokenAccountsByOwner" && b.params[1].programId.startsWith("Tokenz") }],
+          ["balance down", { lamports: 1, spl: [], t22: [], downFor: (b) => b.method === "getBalance" }], ["bad balance", { lamports: -1, spl: [], t22: [] }]]) {
+          shelf.clear();
+          const rr = await EX("/exit/holdings/sol/" + OWN, mkSol(o), envS);
+          ok(rr.status === 502, "[exit sol] " + label + " -> 502 (unknown, never an empty wallet), got " + rr.status);
+        }
+        // سقفِ ۲۰۰
+        shelf.clear();
+        const B58 = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
+        const mint58 = (i) => { let t = ""; for (let k = 0; k < 4; k++) { t = B58[i % 58] + t; i = Math.floor(i / 58); } return "Mint" + t + "2".repeat(36); };
+        const many = []; for (let i = 0; i < 205; i++) many.push(acc(mint58(i), "5"));
+        bS = await (await EX("/exit/holdings/sol/" + OWN, mkSol({ lamports: 0, spl: many, t22: [] }), envS)).json();
+        ok(bS.tokens.length === 200 && bS.more === true, "[exit sol] more than 200 mints -> 200 and more:true, got " + bS.tokens.length);
+        // آدرسِ بد
+        for (const bad of ["0x" + "ab".repeat(20), "short", "0OIl" + "1".repeat(40)]) {
+          const rr = await EX("/exit/holdings/sol/" + bad, mkSol({ down: true }), envS);
+          ok(rr.status === 400, "[exit sol] a non-Solana address is rejected: " + bad + " -> " + rr.status);
+        }
+        console.log("[exit sol] /exit/holdings/sol/<owner>: SOL + SPL + Token-2022 balances from SOL_RPC, summed per mint, case kept, cached a minute, any failed read = 502");
+      }
       M._exitKnownReset();
       console.log("[exit known] spam-heavy wallets: CoinGecko Base top-1000 list (KV, daily, lazy) checked in one batch when holdings are incomplete");
     }
