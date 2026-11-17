@@ -24658,6 +24658,8 @@ async def check_exit_solana(p, errors):
         env.sol_quote = q
         pg = await env.open("/exit/" + EX_SOL_OWNER)
         await ex_wait_done(pg)
+        path = await pg.evaluate("() => location.pathname")
+        assert path == "/exit/" + EX_SOL_OWNER, "[exit sol] the shareable link keeps the Solana address, case and all: %r" % path
         assert env.holdings_calls == ["sol/" + EX_SOL_OWNER], "[exit sol] holdings are read from /exit/holdings/sol/<owner> with the case kept: %s" % env.holdings_calls
         sg = [g for g in env.gt_calls if g.startswith("networks/solana/tokens/multi/")]
         assert sg and all(x in sg[0] for x in (LIQ, NOQ, SPAM, EX_WSOL)), "[exit sol] prices come from GeckoTerminal's solana network with exact-case mints: %s" % env.gt_calls

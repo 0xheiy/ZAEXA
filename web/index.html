@@ -8439,7 +8439,7 @@ const EXIT_PATH_RE=/^\/exit(\/[^/]*)?\/?$/;
 const exitBootPath=EXIT_PATH_RE.test(location.pathname);
 let exvSeq=0,exitState=null,exitTouched=false,exitSkippedBoot=false;
 const exitPath=()=>EXIT_PATH_RE.test(location.pathname);
-const exitUrl=a=>"/exit"+(EXIT_ADDR_RE.test(a||"")?"/"+a:"");
+const exitUrl=a=>"/exit"+(exitChainOf((a||"").trim())?"/"+a.trim():"");
 const exitNum=v=>{if(v==null||(typeof v==="string"&&v.trim()===""))return null;const n=Number(v);return Number.isFinite(n)?n:null;};
 function exitMoney(n){
   if(n==null||!isFinite(n))return null;
