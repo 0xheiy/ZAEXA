@@ -37,6 +37,12 @@ export const SEL_AGGREGATE3 = "0x82ad56cb";    // aggregate3((address,bool,bytes
 // ---- بودجه‌ی خودِ خلاصه ----
 // ساب‌ریکوئستِ صریحِ یک محاسبه (سقفِ پلتفرم ~۵۰). معمولی: هلدینگ ۱ + قیمت ⌈n/25⌉ + کوت ۱ = ۳ تا ۶.
 export const EXIT_SUBREQ_BUDGET = 24;   // ۱۵ نوامبر: ۱۶ → ۲۴ — هلدینگ حالا تا ۵ صفحه‌ی Portfolio (و در شکست تا ۵ صفحه‌ی RPC) می‌گیرد
+// بودجه‌ی خلاصه‌ی سولانا — سقفِ پلتفرمِ پلنِ رایگانِ کلادفلر ۵۰ ساب‌ریکوئستِ بیرونی در هر اجراست؛ ۴۴ یعنی ۶ تا جا برای
+// هر fetchِ بیرون از متر (مثلاً خودِ مسیرِ صفحه) می‌ماند. فقط fetchهای رد‌شده از متر شمرده می‌شوند: خواندن/نوشتنِ Cache API
+// (کشِ کوتِ q/ و خلاصه) داخلی است و جزوِ ۵۰ نیست، پس خواندنِ کوت‌های کش‌شده بی‌هزینه است.
+export const EXIT_SOL_SUBREQ_BUDGET = 44;
+// آینه‌ی EXIT_SOL_MAX_QUOTES در web/index.html: فقط ۴۰ توکنِ باارزشِ هر کیفِ سولانا کوت می‌گیرند؛ بقیه Unknown (نه صفر)
+export const EXIT_SOL_MAX_QUOTES = 40;
 // بیش از این تعداد توکنِ شمرده‌شده کوت نمی‌گیرد → Unknown (نه صفر)
 export const EXIT_QUOTE_MAX_TOKENS = 30;
 // تعدادِ زیرتماسِ هر aggregate3 (مرزِ تکه‌ها روی توکن است، پس یک تکه‌ی خراب فقط توکن‌های خودش را Unknown می‌کند)
@@ -44,9 +50,24 @@ export const EXIT_MC_CHUNK = 60;
 export const EXIT_TTL_S = 600;
 export const EXIT_BUCKET_MS = EXIT_TTL_S * 1000;
 // نسخه‌ی تصویرِ /og/exit — اگر چیدمان عوض شد جلو ببر
-export const OG_EXIT_IMAGE_V = "2";
+export const OG_EXIT_IMAGE_V = "3";   // ۱۸ نوامبر: ۲ → ۳ — کارتِ سولانا (TOP.Solana) اضافه شد
 
 export const EXIT_ADDR_RE = /^0x[0-9a-fA-F]{40}$/;
+
+/* کلیدِ عمومیِ سولانا — عیناً منطقِ exitSolKeyOk در web/index.html (تست [exit og sol] یکی‌بودنشان را می‌سنجد).
+   🔴 base58 حساس به بزرگی/کوچکی است؛ هیچ‌جا lowercase نمی‌شود. الگو کافی نیست: باید دقیقاً ۳۲ بایت decode شود ('1'های اول = بایتِ صفر). */
+const EXIT_SOL_RE = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
+export function exitSolKeyOk(a) {
+  if (typeof a !== "string" || !EXIT_SOL_RE.test(a)) return false;
+  const A = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
+  let n = 0n;
+  for (const c of a) n = n * 58n + BigInt(A.indexOf(c));
+  let len = 0;
+  while (n > 0n) { n >>= 8n; len++; }
+  let z = 0;
+  while (a[z] === "1") z++;
+  return len + z === 32;
+}
 
 // ---- عددها ----
 // Number(ethers.formatUnits(bal, dec)) بدونِ ethers: رشته‌ی دهدهیِ دقیق، بعد Number
@@ -84,7 +105,8 @@ export function utcClock(ms) {
 export const exitBucket = (now) => Math.floor(now / EXIT_BUCKET_MS);
 
 // ---- قیمت: پاسخِ tokens/multi?include=top_pools → Map (همان پارسِ exitLoadPrices در کلاینت) ----
-export function exitParsePrices(j, info) {
+// keepCase: سولانا — mintها حساس به بزرگی/کوچکی‌اند، کلید همان‌طور که GT داده می‌ماند. پیش‌فرض (Base) = lowercase، مثلِ قبل.
+export function exitParsePrices(j, info, keepCase) {
   if (!j || !Array.isArray(j.data)) throw new Error("shape");
   const pools = new Map();
   for (const x of (Array.isArray(j.included) ? j.included : [])) if (x && typeof x.id === "string") pools.set(x.id, x);
@@ -93,7 +115,7 @@ export function exitParsePrices(j, info) {
     if (!a || typeof a.address !== "string") continue;
     const tp = d.relationships && d.relationships.top_pools && d.relationships.top_pools.data;
     const pool = Array.isArray(tp) && tp[0] && typeof tp[0].id === "string" ? pools.get(tp[0].id) : null;
-    info.set(a.address.toLowerCase(), {
+    info.set(keepCase ? a.address : a.address.toLowerCase(), {
       price: exitNum(a.price_usd),
       dec: Number.isInteger(a.decimals) && a.decimals >= 0 && a.decimals <= 36 ? a.decimals : null,
       reserve: pool && pool.attributes ? exitNum(pool.attributes.reserve_in_usd) : null,
@@ -252,12 +274,14 @@ export function exitOgFields(wallet, origin, s, now) {
     };
   }
   const sa = shortAddr(wallet);
+  // زنجیر از شکلِ آدرس: 0x… = Base، وگرنه سولانا (آدرسِ سولانا همان‌طور که تایپ شده می‌ماند)
+  const chainName = EXIT_ADDR_RE.test(wallet) ? "Base" : "Solana";
   const image = origin + "/og/exit/" + wallet + ".png?v=" + OG_EXIT_IMAGE_V + "&r=" + exitBucket(now);
   const url = origin + "/exit/" + wallet;
   if (!exitSummaryValid(s)) {
     return {
       title: "Exit value of " + sa + " — Zaexa",
-      description: "What this Base wallet would get if it sold everything now, from live quotes.",
+      description: "What this " + chainName + " wallet would get if it sold everything now, from live quotes.",
       image, alt: "Exit value of " + sa + " — Zaexa", url,
     };
   }

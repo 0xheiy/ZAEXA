@@ -124,6 +124,9 @@ export function exitCardLines(s) {
 
 /* ورودی: { addr, summary } یا { generic:true }. خروجی: Uint8Array PNG. */
 export async function exitCardPng({ addr, summary, generic }) {
+  // زنجیرِ کارت از خودِ خلاصه می‌آید؛ کارتِ عمومی همیشه Base است. TOP.Solana پیلِ «Solana» را پخته دارد.
+  const sol = !generic && !!summary && summary.chain === "solana";
+  const chainKey = sol ? "Solana" : "Base";
   const band = new Uint8Array(ROWS * ROW);
   band.set(BAND_BYTES, 0);
   band.set(BAND2_BYTES, BAND1_LEN);
@@ -135,8 +138,9 @@ export async function exitCardPng({ addr, summary, generic }) {
   } else {
     const L = exitCardLines(summary);
     // ریتم (baseline): آدرسِ کوچک زیرِ نشان ۳۱۲ · On paper ۳۵۶ · If you sold now ۳۹۴ · عددِ بزرگ ۴۶۴ · درصد ۵۱۰ · یک خطِ ریزِ muted ۵۴۰
-    // (پیلِ Base جزءِ TOP پخته است، پس آدرس فقط می‌تواند زیرِ wordmark بنشیند)
-    text(band, "R20", shortAddr(String(addr).toLowerCase()), LEFT, 312, DIM);
+    // (پیلِ زنجیر جزءِ TOP پخته است، پس آدرس فقط می‌تواند زیرِ wordmark بنشیند)
+    // 🔴 آدرسِ سولانا حساس به بزرگی/کوچکی است: هرگز lowercase نمی‌شود (فقط Base)
+    text(band, "R20", shortAddr(sol ? String(addr) : String(addr).toLowerCase()), LEFT, 312, DIM);
     text(band, "R28", "On paper", LEFT, 356, GRAY);
     const px0 = LEFT + wid("R28", "On paper") + 16;
     const pStr = okChars("B31", L.paper) ? L.paper : "";
@@ -159,7 +163,7 @@ export async function exitCardPng({ addr, summary, generic }) {
   text(band, "B28", url, RIGHT - wid("B28", url), 590, GRAY);
 
   // ---- مونتاژِ PNG (همان IDAT#1 TOP + IDAT#2 stored + IDAT#3 پایین، با پایینِ تازه) ----
-  const top = TOP_BYTES.Base;
+  const top = TOP_BYTES[chainKey];
   const bot = BOTTOM2_BYTES;
   const bandLen = band.length;
   const nBlocks = Math.ceil(bandLen / 65535);
@@ -178,7 +182,7 @@ export async function exitCardPng({ addr, summary, generic }) {
   put32(out, o, idat1Len); out.set(TYPE("IDAT"), o + 4);
   out[o + 8] = 0x78; out[o + 9] = 0x01;
   out.set(top, o + 10);
-  put32(out, o + 8 + idat1Len, TOP.Base.crc);
+  put32(out, o + 8 + idat1Len, TOP[chainKey].crc);
   o += 12 + idat1Len;
   put32(out, o, idat2Len); out.set(TYPE("IDAT"), o + 4);
   let p = o + 8;
@@ -194,7 +198,7 @@ export async function exitCardPng({ addr, summary, generic }) {
   o = p + 4;
   put32(out, o, idat3Len); out.set(TYPE("IDAT"), o + 4);
   out.set(bot, o + 8);
-  const adl = adlerCombine(adlerCombine(TOP.Base.adler, adler32(band), bandLen), BOTTOM2_ADLER, BOTTOM2_LEN);
+  const adl = adlerCombine(adlerCombine(TOP[chainKey].adler, adler32(band), bandLen), BOTTOM2_ADLER, BOTTOM2_LEN);
   put32(out, o + 8 + bot.length, adl);
   const crc3 = crcUpdate(BOTTOM2_CRC_STATE, out, o + 8 + bot.length, o + 12 + bot.length);
   put32(out, o + 12 + bot.length, (crc3 ^ 0xffffffff) >>> 0);

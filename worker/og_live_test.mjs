@@ -16,6 +16,7 @@ import { fileURLToPath } from "node:url";
 import path from "node:path";
 import fs from "node:fs";
 import { OG_IMAGE_V } from "./og.js";
+import { OG_EXIT_IMAGE_V } from "./exit.js";
 import { OG_BUDGET_MS } from "./index.js";
 
 let Miniflare;
@@ -462,7 +463,7 @@ for (const [mode, label] of [["error", "a 500 from upstream"], ["slow", "an upst
   const bucket = Math.floor(Date.now() / 600000);
   ok(res.status === 200 && (res.headers.get("x-robots-tag") || "").includes("noindex"), "[exit og live] /exit/<addr> is 200 and noindex");
   ok(tag(html, "og:title") === "Exit value of 0xabab…abab: $3,000 if sold now", "[exit og live] og:title from the wallet's real numbers, got " + tag(html, "og:title"));
-  const want = "https://zaexa.com/og/exit/" + WALLET + ".png?v=2&r=" + bucket;
+  const want = "https://zaexa.com/og/exit/" + WALLET + ".png?v=" + OG_EXIT_IMAGE_V + "&r=" + bucket;
   ok(tag(html, "og:image") === want && tag(html, "twitter:image") === want && tag(html, "twitter:card") === "summary_large_image", "[exit og live] og:image / twitter:image / card, got " + tag(html, "og:image"));
   ok((html.match(/property="og:title"/g) || []).length === 1 && !html.includes('content="Zaexa — DEX aggregator on Base"'), "[exit og live] the real page's static data-og tags are gone, one og:title");
   ok(/<head>[\s\S]*?<title>Exit value of 0xabab…abab/.test(html) && /<svg class="wordmark"[^>]*><title>Zaexa<\/title>/.test(html), "[exit og live] only the head title changed (the wordmark's SVG title is intact)");

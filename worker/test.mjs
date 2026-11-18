@@ -18391,6 +18391,7 @@ console.log(fails === 0
       ok(num(/const EXIT_CONC=\d+,EXIT_BATCH=(\d+);/) === X.EXIT_BATCH, "[exit og] EXIT_BATCH must match the client");
       ok(num(/const EXIT_LOST_NONE=([0-9.]+);/) === X.EXIT_LOST_NONE && X.EXIT_LOST_NONE === 0.05, "[exit og] EXIT_LOST_NONE (percent, 0.05) must match the client, got " + X.EXIT_LOST_NONE);
       ok(num(/const EXIT_GAP_MED=(\d+),/) === X.EXIT_GAP_MED && num(/EXIT_GAP_BIG=(\d+);/) === X.EXIT_GAP_BIG, "[exit og] the 5% / 20% colour thresholds must match the client");
+      ok(num(/EXIT_SOL_MAX_QUOTES=(\d+),/) === X.EXIT_SOL_MAX_QUOTES, "[exit og] EXIT_SOL_MAX_QUOTES must match the client");
       const ex = /executor:"(0x[0-9a-fA-F]{40})"/.exec(app), mc = /multicall3:"(0x[0-9a-fA-F]{40})"/.exec(app);
       ok(ex && ex[1] === X.EXIT_EXECUTOR, "[exit og] the executor address (fee source) must match CHAIN.executor in web/index.html, got " + (ex && ex[1]));
       ok(mc && mc[1] === X.MULTICALL3, "[exit og] the Multicall3 address must match CHAIN.multicall3 in web/index.html");
@@ -18726,7 +18727,7 @@ console.log(fails === 0
       ok(lastP.status === 200 && !/\$/.test(tag(lh, "og:title")) && w8.kinds.filter((k) => k === "holdings").length <= 120, "[exit og] over the rate limit the page still renders (200) without numbers and without more upstream work");
       // در Workers واقعی (HTMLRewriter) همان توابع: برای لایه‌ی خالصِ تگ‌ها یک بررسیِ مستقیم
       const f = X.exitOgFields(W, origin, { paper: 100, exit: 80, lostPct: 20, quotedPaper: 100, unknownCount: 0, counted: 1, at: Date.UTC(2026, 10, 11, 9, 41), partial: false }, 600000 * 7 + 5);
-      ok(f.title === "Exit value of 0xabab…abab: $80.00 if sold now" && f.image === origin + "/og/exit/" + W + ".png?v=" + X.OG_EXIT_IMAGE_V + "&r=7" && X.OG_EXIT_IMAGE_V === "2", "[exit og] pure tag fields: complete summary has no 'at least'; the bucket is floor(now/10min), got " + f.title + " " + f.image);
+      ok(f.title === "Exit value of 0xabab…abab: $80.00 if sold now" && f.image === origin + "/og/exit/" + W + ".png?v=" + X.OG_EXIT_IMAGE_V + "&r=7" && X.OG_EXIT_IMAGE_V === "3", "[exit og] pure tag fields: complete summary has no 'at least'; the bucket is floor(now/10min), got " + f.title + " " + f.image);
       ok(X.exitOgTags(f).includes('content="' + f.image.replace(/&/g, "&amp;") + '"') && !X.exitOgTags({ ...f, title: 'a"b<c' }).includes('a"b<c'), "[exit og] tag values are HTML-escaped");
     }
 
@@ -18768,6 +18769,348 @@ console.log(fails === 0
       ok(restD === TGX.EXIT_UNKNOWN && !restD.includes("$") && evPoints.length === 0, "[exit tg] holdings down -> the unknown text, no figure, no counter, got " + JSON.stringify(jD.text));
       TGX.tgRateReset();
       console.log("[exit tg] bot /exit wired to exitSummaryCached (same cache and budget as /og/exit); unknown never shows a figure");
+    }
+
+    // ===== ذ) ۱۸ نوامبر — [exit og sol]: کارتِ پیش‌نمایشِ سولانا، کشِ کوتِ q/ و خلاصه‌ی سمتِ سرور =====
+    {
+      let nS = 0;
+      const okS = (c, w) => { nS++; ok(c, w); };
+      const OGT = await import("./og-token.js");
+      const OGD = await import("./og-token-data.js");
+      const SOLW = "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM";
+      const SOLK = "https://solana-mainnet.g.alchemy.com/v2/SECRET-EXIT-SOL-OG-KEY";
+      const envSol = { ...envX, SOL_RPC: SOLK };
+      const WSOL = "So11111111111111111111111111111111111111112", USDC = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
+      const MA = "DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263", MB = "JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN", MC2 = "2b1kV6DkPAnxd5ixfnxCpjxmKwqjjaYmCZfHsFu24GXo";
+      const MTHIN = "Gh9ZwEmdLJ8DscKNTkTqPbNwLNNBjuSzaG9Vp2KGtKJr", MDUST = "7vfCXTUXx5WJV5JADk17DUJ4ksgau7utNKj4b963voxs", MNOP = "4k3Dyjzvzp8eMZWUXbBCjEvwSkkk59S5iCNLY3QrkX6R";
+      const GT_SOL = "https://api.geckoterminal.com/api/v2/networks/solana/tokens/multi/";
+      const SOLP = 150;
+      // موجودی‌ها (mint → {dec, bal, price, reserve})؛ 🔴 جست‌وجو با mintِ دقیق (حساس به بزرگی/کوچکی) — کلیدِ lowercase چیزی پیدا نمی‌کند
+      const STK = {
+        [WSOL]: { dec: 9, bal: 0n, price: "150", reserve: "9000000" },
+        [MA]: { dec: 6, bal: 1000000000n, price: "2", reserve: "80000" },          // 1000 توکن × 2 = 2000$
+        [MB]: { dec: 6, bal: 500000000n, price: "1", reserve: "60000" },           // 500$
+        [MC2]: { dec: 9, bal: 4000000000n, price: "25", reserve: "70000" },        // 100$، هیچ مسیری ندارد
+        [USDC]: { dec: 6, bal: 300000000n, price: "1", reserve: "9000000" },       // 300$
+        [MTHIN]: { dec: 6, bal: 1000000000n, price: "1", reserve: "1200" },        // استخرِ ریز → thin
+        [MDUST]: { dec: 6, bal: 100000n, price: "1", reserve: "80000" },           // 0.1$ → dust
+        [MNOP]: { dec: 6, bal: 5000000n, price: null, reserve: null },              // GT نمی‌شناسد
+      };
+      const LAMPORTS = 2000000000n;                                                // 2 SOL = 300$
+      // جدولِ کوت Jupiter: mint → { خروجی → outAmount }
+      const JQ = {
+        [MA]: { [WSOL]: "12500000000", [USDC]: "1900000000" },                     // SOL: 1875$ ؛ USDC: 1900$ → 1900
+        [MB]: { [WSOL]: "3000000000" },                                            // 450$
+        [USDC]: { [WSOL]: "1900000000" },                                          // 285$
+      };
+      const HELD_ALL = [MA, MB, MC2, USDC, MTHIN, MDUST, MNOP];
+      const HELD_QUOTABLE = [MA, MB, USDC, MTHIN, MDUST, MNOP];                    // بدونِ MC2 (بی‌مسیر)
+      const EXP_ALL = { paper: 300 + 2000 + 500 + 100 + 300, exit: 300 + 1900 + 450 + 285, unknown: 1, counted: 4 };
+      const EXP_Q = { paper: 300 + 2000 + 500 + 300, exit: 300 + 1900 + 450 + 285, unknown: 0, counted: 3 };
+      function mkSolWorld(o) {
+        const opt = Object.assign({ held: HELD_ALL, lamports: LAMPORTS, jq: JQ, noSolPrice: false, first429: [], always429: false, gtDown: false }, o || {});
+        const w = { opt, calls: [], kinds: [], jup: [], n429: new Map() };
+        w.handler = async (u, init) => {
+          init = init || {};
+          if (u === SOLK) {
+            w.kinds.push("holdings"); w.calls.push(u);
+            const body = JSON.parse(init.body);
+            if (body.method === "getBalance") return jb({ jsonrpc: "2.0", id: body.id, result: { context: { slot: 1 }, value: Number(opt.lamports) } });
+            const spl = body.params[1].programId === "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA";
+            const val = spl ? opt.held.map((m) => ({ pubkey: "x", account: { data: { parsed: { info: { mint: m, owner: SOLW, tokenAmount: { amount: STK[m].bal.toString(), decimals: STK[m].dec } }, type: "account" }, program: "spl-token" } } })) : [];
+            return jb({ jsonrpc: "2.0", id: body.id, result: { context: { slot: 1 }, value: val } });
+          }
+          if (u.startsWith(GT_SOL)) {
+            w.kinds.push("gt"); w.calls.push(u);
+            if (opt.gtDown) return jb({ error: "x" }, 500);
+            const list = decodeURIComponent(u.slice(GT_SOL.length).split("?")[0]).split(",");
+            const data = [], included = [];
+            for (const a of list) {
+              const t = STK[a];
+              if (!t || t.price == null || (opt.noSolPrice && a === WSOL)) continue;
+              data.push({ id: "solana_" + a, type: "token", attributes: { address: a, symbol: "T", decimals: t.dec, price_usd: t.price },
+                relationships: { top_pools: { data: [{ id: "solana_pool" + a, type: "pool" }] } } });
+              included.push({ id: "solana_pool" + a, type: "pool", attributes: { address: "pool" + a, reserve_in_usd: t.reserve } });
+            }
+            return jb({ data, included });
+          }
+          if (u.startsWith("https://api.jup.ag/swap/v1/quote?")) {
+            w.kinds.push("jup"); w.calls.push(u);
+            const p = new URL(u).searchParams;
+            const rec = { in: p.get("inputMint"), out: p.get("outputMint"), amount: p.get("amount"), slippage: p.get("slippageBps"), mode: p.get("swapMode"), restrict: p.get("restrictIntermediateTokens"), direct: p.get("onlyDirectRoutes") };
+            w.jup.push(rec);
+            const k = rec.in + "|" + rec.out;
+            if (opt.always429) return jb({ error: "rate" }, 429);
+            if (opt.first429.includes(k) && !w.n429.get(k)) { w.n429.set(k, 1); return jb({ error: "rate" }, 429); }
+            const out = opt.jq[rec.in] && opt.jq[rec.in][rec.out];
+            if (out == null) return jb({ error: "no route", errorCode: "COULD_NOT_FIND_ANY_ROUTE" }, 404);
+            return jb({ inputMint: rec.in, outputMint: rec.out, inAmount: rec.amount, outAmount: out, swapMode: "ExactIn", routePlan: [] });
+          }
+          w.kinds.push("other"); w.calls.push(u);
+          return jb({ error: "unexpected" }, 500);
+        };
+        return w;
+      };
+      const CSOL = async (w, opts) => {
+        const saved = globalThis.fetch;
+        globalThis.fetch = (u, o) => w.handler(String(u), o || {});
+        try { return await IDX.exitSummaryCompute(SOLW, envSol, opts, "solana"); } finally { globalThis.fetch = saved; }
+      };
+      const qUrl = (m, o, amt) => "https://exit.zaexa.internal/q/" + m + "/" + o + "/" + amt;
+      const seedQ = (m, o, out) => shelf.set(qUrl(m, o, STK[m].bal.toString()), new Response(JSON.stringify({ out, at: Date.now() })));
+      const tagS = (html, k) => { const m = new RegExp('<meta (?:property|name)="' + k.replace(/[:]/g, "\\:") + '" content="([^"]*)">').exec(html); return m ? m[1].replace(/&amp;/g, "&").replace(/&quot;/g, '"') : null; };
+      const b58 = (bytes) => { let n = 0n; for (const b of bytes) n = n * 256n + BigInt(b); const A = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"; let s = ""; while (n > 0n) { s = A[Number(n % 58n)] + s; n /= 58n; } let z = 0; while (z < bytes.length && bytes[z] === 0) z++; return "1".repeat(z) + s; };
+
+      // ---- (g) ثابت‌ها و exitSolKeyOk: همان تابعِ صفحه ----
+      {
+        const app = fs.readFileSync(new URL("../web/index.html", import.meta.url), "utf8");
+        okS(Number((/EXIT_SOL_MAX_QUOTES=(\d+)/.exec(app) || [])[1]) === X.EXIT_SOL_MAX_QUOTES && X.EXIT_SOL_MAX_QUOTES === 40, "[exit og sol] EXIT_SOL_MAX_QUOTES must match web/index.html (40), got " + X.EXIT_SOL_MAX_QUOTES);
+        okS(X.EXIT_SOL_SUBREQ_BUDGET === 44 && X.EXIT_SOL_SUBREQ_BUDGET < 50, "[exit og sol] the Solana summary budget is 44 (under the free plan's 50), got " + X.EXIT_SOL_SUBREQ_BUDGET);
+        const reSrc = /const EXIT_SOL_RE=[^;]+;/.exec(app), fnSrc = /function exitSolKeyOk\(a\)\{[\s\S]*?\n\}/.exec(app);
+        okS(reSrc && fnSrc, "[exit og sol] the page's exitSolKeyOk text can be extracted for the parity test");
+        const pageFn = new Function(reSrc[0] + fnSrc[0] + "; return exitSolKeyOk;")();
+        const bytes31 = Array.from({ length: 31 }, (_, i) => i + 1), bytes32 = Array.from({ length: 32 }, (_, i) => i + 1), bytes33 = [1].concat(bytes32);
+        const vecs = [SOLW, WSOL, USDC, MA, MB, MC2, b58(bytes31), b58(bytes32), b58(bytes33), "1" + b58(bytes31), "1" + b58(bytes32), "11" + b58(bytes31), b58([0].concat(bytes31)),
+          SOLW.replace("W", "0"), SOLW.replace("W", "O"), SOLW.replace("z", "I"), SOLW.replace("D", "l"), SOLW.slice(0, 31), SOLW + "A", "", "abc", "0x" + "ab".repeat(20), "1".repeat(32), "1".repeat(31), "1".repeat(33), "z".repeat(44), "z".repeat(32)];
+        for (const v of vecs) okS(X.exitSolKeyOk(v) === pageFn(v), "[exit og sol] exitSolKeyOk agrees with the page on " + JSON.stringify(v.slice(0, 20)) + " (" + v.length + " chars): worker " + X.exitSolKeyOk(v) + " page " + pageFn(v));
+        okS(X.exitSolKeyOk(SOLW) && X.exitSolKeyOk(WSOL) && X.exitSolKeyOk("1" + b58(bytes31)) && !X.exitSolKeyOk(b58(bytes31)) && !X.exitSolKeyOk(b58(bytes33)) && !X.exitSolKeyOk("1" + SOLW) && !X.exitSolKeyOk(SOLW.replace("W", "0")),
+          "[exit og sol] fixed vectors: a real key and the SOL mint pass, 31 and 33 bytes and a string with 0/O/I/l fail");
+        okS(b58(bytes33).length === 44, "[exit og sol] the 33-byte vector has 44 chars (so only the byte-length check can reject it), got " + b58(bytes33).length);
+      }
+
+      // ---- (a) /sol/quote: فقط می‌نویسد، هرگز از کش سرو نمی‌کند ----
+      {
+        const QS = async (path, handler, extra) => {
+          const saved = globalThis.fetch; let n = 0;
+          globalThis.fetch = async (u, o) => { n++; return handler(String(u), o || {}); };
+          try { const r = await call(path, hdr(), extra); const body = await r.json(); return { status: r.status, body, n }; } finally { globalThis.fetch = saved; }
+        };
+        const upOk = (out) => async () => jb({ inAmount: "1000000000", outAmount: out, swapMode: "ExactIn", routePlan: [] });
+        const base = "/sol/quote?inputMint=" + MA + "&outputMint=" + WSOL + "&amount=1000000000";
+        resetCache();
+        let r = await QS(base + "&slippageBps=100", upOk("12500000000"));
+        const qk = qUrl(MA, WSOL, "1000000000");
+        okS(r.status === 200 && r.body.outAmount === "12500000000", "[exit og sol] /sol/quote still passes the Jupiter body through, got " + r.status);
+        okS(puts.length === 1 && puts[0].u === qk && puts[0].cc === "public, max-age=" + X.EXIT_TTL_S, "[exit og sol] an exit-shaped success writes the q/ key with the mint case kept and the exit TTL, got " + JSON.stringify(puts));
+        const stored = JSON.parse(await shelf.get(qk).clone().text());
+        okS(stored.out === "12500000000" && Number.isFinite(stored.at) && Object.keys(stored).sort().join() === "at,out", "[exit og sol] the cached value is only { out, at }, got " + JSON.stringify(stored));
+        okS(puts.length === 1 && puts[0].u.includes("/" + MA + "/" + WSOL + "/") && !puts[0].u.includes(MA.toLowerCase()), "[exit og sol] the cache key never contains a lowercased mint");
+        // دومین درخواستِ یکسان باز هم به Jupiter می‌رود و جوابِ *تازه* را می‌دهد (سواپِ زنده هرگز از کش سرو نمی‌شود)
+        const r2 = await QS(base + "&slippageBps=100", upOk("777"));
+        okS(r2.n === 1 && r2.body.outAmount === "777", "[exit og sol] a second identical /sol/quote still calls Jupiter and returns the live answer, never the cached one; upstream calls " + r2.n + ", got " + r2.body.outAmount);
+        // مقصدِ USDC و slippage پیش‌فرض (۱۰۰) هم شکلِ Exit است
+        resetCache();
+        r = await QS("/sol/quote?inputMint=" + MA + "&outputMint=" + USDC + "&amount=1000000000", upOk("1900000000"));
+        okS(puts.length === 1 && puts[0].u === qUrl(MA, USDC, "1000000000"), "[exit og sol] USDC output with the default slippage (100) is exit-shaped too, got " + JSON.stringify(puts));
+        // شکل‌هایی که Exit نیستند هیچ‌چیز نمی‌نویسند
+        const nonExit = [
+          ["slippage 50", base + "&slippageBps=50"],
+          ["ExactOut", base + "&slippageBps=100&swapMode=ExactOut"],
+          ["onlyDirectRoutes=true", base + "&slippageBps=100&onlyDirectRoutes=true"],
+          ["output not SOL/USDC", "/sol/quote?inputMint=" + MA + "&outputMint=" + MB + "&amount=1000000000&slippageBps=100"],
+        ];
+        for (const [label, path] of nonExit) {
+          resetCache();
+          const rr = await QS(path, upOk("5"));
+          okS(rr.status === 200 && puts.length === 0 && shelf.size === 0, "[exit og sol] non-exit shape (" + label + ") writes nothing to the cache, got " + puts.length);
+        }
+        resetCache();
+        const rd = await QS(base + "&slippageBps=100&onlyDirectRoutes=false", upOk("9"));
+        okS(rd.status === 200 && puts.length === 1, "[exit og sol] onlyDirectRoutes=false is still exit-shaped");
+        // outAmount نامعتبر یا پاسخِ ناموفق → نوشته نمی‌شود
+        for (const bad of ["12.5", "-1", "abc", "1".repeat(41), ""]) {
+          resetCache();
+          const rb = await QS(base + "&slippageBps=100", upOk(bad));
+          okS(rb.status === 200 && puts.length === 0, "[exit og sol] a malformed outAmount (" + JSON.stringify(bad.slice(0, 12)) + ") is never cached");
+        }
+        resetCache();
+        const rf = await QS(base + "&slippageBps=100", async () => jb({ error: "x", errorCode: "COULD_NOT_FIND_ANY_ROUTE" }, 404));
+        okS(rf.status === 502 && puts.length === 0, "[exit og sol] a failed upstream quote is not cached and still maps to 502");
+        // خرابیِ کش پاسخ را عوض نمی‌کند
+        resetCache();
+        const savedPut = globalThis.caches.default.put;
+        globalThis.caches.default.put = async () => { throw new Error("cache down"); };
+        const rc = await QS(base + "&slippageBps=100", upOk("12500000000"));
+        globalThis.caches.default.put = savedPut;
+        okS(rc.status === 200 && rc.body.outAmount === "12500000000", "[exit og sol] a failing cache write never changes the /sol/quote response");
+        resetCache();
+      }
+
+      // ---- (b) همه‌ی کوت‌ها از پیش در کش: صفر تماس به Jupiter، qc = ردیف‌های شمرده‌شده ----
+      {
+        resetCache();
+        for (const m of [MA, MB, USDC]) for (const o of [WSOL, USDC]) if (JQ[m][o] != null) seedQ(m, o, JQ[m][o]);
+        seedQ(MA, USDC, "1900000000");
+        shelf.set(qUrl(MB, USDC, STK[MB].bal.toString()), new Response(JSON.stringify({ out: "0", at: Date.now() })));   // «۰» = نتیجه هست ولی قابلِ استفاده نیست
+        const w = mkSolWorld({ held: HELD_QUOTABLE });
+        const r = await CSOL(w, {});
+        const s = r.s;
+        okS(w.jup.length === 0 && r.fetches === 4 && w.kinds.join() === "holdings,holdings,holdings,gt", "[exit og sol] with every quote cached there is no Jupiter call (3 holdings reads + 1 price batch), got " + w.kinds.join());
+        okS(s && near(s.exit, EXP_Q.exit) && near(s.paper, EXP_Q.paper) && s.counted === EXP_Q.counted && s.unknownCount === 0, "[exit og sol] the exit equals the hand-computed max(SOL,USDC) per row + native SOL, got " + JSON.stringify(s));
+        okS(s && s.chain === "solana" && s.qc === 3 && s.ql === 0 && Number.isInteger(s.qc) && Number.isInteger(s.ql), "[exit og sol] qc = counted rows (3), ql = 0, chain solana, got " + JSON.stringify(s));
+        okS(s && near(s.lostPct, (1 - EXP_Q.exit / (EXP_Q.paper)) * 100, 0.001) && X.exitSummaryValid(s), "[exit og sol] lostPct over the quoted rows, and exitSummaryValid accepts the Solana summary");
+        okS(X.exitSummaryValid({ paper: 1, exit: 1, lostPct: 0, quotedPaper: 1, unknownCount: 0, counted: 1, at: 1 }), "[exit og sol] exitSummaryValid still accepts a Base summary without chain/qc/ql");
+        // SOL قیمت ندارد: نتیجه‌های SOL قابلِ استفاده نیستند، USDC هنوز هست
+        resetCache();
+        for (const m of [MA, MB, USDC]) for (const o of [WSOL, USDC]) if (JQ[m][o] != null) seedQ(m, o, JQ[m][o]);
+        const wn = mkSolWorld({ held: HELD_QUOTABLE, noSolPrice: true });
+        const rn = await CSOL(wn, {});
+        okS(rn.s && near(rn.s.exit, 1900) && rn.s.unknownCount === 2 && wn.jup.every((x) => x.out === USDC), "[exit og sol] without a SOL price only USDC quotes count (TA 1900), the rest are Unknown, no SOL quote is asked; got " + JSON.stringify(rn.s));
+        resetCache();
+      }
+
+      // ---- (c) کشِ خالی: کوتِ زنده، اول SOL بعد USDC؛ بودجه ----
+      {
+        resetCache();
+        const w = mkSolWorld();
+        const r = await CSOL(w, {});
+        const s = r.s;
+        const outs = w.jup.map((x) => (x.out === WSOL ? "S" : "U"));
+        okS(w.jup.length === 7 && outs.join("") === "SSSSUUU", "[exit og sol] empty cache: 4 SOL quotes first, then 3 USDC quotes (USDC mint itself skipped), got " + outs.join(""));
+        okS(w.jup.slice(0, 4).map((x) => x.in).join() === [MA, MB, USDC, MC2].join(), "[exit og sol] live quotes go in descending paper order, got " + w.jup.slice(0, 4).map((x) => x.in.slice(0, 4)).join());
+        okS(w.jup.every((x) => x.slippage === "100" && x.mode === "ExactIn" && x.restrict === "true" && x.direct === null && x.amount === STK[x.in].bal.toString()), "[exit og sol] live quotes use the same params as /sol/quote (slippage 100, ExactIn, restrictIntermediateTokens, full balance, no onlyDirectRoutes)");
+        okS(s && near(s.exit, EXP_ALL.exit) && s.unknownCount === 1 && s.counted === 4 && near(s.paper, EXP_ALL.paper), "[exit og sol] live result equals the hand-computed values; the no-route token is Unknown, got " + JSON.stringify(s));
+        okS(s && s.qc === 0 && s.ql === 3 && r.fetches === 11, "[exit og sol] qc 0 / ql 3 and 11 metered fetches (3 holdings + 1 price + 7 quotes), got " + (s && s.qc) + "/" + (s && s.ql) + "/" + r.fetches);
+        okS(puts.some((p) => p.u === qUrl(MA, WSOL, "1000000000")) && puts.some((p) => p.u === qUrl(MA, USDC, "1000000000")) && puts.every((p) => p.u.startsWith("https://exit.zaexa.internal/q/")),
+          "[exit og sol] successful live quotes are written to the shared q/ cache with the case kept, got " + puts.map((p) => p.u.slice(-40)).join(" | "));
+        okS(!puts.some((p) => p.u.includes(MC2)) , "[exit og sol] a failed live quote is not cached");
+        // کش گرم از اجرای قبل: بار دوم هیچ تماسی به Jupiter نمی‌رود (نتیجه‌ی کوت‌های موفق از کش؛ فقط MC2 که مسیر ندارد دوباره پرسیده می‌شود)
+        const w2 = mkSolWorld();
+        const r2 = await CSOL(w2, {});
+        okS(w2.jup.length === 3 && w2.jup.every((x) => JQ[x.in] == null || JQ[x.in][x.out] == null) && r2.s && near(r2.s.exit, EXP_ALL.exit) && r2.s.qc === 3 && r2.s.ql === 0, "[exit og sol] the live quotes of one run are the cached quotes of the next (only the pairs that had no route are asked again), got " + w2.jup.length + " / " + JSON.stringify(r2.s));
+        // بودجه‌ی کم: ۶ = ۴ پایه + ۲ کوت → گذرِ USDC بریده، ردیف‌های بی‌کوت Unknown (نه ۰)
+        resetCache();
+        const w3 = mkSolWorld();
+        const r3 = await CSOL(w3, { budget: 6 });
+        okS(r3.fetches <= 6 && w3.jup.length === 2 && r3.denied === 0 && !r3.blown, "[exit og sol] budget 6: only 2 quotes are asked and the guard never has to refuse a fetch (live pass checks the budget itself), got fetches " + r3.fetches + " jup " + w3.jup.length + " denied " + r3.denied);
+        okS(r3.s && near(r3.s.exit, 300 + 1875 + 450) && r3.s.unknownCount === 2 && r3.s.counted === 4, "[exit og sol] rows with no quote are Unknown and stay out of the total (never 0), got " + JSON.stringify(r3.s));
+        resetCache();
+        const w4 = mkSolWorld();
+        const r4 = await CSOL(w4, { budget: 8 });
+        okS(w4.jup.length === 4 && w4.jup.every((x) => x.out === WSOL) && r4.fetches <= 8 && r4.denied === 0, "[exit og sol] budget 8: the 4 SOL quotes use it up and the USDC pass is cut, got " + w4.jup.map((x) => x.out === WSOL ? "S" : "U").join(""));
+        okS(r4.s && near(r4.s.exit, 300 + 1875 + 450 + 285) && r4.s.unknownCount === 1, "[exit og sol] the cut USDC pass leaves the SOL-quote value (a floor), got " + JSON.stringify(r4.s));
+        for (const b of [4, 5, 7, 9, 10, 20]) {
+          resetCache();
+          const wb = mkSolWorld(); const rb = await CSOL(wb, { budget: b });
+          okS(rb.fetches <= b && rb.denied === 0, "[exit og sol] fetches never exceed the budget " + b + " and are never refused by the guard, got " + rb.fetches + " / denied " + rb.denied);
+        }
+        // بودجه‌ی صفر برای کوت: بی‌کوت = null (کارتِ عمومی)، نه «$0»
+        resetCache();
+        const w5 = mkSolWorld({ held: [MB] });
+        const r5 = await CSOL(w5, { budget: 4 });
+        okS(r5.s && near(r5.s.exit, 300) && r5.s.unknownCount === 1, "[exit og sol] budget 4 (no quote at all): only native SOL counts, the token is Unknown, got " + JSON.stringify(r5.s));
+        // بیش از ۴۰ توکن: فقط ۴۰ تای باارزش کاندیدای کوت‌اند
+        resetCache();
+        const bigHeld = [];
+        for (let i = 0; i < 45; i++) { const m = b58(Array.from({ length: 32 }, (_, k) => (k === 0 ? 7 : (i * 5 + k) % 256))); STK[m] = { dec: 6, bal: BigInt(1000 + i) * 1000000n, price: "1", reserve: "80000" }; bigHeld.push(m); }
+        const wBig = mkSolWorld({ held: bigHeld, jq: {} });
+        const rBig = await CSOL(wBig, { budget: 200 });
+        const asked = new Set(wBig.jup.map((x) => x.in));
+        const topMints = bigHeld.slice().sort((a, b) => Number(STK[b].bal - STK[a].bal)).slice(0, 40);
+        okS(asked.size === 40 && topMints.every((m) => asked.has(m)) && rBig.s && rBig.s.unknownCount === 45 && near(rBig.s.exit, 300), "[exit og sol] only the 40 most valuable counted tokens are quoted, the other 5 are Unknown; asked " + asked.size);
+        resetCache();
+      }
+
+      // ---- (h) ۴۲۹: یک بار دوباره بعد از ۱۱۰۰ms ----
+      {
+        resetCache();
+        const w = mkSolWorld({ held: [MA], first429: [MA + "|" + WSOL] });
+        const t0 = Date.now();
+        const r = await CSOL(w, {});
+        const dt = Date.now() - t0;
+        const tries = w.jup.filter((x) => x.in === MA && x.out === WSOL).length;
+        okS(tries === 2 && dt >= 1000 && r.s && near(r.s.exit, 300 + 1900), "[exit og sol] a 429 is retried exactly once after ~1.1s and then succeeds; tries " + tries + ", " + dt + "ms, got " + JSON.stringify(r.s));
+        resetCache();
+        const wA = mkSolWorld({ held: [MA], always429: true });
+        const rA = await CSOL(wA, {});
+        okS(wA.jup.filter((x) => x.out === WSOL).length === 2 && wA.jup.filter((x) => x.out === USDC).length === 2 && rA.s && near(rA.s.exit, 300) && rA.s.unknownCount === 1, "[exit og sol] a second 429 gives up (2 tries per quote), the token is Unknown (never 0), got " + wA.jup.length + " " + JSON.stringify(rA.s));
+        resetCache();
+      }
+
+      // ---- (d)(e) مسیرها: /og/exit/<کلید>.png و /exit/<کلید> ----
+      {
+        resetCache();
+        for (const m of [MA, MB, USDC]) for (const o of [WSOL, USDC]) if (JQ[m][o] != null) seedQ(m, o, JQ[m][o]);
+        seedQ(MB, USDC, "0");                                       // «پرسیده شد، خروجی صفر» = نتیجه هست، دوباره نمی‌پرسیم
+        const wq = mkSolWorld({ held: HELD_QUOTABLE });
+        const res = await RUN(wq, "/og/exit/" + SOLW + ".png", hdr(), envSol);
+        const png = new Uint8Array(await res.arrayBuffer());
+        const info = pngInfo(png);
+        okS(res.status === 200 && res.headers.get("content-type") === "image/png" && info && !info.crcBad && info.w === 1200 && info.h === 630 && info.rawLen === 630 * (1200 * 3 + 1), "[exit og sol] /og/exit/<solana key>.png is a valid 1200x630 PNG, got " + res.status);
+        okS(res.headers.get("x-exit-src") === "c=3;l=0;u=0", "[exit og sol] x-exit-src reports cached/live/unknown counts and no address, got " + res.headers.get("x-exit-src"));
+        okS(!JSON.stringify([...res.headers]).includes(SOLW) && wq.jup.length === 0, "[exit og sol] the header carries no address; all quotes came from the cache");
+        okS(puts.some((p) => p.u === "https://exit.zaexa.internal/s/sol/" + SOLW) && !puts.some((p) => p.u.includes(SOLW.toLowerCase()) && !p.u.includes(SOLW)), "[exit og sol] the summary is cached under /s/sol/<key as typed>, never a lowercased key, got " + puts.map((p) => p.u.slice(-30)).join(" | "));
+        okS(!puts.some((p) => p.u === "https://exit.zaexa.internal/s/" + SOLW), "[exit og sol] the Base summary key is not used for a Solana wallet");
+        // کارتِ سولانا از TOP.Solana ساخته می‌شود
+        const sum = JSON.parse(await shelf.get("https://exit.zaexa.internal/s/sol/" + SOLW).clone().text());
+        const idat1Len = Buffer.from(png).readUInt32BE(33);
+        const crc1 = Buffer.from(png).readUInt32BE(33 + 8 + idat1Len);
+        okS(crc1 === OGD.TOP.Solana.crc && crc1 !== OGD.TOP.Base.crc, "[exit og sol] the first IDAT closes with TOP.Solana's CRC, got " + crc1);
+        okS(Buffer.from(png).subarray(33 + 10, 33 + 8 + idat1Len).equals(Buffer.from(OGT.TOP_BYTES.Solana)), "[exit og sol] the top rows are TOP_BYTES.Solana byte for byte");
+        const asBase = await OGX.exitCardPng({ addr: SOLW, summary: { ...sum, chain: undefined } });
+        okS(Buffer.compare(Buffer.from(png), Buffer.from(asBase)) !== 0 && Buffer.from(asBase).readUInt32BE(33 + 8 + Buffer.from(asBase).readUInt32BE(33)) === OGD.TOP.Base.crc, "[exit og sol] the same summary on the Base card gives different bytes (Base pill), the Solana card is not the Base one");
+        const lowerAddr = await OGX.exitCardPng({ addr: SOLW.toLowerCase(), summary: sum });
+        okS(Buffer.compare(Buffer.from(png), Buffer.from(lowerAddr)) !== 0, "[exit og sol] the address under the wordmark keeps its case on the Solana card");
+        const genericP = await OGX.exitCardPng({ generic: true });
+        okS(Buffer.from(genericP).readUInt32BE(33 + 8 + Buffer.from(genericP).readUInt32BE(33)) === OGD.TOP.Base.crc, "[exit og sol] the generic card stays the Base one");
+        // Base: بدونِ هدر
+        resetCache();
+        const wb = mkWorld();
+        const rb = await RUN(wb, "/og/exit/" + W + ".png", hdr(), envX);
+        okS(rb.status === 200 && rb.headers.get("x-exit-src") === null, "[exit og sol] a Base card carries no x-exit-src (its summary has no qc/ql); Base response is unchanged");
+        // دومین درخواست از کشِ تصویر هم همان هدر را دارد
+        resetCache();
+        for (const m of [MA, MB, USDC]) for (const o of [WSOL, USDC]) if (JQ[m][o] != null) seedQ(m, o, JQ[m][o]);
+        const w1 = mkSolWorld({ held: HELD_QUOTABLE });
+        await RUN(w1, "/og/exit/" + SOLW + ".png", hdr(), envSol);
+        const w2 = mkSolWorld({ held: HELD_QUOTABLE });
+        const rr = await RUN(w2, "/og/exit/" + SOLW + ".png", hdr(), envSol);
+        okS(w2.calls.length === 0 && rr.headers.get("x-exit-src") === "c=3;l=0;u=0", "[exit og sol] a repeat is served from the image cache with the same header and no upstream work");
+        // صفحه: تگ‌ها، ?v=3، آدرسِ تصویر با همان بزرگی/کوچکی
+        resetCache();
+        for (const m of [MA, MB, USDC]) for (const o of [WSOL, USDC]) if (JQ[m][o] != null) seedQ(m, o, JQ[m][o]);
+        const wp = mkSolWorld({ held: HELD_QUOTABLE });
+        const rp = await RUN(wp, "/exit/" + SOLW, hdr(BOT), envSol);
+        const html = await rp.text();
+        const img = tagS(html, "og:image");
+        okS(/^https:\/\/zaexa\.com\/og\/exit\/9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM\.png\?v=3&r=\d+$/.test(img), "[exit og sol] og:image keeps the Solana key exactly as typed and uses ?v=3, got " + img);
+        okS(tagS(html, "og:url") === "https://zaexa.com/exit/" + SOLW && /^Exit value of 9WzDXw…AWWM: \$2,935 if sold now$/.test(tagS(html, "og:title")), "[exit og sol] og:url keeps the case and the title carries the shortened key and the number, got " + tagS(html, "og:title"));
+        okS(puts.some((p) => p.u === "https://exit.zaexa.internal/s/sol/" + SOLW) && (rp.headers.get("x-robots-tag") || "").includes("noindex"), "[exit og sol] page route: summary under the case-kept Solana key, noindex kept");
+        // سرد: انسان + کش خالی → توضیحِ Solana، بدونِ عدد
+        resetCache();
+        const wc = mkSolWorld();
+        const rcold = await RUN(wc, "/exit/" + SOLW, hdr(), envSol);
+        const hc = await rcold.text();
+        okS(wc.calls.length === 0 && /Solana wallet/.test(tagS(hc, "og:description") || "") && !/Base wallet/.test(tagS(hc, "og:description") || "") && !/\$/.test(tagS(hc, "og:title")) && tagS(hc, "og:image").includes("/og/exit/" + SOLW + ".png"),
+          "[exit og sol] cold human page for a Solana key: 'Solana wallet' text, no number, image URL keeps the case, no upstream work, got " + tagS(hc, "og:description"));
+        // exitOgFields خالص
+        const fS = X.exitOgFields(SOLW, "https://zaexa.com", null, 600000 * 7 + 5);
+        const fB = X.exitOgFields(W, "https://zaexa.com", null, 600000 * 7 + 5);
+        okS(fS.description.includes("Solana wallet") && fB.description.includes("Base wallet") && fS.image === "https://zaexa.com/og/exit/" + SOLW + ".png?v=3&r=7" && fS.url === "https://zaexa.com/exit/" + SOLW, "[exit og sol] exitOgFields is chain-aware and keeps the Solana key as typed");
+        // کیفِ Base هنوز lowercase می‌شود (رفتارِ قبلی)
+        resetCache();
+        const wU = mkWorld();
+        const rU = await RUN(wU, "/exit/0x" + "AB".repeat(20), hdr(BOT), envX);
+        okS(tagS(await rU.text(), "og:url") === "https://zaexa.com/exit/0x" + "ab".repeat(20), "[exit og sol] a mixed-case Base wallet is still lowercased");
+        resetCache();
+      }
+
+      // ---- (f) رشته‌های شبیهِ سولانا ولی نامعتبر ----
+      {
+        const k31 = b58(Array.from({ length: 31 }, (_, i) => i + 1)), k33 = b58([1].concat(Array.from({ length: 32 }, (_, i) => i + 1))), k33z = "1" + SOLW;
+        for (const bad of [k31, k33, k33z, SOLW.replace("W", "0"), SOLW.slice(0, 31)]) {
+          resetCache();
+          const w = mkSolWorld();
+          const r1 = await RUN(w, "/og/exit/" + bad + ".png", hdr(), envSol);
+          okS(r1.status === 400 && w.calls.length === 0 && puts.length === 0, "[exit og sol] /og/exit/" + bad.slice(0, 12) + "… (" + bad.length + " chars) -> 400, no upstream work, got " + r1.status);
+          const r2 = await RUN(w, "/exit/" + bad, hdr(BOT), envSol);
+          const h2 = await r2.text();
+          okS(r2.status === 200 && h2.includes("OLD-SITE-TITLE") && w.calls.length === 0 && (r2.headers.get("x-robots-tag") || "").includes("noindex"), "[exit og sol] /exit/" + bad.slice(0, 12) + "… stays the generic site card (no wallet tags), no upstream work");
+        }
+        resetCache();
+      }
+      okS(kvOps.length === 0 && evPoints.length === 0, "[exit og sol] (end) no KV or /ev operation in the whole Solana section");
+      console.log("[exit og sol] Solana preview: /sol/quote writes (never reads) exit-shaped quotes to the q/ cache; the server summary reads that cache first, quotes the rest live (SOL then USDC, budget 44, 429 retried once), unknown never 0, case kept everywhere, card built from TOP.Solana with x-exit-src; " + nS + " assertions");
     }
   } finally {
     globalThis.caches = savedCaches;

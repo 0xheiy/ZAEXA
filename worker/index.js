@@ -165,7 +165,7 @@ import { fetchVerdict, fetchCounterSell, poolDirectedProof, v4OneWayProof, oneWa
   WETH_ADDR, USDC_ADDR, sellAmountFrom, canaryCall, canaryUsdPerEth, VD_MAX_ENDPOINTS } from "./verdict.js";
 import {
   EXIT_BATCH, EXIT_EXECUTOR, MULTICALL3, SEL_FEE_BPS, EXIT_SUBREQ_BUDGET, EXIT_QUOTE_MAX_TOKENS, EXIT_MC_CHUNK, EXIT_TTL_S,
-  EXIT_ADDR_RE, unitsToNumber, exitParsePrices, exitMakeRow, exitSummaryFrom, exitSummaryValid, encodeAggregate3, decodeAggregate3,
+  EXIT_SOL_SUBREQ_BUDGET, EXIT_SOL_MAX_QUOTES, exitSolKeyOk, EXIT_ADDR_RE, unitsToNumber, exitParsePrices, exitMakeRow, exitSummaryFrom, exitSummaryValid, encodeAggregate3, decodeAggregate3,
   exitProbesFor, bestWethOut, feeBpsFrom, exitOgFields, exitOgTags, EXIT_BOT_UA,
 } from "./exit.js";
 import { exitCardPng } from "./og-exit.js";
@@ -1799,11 +1799,64 @@ async function readJsonBody(request, maxBytes) {
   finally { clearTimeout(timer); reader.releaseLock(); }
 }
 
+/* ---- کشِ کوتِ «شکلِ Exit» (۱۸ نوامبر) ----
+   کارتِ پیش‌نمایشِ سولانا باید عددی نزدیک به صفحه بدهد. راهِ مطمئن: کوت‌های خودِ صفحه را به اشتراک بگذاریم، نه عددها را.
+   صفحه کوت‌هایش را از همین /sol/quote می‌گیرد؛ هر ۲۰۰ِ موفقِ «شکلِ Exit» (ExactIn، slippage ۱۰۰، بدونِ onlyDirectRoutes، مقصد SOL یا USDC)
+   اینجا فقط *نوشته* می‌شود: { out, at } زیرِ exit.zaexa.internal/q/<ورودی>/<مقصد>/<مقدار> (mintها با همان بزرگی/کوچکی).
+   🔴 خودِ /sol/quote هرگز از این کش نمی‌خواند — سواپِ زنده همیشه کوتِ زنده می‌گیرد. فقط خلاصه‌ی سمتِ سرور (exitSummaryInnerSol) می‌خواند؛
+   مقدار از Jupiterِ خودِ ما آمده و amount همان موجودیِ روی زنجیر است که سرور خودش خوانده، پس قابلِ اعتماد است. عددی از مرورگر پذیرفته نمی‌شود.
+   🔴 خطای کش هرگز پاسخِ /sol/quote را عوض نمی‌کند. */
+const SOL_WSOL_MINT = "So11111111111111111111111111111111111111112";
+const SOL_USDC_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
+// Cache API مستقیم (نه cacheStore): داخلِ محاسبه‌ی خلاصه، cacheStore خاموش است ولی کشِ کوت باید کار کند — و این‌ها ساب‌ریکوئست نیستند
+function solQuoteStore() { return typeof caches !== "undefined" && caches ? caches.default : null; }
+const solQuoteKey = (inM, outM, amount) => new Request("https://exit.zaexa.internal/q/" + inM + "/" + outM + "/" + amount, { method: "GET" });
+// پارامترهای کوت — یک جا برای مسیرِ /sol/quote و کوتِ زنده‌ی خلاصه، تا از هم جدا نشوند
+function solQuoteParams(p) {
+  const q = new URLSearchParams({
+    inputMint: p.inputMint, outputMint: p.outputMint, amount: p.amount, slippageBps: String(p.slippageBps),
+    restrictIntermediateTokens: "true", swapMode: p.swapMode,
+  });
+  if (p.direct === true) q.set("onlyDirectRoutes", "true");
+  return q;
+}
+function solQuoteExitShape(p) {
+  return p.swapMode === "ExactIn" && p.slippageBps === 100 && p.direct !== true
+    && (p.outputMint === SOL_WSOL_MINT || p.outputMint === SOL_USDC_MINT);
+}
+// کوتِ Jupiter + (اگر شکلِ Exit و موفق بود) نوشتنِ کش. خطای کش بی‌صدا؛ ctx.waitUntil اگر هست.
+async function solQuoteCall(env, p, ctx) {
+  const r = await jupProxyFetch(env, "/swap/v1/quote?" + solQuoteParams(p).toString(), { method: "GET" }, SOL_JUP_TIMEOUT_MS);
+  if (r.ok && r.json && solQuoteExitShape(p)) {
+    try {
+      const oa = r.json.outAmount, store = solQuoteStore();
+      if (store && !r.json.error && typeof oa === "string" && /^\d{1,40}$/.test(oa)) {
+        const put = Promise.resolve(store.put(solQuoteKey(p.inputMint, p.outputMint, p.amount),
+          new Response(JSON.stringify({ out: oa, at: Date.now() }), { status: 200, headers: { "cache-control": "public, max-age=" + EXIT_TTL_S } }))).catch(() => {});
+        if (ctx && typeof ctx.waitUntil === "function") ctx.waitUntil(put); else await put;
+      }
+    } catch (e) { /* کش خراب = بی‌اثر روی پاسخ */ }
+  }
+  return r;
+}
+// فقط برای خلاصه: خواندنِ کوتِ کش‌شده → BigInt یا undefined
+async function solQuoteCacheGet(inM, outM, amount) {
+  try {
+    const store = solQuoteStore();
+    if (!store) return undefined;
+    const hit = await store.match(solQuoteKey(inM, outM, amount));
+    if (!hit) return undefined;
+    const j = await hit.json();
+    if (!j || typeof j.out !== "string" || !/^\d{1,40}$/.test(j.out) || !Number.isFinite(j.at) || Date.now() - j.at > EXIT_TTL_S * 1000) return undefined;
+    return BigInt(j.out);
+  } catch (e) { return undefined; }
+}
+
 /* GET /sol/quote?inputMint=&outputMint=&amount=&slippageBps= — پراکسیِ خامِ
    Jupiter /swap/v1/quote. restrictIntermediateTokens همیشه اضافه می‌شود،
    کاربر نمی‌تواند خاموشش کند. بدنه‌ی ۲۰۰ عیناً پاس داده می‌شود؛ غیرِ۲۰۰ →
    ۵۰۲ با کدِ بسته، هرگز متنِ جوپیتر. */
-async function solQuoteRoute(request, url, env) {
+async function solQuoteRoute(request, url, env, ctx) {
   if (!rateOk(request, "solq", RL_LIMIT, RL_WINDOW_MS))
     return solDone(429, { error: "too many requests" }, { "retry-after": "60" });
   if (request.method === "OPTIONS") return new Response(null, { status: 204, headers: SOL_CORS });
@@ -1832,14 +1885,9 @@ async function solQuoteRoute(request, url, env) {
     if (!(slippageBps >= 1 && slippageBps <= 5000)) return solDone(400, { error: "bad-slippage" });
   }
 
-  const q = new URLSearchParams({
-    inputMint, outputMint, amount, slippageBps: String(slippageBps),
-    restrictIntermediateTokens: "true", swapMode,
-  });
   const direct=url.searchParams.get("onlyDirectRoutes");
   if(direct!=null&&direct!=="true"&&direct!=="false")return solDone(400,{error:"bad-direct-mode"});
-  if(direct==="true")q.set("onlyDirectRoutes","true");
-  const r = await jupProxyFetch(env, "/swap/v1/quote?" + q.toString(), { method: "GET" }, SOL_JUP_TIMEOUT_MS);
+  const r = await solQuoteCall(env, { inputMint, outputMint, amount, slippageBps, swapMode, direct: direct === "true" }, ctx);
   if (!r.ok || !r.json) return solDone(502, { error: "jup:quote:" + r.status, reason: solQuoteFailReason(r.status, r.json) });
   return solDone(200, r.json);
 }
@@ -4889,18 +4937,19 @@ const EXIT_PAGE_WAIT_MS = 3500;      // صفحه‌ی /exit/<آدرس> برای 
 const EXIT_IMG_WAIT_MS = 8000;       // تصویر تا این‌قدر؛ بعد کارتِ عمومی (محاسبه در پس‌زمینه ادامه می‌دهد و کش را پر می‌کند)
 const exitInflight = new Map();      // کیف → Promise (فقط حافظه‌ی همین isolate)
 
-async function exitPricesServer(addrs, env, st) {
+async function exitPricesServer(addrs, env, st, sol) {
   const info = new Map(), failed = new Set();
-  const list = [...new Set(addrs.map((a) => a.toLowerCase()))];
+  // 🔴 سولانا (sol=true): mintها حساس به بزرگی/کوچکی‌اند — هرگز lowercase نمی‌شوند؛ Base مثلِ قبل lowercase
+  const list = [...new Set(sol ? addrs : addrs.map((a) => a.toLowerCase()))];
   for (let i = 0; i < list.length; i += EXIT_BATCH) {
     const batch = list.slice(i, i + EXIT_BATCH);
     if (st.blown) { batch.forEach((a) => failed.add(a)); continue; }      // بودجه تمام: نپرس، Unknown بماند
     const ac = new AbortController();
     const timer = setTimeout(() => ac.abort(), EXIT_PRICE_TIMEOUT_MS);
     try {
-      const { res } = await gtUpstream("networks/base/tokens/multi/" + batch.join(",") + "?include=top_pools", env, { signal: ac.signal });
+      const { res } = await gtUpstream("networks/" + (sol ? "solana" : "base") + "/tokens/multi/" + batch.join(",") + "?include=top_pools", env, { signal: ac.signal });
       if (!res || !res.ok) throw new Error("status");
-      exitParsePrices(await res.json(), info);
+      exitParsePrices(await res.json(), info, sol === true);
     } catch (e) { batch.forEach((a) => failed.add(a)); }
     finally { clearTimeout(timer); }
   }
@@ -4992,28 +5041,116 @@ async function exitSummaryInner(wallet, env, st) {
   return { s: exitSummaryFrom(rows, h, Date.now()), why: "done" };
 }
 
-/* محاسبه‌ی بی‌کش. opts.budget فقط برای تست. خروجی { s, why, fetches } — هرگز پرتاب نمی‌کند. */
-async function exitSummaryCompute(wallet, env, opts) {
-  const budget = opts && Number.isInteger(opts.budget) ? opts.budget : EXIT_SUBREQ_BUDGET;
+/* ---- ۱۸ نوامبر — خلاصه‌ی سولانا ----
+   همان قواعدِ Base (exitMakeRow، شمارش، Unknown هرگز صفر) با این تفاوت‌ها:
+   • هلدینگ: exitSolHoldingsCore؛ قیمت: GeckoTerminal شبکه‌ی solana با mintِ wrapped-SOL اول (قیمتش = SOL/USD)؛ ردیفِ SOL بومی مثلِ ETH (dec ۹).
+   • کوت: Jupiter به SOL و به USDC، بیشینه — همان exitQuoteSol صفحه. کارمزدِ پلتفرم روی سولانا صفر است.
+   • ۳ گذر: (۱) خواندنِ کشِ q/ برای همه‌ی کاندیداها (بی‌هزینه، ساب‌ریکوئست نیست)؛ (۲) کوتِ زنده‌ی SOL برای آن‌ها که ندارند؛
+     (۳) کوتِ زنده‌ی USDC برای آن‌ها که ندارند — فقط تا وقتی بودجه هست. هر دو گذرِ زنده هم‌زمانیِ ۲ و به ترتیبِ ارزش؛ ۴۲۹ → یک بار بعد از ۱۱۰۰ms.
+   • فقط EXIT_SOL_MAX_QUOTES توکنِ باارزش کاندیدای کوت‌اند؛ بقیه Unknown. بودجه که تمام شد دیگر نمی‌پرسیم و هرچه نتیجه ندارد Unknown می‌ماند.
+   • qc/ql شمارنده‌های بسته‌ی تشخیصی‌اند (ردیف‌هایی که حداقل یک کوتِ کش‌شده داشتند / فقط زنده)، نه آدرس. */
+const EXIT_SOL_RETRY_MS = 1100;
+const exitSolCanAsk = (st) => !st.blown && (typeof st.room !== "function" || st.room() > 0);
+async function exitSolAskLive(env, st, mint, outMint, amount) {
+  for (let k = 0; k < 2; k++) {
+    if (!exitSolCanAsk(st)) return undefined;
+    const r = await solQuoteCall(env, { inputMint: mint, outputMint: outMint, amount, slippageBps: 100, swapMode: "ExactIn", direct: false }, null);
+    if (r.status === 429 && k === 0) { await new Promise((z) => setTimeout(z, EXIT_SOL_RETRY_MS)); continue; }
+    const oa = r.json && r.json.outAmount;
+    if (r.ok && r.json && !r.json.error && typeof oa === "string" && /^\d{1,40}$/.test(oa)) return BigInt(oa);
+    return undefined;
+  }
+  return undefined;
+}
+async function exitSummaryInnerSol(owner, env, st) {
+  const h = await exitSolHoldingsCore(owner, env);
+  if (!h) return { s: null, why: "holdings" };
+  const { info, failed } = await exitPricesServer([SOL_WSOL_MINT].concat(h.tokens.map((t) => t.address)), env, st, true);   // wrapped SOL اول: SOL/USD در دسته‌ی اولِ قیمت
+  const wm = info.get(SOL_WSOL_MINT);
+  const solUsd = wm && wm.price != null && wm.price > 0 ? wm.price : null;
+  const rows = [];
+  const lamports = BigInt(h.eth);
+  if (lamports > 0n) {
+    const nat = { native: true, addr: "native", bal: lamports, dec: 9, price: null, paper: null, exit: null, quote: "done", state: "counted", why: "" };
+    nat.amt = unitsToNumber(lamports, 9);
+    if (solUsd != null) { nat.paper = nat.amt * solUsd; nat.exit = nat.paper; nat.price = solUsd; }   // SOL: کاغذی = خروج
+    rows.push(nat);
+  }
+  for (const t of h.tokens) rows.push(exitMakeRow(t, info, failed));
+  const todo = rows.filter((r) => r.state === "counted" && r.quote === "pending").sort((x, y) => (y.paper || 0) - (x.paper || 0));
+  todo.slice(EXIT_SOL_MAX_QUOTES).forEach((r) => { r.quote = "unknown"; r.exit = null; });   // بیش از سقف: Unknown، هرگز صفر
+  const need = [];
+  for (const r of todo.slice(0, EXIT_SOL_MAX_QUOTES)) {
+    if (r.addr === SOL_WSOL_MINT) {                       // خودِ wrapped SOL: مقدار × قیمت، بی‌کوت
+      r.exit = solUsd == null ? null : r.amt * solUsd;
+      r.quote = r.exit == null ? "unknown" : "ok";
+    } else need.push(r);
+  }
+  const res = new Map(need.map((r) => [r, { sol: undefined, usdc: undefined, cSol: false, cUsdc: false, amount: r.bal.toString() }]));
+  const askable = need.filter((r) => isAmountStr(res.get(r).amount));
+  const wantSol = (r) => solUsd != null;
+  const wantUsdc = (r) => r.addr !== SOL_USDC_MINT;
+  // گذرِ ۱: کشِ q/ (بی‌هزینه)
+  await Promise.all(askable.map(async (r) => {
+    const x = res.get(r);
+    if (wantSol(r)) { x.sol = await solQuoteCacheGet(r.addr, SOL_WSOL_MINT, x.amount); x.cSol = x.sol !== undefined; }
+    if (wantUsdc(r)) { x.usdc = await solQuoteCacheGet(r.addr, SOL_USDC_MINT, x.amount); x.cUsdc = x.usdc !== undefined; }
+  }));
+  const pool = async (items, fn) => {
+    let i = 0;
+    const run = async () => { while (i < items.length) { if (!exitSolCanAsk(st)) return; await fn(items[i++]); } };
+    await Promise.all([run(), run()]);
+  };
+  // گذرِ ۲: کوتِ زنده‌ی SOL
+  await pool(askable.filter((r) => wantSol(r) && res.get(r).sol === undefined), async (r) => {
+    const x = res.get(r); x.sol = await exitSolAskLive(env, st, r.addr, SOL_WSOL_MINT, x.amount);
+  });
+  // گذرِ ۳: کوتِ زنده‌ی USDC، فقط تا وقتی بودجه هست
+  await pool(askable.filter((r) => wantUsdc(r) && res.get(r).usdc === undefined), async (r) => {
+    const x = res.get(r); x.usdc = await exitSolAskLive(env, st, r.addr, SOL_USDC_MINT, x.amount);
+  });
+  let qc = 0, ql = 0;
+  for (const r of need) {
+    const x = res.get(r), outs = [];
+    let cached = false;
+    if (solUsd != null && x.sol != null && x.sol > 0n) { outs.push(unitsToNumber(x.sol, 9) * solUsd); cached = cached || x.cSol; }
+    if (x.usdc != null && x.usdc > 0n) { outs.push(unitsToNumber(x.usdc, 6)); cached = cached || x.cUsdc; }
+    const ok = outs.filter((v) => Number.isFinite(v) && v >= 0);
+    r.exit = ok.length ? Math.max(...ok) : null;          // 🔴 null = Unknown؛ هرگز ۰
+    r.quote = r.exit == null ? "unknown" : "ok";
+    if (r.exit != null) { if (cached) qc++; else ql++; }
+  }
+  const s = exitSummaryFrom(rows, h, Date.now());
+  return { s: s && { ...s, chain: "solana", qc, ql }, why: "done" };
+}
+
+/* محاسبه‌ی بی‌کش. opts.budget فقط برای تست. chain: "base" (پیش‌فرض) یا "solana". خروجی { s, why, fetches } — هرگز پرتاب نمی‌کند.
+   denied = تعدادِ fetchهایی که نگهبانِ بودجه ردشان کرد (تشخیصی/تست: گذرهای زنده باید پیش از رسیدن به سقف بایستند). */
+async function exitSummaryCompute(wallet, env, opts, chain) {
+  const sol = chain === "solana";
+  const budget = opts && Number.isInteger(opts.budget) ? opts.budget : sol ? EXIT_SOL_SUBREQ_BUDGET : EXIT_SUBREQ_BUDGET;
   const meter = makeSubMeter();
-  const st = { blown: false };
+  const st = { blown: false, denied: 0, room: () => budget - meter.fetches };
   const guarded = Object.create(meter);
   guarded.fetch = (input, init) => {
-    if (meter.fetches >= budget) { st.blown = true; return Promise.reject(new Error("exit-budget")); }
+    if (meter.fetches >= budget) { st.blown = true; st.denied++; return Promise.reject(new Error("exit-budget")); }
     return meter.fetch(input, init);
   };
   try {
-    const r = await reportContext.run({ meter: guarded, pace: null, poolsMemo: new Map() }, () => exitSummaryInner(wallet, env, st));
-    return { ...r, fetches: meter.fetches, blown: st.blown };
+    const r = await reportContext.run({ meter: guarded, pace: null, poolsMemo: new Map() }, () => (sol ? exitSummaryInnerSol(wallet, env, st) : exitSummaryInner(wallet, env, st)));
+    return { ...r, fetches: meter.fetches, blown: st.blown, denied: st.denied };
   } catch (e) {
-    return { s: null, why: "error", fetches: meter.fetches, blown: st.blown };
+    return { s: null, why: "error", fetches: meter.fetches, blown: st.blown, denied: st.denied };
   }
 }
 
 /* کش ۱۰دقیقه‌ای + ادغامِ هم‌زمان. o.compute=false: فقط کش. o.waitMs: بیشینه‌ی انتظار (محاسبه در پس‌زمینه ادامه می‌دهد). */
-async function exitSummaryCached(wallet, env, ctx, o) {
+async function exitSummaryCached(wallet, env, ctx, o, chain) {
+  const sol = chain === "solana";
   const store = cacheStore();
-  const key = new Request("https://exit.zaexa.internal/s/" + wallet, { method: "GET" });
+  // کلیدِ سولانا جدا از Base (و با همان بزرگی/کوچکیِ آدرس)؛ کلیدِ Base بی‌تغییر
+  const key = new Request("https://exit.zaexa.internal/s/" + (sol ? "sol/" : "") + wallet, { method: "GET" });
+  const ikey = sol ? "sol:" + wallet : wallet;
   if (store) {
     try {
       const hit = await store.match(key);
@@ -5021,11 +5158,11 @@ async function exitSummaryCached(wallet, env, ctx, o) {
     } catch (e) { /* کش خراب = بی‌کش */ }
   }
   if (!o || !o.compute) return null;
-  let p = exitInflight.get(wallet);
+  let p = exitInflight.get(ikey);
   if (!p) {
     p = (async () => {
       try {
-        const r = await exitSummaryCompute(wallet, env, o);
+        const r = await exitSummaryCompute(wallet, env, o, chain);
         if (r.s && store) {
           const put = Promise.resolve(store.put(key, new Response(JSON.stringify(r.s), { status: 200,
             headers: { "cache-control": "public, max-age=" + EXIT_TTL_S } }))).catch(() => {});
@@ -5033,9 +5170,9 @@ async function exitSummaryCached(wallet, env, ctx, o) {
         }
         return r.s;
       } catch (e) { return null; }
-      finally { exitInflight.delete(wallet); }
+      finally { exitInflight.delete(ikey); }
     })();
-    exitInflight.set(wallet, p);
+    exitInflight.set(ikey, p);
     if (ctx && typeof ctx.waitUntil === "function") ctx.waitUntil(p);
   }
   if (!o.waitMs) return p;
@@ -5047,10 +5184,12 @@ async function exitSummaryCached(wallet, env, ctx, o) {
 const OG_EXIT_RE = /^\/og\/exit\/([^/.]+)\.png$/;
 async function ogExitRoute(request, url, env, ctx, raw) {
   if (request.method !== "GET" && request.method !== "HEAD") return new Response(null, { status: 405 });
-  if (!EXIT_ADDR_RE.test(raw))
+  const isBase = EXIT_ADDR_RE.test(raw);
+  if (!isBase && !exitSolKeyOk(raw))
     return new Response("bad address", { status: 400, headers: { "content-type": "text/plain; charset=utf-8", "cache-control": "no-store" } });
   try {
-    const wallet = raw.toLowerCase();
+    const chain = isBase ? "base" : "solana";
+    const wallet = isBase ? raw.toLowerCase() : raw;      // 🔴 سولانا هرگز lowercase نمی‌شود
     const store = cacheStore();
     const cacheKey = new Request(url.toString(), { method: "GET" });
     if (store) {
@@ -5061,7 +5200,7 @@ async function ogExitRoute(request, url, env, ctx, raw) {
     }
     const compute = rateOk(request, "exog", RL_LIMIT, RL_WINDOW_MS);
     let s = null;
-    try { s = await exitSummaryCached(wallet, env, ctx, { compute, waitMs: EXIT_IMG_WAIT_MS }); } catch (e) { s = null; }
+    try { s = await exitSummaryCached(wallet, env, ctx, { compute, waitMs: EXIT_IMG_WAIT_MS }, chain); } catch (e) { s = null; }
     const png = await exitCardPng(s ? { addr: wallet, summary: s } : { generic: true });
     const res = new Response(request.method === "HEAD" ? null : png, {
       status: 200,
@@ -5074,6 +5213,9 @@ async function ogExitRoute(request, url, env, ctx, raw) {
         "x-robots-tag": "noindex",
       },
     });
+    /* هدرِ تشخیصیِ بسته: c = ردیف‌هایی که کوتِ کش‌شده‌ی صفحه را به کار بردند، l = فقط زنده، u = Unknown. بی‌آدرس.
+       خلاصه‌ی Base qc/ql ندارد → هدر را نمی‌گذاریم (پاسخِ Base بایت‌به‌بایت مثلِ قبل می‌ماند). */
+    if (s && Number.isInteger(s.qc) && Number.isInteger(s.ql)) res.headers.set("x-exit-src", "c=" + s.qc + ";l=" + s.ql + ";u=" + s.unknownCount);
     if (s && store && request.method === "GET") {
       let put = null;
       try { put = Promise.resolve(store.put(cacheKey, res.clone())).catch(() => {}); } catch (e) { /* کش خراب = بی‌کش */ }
@@ -5104,15 +5246,17 @@ function injectExitOg(res, url, wallet, sumPromise) {
 async function exitPageRoute(request, url, env, ctx) {
   const m = EXIT_PAGE.exec(url.pathname.replace(/(.)\/$/, "$1"));
   const raw = m && m[1] ? m[1] : null;
-  const valid = raw !== null && EXIT_ADDR_RE.test(raw);
-  const wallet = valid ? raw.toLowerCase() : null;
+  const isBase = raw !== null && EXIT_ADDR_RE.test(raw);
+  const isSol = raw !== null && !isBase && exitSolKeyOk(raw);
+  const valid = isBase || isSol;
+  const wallet = isBase ? raw.toLowerCase() : isSol ? raw : null;     // 🔴 سولانا همان‌طور که تایپ شده (حساس به بزرگی/کوچکی)
   /* عدد فقط برای رباتِ پیش‌نمایش محاسبه می‌شود (انسان منتظرِ ۳ ثانیه‌ی سرور نمی‌ماند؛ خودِ صفحه همان را در مرورگر می‌سازد).
      کش اگر باشد برای همه می‌آید. شروعِ محاسبه *پیش از* await روی ASSETS تا موازی بروند. */
   let sum = null;
   if (valid && request.method === "GET") {
     const bot = EXIT_BOT_UA.test(request.headers.get("user-agent") || "");
     const compute = bot && rateOk(request, "exog", RL_LIMIT, RL_WINDOW_MS);
-    sum = exitSummaryCached(wallet, env, ctx, { compute, waitMs: EXIT_PAGE_WAIT_MS }).catch(() => null);
+    sum = exitSummaryCached(wallet, env, ctx, { compute, waitMs: EXIT_PAGE_WAIT_MS }, isSol ? "solana" : "base").catch(() => null);
   }
   const res = await env.ASSETS.fetch(new Request(new URL("/app", url), request));
   const headers = new Headers(res.headers);
@@ -5187,7 +5331,7 @@ export default {
     /* سوآپِ زنده‌ی سولانا — هر سه پیش از /vd بررسی نمی‌شوند چون پیشوندشان
        فرق دارد؛ ترتیب اینجا اهمیتی ندارد، فقط برای هم‌جواری با بقیه‌ی
        مسیرهای تازه نگه داشته شده. */
-    if (url.pathname === "/sol/quote") return solQuoteRoute(request, url, env);
+    if (url.pathname === "/sol/quote") return solQuoteRoute(request, url, env, ctx);
     if (url.pathname === "/sol/swap") return solSwapRoute(request, url, env);
     if (url.pathname === "/sol/rpc") return solRpcRoute(request, url, env);
     if (url.pathname === "/base/rpc") return baseRpcRoute(request, env);
