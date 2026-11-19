@@ -5326,7 +5326,7 @@ export default {
       return tgRoute(request, url, env, {
         verdict: (a) => tokenVerdict(a, env, ctx, Date.now() + OG_BUDGET_MS, { withSymbol: true }),
         /* /exit <کیف> — همان خلاصه‌ی ۱۰دقیقه‌ایِ کارتِ پیش‌نمایش (یک کش، یک محاسبه برای هر دو). null = نمی‌دانیم، هرگز صفر. */
-        exit: (w) => exitSummaryCached(w, env, ctx, { compute: true, waitMs: TG_EXIT_WAIT_MS }),
+        exit: (w, chain) => exitSummaryCached(w, env, ctx, { compute: true, waitMs: TG_EXIT_WAIT_MS }, chain === "solana" ? "solana" : "base"),
       });
     /* سوآپِ زنده‌ی سولانا — هر سه پیش از /vd بررسی نمی‌شوند چون پیشوندشان
        فرق دارد؛ ترتیب اینجا اهمیتی ندارد، فقط برای هم‌جواری با بقیه‌ی

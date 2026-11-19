@@ -10,7 +10,7 @@
 
 import { chainOf } from "./chains.js";
 import { plainWhy } from "./report_page.js";
-import { exitSummaryValid, shortAddr } from "./exit.js";
+import { exitSummaryValid, exitSolKeyOk, shortAddr } from "./exit.js";
 import { exitCardLines } from "./og-exit.js";
 
 export const TG_CHAT_LIMIT = 10;
@@ -33,7 +33,7 @@ export const HELP_TEXT =
   "Solana: the token's mint address.\n" +
   "In a group: /check <address>, or mention me with the address.\n\n" +
   "Example:\n/check 0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913\n\n" +
-  "For a wallet: /exit <address> shows what a Base wallet would fetch if everything in it were sold now.\n\n" + LAST_LINE;
+  "For a wallet: /exit <address> shows what a Base or Solana wallet would fetch if everything in it were sold now.\n\n" + LAST_LINE;
 // فقط برای /start — یک خط معرفی پیش از همان راهنما
 export const START_TEXT =
   "Zaexa is a DEX aggregator on Base and Solana. This bot runs the same exit check " +
@@ -44,8 +44,9 @@ export const REPORT_URL = "https://zaexa.com/report";
 export const EXIT_PAGE_URL = "https://zaexa.com/exit/";
 export const EXIT_LAST_LINE = "A floor from live quotes, not a price call.";
 export const EXIT_USAGE =
-  "Send /exit followed by a Base wallet address: 0x and 40 hex characters.\n" +
-  "Solana wallets are not covered.";
+  "Send /exit followed by a wallet address:\n" +
+  "Base: 0x and 40 hex characters.\n" +
+  "Solana: the wallet's address.";
 // «نمی‌دانیم» — هم کیفی که چیزی برای شمردن ندارد، هم داده‌ای که نرسید. هیچ رقمِ دلاری در این متن نیست.
 export const EXIT_UNKNOWN =
   "? Could not be worked out right now\n" +
@@ -214,8 +215,9 @@ export function walletHint(chain, r) {
 
 /* متنِ جوابِ /exit — خط‌ها عیناً از exitCardLines (همان منبعِ کارتِ /og/exit؛ هم‌پایه‌ی کارتِ صفحه):
    وقتی توکنِ بی‌کوت هست «at least» و «On paper» همان quotedPaper است. خلاصه‌ی نامعتبر/null = EXIT_UNKNOWN، هرگز «$0». */
-export function exitText(wallet, s) {
-  const head = "Exit value of " + shortAddr(String(wallet)) + " · Base\n";
+/* chain: «base» (پیش‌فرض) یا «solana» — فقط نامِ شبکه در سطرِ اول. 🔴 آدرسِ سولانا همان‌طور که تایپ شده نشان داده می‌شود. */
+export function exitText(wallet, s, chain) {
+  const head = "Exit value of " + shortAddr(String(wallet)) + " · " + (chain === "solana" ? "Solana" : "Base") + "\n";
   if (!exitSummaryValid(s)) return head + EXIT_UNKNOWN;
   const L = exitCardLines(s);
   const unk = s.unknownCount > 0 || s.partial === true;
@@ -301,12 +303,12 @@ function count(env, outcome, chain) {
 
 /* شمارشِ یک جوابِ /exit که عدد داشت — همان نامِ موجودِ صفحه (exit:check، detail خالی) با سطحِ «bot»ِ همین ربات.
    نامِ تازه، مقدارِ تازه یا آدرس ندارد؛ جوابِ «نمی‌دانیم» شمرده نمی‌شود (صفحه هم خواندنِ ناموفق را نمی‌شمارد). */
-function countExit(env) {
+function countExit(env, chain) {
   const ds = env && env.ZX_EV;
   if (!ds || typeof ds.writeDataPoint !== "function") return;
   try {
     ds.writeDataPoint({
-      blobs: ["exit:check", "", "bot", "??", "base"],
+      blobs: ["exit:check", "", "bot", "??", chain === "solana" ? "solana" : "base"],
       doubles: [1],
       indexes: ["exit:check"],
     });
@@ -348,17 +350,22 @@ export async function tgRoute(request, url, env, deps) {
     const addrs = extractAddresses(p.extract);
     if (p.exit) {
       if (addrs.length > 1) return jsonReply(replyObj(message, ONE_ADDRESS));
-      const wallet = addrs.length === 1 && chainOf(addrs[0]) === "base" ? addrs[0] : null;
+      /* ۱۹ نوامبر — کیفِ سولانا هم: الگوی base58 کافی نیست، باید دقیقاً ۳۲ بایت decode شود (exitSolKeyOk، همان قاعده‌ی صفحه و کارت). */
+      const c0 = addrs.length === 1 ? chainOf(addrs[0]) : null;
+      const wChain = c0 === "base" ? "base" : c0 === "solana" && exitSolKeyOk(addrs[0]) ? "solana" : null;
+      const wallet = wChain ? addrs[0] : null;
       if (!wallet) return jsonReply(replyObj(message, EXIT_USAGE));
       const nowX = deps && typeof deps.now === "number" ? deps.now : Date.now();
       if (!chatOk(chat.id, nowX)) return jsonReply(replyObj(message, CHAT_LIMIT));
       if (!globalOk(nowX) || !exitOk(nowX)) return jsonReply(replyObj(message, GLOBAL_LIMIT));
       let s = null;
-      // کلیدِ کشِ خلاصه حروفِ کوچک است (همان قاعده‌ی /og/exit)؛ پرتاب یا نبودِ deps.exit = «نمی‌دانیم»
-      try { s = deps && typeof deps.exit === "function" ? await deps.exit(wallet.toLowerCase()) : null; } catch (e) { s = null; }
+      /* کلیدِ کشِ خلاصه‌ی Base حروفِ کوچک است (همان قاعده‌ی /og/exit)؛ 🔴 سولانا هرگز lowercase نمی‌شود.
+         پرتاب یا نبودِ deps.exit = «نمی‌دانیم». */
+      const key = wChain === "base" ? wallet.toLowerCase() : wallet;
+      try { s = deps && typeof deps.exit === "function" ? await deps.exit(key, wChain) : null; } catch (e) { s = null; }
       if (!exitSummaryValid(s)) s = null;
-      if (s) countExit(env);
-      const o = replyObj(message, exitText(wallet, s));
+      if (s) countExit(env, wChain);
+      const o = replyObj(message, exitText(wallet, s, wChain));
       o.reply_markup = { inline_keyboard: [[{ text: "Open on Zaexa", url: EXIT_PAGE_URL + wallet }]] };
       return jsonReply(o);
     }

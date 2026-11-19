@@ -19110,6 +19110,31 @@ console.log(fails === 0
         resetCache();
       }
       okS(kvOps.length === 0 && evPoints.length === 0, "[exit og sol] (end) no KV or /ev operation in the whole Solana section");
+      // ---- (i) ۱۹ نوامبر — رباتِ تلگرام: /exit <کیفِ سولانا> از راهِ خودِ Worker همان خلاصه‌ی سولانای کارت را می‌گیرد ----
+      {
+        const TGX = await import("./tg.js");
+        const TGT = "123456:EXIT_SOL_TG_TOKEN";
+        const { path: TP, header: TH } = await TGX.tgSecrets(TGT);
+        const envT = { ...envSol, TG_BOT_TOKEN: TGT, TG_BOT_USERNAME: "ZaexaTestBot" };
+        const POST = (text) => ({ method: "POST", headers: { "x-telegram-bot-api-secret-token": TH, "content-type": "application/json", "cf-connecting-ip": "198.18.91.1" },
+          body: JSON.stringify({ update_id: 9101, message: { message_id: 7, chat: { id: 556, type: "private" }, from: { id: 98, is_bot: false }, date: 1, text } }) });
+        const noTime = (t) => String(t).replace(/\nQuoted at \d\d:\d\d UTC\./, "");
+        TGX.tgRateReset();
+        resetCache();
+        for (const m of [MA, MB, USDC]) for (const o of [WSOL, USDC]) if (JQ[m][o] != null) seedQ(m, o, JQ[m][o]);
+        const want = await CSOL(mkSolWorld({ held: HELD_QUOTABLE }), {});
+        resetCache();
+        for (const m of [MA, MB, USDC]) for (const o of [WSOL, USDC]) if (JQ[m][o] != null) seedQ(m, o, JQ[m][o]);
+        const wT = mkSolWorld({ held: HELD_QUOTABLE });
+        const resT = await RUN(wT, "/tg/" + TP, POST("/exit " + SOLW), envT);
+        const jT = await resT.json();
+        okS(resT.status === 200 && want.s && jT.method === "sendMessage" && noTime(jT.text) === noTime(TGX.exitText(SOLW, want.s, "solana")) && jT.text.includes(" · Solana\n") && jT.text.includes("If sold now"),
+          "[exit og sol] Telegram /exit <solana wallet> through the Worker replies with the same Solana summary the card computes: " + JSON.stringify(jT.text));
+        okS(puts.some((p) => p.u === "https://exit.zaexa.internal/s/sol/" + SOLW) && wT.kinds.includes("holdings") && !wT.kinds.includes("other"),
+          "[exit og sol] the bot's summary lands in the Solana card cache key (address as typed) and reads Solana holdings, got " + wT.kinds.join());
+        okS(jT.reply_markup && jT.reply_markup.inline_keyboard[0][0].url === "https://zaexa.com/exit/" + SOLW, "[exit og sol] the bot button opens the page with the address as typed");
+      }
+
       console.log("[exit og sol] Solana preview: /sol/quote writes (never reads) exit-shaped quotes to the q/ cache; the server summary reads that cache first, quotes the rest live (SOL then USDC, budget 44, 429 retried once), unknown never 0, case kept everywhere, card built from TOP.Solana with x-exit-src; " + nS + " assertions");
     }
   } finally {

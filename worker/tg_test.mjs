@@ -407,7 +407,7 @@ done("privacy");
   r = await g("/exit@zaexatestbot " + WAL);
   ok(r.json && ex.seen.length === 2, "group /exit@zaexatestbot replies");
   ex = mkExit(S());
-  for (const [text, want, label] of [["/exit", EXIT_USAGE, "no address"], ["/exit hello", EXIT_USAGE, "text without an address"], ["/exit " + MINT, EXIT_USAGE, "a Solana address"],
+  for (const [text, want, label] of [["/exit", EXIT_USAGE, "no address"], ["/exit hello", EXIT_USAGE, "text without an address"], ["/exit " + "1".repeat(40), EXIT_USAGE, "a base58 string that is not a 32-byte Solana key"],
     ["/exit " + WAL + " " + OTHER, ONE_ADDRESS, "two addresses"]]) {
     r = await runCount(upd(msg(text)), { exit: ex });
     ok(r.json && r.json.text === want && !r.json.reply_markup && ex.seen.length === 0 && r.n === 0, "/exit with " + label + " -> fixed text, no summary, no verdict");
@@ -420,6 +420,24 @@ done("privacy");
   }
   r = await runCount(upd(msg("/exit " + WAL)));
   ok(r.json && r.json.text === HEAD + EXIT_UNKNOWN, "no exit dependency -> the unknown text");
+
+  // --- ۱۹ نوامبر: کیفِ سولانا ---
+  {
+    tgRateReset();
+    const SW = "CbU4oSFCk8SVgW23NLvb5BwctvWcZZHfxRD6HudP8gAo";
+    const SHEAD = "Exit value of CbU4oS…8gAo · Solana\n";
+    const seen = [];
+    const exS = async (w, c) => { seen.push([w, c]); return S(); };
+    let rs = await runCount(upd(msg("/exit " + SW)), { exit: exS });
+    ok(rs.json && rs.json.text === exitText(SW, S(), "solana") && rs.json.text.startsWith(SHEAD) && rs.n === 0, "Solana /exit replies with the exit text headed '· Solana', no verdict, got " + JSON.stringify(rs.json && rs.json.text));
+    ok(seen.length === 1 && seen[0][0] === SW && seen[0][1] === "solana", "Solana /exit asks the summary with the address as typed (never lower-cased) and chain solana, got " + JSON.stringify(seen));
+    ok(rs.json && rs.json.reply_markup.inline_keyboard[0][0].url === "https://zaexa.com/exit/" + SW, "Solana /exit button links to the page with the address as typed");
+    const seenB = [];
+    rs = await runCount(upd(msg("/exit " + WAL)), { exit: async (w, c) => { seenB.push([w, c]); return S(); } });
+    ok(seenB.length === 1 && seenB[0][0] === WAL.toLowerCase() && seenB[0][1] === "base", "Base /exit passes chain base, got " + JSON.stringify(seenB));
+    ok(exitText(WAL, S()) === exitText(WAL, S(), "base") && exitText(WAL, S()).startsWith(HEAD), "exitText without a chain stays the Base text");
+    ok(/Solana/.test(EXIT_USAGE) && !/not covered/.test(EXIT_USAGE) && /Base or Solana wallet/.test(HELP_TEXT), "usage and help name Solana wallets");
+  }
 
   // --- سقف‌ها ---
   tgRateReset();
@@ -463,11 +481,14 @@ done("privacy");
     await send("/exit " + WAL, mkExit(null));
     await send("/exit " + WAL, mkExit(new Error("x")));
     await send("/exit", mkExit(S()));
+    await send("/exit " + "1".repeat(40), mkExit(S()));
+    ok(points.length === 1, "unknown, usage and not-a-wallet /exit replies write no point (got " + points.length + ")");
     await send("/exit " + MINT, mkExit(S()));
-    ok(points.length === 1, "unknown, usage and wrong-chain /exit replies write no point (got " + points.length + ")");
+    ok(points.length === 2 && JSON.stringify(points[1].blobs) === JSON.stringify(["exit:check", "", "bot", "??", "solana"]),
+      "a Solana /exit reply with numbers writes one point with the existing chain value 'solana', no address: " + JSON.stringify(points[1]));
     const flat = JSON.stringify(points).toLowerCase();
-    ok(!flat.includes(WAL.toLowerCase()) && !flat.includes("8a0d") && !flat.includes("7e23") && !flat.includes("424242"), "no wallet address and no chat id in the data point");
-    ok(bodies.length === 5 && bodies[0].includes("If sold now"), "the five replies were produced");
+    ok(!flat.includes(WAL.toLowerCase()) && !flat.includes("8a0d") && !flat.includes("7e23") && !flat.includes("424242") && !flat.includes(MINT.toLowerCase()), "no wallet address and no chat id in the data point");
+    ok(bodies.length === 6 && bodies[0].includes("If sold now") && bodies[5].includes("If sold now"), "the six replies were produced");
     for (const b of bodies) ok(!b.includes(TOKEN) && !b.includes("TESTTOKEN") && !b.includes(H) && !b.includes(P), "exit body leaks secret");
     const envBoom = mkEnv({ ZX_EV: { writeDataPoint() { throw new Error("boom"); } } });
     const rb = await run(upd(msg("/exit " + WAL, { chat: 424243 })), { env: envBoom, exit: mkExit(S()) });
