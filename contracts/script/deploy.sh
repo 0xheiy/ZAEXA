@@ -76,6 +76,10 @@ FEE_TOKENS_ARG="[$FEE_TOKENS_ARR]"
 # هشتمی روتر کارخانه‌ی قدیمیِ همان Slipstream است (aerodrome-cl-v1) — همان
 # kind=4، فکتوری و کوتر جدا؛ روی زنجیره ۲۴ سپتامبر ۲۰۲۶ با factory() و یک
 # eth_call واقعیِ exactInputSingle (سلکتور 0xa026383e) تأیید شده.
+# دهمی روتر کارخانه‌ی سومِ Slipstream است (aerodrome-cl-3، Dromos Labs ۲۱ اکتبر
+# ۲۰۲۶) — همان kind=4 و همان ساختار exactInputSingle (سلکتور 0xa026383e)، پس
+# قرارداد تغییری نمی‌خواهد؛ فقط برای دیپلوی‌های بعدی اینجا لیست‌سفید می‌شود.
+# کوتر این کارخانه metaquoter است (فقط سمت وب؛ اجراکننده کوت نمی‌گیرد).
 # نهمی UniswapV2Router02 روی Base است (kind=0، مثل BaseSwap) — آدرس از
 # docs.uniswap.org؛ در verify_dexes.sh فهرست شده، و روی زنجیره باید پیش از
 # استفاده با آن اسکریپت تأیید شود.
@@ -87,7 +91,8 @@ ROUTERS="0x2626664c2603336E57B271c5C0b26F421741e481,\
 0x1b81D678ffb9C0263b24A97847620C99d213eB14,\
 0x698Cb2b6dd822994581fEa6eA4Fc755d1363A92F,\
 0xBE6D8f0d05cC4be24d5167a3eF062215bE6D18a5,\
-0x4752ba5DBc23f44D87826276BF6Fd6b1C372aD24"
+0x4752ba5DBc23f44D87826276BF6Fd6b1C372aD24,\
+0x9Ee35Bf1bd69a03c6F0393582030fCe8Bb93D418"
 
 echo "==============================================================="
 echo " دیپلوی SwapExecutor"

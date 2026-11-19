@@ -2068,6 +2068,7 @@ def check_stock_tokens():
         "SNDKc": "0xb200000000000000000000397293Cb8cda9a10c5",
         "SPCXc": "0xb2000000000000000000007b9fcbd005511aCBd5",
         "TSLAc": "0xb2000000000000000000001e800a7f5189430cD0",
+        "ANTc": "0xb20000000000000000000016e38FD364d271Ba28",
     }
     for sym, addr in want.items():
         assert sym in toks, "stock token %s is missing from BASE_TOKENS" % sym
@@ -5685,10 +5686,11 @@ async def check_report_picker(p, errors):
 # حجم "3488482.1" و تغییر "-1.42" هر دو *رشته* (GeckoTerminal رشته می‌فرستد، نه عدد).
 # =====================================================================
 import json as _stkjson
-# ۱۱ اکتبر — فهرستِ مستقلِ Base (۱۲ تا): نماد، نام، توکن، استخر، فید (None = بدون فیدِ Chainlink). عمداً کپیِ جدا از index.html.
+# ۱۱ اکتبر — فهرستِ مستقلِ Base (۱۲ تا؛ ۱۹ نوامبر ANTc شد ۱۳ تا): نماد، نام، توکن، استخر، فید (None = بدون فیدِ Chainlink). عمداً کپیِ جدا از index.html.
 STK_BASE_EXPECT = [
     ('AAPLc', 'Apple', '0xb200000000000000000000C2e324d24d7eEcd1fb', '0xa3b1e3f9747065e2073722ff4c9027d3ea4994f0', '0x787f13dEa48Db0897CbCDD985de77809D837F988'),
     ('AMZNc', 'Amazon', '0xb200000000000000000000d9192b6B456483C2E8', '0xd03bc8c7f2faedce2aac81bf0444aea08ea06e9b', '0x06A8E4b3aBB3B7543d8396FB2B763d22820cB295'),
+    ('ANTc', 'Anthropic', '0xb20000000000000000000016e38FD364d271Ba28', '0x599c4225fe90214795a0be228d20d7680f8ced15', None),
     ('GOOGLc', 'Alphabet', '0xb2000000000000000000002D0BA3164cc74f58B7', '0xb1987cad1682841b4b641d50e520777ec5ab5542', '0x5bF49E0ffA937CE2FfF033c739aD7C634c4D34F2'),
     ('METAc', 'Meta', '0xb2000000000000000000008bC8786B856E61707C', '0xeaf57753bc382e0324a1d43f72e7027705a2273e', '0x6526aE6797A76123638b863AeE4dD27Ba4E4b27D'),
     ('MSFTc', 'Microsoft', '0xB200000000000000000000Ab99cFa739E253872B', '0x7103eb3c9590d1281f7dc03b2a9ee27c39df5d54', '0xeB10A6c9aa7E537aEd766C08c35Dae35B321b18c'),
@@ -5706,6 +5708,7 @@ STK_NAMES = {e[0]: e[1] for e in STK_BASE_EXPECT}
 STK_FIX = {
     "AAPLc": (258.31, 38711500, 25802000000, "4512300.5", "0.85"),
     "AMZNc": (224.87, 44470500, 22510000000, "850000.2", "-0.40"),
+    "ANTc": (96.70, 103413114, None, "812000.5", "1.10"),   # ۱۹ نوامبر: کوتِ واقعیِ metaquoter روی استخرِ USDC/ANTc
     "GOOGLc": (187.42, 53357000, 18760000000, "1262000", "1.12"),
     "METAc": (612.15, 16336000, 61120000000, "980400.7", "-2.30"),
     "MSFTc": (431.08, 23198000, 43150000000, "2210000.9", "0.05"),
@@ -5725,7 +5728,7 @@ def stk_cfg(**over):
     """پیکربندی فیکسچر از روی خودِ index.html — آدرس‌ها را دستی کپی نمی‌کنیم تا با کد یکی بمانند."""
     src = open(os.path.join(HERE, "..", "index.html"), encoding="utf-8").read()
     feeds, pools = {}, {}
-    for m in re.finditer(r'\{sym:"(\w+)",name:"[^"]*",feed:(null|"0x[0-9a-fA-F]{40}"),pool:"(0x[0-9a-f]{40})"\}', src):
+    for m in re.finditer(r'\{sym:"(\w+)",name:"[^"]*",feed:(null|"0x[0-9a-fA-F]{40}"),pool:"(0x[0-9a-f]{40})"(?:,dex:"[\w-]+")?\}', src):
         if m.group(2) != "null":
             feeds[m.group(2).strip('"').lower()] = m.group(1)
         pools[m.group(3).lower()] = m.group(1)
@@ -5735,9 +5738,10 @@ def stk_cfg(**over):
         if m.group(1) in STK_FIX:
             tokens[m.group(2).lower()] = m.group(1)
     quoter = re.search(r'\{id:"aerodrome-cl",.*?quoter:"(0x[0-9a-fA-F]{40})"', src, re.S).group(1).lower()
-    assert len(feeds) == 10 and len(pools) == 12 and len(tokens) == 12, (
-        "[stocks] could not read the 10 feeds / 12 pools / 12 tokens from index.html: %d/%d/%d" % (len(feeds), len(pools), len(tokens)))
-    cfg = {"feeds": feeds, "pools": pools, "tokens": tokens, "quoter": quoter,
+    meta = re.search(r'\{id:"aerodrome-cl-3",.*?quoter:"(0x[0-9a-fA-F]{40})"', src, re.S).group(1).lower()
+    assert len(feeds) == 10 and len(pools) == 13 and len(tokens) == 13, (
+        "[stocks] could not read the 10 feeds / 13 pools / 13 tokens from index.html: %d/%d/%d" % (len(feeds), len(pools), len(tokens)))
+    cfg = {"feeds": feeds, "pools": pools, "tokens": tokens, "quoter": quoter, "metaquoter": meta,
            "fix": {s: {"out": f[1], "answer": f[2], "vol": f[3], "chg": f[4]} for s, f in STK_FIX.items()},
            "ageSec": 300, "failQuote": [], "failAll": False, "failGt": False}
     cfg.update(over)
@@ -5769,6 +5773,11 @@ STK_INIT_JS = """(() => {
         const t = String(target).toLowerCase();
         if (t === c.quoter && inner.name === "quoteExactInputSingle" && c.tokens[String(inner.args[0][1]).toLowerCase()])
           return ["q", c.tokens[String(inner.args[0][1]).toLowerCase()]];
+        // ۱۹ نوامبر: ردیفِ ANTc با metaquoter (کلیدش آدرسِ استخر است، نه جفتِ توکن)؛ آرگومان‌ها برای کاوشگر ثبت می‌شود
+        if (t === c.metaquoter && inner.name === "quoteExactInputSingleV3" && c.pools[String(inner.args[0]).toLowerCase()]) {
+          (window.__STK__.metaArgs = window.__STK__.metaArgs || []).push(inner.args.map(String));
+          return ["m", c.pools[String(inner.args[0]).toLowerCase()]];
+        }
         if (inner.name === "latestRoundData" && c.feeds[t]) return ["f", c.feeds[t]];
         return null;
       };
@@ -5778,9 +5787,9 @@ STK_INIT_JS = """(() => {
       window.__STK__.kinds.push(kinds.map(k => k[0] + ":" + k[1]));
       if (c.failAll) throw Object.assign(new Error("Failed to fetch"), {code: "NETWORK_ERROR"});
       const results = kinds.map(([k, sym]) => {
-        if (k === "q") {
+        if (k === "q" || k === "m") {
           if (c.failQuote.includes(sym)) return [false, "0x"];
-          return [true, toHex(ser({ret: [BigInt(c.fix[sym].out), 0n, 0, 0n]}))];
+          return [true, toHex(ser({ret: k === "m" ? [BigInt(c.fix[sym].out), 0n, 0] : [BigInt(c.fix[sym].out), 0n, 0, 0n]}))];
         }
         return [true, toHex(ser({ret: [1n, BigInt(c.fix[sym].answer), 0n, BigInt(Math.floor(Date.now() / 1000) - c.ageSec), 1n]}))];
       });
@@ -6361,7 +6370,7 @@ async def check_stocks_sol(p, errors):
         st = await pg.evaluate(ST_JS)
         exp = STK_SOL_EXPECT if sol else [(e[0], e[1]) for e in STK_BASE_EXPECT]
         names = STK_SOL_NAMES if sol else STK_NAMES
-        n = 21 if sol else 12
+        n = 21 if sol else 13
         assert st["bodyRows"] == n and st["total"] == n, "%s: exactly %d rows, got %s" % (tag, n, st["bodyRows"])
         assert [r[0] for r in st["rows"]] == [e[0] for e in exp], "%s: row order %s" % (tag, [r[0] for r in st["rows"]])
         for r in st["rows"]:
@@ -6398,7 +6407,7 @@ async def check_stocks_sol(p, errors):
         st = await lists_check(pg, "[stocks lists] Base again #%d" % (rnd + 1), False)
         assert dict((r[0], r[3]) for r in st["rows"])["GOOGLc"] == "GOOG", "[stocks lists] GOOGLc avatar letters"
     await pg.context.close()
-    print("[stocks lists] #stkTable tbody is empty in the HTML; Base boot builds exactly 12 rows in STK order; Solana exactly 20 in STK_SOL order with no Base symbol left; three round trips never duplicate rows; avatar letters GOOG / STRC / QQQ; 'S&P 500 ETF' and \"McDonald's\" render literally; names are set as text (an HTML-looking name stays text)")
+    print("[stocks lists] #stkTable tbody is empty in the HTML; Base boot builds exactly 13 rows in STK order; Solana exactly 20 in STK_SOL order with no Base symbol left; three round trips never duplicate rows; avatar letters GOOG / STRC / QQQ; 'S&P 500 ETF' and \"McDonald's\" render literally; names are set as text (an HTML-looking name stays text)")
 
     # ---- [stocks no feed] ۱۱ اکتبر — بدون فید: مرجع «—»، فاصله خالی؛ قیمت و تغییر و حجم سر جایشان ----
     FEEDLESS_JS = """() => Object.fromEntries([...document.querySelectorAll('#stkTable tbody tr')].map(r => [r.dataset.sym, {
@@ -6417,9 +6426,9 @@ async def check_stocks_sol(p, errors):
         else:
             assert r["ref"] == e["ref"] and r["gap"] == e["gap"], "[stocks no feed] Base %s keeps its reference: %s" % (sym_, r)
     kinds = await pg.evaluate("() => window.__STK__.kinds")
-    assert len(kinds) == 1 and len(kinds[0]) == 22, "[stocks no feed] one multicall batch of 12 quotes + 10 feeds: %s" % [len(k_) for k_ in kinds]
-    assert sum(1 for k_ in kinds[0] if k_.startswith("q:")) == 12 and sum(1 for k_ in kinds[0] if k_.startswith("f:")) == 10, "[stocks no feed] 12 quotes and 10 feeds: %s" % kinds[0]
-    assert not ({"f:MUc", "f:PLTRc"} & set(kinds[0])) and {"q:MUc", "q:PLTRc"} <= set(kinds[0]), "[stocks no feed] MUc/PLTRc are quoted but never asked for a feed: %s" % kinds[0]
+    assert len(kinds) == 1 and len(kinds[0]) == 23, "[stocks no feed] one multicall batch of 13 quotes + 10 feeds: %s" % [len(k_) for k_ in kinds]
+    assert sum(1 for k_ in kinds[0] if k_[:2] in ("q:", "m:")) == 13 and sum(1 for k_ in kinds[0] if k_.startswith("f:")) == 10, "[stocks no feed] 13 quotes (12 aerodrome-cl + 1 metaquoter) and 10 feeds: %s" % kinds[0]
+    assert not ({"f:MUc", "f:PLTRc", "f:ANTc"} & set(kinds[0])) and {"q:MUc", "q:PLTRc", "m:ANTc"} <= set(kinds[0]), "[stocks no feed] MUc/PLTRc/ANTc are quoted but never asked for a feed: %s" % kinds[0]
     await pg.context.close()
     pg = await open_sol(badFeeds=[])
     await stk_sol_wait(pg)
@@ -6436,7 +6445,7 @@ async def check_stocks_sol(p, errors):
     assert rq["rpc"] == 9 and sorted(r["body"]["params"][0]["to"].lower() for r in rq["rpcReqs"]) == sorted(f_.lower() for _, _, _, f_ in STK_SOL_EXPECT if f_), \
         "[stocks no feed] Solana asks exactly the 9 feeds that exist (%d eth_call)" % rq["rpc"]
     await pg.context.close()
-    print("[stocks no feed] Base MUc/PLTRc and Solana ANTx/COINx/CRCLx/GLDx/GMEx/HOODx/MCDx/PLTRx/QQQx/SPYx/STRCx/ANTHROPIC show a dash reference with an empty gap (no error class) while price, change and volume still show; the Base batch is 12 quotes + 10 feeds and never reads a feed for MUc/PLTRc; Solana makes exactly 9 eth_call")
+    print("[stocks no feed] Base ANTc/MUc/PLTRc and Solana ANTx/COINx/CRCLx/GLDx/GMEx/HOODx/MCDx/PLTRx/QQQx/SPYx/STRCx/ANTHROPIC show a dash reference with an empty gap (no error class) while price, change and volume still show; the Base batch is 13 quotes + 10 feeds and never reads a feed for ANTc/MUc/PLTRc; Solana makes exactly 9 eth_call")
 
     await b.close()
     assert not errs, "[stocks sol] console/page errors: %s" % errs[:5]
@@ -6452,9 +6461,9 @@ async def check_stocks(p, errors):
     blk = re.search(r"const STK=\[(.*?)\n\];", src_ix, re.S)
     assert blk, "[stocks base list] STK not found in index.html"
     got_b = [(a_, n_, None if f_ == "null" else f_.strip('"'), p_) for a_, n_, f_, p_ in
-             re.findall(r'\{sym:"(\w+)",name:"([^"]*)",feed:(null|"0x[0-9a-fA-F]{40}"),pool:"(0x[0-9a-f]{40})"\}', blk.group(1))]
+             re.findall(r'\{sym:"(\w+)",name:"([^"]*)",feed:(null|"0x[0-9a-fA-F]{40}"),pool:"(0x[0-9a-f]{40})"(?:,dex:"aerodrome-cl-3")?\}', blk.group(1))]
     assert got_b == [(a_, n_, f_, p_) for a_, n_, _t, p_, f_ in STK_BASE_EXPECT], "[stocks base list] STK differs from the verified list: %s" % (got_b,)
-    assert len(got_b) == 12 and [e[0] for e in got_b] == sorted(e[0] for e in got_b), "[stocks base list] 12 entries, alphabetical"
+    assert len(got_b) == 13 and [e[0] for e in got_b] == sorted(e[0] for e in got_b), "[stocks base list] 13 entries, alphabetical"
     bt_block = re.search(r"const BASE_TOKENS=\[(.*?)\n\];", src_ix, re.S).group(1)
     for sym_, _n, tok_, _p, _f in STK_BASE_EXPECT:
         m_ = re.search(r'\{symbol:"%s",name:"[^"]*",address:"(0x[0-9a-fA-F]{40})",decimals:(\d+)\}' % sym_, bt_block)
@@ -6464,8 +6473,26 @@ async def check_stocks(p, errors):
         assert '{symbol:"%s",name:"%s",address:"%s",decimals:8}' % (sym_, name_, addr_) in bt_block, "[stocks base list] %s missing from BASE_TOKENS" % sym_
     solblk = re.search(r"const STK_SOL=\[(.*?)\n\];", src_ix, re.S).group(1)
     assert "SNDKx" not in solblk and "Xswbpc8UqU6e1j9QZEWCjBMjyvz4twqD7PCy6j2e7jj" not in src_ix, "[stocks base list] SNDKx must be gone from STK_SOL"
-    print("[stocks base list] STK holds exactly the 12 verified (symbol, name, feed-or-null, pool) entries in order; MUc and PLTRc are in BASE_TOKENS with exactly the verified addresses and 8 decimals; no SNDKx on Solana")
+    print("[stocks base list] STK holds exactly the 13 verified (symbol, name, feed-or-null, pool) entries in order; MUc and PLTRc are in BASE_TOKENS with exactly the verified addresses and 8 decimals; no SNDKx on Solana")
 
+
+    # ---- [stocks base antc] ۱۹ نوامبر — ANTc از کارخانه‌ی سومِ Slipstream: قیمت از metaquoter (آدرسِ استخر)، نه کوتر aerodrome-cl ----
+    pg = await stk_open(b, 1280, 800, "light", errs)
+    await stk_wait_loaded(pg)
+    rows_a = {r["sym"]: r for r in await pg.evaluate(STK_ROWS_JS)}
+    assert len(rows_a) == 13 and list(rows_a)[1:3] == ["AMZNc", "ANTc"], "[stocks base antc] 13 rows with ANTc right after AMZNc: %s" % list(rows_a)
+    ra = rows_a["ANTc"]
+    assert ra["name"] == "Anthropic" and ra["b"] == "ANTc" and ra["av"] == "ANT", "[stocks base antc] ANTc name cell: %s" % ra
+    assert ra["px"] == "$96.70" and ra["px"] == stk_expect("ANTc")["price"], "[stocks base antc] 100 USDC -> 1.03413114 ANTc must price at $96.70: %s" % ra
+    assert ra["ref"] == "—" and ra["gap"] == "" and ra["trade"] == "Trade", "[stocks base antc] no Chainlink feed -> dash reference and empty gap: %s" % ra
+    st_a = await pg.evaluate("() => ({kinds: window.__STK__.kinds, meta: window.__STK__.metaArgs || []})")
+    ka = st_a["kinds"]
+    assert len(ka) == 1 and ka[0].count("m:ANTc") == 1 and "q:ANTc" not in ka[0] and sum(1 for k_ in ka[0] if k_.startswith("q:")) == 12, \
+        "[stocks base antc] ANTc is quoted once through the metaquoter and never through the aerodrome-cl quoter: %s" % ka
+    assert st_a["meta"] == [["0x599c4225fe90214795a0be228d20d7680f8ced15", "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913", "100000000", "0"]], \
+        "[stocks base antc] the metaquoter call is (pool, USDC, 100 USDC, 0): %s" % st_a["meta"]
+    await pg.context.close()
+    print("[stocks base antc] the Base stocks view shows 13 rows incl. ANTc right after AMZNc; its price $96.70 comes from one metaquoter call quoteExactInputSingleV3(pool 0x599c...ed15, USDC, 100 USDC, 0) (fixture 103413114), never from the aerodrome-cl quoter; reference is a dash with an empty gap")
 
     # ---- [stocks nav] ----
     NAV_JS = """() => { const nav = document.getElementById('nav'); const items = [...nav.children];
@@ -6549,7 +6576,7 @@ async def check_stocks(p, errors):
         note = await pg.inner_text("#view-stocks .note")
         assert note == "Prices are live quotes from the deepest Aerodrome pool for $100. Issuer terms: not offered to US persons. Not investment advice.", "%s: note text %r" % (ctxn, note)
         await pg.context.close()
-    print("[stocks view] /app#stocks on first load (1280x800 and 390x844, light and dark): boot view shown from the first paint; 12 rows in the fixed order; TSLAc $377.04 / ref $375.73 / +0.35% pool gap / $3.5M / ▼ 1.42% (dn); every row matches an independent calculation; Reference and Volume columns hidden at 390; colours follow --pos/--neg/--on-acc")
+    print("[stocks view] /app#stocks on first load (1280x800 and 390x844, light and dark): boot view shown from the first paint; 13 rows in the fixed order; TSLAc $377.04 / ref $375.73 / +0.35% pool gap / $3.5M / ▼ 1.42% (dn); every row matches an independent calculation; Reference and Volume columns hidden at 390; colours follow --pos/--neg/--on-acc")
 
     # ---- [stocks pill] وضعیتِ بازار با ساعتِ جعلی: نیویورک در ۷ اکتبر UTC-4 است ----
     import datetime as _dt
@@ -6583,11 +6610,11 @@ async def check_stocks(p, errors):
             e = await pg.evaluate(EDGE_JS)
             for k in ("ttl", "lede", "tk"):
                 assert abs(e[k] - 20) <= 0.5, "%s: .%s starts %.2fpx from the card's left edge, not 20: %s" % (ctxn, k, e[k], e)
-            assert len(e["trades"]) == 12 and all(abs(x - 20) <= 0.5 for x in e["trades"]), \
+            assert len(e["trades"]) == 13 and all(abs(x - 20) <= 0.5 for x in e["trades"]), \
                 "%s: every Trade button must end 20px from the card's right edge: %s" % (ctxn, e["trades"])
             assert e["sw"] <= e["iw"], "%s: the page scrolls horizontally: %s" % (ctxn, e)
             await pg.context.close()
-    print("[stocks edges] 1280 and 390, light and dark: title, lede and first column start 20px from the card's left edge; all 12 Trade buttons end 20px from its right edge; no horizontal page scroll")
+    print("[stocks edges] 1280 and 390, light and dark: title, lede and first column start 20px from the card's left edge; all 13 Trade buttons end 20px from its right edge; no horizontal page scroll")
 
     # ---- [stocks fail] ----
     pg = await stk_open(b, 1280, 800, "light", errs, cfg=stk_cfg(failQuote=["NVDAc"], failGt=True))
@@ -6613,7 +6640,7 @@ async def check_stocks(p, errors):
     pg = await stk_open(b, 1280, 800, "light", errs, cfg=stk_cfg(failAll=True, failGt=True))
     await pg.wait_for_function("() => document.getElementById('stkMktTxt').textContent.includes('unavailable')", timeout=30000)
     rows = await pg.evaluate(STK_ROWS_JS)
-    assert len(rows) == 12 and all(r["px"] == "—" and r["ref"] == "—" and r["gap"] == "" and r["vol"] == "—" for r in rows), "[stocks fail] total failure rows: %s" % rows
+    assert len(rows) == 13 and all(r["px"] == "—" and r["ref"] == "—" and r["gap"] == "" and r["vol"] == "—" for r in rows), "[stocks fail] total failure rows: %s" % rows
     assert await pg.inner_text("#stkMktTxt") == "Prices unavailable — retrying", "[stocks fail] total failure pill"
     txt = await pg.inner_text("#view-stocks")
     assert "NaN" not in txt and "$0.00" not in txt, "[stocks fail] junk after total failure: %s" % txt[:300]
@@ -6625,7 +6652,7 @@ async def check_stocks(p, errors):
     assert await pg.evaluate("() => document.querySelector('#view-stocks tr[data-sym=\"TSLAc\"] .cPx .v').textContent") == "$377.04", "[stocks fail] the table must recover"
     assert (await pg.inner_text("#stkMktTxt")).startswith("US market "), "[stocks fail] pill after recovery"
     await pg.context.close()
-    print("[stocks fail] one failed quote and a failed pools/multi: that row shows a dash (no NaN, no $0.00) while its Chainlink reference and the other 11 rows stay; volume and change show dashes; total failure keeps 12 dash rows with 'Prices unavailable — retrying' and recovers on the next open")
+    print("[stocks fail] one failed quote and a failed pools/multi: that row shows a dash (no NaN, no $0.00) while its Chainlink reference and the other 12 rows stay; volume and change show dashes; total failure keeps 13 dash rows with 'Prices unavailable — retrying' and recovers on the next open")
 
     # ---- [stocks trade] ----
     pg = await stk_open(b, 1280, 800, "light", errs, init_extra=stk_sol_init(sol=False))
@@ -6666,8 +6693,8 @@ async def check_stocks(p, errors):
     await stk_wait_loaded(pg)
     n0 = await pg.evaluate("() => window.__STK__.batches")
     g0 = await pg.evaluate("() => window.__STK__.gt")
-    assert [len(k_) for k_ in await pg.evaluate("() => window.__STK__.kinds")] == [22], "[stocks timer] the single batch holds 12 quotes + 10 feed reads"
-    assert n0 == 1 and g0 == 1, "[stocks timer] opening the view must send exactly one 22-call batch and one pools/multi request: %s/%s" % (n0, g0)
+    assert [len(k_) for k_ in await pg.evaluate("() => window.__STK__.kinds")] == [23], "[stocks timer] the single batch holds 13 quotes + 10 feed reads"
+    assert n0 == 1 and g0 == 1, "[stocks timer] opening the view must send exactly one 23-call batch and one pools/multi request: %s/%s" % (n0, g0)
     await pg.clock.run_for(61000)
     await pg.wait_for_timeout(400)
     n1 = await pg.evaluate("() => window.__STK__.batches")
@@ -6763,7 +6790,7 @@ async def check_stocks(p, errors):
     await pg.reload()
     await stk_wait_loaded(pg)
     try:
-        await pg.wait_for_function("() => document.querySelectorAll('#view-stocks .av img.on').length === 12", timeout=15000)
+        await pg.wait_for_function("() => document.querySelectorAll('#view-stocks .av img.on').length === 13", timeout=15000)
     except Exception:
         dbg = await pg.evaluate("async () => ({fsrc: String(window.fetch).slice(0,80), mc: JSON.stringify(metaCache['0xb2000000000000000000001e800a7f5189430cd0']||null).slice(0,120), ls: (()=>{try{return (localStorage.getItem('zaexa.logo.v1')||'').slice(0,200)}catch(e){return 'ERR'}})(), tl: await tokenLogo(BASE_TOKENS.find(x => x.symbol === 'TSLAc')).catch(e => 'ERR ' + e), done: typeof stkLogosDone !== 'undefined' ? stkLogosDone : 'undef', chain: activeChain, view: view, multi: window.__LOGO__ && window.__LOGO__.multi, imgs: document.querySelectorAll('#view-stocks .av img').length, on: document.querySelectorAll('#view-stocks .av img.on').length, srcs: [...document.querySelectorAll('#view-stocks .av img')].slice(0,2).map(i => i.src)})")
         raise AssertionError("[stocks logos] logos did not load: %s" % dbg)
@@ -6773,11 +6800,11 @@ async def check_stocks(p, errors):
         assert r["src"] and r["src"].endswith(".png") and "coin-images.coingecko.com" in r["src"], "[stocks logos] %s must show its own image_url: %s" % (r["sym"], r)
         assert r["letters"] and not r["fb"] and not r["bg"], "[stocks logos] %s keeps the card's own gradient letters underneath (no seeded fallback restyle): %s" % (r["sym"], r)
     srcs = [r["src"] for r in lg]
-    assert len(set(srcs)) == 12, "[stocks logos] twelve different logos, one per stock: %s" % srcs
+    assert len(set(srcs)) == 13, "[stocks logos] thirteen different logos, one per stock: %s" % srcs
     multi = await pg.evaluate("() => window.__LOGO__.multi")
     assert multi >= 1 and multi <= 2, "[stocks logos] logos come in a batched tokens/multi request (not one per stock): %s" % multi
     await pg.context.close()
-    print("[stocks logos] each of the 12 rows shows its own token logo from the batched tokens/multi image_url over the card's gradient letters (" + str(multi) + " request)")
+    print("[stocks logos] each of the 13 rows shows its own token logo from the batched tokens/multi image_url over the card's gradient letters (" + str(multi) + " request)")
 
     await b.close()
     assert not errs, "[stocks] console/page errors: %s" % errs[:5]
@@ -10139,7 +10166,7 @@ async def check_flow_established(p, errors):
             return {bad: BASE_TOKENS.filter(t => t.native || t.stable || stk.has(t.symbol) || ['EURC', 'USDe'].includes(t.symbol)).map(t => t.address.toLowerCase()),
                     ok: BASE_TOKENS.filter(t => !t.native && !t.stable && !stk.has(t.symbol) && !['EURC', 'USDe'].includes(t.symbol)).map(t => t.address.toLowerCase()),
                     weth: WETH_ADDR.toLowerCase(), stables: BASE_TOKENS.filter(t => t.stable).length, stocks: STK.length}; }""")
-        assert exp["stables"] >= 3 and exp["stocks"] == 12 and len(exp["ok"]) > 10, "[flow established] the page's lists look different from what the probe expects: %s" % exp
+        assert exp["stables"] >= 3 and exp["stocks"] == 13 and len(exp["ok"]) > 10, "[flow established] the page's lists look different from what the probe expects: %s" % exp
 
         # ---- Established: صفر pairs.json، tokens/multi ≤۳۰ آدرس، بدونِ استیبل/سهام ----
         log = {"tokens": [], "pools": []}
@@ -10440,6 +10467,7 @@ async def main():
         await check_api_page(p, errors)
         await check_report_picker(p, errors)
         await check_stocks(p, errors)
+        await check_slip3(p, errors)
         await check_stocks_sol(p, errors)
         await check_wallet_watch(p, errors)
         await check_report_chain(p, errors)
@@ -22728,7 +22756,7 @@ async def check_stocks_star(p, errors):
             if chain == "base":
                 pg = await stk_open(b, 1440, 900, "light", errs)
                 await stk_wait_loaded(pg)
-                sym, n = "TSLAc", 12
+                sym, n = "TSLAc", 13
             else:
                 pg = await stk_open(b, 1280, 800, "light", errs, init_extra=stk_sol_init(sol=True))
                 await stk_sol_wait(pg)
@@ -23125,8 +23153,12 @@ async def check_base_picker_onchain_sort(p, errors):
             assert await pg.evaluate("() => window.__pickerBatches.length") == 0, "[base picker onchain sort] cached GT prices must cause zero quote batches"
             await pg.unroute_all(behavior="wait")
             await pg.context.close()
-        assert orders[0] == orders[1], "[base picker onchain sort] GT-cached ordering must be byte-identical to aa8c727"
-        print("[base picker onchain sort] PASS — GT cached: byte-identical ordering to aa8c727 and zero quote batches; public and Worker fallback paths pass")
+        # ۱۹ نوامبر: تنها تفاوتِ مجازِ نسبت به aa8c727 ردیفِ تازه‌ی ANTc است (توکنِ جدید در فهرست)؛ بدونِ آن ترتیب باید بایت‌به‌بایت همان بماند.
+        antc_addr = "0xb20000000000000000000016e38fd364d271ba28"
+        cur_order = json.loads(orders[1])
+        assert cur_order.count(antc_addr) == 1 and antc_addr not in json.loads(orders[0]), "[base picker onchain sort] ANTc is the one new picker row since aa8c727"
+        assert json.loads(orders[0]) == [a for a in cur_order if a != antc_addr], "[base picker onchain sort] GT-cached ordering must be byte-identical to aa8c727 (apart from the new ANTc row)"
+        print("[base picker onchain sort] PASS — GT cached: byte-identical ordering to aa8c727 (plus the new ANTc row) and zero quote batches; public and Worker fallback paths pass")
     finally:
         await b.close()
         srv.shutdown()
@@ -24918,6 +24950,165 @@ async def check_exit_layout(p, errors):
     finally:
         await b.close()
         env.srv.shutdown()
+
+
+
+# =====================================================================
+# ۱۹ نوامبر ۲۰۲۶ — کارخانه‌ی سومِ Slipstream (aerodrome-cl-3): آدرسِ استخر با CREATE2،
+# کوت با metaquoter (quoteExactInputSingleV3، سلکتور 0x0a674142)، و دروازه‌ها.
+# استاب ethers نه keccak دارد نه getCreate2Address نه AbiCoder، و Interfaceاش JSON می‌سازد نه
+# سلکتورِ واقعی. پس همین‌جا ethers *واقعی* را کنارِ استاب می‌گذاریم: توابعِ هش روی E نصب می‌شوند،
+# iMetaQ یک Interface واقعی می‌شود (تا سلکتورِ روی سیم دیده شود) و call() فقط فراخوانی‌های
+# metaquoter را خودش جواب می‌دهد؛ بقیه به استابِ اصلی می‌رسند.
+# =====================================================================
+S3_POOL = "0x599C4225FE90214795a0be228D20d7680f8CED15"
+S3_USDC = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913"
+S3_ANTC = "0xb20000000000000000000016e38FD364d271Ba28"
+S3_META = "0x1dDfeC5058180C207F55BB77D95AcDd0d8227868"
+S3_ROUTER = "0x9Ee35Bf1bd69a03c6F0393582030fCe8Bb93D418"
+S3_OVERLAY = """() => {
+  const E0 = window.ethers, real = window.__realEthers;
+  E.keccak256 = real.keccak256; E.getCreate2Address = real.getCreate2Address; E.AbiCoder = real.AbiCoder;
+  iMetaQ = new real.Interface(ABI.metaQuoter);
+  const ser = x => JSON.stringify(x, (k, v) => typeof v === "bigint" ? {__b: v.toString()} : v);
+  const de = s => JSON.parse(s, (k, v) => (v && v.__b !== undefined ? BigInt(v.__b) : v));
+  const toHex = s => "0x" + Array.from(new TextEncoder().encode(s)).map(b => b.toString(16).padStart(2, "0")).join("");
+  const fromHex = h => new TextDecoder().decode(new Uint8Array((h.slice(2).match(/../g) || []).map(x => parseInt(x, 16))));
+  const META = %s.toLowerCase();
+  window.__S3 = {meta: [], mode: "ok", out: 103413114n};
+  const P = E.JsonRpcProvider.prototype, orig = P.call;
+  P.call = async function (tx) {
+    let outer; try { outer = de(fromHex(tx.data)); } catch (e) { return orig.apply(this, arguments); }
+    const calls = outer.args[0];
+    if (!calls.some(c => String(c[0]).toLowerCase() === META)) return orig.apply(this, arguments);
+    const rest = calls.filter(c => String(c[0]).toLowerCase() !== META);
+    let restRes = [];
+    if (rest.length) restRes = de(fromHex(await orig.call(this, Object.assign({}, tx, {data: toHex(ser({name: "aggregate3", args: [rest]}))})))).ret[0];
+    let ri = 0;
+    const results = calls.map(c => {
+      if (String(c[0]).toLowerCase() !== META) return restRes[ri++];
+      const data = String(c[2]);
+      const rec = {target: String(c[0]), data, sel: data.slice(0, 10)};
+      window.__S3.meta.push(rec);
+      if (rec.sel !== "0x0a674142") return [false, "0x"];
+      const a = window.__realEthers.Interface.from(ABI.metaQuoter).decodeFunctionData("quoteExactInputSingleV3", data);
+      rec.args = [a[0], a[1], a[2].toString(), a[3].toString()];
+      if (window.__S3.mode === "revert") return [false, "0x"];
+      return [true, iMetaQ.encodeFunctionResult("quoteExactInputSingleV3", [window.__S3.out, 0n, 0])];
+    });
+    return toHex(ser({ret: [results]}));
+  };
+}""" % _stkjson.dumps(S3_META)
+
+
+async def s3_open(b, errors):
+    """صفحه‌ی هارنس + ethers واقعی کنار استاب (E همان استاب می‌ماند)."""
+    pg = await b.new_page(viewport={"width": 1240, "height": 1000})
+    pg.on("console", lambda m: errors.append(m.text) if m.type == "error" else None)
+    pg.on("pageerror", lambda e: errors.append("PAGEERROR %s" % e))
+    await pg.goto(URL)
+    await pg.wait_for_function("() => typeof E !== 'undefined' && E && typeof iMetaQ !== 'undefined' && iMetaQ && typeof DEXES !== 'undefined'", timeout=20000)
+    await pg.wait_for_timeout(600)
+    await pg.evaluate("() => { window.__stubEthers = window.ethers; }")
+    await pg.add_script_tag(path=vendor_path("ethers.umd.min"))
+    await pg.evaluate("() => { window.__realEthers = window.ethers; window.ethers = window.__stubEthers; }")
+    await pg.evaluate(S3_OVERLAY)
+    return pg
+
+
+S3_QUOTE_JS = """async ([tin, tout, amt]) => {
+    const dex = DEXES.find(d => d.id === "aerodrome-cl-3");
+    const stats = newStats();
+    window.__S3.meta.length = 0;
+    const r = await quoteMany([{venue: {dex, feeTier: null, stable: null, tickSpacing: 10}, tokenIn: tin, tokenOut: tout, amountIn: BigInt(amt)}], stats);
+    return {out: r[0].out === null ? null : r[0].out.toString(), status: r[0].status, stats, meta: window.__S3.meta.map(m => Object.assign({}, m))};
+}"""
+
+
+async def check_slip3(p, errors):
+    b = await p.chromium.launch()
+    try:
+        pg = await s3_open(b, errors)
+        sel_new = await pg.evaluate("() => __realEthers.id('quoteExactInputSingleV3(address,address,uint256,uint160)').slice(0, 10)")
+        sel_old = await pg.evaluate("() => __realEthers.id('quoteExactInputSingle((address,address,uint256,int24,uint160))').slice(0, 10)")
+        assert sel_new == "0x0a674142", "[slip3 quote] the metaquoter selector must be 0x0a674142: %s" % sel_new
+
+        # ---- [slip3 pool addr] ----
+        pa = await pg.evaluate("""([u, a]) => { const d = DEXES.find(x => x.id === "aerodrome-cl-3");
+            return {fwd: clPoolAddr(d, u, a, 10), rev: clPoolAddr(d, a, u, 10), lower: clPoolAddr(d, u.toLowerCase(), a.toLowerCase(), 10),
+                    ts50: clPoolAddr(d, u, a, 50), stk: STK.find(s => s.sym === "ANTc").pool}; }""", [S3_USDC, S3_ANTC])
+        assert pa["fwd"].lower() == S3_POOL.lower(), "[slip3 pool addr] (USDC, ANTc, 10) must give the on-chain pool %s, got %s" % (S3_POOL, pa["fwd"])
+        assert pa["rev"].lower() == S3_POOL.lower(), "[slip3 pool addr] reversed argument order must give the same pool (token0 < token1 sorting): %s" % pa["rev"]
+        assert pa["lower"].lower() == S3_POOL.lower(), "[slip3 pool addr] lowercase inputs give the same pool: %s" % pa["lower"]
+        assert pa["ts50"].lower() != S3_POOL.lower(), "[slip3 pool addr] the tickSpacing is part of the salt: %s" % pa["ts50"]
+        assert pa["stk"].lower() == S3_POOL.lower(), "[slip3 pool addr] the STK row for ANTc must hold the same pool: %s" % pa["stk"]
+        print("[slip3 pool addr] clPoolAddr(USDC, ANTc, 10) and the reversed order both give 0x599C4225FE90214795a0be228D20d7680f8CED15 (the on-chain factory.getPool); lowercase inputs agree, tickSpacing 50 gives another pool, and the ANTc STK row holds the same address")
+
+        # ---- [slip3 quote] ----
+        q = await pg.evaluate(S3_QUOTE_JS, [S3_USDC, S3_ANTC, 100000000])
+        assert len(q["meta"]) == 1, "[slip3 quote] exactly one call to the metaquoter: %s" % q["meta"]
+        m = q["meta"][0]
+        assert m["target"].lower() == S3_META.lower(), "[slip3 quote] the quote goes to the metaquoter: %s" % m["target"]
+        assert m["sel"] == "0x0a674142", "[slip3 quote] selector must be quoteExactInputSingleV3 (0x0a674142), got %s" % m["sel"]
+        assert m["sel"] != sel_old, "[slip3 quote] the old quoteExactInputSingle selector must never be sent to the metaquoter"
+        assert m["args"][0].lower() == S3_POOL.lower(), "[slip3 quote] first argument is the CREATE2 pool: %s" % m["args"]
+        assert m["args"][1].lower() == S3_USDC.lower() and m["args"][2] == "100000000" and m["args"][3] == "0", "[slip3 quote] (pool, tokenIn, amountIn, 0): %s" % m["args"]
+        assert q["status"] == "ok" and q["out"] == "103413114" and q["stats"]["ok"] == 1, "[slip3 quote] the fixture answer becomes the amount: %s" % q
+        qr = await pg.evaluate(S3_QUOTE_JS, [S3_ANTC, S3_USDC, 100000000])
+        assert qr["meta"][0]["args"][0].lower() == S3_POOL.lower() and qr["meta"][0]["args"][1].lower() == S3_ANTC.lower(), \
+            "[slip3 quote] selling ANTc quotes the same pool with tokenIn = ANTc: %s" % qr["meta"]
+        await pg.evaluate("() => { window.__S3.mode = 'revert'; }")
+        qv = await pg.evaluate(S3_QUOTE_JS, [S3_USDC, S3_ANTC, 100000000])
+        assert qv["status"] == "nopool" and qv["out"] is None, "[slip3 quote] a reverting quote (no such pool) must end as the no-pool status, never an amount: %s" % qv
+        assert qv["stats"]["noPool"] == 1 and qv["stats"]["ok"] == 0 and qv["stats"]["rpcFailed"] == 0, "[slip3 quote] a revert is a no-pool, not an RPC failure and not an ok: %s" % qv["stats"]
+        assert all(x["sel"] == "0x0a674142" and x["sel"] != sel_old for x in qv["meta"]), "[slip3 quote] the row never sends the old selector: %s" % qv["meta"]
+        await pg.evaluate("() => { window.__S3.mode = 'ok'; }")
+        print("[slip3 quote] an aerodrome-cl-3 venue quotes through the metaquoter with selector 0x0a674142 and arguments (CREATE2 pool, tokenIn, amount, 0), in both directions; the answer becomes the amount; a revert ends as the no-pool status (noPool=1, never an amount, not an RPC failure); the old quoteExactInputSingle selector is never sent")
+
+        # ---- [slip3 gate] ----
+        gt = await pg.evaluate("""async ([router, meta]) => {
+            const P = E.JsonRpcProvider.prototype, origGC = P.getCode;
+            const v1Router = "0xBE6D8f0d05cC4be24d5167a3eF062215bE6D18a5", oldQuoter = "0x514c8B5f54112481E28028F1166Bd78501089259";
+            let metaCode = "0x60806040" + E.id("quoteExactInputSingleV3(address,address,uint256,uint160)").slice(2, 10);
+            P.getCode = async function (a) {
+                const l = String(a).toLowerCase();
+                if (l === router.toLowerCase()) return origGC.call(this, v1Router);
+                if (l === meta.toLowerCase()) return metaCode;
+                return origGC.apply(this, arguments);
+            };
+            const st = () => Object.assign({}, dexStatus["aerodrome-cl-3"]);
+            const out = {};
+            await verifyDexes(); out.byDefault = st();
+            out.enabledDefault = enabledDexes().some(d => d.id === "aerodrome-cl-3");
+            window.__STUB_ROUTER_ALLOWED__ = {[router.toLowerCase()]: false};
+            await verifyDexes(); out.blocked = st();
+            out.enabledBlocked = enabledDexes().some(d => d.id === "aerodrome-cl-3");
+            out.venuesBlocked = allVenues().some(v => v.dex.id === "aerodrome-cl-3");
+            window.__STUB_ROUTER_ALLOWED__ = {[router.toLowerCase()]: true};
+            await verifyDexes(); out.allowed = st();
+            out.venuesAllowed = allVenues().filter(v => v.dex.id === "aerodrome-cl-3").map(v => v.tickSpacing);
+            // کوتر با سلکتورِ نسلِ دیگر (QuoterV2 قدیمی) → دروازه‌ی ۲ باید رد کند
+            const oldQuoterCode = await origGC.call(E.JsonRpcProvider.prototype, oldQuoter).catch(() => null);
+            metaCode = oldQuoterCode;
+            await verifyDexes(); out.wrongQuoter = st();
+            metaCode = "0x60806040" + E.id("quoteExactInputSingleV3(address,address,uint256,uint160)").slice(2, 10);
+            delete window.__STUB_ROUTER_ALLOWED__;
+            P.getCode = origGC;
+            await verifyDexes();
+            out.final = st();
+            return out;
+        }""", [S3_ROUTER, S3_META])
+        assert gt["byDefault"]["ok"] is True and gt["enabledDefault"], "[slip3 gate] with a router that has the selector, a metaquoter that has 0x0a674142 and allowedRouter=true the row passes all gates: %s" % gt["byDefault"]
+        assert gt["blocked"]["ok"] is False and gt["blocked"]["reason"] == "not allow-listed on the executor contract yet", "[slip3 gate] allowedRouter=false must disable the row with the not-allow-listed reason: %s" % gt["blocked"]
+        assert not gt["enabledBlocked"] and not gt["venuesBlocked"], "[slip3 gate] a not-allow-listed row carries no leg into routing: %s" % gt
+        assert gt["allowed"]["ok"] is True and gt["venuesAllowed"] == [1, 10, 50, 100, 200], "[slip3 gate] allowedRouter=true restores the row with tickSpacings 1,10,50,100,200 (not 150/250): %s" % gt
+        assert gt["wrongQuoter"]["ok"] is False and "quoter does not expose the function we call" in gt["wrongQuoter"]["reason"], \
+            "[slip3 gate] the quoter gate must look for the metaquoter selector, so an old-generation quoter code is rejected: %s" % gt["wrongQuoter"]
+        assert gt["final"]["ok"] is False, "[slip3 gate] without the test's code patch the stub has no code at the new router: the row is rejected by default: %s" % gt["final"]
+        print("[slip3 gate] aerodrome-cl-3 passes gates 1-3 with allowedRouter=true; with false it is disabled with 'not allow-listed on the executor contract yet' and carries no venue; the quoter gate checks 0x0a674142 (old-generation quoter code is rejected); venues are tickSpacing 1,10,50,100,200")
+        await pg.close()
+    finally:
+        await b.close()
 
 
 async def only(names):

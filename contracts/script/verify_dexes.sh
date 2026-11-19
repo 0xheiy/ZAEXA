@@ -61,6 +61,10 @@ SIG_QUOTER="quoteExactInputSingle((address,address,uint256,uint24,uint160))"
 # $SIG_V3_LEGACY بسنجیمش، به‌غلط PASS می‌گیرد.
 SIG_SLIPSTREAM="exactInputSingle((address,address,int24,address,uint256,uint256,uint256,uint160))"
 SIG_QUOTER_CL="quoteExactInputSingle((address,address,uint256,int24,uint160))"
+# کارخانه‌ی سومِ Slipstream (Dromos Labs، ۲۱ اکتبر ۲۰۲۶): QuoterV2 ندارد؛ به‌جایش
+# metaquoter با تابعِ دیگر و *آدرسِ استخر* به‌جای جفت توکن. سلکتورش 0x0a674142 است.
+# روتر همان SIG_SLIPSTREAM (0xa026383e) است، پس فقط کوتر فرق دارد.
+SIG_QUOTER_META="quoteExactInputSingleV3(address,address,uint256,uint160)"
 
 # نام|نوع|روتر|کوتر (کوتر فقط برای V3)
 DEXES=(
@@ -79,13 +83,16 @@ DEXES=(
   # Aerodrome Slipstream v1 — کارخانه‌ی قدیمیِ همان Slipstream. اجراکننده
   # هنوز این روتر را لیست‌سفید نکرده؛ allow_router.sh این کار را می‌کند.
   "Aerodrome Slipstream v1|slipstream|0xBE6D8f0d05cC4be24d5167a3eF062215bE6D18a5|0x254cF9E1E6e233aa1AC962CB9B05b2cfeAaE15b0"
+  # Aerodrome Slipstream (new) — کارخانه‌ی سوم 0x9CB220581b91b0C83223012FE69688b92aD07a76.
+  # نوع slipstream-meta: روترش مثل slipstream، کوترش metaquoter است (سلکتور دیگر).
+  "Aerodrome Slipstream (new)|slipstream-meta|0x9Ee35Bf1bd69a03c6F0393582030fCe8Bb93D418|0x1dDfeC5058180C207F55BB77D95AcDd0d8227868"
 )
 
 sig_for() {
   case "$1" in
     v3)         echo "$SIG_V3" ;;
     v3legacy)   echo "$SIG_V3_LEGACY" ;;
-    slipstream) echo "$SIG_SLIPSTREAM" ;;
+    slipstream|slipstream-meta) echo "$SIG_SLIPSTREAM" ;;
     solidly)    echo "$SIG_SOLIDLY" ;;
     *)          echo "$SIG_V2" ;;
   esac
@@ -95,7 +102,8 @@ sig_for() {
 # در سمت روتر یک بار افتاد.
 quoter_sig_for() {
   case "$1" in
-    slipstream) echo "$SIG_QUOTER_CL" ;;
+    slipstream)      echo "$SIG_QUOTER_CL" ;;
+    slipstream-meta) echo "$SIG_QUOTER_META" ;;
     *)          echo "$SIG_QUOTER" ;;
   esac
 }
@@ -163,7 +171,7 @@ for entry in "${DEXES[@]}"; do
     continue
   fi
 
-  if [ "$KIND" = "v3" ] || [ "$KIND" = "v3legacy" ] || [ "$KIND" = "slipstream" ]; then
+  if [ "$KIND" = "v3" ] || [ "$KIND" = "v3legacy" ] || [ "$KIND" = "slipstream" ] || [ "$KIND" = "slipstream-meta" ]; then
     if ! QCODE=$(try_cast cast code "$QUOTER" --rpc-url "$RPC"); then
       row "$NAME" "UNKNOWN" "the RPC did not answer for quoter $QUOTER"
       UNSEEN=1; continue
