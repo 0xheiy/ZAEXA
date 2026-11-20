@@ -1377,6 +1377,14 @@ if (!ethersFile) throw new Error("could not find the vendored ethers bundle unde
 createRequire(import.meta.url)(fileURLToPath(new URL(ethersFile, webDir)));
 const ethers = globalThis.ethers;
 
+// اوراکلِ آدرسِ استخرِ کارخانه‌ی سومِ Slipstream — فقط در تست، با ethers (هرگز در کدِ Worker)
+function clMetaPoolOracle(factory, impl, a, b, ts) {
+  const [t0, t1] = BigInt(a.toLowerCase()) < BigInt(b.toLowerCase()) ? [a, b] : [b, a];
+  const salt = ethers.keccak256(ethers.AbiCoder.defaultAbiCoder().encode(["address", "address", "int24"], [t0, t1, ts]));
+  const code = "0x3d602d80600a3d3981f3363d3d373d3d3d363d73" + impl.slice(2).toLowerCase() + "5af43d82803e903d91602b57fd5bf3";
+  return ethers.getCreate2Address(factory, salt, ethers.keccak256(code)).toLowerCase();
+}
+
 /* نگاشتِ id (همان idِ عددیِ eth_call که callBatch در verdict.js می‌سازد —
    ۰ کاناری است، آیتم‌ها از ۱ شروع می‌شوند) به kind، از رویِ خودِ
    buildProbe/VD_VENUES ساخته می‌شود — نه یک فهرستِ دستیِ دومِ نامِ صرافی‌ها
@@ -1403,6 +1411,7 @@ function isSolidlyReqId(id) { return PROBE_KIND_BY_ID.get(id) === "SOLIDLY"; }
     SEL_SOLIDLY: "getAmountsOut(uint256,(address,address,bool,address)[])",
     SEL_V2: "getAmountsOut(uint256,address[])",
     SEL_V4_SINGLE: "quoteExactInputSingle(((address,address,uint24,int24,address),bool,uint128,bytes))",
+    SEL_CL_META: "quoteExactInputSingleV3(address,address,uint256,uint160)",
   };
   for (const [name, sig] of Object.entries(sigs)) {
     const want = ethers.id(sig).slice(0, 10);
@@ -1419,8 +1428,10 @@ function isSolidlyReqId(id) { return PROBE_KIND_BY_ID.get(id) === "SOLIDLY"; }
   for (const row of vd.VD_VENUES) {
     addrs.push([row.id + ".to", row.to]);
     if (row.factory) addrs.push([row.id + ".factory", row.factory]);
+    if (row.poolImpl) addrs.push([row.id + ".poolImpl", row.poolImpl]);
   }
-  ok(addrs.length === 2 + vd.VD_VENUES.length + 1, "expected exactly one factory address (aerodrome)");
+  // aerodrome (SOLIDLY factory) + aerodrome-cl-3 (factory + poolImpl)
+  ok(addrs.length === 2 + vd.VD_VENUES.length + 3, "expected exactly three extra addresses (aerodrome factory, aerodrome-cl-3 factory and poolImpl), got " + (addrs.length - 2 - vd.VD_VENUES.length));
   for (const [label, a] of addrs) {
     let checksummed;
     try { checksummed = ethers.getAddress(a); } catch { checksummed = null; }
@@ -1440,6 +1451,8 @@ function isSolidlyReqId(id) { return PROBE_KIND_BY_ID.get(id) === "SOLIDLY"; }
   const ifaceI = new ethers.Interface([
     "function quoteExactInputSingle((address,address,uint256,int24,uint160)) returns (uint256,uint160,uint32,uint256)"]);
   const ifaceV2 = new ethers.Interface(["function getAmountsOut(uint256,address[]) returns (uint256[])"]);
+  const ifaceMeta = new ethers.Interface([
+    "function quoteExactInputSingleV3(address,address,uint256,uint160) returns (uint256,uint160,uint32)"]);
   const ifaceSolidly = new ethers.Interface([
     "function getAmountsOut(uint256,(address,address,bool,address)[]) returns (uint256[])"]);
   const ifaceV4 = new ethers.Interface([
@@ -1461,7 +1474,7 @@ function isSolidlyReqId(id) { return PROBE_KIND_BY_ID.get(id) === "SOLIDLY"; }
   }
 
   const probe = vd.buildProbe(TOKEN, vd.WETH_ADDR, amt);
-  ok(probe.length === 27, "buildProbe should produce exactly 27 calls (3+3+6+5+2+1+1+1+1+4), got " + probe.length);
+  ok(probe.length === 32, "buildProbe should produce exactly 32 calls (3+3+6+5+5+2+1+1+1+1+4), got " + probe.length);
 
   for (const p of probe) {
     const row = vd.VD_VENUES.find((r) => r.id === p.id);
@@ -1476,6 +1489,9 @@ function isSolidlyReqId(id) { return PROBE_KIND_BY_ID.get(id) === "SOLIDLY"; }
       want = ifaceU.encodeFunctionData("quoteExactInputSingle", [[TOKEN, vd.WETH_ADDR, amt, p.key, 0]]);
     } else if (row.kind === "CL_INT24") {
       want = ifaceI.encodeFunctionData("quoteExactInputSingle", [[TOKEN, vd.WETH_ADDR, amt, p.key, 0]]);
+    } else if (row.kind === "CL_META") {
+      want = ifaceMeta.encodeFunctionData("quoteExactInputSingleV3",
+        [clMetaPoolOracle(row.factory, row.poolImpl, TOKEN, vd.WETH_ADDR, p.key), TOKEN, amt, 0]);
     } else if (row.kind === "SOLIDLY") {
       want = ifaceSolidly.encodeFunctionData("getAmountsOut",
         [amt, [[TOKEN, vd.WETH_ADDR, p.key, row.factory]]]);
@@ -1566,13 +1582,13 @@ function isSolidlyReqId(id) { return PROBE_KIND_BY_ID.get(id) === "SOLIDLY"; }
   // بی‌صدا حذف کند (نه بریده)، یکی کمتر باید هر چهار کلید را نگه دارد.
   {
     const overflow = vd.buildProbe(TOKEN, vd.WETH_ADDR, 2n ** 128n);
-    ok(overflow.length === 23, "an amountIn at exactly 2**128 must drop all four v4 entries, leaving the "
-      + "23 non-v4 calls, got " + overflow.length);
+    ok(overflow.length === 28, "an amountIn at exactly 2**128 must drop all four v4 entries, leaving the "
+      + "28 non-v4 calls, got " + overflow.length);
     ok(!overflow.some((p) => p.id === "uniswap-v4"), "an amountIn at 2**128 must never produce a "
       + "uniswap-v4 entry with truncated data");
 
     const atCap = vd.buildProbe(TOKEN, vd.WETH_ADDR, 2n ** 128n - 1n);
-    ok(atCap.length === 27, "an amountIn one below 2**128 must still produce all 27 calls, got " + atCap.length);
+    ok(atCap.length === 32, "an amountIn one below 2**128 must still produce all 32 calls, got " + atCap.length);
     ok(atCap.filter((p) => p.id === "uniswap-v4").length === 4, "an amountIn one below 2**128 must keep "
       + "all four v4 keys");
 
@@ -5626,10 +5642,10 @@ const REPORT_LOCS_EXPECTED = expectedReportLocs();
     globalThis.fetch = async () => jsonRes({ notData: [] });
     ok(await baseVenueCovered(ADDR, {}) === null, "a body without a data array must give null, never false");
 
-    // نگاشت باید دقیقاً همان نُه idِ اندازه‌گیری‌شده را داشته باشد — نه
+    // نگاشت باید دقیقاً همان ده idِ اندازه‌گیری‌شده را داشته باشد — نه
     // بیشتر نه کمتر — و uniswap-v4-base هرگز نباید عضوش شود.
     const wantIds = ["uniswap-v3-base", "pancakeswap-v3-base", "aerodrome-slipstream",
-      "aerodrome-slipstream-3", "aerodrome-base", "baseswap", "sushiswap-v2-base",
+      "aerodrome-slipstream-3", "aero-slipstream-base", "aerodrome-base", "baseswap", "sushiswap-v2-base",
       "alien-base", "uniswap-v2-base"];
     ok(Object.keys(GT_DEX_TO_VENUE).length === wantIds.length &&
       wantIds.every((id) => id in GT_DEX_TO_VENUE),
@@ -5876,6 +5892,205 @@ const REPORT_LOCS_EXPECTED = expectedReportLocs();
     + "aerodrome-slipstream-2 staying absent; and end to end through fetchVerdict, a live quote from "
     + "only the old-factory quoter still reaches sell, proving that quoter is really asked, not just "
     + "declared");
+}
+
+/* ---- [vd slip3] ۲۰ نوامبر ۲۰۲۶ — کارخانه‌ی سومِ Slipstream (aerodrome-cl-3، متاکوتر با آدرسِ استخر) ----
+   Worker کِکاک۲۵۶ نداشت، پس آدرسِ استخرِ این کارخانه محاسبه‌نشدنی بود و
+   توکنی که فقط آن‌جا معامله می‌شد «نامعلوم» می‌ماند و گاردِ پوشش هم آن را
+   نمی‌دید. اینجا: کِکاک با بردار و اوراکلِ ethers، آدرسِ CREATE2 با بردارِ
+   زنده‌ی ANTc، رمزگذاری/رمزگشایی، حکمِ سرتاسری، آینه‌ی CL_INT24، و اینکه
+   ساب‌ریکوئستِ تازه‌ای اضافه نشد. ethers فقط اوراکلِ تست است. */
+{
+  const K = await import("./keccak.js");
+  const hexOf = (u8) => K.bytesToHex(u8);
+  const w3 = (n) => BigInt(n).toString(16).padStart(64, "0");
+  const mkStatic3 = (n) => "0x" + w3(n) + w3(0) + w3(0);        // شکلِ واقعیِ متاکوتر: ۳ کلمه
+  const mkStatic4s = (n) => "0x" + w3(n) + w3(0) + w3(0) + w3(0); // کوترهای قدیمی و کاناری: ۴ کلمه
+
+  // ---- ۱) کِکاک ----
+  ok(hexOf(K.keccak256(new Uint8Array())) === "c5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470",
+    "[vd slip3] keccak256(\"\") must be the original-Keccak vector (padding 0x01, not SHA3's 0x06)");
+  ok(hexOf(K.keccak256(K.utf8Bytes("abc"))) === "4e03657aea45a94fc7d47ba826c8d667c0d1e6e33a64a036ec44f58fa12d6c45",
+    "[vd slip3] keccak256(\"abc\") must match the known vector");
+  ok(hexOf(K.keccak256(new Uint8Array())) !== "a7ffc6f8bf1ed76651c14756a061d662f580ff4de43b49fa82d80a4b80f8434a",
+    "[vd slip3] keccak256(\"\") must never equal SHA3-256(\"\")");
+  for (const n of [1, 32, 135, 136, 137, 200, 272, 300]) {
+    const b = Uint8Array.from({ length: n }, (_, i) => (i * 7 + 3) & 255);
+    ok(hexOf(K.keccak256(b)) === ethers.keccak256(b).slice(2),
+      "[vd slip3] keccak256 of a " + n + "-byte input (rate 136: " + (n >= 136 ? "multi-block" : "single block") + ") must match ethers");
+  }
+  const SIG = "quoteExactInputSingleV3(address,address,uint256,uint160)";
+  ok("0x" + hexOf(K.keccak256(K.utf8Bytes(SIG))).slice(0, 8) === "0x0a674142",
+    "[vd slip3] the metaquoter selector must be keccak(\"" + SIG + "\")[0..4] = 0x0a674142");
+  ok(vd.SEL_CL_META === "0x0a674142", "[vd slip3] SEL_CL_META must be 0x0a674142, got " + vd.SEL_CL_META);
+
+  // ---- ۲) آدرسِ استخر (بردارِ زنده‌ی Base، ۱۹ نوامبر) ----
+  const F3 = "0x9CB220581b91b0C83223012FE69688b92aD07a76";
+  const IMPL3 = "0x1642634C8CB1C9f1B84c9a1a08534F8c3F4E89f8";
+  const META_TO = "0x1dDfeC5058180C207F55BB77D95AcDd0d8227868";
+  const ANTC = "0xb20000000000000000000016e38fd364d271ba28";
+  const POOL_ANTC = "0x599c4225fe90214795a0be228d20d7680f8ced15";
+  ok(vd.clMetaPoolAddr(F3, IMPL3, vd.USDC_ADDR, ANTC, 10) === POOL_ANTC,
+    "[vd slip3] USDC/ANTc/10 must give the on-chain pool 0x599C…ED15, got " + vd.clMetaPoolAddr(F3, IMPL3, vd.USDC_ADDR, ANTC, 10));
+  ok(vd.clMetaPoolAddr(F3, IMPL3, ANTC, vd.USDC_ADDR, 10) === POOL_ANTC,
+    "[vd slip3] reversed token order must give the same pool (token0 < token1 is sorted inside), got " + vd.clMetaPoolAddr(F3, IMPL3, ANTC, vd.USDC_ADDR, 10));
+  ok(vd.clMetaPoolAddr(F3.toLowerCase(), IMPL3.toUpperCase().replace("0X", "0x"), vd.USDC_ADDR.toUpperCase().replace("0X", "0x"), ANTC, 10) === POOL_ANTC,
+    "[vd slip3] letter case of the inputs must not matter");
+  ok(vd.clMetaPoolAddr(F3, IMPL3, ANTC, vd.USDC_ADDR, 50) !== POOL_ANTC, "[vd slip3] a different tickSpacing must give a different pool");
+  for (const ts of [1, 10, 50, 100, 200]) {
+    for (const [x, y] of [[ANTC, vd.USDC_ADDR], [vd.USDC_ADDR, ANTC], [vd.WETH_ADDR, ANTC]]) {
+      ok(vd.clMetaPoolAddr(F3, IMPL3, x, y, ts) === clMetaPoolOracle(F3, IMPL3, x, y, ts),
+        "[vd slip3] clMetaPoolAddr must match the ethers CREATE2 oracle for " + x + "/" + y + "/" + ts);
+    }
+  }
+
+  // ---- ۳) ردیفِ جدول ----
+  const idx3 = vd.VD_VENUES.findIndex((r) => r.id === "aerodrome-cl-3");
+  ok(idx3 === vd.VD_VENUES.findIndex((r) => r.id === "aerodrome-cl-v1") + 1, "[vd slip3] aerodrome-cl-3 must sit right after aerodrome-cl-v1");
+  const row3 = vd.VD_VENUES[idx3];
+  ok(row3 && row3.kind === "CL_META" && row3.to === META_TO && row3.factory === F3 && row3.poolImpl === IMPL3 &&
+    JSON.stringify(row3.keys) === "[1,10,50,100,200]",
+    "[vd slip3] the aerodrome-cl-3 row must be exactly the verified metaquoter/factory/impl with keys [1,10,50,100,200], got " + JSON.stringify(row3));
+  ok(vd.VD_ZERO_IS_PROOF.CL_META === true && vd.VD_POSITIVE_ONLY.CL_META === false,
+    "[vd slip3] CL_META must behave like CL_INT24: zero is proof, not positive-only");
+
+  // ---- ۴) buildProbeFor ----
+  const TOK3 = "0x6666666666666666666666666666666666666666";
+  const probe3 = vd.buildProbeFor(TOK3, vd.WETH_ADDR, 12345n, ["aerodrome-cl-3"]);
+  ok(probe3.length === 5 && probe3.every((p) => p.id === "aerodrome-cl-3" && p.to === META_TO),
+    "[vd slip3] buildProbeFor([\"aerodrome-cl-3\"]) must emit exactly 5 calls to the metaquoter, got " + probe3.length);
+  ok(JSON.stringify(probe3.map((p) => p.key)) === "[1,10,50,100,200]", "[vd slip3] keys must follow the row order");
+  for (const p of probe3) {
+    ok(p.data.startsWith("0x0a674142") && p.data.length === 2 + 8 + 4 * 64, "[vd slip3] data must be selector + 4 words for key " + p.key);
+    const wantPool = clMetaPoolOracle(F3, IMPL3, TOK3, vd.WETH_ADDR, p.key);
+    ok("0x" + p.data.slice(10 + 24, 10 + 64) === wantPool, "[vd slip3] word 0 must be the pool for key " + p.key + ", got 0x" + p.data.slice(34, 74) + " want " + wantPool);
+    ok(p.data.slice(10 + 64) ===
+      TOK3.slice(2).padStart(64, "0") + w3(12345) + w3(0),
+      "[vd slip3] words 1-3 must be tokenIn, amountIn, 0 for key " + p.key);
+  }
+  // مرحله‌ی USDC هم استخرِ همان ضدجفت را می‌سازد
+  const probeU = vd.buildProbeFor(TOK3, vd.USDC_ADDR, 1n, ["aerodrome-cl-3"]);
+  ok(probeU.every((p) => "0x" + p.data.slice(34, 74) === clMetaPoolOracle(F3, IMPL3, TOK3, vd.USDC_ADDR, p.key)),
+    "[vd slip3] the USDC stage must address the token/USDC pools");
+
+  // ---- ۵) decodeQuote ----
+  ok(vd.decodeQuote("CL_META", mkStatic3(103413114)) === 103413114n, "[vd slip3] decodeQuote(CL_META) must read the first word of the real 3-word return");
+  ok(vd.decodeQuote("CL_META", mkStatic4s(7)) === 7n, "[vd slip3] decodeQuote(CL_META) must tolerate a longer return");
+  ok(vd.decodeQuote("CL_META", "0x") === null && vd.decodeQuote("CL_META", "0x" + w3(1) + w3(2)) === null && vd.decodeQuote("CL_META", "zz") === null,
+    "[vd slip3] an empty, two-word or non-hex return must be null (unknown), never 0");
+  ok(vd.decodeQuote("CL_META", mkStatic3(0)) === 0n, "[vd slip3] a real zero stays 0n");
+
+  // ---- ۶) حکمِ سرتاسری با RPCِ جعلی ----
+  const metaMeta = { decimals: 18, priceUsd: 2000 };
+  const POOL_TOK_WETH10 = clMetaPoolOracle(F3, IMPL3, TOK3, vd.WETH_ADDR, 10);
+  let fetches3 = 0, seenBatches = [];
+  const rpcStub = (mode) => async (url, init) => {
+    fetches3++;
+    const reqs = JSON.parse(init.body);
+    seenBatches.push(reqs);
+    return new Response(JSON.stringify(reqs.map((r) => {
+      if (r.id === 0) return { id: 0, result: mkStatic4s(5) }; // کاناری
+      const to = String(r.params[0].to).toLowerCase();
+      if (to === META_TO.toLowerCase()) {
+        const pool = "0x" + r.params[0].data.slice(34, 74);
+        if (mode === "live" && pool === POOL_TOK_WETH10) return { id: r.id, result: mkStatic3(777000) };
+        return { id: r.id, error: { code: 3 } };
+      }
+      return { id: r.id, error: { code: 3 } };
+    })), { status: 200, headers: { "content-type": "application/json" } });
+  };
+  const resLive = await vd.fetchVerdict(TOK3, metaMeta, { fetchImpl: rpcStub("live"), rpcs: ["https://rpc-slip3.example"] });
+  ok(resLive === "sell", "[vd slip3] a token whose only liquidity is the aerodrome-cl-3 pool must verdict sell, got " + resLive);
+  const resDead = await vd.fetchVerdict(TOK3, metaMeta, { fetchImpl: rpcStub("dead"), rpcs: ["https://rpc-slip3.example"] });
+  ok(resDead !== "sell", "[vd slip3] a reverting metaquoter must never read as sell, got " + resDead);
+
+  // ---- ۷) ساب‌ریکوئست: همان batchها، نه بیشتر ----
+  fetches3 = 0; seenBatches = [];
+  await vd.fetchVerdict(TOK3, metaMeta, { fetchImpl: rpcStub("dead"), rpcs: ["https://rpc-slip3.example"] });
+  const withRow = fetches3, withBatches = seenBatches.slice();
+  ok(withBatches.every((b) => Array.isArray(b)) && withBatches.every((b) => b.filter((r) => r.id !== 0 && String(r.params[0].to).toLowerCase() === META_TO.toLowerCase()).length >= 5),
+    "[vd slip3] every stage's single JSON-RPC batch must carry the 5 metaquoter calls");
+  const savedRow = vd.VD_VENUES.splice(idx3, 1)[0];
+  let withoutRow;
+  try {
+    fetches3 = 0; seenBatches = [];
+    await vd.fetchVerdict(TOK3, metaMeta, { fetchImpl: rpcStub("dead"), rpcs: ["https://rpc-slip3.example"] });
+    withoutRow = fetches3;
+    ok(seenBatches.every((b) => !b.some((r) => r.id !== 0 && String(r.params[0].to).toLowerCase() === META_TO.toLowerCase())),
+      "[vd slip3] control: with the row removed no metaquoter call is made");
+  } finally { vd.VD_VENUES.splice(idx3, 0, savedRow); }
+  ok(withRow >= 1 && withRow === withoutRow,
+    "[vd slip3] the venue must not add a fetch (same batches): with=" + withRow + " without=" + withoutRow);
+  ok(vd.buildProbe(TOK3, vd.WETH_ADDR, 1n).length === 32 && vd.buildProbe(TOK3, vd.USDC_ADDR, 1n).length === 32,
+    "[vd slip3] buildProbe without real v4 keys must now be 32 calls per stage");
+
+  // ---- ۸) سرتاسریِ /vd-شکل: استخرِ GT با دکسِ aero-slipstream-base، و آینه‌ی CL_INT24 ----
+  const idxM = await import("./index.js");
+  ok(idxM.GT_DEX_TO_VENUE["aero-slipstream-base"] === "aerodrome-cl-3",
+    "[vd slip3] GT_DEX_TO_VENUE[\"aero-slipstream-base\"] must map to aerodrome-cl-3, got " + idxM.GT_DEX_TO_VENUE["aero-slipstream-base"]);
+  ok(idxM.GT_DEX_TO_VENUE["aerodrome-slipstream-3"] === "aerodrome-cl" && !("aerodrome-slipstream-2" in idxM.GT_DEX_TO_VENUE),
+    "[vd slip3] the other two factories' mapping is untouched and aerodrome-slipstream-2 stays unmapped");
+  const jr3 = (body) => new Response(JSON.stringify(body), { status: 200, headers: { "content-type": "application/json" } });
+  const gtMeta3 = () => jr3({ data: { attributes: { name: "Slip3 Token", symbol: "S3T", total_reserve_in_usd: "700000", decimals: 18, price_usd: "2000" } } });
+  const gtPools3 = (dex) => ({ data: [{ id: "base_0xpool", type: "pool", attributes: { address: POOL_TOK_WETH10, reserve_in_usd: "700000.5" },
+    relationships: { dex: { data: { id: dex, type: "dex" } },
+      base_token: { data: { id: "base_" + TOK3 } }, quote_token: { data: { id: "base_" + vd.WETH_ADDR.toLowerCase() } } } }] });
+  const kv3 = { get: async () => JSON.stringify({ keys: [], reason: "ok", complete: true }), put: async () => {} };
+  // venueTo: کدام کوتر (به‌جز متاکوتر) برای حالتِ آینه زنده/مرده باشد
+  const mkWorld3 = (dex, mode, quoterTo) => async (url, init) => {
+    const u = String(url);
+    if (u.endsWith("/pools") || u.includes("/pools?")) return jr3(gtPools3(dex));
+    if (u.startsWith(idxM.UPSTREAM_FREE)) return gtMeta3();
+    const parsed = JSON.parse(init.body);
+    if (Array.isArray(parsed)) {
+      return jr3(parsed.map((r) => {
+        if (r.id === 0) return { id: 0, result: mkStatic4s(5) };
+        const to = String(r.params[0].to).toLowerCase();
+        if (mode === "live" && to === quoterTo.toLowerCase()) {
+          if (to === META_TO.toLowerCase()) {
+            const tokIn = "0x" + r.params[0].data.slice(10 + 64 + 24, 10 + 128); // کلمه‌ی ۱ = tokenIn
+            return "0x" + r.params[0].data.slice(34, 74) === clMetaPoolOracle(F3, IMPL3, tokIn, vd.WETH_ADDR, 10)
+              ? { id: r.id, result: mkStatic3(777000) } : { id: r.id, error: { code: 3 } };
+          }
+          return { id: r.id, result: mkStatic4s(777000) };
+        }
+        return { id: r.id, error: { code: 3 } };
+      }));
+    }
+    return new Response("unexpected", { status: 500 });
+  };
+  const savedF3 = globalThis.fetch;
+  const raw = {};
+  try {
+    for (const [label, dex, quoter] of [
+      ["new", "aero-slipstream-base", META_TO],
+      ["mirror", "aerodrome-slipstream-3", vd.VD_VENUES.find((r) => r.id === "aerodrome-cl").to],
+    ]) {
+      for (const mode of ["live", "dead"]) {
+        globalThis.fetch = mkWorld3(dex, mode, quoter);
+        raw[label + ":" + mode] = await rawVd(("0x" + (label === "new" ? "61" : "62").repeat(20)), { ASSETS, ZX_KV: kv3 });
+      }
+    }
+  } finally { globalThis.fetch = savedF3; }
+  ok(raw["new:live"] && raw["new:live"].v === "sell", "[vd slip3] route: a GT pool on aero-slipstream-base with a live metaquote must verdict sell, got " + JSON.stringify(raw["new:live"]));
+  ok(raw["mirror:live"] && raw["mirror:live"].v === "sell", "[vd slip3] mirror: the same shape on aerodrome-slipstream-3/aerodrome-cl must verdict sell, got " + JSON.stringify(raw["mirror:live"]));
+  ok(JSON.stringify(raw["new:dead"]) === JSON.stringify(raw["mirror:dead"]),
+    "[vd slip3] a reverting metaquoter must be judged exactly like a reverting aerodrome-cl quoter (same coverage rules): new=" +
+    JSON.stringify(raw["new:dead"]) + " mirror=" + JSON.stringify(raw["mirror:dead"]));
+  ok(raw["new:dead"] && raw["new:dead"].v !== "sell", "[vd slip3] reverting metaquoter must never read as sell");
+  // کنترلِ مثبت: بدونِ نگاشت (aerodrome-slipstream-2) همان ورودی هرگز nosellِ تأییدشده نمی‌شود
+  globalThis.fetch = mkWorld3("aerodrome-slipstream-2", "dead", META_TO);
+  let rawUnmapped;
+  try { rawUnmapped = await rawVd("0x" + "63".repeat(20), { ASSETS, ZX_KV: kv3 }); } finally { globalThis.fetch = savedF3; }
+  ok(rawUnmapped && rawUnmapped.v !== "nosell", "[vd slip3] control: an unmapped dex must not give a confirmed nosell (the coverage guard bites), got " + JSON.stringify(rawUnmapped));
+  const { baseVenueCovered: bvc3 } = idxM;
+  for (const [dexId, want] of [["aero-slipstream-base", true], ["aerodrome-slipstream-3", true], ["aerodrome-slipstream-2", false]]) {
+    globalThis.fetch = async () => jr3({ data: [{ relationships: { dex: { data: { id: dexId } } } }] });
+    let got; try { got = await bvc3("0x" + "64".repeat(20), {}); } finally { globalThis.fetch = savedF3; }
+    ok(got === want, "[vd slip3] baseVenueCovered(" + dexId + ") must be " + want + ", got " + got);
+  }
+
+  console.log("[vd slip3] keccak256 matches the empty/abc vectors, a 200-byte multi-block input (and the 135/136/137 padding edges) via ethers, is not SHA3; selector 0x0a674142; the ANTc pool vector in both token orders and 15 ethers CREATE2 cases; the aerodrome-cl-3 row; 5 metaquoter calls per stage with the right pool per key; 3-word decode; a GT aero-slipstream-base pool sells end to end while a reverting metaquoter is judged exactly like aerodrome-cl; one batch per stage unchanged (fetch count equals the table without the row)");
 }
 
 /* ---- ۲۷. worker/v4index.js — کلیدِ واقعیِ v4، از رویِ لاگِ Initialize ----
@@ -6299,7 +6514,7 @@ console.log("[v4index] worker/v4index.js ok — decodeInitializeLog accepts a we
     gotOld + "\n  want " + wantOld);
 }
 
-/* --- ۲۷.۱۱ buildProbe بدونِ opts — دقیقاً همان ۲۶ تای امروز، بایت‌به‌بایت ----
+/* --- ۲۷.۱۱ buildProbe بدونِ opts — دقیقاً همان ۳۲ تای امروز، بایت‌به‌بایت ----
    فهرستِ موردانتظار از رویِ خودِ VD_VENUES ساخته می‌شود (همان الگویِ بخشِ
    ۱۲.۳)، نه یک بلابِ کپی‌شده. */
 {
@@ -6312,6 +6527,8 @@ console.log("[v4index] worker/v4index.js ok — decodeInitializeLog accepts a we
   const ifaceV2 = new ethers.Interface(["function getAmountsOut(uint256,address[]) returns (uint256[])"]);
   const ifaceSolidly = new ethers.Interface([
     "function getAmountsOut(uint256,(address,address,bool,address)[]) returns (uint256[])"]);
+  const ifaceMetaX = new ethers.Interface([
+    "function quoteExactInputSingleV3(address,address,uint256,uint160) returns (uint256,uint160,uint32)"]);
   const ifaceV4b = new ethers.Interface([
     "function quoteExactInputSingle(((address,address,uint24,int24,address),bool,uint128,bytes)) returns (uint256,uint256)"]);
 
@@ -6323,6 +6540,12 @@ console.log("[v4index] worker/v4index.js ok — decodeInitializeLog accepts a we
         for (const key of row.keys) {
           expected.push({ id: row.id, key, to: row.to,
             data: iface.encodeFunctionData("quoteExactInputSingle", [[TOKEN, outAddr, amt, key, 0]]) });
+        }
+      } else if (row.kind === "CL_META") {
+        for (const key of row.keys) {
+          expected.push({ id: row.id, key, to: row.to,
+            data: ifaceMetaX.encodeFunctionData("quoteExactInputSingleV3",
+              [clMetaPoolOracle(row.factory, row.poolImpl, TOKEN, outAddr, key), TOKEN, amt, 0]) });
         }
       } else if (row.kind === "SOLIDLY") {
         for (const stable of row.keys) {
@@ -6351,7 +6574,7 @@ console.log("[v4index] worker/v4index.js ok — decodeInitializeLog accepts a we
   for (const outAddr of [vd.WETH_ADDR, vd.USDC_ADDR]) {
     const got = vd.buildProbe(TOKEN, outAddr, amt);
     const want = expectedFor(outAddr);
-    ok(got.length === 27, "buildProbe with opts absent must still return exactly 27 items for stage " +
+    ok(got.length === 32, "buildProbe with opts absent must still return exactly 32 items for stage " +
       outAddr + ", got " + got.length);
     ok(JSON.stringify(got) === JSON.stringify(want),
       "buildProbe with opts absent must be byte-for-byte identical to the pre-change output for stage " + outAddr);
@@ -13761,7 +13984,7 @@ function stripAllowedWording(t) {
     const before = vd.buildProbe(SN80C, vd.WETH_ADDR, 12345n);
     const after = vd.buildProbe(SN80C, vd.WETH_ADDR, 12345n);
     ok(JSON.stringify(before) === JSON.stringify(after) && before.length === vd.VD_VENUES.reduce((n, r) => {
-        if (r.kind === "CL_UINT24" || r.kind === "CL_INT24") return n + r.keys.length;
+        if (r.kind === "CL_UINT24" || r.kind === "CL_INT24" || r.kind === "CL_META") return n + r.keys.length;
         if (r.kind === "SOLIDLY") return n + r.keys.length;
         if (r.kind === "V2") return n + 1;
         if (r.kind === "V4_SINGLE") return n + r.keys.length;
@@ -18186,6 +18409,7 @@ console.log(fails === 0
     [TE]: { sym: "NOPRICE", dec: 18, price: null, reserve: null, bal: 5n * E18 },             // GT نمی‌شناسد
     [TF]: { sym: "FFF", dec: 6, price: "10", reserve: "70000", bal: 50000000n },
     [WL]: { sym: "WETH", dec: 18, price: "3000", reserve: "9000000", bal: 0n },
+    [tk(0x77)]: { sym: "SLP3", dec: 18, price: "1.0", reserve: "90000", bal: 100n * E18 },     // فقط رویِ کارخانه‌ی سومِ Slipstream (متاکوتر)
   };
   // کوتِ فروش به WETH: توکن → { to(کوتر) → خروجی }
   const QUOTES = {
@@ -18270,13 +18494,20 @@ console.log(fails === 0
               const sel = data.slice(0, 10);
               let token = null, kind = null;
               if (sel === VDX.SEL_CL_UINT24 || sel === VDX.SEL_CL_INT24) { token = "0x" + data.slice(10 + 24, 10 + 64); kind = "cl"; }
+              else if (sel === VDX.SEL_CL_META) {
+                // متاکوتر: کلمه‌ی ۰ = استخر، کلمه‌ی ۱ = tokenIn؛ فقط وقتی استخرِ درست پرسیده شود جواب می‌دهد (opt.metaPool)
+                token = "0x" + data.slice(10 + 64 + 24, 10 + 128); kind = "meta";
+                if (opt.metaPool && ("0x" + data.slice(10 + 24, 10 + 64)).toLowerCase() !== opt.metaPool(token)) return [false, "0x"];
+              }
               else if (sel === VDX.SEL_V2 || sel === VDX.SEL_SOLIDLY) { token = "0x" + data.slice(10 + 192 + 24, 10 + 256); kind = "v2"; }
               if (token) w.quotedTokens.add(token.toLowerCase());
               const out = token && opt.quotes[token.toLowerCase()] && opt.quotes[token.toLowerCase()][to];
               if (out == null) return [false, "0x"];                                    // ریورت = کوتی نیست
               return kind === "cl"
                 ? [true, coder.encode(["uint256", "uint160", "uint32", "uint256"], [out, 0, 0, 0])]
-                : [true, coder.encode(["uint256[]"], [[1n, out]])];
+                : kind === "meta"
+                  ? [true, coder.encode(["uint256", "uint160", "uint32"], [out, 0, 0])]   // شکلِ واقعیِ متاکوتر: سه کلمه
+                  : [true, coder.encode(["uint256[]"], [[1n, out]])];
             });
             return { jsonrpc: "2.0", id: x.id, result: MC.encodeFunctionResult("aggregate3", [res]) };
           }));
@@ -18425,6 +18656,34 @@ console.log(fails === 0
       ok(X.feeBpsFrom(null) === 100 && X.feeBpsFrom([{ ok: false, data: "0x" }]) === 100 && X.feeBpsFrom([{ ok: true, data: coder.encode(["uint256"], [101])}]) === 100
         && X.feeBpsFrom([{ ok: true, data: coder.encode(["uint256"], [30])}]) === 30 && X.feeBpsFrom([{ ok: true, data: coder.encode(["uint256"], [0])}]) === 0,
         "[exit og] an unreadable or out-of-range fee falls back to the contract ceiling (100), never 0; a real 0 stays 0");
+    }
+
+    // ===== [vd slip3] کارخانه‌ی سومِ Slipstream در خلاصه‌ی Exit — کوتِ متاکوتر، نه Unknown =====
+    {
+      const SLP = tk(0x77);
+      const META_X = VDX.VD_VENUES.find((v) => v.id === "aerodrome-cl-3");
+      const wantPool = (t) => VDX.clMetaPoolAddr(META_X.factory, META_X.poolImpl, t, VDX.WETH_ADDR, 10).toLowerCase();
+      // ۰٫۰۵ WETH از رویِ متاکوتر، فقط وقتی استخرِ توکن/WETH با tickSpacing ۱۰ پرسیده شود
+      resetCache();
+      const wLive = mkWorld({ tokens: [SLP], quotes: { [SLP]: { [META_X.to.toLowerCase()]: 50000000000000000n } }, metaPool: wantPool });
+      const rLive = await COMPUTE(wLive);
+      const expExit = ETHP + 0.05 * 3000 * 0.997;
+      ok(rLive.s && rLive.s.unknownCount === 0 && rLive.s.counted === 1 && near(rLive.s.quotedPaper, ETHP + 100) && near(rLive.s.exit, expExit),
+        "[vd slip3] exit: a token whose only pool is on the new Slipstream factory gets the metaquoter's quote (exit " + expExit + "), not Unknown; got " + JSON.stringify(rLive.s));
+      ok(wLive.quotedTokens.has(SLP) && wLive.kinds.join() === "holdings,gt,quote",
+        "[vd slip3] exit: the metaquoter was really asked, in the same single quote batch (no extra subrequest), got " + wLive.kinds.join());
+      // ریوِرتِ متاکوتر → Unknown، هرگز صفر و هرگز «ارزشِ ۰»
+      resetCache();
+      const wDead = mkWorld({ tokens: [SLP], quotes: {} });
+      const rDead = await COMPUTE(wDead);
+      ok(rDead.s && rDead.s.unknownCount === 1 && rDead.s.counted === 1 && near(rDead.s.exit, ETHP) && near(rDead.s.quotedPaper, ETHP) && rDead.s.lostPct === 0 && wDead.quotedTokens.has(SLP),
+        "[vd slip3] exit: a reverting metaquoter leaves the token Unknown (excluded from exit, never a $0 row); got " + JSON.stringify(rDead.s));
+      // یک خروجیِ صفرِ موفق هم کوت نیست، Unknown می‌ماند
+      resetCache();
+      const wZero = mkWorld({ tokens: [SLP], quotes: { [SLP]: { [META_X.to.toLowerCase()]: 0n } } });
+      const rZero = await COMPUTE(wZero);
+      ok(rZero.s && rZero.s.unknownCount === 1 && near(rZero.s.exit, ETHP), "[vd slip3] exit: a metaquote of 0 is Unknown too, got " + JSON.stringify(rZero.s));
+      console.log("[vd slip3 exit] the Exit value server summary quotes a token that trades only on the third Slipstream factory through the metaquoter (right pool, same single batch, 3-word return) and leaves it Unknown — never zero — when the metaquoter reverts or answers 0");
     }
 
     // ===== پ) قواعدِ شمارش + یک کوتِ دسته‌ای + شمارشِ ساب‌ریکوئست =====

@@ -3113,8 +3113,8 @@ const DEXES=[
   // تا وقتی مالک این روتر را روی اجراکننده‌ی v6 لیست‌سفید نکرده، دروازه‌ی ۳
   // (allowListGate) این ردیف را «not allow-listed on the executor contract yet»
   // نگه می‌دارد — همان الگوی امنِ aerodrome-cl-v1 که بالاتر آمده.
-  // ⚠️ در GT_DEX_TO_DEX عمداً نگاشتی برای این کارخانه نیست (آن جدول آینه‌ی
-  // جدولِ ورکر است و ورکر برایش venue ندارد؛ «نامعلوم» باید نامعلوم بماند).
+  // ۲۰ نوامبر: ورکر هم این کارخانه را می‌شناسد (VD_VENUES ردیفِ aerodrome-cl-3، نوعِ CL_META)،
+  // پس GT_DEX_TO_DEX حالا "aero-slipstream-base" را به این ردیف می‌برد — همان آینه‌ی جدولِ ورکر.
   {id:"aerodrome-cl-3",name:"Aerodrome Slipstream (new)",cls:"c",kind:KIND.SLIPSTREAM,
    router:"0x9Ee35Bf1bd69a03c6F0393582030fCe8Bb93D418",
    factory:"0x9CB220581b91b0C83223012FE69688b92aD07a76",
@@ -5787,7 +5787,7 @@ async function measureLiquidity(token){
    حالا به aerodrome-cl-v1 می‌رود و aerodrome-slipstream-3 (کارخانه‌ی جدید)
    به aerodrome-cl. هر id دیگری (uniswap-v4-base، aerodrome-slipstream-2،
    …) یعنی «اینجا سنجیده نشده» و باید به نامعلوم بیفتد، نه به اتهام. */
-const GT_DEX_TO_DEX=Object.freeze({"uniswap-v3-base":"uniswap-v3","pancakeswap-v3-base":"pancake-v3","aerodrome-slipstream":"aerodrome-cl-v1","aerodrome-slipstream-3":"aerodrome-cl","aerodrome-base":"aerodrome","baseswap":"baseswap","sushiswap-v2-base":"sushiswap","alien-base":"alienbase","uniswap-v2-base":"uniswap-v2","uniswap-v4-base":"uniswap-v4"});
+const GT_DEX_TO_DEX=Object.freeze({"uniswap-v3-base":"uniswap-v3","pancakeswap-v3-base":"pancake-v3","aerodrome-slipstream":"aerodrome-cl-v1","aerodrome-slipstream-3":"aerodrome-cl","aero-slipstream-base":"aerodrome-cl-3","aerodrome-base":"aerodrome","baseswap":"baseswap","sushiswap-v2-base":"sushiswap","alien-base":"alienbase","uniswap-v2-base":"uniswap-v2","uniswap-v4-base":"uniswap-v4"});
 /* شاهدِ پوشش برای measureLiquidity: آیا *همه‌ی* استخرهای این توکن روی
    GeckoTerminal در همان جفت‌هایی هستند که measureLiquidity می‌سنجد؟
    true فقط وقتی که مطمئن باشیم؛ در هر ابهامی null برمی‌گردد، هرگز false

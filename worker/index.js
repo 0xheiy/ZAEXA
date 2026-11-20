@@ -812,13 +812,18 @@ async function cachedVerdict(cacheKeyPath, computeFn, ctx, out) {
    aerodrome-slipstream به‌اشتباه به aerodrome-cl نگاشته شده بود — کوترِ
    aerodrome-cl رویِ استخرهای کارخانه‌ی قدیمی ریورت می‌کند، پس آن توکن‌ها
    بی‌صدا «پوشش‌داده‌شده» به‌حساب می‌آمدند بدونِ آنکه واقعاً پرسیده شوند.
-   aerodrome-slipstream-2 (کارخانه‌ی سوم) هنوز کوترِ تأییدشده ندارد و عمداً
-   نگاشت نشده — نامعلوم می‌ماند، نه متهم. */
+   aerodrome-slipstream-2 هنوز کوترِ تأییدشده ندارد و عمداً نگاشت نشده —
+   نامعلوم می‌ماند، نه متهم.
+   ۲۰ نوامبر ۲۰۲۶: کارخانه‌ی سومِ Slipstream (0x9CB2…7a76، Dromos Labs) که
+   GeckoTerminal با aero-slipstream-base برچسب می‌زند به ردیفِ
+   aerodrome-cl-3 (متاکوترِ آدرسِ‌استخر) نگاشت شد؛ آن ردیف رویِ زنجیره
+   تأیید شده است. */
 export const GT_DEX_TO_VENUE = Object.freeze({
   "uniswap-v3-base": "uniswap-v3",
   "pancakeswap-v3-base": "pancake-v3",
   "aerodrome-slipstream": "aerodrome-cl-v1",
   "aerodrome-slipstream-3": "aerodrome-cl",
+  "aero-slipstream-base": "aerodrome-cl-3",
   "aerodrome-base": "aerodrome",
   "baseswap": "baseswap",
   "sushiswap-v2-base": "sushiswap",

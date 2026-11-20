@@ -28,6 +28,8 @@
 // fetchی ندارد، پس این ایمپورت هیچ چیزی را از «خالص‌بودنِ» این ماژول کم
 // نمی‌کند.
 import { keyUsableFor } from "./v4index.js";
+// کِکاک۲۵۶ خودکفا — فقط برای آدرسِ CREATE2ِ استخرهای کارخانه‌ی سومِ Slipstream (clMetaPoolAddr)
+import { keccak256, hexToBytes, bytesToHex, utf8Bytes } from "./keccak.js";
 // بایت‌کدِ runtime همان V4RoundTrip.sol (تولیدشده؛ contracts/script/build_roundtrip.sh) — فقط در stateOverride می‌نشیند
 import { V4RT_ADDRESS, V4RT_CODE } from "./v4_roundtrip_code.js";
 
@@ -37,6 +39,11 @@ export const SEL_CL_UINT24 = "0xc6a5026a";
 // ⚠️ شکل تاپل با CL_UINT24 یکی به‌نظر می‌رسد، ولی چون نوعِ میدانِ چهارم فرق
 // دارد (int24 به‌جای uint24) سلکتور هم فرق می‌کند — کپی از آن یکی اشتباه است.
 export const SEL_CL_INT24 = "0x9e7defe6";
+// quoteExactInputSingleV3(address pool,address tokenIn,uint256 amountIn,uint160 sqrtPriceLimitX96) — متاکوترِ
+// کارخانه‌ی سومِ Slipstream؛ برخلافِ دو کوترِ بالا *آدرسِ استخر* می‌گیرد، نه جفت و کلید.
+// ⚠️ ⚠️ در Workers کِکاک۲۵۶ نیست، پس این سلکتور هم مثل بقیه دستی نوشته شده؛
+// worker/test.mjs آن را با keccak.js (و با ethers.id) از رویِ امضا بازمحاسبه می‌کند.
+export const SEL_CL_META = "0x0a674142";
 // getAmountsOut(uint256 amountIn,(address from,address to,bool stable,address factory)[] routes)
 export const SEL_SOLIDLY = "0x5509a1ac";
 // getAmountsOut(uint256 amountIn,address[] path)
@@ -123,9 +130,12 @@ export const VD_NOTIONAL_USD = 100;
    کارمزدِ ۱۰۰۰۰ برای uniswap-v3 عمداً کنار گذاشته نشده (آن یکی که کنار
    گذاشته شده کارمزدِ ۱۰۰۰۰۰ نیست — این‌جا اصلاً چنین ردیفی وجود ندارد؛
    سطحِ استیبل-به-استیبلِ یونی‌سواپ که کنار گذاشته شده هرگز جزوِ این چهار
-   کارمزد نبوده). جمعِ فراخوانی‌ها بدونِ کلیدهای واقعی همیشه ۲۷ تاست:
-   ۳+۳+۶+۵+۲+۱+۱+۱+۱+۴. با کلیدهای واقعی (opts.v4Keys در buildProbe) تا
-   VD_V4_REAL_MAX=۴ تای دیگر به‌ازای هر مرحله اضافه می‌شود، یعنی حداکثر ۳۱.
+   کارمزد نبوده). جمعِ فراخوانی‌ها بدونِ کلیدهای واقعی همیشه ۳۲ تاست:
+   ۳+۳+۶+۵+۵+۲+۱+۱+۱+۱+۴. با کلیدهای واقعی (opts.v4Keys در buildProbe) تا
+   VD_V4_REAL_MAX=۴ تای دیگر به‌ازای هر مرحله اضافه می‌شود، یعنی حداکثر ۳۶.
+   ۲۰ نوامبر ۲۰۲۶: ردیفِ aerodrome-cl-3 (کارخانه‌ی سوم) پنج تماس اضافه کرد و
+   جمع از ۲۷ به ۳۲ رسید؛ همین پنج تماس هم در همان batchِ هر مرحله می‌روند،
+   پس باز هم ساب‌ریکوئستِ تازه‌ای به کلادفلر اضافه نمی‌شود.
    ۷ اکتبر ۲۰۲۶: tickSpacing ۱۰ به aerodrome-cl اضافه شد (سهام توکنیزه‌ی
    Coinbase آن‌جا معامله می‌شوند) و جمع از ۲۶ به ۲۷ رسید. این تماس‌ها در
    *یک* batch از JSON-RPC به‌ازای هر مرحله می‌روند، پس ساب‌ریکوئستِ تازه‌ای
@@ -155,6 +165,25 @@ export const VD_VENUES = [
        رویِ زنجیره تأیید شد: factory() برابرِ 0x5e7B…809A برگشت و یک
        کوتِ زنده برای WETH→USDC گرفت. */
     to: "0x254cF9E1E6e233aa1AC962CB9B05b2cfeAaE15b0", keys: [1, 50, 100, 200, 2000] },
+  /* کارخانه‌ی سومِ Slipstream (Dromos Labs، ۲۱ اکتبر ۲۰۲۶؛ منبع:
+     github.com/dromos-labs/metadex-slipstream-public،
+     deployment-addresses/cl-base.json) — حدود ۲۷٪ سواپ‌های CLِ Base.
+     GeckoTerminal استخرهایش را با دکسِ aero-slipstream-base برچسب می‌زند.
+     QuoterV2 ندارد؛ فقط یک متاکوتر دارد که تابعش
+     quoteExactInputSingleV3(pool, tokenIn, amountIn, sqrtPriceLimitX96)
+     *آدرسِ استخر* می‌گیرد. آدرسِ استخر قطعی است: CREATE2 با deployer =
+     کارخانه، salt = keccak256(abi.encode(token0, token1, tickSpacing)) با
+     token0 < token1، و initCodeHash = هشِ کلونِ مینیمالِ EIP-1167 روی
+     poolImpl (clMetaPoolAddr). ۱۹ نوامبر ۲۰۲۶ رویِ Base تأیید شد: بردارِ
+     USDC/ANTc/۱۰ برابرِ factory.getPool شد، کوتِ زنده برگشت، و یک سواپِ
+     واقعی از روترِ همین کارخانه با اجراکننده‌ی ما موفق بود.
+     متاکوتر روی آدرسی که استخر ندارد ریوِرت می‌کند — پس CL_META در
+     verdictFrom مثلِ CL_INT24 رفتار می‌کند. کلیدها همان ردیفِ کلاینتند. */
+  { id: "aerodrome-cl-3", kind: "CL_META",
+    to: "0x1dDfeC5058180C207F55BB77D95AcDd0d8227868",
+    factory: "0x9CB220581b91b0C83223012FE69688b92aD07a76",
+    poolImpl: "0x1642634C8CB1C9f1B84c9a1a08534F8c3F4E89f8",
+    keys: [1, 10, 50, 100, 200] },
   { id: "aerodrome", kind: "SOLIDLY",
     to: "0xcF77a3Ba9A5CA399B7c97c74d54e5b1Beb874E43",
     factory: "0x420DD381b31aEf6683db6B902084cB0FFECe40Da", keys: [false, true] },
@@ -217,6 +246,25 @@ function encodeQuoteSingle(selector, tokenIn, tokenOut, amountIn, feeOrTickSpaci
     wordAddr(tokenIn) + wordAddr(tokenOut) + wordUint(amountIn) +
     wordUint(feeOrTickSpacing) + wordUint(0) // sqrtPriceLimitX96 = بدون محدودیت
   );
+}
+
+/* آدرسِ استخرِ کارخانه‌ی سومِ Slipstream — CREATE2 با deployer = factory:
+     salt = keccak256(abi.encode(address token0, address token1, int24 tickSpacing))
+     initCodeHash = keccak256(0x3d602d80600a3d3981f3363d3d373d3d3d363d73 ‖ poolImpl ‖ 5af43d82803e903d91602b57fd5bf3)
+     آدرس = keccak256(0xff ‖ factory ‖ salt ‖ initCodeHash)[12:]
+   token0 همیشه عددیِ کوچک‌تر است؛ ترتیبِ آرگومان‌ها و بزرگیِ حروفِ آدرس بی‌اثر
+   است. خروجی کوچک‌حرف و با 0x است. tickSpacing مثبت است (int24 بدونِ علامت
+   چپ‌چین می‌شود، مثل encodeQuoteSingle). */
+export function clMetaPoolAddr(factory, poolImpl, a, b, tickSpacing) {
+  const x = String(a).toLowerCase().replace(/^0x/, "");
+  const y = String(b).toLowerCase().replace(/^0x/, "");
+  const [t0, t1] = BigInt("0x" + x) < BigInt("0x" + y) ? [x, y] : [y, x];
+  const salt = keccak256(hexToBytes(t0.padStart(WORD, "0") + t1.padStart(WORD, "0") + wordUint(tickSpacing)));
+  const initCodeHash = keccak256(hexToBytes(
+    "3d602d80600a3d3981f3363d3d373d3d3d363d73" + wordAddr(poolImpl).slice(24) + "5af43d82803e903d91602b57fd5bf3"));
+  const h = keccak256(hexToBytes(
+    "ff" + wordAddr(factory).slice(24) + bytesToHex(salt) + bytesToHex(initCodeHash)));
+  return "0x" + bytesToHex(h).slice(24);
 }
 
 /* getAmountsOut(uint256,address[]) — امضای V2. آرایه پویاست: بعد از دو
@@ -405,6 +453,17 @@ export function buildProbeFor(tokenAddr, outAddr, amountIn, venueIds) {
           data: encodeQuoteSingle(sel, tokenAddr, outAddr, amountIn, key),
         });
       }
+    } else if (row.kind === "CL_META") {
+      // quoteExactInputSingleV3(pool, tokenIn, amountIn, 0) — خروجِ توکن همان جهتِ
+      // استخر است و نیازی به tokenOut نیست؛ استخر از رویِ (توکن، ضدجفت، کلید) ساخته می‌شود
+      for (const key of row.keys) {
+        const pool = clMetaPoolAddr(row.factory, row.poolImpl, tokenAddr, outAddr, key);
+        out.push({
+          id: row.id, key, to: row.to,
+          data: "0x" + SEL_CL_META.slice(2) + wordAddr(pool) + wordAddr(tokenAddr) +
+            wordUint(amountIn) + wordUint(0), // sqrtPriceLimitX96 = بدون محدودیت
+        });
+      }
     } else if (row.kind === "SOLIDLY") {
       for (const stable of row.keys) {
         out.push({
@@ -486,6 +545,17 @@ function decodeStatic4(hex) {
   return BigInt("0x" + hexWordAt(body, 0));
 }
 
+/* بازگشتِ (uint256 amountOut,uint160,uint32) — متاکوترِ کارخانه‌ی سومِ Slipstream فقط
+   سه کلمه برمی‌گرداند، نه چهار. decodeStatic4 این را (چون کوتاه‌تر از ۴ کلمه است)
+   ناقص می‌دانست و هر کوتِ زنده «رمزگشایی‌نشده» می‌شد. مثلِ بقیه فقط کلمه‌ی *اول*
+   amountOut است. */
+function decodeStatic3(hex) {
+  if (!isHexData(hex) || hex === "0x") return null;
+  const body = hex.slice(2);
+  if (body.length < 192) return null; // کوتاه‌تر از ۳ کلمه → ناقص برای این شکل
+  return BigInt("0x" + hexWordAt(body, 0));
+}
+
 /* بازگشتِ یک مقدارِ ایستایِ تک‌کلمه‌ای — balanceOf(address)، fee()، tickSpacing().
    هرسه دقیقاً یک uint256/uint24/int24 در یک کلمه برمی‌گردانند؛ decodeStatic4
    این‌ها را رد می‌کرد چون کوتاه‌تر از ظرفیتِ آن (۴ کلمه) است. tickSpacing در
@@ -534,6 +604,7 @@ function decodeDynamicUintArray(hex) {
 
 export function decodeQuote(kind, hex) {
   if (kind === "CL_UINT24" || kind === "CL_INT24") return decodeStatic4(hex);
+  if (kind === "CL_META") return decodeStatic3(hex);
   if (kind === "SOLIDLY" || kind === "V2") return decodeDynamicUintArray(hex);
   if (kind === "V4_SINGLE") return decodeStatic2(hex);
   return null; // نوعِ ناشناخته → نمی‌دانیم، نه صفر
@@ -563,6 +634,10 @@ const PROVEN_NEGATIVE_CODES = new Set([3, -32000]); // بازگشتِ ریوِر
    worker/test.mjs بتواند خودِ همین شیء را پین کند. */
 export const VD_ZERO_IS_PROOF = Object.freeze({
   CL_UINT24: true, CL_INT24: true, V2: true, SOLIDLY: false, V4_SINGLE: false,
+  /* CL_META مثلِ CL_INT24: متاکوتر روی آدرسی که استخر ندارد (آدرسِ CREATE2ی که
+     هرگز ساخته نشده) ریوِرت می‌کند، نه صفر — پس صفرِ *موفق* هم «امتحان شد و
+     صفر داد» است. ولی عملاً همیشه ریوِرتِ کد ۳ می‌رسد که خودش اثبات است. */
+  CL_META: true,
 });
 
 /* v4 را حدس می‌زنیم: چهار PoolKeyِ استاندارد را امتحان می‌کنیم، نه استخرِ
@@ -574,6 +649,9 @@ export const VD_ZERO_IS_PROOF = Object.freeze({
    نوشته شود، هم worker/test.mjs بتواند خودش را پین کند. */
 export const VD_POSITIVE_ONLY = Object.freeze({
   CL_UINT24: false, CL_INT24: false, V2: false, SOLIDLY: false, V4_SINGLE: true,
+  // CL_META حدسی نیست: آدرسِ استخر قطعی است (نه حدسِ PoolKey مثلِ v4)، پس ریوِرتش
+  // اثباتِ «استخری نیست» است — مثلِ CL_INT24، نه positive-only
+  CL_META: false,
 });
 
 /* کمترین تعدادِ شاهدِ واقعیِ منفی برای یک حکمِ "nosell".
@@ -1240,6 +1318,10 @@ export async function poolDirectedProof(tokenAddr, pools, opts) {
 
     // ۱. کاندیدها: فقط CL_UINT24/CL_INT24/V2، فقط ضدجفتِ WETH یا USDC —
     // SOLIDLY و ردیف‌های positive-only (v4) هرگز کاندید نمی‌شوند.
+    // CL_META عمداً بیرون است: این گذر کلیدِ واقعیِ استخر را با tickSpacing()
+    // از خودِ استخر می‌خواند و با کوترِ شکلِ قدیمی کوت می‌گیرد؛ نه آن خواندن
+    // برای استخرهای این کارخانه اندازه‌گیری شده، نه کوترش آن ABI را دارد.
+    // «کاندیدِ نشدن» دقیقاً رفتارِ امروز است (causeless)، نه اتهام.
     const candidates = [];
     for (const pool of pools) {
       try {
