@@ -2557,6 +2557,11 @@ function isSolidlyReqId(id) { return PROBE_KIND_BY_ID.get(id) === "SOLIDLY"; }
       }
       if (rpcStatus[body.method]) return new Response("boom", { status: rpcStatus[body.method] });
       if (body.method === "getBalance") return rpcOk({ value: lamports });
+      // ۲۰ نوامبر — نگهبانِ payer-frozen روی مسیرِ شکستِ رفت‌وبرگشت با jsonParsed صدا می‌زند؛
+      // پیش‌فرضِ این موک: هیچ‌کدام از اکانت‌ها روی زنجیره نیست (null) → همان nosellِ قبلی.
+      if (body.method === "getMultipleAccounts" && body.params[1] && body.params[1].encoding === "jsonParsed") {
+        return rpcOk({ value: body.params[0].map(() => null) });
+      }
       if (body.method === "getMultipleAccounts" && altData) {
         const addrs = body.params[0];
         return rpcOk({ value: addrs.map(() => ({ data: [altData, "base64"] })) });
@@ -19705,6 +19710,115 @@ console.log(fails === 0
     globalThis.fetch = savedF;
   }
   console.log("[sol sim diag] InstructionError [ix, detail] -> sim {ix, code, prog}: Custom -> custom:<n> (u32 only), whitelisted string variants kept, everything else (unknown string, other object, bad number, array, malformed) -> other, prog = program id of that instruction in the composed message or null; control failure -> simControl; the returned verdict object is byte-identical with and without the observer; public /vd never shows sim; ?probe=1 shows it only with the x-run-key header");
+}
+
+/* ---- [sol payer-frozen] نگهبانِ فی‌پیرِ فریز (۲۰ نوامبر ۲۰۲۶) ----
+   رفت‌وبرگشت InstructionError گرفت و یکی از اکانت‌های writableِ همان تراکنش یک اکانتِ توکنِ
+   فریزشده‌ی متعلق به خودِ فی‌پیر است → null/"payer-frozen"، نه nosell. تصمیم فقط از فیلدهای ساختاری. */
+{
+  const vs = await import("./verdict_sol.js");
+  const rpg = await import("./report_page.js");
+  const fakePubkey = (n) => { const b = new Uint8Array(32); for (let i = 0; i < 32; i++) b[i] = (n * 53 + i * 11 + 5) % 256; return vs.base58Encode(b); };
+  const P_SWAP = fakePubkey(31), W1 = fakePubkey(32), W2 = fakePubkey(33), R1 = fakePubkey(34), OTHER = fakePubkey(35);
+  const PAYER = vs.VD_SOL_PAYER;
+  const acc = (pubkey, isWritable, isSigner = false) => ({ pubkey, isSigner, isWritable });
+  const mkIx = (accounts, d) => ({ programId: P_SWAP, accounts, data: vs.bytesToBase64(Uint8Array.from(d)) });
+  const legBuy = { computeBudgetInstructions: [], setupInstructions: [],
+    swapInstruction: mkIx([acc(PAYER, true, true), acc(W1, true), acc(W2, true), acc(R1, false)], [1, 2]),
+    cleanupInstruction: null, addressLookupTableAddresses: [] };
+  const legSell = { computeBudgetInstructions: [], setupInstructions: [],
+    swapInstruction: mkIx([acc(PAYER, true, true), acc(W1, true), acc(R1, false)], [3, 4]),
+    cleanupInstruction: null, addressLookupTableAddresses: [] };
+  const jr = (b, st = 200) => new Response(JSON.stringify(b), { status: st, headers: { "content-type": "application/json" } });
+  const rpcOk = (r) => jr({ jsonrpc: "2.0", id: 1, result: r });
+  const tokAcc = (program, state, owner) => ({ data: { program, space: 165, parsed: { type: "account", info: { state, owner, mint: fakePubkey(40) } } } });
+  // simErr: خطای رفت‌وبرگشت؛ guard: تابعی از آرایه‌ی کلیدها → پاسخ (Response) یا آرایه‌ی value
+  const mk = (simErr, guard) => {
+    const rec = { guardCalls: [], sims: 0 };
+    const fetchImpl = async (url, init) => {
+      const u = String(url);
+      if (u.includes("/swap/v1/quote")) return jr({ outAmount: u.includes("onlyDirectRoutes=true") ? "1000000" : "40000000", routePlan: [{}] });
+      if (u.includes("/swap/v1/swap-instructions")) return jr(JSON.parse(init.body).quoteResponse.outAmount === "1000000" ? legBuy : legSell);
+      const b = JSON.parse(init.body);
+      if (b.method === "getBalance") return rpcOk({ value: 2_000_000_000 });
+      if (b.method === "simulateTransaction") {
+        rec.sims++;
+        return rpcOk({ value: { err: rec.sims === 1 ? simErr : { InstructionError: [1, { Custom: 1 }] } } });
+      }
+      if (b.method === "getMultipleAccounts" && b.params[1] && b.params[1].encoding === "jsonParsed") {
+        rec.guardCalls.push(b.params);
+        const r = guard(b.params[0]);
+        return r instanceof Response ? r : rpcOk({ value: r });
+      }
+      return jr({ error: "unexpected" }, 500);
+    };
+    return { fetchImpl, rec };
+  };
+  const INSTR = { InstructionError: [1, { Custom: 17 }] };
+  const MINT = fakePubkey(77);
+  const run = async (simErr, guard) => {
+    const { fetchImpl, rec } = mk(simErr, guard);
+    const simOut = {};
+    const res = await vs.fetchVerdictSol(MINT, { rpcs: ["https://rpc.example"], jupBase: vs.VD_SOL_JUP_BASE, payer: PAYER, fetchImpl, simOut });
+    return { res, rec, simOut };
+  };
+  // اکانتِ دومِ کلیدها (W2) را با مقدارِ داده‌شده پر می‌کند؛ بقیه null
+  const withW2 = (v) => (keys) => keys.map((k) => (k === W2 ? v : null));
+
+  // الف) spl-token فریز، owner = فی‌پیر → payer-frozen + sim.frozen
+  {
+    const r = await run(INSTR, withW2(tokAcc("spl-token", "frozen", PAYER)));
+    ok(r.res.v === null && r.res.why === "payer-frozen" && vs.VD_SOL_WHY.includes(r.res.why),
+      "[sol payer-frozen] frozen spl-token account owned by the payer -> null/payer-frozen, got " + JSON.stringify(r.res));
+    ok(r.simOut.sim && r.simOut.sim.frozen === true,
+      "[sol payer-frozen] simOut.sim.frozen is true, got " + JSON.stringify(r.simOut));
+  }
+  // ب) فریز ولی owner کسِ دیگر → nosell
+  {
+    const r = await run(INSTR, withW2(tokAcc("spl-token", "frozen", OTHER)));
+    ok(r.res.v === "nosell" && !("why" in r.res) && r.simOut.sim && r.simOut.sim.frozen === undefined,
+      "[sol payer-frozen] frozen account owned by someone else stays nosell, got " + JSON.stringify(r.res));
+  }
+  // پ) state = initialized → nosell
+  {
+    const r = await run(INSTR, withW2(tokAcc("spl-token", "initialized", PAYER)));
+    ok(r.res.v === "nosell", "[sol payer-frozen] initialized account owned by the payer stays nosell, got " + JSON.stringify(r.res));
+  }
+  // ت) HTTP 500 روی تماسِ نگهبان → rpc:getMultipleAccounts
+  {
+    const r = await run(INSTR, () => new Response("boom", { status: 500 }));
+    ok(r.res.v === null && typeof r.res.why === "string" && r.res.why.startsWith("rpc:getMultipleAccounts"),
+      "[sol payer-frozen] HTTP 500 on the guard call -> null/rpc:getMultipleAccounts:*, got " + JSON.stringify(r.res));
+  }
+  // ث) spl-token-2022 فریز، owner = فی‌پیر → payer-frozen
+  {
+    const r = await run(INSTR, withW2(tokAcc("spl-token-2022", "frozen", PAYER)));
+    ok(r.res.v === null && r.res.why === "payer-frozen",
+      "[sol payer-frozen] frozen spl-token-2022 account owned by the payer -> payer-frozen, got " + JSON.stringify(r.res));
+  }
+  // ج) شکلِ درخواست: jsonParsed، بدونِ کلیدِ فی‌پیر، فقط writable، یکتا
+  {
+    const r = await run(INSTR, withW2(null));
+    ok(r.rec.guardCalls.length === 1, "[sol payer-frozen] exactly one guard call, got " + r.rec.guardCalls.length);
+    const [keys, cfg] = r.rec.guardCalls[0];
+    ok(cfg && cfg.encoding === "jsonParsed", "[sol payer-frozen] guard request uses jsonParsed, got " + JSON.stringify(cfg));
+    ok(!keys.includes(PAYER), "[sol payer-frozen] guard request never contains the payer key");
+    ok(keys.length === 2 && keys.includes(W1) && keys.includes(W2) && !keys.includes(R1) && new Set(keys).size === keys.length,
+      "[sol payer-frozen] guard request holds only unique writable keys, got " + JSON.stringify(keys));
+    ok(r.res.v === "nosell", "[sol payer-frozen] nothing frozen -> nosell, got " + JSON.stringify(r.res));
+  }
+  // چ) مسیرِ موفقیت هرگز نگهبان را صدا نمی‌زند
+  {
+    const { fetchImpl, rec } = mk(null, () => { throw new Error("guard must not run"); });
+    const res = await vs.fetchVerdictSol(MINT, { rpcs: ["https://rpc.example"], jupBase: vs.VD_SOL_JUP_BASE, payer: PAYER, fetchImpl });
+    ok(res && res.v === "sell" && rec.guardCalls.length === 0 && rec.sims === 2,
+      "[sol payer-frozen] a successful round trip never calls the jsonParsed getMultipleAccounts, got " + JSON.stringify(res) + " guardCalls=" + rec.guardCalls.length);
+  }
+  // ح) واژه‌نامه
+  ok(vs.VD_SOL_WHY.includes("payer-frozen"), "[sol payer-frozen] payer-frozen is in VD_SOL_WHY");
+  ok(rpg.plainWhy("solana", "payer-frozen") === "The test wallet has a frozen account on this route, so the failed sell proved nothing.",
+    "[sol payer-frozen] plainWhy(solana, payer-frozen) returns the WHY_SOL text, got " + rpg.plainWhy("solana", "payer-frozen"));
+  console.log("[sol payer-frozen] round-trip InstructionError + frozen token account (spl-token or spl-token-2022) owned by the payer -> null/payer-frozen with sim.frozen; other owner or non-frozen state -> nosell; guard RPC failure -> rpc:getMultipleAccounts:*; request is jsonParsed with unique writable non-payer keys only; success path never calls it; why listed and has a plain text");
 }
 
 process.exit(fails === 0 ? 0 : 1);

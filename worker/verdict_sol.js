@@ -277,9 +277,11 @@ export const VD_SOL_JUP_BASE = "https://api.jup.ag";
 export const VD_SOL_MIN_PAYER_LAMPORTS = 1_000_000_000;
 
 // ⚠️ فقط یک حدسِ تاییدنشده. دو چکِ اجرایی (موجودیِ SOL در مرحله‌ی ۱، صفربودنِ
-// موجودیِ همین mint در مرحله‌ی ۲) هستند که واقعاً تصمیم می‌گیرند؛ این کد هرگز
-// فرض نمی‌کند این آدرس از قبل واجدِ شرایط است.
-export const VD_SOL_PAYER = "5tzFkiKscXHK5ZXCGbXZxdw7gTjjD1mBwuoFbhUvuAi9";
+// موجودیِ همین mint در مرحله‌ی ۲) و حالا نگهبانِ payer-frozen در گامِ ۷ هستند که
+// واقعاً تصمیم می‌گیرند؛ این کد هرگز فرض نمی‌کند این آدرس از قبل واجدِ شرایط است.
+// ۲۰ نوامبر ۲۰۲۶ — انتخاب شد چون اکانتِ USDCِ فی‌پیرِ قبلی (5tzFki…) فریز شده بود
+// و هر مسیرِ فروشِ عبوری از USDC را اشتباهاً nosell می‌کرد (مثلاً ANTx).
+export const VD_SOL_PAYER = "H8sMJSCQxfKiFTCfDR3DUMLPwcRbM61LGFJ8N4dK3WjS";
 /* جدولِ آدرسِ خودِ زَکسا روی سولانا (۲۳ سپتامبر). رفت‌وبرگشتِ توکن‌های پامپ‌فان
    ۲۹ آدرسِ یکتا دارد و بدونِ جدول ۱۲۸۱ بایت می‌شود — بالای سقفِ ۱۲۳۲ — و ژوپیتر
    برای پامپ‌فان هیچ جدولی نمی‌دهد. این جدول ۱۲ آدرسِ ثابتِ پامپ‌فان/ژوپیتر را دارد
@@ -357,6 +359,13 @@ const PLACEHOLDER_BLOCKHASH = "1".repeat(32);
        صفر/نامحدود درآمد، ALT/decodeLookupTable، compose/compile/serialize،
        شکلِ ناشناخته‌ی err شبیه‌سازی)، به‌علاوه‌ی catch بیرونیِ خودِ تابع.
 
+     • ۲۰ نوامبر — "payer-frozen": رفت‌وبرگشت InstructionError گرفت، ولی یکی از
+       اکانت‌های writableِ همان تراکنش (به‌جز خودِ فی‌پیر) یک اکانتِ توکنِ spl-token
+       یا spl-token-2022 با state برابرِ "frozen" و owner برابرِ همین فی‌پیر است
+       (getMultipleAccounts با jsonParsed؛ فقط از فیلدهای ساختاری، هرگز لاگ/متن).
+       یعنی کیف‌پولِ آزمون فریز است نه توکن، پس شکستِ فروش چیزی اثبات نکرد → null.
+       فقط روی مسیرِ شکستِ رفت‌وبرگشت اجرا می‌شود، نه کنترل و نه موفقیت.
+
    ⚠️ "unsupported" هم در همین فهرست است چون خودِ واژه‌نامه آن را خواسته،
    ولی هیچ مسیری داخلِ همین تابع آن را تولید نمی‌کند: به زمانی اشاره دارد
    که chainOf آدرس را به‌کل نه Base نه سولانا تشخیص می‌دهد — و آن حالت
@@ -388,6 +397,9 @@ export const VD_SOL_WHY = Object.freeze([
   // ۴ اکتبر — nosellِ سولانا که وتو نشد دیگر هرگز منتشر نمی‌شود (تصمیمِ مالک)؛
   // همان why که publishGuardRow در گزارش روزانه می‌گذارد.
   "sol:unconfirmed",
+  // ۲۰ نوامبر — اکانتِ توکنِ فریزشده‌ی خودِ فی‌پیر روی مسیرِ فروش؛ تقصیرِ کیف‌پولِ
+  // آزمون است نه توکن.
+  "payer-frozen",
 ]);
 
 /* ---------------------------------------------------------------------
@@ -989,6 +1001,33 @@ export async function fetchVerdictSol(mint, opts) {
     // (خطای سطحِ RPC، شکلِ ناشناخته) یعنی نامعلوم، نه غیرقابل‌فروش.
     if (err && typeof err === "object" && Object.prototype.hasOwnProperty.call(err, "InstructionError")) {
       if (simOut) simOut.sim = simDiagFrom(err, composed.instructions);
+      // ۲۰ نوامبر — نگهبانِ فی‌پیرِ فریز: فقط روی همین مسیرِ شکست. اگر یکی از
+      // اکانت‌های writable (جز خودِ فی‌پیر) اکانتِ توکنِ فریزشده‌ی متعلق به فی‌پیر
+      // باشد، شکستِ فروش تقصیرِ کیف‌پولِ آزمون است نه توکن. فقط از فیلدهای ساختاری.
+      if (pastDeadline()) return unknown("deadline");
+      const wKeys = [];
+      for (const ix of composed.instructions) {
+        for (const k of ix.keys) {
+          if (k && k.isWritable === true && typeof k.pubkey === "string" &&
+              k.pubkey !== payer && !wKeys.includes(k.pubkey)) wKeys.push(k.pubkey);
+        }
+      }
+      if (wKeys.length > 0 && wKeys.length <= 100) {
+        const gRes = await rpcCall(fetchImpl, rpc, "getMultipleAccounts",
+          [wKeys, { encoding: "jsonParsed", commitment: "confirmed" }], timeoutMs);
+        if (!gRes.ok) return unknown(rpcFailReason("getMultipleAccounts", gRes));
+        if (!gRes.result || !Array.isArray(gRes.result.value) ||
+            gRes.result.value.length !== wKeys.length) return unknown("internal");
+        const frozenPayer = gRes.result.value.some((v) =>
+          v && v.data && typeof v.data === "object" && !Array.isArray(v.data) &&
+          (v.data.program === "spl-token" || v.data.program === "spl-token-2022") &&
+          v.data.parsed && v.data.parsed.type === "account" && v.data.parsed.info &&
+          v.data.parsed.info.state === "frozen" && v.data.parsed.info.owner === payer);
+        if (frozenPayer) {
+          if (simOut && simOut.sim) simOut.sim.frozen = true;
+          return unknown("payer-frozen");
+        }
+      }
       return { v: "nosell" };
     }
     if (err !== null) return unknown("internal"); // شکلِ err ناشناخته — نه موفقیت، نه InstructionError

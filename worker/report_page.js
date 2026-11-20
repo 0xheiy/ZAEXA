@@ -104,6 +104,7 @@ const WHY_SOL = {
   "sells:recent": "Other wallets sold this token in the last hour, so a failed sell was not trusted.",
   "sells:recent24": "Other wallets sold this token in the last day, so a failed sell was not trusted.",
   "sol:unconfirmed": "The simulated sell failed, but that is not reported until it is confirmed.",
+  "payer-frozen": "The test wallet has a frozen account on this route, so the failed sell proved nothing.",
 };
 const HTTP_BUSY = (n) => n === 0 || n === 429 || (n >= 500 && n <= 599);
 
