@@ -10440,6 +10440,7 @@ async def main():
         await check_rh_token_page(p, errors)
         await check_rh_no_base_calls(p, errors)
         await check_rh_notice(p, errors)
+        await check_rh_swap_parity(p, errors)
         await check_rh_screens(p, errors)
         await check_stock_stats(p, errors)
         await check_exit_near_empty(p, errors)
@@ -25083,7 +25084,9 @@ async def check_slip3(p, errors):
 # است تا با ZX_ONLY=<نام> برای شکستنِ عمدیِ نگهبان‌ها تنها همان اجرا شود.
 # =====================================================================
 RH_CHAIN_JS = "try{localStorage.setItem('zaexa.chain.v1','robinhood')}catch(e){}"
-RH_NOTICE_SWAP_T = "Swaps on Robinhood Chain are coming soon. Prices and market data are live."
+RH_SWAP_CTA_T = "Swaps coming soon"   # ۲۰ نوامبر: اعلانِ تمام‌عرض رفت؛ همین متن روی دکمه‌ی غیرفعالِ کارتِ سواپ است
+RH_SWAP_POOL_T = "0x52e65b17fb6e5ba00ed806f37afcd2daa50271ca"
+RH_SWAP_WETH_T = "0x0bd7d308f8e1639fab988df18a8011f41eacad73"
 RH_NOTICE_NA_T = "Not available on Robinhood Chain yet"
 
 
@@ -25118,8 +25121,9 @@ def rh_new_pools(rows=None):
     return out
 
 
-def rh_gt_board(rows=None, new_status=200, pools_status=200):
+def rh_gt_board(rows=None, new_status=200, pools_status=200, ohlcv=None):
     rows = rows or RH_ROWS
+    ohlcv = ohlcv or rh_swap_ohlcv()
     toks = [fb_tok(rh_a(i), r[0], rh_p(i), "robinhood") for i, r in enumerate(rows)]
     pls = [fb_pool(rh_p(i), r[3], r[4], "robinhood") for i, r in enumerate(rows) if r[3]]
     inner = fb_gt_for(toks, pls, pools_status=pools_status)
@@ -25127,8 +25131,23 @@ def rh_gt_board(rows=None, new_status=200, pools_status=200):
     def gt(path):
         if path.endswith("/new_pools"):
             return (new_status, {"data": rh_new_pools(rows)})
+        if path.endswith("/pools/%s/ohlcv/minute" % RH_SWAP_POOL_T) or path.endswith("/pools/%s/ohlcv/hour" % RH_SWAP_POOL_T):
+            return ohlcv(path)
         return inner(path)
     return gt
+
+
+def rh_swap_ohlcv(status=200):
+    """شمع‌های WETH/USDG به شکلِ پاسخِ واقعیِ GT: [ثانیه، o، h، l، c، حجم] — همه *عدد* (نه رشته)، قدیمی‌ترین آخر (GT نزولی می‌فرستد)."""
+    now = int(__import__("time").time())
+    rows = [[now - 900 * k, 2512.4 + k * 0.5, 2519.9 + k * 0.5, 2508.1 + k * 0.5, 2514.7 + k * 0.5, 31250.75 - k] for k in range(96)]
+
+    def f(path):
+        return (status, {"data": {"id": "robinhood_" + RH_SWAP_POOL_T, "type": "ohlcv_request_response",
+                                  "attributes": {"ohlcv_list": rows}},
+                         "meta": {"base": {"address": RH_SWAP_WETH_T, "name": "Wrapped Ether", "symbol": "WETH"},
+                                  "quote": {"name": "Global Dollar", "symbol": "USDG"}}})
+    return f
 
 
 # توکنِ نمونه برای صفحه‌ی توکن: یک استخرِ برتر + شمع + معاملات (همان فیکسچرهای Early buyers / Large trades)
@@ -25411,12 +25430,15 @@ async def check_rh_notice(p, errors):
             return {view: v.id, texts: notice.map(e => e.textContent), srcMenuInside: !!v.querySelector('#srcMenu') && vis(v.querySelector('#srcChip')),
               acts, ctaVisible: vis(document.getElementById('actBtn')), baseHero: vis(document.getElementById('baseHeroRow')),
               solHero: vis(document.getElementById('appSolHero')), strip: vis(document.getElementById('liveStrip')),
-              watch: vis(document.getElementById('savedWatch')), connect: [document.getElementById('connectBtn').disabled, document.getElementById('connectBtn').textContent]}; }"""
+              watch: vis(document.getElementById('savedWatch')),
+              rhCta: (() => { const c = document.getElementById('rhActBtn'); return c ? [c.disabled, c.textContent.trim()] : null; })(),
+              pickerInRh: !!document.querySelector('#rhSwap #srcMenu'), connect: [document.getElementById('connectBtn').disabled, document.getElementById('connectBtn').textContent]}; }"""
         sw = await pg.evaluate(VIS)
-        assert sw["view"] == "view-swap" and sw["texts"] == [RH_NOTICE_SWAP_T], "[rh notice] Swap notice must be exactly %r: %s" % (RH_NOTICE_SWAP_T, sw)
+        assert sw["view"] == "view-swap" and sw["texts"] == [], "[rh notice] the Swap view has no full-width notice any more (the hero row replaces it): %s" % sw
         assert sw["srcMenuInside"] and not sw["ctaVisible"] and not sw["baseHero"] and not sw["solHero"] and not sw["strip"] and not sw["watch"], \
-            "[rh notice] the swap card, strip and watch panel are gone; the network picker lives in the notice: %s" % sw
-        assert not [a for a in sw["acts"] if re.search(r"connect|swap$|^swap|approve", a, re.I) and a != "Swap"] , "[rh notice] no Connect/Swap action in the Swap view: %s" % sw["acts"]
+            "[rh notice] the Base swap card, strip and watch panel are gone; the network picker lives in the Robinhood swap card: %s" % sw
+        assert sw["rhCta"] == [True, RH_SWAP_CTA_T] and sw["pickerInRh"], "[rh notice] the only swap action is the disabled coming-soon button %r and the picker sits in #rhSwap: %s" % (RH_SWAP_CTA_T, sw)
+        assert not [a for a in sw["acts"] if re.search(r"connect|swap$|^swap|approve", a, re.I) and a not in ("Swap", RH_SWAP_CTA_T)], "[rh notice] no Connect/Swap action in the Swap view: %s" % sw["acts"]
         assert sw["connect"] == [True, "Connect wallet"], "[rh notice] the header wallet button is inert on Robinhood: %s" % sw["connect"]
         shown = {}
         for tab, sel, vid in (("Stocks", '#nav [data-view="stocks"]', "view-stocks"), ("Exit value", '#nav [data-view="exit"]', "view-exit"),
@@ -25455,7 +25477,7 @@ async def check_rh_notice(p, errors):
             n = await pg.evaluate("() => [...document.querySelectorAll('.rhNa')].filter(e => e.getClientRects().length > 0).length")
             assert n == 0, "[rh notice] a Robinhood notice leaked into Base %s" % v
         await pg.context.close()
-        print("[rh notice] on Robinhood the Swap view shows exactly %r and nothing else (no swap card, strip, watch panel; the picker sits inside the notice; header wallet inert); Stocks, Exit value, Exit Report (no navigation) and Portfolio show exactly %r; leaving for Solana restores the real Solana swap view; no notice is visible on Base" % (RH_NOTICE_SWAP_T, RH_NOTICE_NA_T))
+        print("[rh notice] on Robinhood the Swap view has no notice card: its only swap action is the disabled button %r (no Base swap card, strip, watch panel; the picker sits inside #rhSwap; header wallet inert); Stocks, Exit value, Exit Report (no navigation) and Portfolio show exactly %r; leaving for Solana restores the real Solana swap view; no notice is visible on Base" % (RH_SWAP_CTA_T, RH_NOTICE_NA_T))
     finally:
         await b.close()
         srv.shutdown()
@@ -25487,6 +25509,9 @@ async def check_rh_no_base_calls(p, errors):
         assert not bad, "[rh no base calls] fresh Robinhood boot sent forbidden requests: %s" % bad
         assert info == {"log": 0, "blocked": 0, "ethers": True}, "[rh no base calls] no RPC provider use, no blocked Base attempt, no ethers on a Robinhood boot: %s" % info
         assert env.calls and all("networks/robinhood/" in c for c in env.calls), "[rh no base calls] GT: %s" % env.calls
+        # ۲۰ نوامبر: نمودارِ نمای سواپ فقط روی همین شبکه می‌خواند — اگر آدرسش به base برگردد، لایه‌ی دفاعی بی‌صدا رد می‌کند و چیزی روی سیم نمی‌رود؛ پس باید دید که درخواستِ robinhood واقعاً رفته و نمودار کشیده شده
+        assert any(c.startswith("networks/robinhood/pools/%s/ohlcv/" % RH_SWAP_POOL_T) for c in env.calls) and await pg.evaluate("() => !!document.querySelector('#rhPlot svg')"), \
+            "[rh no base calls] the Robinhood swap chart must be fetched from networks/robinhood and drawn: %s" % env.calls
         await pg.context.close()
         # (۱ب) لایه‌های دفاعیِ عمق: حتی اگر کدی از Base به آن‌ها برسد، روی Robinhood چیزی روی سیم نمی‌رود
         pg = await env.open(hash_="#swap", init=[RH_CHAIN_JS], hook=hook, board=False)
@@ -25534,6 +25559,119 @@ async def check_rh_no_base_calls(p, errors):
     assert not errs, "[rh no base calls] console errors: %s" % errs
 
 
+RH_GEO_JS = """() => { const q = s => document.querySelector(s);
+    const r = e => { const b = e.getBoundingClientRect(); return {l: b.left + scrollX, t: b.top + scrollY, w: b.width, h: b.height}; };
+    const st = e => { const c = getComputedStyle(e); return {br: c.borderRadius, pad: c.padding, bg: c.backgroundColor, sh: c.boxShadow}; };
+    const sel = HERO => { const sw = q(HERO + ' .swapCard'), ch = q(HERO + ' .swapChartCard');
+        return {swap: r(sw), chart: r(ch), swapSt: st(sw), chartSt: st(ch), hero: r(q(HERO)), strip: q(HERO + ' > .marketWatch, ' + HERO + ' > .savedWatch') ? 1 : 0,
+                above: [...q(HERO).children].filter(e => !e.classList.contains('swapColumn') && getComputedStyle(e).display !== 'none' && !e.matches('.mTabs')).reduce((a, e) => Math.max(a, e.getBoundingClientRect().bottom + scrollY), 0),
+                gap: parseFloat(getComputedStyle(q(HERO)).rowGap) || 0, cols: getComputedStyle(q(HERO)).gridTemplateColumns,
+                over: document.documentElement.scrollWidth - document.documentElement.clientWidth}; };
+    return sel; }"""
+
+
+async def check_rh_swap_parity(p, errors):
+    """[rh swap parity] ۲۰ نوامبر — Swap روی Robinhood = ردیفِ hero عیناً مثلِ Base (نمودار چپ، کارتِ سواپ ۳۹۶px راست)، فقط نمایش."""
+    srv, origin = rh_srv()
+    b = await p.chromium.launch()
+    errs = []
+    try:
+        pats = rh_base_forbidden()
+        env = FbEnv(b, origin, errs)
+        env.gt = rh_gt_board()
+        reqs = []
+        hook = lambda pg_: pg_.on("request", lambda r: reqs.append(r.url))
+        # Base، ۱۴۴۰px: مرجعِ اندازه
+        pgb = await env.open(hash_="#swap", vw=1440, vh=900, board=False)
+        await pgb.wait_for_function("() => typeof tokenOut !== 'undefined' && tokenOut && document.querySelector('#baseHeroRow .swapCard')", timeout=20000)
+        await pgb.wait_for_timeout(1200)
+        geo_b = await pgb.evaluate("(g) => eval('(' + g + ')')()('#baseHeroRow')", RH_GEO_JS.strip())
+        await pgb.context.close()
+        # Robinhood، ۱۴۴۰px
+        env.calls.clear()
+        pg = await env.open(hash_="#swap", vw=1440, vh=900, init=[RH_CHAIN_JS], board=False, hook=hook)
+        await pg.wait_for_function("() => activeChain === 'robinhood' && view === 'swap'", timeout=10000)
+        await pg.wait_for_function("() => document.querySelector('#rhPlot svg')", timeout=20000)
+        await pg.wait_for_timeout(800)
+        geo_r = await pg.evaluate("(g) => eval('(' + g + ')')()('#rhHero')", RH_GEO_JS.strip())
+        sw, bw = geo_r["swap"], geo_b["swap"]
+        assert abs(sw["w"] - bw["w"]) <= 1 and abs(sw["w"] - 396) <= 1, "[rh swap parity] #rhSwap must be as wide as Base's swap card (396px): rh %s base %s" % (sw, bw)
+        assert abs(sw["l"] - bw["l"]) <= 1, "[rh swap parity] #rhSwap left edge must match Base's: rh %s base %s" % (sw, bw)
+        # Base دارد یک نوارِ Market watch بالای ردیف؛ Robinhood ندارد (در مشخصات نیامده). بالای کارت = بالای ردیف + (نوار و فاصله‌ی ردیف اگر باشد)
+        base_off = bw["t"] - geo_b["hero"]["t"] - ((geo_b["above"] - geo_b["hero"]["t"]) + geo_b["gap"] if geo_b["strip"] else 0)
+        assert abs(geo_r["hero"]["t"] - geo_b["hero"]["t"]) <= 1 and abs((sw["t"] - geo_r["hero"]["t"]) - base_off) <= 1, \
+            "[rh swap parity] #rhSwap top must match Base's swap card (discounting Base's own market-watch strip): rh %s/%s base %s/%s" % (sw, geo_r["hero"], bw, geo_b["hero"])
+        assert abs(geo_r["chart"]["w"] - geo_b["chart"]["w"]) <= 1 and abs(geo_r["chart"]["l"] - geo_b["chart"]["l"]) <= 1, \
+            "[rh swap parity] the chart card must match Base's width and left edge: rh %s base %s" % (geo_r["chart"], geo_b["chart"])
+        assert geo_r["cols"] == geo_b["cols"], "[rh swap parity] hero grid columns must equal Base's: %s vs %s" % (geo_r["cols"], geo_b["cols"])
+        assert geo_r["swapSt"] == geo_b["swapSt"] and geo_r["chartSt"] == geo_b["chartSt"], \
+            "[rh swap parity] same radius/padding/background/shadow as Base: rh %s %s base %s %s" % (geo_r["swapSt"], geo_r["chartSt"], geo_b["swapSt"], geo_b["chartSt"])
+        info = await pg.evaluate("""() => { const q = s => document.querySelector(s), vis = e => !!e && e.getClientRects().length > 0;
+            const cta = q('#rhActBtn');
+            return {pair: q('#rhPairName').textContent, px: q('#rhPxNow').textContent, chg: q('#rhPxChg').textContent, msgHidden: getComputedStyle(q('#rhChartMsg')).display === 'none',
+                    tfs: [...document.querySelectorAll('#rhTfs button')].map(e => e.textContent), cta: [cta.disabled, cta.textContent.trim()],
+                    inputs: [...document.querySelectorAll('#rhSwap input')].map(e => [e.disabled, e.readOnly]),
+                    btns: [...document.querySelectorAll('#rhSwap button')].filter(e => e.id !== 'rhActBtn' && !e.closest('#srcMenu')).map(e => [e.id, e.disabled]),
+                    syms: [q('#rhTokInSym').textContent, q('#rhTokOutSym').textContent], avIn: !!q('#rhTokInAv img'), avOut: q('#rhTokOutAv').textContent,
+                    facts: [...document.querySelectorAll('#rhSwap .fact')].map(e => e.textContent.trim().replace(/\s+/g, ' ')),
+                    extras: ['#rhSwap .routeBar', '#rhSwap #notices', '#rhSwap #statusSlot', '#baseSubRow'].filter(s => vis(q(s))),
+                    picker: !!q('#rhSwap #srcMenu') && vis(q('#srcChip')), title: q('#rhSwap #swapNetworkBar > .ttl').textContent, baseHero: vis(q('#baseHeroRow')),
+                    star: [q('#swapWatch').disabled], tipbox: !!q('#rhPlot #rhTip')}; }""")
+        assert info["pair"] == "WETH / USDG" and info["tfs"] == ["1H", "1D", "1W", "1M"] and info["msgHidden"], "[rh swap parity] chart card header: %s" % info
+        assert info["px"].startswith("$") or re.match(r"^[\d,.]+", info["px"]), "[rh swap parity] the chart shows a WETH price in USD: %s" % info["px"]
+        assert info["cta"] == [True, RH_SWAP_CTA_T], "[rh swap parity] the CTA must be disabled with the coming-soon text: %s" % info["cta"]
+        assert info["inputs"] == [[True, True], [True, True]], "[rh swap parity] both amount inputs are disabled and readonly: %s" % info["inputs"]
+        assert info["btns"] and all(x[1] for x in info["btns"]), "[rh swap parity] token buttons, flip and the watch star are disabled: %s" % info["btns"]
+        assert info["syms"] == ["ETH", "USDG"] and info["avIn"] and info["avOut"] == "U", "[rh swap parity] ETH shows Base's ETH icon, USDG a letter avatar: %s" % info
+        assert info["facts"] == ["Rate—", "Price impact—", "Min received—", "Protocol fee0.00%", "vs Uniswap direct—"], "[rh swap parity] five facts rows: %s" % info["facts"]
+        assert not info["extras"] and not info["baseHero"] and info["picker"] and info["title"] == "Swap", "[rh swap parity] no route bar/notices/sub row; the picker sits in the card header: %s" % info
+        assert info["star"] == [True], "[rh swap parity] the watch star is disabled: %s" % info
+        want = "networks/robinhood/pools/%s/ohlcv/" % RH_SWAP_POOL_T
+        hit = [c for c in env.calls if "/ohlcv/" in c]
+        assert hit and all(want in c and ("token=" + RH_SWAP_WETH_T) in c and "currency=usd" in c for c in hit), "[rh swap parity] the chart's GT request must go to %s priced in USD for WETH: %s" % (want, env.calls)
+        assert all("networks/robinhood/" in c for c in env.calls), "[rh swap parity] only robinhood GT paths: %s" % env.calls
+        bad = rh_hit(reqs, pats)
+        assert not bad, "[rh swap parity] forbidden requests from the Robinhood swap view: %s" % bad
+        # دکمه‌ی بازه: درخواستِ تازه با همان قواعدِ Base (1W = hour, 168)
+        n0 = len(env.calls)
+        await pg.click('#rhTfs [data-tf="1W"]')
+        await pg.wait_for_function("(n) => document.querySelector('#rhPxChg').textContent.endsWith('1W')", arg=n0, timeout=10000)
+        last = env.calls[-1]
+        assert "/ohlcv/hour?aggregate=1&limit=168" in last and want in last, "[rh swap parity] the 1W button must ask hour/1/168 on the same pool: %s" % last
+        assert (await pg.evaluate("() => document.querySelector('#rhTfs .on').dataset.tf")) == "1W", "[rh swap parity] the 1W button turns on"
+        # سوییچ به Solana و برگشت: شبکه‌ی پیکر درست جا به جا می‌شود و کارت Base/Solana را نمی‌گیرد
+        await pg.click("#srcChip")
+        await pg.click('#srcPop [data-chain="solana"]')
+        await pg.wait_for_function("() => activeChain === 'solana'", timeout=20000)
+        await pg.wait_for_function("() => { const e = document.getElementById('appSolHero'); return !!e && e.getClientRects().length > 0; }", timeout=20000)
+        await pg.wait_for_timeout(300)
+        away = await pg.evaluate("() => ({rh: document.getElementById('rhHero').getClientRects().length > 0, bar: !!document.querySelector('#solSwapNetworkSlot #swapNetworkBar')})")
+        assert away == {"rh": False, "bar": True}, "[rh swap parity] on Solana the Robinhood hero is gone and the picker bar is in Solana's slot: %s" % away
+        await pg.context.close()
+        # ۳۹۰px: کارتِ سواپ بالای نمودار، بدونِ سرریزِ افقی
+        pg = await env.open(hash_="#swap", vw=390, vh=844, init=[RH_CHAIN_JS], board=False)
+        await pg.wait_for_function("() => activeChain === 'robinhood' && document.querySelector('#rhPlot svg')", timeout=20000)
+        await pg.wait_for_timeout(500)
+        mob = await pg.evaluate("""() => { const r = s => document.querySelector(s).getBoundingClientRect();
+            return {swap: r('#rhSwap'), chart: r('#rhHero .swapChartCard'), over: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+                    sw: document.documentElement.scrollWidth, tabs: document.querySelectorAll('#rhHero .mTabs').length}; }""")
+        assert mob["swap"]["bottom"] <= mob["chart"]["top"] + 1 and mob["swap"]["top"] < mob["chart"]["top"], "[rh swap parity] on mobile the swap card sits above the chart: %s" % mob
+        assert mob["over"] <= 0 and mob["swap"]["right"] <= 390 + 0.5 and mob["chart"]["right"] <= 390 + 0.5, "[rh swap parity] no horizontal overflow at 390px: %s" % mob
+        await pg.context.close()
+        # شکستِ GT: همان متنِ شکستِ Base
+        env.gt = rh_gt_board(ohlcv=rh_swap_ohlcv(status=429))
+        pg = await env.open(hash_="#swap", vw=1440, vh=900, init=[RH_CHAIN_JS], board=False)
+        await pg.wait_for_function("() => document.getElementById('rhChartMsg').textContent.startsWith('Price history is unavailable')", timeout=20000)
+        msg = await pg.evaluate("() => document.getElementById('rhChartMsg').textContent")
+        assert msg == "Price history is unavailable right now. Quotes and routing below are live and unaffected.", "[rh swap parity] failure text must be Base's: %r" % msg
+        await pg.context.close()
+        print("[rh swap parity] on Robinhood the Swap view is Base's hero row: #rhSwap is %dpx wide with the same left/top, radius, padding, background and shadow as Base's swap card, chart card on the left (WETH / USDG, 1H/1D/1W/1M) with the GT request on networks/robinhood/pools/%s priced in USD for WETH (1W asks hour/168); CTA disabled %r, inputs/token buttons/flip/star disabled, five facts rows with Protocol fee 0.00%%, no route bar or notices; ETH keeps Base's icon, USDG a letter avatar; 390px puts the swap card above the chart with no horizontal overflow; a failed fetch shows Base's failure text; zero forbidden requests" % (round(sw["w"]), RH_SWAP_POOL_T, RH_SWAP_CTA_T))
+    finally:
+        await b.close()
+        srv.shutdown()
+    assert not errs, "[rh swap parity] console errors: %s" % errs
+
+
 async def check_rh_screens(p, errors):
     """فقط با ZX_ONLY=check_rh_screens و ZX_SHOTS=<پوشه>: پیش‌نمایشِ بصری (فیکسچر)."""
     out = os.environ.get("ZX_SHOTS")
@@ -25552,7 +25690,19 @@ async def check_rh_screens(p, errors):
         await pg.screenshot(path=os.path.join(out, "rh_picker.png"))
         await pg.click("#srcChip")
         await pg.wait_for_timeout(300)
-        await pg.screenshot(path=os.path.join(out, "rh_swap_notice.png"))
+        await pg.wait_for_function("() => document.querySelector('#rhPlot svg')", timeout=20000)
+        await pg.wait_for_timeout(500)
+        await pg.screenshot(path=os.path.join(out, "rh_swap_desktop.png"))
+        await pg.context.close()
+        pg = await env.open(hash_="#swap", vw=390, vh=844, init=[RH_CHAIN_JS], board=False)
+        await pg.wait_for_function("() => activeChain === 'robinhood' && document.querySelector('#rhPlot svg')", timeout=20000)
+        await pg.wait_for_timeout(500)
+        await pg.screenshot(path=os.path.join(out, "rh_swap_mobile.png"))
+        await pg.context.close()
+        pg = await env.open(hash_="#swap", vw=1440, vh=900, board=False)       # مقایسه: همان نما روی Base
+        await pg.wait_for_function("() => typeof tokenOut !== 'undefined' && tokenOut && document.querySelector('#baseHeroRow .swapCard')", timeout=20000)
+        await pg.wait_for_timeout(1500)
+        await pg.screenshot(path=os.path.join(out, "base_swap_desktop.png"))
         await pg.context.close()
         for vw, vh, name in ((1440, 900, "rh_flow_desktop.png"), (390, 844, "rh_flow_mobile.png")):
             pg = await env.open(hash_="#flow", vw=vw, vh=vh, init=[RH_CHAIN_JS])

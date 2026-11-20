@@ -1838,8 +1838,12 @@ html[data-rh] .rhNa{display:block}
 .rhNaHead [data-rhslot]{flex:none}
 .rhNaTx{margin:0;padding:14px 20px 20px;color:var(--tx2);font-size:14px;line-height:1.6}
 html[data-rh] #view-stocks>*:not(.rhNa),html[data-rh] #view-exit>*:not(.rhNa),html[data-rh] #view-folio>*:not(.rhNa),
-html[data-rh] #view-swap>*:not(.rhNa){display:none!important}
-html[data-rh] #view-swap>#rhSwapNotice{display:block!important}
+html[data-rh] #view-swap>*:not(#rhHero){display:none!important}
+#rhHero{display:none}
+html[data-rh] #rhHero{display:grid}
+/* متنِ دکمه‌ی غیرفعال («Swaps coming soon»، قبلاً بلندتر) از عرضِ ستونِ ۳۹۶پیکسلی بلندتر است: به‌جای بریدن با «…» (که متن را پنهان می‌کند و روی موبایل ستون را از صفحه بیرون می‌زد) می‌شکند. فقط همین یک دکمه؛ بقیه‌ی ظاهر از کلاس‌های Base می‌آید. */
+#rhSwap{min-width:0}
+#rhActBtn{white-space:normal;line-height:1.3}
 html[data-rh] .mktSwitch a[data-mkt="pairs"]{pointer-events:none;opacity:.55}
 #tk-trade[hidden],#tk-copy[hidden]{display:none!important}
 .rhFlat{box-shadow:none!important;filter:none!important}
@@ -2283,12 +2287,6 @@ try{(function(){
   </div>
 </details>
 <div class="view on" id="view-swap">
-  <!-- Robinhood Chain (فاز ۱): کارتِ سواپ با یک اعلان جایگزین می‌شود؛ هیچ دکمه‌ی Connect/Swap و هیچ کوتی نیست.
-       انتخابگرِ شبکه (#srcMenu) داخلِ همین کارت می‌نشیند تا راهِ برگشت بسته نشود. -->
-  <section class="rhNa rhCard" id="rhSwapNotice" role="status">
-    <div class="rhNaHead"><span class="rhNaTtl">Swap</span><span class="grow"></span><div data-rhslot></div></div>
-    <p class="rhNaTx" data-rhtx>Swaps on Robinhood Chain are coming soon. Prices and market data are live.</p>
-  </section>
   <div class="row hero" id="baseHeroRow">
     <!-- chart -->
     <section class="card">
@@ -2428,6 +2426,58 @@ try{(function(){
         <div id="appSolExitBox"></div>
         <div id="appSolSafetyBody"></div>
       </section>
+  </div>
+  <!-- Robinhood Chain (فاز ۱، فقط نمایش): ردیفِ hero عیناً مثلِ Base — نمودار چپ، کارتِ سواپ راست. هیچ معامله‌ای نیست:
+       ورودی‌ها و دکمه‌ها غیرفعال‌اند. انتخابگرِ شبکه (#srcMenu) همان مسیرِ Base/Solana را می‌رود: placeNetworkControl نوارِ
+       #swapNetworkBar را داخلِ #rhSwapNetworkSlot می‌گذارد. جای این ردیف عمداً بعد از ردیف‌های Base/Solana است تا
+       انتخابگرهای «اولین .row.hero که پنهان نیست» روی Base/Solana همان‌ها را بگیرند. -->
+  <div class="row hero" id="rhHero">
+    <section class="card">
+      <div class="chartTop">
+        <div>
+          <div class="pairName" id="rhPairName">WETH / USDG</div>
+          <div class="px mono" id="rhPxNow">—</div>
+          <div class="chg mono" id="rhPxChg"></div>
+        </div>
+        <div class="tfs" id="rhTfs">
+          <button data-tf="1H">1H</button>
+          <button data-tf="1D" class="on">1D</button>
+          <button data-tf="1W">1W</button>
+          <button data-tf="1M">1M</button>
+        </div>
+      </div>
+      <div class="plot" id="rhPlot">
+        <div class="chartMsg" id="rhChartMsg">Loading price history…</div>
+        <div class="tipbox" id="rhTip"></div>
+      </div>
+      <div class="tstats" id="rhTokStats" hidden></div>
+    </section>
+    <section class="card swapCard" id="rhSwap">
+      <div id="rhSwapNetworkSlot"></div>
+      <div class="leg">
+        <div class="legTop"><span>You pay</span><b id="rhBalIn"></b></div>
+        <div class="legRow">
+          <input class="amt mono" id="rhAmtIn" placeholder="0" inputmode="decimal" autocomplete="off" disabled readonly>
+          <button class="tokbtn" id="rhTokInBtn" type="button" disabled><span class="av" id="rhTokInAv">?</span><span id="rhTokInSym">ETH</span></button>
+        </div>
+      </div>
+      <div class="mid"><button id="rhFlipBtn" type="button" disabled>⇅</button></div>
+      <div class="leg">
+        <div class="legTop"><span>You receive</span><b id="rhBalOut"></b></div>
+        <div class="legRow">
+          <input class="amt mono" id="rhAmtOut" placeholder="0" inputmode="decimal" autocomplete="off" disabled readonly>
+          <button class="tokbtn" id="rhTokOutBtn" type="button" disabled><span class="av" id="rhTokOutAv">?</span><span id="rhTokOutSym">USDG</span></button>
+        </div>
+      </div>
+      <div class="facts">
+        <div class="fact"><span class="k">Rate</span><span class="v mono" id="rhKRate">—</span></div>
+        <div class="fact"><span class="k">Price impact</span><span class="v mono" id="rhKImpact">—</span></div>
+        <div class="fact"><span class="k">Min received</span><span class="v mono" id="rhKMin">—</span></div>
+        <div class="fact"><span class="k">Protocol fee</span><span class="v mono" id="rhKFee">0.00%</span></div>
+        <div class="fact"><span class="k">vs Uniswap direct</span><span class="v mono" id="rhKVs">—</span></div>
+      </div>
+      <button class="cta" id="rhActBtn" disabled>Swaps coming soon</button>
+    </section>
   </div>
 </div><!-- /view-swap -->
 
@@ -6139,11 +6189,15 @@ const CHAIN_LS_KEY="zaexa.chain.v1";
 const CHAIN_IDS=["base","solana","robinhood"];
 const isChainId=v=>CHAIN_IDS.includes(v);
 function gtNetOf(chain){return chain==="solana"?"solana":chain==="robinhood"?"robinhood":"base";}
-const RH_NOTICE_SWAP="Swaps on Robinhood Chain are coming soon. Prices and market data are live.";
 const RH_NOTICE_NA="Not available on Robinhood Chain yet";
 const RH_EXPLORER="https://robinhoodchain.blockscout.com";
 const RH_ADDR_RE=/^0x[0-9a-fA-F]{40}$/;
 let rhBlocked=0;
+/* حالتِ نمودارِ سواپِ Robinhood اینجا اعلان می‌شود (نه کنارِ تابعش) تا هر فراخوانیِ زودهنگام updateSwapViewForChain به TDZ نخورد. */
+const RH_SWAP_POOL="0x52e65b17fb6e5ba00ed806f37afcd2daa50271ca",
+  RH_SWAP_WETH="0x0bd7d308f8e1639fab988df18a8011f41eacad73",
+  RH_SWAP_USDG="0x5fc5360d0400a0fd4f2af552add042d716f1d168";
+let rhSwapSeq=0,rhSwapTf="1D",rhSwapTries=0,rhSwapRetry=null,rhSwapKey="",rhSwapState="idle",rhSwapFailedAt=0,rhSwapLegs=false;
 const onRh=()=>activeChain==="robinhood";
 /* دروازه‌ی دفاعی: اگر کدِ Base روی Robinhood اجرا شود، true برمی‌گرداند و شمرده می‌شود (هیچ درخواستی نمی‌رود). */
 function rhBlock(){if(activeChain!=="robinhood")return false;rhBlocked++;window.__rhBlocked=rhBlocked;return true;}
@@ -6168,15 +6222,16 @@ function placeNetworkControl(){
   if(!menu||!bar)return;
   const inSwap=!tokenPage&&view==="swap";
   let destination;
-  /* Robinhood: Swap/Portfolio/Stocks/Exit/Exit Report فقط اعلان دارند؛ انتخابگر داخلِ همان کارتِ اعلان می‌نشیند تا راهِ برگشت بسته نشود.
+  /* Robinhood: Portfolio/Stocks/Exit/Exit Report فقط اعلان دارند؛ انتخابگر داخلِ همان کارتِ اعلان می‌نشیند تا راهِ برگشت بسته نشود.
+     Swap اعلان ندارد: کارتِ سواپِ Robinhood (#rhSwap) مثلِ Base/Solana نوارِ #swapNetworkBar را در جایگاهِ خودش (#rhSwapNetworkSlot) می‌گیرد.
      Flow تابلوی واقعی دارد و مثلِ Base/Solana از فضای خودش (fbNetSlot) استفاده می‌کند. */
-  const rhSlot=activeChain==="robinhood"&&!tokenPage&&["swap","folio","stocks","exit","rhreport"].includes(view)
-    ?document.querySelector(view==="swap"?"#rhSwapNotice [data-rhslot]":"#view-"+view+" [data-rhslot]"):null;
+  const rhSlot=activeChain==="robinhood"&&!tokenPage&&["folio","stocks","exit","rhreport"].includes(view)
+    ?document.querySelector("#view-"+view+" [data-rhslot]"):null;
   if(rhSlot){
     destination=rhSlot;
     bar.hidden=true;
   }else if(inSwap){
-    const slot=$(activeChain==="solana"?"solSwapNetworkSlot":"baseSwapNetworkSlot");
+    const slot=$(activeChain==="solana"?"solSwapNetworkSlot":activeChain==="robinhood"?"rhSwapNetworkSlot":"baseSwapNetworkSlot");
     if(bar.parentElement!==slot)slot.appendChild(bar);
     destination=bar;
   }else if(tokenPage||view==="token"||view==="exit")destination=$("networkControlParking");   // exit: فقط Base، انتخابگر شبکه جایی ندارد
@@ -6203,6 +6258,15 @@ function paintSrc2(){
    دست‌نخورده می‌ماند — چیدمانِ خودش را دارد. */
 // Keep the same column layout for every network, using the existing cards.
 function prepareSwapColumns(){
+  /* Robinhood (فقط نمایش): همان دو ستونِ Base، بدونِ ردیفِ پایینی و بدونِ نوارِ تب (Pools/Exit check در فاز ۱ نیست). */
+  const rh=$("rhHero");
+  if(rh&&!rh.querySelector(".swapColumn")){
+    const chart=rh.firstElementChild,trade=rh.lastElementChild;
+    chart.classList.add("swapChartCard");
+    const market=document.createElement("div"),actions=document.createElement("div");
+    market.className="swapColumn swapMarketCol";actions.className="swapColumn swapActionsCol";
+    market.append(chart);actions.append(trade);rh.append(market,actions);
+  }
   for(const [heroId,subId] of [["baseHeroRow","baseSubRow"],["appSolHero","appSolSubRow"]]){
     const hero=$(heroId),sub=$(subId);
     if(hero.querySelector(".swapColumn"))continue;
@@ -6312,6 +6376,7 @@ function updateSwapViewForChain(){
     const fn=document.querySelector("#view-flow > p");
     if(fn)fn.textContent="New pools and their activity on Robinhood Chain, read from GeckoTerminal. Samples may not cover every trade or pool.";
     paintWallet();
+    if(!tokenPage&&view==="swap")rhSwapShow();
     return;
   }
   savedWatchSelection();
@@ -10214,6 +10279,57 @@ async function rhTkChart(addr,seq,sym,pool,side){
   }catch{
     if(seq!==rhTkSeq)return;
     chartMsg("Price history is unavailable right now.",els);   // «نمی‌دانم»، نه «قیمت ندارد»
+  }
+}
+/* Robinhood — نمای سواپ (فقط نمایش): جفتِ ثابتِ WETH/USDG. همان drawChart/chartMsg/TFS؛ فقط شبکه‌ی GT از gtNetOf می‌آید
+   و قیمتِ WETH به دلار با token=<آدرسِ WETH> می‌خواهد (سمتِ base/quote استخر را حدس نمی‌زنیم).
+   فقط وقتی نمای سواپِ Robinhood دیده می‌شود بار می‌شود. */
+function rhSwapPaintLegs(){
+  if(rhSwapLegs)return;
+  rhSwapLegs=true;
+  paintAvatar($("rhTokInAv"),{native:true,symbol:"ETH",name:"Ether"});          // همان آیکونِ ETHِ Base (بی‌شبکه)
+  paintFallbackAvatar($("rhTokOutAv"),RH_SWAP_USDG,"USDG");                      // لوگو نداریم: حرفِ اول مثلِ توکنِ بی‌لوگو
+}
+function rhSwapShow(){
+  if(!$("rhPlot"))return;
+  rhSwapPaintLegs();
+  const key=rhSwapTf;
+  if(key===rhSwapKey&&(rhSwapState==="loading"||rhSwapState==="done"))return;
+  if(rhSwapState==="failed"&&key===rhSwapKey&&Date.now()-rhSwapFailedAt<30000)return;   // شکست چسبنده نیست، ولی طوفانِ درخواست هم نمی‌شود
+  rhSwapLoadChart();
+}
+async function rhSwapLoadChart(){
+  if(activeChain!=="robinhood"){rhSwapState="idle";return;}
+  const seq=++rhSwapSeq,tf=rhSwapTf,els={plotEl:$("rhPlot"),msgEl:$("rhChartMsg"),tipEl:$("rhTip")};
+  if(tf!==rhSwapKey){rhSwapTries=0;clearTimeout(rhSwapRetry);}
+  rhSwapKey=tf;rhSwapState="loading";
+  chartMsg("Loading price history…",els);
+  $("rhPxNow").textContent="—";$("rhPxChg").textContent="";
+  try{
+    const cfg=TFS[tf];
+    const j=await gtJson(`${GT}/networks/${gtNetOf("robinhood")}/pools/${RH_SWAP_POOL}/ohlcv/${cfg.tf}?aggregate=${cfg.agg}&limit=${cfg.limit}&currency=usd&token=${RH_SWAP_WETH}`);
+    const raw=(((j||{}).data||{}).attributes||{}).ohlcv_list||[];
+    const data=raw.map(r=>({t:Number(r[0]),c:Number(r[4])})).filter(p=>isFinite(p.t)&&isFinite(p.c)&&p.c>0).sort((x,y)=>x.t-y.t);
+    if(seq!==rhSwapSeq||activeChain!=="robinhood"){if(seq===rhSwapSeq)rhSwapState="idle";return;}   // رفتن از Robinhood: حالتِ «در حال بارگذاری» نچسبد
+    if(data.length<2){rhSwapState="done";chartMsg("Not enough price history for this pair yet.",els);return;}
+    els.msgEl.style.display="none";
+    drawChart(data,Object.assign({unitSymbol:null,tf},els));
+    const first=data[0].c,last=data[data.length-1].c,ch=(last-first)/first*100;
+    $("rhPxNow").textContent=fmtPx(last);
+    const el=$("rhPxChg");el.className="chg mono "+(ch>=0?"up":"down");
+    el.textContent=(ch>=0?"▲ ":"▼ ")+Math.abs(ch).toFixed(2)+"%  ·  "+tf;
+    rhSwapTries=0;rhSwapState="done";
+  }catch{
+    if(seq!==rhSwapSeq||activeChain!=="robinhood"){if(seq===rhSwapSeq)rhSwapState="idle";return;}   // رفتن از Robinhood: حالتِ «در حال بارگذاری» نچسبد
+    if(rhSwapTries<2){
+      rhSwapTries++;
+      chartMsg("Loading price history…",els);
+      clearTimeout(rhSwapRetry);
+      rhSwapRetry=setTimeout(()=>{if(seq===rhSwapSeq)rhSwapLoadChart();},1400*rhSwapTries);
+      return;
+    }
+    rhSwapState="failed";rhSwapFailedAt=Date.now();
+    chartMsg("Price history is unavailable right now. Quotes and routing below are live and unaffected.",els);
   }
 }
 async function openRhTokenPage(addr){
@@ -14554,6 +14670,11 @@ function wire(){
     solTimeframe=b.dataset.tf;
     $("solTfs").querySelectorAll("[data-tf]").forEach(x=>x.classList.toggle("on",x===b));
     solLoadChart();});
+  $("rhTfs").querySelectorAll("[data-tf]").forEach(b=>b.onclick=()=>{
+    if(activeChain!=="robinhood")return;
+    rhSwapTf=b.dataset.tf;
+    $("rhTfs").querySelectorAll("[data-tf]").forEach(x=>x.classList.toggle("on",x===b));
+    rhSwapLoadChart();});
   $("setBtn").onclick=e=>{e.stopPropagation();$("setPop").classList.toggle("on");};
   /* ۱۸ اکتبر — تبِ Markets بازشو نیست: کلید zaexa.markets.v1 («flow» یا «pairs»؛ هر چیزِ دیگر = pairs) می‌گوید کدام
      صفحه باز شود. Flow همین‌جا نما را عوض می‌کند، pairs به /pairs می‌رود. */
