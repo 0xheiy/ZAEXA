@@ -161,7 +161,7 @@ import { tokenSeo, ogGuarded } from "./tokseo.js";
 import { ogImageResponse } from "./og-image.js";
 import { tokenCardPng, renderable, logoFromJpeg } from "./og-token.js";
 import { logoResponse } from "./logo-image.js";
-import { fetchVerdict, fetchCounterSell, poolDirectedProof, v4OneWayProof, oneWayCounterFor, VD_VENUES, VD_RPCS, VD_V4_STAGE_COUNTERS,
+import { measureNearEmpty, VD_NEAR_EMPTY_RET_PCT, fetchVerdict, fetchCounterSell, poolDirectedProof, v4OneWayProof, oneWayCounterFor, VD_VENUES, VD_RPCS, VD_V4_STAGE_COUNTERS,
   WETH_ADDR, USDC_ADDR, sellAmountFrom, canaryCall, canaryUsdPerEth, VD_MAX_ENDPOINTS } from "./verdict.js";
 import {
   EXIT_BATCH, EXIT_EXECUTOR, MULTICALL3, SEL_FEE_BPS, EXIT_SUBREQ_BUDGET, EXIT_QUOTE_MAX_TOKENS, EXIT_MC_CHUNK, EXIT_TTL_S,
@@ -756,6 +756,7 @@ async function cachedVerdict(cacheKeyPath, computeFn, ctx, out) {
         const body = await hit.json();
         if (out && body && body.v4Proof === true) out.v4Proof = true;
         if (out && body && body.v4Keyed === true) out.v4Keyed = true;
+        if (out && body && body.pool === "near-empty") out.pool = "near-empty"; // برچسبِ اندازه‌گیری‌شده کنارِ همان حکمِ کش‌شده می‌ماند
         return body && (body.verdict === "sell" || body.verdict === "nosell") ? body.verdict : null;
       }
     }
@@ -769,6 +770,7 @@ async function cachedVerdict(cacheKeyPath, computeFn, ctx, out) {
       const stashBody = { verdict };
       if (out && out.v4Proof === true) stashBody.v4Proof = true;
       if (out && out.v4Keyed === true) stashBody.v4Keyed = true;
+      if (out && out.pool === "near-empty") stashBody.pool = "near-empty";
       const stash = new Response(JSON.stringify(stashBody), {
         headers: {
           "content-type": "application/json",
@@ -1425,6 +1427,10 @@ export async function withCounterProof(result, addr, meta, deadlineAt, env, cove
    ساب‌ریکوئست (batchِ قیمت، batchِ round trip)؛ سقفِ بودجه‌ی گذر عمداً همان
    قدیمیِ سه‌تایی ماند (یکی کمتر از COUNTER_PROOF_PASS_MAX_USED). هر شکستی → false. */
 export const ONE_WAY_PASS_MAX_USED = COUNTER_PROOF_PASS_MAX_USED - 1;
+/* ۲۰ نوامبر — خواندنِ ذخایرِ برچسبِ near-empty تا سه ساب‌ریکوئست می‌خواهد (V2:
+   factory، getPair، ذخایر)؛ سقفِ گذر یکی کمتر از counter-proof تا همان چهار
+   ساب‌ریکوئستِ حاشیه بماند. بدونِ meterHooks (مثلِ /vd) هرگز محدود نمی‌کند. */
+export const NEAR_EMPTY_PASS_MAX_USED = COUNTER_PROOF_PASS_MAX_USED - 1;
 /* ۱ نوامبر — ناظرِ نتیجه: هر بار یک برچسبِ کوتاه و ثابت (هرگز آدرس) به
    meterHooks.oneWay می‌رود تا در /vd/passes (sub.oneWay) شمرده شود. فقط رصد؛
    روی خودِ حکم هیچ اثری ندارد. */
@@ -1482,6 +1488,11 @@ export async function v4OneWayCheck(addr, meta, env, deadlineAt, meterHooks) {
   }
 }
 
+// کلیدِ pool فقط وقتی اندازه‌گیری شده کلید می‌شود — undefined هرگز کلید نمی‌سازد
+function withPoolLabel(obj, on) {
+  if (on) obj.pool = "near-empty";
+  return obj;
+}
 async function ogFetchVerdictDetail(addr, meta, deadlineAt, env, ctx, metaWhy, meterHooks) {
   if (!meta) return { v: null, why: typeof metaWhy === "string" ? metaWhy : "internal" }; // بدونِ متادیتا حتی یک تلاش هم لازم نیست
   const chain = chainOf(addr);
@@ -1534,6 +1545,17 @@ async function ogFetchVerdictDetail(addr, meta, deadlineAt, env, ctx, metaWhy, m
       baseWhy = whyOut.why;
       ret = retOut.ret;
       if (whyOut.v4Proof === true) cacheOut.v4Proof = true;
+      /* ۲۰ نوامبر — برچسبِ «pool: near-empty»: فقط کنارِ یک "sell"ِ تازه‌محاسبه با
+         ret زیرِ آستانه، و فقط با بودجه/مهلتِ کافی. اندازه‌گیری شکست بخورد یا
+         نشدنی باشد، هیچ برچسبی نمی‌نشیند؛ خودِ حکم هرگز عوض نمی‌شود. */
+      if (result === "sell" && typeof retOut.ret === "number" && retOut.ret < VD_NEAR_EMPTY_RET_PCT && retOut.src &&
+          (deadlineAt == null || deadlineAt - Date.now() >= 1200) &&
+          passBudgetHasRoom(meterHooks, NEAR_EMPTY_PASS_MAX_USED)) {
+        try {
+          const lbl = await measureNearEmpty(addr, retOut.src, retOut.ret, { fetchImpl: fetch, deadlineAt });
+          if (lbl === "near-empty") cacheOut.pool = "near-empty";
+        } catch (e) { /* اندازه‌گیری هرگز حکم را نمی‌شکند */ }
+      }
       return result;
     },
     ctx,
@@ -1554,7 +1576,8 @@ async function ogFetchVerdictDetail(addr, meta, deadlineAt, env, ctx, metaWhy, m
       // فقط وقتی عدد است می‌نشیند — retPctFrom که نتوانسته قیمت‌گذاری کند
       // null می‌دهد، و آن null هم باید undefined بشود، نه یک کلیدِ واقعی با
       // مقدارِ null: «نتوانستیم اندازه بگیریم» باید غایب باشد، نه صفر/null.
-      : { v: raw, why: null, ret: raw === "sell" && typeof ret === "number" ? ret : undefined };
+      : withPoolLabel({ v: raw, why: null, ret: raw === "sell" && typeof ret === "number" ? ret : undefined },
+        raw === "sell" && cacheOut.pool === "near-empty");
   }
   const covered = await baseVenueCoveredDetail(addr, env);
 
@@ -2765,8 +2788,9 @@ export async function tokenVerdict(addr, env, ctx, deadlineAt, opts) {
   }
   if (chain === "base") {
     const { meta, why: metaWhy } = await ogFetchMetaDetail(addr, env);
-    const { v, why, cause, ret, via } = await ogFetchVerdictDetail(addr, meta, deadlineAt, env, ctx, metaWhy);
-    return { chain, v, why, cause, ret, via, symbol: meta && meta.symbol ? meta.symbol : undefined };
+    const { v, why, cause, ret, via, pool } = await ogFetchVerdictDetail(addr, meta, deadlineAt, env, ctx, metaWhy);
+    return withPoolLabel({ chain, v, why, cause, ret, via, symbol: meta && meta.symbol ? meta.symbol : undefined },
+      v === "sell" && pool === "near-empty");
   }
   return { chain: null, v: null, why: "internal" };
 }
@@ -2910,6 +2934,18 @@ async function diagVerdict(request, url, env, ctx) {
   countVdExternal(request, env, chain); // فقط آدرسِ معتبرِ GETِ غیرِ تشخیصی که به بررسی می‌رسد
 
   const t0 = Date.now();
+  /* ۲۰ نوامبر — GET /vd/<mint سولانا>?probe=1 (فقط با هدرِ x-run-key = env.RUN_KEY؛
+     همان گیتِ diagnostic بالا: بدونِ کلید ۴۰۴ می‌شود پیش از رسیدن به اینجا).
+     دقیقاً مثلِ ?probe=1 روی Base: کش را دور می‌زند و حکمِ *خامِ* fetchVerdictSol را
+     با یک observer (simOut) برمی‌گرداند — sim/simControl فقط همین‌جا بیرون می‌آیند،
+     هرگز در پاسخِ عمومیِ /vd/<mint>. هیچ چیز در کش نوشته نمی‌شود. */
+  if (chain === "solana" && url.searchParams.get("probe") === "1") {
+    const simOut = {};
+    const res = await fetchVerdictSol(addr,
+      { deadlineAt: t0 + OG_BUDGET_MS, fetchImpl: fetch, rpcs: solRpcsFor(env), jupBase: VD_SOL_JUP_BASE,
+        payer: VD_SOL_PAYER, jupKey: jupKeyFor(env), simOut });
+    return vdDone(200, { v: res.v, ms: Date.now() - t0, why: res.why, sim: simOut.sim, simControl: simOut.simControl });
+  }
   if (chain === "solana") {
     // «why» فقط وقتی v واقعاً null باشد چیزی غیرِ undefined است؛ JSON.stringify
     // کلیدی با مقدارِ undefined را خودش حذف می‌کند، پس یک sell/nosell همان
@@ -2976,14 +3012,15 @@ async function diagVerdict(request, url, env, ctx) {
      در دسترس نیست (tokenVerdict فقط حکم برمی‌گرداند)، پس شاخه‌ی v4 گارد
      عمل نمی‌کند؛ v4-onlyِ اثبات‌نشده را خودِ finalizeBaseNosell قبلاً می‌گیرد. */
   const raw = await tokenVerdict(addr, env, ctx, t0 + OG_BUDGET_MS);
-  const { v, why, cause, ret, via } = publishGuardRow(
-    { v: raw.v, why: raw.why, cause: raw.cause, ret: raw.ret, via: raw.via }, "base");
+  const { v, why, cause, ret, via, pool } = publishGuardRow(
+    withPoolLabel({ v: raw.v, why: raw.why, cause: raw.cause, ret: raw.ret, via: raw.via }, raw.pool === "near-empty"), "base");
   return vdDone(200, {
     v, ms: Date.now() - t0,
     why: v === null ? why : undefined,
     cause: v === "nosell" ? cause : undefined,
     ret: v === "sell" && typeof ret === "number" ? ret : undefined,
     via: v === "sell" && (via === "counter" || via === "pool-key") ? via : undefined,
+    pool: v === "sell" && pool === "near-empty" ? "near-empty" : undefined,
   });
 }
 

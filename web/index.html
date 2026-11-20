@@ -2537,7 +2537,7 @@ try{(function(){
       <span class="mkt" id="stkMkt"><i></i><span id="stkMktTxt"></span></span>
     </header>
     <p class="lede" id="stkMsg" role="status" hidden></p>
-    <p class="lede" id="stkLede">Tokenized shares issued by Coinbase, each backed 1:1 by a real share. Trade them on-chain any time against USDC; where shown, the reference price comes from Chainlink and moves only while the US market is open.</p>
+    <p class="lede" id="stkLede">Tokenized stocks issued by Coinbase Onchain SPV Ltd (ADGM) as certificates representing a beneficial interest in the underlying share. The listed companies do not issue these tokens. Trade them on-chain any time against USDC; where shown, the reference price comes from Chainlink and moves only while the US market is open.</p>
     <table id="stkTable">
       <thead><tr><th class="stkStarTh"></th><th>Stock</th><th>Price</th><th class="colRef">Reference</th><th class="colVol">Volume 24h</th><th></th></tr></thead>
       <tbody></tbody>
@@ -4570,9 +4570,13 @@ function renderRoundTrip(box,x){
     const retNote=(typeof x.ret==="number"&&isFinite(x.ret))
       ?" A $100 sell, valued at the listed price, was quoted back at "+x.ret.toFixed(1)+"%."
       :"";
+    // ۲۰ نوامبر: برچسبِ اندازه‌گیری‌شده‌ی سرور — استایلِ sell می‌ماند، فقط متن اضافه می‌شود (حکم عوض نمی‌شود)
+    const neChip=x.pool==="near-empty"
+      ?`<span class="tripBadge" id="tripNearEmpty" style="margin-left:6px;color:var(--pos);background:var(--pglow)" title="Our server measured under $10 on the WETH or USDC side of the pool that quoted this sell.">Sells · pool nearly empty</span>`
+      :"";
     box.innerHTML=`<div class="tripHead">
         <span class="tripPct" style="color:var(--pos)">Sellable</span>
-        <span class="tripBadge" style="color:var(--pos);background:var(--pglow)">Server check</span>
+        <span class="tripBadge" style="color:var(--pos);background:var(--pglow)">Server check</span>${neChip}
       </div>
       <div class="tripTrack"></div>
       <div class="tripEnds"><span>Checked by our server</span><span>&nbsp;</span></div>
@@ -6563,7 +6567,7 @@ async function solAppLoadToken(mint){
       if(solTokenSymbol==="Unknown"&&j.symbol){solTokenSymbol=j.symbol;$("appSolExitSym").textContent=j.symbol;if($("solPairName"))$("solPairName").textContent=j.symbol+" / USD";}
       if(!solTokenLogoUrl&&j.logo)solTokenLogoUrl=j.logo;
       solPaintLegs();paintSolAvatar({symbol:solTokenSymbol,image_url:solTokenLogoUrl});
-      if(!meta&&j.stats)renderSolStats(j.stats,"solTokStats");   // ۲۰ اکتبر: آمارِ بازار از Jupiter وقتی GT نیست
+      if(!meta&&j.stats)renderSolStats(j.stats,"solTokStats",mint);   // ۲۰ اکتبر: آمارِ بازار از Jupiter وقتی GT نیست
     });
   }
   $("appSolExitSym").textContent=solTokenSymbol;
@@ -6575,7 +6579,7 @@ async function solAppLoadToken(mint){
   // F — کارتِ نمودار/آمار: عنوانِ جفت فوراً (بدونِ صبر برای GT)، بعد
   // renderSolStats از همان meta که بالاتر گرفته شد (تماسِ GTِ دومی لازم نیست).
   if($("solPairName"))$("solPairName").textContent=solTokenSymbol+" / USD";
-  renderSolStats(meta,"solTokStats");
+  renderSolStats(meta,"solTokStats",solMintCur);
   solLoadChart();
   if(activeChain==="solana"&&view==="flow"){paintFlowToken();renderFlow();}
 }
@@ -7364,6 +7368,23 @@ function mcFdvOf(a,cg){
   const impossiblePair=mc!=null&&fdv!=null&&isFinite(mc)&&isFinite(fdv)&&mc>0&&fdv>0&&mc>fdv*1.01;
   return {mc,fdv,impossiblePair};
 }
+/* ۲۰ نوامبر — توکنِ سهام (STK روی Base، STK_SOL روی سولانا): «Market cap» و «FDV» اینجا معنی ندارد؛ شرکت این توکن را منتشر نکرده و
+   fdv_usd ِ GT = قیمت × عرضه‌ی آنچین است، نه ارزش بازار شرکت. پس یک کاشی با نام درست نشان می‌دهیم.
+   fdv_usd خام استفاده می‌شود (نه mcFdvOf که با id کوین‌گکو آن را null می‌کند)؛ نبودِ عدد «—» است، نه صفر. */
+const STOCK_SUPPLY_LABEL="Onchain supply value";
+const STOCK_SUPPLY_TIP="Value of the tokenized supply on this chain, not the company's market cap.";
+function marketStatRows(a,cg,stock){
+  const num=v=>(v==null||v==="")?null:Number(v);
+  const tail=[["Volume 24h",fmtBig(num(a.volume_usd&&a.volume_usd.h24))],["Liquidity",fmtBig(num(a.total_reserve_in_usd))]];
+  if(stock){
+    const v=num(a.fdv_usd);
+    return {rows:[[STOCK_SUPPLY_LABEL,(v!=null&&isFinite(v)&&v>0)?fmtBig(v):"—",STOCK_SUPPLY_TIP]].concat(tail),impossiblePair:false};
+  }
+  const {mc,fdv,impossiblePair}=mcFdvOf(a,cg);
+  return {rows:[["Market cap",impossiblePair?"—":fmtBig(mc)],["FDV",impossiblePair?"—":fmtBig(fdv)]].concat(tail),impossiblePair};
+}
+const statTileHtml=(cls,[k,v,tip])=>
+  `<div class="${cls}"${tip?` title="${esc(tip)}"`:""}><div class="k">${esc(k)}</div><div class="v">${esc(v)}</div></div>`;
 let statsSeq=0;
 async function renderTokenStats(t){
   const box=panel("tokStats");if(!box)return;
@@ -7373,23 +7394,15 @@ async function renderTokenStats(t){
   try{a=await tokenMeta(t.native?WETH_ADDR:t.address);}catch{}
   if(seq!==statsSeq)return;
   if(!a){box.hidden=true;return;}
-  const num=v=>(v==null||v==="")?null:Number(v);
+  const stock=!t.native&&isStockRep({address:t.address});   // توکنِ سهام: بدون Market cap/FDV
   const paint=cg=>{
     // مارکت‌کپ > FDV محال است (بالا توضیح داده شد). ۱٪ رواداری برای گرد کردن
     // و اینکه دو عدد در دو لحظه‌ی کمی متفاوت نمونه‌برداری شده‌اند — نمونه‌ی
     // واقعی ۱۷ برابر بود، نه ۱٪، پس این رواداری چیزی واقعی را پنهان نمی‌کند.
-    const {mc,fdv,impossiblePair}=mcFdvOf(a,cg);
-    const rows=[
-      ["Market cap",impossiblePair?"—":fmtBig(mc)],
-      ["FDV",impossiblePair?"—":fmtBig(fdv)],
-      ["Volume 24h",fmtBig(num(a.volume_usd&&a.volume_usd.h24))],
-      ["Liquidity",fmtBig(num(a.total_reserve_in_usd))],
-    ];
+    const {rows,impossiblePair}=marketStatRows(a,cg,stock);
     // اگر همه‌شان نامعلوم‌اند، یک ردیف پر از «—» فقط سروصداست
     if(rows.every(r=>r[1]==="—")){box.hidden=true;return;}
-    box.innerHTML=rows.map(([k,v])=>
-      `<div class="${tokenPage?"tkStat":"tstat"}"><div class="k">${esc(k)}</div>`+
-      `<div class="v">${esc(v)}</div></div>`).join("")+
+    box.innerHTML=rows.map(r=>statTileHtml(tokenPage?"tkStat":"tstat",r)).join("")+
       (impossiblePair?'<div class="statNote">Market cap and FDV are hidden. The price source '+
         'reported a market cap larger than the fully diluted value, which is impossible — '+
         'one of the two is wrong and we cannot tell which.</div>':"");
@@ -7397,7 +7410,7 @@ async function renderTokenStats(t){
   };
   paint(undefined);
   const id=cgIdOf(a);
-  if(!id)return;
+  if(!id||stock)return;   // سهام: جفتِ CG لازم نیست (کاشیِ ارزشِ عرضه از GT)
   const cg=await cgMcapOf(id);
   if(seq!==statsSeq)return;   // توکن عوض شده: جوابِ کهنه نمی‌نشیند
   paint(cg);
@@ -7915,7 +7928,7 @@ async function tokenExitFallback(seq,why){
   const sv=await fetchVdVerdict(tokenOut.address);
   if(seq!==tkExitSeq||tkExitSettled===seq)return;
   tkExitSettled=tkExitSeq;clearTimeout(tkExitTimer);tkExitTimer=null;
-  if(sv.v==="sell")renderRoundTrip($("tk-exitBox"),{state:"serverSell",ret:sv.ret});
+  if(sv.v==="sell")renderRoundTrip($("tk-exitBox"),{state:"serverSell",ret:sv.ret,pool:sv.pool});
   else if(sv.v==="nosell")renderRoundTrip($("tk-exitBox"),{state:"serverNoSell",cause:sv.cause});
   else renderRoundTrip($("tk-exitBox"),{state:"unknown",reason:REASON[why]||REASON.timeout});
 }
@@ -11851,7 +11864,11 @@ async function fetchVdVerdict(mint){
     // رفت‌وبرگشتِ *قیمتی* (نه اجرا) آمده — کارتِ exit-check باید بگوید
     // «تخمینی از quote»، نه اینکه مثلِ یک رفت‌وبرگشتِ واقعاً اجراشده جا بزند.
     const basis=(v==="sell"&&j.basis==="quote")?"quote":null;
-    return {v,why,cause,ret,basis};
+    // ۲۰ نوامبر: pool فقط دقیقاً "near-empty" و فقط کنارِ sell پذیرفته می‌شود (برچسبِ اندازه‌گیری‌شده‌ی سرور)؛
+    // کلید فقط وقتی هست که مقدار دارد، تا شکلِ بازگشتیِ امروز برای بقیه عیناً همان بماند.
+    const out={v,why,cause,ret,basis};
+    if(v==="sell"&&j.pool==="near-empty")out.pool="near-empty";
+    return out;
   }catch{return {v:null,why:null,cause:null,ret:null,basis:null};}
 }
 
@@ -11877,24 +11894,18 @@ function paintSolAvatar(meta){
    محال است، آن جفت پنهان می‌شود؛ همه‌چیز «—» یعنی جعبه‌ای نشان نده)، ولی
    از رویِ attributes خامی که خودمان گرفته‌ایم، نه از tokenMeta/BASE_TOKENS. */
 const solStatsSeq=new Map();
-function renderSolStats(a,targetId){
+function renderSolStats(a,targetId,mint){
   const box=$(targetId||"tk-tokStats");if(!box)return;
   const sk=targetId||"tk-tokStats",seq=(solStatsSeq.get(sk)||0)+1;
   solStatsSeq.set(sk,seq);
   if(!a){box.hidden=true;return;}
   const rowClass=(targetId==="solTokStats")?"tstat":"tkStat"; // همان قاعده‌ی renderTokenStats
-  const num=v=>(v==null||v==="")?null:Number(v);
+  // mint صریح از صدازننده می‌آید (نه solMintCur): صفحه‌ی Robinhood هم از همین تابع رد می‌شود و solMintCur آنجا کهنه است
+  const stock=typeof mint==="string"&&isStockRep({solana:true,mint});
   const paint=cg=>{
-    const {mc,fdv,impossiblePair}=mcFdvOf(a,cg);
-    const rows=[
-      ["Market cap",impossiblePair?"—":fmtBig(mc)],
-      ["FDV",impossiblePair?"—":fmtBig(fdv)],
-      ["Volume 24h",fmtBig(num(a.volume_usd&&a.volume_usd.h24))],
-      ["Liquidity",fmtBig(num(a.total_reserve_in_usd))],
-    ];
+    const {rows,impossiblePair}=marketStatRows(a,cg,stock);
     if(rows.every(r=>r[1]==="—")){box.hidden=true;return;}
-    box.innerHTML=rows.map(([k,v])=>
-      `<div class="${rowClass}"><div class="k">${esc(k)}</div><div class="v">${esc(v)}</div></div>`).join("")+
+    box.innerHTML=rows.map(r=>statTileHtml(rowClass,r)).join("")+
       (impossiblePair?'<div class="statNote">Market cap and FDV are hidden. The price source '+
         'reported a market cap larger than the fully diluted value, which is impossible — '+
         'one of the two is wrong and we cannot tell which.</div>':"");
@@ -11902,7 +11913,7 @@ function renderSolStats(a,targetId){
   };
   paint(undefined);
   const id=cgIdOf(a);
-  if(!id)return;
+  if(!id||stock)return;
   cgMcapOf(id).then(cg=>{
     if(solStatsSeq.get(sk)!==seq)return;   // رندرِ تازه‌تر نشسته: جوابِ کهنه نادیده
     paint(cg);
@@ -12043,7 +12054,7 @@ async function openSolanaTokenPage(mint){
     ?("$"+(px<1?px.toPrecision(4):px.toLocaleString(undefined,{maximumFractionDigits:2})))
     :"—";
   paintSolAvatar(meta);
-  renderSolStats(meta);
+  renderSolStats(meta,undefined,mint);
   renderSolExit(verdict.v,verdict.why,null,verdict.basis,verdict.ret,verdict.cause);
   solPaintSellPill(verdict.v,verdict.basis,verdict.ret,verdict.cause);
 
@@ -14219,7 +14230,7 @@ function stkPaintLogos(){
     tokenLogo(t).then(url=>{if(activeChain==="base")stkAddLogo(av,url,gen);});
   });
 }
-const STK_LEDE_BASE="Tokenized shares issued by Coinbase, each backed 1:1 by a real share. Trade them on-chain any time against USDC; where shown, the reference price comes from Chainlink and moves only while the US market is open.";
+const STK_LEDE_BASE="Tokenized stocks issued by Coinbase Onchain SPV Ltd (ADGM) as certificates representing a beneficial interest in the underlying share. The listed companies do not issue these tokens. Trade them on-chain any time against USDC; where shown, the reference price comes from Chainlink and moves only while the US market is open.";
 const STK_NOTE_BASE="Prices are live quotes from the deepest Aerodrome pool for $100. Issuer terms: not offered to US persons. Not investment advice.";
 const STK_LEDE_SOL="Tokenized shares and ETFs issued by Backed (xStocks), each backed 1:1 by the real asset. Trade them on-chain any time against USDC; where shown, the reference price comes from Chainlink and moves only while the US market is open.";
 const STK_NOTE_SOL="Prices are the latest on-chain trade prices from GeckoTerminal; your swap quote comes from Jupiter. Issuer terms: not offered to US persons. Not investment advice.";

@@ -806,6 +806,152 @@ export function retPctFrom(batch, stage) {
   }
 }
 
+/* ---------------------------------------------------------------------
+   برچسبِ «pool: near-empty» — ۲۰ نوامبر ۲۰۲۶ (تصمیمِ مالک: گزینه‌ی الف)
+   =========================================================================
+   یازده توکنِ تقلبیِ «ANTHROPIC» روی Base استخرِ WETH با کمتر از ۰٫۰۰۰۰۰۲ WETH
+   دارند؛ کوتِ فروشِ گرد-و-غبار فنی موفق می‌شود پس /vd می‌گوید "sell". تصمیمِ
+   ثابتِ مالک: هیچ آستانه‌ی ret هرگز "sell" را "nosell" نمی‌کند. پس حکم همان
+   "sell" می‌ماند و فقط یک برچسبِ *اندازه‌گیری‌شده* کنارش می‌نشیند.
+   قواعد:
+   - فقط وقتی v==="sell" و ret عددی و زیرِ VD_NEAR_EMPTY_RET_PCT است.
+   - فقط استخرِ همان صرافی که کوتِ برنده را داد (V2 یا SOLIDLY)؛ CL/V4 → هیچ
+     برچسبی (نامعلوم نامعلوم می‌ماند).
+   - ضدجفتِ استخر (WETH/USDC) از رویِ getReserves()+token0() خوانده می‌شود و
+     اگر ارزشش زیرِ VD_NEAR_EMPTY_USD بود برچسب می‌نشیند. قیمتِ اتر همان
+     canaryUsdPerEthِ همان batchی است که ret را ساخت؛ USDC = یک دلار.
+   - هر چیزِ نامشخص (استخر پیدا نشد، خواندن شکست خورد، قیمتِ اتر نبود، مهلت
+     یا بودجه کم بود) → null: هرگز استنباط نمی‌شود، هرگز v را عوض نمی‌کند.
+   - تصمیم فقط از رویِ شکلِ پاسخ (آدرس/عدد)، هرگز از متنِ خطا. */
+export const VD_NEAR_EMPTY_RET_PCT = 5;   // درصدِ برگشتِ صد دلار
+export const VD_NEAR_EMPTY_USD = 10;      // ارزشِ سمتِ ضدجفت، دلار
+export const SEL_GET_RESERVES = "0x0902f1ac";       // getReserves()
+export const SEL_TOKEN0 = "0x0dfe1681";             // token0()
+export const SEL_ROUTER_FACTORY = "0xc45a0155";     // factory() روی روترِ V2
+export const SEL_V2_GET_PAIR = "0xe6a43905";        // getPair(address,address)
+export const SEL_SOLIDLY_GET_POOL = "0x79bc57d5";   // getPool(address,address,bool)
+
+// اندیسِ بزرگ‌ترین کوتِ مثبتِ batch (اولی در تساوی) یا -1 — هم‌قاعده با bestPositive
+export function bestPositiveIndex(batch) {
+  try {
+    const list = batch && Array.isArray(batch.items) ? batch.items : [];
+    let best = null, idx = -1;
+    for (let i = 0; i < list.length; i++) {
+      const v = decodeItemValue(list[i]);
+      if (v != null && v > 0n && (best == null || v > best)) { best = v; idx = i; }
+    }
+    return idx;
+  } catch (e) {
+    return -1;
+  }
+}
+
+// یک کلمه‌ی ABI → آدرسِ غیرصفر، یا null
+function addrFromWord(hex) {
+  if (typeof hex !== "string" || !/^0x[0-9a-fA-F]{64}$/.test(hex)) return null;
+  if (!/^0{24}$/.test(hex.slice(2, 26))) return null;
+  const a = "0x" + hex.slice(26).toLowerCase();
+  return /^0x0{40}$/.test(a) ? null : a;
+}
+
+// یک batchِ eth_call (یک ساب‌ریکوئست) → آرایه‌ی نتیجه‌ها (رشته یا null) هم‌ترتیبِ calls، یا null
+async function ethCallsOnce(fetchImpl, rpcUrl, calls, timeoutMs) {
+  const ac = new AbortController();
+  const timer = setTimeout(() => ac.abort(), timeoutMs);
+  try {
+    const res = await fetchImpl(rpcUrl, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(calls.map((c, i) => ({
+        jsonrpc: "2.0", id: i + 1, method: "eth_call", params: [{ to: c.to, data: c.data }, "latest"] }))),
+      signal: ac.signal,
+    });
+    if (!res || res.status !== 200) return null;
+    const body = await res.json();
+    if (!Array.isArray(body)) return null;
+    const byId = new Map();
+    for (const e of body) {
+      if (!e || typeof e !== "object" || e.id === undefined || e.id === null) return null;
+      byId.set(e.id, e);
+    }
+    return calls.map((c, i) => {
+      const e = byId.get(i + 1);
+      return e && !e.error && typeof e.result === "string" ? e.result : null;
+    });
+  } catch (e) {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/* src: { id, key, stage, rpc, ethUsd } از retOut.src (fetchVerdict). برمی‌گرداند
+   "near-empty" یا null. هرگز پرتاب نمی‌کند. V2: ۳ ساب‌ریکوئست (factory، getPair،
+   ذخایر)؛ SOLIDLY: ۲ (getPool، ذخایر). */
+export async function measureNearEmpty(tokenAddr, src, ret, opts) {
+  try {
+    if (typeof ret !== "number" || !Number.isFinite(ret) || ret <= 0 || ret >= VD_NEAR_EMPTY_RET_PCT) return null;
+    if (!src || typeof src.id !== "string" || typeof src.rpc !== "string" || !src.rpc) return null;
+    const kind = VENUE_KIND_BY_ID.get(src.id);
+    if (kind !== "SOLIDLY" && kind !== "V2") return null; // CL/V4/ناشناخته → هیچ برچسبی
+    const row = VD_VENUES.find((r) => r.id === src.id);
+    if (!row) return null;
+    const tok = String(tokenAddr).toLowerCase();
+    if (!/^0x[0-9a-f]{40}$/.test(tok)) return null;
+
+    let counter, usdPer, dec;
+    if (src.stage === "weth") {
+      counter = WETH_ADDR.toLowerCase(); dec = 18; usdPer = src.ethUsd;
+      if (typeof usdPer !== "number" || !Number.isFinite(usdPer) || usdPer <= 0) return null; // قیمتِ اتر نبود → هیچ
+    } else if (src.stage === "usdc") {
+      counter = USDC_ADDR.toLowerCase(); dec = 6; usdPer = 1;
+    } else {
+      return null;
+    }
+
+    const o = opts || {};
+    const fetchImpl = o.fetchImpl || fetch;
+    const now = o.now || Date.now;
+    const deadlineAt = o.deadlineAt;
+    const timeoutMs = o.timeoutMs || 900;
+    const noTime = () => deadlineAt != null && (now() >= deadlineAt || deadlineAt - now() < 400);
+
+    let pool = null;
+    if (kind === "SOLIDLY") {
+      if (typeof src.key !== "boolean" || typeof row.factory !== "string") return null;
+      if (noTime()) return null;
+      const r = await ethCallsOnce(fetchImpl, src.rpc, [{ to: row.factory,
+        data: SEL_SOLIDLY_GET_POOL + wordAddr(tok) + wordAddr(counter) + wordBool(src.key) }], timeoutMs);
+      pool = r ? addrFromWord(r[0]) : null;
+    } else {
+      if (noTime()) return null;
+      const r1 = await ethCallsOnce(fetchImpl, src.rpc, [{ to: row.to, data: SEL_ROUTER_FACTORY }], timeoutMs);
+      const factory = r1 ? addrFromWord(r1[0]) : null;
+      if (!factory || noTime()) return null;
+      const r2 = await ethCallsOnce(fetchImpl, src.rpc, [{ to: factory,
+        data: SEL_V2_GET_PAIR + wordAddr(tok) + wordAddr(counter) }], timeoutMs);
+      pool = r2 ? addrFromWord(r2[0]) : null;
+    }
+    if (!pool || noTime()) return null;
+
+    const r3 = await ethCallsOnce(fetchImpl, src.rpc, [
+      { to: pool, data: SEL_GET_RESERVES }, { to: pool, data: SEL_TOKEN0 }], timeoutMs);
+    if (!r3 || typeof r3[0] !== "string" || !/^0x[0-9a-fA-F]{128,}$/.test(r3[0])) return null;
+    const token0 = addrFromWord(r3[1]);
+    if (!token0) return null;
+    const res0 = BigInt("0x" + r3[0].slice(2, 66)), res1 = BigInt("0x" + r3[0].slice(66, 130));
+    let counterRes;
+    if (token0 === counter) counterRes = res0;
+    else if (token0 === tok) counterRes = res1;
+    else return null; // استخر جفتِ ما نیست → استنباط نمی‌کنیم
+    const usd = (Number(counterRes) / 10 ** dec) * usdPer;
+    if (!Number.isFinite(usd) || usd < 0) return null;
+    return usd < VD_NEAR_EMPTY_USD ? "near-empty" : null;
+  } catch (e) {
+    return null;
+  }
+}
+
 export function verdictFrom({ canary, items }) {
   const list = items || [];
 
@@ -1067,8 +1213,17 @@ export async function fetchVerdict(tokenAddr, meta, opts) {
   // پیش از هر "sell" صدا زده می‌شود، با batch و stageِ همان لحظه — هرگز
   // روی nosell/null، و هرگز با batchِ یک مرحله‌ی دیگر.
   const retOut = o.retOut && typeof o.retOut === "object" ? o.retOut : null;
-  function setRet(batch, stage) {
-    if (retOut) retOut.ret = retPctFrom(batch, stage);
+  function setRet(batch, stage, items, rpcUrl) {
+    if (!retOut) return;
+    retOut.ret = retPctFrom(batch, stage);
+    // منبعِ کوتِ برنده (صرافی/کلید/مرحله/اندپوینت/قیمتِ اتر) — فقط برای
+    // برچسبِ «pool»؛ مشاهده‌گرِ محض، هرگز روی verdict اثر ندارد.
+    try {
+      const idx = bestPositiveIndex(batch);
+      const it = idx >= 0 && Array.isArray(items) ? items[idx] : null;
+      retOut.src = it ? { id: it.id, key: it.key, stage, rpc: rpcUrl,
+        ethUsd: stage === "weth" ? canaryUsdPerEth(batch) : null } : null;
+    } catch (e) { retOut.src = null; }
   }
 
   try {
@@ -1119,7 +1274,7 @@ export async function fetchVerdict(tokenAddr, meta, opts) {
       if (!canaryAlive) { canaryDeadCount++; continue; } // کاناریِ مرده → این اندپوینت هم قابلِ‌اعتماد نیست، بعدی
 
       const verdictA = verdictFrom(batchA);
-      if (verdictA === "sell") { setRet(batchA, "weth"); return "sell"; }
+      if (verdictA === "sell") { setRet(batchA, "weth", itemsWeth, rpc); return "sell"; }
       if (verdictA !== "nosell") {
         /* ابهامِ ردیف‌ها با کاناریِ زنده — دلیلِ عوض‌کردنِ اندپوینت نیست، و
            تا امروز همین‌جا با null تمام می‌شد.
@@ -1143,7 +1298,7 @@ export async function fetchVerdict(tokenAddr, meta, opts) {
         if (deadlineHit("usdc-proof")) return null;
         const batchP = await callBatch(fetchImpl, rpc, canary, proofItems, timeoutMs, collect, "usdc-proof");
         if (batchP == null) { setWhy("proof-rpc"); return null; }
-        if (verdictFrom(batchP) === "sell") { setRet(batchP, "usdc"); return "sell"; }
+        if (verdictFrom(batchP) === "sell") { setRet(batchP, "usdc", proofItems, rpc); return "sell"; }
         setWhy("proof-no-quote");
         return null;
       }
@@ -1154,7 +1309,7 @@ export async function fetchVerdict(tokenAddr, meta, opts) {
       if (batchB == null) { setWhy("usdc-rpc"); return null; } // ابهامِ مرحله‌ی B هم اندپوینتِ بعدی را صدا نمی‌زند
 
       const verdictB = verdictFrom(batchB);
-      if (verdictB === "sell") { setRet(batchB, "usdc"); return "sell"; }
+      if (verdictB === "sell") { setRet(batchB, "usdc", itemsUsdc, rpc); return "sell"; }
       if (verdictB === "nosell") { markV4Proof(batchA); markV4Proof(batchB); return "nosell"; }
       setWhy("usdc-no-proof");
       return null;

@@ -16,7 +16,7 @@
    تضمین می‌شود: CHECK_KIND_BY_CHAIN زیر، و اینکه reportRow اصلاً پارامتری
    برای checkKind نمی‌پذیرد. */
 
-import { isBaseWhy } from "./verdict.js";
+import { isBaseWhy, VD_NEAR_EMPTY_RET_PCT } from "./verdict.js";
 import { SOL_MINT } from "./chains.js";
 
 export const REPORT_MIN_RESERVE_USD = 5000;
@@ -257,6 +257,17 @@ export function retForRow(verdict, ret) {
   return Math.round(ret * 10) / 10;
 }
 
+/* ۲۰ نوامبر — برچسبِ اندازه‌گیری‌شده‌ی «استخرِ تقریباً خالی» کنارِ یک sell.
+   واژه‌نامه‌ی بسته: فقط "near-empty". فقط Base، فقط verdict==="sell" و فقط وقتی
+   ret عددی و زیرِ همان آستانه‌ی verdict.js است — برچسبِ دست‌ساز یا بی‌ret هرگز
+   در انبار نمی‌نشیند. هرگز verdict را عوض نمی‌کند. */
+export const REPORT_POOLS = Object.freeze(["near-empty"]);
+export function poolForRow(chain, verdict, ret, pool) {
+  if (chain !== "base" || verdict !== "sell") return undefined;
+  if (typeof ret !== "number" || !Number.isFinite(ret) || ret <= 0 || ret >= VD_NEAR_EMPTY_RET_PCT) return undefined;
+  return typeof pool === "string" && REPORT_POOLS.includes(pool) ? pool : undefined;
+}
+
 /* واژه‌نامه‌ی بسته‌ی follow — دقیقاً هم‌رده‌ی REPORT_CAUSES: امروز فقط دو
    عضو دارد، ولی فهرست است نه یک رشته‌ی تکی. */
 export const REPORT_FOLLOWS = Object.freeze(["pool-empty", "pool-there"]);
@@ -459,7 +470,7 @@ export function pickRecheckTargets(doc, nowMs, cap = 4) {
    ازجمله) رفتارش را از رویِ آن عوض نمی‌کند. */
 export function reportRow({
   chain, address, symbol, name, verdict, checkedAt, poolCreatedAt, priceUsd, reserveUsd, vol24hUsd, fdvUsd, dex,
-  why, cause, ret,
+  why, cause, ret, pool,
 }) {
   try {
     if (verdict !== "sell" && verdict !== "nosell" && verdict !== null) return null; // هرگز یک حکم ساختگی
@@ -502,6 +513,9 @@ export function reportRow({
     // ندارند دیگر با سندهای تازه قابلِ‌مقایسه نمی‌مانند.
     const rowRet = retForRow(verdict, ret);
     if (rowRet !== undefined) row.ret = rowRet;
+    // pool هم همان انضباط: فقط وقتی واقعاً اندازه‌گیری شده کلید می‌شود
+    const rowPool = poolForRow(chain, verdict, rowRet, pool);
+    if (rowPool !== undefined) row.pool = rowPool;
     return row;
   } catch (e) {
     return null;
@@ -867,6 +881,7 @@ export async function runReportPass({
       // همان انضباط برای ret — فقط وقتی verdictResult واقعاً شیء است چیزی
       // غیرِundefined می‌شود؛ reportRow/retForRow خودشان باز هم می‌سنجندش.
       const ret = verdictOk ? verdictResult.ret : undefined;
+      const pool = verdictOk ? verdictResult.pool : undefined;   // ۲۰ نوامبر: برچسبِ near-empty (reportRow می‌سنجدش)
 
       const checkedAt = new Date(now()).toISOString();
       // ⚠️ priceUsd/vol24hUsd/fdvUsd همیشه از t (همان ردیفِ pool که
@@ -889,6 +904,7 @@ export async function runReportPass({
         why,
         cause,
         ret,
+        pool,
       });
       mTokenEnd();
 
@@ -1420,6 +1436,13 @@ export function reportText(doc, opts) {
     if (followedRows.length > 0) {
       lines.push(followedRows.length + " of the quoted tokens were re-checked 1–3 hours later. " +
         followEmptyCount + " had an empty pool.");
+    }
+
+    // ۲۰ نوامبر: برچسبِ اندازه‌گیری‌شده — فقط وقتی دست‌کم یک ردیفِ sell آن را دارد
+    // (ردیف‌های بدونِ آن بایت‌به‌بایت همان متنِ امروز می‌مانند). حکم‌ها را عوض نمی‌کند.
+    const nearEmptyCount = rows.filter((r) => r.v === "sell" && r.pool === "near-empty").length;
+    if (nearEmptyCount > 0) {
+      lines.push(nearEmptyCount + " of the quoted tokens had a nearly empty pool (Pool nearly empty).");
     }
 
     // خطِ خالی همیشه — وگرنه وقتی هیچ توکنی پرچم نخورده، پانویس به شمارش‌ها می‌چسبد.

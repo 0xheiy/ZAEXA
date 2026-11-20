@@ -5934,7 +5934,7 @@ STK_SOL_LEDE = ("Tokenized shares and ETFs issued by Backed (xStocks), each back
                 "against USDC; where shown, the reference price comes from Chainlink and moves only while the US market is open.")
 STK_SOL_NOTE = ("Prices are the latest on-chain trade prices from GeckoTerminal; your swap quote comes from Jupiter. "
                 "Issuer terms: not offered to US persons. Not investment advice.")
-STK_BASE_LEDE = ("Tokenized shares issued by Coinbase, each backed 1:1 by a real share. Trade them on-chain any time "
+STK_BASE_LEDE = ("Tokenized stocks issued by Coinbase Onchain SPV Ltd (ADGM) as certificates representing a beneficial interest in the underlying share. The listed companies do not issue these tokens. Trade them on-chain any time "
                  "against USDC; where shown, the reference price comes from Chainlink and moves only while the US market is open.")
 STK_BASE_NOTE = ("Prices are live quotes from the deepest Aerodrome pool for $100. Issuer terms: not offered to US persons. "
                  "Not investment advice.")
@@ -10441,6 +10441,9 @@ async def main():
         await check_rh_no_base_calls(p, errors)
         await check_rh_notice(p, errors)
         await check_rh_screens(p, errors)
+        await check_stock_stats(p, errors)
+        await check_exit_near_empty(p, errors)
+        await check_report_near_empty(p, errors)
         await check_flow_established(p, errors)
         await check_flow_header_stable(p, errors)
         await check_exit_header_icons(p, errors)
@@ -15617,6 +15620,7 @@ async def main():
         txt_impossible = await stats_case(fx_impossible)
         txt_normal = await stats_case(fx_normal)
         txt_tol = await stats_case(fx_tol)
+
         await stpg.close()
 
         print("[stats] impossible pair is refused: mc=%r fdv=%r note=%s"
@@ -25559,6 +25563,216 @@ async def check_rh_screens(p, errors):
     finally:
         await b.close()
         srv.shutdown()
+
+
+ANTC_ADDR = "0xb20000000000000000000016e38FD364d271Ba28"
+
+
+async def stock_stats_open(p, errs, vw=1240, vh=1000):
+    srv, origin = we_serve()
+    b = await p.chromium.launch()
+    env = FbEnv(b, origin, errs)
+    attrs = {"address": ANTC_ADDR.lower(), "symbol": "ANTc", "name": "Anthropic", "decimals": 8, "price_usd": "96.7",
+             "market_cap_usd": "58200000", "fdv_usd": "412000000", "coingecko_coin_id": "anthropic-stock",
+             "volume_usd": {"h24": "1000000"}, "total_reserve_in_usd": "500000"}
+
+    def gt(path):
+        if "/tokens/multi/" in path:
+            want = [a.lower() for a in path.split("/tokens/multi/")[1].split(",")]
+            return (200, {"data": [{"id": "base_" + ANTC_ADDR.lower(), "type": "token", "attributes": attrs}] if ANTC_ADDR.lower() in want else []})
+        return None
+    env.gt = gt
+    pg = await env.open(hash_="", vw=vw, vh=vh, scheme="light", board=False, path="/t/" + ANTC_ADDR)
+    await pg.wait_for_function("() => tokenPage && tokenOut && tokenOut.symbol === 'ANTc'", timeout=15000)
+    return srv, b, pg
+
+
+async def check_stock_stats(p, errors):
+    """[stock stats] ۲۰ نوامبر — توکنِ سهام (Base STK، Solana STK_SOL): یک کاشیِ «Onchain supply value» به‌جای Market cap/FDV؛
+    توکنِ عادی دست‌نخورده؛ و لِدِ سهامِ Base با جمله‌ی اولِ تازه (لِدِ سولانا بدونِ تغییر)."""
+    errs = []
+    srv, b, pg = await stock_stats_open(p, errs)
+    try:
+        os.makedirs("/tmp/shots", exist_ok=True)
+        STK_TIP = "Value of the tokenized supply on this chain, not the company's market cap."
+        # ۱) خودِ صفحه‌ی توکنِ ANTc، بدونِ هیچ دستکاری: آمار از GT می‌آید
+        await pg.wait_for_function("() => document.getElementById('tk-tokStats') && !document.getElementById('tk-tokStats').hidden && document.querySelectorAll('#tk-tokStats .k').length > 0", timeout=15000)
+        await pg.wait_for_timeout(600)
+        organic = await pg.evaluate("""() => { const b = document.getElementById('tk-tokStats');
+            return {keys: [...b.querySelectorAll('.k')].map(e => e.textContent), vals: [...b.querySelectorAll('.v')].map(e => e.textContent),
+                    tips: [...b.children].map(e => e.getAttribute('title') || '')}; }""")
+        await pg.locator("#tk-tokStats").screenshot(path="/tmp/shots/stock_stats.png")
+
+        async def stock_case(sym_or_addr, fx):
+            return await pg.evaluate("""async ([symOrAddr, fx]) => {
+                const t = BASE_TOKENS.find(x => x.symbol === symOrAddr) || {address: symOrAddr, symbol: "OTH", decimals: 18};
+                const key = t.address.toLowerCase();
+                const had = key in metaCache, orig = metaCache[key];
+                metaCache[key] = fx;
+                window.__cgCalls = 0;
+                const of = window.fetch;
+                window.fetch = (u, ...a) => { if (String(u).includes("/cg/mcap")) window.__cgCalls++; return of(u, ...a); };
+                try { await renderTokenStats(t); await new Promise(r => setTimeout(r, 150)); } finally { window.fetch = of; }
+                const box = document.getElementById("tk-tokStats");
+                const out = {hidden: box.hidden, keys: [...box.querySelectorAll(".k")].map(e => e.textContent),
+                             vals: [...box.querySelectorAll(".v")].map(e => e.textContent),
+                             tips: [...box.children].map(e => e.getAttribute("title") || ""), text: box.textContent, cg: window.__cgCalls};
+                if (had) metaCache[key] = orig; else delete metaCache[key];
+                return out;
+            }""", [sym_or_addr, fx])
+        base_fx = {"volume_usd": {"h24": "1000000"}, "total_reserve_in_usd": "500000"}
+        r_stk = await stock_case("ANTc", dict(base_fx, market_cap_usd="58200000", fdv_usd="412000000", coingecko_coin_id="anthropic-stock"))
+        r_none = await stock_case("ANTc", dict(base_fx, market_cap_usd="58200000"))
+        r_norm = await stock_case("0x1111111111111111111111111111111111111111",
+                                  dict(base_fx, market_cap_usd="34670000", fdv_usd="212500000"))
+        r_sol = await pg.evaluate("""() => {
+            let box = document.getElementById("solTokStats"), made = false;
+            if (!box) { box = document.createElement("div"); box.id = "solTokStats"; document.body.appendChild(box); made = true; }
+            const fx = {market_cap_usd: "58200000", fdv_usd: "412000000", volume_usd: {h24: "1000000"}, total_reserve_in_usd: "500000"};
+            const rd = () => ({keys: [...box.querySelectorAll(".k")].map(e => e.textContent), vals: [...box.querySelectorAll(".v")].map(e => e.textContent),
+                               tips: [...box.children].map(e => e.getAttribute("title") || "")});
+            renderSolStats(fx, "solTokStats", STK_SOL[0].mint); const stock = rd();
+            renderSolStats(fx, "solTokStats", "So11111111111111111111111111111111111111112"); const norm = rd();
+            renderSolStats(fx, "solTokStats"); const noMint = rd();   // مسیرِ Robinhood: mint ندارد
+            if (made) box.remove(); else { box.innerHTML = ""; box.hidden = true; }
+            return {stock, norm, noMint};
+        }""")
+        lede = await pg.evaluate("() => [STK_LEDE_BASE, STK_LEDE_SOL]")
+        print("[stock stats] ANTc page keys=%s vals=%s | injected keys=%s | normal keys=%s | solana stock keys=%s"
+              % (organic["keys"], organic["vals"], r_stk["keys"], r_norm["keys"], r_sol["stock"]["keys"]))
+        assert organic["keys"] == ["Onchain supply value", "Volume 24h", "Liquidity"] and organic["vals"][0] == "$412.00M" and organic["tips"][0] == STK_TIP, \
+            "[stock stats] the real ANTc token page must show one 'Onchain supply value' tile (GT fdv_usd, exact tooltip) and no Market cap/FDV: %s" % organic
+        assert r_stk["keys"] == ["Onchain supply value", "Volume 24h", "Liquidity"], "[stock stats] ANTc must show one 'Onchain supply value' tile: %s" % r_stk["keys"]
+        assert "Market cap" not in r_stk["text"] and "FDV" not in r_stk["text"], "[stock stats] ANTc text must not mention Market cap/FDV: %r" % r_stk["text"]
+        assert r_stk["vals"][0] == "$412.00M" and r_stk["tips"][0] == STK_TIP, "[stock stats] the tile carries GT's fdv_usd and the exact tooltip: %s %s" % (r_stk["vals"], r_stk["tips"])
+        assert r_stk["cg"] == 0, "[stock stats] a stock token must not fetch /cg/mcap (the CoinGecko pair is not used): %d calls" % r_stk["cg"]
+        assert r_none["keys"][0] == "Onchain supply value" and r_none["vals"][0] == "\u2014", \
+            "[stock stats] a missing fdv_usd is a dash, never $0 and never a fallback to the market cap: %s" % r_none["vals"]
+        assert r_norm["keys"] == ["Market cap", "FDV", "Volume 24h", "Liquidity"] and r_norm["vals"][:2] == ["$34.67M", "$212.50M"] and not any(r_norm["tips"]), \
+            "[stock stats] a normal token still shows both tiles: %s %s" % (r_norm["keys"], r_norm["vals"])
+        assert r_sol["stock"]["keys"] == ["Onchain supply value", "Volume 24h", "Liquidity"] and r_sol["stock"]["vals"][0] == "$412.00M" and r_sol["stock"]["tips"][0] == STK_TIP, \
+            "[stock stats] Solana stock token: %s" % r_sol["stock"]
+        assert r_sol["norm"]["keys"] == ["Market cap", "FDV", "Volume 24h", "Liquidity"], "[stock stats] a normal Solana token keeps both tiles: %s" % r_sol["norm"]
+        assert r_sol["noMint"]["keys"] == ["Market cap", "FDV", "Volume 24h", "Liquidity"], "[stock stats] a caller without a mint (Robinhood page) never gets the stock tile: %s" % r_sol["noMint"]
+        NEW = "Tokenized stocks issued by Coinbase Onchain SPV Ltd (ADGM) as certificates representing a beneficial interest in the underlying share. The listed companies do not issue these tokens."
+        assert lede[0].startswith(NEW + " Trade them on-chain any time against USDC;") and "1:1" not in lede[0], "[stock stats] STK_LEDE_BASE has the new first sentence and keeps the rest: %r" % lede[0]
+        assert lede[1].startswith("Tokenized shares and ETFs issued by Backed (xStocks), each backed 1:1"), "[stock stats] STK_LEDE_SOL is unchanged: %r" % lede[1]
+        static = open(os.path.join(HERE, "..", "index.html"), encoding="utf-8").read()
+        assert ('id="stkLede">' + lede[0] + '</p>') in static, "[stock stats] the static #stkLede HTML mirrors STK_LEDE_BASE"
+        assert not errs, "[stock stats] console errors: %s" % errs
+        print("[stock stats] PASS - Base/Solana stock tokens show one 'Onchain supply value' tile (GT fdv_usd, exact tooltip, dash when missing, no /cg/mcap call); normal tokens and the Robinhood/no-mint path keep Market cap + FDV; the Base lede has the new first sentence (static HTML too) and the Solana lede is unchanged")
+    finally:
+        await b.close()
+        srv.shutdown()
+
+
+async def check_exit_near_empty(p, errors):
+    """[exit near-empty] ۲۰ نوامبر — برچسبِ اندازه‌گیری‌شده‌ی سرور روی چیپِ sell: «Sells · pool nearly empty» با همان استایلِ sell؛
+    بدونِ برچسب همان متنِ امروز؛ و fetchVdVerdict فقط "near-empty" را آن هم فقط کنارِ sell می‌پذیرد."""
+    errs = []
+    srv, b, pg = await stock_stats_open(p, errs)
+    try:
+        os.makedirs("/tmp/shots", exist_ok=True)
+        js = """async (body) => {
+            const of = window.fetch;
+            window.fetch = (u, ...a) => String(u).includes("/vd/")
+                ? Promise.resolve(new Response(JSON.stringify(body), {status: 200, headers: {"content-type": "application/json"}})) : of(u, ...a);
+            try { return await fetchVdVerdict(tokenOut.address); } finally { window.fetch = of; }
+        }"""
+        v_ne = await pg.evaluate(js, {"v": "sell", "ret": 0.1, "pool": "near-empty"})
+        v_plain = await pg.evaluate(js, {"v": "sell", "ret": 50})
+        v_bad = await pg.evaluate(js, {"v": "sell", "ret": 0.1, "pool": "empty"})
+        v_no = await pg.evaluate(js, {"v": "nosell", "pool": "near-empty"})
+        v_unk = await pg.evaluate(js, {"v": None, "pool": "near-empty", "why": "rpc-down"})
+        assert v_ne.get("pool") == "near-empty" and v_ne["v"] == "sell" and v_ne["ret"] == 0.1, "[exit near-empty] fetchVdVerdict keeps the measured label on a sell: %s" % v_ne
+        assert "pool" not in v_plain and "pool" not in v_bad and "pool" not in v_no and "pool" not in v_unk and v_no["v"] == "nosell" and v_unk["v"] is None, \
+            "[exit near-empty] only the exact word near-empty beside a sell is accepted: %s %s %s %s" % (v_plain, v_bad, v_no, v_unk)
+        assert sorted(v_plain.keys()) == ["basis", "cause", "ret", "v", "why"], "[exit near-empty] without the label the verdict keeps today's shape: %s" % v_plain
+
+        # سرتاسری: همان تابعِ واقعیِ tokenExitFallback که صفحه‌ی توکن صدا می‌زند
+        run = """async (body) => {
+            const of = window.fetch;
+            window.fetch = (u, ...a) => String(u).includes("/vd/")
+                ? Promise.resolve(new Response(JSON.stringify(body), {status: 200, headers: {"content-type": "application/json"}})) : of(u, ...a);
+            tkExitSeq++; tkExitSettled = 0;
+            try { await tokenExitFallback(tkExitSeq, "timeout"); } finally { window.fetch = of; }
+            const box = document.getElementById("tk-exitBox");
+            const chip = box.querySelector("#tripNearEmpty");
+            const head = box.querySelector(".tripPct");
+            return {text: box.textContent.replace(/\\s+/g, " ").trim(), chip: chip ? chip.textContent : null, title: chip ? chip.title : null,
+                    chipColor: chip ? getComputedStyle(chip).color : null, headColor: head ? getComputedStyle(head).color : null,
+                    head: head ? head.textContent : null, badges: [...box.querySelectorAll(".tripBadge")].map(e => e.textContent)};
+        }"""
+        ne = await pg.evaluate(run, {"v": "sell", "ret": 0.1, "pool": "near-empty"})
+        await pg.locator("#tk-exitBox").screenshot(path="/tmp/shots/near_empty_chip.png")
+        plain = await pg.evaluate(run, {"v": "sell", "ret": 50})
+        print("[exit near-empty] chip=%r head=%r badges=%s | plain badges=%s" % (ne["chip"], ne["head"], ne["badges"], plain["badges"]))
+        assert ne["chip"] == "Sells \u00b7 pool nearly empty" and ne["head"] == "Sellable" and ne["badges"] == ["Server check", "Sells \u00b7 pool nearly empty"], \
+            "[exit near-empty] the server-sell card keeps its Sellable head and Server check badge and adds the chip: %s" % ne
+        assert ne["chipColor"] == ne["headColor"], "[exit near-empty] the chip keeps the sell (positive) styling: %s vs %s" % (ne["chipColor"], ne["headColor"])
+        assert ne["title"] and "under $10" in ne["title"], "[exit near-empty] the chip explains what was measured: %r" % ne["title"]
+        assert plain["chip"] is None and "pool nearly empty" not in plain["text"] and plain["badges"] == ["Server check"] and "A $100 sell, valued at the listed price, was quoted back at 50.0%." in plain["text"], \
+            "[exit near-empty] without the label the card is today's card: %s" % plain
+        assert not errs, "[exit near-empty] console errors: %s" % errs
+        print("[exit near-empty] PASS - the token page's server-sell card shows 'Sells \u00b7 pool nearly empty' (sell colour, explained in the tooltip) only when /vd says pool near-empty beside a sell; every other body leaves today's card; fetchVdVerdict accepts only that exact word and only beside a sell")
+    finally:
+        await b.close()
+        srv.shutdown()
+
+
+
+async def check_report_near_empty(p, errors):
+    """[report near-empty] ۲۰ نوامبر — صفحه‌ی گزارش: «Pool nearly empty» فقط کنارِ sellِ Base که برچسبش را دارد؛ هیچ ردیفِ دیگر
+    (sell بدونِ برچسب، nosell، نامعلوم، Solana) تغییر نمی‌کند. (باگِ زنجیره‌ی if/else در همین کاوشگر صید شد.)"""
+    import json as _j, subprocess, tempfile
+    worker_dir = os.path.join(HERE, "..", "..", "worker")
+    out = os.path.join(tempfile.mkdtemp(prefix="rne_"), "r.html")
+    gen = r"""
+    import fs from "node:fs";
+    import { renderReportPage } from "./report_page.js";
+    import { publishGuardRow } from "./report.js";
+    const D = "2026-11-20";
+    const a = (n) => "0x" + n.toString(16).padStart(40, "0");
+    const base = (n, extra) => Object.assign({ chain: "base", address: a(n), symbol: "T" + n, name: "Name " + n, v: "sell", checkKind: "sell-quote",
+      checkedAt: D + "T10:0" + n + ":00.000Z", poolCreatedAt: null, priceUsd: 1, reserveUsd: 5000, vol24hUsd: 1, fdvUsd: 1, dex: "baseswap", why: null }, extra);
+    const rows = [
+      base(1, { ret: 0.1, pool: "near-empty" }),
+      base(2, { ret: 90 }),
+      base(3, { v: "nosell", cause: "empty-pool" }),
+      base(4, { v: null, why: "rpc-down" }),
+      { chain: "solana", address: "S" + "1".repeat(43), symbol: "SOLX", name: "Sol", v: "sell", checkKind: "roundtrip", checkedAt: D + "T11:00:00.000Z", reserveUsd: 8000, why: null, pool: "near-empty" },
+    ].map((r) => publishGuardRow(r, undefined));
+    fs.writeFileSync(process.argv[1], renderReportPage({ date: D, today: D, firstDate: "2026-09-08", rows, history: [] }));
+    """
+    r = subprocess.run(["node", "--input-type=module", "-e", gen, out], capture_output=True, text=True, cwd=worker_dir)
+    assert r.returncode == 0, "[report near-empty] could not render the fixture page:\n%s" % r.stderr
+    b = await p.chromium.launch()
+    errs = []
+    try:
+        pg = await b.new_page(viewport={"width": 1440, "height": 900})
+        pg.on("pageerror", lambda e: errs.append("PAGEERROR %s" % e))
+        await pg.route("http://**", lambda r_: asyncio.ensure_future(r_.abort()))
+        await pg.route("https://**", lambda r_: asyncio.ensure_future(r_.abort()))
+        await pg.goto("file://" + out)
+        await pg.wait_for_selector("#tb tr", timeout=10000)
+        rows = await pg.evaluate("""() => [...document.querySelectorAll('#tb tr')].map(tr => ({sym: tr.children[0] ? tr.children[0].textContent : '', verdict: tr.children[1] ? tr.children[1].textContent : ''}))""")
+        by = {r_["sym"][:3]: r_["verdict"] for r_ in rows}
+        print("[report near-empty] verdict cells: %s" % {k: v for k, v in by.items()})
+        t1 = [r_["verdict"] for r_ in rows if r_["sym"].startswith("$T1")]
+        t2 = [r_["verdict"] for r_ in rows if r_["sym"].startswith("$T2")]
+        t3 = [r_["verdict"] for r_ in rows if r_["sym"].startswith("$T3")]
+        t4 = [r_["verdict"] for r_ in rows if r_["sym"].startswith("$T4")]
+        sx = [r_["verdict"] for r_ in rows if r_["sym"].startswith("$SOLX")]
+        assert t1 == ["\u2713 Sell route quotedPool nearly empty"], "[report near-empty] the labelled Base sell shows the pill plus 'Pool nearly empty': %s" % t1
+        assert t2 == ["\u2713 Sell route quoted"], "[report near-empty] a Base sell without the label is untouched (no stray 'Could not be checked'): %s" % t2
+        assert len(t3) == 1 and t3[0].startswith("\u26a0 No sell route") and "nearly empty" not in t3[0], "[report near-empty] a nosell row is untouched: %s" % t3
+        assert len(t4) == 1 and t4[0].startswith("? Could not be checked") and "nearly empty" not in t4[0], "[report near-empty] an unknown row is untouched: %s" % t4
+        assert sx == ["\u2713 Passed buy and sell"], "[report near-empty] a Solana row never shows the label: %s" % sx
+        assert not errs, "[report near-empty] page errors: %s" % errs
+        print("[report near-empty] PASS - 'Pool nearly empty' appears only beside the Sell route quoted pill of a Base sell that carries the measured label; sell without it, nosell, unknown and Solana rows render exactly as before")
+    finally:
+        await b.close()
+
 
 
 async def only(names):

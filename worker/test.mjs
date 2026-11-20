@@ -19409,4 +19409,302 @@ console.log(fails === 0
   console.log("[exit og] server summary uses the client's counting rules (reserve ≥ report minimum, value ≥ $1, ETH always, unknown never zero, lostPct over tokens with both numbers) with constants checked against web/index.html; one Multicall3 quote request (+fee) with an explicit subrequest budget; /og/exit/<address>.png is a valid 1200x630 card from the token-card renderer (generic card, never $0, on any failure; 400 on a bad address); /exit/<address> gets og/twitter tags with the wallet card (?v= and a 10-minute ?r= bucket), the noindex header stays, only preview bots trigger the computation; 10-minute Cache API per address, no KV/ev writes, shared in-flight work");
 }
 
+/* ---- [vd near-empty] برچسبِ «pool: near-empty» روی sell (۲۰ نوامبر ۲۰۲۶) ----
+   تصمیمِ مالک: حکم همان "sell" می‌ماند؛ فقط وقتی ret < 5 و ذخیره‌ی ضدجفتِ استخرِ
+   همان صرافی (V2/SOLIDLY) *اندازه‌گیری* شد و زیرِ ۱۰ دلار بود، pool:"near-empty"
+   کنارش می‌نشیند. هر چیزِ نامشخص → هیچ برچسبی. */
+{
+  const { UPSTREAM_FREE: UFN } = await import("./index.js");
+  const mi = await import("./index.js");
+  const w = (n) => BigInt(n).toString(16).padStart(64, "0");
+  const mkStatic4 = (n) => "0x" + w(n) + w(0) + w(0) + w(0);
+  const arr2 = (a, b) => "0x" + w(0x20) + w(2) + w(a) + w(b);
+  const wAddr = (a) => "0x" + "0".repeat(24) + String(a).replace(/^0x/, "").toLowerCase();
+  const V2ROW = vd.VD_VENUES.find((r) => r.id === "baseswap");
+  const SOLROW = vd.VD_VENUES.find((r) => r.id === "aerodrome");
+  const CLROW = vd.VD_VENUES.find((r) => r.id === "uniswap-v3");
+  const FACT = "0x" + "f".repeat(40), PAIR = "0x" + "a".repeat(40);
+  const lc = (s) => String(s).toLowerCase();
+  const WETH = lc(vd.WETH_ADDR);
+  let N = { reads: [] };
+  const mkFetch = () => async (url, init) => {
+    const u = String(url);
+    if (u.startsWith(UFN)) return new Response(JSON.stringify({ data: { attributes: {
+      name: "Near Empty Test", symbol: "NET", total_reserve_in_usd: "1000", decimals: 18, price_usd: "2000" } } }),
+      { status: 200, headers: { "content-type": "application/json" } });
+    const reqs = JSON.parse(init.body);
+    return json(reqs.map((r) => {
+      if (r.id === 0) return { id: 0, result: mkStatic4(20000000) };   // 0.01 WETH -> 200 USDC => $2000/ETH
+      const to = lc(r.params[0].to), data = r.params[0].data;
+      // خواندن‌های اندازه‌گیری (نه کوت)
+      if (data === vd.SEL_ROUTER_FACTORY && to === lc(V2ROW.to)) { N.reads.push("factory"); return N.readFail ? { id: r.id, error: { code: -32000 } } : { id: r.id, result: wAddr(FACT) }; }
+      if (data.startsWith(vd.SEL_V2_GET_PAIR) && to === lc(FACT)) { N.reads.push("getPair"); return { id: r.id, result: wAddr(PAIR) }; }
+      if (data.startsWith(vd.SEL_SOLIDLY_GET_POOL) && to === lc(SOLROW.factory)) {
+        N.reads.push("getPool");
+        const stableWord = data.slice(10 + 64 * 2, 10 + 64 * 3);
+        return { id: r.id, result: BigInt("0x" + stableWord) === 0n ? wAddr(PAIR) : wAddr("0x" + "0".repeat(40)) };
+      }
+      if (to === lc(PAIR) && data === vd.SEL_GET_RESERVES) {
+        N.reads.push("reserves");
+        return N.reserves ? { id: r.id, result: "0x" + w(N.reserves[0]) + w(N.reserves[1]) + w(0) } : { id: r.id, error: { code: -32000 } };
+      }
+      if (to === lc(PAIR) && data === vd.SEL_TOKEN0) { N.reads.push("token0"); return { id: r.id, result: wAddr(N.token0 === "weth" ? WETH : N.token) }; }
+      // کوت‌ها
+      if (N.venue === "v2" && to === lc(V2ROW.to) && data.startsWith(vd.SEL_V2)) return { id: r.id, result: arr2(1, N.out) };
+      if (N.venue === "solidly" && to === lc(SOLROW.to) && data.startsWith(vd.SEL_SOLIDLY)) {
+        const stable = BigInt("0x" + data.slice(10 + 64 * 5, 10 + 64 * 6)) !== 0n;
+        return { id: r.id, result: stable ? arr2(1, 0) : arr2(1, N.out) };
+      }
+      if (N.venue === "cl" && to === lc(CLROW.to) && data.startsWith(vd.SEL_CL_UINT24) && r.id === 1) return { id: r.id, result: mkStatic4(N.out) };
+      return { id: r.id, result: "0x" };
+    }));
+  };
+  const savedF = globalThis.fetch, savedC = globalThis.caches;
+  let ipN = 0, addrN = 0;
+  async function scenario(cfg) {
+    addrN++;
+    const addr = "0x" + addrN.toString(16).padStart(2, "0").repeat(20);
+    N = { reads: [], token: addr, ...cfg };
+    globalThis.fetch = mkFetch();
+    const res = await call("/vd/" + addr, { headers: { "cf-connecting-ip": "203.0.113." + (100 + (++ipN)) } });
+    const body = await res.json();
+    return { body, reads: N.reads.slice(), addr };
+  }
+  const WEI = 10n ** 18n;
+  // ret = out(WETH)*2000/100 %  ->  5e13 wei = $0.1 = 0.1%
+  const OUT_TINY = 5n * 10n ** 13n;
+  try {
+    // 1) V2، ذخیره‌ی WETH غبار (token0 = WETH) + ret 0.1 -> sell + near-empty، ret دست‌نخورده
+    const a = await scenario({ venue: "v2", out: OUT_TINY, reserves: [2n * 10n ** 12n, 5n * WEI], token0: "weth" });
+    ok(a.body.v === "sell" && a.body.ret === 0.1 && a.body.pool === "near-empty",
+       "[vd near-empty] dust WETH reserve + ret 0.1 must stay sell and carry pool near-empty, got " + JSON.stringify(a.body));
+    ok(a.reads.join() === "factory,getPair,reserves,token0", "[vd near-empty] V2 needs exactly factory, getPair, reserves+token0 (3 requests), got " + a.reads.join());
+    // 1b) سمتِ دیگر: token0 = خودِ توکن -> WETH در reserve1
+    const a2 = await scenario({ venue: "v2", out: OUT_TINY, reserves: [5n * WEI, 2n * 10n ** 12n], token0: "token" });
+    ok(a2.body.v === "sell" && a2.body.pool === "near-empty", "[vd near-empty] the WETH side is picked by token0(), not by position, got " + JSON.stringify(a2.body));
+    const a3 = await scenario({ venue: "v2", out: OUT_TINY, reserves: [2n * 10n ** 12n, 5n * WEI], token0: "token" });
+    ok(a3.body.v === "sell" && a3.body.pool === undefined, "[vd near-empty] a dust amount on the TOKEN side says nothing about WETH, got " + JSON.stringify(a3.body));
+    // 2) ذخیره‌ی سالم -> بدون فیلد pool
+    const b = await scenario({ venue: "v2", out: OUT_TINY, reserves: [10n * WEI, 10n * WEI], token0: "weth" });
+    ok(b.body.v === "sell" && b.body.ret === 0.1 && !("pool" in b.body), "[vd near-empty] a healthy reserve must add no pool field, got " + JSON.stringify(b.body));
+    ok(b.reads.length === 4, "[vd near-empty] the healthy case still measured (4 reads), got " + b.reads.join());
+    // 2b) مرز: دقیقاً ۱۰ دلار (0.005 WETH) برچسب نمی‌گیرد؛ کمی کمتر می‌گیرد
+    const e10 = await scenario({ venue: "v2", out: OUT_TINY, reserves: [5n * 10n ** 15n, 5n * WEI], token0: "weth" });
+    ok(e10.body.v === "sell" && !("pool" in e10.body), "[vd near-empty] exactly $10 is not near-empty, got " + JSON.stringify(e10.body));
+    const e9 = await scenario({ venue: "v2", out: OUT_TINY, reserves: [4990n * 10n ** 12n, 5n * WEI], token0: "weth" });
+    ok(e9.body.v === "sell" && e9.body.pool === "near-empty", "[vd near-empty] $9.98 is near-empty, got " + JSON.stringify(e9.body));
+    // 3) ret 50 -> هیچ خواندنی اصلاً
+    const c = await scenario({ venue: "v2", out: 25n * 10n ** 15n, reserves: [2n * 10n ** 12n, 5n * WEI], token0: "weth" });
+    ok(c.body.v === "sell" && c.body.ret === 50 && !("pool" in c.body), "[vd near-empty] ret 50 must carry no pool field, got " + JSON.stringify(c.body));
+    ok(c.reads.length === 0, "[vd near-empty] ret 50 must not read the pool at all, got " + c.reads.join());
+    // ret دقیقاً 5 هم زیرِ آستانه نیست
+    const c5 = await scenario({ venue: "v2", out: 25n * 10n ** 14n, reserves: [2n * 10n ** 12n, 5n * WEI], token0: "weth" });
+    ok(c5.body.ret === 5 && !("pool" in c5.body) && c5.reads.length === 0, "[vd near-empty] ret exactly 5 is not below 5: no read, no field, got " + JSON.stringify(c5.body) + " reads=" + c5.reads.join());
+    // 4) ذخایر ناخوانا -> بدون فیلد؛ و فروش همان sell
+    const d = await scenario({ venue: "v2", out: OUT_TINY, reserves: null, token0: "weth" });
+    ok(d.body.v === "sell" && !("pool" in d.body), "[vd near-empty] unreadable reserves must add nothing, got " + JSON.stringify(d.body));
+    const d2 = await scenario({ venue: "v2", out: OUT_TINY, reserves: [2n * 10n ** 12n, 5n * WEI], token0: "weth", readFail: true });
+    ok(d2.body.v === "sell" && !("pool" in d2.body), "[vd near-empty] an unreadable router factory() must add nothing, got " + JSON.stringify(d2.body));
+    // 5) CL -> بدون فیلد و بدون خواندن
+    const f = await scenario({ venue: "cl", out: OUT_TINY, reserves: [2n * 10n ** 12n, 5n * WEI], token0: "weth" });
+    ok(f.body.v === "sell" && f.body.ret === 0.1 && !("pool" in f.body) && f.reads.length === 0,
+       "[vd near-empty] a CL venue is skipped (no read, no field), got " + JSON.stringify(f.body) + " reads=" + f.reads.join());
+    // 6) SOLIDLY (aerodrome، stable=false): دو ساب‌ریکوئست
+    const g = await scenario({ venue: "solidly", out: OUT_TINY, reserves: [2n * 10n ** 12n, 5n * WEI], token0: "weth" });
+    ok(g.body.v === "sell" && g.body.pool === "near-empty" && g.reads.join() === "getPool,reserves,token0",
+       "[vd near-empty] SOLIDLY resolves the pool with getPool(stable flag of the winning quote) then reads reserves, got " + JSON.stringify(g.body) + " reads=" + g.reads.join());
+    // 7) بودجه‌ی گذر تمام: هیچ خواندن، هیچ فیلد
+    addrN++;
+    const addrB = "0x" + addrN.toString(16).padStart(2, "0").repeat(20);
+    N = { reads: [], token: addrB, venue: "v2", out: OUT_TINY, reserves: [2n * 10n ** 12n, 5n * WEI], token0: "weth" };
+    globalThis.fetch = mkFetch();
+    const metaN = { decimals: 18, priceUsd: 2000, symbol: "NET", name: "Near Empty Test" };
+    const bud = await mi.ogFetchVerdictDetail(addrB, metaN, Date.now() + 2000, env, {}, undefined, { used: () => 49, capHit: () => false });
+    ok(bud.v === "sell" && bud.pool === undefined && N.reads.length === 0, "[vd near-empty] an exhausted pass budget must skip the read: v=" + bud.v + " pool=" + bud.pool + " reads=" + N.reads.join());
+    addrN++;
+    const addrB2 = "0x" + addrN.toString(16).padStart(2, "0").repeat(20);
+    N = { reads: [], token: addrB2, venue: "v2", out: OUT_TINY, reserves: [2n * 10n ** 12n, 5n * WEI], token0: "weth" };
+    const bud2 = await mi.ogFetchVerdictDetail(addrB2, metaN, Date.now() + 2000, env, {}, undefined, { used: () => 20, capHit: () => false });
+    ok(bud2.v === "sell" && bud2.pool === "near-empty" && N.reads.length === 4, "[vd near-empty] with budget room the same call labels: " + JSON.stringify(bud2) + " reads=" + N.reads.join());
+    addrN++;
+    const addrB3 = "0x" + addrN.toString(16).padStart(2, "0").repeat(20);
+    N = { reads: [], token: addrB3, venue: "v2", out: OUT_TINY, reserves: [2n * 10n ** 12n, 5n * WEI], token0: "weth" };
+    const bud3 = await mi.ogFetchVerdictDetail(addrB3, metaN, Date.now() + 500, env, {}, undefined, undefined);
+    ok(bud3.v === "sell" && bud3.pool === undefined && N.reads.length === 0, "[vd near-empty] too little time left skips the read: " + JSON.stringify(bud3) + " reads=" + N.reads.join());
+
+    // 8) واحد: قیمتِ اتر نبود / مرحله‌ی USDC / ret نامعتبر / صرافیِ ناشناخته
+    const calls0 = [];
+    const spy = async (url, init) => { calls0.push(1); return json([]); };
+    const T = "0x" + "9".repeat(40);
+    ok(await vd.measureNearEmpty(T, { id: "baseswap", key: null, stage: "weth", rpc: "https://r.example", ethUsd: null }, 0.1, { fetchImpl: spy }) === null && calls0.length === 0,
+       "[vd near-empty] no ETH price -> null without a single read");
+    ok(await vd.measureNearEmpty(T, { id: "uniswap-v4", key: "x", stage: "weth", rpc: "https://r.example", ethUsd: 2000 }, 0.1, { fetchImpl: spy }) === null && calls0.length === 0,
+       "[vd near-empty] a v4 row is skipped");
+    ok(await vd.measureNearEmpty(T, { id: "baseswap", key: null, stage: "weth", rpc: "https://r.example", ethUsd: 2000 }, undefined, { fetchImpl: spy }) === null && calls0.length === 0,
+       "[vd near-empty] no ret -> no read");
+    for (const badRet of [5, 50, 0, -1, NaN, "0.1"]) {
+      ok(await vd.measureNearEmpty(T, { id: "baseswap", key: null, stage: "weth", rpc: "https://r.example", ethUsd: 2000 }, badRet, { fetchImpl: spy }) === null && calls0.length === 0,
+         "[vd near-empty] ret " + String(badRet) + " is not in (0, 5): no read, no label (the measurer guards on its own, not only its caller)");
+    }
+    // USDC: 5 USDC -> near-empty، 50 USDC -> هیچ
+    for (const [usdcUnits, want] of [[5000000n, "near-empty"], [50000000n, null]]) {
+      N = { reads: [], token: T, reserves: [usdcUnits, 10n * WEI], token0: "usdc" };
+      const fx = mkFetch();
+      const fixed = async (u, i) => {
+        const reqs = JSON.parse(i.body);
+        return json(reqs.map((r) => {
+          const to = lc(r.params[0].to), data = r.params[0].data;
+          if (data === vd.SEL_ROUTER_FACTORY) return { id: r.id, result: wAddr(FACT) };
+          if (data.startsWith(vd.SEL_V2_GET_PAIR)) return { id: r.id, result: wAddr(PAIR) };
+          if (data === vd.SEL_GET_RESERVES) return { id: r.id, result: "0x" + w(N.reserves[0]) + w(N.reserves[1]) + w(0) };
+          if (data === vd.SEL_TOKEN0) return { id: r.id, result: wAddr(vd.USDC_ADDR) };
+          return { id: r.id, error: { code: -32000 } };
+        }));
+      };
+      const got = await vd.measureNearEmpty(T, { id: "baseswap", key: null, stage: "usdc", rpc: "https://r.example", ethUsd: null }, 1, { fetchImpl: fixed });
+      ok(got === want, "[vd near-empty] USDC side valued at $1 per unit: " + usdcUnits + " -> " + want + ", got " + got);
+    }
+
+    // 9) ردیفِ گزارش، متن و صفحه
+    const rr = (o) => reportRow({ chain: "base", address: "0x" + "1".repeat(40), symbol: "X", name: "x", verdict: "sell", checkedAt: "2026-11-20T10:00:00.000Z",
+      poolCreatedAt: null, priceUsd: 1, reserveUsd: 5000, vol24hUsd: 1, fdvUsd: 1, dex: "baseswap", why: null, ret: 0.1, pool: "near-empty", ...o });
+    ok(rr({}).pool === "near-empty", "[vd near-empty] a measured sell row keeps pool");
+    ok(rr({ ret: 50 }).pool === undefined && !("pool" in rr({ ret: 50 })), "[vd near-empty] ret >= 5 never stores the label");
+    ok(!("pool" in rr({ verdict: "nosell", cause: "empty-pool", ret: undefined })), "[vd near-empty] a nosell row never stores the label");
+    ok(!("pool" in rr({ verdict: null, why: "rpc-down", ret: undefined })), "[vd near-empty] an unknown row never stores the label");
+    ok(!("pool" in rr({ chain: "solana", address: "So11111111111111111111111111111111111111112" })), "[vd near-empty] Solana rows never carry the label");
+    ok(!("pool" in rr({ pool: "near-empty-x" })) && !("pool" in rr({ pool: "empty" })), "[vd near-empty] the vocabulary is closed (only near-empty)");
+    const docNE = { date: "2026-11-20", generatedAt: "2026-11-20T11:00:00.000Z", chains: ["base"], checked: 2, rows: [rr({}), rr({ address: "0x" + "2".repeat(40), pool: undefined, ret: 90 })] };
+    const txtNE = reportText(docNE);
+    ok(typeof txtNE === "string" && txtNE.includes("1 of the quoted tokens had a nearly empty pool"), "[vd near-empty] the text report counts the labelled sells: " + String(txtNE).slice(0, 400));
+    const docNo = { ...docNE, rows: [docNE.rows[1]] };
+    ok(!String(reportText(docNo)).includes("nearly empty"), "[vd near-empty] no labelled row -> the text report is unchanged");
+    const rp = await import("./report_page.js");
+    const html = String(rp.renderReportPage({ date: "2026-11-20", today: "2026-11-20", firstDate: "2026-10-01", rows: docNE.rows, history: [] }));
+    ok(html.includes('"pool":"near-empty"') && (html.match(/"pool":"near-empty"/g) || []).length === 1,
+       "[vd near-empty] the report page island carries pool for exactly the labelled row");
+    ok(html.includes("Pool nearly empty"), "[vd near-empty] the report page script renders the Pool nearly empty text");
+    console.log("[vd near-empty] V2/SOLIDLY dust reserve with ret<5 -> sell + pool near-empty (WETH side picked by token0, $10 boundary exact, USDC at $1); healthy reserve, ret>=5, unreadable reserves/factory, CL/v4 venue, missing ETH price, exhausted budget or short deadline -> no field and no (or no more) reads; report rows/text/page carry the closed label only on Base sells with ret<5");
+  } finally {
+    globalThis.fetch = savedF; globalThis.caches = savedC;
+  }
+}
+
+/* ---- [sol sim diag] تشخیصِ ساختاریِ شکستِ شبیه‌سازیِ سولانا (۲۰ نوامبر ۲۰۲۶) ----
+   InstructionError = [اندیس، جزئیات] -> sim:{ix, code, prog}. واژه‌نامه‌ی بسته: "custom:<n>"،
+   عضوِ VD_SOL_SIM_CODES، یا "other". فقط از طریق opts.simOut و مسیرِ ?probe=1 با x-run-key. */
+{
+  const vs = await import("./verdict_sol.js");
+  const fakePubkey = (n) => { const b = new Uint8Array(32); for (let i = 0; i < 32; i++) b[i] = (n * 41 + i * 7 + 3) % 256; return vs.base58Encode(b); };
+  const rawIx = (programId, dataBytes) => ({ programId,
+    accounts: [{ pubkey: vs.VD_SOL_PAYER, isSigner: true, isWritable: true }], data: vs.bytesToBase64(Uint8Array.from(dataBytes)) });
+  const P_CB = fakePubkey(21), P_SETUP = fakePubkey(22), P_SWAP = fakePubkey(23);
+  const legBuy = { computeBudgetInstructions: [rawIx(P_CB, [1])], setupInstructions: [rawIx(P_SETUP, [1])],
+    swapInstruction: rawIx(P_SWAP, [1, 2]), cleanupInstruction: null, addressLookupTableAddresses: [] };
+  const legSell = { computeBudgetInstructions: [], setupInstructions: [],
+    swapInstruction: rawIx(P_SWAP, [3, 4]), cleanupInstruction: null, addressLookupTableAddresses: [] };
+  // ترتیبِ رفت‌وبرگشت: [0]=P_CB [1]=P_SETUP [2]=P_SWAP(buy) [3]=P_SWAP(sell)؛ کنترل: [0]=P_SWAP
+  const jr = (b, s = 200) => new Response(JSON.stringify(b), { status: s, headers: { "content-type": "application/json" } });
+  const rpcOk = (r) => jr({ jsonrpc: "2.0", id: 1, result: r });
+  const mkFetch = (primaryErr, controlErr) => {
+    let sims = 0;
+    return async (url, init) => {
+      const u = String(url);
+      if (u.includes("/swap/v1/quote")) return jr({ outAmount: u.includes("onlyDirectRoutes=true") ? "1000000" : "40000000", routePlan: [{}] });
+      if (u.includes("/swap/v1/swap-instructions")) return jr(JSON.parse(init.body).quoteResponse.outAmount === "1000000" ? legBuy : legSell);
+      const b = JSON.parse(init.body);
+      if (b.method === "getBalance") return rpcOk({ value: 2_000_000_000 });
+      if (b.method === "simulateTransaction") { sims++; return rpcOk({ value: { err: sims === 1 ? primaryErr : controlErr } }); }
+      return jr({ error: "unexpected" }, 500);
+    };
+  };
+  const MINT = fakePubkey(77);
+  const run = async (primaryErr, controlErr, withOut) => {
+    const simOut = withOut ? {} : undefined;
+    const res = await vs.fetchVerdictSol(MINT, { rpcs: ["https://rpc.example"], jupBase: vs.VD_SOL_JUP_BASE, payer: vs.VD_SOL_PAYER,
+      fetchImpl: mkFetch(primaryErr, controlErr), simOut });
+    return { res, simOut };
+  };
+
+  // 1) Custom -> custom:6001 + برنامه‌ی همان اندیس
+  const c1 = await run({ InstructionError: [2, { Custom: 6001 }] }, null, true);
+  ok(c1.res.v === "nosell" && c1.simOut.sim && c1.simOut.sim.ix === 2 && c1.simOut.sim.code === "custom:6001" && c1.simOut.sim.prog === P_SWAP,
+     "[sol sim diag] Custom error -> custom:6001 with the program id of instruction 2, got " + JSON.stringify(c1));
+  // 2) رشته‌ی عضوِ فهرست
+  const c2 = await run({ InstructionError: [1, "InvalidAccountData"] }, null, true);
+  ok(c2.res.v === "nosell" && c2.simOut.sim.ix === 1 && c2.simOut.sim.code === "InvalidAccountData" && c2.simOut.sim.prog === P_SETUP,
+     "[sol sim diag] a whitelisted string variant is kept as is, got " + JSON.stringify(c2.simOut));
+  // 3) شکل‌های ناشناخته -> other (هرگز متنِ آزاد)
+  for (const [err, want] of [
+    [{ InstructionError: [1, "SomethingNew"] }, { ix: 1, code: "other", prog: P_SETUP }],
+    [{ InstructionError: [1, { BorshIoError: "free text must never be read" }] }, { ix: 1, code: "other", prog: P_SETUP }],
+    [{ InstructionError: [1, { Custom: -1 }] }, { ix: 1, code: "other", prog: P_SETUP }],
+    [{ InstructionError: [1, { Custom: 1.5 }] }, { ix: 1, code: "other", prog: P_SETUP }],
+    [{ InstructionError: [1, { Custom: 4294967296 }] }, { ix: 1, code: "other", prog: P_SETUP }],
+    [{ InstructionError: [1, { Custom: 5, Extra: 1 }] }, { ix: 1, code: "other", prog: P_SETUP }],
+    [{ InstructionError: [1, ["InvalidAccountData"]] }, { ix: 1, code: "other", prog: P_SETUP }],
+    [{ InstructionError: [99, { Custom: 5 }] }, { ix: 99, code: "custom:5", prog: null }],
+    [{ InstructionError: ["x", "InvalidArgument"] }, { ix: null, code: "InvalidArgument", prog: null }],
+    [{ InstructionError: "oops" }, { ix: null, code: "other", prog: null }],
+  ]) {
+    const x = await run(err, null, true);
+    ok(x.res.v === "nosell" && JSON.stringify(x.simOut.sim) === JSON.stringify(want),
+       "[sol sim diag] unknown shape " + JSON.stringify(err) + " -> " + JSON.stringify(want) + ", got " + JSON.stringify(x.simOut) + " v=" + x.res.v);
+  }
+  // 4) کنترلِ ناموفق: sell، با simControl؛ sim برای رفت‌وبرگشتِ موفق نیست
+  const c4 = await run(null, { InstructionError: [0, { Custom: 6002 }] }, true);
+  ok(c4.res.v === "sell" && c4.simOut.sim === undefined && c4.simOut.simControl &&
+     c4.simOut.simControl.ix === 0 && c4.simOut.simControl.code === "custom:6002" && c4.simOut.simControl.prog === P_SWAP,
+     "[sol sim diag] a failing control is recorded as simControl (program of the control message's instruction 0), got " + JSON.stringify(c4));
+  // 5) verdict بدونِ simOut بایت‌به‌بایت همان است
+  for (const [pe, ce] of [[{ InstructionError: [2, { Custom: 6001 }] }, null], [null, { InstructionError: [0, { Custom: 6002 }] }]]) {
+    const withO = await run(pe, ce, true), without = await run(pe, ce, false);
+    ok(JSON.stringify(withO.res) === JSON.stringify(without.res), "[sol sim diag] simOut never changes the returned object: " + JSON.stringify(withO.res) + " vs " + JSON.stringify(without.res));
+  }
+  ok(!("sim" in (await run({ InstructionError: [2, { Custom: 6001 }] }, null, false)).res), "[sol sim diag] the returned object itself never carries sim");
+  // 6) لیست بسته
+  ok(Object.isFrozen(vs.VD_SOL_SIM_CODES) && ["InvalidAccountData", "AccountNotFound", "InsufficientFunds", "InvalidArgument",
+     "IncorrectProgramId", "AccountAlreadyInitialized", "UninitializedAccount", "InvalidInstructionData"].every((c) => vs.VD_SOL_SIM_CODES.includes(c)),
+     "[sol sim diag] the closed list is frozen and has the required codes");
+
+  // 7) سرتاسری: /vd/<mint> عمومی هرگز sim ندارد؛ ?probe=1 فقط با x-run-key
+  const savedF = globalThis.fetch;
+  try {
+    const KEY = "k-" + "x".repeat(12);
+    const envD = { ASSETS, RUN_KEY: KEY };
+    globalThis.fetch = mkFetch({ InstructionError: [2, { Custom: 6001 }] }, null);
+    const pub = await rawWorker.fetch(new Request(ORIGIN + "/vd/" + MINT, { headers: { "cf-connecting-ip": "203.0.113.201" } }), envD, {});
+    const pubRaw = await pub.text();
+    ok(pub.status === 200 && !pubRaw.includes("sim") && !pubRaw.includes("6001") && JSON.parse(pubRaw).v === null,
+       "[sol sim diag] the public /vd/<mint> never contains sim (published null for a failed sim), got " + pubRaw);
+    // ?probe=1 بدونِ هدر / با هدرِ غلط -> ۴۰۴ و بدونِ نشتِ sim
+    for (const hdr of [{}, { "x-run-key": "wrong" }]) {
+      globalThis.fetch = mkFetch({ InstructionError: [2, { Custom: 6001 }] }, null);
+      const bad = await rawWorker.fetch(new Request(ORIGIN + "/vd/" + MINT + "?probe=1", { headers: { "cf-connecting-ip": "203.0.113.202", ...hdr } }), envD, {});
+      const badRaw = await bad.text();
+      ok(bad.status === 404 && !badRaw.includes("sim"), "[sol sim diag] ?probe=1 without the right x-run-key is 404 and shows no sim, got " + bad.status + " " + badRaw);
+    }
+    // با کلیدِ درست: sim + حکمِ خام (nosell) + کش نوشته نمی‌شود
+    globalThis.fetch = mkFetch({ InstructionError: [2, { Custom: 6001 }] }, null);
+    const good = await rawWorker.fetch(new Request(ORIGIN + "/vd/" + MINT + "?probe=1", { headers: { "cf-connecting-ip": "203.0.113.203", "x-run-key": KEY } }), envD, {});
+    const gb = await good.json();
+    ok(good.status === 200 && gb.v === "nosell" && gb.sim && gb.sim.ix === 2 && gb.sim.code === "custom:6001" && gb.sim.prog === P_SWAP && gb.simControl === undefined,
+       "[sol sim diag] ?probe=1 with x-run-key answers the raw verdict plus sim, got " + JSON.stringify(gb));
+    // کنترلِ ناموفق هم همان‌جا
+    globalThis.fetch = mkFetch(null, { InstructionError: [0, "InvalidArgument"] });
+    const good2 = await rawWorker.fetch(new Request(ORIGIN + "/vd/" + MINT + "?probe=1", { headers: { "cf-connecting-ip": "203.0.113.204", "x-run-key": KEY } }), envD, {});
+    const gb2 = await good2.json();
+    ok(gb2.v === "sell" && gb2.sim === undefined && gb2.simControl && gb2.simControl.code === "InvalidArgument" && gb2.simControl.prog === P_SWAP,
+       "[sol sim diag] ?probe=1 also shows simControl when the control fails, got " + JSON.stringify(gb2));
+    // و /vd عمومیِ همان mint بعد از آن همچنان بدونِ sim
+    globalThis.fetch = mkFetch(null, { InstructionError: [0, "InvalidArgument"] });
+    const pub2 = await rawWorker.fetch(new Request(ORIGIN + "/vd/" + MINT, { headers: { "cf-connecting-ip": "203.0.113.205" } }), envD, {});
+    const pub2Raw = await pub2.text();
+    ok(!pub2Raw.includes("sim") && !pub2Raw.includes("InvalidArgument"), "[sol sim diag] the public sell body has no sim/simControl, got " + pub2Raw);
+  } finally {
+    globalThis.fetch = savedF;
+  }
+  console.log("[sol sim diag] InstructionError [ix, detail] -> sim {ix, code, prog}: Custom -> custom:<n> (u32 only), whitelisted string variants kept, everything else (unknown string, other object, bad number, array, malformed) -> other, prog = program id of that instruction in the composed message or null; control failure -> simControl; the returned verdict object is byte-identical with and without the observer; public /vd never shows sim; ?probe=1 shows it only with the x-run-key header");
+}
+
 process.exit(fails === 0 ? 0 : 1);

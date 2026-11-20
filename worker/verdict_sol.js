@@ -775,6 +775,48 @@ function jupQuoteFailWhy(res, side) {
 }
 
 /* ---------------------------------------------------------------------
+   simDiagFrom — تشخیصِ ساختاریِ شکستِ شبیه‌سازی (۲۰ نوامبر ۲۰۲۶)
+   =========================================================================
+   رفت‌وبرگشتِ سولانا با هر InstructionError به {v:"nosell"} می‌رسد (و بیرون
+   null منتشر می‌شود)، ولی «کدام دستورالعمل، با چه کدی» هیچ‌جا ثبت نمی‌شد.
+   این تابع فقط از رویِ *شکلِ* err می‌خواند: InstructionError = [اندیس، جزئیات]
+   - جزئیات {Custom:n} → "custom:<n>" (n صحیحِ ۳۲بیتی بی‌علامت)
+   - جزئیاتِ رشته‌ای که عضوِ فهرستِ بسته‌ی VD_SOL_SIM_CODES است → همان رشته
+   - هر چیزِ دیگر → "other"
+   prog = programId دستورالعملِ همان اندیس در پیامِ ترکیب‌شده، یا null.
+   🔴 هرگز لاگ یا متنِ پیام را نمی‌خواند؛ هرگز پرتاب نمی‌کند؛ فقط از طریق
+   opts.simOut (مشاهده‌گر) بیرون می‌رود و روی verdict اثری ندارد. */
+export const VD_SOL_SIM_CODES = Object.freeze([
+  "InvalidAccountData", "AccountNotFound", "InsufficientFunds", "InvalidArgument",
+  "IncorrectProgramId", "AccountAlreadyInitialized", "UninitializedAccount", "InvalidInstructionData",
+  "MissingRequiredSignature", "AccountDataTooSmall", "ComputationalBudgetExceeded",
+  "ProgramFailedToComplete", "ArithmeticOverflow", "InvalidAccountOwner", "IncorrectAuthority",
+  "NotEnoughAccountKeys",
+]);
+const SIM_PROG_RE = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
+export function simDiagFrom(err, instructions) {
+  try {
+    const ie = err && typeof err === "object" ? err.InstructionError : undefined;
+    if (!Array.isArray(ie) || ie.length !== 2) return { ix: null, code: "other", prog: null };
+    const [i, detail] = ie;
+    const ix = Number.isInteger(i) && i >= 0 && i <= 255 ? i : null;
+    let code = "other";
+    if (typeof detail === "string") {
+      if (VD_SOL_SIM_CODES.includes(detail)) code = detail;
+    } else if (detail && typeof detail === "object" && !Array.isArray(detail)) {
+      const keys = Object.keys(detail);
+      if (keys.length === 1 && keys[0] === "Custom" && Number.isInteger(detail.Custom) &&
+          detail.Custom >= 0 && detail.Custom <= 0xFFFFFFFF) code = "custom:" + detail.Custom;
+    }
+    const ins = ix != null && Array.isArray(instructions) ? instructions[ix] : null;
+    const p = ins && typeof ins.programId === "string" ? ins.programId : null;
+    return { ix, code, prog: p && SIM_PROG_RE.test(p) ? p : null };
+  } catch (e) {
+    return { ix: null, code: "other", prog: null };
+  }
+}
+
+/* ---------------------------------------------------------------------
    fetchVerdictSol — ارکستراسیون؛ هشت گام. گام‌های ۱ تا ۷ دقیقاً همان
    ترتیبِ اسپایک‌اند (رفت‌وبرگشت را شبیه‌سازی کن)؛ گامِ ۸ چیزی است که اسپایک
    نداشت — یک شبیه‌سازیِ کنترلِ منفی به‌جایِ lookupِ getTokenAccountsByOwner،
@@ -797,6 +839,10 @@ export async function fetchVerdictSol(mint, opts) {
     // نمی‌کند — رفتارِ امروز، بدونِ کم‌وکاست.
     const jupKey = (typeof o.jupKey === "string" && o.jupKey) || "";
     const timeoutMs = o.timeoutMs || 900;
+    // opts.simOut فقط وقتی شیء است فعال می‌شود — مشاهده‌گرِ محض (همان الگوی
+    // whyOut/retOut در verdict.js): نبودنش رفتار و خروجی را بایت‌به‌بایت همان
+    // می‌گذارد، و پر کردنش هرگز verdict را عوض نمی‌کند.
+    const simOut = o.simOut && typeof o.simOut === "object" ? o.simOut : null;
     const payer = o.payer || VD_SOL_PAYER;
     const zxAlt = typeof o.zxAlt === "string" ? o.zxAlt : VD_SOL_ALT;
 
@@ -941,8 +987,10 @@ export async function fetchVerdictSol(mint, opts) {
     // ⚠️ هرگز از رویِ متنِ آزادِ خطا تصمیم نمی‌گیریم — فقط از رویِ شکل: یک
     // InstructionError یعنی زنجیره واقعاً اجرا کرد و ردش کرد؛ هر شکلِ دیگر
     // (خطای سطحِ RPC، شکلِ ناشناخته) یعنی نامعلوم، نه غیرقابل‌فروش.
-    if (err && typeof err === "object" && Object.prototype.hasOwnProperty.call(err, "InstructionError"))
+    if (err && typeof err === "object" && Object.prototype.hasOwnProperty.call(err, "InstructionError")) {
+      if (simOut) simOut.sim = simDiagFrom(err, composed.instructions);
       return { v: "nosell" };
+    }
     if (err !== null) return unknown("internal"); // شکلِ err ناشناخته — نه موفقیت، نه InstructionError
 
     // ۸. 🔴 کنترلِ منفی — رفت‌وبرگشت موفق شد، ولی این هنوز اثبات نمی‌کند که
@@ -1010,8 +1058,10 @@ export async function fetchVerdictSol(mint, opts) {
       return { v: "sell", basis: "quote", ret };
     }
     if (controlErr && typeof controlErr === "object" &&
-        Object.prototype.hasOwnProperty.call(controlErr, "InstructionError"))
+        Object.prototype.hasOwnProperty.call(controlErr, "InstructionError")) {
+      if (simOut) simOut.simControl = simDiagFrom(controlErr, controlComposed.instructions);
       return { v: "sell" }; // فقط اینجا — بعدِ شکستِ واقعیِ کنترل
+    }
     return unknown("internal"); // شکلِ controlErr ناشناخته — نه موفقیت، نه InstructionError
   } catch {
     return { v: null, why: "internal" }; // این تابع هرگز نباید پرتاب کند

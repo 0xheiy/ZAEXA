@@ -250,6 +250,7 @@ function islandRow(r) {
   };
   if (typeof r.cause === "string") o.cause = r.cause;
   if (typeof r.ret === "number" && Number.isFinite(r.ret)) o.ret = r.ret;
+  if (r.chain === "base" && r.v === "sell" && r.pool === "near-empty") o.pool = r.pool;   // برچسبِ بسته؛ هر مقدارِ دیگر نادیده
   if (hasFollow(r)) { o.follow = r.follow; if (typeof r.followAt === "string") o.followAt = r.followAt; }
   // why همیشه جمله است، نه کد.
   if (o.v === null) o.why = plainWhy(r.chain, r.why);
@@ -467,6 +468,8 @@ const CLIENT_JS = String.raw`
         var cw=r.cause==='empty-pool'?' · pool is empty':r.cause==='sell-reverts'?' · the sell reverts':r.cause==='one-way-pool'?' · one-way pool':'';
         td.appendChild(pill('no','⚠ No sell route'+cw));
       } else { td.appendChild(pill('na','? Could not be checked')); td.appendChild(el('span','why muted',r.why||'The check did not finish.')); }
+      // ۲۰ نوامبر: برچسبِ اندازه‌گیری‌شده کنارِ حکمِ sell — بعد از کلِ زنجیره‌ی if/else تا شاخه‌ی else دیگر به آن نچسبد
+      if(r.v==='sell'&&base&&r.pool==='near-empty') td.appendChild(el('span','why muted','Pool nearly empty'));
       tr.appendChild(td);
       td=el('td','num');
       if(typeof r.ret==='number'&&r.ret>100){ td.appendChild(document.createTextNode('—')); td.appendChild(el('span','retnote','price feed and pool disagreed')); }

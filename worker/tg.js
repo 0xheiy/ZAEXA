@@ -166,12 +166,14 @@ const goodRet = (ret) => typeof ret === "number" && Number.isFinite(ret) && ret 
 // body و outcome را با هم می‌دهد؛ outcome فقط برای شمارنده است
 function classify(chain, r) {
   r = r && typeof r === "object" ? r : {};
-  const { v, cause, ret, basis } = r;
+  const { v, cause, ret, basis, pool } = r;
   let why = r.why;
   if (v === "sell" && chain === "base") {
+    // ۲۰ نوامبر: برچسبِ اندازه‌گیری‌شده‌ی سرور (واژه‌نامه‌ی بسته: فقط "near-empty") — حکم همان sell می‌ماند
+    const ne = pool === "near-empty" ? " · pool nearly empty" : "";
     return { outcome: "sell", body: goodRet(ret)
-      ? "✓ Sell route quoted. A $100 sell quote returned " + Math.round(ret) + "%."
-      : "✓ Sell route quoted." };
+      ? "✓ Sell route quoted" + ne + ". A $100 sell quote returned " + Math.round(ret) + "%."
+      : "✓ Sell route quoted" + ne + "." };
   }
   if (v === "sell" && chain === "solana") {
     if (basis !== "quote") return { outcome: "sell", body: "✓ Passed a simulated buy and sell." };
