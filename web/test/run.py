@@ -8677,10 +8677,12 @@ class FbEnv:
         self.pnl_gate.set(); self.pnl_hold.set()
         self.pnl_inflight = self.pnl_max = 0
 
-    async def open(self, hash_="#flow", vw=1280, vh=900, scheme="dark", board=True, init=None, path="/app"):
+    async def open(self, hash_="#flow", vw=1280, vh=900, scheme="dark", board=True, init=None, path="/app", hook=None):
         ctx = await self.b.new_context(viewport={"width": vw, "height": vh}, color_scheme=scheme)
         pg = await ctx.new_page()
         pg._zx_board = board
+        if hook:
+            hook(pg)   # Robinhood: ثبتِ همه‌ی درخواست‌ها (حتی ابورت‌شده‌ها) پیش از اولین ناوبری
         pg.on("pageerror", lambda e: self.errs.append("PAGEERROR %s" % e))
         pg.on("console", lambda m: self.errs.append("CONSOLE %s" % m.text) if m.type == "error" and
               "Failed to load resource" not in m.text else None)
@@ -10433,6 +10435,12 @@ async def main():
         await check_flow_board_mobile(p, errors)
         await check_flow_board_width(p, errors)
         await check_flow_board_parity(p, errors)
+        await check_rh_picker(p, errors)
+        await check_rh_flow(p, errors)
+        await check_rh_token_page(p, errors)
+        await check_rh_no_base_calls(p, errors)
+        await check_rh_notice(p, errors)
+        await check_rh_screens(p, errors)
         await check_flow_established(p, errors)
         await check_flow_header_stable(p, errors)
         await check_exit_header_icons(p, errors)
@@ -18042,7 +18050,7 @@ async def main():
             "#srcPop [data-chain]", "els => els.map(e => e.textContent.trim())")
         await a1.close()
         print("[chain switch] selector options=%s" % cs_opts)
-        assert cs_opts == ["Base", "Solana"], "the network selector must list exactly Base then Solana: %s" % cs_opts
+        assert cs_opts == ["Base", "Solana", "Robinhood Chain"], "the network selector must list exactly Base, Solana, then Robinhood Chain: %s" % cs_opts
 
         # ب) انتخابِ Solana کارتِ Solana را نشان و کارت‌های Base-only را
         # پنهان می‌کند؛ برگشت به Base همه چیز را برمی‌گرداند.
@@ -25063,6 +25071,494 @@ async def check_slip3(p, errors):
         await pg.close()
     finally:
         await b.close()
+
+
+# =====================================================================
+# Robinhood Chain — فاز ۱ (فقط نمایش). فیکسچرها شکلِ پاسخ‌های واقعیِ GeckoTerminal را دارند
+# (همان fb_tok/fb_pool/new_pools مثلِ Base): اعداد *رشته*، شمارِ معاملات *عدد*. هر کاوشگر یک تابعِ جدا
+# است تا با ZX_ONLY=<نام> برای شکستنِ عمدیِ نگهبان‌ها تنها همان اجرا شود.
+# =====================================================================
+RH_CHAIN_JS = "try{localStorage.setItem('zaexa.chain.v1','robinhood')}catch(e){}"
+RH_NOTICE_SWAP_T = "Swaps on Robinhood Chain are coming soon. Prices and market data are live."
+RH_NOTICE_NA_T = "Not available on Robinhood Chain yet"
+
+
+def rh_a(i):
+    return "0x%040x" % (0xC00 + i)
+
+
+def rh_p(i):
+    return "0x%040x" % (0xD00 + i)
+
+
+# sym، چند ثانیه پیش ساخته شد، ذخیره (رشته)، h1، h6
+RH_ROWS = [
+    ("RHA", 20 * 60, "48000.5", (30, 10, 50, 15, "12400"), (90, 40, 200, 100, "98000")),
+    ("RHB", 90 * 60, "9100", (12, 20, 20, 30, "850.2"), (40, 10, 100, 25, "5000")),
+    ("RHC", 3 * 3600, "250000", (8, 8, 9, 9, "0"), (20, 50, 30, 90, "120")),
+    ("LOW", 10 * 60, "4000", (5, 1, 6, 1, "10"), (6, 2, 8, 3, "20")),          # زیرِ کفِ ذخیره → فهرست نمی‌شود
+    ("<img src=x onerror=1>", 30 * 60, "70000", (20, 3, 25, 4, "3100"), (50, 9, 80, 12, "9000")),   # نمادِ خصمانه
+]
+RH_VISIBLE = ["RHA", "RHB", "RHC", None]     # None = نمادِ خصمانه → آدرسِ کوتاه
+
+
+def rh_new_pools(rows=None):
+    out = []
+    for i, (sym, ago, reserve, h1, h6) in enumerate(rows or RH_ROWS):
+        out.append({"id": "robinhood_" + rh_p(i), "type": "pool", "attributes": {
+            "address": rh_p(i), "name": "%s / WETH 0.3%%" % sym, "pool_created_at": fb_iso(ago),
+            "reserve_in_usd": reserve, "base_token_price_usd": "0.0123", "volume_usd": {"h24": "1000.5"}},
+            "relationships": {"base_token": {"data": {"id": "robinhood_" + rh_a(i), "type": "token"}},
+                              "quote_token": {"data": {"id": "robinhood_" + rh_a(999), "type": "token"}},
+                              "dex": {"data": {"id": "uniswap-v3-robinhood", "type": "dex"}}}})
+    return out
+
+
+def rh_gt_board(rows=None, new_status=200, pools_status=200):
+    rows = rows or RH_ROWS
+    toks = [fb_tok(rh_a(i), r[0], rh_p(i), "robinhood") for i, r in enumerate(rows)]
+    pls = [fb_pool(rh_p(i), r[3], r[4], "robinhood") for i, r in enumerate(rows) if r[3]]
+    inner = fb_gt_for(toks, pls, pools_status=pools_status)
+
+    def gt(path):
+        if path.endswith("/new_pools"):
+            return (new_status, {"data": rh_new_pools(rows)})
+        return inner(path)
+    return gt
+
+
+# توکنِ نمونه برای صفحه‌ی توکن: یک استخرِ برتر + شمع + معاملات (همان فیکسچرهای Early buyers / Large trades)
+RH_TOK = rh_a(0)
+RH_TPOOL = rh_p(0)
+
+
+def rh_gt_token(tok=RH_TOK, pool=RH_TPOOL, symbol="RHA"):
+    plain = eb_trades_ok(tok=tok, other=rh_a(999))
+    created_ago, trades, q = plain
+    large = lg_data(tok=tok)
+    now = int(__import__("time").time())
+    pool_obj = {"id": "robinhood_" + pool, "type": "pool", "attributes": {
+        "address": pool, "name": symbol + " / WETH 0.3%", "reserve_in_usd": "48000.5", "pool_created_at": fb_iso(created_ago),
+        "volume_usd": {"h24": "98000.25"}},
+        "relationships": {"base_token": {"data": {"id": "robinhood_" + tok, "type": "token"}},
+                          "quote_token": {"data": {"id": "robinhood_" + rh_a(999), "type": "token"}},
+                          "dex": {"data": {"id": "uniswap-v3-robinhood", "type": "dex"}}}}
+    candles = [[now - 900 * (96 - k), 1, 1, 1, 0.01 + k * 0.0001, 100] for k in range(96)]
+    calls = {"gt": []}
+
+    def gt(path, last=""):
+        if path.endswith("/tokens/" + tok + "/pools"):
+            return (200, {"data": [pool_obj]})
+        if path.endswith("/tokens/" + tok):
+            return (200, {"data": {"id": "robinhood_" + tok, "attributes": {
+                "address": tok, "symbol": symbol, "name": "Name " + symbol, "decimals": 18, "price_usd": "0.0123",
+                "image_url": "missing.png", "total_reserve_in_usd": "48000.5", "fdv_usd": "1000000.5",
+                "market_cap_usd": None, "volume_usd": {"h24": "98000.25"}},
+                "relationships": {"top_pools": {"data": [{"id": "robinhood_" + pool, "type": "pool"}]}}}})
+        if "/ohlcv/" in path:
+            return (200, {"data": {"attributes": {"ohlcv_list": candles}}})
+        if path.endswith("/pools/" + pool + "/trades"):
+            return (200, {"data": large if last == "LG" else trades})
+        if path.endswith("/pools/" + pool):
+            return (200, {"data": pool_obj})
+        return None
+    return gt
+
+
+def rh_base_forbidden():
+    """هر درخواستی که روی Robinhood نباید هرگز برود: RPCهای Base (از خودِ index.html)، پراکسی‌ی RPC، /vd، /exit/holdings،
+    ژوپیتر، اجراکننده/سولانا، /pnl، /cmc، /pairs.json، و هر مسیرِ GT غیرِ robinhood."""
+    src = open(os.path.join(HERE, "..", "index.html"), encoding="utf-8").read()
+    m = re.search(r"rpcs:\[(.*?)\.\.\.\(/\^https", src, re.S)
+    hosts = re.findall(r'https://([a-z0-9.\-]+)', m.group(1))
+    assert len(hosts) >= 4, "the Base RPC list could not be read from index.html: %s" % hosts
+    pats = [(h, re.compile(re.escape(h))) for h in hosts]
+    pats += [("/base/rpc", re.compile(r"/base/rpc")), ("/vd/", re.compile(r"/vd/")),
+             ("/exit/holdings", re.compile(r"/exit/holdings")), ("jupiter", re.compile(r"jup\.ag|/sol/")),
+             ("/pnl/", re.compile(r"/pnl/")), ("/cmc/", re.compile(r"/cmc/")),
+             ("/pairs.json", re.compile(r"/pairs\.json")), ("/ev", re.compile(r"/ev(\?|$)")),
+             ("gt networks/base", re.compile(r"networks/base/")), ("gt networks/solana", re.compile(r"networks/solana/")),
+             ("/report", re.compile(r"/report"))]
+    return pats
+
+
+def rh_hit(urls, pats):
+    return [(n, u) for u in urls for n, rx in pats if rx.search(u.replace("https://127.0.0.1", "").split("#")[0].split("?", 1)[0]
+                                                                  if n in ("/ev", "/report", "/pairs.json", "/vd/") else u)]
+
+
+def rh_srv():
+    return we_serve()   # /app و /t/ هر دو به harness.html می‌روند
+
+
+async def check_rh_picker(p, errors):
+    """[rh picker] سه گزینه؛ انتخابِ Robinhood activeChain را می‌گذارد و با رفرش می‌ماند؛ چیپِ تخت (بدونِ هاله)."""
+    srv, origin = rh_srv()
+    b = await p.chromium.launch()
+    errs = []
+    try:
+        env = FbEnv(b, origin, errs)
+        env.gt = rh_gt_board()
+        pg = await env.open(hash_="#swap", board=False)
+        await pg.wait_for_timeout(500)
+        opts = await pg.eval_on_selector_all("#srcPop [data-chain]", "els => els.map(e => [e.textContent.trim(), e.dataset.chain, e.id])")
+        assert opts == [["Base", "base", "srcOptBase"], ["Solana", "solana", "srcOptSolana"], ["Robinhood Chain", "robinhood", "srcOptRobinhood"]], \
+            "[rh picker] the network selector must list Base, Solana, Robinhood Chain (ids srcOptBase/srcOptSolana/srcOptRobinhood): %s" % opts
+        await pg.click("#srcChip")
+        await pg.click("#srcOptRobinhood")
+        await pg.wait_for_function("() => activeChain === 'robinhood'", timeout=10000)
+        st = await pg.evaluate("""() => ({ls: localStorage.getItem('zaexa.chain.v1'), tx: document.getElementById('srcTx').textContent,
+            checked: [...document.querySelectorAll('#srcPop [data-chain]')].map(b => b.getAttribute('aria-checked')),
+            rh: document.documentElement.hasAttribute('data-rh'),
+            label: document.getElementById('srcChip').getAttribute('aria-label')})""")
+        assert st["ls"] == "robinhood", "[rh picker] choosing Robinhood Chain must be persisted like Base/Solana: %s" % st
+        assert st["tx"] == "Robinhood Chain" and st["checked"] == ["false", "false", "true"] and st["rh"] and st["label"] == "Select network: Robinhood Chain", \
+            "[rh picker] chip and checked state must follow the choice: %s" % st
+        # چیپِ تخت: گزینه و آیکونِ Robinhood بدونِ سایه/فیلتر/درخشش‌اند و دقیقاً مثلِ گزینه‌ی Base (خودِ #srcChip طرحِ مشترکِ موجود را دارد)
+        flat = await pg.evaluate("""() => { const q = s => document.querySelector(s); const r = {};
+            for (const s of ['#srcOptRobinhood', '#srcOptRobinhood svg', '#srcOptRobinhood *', '#srcOptBase']) { const c = getComputedStyle(q(s));
+              r[s] = [c.boxShadow, c.filter, c.textShadow]; } return r; }""")
+        for s_ in ('#srcOptRobinhood', '#srcOptRobinhood svg', '#srcOptRobinhood *'):
+            assert flat[s_][1] == "none" and flat[s_][2] == "none" and flat[s_][0] == "none", \
+                "[rh picker] the Robinhood option/icon must be flat (no glow/halo): %s %s" % (s_, flat[s_])
+        assert flat['#srcOptRobinhood'] == flat['#srcOptBase'], "[rh picker] the Robinhood option must be styled like the Base option: %s" % flat
+        await pg.click("#srcChip")
+        # رفرش: همان زنجیره برمی‌گردد
+        await pg.reload()
+        await pg.wait_for_function("() => typeof activeChain !== 'undefined' && activeChain === 'robinhood' && document.documentElement.hasAttribute('data-rh')", timeout=10000)
+        assert await pg.evaluate("() => localStorage.getItem('zaexa.chain.v1')") == "robinhood", "[rh picker] the choice must survive a reload"
+        # برگشت به Base: بدونِ ethers (بوتِ Robinhood) → بارگذاریِ کامل؛ در پایان Base است و data-rh برداشته شده
+        await pg.click("#srcChip")
+        await pg.click("#srcOptBase")
+        await pg.wait_for_function("() => typeof activeChain !== 'undefined' && activeChain === 'base' && !document.documentElement.hasAttribute('data-rh')", timeout=20000)
+        assert await pg.evaluate("() => localStorage.getItem('zaexa.chain.v1')") == "base", "[rh picker] switching back must persist Base"
+        await pg.context.close()
+        # لینکِ هش
+        pg = await env.open(hash_="#flow?chain=robinhood", board=True)
+        await pg.wait_for_function("() => activeChain === 'robinhood'", timeout=10000)
+        await pg.context.close()
+        print("[rh picker] the selector lists Base, Solana and Robinhood Chain; choosing Robinhood Chain sets activeChain + data-rh, is stored in zaexa.chain.v1 and survives a reload (and #flow?chain=robinhood works); the chip/option/icon carry no shadow, filter or glow; going back to Base after a Robinhood boot (no ethers loaded) reloads cleanly into Base")
+    finally:
+        await b.close()
+        srv.shutdown()
+    assert not errs, "[rh picker] console errors: %s" % errs
+
+
+async def check_rh_flow(p, errors):
+    """[rh flow] تابلوی «Where money is flowing» روی Robinhood: فقط networks/robinhood، همان ستون‌ها و قواعدِ Base، چیپ‌های Exit = Not checked."""
+    srv, origin = rh_srv()
+    b = await p.chromium.launch()
+    errs = []
+    try:
+        env = FbEnv(b, origin, errs)
+        env.gt = rh_gt_board()
+        reqs = []
+        pg = await env.open(hash_="#flow", init=[RH_CHAIN_JS], hook=lambda pg_: pg_.on("request", lambda r: reqs.append(r.url)))
+        await fb_wait_rows(pg, 4)
+        rows = await pg.evaluate(FB_TBL_JS)
+        assert [r["sym"] for r in rows if r["sym"] in ("RHA", "RHB", "RHC")].__len__() == 3, "[rh flow] three symbols from tokens/multi expected: %s" % rows
+        assert any(re.match(r"^0x[0-9a-f]{4}…[0-9a-f]{4}$", r["sym"]) for r in rows), \
+            "[rh flow] a hostile symbol must fall back to the short address, as on Base: %s" % rows
+        assert not await pg.evaluate("() => !!document.querySelector('#flowBody img[src=x], #flowBody .fbTkTx img')"), "[rh flow] hostile symbol must not become markup"
+        assert all(r["chip"] == "Not checked" and r["chipCls"] == "fbChip " for r in rows), \
+            "[rh flow] every Exit chip must read exactly 'Not checked' with no verdict colour: %s" % [(r["chip"], r["chipCls"]) for r in rows]
+        assert all("Sell routes are not checked" in r["title"] for r in rows), "[rh flow] chip title: %s" % rows
+        assert "LOW" not in [r["sym"] for r in rows] and len(rows) == 4, "[rh flow] a pool under the $5,000 reserve floor must not be listed: %s" % rows
+        # فقط GT شبکه‌ی robinhood: هر مسیر، و هر سه مسیرِ لازم دیده شده
+        assert env.calls and all("networks/robinhood/" in c for c in env.calls), "[rh flow] every GT request must be networks/robinhood: %s" % env.calls
+        assert any("/new_pools" in c for c in env.calls) and any("/tokens/multi/" in c for c in env.calls) and any("/pools/multi/" in c for c in env.calls), env.calls
+        assert not env.pairs_calls, "[rh flow] Robinhood has no /pairs.json store: %s" % env.pairs_calls
+        # آدرس‌ها lower-case (EVM)
+        multi = [c for c in env.calls if "/tokens/multi/" in c][0]
+        assert multi.split("/tokens/multi/")[1].split("?")[0] == multi.split("/tokens/multi/")[1].split("?")[0].lower(), "[rh flow] GT keys must be lower-case: %s" % multi
+        # عنوان/ستون‌ها مثلِ Base
+        sub = await pg.inner_text(".fbSub")
+        assert sub == "New Robinhood Chain pairs · last hour · by unique wallets", "[rh flow] subtitle: %r" % sub
+        heads = await pg.eval_on_selector_all(".fbTbl thead th", "els => els.map(e => e.textContent.trim())")
+        assert heads == ["", "Token", "Net buyers", "Buyers / Sellers", "Buy share", "Volume 1h", "Exit"], "[rh flow] columns: %s" % heads
+        # Established و کلیدِ مسیرِ فروش: Not checked، نه حکم
+        st = await pg.evaluate("""() => { const e = document.querySelector('[data-fbset=est]'), t = document.querySelector('.fbTog');
+          return {estDis: e.getAttribute('aria-disabled'), estTitle: e.title, newOn: document.querySelector('[data-fbset=new]').classList.contains('on'),
+                  estOn: e.classList.contains('on'), togVis: getComputedStyle(t).visibility, togInert: t.inert}; }""")
+        assert st == {"estDis": "true", "estTitle": "Not checked on Robinhood Chain yet", "newOn": True, "estOn": False, "togVis": "hidden", "togInert": True}, \
+            "[rh flow] Established is Not checked and the sell-route switch is hidden: %s" % st
+        await pg.evaluate("() => document.querySelector('[data-fbset=est]').click()")
+        await pg.wait_for_timeout(300)
+        assert await pg.evaluate("() => fbPref.set") == "new" and len(await pg.query_selector_all("#flowBody .fbRow")) == 4, "[rh flow] Established cannot be selected"
+        # 6h
+        await pg.click("[data-fbw=h6]")
+        await pg.wait_for_timeout(300)
+        vol6 = await pg.evaluate("() => [...document.querySelectorAll('#flowBody .fbRow .fbVol')].map(e => e.textContent.trim())")
+        assert "$98.0K" in vol6 or any(v.startswith("$98") for v in vol6), "[rh flow] 6h volumes from the h6 window: %s" % vol6
+        # ستاره‌ها: دیده‌بانی فقط Base/Solana
+        assert not await pg.query_selector("#flowBody .fbStar"), "[rh flow] no watch star on Robinhood rows (watchlist knows Base/Solana only)"
+        # ردیف روی صفحه‌ی توکن می‌رود (بارگذاریِ کامل با پرچم)
+        await pg.click('.fbRow[data-addr="%s"]' % rh_a(0))
+        await pg.wait_for_function("() => location.pathname === '/t/%s'" % rh_a(0), timeout=15000)
+        assert "chain=robinhood" in await pg.evaluate("() => location.search"), "[rh flow] a row opens the Robinhood token page"
+        await pg.context.close()
+        # GT خراب: نامعلوم، نه صفر
+        env.gt = rh_gt_board(pools_status=500)
+        pg = await env.open(hash_="#flow", init=[RH_CHAIN_JS])
+        await fb_wait_rows(pg, 4)
+        assert "unavailable right now — unknown, not zero" in await pg.inner_text("#flowBody"), "[rh flow] pools/multi down must read unknown, not zero"
+        await pg.context.close()
+        env.gt = rh_gt_board(new_status=500)
+        pg = await env.open(hash_="#flow", init=[RH_CHAIN_JS])
+        await pg.wait_for_selector(".fbMsg", timeout=20000)
+        assert "could not be loaded" in await pg.inner_text(".fbMsg"), "[rh flow] new_pools down must read could-not-load"
+        await pg.context.close()
+        print("[rh flow] Robinhood board: only networks/robinhood GT paths (new_pools, tokens/multi, pools/multi; lower-case keys), no /pairs.json; 4 rows (a $4,000-reserve pool and nothing else is dropped, hostile symbol falls back to a short address); columns identical to Base; every Exit chip reads 'Not checked'; Established is aria-disabled and cannot be selected, the sell-route switch is hidden; 6h works; no watch stars; a row opens /t/<addr>?chain=robinhood; GT failures read unknown, not zero")
+    finally:
+        await b.close()
+        srv.shutdown()
+    assert not errs, "[rh flow] console errors: %s" % errs
+
+
+async def check_rh_token_page(p, errors):
+    """[rh token page] /t/<addr>?chain=robinhood: GT شبکه‌ی robinhood برای نمودار/استخرها/آمار؛ هیچ حکمی؛ فقط Not checked."""
+    srv, origin = rh_srv()
+    b = await p.chromium.launch()
+    errs = []
+    try:
+        env = FbEnv(b, origin, errs)
+        g = rh_gt_token()
+        env.gt = lambda path: g(path, "LG" if env.calls and LG_Q in env.calls[-1] else "")
+        reqs = []
+        # متنِ سمتِ سرور (برای Base ساخته می‌شود) نباید روی صفحه‌ی Robinhood دیده شود
+        seed_facts = ("new MutationObserver((m,o)=>{const f=document.getElementById('tk-facts');if(f){f.hidden=false;f.textContent='BASE FACTS';f.dataset.addr='%s';window.__factsSeeded=true;o.disconnect();}})"
+                      ".observe(document,{childList:true,subtree:true});" % RH_TOK)
+        pg = await env.open(hash_="", path="/t/%s?chain=robinhood" % RH_TOK, init=[seed_facts], board=False,
+                            hook=lambda pg_: pg_.on("request", lambda r: reqs.append(r.url)))
+        await pg.wait_for_function("() => document.getElementById('tk-sym').textContent === 'RHA'", timeout=20000)
+        await pg.wait_for_function("() => document.querySelector('#tk-plot svg')", timeout=20000)
+        await pg.wait_for_function("() => document.querySelectorAll('#rhTkPoolsBody .rhRow').length === 1", timeout=20000)
+        st = await pg.evaluate("""() => ({chain: activeChain, tokenPage, view, chip: document.getElementById('tk-chip').textContent.trim(),
+            chipChain: document.getElementById('tk-chip').dataset.chain, addr: document.getElementById('tk-addr').href,
+            px: document.getElementById('tk-px').textContent, name: document.getElementById('tk-name').textContent,
+            exit: document.getElementById('tk-exitBox').innerText.replace(/\\s+/g, ' ').trim(),
+            safety: document.getElementById('tk-safetyBody').innerText.replace(/\\s+/g, ' ').trim(),
+            trade: document.getElementById('tk-trade').offsetParent === null, copy: document.getElementById('tk-copy').offsetParent === null,
+            facts: document.getElementById('tk-facts').hidden, stats: document.getElementById('tk-tokStats').innerText.replace(/\\s+/g, ' ').trim(),
+            pools: document.getElementById('rhTkPoolsBody').innerText.replace(/\\s+/g, ' ').trim(), pair: document.getElementById('tk-pairName').textContent,
+            ethers: typeof E === 'undefined' || E === undefined, blocked: window.__rhBlocked || 0})""")
+        assert st["chain"] == "robinhood" and st["tokenPage"] and st["view"] == "token" and st["chip"] == "Robinhood Chain" and st["chipChain"] == "robinhood", st
+        assert st["addr"] == "https://robinhoodchain.blockscout.com/token/" + RH_TOK, "[rh token page] explorer link: %s" % st["addr"]
+        assert st["px"] == "$0.01230" and st["name"] == "Name RHA" and st["pair"] == "RHA / USD", st
+        assert st["exit"].startswith("Not checked") and st["safety"].startswith("Not checked"), \
+            "[rh token page] any verdict/exit panel must read Not checked: %s | %s" % (st["exit"], st["safety"])
+        assert not re.search(r"Sell route|Honeypot|Safe|Exit estimated|Quoted just now|official", st["exit"] + " " + st["safety"] + " " + st["name"], re.I) or \
+            "does not mean safe" in st["exit"], "[rh token page] no verdict wording: %s" % st
+        assert await pg.evaluate("() => window.__factsSeeded === true"), "[rh token page] the probe must have pre-seeded the server-built Base facts"
+        assert st["trade"] and st["copy"] and st["facts"], "[rh token page] no Trade/share action and no server-built Base facts: %s" % st
+        assert "volume 24h" in st["stats"].lower() and "liquidity" in st["stats"].lower(), "[rh token page] stats panel: %s" % st["stats"]
+        assert "RHA / WETH 0.3%" in st["pools"] and "uniswap-v3-robinhood" in st["pools"], "[rh token page] pools panel: %s" % st["pools"]
+        assert st["ethers"] and st["blocked"] == 0, "[rh token page] no ethers and no blocked Base attempt: %s" % st
+        # Early buyers و Large trades: GT-only (شبکه‌ی robinhood)، Large trades بدونِ P&L (آن به Worker/Base می‌رود)
+        await pg.wait_for_function("() => { const e = document.getElementById('flowEarly'); return !e.hidden && e.textContent.trim() !== '' && !e.querySelector('.sk'); }", timeout=20000)
+        eb = await pg.evaluate("() => document.getElementById('flowEarly').innerText.replace(/\\s+/g, ' ').trim()")
+        assert eb.startswith("Early buyers") and ("First" in eb or "unknown" in eb), "[rh token page] Early buyers card: %r" % eb
+        lg = await lg_text(pg)
+        assert lg.startswith("Large trades") and "P&L" not in lg and "robinhoodchain.blockscout.com" in await pg.evaluate("() => document.getElementById('flowLarge').innerHTML"), \
+            "[rh token page] Large trades without P&L and with Robinhood explorer links: %r" % lg
+        assert not await pg.evaluate("() => document.getElementById('flowEarly').closest('#view-flow')") and \
+            await pg.evaluate("() => !!document.getElementById('flowLarge').closest('#view-token')"), "[rh token page] the two cards live inside the token view"
+        assert env.calls and all("networks/robinhood/" in c for c in env.calls), "[rh token page] every GT request must be networks/robinhood: %s" % env.calls
+        assert any(re.search(r"/tokens/%s(\?|$)" % RH_TOK, c) for c in env.calls) and any("/tokens/%s/pools" % RH_TOK in c for c in env.calls) \
+            and any("/ohlcv/" in c for c in env.calls), env.calls
+        bad = rh_hit(reqs, rh_base_forbidden())
+        assert not bad, "[rh token page] forbidden requests: %s" % bad
+        await pg.context.close()
+        # آدرسِ ناخوانا یا توکنِ ناشناس در GT: «Unknown token»، نه حکم
+        env.gt = lambda path: (404, {}) if path.endswith("/tokens/" + RH_TOK) else None
+        pg = await env.open(hash_="", path="/t/%s?chain=robinhood" % RH_TOK, board=False)
+        await pg.wait_for_function("() => document.getElementById('tk-sym').textContent === 'Unknown token'", timeout=20000)
+        assert (await pg.inner_text("#tk-exitBox")).startswith("Not checked"), "[rh token page] unknown token still reads Not checked, never a verdict"
+        await pg.context.close()
+        # بدونِ پرچم، همین آدرس Base است (ذخیره‌شده‌ی Robinhood عوضش نمی‌کند): هیچ GT ی با robinhood نمی‌رود
+        env.calls.clear()
+        env.gt = lambda path: None
+        pg = await env.open(hash_="", path="/t/%s" % RH_TOK, board=False, init=[RH_CHAIN_JS])
+        await pg.wait_for_function("() => typeof activeChain !== 'undefined' && tokenPage === true", timeout=20000)
+        assert await pg.evaluate("() => activeChain") == "base" and not any("networks/robinhood" in c for c in env.calls), \
+            "[rh token page] /t/0x… without the flag stays a Base page: %s" % env.calls
+        await pg.context.close()
+        print("[rh token page] /t/<addr>?chain=robinhood: activeChain robinhood, GT networks/robinhood only (token, pools, ohlcv, trades), chart drawn, stats + pools panels, Early buyers + Large trades (no P&L, Robinhood explorer) inside the token view; exit and safety panels read 'Not checked' (no verdict wording), no Trade/share, server-built Base facts hidden; no ethers, no blocked Base attempt, none of the forbidden requests; an unreadable token still reads Not checked; /t/0x… without the flag stays Base")
+    finally:
+        await b.close()
+        srv.shutdown()
+    assert not errs, "[rh token page] console errors: %s" % errs
+
+
+async def check_rh_notice(p, errors):
+    """[rh notice] متنِ دقیقِ اعلان روی Swap/Stocks/Exit value/Exit Report (و Portfolio)؛ بدونِ Connect/Swap؛ انتخابگر در دسترس؛ Base/Solana بی‌اثر."""
+    srv, origin = rh_srv()
+    b = await p.chromium.launch()
+    errs = []
+    try:
+        env = FbEnv(b, origin, errs)
+        env.gt = rh_gt_board()
+        pg = await env.open(hash_="#swap", init=[RH_CHAIN_JS], board=False)
+        await pg.wait_for_function("() => typeof activeChain !== 'undefined' && activeChain === 'robinhood' && view === 'swap'", timeout=10000)
+        await pg.wait_for_timeout(500)
+        VIS = """() => { const vis = e => !!e && e.getClientRects().length > 0 && getComputedStyle(e).visibility !== 'hidden';
+            const v = document.querySelector('.view.on'); const notice = [...v.querySelectorAll('[data-rhtx]')].filter(vis);
+            const acts = [...v.querySelectorAll('button, a, input, .cta')].filter(vis).map(e => (e.textContent || e.placeholder || '').trim());
+            return {view: v.id, texts: notice.map(e => e.textContent), srcMenuInside: !!v.querySelector('#srcMenu') && vis(v.querySelector('#srcChip')),
+              acts, ctaVisible: vis(document.getElementById('actBtn')), baseHero: vis(document.getElementById('baseHeroRow')),
+              solHero: vis(document.getElementById('appSolHero')), strip: vis(document.getElementById('liveStrip')),
+              watch: vis(document.getElementById('savedWatch')), connect: [document.getElementById('connectBtn').disabled, document.getElementById('connectBtn').textContent]}; }"""
+        sw = await pg.evaluate(VIS)
+        assert sw["view"] == "view-swap" and sw["texts"] == [RH_NOTICE_SWAP_T], "[rh notice] Swap notice must be exactly %r: %s" % (RH_NOTICE_SWAP_T, sw)
+        assert sw["srcMenuInside"] and not sw["ctaVisible"] and not sw["baseHero"] and not sw["solHero"] and not sw["strip"] and not sw["watch"], \
+            "[rh notice] the swap card, strip and watch panel are gone; the network picker lives in the notice: %s" % sw
+        assert not [a for a in sw["acts"] if re.search(r"connect|swap$|^swap|approve", a, re.I) and a != "Swap"] , "[rh notice] no Connect/Swap action in the Swap view: %s" % sw["acts"]
+        assert sw["connect"] == [True, "Connect wallet"], "[rh notice] the header wallet button is inert on Robinhood: %s" % sw["connect"]
+        shown = {}
+        for tab, sel, vid in (("Stocks", '#nav [data-view="stocks"]', "view-stocks"), ("Exit value", '#nav [data-view="exit"]', "view-exit"),
+                              ("Exit Report", '#nav a.navLink[href="/report"]', "view-rhreport")):
+            before = await pg.evaluate("() => location.href")
+            await pg.click(sel)
+            await pg.wait_for_function("(v) => document.querySelector('.view.on').id === v", arg=vid, timeout=10000)
+            await pg.wait_for_timeout(200)
+            r = await pg.evaluate(VIS)
+            shown[tab] = r
+            assert r["texts"] == [RH_NOTICE_NA_T], "[rh notice] %s notice must be exactly %r: %s" % (tab, RH_NOTICE_NA_T, r)
+            assert r["srcMenuInside"], "[rh notice] the network picker stays reachable on %s: %s" % (tab, r)
+            if tab == "Exit Report":
+                assert (await pg.evaluate("() => location.pathname")) != "/report" and (await pg.evaluate("() => location.pathname")) in ("/app", before.split("#")[0].replace(origin, "")), \
+                    "[rh notice] the Exit Report tab must not navigate away on Robinhood"
+            elif tab == "Stocks":
+                assert not await pg.evaluate("() => document.querySelectorAll('#stkTable tbody tr').length"), "[rh notice] no stock rows are built on Robinhood"
+        await pg.click("#folioMenuBtn", force=True) if False else await pg.evaluate("() => setView('folio')")
+        r = await pg.evaluate(VIS)
+        assert r["texts"] == [RH_NOTICE_NA_T], "[rh notice] Portfolio notice: %s" % r
+        # راهِ برگشت از داخلِ اعلان: انتخابگر → Solana بدونِ بارگذاری و Base (بارگذاریِ کامل)
+        await pg.evaluate("() => setView('stocks')")
+        await pg.click("#srcChip")
+        await pg.click('#srcPop [data-chain="solana"]')
+        await pg.wait_for_function("() => activeChain === 'solana' && !document.documentElement.hasAttribute('data-rh')", timeout=20000)
+        await pg.wait_for_function("() => { const e = document.getElementById('appSolHero'); return !!e && e.getClientRects().length > 0; }", timeout=20000)
+        away = await pg.evaluate("""() => { const vis = e => !!e && e.getClientRects().length > 0;
+            return {notice: [...document.querySelectorAll('.rhNa')].some(vis), sol: vis(document.getElementById('appSolHero')), view} }""")
+        assert not away["notice"] and away["sol"], "[rh notice] leaving Robinhood restores the real Solana view and hides every notice: %s" % away
+        await pg.context.close()
+        # Base: هیچ اعلانی دیده نمی‌شود
+        pg = await env.open(hash_="#swap", board=False)
+        await pg.wait_for_timeout(600)
+        for v in ("stocks", "exit", "folio", "swap"):
+            await pg.evaluate("(v) => setView(v)", v)
+            n = await pg.evaluate("() => [...document.querySelectorAll('.rhNa')].filter(e => e.getClientRects().length > 0).length")
+            assert n == 0, "[rh notice] a Robinhood notice leaked into Base %s" % v
+        await pg.context.close()
+        print("[rh notice] on Robinhood the Swap view shows exactly %r and nothing else (no swap card, strip, watch panel; the picker sits inside the notice; header wallet inert); Stocks, Exit value, Exit Report (no navigation) and Portfolio show exactly %r; leaving for Solana restores the real Solana swap view; no notice is visible on Base" % (RH_NOTICE_SWAP_T, RH_NOTICE_NA_T))
+    finally:
+        await b.close()
+        srv.shutdown()
+    assert not errs, "[rh notice] console errors: %s" % errs
+
+
+async def check_rh_no_base_calls(p, errors):
+    """[rh no base calls] روی Robinhood در Swap/Markets/Stocks/Exit value/Exit Report/Portfolio: صفر درخواست به RPCهای Base، /vd، /exit/holdings، ژوپیتر، /pnl، /cmc، /pairs.json، و صفر GT شبکه‌ی base/solana."""
+    srv, origin = rh_srv()
+    b = await p.chromium.launch()
+    errs = []
+    try:
+        pats = rh_base_forbidden()
+        env = FbEnv(b, origin, errs)
+        env.gt = rh_gt_board()
+        reqs = []
+        hook = lambda pg_: pg_.on("request", lambda r: reqs.append(r.url))
+        WALK = ["swap", "flow", "stocks", "exit", "rhreport", "folio", "faq", "swap", "flow"]
+        # (۱) بوتِ تازه روی Robinhood
+        pg = await env.open(hash_="#swap", init=[RH_CHAIN_JS, "window.__STUB_RPC_LOG__ = [];"], hook=hook)
+        await pg.wait_for_function("() => typeof activeChain !== 'undefined' && activeChain === 'robinhood'", timeout=10000)
+        for v in WALK:
+            await pg.evaluate("(v) => setView(v)", v)
+            await pg.wait_for_timeout(350)
+        await fb_wait_rows(pg, 4)
+        await pg.wait_for_timeout(1500)
+        info = await pg.evaluate("() => ({log: (window.__STUB_RPC_LOG__ || []).length, blocked: window.__rhBlocked || 0, ethers: typeof E === 'undefined' || E === undefined})")
+        bad = rh_hit(reqs, pats)
+        assert not bad, "[rh no base calls] fresh Robinhood boot sent forbidden requests: %s" % bad
+        assert info == {"log": 0, "blocked": 0, "ethers": True}, "[rh no base calls] no RPC provider use, no blocked Base attempt, no ethers on a Robinhood boot: %s" % info
+        assert env.calls and all("networks/robinhood/" in c for c in env.calls), "[rh no base calls] GT: %s" % env.calls
+        await pg.context.close()
+        # (۱ب) لایه‌های دفاعیِ عمق: حتی اگر کدی از Base به آن‌ها برسد، روی Robinhood چیزی روی سیم نمی‌رود
+        pg = await env.open(hash_="#swap", init=[RH_CHAIN_JS], hook=hook, board=False)
+        await pg.wait_for_function("() => typeof activeChain !== 'undefined' && activeChain === 'robinhood'", timeout=10000)
+        await pg.wait_for_timeout(800)
+        reqs.clear()
+        direct = await pg.evaluate("""async () => { const r = {};
+            try { await loadMetas(['0x833589fcd6edb6e08f4c7c32d4f71b54bda02913']); r.metas = 'returned'; } catch (e) { r.metas = 'threw ' + e.message; }
+            try { await gtJson(GT + '/networks/base/tokens/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913'); r.gt = 'resolved'; } catch (e) { r.gt = 'rejected'; }
+            try { await rpcSend('eth_blockNumber', []); r.rpc = 'resolved'; } catch (e) { r.rpc = e.rpcDown ? 'rpcDown' : 'threw'; }
+            r.blocked = window.__rhBlocked || 0; return r; }""")
+        await pg.wait_for_timeout(500)
+        assert direct == {"metas": "returned", "gt": "rejected", "rpc": "rpcDown", "blocked": 2}, \
+            "[rh no base calls] loadMetas, a stale Base GT URL and rpcSend must all be refused on Robinhood: %s" % direct
+        bad = rh_hit(reqs, pats)
+        assert not bad, "[rh no base calls] direct calls into Base helpers reached the wire: %s" % bad
+        await pg.context.close()
+        # (۲) سوییچ از Base به Robinhood در همان نشست: بعد از سوییچ هیچ‌چیزِ Base نمی‌رود (کوتِ زمان‌بندی‌شده، موجودی، تایمرها)
+        reqs.clear()
+        env.calls.clear()
+        pg = await env.open(hash_="#swap", init=["window.__STUB_RPC_LOG__ = [];"], hook=hook, board=False)
+        await pg.wait_for_function("() => typeof E !== 'undefined' && E && typeof tokenOut !== 'undefined' && tokenOut", timeout=20000)
+        await pg.evaluate("() => { __STUB_RPC_LOG__.length = 0; }")
+        await pg.fill("#amtIn", "1")                         # کوتِ Base زمان‌بندی می‌شود (۴۲۰ms) و باید بعد از سوییچ شلیک شود
+        await pg.click("#srcChip")
+        await pg.click("#srcOptRobinhood")
+        await pg.wait_for_function("() => activeChain === 'robinhood'", timeout=10000)
+        # درخواستی که *پیش از* چرخش در همان تیک رفته (رویدادِ مرورگر کمی دیرتر ثبت می‌شود) نشتِ Robinhood نیست؛ مرز ۲۵۰ms بعد از چرخش
+        await pg.wait_for_timeout(250)
+        mark = len(reqs)
+        await pg.evaluate("() => { __STUB_RPC_LOG__.length = 0; }")
+        for v in WALK:
+            await pg.evaluate("(v) => setView(v)", v)
+            await pg.wait_for_timeout(350)
+        await pg.wait_for_timeout(2500)
+        info = await pg.evaluate("() => ({log: (window.__STUB_RPC_LOG__ || []).length, blocked: window.__rhBlocked || 0})")
+        bad = rh_hit(reqs[mark:], pats)
+        assert not bad, "[rh no base calls] after switching Base→Robinhood forbidden requests were sent: %s" % bad
+        assert info == {"log": 0, "blocked": 0}, "[rh no base calls] after switching Base→Robinhood no provider use and no blocked attempt: %s" % info
+        await pg.context.close()
+        print("[rh no base calls] walking Swap, Markets, Stocks, Exit value, Exit Report, Portfolio, FAQ on Robinhood (fresh boot and after a Base→Robinhood switch with a quote armed): zero requests to any Base RPC host or /base/rpc, /vd, /exit/holdings, Jupiter or /sol, /pnl, /cmc, /pairs.json, /ev, /report, zero networks/base or networks/solana GT paths, zero RPC provider calls, zero blocked-attempt counts, and no ethers on a fresh boot; calling loadMetas, a Base GT URL and rpcSend directly on Robinhood is refused (nothing on the wire)")
+    finally:
+        await b.close()
+        srv.shutdown()
+    assert not errs, "[rh no base calls] console errors: %s" % errs
+
+
+async def check_rh_screens(p, errors):
+    """فقط با ZX_ONLY=check_rh_screens و ZX_SHOTS=<پوشه>: پیش‌نمایشِ بصری (فیکسچر)."""
+    out = os.environ.get("ZX_SHOTS")
+    if not out:
+        return
+    os.makedirs(out, exist_ok=True)
+    srv, origin = rh_srv()
+    b = await p.chromium.launch()
+    try:
+        env = FbEnv(b, origin, [])
+        env.gt = rh_gt_board()
+        pg = await env.open(hash_="#swap", vw=1440, vh=900, init=[RH_CHAIN_JS], board=False)
+        await pg.wait_for_function("() => activeChain === 'robinhood'")
+        await pg.click("#srcChip")
+        await pg.wait_for_timeout(300)
+        await pg.screenshot(path=os.path.join(out, "rh_picker.png"))
+        await pg.click("#srcChip")
+        await pg.wait_for_timeout(300)
+        await pg.screenshot(path=os.path.join(out, "rh_swap_notice.png"))
+        await pg.context.close()
+        for vw, vh, name in ((1440, 900, "rh_flow_desktop.png"), (390, 844, "rh_flow_mobile.png")):
+            pg = await env.open(hash_="#flow", vw=vw, vh=vh, init=[RH_CHAIN_JS])
+            await fb_wait_rows(pg, 4)
+            await pg.wait_for_timeout(600)
+            await pg.screenshot(path=os.path.join(out, name), full_page=True)
+            await pg.context.close()
+    finally:
+        await b.close()
+        srv.shutdown()
 
 
 async def only(names):

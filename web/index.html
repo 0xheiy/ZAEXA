@@ -107,6 +107,7 @@ if(/^\/t\/[^/]+\/?$/.test(location.pathname)||/^\/exit\/[^/]+\/?$/.test(location
     try{r=decodeURIComponent(r);}catch(e){}
     var i=r.indexOf("?"),c=null;
     try{c=new URLSearchParams(i<0?"":r.slice(i+1)).get("chain");}catch(e){}
+    if(c==="robinhood")return;   // Robinhood Chain: هیچ بخشِ Base مخفی نمی‌شود (فلاشِ بوتِ سولانا مالِ سولاناست)
     if(c!=="solana"&&c!=="base"){
       c=null;
       try{var v=localStorage.getItem("zaexa.chain.v1");c=(v==="solana"||v==="base")?v:null;}catch(e){}
@@ -1827,6 +1828,26 @@ footer .fine{max-width:78ch;margin:46px 0 0;font-size:11.5px;color:var(--tx3);li
 .swapCard:has(#swapNetworkBar){overflow:visible}
 
 #folioNetworkSlot,#flowNetworkSlot,#stocksNetworkSlot{flex:none}
+/* Robinhood Chain (فاز ۱) — کارتِ اعلان: تخت، بدونِ هاله و درخشش. فقط وقتی زنجیره Robinhood است دیده می‌شود (data-rh را paintSrc می‌گذارد). */
+.rhNa{display:none;overflow:visible}
+html[data-rh] .rhNa{display:block}
+.rhNaHead{display:flex;align-items:center;gap:10px;padding:16px 16px 0}
+/* کارتِ اعلان عمداً کلاس‌های card/ttl ندارد تا هیچ انتخابگرِ موجودِ Base/Solana (و آزمون‌هایشان) آن را نگیرد */
+.rhCard{background:var(--card);border-radius:22px;box-shadow:var(--sh);overflow:hidden}
+.rhNaTtl{font-size:15.5px;font-weight:660;color:var(--tx)}
+.rhNaHead [data-rhslot]{flex:none}
+.rhNaTx{margin:0;padding:14px 20px 20px;color:var(--tx2);font-size:14px;line-height:1.6}
+html[data-rh] #view-stocks>*:not(.rhNa),html[data-rh] #view-exit>*:not(.rhNa),html[data-rh] #view-folio>*:not(.rhNa),
+html[data-rh] #view-swap>*:not(.rhNa){display:none!important}
+html[data-rh] #view-swap>#rhSwapNotice{display:block!important}
+html[data-rh] .mktSwitch a[data-mkt="pairs"]{pointer-events:none;opacity:.55}
+#tk-trade[hidden],#tk-copy[hidden]{display:none!important}
+.rhFlat{box-shadow:none!important;filter:none!important}
+.rhTkPools .rhRow{display:grid;grid-template-columns:minmax(0,1fr) auto auto;gap:12px;align-items:center;padding:10px 20px;border-top:1px solid var(--line);font-size:13px}
+.rhTkPools .rhRow b{font-weight:620;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.rhTkPools .rhRow small{display:block;color:var(--tx3);font-size:11.5px}
+.rhNotChecked{padding:18px 20px;color:var(--tx2);font-size:13.5px;line-height:1.6}
+.rhNotChecked b{display:block;color:var(--tx);font-size:15px;margin-bottom:4px}
 #view-stocks>.card:has(#srcMenu){overflow:visible}
 /* ۱۰ اکتبر — باگِ زنده: .empty.intro{display:flex} بر [hidden]ِ مرورگر می‌برد و بلوکِ «US stocks trade on Base» روی Base هم دیده می‌شد. */
 #view-stocks [hidden]{display:none!important}
@@ -2115,6 +2136,15 @@ html:not(.ctaReady) #actBtn:disabled,html:not(.ctaReady) #solSwapBtn:disabled{ba
 </svg>
 
       </button>
+      <!-- Robinhood Chain (فاز ۱، فقط نمایش): آیکون یک نشانِ ساده‌ی تخت است، نه لوگوی رسمی؛ بدونِ درخشش و هاله -->
+      <button type="button" class="walletAction" id="srcOptRobinhood" data-chain="robinhood" role="menuitemradio" aria-checked="false">
+        <span>Robinhood Chain</span>
+        <svg width="18" height="18" aria-hidden="true" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+<circle cx="12" cy="12" r="12" fill="#00C805"/>
+<path d="M6.5 17.5c.6-4.6 3.7-8.4 9.6-9.6-.4 5.6-3.9 9.2-8.4 9.6" fill="#fff"/>
+<path d="M6.5 17.5 13 11" stroke="#00C805" stroke-width="1.2" stroke-linecap="round"/>
+</svg>
+      </button>
     </div>
   </div>
   <div class="rel watchWrap" id="watchWrap" hidden>
@@ -2161,8 +2191,8 @@ try{(function(){
   try{if(localStorage.getItem("zaexa.solwallet.off.v1")==="1")return;}catch(e){}
   var raw=location.hash.slice(1);try{raw=decodeURIComponent(raw);}catch(e){}
   var i=raw.indexOf("?"),q="";try{q=new URLSearchParams(i<0?"":raw.slice(i+1)).get("chain");}catch(e){}
-  var c=(q==="solana"||q==="base")?q:null;
-  if(!c){try{var v=localStorage.getItem("zaexa.chain.v1");c=(v==="solana"||v==="base")?v:null;}catch(e){}}
+  var c=(q==="solana"||q==="base"||q==="robinhood")?q:null;
+  if(!c){try{var v=localStorage.getItem("zaexa.chain.v1");c=(v==="solana"||v==="base"||v==="robinhood")?v:null;}catch(e){}}
   if(c!=="solana")return;
   var b=document.getElementById("connectBtn");if(!b)return;
   b.className="chip";b.textContent=r.address.slice(0,6)+"\u2026"+r.address.slice(-4);b.setAttribute("aria-busy","true");
@@ -2184,9 +2214,9 @@ try{(function(){
   try{if(localStorage.getItem("zaexa.base.wallet")!==r.key)return;}catch(e){return;}
   var raw=location.hash.slice(1);try{raw=decodeURIComponent(raw);}catch(e){}
   var i=raw.indexOf("?"),q="";try{q=new URLSearchParams(i<0?"":raw.slice(i+1)).get("chain");}catch(e){}
-  var c=(q==="solana"||q==="base")?q:null;
-  if(!c){try{var v=localStorage.getItem("zaexa.chain.v1");c=(v==="solana"||v==="base")?v:null;}catch(e){}}
-  if(/^\/t\/0x[0-9a-fA-F]{40}\/?$/.test(location.pathname))c="base";
+  var c=(q==="solana"||q==="base"||q==="robinhood")?q:null;
+  if(!c){try{var v=localStorage.getItem("zaexa.chain.v1");c=(v==="solana"||v==="base"||v==="robinhood")?v:null;}catch(e){}}
+  if(/^\/t\/0x[0-9a-fA-F]{40}\/?$/.test(location.pathname))c=/(^|[?&])chain=robinhood(&|$)/.test(location.search)?"robinhood":"base";   // صفحه‌ی توکنِ Robinhood Chain: بازیابیِ Base اصلاً اجرا نمی‌شود
   if((c||"base")!=="base")return;
   if(/^\/t\/[1-9A-HJ-NP-Za-km-z]{32,44}\/?$/.test(location.pathname))return;   // صفحه‌ی توکنِ سولانا: بازیابیِ Base اصلاً اجرا نمی‌شود
   var b=document.getElementById("connectBtn");if(!b)return;
@@ -2253,6 +2283,12 @@ try{(function(){
   </div>
 </details>
 <div class="view on" id="view-swap">
+  <!-- Robinhood Chain (فاز ۱): کارتِ سواپ با یک اعلان جایگزین می‌شود؛ هیچ دکمه‌ی Connect/Swap و هیچ کوتی نیست.
+       انتخابگرِ شبکه (#srcMenu) داخلِ همین کارت می‌نشیند تا راهِ برگشت بسته نشود. -->
+  <section class="rhNa rhCard" id="rhSwapNotice" role="status">
+    <div class="rhNaHead"><span class="rhNaTtl">Swap</span><span class="grow"></span><div data-rhslot></div></div>
+    <p class="rhNaTx" data-rhtx>Swaps on Robinhood Chain are coming soon. Prices and market data are live.</p>
+  </section>
   <div class="row hero" id="baseHeroRow">
     <!-- chart -->
     <section class="card">
@@ -2396,6 +2432,10 @@ try{(function(){
 </div><!-- /view-swap -->
 
 <div class="view" id="view-folio">
+  <section class="rhNa rhCard" data-rhna role="status">
+    <div class="rhNaHead"><span class="rhNaTtl">Your portfolio</span><span class="grow"></span><div data-rhslot></div></div>
+    <p class="rhNaTx" data-rhtx>Not available on Robinhood Chain yet</p>
+  </section>
   <section class="card">
     <header><span class="ttl">Your portfolio</span><span class="grow"></span>
       <span class="ttl mono" id="folioTotal"></span><div id="folioNetworkSlot"></div></header>
@@ -2421,6 +2461,10 @@ try{(function(){
      همان سندِ اپ است (نه یک html تازه). ۱۵ نوامبر: تبِ خودش در نوارِ بالا را دارد (دیگر داخلِ Portfolio نیست).
      ===================================================================== -->
 <div class="view" id="view-exit">
+  <section class="rhNa rhCard" data-rhna role="status">
+    <div class="rhNaHead"><span class="rhNaTtl">Exit value</span><span class="grow"></span><div data-rhslot></div></div>
+    <p class="rhNaTx" data-rhtx>Not available on Robinhood Chain yet</p>
+  </section>
   <section class="card" id="exitCard">
     <header><span class="ttl">Exit value</span><span class="grow"></span></header>
     <p class="lede">If you sold everything in a wallet right now, how many dollars would you actually get? Paper value uses market prices; exit value uses live quotes for selling the full balance. Base and Solana.</p>
@@ -2480,6 +2524,10 @@ try{(function(){
      دسته‌ی multicall؛ حجم و تغییرِ ۲۴ساعته از یک درخواستِ GeckoTerminal.
      ===================================================================== -->
 <div class="view" id="view-stocks">
+  <section class="rhNa rhCard" data-rhna role="status">
+    <div class="rhNaHead"><span class="rhNaTtl">US stocks</span><span class="grow"></span><div data-rhslot></div></div>
+    <p class="rhNaTx" data-rhtx>Not available on Robinhood Chain yet</p>
+  </section>
   <section class="card">
     <header>
       <span class="ttl">US stocks</span>
@@ -2680,6 +2728,14 @@ try{(function(){
   </div>
   <p class="tkFine" id="tk-fine">Heuristics on public bytecode, not an audit. A clean score is not a
     guarantee.</p>
+</div>
+
+<!-- Exit Report روی Robinhood Chain: صفحه‌ی /report مالِ Base/Solana است؛ کلیکِ تبِ بالا اینجا فقط اعلان نشان می‌دهد (setView فقط روی Robinhood این را می‌پذیرد) -->
+<div class="view" id="view-rhreport">
+  <section class="rhNa rhCard" data-rhna role="status">
+    <div class="rhNaHead"><span class="rhNaTtl">Exit Report</span><span class="grow"></span><div data-rhslot></div></div>
+    <p class="rhNaTx" data-rhtx>Not available on Robinhood Chain yet</p>
+  </section>
 </div>
 
 <!-- پرسش‌های متداول ابزار نیست، یک صفحه‌ی توضیح است — بدون دکمه در ناوبری بالا
@@ -3417,6 +3473,7 @@ function useRpc(url){
   paintSrc();
 }
 async function saveCustomRpc(raw){
+  if(typeof rhBlock==="function"&&rhBlock()){rpcState("err","Custom RPC applies to Base only.");return;}
   const v=(raw||"").trim();
   if(!v){clearCustomRpc();return;}
   if(!/^https:\/\//i.test(v)){
@@ -3517,6 +3574,9 @@ const LS_RPC_LAST="zaexa.rpc.last";
    بخورند، هیچ‌کدام علامت نمی‌خورند — چون آن‌وقت مقصر شبکه‌ی خودِ کاربر است،
    نه اندپوینت‌ها، و تلاش بعدی باید دوباره همه را امتحان کند. */
 async function rpcSend(fn){
+  /* Robinhood Chain: هیچ خواندنِ Base نباید برود. این تنها گذرگاهِ همه‌ی خواندن‌های RPCِ Base است؛
+     اگر کسی تا اینجا رسید (یعنی جایی نگهبان ندارد) شمرده می‌شود و درخواستی نمی‌رود. */
+  if(rhBlock()){const e=new Error("Base RPC is not used on Robinhood Chain");e.rpcDown=true;throw e;}
   if(walletReady()){
     try{const v=await withTimeout(fn(walletProvider),9000);liveSrc="wallet";paintSrc();return v;}
     catch(e){if(isRevert(e))throw e;}
@@ -4847,6 +4907,7 @@ function ev(name,detail,chain){
   // hashchange می‌تواند رگباری بیاید (دکمه‌ی back نگه‌داشته‌شده). یک رویداد
   // هم‌نام در فاصله‌ی کمتر از یک ثانیه شمرده نمی‌شود.
   const now=Date.now(),network=chain||(typeof activeChain!=="undefined"?activeChain:"base"),key=name+":"+network;
+  if(network==="robinhood")return;   // فاز ۱: فهرستِ بسته‌ی /ev فقط base|solana را می‌شناسد و پهنایش بدونِ اجازه‌ی مالک عوض نمی‌شود → هیچ رویدادی نمی‌رود
   if(evLast[key]&&now-evLast[key]<1000)return;
   evLast[key]=now;
   const body=JSON.stringify({e:name,d:detail||"",
@@ -5070,6 +5131,9 @@ function rateLimited(e){return !!(e&&e.gtBackoff);}
 /* یک «تلاش» روی سیم، با ترتیبِ مسیر (توضیحِ بالای GT_PROXY_ENABLED).
    → {r:Response, via:"direct"|"proxy"}؛ فقط وقتی هر دو مسیر پرتاب کنند پرتاب می‌کند. */
 async function gtFetch(url){
+  /* Robinhood: درخواستِ GT که پیش از سوییچ در صف مانده (شبکه‌ی base/solana) هرگز روی سیم نمی‌رود.
+     این شمارنده‌ی rhBlocked را بالا نمی‌برد: کدِ Base اجرا نشده، فقط یک درخواستِ کهنه بوده. */
+  if(activeChain==="robinhood"&&/\/networks\//.test(url)&&!/\/networks\/robinhood\//.test(url)){const e=new Error("gt: stale non-Robinhood request dropped");e.gtPermanent=true;throw e;}
   const init={headers:{accept:"application/json"}};
   const direct=()=>withTimeout(fetch(url,init),9000);
   const proxy=()=>withTimeout(fetch(gtWire(url),init),9000);
@@ -5240,6 +5304,7 @@ function chartMsg(t,opts){
 
 let chartTries=0,chartRetry=null,chartKey="";
 async function loadChart(){
+  if(rhBlock())return;
   const seq=++chartSeq;
   if(!tokenIn||!tokenOut)return;
   // شمارنده‌ی تلاش به همین جفت و همین بازه تعلق دارد، نه به کل جلسه
@@ -5915,6 +5980,7 @@ const metaCache={};        // فقط نتایج موفق
                            // (صف دسته‌ای در tokenMeta پایین‌تر است)
 
 async function loadMetas(addrs){
+  if(rhBlock())return;   // Robinhood: متادیتای توکن‌های Base (GT شبکه‌ی base) هرگز نمی‌رود
   const want=[...new Set(addrs.map(a=>a.toLowerCase()))].filter(a=>!(a in metaCache));
   if(!want.length)return;
   for(let i=0;i<want.length;i+=25){
@@ -6062,14 +6128,29 @@ const SOL_WALLET_OFF_KEY="zaexa.solwallet.off.v1";
    از رویِ آدرس تشخیص می‌دهد). لینکِ اشتراکی `#swap?chain=solana` روی
    localStorage اولویت دارد؛ نبودِ هردو یعنی Base، پیش‌فرضِ همیشگی. */
 const CHAIN_LS_KEY="zaexa.chain.v1";
+/* Robinhood Chain (فاز ۱، فقط نمایش) — سومین زنجیره. قاعده‌ی کار:
+   • شبکه‌ی GeckoTerminal را همیشه gtNetOf می‌گوید ("base" | "solana" | "robinhood")؛ هیچ‌جا سه‌شاخه‌ی درون‌خطی نیست.
+   • هر جایی که Robinhood را نمی‌شناسد باید روی Robinhood دست‌نیافتنی باشد (اعلان جایش را می‌گیرد)؛ rhBlocked
+     هر تلاشِ Base روی Robinhood را می‌شمارد تا کاوشگر [rh no base calls] صفر بودنش را بسنجد. */
+const CHAIN_IDS=["base","solana","robinhood"];
+const isChainId=v=>CHAIN_IDS.includes(v);
+function gtNetOf(chain){return chain==="solana"?"solana":chain==="robinhood"?"robinhood":"base";}
+const RH_NOTICE_SWAP="Swaps on Robinhood Chain are coming soon. Prices and market data are live.";
+const RH_NOTICE_NA="Not available on Robinhood Chain yet";
+const RH_EXPLORER="https://robinhoodchain.blockscout.com";
+const RH_ADDR_RE=/^0x[0-9a-fA-F]{40}$/;
+let rhBlocked=0;
+const onRh=()=>activeChain==="robinhood";
+/* دروازه‌ی دفاعی: اگر کدِ Base روی Robinhood اجرا شود، true برمی‌گرداند و شمرده می‌شود (هیچ درخواستی نمی‌رود). */
+function rhBlock(){if(activeChain!=="robinhood")return false;rhBlocked++;window.__rhBlocked=rhBlocked;return true;}
 function readStoredChain(){
-  try{const v=localStorage.getItem(CHAIN_LS_KEY);return (v==="solana"||v==="base")?v:null;}
+  try{const v=localStorage.getItem(CHAIN_LS_KEY);return isChainId(v)?v:null;}
   catch{return null;}
 }
 function storeChain(v){try{localStorage.setItem(CHAIN_LS_KEY,v);}catch{}}
 function initialChain(){
   const q=parseHash().params.get("chain");
-  if(q==="solana"||q==="base")return q;
+  if(isChainId(q))return q;
   return readStoredChain()||"base";
 }
 let activeChain="base";
@@ -6083,7 +6164,14 @@ function placeNetworkControl(){
   if(!menu||!bar)return;
   const inSwap=!tokenPage&&view==="swap";
   let destination;
-  if(inSwap){
+  /* Robinhood: Swap/Portfolio/Stocks/Exit/Exit Report فقط اعلان دارند؛ انتخابگر داخلِ همان کارتِ اعلان می‌نشیند تا راهِ برگشت بسته نشود.
+     Flow تابلوی واقعی دارد و مثلِ Base/Solana از فضای خودش (fbNetSlot) استفاده می‌کند. */
+  const rhSlot=activeChain==="robinhood"&&!tokenPage&&["swap","folio","stocks","exit","rhreport"].includes(view)
+    ?document.querySelector(view==="swap"?"#rhSwapNotice [data-rhslot]":"#view-"+view+" [data-rhslot]"):null;
+  if(rhSlot){
+    destination=rhSlot;
+    bar.hidden=true;
+  }else if(inSwap){
     const slot=$(activeChain==="solana"?"solSwapNetworkSlot":"baseSwapNetworkSlot");
     if(bar.parentElement!==slot)slot.appendChild(bar);
     destination=bar;
@@ -6097,7 +6185,7 @@ function placeNetworkControl(){
     if(destination===$("headerNetworkAnchor").parentElement)$("headerNetworkAnchor").after(menu);
     else destination.appendChild(menu);
   }
-  bar.hidden=!inSwap;
+  if(!rhSlot)bar.hidden=!inSwap;
   document.documentElement.classList.add("netPlaced");
 }
 
@@ -6209,6 +6297,19 @@ mtabInit();
 let solAppDefaultFailedAt=0;
 let solAppDefaulted=false,solAppDefaultState="idle";   // idle|loading|done|failed
 function updateSwapViewForChain(){
+  if(activeChain==="robinhood"){
+    // فاز ۱: نمای سواپ فقط اعلان است (CSS با data-rh بقیه را پنهان می‌کند). هیچ‌چیزِ Base/Solana اینجا لمس نمی‌شود.
+    savedWatchSelection();
+    placeNetworkControl();
+    paintSrc();paintSrc2();
+    liveStripStop();
+    const ft=document.querySelector(".footTag");
+    if(ft&&ft.dataset.baseCopy)ft.textContent=ft.dataset.baseCopy;
+    const fn=document.querySelector("#view-flow > p");
+    if(fn)fn.textContent="New pools and their activity on Robinhood Chain, read from GeckoTerminal. Samples may not cover every trade or pool.";
+    paintWallet();
+    return;
+  }
   savedWatchSelection();
   placeNetworkControl();
   if(!tokenPage){
@@ -6355,7 +6456,7 @@ function liveStripShow(chain,j){
   }catch{liveStripStop();}
 }
 function refreshLiveStrip(){
-  if(tokenPage||view!=="swap"||!/^https?:$/.test(location.protocol)){liveStripStop();return;}
+  if(activeChain==="robinhood"||tokenPage||view!=="swap"||!/^https?:$/.test(location.protocol)){liveStripStop();return;}
   const chain=activeChain;
   liveStripStop();                       // seq جدید؛ جوابِ دیررسِ زنجیره/نمای قبلی نادیده گرفته می‌شود
   const seq=liveStripSeq;
@@ -6381,27 +6482,34 @@ function refreshLiveStrip(){
 let baseBootPaintPending=false;
 function setChain(next){
 
-  next=(next==="solana")?"solana":"base";
+  next=isChainId(next)?next:"base";
   closeSrcMenu();
   if(next===activeChain)return;
-  if(next==="base"&&!E){
+  const fromRh=activeChain==="robinhood";
+  if((next==="base"||fromRh)&&!E){
     // After a Solana-only report, Trade has already pushed /app without loading
     // EVM dependencies. A hash-only navigation cannot initialize them.
-    storeChain("base");history.pushState(null,"","/app#swap?chain=base");location.reload();return;
+    // Robinhood هم بدونِ ethers بوت می‌شود (هیچ RPCای نیست)؛ برگشت از آن به هر زنجیره‌ی دیگر همین بارگذاریِ کامل را می‌خواهد.
+    storeChain(next);history.pushState(null,"","/app#swap?chain="+next);location.reload();return;
   }
   if(tokenPage){location.assign("/app#swap?chain="+next);return;}
   ++folioSeq;++flowSeq;++marketPairSeq;
   solInvalidateQuote();
   activeChain=next;
   storeChain(next);
+  if(next==="robinhood"){
+    // هر کارِ نیمه‌کاره‌ی Base (کوتِ زمان‌بندی‌شده، نمودار، اسکن) همین‌جا باطل می‌شود؛ جوابِ دیررسشان نادیده گرفته می‌شود
+    clearTimeout(qTimer);currentPlan=null;++quoteSeq;++chartSeq;++scanSeq;++exitSeq;
+    stocksStop();liveStripStop();
+  }
   if(next==="base"&&baseBootPaintPending){baseBootPaintPending=false;paintToken("in",tokenIn);paintToken("out",tokenOut);loadChart();}
   updateSwapViewForChain();
   if(next==="base")ensureBaseDexes().then(()=>{if(activeChain==="base"&&view==="swap")scheduleQuote();}).catch(()=>{});
-  if(view==="swap"){if(next==="solana")solScheduleQuote();else scheduleQuote();}
+  if(view==="swap"&&next!=="robinhood"){if(next==="solana")solScheduleQuote();else scheduleQuote();}
   if(view==="folio")renderFolio();
   if(view==="flow"){paintFlowToken();renderFlow();}
   // تعویض زنجیره: توقف، دادهٔ زنجیرهٔ قبلی پاک، نقاشی دوباره و شروع (stkSeq پاسخ‌های کهنه را می‌اندازد)
-  if(view==="stocks"){stocksStop();stkResetData();stkChainPaint();stocksStart();}
+  if(view==="stocks"){stocksStop();if(next!=="robinhood"){stkResetData();stkChainPaint();stocksStart();}}
 }
 function closeSrcMenu(focusBack){
   $("srcPop").classList.remove("on");
@@ -7077,7 +7185,7 @@ async function loadMarketWatch(chain){
   marketWatchInflight.set(chain,task);return task;
 }
 function refreshMarketWatch(){
-  if(tokenPage||view!=="swap"||document.hidden)return;
+  if(activeChain==="robinhood"||tokenPage||view!=="swap"||document.hidden)return;
   const chain=activeChain,seq=++marketWatchSeq;paintMarketWatch(chain);
   const mc=marketWatchCache.get(chain),mkeys=marketWatchTokens(chain).map(t=>watchAddr(chain,t));
   if(Date.now()-(mc?.t||0)<60000&&mkeys.every(k=>(mc.keys||[]).includes(k)))return;
@@ -7346,6 +7454,13 @@ function fmt(v,dec,p){
 function note(k,h){return `<div class="note ${k}">${h}</div>`;}
 function setNotice(h){$("notices").innerHTML=h||"";}
 function paintSrc(){
+  // data-rh: CSS با آن اعلانِ Robinhood را نشان و محتوای Base-only را پنهان می‌کند (تنها منبعِ این وضعیت؛ هر تغییرِ activeChain از paintSrc می‌گذرد)
+  document.documentElement.toggleAttribute("data-rh",activeChain==="robinhood");
+  // صفحه‌ی /pairs (web/pairs.html) فقط Base/Solana را می‌شناسد: روی Robinhood پیوندش غیرفعال است و تازه‌ها در تابلوی Flow می‌آیند
+  document.querySelectorAll('.mktSwitch a[data-mkt="pairs"]').forEach(a=>{
+    if(activeChain==="robinhood"){a.setAttribute("aria-disabled","true");a.tabIndex=-1;a.title="New Robinhood Chain pools are listed in Flow";}
+    else{a.removeAttribute("aria-disabled");a.removeAttribute("tabindex");a.removeAttribute("title");}
+  });
   document.querySelectorAll('a[href^="/pairs"]').forEach(a=>a.href="/pairs"+(activeChain==="solana"?"?chain=solana":""));
   const icon=$("srcNetworkIcon"),option=document.querySelector('#srcPop [data-chain="'+activeChain+'"] svg');
   if(icon&&option){
@@ -7354,8 +7469,14 @@ function paintSrc(){
     copy.querySelectorAll('*').forEach(el=>{for(const a of [...el.attributes])for(const [old,next] of ids)if(a.value.includes('url(#'+old+')'))el.setAttribute(a.name,a.value.replaceAll('url(#'+old+')','url(#'+next+')'));});
     icon.replaceChildren(copy);
   }
-  $("srcChip").setAttribute("aria-label","Select network: "+(activeChain==="solana"?"Solana":"Base"));
+  $("srcChip").setAttribute("aria-label","Select network: "+(activeChain==="solana"?"Solana":activeChain==="robinhood"?"Robinhood Chain":"Base"));
   const led=$("srcChip").firstElementChild;
+  if(activeChain==="robinhood"){
+    // هیچ RPCِ زنده‌ای خوانده نمی‌شود (فاز ۱: فقط GeckoTerminal) → چراغ خاموش؛ چیپ تخت و بدونِ هاله
+    led.className="led off";
+    $("srcTx").textContent="Robinhood Chain";$("srcTx").style.display="";
+    return;
+  }
   // چیپِ شبکه از ۲۷ سپتامبر یک گزینشگر است؛ روی Solana هیچ RPCِ زنده‌ای
   // اینجا خوانده نمی‌شود (نه eth_call ای)، پس چراغ همیشه خاموش می‌ماند —
   // همان قاعده‌ی «چیزی که نمی‌توانیم اثبات کنیم را ادعا نکنیم».
@@ -7409,12 +7530,14 @@ function savedWatchRead(){
   return rows;
 }
 function savedWatchCurrent(chain){
+  if(chain==='robinhood')return null;   // فاز ۱: دیده‌بانی فقط Base/Solana (pairs.html ردیفِ زنجیره‌ی ناشناس را دور می‌ریزد)
   if(chain==='solana')return savedWatchClean({chain,address:solMintCur,symbol:solTokenSymbol});
   if(!tokenOut||tokenOut.native)return null;
   return savedWatchClean({chain:'base',address:tokenOut.address,symbol:tokenOut.symbol,name:tokenOut.name});
 }
 // کارتِ سواپ: توکنِ «You receive». Base: tokenOut مگر native؛ Solana: mintِ دریافتی مگر SOL
 function savedWatchReceived(chain){
+  if(chain==='robinhood')return null;
   if(chain==='solana'){
     const buy=solSide==='buy',mint=buy?solMintCur:solRefMint;
     if(!mint||mint===SOL_MINT_ADDR)return null;
@@ -7427,7 +7550,7 @@ function savedWatchPlace(){
   const panel=$('savedWatch');
   // Keep the mobile trade button in its existing position: the saved list
   // follows the swap card there, and spans the desktop workspace above it.
-  const show=!tokenPage&&view==='swap';
+  const show=!tokenPage&&view==='swap'&&activeChain!=='robinhood';
   const hero=show?$(activeChain==='solana'?'appSolHero':'baseHeroRow'):null;
   if(hero){
     // زیرِ نوارِ Market watch (اگر هست) تا سرتیترِ نوار و پنل یک تکه دیده شوند
@@ -7814,6 +7937,7 @@ function paintRouteIdle(){
 
 let qTimer=null;
 function scheduleQuote(){
+  if(rhBlock())return;
   hideSwapDone();
   clearTimeout(qTimer);currentPlan=null;
   $(mode==="exactIn"?"amtOut":"amtIn").value="";
@@ -7889,6 +8013,7 @@ async function solveForOutput(tIn,tOut,target,stats,seq){
 /* ۶ اکتبر: روی کلیکِ سواپ (forSwap) منتظرِ exit check نمی‌مانیم؛ نتیجه هر وقت رسید
    رندر می‌شود تا کلیک ۰٫۴ تا ۲ ثانیه عقب نیفتد و برچسبِ «Checking exit…» هم تا ابد نماند. */
 async function runQuote(opts){
+  if(rhBlock())return;
   const seq=++quoteSeq;
   // در حالت معکوس، اول مبلغ ورودی را پیدا می‌کنیم
   if(mode==="targetOut"){
@@ -8378,6 +8503,7 @@ function refreshSolanaViews(){
 }
 
 async function renderFolio(){
+  if(activeChain==="robinhood")return;   // Portfolio روی Robinhood فقط اعلان است
   if(activeChain==="solana")return solRunView("folio",renderSolFolio);
   const seq=++folioSeq;
   const body=$("folioBody");
@@ -8724,6 +8850,7 @@ function exitRender(){
 function exitStatus(msg){$("exitBody").innerHTML='<div class="empty"><span class="spin"></span>'+esc(msg)+"</div>";}
 function exitFail(msg){$("exitBody").innerHTML='<div class="empty">'+esc(msg)+"</div>";}
 async function exitRun(raw){
+  if(rhBlock())return;
   const addr=String(raw||"").trim();
   const bad=exitValidate(addr);
   exitShowErr(bad);
@@ -9000,7 +9127,7 @@ const WINDOWS={m5:{label:"5 minutes",blocks:BASE_BLOCKS_PER_HOUR/12},m15:{label:
   h24:{label:"24 hours",blocks:BASE_BLOCKS_PER_HOUR*24}};
 
 async function renderFlow(){
-  if(flowBoard)return fbRender();
+  if(activeChain==="robinhood"||flowBoard)return fbRender();   // Robinhood: فقط تابلو؛ جریانِ تک‌توکن به RPC نیاز دارد
   flowChrome(false);
   if(activeChain==="solana"){ebOff();return solRunView("flow",renderSolFlow);}
   const seq=++flowSeq,body=$("flowBody");
@@ -9142,6 +9269,8 @@ const fbPref=(()=>{
     if(j&&typeof j==="object"){if(typeof j.only==="boolean")o.only=j.only;if(j.w==="h1"||j.w==="h6")o.w=j.w;if(j.set==="new"||j.set==="est")o.set=j.set;if(j.lg==="top")o.lg="top";}}catch{}
   return o;
 })();
+// Robinhood: «Established» ندارد (فهرستِ شناخته‌شده‌ی Base/Solana است و برای آن چیزی نمی‌دانیم) → همیشه New؛ ترجیحِ ذخیره‌شده‌ی کاربر دست نمی‌خورد
+const fbSet=()=>activeChain==="robinhood"?"new":fbPref.set;
 function fbSavePref(){try{const o={only:fbPref.only,w:fbPref.w,set:fbPref.set};if(fbPref.lg==="top")o.lg="top";localStorage.setItem(FB_LS,JSON.stringify(o));}catch{}}   // lg فقط وقتی پیش‌فرض نیست نوشته می‌شود
 // عددِ نامعتبر/غایب null می‌شود («—»)، هرگز ۰؛ رشته‌ی خالی هم عدد نیست (همان سبکِ renderSolFlow).
 const fbNum=v=>{if(v==null||typeof v==="boolean"||(typeof v==="string"&&v.trim()===""))return null;const n=Number(v);return Number.isFinite(n)?n:null;};
@@ -9176,6 +9305,7 @@ function fbAvatar(el,addr,symbol,url){
   el.appendChild(img);
 }
 async function fbLoad(chain){
+  if(chain==="robinhood")return fbLoadRh();
   const out={chain,t:Date.now(),pairsOk:false,gtOk:true,items:[]};
   let j=null;
   if(/^https?:$/.test(location.protocol)){
@@ -9245,7 +9375,7 @@ function fbRows(d,w){
     const tot=a&&a.buys!==null&&a.sells!==null?a.buys+a.sells:null;
     return {it,a,net,share:tot>0?a.buys/tot:null,vol:a?a.vol:null};
   });
-  if(fbPref.only&&d.set!=="est")list=list.filter(r=>r.it.v==="sell");   // در حالت Established سوییچ پنهان است
+  if(fbPref.only&&d.set!=="est"&&d.chain!=="robinhood")list=list.filter(r=>r.it.v==="sell");   // در حالت Established سوییچ پنهان است؛ روی Robinhood حکمی نداریم، پس فیلتر نمی‌شود
   // کلیدِ نامعلوم همیشه آخر؛ اول خریدارِ خالص، بعد حجم، بعد تازه‌تر
   const cmp=(x,y,k)=>{
     if((x[k]===null)!==(y[k]===null))return x[k]===null?1:-1;
@@ -9256,14 +9386,21 @@ function fbRows(d,w){
 }
 // سرِ تابلو یک بار در HTML است (انتخابگرِ شبکه داخلش می‌نشیند و با بازنقاشیِ جدول از بین نمی‌رود)؛ فقط متن و حالت‌ها هماهنگ می‌شود
 function fbHead(d){
-  const w=fbPref.w,name=(d?d.chain:activeChain)==="solana"?"Solana":"Base";
-  const est=fbPref.set==="est";
+  const w=fbPref.w,name=(d?d.chain:activeChain)==="solana"?"Solana":(d?d.chain:activeChain)==="robinhood"?"Robinhood Chain":"Base";
+  const est=fbSet()==="est",rh=activeChain==="robinhood";
   const sub=$("fbSub");if(sub)sub.textContent=`${est?"Established "+name+" tokens":"New "+name+" pairs"} · ${w==="h1"?"last hour":"last 6 hours"} · by unique wallets`;
-  document.querySelectorAll("#fbHead [data-fbset]").forEach(b=>b.classList.toggle("on",b.dataset.fbset===fbPref.set));
+  document.querySelectorAll("#fbHead [data-fbset]").forEach(b=>{
+    b.classList.toggle("on",b.dataset.fbset===fbSet());
+    // Robinhood: Established «Not checked» است و انتخاب‌شدنی نیست
+    const off=rh&&b.dataset.fbset==="est";
+    if(off){b.setAttribute("aria-disabled","true");b.title="Not checked on Robinhood Chain yet";}
+    else{b.removeAttribute("aria-disabled");b.removeAttribute("title");}
+  });
   document.querySelectorAll("#fbHead [data-fbw]").forEach(b=>b.classList.toggle("on",b.dataset.fbw===w));
   const t=document.querySelector("#fbHead [data-fbtog]");if(t){
     t.setAttribute("aria-checked",fbPref.only?"true":"false");
-    t.style.visibility=est?"hidden":"";t.setAttribute("aria-hidden",String(est));t.inert=est;t.tabIndex=est?-1:0;
+    const hideTog=est||rh;   // Robinhood: کلیدِ «مسیر فروش» معنا ندارد (حکمی نداریم) → همان حالتِ پنهانِ Established
+    t.style.visibility=hideTog?"hidden":"";t.setAttribute("aria-hidden",String(hideTog));t.inert=hideTog;t.tabIndex=hideTog?-1:0;
   }   // Reserve the switch's space without changing its stored preference.
   return "";
 }
@@ -9288,7 +9425,7 @@ function fbSkeleton(){
 function fbPaint(){
   const body=$("flowBody"),d=fbData;
   if(!d||!fbOn)return;
-  const w=fbPref.w,now=Date.now(),est=d.set==="est";
+  const w=fbPref.w,now=Date.now(),est=d.set==="est",rh=d.chain==="robinhood";
   let h=fbHead(d)+(fbErr?note("err",esc(fbErr)):"");
   fbShown=[];
   if(!d.pairsOk){
@@ -9318,9 +9455,10 @@ function fbPaint(){
           const m=/^(Not checked)( yet)$|^(.+?)( · .+)$/.exec(lbl);
           if(m)lblHtml=m[1]?`${esc(m[1])}<span class="fbOpt">${esc(m[2])}</span>`:`${esc(m[3])}<span class="fbOpt">${esc(m[4])}</span>`;
         }
-        const sw=fbStarOn(it.addr);
+        if(rh){cls="";lbl="Not checked";ttl="Sell routes are not checked on Robinhood Chain yet";lblHtml=null;}   // حکمِ سمتِ سرور نداریم؛ هرگز «Unknown» یا حکمِ ساختگی
+        const sw=rh?false:fbStarOn(it.addr);
         h+=`<tr class="fbRow" tabindex="0" role="link" data-i="${i}" data-addr="${esc(it.addr)}">
-          <td class="fbStarTd"><button type="button" class="iconBtn fbStar savedToggle" data-fbstar="${i}" aria-pressed="${sw?"true":"false"}" aria-label="${sw?"Stop watching ":"Watch "}${esc(it.symbol)}" title="${sw?"Stop watching ":"Watch "}${esc(it.symbol)}">${sw?"★":"☆"}</button></td>
+          ${rh?'<td class="fbStarTd"></td>':''}${rh?'':`<td class="fbStarTd"><button type="button" class="iconBtn fbStar savedToggle" data-fbstar="${i}" aria-pressed="${sw?"true":"false"}" aria-label="${sw?"Stop watching ":"Watch "}${esc(it.symbol)}" title="${sw?"Stop watching ":"Watch "}${esc(it.symbol)}">${sw?"★":"☆"}</button></td>`}
           <td><div class="fbTok"><span class="av fbAv" data-i="${i}"></span><span class="fbTkTx"><b>${esc(it.symbol)}</b>${est?"":`<span class="fbAge">${esc(fbAge(it.created,now))}</span>`}</span></div></td>
           <td class="mono fbNet" style="font-weight:620">${net}</td>
           <td class="fbBS mono" style="color:var(--tx2)">${bs}</td>
@@ -9332,6 +9470,7 @@ function fbPaint(){
       if(!d.gtOk||!d.items.some(it=>it.act))h+=`<div class="fnote">Market activity is unavailable right now — unknown, not zero.</div>`;
     }
     h+=`<div class="fnote">Counts are GeckoTerminal's pool totals for the window. Net buyers = unique buyers − unique sellers. Not a recommendation.</div>`;
+    if(rh)h+=`<div class="fnote">Sell routes are not checked on Robinhood Chain yet, and anyone can list a token here, including look-alikes of well-known names. Check the contract address before you trust a name.</div>`;
   }
   if(h===fbLast&&body.firstChild)return;     // بدون تغییر: بازنقاشی نکن تا لوگوها سوسو نزنند
   fbLast=h;
@@ -9347,9 +9486,9 @@ function fbPaint(){
   body.querySelectorAll(".fbAv").forEach(el=>{const r=fbShown[+el.dataset.i];if(r)fbAvatar(el,r.it.addr,r.it.symbol,r.it.img);});
 }
 async function fbRender(refresh){
-  const seq=++flowSeq,chain=activeChain,set=fbPref.set;
+  const seq=++flowSeq,chain=activeChain,set=fbSet();
   flowChrome(true);
-  const cur=()=>seq===flowSeq&&fbOn&&activeChain===chain&&fbPref.set===set;
+  const cur=()=>seq===flowSeq&&fbOn&&activeChain===chain&&fbSet()===set;
   const have=!!fbData&&fbData.chain===chain&&fbData.set===set;
   if(have){
     fbPaint();
@@ -9426,6 +9565,7 @@ async function fbLoadEst(chain){
 // تعویضِ مجموعه: داده‌ی مجموعه‌ی قبلی کنار گذاشته می‌شود (≤۶۰ث) تا برگشت دوباره از GT نخواهد؛ فقط یک fbRender
 const fbStash={};
 function fbSwitchSet(s){
+  if(activeChain==="robinhood")return;   // Established روی Robinhood «Not checked» است
   if(s===fbPref.set)return;
   if(fbData&&fbData.set)fbStash[fbData.chain+":"+fbData.set]=fbData;
   fbPref.set=s;fbSavePref();fbErr="";
@@ -9438,6 +9578,12 @@ async function fbOpen(addr){
   if(fbOpening)return;
   fbOpening=true;fbErr="";
   try{
+    if(activeChain==="robinhood"){
+      // سواپ نیست؛ ردیف به صفحه‌ی توکنِ Robinhood می‌رود (بارگذاریِ کامل: بوتِ تمیز، بدونِ هیچ حالتِ Base)
+      if(!RH_ADDR_RE.test(addr))throw new Error("bad address");
+      location.assign("/t/"+addr.toLowerCase()+"?chain=robinhood");
+      return;
+    }
     if(activeChain==="solana"){
       if(!SOL_MINT_RE.test(addr))throw new Error("bad address");
       flowBoard=false;
@@ -9544,18 +9690,18 @@ function ebHtml(r,symbol){
     <div class="ebPct mono">${r.pct.toFixed(0)}% of their tokens sold</div></div>
     <div class="fnote">Only sells through this pool are counted; tokens moved to another wallet look like holding.</div></div>`;
 }
-function ebStartBase(t){
-  const key="base|"+t.address.toLowerCase(),mine=++ebSeq;
+function ebStartBase(t,netId){
+  const net=netId||CHAIN.gtNetwork,key=net+"|"+t.address.toLowerCase(),mine=++ebSeq;
   if(ebCache&&ebCache.key===key&&Date.now()-ebCache.t<EB_TTL){ebShow(ebCache.html);return;}
   ebShow(ebLoadHtml());
-  ebFetchBase(t).then(res=>{
+  ebFetchBase(t,net).then(res=>{
     if(mine!==ebSeq)return;
     if(res.keep)ebCache={key,t:Date.now(),html:res.html};
     ebShow(res.html);
   });
 }
-async function ebFetchBase(t){
-  const net=CHAIN.gtNetwork,fail={html:ebUnkHtml("na"),keep:false};
+async function ebFetchBase(t,netId){
+  const net=netId||CHAIN.gtNetwork,fail={html:ebUnkHtml("na"),keep:false};
   try{
     const j=await gtJson(`${GT}/networks/${net}/tokens/${t.address}?include=top_pools`);
     const tp=j&&j.data&&j.data.relationships&&j.data.relationships.top_pools&&j.data.relationships.top_pools.data;
@@ -9713,7 +9859,7 @@ function lgRowsHtml(st){
       <span class="amt2 mono">${fmtBig(x.usd)}</span>${lgOkAddr(w)?link:`<span class="mono" style="font-size:11.5px;color:var(--tx3)">${esc(shortAddr(w))}</span>`}${lgCellHtml(st,x,max)}<span class="ago">${agoText(x.ts)}</span>${LG_CHEV}</div>${open?lgPanelHtml(st,x):""}</div>`;
   }).join("");
 }
-function lgHtml(r,solana,st){
+function lgHtml(r,solana,st,exp){
   if(!r.rows.length)return lgMsgHtml("No trades of $1,000 or more in the latest data.");
   const hh=new Date(r.oldest),t=String(hh.getUTCHours()).padStart(2,"0")+":"+String(hh.getUTCMinutes()).padStart(2,"0");
   const win=r.total>=300?`Latest 300 trades (the feed is capped) since ${t} UTC`:`Last ${r.total} trades since ${t} UTC`;
@@ -9723,7 +9869,7 @@ function lgHtml(r,solana,st){
   const link=w=>{
     const ok=solana?/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(w):/^0x[0-9a-fA-F]{40}$/.test(w);
     const sh=shortAddr(w);
-    return ok?`<a class="mono" target="_blank" rel="noopener" href="${solana?"https://solscan.io/account/":CHAIN.explorer+"/address/"}${w}">${sh}</a>`:`<span class="mono" style="font-size:11.5px;color:var(--tx3)">${esc(sh)}</span>`;
+    return ok?`<a class="mono" target="_blank" rel="noopener" href="${solana?"https://solscan.io/account/":(exp||CHAIN.explorer)+"/address/"}${w}">${sh}</a>`:`<span class="mono" style="font-size:11.5px;color:var(--tx3)">${esc(sh)}</span>`;
   };
   const sum=`<div class="lgSum"><span>Big buyers <b class="mono">${r.buyers}</b> · Big sellers <b class="mono">${r.sellers}</b></span>${net}</div>`;
   if(!solana&&st){
@@ -9859,7 +10005,7 @@ function lgPnlGo(st){
   };
   for(let i=0;i<Math.min(LG_PNL_CONC,todo.length);i++)worker();
 }
-async function lgRun(net,tokenAddr,lower,getPool,sym){
+async function lgRun(net,tokenAddr,lower,getPool,sym,opts){
   const mine=++lgSeq,box=$("flowLarge"),k=net+"|"+tokenAddr;
   if(box&&(box.hidden||box.dataset.k!==k))lgShow(lgLoadHtml());   // همان توکن: کارتِ قبلی می‌ماند، سوسو نمی‌زند
   if(box)box.dataset.k=k;
@@ -9868,8 +10014,8 @@ async function lgRun(net,tokenAddr,lower,getPool,sym){
     const g=await getPool();
     const data=await lgFetch(net,g.pool);
     const r=lgAnalyze(data,tokenAddr,lower);
-    st=lower?lgState(k,r,g.px,sym,mine,tokenAddr):null;
-    html=lgHtml(r,!lower,st);
+    st=lower&&!(opts&&opts.noPnl)?lgState(k,r,g.px,sym,mine,tokenAddr):null;   // P&L به Worker/Base می‌رود؛ روی Robinhood فهرستِ ساده
+    html=lgHtml(r,!lower,st,opts&&opts.explorer);
   }catch{html=lgMsgHtml("Large trades could not be loaded right now.");}
   if(mine===lgSeq){lgShow(html);if(st)lgPnlGo(st);}
 }
@@ -9884,8 +10030,8 @@ function lgStartSol(mint,cache){
   }catch{html=lgMsgHtml("Large trades could not be loaded right now.");}
   lgShow(html);
 }
-function lgStartBase(t){
-  const net=CHAIN.gtNetwork;
+function lgStartBase(t,netId,opts){
+  const net=netId||CHAIN.gtNetwork;
   return lgRun(net,t.address,true,async()=>{
     const j=await gtJson(`${GT}/networks/${net}/tokens/${t.address}?include=top_pools`);   // همان آدرسِ Early buyers؛ کش/هم‌زمان
     const pv=j&&j.data&&j.data.attributes&&j.data.attributes.price_usd,px=pv==null||pv===""?NaN:Number(pv);   // قیمتِ همین پاسخ؛ نبودنش = P&L نامعلوم
@@ -9895,7 +10041,7 @@ function lgStartBase(t){
     const pool=id.slice(net.length+1);
     if(!/^0x[0-9a-fA-F]{40}$/.test(pool))throw new Error("lg: bad pool");
     return {pool,px:Number.isFinite(px)&&px>0&&px<=1e9?px:null};
-  },t.symbol);
+  },t.symbol,opts);
 }
 
 /* کلیکِ ردیف (باز/بسته) و کلیدِ Latest|Top P&L — یک شنونده‌ی تفویضی؛ پیوندِ آدرس ردیف را باز نمی‌کند. */
@@ -9920,8 +10066,199 @@ function lgStartBase(t){
   });
 })();
 
+/* =====================================================================
+   Robinhood Chain — فاز ۱ (فقط نمایش) — داده فقط از GeckoTerminal، شبکه‌ی `robinhood`
+   ---------------------------------------------------------------------
+   • هیچ RPC، هیچ multicall، هیچ /vd و /exit، هیچ حکمِ فروش: هر چیزی که «حکم» بود اینجا «Not checked» است.
+   • توکن‌های سهامِ Robinhood هیچ‌جا فهرست نمی‌شوند و هیچ توکنی «رسمی» برچسب نمی‌خورد (نمونه‌های جعلی فراوان‌اند؛
+     بزرگ‌ترین استخرِ GT برای «ANT/WETH» جعلی است).
+   • آدرس‌ها EVM هستند → کلیدِ GT همیشه lower-case (مثلِ Base).
+   ===================================================================== */
+const RH_MIN_RESERVE=5000;   // همان کفِ ذخیره‌ی REPORT_MIN_RESERVE_USDِ Worker برای فهرستِ Base؛ استخرِ بی‌ذخیره یا با ذخیره‌ی نامعلوم فهرست نمی‌شود
+// تابلوی «New tokens»: Base از /pairs.json (انبار Worker) می‌آید؛ Robinhood انباری ندارد، پس مستقیم از new_pools خودِ GT
+async function fbLoadRh(){
+  const chain="robinhood",net=gtNetOf(chain),key=a=>a.toLowerCase();
+  const out={chain,t:Date.now(),pairsOk:false,gtOk:true,items:[]};
+  let pj=null;
+  try{pj=await gtJson(`${GT}/networks/${net}/new_pools?page=1`);}catch{return out;}
+  if(!pj||!Array.isArray(pj.data))return out;
+  out.pairsOk=true;
+  const seen=new Set(),rows=[];
+  for(const p of pj.data){
+    const a=p&&p.attributes||{};
+    const bt=p&&p.relationships&&p.relationships.base_token&&p.relationships.base_token.data&&p.relationships.base_token.data.id;
+    if(typeof bt!=="string"||!bt.startsWith(net+"_"))continue;
+    const addr=bt.slice(net.length+1);
+    if(!RH_ADDR_RE.test(addr)||/^0x0{40}$/i.test(addr)||seen.has(key(addr)))continue;
+    const created=typeof a.pool_created_at==="string"?Date.parse(a.pool_created_at):NaN;
+    if(!Number.isFinite(created))continue;
+    const reserve=fbNum(a.reserve_in_usd);   // GT رشته می‌فرستد
+    if(reserve===null||reserve<RH_MIN_RESERVE)continue;
+    seen.add(key(addr));
+    // نماد از نامِ استخر («SYM / WETH 0.3%») تا تأییدِ tokens/multi؛ فقط شکلِ امنِ liveStripName پذیرفته می‌شود
+    const first=typeof a.name==="string"?a.name.split(" / ")[0].trim():"";
+    rows.push({addr:key(addr),symbol:liveStripName({symbol:first,address:key(addr)},"base"),v:null,checkedAt:null,created,img:null,pool:null,act:null});
+  }
+  rows.sort((x,y)=>y.created-x.created);
+  out.items=rows.slice(0,FB_FETCH);
+  if(!out.items.length)return out;
+  const byAddr=new Map(out.items.map(it=>[key(it.addr),it]));
+  const poolsOf=new Map();
+  try{
+    const tj=await gtJson(`${GT}/networks/${net}/tokens/multi/${out.items.map(i=>i.addr).join(",")}?include=top_pools`);
+    if(!tj||!Array.isArray(tj.data))throw new Error("tokens/multi unavailable");
+    for(const row of tj.data){
+      const a=row&&row.attributes||{};
+      const it=typeof a.address==="string"?byAddr.get(key(a.address)):null;
+      if(!it)continue;
+      if(typeof a.symbol==="string"&&a.symbol)it.symbol=liveStripName({symbol:a.symbol,address:it.addr},"base");
+      if(typeof a.image_url==="string"&&okLogo(a.image_url)&&a.image_url!=="")it.img=a.image_url;
+      const tp=row.relationships&&row.relationships.top_pools&&row.relationships.top_pools.data;
+      const id=tp&&tp[0]&&tp[0].id;
+      if(typeof id==="string"&&id.startsWith(net+"_")){it.pool=key(id.slice(net.length+1));poolsOf.set(it.pool,true);}
+    }
+  }catch{out.gtOk=false;return out;}
+  if(poolsOf.size){
+    try{
+      const pj2=await gtJson(`${GT}/networks/${net}/pools/multi/${[...poolsOf.keys()].join(",")}`);
+      if(!pj2||!Array.isArray(pj2.data))throw new Error("pools/multi unavailable");
+      const byPool=new Map();
+      for(const row of pj2.data){
+        const a=row&&row.attributes||{};
+        const id=typeof row.id==="string"&&row.id.startsWith(net+"_")?row.id.slice(net.length+1):a.address;
+        if(typeof id==="string")byPool.set(key(id),a);
+      }
+      for(const it of out.items){
+        const a=it.pool?byPool.get(it.pool):null;
+        if(!a)continue;
+        it.act={};
+        for(const w of ["h1","h6"]){
+          const tx=a.transactions&&a.transactions[w];
+          it.act[w]={buyers:fbCnt(tx&&tx.buyers),sellers:fbCnt(tx&&tx.sellers),buys:fbCnt(tx&&tx.buys),sells:fbCnt(tx&&tx.sells),
+            vol:fbCnt(a.volume_usd&&a.volume_usd[w])};
+        }
+      }
+    }catch{out.gtOk=false;}
+  }
+  return out;
+}
+
+/* ---- صفحه‌ی توکنِ Robinhood: /t/<0x…>?chain=robinhood ----
+   سندِ همان index.html است (مثلِ /t/ی Base و سولانا)؛ هیچ ethers، RPC، کیف‌پول و /vd نیست. تنها منبع: GT شبکه‌ی robinhood. */
+let rhTkSeq=0,rhHome=null;
+const rhNotCheckedHtml=(ttl,msg)=>`<div class="rhNotChecked"><b>${esc(ttl)}</b>${esc(msg)}</div>`;
+function rhTkMountCards(){
+  const left=document.querySelector("#tk-grid .tkLeft");
+  let pools=$("rhTkPools");
+  if(!pools){
+    pools=document.createElement("section");pools.className="card rhTkPools";pools.id="rhTkPools";
+    pools.innerHTML='<header><span class="ttl">Pools</span><span class="grow"></span><span class="ttl mono" id="rhTkPoolsMeta">—</span></header><div id="rhTkPoolsBody"><div class="empty">Loading pools…</div></div>';
+  }
+  left.appendChild(pools);
+  const eb=$("flowEarly"),lg=$("flowLarge");
+  if(eb&&lg){
+    if(!rhHome)rhHome={parent:eb.parentNode};
+    left.append(eb,lg);
+  }
+}
+function rhTkUnmountCards(){
+  const eb=$("flowEarly"),lg=$("flowLarge");
+  ebOff();
+  if(rhHome&&eb&&lg)rhHome.parent.append(eb,lg);
+  const pools=$("rhTkPools");if(pools)pools.remove();
+}
+function rhPoolsRender(list,addr){
+  const body=$("rhTkPoolsBody");if(!body)return;
+  const rows=(Array.isArray(list)?list:[]).slice(0,8);
+  $("rhTkPoolsMeta").textContent=rows.length?(rows.length+(rows.length===1?" pool":" pools")):"—";
+  if(!rows.length){body.innerHTML='<div class="empty">No pool is listed for this token. That is unknown, not zero.</div>';return;}
+  body.innerHTML=rows.map(p=>{
+    const a=p&&p.attributes||{};
+    const dex=p&&p.relationships&&p.relationships.dex&&p.relationships.dex.data&&p.relationships.dex.data.id;
+    const liq=fbNum(a.reserve_in_usd),vol=fbNum(a.volume_usd&&a.volume_usd.h24);
+    return `<div class="rhRow"><span><b>${esc(typeof a.name==="string"?a.name:"Pool")}</b><small>${esc(typeof dex==="string"?dex:"dex unknown")}</small></span>
+      <span class="mono">${liq===null?"—":esc(fmtBig(liq))}<small>liquidity</small></span><span class="mono">${vol===null?"—":esc(fmtBig(vol))}<small>volume 24h</small></span></div>`;
+  }).join("");
+}
+async function rhTkChart(addr,seq,sym,pool,side){
+  const els={plotEl:$("tk-plot"),msgEl:$("tk-chartMsg"),tipEl:$("tk-tip")};
+  $("tk-pairName").textContent=(sym||"Token")+" / USD";
+  chartMsg("Loading price history…",els);
+  try{
+    if(!pool)throw new Error("no pool");
+    const cfg=TFS["1D"];
+    const j=await gtJson(`${GT}/networks/robinhood/pools/${pool}/ohlcv/${cfg.tf}?aggregate=${cfg.agg}&limit=${cfg.limit}&currency=usd&token=${side}`);
+    const raw=(((j||{}).data||{}).attributes||{}).ohlcv_list||[];
+    const data=raw.map(r=>({t:Number(r[0]),c:Number(r[4])})).filter(p=>isFinite(p.t)&&isFinite(p.c)&&p.c>0).sort((x,y)=>x.t-y.t);
+    if(seq!==rhTkSeq)return;
+    if(data.length<2){chartMsg("Not enough price history for this pair yet.",els);return;}
+    els.msgEl.style.display="none";
+    drawChart(data,Object.assign({unitSymbol:null,tf:"1D"},els));
+    const first=data[0].c,last=data[data.length-1].c,ch=(last-first)/first*100;
+    $("tk-pxNow").textContent=fmtPx(last);
+    const el=$("tk-pxChg");el.className="chg mono "+(ch>=0?"up":"down");
+    el.textContent=(ch>=0?"▲ ":"▼ ")+Math.abs(ch).toFixed(2)+"%  ·  1D";
+  }catch{
+    if(seq!==rhTkSeq)return;
+    chartMsg("Price history is unavailable right now.",els);   // «نمی‌دانم»، نه «قیمت ندارد»
+  }
+}
+async function openRhTokenPage(addr){
+  const a=String(addr).toLowerCase(),seq=++rhTkSeq,net=gtNetOf("robinhood");
+  // متنِ سمتِ سرور (tk-facts) برای Base ساخته می‌شود؛ برای یک آدرسِ Robinhood هرگز نشان داده نمی‌شود
+  const f=$("tk-facts");if(f){f.hidden=true;f.textContent="";f.dataset.addr="";}
+  paintReportNetwork("robinhood");
+  $("tk-trade").hidden=true;$("tk-copy").hidden=true;   // سواپ و لینکِ «بررسی» (حکمِ Base) در فاز ۱ نیستند
+  $("tk-chartCard").hidden=false;$("tk-fine").hidden=true;$("tk-grid").style.gridTemplateColumns="";
+  $("tk-sym").textContent="—";$("tk-name").textContent="";$("tk-px").textContent="—";
+  $("tk-addr").textContent=shortAddr(a);$("tk-addr").href=RH_EXPLORER+"/token/"+a;
+  paintFallbackAvatar($("tk-av"),a,"");
+  $("tk-exitBox").innerHTML=rhNotCheckedHtml("Not checked","Sell-back and exit checks are not available on Robinhood Chain yet. Not checked does not mean safe.");
+  $("tk-safetyBody").innerHTML=rhNotCheckedHtml("Not checked","Token safety checks are not available on Robinhood Chain yet. Anyone can create a token with any name here, including look-alikes of well-known names — check the contract address.");
+  rhTkMountCards();
+  let meta=null,pools=[];
+  try{
+    const j=await gtJson(`${GT}/networks/${net}/tokens/${a}`);
+    const at=j&&j.data&&j.data.attributes;
+    meta=at&&typeof at==="object"?at:null;
+  }catch{meta=null;}
+  if(seq!==rhTkSeq)return;
+  const sym=meta&&typeof meta.symbol==="string"&&meta.symbol?meta.symbol:"Unknown token";
+  $("tk-sym").textContent=sym;
+  $("tk-name").textContent=meta&&typeof meta.name==="string"?meta.name:"";
+  const px=meta&&meta.price_usd!=null?Number(meta.price_usd):NaN;
+  $("tk-px").textContent=(isFinite(px)&&px>0)?("$"+(px<1?px.toPrecision(4):px.toLocaleString(undefined,{maximumFractionDigits:2}))):"—";
+  const av=$("tk-av");av.innerHTML="";paintFallbackAvatar(av,a,sym);
+  if(meta&&typeof meta.image_url==="string"&&okLogo(meta.image_url)){
+    const img=new Image();img.alt="";img.loading="lazy";img.onload=()=>img.classList.add("on");img.onerror=()=>img.remove();img.src=meta.image_url;av.appendChild(img);
+  }
+  renderSolStats(meta);   // همان قاعده‌ی چهار عدد (mcap>FDV محال پنهان می‌شود)؛ فقط به attributes خام GT نگاه می‌کند
+  try{
+    const pj=await gtJson(`${GT}/networks/${net}/tokens/${a}/pools?page=1`);
+    pools=pj&&Array.isArray(pj.data)?pj.data:[];
+  }catch{pools=[];}
+  if(seq!==rhTkSeq)return;
+  rhPoolsRender(pools,a);
+  const eq=id=>typeof id==="string"&&id.toLowerCase()===net+"_"+a;
+  const top=pools.find(p=>p&&p.relationships&&(eq(p.relationships.base_token&&p.relationships.base_token.data&&p.relationships.base_token.data.id)||
+    eq(p.relationships.quote_token&&p.relationships.quote_token.data&&p.relationships.quote_token.data.id)));
+  const poolId=top?String((top.attributes&&top.attributes.address)||String(top.id||"").slice(net.length+1)):"";
+  const side=top&&eq(top.relationships.quote_token&&top.relationships.quote_token.data&&top.relationships.quote_token.data.id)?"quote":"base";
+  rhTkChart(a,seq,sym,okPool(poolId)?poolId:"",side);
+  ebStartBase({address:a,symbol:sym},net);                       // Early buyers: GT-only، همان قاعده‌ی Base
+  lgStartBase({address:a,symbol:sym},net,{noPnl:true,explorer:RH_EXPLORER});   // Large trades: بدونِ P&L (آن به Worker/Base می‌رود)
+}
+// خروج از صفحه‌ی توکنِ Robinhood (leaveTokenPage): کارت‌های جابه‌جا‌شده به جای خود برمی‌گردند
+function rhTokenLeave(){
+  ++rhTkSeq;
+  rhTkUnmountCards();
+  $("tk-trade").hidden=false;$("tk-copy").hidden=false;
+  storeChain("robinhood");
+}
+
 /* ---------- safety panel ---------- */
 async function runScan(token){
+  if(rhBlock())return;
   const seq=++scanSeq;
   if(!token)return;
   $("safetySym").textContent=token.symbol;
@@ -10414,6 +10751,12 @@ async function switchNetwork(){
 }
 function paintWallet(){
   const b=$("connectBtn"),addr=$("walletAddr");
+  /* Robinhood (فاز ۱): هیچ اتصال/تعویضِ زنجیره‌ای نیست — دکمه غیرفعال و بی‌اثر است (کیف‌پولِ Base/Solana دست‌نخورده می‌ماند). */
+  if(activeChain==="robinhood"){
+    b.removeAttribute("aria-busy");b.disabled=true;b.textContent="Connect wallet";b.className="chip solid";
+    b.title="Wallets are not supported on Robinhood Chain yet";addr.textContent="—";closeWalletMenu();return;
+  }
+  if(b.title==="Wallets are not supported on Robinhood Chain yet")b.removeAttribute("title");
   // روی /app با زنجیره‌ی Solana، این دکمه کیف‌پولِ سولانا را نشان می‌دهد —
   // کیف‌پولِ Base (account) دست‌نخورده در پس‌زمینه می‌ماند، فقط پنهان است.
   if(activeChain!=="solana")b.removeAttribute("aria-busy");
@@ -10533,6 +10876,7 @@ async function disconnect(){
         "list this site as allowed — remove it there if you want the access gone too."));
 }
 async function refreshBalances(){
+  if(rhBlock())return;
   if(!account){balances={};paintBalances();return;}
   const toks=allTokens().filter(t=>!t.native);
   try{
@@ -10552,9 +10896,9 @@ async function refreshBalances(){
 let balTimer=null;
 function startBalanceWatch(){
   clearInterval(balTimer);
-  balTimer=setInterval(()=>{if(account&&!document.hidden)refreshBalances();},15000);
+  balTimer=setInterval(()=>{if(account&&!document.hidden&&activeChain!=="robinhood")refreshBalances();},15000);
 }
-document.addEventListener("visibilitychange",()=>{if(!document.hidden&&account)refreshBalances();});
+document.addEventListener("visibilitychange",()=>{if(!document.hidden&&account&&activeChain!=="robinhood")refreshBalances();});
 // نمای Stocks در تبِ پنهان چیزی نمی‌خواند؛ وقتی تب دوباره دیده شد و هنوز داده‌ای نیامده، همان لحظه بخوان (نه ۶۰ ثانیه بعد).
 document.addEventListener("visibilitychange",()=>{if(!document.hidden&&stkActive&&view==="stocks"&&!stkData.loaded)stocksTick();});
 addEventListener("focus",()=>{if(account)refreshBalances();});
@@ -10566,6 +10910,7 @@ async function readFee(){
   }catch{}
 }
 async function refreshAllowance(){
+  if(rhBlock())return;
   allowance=0n;allowanceKnown=false;
   if(!account||!tokenIn)return;
   const tk=tokenIn,acc=account;
@@ -11404,7 +11749,7 @@ function tokenPageUrl(t){
 function paintReportNetwork(chain){
   const badge=$("tk-chip"),logo=document.querySelector('#srcPop [data-chain="'+chain+'"] svg');
   badge.dataset.chain=chain;
-  const name=document.createElement('span');name.textContent=chain==="solana"?"Solana":"Base";
+  const name=document.createElement('span');name.textContent=chain==="solana"?"Solana":chain==="robinhood"?"Robinhood Chain":"Base";
   const copy=logo.cloneNode(true);
   copy.querySelectorAll('[id]').forEach(el=>{const old=el.id;el.id+='Report';copy.querySelectorAll('*').forEach(x=>{for(const a of [...x.attributes])if(a.value.includes('url(#'+old+')'))x.setAttribute(a.name,a.value.replaceAll('url(#'+old+')','url(#'+old+'Report)'));});});
   badge.replaceChildren(copy,name);
@@ -13503,6 +13848,7 @@ function restorePair(){
      باشد. عمداً خوانده نمی‌شود — بالای این فایل نوشته چرا. */
 }
 async function applyShareParams(){
+  if(activeChain==="robinhood")return;   // لینکِ اشتراکِ سواپ روی Robinhood معنا ندارد (سواپ نیست)
   const {params}=parseHash();
   if(params.get("chain")==="solana"){await solApplyShare(params);return;}
   if(!params.has("in")&&!params.has("out")&&!params.has("amt"))return;
@@ -13550,6 +13896,7 @@ function leaveTokenPage(v){
   renderedPath=location.pathname;
   $("amtIn").value="";$("amtOut").value="";
   mode="exactIn";setNotice("");
+  if(activeChain==="robinhood"){rhTokenLeave();return;}
   if(activeChain==="solana"){
     storeChain("solana");solMode="exactIn";$("solAmt").value="";$("solOutRead").value="";
     solInvalidateQuote();updateSwapViewForChain();solPaintLegs();solAppLoadToken(solMintCur);return;
@@ -13900,6 +14247,7 @@ function stkChainPaint(){
   stkStarSync();
 }
 function stocksStart(){
+  if(activeChain==="robinhood")return;   // Stocks روی Robinhood فقط اعلان است: نه multicall، نه GT
   if(stkActive)return;stkActive=true;
   if(stkDataChain!==activeChain)stkResetData();
   stkChainPaint();stkPaintLogos();stkPaint();stocksTick();
@@ -13981,7 +14329,8 @@ function mktGet(){try{return localStorage.getItem(MKT_KEY)==="flow"?"flow":"pair
 function mktSet(v){try{localStorage.setItem(MKT_KEY,v);}catch(e){}}
 function setView(v,push){
   if(v&&v.indexOf("?")>=0)v=v.slice(0,v.indexOf("?"));
-  if(!["swap","folio","flow","token","faq","stocks","exit"].includes(v))v="swap";
+  if(!["swap","folio","flow","token","faq","stocks","exit","rhreport"].includes(v))v="swap";
+  if(v==="rhreport"){if(activeChain!=="robinhood")v="swap";else push=false;}   // نمای اعلانِ Exit Report فقط روی Robinhood وجود دارد و در هش نمی‌نشیند
   /* اگر از صفحه‌ی توکن بیرون می‌رویم، آدرس را خودِ leaveTokenPage عوض
      می‌کند، پس دیگر hash نباید دوباره نوشته شود. */
   const leaving=tokenPage&&v!=="token";
@@ -14022,6 +14371,7 @@ function setView(v,push){
    توکن (یا لوگو/نمادش) واقعاً عوض شده نقاشی می‌شود؛ کلیدِ آخر روی خودِ عنصر می‌ماند. */
 function paintFlowToken(){
   const av=$("flowTokAv");
+  if(activeChain==="robinhood"){$("flowTokSym").textContent="—";return;}   // دکمه‌ی انتخابِ توکن روی تابلو پنهان است
   if(activeChain==="solana"){
     // SOL همان لوگوی واقعیِ wSOL (یا گرادیانِ جایگزین) را می‌گیرد که جای دیگر هم دارد.
     const isSol=solMintCur===SOL_MINT_ADDR;
@@ -14098,6 +14448,7 @@ function wire(){
   document.addEventListener("mousedown",e=>{
     if(!$("srcPop").contains(e.target)&&!$("srcChip").contains(e.target))closeSrcMenu();});
   $("connectBtn").onclick=()=>{
+    if(activeChain==="robinhood")return;   // فاز ۱: هیچ درخواستِ اتصال/تعویضِ زنجیره برای Robinhood نیست
     if(activeChain==="solana"&&solPendingRestore())return;   // بازیابیِ نشست در جریان است
     if(activeChain==="solana"){
       if(!solAccount){solOpenWalletPicker();return;}
@@ -14172,7 +14523,7 @@ function wire(){
     // لینکِ اشتراکِ سولانا (in/out/amt) باید همان مسیرِ بوت را برود، نه فقط تعویضِ زنجیره.
     const hp=parseHash().params;
     if(hc==="solana"&&(hp.has("in")||hp.has("out")||hp.has("amt")))applyShareParams();
-    else if(hc==="solana"||hc==="base")setChain(hc);
+    else if(hc==="solana"||hc==="base"||hc==="robinhood")setChain(hc);
   });
   $("flowTokBtn").onclick=()=>{flowPicking=true;if(activeChain==="solana")solOpenTokenPicker();else openPicker("out");};
   setInterval(()=>{if(!document.hidden){refreshSolanaViews();refreshMarketWatch();}},30000);
@@ -14196,9 +14547,13 @@ function wire(){
   /* ۱۸ اکتبر — تبِ Markets بازشو نیست: کلید zaexa.markets.v1 («flow» یا «pairs»؛ هر چیزِ دیگر = pairs) می‌گوید کدام
      صفحه باز شود. Flow همین‌جا نما را عوض می‌کند، pairs به /pairs می‌رود. */
   $("navMarkets").onclick=()=>{
-    if(mktGet()==="flow")setView("flow");else location.href="/pairs";};
+    if(activeChain==="robinhood"||mktGet()==="flow")setView("flow");else location.href="/pairs";};   // Robinhood: /pairs آن را نمی‌شناسد
+  /* Robinhood: /report مالِ Base/Solana است → کلیکِ تبِ Exit Report فقط نمای اعلان را باز می‌کند (روی Base/Solana پیوندِ واقعی دست‌نخورده می‌ماند) */
+  document.querySelectorAll('#nav a.navLink[href="/report"]').forEach(a=>a.addEventListener("click",e=>{
+    if(activeChain==="robinhood"){e.preventDefault();setView("rhreport");}}));
   /* سوییچِ بالای نمای Flow: اول انتخاب ذخیره می‌شود، بعد Flow درجا (بدونِ بارگذاریِ دوباره) و New pairs با ناوبری. */
   document.querySelectorAll(".mktSwitch a[data-mkt]").forEach(a=>a.addEventListener("click",e=>{
+    if(activeChain==="robinhood"&&a.dataset.mkt==="pairs"){e.preventDefault();return;}
     mktSet(a.dataset.mkt);
     if(a.dataset.mkt==="flow"){e.preventDefault();setView("flow");}}));
   document.addEventListener("mousedown",e=>{
@@ -14347,7 +14702,7 @@ function tourStoreOk(){
   }catch{return false;}
 }
 function tourMaybe(){
-  if(tour||tokenPage||view!=="swap"||/^\/t\//.test(location.pathname))return;
+  if(tour||tokenPage||view!=="swap"||/^\/t\//.test(location.pathname)||activeChain==="robinhood")return;
   const h=parseHash();
   if(h.view&&h.view!=="swap")return;
   if(["in","out","amt","check"].some(k=>h.params.has(k)))return;
@@ -14500,16 +14855,23 @@ $("setBtn").addEventListener("click",()=>{$("tourBtn").hidden=!!tokenPage;});
   // اتصالِ بی‌صدایش را از دست می‌دهد چون solLastWalletName هنوز خالی است.
   solTryAutoRestoreName();
   activeChain=initialChain();
+  /* Robinhood Chain (فاز ۱): /t/0x…?chain=robinhood صفحه‌ی توکنِ آن است؛ /t/0x… بدونِ پرچم همیشه Base است (انتخابِ ذخیره‌شده را عوض نمی‌کند).
+     بوتِ Robinhood اصلاً ethers، RPC، دروازه‌های صرافی و بازیابیِ کیف‌پول ندارد. */
+  const rhTokMatch=/^\/t\/(0x[0-9a-fA-F]{40})\/?$/.exec(location.pathname);
+  let rhTokFlag=false;try{rhTokFlag=new URLSearchParams(location.search).get("chain")==="robinhood";}catch{}
+  if(rhTokMatch&&rhTokFlag)activeChain="robinhood";
+  else if(rhTokMatch&&activeChain==="robinhood")activeChain="base";
+  const rhBoot=activeChain==="robinhood";
   if(activeChain!=="solana")globalThis.__zxSolPend=null;
   solArmPendingTimeout();
-  if(activeChain==="solana"||solanaReadOnly)globalThis.__zxBasePend=null;   // Base-pending فقط روی Base
+  if(activeChain==="solana"||rhBoot||solanaReadOnly)globalThis.__zxBasePend=null;   // Base-pending فقط روی Base
   baseArmPendingTimeout();
   initMarketWatch();
   wire();
   /* ⚠️ همه‌ی این بلوک — ethers، همه‌ی Interfaceها، RPC، جفتِ پیش‌فرض،
      نمودار — فقط برای Base است. رویِ مسیرِ سولانا هیچ‌کدامشان صدا زده
      نمی‌شود: نه loadEthers، نه makeProvider، نه یک eth_call. */
-  if(!solanaReadOnly){
+  if(!solanaReadOnly&&!rhBoot){
     /* ۱۱ اکتبر: اسکنِ EIP-6963 و مکثِ ۱۲۰ms همین‌جا شروع می‌شود، موازی با بارگذاریِ ethers
        (قبلاً بعد از دروازه‌ها و applyShareParams و runScan بود). */
     walletsReady=baseWalletsReady();
@@ -14622,6 +14984,16 @@ $("setBtn").addEventListener("click",()=>{$("tourBtn").hidden=!!tokenPage;});
     tokenPage=true;
     setView("token",false);
     await openSolanaTokenPage(onTokenSol[1]);
+    return;
+  }
+  if(rhBoot){
+    /* Robinhood Chain: فقط GeckoTerminal. بدونِ ethers/RPC/دروازه/کیف‌پول؛ همه‌ی نماهایی که Base-only‌اند اعلان دارند. */
+    const onExitRh=exitBootPath?EXIT_PATH_RE.exec(location.pathname):null;
+    tokenPage=!!rhTokMatch;
+    setView(tokenPage?"token":(onExitRh?"exit":(parseHash().view||"swap")),false);
+    paintSrc();paintSrc2();
+    if(tokenPage)await openRhTokenPage(rhTokMatch[1]);
+    else updateSwapViewForChain();
     return;
   }
   /* /t/<آدرس> یعنی «این توکن را برایم بررسی کن». Worker همین index.html را

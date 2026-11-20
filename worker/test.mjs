@@ -111,6 +111,12 @@ const REAL = [
   // ۴ نوامبر — تابلوی Established و کارتِ Large trades همین دو را می‌فرستند
   ["/gt/networks/base/tokens/multi/0xa,0xb?include=top_pools", "https://api.geckoterminal.com/api/v2/networks/base/tokens/multi/0xa,0xb?include=top_pools"],
   ["/gt/networks/base/pools/0xpool/trades?trade_volume_in_usd_greater_than=1000", "https://api.geckoterminal.com/api/v2/networks/base/pools/0xpool/trades?trade_volume_in_usd_greater_than=1000"],
+  // Robinhood Chain (فاز ۱، فقط نمایش): همان مسیرهای تابلو و صفحه‌ی توکن با شبکه‌ی robinhood، بدونِ تغییر در فهرستِ مجاز
+  ["/gt/networks/robinhood/new_pools?page=1", "https://api.geckoterminal.com/api/v2/networks/robinhood/new_pools?page=1"],
+  ["/gt/networks/robinhood/tokens/multi/0xa,0xb?include=top_pools", "https://api.geckoterminal.com/api/v2/networks/robinhood/tokens/multi/0xa,0xb?include=top_pools"],
+  ["/gt/networks/robinhood/pools/multi/0xa,0xb", "https://api.geckoterminal.com/api/v2/networks/robinhood/pools/multi/0xa,0xb"],
+  ["/gt/networks/robinhood/pools/0xpool/ohlcv/hour?aggregate=4&limit=180&currency=usd", "https://api.geckoterminal.com/api/v2/networks/robinhood/pools/0xpool/ohlcv/hour?aggregate=4&limit=180&currency=usd"],
+  ["/gt/networks/robinhood/pools/0xpool/trades?trade_volume_in_usd_greater_than=1000", "https://api.geckoterminal.com/api/v2/networks/robinhood/pools/0xpool/trades?trade_volume_in_usd_greater_than=1000"],
 ];
 for (const [path, want] of REAL) {
   reply = json({ data: [] });
