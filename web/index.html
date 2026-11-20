@@ -1870,7 +1870,6 @@ footer .fine{max-width:78ch;margin:46px 0 0;font-size:11.5px;color:var(--tx3);li
 #view-stocks td small{display:block;font-size:12px;color:var(--tx3)}
 #view-stocks td small.up{color:var(--pos)}
 #view-stocks td small.dn{color:var(--neg)}
-#view-stocks .preChip{display:inline-block;margin-top:3px;padding:2px 8px;border-radius:999px;font-size:11px;font-weight:640;line-height:1.4;color:var(--acc);background:color-mix(in srgb,var(--acc) 14%,transparent)}
 #view-stocks .trade{display:inline-block;gap:0;margin:0;padding:7px 16px;border:0;border-radius:999px;font-size:13px;font-weight:650;line-height:1.3;color:var(--on-acc);background:var(--grad);cursor:pointer}
 #view-stocks .note{margin:0;padding:0 6px;border-radius:0;font-size:12px;color:var(--tx3);line-height:1.55}
 @media(max-width:720px){#view-stocks .colRef,#view-stocks .colVol{display:none}#view-stocks td,#view-stocks th{padding:10px 6px}#view-stocks th:first-child,#view-stocks td:first-child{padding-left:20px}#view-stocks th:last-child,#view-stocks td:last-child{padding-right:20px}#view-stocks .trade{padding:7px 12px}}
@@ -2497,7 +2496,6 @@ try{(function(){
     </table>
   </section>
   <p class="note" id="stkNote">Prices are live quotes from the deepest Aerodrome pool for $100. Issuer terms: not offered to US persons. Not investment advice.</p>
-  <p class="note" id="stkPreNote" hidden></p>
 </div>
 
 <!-- =====================================================================
@@ -5686,9 +5684,7 @@ const STOCK_NOTE="The issuer can freeze accounts and recover tokens. This is exp
 function isStockRep(rep){
   try{
     if(!rep)return false;
-    // ردیفِ pre:true (ANTHROPIC) توکنِ Backed نیست و صادرکننده‌ی تنظیم‌شده ندارد؛ پس برچسبِ «Issuer-controlled · regulated» نگیرد
-    // و پویشگر حکم و یافته‌های عادی (freeze/mint authority) را نشان دهد.
-    if(rep.solana)return typeof rep.mint==="string"&&STK_SOL.some(s=>s.mint===rep.mint&&!s.pre);
+    if(rep.solana)return typeof rep.mint==="string"&&STK_SOL.some(s=>s.mint===rep.mint);
     if(rep.native||typeof rep.address!=="string")return false;
     const a=rep.address.toLowerCase();
     return STK.some(s=>BASE_TOKENS.some(t=>t.symbol===s.sym&&t.address.toLowerCase()===a));
@@ -13598,10 +13594,6 @@ const STK=[
 ];
 // فهرستِ سولانا: هر ۱۹ تا ۱۱ اکتبر تأیید شد — mint از DefiLlama + تطابقِ دقیقِ نام/نماد در GeckoTerminal + برچسبِ verified/xstocks در Jupiter + mint authority و freeze authority یکسان در هر ۱۹ تا (بررسیِ صادرکننده که فهرستِ خودکارِ بعدی هم می‌کند)؛ مشمول = نقدینگی ≥ ۲۵۰ هزار دلار؛ SNDKx حذف شد (نقدینگی در سولانا ندارد).
 // feed = فیدِ Chainlink همان سهم روی Base یا null.
-// ۱۹ نوامبر ۲۰۲۶ (تصمیمِ مالک): ۱۹ ردیفِ xStocks توکن‌های تأییدشده‌ی Backed هستند. ردیفِ pre:true (ANTHROPIC) ردیابِ پیش‌از‌IPO
-// از PreStocks است — نه Backed، نه سهم؛ پشتوانه‌اش مستقل تأیید نشده. Anthropic در ۱۱ مه ۲۰۲۶ گفته انتقال‌های بدونِ تأییدِ
-// سهامش باطل است؛ روی این توکن mint و freeze authority روشن است. موضعِ محصول: زائکسا تجمیع‌کننده است و تصمیمِ خرید با کاربر،
-// پس فهرست می‌شود و واقعیت‌ها کنارش نشان داده می‌شود (چیپِ «Pre-IPO tracker» و یادداشتِ جدا در نمای سولانا).
 const STK_SOL=[
   {sym:"AAPLx",name:"Apple",mint:"XsbEhLAtcf6HdfpFZ5xEMdqW8nfAvcsP5bdudRLJzJp",feed:"0x787f13dEa48Db0897CbCDD985de77809D837F988"},
   {sym:"AMZNx",name:"Amazon",mint:"Xs3eBt7uRfJX8QUs4suhyU8p2M6DoUDrJyWBa8LLZsg",feed:"0x06A8E4b3aBB3B7543d8396FB2B763d22820cB295"},
@@ -13626,7 +13618,6 @@ const STK_SOL=[
   {sym:"SPYx",name:"S&P 500 ETF",mint:"XsoCS1TfEyfFhfvj8EtZ528L3CaKBDBRqRapnBbDF2W",feed:null},
   {sym:"STRCx",name:"Strategy Preferred",mint:"Xs78JED6PFZxWc2wCEPspZW9kL3Se5J7L5TChKgsidH",feed:null},
   {sym:"TSLAx",name:"Tesla",mint:"XsDoVfqeBukxuZHWhdvWHBhgEHjGNst4MLodqsJHzoB",feed:"0xFaf869185383a24F8cb00e27BdA6b63B9905DCb4"},
-  {sym:"ANTHROPIC",name:"Anthropic (pre-IPO)",mint:"Pren1FvFX6J3E4kXhJuCiAD5aDmGEb7qJRncwA8Lkhw",feed:null,pre:true},
 ];
 const STK_FEED_ABI=["function latestRoundData() view returns (uint80 roundId,int256 answer,uint256 startedAt,uint256 updatedAt,uint80 answeredInRound)"];
 const STK_REFRESH_MS=60000,STK_RETRY_MS=15000;
@@ -13884,14 +13875,12 @@ function stkPaintLogos(){
 const STK_LEDE_BASE="Tokenized shares issued by Coinbase, each backed 1:1 by a real share. Trade them on-chain any time against USDC; where shown, the reference price comes from Chainlink and moves only while the US market is open.";
 const STK_NOTE_BASE="Prices are live quotes from the deepest Aerodrome pool for $100. Issuer terms: not offered to US persons. Not investment advice.";
 const STK_LEDE_SOL="Tokenized shares and ETFs issued by Backed (xStocks), each backed 1:1 by the real asset. Trade them on-chain any time against USDC; where shown, the reference price comes from Chainlink and moves only while the US market is open.";
-const STK_PRENOTE="ANTHROPIC is a pre-IPO tracker token issued by PreStocks, not by Backed. It is not a share: no ownership, votes or dividends, and its backing has not been independently verified. Anthropic has said that unapproved transfers of its stock are void. The issuer can freeze accounts and mint new tokens.";
 const STK_NOTE_SOL="Prices are the latest on-chain trade prices from GeckoTerminal; your swap quote comes from Jupiter. Issuer terms: not offered to US persons. Not investment advice.";
 // متن‌ها و ردیف‌ها را از فهرستِ زنجیره می‌سازد (DOM API و textContent، نه innerHTML)؛ ردیف‌ها با data-sym همان زنجیره کلید می‌خورند.
 function stkChainPaint(){
   const sol=activeChain==="solana";
   $("stkLede").textContent=sol?STK_LEDE_SOL:STK_LEDE_BASE;
   $("stkNote").textContent=sol?STK_NOTE_SOL:STK_NOTE_BASE;
-  $("stkPreNote").textContent=STK_PRENOTE;$("stkPreNote").hidden=!sol;   // یادداشتِ ردیفِ pre فقط در نمای سولانا (متنِ جدا تا یادداشتِ xStocks دست‌نخورده بماند)
   ++stkLogoGen;stkLogosDone=false;
   const tb=document.querySelector("#stkTable tbody");
   tb.textContent="";
@@ -13901,7 +13890,6 @@ function stkChainPaint(){
     const td0=mk("td","stkStarTd"),st=mk("button","iconBtn savedToggle stkStar","☆");st.type="button";st.dataset.stkstar=s.sym;st.setAttribute("aria-pressed","false");td0.append(st);
     const td1=mk("td"),tk=mk("div","tk"),nm=mk("span","nm");
     nm.append(mk("b",null,s.sym),mk("small",null,s.name));
-    if(s.pre)nm.append(mk("span","preChip","Pre-IPO tracker"));   // فقط ردیف‌های pre:true؛ xStocks چیپ ندارد
     tk.append(mk("span","av",s.sym.slice(0,-1).slice(0,4)),nm);td1.append(tk);
     const td2=mk("td","cPx");td2.append(mk("span","v","—"),mk("small"));
     const td3=mk("td","colRef");td3.append(mk("span","v","—"),mk("small","gap"));

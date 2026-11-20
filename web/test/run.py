@@ -5875,7 +5875,7 @@ async def stk_wait_loaded(pg, vol=True):
 # =====================================================================
 import hashlib as _stkhash
 
-# ۱۱ اکتبر — فهرستِ مستقلِ سولانا (۱۹ تا؛ از ۱۹ نوامبر ۲۰ تا با ردیفِ pre-IPO): نماد، نام، mint، فیدِ Chainlink روی Base (None = ندارد). کپیِ جدا از index.html.
+# ۱۱ اکتبر — فهرستِ مستقلِ سولانا (۱۹ تا): نماد، نام، mint، فیدِ Chainlink روی Base (None = ندارد). کپیِ جدا از index.html.
 STK_SOL_EXPECT = [
     ('AAPLx', 'Apple', 'XsbEhLAtcf6HdfpFZ5xEMdqW8nfAvcsP5bdudRLJzJp', '0x787f13dEa48Db0897CbCDD985de77809D837F988'),
     ('AMZNx', 'Amazon', 'Xs3eBt7uRfJX8QUs4suhyU8p2M6DoUDrJyWBa8LLZsg', '0x06A8E4b3aBB3B7543d8396FB2B763d22820cB295'),
@@ -5897,13 +5897,7 @@ STK_SOL_EXPECT = [
     ('SPYx', 'S&P 500 ETF', 'XsoCS1TfEyfFhfvj8EtZ528L3CaKBDBRqRapnBbDF2W', None),
     ('STRCx', 'Strategy Preferred', 'Xs78JED6PFZxWc2wCEPspZW9kL3Se5J7L5TChKgsidH', None),
     ('TSLAx', 'Tesla', 'XsDoVfqeBukxuZHWhdvWHBhgEHjGNst4MLodqsJHzoB', '0xFaf869185383a24F8cb00e27BdA6b63B9905DCb4'),
-    ('ANTHROPIC', 'Anthropic (pre-IPO)', 'Pren1FvFX6J3E4kXhJuCiAD5aDmGEb7qJRncwA8Lkhw', None),
 ]
-STK_SOL_PRE = {'ANTHROPIC'}   # ردیف‌های pre:true — توکنِ Backed نیستند
-STK_SOL_PRE_NOTE = ("ANTHROPIC is a pre-IPO tracker token issued by PreStocks, not by Backed. It is not a share: no ownership, votes or dividends, "
-                    "and its backing has not been independently verified. Anthropic has said that unapproved transfers of its stock are void. "
-                    "The issuer can freeze accounts and mint new tokens.")
-STK_SOL_PRE_CHIP = "Pre-IPO tracker"
 STK_SOL_ORDER = [e[0] for e in STK_SOL_EXPECT]
 STK_SOL_NAMES = {e[0]: e[1] for e in STK_SOL_EXPECT}
 STK_SOL_USDC = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"
@@ -5934,7 +5928,6 @@ STK_SOL_FIX = {
     "SPYx": ("601.18", "8120000.5", "0.45"),
     "STRCx": ("98.7", "712.3", "-0.75"),
     "TSLAx": ("378.5599", "3588482.1", "-1.50"),
-    "ANTHROPIC": ("1010.50", "2200000.0", "-1.47"),
 }
 STK_SOL_BADFEED = ["MSTRx"]
 STK_SOL_LEDE = ("Tokenized shares and ETFs issued by Backed (xStocks), each backed 1:1 by the real asset. Trade them on-chain any time "
@@ -5961,7 +5954,7 @@ def stk_sol_parse():
     blk = re.search(r"const STK_SOL=\[(.*?)\n\];", src, re.S)
     assert blk, "[stocks sol] STK_SOL not found in index.html"
     return [(a, b_, c.strip('"') if c != "null" else None)
-            for a, b_, c in re.findall(r'\{sym:"(\w+)",name:"[^"]*",mint:"([^"]+)",feed:(null|"0x[0-9a-fA-F]{40}")(?:,pre:true)?\}', blk.group(1))]
+            for a, b_, c in re.findall(r'\{sym:"(\w+)",name:"[^"]*",mint:"([^"]+)",feed:(null|"0x[0-9a-fA-F]{40}")\}', blk.group(1))]
 
 
 def stk_sol_rpcs():
@@ -6085,7 +6078,7 @@ async def stk_sol_wait(pg):
 
 async def stk_sol_rows_check(pg, tag, **kw):
     rows = await pg.evaluate(STK_ROWS_JS)
-    assert len(rows) == 21, "%s: expected 21 rows, got %d" % (tag, len(rows))
+    assert len(rows) == 20, "%s: expected 20 rows, got %d" % (tag, len(rows))
     for (xs, _n, mint, _f), r in zip(STK_SOL_EXPECT, rows):
         base = xs
         e = stk_sol_expect(base, **kw)
@@ -6111,18 +6104,18 @@ async def check_stocks_sol(p, errors):
     # ---- [stocks sol mints] ----
     ent = stk_sol_parse()
     assert ent == [(a_, m_, f_) for a_, _n, m_, f_ in STK_SOL_EXPECT], "[stocks sol mints] STK_SOL in index.html differs from the verified list: %s" % (ent,)
-    assert len(ent) == 21 and "SNDKx" not in [e[0] for e in ent], "[stocks sol mints] 21 entries (20 xStocks + ANTHROPIC), no SNDKx"
+    assert len(ent) == 20 and "SNDKx" not in [e[0] for e in ent], "[stocks sol mints] 20 entries, no SNDKx"
     for xs, mint, _f in ent:
         assert re.match(r"^[1-9A-HJ-NP-Za-km-z]{32,44}$", mint), "[stocks sol mints] %s is not a base58 mint: %r" % (xs, mint)
-    assert len({m for _, m, _ in ent}) == 21, "[stocks sol mints] twenty-one distinct mints"
-    assert [e[0] for e in ent if e[0] not in STK_SOL_PRE] == sorted(e[0] for e in ent if e[0] not in STK_SOL_PRE), "[stocks sol mints] alphabetical by symbol (the pre-IPO row is appended last)"
-    assert [e[0] for e in ent][-1] == "ANTHROPIC" and [e[0] for e in ent].count("ANTHROPIC") == 1, "[stocks sol mints] ANTHROPIC is the last row, once"
-    print("[stocks sol mints] STK_SOL holds exactly the 20 verified xStocks (ANTx since 19 Nov) plus the ANTHROPIC pre-IPO row (symbol, mint, feed-or-null) entries in order, every mint is base58 (32-44 chars) and distinct, no SNDKx")
+    assert len({m for _, m, _ in ent}) == 20, "[stocks sol mints] twenty distinct mints"
+    assert [e[0] for e in ent] == sorted(e[0] for e in ent), "[stocks sol mints] alphabetical by symbol"
+    assert not any(m == "Pren1FvFX6J3E4kXhJuCiAD5aDmGEb7qJRncwA8Lkhw" for _, m, _ in ent), "[stocks sol mints] the PreStocks pre-IPO tracker was removed on 19 Nov once ANTx listed"
+    print("[stocks sol mints] STK_SOL holds exactly the 20 verified xStocks (ANTx since 19 Nov; the PreStocks pre-IPO row removed) (symbol, mint, feed-or-null) entries in order, every mint is base58 (32-44 chars) and distinct, no SNDKx")
 
     # ---- [stocks sol view] ----
     pg = await open_sol()
     await stk_sol_wait(pg)
-    await pg.wait_for_function("() => document.querySelectorAll('#view-stocks .av img.on').length === 21", timeout=15000)
+    await pg.wait_for_function("() => document.querySelectorAll('#view-stocks .av img.on').length === 20", timeout=15000)
     assert await pg.evaluate("() => activeChain") == "solana", "[stocks sol view] the fixture must boot on Solana"
     await stk_sol_rows_check(pg, "[stocks sol view]")
     st = await pg.evaluate("""() => ({lede: document.getElementById('stkLede').textContent, note: document.getElementById('stkNote').textContent,
@@ -6136,7 +6129,7 @@ async def check_stocks_sol(p, errors):
     for base, src in st["imgs"]:
         assert src == stk_sol_logo(base), "[stocks sol view] %s logo must be the image_url from tokens/multi: %r" % (base, src)
     await pg.context.close()
-    print("[stocks sol view] Solana boot on #stocks: 21 rows with AAPLx...TSLAx (incl. ANTx) and ANTHROPIC, GeckoTerminal prices (string price_usd), 24h change from the top pool, Chainlink reference and gap, volume, a zero price, a dead feed and rows without a feed shown as dashes, exact lede/note, market pill, own image_url logos")
+    print("[stocks sol view] Solana boot on #stocks: 20 rows with AAPLx...TSLAx (incl. ANTx), GeckoTerminal prices (string price_usd), 24h change from the top pool, Chainlink reference and gap, volume, a zero price, a dead feed and rows without a feed shown as dashes, exact lede/note, market pill, own image_url logos")
 
     # ---- [stocks sol requests] ----
     pg = await open_sol(badFeeds=[])
@@ -6145,7 +6138,7 @@ async def check_stocks_sol(p, errors):
     rq = await pg.evaluate("() => Object.assign({}, window.__STKSOL__, {batches: window.__STK__.batches})")
     sol_feeds = [f_ for _, _, f_ in ent if f_]
     assert len(sol_feeds) == 9, "[stocks sol requests] fixture: nine entries with a feed"
-    assert rq["tokensAll"] == 1 and rq["tokens"] == 1 and rq["pools"] == 1 and rq["rpc"] == 9, "[stocks sol requests] exactly one tokens/multi (all 21 mints), one pools/multi, nine single eth_call requests: %s" % {k: rq[k] for k in ("tokensAll", "tokens", "pools", "rpc")}
+    assert rq["tokensAll"] == 1 and rq["tokens"] == 1 and rq["pools"] == 1 and rq["rpc"] == 9, "[stocks sol requests] exactly one tokens/multi (all 20 mints), one pools/multi, nine single eth_call requests: %s" % {k: rq[k] for k in ("tokensAll", "tokens", "pools", "rpc")}
     assert rq["quote"] == 0, "[stocks sol requests] loading the view must not call /sol/quote (%d calls)" % rq["quote"]
     assert rq["batches"] == 0, "[stocks sol requests] the Solana path must not use ethers/multicall (%d multicall batches)" % rq["batches"]
     assert rq["tokensUrl"].endswith("/networks/solana/tokens/multi/" + ",".join(m for _, m, _ in ent)), "[stocks sol requests] tokens/multi URL: %s" % rq["tokensUrl"]
@@ -6165,7 +6158,7 @@ async def check_stocks_sol(p, errors):
                and r["body"]["params"][0]["to"].lower() == ent[r["body"]["id"]][2].lower() for r in got), \
         "[stocks sol requests] eth_call bodies: %s" % [r["body"] for r in got]
     await pg.context.close()
-    print("[stocks sol requests] exactly one tokens/multi (21 mints, STK_SOL order, path < 1200 chars), one pools/multi (top pools), nine single eth_call requests (one per entry that has a feed, exact bodies, no batch array) all to the first Base endpoint; zero /sol/quote; zero multicall batches")
+    print("[stocks sol requests] exactly one tokens/multi (20 mints, STK_SOL order, path < 1200 chars), one pools/multi (top pools), nine single eth_call requests (one per entry that has a feed, exact bodies, no batch array) all to the first Base endpoint; zero /sol/quote; zero multicall batches")
 
     # ---- [stocks sol note gone] ----
     GONE_JS = """() => { const v = document.getElementById('view-stocks');
@@ -6198,7 +6191,7 @@ async def check_stocks_sol(p, errors):
     await pg.click("#srcChip")
     await pg.click('#srcPop [data-chain="solana"]')
     await stk_sol_wait(pg)
-    await pg.wait_for_function("() => document.querySelectorAll('#view-stocks .av img.on').length === 21", timeout=15000)
+    await pg.wait_for_function("() => document.querySelectorAll('#view-stocks .av img.on').length === 20", timeout=15000)
     await stk_sol_rows_check(pg, "[stocks sol switch] on Solana")
     txt = await pg.evaluate("() => [document.getElementById('stkLede').textContent, document.getElementById('stkNote').textContent]")
     assert txt == [STK_SOL_LEDE, STK_SOL_NOTE], "[stocks sol switch] Solana texts after the switch: %s" % txt
@@ -6216,7 +6209,7 @@ async def check_stocks_sol(p, errors):
     snaps = await pg.evaluate("() => window.__SNAP")
     saw_x = False
     for s in snaps:
-        xs = all(n.endswith("x") or n in STK_SOL_PRE for n in s["n"]); cs = all(n.endswith("c") for n in s["n"])
+        xs = all(n.endswith("x") for n in s["n"]); cs = all(n.endswith("c") for n in s["n"])
         assert xs or cs, "[stocks sol switch] mixed symbols in one snapshot: %s" % s
         saw_x = saw_x or xs
         if xs:
@@ -6276,7 +6269,7 @@ async def check_stocks_sol(p, errors):
         focus: document.activeElement && document.activeElement.id, chain: activeChain})""")
     assert st["swap"] and not st["stocks"] and st["chain"] == "solana", "[stocks sol trade] must land on the Solana swap view: %s" % st
     assert st["top"] == "USDC" and st["bot"] == "TSLAx" and st["side"] == "buy", "[stocks sol trade] pay USDC, receive TSLAx: %s" % st
-    assert st["mint"] == next(m_ for s_, m_, _f in ent if s_ == "TSLAx") and st["ref"] == STK_SOL_USDC, "[stocks sol trade] the card's mints: %s" % st
+    assert st["mint"] == ent[-1][1] and st["ref"] == STK_SOL_USDC, "[stocks sol trade] the card's mints: %s" % st
     assert st["amt"] == "" and st["out"] == "" and st["focus"] == "solAmt", "[stocks sol trade] empty amount, 'You pay' focused: %s" % st
     assert await pg.evaluate("() => window.__STKSOL__.quote") == 0, "[stocks sol trade] Trade alone must not request a quote"
     await pg.context.close()
@@ -6316,45 +6309,6 @@ async def check_stocks_sol(p, errors):
     h1 = await pg.evaluate("() => [window.__STKSOL__.tokens, window.__STKSOL__.pools, window.__STKSOL__.rpc]")
     assert h1 == [1, 1, 9], "[stocks sol hidden tab] visible must load exactly once (1 tokens, 1 pools, 9 eth_call): %s" % (h1,)
     await pg.context.close()
-    # ---- [stocks sol pre] ۱۹ نوامبر — ANTHROPIC (PreStocks) سهمِ Backed نیست: چیپ، یادداشتِ جدا، بدونِ برچسبِ صادرکننده‌ی تنظیم‌شده ----
-    PRE_MINT = "Pren1FvFX6J3E4kXhJuCiAD5aDmGEb7qJRncwA8Lkhw"
-    XS_MINT = "XsbEhLAtcf6HdfpFZ5xEMdqW8nfAvcsP5bdudRLJzJp"
-    PRE_JS = """(note) => { const vis = e => e.getClientRects().length > 0 && getComputedStyle(e).visibility !== 'hidden';
-        const rows = [...document.querySelectorAll('#view-stocks tr[data-sym]')];
-        const chips = rows.map(tr => [tr.dataset.sym, [...tr.querySelectorAll('.preChip')].map(c => c.textContent)]).filter(x => x[1].length);
-        const nodes = [...document.querySelectorAll('#view-stocks *, #stkPreNote, #stkNote')].filter(e => e.children.length === 0 && e.textContent.trim() === note);
-        return {chips: chips, anyChipText: rows.filter(tr => tr.textContent.includes('Pre-IPO tracker')).map(tr => tr.dataset.sym),
-                noteVisible: nodes.some(vis), noteNodes: nodes.length, stkNote: document.getElementById('stkNote').textContent,
-                stk: document.getElementById('stkPreNote').textContent,
-                preRep: isStockRep({solana: true, mint: %s}), xsRep: isStockRep({solana: true, mint: %s}),
-                preOnly: STK_SOL.filter(s => s.pre).map(s => s.sym)}; }""" % (_stkjson.dumps(PRE_MINT), _stkjson.dumps(XS_MINT))
-    pg = await open_sol()
-    await stk_sol_wait(pg)
-    await pg.wait_for_timeout(500)
-    pr = await pg.evaluate(PRE_JS, STK_SOL_PRE_NOTE)
-    assert pr["chips"] == [["ANTHROPIC", [STK_SOL_PRE_CHIP]]], "[stocks sol pre] only the ANTHROPIC row carries the 'Pre-IPO tracker' chip: %s" % pr["chips"]
-    assert pr["anyChipText"] == ["ANTHROPIC"], "[stocks sol pre] no xStocks row may contain the chip text: %s" % pr["anyChipText"]
-    assert pr["preOnly"] == ["ANTHROPIC"], "[stocks sol pre] only ANTHROPIC is flagged pre: %s" % pr["preOnly"]
-    assert pr["noteVisible"] and pr["stk"] == STK_SOL_PRE_NOTE, "[stocks sol pre] the exact pre-IPO note is visible in the Solana view: %s" % pr
-    assert pr["stkNote"] == STK_SOL_NOTE, "[stocks sol pre] the existing xStocks note is unchanged: %r" % pr["stkNote"]
-    assert pr["preRep"] is False and pr["xsRep"] is True, "[stocks sol pre] isStockRep must be false for the ANTHROPIC mint and true for an xStocks mint: %s" % pr
-    rq = await pg.evaluate("() => window.__STKSOL__")
-    assert PRE_MINT in rq["tokensUrl"] and PRE_MINT.lower() not in rq["tokensUrl"], "[stocks sol pre] the ANTHROPIC mint keeps its exact case in the tokens/multi URL: %s" % rq["tokensUrl"]
-    await pg.click("#srcChip")
-    await pg.click('#srcPop [data-chain="base"]')
-    await stk_wait_loaded(pg)
-    await pg.wait_for_timeout(300)
-    pb = await pg.evaluate(PRE_JS, STK_SOL_PRE_NOTE)
-    assert not pb["noteVisible"] and pb["anyChipText"] == [], "[stocks sol pre] after switching to Base the pre-IPO note and chip are gone: %s" % pb
-    assert pb["stkNote"] == STK_BASE_NOTE, "[stocks sol pre] Base keeps its own note: %r" % pb["stkNote"]
-    await pg.context.close()
-    pg = await open_sol(sol=False)
-    await stk_wait_loaded(pg)
-    pb = await pg.evaluate(PRE_JS, STK_SOL_PRE_NOTE)
-    assert not pb["noteVisible"] and pb["anyChipText"] == [], "[stocks sol pre] on a Base boot the pre-IPO note is not visible: %s" % pb
-    await pg.context.close()
-    print("[stocks sol pre] ANTHROPIC row carries the 'Pre-IPO tracker' chip and no xStocks row does; the exact PreStocks note shows in the Solana view only (xStocks note unchanged, absent on a Base boot and after a switch to Base); isStockRep is false for the ANTHROPIC mint and true for an xStocks mint; the mint keeps its exact case in the tokens/multi URL")
-
     print("[stocks sol hidden tab] a Solana tab opened hidden sends no tokens/pools/rpc request; the moment it becomes visible it loads once")
 
     # ---- [stocks lists] ۱۱ اکتبر — هر زنجیره فهرستِ خودش را دارد؛ جدول از داده ساخته می‌شود ----
@@ -6370,7 +6324,7 @@ async def check_stocks_sol(p, errors):
         st = await pg.evaluate(ST_JS)
         exp = STK_SOL_EXPECT if sol else [(e[0], e[1]) for e in STK_BASE_EXPECT]
         names = STK_SOL_NAMES if sol else STK_NAMES
-        n = 21 if sol else 13
+        n = 20 if sol else 13
         assert st["bodyRows"] == n and st["total"] == n, "%s: exactly %d rows, got %s" % (tag, n, st["bodyRows"])
         assert [r[0] for r in st["rows"]] == [e[0] for e in exp], "%s: row order %s" % (tag, [r[0] for r in st["rows"]])
         for r in st["rows"]:
@@ -6435,7 +6389,7 @@ async def check_stocks_sol(p, errors):
     await pg.wait_for_timeout(500)
     fr = await pg.evaluate(FEEDLESS_JS)
     nofeed = [e[0] for e in STK_SOL_EXPECT if e[3] is None]
-    assert len(nofeed) == 12, "[stocks no feed] fixture: twelve Solana entries without a feed (eleven xStocks + ANTHROPIC)"
+    assert len(nofeed) == 11, "[stocks no feed] fixture: eleven Solana entries without a feed"
     for sym_ in nofeed:
         e = stk_sol_expect(sym_)
         r = fr[sym_]
@@ -6445,7 +6399,7 @@ async def check_stocks_sol(p, errors):
     assert rq["rpc"] == 9 and sorted(r["body"]["params"][0]["to"].lower() for r in rq["rpcReqs"]) == sorted(f_.lower() for _, _, _, f_ in STK_SOL_EXPECT if f_), \
         "[stocks no feed] Solana asks exactly the 9 feeds that exist (%d eth_call)" % rq["rpc"]
     await pg.context.close()
-    print("[stocks no feed] Base ANTc/MUc/PLTRc and Solana ANTx/COINx/CRCLx/GLDx/GMEx/HOODx/MCDx/PLTRx/QQQx/SPYx/STRCx/ANTHROPIC show a dash reference with an empty gap (no error class) while price, change and volume still show; the Base batch is 13 quotes + 10 feeds and never reads a feed for ANTc/MUc/PLTRc; Solana makes exactly 9 eth_call")
+    print("[stocks no feed] Base ANTc/MUc/PLTRc and Solana ANTx/COINx/CRCLx/GLDx/GMEx/HOODx/MCDx/PLTRx/QQQx/SPYx/STRCx show a dash reference with an empty gap (no error class) while price, change and volume still show; the Base batch is 13 quotes + 10 feeds and never reads a feed for ANTc/MUc/PLTRc; Solana makes exactly 9 eth_call")
 
     await b.close()
     assert not errs, "[stocks sol] console/page errors: %s" % errs[:5]
@@ -22760,7 +22714,7 @@ async def check_stocks_star(p, errors):
             else:
                 pg = await stk_open(b, 1280, 800, "light", errs, init_extra=stk_sol_init(sol=True))
                 await stk_sol_wait(pg)
-                sym, n = "AAPLx", 21
+                sym, n = "AAPLx", 20
             g = await pg.evaluate("""(sym) => { const c = document.querySelector('#view-stocks .card').getBoundingClientRect(), rows = [...document.querySelectorAll('#view-stocks tr[data-sym]')];
                 const b = document.querySelector('#view-stocks tr[data-sym="' + sym + '"] td:first-child .stkStar'), tk = document.querySelector('#view-stocks tr[data-sym="' + sym + '"] .tk');
                 const r = b && b.getBoundingClientRect();
