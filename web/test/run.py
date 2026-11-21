@@ -25980,8 +25980,10 @@ async def check_net_pop_mobile(p, errors):
                 assert g["vis"], "%s: the network popup must be open after clicking the chip: %s" % (tag, g)
                 assert q["t"] >= c["b"] - 0.5 and q["t"] - c["b"] <= 16, "%s: the popup must open right under the chip (gap 0..16px): %s" % (tag, g)
                 assert q["l"] < c["r"] and q["r"] > c["l"], "%s: the popup must overlap the chip horizontally: %s" % (tag, g)
-                if vw == 390:     # دسکتاپ عمداً دست‌نخورده (روی Flow با تابلو از قبل کمی از چپ بیرون می‌زند)
-                    assert q["l"] >= 0 and q["r"] <= vw, "%s: the popup must sit fully inside the viewport: %s" % (tag, g)
+                assert q["l"] >= 0 and q["r"] <= vw, "%s: the popup must sit fully inside the viewport: %s" % (tag, g)
+                if vw == 1440 and name == "flow-board":   # ۲۱ نوامبر — چیپ زیرِ عنوان سمتِ چپ → بازشو چپ‌چین زیرِ آن
+                    assert abs(q["l"] - c["l"]) <= 1, "%s: the popup must be left-aligned under the left-hand chip on desktop: %s" % (tag, g)
+                if vw == 390:
                     assert g["pos"] == "absolute", "%s: the popup must be position:absolute inside the view: %s" % (tag, g)
                     if name == "flow-board":   # چیپ سمتِ راستِ عنوان است → بازشو راست‌چین زیرِ آن
                         assert abs(q["r"] - c["r"]) <= 1, "%s: the popup must be right-aligned under the right-hand chip: %s" % (tag, g)
@@ -25993,7 +25995,7 @@ async def check_net_pop_mobile(p, errors):
                 seen.append((name, vw))
                 await pg.context.close()
         assert not errs, "[net pop mobile] console errors: %s" % errs
-        print("[net pop mobile] PASS - at 390px the network popup opens right under the chip (Swap on Base/Solana/Robinhood, Flow with and without the board, Stocks, Portfolio), fully inside the viewport and position:absolute; the settings popup stays fixed; at 1440px it still opens under the chip")
+        print("[net pop mobile] PASS - at 390px the network popup opens right under the chip (Swap on Base/Solana/Robinhood, Flow with and without the board, Stocks, Portfolio), fully inside the viewport and position:absolute; the settings popup stays fixed; at 1440px it opens under the chip and fully inside the viewport (Flow board: left-aligned)")
     finally:
         await b.close()
         srv.shutdown()

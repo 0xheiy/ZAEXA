@@ -1839,6 +1839,8 @@ footer .fine{max-width:78ch;margin:46px 0 0;font-size:11.5px;color:var(--tx3);li
 .view #srcChip .led{display:none}
 .view #srcTx{display:inline!important;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .view #srcPop{top:42px;width:220px;max-width:calc(100vw - 48px)}
+/* ۲۱ نوامبر — دسکتاپ: در تابلوی Flow چیپ زیرِ عنوان سمتِ چپ است؛ بازشوی راست‌چین ~۴۶px از لبه‌ی چپِ صفحه بیرون می‌زد → چپ‌چین زیرِ چیپ (قاعده‌ی گوشی پایین‌تر مقدم است). */
+#fbNetSlot #srcPop{left:0;right:auto}
 /* ۲۱ نوامبر — روی گوشی قاعده‌ی عمومیِ .pop (fixed، بالا-راستِ صفحه) بازشوی شبکه را از زیرِ چیپ می‌برد؛
    داخلِ نما دوباره به خودِ چیپ (#srcMenu، position:relative) می‌چسبد. بازشوی تنظیمات/والت و چیپِ هدر دست‌نخورده‌اند. */
 @media(max-width:720px){
