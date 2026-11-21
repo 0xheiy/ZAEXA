@@ -10436,6 +10436,7 @@ async def main():
         await check_flow_board_width(p, errors)
         await check_flow_board_parity(p, errors)
         await check_rh_picker(p, errors)
+        await check_net_pop_mobile(p, errors)
         await check_rh_flow(p, errors)
         await check_rh_token_page(p, errors)
         await check_rh_no_base_calls(p, errors)
@@ -25923,6 +25924,76 @@ async def check_report_near_empty(p, errors):
     finally:
         await b.close()
 
+
+
+NETPOP_SOL_JS = "try{localStorage.setItem('zaexa.chain.v1','solana')}catch(e){}"
+# (نام، هش، init، board). Flow هم با تابلو (fbNetSlot) هم بی‌تابلو (flowNetworkSlot).
+NETPOP_CASES = [
+    ("swap-base", "#swap", [], False),
+    ("swap-solana", "#swap", [NETPOP_SOL_JS], False),
+    ("swap-robinhood", "#swap", [RH_CHAIN_JS], False),
+    ("flow-board", "#flow", [], True),
+    ("flow", "#flow", [], False),
+    ("stocks", "#stocks", [], False),
+    ("folio", "#folio", [], False),
+]
+NETPOP_GEOM_JS = """() => { const q = s => document.querySelector(s), r = e => { const b = e.getBoundingClientRect(); return {l: b.left, r: b.right, t: b.top, b: b.bottom}; };
+    const chip = q('#srcChip'), pop = q('#srcPop'), set = q('#setPop');
+    return {chip: r(chip), pop: r(pop), vis: getComputedStyle(pop).display !== 'none' && pop.classList.contains('on'), pos: getComputedStyle(pop).position,
+            setpos: getComputedStyle(set).position, parent: chip.closest('#srcMenu').parentElement.id || chip.closest('#srcMenu').parentElement.className,
+            iw: innerWidth, sw: document.documentElement.scrollWidth}; }"""
+
+
+async def netpop_open(env, name, hash_, init, board, vw, vh):
+    pg = await env.open(hash_=hash_, vw=vw, vh=vh, init=init, board=board)
+    await pg.wait_for_function("() => document.documentElement.classList.contains('netPlaced')", timeout=20000)
+    if name.endswith("robinhood"):
+        await pg.wait_for_function("() => activeChain === 'robinhood'", timeout=20000)
+    if name == "swap-solana":
+        await pg.wait_for_function("() => activeChain === 'solana'", timeout=20000)
+    await pg.wait_for_timeout(700)
+    await pg.click("#srcChip")
+    await pg.wait_for_timeout(300)
+    return pg
+
+
+async def check_net_pop_mobile(p, errors):
+    """[net pop mobile] ۲۱ نوامبر — روی گوشی (۳۹۰) بازشوی شبکه زیرِ خودِ چیپ باز می‌شود (نه بالا-راستِ صفحه زیرِ دکمه‌ی والت)،
+    کامل داخلِ صفحه است و position:absolute؛ بازشوی تنظیمات fixed می‌ماند. دسکتاپ (۱۴۴۰) بدونِ تغییر: زیرِ چیپ."""
+    srv, origin = rh_srv()
+    b = await p.chromium.launch()
+    errs = []
+    shots = os.environ.get("ZX_NETPOP_SHOTS", "/tmp/netpop") if os.environ.get("ZX_NETPOP_SHOTS") is not None or os.environ.get("ZX_ONLY") else None
+    try:
+        env = FbEnv(b, origin, errs)
+        env.gt = rh_gt_board()
+        seen = []
+        for name, h, init, board in NETPOP_CASES:
+            for vw, vh in ((390, 844), (1440, 900)):
+                pg = await netpop_open(env, name, h, init, board, vw, vh)
+                g = await pg.evaluate(NETPOP_GEOM_JS)
+                tag = "[net pop mobile] %s @%d" % (name, vw)
+                if os.environ.get("ZX_NETPOP_DEBUG"):
+                    print(tag, g)
+                c, q = g["chip"], g["pop"]
+                assert g["vis"], "%s: the network popup must be open after clicking the chip: %s" % (tag, g)
+                assert q["t"] >= c["b"] - 0.5 and q["t"] - c["b"] <= 16, "%s: the popup must open right under the chip (gap 0..16px): %s" % (tag, g)
+                assert q["l"] < c["r"] and q["r"] > c["l"], "%s: the popup must overlap the chip horizontally: %s" % (tag, g)
+                if vw == 390:     # دسکتاپ عمداً دست‌نخورده (روی Flow با تابلو از قبل کمی از چپ بیرون می‌زند)
+                    assert q["l"] >= 0 and q["r"] <= vw, "%s: the popup must sit fully inside the viewport: %s" % (tag, g)
+                    assert g["pos"] == "absolute", "%s: the popup must be position:absolute inside the view: %s" % (tag, g)
+                    assert g["setpos"] == "fixed", "%s: the settings popup must stay position:fixed on mobile: %s" % (tag, g)
+                    assert g["sw"] <= g["iw"], "%s: the page must not scroll sideways: %s" % (tag, g)
+                    if shots and name in ("swap-base", "flow", "stocks", "swap-robinhood"):
+                        os.makedirs(shots, exist_ok=True)
+                        await pg.screenshot(path=os.path.join(shots, "%s_mobile.png" % {"swap-base": "swap", "swap-robinhood": "rh"}.get(name, name)))
+                seen.append((name, vw))
+                await pg.context.close()
+        assert not errs, "[net pop mobile] console errors: %s" % errs
+        print("[net pop mobile] PASS - at 390px the network popup opens right under the chip (Swap on Base/Solana/Robinhood, Flow with and without the board, Stocks, Portfolio), fully inside the viewport and position:absolute; the settings popup stays fixed; at 1440px it still opens under the chip")
+    finally:
+        await b.close()
+        srv.shutdown()
 
 
 async def only(names):
