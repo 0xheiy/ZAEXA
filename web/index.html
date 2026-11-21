@@ -1147,7 +1147,6 @@ section.card.isDone #actBtn,section.card.isDone #solStatusSlot,section.card.isDo
 .fbHead[hidden]{display:none}
 .fbTtl{font-size:15.5px;font-weight:660}
 .fbSub{font-size:12.5px;color:var(--tx3);margin-top:3px}
-@media(max-width:720px){.fbSub{min-height:3lh}}
 /* ۱ نوامبر (طرحِ حسام): شبکه زیرِ عنوان سمتِ چپ (مثلِ /pairs)؛ کلیدِ مسیرِ فروش · New tokens|Established · 1h|6h
    در یک خط سمتِ راست. کلید اولِ خط است تا پنهان‌شدنش در Established (جایش نگه داشته می‌شود) فقط فضای خالیِ سمتِ چپ بماند. */
 .fbCtl{display:flex;flex-wrap:wrap;align-items:center;justify-content:flex-end;gap:8px}
@@ -1165,6 +1164,21 @@ section.card.isDone #actBtn,section.card.isDone #solStatusSlot,section.card.isDo
 #fbHead .tfs button[data-t]::after{content:attr(data-t);content:attr(data-t) / "";font-weight:620;height:0;visibility:hidden;overflow:hidden;pointer-events:none;user-select:none}
 #fbNetSlot{flex:none;display:flex}
 #fbNetSlot .chip{height:34px;box-sizing:border-box}
+/* ۲۱ نوامبر — گوشی: عنوان با چیپِ شبکه هم‌خط (چیپ سمتِ راست)، زیرعنوان زیرش (جای دو خط)، بعد کلیدِ مسیرِ فروش،
+   و در ردیفِ آخر New tokens|Established سمتِ چپ و 1h|6h سمتِ راست. کلید در Established با visibility پنهان می‌ماند و جایش حفظ می‌شود ([flow header stable]: کنترل‌ها نباید بپرند). */
+@media(max-width:720px){
+  .fbHead{flex-direction:column;align-items:stretch;gap:12px}
+  .fbHL{display:grid;grid-template-columns:minmax(0,1fr) auto;column-gap:12px;align-items:center}
+  .fbTtl{grid-row:1;grid-column:1}
+  #fbNetSlot{grid-row:1;grid-column:2;margin-top:0;justify-self:end}
+  .fbSub{grid-row:2;grid-column:1/-1;min-height:2lh}
+  .fbCtl{display:grid;grid-template-columns:auto auto;justify-content:space-between;align-items:center;gap:10px 8px;width:100%}
+  .fbTog{grid-column:1/-1;justify-self:start}
+  .fbCtl .tfs:nth-of-type(1){justify-self:start}
+  .fbCtl .tfs:nth-of-type(2){justify-self:end}
+  /* «New tokens» در ۳۹۰px دوخطی می‌شد. */
+  .fbCtl .tfs button{white-space:nowrap;padding:0 10px}
+}
 .fbTog{display:inline-flex;align-items:center;gap:9px;height:34px;box-sizing:border-box;padding:0 14px 0 10px;border-radius:999px;background:var(--card2);color:var(--tx2);font-size:12.5px;text-align:left;white-space:nowrap}
 .fbSw{width:28px;height:16px;border-radius:9px;background:var(--line2);position:relative;flex:none;transition:background .16s}
 .fbSw::after{content:"";position:absolute;top:2px;left:2px;width:12px;height:12px;border-radius:50%;background:var(--tx3);transition:transform .16s,background .16s}
@@ -1829,7 +1843,8 @@ footer .fine{max-width:78ch;margin:46px 0 0;font-size:11.5px;color:var(--tx3);li
    داخلِ نما دوباره به خودِ چیپ (#srcMenu، position:relative) می‌چسبد. بازشوی تنظیمات/والت و چیپِ هدر دست‌نخورده‌اند. */
 @media(max-width:720px){
   .view #srcPop{position:absolute;top:42px;right:0;left:auto;width:220px;max-width:calc(100vw - 48px)}
-  #fbNetSlot #srcPop,#stocksNetworkSlot #srcPop{left:0;right:auto}
+  #fbNetSlot #srcPop{right:0;left:auto}   /* چیپ سمتِ راستِ عنوان است */
+  #stocksNetworkSlot #srcPop{left:0;right:auto}
 }
 .swapCard:has(#swapNetworkBar){overflow:visible}
 

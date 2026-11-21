@@ -10437,6 +10437,7 @@ async def main():
         await check_flow_board_parity(p, errors)
         await check_rh_picker(p, errors)
         await check_net_pop_mobile(p, errors)
+        await check_flow_head_mobile(p, errors)
         await check_rh_flow(p, errors)
         await check_rh_token_page(p, errors)
         await check_rh_no_base_calls(p, errors)
@@ -25982,6 +25983,8 @@ async def check_net_pop_mobile(p, errors):
                 if vw == 390:     # دسکتاپ عمداً دست‌نخورده (روی Flow با تابلو از قبل کمی از چپ بیرون می‌زند)
                     assert q["l"] >= 0 and q["r"] <= vw, "%s: the popup must sit fully inside the viewport: %s" % (tag, g)
                     assert g["pos"] == "absolute", "%s: the popup must be position:absolute inside the view: %s" % (tag, g)
+                    if name == "flow-board":   # چیپ سمتِ راستِ عنوان است → بازشو راست‌چین زیرِ آن
+                        assert abs(q["r"] - c["r"]) <= 1, "%s: the popup must be right-aligned under the right-hand chip: %s" % (tag, g)
                     assert g["setpos"] == "fixed", "%s: the settings popup must stay position:fixed on mobile: %s" % (tag, g)
                     assert g["sw"] <= g["iw"], "%s: the page must not scroll sideways: %s" % (tag, g)
                     if shots and name in ("swap-base", "flow", "stocks", "swap-robinhood"):
@@ -25991,6 +25994,104 @@ async def check_net_pop_mobile(p, errors):
                 await pg.context.close()
         assert not errs, "[net pop mobile] console errors: %s" % errs
         print("[net pop mobile] PASS - at 390px the network popup opens right under the chip (Swap on Base/Solana/Robinhood, Flow with and without the board, Stocks, Portfolio), fully inside the viewport and position:absolute; the settings popup stays fixed; at 1440px it still opens under the chip")
+    finally:
+        await b.close()
+        srv.shutdown()
+
+
+# ۲۱ نوامبر — هدرِ تابلوی Flow روی گوشی: عنوان + چیپِ شبکه هم‌خط، زیرعنوان، کلید، و دو گروهِ New/Established و 1h/6h دو سرِ یک ردیف.
+FH_BASE_1440 = {"base-new": {"ttl": {"l": 20, "t": 18, "w": 715.41, "h": 24.02}, "chip": {"l": 20, "t": 76.39, "w": 101.42, "h": 34}, "sub": {"l": 20, "t": 45.02, "w": 715.41, "h": 19.38}, "tog": {"l": 751.41, "t": 18, "w": 230.84, "h": 34}, "tfs0": {"l": 990.25, "t": 18, "w": 207.14, "h": 34}, "tfs1": {"l": 1205.39, "t": 18, "w": 94.61, "h": 34}}, "base-est": {"ttl": {"l": 20, "t": 18, "w": 715.41, "h": 24.02}, "chip": {"l": 20, "t": 76.39, "w": 101.42, "h": 34}, "sub": {"l": 20, "t": 45.02, "w": 715.41, "h": 19.38}, "tog": {"l": 751.41, "t": 18, "w": 230.84, "h": 34}, "tfs0": {"l": 990.25, "t": 18, "w": 207.14, "h": 34}, "tfs1": {"l": 1205.39, "t": 18, "w": 94.61, "h": 34}}}   # بعد از ثبتِ مقدارِ امروز پر می‌شود (مختصات نسبت به کارت)
+FH_GEOM_JS = """() => { const card = document.querySelector('#view-flow .card'), cb = card.getBoundingClientRect();
+    const r = e => { const b = e.getBoundingClientRect(); return {l: b.left - cb.left, r: b.right - cb.left, t: b.top - cb.top, b: b.bottom - cb.top, h: b.height, w: b.width}; };
+    const hd = document.getElementById('fbHead'), tf = hd.querySelectorAll('.tfs'), sub = hd.querySelector('.fbSub');
+    const over = [...hd.querySelectorAll('*')].filter(e => e.getBoundingClientRect().width > 0 && getComputedStyle(e).display !== 'none' && (e.getBoundingClientRect().right > cb.right + 0.5 || e.getBoundingClientRect().left < cb.left - 0.5)).map(e => e.tagName + '.' + e.className);
+    return {ttl: r(hd.querySelector('.fbTtl')), chip: r(document.querySelector('#fbNetSlot #srcChip')), sub: r(sub), tog: r(hd.querySelector('.fbTog')),
+            tfs0: r(tf[0]), tfs1: r(tf[1]), card: {w: cb.width}, over: over, lh: parseFloat(getComputedStyle(sub).lineHeight) || sub.getBoundingClientRect().height,
+            subtxt: sub.textContent, sw: document.documentElement.scrollWidth, iw: innerWidth}; }"""
+
+
+async def fh_open(env, chain, est, vw, vh):
+    init = [RH_CHAIN_JS] if chain == "robinhood" else []
+    pg = await env.open(hash_="#flow", vw=vw, vh=vh, init=init, board=True)
+    await pg.wait_for_function("() => document.documentElement.classList.contains('netPlaced') && document.querySelector('#fbNetSlot #srcChip')", timeout=20000)
+    if chain == "robinhood":
+        await pg.wait_for_function("() => activeChain === 'robinhood'", timeout=20000)
+    await pg.wait_for_timeout(500)
+    if est:
+        await pg.click('[data-fbset="est"]')
+        await pg.wait_for_function("() => document.getElementById('fbSub').textContent.startsWith('Established')", timeout=20000)
+        await pg.wait_for_timeout(300)
+    return pg
+
+
+async def check_flow_head_mobile(p, errors):
+    """[flow head mobile] روی ۳۹۰ و ۳۶۰: چیپِ شبکه هم‌ترازِ عنوان و سمتِ راست، زیرعنوان زیرِ عنوان، کلید بلافاصله بعدش،
+    دو گروهِ tfs هم‌ردیف (اولی چپ، دومی راست)، بدونِ سرریزِ افقی؛ در ۱۴۴۰ هدر دقیقاً مثلِ قبل."""
+    srv, origin = rh_srv()
+    b = await p.chromium.launch()
+    errs = []
+    shots = "/tmp/fbhead"
+    try:
+        env = FbEnv(b, origin, errs)
+        env.gt = rh_gt_board()
+        os.makedirs(shots, exist_ok=True)
+        for vw, vh in (() if os.environ.get("ZX_FH_RECORD") else ((390, 844), (360, 780))):
+            for chain in ("base", "robinhood"):
+                for est in (False, True):
+                    if chain == "robinhood" and est:
+                        continue   # Established روی Robinhood غیرفعال است (aria-disabled)
+                    pg = await fh_open(env, chain, est, vw, vh)
+                    g = await pg.evaluate(FH_GEOM_JS)
+                    tag = "[flow head mobile] %s %s @%d" % (chain, "est" if est else "new", vw)
+                    ttl, chip, sub, tog, t0, t1, cw, lh = g["ttl"], g["chip"], g["sub"], g["tog"], g["tfs0"], g["tfs1"], g["card"]["w"], g["lh"]
+                    assert abs((chip["t"] + chip["b"]) / 2 - (ttl["t"] + ttl["b"]) / 2) <= 6, "%s: chip vertical center must match the title's (+-6px): %s" % (tag, g)
+                    assert chip["r"] >= cw - 24, "%s: chip right edge must be within 24px of the card's right edge: %s" % (tag, g)
+                    assert chip["l"] > ttl["r"], "%s: chip must not overlap the title: %s" % (tag, g)
+                    assert sub["t"] >= ttl["b"] - 0.5, "%s: subtitle must sit below the title: %s" % (tag, g)
+                    assert sub["h"] <= 2 * lh + 1, "%s: subtitle must fit in 2 lines (h=%s lh=%s): %s" % (tag, sub["h"], lh, g)
+                    if tog["h"] == 0:   # Established: کلید روی گوشی جا نمی‌گیرد (بدونِ حفره)
+                        assert t0["t"] >= sub["b"] - 0.5, "%s: groups must sit below the subtitle: %s" % (tag, g)
+                        assert t0["t"] - sub["b"] <= 2 * lh + 14, "%s: gap between subtitle and groups too big (%.1fpx): %s" % (tag, t0["t"] - sub["b"], g)
+                    else:
+                        assert tog["t"] >= sub["b"] - 0.5, "%s: toggle must sit below the subtitle: %s" % (tag, g)
+                        assert tog["t"] - sub["b"] <= 2 * lh + 14, "%s: gap between subtitle and toggle too big (%.1fpx): %s" % (tag, tog["t"] - sub["b"], g)
+                        assert tog["l"] <= 24, "%s: toggle must be left-aligned with the card: %s" % (tag, g)
+                    assert t0["h"] <= 36 and t1["h"] <= 36, "%s: segmented buttons must stay on one line (no wrapped labels): %s" % (tag, g)
+                    assert abs(t0["t"] - t1["t"]) <= 2, "%s: the two segmented groups must share a row: %s" % (tag, g)
+                    assert t0["l"] <= 24, "%s: first group must be left-aligned: %s" % (tag, g)
+                    assert t1["r"] >= cw - 24, "%s: second group must be right-aligned: %s" % (tag, g)
+                    if tog["h"]:
+                        assert t0["t"] >= tog["b"] - 0.5, "%s: groups must sit below the toggle row: %s" % (tag, g)
+                    assert not g["over"], "%s: header elements overflow the card: %s" % (tag, g)
+                    assert g["sw"] <= g["iw"], "%s: the page must not scroll sideways: %s" % (tag, g)
+                    if chain == "robinhood":   # بلندترین زیرعنوانِ ممکن؛ باید در دو خط بماند
+                        await pg.evaluate("() => { document.getElementById('fbSub').textContent = 'Established Robinhood Chain tokens \u00b7 last 6 hours \u00b7 by unique wallets'; }")
+                        g2 = await pg.evaluate(FH_GEOM_JS)
+                        assert g2["sub"]["h"] <= 2 * g2["lh"] + 1, "%s: the longest subtitle must fit in 2 lines: %s" % (tag, g2)
+                    if vw == 390 and (chain, est) in (("base", False), ("base", True), ("robinhood", False)):
+                        card = await pg.query_selector("#view-flow .card")
+                        await card.screenshot(path="%s/%s_390.png" % (shots, {("base", False): "base_new", ("base", True): "base_est", ("robinhood", False): "rh_new"}[(chain, est)]))
+                    await pg.context.close()
+        # دسکتاپ: مختصاتِ امروز (ثبت‌شده روی کدِ دست‌نخورده)
+        cur = {}
+        for chain, est in (("base", False), ("base", True)):
+            pg = await fh_open(env, chain, est, 1440, 900)
+            g = await pg.evaluate(FH_GEOM_JS)
+            cur["%s-%s" % (chain, "est" if est else "new")] = {k: g[k] for k in ("ttl", "chip", "sub", "tog", "tfs0", "tfs1")}
+            if not est:
+                card = await pg.query_selector("#view-flow .card")
+                await card.screenshot(path="%s/base_new_1440.png" % shots)
+            await pg.context.close()
+        if os.environ.get("ZX_FH_RECORD"):
+            print("FH_RECORD", _fbj.dumps(cur))
+        else:
+            assert FH_BASE_1440 is not None
+            for case, rects in FH_BASE_1440.items():
+                for el, rc in rects.items():
+                    for k in ("l", "t", "w", "h"):
+                        assert abs(cur[case][el][k] - rc[k]) <= 1, "[flow head mobile] 1440 %s %s.%s changed: %s -> %s" % (case, el, k, rc[k], cur[case][el][k])
+        assert not errs, "[flow head mobile] console errors: %s" % errs
+        print("[flow head mobile] PASS - at 390/360 (Base and Robinhood, New tokens and Established) the network chip sits on the title row at the right, the subtitle fits two lines, the toggle follows right below, the two segmented groups share one row (left/right), nothing overflows; at 1440 the header rects equal the recorded desktop layout")
     finally:
         await b.close()
         srv.shutdown()
