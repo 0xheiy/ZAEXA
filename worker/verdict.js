@@ -1601,6 +1601,29 @@ export async function poolDirectedProof(tokenAddr, pools, opts) {
     const quoteById = new Map();
     for (let i = 0; i < quoteItems.length; i++) quoteById.set(quoteItems[i].id, batchQuote.items[i]);
 
+    /* ۴٫۵ — ۲۲ نوامبر (ممیزیِ فیبل، بند ۴): کدِ -32000 فقط ریوِرت نیست؛ مهلتِ اجرای گره و «بلاک
+       پیدا نشد» هم همین کد را می‌گیرند. «sell-reverts» تنها مسیری است که این کد به حکمِ منتشرشده
+       می‌رسد، پس هر ردیفِ -32000 یک بار دیگر از زنجیره پرسیده می‌شود (قاعده‌ی اول: دوباره بپرس، از
+       متنِ خطا تصمیم نگیر). فقط وقتی دوباره -32000 یا ریوِرتِ کدِ ۳ آمد و کاناریِ همان دسته زنده بود
+       اثبات می‌ماند؛ کوتِ مثبت برنده است (پایین‌تر)؛ هر چیزِ دیگر — شکستِ دسته، مهلت، خطای دیگر،
+       کاناریِ مرده — «نمی‌دانیم» است. کدِ ۳ (ریوِرت با داده) تک‌رأی می‌ماند. هزینه: یک تماس، فقط
+       وقتی دست‌کم یک ردیفِ -32000 هست. */
+    const reaskItems = quoteItems.filter((q) => {
+      const it = quoteById.get(q.id);
+      return it && it.error && it.error.code === -32000;
+    });
+    if (reaskItems.length > 0) {
+      const unknown = { error: { code: "reask-unknown" } }; // نه در PROVEN_NEGATIVE_CODES، نه کوت → هرگز اثبات
+      let b3 = null;
+      if (!deadlineHit()) b3 = await callBatch(fetchImpl, rpc, canary, reaskItems, timeoutMs, collect, "pool-reask");
+      const b3Alive = b3 != null && b3.canary && !b3.canary.error && typeof b3.canary.result === "string" &&
+        (() => { const v = decodeQuote("CL_UINT24", b3.canary.result); return v != null && v > 0n; })();
+      for (let i = 0; i < reaskItems.length; i++) {
+        const again = b3Alive && Array.isArray(b3.items) ? b3.items[i] : null;
+        quoteById.set(reaskItems[i].id, again && typeof again === "object" ? again : unknown);
+      }
+    }
+
     // ۵. هر کوتِ مثبتی در همین مرحله برنده است — تصمیمِ صریحِ حسام (۱۶ شهریور):
     // یک کوتِ مثبت با کلیدِ واقعیِ خودِ استخر خودش اثباتِ «قابلِ‌فروش» است.
     let anyPositive = false;

@@ -1031,11 +1031,14 @@ async function baseVenueCoveredDetail(addr, env) {
     // ۲۷ سپتامبر — pools: همان بدنه‌ی خام، برای poolDirectedProof
     // (worker/verdict.js/ogFetchVerdictDetail) — بدونِ این، آن اثبات یک
     // فراخوانیِ *دومِ* همین pools را لازم داشت؛ حالا فقط همین‌جا نشسته است.
+    /* ۲۲ نوامبر (ممیزیِ فیبل، بند ۷): v4Listed روی *همه‌ی* ردیف‌ها، نه فقط تا اولین صرافیِ
+       پوشش‌دار — finalizeBaseNosell حالا «sell-reverts»ِ توکنِ دارای استخرِ v4 را نامعلوم می‌کند. */
+    const dexOf = (pool) => pool && pool.relationships && pool.relationships.dex &&
+      pool.relationships.dex.data && pool.relationships.dex.data.id;
+    v4Listed = r.data.some((pool) => dexOf(pool) === "uniswap-v4-base");
     for (const pool of r.data) {
-      const dexId = pool && pool.relationships && pool.relationships.dex &&
-        pool.relationships.dex.data && pool.relationships.dex.data.id;
+      const dexId = dexOf(pool);
       if (typeof dexId !== "string") continue;
-      if (dexId === "uniswap-v4-base") v4Listed = true;
       const venue = GT_DEX_TO_VENUE[dexId];
       if (venue && VD_VENUE_ID_SET.has(venue)) return { covered: true, why: null, v4Listed, sellersH1, sellersElsewhere24, counterTop, pools: r.data };
     }
@@ -1717,6 +1720,11 @@ export function finalizeBaseNosell(empty, covered, v4Only, poolCause, oneWay) {
   // بعد از sells:recent، پیش از v4:unproven، و فقط برای حکمِ v4-only.
   if (v4Only && oneWay === true) return { v: "nosell", why: null, cause: "one-way-pool" };
   if (v4Only) return { v: null, why: "v4:unproven" };
+  /* ۲۲ نوامبر (ممیزیِ فیبل، بند ۷) — توکنی که استخرِ v4 دارد: ریوِرتِ صرافی‌های پوشش‌دار ثابت
+     نمی‌کند که فروش از استخرِ v4 هم نمی‌رود (ردیفِ v4 فقط-مثبت است). گزارش همین را برای ردیفِ v4
+     نامعلوم نشان می‌داد ولی /vd، صفحه‌ی توکن، کارت و ربات منتشر می‌کردند؛ حالا همه‌جا یکی است.
+     «empty-pool» و «one-way-pool» دست نمی‌خورند (شاهدِ v4ِ خودشان را دارند). */
+  if (poolCause === "sell-reverts" && covered && covered.v4Listed === true) return { v: null, why: "v4:unproven" };
   return { v: "nosell", why: null, cause: poolCause === "sell-reverts" ? "sell-reverts" : undefined };
 }
 

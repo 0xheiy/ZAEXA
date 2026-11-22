@@ -14126,6 +14126,15 @@ function stripAllowedWording(t) {
         if (sel === vd.SEL_CL_UINT24 || sel === vd.SEL_CL_INT24) {
           const feeOrTick = parseInt(data.slice(2 + 8 + 64 * 3, 2 + 8 + 64 * 4), 16);
           const cand = cfg.find((p) => p.quoterTo && p.quoterTo.toLowerCase() === toL && p.key === feeOrTick);
+          // ۲۲ نوامبر — دنباله‌ی پاسخ برای پرسیدنِ دوباره (بند ۴ِ ممیزی): هر کوت یک قدم جلو می‌رود
+          if (cand && Array.isArray(cand.seq)) {
+            cand.quoteCalls = (cand.quoteCalls || 0) + 1;
+            const b = cand.seq.length > 1 ? cand.seq.shift() : cand.seq[0];
+            if (b === "e32000") return { id: r.id, error: { code: -32000 } };
+            if (b === "positive") return { id: r.id, result: mk4PP(500000000000000000n) };
+            if (b === "revert") return { id: r.id, error: { code: 3 } };
+            return { id: r.id, error: { code: -32603 } };
+          }
           if (cand && cand.quoteBehavior === "positive") return { id: r.id, result: mk4PP(cand.quoteAmount || 500000000000000000n) };
           if (cand && cand.quoteBehavior === "zero") return { id: r.id, result: mk4PP(0) };
           // ریوِرتِ واقعیِ اجرا (کدِ ۳، همان PROVEN_NEGATIVE_CODES) — نه "0x"ی بی‌نام
@@ -14290,6 +14299,59 @@ function stripAllowedWording(t) {
     const ctl = await run(two(), cfgOf({}));
     ok(ctl.v === "nosell" && ctl.cause === "sell-reverts",
       "[pool proof unknown] positive control: funded pool whose own real-key quote reverts (code 3) -> sell-reverts, got " + JSON.stringify(ctl));
+
+    // [fable 4] ۲۲ نوامبر — -32000 فقط با تکرار در پرسیدنِ دوباره اثبات است
+    {
+      const seqRun = async (seq, wrap) => {
+        const cfg = cfgOf({ seq: seq.slice() });
+        let batches = 0;
+        const base = makeDispatchPP(cfg);
+        const fetchImpl = async (url, init) => { batches++; return wrap ? wrap(batches, url, init, base) : base(url, init); };
+        const res = await vd.poolDirectedProof(TOK, two(), PU({ fetchImpl }));
+        return { res, calls: cfg[0].quoteCalls || 0, batches };
+      };
+      const a = await seqRun(["e32000", "e32000"]);
+      ok(a.res.v === "nosell" && a.res.cause === "sell-reverts" && a.calls === 2 && a.batches === 3,
+        "[fable 4] -32000 repeated on the re-ask (live canary) -> sell-reverts after exactly one extra batch, got " + JSON.stringify(a));
+      const b = await seqRun(["e32000", "positive"]);
+      ok(b.res.v === "sell" && b.res.via === "pool-key", "[fable 4] -32000 then a positive quote on the re-ask -> sell, got " + JSON.stringify(b.res));
+      const c = await seqRun(["e32000", "e32603"]);
+      ok(causeless(c.res), "[fable 4] -32000 then another RPC error -> causeless (never sell-reverts), got " + JSON.stringify(c.res));
+      const d = await seqRun(["e32000"], async (n, url, init, base) => { if (n === 3) throw new Error("down"); return base(url, init); });
+      ok(causeless(d.res), "[fable 4] -32000 and the re-ask batch fails -> causeless, got " + JSON.stringify(d.res));
+      const e = await seqRun(["e32000", "e32000"], async (n, url, init, base) => {
+        const r = await base(url, init);
+        if (n !== 3) return r;
+        const arr = await r.json();
+        return jsonPP(arr.map((x) => (x.id === 0 ? { id: 0, error: { code: -32603 } } : x)));
+      });
+      ok(causeless(e.res), "[fable 4] a repeated -32000 under a dead canary proves nothing -> causeless, got " + JSON.stringify(e.res));
+      const f = await seqRun(["revert"]);
+      ok(f.res.cause === "sell-reverts" && f.calls === 1 && f.batches === 2, "[fable 4] a code-3 revert is still a single vote: sell-reverts with no re-ask, got " + JSON.stringify(f));
+      const g = await seqRun(["e32000", "e32000"], null);
+      ok(g.calls === 2, "[fable 4] the re-ask sends only the -32000 rows");
+    }
+    // [fable 7] ۲۲ نوامبر — توکنِ دارای استخرِ v4: «sell-reverts» همه‌جا نامعلوم، مثلِ گزارش
+    {
+      const f1 = finalizeBaseNosell(undefined, { v4Listed: true }, false, "sell-reverts");
+      ok(f1.v === null && f1.why === "v4:unproven", "[fable 7] a token with a v4 pool: sell-reverts -> v4:unproven, got " + JSON.stringify(f1));
+      const f2 = finalizeBaseNosell(undefined, { v4Listed: false }, false, "sell-reverts");
+      ok(f2.v === "nosell" && f2.cause === "sell-reverts", "[fable 7] no v4 pool: sell-reverts still published, got " + JSON.stringify(f2));
+      const f3 = finalizeBaseNosell(undefined, { v4Listed: true }, false, "empty-pool");
+      ok(f3.v === "nosell" && f3.cause === "empty-pool", "[fable 7] empty-pool keeps its own evidence even with a v4 pool, got " + JSON.stringify(f3));
+      const f4 = finalizeBaseNosell(false, { v4Listed: true }, true, undefined, true);
+      ok(f4.v === "nosell" && f4.cause === "one-way-pool", "[fable 7] one-way-pool unchanged, got " + JSON.stringify(f4));
+      const saved = globalThis.fetch;
+      globalThis.fetch = async () => jsonPP({ data: [
+        { relationships: { dex: { data: { id: "uniswap-v3-base" } } }, attributes: {} },
+        { relationships: { dex: { data: { id: "uniswap-v4-base" } } }, attributes: {} },
+      ] });
+      try {
+        const { baseVenueCoveredDetail: bvcdF } = await import("./index.js");
+        const cov = await bvcdF("0x" + "7e".repeat(20), {});
+        ok(cov.covered === true && cov.v4Listed === true, "[fable 7] v4Listed sees a v4 pool listed after the first covered venue, got " + JSON.stringify({ c: cov.covered, v: cov.v4Listed }));
+      } finally { globalThis.fetch = saved; }
+    }
 
     // ۱) خواندنِ موجودی/کلیدِ استخرِ پرشده ناکام → causeless، هرگز empty-pool
     const rBalErr = await run(two(), cfgOf({ balanceBehavior: "error" }));
