@@ -7443,7 +7443,15 @@ console.log("[v4 pool selection] v4PoolsFromGt now ranks by sellers24 (numeric o
   // ⚠️ v4PoolsEmpty از این پس فقط رویِ ورودیِ complete:true اثبات می‌سنجد
   // (بخشِ [v4 pool selection] پایین‌تر دلیلش را پین می‌کند)؛ فیکسچرهای این
   // بخش پس complete:true می‌گذارند تا رفتارِ «قبلی» همان رفتار بماند.
-  const kvWith = (keys) => ({ get: async () => JSON.stringify({ keys, reason: "ok", complete: true }), put: async () => {} });
+  /* ۲۲ نوامبر (بند ۵ِ ممیزی): «complete» فقط وقتی معتبر است که فهرستِ امروزِ استخرها هم همان استخرهای v4 را
+     نشان دهد؛ پس /pools در این بخش استخرهای v4ِ همان کلیدها را هم برمی‌گرداند (توکنِ واقعیِ ایندکس‌شده). */
+  let cur9Keys = [];
+  const kvWith = (keys) => { cur9Keys = keys; return { get: async () => JSON.stringify({ keys, reason: "ok", complete: true }), put: async () => {} }; };
+  const pools9 = () => {
+    const b = poolsBody9(["uniswap-v3-base"]);
+    b.data.push(...cur9Keys.filter((k) => k && k.poolId).map((k) => k.poolId).map((id) => ({ relationships: { dex: { data: { id: "uniswap-v4-base" } } }, attributes: { address: id, pool_created_at: "2026-09-19T00:00:00Z" } })));
+    return jsonRes9(b);
+  };
 
   /* یک fetchِ جعلیِ عمومی برای این بخش: /pools یک استخرِ پوشش‌داده‌شده
      می‌دهد، متادیتا برمی‌گردد، پروبِ صرافی‌ها همه‌جا ریوِرت می‌کند (nosellِ
@@ -7455,7 +7463,7 @@ console.log("[v4 pool selection] v4PoolsFromGt now ranks by sellers24 (numeric o
   function makeFetch9(liqByPoolId, ethCallsOut) {
     return async (url, init) => {
       const u = String(url);
-      if (u.endsWith("/pools")) return jsonRes9(poolsBody9(["uniswap-v3-base"]));
+      if (u.endsWith("/pools")) return pools9();
       if (u.startsWith(UF_C9)) return gtMetaFor9("Empty Pool Token");
       const parsed = JSON.parse(init.body);
       if (Array.isArray(parsed)) {
@@ -7561,7 +7569,7 @@ console.log("[v4 pool selection] v4PoolsFromGt now ranks by sellers24 (numeric o
     const ADDR2 = "0x" + "54".repeat(20);
     globalThis.fetch = async (url, init) => {
       const u = String(url);
-      if (u.endsWith("/pools")) return jsonRes9(poolsBody9(["uniswap-v3-base"]));
+      if (u.endsWith("/pools")) return pools9();
       if (u.startsWith(UF_C9)) return gtMetaFor9("Bad Hex Token");
       const parsed = JSON.parse(init.body);
       if (Array.isArray(parsed)) {
@@ -7633,7 +7641,7 @@ console.log("[v4 pool selection] v4PoolsFromGt now ranks by sellers24 (numeric o
     const ADDR_SELL = "0x" + "55".repeat(20);
     globalThis.fetch = countingWrap(async (url, init) => {
       const u = String(url);
-      if (u.endsWith("/pools")) return jsonRes9(poolsBody9(["uniswap-v3-base"]));
+      if (u.endsWith("/pools")) return pools9();
       if (u.startsWith(UF_C9)) return gtMetaFor9("Sell Token C9");
       const reqs = JSON.parse(init.body);
       return jsonRes9(reqs.map((r) => r.id === 0
@@ -10631,8 +10639,12 @@ function stripAllowedWording(t) {
     name: "V4 Exception Token", symbol: "V4X", total_reserve_in_usd: "1000",
     decimals: 18, price_usd: "2000",
   } } }), { status: 200, headers: { "content-type": "application/json" } });
+  /* ۲۲ نوامبر (بند ۵ِ ممیزی): ردیفِ v4 شناسه و تاریخِ ساختِ کلیدِ ذخیره‌شده را دارد — همان توکنِ واقعیِ ایندکس‌شده. */
+  let curKeyX = null;
   const poolsBodyX = (dexIds) => new Response(JSON.stringify({ data: dexIds.map((id) => (
-    { relationships: { dex: { data: { id } } } })) }), { status: 200, headers: { "content-type": "application/json" } });
+    id === "uniswap-v4-base" && curKeyX
+      ? { relationships: { dex: { data: { id } } }, attributes: { address: curKeyX.poolId, pool_created_at: "2026-09-19T00:00:00Z" } }
+      : { relationships: { dex: { data: { id } } } })) }), { status: 200, headers: { "content-type": "application/json" } });
   // eth_call تکیِ v4PoolsEmpty (نه آرایه‌ی batch) — همیشه یک نقدینگیِ صفرِ
   // خواندنی برمی‌گرداند؛ خودِ cause این بخش را نمی‌سنجد، فقط v/why را.
   const singleEthCallOkX = (parsed) => new Response(JSON.stringify(
@@ -10640,11 +10652,11 @@ function stripAllowedWording(t) {
     { status: 200, headers: { "content-type": "application/json" } });
   // complete:true — این توکن‌ها واقعاً ایندکس شده‌اند (شاهدِ کاملِ ۲۷.۲۰)، پس
   // v4PoolsEmpty باید مثلِ همیشه رویِ کلیدشان eth_call بزند.
-  const realKvX = (addr, key) => ({
+  const realKvX = (addr, key) => { curKeyX = key; return {
     get: async (k) => (k === v4KvKeyX("base", addr) ? JSON.stringify({ keys: [key], reason: "ok", complete: true }) : null),
     put: async () => {},
-  });
-  const noKvX = () => ({ get: async () => null, put: async () => {} });
+  }; };
+  const noKvX = () => { curKeyX = null; return { get: async () => null, put: async () => {} }; };
   // شناسه‌ی استخرِ این کلید هرگز با هیچ داده‌ی ریوِرتی که پایین‌تر می‌سازیم
   // یکی نمی‌شود — یعنی v4NoLiquidityProof/whyOut.v4Proof هرگز true نمی‌شود؛
   // این بخش عمداً شاخه‌ی تازه را می‌سنجد، نه شاخه‌ی قدیمیِ ۱۹ شهریور.
@@ -17089,11 +17101,17 @@ function stripAllowedWording(t) {
   ok(f7.why === "v4:unproven", "[one-way round trip] only a strict true counts as proof");
 
   // 4. v4OneWayCheck — ایندکسِ کامل لازم است، ولتِ بودجه، و Solana هرگز
-  const kvOf = (entry) => ({ get: async () => (entry == null ? null : JSON.stringify(entry)), put: async () => {} });
+  /* ۲۲ نوامبر (بند ۵ِ ممیزی): v4OneWayCheck «complete» را روی فهرستِ امروزِ استخرها هم می‌سنجد؛ /pools
+     همان استخرهای کلیدهای آخرین ورودیِ خوانده‌شده را برمی‌گرداند (توکنِ واقعیِ ایندکس‌شده). */
+  let curOwKeys = [];
+  const kvOf = (entry) => { curOwKeys = entry && Array.isArray(entry.keys) ? entry.keys : []; return { get: async () => (entry == null ? null : JSON.stringify(entry)), put: async () => {} }; };
+  const owPools = (fn) => async (url, init) => (String(url).endsWith("/pools")
+    ? new Response(JSON.stringify({ data: curOwKeys.filter((k) => k && k.poolId).map((k) => k.poolId).map((id) => ({ relationships: { dex: { data: { id: "uniswap-v4-base" } } }, attributes: { address: id, pool_created_at: "2026-09-19T00:00:00Z" } })) }), { status: 200, headers: { "content-type": "application/json" } })
+    : fn(url, init));
   const realFetch = globalThis.fetch;
   try {
     const m = mock({ trip: SELL_NEL });
-    globalThis.fetch = m.fn;
+    globalThis.fetch = owPools(m.fn);
     const env = (entry) => ({ ZX_KV: kvOf(entry) });
     ok(await v4OneWayCheck(XDP, {}, env({ keys: [KEY], complete: true }), undefined, undefined) === true,
       "[one-way round trip] a complete index with the real key proves via the check");
@@ -17115,12 +17133,12 @@ function stripAllowedWording(t) {
     ok(await v4OneWayCheck(XDP, {}, env({ keys: [KEY], complete: true }), undefined,
       { used: () => 0, capHit: () => true }) === false, "[one-way round trip] capHit skips the check");
     {
-      const mu = mock({ trip: SELL_NEL }); globalThis.fetch = mu.fn;
+      const mu = mock({ trip: SELL_NEL }); globalThis.fetch = owPools(mu.fn);
       const useen = [];
       const uk = mkKey(XDP < vdw.USDC_ADDR.toLowerCase() ? XDP : vdw.USDC_ADDR.toLowerCase(), XDP < vdw.USDC_ADDR.toLowerCase() ? vdw.USDC_ADDR.toLowerCase() : XDP, 500, 10, NATIVE);
       ok(await v4OneWayCheck(XDP, {}, env({ keys: [uk], complete: true }), undefined, { used: () => 0, capHit: () => false, stage: () => {}, oneWay: (l) => useen.push(l) }) === false &&
          mu.calls.batches === 0 && useen[0] === "skip:usdc", "[one-way round trip] a USDC-quoted key is skipped with the label skip:usdc and zero calls, got " + JSON.stringify(useen));
-      globalThis.fetch = m.fn;
+      globalThis.fetch = owPools(m.fn);
     }
     const withNoPool = await v4OneWayCheck(XDP, {}, env({ keys: [{ ...KEY, poolId: undefined }], complete: true }), undefined, undefined);
     ok(withNoPool === false, "[one-way round trip] indexed keys without poolId prove nothing");
@@ -17132,13 +17150,13 @@ function stripAllowedWording(t) {
     await v4OneWayCheck(XDP, {}, env({ keys: [KEY], complete: false }), undefined, hooks(0));
     await v4OneWayCheck(XDP, {}, env({ keys: [KEY, { ...KEY, fee: 3000, tickSpacing: 60, poolId: "0x" + "ab".repeat(32) }], complete: true }), undefined, hooks(0));
     await v4OneWayCheck(XDP, {}, env({ keys: [KEY], complete: true }), Date.now() + 500, hooks(0));
-    globalThis.fetch = mock({ trip: "filled" }).fn; // round trip پر می‌شود → اثبات نیست
+    globalThis.fetch = owPools(mock({ trip: "filled" }).fn); // round trip پر می‌شود → اثبات نیست
     await v4OneWayCheck(XDP, {}, env({ keys: [KEY], complete: true }), undefined, hooks(0));
     ok(JSON.stringify(seen.slice(0, 5)) === JSON.stringify(["proved", "skip:budget", "skip:index", "skip:keys", "skip:deadline"]) &&
        /^oneway-trip:/.test(seen[5] || "") && seen.every((l) => /^[a-z0-9:-]{1,40}$/.test(l) && !/0x/.test(l)),
       "[one-way round trip] the observer labels every outcome (proved / skip:* / last stage:out), never an address, got " + JSON.stringify(seen));
     const hooksThrow = { used: () => 0, capHit: () => false, stage: () => {}, oneWay: () => { throw new Error("x"); } };
-    globalThis.fetch = m.fn;
+    globalThis.fetch = owPools(m.fn);
     ok(await v4OneWayCheck(XDP, {}, env({ keys: [KEY], complete: true }), undefined, hooksThrow) === true,
       "[one-way round trip] a throwing observer never changes the verdict");
   } finally { globalThis.fetch = realFetch; }
@@ -19839,6 +19857,78 @@ console.log(fails === 0
   ok(rpg.plainWhy("solana", "payer-frozen") === "The test wallet has a frozen account on this route, so the failed sell proved nothing.",
     "[sol payer-frozen] plainWhy(solana, payer-frozen) returns the WHY_SOL text, got " + rpg.plainWhy("solana", "payer-frozen"));
   console.log("[sol payer-frozen] round-trip InstructionError + frozen token account (spl-token or spl-token-2022) owned by the payer -> null/payer-frozen with sim.frozen; other owner or non-frozen state -> nosell; guard RPC failure -> rpc:getMultipleAccounts:*; request is jsonParsed with unique writable non-payer keys only; success path never calls it; why listed and has a plain text");
+}
+
+// ---------- [fable 5-7] ۲۲ نوامبر — بندهای ۵، ۶ و ۷ِ ممیزیِ فیبل ----------
+{
+  const idxF = await import("./index.js");
+  const TOK = "0x" + "5a".repeat(20);
+  const IDA = "0x" + "a1".repeat(32), IDB = "0x" + "b2".repeat(32);
+  const v4row = (id, created = "2026-11-01T00:00:00Z") => ({ relationships: { dex: { data: { id: "uniswap-v4-base" } } },
+    attributes: created == null ? { address: id } : { address: id, pool_created_at: created } });
+  const v3row = { relationships: { dex: { data: { id: "uniswap-v3-base" } } }, attributes: { address: "0x" + "c3".repeat(20) } };
+  const H = v4.v4CompleteStillHolds;
+  const C = null;
+  // بند ۵ — «complete» روی فهرستِ امروز
+  ok(H([{ poolId: IDA }], [v3row, v4row(IDA)], TOK, C) === true, "[fable 5] stored keys cover every v4 pool listed today -> complete still holds");
+  ok(H([{ poolId: IDA }], [v4row(IDA), v4row(IDB)], TOK, C) === false, "[fable 5] a v4 pool created after the index (not among the keys) -> not complete");
+  ok(H([{ poolId: IDA }], [v4row(IDA), v4row(IDB, null)], TOK, C) === false, "[fable 5] a v4 pool without a creation date today -> not complete");
+  ok(H([{ poolId: IDA }], [v4row(IDA), ...Array.from({ length: v4.V4_GT_PAGE_SIZE - 1 }, () => v3row)], TOK, C) === false, "[fable 5] a full GeckoTerminal page -> not complete (a second page may hide pools)");
+  ok(H([{ poolId: IDA }], [v3row], TOK, C) === false && H([], [v4row(IDA)], TOK, C) === false && H([{ poolId: IDA }], null, TOK, C) === false,
+     "[fable 5] no v4 pool today, no stored keys, or no pool list -> not complete (unknown, never a claim)");
+  ok(H([{ poolId: IDA.toUpperCase().replace("0X", "0x") }], [v4row(IDA)], TOK, C) === true, "[fable 5] pool ids compare case-insensitively");
+  // ایندکس: استخرِ بی‌تاریخ complete را می‌شکند (هر دو مسیر)
+  const gtF = v4.v4PoolsFromGt([v4row(IDA), v4row(IDB, null)], TOK, null);
+  ok(gtF.undated === 1 && gtF.listed === 1 && gtF.rows.length === 1, "[fable 5] v4PoolsFromGt counts an undated v4 pool as undated, outside listed, got " + JSON.stringify({ u: gtF.undated, l: gtF.listed }));
+  // سرتاسری: v4PoolsEmpty روی ورودیِ complete ولی استخرِ تازه → null، و هیچ getLiquidity
+  {
+    const saved = globalThis.fetch;
+    const calls = { eth: 0 };
+    let today = [v4row(IDA)];
+    globalThis.fetch = async (url, init) => {
+      const u = String(url);
+      if (u.endsWith("/pools")) return new Response(JSON.stringify({ data: today }), { status: 200, headers: { "content-type": "application/json" } });
+      const b = JSON.parse(init.body);
+      if (b && b.method === "eth_call") { calls.eth++; return new Response(JSON.stringify({ jsonrpc: "2.0", id: b.id, result: "0x" + "0".repeat(64) }), { status: 200 }); }
+      return new Response("x", { status: 500 });
+    };
+    const envF = { ZX_KV: { get: async () => JSON.stringify({ keys: [{ poolId: IDA }], reason: "ok", complete: true }), put: async () => {} } };
+    try {
+      const e1 = await idxF.v4PoolsEmpty(TOK, envF, Date.now() + 5000);
+      ok(e1 === true && calls.eth === 1, "[fable 5] control: today's list matches the index -> the empty-pool witness still runs, got " + e1 + " eth=" + calls.eth);
+      today = [v4row(IDA), v4row(IDB)]; calls.eth = 0;
+      const e2 = await idxF.v4PoolsEmpty(TOK, envF, Date.now() + 5000);
+      ok(e2 === null && calls.eth === 0, "[fable 5] a new v4 pool since the index -> null (never empty-pool) and zero liquidity calls, got " + e2 + " eth=" + calls.eth);
+      today = null; calls.eth = 0;
+      globalThis.fetch = async () => new Response("down", { status: 503 });
+      const e3 = await idxF.v4PoolsEmpty(TOK, envF, Date.now() + 5000);
+      ok(e3 === null, "[fable 5] the pool list cannot be read -> null (unknown), got " + e3);
+    } finally { globalThis.fetch = saved; }
+  }
+  // بند ۶ — سولانا: ذخیره‌ی صفرِ GT هرگز «Pool empty» نیست
+  {
+    const saved = globalThis.fetch;
+    const MINT = "So11111111111111111111111111111111111111112".slice(0, 32) + "pumpAAAAAAAA";
+    const solRow = (r) => ({ relationships: { base_token: { data: { id: "solana_" + MINT } }, quote_token: { data: { id: "solana_x" } } }, attributes: { reserve_in_usd: r } });
+    let rows = [solRow("0"), solRow("0.0")];
+    globalThis.fetch = async (url) => (String(url).endsWith("/pools")
+      ? new Response(JSON.stringify({ data: rows }), { status: 200, headers: { "content-type": "application/json" } })
+      : new Response("x", { status: 500 }));
+    try {
+      const z = await idxF.solPoolsEmpty(MINT, {});
+      ok(z === null, "[fable 6] Solana: an all-zero GT reserve -> null, never true (GT reserve is not liquidity evidence), got " + z);
+      rows = [solRow("0"), solRow("1234")];
+      const p = await idxF.solPoolsEmpty(MINT, {});
+      ok(p === false, "[fable 6] Solana: a positive reserve still reads pool-there (false), got " + p);
+    } finally { globalThis.fetch = saved; }
+  }
+  // بند ۷ — ربات همان گاردِ انتشار را صدا می‌زند، نه کپیِ دست‌نویس
+  {
+    const tgSrc = fs.readFileSync(new URL("./tg.js", import.meta.url), "utf8");
+    ok(/import \{ publishGuardRow \} from "\.\/report\.js";/.test(tgSrc) && /const g = publishGuardRow\(/.test(tgSrc),
+       "[fable 7] worker/tg.js classify() runs publishGuardRow (the same guard as the report, /vd and the token page)");
+  }
+  console.log("[fable 5-7] v4 'complete' is re-checked against today's pool list (new or undated v4 pool, full page, unreadable list -> unknown); Solana zero GT reserve never labels a pool empty; the Telegram bot uses publishGuardRow");
 }
 
 process.exit(fails === 0 ? 0 : 1);

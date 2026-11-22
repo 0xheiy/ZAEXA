@@ -260,6 +260,7 @@ export function v4PoolsFromGt(pools, tokenAddr, counters) {
   let sawId = false;
   let sawCounter = false;
   let listed = 0;
+  let undated = 0; // ۲۲ نوامبر (ممیزیِ فیبل، بند ۵): استخرِ v4ِ واقعی بی‌تاریخِ ساخت ایندکس نمی‌شود، پس «کامل» نمی‌تواند باشد
   const rows = [];
 
   for (const row of list) {
@@ -277,7 +278,7 @@ export function v4PoolsFromGt(pools, tokenAddr, counters) {
 
     const createdAtRaw = row.attributes && row.attributes.pool_created_at;
     const createdAtMs = typeof createdAtRaw === "string" ? Date.parse(createdAtRaw) : NaN;
-    if (!Number.isFinite(createdAtMs)) continue;
+    if (!Number.isFinite(createdAtMs)) { undated++; continue; }
 
     // هر ردیفِ واجدِ شرایط، پیش از هر فیلترِ ضدجفت یا سقفِ V4_MAX_POOLS شمرده می‌شود.
     listed++;
@@ -295,8 +296,21 @@ export function v4PoolsFromGt(pools, tokenAddr, counters) {
   rows.sort((a, b) => (b.sellers24 !== a.sellers24 ? b.sellers24 - a.sellers24 : b.createdAtMs - a.createdAtMs));
   return {
     rows: rows.slice(0, V4_MAX_POOLS).map((r) => ({ poolId: r.poolId, createdAtMs: r.createdAtMs })),
-    sawV4, sawId, sawCounter, listed,
+    sawV4, sawId, sawCounter, listed, undated,
   };
+}
+
+/* ۲۲ نوامبر (ممیزیِ فیبل، بند ۵) — «complete»ِ ذخیره‌شده تا ۳۰ روز می‌ماند، ولی توکن می‌تواند در این
+   مدت استخرِ v4ِ تازه بسازد؛ کلیدِ قدیمی صفر است و «استخرِ خالی» غلط منتشر می‌شد. پس پیش از هر ادعا،
+   همان سه شرطِ complete روی فهرستِ *امروزِ* استخرها دوباره سنجیده می‌شود: صفحه‌ی ناقص، هیچ استخرِ
+   بی‌تاریخ یا کنارگذاشته، و شناسه‌ی هر استخرِ v4ِ امروز میانِ کلیدهای ذخیره‌شده. هر چیزِ دیگر → false
+   (نامعلوم، هرگز ادعا). محض و بی‌شبکه. */
+export function v4CompleteStillHolds(keys, pools, tokenAddr, counters) {
+  if (!Array.isArray(keys) || keys.length === 0 || !Array.isArray(pools) || pools.length >= V4_GT_PAGE_SIZE) return false;
+  const { rows, listed, undated } = v4PoolsFromGt(pools, tokenAddr, counters);
+  if (undated !== 0 || rows.length === 0 || rows.length !== listed) return false;
+  const have = new Set(keys.map((k) => (k && typeof k.poolId === "string" ? k.poolId.toLowerCase() : null)).filter(Boolean));
+  return rows.every((r) => have.has(r.poolId));
 }
 
 /* ---------------------------------------------------------------------
@@ -535,7 +549,7 @@ export async function indexV4Keys({ tokenAddr, pools, rpcCall, now, collect, cou
   try {
     // now: برای measureBlockMs (کشِ نرخ) — آزمون تزریق می‌کند
 
-    const { rows, sawV4, sawId, sawCounter, listed } = v4PoolsFromGt(pools, tokenAddr, counters);
+    const { rows, sawV4, sawId, sawCounter, listed, undated } = v4PoolsFromGt(pools, tokenAddr, counters);
 
     /* پشتیبان: وقتی لاگ‌ها خوانده نشدند (rpc-down/no-anchor)، کلیدِ هر ردیف را از
        PositionManager.poolKeys می‌خوانیم. فقط کلیدِ کاملاً معتبرِ همین توکن پذیرفته
@@ -557,7 +571,7 @@ export async function indexV4Keys({ tokenAddr, pools, rpcCall, now, collect, cou
         const keys = got.filter(Boolean);
         if (keys.length === 0) return orig;
         const complete = Array.isArray(pools) && pools.length < V4_GT_PAGE_SIZE &&
-          rows.length === listed && keys.length === rows.length;
+          rows.length === listed && undated === 0 && keys.length === rows.length;
         return { keys: mergeV4Keys([], keys), reason: "ok", complete, via: "posm" };
       } catch (e) { return orig; }
     }
@@ -636,7 +650,7 @@ export async function indexV4Keys({ tokenAddr, pools, rpcCall, now, collect, cou
        ضدجفت/سقفِ V4_MAX_POOLS چیزی را کنار نگذاشته (rows همان listed است)،
        و (ج) نتیجه واقعاً ok بود و هر ردیفِ ایندکس‌شده دست‌کم یک کلید داد. */
     const complete = Array.isArray(pools) && pools.length < V4_GT_PAGE_SIZE &&
-      rows.length === listed && allRowsHit;
+      rows.length === listed && undated === 0 && allRowsHit;
 
     return { keys: mergeV4Keys([], found), reason: "ok", complete };
   } catch (e) {

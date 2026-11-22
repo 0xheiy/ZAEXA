@@ -10,6 +10,7 @@
 
 import { chainOf } from "./chains.js";
 import { plainWhy } from "./report_page.js";
+import { publishGuardRow } from "./report.js";
 import { exitSummaryValid, exitSolKeyOk, shortAddr } from "./exit.js";
 import { exitCardLines } from "./og-exit.js";
 
@@ -166,8 +167,12 @@ const goodRet = (ret) => typeof ret === "number" && Number.isFinite(ret) && ret 
 // body و outcome را با هم می‌دهد؛ outcome فقط برای شمارنده است
 function classify(chain, r) {
   r = r && typeof r === "object" ? r : {};
-  const { v, cause, ret, basis, pool } = r;
-  let why = r.why;
+  /* ۲۲ نوامبر (ممیزیِ فیبل، بند ۷) — همان گاردِ انتشارِ گزارش، /vd و صفحه‌ی توکن، نه یک کپیِ دست‌نویس:
+     nosellِ بی‌علتِ اثبات‌شده → null با why ِ گارد (cause:unproven / sol:unconfirmed). */
+  const g = publishGuardRow({ v: r.v, why: r.why, cause: r.cause, ret: r.ret }, chain === "solana" ? "solana" : "base");
+  const { ret, basis, pool } = r;
+  const v = g.v, cause = g.cause;
+  let why = g.why;
   if (v === "sell" && chain === "base") {
     // ۲۰ نوامبر: برچسبِ اندازه‌گیری‌شده‌ی سرور (واژه‌نامه‌ی بسته: فقط "near-empty") — حکم همان sell می‌ماند
     const ne = pool === "near-empty" ? " · pool nearly empty" : "";
@@ -184,9 +189,7 @@ function classify(chain, r) {
     if (cause === "empty-pool") return { outcome: "nosell", body: "⚠ No sell route quoted · pool is empty" };
     if (cause === "sell-reverts") return { outcome: "nosell", body: "⚠ No sell route quoted · the sell reverts" };
     if (cause === "one-way-pool") return { outcome: "nosell", body: "⚠ No sell route quoted · one-way pool\nA $100 buy fills, but selling the same amount back does not: the pool's other side is too thin." };
-    why = "cause:unproven";
-  } else if (v === "nosell" && chain === "solana") {
-    why = "sol:unconfirmed"; // سولانا هرگز nosell منتشر نمی‌کند
+    why = "cause:unproven"; // گارد این را پیش‌تر می‌گیرد؛ فقط پشتیبان اگر روزی علتِ تازه‌ای به گارد اضافه شد و اینجا نه
   }
   return { outcome: "na", body: "? Could not be checked\n" + plainWhy(chain, why) };
 }

@@ -185,7 +185,7 @@ import {
   VD_SOL_RPC_METHODS, VD_SOL_RPC_PROBE_PARAMS, probeRpcMethod,
 } from "./verdict_sol.js";
 import { indexV4Keys, v4KvKey, V4_REASONS, V4_LOG_RPCS, V4_LOG_RPC_CANDIDATES, V4_LOGS_ONLY_RPCS, V4_BLOCK_RPCS, V4_KEY_TTL_S, V4_MISS_TTL_S,
-  V4_POOL_MANAGER, V4_INITIALIZE_TOPIC } from "./v4index.js";
+  V4_POOL_MANAGER, V4_INITIALIZE_TOPIC, v4CompleteStillHolds } from "./v4index.js";
 
 /* پراکسی باز نیست. فقط شکل مسیرهایی که خودِ سایت می‌زند اجازه دارد:
      networks/base/tokens/<addr>
@@ -1289,6 +1289,17 @@ export const V4_EMPTY_MIN_MS = 400;
    اگر نه، جواب null می‌ماند، نه false و نه true — ورودی‌های ذخیره‌شده‌ی
    قدیمی‌تر (بدونِ این فیلد) هم تا دوباره ایندکس‌شدن همین‌طور نامعلوم
    می‌مانند؛ نامعلوم هرگز «نه» نیست. */
+/* ۲۲ نوامبر (ممیزیِ فیبل، بند ۵) — «complete»ِ ذخیره‌شده فقط وقتی معتبر است که فهرستِ امروزِ استخرها
+   هم همان را بگوید (v4CompleteStillHolds). داخلِ گذر، فهرست از حافظه‌ی همان گذر می‌آید (پوشش قبلاً
+   گرفته‌اش)؛ بیرون از گذر یک تماسِ GT، فقط برای کاندیدِ منفی. شکست → false (نامعلوم). */
+export async function v4EntryComplete(entry, addr, env) {
+  try {
+    if (!entry || entry.complete !== true || !Array.isArray(entry.keys)) return false;
+    const r = await fetchBaseTokenPoolsRaw(addr, env);
+    if (!r || r.ok !== true) return false;
+    return v4CompleteStillHolds(entry.keys, r.data, addr, V4_ALL_COUNTERS);
+  } catch (e) { return false; }
+}
 export async function v4PoolsEmpty(addr, env, deadlineAt) {
   /* ⚠️ بودجه‌ی زمانی: این تابع روی مسیرِ کارتِ OG هم اجرا می‌شود که کلِ
      بودجه‌اش OG_BUDGET_MS است. یک توضیح هرگز نباید خودِ جواب را دیر کند،
@@ -1298,6 +1309,7 @@ export async function v4PoolsEmpty(addr, env, deadlineAt) {
   if (left < V4_EMPTY_MIN_MS) return null;
   const entry = await readV4Entry(addr, env);
   if (entry.complete !== true) return null; // ایندکسِ ناقص/قدیمی — نامعلوم، نه ادعا
+  if (!(await v4EntryComplete(entry, addr, env))) return null; // استخرِ تازه از زمانِ ایندکس، یا فهرست خوانده نشد — نامعلوم
   const keys = entry.keys;
   if (!Array.isArray(keys) || keys.length === 0) return null;
   const use = keys.slice(0, 4);
@@ -1480,6 +1492,7 @@ export async function v4OneWayCheck(addr, meta, env, deadlineAt, meterHooks) {
     if (!passBudgetHasRoom(meterHooks, ONE_WAY_PASS_MAX_USED)) { noteOneWay(meterHooks, "skip:budget"); return false; }
     const entry = await readV4Entry(addr, env);
     if (entry.complete !== true || !Array.isArray(entry.keys)) { noteOneWay(meterHooks, "skip:index"); return false; } // همان شرطِ v4PoolsEmpty
+    if (!(await v4EntryComplete(entry, addr, env))) { noteOneWay(meterHooks, "skip:index"); return false; } // ۲۲ نوامبر: «دقیقاً یک کلید» روی فهرستِ امروز
     // فقط وقتی توکن دقیقاً یک استخرِ v4 دارد: با چند استخر، یک‌طرفه‌بودنِ یکی چیزی درباره‌ی بقیه نمی‌گوید.
     if (entry.keys.length !== 1) { noteOneWay(meterHooks, "skip:keys"); return false; }
     const key = entry.keys.find((k) => oneWayCounterFor(k, addr) != null);
@@ -2279,7 +2292,8 @@ export async function solPoolsEmpty(mint,env){
   if(!rows.length)return null;
   const values=rows.map(p=>p.attributes?.reserve_in_usd);
   if(values.some(x=>x!=null&&x!==""&&Number.isFinite(Number(x))&&Number(x)>0))return false;
-  if(values.every(x=>x!=null&&x!==""&&Number.isFinite(Number(x))&&Number(x)===0))return true;
+  /* ۲۲ نوامبر (ممیزیِ فیبل، بند ۶) — ذخیره‌ی صفرِ GT شاهدِ خالی‌بودن نیست (خودارجاع است؛ تصمیمِ ثابت)،
+     پس برچسبِ «Pool empty» روی سولانا هرگز از این عدد نمی‌آید: صفر → null (نامعلوم). */
   return null;
 }
 async function solNosellVeto(mint, env) {

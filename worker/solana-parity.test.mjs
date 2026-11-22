@@ -12,8 +12,9 @@ test('Solana pool evidence is unknown for missing, malformed or unrelated pools'
  }
  await mocked(async()=>new Response('',{status:503}),async()=>assert.equal(await solPoolsEmpty(MINT,{}),null));
 });
-test('zero liquidity evidence requires all returned matching pools to be explicitly zero',async()=>{
- await mocked(async()=>Response.json({data:[pool('solana',MINT,'0')]}),async()=>assert.equal(await solPoolsEmpty(MINT,{}),true));
+// ۲۲ نوامبر (ممیزیِ فیبل، بند ۶): ذخیره‌ی صفرِ GT شاهدِ خالی‌بودن نیست — صفر هرگز true نمی‌دهد، فقط null (نامعلوم)
+test('a zero GT reserve is never pool-empty evidence; a positive reserve still reads pool-there',async()=>{
+ await mocked(async()=>Response.json({data:[pool('solana',MINT,'0')]}),async()=>assert.equal(await solPoolsEmpty(MINT,{}),null));
  await mocked(async()=>Response.json({data:[pool('solana',MINT,'0'),pool('solana',MINT,'1')]}),async()=>assert.equal(await solPoolsEmpty(MINT,{}),false));
 });
 test('sitemap contains both networks and survives one network outage',async()=>{
