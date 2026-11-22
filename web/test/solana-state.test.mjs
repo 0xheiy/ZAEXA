@@ -91,6 +91,7 @@ test('late token metadata cannot replace a newer token selection', async () => {
     renderSolExit() {}, solPaintSellPill() {}, renderSolStats() {}, solLoadChart() {},
     fetchSolMeta: mint => mint === 'mintA' ? old.promise : Promise.resolve({ symbol: 'B', decimals: 6 }),
     fetchVdVerdict: async () => ({ v: 'sell' }),
+    flowPicking: false, flowBoard: true, // ۲۲ نوامبر: solAppLoadToken حالا وضعِ انتخاب از تابلوی Flow را هم می‌خواند
   });
   const pending = c.solAppLoadToken('mintA');
   await c.solAppLoadToken('mintB');
@@ -258,6 +259,7 @@ test('token page with missing metadata still initializes the wallet', async () =
     solWalletStandardInit() { initialized = true; },
     solSwapReset(mint) { c.solMintCur = mint; ++c.solTokenSeq; },
     fetchSolMeta: async () => null, fetchVdVerdict: async () => ({ v: null }),
+    tkFactsSync() {}, // ۲۲ نوامبر: صفحه‌ی توکن متنِ سرور-ساخت را با آدرس هم‌گام می‌کند (۵ نوامبر)
   });
   await c.openSolanaTokenPage('mintA');
   assert.equal(c.solTokenSymbol, 'Unknown');
