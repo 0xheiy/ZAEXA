@@ -75,6 +75,7 @@ function paceStart() {
   const pc = {
     gate: Promise.resolve(), next: 0, t0: paceNowImpl(),
     calls: 0, waitsMs: 0, r429: 0, retries: 0, ok: 0,
+    retryMs: 0, // ۲۲ نوامبر — جمعِ انتظارهای بعد از ۴۲۹ (waitsMs فقط فاصله‌ی نوبت است و معنایش در رکورد عوض نمی‌شود)
     cmc: { calls: 0, ok: 0, used: 0, rej: 0 },
   };
   const scope = reportContext.getStore();
@@ -126,6 +127,7 @@ async function gtUpstream(rest, env, opts) {
           if (attempt < PACE_RETRY_WAITS.length && paceNowImpl() - pc.t0 <= PACE_WALL_MS) {
             pc.retries++;
             if (dl) dl.clear();
+            pc.retryMs += PACE_RETRY_WAITS[attempt];
             await paceSleepImpl(PACE_RETRY_WAITS[attempt]);
             continue;
           }
@@ -1440,8 +1442,20 @@ function noteOneWay(meterHooks, label) {
   }
 }
 /* ۸ نوامبر — ناظرِ ایندکسِ v4 داخلِ گذرِ ساعتی: فقط برچسبِ بسته (found:keys،
-   found:empty، یکی از V4_REASONS یا other، threw:cap، threw:other، slow)، هرگز
+   found:empty، یکی از V4_REASONS یا other، threw:cap، threw:other، slow، slow:queue)، هرگز
    آدرس. فقط رصد؛ نه پرتاب می‌کند نه جریان را عوض. */
+/* ۲۲ نوامبر — کلِ زمانی که گذر تا این لحظه در صفِ ریتمِ رله منتظر مانده (فاصله‌ی نوبت + انتظارِ بعد از ۴۲۹).
+   سنجش ۲۱ نوامبر: «slow» تقریباً همیشه همین صف بود، نه خودِ ایندکس (روی ردیف‌های بی‌RPCِ no-v4-counter هم شلیک می‌شد).
+   بیرون از گذر صفر. حلقه‌های حکم در گذر پشت‌سرهم‌اند، پس تفاوتِ دو خواندن مالِ همان ایندکس است. */
+function paceQueuedMs() {
+  const pc = currentPace();
+  return pc ? (pc.waitsMs || 0) + (pc.retryMs || 0) : 0;
+}
+/* برچسبِ زمانِ یک ایندکس: کار (بی‌صف) بیش از ۵ث → slow؛ فقط با صف بیش از ۵ث → slow:queue؛ وگرنه هیچ. */
+export function v4IdxSlowLabel(totalMs, queuedMs) {
+  if (!(totalMs > 5000)) return null;
+  return totalMs - Math.max(0, queuedMs || 0) > 5000 ? "slow" : "slow:queue";
+}
 function noteV4Idx(meter, label) {
   try {
     if (meter && typeof meter.v4idx === "function") meter.v4idx(label);
@@ -3812,27 +3826,29 @@ async function scheduledReportPassBody(env, ctx, opts, meter) {
          اجرا می‌شود — تنها برای توکنی که دکسش v4 است و هنوز ورودی ندارد. */
       verdictOf: async (addr, meta, metaWhy, dex) => {
         if (env.ZX_KV && typeof dex === "string" && dex.startsWith("uniswap-v4")) {
-          let idxT0 = 0;
+          let idxT0 = 0, idxQ0 = 0;
           try {
             const entry = await readV4Entry(addr, env);
             if (entry.found) {
               noteV4Idx(meter, Array.isArray(entry.keys) && entry.keys.length >= 1 ? "found:keys" : "found:empty");
             } else {
               idxT0 = Date.now();
+              idxQ0 = paceQueuedMs();
               const idxRes = await runV4Index(addr, env);
               const idxMs = Date.now() - idxT0;
               idxT0 = 0;
               const why = idxRes && idxRes.reason;
               noteV4Idx(meter, typeof why === "string" && V4_REASONS.includes(why) ? why : "other");
               if (idxRes && idxRes.via === "posm") noteV4Idx(meter, "posm");
-              if (idxMs > 5000) noteV4Idx(meter, "slow");
+              const slowL = v4IdxSlowLabel(idxMs, paceQueuedMs() - idxQ0);
+              if (slowL) noteV4Idx(meter, slowL);
             }
           } catch (e) {
             /* ایندکس هرگز نباید گذرِ گزارش را بشکند */
             let capped = false;
             try { capped = meter.isCapHit() === true; } catch (e2) { /* فقط رصد */ }
             noteV4Idx(meter, capped ? "threw:cap" : "threw:other");
-            try { if (idxT0 && Date.now() - idxT0 > 5000) noteV4Idx(meter, "slow"); } catch (e3) { /* فقط رصد */ }
+            try { const slowL = idxT0 ? v4IdxSlowLabel(Date.now() - idxT0, paceQueuedMs() - idxQ0) : null; if (slowL) noteV4Idx(meter, slowL); } catch (e3) { /* فقط رصد */ }
           }
         }
         return ogFetchVerdictDetail(addr, meta, Date.now() + OG_BUDGET_MS, env, ctx, metaWhy,

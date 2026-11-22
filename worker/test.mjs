@@ -17573,7 +17573,8 @@ console.log(fails === 0
     const store = new Map(init || []);
     return { store, get: async (k) => (store.has(k) ? store.get(k) : null), put: async (k, v) => { store.set(k, v); } };
   };
-  async function v4MeterPass({ addr, dex, kvInit, poolsHandler, throwAfterIndex, slowAfterIndex, posmKey }) {
+  async function v4MeterPass({ addr, dex, kvInit, poolsHandler, throwAfterIndex, slowAfterIndex, posmKey, queueMs }) {
+    const { _paceActive: paceNow } = await import("./index.js");
     const logM = v4BuildLog({
       poolId: POOL_ID_M, currency0: vd.NATIVE_ADDR, currency1: addr,
       feeWord: v4wNum(0), tickWord: v4wNum(1), hooksWord: v4wAddrWord(vd.NATIVE_ADDR),
@@ -17593,7 +17594,12 @@ console.log(fails === 0
         return json({ data: [row] });
       }
       if (u.includes("/networks/solana/new_pools")) return json({ data: [] });
-      if (u.endsWith("/pools")) { calls.pools++; return poolsHandler(); }
+      if (u.endsWith("/pools")) {
+        calls.pools++;
+        // ۲۲ نوامبر: انتظارِ صفِ ریتمِ رله را داخلِ همین ایندکس شبیه‌سازی کن (همان شمارنده‌ای که paceSlot/۴۲۹ پر می‌کنند)
+        if (queueMs) { const pc = paceNow(); if (pc) pc.retryMs = (pc.retryMs || 0) + queueMs; }
+        return poolsHandler();
+      }
       if (u.includes("/tokens/multi/")) {
         return new Response("nope", { status: 500 });
       }
@@ -17687,6 +17693,20 @@ console.log(fails === 0
   const rSl = await v4MeterPass({ addr: G, dex: "uniswap-v4-base", poolsHandler: goodPools, slowAfterIndex: true });
   ok(JSON.stringify(rSl.rec.sub.v4idx) === '{"ok":1,"slow":1}', "[v4 index meter] a >5000ms index adds slow next to its outcome, got " + JSON.stringify(rSl.rec.sub.v4idx));
   ok(JSON.stringify(rOk.rec.sub.v4idx) === '{"ok":1}', "[v4 index meter] a fast index never records slow");
+  // ۲۲ نوامبر — همان ۶ ثانیه، ولی ۸ ثانیه‌اش انتظار در صفِ رله بود → slow:queue، نه slow
+  const Gq = tag("a8");
+  const rSq = await v4MeterPass({ addr: Gq, dex: "uniswap-v4-base", poolsHandler: goodPools, slowAfterIndex: true, queueMs: 8000 });
+  ok(JSON.stringify(rSq.rec.sub.v4idx) === '{"ok":1,"slow:queue":1}', "[v4 index meter] a >5000ms index whose time was the relay pace queue records slow:queue, not slow, got " + JSON.stringify(rSq.rec.sub.v4idx));
+  // صفِ کوتاه (۵۰۰ms) کارِ واقعیِ بیش از ۵ث را پنهان نمی‌کند → هنوز slow
+  const Gs = tag("a9");
+  const rSs = await v4MeterPass({ addr: Gs, dex: "uniswap-v4-base", poolsHandler: goodPools, slowAfterIndex: true, queueMs: 500 });
+  ok(JSON.stringify(rSs.rec.sub.v4idx) === '{"ok":1,"slow":1}', "[v4 index meter] a short queue does not hide real slowness, got " + JSON.stringify(rSs.rec.sub.v4idx));
+  {
+    const { v4IdxSlowLabel: L } = await import("./index.js");
+    ok(L(5000, 0) === null && L(4000, 9000) === null && L(5001, 0) === "slow" && L(9000, 3999) === "slow" &&
+       L(9000, 4000) === "slow:queue" && L(6000, 8000) === "slow:queue" && L(6000, -5) === "slow" && L(6000, undefined) === "slow",
+       "[v4 index meter] v4IdxSlowLabel: >5000ms work -> slow, >5000ms only with the queue -> slow:queue, otherwise none");
+  }
 
   // dexِ غیرِ v4 چیزی نمی‌شمارد
   const rNon = await v4MeterPass({ addr: tag("f6"), dex: "uniswap-v3-base", poolsHandler: goodPools });
