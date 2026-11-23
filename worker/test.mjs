@@ -116,7 +116,9 @@ const REAL = [
   ["/gt/networks/robinhood/tokens/multi/0xa,0xb?include=top_pools", "https://api.geckoterminal.com/api/v2/networks/robinhood/tokens/multi/0xa,0xb?include=top_pools"],
   ["/gt/networks/robinhood/pools/multi/0xa,0xb", "https://api.geckoterminal.com/api/v2/networks/robinhood/pools/multi/0xa,0xb"],
   ["/gt/networks/robinhood/pools/0xpool/ohlcv/hour?aggregate=4&limit=180&currency=usd", "https://api.geckoterminal.com/api/v2/networks/robinhood/pools/0xpool/ohlcv/hour?aggregate=4&limit=180&currency=usd"],
-  ["/gt/networks/robinhood/pools/0xpool/trades?trade_volume_in_usd_greater_than=1000", "https://api.geckoterminal.com/api/v2/networks/robinhood/pools/0xpool/trades?trade_volume_in_usd_greater_than=1000"],
+  ["/gt/networks/robinhood/pools/0xpool/trades?trade_volume_in_usd_greater_than=1000", "https://api.geckoterminal.com/api/v2/networks/robinhood/pools/0xpool/trades?trade_volume_in_usd_greater_than=1000"],  // ۲۳ نوامبر — نمودارِ سواپِ Robinhood سمتِ WETH را با آدرس می‌فرستد (token=0x…)؛ پیش‌تر ۴۰۰ می‌گرفت
+  ["/gt/networks/robinhood/pools/0x52e65b17fb6e5ba00ed806f37afcd2daa50271ca/ohlcv/minute?aggregate=15&limit=96&currency=usd&token=0x0bd7d308f8e1639fab988df18a8011f41eacad73", "https://api.geckoterminal.com/api/v2/networks/robinhood/pools/0x52e65b17fb6e5ba00ed806f37afcd2daa50271ca/ohlcv/minute?aggregate=15&limit=96&currency=usd&token=0x0bd7d308f8e1639fab988df18a8011f41eacad73"],
+  ["/gt/networks/base/pools/0xpool/ohlcv/hour?aggregate=1&limit=25&currency=usd&token=quote", "https://api.geckoterminal.com/api/v2/networks/base/pools/0xpool/ohlcv/hour?aggregate=1&limit=25&currency=usd&token=quote"],
 ];
 for (const [path, want] of REAL) {
   reply = json({ data: [] });
@@ -164,7 +166,9 @@ const BAD = [
   "/gt/networks/base/tokens/0xabc?page=99999",   // پارامتر آشنا، مقدار خارج از شکل
   "/gt/networks/base/tokens/0xabc?currency=USD'",// نقل‌قول در مقدار
   "/gt/networks/base/tokens/multi/0xa?include=dex,network",   // include فقط top_pools
-  "/gt/networks/base/pools/0xp/trades?trade_volume_in_usd_greater_than=1e9",
+  "/gt/networks/base/pools/0xp/trades?trade_volume_in_usd_greater_than=1e9",  "/gt/networks/base/pools/0xp/ohlcv/hour?token=0x0bd7d308f8e1639fab988df18a8011f41eacad7",    // آدرسِ ۳۹ رقمی
+  "/gt/networks/base/pools/0xp/ohlcv/hour?token=0x0bd7d308f8e1639fab988df18a8011f41eacad73a",  // آدرسِ ۴۱ رقمی
+  "/gt/networks/base/pools/0xp/ohlcv/hour?token=0xZZd7d308f8e1639fab988df18a8011f41eacad73",   // غیرِ هگز
 ];
 for (const path of BAD) {
   reply = json({ data: [] });

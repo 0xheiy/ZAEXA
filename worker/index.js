@@ -205,7 +205,10 @@ const QUERY_OK = {
   limit: /^[0-9]{1,4}$/,
   currency: /^[a-z]{1,8}$/,
   before_timestamp: /^[0-9]{1,12}$/,
-  token: /^[A-Za-z0-9]{1,10}$/,
+  /* ۲۳ نوامبر — نمودارِ سواپِ Robinhood سمتِ WETH را با آدرس می‌فرستد (token=0x…، ۴۲ نویسه)؛ شکلِ قبلی
+     فقط base/quote را می‌پذیرفت، پس هر بار که مرورگر «اول پراکسی» بود نمودار ۴۰۰ می‌گرفت و
+     «Price history is unavailable» نشان می‌داد. فقط آدرسِ دقیقِ EVM اضافه شد، نه هر رشته‌ای. */
+  token: /^(?:[A-Za-z0-9]{1,10}|0x[0-9a-fA-F]{40})$/,
   /* ۴ نوامبر — این دو را خودِ سایت می‌فرستد ولی در فهرست نبودند، پس هر وقت مرورگر «اول پراکسی» بود
      (IPِ ایران/وی‌پی‌ان، یا ۴۲۹ِ مستقیم) تابلوی Established روی Base خالی می‌ماند (tokens/multi?include=top_pools → ۴۰۰)
      و کارتِ Large trades «could not be loaded» می‌داد (trades?trade_volume_in_usd_greater_than=1000 → ۴۰۰).
