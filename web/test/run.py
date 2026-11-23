@@ -1243,6 +1243,7 @@ def check_exit13_static():
     print("[exit 13 static] old skeleton sentence gone; FAQ mentions a connected wallet; "
           "tokenExitFallback touches neither rememberExit nor exitCache")
 
+RH_EXECUTOR = "0xC261E57cF5739A8a538884405600E4e45dF24802"   # Robinhood Chain: زنده؛ روی Base همین آدرس بازنشسته است
 RETIRED_EXECUTORS = [
     "0x6443C06bb117223DC818df54A09A642696D0489c",
     "0x9fc4608fA104b032B902650A4D12E0CA51a2F684",
@@ -1280,6 +1281,15 @@ def check_one_executor_address():
     live = m.group(1)
     assert live.lower() not in [a.lower() for a in RETIRED_EXECUTORS], \
         "the app itself points at a retired executor: " + live
+    # ۲۳ نوامبر: همان آدرسِ CREATE روی Base بازنشسته و روی Robinhood Chain زنده است. نگهبان زنجیره‌آگاه شد:
+    # اولین لیترالِ executor (Base) باید همان Base بماند، و CHAIN_RH دقیقاً اجراکننده‌ی Robinhood را داشته باشد.
+    assert live == "0x5f3FCcfF3339DAa9eA7D2EBC3f77017D65467132", \
+        "the FIRST executor literal in index.html (Base) must stay the live Base executor, got " + live
+    rh_blk = re.search(r"const CHAIN_RH=\{(.*?)\n\};", idx, re.S)
+    assert rh_blk, "CHAIN_RH is gone from index.html"
+    rh_ex = re.search(r'executor:"(0x[0-9a-fA-F]{40})"', rh_blk.group(1))
+    assert rh_ex and rh_ex.group(1) == RH_EXECUTOR, \
+        "CHAIN_RH.executor must be exactly the Robinhood executor %s, got %s" % (RH_EXECUTOR, rh_ex and rh_ex.group(1))
 
     # صفحه‌ی معرفی آدرس را ثابت در HTML دارد، چون CHAIN را اجرا نمی‌کند. پس
     # همان آدرس باید مو‌به‌مو با CHAIN.executor یکی باشد — وگرنه روزی قرارداد
@@ -1341,7 +1351,8 @@ def check_one_executor_address():
         # یعنی نگهبان دقیقاً همان باگی را که برایش نوشته شده بود نمی‌گرفت.
         for i, line in enumerate(low.splitlines(), 1):
             for old_addr in RETIRED_EXECUTORS:
-                if old_addr.lower() in line and not any(w in line for w in RETIRED_WORDS):
+                if old_addr.lower() in line and not any(w in line for w in RETIRED_WORDS) \
+                        and not (old_addr.lower() == RH_EXECUTOR.lower() and "robinhood" in line):
                     problems.append("%s:%d names retired executor %s with no retirement "
                                     "label on that line" % (label, i, old_addr))
 
@@ -10443,6 +10454,10 @@ async def main():
         await check_rh_no_base_calls(p, errors)
         await check_rh_notice(p, errors)
         await check_rh_swap_parity(p, errors)
+        await check_rh_swap_live(p, errors)
+        await check_rh_exit_check(p, errors)
+        await check_rh_config(p, errors)
+        await check_rh_v4_keys(p, errors)
         await check_rh_screens(p, errors)
         await check_stock_stats(p, errors)
         await check_exit_near_empty(p, errors)
@@ -25231,7 +25246,8 @@ async def check_rh_picker(p, errors):
             "[rh picker] the network selector must list Base, Solana, Robinhood Chain (ids srcOptBase/srcOptSolana/srcOptRobinhood): %s" % opts
         await pg.click("#srcChip")
         await pg.click("#srcOptRobinhood")
-        await pg.wait_for_function("() => activeChain === 'robinhood'", timeout=10000)
+        # ۲۳ نوامبر: ورود به Robinhood همیشه reload است (پیکربندی هنگامِ بوت انتخاب می‌شود)؛ منتظرِ بوتِ تازه می‌مانیم
+        await pg.wait_for_function("() => typeof activeChain !== 'undefined' && activeChain === 'robinhood' && document.documentElement.hasAttribute('data-rh') && document.getElementById('srcTx').textContent === 'Robinhood Chain'", timeout=20000)
         st = await pg.evaluate("""() => ({ls: localStorage.getItem('zaexa.chain.v1'), tx: document.getElementById('srcTx').textContent,
             checked: [...document.querySelectorAll('#srcPop [data-chain]')].map(b => b.getAttribute('aria-checked')),
             rh: document.documentElement.hasAttribute('data-rh'),
@@ -25434,14 +25450,16 @@ async def check_rh_notice(p, errors):
               solHero: vis(document.getElementById('appSolHero')), strip: vis(document.getElementById('liveStrip')),
               watch: vis(document.getElementById('savedWatch')),
               rhCta: (() => { const c = document.getElementById('rhActBtn'); return c ? [c.disabled, c.textContent.trim()] : null; })(),
-              pickerInRh: !!document.querySelector('#rhSwap #srcMenu'), connect: [document.getElementById('connectBtn').disabled, document.getElementById('connectBtn').textContent]}; }"""
+              pickerInRh: !!document.querySelector('#rhSwap #srcMenu'), pickerInBase: !!document.querySelector('#baseSwapNetworkSlot #srcMenu'),
+              rhHeroVis: vis(document.getElementById('rhHero')), connect: [document.getElementById('connectBtn').disabled, document.getElementById('connectBtn').textContent]}; }"""
         sw = await pg.evaluate(VIS)
         assert sw["view"] == "view-swap" and sw["texts"] == [], "[rh notice] the Swap view has no full-width notice any more (the hero row replaces it): %s" % sw
-        assert sw["srcMenuInside"] and not sw["ctaVisible"] and not sw["baseHero"] and not sw["solHero"] and not sw["strip"] and not sw["watch"], \
-            "[rh notice] the Base swap card, strip and watch panel are gone; the network picker lives in the Robinhood swap card: %s" % sw
-        assert sw["rhCta"] == [True, RH_SWAP_CTA_T] and sw["pickerInRh"], "[rh notice] the only swap action is the disabled coming-soon button %r and the picker sits in #rhSwap: %s" % (RH_SWAP_CTA_T, sw)
-        assert not [a for a in sw["acts"] if re.search(r"connect|swap$|^swap|approve", a, re.I) and a not in ("Swap", RH_SWAP_CTA_T)], "[rh notice] no Connect/Swap action in the Swap view: %s" % sw["acts"]
-        assert sw["connect"] == [True, "Connect wallet"], "[rh notice] the header wallet button is inert on Robinhood: %s" % sw["connect"]
+        # ۲۳ نوامبر: سواپِ Robinhood واقعی است — همان ردیفِ hero ِ Base (کارتِ سواپ، دکمه‌ی اتصال، انتخابگر در #baseSwapNetworkSlot)؛ #rhHero دیده نمی‌شود
+        assert sw["srcMenuInside"] and sw["ctaVisible"] and sw["baseHero"] and not sw["solHero"] and not sw["strip"] and not sw["watch"] and not sw["rhHeroVis"], \
+            "[rh notice] the Base swap card is shown on Robinhood swap, the old Robinhood hero is hidden, no strip/watch panel: %s" % sw
+        assert sw["pickerInBase"] and not sw["pickerInRh"], "[rh notice] the network picker sits in the Base swap card's slot: %s" % sw
+        assert not [a for a in sw["acts"] if "coming soon" in a.lower()], "[rh notice] no coming-soon button remains: %s" % sw["acts"]
+        assert sw["connect"] == [False, "Connect wallet"], "[rh notice] the header wallet button works on Robinhood swap: %s" % sw["connect"]
         shown = {}
         for tab, sel, vid in (("Stocks", '#nav [data-view="stocks"]', "view-stocks"), ("Exit value", '#nav [data-view="exit"]', "view-exit"),
                               ("Exit Report", '#nav a.navLink[href="/report"]', "view-rhreport")):
@@ -25465,7 +25483,9 @@ async def check_rh_notice(p, errors):
         await pg.evaluate("() => setView('stocks')")
         await pg.click("#srcChip")
         await pg.click('#srcPop [data-chain="solana"]')
-        await pg.wait_for_function("() => activeChain === 'solana' && !document.documentElement.hasAttribute('data-rh')", timeout=20000)
+        # ۲۳ نوامبر: خروج از Robinhood reload است (نمای فعلی حفظ می‌شود)؛ بعد از بوتِ Solana به Swap می‌رویم
+        await pg.wait_for_function("() => typeof activeChain !== 'undefined' && activeChain === 'solana' && typeof setView === 'function' && !document.documentElement.hasAttribute('data-rh')", timeout=25000)
+        await pg.evaluate("() => setView('swap')")
         await pg.wait_for_function("() => { const e = document.getElementById('appSolHero'); return !!e && e.getClientRects().length > 0; }", timeout=20000)
         away = await pg.evaluate("""() => { const vis = e => !!e && e.getClientRects().length > 0;
             return {notice: [...document.querySelectorAll('.rhNa')].some(vis), sol: vis(document.getElementById('appSolHero')), view} }""")
@@ -25479,7 +25499,7 @@ async def check_rh_notice(p, errors):
             n = await pg.evaluate("() => [...document.querySelectorAll('.rhNa')].filter(e => e.getClientRects().length > 0).length")
             assert n == 0, "[rh notice] a Robinhood notice leaked into Base %s" % v
         await pg.context.close()
-        print("[rh notice] on Robinhood the Swap view has no notice card: its only swap action is the disabled button %r (no Base swap card, strip, watch panel; the picker sits inside #rhSwap; header wallet inert); Stocks, Exit value, Exit Report (no navigation) and Portfolio show exactly %r; leaving for Solana restores the real Solana swap view; no notice is visible on Base" % (RH_SWAP_CTA_T, RH_NOTICE_NA_T))
+        print("[rh notice] on Robinhood the Swap view has no notice card: it is the Base swap card with a working Connect wallet (no strip, no watch panel, the old Robinhood hero hidden, picker in the Base swap slot; %r button gone); Stocks, Exit value, Exit Report (no navigation) and Portfolio show exactly %r; leaving for Solana restores the real Solana swap view; no notice is visible on Base" % (RH_SWAP_CTA_T, RH_NOTICE_NA_T))
     finally:
         await b.close()
         srv.shutdown()
@@ -25494,7 +25514,7 @@ async def check_rh_no_base_calls(p, errors):
     try:
         pats = rh_base_forbidden()
         env = FbEnv(b, origin, errs)
-        env.gt = rh_gt_board()
+        env.gt = rh_gt_swap()
         reqs = []
         hook = lambda pg_: pg_.on("request", lambda r: reqs.append(r.url))
         WALK = ["swap", "flow", "stocks", "exit", "rhreport", "folio", "faq", "swap", "flow"]
@@ -25506,28 +25526,30 @@ async def check_rh_no_base_calls(p, errors):
             await pg.wait_for_timeout(350)
         await fb_wait_rows(pg, 4)
         await pg.wait_for_timeout(1500)
-        info = await pg.evaluate("() => ({log: (window.__STUB_RPC_LOG__ || []).length, blocked: window.__rhBlocked || 0, ethers: typeof E === 'undefined' || E === undefined})")
+        # ۲۳ نوامبر: Robinhood حالا با ethers بوت می‌شود و RPC خودش را می‌خواند — ولی هرگز یک میزبانِ Base را
+        info = await pg.evaluate("() => ({log: [...new Set(window.__STUB_RPC_LOG__ || [])], blocked: window.__rhBlocked || 0, ethers: typeof E !== 'undefined' && !!E})")
         bad = rh_hit(reqs, pats)
         assert not bad, "[rh no base calls] fresh Robinhood boot sent forbidden requests: %s" % bad
-        assert info == {"log": 0, "blocked": 0, "ethers": True}, "[rh no base calls] no RPC provider use, no blocked Base attempt, no ethers on a Robinhood boot: %s" % info
+        assert info["log"] == [RH_RPC_T] and info["blocked"] == 0 and info["ethers"], "[rh no base calls] ethers loads, every RPC read goes to the Robinhood RPC only, and no Base-only code was blocked: %s" % info
         assert env.calls and all("networks/robinhood/" in c for c in env.calls), "[rh no base calls] GT: %s" % env.calls
         # ۲۰ نوامبر: نمودارِ نمای سواپ فقط روی همین شبکه می‌خواند — اگر آدرسش به base برگردد، لایه‌ی دفاعی بی‌صدا رد می‌کند و چیزی روی سیم نمی‌رود؛ پس باید دید که درخواستِ robinhood واقعاً رفته و نمودار کشیده شده
-        assert any(c.startswith("networks/robinhood/pools/%s/ohlcv/" % RH_SWAP_POOL_T) for c in env.calls) and await pg.evaluate("() => !!document.querySelector('#rhPlot svg')"), \
-            "[rh no base calls] the Robinhood swap chart must be fetched from networks/robinhood and drawn: %s" % env.calls
+        assert any(c.startswith("networks/robinhood/pools/%s/ohlcv/" % RH_SWAP_POOL_T) for c in env.calls) and await pg.evaluate("() => !!document.querySelector('#plot svg')"), \
+            "[rh no base calls] the swap chart (Base chart code) must be fetched from networks/robinhood and drawn: %s" % env.calls
         await pg.context.close()
         # (۱ب) لایه‌های دفاعیِ عمق: حتی اگر کدی از Base به آن‌ها برسد، روی Robinhood چیزی روی سیم نمی‌رود
-        pg = await env.open(hash_="#swap", init=[RH_CHAIN_JS], hook=hook, board=False)
-        await pg.wait_for_function("() => typeof activeChain !== 'undefined' && activeChain === 'robinhood'", timeout=10000)
+        pg = await env.open(hash_="#swap", init=[RH_CHAIN_JS, "window.__STUB_RPC_LOG__ = [];"], hook=hook, board=False)
+        await pg.wait_for_function("() => typeof activeChain !== 'undefined' && activeChain === 'robinhood' && typeof E !== 'undefined' && E", timeout=20000)
         await pg.wait_for_timeout(800)
         reqs.clear()
         direct = await pg.evaluate("""async () => { const r = {};
             try { await loadMetas(['0x833589fcd6edb6e08f4c7c32d4f71b54bda02913']); r.metas = 'returned'; } catch (e) { r.metas = 'threw ' + e.message; }
             try { await gtJson(GT + '/networks/base/tokens/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913'); r.gt = 'resolved'; } catch (e) { r.gt = 'rejected'; }
-            try { await rpcSend('eth_blockNumber', []); r.rpc = 'resolved'; } catch (e) { r.rpc = e.rpcDown ? 'rpcDown' : 'threw'; }
+            try { await rpcSend(pr => pr.getBlockNumber()); r.rpc = 'resolved'; } catch (e) { r.rpc = e.rpcDown ? 'rpcDown' : 'threw'; }
+            r.rpcHosts = [...new Set(window.__STUB_RPC_LOG__ || [])];
             r.blocked = window.__rhBlocked || 0; return r; }""")
         await pg.wait_for_timeout(500)
-        assert direct == {"metas": "returned", "gt": "rejected", "rpc": "rpcDown", "blocked": 2}, \
-            "[rh no base calls] loadMetas, a stale Base GT URL and rpcSend must all be refused on Robinhood: %s" % direct
+        assert direct == {"metas": "returned", "gt": "rejected", "rpc": "resolved", "rpcHosts": [RH_RPC_T], "blocked": 0}, \
+            "[rh no base calls] a stale Base GT URL is refused; loadMetas stays on networks/robinhood; rpcSend reads only the Robinhood RPC: %s" % direct
         bad = rh_hit(reqs, pats)
         assert not bad, "[rh no base calls] direct calls into Base helpers reached the wire: %s" % bad
         await pg.context.close()
@@ -25540,8 +25562,9 @@ async def check_rh_no_base_calls(p, errors):
         await pg.fill("#amtIn", "1")                         # کوتِ Base زمان‌بندی می‌شود (۴۲۰ms) و باید بعد از سوییچ شلیک شود
         await pg.click("#srcChip")
         await pg.click("#srcOptRobinhood")
-        await pg.wait_for_function("() => activeChain === 'robinhood'", timeout=10000)
-        # درخواستی که *پیش از* چرخش در همان تیک رفته (رویدادِ مرورگر کمی دیرتر ثبت می‌شود) نشتِ Robinhood نیست؛ مرز ۲۵۰ms بعد از چرخش
+        # ۲۳ نوامبر: ورود به Robinhood همیشه reload است؛ بوتِ تازه با ethers و RPC خودش
+        await pg.wait_for_function("() => typeof activeChain !== 'undefined' && activeChain === 'robinhood' && document.documentElement.hasAttribute('data-rh') && typeof E !== 'undefined' && E", timeout=20000)
+        # درخواستی که *پیش از* reload رفته (رویدادِ مرورگر کمی دیرتر ثبت می‌شود) نشتِ Robinhood نیست؛ مرز ۲۵۰ms بعد از بوتِ تازه
         await pg.wait_for_timeout(250)
         mark = len(reqs)
         await pg.evaluate("() => { __STUB_RPC_LOG__.length = 0; }")
@@ -25549,12 +25572,12 @@ async def check_rh_no_base_calls(p, errors):
             await pg.evaluate("(v) => setView(v)", v)
             await pg.wait_for_timeout(350)
         await pg.wait_for_timeout(2500)
-        info = await pg.evaluate("() => ({log: (window.__STUB_RPC_LOG__ || []).length, blocked: window.__rhBlocked || 0})")
+        info = await pg.evaluate("() => ({log: [...new Set(window.__STUB_RPC_LOG__ || [])], blocked: window.__rhBlocked || 0})")
         bad = rh_hit(reqs[mark:], pats)
         assert not bad, "[rh no base calls] after switching Base→Robinhood forbidden requests were sent: %s" % bad
-        assert info == {"log": 0, "blocked": 0}, "[rh no base calls] after switching Base→Robinhood no provider use and no blocked attempt: %s" % info
+        assert info["blocked"] == 0 and all(u == RH_RPC_T for u in info["log"]), "[rh no base calls] after switching Base→Robinhood only the Robinhood RPC is read and no Base-only code ran: %s" % info
         await pg.context.close()
-        print("[rh no base calls] walking Swap, Markets, Stocks, Exit value, Exit Report, Portfolio, FAQ on Robinhood (fresh boot and after a Base→Robinhood switch with a quote armed): zero requests to any Base RPC host or /base/rpc, /vd, /exit/holdings, Jupiter or /sol, /pnl, /cmc, /pairs.json, /ev, /report, zero networks/base or networks/solana GT paths, zero RPC provider calls, zero blocked-attempt counts, and no ethers on a fresh boot; calling loadMetas, a Base GT URL and rpcSend directly on Robinhood is refused (nothing on the wire)")
+        print("[rh no base calls] walking Swap, Markets, Stocks, Exit value, Exit Report, Portfolio, FAQ on Robinhood (fresh boot and after a Base→Robinhood switch with a quote armed): zero requests to any Base RPC host or /base/rpc, /vd, /exit/holdings, Jupiter or /sol, /pnl, /cmc, /pairs.json, /ev, /report, zero networks/base or networks/solana GT paths, every RPC read goes to the Robinhood RPC only, zero blocked-attempt counts; a Base GT URL is refused and rpcSend reads only the Robinhood RPC")
     finally:
         await b.close()
         srv.shutdown()
@@ -25573,14 +25596,14 @@ RH_GEO_JS = """() => { const q = s => document.querySelector(s);
 
 
 async def check_rh_swap_parity(p, errors):
-    """[rh swap parity] ۲۰ نوامبر — Swap روی Robinhood = ردیفِ hero عیناً مثلِ Base (نمودار چپ، کارتِ سواپ ۳۹۶px راست)، فقط نمایش."""
+    """[rh swap parity] ۲۳ نوامبر — Swap روی Robinhood = *همان* ردیفِ hero ِ Base (نمودار چپ، کارتِ سواپ ۳۹۶px راست)، حالا با سواپِ واقعی."""
     srv, origin = rh_srv()
     b = await p.chromium.launch()
     errs = []
     try:
         pats = rh_base_forbidden()
         env = FbEnv(b, origin, errs)
-        env.gt = rh_gt_board()
+        env.gt = rh_gt_swap()
         reqs = []
         hook = lambda pg_: pg_.on("request", lambda r: reqs.append(r.url))
         # Base، ۱۴۴۰px: مرجعِ اندازه
@@ -25589,89 +25612,396 @@ async def check_rh_swap_parity(p, errors):
         await pgb.wait_for_timeout(1200)
         geo_b = await pgb.evaluate("(g) => eval('(' + g + ')')()('#baseHeroRow')", RH_GEO_JS.strip())
         await pgb.context.close()
-        # Robinhood، ۱۴۴۰px
+        # Robinhood، ۱۴۴۰px — همان #baseHeroRow
         env.calls.clear()
         pg = await env.open(hash_="#swap", vw=1440, vh=900, init=[RH_CHAIN_JS], board=False, hook=hook)
-        await pg.wait_for_function("() => activeChain === 'robinhood' && view === 'swap'", timeout=10000)
-        await pg.wait_for_function("() => document.querySelector('#rhPlot svg')", timeout=20000)
+        await pg.wait_for_function("() => typeof activeChain !== 'undefined' && activeChain === 'robinhood' && view === 'swap' && typeof tokenOut !== 'undefined' && tokenOut && document.querySelector('#baseHeroRow .swapCard')", timeout=25000)
+        await pg.wait_for_function("() => document.querySelector('#plot svg')", timeout=20000)
         await pg.wait_for_timeout(800)
-        geo_r = await pg.evaluate("(g) => eval('(' + g + ')')()('#rhHero')", RH_GEO_JS.strip())
+        geo_r = await pg.evaluate("(g) => eval('(' + g + ')')()('#baseHeroRow')", RH_GEO_JS.strip())
         sw, bw = geo_r["swap"], geo_b["swap"]
-        assert abs(sw["w"] - bw["w"]) <= 1 and abs(sw["w"] - 396) <= 1, "[rh swap parity] #rhSwap must be as wide as Base's swap card (396px): rh %s base %s" % (sw, bw)
-        assert abs(sw["l"] - bw["l"]) <= 1, "[rh swap parity] #rhSwap left edge must match Base's: rh %s base %s" % (sw, bw)
-        # Base دارد یک نوارِ Market watch بالای ردیف؛ Robinhood ندارد (در مشخصات نیامده). بالای کارت = بالای ردیف + (نوار و فاصله‌ی ردیف اگر باشد)
+        assert abs(sw["w"] - bw["w"]) <= 1 and abs(sw["w"] - 396) <= 1, "[rh swap parity] the Robinhood swap card must be as wide as Base's (396px): rh %s base %s" % (sw, bw)
+        assert abs(sw["l"] - bw["l"]) <= 1, "[rh swap parity] swap card left edge must match Base's: rh %s base %s" % (sw, bw)
+        # Base دارد یک نوارِ Market watch بالای ردیف؛ Robinhood آن را پنهان می‌کند (نوار ETH/AERO/cbBTC مالِ Base است). بالای کارت = بالای ردیف + (نوار و فاصله‌ی ردیف اگر باشد)
         base_off = bw["t"] - geo_b["hero"]["t"] - ((geo_b["above"] - geo_b["hero"]["t"]) + geo_b["gap"] if geo_b["strip"] else 0)
         assert abs(geo_r["hero"]["t"] - geo_b["hero"]["t"]) <= 1 and abs((sw["t"] - geo_r["hero"]["t"]) - base_off) <= 1, \
-            "[rh swap parity] #rhSwap top must match Base's swap card (discounting Base's own market-watch strip): rh %s/%s base %s/%s" % (sw, geo_r["hero"], bw, geo_b["hero"])
+            "[rh swap parity] swap card top must match Base's (discounting Base's own market-watch strip): rh %s/%s base %s/%s" % (sw, geo_r["hero"], bw, geo_b["hero"])
         assert abs(geo_r["chart"]["w"] - geo_b["chart"]["w"]) <= 1 and abs(geo_r["chart"]["l"] - geo_b["chart"]["l"]) <= 1, \
             "[rh swap parity] the chart card must match Base's width and left edge: rh %s base %s" % (geo_r["chart"], geo_b["chart"])
         assert geo_r["cols"] == geo_b["cols"], "[rh swap parity] hero grid columns must equal Base's: %s vs %s" % (geo_r["cols"], geo_b["cols"])
         assert geo_r["swapSt"] == geo_b["swapSt"] and geo_r["chartSt"] == geo_b["chartSt"], \
             "[rh swap parity] same radius/padding/background/shadow as Base: rh %s %s base %s %s" % (geo_r["swapSt"], geo_r["chartSt"], geo_b["swapSt"], geo_b["chartSt"])
         info = await pg.evaluate("""() => { const q = s => document.querySelector(s), vis = e => !!e && e.getClientRects().length > 0;
-            const cta = q('#rhActBtn');
-            return {pair: q('#rhPairName').textContent, px: q('#rhPxNow').textContent, chg: q('#rhPxChg').textContent, msgHidden: getComputedStyle(q('#rhChartMsg')).display === 'none',
-                    tfs: [...document.querySelectorAll('#rhTfs button')].map(e => e.textContent), cta: [cta.disabled, cta.textContent.trim()],
-                    inputs: [...document.querySelectorAll('#rhSwap input')].map(e => [e.disabled, e.readOnly]),
-                    btns: [...document.querySelectorAll('#rhSwap button')].filter(e => e.id !== 'rhActBtn' && !e.closest('#srcMenu')).map(e => [e.id, e.disabled]),
-                    syms: [q('#rhTokInSym').textContent, q('#rhTokOutSym').textContent], avIn: !!q('#rhTokInAv img'), avOut: q('#rhTokOutAv').textContent,
-                    facts: [...document.querySelectorAll('#rhSwap .fact')].map(e => e.textContent.trim().replace(/\s+/g, ' ')),
-                    extras: ['#rhSwap .routeBar', '#rhSwap #notices', '#rhSwap #statusSlot', '#baseSubRow'].filter(s => vis(q(s))),
-                    picker: !!q('#rhSwap #srcMenu') && vis(q('#srcChip')), title: q('#rhSwap #swapNetworkBar > .ttl').textContent, baseHero: vis(q('#baseHeroRow')),
-                    star: [q('#swapWatch').disabled], tipbox: !!q('#rhPlot #rhTip')}; }""")
-        assert info["pair"] == "WETH / USDG" and info["tfs"] == ["1H", "1D", "1W", "1M"] and info["msgHidden"], "[rh swap parity] chart card header: %s" % info
-        assert info["px"].startswith("$") or re.match(r"^[\d,.]+", info["px"]), "[rh swap parity] the chart shows a WETH price in USD: %s" % info["px"]
-        assert info["cta"] == [True, RH_SWAP_CTA_T], "[rh swap parity] the CTA must be disabled with the coming-soon text: %s" % info["cta"]
-        assert info["inputs"] == [[True, True], [True, True]], "[rh swap parity] both amount inputs are disabled and readonly: %s" % info["inputs"]
-        assert info["btns"] and all(x[1] for x in info["btns"]), "[rh swap parity] token buttons, flip and the watch star are disabled: %s" % info["btns"]
-        assert info["syms"] == ["ETH", "USDG"] and info["avIn"] and info["avOut"] == "U", "[rh swap parity] ETH shows Base's ETH icon, USDG a letter avatar: %s" % info
-        assert info["facts"] == ["Rate—", "Price impact—", "Min received—", "Protocol fee0.00%", "vs Uniswap direct—"], "[rh swap parity] five facts rows: %s" % info["facts"]
-        assert not info["extras"] and not info["baseHero"] and info["picker"] and info["title"] == "Swap", "[rh swap parity] no route bar/notices/sub row; the picker sits in the card header: %s" % info
-        assert info["star"] == [True], "[rh swap parity] the watch star is disabled: %s" % info
+            const cta = q('#actBtn');
+            return {pair: q('#pairName').textContent, px: q('#pxNow').textContent, chg: q('#pxChg').textContent, msgHidden: getComputedStyle(q('#chartMsg')).display === 'none',
+                    tfs: [...document.querySelectorAll('#tfs button')].map(e => e.textContent), cta: [cta.disabled, cta.textContent.trim()],
+                    inputs: [q('#amtIn').disabled, q('#amtIn').readOnly, q('#amtOut').disabled],
+                    syms: [tokenIn.symbol, tokenOut.symbol], soon: document.body.innerText.includes('Swaps coming soon'),
+                    pools: vis(q('#baseHeroRow .swapPoolsCard')), safety: vis(q('#baseHeroRow .swapSafetyCard')), poolsTtl: q('#baseHeroRow .swapPoolsCard .ttl').textContent,
+                    picker: !!q('#baseSwapNetworkSlot #srcMenu') && vis(q('#srcChip')), title: q('#baseSwapNetworkSlot #swapNetworkBar > .ttl').textContent,
+                    rhHero: vis(q('#rhHero')), strip: vis(q('.marketWatch'))}; }""")
+        assert info["pair"] == "USDG / ETH" and info["tfs"] == ["1H", "1D", "1W", "1M"] and info["msgHidden"], "[rh swap parity] chart card header (Base chart code on the Robinhood pair): %s" % info
+        assert info["px"].endswith("ETH") and re.match(r"^[\d,.]+", info["px"]), "[rh swap parity] the chart shows a price in the pay token: %s" % info["px"]
+        assert info["cta"] == [False, "Connect wallet"] and not info["soon"], "[rh swap parity] the swap button is the live Base one, not a coming-soon stub: %s" % info
+        assert info["inputs"][0] is False and info["inputs"][1] is False, "[rh swap parity] the amount input is editable: %s" % info["inputs"]
+        assert info["syms"] == ["ETH", "USDG"], "[rh swap parity] default pair ETH -> USDG: %s" % info["syms"]
+        assert info["pools"] and info["safety"] and info["poolsTtl"] == "Every pool on Robinhood Chain", "[rh swap parity] the Pools and Safety/Exit check cards are shown: %s" % info
+        assert info["picker"] and info["title"] == "Swap" and not info["rhHero"] and not info["strip"], "[rh swap parity] picker in the card header, old Robinhood hero and the Base market strip hidden: %s" % info
         want = "networks/robinhood/pools/%s/ohlcv/" % RH_SWAP_POOL_T
         hit = [c for c in env.calls if "/ohlcv/" in c]
-        assert hit and all(want in c and ("token=" + RH_SWAP_WETH_T) in c and "currency=usd" in c for c in hit), "[rh swap parity] the chart's GT request must go to %s priced in USD for WETH: %s" % (want, env.calls)
+        assert hit and all(want in c and "currency=usd" in c for c in hit), "[rh swap parity] the chart's GT request must go to %s priced in USD: %s" % (want, env.calls)
         assert all("networks/robinhood/" in c for c in env.calls), "[rh swap parity] only robinhood GT paths: %s" % env.calls
         bad = rh_hit(reqs, pats)
         assert not bad, "[rh swap parity] forbidden requests from the Robinhood swap view: %s" % bad
         # دکمه‌ی بازه: درخواستِ تازه با همان قواعدِ Base (1W = hour, 168)
         n0 = len(env.calls)
-        await pg.click('#rhTfs [data-tf="1W"]')
-        await pg.wait_for_function("(n) => document.querySelector('#rhPxChg').textContent.endsWith('1W')", arg=n0, timeout=10000)
-        last = env.calls[-1]
+        await pg.click('#tfs [data-tf="1W"]')
+        await pg.wait_for_function("(n) => document.querySelector('#pxChg').textContent.endsWith('1W')", arg=n0, timeout=10000)
+        last = [c for c in env.calls if "/ohlcv/" in c][-1]
         assert "/ohlcv/hour?aggregate=1&limit=168" in last and want in last, "[rh swap parity] the 1W button must ask hour/1/168 on the same pool: %s" % last
-        assert (await pg.evaluate("() => document.querySelector('#rhTfs .on').dataset.tf")) == "1W", "[rh swap parity] the 1W button turns on"
-        # سوییچ به Solana و برگشت: شبکه‌ی پیکر درست جا به جا می‌شود و کارت Base/Solana را نمی‌گیرد
+        assert (await pg.evaluate("() => document.querySelector('#tfs .on').dataset.tf")) == "1W", "[rh swap parity] the 1W button turns on"
+        # سوییچ به Solana (reload) : کارتِ Base/Robinhood رفته و نوارِ انتخابگر در جایگاهِ Solana است
         await pg.click("#srcChip")
         await pg.click('#srcPop [data-chain="solana"]')
-        await pg.wait_for_function("() => activeChain === 'solana'", timeout=20000)
+        await pg.wait_for_function("() => typeof activeChain !== 'undefined' && activeChain === 'solana' && !document.documentElement.hasAttribute('data-rh')", timeout=25000)
         await pg.wait_for_function("() => { const e = document.getElementById('appSolHero'); return !!e && e.getClientRects().length > 0; }", timeout=20000)
         await pg.wait_for_timeout(300)
         away = await pg.evaluate("() => ({rh: document.getElementById('rhHero').getClientRects().length > 0, bar: !!document.querySelector('#solSwapNetworkSlot #swapNetworkBar')})")
         assert away == {"rh": False, "bar": True}, "[rh swap parity] on Solana the Robinhood hero is gone and the picker bar is in Solana's slot: %s" % away
         await pg.context.close()
-        # ۳۹۰px: کارتِ سواپ بالای نمودار، بدونِ سرریزِ افقی
-        pg = await env.open(hash_="#swap", vw=390, vh=844, init=[RH_CHAIN_JS], board=False)
-        await pg.wait_for_function("() => activeChain === 'robinhood' && document.querySelector('#rhPlot svg')", timeout=20000)
-        await pg.wait_for_timeout(500)
-        mob = await pg.evaluate("""() => { const r = s => document.querySelector(s).getBoundingClientRect();
-            return {swap: r('#rhSwap'), chart: r('#rhHero .swapChartCard'), over: document.documentElement.scrollWidth - document.documentElement.clientWidth,
-                    sw: document.documentElement.scrollWidth, tabs: document.querySelectorAll('#rhHero .mTabs').length}; }""")
-        assert mob["swap"]["bottom"] <= mob["chart"]["top"] + 1 and mob["swap"]["top"] < mob["chart"]["top"], "[rh swap parity] on mobile the swap card sits above the chart: %s" % mob
-        assert mob["over"] <= 0 and mob["swap"]["right"] <= 390 + 0.5 and mob["chart"]["right"] <= 390 + 0.5, "[rh swap parity] no horizontal overflow at 390px: %s" % mob
-        await pg.context.close()
-        # شکستِ GT: ۲۳ نوامبر [حسام] — متن دیگر مثلِ Base نیست، چون روی Robinhood کوت و مسیریابیِ زنده‌ای وجود ندارد
-        env.gt = rh_gt_board(ohlcv=rh_swap_ohlcv(status=429))
+        # ۳۹۰px: همان چیدمانِ موبایلِ Base (کارتِ سواپ و نمودار)، بدونِ سرریزِ افقی
+        geos = {}
+        for tag, init in (("base", None), ("rh", [RH_CHAIN_JS])):
+            pgm = await env.open(hash_="#swap", vw=390, vh=844, init=init, board=False)
+            await pgm.wait_for_function("() => typeof tokenOut !== 'undefined' && tokenOut && document.querySelector('#baseHeroRow .swapCard')", timeout=25000)
+            await pgm.wait_for_timeout(600)
+            geos[tag] = await pgm.evaluate("""() => { const r = s => document.querySelector(s).getBoundingClientRect();
+                return {swapAbove: r('#baseHeroRow .swapCard').top < r('#baseHeroRow .swapChartCard').top, swapW: Math.round(r('#baseHeroRow .swapCard').width),
+                        over: document.documentElement.scrollWidth - document.documentElement.clientWidth, right: r('#baseHeroRow .swapCard').right}; }""")
+            await pgm.context.close()
+        assert geos["rh"]["swapAbove"] == geos["base"]["swapAbove"] and geos["rh"]["swapW"] == geos["base"]["swapW"], "[rh swap parity] the 390px layout equals Base's: %s" % geos
+        assert geos["rh"]["over"] <= 0 and geos["rh"]["right"] <= 390.5, "[rh swap parity] no horizontal overflow at 390px: %s" % geos
+        # شکستِ GT: نمودار همان پیامِ Base را می‌دهد (کوت و مسیریابی روی Robinhood دوباره زنده‌اند)
+        env.gt = rh_gt_swap()
+        env_gt_ok = env.gt
+        def gt_429(path, ok=env_gt_ok):
+            if "/ohlcv/" in path:
+                return (404, {})
+            return ok(path)
+        env.gt = gt_429
         pg = await env.open(hash_="#swap", vw=1440, vh=900, init=[RH_CHAIN_JS], board=False)
-        await pg.wait_for_function("() => document.getElementById('rhChartMsg').textContent.startsWith('Price history is unavailable')", timeout=20000)
-        msg = await pg.evaluate("() => document.getElementById('rhChartMsg').textContent")
-        assert msg == "Price history is unavailable right now.", "[rh swap parity] failure text must not claim live quotes (swaps are off on Robinhood): %r" % msg
+        await pg.wait_for_function("() => document.getElementById('chartMsg') && document.getElementById('chartMsg').textContent.startsWith('Price history is unavailable')", timeout=30000)
+        msg = await pg.evaluate("() => document.getElementById('chartMsg').textContent")
+        assert msg == "Price history is unavailable right now. Quotes and routing below are live and unaffected.", "[rh swap parity] failure text is Base's (quotes are live on Robinhood): %r" % msg
         await pg.context.close()
-        print("[rh swap parity] on Robinhood the Swap view is Base's hero row: #rhSwap is %dpx wide with the same left/top, radius, padding, background and shadow as Base's swap card, chart card on the left (WETH / USDG, 1H/1D/1W/1M) with the GT request on networks/robinhood/pools/%s priced in USD for WETH (1W asks hour/168); CTA disabled %r, inputs/token buttons/flip/star disabled, five facts rows with Protocol fee 0.00%%, no route bar or notices; ETH keeps Base's icon, USDG a letter avatar; 390px puts the swap card above the chart with no horizontal overflow; a failed fetch shows Base's failure text; zero forbidden requests" % (round(sw["w"]), RH_SWAP_POOL_T, RH_SWAP_CTA_T))
+        print("[rh swap parity] on Robinhood the Swap view is Base's own hero row (#baseHeroRow): the swap card is %dpx wide with the same left/top, radius, padding, background and shadow as Base, chart card on the left (USDG / ETH, 1H/1D/1W/1M on networks/robinhood in USD), a live Connect wallet button, the Pools and Safety/Exit check cards, no coming-soon stub, the old Robinhood hero and Base market strip hidden; the 390px layout equals Base's; Solana switch hides it" % round(sw["w"]))
     finally:
         await b.close()
         srv.shutdown()
     assert not errs, "[rh swap parity] console errors: %s" % errs
+
+
+# =====================================================================
+# ۲۳ نوامبر — سواپِ واقعی و Exit check روی Robinhood Chain (4663). همان رابطِ Base؛ پیکربندی هنگامِ بوت انتخاب می‌شود.
+# استاب ethers برای RH توسعه یافت (زنجیره‌ی ۴۶۶۳، اجراکننده‌ی RH، روتر/کوترِ Uniswap V3 و دو توکنِ RH).
+# =====================================================================
+RH_EXEC_T = "0xC261E57cF5739A8a538884405600E4e45dF24802"
+RH_ADAPTER_T = "0x4DF8c399DA86F9c51926ABB6E57abc90Ee678C3B"
+RH_RPC_T = "https://rpc.mainnet.chain.robinhood.com"
+RH_USDG_T = "0x5fc5360d0400a0fd4f2af552add042d716f1d168"
+RH_INIT_SWAP = [RH_CHAIN_JS, "window.__STUB_RPC_LOG__ = [];"]
+
+
+def rh_gt_swap():
+    """GT برای نمودارِ WETH/USDG روی Robinhood: استخرِ برترِ WETH + شمع‌ها (همان فیکسچرِ rh_gt_board)."""
+    base = rh_gt_board()
+
+    def gt(path):
+        if path.lower().endswith("/tokens/%s/pools" % RH_SWAP_WETH_T):
+            return (200, {"data": [{"id": "robinhood_" + RH_SWAP_POOL_T, "type": "pool"}]})
+        return base(path)
+    return gt
+
+
+RH_WALLET_JS = r"""() => {
+    const BIGV = 10n ** 40n;
+    window.__STUB_ALLOWANCE__ = BIGV.toString();
+    window.__STUB_BALANCE__ = BIGV.toString();
+    account = "0x8A0Dcb583C8CAdc481E34487c34f1B856fe97e23";
+    signer = {}; walletChainId = CHAIN.id; walletIsRemote = false;
+    balances[balKey(tokenIn)] = BIGV; allowance = BIGV; allowanceKnown = true;
+}"""
+
+
+async def check_rh_swap_live(p, errors):
+    """[rh swap live] روی Robinhood: کوت ← مسیر روی Uniswap V3 ← یک executeSwap به اجراکننده‌ی RH بدونِ Builder Code؛ add-chain با ۴۶۶۳/RPC/Blockscout."""
+    srv, origin = rh_srv()
+    b = await p.chromium.launch()
+    errs = []
+    try:
+        pats = rh_base_forbidden()
+        env = FbEnv(b, origin, errs)
+        env.gt = rh_gt_swap()
+        reqs = []
+        hook = lambda pg_: pg_.on("request", lambda r: reqs.append(r.url))
+        pg = await env.open(hash_="#swap", vw=1440, vh=900, init=RH_INIT_SWAP, board=False, hook=hook)
+        await pg.wait_for_function("() => typeof E !== 'undefined' && E && typeof tokenOut !== 'undefined' && tokenOut && typeof enabledDexes === 'function' && enabledDexes().length > 0", timeout=25000)
+        st = await pg.evaluate("""() => { const vis = e => !!e && e.getClientRects().length > 0;
+            return {chain: activeChain, id: CHAIN.id, ex: CHAIN.executor, name: CHAIN.name, pair: [tokenIn.symbol, tokenOut.symbol],
+                    heroB: vis(document.getElementById('baseHeroRow')), subB: vis(document.querySelector('#baseHeroRow .swapPoolsCard')) && vis(document.querySelector('#baseHeroRow .swapSafetyCard')), heroRh: vis(document.getElementById('rhHero')),
+                    soon: document.body.innerText.includes('Swaps coming soon'), cta: document.getElementById('actBtn').textContent.trim(),
+                    connect: [document.getElementById('connectBtn').disabled, document.getElementById('connectBtn').textContent.trim()],
+                    dexes: enabledDexes().map(d => d.id), proxy: BASE_RPC_PROXY, rpcs: CHAIN.rpcs}; }""")
+        assert st["chain"] == "robinhood" and st["id"] == 4663 and st["ex"] == RH_EXEC_T and st["name"] == "Robinhood Chain", "[rh swap live] boot config: %s" % st
+        assert st["pair"] == ["ETH", "USDG"], "[rh swap live] the default pair is ETH -> USDG: %s" % st
+        assert st["heroB"] and st["subB"] and not st["heroRh"] and not st["soon"], "[rh swap live] the Base hero row with its Pools and Safety (Exit check) cards is shown, the old Robinhood hero and its coming-soon button are gone: %s" % st
+        assert st["cta"] == "Connect wallet" and st["connect"] == [False, "Connect wallet"], "[rh swap live] the wallet button works on Robinhood swap: %s" % st
+        assert "uniswap-v3" in st["dexes"] and st["proxy"] is None and st["rpcs"] == [RH_RPC_T], "[rh swap live] uniswap-v3 verified, no Base RPC proxy, only the Robinhood RPC: %s" % st
+        # --- کوت ← مسیر ---
+        await pg.evaluate(RH_WALLET_JS)
+        await pg.fill("#amtIn", "0.01")
+        await pg.wait_for_function("() => currentPlan && currentPlan.parts && currentPlan.parts.length > 0", timeout=20000)
+        plan = await pg.evaluate("""() => ({dexes: currentPlan.parts.flatMap(p => p.route.hops.map(h => h.venue.dex.id)),
+            routers: currentPlan.parts.flatMap(p => p.route.hops.map(h => venueRouter(h.venue).toLowerCase())),
+            out: document.getElementById('amtOut').value, btn: document.getElementById('actBtn').textContent.trim()})""")
+        assert plan["dexes"] and all(d in ("uniswap-v3", "aerodrome-cl-3") for d in plan["dexes"]), "[rh swap live] the route must run over uniswap-v3 or aerodrome-cl-3 only: %s" % plan
+        assert all(r == "0xcaf681a66d020601342297493863e78c959e5cb2" for r in plan["routers"]) and float(plan["out"].replace(",", "")) > 0, "[rh swap live] the route goes through the Robinhood V3 router and a positive amount shows: %s" % plan
+        # --- doSwap: یک executeSwap به اجراکننده‌ی RH، بدونِ Builder Code ---
+        sent = await pg.evaluate(r"""async () => {
+            const realContract = E.Contract, realErr = console.error;
+            console.error = () => {};
+            const sleep = ms => new Promise(r => setTimeout(r, ms));
+            const wait = async () => { for (let i = 0; i < 200 && busy; i++) await sleep(50); await sleep(50); };
+            const out = {ctor: [], sends: [], remote: []};
+            E.Contract = function (addr, abi, runner) {
+                out.ctor.push({addr, viaSigner: runner === signer, runnerKeys: Object.keys(runner || {})});
+                const send = function (...a) { out.sends.push({minOut: a[3].toString(), parts: a[4].length}); throw new Error("probe: stop before sending"); };
+                send.staticCall = async () => 1n;
+                send.estimateGas = async () => 21000n;
+                return { executeSwap: send };
+            };
+            try {
+                await doSwap(); await wait();
+                out.notice = document.getElementById('notices').innerText.replace(/\s+/g, ' ').slice(0, 300);
+                out.contractSends = out.sends.length;
+                out.sends.length = 0;
+                walletIsRemote = true;
+                walletEip1193 = { request: async ({method, params}) => { out.remote.push({method, to: params && params[0] && params[0].to, data: params && params[0] && params[0].data}); throw new Error("probe: stop before sending"); } };
+                await doSwap(); await wait();
+            } finally { E.Contract = realContract; console.error = realErr; walletIsRemote = false; }
+            out.suffix = BASE_BUILDER_SUFFIX.slice(2);
+            return out;
+        }""")
+        exec_ctor = [c for c in sent["ctor"] if c["addr"].lower() == RH_EXEC_T.lower()]
+        assert exec_ctor and all(c["viaSigner"] for c in exec_ctor), "[rh swap live] the executor contract at the Robinhood address must be driven by the plain signer (no builder-code runner): %s" % sent["ctor"]
+        assert not [c for c in sent["ctor"] if c["addr"].lower() != RH_EXEC_T.lower()], "[rh swap live] no other executor address may be used: %s" % sent["ctor"]
+        assert sent["contractSends"] == 1, "[rh swap live] exactly one executeSwap must be sent through the contract path: %s" % sent
+        rem = [r for r in sent["remote"] if r["method"] == "eth_sendTransaction"]
+        assert len(rem) == 1 and rem[0]["to"].lower() == RH_EXEC_T.lower(), "[rh swap live] exactly one eth_sendTransaction to the Robinhood executor on the remote-wallet path: %s" % sent["remote"]
+        assert not rem[0]["data"].endswith(sent["suffix"]), "[rh swap live] NO ERC-8021 builder-code suffix on Robinhood calldata: %s" % rem[0]["data"][-60:]
+        # --- add-chain ---
+        add = await pg.evaluate(r"""async () => {
+            const calls = [];
+            walletEip1193 = { request: async ({method, params}) => { calls.push({method, params});
+                if (method === "wallet_switchEthereumChain") { const e = new Error("unrecognized chain"); e.code = 4902; throw e; }
+                return null; } };
+            await switchNetwork();
+            const lbl = (walletChainId = 8453, refreshButton(), document.getElementById('actBtn').textContent.trim());
+            walletChainId = CHAIN.id;
+            return {calls, lbl};
+        }""")
+        sw, ac = add["calls"][0], add["calls"][1]
+        assert sw["method"] == "wallet_switchEthereumChain" and sw["params"][0]["chainId"] == "0x1237", "[rh swap live] the switch request carries chainId 0x1237: %s" % add
+        p0 = ac["params"][0]
+        assert ac["method"] == "wallet_addEthereumChain" and p0["chainId"] == "0x1237" and p0["chainName"] == "Robinhood Chain" \
+            and p0["rpcUrls"] == [RH_RPC_T] and p0["blockExplorerUrls"] == ["https://robinhoodchain.blockscout.com"] \
+            and p0["nativeCurrency"] == {"name": "Ether", "symbol": "ETH", "decimals": 18}, "[rh swap live] add-chain must carry 0x1237, the Robinhood RPC, Blockscout and ETH: %s" % ac
+        assert add["lbl"] == "Switch to Robinhood Chain", "[rh swap live] the wrong-network button names the chain: %r" % add["lbl"]
+        # --- هیچ درخواستِ Base/Worker ---
+        bad = rh_hit(reqs, pats)
+        assert not bad, "[rh swap live] forbidden requests during a Robinhood swap: %s" % bad
+        log = await pg.evaluate("() => window.__STUB_RPC_LOG__")
+        assert log and all(u == RH_RPC_T for u in log), "[rh swap live] every RPC read goes to the Robinhood RPC: %s" % sorted(set(log))
+        assert all("networks/robinhood/" in c for c in env.calls), "[rh swap live] only robinhood GT paths: %s" % env.calls
+        await pg.context.close()
+        print("[rh swap live] on Robinhood the Base swap UI quotes over uniswap-v3 through the Robinhood router (RPC %s only, no Base host, no Worker call), doSwap sends one executeSwap to %s via the plain signer / one eth_sendTransaction with NO builder-code suffix, and add-chain carries 0x1237 + the Robinhood RPC + Blockscout; wrong-network label says 'Switch to Robinhood Chain'" % (RH_RPC_T, RH_EXEC_T))
+    finally:
+        await b.close()
+        srv.shutdown()
+    assert not errs, "[rh swap live] console errors: %s" % errs
+
+
+async def check_rh_exit_check(p, errors):
+    """[rh exit check] Exit check روی Robinhood: رفت‌وبرگشت از اجراکننده‌ی RH (staticCall) و نمایشِ حکم؛ بدونِ Worker."""
+    srv, origin = rh_srv()
+    b = await p.chromium.launch()
+    errs = []
+    try:
+        pats = rh_base_forbidden()
+        env = FbEnv(b, origin, errs)
+        env.gt = rh_gt_swap()
+        reqs = []
+        hook = lambda pg_: pg_.on("request", lambda r: reqs.append(r.url))
+        pg = await env.open(hash_="#swap", vw=1440, vh=900, init=RH_INIT_SWAP, board=False, hook=hook)
+        await pg.wait_for_function("() => typeof E !== 'undefined' && E && typeof tokenOut !== 'undefined' && tokenOut && enabledDexes().length > 0", timeout=25000)
+        await pg.evaluate(RH_WALLET_JS)
+        res = await pg.evaluate(r"""async () => {
+            const realContract = E.Contract;
+            const seen = [];
+            E.Contract = function (addr, abi, runner) {
+                const ex = async () => 1n;
+                const f = function () { throw new Error("probe: no send"); };
+                f.staticCall = async (...a) => { seen.push({addr, same: JSON.stringify(a[0]) === JSON.stringify(a[1]), steps: a[4].length}); return (10n ** 6n) * 995n / 1000n * 10n ** 12n; };
+                f.estimateGas = async () => 21000n;
+                return { executeSwap: f };
+            };
+            const sleep = ms => new Promise(r => setTimeout(r, ms));
+            try {
+                // ETH → USDG: اولین ورودی؛ بعد خروجی را USDG می‌گیریم تا رفت‌وبرگشت بسازد
+                tokenIn = BASE_TOKENS.find(t => t.symbol === "WETH");
+                tokenOut = BASE_TOKENS.find(t => t.symbol === "USDG");
+                document.getElementById('amtIn').value = "1";
+                balances[balKey(tokenIn)] = 10n ** 40n; allowance = 10n ** 40n; allowanceKnown = true;
+                await runQuote();
+                for (let i = 0; i < 100 && !seen.length; i++) await sleep(100);
+                await sleep(500);
+            } finally { E.Contract = realContract; }
+            return {seen};
+        }""")
+        assert res["seen"], "[rh exit check] the Exit check never simulated through the executor: %s" % res
+        assert all(s["addr"].lower() == RH_EXEC_T.lower() for s in res["seen"]) and any(s["same"] for s in res["seen"]), \
+            "[rh exit check] the round trip (tokenIn == tokenOut) must run staticCall on the Robinhood executor %s: %s" % (RH_EXEC_T, res["seen"])
+        shown = await pg.evaluate("() => { const t = (document.getElementById('exitBox') || {}).innerText || ''; return t.replace(/\\s+/g, ' ').trim(); }")
+        assert shown and not re.search(r"NaN|undefined|\[object", shown), "[rh exit check] a verdict must be shown (no NaN/undefined): %r" % shown
+        bad = rh_hit(reqs, pats)
+        assert not bad, "[rh exit check] forbidden requests (Worker /vd, /exit, /pnl ...) during the Exit check: %s" % bad
+        await pg.context.close()
+        print("[rh exit check] on Robinhood the Exit check ran a round-trip staticCall through executor %s (%d simulation(s), no Worker call) and shows: %s" % (RH_EXEC_T, len(res["seen"]), shown[:90]))
+    finally:
+        await b.close()
+        srv.shutdown()
+    assert not errs, "[rh exit check] console errors: %s" % errs
+
+
+async def check_rh_config(p, errors):
+    """[rh config] Base دست‌نخورده؛ بوتِ Robinhood دقیقاً سه صرافی و آدرس‌های سنجیده؛ CREATE2 اسلیپ‌استریم = 0x7615…"""
+    src = open(os.path.join(HERE, "..", "index.html"), encoding="utf-8").read()
+    # --- منبع: لیترالِ Base بی‌تغییر، CHAIN_RH با آدرس‌های مشخصات ---
+    base_m = re.search(r"const CHAIN=\{(.*?)\n\};", src, re.S)
+    assert base_m and 'executor:"0x5f3FCcfF3339DAa9eA7D2EBC3f77017D65467132"' in base_m.group(1) and "id:8453" in base_m.group(1), \
+        "[rh config] the Base CHAIN literal must keep its executor and id"
+    rh_m = re.search(r"const CHAIN_RH=\{(.*?)\n\};", src, re.S)
+    assert rh_m, "[rh config] CHAIN_RH is missing"
+    for lit in ('id:4663', 'hexId:"0x1237"', 'name:"Robinhood Chain"', 'explorer:"https://robinhoodchain.blockscout.com"', 'gtNetwork:"robinhood"',
+                'multicall3:"0xcA11bde05977b3631167028862bE2a173976CA11"', 'executor:"%s"' % RH_EXEC_T, 'v4Adapter:"%s"' % RH_ADAPTER_T,
+                'v4PoolManager:"0x8366a39cc670b4001a1121b8f6a443a643e40951"', 'v4Quoter:"0x8dc178efb8111bb0973dd9d722ebeff267c98f94"',
+                'rpcs:["%s"]' % RH_RPC_T, 'wrapped:"WETH"', 'reference:"USDG"'):
+        assert lit in rh_m.group(1), "[rh config] CHAIN_RH must contain %s" % lit
+    # فهرستِ Base از منبع (همان رجکسِ کاوشگرهای دیگر)
+    base_ids = re.findall(r'\{id:"([a-z0-9\-]+)"', re.search(r"const DEXES=\[(.*?)\n\];", src, re.S).group(1))
+    srv, origin = rh_srv()
+    b = await p.chromium.launch()
+    errs = []
+    try:
+        env = FbEnv(b, origin, errs)
+        env.gt = rh_gt_swap()
+        # --- Base: بایت‌به‌بایت مثلِ قبل ---
+        pgb = await env.open(hash_="#swap", board=False)
+        await pgb.wait_for_function("() => typeof E !== 'undefined' && E && typeof tokenOut !== 'undefined' && tokenOut", timeout=25000)
+        cb = await pgb.evaluate("""() => ({id: CHAIN.id, ex: CHAIN.executor, rpcs: CHAIN.rpcs, ids: DEXES.map(d => d.id), routers: DEXES.map(d => d.router || null),
+            tok: BASE_TOKENS.slice(0, 4).map(t => t.symbol), n: BASE_TOKENS.length, weth: WETH_ADDR, ref: CHAIN.reference, proxy: BASE_RPC_PROXY, name: CHAIN.name, gmap: gtDexMap() === GT_DEX_TO_DEX})""")
+        assert cb["gmap"] is True, "[rh config] Base boot must use the Base GT dex map"
+        assert cb["id"] == 8453 and cb["ex"] == "0x5f3FCcfF3339DAa9eA7D2EBC3f77017D65467132" and cb["name"] == "Base", "[rh config] Base boot must keep the Base config: %s" % cb
+        assert cb["ids"] == base_ids and len(base_ids) >= 10, "[rh config] Base boot keeps exactly the Base DEXES list: %s vs %s" % (cb["ids"], base_ids)
+        assert cb["rpcs"][0] == "https://base.publicnode.com" and "https://mainnet.base.org" in cb["rpcs"] and cb["proxy"], "[rh config] Base RPC list and proxy unchanged: %s" % cb
+        assert cb["tok"] == ["ETH", "WETH", "USDC", "AERO"] and cb["weth"] == "0x4200000000000000000000000000000000000006" and cb["ref"] == "USDC", "[rh config] Base tokens/WETH unchanged: %s" % cb
+        await pgb.context.close()
+        # --- Robinhood ---
+        pg = await env.open(hash_="#swap", init=RH_INIT_SWAP, board=False)
+        await pg.wait_for_function("() => typeof E !== 'undefined' && E && typeof tokenOut !== 'undefined' && tokenOut", timeout=25000)
+        cr = await pg.evaluate("""() => ({id: CHAIN.id, hex: CHAIN.hexId, ex: CHAIN.executor, ad: CHAIN.v4Adapter, rpcs: CHAIN.rpcs, def: DEFAULT_RPCS, proxy: BASE_RPC_PROXY,
+            ids: DEXES.map(d => d.id), dx: DEXES.map(d => [d.router || null, d.factory || null, d.quoter || null]),
+            tok: BASE_TOKENS.map(t => [t.symbol, t.address, t.decimals]), weth: WETH_ADDR, ref: CHAIN.reference, gt: CHAIN.gtNetwork, pair: PAIR_KEY,
+            slip: DEXES.find(d => d.id === 'aerodrome-cl-3').poolImpl, ts: DEXES.find(d => d.id === 'aerodrome-cl-3').tickSpacings})""")
+        assert cr["id"] == 4663 and cr["hex"] == "0x1237" and cr["ex"] == RH_EXEC_T and cr["ad"] == RH_ADAPTER_T and cr["gt"] == "robinhood", "[rh config] Robinhood boot config: %s" % cr
+        assert cr["rpcs"] == [RH_RPC_T] and cr["def"] == [RH_RPC_T] and cr["proxy"] is None, "[rh config] one Robinhood RPC, no proxy: %s" % cr
+        assert cr["ids"] == ["uniswap-v3", "aerodrome-cl-3", "uniswap-v4"], "[rh config] Robinhood boots with exactly the three venues: %s" % cr["ids"]
+        want = [["0xcaf681a66d020601342297493863e78c959e5cb2", "0x1f7d7550b1b028f7571e69a784071f0205fd2efa", "0x33e885ed0ec9bf04ecfb19341582aadcb4c8a9e7"],
+                ["0x9ee35bf1bd69a03c6f0393582030fce8bb93d418", "0xc63d7338c178e805c544b8f897066bd3bbcbe136", "0x1ddfec5058180c207f55bb77d95acdd0d8227868"],
+                [None, None, "0x8dc178efb8111bb0973dd9d722ebeff267c98f94"]]
+        got = [[(x or "").lower() or None for x in row] for row in cr["dx"]]
+        assert got == want, "[rh config] venue addresses: %s" % got
+        assert [t[0] for t in cr["tok"]] == ["ETH", "WETH", "USDG"] and cr["tok"][1][1].lower() == "0x0bd7d308f8e1639fab988df18a8011f41eacad73" \
+            and cr["tok"][2][1].lower() == RH_USDG_T and cr["weth"].lower() == cr["tok"][1][1].lower() and cr["ref"] == "USDG", "[rh config] Robinhood tokens: %s" % cr["tok"]
+        assert cr["pair"] == "zaexa.pair.rh", "[rh config] the saved pair must not share a key with Base: %s" % cr["pair"]
+        gm = await pg.evaluate("""() => ({m: gtDexMap(), base: gtDexMap() === GT_DEX_TO_DEX, usdgDec: BASE_TOKENS.find(t => t.symbol === 'USDG').decimals})""")
+        assert gm["m"] == {"uniswap-v3-robinhood": "uniswap-v3", "aero-slipstream-robinhood": "aerodrome-cl-3", "uniswap-v4-robinhood": "uniswap-v4"} and not gm["base"] \
+            and gm["usdgDec"] == 6, "[rh config] Robinhood GT dex ids map to the three venues (USDG decimals 6, measured on chain): %s" % gm
+        # --- CREATE2: WETH/USDG ts50 با کارخانه‌ی RH = 0x7615… (ethers واقعی کنار استاب) ---
+        await pg.evaluate("() => { window.__stubEthers = window.ethers; }")
+        await pg.add_script_tag(path=vendor_path("ethers.umd.min"))
+        await pg.evaluate("() => { window.__realEthers = window.ethers; window.ethers = window.__stubEthers; E.keccak256 = __realEthers.keccak256; E.getCreate2Address = __realEthers.getCreate2Address; E.AbiCoder = __realEthers.AbiCoder; }")
+        c2 = await pg.evaluate("""() => { const d = DEXES.find(x => x.id === 'aerodrome-cl-3'); const w = BASE_TOKENS[1].address, u = BASE_TOKENS[2].address;
+            return {fwd: clPoolAddr(d, w, u, 50), rev: clPoolAddr(d, u, w, 50), ts10: clPoolAddr(d, w, u, 10)}; }""")
+        assert c2["fwd"].lower() == "0x7615926023bb149f36095645c2a81dc367d39750" and c2["rev"].lower() == c2["fwd"].lower() and c2["ts10"].lower() != c2["fwd"].lower(), \
+            "[rh config] CREATE2 Slipstream WETH/USDG ts50 with the Robinhood factory must be 0x7615926023bB149f36095645C2A81DC367D39750: %s" % c2
+        await pg.context.close()
+        print("[rh config] Base boot keeps its CHAIN/DEXES (%d)/tokens/RPC list/proxy untouched; Robinhood boot has chain 4663 (executor %s, adapter %s), exactly uniswap-v3 + aerodrome-cl-3 + uniswap-v4, ETH/WETH/USDG, one RPC and no proxy; CREATE2 WETH/USDG ts50 = %s" % (len(base_ids), RH_EXEC_T, RH_ADAPTER_T, c2["fwd"]))
+    finally:
+        await b.close()
+        srv.shutdown()
+    assert not errs, "[rh config] console errors: %s" % errs
+
+
+async def check_rh_v4_keys(p, errors):
+    """[rh v4 keys] Robinhood: کلیدِ استخرِ v4 از GT (dex uniswap-v4-robinhood) + PositionManager.poolKeys(bytes25) با multicall؛ فقط کلیدی که keccak256(abi.encode(key)) == poolId."""
+    srv, origin = rh_srv()
+    b = await p.chromium.launch()
+    errs = []
+    try:
+        env = FbEnv(b, origin, errs)
+        env.gt = rh_gt_swap()
+        pg = await env.open(hash_="#swap", init=RH_INIT_SWAP, board=False)
+        await pg.wait_for_function("() => typeof E !== 'undefined' && E && typeof tokenOut !== 'undefined' && tokenOut", timeout=25000)
+        await pg.evaluate("() => { window.__stubEthers = window.ethers; }")
+        await pg.add_script_tag(path=vendor_path("ethers.umd.min"))
+        await pg.evaluate("() => { window.__realEthers = window.ethers; window.ethers = window.__stubEthers; E.keccak256 = __realEthers.keccak256; }")
+        res = await pg.evaluate("""async () => {
+            const R = window.__realEthers, coder = R.AbiCoder.defaultAbiCoder();
+            const T = "0x00000000000000000000000000000000000000aa";                       // توکنِ آزمایشی
+            const W = WETH_ADDR.toLowerCase();
+            const [c0, c1] = BigInt(T) < BigInt(W) ? [T, W] : [W, T];
+            const key = [c0, c1, 3000, 60, "0x0000000000000000000000000000000000000000"];
+            const id = k => R.keccak256(coder.encode(["address", "address", "uint24", "int24", "address"], k));
+            const goodId = id(key), badKey = [c0, c1, 500, 10, key[4]], badId = id(badKey);
+            const forged = id([c0, c1, 100, 1, key[4]]);                                    // poolId که با کلیدِ برگشتی نمی‌خواند
+            const enc = k => coder.encode(["address", "address", "uint24", "int24", "address"], k);
+            const calls = [];
+            const realGt = gtJson, realMc = multicall;
+            const pool = (a, dex) => ({id: "robinhood_" + a, type: "pool", attributes: {address: a}, relationships: {dex: {data: {id: dex}}}});
+            gtJson = async url => ({data: [pool(goodId, "uniswap-v4-robinhood"), pool(forged, "uniswap-v4-robinhood"), pool("0x" + "12".repeat(20), "uniswap-v3-robinhood"), pool("0xabc", "uniswap-v4-robinhood")]});
+            multicall = async cs => { calls.push(cs.map(c => [c.target, c.data])); return cs.map(c => {
+                const body = c.data.slice(10);
+                if (body === goodId.slice(2, 52).padEnd(64, "0")) return {ok: true, data: enc(key)};
+                return {ok: true, data: enc(badKey)};                                         // کلیدِ نامربوط به poolId
+            }); };
+            let keys;
+            try { keys = await rhV4Keys(T); } finally { gtJson = realGt; multicall = realMc; }
+            return {keys, calls, goodId, forged, sel: R.id("poolKeys(bytes25)").slice(0, 10), pm: CHAIN.v4PositionManager, c0, c1};
+        }""")
+        assert res["sel"] == "0x86b6be7d", "[rh v4 keys] poolKeys(bytes25) selector: %s" % res["sel"]
+        assert len(res["calls"]) == 1 and len(res["calls"][0]) == 2, "[rh v4 keys] one multicall with one poolKeys read per v4 pool id (the v3 row and the malformed id are skipped): %s" % res["calls"]
+        tgt, data = res["calls"][0][0]
+        assert tgt.lower() == "0x58daec3116aae6d93017baaea7749052e8a04fa7" and data == "0x86b6be7d" + res["goodId"][2:52].lower().ljust(64, "0"), \
+            "[rh v4 keys] PositionManager.poolKeys(bytes25(poolId)) calldata: %s" % res["calls"][0][0]
+        assert res["keys"] == [{"currency0": res["c0"], "currency1": res["c1"], "fee": 3000, "tickSpacing": 60, "hooks": "0x0000000000000000000000000000000000000000"}], \
+            "[rh v4 keys] only the key whose keccak256(abi.encode(key)) equals the pool id is kept (the forged one is dropped): %s" % res["keys"]
+        await pg.context.close()
+        print("[rh v4 keys] a Robinhood token's v4 keys come from GT pools with dex uniswap-v4-robinhood, one multicall of PositionManager.poolKeys(bytes25) (selector 0x86b6be7d), and a key is kept only when keccak256(abi.encode(key)) == the 32-byte pool id (a mismatching key, a v3 row and a malformed id are all dropped)")
+    finally:
+        await b.close()
+        srv.shutdown()
+    assert not errs, "[rh v4 keys] console errors: %s" % errs
 
 
 async def check_rh_screens(p, errors):
@@ -25684,7 +26014,7 @@ async def check_rh_screens(p, errors):
     b = await p.chromium.launch()
     try:
         env = FbEnv(b, origin, [])
-        env.gt = rh_gt_board()
+        env.gt = rh_gt_swap()   # نمای سواپ حالا همان کارتِ Base است
         pg = await env.open(hash_="#swap", vw=1440, vh=900, init=[RH_CHAIN_JS], board=False)
         await pg.wait_for_function("() => activeChain === 'robinhood'")
         await pg.click("#srcChip")
@@ -25692,12 +26022,12 @@ async def check_rh_screens(p, errors):
         await pg.screenshot(path=os.path.join(out, "rh_picker.png"))
         await pg.click("#srcChip")
         await pg.wait_for_timeout(300)
-        await pg.wait_for_function("() => document.querySelector('#rhPlot svg')", timeout=20000)
+        await pg.wait_for_function("() => document.querySelector('#plot svg')", timeout=20000)
         await pg.wait_for_timeout(500)
         await pg.screenshot(path=os.path.join(out, "rh_swap_desktop.png"))
         await pg.context.close()
         pg = await env.open(hash_="#swap", vw=390, vh=844, init=[RH_CHAIN_JS], board=False)
-        await pg.wait_for_function("() => activeChain === 'robinhood' && document.querySelector('#rhPlot svg')", timeout=20000)
+        await pg.wait_for_function("() => activeChain === 'robinhood' && document.querySelector('#plot svg')", timeout=20000)
         await pg.wait_for_timeout(500)
         await pg.screenshot(path=os.path.join(out, "rh_swap_mobile.png"))
         await pg.context.close()
@@ -25706,6 +26036,7 @@ async def check_rh_screens(p, errors):
         await pg.wait_for_timeout(1500)
         await pg.screenshot(path=os.path.join(out, "base_swap_desktop.png"))
         await pg.context.close()
+        env.gt = rh_gt_board()
         for vw, vh, name in ((1440, 900, "rh_flow_desktop.png"), (390, 844, "rh_flow_mobile.png")):
             pg = await env.open(hash_="#flow", vw=vw, vh=vh, init=[RH_CHAIN_JS])
             await fb_wait_rows(pg, 4)

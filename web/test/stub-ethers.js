@@ -93,14 +93,28 @@
   // باید با CHAIN.executor در index.html یکی باشد، وگرنه allowedRouter و feeBps
   // در استاب هرگز match نمی‌شوند و دروازه‌ی ۳ بی‌صدا از تست بیرون می‌ماند.
   const EXEC   = "0x5f3FCcfF3339DAa9eA7D2EBC3f77017D65467132".toLowerCase();
+  /* ۲۳ نوامبر — Robinhood Chain (4663). همان استاب، زنجیره‌ی دوم: اجراکننده‌ی RH (همان آدرسِ CREATE روی زنجیره‌ی دیگر)،
+     روتر/کوترِ Uniswap V3 و دو توکنِ RH. WETH/USDG در AMM همان «weth»/«usdc» هستند تا عمقِ استخرها یکی باشد.
+     ⚠️ سلکتورِ Slipstream/V4 عمداً روی RH کد ندارد: دروازه‌ی چهارم آن‌ها را خاموش نگه می‌دارد، فقط V3 زنده است. */
+  const RH_RPC   = "https://rpc.mainnet.chain.robinhood.com";
+  const RH_EXEC  = "0xC261E57cF5739A8a538884405600E4e45dF24802".toLowerCase();
+  const RH_V3_R  = "0xcaf681a66d020601342297493863e78c959e5cb2".toLowerCase();
+  const RH_V3_Q  = "0x33e885ed0ec9bf04ecfb19341582aadcb4c8a9e7".toLowerCase();
+  const RH_WETH  = "0x0Bd7D308f8E1639FAb988df18A8011f41EAcAD73".toLowerCase();
+  const RH_USDG  = "0x5fc5360d0400a0fd4f2af552add042d716f1d168".toLowerCase();
+  const RH_SYM   = { [RH_WETH]: "WETH", [RH_USDG]: "USDC" };      // نامِ AMM
+  const RH_TSYM  = { [RH_WETH]: "WETH", [RH_USDG]: "USDG" };      // نمادِ symbol()
+  V3_QUOTERS[RH_V3_Q] = "uni";
+  const isExec = t => t === EXEC || t === RH_EXEC;
+  const chainIdOf = url => (String(url).startsWith(RH_RPC) ? 4663 : 8453);
 
   /* ۱۱ نوامبر — توکن‌های دلخواهِ تست (Exit value): window.__STUB_TOKENS__ = { "<آدرسِ lower>": { sym, dec, usd, pools: { "uni-3000|weth": عمقِ دلاری, … } } }.
      کلیدِ pools همان «<venueKey>|<نمادِ طرفِ مقابل>» است (طرفِ مقابل weth یا usdc). توکنِ بی‌pool همان «مسیری نیست» است.
      ⚠️ فقط وقتی window.__STUB_TOKENS__ پر باشد اثر دارد؛ همه‌ی کاوشگرهای قدیمی بدونِ آن دقیقاً مثلِ قبل‌اند. */
   const custom = a => (window.__STUB_TOKENS__ || {})[String(a).toLowerCase()];
-  const symOf = a => (custom(a) ? "@" + String(a).toLowerCase() : null) || Object.keys(T).find(k => T[k].toLowerCase() === a.toLowerCase()) || "???";
-  const decOf = a => custom(a) ? custom(a).dec : DEC[String(a).toLowerCase()];
-  const usdOf = a => custom(a) ? custom(a).usd : USD[String(a).toLowerCase()];
+  const symOf = a => RH_SYM[String(a).toLowerCase()] || (custom(a) ? "@" + String(a).toLowerCase() : null) || Object.keys(T).find(k => T[k].toLowerCase() === a.toLowerCase()) || "???";
+  const decOf = a => RH_SYM[String(a).toLowerCase()] ? (RH_SYM[String(a).toLowerCase()] === "WETH" ? 18 : 6) : custom(a) ? custom(a).dec : DEC[String(a).toLowerCase()];
+  const usdOf = a => RH_SYM[String(a).toLowerCase()] ? (RH_SYM[String(a).toLowerCase()] === "WETH" ? 3000 : 1) : custom(a) ? custom(a).usd : USD[String(a).toLowerCase()];
   const pairKey = (a, b) => [symOf(a).toLowerCase(), symOf(b).toLowerCase()].sort().join("-");
 
   function venueKeyV3(prefix, fee) { return prefix + "-" + fee; }
@@ -166,6 +180,7 @@
     "0x698Cb2b6dd822994581fEa6eA4Fc755d1363A92F",   // Aerodrome Slipstream router
     "0xBE6D8f0d05cC4be24d5167a3eF062215bE6D18a5",   // Aerodrome Slipstream v1 router (old factory)
     "0x4752ba5DBc23f44D87826276BF6Fd6b1C372aD24",   // Uniswap V2 router (روی زنجیره کد دارد؛ لیست‌سفید نیست — پایین)
+    "0xcaf681a66d020601342297493863e78c959e5cb2",   // Robinhood: Uniswap V3 SwapRouter02
   ].map(a => a.toLowerCase());
   // کوترها کد جدا دارند: دروازه‌ی جدید سلکتور کوتر را در بایت‌کد می‌گردد،
   // پس اگر کد کوتر همان کد روتر باشد تست چیزی را ثابت نمی‌کند.
@@ -174,6 +189,7 @@
     "0xB048Bbc1Ee6b733FFfCFb9e9cEF7375518e25997",   // PancakeSwap V3 quoter
     "0x514c8B5f54112481E28028F1166Bd78501089259",   // Aerodrome Slipstream quoter
     "0x254cF9E1E6e233aa1AC962CB9B05b2cfeAaE15b0",   // Aerodrome Slipstream v1 quoter (old factory)
+    "0x33e885ed0ec9bf04ecfb19341582aadcb4c8a9e7",   // Robinhood: Uniswap V3 QuoterV2
   ].map(a => a.toLowerCase());
   const SWAP_SIGS = [
     "exactInputSingle((address,address,uint24,address,uint256,uint256,uint160))",
@@ -232,7 +248,7 @@
     stubAlive(this.url);
     if (method !== "eth_chainId") throw new Error("unexpected RPC method: " + method);
     const cfg = (window.__STUB_RPC__ || {})[this.url];
-    return "0x" + BigInt(cfg === undefined ? 8453 : cfg).toString(16);
+    return "0x" + BigInt(cfg === undefined ? chainIdOf(this.url) : cfg).toString(16);
   };
   JsonRpcProvider.prototype.getBalance = async function () {
     stubAlive(this.url);
@@ -256,7 +272,7 @@
     const cfg = (window.__STUB_RPC__ || {})[this.url];
     if (cfg === "unreachable")
       throw Object.assign(new Error("fetch failed"), { code: "NETWORK_ERROR" });
-    return { chainId: BigInt(cfg === undefined ? 8453 : cfg) };
+    return { chainId: BigInt(cfg === undefined ? chainIdOf(this.url) : cfg) };
   };
   JsonRpcProvider.prototype.getLogs = async function () {
     stubAlive(this.url);
@@ -341,19 +357,19 @@
           const key = target + "|" + JSON.stringify(c.args);
           return [true, pack(["0x" + fakeId(key).slice(2, 42)])];
         }
-        if (c.name === "symbol")   return [true, pack([custom(target) ? custom(target).sym : symOf(target)])];
+        if (c.name === "symbol")   return [true, pack([RH_TSYM[t] || (custom(target) ? custom(target).sym : symOf(target))])];
         if (c.name === "name")     return [true, pack(["Test Token"])];
         if (c.name === "decimals") return [true, pack([decOf(t) || 18])];
-        if (t === EXEC && c.name === "feeBps") return [true, pack([0n])];
+        if (isExec(t) && c.name === "feeBps") return [true, pack([0n])];
         // پیش‌فرض true برای همه (وضعیت زنده‌ی امروز)، ولی قابل بازنویسی
         // به‌ازای هر روتر — window.__STUB_ROUTER_ALLOWED__ = {"<router>": false}
         // — تا دروازه‌ی ۳ (allowListGate) بدون لیست‌سفید شدن یک روتر خاص
         // آزموده شود.
-        if (t === EXEC && c.name === "allowedAdapter") {
+        if (isExec(t) && c.name === "allowedAdapter") {
           const r = String(c.args[0]).toLowerCase();
           return [true, pack([!!(window.__STUB_ADAPTER_ALLOWED__ || {})[r]])];
         }
-        if (t === EXEC && c.name === "allowedRouter") {
+        if (isExec(t) && c.name === "allowedRouter") {
           const r = String(c.args[0]).toLowerCase();
           const ov = (window.__STUB_ROUTER_ALLOWED__ || {})[r];
           return [true, pack([ov === undefined ? r !== UNIV2_R : ov])];

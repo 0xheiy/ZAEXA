@@ -4,6 +4,8 @@
 
 Live contract: [`0x5f3FCcfF3339DAa9eA7D2EBC3f77017D65467132`](https://basescan.org/address/0x5f3fccff3339daa9ea7d2ebc3f77017d65467132#code) — source verified on BaseScan.
 
+Robinhood Chain contract: `0xC261E57cF5739A8a538884405600E4e45dF24802` (SwapExecutor v6), v4 adapter `0x4DF8c399DA86F9c51926ABB6E57abc90Ee678C3B`
+
 The single source of truth for this address is `CHAIN.executor` in `web/index.html`.
 The UI suite fails if any document here names a retired deployment as the live one.
 

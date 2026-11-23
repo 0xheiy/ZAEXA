@@ -232,7 +232,9 @@ echo " $EXPLORER/address/$EXEC"
 echo "==============================================================="
 echo "Saved to contracts/deployment_robinhood.txt - paste this whole block back into the chat."
 echo
-echo "Source verification on Blockscout (no API key needed):"
-echo "  FOUNDRY_PROFILE=executor forge verify-contract $EXEC src/SwapExecutor.sol:SwapExecutor --verifier blockscout --verifier-url $EXPLORER/api/ --chain-id $CHAIN_ID --watch --constructor-args \$(cast abi-encode 'c(address,address,uint256,address,address[])' $OWNER $FEE_RECIPIENT $FEE_BPS $WETH_ADDR '$FEE_TOKENS_ARG')"
-echo "  forge verify-contract $ADAPTER src/UniswapV4Adapter.sol:UniswapV4Adapter --verifier blockscout --verifier-url $EXPLORER/api/ --chain-id $CHAIN_ID --watch --constructor-args \$(cast abi-encode 'c(address,address,address)' $POOL_MANAGER $WETH_ADDR $EXEC)"
+echo "Source verification on Blockscout (no API key needed). Both profiles write to the same out/ folder,"
+echo "so each verify rebuilds with its own profile first. If Blockscout answers with a Cloudflare"
+echo "'Just a moment...' page, the CLI is blocked from this network - verify from a browser instead."
+echo "  FOUNDRY_PROFILE=executor forge build && FOUNDRY_PROFILE=executor forge verify-contract $EXEC src/SwapExecutor.sol:SwapExecutor --verifier blockscout --verifier-url $EXPLORER/api/ --chain-id $CHAIN_ID --watch --constructor-args \$(cast abi-encode 'c(address,address,uint256,address,address[])' $OWNER $FEE_RECIPIENT $FEE_BPS $WETH_ADDR '$FEE_TOKENS_ARG')"
+echo "  FOUNDRY_PROFILE=default forge build && FOUNDRY_PROFILE=default forge verify-contract $ADAPTER src/UniswapV4Adapter.sol:UniswapV4Adapter --verifier blockscout --verifier-url $EXPLORER/api/ --chain-id $CHAIN_ID --watch --constructor-args \$(cast abi-encode 'c(address,address,address)' $POOL_MANAGER $WETH_ADDR $EXEC)"
 [ $R_OK = 1 ] && [ $A_OK = 1 ] || exit 2
