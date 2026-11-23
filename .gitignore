@@ -23,3 +23,6 @@ drafts/
 
 # --- خروجیِ scripts/build_site.mjs (ساختِ کلادفلر) ---
 _site/
+**/deployment_robinhood.txt
+.rpc-robinhood
+contracts/.rpc-robinhood
