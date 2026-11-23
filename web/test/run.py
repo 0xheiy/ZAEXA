@@ -25660,12 +25660,12 @@ async def check_rh_swap_parity(p, errors):
         assert mob["swap"]["bottom"] <= mob["chart"]["top"] + 1 and mob["swap"]["top"] < mob["chart"]["top"], "[rh swap parity] on mobile the swap card sits above the chart: %s" % mob
         assert mob["over"] <= 0 and mob["swap"]["right"] <= 390 + 0.5 and mob["chart"]["right"] <= 390 + 0.5, "[rh swap parity] no horizontal overflow at 390px: %s" % mob
         await pg.context.close()
-        # شکستِ GT: همان متنِ شکستِ Base
+        # شکستِ GT: ۲۳ نوامبر [حسام] — متن دیگر مثلِ Base نیست، چون روی Robinhood کوت و مسیریابیِ زنده‌ای وجود ندارد
         env.gt = rh_gt_board(ohlcv=rh_swap_ohlcv(status=429))
         pg = await env.open(hash_="#swap", vw=1440, vh=900, init=[RH_CHAIN_JS], board=False)
         await pg.wait_for_function("() => document.getElementById('rhChartMsg').textContent.startsWith('Price history is unavailable')", timeout=20000)
         msg = await pg.evaluate("() => document.getElementById('rhChartMsg').textContent")
-        assert msg == "Price history is unavailable right now. Quotes and routing below are live and unaffected.", "[rh swap parity] failure text must be Base's: %r" % msg
+        assert msg == "Price history is unavailable right now.", "[rh swap parity] failure text must not claim live quotes (swaps are off on Robinhood): %r" % msg
         await pg.context.close()
         print("[rh swap parity] on Robinhood the Swap view is Base's hero row: #rhSwap is %dpx wide with the same left/top, radius, padding, background and shadow as Base's swap card, chart card on the left (WETH / USDG, 1H/1D/1W/1M) with the GT request on networks/robinhood/pools/%s priced in USD for WETH (1W asks hour/168); CTA disabled %r, inputs/token buttons/flip/star disabled, five facts rows with Protocol fee 0.00%%, no route bar or notices; ETH keeps Base's icon, USDG a letter avatar; 390px puts the swap card above the chart with no horizontal overflow; a failed fetch shows Base's failure text; zero forbidden requests" % (round(sw["w"]), RH_SWAP_POOL_T, RH_SWAP_CTA_T))
     finally:

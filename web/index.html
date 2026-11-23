@@ -10352,7 +10352,8 @@ async function rhSwapLoadChart(){
       return;
     }
     rhSwapState="failed";rhSwapFailedAt=Date.now();
-    chartMsg("Price history is unavailable right now. Quotes and routing below are live and unaffected.",els);
+    // ۲۳ نوامبر [حسام]: روی Robinhood سواپ خاموش است، پس جمله‌ی «کوت‌ها زنده‌اند» نادرست بود — همان متنِ صفحه‌ی توکنِ Robinhood
+    chartMsg("Price history is unavailable right now.",els);
   }
 }
 async function openRhTokenPage(addr){
