@@ -1856,11 +1856,31 @@ footer .fine{max-width:78ch;margin:46px 0 0;font-size:11.5px;color:var(--tx3);li
 html[data-rh] .rhNa{display:block}
 .rhNaHead{display:flex;align-items:center;gap:10px;padding:16px 16px 0}
 /* کارتِ اعلان عمداً کلاس‌های card/ttl ندارد تا هیچ انتخابگرِ موجودِ Base/Solana (و آزمون‌هایشان) آن را نگیرد */
+/* BADGES:CSS:BEGIN — ۲۴ نوامبر. بدونِ glow/halo (قاعده‌ی سایت): خودِ هنرِ مدال سایه‌ی خودش را دارد. */
+#badgesCard[hidden]{display:none!important}
+#badgesCard .bdgRow{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:14px;padding:6px 20px 20px}
+.bdgM{display:flex;flex-direction:column;align-items:center;gap:6px;padding:10px 6px;border-radius:16px;background:transparent;text-align:center;min-width:0;cursor:pointer}
+.bdgM:hover{background:var(--card2)}
+.bdgM img{width:120px;max-width:100%;height:auto;display:block}
+.bdgM .bdgN{font-size:13.5px;font-weight:660;color:var(--tx)}
+.bdgM .bdgS{font-size:12px;color:var(--tx3)}
+.bdgM.off img{filter:grayscale(1) brightness(.45);opacity:.7}
+#badgesBody .bdgMsg{padding:6px 20px 20px;color:var(--tx2);font-size:14px}
+.bdgModal{max-width:380px;max-height:90vh;overflow-y:auto;align-items:center;text-align:center;padding:22px 22px 20px}
+.bdgModal .bdgBig img{width:240px;max-width:100%;height:auto;display:block;margin:0 auto}
+.bdgModal.off .bdgBig img{filter:grayscale(1) brightness(.45);opacity:.7}
+.bdgModal h3{padding:12px 0 2px;justify-content:center;font-size:19px}
+.bdgModal p{margin:6px 0 0;color:var(--tx2);font-size:14px;line-height:1.5}
+.bdgModal .bdgStat{color:var(--tx);font-weight:600}
+.bdgModal .bdgRule{font-size:12.5px;color:var(--tx3)}
+.bdgModal .bdgAct{display:flex;gap:10px;justify-content:center;margin-top:16px;flex-wrap:wrap}
+@media(max-width:720px){#badgesCard .bdgRow{grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;padding:6px 12px 16px}.bdgM img{width:100px}}
+/* BADGES:CSS:END */
 .rhCard{background:var(--card);border-radius:22px;box-shadow:var(--sh);overflow:hidden}
 .rhNaTtl{font-size:15.5px;font-weight:660;color:var(--tx)}
 .rhNaHead [data-rhslot]{flex:none}
 .rhNaTx{margin:0;padding:14px 20px 20px;color:var(--tx2);font-size:14px;line-height:1.6}
-html[data-rh] #view-stocks>*:not(.rhNa),html[data-rh] #view-exit>*:not(.rhNa),html[data-rh] #view-folio>*:not(.rhNa),
+html[data-rh] #view-stocks>*:not(.rhNa),html[data-rh] #view-exit>*:not(.rhNa),html[data-rh] #view-folio>*:not(.rhNa):not(#badgesCard),
 html[data-rh] #view-swap>#rhHero{display:none!important}
 /* نوارِ Market watch فقط برای Base/Solana معنا دارد (ETH/AERO/cbBTC)؛ روی Robinhood بدونِ داده بود و «—» نشان می‌داد */
 html[data-rh] .marketWatch{display:none!important}
@@ -2522,6 +2542,12 @@ try{(function(){
       <button class="chip solid" data-act="connect">Connect wallet</button>
     </div></div>
   </section>
+  <!-- BADGES:HTML:BEGIN — نشان‌ها فقط برای کیفِ EVM وصل‌شده (Base یا Robinhood)؛ روی سولانا و بدونِ کیف پنهان -->
+  <section class="card" id="badgesCard" hidden>
+    <header><span class="ttl">Badges</span><span class="grow"></span><span class="ttl mono" id="badgesCount"></span></header>
+    <div id="badgesBody" aria-live="polite"></div>
+  </section>
+  <!-- BADGES:HTML:END -->
   <p style="padding:0 6px;color:var(--tx3);font-size:12px;margin:0">
     Balances are read straight from the chain and refresh on their own. Prices come from
     GeckoTerminal — a token with no price feed is listed but left out of the percentages.
@@ -2946,6 +2972,19 @@ try{(function(){
     <div class="tlist" id="tokList"></div>
   </div>
 </div>
+
+<!-- BADGES:MODAL:BEGIN — بیرون از هر .view (مثلِ #walletOv): .ov با position:fixed داخلِ نمای غیرفعال رندر نمی‌شود -->
+<div class="ov" id="badgeOv">
+  <div class="modal bdgModal" role="dialog" aria-modal="true" aria-labelledby="badgeMTitle">
+    <div class="bdgBig"><img id="badgeMImg" src="" alt="" width="240" height="259"></div>
+    <h3 id="badgeMTitle"></h3>
+    <p class="bdgStat" id="badgeMStat"></p>
+    <p id="badgeMHow"></p>
+    <p class="bdgRule" id="badgeMRule"></p>
+    <div class="bdgAct"><button class="chip solid" id="badgeShare" type="button">Share on X</button><button class="chip" id="badgeClose" type="button">Close</button></div>
+  </div>
+</div>
+<!-- BADGES:MODAL:END -->
 
 <!-- ۲۷ سپتامبر — بیرون از هر .view، عیناً مثلِ #walletOv/#tokOv بالا: این
      پیکرِ کیف‌پولِ سولانا هم روی صفحه‌ی توکن باز می‌شود هم روی /app، پس
@@ -8703,7 +8742,96 @@ function refreshSolanaViews(){
   if(view==="flow"&&!solViewJobs.flow&&!fbOn){paintFlowToken();renderFlow();}   // تابلو تازه‌سازیِ ۶۰ثانیه‌ی خودش را دارد
 }
 
+/* BADGES:BEGIN — ۲۴ نوامبر. نشان‌های Portfolio؛ فقط از GET /badges/<کیف>.json (خوانده‌شده از زنجیره توسط Worker).
+   هرگز از ذخیره‌ی مرورگر یا ادعای کاربر. هیچ رویدادِ آماریِ تازه‌ای نیست. شکستِ خواندن = «نمی‌شود خواند»، نه «هیچ نشانی نیست». */
+const BADGE_DEF=[
+  {id:"first",title:"First swap",how:"Make one swap of $5 or more through Zaexa, on Base or Robinhood Chain."},
+  {id:"base",title:"Base trader",how:"Swap $5 or more on Base through Zaexa."},
+  {id:"rh",title:"Robinhood trader",how:"Swap $5 or more on Robinhood Chain through Zaexa."},
+  {id:"stock",title:"Stock buyer",how:"Buy a tokenized stock, like TSLAc, through Zaexa \u2014 $5 or more."},
+  {id:"ten",title:"10 swaps",how:"Make ten swaps through Zaexa, each $5 or more."}
+];
+const BADGE_RULE="Counted when one side of the swap is ETH or a stablecoin and it is worth $5 or more. Read from the chain; updates within an hour.";
+const BADGE_MON=["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+let badgesSeq=0,badgesDoc=null,badgesAt=0,badgesOpenId=null,badgesLastFocus=null;
+function badgeDate(ts){const d=new Date(ts*1000);return BADGE_MON[d.getUTCMonth()]+" "+d.getUTCDate()+", "+d.getUTCFullYear();}
+function badgeView(id){
+  const def=BADGE_DEF.find(b=>b.id===id),b=badgesDoc&&badgesDoc.badges.find(x=>x.id===id);
+  if(!def||!b)return null;
+  const got=b.state==="got";
+  let status;
+  if(got)status=badgeDate(b.ts);
+  else if(b.state==="pending")status="Still reading history";
+  else if(id==="ten"&&badgesDoc.progress&&badgesDoc.progress.ten>0)status=badgesDoc.progress.ten+" of 10";
+  else status="Not yet";
+  return{def,got,status};
+}
+function badgesShareUrl(){
+  if(!badgesDoc)return null;
+  const got=BADGE_DEF.filter(d=>badgesDoc.badges.some(b=>b.id===d.id&&b.state==="got")).map(d=>d.title);
+  const text=got.length?"My Zaexa badges: "+got.join(" \u00b7 "):"Collecting Zaexa badges";
+  return "https://x.com/intent/tweet?text="+encodeURIComponent(text)+"&url="+encodeURIComponent("https://zaexa.com/badges/"+badgesDoc.address);
+}
+function badgesPaint(){
+  const body=$("badgesBody"),cnt=$("badgesCount");
+  if(!badgesDoc){return;}
+  const n=badgesDoc.badges.filter(b=>b.state==="got").length;
+  cnt.textContent=n+" of 5";
+  body.innerHTML='<div class="bdgRow">'+BADGE_DEF.map(d=>{
+    const v=badgeView(d.id);
+    return '<button type="button" class="bdgM'+(v.got?"":" off")+'" data-badge="'+d.id+'"><img src="/badges/art/'+d.id+'.svg" alt="" width="120" height="130" loading="lazy">'
+      +'<span class="bdgN">'+esc(d.title)+'</span><span class="bdgS">'+esc(v.status)+'</span></button>';
+  }).join("")+'</div>';
+}
+async function renderBadges(){
+  const card=$("badgesCard");
+  if(!card)return;
+  if(!account||activeChain==="solana"){card.hidden=true;badgesSeq++;return;}
+  card.hidden=false;
+  const addr=String(account).toLowerCase(),seq=++badgesSeq,body=$("badgesBody");
+  if(badgesDoc&&badgesDoc.address===addr&&Date.now()-badgesAt<60000){badgesPaint();return;}
+  if(!badgesDoc||badgesDoc.address!==addr){badgesDoc=null;$("badgesCount").textContent="";body.innerHTML='<div class="bdgMsg"><span class="spin"></span>Reading badges\u2026</div>';}
+  let doc=null;
+  try{
+    const r=await withTimeout(fetch(v4Origin()+"/badges/"+addr+".json",{headers:{accept:"application/json"}}),15000);
+    if(r.ok){const j=await r.json();if(j&&j.address===addr&&Array.isArray(j.badges)&&j.badges.length===5)doc=j;}
+  }catch(e){doc=null;}
+  if(seq!==badgesSeq)return;
+  if(!doc){
+    if(badgesDoc&&badgesDoc.address===addr){badgesPaint();return;}   // یک خوانشِ قبلیِ همین کیف هنوز درست است
+    badgesDoc=null;$("badgesCount").textContent="";
+    body.innerHTML='<div class="bdgMsg">Badges could not be read right now</div>';
+    return;
+  }
+  badgesDoc=doc;badgesAt=Date.now();badgesPaint();
+}
+function badgeOpen(id){
+  const v=badgeView(id);
+  if(!v)return;
+  badgesOpenId=id;badgesLastFocus=document.activeElement;
+  $("badgeMImg").src="/badges/art/"+id+".svg";
+  $("badgeMTitle").textContent=v.def.title;
+  $("badgeMStat").textContent=v.status;
+  $("badgeMHow").textContent=(v.got?"How you got it: ":"How to get it: ")+v.def.how;
+  $("badgeMRule").textContent=BADGE_RULE;
+  $("badgeOv").querySelector(".bdgModal").classList.toggle("off",!v.got);
+  $("badgeOv").classList.add("on");
+  $("badgeClose").focus();
+}
+function badgeClose(){
+  if(!$("badgeOv").classList.contains("on"))return;
+  $("badgeOv").classList.remove("on");badgesOpenId=null;
+  if(badgesLastFocus&&badgesLastFocus.focus)badgesLastFocus.focus();
+}
+$("badgesBody").addEventListener("click",e=>{const b=e.target.closest("[data-badge]");if(b)badgeOpen(b.dataset.badge);});
+$("badgeClose").onclick=badgeClose;
+$("badgeOv").addEventListener("click",e=>{if(e.target===$("badgeOv"))badgeClose();});
+document.addEventListener("keydown",e=>{if(e.key==="Escape"&&$("badgeOv").classList.contains("on")){e.preventDefault();badgeClose();}});
+$("badgeShare").onclick=()=>{const u=badgesShareUrl();if(u)window.open(u,"_blank","noopener,noreferrer");};
+/* BADGES:END */
+
 async function renderFolio(){
+  renderBadges();
   if(activeChain==="robinhood")return;   // Portfolio روی Robinhood فقط اعلان است
   if(activeChain==="solana")return solRunView("folio",renderSolFolio);
   const seq=++folioSeq;

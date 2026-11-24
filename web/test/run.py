@@ -8630,6 +8630,7 @@ async def check_uniswap_v4(pg):
 # فیکسچرها شکلِ واقعیِ GeckoTerminal را دارند: حجم/ذخیره/مقدار توکن *رشته*، شمارِ معاملات *عدد*.
 # =====================================================================
 import functools as _fbft, http.server as _fbhttp, threading as _fbth, json as _fbj
+import urllib.parse as _fburl
 from datetime import datetime as _fbdt, timedelta as _fbtd, timezone as _fbtz
 
 FB_BAD_RE = re.compile(r"NaN|undefined|\$0\.00|Infinity|\[object")
@@ -8687,6 +8688,7 @@ class FbEnv:
         self.pnl, self.pnl_calls, self.pnl_gate, self.pnl_hold, self.pnl_hold_w = None, [], asyncio.Event(), asyncio.Event(), None
         self.pnl_gate.set(); self.pnl_hold.set()
         self.pnl_inflight = self.pnl_max = 0
+        self.extra = None   # ۲۴ نوامبر: async (route, rest, url) -> True اگر خودش جواب داد (نشان‌ها: /badges/...)
 
     async def open(self, hash_="#flow", vw=1280, vh=900, scheme="dark", board=True, init=None, path="/app", hook=None):
         ctx = await self.b.new_context(viewport={"width": vw, "height": vh}, color_scheme=scheme)
@@ -8714,6 +8716,8 @@ class FbEnv:
                     if self.pairs["delay"]:
                         await asyncio.sleep(self.pairs["delay"])
                     return await ok(route, _fbj.dumps(self.pairs["body"]), self.pairs["status"])
+                if self.extra is not None and await self.extra(route, rest, u):
+                    return
                 if rest == "/ev":
                     return await route.fulfill(status=204, body="")
                 if rest.startswith("/vd/"):
@@ -10498,12 +10502,14 @@ async def main():
         await check_exit_value(p, errors)
         await check_exit_failures(p, errors)
         await check_exit_routes(p, errors)
+        await check_badges_card(p, errors)
         await check_exit_solana(p, errors)
         await check_exit_layout(p, errors)
         b = await p.chromium.launch()
         pg = await b.new_page(viewport={"width": 1240, "height": 1000}, color_scheme="dark")
         pg.on("console", on_console)
         pg.on("pageerror", lambda e: errors.append(f"PAGEERROR {e}"))
+        await bdg_stub(pg)   # ۲۴ نوامبر: Portfolio با کیفِ وصل‌شده کارتِ نشان‌ها را می‌خواند؛ بدونِ stub یک خطای شبکه در کنسولِ سوییت می‌ماند
         await pg.goto(URL)
         await pg.wait_for_timeout(900)
 
@@ -13952,6 +13958,8 @@ async def main():
         wp_errs = []
         wp = await b.new_page(viewport={"width": 1440, "height": 900}, color_scheme="light", device_scale_factor=1.5)
         wp.on("pageerror", lambda e: wp_errs.append(str(e)))
+        # ۲۴ نوامبر: باز شدنِ Portfolio با کیفِ وصل‌شده حالا کارتِ نشان‌ها را هم می‌خواند (GET /badges/<کیف>.json و /badges/art/*.svg)؛ بدونِ stub یک خطای شبکه در کنسولِ سوییت می‌ماند
+        await bdg_stub(wp)
         await wp.goto(URL); await wp.wait_for_timeout(800)
         await wp.evaluate("""() => { account = "0x8A0Dcb583C8CAdc481E34487c34f1B856fe97e23"; walletChainId = CHAIN.id; paintWallet(); }""")
         await wp.click("#connectBtn"); await wp.wait_for_timeout(250)
@@ -26425,6 +26433,260 @@ async def check_flow_head_mobile(p, errors):
                         assert abs(cur[case][el][k] - rc[k]) <= 1, "[flow head mobile] 1440 %s %s.%s changed: %s -> %s" % (case, el, k, rc[k], cur[case][el][k])
         assert not errs, "[flow head mobile] console errors: %s" % errs
         print("[flow head mobile] PASS - at 390/360 (Base and Robinhood, New tokens and Established) the network chip sits on the title row at the right, the subtitle fits two lines, the toggle follows right below, the two segmented groups share one row (left/right), nothing overflows; at 1440 the header rects equal the recorded desktop layout")
+    finally:
+        await b.close()
+        srv.shutdown()
+
+
+# ---------- ۲۴ نوامبر — نشان‌های Portfolio ----------
+BDG_ADDR = "0x1234567890abcdef1234567890abcdef12345678"
+BDG_IDS = ["first", "base", "rh", "stock", "ten"]
+BDG_TITLES = ["First swap", "Base trader", "Robinhood trader", "Stock buyer", "10 swaps"]
+BDG_BAN = re.compile(r"\b(points?|rewards?|eligible|airdrops?|seasons?|earn(?:s|ed|ing)?)\b", re.I)
+# ⚠️ استابِ ethers در هارنس اتصالِ «کامل» را تمام نمی‌کند (همان نکته‌ی autoconnect_page)؛ پس account مستقیم گذاشته می‌شود و renderFolio صدا زده می‌شود.
+# کارت فقط به account و activeChain نگاه می‌کند؛ سیمِ connect → refreshBalances → renderFolio را check_badges_static می‌سنجد.
+BDG_WALLET = "window.open = function(){ window.__opened = Array.prototype.slice.call(arguments); return null; };"
+
+
+def bdg_doc(got=(), ten=0, pending=(), ts=1795348800):
+    bs = []
+    for i in BDG_IDS:
+        if i in got:
+            bs.append({"id": i, "got": True, "state": "got", "ts": ts, "tx": "0x" + "ab" * 32, "chain": "rh" if i == "rh" else "base"})
+        else:
+            bs.append({"id": i, "got": False, "state": "pending" if i in pending else "none"})
+    return {"address": BDG_ADDR, "complete": {"base": True, "rh": True}, "n": len(got), "badges": bs, "progress": {"ten": ten}}
+
+
+async def bdg_stub(page):
+    """/badges/<کیف>.json و /badges/art/*.svg برای صفحه‌هایی که فقط ‌می‌خواهند کنسولشان تمیز بماند."""
+    def h(r):
+        u = r.request.url
+        m = re.search(r"/badges/(0x[0-9a-fA-F]{40})\.json", u)
+        if m:
+            return r.fulfill(status=200, content_type="application/json", body=_fbj.dumps({**bdg_doc(got=("first",), ten=1), "address": m.group(1).lower()}))
+        return r.fulfill(status=200, content_type="image/svg+xml", body="<svg xmlns='http://www.w3.org/2000/svg'/>")
+    await page.route("**/badges/**", h)
+
+
+BDG_JS = """() => { const q = s => [...document.querySelectorAll(s)];
+    const card = document.getElementById('badgesCard'), r = card.getBoundingClientRect();
+    const ms = q('#badgesCard .bdgM').map(m => { const b = m.getBoundingClientRect(), im = m.querySelector('img'), ib = im.getBoundingClientRect();
+        return { id: m.dataset.badge, name: m.querySelector('.bdgN').textContent, st: m.querySelector('.bdgS').textContent, off: m.classList.contains('off'),
+                 src: im.getAttribute('src'), top: Math.round(b.top), l: b.left, r: b.right, iw: ib.width, filter: getComputedStyle(im).filter, op: getComputedStyle(im).opacity }; });
+    return { hidden: card.hidden || getComputedStyle(card).display === 'none', count: document.getElementById('badgesCount').textContent, ms: ms,
+             body: document.getElementById('badgesBody').innerText, cardL: r.left, cardR: r.right, sw: document.documentElement.scrollWidth, iw: innerWidth }; }"""
+
+
+def check_badges_static():
+    src = open(os.path.join(HERE, "..", "index.html"), encoding="utf-8").read()
+    wk = open(os.path.join(HERE, "..", "..", "worker", "badges.js"), encoding="utf-8").read()
+    reg = {}
+    for tag, rx in (("js", r"/\* BADGES:BEGIN(.*?)/\* BADGES:END \*/"), ("css", r"/\* BADGES:CSS:BEGIN(.*?)/\* BADGES:CSS:END \*/"),
+                    ("html", r"<!-- BADGES:HTML:BEGIN(.*?)<!-- BADGES:HTML:END -->"), ("modal", r"<!-- BADGES:MODAL:BEGIN(.*?)<!-- BADGES:MODAL:END -->")):
+        m = re.search(rx, src, re.S)
+        assert m, "[badges static] the %s block markers are missing in web/index.html" % tag
+        reg[tag] = m.group(1)
+        assert not BDG_BAN.search(m.group(1)), "[badges static] banned word in the %s block: %s" % (tag, BDG_BAN.search(m.group(1)).group(0))
+    assert not BDG_BAN.search(wk), "[badges static] banned word in worker/badges.js: %s" % BDG_BAN.search(wk).group(0)
+    # ۱) فهرستِ سهام: Worker و اپ یکی‌اند
+    app = sorted(a.lower() for a in re.findall(r'\{symbol:"[A-Z]+c",name:"[^"]*",address:"(0x[0-9a-fA-F]{40})",decimals:8\}', src))
+    wkl = sorted(re.findall(r'"(0xb2[0-9a-f]{38})", // [A-Z]+c', wk))
+    assert len(app) == 13 and app == wkl, "[badges static] the 13 B20 stock addresses must be identical in web/index.html and worker/badges.js: %s vs %s" % (len(app), len(wkl))
+    assert "0xb20000000000000000000016e38fd364d271ba28" in wkl, "[badges static] ANTc must be in the list"
+    # ۲) عنوان‌ها، متنِ قاعده و how-to دقیقاً مطابقِ مالک
+    titles = re.findall(r'\{id:"(\w+)",title:"([^"]+)",how:"([^"]+)"\}', reg["js"])
+    assert [t[0] for t in titles] == BDG_IDS and [t[1] for t in titles] == BDG_TITLES, "[badges static] ids/titles: %s" % titles
+    how = {t[0]: t[2].replace("\\u2014", "\u2014") for t in titles}
+    assert how == {
+        "first": "Make one swap of $5 or more through Zaexa, on Base or Robinhood Chain.",
+        "base": "Swap $5 or more on Base through Zaexa.",
+        "rh": "Swap $5 or more on Robinhood Chain through Zaexa.",
+        "stock": "Buy a tokenized stock, like TSLAc, through Zaexa \u2014 $5 or more.",
+        "ten": "Make ten swaps through Zaexa, each $5 or more."}, "[badges static] how-to texts: %s" % how
+    assert 'const BADGE_RULE="Counted when one side of the swap is ETH or a stablecoin and it is worth $5 or more. Read from the chain; updates within an hour.";' in reg["js"], "[badges static] rule line"
+    # ۳) هیچ نامِ /ev تازه، هیچ localStorage برای نشان، هیچ glow
+    assert "localStorage" not in reg["js"] and "/ev" not in reg["js"] and "sendEv" not in reg["js"], "[badges static] badges never read localStorage nor emit /ev events"
+    assert not re.search(r"box-shadow[^;}]*(rgba?\(|#)[^;}]*\d+px\s+\d+px\s+[3-9]\d+px", reg["css"]) and "drop-shadow" not in reg["css"], "[badges static] no glow/halo in the badges CSS (the art carries its own shadow)"
+    assert "filter:grayscale(1) brightness(.45)" in reg["css"] and "opacity:.7" in reg["css"], "[badges static] locked medals: grayscale(1) brightness(.45) + opacity .7"
+    # ۴) CSP برای SVGهای هم‌مبدأ، و کارت روی Robinhood دیده می‌شود
+    hd = open(os.path.join(HERE, "..", "_headers"), encoding="utf-8").read()
+    assert re.search(r"img-src 'self' ", hd), "[badges static] _headers img-src must allow same-origin images (/badges/art/*.svg)"
+    assert re.search(r"async function renderFolio\(\)\{\s*renderBadges\(\);", src), "[badges static] renderFolio must start by calling renderBadges() (every account change reaches it through refreshBalances/handleAccountsChanged/disconnect)"
+    assert "#view-folio>*:not(.rhNa):not(#badgesCard)" in src, "[badges static] the Robinhood folio rule must keep #badgesCard visible"
+    # ۵) Worker: نه در sitemap، نه در robots، کرونِ دوم
+    idx = open(os.path.join(HERE, "..", "..", "worker", "index.js"), encoding="utf-8").read()
+    assert 'const staticPaths = ["/", "/app", "/pairs", "/api"];' in idx and "badges" not in re.search(r'const staticPaths = [^;]*;', idx).group(0), "[badges static] /badges is not a static sitemap path"
+    assert "badges" not in re.search(r"export const ROBOTS_DISALLOW = Object.freeze\(\[(.*?)\]\);", idx, re.S).group(1), "[badges static] /badges must stay crawlable so noindex can be read"
+    assert 'crons = ["17 * * * *", "47 * * * *"]' in open(os.path.join(HERE, "..", "..", "wrangler.toml"), encoding="utf-8").read(), "[badges static] both crons in wrangler.toml"
+    print("[badges static] app and worker agree on the 13 B20 stock addresses, ids/titles/how-to/rule texts are exactly the owner's, none of the banned words in the badge JS/CSS/HTML/modal or worker/badges.js, no localStorage/ev/glow, locked style, CSP allows same-origin art, /badges not in sitemap or robots, both crons")
+
+
+check_badges_static()
+
+
+async def check_badges_card(p, errors):
+    srv, origin = fb_serve()
+    b = await p.chromium.launch()
+    errs = []
+    try:
+        env = FbEnv(b, origin, errs)
+        state = {"doc": None, "status": 200, "calls": []}
+
+        async def extra(route, rest, u):
+            m = re.match(r"^/badges/(0x[0-9a-f]{40})\.json$", rest)
+            if m:
+                state["calls"].append(rest)
+                if state["status"] != 200:
+                    await route.fulfill(status=state["status"], content_type="application/json", body='{"error":"unavailable"}')
+                else:
+                    await route.fulfill(status=200, content_type="application/json", body=_fbj.dumps(state["doc"]))
+                return True
+            if rest.startswith("/badges/art/") and rest.endswith(".svg") and os.environ.get("ZX_SHOTS"):
+                # فقط برای عکسِ پیش‌نمایش: هنرِ واقعی از worker/badge-art.js
+                import re as _re, json as _json
+                _src = open(os.path.join(HERE, "..", "..", "worker", "badge-art.js"), encoding="utf-8").read()
+                _m = _re.search(r'\b' + rest[len("/badges/art/"):-4] + r'\s*:\s*("(?:[^"\\]|\\.)*")', _src, _re.S)
+                if _m:
+                    await route.fulfill(status=200, content_type="image/svg+xml", body=_json.loads(_m.group(1)))
+                    return True
+            if rest.startswith("/badges/art/") and rest.endswith(".svg"):
+                await route.fulfill(status=200, content_type="image/svg+xml", body='<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 216"><rect width="200" height="216" fill="#888"/></svg>')
+                return True
+            return False
+        env.extra = extra
+
+        async def open_folio(vw=1280, vh=900, hash_="#folio", init=None, connect=True):
+            state["calls"].clear()
+            pg = await env.open(hash_=hash_, vw=vw, vh=vh, init=[BDG_WALLET] + (init or []))
+            await pg.wait_for_function("() => typeof E !== 'undefined' && !!E && typeof renderFolio === 'function'", timeout=20000)
+            if connect:
+                await pg.evaluate("(a) => { account = a; renderFolio(); }", BDG_ADDR)
+                try:
+                    await pg.wait_for_selector("#badgesCard:not([hidden])", timeout=15000)
+                except Exception:
+                    raise AssertionError("[badges card] the card never appeared: %s" % errs[:5])
+            return pg
+
+        # 1) نشان‌ها: دو تا گرفته، ten با ۳ از ۱۰
+        state["doc"] = bdg_doc(got=("first", "base"), ten=3)
+        pg = await open_folio()
+        await pg.wait_for_selector("#badgesCard .bdgM", timeout=15000)
+        g = await pg.evaluate(BDG_JS)
+        assert state["calls"] == ["/badges/%s.json" % BDG_ADDR], "[badges card] one request, lower-case full address: %s" % state["calls"]
+        assert g["count"] == "2 of 5", "[badges card] the count on the right: %r" % g["count"]
+        assert [m["name"] for m in g["ms"]] == BDG_TITLES and [m["id"] for m in g["ms"]] == BDG_IDS, "[badges card] five medals in order: %s" % [m["name"] for m in g["ms"]]
+        assert [m["st"] for m in g["ms"]] == ["Nov 22, 2026", "Nov 22, 2026", "Not yet", "Not yet", "3 of 10"], "[badges card] date / Not yet / 3 of 10: %s" % [m["st"] for m in g["ms"]]
+        assert [m["off"] for m in g["ms"]] == [False, False, True, True, True], "[badges card] only the got medals are in colour"
+        assert all(m["src"] == "/badges/art/%s.svg" % m["id"] for m in g["ms"]), "[badges card] each medal is /badges/art/<id>.svg: %s" % [m["src"] for m in g["ms"]]
+        assert len({m["top"] for m in g["ms"]}) == 1 and all(100 <= m["iw"] <= 121 for m in g["ms"]), "[badges card] desktop: one row of ~120px medals: %s" % [(m["top"], m["iw"]) for m in g["ms"]]
+        off = g["ms"][2]
+        assert "grayscale(1)" in off["filter"] and "brightness(0.45)" in off["filter"] and off["op"] == "0.7", "[badges card] locked = grayscale(1) brightness(.45) + opacity .7: %s" % off
+        on = g["ms"][0]
+        assert on["filter"] == "none" and on["op"] == "1", "[badges card] a got medal has no filter: %s" % on
+        # مودال: ten (هنوز نه)
+        await pg.click('#badgesCard [data-badge="ten"]')
+        md = await pg.evaluate("""() => ({ on: document.getElementById('badgeOv').classList.contains('on'), t: document.getElementById('badgeMTitle').textContent,
+            st: document.getElementById('badgeMStat').textContent, how: document.getElementById('badgeMHow').textContent, rule: document.getElementById('badgeMRule').textContent,
+            iw: document.getElementById('badgeMImg').getBoundingClientRect().width, src: document.getElementById('badgeMImg').getAttribute('src'),
+            btn: [...document.querySelectorAll('#badgeOv button')].map(x => x.textContent) })""")
+        assert md["on"] and md["t"] == "10 swaps" and md["st"] == "3 of 10", "[badges modal] title/progress: %s" % md
+        assert md["how"] == "How to get it: Make ten swaps through Zaexa, each $5 or more.", "[badges modal] how-to for a not-yet badge: %r" % md["how"]
+        assert md["rule"] == "Counted when one side of the swap is ETH or a stablecoin and it is worth $5 or more. Read from the chain; updates within an hour.", "[badges modal] rule line: %r" % md["rule"]
+        assert 230 <= md["iw"] <= 241 and md["src"] == "/badges/art/ten.svg" and md["btn"] == ["Share on X", "Close"], "[badges modal] 240px medal and the two buttons: %s" % md
+        await pg.keyboard.press("Escape")
+        assert not await pg.evaluate("() => document.getElementById('badgeOv').classList.contains('on')"), "[badges modal] Escape closes"
+        await pg.click('#badgesCard [data-badge="base"]')
+        md = await pg.evaluate("() => ({ st: document.getElementById('badgeMStat').textContent, how: document.getElementById('badgeMHow').textContent })")
+        assert md == {"st": "Nov 22, 2026", "how": "How you got it: Swap $5 or more on Base through Zaexa."}, "[badges modal] a got badge: date and 'How you got it': %s" % md
+        await pg.mouse.click(5, 5)   # پس‌زمینه
+        assert not await pg.evaluate("() => document.getElementById('badgeOv').classList.contains('on')"), "[badges modal] a click on the backdrop closes"
+        await pg.click('#badgesCard [data-badge="first"]')
+        await pg.click("#badgeClose")
+        assert not await pg.evaluate("() => document.getElementById('badgeOv').classList.contains('on')"), "[badges modal] Close closes"
+        # اشتراک: نشانِ گرفته‌شده‌ها، نشانیِ کامل
+        await pg.click('#badgesCard [data-badge="first"]')
+        await pg.click("#badgeShare")
+        opened = await pg.evaluate("() => window.__opened")
+        q = lambda s: _fburl.quote(s, safe="!~*'()")
+        want = "https://x.com/intent/tweet?text=" + q("My Zaexa badges: First swap \u00b7 Base trader") + "&url=" + q("https://zaexa.com/badges/" + BDG_ADDR)
+        assert opened and opened[0] == want and opened[1] == "_blank", "[badges share] exact intent URL: %s vs %s" % (opened, want)
+        txt = await pg.evaluate("() => document.getElementById('badgesCard').innerText + ' ' + document.getElementById('badgeOv').innerText")
+        assert not BDG_BAN.search(txt) and not BDG_BAN.search(_fburl.unquote(want)), "[badges words] none of the banned words on screen or in the share text: %s" % txt
+        if os.environ.get("ZX_SHOTS"):
+            os.makedirs(os.environ["ZX_SHOTS"], exist_ok=True)
+            await pg.keyboard.press("Escape")
+            await pg.click('#badgesCard [data-badge="ten"]')
+            await pg.screenshot(path=os.path.join(os.environ["ZX_SHOTS"], "badges_modal.png"))
+            await pg.keyboard.press("Escape")
+            await pg.locator("#badgesCard").screenshot(path=os.path.join(os.environ["ZX_SHOTS"], "badges_card.png"))
+        await pg.context.close()
+        # 2) هیچ نشانی: متنِ اشتراکِ جایگزین
+        state["doc"] = bdg_doc(got=(), ten=0)
+        pg = await open_folio()
+        await pg.wait_for_selector("#badgesCard .bdgM", timeout=15000)
+        g = await pg.evaluate(BDG_JS)
+        assert g["count"] == "0 of 5" and all(m["st"] == "Not yet" and m["off"] for m in g["ms"]), "[badges card] nothing yet: %s" % g
+        await pg.click('#badgesCard [data-badge="first"]'); await pg.click("#badgeShare")
+        opened = await pg.evaluate("() => window.__opened")
+        assert opened[0] == "https://x.com/intent/tweet?text=" + q("Collecting Zaexa badges") + "&url=" + q("https://zaexa.com/badges/" + BDG_ADDR), "[badges share] no badge -> 'Collecting Zaexa badges': %s" % opened
+        await pg.context.close()
+        # 3) تاریخچه هنوز خوانده می‌شود: نه «Not yet»
+        state["doc"] = bdg_doc(got=("first", "base"), ten=2, pending=("rh", "stock", "ten"))
+        pg = await open_folio()
+        await pg.wait_for_selector("#badgesCard .bdgM", timeout=15000)
+        g = await pg.evaluate(BDG_JS)
+        assert [m["st"] for m in g["ms"]] == ["Nov 22, 2026", "Nov 22, 2026", "Still reading history", "Not yet" if False else "Still reading history", "Still reading history"], "[badges card] pending: %s" % [m["st"] for m in g["ms"]]
+        await pg.click('#badgesCard [data-badge="rh"]')
+        assert await pg.inner_text("#badgeMStat") == "Still reading history", "[badges modal] pending in the modal"
+        await pg.context.close()
+        # 4) خطا: هرگز «همه نگرفته» نشان نمی‌دهد
+        for label, st, doc in (("503", 503, None), ("bad shape", 200, {"badges": []}), ("wrong address", 200, {**bdg_doc(), "address": "0x" + "1" * 40})):
+            state["status"], state["doc"] = st, doc
+            pg = await open_folio()
+            await pg.wait_for_function("() => document.getElementById('badgesBody').innerText.includes('could not be read')", timeout=15000)
+            g = await pg.evaluate(BDG_JS)
+            assert g["body"].strip() == "Badges could not be read right now" and g["ms"] == [] and g["count"] == "", "[badges error] %s: only the error line, no medals, no count: %s" % (label, g)
+            await pg.context.close()
+        state["status"] = 200
+        # 5) موبایل: ۳+۲، بدونِ سرریز
+        state["doc"] = bdg_doc(got=("first", "base", "rh"), ten=7)
+        for vw in (390, 360):
+            pg = await open_folio(vw=vw, vh=800)
+            await pg.wait_for_selector("#badgesCard .bdgM", timeout=15000)
+            g = await pg.evaluate(BDG_JS)
+            tops = sorted({m["top"] for m in g["ms"]})
+            assert len(tops) == 2 and [sum(1 for m in g["ms"] if m["top"] == t) for t in tops] == [3, 2], "[badges mobile %d] 3+2 grid: %s" % (vw, [(m["top"], m["l"]) for m in g["ms"]])
+            assert g["sw"] <= g["iw"] and all(m["l"] >= g["cardL"] - 1 and m["r"] <= g["cardR"] + 1 for m in g["ms"]), "[badges mobile %d] fits the card and the page does not scroll sideways: %s" % (vw, g)
+            await pg.click('#badgesCard [data-badge="stock"]')
+            mg = await pg.evaluate("() => { const r = document.querySelector('#badgeOv .bdgModal').getBoundingClientRect(); return { l: r.left, r: r.right, sw: document.documentElement.scrollWidth, iw: innerWidth, b: r.bottom, ih: innerHeight }; }")
+            assert mg["l"] >= 0 and mg["r"] <= mg["iw"] and mg["sw"] <= mg["iw"] and mg["b"] <= mg["ih"], "[badges mobile %d] the modal fits the screen: %s" % (vw, mg)
+            await pg.context.close()
+        # 6) بدونِ کیف: کارت نیست و درخواستی نمی‌رود
+        state["calls"].clear()
+        pg = await open_folio(connect=False)
+        await pg.evaluate("() => renderFolio()")
+        await pg.wait_for_timeout(800)
+        assert await pg.evaluate("() => document.getElementById('badgesCard').hidden") and not state["calls"], "[badges card] no wallet: the card is hidden and nothing is requested: %s" % state["calls"]
+        await pg.context.close()
+        # 7) Robinhood: کارت دیده می‌شود (فقط اعلانِ Portfolio پنهان نمی‌کند)
+        state["doc"] = bdg_doc(got=("first", "rh"), ten=2)
+        try:
+            pg = await open_folio(hash_="#folio?chain=robinhood")
+            await pg.wait_for_selector("#badgesCard .bdgM", timeout=15000)
+            vis = await pg.evaluate("() => ({ rh: document.documentElement.hasAttribute('data-rh'), card: getComputedStyle(document.getElementById('badgesCard')).display, na: getComputedStyle(document.querySelector('#view-folio .rhNa')).display })")
+            assert vis["rh"] and vis["card"] != "none", "[badges card] Robinhood boot with a wallet shows the card next to the notice: %s" % vis
+            await pg.context.close()
+        except Exception as e:
+            raise AssertionError("[badges card] Robinhood boot: %s" % e)
+        # 8) سولانا: کارت نیست
+        pg = await open_folio(hash_="#folio?chain=solana", connect=False)
+        await pg.evaluate("(a) => { account = a; renderFolio(); }", BDG_ADDR)
+        await pg.wait_for_timeout(800)
+        assert await pg.evaluate("() => getComputedStyle(document.getElementById('badgesCard')).display") == "none", "[badges card] Solana: no badges card"
+        await pg.context.close()
+        assert not [e for e in errs if "PAGEERROR" in e], "[badges card] page errors: %s" % errs
+        print("[badges card] Portfolio card from /badges/<addr>.json: 5 medals in order with date / Not yet / 3 of 10 / Still reading history, locked = grayscale+brightness+opacity, modal (240px, how-to line, rule line, Share on X exact URL, Escape/backdrop/Close), fallback share text, error line never shows all-not-got, 3+2 grid at 390/360 without overflow, hidden without a wallet and on Solana, visible on Robinhood")
     finally:
         await b.close()
         srv.shutdown()

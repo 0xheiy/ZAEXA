@@ -47,6 +47,7 @@ import {
   finalizeBaseNosell, SELLERS_H1_VETO, sellersH1Of, sellersElsewhere24Of,
 } from "./index.js";
 import { isBaseWhy as isBaseWhyT } from "./verdict.js";
+import { runBadgesCases } from "./badges_cases.mjs";
 
 let fails = 0;
 function ok(cond, what) {
@@ -19996,5 +19997,8 @@ console.log(fails === 0
   }
   console.log("[fable 5-7] v4 'complete' is re-checked against today's pool list (new or undated v4 pool, full page, unreadable list -> unknown); Solana zero GT reserve never labels a pool empty; the Telegram bot uses publishGuardRow");
 }
+
+// ۲۴ نوامبر — نشان‌های Portfolio (worker/badges.js)
+await runBadgesCases(ok, worker);
 
 process.exit(fails === 0 ? 0 : 1);

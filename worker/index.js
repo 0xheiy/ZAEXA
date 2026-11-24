@@ -161,6 +161,7 @@ async function gtUpstream(rest, env, opts) {
 import { ogTags, ogTitle, pickTokenMeta, pickDsMeta, pickCmcMeta } from "./og.js";
 import { tokenSeo, ogGuarded } from "./tokseo.js";
 import { ogImageResponse } from "./og-image.js";
+import { badgesRoute, runBadgesPass, baseRpcList, BADGES_CRON } from "./badges.js";
 import { tokenCardPng, renderable, logoFromJpeg } from "./og-token.js";
 import { logoResponse } from "./logo-image.js";
 import { measureNearEmpty, VD_NEAR_EMPTY_RET_PCT, fetchVerdict, fetchCounterSell, poolDirectedProof, v4OneWayProof, oneWayCounterFor, VD_VENUES, VD_RPCS, VD_V4_STAGE_COUNTERS,
@@ -3750,6 +3751,17 @@ function reportBudgetLeft(meter) {
   return REPORT_SUBREQ_BUDGET - (meter.fetches + meter.cacheOps);
 }
 
+async function scheduledBadgesPass(env) {
+  try {
+    return await runBadgesPass(env, {
+      gt: (rest) => gtUpstream(rest, env).then((r) => r.res),
+      baseRpcs: baseRpcList(env, V4_LOG_RPCS),
+    });
+  } catch (e) {
+    return { error: true }; // کرون هرگز پرتاب نمی‌کند
+  }
+}
+
 async function scheduledReportPass(env, ctx, opts) {
   try {
     // بدونِ KV، حتی یک تماسِ بالادست هم روا نیست — همان گاردِ اولِ
@@ -5393,6 +5405,8 @@ export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
     if (url.pathname.startsWith("/v4/keys/")) return v4KeysRoute(request, url, env);
+    // ۲۴ نوامبر — نشان‌های Portfolio: /badges/<آدرس>(.json)، /badges/art/<id>.svg، /badges/og.png (هیچ فهرستی نیست)
+    if (url.pathname === "/badges" || url.pathname.startsWith("/badges/")) return badgesRoute(request, url, env);
     if (url.pathname === "/gt" || url.pathname.startsWith("/gt/"))
       return proxyGt(request, url, ctx, env);
     if (url.pathname === "/cmc/kline") return cmcKlineRoute(request, url, ctx, env);
@@ -5550,6 +5564,11 @@ export default {
      از نوشتنِ لاگ قطع شد — گذرهای ۱۹:۱۸ و ۲۰:۱۸ UTC هیچ رکوردی نداشتند.
      خودِ هندلرِ کرونِ ساعتی تا چند دقیقه زمانِ دیواری دارد. */
   async scheduled(event, env, ctx) {
+    // ۲۴ نوامبر: کرونِ دومِ نشان‌ها بودجه‌ی ساب‌ریکوئستِ جدا دارد؛ هر کرونِ دیگر دقیقاً همان گذرِ قبلی است.
+    if (event && event.cron === BADGES_CRON) {
+      await scheduledBadgesPass(env);
+      return;
+    }
     await scheduledReportPass(env, ctx);
   },
 };
@@ -5572,6 +5591,7 @@ export function _cgKeyDownUntil(set) { if (set !== undefined) cgKeyDownUntil = s
 export { VD_ADDR_RE };
 export { TOKEN_PAGE, solFetchVerdict };
 export { SITEMAP_TOKEN_PAGES, SITEMAP_TOKEN_CAP, sitemapResponse, buildSitemapTokens };
+export { scheduledBadgesPass };
 export { reportRoute, pairsRoute, scheduledReportPass, reportRunRoute, REPORT_RUN_MAX_TOKENS };
 export { makeSubMeter, meterKv, REPORT_SUBREQ_BUDGET, reportBudgetLeft };
 export { readV4Keys, readV4Entry, rpcCallBase, fetchV4Pools, storeV4Result, v4StoreTtl, runV4Index };
