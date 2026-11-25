@@ -10433,6 +10433,7 @@ async def main():
         await check_token_page_hash_links(p, errors)
         await check_live_strip(p, errors)
         await check_mobile_compact(p, errors)
+        await check_pools_fit(p, errors)
         await check_first_visit_tour(p, errors)
         await check_report_page(p, errors)
         await check_api_page(p, errors)
@@ -27460,6 +27461,151 @@ async def check_folio_side(p, errors):
     finally:
         await b.close()
         srv.shutdown()
+
+
+async def check_pools_fit(p, errors):
+    """[pools fit] — کارتِ «Every pool» روی دسکتاپ از پایینِ ستونِ کناری پایین‌تر نمی‌رود.
+
+    ≥۹۴۱px و وقتی فهرست بلندتر از ستونِ کناری است، poolsFit() به کارت کلاسِ poolsFit و max-height اینلاین
+    می‌دهد؛ کارت خودش اسکرول می‌خورد، هدرش چسبان است، و صفحه دراز نمی‌شود. حداقلِ سقف ۳۶۰px است. با
+    تازه‌شدنِ قیمت‌ها یا تغییرِ اندازه جای اسکرول نباید به بالا برگردد (حسابِ سقف بدونِ پاک‌کردنِ قبلی است).
+    روی سولانا کارتِ واقعی #solPools است (فرزندِ مستقیمِ ستون یک جایگاهِ display:contents است) و آن جایگاه
+    هرگز کلاس یا سقف نمی‌گیرد. زیر ۹۴۱px هیچ سقفی نیست."""
+    errs = []
+    b = await p.chromium.launch()
+    CARD = "#baseHeroRow .swapMarketCol>.swapPoolsCard"
+    ACT = "#baseHeroRow .swapActionsCol"
+    STATE = """([cs, as]) => { const c = document.querySelector(cs), a = document.querySelector(as), h = c.querySelector(':scope>header');
+        const cr = c.getBoundingClientRect();
+        return {fit: c.classList.contains('poolsFit'), mh: c.style.maxHeight, sh: c.scrollHeight, ch: c.clientHeight,
+                cb: cr.bottom, ab: a.getBoundingClientRect().bottom, oy: getComputedStyle(c).overflowY, first: c.firstElementChild === h,
+                pos: getComputedStyle(h).position, bg: getComputedStyle(h).backgroundColor, st: c.scrollTop}; }"""
+    HDR = """(cs) => { const c = document.querySelector(cs), h = c.querySelector(':scope>header');
+        return {top: h.getBoundingClientRect().top, ctop: c.getBoundingClientRect().top, st: c.scrollTop}; }"""
+    FRAMES = "() => new Promise(r => requestAnimationFrame(() => requestAnimationFrame(() => setTimeout(r, 60))))"
+
+    async def quote(pg, hash_=None):
+        await pg.goto(URL)
+        await pg.wait_for_timeout(900)
+        await pg.fill("#amtIn", "1000")
+        await pg.wait_for_function("() => document.getElementById('amtOut').value !== ''", timeout=20000)
+        await pg.wait_for_timeout(1500)
+        n = await pg.evaluate("() => document.querySelectorAll('#venueBody .vrow').length")
+        assert n >= 20, "[pools fit] the harness quote yields many venue rows (got %d)" % n
+
+    async def new(scheme, vw, vh):
+        pg = await b.new_page(viewport={"width": vw, "height": vh}, color_scheme=scheme)
+        pg.on("console", lambda m: m.type == "error" and errs.append(m.text))
+        pg.on("pageerror", lambda e: errs.append("PAGEERROR " + str(e)))
+        return pg
+
+    async def hold(pg, tag):
+        g = await pg.evaluate(STATE, [CARD, ACT])
+        assert g["fit"], tag + ": the market-column pools card has poolsFit: %s" % g
+        m = re.fullmatch(r"(\d+)px", g["mh"] or "")
+        assert m and int(m.group(1)) >= 360, tag + ": inline max-height is a px cap of at least 360: %s" % g
+        assert abs(g["cb"] - g["ab"]) <= 2, tag + ": card bottom within 2px of the actions column bottom: %s" % g
+        assert g["sh"] > g["ch"], tag + ": content is taller than the capped card: %s" % g
+        assert g["oy"] == "auto", tag + ": overflow-y is auto: %s" % g
+        assert g["first"] and g["pos"] == "sticky", tag + ": the first child header is position sticky: %s" % g
+        assert g["bg"] not in ("rgba(0, 0, 0, 0)", "transparent"), tag + ": sticky header has a solid background: %s" % g
+        await pg.evaluate("(cs) => { document.querySelector(cs).scrollTop = 400; }", CARD)
+        await pg.wait_for_timeout(150)
+        h = await pg.evaluate(HDR, CARD)
+        assert h["st"] > 0 and abs(h["top"] - h["ctop"]) <= 1, tag + ": scrolled header sticks to the card top: %s" % h
+        return g
+
+    try:
+        # ---- 1، 2، 3، 4، 10: روشن، Base ----
+        pg = await new("light", 1440, 1000)
+        await quote(pg)
+        g = await hold(pg, "[pools fit] 1440 light")
+        await pg.evaluate("(cs) => { document.querySelector(cs).scrollTop = 0; }", CARD)
+        # ۴: صفحه کوتاه‌تر می‌شود؛ بدونِ سقف به‌اندازه‌ی (scrollHeight - clientHeight) درازتر بود
+        cmp_ = await pg.evaluate("""(cs) => { const c = document.querySelector(cs), de = document.documentElement;
+            const capped = de.scrollHeight, mh = c.style.maxHeight; c.classList.remove('poolsFit'); c.style.maxHeight = '';
+            const free = de.scrollHeight; c.style.maxHeight = mh; c.classList.add('poolsFit'); return {capped, free}; }""", CARD)
+        extra = g["sh"] - g["ch"]
+        assert extra > 100 and cmp_["capped"] < cmp_["free"] and abs((cmp_["free"] - cmp_["capped"]) - extra) <= 20, (
+            "[pools fit] the cap makes the page shorter by the hidden part of the list (scrollHeight - clientHeight=%d): %s" % (extra, cmp_))
+        # ۳: جای اسکرول بعد از دوباره‌کشیدنِ ونیوها و تغییرِ اندازه می‌ماند
+        await pg.evaluate("(cs) => { document.querySelector(cs).scrollTop = 400; }", CARD)
+        await pg.evaluate("() => renderVenues(lastDirect, null)")
+        await pg.evaluate(FRAMES)
+        st = await pg.evaluate("(cs) => document.querySelector(cs).scrollTop", CARD)
+        assert st > 0, "[pools fit] scroll position kept after renderVenues re-render: %s" % st
+        await pg.evaluate("(cs) => { document.querySelector(cs).scrollTop = 400; }", CARD)
+        await pg.fill("#amtIn", "1000")
+        await pg.wait_for_timeout(1800)
+        st = await pg.evaluate("(cs) => document.querySelector(cs).scrollTop", CARD)
+        assert st > 0, "[pools fit] scroll position kept after the quote refreshes: %s" % st
+        await pg.evaluate("(cs) => { document.querySelector(cs).scrollTop = 400; }", CARD)
+        mh0 = await pg.evaluate("(cs) => document.querySelector(cs).style.maxHeight", CARD)
+        await pg.set_viewport_size({"width": 1460, "height": 1000})
+        await pg.evaluate(FRAMES)
+        s2 = await pg.evaluate(STATE, [CARD, ACT])
+        assert s2["fit"] and s2["st"] > 0 and (s2["st"] == 400 or s2["mh"] != mh0), (
+            "[pools fit] scroll position kept (exactly 400 unless the cap changed) after a resize: %s (cap before %s)" % (s2, mh0))
+        # ۱۰: بیکار = هیچ تغییری در style/class کارت (حلقه‌ی rAF نیست)
+        await pg.wait_for_timeout(500)
+        muts = await pg.evaluate("""(cs) => new Promise(r => { const c = document.querySelector(cs); let n = 0;
+            new MutationObserver(l => { n += l.length; }).observe(c, {attributes: true, attributeFilter: ['style', 'class']});
+            setTimeout(() => r(n), 1000); })""", CARD)
+        assert muts == 0, "[pools fit] the card's style/class do not mutate while idle (no rAF loop): %d" % muts
+        # ۶: ستونِ کناریِ کوتاه → کفِ ۳۶۰px
+        await pg.add_style_tag(content=".swapActionsCol>*{display:none!important}")
+        await pg.evaluate(FRAMES)
+        await pg.wait_for_timeout(200)
+        s6 = await pg.evaluate(STATE, [CARD, ACT])
+        assert s6["fit"] and s6["mh"] == "360px", "[pools fit] a short actions column leaves the 360px minimum: %s" % s6
+        await pg.close()
+
+        # ---- ۸: تاریک ----
+        pg = await new("dark", 1440, 1000)
+        await quote(pg)
+        await hold(pg, "[pools fit] 1440 dark")
+        await pg.close()
+
+        # ---- ۵: فهرستِ کوتاه (بدونِ مبلغ) سقف نمی‌گیرد ----
+        pg = await new("light", 1440, 1000)
+        await pg.goto(URL)
+        await pg.wait_for_timeout(1500)
+        s5 = await pg.evaluate(STATE, [CARD, ACT])
+        assert not s5["fit"] and s5["mh"] == "" and s5["sh"] <= s5["ch"] + 1, "[pools fit] no amount (short list) means no cap: %s" % s5
+        await pg.close()
+
+        # ---- ۷: موبایل ----
+        pg = await new("light", 390, 844)
+        await quote(pg)
+        await pg.click('.mTabs [data-mtab="pools"]')
+        await pg.wait_for_timeout(600)
+        mob = await pg.evaluate("() => [...document.querySelectorAll('.swapPoolsCard')].map(c => [c.classList.contains('poolsFit'), c.style.maxHeight])")
+        assert mob and all(not f and not m for f, m in mob), "[pools fit] 390px has no poolsFit and no max-height on any pools card (22 rows): %s" % mob
+        await pg.close()
+        assert not errs, "[pools fit] console errors: %s" % errs[:5]
+
+        # ---- ۹: سولانا (کارتِ واقعی #solPools؛ جایگاهِ display:contents هیچ‌وقت) ----
+        pg = await b.new_page(viewport={"width": 1440, "height": 1000})
+        await pg.goto(URL.replace("#swap", "#swap?chain=solana"))
+        await pg.wait_for_function("() => activeChain === 'solana' && !document.getElementById('solPools').hidden", timeout=20000)
+        await pg.wait_for_timeout(1200)
+        await pg.evaluate("""() => { const s = document.getElementById('solPools');
+            let h = '<header><span class="ttl">Venues for this swap</span></header>';
+            for (let i = 0; i < 40; i++) h += '<div class="vrow" style="height:40px">row ' + i + '</div>'; s.innerHTML = h; }""")
+        await pg.evaluate(FRAMES)
+        await pg.wait_for_timeout(300)
+        sol = await pg.evaluate("""() => { const c = document.getElementById('solPools'), slot = document.getElementById('appSolPoolsSlot'),
+            a = document.querySelector('#appSolHero .swapActionsCol');
+            return {fit: c.classList.contains('poolsFit'), mh: c.style.maxHeight, cb: c.getBoundingClientRect().bottom, ab: a.getBoundingClientRect().bottom,
+                    sh: c.scrollHeight, ch: c.clientHeight, slotFit: slot.classList.contains('poolsFit'), slotMh: slot.style.maxHeight,
+                    nested: slot.contains(c) && slot.parentElement.classList.contains('swapMarketCol')}; }""")
+        assert sol["nested"] and sol["fit"] and sol["mh"], "[pools fit] Solana: #solPools (nested in the market column slot) gets poolsFit and a max-height: %s" % sol
+        assert not sol["slotFit"] and not sol["slotMh"], "[pools fit] Solana: the display:contents slot never gets poolsFit or a max-height: %s" % sol
+        assert abs(sol["cb"] - sol["ab"]) <= 2 and sol["sh"] > sol["ch"], "[pools fit] Solana: #solPools bottom within 2px of the actions column bottom: %s" % sol
+        await pg.close()
+        print("[pools fit] 1440 light/dark: market-column pools card capped to the actions column bottom (inline max-height, bottoms within 2px, overflow auto, sticky solid header that stays at the card top), page shorter by the hidden part of the list, scroll kept after renderVenues, a quote refresh and a resize, no style/class mutation while idle, 360px minimum with a short actions column; no amount = no cap; 390px no cap on any pools card; Solana: #solPools capped and aligned, its slot untouched; no console errors")
+    finally:
+        await b.close()
 
 
 async def only(names):

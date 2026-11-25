@@ -1672,6 +1672,8 @@ footer .fine{max-width:78ch;margin:46px 0 0;font-size:11.5px;color:var(--tx3);li
 /* Each desktop column flows independently: a taller swap never leaves a hole
    between the chart and pools. Mobile retains swap → chart → pools → safety. */
 .swapColumn{display:flex;flex-direction:column;gap:18px;min-width:0}
+.swapPoolsCard.poolsFit{overflow-y:auto;overscroll-behavior:contain;scrollbar-width:thin}
+.swapPoolsCard.poolsFit>header:first-child{position:sticky;top:0;z-index:2;background:var(--card);padding-bottom:12px;box-shadow:0 1px 0 var(--line)}
 #baseSubRow,#appSolSubRow{display:none}
 #solStatusSlot:has(#solRouteBar[hidden]):has(#solNotices:empty){min-height:0;margin:0}
 @media(max-width:940px){
@@ -6620,6 +6622,38 @@ function mtabSafeSig(rep){
   return rep.findings.some(f=>f.level==="critical"||f.level==="high")?"bad":"ok";
 }
 prepareSwapColumns();
+/* ۲۵ نوامبر (حسام): روی دسکتاپ کارتِ «Every pool» از پایینِ ستونِ کناری (سواپ + Exit check)
+   پایین‌تر نمی‌رود؛ بلندتر شد، خودش اسکرول می‌خورد و صفحه را دراز نمی‌کند. حداقل ۳۶۰px تا با
+   ستونِ کناریِ کوتاه (Exit check خالی) فهرست له نشود. زیرِ ۹۴۱px (تب‌های موبایل) هیچ سقفی نیست. */
+const POOLS_FIT_MIN=360;
+function poolsFit(){
+  const desk=innerWidth>=941;
+  for(const col of document.querySelectorAll(".row.hero .swapMarketCol")){
+    const act=col.parentElement&&col.parentElement.querySelector(":scope>.swapActionsCol");
+    for(const slot of col.querySelectorAll(":scope>.swapPoolsCard")){
+      // سولانا: فرزندِ ستون یک جایگاهِ display:contents است و کارتِ واقعی (#solPools) داخلش
+      const c=getComputedStyle(slot).display==="contents"?slot.querySelector(".swapPoolsCard"):slot;
+      if(!c)continue;
+      // بدونِ پاک‌کردنِ سقف حساب می‌شود (scrollHeight با سقف هم ارتفاعِ کاملِ محتواست)، تا
+      // تازه‌شدنِ قیمت‌ها یا تغییرِ اندازه جای اسکرولِ کاربر را به بالا برنگرداند
+      const cap=(desk&&act&&c.offsetParent)?Math.max(POOLS_FIT_MIN,Math.floor(act.getBoundingClientRect().bottom-c.getBoundingClientRect().top)):0;
+      if(cap&&c.scrollHeight>cap+1){if(c.style.maxHeight!==cap+"px")c.style.maxHeight=cap+"px";c.classList.add("poolsFit");}
+      else if(c.classList.contains("poolsFit")||c.style.maxHeight){c.classList.remove("poolsFit");c.style.maxHeight="";}
+    }
+  }
+}
+let poolsFitQ=0;
+function poolsFitSoon(){if(poolsFitQ)return;poolsFitQ=requestAnimationFrame(()=>{poolsFitQ=0;try{poolsFit();}catch{}});}
+try{
+  if(window.ResizeObserver){
+    const ro=new ResizeObserver(poolsFitSoon);
+    for(const el of document.querySelectorAll(".row.hero .swapActionsCol, .row.hero .swapActionsCol>*, .row.hero .swapMarketCol>*, #solPools"))ro.observe(el);
+    // محتوای کارتِ استخرها عوض می‌شود ولی خودِ کارت (با سقف) هم‌اندازه می‌ماند؛ پس فرزندانش را هم می‌پاییم
+    const mo=new MutationObserver(poolsFitSoon);
+    for(const c of document.querySelectorAll(".row.hero .swapMarketCol>.swapPoolsCard"))mo.observe(c,{childList:true,subtree:true,attributes:true,attributeFilter:["hidden"]});
+  }
+  addEventListener("resize",poolsFitSoon);
+}catch{}
 mtabInit();
 let solAppDefaultFailedAt=0;
 let solAppDefaulted=false,solAppDefaultState="idle";   // idle|loading|done|failed
