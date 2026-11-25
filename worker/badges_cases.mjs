@@ -1,5 +1,6 @@
 /* کاوشگرهای نشان‌ها (worker/badges.js) — از worker/test.mjs صدا زده می‌شود (runBadgesCases(ok, worker)).
    بدونِ شبکه: fetch و KV جعلی. هر رفتار یک کاوشگر دارد؛ شکستنِ عمدی با ZX_BADGES_BREAK=<نام> (فقط برای دیدنِ قرمزشدن). */
+import crypto from "node:crypto";
 import fs from "node:fs";
 import {
   TOPIC0_V5, TOPIC0_V6, SIG_V5, SIG_V6, BASE_STOCKS, RH_STOCKS, RH_STOCK_SYMBOLS, REF_MAGIC, parseRefFromInput, BADGE_IDS, BADGE_TITLES, BADGE_CHAINS, BADGES_RPC_MAX,
@@ -469,8 +470,9 @@ export async function runBadgesCases(ok, worker) {
   // ---------- [badges stock rh] ----------
   {
     ok(RH_STOCKS.length === 205 && new Set(RH_STOCKS).size === 205 && RH_STOCKS.every((a) => /^0x[0-9a-f]{40}$/.test(a)) && RH_STOCK_SYMBOLS.length === 205, "[badges stock rh] 205 distinct lowercase official addresses with a parallel symbol list");
-    const fileLines = fs.readFileSync("/home/claude/specs/rh_stocks_all.txt", "utf8").trim().split("\n").map((l) => l.trim().split(/\s+/));
-    ok(fileLines.every(([sy, a], i) => RH_STOCK_SYMBOLS[i] === sy && RH_STOCKS[i] === a.toLowerCase()), "[badges stock rh] the list equals rh_stocks_all.txt line by line");
+    // اثرِ انگشتِ فهرستِ رسمیِ ۲۰۵ سهم (نماد و آدرس، خط به خط) — بدون وابستگی به فایلی بیرون از مخزن
+    const listHash = crypto.createHash("sha256").update(RH_STOCK_SYMBOLS.map((sy, i) => sy + " " + RH_STOCKS[i]).join("\n")).digest("hex");
+    ok(listHash === "4ed8c37ab79ac325ec019ea0ea519b3759f6dd4a65db66228af72f221ebc4608", "[badges stock rh] the list matches the official 205-line docs list (sha256 fingerprint)");
     const r = emptyUser();
     applyCounted(r, "rh", "0x01", 0, 10, RH_STOCKS[7].toUpperCase().replace("0X", "0x"));
     ok(r.stock && r.stock.c === "rh", "[badges stock rh] an RH swap whose tokenOut is in RH_STOCKS gets stock (case-insensitive)");
@@ -618,6 +620,6 @@ export async function runBadgesCases(ok, worker) {
   console.log("[ref parse] referrer read from tx input: blob = 20-byte address + 5a585201, with or without the ERC-8021 builder suffix (stripped by its declared length); garbage, too short, wrong magic, zero address, overrunning suffix -> null; uppercase -> lowercase; never throws");
   console.log("[ref index] first counted swap only ($5+, one tx lookup before applyCounted, failure = Unknown + clean replay with exactly one attribution); tx.to must be the emitting executor, tx.from the user, no self-invite, no-ref first swap closes the door; 10 friends by time, 11th ignored, same friend once, under-$5 swap makes no lookup");
   console.log("[ref privacy] badgesDoc and /badges pages of a referrer and a friend contain neither address of the other and no refs/refBy field");
-  console.log("[badges stock rh] 205 official Robinhood stock tokens equal rh_stocks_all.txt; an RH swap into one gives stock, any other RH token does not, Base rule unchanged");
+  console.log("[badges stock rh] 205 official Robinhood stock tokens match the docs list fingerprint; an RH swap into one gives stock, any other RH token does not, Base rule unchanged");
   console.log("[badges] topic0 from signatures (and from SwapExecutor.sol), v5/v6 decode, usd rule (stable 6dp, ETH x daily close, >= $5, neither side not counted), derivation (first/base/rh/stock/ten/ref1/ref10, dedupe, watermark), unknown is never no (RPC failure, unknown price, missing timestamp, range errors), 20-call budget, Robinhood resumable start search, /badges json+page+art+og (noindex, validation, pending, no enumeration), sitemap/robots, banned words, B20 parity, two-cron dispatch");
 }
