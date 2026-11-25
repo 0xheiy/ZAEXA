@@ -1856,25 +1856,61 @@ footer .fine{max-width:78ch;margin:46px 0 0;font-size:11.5px;color:var(--tx3);li
 html[data-rh] .rhNa{display:block}
 .rhNaHead{display:flex;align-items:center;gap:10px;padding:16px 16px 0}
 /* کارتِ اعلان عمداً کلاس‌های card/ttl ندارد تا هیچ انتخابگرِ موجودِ Base/Solana (و آزمون‌هایشان) آن را نگیرد */
-/* BADGES:CSS:BEGIN — ۲۴ نوامبر. بدونِ glow/halo (قاعده‌ی سایت): خودِ هنرِ مدال سایه‌ی خودش را دارد. */
+/* BADGES:CSS:BEGIN — ۲۴ نوامبر. جز مودالِ نشان، بدونِ glow/halo (قاعده‌ی سایت): خودِ هنرِ مدال سایه‌ی خودش را دارد. */
 #badgesCard[hidden]{display:none!important}
-#badgesCard .bdgRow{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:14px;padding:6px 20px 20px}
-.bdgM{display:flex;flex-direction:column;align-items:center;gap:6px;padding:10px 6px;border-radius:16px;background:transparent;text-align:center;min-width:0;cursor:pointer}
-.bdgM:hover{background:var(--card2)}
-.bdgM img{width:120px;max-width:100%;height:auto;display:block}
-.bdgM .bdgN{font-size:13.5px;font-weight:660;color:var(--tx)}
-.bdgM .bdgS{font-size:12px;color:var(--tx3)}
-.bdgM.off img{filter:grayscale(1) brightness(.45);opacity:.7}
 #badgesBody .bdgMsg{padding:6px 20px 20px;color:var(--tx2);font-size:14px}
-.bdgModal{max-width:380px;max-height:90vh;overflow-y:auto;align-items:center;text-align:center;padding:22px 22px 20px}
-.bdgModal .bdgBig img{width:240px;max-width:100%;height:auto;display:block;margin:0 auto}
-.bdgModal.off .bdgBig img{filter:grayscale(1) brightness(.45);opacity:.7}
-.bdgModal h3{padding:12px 0 2px;justify-content:center;font-size:19px}
-.bdgModal p{margin:6px 0 0;color:var(--tx2);font-size:14px;line-height:1.5}
-.bdgModal .bdgStat{color:var(--tx);font-weight:600}
-.bdgModal .bdgRule{font-size:12.5px;color:var(--tx3)}
-.bdgModal .bdgAct{display:flex;gap:10px;justify-content:center;margin-top:16px;flex-wrap:wrap}
-@media(max-width:720px){#badgesCard .bdgRow{grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;padding:6px 12px 16px}.bdgM img{width:100px}}
+.bdgGrid{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:14px;padding:6px 20px 20px}
+.bdgC{all:unset;box-sizing:border-box;cursor:pointer;display:flex;flex-direction:column;background:var(--card2);border:1px solid var(--line);border-radius:18px;padding:14px 14px 12px;min-width:0;transition:transform .2s}
+.bdgC:hover{transform:translateY(-2px)}
+.bdgC:focus-visible{outline:2px solid var(--acc);outline-offset:2px}
+.bdgArt img{display:block;width:78%;height:auto;margin:2px auto 10px}
+.bdgN{font-size:14.5px;font-weight:600;color:var(--tx);margin-bottom:5px}
+.bdgC:not(.got) .bdgN{color:var(--tx2)}
+.bdgH{font-size:12.5px;line-height:1.5;color:var(--tx2);flex:1}
+.bdgS{margin-top:10px;padding-top:9px;border-top:1px solid var(--line);font-size:12px;color:var(--tx3);display:flex;align-items:center;gap:8px}
+.bdgC.got .bdgS{color:var(--tx);display:block}.bdgS b{white-space:nowrap}
+.bdgBar{flex:1;height:4px;border-radius:9px;background:var(--bg);overflow:hidden;box-shadow:inset 1px 1px 2px var(--soft-lo)}
+.bdgBar b{display:block;height:100%;background:var(--grad)}
+@media(max-width:960px){.bdgGrid{grid-template-columns:repeat(3,minmax(0,1fr))}}
+@media(max-width:600px){.bdgGrid{grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;padding:6px 12px 16px}}
+/* مودالِ نشان */
+#badgeOv{align-items:center;padding:24px 16px}
+.bdgModal{position:relative;width:min(420px,92vw);max-width:420px;max-height:92vh;overflow-y:auto;overflow-x:hidden;padding:26px 26px 22px;text-align:center;border-radius:26px}
+.bdgModal [hidden]{display:none!important}
+.bdgX{position:absolute;top:14px;right:14px;z-index:3;width:34px;height:34px;border-radius:50%;border:1px solid var(--line);background:var(--bg);color:var(--tx2);font-size:16px;cursor:pointer;box-shadow:inset 2px 2px 5px var(--soft-lo),inset -2px -2px 5px var(--soft-hi)}
+.bdgLab,.bdgModal h3,.bdgDate,.bdgRev{position:relative;z-index:2}
+.bdgLab{font-size:11px;letter-spacing:.16em;color:var(--tx3);font-weight:600;text-align:left}
+.bdgModal h3{font-size:30px;font-weight:700;margin:6px 0 2px;text-align:left;letter-spacing:-.01em;padding:0;display:block}
+.bdgDate{font-size:13px;color:var(--tx3);text-align:left}
+.bdgStage{position:relative;width:230px;height:230px;margin:18px auto 10px;perspective:800px;flex:none}
+.bdgStage .bdgB{position:relative;z-index:1;width:100%;height:100%;transform-style:preserve-3d}
+.bdgStage .bdgB>svg,.bdgStage .bdgB>img{width:100%;height:100%;display:block}
+.bdgModal p{margin:6px 0 0;color:var(--tx2);font-size:13.5px;line-height:1.55}
+.bdgRule{font-size:12px!important;color:var(--tx3)!important}
+.bdgWho{display:inline-block;font-size:12px;color:var(--tx3);padding:5px 11px;border-radius:999px;background:var(--bg);box-shadow:inset 2px 2px 5px var(--soft-lo),inset -2px -2px 5px var(--soft-hi);margin:14px 0 16px}
+.bdgAct{display:flex;flex-direction:column;gap:10px}.bdgAct>button{width:100%;box-sizing:border-box;justify-content:center;text-align:center;margin:0}
+/* ⚠️ قاعده‌ی سایت «بدونِ glow/halo» است؛ پرتو و هاله‌ی این مودال استثنای صریحِ مالک است (حسام، ۲۴ نوامبر ۲۰۲۶) و جای دیگری مجاز نیست. */
+.bdgBeams{position:absolute;inset:0;pointer-events:none;opacity:0;overflow:hidden;border-radius:inherit}
+.bdgBeams i{position:absolute;top:-40px;width:110px;height:520px;transform-origin:50% 0;filter:blur(14px);background:linear-gradient(180deg,var(--c1),transparent 78%);opacity:.32;mix-blend-mode:screen}
+.bdgBeams i:nth-child(1){left:12%;transform:rotate(-24deg);animation:bdgSway1 6s ease-in-out infinite}
+.bdgBeams i:nth-child(2){left:calc(50% - 55px);background:linear-gradient(180deg,var(--c2),transparent 80%);opacity:.26;animation:bdgSway2 7s ease-in-out infinite}
+.bdgBeams i:nth-child(3){right:12%;transform:rotate(24deg);animation:bdgSway3 6.5s ease-in-out infinite}
+.bdgHalo{position:absolute;left:50%;top:50%;width:300px;height:300px;margin:-150px 0 0 -150px;border-radius:50%;background:radial-gradient(circle,var(--c1) 0%,var(--c2) 30%,transparent 66%);opacity:0;filter:blur(24px);pointer-events:none}
+.bdgPt{position:absolute;left:50%;top:55%;width:5px;height:2px;border-radius:2px;opacity:0}
+.bdgModal.cel .bdgBeams{animation:bdgFade .9s .35s ease forwards}
+.bdgModal.cel .bdgHalo{animation:bdgHalo 1.4s .7s ease forwards}
+.bdgModal.cel .bdgB{animation:bdgFlip 1.1s cubic-bezier(.2,.8,.2,1) both}
+.bdgModal.cel .lt{stroke-dasharray:1;stroke-dashoffset:1;animation:bdgDraw 1.3s .75s ease-out forwards}
+.bdgModal.cel .gl{opacity:0;animation:bdgFade .5s .6s ease forwards}
+.bdgModal.cel .bdgPt{animation:bdgBurst 1.6s cubic-bezier(.15,.7,.3,1) forwards}
+.bdgModal.cel .bdgRev>*{opacity:0;transform:translateY(8px);animation:bdgUp .45s ease forwards}
+.bdgModal.cel .bdgRev>*:nth-child(1){animation-delay:.9s}.bdgModal.cel .bdgRev>*:nth-child(2){animation-delay:.95s}.bdgModal.cel .bdgRev>*:nth-child(3){animation-delay:1s}.bdgModal.cel .bdgRev>*:nth-child(4){animation-delay:1.1s}
+@keyframes bdgFlip{0%{transform:scale(.55) rotateY(-160deg);opacity:0}55%{opacity:1}100%{transform:none}}
+@keyframes bdgDraw{to{stroke-dashoffset:0}} @keyframes bdgFade{to{opacity:1}} @keyframes bdgUp{to{opacity:1;transform:none}}
+@keyframes bdgBurst{0%{opacity:0;transform:translate(-50%,-50%)}15%{opacity:1}100%{opacity:0;transform:translate(var(--dx),var(--dy)) rotate(var(--r))}}
+@keyframes bdgHalo{0%{opacity:0;transform:scale(.6)}40%{opacity:.55}100%{opacity:.28;transform:none}}
+@keyframes bdgSway1{50%{transform:rotate(-17deg)}} @keyframes bdgSway2{50%{transform:rotate(5deg)}} @keyframes bdgSway3{50%{transform:rotate(17deg)}}
+@media(prefers-reduced-motion:reduce){.bdgModal.cel .bdgB,.bdgModal.cel .bdgPt,.bdgModal.cel .lt,.bdgModal.cel .gl,.bdgModal.cel .bdgRev>*,.bdgBeams i{animation:none!important}.bdgModal.cel .lt{stroke-dashoffset:0}.bdgModal.cel .gl,.bdgModal.cel .bdgRev>*{opacity:1;transform:none}.bdgModal.cel .bdgBeams{animation:none;opacity:1}.bdgModal.cel .bdgHalo{animation:none;opacity:.28}}
 /* BADGES:CSS:END */
 .rhCard{background:var(--card);border-radius:22px;box-shadow:var(--sh);overflow:hidden}
 .rhNaTtl{font-size:15.5px;font-weight:660;color:var(--tx)}
@@ -2976,12 +3012,18 @@ try{(function(){
 <!-- BADGES:MODAL:BEGIN — بیرون از هر .view (مثلِ #walletOv): .ov با position:fixed داخلِ نمای غیرفعال رندر نمی‌شود -->
 <div class="ov" id="badgeOv">
   <div class="modal bdgModal" role="dialog" aria-modal="true" aria-labelledby="badgeMTitle">
-    <div class="bdgBig"><img id="badgeMImg" src="" alt="" width="240" height="259"></div>
+    <div class="bdgBeams" aria-hidden="true"><i></i><i></i><i></i></div>
+    <button class="bdgX" id="badgeClose" type="button" aria-label="Close">&times;</button>
+    <div class="bdgLab" id="badgeMLab"></div>
     <h3 id="badgeMTitle"></h3>
-    <p class="bdgStat" id="badgeMStat"></p>
-    <p id="badgeMHow"></p>
-    <p class="bdgRule" id="badgeMRule"></p>
-    <div class="bdgAct"><button class="chip solid" id="badgeShare" type="button">Share on X</button><button class="chip" id="badgeClose" type="button">Close</button></div>
+    <div class="bdgDate" id="badgeMStat"></div>
+    <div class="bdgStage" id="badgeMStage"></div>
+    <div class="bdgRev">
+      <p id="badgeMHow"></p>
+      <p class="bdgRule" id="badgeMRule"></p>
+      <div><span class="bdgWho mono" id="badgeMWho"></span></div>
+      <div class="bdgAct"><button class="cta" id="badgeShare" type="button">Share on X</button><button class="chip" id="badgeCopy" type="button">Copy link</button></div>
+    </div>
   </div>
 </div>
 <!-- BADGES:MODAL:END -->
@@ -8744,16 +8786,19 @@ function refreshSolanaViews(){
 
 /* BADGES:BEGIN — ۲۴ نوامبر. نشان‌های Portfolio؛ فقط از GET /badges/<کیف>.json (خوانده‌شده از زنجیره توسط Worker).
    هرگز از ذخیره‌ی مرورگر یا ادعای کاربر. هیچ رویدادِ آماریِ تازه‌ای نیست. شکستِ خواندن = «نمی‌شود خواند»، نه «هیچ نشانی نیست». */
+const BADGE_ART_V="2";
+const BADGE_COL={first:["#22EFF6","#C56CF5"],base:["#4f8cff","#9fc4ff"],rh:["#3ee08f","#c7f36b"],stock:["#ffcf6b","#ff8a5c"],ten:["#c56cf5","#ff7ad9"]};
 const BADGE_DEF=[
-  {id:"first",title:"First swap",how:"Make one swap of $5 or more through Zaexa, on Base or Robinhood Chain."},
-  {id:"base",title:"Base trader",how:"Swap $5 or more on Base through Zaexa."},
-  {id:"rh",title:"Robinhood trader",how:"Swap $5 or more on Robinhood Chain through Zaexa."},
-  {id:"stock",title:"Stock buyer",how:"Buy a tokenized stock, like TSLAc, through Zaexa \u2014 $5 or more."},
-  {id:"ten",title:"10 swaps",how:"Make ten swaps through Zaexa, each $5 or more."}
+  {id:"first",title:"First swap",how:"Make one swap of $5 or more through Zaexa, on Base or Robinhood Chain.",got:"making your first swap of $5 or more through Zaexa."},
+  {id:"base",title:"Base trader",how:"Swap $5 or more on Base through Zaexa.",got:"swapping $5 or more on Base through Zaexa."},
+  {id:"rh",title:"Robinhood trader",how:"Swap $5 or more on Robinhood Chain through Zaexa.",got:"swapping $5 or more on Robinhood Chain through Zaexa."},
+  {id:"stock",title:"Stock buyer",how:"Buy a tokenized stock, like TSLAc, through Zaexa — $5 or more.",got:"buying a tokenized stock through Zaexa."},
+  {id:"ten",title:"10 swaps",how:"Make ten swaps through Zaexa, each $5 or more.",got:"making ten swaps of $5 or more through Zaexa."}
 ];
 const BADGE_RULE="Counted when one side of the swap is ETH or a stablecoin and it is worth $5 or more. Read from the chain; updates within an hour.";
 const BADGE_MON=["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
-let badgesSeq=0,badgesDoc=null,badgesAt=0,badgesOpenId=null,badgesLastFocus=null;
+let badgesSeq=0,badgesDoc=null,badgesAt=0,badgesOpenId=null,badgesLastFocus=null,badgesOpenSeq=0,badgesQueue=[];
+const badgesArtCache=new Map();
 function badgeDate(ts){const d=new Date(ts*1000);return BADGE_MON[d.getUTCMonth()]+" "+d.getUTCDate()+", "+d.getUTCFullYear();}
 function badgeView(id){
   const def=BADGE_DEF.find(b=>b.id===id),b=badgesDoc&&badgesDoc.badges.find(x=>x.id===id);
@@ -8766,22 +8811,110 @@ function badgeView(id){
   else status="Not yet";
   return{def,got,status};
 }
-function badgesShareUrl(){
-  if(!badgesDoc)return null;
-  const got=BADGE_DEF.filter(d=>badgesDoc.badges.some(b=>b.id===d.id&&b.state==="got")).map(d=>d.title);
-  const text=got.length?"My Zaexa badges: "+got.join(" \u00b7 "):"Collecting Zaexa badges";
-  return "https://x.com/intent/tweet?text="+encodeURIComponent(text)+"&url="+encodeURIComponent("https://zaexa.com/badges/"+badgesDoc.address);
-}
+function badgesLink(){return badgesDoc?"https://zaexa.com/badges/"+badgesDoc.address:null;}
 function badgesPaint(){
   const body=$("badgesBody"),cnt=$("badgesCount");
   if(!badgesDoc){return;}
   const n=badgesDoc.badges.filter(b=>b.state==="got").length;
   cnt.textContent=n+" of 5";
-  body.innerHTML='<div class="bdgRow">'+BADGE_DEF.map(d=>{
-    const v=badgeView(d.id);
-    return '<button type="button" class="bdgM'+(v.got?"":" off")+'" data-badge="'+d.id+'"><img src="/badges/art/'+d.id+'.svg" alt="" width="120" height="130" loading="lazy">'
-      +'<span class="bdgN">'+esc(d.title)+'</span><span class="bdgS">'+esc(v.status)+'</span></button>';
+  body.innerHTML='<div class="bdgGrid">'+BADGE_DEF.map(d=>{
+    const v=badgeView(d.id),b=badgesDoc.badges.find(x=>x.id===d.id);
+    let st;
+    if(v.got)st="Got it · <b>"+esc(badgeDate(b.ts))+"</b>";
+    else if(b.state==="pending")st="Still reading history";
+    else if(d.id==="ten"&&badgesDoc.progress&&badgesDoc.progress.ten>0){const k=Math.min(10,badgesDoc.progress.ten);st=k+" / 10 swaps"+'<i class="bdgBar"><b style="width:'+(k*10)+'%"></b></i>';}
+    else st="Not yet";
+    return '<button type="button" class="bdgC'+(v.got?" got":"")+'" data-badge="'+d.id+'">'
+      +'<span class="bdgArt"><img src="/badges/art/'+d.id+(v.got?"":"-off")+'.svg?v='+BADGE_ART_V+'" alt="" width="200" height="200" loading="lazy"></span>'
+      +'<span class="bdgN">'+esc(d.title)+'</span><span class="bdgH">'+esc(d.how)+'</span><span class="bdgS">'+st+'</span></button>';
   }).join("")+'</div>';
+}
+/* هنرِ درون‌خطی: idها پسوند می‌گیرند تا با هیچ چیزِ صفحه برخورد نکنند؛ رد شدنِ گارد یا شکستِ شبکه = null (برمی‌گردیم به <img>) */
+function badgeArtSuffix(t){
+  return t.replace(/(\s)id="([A-Za-z0-9_-]+)"/g,'$1id="$2_bm"')
+    .replace(/url\(\s*(["']?)#([A-Za-z0-9_-]+)\1\s*\)/g,'url($1#$2_bm$1)')
+    .replace(/href="#([A-Za-z0-9_-]+)"/g,'href="#$1_bm"');
+}
+async function badgeArt(id){
+  if(badgesArtCache.has(id))return badgesArtCache.get(id);
+  try{
+    const r=await withTimeout(fetch(v4Origin()+"/badges/art/"+id+".svg?v="+BADGE_ART_V),4000);
+    if(!r.ok)return null;
+    const t=(await r.text()).trim();
+    if(t.indexOf("<svg")!==0||/<script|\son[a-z]+\s*=|javascript:/i.test(t))return null;
+    const o=badgeArtSuffix(t);
+    badgesArtCache.set(id,o);
+    return o;
+  }catch(e){return null;}
+}
+function badgeParticles(c1,c2){
+  let h="";
+  for(let i=0;i<22;i++){
+    const a=Math.random()*Math.PI*2,r=90+Math.random()*80,x=Math.cos(a)*r,y=Math.sin(a)*r-40,d=.55+Math.random()*.25;
+    h+='<i class="bdgPt" style="background:'+(i%2?c2:c1)+';--dx:'+x.toFixed(1)+'px;--dy:'+y.toFixed(1)+'px;--r:'+Math.round(Math.random()*360)+'deg;animation-delay:'+d.toFixed(2)+'s"></i>';
+  }
+  return h;
+}
+function badgeShort(a){a=String(a||"");return a.slice(0,6)+"…"+a.slice(-4);}
+async function badgeOpen(id,celebrate){
+  const v=badgeView(id);
+  if(!v)return;
+  const seq=++badgesOpenSeq,ov=$("badgeOv"),m=ov.querySelector(".bdgModal"),col=BADGE_COL[id]||BADGE_COL.first;
+  badgesOpenId=id;
+  if(!ov.classList.contains("on"))badgesLastFocus=document.activeElement;
+  m.style.setProperty("--c1",col[0]);m.style.setProperty("--c2",col[1]);
+  $("badgeMTitle").textContent=v.def.title;
+  $("badgeMStat").textContent=v.status;
+  $("badgeMRule").textContent=BADGE_RULE;
+  const who=$("badgeMWho"),sh=$("badgeShare"),cp=$("badgeCopy"),stage=$("badgeMStage");
+  if(v.got){
+    $("badgeMLab").textContent=celebrate?"NEW BADGE":"BADGE";
+    $("badgeMHow").textContent="You got this by "+v.def.got;
+    who.textContent=badgeShort(badgesDoc.address);who.hidden=false;sh.hidden=false;cp.hidden=false;
+    m.classList.remove("cel");
+    stage.innerHTML="";
+  }else{
+    $("badgeMLab").textContent="BADGE";
+    $("badgeMHow").textContent="How to get it: "+v.def.how;
+    who.hidden=true;sh.hidden=true;cp.hidden=true;
+    m.classList.remove("cel");
+    stage.innerHTML='<div class="bdgB"><img src="/badges/art/'+id+'-off.svg?v='+BADGE_ART_V+'" alt="" width="230" height="230"></div>';
+  }
+  ov.classList.add("on");
+  $("badgeClose").focus();
+  if(!v.got)return;
+  let art=await badgeArt(id);
+  if(seq!==badgesOpenSeq)return;   // بازشدنِ تازه‌تر؛ هرگز در مودالِ نشانِ دیگر نمی‌نشیند
+  if(!art)art='<img src="/badges/art/'+id+'.svg?v='+BADGE_ART_V+'" alt="" width="230" height="230">';
+  stage.innerHTML='<div class="bdgHalo"></div><div class="bdgB">'+art+'</div>'+badgeParticles(col[0],col[1]);
+  m.classList.remove("cel");void m.offsetWidth;m.classList.add("cel");
+}
+function badgeClose(){
+  if(!$("badgeOv").classList.contains("on"))return;
+  $("badgeOv").classList.remove("on");badgesOpenId=null;badgesOpenSeq++;
+  if(badgesLastFocus&&badgesLastFocus.focus)badgesLastFocus.focus();
+  if(badgesQueue.length){
+    const nx=badgesQueue.shift();
+    setTimeout(()=>{if(!document.querySelector(".ov.on"))badgeOpen(nx,true);},260);
+  }
+}
+/* نشانِ تازه‌گرفته: یک بار برای هر کیف نشان داده می‌شود؛ هر خطای ذخیره‌ساز = هرگز خودکار باز نشود */
+function badgesAutoShow(addr){
+  if(!badgesDoc)return;
+  const key="zx.bdgSeen."+addr;
+  let raw;
+  try{raw=localStorage.getItem(key);}catch(e){return;}
+  const got=badgesDoc.badges.filter(b=>b.state==="got");
+  let stored=null;
+  if(raw!==null){try{const j=JSON.parse(raw);if(Array.isArray(j))stored=j.filter(x=>typeof x==="string");}catch(e){stored=null;}}
+  let queue;
+  if(stored===null)queue=got.length?[got.reduce((a,b)=>b.ts>a.ts?b:a)]:[];
+  else queue=got.filter(b=>!stored.includes(b.id)).sort((a,b)=>a.ts-b.ts);
+  try{localStorage.setItem(key,JSON.stringify([...new Set((stored||[]).concat(got.map(b=>b.id)))]));}catch(e){return;}
+  if(!queue.length)return;
+  if(view!=="folio"||$("badgeOv").classList.contains("on")||document.querySelector(".ov.on")||document.visibilityState!=="visible")return;
+  badgesQueue=queue.slice(1).map(b=>b.id);
+  badgeOpen(queue[0].id,true);
 }
 async function renderBadges(){
   const card=$("badgesCard");
@@ -8790,7 +8923,7 @@ async function renderBadges(){
   card.hidden=false;
   const addr=String(account).toLowerCase(),seq=++badgesSeq,body=$("badgesBody");
   if(badgesDoc&&badgesDoc.address===addr&&Date.now()-badgesAt<60000){badgesPaint();return;}
-  if(!badgesDoc||badgesDoc.address!==addr){badgesDoc=null;$("badgesCount").textContent="";body.innerHTML='<div class="bdgMsg"><span class="spin"></span>Reading badges\u2026</div>';}
+  if(!badgesDoc||badgesDoc.address!==addr){badgesDoc=null;$("badgesCount").textContent="";body.innerHTML='<div class="bdgMsg"><span class="spin"></span>Reading badges…</div>';}
   let doc=null;
   try{
     const r=await withTimeout(fetch(v4Origin()+"/badges/"+addr+".json",{headers:{accept:"application/json"}}),15000);
@@ -8804,30 +8937,24 @@ async function renderBadges(){
     return;
   }
   badgesDoc=doc;badgesAt=Date.now();badgesPaint();
+  badgesAutoShow(addr);
 }
-function badgeOpen(id){
-  const v=badgeView(id);
-  if(!v)return;
-  badgesOpenId=id;badgesLastFocus=document.activeElement;
-  $("badgeMImg").src="/badges/art/"+id+".svg";
-  $("badgeMTitle").textContent=v.def.title;
-  $("badgeMStat").textContent=v.status;
-  $("badgeMHow").textContent=(v.got?"How you got it: ":"How to get it: ")+v.def.how;
-  $("badgeMRule").textContent=BADGE_RULE;
-  $("badgeOv").querySelector(".bdgModal").classList.toggle("off",!v.got);
-  $("badgeOv").classList.add("on");
-  $("badgeClose").focus();
-}
-function badgeClose(){
-  if(!$("badgeOv").classList.contains("on"))return;
-  $("badgeOv").classList.remove("on");badgesOpenId=null;
-  if(badgesLastFocus&&badgesLastFocus.focus)badgesLastFocus.focus();
-}
-$("badgesBody").addEventListener("click",e=>{const b=e.target.closest("[data-badge]");if(b)badgeOpen(b.dataset.badge);});
+$("badgesBody").addEventListener("click",e=>{const b=e.target.closest("[data-badge]");if(b){badgesQueue=[];badgeOpen(b.dataset.badge,false);}});
 $("badgeClose").onclick=badgeClose;
 $("badgeOv").addEventListener("click",e=>{if(e.target===$("badgeOv"))badgeClose();});
 document.addEventListener("keydown",e=>{if(e.key==="Escape"&&$("badgeOv").classList.contains("on")){e.preventDefault();badgeClose();}});
-$("badgeShare").onclick=()=>{const u=badgesShareUrl();if(u)window.open(u,"_blank","noopener,noreferrer");};
+$("badgeShare").onclick=()=>{
+  const v=badgesOpenId&&badgeView(badgesOpenId),u=badgesLink();
+  if(!v||!u)return;
+  window.open("https://x.com/intent/tweet?text="+encodeURIComponent('Got the "'+v.def.title+'" badge on Zaexa')+"&url="+encodeURIComponent(u),"_blank","noopener,noreferrer");
+};
+$("badgeCopy").onclick=async()=>{
+  const btn=$("badgeCopy"),u=badgesLink();
+  let ok=false;
+  try{await navigator.clipboard.writeText(u);ok=true;}catch(e){ok=false;}
+  btn.textContent=ok?"Copied":"Copy failed";
+  setTimeout(()=>{btn.textContent="Copy link";},1400);
+};
 /* BADGES:END */
 
 async function renderFolio(){

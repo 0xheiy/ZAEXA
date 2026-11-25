@@ -6,7 +6,7 @@ import {
   decodeSwapped, classifySwap, applyCounted, emptyUser, runBadgesPass, badgesDoc, badgesRoute, badgePageHtml, baseRpcList,
 } from "./badges.js";
 import { keccak256, utf8Bytes, bytesToHex } from "./keccak.js";
-import { BADGE_SVG, OG_PNG_PARTS } from "./badge-art.js";
+import { BADGE_SVG, BADGE_SVG_OFF, OG_PNG_PARTS, BADGE_ART_VERSION } from "./badge-art.js";
 import { scheduledBadgesPass, sitemapResponse } from "./index.js";
 
 const read = (rel) => fs.readFileSync(new URL(rel, import.meta.url), "utf8");
@@ -342,7 +342,7 @@ export async function runBadgesCases(ok, worker) {
     ok(by.first.state === "got", "[badges json] first is got");
     ok(by.stock.state === "none" && by.stock.got === false, "[badges json] stock on a complete Base: state none");
     ok(by.rh.state === "pending" && by.ten.state === "pending", "[badges json] an incomplete chain makes a not-got badge 'pending', never 'none' (rh, and ten which needs both chains)");
-    for (const bad of ["/badges/0x123.json", "/badges/" + A.slice(0, 41) + ".json", "/badges/" + A + "0.json", "/badges/0x" + "g".repeat(40) + ".json", "/badges/" + A + "/", "/badges/" + A + ".json/x", "/badges", "/badges/", "/badges/index", "/badges/list", "/badges/art/nope.svg", "/badges/art/__proto__.svg", "/badges/art/first.png"]) {
+    for (const bad of ["/badges/0x123.json", "/badges/" + A.slice(0, 41) + ".json", "/badges/" + A + "0.json", "/badges/0x" + "g".repeat(40) + ".json", "/badges/" + A + "/", "/badges/" + A + ".json/x", "/badges", "/badges/", "/badges/index", "/badges/list", "/badges/art/nope.svg", "/badges/art/__proto__.svg", "/badges/art/first.png", "/badges/art/nope-off.svg", "/badges/art/first-off-off.svg", "/badges/art/__proto__-off.svg", "/badges/art/first-OFF.svg"]) {
       const x = await get(bad);
       ok(x.status === 404 && x.headers.get("x-robots-tag") === "noindex", "[badges json] strict validation / no index: " + bad + " -> " + x.status);
     }
@@ -360,13 +360,31 @@ export async function runBadgesCases(ok, worker) {
     ok(/<meta property="og:title" content="Zaexa badges">/.test(html) && /<meta property="og:description" content="2 of 5 Zaexa badges">/.test(html) && /<meta property="og:image" content="https:\/\/zaexa\.com\/badges\/og\.png">/.test(html) && /<meta name="twitter:card" content="summary_large_image">/.test(html), "[badges page] og:title, og:description '<n> of 5 Zaexa badges', og:image, twitter:card");
     ok(html.includes(A.slice(0, 6) + "…" + A.slice(-4)) && !html.includes(A), "[badges page] the short address on screen, the full address nowhere in the page");
     ok((html.match(/0x[0-9a-fA-F]{40}/g) || []).length === 0 && !/href="\/badges/.test(html), "[badges page] no wallet address and no link to other wallets or badge pages");
-    ok(BADGE_IDS.every((id) => html.includes("/badges/art/" + id + ".svg") && html.includes(BADGE_TITLES[id])) && html.includes("Not yet") && html.includes("Still reading history") && html.includes("Nov 10, 2026"), "[badges page] five medals with titles, 'Not yet' / 'Still reading history' / date");
+    ok(BADGE_IDS.every((id) => /\/badges\/art\/[a-z]+(-off)?\.svg/.test(html) && html.includes("/badges/art/" + id) && html.includes(BADGE_TITLES[id])) && html.includes("Not yet") && html.includes("Still reading history") && html.includes("Nov 10, 2026"), "[badges page] five medals with titles, 'Not yet' / 'Still reading history' / date");
     ok(/href="\/app"[^>]*>Open Zaexa</.test(html) && html.includes("Zaexa badges"), "[badges page] 'Open Zaexa' goes to /app");
     ok((html.match(/class="medal off"/g) || []).length === 3, "[badges page] the three not-got medals are dimmed");
     ok(html.includes("#0a0810"), "[badges page] dark palette");
+    ok((html.match(/\/badges\/art\/[a-z]+-off\.svg/g) || []).length === 3 && (html.match(/\/badges\/art\/[a-z]+\.svg/g) || []).length === 2 && !/grayscale/i.test(html), "[badges page] the three not-got medals use the -off art file, the two got ones the earned art, and the page CSS has no grayscale");
     // هنر
-    const art = await get("/badges/art/first.svg?v=1");
+    const art = await get("/badges/art/first.svg?v=" + BADGE_ART_VERSION);
     ok(art.status === 200 && art.headers.get("content-type").startsWith("image/svg+xml") && /immutable/.test(art.headers.get("cache-control")) && art.headers.get("x-robots-tag") === "noindex" && (await art.text()) === BADGE_SVG.first, "[badges art] svg served from badge-art.js with a long cache for the versioned URL");
+    const off = await get("/badges/art/first-off.svg?v=" + BADGE_ART_VERSION);
+    ok(off.status === 200 && off.headers.get("content-type").startsWith("image/svg+xml") && (await off.text()) === BADGE_SVG_OFF.first, "[badges art off] first-off.svg serves the locked art from BADGE_SVG_OFF");
+    {
+      const bad = [];
+      for (const [mapName, map] of [["BADGE_SVG", BADGE_SVG], ["BADGE_SVG_OFF", BADGE_SVG_OFF]]) {
+        for (const [id, svg] of Object.entries(map)) {
+          const tag = mapName + "." + id;
+          if (!svg.startsWith("<svg")) bad.push(tag + " start");
+          if (!svg.includes('viewBox="0 0 200 200"')) bad.push(tag + " viewBox");
+          if (/<text/i.test(svg) || /font-family/i.test(svg) || /<script/i.test(svg) || /\son[a-z]+=/i.test(svg)) bad.push(tag + " forbidden markup");
+          if (/http/i.test(svg.split("http://www.w3.org/2000/svg").join(""))) bad.push(tag + " external url");
+          if (mapName === "BADGE_SVG" && !svg.includes('class="lt" pathLength="1"')) bad.push(tag + " no light line");
+          if (mapName === "BADGE_SVG_OFF" && svg.includes('class="lt"')) bad.push(tag + " has light line");
+        }
+      }
+      ok(bad.length === 0 && Object.keys(BADGE_SVG).length === 5 && Object.keys(BADGE_SVG_OFF).length === 5, "[badges art shape] all 10 svgs: 200x200 viewBox, no text/fonts/script/handlers/external urls; earned have class lt pathLength 1, locked have none " + bad.join(","));
+    }
     const og = await get("/badges/og.png");
     const bytes = new Uint8Array(await og.arrayBuffer());
     ok(og.status === 200 && og.headers.get("content-type") === "image/png" && bytes[0] === 0x89 && bytes[1] === 0x50 && bytes.length === Buffer.from(OG_PNG_PARTS.join(""), "base64").length, "[badges art] og.png decodes from the base64 parts in badge-art.js");

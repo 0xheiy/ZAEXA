@@ -13,7 +13,7 @@
 
 import { keccak256, utf8Bytes, bytesToHex } from "./keccak.js";
 import { LANDING_SVG_DEFS } from "./report_page.js";
-import { BADGE_SVG, OG_PNG_PARTS, BADGE_ART_VERSION } from "./badge-art.js";
+import { BADGE_SVG, BADGE_SVG_OFF, OG_PNG_PARTS, BADGE_ART_VERSION } from "./badge-art.js";
 
 export const BADGE_IDS = Object.freeze(["first", "base", "rh", "stock", "ten"]);
 export const BADGE_TITLES = Object.freeze({
@@ -567,7 +567,6 @@ const PAGE_CSS = ":root{--bg:#0a0810;--card:#131020;--line:#221d33;--tx:#f0eef7;
   ".grid{display:grid;grid-template-columns:repeat(5,1fr);gap:14px}" +
   ".medal{background:var(--card);border:1px solid var(--line);border-radius:18px;padding:16px 10px;text-align:center}" +
   ".medal img{width:100%;max-width:140px;height:auto;display:block;margin:0 auto 10px}" +
-  ".medal.off img{filter:grayscale(1) brightness(.45);opacity:.7}" +
   ".medal b{display:block;font-size:14px}.medal span{display:block;font-size:12.5px;color:var(--tx3);margin-top:2px}" +
   ".cta{display:inline-block;margin-top:30px;padding:14px 22px;border-radius:999px;font-weight:700;font-size:13px;color:#05121a;background:linear-gradient(105deg,var(--g1),#50c8f6 42%,var(--g2))}" +
   "@media(max-width:720px){.grid{grid-template-columns:repeat(2,1fr)}h1{font-size:23px}}";
@@ -576,8 +575,8 @@ export function badgePageHtml(addr, doc) {
   const got = doc.badges.filter((b) => b.got).length;
   const cards = doc.badges.map((b) => {
     const when = b.got ? fmtDate(b.ts) : b.state === "pending" ? "Still reading history" : "Not yet";
-    return '<div class="medal' + (b.got ? "" : " off") + '"><img src="/badges/art/' + b.id + ".svg?v=" + BADGE_ART_VERSION +
-      '" alt="" width="140" height="151"><b>' + esc(BADGE_TITLES[b.id]) + "</b><span>" + esc(when) + "</span></div>";
+    return '<div class="medal' + (b.got ? "" : " off") + '"><img src="/badges/art/' + b.id + (b.got ? "" : "-off") + ".svg?v=" + BADGE_ART_VERSION +
+      '" alt="" width="140" height="140"><b>' + esc(BADGE_TITLES[b.id]) + "</b><span>" + esc(when) + "</span></div>";
   }).join("");
   const desc = got + " of 5 Zaexa badges";
   return "<!DOCTYPE html>\n<html lang=\"en\"><head><meta charset=\"utf-8\">" +
@@ -641,10 +640,11 @@ export async function badgesRoute(request, url, env) {
       "content-type": "text/html; charset=utf-8", "cache-control": "public, max-age=60",
       "content-security-policy": PAGE_CSP, "x-content-type-options": "nosniff", "referrer-policy": "no-referrer", ...NOINDEX } });
   }
-  const art = /^\/badges\/art\/([a-z]+)\.svg$/.exec(p);
-  if (art && Object.prototype.hasOwnProperty.call(BADGE_SVG, art[1]) && BADGE_IDS.includes(art[1])) {
+  const art = /^\/badges\/art\/([a-z]+)(-off)?\.svg$/.exec(p);
+  const artMap = art && art[2] ? BADGE_SVG_OFF : BADGE_SVG; // «-off» = هنرِ قفل
+  if (art && Object.prototype.hasOwnProperty.call(artMap, art[1]) && BADGE_IDS.includes(art[1])) {
     const versioned = url.searchParams.get("v") === BADGE_ART_VERSION;
-    return new Response(head ? null : BADGE_SVG[art[1]], { status: 200, headers: {
+    return new Response(head ? null : artMap[art[1]], { status: 200, headers: {
       "content-type": "image/svg+xml; charset=utf-8",
       "cache-control": versioned ? "public, max-age=31536000, immutable" : "public, max-age=3600",
       "content-security-policy": "default-src 'none'; style-src 'unsafe-inline'", "x-content-type-options": "nosniff", ...NOINDEX } });
