@@ -1863,7 +1863,7 @@ html[data-rh] .rhNa{display:block}
 .bdgC{all:unset;box-sizing:border-box;cursor:pointer;display:flex;flex-direction:column;background:var(--card2);border:1px solid var(--line);border-radius:18px;padding:14px 14px 12px;min-width:0;transition:transform .2s}
 .bdgC:hover{transform:translateY(-2px)}
 .bdgC:focus-visible{outline:2px solid var(--acc);outline-offset:2px}
-.bdgArt img{display:block;width:78%;height:auto;margin:2px auto 10px}
+.bdgArt img{display:block;width:96%;height:auto;margin:2px auto 10px}
 .bdgN{font-size:14.5px;font-weight:600;color:var(--tx);margin-bottom:5px}
 .bdgC:not(.got) .bdgN{color:var(--tx2)}
 .bdgH{font-size:12.5px;line-height:1.5;color:var(--tx2);flex:1}
@@ -1882,7 +1882,7 @@ html[data-rh] .rhNa{display:block}
 .bdgLab{font-size:11px;letter-spacing:.16em;color:var(--tx3);font-weight:600;text-align:left}
 .bdgModal h3{font-size:30px;font-weight:700;margin:6px 0 2px;text-align:left;letter-spacing:-.01em;padding:0;display:block}
 .bdgDate{font-size:13px;color:var(--tx3);text-align:left}
-.bdgStage{position:relative;width:230px;height:230px;margin:18px auto 10px;perspective:800px;flex:none}
+.bdgStage{position:relative;width:272px;height:272px;margin:18px auto 10px;perspective:800px;flex:none}
 .bdgStage .bdgB{position:relative;z-index:1;width:100%;height:100%;transform-style:preserve-3d}
 .bdgStage .bdgB>svg,.bdgStage .bdgB>img{width:100%;height:100%;display:block}
 .bdgModal p{margin:6px 0 0;color:var(--tx2);font-size:13.5px;line-height:1.55}
@@ -1914,8 +1914,28 @@ html[data-rh] .rhNa{display:block}
 .invBody{padding:6px 20px 20px}
 .invTx{margin:0 0 12px;color:var(--tx2);font-size:14px;line-height:1.6}
 .invLink{display:block;font-size:12.5px;color:var(--tx);padding:11px 14px;border-radius:14px;background:var(--bg);box-shadow:inset 2px 2px 5px var(--soft-lo),inset -2px -2px 5px var(--soft-hi);overflow-wrap:anywhere;user-select:all}
-.invAct{display:flex;gap:10px;flex-wrap:wrap;margin-top:12px}.invAct>button{flex:1 1 160px;width:auto;margin:0;box-sizing:border-box;justify-content:center;text-align:center;padding:12px 16px}
-.invSt{margin-top:12px;font-size:12.5px;color:var(--tx3)}
+.invRow{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:12px}
+.invAct{display:flex;gap:8px;margin-left:auto}.invAct>button{flex:none;width:auto;margin:0;box-sizing:border-box;justify-content:center;text-align:center;padding:7px 14px;font-size:12.5px;min-height:0;border-radius:999px}
+.invSt{font-size:12.5px;color:var(--tx3)}
+.folioSide{display:flex;flex-direction:column;gap:18px;min-width:0}
+.folioSide:not(:has(>:not([hidden]))){display:none}
+/* ستونِ کناری: نشان‌ها و دعوت کنارِ کارتِ توکن‌ها، تا فهرستِ بلندِ توکن آن‌ها را پایین نبرد */
+@media(min-width:1100px){
+  main:has(>#view-folio.on #badgesCard:not([hidden])){max-width:1360px}
+  #view-folio.on:has(#badgesCard:not([hidden])){display:grid;grid-template-columns:minmax(0,1fr) 430px;grid-template-rows:auto 1fr;gap:18px;align-items:start}
+  #view-folio.on:has(#badgesCard:not([hidden]))>.rhNa,#view-folio.on:has(#badgesCard:not([hidden]))>.card{grid-column:1;grid-row:1}
+  #view-folio.on:has(#badgesCard:not([hidden]))>p{grid-column:1;grid-row:2}
+  #view-folio.on:has(#badgesCard:not([hidden]))>.folioSide{grid-column:2;grid-row:1/3}
+  .folioSide .bdgGrid{grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;padding:6px 16px 16px}
+  .folioSide .bdgC{padding:8px 4px 10px;border-radius:16px}
+  .folioSide .bdgArt img{width:100%;margin:0 auto 6px}
+  .folioSide .bdgN{font-size:12.5px;text-align:center;margin-bottom:0}
+  .folioSide .bdgH{display:none}
+  .folioSide .bdgS{font-size:11px;margin-top:8px;padding-top:7px;justify-content:center;text-align:center}
+  .folioSide .invBody{padding:4px 16px 16px}.folioSide .invTx{font-size:13px}
+  .folioSide .invLink{font-size:11.5px;padding:9px 12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;overflow-wrap:normal}
+  .folioSide .bdgC.got .bdgS{white-space:nowrap}
+}
 /* BADGES:CSS:END */
 .rhCard{background:var(--card);border-radius:22px;box-shadow:var(--sh);overflow:hidden}
 /* ۲۵ نوامبر — باگِ زنده: .rhNa{overflow:visible} بالاتر است و همین .rhCard (overflow:hidden) آن را می‌برد؛ منوی شبکه که داخلِ کارتِ کوتاهِ اعلان نشسته بود بریده می‌شد. قاعده‌ی هم‌وزن و بعد از .rhCard؛ .rhCard جاهای دیگر دست‌نخورده. منوی باز بالای محتوای بعدی می‌ماند. */
@@ -1924,7 +1944,7 @@ html[data-rh] .rhNa{display:block}
 .rhNaTtl{font-size:15.5px;font-weight:660;color:var(--tx)}
 .rhNaHead [data-rhslot]{flex:none}
 .rhNaTx{margin:0;padding:14px 20px 20px;color:var(--tx2);font-size:14px;line-height:1.6}
-html[data-rh] #view-exit>*:not(.rhNa),html[data-rh] #view-folio>*:not(.rhNa):not(#badgesCard):not(#inviteCard),
+html[data-rh] #view-exit>*:not(.rhNa),html[data-rh] #view-folio>*:not(.rhNa):not(.folioSide),
 html[data-rh] #view-swap>#rhHero{display:none!important}
 /* ۲۵ نوامبر — سهامِ Robinhood: فیدِ مرجع (Chainlink) وصل نیست؛ سرستون و سلول‌های «Reference» پنهان‌اند. */
 html[data-rh] #view-stocks .colRef{display:none}
@@ -2589,6 +2609,7 @@ try{(function(){
     </div></div>
   </section>
   <!-- BADGES:HTML:BEGIN — نشان‌ها فقط برای کیفِ EVM وصل‌شده (Base یا Robinhood)؛ روی سولانا و بدونِ کیف پنهان -->
+  <div class="folioSide" id="folioSide">
   <section class="card" id="badgesCard" hidden>
     <header><span class="ttl">Badges</span><span class="grow"></span><span class="ttl mono" id="badgesCount"></span></header>
     <div id="badgesBody" aria-live="polite"></div>
@@ -2598,10 +2619,11 @@ try{(function(){
     <div class="invBody">
       <p class="invTx">Share your link. When a friend's first swap of $5 or more on Zaexa goes through it, your invite is written into their swap on-chain and counts toward your Friend badges.</p>
       <span class="invLink mono" id="inviteLink"></span>
-      <div class="invAct"><button class="chip" id="inviteCopy" type="button">Copy link</button><button class="cta" id="inviteShare" type="button">Share on X</button></div>
-      <div class="invSt" id="inviteStatus" hidden></div>
+      <div class="invRow"><div class="invSt" id="inviteStatus" hidden></div>
+        <div class="invAct"><button class="chip" id="inviteCopy" type="button">Copy link</button><button class="cta" id="inviteShare" type="button">Share on X</button></div></div>
     </div>
   </section>
+  </div>
   <!-- BADGES:HTML:END -->
   <p style="padding:0 6px;color:var(--tx3);font-size:12px;margin:0">
     Balances are read straight from the chain and refresh on their own. Prices come from
@@ -8831,7 +8853,7 @@ function refreshSolanaViews(){
 
 /* BADGES:BEGIN — ۲۴ نوامبر. نشان‌های Portfolio؛ فقط از GET /badges/<کیف>.json (خوانده‌شده از زنجیره توسط Worker).
    هرگز از ذخیره‌ی مرورگر یا ادعای کاربر. هیچ رویدادِ آماریِ تازه‌ای نیست. شکستِ خواندن = «نمی‌شود خواند»، نه «هیچ نشانی نیست». */
-const BADGE_ART_V="3";
+const BADGE_ART_V="4";
 const BADGE_COL={first:["#22EFF6","#C56CF5"],base:["#4f8cff","#9fc4ff"],rh:["#3ee08f","#c7f36b"],stock:["#ffcf6b","#ff8a5c"],ten:["#c56cf5","#ff7ad9"],ref1:["#ff6b9a","#ffc2d6"],ref10:["#ff8a5c","#ffd36b"]};
 const BADGE_DEF=[
   {id:"first",title:"First swap",how:"Make one swap of $5 or more through Zaexa, on Base or Robinhood Chain.",got:"making your first swap of $5 or more through Zaexa."},

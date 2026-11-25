@@ -853,7 +853,7 @@ const PAGE_CSS = ":root{--bg:#0a0810;--card:#131020;--line:#221d33;--tx:#f0eef7;
   ".sub{margin:0 0 26px;color:var(--tx2);font-size:14px}.mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}" +
   ".grid{display:grid;grid-template-columns:repeat(4,1fr);gap:14px}" +
   ".medal{background:var(--card);border:1px solid var(--line);border-radius:18px;padding:16px 10px;text-align:center}" +
-  ".medal img{width:100%;max-width:140px;height:auto;display:block;margin:0 auto 10px}" +
+  ".medal img{width:100%;max-width:172px;height:auto;display:block;margin:0 auto 10px}" +
   ".medal b{display:block;font-size:14px}.medal span{display:block;font-size:12.5px;color:var(--tx3);margin-top:2px}" +
   ".cta{display:inline-block;margin-top:30px;padding:14px 22px;border-radius:999px;font-weight:700;font-size:13px;color:#05121a;background:linear-gradient(105deg,var(--g1),#50c8f6 42%,var(--g2))}" +
   "@media(max-width:720px){.grid{grid-template-columns:repeat(2,1fr)}h1{font-size:23px}}";

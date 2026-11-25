@@ -544,14 +544,47 @@ export async function runBadgesCases(ok, worker) {
         for (const [id, svg] of Object.entries(map)) {
           const tag = mapName + "." + id;
           if (!svg.startsWith("<svg")) bad.push(tag + " start");
-          if (!svg.includes('viewBox="0 0 200 200"')) bad.push(tag + " viewBox");
+          if (!svg.includes('viewBox="-24 -16 248 248"')) bad.push(tag + " viewBox");
           if (/<text/i.test(svg) || /font-family/i.test(svg) || /<script/i.test(svg) || /\son[a-z]+=/i.test(svg)) bad.push(tag + " forbidden markup");
           if (/http/i.test(svg.split("http://www.w3.org/2000/svg").join(""))) bad.push(tag + " external url");
           if (mapName === "BADGE_SVG" && !svg.includes('class="lt" pathLength="1"')) bad.push(tag + " no light line");
           if (mapName === "BADGE_SVG_OFF" && svg.includes('class="lt"')) bad.push(tag + " has light line");
         }
       }
-      ok(bad.length === 0 && Object.keys(BADGE_SVG).length === 7 && Object.keys(BADGE_SVG_OFF).length === 7 && BADGE_ART_VERSION === "3", "[badges art shape] all 14 svgs (art v3): 200x200 viewBox, no text/fonts/script/handlers/external urls; earned have class lt pathLength 1, locked have none " + bad.join(","));
+      ok(bad.length === 0 && Object.keys(BADGE_SVG).length === 7 && Object.keys(BADGE_SVG_OFF).length === 7 && BADGE_ART_VERSION === "4", "[badges art shape] all 14 svgs (art v4): -24 -16 248 248 viewBox, no text/fonts/script/handlers/external urls; earned have class lt pathLength 1, locked have none " + bad.join(","));
+    }
+    {
+      // سایه‌ی نرم: بیضیِ پای مدال گرادیانی است نه فیلتردار، و هر چه سایه می‌کشد داخلِ viewBox می‌ماند (قبلاً پنجره‌ی ۲۰۰×۲۰۰ لبه‌ی سایه را صاف می‌برید)
+      const bad = [];
+      let n = 0;
+      for (const [mapName, map] of [["BADGE_SVG", BADGE_SVG], ["BADGE_SVG_OFF", BADGE_SVG_OFF]]) {
+        for (const [id, svg] of Object.entries(map)) {
+          const tag = mapName + "." + id;
+          n++;
+          const vb = (svg.match(/viewBox="([-\d.]+) ([-\d.]+) ([\d.]+) ([\d.]+)"/) || []).slice(1).map(Number);
+          if (vb.length !== 4) { bad.push(tag + " no viewBox"); continue; }
+          const [vx, vy, vw, vh] = vb, x0 = vx, x1 = vx + vw, y0 = vy, y1 = vy + vh;
+          const ells = svg.match(/<ellipse\b[^>]*>/g) || [];
+          if (ells.some((e) => /\sfilter=/.test(e))) bad.push(tag + " ellipse has filter");
+          const gd = ells.filter((e) => /fill="url\(#gds[^)]*\)"/.test(e));
+          if (gd.length !== 1) { bad.push(tag + " gradient ellipses=" + gd.length); continue; }
+          const gid = gd[0].match(/fill="url\(#(gds[^)]*)\)"/)[1];
+          const rg = svg.match(new RegExp('<radialGradient id="' + gid + '"[^>]*>([\\s\\S]*?)</radialGradient>'));
+          const stops = rg ? rg[1].match(/<stop\b[^>]*>/g) || [] : [];
+          if (!rg || !stops.length || !/stop-opacity="0"/.test(stops[stops.length - 1])) bad.push(tag + " gradient last stop not transparent");
+          const num = (a) => Number((gd[0].match(new RegExp('\\s' + a + '="([-\\d.]+)"')) || [])[1]);
+          const cx = num("cx"), cy = num("cy"), rx = num("rx"), ry = num("ry");
+          if ([cx, cy, rx, ry].some((v) => !Number.isFinite(v))) { bad.push(tag + " ellipse numbers"); continue; }
+          if (cx - rx < x0 || cx + rx > x1 || cy - ry < y0 || cy + ry > y1) bad.push(tag + " ellipse box outside viewBox");
+          const fid = svg.match(/<g filter="url\(#(ds[a-z0-9]+)\)"/);
+          const fm = fid && svg.match(new RegExp('<filter id="' + fid[1] + '"[^>]*>([\\s\\S]*?)</filter>'));
+          const sh = fm ? [...fm[1].matchAll(/<feDropShadow\b[^>]*dy="([-\d.]+)"[^>]*stdDeviation="([-\d.]+)"/g)].map((m) => Number(m[1]) + 3 * Number(m[2])) : [];
+          if (!sh.length) { bad.push(tag + " no frame drop shadow"); continue; }
+          const reach = Math.max(...sh), R = 94 * 0.934;
+          if (100 - R - 3 * 0 < x0 || 100 + R > x1 || 100 - R - reach < y0 || 100 + R + reach > y1) bad.push(tag + " frame shadow outside viewBox");
+        }
+      }
+      ok(n === 14 && bad.length === 0, "[badges art shadow] all 14 svgs: no ellipse carries a filter, exactly one gradient ellipse whose radialGradient ends transparent, and the ellipse plus the frame drop shadow (outer radius 94*0.934, dy+3*std) fit inside the viewBox " + bad.join(","));
     }
     for (const id of ["ref1", "ref10"]) {
       const a1 = await get("/badges/art/" + id + ".svg?v=" + BADGE_ART_VERSION), a2 = await get("/badges/art/" + id + "-off.svg?v=" + BADGE_ART_VERSION);

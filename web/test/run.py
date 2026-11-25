@@ -10508,6 +10508,7 @@ async def main():
         await check_ref_capture(p, errors)
         await check_ref_suffix(p, errors)
         await check_invite_card(p, errors)
+        await check_folio_side(p, errors)
         await check_exit_solana(p, errors)
         await check_exit_layout(p, errors)
         b = await p.chromium.launch()
@@ -26872,7 +26873,7 @@ def check_badges_static():
         "ref10": "Ten different friends whose first $5+ swap on Zaexa went through your invite link."}, "[badges static] how-to texts: %s" % how
     assert 'const BADGE_RULE="Counted when one side of the swap is ETH or a stablecoin and it is worth $5 or more. Read from the chain; updates within an hour.";' in reg["js"], "[badges static] rule line"
     assert 'const BADGE_RULE_REF="Read from the swap itself: your invite is written into your friend\'s swap transaction. Only their first swap of $5 or more counts, and inviting yourself doesn\'t.";' in reg["js"].replace("\u2019", "'") or 'const BADGE_RULE_REF="Read from the swap itself: your invite is written into your friend\'s swap transaction.' in reg["js"], "[badges static] the friend-badge rule line"
-    assert 'const BADGE_ART_V="3";' in reg["js"] and 'ref1:["#ff6b9a","#ffc2d6"]' in reg["js"] and 'ref10:["#ff8a5c","#ffd36b"]' in reg["js"], "[badges static] art v3 and the two new colour pairs"
+    assert 'const BADGE_ART_V="4";' in reg["js"] and 'ref1:["#ff6b9a","#ffc2d6"]' in reg["js"] and 'ref10:["#ff8a5c","#ffd36b"]' in reg["js"], "[badges static] art v4 and the two new colour pairs"
     # ۳) هیچ نامِ /ev تازه، هیچ localStorage برای نشان، هیچ glow
     # ۲۴ نوامبر: تنها استفاده‌ی مجاز از localStorage کلیدِ «دیده‌شده» (zx.bdgSeen.<کیف>) برای نمایشِ خودکار است؛ خودِ نشان‌ها هرگز از آن خوانده نمی‌شوند
     ls_lines = [ln for ln in reg["js"].split("\n") if "localStorage" in ln]
@@ -26883,7 +26884,7 @@ def check_badges_static():
     hd = open(os.path.join(HERE, "..", "_headers"), encoding="utf-8").read()
     assert re.search(r"img-src 'self' ", hd), "[badges static] _headers img-src must allow same-origin images (/badges/art/*.svg)"
     assert re.search(r"async function renderFolio\(\)\{\s*renderBadges\(\);", src), "[badges static] renderFolio must start by calling renderBadges() (every account change reaches it through refreshBalances/handleAccountsChanged/disconnect)"
-    assert "#view-folio>*:not(.rhNa):not(#badgesCard):not(#inviteCard)" in src, "[badges static] the Robinhood folio rule must keep #badgesCard and #inviteCard visible"
+    assert "#view-folio>*:not(.rhNa):not(.folioSide)" in src, "[badges static] the Robinhood folio rule must keep .folioSide (badges and invite cards) visible"
     # ۵) Worker: نه در sitemap، نه در robots، کرونِ دوم
     idx = open(os.path.join(HERE, "..", "..", "worker", "index.js"), encoding="utf-8").read()
     assert 'const staticPaths = ["/", "/app", "/pairs", "/api"];' in idx and "badges" not in re.search(r'const staticPaths = [^;]*;', idx).group(0), "[badges static] /badges is not a static sitemap path"
@@ -26953,16 +26954,16 @@ async def check_badges_card(p, errors):
         assert [m["got"] for m in g["ms"]] == [True, True, False, False, False, False, False], "[badges card] only the got cards are in colour: %s" % [m["got"] for m in g["ms"]]
         assert all(m["tag"] == "BUTTON" for m in g["ms"]) and [m["how"] for m in g["ms"]][1] == "Swap $5 or more on Base through Zaexa.", "[badges card] cards are buttons that show the how-to line"
         tops = sorted({m["top"] for m in g["ms"]})
-        assert len(tops) == 2 and [sum(1 for m in g["ms"] if m["top"] == t) for t in tops] == [4, 3], "[badges card] desktop: 4 + 3 grid: %s" % [(m["top"], m["iw"]) for m in g["ms"]]
+        assert len(tops) == 3 and [sum(1 for m in g["ms"] if m["top"] == t) for t in tops] == [3, 3, 1], "[badges card] desktop (1280, side column): 3 + 3 + 1 grid: %s" % [(m["top"], m["iw"]) for m in g["ms"]]
         assert all(m["filter"] == "none" for m in g["ms"]), "[badges card] no filter on any medal: %s" % [m["filter"] for m in g["ms"]]
         assert len(g["ms"]) == 7, "[badges cards] seven .bdgC cards: %d" % len(g["ms"])
-        assert all(m["src"].endswith("/%s.svg?v=3" % m["id"]) and not m["src"].endswith("-off.svg?v=3") for m in g["ms"] if m["got"]), "[badges cards] earned art src: %s" % [m["src"] for m in g["ms"]]
-        assert all(m["src"].endswith("/%s-off.svg?v=3" % m["id"]) for m in g["ms"] if not m["got"]), "[badges cards] locked art src ends -off.svg?v=3: %s" % [m["src"] for m in g["ms"]]
+        assert all(m["src"].endswith("/%s.svg?v=4" % m["id"]) and not m["src"].endswith("-off.svg?v=4") for m in g["ms"] if m["got"]), "[badges cards] earned art src: %s" % [m["src"] for m in g["ms"]]
+        assert all(m["src"].endswith("/%s-off.svg?v=4" % m["id"]) for m in g["ms"] if not m["got"]), "[badges cards] locked art src ends -off.svg?v=4: %s" % [m["src"] for m in g["ms"]]
         assert g["ms"][0]["st"].startswith("Got it") and "Nov 22, 2026" in g["ms"][0]["st"], "[badges cards] got card status: %r" % g["ms"][0]["st"]
         assert g["ms"][4]["st"].startswith("3 / 10 swaps") and g["ms"][4]["bar"] and "width:30%" in g["ms"][4]["bar"].replace(" ", ""), "[badges cards] ten progress text and 30%% bar: %s" % g["ms"][4]
         assert [m["st"] for m in g["ms"]][2:4] == ["Not yet", "Not yet"] and g["ms"][5]["st"] == "Not yet", "[badges cards] Not yet: %s" % [m["st"] for m in g["ms"]]
         assert g["ms"][6]["st"].startswith("3 / 10 friends") and g["ms"][6]["bar"] and "width:30%" in g["ms"][6]["bar"].replace(" ", ""), "[badges cards] ref10 progress text and 30%% bar: %s" % g["ms"][6]
-        print("[badges cards] 7 .bdgC in a 4 + 3 desktop grid; ref10 3 / 10 friends with a 30% bar; earned art <id>.svg?v=3, locked <id>-off.svg?v=3; ten 3 / 10 swaps with a 30% bar; got card says Got it; no filter")
+        print("[badges cards] 7 .bdgC in a 3 + 3 + 1 side-column desktop grid; ref10 3 / 10 friends with a 30% bar; earned art <id>.svg?v=4, locked <id>-off.svg?v=4; ten 3 / 10 swaps with a 30% bar; got card says Got it; no filter")
         # مودالِ قفل: ten (هنوز نه)
         await pg.click('#badgesCard [data-badge="ten"]')
         md = await pg.evaluate("""() => { const m = document.querySelector('#badgeOv .bdgModal'), hid = id => { const e = document.getElementById(id); return e.hidden && getComputedStyle(e).display === 'none'; };
@@ -26973,15 +26974,15 @@ async def check_badges_card(p, errors):
         assert md["on"] and md["t"] == "10 swaps" and md["st"] == "3 of 10" and md["lab"] == "BADGE", "[badges modal] title/progress/label: %s" % md
         assert md["how"] == "How to get it: Make ten swaps through Zaexa, each $5 or more.", "[badges modal] how-to for a not-yet badge: %r" % md["how"]
         assert md["rule"] == "Counted when one side of the swap is ETH or a stablecoin and it is worth $5 or more. Read from the chain; updates within an hour.", "[badges modal] rule line: %r" % md["rule"]
-        assert not md["cel"] and md["hid"] == [True, True, True] and md["src"] == "/badges/art/ten-off.svg?v=3", "[badges locked modal] no celebration, who/share/copy hidden, -off art: %s" % md
+        assert not md["cel"] and md["hid"] == [True, True, True] and md["src"] == "/badges/art/ten-off.svg?v=4", "[badges locked modal] no celebration, who/share/copy hidden, -off art: %s" % md
         assert md["r"] <= md["ih"], "[badges modal] fits the viewport: %s" % md
-        print("[badges locked modal] a locked card opens a calm modal: no cel class, Who/Share/Copy hidden, 'How to get it: ...', stage img ends -off.svg?v=3")
+        print("[badges locked modal] a locked card opens a calm modal: no cel class, Who/Share/Copy hidden, 'How to get it: ...', stage img ends -off.svg?v=4")
         await pg.keyboard.press("Escape")
         assert not await pg.evaluate("() => document.getElementById('badgeOv').classList.contains('on')"), "[badges modal] Escape closes"
         for rid, rhow in (("ref1", "How to get it: Share your invite link. A friend counts when their first swap of $5 or more on Zaexa goes through it."), ("ref10", "How to get it: Ten different friends whose first $5+ swap on Zaexa went through your invite link.")):
             await pg.click('#badgesCard [data-badge="%s"]' % rid)
             rm_ = await pg.evaluate("() => ({ rule: document.getElementById('badgeMRule').textContent, how: document.getElementById('badgeMHow').textContent, src: document.querySelector('#badgeMStage img').getAttribute('src') })")
-            assert rm_["rule"] == "Read from the swap itself: your invite is written into your friend's swap transaction. Only their first swap of $5 or more counts, and inviting yourself doesn't." and rm_["how"] == rhow and rm_["src"] == "/badges/art/%s-off.svg?v=3" % rid, "[badges friend modal] %s: rule line, how-to and -off art: %s" % (rid, rm_)
+            assert rm_["rule"] == "Read from the swap itself: your invite is written into your friend's swap transaction. Only their first swap of $5 or more counts, and inviting yourself doesn't." and rm_["how"] == rhow and rm_["src"] == "/badges/art/%s-off.svg?v=4" % rid, "[badges friend modal] %s: rule line, how-to and -off art: %s" % (rid, rm_)
             await pg.keyboard.press("Escape")
         print("[badges friend modal] ref1/ref10 open with their own rule line (read from the swap itself), how-to text and -off art; the other five keep the original rule line")
         await pg.click('#badgesCard [data-badge="base"]')
@@ -27017,7 +27018,7 @@ async def check_badges_card(p, errors):
         pg = await open_folio()
         await pg.wait_for_selector("#badgesCard .bdgC", timeout=15000)
         g = await pg.evaluate(BDG_JS)
-        assert g["count"] == "0 of 7" and all(m["st"] == "Not yet" and not m["got"] and m["src"].endswith("-off.svg?v=3") for m in g["ms"]), "[badges card] nothing yet: %s" % g
+        assert g["count"] == "0 of 7" and all(m["st"] == "Not yet" and not m["got"] and m["src"].endswith("-off.svg?v=4") for m in g["ms"]), "[badges card] nothing yet: %s" % g
         await pg.click('#badgesCard [data-badge="first"]')
         assert await pg.evaluate("() => document.getElementById('badgeShare').hidden && !document.querySelector('#badgeOv .bdgModal').classList.contains('cel')"), "[badges card] nothing yet: no share, no celebration"
         await pg.context.close()
@@ -27088,7 +27089,7 @@ async def check_badges_card(p, errors):
         await pg.click('#badgesCard [data-badge="first"]')
         await pg.wait_for_selector("#badgeMStage img", timeout=10000)
         fb = await pg.evaluate("() => ({ on: document.getElementById('badgeOv').classList.contains('on'), svg: !!document.querySelector('#badgeMStage svg'), src: document.querySelector('#badgeMStage img').getAttribute('src'), cel: document.querySelector('#badgeOv .bdgModal').classList.contains('cel') })")
-        assert fb["on"] and not fb["svg"] and fb["src"] == "/badges/art/first.svg?v=3", "[badges fallback] art fetch aborted: the modal opens with the <img>: %s" % fb
+        assert fb["on"] and not fb["svg"] and fb["src"] == "/badges/art/first.svg?v=4", "[badges fallback] art fetch aborted: the modal opens with the <img>: %s" % fb
         await pg.context.close()
         state["art_fail"] = False
         print("[badges fallback] with every art request aborted the earned modal still opens and shows the plain <img> instead of the inline svg")
@@ -27357,6 +27358,105 @@ async def check_invite_card(p, errors):
         await pg.context.close()
         assert not [e for e in errs if "PAGEERROR" in e], "[invite card] page errors: %s" % errs
         print("[invite card] 'Invite friends' card right after Badges: exact text, mono link https://zaexa.com/app?ref=<lower-case address>, Copy link (Copied 1400ms / Copy failed), Share on X exact intent URL (noopener,noreferrer), '0 friends / 1 friend / 3 friends so far' from progress.ref and hidden until the doc loads, hidden on Solana and with no wallet, visible on Robinhood, no banned words")
+    finally:
+        await b.close()
+        srv.shutdown()
+
+
+async def check_folio_side(p, errors):
+    """[folio side layout] ستونِ کناریِ Portfolio: نشان‌ها و دعوت کنارِ کارتِ توکن‌ها (≥۱۱۰۰px)، چیدمانِ فشرده‌ی دعوت، و چیدمانِ عمودی در پنجره‌ی باریک."""
+    srv, origin = fb_serve()
+    b = await p.chromium.launch()
+    errs = []
+    try:
+        env = FbEnv(b, origin, errs)
+        st = {"ref": 3, "gate": None}
+        env.extra = bdg_extra_factory(st)
+        ACC = "0x1234567890ABCDEF1234567890abcdef12345678"
+        LINK = "https://zaexa.com/app?ref=" + ACC.lower()
+        CLIP = "Object.defineProperty(navigator, 'clipboard', {value: {writeText: async t => { window.__clip = t; }}, configurable: true});"
+        # دوازده ردیفِ ساختگی بعد از رندر، تا کارتِ توکن‌ها بلند شود (مثلِ پیش‌نمایش)
+        ROWS = "".join('<div class="frow"><span class="fchip"></span><span><span class="fsym">TKN%d</span><br><span class="fbal mono">1,234.56</span></span><span class="fval"><span class="u mono">$%d.20</span><br><span class="p mono">1.%d%%</span></span></div>' % (i, 100 + i, i) for i in range(12))
+
+        async def open_(vw, vh, hash_="#folio", connect=True, theme=None, rows=True):
+            pg = await env.open(hash_=hash_, vw=vw, vh=vh, init=[BDG_WALLET, CLIP, bdg_seen_js(BDG_IDS)])
+            await pg.wait_for_function("() => typeof E !== 'undefined' && !!E && typeof renderFolio === 'function'", timeout=20000)
+            if connect:
+                await pg.evaluate("(a) => { account = a; renderFolio(); }", ACC)
+                await pg.wait_for_function("() => !document.getElementById('inviteStatus').hidden", timeout=15000)
+            if theme:
+                await pg.evaluate("(t) => document.documentElement.setAttribute('data-theme', t)", theme)
+            if rows:
+                await pg.evaluate("(h) => { document.getElementById('folioBody').innerHTML = '<div class=\"flist\">' + h + '</div>'; }", ROWS)
+            await pg.wait_for_timeout(500)
+            return pg
+        GEO = """() => { const R = e => { const r = e.getBoundingClientRect(); return {l: r.left, r: r.right, t: r.top, b: r.bottom}; };
+            const v = document.getElementById('view-folio'), side = document.getElementById('folioSide'), bc = document.getElementById('badgesCard'), ic = document.getElementById('inviteCard');
+            const port = [...v.children].find(e => e.classList.contains('card') && !e.classList.contains('rhNa'));
+            const body = document.querySelector('#inviteCard .invBody'), cs = getComputedStyle(body);
+            const bodyR = body.getBoundingClientRect().right - parseFloat(cs.paddingRight);
+            const cells = [...document.querySelectorAll('#badgesBody .bdgC')].slice(0, 3);
+            const btns = [...document.querySelectorAll('#inviteCard .invAct>button')].map(R);
+            const lk = document.getElementById('inviteLink'), lh = parseFloat(getComputedStyle(lk).lineHeight) || parseFloat(getComputedStyle(lk).fontSize) * 1.2;
+            const stR = R(document.getElementById('inviteStatus'));
+            return { inSide: side.classList.contains('folioSide') && side.contains(bc) && side.contains(ic) && bc.nextElementSibling === ic, port: port && R(port), side: R(side), bc: R(bc), ic: R(ic),
+                     cols: new Set(cells.map(c => Math.round(c.getBoundingClientRect().left))).size, ncells: cells.length,
+                     bdgH: [...document.querySelectorAll('#badgesBody .bdgH')].map(e => getComputedStyle(e).display), btns, bodyR, stR,
+                     linkH: lk.clientHeight - parseFloat(getComputedStyle(lk).paddingTop) - parseFloat(getComputedStyle(lk).paddingBottom), lh, linkOver: lk.scrollWidth > lk.clientWidth, sw: document.documentElement.scrollWidth, iw: innerWidth,
+                     display: getComputedStyle(v).display, sideDisp: getComputedStyle(side).display, mainMax: getComputedStyle(document.querySelector('main')).maxWidth,
+                     portDisp: port ? getComputedStyle(port).display : null }; }"""
+
+        async def wide(theme):
+            pg = await open_(1440, 1000, theme=theme)
+            g = await pg.evaluate(GEO)
+            tag = "[folio side layout] 1440 " + (theme or "dark")
+            assert g["inSide"] and g["port"], tag + ": badges and invite cards are inside #folioSide, invite right after badges, portfolio card found: %s" % g
+            assert g["ic"]["t"] >= g["bc"]["b"] - 0.5, tag + ": invite card sits below the badges card: %s" % g
+            assert g["side"]["l"] >= g["port"]["r"] + 12, tag + ": side column left of %.1f is at least 12px right of the portfolio card right %.1f" % (g["side"]["l"], g["port"]["r"])
+            assert abs(g["side"]["t"] - g["port"]["t"]) <= 2, tag + ": side column and portfolio card tops equal within 2px: %s vs %s" % (g["side"]["t"], g["port"]["t"])
+            return pg, g, tag
+        pg, g, tag = await wide(None)
+        assert g["display"] == "grid", tag + ": #view-folio is a grid: %s" % g["display"]
+        assert g["ncells"] == 3 and g["cols"] == 3, tag + ": badges grid has 3 columns (3 distinct lefts among the first 3 cards): %s" % g
+        assert g["bdgH"] and all(d == "none" for d in g["bdgH"]), tag + ": .bdgH description hidden in the side column: %s" % g["bdgH"]
+        assert len(g["btns"]) == 2 and all(x["b"] - x["t"] <= 40 for x in g["btns"]), tag + ": invite buttons at most 40px tall: %s" % g["btns"]
+        assert abs(g["btns"][0]["t"] - g["btns"][1]["t"]) <= 2 and g["btns"][0]["r"] <= g["btns"][1]["l"] + 1, tag + ": Copy and Share on one row, Copy first: %s" % g["btns"]
+        assert abs(g["btns"][1]["r"] - g["bodyR"]) <= 2, tag + ": Share right edge within 2px of the invite body content right (%s vs %s)" % (g["btns"][1]["r"], g["bodyR"])
+        sc = (g["stR"]["t"] + g["stR"]["b"]) / 2
+        assert abs(sc - (g["btns"][0]["t"] + g["btns"][0]["b"]) / 2) <= 6 and g["stR"]["r"] <= g["btns"][0]["l"] + 1, tag + ": friends line on the buttons' row and left of Copy: %s %s" % (g["stR"], g["btns"])
+        assert g["linkH"] < 2 * g["lh"], tag + ": invite link is one line (content height %s, line-height %s)" % (g["linkH"], g["lh"])
+        await pg.click("#inviteCopy")
+        assert await pg.evaluate("() => window.__clip") == LINK, tag + ": Copy still writes the FULL link"
+        assert g["sw"] <= g["iw"], tag + ": no horizontal overflow (%s > %s)" % (g["sw"], g["iw"])
+        assert g["mainMax"] == "1360px", tag + ": main widens to 1360px: %s" % g["mainMax"]
+        await pg.context.close()
+        pg, g, tag = await wide("light")
+        await pg.context.close()
+        pg, g, tag = await wide("dark")
+        await pg.context.close()
+        # باریک: عمودی، توضیحِ نشان‌ها دیده می‌شود
+        pg = await open_(1000, 900)
+        g = await pg.evaluate(GEO)
+        assert g["display"] == "flex", "[folio side layout] 1000: #view-folio stays a stacked flex: %s" % g["display"]
+        assert g["inSide"] and g["side"]["t"] >= g["port"]["b"] - 0.5, "[folio side layout] 1000: side column below the portfolio card: %s" % g
+        assert g["bdgH"] and all(d != "none" for d in g["bdgH"]), "[folio side layout] 1000: .bdgH stays visible below 1100px: %s" % g["bdgH"]
+        assert g["sw"] <= g["iw"], "[folio side layout] 1000: no horizontal overflow"
+        await pg.context.close()
+        # بدونِ کیف
+        pg = await open_(1440, 1000, connect=False, rows=False)
+        await pg.evaluate("() => renderFolio()")
+        await pg.wait_for_timeout(600)
+        g = await pg.evaluate(GEO)
+        assert g["display"] != "grid" and g["sideDisp"] == "none" and g["mainMax"] == "1140px", "[folio side layout] no wallet: not a grid, #folioSide hidden, main max-width 1140px: %s %s %s" % (g["display"], g["sideDisp"], g["mainMax"])
+        await pg.context.close()
+        # Robinhood
+        pg = await open_(1440, 1000, hash_="#folio?chain=robinhood")
+        g = await pg.evaluate(GEO)
+        assert await pg.evaluate("() => document.documentElement.hasAttribute('data-rh')"), "[folio side layout] Robinhood: data-rh set"
+        assert g["sideDisp"] != "none" and g["side"]["b"] > g["side"]["t"] and g["portDisp"] == "none", "[folio side layout] Robinhood: side column visible, portfolio card hidden: %s" % g
+        await pg.context.close()
+        assert not [e for e in errs if "PAGEERROR" in e], "[folio side layout] page errors: %s" % errs
+        print("[folio side layout] 1440 (light and dark): grid, badges+invite in #folioSide beside the portfolio card (tops equal, 12px gap, no overflow), 3-column badges with hidden descriptions, compact one-row invite buttons aligned to the content edge, one-line link with full-link Copy; 1000 stacked with descriptions; no wallet hides the column (main 1140px); Robinhood shows it with the portfolio card hidden")
     finally:
         await b.close()
         srv.shutdown()
