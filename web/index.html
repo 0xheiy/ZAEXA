@@ -1857,9 +1857,9 @@ html[data-rh] .rhNa{display:block}
 .rhNaHead{display:flex;align-items:center;gap:10px;padding:16px 16px 0}
 /* کارتِ اعلان عمداً کلاس‌های card/ttl ندارد تا هیچ انتخابگرِ موجودِ Base/Solana (و آزمون‌هایشان) آن را نگیرد */
 /* BADGES:CSS:BEGIN — ۲۴ نوامبر. جز مودالِ نشان، بدونِ glow/halo (قاعده‌ی سایت): خودِ هنرِ مدال سایه‌ی خودش را دارد. */
-#badgesCard[hidden]{display:none!important}
+#badgesCard[hidden],#inviteCard[hidden]{display:none!important}
 #badgesBody .bdgMsg{padding:6px 20px 20px;color:var(--tx2);font-size:14px}
-.bdgGrid{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:14px;padding:6px 20px 20px}
+.bdgGrid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px;padding:6px 20px 20px}
 .bdgC{all:unset;box-sizing:border-box;cursor:pointer;display:flex;flex-direction:column;background:var(--card2);border:1px solid var(--line);border-radius:18px;padding:14px 14px 12px;min-width:0;transition:transform .2s}
 .bdgC:hover{transform:translateY(-2px)}
 .bdgC:focus-visible{outline:2px solid var(--acc);outline-offset:2px}
@@ -1911,13 +1911,23 @@ html[data-rh] .rhNa{display:block}
 @keyframes bdgHalo{0%{opacity:0;transform:scale(.6)}40%{opacity:.55}100%{opacity:.28;transform:none}}
 @keyframes bdgSway1{50%{transform:rotate(-17deg)}} @keyframes bdgSway2{50%{transform:rotate(5deg)}} @keyframes bdgSway3{50%{transform:rotate(17deg)}}
 @media(prefers-reduced-motion:reduce){.bdgModal.cel .bdgB,.bdgModal.cel .bdgPt,.bdgModal.cel .lt,.bdgModal.cel .gl,.bdgModal.cel .bdgRev>*,.bdgBeams i{animation:none!important}.bdgModal.cel .lt{stroke-dashoffset:0}.bdgModal.cel .gl,.bdgModal.cel .bdgRev>*{opacity:1;transform:none}.bdgModal.cel .bdgBeams{animation:none;opacity:1}.bdgModal.cel .bdgHalo{animation:none;opacity:.28}}
+.invBody{padding:6px 20px 20px}
+.invTx{margin:0 0 12px;color:var(--tx2);font-size:14px;line-height:1.6}
+.invLink{display:block;font-size:12.5px;color:var(--tx);padding:11px 14px;border-radius:14px;background:var(--bg);box-shadow:inset 2px 2px 5px var(--soft-lo),inset -2px -2px 5px var(--soft-hi);overflow-wrap:anywhere;user-select:all}
+.invAct{display:flex;gap:10px;flex-wrap:wrap;margin-top:12px}.invAct>button{flex:1 1 160px;width:auto;margin:0;box-sizing:border-box;justify-content:center;text-align:center;padding:12px 16px}
+.invSt{margin-top:12px;font-size:12.5px;color:var(--tx3)}
 /* BADGES:CSS:END */
 .rhCard{background:var(--card);border-radius:22px;box-shadow:var(--sh);overflow:hidden}
+/* ۲۵ نوامبر — باگِ زنده: .rhNa{overflow:visible} بالاتر است و همین .rhCard (overflow:hidden) آن را می‌برد؛ منوی شبکه که داخلِ کارتِ کوتاهِ اعلان نشسته بود بریده می‌شد. قاعده‌ی هم‌وزن و بعد از .rhCard؛ .rhCard جاهای دیگر دست‌نخورده. منوی باز بالای محتوای بعدی می‌ماند. */
+.rhNa.rhCard{overflow:visible}
+.rhNa.rhCard:has(#srcPop.on){position:relative;z-index:5}
 .rhNaTtl{font-size:15.5px;font-weight:660;color:var(--tx)}
 .rhNaHead [data-rhslot]{flex:none}
 .rhNaTx{margin:0;padding:14px 20px 20px;color:var(--tx2);font-size:14px;line-height:1.6}
-html[data-rh] #view-stocks>*:not(.rhNa),html[data-rh] #view-exit>*:not(.rhNa),html[data-rh] #view-folio>*:not(.rhNa):not(#badgesCard),
+html[data-rh] #view-exit>*:not(.rhNa),html[data-rh] #view-folio>*:not(.rhNa):not(#badgesCard):not(#inviteCard),
 html[data-rh] #view-swap>#rhHero{display:none!important}
+/* ۲۵ نوامبر — سهامِ Robinhood: فیدِ مرجع (Chainlink) وصل نیست؛ سرستون و سلول‌های «Reference» پنهان‌اند. */
+html[data-rh] #view-stocks .colRef{display:none}
 /* نوارِ Market watch فقط برای Base/Solana معنا دارد (ETH/AERO/cbBTC)؛ روی Robinhood بدونِ داده بود و «—» نشان می‌داد */
 html[data-rh] .marketWatch{display:none!important}
 #rhHero{display:none}
@@ -2583,6 +2593,15 @@ try{(function(){
     <header><span class="ttl">Badges</span><span class="grow"></span><span class="ttl mono" id="badgesCount"></span></header>
     <div id="badgesBody" aria-live="polite"></div>
   </section>
+  <section class="card" id="inviteCard" hidden>
+    <header><span class="ttl">Invite friends</span></header>
+    <div class="invBody">
+      <p class="invTx">Share your link. When a friend's first swap of $5 or more on Zaexa goes through it, your invite is written into their swap on-chain and counts toward your Friend badges.</p>
+      <span class="invLink mono" id="inviteLink"></span>
+      <div class="invAct"><button class="chip" id="inviteCopy" type="button">Copy link</button><button class="cta" id="inviteShare" type="button">Share on X</button></div>
+      <div class="invSt" id="inviteStatus" hidden></div>
+    </div>
+  </section>
   <!-- BADGES:HTML:END -->
   <p style="padding:0 6px;color:var(--tx3);font-size:12px;margin:0">
     Balances are read straight from the chain and refresh on their own. Prices come from
@@ -2655,15 +2674,11 @@ try{(function(){
 </div>
 
 <!-- =====================================================================
-     ۷ اکتبر — نمای «US stocks»: فهرستِ هر زنجیره از داده (STK / STK_SOL) ساخته می‌شود.
+     ۷ اکتبر — نمای «US stocks»: فهرستِ هر زنجیره از داده (STK / STK_SOL / STK_RH) ساخته می‌شود.
      قیمت از کوترِ Slipstream (tickSpacing ۱۰) و مرجع از Chainlink، هر دو در یک
      دسته‌ی multicall؛ حجم و تغییرِ ۲۴ساعته از یک درخواستِ GeckoTerminal.
      ===================================================================== -->
 <div class="view" id="view-stocks">
-  <section class="rhNa rhCard" data-rhna role="status">
-    <div class="rhNaHead"><span class="rhNaTtl">US stocks</span><span class="grow"></span><div data-rhslot></div></div>
-    <p class="rhNaTx" data-rhtx>Not available on Robinhood Chain yet</p>
-  </section>
   <section class="card">
     <header>
       <span class="ttl">US stocks</span>
@@ -3227,11 +3242,23 @@ function withBuilderCode(data){
   const d=String(data||"0x"), sfx=BASE_BUILDER_SUFFIX.slice(2);
   return d.toLowerCase().endsWith(sfx)?d:d+sfx;
 }
+/* دعوت: blob = آدرسِ دعوت‌کننده + 5a585201 پیش از پسوندِ Builder Code؛ تابعِ خالص و خطای ذخیره‌ساز = خاموش. */
+const REF_KEY="zx.ref",REF_MAGIC="5a585201";
+function storedRef(){
+  try{const v=localStorage.getItem(REF_KEY);return /^0x[0-9a-fA-F]{40}$/.test(v||"")&&!/^0x0{40}$/.test(v)?v.toLowerCase():null;}catch(e){return null;}
+}
+function withRef(data,account){
+  const d=String(data||"0x"),r=storedRef();
+  if(!r||String(account||"").toLowerCase()===r)return d;
+  const blob=r.slice(2)+REF_MAGIC,dl=d.toLowerCase();
+  if(dl.endsWith(blob)||dl.endsWith(blob+BASE_BUILDER_SUFFIX.slice(2)))return d;
+  return d+blob;
+}
 /* runner برای Contractِ executor: فقط estimateGas و sendTransaction پسوند می‌گیرند،
    پس تخمین گس روی همان data نهایی است. call (شبیه‌سازی staticCall) دست‌نخورده است.
    به signer تنبل ارجاع می‌دهد تا با signer واقعیِ ethers و هر دوبلِ تستی کار کند. */
 function builderRunner(sg){
-  const tag=tx=>({...tx,data:withBuilderCode(tx&&tx.data)});
+  const tag=tx=>{const d=withRef(tx&&tx.data,account);return{...tx,data:CHAIN.id===8453?withBuilderCode(d):d};};   // Builder Code فقط روی Base و همیشه آخر
   return{
     get provider(){return sg&&sg.provider;},
     getAddress:(...a)=>sg.getAddress(...a),
@@ -5144,6 +5171,24 @@ let devNotice="";
     history.replaceState(null,"",u.pathname+u.search+u.hash);
   }catch{}
 })();
+/* دعوت: ?ref در بوت یک بار خوانده می‌شود (اولین لمس برنده) و فقط همان پارامتر از نشانی برداشته می‌شود، پیش از applyShareParams. */
+(function(){
+  try{
+    const q=location.search.replace(/^\?/,"");
+    if(!q)return;
+    const parts=q.split("&"),keep=[];let val=null,had=false;
+    for(const x of parts){
+      const k=x.split("=")[0];
+      if(k==="ref"){had=true;if(val===null)val=decodeURIComponent(x.slice(4));}
+      else if(x!=="")keep.push(x);
+    }
+    if(!had)return;
+    if(/^0x[0-9a-fA-F]{40}$/.test(val||"")&&!/^0x0{40}$/.test(val)){
+      try{if(!localStorage.getItem(REF_KEY))localStorage.setItem(REF_KEY,val.toLowerCase());}catch(e){}
+    }
+    history.replaceState(history.state,"",location.pathname+(keep.length?"?"+keep.join("&"):"")+location.hash);
+  }catch(e){}
+})();
 let evLast=Object.create(null);
 function ev(name,detail,chain){
   if(!EV_ENABLED||evOff()||!evUrl)return;
@@ -6414,10 +6459,10 @@ function placeNetworkControl(){
   if(!menu||!bar)return;
   const inSwap=!tokenPage&&view==="swap";
   let destination;
-  /* Robinhood: Portfolio/Stocks/Exit/Exit Report فقط اعلان دارند؛ انتخابگر داخلِ همان کارتِ اعلان می‌نشیند تا راهِ برگشت بسته نشود.
+  /* Robinhood: Portfolio/Exit/Exit Report فقط اعلان دارند (Stocks از ۲۵ نوامبر کارتِ واقعی دارد و از #stocksNetworkSlot می‌گیرد)؛ انتخابگر داخلِ همان کارتِ اعلان می‌نشیند تا راهِ برگشت بسته نشود.
      Swap اعلان ندارد: کارتِ سواپِ Robinhood (#rhSwap) مثلِ Base/Solana نوارِ #swapNetworkBar را در جایگاهِ خودش (#rhSwapNetworkSlot) می‌گیرد.
      Flow تابلوی واقعی دارد و مثلِ Base/Solana از فضای خودش (fbNetSlot) استفاده می‌کند. */
-  const rhSlot=activeChain==="robinhood"&&!tokenPage&&["folio","stocks","exit","rhreport"].includes(view)
+  const rhSlot=activeChain==="robinhood"&&!tokenPage&&["folio","exit","rhreport"].includes(view)
     ?document.querySelector("#view-"+view+" [data-rhslot]"):null;
   if(rhSlot){
     destination=rhSlot;
@@ -8786,16 +8831,19 @@ function refreshSolanaViews(){
 
 /* BADGES:BEGIN — ۲۴ نوامبر. نشان‌های Portfolio؛ فقط از GET /badges/<کیف>.json (خوانده‌شده از زنجیره توسط Worker).
    هرگز از ذخیره‌ی مرورگر یا ادعای کاربر. هیچ رویدادِ آماریِ تازه‌ای نیست. شکستِ خواندن = «نمی‌شود خواند»، نه «هیچ نشانی نیست». */
-const BADGE_ART_V="2";
-const BADGE_COL={first:["#22EFF6","#C56CF5"],base:["#4f8cff","#9fc4ff"],rh:["#3ee08f","#c7f36b"],stock:["#ffcf6b","#ff8a5c"],ten:["#c56cf5","#ff7ad9"]};
+const BADGE_ART_V="3";
+const BADGE_COL={first:["#22EFF6","#C56CF5"],base:["#4f8cff","#9fc4ff"],rh:["#3ee08f","#c7f36b"],stock:["#ffcf6b","#ff8a5c"],ten:["#c56cf5","#ff7ad9"],ref1:["#ff6b9a","#ffc2d6"],ref10:["#ff8a5c","#ffd36b"]};
 const BADGE_DEF=[
   {id:"first",title:"First swap",how:"Make one swap of $5 or more through Zaexa, on Base or Robinhood Chain.",got:"making your first swap of $5 or more through Zaexa."},
   {id:"base",title:"Base trader",how:"Swap $5 or more on Base through Zaexa.",got:"swapping $5 or more on Base through Zaexa."},
   {id:"rh",title:"Robinhood trader",how:"Swap $5 or more on Robinhood Chain through Zaexa.",got:"swapping $5 or more on Robinhood Chain through Zaexa."},
-  {id:"stock",title:"Stock buyer",how:"Buy a tokenized stock, like TSLAc, through Zaexa — $5 or more.",got:"buying a tokenized stock through Zaexa."},
-  {id:"ten",title:"10 swaps",how:"Make ten swaps through Zaexa, each $5 or more.",got:"making ten swaps of $5 or more through Zaexa."}
+  {id:"stock",title:"Stock buyer",how:"Buy a tokenized stock, like TSLA, through Zaexa on Base or Robinhood Chain — $5 or more.",got:"buying a tokenized stock through Zaexa."},
+  {id:"ten",title:"10 swaps",how:"Make ten swaps through Zaexa, each $5 or more.",got:"making ten swaps of $5 or more through Zaexa."},
+  {id:"ref1",title:"First friend",how:"Share your invite link. A friend counts when their first swap of $5 or more on Zaexa goes through it.",got:"inviting a friend whose first swap on Zaexa went through your link."},
+  {id:"ref10",title:"Ten friends",how:"Ten different friends whose first $5+ swap on Zaexa went through your invite link.",got:"inviting ten friends whose first swaps on Zaexa went through your link."}
 ];
 const BADGE_RULE="Counted when one side of the swap is ETH or a stablecoin and it is worth $5 or more. Read from the chain; updates within an hour.";
+const BADGE_RULE_REF="Read from the swap itself: your invite is written into your friend's swap transaction. Only their first swap of $5 or more counts, and inviting yourself doesn't.";
 const BADGE_MON=["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
 let badgesSeq=0,badgesDoc=null,badgesAt=0,badgesOpenId=null,badgesLastFocus=null,badgesOpenSeq=0,badgesQueue=[];
 const badgesArtCache=new Map();
@@ -8816,13 +8864,15 @@ function badgesPaint(){
   const body=$("badgesBody"),cnt=$("badgesCount");
   if(!badgesDoc){return;}
   const n=badgesDoc.badges.filter(b=>b.state==="got").length;
-  cnt.textContent=n+" of 5";
+  cnt.textContent=n+" of "+BADGE_DEF.length;
+  inviteStatus();
   body.innerHTML='<div class="bdgGrid">'+BADGE_DEF.map(d=>{
     const v=badgeView(d.id),b=badgesDoc.badges.find(x=>x.id===d.id);
     let st;
     if(v.got)st="Got it · <b>"+esc(badgeDate(b.ts))+"</b>";
     else if(b.state==="pending")st="Still reading history";
     else if(d.id==="ten"&&badgesDoc.progress&&badgesDoc.progress.ten>0){const k=Math.min(10,badgesDoc.progress.ten);st=k+" / 10 swaps"+'<i class="bdgBar"><b style="width:'+(k*10)+'%"></b></i>';}
+    else if(d.id==="ref10"&&badgesDoc.progress&&badgesDoc.progress.ref>0){const k=Math.min(10,badgesDoc.progress.ref);st=k+" / 10 friends"+'<i class="bdgBar"><b style="width:'+(k*10)+'%"></b></i>';}
     else st="Not yet";
     return '<button type="button" class="bdgC'+(v.got?" got":"")+'" data-badge="'+d.id+'">'
       +'<span class="bdgArt"><img src="/badges/art/'+d.id+(v.got?"":"-off")+'.svg?v='+BADGE_ART_V+'" alt="" width="200" height="200" loading="lazy"></span>'
@@ -8865,7 +8915,7 @@ async function badgeOpen(id,celebrate){
   m.style.setProperty("--c1",col[0]);m.style.setProperty("--c2",col[1]);
   $("badgeMTitle").textContent=v.def.title;
   $("badgeMStat").textContent=v.status;
-  $("badgeMRule").textContent=BADGE_RULE;
+  $("badgeMRule").textContent=(id==="ref1"||id==="ref10")?BADGE_RULE_REF:BADGE_RULE;
   const who=$("badgeMWho"),sh=$("badgeShare"),cp=$("badgeCopy"),stage=$("badgeMStage");
   if(v.got){
     $("badgeMLab").textContent=celebrate?"NEW BADGE":"BADGE";
@@ -8919,21 +8969,24 @@ function badgesAutoShow(addr){
 async function renderBadges(){
   const card=$("badgesCard");
   if(!card)return;
-  if(!account||activeChain==="solana"){card.hidden=true;badgesSeq++;return;}
+  const inv=$("inviteCard");
+  if(!account||activeChain==="solana"){card.hidden=true;if(inv)inv.hidden=true;badgesSeq++;return;}
   card.hidden=false;
+  if(inv){inv.hidden=false;$("inviteLink").textContent=inviteLink();inviteStatus();}
   const addr=String(account).toLowerCase(),seq=++badgesSeq,body=$("badgesBody");
   if(badgesDoc&&badgesDoc.address===addr&&Date.now()-badgesAt<60000){badgesPaint();return;}
-  if(!badgesDoc||badgesDoc.address!==addr){badgesDoc=null;$("badgesCount").textContent="";body.innerHTML='<div class="bdgMsg"><span class="spin"></span>Reading badges…</div>';}
+  if(!badgesDoc||badgesDoc.address!==addr){badgesDoc=null;$("badgesCount").textContent="";body.innerHTML='<div class="bdgMsg"><span class="spin"></span>Reading badges…</div>';inviteStatus();}
   let doc=null;
   try{
     const r=await withTimeout(fetch(v4Origin()+"/badges/"+addr+".json",{headers:{accept:"application/json"}}),15000);
-    if(r.ok){const j=await r.json();if(j&&j.address===addr&&Array.isArray(j.badges)&&j.badges.length===5)doc=j;}
+    if(r.ok){const j=await r.json();if(j&&j.address===addr&&Array.isArray(j.badges)&&j.badges.length===BADGE_DEF.length)doc=j;}
   }catch(e){doc=null;}
   if(seq!==badgesSeq)return;
   if(!doc){
     if(badgesDoc&&badgesDoc.address===addr){badgesPaint();return;}   // یک خوانشِ قبلیِ همین کیف هنوز درست است
     badgesDoc=null;$("badgesCount").textContent="";
     body.innerHTML='<div class="bdgMsg">Badges could not be read right now</div>';
+    inviteStatus();
     return;
   }
   badgesDoc=doc;badgesAt=Date.now();badgesPaint();
@@ -8950,6 +9003,28 @@ $("badgeShare").onclick=()=>{
 };
 $("badgeCopy").onclick=async()=>{
   const btn=$("badgeCopy"),u=badgesLink();
+  let ok=false;
+  try{await navigator.clipboard.writeText(u);ok=true;}catch(e){ok=false;}
+  btn.textContent=ok?"Copied":"Copy failed";
+  setTimeout(()=>{btn.textContent="Copy link";},1400);
+};
+/* دعوت: لینکِ کیفِ وصل‌شده و شمارِ دوستان از progress.ref. */
+function inviteLink(){return account?"https://zaexa.com/app?ref="+String(account).toLowerCase():"";}
+function inviteStatus(){
+  const el=$("inviteStatus");
+  if(!el)return;
+  if(!account||!badgesDoc||badgesDoc.address!==String(account).toLowerCase()||!badgesDoc.progress){el.hidden=true;return;}
+  const n=Number(badgesDoc.progress.ref)||0;
+  el.textContent=n+" friend"+(n===1?"":"s")+" so far";
+  el.hidden=false;
+}
+$("inviteShare").onclick=()=>{
+  const u=inviteLink();
+  if(!u)return;
+  window.open("https://x.com/intent/tweet?text="+encodeURIComponent("Swap on Zaexa")+"&url="+encodeURIComponent(u),"_blank","noopener,noreferrer");
+};
+$("inviteCopy").onclick=async()=>{
+  const btn=$("inviteCopy"),u=inviteLink();
   let ok=false;
   try{await navigator.clipboard.writeText(u);ok=true;}catch(e){ok=false;}
   btn.textContent=ok?"Copied":"Copy failed";
@@ -11659,7 +11734,7 @@ async function doSwap(){
       setBusy(false);refreshButton();ev("swap:blocked","","base");return;}
 
     const deadline=BigInt(Math.floor(Date.now()/1000)+Math.max(1,deadlineMin)*60);
-    const exec=new E.Contract(CHAIN.executor,ABI.executor,CHAIN.id===8453?builderRunner(signer):signer);   // Builder Code فقط روی Base
+    const exec=new E.Contract(CHAIN.executor,ABI.executor,builderRunner(signer));   // دعوت روی هر دو زنجیره؛ Builder Code فقط روی Base
     setBusy(true,"Simulating…");
     const cands=[{label:"best",plan:fresh,parts:buildParts(fresh),minOut:minOutOf(fresh)}];
     (fresh.allRoutes||[]).slice(0,4).forEach(r=>{
@@ -11752,7 +11827,7 @@ async function doSwap(){
       ? (async()=>{
           const data0=iExec.encodeFunctionData("executeSwap",
             [asArg(tokenIn),asArg(tokenOut),amountIn,chosen.minOut,chosen.parts,deadline]);
-          const data=CHAIN.id===8453?withBuilderCode(data0):data0;   // Builder Code فقط روی Base
+          const data=CHAIN.id===8453?withBuilderCode(withRef(data0,account)):withRef(data0,account);   // دعوت روی هر دو زنجیره؛ Builder Code فقط روی Base
           const p={from:account,to:E.getAddress(CHAIN.executor),data};
           if(isNative(tokenIn))p.value="0x"+amountIn.toString(16);
           if(sentAnyway)p.gas="0x"+(1500000).toString(16);
@@ -14473,6 +14548,54 @@ const STK_SOL=[
   {sym:"STRCx",name:"Strategy Preferred",mint:"Xs78JED6PFZxWc2wCEPspZW9kL3Se5J7L5TChKgsidH",feed:null},
   {sym:"TSLAx",name:"Tesla",mint:"XsDoVfqeBukxuZHWhdvWHBhgEHjGNst4MLodqsJHzoB",feed:"0xFaf869185383a24F8cb00e27BdA6b63B9905DCb4"},
 ];
+/* فهرستِ Robinhood Chain (۲۵ نوامبر ۲۰۲۶): منبع = docs.robinhood.com/chain/contracts ∩ GeckoTerminal با ذخیره ≥ ۱۰۰ هزار دلار؛
+   از ۲۰۵ توکنِ رسمی ۴۲ تا فهرست شد، به ترتیبِ نقدینگی. اعشارِ همه ۱۸. مرجعِ Chainlink وصل نیست (ستونِ Reference روی Robinhood پنهان است).
+   توکن‌ها به فهرستِ سواپِ Robinhood هم اضافه می‌شوند (فقط BOOT_RH؛ فهرستِ Base دست‌نخورده). */
+const STK_RH=[
+  {sym:"NVDA",name:"NVIDIA",address:"0xd0601CE157Db5bdC3162BbaC2a2C8aF5320D9EEC"},
+  {sym:"SPY",name:"SPDR S&P 500 ETF Trust",address:"0x117cc2133c37B721F49dE2A7a74833232B3B4C0C"},
+  {sym:"SPCX",name:"Space Exploration Technologies Corp.",address:"0x4a0E65A3EcceC6dBe60AE065F2e7bb85Fae35eEa"},
+  {sym:"QQQ",name:"Invesco QQQ",address:"0xD5f3879160bc7c32ebb4dC785F8a4F505888de68"},
+  {sym:"ANT",name:"Anthropic, PBC",address:"0xbbB6c29bCc3a1028A2B54310DF73F4F7A3bcB373"},
+  {sym:"META",name:"Meta Platforms",address:"0xc0D6457C16Cc70d6790Dd43521C899C87ce02f35"},
+  {sym:"GLD",name:"SPDR Gold Trust",address:"0xC9a981FEE1F9DEc688bb123ccDeCc63D0deBFC4e"},
+  {sym:"GOOGL",name:"Alphabet Class A",address:"0x2e0847E8910a9732eB3fb1bb4b70a580ADAD4FE3"},
+  {sym:"TSLA",name:"Tesla",address:"0x322F0929c4625eD5bAd873c95208D54E1c003b2d"},
+  {sym:"GME",name:"GameStop",address:"0x1b0E319c6A659F002271B69dB8A7df2F911c153E"},
+  {sym:"USO",name:"United States Oil Fund",address:"0xa30FA36Db767ad9eD3f7a60fC79526fB4d56D344"},
+  {sym:"MSTR",name:"Strategy Inc.",address:"0xec262a75e413fAfD0dF80480274532C79D42da09"},
+  {sym:"AAPL",name:"Apple",address:"0xaF3D76f1834A1d425780943C99Ea8A608f8a93f9"},
+  {sym:"AMC",name:"AMC Entertainment",address:"0x05a3d1Cd21d0C88145E82600E62e7E496e0F222B"},
+  {sym:"COIN",name:"Coinbase",address:"0x6330D8C3178a418788dF01a47479c0ce7CCF450b"},
+  {sym:"AMZN",name:"Amazon",address:"0x12f190a9F9d7D37a250758b26824B97CE941bF54"},
+  {sym:"MU",name:"Micron Technology",address:"0xfF080c8ce2E5feadaCa0Da81314Ae59D232d4afD"},
+  {sym:"PLTR",name:"Palantir Technologies",address:"0x894E1EC2D74FFE5AEF8Dc8A9e84686acCB964F2A"},
+  {sym:"MSFT",name:"Microsoft",address:"0xe93237C50D904957Cf27E7B1133b510C669c2e74"},
+  {sym:"HIMS",name:"Hims & Hers Health",address:"0xCceE82fE024c36fA15E1005edE3E9e4787e23D09"},
+  {sym:"TTWO",name:"Take-Two Interactive Software",address:"0x5e81213613b6B86EaB4c6c50d718d34359459786"},
+  {sym:"DJT",name:"Trump Media & Technology Group",address:"0x1D11f0496982706C5e14A514D4E79F2e6BdE4516"},
+  {sym:"AMD",name:"AMD",address:"0x86923f96303D656E4aa86D9d42D1e57ad2023fdC"},
+  {sym:"INTC",name:"Intel",address:"0xc72b96e0E48ecd4DC75E1e45396e26300BC39681"},
+  {sym:"RDDT",name:"Reddit",address:"0x05b37Fb53A299a1b874A619e1c4C404D52C36F4C"},
+  {sym:"SGOV",name:"iShares 0-3 Month Treasury Bond ETF",address:"0x92FD66527192E3e61d4DDd13322Aa222DE86F9B5"},
+  {sym:"TSM",name:"Taiwan Semiconductor Manufacturing",address:"0x58FfE4a942d3885bAa22D7520691F611EF09e7AA"},
+  {sym:"CRCL",name:"Circle Internet Group",address:"0xdF0992E440dD0be65BD8439b609d6D4366bf1CB5"},
+  {sym:"RBLX",name:"Roblox",address:"0xF0C4BF4C582cb3836e98394b1d4e7B7281101bE8"},
+  {sym:"SLV",name:"iShares Silver Trust",address:"0x411eFb0E7f985935DAec3D4C3ebaEa0d0AD7D89f"},
+  {sym:"MRNA",name:"Moderna",address:"0x43B07D15cE533bEc5476d70C22a78a1B2B662155"},
+  {sym:"LLY",name:"Eli Lilly",address:"0x8005d266423c7ea827372c9c864491e5786600ea"},
+  {sym:"COST",name:"Costco",address:"0x4EA005168D7F09a7A0Ba9D1DEf21a479950E44C2"},
+  {sym:"TTEQ",name:"T. Rowe Price Technology ETF",address:"0x80E10255A83B257F5A8674D363F547842aa53b8e"},
+  {sym:"LULU",name:"Lululemon",address:"0x4e62068525Ab11FE768e29dfD00ef909B9803016"},
+  {sym:"AVGO",name:"Broadcom",address:"0x156E175DD063a8cE274C50654eF40e0032b3fbcF"},
+  {sym:"NFLX",name:"Netflix",address:"0xE0444EF8BF4eD74f74FD73686e2ddF4C1c5591E8"},
+  {sym:"SNAP",name:"Snap",address:"0xF6589F11Bc40b669e584073F428B05562F568733"},
+  {sym:"SNDK",name:"Sandisk Corporation",address:"0xB90A19fF0Af67f7779afF50A882A9CfF42446400"},
+  {sym:"IBM",name:"IBM",address:"0x980dcf6766FA79f5Cf0c4AAdb3ab477ff15a9619"},
+  {sym:"BABA",name:"Alibaba",address:"0xad25Ac6C84D497db898fa1E8387bf6Af3532a1c4"},
+  {sym:"SKHY",name:"SK hynix ADS",address:"0x84CAb63bc87912E71ad199ff14A0bA45de68FeF8"},
+];
+if(BOOT_RH)BASE_TOKENS.push(...STK_RH.map(s=>({symbol:s.sym,name:s.name,address:s.address,decimals:18})));
 const STK_FEED_ABI=["function latestRoundData() view returns (uint80 roundId,int256 answer,uint256 startedAt,uint256 updatedAt,uint80 answeredInRound)"];
 const STK_REFRESH_MS=60000,STK_RETRY_MS=15000;
 const stkFresh=()=>({px:{},ref:{},vol:{},chg:{},logo:{},refAt:0,gtOk:false,loaded:false,failed:false});
@@ -14501,7 +14624,11 @@ function stkAgo(sec){
   const h=Math.floor(m/60);
   return h<24?h+"h":Math.floor(h/24)+"d";
 }
-const stkList=()=>activeChain==="solana"?STK_SOL:STK;
+const stkList=()=>activeChain==="solana"?STK_SOL:activeChain==="robinhood"?STK_RH:STK;
+// زنجیره‌های «فقط GeckoTerminal» (بدونِ multicall و Chainlink روی خودِ زنجیره): سولانا و Robinhood. یک مسیرِ کد برای هر دو.
+const stkGt=()=>activeChain==="solana"||activeChain==="robinhood";
+// کلیدِ ردیف در پاسخ GT: mintِ سولانا عیناً (حساس به حروف)، آدرسِ Robinhood با حروفِ کوچک.
+const stkKey=s=>activeChain==="solana"?s.mint:s.address.toLowerCase();
 function stkPaint(){
   const d=stkData;
   const L=stkList(),anyPx=L.some(s=>d.px[s.sym]>0),anyRef=L.some(s=>d.ref[s.sym]>0);
@@ -14609,7 +14736,7 @@ async function stocksLoad(){
   await Promise.all([chainP,gtP]);
   return !gotAny;
 }
-// سولانا: قیمت و حجم از GeckoTerminal، تغییرِ ۲۴ساعته از استخرِ برتر، مرجع از فیدِ Chainlink روی Base (دستهٔ JSON-RPC دستی؛ بدون ethers).
+// سولانا و Robinhood (stocksLoadGt): قیمت و حجم از GeckoTerminal، تغییرِ ۲۴ساعته از استخرِ برتر، مرجع از فیدِ Chainlink روی Base (دستهٔ JSON-RPC دستی؛ بدون ethers).
 const stkNum=x=>(x==null||x==="")?NaN:Number(x);
 // اندازه‌گیری روی سایت زنده (۱۰ اکتبر): دسته‌ی JSON-RPC روی publicnode «Failed to fetch»، روی meowrpc خطای ۴۰۰ غیر JSON و روی drpc
 // آرایه‌ای از خطاها (HTTP 500) می‌دهد؛ تک‌درخواست‌ها روی publicnode و drpc ۱۰ از ۱۰ جواب می‌دهند. پس هر فید جدا و موازی؛ فقط فیدهای جامانده به اندپوینت بعدی می‌روند.
@@ -14640,47 +14767,76 @@ async function stkRefBatch(){
   }
   return Object.keys(ref).length?{ref,refAt}:null;
 }
-async function stocksLoadSol(){
-  const seq=++stkSeq;
+// سقفِ هر درخواستِ دسته‌ای GT: ۲۵ کلید و (برای پراکسی) کمتر از ۱۲۰۰ نویسه در کلِ مسیر. طولِ مسیر از روی خودِ کلیدها حساب می‌شود
+// (شناسه‌ی استخرِ v4 = ۶۶ نویسه، v3 = ۴۲)، نه با عددِ حدسی.
+const STK_GT_MAX=25,STK_GT_PATH=1199;
+function stkChunks(keys,tail){
+  const room=STK_GT_PATH-(new URL(GT).pathname+tail).length,out=[];
+  let cur=[],len=0;
+  for(const k of keys){
+    const add=(cur.length?1:0)+k.length;
+    if(cur.length&&(cur.length>=STK_GT_MAX||len+add>room)){out.push(cur);cur=[];len=0;}
+    len+=(cur.length?1:0)+k.length;cur.push(k);
+  }
+  if(cur.length)out.push(cur);
+  return out;
+}
+async function stocksLoadGt(){
+  const seq=++stkSeq,net=activeChain,L=stkList(),sol=net==="solana";
   stkPaintLogos();   // لوگوهای نگه‌داشته‌شده بی‌درنگ، پیش از هر درخواست
-  const byMint=new Map(STK_SOL.map(s=>[s.mint,s]));
+  const bySym=new Map(L.map(s=>[stkKey(s),s]));
   const gtP=(async()=>{
-    const j=await gtJson(`${GT}/networks/solana/tokens/multi/${STK_SOL.map(s=>s.mint).join(",")}`);
+    // هر دسته جدا: دسته‌ی شکست‌خورده فقط ردیف‌های خودش را «—» می‌گذارد (null = نپرسیدیم/نشد، هرگز صفر)
+    const tchunks=stkChunks(L.map(stkKey),`/networks/${net}/tokens/multi/`);
+    const tgot=await Promise.all(tchunks.map(c=>gtJson(`${GT}/networks/${net}/tokens/multi/${c.join(",")}`).catch(()=>null)));
     if(seq!==stkSeq)return;
-    const px={},vol={},logo={},pools=[],poolOf={};
-    for(const row of ((j&&j.data)||[])){
-      const a=row&&row.attributes||{};
-      const s=byMint.get(a.address);
-      if(!s)continue;
-      const p=stkNum(a.price_usd),v=stkNum(a.volume_usd&&a.volume_usd.h24);
-      if(p>0&&isFinite(p))px[s.sym]=p;
-      if(isFinite(v))vol[s.sym]=v;
-      if(typeof a.image_url==="string"&&okLogo(a.image_url)&&a.image_url!==""){
-        logo[s.sym]=a.image_url;
-        if(lsGet(LS_LOGO,s.mint,ttlLogo,okLogo)!==a.image_url)lsSet(LS_LOGO,s.mint,a.image_url);   // ۱۳ اکتبر: لوگو بین بازدیدها می‌ماند (قواعدِ lsSet: https و okLogo)
+    const px={...stkData.px},vol={...stkData.vol},logo={...stkData.logo},poolOf={},pools=[];
+    tgot.forEach((j,ci)=>{
+      if(!j||!Array.isArray(j.data))return;
+      for(const k of tchunks[ci]){const s=bySym.get(k);if(s){delete px[s.sym];delete vol[s.sym];}}
+      for(const row of j.data){
+        const a=row&&row.attributes||{};
+        const s=bySym.get(sol?a.address:String(a.address||"").toLowerCase());
+        if(!s)continue;
+        const p=stkNum(a.price_usd),v=stkNum(a.volume_usd&&a.volume_usd.h24);
+        if(p>0&&isFinite(p))px[s.sym]=p;
+        if(isFinite(v))vol[s.sym]=v;
+        if(typeof a.image_url==="string"&&okLogo(a.image_url)&&a.image_url!==""){
+          logo[s.sym]=a.image_url;
+          if(lsGet(LS_LOGO,stkKey(s),ttlLogo,okLogo)!==a.image_url)lsSet(LS_LOGO,stkKey(s),a.image_url);   // ۱۳ اکتبر: لوگو بین بازدیدها می‌ماند (قواعدِ lsSet: https و okLogo)
+        }
+        const tp=row&&row.relationships&&row.relationships.top_pools&&row.relationships.top_pools.data;
+        const id=tp&&tp[0]&&tp[0].id;
+        if(typeof id==="string"){
+          let pa=id.startsWith(net+"_")?id.slice(net.length+1):id;
+          if(!sol)pa=pa.toLowerCase();
+          if(!(pa in poolOf)){pools.push(pa);poolOf[pa]=s.sym;}
+        }
       }
-      const tp=row&&row.relationships&&row.relationships.top_pools&&row.relationships.top_pools.data;
-      const id=tp&&tp[0]&&tp[0].id;
-      if(typeof id==="string"){const pa=id.replace(/^solana_/,"");pools.push(pa);poolOf[pa]=s.sym;}
-    }
+    });
     stkData.px=px;stkData.vol=vol;stkData.logo=logo;stkData.gtOk=Object.keys(vol).length>0;
     stkPaint();stkPaintLogos();
     if(!pools.length)return;
-    const k=await gtJson(`${GT}/networks/solana/pools/multi/${pools.join(",")}`);
+    const pchunks=stkChunks(pools,`/networks/${net}/pools/multi/`);
+    const pgot=await Promise.all(pchunks.map(c=>gtJson(`${GT}/networks/${net}/pools/multi/${c.join(",")}`).catch(()=>null)));
     if(seq!==stkSeq)return;
-    const chg={};
-    for(const row of ((k&&k.data)||[])){
-      const a=row&&row.attributes||{};
-      const base=poolOf[String(row&&row.id||a.address||"").replace(/^solana_/,"")];
-      const c=stkNum(a.price_change_percentage&&a.price_change_percentage.h24);
-      if(base&&isFinite(c))chg[base]=c;
-    }
+    const chg={...stkData.chg};
+    pgot.forEach(k=>{
+      for(const row of ((k&&k.data)||[])){
+        const a=row&&row.attributes||{};
+        let pid=String(row&&row.id||a.address||"");
+        pid=pid.startsWith(net+"_")?pid.slice(net.length+1):pid;
+        const base=poolOf[sol?pid:pid.toLowerCase()];
+        const c=stkNum(a.price_change_percentage&&a.price_change_percentage.h24);
+        if(base&&isFinite(c))chg[base]=c;
+      }
+    });
     stkData.chg=chg;stkPaint();
   })().catch(()=>{});
-  const refP=stkRefBatch().then(r=>{
+  const refP=sol?stkRefBatch().then(r=>{
     if(seq!==stkSeq||!r)return;
     stkData.ref=r.ref;stkData.refAt=r.refAt;stkPaint();
-  }).catch(()=>{});
+  }).catch(()=>{}):Promise.resolve();   // Robinhood: فیدِ مرجع وصل نیست
   await Promise.all([gtP,refP]);
   if(seq!==stkSeq)return false;
   const gotAny=Object.keys(stkData.px).length>0||Object.keys(stkData.ref).length>0;
@@ -14692,7 +14848,7 @@ async function stocksTick(){
   const run=stkRun;
   clearTimeout(stkTimer);stkTimer=0;
   let failed=false;
-  if(!document.hidden)failed=await(activeChain==="solana"?stocksLoadSol():stocksLoad());
+  if(!document.hidden)failed=await(stkGt()?stocksLoadGt():stocksLoad());
   if(run!==stkRun||view!=="stocks")return;
   stkTimer=setTimeout(stocksTick,failed?STK_RETRY_MS:STK_REFRESH_MS);
 }
@@ -14710,15 +14866,15 @@ function stkAddLogo(av,url,gen){
   img.src=url;av.appendChild(img);
 }
 function stkPaintLogos(){
-  const gen=stkLogoGen,sol=activeChain==="solana";
-  if(!sol){if(stkLogosDone)return;stkLogosDone=true;}
+  const gen=stkLogoGen,gt=stkGt();
+  if(!gt){if(stkLogosDone)return;stkLogosDone=true;}
   document.querySelectorAll("#stkTable tr[data-sym]").forEach(tr=>{
     const av=tr.querySelector(".av");
     if(!av)return;
-    if(sol){
-      const s=STK_SOL.find(x=>x.sym===tr.dataset.sym);
+    if(gt){
+      const s=stkList().find(x=>x.sym===tr.dataset.sym);
       // لوگوی تازه برنده است؛ وگرنه همان که بازدیدِ قبلی نگه داشته (پیش از شبکه)
-      stkAddLogo(av,stkData.logo[tr.dataset.sym]||(s?lsGet(LS_LOGO,s.mint,ttlLogo,okLogo):""),gen);return;
+      stkAddLogo(av,stkData.logo[tr.dataset.sym]||(s?lsGet(LS_LOGO,stkKey(s),ttlLogo,okLogo):""),gen);return;
     }
     const t=BASE_TOKENS.find(x=>x.symbol===tr.dataset.sym);
     if(!t)return;
@@ -14730,11 +14886,13 @@ const STK_LEDE_BASE="Tokenized stocks issued by Coinbase Onchain SPV Ltd (ADGM) 
 const STK_NOTE_BASE="Prices are live quotes from the deepest Aerodrome pool for $100. Issuer terms: not offered to US persons. Not investment advice.";
 const STK_LEDE_SOL="Tokenized shares and ETFs issued by Backed (xStocks), each backed 1:1 by the real asset. Trade them on-chain any time against USDC; where shown, the reference price comes from Chainlink and moves only while the US market is open.";
 const STK_NOTE_SOL="Prices are the latest on-chain trade prices from GeckoTerminal; your swap quote comes from Jupiter. Issuer terms: not offered to US persons. Not investment advice.";
+const STK_LEDE_RH="Robinhood Stock Tokens: tokenised debt securities issued by Robinhood Assets (Jersey) Limited, one ERC-20 per stock or ETF. They are not offered to U.S. persons and are restricted in Canada, the United Kingdom and Switzerland. Trade them on-chain any time against USDG.";
+const STK_NOTE_RH="Prices are the latest on-chain trade prices from GeckoTerminal; your swap quote comes from the pools on Robinhood Chain. Not investment advice.";
 // متن‌ها و ردیف‌ها را از فهرستِ زنجیره می‌سازد (DOM API و textContent، نه innerHTML)؛ ردیف‌ها با data-sym همان زنجیره کلید می‌خورند.
 function stkChainPaint(){
-  const sol=activeChain==="solana";
-  $("stkLede").textContent=sol?STK_LEDE_SOL:STK_LEDE_BASE;
-  $("stkNote").textContent=sol?STK_NOTE_SOL:STK_NOTE_BASE;
+  const sol=activeChain==="solana",rh=activeChain==="robinhood";
+  $("stkLede").textContent=rh?STK_LEDE_RH:sol?STK_LEDE_SOL:STK_LEDE_BASE;
+  $("stkNote").textContent=rh?STK_NOTE_RH:sol?STK_NOTE_SOL:STK_NOTE_BASE;
   ++stkLogoGen;stkLogosDone=false;
   const tb=document.querySelector("#stkTable tbody");
   tb.textContent="";
@@ -14744,7 +14902,8 @@ function stkChainPaint(){
     const td0=mk("td","stkStarTd"),st=mk("button","iconBtn savedToggle stkStar","☆");st.type="button";st.dataset.stkstar=s.sym;st.setAttribute("aria-pressed","false");td0.append(st);
     const td1=mk("td"),tk=mk("div","tk"),nm=mk("span","nm");
     nm.append(mk("b",null,s.sym),mk("small",null,s.name));
-    tk.append(mk("span","av",s.sym.slice(0,-1).slice(0,4)),nm);td1.append(tk);
+    // سولانا/Base: پسوندِ x/c حذف؛ نمادهای Robinhood پسوند ندارند
+    tk.append(mk("span","av",rh?s.sym.slice(0,4):s.sym.slice(0,-1).slice(0,4)),nm);td1.append(tk);
     const td2=mk("td","cPx");td2.append(mk("span","v","—"),mk("small"));
     const td3=mk("td","colRef");td3.append(mk("span","v","—"),mk("small","gap"));
     const td4=mk("td","colVol","—");
@@ -14754,7 +14913,6 @@ function stkChainPaint(){
   stkStarSync();
 }
 function stocksStart(){
-  if(activeChain==="robinhood")return;   // Stocks روی Robinhood فقط اعلان است: نه multicall، نه GT
   if(stkActive)return;stkActive=true;
   if(stkDataChain!==activeChain)stkResetData();
   stkChainPaint();stkPaintLogos();stkPaint();stocksTick();
@@ -14790,7 +14948,8 @@ async function stocksTrade(sym){
     $("solAmt").focus();
     return;
   }
-  const t=BASE_TOKENS.find(x=>x.symbol===sym),usdc=tokenBySymbol("USDC"),eth=BASE_TOKENS.find(x=>x.native);
+  // مرجع = USDC روی Base، USDG روی Robinhood (CHAIN.reference)؛ توکنِ سهام همان ردیفِ فهرستِ سواپ است
+  const t=BASE_TOKENS.find(x=>x.symbol===sym),usdc=tokenBySymbol(CHAIN.reference),eth=BASE_TOKENS.find(x=>x.native);
   if(!E||!t||!usdc)return;
   hideSwapDone();
   const ub=account?balances[balKey(usdc)]:undefined;
@@ -14807,6 +14966,7 @@ async function stocksTrade(sym){
 function stkWatchRow(sym){
   const s=stkList().find(x=>x.sym===sym);if(!s)return null;
   if(activeChain==="solana")return savedWatchClean({chain:"solana",address:s.mint,symbol:s.sym,name:s.name});
+  if(activeChain==="robinhood")return null;   // فهرستِ نظارت فقط base|solana را می‌شناسد؛ نمادِ Robinhood (مثلاً TSLA) هرگز با ردیفِ Base (TSLAc) یکی نمی‌شود
   const t=BASE_TOKENS.find(x=>x.symbol===sym);
   return t&&!t.native?savedWatchClean({chain:"base",address:t.address,symbol:s.sym,name:s.name}):null;
 }
@@ -14814,7 +14974,7 @@ function stkStarSync(){
   document.querySelectorAll("#stkTable .stkStar").forEach(b=>{
     const row=stkWatchRow(b.dataset.stkstar),on=!!row&&savedWatchRows.some(r=>savedWatchKey(r)===savedWatchKey(row));
     b.disabled=!row;b.setAttribute("aria-pressed",String(on));b.textContent=on?"★":"☆";
-    const lab=(on?"Stop watching ":"Watch ")+b.dataset.stkstar;b.setAttribute("aria-label",lab);b.title=row?lab:"Select a token first";
+    const lab=(on?"Stop watching ":"Watch ")+b.dataset.stkstar;b.setAttribute("aria-label",lab);b.title=row?lab:activeChain==="robinhood"?"Watchlist is not available on Robinhood Chain yet":"Select a token first";
   });
 }
 $("stkTable").addEventListener("click",e=>{

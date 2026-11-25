@@ -10457,6 +10457,8 @@ async def main():
         await check_rh_token_page(p, errors)
         await check_rh_no_base_calls(p, errors)
         await check_rh_notice(p, errors)
+        await check_rh_na_menu(p, errors)
+        await check_rh_stocks(p, errors)
         await check_rh_swap_parity(p, errors)
         await check_rh_swap_live(p, errors)
         await check_rh_exit_check(p, errors)
@@ -10503,6 +10505,9 @@ async def main():
         await check_exit_failures(p, errors)
         await check_exit_routes(p, errors)
         await check_badges_card(p, errors)
+        await check_ref_capture(p, errors)
+        await check_ref_suffix(p, errors)
+        await check_invite_card(p, errors)
         await check_exit_solana(p, errors)
         await check_exit_layout(p, errors)
         b = await p.chromium.launch()
@@ -15115,11 +15120,15 @@ async def main():
                 out.candCount = firstParts.length;
                 // مسیرِ والتِ راه‌دور: p.gas
                 sent.length = 0;
+                window.__realEnc = iExec.encodeFunctionData.bind(iExec); let d0 = null;
+                iExec.encodeFunctionData = (...a) => { d0 = window.__realEnc(...a); return d0; };   // data0 را برای [ref suffix] نگه می‌دارد
+                localStorage.setItem("zx.ref", "0x" + "ab".repeat(20));
                 walletIsRemote = true;
                 walletEip1193 = { request: async ({method, params}) => { remoteReq.push({method, params}); throw new Error("probe: stop before sending"); } };
                 btn().click(); await wait();
-                out.remote = remoteReq.length ? {method: remoteReq[0].method, gas: remoteReq[0].params[0].gas, sfx: String(remoteReq[0].params[0].data).endsWith(BASE_BUILDER_SUFFIX.slice(2))} : null;
+                out.remote = remoteReq.length ? {method: remoteReq[0].method, gas: remoteReq[0].params[0].gas, sfx: String(remoteReq[0].params[0].data).endsWith(BASE_BUILDER_SUFFIX.slice(2)), data: String(remoteReq[0].params[0].data), d0, bsfx: BASE_BUILDER_SUFFIX.slice(2)} : null;
             } finally {
+                localStorage.removeItem("zx.ref"); if (window.__realEnc) { iExec.encodeFunctionData = window.__realEnc; window.__realEnc = null; }
                 E.Contract = realContract; console.error = realErr;
                 walletIsRemote = false; baseSimArmedKey = null; baseSimFailedKey = null;
                 delete window.__STUB_BALANCE__;
@@ -15142,6 +15151,10 @@ async def main():
             "sim override: the remote-wallet payload must carry gas 0x16e360: %s" % simo_base["remote"]
         assert simo_base["remote"]["sfx"], \
             "builder code: the remote-wallet executeSwap data must end with the ERC-8021 suffix: %s" % simo_base["remote"]
+        rr_ = simo_base["remote"]
+        assert rr_["d0"] and rr_["data"].lower() == (rr_["d0"] + "ab" * 20 + "5a585201" + rr_["bsfx"]).lower(), \
+            "[ref suffix] Base remote path: data must be data0 + invite blob + builder suffix, in that order: ...%s" % rr_["data"][-130:]
+        print("[ref suffix] Base remote-wallet path: executeSwap data = data0 + 20-byte referrer + 5a585201 + ERC-8021 builder suffix (suffix last)")
 
         # ---- [builder code] ERC-8021 روی Base: پسوند درست، فقط روی estimateGas/sendTransaction ----
         bc = await pg.evaluate(r"""async () => {
@@ -25440,7 +25453,7 @@ async def check_rh_token_page(p, errors):
 
 
 async def check_rh_notice(p, errors):
-    """[rh notice] متنِ دقیقِ اعلان روی Swap/Stocks/Exit value/Exit Report (و Portfolio)؛ بدونِ Connect/Swap؛ انتخابگر در دسترس؛ Base/Solana بی‌اثر."""
+    """[rh notice] متنِ دقیقِ اعلان روی Swap/Exit value/Exit Report (و Portfolio؛ Stocks از ۲۵ نوامبر کارتِ واقعی است)؛ بدونِ Connect/Swap؛ انتخابگر در دسترس؛ Base/Solana بی‌اثر."""
     srv, origin = rh_srv()
     b = await p.chromium.launch()
     errs = []
@@ -25469,7 +25482,7 @@ async def check_rh_notice(p, errors):
         assert not [a for a in sw["acts"] if "coming soon" in a.lower()], "[rh notice] no coming-soon button remains: %s" % sw["acts"]
         assert sw["connect"] == [False, "Connect wallet"], "[rh notice] the header wallet button works on Robinhood swap: %s" % sw["connect"]
         shown = {}
-        for tab, sel, vid in (("Stocks", '#nav [data-view="stocks"]', "view-stocks"), ("Exit value", '#nav [data-view="exit"]', "view-exit"),
+        for tab, sel, vid in (("Exit value", '#nav [data-view="exit"]', "view-exit"),
                               ("Exit Report", '#nav a.navLink[href="/report"]', "view-rhreport")):
             before = await pg.evaluate("() => location.href")
             await pg.click(sel)
@@ -25482,9 +25495,12 @@ async def check_rh_notice(p, errors):
             if tab == "Exit Report":
                 assert (await pg.evaluate("() => location.pathname")) != "/report" and (await pg.evaluate("() => location.pathname")) in ("/app", before.split("#")[0].replace(origin, "")), \
                     "[rh notice] the Exit Report tab must not navigate away on Robinhood"
-            elif tab == "Stocks":
-                assert not await pg.evaluate("() => document.querySelectorAll('#stkTable tbody tr').length"), "[rh notice] no stock rows are built on Robinhood"
-        await pg.click("#folioMenuBtn", force=True) if False else await pg.evaluate("() => setView('folio')")
+        # ۲۵ نوامبر: Stocks دیگر اعلان نیست؛ کارتِ واقعیِ سهام با انتخابگر در جایگاهِ خودش (جزئیاتش در [rh stocks view])
+        await pg.click('#nav [data-view="stocks"]')
+        await pg.wait_for_function("() => document.querySelector('.view.on').id === 'view-stocks'", timeout=10000)
+        r = await pg.evaluate(VIS)
+        assert r["texts"] == [] and r["srcMenuInside"] and await pg.evaluate("() => !!document.querySelector('#stocksNetworkSlot #srcMenu')"), "[rh notice] Stocks shows the real card, not the notice: %s" % r
+        await pg.evaluate("() => setView('folio')")
         r = await pg.evaluate(VIS)
         assert r["texts"] == [RH_NOTICE_NA_T], "[rh notice] Portfolio notice: %s" % r
         # راهِ برگشت از داخلِ اعلان: انتخابگر → Solana بدونِ بارگذاری و Base (بارگذاریِ کامل)
@@ -25507,11 +25523,335 @@ async def check_rh_notice(p, errors):
             n = await pg.evaluate("() => [...document.querySelectorAll('.rhNa')].filter(e => e.getClientRects().length > 0).length")
             assert n == 0, "[rh notice] a Robinhood notice leaked into Base %s" % v
         await pg.context.close()
-        print("[rh notice] on Robinhood the Swap view has no notice card: it is the Base swap card with a working Connect wallet (no strip, no watch panel, the old Robinhood hero hidden, picker in the Base swap slot; %r button gone); Stocks, Exit value, Exit Report (no navigation) and Portfolio show exactly %r; leaving for Solana restores the real Solana swap view; no notice is visible on Base" % (RH_SWAP_CTA_T, RH_NOTICE_NA_T))
+        print("[rh notice] on Robinhood the Swap view has no notice card: it is the Base swap card with a working Connect wallet (no strip, no watch panel, the old Robinhood hero hidden, picker in the Base swap slot; %r button gone); Exit value, Exit Report (no navigation) and Portfolio show exactly %r (Stocks shows the real stocks card instead); leaving for Solana restores the real Solana swap view; no notice is visible on Base" % (RH_SWAP_CTA_T, RH_NOTICE_NA_T))
     finally:
         await b.close()
         srv.shutdown()
     assert not errs, "[rh notice] console errors: %s" % errs
+
+
+# =====================================================================
+# ۲۵ نوامبر — منوی شبکه روی کارتِ اعلانِ Robinhood و سهامِ آمریکا روی Robinhood
+# =====================================================================
+RH_MENU_JS = """() => { const pop = document.getElementById('srcPop');
+    const opts = [...pop.querySelectorAll('[data-chain]')];
+    return {on: pop.classList.contains('on'), view: document.querySelector('.view.on').id, iw: innerWidth, ih: innerHeight,
+      opts: opts.map(o => { const r = o.getBoundingClientRect(), cx = r.left + r.width / 2, cy = r.top + r.height / 2, el = document.elementFromPoint(cx, cy);
+        return {chain: o.dataset.chain, w: r.width, h: r.height, inView: r.width > 0 && r.height > 0 && r.top >= 0 && r.left >= 0 && r.bottom <= innerHeight && r.right <= innerWidth,
+                hit: !!el && (el === o || o.contains(el)), box: [Math.round(r.left), Math.round(r.top), Math.round(r.right), Math.round(r.bottom)], over: el ? (el.id || el.className || el.tagName) : null}; })}; }"""
+
+
+def rh_menu_assert(m, tag):
+    assert m["on"], "%s: the network menu must be open: %s" % (tag, m)
+    assert [o["chain"] for o in m["opts"]] == ["base", "solana", "robinhood"], "%s: three options expected: %s" % (tag, m)
+    for o in m["opts"]:
+        assert o["inView"], "%s: option %s lies outside the viewport: %s" % (tag, o["chain"], m)
+        assert o["hit"], "%s: option %s is covered or clipped (elementFromPoint at its centre returns %s): %s" % (tag, o["chain"], o["over"], m)
+
+
+async def check_rh_na_menu(p, errors):
+    """[rh na menu] ۲۵ نوامبر — منوی شبکه‌ای که placeNetworkControl داخلِ کارتِ اعلانِ Robinhood می‌گذارد نباید بریده یا زیرِ محتوای بعدی بماند
+    (.rhCard{overflow:hidden} بر .rhNa{overflow:visible} می‌برد). هر گزینه کامل داخلِ صفحه است و elementFromPoint در مرکزش همان گزینه را می‌دهد."""
+    srv, origin = rh_srv()
+    b = await p.chromium.launch()
+    errs = []
+    try:
+        env = FbEnv(b, origin, errs)
+        env.gt = rh_gt_swap()
+        for vw, vh in ((1440, 900), (390, 844)):
+            pg = await env.open(hash_="#swap", vw=vw, vh=vh, init=[RH_CHAIN_JS], board=False)
+            await pg.wait_for_function("() => typeof activeChain !== 'undefined' && activeChain === 'robinhood' && typeof setView === 'function'", timeout=20000)
+            await pg.wait_for_timeout(400)
+            for v in ("folio", "exit", "rhreport"):
+                await pg.evaluate("(v) => setView(v)", v)
+                await pg.wait_for_function("(v) => document.querySelector('.view.on').id === 'view-' + v", arg=v, timeout=10000)
+                assert await pg.evaluate("() => !!document.querySelector('.view.on [data-rhna]') && document.querySelector('.view.on [data-rhslot] #srcMenu') !== null"), \
+                    "[rh na menu] %s@%d: the notice card must hold the network picker" % (v, vw)
+                await pg.click("#srcChip")
+                await pg.wait_for_timeout(250)
+                m = await pg.evaluate(RH_MENU_JS)
+                assert m["view"] == "view-" + v, "[rh na menu] wrong view: %s" % m
+                rh_menu_assert(m, "[rh na menu] %s@%d" % (v, vw))
+                await pg.click("#srcChip")
+                await pg.wait_for_timeout(150)
+            await pg.context.close()
+        print("[rh na menu] on Robinhood the network menu opened from the notice card of Portfolio, Exit value and Exit Report (1440 and 390 wide): all three options are fully inside the viewport and document.elementFromPoint at each option's centre returns that option (not clipped by the card, not covered by the next card)")
+    finally:
+        await b.close()
+        srv.shutdown()
+    assert not errs, "[rh na menu] console errors: %s" % errs
+
+
+RH_STK_NODATA = "—"
+RH_STK_EXPECT = [
+    ("NVDA", "NVIDIA", "0xd0601CE157Db5bdC3162BbaC2a2C8aF5320D9EEC"),
+    ("SPY", "SPDR S&P 500 ETF Trust", "0x117cc2133c37B721F49dE2A7a74833232B3B4C0C"),
+    ("SPCX", "Space Exploration Technologies Corp.", "0x4a0E65A3EcceC6dBe60AE065F2e7bb85Fae35eEa"),
+    ("QQQ", "Invesco QQQ", "0xD5f3879160bc7c32ebb4dC785F8a4F505888de68"),
+    ("ANT", "Anthropic, PBC", "0xbbB6c29bCc3a1028A2B54310DF73F4F7A3bcB373"),
+    ("META", "Meta Platforms", "0xc0D6457C16Cc70d6790Dd43521C899C87ce02f35"),
+    ("GLD", "SPDR Gold Trust", "0xC9a981FEE1F9DEc688bb123ccDeCc63D0deBFC4e"),
+    ("GOOGL", "Alphabet Class A", "0x2e0847E8910a9732eB3fb1bb4b70a580ADAD4FE3"),
+    ("TSLA", "Tesla", "0x322F0929c4625eD5bAd873c95208D54E1c003b2d"),
+    ("GME", "GameStop", "0x1b0E319c6A659F002271B69dB8A7df2F911c153E"),
+    ("USO", "United States Oil Fund", "0xa30FA36Db767ad9eD3f7a60fC79526fB4d56D344"),
+    ("MSTR", "Strategy Inc.", "0xec262a75e413fAfD0dF80480274532C79D42da09"),
+    ("AAPL", "Apple", "0xaF3D76f1834A1d425780943C99Ea8A608f8a93f9"),
+    ("AMC", "AMC Entertainment", "0x05a3d1Cd21d0C88145E82600E62e7E496e0F222B"),
+    ("COIN", "Coinbase", "0x6330D8C3178a418788dF01a47479c0ce7CCF450b"),
+    ("AMZN", "Amazon", "0x12f190a9F9d7D37a250758b26824B97CE941bF54"),
+    ("MU", "Micron Technology", "0xfF080c8ce2E5feadaCa0Da81314Ae59D232d4afD"),
+    ("PLTR", "Palantir Technologies", "0x894E1EC2D74FFE5AEF8Dc8A9e84686acCB964F2A"),
+    ("MSFT", "Microsoft", "0xe93237C50D904957Cf27E7B1133b510C669c2e74"),
+    ("HIMS", "Hims & Hers Health", "0xCceE82fE024c36fA15E1005edE3E9e4787e23D09"),
+    ("TTWO", "Take-Two Interactive Software", "0x5e81213613b6B86EaB4c6c50d718d34359459786"),
+    ("DJT", "Trump Media & Technology Group", "0x1D11f0496982706C5e14A514D4E79F2e6BdE4516"),
+    ("AMD", "AMD", "0x86923f96303D656E4aa86D9d42D1e57ad2023fdC"),
+    ("INTC", "Intel", "0xc72b96e0E48ecd4DC75E1e45396e26300BC39681"),
+    ("RDDT", "Reddit", "0x05b37Fb53A299a1b874A619e1c4C404D52C36F4C"),
+    ("SGOV", "iShares 0-3 Month Treasury Bond ETF", "0x92FD66527192E3e61d4DDd13322Aa222DE86F9B5"),
+    ("TSM", "Taiwan Semiconductor Manufacturing", "0x58FfE4a942d3885bAa22D7520691F611EF09e7AA"),
+    ("CRCL", "Circle Internet Group", "0xdF0992E440dD0be65BD8439b609d6D4366bf1CB5"),
+    ("RBLX", "Roblox", "0xF0C4BF4C582cb3836e98394b1d4e7B7281101bE8"),
+    ("SLV", "iShares Silver Trust", "0x411eFb0E7f985935DAec3D4C3ebaEa0d0AD7D89f"),
+    ("MRNA", "Moderna", "0x43B07D15cE533bEc5476d70C22a78a1B2B662155"),
+    ("LLY", "Eli Lilly", "0x8005d266423c7ea827372c9c864491e5786600ea"),
+    ("COST", "Costco", "0x4EA005168D7F09a7A0Ba9D1DEf21a479950E44C2"),
+    ("TTEQ", "T. Rowe Price Technology ETF", "0x80E10255A83B257F5A8674D363F547842aa53b8e"),
+    ("LULU", "Lululemon", "0x4e62068525Ab11FE768e29dfD00ef909B9803016"),
+    ("AVGO", "Broadcom", "0x156E175DD063a8cE274C50654eF40e0032b3fbcF"),
+    ("NFLX", "Netflix", "0xE0444EF8BF4eD74f74FD73686e2ddF4C1c5591E8"),
+    ("SNAP", "Snap", "0xF6589F11Bc40b669e584073F428B05562F568733"),
+    ("SNDK", "Sandisk Corporation", "0xB90A19fF0Af67f7779afF50A882A9CfF42446400"),
+    ("IBM", "IBM", "0x980dcf6766FA79f5Cf0c4AAdb3ab477ff15a9619"),
+    ("BABA", "Alibaba", "0xad25Ac6C84D497db898fa1E8387bf6Af3532a1c4"),
+    ("SKHY", "SK hynix ADS", "0x84CAb63bc87912E71ad199ff14A0bA45de68FeF8"),
+]
+
+
+def rh_stk_pool(i):
+    """ردیف‌های زوج: شناسه‌ی استخرِ ۴۲ نویسه‌ای (v3)، فرد: ۶۶ نویسه‌ای (v4) — تا طولِ مسیرِ pools/multi واقعاً سنجیده شود."""
+    return ("0x%040x" % (0xA000 + i)) if i % 2 == 0 else ("0x%064x" % (0xB000 + i))
+
+
+def rh_stk_px(i):
+    return 10 + i * 7.5 + 0.0123
+
+
+def rh_stk_vol(i):
+    return 400 + i * i * 61234.37
+
+
+def rh_stk_chg(i):
+    return ((i % 7) - 3) * 1.37
+
+
+def rh_stk_logo(sym):
+    return "https://assets.geckoterminal.com/stk/rh/%s.png" % sym
+
+
+def rh_stk_gt(fail_first_tokens=False):
+    """GT روی Robinhood برای ۴۲ سهم؛ همه‌ی اعدادِ پاسخ *رشته* (شکلِ واقعیِ GeckoTerminal). fail_first_tokens: دسته‌ی tokens/multi که NVDA در آن است ۴۰۰ می‌دهد."""
+    by_addr = {a.lower(): (i, s) for i, (s, _n, a) in enumerate(RH_STK_EXPECT)}
+    by_pool = {rh_stk_pool(i): i for i in range(len(RH_STK_EXPECT))}
+    first = RH_STK_EXPECT[0][2].lower()
+
+    def gt(path):
+        if "networks/robinhood/tokens/multi/" in path:
+            want = path.split("/tokens/multi/")[1].split(",")
+            if fail_first_tokens and first in want:
+                return (400, {"errors": [{"status": "400"}]})
+            rows = []
+            for a in want:
+                if a not in by_addr:
+                    continue
+                i, s = by_addr[a]
+                rows.append({"id": "robinhood_" + a, "type": "token", "attributes": {
+                    "address": a, "symbol": s, "decimals": 18, "image_url": rh_stk_logo(s),
+                    "price_usd": repr(rh_stk_px(i)), "total_reserve_in_usd": "1251812.35199373132185931839092692522448691293471443219202",
+                    "volume_usd": {"h24": repr(rh_stk_vol(i))}},
+                    "relationships": {"top_pools": {"data": [{"id": "robinhood_" + rh_stk_pool(i), "type": "pool"}]}}})
+            return (200, {"data": rows})
+        if "networks/robinhood/pools/multi/" in path:
+            want = path.split("/pools/multi/")[1].split(",")
+            rows = []
+            for pa in want:
+                if pa not in by_pool:
+                    continue
+                i = by_pool[pa]
+                rows.append({"id": "robinhood_" + pa, "type": "pool", "attributes": {
+                    "address": pa, "price_change_percentage": {"h24": "%.2f" % rh_stk_chg(i)}}})
+            return (200, {"data": rows})
+        return rh_gt_swap()(path)
+    return gt
+
+
+def rh_stk_vol_txt(v):
+    if v >= 1e6:
+        return "$%.1fM" % (v / 1e6)
+    if v >= 1e3:
+        return "$%dK" % int(v / 1e3 + 0.5)
+    return "$%d" % int(v + 0.5)
+
+
+def rh_stk_chunks(keys, tail):
+    """مستقلِ از index.html: گروه‌بندیِ حریصانه با سقفِ ۲۵ کلید و کلِ مسیرِ /api/v2<tail><کلیدها> کمتر از ۱۲۰۰ نویسه."""
+    room = 1199 - len("/api/v2" + tail)
+    out, cur, ln = [], [], 0
+    for k in keys:
+        if cur and (len(cur) >= 25 or ln + 1 + len(k) > room):
+            out.append(cur)
+            cur, ln = [], 0
+        ln += (1 if cur else 0) + len(k)
+        cur.append(k)
+    if cur:
+        out.append(cur)
+    return out
+
+
+RH_STK_VIEW_JS = STK_ROWS_JS.replace("trade: tr.querySelector('.trade').textContent }))", "trade: tr.querySelector('.trade').textContent, star: tr.querySelector('.stkStar').disabled }))")
+
+
+async def rh_stk_open(env, reqs, vw=1280, vh=900, init=None):
+    hook = lambda pg_: pg_.on("request", lambda r: reqs.append(r.url))
+    pg = await env.open(hash_="#stocks", vw=vw, vh=vh, init=(init if init is not None else [RH_CHAIN_JS, "window.__STUB_RPC_LOG__ = [];"]), hook=hook, board=False)
+    await pg.wait_for_function("() => typeof activeChain !== 'undefined' && activeChain === 'robinhood' && document.querySelectorAll('#view-stocks tr[data-sym]').length > 0", timeout=25000)
+    return pg
+
+
+async def check_rh_stocks(p, errors):
+    """[rh stocks view] / [rh stocks trade] / [rh stocks isolation] — ۲۵ نوامبر: سهامِ Robinhood (۴۲ ردیف) از GeckoTerminal، بدونِ multicall و Chainlink."""
+    assert len(RH_STK_EXPECT) == 42 and len({s for s, _n, _a in RH_STK_EXPECT}) == 42
+    srv, origin = rh_srv()
+    b = await p.chromium.launch()
+    errs = []
+    try:
+        env = FbEnv(b, origin, errs)
+        env.gt = rh_stk_gt()
+        reqs = []
+        pg = await rh_stk_open(env, reqs)
+        await pg.wait_for_function("() => document.querySelectorAll('#view-stocks .av img.on').length === 42 && [...document.querySelectorAll('#view-stocks .colVol')].every(e => e.textContent !== '—')", timeout=30000)
+        await pg.wait_for_function("() => [...document.querySelectorAll('#view-stocks .cPx small')].every(e => e.textContent !== '')", timeout=30000)
+        rows = await pg.evaluate(RH_STK_VIEW_JS)
+        # ---- [rh stocks view] ----
+        assert [r["sym"] for r in rows] == [s for s, _n, _a in RH_STK_EXPECT], "[rh stocks view] 42 rows in the file's order: %s" % [r["sym"] for r in rows]
+        for i, r in enumerate(rows):
+            s, n, a = RH_STK_EXPECT[i]
+            assert r["b"] == s and r["name"] == n and r["trade"] == "Trade", "[rh stocks view] row %d: %s" % (i, r)
+            assert r["px"] == "${:,.2f}".format(rh_stk_px(i)), "[rh stocks view] %s price from the string price_usd: %s" % (s, r)
+            c = rh_stk_chg(i)
+            assert r["chg"] == ("▼ " if c < 0 else "▲ ") + "%.2f%%" % abs(c) and r["chgCls"] == ("dn" if c < 0 else "up"), "[rh stocks view] %s 24h change from the top pool: %s" % (s, r)
+            assert r["vol"] == rh_stk_vol_txt(rh_stk_vol(i)), "[rh stocks view] %s volume from the string h24: %s want %s" % (s, r["vol"], rh_stk_vol_txt(rh_stk_vol(i)))
+            assert r["refDisp"] == "none" and r["volDisp"] != "none", "[rh stocks view] the Reference cell is hidden, volume stays: %s" % r
+            assert r["av"] == s[:4], "[rh stocks view] avatar letters are the symbol (no trailing letter cut): %s" % r
+            assert r["star"] is True, "[rh stocks view] no watch star on Robinhood (watchlist knows base|solana only): %s" % r
+        av = {r["sym"]: r["av"] for r in rows}
+        assert av["NVDA"] == "NVDA" and av["TSLA"] == "TSLA" and av["SPY"] == "SPY" and av["GOOGL"] == "GOOG", "[rh stocks view] avatar letters: %s" % av
+        st = await pg.evaluate("""() => ({th: getComputedStyle(document.querySelector('#stkTable th.colRef')).display, thVol: getComputedStyle(document.querySelector('#stkTable th.colVol')).display,
+            lede: document.getElementById('stkLede').textContent, note: document.getElementById('stkNote').textContent,
+            notice: document.querySelectorAll('#view-stocks [data-rhna], #view-stocks .rhNa').length, card: getComputedStyle(document.querySelector('#view-stocks > .card')).display,
+            slot: !!document.querySelector('#stocksNetworkSlot #srcMenu'), chip: document.getElementById('srcTx').textContent,
+            imgs: [...document.querySelectorAll('#view-stocks .av img')].map(i => i.src), pill: document.getElementById('stkMktTxt').textContent,
+            txt: document.getElementById('view-stocks').innerText, ethers: typeof E !== 'undefined' && !!E})""")
+        assert st["th"] == "none" and st["thVol"] != "none", "[rh stocks view] the Reference column header is hidden: %s" % st
+        assert st["lede"] == RH_STK_LEDE and st["note"] == RH_STK_NOTE, "[rh stocks view] exact lede/note: %r / %r" % (st["lede"], st["note"])
+        assert st["notice"] == 0 and st["card"] != "none" and st["slot"] and st["chip"] == "Robinhood Chain", "[rh stocks view] the normal stocks card with the picker in #stocksNetworkSlot, no notice: %s" % st
+        assert all(src == rh_stk_logo(RH_STK_EXPECT[i][0]) for i, src in enumerate(st["imgs"])) and len(st["imgs"]) == 42, "[rh stocks view] logos are the image_url of tokens/multi: %s" % st["imgs"][:3]
+        assert re.match(r"^US market (open|closed)$", st["pill"]), "[rh stocks view] no reference age on Robinhood: %r" % st["pill"]
+        assert "NaN" not in st["txt"] and "undefined" not in st["txt"] and "$0.00" not in st["txt"], "[rh stocks view] junk text"
+        # درخواست‌ها: دقیقاً ۲ tokens/multi (۲۵ + ۱۷)، pools/multi به تعدادِ محاسبه‌شده، همه زیر ۱۲۰۰ نویسه، بدونِ RPC و multicall
+        addrs = [a.lower() for _s, _n, a in RH_STK_EXPECT]
+        tq = [u for u in reqs if "/networks/robinhood/tokens/multi/" in u and any(a in u for a in addrs)]
+        pq = [u for u in reqs if "/networks/robinhood/pools/multi/" in u]
+        want_t = rh_stk_chunks(addrs, "/networks/robinhood/tokens/multi/")
+        pools = [rh_stk_pool(i) for i in range(42)]
+        want_p = rh_stk_chunks(pools, "/networks/robinhood/pools/multi/")
+        assert len(want_t) == 2 and [len(c) for c in want_t] == [25, 17], "[rh stocks view] fixture sanity: tokens 25 + 17: %s" % [len(c) for c in want_t]
+        assert len(want_p) == 3 and sum(len(c) for c in want_p) == 42, "[rh stocks view] fixture sanity: 21 v3 (42-char) + 21 v4 (66-char) ids do not fit one or two paths under 1200 chars, 3 calls: %s" % [len(c) for c in want_p]
+        assert len(tq) == 2 and len(pq) == len(want_p), "[rh stocks view] exactly 2 tokens/multi and %d pools/multi calls per refresh: %d / %d" % (len(want_p), len(tq), len(pq))
+        for u, c in zip(tq, want_t):
+            assert u.endswith("/networks/robinhood/tokens/multi/" + ",".join(c)), "[rh stocks view] tokens/multi chunk: %s" % u[-120:]
+        assert [u.rsplit("/", 1)[1] for u in pq] == [",".join(c) for c in want_p], "[rh stocks view] pools/multi chunks (computed from the 42/66-char ids): %s" % [u[-90:] for u in pq]
+        for u in tq + pq:
+            path = urlparse(u).path
+            assert len(path) < 1200 and len(path.rsplit("/", 1)[1]) < 1200, "[rh stocks view] a multi path is %d chars (must stay < 1200): %s" % (len(path), path[:90])
+            assert path.rsplit("/", 1)[1] == path.rsplit("/", 1)[1].lower(), "[rh stocks view] GT keys must be lower-case"
+        bad = [u for u in reqs if re.search(r"/base/rpc|/sol/|networks/base/|networks/solana/|/vd/|/pairs\.json|rpc\.mainnet\.chain\.robinhood", u)]
+        assert not bad, "[rh stocks view] forbidden requests while loading the stocks view: %s" % bad
+        assert all(u == RH_RPC_T for u in await pg.evaluate("() => window.__STUB_RPC_LOG__ || []")), "[rh stocks view] every RPC read is the Robinhood RPC (no Base endpoint, no Chainlink)"
+        assert await pg.evaluate("() => typeof stocksLoad === 'function' && !stkFeedIface"), "[rh stocks view] the Base multicall/Chainlink path was never started"
+        # منوی شبکه روی همین کارت هم کامل دیده می‌شود
+        await pg.click("#srcChip")
+        await pg.wait_for_timeout(250)
+        rh_menu_assert(await pg.evaluate(RH_MENU_JS), "[rh stocks view] network menu")
+        await pg.click("#srcChip")
+        # زمان‌بند: با رفتن به نمای دیگر قطع، با برگشت دوباره شروع
+        away = await pg.evaluate("() => { setView('swap'); return [stkActive, stkTimer]; }")
+        assert away == [False, 0], "[rh stocks view] leaving the view stops the 60 s timer: %s" % away
+        back = await pg.evaluate("() => { setView('stocks'); return [stkActive, stkTimer !== undefined]; }")
+        assert back[0] is True, "[rh stocks view] returning restarts it: %s" % back
+        await pg.context.close()
+        print("[rh stocks view] Robinhood #stocks: the normal stocks card (picker in its slot, no notice) with 42 rows in the file's order, string price_usd / h24 volume / top-pool 24h change painted, own image_url logos, avatar letters = the symbol (NVDA not NVD), Reference column and header hidden, exact RH lede and note; exactly 2 tokens/multi (25+17) and %d pools/multi calls (42 mixed v3/v4 ids), every path < 1200 chars, lower-case keys; no Base RPC, Chainlink/multicall, Base/Solana GT or /vd request; the network menu is fully visible; the timer stops on leaving" % len(want_p))
+        # ---- یک دسته‌ی tokens/multi شکست می‌خورد ----
+        env.gt = rh_stk_gt(fail_first_tokens=True)
+        reqs2 = []
+        pg = await rh_stk_open(env, reqs2)
+        await pg.wait_for_function("() => document.querySelector('#view-stocks tr[data-sym=\"SKHY\"] .cPx .v').textContent !== '—'", timeout=30000)
+        await pg.wait_for_timeout(1500)
+        rows = await pg.evaluate(RH_STK_VIEW_JS)
+        for i, r in enumerate(rows):
+            if i < 25:
+                assert r["px"] == RH_STK_NODATA and r["vol"] == RH_STK_NODATA and r["chg"] == "", "[rh stocks view] failed chunk: %s must show dashes, never $0: %s" % (r["sym"], r)
+            else:
+                assert r["px"] == "${:,.2f}".format(rh_stk_px(i)) and r["vol"] == rh_stk_vol_txt(rh_stk_vol(i)), "[rh stocks view] the other chunk is painted: %s" % r
+        txt = await pg.inner_text("#view-stocks")
+        assert "$0.00" not in txt and "NaN" not in txt and "undefined" not in txt, "[rh stocks view] junk text after a failed chunk: %s" % txt[:200]
+        pq2 = [u for u in reqs2 if "/networks/robinhood/pools/multi/" in u]
+        sub = rh_stk_chunks(pools[25:], "/networks/robinhood/pools/multi/")
+        assert [u.rsplit("/", 1)[1] for u in pq2] == [",".join(c) for c in sub], "[rh stocks view] only the pools of the rows that did load are asked: %s" % [u[-60:] for u in pq2]
+        assert not await pg.evaluate("() => document.getElementById('stkMktTxt').textContent.includes('unavailable')"), "[rh stocks view] the pill must not claim all prices failed when one chunk loaded"
+        await pg.context.close()
+        print("[rh stocks view] a failed tokens/multi chunk (HTTP 400) leaves exactly its 25 rows at dashes (price, volume, change) - never $0 - while the other 17 rows load and only their pools are asked")
+        # ---- [rh stocks trade] ----
+        env.gt = rh_stk_gt()
+        for usdg_zero in (False, True):
+            reqs3 = []
+            pg = await rh_stk_open(env, reqs3)
+            await pg.wait_for_function("() => typeof E !== 'undefined' && E && typeof tokenOut !== 'undefined' && tokenOut && document.querySelector('#view-stocks tr[data-sym=\"TSLA\"] .cPx .v').textContent !== '—'", timeout=30000)
+            await pg.evaluate("""(zero) => { account = "0x8A0Dcb583C8CAdc481E34487c34f1B856fe97e23"; signer = {}; walletChainId = CHAIN.id; walletIsRemote = false;
+                const usdg = BASE_TOKENS.find(t => t.symbol === 'USDG'); balances[balKey(usdg)] = zero ? 0n : 5000000n; window.__STUB_ALLOWANCE__ = '0';
+                document.getElementById('amtIn').value = '123'; }""", usdg_zero)
+            await pg.click('#view-stocks tr[data-sym="TSLA"] .trade')
+            await pg.wait_for_function("() => document.getElementById('view-swap').classList.contains('on')", timeout=10000)
+            await pg.wait_for_timeout(300)
+            t = await pg.evaluate("""() => ({swap: document.getElementById('view-swap').classList.contains('on'), stocks: document.getElementById('view-stocks').classList.contains('on'), chain: activeChain,
+                inSym: tokenIn.symbol, outSym: tokenOut.symbol, outAddr: tokenOut.address, outDec: tokenOut.decimals, amt: document.getElementById('amtIn').value, out: document.getElementById('amtOut').value,
+                focus: document.activeElement && document.activeElement.id, mode: mode, noBase: BASE_TOKENS.some(x => x.symbol === 'TSLAc')})""")
+            want_in = "ETH" if usdg_zero else "USDG"
+            assert t["swap"] and not t["stocks"] and t["chain"] == "robinhood", "[rh stocks trade] must land on the Robinhood swap card: %s" % t
+            assert t["inSym"] == want_in and t["outSym"] == "TSLA" and t["outAddr"].lower() == "0x322f0929c4625ed5bad873c95208d54e1c003b2d" and t["outDec"] == 18, \
+                "[rh stocks trade] pay %s, receive TSLA (0x322F0929...): %s" % (want_in, t)
+            assert t["amt"] == "" and t["out"] == "" and t["focus"] == "amtIn" and t["mode"] == "exactIn" and not t["noBase"], "[rh stocks trade] empty amount, 'You pay' focused: %s" % t
+            await pg.context.close()
+        print("[rh stocks trade] Trade on TSLA opens the Robinhood swap card paying USDG (native ETH when the connected wallet holds zero USDG) and receiving TSLA (0x322F0929..., 18 decimals), a typed amount cleared, 'You pay' focused; the stock tokens are selectable on Robinhood only")
+        # ---- [rh stocks isolation] ----
+        pg = await env.open(hash_="#stocks", board=False)
+        await pg.wait_for_function("() => typeof activeChain !== 'undefined' && activeChain === 'base' && document.querySelectorAll('#view-stocks tr[data-sym]').length === 13", timeout=25000)
+        iso = await pg.evaluate("""() => ({rh: STK_RH.length, base: STK.length, sol: STK_SOL.length, list: stkList() === STK, tokensRh: BASE_TOKENS.some(t => STK_RH.some(s => s.address.toLowerCase() === t.address.toLowerCase())),
+            ref: getComputedStyle(document.querySelector('#stkTable th.colRef')).display,
+            av: document.querySelector('#view-stocks tr[data-sym="GOOGLc"] .av').textContent, lede: document.getElementById('stkLede').textContent.slice(0, 40)})""")
+        assert iso["rh"] == 42 and iso["base"] == 13 and iso["sol"] == 20 and iso["list"] and not iso["tokensRh"], "[rh stocks isolation] Base keeps its own list and token list: %s" % iso
+        assert iso["ref"] != "none" and iso["av"] == "GOOG" and iso["lede"].startswith("Tokenized stocks issued by Coinbase"), "[rh stocks isolation] Base keeps the Reference column, the c-suffix trimming and its lede: %s" % iso
+        await pg.context.close()
+        print("[rh stocks isolation] on Base the stocks view still has its 13 c-symbols, the Reference column, 'GOOG' avatar trimming and the Coinbase lede, and the Base token list holds none of the 42 Robinhood tokens (the existing Base and Solana stocks probes run untouched)")
+    finally:
+        await b.close()
+        srv.shutdown()
+    assert not errs, "[rh stocks] console errors: %s" % errs
+
+
+RH_STK_LEDE = "Robinhood Stock Tokens: tokenised debt securities issued by Robinhood Assets (Jersey) Limited, one ERC-20 per stock or ETF. They are not offered to U.S. persons and are restricted in Canada, the United Kingdom and Switzerland. Trade them on-chain any time against USDG."
+RH_STK_NOTE = "Prices are the latest on-chain trade prices from GeckoTerminal; your swap quote comes from the pools on Robinhood Chain. Not investment advice."
 
 
 async def check_rh_no_base_calls(p, errors):
@@ -25794,19 +26134,24 @@ async def check_rh_swap_live(p, errors):
                 out.contractSends = out.sends.length;
                 out.sends.length = 0;
                 walletIsRemote = true;
+                window.__realEnc = iExec.encodeFunctionData.bind(iExec); out.d0 = null;
+                iExec.encodeFunctionData = (...a) => { out.d0 = window.__realEnc(...a); return out.d0; };
+                localStorage.setItem("zx.ref", "0x" + "cd".repeat(20));
                 walletEip1193 = { request: async ({method, params}) => { out.remote.push({method, to: params && params[0] && params[0].to, data: params && params[0] && params[0].data}); throw new Error("probe: stop before sending"); } };
                 await doSwap(); await wait();
-            } finally { E.Contract = realContract; console.error = realErr; walletIsRemote = false; }
+            } finally { localStorage.removeItem("zx.ref"); if (window.__realEnc) { iExec.encodeFunctionData = window.__realEnc; window.__realEnc = null; } E.Contract = realContract; console.error = realErr; walletIsRemote = false; }
             out.suffix = BASE_BUILDER_SUFFIX.slice(2);
             return out;
         }""")
         exec_ctor = [c for c in sent["ctor"] if c["addr"].lower() == RH_EXEC_T.lower()]
-        assert exec_ctor and all(c["viaSigner"] for c in exec_ctor), "[rh swap live] the executor contract at the Robinhood address must be driven by the plain signer (no builder-code runner): %s" % sent["ctor"]
+        assert exec_ctor and all(c["viaSigner"] or ("sendTransaction" in c["runnerKeys"] and "estimateGas" in c["runnerKeys"]) for c in exec_ctor) and any(not c["viaSigner"] for c in exec_ctor), "[rh swap live] the executor contract at the Robinhood address is driven by the plain signer (pre-flight) or the swap runner (send path: invite tag only, no builder code, checked on the data below): %s" % sent["ctor"]
         assert not [c for c in sent["ctor"] if c["addr"].lower() != RH_EXEC_T.lower()], "[rh swap live] no other executor address may be used: %s" % sent["ctor"]
         assert sent["contractSends"] == 1, "[rh swap live] exactly one executeSwap must be sent through the contract path: %s" % sent
         rem = [r for r in sent["remote"] if r["method"] == "eth_sendTransaction"]
         assert len(rem) == 1 and rem[0]["to"].lower() == RH_EXEC_T.lower(), "[rh swap live] exactly one eth_sendTransaction to the Robinhood executor on the remote-wallet path: %s" % sent["remote"]
         assert not rem[0]["data"].endswith(sent["suffix"]), "[rh swap live] NO ERC-8021 builder-code suffix on Robinhood calldata: %s" % rem[0]["data"][-60:]
+        assert sent["d0"] and rem[0]["data"].lower() == (sent["d0"] + "cd" * 20 + "5a585201").lower(), "[ref suffix] Robinhood remote path: data must be exactly data0 + invite blob (no builder suffix): ...%s" % rem[0]["data"][-100:]
+        print("[ref suffix] Robinhood remote-wallet path: executeSwap data = data0 + 20-byte referrer + 5a585201, nothing after it")
         # --- add-chain ---
         add = await pg.evaluate(r"""async () => {
             const calls = [];
@@ -25939,8 +26284,10 @@ async def check_rh_config(p, errors):
                 [None, None, "0x8dc178efb8111bb0973dd9d722ebeff267c98f94"]]
         got = [[(x or "").lower() or None for x in row] for row in cr["dx"]]
         assert got == want, "[rh config] venue addresses: %s" % got
-        assert [t[0] for t in cr["tok"]] == ["ETH", "WETH", "USDG"] and cr["tok"][1][1].lower() == "0x0bd7d308f8e1639fab988df18a8011f41eacad73" \
+        assert [t[0] for t in cr["tok"]][:3] == ["ETH", "WETH", "USDG"] and cr["tok"][1][1].lower() == "0x0bd7d308f8e1639fab988df18a8011f41eacad73" \
             and cr["tok"][2][1].lower() == RH_USDG_T and cr["weth"].lower() == cr["tok"][1][1].lower() and cr["ref"] == "USDG", "[rh config] Robinhood tokens: %s" % cr["tok"]
+        # ۲۵ نوامبر: بعد از سه ردیفِ پایه، ۴۲ توکنِ سهام (۱۸ اعشار) به همان ترتیبِ فایل — فقط روی Robinhood
+        assert [[t[0], t[1], t[2]] for t in cr["tok"][3:]] == [[sy, ad, 18] for sy, _n, ad in RH_STK_EXPECT], "[rh config] the 42 stock tokens follow the three base rows: %s" % cr["tok"][3:6]
         assert cr["pair"] == "zaexa.pair.rh", "[rh config] the saved pair must not share a key with Base: %s" % cr["pair"]
         gm = await pg.evaluate("""() => ({m: gtDexMap(), base: gtDexMap() === GT_DEX_TO_DEX, usdgDec: BASE_TOKENS.find(t => t.symbol === 'USDG').decimals})""")
         assert gm["m"] == {"uniswap-v3-robinhood": "uniswap-v3", "aero-slipstream-robinhood": "aerodrome-cl-3", "uniswap-v4-robinhood": "uniswap-v4"} and not gm["base"] \
@@ -26440,22 +26787,22 @@ async def check_flow_head_mobile(p, errors):
 
 # ---------- ۲۴ نوامبر — نشان‌های Portfolio ----------
 BDG_ADDR = "0x1234567890abcdef1234567890abcdef12345678"
-BDG_IDS = ["first", "base", "rh", "stock", "ten"]
-BDG_TITLES = ["First swap", "Base trader", "Robinhood trader", "Stock buyer", "10 swaps"]
+BDG_IDS = ["first", "base", "rh", "stock", "ten", "ref1", "ref10"]
+BDG_TITLES = ["First swap", "Base trader", "Robinhood trader", "Stock buyer", "10 swaps", "First friend", "Ten friends"]
 BDG_BAN = re.compile(r"\b(points?|rewards?|eligible|airdrops?|seasons?|earn(?:s|ed|ing)?)\b", re.I)
 # ⚠️ استابِ ethers در هارنس اتصالِ «کامل» را تمام نمی‌کند (همان نکته‌ی autoconnect_page)؛ پس account مستقیم گذاشته می‌شود و renderFolio صدا زده می‌شود.
 # کارت فقط به account و activeChain نگاه می‌کند؛ سیمِ connect → refreshBalances → renderFolio را check_badges_static می‌سنجد.
 BDG_WALLET = "window.open = function(){ window.__opened = Array.prototype.slice.call(arguments); return null; };"
 
 
-def bdg_doc(got=(), ten=0, pending=(), ts=1795348800, ts_map=None):
+def bdg_doc(got=(), ten=0, pending=(), ts=1795348800, ts_map=None, ref=0):
     bs = []
     for i in BDG_IDS:
         if i in got:
             bs.append({"id": i, "got": True, "state": "got", "ts": (ts_map or {}).get(i, ts), "tx": "0x" + "ab" * 32, "chain": "rh" if i == "rh" else "base"})
         else:
             bs.append({"id": i, "got": False, "state": "pending" if i in pending else "none"})
-    return {"address": BDG_ADDR, "complete": {"base": True, "rh": True}, "n": len(got), "badges": bs, "progress": {"ten": ten}}
+    return {"address": BDG_ADDR, "complete": {"base": True, "rh": True}, "n": len(got), "badges": bs, "progress": {"ten": ten, "ref": ref}}
 
 
 def bdg_art_body(name):
@@ -26483,7 +26830,7 @@ async def bdg_stub(page):
         return r.fulfill(status=200, content_type="image/svg+xml", body="<svg xmlns='http://www.w3.org/2000/svg'/>")
     await page.route("**/badges/**", h)
     # نشانِ «دیده‌شده» برای هر کیفی از پیش پر است تا نمایشِ خودکارِ مودال کلیکِ پروب‌های دیگر را نگیرد
-    await page.add_init_script("(function(){var g=Storage.prototype.getItem;Storage.prototype.getItem=function(k){var v=g.call(this,k);return v===null&&String(k).indexOf('zx.bdgSeen.')===0?'[\"first\",\"base\",\"rh\",\"stock\",\"ten\"]':v;};})();")
+    await page.add_init_script("(function(){var g=Storage.prototype.getItem;Storage.prototype.getItem=function(k){var v=g.call(this,k);return v===null&&String(k).indexOf('zx.bdgSeen.')===0?'[\"first\",\"base\",\"rh\",\"stock\",\"ten\",\"ref1\",\"ref10\"]':v;};})();")
 
 
 BDG_JS = """() => { const q = s => [...document.querySelectorAll(s)];
@@ -26519,9 +26866,13 @@ def check_badges_static():
         "first": "Make one swap of $5 or more through Zaexa, on Base or Robinhood Chain.",
         "base": "Swap $5 or more on Base through Zaexa.",
         "rh": "Swap $5 or more on Robinhood Chain through Zaexa.",
-        "stock": "Buy a tokenized stock, like TSLAc, through Zaexa \u2014 $5 or more.",
-        "ten": "Make ten swaps through Zaexa, each $5 or more."}, "[badges static] how-to texts: %s" % how
+        "stock": "Buy a tokenized stock, like TSLA, through Zaexa on Base or Robinhood Chain \u2014 $5 or more.",
+        "ten": "Make ten swaps through Zaexa, each $5 or more.",
+        "ref1": "Share your invite link. A friend counts when their first swap of $5 or more on Zaexa goes through it.",
+        "ref10": "Ten different friends whose first $5+ swap on Zaexa went through your invite link."}, "[badges static] how-to texts: %s" % how
     assert 'const BADGE_RULE="Counted when one side of the swap is ETH or a stablecoin and it is worth $5 or more. Read from the chain; updates within an hour.";' in reg["js"], "[badges static] rule line"
+    assert 'const BADGE_RULE_REF="Read from the swap itself: your invite is written into your friend\'s swap transaction. Only their first swap of $5 or more counts, and inviting yourself doesn\'t.";' in reg["js"].replace("\u2019", "'") or 'const BADGE_RULE_REF="Read from the swap itself: your invite is written into your friend\'s swap transaction.' in reg["js"], "[badges static] the friend-badge rule line"
+    assert 'const BADGE_ART_V="3";' in reg["js"] and 'ref1:["#ff6b9a","#ffc2d6"]' in reg["js"] and 'ref10:["#ff8a5c","#ffd36b"]' in reg["js"], "[badges static] art v3 and the two new colour pairs"
     # ۳) هیچ نامِ /ev تازه، هیچ localStorage برای نشان، هیچ glow
     # ۲۴ نوامبر: تنها استفاده‌ی مجاز از localStorage کلیدِ «دیده‌شده» (zx.bdgSeen.<کیف>) برای نمایشِ خودکار است؛ خودِ نشان‌ها هرگز از آن خوانده نمی‌شوند
     ls_lines = [ln for ln in reg["js"].split("\n") if "localStorage" in ln]
@@ -26532,7 +26883,7 @@ def check_badges_static():
     hd = open(os.path.join(HERE, "..", "_headers"), encoding="utf-8").read()
     assert re.search(r"img-src 'self' ", hd), "[badges static] _headers img-src must allow same-origin images (/badges/art/*.svg)"
     assert re.search(r"async function renderFolio\(\)\{\s*renderBadges\(\);", src), "[badges static] renderFolio must start by calling renderBadges() (every account change reaches it through refreshBalances/handleAccountsChanged/disconnect)"
-    assert "#view-folio>*:not(.rhNa):not(#badgesCard)" in src, "[badges static] the Robinhood folio rule must keep #badgesCard visible"
+    assert "#view-folio>*:not(.rhNa):not(#badgesCard):not(#inviteCard)" in src, "[badges static] the Robinhood folio rule must keep #badgesCard and #inviteCard visible"
     # ۵) Worker: نه در sitemap، نه در robots، کرونِ دوم
     idx = open(os.path.join(HERE, "..", "..", "worker", "index.js"), encoding="utf-8").read()
     assert 'const staticPaths = ["/", "/app", "/pairs", "/api"];' in idx and "badges" not in re.search(r'const staticPaths = [^;]*;', idx).group(0), "[badges static] /badges is not a static sitemap path"
@@ -26540,7 +26891,10 @@ def check_badges_static():
     assert 'crons = ["17 * * * *", "47 * * * *"]' in open(os.path.join(HERE, "..", "..", "wrangler.toml"), encoding="utf-8").read(), "[badges static] both crons in wrangler.toml"
     forb = [BDG_BAN.search(reg[k]) for k in ("js", "html", "modal")]
     assert not any(forb), "[badges forbidden words] banned word in the JS/HTML/modal blocks: %s" % [f.group(0) for f in forb if f]
-    print("[badges forbidden words] none of points, reward(s), eligible, airdrop, season, earn/earned in the BADGES JS, HTML and MODAL blocks")
+    inv = re.search(r'<section class="card" id="inviteCard".*?</section>', src, re.S)
+    assert inv and re.search(r'<!-- BADGES:HTML:BEGIN.*?id="inviteCard".*?<!-- BADGES:HTML:END -->', src, re.S), "[badges forbidden words] the invite card must sit inside the BADGES:HTML block"
+    assert not BDG_BAN.search(inv.group(0)), "[badges forbidden words] banned word in the invite card: %s" % BDG_BAN.search(inv.group(0)).group(0)
+    print("[badges forbidden words] none of points, reward(s), eligible, airdrop, season, earn/earned in the BADGES JS, HTML (incl. the invite card) and MODAL blocks")
     print("[badges static] app and worker agree on the 13 B20 stock addresses, ids/titles/how-to/rule texts are exactly the owner's, none of the banned words in the badge JS/CSS/HTML/modal or worker/badges.js, no localStorage/ev/glow, locked style, CSP allows same-origin art, /badges not in sitemap or robots, both crons")
 
 
@@ -26589,24 +26943,26 @@ async def check_badges_card(p, errors):
             return pg
 
         # 1) نشان‌ها: دو تا گرفته، ten با ۳ از ۱۰
-        state["doc"] = bdg_doc(got=("first", "base"), ten=3)
+        state["doc"] = bdg_doc(got=("first", "base"), ten=3, ref=3)
         pg = await open_folio()
         await pg.wait_for_selector("#badgesCard .bdgC", timeout=15000)
         g = await pg.evaluate(BDG_JS)
         assert state["calls"] == ["/badges/%s.json" % BDG_ADDR], "[badges card] one request, lower-case full address: %s" % state["calls"]
-        assert g["count"] == "2 of 5", "[badges card] the count on the right: %r" % g["count"]
-        assert [m["name"] for m in g["ms"]] == BDG_TITLES and [m["id"] for m in g["ms"]] == BDG_IDS, "[badges card] five medals in order: %s" % [m["name"] for m in g["ms"]]
-        assert [m["got"] for m in g["ms"]] == [True, True, False, False, False], "[badges card] only the got cards are in colour: %s" % [m["got"] for m in g["ms"]]
+        assert g["count"] == "2 of 7", "[badges card] the count on the right: %r" % g["count"]
+        assert [m["name"] for m in g["ms"]] == BDG_TITLES and [m["id"] for m in g["ms"]] == BDG_IDS, "[badges card] seven medals in order: %s" % [m["name"] for m in g["ms"]]
+        assert [m["got"] for m in g["ms"]] == [True, True, False, False, False, False, False], "[badges card] only the got cards are in colour: %s" % [m["got"] for m in g["ms"]]
         assert all(m["tag"] == "BUTTON" for m in g["ms"]) and [m["how"] for m in g["ms"]][1] == "Swap $5 or more on Base through Zaexa.", "[badges card] cards are buttons that show the how-to line"
-        assert len({m["top"] for m in g["ms"]}) == 1, "[badges card] desktop: one row of five: %s" % [(m["top"], m["iw"]) for m in g["ms"]]
+        tops = sorted({m["top"] for m in g["ms"]})
+        assert len(tops) == 2 and [sum(1 for m in g["ms"] if m["top"] == t) for t in tops] == [4, 3], "[badges card] desktop: 4 + 3 grid: %s" % [(m["top"], m["iw"]) for m in g["ms"]]
         assert all(m["filter"] == "none" for m in g["ms"]), "[badges card] no filter on any medal: %s" % [m["filter"] for m in g["ms"]]
-        assert len(g["ms"]) == 5, "[badges cards] five .bdgC cards: %d" % len(g["ms"])
-        assert all(m["src"].endswith("/%s.svg?v=2" % m["id"]) and not m["src"].endswith("-off.svg?v=2") for m in g["ms"] if m["got"]), "[badges cards] earned art src: %s" % [m["src"] for m in g["ms"]]
-        assert all(m["src"].endswith("/%s-off.svg?v=2" % m["id"]) for m in g["ms"] if not m["got"]), "[badges cards] locked art src ends -off.svg?v=2: %s" % [m["src"] for m in g["ms"]]
+        assert len(g["ms"]) == 7, "[badges cards] seven .bdgC cards: %d" % len(g["ms"])
+        assert all(m["src"].endswith("/%s.svg?v=3" % m["id"]) and not m["src"].endswith("-off.svg?v=3") for m in g["ms"] if m["got"]), "[badges cards] earned art src: %s" % [m["src"] for m in g["ms"]]
+        assert all(m["src"].endswith("/%s-off.svg?v=3" % m["id"]) for m in g["ms"] if not m["got"]), "[badges cards] locked art src ends -off.svg?v=3: %s" % [m["src"] for m in g["ms"]]
         assert g["ms"][0]["st"].startswith("Got it") and "Nov 22, 2026" in g["ms"][0]["st"], "[badges cards] got card status: %r" % g["ms"][0]["st"]
         assert g["ms"][4]["st"].startswith("3 / 10 swaps") and g["ms"][4]["bar"] and "width:30%" in g["ms"][4]["bar"].replace(" ", ""), "[badges cards] ten progress text and 30%% bar: %s" % g["ms"][4]
-        assert [m["st"] for m in g["ms"]][2:4] == ["Not yet", "Not yet"], "[badges cards] Not yet: %s" % [m["st"] for m in g["ms"]]
-        print("[badges cards] 5 .bdgC in one desktop row; earned art <id>.svg?v=2, locked <id>-off.svg?v=2; ten 3 / 10 swaps with a 30% bar; got card says Got it; no filter")
+        assert [m["st"] for m in g["ms"]][2:4] == ["Not yet", "Not yet"] and g["ms"][5]["st"] == "Not yet", "[badges cards] Not yet: %s" % [m["st"] for m in g["ms"]]
+        assert g["ms"][6]["st"].startswith("3 / 10 friends") and g["ms"][6]["bar"] and "width:30%" in g["ms"][6]["bar"].replace(" ", ""), "[badges cards] ref10 progress text and 30%% bar: %s" % g["ms"][6]
+        print("[badges cards] 7 .bdgC in a 4 + 3 desktop grid; ref10 3 / 10 friends with a 30% bar; earned art <id>.svg?v=3, locked <id>-off.svg?v=3; ten 3 / 10 swaps with a 30% bar; got card says Got it; no filter")
         # مودالِ قفل: ten (هنوز نه)
         await pg.click('#badgesCard [data-badge="ten"]')
         md = await pg.evaluate("""() => { const m = document.querySelector('#badgeOv .bdgModal'), hid = id => { const e = document.getElementById(id); return e.hidden && getComputedStyle(e).display === 'none'; };
@@ -26617,11 +26973,17 @@ async def check_badges_card(p, errors):
         assert md["on"] and md["t"] == "10 swaps" and md["st"] == "3 of 10" and md["lab"] == "BADGE", "[badges modal] title/progress/label: %s" % md
         assert md["how"] == "How to get it: Make ten swaps through Zaexa, each $5 or more.", "[badges modal] how-to for a not-yet badge: %r" % md["how"]
         assert md["rule"] == "Counted when one side of the swap is ETH or a stablecoin and it is worth $5 or more. Read from the chain; updates within an hour.", "[badges modal] rule line: %r" % md["rule"]
-        assert not md["cel"] and md["hid"] == [True, True, True] and md["src"] == "/badges/art/ten-off.svg?v=2", "[badges locked modal] no celebration, who/share/copy hidden, -off art: %s" % md
+        assert not md["cel"] and md["hid"] == [True, True, True] and md["src"] == "/badges/art/ten-off.svg?v=3", "[badges locked modal] no celebration, who/share/copy hidden, -off art: %s" % md
         assert md["r"] <= md["ih"], "[badges modal] fits the viewport: %s" % md
-        print("[badges locked modal] a locked card opens a calm modal: no cel class, Who/Share/Copy hidden, 'How to get it: ...', stage img ends -off.svg?v=2")
+        print("[badges locked modal] a locked card opens a calm modal: no cel class, Who/Share/Copy hidden, 'How to get it: ...', stage img ends -off.svg?v=3")
         await pg.keyboard.press("Escape")
         assert not await pg.evaluate("() => document.getElementById('badgeOv').classList.contains('on')"), "[badges modal] Escape closes"
+        for rid, rhow in (("ref1", "How to get it: Share your invite link. A friend counts when their first swap of $5 or more on Zaexa goes through it."), ("ref10", "How to get it: Ten different friends whose first $5+ swap on Zaexa went through your invite link.")):
+            await pg.click('#badgesCard [data-badge="%s"]' % rid)
+            rm_ = await pg.evaluate("() => ({ rule: document.getElementById('badgeMRule').textContent, how: document.getElementById('badgeMHow').textContent, src: document.querySelector('#badgeMStage img').getAttribute('src') })")
+            assert rm_["rule"] == "Read from the swap itself: your invite is written into your friend's swap transaction. Only their first swap of $5 or more counts, and inviting yourself doesn't." and rm_["how"] == rhow and rm_["src"] == "/badges/art/%s-off.svg?v=3" % rid, "[badges friend modal] %s: rule line, how-to and -off art: %s" % (rid, rm_)
+            await pg.keyboard.press("Escape")
+        print("[badges friend modal] ref1/ref10 open with their own rule line (read from the swap itself), how-to text and -off art; the other five keep the original rule line")
         await pg.click('#badgesCard [data-badge="base"]')
         await pg.wait_for_selector("#badgeMStage svg", timeout=10000)
         md = await pg.evaluate("""() => { const m = document.querySelector('#badgeOv .bdgModal'), ids = [...document.querySelectorAll('#badgeMStage [id]')].map(e => e.id);
@@ -26655,7 +27017,7 @@ async def check_badges_card(p, errors):
         pg = await open_folio()
         await pg.wait_for_selector("#badgesCard .bdgC", timeout=15000)
         g = await pg.evaluate(BDG_JS)
-        assert g["count"] == "0 of 5" and all(m["st"] == "Not yet" and not m["got"] and m["src"].endswith("-off.svg?v=2") for m in g["ms"]), "[badges card] nothing yet: %s" % g
+        assert g["count"] == "0 of 7" and all(m["st"] == "Not yet" and not m["got"] and m["src"].endswith("-off.svg?v=3") for m in g["ms"]), "[badges card] nothing yet: %s" % g
         await pg.click('#badgesCard [data-badge="first"]')
         assert await pg.evaluate("() => document.getElementById('badgeShare').hidden && !document.querySelector('#badgeOv .bdgModal').classList.contains('cel')"), "[badges card] nothing yet: no share, no celebration"
         await pg.context.close()
@@ -26664,7 +27026,7 @@ async def check_badges_card(p, errors):
         pg = await open_folio()
         await pg.wait_for_selector("#badgesCard .bdgC", timeout=15000)
         g = await pg.evaluate(BDG_JS)
-        assert [m["st"] for m in g["ms"]] == ["Got it \u00b7 Nov 22, 2026", "Got it \u00b7 Nov 22, 2026", "Still reading history", "Still reading history", "Still reading history"], "[badges card] pending: %s" % [m["st"] for m in g["ms"]]
+        assert [m["st"] for m in g["ms"]] == ["Got it \u00b7 Nov 22, 2026", "Got it \u00b7 Nov 22, 2026", "Still reading history", "Still reading history", "Still reading history", "Not yet", "Not yet"], "[badges card] pending: %s" % [m["st"] for m in g["ms"]]
         await pg.click('#badgesCard [data-badge="rh"]')
         assert await pg.inner_text("#badgeMStat") == "Still reading history", "[badges modal] pending in the modal"
         await pg.context.close()
@@ -26684,7 +27046,7 @@ async def check_badges_card(p, errors):
             await pg.wait_for_selector("#badgesCard .bdgC", timeout=15000)
             g = await pg.evaluate(BDG_JS)
             tops = sorted({m["top"] for m in g["ms"]})
-            assert len(tops) == 3 and [sum(1 for m in g["ms"] if m["top"] == t) for t in tops] == [2, 2, 1], "[badges mobile %d] 2+2+1 grid: %s" % (vw, [(m["top"], m["l"]) for m in g["ms"]])
+            assert len(tops) == 4 and [sum(1 for m in g["ms"] if m["top"] == t) for t in tops] == [2, 2, 2, 1], "[badges mobile %d] 2+2+2+1 grid: %s" % (vw, [(m["top"], m["l"]) for m in g["ms"]])
             assert g["sw"] <= g["iw"] and all(m["l"] >= g["cardL"] - 1 and m["r"] <= g["cardR"] + 1 for m in g["ms"]), "[badges mobile %d] fits the card and the page does not scroll sideways: %s" % (vw, g)
             await pg.click('#badgesCard [data-badge="stock"]')   # قفل
             mg = await pg.evaluate("() => { const r = document.querySelector('#badgeOv .bdgModal').getBoundingClientRect(); return { l: r.left, r: r.right, sw: document.documentElement.scrollWidth, iw: innerWidth, b: r.bottom, ih: innerHeight }; }")
@@ -26726,7 +27088,7 @@ async def check_badges_card(p, errors):
         await pg.click('#badgesCard [data-badge="first"]')
         await pg.wait_for_selector("#badgeMStage img", timeout=10000)
         fb = await pg.evaluate("() => ({ on: document.getElementById('badgeOv').classList.contains('on'), svg: !!document.querySelector('#badgeMStage svg'), src: document.querySelector('#badgeMStage img').getAttribute('src'), cel: document.querySelector('#badgeOv .bdgModal').classList.contains('cel') })")
-        assert fb["on"] and not fb["svg"] and fb["src"] == "/badges/art/first.svg?v=2", "[badges fallback] art fetch aborted: the modal opens with the <img>: %s" % fb
+        assert fb["on"] and not fb["svg"] and fb["src"] == "/badges/art/first.svg?v=3", "[badges fallback] art fetch aborted: the modal opens with the <img>: %s" % fb
         await pg.context.close()
         state["art_fail"] = False
         print("[badges fallback] with every art request aborted the earned modal still opens and shows the plain <img> instead of the inline svg")
@@ -26773,9 +27135,9 @@ async def check_badges_card(p, errors):
         pg = await open_folio(seen=None, init=["Storage.prototype.getItem = function(){ throw new Error('denied'); };"])
         await pg.wait_for_selector("#badgesCard .bdgC", timeout=15000)
         await pg.wait_for_timeout(900)
-        assert await modal_off(pg) and len(await pg.query_selector_all("#badgesCard .bdgC")) == 5 and not [e for e in errs[before:] if "PAGEERROR" in e], "[badges storage throws] no popup, the card still renders, no page error: %s" % errs[before:]
+        assert await modal_off(pg) and len(await pg.query_selector_all("#badgesCard .bdgC")) == 7 and not [e for e in errs[before:] if "PAGEERROR" in e], "[badges storage throws] no popup, the card still renders, no page error: %s" % errs[before:]
         await pg.context.close()
-        print("[badges storage throws] localStorage.getItem throwing: no auto popup, the five cards still render, no page error")
+        print("[badges storage throws] localStorage.getItem throwing: no auto popup, the seven cards still render, no page error")
         # صف: سه نشانِ تازه به ترتیبِ ts
         state["doc"] = bdg_doc(got=("first", "base", "ten"), ten=10, ts_map={"first": 1795000000, "base": 1795100000, "ten": 1795300000})
         pg = await open_folio(seen=["first"])
@@ -26790,7 +27152,211 @@ async def check_badges_card(p, errors):
         await pg.context.close()
         print("[badges auto queue] seen=[first] with first+base+ten earned: base opens, Close opens ten after the delay, Close ends the queue")
         assert not [e for e in errs if "PAGEERROR" in e], "[badges card] page errors: %s" % errs
-        print("[badges card] Portfolio card from /badges/<addr>.json: 5 cards in order with Got it date / Not yet / 3 of 10 / Still reading history, modal (how-to line, rule line, Escape/backdrop/X close), nothing-yet cards have no share, error line never shows all-not-got, 2+2+1 grid at 390/360 without overflow, hidden without a wallet and on Solana, visible on Robinhood")
+        print("[badges card] Portfolio card from /badges/<addr>.json: 7 cards in order with Got it date / Not yet / 3 of 10 / Still reading history, modal (how-to line, rule line, Escape/backdrop/X close), nothing-yet cards have no share, error line never shows all-not-got, 2+2+2+1 grid at 390/360 without overflow, hidden without a wallet and on Solana, visible on Robinhood")
+    finally:
+        await b.close()
+        srv.shutdown()
+
+
+# ---------- ۲۵ نوامبر — دعوت (referral): ثبتِ ?ref، برچسبِ calldata، کارتِ دعوت ----------
+REF_A = "0xAbCdEf0123456789aBcDeF0123456789AbCdEf01"
+REF_B = "0x" + "b2" * 20
+
+
+def bdg_extra_factory(state=None):
+    """/badges/<کیف>.json و هنرِ ساده برای صفحه‌هایی که فقط کنسولشان باید تمیز بماند؛ state = {ref, gate, calls}."""
+    st = state if state is not None else {}
+
+    async def extra(route, rest, u):
+        m = re.match(r"^/badges/(0x[0-9a-f]{40})\.json$", rest)
+        if m:
+            if st.get("gate") is not None:
+                await st["gate"].wait()
+            await route.fulfill(status=200, content_type="application/json", body=_fbj.dumps({**bdg_doc(got=("first",), ten=1, ref=st.get("ref", 0)), "address": m.group(1)}))
+            return True
+        if rest.startswith("/badges/art/") and rest.endswith(".svg"):
+            await route.fulfill(status=200, content_type="image/svg+xml", body="<svg xmlns='http://www.w3.org/2000/svg'/>")
+            return True
+        return False
+    return extra
+
+
+async def check_ref_capture(p, errors):
+    """[ref capture] ?ref در بوت: ذخیره‌ی حروفِ کوچک، اولین لمس برنده، حذفِ فقط همان پارامتر، نامعتبر/صفر نادیده، ذخیره‌سازِ خراب = بی‌خطا."""
+    srv, origin = fb_serve()
+    b = await p.chromium.launch()
+    errs = []
+    try:
+        env = FbEnv(b, origin, errs)
+        env.extra = bdg_extra_factory()
+        SNAP = """() => ({ ref: (() => { try { return localStorage.getItem('zx.ref'); } catch (e) { return 'THROWS'; } })(), search: location.search, hash: location.hash, path: location.pathname })"""
+
+        async def ready(pg):
+            await pg.wait_for_function("() => typeof E !== 'undefined' && !!E && typeof renderFolio === 'function'", timeout=20000)
+        pg = await env.open(path="/app?ref=%s&x=1%%202&y=3" % REF_A, hash_="#folio", init=[bdg_seen_js(BDG_IDS)])
+        await ready(pg)
+        s1 = await pg.evaluate(SNAP)
+        assert s1["ref"] == REF_A.lower() and s1["search"] == "?x=1%202&y=3" and s1["hash"] == "#folio" and s1["path"] == "/app", "[ref capture] a valid ?ref is stored in lower case and only that param leaves the URL (other params and the hash stay): %s" % s1
+        await pg.goto(origin + "/app?ref=%s#folio" % REF_B)
+        await ready(pg)
+        s2 = await pg.evaluate(SNAP)
+        assert s2["ref"] == REF_A.lower() and "ref" not in s2["search"], "[ref capture] a second visit with a different ref never overwrites (first touch wins): %s" % s2
+        await pg.context.close()
+        for q in ("0x123", "0x" + "0" * 40, "0x" + "g" * 40, "", "0x" + "ab" * 20 + "00", "reference"):
+            pg = await env.open(path="/app?ref=%s" % q + ("&reference=keep" if q == "reference" else ""), hash_="#folio", init=[bdg_seen_js(BDG_IDS)])
+            await ready(pg)
+            sn = await pg.evaluate(SNAP)
+            assert sn["ref"] is None and "ref=" not in sn["search"].replace("reference=", "") and (q != "reference" or sn["search"] == "?reference=keep"), "[ref capture] an invalid / zero ref (%r) stores nothing, and a similarly named param survives: %s" % (q, sn)
+            await pg.context.close()
+        before = len(errs)
+        pg = await env.open(path="/app?ref=%s&keep=1" % REF_B, hash_="#folio", init=["Storage.prototype.getItem = function(){ throw new Error('denied'); }; Storage.prototype.setItem = function(){ throw new Error('denied'); };"])
+        await ready(pg)
+        await pg.wait_for_timeout(600)
+        sn = await pg.evaluate("() => ({ search: location.search, w: typeof withRef === 'function' ? withRef('0xabcd', '0x' + '11'.repeat(20)) : null })")
+        assert sn["search"] == "?keep=1" and sn["w"] == "0xabcd", "[ref capture] a throwing localStorage leaves the feature off (data unchanged) and the URL clean: %s" % sn
+        assert not [e for e in errs[before:] if "PAGEERROR" in e], "[ref capture] a throwing localStorage must not raise a page error: %s" % errs[before:]
+        await pg.context.close()
+        assert not [e for e in errs if "PAGEERROR" in e], "[ref capture] page errors: %s" % errs
+        print("[ref capture] valid ?ref stored lower-case under zx.ref and removed from the URL alone (other params + hash kept); a later different ref never overwrites; short/zero/non-hex/too long ignored (a param named reference survives); throwing localStorage = feature off, no page error")
+    finally:
+        await b.close()
+        srv.shutdown()
+
+
+async def check_ref_suffix(p, errors):
+    """[ref suffix] withRef خالص و idempotent؛ runner افزونه روی Base (blob ← پسوند) و Robinhood (فقط blob)؛ call دست‌نخورده؛ متنِ خطِ والتِ راه‌دور."""
+    srv, origin = fb_serve()
+    b = await p.chromium.launch()
+    errs = []
+    try:
+        env = FbEnv(b, origin, errs)
+        env.extra = bdg_extra_factory()
+        pg = await env.open(hash_="#folio", init=[bdg_seen_js(BDG_IDS)])
+        await pg.wait_for_function("() => typeof withRef === 'function' && typeof builderRunner === 'function' && typeof E !== 'undefined' && !!E", timeout=20000)
+        r = await pg.evaluate(r"""async () => {
+            const REF = "0x" + "ab".repeat(20), ACC = "0x" + "11".repeat(20), MAGIC = "5a585201", blob = REF.slice(2) + MAGIC, sfx = BASE_BUILDER_SUFFIX.slice(2);
+            const d = "0x12345678" + "00".repeat(40), out = {};
+            const set = v => { if (v === null) localStorage.removeItem("zx.ref"); else localStorage.setItem("zx.ref", v); };
+            set(null);
+            out.noRef = withRef(d, ACC) === d;
+            set(REF);
+            const frozen = String(d), before = localStorage.getItem("zx.ref");
+            out.add = withRef(d, ACC) === d + blob && d === frozen && localStorage.getItem("zx.ref") === before;
+            out.idem = withRef(withRef(d, ACC), ACC) === d + blob;
+            out.idemSfx = withRef(withBuilderCode(d + blob), ACC) === d + blob + sfx;
+            out.self = withRef(d, REF.toUpperCase().replace("0X", "0x")) === d && withRef(d, REF) === d;
+            out.upperData = withRef((d + blob).toUpperCase().replace("0X", "0x"), ACC) === (d + blob).toUpperCase().replace("0X", "0x");
+            set("0x" + "00".repeat(20)); out.zero = withRef(d, ACC) === d;
+            set("garbage"); out.garbage = withRef(d, ACC) === d;
+            set(REF.toUpperCase().replace("0X", "0x")); out.upperStored = withRef(d, ACC) === d + blob;
+            set(REF);
+            const mk = () => { const seen = []; return {seen, fake: {provider: null, getAddress: async () => "0x1",
+                call: async tx => { seen.push(["call", tx.data]); return "0x"; },
+                estimateGas: async tx => { seen.push(["est", tx.data]); return 1n; },
+                sendTransaction: async tx => { seen.push(["send", tx.data]); return {hash: "0x"}; }}}; };
+            const run = async () => { const m = mk(), rn = builderRunner(m.fake); account = ACC;
+                await rn.call({data: d}); await rn.estimateGas({data: d}); await rn.sendTransaction({data: d}); return m.seen; };
+            const realId = CHAIN.id;
+            try {
+                CHAIN.id = 8453; out.base = await run();
+                CHAIN.id = 4663; out.rh = await run();
+            } finally { CHAIN.id = realId; set(null); }
+            // ERC-8021 از ته: marker ← schema ← طول ← کدها، و پیش از آن blob
+            const tail = out.base[2][1].slice(2), hb = []; for (let i = 0; i < tail.length; i += 2) hb.push(parseInt(tail.slice(i, i + 2), 16));
+            const marker = hb.slice(-16).map(x => x.toString(16).padStart(2, "0")).join(""), schema = hb[hb.length - 17], len = hb[hb.length - 18];
+            const rest = tail.slice(0, tail.length - 2 * (16 + 2 + len));
+            out.parse = {marker, schema, len, code: String.fromCharCode(...hb.slice(hb.length - 18 - len, hb.length - 18)), blobBefore: rest.endsWith(blob), exp: d + blob, tailIsExp: ("0x" + rest) === d + blob};
+            out.d = d; out.blob = blob; out.sfx = sfx;
+            return out;
+        }""")
+        d, blob, sfx = r["d"], r["blob"], r["sfx"]
+        assert r["noRef"] and r["add"] and r["idem"] and r["idemSfx"] and r["self"] and r["upperData"] and r["zero"] and r["garbage"] and r["upperStored"], "[ref suffix] withRef pure-function cases (no ref, add, idempotent, idempotent before the builder suffix, ref == account in any case, invalid stored value): %s" % {k: v for k, v in r.items() if k in ("noRef", "add", "idem", "idemSfx", "self", "upperData", "zero", "garbage", "upperStored")}
+        assert r["base"] == [["call", d], ["est", d + blob + sfx], ["send", d + blob + sfx]], "[ref suffix] Base extension path: estimateGas and sendTransaction carry data0 + blob + builder suffix, call() stays plain: %s" % r["base"]
+        assert r["rh"] == [["call", d], ["est", d + blob], ["send", d + blob]], "[ref suffix] Robinhood extension path: estimateGas and sendTransaction carry data0 + blob (no builder suffix), call() stays plain: %s" % r["rh"]
+        pr = r["parse"]
+        assert pr["marker"] == "8021" * 8 and pr["schema"] == 0 and pr["len"] == 11 and pr["code"] == "bc_r52gopww" and pr["blobBefore"] and pr["tailIsExp"], "[ref suffix] the builder suffix still parses per ERC-8021 from the end and the blob sits right before it: %s" % pr
+        src = open(os.path.join(HERE, "..", "index.html"), encoding="utf-8").read()
+        assert "const data=CHAIN.id===8453?withBuilderCode(withRef(data0,account)):withRef(data0,account);" in src, "[ref suffix] the remote-wallet line must be withBuilderCode(withRef(data0,account)) on Base and withRef(data0,account) elsewhere"
+        assert "new E.Contract(CHAIN.executor,ABI.executor,builderRunner(signer))" in src and "const tag=tx=>{const d=withRef(tx&&tx.data,account);return{...tx,data:CHAIN.id===8453?withBuilderCode(d):d};};" in src, "[ref suffix] the extension path uses the runner on both chains, blob first, builder suffix last (Base only)"
+        assert not [e for e in errs if "PAGEERROR" in e], "[ref suffix] page errors: %s" % errs
+        print("[ref suffix] withRef is pure and idempotent (also before the builder suffix), skips ref == account and invalid values; extension path on Base = data0+blob+ERC-8021 suffix (parses from the end), on Robinhood = data0+blob; call() stays plain; remote-wallet line pinned in the source (end-to-end data checks are in [sim override] and [rh swap live])")
+    finally:
+        await b.close()
+        srv.shutdown()
+
+
+async def check_invite_card(p, errors):
+    """[invite card] کارتِ دعوت: لینک، Copy، Share، خطِ دوستان (۰/۱/۳)، پنهان روی سولانا و بدونِ کیف، دیده روی Robinhood، واژه‌های ممنوع."""
+    srv, origin = fb_serve()
+    b = await p.chromium.launch()
+    errs = []
+    try:
+        env = FbEnv(b, origin, errs)
+        st = {"ref": 0, "gate": None}
+        env.extra = bdg_extra_factory(st)
+        ACC = "0x1234567890ABCDEF1234567890abcdef12345678"
+        LINK = "https://zaexa.com/app?ref=" + ACC.lower()
+        CLIP = "Object.defineProperty(navigator, 'clipboard', {value: {writeText: async t => { if (window.__clipFail) throw new Error('denied'); window.__clip = t; }}, configurable: true});"
+
+        async def open_(hash_="#folio", connect=True, vw=1280):
+            pg = await env.open(hash_=hash_, vw=vw, vh=900, init=[BDG_WALLET, CLIP, bdg_seen_js(BDG_IDS)])
+            await pg.wait_for_function("() => typeof E !== 'undefined' && !!E && typeof renderFolio === 'function'", timeout=20000)
+            if connect:
+                await pg.evaluate("(a) => { account = a; renderFolio(); }", ACC)
+            return pg
+        VIS = "() => { const c = document.getElementById('inviteCard'); return !c.hidden && getComputedStyle(c).display !== 'none' && c.getClientRects().length > 0; }"
+        st["ref"] = 3
+        st["gate"] = asyncio.Event()
+        pg = await open_()
+        await pg.wait_for_function(VIS, timeout=15000)
+        pre = await pg.evaluate("() => { const e = document.getElementById('inviteStatus'); return e.hidden || getComputedStyle(e).display === 'none'; }")
+        assert pre, "[invite card] the friends line stays hidden until the badges document has loaded"
+        st["gate"].set()
+        await pg.wait_for_function("() => !document.getElementById('inviteStatus').hidden", timeout=15000)
+        g = await pg.evaluate("""() => { const c = document.getElementById('inviteCard'), t = id => document.getElementById(id).textContent;
+            return { title: c.querySelector('.ttl').textContent, tx: c.querySelector('.invTx').textContent, link: t('inviteLink'), copy: t('inviteCopy'), share: t('inviteShare'), status: t('inviteStatus'),
+                     after: document.getElementById('badgesCard').nextElementSibling && document.getElementById('badgesCard').nextElementSibling.id, cls: c.className,
+                     btn: [document.getElementById('inviteCopy').className, document.getElementById('inviteShare').className], mono: document.getElementById('inviteLink').classList.contains('mono'), text: c.innerText }; }""")
+        assert g["title"] == "Invite friends" and g["tx"] == "Share your link. When a friend's first swap of $5 or more on Zaexa goes through it, your invite is written into their swap on-chain and counts toward your Friend badges.", "[invite card] exact title and text: %s" % g
+        assert g["link"] == LINK and g["mono"] and g["copy"] == "Copy link" and g["share"] == "Share on X" and g["after"] == "inviteCard" and g["cls"] == "card" and g["btn"] == ["chip", "cta"], "[invite card] link text (lower-case connected address), mono box, buttons, card placed right after #badgesCard: %s" % g
+        assert g["status"] == "3 friends so far", "[invite card] friends line comes from progress.ref (3): %r" % g["status"]
+        assert not BDG_BAN.search(g["text"]), "[invite card] banned word on screen: %s" % g["text"]
+        await pg.click("#inviteCopy")
+        c1 = await pg.evaluate("() => ({ clip: window.__clip, t: document.getElementById('inviteCopy').textContent })")
+        assert c1["clip"] == LINK and c1["t"] == "Copied", "[invite card] Copy writes the link to the clipboard and says Copied: %s" % c1
+        await pg.wait_for_timeout(1700)
+        assert await pg.inner_text("#inviteCopy") == "Copy link", "[invite card] Copied returns to Copy link after 1400ms"
+        await pg.evaluate("() => { window.__clipFail = true; }")
+        await pg.click("#inviteCopy")
+        assert await pg.inner_text("#inviteCopy") == "Copy failed", "[invite card] a failing clipboard says Copy failed"
+        await pg.click("#inviteShare")
+        opened = await pg.evaluate("() => window.__opened")
+        want = "https://x.com/intent/tweet?text=" + _fburl.quote("Swap on Zaexa", safe="!~*'()") + "&url=" + _fburl.quote(LINK, safe="!~*'()")
+        assert opened and opened[0] == want and opened[1] == "_blank" and opened[2] == "noopener,noreferrer", "[invite card] Share on X opens the exact intent URL with noopener,noreferrer: %s" % opened
+        await pg.context.close()
+        for n, want_t in ((0, "0 friends so far"), (1, "1 friend so far"), (3, "3 friends so far")):
+            st["ref"], st["gate"] = n, None
+            pg = await open_()
+            await pg.wait_for_function("() => !document.getElementById('inviteStatus').hidden", timeout=15000)
+            assert await pg.inner_text("#inviteStatus") == want_t, "[invite card] friends wording for %d: %r" % (n, await pg.inner_text("#inviteStatus"))
+            await pg.context.close()
+        pg = await open_(connect=False)
+        await pg.evaluate("() => renderFolio()")
+        await pg.wait_for_timeout(700)
+        assert not await pg.evaluate(VIS), "[invite card] hidden with no wallet"
+        await pg.context.close()
+        pg = await open_(hash_="#folio?chain=solana", connect=False)
+        await pg.evaluate("(a) => { account = a; renderFolio(); }", ACC)
+        await pg.wait_for_timeout(800)
+        assert not await pg.evaluate(VIS), "[invite card] hidden on Solana"
+        await pg.context.close()
+        pg = await open_(hash_="#folio?chain=robinhood")
+        await pg.wait_for_function(VIS, timeout=15000)
+        rh = await pg.evaluate("() => ({ rh: document.documentElement.hasAttribute('data-rh'), badges: getComputedStyle(document.getElementById('badgesCard')).display, link: document.getElementById('inviteLink').textContent })")
+        assert rh["rh"] and rh["badges"] != "none" and rh["link"] == LINK, "[invite card] visible on Robinhood next to the badges card: %s" % rh
+        await pg.context.close()
+        assert not [e for e in errs if "PAGEERROR" in e], "[invite card] page errors: %s" % errs
+        print("[invite card] 'Invite friends' card right after Badges: exact text, mono link https://zaexa.com/app?ref=<lower-case address>, Copy link (Copied 1400ms / Copy failed), Share on X exact intent URL (noopener,noreferrer), '0 friends / 1 friend / 3 friends so far' from progress.ref and hidden until the doc loads, hidden on Solana and with no wallet, visible on Robinhood, no banned words")
     finally:
         await b.close()
         srv.shutdown()

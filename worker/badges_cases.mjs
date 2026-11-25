@@ -2,7 +2,7 @@
    بدونِ شبکه: fetch و KV جعلی. هر رفتار یک کاوشگر دارد؛ شکستنِ عمدی با ZX_BADGES_BREAK=<نام> (فقط برای دیدنِ قرمزشدن). */
 import fs from "node:fs";
 import {
-  TOPIC0_V5, TOPIC0_V6, SIG_V5, SIG_V6, BASE_STOCKS, BADGE_IDS, BADGE_TITLES, BADGE_CHAINS, BADGES_RPC_MAX,
+  TOPIC0_V5, TOPIC0_V6, SIG_V5, SIG_V6, BASE_STOCKS, RH_STOCKS, RH_STOCK_SYMBOLS, REF_MAGIC, parseRefFromInput, BADGE_IDS, BADGE_TITLES, BADGE_CHAINS, BADGES_RPC_MAX,
   decodeSwapped, classifySwap, applyCounted, emptyUser, runBadgesPass, badgesDoc, badgesRoute, badgePageHtml, baseRpcList,
 } from "./badges.js";
 import { keccak256, utf8Bytes, bytesToHex } from "./keccak.js";
@@ -21,8 +21,19 @@ const w = (n) => BigInt(n).toString(16).padStart(64, "0");
 const u = (n) => "0x" + n.toString(16).padStart(40, "0");   // کیف جعلیِ شماره n
 const hex = (n) => "0x" + n.toString(16);
 let txn = 0;
-function mkLog(ex, user, tin, tout, ain, aout, block, idx, ts) {
+/* تراکنش‌های جعلی برای eth_getTransactionByHash: هش → {from,to,input}. */
+const TXS = new Map();
+const MARK8021 = "80218021802180218021802180218021";
+const DATA0 = "0x12345678" + "00".repeat(64);
+const blobOf = (ref) => ref.replace(/^0x/, "").toLowerCase() + REF_MAGIC;
+const builderSuffix = (codes) => { const c = Buffer.from(codes || "baseapp").toString("hex"); return c + (c.length / 2).toString(16).padStart(2, "0") + "00" + MARK8021; };
+function mkLog(ex, user, tin, tout, ain, aout, block, idx, ts, opts) {
   txn++;
+  const o = opts || {};
+  TXS.set("0x" + txn.toString(16).padStart(64, "0"), {
+    from: o.from || user, to: o.to || ex.addr,
+    input: o.input || (o.ref ? DATA0 + blobOf(o.ref) + (ex === RHX || o.noBuilder ? "" : builderSuffix()) : DATA0 + (ex === RHX ? "" : builderSuffix())),
+  });
   const data = "0x" + w(ain) + w(aout) + w(0) + (ex.ver === 6 ? "0".repeat(24) + tin.replace(/^0x/, "").slice(0) .padStart(40, "0") : "");
   return { address: ex.addr, topics: [ex.topic, pad(user), pad(tin), pad(tout)], data, blockNumber: hex(block), logIndex: hex(idx),
     transactionHash: "0x" + txn.toString(16).padStart(64, "0"), ...(ts ? { blockTimestamp: hex(ts) } : {}) };
@@ -41,7 +52,7 @@ function world(over) {
   const W = {
     head: 1000100, rhHead: 600, rhDeploy: 337, startV5: 1000000, startV6: 1000040,
     logs: [], failLogs: false, maxSpan: Infinity, gtDays: { "2026-11-09": 3000, "2026-11-10": 3000, "2026-11-23": 2000 },
-    gtOk: true, calls: [], gtCalls: [], blockTs: {}, rhLogs: [], ...(over || {}),
+    gtOk: true, calls: [], gtCalls: [], blockTs: {}, rhLogs: [], failTx: false, ...(over || {}),
   };
   W.fetch = async (url, init) => {
     const s = String(url);
@@ -73,6 +84,10 @@ function world(over) {
       if (W.failReceipt) return new Response("x", { status: 503 });
       const ex = [V5, V6].find((e) => e.creationTx === p[0]);
       return ok({ blockNumber: hex(ex === V5 ? W.startV5 : W.startV6), contractAddress: ex.addr, status: "0x1" });
+    }
+    if (body.method === "eth_getTransactionByHash") {
+      if (W.failTx === true || (W.failTx instanceof Set && W.failTx.has(p[0]))) return new Response("x", { status: 503 });
+      return ok(TXS.get(p[0]) || null);
     }
     if (body.method === "eth_getCode") return ok(parseInt(p[1], 16) >= W.rhDeploy ? "0x6080" : "0x");
     if (body.method === "eth_getBlockByNumber") {
@@ -169,7 +184,7 @@ export async function runBadgesCases(ok, worker) {
     applyCounted(r4, "base", "0x01", 5, 50, OTHER, { x: "ex", b: 10, i: 5 });
     ok(!applyCounted(r4, "base", "0x02", 4, 50, OTHER, { x: "ex", b: 10, i: 4 }) && !applyCounted(r4, "base", "0x03", 9, 50, OTHER, { x: "ex", b: 9, i: 9 }) && r4.n === 1,
       "[badges derive] the per-executor watermark skips a replayed earlier position even when seen[] has rolled over");
-    ok(JSON.stringify(Object.keys(emptyUser()).sort()) === JSON.stringify(["base", "first", "n", "rh", "seen", "stock", "ten", "ts10", "v", "w"]), "[badges derive] user record shape {v,n,first,base,rh,stock,ten,seen}+ts10,w");
+    ok(JSON.stringify(Object.keys(emptyUser()).sort()) === JSON.stringify(["base", "first", "n", "ref1", "ref10", "refBy", "refs", "rh", "seen", "stock", "ten", "ts10", "v", "w"]), "[badges derive] user record shape {v,n,first,base,rh,stock,ten,seen}+ts10,w+refs,ref1,ref10,refBy");
   }
   // ---------- گذر: شمارش، cursor، شکست ----------
   {
@@ -322,6 +337,156 @@ export async function runBadgesCases(ok, worker) {
     for (let i = 0; i < 4; i++) await withWorld(W2, () => runBadgesPass({ ZX_KV: kv2 }, DEPS()));
     ok(kv2.m.get("badges:start:rh:" + RHX.addr) === "9001", "[badges rh] resumed passes converge on the exact first block with code: " + kv2.m.get("badges:start:rh:" + RHX.addr));
   }
+  // ---------- [ref parse] ----------
+  {
+    const REFA = u(0x7e1);
+    const good = DATA0 + blobOf(REFA);
+    ok(parseRefFromInput(good + builderSuffix()) === REFA, "[ref parse] blob followed by an ERC-8021 builder suffix -> the referrer");
+    ok(parseRefFromInput(good) === REFA, "[ref parse] blob without a builder suffix (Robinhood) -> the referrer");
+    ok(parseRefFromInput(good + builderSuffix("a,bb,cccc")) === REFA, "[ref parse] a longer builder code list is stripped by its declared length");
+    ok(["", "0x", "0xzz", "0x123", "nonsense", null, undefined, 5, {}, "0x" + "ff".repeat(40)].every((x) => parseRefFromInput(x) === null), "[ref parse] garbage input -> null, never a throw");
+    ok(parseRefFromInput("0x" + blobOf(REFA)) === null && parseRefFromInput("0x12345678" + blobOf(REFA).slice(8)) === null, "[ref parse] too short (no selector, or fewer than selector+20+4 bytes) -> null");
+    ok(parseRefFromInput(DATA0 + REFA.slice(2) + "5a585202") === null && parseRefFromInput(DATA0 + REFA.slice(2) + "5a585200" + builderSuffix()) === null, "[ref parse] wrong magic (version byte) -> null");
+    ok(parseRefFromInput(DATA0 + blobOf(ZERO)) === null, "[ref parse] the zero address -> null");
+    ok(parseRefFromInput("0x" + (DATA0 + blobOf(REFA) + builderSuffix()).slice(2).toUpperCase()) === REFA, "[ref parse] uppercase hex input -> lowercase 0x address");
+    ok(parseRefFromInput(DATA0 + blobOf(REFA) + "aabb" + "ff" + "00" + MARK8021) === null, "[ref parse] a builder suffix whose declared length overruns the input -> null");
+    ok(parseRefFromInput(DATA0 + blobOf(REFA) + MARK8021) === null, "[ref parse] a marker with no room for schema/length bytes in front of it -> null or no magic, never a guess");
+    ok(REF_MAGIC === "5a585201", "[ref parse] REF_MAGIC is ZXR + version 01");
+  }
+  // ---------- [ref index] ----------
+  {
+    const REF = u(900), REF2 = u(901);
+    const D = T("2026-11-09");
+    const lg = (user, blk, ts, opts, amt) => mkLog(V5, user, USDC, OTHER, amt || 20_000_000, 1, blk, 0, ts, opts);
+    const runAll = async (W, kv, n) => { let last = null; for (let i = 0; i < (n || 6); i++) last = await withWorld(W, () => runBadgesPass({ ZX_KV: kv }, DEPS())); return last; };
+    const txCalls = (W) => W.calls.filter((c) => c.m === "eth_getTransactionByHash").length;
+    {
+      const W = world();
+      W.logs = [
+        lg(u(101), 1000010, D, { ref: REF }),                       // اولین سواپِ دوست با دعوت
+        lg(u(101), 1000011, D + 10, { ref: REF2 }),                 // سواپِ بعدی با دعوتِ دیگر: هیچ
+        lg(u(101), 1000012, D + 20, { ref: REF }),                  // همان دوست دوباره: یک بار
+        lg(u(102), 1000013, D + 30, {}),                            // اولین سواپ بی‌دعوت
+        lg(u(102), 1000014, D + 40, { ref: REF }),                  // بعداً دعوت: هرگز
+        lg(u(103), 1000015, D + 50, { ref: u(103) }),               // خوددعوتی
+        lg(u(104), 1000016, D + 60, { ref: REF, to: OTHER }),       // to ≠ اجراکننده
+        lg(u(105), 1000017, D + 70, { ref: REF, from: OTHER }),     // from ≠ کاربر
+      ];
+      const kv = makeKv();
+      await runAll(W, kv);
+      ok(curOf(kv, V5) === "1000090", "[ref index] the replay-safe pass reads the whole range (cursor at head-10)");
+      const R = userOf(kv, 900);
+      ok(R && R.refs.length === 1 && R.refs[0].u === u(101) && R.ref1 && R.ref1.tx === R.refs[0].tx && R.ref1.c === "base" && R.ref1.ts === D && R.ref10 === null,
+        "[ref index] first counted swap carrying a ref -> referrer has 1 friend and ref1 {c,tx,ts}: " + JSON.stringify(R && R.ref1));
+      ok(badgesDoc(REF, R, { base: { complete: true }, rh: { complete: true } }).progress.ref === 1, "[ref index] progress.ref is 1");
+      ok(userOf(kv, 901) === null, "[ref index] the friend's later swap with another ref credits nobody");
+      ok(userOf(kv, 101).refBy.a === REF && userOf(kv, 101).n === 3, "[ref index] the friend records who invited them");
+      ok(userOf(kv, 102).refBy && userOf(kv, 102).refBy.a === null && R.refs.length === 1, "[ref index] a first counted swap without a ref -> refBy {a:null}, and a later ref never counts");
+      ok(userOf(kv, 103).refBy.a === null && userOf(kv, 103).refs.length === 0, "[ref index] a self-invite is ignored");
+      ok(userOf(kv, 104).refBy.a === null && userOf(kv, 105).refBy.a === null, "[ref index] tx.to != the emitting executor, and tx.from != the swapping user, are both ignored");
+      ok(txCalls(W) === 5, "[ref index] one eth_getTransactionByHash per first swap (5 users), none for later swaps: " + txCalls(W));
+    }
+    {
+      // شکستِ جست‌وجوی تراکنش: Unknown، cursor جلو نمی‌رود، و بعد از بازپخشِ موفق دقیقاً ۱ (نه ۰، نه ۲)
+      const W = world();
+      const l0 = lg(u(110), 1000010, D, {});
+      const l1 = lg(u(111), 1000020, D + 10, { ref: REF });
+      W.logs = [l0, l1];
+      W.failTx = new Set([l1.transactionHash]);
+      const kv = makeKv();
+      await runAll(W, kv, 3);
+      ok(curOf(kv, V5) === "1000019" && !userOf(kv, 111) && !userOf(kv, 900), "[ref index] a failing eth_getTransactionByHash is Unknown: the cursor stops before that block and nothing about it is written: " + curOf(kv, V5));
+      ok(userOf(kv, 110) && userOf(kv, 110).n === 1, "[ref index] swaps before the failing one are kept");
+      W.failTx = false;
+      await runAll(W, kv, 4);
+      const R = userOf(kv, 900);
+      ok(R && R.refs.length === 1 && userOf(kv, 111).n === 1 && userOf(kv, 111).refBy.a === REF && curOf(kv, V5) === "1000090", "[ref index] after the replay succeeds the referrer has exactly 1 friend (not 0, not 2) and the friend's swap counted once");
+      // بازپخشِ کاملِ تاریخچه (cursor گم‌شده) چیزی را دوبار نمی‌شمارد
+      const before = JSON.stringify([...kv.m.entries()].filter(([k]) => k.startsWith("badge:u:")));
+      kv.m.delete("badges:cur:base:" + V5.addr); kv.m.delete("badges:cur:base:" + V6.addr);
+      await runAll(W, kv, 4);
+      ok(before === JSON.stringify([...kv.m.entries()].filter(([k]) => k.startsWith("badge:u:"))), "[ref index] re-reading the whole history changes no record (no double attribution)");
+    }
+    {
+      // ده دوستِ متفاوت: ref10 = دهمی به ترتیبِ زمان؛ یازدهم هیچ؛ یک دوستِ زودتر جای دهمی را می‌گیرد
+      const W = world();
+      W.logs = [];
+      for (let k = 1; k <= 10; k++) W.logs.push(lg(u(200 + k), 1000010 + k, D + ((k * 7) % 10) * 100, { ref: REF }));
+      W.logs.push(lg(u(211), 1000030, D + 5000, { ref: REF }));
+      const kv = makeKv();
+      await runAll(W, kv, 8);
+      const R = userOf(kv, 900);
+      ok(R && R.refs.length === 10 && R.ref1.ts === D && R.ref10 && R.ref10.ts === D + 900, "[ref index] 10 distinct friends -> ref10 is the 10th by time (not by processing order): " + JSON.stringify(R && R.ref10));
+      ok(R.refs.every((x) => x.u !== u(211)) && R.refs.length === 10 && userOf(kv, 211).refBy.a === REF, "[ref index] an 11th friend (later) changes nothing in the referrer's list");
+      ok(badgesDoc(REF, R, { base: { complete: true }, rh: { complete: true } }).progress.ref === 10, "[ref index] progress.ref caps at 10");
+      const W2 = world(); W2.logs = W.logs.concat([lg(u(212), 1000031, D - 1000, { ref: REF })]);
+      const kv2 = makeKv();
+      await runAll(W2, kv2, 8);
+      const R2 = userOf(kv2, 900);
+      ok(R2.refs.length === 10 && R2.ref1.ts === D - 1000 && R2.ref10.ts === D + 800 && R2.refs.every((x) => x.u !== u(207)), "[ref index] a friend earlier than the 10th pushes the 10th out, still capped at 10");
+    }
+    {
+      // زیر ۵ دلار: هیچ جست‌وجویی (صفر تماسِ اضافه)
+      const W = world();
+      W.logs = [lg(u(120), 1000010, D, { ref: REF }, 4_990_000)];
+      const kv = makeKv();
+      await runAll(W, kv, 2);
+      ok(txCalls(W) === 0 && !userOf(kv, 120) && !userOf(kv, 900), "[ref index] a swap under $5 never triggers the transaction lookup (0 extra RPC calls) and writes nothing");
+      const W5 = world();
+      W5.logs = [lg(u(120), 1000010, D, { ref: REF }, 4_990_000), lg(u(120), 1000011, D + 5, { ref: REF }, 6_000_000)];
+      const kv5 = makeKv();
+      await runAll(W5, kv5, 3);
+      ok(txCalls(W5) === 1 && userOf(kv5, 900) && userOf(kv5, 900).refs.length === 1 && userOf(kv5, 120).n === 1, "[ref index] the first COUNTED swap is the one that is looked up and attributed");
+    }
+    {
+      const W = world();
+      W.logs = [lg(u(130), 1000010, D, { ref: REF })];
+      const kv = makeKv();
+      const res = await runAll(W, kv, 1);
+      ok(res.rpc <= BADGES_RPC_MAX, "[ref index] the lookup counts toward the same RPC budget: " + res.rpc);
+    }
+  }
+  // ---------- [ref privacy] ----------
+  {
+    const REF = u(900), F = u(101), D = T("2026-11-09");
+    const W = world();
+    W.logs = [mkLog(V5, F, USDC, OTHER, 20_000_000, 1, 1000010, 0, D, { ref: REF })];
+    const kv = makeKv();
+    for (let i = 0; i < 4; i++) await withWorld(W, () => runBadgesPass({ ZX_KV: kv }, DEPS()));
+    kv.m.set("badges:status", JSON.stringify({ base: { cursor: 1, head: 1, complete: true }, rh: { cursor: 1, head: 1, complete: true } }));
+    const env = { ZX_KV: kv };
+    const get = (p) => worker.fetch(new Request("https://zaexa.com" + p), env, { waitUntil() {} });
+    const pieces = (a) => [a, a.toUpperCase().replace("0X", "0x"), a.slice(0, 6) + "…" + a.slice(-4), a.slice(2)];
+    const refJson = await (await get("/badges/" + REF + ".json")).text(), refPage = await (await get("/badges/" + REF)).text();
+    const frJson = await (await get("/badges/" + F + ".json")).text(), frPage = await (await get("/badges/" + F)).text();
+    ok(userOf(kv, 900) && userOf(kv, 900).refs.length === 1 && userOf(kv, 101).refBy.a === REF, "[ref privacy] fixture: the attribution exists in the stored records");
+    ok(!pieces(F).some((x) => refJson.includes(x) || refPage.includes(x)), "[ref privacy] the referrer's json and page never contain the friend's address");
+    ok(!pieces(REF).some((x) => frJson.includes(x) || frPage.includes(x)), "[ref privacy] the friend's json and page never contain the referrer's address");
+    ok(!/"refs"|"refBy"|"ref1".*"u"/.test(refJson + frJson) && !/refBy|"refs"/.test(refPage + frPage), "[ref privacy] no refs / refBy field anywhere in the public output");
+    const jd = JSON.parse(refJson);
+    ok(jd.progress.ref === 1 && jd.badges.find((b) => b.id === "ref1").got === true && jd.badges.find((b) => b.id === "ref10").state === "none" && JSON.parse(frJson).progress.ref === 0, "[ref privacy] the public doc only has the count (progress.ref) and the badge states");
+  }
+  // ---------- [badges stock rh] ----------
+  {
+    ok(RH_STOCKS.length === 205 && new Set(RH_STOCKS).size === 205 && RH_STOCKS.every((a) => /^0x[0-9a-f]{40}$/.test(a)) && RH_STOCK_SYMBOLS.length === 205, "[badges stock rh] 205 distinct lowercase official addresses with a parallel symbol list");
+    const fileLines = fs.readFileSync("/home/claude/specs/rh_stocks_all.txt", "utf8").trim().split("\n").map((l) => l.trim().split(/\s+/));
+    ok(fileLines.every(([sy, a], i) => RH_STOCK_SYMBOLS[i] === sy && RH_STOCKS[i] === a.toLowerCase()), "[badges stock rh] the list equals rh_stocks_all.txt line by line");
+    const r = emptyUser();
+    applyCounted(r, "rh", "0x01", 0, 10, RH_STOCKS[7].toUpperCase().replace("0X", "0x"));
+    ok(r.stock && r.stock.c === "rh", "[badges stock rh] an RH swap whose tokenOut is in RH_STOCKS gets stock (case-insensitive)");
+    const r2 = emptyUser();
+    applyCounted(r2, "rh", "0x02", 0, 10, OTHER);
+    applyCounted(r2, "base", "0x03", 0, 11, RH_STOCKS[7]);
+    ok(!r2.stock, "[badges stock rh] a non-stock RH token, or an RH stock address on Base, does not");
+    const r3 = emptyUser();
+    applyCounted(r3, "base", "0x04", 0, 10, TSLA);
+    ok(r3.stock && r3.stock.c === "base", "[badges stock rh] the Base rule is unchanged");
+    const W = world({ rhHead: 700, rhDeploy: 337 });
+    W.rhLogs = [mkLog(RHX, u(8), R.stables[0], RH_STOCKS[3], 8_000_000, 1, 400, 0, T("2026-11-09")), mkLog(RHX, u(9), R.stables[0], OTHER, 8_000_000, 1, 401, 0, T("2026-11-09"))];
+    const kv = makeKv();
+    for (let i = 0; i < 6; i++) await withWorld(W, () => runBadgesPass({ ZX_KV: kv }, DEPS()));
+    ok(userOf(kv, 8) && userOf(kv, 8).stock && userOf(kv, 8).stock.c === "rh" && userOf(kv, 9) && !userOf(kv, 9).stock, "[badges stock rh] through a real pass: stock-token swap on Robinhood -> stock, other token -> none");
+  }
   // ---------- نقطه‌های پایانی ----------
   {
     const kv = makeKv();
@@ -335,12 +500,12 @@ export async function runBadgesCases(ok, worker) {
     const r = await get("/badges/" + A + ".json");
     const j = await r.json();
     ok(r.status === 200 && r.headers.get("x-robots-tag") === "noindex" && /public/.test(r.headers.get("cache-control")) && /max-age=60/.test(r.headers.get("cache-control")), "[badges json] 200, Cache-Control public 60s, X-Robots-Tag noindex: " + r.headers.get("cache-control"));
-    ok(j.address === A && j.n === 1 && j.complete.base === true && j.complete.rh === false && j.badges.length === 5 && j.progress.ten === 1, "[badges json] shape {address,complete,n,badges,progress}: " + JSON.stringify(j).slice(0, 200));
+    ok(j.address === A && j.n === 1 && j.complete.base === true && j.complete.rh === false && j.badges.length === 7 && j.progress.ten === 1 && j.progress.ref === 0, "[badges json] shape {address,complete,n,badges,progress}: " + JSON.stringify(j).slice(0, 200));
     const by = Object.fromEntries(j.badges.map((b) => [b.id, b]));
-    ok(JSON.stringify(j.badges.map((b) => b.id)) === JSON.stringify(BADGE_IDS), "[badges json] the five ids in order");
+    ok(JSON.stringify(j.badges.map((b) => b.id)) === JSON.stringify(BADGE_IDS), "[badges json] the seven ids in order");
     ok(by.base.state === "got" && by.base.got === true && by.base.chain === "base" && by.base.tx === "0xaa" && by.base.ts === T("2026-11-10"), "[badges json] a got badge carries ts/tx/chain");
     ok(by.first.state === "got", "[badges json] first is got");
-    ok(by.stock.state === "none" && by.stock.got === false, "[badges json] stock on a complete Base: state none");
+    ok(by.stock.state === "pending" && by.stock.got === false && by.ref1.state === "pending" && by.ref10.state === "pending", "[badges json] stock (Base or Robinhood) and the friend badges need both chains: pending while Robinhood is still being read");
     ok(by.rh.state === "pending" && by.ten.state === "pending", "[badges json] an incomplete chain makes a not-got badge 'pending', never 'none' (rh, and ten which needs both chains)");
     for (const bad of ["/badges/0x123.json", "/badges/" + A.slice(0, 41) + ".json", "/badges/" + A + "0.json", "/badges/0x" + "g".repeat(40) + ".json", "/badges/" + A + "/", "/badges/" + A + ".json/x", "/badges", "/badges/", "/badges/index", "/badges/list", "/badges/art/nope.svg", "/badges/art/__proto__.svg", "/badges/art/first.png", "/badges/art/nope-off.svg", "/badges/art/first-off-off.svg", "/badges/art/__proto__-off.svg", "/badges/art/first-OFF.svg"]) {
       const x = await get(bad);
@@ -357,14 +522,15 @@ export async function runBadgesCases(ok, worker) {
     const html = await pr.text();
     ok(pr.status === 200 && /text\/html/.test(pr.headers.get("content-type")) && pr.headers.get("x-robots-tag") === "noindex", "[badges page] 200 html with X-Robots-Tag noindex");
     ok(/<meta name="robots" content="noindex">/.test(html), "[badges page] <meta name=robots content=noindex>");
-    ok(/<meta property="og:title" content="Zaexa badges">/.test(html) && /<meta property="og:description" content="2 of 5 Zaexa badges">/.test(html) && /<meta property="og:image" content="https:\/\/zaexa\.com\/badges\/og\.png">/.test(html) && /<meta name="twitter:card" content="summary_large_image">/.test(html), "[badges page] og:title, og:description '<n> of 5 Zaexa badges', og:image, twitter:card");
+    ok(/<meta property="og:title" content="Zaexa badges">/.test(html) && /<meta property="og:description" content="2 of 7 Zaexa badges">/.test(html) && /<meta property="og:image" content="https:\/\/zaexa\.com\/badges\/og\.png">/.test(html) && /<meta name="twitter:card" content="summary_large_image">/.test(html), "[badges page] og:title, og:description '<n> of 7 Zaexa badges', og:image, twitter:card");
     ok(html.includes(A.slice(0, 6) + "…" + A.slice(-4)) && !html.includes(A), "[badges page] the short address on screen, the full address nowhere in the page");
     ok((html.match(/0x[0-9a-fA-F]{40}/g) || []).length === 0 && !/href="\/badges/.test(html), "[badges page] no wallet address and no link to other wallets or badge pages");
-    ok(BADGE_IDS.every((id) => /\/badges\/art\/[a-z]+(-off)?\.svg/.test(html) && html.includes("/badges/art/" + id) && html.includes(BADGE_TITLES[id])) && html.includes("Not yet") && html.includes("Still reading history") && html.includes("Nov 10, 2026"), "[badges page] five medals with titles, 'Not yet' / 'Still reading history' / date");
+    ok(BADGE_IDS.every((id) => /\/badges\/art\/[a-z0-9]+(-off)?\.svg/.test(html) && html.includes("/badges/art/" + id) && html.includes(BADGE_TITLES[id])) && html.includes("Still reading history") && html.includes("Nov 10, 2026"), "[badges page] seven medals with titles, 'Not yet' / 'Still reading history' / date");
+    ok(badgePageHtml(A, badgesDoc(A, rec, { base: { complete: true }, rh: { complete: true } })).includes("Not yet"), "[badges page] with both chains complete a not-got medal says 'Not yet'");
     ok(/href="\/app"[^>]*>Open Zaexa</.test(html) && html.includes("Zaexa badges"), "[badges page] 'Open Zaexa' goes to /app");
-    ok((html.match(/class="medal off"/g) || []).length === 3, "[badges page] the three not-got medals are dimmed");
+    ok((html.match(/class="medal off"/g) || []).length === 5, "[badges page] the five not-got medals are dimmed");
     ok(html.includes("#0a0810"), "[badges page] dark palette");
-    ok((html.match(/\/badges\/art\/[a-z]+-off\.svg/g) || []).length === 3 && (html.match(/\/badges\/art\/[a-z]+\.svg/g) || []).length === 2 && !/grayscale/i.test(html), "[badges page] the three not-got medals use the -off art file, the two got ones the earned art, and the page CSS has no grayscale");
+    ok((html.match(/\/badges\/art\/[a-z0-9]+-off\.svg/g) || []).length === 5 && (html.match(/\/badges\/art\/[a-z0-9]+\.svg/g) || []).length === 2 && !/grayscale/i.test(html), "[badges page] the five not-got medals use the -off art file, the two got ones the earned art, and the page CSS has no grayscale");
     // هنر
     const art = await get("/badges/art/first.svg?v=" + BADGE_ART_VERSION);
     ok(art.status === 200 && art.headers.get("content-type").startsWith("image/svg+xml") && /immutable/.test(art.headers.get("cache-control")) && art.headers.get("x-robots-tag") === "noindex" && (await art.text()) === BADGE_SVG.first, "[badges art] svg served from badge-art.js with a long cache for the versioned URL");
@@ -383,7 +549,11 @@ export async function runBadgesCases(ok, worker) {
           if (mapName === "BADGE_SVG_OFF" && svg.includes('class="lt"')) bad.push(tag + " has light line");
         }
       }
-      ok(bad.length === 0 && Object.keys(BADGE_SVG).length === 5 && Object.keys(BADGE_SVG_OFF).length === 5, "[badges art shape] all 10 svgs: 200x200 viewBox, no text/fonts/script/handlers/external urls; earned have class lt pathLength 1, locked have none " + bad.join(","));
+      ok(bad.length === 0 && Object.keys(BADGE_SVG).length === 7 && Object.keys(BADGE_SVG_OFF).length === 7 && BADGE_ART_VERSION === "3", "[badges art shape] all 14 svgs (art v3): 200x200 viewBox, no text/fonts/script/handlers/external urls; earned have class lt pathLength 1, locked have none " + bad.join(","));
+    }
+    for (const id of ["ref1", "ref10"]) {
+      const a1 = await get("/badges/art/" + id + ".svg?v=" + BADGE_ART_VERSION), a2 = await get("/badges/art/" + id + "-off.svg?v=" + BADGE_ART_VERSION);
+      ok(a1.status === 200 && (await a1.text()) === BADGE_SVG[id] && a2.status === 200 && (await a2.text()) === BADGE_SVG_OFF[id], "[badges art off] " + id + ".svg and " + id + "-off.svg are served from the art maps");
     }
     const og = await get("/badges/og.png");
     const bytes = new Uint8Array(await og.arrayBuffer());
@@ -445,5 +615,9 @@ export async function runBadgesCases(ok, worker) {
     ok(!/(?:\/ev|"ev")/.test(bj) && !/Solana|solana/.test(bj.replace(/\/\*[\s\S]*?\*\//g, "")), "[badges privacy] no new /ev event name and no Solana badge");
   }
   void scheduledBadgesPass; void baseRpcList; void brk;
-  console.log("[badges] topic0 from signatures (and from SwapExecutor.sol), v5/v6 decode, usd rule (stable 6dp, ETH x daily close, >= $5, neither side not counted), derivation (first/base/rh/stock/ten, dedupe, watermark), unknown is never no (RPC failure, unknown price, missing timestamp, range errors), 20-call budget, Robinhood resumable start search, /badges json+page+art+og (noindex, validation, pending, no enumeration), sitemap/robots, banned words, B20 parity, two-cron dispatch");
+  console.log("[ref parse] referrer read from tx input: blob = 20-byte address + 5a585201, with or without the ERC-8021 builder suffix (stripped by its declared length); garbage, too short, wrong magic, zero address, overrunning suffix -> null; uppercase -> lowercase; never throws");
+  console.log("[ref index] first counted swap only ($5+, one tx lookup before applyCounted, failure = Unknown + clean replay with exactly one attribution); tx.to must be the emitting executor, tx.from the user, no self-invite, no-ref first swap closes the door; 10 friends by time, 11th ignored, same friend once, under-$5 swap makes no lookup");
+  console.log("[ref privacy] badgesDoc and /badges pages of a referrer and a friend contain neither address of the other and no refs/refBy field");
+  console.log("[badges stock rh] 205 official Robinhood stock tokens equal rh_stocks_all.txt; an RH swap into one gives stock, any other RH token does not, Base rule unchanged");
+  console.log("[badges] topic0 from signatures (and from SwapExecutor.sol), v5/v6 decode, usd rule (stable 6dp, ETH x daily close, >= $5, neither side not counted), derivation (first/base/rh/stock/ten/ref1/ref10, dedupe, watermark), unknown is never no (RPC failure, unknown price, missing timestamp, range errors), 20-call budget, Robinhood resumable start search, /badges json+page+art+og (noindex, validation, pending, no enumeration), sitemap/robots, banned words, B20 parity, two-cron dispatch");
 }
