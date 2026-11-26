@@ -1950,8 +1950,9 @@ html[data-rh] #view-exit>*:not(.rhNa),html[data-rh] #view-folio>*:not(.rhNa):not
 html[data-rh] #view-swap>#rhHero{display:none!important}
 /* ۲۵ نوامبر — سهامِ Robinhood: فیدِ مرجع (Chainlink) وصل نیست؛ سرستون و سلول‌های «Reference» پنهان‌اند. */
 html[data-rh] #view-stocks .colRef{display:none}
-/* نوارِ Market watch فقط برای Base/Solana معنا دارد (ETH/AERO/cbBTC)؛ روی Robinhood بدونِ داده بود و «—» نشان می‌داد */
-html[data-rh] .marketWatch{display:none!important}
+/* نوارِ Market watch هر زنجیره مالِ خودش است: روی Robinhood فقط نوارِ Robinhood (ETH/NVDA/TSLA) دیده می‌شود، روی Base/Solana هرگز */
+html[data-rh] .marketWatch:not([data-chain="robinhood"]){display:none!important}
+html:not([data-rh]) .marketWatch[data-chain="robinhood"]{display:none!important}
 #rhHero{display:none}
 /* متنِ دکمه‌ی غیرفعال («Swaps coming soon»، قبلاً بلندتر) از عرضِ ستونِ ۳۹۶پیکسلی بلندتر است: به‌جای بریدن با «…» (که متن را پنهان می‌کند و روی موبایل ستون را از صفحه بیرون می‌زد) می‌شکند. فقط همین یک دکمه؛ بقیه‌ی ظاهر از کلاس‌های Base می‌آید. */
 #rhSwap{min-width:0}
@@ -6679,6 +6680,7 @@ function updateSwapViewForChain(){
       if(pt)pt.textContent="Every pool on "+CHAIN.name;
       mtabRefresh();
     }
+    refreshMarketWatch();   // نوارِ Robinhood (ETH/NVDA/TSLA)؛ در صفحه‌ی توکن یا خارج از نمای swap خودش برمی‌گردد
     return;
   }
   savedWatchSelection();
@@ -7404,13 +7406,21 @@ const MARKET_WATCH_SOL=[
 ];
 const marketWatchCache=new Map(),marketWatchInflight=new Map();   // cache: {t,rows,keys}
 let marketWatchSeq=0,marketPairSeq=0;
-const marketWatchDefaults=chain=>chain==="solana"?MARKET_WATCH_SOL:BASE_TOKENS.filter(t=>["ETH","AERO","cbBTC"].includes(t.symbol));
+// Robinhood: به همین ترتیب (ETH بومی، NVDA، TSLA) از جدولِ توکنِ بوتِ Robinhood؛ روی بوتِ Base لیستِ خالی (نوار هم پنهان است)
+const MARKET_WATCH_RH_SYMS=["ETH","NVDA","TSLA"];
+const marketWatchDefaults=chain=>chain==="solana"?MARKET_WATCH_SOL
+  :chain==="robinhood"?(BOOT_RH?MARKET_WATCH_RH_SYMS.map(sym=>BASE_TOKENS.find(t=>t.symbol===sym)).filter(Boolean):[])
+  :BASE_TOKENS.filter(t=>["ETH","AERO","cbBTC"].includes(t.symbol));
+const marketWatchQuote=chain=>chain==="robinhood"?"USDG":"USDC";   // توکنِ مرجعِ جفت: Base/Solana USDC، Robinhood USDG
+const marketWatchName=chain=>chain==="base"?"Base":chain==="solana"?"Solana":"Robinhood";
 // ۲۵ اکتبر: نوار فقط توکن‌های پیش‌فرض را نشان می‌دهد؛ دیده‌بانی در ریل/پاپ‌اوورِ خودش است
 function marketWatchTokens(chain){return marketWatchDefaults(chain);}
 function initMarketWatch(){
-  for(const [chain,id] of [["base","baseHeroRow"],["solana","appSolHero"]]){
+  // Robinhood در همان ردیفِ hero ِ Base می‌نشیند (سواپِ Robinhood همان #baseHeroRow است)؛ CSS با data-rh فقط یکی را نشان می‌دهد
+  // ترتیبِ prepend: Robinhood اول تا نوارِ Base همچنان اولین فرزندِ #baseHeroRow بماند
+  for(const [chain,id] of [["robinhood","baseHeroRow"],["base","baseHeroRow"],["solana","appSolHero"]]){
     const box=document.createElement("section");box.className="marketWatch";box.dataset.chain=chain;
-    box.setAttribute("aria-label",chain==="base"?"Base market watch":"Solana market watch");
+    box.setAttribute("aria-label",marketWatchName(chain)+" market watch");
     box.innerHTML='<span class="watchHeading">Market watch · 24h</span><div class="watchItems"></div>';
     $(id).prepend(box);paintMarketWatch(chain);
   }
@@ -7426,13 +7436,15 @@ function watchSpark(series){
    {chain:{address:url}} در localStorage؛ هر دسترسی try/catch و okLogo هم هنگام خواندن هم نوشتن. */
 const WATCH_LOGO_KEY="zaexa.watchlogo.v1";
 let watchLogoMem=null;
-const watchAddr=(chain,t)=>{const a=t.mint||(t.native?WETH_ADDR:t.address);return chain==="base"?String(a).toLowerCase():a;};
+// Base و Robinhood بدونِ حساسیت به حروف (حروفِ کوچک)، Solana عیناً
+const watchNorm=(chain,a)=>chain==="solana"?a:String(a).toLowerCase();
+const watchAddr=(chain,t)=>watchNorm(chain,t.mint||(t.native?WETH_ADDR:t.address));
 function watchLogoLoad(){
   if(watchLogoMem)return watchLogoMem;
   watchLogoMem={};
   try{
     const o=JSON.parse(localStorage.getItem(WATCH_LOGO_KEY)||"{}");
-    if(o&&typeof o==="object"&&!Array.isArray(o))for(const c of ["base","solana"]){
+    if(o&&typeof o==="object"&&!Array.isArray(o))for(const c of ["base","solana","robinhood"]){
       const m=o[c];if(!m||typeof m!=="object"||Array.isArray(m))continue;
       const out={};for(const [a,u] of Object.entries(m))if(u&&okLogo(u))out[a]=u;
       watchLogoMem[c]=out;
@@ -7485,8 +7497,8 @@ function paintMarketWatch(chain){
   const cur=[...box.querySelectorAll(":scope > .watchPair")];
   if(cur.length!==tokens.length||cur.some((el,i)=>el.dataset.k!==keys[i])){
     box.innerHTML=tokens.map((t,i)=>
-      `<button class="watchPair" type="button" data-watch="${i}" data-k="${esc(keys[i])}" aria-label="Trade ${esc(t.symbol)} / USDC" title="Select ${esc(t.symbol)} / USDC · prices in USD · chart from a sampled pool">
-      <span class="av"></span><span class="watchInfo"><span class="watchName">${esc(t.symbol)}<span> / USDC</span></span>
+      `<button class="watchPair" type="button" data-watch="${i}" data-k="${esc(keys[i])}" aria-label="Trade ${esc(t.symbol)} / ${marketWatchQuote(chain)}" title="Select ${esc(t.symbol)} / ${marketWatchQuote(chain)} · prices in USD · chart from a sampled pool">
+      <span class="av"></span><span class="watchInfo"><span class="watchName">${esc(t.symbol)}<span> / ${marketWatchQuote(chain)}</span></span>
       <span class="watchNumbers"><span class="watchPrice mono"></span><span class="watchChange mono"></span></span></span>
       <span class="watchSpark"></span></button>`).join("");
     box.querySelectorAll(".watchPair").forEach((el,i)=>{
@@ -7516,10 +7528,12 @@ function paintMarketWatch(chain){
     paintWatchAvatar(el.querySelector(".av"),t,row.logo||watchLogoGet(chain,t));
   });
 }
+// آدرسِ درخواستِ GT: Robinhood با حروفِ کوچک (آدرس‌های فهرستِ سهام checksum دارند)؛ Base/Solana مثلِ قبل
+const mwAddr=(chain,t)=>{const a=t.mint||(t.native?WETH_ADDR:t.address);return chain==="robinhood"?String(a).toLowerCase():a;};
 async function fetchWatchSeries(chain,t){
-  const address=t.mint||(t.native?WETH_ADDR:t.address);
+  const address=mwAddr(chain,t);
   const j=await gtJson(`${GT}/networks/${chain}/tokens/${address}/pools?page=1`);
-  const eq=(id)=>chain==="base"?String(id).toLowerCase()===`${chain}_${address}`.toLowerCase():id===`${chain}_${address}`;
+  const eq=(id)=>chain!=="solana"?String(id).toLowerCase()===`${chain}_${address}`.toLowerCase():id===`${chain}_${address}`;
   const pool=(j?.data||[]).find(p=>eq(p.relationships?.base_token?.data?.id)||eq(p.relationships?.quote_token?.data?.id));
   if(!pool)return [];
   const side=eq(pool.relationships?.quote_token?.data?.id)?"quote":"base";
@@ -7532,16 +7546,16 @@ async function fetchWatchSeries(chain,t){
 async function loadMarketWatch(chain){
   if(marketWatchInflight.has(chain))return marketWatchInflight.get(chain);
   const task=(async()=>{
-    const tokens=marketWatchTokens(chain),addresses=tokens.map(t=>t.mint||(t.native?WETH_ADDR:t.address));
+    const tokens=marketWatchTokens(chain),addresses=tokens.map(t=>mwAddr(chain,t));
     let metas={};
     try{
       const j=await gtJson(`${GT}/networks/${chain}/tokens/multi/`+addresses.join(","));
-      for(const r of j?.data||[]){const a=r.attributes;if(a?.address)metas[chain==="base"?a.address.toLowerCase():a.address]=a;}
+      for(const r of j?.data||[]){const a=r.attributes;if(a?.address)metas[watchNorm(chain,a.address)]=a;}
     }catch{}
-    const rows=tokens.map((t,i)=>{const a=metas[chain==="base"?addresses[i].toLowerCase():addresses[i]]||{};
+    const rows=tokens.map((t,i)=>{const a=metas[watchNorm(chain,addresses[i])]||{};
       const price=a.price_usd==null?NaN:Number(a.price_usd);
       return {price:Number.isFinite(price)&&price>0?price:null,logo:okLogo(a.image_url)?a.image_url:null,series:[],change:null};});
-    const loadedKeys=addresses.map(a=>chain==="base"?String(a).toLowerCase():a);
+    const loadedKeys=addresses.map(a=>watchNorm(chain,a));
     marketWatchCache.set(chain,{t:Date.now(),rows,keys:loadedKeys});
     tokens.forEach((t,i)=>{if(rows[i].logo&&!t.native&&t.mint!==SOL_MINT_ADDR)watchLogoSet(chain,t,rows[i].logo);});   // آیکونِ ETH/SOL ثابت و درون‌فایل است، کش نمی‌خواهد   // لوگوی تازه جایگزینِ کش می‌شود
     if(activeChain===chain)paintMarketWatch(chain);
@@ -7561,7 +7575,7 @@ async function loadMarketWatch(chain){
   marketWatchInflight.set(chain,task);return task;
 }
 function refreshMarketWatch(){
-  if(activeChain==="robinhood"||tokenPage||view!=="swap"||document.hidden)return;
+  if(tokenPage||view!=="swap"||document.hidden)return;
   const chain=activeChain,seq=++marketWatchSeq;paintMarketWatch(chain);
   const mc=marketWatchCache.get(chain),mkeys=marketWatchTokens(chain).map(t=>watchAddr(chain,t));
   if(Date.now()-(mc?.t||0)<60000&&mkeys.every(k=>(mc.keys||[]).includes(k)))return;
@@ -7580,7 +7594,7 @@ async function chooseMarketPair(chain,t){
     solSide="buy";solPaintLegs();solScheduleQuote();
   }else{
     hideSwapDone();mode="exactIn";$("amtIn").value="";$("amtOut").value="";
-    tokenIn=BASE_TOKENS.find(t=>t.symbol==="USDC");tokenOut=t;
+    tokenIn=BASE_TOKENS.find(x=>x.symbol===marketWatchQuote(chain));tokenOut=t;
     paintToken("in",tokenIn);paintToken("out",tokenOut);paintBalances();paintAmtClear();
     runScan(tokenOut);loadChart();paintFlowToken();refreshAllowance().then(scheduleQuote);
   }
@@ -7885,14 +7899,15 @@ function paintSrc(){
     :(customRpc?"Base · custom RPC":"Base");
 }
 /* Browser-only watchlist. Only public token identifiers and labels are stored.
-   Chain + address is the identity; Base is case-insensitive, Solana is not. */
+   Chain + address is the identity; Base and Robinhood are case-insensitive, Solana is not.
+   ETH/SOL بومی با نشانیِ توکنِ بسته‌بندی‌شده‌شان ذخیره می‌شوند (همان قاعده‌ی watchAddr): WETH و ETH عمداً یک ردیف‌اند. */
 const SAVED_WATCH_KEY="zaexa.watchlist.v1",SAVED_WATCH_MAX=30;
 let savedWatchRows=[],savedWatchReady=false,savedWatchSeq=0;
 const savedWatchPrices=new Map();
 function savedWatchClean(row){
-  if(!row||typeof row!=="object"||!['base','solana'].includes(row.chain)||typeof row.address!=="string")return null;
+  if(!row||typeof row!=="object"||!['base','solana','robinhood'].includes(row.chain)||typeof row.address!=="string")return null;
   let address=row.address;
-  if(row.chain==='base'){
+  if(row.chain==='base'||row.chain==='robinhood'){
     if(!/^0x[0-9a-fA-F]{40}$/.test(address)||/^0x0{40}$/i.test(address))return null;
     address=address.toLowerCase();
   }else if(!SOL_MINT_RE.test(address))return null;
@@ -7900,6 +7915,10 @@ function savedWatchClean(row){
   return {chain:row.chain,address,symbol:label(row.symbol),name:label(row.name)};
 }
 function savedWatchKey(row){return row.chain+':'+row.address;}
+const SAVED_WATCH_WETH={base:'0x4200000000000000000000000000000000000006',robinhood:'0x0bd7d308f8e1639fab988df18a8011f41eacad73'};
+const savedWatchChainName=chain=>chain==='base'?'Base':chain==='robinhood'?'Robinhood':'Solana';
+// Base: /t/<آدرس>؛ Solana: همان رفتارِ قبلی (/t/<mint>)؛ Robinhood: صفحه‌ی توکنِ Robinhood با پرچمِ chain (قالبِ موجودِ /t/0x…?chain=robinhood)
+const savedWatchHref=row=>'/t/'+encodeURIComponent(row.address)+(row.chain==='robinhood'?'?chain=robinhood':'');
 function savedWatchRead(){
   const raw=localStorage.getItem(SAVED_WATCH_KEY);
   if(!raw)return [];
@@ -7914,32 +7933,46 @@ function savedWatchRead(){
   }
   return rows;
 }
-function savedWatchCurrent(chain){
-  if(chain==='robinhood')return null;   // فاز ۱: دیده‌بانی فقط Base/Solana (pairs.html ردیفِ زنجیره‌ی ناشناس را دور می‌ریزد)
-  if(chain==='solana')return savedWatchClean({chain,address:solMintCur,symbol:solTokenSymbol});
-  if(!tokenOut||tokenOut.native)return null;
-  return savedWatchClean({chain:'base',address:tokenOut.address,symbol:tokenOut.symbol,name:tokenOut.name});
+// زنجیره‌ی EVMِ این بوت: tokenOut و WETH_ADDR فقط مالِ همین زنجیره‌اند
+const savedWatchEvmChain=()=>BOOT_RH?'robinhood':'base';
+const SOL_NAME_SYM='SOL',SOL_NAME_NAME='Solana';
+// ETH بومی ← ردیفِ WETH با نمادِ ETH؛ بقیه عیناً
+function savedWatchEvm(chain,t){
+  if(!t)return null;
+  if(t.native)return savedWatchClean({chain,address:WETH_ADDR,symbol:'ETH',name:'Ether'});
+  return savedWatchClean({chain,address:t.address,symbol:t.symbol,name:t.name});
 }
-// کارتِ سواپ: توکنِ «You receive». Base: tokenOut مگر native؛ Solana: mintِ دریافتی مگر SOL
+// توکنِ صفحه‌ی توکنِ Robinhood (tokenOut آنجا ساخته نمی‌شود)؛ openRhTokenPage پرش می‌کند و rhTokenLeave خالی
+let rhTkCur=null;
+function savedWatchCurrent(chain){
+  if(chain==='solana'){
+    const sol=solMintCur===SOL_MINT_ADDR;
+    return savedWatchClean({chain,address:solMintCur,symbol:sol?SOL_NAME_SYM:solTokenSymbol,name:sol?SOL_NAME_NAME:''});
+  }
+  if(chain!==savedWatchEvmChain())return null;
+  if(chain==='robinhood'&&tokenPage)return rhTkCur?savedWatchClean({chain,address:rhTkCur.address,symbol:rhTkCur.symbol,name:rhTkCur.name}):null;
+  return savedWatchEvm(chain,tokenOut);
+}
+// کارتِ سواپ: توکنِ «You receive». EVM: tokenOut (ETH بومی هم)؛ Solana: mintِ دریافتی (SOL هم)
 function savedWatchReceived(chain){
-  if(chain==='robinhood')return null;
   if(chain==='solana'){
     const buy=solSide==='buy',mint=buy?solMintCur:solRefMint;
-    if(!mint||mint===SOL_MINT_ADDR)return null;
+    if(!mint)return null;
+    if(mint===SOL_MINT_ADDR)return savedWatchClean({chain,address:mint,symbol:SOL_NAME_SYM,name:SOL_NAME_NAME});
     return savedWatchClean({chain,address:mint,symbol:buy?solTokenSymbol:solRefSymbol});
   }
-  return savedWatchCurrent('base');
+  return savedWatchCurrent(chain);
 }
 function savedWatchPlace(){
   if(!savedWatchReady)return;
   const panel=$('savedWatch');
   // Keep the mobile trade button in its existing position: the saved list
   // follows the swap card there, and spans the desktop workspace above it.
-  const show=!tokenPage&&view==='swap'&&activeChain!=='robinhood';
-  const hero=show?$(activeChain==='solana'?'appSolHero':'baseHeroRow'):null;
+  const show=!tokenPage&&view==='swap';
+  const hero=show?$(activeChain==='solana'?'appSolHero':'baseHeroRow'):null;   // Robinhood همان #baseHeroRow است
   if(hero){
-    // زیرِ نوارِ Market watch (اگر هست) تا سرتیترِ نوار و پنل یک تکه دیده شوند
-    const strip=hero.querySelector(':scope > .marketWatch');
+    // زیرِ نوارِ Market watchِ همین زنجیره (اگر هست) تا سرتیترِ نوار و پنل یک تکه دیده شوند
+    const strip=hero.querySelector(':scope > .marketWatch[data-chain="'+activeChain+'"]');
     if(strip){if(strip.nextElementSibling!==panel)strip.after(panel);}
     else if(panel.parentElement!==hero)hero.prepend(panel);
   }
@@ -7951,7 +7984,7 @@ function savedWatchPlace(){
 function savedWatchSelection(){
   if(!savedWatchReady)return;
   savedWatchPlace();
-  for(const [id,chain] of [['baseWatch','base'],['solWatch','solana'],['tokenWatch',activeChain],['swapWatch',activeChain]]){
+  for(const [id,chain] of [['baseWatch',savedWatchEvmChain()],['solWatch','solana'],['tokenWatch',activeChain],['swapWatch',activeChain]]){
     const b=$(id);if(!b)continue;
     const row=id==='swapWatch'?savedWatchReceived(chain):savedWatchCurrent(chain),on=!!row&&savedWatchRows.some(r=>savedWatchKey(r)===savedWatchKey(row));
     b.disabled=!row;b.setAttribute('aria-pressed',String(on));b.textContent=on?'★':'☆';
@@ -7960,8 +7993,29 @@ function savedWatchSelection(){
   }
 }
 function savedWatchStatus(text){$('savedStatus').textContent=text;watchStatusText=text||'';document.querySelectorAll('.wlStatus').forEach(n=>{n.textContent=watchStatusText;});}
+/* ⚠️ نوشتن هرگز ردیفی را که نمی‌فهمد دور نمی‌ریزد (زنجیره‌ی ناشناس، فیلدِ آینده، ردیفِ Robinhood در نسخه‌ی قدیمی):
+   آرایه‌ی خامِ ذخیره‌شده دوباره خوانده می‌شود، ردیف‌های فهمیده‌شده فقط اگر در فهرستِ جدید هستند می‌مانند، بقیه عیناً،
+   و ردیف‌های تازه ته‌اش می‌آیند. سقف: ۳۰ ردیفِ معتبر و ۵۰۰۰۰ نویسه. */
+function savedWatchMerge(rows){
+  let raw=[];
+  try{
+    const txt=localStorage.getItem(SAVED_WATCH_KEY);
+    if(txt&&txt.length<=50000){const j=JSON.parse(txt);if(Array.isArray(j))raw=j;}
+  }catch{raw=[];}
+  const want=new Set(rows.map(savedWatchKey)),kept=new Set(),out=[];
+  raw.forEach((r,i)=>{
+    const c=i<300?savedWatchClean(r):null;
+    if(!c){out.push(r);return;}                       // نافهمیده (یا بعد از ۳۰۰تای اول): عیناً می‌ماند
+    const k=savedWatchKey(c);
+    if(want.has(k)&&!kept.has(k)){kept.add(k);out.push(r);}
+  });
+  for(const r of rows)if(!kept.has(savedWatchKey(r)))out.push(r);
+  const txt=JSON.stringify(out);
+  if(txt.length>50000)throw new Error('Watchlist too large');
+  return txt;
+}
 function savedWatchCommit(rows,message){
-  try{localStorage.setItem(SAVED_WATCH_KEY,JSON.stringify(rows));}
+  try{localStorage.setItem(SAVED_WATCH_KEY,savedWatchMerge(rows));}
   catch{savedWatchStatus('Could not save in this browser. Check your storage settings and try again.');watchPopOpen();return false;}
   savedWatchRows=rows;++savedWatchSeq;savedWatchRender();savedWatchStatus(message);return true;
 }
@@ -7990,8 +8044,8 @@ function savedWatchRender(){
   const el=(tag,cls,text)=>{const n=document.createElement(tag);n.className=cls;if(text!=null)n.textContent=text;return n;};
   for(const row of savedWatchRows){
     const key=savedWatchKey(row),wrap=el('div','savedRow'),a=el('a','savedLink');
-    a.href='/t/'+encodeURIComponent(row.address);a.title=row.name||row.symbol||row.address;
-    a.append(el('span','savedBadge',row.chain==='base'?'Base':'Solana'));
+    a.href=savedWatchHref(row);a.title=row.name||row.symbol||row.address;
+    a.append(el('span','savedBadge',savedWatchChainName(row.chain)));
     const identity=el('span','savedIdentity');identity.append(el('b','',row.symbol||shortAddr(row.address)),el('small','mono',shortAddr(row.address)));
     const xs=savedWatchExit(row);identity.append(el('span','savedChip '+xs.cls,xs.text));a.append(identity);
     const quote=savedWatchPrices.get(key),price=el('span','savedPrice',quote?watchPrice(quote.price):'—');
@@ -8010,7 +8064,7 @@ function savedWatchRender(){
   try{watchSurfacesRender();}catch{}
   try{if(typeof fbStarSync==='function')fbStarSync();}catch{}
   try{if(typeof stkStarSync==='function')stkStarSync();}catch{}
-  try{if(typeof initMarketWatch==='function'&&document.querySelector('.marketWatch')){paintMarketWatch('base');paintMarketWatch('solana');if(view==='swap'&&!tokenPage)refreshMarketWatch();}}catch{}
+  try{if(typeof initMarketWatch==='function'&&document.querySelector('.marketWatch')){paintMarketWatch('base');paintMarketWatch('solana');paintMarketWatch('robinhood');if(view==='swap'&&!tokenPage)refreshMarketWatch();}}catch{}
 }
 /* ۲۴ اکتبر: چیپِ وضعیتِ خروج برای هر ردیف. اول نتیجه‌ی همین نشست (exitCache / solExitSeen)، بعد /pairs.json
    (هم‌مبدأ، یک بار در هر بازشدنِ پنل، کش ۶۰ ثانیه)، وگرنه «Not checked yet». هرگز حکمِ کهنه‌تر از ۶ ساعت. */
@@ -8024,8 +8078,9 @@ function savedWatchExit(row){
     return {cls:v==='sell'?'p':v==='nosell'?'n':'u',text:t+' · '+savedWatchAgo(at,now)};
   };
   let s=null;
-  if(row.chain==='base'){
-    const c=exitCache[row.address];
+  if(row.chain==='base'||row.chain==='robinhood'){
+    // exitCache مالِ زنجیره‌ی همین بوت است (Base یا Robinhood)؛ ردیفِ زنجیره‌ی دیگر هرگز از آن نمی‌خواند
+    const c=row.chain===savedWatchEvmChain()?exitCache[row.address]:null;
     if(c&&c.state){
       const v=(c.state==='verified'&&tripCost(c.lossPct).state==='implausible')?null
         :(c.state==='verified'||c.state==='estimated')?'sell':(c.state==='blocked'||c.state==='noexit')?'nosell':null;
@@ -8048,7 +8103,7 @@ function savedWatchExit(row){
 }
 async function savedWatchPairsLoad(){
   if(!/^https?:$/.test(location.protocol))return;
-  const chains=[...new Set(savedWatchRows.map(r=>r.chain))];
+  const chains=[...new Set(savedWatchRows.map(r=>r.chain))].filter(c=>c!=='robinhood');   // /pairs.json زنجیره‌ی Robinhood را ندارد
   let changed=false;
   await Promise.all(chains.map(async chain=>{
     const hit=savedWatchPairs.get(chain);
@@ -8076,17 +8131,20 @@ async function savedWatchRefresh(){
   savedWatchPairsLoad().catch(()=>{});
   const seq=++savedWatchSeq,rows=savedWatchRows.slice();
   $('savedRefresh').disabled=true;document.querySelectorAll('.wlRefresh').forEach(b=>{b.disabled=true;});savedWatchStatus('Updating prices…');
-  const results=await Promise.all(['base','solana'].map(async chain=>{
+  const results=await Promise.all(['base','solana','robinhood'].map(async chain=>{
     const selected=rows.filter(r=>r.chain===chain);if(!selected.length)return {ok:true,prices:[]};
+    // روی بوتِ Robinhood درخواستِ GTِ شبکه‌ی دیگر عمداً هرگز روی سیم نمی‌رود (gtFetch)؛ قیمتِ آن ردیف‌ها «—» می‌ماند، نه خطا
+    if(activeChain==='robinhood'&&chain!=='robinhood')return {ok:true,prices:[]};
     try{
-      const requestUrl=GT+'/networks/'+(chain==='base'?CHAIN.gtNetwork:'solana')+'/tokens/multi/'+selected.map(r=>r.address).join(',')+'?include=top_pools';
+      // شناسه‌ی شبکه‌ی GT عیناً (نه CHAIN.gtNetwork: زنجیره‌ی فعال ممکن است فرق کند)
+      const requestUrl=GT+'/networks/'+chain+'/tokens/multi/'+selected.map(r=>r.address).join(',')+'?include=top_pools';
       const j=await gtJson(requestUrl),sampledAt=gtCache.get(requestUrl)?.t||Date.now();
       if(!Array.isArray(j?.data))return {ok:false,prices:[]};
       const prices=[],poolOf=new Map();
       if(Array.isArray(j.included))for(const x of j.included)if(x&&typeof x.id==='string')poolOf.set(x.id,x);
       for(const item of j.data){
         const a=item?.attributes;if(!a||typeof a.address!=='string')continue;
-        const address=chain==='base'?a.address.toLowerCase():a.address;
+        const address=watchNorm(chain,a.address);
         const row=selected.find(r=>r.address===address);
         const numeric=typeof a.price_usd==='number'||(typeof a.price_usd==='string'&&a.price_usd.trim()!=='');
         const price=numeric?Number(a.price_usd):NaN;
@@ -8180,11 +8238,14 @@ function watchPanelFill(root){
   if(!n)list.append(el("p","wlEmpty","Star a token to keep it here."));
   for(const row of savedWatchRows){
     const key=savedWatchKey(row),sym=row.symbol||shortAddr(row.address),wrap=el("div","wlRow"),a=el("a","wlLink");
-    a.href="/t/"+encodeURIComponent(row.address);a.title=row.name||row.symbol||row.address;
+    a.href=savedWatchHref(row);a.title=row.name||row.symbol||row.address;
     const av=el("span","av wlAv");
-    const tk=row.chain==="solana"?{mint:row.address,symbol:row.symbol}:{address:row.address,symbol:row.symbol};
+    // ETH بومی (ردیفِ WETH با نمادِ ETH) و SOL به شاخه‌های بومیِ paintWatchAvatar می‌رسند؛ نمادِ ETH روی آدرسی غیر از WETH همان آیکون را نمی‌گیرد
+    const tk=row.chain==="solana"?{mint:row.address,symbol:row.symbol}
+      :(row.symbol==="ETH"&&row.address===SAVED_WATCH_WETH[row.chain])?{native:true,address:row.address,symbol:"ETH"}
+      :{address:row.address,symbol:row.symbol};
     try{paintWatchAvatar(av,tk,watchLogoGet(row.chain,tk));}catch{}
-    const id=el("span","wlId");id.append(el("b","wlSym",sym),el("span","wlChain",row.chain==="base"?"Base":"Solana"));
+    const id=el("span","wlId");id.append(el("b","wlSym",sym),el("span","wlChain",savedWatchChainName(row.chain)));
     const q=savedWatchPrices.get(key),num=el("span","wlNum"),px=el("span","wlPx mono",q?watchPrice(q.price):"—");
     const cg=q&&q.chg!=null&&Number.isFinite(q.chg)?q.chg:null;
     num.append(px,el("span","wlChg mono"+(cg===null?"":cg>=0?" up":" down"),cg===null?"—":(cg>=0?"▲ ":"▼ ")+Math.abs(cg).toFixed(2)+"%"));
@@ -8225,7 +8286,7 @@ function initSavedWatch(){
   if(savedWatchReady)return;
   savedWatchReady=true;
   try{savedWatchRows=savedWatchRead();}catch{savedWatchStatus('Your saved list could not be read. New saves will replace it.');}
-  for(const [id,chain] of [['baseWatch','base'],['solWatch','solana'],['tokenWatch',null]])$(id).onclick=()=>savedWatchToggle(chain||activeChain);
+  for(const [id,chain] of [['baseWatch',savedWatchEvmChain()],['solWatch','solana'],['tokenWatch',null]])$(id).onclick=()=>savedWatchToggle(chain||activeChain);
   $('swapWatch').onclick=()=>{const row=savedWatchReceived(activeChain);if(row)savedWatchToggleRow(row,false);};
   $('savedRefresh').onclick=savedWatchRefresh;
   $('savedWatch').ontoggle=()=>{if($('savedWatch').open)savedWatchRefresh();};
@@ -10853,6 +10914,7 @@ async function openRhTokenPage(addr){
   $("tk-sym").textContent="—";$("tk-name").textContent="";$("tk-px").textContent="—";
   $("tk-addr").textContent=shortAddr(a);$("tk-addr").href=RH_EXPLORER+"/token/"+a;
   paintFallbackAvatar($("tk-av"),a,"");
+  rhTkCur={address:a,symbol:"",name:""};savedWatchSelection();   // ★ی صفحه‌ی توکن از همین آدرس؛ نماد بعد از GT می‌رسد
   $("tk-exitBox").innerHTML=rhNotCheckedHtml("Not checked","Sell-back and exit checks are not available on Robinhood Chain yet. Not checked does not mean safe.");
   $("tk-safetyBody").innerHTML=rhNotCheckedHtml("Not checked","Token safety checks are not available on Robinhood Chain yet. Anyone can create a token with any name here, including look-alikes of well-known names — check the contract address.");
   rhTkMountCards();
@@ -10866,6 +10928,7 @@ async function openRhTokenPage(addr){
   const sym=meta&&typeof meta.symbol==="string"&&meta.symbol?meta.symbol:"Unknown token";
   $("tk-sym").textContent=sym;
   $("tk-name").textContent=meta&&typeof meta.name==="string"?meta.name:"";
+  if(rhTkCur&&rhTkCur.address===a){rhTkCur={address:a,symbol:sym==="Unknown token"?"":sym,name:meta&&typeof meta.name==="string"?meta.name:""};savedWatchSelection();}
   const px=meta&&meta.price_usd!=null?Number(meta.price_usd):NaN;
   $("tk-px").textContent=(isFinite(px)&&px>0)?("$"+(px<1?px.toPrecision(4):px.toLocaleString(undefined,{maximumFractionDigits:2}))):"—";
   const av=$("tk-av");av.innerHTML="";paintFallbackAvatar(av,a,sym);
@@ -10890,7 +10953,7 @@ async function openRhTokenPage(addr){
 }
 // خروج از صفحه‌ی توکنِ Robinhood (leaveTokenPage): کارت‌های جابه‌جا‌شده به جای خود برمی‌گردند
 function rhTokenLeave(){
-  ++rhTkSeq;
+  ++rhTkSeq;rhTkCur=null;
   rhTkUnmountCards();
   $("tk-trade").hidden=false;$("tk-copy").hidden=false;
   storeChain("robinhood");
@@ -15018,19 +15081,20 @@ async function stocksTrade(sym){
   refreshAllowance().then(scheduleQuote);
   $("amtIn").focus();
 }
-// ستاره‌ی سهام: Base از آدرسِ BASE_TOKENS، Solana از mintِ دقیق؛ ردیف را باز نمی‌کند
+// ستاره‌ی سهام: Base از آدرسِ BASE_TOKENS، Solana از mintِ دقیق، Robinhood از آدرسِ فهرستِ STK_RH؛ ردیف را باز نمی‌کند
 function stkWatchRow(sym){
   const s=stkList().find(x=>x.sym===sym);if(!s)return null;
   if(activeChain==="solana")return savedWatchClean({chain:"solana",address:s.mint,symbol:s.sym,name:s.name});
-  if(activeChain==="robinhood")return null;   // فهرستِ نظارت فقط base|solana را می‌شناسد؛ نمادِ Robinhood (مثلاً TSLA) هرگز با ردیفِ Base (TSLAc) یکی نمی‌شود
+  // Robinhood: ردیفِ chain:"robinhood" با آدرسِ خودِ توکن؛ هرگز با ردیفِ Base (TSLAc) یکی نمی‌شود
+  if(activeChain==="robinhood")return savedWatchClean({chain:"robinhood",address:s.address,symbol:s.sym,name:s.name});
   const t=BASE_TOKENS.find(x=>x.symbol===sym);
-  return t&&!t.native?savedWatchClean({chain:"base",address:t.address,symbol:s.sym,name:s.name}):null;
+  return t?savedWatchClean({chain:"base",address:t.address,symbol:s.sym,name:s.name}):null;
 }
 function stkStarSync(){
   document.querySelectorAll("#stkTable .stkStar").forEach(b=>{
     const row=stkWatchRow(b.dataset.stkstar),on=!!row&&savedWatchRows.some(r=>savedWatchKey(r)===savedWatchKey(row));
     b.disabled=!row;b.setAttribute("aria-pressed",String(on));b.textContent=on?"★":"☆";
-    const lab=(on?"Stop watching ":"Watch ")+b.dataset.stkstar;b.setAttribute("aria-label",lab);b.title=row?lab:activeChain==="robinhood"?"Watchlist is not available on Robinhood Chain yet":"Select a token first";
+    const lab=(on?"Stop watching ":"Watch ")+b.dataset.stkstar;b.setAttribute("aria-label",lab);b.title=row?lab:"Select a token first";
   });
 }
 $("stkTable").addEventListener("click",e=>{

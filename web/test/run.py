@@ -10434,6 +10434,10 @@ async def main():
         await check_live_strip(p, errors)
         await check_mobile_compact(p, errors)
         await check_pools_fit(p, errors)
+        await check_watch_native(p, errors)
+        await check_watch_robinhood(p, errors)
+        await check_watch_preserve(p, errors)
+        await check_market_watch_rh(p, errors)
         await check_first_visit_tour(p, errors)
         await check_report_page(p, errors)
         await check_api_page(p, errors)
@@ -22559,7 +22563,8 @@ async def check_pairs_star(p, errors):
         ctx, pg = await open_pairs(1280, rows_s, chain="solana", init=[we_seed(junk, "j1")])
         await pg.click("#rowsBody tr:nth-child(1) .star-btn")
         s = await stored(pg)
-        assert s == [{"chain": "base", "address": base_a, "symbol": "KEEPx", "name": ""}, {"chain": "solana", "address": sol_mixed, "symbol": "SOLM", "name": ""}], "[pairs star] invalid stored entries are dropped, labels cleaned, the Solana mint is kept exact: %s" % s
+        # ۲۶ نوامبر: نوشتن هیچ ردیفِ نافهمیده‌ای را دور نمی‌ریزد (قبلاً «dropped, labels cleaned» بود و ردیف‌های Robinhood را هم پاک می‌کرد)
+        assert s == junk + [{"chain": "solana", "address": sol_mixed, "symbol": "SOLM", "name": ""}], "[pairs star] every stored entry survives verbatim, the new Solana row is appended with its mint exact: %s" % s
         await ctx.close()
         # پر بودن
         full = [{"chain": "base", "address": fb_evm(0xE00 + i), "symbol": "F%d" % i, "name": ""} for i in range(30)]
@@ -22579,7 +22584,7 @@ async def check_pairs_star(p, errors):
         await we_shot(pg, "pairs-star-390-light.png")
         await ctx.close()
         assert not errs, "[pairs star] console errors: %s" % errs
-        print("[pairs star] star as the first column of New pairs (and in the phone cards, no overflow at 390): toggles zaexa.watchlist.v1 with the app's validation (Base lower-cased, Solana mint exact, junk entries dropped, labels cleaned), merges with another tab's write before saving, shows the 30-token message when full and never navigates")
+        print("[pairs star] star as the first column of New pairs (and in the phone cards, no overflow at 390): toggles zaexa.watchlist.v1 with the app's validation (Base lower-cased, Solana mint exact, entries it does not understand kept verbatim), merges with another tab's write before saving, shows the 30-token message when full and never navigates")
     finally:
         await b.close()
         srv.shutdown()
@@ -22587,7 +22592,7 @@ async def check_pairs_star(p, errors):
 
 async def check_swap_star(p, errors):
     """[swap star] ۲۵ اکتبر: دکمه‌ی ستاره‌ی گرد ۳۲px در هدرِ کارتِ سواپ، چپِ انتخابگرِ شبکه، برای توکنِ «You receive»
-    (Base: tokenOut مگر native؛ Solana: mintِ دریافتی مگر SOL) — همان آیکون و aria ستاره‌ی کارتِ Exit؛ سطحِ برآمده در [swap star raised]؛ بدونِ توکن غیرفعال با title."""
+    (Base: tokenOut، ETH بومی هم؛ Solana: mintِ دریافتی، SOL هم) — همان آیکون و aria ستاره‌ی کارتِ Exit؛ سطحِ برآمده در [swap star raised]؛ بدونِ توکن غیرفعال با title."""
     srv, origin = we_serve()
     b = await p.chromium.launch()
     errs = []
@@ -22617,7 +22622,7 @@ async def check_swap_star(p, errors):
         assert await stored(pg) == [], "[swap star] second click must remove the token"
         await pg.evaluate("() => { tokenOut = BASE_TOKENS.find(t => t.native); savedWatchSelection(); }")
         st = await pg.evaluate("() => [swapWatch.disabled, swapWatch.title]")
-        assert st == [True, "Select a token first"], "[swap star] native received token must disable the star: %s" % st
+        assert st == [False, "Watch ETH"], "[swap star] native received token is watchable (stored as the WETH row with symbol ETH): %s" % st   # ۲۶ نوامبر: قبلاً غیرفعال بود
         await pg.context.close()
         # --- Solana ---
         pg = await env.open("#swap?chain=solana", vw=1440, vh=900, scheme="light", board=False)
@@ -22631,12 +22636,12 @@ async def check_swap_star(p, errors):
         assert await pg.get_attribute("#swapWatch", "aria-pressed") == "true", "[swap star] Solana pressed"
         await pg.evaluate("() => { solSide = 'sell'; savedWatchSelection(); }")
         st = await pg.evaluate("() => [swapWatch.disabled, swapWatch.title, swapWatch.getAttribute('aria-pressed')]")
-        assert st == [True, "Select a token first", "false"], "[swap star] Solana sell into SOL has no watchable received token: %s" % st
+        assert st == [False, "Watch SOL", "false"], "[swap star] Solana sell into SOL: SOL is watchable (SOL_MINT_ADDR row), not saved yet: %s" % st   # ۲۶ نوامبر: قبلاً غیرفعال بود
         await pg.evaluate("([m]) => { solRefMint = m; solRefSymbol = 'USDC'; solMintCur = SOL_MINT_ADDR; solTokenSymbol = 'SOL'; savedWatchSelection(); }", [FB_SOL_USDC])
         assert await pg.get_attribute("#swapWatch", "aria-pressed") == "true", "[swap star] Solana sell: the received mint is the reference token"
         await pg.context.close()
         assert not errs, "[swap star] console errors: %s" % errs
-        print("[swap star] 32px round star in the Base and Solana swap header left of the network selector, same icon/aria and colour/border as the exit-card star, raised surface tested separately; toggles the received token (Base tokenOut non-native; Solana received mint exact, SOL disabled with 'Select a token first')")
+        print("[swap star] 32px round star in the Base and Solana swap header left of the network selector, same icon/aria and colour/border as the exit-card star, raised surface tested separately; toggles the received token (Base tokenOut incl. native ETH; Solana received mint exact, SOL included)")
     finally:
         await b.close()
         srv.shutdown()
@@ -25355,7 +25360,7 @@ async def check_rh_flow(p, errors):
         vol6 = await pg.evaluate("() => [...document.querySelectorAll('#flowBody .fbRow .fbVol')].map(e => e.textContent.trim())")
         assert "$98.0K" in vol6 or any(v.startswith("$98") for v in vol6), "[rh flow] 6h volumes from the h6 window: %s" % vol6
         # ستاره‌ها: دیده‌بانی فقط Base/Solana
-        assert not await pg.query_selector("#flowBody .fbStar"), "[rh flow] no watch star on Robinhood rows (watchlist knows Base/Solana only)"
+        assert not await pg.query_selector("#flowBody .fbStar"), "[rh flow] no watch star on the Robinhood flow board rows (the board has no star column there)"
         # ردیف روی صفحه‌ی توکن می‌رود (بارگذاریِ کامل با پرچم)
         await pg.click('.fbRow[data-addr="%s"]' % rh_a(0))
         await pg.wait_for_function("() => location.pathname === '/t/%s'" % rh_a(0), timeout=15000)
@@ -25479,7 +25484,7 @@ async def check_rh_notice(p, errors):
         assert sw["view"] == "view-swap" and sw["texts"] == [], "[rh notice] the Swap view has no full-width notice any more (the hero row replaces it): %s" % sw
         # ۲۳ نوامبر: سواپِ Robinhood واقعی است — همان ردیفِ hero ِ Base (کارتِ سواپ، دکمه‌ی اتصال، انتخابگر در #baseSwapNetworkSlot)؛ #rhHero دیده نمی‌شود
         assert sw["srcMenuInside"] and sw["ctaVisible"] and sw["baseHero"] and not sw["solHero"] and not sw["strip"] and not sw["watch"] and not sw["rhHeroVis"], \
-            "[rh notice] the Base swap card is shown on Robinhood swap, the old Robinhood hero is hidden, no strip/watch panel: %s" % sw
+            "[rh notice] the Base swap card is shown on Robinhood swap, the old Robinhood hero is hidden, no live strip, the in-page watch panel stays hidden (the watchlist lives in the rail/popover, [watch robinhood]): %s" % sw
         assert sw["pickerInBase"] and not sw["pickerInRh"], "[rh notice] the network picker sits in the Base swap card's slot: %s" % sw
         assert not [a for a in sw["acts"] if "coming soon" in a.lower()], "[rh notice] no coming-soon button remains: %s" % sw["acts"]
         assert sw["connect"] == [False, "Connect wallet"], "[rh notice] the header wallet button works on Robinhood swap: %s" % sw["connect"]
@@ -25525,7 +25530,7 @@ async def check_rh_notice(p, errors):
             n = await pg.evaluate("() => [...document.querySelectorAll('.rhNa')].filter(e => e.getClientRects().length > 0).length")
             assert n == 0, "[rh notice] a Robinhood notice leaked into Base %s" % v
         await pg.context.close()
-        print("[rh notice] on Robinhood the Swap view has no notice card: it is the Base swap card with a working Connect wallet (no strip, no watch panel, the old Robinhood hero hidden, picker in the Base swap slot; %r button gone); Exit value, Exit Report (no navigation) and Portfolio show exactly %r (Stocks shows the real stocks card instead); leaving for Solana restores the real Solana swap view; no notice is visible on Base" % (RH_SWAP_CTA_T, RH_NOTICE_NA_T))
+        print("[rh notice] on Robinhood the Swap view has no notice card: it is the Base swap card with a working Connect wallet (no live strip, the in-page watch panel hidden as everywhere, the old Robinhood hero hidden, picker in the Base swap slot; %r button gone); Exit value, Exit Report (no navigation) and Portfolio show exactly %r (Stocks shows the real stocks card instead); leaving for Solana restores the real Solana swap view; no notice is visible on Base" % (RH_SWAP_CTA_T, RH_NOTICE_NA_T))
     finally:
         await b.close()
         srv.shutdown()
@@ -25746,7 +25751,7 @@ async def check_rh_stocks(p, errors):
             assert r["vol"] == rh_stk_vol_txt(rh_stk_vol(i)), "[rh stocks view] %s volume from the string h24: %s want %s" % (s, r["vol"], rh_stk_vol_txt(rh_stk_vol(i)))
             assert r["refDisp"] == "none" and r["volDisp"] != "none", "[rh stocks view] the Reference cell is hidden, volume stays: %s" % r
             assert r["av"] == s[:4], "[rh stocks view] avatar letters are the symbol (no trailing letter cut): %s" % r
-            assert r["star"] is True, "[rh stocks view] no watch star on Robinhood (watchlist knows base|solana only): %s" % r
+            assert r["star"] is False, "[rh stocks view] the watch star is enabled on Robinhood (watchlist knows robinhood rows; was disabled before 26 Nov): %s" % r
         av = {r["sym"]: r["av"] for r in rows}
         assert av["NVDA"] == "NVDA" and av["TSLA"] == "TSLA" and av["SPY"] == "SPY" and av["GOOGL"] == "GOOG", "[rh stocks view] avatar letters: %s" % av
         st = await pg.evaluate("""() => ({th: getComputedStyle(document.querySelector('#stkTable th.colRef')).display, thVol: getComputedStyle(document.querySelector('#stkTable th.colVol')).display,
@@ -25974,8 +25979,11 @@ async def check_rh_swap_parity(p, errors):
         assert abs(sw["l"] - bw["l"]) <= 1, "[rh swap parity] swap card left edge must match Base's: rh %s base %s" % (sw, bw)
         # Base دارد یک نوارِ Market watch بالای ردیف؛ Robinhood آن را پنهان می‌کند (نوار ETH/AERO/cbBTC مالِ Base است). بالای کارت = بالای ردیف + (نوار و فاصله‌ی ردیف اگر باشد)
         base_off = bw["t"] - geo_b["hero"]["t"] - ((geo_b["above"] - geo_b["hero"]["t"]) + geo_b["gap"] if geo_b["strip"] else 0)
-        assert abs(geo_r["hero"]["t"] - geo_b["hero"]["t"]) <= 1 and abs((sw["t"] - geo_r["hero"]["t"]) - base_off) <= 1, \
-            "[rh swap parity] swap card top must match Base's (discounting Base's own market-watch strip): rh %s/%s base %s/%s" % (sw, geo_r["hero"], bw, geo_b["hero"])
+        # ۲۶ نوامبر: Robinhood هم نوارِ Market watch ِ خودش را دارد (ETH/NVDA/TSLA)؛ هر دو طرف با نوارِ خودشان کم می‌شوند
+        rh_off = (sw["t"] - geo_r["hero"]["t"]) - (((geo_r["above"] - geo_r["hero"]["t"]) + geo_r["gap"]) if geo_r["strip"] else 0)
+        assert geo_r["strip"] == 1, "[rh swap parity] the Robinhood hero carries its own market-watch strip: %s" % geo_r
+        assert abs(geo_r["hero"]["t"] - geo_b["hero"]["t"]) <= 1 and abs(rh_off - base_off) <= 1, \
+            "[rh swap parity] swap card top must match Base's (each discounting its own market-watch strip): rh %s/%s base %s/%s" % (sw, geo_r["hero"], bw, geo_b["hero"])
         assert abs(geo_r["chart"]["w"] - geo_b["chart"]["w"]) <= 1 and abs(geo_r["chart"]["l"] - geo_b["chart"]["l"]) <= 1, \
             "[rh swap parity] the chart card must match Base's width and left edge: rh %s base %s" % (geo_r["chart"], geo_b["chart"])
         assert geo_r["cols"] == geo_b["cols"], "[rh swap parity] hero grid columns must equal Base's: %s vs %s" % (geo_r["cols"], geo_b["cols"])
@@ -25989,14 +25997,14 @@ async def check_rh_swap_parity(p, errors):
                     syms: [tokenIn.symbol, tokenOut.symbol], soon: document.body.innerText.includes('Swaps coming soon'),
                     pools: vis(q('#baseHeroRow .swapPoolsCard')), safety: vis(q('#baseHeroRow .swapSafetyCard')), poolsTtl: q('#baseHeroRow .swapPoolsCard .ttl').textContent,
                     picker: !!q('#baseSwapNetworkSlot #srcMenu') && vis(q('#srcChip')), title: q('#baseSwapNetworkSlot #swapNetworkBar > .ttl').textContent,
-                    rhHero: vis(q('#rhHero')), strip: vis(q('.marketWatch'))}; }""")
+                    rhHero: vis(q('#rhHero')), strip: vis(q('.marketWatch[data-chain="base"]')), rhStrip: vis(q('.marketWatch[data-chain="robinhood"]'))}; }""")
         assert info["pair"] == "USDG / ETH" and info["tfs"] == ["1H", "1D", "1W", "1M"] and info["msgHidden"], "[rh swap parity] chart card header (Base chart code on the Robinhood pair): %s" % info
         assert info["px"].endswith("ETH") and re.match(r"^[\d,.]+", info["px"]), "[rh swap parity] the chart shows a price in the pay token: %s" % info["px"]
         assert info["cta"] == [False, "Connect wallet"] and not info["soon"], "[rh swap parity] the swap button is the live Base one, not a coming-soon stub: %s" % info
         assert info["inputs"][0] is False and info["inputs"][1] is False, "[rh swap parity] the amount input is editable: %s" % info["inputs"]
         assert info["syms"] == ["ETH", "USDG"], "[rh swap parity] default pair ETH -> USDG: %s" % info["syms"]
         assert info["pools"] and info["safety"] and info["poolsTtl"] == "Every pool on Robinhood Chain", "[rh swap parity] the Pools and Safety/Exit check cards are shown: %s" % info
-        assert info["picker"] and info["title"] == "Swap" and not info["rhHero"] and not info["strip"], "[rh swap parity] picker in the card header, old Robinhood hero and the Base market strip hidden: %s" % info
+        assert info["picker"] and info["title"] == "Swap" and not info["rhHero"] and not info["strip"] and info["rhStrip"], "[rh swap parity] picker in the card header, old Robinhood hero and the Base market strip hidden, the Robinhood strip shown: %s" % info
         want = "networks/robinhood/pools/%s/ohlcv/" % RH_SWAP_POOL_T
         hit = [c for c in env.calls if "/ohlcv/" in c]
         assert hit and all(want in c and "currency=usd" in c for c in hit), "[rh swap parity] the chart's GT request must go to %s priced in USD: %s" % (want, env.calls)
@@ -27606,6 +27614,325 @@ async def check_pools_fit(p, errors):
         print("[pools fit] 1440 light/dark: market-column pools card capped to the actions column bottom (inline max-height, bottoms within 2px, overflow auto, sticky solid header that stays at the card top), page shorter by the hidden part of the list, scroll kept after renderVenues, a quote refresh and a resize, no style/class mutation while idle, 360px minimum with a short actions column; no amount = no cap; 390px no cap on any pools card; Solana: #solPools capped and aligned, its slot untouched; no console errors")
     finally:
         await b.close()
+
+
+# =====================================================================
+# ۲۶ نوامبر — دیده‌بانی روی Robinhood Chain و برای ارزهای بومی (ETH/SOL)، و نوارِ Market watchِ Robinhood.
+# فیکسچرِ GT همان شکلِ JSON:API ای است که اپ می‌خواند و بقیه‌ی فیکسچرهای Robinhood (rh_stk_gt) می‌سازند:
+# همه‌ی اعداد *رشته* (price_usd، h24)، شناسه‌ی توکن "robinhood_<آدرس حروف کوچک>"، استخرِ برتر در relationships.top_pools و در included.
+# ⚠️ نمونه‌ی زنده‌ی https://zaexa.com/gt/networks/robinhood/tokens/multi/<TSLA>?include=top_pools در این نشست قابل دریافت نبود
+# (WebFetch با robots_disallowed رد شد و پراکسیِ خروجی zaexa.com را نبست)؛ شکل از همان فیکسچرهای موجود و کدِ خواننده برداشته شد.
+# =====================================================================
+RHW_TSLA = "0x322F0929c4625eD5bAd873c95208D54E1c003b2d"
+RHW_NVDA = "0xd0601CE157Db5bdC3162BbaC2a2C8aF5320D9EEC"
+RHW_TOKS = {   # آدرس حروف کوچک ← (نماد، نام، قیمت‌رشته، استخر، تغییر ۲۴ساعته‌رشته)
+    RH_SWAP_WETH_T: ("WETH", "Wrapped Ether", "2514.7", RH_SWAP_POOL_T, "1.25"),
+    RHW_NVDA.lower(): ("NVDA", "NVIDIA", "182.35", "0x%040x" % 0xE001, "-0.80"),
+    RHW_TSLA.lower(): ("TSLA", "Tesla", "341.2", "0x%040x" % 0xE002, "2.40"),
+}
+
+
+RHW_SLOPE = {RH_SWAP_WETH_T: 0.001, RHW_NVDA.lower(): -0.0005, RHW_TSLA.lower(): 0.002}   # شیبِ شمع‌های ساعتی ← تغییرِ ۲۴ساعته‌ی نوار
+
+
+def rhw_gt(token_page=False):
+    """GT روی Robinhood برای نوارِ ETH/NVDA/TSLA و برای تازه‌سازیِ دیده‌بانی؛ بقیه‌ی مسیرها از فیکسچرهای Robinhood."""
+    base_gt = rh_gt_token(tok=RHW_TSLA.lower(), pool=RHW_TOKS[RHW_TSLA.lower()][3], symbol="TSLA") if token_page else rh_gt_swap()
+    now = int(__import__("time").time())
+
+    def pool_obj(a, with_rel=True):
+        sym, _n, _px, pool, chg = RHW_TOKS[a]
+        o = {"id": "robinhood_" + pool, "type": "pool", "attributes": {"address": pool, "name": sym + " / USDG",
+             "price_change_percentage": {"h24": chg}, "reserve_in_usd": "1500000.5"}}
+        if with_rel:
+            o["relationships"] = {"base_token": {"data": {"id": "robinhood_" + a, "type": "token"}},
+                                  "quote_token": {"data": {"id": "robinhood_" + rh_a(999), "type": "token"}},
+                                  "dex": {"data": {"id": "uniswap-v3-robinhood", "type": "dex"}}}
+        return o
+
+    def gt(path):
+        if "networks/robinhood/tokens/multi/" in path:
+            want = [a.lower() for a in path.split("/tokens/multi/")[1].split(",")]
+            known = [a for a in want if a in RHW_TOKS]
+            return (200, {"data": [{"id": "robinhood_" + a, "type": "token", "attributes": {
+                "address": a, "symbol": RHW_TOKS[a][0], "name": RHW_TOKS[a][1], "decimals": 18, "image_url": "missing.png",
+                "price_usd": RHW_TOKS[a][2]},
+                "relationships": {"top_pools": {"data": [{"id": "robinhood_" + RHW_TOKS[a][3], "type": "pool"}]}}} for a in known],
+                "included": [pool_obj(a, with_rel=False) for a in known]})
+        m = re.search(r"networks/robinhood/tokens/(0x[0-9a-f]{40})/pools$", path.lower())
+        if m and m.group(1) in RHW_TOKS and not (token_page and m.group(1) == RHW_TSLA.lower()):
+            return (200, {"data": [pool_obj(m.group(1))]})
+        m = re.search(r"networks/robinhood/pools/(0x[0-9a-f]{40})/ohlcv/hour", path.lower())
+        if m:
+            for a, v in RHW_TOKS.items():
+                if v[3] == m.group(1):
+                    last, c0 = now - 600, float(v[2])
+                    rows = [[last - 3600 * k, c0, c0, c0, round(c0 * (1 - RHW_SLOPE[a] * k), 4), 1000] for k in range(25)]
+                    return (200, {"data": {"id": "robinhood_" + m.group(1), "type": "ohlcv_request_response", "attributes": {"ohlcv_list": rows}}})
+        return base_gt(path)
+    return gt
+
+
+async def rhw_open(env, hash_="#swap", vw=1440, vh=900, seed=None, reqs=None, rh=True, scheme="light", path="/app"):
+    init = ([RH_CHAIN_JS] if rh else []) + ([we_seed(seed, "rhw." + str(vw) + hash_)] if seed else [])
+    hook = (lambda pg_: pg_.on("request", lambda r: reqs.append(r.url))) if reqs is not None else None
+    pg = await env.open(hash_=hash_, vw=vw, vh=vh, scheme=scheme, init=init, board=False, hook=hook, path=path)
+    if rh:
+        await pg.wait_for_function("() => typeof activeChain !== 'undefined' && activeChain === 'robinhood' && typeof savedWatchReady !== 'undefined' && savedWatchReady", timeout=25000)
+    return pg
+
+
+async def check_watch_native(p, errors):
+    """[watch native] ۲۶ نوامبر: ETH (Base) و SOL قابل دیده‌بانی‌اند؛ هویتشان نشانیِ توکنِ بسته‌بندی‌شده با نمادِ بومی است (WETH و ETH یک ردیف)،
+    ستاره‌ی کارتِ سواپ و کارتِ Exit فعال است و آواتارِ ریل آیکونِ ETH/SOL است نه حرف."""
+    srv, origin = we_serve()
+    b = await p.chromium.launch()
+    errs = []
+    stored = lambda pg: pg.evaluate("() => JSON.parse(localStorage.getItem('%s') || '[]')" % WE_KEY)
+    try:
+        env = FbEnv(b, origin, errs)
+        pg = await env.open("#swap", vw=1920, vh=1000, scheme="light", board=False)
+        await pg.wait_for_selector("#swapWatch", state="visible")
+        await pg.wait_for_timeout(900)
+        await pg.evaluate("() => { tokenOut = BASE_TOKENS.find(t => t.native); paintToken('out', tokenOut); }")
+        st = await pg.evaluate("() => [swapWatch.disabled, swapWatch.getAttribute('aria-pressed'), swapWatch.title, baseWatch.disabled, baseWatch.title]")
+        assert st == [False, "false", "Watch ETH", False, "Watch ETH"], "[watch native] Base ETH as the receive token: the swap-card star and the exit-check star are enabled: %s" % st
+        await pg.click("#swapWatch")
+        weth = await pg.evaluate("() => WETH_ADDR.toLowerCase()")
+        assert weth == "0x4200000000000000000000000000000000000006", weth
+        s = await stored(pg)
+        assert s == [{"chain": "base", "address": weth, "symbol": "ETH", "name": "Ether"}], "[watch native] Base ETH is stored as the lower-cased WETH address with symbol ETH: %s" % s
+        st = await pg.evaluate("() => [swapWatch.getAttribute('aria-pressed'), baseWatch.getAttribute('aria-pressed'), baseWatch.disabled]")
+        assert st == ["true", "true", False], "[watch native] the exit-check star for ETH is enabled and pressed: %s" % st
+        await pg.evaluate("() => { tokenOut = BASE_TOKENS.find(t => t.symbol === 'WETH'); paintToken('out', tokenOut); }")
+        st = await pg.evaluate("() => [swapWatch.disabled, swapWatch.getAttribute('aria-pressed'), swapWatch.getAttribute('aria-label')]")
+        assert st[:2] == [False, "true"], "[watch native] WETH selected shows the same row pressed (ETH and WETH share one row on purpose): %s" % st
+        await pg.wait_for_selector("#watchRail .wlRow", timeout=8000)
+        av = await pg.evaluate("() => { const a = document.querySelector('#watchRail .wlRow .wlAv'); return {logo: a.dataset.logo, img: !!a.querySelector('img.on, img'), sym: document.querySelector('#watchRail .wlSym').textContent, chain: document.querySelector('#watchRail .wlChain').textContent}; }")
+        assert av["logo"] == "eth" and av["img"] and av["sym"] == "ETH" and av["chain"] == "Base", "[watch native] the rail paints the ETH icon, not a letter: %s" % av
+        await pg.context.close()
+        # --- Solana ---
+        pg = await env.open("#swap?chain=solana", vw=1920, vh=1000, scheme="light", board=False)
+        await pg.wait_for_selector("#swapWatch", state="visible")
+        await pg.wait_for_timeout(900)
+        await pg.evaluate("() => { solMintCur = SOL_MINT_ADDR; solTokenSymbol = 'SOL'; solSide = 'buy'; savedWatchSelection(); }")
+        st = await pg.evaluate("() => [swapWatch.disabled, swapWatch.title, solWatch.disabled, solWatch.title]")
+        assert st == [False, "Watch SOL", False, "Watch SOL"], "[watch native] Solana SOL as the receive token: swap-card and exit-check stars enabled: %s" % st
+        await pg.click("#swapWatch")
+        s = await stored(pg)
+        assert s == [{"chain": "solana", "address": "So11111111111111111111111111111111111111112", "symbol": "SOL", "name": "Solana"}], "[watch native] Solana SOL is stored with SOL_MINT_ADDR: %s" % s
+        assert await pg.evaluate("() => [swapWatch.getAttribute('aria-pressed'), solWatch.getAttribute('aria-pressed')]") == ["true", "true"], "[watch native] both Solana stars show it saved"
+        await pg.wait_for_selector("#watchRail .wlRow", timeout=8000)
+        av = await pg.evaluate("() => { const a = document.querySelector('#watchRail .wlRow .wlAv'); return {logo: a.dataset.logo, svg: !!a.querySelector('svg'), sym: document.querySelector('#watchRail .wlSym').textContent, chain: document.querySelector('#watchRail .wlChain').textContent}; }")
+        assert av["logo"] == "sol" and av["svg"] and av["sym"] == "SOL" and av["chain"] == "Solana", "[watch native] the rail paints the Solana icon, not a letter: %s" % av
+        await pg.context.close()
+        assert not errs, "[watch native] console errors: %s" % errs
+        print("[watch native] Base ETH and Solana SOL are watchable: the swap-card and exit-check stars are enabled, ETH is stored as {base, WETH lower-case, ETH, Ether} and shares its row with WETH (pressed when WETH is selected), SOL as {solana, SOL_MINT_ADDR, SOL, Solana}, and the rail avatars are the ETH and Solana icons")
+    finally:
+        await b.close()
+        srv.shutdown()
+
+
+async def check_watch_robinhood(p, errors):
+    """[watch robinhood] ۲۶ نوامبر: دیده‌بانی روی Robinhood — ستاره‌ی سواپ/Exit/سهام/صفحه‌ی توکن، ریل و پاپ‌اور، قیمت از GT شبکه‌ی robinhood،
+    چیپ Robinhood، لینک /t/<آدرس>?chain=robinhood و هیچ /pairs.json?chain=robinhood."""
+    srv, origin = rh_srv()
+    b = await p.chromium.launch()
+    errs = []
+    stored = lambda pg: pg.evaluate("() => JSON.parse(localStorage.getItem('%s') || '[]')" % WE_KEY)
+    tsla = RHW_TSLA.lower()
+    try:
+        env = FbEnv(b, origin, errs)
+        env.gt = rhw_gt(token_page=True)
+        reqs = []
+        pg = await rhw_open(env, "#swap", vw=1920, vh=1000, reqs=reqs)
+        await pg.wait_for_function("() => typeof tokenOut !== 'undefined' && tokenOut && document.querySelector('#baseHeroRow .swapCard')", timeout=25000)
+        await pg.wait_for_timeout(900)
+        await pg.evaluate("() => { tokenOut = BASE_TOKENS.find(t => t.symbol === 'TSLA'); paintToken('out', tokenOut); }")
+        st = await pg.evaluate("() => [swapWatch.disabled, swapWatch.getAttribute('aria-pressed'), swapWatch.title, baseWatch.disabled, baseWatch.title]")
+        assert st == [False, "false", "Watch TSLA", False, "Watch TSLA"], "[watch robinhood] the swap-card star and the exit-check star on TSLA are enabled: %s" % st
+        await pg.click("#swapWatch")
+        s = await stored(pg)
+        assert s == [{"chain": "robinhood", "address": tsla, "symbol": "TSLA", "name": "Tesla"}], "[watch robinhood] TSLA is saved as a robinhood row with the lower-cased address: %s" % s
+        assert await pg.evaluate("() => [swapWatch.getAttribute('aria-pressed'), baseWatch.getAttribute('aria-pressed')]") == ["true", "true"], "[watch robinhood] both stars show it saved"
+        # ETH بومی روی Robinhood = ردیفِ WETH ِ Robinhood با نمادِ ETH
+        await pg.evaluate("() => { tokenOut = BASE_TOKENS.find(t => t.native); paintToken('out', tokenOut); }")
+        assert await pg.evaluate("() => [swapWatch.disabled, swapWatch.title]") == [False, "Watch ETH"], "[watch robinhood] native ETH is watchable on Robinhood too"
+        await pg.evaluate("() => { tokenOut = BASE_TOKENS.find(t => t.symbol === 'TSLA'); paintToken('out', tokenOut); }")
+        # ریل (≥۱۷۸۰) و ردیف
+        await pg.wait_for_selector("#watchRail .wlRow", timeout=8000)
+        await pg.wait_for_function("() => document.querySelector('#watchRail .wlPx').textContent !== '—'", timeout=15000)
+        row = await pg.evaluate("""() => { const r = document.querySelector('#watchRail .wlRow'), rail = document.getElementById('watchRail');
+            return {shown: rail.getClientRects().length > 0, sym: r.querySelector('.wlSym').textContent, chain: r.querySelector('.wlChain').textContent,
+                    href: r.querySelector('a').getAttribute('href'), px: r.querySelector('.wlPx').textContent, chg: r.querySelector('.wlChg').textContent,
+                    exit: r.querySelector('.savedChip').textContent, panelHidden: document.getElementById('savedWatch').hidden}; }""")
+        assert row["shown"] and row["sym"] == "TSLA" and row["chain"] == "Robinhood", "[watch robinhood] the rail shows on the Robinhood swap view with the Robinhood badge: %s" % row
+        assert row["href"] == "/t/" + tsla + "?chain=robinhood", "[watch robinhood] the row link is the existing Robinhood token-page format: %s" % row
+        assert row["px"] == "$341.2" and row["chg"] == "▲ 2.40%" and "Not checked yet" in row["exit"] and not row["panelHidden"], "[watch robinhood] price/24h change come from the GT robinhood fixture, exit chip is 'Not checked yet': %s" % row
+        multi = [c for c in env.calls if "/tokens/multi/" in c and tsla in c.lower() and "include=top_pools" in c]
+        assert multi and all(c.startswith("networks/robinhood/tokens/multi/") for c in multi), "[watch robinhood] the refresh asks GT networks/robinhood/tokens/multi: %s" % env.calls
+        assert not any("/pairs.json" in u for u in reqs) and not env.pairs_calls, "[watch robinhood] /pairs.json is never requested for robinhood: %s" % [u for u in reqs if "pairs" in u]
+        assert not any(c.startswith(("networks/base/", "networks/solana/")) for c in env.calls), "[watch robinhood] no GT call for another network: %s" % env.calls
+        # روی Robinhood فقط ردیف‌های Robinhood قیمت می‌گیرند؛ ردیفِ Base/Solana خطا نمی‌دهد
+        await pg.evaluate("""() => { const k = 'zaexa.watchlist.v1'; const r = JSON.parse(localStorage.getItem(k)); r.push({chain: 'base', address: '0x%040x', symbol: 'BAS', name: ''}, {chain: 'solana', address: 'So11111111111111111111111111111111111111112', symbol: 'SOL', name: 'Solana'});
+            localStorage.setItem(k, JSON.stringify(r)); savedWatchRows = savedWatchRead(); savedWatchRender(); savedWatchRefresh(); }""" % 0xB45)
+        await pg.wait_for_function("() => document.querySelector('.wlStatus').textContent.startsWith('Prices refreshed')", timeout=15000)
+        assert not any(c.startswith(("networks/base/", "networks/solana/")) for c in env.calls), "[watch robinhood] on a Robinhood boot the Base/Solana rows are not requested (the wire would drop them): %s" % env.calls
+        await pg.evaluate("() => { savedWatchRows = savedWatchRows.filter(r => r.chain === 'robinhood'); localStorage.setItem('zaexa.watchlist.v1', JSON.stringify(savedWatchRows)); savedWatchRender(); }")
+        # لینکِ ریل → صفحه‌ی توکنِ Robinhood؛ ★ی آنجا از آدرسِ همان صفحه
+        await pg.click("#watchRail .wlRow a")
+        await pg.wait_for_function("() => activeChain === 'robinhood' && tokenPage === true && rhTkCur && rhTkCur.symbol === 'TSLA'", timeout=25000)
+        st = await pg.evaluate("() => [tokenWatch.disabled, tokenWatch.getAttribute('aria-pressed'), tokenWatch.title, location.pathname + location.search]")
+        assert st == [False, "true", "Stop watching TSLA", "/t/" + tsla + "?chain=robinhood"], "[watch robinhood] the Robinhood token page star is enabled and pressed for the saved token: %s" % st
+        await pg.click("#tokenWatch")
+        assert await stored(pg) == [], "[watch robinhood] the token page star removes the robinhood row"
+        await pg.click("#tokenWatch")
+        s = await stored(pg)
+        assert s == [{"chain": "robinhood", "address": tsla, "symbol": "TSLA", "name": "Name TSLA"}], "[watch robinhood] the token page star saves the page's token: %s" % s
+        await pg.context.close()
+        # جدولِ سهام: ستاره کار می‌کند
+        env.calls.clear()
+        env.gt = rh_stk_gt()
+        pg = await rhw_open(env, "#stocks", vw=1280, vh=900)
+        await pg.wait_for_function("() => document.querySelectorAll('#view-stocks tr[data-sym]').length === 42", timeout=25000)
+        sel = '#view-stocks tr[data-sym="NVDA"] .stkStar'
+        st = await pg.evaluate("(s) => [document.querySelector(s).disabled, document.querySelector(s).title, document.querySelector(s).getAttribute('aria-pressed')]", sel)
+        assert st == [False, "Watch NVDA", "false"], "[watch robinhood] the stocks star is enabled and no longer says 'not available': %s" % st
+        await pg.click(sel)
+        s = await stored(pg)
+        assert s == [{"chain": "robinhood", "address": RHW_NVDA.lower(), "symbol": "NVDA", "name": "NVIDIA"}], "[watch robinhood] the stocks star saves the Robinhood stock token address: %s" % s
+        assert await pg.get_attribute(sel, "aria-pressed") == "true"
+        await pg.context.close()
+        # پاپ‌اور (۱۴۴۰) و پنلِ نمای swap
+        env.gt = rhw_gt()
+        pg = await rhw_open(env, "#swap", vw=1440, vh=900, seed=[{"chain": "robinhood", "address": tsla, "symbol": "TSLA", "name": "Tesla"}])
+        await pg.wait_for_selector("#watchBtn", state="visible", timeout=8000)
+        await pg.click("#watchBtn")
+        await pg.wait_for_selector("#watchPop .wlRow", state="visible", timeout=8000)
+        assert await pg.evaluate("() => document.querySelector('#watchPop .wlChain').textContent") == "Robinhood", "[watch robinhood] the popover lists the Robinhood row"
+        await pg.context.close()
+        assert not errs, "[watch robinhood] console errors: %s" % errs
+        print("[watch robinhood] Robinhood: swap-card, exit-check, stocks-table and token-page stars save {robinhood, lower-cased address} rows (native ETH too), the rail and popover show on the Robinhood swap view with the 'Robinhood' badge and a /t/<addr>?chain=robinhood link, prices come from GT networks/robinhood/tokens/multi (strings stay strings), Base/Solana rows are not requested on a Robinhood boot, and /pairs.json is never asked for robinhood")
+    finally:
+        await b.close()
+        srv.shutdown()
+
+
+async def check_watch_preserve(p, errors):
+    """[watch preserve] ۲۶ نوامبر: نوشتنِ فهرست (index.html و pairs.html) هیچ ردیفِ نافهمیده‌ای (Robinhood در نسخه‌ی قدیمی، زنجیره‌ی ناشناس) را دور نمی‌ریزد."""
+    srv, origin = we_serve()
+    b = await p.chromium.launch()
+    errs = []
+    stored = lambda pg: pg.evaluate("() => JSON.parse(localStorage.getItem('%s') || '[]')" % WE_KEY)
+    try:
+        base_row = {"chain": "base", "address": fb_evm(0xC01), "symbol": "WA", "name": "Watch 0"}
+        rh_row = {"chain": "robinhood", "address": RHW_TSLA.lower(), "symbol": "TSLA", "name": "Tesla"}
+        zzz = {"chain": "zzz", "address": "x", "extra": [1, 2]}
+        seed = [base_row, rh_row, zzz]
+        env = FbEnv(b, origin, errs)
+        pg = await env.open("#swap", vw=1920, vh=1000, scheme="light", board=False, init=[we_seed(seed, "wp1")])
+        await pg.wait_for_selector("#watchRail .wlRow", timeout=8000)
+        assert await pg.evaluate("() => savedWatchRows.map(r => r.chain)") == ["base", "robinhood"], "[watch preserve] the app understands base and robinhood rows and ignores zzz"
+        await pg.evaluate("""() => { const r = savedWatchRows.find(x => x.chain === 'base'); savedWatchToggleRow(r, true); }""")
+        s = await stored(pg)
+        assert s == [rh_row, zzz], "[watch preserve] index: removing the base row keeps the robinhood and zzz raw entries verbatim: %s" % s
+        await pg.evaluate("""([a]) => { savedWatchToggleRow(savedWatchClean({chain: 'base', address: a, symbol: 'WA', name: 'Watch 0'}), true); }""", [base_row["address"]])
+        s = await stored(pg)
+        assert s == [rh_row, zzz, base_row], "[watch preserve] index: adding it back appends it and keeps the others: %s" % s
+        await pg.click("#watchRail .wlRow:has(.wlChain:text('Robinhood')) .wlRm")
+        s = await stored(pg)
+        assert s == [zzz, base_row], "[watch preserve] index: the rail's remove button removes only its own row: %s" % s
+        await pg.evaluate("""() => { localStorage.setItem('zaexa.watchlist.v1', JSON.stringify(%s)); savedWatchRows = savedWatchRead(); savedWatchRender(); }""" % _fbj.dumps(seed))
+        await pg.context.close()
+        # pairs.html
+        rows_p = [{"chain": "base", "address": fb_evm(0xF01), "symbol": "AAA", "name": "AAA token", "v": "sell", "checkKind": "roundtrip", "checkedAt": fb_iso(600),
+                   "poolCreatedAt": fb_iso(3600), "dex": "uniswap-v3", "priceUsd": 1.5, "reserveUsd": 12000, "vol24hUsd": 5000}]
+        ctx = await b.new_context(viewport={"width": 1280, "height": 900}, color_scheme="light")
+        pg = await ctx.new_page()
+        pg.on("pageerror", lambda e: errs.append("PAGEERROR %s" % e))
+        pg.on("console", lambda m: errs.append("CONSOLE %s" % m.text) if m.type == "error" and "Failed to load resource" not in m.text else None)
+
+        async def h(route):
+            u = route.request.url
+            if u.startswith(origin):
+                if u.split("?")[0][len(origin):] == "/pairs.json":
+                    return await route.fulfill(status=200, content_type="application/json", body=_fbj.dumps({"store": True, "rows": rows_p}))
+                return await route.continue_()
+            return await route.abort()
+        await pg.route("**/*", h)
+        await pg.add_init_script(we_seed(seed, "wp2"))
+        await pg.goto(origin + "/pairs")
+        await pg.wait_for_selector("#rowsBody .star-btn", state="attached", timeout=15000)
+        txt = await pg.evaluate("() => ['#rowsBody', '#rowsCards'].map(s => document.querySelector(s).innerHTML).join(' ')")
+        assert RHW_TSLA.lower() not in txt.lower() and "TSLA" not in txt and "Robinhood" not in txt, "[watch preserve] pairs: a Robinhood row is not rendered on the Base pairs page"
+        assert await pg.evaluate("() => document.querySelectorAll('#rowsBody .star-btn').length") == 1, "[watch preserve] pairs: only the page's own rows have stars"
+        await pg.click("#rowsBody tr:nth-child(1) .star-btn")
+        s = await stored(pg)
+        assert s == seed + [{"chain": "base", "address": rows_p[0]["address"], "symbol": "AAA", "name": ""}], "[watch preserve] pairs: toggling a star keeps every stored entry (robinhood, zzz) and appends the new row: %s" % s
+        await pg.click("#rowsBody tr:nth-child(1) .star-btn")
+        s = await stored(pg)
+        assert s == seed, "[watch preserve] pairs: toggling it off removes only that row: %s" % s
+        await ctx.close()
+        assert not errs, "[watch preserve] console errors: %s" % errs
+        print("[watch preserve] a base row, a robinhood row and an unknown {chain:'zzz'} row seeded: toggling and removing in the app and toggling a star on the pairs page change only their own key; the robinhood and zzz raw entries survive verbatim and the Robinhood row is not rendered on the pairs page")
+    finally:
+        await b.close()
+        srv.shutdown()
+
+
+async def check_market_watch_rh(p, errors):
+    """[market watch rh] ۲۶ نوامبر: نوارِ Market watch روی Robinhood = ETH، NVDA، TSLA با مرجعِ USDG؛ فقط روی Robinhood دیده می‌شود."""
+    srv, origin = rh_srv()
+    b = await p.chromium.launch()
+    errs = []
+    try:
+        env = FbEnv(b, origin, errs)
+        env.gt = rhw_gt()
+        pg = await rhw_open(env, "#swap", vw=1440, vh=900, scheme="light")
+        await pg.wait_for_function("() => document.querySelectorAll('.marketWatch[data-chain=robinhood] .watchSpark svg').length === 3", timeout=30000)
+        await pg.wait_for_timeout(500)
+        m = await pg.evaluate("""() => { const vis = e => !!e && e.getClientRects().length > 0 && getComputedStyle(e).visibility !== 'hidden';
+            const w = document.querySelector('.marketWatch[data-chain=robinhood]'), pairs = [...w.querySelectorAll('.watchPair')];
+            return {rh: vis(w), base: vis(document.querySelector('.marketWatch[data-chain=base]')), sol: vis(document.querySelector('.marketWatch[data-chain=solana]')),
+                names: pairs.map(x => x.querySelector('.watchName').firstChild.textContent), quote: pairs.map(x => x.querySelector('.watchName span').textContent),
+                aria: pairs.map(x => x.getAttribute('aria-label')), px: pairs.map(x => x.querySelector('.watchPrice').textContent), chg: pairs.map(x => x.querySelector('.watchChange').textContent),
+                ethLogo: pairs[0].querySelector('.av').dataset.logo, ethImg: !!pairs[0].querySelector('.av img'), head: w.querySelector('.watchHeading').textContent,
+                text: w.textContent}; }""")
+        assert m["rh"] and not m["base"] and not m["sol"], "[market watch rh] on Robinhood only the Robinhood strip is visible: %s" % m
+        assert m["names"] == ["ETH", "NVDA", "TSLA"] and m["quote"] == [" / USDG"] * 3 and m["aria"] == ["Trade %s / USDG" % x for x in m["names"]], "[market watch rh] ETH, NVDA, TSLA in that order, quoted in USDG: %s" % m
+        assert m["ethLogo"] == "eth" and m["ethImg"], "[market watch rh] ETH is painted with the ETH icon: %s" % m
+        assert m["px"] == ["$2,514.7", "$182.35", "$341.2"] and m["chg"] == ["▲ 2.46%", "▼ 1.19%", "▲ 5.04%"] and not re.search(r"NaN|\$0\.00|undefined", m["text"]), "[market watch rh] prices come from GT robinhood (ETH priced through the Robinhood WETH): %s" % m
+        paths = [c for c in env.calls]
+        assert paths and all(c.startswith("networks/robinhood/") for c in paths), "[market watch rh] every GT call is on the robinhood network: %s" % paths
+        multi = [c for c in paths if "/tokens/multi/" in c and RH_SWAP_WETH_T in c.lower()]
+        assert multi and RH_SWAP_WETH_T in multi[0].lower() and RHW_NVDA.lower() in multi[0].lower() and RHW_TSLA.lower() in multi[0].lower(), "[market watch rh] one tokens/multi with WETH, NVDA and TSLA: %s" % multi
+        # کلیک مثلِ Base: جفتِ USDG → توکن
+        await pg.click(".marketWatch[data-chain=robinhood] .watchPair:nth-child(3)")
+        await pg.wait_for_function("() => tokenOut && tokenOut.symbol === 'TSLA'", timeout=8000)
+        assert await pg.evaluate("() => [tokenIn.symbol, tokenOut.symbol]") == ["USDG", "TSLA"], "[market watch rh] clicking a strip item selects USDG -> that token like Base does"
+        await pg.click(".marketWatch[data-chain=robinhood] .watchPair:nth-child(1)")
+        await pg.wait_for_function("() => tokenOut && tokenOut.native", timeout=8000)
+        await pg.context.close()
+        # موبایل ۳۹۰: همان قاعده‌ی فشرده‌ی Base (نوار پنهان)
+        pg = await rhw_open(env, "#swap", vw=390, vh=844, scheme="light")
+        await pg.wait_for_timeout(1200)
+        mob = await pg.evaluate("() => [...document.querySelectorAll('.marketWatch')].map(e => [e.dataset.chain, getComputedStyle(e).display])")
+        assert all(d == "none" for _c, d in mob), "[market watch rh] 390: every strip is hidden by the Base compact rule: %s" % mob
+        await pg.context.close()
+        # Base: نوارِ Robinhood پنهان، نوارِ Base دیده می‌شود
+        env.gt = lambda path: None
+        pg = await rhw_open(env, "#swap", vw=1440, vh=900, rh=False)
+        await pg.wait_for_selector(".marketWatch[data-chain=base] .watchPair", timeout=15000)
+        bs = await pg.evaluate("""() => { const vis = e => !!e && e.getClientRects().length > 0;
+            return {base: vis(document.querySelector('.marketWatch[data-chain=base]')), rh: vis(document.querySelector('.marketWatch[data-chain=robinhood]')), sol: vis(document.querySelector('.marketWatch[data-chain=solana]')),
+                names: [...document.querySelectorAll('.marketWatch[data-chain=base] .watchName')].map(x => x.firstChild.textContent), rhItems: document.querySelectorAll('.marketWatch[data-chain=robinhood] .watchPair').length}; }""")
+        assert bs["base"] and not bs["rh"] and not bs["sol"] and bs["names"] == ["ETH", "AERO", "cbBTC"] and bs["rhItems"] == 0, "[market watch rh] on Base the Robinhood strip is hidden and empty, the Base strip is unchanged: %s" % bs
+        await pg.context.close()
+        assert not errs, "[market watch rh] console errors: %s" % errs
+        print("[market watch rh] Robinhood swap view at 1440: the Market watch strip shows ETH (ETH icon), NVDA, TSLA in order, quoted in USDG, priced from GT networks/robinhood through the shared renderer, clicking an item selects USDG -> token; the Base and Solana strips are hidden there and the Robinhood strip is hidden on Base; at 390 it follows the Base compact rule (hidden)")
+    finally:
+        await b.close()
+        srv.shutdown()
 
 
 async def only(names):

@@ -1098,14 +1098,15 @@ Solana</button><script>if(window.__zxPairsCopy){window.__zxPairsCopy.tabs();wind
   }
 
   /* ۲۴ اکتبر — دیده‌بانی: همان کلید و همان قواعدِ اعتبارسنجیِ savedWatchClean در web/index.html
-     (Base بدون حساسیت به حروف، Solana دقیق، سقف ۳۰). پیش از هر نوشتن، فهرستِ ذخیره‌شده دوباره
-     خوانده می‌شود تا تغییرِ تبِ دیگر گم نشود. */
+     (Base و Robinhood بدون حساسیت به حروف، Solana دقیق، سقف ۳۰). پیش از هر نوشتن، فهرستِ ذخیره‌شده دوباره
+     خوانده می‌شود تا تغییرِ تبِ دیگر گم نشود. این صفحه فقط ستاره‌ی زنجیره‌ی خودش را نشان می‌دهد، ولی هر ردیفی را که
+     نمی‌فهمد (Robinhood، زنجیره‌ی ناشناس) هنگامِ نوشتن عیناً نگه می‌دارد — watchWrite. */
   var WATCH_KEY = 'zaexa.watchlist.v1', WATCH_MAX = 30;
   var WATCH_SOL_RE = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
   function watchClean(row){
-    if (!row || typeof row !== 'object' || ['base', 'solana'].indexOf(row.chain) < 0 || typeof row.address !== 'string') return null;
+    if (!row || typeof row !== 'object' || ['base', 'solana', 'robinhood'].indexOf(row.chain) < 0 || typeof row.address !== 'string') return null;
     var address = row.address;
-    if (row.chain === 'base') {
+    if (row.chain === 'base' || row.chain === 'robinhood') {
       if (!/^0x[0-9a-fA-F]{40}$/.test(address) || /^0x0{40}$/i.test(address)) return null;
       address = address.toLowerCase();
     } else if (!WATCH_SOL_RE.test(address)) return null;
@@ -1129,6 +1130,28 @@ Solana</button><script>if(window.__zxPairsCopy){window.__zxPairsCopy.tabs();wind
     return rows;
   }
   function watchSafeRead(){ try { return watchRead(); } catch (e) { return []; } }
+  /* نوشتن بدونِ دورریختنِ ردیفِ نافهمیده: آرایه‌ی خامِ ذخیره‌شده دوباره خوانده می‌شود، ردیف‌های فهمیده‌شده فقط اگر در
+     فهرستِ جدید هستند می‌مانند، هر ردیفِ دیگر (Robinhood، زنجیره‌ی ناشناس) عیناً؛ ردیف‌های تازه ته می‌آیند.
+     سقف: ۳۰ ردیفِ معتبر (با خودِ فهرستِ جدید) و ۵۰۰۰۰ نویسه — بیشتر از آن پرتاب می‌کند. */
+  function watchWrite(rows){
+    var raw = [];
+    try {
+      var txt = localStorage.getItem(WATCH_KEY);
+      if (txt && txt.length <= 50000) { var j = JSON.parse(txt); if (Array.isArray(j)) raw = j; }
+    } catch (e) { raw = []; }
+    var want = {}, kept = {}, out = [], i;
+    for (i = 0; i < rows.length; i++) want[watchKeyOf(rows[i])] = true;
+    for (i = 0; i < raw.length; i++) {
+      var c = i < 300 ? watchClean(raw[i]) : null;
+      if (!c) { out.push(raw[i]); continue; }
+      var k = watchKeyOf(c);
+      if (want[k] && !kept[k]) { kept[k] = true; out.push(raw[i]); }
+    }
+    for (i = 0; i < rows.length; i++) if (!kept[watchKeyOf(rows[i])]) out.push(rows[i]);
+    var text = JSON.stringify(out);
+    if (text.length > 50000) throw new Error('Watchlist too large');
+    localStorage.setItem(WATCH_KEY, text);
+  }
   function watchRowChain(row){ return (row && row.chain === 'solana') ? 'solana' : (row && row.chain === 'base') ? 'base' : currentChain; }
   function watchIsOn(rows, chain, addr){
     var probe = watchClean({ chain: chain, address: addr });
@@ -1173,7 +1196,7 @@ Solana</button><script>if(window.__zxPairsCopy){window.__zxPairsCopy.tabs();wind
       watchSyncStars(); return;
     }
     var next = on ? rows.filter(function(r){ return watchKeyOf(r) !== key; }) : rows.concat([row]);
-    try { localStorage.setItem(WATCH_KEY, JSON.stringify(next)); }
+    try { watchWrite(next); }
     catch (err) { watchNote('Could not save in this browser. Check your storage settings and try again.'); return; }
     watchNote('');
     watchSyncStars();
