@@ -113,10 +113,11 @@ const GOOD = {
   await m.dispose();
 
   ok(res.status === 200, "the token page did not return 200 (" + res.status + ")");
-  ok(html.includes('content="USDC · USD Coin — Zaexa"'),
+  // ۲۶ نوامبر: عنوان/توضیحِ مخصوصِ توکن («SYM (Chain) — حکم · Zaexa»، «… Liquidity now $Y.»)
+  ok(html.includes('content="USDC (Base) \u2014 not confirmed \u00b7 Zaexa"'),
      "og:title does not carry the token:\n" + html.slice(0, 900));
-  ok(html.includes("Liquidity $12.40M"), "the description lost the liquidity figure");
-  ok(html.includes("Vol 24h $3.12M"), "the description lost the 24h volume");
+  ok(html.includes("Liquidity now $12.40M."), "the description lost the liquidity figure");
+  ok(!html.includes("Vol 24h $3.12M"), "the new description must not carry the old volume phrase");
   ok(/property="og:image" content="https:\/\/zaexa\.com\/og\/t\/0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913\.png\?v=1&amp;h=[0-9a-f]{8}"/.test(html),
      "og:image is not the absolute, versioned per-token card");
   ok(html.includes('property="og:image:alt" content="USDC on Base — Zaexa"'), "og:image:alt is not the token's");
@@ -128,7 +129,7 @@ const GOOD = {
   ok(!html.includes("the home page blurb"), "the static og:description survived");
   ok((html.match(/property="og:title"/g) || []).length === 1,
      "there is more than one og:title in the page");
-  ok(html.includes("<title>USDC · USD Coin — Zaexa</title>"),
+  ok(html.includes("<title>USDC (Base) \u2014 not confirmed \u00b7 Zaexa</title>"),
      "the browser tab title was not replaced");
   ok(html.includes("<body>app</body>"), "the body was damaged by the rewrite");
   ok(upstreamHits.length === 1 &&
@@ -261,12 +262,12 @@ for (const [mode, label] of [["error", "a 500 from upstream"], ["slow", "an upst
   const ms = Date.now() - t0;
   await m.dispose();
 
-  const wantDesc = "Base · Liquidity $12.40M · Vol 24h $3.12M. Check whether you can sell it " +
-    "back before you buy — exit simulation and risk flags, no wallet needed.";
+  // ۲۶ نوامبر: توضیحِ مخصوصِ توکن (جایگزینِ جمله‌ی عمومیِ قدیمی)؛ RPC در دسترس نیست → «not confirmed»
+  const wantDesc = "USD Coin (USDC) on Base, contract 0x8335\u20262913. Zaexa&#39;s last exit check: not confirmed. Liquidity now $12.40M.";
   ok(res.status === 200,
      "the token page with an unreachable RPC did not return 200 (" + res.status + ")");
   ok(html.includes('content="' + wantDesc + '"'),
-     "with the RPC unreachable, og:description is not byte-for-byte today's description:\n" +
+     "with the RPC unreachable, og:description is not the token description with 'not confirmed':\n" +
      html.slice(0, 900));
   ok(!html.includes("sell route"),
      "an unknown verdict leaked a verdict sentence into the description anyway");
@@ -276,7 +277,7 @@ for (const [mode, label] of [["error", "a 500 from upstream"], ["slow", "an upst
   ok(upstreamHits.some((u) => /publicnode\.com|meowrpc\.com|drpc\.org|tenderly\.co|base\.org/.test(u)),
      "the verdict path never even attempted an RPC call — is it actually wired up? hits: " +
      JSON.stringify(upstreamHits));
-  console.log("[og live] verdict: RPC genuinely unreachable -> today's description byte-for-byte, "
+  console.log("[og live] verdict: RPC genuinely unreachable -> 'not confirmed' token description, "
     + "page 200 in " + ms + "ms (budget " + OG_BUDGET_MS + "ms)");
 }
 
@@ -396,7 +397,7 @@ for (const [mode, label] of [["error", "a 500 from upstream"], ["slow", "an upst
   ok(h1Of(a1) === "AAA" && h1Of(a2) === "BBB" && aboutOf(a1) && aboutOf(a1) !== aboutOf(a2),
      "[token seo live] two tokens must differ in h1 and .tkAbout");
   ok(/class="fbChip p">Exit check: Sell route quoted</.test(a1) && /A quote is not a guarantee\./.test(a1), "[token seo live] sell chip and sentence");
-  ok(/<title>AAA \u00b7 Alpha Coin \u2014 Zaexa<\/title>/.test(a1), "[token seo live] title is already per-token (ogTags/ogTitle), left alone");
+  ok(/<title>AAA \(Base\) \u2014 sell route quoted \u00b7 Zaexa<\/title>/.test(a1), "[token seo live] title is per-token: SYM (Chain) \u2014 word \u00b7 Zaexa");
 
   const EVIL = '<script>alert(1)</script>"&\'';
   const ev = await run(M(EVIL, EVIL, 22500, "$22.5K"), { v: "sell" }, "Base");
@@ -419,6 +420,124 @@ for (const [mode, label] of [["error", "a 500 from upstream"], ["slow", "an upst
   console.log("[token seo live] real rewriter on the real index.html: h1 = symbol, only h1, facts visible and escaped, nosell guard, noindex only on positive evidence, no extra upstream call");
 }
 
+
+/* ---- ۸ب. «Token facts» روی workerd واقعی (HTMLRewriter + KVِ miniflare) ----
+   الف) injectOg با tfِ کنترل‌شده: جعبه، عنوان/توضیح، چیپِ سولانا، Base دست‌نخورده، tf=null → صفحه مثلِ قبل؛
+   ب) خطِ لولهٔ کاملِ Worker با ZX_KV واقعی (ایندکس با mergeDay ساخته می‌شود): جعبه + هم‌نام‌ها، بدونِ تماسِ بالادستیِ اضافه. */
+{
+  const REAL = fs.readFileSync(path.join(here, "..", "web", "index.html"), "utf8");
+  const TFM = await import("./tokfacts.js");
+  const tag = (html, id) => (new RegExp("<[a-z0-9]+ [^>]*id=\"" + id + "\"[^>]*>").exec(html) || [""])[0];
+  const chipOf = (html) => (/<span class="tkChip" id="tk-chip"[^>]*>[\s\S]*?<\/span>\s*<a class="tkAddr/.exec(html) || [""])[0];
+  const boxOf = (html) => (/<section class="tkFactsBox"[\s\S]*?<\/section>/.exec(html) || [""])[0];
+  const HARNESS =
+    'import { injectOg } from "./index.js";' +
+    "export default { async fetch(req, env) {" +
+    "  const u = new URL(req.url); const c = JSON.parse(u.searchParams.get('c'));" +
+    "  const page = await env.ASSETS.fetch(req);" +
+    "  return injectOg(page, u, c.addr, Promise.resolve(c.meta), Promise.resolve(c.vd), c.chain, c.tf === undefined ? undefined : Promise.resolve(c.tf));" +
+    "} };";
+  const hm = new Miniflare({
+    modules: true, script: HARNESS, scriptPath: path.join(here, "__tokfacts_harness.js"), modulesRoot: here,
+    modulesRules: [{ type: "ESModule", include: ["**/*.js"] }],
+    compatibilityDate: "2026-08-10", compatibilityFlags: ["nodejs_als"],
+    serviceBindings: { ASSETS: () => new Response(REAL, { status: 200, headers: { "content-type": "text/html; charset=utf-8" } }) },
+  });
+  const run = async (c) => {
+    const q = encodeURIComponent(JSON.stringify(c));
+    return await (await hm.dispatchFetch("https://zaexa.com/t/" + c.addr + "?c=" + q)).text();
+  };
+  const SOLM = "So11111111111111111111111111111111111111112";
+  const meta = (sym, name) => ({ name, symbol: sym, liquidity: "$22.5K", liquidityUsd: 22500, vol24: "$3.1K", fdvUsd: 900000, decimals: 9, priceUsd: 1, imageUrl: null });
+  const row = (o) => ({ chain: "base", address: ADDR.toLowerCase(), symbol: "GRAVY", name: "Gravy Coin", v: "sell", why: null, checkKind: "sell-quote",
+    checkedAt: "2026-11-20T09:17:00.000Z", poolCreatedAt: "2026-11-20T08:00:00Z", priceUsd: 0.1, reserveUsd: 8000, vol24hUsd: 1200, fdvUsd: 100000, dex: "uniswap-v3-base", ...o });
+  const tf = { rows: [{ date: "2026-11-23", row: row({ checkedAt: "2026-11-23T10:17:00.000Z", follow: "pool-there", followAt: "2026-11-23T11:20:00.000Z" }) }, { date: "2026-11-20", row: row({}) }],
+    same: { name: { count: 2, norm: "gravy coin", set: "a,b", samples: [{ c: "base", a: "0x" + "b".repeat(40), d: "2026-11-22", y: "GRV" }] }, symbol: null },
+    range: { from: "2026-09-08", to: "2026-11-25" }, dates: ["2026-11-20", "2026-11-23"], firstDate: "2026-11-20" };
+  const withTf = await run({ meta: meta("GRAVY", "Gravy Coin"), vd: { v: "sell" }, chain: "Base", addr: ADDR, tf });
+  ok(boxOf(withTf).startsWith('<section class="tkFactsBox" aria-labelledby="tk-facts-h"><h2 id="tk-facts-h" class="tkfH">Token facts</h2>') && /<div id="tk-facts"|<div class="tkFacts" id="tk-facts"/.test(withTf) && withTf.indexOf("tkFactsBox\"") > withTf.indexOf('class="tkAbout"'),
+     "[token facts live] the box sits inside #tk-facts after the chips and p.tkAbout");
+  ok((withTf.match(/<h1[ >]/g) || []).length === 1 && (withTf.match(/id="tk-facts-h"/g) || []).length === 1, "[token facts live] still exactly one h1, one box heading");
+  ok(/<title>GRAVY \(Base\) \u2014 sell route quoted \u00b7 Zaexa<\/title>/.test(withTf) && /property="og:title" content="GRAVY \(Base\) \u2014 sell route quoted \u00b7 Zaexa"/.test(withTf), "[token facts live] title and og:title");
+  ok(/name="description" content="Gravy Coin \(GRAVY\) on Base, contract 0x8335\u20262913\. Zaexa&#39;s last exit check: sell route quoted\. Liquidity now \$22\.5K\. First seen in the Exit Report on 20 Nov\."/.test(withTf.replace(/0x[0-9a-fA-F]{4}\u2026[0-9a-fA-F]{4}/, "0x8335\u20262913")),
+     "[token facts live] description: " + (/name="description" content="[^"]*"/.exec(withTf) || [""])[0]);
+  ok(withTf.includes('<div class="k">Liquidity</div><div class="v">$22.5K</div><div class="s">First check $8.0K \u00b7 20 Nov</div>'), "[token facts live] liquidity tile: now with first check under it");
+  ok(/<a class="tkAddr mono" id="tk-addr"[^>]*href="https:\/\/basescan\.org\/token\/0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913"[^>]*>0x8335\u20262913<\/a>/.test(withTf), "[token facts live] the header address is server-filled (client format: short text, explorer href with the full address)");
+  ok(chipOf(withTf).includes('data-chain="base"') && chipOf(withTf).includes("<span>Base</span>") && chipOf(withTf).includes('fill="#0052FF"'), "[token facts live] a Base page keeps the Base chip");
+  const sol = await run({ meta: meta("SOLX", "Solx"), vd: { v: "nosell", cause: "empty-pool" }, chain: "Solana", addr: SOLM,
+    tf: { rows: [], same: null, range: null, dates: [], firstDate: null } });
+  const solChip = chipOf(sol);
+  ok(solChip.includes('data-chain="solana"') && solChip.includes("<span>Solana</span>") && solChip.includes('viewBox="0 0 101 88"') && solChip.includes("url(#paint0_linear_174_4403Report)") && !solChip.includes("0052FF") && !solChip.includes("<span>Base</span>"),
+     "[token facts live] a Solana page gets the Solana chip (icon and text) in the initial HTML: " + solChip.slice(0, 200));
+  ok(/<title>SOLX \(Solana\) \u2014 not confirmed \u00b7 Zaexa<\/title>/.test(sol) && !/No sell route/.test(boxOf(sol)) && /id="tk-addr"[^>]*href="https:\/\/solscan\.io\/token\/So11/.test(sol), "[token facts live] Solana: not confirmed title, solscan header link, never nosell");
+  ok(!/tkfPool|In Exit Report|tkfPanel/.test(boxOf(sol)) && /Exit checks/.test(boxOf(sol)), "[token facts live] a token with no report row: no pool / report / panel, the live exit item stays");
+  // tf = null → صفحه دقیقاً مثلِ قبل (بدونِ جعبه) ولی عنوان/چیپ همان‌اند
+  const noTf = await run({ meta: meta("GRAVY", "Gravy Coin"), vd: { v: "sell" }, chain: "Base", addr: ADDR, tf: null });
+  ok(!noTf.includes("tkFactsBox\"") && /class="tkAbout"/.test(noTf) && /<title>GRAVY \(Base\)/.test(noTf), "[token facts live] tf null: no box, the rest of the page as before");
+  const none = await run({ meta: meta("GRAVY", "Gravy Coin"), vd: { v: "sell" }, chain: "Base", addr: ADDR });
+  ok(none === noTf, "[token facts live] tf omitted and tf null render identically");
+  const robots = (h) => /<meta name="robots" content="noindex,follow">/.test(h);
+  ok(robots(await run({ meta: { ...meta("EMP", "Empty"), liquidityUsd: 100 }, vd: null, chain: "Base", addr: ADDR, tf })) === true &&
+     robots(await run({ meta: meta("EMP", "Empty"), vd: { v: "nosell", cause: "empty-pool" }, chain: "Base", addr: ADDR, tf })) === true &&
+     robots(withTf) === false && robots(sol) === false, "[token facts live] the noindex rule is unchanged");
+  const EVIL = '<script>alert(1)</script>\u202e"\'&';
+  const ev = await run({ meta: meta(EVIL, EVIL), vd: { v: "sell" }, chain: "Base", addr: ADDR,
+    tf: { ...tf, rows: [{ date: "2026-11-20", row: row({ name: EVIL, symbol: EVIL, dex: "<img src=x onerror=1>" }) }],
+      same: { name: { count: 1, norm: "x", set: "a", samples: [{ c: "base", a: "0x" + "b".repeat(40), d: "2026-11-22", y: EVIL }] }, symbol: null } } });
+  ok(!ev.includes("<script>alert(1)") && !/<img src=x/.test(ev) && boxOf(ev).includes("&lt;script&gt;"), "[token facts live] hostile strings stay inert in the box, title and description");
+  await hm.dispose();
+
+  // ب) خطِ لولهٔ کامل با KVِ واقعیِ miniflare
+  const BASE_ADDR = ADDR.toLowerCase();
+  const OTHER = "0x" + "b".repeat(40), OTHER2 = "0x" + "c".repeat(40);
+  const today = new Date().toISOString().slice(0, 10);
+  const dAgo = (n) => TFM.addDays(today, -n);
+  const mf2 = new Miniflare({
+    modules: true, script: 'import w from "./index.js"; export default w;', scriptPath: path.join(here, "__tokfacts_live_entry.js"), modulesRoot: here,
+    modulesRules: [{ type: "ESModule", include: ["**/*.js"] }], compatibilityDate: "2026-08-10", compatibilityFlags: ["nodejs_als"],
+    kvNamespaces: ["ZX_KV"],
+    serviceBindings: { ASSETS: () => new Response(REAL, { status: 200, headers: { "content-type": "text/html; charset=utf-8" } }) },
+    outboundService: (req) => {
+      upstreamHits.push(req.url);
+      if (/publicnode\.com|meowrpc\.com|drpc\.org|tenderly\.co|mainnet\.base\.org|onfinality\.io|api\.jup\.ag|mainnet-beta\.solana\.com/.test(req.url))
+        return Promise.reject(new Error("no route to Base/Solana RPC or Jupiter in this sandbox"));
+      return new Response(JSON.stringify(upstreamReply), { headers: { "content-type": "application/json" } });
+    },
+  });
+  const kv = await mf2.getKVNamespace("ZX_KV");
+  const rw = (o) => ({ chain: "base", address: BASE_ADDR, symbol: "USDC", name: "USD Coin", v: "sell", why: null, checkKind: "sell-quote",
+    checkedAt: dAgo(3) + "T09:17:00.000Z", poolCreatedAt: dAgo(3) + "T08:00:00Z", priceUsd: 1, reserveUsd: 8000, vol24hUsd: 1200, fdvUsd: 100000, dex: "aerodrome-base", ...o });
+  const doc = (d, rows) => kv.put("report:" + d, JSON.stringify({ date: d, generatedAt: d + "T10:00:00Z", chains: ["base"], checked: rows.length, rows }));
+  await doc(dAgo(3), [rw({}), rw({ address: OTHER, symbol: "USDC", name: "USD Coin" })]);
+  await doc(dAgo(1), [rw({ checkedAt: dAgo(1) + "T10:00:00.000Z", poolCreatedAt: dAgo(3) + "T08:00:00Z", follow: "pool-empty", followAt: dAgo(1) + "T11:05:00.000Z" }), rw({ address: OTHER2, symbol: "USDC", name: "Other USD" })]);
+  for (let d = TFM.IDX_FIRST_DATE; d <= dAgo(1); d = TFM.addDays(d, 1)) await TFM.mergeDay(kv, d);
+  upstreamHits = []; upstreamReply = GOOD;
+  const t0 = Date.now();
+  const e2e = await (await mf2.dispatchFetch("https://zaexa.com/t/" + ADDR)).text();
+  const ms = Date.now() - t0;
+  const b2 = boxOf(e2e);
+  ok(b2.includes('<p class="tkfPool">Aerodrome pool \u00b7 created ' + (+dAgo(3).slice(8)) + " "), "[token facts live e2e] pool row from the report: " + b2.slice(0, 500));
+  ok(b2.includes("1 other token used the name \u201cUSD Coin\u201d") && b2.includes("2 other tokens used the symbol \u201cUSDC\u201d") && b2.includes('<a class="fbChip" href="/t/' + OTHER + '">USDC \u00b7 0xbbbb\u2026bbbb') && !b2.includes('href="/t/' + BASE_ADDR + '"'),
+     "[token facts live e2e] name panel and symbol panel list the other tokens and not this one: " + b2.slice(b2.indexOf("tkfPanel")));
+  // نام و نماد در دو شارد → فقط دو سند (امروز + اولین تاریخ)؛ ردیفِ دیروز (با follow) خوانده نمی‌شود، ولی هر دو تاریخ لینک دارند
+  ok(/First check \$8\.0K \u00b7 \d+ \w{3}/.test(b2) && (b2.match(/href="\/report\//g) || []).length === 2, "[token facts live e2e] first-check figures and two Exit Report links: " + b2.slice(0, 600));
+  ok(upstreamHits.every((u) => /coingecko|geckoterminal|publicnode|meowrpc|drpc|tenderly|base\.org|onfinality|dexscreener/.test(u)), "[token facts live e2e] no new upstream host: " + JSON.stringify(upstreamHits));
+  ok(ms < OG_BUDGET_MS + 1500, "[token facts live e2e] page time " + ms + "ms stays inside the card budget");
+  // KV غایب/کند نباید صفحه را بشکند: بدونِ هیچ ایندکسی هم صفحه ۲۰۰ و بدونِ same-name
+  await mf2.dispose();
+  const mf3 = new Miniflare({
+    modules: true, script: 'import w from "./index.js"; export default w;', scriptPath: path.join(here, "__tokfacts_live_entry2.js"), modulesRoot: here,
+    modulesRules: [{ type: "ESModule", include: ["**/*.js"] }], compatibilityDate: "2026-08-10", compatibilityFlags: ["nodejs_als"],
+    kvNamespaces: ["ZX_KV"],
+    serviceBindings: { ASSETS: () => new Response(REAL, { status: 200, headers: { "content-type": "text/html; charset=utf-8" } }) },
+    outboundService: () => new Response(JSON.stringify(upstreamReply), { headers: { "content-type": "application/json" } }),
+  });
+  upstreamReply = GOOD;
+  const fresh = await (await mf3.dispatchFetch("https://zaexa.com/t/" + ADDR)).text();
+  ok(/Exit checks/.test(boxOf(fresh)) && !/tkfPanel|tkfPool/.test(fresh.slice(fresh.indexOf("tkFactsBox\""))) && /<title>USDC \(Base\)/.test(fresh), "[token facts live e2e] an empty KV: identity rows only, no same-name block, page fine");
+  await mf3.dispose();
+  console.log("[token facts live] real rewriter on the real index.html: box inside #tk-facts, specific title/description, Solana chip in the initial HTML (Base unchanged), tf null = old page, noindex unchanged, hostile strings inert; full pipeline with a real KV: pool/same-symbol/follow/report links, no extra upstream host");
+}
 
 /* ---- ۹. Exit value: تگ‌های /exit/<آدرس> و /og/exit/<آدرس>.png روی workerd (HTMLRewriter و Cache API واقعی) ----
    جهانِ ساختگی فقط یک کیفِ «فقط ETH» است (هلدینگ + یک دسته‌ی قیمت؛ کوت لازم نیست)، تا بدونِ شبکه‌ی واقعی

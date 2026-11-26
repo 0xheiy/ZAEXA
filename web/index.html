@@ -1548,6 +1548,41 @@ footer .fine{max-width:78ch;margin:46px 0 0;font-size:11.5px;color:var(--tx3);li
 .tkFacts[hidden]{display:none}
 .tkChips{display:flex;flex-wrap:wrap;gap:8px}
 .tkAbout{margin:10px 0 0;font-size:13px;line-height:1.5;color:var(--tx2)}
+/* ۲۶ نوامبر — «Token facts» (طراحیِ دوباره): کاشی‌های آمار هم‌سبکِ نوارِ آمارِ زیرِ نمودار (برچسبِ ریزِ بزرگ + مقدار)،
+   خطِ زمانیِ exit check، پیل‌های گزارش و یک پنلِ هم‌نام. فقط متغیرهای موجود؛ بدونِ هاله و سایه. */
+.tkFactsBox{margin-top:18px;padding-top:16px;border-top:1px solid var(--line);font-size:13px;line-height:1.5;color:var(--tx2)}
+.tkFactsBox>*+*{margin-top:18px}
+.tkFactsBox .tkfH{margin:0 0 8px;font-size:11px;font-weight:640;letter-spacing:.1em;text-transform:uppercase;color:var(--tx3)}
+.tkFactsBox>.tkfH{margin:0 0 -4px}
+.tkfTiles{display:flex;flex-wrap:wrap;row-gap:14px}
+.tkfTile{padding:0 28px;border-left:1px solid var(--line);min-width:0}
+.tkfTile:first-child{padding-left:0;border-left:0}
+.tkfTile .k{font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--tx3)}
+.tkfTile .v{margin-top:6px;font-size:18px;font-weight:600;letter-spacing:-.02em;font-variant-numeric:tabular-nums;color:var(--tx)}
+.tkfTile .s,.tkFactsBox .s{margin-top:3px;font-size:12px;color:var(--tx3)}
+.tkfPool{margin:10px 0 0;font-size:12px;color:var(--tx3)}.tkFactsBox>.tkfPool{margin-top:10px}
+.tkfTl{margin:0;padding:0;list-style:none}
+.tkfTl li{position:relative;display:flex;justify-content:space-between;gap:14px;padding:4px 0 4px 20px}
+.tkfTl li>span{min-width:0;overflow-wrap:anywhere;color:var(--tx)}
+.tkfTl li>time{flex:none;font-size:12px;color:var(--tx3);white-space:nowrap;font-variant-numeric:tabular-nums}
+.tkfTl li>i{position:absolute;left:0;top:11px;width:8px;height:8px;border-radius:50%;background:var(--tx3)}
+.tkfTl li.g>i{background:var(--pos)}
+.tkfTl li.r>i{background:var(--neg)}
+.tkfTl li::before{content:"";position:absolute;left:3.5px;top:0;bottom:0;width:1px;background:var(--line)}
+.tkfTl li:first-child::before{top:15px}
+.tkfTl li:last-child::before{bottom:calc(100% - 15px)}
+.tkfPills{display:flex;flex-wrap:wrap;gap:8px}
+.tkFactsBox a.fbChip{text-decoration:none;color:var(--tx2)}
+.tkFactsBox a.fbChip:hover{color:var(--tx)}
+.tkFactsBox .fbChip .d{margin-left:4px;font-weight:500;color:var(--tx3)}
+.tkfPanel{background:var(--card2);border-radius:14px;padding:14px}
+.tkfPanel>b{display:block;font-weight:600;color:var(--tx)}
+.tkfPanel .tkfPills{margin-top:10px}
+@media(max-width:720px){
+  .tkfTile{flex:0 0 50%;box-sizing:border-box}
+  .tkfTile:nth-child(odd){padding-left:0;border-left:0}
+  .tkfTile:nth-child(even){padding-left:20px}
+}
 .tkAv{width:56px;height:56px;border-radius:50%;display:grid;place-items:center;
   background:var(--raise);font-size:15px;font-weight:600;color:var(--tx2);
   box-shadow:0 0 0 1px var(--line)}

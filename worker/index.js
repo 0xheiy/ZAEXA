@@ -160,6 +160,7 @@ async function gtUpstream(rest, env, opts) {
 
 import { ogTags, ogTitle, pickTokenMeta, pickDsMeta, pickCmcMeta } from "./og.js";
 import { tokenSeo, ogGuarded } from "./tokseo.js";
+import { tokFacts, idxPassStep, SOL_CHIP_INNER } from "./tokfacts.js";
 import { ogImageResponse } from "./og-image.js";
 import { badgesRoute, runBadgesPass, baseRpcList, BADGES_CRON } from "./badges.js";
 import { tokenCardPng, renderable, logoFromJpeg } from "./og-token.js";
@@ -2354,16 +2355,18 @@ async function solFetchVerdict(mint, deadlineAt, ctx, env) {
    ترتیب مهم است: اول تگ‌های ثابتِ صفحه‌ی اصلی (که با data-og علامت خورده‌اند)
    برداشته می‌شوند، بعد تگ‌های این توکن اضافه می‌شود — وگرنه ربات دو og:title
    می‌دید و کدام را برمی‌دارد به خودش بستگی داشت. */
-function injectOg(res, url, addr, metaPromise, vdPromise, chain) {
+function injectOg(res, url, addr, metaPromise, vdPromise, chain, tfPromise) {
   if (typeof HTMLRewriter === "undefined") return res;   // بیرون از Workers (تست node)
   if (!res || res.status !== 200) return res;
   const ct = res.headers.get("content-type") || "";
   if (!/text\/html/i.test(ct)) return res;
   // هر خطا → صفحه‌ی بدونِ متنِ سئو، نه صفحه‌ی شکسته؛ نتیجه یک بار حساب می‌شود
   let memo = null;
-  const seoOf = (meta, vd) => {
+  /* tokFacts (worker/tokfacts.js): خودش زیرِ مهلتِ OG_BUDGET_MS است و هرگز رد نمی‌شود؛ هر خطا → null */
+  const tfP = Promise.resolve(tfPromise || null).catch(() => null);
+  const seoOf = (meta, vd, tf) => {
     if (memo) return memo;
-    try { memo = tokenSeo(meta, vd, chain, addr); } catch (e) { memo = { sym: null, name: null, facts: null, noindex: false }; }
+    try { memo = tokenSeo(meta, vd, chain, addr, tf); } catch (e) { memo = { sym: null, name: null, facts: null, noindex: false, title: null, desc: null }; }
     return memo;
   };
   return new HTMLRewriter()
@@ -2374,40 +2377,61 @@ function injectOg(res, url, addr, metaPromise, vdPromise, chain) {
         // عنوان به verdict نیازی ندارد، ولی باید همان Promise را await کند
         // تا سرِ نخِ زمانی هر دو handler یکی باشد — نه اینکه عنوان زودتر
         // از verdict چاپ شود و بعد head دوباره صبر کند.
-        const [meta] = await Promise.all([metaPromise, vdPromise]);
-        el.setInnerContent(ogTitle(meta), { html: false });
+        const [meta, vd, tf] = await Promise.all([metaPromise, vdPromise, tfP]);
+        el.setInnerContent(seoOf(meta, vd, tf).title || ogTitle(meta), { html: false });
       },
     })
     .on("head", {
       async element(el) {
-        const [meta, vd] = await Promise.all([metaPromise, vdPromise]);
+        const [meta, vd, tf] = await Promise.all([metaPromise, vdPromise, tfP]);
         // حکم از همان گاردِ صفحه (ogGuarded) — کارت و صفحه یک حرف بزنند
         const { verdict, cause } = ogGuarded(vd, chain);
+        const seo = seoOf(meta, vd, tf);
         // برچسبِ زنجیره از همان chainOf(addr) که کالر پاس داده — نه حدسی
-        // که اینجا دوباره زده شود.
-        el.append(ogTags(meta, addr, url.origin, verdict, chain, cause), { html: true });
-        if (seoOf(meta, vd).noindex) el.append('<meta name="robots" content="noindex,follow">', { html: true });
+        // که اینجا دوباره زده شود. عنوان/توضیحِ مخصوصِ توکن از tokenSeo (۲۶ نوامبر).
+        el.append(ogTags(meta, addr, url.origin, verdict, chain, cause, { title: seo.title, desc: seo.desc }), { html: true });
+        if (seo.noindex) el.append('<meta name="robots" content="noindex,follow">', { html: true });
       },
     })
     // متنِ واقعیِ توکن داخلِ UI مرئی (worker/tokseo.js) — همان meta/verdictِ بالا، بدونِ تماسِ تازه
     .on("h1#tk-sym", {
       async element(el) {
-        const [meta, vd] = await Promise.all([metaPromise, vdPromise]);
-        const s = seoOf(meta, vd);
+        const [meta, vd, tf] = await Promise.all([metaPromise, vdPromise, tfP]);
+        const s = seoOf(meta, vd, tf);
         if (s.sym) el.setInnerContent(s.sym, { html: false });
       },
     })
     .on("#tk-name", {
       async element(el) {
-        const [meta, vd] = await Promise.all([metaPromise, vdPromise]);
-        const s = seoOf(meta, vd);
+        const [meta, vd, tf] = await Promise.all([metaPromise, vdPromise, tfP]);
+        const s = seoOf(meta, vd, tf);
         if (s.name) el.setInnerContent(s.name, { html: false });
+      },
+    })
+    /* ۲۶ نوامبر — چیپِ زنجیره در HTMLِ اولیه: web/index.html سخت‌کد Base است؛ برای سولانا
+       همان آیکون و متنی که کلاینت (paintReportNetwork) می‌نشاند از سرور می‌آید. Base دست‌نخورده. */
+    .on("#tk-chip", {
+      element(el) {
+        if (chain !== "Solana") return;
+        el.setAttribute("data-chain", "solana");
+        el.setInnerContent(SOL_CHIP_INNER, { html: true });
+      },
+    })
+    /* ۲۶ نوامبر: هدرِ کارت سمتِ سرور پر می‌شود (همان قالبِ کلاینت: آدرسِ کوتاه + لینکِ explorer با آدرسِ کامل)،
+       فقط وقتی جعبه‌ی Token facts هم می‌آید */
+    .on("#tk-addr", {
+      async element(el) {
+        const [meta, vd, tf] = await Promise.all([metaPromise, vdPromise, tfP]);
+        if (!tf || !seoOf(meta, vd, tf).facts) return;
+        el.setAttribute("href", (chain === "Solana" ? "https://solscan.io/token/" : "https://basescan.org/token/") + addr);
+        el.setAttribute("title", addr);
+        el.setInnerContent(addr.slice(0, 6) + "\u2026" + addr.slice(-4), { html: false });
       },
     })
     .on("#tk-facts", {
       async element(el) {
-        const [meta, vd] = await Promise.all([metaPromise, vdPromise]);
-        const s = seoOf(meta, vd);
+        const [meta, vd, tf] = await Promise.all([metaPromise, vdPromise, tfP]);
+        const s = seoOf(meta, vd, tf);
         if (!s.facts) return;
         el.removeAttribute("hidden");
         el.setAttribute("data-addr", addr);
@@ -3849,7 +3873,7 @@ async function scheduledReportPassBody(env, ctx, opts, meter) {
       return page1.concat(page2);
     };
 
-    return await runReportPass({
+    const passResult = await runReportPass({
       kv: paceKv(meterKv(env.ZX_KV, meter)),
       meter,
       fetchPools,
@@ -3935,6 +3959,15 @@ async function scheduledReportPassBody(env, ctx, opts, meter) {
         }
       },
     });
+    /* ۲۶ نوامبر — آخرِ گذر، فقط کرونِ دقیقه‌ی ۱۷: ادغامِ یک روزِ گزارش در ایندکسِ Token facts
+       (worker/tokfacts.js). فقط KV؛ بدونِ هیچ تماسِ بالادستی. هم‌انضباطِ بودجه: اگر سقفِ
+       ساب‌ریکوئست خورده یا بودجه‌ی گذر تمام است، رد می‌شود. هرگز پرتاب نمی‌کند و روی
+       نتیجه‌ی گذر اثری ندارد. */
+    if (opts && opts.idxMerge === true) {
+      await idxPassStep(env.ZX_KV, Date.now(),
+        () => passBudgetHasRoom({ capHit: () => meter.isCapHit() }) && reportBudgetLeft(meter) > 0);
+    }
+    return passResult;
   } catch (e) {
     return { checked: 0, added: 0 }; // یک اجرای زمان‌بندی‌شده هرگز نباید پرتاب کند
   }
@@ -5539,6 +5572,9 @@ export default {
          روی سقف نرخ metaPromise اصلاً null است، پس اینجا هم هیچ verdict‌ای
          ساخته نمی‌شود — دقیقاً همان استدلالِ metaPromise بالا. */
       const vdPromise = metaPromise ? metaPromise.then((m) => ogFetchVerdictDetail(addr, m, deadlineAt, env, ctx)) : null;
+      /* ۲۶ نوامبر — «Token facts»: ردیف‌های گزارش + هم‌نام‌ها از KV (فقط KV، بدونِ تماسِ بالادستی)،
+         زیرِ همان مهلتِ OG_BUDGET_MS؛ تایم‌اوت/خطا → null و صفحه مثلِ قبل. */
+      const tfPromise = metaPromise ? tokFacts(addr, chainOf(addr), env, deadlineAt, metaPromise) : null;
       /* ⚠️ «/app» نه «/». از روزی که صفحه‌ی معرفی روی ریشه نشست، «/» دیگر
          اپ نیست. اگر این خط روی «/» بماند، هر لینکِ /t/<آدرس> صفحه‌ی
          معرفی را باز می‌کند و اپ هرگز بالا نمی‌آید — و چون ۲۰۰ برمی‌گردد،
@@ -5548,7 +5584,7 @@ export default {
       // همان chainOf(addr) که ogFetchVerdict بالاتر برای انتخابِ verdictِ
       // درست به کار می‌برد — یک منبعِ حقیقت، نه تشخیصِ دومی داخلِ og.js.
       const chain = chainOf(addr) === "solana" ? "Solana" : "Base";
-      return withinLimit ? injectOg(res, url, addr, metaPromise, vdPromise, chain) : res;
+      return withinLimit ? injectOg(res, url, addr, metaPromise, vdPromise, chain, tfPromise) : res;
     }
     // بقیه‌ی سایت دست‌نخورده از فایل‌های ثابت می‌آید.
     if (env && env.ASSETS) return env.ASSETS.fetch(request);
@@ -5569,7 +5605,9 @@ export default {
       await scheduledBadgesPass(env);
       return;
     }
-    await scheduledReportPass(env, ctx);
+    /* ۲۶ نوامبر: ادغامِ یک روزِ گزارش در ایندکسِ «Token facts» فقط در کرونِ دقیقه‌ی ۱۷
+       (آخرِ همان گذر)؛ کرونِ دقیقه‌ی ۴۷ و /report/run هرگز. */
+    await scheduledReportPass(env, ctx, { idxMerge: !!(event && typeof event.cron === "string" && /^17\s/.test(event.cron)) });
   },
 };
 

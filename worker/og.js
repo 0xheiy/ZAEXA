@@ -85,11 +85,15 @@ export function pickTokenMeta(body) {
   // ذخیره‌ی عددی (فقط برای noindex در worker/tokseo.js): null/خالی = نامعلوم، نه ۰
   const rv = a.total_reserve_in_usd;
   const rn = rv == null || (typeof rv === "string" && !rv.trim()) ? NaN : Number(rv);
+  // FDV عددی (جعبه‌ی Token facts، «Now»): از fdv_usd خودِ GT؛ نبود/غیرمتناهی/≤۰ → null، نه ۰
+  const fv = a.fdv_usd;
+  const fn = fv == null || (typeof fv === "string" && !fv.trim()) ? NaN : Number(fv);
   return {
     name: ogClean(a.name, 48),
     symbol: ogClean(a.symbol, 16),
     liquidity: ogBig(a.total_reserve_in_usd),
     liquidityUsd: Number.isFinite(rn) && rn >= 0 ? rn : null,
+    fdvUsd: Number.isFinite(fn) && fn > 0 ? fn : null,
     vol24: ogBig(a.volume_usd && a.volume_usd.h24),
     decimals,
     priceUsd,
@@ -213,9 +217,11 @@ function fnv1aHex(str) {
   return h.toString(16).padStart(8, "0");
 }
 
-export function ogTags(meta, addr, origin, verdict, chain, cause) {
-  const title = ogTitle(meta);
-  const desc = ogDescription(meta, verdict, chain, cause);
+/* over (اختیاری): { title, desc } — عنوان/توضیحِ مخصوصِ توکن (worker/tokseo.js)؛ بدونِ آن
+   یا با مقدارِ خالی همان ogTitle/ogDescription همیشگی می‌آید. */
+export function ogTags(meta, addr, origin, verdict, chain, cause, over) {
+  const title = (over && over.title) || ogTitle(meta);
+  const desc = (over && over.desc) || ogDescription(meta, verdict, chain, cause);
   let img = origin + OG_IMAGE_PATH + "?v=" + OG_IMAGE_V;
   let alt = "Zaexa";
   // نمادِ قابل‌رندر → کارتِ مخصوصِ توکن؛ وگرنه دقیقاً همان تگ‌های قدیمیِ عمومی

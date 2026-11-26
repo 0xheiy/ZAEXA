@@ -19998,6 +19998,317 @@ console.log(fails === 0
   console.log("[fable 5-7] v4 'complete' is re-checked against today's pool list (new or undated v4 pool, full page, unreadable list -> unknown); Solana zero GT reserve never labels a pool empty; the Telegram bot uses publishGuardRow");
 }
 
+/* ---- ۲۶ نوامبر — [token facts]: ایندکسِ هم‌نام، tokFacts، جعبه‌ی Token facts، عنوان/توضیح ---- */
+{
+  const TF = await import("./tokfacts.js");
+  const SEO = await import("./tokseo.js");
+  const { pickTokenMeta } = await import("./og.js");
+  const T = (m) => "[token facts] " + m;
+
+  class FakeKv {
+    constructor() { this.m = new Map(); this.gets = []; this.puts = []; this.hang = false; this.boom = false; }
+    async get(k, o) {
+      this.gets.push(k);
+      if (this.boom) throw new Error("kv down");
+      if (this.hang) return new Promise(() => {});
+      return this.m.has(k) ? this.m.get(k) : null;
+    }
+    async put(k, v) { this.puts.push(k); this.m.set(k, v); }
+    reset() { this.gets = []; this.puts = []; }
+  }
+  const bAddr = (n) => "0x" + n.toString(16).padStart(40, "0");
+  const sMint = (c) => c.repeat(44);
+  const mkRow = (o) => ({
+    chain: "base", address: bAddr(1), symbol: "GRAVY", name: "Gravy Coin", v: "sell", why: null, checkKind: "sell-quote",
+    checkedAt: "2026-11-10T09:17:00.000Z", poolCreatedAt: "2026-11-10T08:00:00Z", priceUsd: 0.001, reserveUsd: 12000,
+    vol24hUsd: 3400, fdvUsd: 250000, dex: "uniswap-v3-base", ret: 99.2, ...o,
+  });
+  const putDoc = (kv, date, rows) => kv.m.set("report:" + date, JSON.stringify({ date, generatedAt: date + "T10:00:00Z", chains: ["base"], checked: rows.length, rows }));
+
+  // norm — NFKC، کنترل/bidi، فاصله، lowercase، سقف
+  ok(TF.norm("  \uFF30epe\u202E  Coin\n") === "pepe coin", T("norm: NFKC, bidi stripped, whitespace collapsed, lowercase, got " + TF.norm("  \uFF30epe\u202E  Coin\n")));
+  ok(TF.norm("\u202e \u0001 ") === null && TF.norm(5) === null && TF.norm("") === null, T("norm: empty after stripping -> null"));
+  ok(Array.from(TF.normName("a".repeat(100))).length === 64 && Array.from(TF.normSymbol("b".repeat(100))).length === 32, T("norm: caps 64 / 32"));
+  ok(TF.fnv1a32("a") === 0xe40c292c && TF.fnv1a32("") === 0x811c9dc5, T("fnv1a32 matches the reference values"));
+  const shards = new Set(["n|gravy", "s|gravy", "base:0x1", "solana:abc", "x", "y", "z"].map(TF.shardOf));
+  ok([...shards].every((s) => Number.isInteger(s) && s >= 0 && s < 16) && TF.shardOf("n|gravy") === TF.shardOf("n|gravy") && ["n|gravy","s|x","n|ab","q"].every((k) => TF.nameShardOf(k) >= 0 && TF.nameShardOf(k) < 64) && TF.NIDX_SHARDS === 64 && TF.IDX_SHARDS === 16, T("shardOf stays in 0..15, nameShardOf in 0..63, both stable"));
+  ok(TF.addrHash("base", bAddr(255).toUpperCase().replace("0X", "0x")) === TF.addrHash("base", bAddr(255)) && TF.addrHash("base", bAddr(255)).startsWith("b") && TF.addrHash("solana", sMint("A")).startsWith("sAAAA"),
+     T("address hash: b/s prefix + last 12 chars, Base case-insensitive"));
+
+  // ادغام: idempotent، فقط شاردهای لازم، <=۳۳ نوشتن، state جلو می‌رود
+  {
+    const kv = new FakeKv();
+    const d1 = "2026-09-08", d2 = "2026-09-09";
+    putDoc(kv, d1, [
+      mkRow({ address: bAddr(1) }),
+      mkRow({ address: bAddr(2), symbol: "GRV2", name: "Gravy Coin" }),
+      mkRow({ address: bAddr(1) }), // تکرار در همان روز
+      mkRow({ address: "0xABCDEF" + "0".repeat(34), symbol: "BAD", name: "Bad" }), // آدرسِ نامعتبر
+      mkRow({ chain: "solana", address: sMint("S"), symbol: "SOLG", name: "Gravy Coin", checkKind: "roundtrip" }),
+      mkRow({ chain: "ethereum", address: bAddr(9) }),
+      mkRow({ address: bAddr(3), symbol: "", name: "" }), // بدونِ نام/نماد: فقط توکن‌ایندکس
+    ]);
+    const r1 = await TF.mergeDay(kv, d1);
+    ok(r1.writes <= 81 && kv.puts.length === r1.writes && kv.puts[kv.puts.length - 1] === "idx:v1:state", T("merge: <=81 writes, state written last: " + r1.writes));
+    ok(JSON.parse(kv.m.get("idx:v1:state")).next === d2, T("merge: state advances to the next day"));
+    ok(kv.puts.every((k) => /^(nidx:v2|tidx:v1):\d+$|^idx:v1:state$/.test(k)) && new Set(kv.puts).size === kv.puts.length, T("merge: only index keys, each written once"));
+    const snap = (kv0) => JSON.stringify([...kv0.m.entries()].filter(([k]) => /^(nidx|tidx)/.test(k)).sort());
+    const before = snap(kv);
+    kv.m.set("idx:v1:state", JSON.stringify({ next: d1 }));
+    await TF.mergeDay(kv, d1);
+    ok(snap(kv) === before, T("merge: the same day twice leaves every shard byte-identical (idempotent)"));
+    const nShard = JSON.parse(kv.m.get("nidx:v2:" + TF.nameShardOf("n|gravy coin")));
+    ok(nShard.e["n|gravy coin"][0].length === 3, T("merge: distinct counting by address (2 Base + 1 Solana under one name, duplicate row ignored): " + JSON.stringify(nShard.e["n|gravy coin"][0])));
+    ok(nShard.e["n|gravy coin"][1].length === 3 && nShard.e["n|gravy coin"][1].every((s) => Array.isArray(s) && s.length === 4 && ["b", "s"].includes(s[0]) && /^0x|^S/.test(s[1]) && s[2] === 20260908 && typeof s[3] === "string"), T("merge: samples are compact [c,a,d,y] arrays with d = YYYYMMDD"));
+    ok(!JSON.stringify([...kv.m.entries()]).includes("bad"), T("merge: a row with an invalid address is skipped"));
+    const tShard = JSON.parse(kv.m.get("tidx:v1:" + TF.shardOf(TF.tokenKeyOf("base", bAddr(3)))));
+    ok(JSON.stringify(tShard.e["base:" + bAddr(3)]) === JSON.stringify([d1]), T("merge: a token with no name still enters the token index"));
+    // روزِ دوم: همان آدرس دوباره → شمارش ثابت، تاریخ‌ها صعودی
+    putDoc(kv, d2, [mkRow({ address: bAddr(1) })]);
+    const w0 = kv.puts.length;
+    const r2 = await TF.mergeDay(kv, d2);
+    const nShard2 = JSON.parse(kv.m.get("nidx:v2:" + TF.nameShardOf("n|gravy coin")));
+    ok(nShard2.e["n|gravy coin"][0].length === 3 && nShard2.e["n|gravy coin"][1][0][2] === 20260909, T("merge: the same address on another day keeps the count and refreshes the sample date"));
+    ok(r2.writes <= 4 && kv.puts.length - w0 === r2.writes, T("merge: only the touched shards are written (token shard, name shard, symbol shard, state): " + r2.writes));
+    const tShard2 = JSON.parse(kv.m.get("tidx:v1:" + TF.shardOf(TF.tokenKeyOf("base", bAddr(1)))));
+    ok(JSON.stringify(tShard2.e["base:" + bAddr(1)]) === JSON.stringify([d1, d2]), T("merge: token dates ascending and deduped"));
+    // روزِ بدونِ سند: رد می‌شود، فقط state نوشته می‌شود
+    const w1 = kv.puts.length;
+    const r3 = await TF.mergeDay(kv, "2026-09-10");
+    ok(r3.writes === 1 && kv.puts.length - w1 === 1 && JSON.parse(kv.m.get("idx:v1:state")).next === "2026-09-11", T("merge: a missing doc is skipped, only the state advances"));
+    // نمونه‌ها سقفِ ۶ و تاریخ‌های توکن سقفِ ۵ (اولین تاریخ می‌ماند)
+    const kv2 = new FakeKv();
+    for (let i = 0; i < 8; i++) putDoc(kv2, TF.addDays("2026-09-08", i), [mkRow({ address: bAddr(100 + i), symbol: "S" + i, name: "Same Name" }), mkRow({ address: bAddr(7), symbol: "SEVEN", name: "Seven" })]);
+    for (let i = 0; i < 8; i++) await TF.mergeDay(kv2, TF.addDays("2026-09-08", i));
+    const ns = JSON.parse(kv2.m.get("nidx:v2:" + TF.nameShardOf("n|same name"))).e["n|same name"];
+    ok(ns[0].length === 8 && ns[1].length === 5 && ns[1][0][2] === 20260915 && ns[1][4][2] === 20260911, T("merge: count 8, samples capped at 5 newest-first"));
+    const td = JSON.parse(kv2.m.get("tidx:v1:" + TF.shardOf(TF.tokenKeyOf("base", bAddr(7))))).e["base:" + bAddr(7)];
+    ok(td.length === 5 && td[0] === "2026-09-08" && td[4] === "2026-09-15" && td.every((x, i) => i === 0 || td[i - 1] < x), T("token index: <=5 ascending dates, the first date is kept: " + td));
+    // گاردِ عمومی پیش از هر فیلد: ردیفِ ساختگی با chain غیرِ base/solana و v4 بی‌علت فقط خوانده می‌شود، فیلدِ جعلی استفاده نمی‌شود
+    const g = TF.guardedRowOf(mkRow({ v: "nosell", dex: "uniswap-v3-base" }));
+    ok(g && g.v === null && g.why === "cause:unproven" && !("cause" in g), T("merge guard: a cause-less Base nosell row is the public 'unproven' row"));
+    const gs = TF.guardedRowOf(mkRow({ chain: "solana", address: sMint("S"), v: "nosell", cause: "empty-pool" }));
+    ok(gs && gs.v === null && gs.why === "sol:unconfirmed", T("merge guard: a Solana nosell row is unconfirmed"));
+  }
+
+  // قلاب گذر: ساعتِ زوج/فرد، قاعده‌ی «دیروز»، بودجه، خطا
+  {
+    const kv = new FakeKv();
+    const NOW_ODD = Date.UTC(2026, 10, 26, 14, 17), NOW_EVEN = Date.UTC(2026, 10, 26, 18, 17); // ۱۴ مضربِ ۶ نیست، ۱۸ هست
+    kv.m.set("idx:v1:state", JSON.stringify({ next: "2026-11-20" }));
+    putDoc(kv, "2026-11-20", [mkRow()]);
+    let r = await TF.idxPassStep(kv, NOW_ODD, () => true);
+    ok(r.ran === false && kv.puts.length === 0, T("hook: UTC hour % 6 != 0 and next != yesterday -> nothing merged"));
+    r = await TF.idxPassStep(kv, NOW_EVEN, () => false);
+    ok(r.ran === false && kv.puts.length === 0, T("hook: no budget room -> nothing merged"));
+    r = await TF.idxPassStep(kv, NOW_EVEN, () => true);
+    ok(r.ran === true && JSON.parse(kv.m.get("idx:v1:state")).next === "2026-11-21", T("hook: UTC hour % 6 === 0 merges exactly one day"));
+    kv.m.set("idx:v1:state", JSON.stringify({ next: "2026-11-25" })); putDoc(kv, "2026-11-25", [mkRow()]);
+    r = await TF.idxPassStep(kv, NOW_ODD, () => true);
+    ok(r.ran === true && JSON.parse(kv.m.get("idx:v1:state")).next === "2026-11-26", T("hook: next === yesterday merges at any hour"));
+    r = await TF.idxPassStep(kv, NOW_EVEN, () => true);
+    ok(r.ran === false && JSON.parse(kv.m.get("idx:v1:state")).next === "2026-11-26", T("hook: caught up (next === today) -> nothing"));
+    const bad = new FakeKv(); bad.m.set("idx:v1:state", JSON.stringify({ next: "2026-11-20" })); putDoc(bad, "2026-11-20", [mkRow()]);
+    bad.put = async () => { throw new Error("quota"); };
+    let threw = false;
+    try { r = await TF.idxPassStep(bad, NOW_EVEN, () => true); } catch (e) { threw = true; }
+    ok(!threw && r.ran === false && JSON.parse(bad.m.get("idx:v1:state")).next === "2026-11-20", T("hook: a KV error stops quietly and leaves the state unchanged"));
+    // سیم‌کشیِ واقعیِ scheduled(): فقط کرونِ ۱۷ و فقط با idxMerge
+    const savedNow = Date.now, savedF = globalThis.fetch;
+    const store = new FakeKv(); store.m.set("idx:v1:state", JSON.stringify({ next: "2026-11-20" })); putDoc(store, "2026-11-20", [mkRow()]);
+    globalThis.fetch = async (url) => (String(url).includes("/new_pools") ? json({ data: [] }) : new Response("{}", { status: 200 }));
+    try {
+      Date.now = () => NOW_EVEN;
+      await worker.scheduled({ cron: "47 * * * *" }, { ZX_KV: store }, { waitUntil() {} });
+      ok(!store.puts.some((k) => /^(nidx|tidx|idx):/.test(k)), T("cron 47 never touches the index"));
+      await scheduledReportPass({ ZX_KV: store }, {});
+      ok(!store.puts.some((k) => /^(nidx|tidx|idx):/.test(k)), T("a pass without idxMerge (/report/run) never touches the index"));
+      await worker.scheduled({ cron: "17 * * * *" }, { ZX_KV: store }, { waitUntil() {} });
+      ok(JSON.parse(store.m.get("idx:v1:state")).next === "2026-11-21", T("cron 17 at an hour % 6 === 0 merges one day at the end of the pass"));
+      Date.now = () => NOW_ODD;
+      await worker.scheduled({ cron: "17 * * * *" }, { ZX_KV: store }, { waitUntil() {} });
+      ok(JSON.parse(store.m.get("idx:v1:state")).next === "2026-11-21", T("cron 17 at an hour % 6 !== 0 does not merge (backfill)"));
+    } finally { Date.now = savedNow; globalThis.fetch = savedF; }
+  }
+
+  // tokFacts: ساختِ جهانِ نمونه با ادغامِ واقعی
+  const kv = new FakeKv();
+  const A = bAddr(0xa1), B = bAddr(0xb2), C = bAddr(0xc3), D = bAddr(0xd4);
+  const SOLM = sMint("G");
+  const env = { ZX_KV: kv };
+  const todayD = utcDateOf(Date.now());
+  const dayMinus = (n) => TF.addDays(todayD, -n);
+  const d1 = dayMinus(6), d2 = dayMinus(3), d3 = dayMinus(1);
+  putDoc(kv, d1, [mkRow({ address: A, symbol: "GRAVY", name: "Gravy Coin", reserveUsd: 8000, fdvUsd: 100000, vol24hUsd: 1200, checkedAt: d1 + "T09:17:00.000Z", poolCreatedAt: d1 + "T08:00:00Z", dex: "uniswap-v4-base", v: null, why: "v4:unproven" })]);
+  putDoc(kv, d2, [mkRow({ address: A, checkedAt: d2 + "T10:17:00.000Z", follow: "pool-there", followAt: d2 + "T11:20:00.000Z" }),
+    mkRow({ address: B, symbol: "GRAVY", name: "Gravy Coin" }), mkRow({ address: C, symbol: "GRVY", name: "Gravy Coin" })]);
+  putDoc(kv, d3, [mkRow({ address: D, symbol: "gravy", name: "GRAVY  COIN" }),
+    mkRow({ chain: "solana", address: SOLM, symbol: "GRAVY", name: "Other", checkKind: "roundtrip", v: "nosell", cause: "empty-pool" })]);
+  // ادغام از اولین روز تا دیروز (روزهای بدونِ سند رد می‌شوند)
+  for (let d = TF.IDX_FIRST_DATE; d <= d3; d = TF.addDays(d, 1)) await TF.mergeDay(kv, d);
+  ok(JSON.parse(kv.m.get("idx:v1:state")).next === todayD, T("backfill to yesterday: state === today"));
+  putDoc(kv, todayD, [mkRow({ address: A, checkedAt: todayD + "T04:17:00.000Z", v: null, why: "rpc:0", recheck: "nosell", recheckAt: todayD + "T05:30:00.000Z", recheckCause: "sell-reverts", dex: "uniswap-v3-base" })]);
+  const metaA = { name: "Gravy Coin", symbol: "GRAVY", liquidity: "$14.2K", liquidityUsd: 14200, fdvUsd: 300000, vol24: "$5.0K", decimals: 18, priceUsd: 0.001, imageUrl: null };
+  const dl = () => Date.now() + 2000;
+
+  kv.reset();
+  const tf = await TF.tokFacts(A, "base", env, dl(), Promise.resolve(metaA));
+  ok(tf && Array.isArray(tf.rows), T("tokFacts returns an object"));
+  ok(kv.gets.length <= 6, T("tokFacts: <=6 KV reads, got " + kv.gets.length + " " + JSON.stringify(kv.gets)));
+  // نام و نماد در دو شاردِ جدا → ۶ − ۲ − ۲ = ۲ سند: امروز (ادغام‌نشده) + اولین تاریخ (برای «first check»)
+  ok(tf.rows.map((x) => x.date).join() === [todayD, d1].join(), T("rows: newest first, today's unmerged doc included, the first date kept when the budget allows 2 docs: " + tf.rows.map((x) => x.date)));
+  ok(tf.rows[0].row.v === null && tf.rows[0].row.why === "rpc:0" && tf.rows[0].row.recheck === "nosell", T("rows go through the public guard (a proven recheck survives)"));
+  // نام و نمادی که در یک شارد می‌نشینند → ۳ سند
+  let one = null;
+  for (let i = 0; i < 400 && !one; i++) if (TF.nameShardOf("n|one" + i) === TF.nameShardOf("s|one" + i)) one = "one" + i;
+  kv.reset();
+  const tf3 = await TF.tokFacts(A, "base", env, Date.now() + 2000, Promise.resolve({ ...metaA, name: one, symbol: one }));
+  ok(tf3.rows.map((x) => x.date).join() === [todayD, d2, d1].join() && kv.gets.length === 6, T("one shard -> 3 docs, 6 reads: " + tf3.rows.map((x) => x.date) + " " + kv.gets.length));
+  ok(tf.firstDate === d1 && tf.dates.join() === [d1, d2, todayD].join(), T("first date and seen dates: " + tf.firstDate + " " + tf.dates));
+  ok(tf.range.from === TF.IDX_FIRST_DATE && tf.range.to === d3, T("range = first day .. last merged day: " + JSON.stringify(tf.range)));
+  ok(tf.same.name.count === 3 && tf.same.name.samples.length === 3 && tf.same.name.samples.every((s) => s.a !== A), T("same name: excludes this token, counts distinct addresses (B, C, D): " + JSON.stringify(tf.same.name)));
+  ok(tf.same.symbol.count === 3 && tf.same.symbol.samples.some((s) => s.c === "solana") && tf.same.symbol.samples.every((s) => s.a !== A), T("same symbol: B, D and the Solana mint, not A: " + tf.same.symbol.count));
+  ok(tf.same.name.norm === "gravy coin" && tf.same.symbol.norm === "gravy", T("norm carried"));
+  // بدترین حالتِ KV: نام و نماد در دو شاردِ جدا → باز هم <=۶
+  let worstReads = 0;
+  for (let i = 1; i <= 40; i++) {
+    const m = { ...metaA, name: "Name" + i, symbol: "SYM" + i };
+    kv.reset();
+    const r = await TF.tokFacts(A, "base", env, dl(), Promise.resolve(m));
+    ok(r !== null, T("worst-case reads: a result for " + i));
+    worstReads = Math.max(worstReads, kv.gets.length);
+  }
+  ok(worstReads <= 6, T("KV reads <= 6 in every shard layout, max " + worstReads));
+  // meta غایب: نام/نماد از تازه‌ترین ردیف
+  kv.reset();
+  const tfNoMeta = await TF.tokFacts(A, "base", env, dl(), Promise.resolve(null));
+  ok(tfNoMeta && tfNoMeta.same.name && tfNoMeta.same.name.count === 3 && kv.gets.length <= 6, T("no meta: names from the newest row, <=6 reads (" + kv.gets.length + ")"));
+  // Solana: همین توکن با mint، سقفِ شمارش و خودِ آن حذف
+  kv.reset();
+  const tfSol = await TF.tokFacts(SOLM, "solana", env, dl(), Promise.resolve({ name: "Other", symbol: "GRAVY" }));
+  ok(tfSol && tfSol.rows.length === 1 && tfSol.rows[0].row.v === null && tfSol.same.symbol.count === 3 && tfSol.same.symbol.samples.every((s) => s.a !== SOLM), T("Solana token: guarded row (nosell hidden), same-symbol excludes itself"));
+  // هیچ چیزِ ادغام‌شده‌ای نیست → same = null
+  const kvEmpty = new FakeKv(); putDoc(kvEmpty, todayD, [mkRow({ address: A })]);
+  const tfE = await TF.tokFacts(A, "base", { ZX_KV: kvEmpty }, dl(), Promise.resolve(metaA));
+  ok(tfE && tfE.same === null && tfE.range === null && tfE.rows.length === 1, T("nothing merged yet -> same is null, range null, today's row still shown"));
+  // مهلت و خطا
+  const kvHang = new FakeKv(); kvHang.hang = true;
+  let t0 = Date.now();
+  const tfH = await TF.tokFacts(A, "base", { ZX_KV: kvHang }, Date.now() + 60, Promise.resolve(metaA));
+  ok(tfH === null && Date.now() - t0 < 400, T("a KV that never answers: null at the deadline (" + (Date.now() - t0) + "ms)"));
+  const kvBoom = new FakeKv(); kvBoom.boom = true;
+  ok((await TF.tokFacts(A, "base", { ZX_KV: kvBoom }, dl(), Promise.resolve(metaA))) === null, T("a KV error: null"));
+  ok((await TF.tokFacts(A, "base", {}, dl(), null)) === null, T("no KV binding: null"));
+  // تایم‌اوت متا: همان مهلت
+  t0 = Date.now();
+  ok((await TF.tokFacts(A, "base", env, Date.now() + 60, new Promise(() => {}))) === null && Date.now() - t0 < 400, T("a meta promise that never settles still ends at the deadline"));
+
+  // رندر (طراحیِ دوباره ۲۶ نوامبر: کاشی‌ها، خطِ استخر، خطِ زمانی، پیل‌ها، پنلِ هم‌نام)
+  const VD = { v: "sell" };
+  const seoA = SEO.tokenSeo(metaA, VD, "Base", A, tf);
+  const box = seoA.facts.slice(seoA.facts.indexOf('<section class="tkFactsBox"'));
+  const text = (h) => h.replace(/<[^>]*>/g, " ").replace(/&#39;/g, "'").replace(/&quot;/g, '"').replace(/&amp;/g, "&").replace(/\s+/g, " ");
+  ok(box.startsWith('<section class="tkFactsBox" aria-labelledby="tk-facts-h"><h2 id="tk-facts-h" class="tkfH">Token facts</h2>') && box.endsWith("</section>"), T("box structure"));
+  ok(seoA.facts.indexOf('<div class="tkChips">') === 0 && seoA.facts.indexOf('<p class="tkAbout">') < seoA.facts.indexOf("tkFactsBox"), T("the box comes after the chips and p.tkAbout"));
+  ok(!/<dt>|<dl>|basescan|Contract|>Name<|>Symbol<|>Chain</.test(box), T("no rows that duplicate the header card (name, symbol, chain, contract)"));
+  ok(text(box).includes("Uniswap V3 pool · created 10 Nov 2026, 08:00 UTC") && !/Uniswap V4/.test(text(box)) && /<p class="tkfPool">/.test(box), T("pool line: newest row's DEX label and created time: " + text(box).slice(0, 300)));
+  ok(box.includes('<div class="tkfTile"><div class="k">Liquidity</div><div class="v">$14.2K</div><div class="s">First check $8.0K · 20 Nov</div></div>'), T("liquidity tile: Now bold, first check under it: " + box.slice(box.indexOf("tkfTiles"), box.indexOf("tkfTiles") + 400)));
+  ok(box.includes('<div class="k">FDV</div><div class="v">$300.0K</div><div class="s">First check $100.0K · 20 Nov</div>') && box.includes('<div class="k">Volume 24h</div><div class="v">$5.0K</div><div class="s">First check $1.2K · 20 Nov</div>'), T("FDV and volume tiles"));
+  ok(!/[Tt]raders/.test(box), T("traders are not shown"));
+  ok(box.includes('<li class="g"><i></i><span>Sell route quoted</span><time>Live, this page</time></li>') && text(box).indexOf("Live, this page") < text(box).indexOf(" UTC", text(box).indexOf("Exit checks")), T("exit checks: live item first, green dot, no clock time"));
+  const box3 = SEO.tokenSeo({ ...metaA, name: one, symbol: one }, VD, "Base", A, tf3).facts;
+  ok(/<li class="n"><i><\/i><span>Not confirmed<\/span><time>\d+ \w{3} 04:17 UTC<\/time>/.test(box3) && /<li class="g"><i><\/i><span>Pool still there an hour later<\/span><time>\d+ \w{3} 11:20 UTC<\/time>/.test(box3) && /<li class="g"><i><\/i><span>Sell route quoted<\/span><time>\d+ \w{3} 10:17 UTC<\/time>/.test(box3) && !/20 Nov 09:17 UTC/.test(box3), T("exit checks: per-row items with dots and times, the 5-item cap drops the oldest"));
+  ok(/<li class="r"><i><\/i><span>Rechecked: No sell route quoted · the sell reverts<\/span><time>\d+ \w{3} 05:30 UTC/.test(box3), T("exit checks: a proven recheck is a red item with the cause word"));
+  ok((box3.match(/<li class="[gnr]">/g) || []).length === 5 && box3.indexOf("Live, this page") < box3.indexOf("05:30 UTC") && box3.indexOf("05:30 UTC") < box3.indexOf("04:17 UTC"), T("exit checks: <=5 items, live first, then newest first"));
+  ok(/<a class="fbChip" href="\/report\/[^"]+">Exit Report · \d+ \w{3}<\/a>/.test(box) && (box.match(/href="\/report\//g) || []).length === 3 && box.includes('href="/report/' + d1 + '"') && box.includes('href="/report/' + todayD + '"'), T("In Exit Report pills for each date"));
+  const pn = box.slice(box.indexOf('<div class="tkfPanel">'));
+  ok(/<b>3 other tokens used the name “Gravy Coin”<\/b><div class="s">In Zaexa&#39;s daily reports, 8 Sep – \d+ \w{3}<\/div>/.test(pn), T("same-name panel: bold first line, muted range line: " + text(pn).slice(0, 200)));
+  ok(box.includes('<a class="fbChip" href="/t/' + B + '">GRAVY · 0x0000…') && (pn.match(/<a class="fbChip" href="\/t\//g) || []).length >= 3, T("sample tokens as pills /t/<addr> with symbol, short address, muted date"));
+  ok(!box.includes('href="/t/' + A + '"'), T("the token itself is never listed as 'other'"));
+  ok(!/\$0\b|undefined|NaN|null|<div class="s"><\/div>|<div class="v"><\/div>/.test(box), T("no placeholder values in the box: " + box.match(/\$0\b|undefined|NaN|null/)));
+  // اگر نماد چیزِ تازه‌ای اضافه نکند، در همان پنل ادغام می‌شود؛ وگرنه پنلِ دوم
+  const mk = (n, sy) => ({ count: n.length, norm: "x", set: n.join(","), samples: n.map((h, i) => ["b", bAddr(500 + i), 20261101, "S"]) });
+  const merged = SEO.tokenFactsBox(metaA, VD, "Base", A, { rows: [], dates: [], firstDate: null, range: { from: "2026-09-08", to: "2026-11-25" }, same: { name: mk(["b1", "b2", "b3"]), symbol: mk(["b1", "b2"]) } });
+  ok((merged.match(/class="tkfPanel"/g) || []).length === 1 && merged.includes("(2 of them also use the symbol GRAVY)"), T("symbol adds nothing new -> one panel with the merged phrase: " + text(merged).slice(-250)));
+  const two = SEO.tokenFactsBox(metaA, VD, "Base", A, { rows: [], dates: [], firstDate: null, range: { from: "2026-09-08", to: "2026-11-25" }, same: { name: mk(["b1", "b2"]), symbol: mk(["b1", "b9"]) } });
+  ok((two.match(/class="tkfPanel"/g) || []).length === 2 && two.includes("1 other token used the symbol “GRAVY”") === false && /2 other tokens used the symbol “GRAVY”/.test(two), T("symbol adds a token -> second panel: " + text(two).slice(-300)));
+  const symOnly = SEO.tokenFactsBox(metaA, VD, "Base", A, { rows: [], dates: [], firstDate: null, range: { from: "2026-09-08", to: "2026-11-25" }, same: { name: null, symbol: mk(["b1"]) } });
+  ok((symOnly.match(/class="tkfPanel"/g) || []).length === 1 && symOnly.includes("1 other token used the symbol “GRAVY”"), T("symbol only -> one panel, singular"));
+  // واژه‌های ممنوع (بیرون از عبارتِ دقیقِ «the sell reverts»)
+  const scrub = (h) => text(h).replace(/the sell reverts/g, "");
+  ok(!/round trip|simulat|safe|verified|honeypot|\btax|blacklist|revert|scam|fake|impostor|copycat|clone|risk/i.test(scrub(box + box3)), T("banned words: " + (scrub(box + box3).match(/round trip|simulat|safe|verified|honeypot|\btax|blacklist|revert|scam|fake|impostor|copycat|clone|risk/i) || [""])[0]));
+  ok(box.length < 4200, T("the box stays compact: " + box.length + " bytes"));
+
+  // حذفِ بخشِ بی‌داده — همه‌ی دادهٔ گزارش و مبلغ غایب
+  const tfBare = { rows: [], same: null, range: null, dates: [], firstDate: null };
+  const bare = SEO.tokenSeo({ name: "Bare", symbol: "BARE", liquidity: null, liquidityUsd: null, vol24: null, fdvUsd: null }, null, "Base", A, tfBare).facts;
+  const bareBox = bare.slice(bare.indexOf("<section"));
+  ok(/Exit checks/.test(bareBox) && /<span>Not confirmed<\/span><time>Live, this page<\/time>/.test(bareBox), T("a token with no report row: the live exit item only"));
+  ok(!/tkfTiles|tkfPool|In Exit Report|tkfPanel|First check|at first check|\$0|NaN|undefined/.test(bareBox), T("a token with no report row: no tiles/pool/report/panel, no placeholders: " + bareBox));
+  // مبلغِ ناموجود هرگز «$0» نمی‌شود، حتی با عددِ صفرِ ذخیره‌شده
+  const zero = SEO.tokenSeo({ ...metaA, liquidity: null, fdvUsd: null, vol24: null }, VD, "Base", A,
+    { ...tf, rows: [{ date: d1, row: mkRow({ address: A, reserveUsd: 0, fdvUsd: null, vol24hUsd: 0, dex: null, poolCreatedAt: null }) }], firstDate: d1, same: null }).facts;
+  ok(!/\$0|Liquidity|FDV|Volume 24h|tkfTiles|tkfPool/.test(zero.slice(zero.indexOf("<section"))), T("zero/missing money tiles are omitted, never $0"));
+  // فقط مقدارِ اولین چک: همان مقدار می‌شود با «at first check»
+  const onlyFirst = SEO.tokenSeo({ ...metaA, liquidity: null, fdvUsd: null, vol24: null }, VD, "Base", A, { ...tf, same: null }).facts;
+  ok(onlyFirst.includes('<div class="k">Liquidity</div><div class="v">$8.0K</div><div class="s">at first check, 20 Nov</div>') && !/Now/.test(onlyFirst), T("a tile with only a first-check value shows it with 'at first check'"));
+  // سولانا: nosell هرگز
+  const seoS = SEO.tokenSeo({ name: "Other", symbol: "GRAVY", liquidity: "$9.0K", liquidityUsd: 9000, vol24: null }, { v: "nosell", cause: "empty-pool" }, "Solana", SOLM, tfSol);
+  const sb = seoS.facts.slice(seoS.facts.indexOf("<section"));
+  ok(!/No sell route|pool is empty|sell reverts/.test(sb) && /<li class="n"><i><\/i><span>Not confirmed<\/span><time>Live, this page/.test(sb), T("Solana: a nosell is never shown"));
+  const unguarded = { rows: [{ date: d1, row: { chain: "solana", address: SOLM, v: "nosell", cause: "empty-pool", checkedAt: d1 + "T01:00:00Z" } },
+    { date: d2, row: { chain: "base", address: A, v: "nosell", checkedAt: d2 + "T01:00:00Z" } }], same: null, range: null, dates: [d1], firstDate: d1 };
+  ok(!/No sell route/.test(SEO.tokenSeo(metaA, null, "Solana", SOLM, unguarded).facts) && /Not confirmed/.test(SEO.tokenSeo(metaA, null, "Solana", SOLM, unguarded).facts), T("render: a Solana nosell row reads Not confirmed even if it slipped past the read guard"));
+  const nc = SEO.tokenSeo(metaA, null, "Base", A, { ...unguarded, rows: [unguarded.rows[1]] }).facts;
+  ok(/<li class="n"><i><\/i><span>Not confirmed<\/span><time>\d+ \w{3} 01:00 UTC/.test(nc) && !/No sell route/.test(nc), T("render: a cause-less Base nosell row is a grey Not confirmed"));
+  const provenRow = SEO.tokenSeo(metaA, null, "Base", A, { ...unguarded, rows: [{ date: d2, row: { chain: "base", address: A, v: "nosell", cause: "empty-pool", checkedAt: d2 + "T01:00:00Z" } }] }).facts;
+  ok(/<li class="r"><i><\/i><span>No sell route quoted · pool is empty<\/span><time>\d+ \w{3} 01:00 UTC/.test(provenRow), T("render: a proven cause is a red item with the exact vocabulary"));
+  const epLive = SEO.tokenSeo(metaA, { v: "nosell", cause: "empty-pool" }, "Base", A, tf).facts;
+  ok(!/\$14\.2K<\/div><div class="s">/.test(epLive.slice(epLive.indexOf("<section"))) && /at first check/.test(epLive), T("empty-pool hides every Now figure (first-check values remain)"));
+  // سرِ کارت: #tk-addr سمتِ سرور (قالبِ کلاینت)
+  ok(/\.on\("#tk-addr"/.test(fs.readFileSync(new URL("./index.js", import.meta.url), "utf8")), T("injectOg fills #tk-addr"));
+  // گریز و bidi
+  const EV = "<script>alert(1)</script>\u202e\"'&";
+  const tfEv = { ...tf, same: { name: { count: 1, norm: "x", set: "a", samples: [{ c: "base", a: B, d: d2, y: EV }] }, symbol: null } };
+  const ev = SEO.tokenSeo({ ...metaA, name: EV, symbol: EV }, VD, "Base", A, { ...tfEv, rows: [{ date: d2, row: mkRow({ address: A, name: EV, symbol: EV, dex: "<img src=x onerror=1>" }) }] }).facts;
+  ok(!/<script|<img/i.test(ev) && ev.includes("&lt;script&gt;") && ev.includes("&lt;img src=x"), T("escaping: hostile name/symbol/dex id/sample symbol stay inert"));
+  // عنوان و توضیح
+  const mS = { name: "Gravy", symbol: "GRAVY", liquidity: "$9.0K", liquidityUsd: 9000 };
+  ok(SEO.tokenTitle(mS, { v: "sell" }, "Solana") === "GRAVY (Solana) \u2014 sell route quoted \u00b7 Zaexa", T("title: " + SEO.tokenTitle(mS, { v: "sell" }, "Solana")));
+  ok(SEO.tokenTitle(mS, null, "Base") === "GRAVY (Base) \u2014 not confirmed \u00b7 Zaexa" && SEO.tokenTitle(mS, { v: "nosell", cause: "sell-reverts" }, "Base") === "GRAVY (Base) \u2014 no sell route quoted \u00b7 Zaexa", T("title words"));
+  ok(SEO.tokenTitle(mS, { v: "nosell", cause: "empty-pool" }, "Solana") === "GRAVY (Solana) \u2014 not confirmed \u00b7 Zaexa" && SEO.tokenTitle(mS, { v: "nosell" }, "Base").includes("not confirmed"), T("title: Solana nosell and cause-less nosell are 'not confirmed'"));
+  ok(SEO.tokenTitle({ name: "Only Name", symbol: null }, null, "Base") === "Only Name (Base) \u2014 not confirmed \u00b7 Zaexa" && SEO.tokenTitle({ name: null, symbol: null }, null, "Base") === null && SEO.tokenTitle(null, null, "Base") === null, T("title: name without symbol; none -> generic (null)"));
+  const dsc = SEO.tokenDescription(mS, { v: "sell" }, "Solana", SOLM, tf);
+  ok(dsc.startsWith("GRAVY on Solana, contract " + SOLM.slice(0, 6) + "\u2026" + SOLM.slice(-4) + ". Zaexa's last exit check: sell route quoted. Liquidity now $9.0K. First seen in the Exit Report on ") && dsc.length <= 200, T("description: " + dsc));
+  ok(SEO.tokenDescription(mS, null, "Base", A, null) === "GRAVY on Base, contract " + A.slice(0, 6) + "\u2026" + A.slice(-4) + ". Zaexa's last exit check: not confirmed. Liquidity now $9.0K.", T("description without tf: no first-seen part"));
+  ok(!/Liquidity now/.test(SEO.tokenDescription({ ...mS, liquidity: null }, null, "Base", A, null)) && !/Liquidity now/.test(SEO.tokenDescription(mS, { v: "nosell", cause: "empty-pool" }, "Base", A, null)), T("description: liquidity omitted when missing or when the pool is empty"));
+  ok(SEO.tokenDescription({ name: "N".repeat(48), symbol: "S".repeat(16), liquidity: "$9.0K" }, null, "Solana", SOLM, tf).length <= 200, T("description <= 200"));
+  // noindex و گاردها: tf هیچ‌چیز را عوض نمی‌کند
+  for (const [m, v, c] of [[mS, { v: "nosell", cause: "empty-pool" }, "Base"], [{ ...mS, liquidityUsd: 100 }, null, "Base"], [mS, { v: "sell" }, "Solana"], [mS, null, "Base"]]) {
+    ok(SEO.tokenSeo(m, v, c, A).noindex === SEO.tokenSeo(m, v, c, A, tf).noindex && SEO.tokenSeo(m, v, c, A).noindex === SEO.tokenNoindex(m, v, c), T("noindex rule identical with and without tf"));
+  }
+  ok(SEO.tokenSeo(mS, { v: "sell" }, "Base", A).facts === SEO.tokenSeo(mS, { v: "sell" }, "Base", A, null).facts && !SEO.tokenSeo(mS, { v: "sell" }, "Base", A).facts.includes("tkFactsBox"), T("without tf the facts are exactly the old chips + paragraph"));
+  // ogTags: عنوان و توضیحِ تازه فقط وقتی داده شوند
+  const { ogTags, ogTitle: ogT } = await import("./og.js");
+  ok(ogTags(mS, A, ORIGIN, null, "Base", undefined, undefined) === ogTags(mS, A, ORIGIN, null, "Base") && ogTags(mS, A, ORIGIN, null, "Base", undefined, {}) === ogTags(mS, A, ORIGIN, null, "Base") && ogTags(mS, A, ORIGIN, null, "Base", undefined, { title: null, desc: null }) === ogTags(mS, A, ORIGIN, null, "Base"), T("ogTags without an override is byte-identical"));
+  const withOv = ogTags(mS, A, ORIGIN, null, "Base", undefined, { title: "T1", desc: "D1" });
+  ok(withOv.includes('property="og:title" content="T1"') && withOv.includes('name="twitter:title" content="T1"') && withOv.includes('name="description" content="D1"') && withOv.includes('property="og:description" content="D1"'), T("ogTags override: og:title, twitter:title, description, og:description"));
+  // pickTokenMeta.fdvUsd
+  const pm = (fdv) => pickTokenMeta({ data: { attributes: { name: "N", symbol: "S", fdv_usd: fdv } } }).fdvUsd;
+  ok(pm("1234.5") === 1234.5 && pm(null) === null && pm("") === null && pm("0") === null && pm("-3") === null && pm("abc") === null && pm(undefined) === null && pm("Infinity") === null, T("pickTokenMeta.fdvUsd: numeric, null when missing/non-finite/<=0"));
+  // چیپِ سولانا در HTMLِ اولیه: همان SVGی که کلاینت می‌نشاند
+  {
+    const src = fs.readFileSync(new URL("../web/index.html", import.meta.url), "utf8");
+    const opt = src.slice(src.indexOf('id="srcOptSolana"'));
+    let svg = opt.slice(opt.indexOf("<svg"), opt.indexOf("</svg>") + 6);
+    svg = svg.replaceAll("paint0_linear_174_4403", "paint0_linear_174_4403Report");
+    const squash = (x) => x.replace(/>\s+</g, "><").replace(/\s+/g, " ").trim();
+    ok(squash(svg) === squash(TF.SOL_CHIP_SVG), T("Solana chip SVG is the client's own markup (copy of #srcOptSolana with the Report id suffix)"));
+    ok(/\.on\("#tk-chip"/.test(fs.readFileSync(new URL("./index.js", import.meta.url), "utf8")) && TF.SOL_CHIP_INNER.endsWith("<span>Solana</span>"), T("injectOg rewrites #tk-chip"));
+  }
+  console.log("[token facts] norm/shards, idempotent day merge (<=33 writes, only touched shards, state last), hook odd/even/yesterday/budget/error + cron wiring, tokFacts (<=6 KV reads, deadline, guards, self-exclusion, range), box rendering (omissions, escaping, vocabulary, banned words, Solana), title/description formats, noindex unchanged, Solana chip");
+}
+
 // ۲۴ نوامبر — نشان‌های Portfolio (worker/badges.js)
 await runBadgesCases(ok, worker);
 

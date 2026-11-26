@@ -23975,7 +23975,9 @@ async def check_token_page_seo(p, errors):
     def git(*a):
         return subprocess.run(["git", "-C", root] + list(a), capture_output=True, text=True)
     old_src = None
-    for cand in ("HEAD", "HEAD~1", "HEAD~2", "HEAD~3", "HEAD~4"):
+    # ۲۶ نوامبر: پنجره‌ی «HEAD..HEAD~4» دیگر به کامیتِ پیش از tk-facts (e1c5af2) نمی‌رسید؛ فقط کامیت‌هایی که
+    # خودِ web/index.html را عوض کرده‌اند (تا ۴۰۰تا) از تازه به قدیم دیده می‌شوند.
+    for cand in ["HEAD"] + git("rev-list", "-n", "400", "HEAD", "--", "web/index.html").stdout.split():
         o_ = git("show", cand + ":web/index.html")
         if o_.returncode == 0 and 'id="tk-facts"' not in o_.stdout:
             old_src = o_.stdout
@@ -23992,7 +23994,20 @@ async def check_token_page_seo(p, errors):
     FACTS = ('<div class="tkChips"><span class="fbChip n">Exit check: No sell route quoted \u00b7 the sell reverts</span>'
              '<span class="fbChip">Pool $22.5K</span><span class="fbChip">Vol 24h $3.1K</span></div>'
              '<p class="tkAbout">Alpha Coin (AAA) is a token on Base. Zaexa&#39;s last exit check found no sell route: the sell reverts. '
-             'Its pools held about $22.5K with $3.1K traded in the last 24 hours.</p>')
+             'Its pools held about $22.5K with $3.1K traded in the last 24 hours.</p>'
+             # ۲۶ نوامبر: جعبه‌ی Token facts (طراحیِ دوباره؛ همان ساختارِ worker/tokseo.js tokenFactsBox)
+             '<section class="tkFactsBox" aria-labelledby="tk-facts-h"><h2 id="tk-facts-h" class="tkfH">Token facts</h2>'
+             '<div class="tkfTiles"><div class="tkfTile"><div class="k">Liquidity</div><div class="v">$14.2K</div><div class="s">First check $8.0K \u00b7 20 Nov</div></div>'
+             '<div class="tkfTile"><div class="k">FDV</div><div class="v">$300.0K</div><div class="s">First check $100.0K \u00b7 20 Nov</div></div>'
+             '<div class="tkfTile"><div class="k">Volume 24h</div><div class="v">$5.0K</div><div class="s">First check $1.2K \u00b7 20 Nov</div></div></div>'
+             '<p class="tkfPool">Uniswap V3 pool \u00b7 created 20 Nov 2026, 08:41 UTC</p>'
+             '<div class="tkfGroup"><h3 class="tkfH">Exit checks</h3><ol class="tkfTl">'
+             '<li class="g"><i></i><span>Sell route quoted</span><time>Live, this page</time></li>'
+             '<li class="r"><i></i><span>Rechecked: No sell route quoted \u00b7 the sell reverts</span><time>26 Nov 05:30 UTC</time></li>'
+             '<li class="n"><i></i><span>Not confirmed</span><time>24 Nov 14:17 UTC</time></li></ol></div>'
+             '<div class="tkfGroup"><h3 class="tkfH">In Exit Report</h3><div class="tkfPills"><a class="fbChip" href="/report/2026-11-20">Exit Report \u00b7 20 Nov</a><a class="fbChip" href="/report/2026-11-23">Exit Report \u00b7 23 Nov</a></div></div>'
+             '<div class="tkfPanel"><b>3 other tokens used the name \u201cAlpha Coin\u201d (2 of them also use the symbol AAA)</b><div class="s">In Zaexa&#39;s daily reports, 8 Sep \u2013 25 Nov</div>'
+             '<div class="tkfPills"><a class="fbChip" href="/t/%s">AAA \u00b7 0xbbbb\u2026bbbb <span class="d">22 Nov</span></a></div></div></section>') % OTHER
     tag_h = '<div class="tkFacts" id="tk-facts" hidden></div>'
     assert tag_h in new_src, "[token seo] the empty #tk-facts placeholder is gone from web/index.html"
 
@@ -24085,13 +24100,26 @@ async def check_token_page_seo(p, errors):
                   chipsInside: chips.every(r => r.right <= br.right + 0.5 && r.left >= br.left - 0.5),
                   oneLine: chips.every(r => r.height <= 28),
                   docW: document.documentElement.scrollWidth, vw: innerWidth, about: f.querySelector('.tkAbout') ? getComputedStyle(f.querySelector('.tkAbout')).fontSize : null,
-                  below: fr.top >= document.querySelector('.tkId').getBoundingClientRect().bottom - 0.5, h1s: document.querySelectorAll('h1').length}; }""", FACTS)
+                  below: fr.top >= document.querySelector('.tkId').getBoundingClientRect().bottom - 0.5, h1s: document.querySelectorAll('h1').length,
+                  box: (() => { const b = f.querySelector('.tkFactsBox'); if (!b) return null; const cs = getComputedStyle(b), h2 = getComputedStyle(b.querySelector('h2'));
+                    const over = [...b.querySelectorAll('*')].some(e => { const r = e.getBoundingClientRect(); return r.width > 0 && r.right > br.right + 0.5; });
+                    const tiles = [...b.querySelectorAll('.tkfTile')].map(t => Math.round(t.getBoundingClientRect().top));
+                    const dots = [...b.querySelectorAll('.tkfTl i')].map(i => { const r = i.getBoundingClientRect(); return [Math.round(r.width), Math.round(r.height), getComputedStyle(i).backgroundColor]; });
+                    const pan = getComputedStyle(b.querySelector('.tkfPanel'));
+                    return {rows: new Set(tiles).size, h2: h2.fontSize + '|' + h2.fontWeight + '|' + h2.textTransform, fs: cs.fontSize, shadow: [cs, pan, getComputedStyle(b.querySelector('.tkfTile'))].map(c => c.boxShadow).join(','),
+                            over: over, dots: dots, panelRadius: pan.borderRadius, panelBg: pan.backgroundColor, card2: getComputedStyle(document.documentElement).getPropertyValue('--card2').trim(), h: Math.round(b.getBoundingClientRect().height)}; })()}; }""", FACTS)
             await pf.close()
             assert not st["hidden"] and st["html"] == "same", "[token seo] %dpx: the client wiped or changed the server-filled facts: %r" % (vw, st["html"][:80])
             assert st["oneLine"], "[token seo] %dpx: a chip was squeezed onto two lines instead of wrapping to the next row: %s" % (vw, st)
             assert st["inside"] and st["chipsInside"], "[token seo] %dpx: facts overflow the tkBar card: %s" % (vw, st)
             assert st["docW"] <= st["vw"], "[token seo] %dpx: horizontal overflow %d > %d with facts filled" % (vw, st["docW"], st["vw"])
             assert st["about"] == "13px" and st["below"] and st["h1s"] == 1, "[token seo] %dpx: facts style/position: %s" % (vw, st)
+            bx = st["box"]
+            assert bx and bx["rows"] == (1 if vw >= 721 else 2), "[token seo] %dpx: the stat tiles sit in one row from 721px and wrap 2 per row below: %s" % (vw, bx)
+            assert bx["h2"] == "11px|640|uppercase" and bx["fs"] == "13px" and set(bx["shadow"].split(",")) == {"none"}, "[token seo] %dpx: Token facts heading is a small uppercase label, no shadows: %s" % (vw, bx)
+            assert all(d[0] == 8 and d[1] == 8 for d in bx["dots"]) and len(bx["dots"]) == 3 and len({d[2] for d in bx["dots"]}) == 3, "[token seo] %dpx: 8px timeline dots in three colours (green/red/grey): %s" % (vw, bx["dots"])
+            assert bx["panelRadius"] == "14px" and bx["panelBg"] != "rgba(0, 0, 0, 0)", "[token seo] %dpx: same-name panel is a 14px inset surface: %s" % (vw, bx)
+            assert not bx["over"], "[token seo] %dpx: a Token facts element overflows the card (long contract address must wrap): %s" % (vw, bx)
         ps = await open_page("stale", "/t/" + ADDR, 1440)
         sh = await ps.evaluate("() => { const f = document.getElementById('tk-facts'); return [f.hidden, f.innerHTML]; }")
         await ps.close()
